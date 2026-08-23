@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+            archive: tar.gz
+          - os: windows-latest
+            cmake-flags: ""
+            archive: zip
+          - os: macos-latest
+            cmake-flags: -G Ninja
+            archive: tar.gz
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake-flags }}
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -C Release
+
+      - name: Install to staging
+        run: |
+          cmake --install build --config Release --prefix "${{ github.workspace }}/staging"
+
+      - name: Archive (zip, Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "staging/*" -DestinationPath `
+            "aurora-${{ github.ref_name }}-windows-x64.zip"
+
+      - name: Archive (tar.gz, Linux/macOS)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          OSNAME="$(echo '${{ matrix.os }}' | cut -d- -f1)"
+          tar -czf "aurora-${{ github.ref_name }}-${OSNAME}-x64.tar.gz" -C staging .
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-${{ matrix.os }}
+          path: aurora-${{ github.ref_name }}-*
+
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

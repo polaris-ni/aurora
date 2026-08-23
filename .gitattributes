@@ -1,0 +1,20 @@
+# Aurora 仓库行尾规范化：统一以 LF 存储与检出，消除 autocrlf 带来的行尾噪声。
+# 所有文本文件自动检测并强制 LF；第三方依赖保持上游原样，不纳入规范化。
+* text=auto eol=lf
+
+# 第三方依赖（vendored）按二进制处理，避免触碰上游行尾。
+third_party/ -text
+
+# 二进制资源保持原样。
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.exe binary
+*.dll binary
+*.zip binary

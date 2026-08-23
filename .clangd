@@ -1,0 +1,6 @@
+CompileFlags:
+  # clangd 默认只在文件目录向上查找 compile_commands.json，不会去 build/，
+  # 从而回退到根目录 compile_flags.txt（缺少 _WIN32 的 SDK 头路径），
+  # 导致 Win32 专有符号（如 NOTIFYICONDATAW）无法解析。
+  # 指向 CMake 生成的编译数据库，使用真实构建 flags（含 AURORA_BACKEND_WIN32 与 SDK 探测）。
+  CompilationDatabase: build
