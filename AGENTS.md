@@ -7,9 +7,7 @@
 
 ## 1. 项目定位（一句话）
 
-**Aurora** 是一个 C++20 跨平台 **AI-first** GUI 库：以「声明式、响应式、概念可枚举」为设计内核， 使用纯软件栅格 `Painter` 渲染，
-**不依赖 GPU**；以 **编译型静态库** 形式交付 （`include/` 放声明，`src/aurora/*.cpp` 放实现），消费者
-`#include "aurora/aurora.h"` 并链接静态库。
+**Aurora** 是一个 C++20 跨平台 **AI-first** GUI 库：以「声明式、响应式、概念可枚举」为设计内核， 使用纯软件栅格 `Painter` 渲染， **不依赖 GPU**；以 **编译型静态库** 形式交付 （`include/` 放声明，`src/aurora/*.cpp` 放实现），消费者`#include "aurora/aurora.h"` 并链接静态库。
 
 - 命名空间：`namespace aurora;` 推荐别名 `namespace au = aurora;`，入口头 `include/aurora/aurora.h`。 另有可选前向声明头
   `include/aurora/aurora_fwd.h`（仅前向声明重量级门面类型， 供只需指针/引用的 TU 降低瞬时包含成本；需完整 API 时仍用
@@ -71,17 +69,17 @@
 
 ## 4. 文档导航表（codespec/）
 
-| 你想了解                                              | 读这个文件                      | 权威性说明                                                                                                                                |
-|-------------------------------------------------------|---------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
-| **需求 / 功能规格 / API 契约**                        | `codespec/SPECIFICATIONS.md`    | 🥇 API 与需求以它为准；含「背景与需求」开篇                                                                                               |
-| **架构 / 运行时 / 分层 / 模块映射 / 设计原则**        | `codespec/ARCHITECTURE.md`      | 🥇 架构与设计以它为准；含「AI-first 设计原则」章节                                                                                        |
-| **核心概念 / 跨框架映射 / 概念可枚举性**              | `codespec/CONCEPTS.md`          | 概念认知与「React/Flutter/Qt 翻译表」                                                                                                     |
-| **编码规范 / 命名 / 错误 / AI 友好性规则 / 版本管理** | `codespec/CODING_STANDARDS.md`  | 🥇 编码规则以它为准；含「AI 友好性（评估标准 v2.5）」与「版本与变更管理」章节                                                             |
-| **使用指南 / 复制即用配方**                           | `codespec/GUIDELINE.md`         | 最小可编译片段集合（原 RECIPES）                                                                                                          |
-| **编译选项 / 宏 / 环境变量（统一参考）**              | `codespec/BUILD_OPTIONS.md`     | 🥇 所有 CMake 开关、缓存变量、feature 宏与运行期环境变量以它为准                                                                          |
-| **提交信息规范（Commit Message）**                    | `codespec/COMMIT_CONVENTION.md` | 🥇 提交写法、type/scope 表、与 SemVer / `CHANGELOG.json` 对齐以它为准                                                                     |
-| **数据存储抽象层（Storage 门面 + 后端抽象）**         | `codespec/ARCHITECTURE.md` §4.1 | 存储子系统设计：后端抽象、信封/类型化、异步卸载、变更通知、跨记录事务；当前为设计稿，API 契约最终以 `include/aurora/storage/*.h` 落地为准 |
-| **项目整体结构 / 该读哪个文档**                       | 本文件 `AGENTS.md`              | 入口                                                                                                                                      |
+| 你想了解                                              | 读这个文件                      | 权威性说明                                                                                                                                                                                                                                                                         |
+|-------------------------------------------------------|---------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **需求 / 功能规格 / API 契约**                        | `codespec/SPECIFICATIONS.md`    | 🥇 API 与需求以它为准；「三、特性详细规范」分为 21 份子文档：`codespec/specification/features/`(A–G，8 份) / `codespec/specification/subsystems/`(H.1–H.10c，7 份) / `codespec/specification/subsystems_api/`(H.11–H.17+Log+AI-First，6 份)；逐文件清单见 `SPECIFICATIONS.md` 目录 |
+| **架构 / 运行时 / 分层 / 模块映射 / 设计原则**        | `codespec/ARCHITECTURE.md`      | 🥇 架构与设计以它为准；分为 `codespec/architecture/ARCHITECTURE_RUNTIME.md`(运行时/模块映射/数据流)/`ARCHITECTURE_WIDGET.md`(组件树/事件/渲染/序列化)/`ARCHITECTURE_PERF.md`(性能/不变量)/`ARCHITECTURE_AI.md`(AI-first)，同目录                                                   |
+| **核心概念 / 跨框架映射 / 概念可枚举性**              | `codespec/CONCEPTS.md`          | 概念认知与「React/Flutter/Qt 翻译表」；「核心概念审计」为 `codespec/concepts/CONCEPTS_CORE.md`                                                                                                                                                                                     |
+| **编码规范 / 命名 / 错误 / AI 友好性规则 / 版本管理** | `codespec/CODING_STANDARDS.md`  | 🥇 编码规则以它为准；分为 `codespec/coding/CODING_ERRORS_NAMING.md`(错误/命名/文档/元数据/契约)/`CODING_AI.md`(AI 友好性)/`CODING_VERSIONING.md`(版本管理)/`CODING_SIGNATURE.md`(函数签名/内部工具)，同目录                                                                        |
+| **使用指南 / 复制即用配方**                           | `codespec/GUIDELINE.md`         | 最小可编译片段集合（原 RECIPES）；分为 `codespec/guideline/GUIDELINE_BASICS.md`(基础)/`GUIDELINE_ASYNC_SERIAL.md`(异步/序列化)/`GUIDELINE_INTEGRATION.md`(集成)/`GUIDELINE_PITFALLS.md`(坑/调试)，同目录                                                                           |
+| **编译选项 / 宏 / 环境变量（统一参考）**              | `codespec/BUILD_OPTIONS.md`     | 🥇 所有 CMake 开关、缓存变量、feature 宏与运行期环境变量以它为准；分为 `codespec/build_options/BUILD_OPTIONS_BUILD.md`(BUILD_*)/`BUILD_OPTIONS_BACKEND.md`(BACKEND_*)/`BUILD_OPTIONS_ENABLE.md`(ENABLE_*)/`BUILD_OPTIONS_INTERNAL.md`(缓存/定义/变量)，同目录                      |
+| **提交信息规范（Commit Message）**                    | `codespec/COMMIT_CONVENTION.md` | 🥇 提交写法、type/scope 表、与 SemVer / `CHANGELOG.json` 对齐以它为准                                                                                                                                                                                                              |
+| **数据存储抽象层（Storage 门面 + 后端抽象）**         | `codespec/ARCHITECTURE.md` §4.1 | 存储子系统设计：后端抽象、信封/类型化、异步卸载、变更通知、跨记录事务；当前为设计稿，API 契约最终以 `include/aurora/storage/*.h` 落地为准                                                                                                                                          |
+| **项目整体结构 / 该读哪个文档**                       | 本文件 `AGENTS.md`              | 入口                                                                                                                                                                                                                                                                               |
 
 ### 模块划分
 
