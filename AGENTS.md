@@ -59,7 +59,7 @@
   `--target demo_lazy_list`），全部 demo 用聚合目标（`--target demos`）。
 - CMake 选项 / 编译宏 / 运行时环境变量： **全部统一列于 `codespec/BUILD_OPTIONS.md`（唯一权威来源）**。该文按三层命名分类法组织——
   `AURORA_BUILD_*`（构建产物开关）/ `AURORA_BACKEND_*`（后端开关=feature 宏）/ `AURORA_ENABLE_*`（插桩/分析），并含
-  `AURORA_GLFW_ROOT` 等缓存变量、`NOMINMAX` 等全局编译定义、golden 测试的 4 个运行时环境变量与快速速查表。此处不再重复罗列，以免漂移。
+  `NOMINMAX` 等全局编译定义、golden 测试的 4 个运行时环境变量与快速速查表。此处不再重复罗列，以免漂移。
 - 测试：在 `build/` 下运行 `ctest`。从仓库根运行测试以保证`tests/golden` 等相对路径解析（或设 `AURORA_GOLDEN_DIR`）； **
   `ctest` 会把测试 CWD 设为 `build/`，故 golden等依赖相对路径的测试须从仓库根直接运行可执行文件**（如
   `./build/test_offscreen`，原 test_golden 已并入）才能正确解析路径。

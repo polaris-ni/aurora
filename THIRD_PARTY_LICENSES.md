@@ -148,8 +148,46 @@ PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 
 ---
 
+## 7. GLFW — 跨平台窗口与输入（可选后端依赖）
+
+- **版本**：3.5.1（`third_party/glfw/include/GLFW/glfw3.h`：`GLFW_VERSION_MAJOR=3` / `MINOR=5` / `REVISION=1`）
+- **来源**：vendored 于 `third_party/glfw/`
+- **用途**：`GlfwSurface` 后端的窗口创建 / OpenGL 上下文 / 原生输入事件（鼠标、键盘、滚轮、文本、resize）
+- **集成方式**：仅 `AURORA_BACKEND_GLFW=ON` 时经 `add_subdirectory(third_party/glfw EXCLUDE_FROM_ALL)` 源码构建
+  并以 `target_link_libraries(aurora PUBLIC glfw opengl32)` 静态链接（关 examples/tests/docs/install；
+  默认 OFF，关闭时链接产物完全不含 GLFW）
+- **许可**：zlib/libpng 许可（宽松，兼容静态链接分发），全文见 `third_party/glfw/LICENSE.md`
+- **许可全文**
+
+```
+Copyright (c) 2002-2006 Marcus Geelnard
+
+Copyright (c) 2006-2019 Camilla Löwy
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would
+   be appreciated but is not required.
+
+2. Altered source versions must be plainly marked as such, and must not
+   be misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source
+   distribution.
+```
+
+---
+
 ## 合规说明
 
 - 上述组件均以源码形式 vendored 于仓库内，可在无网络环境下构建，版本锁定、可审计。
-- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、nlohmann/json（MIT）、Noto Sans（OFL）均为自由/宽松许可，兼容 Aurora 的静态库分发模式。
+- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、nlohmann/json（MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）均为自由/宽松许可，兼容 Aurora 的静态库分发模式。
 - 许可全文以各组件目录内原始 `LICENSE.TXT` / `COPYING` / 头注释为权威来源；本文件仅作索引与归档。
