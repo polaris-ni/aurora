@@ -1,7 +1,6 @@
 # A. API 设计层（#1–#5）
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 相关核心子系统实现（H 系列）见 [`../subsystems/`](../subsystems)（H.1–H.10c 信号/动画/环境/事件/渲染/窗口/平台）与 [`../subsystems_api/`](../subsystems_api)（H.11–H.17 + Log + AI-First 序列化/布局/控件/Inspector/工具/日志）。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§A.**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
 #### #1 声明式双模 API（链式 / 分步 / 配置块等价）
 
@@ -37,7 +36,7 @@ btn3.on_click = fn;
   直接成员赋值：`auto b = au::Button(); b.label = au::LocalizedString{ "..." };`。链式 setter（如 `.font_size(24).bold()`
   ）返回引用，作为子节点放入 `children` 时必须用 `std::move` 包裹（`Widget` 拷贝构造被删除，`Node` 仅移动派生对象）。
 - 指定初始化器 **仅适用于 `*Props` 聚合结构**（如 `au::ButtonProps{ .label = ... }`）与 `Theme` 等纯数据聚合；其中字段顺序无关，遗漏字段回退默认值。
-- 嵌套声明推荐：`au::Column(au::ColumnProps{ .children = { ... } })` 的树形结构（控件组合见 §H.13）
+- 嵌套声明推荐：`au::Column(au::ColumnProps{ .children = { ... } })` 的树形结构（控件组合见 §H.14）
 - 控件可用 `au::` 或 `aurora::` 前缀；推荐 `namespace au = aurora;`
 - 所有控件统一采用 **继承式双模 API**：`class Xxx : public XxxProps`，`XxxProps` 的字段即控件自身公有字段（如
   `Text.content`、`TextInput.value`、`Scroll.step`、`Grid.columns/gap`、`ImageView.bitmap/source`），不再用私有 `m_*`
@@ -112,8 +111,8 @@ namespace aurora {
 // 推荐别名：简短且不冲突
 namespace au = aurora;
 
-// 一个 using 即可使用全部核心 API
-using namespace aurora;  // 官方推荐，无冲突风险
+// 推荐用别名 au:: 而非全局 using namespace aurora;（避免与 std / 三方命名空间污染）
+namespace au = aurora;  // 推荐别名（见上行）
 
 // ❌ 禁止深层嵌套
 // aurora::widgets::buttons::MaterialButton
@@ -132,7 +131,7 @@ using namespace aurora;  // 官方推荐，无冲突风险
 **规范：**
 
 ```text
-核心组件 ≤ 30 个
+核心概念控件 ≤ 30 个（含扩展/组合/平台/媒体控件的总清单 ≈ 40，见 §H.14）
 每个组件核心方法 ≤ 15 个
 高级功能通过组合而非继承实现
 ```
@@ -142,7 +141,7 @@ using namespace aurora;  // 官方推荐，无冲突风险
 ```cpp
 au::Row{}      // 水平排列
 au::Column{}   // 垂直排列
-au::Stack()    // 层叠
+au::Stack{}    // 层叠
 au::Grid()     // 网格
 au::Scroll()   // 可滚动容器
 au::Spacer()   // 弹性空间
@@ -172,8 +171,8 @@ au::MenuBar()      // = Row + 下拉菜单
 
 ```cpp
 // 强类型枚举 —— AI 不会传错值
-button.alignment(au::Align::Center);       // 编译通过
-button.alignment(au::Align::Cenetr);       // 编译错误！拼写错误立刻发现
+button.alignment(au::Alignment::Center);       // 编译通过
+button.alignment(au::Alignment::Cenetr);       // 编译错误！拼写错误立刻发现
 
 // 类型化尺寸 —— 防止 px/dp/percent 混用
 button.width(au::px(120));
@@ -182,7 +181,7 @@ button.width(au::dp(48));
 // button.width(120);  // ❌ 编译错误，必须指定单位
 
 // 编译错误信息需直接指出单位错误，而不是模版爆栈
-// [Aurora::TypeError] Button.width():
+// [widget-invalid-prop] Button.width():
 //   - Expected: au::Dimension (px / dp / percent / auto)
 //   - Received: int (120)
 //   - Fix: Use au::px(120) or au::dp(120)
@@ -207,7 +206,7 @@ static_assert(au::is_valid_child_of<au::Text, au::Column>);   // Text 可作为 
 au::Button(au::ButtonProps{ .label = "OK" });
 // 默认：enabled=true, visible=true,
 //       alignment=Center, font_size=14,
-//       padding={8,16}, corner_radius=4
+//       padding={8,16}, corner_radius=6
 ```
 
 **关键约束：**

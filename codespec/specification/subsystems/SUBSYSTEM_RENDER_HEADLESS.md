@@ -1,8 +1,6 @@
 # H.9 渲染与无头校验
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 后续核心子系统 API 章节（H.11–H.17 + Log + AI-First）见 [`../subsystems_api/`](../subsystems_api)：SUBSYSTEM_API_SERIALIZE / SUBSYSTEM_API_LAYOUT_ENGINE / SUBSYSTEM_API_WIDGETS / SUBSYSTEM_API_INSPECTOR / SUBSYSTEM_API_TOOLING / SUBSYSTEM_API_LOG_AI。
-> 相关功能域规范（A–G）见 [`../features/`](../features)：FEATURE_API_DESIGN / FEATURE_ARCH_STATE / FEATURE_RUNTIME_SAFETY / FEATURE_LAYOUT_RENDER / FEATURE_CROSS_PLATFORM / FEATURE_AI_INSPECTION / FEATURE_AI_TOOLING / FEATURE_ENGINEERING。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§H.9**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
 #### #H.9 渲染与无头校验（Headless）
 
@@ -95,9 +93,9 @@ TCHECK(std::string{ snap["type"].get<std::string>() } == "Button");
 TCHECK(std::abs(snap["box"]["w"].get<float>() - 800.0f) < 0.001f);
 ```
 
-> **统一后端 API（类型安全工厂）**：`SurfaceKind{Headless, Win32, Glfw, X11, Wayland, MacOS, Wasm}` 现仅为 **类型标签**（仅
+> **统一后端 API（类型安全工厂）**：`SurfaceKind{Headless, Win32, Glfw, X11, Wayland, MacOS, Wasm, D3D11}` 现仅为 **类型标签**（仅
 > `auto_detect_surface()` 返回类型与 `Platform::surface` 字段，不再用于构造选择）；跨后端通用的
-> `WindowOptions{size,title,max_frames}` + 各后端专属选项 `HeadlessOptions{png_path}` / `Win32Options{}` /
+> `WindowOptions{size,title,max_frames}` + 各后端专属选项 `HeadlessOptions{png_path}` / `Win32Options{}` / `D3D11Options{vsync}`（D3D11 GPU 增量上屏，默认 OFF） /
 > `GlfwOptions{gl_major,gl_minor,resizable}` / `X11Options{}` / `WaylandOptions{}` / `MacOSOptions{}` /
 > `WasmOptions{canvas_id}` + 工厂 `create_window(const XxxOptions&)`（类型安全重载，后端选择收口于此，编译器拒绝把某后端专属字段误用到不相关后端）（见
 > `window/window.h`）。`Headless` 用软件 `Painter`；`Win32` 为零三方依赖的 Win32/GDI 后端（仅 `_WIN32`）；`GlfwSurface`（OpenGL
@@ -117,7 +115,7 @@ TCHECK(std::abs(snap["box"]["w"].get<float>() - 800.0f) < 0.001f);
     `Application(Scene, unique_ptr<Surface>, WindowOptions)` 或 `App().surface(...)` 注入，仅此一个入口覆盖所有自定义后端。空
     `Surface`/`Window` 仅 WARN 降级（错误归属调用方，其持有工厂 `Result`）。无头便捷构造 `Application(Scene, w, h)` 保持不变。
 > - **后端能力 feature 宏（编译/链接期代码剪裁）**：每个内置后端由一对 CMake 开关 + feature 宏控制，可整体剔除：
-    `AURORA_BACKEND_HEADLESS`（无头内存/PNG，默认 ON）/ `AURORA_BACKEND_WIN32`（Win32/GDI，Windows 默认 ON）/
+    `AURORA_BACKEND_HEADLESS`（无头内存/PNG，默认 ON）/ `AURORA_BACKEND_WIN32`（Win32/GDI，Windows 默认 ON）/ `AURORA_BACKEND_D3D11`（D3D11 GPU 增量上屏，Win32 专属，需 `d3d11`/`dxgi`/`d3dcompiler`，默认 OFF）/
     `AURORA_BACKEND_GLFW`（GLFW/OpenGL，由 `AURORA_BACKEND_GLFW` 开关控制）/ `AURORA_BACKEND_X11`（X11/Xlib，Linux 桌面，需
     `libX11`，默认 OFF）/ `AURORA_BACKEND_WAYLAND`（原生 Wayland，Linux 桌面，需 `wayland-client`/`xkbcommon`/
     `wayland-protocols`，默认 OFF）/ `AURORA_BACKEND_MACOS`（Cocoa/AppKit，Apple 平台，默认 OFF）/ `AURORA_BACKEND_WASM`

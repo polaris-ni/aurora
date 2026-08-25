@@ -1,10 +1,8 @@
-# H.14 自描述发现 + H.15 MCP/CLI + H.16 偏好 + H.17 性能
+# H.16 自描述发现 + H.17 MCP/CLI + H.18 偏好 + H.19 性能
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 前置核心子系统章节（H.1–H.10c）见 [`../subsystems/`](../subsystems)：SUBSYSTEM_SIGNAL_MODIFIER / SUBSYSTEM_ANIMATION / SUBSYSTEM_ENV_THEME / SUBSYSTEM_EVENT_FOCUS_NAV / SUBSYSTEM_RENDER_HEADLESS / SUBSYSTEM_APP_WINDOW / SUBSYSTEM_PLATFORM_SHELL。
-> 相关功能域规范（A–G）见 [`../features/`](../features)：FEATURE_API_DESIGN / FEATURE_ARCH_STATE / FEATURE_RUNTIME_SAFETY / FEATURE_LAYOUT_RENDER / FEATURE_CROSS_PLATFORM / FEATURE_AI_INSPECTION / FEATURE_AI_TOOLING / FEATURE_ENGINEERING。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§H.16**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
-#### #H.14 组件运行时自描述与发现 API
+#### #H.16 组件运行时自描述与发现 API
 
 每个控件提供编译期确定的完整元数据，供 AI Agent / 工具链在运行时动态发现可用组件及其属性。
 
@@ -45,6 +43,8 @@ struct WidgetDescriptor {
 | `describe_component(type)`   | 同 `component_schema`，公共别名                                                                                                       |
 | `search_components(keyword)` | 按名称模糊搜索已注册组件                                                                                                              |
 
+> **发现 API 命名说明**：`list_all_components()` 与 `list_all_schemas()` 是两个**真实且不同**的函数，并非笔误——`list_all_components()` 返回 `std::vector<std::string>`（仅组件类型名列表，供 MCP `list_components` 工具消费），`list_all_schemas()` 返回 `std::vector<Json>`（完整 schema，供 MCP `get_schema` 工具消费）；二者并存，无需统一。
+
 **`children_policy` 语义**：
 
 | 值           | 含义                 | 典型控件                          |
@@ -56,9 +56,9 @@ struct WidgetDescriptor {
 **JSON 序列化**：`descriptor_to_json(WidgetDescriptor)` / `descriptor_to_json(PropDescriptor)` 输出标准 JSON，供
 `gen_api_tools` 消费生成 `aurora_api.json`。
 
-#### #H.15 MCP Server 与 CLI 工具链
+#### #H.17 MCP Server 与 CLI 工具链
 
-AI Agent 集成工具，消费 §H.14 自描述元数据与序列化/渲染/代码生成 API。
+AI Agent 集成工具，消费 §H.16 自描述元数据与序列化/渲染/代码生成 API。
 
 **MCP Server（`aurora_mcp`，stdio JSON-RPC 2.0）：**
 
@@ -106,7 +106,7 @@ aurora schema                             # 输出完整 aurora_api.json
 传输：stdin/stdout，`Content-Length: <N>\r\n\r\n<JSON-RPC 2.0 body>`（与 MCP 一致）。 schema 来源：库 live API（
 `describe_component` + `known_enums`），不读取 `aurora_api.json` 文件，始终与代码同步。
 
-#### #H.16 偏好配置（Preferences / aurora::preferences）
+#### #H.18 偏好配置（Preferences / aurora::preferences）
 
 轻量持久化键值配置（对标 Android `SharedPreferences` / iOS `UserDefaults`），以 **单个 JSON 文件**为后端。 属
 **状态/存储层扩展**， **不新增任何 UI 控件**，不影响核心概念 ≤15 预算。
@@ -129,7 +129,7 @@ aurora schema                             # 输出完整 aurora_api.json
     - **Binding 删除路径（可靠语义）**：`Preferences::binding(key, fallback)` 返回的 `Binding<T>` 已注入删除回调（封装
       `remove(key)`，走墓碑可靠删除）。控件卸载/失效时可调用 `binding.remove()` 删除对应持久化键；纯 `State` 绑定（未注入回调）的
       `remove()` 为安全空操作，可通过 `removable()` 查询是否可删除。调用 `remove()` 后该 Binding 即失效（其上游 `State`
-      可能被销毁），不应再 `get`/`set`。多进程下删除经墓碑持久化与传播，最终一致（见 #H.16）。
+      可能被销毁），不应再 `get`/`set`。多进程下删除经墓碑持久化与传播，最终一致（见 #H.18）。
 - **并发安全**：
     - **线程安全**：实例内部以 `std::shared_mutex` 保护内存 JSON 与 `State` 注册表——读操作（`get`/`contains`/`keys`/
       `watch`/`last_load_error`）走共享锁，写操作（`set`/`remove`/`clear`/`flush`/`reload`）走独占锁，可在多线程下安全并发读写；
@@ -203,7 +203,7 @@ prefs.group("ui").group("editor").set("font", std::string("Mono"));
 ui.clear();
 ```
 
-#### #H.17 性能检测体系（Performance Profiling）
+#### #H.19 性能检测体系（Performance Profiling）
 
 核心目标：提供帧级运行时指标采集与可视化能力，帮助开发者定位渲染瓶颈与帧率异常。零外部依赖，默认关闭、按需启用。
 

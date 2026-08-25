@@ -1,8 +1,6 @@
 # H.6 事件响应链 + H.7 焦点 + H.8 导航
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 后续核心子系统 API 章节（H.11–H.17 + Log + AI-First）见 [`../subsystems_api/`](../subsystems_api)：SUBSYSTEM_API_SERIALIZE / SUBSYSTEM_API_LAYOUT_ENGINE / SUBSYSTEM_API_WIDGETS / SUBSYSTEM_API_INSPECTOR / SUBSYSTEM_API_TOOLING / SUBSYSTEM_API_LOG_AI。
-> 相关功能域规范（A–G）见 [`../features/`](../features)：FEATURE_API_DESIGN / FEATURE_ARCH_STATE / FEATURE_RUNTIME_SAFETY / FEATURE_LAYOUT_RENDER / FEATURE_CROSS_PLATFORM / FEATURE_AI_INSPECTION / FEATURE_AI_TOOLING / FEATURE_ENGINEERING。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§H.6**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
 #### #H.6 事件与响应链（Response Chain）
 
@@ -96,7 +94,7 @@ nav.pop();                                            // 返回
 nav.open_uri("home/detail/42", [](const std::string& name) { return build_route(name); });
 
 // 共享元素转场：两页各放同 tag 的 Hero，转场自动「形变飞入」
-au::Hero{ "logo", au::Container{ au::Text{ "Aurora" } } };
+au::Hero("logo", au::Text("Aurora"));   // Hero(tag, Node)；Text 直接作为子节点，无需 Container 包裹
 ```
 
 > 当前为 MVP 页面栈，已支持共享元素转场（`Hero` + `TransitionLayer`，§H.8）与深层链接（`Navigator::open_uri`，§H.8）。

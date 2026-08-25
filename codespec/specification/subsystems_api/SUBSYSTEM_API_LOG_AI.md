@@ -1,10 +1,8 @@
-# H.xx 日志 + H.yy AI-First
+# H.20 日志 + H.21 AI-First
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 前置核心子系统章节（H.1–H.10c）见 [`../subsystems/`](../subsystems)：SUBSYSTEM_SIGNAL_MODIFIER / SUBSYSTEM_ANIMATION / SUBSYSTEM_ENV_THEME / SUBSYSTEM_EVENT_FOCUS_NAV / SUBSYSTEM_RENDER_HEADLESS / SUBSYSTEM_APP_WINDOW / SUBSYSTEM_PLATFORM_SHELL。
-> 相关功能域规范（A–G）见 [`../features/`](../features)：FEATURE_API_DESIGN / FEATURE_ARCH_STATE / FEATURE_RUNTIME_SAFETY / FEATURE_LAYOUT_RENDER / FEATURE_CROSS_PLATFORM / FEATURE_AI_INSPECTION / FEATURE_AI_TOOLING / FEATURE_ENGINEERING。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§H.20**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
-### H.xx 日志（Log）子系统
+### H.20 日志（Log）子系统
 
 > 头文件：`include/aurora/core/log.h` + 实现 `src/aurora/core/log.cpp`；经 `include/aurora/aurora.h` 暴露（
 > `#include "aurora/core/log.h"`）。
@@ -33,7 +31,7 @@
 
 ---
 
-### H.yy AI-First 便利性层
+### H.21 AI-First 便利性层
 
 > 增量叠加在既有声明式 `Node`/`Props` 架构之上； **不改动**软件 `Painter`、单一静态库、声明式树内核。使用配方见
 > `GUIDELINE.md` §18–§19。

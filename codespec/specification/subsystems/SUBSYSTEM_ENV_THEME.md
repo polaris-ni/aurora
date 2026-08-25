@@ -1,8 +1,6 @@
 # H.4 / H.4.1 环境/DI + 媒体查询；H.5 主题/i18n
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 后续核心子系统 API 章节（H.11–H.17 + Log + AI-First）见 [`../subsystems_api/`](../subsystems_api)：SUBSYSTEM_API_SERIALIZE / SUBSYSTEM_API_LAYOUT_ENGINE / SUBSYSTEM_API_WIDGETS / SUBSYSTEM_API_INSPECTOR / SUBSYSTEM_API_TOOLING / SUBSYSTEM_API_LOG_AI。
-> 相关功能域规范（A–G）见 [`../features/`](../features)：FEATURE_API_DESIGN / FEATURE_ARCH_STATE / FEATURE_RUNTIME_SAFETY / FEATURE_LAYOUT_RENDER / FEATURE_CROSS_PLATFORM / FEATURE_AI_INSPECTION / FEATURE_AI_TOOLING / FEATURE_ENGINEERING。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§H.4**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
 #### #H.4 环境（Environment）与依赖注入
 
@@ -41,6 +39,8 @@ UI（Flutter `MediaQuery` + `LayoutBuilder` 语义）。
     - `PlatformKind platform`：编译期常量——Win32 下 `Windows`，其余 `Unknown`（不做运行时 OS 探测）。枚举含
       `Unknown/Windows/macOS/Linux/Web`。
     - `DeviceKind device`：编译期常量——Win32 下 `Desktop`，其余 `Unknown`。枚举含 `Unknown/Desktop/Mobile/Tablet`。
+    - **注**：`PlatformKind` / `DeviceKind` 反映**编译目标**平台（编译期常量），非运行期 OS 探测；运行期能力探测走
+      `au::platform().capabilities()`（见 `window/platform.h`）。
     - `EdgeInsets padding`：安全区（刘海 / 状态栏）内边距（dp）。 **Wayland 客户端自绘装饰（CSD）标题栏/边框占用的区域经
       `Surface::content_inset()` 并入本字段**（见 `DecorationPolicy`），子树据其为内容留白以避开自绘装饰——对齐 Flutter
       `MediaQuery.padding` / `SafeArea` 范式，使「无标题栏窗口内容也不被遮挡」。** 默认 0（无装饰）。

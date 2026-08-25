@@ -1,8 +1,6 @@
 # H.10 App/Scene/Window + H.10b Scheduler + H.10c DEBUG 门面 + H.10d 生命周期
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 后续核心子系统 API 章节（H.11–H.17 + Log + AI-First）见 [`../subsystems_api/`](../subsystems_api)：SUBSYSTEM_API_SERIALIZE / SUBSYSTEM_API_LAYOUT_ENGINE / SUBSYSTEM_API_WIDGETS / SUBSYSTEM_API_INSPECTOR / SUBSYSTEM_API_TOOLING / SUBSYSTEM_API_LOG_AI。
-> 相关功能域规范（A–G）见 [`../features/`](../features)：FEATURE_API_DESIGN / FEATURE_ARCH_STATE / FEATURE_RUNTIME_SAFETY / FEATURE_LAYOUT_RENDER / FEATURE_CROSS_PLATFORM / FEATURE_AI_INSPECTION / FEATURE_AI_TOOLING / FEATURE_ENGINEERING。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§H.10**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
 #### #H.10 应用（Application）/ 场景（Scene）/ 窗口（Window）与帧循环
 
@@ -272,7 +270,7 @@ Aurora 不移植安卓 `Activity` 的 `onCreate/onStart/onResume/onPause/onStop/
 ```cpp
 // 控件级：挂载计数 / 卸载清理
 au::Lifecycle(
-    au::Text{ "子树" },
+    au::Text("子树"),
     [](const au::BuildContext &ctx) { subscribe(); },   // on_mount：恰好一次
     []() { unsubscribe(); }                              // on_unmount：销毁时清理
 );
@@ -287,7 +285,9 @@ app.set_on_window_state([](au::WindowState s) {
 //   const auto *ws = ctx.environment<au::WindowState>();
 ```
 
-#### #H.12 文字选中（Text / TextInput）
+#### #H.11b 文字选中（Text / TextInput）
+
+> **编号说明**：本节编号 H.11b 与 `SUBSYSTEM_PLATFORM_SHELL.md` 标题一致（后者标题含「H.11b 文字选中」）；文字选中定义以本文件本节为准。
 
 - **角色区分**：`Text` 是 **只读文本显示控件**，`TextInput` 是 **可编辑文本控件**。二者选区状态机相同，但「编辑光标（caret）」与「编辑键」仅属于
   `TextInput`：

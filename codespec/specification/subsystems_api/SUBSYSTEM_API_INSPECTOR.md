@@ -1,10 +1,8 @@
-# H.13b Inspector 面板 + H.13c Inspector 远程
+# H.15b Inspector 面板 + H.15c Inspector 远程
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 前置核心子系统章节（H.1–H.10c）见 [`../subsystems/`](../subsystems)：SUBSYSTEM_SIGNAL_MODIFIER / SUBSYSTEM_ANIMATION / SUBSYSTEM_ENV_THEME / SUBSYSTEM_EVENT_FOCUS_NAV / SUBSYSTEM_RENDER_HEADLESS / SUBSYSTEM_APP_WINDOW / SUBSYSTEM_PLATFORM_SHELL。
-> 相关功能域规范（A–G）见 [`../features/`](../features)：FEATURE_API_DESIGN / FEATURE_ARCH_STATE / FEATURE_RUNTIME_SAFETY / FEATURE_LAYOUT_RENDER / FEATURE_CROSS_PLATFORM / FEATURE_AI_INSPECTION / FEATURE_AI_TOOLING / FEATURE_ENGINEERING。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§H.15b**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
-#### #H.13b Inspector 面板（InspectorPanel）
+#### #H.15b Inspector 面板（InspectorPanel）
 
 > 新增 `InspectorPanel` 控件（`include/aurora/widget/inspector_panel.h`）：左右分栏布局，左侧树形浏览器展示 Widget
 > 层级，右侧属性面板展示选中 Widget 的类型与属性值。支持分隔条拖拽调整比例、运行时属性回写。
@@ -32,7 +30,7 @@
 | `export_code()`                      | 将当前 widget 树导出为 C++ 源码字符串              |
 | `on_export_code`                     | “Export Code” 按钮点击回调，参数为生成的代码字符串 |
 
-#### #H.13c Inspector 远程 HTTP 接口（InspectorServer）
+#### #H.15c Inspector 远程 HTTP 接口（InspectorServer）
 
 > 新增 `InspectorServer`（`include/aurora/inspector/inspector_server.h`）：localhost-only HTTP 服务器，暴露 REST 端点供外部
 > Inspector 工具远程访问运行时 widget 树。仅 Windows，CMake 开关 `AURORA_BUILD_INSPECTOR_SERVER`（默认 OFF）。

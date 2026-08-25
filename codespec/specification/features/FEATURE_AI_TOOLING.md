@@ -1,7 +1,6 @@
 # F2. AI 工具链层：Recipe / LSP-MCP-CLI / 可逆性（#16,#17,#22）
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 相关核心子系统实现（H 系列）见 [`../subsystems/`](../subsystems)（H.1–H.10c 信号/动画/环境/事件/渲染/窗口/平台）与 [`../subsystems_api/`](../subsystems_api)（H.11–H.17 + Log + AI-First 序列化/布局/控件/Inspector/工具/日志）。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§F2.**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
 #### #16 示例驱动文档（Recipe 形式）
 
@@ -51,16 +50,16 @@ int main() {
 
 - **MCP Server（aurora-mcp）**：stdio JSON-RPC 2.0，暴露 10 个 MCP tools（list_components / describe_component /
   search_components / validate_tree / render_snapshot / render_png / to_code / to_yaml / get_schema / validate_ui）。详见
-  §H.15。
+  §H.17。
 - **CLI 工具（aurora_cli）**：子命令：components / describe / search / validate / snapshot / render / to-code /
-  to-yaml / schema。详见 §H.15。
+  to-yaml / schema。详见 §H.17。
 - **LSP（aurora-lsp）**：stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明式写法提供
   completion / hover / diagnostics / codeAction 四件套：
     - **completion**：`au::` 后补组件/枚举类型；`XxxProps{` 内 `.` 后补属性（显示默认值/必填/文档）；枚举属性 `=` 后补枚举值。
     - **hover**：`au::Type` 显示组件概要（属性数/事件/示例）；`.prop` 显示类型/默认值/必填/文档。
     - **diagnostics**（didOpen/didChange 后 publishDiagnostics）：未知组件类型、未知属性、非法枚举值、缺失必填属性（warning）。
     - **codeAction**：为缺失必填属性的组件生成「补全缺失必填属性」快速修复（在 `}` 前插入 `.prop = <default>`）。
-    - 消费库 live API（`describe_component` + `known_enums`），无需读取 `aurora_api.json` 文件，始终与代码同步。详见 §H.15。
+    - 消费库 live API（`describe_component` + `known_enums`），无需读取 `aurora_api.json` 文件，始终与代码同步。详见 §H.17。
 
 <details>
 <summary>原始目标形态（保留供参考）</summary>

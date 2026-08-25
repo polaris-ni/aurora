@@ -1,10 +1,8 @@
-# H.11 序列化与结构快照
+# H.12 序列化与结构快照
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 前置核心子系统章节（H.1–H.10c）见 [`../subsystems/`](../subsystems)：SUBSYSTEM_SIGNAL_MODIFIER / SUBSYSTEM_ANIMATION / SUBSYSTEM_ENV_THEME / SUBSYSTEM_EVENT_FOCUS_NAV / SUBSYSTEM_RENDER_HEADLESS / SUBSYSTEM_APP_WINDOW / SUBSYSTEM_PLATFORM_SHELL。
-> 相关功能域规范（A–G）见 [`../features/`](../features)：FEATURE_API_DESIGN / FEATURE_ARCH_STATE / FEATURE_RUNTIME_SAFETY / FEATURE_LAYOUT_RENDER / FEATURE_CROSS_PLATFORM / FEATURE_AI_INSPECTION / FEATURE_AI_TOOLING / FEATURE_ENGINEERING。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§H.12**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
-#### #H.11 序列化与结构快照（Diff / Patch）
+#### #H.12 序列化与结构快照（Diff / Patch）
 
 核心目标：UI 树可双向转换与增量修改，供 AI 工具链消费（§13）。
 

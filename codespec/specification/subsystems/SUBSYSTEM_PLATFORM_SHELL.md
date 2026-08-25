@@ -1,8 +1,8 @@
-# H.11 平台 Shell + H.12 文字选中
+# H.11 平台 Shell + H.11b 文字选中
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 后续核心子系统 API 章节（H.11–H.17 + Log + AI-First）见 [`../subsystems_api/`](../subsystems_api)：SUBSYSTEM_API_SERIALIZE / SUBSYSTEM_API_LAYOUT_ENGINE / SUBSYSTEM_API_WIDGETS / SUBSYSTEM_API_INSPECTOR / SUBSYSTEM_API_TOOLING / SUBSYSTEM_API_LOG_AI。
-> 相关功能域规范（A–G）见 [`../features/`](../features)：FEATURE_API_DESIGN / FEATURE_ARCH_STATE / FEATURE_RUNTIME_SAFETY / FEATURE_LAYOUT_RENDER / FEATURE_CROSS_PLATFORM / FEATURE_AI_INSPECTION / FEATURE_AI_TOOLING / FEATURE_ENGINEERING。
+> **编号说明**：本文件仅覆盖 **H.11 平台 Shell**；文字选中（**H.11b**）实际定义见 `SUBSYSTEM_APP_WINDOW.md` 的「#H.11b 文字选中」节。
+
+> 本文件是「三、特性详细规范」子文档，覆盖 **§H.11**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
 #### #H.11 平台 Shell（文件对话框 / 系统托盘 / 剪贴板 / 文件拖放 / 多显示器）
 

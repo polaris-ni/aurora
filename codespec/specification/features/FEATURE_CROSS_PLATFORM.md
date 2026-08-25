@@ -1,7 +1,6 @@
 # E. 跨平台层（#14,#15）
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 相关核心子系统实现（H 系列）见 [`../subsystems/`](../subsystems)（H.1–H.10c 信号/动画/环境/事件/渲染/窗口/平台）与 [`../subsystems_api/`](../subsystems_api)（H.11–H.17 + Log + AI-First 序列化/布局/控件/Inspector/工具/日志）。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§E.**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
 #### #14 零 #ifdef 跨平台 + 插件式平台扩展
 
@@ -11,12 +10,8 @@
 
 ```cpp
 // 应用代码 100% 跨平台，零 #ifdef
-// 当前 API：au::Application 组合根（经类型安全后端工厂 create_window 适配平台）
-auto win_res = au::create_window(au::Win32Options{ .title = "My App", .size = {640, 480} });
-au::Application app{ au::Scene{std::move(root)},
-                     win_res ? std::move(win_res.value()) : nullptr,
-                     au::WindowOptions{ .title = "My App", .size = {640, 480} } };
-app.run();  // 自动适配平台后端（Win32 / Glfw / Headless）
+// 不指定任何平台专属 Options：create_window 经 auto_detect_surface() 运行期自动选用后端（Win32 / Glfw / Headless）
+au::App().title("My App").size(640, 480).view(std::move(root)).run();
 
 // 流式便捷封装（已实现，§H.9）：一行式启动
 au::App().title("My App").size(640, 480).view(std::move(root)).run();

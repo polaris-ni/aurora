@@ -1,10 +1,8 @@
-# H.12 布局引擎 + H.12b 共享枚举
+# H.13 布局引擎 + H.13b 共享枚举
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 前置核心子系统章节（H.1–H.10c）见 [`../subsystems/`](../subsystems)：SUBSYSTEM_SIGNAL_MODIFIER / SUBSYSTEM_ANIMATION / SUBSYSTEM_ENV_THEME / SUBSYSTEM_EVENT_FOCUS_NAV / SUBSYSTEM_RENDER_HEADLESS / SUBSYSTEM_APP_WINDOW / SUBSYSTEM_PLATFORM_SHELL。
-> 相关功能域规范（A–G）见 [`../features/`](../features)：FEATURE_API_DESIGN / FEATURE_ARCH_STATE / FEATURE_RUNTIME_SAFETY / FEATURE_LAYOUT_RENDER / FEATURE_CROSS_PLATFORM / FEATURE_AI_INSPECTION / FEATURE_AI_TOOLING / FEATURE_ENGINEERING。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§H.13**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
-#### #H.12 布局引擎（Layout Engine）
+#### #H.13 布局引擎（Layout Engine）
 
 核心目标：代数一致、可推理、确定性的尺寸与位置求解（与 §20 互补）。
 
@@ -35,7 +33,7 @@ row.modifier = au::Modifier{}.padding(8);
 
 > **形式化协议**：约束传递规则、Flex/Grid 分配公式、Length 四态语义、心算示例等详见 [`LAYOUT_PROTOCOL.md`](../../LAYOUT_PROTOCOL.md)（以 `FlexLayouter::layout` 实现为准）。
 
-#### #H.12b 共享枚举（Shared Enums）
+#### #H.13b 共享枚举（Shared Enums）
 
 控件丰富属性引入的跨控件共享枚举，统一定义于 `core/enums.h`，并经 `props_io.h` 提供 `*_to_json` / `json_to_*`
 互转（供各控件 `serializeProps`/`deserializeProps` 使用）；枚举值亦登记于 `gen_api.cpp` 的 `known_enums()`， 供

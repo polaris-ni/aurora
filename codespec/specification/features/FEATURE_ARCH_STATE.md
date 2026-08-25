@@ -1,7 +1,6 @@
 # B. 架构与状态层（#6–#9）
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 相关核心子系统实现（H 系列）见 [`../subsystems/`](../subsystems)（H.1–H.10c 信号/动画/环境/事件/渲染/窗口/平台）与 [`../subsystems_api/`](../subsystems_api)（H.11–H.17 + Log + AI-First 序列化/布局/控件/Inspector/工具/日志）。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§B.**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
 #### #6 单向数据流 + 细粒度信号状态模型
 
@@ -17,8 +16,8 @@ au::State<int> count{0};
 // 2) 把信号直接作为属性传给组件（属性类型为 Reactive<T>，可持有常量或信号）
 au::Column(au::ColumnProps{
     .children = {
-        std::move(au::Text(au::Computed<au::LocalizedString>{
-            [&]{ return au::LocalizedString{ "Count: " + std::to_string(count.get()) }; } })),
+        std::move(au::Text(au::computed([&] {
+            return au::LocalizedString{ "Count: " + std::to_string(count.get()) }; }))),
         std::move(au::Button(au::ButtonProps{ .label = "+1" })
                       .set_on_click([&]{ count.set(count.get() + 1); })),  // 写信号 → 仅刷新依赖
     },
@@ -157,7 +156,7 @@ au::Text("Hello").font_size(20);   // 显式指定
 // error: no matching function for call to 'children'
 
 // ✅ Aurora 友好的错误信息
-// [Aurora::LayoutError] Column.children():
+// [layout-null-child] Column.children():
 //   - Received: 3 children (Text, Button, nullptr)
 //   - Problem: 3rd child is nullptr. Did you forget to create the widget?
 //   - Suggestion: Use au::Optional() for conditional children.
@@ -178,7 +177,7 @@ au::Text("Hello").font_size(20);   // 显式指定
 
 ```json
 {
-  "code": "Aurora::LayoutError::NullChild",
+  "code": "layout-null-child",
   "message": "3rd child is nullptr",
   "location": {
     "file": "main.cpp",
@@ -186,7 +185,7 @@ au::Text("Hello").font_size(20);   // 显式指定
     "column": 8
   },
   "suggestion": "Use au::Optional() for conditional children",
-  "severity": "error",
+  "severity": "warning",
   "auto_fix": {
     "action": "wrap_with_optional",
     "target": "child[2]"

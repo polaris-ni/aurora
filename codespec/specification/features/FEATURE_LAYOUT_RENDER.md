@@ -1,7 +1,6 @@
 # D. 布局与渲染层（#11,#20）
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 相关核心子系统实现（H 系列）见 [`../subsystems/`](../subsystems)（H.1–H.10c 信号/动画/环境/事件/渲染/窗口/平台）与 [`../subsystems_api/`](../subsystems_api)（H.11–H.17 + Log + AI-First 序列化/布局/控件/Inspector/工具/日志）。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§D.**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
 #### #11 确定性渲染 + 逻辑快照测试
 
@@ -72,7 +71,7 @@ au::Scroll(au::ScrollProps{ .child = au::Row(au::RowProps{ .children = { /* ... 
 // 布局方程无解时按约束 clamp（永不未定义行为）
 
 // 规则 4：布局结果可查询
-auto snap = au::render_to_logical_snapshot(root, au::Size{800, 600});
+auto snap = au::render_to_logical_snapshot(root, 800, 600);   // 3 个 int 参数（见 include/aurora/render/offscreen.h）
 // snap 内含每个组件的确定性盒模型：{x:20, y:10, w:100, h:24}
 ```
 

@@ -1,8 +1,6 @@
 # H.1–H.2 响应式信号系统 + Modifier 修饰系统
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 后续核心子系统 API 章节（H.11–H.17 + Log + AI-First）见 [`../subsystems_api/`](../subsystems_api)：SUBSYSTEM_API_SERIALIZE / SUBSYSTEM_API_LAYOUT_ENGINE / SUBSYSTEM_API_WIDGETS / SUBSYSTEM_API_INSPECTOR / SUBSYSTEM_API_TOOLING / SUBSYSTEM_API_LOG_AI。
-> 相关功能域规范（A–G）见 [`../features/`](../features)：FEATURE_API_DESIGN / FEATURE_ARCH_STATE / FEATURE_RUNTIME_SAFETY / FEATURE_LAYOUT_RENDER / FEATURE_CROSS_PLATFORM / FEATURE_AI_INSPECTION / FEATURE_AI_TOOLING / FEATURE_ENGINEERING。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§H.1–H.2**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
 ### H. 核心子系统 API 规范
 
@@ -17,17 +15,17 @@
 - **`Reactive<T>`**：属性容器。可持有"常量"或"信号引用"；`get()` 在作用域内同样登记依赖。所有可被信号驱动的属性均为
   `Reactive<T>`（如 `Text.content`、`Button.label`）。
 - **`Binding<T>`**：`State<T>` 的双向绑定包装（读写都同步回源）。
-- **`Computed<T>`**：派生信号；`get()` 时按当前依赖重算，只读、可缓存。
+- **`Computed<T>`**：派生信号；`get()` 时按当前依赖重算，只读、可缓存。构造统一用工厂 `au::computed(lambda)`（T 由 lambda 返回类型推导），与 `aurora_api.json` / `timer.h` 示例对齐；不要直接用 `Computed<T>{ lambda }` 聚合构造。
 - **`Effect`**：响应式副作用作用域。构造时立即运行一次，期间 `get()` 的信号会登记为依赖；任一依赖 `set()` 时自动重跑。
 - **`SignalView<T>`**：`State<T>` / `Computed<T>` 共用的只读信号视图（`get()`）。
 
 ```cpp
 au::State<int> count{0};
 
-au::Text label{ .content = "count = " };          // 常量（LocalizedString）
-au::Text value{ .content = au::Computed<au::LocalizedString>{   // 派生信号
-    [&]{ return au::LocalizedString{ std::to_string(count.get()) }; } } };
-au::Computed<bool> is_even{ [&]{ return count.get() % 2 == 0; } };
+au::Text label("count = ");          // 常量（LocalizedString）
+au::Text value(au::computed([&] {    // 派生信号（au::computed 工厂，T 由 lambda 返回类型推导）
+    return au::LocalizedString{ std::to_string(count.get()) }; }));
+auto is_even = au::computed([&] { return count.get() % 2 == 0; });   // 派生信号
 
 au::Effect watch{ [&]{ Diagnostics::info("count = " + std::to_string(count.get())); } };
 

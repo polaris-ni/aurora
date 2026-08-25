@@ -30,14 +30,14 @@
         - [H.6 事件 + H.7 焦点 + H.8 导航 → `SUBSYSTEM_EVENT_FOCUS_NAV.md`](./specification/subsystems/SUBSYSTEM_EVENT_FOCUS_NAV.md)
         - [H.9 渲染与无头 → `SUBSYSTEM_RENDER_HEADLESS.md`](./specification/subsystems/SUBSYSTEM_RENDER_HEADLESS.md)
         - [H.10 App/Window + H.10b 调度 + H.10c DEBUG + H.10d 生命周期 → `SUBSYSTEM_APP_WINDOW.md`](./specification/subsystems/SUBSYSTEM_APP_WINDOW.md)
-        - [H.11 平台 Shell + H.12 文字选中 → `SUBSYSTEM_PLATFORM_SHELL.md`](./specification/subsystems/SUBSYSTEM_PLATFORM_SHELL.md)
-    - 核心子系统 API（H.11–H.17 + Log + AI-First）→ `specification/subsystems_api/`（6 份）
-        - [H.11 序列化 → `SUBSYSTEM_API_SERIALIZE.md`](./specification/subsystems_api/SUBSYSTEM_API_SERIALIZE.md)
-        - [H.12 布局引擎 → `SUBSYSTEM_API_LAYOUT_ENGINE.md`](./specification/subsystems_api/SUBSYSTEM_API_LAYOUT_ENGINE.md)
-        - [H.13 控件清单 + H.13.1 可定制性 + VideoPlayer → `SUBSYSTEM_API_WIDGETS.md`](./specification/subsystems_api/SUBSYSTEM_API_WIDGETS.md)
-        - [H.13b Inspector 面板 + H.13c 远程 → `SUBSYSTEM_API_INSPECTOR.md`](./specification/subsystems_api/SUBSYSTEM_API_INSPECTOR.md)
-        - [H.14 自描述 + H.15 MCP/CLI + H.16 偏好 + H.17 性能 → `SUBSYSTEM_API_TOOLING.md`](./specification/subsystems_api/SUBSYSTEM_API_TOOLING.md)
-        - [H.xx 日志 + H.yy AI-First → `SUBSYSTEM_API_LOG_AI.md`](./specification/subsystems_api/SUBSYSTEM_API_LOG_AI.md)
+        - [H.11 平台 Shell + H.11b 文字选中 → `SUBSYSTEM_PLATFORM_SHELL.md`](./specification/subsystems/SUBSYSTEM_PLATFORM_SHELL.md)
+    - 核心子系统 API（H.12–H.21 + Log + AI-First）→ `specification/subsystems_api/`（6 份）
+        - [H.12 序列化 → `SUBSYSTEM_API_SERIALIZE.md`](./specification/subsystems_api/SUBSYSTEM_API_SERIALIZE.md)
+        - [H.13 布局引擎 + H.13b 共享枚举 → `SUBSYSTEM_API_LAYOUT_ENGINE.md`](./specification/subsystems_api/SUBSYSTEM_API_LAYOUT_ENGINE.md)
+        - [H.14 控件清单 + H.14.1 可定制性 + VideoPlayer → `SUBSYSTEM_API_WIDGETS.md`](./specification/subsystems_api/SUBSYSTEM_API_WIDGETS.md)
+        - [H.15b Inspector 面板 + H.15c 远程 → `SUBSYSTEM_API_INSPECTOR.md`](./specification/subsystems_api/SUBSYSTEM_API_INSPECTOR.md)
+        - [H.16 自描述 + H.17 MCP/CLI + H.18 偏好 + H.19 性能 → `SUBSYSTEM_API_TOOLING.md`](./specification/subsystems_api/SUBSYSTEM_API_TOOLING.md)
+        - [H.20 日志 + H.21 AI-First → `SUBSYSTEM_API_LOG_AI.md`](./specification/subsystems_api/SUBSYSTEM_API_LOG_AI.md)
 - [四、特性间的张力与解决](#四特性间的张力与解决)
 - [五、不可分割组与开发路线图](#五不可分割组与开发路线图)
 - [六、综合架构蓝图](#六综合架构蓝图)
@@ -62,7 +62,7 @@ Aurora 要让「 **写 UI 像写声明式数据**」一样自然：开发者（�
 - **Token 经济**：API 表面紧凑，AI 在有限上下文即可装载全部概念。
 - **AI 友好错误**：错误信息携带「修复建议」与文档锚点（见 §9 / `CODING_STANDARDS.md`）。
 - **降级而非中止**：非法输入产出 `Diagnostics` 并降级，而非崩溃（见 §21）。
-- **跨平台零依赖**：核心渲染不依赖 GPU；Win32/GDI 零三方依赖（见 §H.9 / `ARCHITECTURE.md`）。
+- **跨平台零依赖**：核心渲染（软件栅格）不依赖 GPU；Win32/GDI 零三方依赖；D3D11 仅作可选 GPU 像素上屏（默认 OFF，见 §H.9 / `ARCHITECTURE.md`）。
 
 ### 〇.3 范围（Scope）
 
@@ -75,13 +75,13 @@ Surface（Headless/Win32/Glfw）、序列化、导航、动画、异步、定时
 - 不做「又一套 CSS」：布局用代码表达，不引入样式表语言。
 - 不做服务端渲染。
 - 不做可视化拖拽编辑器（除非社区驱动）。
-- 不做 Playground（见 `CODING_STANDARDS.md` 四.8）。MCP/CLI 与 LSP 已提供（见 §H.15）。
+- 不做 Playground（见 `CODING_STANDARDS.md` 四.8）。MCP/CLI 与 LSP 已提供（见 §H.17）。
 
 ### 〇.5 技术约束（Constraints）
 
 - C++20 最小标准。
 - 静态库交付（非 header-only）。
-- 软件栅格渲染，无 GPU 依赖。
+- 软件栅格渲染，核心不依赖 GPU（D3D11 仅用于可选 GPU 像素上屏，默认 OFF，见 §H.9）。
 - Windows 优先验证（Win32/GDI），跨平台后端可选（见 §H.9 / `ARCHITECTURE.md`）。
 
 ---
@@ -152,7 +152,7 @@ Aurora 的设计必须从根本上消除这两类错误的可能性。
 >
 > - **`features/`**（功能域 A–G，8 份）：`FEATURE_API_DESIGN` / `FEATURE_ARCH_STATE` / `FEATURE_RUNTIME_SAFETY` / `FEATURE_LAYOUT_RENDER` / `FEATURE_CROSS_PLATFORM` / `FEATURE_AI_INSPECTION` / `FEATURE_AI_TOOLING` / `FEATURE_ENGINEERING`
 > - **`subsystems/`**（核心子系统 H.1–H.10c，7 份）：`SUBSYSTEM_SIGNAL_MODIFIER` / `SUBSYSTEM_ANIMATION` / `SUBSYSTEM_ENV_THEME` / `SUBSYSTEM_EVENT_FOCUS_NAV` / `SUBSYSTEM_RENDER_HEADLESS` / `SUBSYSTEM_APP_WINDOW` / `SUBSYSTEM_PLATFORM_SHELL`
-> - **`subsystems_api/`**（核心子系统 H.11–H.17 + Log + AI-First，6 份）：`SUBSYSTEM_API_SERIALIZE` / `SUBSYSTEM_API_LAYOUT_ENGINE` / `SUBSYSTEM_API_WIDGETS` / `SUBSYSTEM_API_INSPECTOR` / `SUBSYSTEM_API_TOOLING` / `SUBSYSTEM_API_LOG_AI`
+> - **`subsystems_api/`**（核心子系统 H.12–H.21 + Log + AI-First，6 份）：`SUBSYSTEM_API_SERIALIZE` / `SUBSYSTEM_API_LAYOUT_ENGINE` / `SUBSYSTEM_API_WIDGETS` / `SUBSYSTEM_API_INSPECTOR` / `SUBSYSTEM_API_TOOLING` / `SUBSYSTEM_API_LOG_AI`
 >
 > 完整的逐文件清单与链接见上方 [目录](#三特性详细规范)。各子文档内章节编号（A/B/C…、H.1/H.2…）保持原样；交叉引用（如 `§H.9`）仍按原名指代对应章节。
 
@@ -227,7 +227,7 @@ Aurora 的特性按「AI 兼容性闭环组」组织，各组在当前版本均�
 │   to_json / from_json · Diff/Patch · Undo · Canonical Form   │
 ├──────────────────────────────────────────────────────────────┤
 │                  Aurora Component Layer                       │
-│   30 核心组件 · 共享所有权(shared_ptr<Node>) · WidgetId 引用 · 自描述 │
+│   约 30 核心概念组件 · 共享所有权(shared_ptr<Node>) · WidgetId 引用 · 自描述 │
 │   双模 API(指定初始化器/链式setter) · 降级渲染 · 部分代码容错      │
 ├──────────────────────────────────────────────────────────────┤
 │   Modifier · 动画(AnimationController) · 环境(Provider) · 导航(Navigator) │
@@ -307,7 +307,7 @@ namespace aurora::v2 { /* ... */ }
 
 > 每个控件实现 `static describe_static()` + `virtual describe()`，返回完整 `WidgetDescriptor`；
 > `component_schema()` / `list_all_schemas()` 消费 describe () 输出；`aurora_api.json` 自动包含增强字段。
-> 详见 §H.14。
+> 详见 §H.16。
 
 ```cpp
 // 任何 Aurora 组件都能在运行时描述自己的完整 API
@@ -340,16 +340,16 @@ auto all = au::serialization::list_all_schemas();
 
 ### 附录 C：Aurora 项目命名规范速查
 
-| 场景               | 用法                                    |
-|:-------------------|:----------------------------------------|
-| 完整命名空间       | `aurora::Button`                        |
-| 推荐别名           | `namespace au = aurora;` → `au::Button` |
-| 头文件（兼容模式） | `#include <aurora/aurora.h>`            |
-| CLI 工具           | `aurora validate / preview / snapshot`  |
-| MCP 服务           | `aurora-mcp`                            |
-| LSP 服务           | `aurora-lsp`                            |
-| API Schema 文件    | `aurora_api.json`                       |
-| 错误码前缀         | `Aurora::LayoutError::NullChild`        |
+| 场景                  | 用法                                                                                      |
+|:----------------------|:------------------------------------------------------------------------------------------|
+| 完整命名空间          | `aurora::Button`                                                                          |
+| 推荐别名              | `namespace au = aurora;` → `au::Button`                                                   |
+| 头文件（兼容模式）    | `#include <aurora/aurora.h>`                                                              |
+| CLI 工具              | `aurora validate / preview / snapshot`                                                    |
+| MCP 服务              | `aurora-mcp`                                                                              |
+| LSP 服务              | `aurora-lsp`                                                                              |
+| API Schema 文件       | `aurora_api.json`                                                                         |
+| 错误码（枚举 / slug） | `LayoutNullChild`（slug `layout-null-child`，冻结对外契约；命名空间 `aurora::ErrorCode`） |
 
 ---
 

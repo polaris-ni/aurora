@@ -1,7 +1,6 @@
 # C. 运行时安全层（#18,#19,#21,#23）
 
-> 本文件是「三、特性详细规范」按功能域/子系统划分出的子文档；返回主线索引见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
-> 相关核心子系统实现（H 系列）见 [`../subsystems/`](../subsystems)（H.1–H.10c 信号/动画/环境/事件/渲染/窗口/平台）与 [`../subsystems_api/`](../subsystems_api)（H.11–H.17 + Log + AI-First 序列化/布局/控件/Inspector/工具/日志）。
+> 本文件是「三、特性详细规范」子文档，覆盖 **§C.**；完整章节导航（H 系列 + A–G 功能域）见 [SPECIFICATIONS.md](../../SPECIFICATIONS.md)。
 
 #### #18 安全的内存与所有权模型
 
@@ -23,11 +22,13 @@ parent.children.push_back(std::move(child));  // child 节点移入 parent
 struct AppState {
     au::WidgetId focused_field;  // 不是 Widget*，是稳定 ID
 };
-auto widget = tree.find(state.focused_field);  // optional<Widget*>
+auto node = au::inspect::find_node_by_path(root, path);  // 返回 Node（非裸指针），生命周期由树 shared_ptr 持有
 
 // 规则 4：禁止裸指针出现在公开 API 中
 // ❌ void on_click(Button* sender, Event* e);
 // ✅ void on_click(au::WidgetId sender, const au::Event& e);
+// 例外：Inspector / 调试内部句柄（如 selected_widget()、set_surface_getter）可返回裸 Widget*/Surface*，
+//       但必须配弱引用守卫（生命周期由树 shared_ptr 持有），且不得进入业务公开 API。
 ```
 
 **关键约束：**
@@ -114,7 +115,7 @@ au::Column(au::ColumnProps{ .gap = -10 });  // → gap 钳到 0 + 警告
 // AI 通过快照可以识别"这个位置降级了"
 
 // 规则 3：所有降级产生结构化警告（与 #9 配合）
-// [Aurora::Degraded] Image.source:
+// [render-degraded] Image.source:
 //   - Received: "" (empty string)
 //   - Fallback: placeholder rendered (200x150, dashed border)
 //   - Fix: provide a valid file path or URL
@@ -157,7 +158,7 @@ namespace aurora {
         std::string description;
         explicit TODO(std::string desc) : description(std::move(desc)) {}
     };
-    // 运行时行为：触发时输出警告 "[Aurora::TODO] handle_click not implemented"
+    // 运行时行为：触发时输出警告 "[au::TODO] handle_click not implemented"（au::TODO 是占位回调，非错误码）
     // 并在 UI 上显示一个黄色占位提示条（仅 strict_mode=false 时）
 }
 ```
