@@ -109,7 +109,7 @@ aurora schema                             # 输出完整 aurora_api.json
 #### #H.18 偏好配置（Preferences / aurora::preferences）
 
 轻量持久化键值配置（对标 Android `SharedPreferences` / iOS `UserDefaults`），以 **单个 JSON 文件**为后端。 属
-**状态/存储层扩展**， **不新增任何 UI 控件**，不影响核心概念 ≤15 预算。
+**状态/存储层扩展**， **不新增任何 UI 控件**。
 
 - **存储位置在初始化时显式指定**：
     - `Preferences()` —— 内存模式（不绑定文件），所有写入仅存内存；`flush`/`reload` 返回 `prefs-not-persistent` 错误。
