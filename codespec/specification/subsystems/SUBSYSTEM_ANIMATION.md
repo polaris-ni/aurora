@@ -8,9 +8,9 @@
 
 - **`AnimationController`**：驱动一条归一化进度（0→1）。`forward(from=-1)` 正向播放、`reverse()` 反向、`reset(t=0)` 复位、
   `value()` 取当前进度（时长在构造 `AnimationController(duration_seconds, value)` 时确定，无 set_duration）。
-- **`Tween<T>`**：补间函数。`Tween<T>(a, b, curve)`（或 `Tween<T>(value)` 常量），`value(t)` 按曲线在 a→b 间插值；支持
+- **`Tween<T>`**：补间函数。`Tween<T>(a, b, curve)`，`value(t)` 按曲线在 a→b 间插值；支持
   `int/float/Size/Point/Color` 等。
-- **`Keyframes<T>`**：关键帧序列。`Keyframes<T>(stops)`（每帧 `Stop{time, value, curve}`），`value(t)` 在分段间插值。
+- **`Keyframes<T>`**：关键帧序列。`Keyframes<T>(stops)`（每帧 `Stop{time, value}`；插值严格线性），`value(t)` 在分段间插值。
 - **`Curve` / `Curves`**：缓动曲线。`Curves::linear()`、`ease_in()`、`ease_out()`、`ease_in_out()`、`ease_in_out_cubic()`
   等（Curves 无 steps 工厂）。
 - **`SpringDescription`**：弹簧物理参数（`stiffness` / `damping` / `mass`），配合 `SpringSimulation` 用于物理感动画。

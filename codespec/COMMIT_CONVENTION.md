@@ -1,7 +1,7 @@
 # Commit Message 规范（Aurora）
 
 > 本规范约定仓库提交信息的统一写法，确保 `git log` 可读、可自动归类，
-> 并与本项目的 **SemVer 版本策略**（`CODING_STANDARDS.md` §8）和 **`CHANGELOG.json` 变更追踪** 对齐。
+> 并与本项目的 **SemVer 版本策略**（`coding/CODING_VERSIONING.md`）和 **`CHANGELOG.json` 变更追踪** 对齐。
 > 提交信息支持**简体中文或英文**（二选一，同一仓库内保持一致即可）。
 
 ---

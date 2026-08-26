@@ -12,44 +12,43 @@
   `Application(Scene, unique_ptr<Surface>, WindowOptions)`（注入自定义 `Surface`，内部同样经 `create_window` 组装 `Window`
   ）；保留无头构造 `Application(Scene, w, h)`。两个持有 `Window` 的构造共用私有 `attach_window` 接线（事件派发 +
   窗口级可见性/几何态上报），避免重复。`set_on_frame(cb)` 注入每帧自定义逻辑（在 `present_root` 之前调用）；`run()`
-  启动帧循环（pump → 派发 → `present_root` → `tick`）。保留 `dispatch_*` / `tick` / `render_to_png`。新增
+  启动帧循环（pump → 派发 → `tick`（动画/定时任务推进）→ `present_root`）。保留 `dispatch_*` / `tick` / `render_to_png`。新增
   `set_overlay(std::shared_ptr<Widget>)`：注入独立于 widget 树的 HUD 叠加层（典型 `PerfOverlay`），由 `Window::present_root`
-  在 tree paint 之后、present 之前合成；叠加层渲染到独立离屏缓冲、以 ~2Hz 重绘自身，不再触发整树重绘（见 ARCHITECTURE
+  在 tree paint 之后、present 之前合成；叠加层渲染到独立离屏缓冲、以 ~2Hz 重绘自身，不再触发整树重绘（见 `ARCHITECTURE_PERF.md`
   §10.2.1）。
 - **`Scene`**：场景快照。`Scene::serialize()`（无参，返回 `std::string`）把当前 UI 树序列化为 JSON 结构；
   `Scene::serialize_widget(const Widget&, std::string&)` 为内部递归辅助。供 Inspector / 测试消费（见 `app/scene.h`）。
 - **`Window` / `Surface`**：窗口与绘制目标抽象；后端经 `create_window` 选择（`Headless` 默认、`Win32` 零依赖、`GlfwSurface`
   真实窗口）。
 - **帧循环**：`Window` 提供 VSync 回调，每帧 `tick(dt)` → `present_root`（脏区域决策）→ `present()`。单线程 UI（见
-  §18）：所有构建 / 事件 / 重绘在 UI 线程。
+  `specification/features/FEATURE_RUNTIME_SAFETY.md` §18）：所有构建 / 事件 / 重绘在 UI 线程。
 - **脏区域追踪（默认开启）**：`Window::present_root` 按「绘制脏 `DirtyRegionTracker` / 布局脏 `m_layout_dirty` / 尺寸变化 /
   根变化」四要素决策本帧——
     - 四者全否 → **整帧跳过**（idle 零开销，上帧画面仍有效，返回 `true` 不重绘）； **例外——系统重绘请求驱动的帧不得只跳过**：由
       `set_present_request` 回调（Win32 `WM_PAINT`/`WM_SIZE`）驱动的 `present_root`，即便脏追踪判定跳帧，也必须
       `set_present_dirty({})` 后 `present()` 全量 blit 重新上屏——帧缓冲内容仍有效但窗口表面已被 OS 置无效（典型：
-      **最小化还原**后为类背景刷底色，若只跳过则白屏；遮挡揭开同理）；普通 idle 帧不受影响，仍零上屏（回归：`test_present_skip`
-      #6）；
+      **最小化还原**后为类背景刷底色，若只跳过则白屏；遮挡揭开同理）；普通 idle 帧不受影响，仍零上屏（回归：`tests/test_application.cpp` 的 `sec_present_skip`）；
     - 仅绘制脏（如文本选区高亮、主题/颜色切换、局部 `State` 文本变更）→ **跳过整树 `layout`**，复用已缓存 `Node` 几何直接
       `paint`（拖选在大窗/最大化下收益随面积放大最显著）；本帧绘制时 `present_root` 进一步 **跳过 `begin_frame`
       保留上帧帧缓冲**（`Headless`/`D3D11` 的 `begin_frame` 会清零整帧，直接 begin 会使裁剪外黑屏），先
       `Painter::clear_rect(merged_bounds)` 把脏矩形并界重置为新帧零基底，再 `push_clip(merged_bounds)` 裁剪重绘（逻辑 dp，与
       `Painter` 同坐标系）——裁剪内从零基底按原序重新合成、裁剪外沿用上帧像素， **两侧均与整帧重绘逐位一致（golden
-      零差异，无残留、无半透明双重混合）**；`wire_dirty` 回调标记控件最近一次 `paint` 的绝对几何（`Widget::paint_bounds()`
+      零差异，无残留、无半透明双重混合）**；`install_dirty_sink` 回调标记控件最近一次 `paint` 的绝对几何（`Widget::paint_bounds()`
       ，而非一律 `mark_all`），使裁剪命中精确区域。（子树跳过作为后续性能增强，当前以逐像素裁剪保证正确性的前提下不做，避免文本/AA
       发光溢出绘制被跳掉产生差异。）
     - 布局脏或尺寸变化 → `layout + paint`； **Win32 上屏性能契约**：`Win32Surface::present()` 经常驻 BGRA（GDI 原生序）DIB
       section + `BitBlt` 上屏（全量帧整幅 RGBA→BGRA swizzle，脏区帧仅 swizzle+blit 脏矩形）， **禁止退回 RGBA 掩码（
-      `BI_BITFIELDS`）直推**——非原生掩码会迫使 GDI 逐像素慢速转换（5760×3132px 实测全量 87ms vs 现 ~8ms，最大化/resize
+      `BI_BITFIELDS`）直推**——非原生掩码会迫使 GDI 逐像素慢速转换（5760×3132px 实测全量 87ms vs 现 ~9ms，最大化/resize
       卡顿主因；bench `bench_win32_present` ④ 监控）；`WM_SIZE` 同步重渲染后 `ValidateRect`，免去紧跟 `WM_PAINT` 的重复全量上屏；
     - 根变化（如 `Navigator` 切换页面、`run_demo` 换树）→ 强制整体重绘，避免停留旧页面。
       `mark_needs_layout()` 置「布局脏 + 绘制脏」，`mark_needs_paint()` 仅置「绘制脏」；`Widget::on_dirty` 改为
-      `std::function<void(bool)>`（`true`=含布局脏）经 `wire_dirty` 接线整棵树。`enable_dirty_tracking(bool)`
+      `std::function<void(bool)>`（`true`=含布局脏）经 `install_dirty_sink`（`on_subtree_dirty`）接线整棵树。`enable_dirty_tracking(bool)`
       可关闭回到每帧全量重绘历史行为；`force_full_redraw()` 供动画/视频/定时器持续重绘或外部环境突变时强制下一帧全绘。
       **首帧 `m_first_frame=true` 强制全绘**；重新挂载/根变化时自动 `mount` 接线响应式订阅，使 `State`
       /修饰变更能标脏重绘（修复旧版靠每帧全量重绘掩盖的「未挂载树不响应响应式」潜在回归）。
-    - **脏矩形数量上限可调（`render/dirty_region.h`）**：`DirtyRegion` 累积的矩形数超过上限时会合并为单一并界（避免矩形数无界增长导致裁剪与遍历成本反超收益）。上限默认仍为
-      `DirtyRegion::AURORA_MAX_RECTS == 16`，新增进程级可调接口 `DirtyRegion::max_rects() -> std::size_t` /
-      `DirtyRegion::set_max_rects(std::size_t)`，`mark()` 改读 `max_rects()`。用途是按场景调参（如大量小控件独立标脏的列表页可上调、超大窗口可下调）；
+    - **脏矩形数量上限可调（`render/dirty_region.h`）**：`DirtyRegionTracker` 累积的矩形数超过上限时整帧标脏（`mark_all()`，避免矩形数无界增长导致裁剪与遍历成本反超收益）。上限默认仍为
+      `DirtyRegionTracker::AURORA_MAX_RECTS == 16`，新增进程级可调接口 `DirtyRegionTracker::max_rects() -> std::size_t` /
+      `DirtyRegionTracker::set_max_rects(std::size_t)`，`mark()` 改读 `max_rects()`。用途是按场景调参（如大量小控件独立标脏的列表页可上调、超大窗口可下调）；
       **改变该值只影响合并时机与性能，不影响像素结果**——裁剪内始终从零基底按原序重新合成，与整帧重绘逐位一致。
 - **Win32 系统重绘处理（`win32_surface.h`）**：窗口类背景刷 `wc.hbrBackground` 用浅灰实心刷 `RGB(245,245,247)`（而非默认黑色擦除）；
   `wnd_proc` 处理 `WM_PAINT`，在系统要求重绘（最大化/缩放）时立即 `present()` 当前已就绪帧缓冲，填平「OS 放大 → 内容跟上」空档。
@@ -102,7 +101,10 @@
   `paces_frames()`（vsync `Present(1,0)` 自带节拍，帧调度跳过 CPU sleep；`D3D11Options.vsync` 默认 `true`）。
 
 ```cpp
-auto win_res = au::create_window(au::Win32Options{ .title = "Demo" });
+au::WindowOptions base{ .title = "Demo" };                 // 先构造基类选项
+au::Win32Options opts;                                      // 指定初始化器不能指名基类成员
+static_cast<au::WindowOptions &>(opts) = base;              // 拷贝基类部分后传入
+auto win_res = au::create_window(opts);
 au::Application app{ build_ui(), win_res ? std::move(win_res.value()) : nullptr };
 app.set_on_frame([] { /* 把共享状态写入 Reactive 标签 */ });
 app.run();                           // 帧循环 + 事件派发
@@ -115,8 +117,8 @@ HeadlessOptions{ .png_path = "out.png" }); au::App ().window (win ? std::move (w
 ()).frames (1).run ();
 ```
 
-- **`au::App()`流式构建器（已实现，§4.5）**：薄封装，内部构造 `Application` 并进入帧循环，不破坏旧用法。`title(string)` / `size(w,h)` / `surface(unique_ptr<Surface>)`（自定义后端，注入后 `run()` 经 `create_window` 组装 `Window`）/ `window(unique_ptr<Window>)`（接受 `create_window(XxxOptions)` 产出）/ `view(Node)` / `on_frame(cb)` / `frames(int)`（限制帧数，`-1` 跑到 `should_close`）/ `overlay(shared_ptr<Widget>)`（链式注入 HUD 叠加层，等价于 `Application::set_overlay`）后调 `run()`。`run()` 后端优先级：自定义 `Surface` > 预组装 `Window` > 自动检测（默认 `auto_detect_surface()`）。
-- **`au::platform()`**：显式运行时平台查询，跳过后端探测。返回 `Platform{ PlatformKind kind, DeviceKind device, SurfaceKind backend }`，含 `is_mobile()` / `is_desktop()` / `capabilities()`（`PlatformCapabilities{ multitouch, high_frequency_pointer, desktop, mobile }`）。`multitouch` 在真实显示后端（Win32/Glfw）为 `true`、`Headless` 为 `false`；`high_frequency_pointer` 在 Glfw/Win32 为 `true`。
+- **`au::App()`流式构建器（已实现）**：薄封装，内部构造 `Application` 并进入帧循环，不破坏旧用法。`title(string)` / `size(w,h)` / `surface(unique_ptr<Surface>)`（自定义后端，注入后 `run()` 经 `create_window` 组装 `Window`）/ `window(unique_ptr<Window>)`（接受 `create_window(XxxOptions)` 产出）/ `view(Node)` / `on_frame(cb)` / `frames(int)`（限制帧数，`-1` 跑到 `should_close`）/ `overlay(shared_ptr<Widget>)`（链式注入 HUD 叠加层，等价于 `Application::set_overlay`）后调 `run()`。`run()` 后端优先级：自定义 `Surface` > 预组装 `Window` > 自动检测（默认 `auto_detect_surface()`）。
+- **`au::platform()`**：显式运行时平台查询，跳过后端探测。返回 `Platform{ PlatformKind kind, DeviceKind device, SurfaceKind surface }`，含 `is_mobile()` / `is_desktop()` / `capabilities()`（`PlatformCapabilities{ multitouch, high_frequency_pointer, desktop, mobile }`）。`multitouch` 在真实显示后端（Win32/Glfw）为 `true`、`Headless` 为 `false`；`high_frequency_pointer` 在 Glfw/Win32 为 `true`。
 
 ```cpp
 // 一行式启动（等价于上方 Application 构造）

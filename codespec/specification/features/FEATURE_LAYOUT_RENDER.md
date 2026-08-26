@@ -57,11 +57,11 @@ auto hi = au::Text(au::TextProps{ .content = "Hi" });
 hi.modifier = au::Modifier{}
     .padding(8)                   // 内边距，永远加在内容尺寸之外
     .border(1, au::colors::Gray)  // 边框
-    .width(au::px(200));          // 内容宽度（强类型，必须带单位）
+    .width(200);                  // 内容宽度（Modifier::width 取 float；Length 强类型宽度走 Widget::width(Length)）
 // 最终占用 = padding + border + width（无例外）
 
 // 规则 2：百分比的参照物永远明确
-child.width(au::percent(50));
+child.width(au::percent(0.5));
 // 参照物 = 父容器的 content width（不含 padding）
 // 文档和 LSP 提示中必须写明参照物
 

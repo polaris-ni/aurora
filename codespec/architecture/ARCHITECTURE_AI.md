@@ -13,7 +13,7 @@
 > **编码规则层** 的条目（命名/错误/工具链等）见 `CODING_STANDARDS.md`「AI 友好性」章节；
 > 跨框架概念映射与核心概念审计见 `CONCEPTS.md`。
 
-### 12.1 Token 经济性 API 表面保持紧凑（约 40 个 widget + 修饰 + 状态原语），核心概念可枚举、可命名、可映射
+### 12.1 Token 经济性 API 表面保持紧凑（60+ widget + 修饰 + 状态原语），核心概念可枚举、可命名、可映射
 （见 `CONCEPTS.md`），使 AI 在有限上下文窗口内即可装载全部概念。
 
 ### 12.2 概念可枚举性 全部 UI 原语可枚举、可命名、可映射。详见 `CONCEPTS.md` 的「核心概念审计」。
@@ -26,7 +26,7 @@
 ### 12.5 最小正交 API API 正交：布局用 `Column/Row/Stack/Grid/Scroll`，装饰用 `Modifier`，状态用 `State/Signal/Store`，
 互不重叠；避免「多种方式做同一件事」带来的选择困惑。
 
-### 12.6 线程模型 单线程 UI + 跨线程安全写入（`State::set`）。在文档与示例明确标注，避免 AI 误用多线程改树。
+### 12.6 线程模型 单线程 UI；`State::set` 仅限主线程（跨线程结果须经 `au::async`/`Task::set_main_poster` 回投后再写）。在文档与示例明确标注，避免 AI 误用多线程改树。
 
 ### 12.7 显式数据流 状态经 `State/Signal/Store` 显式流动，依赖图可静态推导，便于 AI 推断「改 X 会影响哪些 widget」。
 

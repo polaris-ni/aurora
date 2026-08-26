@@ -6,7 +6,7 @@
 
 > 头文件：`include/aurora/core/log.h` + 实现 `src/aurora/core/log.cpp`；经 `include/aurora/aurora.h` 暴露（
 > `#include "aurora/core/log.h"`）。
-> 编码纪律见 `CODING_STANDARDS.md` §4 三.6： **禁止直接使用标准输出**，所有输出须经本子系统收口。
+> 编码纪律见 `coding/CODING_ERRORS_NAMING.md` §3.6： **禁止直接使用标准输出**，所有输出须经本子系统收口。
 
 **双通道设计**：
 
@@ -34,10 +34,10 @@
 ### H.21 AI-First 便利性层
 
 > 增量叠加在既有声明式 `Node`/`Props` 架构之上； **不改动**软件 `Painter`、单一静态库、声明式树内核。使用配方见
-> `GUIDELINE.md` §18–§19。
+> `guideline/GUIDELINE_INTEGRATION.md` §18–§19。
 
 **`aurora::ui` 声明式工厂（`include/aurora/ui/factories.h`，经 `aurora.h` 暴露）**：`label` / `button` / `input` /
-`checkbox` / `slider` / `vbox` / `hbox` / `stack` / `grid` / `scroll` 十个自由函数，签名 `(Container& parent, ...)`；构造控件、
+`checkbox` / `slider` / `vbox` / `hbox` / `stack` / `grid` / `scroll` / `lazy_row` / `bottom_nav_bar` 共 12 个自由函数，签名 `(Container& parent, ...)`；构造控件、
 `push_back` 到父 `m_children`（`Container::add`）、返回强类型裸指针（`Text*`/`Button*`/`Column*`…）。`vbox`/`hbox` 分别映射到
 `Column`/`Row`。容器类第二参数为既有 `XxxProps`（默认 `{}`），`label`/`button` 首参为主文案覆盖对应 Props 字段。指针生命周期由父树
 `shared_ptr` 持有。

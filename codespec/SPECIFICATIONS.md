@@ -23,7 +23,7 @@
         - [F1. AI 工具链层：Inspector/序列化 → `FEATURE_AI_INSPECTION.md`](./specification/features/FEATURE_AI_INSPECTION.md)
         - [F2. AI 工具链层：Recipe/LSP → `FEATURE_AI_TOOLING.md`](./specification/features/FEATURE_AI_TOOLING.md)
         - [G. 工程约束 → `FEATURE_ENGINEERING.md`](./specification/features/FEATURE_ENGINEERING.md)
-    - 核心子系统 API（H.1–H.10c）→ `specification/subsystems/`（7 份）
+    - 核心子系统 API（H.1–H.11b）→ `specification/subsystems/`（7 份）
         - [H.1–H.2 信号 + Modifier → `SUBSYSTEM_SIGNAL_MODIFIER.md`](./specification/subsystems/SUBSYSTEM_SIGNAL_MODIFIER.md)
         - [H.3 动画 → `SUBSYSTEM_ANIMATION.md`](./specification/subsystems/SUBSYSTEM_ANIMATION.md)
         - [H.4/H.4.1 环境/DI + H.5 主题/i18n → `SUBSYSTEM_ENV_THEME.md`](./specification/subsystems/SUBSYSTEM_ENV_THEME.md)
@@ -58,7 +58,7 @@ Aurora 要让「 **写 UI 像写声明式数据**」一样自然：开发者（�
 ### 〇.2 设计原则（Design Principles）
 
 - **声明式优先**：界面是「状态 → 视图」的纯函数；改状态而非改树。
-- **概念最小正交**：约 40 个 widget + 修饰 + 状态原语，无重叠。
+- **概念最小正交**：60+ widget + 修饰 + 状态原语，无重叠。
 - **概念可枚举**：全部 UI 原语可枚举、可命名、可映射（见 `CONCEPTS.md` 核心概念审计）。
 - **Token 经济**：API 表面紧凑，AI 在有限上下文即可装载全部概念。
 - **AI 友好错误**：错误信息携带「修复建议」与文档锚点（见 §9 / `CODING_STANDARDS.md`）。
@@ -76,7 +76,7 @@ Surface（Headless/Win32/Glfw）、序列化、导航、动画、异步、定时
 - 不做「又一套 CSS」：布局用代码表达，不引入样式表语言。
 - 不做服务端渲染。
 - 不做可视化拖拽编辑器（除非社区驱动）。
-- 不做 Playground（见 `CODING_STANDARDS.md` 四.8）。MCP/CLI 与 LSP 已提供（见 §H.17）。
+- 不做 Playground（见 `coding/CODING_AI.md` §7 一.8）。MCP/CLI 与 LSP 已提供（见 §H.17）。
 
 ### 〇.5 技术约束（Constraints）
 
@@ -152,7 +152,7 @@ Aurora 的设计必须从根本上消除这两类错误的可能性。
 > 本章体量较大，已划分为 21 份子文档，分布在 `codespec/specification/` 下的三个子目录：
 >
 > - **`features/`**（功能域 A–G，8 份）：`FEATURE_API_DESIGN` / `FEATURE_ARCH_STATE` / `FEATURE_RUNTIME_SAFETY` / `FEATURE_LAYOUT_RENDER` / `FEATURE_CROSS_PLATFORM` / `FEATURE_AI_INSPECTION` / `FEATURE_AI_TOOLING` / `FEATURE_ENGINEERING`
-> - **`subsystems/`**（核心子系统 H.1–H.10c，7 份）：`SUBSYSTEM_SIGNAL_MODIFIER` / `SUBSYSTEM_ANIMATION` / `SUBSYSTEM_ENV_THEME` / `SUBSYSTEM_EVENT_FOCUS_NAV` / `SUBSYSTEM_RENDER_HEADLESS` / `SUBSYSTEM_APP_WINDOW` / `SUBSYSTEM_PLATFORM_SHELL`
+> - **`subsystems/`**（核心子系统 H.1–H.11b，7 份）：`SUBSYSTEM_SIGNAL_MODIFIER` / `SUBSYSTEM_ANIMATION` / `SUBSYSTEM_ENV_THEME` / `SUBSYSTEM_EVENT_FOCUS_NAV` / `SUBSYSTEM_RENDER_HEADLESS` / `SUBSYSTEM_APP_WINDOW` / `SUBSYSTEM_PLATFORM_SHELL`
 > - **`subsystems_api/`**（核心子系统 H.12–H.21 + Log + AI-First，6 份）：`SUBSYSTEM_API_SERIALIZE` / `SUBSYSTEM_API_LAYOUT_ENGINE` / `SUBSYSTEM_API_WIDGETS` / `SUBSYSTEM_API_INSPECTOR` / `SUBSYSTEM_API_TOOLING` / `SUBSYSTEM_API_LOG_AI`
 >
 > 完整的逐文件清单与链接见上方 [目录](#三特性详细规范)。各子文档内章节编号（A/B/C…、H.1/H.2…）保持原样；交叉引用（如 `§H.9`）仍按原名指代对应章节。
@@ -166,7 +166,7 @@ Aurora 的设计必须从根本上消除这两类错误的可能性。
 | #6 细粒度信号 vs #7 共享所有权 | 信号变化需定点刷新，但组件树需可被复制/移动 | `Node` 持有 `shared_ptr<Widget>`（拷贝即共享），信号变化仅重绘依赖组件（#18/#H.1）      |
 | #4 强类型 vs 编译速度          | 大量模板/概念检查拖慢编译                   | 核心路径用简单类型，高级校验放在**独立验证工具**中（CLI），不阻塞编译                   |
 | #12 机器Schema vs #2 命名一致  | Schema 需要额外维护                         | Schema 从代码**自动生成**（通过宏/注解/编译插件），保证与实现同步                       |
-| #6 信号刷新 vs 高频交互        | 每帧走全链路延迟不可接受                    | 默认细粒度信号定点刷新；高频绘制用 `Canvas`/`DirectHandler` opt-in（#H.1/#H.6）         |
+| #6 信号刷新 vs 高频交互        | 每帧走全链路延迟不可接受                    | 默认细粒度信号定点刷新；高频绘制用 `Canvas` opt-in（#H.1/#H.6） |
 | #18 单线程 UI vs #19 异步      | 异步结果需回 UI 线程                        | `au::async` 经主线程投递器回到 UI 线程（#18/#19）                                       |
 | #2 命名一致 vs 历史 API        | AI 可能混用新旧命名                         | 文档统一 snake_case 属性 + CamelCase 类型，废弃名仅在兼容层标注（#2/附录 C）            |
 
@@ -221,14 +221,14 @@ Aurora 的特性按「AI 兼容性闭环组」组织，各组在当前版本均�
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │                  Aurora AI Tooling Layer                      │
-│   aurora-mcp · aurora-lsp · aurora CLI · AI Compat Test     │
+│   aurora_mcp · aurora_lsp · aurora_cli · ai_compat_test     │
 │   aurora_api.json · Recipe Search · Diff Patch · to_code()   │
 ├──────────────────────────────────────────────────────────────┤
 │                  Aurora Serialization Layer                   │
 │   to_json / from_json · Diff/Patch · Undo · Canonical Form   │
 ├──────────────────────────────────────────────────────────────┤
 │                  Aurora Component Layer                       │
-│   约 30 核心概念组件 · 共享所有权(shared_ptr<Node>) · WidgetId 引用 · 自描述 │
+│   60+ 核心概念组件 · 共享所有权(shared_ptr<Node>) · 稳定 ID(Node::id) 引用 · 自描述 │
 │   双模 API(指定初始化器/链式setter) · 降级渲染 · 部分代码容错      │
 ├──────────────────────────────────────────────────────────────┤
 │   Modifier · 动画(AnimationController) · 环境(Provider) · 导航(Navigator) │
@@ -236,7 +236,7 @@ Aurora 的特性按「AI 兼容性闭环组」组织，各组在当前版本均�
 ├──────────────────────────────────────────────────────────────┤
 │                  Aurora State + Event Layer                   │
 │   信号 State/Reactive/Computed/Effect · 可选 Store<State>      │
-│   细粒度定点刷新 · Action 派发(可选) + DirectHandler(opt-in)    │
+│   细粒度定点刷新 · Action 派发(可选) · Canvas 高频 opt-in      │
 ├──────────────────────────────────────────────────────────────┤
 │                  Aurora Async Layer                           │
 │   aurora::ThreadPool(有界 worker) · au::async() · au::co_async() │
@@ -270,8 +270,8 @@ Aurora 的特性按「AI 兼容性闭环组」组织，各组在当前版本均�
 这个"500 token 一次通过"应该作为 Aurora 的 **持续集成测试**——每次 API 变更后，用多个 LLM 做生成测试，通过率低于 90% 就回滚变更：
 
 ```bash
-# CI 中的 AI 兼容性测试
-$ aurora ai-compat-test --model gpt-4o --prompt "Create a login form" --pass-rate 0.9
+# AI 兼容性批量验证（独立工具 ai_compat_test，无 LLM 调用）
+$ ./build/ai_compat_test        # 遍历 tests/fixtures/ai_compat/ 下全部 JSON fixture（valid_* 期望通过、error_* 期望报错）
 ✓ 9/10 generations compiled successfully
 ✓ 8/10 matched expected structure
 ✗ 1/10 used deprecated .setCaption() → FAIL (need better naming)
@@ -332,7 +332,7 @@ au::Widget &w = btn;
 auto desc = w.describe();  // 同上
 
 // 批量发现
-auto all = au::serialization::list_all_schemas();
+auto all = au::list_all_schemas();
 ```
 
 这使得 AI Agent 可以在 **运行时**动态发现 Aurora API，而不完全依赖训练数据。
@@ -346,9 +346,9 @@ auto all = au::serialization::list_all_schemas();
 | 完整命名空间          | `aurora::Button`                                                                          |
 | 推荐别名              | `namespace au = aurora;` → `au::Button`                                                   |
 | 头文件（兼容模式）    | `#include <aurora/aurora.h>`                                                              |
-| CLI 工具              | `aurora validate / preview / snapshot`                                                    |
-| MCP 服务              | `aurora-mcp`                                                                              |
-| LSP 服务              | `aurora-lsp`                                                                              |
+| CLI 工具              | `aurora validate / snapshot / render / preview`                                                    |
+| MCP 服务              | `aurora_mcp`                                                                              |
+| LSP 服务              | `aurora_lsp`                                                                              |
 | API Schema 文件       | `aurora_api.json`                                                                         |
 | 错误码（枚举 / slug） | `LayoutNullChild`（slug `layout-null-child`，冻结对外契约；命名空间 `aurora::ErrorCode`） |
 

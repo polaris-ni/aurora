@@ -28,6 +28,8 @@
 | tick_gestures 按需遍历 | 仅遍历注册了手势计时器的 widget（而非全树） | 无手势 widget 零开销 |
 | FlexItem std::function 消除 | 函数指针 + `void*` 上下文替代 `std::function` | 消除 `std::function` 堆分配与间接调用开销 |
 
+> 注：`wire_dirty`（每帧递归接线整棵树 `on_dirty`）已被取代（见 `window.h` `present_root` 的脏区驱动），上表首行为历史记录，当前实现不依赖接线式方案。
+
 ### P2 — 渲染管线快速路径
 
 | 优化项 | 措施 | 效果 |
@@ -46,7 +48,7 @@
 | 不透明快路径接入 | `draw_linear_gradient` / `draw_radial_gradient` 仅对「双色标 + 两停靠点 + 两端 alpha==255」走 SIMD；逐行预计算 `py` 折叠 `dy` | 跳过 sRGB↔线性 LUT 往返（不透明像素数学等价于直写 sRGB，与旧实现位级一致） |
 
 > **双实现确定性约束**：SIMD 路径必须与标量黄金路径**逐位一致**——`-ffp-contract=off` 禁 FMA、向量化沿用同一浮点运算序列、整型截断用 `cvtt`（`_mm_cvttps_epi32` / `_mm256_cvttps_epi32`）。CI 由 `test_simd_parity`（37,805 比对用例，随机化 + 固定种子，覆盖 5 色对 / 非对齐宽 / 多 stop0·range / 随机几何）逐位比对，G-13 一票否决；`test_offscreen` 同步零差异。
-> 该优化为 `aurora::detail` 内部实现，不引入公共 API、不改变像素契约；`AURORA_ENABLE_SIMD` 默认 ON，OFF 时仅标量路径，详见 `BUILD_OPTIONS.md` §3.2。
+> 该优化为 `aurora::detail` 内部实现，不引入公共 API、不改变像素契约；`AURORA_ENABLE_SIMD` 默认 ON，OFF 时仅标量路径，详见 `BUILD_OPTIONS_ENABLE.md` §3.2。
 
 ---
 

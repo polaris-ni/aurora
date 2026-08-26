@@ -173,7 +173,7 @@ for i in 0..n:
 origin.main = container_main - (origin.main + size.main)
 ```
 
-> 反向经 `FlexDirection::RowReverse` / `FlexDirection::ColumnReverse`（即 `FlexDirection` 的四值）表达；注意 `VerticalDirection` 枚举当前 **未被布局引擎消费**，反向请用 `FlexDirection` 的 Reverse 取值，而非 `VerticalDirection`。
+> 反向经 `FlexDirection::RowReverse` / `FlexDirection::ColumnReverse`（即 `FlexDirection` 的四值）表达；反向布局一律使用 `FlexDirection` 的 Reverse 取值。
 
 ### 3.8 交叉轴对齐
 

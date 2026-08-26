@@ -89,7 +89,7 @@ if (chrome && chrome->valid()) {
 }
 ```
 
-> 跨不相关子树的共享状态（如购物车 `Store`、主题、`WindowChrome`）统一走 Environment 注入 + `ctx.environment<T>()` 取用；注入方须保证 `T` 的生命周期长于消费方（见 §21 决策树）。
+> 跨不相关子树的共享状态（如购物车 `Store`、主题、`WindowChrome`）统一走 Environment 注入 + `ctx.environment<T>()` 取用；注入方须保证 `T` 的生命周期长于消费方（见 `concepts/CONCEPTS_CORE.md`「状态作用域决策树」）。
 
 ### 21.5 Computed 派生
 
@@ -124,7 +124,7 @@ auto filtered = std::make_shared<au::Computed<std::vector<std::string>>>(
 
 > 真实后端的运行时画面与状态抓取能力（设计取舍见 `../architecture/ARCHITECTURE_PERF.md` §10.7，API 契约见 `SPECIFICATIONS.md` §H.10c 与 `BUILD_OPTIONS.md` `AURORA_ENABLE_DEBUG`），弥补 golden 测试只能覆盖 `HeadlessSurface` 的盲区。
 > 全部门控 `AURORA_ENABLE_DEBUG`（Debug / RelWithDebInfo 自动注入，Release / MinSizeRel 不注入）；头经 `aurora/aurora.h` 暴露，消费端调用始终可编译，关闭时 API 返回 `disabled` / `{"available":false,...}`， **零开销**。
-> 开启 `AURORA_BUILD_INSPECTOR_SERVER`（跨平台）时，下列能力经 `InspectorServer` 的 `/api/debug/*` REST 端点远程暴露（见 §17b）。
+> 开启 `AURORA_BUILD_INSPECTOR_SERVER`（跨平台）时，下列能力经 `InspectorServer` 的 `/api/debug/*` REST 端点远程暴露（见 `GUIDELINE_INTEGRATION.md` §17b）。
 
 ### 22.1 帧缓冲 / 真实窗口截图
 

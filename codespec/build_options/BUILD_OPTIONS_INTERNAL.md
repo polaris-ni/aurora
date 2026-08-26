@@ -47,11 +47,11 @@ GLFW 同口径自 `third_party/glfw`（3.5.1）源码构建，但仅在 `AURORA_
 
 ## 5. 全局编译定义（非选项，固定注入）
 
-| 宏                        | 注入方式                                      | 作用域         | 说明                                                                                                |
-|---------------------------|-----------------------------------------------|----------------|-----------------------------------------------------------------------------------------------------|
-| `NOMINMAX`                | `add_compile_definitions(NOMINMAX)`           | 全局           | 抑制 `<windows.h>` 的 `min/max` 宏，保证 `std::min/max` 在 Windows 可用（`preferences.cpp` 等用到） |
-| `_CRT_SECURE_NO_WARNINGS` | `target_compile_definitions(aurora PUBLIC …)` | 仅 MSVC        | 抑制 MSVC 对 `std::fopen` 等 POSIX 函数的弃用警告（`render/png.h`）                                 |
-| `AURORA_BACKEND_*`        | `target_compile_definitions(aurora PUBLIC …)` | 由 §2 开关控制 | 后端 feature 宏，见 §2                                                                              |
+| 宏                        | 注入方式                                      | 作用域                                    | 说明                                                                                                |
+|---------------------------|-----------------------------------------------|-------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| `NOMINMAX`                | `add_compile_definitions(NOMINMAX)`           | 全局                                      | 抑制 `<windows.h>` 的 `min/max` 宏，保证 `std::min/max` 在 Windows 可用（`preferences.cpp` 等用到） |
+| `_CRT_SECURE_NO_WARNINGS` | `target_compile_definitions(aurora PUBLIC …)` | 仅 MSVC                                   | 抑制 MSVC 对 `std::fopen` 等 POSIX 函数的弃用警告（`render/png.h`）                                 |
+| `AURORA_BACKEND_*`        | `target_compile_definitions(aurora PUBLIC …)` | 由 `BUILD_OPTIONS_BACKEND.md` §2 开关控制 | 后端 feature 宏，见 `BUILD_OPTIONS_BACKEND.md` §2                                                   |
 
 ---
 

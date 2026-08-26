@@ -20,7 +20,7 @@
 ### 14.2.1 单元测试（`tests/test_*.cpp`）
 
 - 每个公共源文件对应一个 `test_*.cpp`（与 `examples/demos/demo_*.cpp` 同构：1 源文件 ↔ 1 测试 ↔ 1 demo）。
-- 经 `tests/CMakeLists.txt` 收集（`GLOB CONFIGURE_DEPENDS`），由 CTest 注册为目标。
+- 经 `cmake/AuroraTests.cmake` 收集（`file(GLOB CONFIGURE_DEPENDS)`），由 CTest 注册为目标。
 - 覆盖：布局求解、响应式信号、序列化往返、存储后端、错误码构造等核心逻辑。
 
 ### 14.2.2 Golden 测试（渲染像素级）

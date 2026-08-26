@@ -18,15 +18,15 @@ auto parent = au::Column{};
 parent.children.push_back(std::move(child));  // child 节点移入 parent
 // 整棵树随根 Node 析构而析构，AI 无需手动管理生命周期
 
-// 规则 3：跨组件引用 = 弱引用 ID，非裸指针
+// 规则 3：跨组件引用 = 稳定标识，非裸指针
 struct AppState {
-    au::WidgetId focused_field;  // 不是 Widget*，是稳定 ID
+    std::string focused_field_id;  // 对应 Node::set_id()/id() 的稳定标识（不是 Widget*）
 };
 auto node = au::inspect::find_node_by_path(root, path);  // 返回 Node（非裸指针），生命周期由树 shared_ptr 持有
 
 // 规则 4：禁止裸指针出现在公开 API 中
 // ❌ void on_click(Button* sender, Event* e);
-// ✅ void on_click(au::WidgetId sender, const au::Event& e);
+// ✅ void on_click(std::string_view sender_id, const au::Event& e);  // 以 id 传递触发者，经 find_node_by_path 查询
 // 例外：Inspector / 调试内部句柄（如 selected_widget()、set_surface_getter）可返回裸 Widget*/Surface*，
 //       但必须配弱引用守卫（生命周期由树 shared_ptr 持有），且不得进入业务公开 API。
 ```
@@ -36,7 +36,7 @@ auto node = au::inspect::find_node_by_path(root, path);  // 返回 Node（非裸
 - UI 树通过 `std::shared_ptr<Widget>` 管理所有权，明确父子关系
 - 禁止裸指针传递，组件树自动管理生命周期
 - AI 不需要手动 `delete` 或担心 use-after-free
-- 事件回调中需要引用"触发者" → 用 `WidgetId` + 查询，而非引用/指针
+- 事件回调中需要引用"触发者" → 用稳定标识 `Node::id()` + 查询（`inspect::find_node_by_path`），而非引用/指针
 
 **单线程 UI 说明：**
 
@@ -64,7 +64,7 @@ auto task = au::async([] { return fetch_from_network(); });  // 返回 au::Task<
 task.with_timeout(std::chrono::seconds(5))                  // opt-in 超时
     .then([](const au::Result<Data> &r) {                   // 回调在 UI 线程执行
         if (r) store->set(r.value());
-        else   Diagnostics::error(r.error().message);       // 含 async-timeout
+        else   Diagnostics::report(r.error().message);      // 含 async-timeout
     });
 
 // 模式 B：协程式 co_await（续体回到主线程）
@@ -80,7 +80,7 @@ au::launch(load());
 - **后台执行底座是有界线程池 `aurora::ThreadPool`**（`ThreadPool::default_pool()`，worker 数 = `hardware_concurrency()`，下限
   2）；`au::async` / `co_async` 均向该池提交任务， **不再为每次调用 `std::thread().detach()`**，杜绝线程爆炸与悬挂线程（池析构
   stop+join）。
-- `au::async(fn)` 返回的 `au::Task<T>` 在后台线程执行 `fn`（`fn` 返回 `T` 或 `Result<T>`，异常捕获为 `async-exception`错误）。
+- `au::async(fn)` 返回的 `au::Task<T>` 在后台线程执行 `fn`（`fn` 返回 `T` 或 `Result<T>`，异常捕获为 `runtime-async-exception`错误）。
 - `Task::then` 的回调 **保证在 UI（主）线程**执行，可直接更新 UI；跨线程投递由 `Task::set_main_poster` 安装（无 poster
   时直接调用，供 headless / 测试）。
 - 异步错误通过 `au::Result<T>` 传递，回调必须处理 `if (r) ... else ...`；超时经 `async-timeout` 错误回传。
@@ -155,11 +155,10 @@ namespace aurora {
     // au::TODO 是一个占位回调，用于标记尚未实现的事件处理
     // 类型：可转换为任何回调签名的占位对象
     struct TODO {
-        std::string description;
-        explicit TODO(std::string desc) : description(std::move(desc)) {}
+        std::string what;
+        explicit TODO(std::string what) : what(std::move(what)) {}
     };
-    // 运行时行为：触发时输出警告 "[au::TODO] handle_click not implemented"（au::TODO 是占位回调，非错误码）
-    // 并在 UI 上显示一个黄色占位提示条（仅 strict_mode=false 时）
+    // 运行时行为：触发时经 Diagnostics::warn("TODO", what) 输出警告（todo.h:34-38；au::TODO 是占位回调，非错误码）
 }
 ```
 

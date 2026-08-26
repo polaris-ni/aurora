@@ -1,7 +1,7 @@
 # 错误处理架构（Error Handling Architecture）
 
 > 本文档描述 Aurora **错误处理的设计模型与架构分层**，属于架构层（architecture）。
-> - 错误**规则与写法**（命名、何时返回 `Result`、断言边界等）见 [`CODING_ERRORS_NAMING.md` §1](./coding/CODING_ERRORS_NAMING.md#1-错误处理error-handling对应规格-9)（对应规格 §9）。
+> - 错误**规则与写法**（命名、何时返回 `Result`、断言边界等）见 [`CODING_ERRORS_NAMING.md` §1](../coding/CODING_ERRORS_NAMING.md#1-错误处理error-handling对应规格-9)（对应规格 §9）。
 > - 错误**码目录（数据）**由 `tools/gen_error_codes.cpp` 自动生成并维护于 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)，**请勿手改**。
 > - 本文档不重复上述两份内容，只说明「错误在系统里如何被建模、分类、生成与传播」。
 
@@ -13,7 +13,7 @@
 
 - 每个错误同时服务于两类受众：
   - **进程外**（JSON / 日志 / IDE 工具 / AI 编码助手）：只认冻结 `slug`（如 `"nav-depth-exceeded"`，改名标识符也不变）与 `code_enum`（C++ 标识符，调试用）。
-  - **进程内**：用 `code_enum` 做类型安全分支（`err.is(ErrorCode::X)`），用 `severity` / `category` / `auto_fixable` / `retryable` 等元数据做策略判断。
+  - **进程内**：用 `code_enum` 做类型安全分支（`err.code_enum == ErrorCode::X`），用 `severity` / `category` / `auto_fixable` / `retryable` 等元数据做策略判断。
 - 失败路径统一：可恢复失败经 `Result<T>` 沿调用链返回，不靠异常横跨业务边界。
 
 ---
@@ -110,7 +110,7 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 ## 13.5 错误传播策略
 
 - **可恢复失败**：沿调用链返回 `Result<T>`，调用方用 `if (result)` / `result.ok()` 检查；所有返回 `Result` 的接口标注 `[[nodiscard]]`，避免吞错。
-- **不可恢复错误**（断言边界，对应规格 §7 决策树）：使用 `assert` / 前置条件检查，见 [`include/aurora/core/assert.h`](../../include/aurora/core/assert.h) 与 [`CODING_ERRORS_NAMING.md`](./coding/CODING_ERRORS_NAMING.md#1-错误处理error-handling对应规格-9)。
+- **不可恢复错误**（断言边界，对应规格 §9 不可恢复决策树）：使用 `assert` / 前置条件检查，见 [`include/aurora/core/assert.h`](../../include/aurora/core/assert.h) 与 [`CODING_ERRORS_NAMING.md`](../coding/CODING_ERRORS_NAMING.md#1-错误处理error-handling对应规格-9)。
 - `unwrap()` 仅用于不可恢复场景（把错误转为 `std::runtime_error`），业务边界不应依赖它做流程控制。
 
 ---
@@ -119,7 +119,7 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 
 | 主题 | 权威文档 | 本文档的角色 |
 |------|----------|--------------|
-| 错误写法 / 命名 / 断言边界 | [`CODING_ERRORS_NAMING.md` §1](./coding/CODING_ERRORS_NAMING.md#1-错误处理error-handling对应规格-9)（规格 §9） | 设计模型概述 + 交叉引用 |
+| 错误写法 / 命名 / 断言边界 | [`CODING_ERRORS_NAMING.md` §1](../coding/CODING_ERRORS_NAMING.md#1-错误处理error-handling对应规格-9)（规格 §9） | 设计模型概述 + 交叉引用 |
 | 错误码目录（数据） | [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)（自动生成） | 不复制；只说明生成管线与契约 |
 | 错误码源定义 | `codespec/errors.toml` + `tools/gen_error_codes.cpp` | 说明「码从哪来」 |
 | 类型定义 | `include/aurora/core/result.h` / `error_codes.gen.h` | 引用，不重述成员 |

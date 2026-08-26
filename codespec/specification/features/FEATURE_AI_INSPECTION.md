@@ -68,7 +68,7 @@ std::string dump = au::dump_tree_json(root).dump();   // 见 widget/inspect.h
     {
       "name": "corner_radius",
       "type": "float",
-      "default": "0"
+      "default": "6.0"
     },
     {
       "name": "padding",
@@ -87,9 +87,7 @@ std::string dump = au::dump_tree_json(root).dump();   // 见 widget/inspect.h
     }
   ],
   "events": [
-    "on_click",
-    "on_hover",
-    "on_focus"
+    "on_click"
   ],
   "children_policy": "none",
   "examples": [
@@ -120,7 +118,7 @@ std::string dump = au::dump_tree_json(root).dump();   // 见 widget/inspect.h
 ```cpp
 // 任何 UI 树都可以双向转换
 au::Json json = au::serialization::to_json(my_widget_tree);
-auto restored = au::serialization::from_json(json);   // 返回 Result，使用前判 is_ok()
+auto restored = au::serialization::from_json(json);   // 返回 Result，使用前判 ok()
 
 // YAML 输出（当前仅输出方向，无 from_yaml）
 std::string yaml = au::serialization::to_yaml(my_widget_tree);  // Widget 树 → YAML

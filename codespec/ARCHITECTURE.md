@@ -24,7 +24,7 @@ Aurora 是一个现代 C++20 跨平台 GUI 库，以「声明式（declarative�
 声明式优于命令式、数据单向流动、错误信息携带「修复建议」。
 
 区别于传统 GUI 框架，Aurora 不引入 GPU 依赖，采用纯软件栅格渲染（`Painter`），
-并以内核/适配分离的分层架构实现跨平台（Win32/GDI、GLFW/OpenGL、Headless 内存）。
+并以内核/适配分离的分层架构实现跨平台（Win32/GDI、D3D11 GPU 上屏、GLFW/OpenGL、X11/Xlib、Wayland、Wasm/Canvas、macOS 骨架、Headless 内存）。
 
 ---
 

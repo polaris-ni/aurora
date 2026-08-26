@@ -40,7 +40,7 @@ btn3.on_click = fn;
 - 控件可用 `au::` 或 `aurora::` 前缀；推荐 `namespace au = aurora;`
 - 所有控件统一采用 **继承式双模 API**：`class Xxx : public XxxProps`，`XxxProps` 的字段即控件自身公有字段（如
   `Text.content`、`TextInput.value`、`Scroll.step`、`Grid.columns/gap`、`ImageView.bitmap/source`），不再用私有 `m_*`
-  重复声明同一属性（见 §1 / 编码规范 §2 (1.5) / §7 (一.5)）
+  重复声明同一属性（双模 API 为既有约定；`Props` 字段即公有字段）
 
 ```cpp
 auto page = au::Column(au::ColumnProps{
@@ -71,7 +71,7 @@ auto page = au::Column(au::ColumnProps{
 ```text
 属性用名词：      .content, .label, .color, .font_size
 事件用 on_ 前缀： .on_click, .on_change, .on_focus_change
-布尔用 is_/has_： .is_visible, .is_enabled
+布尔用 show/enabled 语义： .show, .enabled
 动作用动词：      .show, .hide, .request_focus, .reset
 杜绝缩写：        background 而非 bg（与 aurora::Theme 成员一致）
 ```
@@ -80,13 +80,13 @@ auto page = au::Column(au::ColumnProps{
 
 ```cpp
 // ✅ 一致：所有组件的相同语义属性使用完全相同的名称
-Text.content   /  Label.content   /  TextInput.value
+Text.content   /  TextInput.value
 Button.label   /  (若有) Image.label
 Button.on_click / Image.on_click / Row.on_click
 
 // ❌ 不一致（AI 会混淆）：
-Button.setCaption() / Label.setText() / TextInput.setValue()
-Button.setWidth() / Label.w() / Image.size().x
+Button.setCaption() / TextInput.setValue()
+Button.setWidth() / Image.size().x
 ```
 
 **词序规则：** 统一为 `verb_noun` 或 `noun` 形式，属性设置器统一为属性直接赋值风格，避免 `setTitle`、`withTitle`、`title` 混用。
@@ -131,7 +131,7 @@ namespace au = aurora;  // 推荐别名（见上行）
 **规范：**
 
 ```text
-核心概念控件保持精简（含扩展/组合/平台/媒体控件的总清单见 §H.14，当前 ≈ 40，不预设硬性数量上限）
+核心概念控件保持精简（含扩展/组合/平台/媒体控件的总清单见 §H.14，当前 60+，不预设硬性数量上限）
 每个组件核心方法保持精简（Token 经济优先，避免方法无序膨胀，不预设硬性数量上限）
 高级功能通过组合而非继承实现
 ```
@@ -151,11 +151,11 @@ au::Divider()  // 分隔线
 **常用组合配方（可从原语推导）：**
 
 ```cpp
-au::FormLayout()   // = Column + 固定 label 宽度 + 自动对齐
-au::Toolbar()      // = Row + 固定高度 + 溢出折叠
-au::Sidebar()      // = Column + 固定宽度 + 可折叠
-au::TabView()      // = Stack + 顶部 Tab 切换
-au::MenuBar()      // = Row + 下拉菜单
+au::Form() / au::FormField()    // = 表单：label 列宽 + 控件自动对齐（widget/form.h）
+au::ToolBar()                   // = Row + 固定高度 + 溢出折叠（widget/toolbar.h）
+au::Drawer()                    // = 可折叠侧边面板（widget/drawer.h）
+au::TabBar() + au::PageView()   // = 顶部 Tab + 页体切换（widget/tab_bar.h / widget/drawer.h）
+au::MenuBar()                   // = Row + 下拉菜单（widget/menu_bar.h）
 // ...
 ```
 
@@ -176,7 +176,7 @@ button.alignment(au::Alignment::Cenetr);       // 编译错误！拼写错误立
 
 // 类型化尺寸 —— 防止 px/dp/percent 混用
 button.width(au::px(120));
-button.width(au::percent(50));
+button.width(au::percent(0.5));
 button.width(au::dp(48));
 // button.width(120);  // ❌ 编译错误，必须指定单位
 
@@ -186,9 +186,9 @@ button.width(au::dp(48));
 //   - Received: int (120)
 //   - Fix: Use au::px(120) or au::dp(120)
 
-// 编译期布局校验（参数顺序：Child, Parent）
-static_assert(au::is_valid_child_of<au::Text, au::Column>);   // Text 可作为 Column 的子元素 ✓
-// static_assert(au::is_valid_child_of<au::Window, au::Button>); // Window 不可作为 Button 的子元素 ✗
+// 子节点合法性采用运行时校验（容器统一接受任意 Node，无编译期白名单）：
+// au::validate(root) 将空子节点 / 深度超限 / 未知类型报告为结构化 Error（见 #9 / #21 / app/validate.h）
+// 若在公开 API 使用裸指针作子节点参数，编译器直接拒绝（Node 化是唯一入口）
 ```
 
 **约束：** 模板深度 ≤ 3 层，避免模板元编程导致的编译爆炸和不可读错误。
@@ -206,14 +206,14 @@ static_assert(au::is_valid_child_of<au::Text, au::Column>);   // Text 可作为 
 au::Button(au::ButtonProps{ .label = "OK" });
 // 默认：enabled=true, visible=true,
 //       alignment=Center, font_size=14,
-//       padding={8,16}, corner_radius=6
+//       padding={12,6,12,6}, corner_radius=6
 ```
 
 **关键约束：**
 
 - 默认值文档化在声明处，AI 工具可通过 LSP 直接显示默认参数，无需查阅外部文档
 - 默认值应适用于 80% 场景，避免 AI 每次都需要显式指定
-- 运行时可查询默认值：`btn.defaults()`
+- 运行时可查询默认值：`btn.defaults()`（返回默认 `ButtonProps`）
 - 代码中可省略（保持简洁），但 LSP hover 时可见（保持透明）
 
 ---

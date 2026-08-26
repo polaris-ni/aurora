@@ -10,7 +10,7 @@
   `Result`，失败经 `Result::Error` 表达，使用前须 `is_ok()`。组件通过 `serialize_props` / `deserialize_props` 虚钩子声明可序列化属性。
 - **`serialization::diff(before, after)` / `diff_into` / `serialization::apply_patch`**：生成 / 应用 JSON Patch（见 §13
   差分协议）；`apply_patch` 第一参数是 `au::Json`（ **非** widget 树），AI 可只发部分 UI 树 patch 做增量修改。
-- **`WidgetRegistry`**：组件工厂注册表。`WidgetRegistry::make(type_name, props)` 按类型名构造组件；`listTypes()`
+- **`WidgetRegistry`**：组件工厂注册表。`WidgetRegistry::make(type_name, props)` 按类型名构造组件；`list_types()`
   枚举所有已注册类型。Schema 可从注册表自动生成（§12）。
 - **`Scene::serialize`**：把运行中 UI 导出为结构化描述（返回 `std::string`，无参）；对应规格 §10 Inspector。
 

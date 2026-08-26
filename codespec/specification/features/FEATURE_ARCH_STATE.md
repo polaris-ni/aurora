@@ -16,8 +16,8 @@ au::State<int> count{0};
 // 2) 把信号直接作为属性传给组件（属性类型为 Reactive<T>，可持有常量或信号）
 au::Column(au::ColumnProps{
     .children = {
-        std::move(au::Text(au::computed([&] {
-            return au::LocalizedString{ "Count: " + std::to_string(count.get()) }; }))),
+        std::move(au::Text(au::Computed<au::LocalizedString>{ [&] {
+            return au::LocalizedString{ "Count: " + std::to_string(count.get()) }; } })),
         std::move(au::Button(au::ButtonProps{ .label = "+1" })
                       .set_on_click([&]{ count.set(count.get() + 1); })),  // 写信号 → 仅刷新依赖
     },
@@ -29,25 +29,25 @@ au::Column(au::ColumnProps{
 - **State → View 是纯函数映射**：组件的 `paint` 是信号当前值的纯函数，AI 最容易生成
 - **事件 → State 通过普通赋值**：`count.set(...)`，无需 Action / Reducer 样板
 - **细粒度、定点刷新**：只有读取过该信号的组件/计算会被重跑（见 §H.1）
-- **属性即信号**：`Reactive<T>` 属性既可接受常量（如 `.content = "Hi"`）也可接受信号（如 `.content = some_state`），二者对组件透明
-- **状态可序列化**：`State<T>` 可被 `to_json` / `from_json` 快照，便于 AI 做快照测试
+- **属性即信号**：`Reactive<T>` 属性既可接受常量（如 `.content = "Hi"`）也可接受信号——从 `State<T>` 构造为显式 `Reactive(std::shared_ptr<State<T>>)`，须经 `state()`/`shared()` 包装后传入，二者对组件透明
+- **状态可快照**：`StateGraph::to_json()` 可导出依赖图结构（`state_graph.h`），便于 AI 做快照测试；`State<T>` 值本身不直接序列化
 
 **可选：类 Redux 单向数据流（`Store`）**
 
-若偏好单一可信源（single source of truth），Aurora 另提供 `au::Store<S>`（详见 §H.1.6）：`Store` 内部持有 `State<S>`，用
-`dispatch(Action)` + 纯函数 `Reducer` 产生新状态，并暴露 `asSignal()` 供组件像订阅普通信号一样订阅。两者可并存：高频局部状态用
+若偏好单一可信源（single source of truth），Aurora 另提供 `au::Store<S>`（详见 `specification/subsystems/SUBSYSTEM_SIGNAL_MODIFIER.md` §H.1 与 `include/aurora/state/store.h`）：`Store` 内部持有 `State<S>`，用
+`dispatch(Action)` + 纯函数 `Reducer` 产生新状态，并暴露 `as_signal()` 供组件像订阅普通信号一样订阅。两者可并存：高频局部状态用
 `State<T>`，全局应用状态用 `Store<S>`。
 
 ```cpp
 struct AppState { int counter = 0; };
 using Action = au::Action;                         // 字符串标签 + 可选 payload
-auto store = au::Store<AppState>::make(
+auto store = au::make_store(AppState{},
     [](const AppState& s, const Action& a) -> AppState {
-        if (a.name == "increment") return { s.counter + 1 };
+        if (a.type == "increment") return { s.counter + 1 };
         return s;
     });
 au::Button(au::ButtonProps{ .label = "+1" }).set_on_click([&]{ store->dispatch(au::Action{"increment"}); });
-au::Text(std::to_string(store->asSignal().get().counter));
+au::Text(std::to_string(store->as_signal().get().counter));
 ```
 
 **约束：**
@@ -75,7 +75,7 @@ au::Text(std::to_string(store->asSignal().get().counter));
 
 **关键约束：**
 
-- 组件继承层级 **≤ 2 层**（叶控件直接继承 `Widget`；布局/容器继承 `ContainerWidget` / `LayoutWidget`）
+- 组件继承层级 **≤ 2 层**（叶控件直接继承 `Widget`；多子容器继承 `Container`，单子容器继承 `SingleChild`）
 - 用 **组合（Composition）** 替代继承；横切能力（内边距、背景、可点击、尺寸、边框…）由 `Modifier` 正交组合表达（见 §H.2）
 - 整棵 UI 树保存在一个 `Node` 中，`Node` 持有 `std::shared_ptr<Widget>`：
     - **拷贝即共享**：`auto b2 = b1;` 两个 `Node` 指向同一份 widget 实现，复制成本低
@@ -98,7 +98,7 @@ au::Text(std::to_string(store->asSignal().get().counter));
 - **多数情况无需显式写 `Node{...}`**：`Node(W&&)` 是非 explicit 转换构造函数，值类型控件 （`au::Text("...")` /
   `au::Column{...}` / `std::move(w)` 等）可隐式转为 `Node`。仅在两分支类型不同的 `?:`
   三元、或 `std::make_shared<Widget>(...)` 这类需连续两次用户转换的场景才显式包 `Node{...}`。
-- 属性（如 `Text.content`）为 `Reactive<T>`：既可持有常量也可持有信号，对组件透明
+- 属性（如 `Text.content`）为 `Reactive<T>`：既可持有常量也可持有信号（从 `std::shared_ptr<State<T>>` 显式构造），对组件透明
 - 深层嵌套容易导致 AI 迷失，需提供 Builder 模式将深树拆成命名子函数
 
 ---
@@ -116,8 +116,7 @@ window.show();  // 内部自动创建渲染上下文、事件循环、平台窗�
 // ✅ 显式 —— AI 能完整理解控制流
 auto app = au::Application{ build_ui() };   // 显式构造应用并传入根 UI
 app.dispatch_click(x, y);                    // 显式注入输入
-app.tick(1.0 / 60.0);                        // 显式推进帧
-app.present();
+app.tick();                                  // 显式推进一帧（内部驱动布局/绘制/上屏）
 ```
 
 **关键约束：**
@@ -159,14 +158,14 @@ au::Text("Hello").font_size(20);   // 显式指定
 // [layout-null-child] Column.children():
 //   - Received: 3 children (Text, Button, nullptr)
 //   - Problem: 3rd child is nullptr. Did you forget to create the widget?
-//   - Suggestion: Use au::Optional() for conditional children.
+//   - Suggestion: Use Show for conditional children.（条件构造，见 widget/show.h）
 //   - Location: main.cpp:42
 ```
 
 **实现方式：**
 
 - 自定义 `static_assert` 消息（C++20/23）
-- 运行时错误返回 `au::Result<T, au::Error>` 而非抛异常
+- 运行时错误返回 `au::Result<T>`（持 `Error`）而非抛异常
 - 错误对象包含： **what / why / where / suggestion / docs_link**
 - 提供 `au::validate(const Node& root, int max_depth = 64) -> Result<bool>` 在渲染前检查整棵 UI 树 （空子节点 /
   深度超限 / 未知控件类型；返回 `Result<bool>`，首个问题转为结构化 `Error`。见 `app/validate.h`）
@@ -184,10 +183,10 @@ au::Text("Hello").font_size(20);   // 显式指定
     "line": 42,
     "column": 8
   },
-  "suggestion": "Use au::Optional() for conditional children",
+  "suggestion": "Use Show for conditional children",
   "severity": "warning",
   "auto_fix": {
-    "action": "wrap_with_optional",
+    "action": "wrap_with_show",
     "target": "child[2]"
   }
 }

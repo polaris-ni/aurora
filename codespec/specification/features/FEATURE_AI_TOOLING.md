@@ -48,12 +48,12 @@ int main() {
 
 **落地状态：**
 
-- **MCP Server（aurora-mcp）**：stdio JSON-RPC 2.0，暴露 10 个 MCP tools（list_components / describe_component /
+- **MCP Server（aurora_mcp）**：stdio JSON-RPC 2.0，暴露 10 个 MCP tools（list_components / describe_component /
   search_components / validate_tree / render_snapshot / render_png / to_code / to_yaml / get_schema / validate_ui）。详见
   §H.17。
 - **CLI 工具（aurora_cli）**：子命令：components / describe / search / validate / snapshot / render / to-code /
   to-yaml / schema。详见 §H.17。
-- **LSP（aurora-lsp）**：stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明式写法提供
+- **LSP（aurora_lsp）**：stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明式写法提供
   completion / hover / diagnostics / codeAction 四件套：
     - **completion**：`au::` 后补组件/枚举类型；`XxxProps{` 内 `.` 后补属性（显示默认值/必填/文档）；枚举属性 `=` 后补枚举值。
     - **hover**：`au::Type` 显示组件概要（属性数/事件/示例）；`.prop` 显示类型/默认值/必填/文档。
@@ -64,7 +64,7 @@ int main() {
 <details>
 <summary>原始目标形态（保留供参考）</summary>
 
-**1. Language Server Protocol 实现（aurora-lsp）：**
+**1. Language Server Protocol 实现（aurora_lsp）：**
 
 ```text
 支持能力：
@@ -75,7 +75,7 @@ int main() {
 - textDocument/codeAction    → 提供自动修复建议（如 au::px(120) 替换 120）
 ```
 
-**2. MCP (Model Context Protocol) Server（aurora-mcp）：**
+**2. MCP (Model Context Protocol) Server（aurora_mcp）：**
 
 ```text
 协议端点：
@@ -95,10 +95,10 @@ int main() {
 ```bash
 $ aurora new my_project        # 创建新项目脚手架
 $ aurora validate main.cpp     # 检查 UI 代码正确性，输出 JSON 错误
-$ aurora preview main.cpp      # 快速预览 UI（启动临时窗口）
+$ aurora preview tree.json     # 快速预览 UI（启动临时窗口；无显示后端回退无头渲染一帧退出）
 $ aurora snapshot main.cpp     # 生成逻辑快照 + PNG 截图
 $ aurora describe my_app       # 输出运行中应用的 UI 树 JSON
-$ aurora ai-compat-test        # AI 兼容性测试（调用 LLM 生成代码并编译）
+$ ai_compat_test                # 独立工具：AI 兼容性批量验证（遍历 tests/fixtures/ai_compat/，无 LLM 调用）
 $ aurora schema                # 输出 aurora_api.json
 $ aurora to-code tree.json     # UI 树 JSON → C++ 代码（#22）
 ```

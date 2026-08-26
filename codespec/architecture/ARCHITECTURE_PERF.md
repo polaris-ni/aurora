@@ -21,7 +21,7 @@ Aurora 内置轻量级运行时性能检测体系，为开发者提供帧级指�
   - P50/P95/P99 百分位帧时间（`percentile_ms`）
   - 帧时间标准差 / 抖动（`jitter_ms`）
   - 掉帧计数与掉帧率（`dropped_frame_count` / `dropped_frame_ratio`，超过帧预算即计为掉帧）
-  - Hitch 计数（`hitch_count`，帧耗时 > 100ms 视为 hitch）
+  - Hitch 计数（`hitch_count`，帧耗时超过帧预算 2 倍视为 hitch；默认预算 16.67ms 下 ≈33ms）
   - Idle 帧计数（`idle_frame_count`，脏区跳帧不污染渲染统计）
 - **分阶段计时**：`record_phases(layout_ms, paint_ms, present_ms)` 独立记录三阶段耗时，64 帧环形缓冲，提供 `avg_layout_ms` / `avg_paint_ms` / `avg_present_ms` 查询。
 - **帧预算**：`set_frame_budget_ms(ms)` 设置帧预算（默认 16.67ms ≈ 60 FPS），超出即计为掉帧。
@@ -34,7 +34,7 @@ Aurora 内置轻量级运行时性能检测体系，为开发者提供帧级指�
   - 多行统计文本（FPS / avg / P99 / jitter / 掉帧数 / hitch 数 / idle 帧数）
   - FPS 颜色告警（绿 ≥ 55、黄 ≥ 30、红 < 30）
   - 帧时间条形图（最近 128 帧，超预算帧标红）
-- 通过 `PerfOverlay::enable()` / `PerfOverlay::disable()` 按需开关，不启用时零开销。
+- 通过 `PerfOverlay::set_visible(false)` 关闭显示（内容不受影响）；`set_show_counters(bool)` 开关渲染计数器与长任务行。
 
 #### 10.2.1 分层 HUD 叠加层（CPU 性能专项）
 
@@ -64,7 +64,7 @@ widget 树**，由 `Window::present_root` 在 tree paint 之后、present 之前
 
 - **`Window::is_idle_frame()`**：当前帧是否为脏区跳帧（idle 跳过帧）。
 - **`FrameStats::record_idle()`**：记录 idle 跳帧计数，与渲染帧分开统计。
-- 脏区渲染体系（§5）中，无脏且尺寸未变时整帧跳过——这类 idle 帧不应污染 FPS / 帧时间 / 掉帧等渲染指标。`FrameStats` 将 idle 帧与渲染帧分开计数，`fps()` / `avg_frame_ms()` 等指标仅基于渲染帧计算。
+- 脏区渲染体系（`ARCHITECTURE_RUNTIME.md` §5）中，无脏且尺寸未变时整帧跳过——这类 idle 帧不应污染 FPS / 帧时间 / 掉帧等渲染指标。`FrameStats` 将 idle 帧与渲染帧分开计数，`fps()` / `avg_frame_ms()` 等指标仅基于渲染帧计算。
 
 ### 10.5 自动化测试
 
@@ -80,7 +80,7 @@ widget 树**，由 `Window::present_root` 在 tree paint 之后、present 之前
 架构层须始终遵守的两条硬约束（明细见日志）：
 
 - **快速路径逐位一致**：所有快速路径必须与慢路径 golden 零差异，修改后须跑 `test_offscreen` 全量回归。
-- **SIMD 双实现确定性**：SIMD 路径必须与标量黄金路径逐位一致（`-ffp-contract=off`、同浮点运算序列、整型 `cvtt` 截断）；CI 由 `test_simd_parity`（37,805 比对用例）逐位比对，G-13 一票否决；`AURORA_ENABLE_SIMD` 默认 ON（详见 `BUILD_OPTIONS.md` §3.2）。
+- **SIMD 双实现确定性**：SIMD 路径必须与标量黄金路径逐位一致（`-ffp-contract=off`、同浮点运算序列、整型 `cvtt` 截断）；CI 由 `test_simd_parity`（37,805 比对用例）逐位比对，G-13 一票否决；`AURORA_ENABLE_SIMD` 默认 ON（详见 `BUILD_OPTIONS_ENABLE.md` §3.2）。
 
 ### 10.7 调试能力设计依据（真实后端 DEBUG）
 
@@ -105,13 +105,13 @@ widget 树**，由 `Window::present_root` 在 tree paint 之后、present 之前
 > 任何改动都不得破坏以下不变量（违反会导致挂起、闪烁或行为不确定）。
 
 1. **细粒度订阅去重**：`State::subscribe` 必须对同一 `Effect` 去重，否则约 25 帧后挂死。
-2. **根挂载唯一**：`Window::presentRoot` 对同一根只 mount 一次。
+2. **根挂载唯一**：`Window::present_root` 对同一根只 mount 一次。
 3. **命中测试用局部坐标**：`Rect{Point{0,0}, bounds.size}.contains(local)`（非 `bounds.contains`）。
 4. **事件冒泡协议**：`Widget::on_pointer_event` 写 `e.handled = true` 即停止冒泡；
    纯展示控件不拦截以放行父级点击。
 5. **确定性渲染**：相同 widget 树 + 尺寸 → 相同像素输出（`HeadlessSurface` 快照可比对）。
 6. **降级而非中止**：非法输入产出 `Diagnostics` 并降级到安全默认，不抛异常。
-7. **单线程 UI**：widget 树 / 状态订阅 / 重绘调度只在主线程；跨线程写入经 `State::set` 串行化。
+7. **单线程 UI**：widget 树 / 状态订阅 / 重绘调度只在主线程；`State::set` 仅限主线程（跨线程结果须经 `au::async`/`Task::set_main_poster` 回投后再写）。
 8. **头文件尾置返回类型**：所有函数声明/定义用 `auto f(...) -> Ret`。
 9. **强类型几何**：尺寸/颜色/长度使用 `Length`/`Color`/`px()` 等强类型，禁止裸整数隐式转换。
 10. **`RelayoutBoundary` 不变量**：`set_relayout_boundary(true)` 的控件成为显式重排边界——布局脏标记冒泡在边界处截断（`widget.h:mark_needs_layout` 的 `if (m_layout_parent && !is_relayout_boundary())`），且其 `on_dirty(true)` 走 `register_dirty_boundary`（局部重排）而非整树重排。**`Scroll` 不得无条件置此标志**：骨架→真实内容的切换逻辑位于 Scroll 之上的祖先（由下方 `mark_needs_layout` 驱动），若 Scroll 成为边界会截断该脏冒泡，使内容切换永不触发（离屏缓冲恒为骨架）。该误用在 WS-2 中曾导致 `test_navigator_layout_cache` 回归（离屏缓冲恒灰），移除标志后逐像素恢复 HEAD 行为。仅在确有「子树自包含、且切换由本控件自身驱动」的语义时才置位。

@@ -13,8 +13,9 @@
   `include/aurora/aurora_fwd.h`（仅前向声明重量级门面类型， 供只需指针/引用的 TU 降低瞬时包含成本；需完整 API 时仍用
   `aurora.h`）。
 - 渲染内核：软件 `Painter`（ **无 `Renderer` 接口**）。
-- 后端：`Surface` 抽象 + `HeadlessSurface`（内存/离线 PNG）、`GlfwSurface`（OpenGL1.1，CMake 开关）、
-  `Win32Surface`（Win32/GDI，仅 `_WIN32`，零三方依赖）、`X11Surface`（X11/Xlib，Linux 桌面，CMake 开关）、
+- 后端：`Surface` 抽象 + `HeadlessSurface`（内存/离线 PNG）、`GlfwSurface`（OpenGL 3.x 兼容 profile，默认请求 3.3，CMake 开关）、
+  `Win32Surface`（Win32/GDI，仅 `_WIN32`，零三方依赖）、`D3D11Surface`（Windows GPU 增量上屏偏置，CMake 开关）、
+  `X11Surface`（X11/Xlib，Linux 桌面，CMake 开关）、
   `WaylandSurface`（原生 Wayland：wl_shm+xdg-shell+xkbcommon，Linux 桌面，CMake 开关）、
   `WasmSurface`（Emscripten/Canvas 2D，浏览器 rAF 驱动）、`MacOSSurface`（AppKit/CoreGraphics，骨架）。
 - 线程模型：单线程 UI、同步事件、响应式细粒度信号。
@@ -32,8 +33,8 @@
 | `examples/`         | 示例：每个组件一个 `demo_<组件>.cpp` 位于 `examples/demos/`（1:1，CMake 自动 GLOB）；`examples/demos/demo_common.h` 含 `Card`/`BrandBadge`/`GradientTitle` 等demo使用的全局控件 |
 | `tests/`            | 独立可执行测试 + CTest（`tests/*.cpp`）                                                                                                                                         |
 | `third_party/`      | 三方库文件                                                                                                                                                                      |
-| `tools/`            | API 生成与辅助工具（`gen_api_tools.cpp` 生成 `aurora_api.json`）                                                                                                                |
-| `cmake/`            | CMake 模块（顶层 `CMakeLists.txt` 只做编排）：三方构建/后端开关/工具/测试/插桩/安装各一模块，布局详见 `codespec/BUILD_OPTIONS.md` §0.1                                          |
+| `tools/`            | API 生成与辅助工具（`gen_api.cpp` 编译目标为 `gen_api_tools`，生成 `aurora_api.json`；CMake 聚合目标 `aurora_api_json`） |
+| `cmake/`            | CMake 模块（顶层 `CMakeLists.txt` 只做编排）：`AuroraThirdParty`（三方构建）/`AuroraImageCodecs`（图片编解码）/`AuroraCcache`（编译缓存）/`AuroraSimd`（SIMD）/`AuroraBackends`（后端开关）/`AuroraTools`（工具）/`AuroraTests`（测试）/`AuroraInstrumentation`（插桩）/`AuroraInstall`（安装），共 9 个；布局与职责详见 `codespec/BUILD_OPTIONS.md` §0.1 |
 | `codespec/`         | **全部项目文档**（需求/架构/规范/指南/概念），见下方导航表                                                                                                                      |
 | `build/`            | 构建产物，CMake 生成，不纳入版本管理                                                                                                                                            |
 | `aurora_api.json`   | 由 `gen_api_tools` 生成的 API 描述数据（schema/类型/属性键），**非文档、不移动**                                                                                                |
@@ -44,7 +45,7 @@
 
 ## 3. 构建与测试要点
 
-- 工具链：需 **CMake（≥ 3.16）** 与 **C++20 编译器**（如 gcc/clang/MSVC 任一）在 `PATH` 中；推荐 **Ninja** 作为生成器（空转/增量调度远快于
+- 工具链：需 **CMake（≥ 3.20）** 与 **C++20 编译器**（如 gcc/clang/MSVC 任一）在 `PATH` 中；推荐 **Ninja** 作为生成器（空转/增量调度远快于
   Make）。各工具的具体安装目录请按本机环境配置， **勿将绝对路径写死进仓库文档**。
 - 构建（Ninja 默认用满全部核心，无需 `-j`；如回退 Make 须加 `-- -j $env:NUMBER_OF_PROCESSORS`）：
   ```powershell
@@ -58,10 +59,10 @@
 - CMake 选项 / 编译宏 / 运行时环境变量： **全部统一列于 `codespec/BUILD_OPTIONS.md`（唯一权威来源）**。该文按三层命名分类法组织——
   `AURORA_BUILD_*`（构建产物开关）/ `AURORA_BACKEND_*`（后端开关=feature 宏）/ `AURORA_ENABLE_*`（插桩/分析），并含
   `NOMINMAX` 等全局编译定义、golden 测试的 4 个运行时环境变量与快速速查表。此处不再重复罗列，以免漂移。
-- 测试：在 `build/` 下运行 `ctest`。从仓库根运行测试以保证`tests/golden` 等相对路径解析（或设 `AURORA_GOLDEN_DIR`）； **
-  `ctest` 会把测试 CWD 设为 `build/`，故 golden等依赖相对路径的测试须从仓库根直接运行可执行文件**（如
-  `./build/test_offscreen`，原 test_golden 已并入）才能正确解析路径。
-- **测试/示例组织约定**（详见 `CODING_STANDARDS.md` §3 4.8–4.10）：每个公共源文件对应一个 `demo_*.cpp`（`examples/demos/`
+- 测试：在 `build/` 下运行 `ctest`。`cmake/AuroraTests.cmake` 已为依赖相对路径的测试（含
+  `tests/golden`）显式设置 `WORKING_DIRECTORY` 为仓库根， 故 `ctest` 下直接可跑；仅手工直跑可执行文件时（如
+  `./build/test_offscreen`）才须从仓库根执行（同样可设置 `AURORA_GOLDEN_DIR` 覆盖）。
+- **测试/示例组织约定**（详见 `CODING_STANDARDS.md` §3 4.8–4.10 与 `coding/CODING_AI.md` 一.4 默认参数章节）：每个公共源文件对应一个 `demo_*.cpp`（`examples/demos/`
   ）与一个 `test_*.cpp`（`tests/`），二者用文件夹区分；测试文件以 `test` 为前缀（非 `_test` 后缀）。
 - ⚠️ 新增 `.cpp` 后需让 CMake 刷新 GLOB（`CONFIGURE_DEPENDS` 多数情况自动；否则碰一下 `CMakeLists.txt` 或删 `build/` 重建）。
 
@@ -89,7 +90,7 @@
 - **提交信息规范** → `COMMIT_CONVENTION.md`
 - **使用指南** → `GUIDELINE.md`
 - **编译选项/宏/环境变量** → `BUILD_OPTIONS.md`
-- **数据存储抽象层** → `ARCHITECTURE.md` §4.1
+- **数据存储抽象层** → `architecture/ARCHITECTURE_RUNTIME.md` §4.11
 - **总入口** → 根 `AGENTS.md`
 
 ---
@@ -126,7 +127,7 @@
     - CLI 的JSON/usage、benchmark 表格、LSP/MCP 线协议帧等「程序产品」功能输出走 `AURORA_LOG_RAW` 写 stdout，无前缀、 始终输出）；
     - `tools/`、`examples/`、`tests/` 中遗留的 `printf` 风格诊断用 `test_printf`/`test_printf_err` 桥接宏， 勿新增
       `std::cout`/`std::cerr`/`printf`/`fprintf`/`puts`。唯一允许直接触达标准输出的是 `src/aurora/core/log.cpp` 内的 sink
-      实现。详见 `CODING_STANDARDS.md` §4 三.6 与 `SPECIFICATIONS.md` 日志（Log）子系统小节。
+      实现。详见 `coding/CODING_ERRORS_NAMING.md` §3.6 与 `SPECIFICATIONS.md` 日志（Log）子系统小节。
 9. **不得无故改变既有函数/成员的可见性**：AI 在生成或修改代码时，常会顺手调整 `public`/`protected`/`private`
    可见性（如把 `protected` 虚回调改成 `public`、把 `private` 字段挪到 `public` 区等）。这类改动往往与本次任务无关，
    却会破坏封装不变量或改变派生类契约。 **规则**：保持被改文件/类改动前的可见性划分不变；仅当本次改动本身在语义上

@@ -9,6 +9,8 @@
 **核心数据结构**（`include/aurora/widget/descriptor.h`）：
 
 ```cpp
+// 节选（完整字段见 include/aurora/widget/descriptor.h；PropDescriptor 另有 json_type/enum_values/min_value/max_value/
+// pattern/constraint/requires_props/conflicts_with，WidgetDescriptor 另有 allowed_child_types/invariants）
 struct PropDescriptor {
     std::string name;          // "label"
     std::string type;          // "LocalizedString"
@@ -68,6 +70,7 @@ AI Agent 集成工具，消费 §H.16 自描述元数据与序列化/渲染/代�
 | `describe_component` | `{name}`                         | 完整 schema JSON | `describe_component(name)`     |
 | `search_components`  | `{query}`                        | 匹配组件列表     | `search_components(query)`     |
 | `validate_tree`      | `{tree}`                         | 校验结果         | `from_json()` + `validate()`   |
+| `validate_ui`        | `{tree}`                         | 结构化诊断       | `validate_ui_tree_json()`      |
 | `render_snapshot`    | `{tree, width?, height?}`        | 逻辑快照 JSON    | `render_to_logical_snapshot()` |
 | `render_png`         | `{tree, width?, height?, path?}` | PNG 文件路径     | `render_to_png()`              |
 | `to_code`            | `{tree, style?}`                 | C++ 代码         | `to_code()`                    |
@@ -86,6 +89,7 @@ aurora search <keyword>                   # 按名称搜索组件
 aurora validate <tree.json>               # 校验 UI 树 JSON，输出诊断
 aurora snapshot <tree.json> [-w W] [-h H] # 输出逻辑快照 JSON
 aurora render <tree.json> [-w W] [-h H] [-o out.png]  # 离屏渲染为 PNG
+aurora preview <tree.json> [-w W] [-h H]  # 快速预览 UI（启动临时窗口；无显示后端回退无头渲染一帧退出）
 aurora to-code <tree.json> [--style fluent|step|di]   # UI 树 → C++ 代码
 aurora to-yaml <tree.json>                             # UI 树 → YAML 格式
 aurora schema                             # 输出完整 aurora_api.json
@@ -145,7 +149,7 @@ aurora schema                             # 输出完整 aurora_api.json
           同一键会取消墓碑并重建（重新创建不受删除影响）。
         - **全局清空纪元**：`clear()` 置全局清空纪元（时间戳），所有版本早于该纪元的键在各进程下次 `flush`/`reload`
           时被删除；清空之后新 `set` 的键（版本晚于纪元）不受影响。`clear` 是全局操作，会清掉所有已知键（含其他进程持有的键，只要其版本早于纪元）。
-        - 元数据（versions / tombstones / cleared_at）随配置 JSON 一同落盘，存于保留键 `__aurora_prefs_meta__`
+        - 元数据（versions / tombstones / cleared_at）随配置 JSON 一同落盘，存于保留键 `__aurora_preference_meta__`
           （用户键空间应避免使用该名）；旧格式（无该键）仍可兼容加载。
 - **持久化**：`flush() -> Result<void>`（内存 → 文件，仅文件模式有效）、`reload() -> Result<void>`（文件 → 内存并通知所有订阅者）。
 - **读**：`get<T>(key, fallback) -> T`（类型不匹配/缺失回退 `fallback`）。支持 `bool`/整数/浮点/`std::string`/`std::vector`
@@ -253,7 +257,7 @@ is_idle_frame() -> bool     — 当前帧是否为 idle 跳过帧
 - **环形缓冲区 O (1) 采集**：`FrameStats` 为进程级单例，固定 128 帧缓冲，写入与查询均为 O (1) 或 O (N)（N=128 常数）。
 - **分阶段计时**：`present_root()` 内部对 layout / paint / present 三阶段独立计时，64 帧环形缓冲，经 `record_phases` 写入
   `FrameStats`。
-- **Idle 帧隔离**：脏区跳帧（§5）经 `is_idle_frame()` 判定，调用 `record_idle()` 单独计数，不进入渲染帧统计窗口，避免 FPS /
+- **Idle 帧隔离**：脏区跳帧（`ARCHITECTURE_RUNTIME.md` §5）经 `is_idle_frame()` 判定，调用 `record_idle()` 单独计数，不进入渲染帧统计窗口，避免 FPS /
   帧时间 / 掉帧率被空闲帧污染。
 - **PerfOverlay 叠加**：右上角实时显示多行统计文本 + FPS 颜色告警 + 帧时间条形图，经 `PerfOverlay::enable()` / `disable()`
   按需开关。
@@ -276,10 +280,10 @@ is_idle_frame() -> bool     — 当前帧是否为 idle 跳过帧
   SSE2/AVX2 快路径 `gradient_*_scanline_sse2` / `_avx2`；`gradient_linear_fill` / `gradient_radial_fill`（`painter_simd.h`
   ）按 `g_simd_level` 运行时分发（AVX2→SSE2→标量尾补）。仅作用于不透明双色标渐变（两端 `alpha==255`），`draw_linear_gradient` /
   `draw_radial_gradient` 经 `simd_grad` 门控调用。 **全部 detail 内部 API，不进入 `aurora_api.json`**；与标量黄金逐位一致（见
-  `ARCHITECTURE.md` §10.6 与 `BUILD_OPTIONS.md` §3.2）。
+  `ARCHITECTURE_PERF.md` §10.6 与 `BUILD_OPTIONS_ENABLE.md` §3.2）。
 
 > 所有快速路径必须与慢路径逐位一致（golden 零差异），SIMD 双实现另须通过 `test_simd_parity` 逐位比对（G-13 一票否决），详见
-> `ARCHITECTURE.md` §10.6。
+> `ARCHITECTURE_PERF.md` §10.6。
 
 **渲染计数器 `RenderCounters`**（`include/aurora/perf/counters.h`）—— 进程级单例，逐帧累加的渲染成本信号：
 

@@ -56,7 +56,7 @@ server.stop();        // 停止并 join 工作线程
 | `stop()`                                                       | 停止服务器并 join 工作线程                                                                                           |
 | `is_running() -> bool`                                         | 查询服务器是否运行中                                                                                                 |
 | `port() -> uint16_t`                                           | 返回监听端口（未启动返回 0）                                                                                         |
-| `set_surface_getter(std::function<Surface*()> getter) -> void` | 注入 Surface 获取器：调试端点（`snapshot` / `state` / `pick`）借此访问运行时 Surface；可选，未设置时这些端点返回 4xx |
+| `set_surface_getter(std::function<Surface*()> getter) -> void` | 注入 Surface 获取器：调试端点（`snapshot` / `state`）借此访问运行时 Surface；可选，未设置时这两类端点返回 400。`pick` 不依赖（未设置时以根控件尺寸为命中范围） |
 
 **REST 端点**：
 

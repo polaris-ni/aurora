@@ -20,9 +20,9 @@
 
 | 前缀               | 类别               | 语义                                                                                                                                 | 是否向库注入 feature 宏                                                                                                        |
 |--------------------|--------------------|--------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
-| `AURORA_BUILD_*`   | 构建产物开关       | 是否**构建**某个额外交付物（demos / tests）                                                                                          | 否（例外：`AURORA_BUILD_IMAGE_*` 注入非 PUBLIC 的 `AURORA_BUILD_IMAGE_*` 宏，见 §1）                                           |
+| `AURORA_BUILD_*`   | 构建产物开关       | 是否**构建**某个额外交付物（demos / tests）                                                                                          | 否（例外：`AURORA_BUILD_IMAGE_*` 注入非 PUBLIC 的 `AURORA_BUILD_IMAGE_*` 宏，见 `BUILD_OPTIONS_BUILD.md` §1）                                           |
 | `AURORA_BACKEND_*` | 内置后端开关       | 每个 `Surface` 后端一个开关；**开关名 = PUBLIC feature 宏名**                                                                        | 是（`#ifdef` 剪裁 + PUBLIC 传播给消费者）                                                                                      |
-| `AURORA_ENABLE_*`  | 插桩/分析/能力开关 | 是否注入编译/链接期分析工具（覆盖率 / 内存检测 / 调试 / 性能插桩）或开启构建加速/内部能力（lld 链接器 / ccache 缓存 / SIMD / DEBUG） | 多数否；`PROFILING`/`TRACING` 注入 PUBLIC 宏、`SIMD`/`DEBUG` 注入内部宏、`LLD`/`CCACHE` 不注入宏（见 §3 / §3.2 / §3.3 / §3.4） |
+| `AURORA_ENABLE_*`  | 插桩/分析/能力开关 | 是否注入编译/链接期分析工具（覆盖率 / 内存检测 / 调试 / 性能插桩）或开启构建加速/内部能力（lld 链接器 / ccache 缓存 / SIMD / DEBUG） | 多数否；`PROFILING`/`TRACING` 注入 PUBLIC 宏、`SIMD`/`DEBUG` 注入内部宏、`LLD`/`CCACHE` 不注入宏（见 `BUILD_OPTIONS_ENABLE.md` §3 系） |
 
 > 注：`Win32/GDI` 后端仅在 `_WIN32` 下编译， **无需**额外开关，已由 `AURORA_BACKEND_WIN32` 的内置默认值覆盖。
 
@@ -51,7 +51,7 @@
 
 > 参考 [3. AURORA_ENABLE_* 插桩/分析/能力开关](./build_options/BUILD_OPTIONS_ENABLE.md#3-aurora_enable_--插桩分析能力开关)。
 
-> 参考 [4. 强制缓存变量 FreeType HarfBuzz GLFW 源码构建内部](./build_options/BUILD_OPTIONS_INTERNAL.md#4-强制缓存变量freetype--harfbuzz--glfw-源码构建内部))。
+> 参考 [4. 强制缓存变量 FreeType HarfBuzz GLFW 源码构建内部](./build_options/BUILD_OPTIONS_INTERNAL.md#4-强制缓存变量freetype--harfbuzz--glfw-源码构建内部)。
 
 > 参考 [5. 全局编译定义 非选项 固定注入](./build_options/BUILD_OPTIONS_INTERNAL.md#5-全局编译定义非选项固定注入)。
 

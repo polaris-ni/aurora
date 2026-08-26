@@ -7,7 +7,7 @@
 核心目标：在无显示环境（CI / 测试 / AI 调试）中确定性地渲染并校验 UI。
 
 - **`Painter`**：绘制后端抽象（事实渲染内核，软件栅格）。`fill_rect(Rect, Color)`、`draw_rect(Rect, Color)`、
-  `draw_text(Rect, str, Font, Color)`（委托 `FontEngine`）、`draw_image(Rect, Image)`（双线性采样，premultiplied-alpha
+  `draw_text(Rect, str, Font, Color)`（委托 `FontEngine`）、`draw_image(const Image&, const Rect&)`（双线性采样，premultiplied-alpha
   空间插值以避免半透明边缘暗边/光晕），`blend_pixel(x,y,Color)` / `blend_rect(Rect, Color)` 提供 alpha 混合（抗锯齿字体）。跨平台零依赖。新增
   **`set_scale(float)` / `scale()`**：高 DPI 下把 dp 坐标几何绘制 ×scale 放大到物理像素帧缓冲；像素级写入（`blend_pixel`/
   `draw_text`）直接落在物理像素，不再乘 scale。 **`fill_rect` 行级快速路径**：全局透明度为 1
@@ -33,7 +33,7 @@
   `register_font_from_memory(family, ttf_bytes)` 注入字体（family 为空表示默认 sans-serif）；`measure_width` /
   `measure_height` / `draw_text`；选中原语 `caret_x(text, idx, font)` / `hit_test_char(text, x, font)` /
   `hit_test_char_inclusive`（以码点为索引，UTF-8 安全）；抗锯齿策略 `enum class TextAAMode{Supersample, ClearType}` + 进程级
-  `set_text_aa_mode(mode)` / `text_aa_mode()`（默认 `ClearType`）。 **默认字体 = 内置 Noto Sans（OFL）**，引擎首次使用时经
+  `set_text_aa_mode(mode)` / `text_aa_mode()`（默认 `Supersample`）。 **默认字体 = 内置 Noto Sans（OFL）**，引擎首次使用时经
   `register_font_from_memory` 自动注册为 `""/"sans-serif"/"Noto Sans"/"default"`，含 Headless，保证跨机文本渲染逐位确定；缺字按候选
   `FT_Face` 链回退（含系统 CJK 字体，如 msyh/simsun/MSGOTHIC）避免豆腐块；无任何可用字体文件时回退内置 `BitmapFont`
   （零依赖位图字体）保底。 **高 DPI**：度量 / 光标定位在逻辑 dp 空间，`draw_text` 按 `Painter::scale()`
@@ -64,10 +64,10 @@
       `italic`（经 FreeType `FT_Set_Transform` 仿斜，跨平台生效）。统一 opts 保证度量、光标、命中、绘制四者完全一致：
       `letter_spacing` 仅在相邻字形间添加；`italic` 进入字形图集 key 避免正/斜缓存串扰；间距为逻辑 dp，绘制侧 pen
       在物理像素空间累加时 **×`Painter::scale()`** 换算（实显度量同源 ×scale，自然度量 ×1），保证缩放屏下实绘间距与布局度量一致。
-    - **文本抗锯齿（FreeType 驱动，跨平台一致）**：默认 `TextAAMode::ClearType`——`FT_RENDER_MODE_LCD` 输出 3× 水平 RGB
-      子像素覆盖度，由 `Painter::blend_subpixel` 逐通道合成，得到真·子像素锐利文本（非灰度降级）； **仅当文本不透明（
-      `c.a == 255`）时启用**，半透明或字体不可用时自动回退 `Supersample`。`Supersample` 为基线/兜底：`FT_RENDER_MODE_NORMAL`
-      输出 A8 灰度覆盖度，盒式/逐像素 source-over 合成——颜色安全、背景无关，headless 与任意背景均正确。两种模式均依赖
+    - **文本抗锯齿（FreeType 驱动，跨平台一致）**：默认 `TextAAMode::Supersample`（基线）——`FT_RENDER_MODE_NORMAL`
+      输出 A8 灰度覆盖度，盒式/逐像素 source-over 合成——颜色安全、背景无关，headless 与任意背景均正确。`ClearType` 为可选增强：
+      `FT_RENDER_MODE_LCD` 输出 3× 水平 RGB 子像素覆盖度，由 `Painter::blend_subpixel` 逐通道合成，得到真·子像素锐利文本（非灰度降级）；
+      **仅当文本不透明（`c.a == 255`）时启用**，半透明或字体不可用时自动回退 `Supersample`。两种模式均依赖
       `Painter` 的 source-over 合成（Win32 帧缓冲 `SetDIBitsToDevice` 忽略 alpha，AA 须由 `Painter` 合成进 RGB）。
 - **`Surface`**：绘制目标抽象（窗口 / 离屏）。`begin_frame()` / `present()` / `painter()`；`set_event_handler(EventHandler)`
   契约——所有后端只「采集原生事件并翻译为 `aurora::Event` 上抛」，事件派发集中到 `Application` 经
@@ -81,7 +81,7 @@
   实测纯 blit ~130ms、占帧成本 93%；带状 blit 后拖选帧 140→7.6ms，bench `bench_win32_present` 监控）。新增
   `set_title(const std::string&)` 虚方法（默认空实现；`Win32Window` 经 `SetWindowTextA`+`utf8_to_acp` 生效，`Headless`/
   `Glfw` 忽略）；`Window::set_title` 写 `m_title` 后同步下发 `Surface::set_title`，使运行期标题变更到达 OS 窗口。
-- **`render_to_png(root, width, height, path)`**（其中 `root` 为已 mounted 的 `Node &`；`width`/`height`为画布逻辑尺寸）/**
+- **`render_to_png(root, width, height, path)`**（其中 `root` 为 `Node &`——内部自行 `mount`，调用方无需预挂载；`width`/`height`为画布逻辑尺寸）/**
   `render_to_logical_snapshot(root, width, height)`**：离屏渲染（见 `render/offscreen.h`，与`HeadlessSurface` 解耦）。
 
 ```cpp
@@ -95,7 +95,7 @@ TCHECK(std::abs(snap["box"]["w"].get<float>() - 800.0f) < 0.001f);
 
 > **统一后端 API（类型安全工厂）**：`SurfaceKind{Headless, Win32, Glfw, X11, Wayland, MacOS, Wasm, D3D11}` 现仅为 **类型标签**（仅
 > `auto_detect_surface()` 返回类型与 `Platform::surface` 字段，不再用于构造选择）；跨后端通用的
-> `WindowOptions{size,title,max_frames}` + 各后端专属选项 `HeadlessOptions{png_path}` / `Win32Options{}` / `D3D11Options{vsync}`（D3D11 GPU 增量上屏，默认 OFF） /
+> `WindowOptions{size,title,max_frames}` + 各后端专属选项 `HeadlessOptions{png_path}` / `Win32Options{}` / `D3D11Options{vsync}`（`vsync` 默认 `true`；D3D11 后端由 `AURORA_BACKEND_D3D11` 宏控制，默认 OFF） /
 > `GlfwOptions{gl_major,gl_minor,resizable}` / `X11Options{}` / `WaylandOptions{}` / `MacOSOptions{}` /
 > `WasmOptions{canvas_id}` + 工厂 `create_window(const XxxOptions&)`（类型安全重载，后端选择收口于此，编译器拒绝把某后端专属字段误用到不相关后端）（见
 > `window/window.h`）。`Headless` 用软件 `Painter`；`Win32` 为零三方依赖的 Win32/GDI 后端（仅 `_WIN32`）；`GlfwSurface`（OpenGL
@@ -103,8 +103,8 @@ TCHECK(std::abs(snap["box"]["w"].get<float>() - 800.0f) < 0.001f);
 > `libX11`
 > ，经 `AURORA_BACKEND_X11` 启用）与 `WaylandSurface`（原生 Wayland，`wl_shm`+`xdg-shell`+`xkbcommon`，仅 Linux 桌面，经
 > `AURORA_BACKEND_WAYLAND` 启用）均含完整实现（pimpl + `src/aurora/window/*.cpp`）；`MacOSSurface`（Cocoa/AppKit，仅 Apple，经
-> `AURORA_BACKEND_MACOS` 启用）与 `WasmSurface`（`<canvas>` 像素写回，仅 Emscripten，经 `AURORA_BACKEND_WASM`
-> 启用）的窗口/上屏实现仍待对应平台工具链补全（roadmap）。应用层代码经 `create_window(XxxOptions)` 选择后端，不感知具体实现；不指定时
+> `AURORA_BACKEND_MACOS` 启用）的窗口实现仍待对应平台工具链补全（roadmap）；`WasmSurface`（经 `AURORA_BACKEND_WASM`
+> 启用）的 `<canvas>` 像素写回已实现（`wasm_surface.h` EM_ASM `putImageData`），仅 Emscripten 构建/链接验证待补全。应用层代码经 `create_window(XxxOptions)` 选择后端，不感知具体实现；不指定时
 > `App::run()` 经 `auto_detect_surface()` 自动选用（优先级：原生 Wayland/X11/MacOS/Wasm > Win32 > Glfw >
 > Headless；X11+Wayland
 > 同时编译时按运行期会话类型择优——`WAYLAND_DISPLAY` 存在选 Wayland，否则 X11）。`create_native_window()`在 Linux

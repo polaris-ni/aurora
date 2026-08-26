@@ -12,7 +12,8 @@
 ## 3. 运行时（Runtime）
 
 - **单线程 UI（Single-threaded UI）**：所有 widget 树操作、状态变更、事件处理都在主线程。
-  状态写操作（`State::set`）可来自任意线程，但订阅回调与重绘调度在主线程串行化。
+  `State::set` 仅限主线程调用（`state.h` 标注 main-thread only，赋值 + notify 无锁无原子）；跨线程计算结果
+  须经 `au::async` / `Task::set_main_poster` 回投主线程后再写 `State`。
 - **同步事件（Synchronous events）**：`EventDispatcher` 在收到原生平台事件后同步派发，
   命中测试链（hit-test chain）自最深节点向根冒泡，写 `e.handled = true` 即止。
 - **几何权威在 `Node`**：命中链的根矩形取自根 `Node` 的 `m_bounds`（由 `Window::present_root` 写入窗口矩形）；
@@ -65,7 +66,7 @@
 
 | 模块 | 路径 | 职责 |
 |------|------|------|
-| 平台抽象 | `window/` | `surface.h`(`Surface`/`HeadlessSurface`) `window.h` `native_surfaces.h` `win32_window.h`(`Win32Window`) `win32_surface.h`(`Surface::native_handle()` 返回 `void*`，Win32 下实为 `HWND`) `glfw_surface.h` `d3d11_surface.h` `platform.h`(`au::platform()`/`Platform`/`PlatformCapabilities`) |
+| 平台抽象 | `window/` | `surface.h`(`Surface`/`HeadlessSurface`) `window.h` `native_surfaces.h` `win32_window.h`(`Win32Window`) `win32_surface.h`(`Surface::native_handle()` 返回 `void*`，Win32 下实为 `HWND`) `glfw_surface.h` `x11_surface.h` `wayland_surface.h` `wasm_surface.h` `macos_surface.h` `d3d11_surface.h` `frame_pacing.h` `title_bar_geometry.h` `title_bar_style.h` `window_chrome.h` `window_state.h` `platform.h`(`au::platform()`/`Platform`/`PlatformCapabilities`) |
 
 - `Surface` 为可扩展边界：自定义 Surface 经 `Application(Scene, unique_ptr<Surface>)` 注入，不随内置 Surface 增长；各后端由 feature 宏 `AURORA_BACKEND_*` 控制代码剪裁（见 `window.h` 顶部契约）。
 - `win32_window.h`（共享窗口宿主、消息泵、`WM_DROPFILES` 文件拖放）与 `glfw_surface.h`：均 **pimpl 隔离**，公共头零 `<windows.h>` / GLFW / OpenGL 依赖。
@@ -74,7 +75,7 @@
 
 | 模块 | 路径 | 职责 |
 |------|------|------|
-| 组件层 | `widget/` | `widget.h` `text.h` `text_input.h` `button.h` `image_widget.h`(`ImageView`) `checkbox.h` `switch.h` `slider.h` `canvas.h` `progress.h` `divider.h` `rich_text.h` `scroll.h` `stack.h` `grid.h` `spacer.h` `show.h` `repeater.h` `provider.h` `timer.h`(`Timer`) `containers.h`(`Column`/`Row`) `text_span.h` `codegen.h`(`to_code`) `inspect.h` `inspector_panel.h`(`InspectorPanel`+`export_code`) `layout_query.h` `props_io.h` `serialization.h`(`to_json`/`from_json`/`diff`/`apply_patch`/`to_yaml`) `yaml.h`(`to_yaml` YAML 发射器) `recipes.h` |
+| 组件层 | `widget/` | `widget.h` `text.h` `text_input.h` `button.h` `image_widget.h`(`ImageView`) `checkbox.h` `switch.h` `slider.h` `canvas.h` `progress.h` `divider.h` `rich_text.h` `scroll.h` `stack.h` `grid.h` `spacer.h` `show.h` `repeater.h` `provider.h` `timer.h`(`Timer`) `containers.h`(`Column`/`Row`) `text_span.h` `codegen.h`(`to_code`) `inspect.h` `inspector_panel.h`(`InspectorPanel`+`export_code`) `layout_query.h` `props_io.h` `serialization.h`(`to_json`/`from_json`/`diff`/`apply_patch`/`to_yaml`) `yaml.h`(`to_yaml` YAML 发射器) `recipes.h`，另含 `alignment.h` `bottom_nav_bar.h` `chip.h` `data_widgets.h` `descriptor.h` `dialog.h` `drawer.h` `dropdown.h` `expansion_panel.h` `form.h` `grid_view.h` `layout_builder.h` `lazy_list.h` `lazy_row.h` `lifecycle.h` `menu_bar.h` `pickers.h` `placeholder.h` `popup.h` `radio_spin.h` `rich_text_edit.h` `segmented_control.h` `skeleton.h` `splitter.h` `stepper.h` `tab_bar.h` `title_bar.h` `toast.h` `toolbar.h` |
 | 修饰节点 | `modifier/` | `modifier.h`(`Padding`/`Background`/`Border`/`Clip`/`Opacity`/`SizeModifier`/`FlexWeight`/`Clickable`/`AlignNode`/`OffsetNode`/`Draggable`/`LongPress`/`TouchListener`) |
 | 控制流 | `widget/` | `show.h` `repeater.h` `provider.h` `timer.h`（控制流语义，复用组件层定义） |
 | 序列化 | `widget/serialization.h` `widget/codegen.h` `widget/yaml.h` | 树 ⇄ JSON（`to_json`/`from_json`）、差异补丁（`diff`/`apply_patch`）、树 ⇄ 源码（`to_code`）、树 → YAML（`to_yaml`） |
@@ -109,7 +110,7 @@
 
 | 模块 | 路径 | 职责 |
 |------|------|------|
-| 应用驱动 | `app/` | `application.h`(`Application`：`dispatch_file_drop` 便捷派发) `scheduler.h`(`Scheduler`/`TimerHandle` 定时任务、帧循环驱动) `scene.h`(`Scene`) `clipboard.h`(`Clipboard`：文本 + 图像 `set_image`/`get_image`(CF_DIB)，非 Win32/Headless no-op) `file_dialog.h`(`file_dialog_win32.cpp`：`IFileOpenDialog`/`IFileSaveDialog` COM 实现) `system_tray.h`(`system_tray_win32.cpp`：`Shell_NotifyIcon` 实现) `display.h`(`display_win32.cpp`：`EnumDisplayMonitors` 多显示器枚举 + `move_window_to_display`/`display_containing` 窗口迁移，依赖 `Surface::native_handle()`) `perf_overlay.h`(`FrameStats`/`PerfOverlay` 性能检测与叠加面板) `menu.h`(`MenuBar`/`Menu`) `shortcuts.h`(`Shortcut`/`Shortcuts`) |
+| 应用驱动 | `app/` | `application.h`(`Application`：`dispatch_file_drop` 便捷派发) `scheduler.h`(`Scheduler`/`TimerHandle` 定时任务、帧循环驱动) `scene.h`(`Scene`) `clipboard.h`(`Clipboard`：文本 + 图像 `set_image`/`get_image`(CF_DIB)，非 Win32/Headless no-op) `file_dialog.h`(`file_dialog_win32.cpp`：`IFileOpenDialog`/`IFileSaveDialog` COM 实现) `system_tray.h`(`system_tray_win32.cpp`：`Shell_NotifyIcon` 实现) `display.h`(`display_win32.cpp`：`EnumDisplayMonitors` 多显示器枚举 + `move_window_to_display`/`display_containing` 窗口迁移，依赖 `Surface::native_handle()`) `perf_overlay.h`(`FrameStats`/`PerfOverlay` 性能检测与叠加面板) `menu.h`(`MenuItem` 数据模型；`MenuBar` 见 `widget/menu_bar.h`，弹出菜单经 `Popup`) `shortcuts.h`(`ShortcutScope`/`ShortcutBinding`/`ShortcutRegistry`) |
 
 ### 4.9 持久化配置
 
@@ -135,15 +136,15 @@
 **模块布局**（`include/aurora/storage/`）：`storage.h`（`Storage` 门面 + `default_instance`）、`backend.h`（`StorageBackend` 抽象 + 默认 `transaction`）、`memory_backend.h`（`MemoryBackend`：内存快照回滚）、`fs_backend.h`（`FilesystemBackend`：默认零依赖文件系统后端）、`serializable.h`（`StorageSerializable` / `StorageBinarySerializable` / `StorageStorable` 概念与 ADL 定制点）、`storage_types.h`（`StorageRecord` 信封 / `Json` / `StorageBytes` / `StorageChange`）。实现位于 `src/aurora/storage/*`。
 
 **核心抽象契约**：
-- `Storage` 门面：`put<T>(key, value)` / `get<T>(key)` / `remove(key)`（类型化、经 `StorageSerializable` ADL 定制点序列化）；`async_put<T>` / `async_get<T>`（返回 `Future`，把 IO 卸载出 UI 线程）；`on_change(key?, cb)` 返回 `aurora::Subscription`（键级或全局变更通知）；`transaction([](Tx&){...})`（跨记录原子，失败全回滚）；进程级 `default_instance()` 单例。
+- `Storage` 门面：`put(id, value)` / `get(id)` / `remove(id)` / `list()` / `contains(id)` / `clear()` / `flush()`（value 为 `Json` 或原生 `StorageBytes`）；类型化 `put<T>(id, obj)` / `get<T>(id)` 经 `StorageSerializable` ADL 定制点序列化；信封级 `put_record` / `get_record`；异步 `async_put` / `async_get` / `async_get_value` / `async_remove` / `async_list`（返回 `aurora::Task<T>`，把 IO 卸载出 UI 线程）；`on_change(cb)` 返回 `aurora::Subscription`（全局变更通知，回调收 `StorageChange`）；`transaction(body)`（`body` 收 `Storage&`，跨记录原子，失败全回滚）；进程级 `default_instance()` 单例。
 - `StorageBackend` 抽象：`put_raw` / `get_raw` / `remove_raw` / `list_keys` + 默认 `transaction`（顺序 apply + 异常回滚）；`MemoryBackend` 以 `std::map` 全量快照实现回滚；`FilesystemBackend` 每记录一文件（原子写 `tmp`+rename）、目录级锁串行化事务。
-- 信封 `StorageRecord{ key, value(Json|StorageBytes), version, timestamp, type_tag }`：版本号支撑乐观并发与迁移；`StorageChange{ key, old_value, new_value, reason }` 供 `on_change` 投递。
+- 信封 `StorageRecord{ id, type, version, encoding, mtime, payload(Json|StorageBytes), blob_ref }`：版本号支撑乐观并发与迁移；`StorageChange{ op(Put|Remove|Clear|Batch), id }` 供 `on_change` 投递。
 
 **错误模型**：统一经 `Result<T>` / `Error`；后端 IO 失败（文件损坏 / 权限 / 磁盘满）返回 `Error` 而非抛异常；`get` 未命中返回 `Error{NotFound}`（区分于 `null` 值）；事务中途失败回滚并报告首个失败原因。`Error` 携带 `category`/`code`/`message`，机器可解析（见 SPECIFICATIONS 错误子系统）。
 
-**线程模型**：门面 API 主线程调用、经内部队列 marshal 到后台 IO 线程（不阻塞 UI）；`async_*` 天然异步；同步 `get` 在主线程命中内存缓存时零等待、未命中则经 future 等待（调用方自行决定）。后端实现须线程安全（FS 后端目录锁、内存后端原子换页）。
+**线程模型**：门面 API 主线程调用，`async_*` 经 `au::async` 卸载到 worker 线程（结果回投主线程）；同步 `get` 直通后端（门面无内存缓存）。后端实现须线程安全（FS 后端目录锁、内存后端原子换页）。
 
-**CMake**：`AURORA_BUILD_STORAGE`（默认 ON，静态库内部模块，不 PUBLIC 传播）；实现期若引入 SQLite 等三方依赖，须以 `AURORA_STORAGE_SQLITE` 子开关隔离、默认 OFF，保持默认零三方依赖。
+**CMake**：storage 为静态库内部模块，源文件（`src/aurora/storage/`）无条件编译，无独立构建开关；SQLite 等三方后端尚未引入，引入时再以子开关隔离。
 
 **与 `preferences` 的关系**：`Storage` 是更通用的持久化抽象（信封 / 类型化 / 异步 / 事务 / 可注入后端），`preferences::Preferences` 是面向「响应式键值 + JSON 文件」的轻量特化；新代码默认优先 `Storage`，`preferences` 保留为兼容层。
 

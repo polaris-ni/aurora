@@ -7,7 +7,7 @@
 核心目标：把主题、Locale、自定义服务等"下行"数据通过树显式传递，组件用类型查询，避免隐式全局状态。
 
 - **`Environment`**：类型 → 值的不可变映射。`env.with<T>(value)` 返回"注入了 T=value"的新 `Environment`；`env.get<T>()` 读取。
-- **`BuildContext`**：每个组件渲染时拿到的上下文，`ctx.environment<T>()` 向上查找最近注入的 `T`；找不到返回默认构造的 `T`。
+- **`BuildContext`**：每个组件渲染时拿到的上下文，`ctx.environment<T>()` 向上查找最近注入的 `T`；返回 `const T*`，未注入时返回 `nullptr`（调用方判空或回退默认）。
 - **`Provider<T>`**：控件，在子树根注入 `T`：`au::Provider<T>{ x, au::Column(au::ColumnProps{ .children = { ... } }) }`
   （位置式，非指定初始化器；`Column`/`Row` 非聚合，须用 `*Props` 聚合或初始化列表）。
 - **`ThemeProvider` / `LocaleProvider` / `MediaQueryProvider`**：`T=Theme` / `Locale` / `MediaQuery` 的专用 Provider（见
@@ -17,8 +17,8 @@
 // 父级注入
 auto root = au::ThemeProvider{ au::Theme::dark(), build_app() };
 
-// 子组件内查询（无需参数传递）
-au::Text("Hi").color(ctx.environment<au::Theme>().text);
+// 子组件内查询（无需参数传递）；environment<T>() 返回 const T*，须判空
+au::Text("Hi").color(ctx.environment<au::Theme>() ? ctx.environment<au::Theme>()->text : au::Theme::light().text);
 ```
 
 > 与 §8 一致：主题 / 字体 / 颜色通过显式 `Provider` / scope 传递，不依赖隐式上下文继承。
@@ -131,9 +131,9 @@ Node；视觉仅 Adwaita 形态。
       具体值：令牌名经 `Theme` 查询且类型匹配则返回，否则回退 fallback。组件可在绘制前用最近祖先 `Theme` 解析 `StyleProps`
       ，实现「令牌驱动的样式」而无需逐一手写扁平字段读取。
 - **`LocalizedString`**：可本地化的字符串。`LocalizedString::tr(key)`（按 key 查表）或 `LocalizedString{ "字面量" }`（原样显示）；
-  `resolve(Locale*, StringTable*)` 解析为最终文本。所有文本属性类型为 `Reactive<LocalizedString>`，因此 `.content = "Hi"`与
+  `resolve(const StringTable*, const Locale&)` 解析为最终文本。所有文本属性类型为 `Reactive<LocalizedString>`，因此 `.content = "Hi"`与
   `.content = au::LocalizedString::tr("greeting")` 等价。
-- **`StringTable`**：字符串表（key → 各语言文本）。`default_string_table()` 返回内置表；`StringTable::add(key, locale, text)`
+- **`StringTable`**：字符串表（key → 各语言文本）。`default_string_table()` 返回内置表；`StringTable::add(locale, key, tmpl)`
   注册。
 - **`Locale`**：语言 / 地区标识（如 `"zh-CN"`），随 `LocaleProvider` 注入，文本解析时按当前 Locale 查表。
 

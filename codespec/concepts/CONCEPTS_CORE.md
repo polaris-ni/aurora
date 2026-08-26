@@ -17,7 +17,7 @@
 | #  | 概念                             | 成员（类名） | 头文件 |
 |----|----------------------------------|--------------|--------|
 | 1  | **Widget（原子控件）**           | `Text` `TextInput` `Button` `Image`(`ImageView`) `Checkbox` `Switch` `ProgressIndicator` `Slider` `Canvas` `Skeleton` `VideoPlayer` `VideoControls` `BottomNavBar` | `widget/text.h` `widget/text_input.h` `widget/button.h` `widget/image_widget.h`(`ImageView`) `widget/checkbox.h` `widget/switch.h` `widget/progress.h` `widget/slider.h` `widget/canvas.h` `widget/skeleton.h` `widget/bottom_nav_bar.h` |
-| 2  | **Container（多子布局）**        | `Column` `Row` `Stack` `Grid` `GridView` `Scroll` `Spacer` `Repeater` `LazyList` `LazyRow` | `widget/containers.h` `widget/grid_view.h` `widget/repeater.h` `widget/lazy_list.h` `widget/lazy_row.h` |
+| 2  | **Container（多子布局）**        | `Column` `Row` `Stack` `Grid` `GridView` `Scroll` `Spacer` `Repeater` `LazyList` `LazyRow` | `widget/containers.h` `widget/scroll.h` `widget/spacer.h` `widget/grid_view.h` `widget/repeater.h` `widget/lazy_list.h` `widget/lazy_row.h` |
 | 3  | **Modifier（声明式装饰）**       | `Padding` `Background` `Border` `Clip` `Opacity` `SizeModifier` `FlexWeight` `Clickable` `Align` `Offset` `Blur`(blur/backdrop_filter/shadow) `BlendMode` `ShaderMask` `CacheLayer` `Draggable` `LongPress` `Rotate` `Scale` `Transform` | `modifier/modifier.h` `render/blend.h` |
 | 4  | **Control Flow（组合/条件）**    | `Show` `Timer`（定时任务） | `widget/show.h` `widget/provider.h` `environment/*.h` `widget/timer.h` |
 | 5  | **State（响应式状态）**          | `State<T>` `Binding<T>` `Store<T>` `Reactive<T>`(响应式包装，供 `ui::` 工厂双模入参) | `state/state.h` `state/binding.h` `state/store.h` |
@@ -31,7 +31,7 @@
 | 13 | **Animation（动画）**            | `Tween<T>` `Keyframes<T>` `Curve` `Animator` `SpringSimulation` `AnimationController` | `animation/*.h` |
 | 14 | **Platform Shell（平台 Shell）** | `FileDialog`(open_file/save_file/open_folder) `SystemTray`(show/hide/set_icon/show_balloon/on_activate) `Clipboard`(set_text/get_text/set_image/get_image) `FileDropEvent`+`Widget::on_file_drop`(OS 文件拖放) `Display`+`app::list_displays`/`primary_display`/`display_containing`/`move_window_to_display`(多显示器枚举与窗口迁移) | `app/file_dialog.h` `app/system_tray.h` `app/clipboard.h` `app/display.h` `event/event.h`(`FileDropEvent`)；Win32 经 `file_dialog_win32.cpp`/`system_tray_win32.cpp`/`display_win32.cpp` + `window/win32_window.cpp`(`WM_DROPFILES`) 真实实现；非 Win32/Headless 为 no-op/headless 钩子 |
 | 15 | **Accessibility（无障碍）**      | `AccessibilityNode` `AccessibilityRole` `AccessibilityAction` `infer_accessibility_role` `build_accessibility_tree` | `core/accessibility.h` |
-| 16 | **DevTools（开发工具）**         | `HotReload` `generate_ui` `validate_ui` `Diagnostics`(FixSuggestion/collect_fixes/apply_fix) `inspect`(dump_tree/query/get_state) `Logger`(日志设施) | `app/hot_reload.h` `app/generate_ui.h` `app/validate_ui.h` `core/diagnostics.h` `widget/inspect.h` `core/log.h` |
+| 16 | **DevTools（开发工具）**         | `HotReload` `generate_ui` `validate_ui` `Diagnostics`(report/warn/degraded) `inspect`(dump_tree/query/get_state) `Logger`(日志设施) | `app/hot_reload.h` `app/generate_ui.h` `app/validate_ui.h` `core/diagnostics.h` `widget/inspect.h` `core/log.h` |
 | 17 | **Render（渲染）**               | `Painter` `Surface` `HeadlessSurface` `Win32Surface` `GlfwSurface` `X11Surface` `WaylandSurface` `MacOSSurface` `WasmSurface` `create_window`(工厂) `auto_detect_surface` | `render/painter.h` `window/*.h` `window/window.h` |
 | 18 | **Result/Error（错误）**         | `Result<T>` `Error` | `core/result.h` `core/error.h` `core/log.h` |
 | 19 | **Lifecycle / Window（生命周期）** | `Lifecycle`(控件挂载/卸载副作用) `WindowState`(Visible/Occluded/Hidden) `WindowMode`(Normal/Maximized/Minimized/FullScreen) | `widget/lifecycle.h` `window/window_state.h` |
@@ -41,8 +41,8 @@
 > **已完整实现并经真实开窗验证**（`AURORA_BACKEND_X11` 需 libX11；`AURORA_BACKEND_WAYLAND` 需
 wayland-client/xkbcommon/wayland-protocols；默认均 `OFF`，可单开或同时开启，同时开启时按会话类型运行期择优）；
 > `MacOSSurface` / `WasmSurface`（行 17）的 **CMake 开关已接入**（默认 `OFF`）：`AURORA_BACKEND_MACOS` / `AURORA_BACKEND_WASM`
-> 已加入 CMake 并激活 `native_surfaces.h` 的 `#ifdef`，但功能实现（`MacOSSurface` 的 Cocoa 窗口 / `WasmSurface::present()` 的
-> `<canvas>` 像素写回）仍待平台工具链补全（roadmap）。`D3D11Surface` 已通过 `AURORA_BACKEND_D3D11` 开关可用。
+> 已加入 CMake 并激活 `native_surfaces.h` 的 `#ifdef`：`WasmSurface::present()` 的 `<canvas>` 像素写回**已实现**（`wasm_surface.h` 内嵌 EM_ASM
+`putImageData` 胶水 + 事件翻译），仅 Emscripten 构建/链接验证待补全；`MacOSSurface` 的 Cocoa 窗口实现仍待平台工具链补全（roadmap）。`D3D11Surface` 已通过 `AURORA_BACKEND_D3D11` 开关可用。
 
 > **重叠能力优先级判定**：当同一视觉能力同时存在于「固有属性」与「Modifier」时，判定边界如下——
 > - 控件**自身身份语义**的能力（如 `Button` 的 `background_color`、`corner_radius`、`padding`）→ 用**固有属性**优先：随控件序列化、可被 Inspector 枚举、参与 diff。

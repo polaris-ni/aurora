@@ -38,7 +38,7 @@
     - `Application::dispatch_file_drop(paths, x, y)`：便捷入口，构造 `FileDropEvent` 经主派发路径触发 `on_file_drop`。
     - Win32 真实来源：`Win32Window` 构造时 `DragAcceptFiles(hwnd, TRUE)`，并在 `wnd_proc` 处理 `WM_DROPFILES`（
       `DragQueryFileW`/`DragQueryPoint`/`ScreenToClient`/`DragFinish` 解析为 UTF-8 路径列表，落点按 `m_scale` 换算为逻辑坐标）后经
-      `m_handler` 派发；交互为 `@manual`（需真实窗口与拖放，headless 经合成事件/注入断言，见 `tests/test_file_drop.cpp`）。注：
+      `m_handler` 派发；交互为 `@manual`（需真实窗口与拖放，headless 经合成事件/注入断言，见 `tests/test_dispatcher.cpp`）。注：
       `IDropTarget` OLE 拖放曾评估，在本机无头沙箱中因 COM 注册/反注册（`RegisterDragDrop`/`RevokeDragDrop`）不稳定导致
       teardown 确定性崩溃，已暂缓，保留稳定的 `WM_DROPFILES` 路径。
 - **多显示器枚举与管理（`app/display.h`，真实实现 `src/aurora/app/display_win32.cpp`）**：对标 Flutter `Screen` / Qt
@@ -59,7 +59,7 @@
   `Win32Window::hwnd()`）；`Surface` 基类默认返回 `nullptr`，供 `move_window_to_display` 等需句柄的 API 取用，跨平台安全（无头/无句柄返回
   `nullptr`）。声明为 `const`（只读查询，不修改 Surface 状态），Win32/X11/Wayland 覆写同步为 `const`（GLFW/D3D11/Wasm 沿用基类
   `nullptr`）。
-- **`Win32Window` 句柄访问器的类型契约（0.4.0 起，原 1.1.2）**：`Win32Window` 已 pimpl 化，公共头不再包含 `<windows.h>`，因此
+- **`Win32Window` 句柄访问器的类型契约**：`Win32Window` 已 pimpl 化，公共头不再包含 `<windows.h>`，因此
   `Win32Window::hwnd() const -> void*` 与静态 `Win32Window::background_brush() -> void*` **以 `void*` 返回**（原为`HWND`/
   `HBRUSH`）。 调用方在自身已包含 `<windows.h>` 的 TU 内 `static_cast<HWND>(win->hwnd())` /
   `static_cast<HBRUSH>(Win32Window::background_brush())` 还原；
