@@ -140,7 +140,7 @@
   ③ 增量编译——改后端实现只重编 1 个 TU。
 - **句柄暴露**：确需向外暴露原生句柄时，返回 **`void*`** 而非平台类型（如 `hwnd() -> void*`），
   调用方在自身已含平台头的 TU 内 `static_cast<HWND>(...)` 还原。此类访问器属「平台逃生舱」，
-  其静态类型不计入 API 稳定性承诺（见 `API_STABILITY.md`「稳定性承诺豁免条款」）。
+  其静态类型不计入 API 稳定性承诺。
 - **回调归属**：平台 C 回调（GLFW callback、Win32 `WNDPROC`）声明为 `Impl` 的**静态成员**而非文件级自由函数，
   以便直接访问私有 `Impl`；用户指针（`glfwSetWindowUserPointer` / `GWLP_USERDATA`）存 `Impl*`。
 - **现状**：`Win32Window`、`GlfwSurface`、`X11Surface`、`WaylandSurface` 均已合规；新增后端须遵循同一形态。

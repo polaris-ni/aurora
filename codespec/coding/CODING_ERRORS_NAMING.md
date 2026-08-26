@@ -58,8 +58,7 @@
   测试文件头部以「覆盖率说明」注明现状与归类（补测缺口 / 平台门控豁免 / 数据头噪声），不得静默留白。平台门控后端
   （Win32/macOS/WASM/D3D11 等）在非对应平台天然 0 覆盖、纯数据/生成头（如 `render/bitmap_font.h`、`core/error_codes.gen.h`）
   的 constexpr 初始化无运行时计数，均按豁免处理。公共 API ↔ 测试函数的映射经审计落在各 `test_*.cpp` 文件头部注释块中，
-  内部命名空间（`aurora::internal` / `detail`）不属于对外承诺面，不入映射。覆盖率模型（口径 / 阈值 / 豁免归类）的完整定义见
-  `../architecture/ARCHITECTURE_TESTING.md` §14.4。
+  内部命名空间（`aurora::internal` / `detail`）不属于对外承诺面，不入映射；覆盖率口径 / 阈值 / 豁免归类的规则见上文本节约述。
 ## 4. 元数据与可观测（对应规格 §21）
 
 - **错误可机读（3.1）**：`Error.to_json()` 输出结构化错误（code/message/suggestion/docs/where），供 AI 解析。

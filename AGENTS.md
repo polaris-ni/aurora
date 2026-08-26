@@ -19,7 +19,7 @@
   `WasmSurface`（Emscripten/Canvas 2D，浏览器 rAF 驱动）、`MacOSSurface`（AppKit/CoreGraphics，骨架）。
 - 线程模型：单线程 UI、同步事件、响应式细粒度信号。
 - **版本状态**：当前版本 **1.0.0-alpha.1**（早期预览开发版）。alpha 阶段 API 形态已完整但 **尚不构成稳定性承诺**，
-  仍可能破坏性变更；任何变更须遵循 semver 在 `CHANGELOG.json` 记录并提供迁移路径（详见 `codespec/API_STABILITY.md`）。
+  仍可能破坏性变更；任何变更须遵循 semver 在 `CHANGELOG.json` 记录并提供迁移路径。
 
 ---
 

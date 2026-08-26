@@ -1,8 +1,7 @@
 # 测试与 CI 架构（Testing & CI Architecture）
 
-> 本文档描述 Aurora **测试体系的分层、组织约定、覆盖率模型与 CI 执行层**，属于架构层（architecture）。
-> - 测试**编写规则与命名约定**见 [`CODING_STANDARDS.md`](./CODING_STANDARDS.md)（测试组织约定 §3 4.8–4.10）。
-> - 覆盖率**豁免清单（数据）**见 [`COVERAGE_EXEMPTIONS.md`](../COVERAGE_EXEMPTIONS.md)。
+> 本文档描述 Aurora **测试体系的分层、组织约定与 CI 执行层**，属于架构层（architecture）。
+> - 测试 **编写规则与命名约定**见 [`CODING_STANDARDS.md`](../CODING_STANDARDS.md)（测试组织约定 §3 4.8–4.10）。
 > - 性能基准属于 [`ARCHITECTURE_PERF.md`](./ARCHITECTURE_PERF.md) 范畴，本文档仅交叉引用。
 > - 本文档不重复上述内容，只说明「测试在系统里如何分层、组织与被执行」。
 
@@ -27,7 +26,7 @@
 ### 14.2.2 Golden 测试（渲染像素级）
 
 - 以 `test_offscreen`（整合了原 `test_golden`）为主：把 widget 树渲染到 `HeadlessSurface` 内存缓冲，与 golden 基准图逐像素比对。
-- **依赖相对路径**：golden 等测试须从**仓库根**直接运行可执行文件（如 `./build/test_offscreen`），因 `ctest` 会把测试 CWD 设为 `build/`；可用 `AURORA_GOLDEN_DIR` 覆盖解析基准。
+- **依赖相对路径**：golden 等测试须从 **仓库根**直接运行可执行文件（如 `./build/test_offscreen`），因 `ctest` 会把测试 CWD 设为 `build/`；可用 `AURORA_GOLDEN_DIR` 覆盖解析基准。
 - **SIMD 双实现确定性**：`test_simd_parity` 以 37,805 比对用例（随机化 + 固定种子，覆盖 5 色对 / 非对齐宽 / 多 stop 等）逐位比对标量黄金路径与 SSE2/AVX2 快路径，一票否决（详见 [`ARCHITECTURE_PERF.md`](./ARCHITECTURE_PERF.md#10-性能检测体系performance-profiling)）。
 
 ### 14.2.3 性能基准（交叉引用）
@@ -38,38 +37,30 @@
 
 ## 14.3 测试组织约定
 
-- **命名**：测试文件以 `test` 为**前缀**（`test_*.cpp`，非 `_test` 后缀），与源文件同名主体。
+- **命名**：测试文件以 `test` 为 **前缀**（`test_*.cpp`，非 `_test` 后缀），与源文件同名主体。
 - **运行**：从仓库根运行以保证相对路径解析；本地复跑建议以最高并行度执行（`ctest -j` 配满核心，见用户执行偏好），golden / simd 等并发竞争用例须隔离而非退回串行。
-- **新增约束**：新增公共 API / widget / 核心逻辑须配套单测并接入 CTest（见 [`CODING_STANDARDS.md`](./CODING_STANDARDS.md)）。
+- **新增约束**：新增公共 API / widget / 核心逻辑须配套单测并接入 CTest（见 [`CODING_STANDARDS.md`](../CODING_STANDARDS.md)）。
 
 ---
 
-## 14.4 覆盖率模型
-
-- 覆盖率豁免以 [`COVERAGE_EXEMPTIONS.md`](../COVERAGE_EXEMPTIONS.md) 为权威清单（如三方代码、平台专属分支、调试插桩等），新增豁免须在此登记并说明理由。
-- 本文档不复制豁免条目，仅确立「豁免须显式登记」的架构约束。
-
----
-
-## 14.5 CI 架构
+## 14.4 CI 架构
 
 CI 配置位于 `.github/workflows/`：
 
-| 工作流 | 作用 |
-|--------|------|
-| `ci.yml` | 三平台矩阵（ubuntu/gcc、windows/msvc、macos/clang），每推送/PR 跑 `configure → build（库+工具+测试）→ ctest --output-on-failure`；`concurrency` 取消旧运行以提速 |
-| `release.yml` | 发布流程（构建产物 / 版本标签） |
+| 工作流        | 作用                                                                                                                                                             |
+|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `ci.yml`      | 三平台矩阵（ubuntu/gcc、windows/msvc、macos/clang），每推送/PR 跑 `configure → build（库+工具+测试）→ ctest --output-on-failure`；`concurrency` 取消旧运行以提速 |
+| `release.yml` | 发布流程（构建产物 / 版本标签）                                                                                                                                  |
 
-- **执行层职责**：CI 只负责「拉起构建 + 跑 CTest」，不承载测试设计；测试分层与设计见上文 §14.2–§14.4。
-- **当前范围**：`ci.yml` 未设覆盖率门槛（覆盖率由本地 / `COVERAGE_EXEMPTIONS.md` 约束）。如需把覆盖率门禁纳入 CI，属后续增强，不在当前架构内。
+- **执行层职责**：CI 只负责「拉起构建 + 跑 CTest」，不承载测试设计；测试分层与设计见上文 §14.2–§14.3。
+- **当前范围**：`ci.yml` 未设覆盖率门槛（覆盖率由本地约束）。如需把覆盖率门禁纳入 CI，属后续增强，不在当前架构内。
 
 ---
 
-## 14.6 与其他文档的关系
+## 14.5 与其他文档的关系
 
-| 主题 | 权威文档 | 本文档的角色 |
-|------|----------|--------------|
-| 测试编写规则 / 命名 | [`CODING_STANDARDS.md`](./CODING_STANDARDS.md) | 设计模型概述 + 交叉引用 |
-| 覆盖率豁免（数据） | [`COVERAGE_EXEMPTIONS.md`](../COVERAGE_EXEMPTIONS.md) | 不复制；只确立「显式登记」约束 |
-| 性能基准 | [`ARCHITECTURE_PERF.md`](./ARCHITECTURE_PERF.md) | 交叉引用，不重述 |
-| CI 配置（事实） | `.github/workflows/ci.yml` / `release.yml` | 引用，描述执行层职责 |
+| 主题                | 权威文档                                         | 本文档的角色                         |
+|---------------------|--------------------------------------------------|--------------------------------------|
+| 测试编写规则 / 命名 | [`CODING_STANDARDS.md`](../CODING_STANDARDS.md)  | 设计模型概述 + 交叉引用              |
+| 性能基准            | [`ARCHITECTURE_PERF.md`](./ARCHITECTURE_PERF.md) | 交叉引用，不重述                     |
+| CI 配置（事实）     | `.github/workflows/ci.yml` / `release.yml`       | 引用，描述执行层职责                 |
