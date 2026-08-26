@@ -45,6 +45,8 @@ static void test_button_renders_correctly() {
 
 #### #20 布局系统的代数一致性
 
+> 形式化约束传递规则、Flex/Grid 分配公式与心算示例见 [`LAYOUT_PROTOCOL.md`](../../LAYOUT_PROTOCOL.md)。
+
 **核心目标：** AI 可推理尺寸和位置
 
 **规范：**

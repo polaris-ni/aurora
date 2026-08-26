@@ -4,7 +4,7 @@
 
 #### #H.13 布局引擎（Layout Engine）
 
-核心目标：代数一致、可推理、确定性的尺寸与位置求解（与 §20 互补）。
+核心目标：代数一致、可推理、确定性的尺寸与位置求解（与 [§20（FEATURE_LAYOUT_RENDER.md #20 布局代数一致性）](../../specification/features/FEATURE_LAYOUT_RENDER.md) 互补）。
 
 - **`Constraints`**：父对子的尺寸约束 `{ min: Size, max: Size }`；子必须 `constrain()` 回落在约束内。
 - **`Length`**：强类型尺寸。`Length::fixed(px)`（固定像素）、`Length::wrap()`（内容自适应）、`Length::expand()`（撑满）、
@@ -13,9 +13,9 @@
 - **`EdgeInsets`**：边距 / 内边距 `{left, top, right, bottom}`。
 - **`Alignment`**：对齐
   `TopLeft / TopCenter / TopRight / CenterLeft / Center / CenterRight / BottomLeft / BottomCenter / BottomRight`。
-- **`Flex` / `FlexLayouter`**：主轴 / 交叉轴方向与对齐。`FlexDirection{ Row, Column }`、
+- **`Flex` / `FlexLayouter`**：主轴 / 交叉轴方向与对齐。`FlexDirection{ Row, Column, RowReverse, ColumnReverse }`、
   `MainAxisAlignment{ Start, Center, End, SpaceBetween, SpaceAround, SpaceEvenly }`、
-  `CrossAxisAlignment{ Start, Center, End, Stretch }`；`FlexLayouter::layout(...)` 两遍求解（先宽后高，见 §20）。
+  `CrossAxisAlignment{ Start, Center, End, Stretch }`；`FlexLayouter::layout(...)` 两遍求解（先宽后高，见 [§20（FEATURE_LAYOUT_RENDER.md #20 布局代数一致性）](../../specification/features/FEATURE_LAYOUT_RENDER.md)）。
 
 ```cpp
 auto row = au::Row(au::RowProps{
@@ -29,7 +29,7 @@ row.modifier = au::Modifier{}.padding(8);
 ```
 
 设计要点：布局是 `layout(tree, viewport) -> boxes` 的纯函数；父宽 = Σ子宽 + 间距（无隐式边距合并）；百分比参照父 **content**
-宽度；溢出策略显式（Scroll 包裹 / clamp）；窗口 resize 仅重算布局、不改变语义（§20 规则 5–7）。
+宽度；溢出策略显式（Scroll 包裹 / clamp）；窗口 resize 仅重算布局、不改变语义（[§20（FEATURE_LAYOUT_RENDER.md #20 布局代数一致性）](../../specification/features/FEATURE_LAYOUT_RENDER.md) 规则 5–7）。
 
 > **形式化协议**：约束传递规则、Flex/Grid 分配公式、Length 四态语义、心算示例等详见 [`LAYOUT_PROTOCOL.md`](../../LAYOUT_PROTOCOL.md)（以 `FlexLayouter::layout` 实现为准）。
 
@@ -49,7 +49,7 @@ row.modifier = au::Modifier{}.padding(8);
 | `MainAxisSize`       | `Min` `Max`                                                                                                                      | `Column`/`Row` 主轴尺寸策略                                                                               |
 | `MainAxisAlignment`  | `Start` `Center` `End` `SpaceBetween` `SpaceAround` `SpaceEvenly`                                                                | `Column`/`Row` 主轴对齐                                                                                   |
 | `CrossAxisAlignment` | `Start` `Center` `End` `Stretch`                                                                                                 | `Column`/`Row` 交叉轴对齐                                                                                 |
-| `VerticalDirection`  | `Up` `Down`                                                                                                                      | 主轴方向（反向布局）                                                                                      |
+| `VerticalDirection`  | `Up` `Down`                                                                                                                      | 预留 / 未使用（反向布局由 FlexDirection::RowReverse / ColumnReverse 表达）                                                                                      |
 | `StackFit`           | `Loose` `Expand` `Passthrough`                                                                                                   | `Stack` 子项尺寸拟合                                                                                      |
 | `BoxFit`             | `Fill` `Contain` `Cover` `FitWidth` `FitHeight` `None` `ScaleDown`                                                               | `ImageView` 图片缩放拟合                                                                                  |
 
@@ -78,4 +78,4 @@ au::Row{}
 两层构成——固有属性描述控件自身身份（随控件序列化、可被 Inspector 枚举），`Modifier` 承载跨切面、可叠加、 可 `Reactive`
 变化的通用装饰（padding/background/border/align/opacity/rotate/scale/transform/clickable/...）。 两者重叠能力（如 `padding`/
 `corner_radius`/`background_color`）以控件固有属性优先；`Modifier` 同类项保留用于 「给任意控件套一层」的跨切面场景，绘制时
-`Modifier` 在外、固有属性在内（见 `CODING_STANDARDS.md` 一.10）。
+`Modifier` 在外、固有属性在内（见 [`coding/CODING_AI.md`](../../coding/CODING_AI.md) 一.10）。

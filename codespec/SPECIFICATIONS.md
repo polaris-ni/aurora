@@ -34,6 +34,7 @@
     - 核心子系统 API（H.12–H.21 + Log + AI-First）→ `specification/subsystems_api/`（6 份）
         - [H.12 序列化 → `SUBSYSTEM_API_SERIALIZE.md`](./specification/subsystems_api/SUBSYSTEM_API_SERIALIZE.md)
         - [H.13 布局引擎 + H.13b 共享枚举 → `SUBSYSTEM_API_LAYOUT_ENGINE.md`](./specification/subsystems_api/SUBSYSTEM_API_LAYOUT_ENGINE.md)
+        - [布局协议形式化规范 → `LAYOUT_PROTOCOL.md`](./LAYOUT_PROTOCOL.md)
         - [H.14 控件清单 + H.14.1 可定制性 + VideoPlayer → `SUBSYSTEM_API_WIDGETS.md`](./specification/subsystems_api/SUBSYSTEM_API_WIDGETS.md)
         - [H.15b Inspector 面板 + H.15c 远程 → `SUBSYSTEM_API_INSPECTOR.md`](./specification/subsystems_api/SUBSYSTEM_API_INSPECTOR.md)
         - [H.16 自描述 + H.17 MCP/CLI + H.18 偏好 + H.19 性能 → `SUBSYSTEM_API_TOOLING.md`](./specification/subsystems_api/SUBSYSTEM_API_TOOLING.md)
