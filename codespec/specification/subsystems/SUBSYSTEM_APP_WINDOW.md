@@ -129,7 +129,7 @@ if (p.is_mobile() && p.capabilities().multitouch) { /* 启用多指手势 */ }
 
 #### #H.10c 真实后端 DEBUG 门面（`aurora::debug`）
 
-核心目标：为真实后端 DEBUG 能力（设计取舍与落地偏差见 `ARCHITECTURE.md` §10.7）提供统一、门控（`AURORA_ENABLE_DEBUG`
+核心目标：为真实后端 DEBUG 能力（设计取舍与落地偏差见 `../../architecture/ARCHITECTURE_PERF.md` §10.7）提供统一、门控（`AURORA_ENABLE_DEBUG`
 ）的薄封装入口，收编零散调试能力，不搬迁任何生产子系统引擎（Inspector / Diagnostics / perf 留原地）。所有项在
 Release（未开开关）下不产出调试代码：`capture` 返回 disabled 错误、`surface_state` 返回 unavailable JSON；输出目录 API
 为纯文件系统辅助，始终可用。

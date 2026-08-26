@@ -33,7 +33,7 @@
 #### #H.15c Inspector 远程 HTTP 接口（InspectorServer）
 
 > 新增 `InspectorServer`（`include/aurora/inspector/inspector_server.h`）：localhost-only HTTP 服务器，暴露 REST 端点供外部
-> Inspector 工具远程访问运行时 widget 树。仅 Windows，CMake 开关 `AURORA_BUILD_INSPECTOR_SERVER`（默认 OFF）。
+> Inspector 工具远程访问运行时 widget 树。跨平台（Windows: `ws2_32` / POSIX: `pthread`），CMake 开关 `AURORA_BUILD_INSPECTOR_SERVER`（默认 OFF）。
 
 **InspectorServer API**：
 
