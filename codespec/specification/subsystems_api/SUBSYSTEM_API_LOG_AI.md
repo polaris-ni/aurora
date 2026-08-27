@@ -22,7 +22,7 @@
 
 - `Logger::set_sink(LogSink)` / `set_raw_sink(LogSink)`：把两通道重定向到文件或测试捕获；传 `nullptr` 恢复默认（stderr /
   stdout）。
-- `test_printf` / `test_printf_err` 宏：先把 `printf` 风格经 `std::snprintf` 写入 **内存缓冲**（非标准输出），再经
+- `AURORA_TEST_PRINTF` / `AURORA_TEST_PRINTF_ERR` 宏：先把 `printf` 风格经 `std::snprintf` 写入 **内存缓冲**（非标准输出），再经
   `AURORA_LOG_INFO/ERROR("test", ...)` 输出，作为遗留诊断代码的兼容桥接； **新代码请直接用 `AURORA_LOG_*` /
   `AURORA_LOG_RAW`**，勿新增 `printf` 调用。
 

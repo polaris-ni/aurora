@@ -71,8 +71,8 @@
   。诊断/日志统一走 `AURORA_LOG_{TRACE,DEBUG,INFO,WARN,ERROR,FATAL}(category, ...)` 宏（写 stderr，带
   `[时间][级别][module@threadId filename:line] > 消息` 前缀，受级别阈值与启用开关控制）；CLI 的 JSON 结果 / usage 文本、benchmark
   表格、LSP/MCP 等基于 stdio 的线协议帧等「程序产品」功能输出走 `AURORA_LOG_RAW(category, ...)`（写
-  stdout，无前缀、不受阈值/开关限制，始终输出，且 `fflush` 保证即时送达）；遗留 `printf` 风格诊断用 `test_printf` /
-  `test_printf_err` 桥接宏（先 `snprintf` 入 **内存缓冲**再经 `Logger` 输出，非标准输出）。两通道均可通过 `set_sink` /
+  stdout，无前缀、不受阈值/开关限制，始终输出，且 `fflush` 保证即时送达）；遗留 `printf` 风格诊断用 `AURORA_TEST_PRINTF` /
+  `AURORA_TEST_PRINTF_ERR` 桥接宏（先 `snprintf` 入 **内存缓冲**再经 `Logger` 输出，非标准输出）。两通道均可通过 `set_sink` /
   `set_raw_sink` 重定向到文件或测试捕获。详见 `SPECIFICATIONS.md` 日志（Log）子系统小节。
 - **错误定位（3.7）**：错误信息精确到 `文件:行`（`Error::where`）；`AURORA_ASSERT` 附上下文。
 

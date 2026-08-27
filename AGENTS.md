@@ -131,7 +131,7 @@
 8. **禁止直接使用标准输出**：
     - 所有日志/打印/诊断一律走封装好的 `Logger` 接口（`AURORA_LOG_*` 诊断通道写 stderr；
     - CLI 的JSON/usage、benchmark 表格、LSP/MCP 线协议帧等「程序产品」功能输出走 `AURORA_LOG_RAW` 写 stdout，无前缀、 始终输出）；
-    - `tools/`、`examples/`、`tests/` 中遗留的 `printf` 风格诊断用 `test_printf`/`test_printf_err` 桥接宏， 勿新增
+    - `tools/`、`examples/`、`tests/` 中遗留的 `printf` 风格诊断用 `AURORA_TEST_PRINTF`/`AURORA_TEST_PRINTF_ERR` 桥接宏， 勿新增
       `std::cout`/`std::cerr`/`printf`/`fprintf`/`puts`。唯一允许直接触达标准输出的是 `src/aurora/core/log.cpp` 内的 sink
       实现。详见 `coding/CODING_ERRORS_NAMING.md` §3.6 与 `SPECIFICATIONS.md` 日志（Log）子系统小节。
 9. **不得无故改变既有函数/成员的可见性**：AI 在生成或修改代码时，常会顺手调整 `public`/`protected`/`private`
