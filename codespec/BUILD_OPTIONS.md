@@ -33,7 +33,8 @@
 
 | 模块                                | 职责                                                                                                                                           |
 |-------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| `cmake/AuroraThirdParty.cmake`      | FreeType/HarfBuzz 源码构建（须在告警注入前 include）                                                                                           |
+| `cmake/AuroraThirdParty.cmake`      | FreeType/HarfBuzz 源码构建                                                                                                                     |
+| `cmake/AuroraUtils.cmake`           | 消费者目标统一配置辅助（`aurora_setup_consumer_target`，demo/测试/工具复用链接/PCH/C++20/告警）                                                 |
 | `cmake/AuroraBackends.cmake`        | 全部 `AURORA_BACKEND_*` 后端剪裁开关 + P3 优化宏（`AURORA_LAYOUT_CACHE` 等）                                                                   |
 | `cmake/AuroraImageCodecs.cmake`     | `AURORA_BUILD_IMAGE_JPEG` / `AURORA_BUILD_IMAGE_WEBP` / `AURORA_BUILD_IMAGE_PNG`（编译期能力开关，注入非 PUBLIC 的 `AURORA_BUILD_IMAGE_*` 宏） |
 | `cmake/AuroraSimd.cmake`            | `AURORA_ENABLE_SIMD`（光栅内核 SIMD 双实现，内部宏，不 PUBLIC 传播）                                                                           |

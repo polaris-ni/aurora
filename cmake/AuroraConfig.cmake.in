@@ -1,0 +1,90 @@
+@PACKAGE_INIT@
+
+# Aurora — AI-first modern C++ GUI library (find_package 配置)
+#
+# 提供导入目标：
+#   Aurora::aurora  —— 主静态库（含公开头、C++20、feature 宏、传递依赖）
+#   freetype        —— vendored FreeType 静态库（Aurora::aurora 传递链接）
+#   harfbuzz        —— vendored HarfBuzz 静态库（Aurora::aurora 传递链接）
+#
+# 消费者只需：
+#   find_package(Aurora REQUIRED)
+#   target_link_libraries(app PRIVATE Aurora::aurora)
+
+include(CMakeFindDependencyMacro)
+
+# 安装根目录：AuroraConfig.cmake 位于 <prefix>/@CMAKE_INSTALL_LIBDIR@/cmake/Aurora
+# 自 Aurora 向上 3 级：cmake -> lib -> <prefix>
+get_filename_component(_aurora_root "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+
+# ---- FreeType（vendored 静态库，随 aurora 安装到 @CMAKE_INSTALL_LIBDIR@） ----
+find_library(FREETYPE_LIB NAMES freetype libfreetype
+             PATHS "${_aurora_root}/@CMAKE_INSTALL_LIBDIR@" NO_DEFAULT_PATH)
+if(NOT FREETYPE_LIB)
+    message(FATAL_ERROR "Aurora: bundled FreeType static library not found"
+            " (expected ${_aurora_root}/@CMAKE_INSTALL_LIBDIR@/libfreetype.a)")
+endif()
+if(NOT TARGET freetype)
+    add_library(freetype STATIC IMPORTED)
+    set_target_properties(freetype PROPERTIES
+        IMPORTED_LOCATION "${FREETYPE_LIB}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_aurora_root}/@CMAKE_INSTALL_INCLUDEDIR@/freetype2")
+endif()
+
+# ---- HarfBuzz（vendored 静态库，随 aurora 安装） ----
+find_library(HARFBUZZ_LIB NAMES harfbuzz libharfbuzz
+             PATHS "${_aurora_root}/@CMAKE_INSTALL_LIBDIR@" NO_DEFAULT_PATH)
+if(NOT HARFBUZZ_LIB)
+    message(FATAL_ERROR "Aurora: bundled HarfBuzz static library not found")
+endif()
+if(NOT TARGET harfbuzz)
+    add_library(harfbuzz STATIC IMPORTED)
+    set_target_properties(harfbuzz PROPERTIES
+        IMPORTED_LOCATION "${HARFBUZZ_LIB}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_aurora_root}/@CMAKE_INSTALL_INCLUDEDIR@/harfbuzz")
+endif()
+
+# FreeType 解压含压缩字体表（.ttc/.ttf）通常依赖 zlib；尽力定位并传递（找不到则跳过）。
+find_library(AURORA_ZLIB_LIB NAMES z libz)
+if(AURORA_ZLIB_LIB)
+    set(_aurora_extra_links "${AURORA_ZLIB_LIB}")
+endif()
+
+# HarfBuzz 在部分平台（含 MinGW）使用 pthread 实现内部互斥；静态链接需显式传递（置于 harfbuzz 之后）。
+# MinGW 自带 winpthread，直接以库名交由链接器从其 sysroot 解析（无需猜测绝对路径）；
+# 其它平台回退到 pthread。
+if(WIN32)
+    set(_aurora_thread_libs winpthread)
+else()
+    set(_aurora_thread_libs pthread)
+endif()
+
+# 平台系统库（与 aurora 构建期 PUBLIC 链接一致：Win32/GDI 后端需要）。
+set(_aurora_sys_links "")
+if(WIN32)
+    list(APPEND _aurora_sys_links user32 gdi32 shell32 ole32 uuid)
+endif()
+
+# ---- Aurora 主目标 ----
+find_library(AURORA_LIB NAMES aurora libaurora
+             PATHS "${_aurora_root}/@CMAKE_INSTALL_LIBDIR@" NO_DEFAULT_PATH)
+if(NOT AURORA_LIB)
+    message(FATAL_ERROR "Aurora: libaurora.a not found"
+            " (expected ${_aurora_root}/@CMAKE_INSTALL_LIBDIR@/libaurora.a)")
+endif()
+if(NOT TARGET Aurora::aurora)
+    add_library(Aurora::aurora STATIC IMPORTED)
+    set_target_properties(Aurora::aurora PROPERTIES
+        IMPORTED_LOCATION "${AURORA_LIB}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_aurora_root}/@CMAKE_INSTALL_INCLUDEDIR@"
+        INTERFACE_COMPILE_FEATURES cxx_std_20)
+    target_link_libraries(Aurora::aurora INTERFACE
+        freetype harfbuzz ${_aurora_extra_links} ${_aurora_thread_libs} ${_aurora_sys_links})
+    # 安装期导出的 feature 宏（与编译期 aurora 目标 PUBLIC 编译定义一致）。
+    target_compile_definitions(Aurora::aurora INTERFACE @AURORA_EXPORTED_DEFINES@)
+    if(MSVC)
+        target_compile_definitions(Aurora::aurora INTERFACE _CRT_SECURE_NO_WARNINGS)
+    endif()
+endif()
+
+check_required_components(Aurora)

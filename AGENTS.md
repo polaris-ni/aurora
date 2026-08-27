@@ -48,10 +48,16 @@
 - 工具链：需 **CMake（≥ 3.20）** 与 **C++20 编译器**（如 gcc/clang/MSVC 任一）在 `PATH` 中；推荐 **Ninja** 作为生成器（空转/增量调度远快于
   Make）。各工具的具体安装目录请按本机环境配置， **勿将绝对路径写死进仓库文档**。
 - 构建（Ninja 默认用满全部核心，无需 `-j`；如回退 Make 须加 `-- -j $env:NUMBER_OF_PROCESSORS`）：
-  ```powershell
-  cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
-  cmake --build build --target <tgt>
-  ```
+  - 推荐用仓库内置 `CMakePresets.json` 的 `ninja` preset（已预置生成器与 gcc/g++）：
+    ```powershell
+    cmake --preset ninja
+    cmake --build build --target <tgt>
+    ```
+  - 或显式指定生成器：
+    ```powershell
+    cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+    cmake --build build --target <tgt>
+    ```
   （若 PATH 含 LLVM/clang bin，configure 会自动探测 `ld.lld`——`AURORA_ENABLE_LLD=ON` 时链接用 lld 提速，缺失则自动回退 GNU
   ld；lld 仅为可选加速，不影响构建正确性。）
 - ⚠️ demo 不进默认构建（`EXCLUDE_FROM_ALL`）：`cmake --build build` 只建库/工具/测试； 单个 demo 按名构建（
