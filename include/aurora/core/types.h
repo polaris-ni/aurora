@@ -32,8 +32,10 @@ struct Size {
 
     /// @brief 表示"不限制"的尺寸（用于 wrap_content / 安卓 UNSPECIFIED）。
     [[nodiscard]] static constexpr auto infinity() noexcept -> Size {
-        return Size{ .width = std::numeric_limits<float>::infinity(),
-                     .height = std::numeric_limits<float>::infinity(), };
+        return Size{
+            .width = std::numeric_limits<float>::infinity(),
+            .height = std::numeric_limits<float>::infinity(),
+        };
     }
 
     [[nodiscard]] constexpr auto operator*(float s) const noexcept -> Size {
@@ -74,6 +76,8 @@ struct Rect {
         return origin.x == o.origin.x && origin.y == o.origin.y && size.width == o.size.width &&
                size.height == o.size.height;
     }
+
+    // NOLINTNEXTLINE(*-redundant-parentheses)
     [[nodiscard]] auto operator!=(const Rect &o) const noexcept -> bool { return !(*this == o); }
 };
 
@@ -140,6 +144,8 @@ struct Constraints {
         return min.width == o.min.width && min.height == o.min.height && max.width == o.max.width &&
                max.height == o.max.height;
     }
+
+    // NOLINTNEXTLINE(*-redundant-parentheses)
     [[nodiscard]] auto operator!=(const Constraints &o) const noexcept -> bool { return !(*this == o); }
 };
 
