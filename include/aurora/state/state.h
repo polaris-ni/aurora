@@ -16,8 +16,9 @@ class StateGraph; // 前向声明（state_graph.h 提供状态依赖图，§2.6�
 /// @note Thread: main-thread only
 /// @note Side-effects: none
 /// @note Rebuildable: no
-class StateBase {
+class StateBase { // NOLINT(cppcoreguidelines-special-member-functions)
   public:
+    // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
     virtual ~StateBase() = default;
 
   protected:
@@ -49,7 +50,10 @@ class StateBase {
         }
     }
 
+    // protected 是刻意的：派生类（如 State<T>::subscribe）需直接访问观察者表与锚点。
+    // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
     std::vector<ConnectionPtr> m_observers;
+    // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
     AnchorPtr m_anchor{ std::make_shared<ReactiveAnchor>() };
 
     friend class Effect;
@@ -75,7 +79,10 @@ class State : public SignalView<T>, public StateBase, public std::enable_shared_
 
     [[nodiscard]] auto get() const -> const T & override {
         if (Effect::current() != nullptr) {
-            const_cast<const State *>(this)->subscribe(*Effect::current());
+            // 接口约束：get() 为 const 而 subscribe() 为非 const（SignalViewBase），
+            // 订阅需修改观察者表，此处去 const 是安全且有意的。
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+            const_cast<State *>(this)->subscribe(*Effect::current());
         }
         return m_value;
     }

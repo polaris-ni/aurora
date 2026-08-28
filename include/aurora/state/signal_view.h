@@ -29,8 +29,9 @@ using ConnectionPtr = std::shared_ptr<Connection>;
  * @note Side-effects: none
  * @note Rebuildable: no
  */
-class SignalViewBase {
+class SignalViewBase {  // NOLINT(cppcoreguidelines-special-member-functions)
   public:
+    // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
     virtual ~SignalViewBase() = default;
 
     /// @brief 将给定 Effect 注册为自身变化的观察者（读时由 get() 触发）。

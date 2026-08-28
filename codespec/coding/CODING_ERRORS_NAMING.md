@@ -81,6 +81,13 @@
 - **显式标注（五·标注与契约表达）**：纯函数/非纯、线程安全、是否可重建，用文档注释显式标注；`serialization` 重建约束在
   `include/aurora/widget/serialization.h` 注明。
 - **评分方法（六）**：以「AI 在有限上下文窗口内能否一次生成可编译、可运行代码」为验收标准，而非仅人类可读。
+- **豁免**：多态基类定义了虚析构后，原则上应删除（或 `= default` 定义）全部拷贝/移动特殊成员函数；
+  仅当现有 API **刻意依赖**隐式拷贝/移动时（如 `Reactive<T>` 依赖隐式拷贝赋值支持 `content = "Hi";` 写法、
+  `FormField` 按值持有 `State<T>` 并依赖移动语义），才允许用
+  `// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)` 抑制，且必须用紧邻注释写明依赖原因。
+  不得默默无视告警，也不得为消除告警而删除仍被使用的拷贝/移动（先全量构建验证再决定）。
+- **NOLINT 抑制通用规则**：凡用 NOLINT/NOLINTNEXTLINE 抑制 Clang-Tidy 告警，必须（a）写明具体检查名（禁止裸 `NOLINT`
+  新增使用），（b）紧邻注释说明「为何不能按建议修复」。抑制属于显式契约决策，随代码评审、随文档同步。
 
 ## 6. 约束总结（Invariants 链接）
 

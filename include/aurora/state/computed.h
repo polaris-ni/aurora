@@ -37,7 +37,9 @@ template<typename T> class Computed : public SignalView<T>, public StateBase {
 
     [[nodiscard]] auto get() const -> const T & override {
         if (Effect::current() != nullptr) {
-            const_cast<const Computed *>(this)->subscribe(*Effect::current());
+            // 同 State：get() const 与 subscribe() 非 const 的接口约束所致。
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+            const_cast<Computed *>(this)->subscribe(*Effect::current());
         }
         return m_value;
     }

@@ -48,7 +48,10 @@ namespace aurora {
 auto utf8_encode(std::uint32_t cp) -> std::string {
     // 权威版（取 glfw_surface 原 utf8_from_codepoint，完整 Unicode 含辅助平面）。
     if (cp <= 0x7F) {
-        return { 1, static_cast<char>(cp) };
+        // 必须用圆括号：写成 `return { 1, static_cast<char>(cp) };` 会命中
+        // `std::string(std::initializer_list<char>)`，得到 2 字节 "\x01A" 而非 "A"。
+        // NOLINTNEXTLINE(modernize-return-braced-init-list)
+        return std::string(1, static_cast<char>(cp));
     }
     if (cp <= 0x7FF) {
         const std::array b{ static_cast<char>(0xC0U | (cp >> 6U)), static_cast<char>(0x80U | (cp & 0x3FU)) };
