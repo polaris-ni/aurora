@@ -8,6 +8,8 @@ Checks: >
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
   -cppcoreguidelines-pro-type-vararg,
   -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-avoid-do-while,
+  -hicpp-avoid-do-while,
   google-build-using-namespace,
   -bugprone-easily-swappable-parameters,
   -readability-trailing-comma

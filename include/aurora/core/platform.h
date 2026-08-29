@@ -50,6 +50,7 @@
  */
 
 // ─────────────────────────── AURORA_PLATFORM_*：平台家族 ───────────────────────────
+// NOLINTBEGIN(*-macro-usage)
 #ifdef _WIN32
 #define AURORA_PLATFORM_WINDOWS 1U
 #elif defined(__APPLE__) && defined(__MACH__)
@@ -103,3 +104,5 @@
 #define AURORA_BIT_32 1
 #endif
 #endif
+
+// NOLINTEND(*-macro-usage)
