@@ -9,7 +9,8 @@ Checks: >
   -cppcoreguidelines-pro-type-vararg,
   -cppcoreguidelines-owning-memory,
   google-build-using-namespace,
-  -bugprone-easily-swappable-parameters
+  -bugprone-easily-swappable-parameters,
+  -readability-trailing-comma
 WarningsAsErrors: ''
 HeaderFilterRegex: 'aurora/.*'
 CheckOptions:

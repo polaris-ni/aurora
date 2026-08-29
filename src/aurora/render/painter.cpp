@@ -2,8 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
-#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <utility>
@@ -20,7 +18,11 @@
 // 【性能豁免说明】本 TU 整体抑制以下检查，理由与 painter_simd.inl 头部一致：逐像素越界访问
 // 由裁剪交集（shrink_to_clips 与 set_pixel 矩形裁剪逐字一致）在区域边界保证、指针步进与
 // 对齐暂存为混合实现惯用法、窄化转换须与 SIMD 路径逐位一致（golden 测试逐位比对）。
-// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-narrowing-conversions, bugprone-narrowing-conversions, readability-math-missing-parentheses, cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays, cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-pro-bounds-avoid-unchecked-container-access, readability-isolate-declaration, readability-avoid-nested-conditional-operator, modernize-use-auto)
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-narrowing-conversions,
+// bugprone-narrowing-conversions, readability-math-missing-parentheses, cppcoreguidelines-avoid-c-arrays,
+// modernize-avoid-c-arrays, cppcoreguidelines-pro-type-reinterpret-cast,
+// cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+// readability-isolate-declaration, readability-avoid-nested-conditional-operator, modernize-use-auto)
 
 namespace aurora {
 
@@ -33,13 +35,13 @@ auto scale_rect(const Rect &r, float s) -> Rect {
 
 } // namespace
 
-// WS-4 SIMD 双实现：标量参考与 SIMD 路径逐位一致。
+// SIMD 双实现：标量参考与 SIMD 路径逐位一致。
 // gamma LUT / 标量 golden 混合实现见 aurora/render/detail/gamma_lut.{h,cpp} 与 painter_simd.inl。
 using aurora::detail::blend_linear_region;
 using aurora::detail::blend_srgb_over;
 using aurora::detail::blend_srgb_over_region;
 using aurora::detail::blur_region;
-using aurora::detail::g_srgb_to_linear;
+using aurora::detail::g_gamma_tables;
 using aurora::detail::gradient_linear_fill;
 using aurora::detail::gradient_radial_fill;
 using aurora::detail::init_gamma_tables;
@@ -47,8 +49,10 @@ using aurora::detail::linear_to_srgb;
 
 // [性能排查] 各光栅热点耗时累加器（结构/计时器/访问器见 detail/paint_timing.h）。
 // 性能排查累加器为跨函数共享的可变模块状态，设计为有意的命名空间级全局；见 paint_timing()/paint_timing_last()。
-detail::PaintTiming g_pt;      // 当前帧累加器（aurora::g_pt）  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-detail::PaintTiming g_pt_last; // 上一完成绘制帧快照           // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+detail::PaintTiming g_pt; // 当前帧累加器（aurora::g_pt）
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+detail::PaintTiming g_pt_last; // 上一完成绘制帧快照
 
 auto detail::paint_timing() -> detail::PaintTiming & { return g_pt; }
 auto detail::paint_timing_last() -> const detail::PaintTiming & { return g_pt_last; }
@@ -686,12 +690,12 @@ auto Painter::draw_image(const Image &img, const Rect &dest) -> void {
     auto sample = [&](int ix, int iy) -> const std::uint8_t * {
         if (ix < 0) {
             ix = 0;
-        } else if (std::cmp_greater_equal(ix ,img_w)) {
+        } else if (std::cmp_greater_equal(ix, img_w)) {
             ix = static_cast<int>(img_w) - 1;
         }
         if (iy < 0) {
             iy = 0;
-        } else if (std::cmp_greater_equal(iy ,img_h)) {
+        } else if (std::cmp_greater_equal(iy, img_h)) {
             iy = static_cast<int>(img_h) - 1;
         }
         return &img.pixels[(static_cast<std::size_t>(iy) * row4) + (static_cast<std::size_t>(ix) * 4u)];
@@ -863,7 +867,7 @@ auto sd_round_rect(float x, float y, const Rect &r, float rad) -> float {
     const float bottom = r.bottom();
     const float half_w = (right - left) * 0.5f;
     const float half_h = (bottom - top) * 0.5f;
-    rad = std::min({rad, half_w, half_h});
+    rad = std::min({ rad, half_w, half_h });
     const float px = x - ((left + right) * 0.5f);
     const float py = y - ((top + bottom) * 0.5f);
     const float qx = std::fabs(px) - half_w + rad;
@@ -927,8 +931,9 @@ auto Painter::set_pixel(int x, int y, Color c) -> void {
         const std::size_t i =
             ((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) + static_cast<std::size_t>(x)) * 4u;
         // 不透明快路径（WS-4 性能修复）：当 global_alpha×c.a 仍为全不透明（a==1）时，
-        // sRGB↔线性往返是恒等映射（g_srgb_to_linear / g_linear_to_srgb 逐值互逆，已验证 0..255
-        // 全位级一致），故结果数学上等价于直接写入 sRGB 颜色 c，跳过 9 次 gamma LUT 往返。
+        // sRGB↔线性往返是恒等映射（g_gamma_tables.srgb_to_linear / g_gamma_tables.linear_to_srgb
+        // 逐值互逆，已验证 0..255 全位级一致），故结果数学上等价于直接写入 sRGB 颜色 c，
+        // 跳过 9 次 gamma LUT 往返。
         // 与旧实现位级一致，且对渐变/不透明填充/文字等 opaque 绘制普遍提速。
         if (c.m_a == 255) {
             m_pixels[i + 0] = c.m_r;
@@ -1008,7 +1013,8 @@ auto Painter::blend_subpixel(int x, int y, Color c, std::uint8_t cr, std::uint8_
     blend_srgb_over_region(&m_pixels[i], c.m_r, c.m_g, c.m_b, fr, fg, fb, 1);
 }
 
-auto Painter::blend_subpixel_span(int x0, int y, Color c, const std::uint8_t *src, int n, bool lcd, float src_alpha) // NOLINT(readability-function-cognitive-complexity)
+auto Painter::blend_subpixel_span(int x0, int y, Color c, const std::uint8_t *src, int n, bool lcd,
+                                  float src_alpha) // NOLINT(readability-function-cognitive-complexity)
     -> void {
     if (n <= 0) {
         return;
@@ -1045,7 +1051,8 @@ auto Painter::blend_subpixel_span(int x0, int y, Color c, const std::uint8_t *sr
         return;
     }
     // 源色线性光（整段恒定，逐像素仅查一次，省去每像素 3 次 srgb_to_linear 查表）。
-    const float sr_lin[3] = { g_srgb_to_linear[c.m_r], g_srgb_to_linear[c.m_g], g_srgb_to_linear[c.m_b] };
+    const float sr_lin[3] = { g_gamma_tables.srgb_to_linear[c.m_r], g_gamma_tables.srgb_to_linear[c.m_g],
+                              g_gamma_tables.srgb_to_linear[c.m_b] };
     const float cov = static_cast<float>(m_global_alpha) * src_alpha;
     const std::size_t row_base = static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width);
     for (int x = x_lo; x <= x_hi; ++x) {
@@ -1062,9 +1069,9 @@ auto Painter::blend_subpixel_span(int x0, int y, Color c, const std::uint8_t *sr
         const std::size_t i = (row_base + static_cast<std::size_t>(x)) * 4u;
         std::uint8_t *p = &m_pixels[i];
         // gamma-correct source-over（逐位等价于 blend_srgb_over），已验证与旧实现位级一致。
-        p[0] = linear_to_srgb((sr_lin[0] * fr) + (g_srgb_to_linear[p[0]] * (1.0f - fr)));
-        p[1] = linear_to_srgb((sr_lin[1] * fg) + (g_srgb_to_linear[p[1]] * (1.0f - fg)));
-        p[2] = linear_to_srgb((sr_lin[2] * fb) + (g_srgb_to_linear[p[2]] * (1.0f - fb)));
+        p[0] = linear_to_srgb((sr_lin[0] * fr) + (g_gamma_tables.srgb_to_linear[p[0]] * (1.0f - fr)));
+        p[1] = linear_to_srgb((sr_lin[1] * fg) + (g_gamma_tables.srgb_to_linear[p[1]] * (1.0f - fg)));
+        p[2] = linear_to_srgb((sr_lin[2] * fb) + (g_gamma_tables.srgb_to_linear[p[2]] * (1.0f - fb)));
         p[3] = 255;
     }
 }
@@ -1129,7 +1136,8 @@ auto Painter::to_image() const -> Image {
     return img;
 }
 
-auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float sscale, const Matrix2D &matrix) -> void { // NOLINT(readability-function-cognitive-complexity)
+auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float sscale, const Matrix2D &matrix)
+    -> void { // NOLINT(readability-function-cognitive-complexity)
     detail::PaintTimer guard{ &g_pt.composite };
     const float lw = static_cast<float>(sw) / sscale;
     const float lh = static_cast<float>(sh) / sscale;
@@ -1292,8 +1300,10 @@ inline auto sample_gradient(const std::vector<Color> &colors, const std::vector<
 }
 } // namespace
 
-auto Painter::draw_linear_gradient(const Rect &area, Point start, Point end, const std::vector<Color> &colors, // NOLINT(readability-function-cognitive-complexity)
-                                   const std::vector<float> &stops) -> void {
+auto Painter::draw_linear_gradient(
+    const Rect &area, Point start, Point end,
+    const std::vector<Color> &colors, // NOLINT(readability-function-cognitive-complexity)
+    const std::vector<float> &stops) -> void {
     if (is_recording()) {
         DrawCmd cmd;
         cmd.kind = CmdKind::LinearGradient;
@@ -1426,8 +1436,10 @@ auto Painter::draw_linear_gradient(const Rect &area, Point start, Point end, con
     }
 }
 
-auto Painter::draw_radial_gradient(const Rect &area, Point center, float radius, const std::vector<Color> &colors, // NOLINT(readability-function-cognitive-complexity)
-                                   const std::vector<float> &stops) -> void {
+auto Painter::draw_radial_gradient(
+    const Rect &area, Point center, float radius,
+    const std::vector<Color> &colors, // NOLINT(readability-function-cognitive-complexity)
+    const std::vector<float> &stops) -> void {
     if (is_recording()) {
         DrawCmd cmd;
         cmd.kind = CmdKind::RadialGradient;
@@ -1549,7 +1561,8 @@ auto Painter::draw_radial_gradient(const Rect &area, Point center, float radius,
     }
 }
 
-auto Painter::draw_shadow(const Rect &shape, float offset_x, float offset_y, float blur_radius, Color color) -> void { // NOLINT(readability-function-cognitive-complexity)
+auto Painter::draw_shadow(const Rect &shape, float offset_x, float offset_y, float blur_radius, Color color)
+    -> void { // NOLINT(readability-function-cognitive-complexity)
     if (is_recording()) {
         DrawCmd cmd;
         cmd.kind = CmdKind::Shadow;
@@ -1838,4 +1851,8 @@ auto Painter::mask_region(const Rect &region, ShaderMaskKind kind, float strengt
 }
 
 } // namespace aurora
-// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-narrowing-conversions, bugprone-narrowing-conversions, readability-math-missing-parentheses, cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays, cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-pro-bounds-avoid-unchecked-container-access, readability-isolate-declaration, readability-avoid-nested-conditional-operator, modernize-use-auto)
+// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-narrowing-conversions,
+// bugprone-narrowing-conversions, readability-math-missing-parentheses, cppcoreguidelines-avoid-c-arrays,
+// modernize-avoid-c-arrays, cppcoreguidelines-pro-type-reinterpret-cast,
+// cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+// readability-isolate-declaration, readability-avoid-nested-conditional-operator, modernize-use-auto)

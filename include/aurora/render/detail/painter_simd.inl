@@ -1,4 +1,4 @@
-// Aurora — 光栅内核 SIMD 双实现（WS-4【D1】实现）
+// Aurora — 光栅内核 SIMD 双实现
 // 本文件被 painter.cpp 与 tests/test_simd_parity.cpp 共同 include，故全部为 header 内联。
 // 浮点运算序列严格镜像标量黄金实现（-ffp-contract=off 由 CMake 保证），整型截断用 cvtt。
 #pragma once
@@ -174,7 +174,8 @@ inline auto gradient_radial_scanline_scalar(std::uint8_t *row, int x0, int n, fl
 
 // 单像素伽马混合：v = dst_lin*inv + src_lin*alpha，结果转 sRGB。
 // 标量参考：blend_srgb_over(dst, src, alpha) = linear_to_srgb(srgb_to_linear(src)*alpha + srgb_to_linear(dst)*inv)
-// SIMD 逐通道 c：alpha = a[c]，src = s[c]；dv = g_srgb_to_linear[d[c]]，dsf = g_srgb_to_linear[s[c]]。
+// SIMD 逐通道 c：alpha = a[c]，src = s[c]；dv = g_gamma_tables.srgb_to_linear[d[c]]，
+// dsf = g_gamma_tables.srgb_to_linear[s[c]]。
 
 #if defined(AURORA_SIMD_X86)
 inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blend_srgb_over_region_sse2(std::uint8_t *px, std::uint8_t sr,
@@ -734,7 +735,7 @@ inline AURORA_AVX2_TARGET AURORA_NOINLINE auto blur_region_avx2(std::uint8_t *pi
 #endif // GNUC/Clang
 
 // ---------------- 运行时探测 / 分发初始化 ----------------
-inline SimdLevel g_simd_level = SimdLevel::SSE2; // x86-64 基线；detect 后可能升为 AVX2
+// g_simd_level 定义在 painter_simd.h（inline 变量），此处仅实现探测/赋值。
 
 inline auto detect_simd_level() noexcept -> SimdLevel {
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
