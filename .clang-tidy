@@ -10,6 +10,7 @@ Checks: >
   -cppcoreguidelines-owning-memory,
   -cppcoreguidelines-avoid-do-while,
   -hicpp-avoid-do-while,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
   google-build-using-namespace,
   -bugprone-easily-swappable-parameters,
   -readability-trailing-comma
@@ -46,6 +47,14 @@ CheckOptions:
     value: UPPER_CASE
   - key: readability-identifier-naming.ConstantPrefix
     value: 'AURORA_'
+  - key: readability-identifier-naming.ConstantMemberCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantMemberPrefix
+    value: 'm_'
+  - key: readability-identifier-naming.ClassConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.ClassConstantPrefix
+    value: 'm_'
   - key: readability-identifier-naming.LocalConstantCase
     value: lower_case
   - key: readability-identifier-naming.GlobalConstantCase
