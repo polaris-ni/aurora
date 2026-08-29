@@ -720,7 +720,7 @@ class Window {
             // 不应改变其尺寸；若变化说明它实际依赖子节点，误判为 boundary。
             const Size after = w.size();
             const bool size_unchanged =
-                std::fabsf(before.width - after.width) < 1e-3f && std::fabsf(before.height - after.height) < 1e-3f;
+                std::fabs(before.width - after.width) < 1e-3f && std::fabs(before.height - after.height) < 1e-3f;
             AURORA_ASSERT(
                 size_unchanged,
                 "relayout boundary 误判：boundary 尺寸随重排变化，说明其依赖子节点，不能作为 relayout boundary");

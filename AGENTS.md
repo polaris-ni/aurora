@@ -34,7 +34,7 @@
 | `tests/`            | 独立可执行测试 + CTest（`tests/*.cpp`）                                                                                                                                         |
 | `third_party/`      | 三方库文件                                                                                                                                                                      |
 | `tools/`            | API 生成与辅助工具（`gen_api.cpp` 编译目标为 `gen_api_tools`，生成 `aurora_api.json`；CMake 聚合目标 `aurora_api_json`） |
-| `cmake/`            | CMake 模块（顶层 `CMakeLists.txt` 只做编排）：`AuroraThirdParty`（三方构建）/`AuroraImageCodecs`（图片编解码）/`AuroraCcache`（编译缓存）/`AuroraSimd`（SIMD）/`AuroraBackends`（后端开关）/`AuroraTools`（工具）/`AuroraTests`（测试）/`AuroraInstrumentation`（插桩）/`AuroraInstall`（安装），共 9 个；布局与职责详见 `codespec/BUILD_OPTIONS.md` §0.1 |
+| `cmake/`            | CMake 模块（顶层 `CMakeLists.txt` 只做编排）：`AuroraThirdParty`（三方构建）/`AuroraImageCodecs`（图片编解码）/`AuroraCcache`（编译缓存）/`AuroraSimd`（SIMD）/`AuroraBackends`（后端开关）/`AuroraTools`（工具）/`AuroraDemos`（示例）/`AuroraTests`（测试）/`AuroraInstrumentation`（插桩）/`AuroraInstall`（安装），共 10 个；布局与职责详见 `codespec/BUILD_OPTIONS.md` §1.1 |
 | `codespec/`         | **全部项目文档**（需求/架构/规范/指南/概念），见下方导航表                                                                                                                      |
 | `build/`            | 构建产物，CMake 生成，不纳入版本管理                                                                                                                                            |
 | `aurora_api.json`   | 由 `gen_api_tools` 生成的 API 描述数据（schema/类型/属性键），**非文档、不移动**                                                                                                |
@@ -69,7 +69,7 @@
   在 `build/` 下运行 `ctest` 即逐条执行（每条 = `aurora_test_runner --run=<stem>`，进程隔离）。`cmake/AuroraTests.cmake`
   已为依赖相对路径的测试（含 `tests/golden`）显式设置 `WORKING_DIRECTORY` 为仓库根， 故 `ctest` 下直接可跑；仅手工直跑时须从仓库根执行
   （`./build/aurora_test_runner --run=test_offscreen`，或设 `AURORA_GOLDEN_DIR` 覆盖），并可用 `--list`/`--filter=`/`--verbose` 辅助。
-- **测试/示例组织约定**（详见 `CODING_STANDARDS.md` §3 4.8–4.10 与 `coding/CODING_AI.md` 一.4 默认参数章节）：每个公共源文件对应一个 `demo_*.cpp`（`examples/demos/`
+- **测试/示例组织约定**（详见 `CODING_STANDARDS.md` §3 与 §6.2 默认参数章节）：每个公共源文件对应一个 `demo_*.cpp`（`examples/demos/`
   ）与一个 `test_*.cpp`（`tests/`），二者用文件夹区分；测试文件以 `test` 为前缀（非 `_test` 后缀）。测试用例经 `AURORA_TEST()` 宏静态注册
   （用例名 = 文件名 stem，由 CMake 按源文件注入 `AURORA_TEST_NAME`），断言走 `AURORA_TEST_CHECK*`/`AURORA_TEST_REQUIRE*` 家族；
   **测试文件禁止自定义 `main()`**（`main` 由 `tests/au_test_main.cpp` 唯一提供）。后端/平台专属用例在 feature 宏未开启的 `#else` 分支用
@@ -80,27 +80,52 @@
 
 ## 4. 文档导航表（codespec/）
 
-| 你想了解                                              | 读这个文件                      | 权威性说明                                                                                                                                                                                                                                                                         |
-|-------------------------------------------------------|---------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **需求 / 功能规格 / API 契约**                        | `codespec/SPECIFICATIONS.md`    | 🥇 API 与需求以它为准；「三、特性详细规范」分为 21 份子文档：`codespec/specification/features/`(A–G，8 份) / `codespec/specification/subsystems/`(H.1–H.10c，7 份) / `codespec/specification/subsystems_api/`(H.11–H.17+Log+AI-First，6 份)；逐文件清单见 `SPECIFICATIONS.md` 目录 |
-| **架构 / 运行时 / 分层 / 模块映射 / 设计原则**        | `codespec/ARCHITECTURE.md`      | 🥇 架构与设计以它为准；分为 `codespec/architecture/ARCHITECTURE_RUNTIME.md`(运行时/模块映射/数据流)/`ARCHITECTURE_WIDGET.md`(组件树/事件/渲染/序列化)/`ARCHITECTURE_PERF.md`(性能/不变量)/`ARCHITECTURE_AI.md`(AI-first)，同目录                                                   |
-| **核心概念 / 跨框架映射 / 概念可枚举性**              | `codespec/CONCEPTS.md`          | 概念认知与「React/Flutter/Qt 翻译表」；「核心概念审计」为 `codespec/concepts/CONCEPTS_CORE.md`                                                                                                                                                                                     |
-| **编码规范 / 命名 / 错误 / AI 友好性规则 / 版本管理** | `codespec/CODING_STANDARDS.md`  | 🥇 编码规则以它为准；分为 `codespec/coding/CODING_ERRORS_NAMING.md`(错误/命名/文档/元数据/契约)/`CODING_AI.md`(AI 友好性)/`CODING_VERSIONING.md`(版本管理)/`CODING_SIGNATURE.md`(函数签名/内部工具)，同目录                                                                        |
-| **使用指南 / 复制即用配方**                           | `codespec/GUIDELINE.md`         | 最小可编译片段集合（原 RECIPES）；分为 `codespec/guideline/GUIDELINE_BASICS.md`(基础)/`GUIDELINE_ASYNC_SERIAL.md`(异步/序列化)/`GUIDELINE_INTEGRATION.md`(集成)/`GUIDELINE_PITFALLS.md`(坑/调试)，同目录                                                                           |
-| **编译选项 / 宏 / 环境变量（统一参考）**              | `codespec/BUILD_OPTIONS.md`     | 🥇 所有 CMake 开关、缓存变量、feature 宏与运行期环境变量以它为准；分为 `codespec/build_options/BUILD_OPTIONS_BUILD.md`(BUILD_*)/`BUILD_OPTIONS_BACKEND.md`(BACKEND_*)/`BUILD_OPTIONS_ENABLE.md`(ENABLE_*)/`BUILD_OPTIONS_INTERNAL.md`(缓存/定义/变量)，同目录                      |
-| **提交信息规范（Commit Message）**                    | `codespec/COMMIT_CONVENTION.md` | 🥇 提交写法、type/scope 表、与 SemVer / `CHANGELOG.json` 对齐以它为准                                                                                                                                                                                                              |
-| **数据存储抽象层（Storage 门面 + 后端抽象）**         | `codespec/ARCHITECTURE.md` §4.1 | 存储子系统设计：后端抽象、信封/类型化、异步卸载、变更通知、跨记录事务；当前为设计稿，API 契约最终以 `include/aurora/storage/*.h` 落地为准                                                                                                                                          |
-| **项目整体结构 / 该读哪个文档**                       | 本文件 `AGENTS.md`              | 入口                                                                                                                                                                                                                                                                               |
+`codespec/` 共 **14 份手写文档 + 1 份生成物**（`ERROR_CATALOG.md`），外加 2 份生成源数据（`errors.toml` / `debug_api.toml`）。
+各文档的章节号统一为纯数字点分层级（`1` / `1.1` / `1.1.1`）；需求编号 `#1–#24` 是独立的需求标识体系，与章节号并存。
+
+**顶层文档（6 份，均为自包含正文，非外链索引）**
+
+| 你想了解                                              | 读这个文件                     | 权威性说明                                                                                                 |
+|-------------------------------------------------------|--------------------------------|-------------------------------------------------------------------------------------------------------------|
+| **项目定位 / 设计原则 / 需求清单 / 文档导航**         | `codespec/SPECIFICATIONS.md`   | 总纲与索引：24 条特性清单（`#1–#24`）逐条指向其规格落点；分层蓝图、命名速查、API 兼容策略                  |
+| **架构 / 运行时 / 分层 / 模块映射 / 设计不变量**      | `codespec/ARCHITECTURE.md`     | 🥇 架构与设计以它为准：分层、运行时、模块映射、核心数据流、组件树、事件、渲染、性能、11 条设计不变量、错误处理架构、AI-first 原则、测试与 CI |
+| **核心概念 / 跨框架映射 / 概念可枚举性**              | `codespec/CONCEPTS.md`         | 可枚举 UI 原语审计、状态作用域决策树、React / Flutter / Qt 概念映射、迁移要点                              |
+| **编码规范 / 命名 / 错误 / AI 友好性 / 版本管理**     | `codespec/CODING_STANDARDS.md` | 🥇 编码规则以它为准：错误处理、命名、文档与示例、日志纪律、契约标注、AI 友好性、SemVer、函数签名、内部工具层、提交信息规范 |
+| **使用指南 / 复制即用配方**                           | `codespec/GUIDELINE.md`        | 28 组最小可编译片段：界面 / 布局 / 状态 / 异步 / 持久化 / 媒体 / 字体 / Inspector / 工厂 / 测试 / 样式 / 坑 / 调试 |
+| **编译选项 / 宏 / 环境变量（统一参考）**              | `codespec/BUILD_OPTIONS.md`    | 🥇 所有 CMake 开关、缓存变量、feature 宏、运行时环境变量与 find_package 集成以它为准                       |
+
+**子系统规格（8 份，按 `include/aurora/` 模块域切分）**
+
+| 文件 | 覆盖 | 需求 |
+|:---|:---|:---|
+| `specification/01-core.md` | `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池 | #18 #19 #21 #23 |
+| `specification/02-state.md` | `state/`：信号原语、订阅生命周期、`Store`、异步与协程 | #6 #19 |
+| `specification/03-layout-render.md` | `layout/` `render/` `image/` `media/`：布局协议、Flex/Grid 算法、Painter、字体引擎、Surface 与后端 | #11 #20 |
+| `specification/04-widget.md` | `widget/` `ui/`：控件基类契约、自描述、控件清单、可定制性契约 | #7 #22 |
+| `specification/05-event-navigation.md` | `event/` `animation/` `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈 | #8 |
+| `specification/06-app-platform.md` | `app/` `window/` `preferences/` `storage/` `perf/` `debug/`：应用驱动、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面 | #14 #15 |
+| `specification/07-environment-modifier.md` | `environment/` `theming/` `i18n/` `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier | #12 |
+| `specification/08-tooling.md` | 序列化 / 代码生成 / YAML、控件树检查、Inspector、自描述发现、MCP / CLI / LSP、测试原语、日志通道 | #9 #10 #12 #13 #16 #17 #22 |
+
+**数据文件（`codespec/`，位置固定不可移动）**
+
+| 文件 | 说明 |
+|:---|:---|
+| `errors.toml` | 错误码单一声明源（slug / severity / category / message 模板） |
+| `debug_api.toml` | `aurora::debug` 公共自由函数声明源 |
+| `ERROR_CATALOG.md` | `tools/gen_error_codes.cpp` 生成的错误码全量清单（**生成物，勿手改**） |
+
+三个文件路径被 `tools/` 与 `src/aurora/core/diagnostics.cpp` 硬编码。
 
 ### 模块划分
 
 - **需求规格书** → `SPECIFICATIONS.md`
 - **架构 & 设计** → `ARCHITECTURE.md` + `CONCEPTS.md`
-- **编码规范** → `CODING_STANDARDS.md`
-- **提交信息规范** → `COMMIT_CONVENTION.md`
+- **编码规范 & 提交规范** → `CODING_STANDARDS.md`
 - **使用指南** → `GUIDELINE.md`
 - **编译选项/宏/环境变量** → `BUILD_OPTIONS.md`
-- **数据存储抽象层** → `architecture/ARCHITECTURE_RUNTIME.md` §4.11
+- **各子系统 API 契约** → `specification/01`–`08`
+- **数据存储抽象层** → `specification/06-app-platform.md` §9.2 + `ARCHITECTURE.md` §4.8
 - **总入口** → 根 `AGENTS.md`
 
 ---
@@ -111,11 +136,14 @@
    ，保持契约与不变量一致；改完之后，必须按本节的「代码与文档同步」规则回写对应文档，避免文档漂移。
 2. **代码与文档必须同步**（变更类型 → `codespec/` 文档映射）：凡对公共
    API（函数签名、类/类型、信号、属性键、命名空间）或核心设计的增删改，落完代码后须同步更新对应文档；映射如下：
-    - **API 契约 / 功能规格 / 需求**（函数签名、类、信号、属性键、公共行为）→ `SPECIFICATIONS.md`
+    - **API 契约 / 功能规格 / 需求**（函数签名、类、信号、属性键、公共行为）→ `specification/NN-*.md` 中该符号所属模块域的那一份（见 §4 子系统规格表）；跨模块的定位与需求清单 → `SPECIFICATIONS.md`
     - **架构 / 运行时 / 分层 / 模块边界 / 设计原则** → `ARCHITECTURE.md`
     - **核心概念 / 跨框架映射 / 控件语义**（如新增或删除 widget 的对照）→ `CONCEPTS.md`
     - **编码规范 / 命名 / 错误 / AI 友好性**（强类型、命名序、默认参数等）→ `CODING_STANDARDS.md`
+    - **编译期开关 / feature 宏 / 环境变量** → `BUILD_OPTIONS.md`
     - **新增可复现用法 / 最小可编译配方** → `GUIDELINE.md`
+    - **提交信息写法** → `CODING_STANDARDS.md` §10
+    - **文档章节号与需求编号写法**：章节号一律纯数字点分层级（`1` / `1.1` / `1.1.1`），禁止中英文序号；需求编号用 `#N`，与章节号并存
     - 新增 / 删除 widget 或类型时，除 `aurora_api.json`（运行 `gen_api_tools`）外，还应在 `CONCEPTS.md`的控件映射中体现（如适用）。
     - **冲突回写原则**：当文档与代码运行时行为冲突时，以 **代码运行时**为准，并 **回填文档**
       消除冲突，杜绝「文档有、代码无」或「文档缺、代码有」的漂移；不得为迁就旧文档而保留错误实现。
@@ -137,7 +165,7 @@
     - CLI 的JSON/usage、benchmark 表格、LSP/MCP 线协议帧等「程序产品」功能输出走 `AURORA_LOG_RAW` 写 stdout，无前缀、 始终输出）；
     - `tools/`、`examples/`、`tests/` 中遗留的 `printf` 风格诊断用 `AURORA_TEST_PRINTF`/`AURORA_TEST_PRINTF_ERR` 桥接宏， 勿新增
       `std::cout`/`std::cerr`/`printf`/`fprintf`/`puts`。唯一允许直接触达标准输出的是 `src/aurora/core/log.cpp` 内的 sink
-      实现。详见 `coding/CODING_ERRORS_NAMING.md` §3.6 与 `SPECIFICATIONS.md` 日志（Log）子系统小节。
+      实现。详见 `CODING_STANDARDS.md` §4.1 与 `specification/08-tooling.md` §9（日志通道）。
 9. **不得无故改变既有函数/成员的可见性**：AI 在生成或修改代码时，常会顺手调整 `public`/`protected`/`private`
    可见性（如把 `protected` 虚回调改成 `public`、把 `private` 字段挪到 `public` 区等）。这类改动往往与本次任务无关，
    却会破坏封装不变量或改变派生类契约。 **规则**：保持被改文件/类改动前的可见性划分不变；仅当本次改动本身在语义上

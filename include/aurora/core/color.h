@@ -60,7 +60,7 @@ struct Color {
     }
 };
 
-/// @brief 调色板命名空间（规格 §2：推荐 `au::colors::Red` 形式，扁平易发现）。
+/// @brief 调色板命名空间（规格 §2：具名色集中在扁平的 `au::colors` 下，易发现）。
 /// 与 `Color::red()` 等静态工厂并存；AI 可任选其一。
 namespace colors {
 constexpr Color AURORA_WHITE = Color::white();

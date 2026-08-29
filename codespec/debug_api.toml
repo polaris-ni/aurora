@@ -12,8 +12,11 @@
 # Fields:
 # - name       : C++ function name
 # - since      : version introduced
-# - gated      : compile switch (usually AURORA_ENABLE_DEBUG; output-dir
-#                helpers are always available)
+# - gated      : compile switch name, or "none" when the API is always
+#                available regardless of build flags (e.g. the output-dir
+#                helpers). NOTE: omitting the key makes gen_debug_api.cpp
+#                default it to AURORA_ENABLE_DEBUG, so "none" must be
+#                written explicitly.
 # - signature  : full signature (incl. default args), for toolchain / LSP / docs
 # - summary    : human-readable description
 # - header     : declaring header (traceable, optional)
@@ -33,7 +36,7 @@ header = "aurora/debug/debug_backend.h"
 [[function]]
 name = "resolve_output_path"
 since = "0.5.0"
-gated = "AURORA_ENABLE_DEBUG"
+gated = "none"
 signature = "resolve_output_path(const std::string &path) -> std::string"
 summary = "Resolve a relative path without a directory into the default output dir; paths with a directory are returned as-is"
 header = "aurora/debug/debug_backend.h"
@@ -41,7 +44,7 @@ header = "aurora/debug/debug_backend.h"
 [[function]]
 name = "set_output_directory"
 since = "0.5.0"
-gated = "AURORA_ENABLE_DEBUG"
+gated = "none"
 signature = "set_output_directory(const std::string &dir) -> void"
 summary = "Set the default output directory (passing empty string restores the ./aurora_debug/ default)"
 header = "aurora/debug/debug_backend.h"
@@ -49,7 +52,7 @@ header = "aurora/debug/debug_backend.h"
 [[function]]
 name = "output_directory"
 since = "0.5.0"
-gated = "AURORA_ENABLE_DEBUG"
+gated = "none"
 signature = "output_directory() -> std::string"
 summary = "Current default output directory (lazily computed)"
 header = "aurora/debug/debug_backend.h"
