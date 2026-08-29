@@ -52,6 +52,15 @@
 - **文件夹区分（4.9）**：demo 与 test 以目录区分——示例在 `examples/`（含 `examples/demos/`），测试在 `tests/`；二者不混放。
 - **test 文件前缀（4.10）**：测试文件统一以 `test` 为前缀（`test_xxx.cpp`），与示例的 `demo` 前缀（`demo_xxx.cpp`）风格一致，便于
   GLOB 收集与一眼区分源/示例/测试三者。聚合多个不相关控件的「catch-all」测试文件视为反模式，应拆为各 `test_<控件>.cpp`。
+
+- **注册式 runner（4.10a）**：`tests/*.cpp` 全部链入**单一可执行** `aurora_test_runner`（`cmake/AuroraTests.cmake`），`main()`
+  由 `tests/au_test_main.cpp` 唯一提供，**测试文件禁止自定义 `main()`**（否则与全局 `main` 冲突）。用例经 `AURORA_TEST()`
+  宏静态自注册（用例名 = 文件名 stem，由 CMake 按源文件注入 `AURORA_TEST_NAME`；同文件多片段用 `AURORA_TEST_NAMED("名")`）。
+  断言一律走 `test_harness.h` 的 `AURORA_TEST_CHECK*`（非致命，记录后继续）/ `AURORA_TEST_REQUIRE*`（致命，抛 `CheckAbort`
+  终止本用例）家族，失败计数汇入框架上下文，由 runner 统一决定退出码；**不得再自造 `g_test_failures` / `return 0/1` 式退出码**
+  （迁移遗留：`int run()` 段落应改为 `void run()`，或以 `AURORA_TEST_CHECK_EQ(计数, 0)` 桥接本地失败计数，绝不丢弃返回码语义）。
+  后端/平台专属用例在 feature 宏未开启的 `#else` 分支以 `AURORA_TEST_SKIP(宏名)` 注册空通过桩。新增文件漏写注册宏不会报链接错误，
+  由 ctest 的 `registry_integrity` 守护（比对 `runner --list` 与配置期 GLOB 清单）兜底。CTest 粒度不变：每条 = `--run=<stem>`（进程隔离）。
 - **覆盖率工作流（4.11）**：行覆盖率以 GCC `--coverage` 构建（CMake 开关 `AURORA_ENABLE_COVERAGE=ON`，见 `BUILD_OPTIONS.md`）
   并跑完 ctest 后，用 `tools/coverage_report.sh`（Linux/macOS）或 `tools/coverage_report.ps1`（Windows）聚合为终端摘要 +
   `<build_dir>/coverage.csv`，此为唯一口径（gcov 按源文件路径跨目标求和）。逐源文件阈值 **90%**；低于阈值的文件须在其宿主

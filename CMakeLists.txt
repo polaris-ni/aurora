@@ -5,7 +5,7 @@
 #   cmake/AuroraThirdParty.cmake      — FreeType/HarfBuzz 源码构建
 #   cmake/AuroraBackends.cmake        — 后端剪裁开关（Headless/Win32/D3D11/GLFW/X11/Wayland/macOS/WASM）+ P3 优化宏
 #   cmake/AuroraTools.cmake           — 工具/基准可执行（gen_api/MCP/CLI/LSP/bench_* 等）
-#   cmake/AuroraTests.cmake           — CTest 测试目标（GLOB tests/*.cpp）
+#   cmake/AuroraTests.cmake           — CTest 注册式 runner（GLOB tests/*.cpp 链入单一 aurora_test_runner，AURORA_TEST() 自注册）
 #   cmake/AuroraDemos.cmake           — 示例 demo 目标（examples/demos/ 下每组件一个可运行窗口；须在 AuroraTools 之后 include）
 #   cmake/AuroraInstrumentation.cmake — 覆盖率/ASan 插桩（须在全部目标定义之后）
 #   cmake/AuroraInstall.cmake         — 安装 + find_package(Aurora) 导出

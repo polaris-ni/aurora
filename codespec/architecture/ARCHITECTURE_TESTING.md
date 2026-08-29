@@ -20,25 +20,31 @@
 ### 14.2.1 单元测试（`tests/test_*.cpp`）
 
 - 每个公共源文件对应一个 `test_*.cpp`（与 `examples/demos/demo_*.cpp` 同构：1 源文件 ↔ 1 测试 ↔ 1 demo）。
-- 经 `cmake/AuroraTests.cmake` 收集（`file(GLOB CONFIGURE_DEPENDS)`），由 CTest 注册为目标。
+- 经 `cmake/AuroraTests.cmake` 收集（`file(GLOB CONFIGURE_DEPENDS)`），**全部用例链入单一可执行 `aurora_test_runner`**：用例用
+  `AURORA_TEST()` 宏静态自注册（用例名 = 文件名 stem），`main()` 由 `tests/au_test_main.cpp` 唯一提供，测试文件不再自带 `main`。
+  CTest 逐条以 `aurora_test_runner --run=<stem>` 注册（进程隔离与旧「一文件一可执行」等价），并由 `registry_integrity` 守护
+  漏注册。构建从「每文件各自链接 libaurora」收敛为一次链接（全量构建提速的核心）。编写规则见 §14.3 与 CODING_STANDARDS §3 4.10a。
 - 覆盖：布局求解、响应式信号、序列化往返、存储后端、错误码构造等核心逻辑。
 
 ### 14.2.2 Golden 测试（渲染像素级）
 
 - 以 `test_offscreen`（整合了原 `test_golden`）为主：把 widget 树渲染到 `HeadlessSurface` 内存缓冲，与 golden 基准图逐像素比对。
-- **依赖相对路径**：golden 等测试须从 **仓库根**直接运行可执行文件（如 `./build/test_offscreen`），因 `ctest` 会把测试 CWD 设为 `build/`；可用 `AURORA_GOLDEN_DIR` 覆盖解析基准。
+- **依赖相对路径**：golden 等测试须从 **仓库根**运行（如 `./build/aurora_test_runner --run=test_offscreen`），因 `ctest` 已为其把
+  CWD 设为仓库根，手工直跑亦须如此；可用 `AURORA_GOLDEN_DIR` 覆盖解析基准。
 - **SIMD 双实现确定性**：`test_simd_parity` 以 37,805 比对用例（随机化 + 固定种子，覆盖 5 色对 / 非对齐宽 / 多 stop 等）逐位比对标量黄金路径与 SSE2/AVX2 快路径，一票否决（详见 [`ARCHITECTURE_PERF.md`](./ARCHITECTURE_PERF.md#10-性能检测体系performance-profiling)）。
 
 ### 14.2.3 性能基准（交叉引用）
 
-- 衡量工具 `aurora::perf` 埋点（Phase 0）与各项性能门槛见 [`ARCHITECTURE_PERF.md`](./ARCHITECTURE_PERF.md)；实施记录见 `architecture/ARCHITECTURE_PERF_LOG.md`。
+- 衡量工具 `aurora::perf` 埋点与各项性能门槛见 [`ARCHITECTURE_PERF.md`](./ARCHITECTURE_PERF.md)；实施记录见 `architecture/ARCHITECTURE_PERF_LOG.md`。
 
 ---
 
 ## 14.3 测试组织约定
 
 - **命名**：测试文件以 `test` 为 **前缀**（`test_*.cpp`，非 `_test` 后缀），与源文件同名主体。
-- **运行**：从仓库根运行以保证相对路径解析；本地复跑建议以最高并行度执行（`ctest -j` 配满核心，见用户执行偏好），golden / simd 等并发竞争用例须隔离而非退回串行。
+- **运行**：`ctest -R <名>` 逐条拉起 `aurora_test_runner --run=<stem>`；从仓库根运行以保证相对路径解析；本地复跑建议以最高并行度
+  执行（`ctest -j` 配满核心，见用户执行偏好）。共享资源竞争用例（剪贴板 `test_text`/`test_clipboard`、计时 `test_perf_display_list`）
+  以 `RUN_SERIAL` **单独隔离错峰**，而非把整套退回串行。
 - **新增约束**：新增公共 API / widget / 核心逻辑须配套单测并接入 CTest（见 [`CODING_STANDARDS.md`](../CODING_STANDARDS.md)）。
 
 ---

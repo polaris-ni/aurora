@@ -40,7 +40,7 @@
 | `cmake/AuroraSimd.cmake`            | `AURORA_ENABLE_SIMD`（光栅内核 SIMD 双实现，内部宏，不 PUBLIC 传播）                                                                           |
 | `cmake/AuroraCcache.cmake`          | `AURORA_ENABLE_CCACHE`（ccache 编译缓存启动器）                                                                                                |
 | `cmake/AuroraTools.cmake`           | 工具/基准可执行（`aurora_add_tool()` 统一样板）+ `AURORA_BUILD_INSPECTOR_SERVER`                                                               |
-| `cmake/AuroraTests.cmake`           | `AURORA_BUILD_TESTS` CTest 目标（GLOB `tests/*.cpp`）                                                                                          |
+| `cmake/AuroraTests.cmake`           | `AURORA_BUILD_TESTS` 注册式 runner（GLOB `tests/*.cpp` → 单一 `aurora_test_runner`，`AURORA_TEST()` 自注册）                                |
 | `cmake/AuroraInstrumentation.cmake` | `AURORA_ENABLE_COVERAGE` / `AURORA_ENABLE_ASAN` / `AURORA_ENABLE_PROFILING` / `AURORA_ENABLE_TRACING`（须在全部目标定义之后 include）          |
 | `cmake/AuroraInstall.cmake`         | 安装 + `find_package(Aurora)` 导出（须在后端开关之后 include）                                                                                 |
 

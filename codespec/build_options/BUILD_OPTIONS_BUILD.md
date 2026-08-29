@@ -14,7 +14,7 @@
 | 选项                            | 默认值 | 含义                                                                                                        | 引入的目标                                     |
 |---------------------------------|--------|-------------------------------------------------------------------------------------------------------------|------------------------------------------------|
 | `AURORA_BUILD_DEMOS`            | `ON`   | **定义**（非默认构建）`examples/demos/` 下每组件一个的可运行窗口 demo 目标；均 `EXCLUDE_FROM_ALL`，按需构建 | 各 `demo_<组件>` 可执行文件 + 聚合目标 `demos` |
-| `AURORA_BUILD_TESTS`            | `ON`   | 编译 `tests/` 下全部 CTest 独立测试                                                                         | 各 `test_*` 可执行文件 + `enable_testing()`    |
+| `AURORA_BUILD_TESTS`            | `ON`   | 编译 `tests/` 下全部用例并接入 CTest：`AURORA_TEST()` 注册、单一 runner 一次链接，逐条 `--run=<stem>` 隔离 | `aurora_test_runner` 可执行 + `enable_testing()` + `registry_integrity` 守护 |
 | `AURORA_BUILD_INSPECTOR_SERVER` | `OFF`  | 编译 Inspector 远程 HTTP 服务器（跨平台：Windows 链 `ws2_32` / POSIX 链 `pthread`）                         | `aurora_inspector_server` 静态库               |
 | `AURORA_BUILD_IMAGE_JPEG`       | `OFF`  | 启用 JPEG 图像解码支持（关闭时需由消费者自行提供解码后的像素）                                              | 仅改变编译期可用编解码能力，无独立目标         |
 | `AURORA_BUILD_IMAGE_WEBP`       | `OFF`  | 启用 WebP 图像解码支持                                                                                      | 同上                                           |

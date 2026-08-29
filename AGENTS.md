@@ -65,11 +65,15 @@
 - CMake 选项 / 编译宏 / 运行时环境变量： **全部统一列于 `codespec/BUILD_OPTIONS.md`（唯一权威来源）**。该文按三层命名分类法组织——
   `AURORA_BUILD_*`（构建产物开关）/ `AURORA_BACKEND_*`（后端开关=feature 宏）/ `AURORA_ENABLE_*`（插桩/分析），并含
   `NOMINMAX` 等全局编译定义、golden 测试的 4 个运行时环境变量与快速速查表。此处不再重复罗列，以免漂移。
-- 测试：在 `build/` 下运行 `ctest`。`cmake/AuroraTests.cmake` 已为依赖相对路径的测试（含
-  `tests/golden`）显式设置 `WORKING_DIRECTORY` 为仓库根， 故 `ctest` 下直接可跑；仅手工直跑可执行文件时（如
-  `./build/test_offscreen`）才须从仓库根执行（同样可设置 `AURORA_GOLDEN_DIR` 覆盖）。
+- 测试：`cmake/AuroraTests.cmake` 把 `tests/*.cpp` 全部链入**单一可执行** `aurora_test_runner`（注册式 runner，见下条），
+  在 `build/` 下运行 `ctest` 即逐条执行（每条 = `aurora_test_runner --run=<stem>`，进程隔离）。`cmake/AuroraTests.cmake`
+  已为依赖相对路径的测试（含 `tests/golden`）显式设置 `WORKING_DIRECTORY` 为仓库根， 故 `ctest` 下直接可跑；仅手工直跑时须从仓库根执行
+  （`./build/aurora_test_runner --run=test_offscreen`，或设 `AURORA_GOLDEN_DIR` 覆盖），并可用 `--list`/`--filter=`/`--verbose` 辅助。
 - **测试/示例组织约定**（详见 `CODING_STANDARDS.md` §3 4.8–4.10 与 `coding/CODING_AI.md` 一.4 默认参数章节）：每个公共源文件对应一个 `demo_*.cpp`（`examples/demos/`
-  ）与一个 `test_*.cpp`（`tests/`），二者用文件夹区分；测试文件以 `test` 为前缀（非 `_test` 后缀）。
+  ）与一个 `test_*.cpp`（`tests/`），二者用文件夹区分；测试文件以 `test` 为前缀（非 `_test` 后缀）。测试用例经 `AURORA_TEST()` 宏静态注册
+  （用例名 = 文件名 stem，由 CMake 按源文件注入 `AURORA_TEST_NAME`），断言走 `AURORA_TEST_CHECK*`/`AURORA_TEST_REQUIRE*` 家族；
+  **测试文件禁止自定义 `main()`**（`main` 由 `tests/au_test_main.cpp` 唯一提供）。后端/平台专属用例在 feature 宏未开启的 `#else` 分支用
+  `AURORA_TEST_SKIP(宏名)` 注册空通过桩。新增漏注册由 `registry_integrity` 守护（比对 `--list` 与 GLOB 清单）在 ctest 阶段兜底。
 - ⚠️ 新增 `.cpp` 后需让 CMake 刷新 GLOB（`CONFIGURE_DEPENDS` 多数情况自动；否则碰一下 `CMakeLists.txt` 或删 `build/` 重建）。
 
 ---

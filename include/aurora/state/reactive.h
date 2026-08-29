@@ -21,7 +21,7 @@ namespace aurora {
  */
 template<typename T> class Reactive : public SignalView<T> {
   public:
-    explicit Reactive(T v = T{}) : m_state(std::make_shared<State<T>>(std::move(v))) {}
+    Reactive(T v = T{}) : m_state(std::make_shared<State<T>>(std::move(v))) {} // NOLINT(google-explicit-constructor)
 
     /// @brief 由可转换为 T 的值构造（如 `const char*` → `LocalizedString`），
     /// 使 `Text{ .content = "Hi" }` 这类写法可直接编译（§3.1）。
