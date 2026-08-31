@@ -13,7 +13,8 @@ Checks: >
   -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
   google-build-using-namespace,
   -bugprone-easily-swappable-parameters,
-  -readability-trailing-comma
+  -readability-trailing-comma,
+  -modernize-use-ranges
 WarningsAsErrors: ''
 HeaderFilterRegex: 'aurora/.*'
 CheckOptions:
