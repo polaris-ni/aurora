@@ -24,7 +24,7 @@ class DisplayList; // 前向声明（完整定义见 display_list.h）；录制/
 /**
  * @brief 软件栅格绘制器：在 RGBA8 像素缓冲上绘制矩形/文本/图像。
  *
- * 纯软件实现，无 GPU 依赖（架构 §1.2）。后端可插拔（Surface 抽象）：
+ * 纯软件实现，无 GPU 依赖（ARCHITECTURE.md §8.1）。后端可插拔（Surface 抽象）：
  * HeadlessSurface（内存 PNG）、Win32Surface（GDI）、GlfwSurface（OpenGL 1.1 可选）。
  * widget 层只依赖抽象绘制语义（fillRect/drawText/drawImage）。
  */

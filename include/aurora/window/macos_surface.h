@@ -1,7 +1,7 @@
 #pragma once
 #include "aurora/core/platform.h"
 
-// macOS AppKit/CoreGraphics Surface（§10.2）：仅在 defined(AURORA_PLATFORM_MACOS) 时提供。
+// macOS AppKit/CoreGraphics Surface（ARCHITECTURE.md §8.4）：仅在 defined(AURORA_PLATFORM_MACOS) 时提供。
 // 其他平台降级为 HeadlessSurface。
 
 #if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)

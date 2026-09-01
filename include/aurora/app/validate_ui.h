@@ -8,7 +8,7 @@
 namespace aurora {
 
 /**
- * @brief UI 树 JSON Schema 验证错误（规格 §7.1）。
+ * @brief UI 树 JSON Schema 验证错误（specification/08-tooling.md §7.1）。
  *
  * 每条错误携带 JSON 路径、错误信息与修复建议，供 AI Agent 自动修复。
  *
@@ -33,7 +33,7 @@ struct ValidationError {
 };
 
 /**
- * @brief 验证 UI 树 JSON 是否符合 aurora_api.json schema（规格 §7.1）。
+ * @brief 验证 UI 树 JSON 是否符合 aurora_api.json schema（specification/08-tooling.md §7.1）。
  *
  * 用途：AI 生成 UI JSON 后先验证再消费，提前捕获：
  * - 未知 widget 类型（type 字段不在已注册列表中）

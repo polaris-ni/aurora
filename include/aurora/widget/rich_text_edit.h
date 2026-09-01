@@ -24,7 +24,7 @@ struct StyledChar {
 };
 
 /**
- * @brief 可编辑富文本控件（规格 §5.2）。
+ * @brief 可编辑富文本控件。
  *
  * 文档模型为 `vector<StyledChar>`，支持：
  * - 加粗 / 斜体 / 下划线切换（Ctrl+B / Ctrl+I / Ctrl+U）

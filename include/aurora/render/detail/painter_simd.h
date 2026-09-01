@@ -1,4 +1,4 @@
-// Aurora — 光栅内核 SIMD 双实现（WS-4【D1】）
+// Aurora — 光栅内核 SIMD 双实现
 // 约定：
 //  - 标量参考实现（*_scalar）与现有渲染像素逐位一致，golden 以此为准。
 //  - SIMD 路径（*_sse2 / *_avx2）镜像标量浮点运算序列；编译期加 -ffp-contract=off

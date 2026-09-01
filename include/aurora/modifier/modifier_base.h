@@ -73,7 +73,7 @@ class ModifierNode {
     [[nodiscard]] virtual auto flex_weight() const -> float { return 0.0f; }
 
     /// @brief 触发点击回调（仅 `Clickable` 节点覆盖；其余节点为空操作）。
-    /// 由事件派发器在命中目标上调用（架构 §5.4）。
+    /// 由事件派发器在命中目标上调用（架构 §7 事件与命中测试）。
     virtual auto fire_click() const -> void {}
 
     /// @brief 原始触摸事件入口（仅 `TouchListener` 等输入节点覆盖；其余节点为空操作）。

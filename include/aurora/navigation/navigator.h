@@ -11,18 +11,18 @@
 namespace aurora {
 
 /**
- * @brief 导航器：持有 `Route` 栈，管理 push/pop/replace（架构 §5.11，
+ * @brief 导航器：持有 `Route` 栈，管理 push/pop/replace（specification/05-event-navigation.md §7.2，
  * 参考 UIKit UINavigationController / Android NavController / Flutter Navigator）。
  *
  * MVP 支持完整栈（push/pop/replace/popToRoot）；转场动画经 `Route::transition`
- * 配置，由上层在切换当前页后请求重绘/转场（§5.5）。栈变化触发 `onRouteChanged`
- * 回调，供帧循环请求下一帧（§5.10 VSync 合并），避免中间重绘。
+ * 配置，由上层在切换当前页后请求重绘/转场（specification/05-event-navigation.md §7.1）。栈变化触发
+ * `onRouteChanged` 回调，供帧循环请求下一帧（VSync 合并，ARCHITECTURE.md §5.2），避免中间重绘。
  */
-/// @brief 导航栈默认最大深度（规格 §2.4 有界层深度守卫）。超过此深度的 push/restore
+/// @brief 导航栈默认最大深度（specification/05-event-navigation.md §7.2 栈深上限守卫）。超过此深度的 push/restore
 /// 经 `Diagnostics` 降级拒绝，避免无限深栈导致的栈溢出 / 渲染雪崩。
 inline constexpr std::size_t AURORA_DEFAULT_MAX_NAV_DEPTH = 32;
 
-/// @brief 轻量路由表（deep linking 辅助，§H.8）：名称 → 路由构造器。
+/// @brief 轻量路由表（deep linking 辅助）：名称 → 路由构造器。
 using RouteRegistry = std::map<std::string, std::function<Route(const std::string &)>>;
 
 class Navigator {
@@ -50,19 +50,19 @@ class Navigator {
     [[nodiscard]] auto can_pop() const -> bool;
     [[nodiscard]] auto stack() const -> const std::vector<Route> &;
 
-    /// @brief 导出当前路由栈名序列（deep linking，§H.8）。
+    /// @brief 导出当前路由栈名序列（deep linking）。
     [[nodiscard]] auto path() const -> std::vector<std::string>;
 
-    /// @brief 按名称序列重建路由栈（deep linking，§H.8）；build 把名称映射回 Route。
+    /// @brief 按名称序列重建路由栈（deep linking）；build 把名称映射回 Route。
     auto restore(const std::vector<std::string> &names, const std::function<Route(std::string)> &build) -> void;
 
-    /// @brief 按 URI 字符串重建路由栈（deep linking，§H.8）：以 '/' 切分名称序列后委托 restore。
+    /// @brief 按 URI 字符串重建路由栈（deep linking）：以 '/' 切分名称序列后委托 restore。
     auto open_uri(const std::string &uri, const std::function<Route(const std::string &)> &build) -> void;
 
-    /// @brief 按 URI 字符串 + 路由表重建路由栈（§H.8）；表中缺失的名称段被跳过。
+    /// @brief 按 URI 字符串 + 路由表重建路由栈；表中缺失的名称段被跳过。
     auto open_uri(const std::string &uri, const RouteRegistry &registry) -> void;
 
-    /// @brief 栈变化回调（请求下一帧重绘，§5.10）。
+    /// @brief 栈变化回调（请求下一帧重绘，ARCHITECTURE.md §5.2）。
     auto set_on_route_changed(std::function<void()> cb) -> void;
 
     /// @brief 当前允许的最大路由栈深度（默认 `AURORA_DEFAULT_MAX_NAV_DEPTH`）。

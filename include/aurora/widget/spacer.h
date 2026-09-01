@@ -6,7 +6,7 @@
 namespace aurora {
 
 /**
- * @brief 弹性空间（REQUIREMENTS §4.1 / 规格 §4.1.1）。
+ * @brief 弹性空间。
  *
  * 在 `Column`/`Row` 中吸收主轴方向的全部剩余自由空间，用于把相邻 widget 推到两端。
  * 自身无绘制。自由空间为 0 时退化为 0 尺寸（与 Compose/Flutter Spacer 一致）。

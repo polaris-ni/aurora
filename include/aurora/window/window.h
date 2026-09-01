@@ -216,7 +216,7 @@ auto enable_dpi_awareness() -> void;
 
 /**
  * @brief 窗口：组合一个 `Surface` 后端（Headless/Glfw/Win32），提供 pumps 事件、
- * present 根 widget、尺寸/标题管理与帧循环（架构 §4.5 后端选择）。
+ * present 根 widget、尺寸/标题管理与帧循环（ARCHITECTURE.md §8.4 后端家族）。
  *
  * 设计要点（AI-first / 概念可枚举）：
  * - 后端不可知：构造时注入 `Surface`（由 `create_window` 工厂决定具体实现），
@@ -303,7 +303,7 @@ class Window {
     /// @brief 设置当前窗口几何态快照（由 `Application` 在状态变化时调用）。
     auto set_window_mode(WindowMode m) -> void { m_window_mode = m; }
 
-    /// @brief pump 平台事件（→ 经 Surface::set_event_handler 上抛给 Application 集中派发，§5.4）。
+    /// @brief pump 平台事件（→ 经 Surface::set_event_handler 上抛给 Application 集中派发，specification/06-app-platform.md §3.1）。
     auto pump_events() const -> void { m_surface->poll_platform_events(); }
 
     /// @brief 渲染单帧到后端缓冲（不 swap；present() 才提交）。
@@ -324,7 +324,7 @@ class Window {
     /// 整棵树含根 widget 自身无需手动包 `MediaQueryProvider` 即可读取设备上下文；
     /// 手动 `MediaQueryProvider` 仍按「最近祖先优先」覆盖此默认值。
     ///
-    /// 脏区域优化（规格 §2.1，默认开启）：脏追踪开启时按「绘制脏 / 布局脏 / 尺寸变化」
+    /// 脏区域优化（specification/06-app-platform.md §3.2，默认开启）：脏追踪开启时按「绘制脏 / 布局脏 / 尺寸变化」
     /// 三要素决策本帧——无任一脏且尺寸未变 → 整帧跳过（idle 零开销，上帧画面仍有效）；
     /// 仅绘制脏（如文本选区高亮、主题切换）→ 跳过整树 layout，复用已缓存 Node 几何直接 paint；
     /// 布局脏或尺寸变化 → layout + paint。脏来源：任一控件 `mark_needs_layout` → 布局脏 + 绘制脏；
@@ -503,7 +503,7 @@ class Window {
     Environment m_root_env; ///< 每帧重建的根 MediaQuery 注入环境（地址恒定）；present_root 注入。
     WindowState m_window_state = WindowState::Visible; ///< 当前窗口可见性快照（由 Application 设置）。
     WindowMode m_window_mode = WindowMode::Normal;     ///< 当前窗口几何态快照（由 Application 设置）。
-    DirtyRegionTracker m_dirty;                        ///< 绘制脏追踪器（§2.1）。
+    DirtyRegionTracker m_dirty;                        ///< 绘制脏追踪器（specification/06-app-platform.md §3.2）。
     bool m_dirty_tracking = true;                      ///< 脏追踪开关（默认开启：idle 跳帧 + layout/paint 分离）。
     bool m_layout_dirty = true; ///< 布局脏：尺寸/结构/约束变化或 mark_needs_layout 触发，下一帧需重排。
     std::vector<std::weak_ptr<Widget>>

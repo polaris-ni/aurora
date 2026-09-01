@@ -11,7 +11,7 @@
 namespace aurora {
 
 /**
- * @brief 主题作用域：为子树覆盖（或首次注入）主题（规格 §8 显式主题传递）。
+ * @brief 主题作用域：为子树覆盖（或首次注入）主题（specification/07-environment-modifier.md §5.1 显式主题传递）。
  *
  * 语义等价于 `Provider<Theme>`，但提供领域化的名称与构造。子树内任意 widget
  * 经 `inheritTheme(ctx)` 读取最近祖先的 `ThemeScope` 注入值（最近祖先优先，
@@ -42,7 +42,7 @@ class ThemeScope : public Provider<Theme> {
 };
 
 /**
- * @brief 读取最近祖先 `ThemeScope` 注入的主题（§8 显式主题传递）。
+ * @brief 读取最近祖先 `ThemeScope` 注入的主题（specification/07-environment-modifier.md §5.1 显式主题传递）。
  *
  * 在 widget 的 `on_paint`/`on_layout` 中调用以获取当前主题令牌（颜色、字体），
  * 从而让绘制随主题变化。无注入主题时返回默认浅色主题，保证永不崩溃。

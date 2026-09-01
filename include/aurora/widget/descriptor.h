@@ -67,7 +67,7 @@ struct WidgetDescriptor {
 [[nodiscard]] auto descriptor_to_json(const WidgetDescriptor &d) -> Json;
 
 // ============================================================
-// validate_prop<T>：属性值约束验证（规格 §9 增强）
+// validate_prop<T>：属性值约束验证（specification/04-widget.md §2.2）
 // ============================================================
 // 定义在此而非 props_io.h，因需要 PropDescriptor 完整定义（props_io.h 被本头文件包含，
 // 反向包含会造成循环依赖）。

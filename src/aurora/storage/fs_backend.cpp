@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 每记录一个 JSON 信封文件；二进制载荷走 sidecar `<id>.bin` + 信封内 `blob_ref`
 // （对齐 Core Data「>1MB 二进制落盘 + 存路径」策略，零 base64 膨胀）。原子写
-// （临时文件 + rename），可选跨进程 advisory 锁。见 codespec/architecture/ARCHITECTURE_RUNTIME.md §4.11。
+// （临时文件 + rename），可选跨进程 advisory 锁。见 ARCHITECTURE.md §4.8。
 // ============================================================================
 
 #include "aurora/storage/fs_backend.h"

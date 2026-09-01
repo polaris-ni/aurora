@@ -17,7 +17,7 @@
 namespace aurora {
 
 /**
- * @brief 字段验证器（规格 §5.1）：输入字符串 -> 错误消息（空 = 通过）。
+ * @brief 字段验证器：输入字符串 -> 错误消息（空 = 通过）。
  *
  * 可组合：`combine({required(), min_length(3)})` 依次执行，返回首个失败消息。
  * 对标 Flutter `FormFieldValidator`、Qt `QValidator`、WPF `ValidationRule`。
@@ -110,7 +110,7 @@ namespace validators {
 } // namespace validators
 
 /**
- * @brief 表单字段（规格 §5.1）：包裹任意输入控件 + 验证器 + 错误文本展示。
+ * @brief 表单字段：包裹任意输入控件 + 验证器 + 错误文本展示。
  *
  * 子节点为实际输入控件（TextInput 等）；`value_provider` 提供当前值供验证；
  * `validate()` 执行验证并更新错误状态，验证失败时在子控件下方绘制红色错误文本。
@@ -217,7 +217,7 @@ class FormField : public SingleChild {
 };
 
 /**
- * @brief 表单容器（规格 §5.1）：聚合多个 FormField，统一验证与提交。
+ * @brief 表单容器：聚合多个 FormField，统一验证与提交。
  *
  * `submit()` 依次验证所有字段：全部通过则调用 `on_submit`；任一失败则不提交，
  * 各字段各自展示错误。对标 Flutter `Form`、HTML `<form>`。

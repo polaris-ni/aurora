@@ -36,7 +36,7 @@ struct ColumnProps {
  * @brief 纵向线性布局容器（主轴 = 垂直）。
  *
  * 通过 `FlexLayouter` 完成两阶段布局：子项按 flex 权重瓜分剩余高度，交叉轴取最宽子项；
- * 主轴/交叉轴对齐与 `Expand`（经 `Modifier::expand`）见架构 §5.2 / §5.8。
+ * 主轴/交叉轴对齐与 `Expand`（经 `Modifier::expand`）见 specification/03-layout-render.md §7.2。
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
  */
@@ -102,7 +102,7 @@ class Column : public Container, public ColumnProps {
         }
     }
 
-    /// @brief 构建期属性约束校验（规格 §9）：校验 gap >= 0。
+    /// @brief 构建期属性约束校验（specification/04-widget.md §2.2）：校验 gap >= 0。
     [[nodiscard]] auto validate_props() const -> Result<void> override {
         if (gap < 0.0f) {
             return make_error(ErrorCode::WidgetInvalidProp, "布局 gap 必须 >= 0，得到 " + std::to_string(gap),
@@ -232,7 +232,7 @@ class Row : public Container, public RowProps {
         }
     }
 
-    /// @brief 构建期属性约束校验（规格 §9）：校验 gap >= 0。
+    /// @brief 构建期属性约束校验（specification/04-widget.md §2.2）：校验 gap >= 0。
     [[nodiscard]] auto validate_props() const -> Result<void> override {
         if (gap < 0.0f) {
             return make_error(ErrorCode::WidgetInvalidProp, "布局 gap 必须 >= 0，得到 " + std::to_string(gap),

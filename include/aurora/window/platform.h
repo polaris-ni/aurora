@@ -5,7 +5,7 @@
 
 namespace aurora {
 
-/// @brief 平台能力标志（显式查询，跳过 Surface 探测；规格 §4.6）。
+/// @brief 平台能力标志（显式查询，跳过 Surface 探测；specification/06-app-platform.md §5）。
 struct PlatformCapabilities {
     bool multitouch = false;             ///< 支持多点触控（真实显示 Surface Win32/Glfw 为 true，Headless 为 false）。
     bool high_frequency_pointer = false; ///< 高频率指针采样（Win32/Glfw 为 true）。
@@ -13,7 +13,7 @@ struct PlatformCapabilities {
     bool mobile = false;                 ///< 移动形态（Mobile/Tablet）。
 };
 
-/// @brief 平台与运行环境快照（显式查询，跳过 Surface 探测，规格 §4.6）。
+/// @brief 平台与运行环境快照（显式查询，跳过 Surface 探测，specification/06-app-platform.md §5）。
 /// 平台家族 `PlatformKind` 与设备形态 `DeviceKind` 复用 `MediaQuery` 既有定义，避免重复。
 struct Platform {
     PlatformKind kind = PlatformKind::Unknown;
@@ -55,7 +55,7 @@ struct Platform {
     }
 };
 
-/// @brief 显式查询当前平台与运行环境（编译期 OS + 自动探测 Surface，规格 §4.6）。
+/// @brief 显式查询当前平台与运行环境（编译期 OS + 自动探测 Surface，specification/06-app-platform.md §5）。
 /// 不构造任何 `Window` / `Surface`，保持 widget 不反向依赖 Surface 分层。
 [[nodiscard]] inline auto platform() -> Platform {
     Platform p;

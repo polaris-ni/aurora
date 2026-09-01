@@ -56,9 +56,9 @@ class Button : public LeafWidget, public ButtonProps {
     explicit Button(const char *label) { this->label = label; }
 
     // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
-    std::function<void()> on_click; ///< 点击回调（同步派发，见 §5.4）
+    std::function<void()> on_click; ///< 点击回调（同步派发，见 specification/05-event-navigation.md §3）
 
-    /// @brief 运行时可查询的默认属性值（属性默认值的单一事实来源，规格 #5；经实例 `btn.defaults()` 调用亦可）。
+    /// @brief 运行时可查询的默认属性值（属性默认值的单一事实来源，需求 #5；经实例 `btn.defaults()` 调用亦可）。
     [[nodiscard]] static auto defaults() -> ButtonProps { return ButtonProps{}; }
 
     /// @brief 设置文字（链式）。

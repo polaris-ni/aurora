@@ -16,7 +16,7 @@ namespace aurora {
  * @brief 派生状态：由函数 `f(State...)` 计算，自动追踪其读取的依赖。
  *
  * 内部持有一个 Effect：运行 f 时读取的 State 自动成为依赖；任一依赖变化 →
- * 重算并通知本 Computed 的观察者。对应架构 §3.3。
+ * 重算并通知本 Computed 的观察者。对应 specification/02-state.md §2.3。
  *
  * @tparam T 计算结果类型。
  *
@@ -47,7 +47,7 @@ template<typename T> class Computed : public SignalView<T>, public StateBase {
     [[nodiscard]] auto anchor() const -> AnchorPtr override { return StateBase::anchor(); }
 
     auto subscribe(Effect &e) -> void override {
-        // 与 State 一致：去重 + 惰性摘除失效边 + 建立弱引用连接（T1b）。
+        // 与 State 一致：去重 + 惰性摘除失效边 + 建立弱引用连接。
         for (auto it = m_observers.begin(); it != m_observers.end();) {
             if (!(*it)->effect.lock()) {
                 it = m_observers.erase(it); // 失效边，摘除

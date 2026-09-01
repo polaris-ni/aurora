@@ -20,7 +20,7 @@
 namespace aurora {
 
 /**
- * @brief 帧统计（规格 §8.2）：帧时间滑动窗口 + FPS 推导。
+ * @brief 帧统计（ARCHITECTURE.md §10.1）：帧时间滑动窗口 + FPS 推导。
  *
  * `Application::run` 每帧调用 `record(dt)`；`PerfOverlay` / 工具读取。
  * 进程级单例（单线程 UI 模型下无需加锁）。
@@ -294,7 +294,7 @@ class FrameStats {
     double m_paint_sum = 0;
     double m_present_sum = 0;
 
-    // 帧循环唤醒/睡眠观测（阶段 C）
+    // 帧循环唤醒/睡眠观测
     std::size_t m_wakeups = 0;                             ///< 累计唤醒次数（wait_events 返回计数）。
     double m_wait_total_ms = 0.0;                          ///< 累计等待时长（毫秒）。
     bool m_wait_epoch_set = false;                         ///< 是否已记录首次等待（墙钟基准有效）。
@@ -303,7 +303,7 @@ class FrameStats {
 };
 
 /**
- * @brief 性能覆盖层（规格 §8.2）：包裹内容并在角落叠加 FPS/帧时间统计。
+ * @brief 性能覆盖层（ARCHITECTURE.md §10.2）：包裹内容并在角落叠加 FPS/帧时间统计。
  *
  * `set_visible(false)` 关闭显示（内容不受影响）。数据源 `FrameStats::instance()`。
  * 对标 Flutter Performance Overlay。
@@ -350,7 +350,7 @@ class PerfOverlay : public SingleChild {
     }
     [[nodiscard]] auto visible() const -> bool { return m_visible; }
 
-    /// @brief 是否显示渲染计数器与长任务行（渲染性能专项 Phase 0）。
+    /// @brief 是否显示渲染计数器与长任务行。
     auto set_show_counters(bool v) -> PerfOverlay & {
         m_show_counters = v;
         mark_needs_paint();
@@ -376,7 +376,7 @@ class PerfOverlay : public SingleChild {
                                                s.hitch_count(), s.idle_frame_count());
     }
 
-    /// @brief 第三行统计文本：唤醒频率 + 睡眠占比（事件驱动帧循环观测，阶段 C）。
+    /// @brief 第三行统计文本：唤醒频率 + 睡眠占比（事件驱动帧循环观测）。
     [[nodiscard]] static auto stats_line3() -> std::string {
         const FrameStats &s = FrameStats::instance();
         return aurora::internal::string_format("wakeups/s: %.1f | sleep: %.0f%%", s.wakeups_per_sec(),
@@ -399,7 +399,7 @@ class PerfOverlay : public SingleChild {
         }
     }
 
-    /// @brief 第五行统计文本：脏区效率 + 长任务累计（本专项主验收指标）。
+    /// @brief 第五行统计文本：脏区效率 + 长任务累计（脏区效率的主验收指标）。
     [[nodiscard]] static auto stats_line5() -> std::string {
         if constexpr (!profiling_enabled()) {
             return "dirty/long-task: profiling off";
@@ -412,7 +412,7 @@ class PerfOverlay : public SingleChild {
         }
     }
 
-    /// @brief 计数器行的告警颜色：发生整帧重绘时转红（本专项要消灭的场景）。
+    /// @brief 计数器行的告警颜色：发生整帧重绘时转红（需要避免的场景）。
     [[nodiscard]] static auto counters_color() -> Color {
         if constexpr (!profiling_enabled()) {
             return { 140, 140, 140, 255 }; // 灰色 — 数据不可用
@@ -463,7 +463,7 @@ class PerfOverlay : public SingleChild {
         constexpr float line_h = 18.0f;  // 单行文本高度（10pt 字体需 ≥18px 避免截断/错位）
         constexpr float graph_h = 48.0f; // 条形图高度
         constexpr float pad = 6.0f;
-        // 基础三行 + 可选的计数器/脏区两行（渲染性能专项 Phase 0）
+        // 基础三行 + 可选的计数器/脏区两行
         const int line_count = m_show_counters ? 5 : 3;
         const float text_total_h = line_h * static_cast<float>(line_count);
         const float total_h = text_total_h + graph_h + (pad * 2);
@@ -492,10 +492,10 @@ class PerfOverlay : public SingleChild {
         draw_line(stats_line1(), fps_color(s.fps()));
         // 第二行：dropped + hitch + idle（浅灰文本）
         draw_line(stats_line2(), Color(200, 200, 200, 255));
-        // 第三行：唤醒频率 + 睡眠占比（事件驱动帧循环观测，阶段 C）
+        // 第三行：唤醒频率 + 睡眠占比（事件驱动帧循环观测）
         draw_line(stats_line3(), Color(200, 200, 200, 255));
         if (m_show_counters) {
-            // 第四 / 五行：渲染计数器与脏区效率（渲染性能专项 Phase 0）
+            // 第四 / 五行：渲染计数器与脏区效率
             draw_line(stats_line4(), counters_color());
             draw_line(stats_line5(), counters_color());
         }

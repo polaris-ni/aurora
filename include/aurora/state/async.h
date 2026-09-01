@@ -105,7 +105,7 @@ template<typename F> auto invoke_safe(F &&f) {
 } // namespace detail
 
 /**
- * @brief 轻量异步任务（需求 #19 / 规格 §3.5 / §H.10）。
+ * @brief 轻量异步任务（需求 #19 / specification/02-state.md §5.1）。
  *
  * 在单线程 UI 约束下，把「后台计算」与「主线程结果回写」解耦：
  * - `async(fn)` 立即返回一个 `Task<T>`，在**有界线程池**（`ThreadPool::default_pool()`）

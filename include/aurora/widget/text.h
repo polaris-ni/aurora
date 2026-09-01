@@ -45,7 +45,7 @@ struct TextProps {
 /**
  * @brief 文本控件（叶 widget）：测量文字自然尺寸，绘制文本。
  *
- * 支持**双模 API**（规格 §1）：配置块 `Text{.content="Hi", .font={.sizePt=14}}`
+ * 支持**双模 API**（specification/04-widget.md §2.5）：配置块 `Text{.content="Hi", .font={.sizePt=14}}`
  * 与链式 `au::Text("Hi").font_size(14).color(au::colors::Red)` 等价。
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
@@ -64,7 +64,7 @@ class Text : public LeafWidget, public TextProps {
         return *this;
     }
 
-    // 非正数降级为 14pt 并产生诊断（规格 §21）。
+    // 非正数降级为 14pt 并产生诊断（需求 #21）。
     auto font_size(float pt) -> Text & {
         if (pt <= 0.0f) {
             Diagnostics::degraded("widget", "Text 字号 <= 0 已降级为 14pt");
@@ -171,7 +171,7 @@ class Text : public LeafWidget, public TextProps {
 
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 构建期属性约束校验（规格 §9）：当前校验字号必须为正。
+    /// @brief 构建期属性约束校验（specification/04-widget.md §2.2）：当前校验字号必须为正。
     [[nodiscard]] auto validate_props() const -> Result<void> override;
 
     auto serialize_props(Json &props) const -> void override;

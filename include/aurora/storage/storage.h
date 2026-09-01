@@ -5,7 +5,7 @@
 // ----------------------------------------------------------------------------
 // 对标 Application 持有 Surface：门面负责信封封装、类型化、异步卸载与变更通知，
 // 后端经 `create` 注入。API 形态：命名记录仓储（put/get/remove/list）+ 信封级 +
-// 二进制 + 异步 + 事务 + 类型化 + 变更通知。见 codespec/architecture/ARCHITECTURE_RUNTIME.md §4.11。
+// 二进制 + 异步 + 事务 + 类型化 + 变更通知。见 ARCHITECTURE.md §4.8。
 // ============================================================================
 
 #include <functional>
@@ -58,10 +58,10 @@ class Storage {
     [[nodiscard]] auto async_remove(const std::string &id) const -> aurora::Task<void>;
     [[nodiscard]] auto async_list() const -> aurora::Task<std::vector<std::string>>;
 
-    // ---------- 跨记录事务（见 §3.1 后端契约） ----------
+    // ---------- 跨记录事务（后端契约，见 specification/06-app-platform.md §9.2） ----------
     [[nodiscard]] auto transaction(std::function<Result<void>(Storage &)> body) -> Result<void>;
 
-    // ---------- 类型化便捷层（核心抽象接入点，§3.3） ----------
+    // ---------- 类型化便捷层（核心抽象接入点） ----------
     template<StorageStorable T> [[nodiscard]] auto put(const std::string &id, const T &obj) -> Result<void> {
         StorageRecord rec;
         rec.id = id;

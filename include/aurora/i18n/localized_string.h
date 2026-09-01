@@ -11,7 +11,7 @@ namespace aurora {
 class StringTable; // 前向声明：resolve 的定义在 string_table.h（避免循环包含）
 
 /**
- * @brief 可本地化字符串（i18n 运行时，规格 §8 / Q3）。
+ * @brief 可本地化字符串（i18n 运行时，specification/07-environment-modifier.md §6 国际化）。
  *
  * - 非本地化：直接持文本（`text`）
  * - 本地化：以 `key` 查 `StringTable`，按 `Locale` 取模板并用 `args` 格式化

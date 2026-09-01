@@ -18,10 +18,10 @@ struct EffectDep {
 /**
  * @brief 副作用单元：在 run() 期间读取的信号会自动登记为依赖。
  *
- * 对应架构 §5.1 信号依赖追踪。widget 在 mount 时为每个响应式属性创建一个 Effect，
+ * 对应 specification/02-state.md §2.4 信号依赖追踪。widget 在 mount 时为每个响应式属性创建一个 Effect，
  * 属性变化时 Effect 重跑 → markNeedsLayout/Paint（定点刷新，无 key/diff）。
  *
- * 生命周期（T1b）：每个 Effect 持有一个共享锚点 `m_anchor`，State 端以
+ * 生命周期：每个 Effect 持有一个共享锚点 `m_anchor`，State 端以
  * `Connection`（弱引用锚点）记录观察边；Effect 析构时锚点释放，State 下一次
  * notify() 探测到失效并惰性摘除，从而无论 State 与 Effect 谁先析构都不会再
  * 解引用失效对象（彻底消除此前双向裸指针悬垂隐患）。

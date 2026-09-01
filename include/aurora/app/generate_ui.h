@@ -8,7 +8,7 @@
 
 namespace aurora {
 
-/// @brief NL→UI 生成（§7.5 实验性）：由自然语言描述生成 Widget JSON 树。
+/// @brief NL→UI 生成（specification/08-tooling.md §2.5）：由自然语言描述生成 Widget JSON 树。
 ///
 /// 当前为关键词匹配简版（不依赖 LLM）：扫描描述中的控件关键词（button/text/column/row/checkbox），
 /// 从 aurora_api.json schema 提取默认属性，组装为可 `from_json` 的 JSON 片段。

@@ -9,7 +9,7 @@
 
 namespace aurora {
 
-/// @brief JSON UI 热重载（§7.2）：监视 JSON 文件变化 → `from_json` 重建整棵树，
+/// @brief JSON UI 热重载（specification/08-tooling.md §2.2）：监视 JSON 文件变化 → `from_json` 重建整棵树，
 /// 并通过字符串 key 保留 `State` 值（简版状态保留）。
 ///
 /// 用法（伪代码）：

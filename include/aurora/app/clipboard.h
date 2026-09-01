@@ -7,7 +7,7 @@
 namespace aurora {
 
 /**
- * @brief 剪贴板抽象（§ 文字选中 / § 平台 Shell）。
+ * @brief 剪贴板抽象（specification/06-app-platform.md §8.2）。
  *
  * - 文本：`set_text`/`get_text`，各平台实现：
  *   - Windows：`SetClipboardData(CF_UNICODETEXT)` / `GetClipboardData(CF_UNICODETEXT)`

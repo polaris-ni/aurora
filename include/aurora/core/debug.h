@@ -5,7 +5,7 @@
 namespace aurora::debug {
 
 /**
- * @brief 渲染纯度检查（规格 §2.2）。
+ * @brief 渲染纯度检查（GUIDELINE.md §27.5）。
  *
  * 在 `Widget::paint()` 首行接线，捕获「视图在渲染过程中读取可变全局 / 时钟」的反模式：
  * 声明式 UI 的渲染应是纯函数（同输入同输出）。

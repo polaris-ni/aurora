@@ -2,7 +2,7 @@
 // memory_backend.cpp — 内存后端实现（零依赖，始终编译）
 // ----------------------------------------------------------------------------
 // 全部记录存于内存 `std::map`，不落盘。transaction 覆写为快照回滚，使 Memory 后端
-// 拥有与 Sqlite 真事务同等的精确回滚语义。见 codespec/architecture/ARCHITECTURE_RUNTIME.md §4.11。
+// 拥有与 Sqlite 真事务同等的精确回滚语义。见 ARCHITECTURE.md §4.8。
 // ============================================================================
 
 #include "aurora/storage/memory_backend.h"

@@ -9,7 +9,7 @@
 namespace aurora {
 
 /**
- * @brief 焦点移动方向（架构 §4.5）。
+ * @brief 焦点移动方向（specification/05-event-navigation.md §4.1）。
  *
  * - `Forward` / `Backward`：沿 Tab 序前进 / 后退（对应 Tab / Shift+Tab）。
  * - `Up` / `Down` / `Left` / `Right`：方向性焦点移动（供后续布局感知导航扩展）。
@@ -17,7 +17,7 @@ namespace aurora {
 enum class FocusDirection : std::uint8_t { Forward, Backward, Up, Down, Left, Right };
 
 /**
- * @brief 焦点管理（架构 §4.5）。单线程下持有当前焦点 widget 与根树引用。
+ * @brief 焦点管理（specification/05-event-navigation.md §4）。单线程下持有当前焦点 widget 与根树引用。
  *
  * 职责：
  * - 记录并切换焦点 widget（`set_focus` / `request_focus` / `clear`）。

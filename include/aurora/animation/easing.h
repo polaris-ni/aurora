@@ -99,7 +99,7 @@ class Curve {
     std::function<double(double)> m_fn;
 };
 
-/// @brief 常用曲线集合（命名工厂，对应架构 §5.5）。
+/// @brief 常用曲线集合（命名工厂，对应 specification/05-event-navigation.md §6.1）。
 struct Curves {
     static auto linear() -> Curve { return Curve{ CurveKind::Linear }; }
     static auto ease_in() -> Curve { return Curve{ CurveKind::EaseIn }; }

@@ -21,7 +21,7 @@ struct GridProps {
  * 每列宽 = 该列最宽子项自然宽；每行高 = 该行最高子项自然高。
  * 若父约束给定有限宽度，则每列宽均分该宽度（子项在列宽约束下测量）。
  *
- * 采用**继承式双模 API**（规格 §1）：`GridProps` 字段即本控件公有字段，
+ * 采用**继承式双模 API**（specification/04-widget.md §2.5）：`GridProps` 字段即本控件公有字段，
  * `columns`/`gap` 可直接赋值或以配置块构造
  * `Grid{ GridProps{.children = ..., .columns = 2, .gap = 8} }`。
  * @note Thread: main-thread only

@@ -8,7 +8,7 @@
 
 namespace aurora {
 
-/// @brief 一块物理显示器（逻辑像素与 DPI 信息，§ 平台 Shell / 多显示器）。
+/// @brief 一块物理显示器（逻辑像素与 DPI 信息，specification/06-app-platform.md §8.4）。
 /// @note Thread: main-thread only
 /// @note Side-effects: none
 /// @note Rebuildable: no

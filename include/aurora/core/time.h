@@ -8,7 +8,7 @@
 namespace aurora {
 
 /**
- * @brief 当前时间戳（规格 §2.2）。
+ * @brief 当前时间戳（specification/01-core.md §7）。
  *
  * 返回系统时钟的毫秒级时间戳，用于日志 / 快照标注。**注意**：视图渲染的实时逻辑
  * 仍应从 `State`/`Signal` 显式传入时间，避免视图直接读可变全局时钟（见 `debug::check_render_purity`）。

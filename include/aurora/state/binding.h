@@ -9,11 +9,11 @@ namespace aurora {
 /**
  * @brief 双向绑定引用：指向某个上游 State，用于表单控件把值写回上游。
  *
- * 非拥有（// non-owning），仅持有上游 State 的指针。对应架构 §3.3 `Binding<T>`。
+ * 非拥有（// non-owning），仅持有上游 State 的指针。对应 specification/02-state.md §2.1 `Binding<T>`。
  *
  * 可选的「删除回调」（`m_remover`）由后端（如 `Preferences::binding`）注入，使绑定
  * 到持久化键的控件可在卸载/失效时通过 `remove()` 删除对应键（多进程下走可靠墓碑语义）。
- * 未注入删除回调的纯 `State` 绑定时，`remove()` 为空操作。对应 `SPECIFICATIONS.md` #H.16。
+ * 未注入删除回调的纯 `State` 绑定时，`remove()` 为空操作。
  *
  * @tparam T 绑定值的类型。
  *

@@ -6,7 +6,7 @@
 namespace aurora {
 
 /**
- * @brief 布局查询（规格 §2.4）。
+ * @brief 布局查询。
  *
  * 返回某节点已 layout/paint 后的布局结果（需 bounds 已填充）。
  *

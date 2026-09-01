@@ -3,7 +3,7 @@
 namespace aurora {
 
 /**
- * @brief 平台无关的逻辑键码（§5.4）。
+ * @brief 平台无关的逻辑键码（specification/05-event-navigation.md §2.2）。
  *
  * widget/事件层只认 `KeyCode`，不依赖任何平台键值。具体平台（如 GLFW）在各自的
  * 后端中把原生键码翻译成 `KeyCode`（见 `window/glfw_surface.h` 的 `fromGlfwKey`），

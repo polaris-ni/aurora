@@ -15,7 +15,7 @@
 namespace aurora {
 
 /**
- * @brief 二维虚拟网格（§6 新增）：纵向滚动 + 固定列数 + 固定单元格高度，
+ * @brief 二维虚拟网格：纵向滚动 + 固定列数 + 固定单元格高度，
  * 仅实例化可见行内的单元格。
  *
  * 对标 Flutter `GridView`（`SliverGridDelegateWithFixedCrossAxisCount`）、
@@ -182,7 +182,7 @@ class GridView : public Widget {
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         // 裁剪到视口矩形：避免被圆角/裁剪父容器包裹时 Painter 慢路径越界访问
-        // （与 LazyList 同类崩溃修复，见架构 §已知崩溃根因）。
+        // （与 LazyList 同类崩溃修复）。
         p.push_clip(bounds);
         for (auto &val : m_live | std::views::values) {
             const Rect cb = val.bounds();

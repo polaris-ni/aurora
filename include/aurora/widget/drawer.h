@@ -18,7 +18,7 @@ namespace aurora {
 enum class DrawerSide : std::uint8_t { Left, Right };
 
 /**
- * @brief 抽屉/侧边栏（规格 §3.8）：可滑出的侧边面板。
+ * @brief 抽屉/侧边栏：可滑出的侧边面板。
  *
  * 两子结构：基础内容（占满）+ 抽屉面板（左/右停靠）。打开时绘制半透明遮罩
  * （模态语义），点击遮罩关闭；`permanent` 模式下面板始终可见、无遮罩、
@@ -184,7 +184,7 @@ class Drawer : public Widget {
 };
 
 /**
- * @brief 进度对话框（规格 §3.5）：模态进度指示 + 消息 + 可选取消按钮。
+ * @brief 进度对话框：模态进度指示 + 消息 + 可选取消按钮。
  *
  * `set_progress(0..1)` 更新进度（-1 = 不确定态转圈）；`cancel()` 触发取消回调。
  * 对标 Qt `QProgressDialog`。
@@ -286,7 +286,7 @@ class ProgressDialog : public Widget {
 };
 
 /**
- * @brief 页面视图（规格 §3.16）：可翻页容器 + 指示器圆点。
+ * @brief 页面视图：可翻页容器 + 指示器圆点。
  *
  * `current()` 为响应式页码；`next()`/`prev()`/`go_to(i)` 切页；
  * 水平滑动手势翻页（拖拽超过 1/4 宽度）。

@@ -20,7 +20,7 @@ struct StepperStep {
 };
 
 /**
- * @brief 分步向导（规格 §3.14）。
+ * @brief 分步向导。
  *
  * `Stepper{steps, current, on_complete, on_cancel}` — 多步骤表单。
  * 支持线性步骤、步骤验证、完成/取消回调。

@@ -23,7 +23,7 @@ enum class ToastPosition : std::uint8_t {
 };
 
 /**
- * @brief Toast/SnackBar 通知宿主（规格 §3.3）：包裹基础内容并在其上叠加自动消失的通知。
+ * @brief Toast/SnackBar 通知宿主：包裹基础内容并在其上叠加自动消失的通知。
  *
  * `show(text, duration_ms)` 入队；每帧 `tick` 驱动过期出队；同屏最多显示
  * `m_max_visible` 条（其余排队）。通知不拦截命中（点击穿透）。

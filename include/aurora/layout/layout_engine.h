@@ -13,7 +13,7 @@ namespace aurora {
  * 当前直接驱动 `Widget::layout(constraints, ctx)`（其内部已是两阶段：
  * 先 `layoutImpl` 测量并 `constrain` 出尺寸，再写入 `bounds`），再由
  * `buildBox` 收集成 `LayoutBox` 树（位置 + 尺寸 + 子盒），供命中测试 /
- * 调试快照 / 无头渲染复用（架构 §5.2 / §5.10）。
+ * 调试快照 / 无头渲染复用（specification/03-layout-render.md §7.1）。
  *
  * @note Thread: main-thread only
  * @note Side-effects: mutates layout

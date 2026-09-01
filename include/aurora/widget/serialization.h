@@ -86,7 +86,7 @@ auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void;
 
 } // namespace serialization
 
-/// @brief 列出所有已注册组件类型名（反射，规格 §4.9）。
+/// @brief 列出所有已注册组件类型名（反射，specification/08-tooling.md §2.3）。
 [[nodiscard]] auto list_all_components() -> std::vector<std::string>;
 
 /// @brief 返回单个组件的 schema（含 props/children/thread）；未知类型返回空 Json 对象。

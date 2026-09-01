@@ -174,7 +174,7 @@ struct ShapedLine {
     std::vector<ShapedGlyph> glyphs;
 };
 
-// ---------- WS-3 文本 shaping 缓存 ----------
+// ---------- 文本 shaping 缓存 ----------
 // `shape_line(line, faces, px, opts)` 是纯函数：输出只依赖这四个输入。缓存命中即跳过
 // hb_shape（每帧纯 CPU 空烧约 10ms 的主因），返回与重算逐位一致的字形序列——不改变任何
 // 输出像素（golden 零影响），故无条件开启（非 AURORA_ENABLE_PROFILING 门控）。

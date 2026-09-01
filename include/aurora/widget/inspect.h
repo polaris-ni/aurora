@@ -14,7 +14,7 @@
 namespace aurora {
 
 /**
- * @brief 运行时可观测（规格 §3.4）：树转储 / 结构查询 / 状态探查。
+ * @brief 运行时可观测（specification/08-tooling.md §3）：树转储 / 结构查询 / 状态探查。
  *
  * 全部复用 `Widget::child_nodes()` 与 `serialization::to_json`，不引入额外状态。
  * 单线程 UI 假设；均为 `inline`（头文件即可用，无需链接实现）。
@@ -96,7 +96,7 @@ namespace aurora {
     return is_last ? "   " : "│  ";
 }
 
-/// @brief 富格式文本化 Widget 树（AI-First 规范 §6.4）：含 `#id`、bounds、visible、text、
+/// @brief 富格式文本化 Widget 树（specification/08-tooling.md §3）：含 `#id`、bounds、visible、text、
 /// style、listeners，并以 `├─ └─ │` 树形连接符呈现层级，供 AI 文本断言 / diff / 定位。
 ///
 /// 输出示例：

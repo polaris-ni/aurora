@@ -151,4 +151,4 @@ struct Constraints {
 
 } // namespace aurora
 
-#include "aurora/core/dimension.h" // 强类型尺寸工厂 px/dp/percent/fill（规格 §4），在命名空间外引入
+#include "aurora/core/dimension.h" // 强类型尺寸工厂 px/dp/percent/fill（需求 #4），在命名空间外引入

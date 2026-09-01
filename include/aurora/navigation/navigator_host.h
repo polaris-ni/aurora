@@ -22,7 +22,7 @@
 namespace aurora {
 
 /**
- * @brief 导航宿主（§5.11）：包裹 `Navigator` 并在切换路由时驱动 `TransitionLayer`
+ * @brief 导航宿主（specification/05-event-navigation.md §7.4）：包裹 `Navigator` 并在切换路由时驱动 `TransitionLayer`
  * 做淡入淡出/滑动转场。自身不拥有动画驱动，复用 `Application::animator()` 的帧循环。
  *
  * 用法：把 `NavigatorHost` 作为渲染根（present_root 的目标），调用 `push/pop` 切换页面。
@@ -108,7 +108,7 @@ class NavigatorHost : public Widget {
         rebuild_display();
     }
 
-    /// @brief 按 URI 字符串重建路由栈（deep linking，§H.8）：直接替换整栈，无转场动画。
+    /// @brief 按 URI 字符串重建路由栈（deep linking）：直接替换整栈，无转场动画。
     auto open_uri(const std::string &uri, const std::function<Route(const std::string &)> &build) -> void {
         m_nav.open_uri(uri, build);
         m_transitioning = false;
@@ -117,7 +117,7 @@ class NavigatorHost : public Widget {
         rebuild_display();
     }
 
-    /// @brief 按 URI 字符串 + 路由表重建路由栈（§H.8）；表中缺失的名称段被跳过。
+    /// @brief 按 URI 字符串 + 路由表重建路由栈；表中缺失的名称段被跳过。
     auto open_uri(const std::string &uri, const RouteRegistry &registry) -> void {
         m_nav.open_uri(uri, registry);
         m_transitioning = false;
@@ -132,7 +132,7 @@ class NavigatorHost : public Widget {
     /// @brief 读取 Hero 注册表（测试 / 调试用；常态由内部持有）。
     [[nodiscard]] auto hero_registry() const -> const std::shared_ptr<HeroRegistry> & { return m_hero_reg; }
 
-    /// @brief 栈变化回调（请求下一帧重绘，§5.10）。
+    /// @brief 栈变化回调（请求下一帧重绘，ARCHITECTURE.md §5.2）。
     auto set_on_route_changed(std::function<void()> cb) -> void { m_nav.set_on_route_changed(std::move(cb)); }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "NavigatorHost"; }

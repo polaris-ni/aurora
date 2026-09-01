@@ -8,7 +8,7 @@
 
 namespace aurora {
 
-/// @brief 分隔线方向（§4 原语缺项补全）。
+/// @brief 分隔线方向。
 enum class Orientation : std::uint8_t {
     Horizontal,
     Vertical,
@@ -33,7 +33,7 @@ struct DividerProps {
 class Divider : public LeafWidget, public DividerProps {
   public:
     Divider() = default;
-    /// @brief 配置块构造（规格 §1）。
+    /// @brief 配置块构造（specification/04-widget.md §2.5）。
     explicit Divider(const DividerProps &props) : DividerProps(props) {}
 
     /// @brief 设置起点缩进 dp（链式）。

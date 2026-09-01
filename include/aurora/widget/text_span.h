@@ -7,7 +7,7 @@
 namespace aurora {
 
 /**
- * @brief 富文本片段（内联样式单元，§13 富文本测量）。
+ * @brief 富文本片段（内联样式单元）。
  *
  * 一段拥有**统一字体/颜色**的文本，多个 `TextSpan` 顺序拼接即构成富文本。
  * `text` 为 `LocalizedString`，渲染时经 `defaultStringTable` + 当前 `Locale` 解析，支持 i18n。

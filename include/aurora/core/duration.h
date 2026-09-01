@@ -5,7 +5,7 @@
 namespace aurora {
 
 /**
- * @brief 时长强类型（规格 §1.6 互补字面量）。
+ * @brief 时长强类型（需求 #4 互补字面量）。
  *
  * 当前库内时间多为裸 `double` 秒或 `std::chrono`，引入 `Duration` 统一为
  * 编译期单位安全的时长值，避免 magic number 秒与单位歧义。
@@ -28,7 +28,7 @@ struct Duration {
 };
 
 /**
- * @brief 时长字面量（规格 §1.6）。**仅可在 TU 内显式 `using namespace au::literals;` 后使用**。
+ * @brief 时长字面量（需求 #4）。**仅可在 TU 内显式 `using namespace au::literals;` 后使用**。
  * @code
  *   using namespace au::literals;
  *   auto d = 250_ms;   // 0.25 秒

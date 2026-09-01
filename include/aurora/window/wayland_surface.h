@@ -1,7 +1,7 @@
 #pragma once
 #include "aurora/core/platform.h"
 
-// 原生 Wayland Surface（§10.2）：Linux 桌面 Wayland 会话原生窗口后端。
+// 原生 Wayland Surface（ARCHITECTURE.md §8.4）：Linux 桌面 Wayland 会话原生窗口后端。
 // 仅在 defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && AURORA_BACKEND_WAYLAND 时提供；
 // 依赖：wayland-client + xkbcommon + wayland-protocols（xdg-shell）。
 // Debian/Ubuntu `apt install libwayland-dev libxkbcommon-dev wayland-protocols`；

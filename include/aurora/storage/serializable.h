@@ -6,7 +6,7 @@
 // 存储层只认信封；「具体类型 ⇄ 信封」由调用方经 ADL 自由函数定制（与 `serialization`
 // 的 `to_json(const Widget&)` 风格一致，不强制成员函数、不改既有类型可见性）。
 // 提供两条线格式：JSON（默认、可读、可迁移）与原生二进制（对标 Hive TypeAdapter /
-// Realm data，零 JSON 开销）。见 codespec/architecture/ARCHITECTURE_RUNTIME.md §4.11。
+// Realm data，零 JSON 开销）。见 ARCHITECTURE.md §4.8。
 // ============================================================================
 
 #include <concepts>

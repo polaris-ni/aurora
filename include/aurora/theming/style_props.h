@@ -82,7 +82,7 @@ struct ResolvedStyle {
  * 不替代控件既有 `XxxProps`，而是作为「主题令牌驱动」的样式层：组件读取最近
  * 祖先 `ThemeScope` 注入的 `Theme` 后，经 `StyleProps::resolve(theme)` 把所有
  * 两态字段解析为 `ResolvedStyle` 具体值用于绘制。不改既有 `ThemeProvider` 注入机制，
- * 仅叠加令牌解析层（规格 T2）。
+ * 仅叠加令牌解析层（specification/07-environment-modifier.md §5.2 StyleProps）。
  *
  * @note Thread: thread-safe (pure value type)
  * @note Side-effects: none

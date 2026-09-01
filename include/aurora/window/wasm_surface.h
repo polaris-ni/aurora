@@ -1,7 +1,7 @@
 #pragma once
 #include "aurora/core/platform.h"
 
-// WASM/Canvas Surface（§10.3）：仅在 defined(AURORA_PLATFORM_WASM) 时提供。
+// WASM/Canvas Surface（ARCHITECTURE.md §8.4）：仅在 defined(AURORA_PLATFORM_WASM) 时提供。
 // 渲染到 HTML5 Canvas 的 ImageData。其他平台降级为 HeadlessSurface。
 //
 // 设计要点：

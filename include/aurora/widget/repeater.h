@@ -11,7 +11,7 @@
 namespace aurora {
 
 /**
- * @brief 动态列表（REQUIREMENTS §4.1 / 规格 §4.1.1）：把 `State<std::vector<T>>` 的每一项
+ * @brief 动态列表：把 `State<std::vector<T>>` 的每一项
  * 经 `itemBuilder` 展开为一个子 widget。容器尺寸随数据项变化，依赖变化时触发定点刷新。
  *
  * @code
@@ -52,7 +52,7 @@ template<typename T> class Repeater : public Container {
 
     /// @brief 当前允许的子树最大深度（默认 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`）。
     [[nodiscard]] auto max_depth() const -> std::size_t { return m_max_depth; }
-    /// @brief 设置子树最大深度；超限展开经 `Diagnostics` 截断（规格 §2.4）。
+    /// @brief 设置子树最大深度；超限展开经 `Diagnostics` 截断（specification/01-core.md §4.4）。
     auto set_max_depth(std::size_t d) -> void { m_max_depth = d; }
 
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
@@ -129,7 +129,7 @@ template<typename T> class Repeater : public Container {
     bool m_built = false;
     std::size_t m_max_depth = AURORA_DEFAULT_MAX_WIDGET_DEPTH;
 
-    /// @brief 递归统计 widget 子树深度（含自身），用于有界层深度守卫（§2.4）。
+    /// @brief 递归统计 widget 子树深度（含自身），用于有界层深度守卫（specification/01-core.md §4.4）。
     [[nodiscard]] static auto widget_tree_depth(const Widget &w) -> std::size_t {
         std::size_t best = 0;
         for (const Node &c : w.child_nodes()) {

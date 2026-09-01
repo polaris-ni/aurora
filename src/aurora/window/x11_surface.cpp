@@ -256,7 +256,7 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
     d.net_wm_name = XInternAtom(d.dpy, "_NET_WM_NAME", 0);
     d.utf8_string = XInternAtom(d.dpy, "UTF8_STRING", 0);
     d.apply_title(title);
-    // 高级样式映射（§1.8）：置顶 → _NET_WM_STATE_ABOVE；无边框 → _MOTIF_WM_HINTS。
+    // 高级样式映射：置顶 → _NET_WM_STATE_ABOVE；无边框 → _MOTIF_WM_HINTS。
     if (style.always_on_top) {
         Atom above = XInternAtom(d.dpy, "_NET_WM_STATE_ABOVE", 0);
         XChangeProperty(d.dpy, d.win, d.net_wm_state, XA_ATOM, 32, PropModeAppend,

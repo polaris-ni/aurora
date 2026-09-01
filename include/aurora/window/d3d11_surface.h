@@ -18,7 +18,7 @@
 namespace aurora {
 
 /**
- * @brief D3D11 表面（架构 §8）：复用共享 `Win32Window` 宿主，像素经 D3D11 纹理-
+ * @brief D3D11 表面（ARCHITECTURE.md §8.4 后端家族）：复用共享 `Win32Window` 宿主，像素经 D3D11 纹理-
  * 增量上传 + GPU 缩放呈现。paint 管线不变（仍由 `Window::present_root` 驱动 CPU `Painter`），
  * 仅把「CPU RGBA8 帧缓冲 → 屏幕」替换为 GPU 合成，解决大窗口 GDI 上屏瓶颈。
  *

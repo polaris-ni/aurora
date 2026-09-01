@@ -23,7 +23,7 @@ namespace aurora {
  * 已落地：
  *  - 渲染：OpenGL 1.1 立即模式纹理四边形（无需着色器/VAO/GL 加载器），见 `Impl::ensure_gl_objects`/`upload_and_draw`。
  *  - 事件：鼠标/键盘（含 GLFW 键码 → `KeyCode` 映射）、滚轮、文本输入、窗口 resize
- *    均翻译为 aurora `Event`，经 `set_event_handler` 暴露（§5.4）。
+ *    均翻译为 aurora `Event`，经 `set_event_handler` 暴露（ARCHITECTURE.md §3.1）。
  *  - 高 DPI：用 `glfwGetWindowContentScale` 取 scaleFactor；坐标换算采用「内容坐标即
  *    aurora 逻辑坐标」模型（GLFW 光标位置本就是内容坐标，与 widget 布局空间一致）。
  *
@@ -54,7 +54,7 @@ class GlfwSurface : public Surface {
     GlfwSurface(GlfwSurface &&) = delete;
     auto operator=(GlfwSurface &&) -> GlfwSurface & = delete;
 
-    /// @brief 事件处理器：GLFW 原生事件翻译为 aurora `Event` 后上抛（§5.4），由 Application 统一派发。
+    /// @brief 事件处理器：GLFW 原生事件翻译为 aurora `Event` 后上抛（ARCHITECTURE.md §3.1），由 Application 统一派发。
     auto set_event_handler(const EventHandler &h) -> void override;
     /// @brief 注册窗口可见性状态上报句柄（最小化/被遮挡/前台激活）。
     auto set_window_state_handler(WindowStateHandler h) -> void override;

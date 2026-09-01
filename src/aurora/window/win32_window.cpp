@@ -213,7 +213,7 @@ Win32Window::Impl::Impl(int w, int h, const std::string &title, const WindowStyl
     m_hinst = GetModuleHandleA(nullptr);
     register_class();
 
-    // 高级样式映射（§1.8）：无边框 WS_POPUP；不可调大小去 WS_THICKFRAME/WS_MAXIMIZEBOX。
+    // 高级样式映射：无边框 WS_POPUP；不可调大小去 WS_THICKFRAME/WS_MAXIMIZEBOX。
     DWORD win_style = WS_OVERLAPPEDWINDOW;
     if (m_style.frameless) {
         win_style = WS_POPUP;
@@ -403,7 +403,7 @@ auto Win32Window::Impl::handle_size(HWND hwnd, WPARAM wp, LPARAM lp) -> LRESULT 
         }
         update_window_state();
     }
-    // 几何变化当下同步重渲染（性能专项 v1.3）：让帧缓冲在 DWM 合成最大化/缩放动画前已为新尺寸内容。
+    // 几何变化当下同步重渲染：让帧缓冲在 DWM 合成最大化/缩放动画前已为新尺寸内容。
     if (m_present_request) {
         m_present_request();
         ++m_present_count; // 观测器：统计已触发同步重渲染次数
@@ -449,7 +449,7 @@ auto Win32Window::Impl::handle_dpi_changed(HWND hwnd, LPARAM lp) -> LRESULT {
 
 // ---- 尺寸限制分族（WM_GETMINMAXINFO）----
 auto Win32Window::Impl::handle_getminmaxinfo(LPARAM lp) const -> LRESULT {
-    // 尺寸限制（§1.8）：逻辑 dp × scale → 物理像素（含非客户区补偿）。
+    // 尺寸限制：逻辑 dp × scale → 物理像素（含非客户区补偿）。
     auto *mmi = reinterpret_cast<MINMAXINFO *>(lp); // NOLINT(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
     const float sc = dpi_scale();
     const WindowStyleOptions &st = m_style;

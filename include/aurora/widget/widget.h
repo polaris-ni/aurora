@@ -28,7 +28,7 @@
 
 namespace aurora {
 
-/// @brief widget 树默认最大深度（规格 §2.4 有界层深度守卫）。超过此深度的递归展开（如
+/// @brief widget 树默认最大深度（specification/01-core.md §4.4 有界层深度守卫）。超过此深度的递归展开（如
 /// Repeater 嵌套 / 极深容器链）经 `Diagnostics` 降级截断，避免栈溢出 / 渲染雪崩。
 inline constexpr std::size_t AURORA_DEFAULT_MAX_WIDGET_DEPTH = 64;
 
@@ -109,7 +109,7 @@ struct HitNode {
 /**
  * @brief widget 抽象基类：声明布局/绘制/命中/挂载接口与通用属性。
  *
- * 对应架构 §4.3 / §4.6：具体 widget 继承并实现各 `Impl` 虚函数；`modifier`
+ * 对应 ARCHITECTURE.md §4.4：具体 widget 继承并实现各 `Impl` 虚函数；`modifier`
  * 修饰链在基类的 layout/paint/hit_test 中统一包裹，避免各 widget 重复 props。
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
@@ -135,7 +135,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     auto hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget *;
 
     /// @brief 命中链：返回根→最深命中的完整 widget 路径（`this` 起算，含自身与所有命中的祖先/后代）。
-    /// 用于事件自底向上冒泡派发（架构 §5.4）：派发器从链尾（最深）向链头（根）逐个调用，
+    /// 用于事件自底向上冒泡派发（specification/05-event-navigation.md §3）：派发器从链尾（最深）向链头（根）逐个调用，
     /// 某节点写 `e.handled = true` 即停止。命中即止的 `hit_test` 保留供兼容/纯命中查询。
     auto hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx) -> std::vector<HitNode>;
 
@@ -153,7 +153,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     Reactive<bool> show{ true }; ///< 可见性（非结构性隐藏）
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
-    /// @brief 显式宽度意图（规格 §4/§20）：默认 `auto`（按内容）。
+    /// @brief 显式宽度意图（specification/01-core.md §2.2 / 需求 #20）：默认 `auto`（按内容）。
     /// 用 `au::px(120)` / `au::fill()` / `au::percent(0.5f)` 等强类型设置；
     /// **裸整数编译失败**（无 `Length(int)` 隐式转换）。返回 `Widget&` 以支持链式。
     virtual auto width(Length len) -> Widget & {
@@ -182,7 +182,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     }
     [[nodiscard]] auto overflow_strategy() const -> OverflowStrategy { return m_overflow; }
 
-    // ---- 脏标记（§5.4）----
+    // ---- 脏标记（specification/04-widget.md §2.4）----
     auto mark_needs_layout() -> void { mark_needs_layout_impl(false); }
 
     /// @brief 设置布局父节点，供缓存失效与脏标记向上传播。
@@ -288,7 +288,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 默认：修饰链含 Clickable 修饰即为点击目标；Button 等自带 on_click 的叶控件覆写返回 true。
     [[nodiscard]] virtual auto wants_click() const -> bool { return modifier.get().has_clickable(); }
 
-    /// @brief 指针事件入口（架构 §5.4）：在命中目标上调用。
+    /// @brief 指针事件入口（specification/05-event-navigation.md §3）：在命中目标上调用。
     /// 仅在「先按下、再抬起」且未达长按阈值、未拖拽构成一次完整点击时触发 activate / Clickable 回调；
     /// 悬停移动（Move）不触发点击，但有 `draggable`/`longPress` 修饰时驱动拖拽/长按计时。
     /// `e.handled` 仅在本控件自身消费事件（含 Clickable/Draggable/LongPress/ContextMenu 任一手势）时置位，
@@ -371,7 +371,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @brief 文本输入入口（焦点 widget 上调用）。默认标记为已消费。
     virtual auto on_text_input(TextInputEvent &e) -> void { e.handled = true; }
 
-    /// @brief 操作系统文件拖放落在本控件时触发（§ 平台 Shell）；消费时置 `e.handled` 阻止继续。
+    /// @brief 操作系统文件拖放落在本控件时触发；消费时置 `e.handled` 阻止继续。
     /// 默认不处理（交给命中目标自身）。
     virtual auto on_file_drop(FileDropEvent &e) -> void { (void)e; }
 
@@ -379,7 +379,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 基类默认维护 `m_isFocused` 以便 `isFocused()` 正确；子类可覆写以更新聚焦态绘制。
     virtual auto on_focus_change(bool focused) -> void { m_is_focused = focused; }
 
-    // ---- 焦点能力（架构 §4.5）----
+    // ---- 焦点能力（specification/05-event-navigation.md §4）----
     /// @brief 是否可参与焦点序（默认 true）。交互控件保持 true；纯展示控件可设 false。
     [[nodiscard]] auto focusable() const -> bool { return m_focusable; }
     auto set_focusable(bool v) -> Widget & {
@@ -597,7 +597,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     std::vector<std::unique_ptr<Effect>> m_effects;
-    bool m_focusable = true;   ///< 是否可参与焦点序（§4.5）
+    bool m_focusable = true;   ///< 是否可参与焦点序（specification/05-event-navigation.md §4）
     int m_tab_index = 0;       ///< Tab 序权重（越小越靠前）
     bool m_is_focused = false; ///< 当前是否持有焦点
     // NOLINTEND(*-non-private-member-variables-in-classes)

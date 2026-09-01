@@ -74,7 +74,7 @@ struct ShortcutBinding {
 };
 
 /**
- * @brief 快捷键注册表：集中管理应用级快捷键绑定（规格 §8.4）。
+ * @brief 快捷键注册表：集中管理应用级快捷键绑定（specification/06-app-platform.md §8.4）。
  *
  * 由 Application 持有并在键盘事件派发前查询；也可独立用于测试。
  * 匹配成功即消费事件（返回 true），不再向焦点控件派发。

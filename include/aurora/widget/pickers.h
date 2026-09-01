@@ -59,7 +59,7 @@ struct TimeOfDay {
 };
 
 /**
- * @brief 日期选择器（规格 §3.13）：月历网格选择。
+ * @brief 日期选择器：月历网格选择。
  *
  * 顶部年月导航（< 年月 >），下方 7 列日历网格；点击日期选中。
  * 对标 Qt `QDateEdit`+日历、Flutter `showDatePicker`、SwiftUI `DatePicker`。
@@ -280,7 +280,7 @@ class DatePicker : public Widget {
 };
 
 /**
- * @brief 时间选择器（规格 §3.13）：时/分两列上下调节。
+ * @brief 时间选择器：时/分两列上下调节。
  * 对标 Qt `QTimeEdit`、Flutter `showTimePicker`。
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
@@ -409,7 +409,7 @@ class TimePicker : public Widget {
 };
 
 /**
- * @brief 颜色选择器（规格 §3.13）：预设色板网格选择。
+ * @brief 颜色选择器：预设色板网格选择。
  * 对标 Qt `QColorDialog`（简化色板模式）、SwiftUI `ColorPicker`。
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json

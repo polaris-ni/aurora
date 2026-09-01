@@ -15,7 +15,7 @@ namespace aurora {
  * @brief 无头渲染（不依赖窗口系统）。
  *
  * 把「布局 + 绘制 + 写出 PNG / 逻辑快照」从 `HeadlessSurface` 头文件（window/surface.h）
- * 拆分到本文件，使渲染工具与具体 `Surface` 实现解耦（架构 §4.5 后端选择与工厂）。
+ * 拆分到本文件，使渲染工具与具体 `Surface` 实现解耦（specification/03-layout-render.md §8.4）。
  * 真实窗口 Surface 见 `aurora/window/native_surfaces.h`。
  */
 

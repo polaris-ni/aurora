@@ -228,9 +228,9 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
         throw std::runtime_error("GlfwSurface: glfwCreateWindow failed");
     }
     glfwMakeContextCurrent(m_window);
-    glfwSwapInterval(1); // 启用 VSync（对应 §5.10 帧调度）
+    glfwSwapInterval(1); // 启用 VSync（帧循环调度，见 specification/06-app-platform.md §3.1）
 
-    // 转发 GLFW 回调到本实例（§5.4 事件来源）。用户指针存 Impl*，回调据此取回。
+    // 转发 GLFW 回调到本实例（ARCHITECTURE.md §3.1 事件来源）。用户指针存 Impl*，回调据此取回。
     glfwSetWindowUserPointer(m_window, this);
     glfwSetCursorPosCallback(m_window, &Impl::on_cursor_pos);
     glfwSetMouseButtonCallback(m_window, &Impl::on_mouse_button);

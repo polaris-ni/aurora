@@ -109,11 +109,11 @@ template<typename T> class Provider : public SingleChild {
     Environment m_child_env;
 };
 
-/// @brief 便捷别名：注入主题（§4.7 / REQ §4.5 主题化）。
+/// @brief 便捷别名：注入主题（specification/07-environment-modifier.md §5）。
 using ThemeProvider = Provider<Theme>;
-/// @brief 便捷别名：注入区域设置（§4.7 / Q3 i18n）。
+/// @brief 便捷别名：注入区域设置（specification/07-environment-modifier.md §6）。
 using LocaleProvider = Provider<Locale>;
-/// @brief 便捷别名：注入设备度量（§4.7 / 安卓 MediaQuery）。
+/// @brief 便捷别名：注入设备度量（specification/07-environment-modifier.md §3.1 / 安卓 MediaQuery）。
 using MediaQueryProvider = Provider<MediaQuery>;
 
 } // namespace aurora

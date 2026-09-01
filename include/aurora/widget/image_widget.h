@@ -20,14 +20,14 @@ struct ImageViewProps {
 };
 
 /**
- * @brief 图像 widget（REQUIREMENTS §4.1 / 规格 §4.1.1）。
+ * @brief 图像 widget（specification/04-widget.md §3.6）。
  *
  * 持有已解码的 `Image`（来自 `Image::load`，支持 BMP 内置解码 + PNG/JPG 等 stb 解码），
  * 在布局阶段按自身或被约束尺寸确定绘制矩形，绘制阶段经 `Painter::drawImage` 栅格化。
  *
  * 命名为 `ImageView` 以区别于 `core::Image`（解码后的像素数据结构）。
  *
- * 采用**继承式双模 API**（规格 §1）：`ImageViewProps` 字段即本控件公有字段，
+ * 采用**继承式双模 API**（specification/04-widget.md §2.5）：`ImageViewProps` 字段即本控件公有字段，
  * `bitmap`/`source` 可直接访问或以配置块构造
  * `au::ImageView{ au::ImageViewProps{ .bitmap = img, .source = "..." } }`。
  * 渲染宽高 `width()`/`height()` 等 widget 级属性沿用基类（不进 Props）。

@@ -2,7 +2,7 @@
 
 /**
  * @file native_surfaces.h
- * @brief 真实平台 Surface 统一包含入口（架构 §4.5 Surface 选择与工厂）。
+ * @brief 真实平台 Surface 统一包含入口（ARCHITECTURE.md §8.4 / specification/03-layout-render.md §8.5 后端与工厂）。
  *
  * 仅包含「平台 Surface 后端」相关头，供需要弹真实窗口的用户使用：
  * @code

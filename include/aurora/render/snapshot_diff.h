@@ -9,7 +9,7 @@
 namespace aurora {
 
 /**
- * @brief 快照对比结果（规格 §7.3）。
+ * @brief 快照对比结果（specification/03-layout-render.md §8.4）。
  */
 struct SnapshotDiff {
     bool size_mismatch = false;       ///< 尺寸不一致（其余字段无意义）
@@ -25,7 +25,7 @@ struct SnapshotDiff {
 };
 
 /**
- * @brief 逐像素对比两张 RGBA8 快照（规格 §7.3）。
+ * @brief 逐像素对比两张 RGBA8 快照（specification/03-layout-render.md §8.4）。
  *
  * @param baseline  基线图
  * @param current   当前图

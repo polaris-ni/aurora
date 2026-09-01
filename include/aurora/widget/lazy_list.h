@@ -15,7 +15,7 @@
 namespace aurora {
 
 /**
- * @brief 虚拟滚动列表（规格 §2.2）：仅实例化可见区域 + 预取缓冲区的子项。
+ * @brief 虚拟滚动列表（specification/04-widget.md §3.4）：仅实例化可见区域 + 预取缓冲区的子项。
  *
  * 与 `Repeater` 区分：`Repeater` 展开全部子项（适合 <100 项），`LazyList`
  * 仅构建可见窗口内的子项（适合 1000+ 项），滚出窗口的实例被回收。

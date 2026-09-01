@@ -22,7 +22,7 @@ struct SpringDescription {
  * @brief 阻尼弹簧模拟：从 start 收敛到 end，给定初速度（单位/秒）。
  *
  * 提供任意时刻位置（闭合解，统一覆盖欠阻尼/临界阻尼/过阻尼三种情形），
- * 供 spring 动画在每帧 `tick` 时求值（架构 §5.5，对应 Flutter `SpringSimulation`）。
+ * 供 spring 动画在每帧 `tick` 时求值（specification/05-event-navigation.md §6.1，对应 Flutter `SpringSimulation`）。
  *
  * @note Thread: thread-safe (pure value type)
  * @note Side-effects: none

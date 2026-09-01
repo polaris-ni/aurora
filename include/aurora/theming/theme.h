@@ -41,9 +41,9 @@ struct TokenValue {
 };
 
 /**
- * @brief 主题：聚合扁平设计令牌（颜色、字体）+ 命名令牌表。通过 `Provider<Theme>` 注入环境（§4.7）。
+ * @brief 主题：聚合扁平设计令牌（颜色、字体）+ 命名令牌表。通过 `Provider<Theme>` 注入环境（specification/07-environment-modifier.md §5.1）。
  *
- * 对应 REQ §4.5 主题化。`Theme` 同时持有传统扁平字段（`.background` 等，向后兼容）
+ * `Theme` 同时持有传统扁平字段（`.background` 等，向后兼容）
  * 与可扩展的命名令牌表（`.token()`/`.set_token()`），组件用 `ctx.environment<Theme>()` 读取后
  * 既可直接用扁平字段，也可经 `StyleProps` 解析「令牌名或具体值」两态样式。
  *

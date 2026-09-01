@@ -24,7 +24,7 @@ template<typename T> class Reactive : public SignalView<T> {
     Reactive(T v = T{}) : m_state(std::make_shared<State<T>>(std::move(v))) {} // NOLINT(google-explicit-constructor)
 
     /// @brief 由可转换为 T 的值构造（如 `const char*` → `LocalizedString`），
-    /// 使 `Text{ .content = "Hi" }` 这类写法可直接编译（§3.1）。
+    /// 使 `Text{ .content = "Hi" }` 这类写法可直接编译（specification/02-state.md §2.2）。
     ///
     /// @note 刻意**不加 explicit**：属性字段就是靠这条隐式转换支持
     ///       `Reactive<Color> bg = Color::blue();` 与 `content = "Hi";`（先隐式构造成

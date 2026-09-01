@@ -10,7 +10,7 @@
 namespace aurora {
 
 /**
- * @brief 条件显示（REQUIREMENTS §4.1 / 规格 §4.1.1）：当条件为真时显示子节点，
+ * @brief 条件显示：当条件为真时显示子节点，
  * 否则自身尺寸为 0 且不绘制子节点。条件可为 `bool` 或 `State<bool>`（响应式）。
  *
  * @code

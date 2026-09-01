@@ -132,7 +132,7 @@ auto Diagnostics::apply_fix(std::string_view code) -> bool {
     return false;
 }
 
-// ---- 规格 §9 增强：错误码 → 修复策略注册表 ----
+// ---- 需求 #9：错误码 → 修复策略注册表 ----
 
 namespace {
 /// @brief 全局错误码 → 修复策略注册表（main-thread only，同 Diagnostics 线程模型）。

@@ -9,7 +9,7 @@
 namespace aurora {
 
 /**
- * @brief 事件派发器：命中测试 + 同步派发（架构 §4.5 / §5.4）。
+ * @brief 事件派发器：命中测试 + 同步派发（specification/05-event-navigation.md §3）。
  *
  * - `hit_test`：在根树上找到最深可命中 widget（含 `Clickable` 修饰拦截），
  *   并返回「最深目标 → 根」的完整命中链（供冒泡派发复用）。
@@ -22,7 +22,7 @@ namespace aurora {
  *
  * 冒泡并不依赖 widget 父链指针：`hit_test_chain` 在命中时已把整条祖先链一并返回，
  * `deliver_chain` 直接沿该链自最深（链尾）向根（链头）派发并 stop-on-handled。
- * 触摸事件为「原始多点流全链广播 + 合成手势流冒泡」双路径。事件回调内写 `State` 触发 §5.1 定点刷新。
+ * 触摸事件为「原始多点流全链广播 + 合成手势流冒泡」双路径。事件回调内写 `State` 触发 ARCHITECTURE.md §5.1 定点刷新。
  * @note Thread: main-thread only
  * @note Side-effects: none
  */

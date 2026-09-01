@@ -38,7 +38,7 @@ namespace aurora::preferences {
  *   避免多进程并发写导致半写损坏或互相覆盖。删除键采用**版本化 LWW + 墓碑（tombstone）+
  *   全局清空纪元**实现可靠语义：`remove` 写入墓碑并随 `flush` 持久化、跨进程传播，其他进程在
  *   下次 `flush`/`reload` 时学习墓碑并同步删除；`clear` 置全局清空纪元，所有旧版本键被各进程
- *   删除，清空后新 `set` 的键不受影响。详见 `SPECIFICATIONS.md` #H.16。
+ *   删除，清空后新 `set` 的键不受影响。详见 `specification/06-app-platform.md` §9.1。
  * - **单例**：`instance(name)` 提供按名注册表的全局单例访问（每个 name 唯一、懒构造、
  *   线程安全创建）；原构造器依然可用（内存模式 / 测试 / 非单例场景）。
  *

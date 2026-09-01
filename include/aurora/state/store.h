@@ -14,7 +14,7 @@ namespace aurora {
  * @brief 动作：类型化字符串标签 + 类型擦除载荷。
  *
  * Reducer 通过 `type` 区分动作，用 `payloadAs<T>()` 安全取回载荷。
- * 对应架构 §3.4 单向数据流（Redux 式 dispatch/reducer）。
+ * 对应 specification/02-state.md §4 单向数据流（Redux 式 dispatch/reducer）。
  *
  * @code
  *   store->dispatch(Action{"setCount", 42});

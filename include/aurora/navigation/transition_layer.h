@@ -17,7 +17,7 @@
 namespace aurora {
 
 /**
- * @brief 转场合成层（§5.11）：在导航转场进行中叠加渲染「旧页」与「新页」两棵子树，
+ * @brief 转场合成层（specification/05-event-navigation.md §7.4）：在导航转场进行中叠加渲染「旧页」与「新页」两棵子树，
  * 按 `progress`（0→1）合成淡入淡出或水平滑动，进度到 1 后由 `NavigatorHost` 丢弃旧页。
  *
  * 自身不持有动画：外部 `Animator` 通过 `AnimationController` 绑定 `progress` 状态驱动本层。

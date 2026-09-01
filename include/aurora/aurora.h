@@ -2,14 +2,14 @@
 
 /**
  * @file aurora.h
- * @brief 单一包含入口（规格 §2/§24：one import / one namespace）。
+ * @brief 单一包含入口（需求 #2/#24：one import / one namespace）。
  *
  * 包含全部抽象层公共模块；任何翻译单元只需 `#include "aurora/aurora.h"` 即可使用
  * Surface/Window/Painter/FontEngine/事件 等整套抽象 API。
  * **真实平台窗口 Surface**（GLFW/Win32）需另行 `#include "aurora/window/native_surfaces.h"`，
  * 并经 `create_window`（window/window.h）统一构造。无头渲染工具见 render/offscreen.h。
  *
- * 推荐别名（规格 §2）：
+ * 推荐别名（需求 #2）：
  * @code
  *   #include "aurora/aurora.h"
  *   using namespace aurora;   // 或只用 au:: 前缀
@@ -37,10 +37,6 @@
 #include "aurora/core/assert.h"
 #include "aurora/core/color.h"
 #include "aurora/core/debug.h"
-#include "aurora/debug/debug_backend.h" // 真实后端 DEBUG 门面：capture / surface_state / 输出目录 API
-#include "aurora/debug/debug_paint.h"    // 可视化调试叠层 + 控件拾取：DebugPaintFlags / widget_picker
-#include "aurora/debug/debug_runtime.h"   // 运行时信息导出：widget_tree / perf_snapshot / frame_phase_timeline / why_trace / diagnostics
-#include "aurora/debug/debug_trace.h"     // why_trace 热路径埋点声明（轻量）
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/duration.h"
 #include "aurora/core/event_stream.h"
@@ -58,6 +54,10 @@
 #include "aurora/core/time.h"
 #include "aurora/core/types.h"
 #include "aurora/core/version.h"
+#include "aurora/debug/debug_backend.h"
+#include "aurora/debug/debug_paint.h"
+#include "aurora/debug/debug_runtime.h"
+#include "aurora/debug/debug_trace.h"
 #include "aurora/environment/build_context.h"
 #include "aurora/environment/environment.h"
 #include "aurora/environment/media_query.h"
@@ -71,6 +71,10 @@
 #include "aurora/layout/flex_layouter.h"
 #include "aurora/layout/layout_box.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/media/image_sequence_source.h"
+#include "aurora/media/video_controls.h"
+#include "aurora/media/video_player.h"
+#include "aurora/media/video_source.h"
 #include "aurora/modifier/modifier.h"
 #include "aurora/navigation/hero.h"
 #include "aurora/navigation/navigator.h"
@@ -83,6 +87,7 @@
 #include "aurora/perf/scroll_bench.h"
 #include "aurora/perf/stopwatch.h"
 #include "aurora/perf/trace_writer.h"
+#include "aurora/preferences/preferences.h"
 #include "aurora/render/dirty_region.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/image_cache.h"
@@ -102,20 +107,12 @@
 #include "aurora/state/store.h"
 #include "aurora/state/subscription.h"
 #include "aurora/state/undo_stack.h"
-#include "aurora/todo.h"
-
-// 轻量持久化配置（JSON 文件后端，对标 SharedPreferences / UserDefaults）
-#include "aurora/media/image_sequence_source.h"
-#include "aurora/media/video_controls.h"
-#include "aurora/media/video_player.h"
-#include "aurora/media/video_source.h"
-#include "aurora/preferences/preferences.h"
-// 数据存储抽象层（可切换后端：Memory / Filesystem / 未来 SQLite；默认 Filesystem）
 #include "aurora/storage/storage.h"
 #include "aurora/theming/style_props.h"
 #include "aurora/theming/theme.h"
 #include "aurora/theming/theme_query.h"
 #include "aurora/theming/theme_scope.h"
+#include "aurora/todo.h"
 #include "aurora/ui/factories.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/canvas.h"
@@ -138,7 +135,6 @@
 #include "aurora/widget/lazy_list.h"
 #include "aurora/widget/lifecycle.h"
 #include "aurora/widget/menu_bar.h"
-#include "aurora/widget/title_bar.h"
 #include "aurora/widget/pickers.h"
 #include "aurora/widget/placeholder.h"
 #include "aurora/widget/popup.h"
@@ -165,12 +161,13 @@
 #include "aurora/widget/text_input.h"
 #include "aurora/widget/text_span.h"
 #include "aurora/widget/timer.h"
+#include "aurora/widget/title_bar.h"
 #include "aurora/widget/toast.h"
 #include "aurora/widget/toolbar.h"
 #include "aurora/widget/widget.h"
-#include "aurora/window/frame_pacing.h" // compute_wait_timeout：事件驱动帧循环调度决策
-#include "aurora/window/platform.h"     // au::platform()：平台与运行环境显式查询
+#include "aurora/window/frame_pacing.h"
+#include "aurora/window/platform.h"
 #include "aurora/window/surface.h"
 #include "aurora/window/window.h"
 
-namespace au = aurora; ///< 推荐短别名（规格 §2）。`au::colors::Red` 经别名直接可用。
+namespace au = aurora; ///< 推荐短别名（需求 #2）。`au::colors::Red` 经别名直接可用。

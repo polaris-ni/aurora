@@ -446,7 +446,7 @@ using Json = nlohmann::json;
 
 } // namespace aurora
 
-// ---- validate_prop<T>：属性值约束验证（规格 §9 增强） ----
+// ---- validate_prop<T>：属性值约束验证（specification/04-widget.md §2.2） ----
 // validate_prop 模板特化定义在 descriptor.h（需要 PropDescriptor 完整定义，
 // 而 descriptor.h 已 include 本头文件，避免循环依赖）。
 // validate_enum_string 辅助函数同样在 descriptor.h。

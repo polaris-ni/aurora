@@ -13,7 +13,7 @@
 
 namespace aurora::serialization {
 
-/// @brief 代码生成风格（规格 #22 / §I）。
+/// @brief 代码生成风格（需求 #22 / specification/08-tooling.md §2.5）。
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: none
@@ -332,7 +332,7 @@ namespace detail {
 }
 
 /**
- * @brief 把序列化的 widget 树 JSON 反向生成为 Aurora C++ 源码（需求 #22 / 规格 §4.1.1）。
+ * @brief 把序列化的 widget 树 JSON 反向生成为 Aurora C++ 源码（需求 #22 / specification/08-tooling.md §2.5）。
  *
  * 输入为 `to_json(widget)` 产生的结构快照。默认 Fluent 风格（扁平容器 + Type(Props{...}) 叶形式）。
  * 可用 CodeStyle 选择 DesignatedInit（统一指定初始化器）或 StepByStep（分步赋值）。
@@ -388,7 +388,7 @@ namespace detail {
     return os.str();
 }
 
-/// @brief 按指定风格生成代码（规格 #22）。默认 Fluent，与 to_code(node, int) 行为一致。
+/// @brief 按指定风格生成代码（需求 #22）。默认 Fluent，与 to_code(node, int) 行为一致。
 [[nodiscard]] inline auto to_code(const Json &node, CodeStyle style, int indent = 0) -> std::string {
     switch (style) {
     case CodeStyle::DesignatedInit: return to_code_di(node, indent);

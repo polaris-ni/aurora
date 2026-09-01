@@ -10,7 +10,7 @@
 namespace aurora {
 
 /**
- * @brief 转场类型（§5.11）：决定新旧页如何合成。
+ * @brief 转场类型（specification/05-event-navigation.md §7.1）：决定新旧页如何合成。
  */
 enum class TransitionKind : std::uint8_t {
     Fade,  ///< 淡入淡出：旧页淡出 + 新页淡入
@@ -18,17 +18,17 @@ enum class TransitionKind : std::uint8_t {
 };
 
 /**
- * @brief 路由转场配置（§5.11 / §5.5）：驱动 NavigatorHost 的视觉合成。
+ * @brief 路由转场配置（specification/05-event-navigation.md §7.1）：驱动 NavigatorHost 的视觉合成。
  */
 struct RouteTransition {
     bool animated = false;                      ///< 是否使用转场动画
     TransitionKind kind = TransitionKind::Fade; ///< 转场类型
-    Curve curve = Curves::linear();             ///< 转场缓动（§5.5 动画框架）
+    Curve curve = Curves::linear();             ///< 转场缓动（动画框架，specification/05-event-navigation.md §6.1）
     double duration_seconds = 0.3;              ///< 转场时长（秒）
 };
 
 /**
- * @brief 路由：一个页面（子树根）。对应架构 §5.11 的 `Route`（"即一个 Scene 或子树根"）。
+ * @brief 路由：一个页面（子树根）。对应 specification/05-event-navigation.md §7.1 的 `Route`（"即一个 Scene 或子树根"）。
  *
  * 持有 widget 树根节点、可选名称与转场配置。`Node` 内部为 `shared_ptr`，故 `Route`
  * 可安全拷贝/移动。

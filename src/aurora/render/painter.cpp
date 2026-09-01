@@ -930,7 +930,7 @@ auto Painter::set_pixel(int x, int y, Color c) -> void {
         }
         const std::size_t i =
             ((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) + static_cast<std::size_t>(x)) * 4u;
-        // 不透明快路径（WS-4 性能修复）：当 global_alpha×c.a 仍为全不透明（a==1）时，
+        // 不透明快路径：当 global_alpha×c.a 仍为全不透明（a==1）时，
         // sRGB↔线性往返是恒等映射（g_gamma_tables.srgb_to_linear / g_gamma_tables.linear_to_srgb
         // 逐值互逆，已验证 0..255 全位级一致），故结果数学上等价于直接写入 sRGB 颜色 c，
         // 跳过 9 次 gamma LUT 往返。
@@ -1347,7 +1347,7 @@ auto Painter::draw_linear_gradient(
     const float inv_len_sq = 1.0f / len_sq;
 
     const bool fast = !m_has_rounded_clip && m_clip_stack.empty();
-    // SIMD 扫描线快路径（WS-4【D1】）：仅双色标 + 全不透明（a=255）且无任何裁剪时启用，与标量黄金逐位一致；
+    // SIMD 扫描线快路径：仅双色标 + 全不透明（a=255）且无任何裁剪时启用，与标量黄金逐位一致；
     // 其余回落「圆角/矩形裁剪感知」优化路径（见下），再不行才逐像素 set_pixel。
     const bool simd_grad =
         fast && colors.size() == 2 && stops.size() == 2 && colors[0].m_a == 255 && colors[1].m_a == 255;
@@ -1473,7 +1473,7 @@ auto Painter::draw_radial_gradient(
     const float inv_r = 1.0f / r;
 
     const bool fast = !m_has_rounded_clip && m_clip_stack.empty();
-    // SIMD 扫描线快路径（WS-4【D1】）：仅双色标 + 全不透明（a=255）且无任何裁剪时启用，与标量黄金逐位一致。
+    // SIMD 扫描线快路径：仅双色标 + 全不透明（a=255）且无任何裁剪时启用，与标量黄金逐位一致。
     const bool simd_grad =
         fast && colors.size() == 2 && stops.size() == 2 && colors[0].m_a == 255 && colors[1].m_a == 255;
     if (simd_grad) {
@@ -1689,7 +1689,7 @@ auto Painter::blur_region(const Rect &region, float radius) -> void {
 
     // 分离式两遍 box blur（水平 → 垂直），边缘采样钳制到区域内（不漏采区外像素，
     // 毛玻璃语义下区域外背景不参与）。临时缓冲避免读写串扰。
-    // WS-4 SIMD 双实现：标量黄金 / SSE2 / AVX2 逐位一致，分发由 g_simd_level 决定。
+    // SIMD 双实现：标量黄金 / SSE2 / AVX2 逐位一致，分发由 g_simd_level 决定。
     aurora::detail::blur_region(m_pixels.data(), m_width, x0, y0, rw, rh, r);
 }
 

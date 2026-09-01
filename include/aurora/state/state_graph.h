@@ -12,7 +12,7 @@
 namespace aurora {
 
 /**
- * @brief 响应式状态依赖图（规格 §2.6 状态作用域可追踪）。
+ * @brief 响应式状态依赖图（specification/02-state.md §6 状态作用域可追踪）。
  *
  * 从运行期活着的 State / Effect 网络读出节点（state / effect）与边
  * （state → effect 表示「观察」；effect → state 表示「依赖」），
@@ -68,7 +68,7 @@ class StateGraph {
             }
             for (const auto &c : s->m_observers) {
                 // 仅当 Effect 锚点存活（effect 锁定成功）时才读取 effect_raw，
-                // 否则为失效边，直接跳过（T1b：避免解引用已析构 Effect）。
+                // 否则为失效边，直接跳过（避免解引用已析构 Effect）。
                 if (!c->effect.lock()) {
                     continue;
                 }

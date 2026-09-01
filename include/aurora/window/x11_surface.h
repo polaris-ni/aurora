@@ -1,7 +1,7 @@
 #pragma once
 #include "aurora/core/platform.h"
 
-// X11/Xlib Surface（§10.1）：Linux 桌面原生窗口后端，零三方依赖（仅 libX11）。
+// X11/Xlib Surface（ARCHITECTURE.md §8.4）：Linux 桌面原生窗口后端，零三方依赖（仅 libX11）。
 // 仅在 defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && AURORA_BACKEND_X11 时提供；
 // Wayland 会话下经 XWayland 无缝显示（DISPLAY 由 compositor 提供）。
 // Xlib 依赖：Debian/Ubuntu `apt install libx11-dev`；Fedora `dnf install libX11-devel`。

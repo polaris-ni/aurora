@@ -15,7 +15,7 @@ class Widget; // 前向声明：Node 以 shared_ptr<Widget> 持有；析构在 w
 /**
  * @brief 节点包装：接受任意 `Widget` 派生，以 `shared_ptr<Widget>` 共享所有权持有。
  *
- * 对应 REQ §3.1：用户写 `Column{ .children = { Text{}, Button{} } }` 可直接编译，
+ * 用户写 `Column{ .children = { Text{}, Button{} } }` 可直接编译，
  * 派生临时对象被包进新的 `shared_ptr<Widget>`（用户不写 new/make_unique）；
  * `Node` 的拷贝/移动即 `shared_ptr` 的拷贝/移动，同一 widget 实例可被多处 `Node` 共享。
  */

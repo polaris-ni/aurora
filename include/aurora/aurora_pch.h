@@ -1,4 +1,4 @@
-// aurora_pch.h — 预编译头（规格 §3.5 增量编译）。
+// aurora_pch.h — 预编译头（BUILD_OPTIONS.md §2.3 增量编译）。
 //
 // 收录原则：只纳入「稳定且不常变更」的重型头——标准库 + vendored 三方
 // （nlohmann/json.hpp 单头 2.5 万行，是全库最大的单次解析成本）；

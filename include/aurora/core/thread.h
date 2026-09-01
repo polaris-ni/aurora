@@ -6,7 +6,7 @@
 namespace aurora {
 
 /**
- * @brief 单线程 UI 的编译期/运行期守卫（规格 §1.8）。
+ * @brief 单线程 UI 的编译期/运行期守卫（ARCHITECTURE.md §3.1）。
  *
  * Aurora 是单线程 UI：事件、布局、绘制、状态变更均须在同一线程（通常是主线程）完成。
  * `MainThreadOnly<T>` 包装一个值，并在 debug 下断言访问发生在构造它的同一线程；
@@ -62,7 +62,7 @@ template<typename T> class MainThreadOnly<T, false> {
 
 } // namespace aurora
 
-/// @brief 标注函数「必须在主线程调用」（规格 §1.8）。
+/// @brief 标注函数「必须在主线程调用」（ARCHITECTURE.md §3.1）。
 ///
 /// clang 用 `annotate` 属性（可被静态分析 / 文档工具读取）；GCC 不支持 `annotate`
 /// 属性（会触发 `-Wattributes`），故 GCC 与其它编译器均为 no-op；运行期契约仍由

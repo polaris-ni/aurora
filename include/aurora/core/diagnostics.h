@@ -11,7 +11,7 @@
 namespace aurora {
 
 /**
- * @brief 结构化修复建议（规格 §21：错误恢复增强）。
+ * @brief 结构化修复建议（需求 #21）。
  *
  * 携带机器可读 `code`、人类可读 `description` 与可选的 `auto_fix` 回调。
  * 工具 / UI 可经 `Diagnostics::collect_fixes()` 取出，调用 `apply_fix(code)` 一键修复。
@@ -27,14 +27,14 @@ struct FixSuggestion {
 };
 
 /**
- * @brief 诊断记录（规格 §21：错误恢复与降级渲染）。
+ * @brief 诊断记录（需求 #21：错误恢复与降级渲染）。
  *
  * 库在“输入非法 / 部分代码缺失”时**不崩溃、不中止**，而是降级到安全默认值，
  * 并产出一条结构化诊断，供运行时日志与工具消费（JSON 行）。
  *
  * `code` 为机器可读的稳定标识（如 `nav-depth-exceeded`），供 `explain_diagnostic`
  * 与 `--explain` 类工具输出人类可读的解释（CI / 开发者自助排查）。
- * `fix` 为可选的结构化修复建议（§8.3）。
+ * `fix` 为可选的结构化修复建议（specification/01-core.md §8.3）。
  * @note Thread: main-thread only
  * @note Side-effects: none
  */

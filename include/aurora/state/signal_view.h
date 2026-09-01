@@ -8,7 +8,7 @@ class Effect; // 前向声明，避免与 effect.hpp 循环依赖
 
 /// @brief 响应式图的「锚点」：每个 State / Effect 实例持有一个共享锚点，
 /// 观察边 Connection 以 weak_ptr 引用它，从而在任一侧析构后都能安全探测对方
-/// 是否已失效（T1b：消除双向裸指针悬垂，详见 effect.h / state.h）。
+/// 是否已失效（消除双向裸指针悬垂，详见 effect.h / state.h）。
 struct ReactiveAnchor {};
 using AnchorPtr = std::shared_ptr<ReactiveAnchor>;
 

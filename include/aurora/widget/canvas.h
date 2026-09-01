@@ -9,7 +9,7 @@
 namespace aurora {
 
 /**
- * @brief 自定义绘制画布（REQUIREMENTS §4.1 / 规格 §4.1.1）。
+ * @brief 自定义绘制画布（specification/04-widget.md §3.6）。
  *
  * 接受一个绘制回调 `onPaint(painter, bounds)`，在布局给定的矩形内自由绘制
  * （图形图表、自定义图形、原型验证等）。尺寸由 `width`/`height`（或默认 100x100）决定。

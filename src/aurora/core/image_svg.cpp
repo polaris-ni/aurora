@@ -1,4 +1,4 @@
-// 内置 SVG 子集光栅化（规格 §6.2，经用户决策集成到 Image::load / ImageView）。
+// 内置 SVG 子集光栅化（集成到 Image::load / ImageView）。
 //
 // 支持子集（图标级 SVG）：
 // - 形状：<rect>(含 rx 圆角近似)、<circle>、<ellipse>、<line>、<polygon>、<polyline>

@@ -10,7 +10,7 @@
 namespace aurora {
 
 /**
- * @brief 严格模式（规格 §3.3 / CI 用）。
+ * @brief 严格模式（specification/01-core.md §4.3 / CI 用）。
  *
  * `StrictMode::On` 时，`Diagnostics::degraded` 升级为 **error**（硬失败），
  * 用于 CI 把「降级渲染 / 深度超限」等本应容忍的问题变为构建阻断。

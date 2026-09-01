@@ -13,15 +13,15 @@
  */
 namespace aurora {
 
-class Surface;       ///< 抽象渲染后端（Headless/GLFW/Win32/X11/Wayland/...）
-class Window;        ///< 窗口宿主（创建/消息/DPI/事件翻译）
-class Painter;       ///< 软件栅格绘制内核
-class FontEngine;    ///< 字体整形与光栅化引擎
-class Widget;        ///< 控件基类（声明式节点）
-class Application;   ///< 应用生命周期（run/事件循环/资源配置）
-class App;           ///< 轻量应用门面
-class Navigator;     ///< 导航栈控制器
-class Router;        ///< 路由表
-class Theme;         ///< 主题（颜色/排版/形状令牌）
+class Surface;     ///< 抽象渲染后端（Headless/GLFW/Win32/X11/Wayland/...）
+class Window;      ///< 窗口宿主（创建/消息/DPI/事件翻译）
+class Painter;     ///< 软件栅格绘制内核
+class FontEngine;  ///< 字体整形与光栅化引擎
+class Widget;      ///< 控件基类（声明式节点）
+class Application; ///< 应用生命周期（run/事件循环/资源配置）
+class App;         ///< 轻量应用门面
+class Navigator;   ///< 导航栈控制器
+class Router;      ///< 路由表
+struct Theme;      ///< 主题（颜色/排版/形状令牌）
 
 } // namespace aurora

@@ -7,7 +7,7 @@
 namespace aurora {
 
 /**
- * @brief 值类型事件流（规格 §2.5）。对外暴露 `subscribe` / `emit`，以响应式方式订阅 UI 事件。
+ * @brief 值类型事件流（specification/01-core.md §7）。对外暴露 `subscribe` / `emit`，以响应式方式订阅 UI 事件。
  *
  * 单线程 UI 假设（与库一致），故未加锁。`subscribe` 返回 `Subscription`，其析构自动退订。
  */

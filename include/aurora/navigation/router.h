@@ -10,7 +10,7 @@
 namespace aurora {
 
 /**
- * @brief 路由表（§5.11）：按名称登记路由工厂，按需构建 `Route`。
+ * @brief 路由表（specification/05-event-navigation.md §7.3）：按名称登记路由工厂，按需构建 `Route`。
  *
  * 工厂模式使每次导航都获得一棵全新 widget 树（参考 Flutter 命名路由），
  * 避免路由在栈间共享同一棵可变树。

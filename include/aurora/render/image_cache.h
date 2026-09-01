@@ -12,7 +12,7 @@
 namespace aurora {
 
 /**
- * @brief LRU 图片解码缓存（规格 §2.3）：按路径缓存解码后的 `Image`。
+ * @brief LRU 图片解码缓存（specification/03-layout-render.md §8.4）：按路径缓存解码后的 `Image`。
  *
  * `get(path)` 命中直接返回（O(1) 提升到最近使用）；未命中经 `Image::load`
  * 解码后入缓存。内存上限 `set_max_bytes`（默认 64MB），超限 LRU 淘汰。

@@ -19,7 +19,7 @@ enum class AnimationStatus : std::uint8_t {
 };
 
 /**
- * @brief 时间驱动：在 duration 内把线性进度 0→1（或反向）推进（架构 §5.5）。
+ * @brief 时间驱动：在 duration 内把线性进度 0→1（或反向）推进（specification/05-event-navigation.md §6.1）。
  *
  * 纯时间线，**不含曲线**——曲线在 `Tween`/`Keyframes` 上应用；控制器只输出原始
  * 归一化进度 t∈[0,1]。每帧由 `Animator::tick` 调用 `tick(dtSeconds)` 推进。
@@ -68,7 +68,7 @@ class AnimationController {
 };
 
 /**
- * @brief 帧动画管理器（架构 §5.5 `Animator`）。
+ * @brief 帧动画管理器（specification/05-event-navigation.md §6.2 `Animator`）。
  *
  * 持有所有 `AnimationController`，在每帧 `tick(dt)` 中推进它们，并把绑定到
  * `State<T>` 的补间结果写入目标（`State::set` → 触发信号定点刷新，动画不另起通道）。

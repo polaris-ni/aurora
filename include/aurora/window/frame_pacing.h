@@ -19,7 +19,7 @@ namespace aurora {
  * @param next_deadline_ms Scheduler 最近到期任务的剩余毫秒；< 0 表示无定时任务。
  * @param frame_budget_ms  帧预算（1000/max_fps）；<= 0 表示不限帧率（活跃帧不节流）。
  * @param elapsed_ms       本帧已消耗毫秒（帧起点到决策点）。
- * @param backend_paced    后端自带帧节拍（如 D3D11 vsync）：活跃帧跳过 CPU 节流（阶段 B2）。
+ * @param backend_paced    后端自带帧节拍（如 D3D11 vsync）：活跃帧跳过 CPU 节流。
  * @note Thread: main-thread only
  * @note Side-effects: none
  */

@@ -17,7 +17,7 @@ enum class FileChange : std::uint8_t {
 };
 
 /**
- * @brief 文件监视器（规格 §9.6）：轮询式文件系统变化监听。
+ * @brief 文件监视器（specification/01-core.md §7）：轮询式文件系统变化监听。
  *
  * 显式 `poll()` 驱动（可挂到帧循环 / Scheduler::set_interval），确定性、
  * 跨平台（std::filesystem），无后台线程 —— 与单线程 UI 模型契合。

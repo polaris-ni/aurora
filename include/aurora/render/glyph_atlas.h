@@ -13,7 +13,7 @@ namespace aurora::render {
 /// 光栅化。覆盖度以 A8（灰度 `Supersample`）或 RGB（ClearType `FT_RENDER_MODE_LCD` 子像素）
 /// 存储；LRU 淘汰防止 CJK 等大量字形导致内存无限增长。
 ///
-/// 当前为逐字形缓存（内存连续、矩形稳定），Phase 3 可直接重排为连续纹理上传 GPU。
+/// 当前为逐字形缓存（内存连续、矩形稳定），后续可直接重排为连续纹理上传 GPU。
 class GlyphAtlas {
   public:
     enum class Mode : std::uint8_t { Gray, Lcd };

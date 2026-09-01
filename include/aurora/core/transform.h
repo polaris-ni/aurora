@@ -17,7 +17,7 @@ namespace aurora {
  * 仅表达平移 / 旋转 / 缩放（不含投影），求逆稳定、零堆分配，适合每帧热路径。
  *
  * 退化（行列式≈0，如缩放为 0）时 `inverse()` 返回单位矩阵并上报
- * `Diagnostics::degraded`，避免崩溃（规格 §21 错误恢复与降级渲染）。
+ * `Diagnostics::degraded`，避免崩溃（需求 #21 错误恢复与降级渲染）。
  */
 struct Matrix2D {
     float m11 = 1;

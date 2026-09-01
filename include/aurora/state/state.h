@@ -10,7 +10,7 @@
 
 namespace aurora {
 
-class StateGraph; // 前向声明（state_graph.h 提供状态依赖图，§2.6）
+class StateGraph; // 前向声明（state_graph.h 提供状态依赖图，specification/02-state.md §6）
 
 /// @brief 可观察状态容器基类：持有观察者列表并负责通知。
 /// @note Thread: main-thread only
@@ -25,7 +25,7 @@ class StateBase { // NOLINT(cppcoreguidelines-special-member-functions)
     StateBase() { detail::register_state(*this, m_anchor); }
 
     /// @brief 生命周期锚点：供观察边 Connection 以 weak_ptr 引用，使 State 先于
-    ///        Effect 析构时也不会留下悬垂观察者（T1b）。
+    ///        Effect 析构时也不会留下悬垂观察者。
     [[nodiscard]] virtual auto anchor() const -> AnchorPtr { return m_anchor; }
 
     auto notify() -> void {

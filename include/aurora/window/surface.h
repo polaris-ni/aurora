@@ -17,7 +17,7 @@
 
 namespace aurora {
 
-/// @brief 窗口高级样式选项（规格 §1.8）：跨后端声明，由各 Surface 按能力映射。
+/// @brief 窗口高级样式选项：跨后端声明，由各 Surface 按能力映射。
 /// Headless 忽略（无 OS 窗口）；Win32 映射到 WS_EX_TOPMOST / WS_POPUP / 去 WS_THICKFRAME /
 /// WM_GETMINMAXINFO；GLFW 映射到对应 window hint（后续接入）。
 /// 对标 Qt WindowStaysOnTopHint/FramelessWindowHint、WPF Topmost/ResizeMode。
@@ -51,7 +51,7 @@ struct WindowStyleOptions {
     bool always_on_top = false; ///< 置顶（始终浮在普通窗口之上）
     bool frameless = false;     ///< 无边框（无标题栏/边框；自行实现拖拽/关闭）。等价于 DecorationPolicy::Frameless。
     DecorationPolicy decoration = DecorationPolicy::Auto; ///< 装饰策略（见 DecorationPolicy）。
-    bool transparent = false;                             ///< 透明窗口（Win32: WS_EX_LAYERED；§1.8 实验性）
+    bool transparent = false;                             ///< 透明窗口（Win32: WS_EX_LAYERED）
     bool resizable = true;                                ///< 可调大小（false = 固定尺寸，去最大化按钮）
     Size min_size{ .width = 0.0f, .height = 0.0f };       ///< 最小逻辑尺寸（0 = 不限）
     Size max_size{ .width = 0.0f, .height = 0.0f };       ///< 最大逻辑尺寸（0 = 不限）
@@ -59,12 +59,12 @@ struct WindowStyleOptions {
 };
 
 /**
- * @brief 表面抽象：平台窗口/画布的绘制目标（架构 §4.5 `Surface`，<<platform impl>>）。
+ * @brief 表面抽象：平台窗口/画布的绘制目标（ARCHITECTURE.md §4.3 `Surface`，<<platform impl>>）。
  *
  * 一帧生命周期：`beginFrame` → 取 `painter()` 绘制 → `present` 呈现。
  * 已实现后端：`HeadlessSurface`（内存帧缓冲 + 可选 PNG 落盘）、`Win32Surface`（Win32/GDI，仅
  * `AURORA_PLATFORM_WINDOWS`）、 `GlfwSurface`（GLFW/OpenGL，跨平台），均由 `auto_detect_surface()` 按平台选择（见
- * `native_surfaces.h`）； `D3D11Surface` 经 `create_window(D3D11Options)` 显式开启。widget 层与渲染后端解耦（§4.4）。
+ * `native_surfaces.h`）； `D3D11Surface` 经 `create_window(D3D11Options)` 显式开启。widget 层与渲染后端解耦。
  * @note Thread: main-thread only
  * @note Side-effects: none
  */
@@ -257,7 +257,7 @@ class Surface {
 
 #ifdef AURORA_BACKEND_HEADLESS
 /**
- * @brief 无头表面：在内存 `Painter` 帧缓冲上绘制，`present()` 时可写 PNG（§5.7）。
+ * @brief 无头表面：在内存 `Painter` 帧缓冲上绘制，`present()` 时可写 PNG（specification/03-layout-render.md §8.4）。
  *
  * 用于无窗口系统的单元测试与无头校验；不依赖 GLFW/SDL/OpenGL。
  * 仅当 `AURORA_BACKEND_HEADLESS` 定义（默认 ON，可由 CMake `AURORA_BACKEND_HEADLESS=OFF` 剪裁）时提供。

@@ -8,7 +8,7 @@
 namespace aurora {
 
 /**
- * @brief 主题解析查询（规格 §2.1 查询子 API）。
+ * @brief 主题解析查询（specification/07-environment-modifier.md §5.1）。
  *
  * 沿构建好的控件树自顶向下 DFS，遇到 `ThemeProvider` 即更新"当前生效主题"，
  * 返回指定 widget（或整树根）在树中所处位置的**最近生效主题**。默认兜底为

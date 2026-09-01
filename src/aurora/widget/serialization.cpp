@@ -170,12 +170,12 @@ auto register_core_widgets() -> void {
     reg_fresh("Show", []() -> std::shared_ptr<Show> {
         return std::make_shared<Show>(false, Node{ std::make_shared<Spacer>(false) });
     });
-    // 降级视觉占位控件（规格 #18）：可安全从静态 JSON 重建，便于在错误/缺失处渲染占位盒。
+    // 降级视觉占位控件（需求 #18）：可安全从静态 JSON 重建，便于在错误/缺失处渲染占位盒。
     reg_default<Placeholder>("Placeholder");
     reg_default<RichText>("RichText");
     reg_default<Grid>("Grid");
     reg_default<Scroll>("Scroll");
-    // 交互原语（规格 §4 补全）：属性完整可序列化，默认可构造后回填属性即可重建。
+    // 交互原语：属性完整可序列化，默认可构造后回填属性即可重建。
     reg_default<Checkbox>("Checkbox");
     reg_default<Switch>("Switch");
     reg_default<Slider>("Slider");

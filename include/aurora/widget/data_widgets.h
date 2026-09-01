@@ -24,7 +24,7 @@ struct DataColumn {
 enum class SortOrder : std::uint8_t { None, Ascending, Descending };
 
 /**
- * @brief 数据表格（规格 §4.1）：字符串单元格的表格展示。
+ * @brief 数据表格：字符串单元格的表格展示。
  *
  * 行数据为字符串二维数组（序列化友好）；列排序回调 `on_sort(col, order)`
  * 由调用方对数据源重排后 `set_rows` 回填（单向数据流）。行选择（单选）。
@@ -150,7 +150,7 @@ struct TreeItem {
 };
 
 /**
- * @brief 树形视图（规格 §4.2）：层级树展示 + 展开/折叠 + 行选中。
+ * @brief 树形视图：层级树展示 + 展开/折叠 + 行选中。
  *
  * 可见行 = 深度优先展开序（折叠节点子树不展开）。选中以「可见行号」表达，
  * `selected_path()` 返回选中项的标签路径。
@@ -326,7 +326,7 @@ class TreeView : public Widget {
 };
 
 /**
- * @brief 列表视图（规格 §4.3）：数据模型 + 委托渲染 + 选择语义。
+ * @brief 列表视图：数据模型 + 委托渲染 + 选择语义。
  *
  * 与 `Repeater` 区分：`Repeater` 是纯 UI 重复器；`ListView` 绑定字符串数据模型、
  * 内置行选择（单选/多选）与删除操作。委托为可选行构建器（缺省渲染文本行）。

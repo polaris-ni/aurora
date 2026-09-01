@@ -24,7 +24,7 @@ namespace aurora::render {
  *   跨机一致（字体由引擎内置打包），不依赖系统 ClearType 调谐。
  */
 /**
- * @brief 字体引擎（单例）：提供「真实字体渲染」的度量与绘制（架构 §5.x 字体引擎）。
+ * @brief 字体引擎（单例）：提供「真实字体渲染」的度量与绘制（specification/03-layout-render.md §8.2）。
  *
  * 设计目标：widget/布局层只依赖本接口的抽象语义，不关心字形解码来源。
  *

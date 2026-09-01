@@ -10,7 +10,7 @@
 namespace aurora {
 
 /**
- * @brief 撤销命令（规格 §5.3）：命令模式，成对提供 redo/undo。
+ * @brief 撤销命令（specification/02-state.md §6）：命令模式，成对提供 redo/undo。
  *
  * 对标 Qt `QUndoCommand`。用 lambda 组合（AI 友好：无需继承）：
  * @code
@@ -27,7 +27,7 @@ struct UndoCommand {
 };
 
 /**
- * @brief 撤销/重做栈（规格 §5.3）。
+ * @brief 撤销/重做栈（specification/02-state.md §6）。
  *
  * `push` 执行命令的 redo 并入栈（截断重做历史）；`undo`/`redo` 沿栈移动。
  * 深度上限 `set_limit`（默认 100），超限丢弃最旧命令。

@@ -24,7 +24,7 @@ template<> struct CoroShared<void> {
 } // namespace detail
 
 /**
- * @brief 协程式异步任务返回类型（需求 #19 / 规格 §H.10 协程路径）。
+ * @brief 协程式异步任务返回类型（需求 #19 / specification/02-state.md §5.2 协程路径）。
  *
  * 与回调式 `au::async().then()` 并存：`co_await au::co_async(fn)` 在后台线程池执行 `fn`，
  * 续体（coroutine 后续代码）经主线程投递器恢复到主线程（无 poster 时由 worker 直接 resume，

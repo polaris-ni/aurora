@@ -15,7 +15,7 @@
 namespace aurora {
 
 /**
- * @brief 标签/标记控件（规格 §3.9）。
+ * @brief 标签/标记控件。
  *
  * `Chip{label, avatar?, on_delete?}` — 带可选头像图标与删除按钮的紧凑标签。
  * 胶囊圆角背景（`corner_radius < 0` 自动 = 高度一半）；悬停调暗反馈；
@@ -231,7 +231,7 @@ class Chip : public LeafWidget {
 };
 
 /**
- * @brief 角标/计数徽章（规格 §3.9）。
+ * @brief 角标/计数徽章。
  *
  * `Badge{count, child}` — 在子控件右上角叠加数字徽章。
  * 对标 Flutter `Badge`、SwiftUI `.badge()`。

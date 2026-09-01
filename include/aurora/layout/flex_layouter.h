@@ -61,7 +61,7 @@ struct FlexLayout {
  * - 交叉轴对齐：`Start`/`Center`/`End`/`Stretch`（拉伸填满容器交叉轴）。
  * - 弹性分配：权重 > 0 的子项按权重瓜分"父约束剩余空间"；权重 0 仅占内容尺寸。
  *
- * 对应架构 §5.2 / Q13 两阶段布局。与 widget 解耦，可独立单测。
+ * 对应 specification/03-layout-render.md §2.3 两阶段布局。与 widget 解耦，可独立单测。
  *
  * @note Thread: main-thread only
  * @note Side-effects: mutates layout

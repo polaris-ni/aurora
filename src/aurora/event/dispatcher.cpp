@@ -290,7 +290,7 @@ struct MergedModifiers {
         return std::nullopt; // 仅按下阶段匹配快捷键；释放等交给焦点控件
     }
     switch (cat) {
-    case KeyCategory::Tab: // Tab 序导航：Shift+Tab 后退，否则前进（架构 §4.5）
+    case KeyCategory::Tab: // Tab 序导航：Shift+Tab 后退，否则前进（specification/05-event-navigation.md §4）
         fm.move_focus(mods.shift ? FocusDirection::Backward : FocusDirection::Forward);
         e.handled = true;
         return true;

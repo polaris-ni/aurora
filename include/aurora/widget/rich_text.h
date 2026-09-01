@@ -60,7 +60,7 @@ inline auto split_words(const std::string &s) -> std::vector<std::string> {
  * @brief 把片段序列按**单词贪心换行**，返回行集合（已计算每行的 y 与 height）。
  *
  * 在 `maxWidth` 约束内逐词放置；行内非首词前补一个空格宽（按该词所属片段字号）。
- * 行高取该行各片段高度最大值。算法纯函数、无随机性 → 确定性（满足 §11 两遍布局）。
+ * 行高取该行各片段高度最大值。算法纯函数、无随机性 → 确定性（满足 specification/03-layout-render.md §2.3 两阶段布局）。
  */
 inline auto layout_rich_text(const std::vector<TextSpan> &spans, float max_width, const Locale &loc)
     -> std::vector<detail::RichLine> {
@@ -109,7 +109,7 @@ inline auto layout_rich_text(const std::vector<TextSpan> &spans, float max_width
     return lines;
 }
 
-/// @brief 富文本测量（§13）：返回在 `maxWidth` 约束下所需的内容尺寸。
+/// @brief 富文本测量：返回在 `maxWidth` 约束下所需的内容尺寸。
 inline auto measure_rich_text(const std::vector<TextSpan> &spans, float max_width, const Locale &loc = Locale{})
     -> Size {
     const std::vector<detail::RichLine> lines = layout_rich_text(spans, max_width, loc);
@@ -130,7 +130,7 @@ inline auto measure_rich_text(const std::vector<TextSpan> &spans, float max_widt
 }
 
 /**
- * @brief 富文本控件（叶控件，§13）：按 `TextSpan` 序列渲染带样式的文本。
+ * @brief 富文本控件（叶控件）：按 `TextSpan` 序列渲染带样式的文本。
  *
  * 文本经 `defaultStringTable` + 当前 `Locale` 解析（支持 i18n）。布局采用确定性贪心换行，
  * 整串宽度/高度由 `measureRichText` 决定；值来源支持 `Reactive<std::vector<TextSpan>>`。

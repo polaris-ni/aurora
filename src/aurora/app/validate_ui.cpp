@@ -100,7 +100,7 @@ auto type_matches(const Json &value, const std::string &declared_type) -> bool {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity): 递归校验分支较多，复杂度 41 超阈值 25，重构收益低
 auto validate_node(const Json &node, const std::string &path, std::vector<ValidationError> &errors,
                    std::size_t depth = 0, std::size_t max_depth = AURORA_DEFAULT_MAX_WIDGET_DEPTH) -> void {
-    // 0. 深度守卫（规格 §2.4 有界层深度）
+    // 0. 深度守卫（有界层深度，见 specification/08-tooling.md §2.2）
     if (depth > max_depth) {
         errors.push_back({ .path = path,
                            .message = "nesting depth exceeded maximum of " + std::to_string(max_depth) +

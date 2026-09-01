@@ -19,7 +19,7 @@ namespace aurora {
 struct ScrollProps {
     Node child;
     float step = 16.0f;    ///< 每单位滚轮增量的滚动像素
-    float overscan = 1.0f; ///< 缓冲上下各留 overscan 屏：离屏缓冲 = 视口高 ×(1+2×overscan)（G-8 滑动窗口）
+    float overscan = 1.0f; ///< 缓冲上下各留 overscan 屏：离屏缓冲 = 视口高 ×(1+2×overscan)（滑动窗口）
 };
 
 /**
@@ -27,10 +27,10 @@ struct ScrollProps {
  *
  * 内容在宽松约束下测量自然尺寸；容器自身取父约束给出的视口尺寸。
  *
- * 性能模型（滚动流畅、跟手、不卡顿的关键，WS-2 滑动窗口缓冲）：
+ * 性能模型（滚动流畅、跟手、不卡顿的关键，滑动窗口缓冲）：
  * - 内容在宽松约束下测量自然尺寸；容器自身取父约束给出的视口尺寸。
  * - 离屏缓冲 `m_content` 是**滑动窗口**而非整页：尺寸 = 视口宽 × 视口高 ×(1 + 2×overscan)，
- *   与内容总量解耦（G-8：缓冲内存随内容 ×10 不增长）。缓冲以「稳定的内容坐标」录制
+ *   与内容总量解耦（缓冲内存随内容 ×10 不增长）。缓冲以「稳定的内容坐标」录制
  *   （偏移不烘焙进子控件 bounds，子控件的 Display List 缓存不被偏移击穿）。
  * - 滚动只改变下方 `composite` 的平移量，纯滚动帧整页仅一次 blit（平移合成），**不重新栅格化**。
  * - 视口滚出缓冲安全区（上下各 overscan 屏）时才**重锚点并整块重录有界缓冲**；重录频率正比于
@@ -38,7 +38,7 @@ struct ScrollProps {
  * - 非滚动帧（如自动轮播 banner 标脏）重录同一块有界缓冲（已从上百 MB 降到约 3 屏量级）。
  * 这避免了旧实现把偏移烤进 bounds + 绘制时压裁剪，导致每帧重栅整页内容而卡顿的问题。
  *
- * 采用**继承式双模 API**（规格 §1）：`ScrollProps` 字段即本控件公有字段，
+ * 采用**继承式双模 API**（specification/04-widget.md §2.5）：`ScrollProps` 字段即本控件公有字段，
  * `step` 可直接赋值（`scroll.step = 16`）或以配置块构造
  * `Scroll{ ScrollProps{.child = ..., .step = 16} }`。
  * @note Thread: main-thread only
@@ -223,7 +223,7 @@ class Scroll : public Container, public ScrollProps {
             p.pop_clip();
             return;
         }
-        // G-8 计量：滑动窗口离屏缓冲的常驻字节数（RGBA8888）。缓冲尺寸 = 视口宽 × 视口高×(1+2×overscan)，
+        // 计量：滑动窗口离屏缓冲的常驻字节数（RGBA8888）。缓冲尺寸 = 视口宽 × 视口高×(1+2×overscan)，
         // 与内容总量无关（内容 ×10 时缓冲不增长），这是「整页缓冲 → 滑动窗口」优化的直接验收锚点，
         // 不埋点就没有优化前的对照读数。
         AURORA_PROFILE_COUNT(scroll_buffer_bytes, static_cast<std::uint64_t>(m_content->width()) *
@@ -238,11 +238,11 @@ class Scroll : public Container, public ScrollProps {
         // 视口是否仍完全落在已录制的缓冲窗口 [origin, origin+buffer_h] 内（纯 blit 的前提）。
         const bool in_buffer =
             m_offset_y >= m_buffer_origin_y && (m_offset_y + m_viewport_h) <= (m_buffer_origin_y + buffer_h);
-        // reanchor（增量条带重录，见 L5-B）触发条件：
+        // reanchor（增量条带重录）触发条件：
         //  (1) 视口已脱离缓冲（安全网，正常不应发生）；
         //  (2) 长内容（max_origin>0）且正在滚动 —— 每个滚动帧都重锚点并向后偏移缓冲，delta 仅为一帧
         //      滚动量（≈12dp），暴露条带极小 → 单帧成本稳定且低。若只在临近缓冲边缘才重锚点，delta 会
-        //      累积到 ~0.75 屏，条带重绘反而更贵（G-2 最坏帧 37ms 的根源）。短内容（max_origin==0）缓冲
+        //      累积到 ~0.75 屏，条带重绘反而更贵（最坏帧 37ms 的根源）。短内容（max_origin==0）缓冲
         //      已覆盖全部可滚内容，永不重锚点，走 pure_scroll_blit 只做平移合成（最廉价）。
         //  m_content_valid 是增量路径的前提：缓冲刚重建/内容尺寸变化时里面没有可复用像素，
         //  此时若走增量只绘条带会漏画其余部分，必须回落整块重录。
@@ -326,10 +326,10 @@ class Scroll : public Container, public ScrollProps {
                 m_content->pop_clip();
                 // m_content_valid 保持 true（仅更新带内像素，带外像素仍有效）
             } else {
-                // 增量条带重录（L5-B）：缓冲里已栅格化的像素按新旧锚点差**原地按行 memmove**
+                // 增量条带重录：缓冲里已栅格化的像素按新旧锚点差**原地按行 memmove**
                 // 搬移（Painter::shift_pixels），只重绘新进入窗口的条带。
                 // 旧做法是「分配 scratch 缓冲 + 整块 composite 位移 + swap」，composite 的逐像素
-                // 矩阵求逆让单次位移在 3 屏缓冲上稳定 ~30ms —— 与整块重绘同量级，正是 G-2 最坏帧
+                // 矩阵求逆让单次位移在 3 屏缓冲上稳定 ~30ms —— 与整块重绘同量级，正是最坏帧
                 // 击穿 33.3ms 的直接原因；memmove 是连续块搬移，同尺寸下降到 ~1ms。
                 const float old_origin = m_buffer_origin_y;
                 const float new_origin = std::clamp(m_offset_y - overscan_h, 0.0f, max_origin);
@@ -383,7 +383,7 @@ class Scroll : public Container, public ScrollProps {
         if (m_content_w <= 0.0f || m_viewport_h <= 0.0f) {
             return;
         }
-        // 滑动窗口缓冲：高度 = 视口高 ×(1 + 2×overscan)，与内容总量解耦（G-8）。
+        // 滑动窗口缓冲：高度 = 视口高 ×(1 + 2×overscan)，与内容总量解耦。
         const float buffer_h = m_viewport_h * (1.0f + (2.0f * overscan));
         const float scale = ctx.scale_factor > 0.0f ? ctx.scale_factor : 1.0f;
         const int w = static_cast<int>(std::lround(m_content_w));

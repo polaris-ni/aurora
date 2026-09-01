@@ -8,7 +8,7 @@
 namespace aurora {
 
 /**
- * @brief 脏区域追踪器（规格 §2.1）：收集脏矩形并合并重叠区域。
+ * @brief 脏区域追踪器（specification/06-app-platform.md §3.2）：收集脏矩形并合并重叠区域。
  *
  * 帧循环协议：状态变更经 `mark(rect)` / `mark_all()` 标记脏区；渲染前
  * 经 `is_empty()` 判断可否跳帧（无脏区 = 上帧画面仍有效，跳过整帧重绘）；

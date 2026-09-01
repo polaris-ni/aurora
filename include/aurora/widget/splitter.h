@@ -21,7 +21,7 @@ enum class SplitterOrientation {
 };
 
 /**
- * @brief 可拖拽分割器（规格 §1.6）：两区域按比例分配空间，拖动分隔条调整。
+ * @brief 可拖拽分割器：两区域按比例分配空间，拖动分隔条调整。
  *
  * `HSplitter{first, second}` 左右布局；`VSplitter{first, second}` 上下布局。
  * 比例存于响应式 `ratio()`，可订阅联动；`min_first`/`min_second` 限制两侧最小尺寸。

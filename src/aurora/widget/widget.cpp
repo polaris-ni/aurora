@@ -78,10 +78,10 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     }
 #endif
     // 缓存未命中：本节点将真正重新测量（含修饰链构建 + on_layout + 子树递归）。
-    // 计数只统计「真实布局工作量」，缓存命中不计——G-6 复杂度门槛即基于此语义。
+    // 计数只统计「真实布局工作量」，缓存命中不计——复杂度门槛即基于此语义。
     AURORA_PROFILE_COUNT(layout_nodes, 1);
 
-    // 显式尺寸意图（规格 §4/§20）：固定宽度/高度构成"显式盒"，把对应轴约束
+    // 显式尺寸意图（specification/01-core.md §2.2 / 需求 #20）：固定宽度/高度构成"显式盒"，把对应轴约束
     // 夹成 [v, v]，使子节点在固定盒内布局；其余意图（auto/fill）保持内容/弹性。
     Constraints cc = c;
     if (m_width.kind == LengthKind::Fixed) {
@@ -349,7 +349,7 @@ auto Widget::render_into(Painter &dst, const Rect &local, const BuildContext &ct
 
 auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
 #ifdef AURORA_ENABLE_DEBUG
-    // 渲染纯度守卫接线（规格 §2.2）：进入绘制上下文即递增 g_paint_depth，
+    // 渲染纯度守卫接线（GUIDELINE.md §27.5）：进入绘制上下文即递增 g_paint_depth，
     // 配合 current_timestamp() 的 !g_paint_depth 断言捕获「绘制中读全局时钟」的反模式。
     debug::PaintPurityGuard aurora_paint_purity_guard;
     debug::check_render_purity();
@@ -518,7 +518,7 @@ auto Widget::mount(const BuildContext &ctx) -> void {
     }
 
     // 含需每帧计时的手势（LongPress/Draggable）或 Tooltip 延迟检测时，开启 tick 驱动，
-    // 使 Widget::tick 不提前返回，从而正确推进 Tooltip 延迟计时（架构 §4.5/§5.4）。
+    // 使 Widget::tick 不提前返回，从而正确推进 Tooltip 延迟计时。
     const Modifier &mod = modifier.get();
     if (mod.has_gesture() || mod.has_tooltip()) {
         m_needs_gesture_tick = true;

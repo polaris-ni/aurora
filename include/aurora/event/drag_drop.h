@@ -9,7 +9,7 @@
 namespace aurora {
 
 /**
- * @brief 拖放数据载荷（规格 §7.1）。
+ * @brief 拖放数据载荷（specification/05-event-navigation.md §5.2）。
  *
  * 携带 MIME 类型标识与 JSON 载荷，支持文本/控件/自定义数据拖放。
  */

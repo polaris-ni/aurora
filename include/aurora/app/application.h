@@ -18,10 +18,10 @@
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/event.h"
 #include "aurora/event/focus.h"
-#include "aurora/state/async.h" // Task::set_main_poster（跨线程回投经 request_wake 唤醒，阶段 A2）
+#include "aurora/state/async.h" // Task::set_main_poster（跨线程回投经 request_wake 唤醒）
 #include "aurora/state/state.h"
 #include "aurora/widget/widget.h"
-#include "aurora/window/frame_pacing.h" // compute_wait_timeout（帧调度决策，阶段 A2）
+#include "aurora/window/frame_pacing.h" // compute_wait_timeout（帧调度决策）
 #include "aurora/window/window.h"
 #include "aurora/window/window_state.h" // WindowState / WindowMode 及纯函数
 
@@ -30,10 +30,10 @@ namespace aurora {
 /**
  * @brief 应用组合根：持 Scene 与画布尺寸，提供渲染与同步事件派发。
  *
- * 对应架构 §4.5：单线程 UI（Q7）；事件同步派发（Q6），经 `EventDispatcher` + `FocusManager`
+ * 对应 ARCHITECTURE.md §4.6 / §3.1：单线程 UI；事件同步派发，经 `EventDispatcher` + `FocusManager`
  * 统一处理指针/键盘/滚轮/文本输入，并维护焦点序（Tab 导航）。
  *
- * 后端组合（§4.5 后端选择与工厂）：
+ * 后端组合（ARCHITECTURE.md §8.4 / specification/03-layout-render.md §8.5）：
  * - `Application(Scene, unique_ptr<Window>)` 接受由 `create_window(XxxOptions)` 工厂产出的预组装 `Window`；
  *   并注册事件处理器把原生事件经 `EventDispatcher` 集中派发；随后可 `run()` 进入帧循环。
  * - `Application(Scene, unique_ptr<Surface>)` 注入任意自定义 `Surface`（自定义后端稳定入口）。
@@ -101,7 +101,7 @@ class Application {
     /// @brief 定时任务调度器：每帧由 run() 按 dt 驱动，供 `set_timeout`/`set_interval` 与组件级 `Timer` 使用。
     [[nodiscard]] auto scheduler() -> Scheduler & { return m_sched; }
 
-    /// @brief 快捷键注册表：在键盘事件派发到焦点控件前优先匹配（规格 §8.4）。
+    /// @brief 快捷键注册表：在键盘事件派发到焦点控件前优先匹配（specification/06-app-platform.md §8.4）。
     /// 用法：`app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::O}, []{ open(); })`。
     [[nodiscard]] auto shortcuts() -> ShortcutRegistry & { return m_shortcuts; }
 
@@ -129,7 +129,7 @@ class Application {
     /// @brief 注册窗口几何态命令式回调（与 `window_mode()` 响应式订阅并存）。
     auto set_on_window_mode(std::function<void(WindowMode)> cb) -> void { m_on_window_mode = std::move(cb); }
 
-    /// @brief 设置运行时严格模式（规格 §3.3 / CI 门禁）。
+    /// @brief 设置运行时严格模式（specification/01-core.md §4.3 / CI 门禁）。
     /// `run()` 期间套用到线程级开关；默认 Off。
     auto set_strict_mode(StrictMode m) -> void { m_strict = m; }
 
@@ -157,7 +157,7 @@ class Application {
         if (m_opts.max_fps > 0) {
             FrameStats::instance().set_frame_budget_ms(1000.0 / m_opts.max_fps);
         }
-        // 跨线程回投（阶段 A2）：后台线程的 then 回调入队 + 唤醒睡眠中的主循环，
+        // 跨线程回投：后台线程的 then 回调入队 + 唤醒睡眠中的主循环，
         // 下一帧开头在主线程排水执行（兼具线程安全与不丢唤醒）。
         Task<bool>::set_main_poster([this](std::function<void()> fn) -> void {
             {
@@ -190,9 +190,9 @@ class Application {
                 if (m_window->is_idle_frame()) {
                     FrameStats::instance().record_idle();
                 } else {
-                    FrameStats::instance().record(dt); // 帧统计（PerfOverlay/工具消费，§8.2）
+                    FrameStats::instance().record(dt); // 帧统计（PerfOverlay/工具消费，ARCHITECTURE.md §10.1）
                 }
-                // 帧调度决策（阶段 A2）：本帧末尾计算下次唤醒等待，交由 Window::run 执行。
+                // 帧调度决策：本帧末尾计算下次唤醒等待，交由 Window::run 执行。
                 // 决策在 present_root 之后取脏——渲染期间产生的新脏（如动画 State 写回）
                 // 已在 m_dirty 中，查完脏再睡，同线程不丢帧；跨线程经 request_wake 唤醒。
                 if (m_opts.power_saving) {
@@ -223,7 +223,7 @@ class Application {
         aurora::set_strict_mode(prev_strict);
     }
 
-    /// @brief 渲染当前场景到 PNG。运行期同样套用严格模式（§3.3 / CI 门禁），
+    /// @brief 渲染当前场景到 PNG。运行期同样套用严格模式（specification/01-core.md §4.3 / CI 门禁），
     ///        使无窗口后端（HeadlessSurface）的离屏渲染也能触发严格失败。
     [[nodiscard]] auto render_to_png(const char *path) -> Result<bool> {
         const StrictMode prev_strict = aurora::strict_mode();
@@ -233,7 +233,7 @@ class Application {
         return r;
     }
 
-    /// @brief 在坐标 (x,y) 处命中测试并派发指针按下事件（同步回调，§5.4）。
+    /// @brief 在坐标 (x,y) 处命中测试并派发指针按下事件（同步回调，ARCHITECTURE.md §3.1）。
     /// 经 `EventDispatcher` 路径触发 `on_pointer_event`（Button::on_click 与 Clickable 回调）。
     auto dispatch_click(float x, float y) -> void;
 
@@ -250,13 +250,13 @@ class Application {
     /// @brief 同步派发文本输入事件到焦点 widget。
     auto dispatch_text(TextInputEvent e) -> bool;
 
-    /// @brief 同步派发多点触控事件（按 pointer id 做指针捕获与并发路由，§5.4）。
+    /// @brief 同步派发多点触控事件（按 pointer id 做指针捕获与并发路由，ARCHITECTURE.md §3.1）。
     /// 派发器对每个触点：① 把完整 `TouchEvent` 交给命中链（`touch()` 原始流 / `PinchRecognizer`）；
     /// ② 合成对应 `MouseEvent`（携带 `pointer_id`）驱动 `Draggable`/`LongPress`/`Clickable`。
     auto dispatch_touch(const TouchEvent &e) -> void;
 
     /// @brief 同步派发操作系统文件拖放事件到命中控件（窗口逻辑坐标）。
-    /// 经 `EventDispatcher` 路径触发 `on_file_drop`（§ 平台 Shell）。
+    /// 经 `EventDispatcher` 路径触发 `on_file_drop`（specification/06-app-platform.md §8 平台 Shell）。
     auto dispatch_file_drop(const std::vector<std::string> &paths, float x, float y) -> void {
         FileDropEvent e;
         e.position = Point{ .x = x, .y = y };
@@ -327,7 +327,7 @@ class Application {
         m_window->surface().set_window_mode_handler([this](WindowMode m) -> void { on_window_mode_changed(m); });
     }
 
-    /// @brief 排水跨线程回投队列（主线程，每帧开头/退出前调用；阶段 A2）。
+    /// @brief 排水跨线程回投队列（主线程，每帧开头/退出前调用）。
     auto drain_posted() -> void {
         std::vector<std::function<void()>> q;
         {
@@ -358,11 +358,11 @@ class Application {
     State<WindowMode> m_window_mode{ WindowMode::Normal };     ///< 窗口几何态（响应式）。
     std::function<void(WindowState)> m_on_window_state;        ///< 可见性状态命令式回调。
     std::function<void(WindowMode)> m_on_window_mode;          ///< 几何态命令式回调。
-    std::mutex m_posted_mutex;                                 ///< 跨线程回投队列锁（阶段 A2）。
-    std::vector<std::function<void()>> m_posted;               ///< 待主线程执行的回投工作（阶段 A2）。
+    std::mutex m_posted_mutex;                                 ///< 跨线程回投队列锁。
+    std::vector<std::function<void()>> m_posted;               ///< 待主线程执行的回投工作。
 };
 
-/// @brief 流式应用构建器（§4.5）：`au::App().title("X").size(800,600).view(root).run()`。
+/// @brief 流式应用构建器（specification/06-app-platform.md §4）：`au::App().title("X").size(800,600).view(root).run()`。
 ///
 /// 与既有 `Application` 构造语义一致：`run()` 内部构造 `Application` 并进入帧循环，不破坏旧用法。
 /// 后端可由 `.window()`（预组装 Window）/ `.surface()`（自定义 Surface）指定，
@@ -422,7 +422,7 @@ class App {
         m_max_frames = n;
         return *this;
     }
-    /// @brief 设置运行时严格模式（规格 §3.3 / CI 门禁）。
+    /// @brief 设置运行时严格模式（specification/01-core.md §4.3 / CI 门禁）。
     /// `run()` 期间套用到 Application 上下文（严格模式下降级即致命失败）。
     auto strict_mode(StrictMode m) -> App & {
         m_strict = m;
@@ -528,7 +528,7 @@ class App {
     std::shared_ptr<Widget> m_overlay;         ///< HUD 叠加层（`.overlay()`）：独立于 widget 树渲染。
 };
 
-/// @brief 便捷构造：返回流式构建器（§4.5）。
+/// @brief 便捷构造：返回流式构建器（specification/06-app-platform.md §4）。
 // NOLINTNEXTLINE(readability-identifier-naming): 工厂名 `App` 与类型同名，保持 CamelCase 以匹配流式 DSL
 [[nodiscard]] inline auto App() -> App { return App::make(); }
 

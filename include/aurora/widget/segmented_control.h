@@ -17,7 +17,7 @@
 namespace aurora {
 
 /**
- * @brief 分段控件（规格 §3.10）。
+ * @brief 分段控件。
  *
  * `SegmentedControl<T>{segments, selected, on_change}` — 互斥分段选择。
  *
