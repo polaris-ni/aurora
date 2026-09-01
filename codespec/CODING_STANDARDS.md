@@ -242,6 +242,14 @@
 2. 运行 `cmake --build build --target aurora_api_json`（内部执行 `gen_api_tools aurora_api.json`）刷新 API 描述。
 3. 破坏性变更 → 写迁移说明并 bump MAJOR。
 
+### 7.3 第三方组件与许可证
+
+`third_party/` 下每个内嵌（vendored）组件都携带独立许可证，其合规声明集中记录于根目录 `THIRD_PARTY_LICENSES.md`。
+
+- **强制同步**：新增、删除或修改 `third_party/` 下任何第三方组件（含版本升级、子模块增删、补丁改动）时，**必须同步更新** `THIRD_PARTY_LICENSES.md`，保持组件清单与其许可证类型、版权信息、上游来源一致，杜绝「代码有、清单无」或「清单有、已移除」的漂移。
+- **联动项**：若组件的引入 / 移除影响构建（新增 `AURORA_*` 开关、链接库或源码构建目标），一并核对 `BUILD_OPTIONS.md` 相应章节；引入新许可证时确认与项目 MIT 许可兼容。
+- **归类**：此类改动按 `CODING_STANDARDS.md` §10 记为 `build` 类型提交，并在需要时于 `CHANGELOG.json` 备注依赖变化。
+
 ---
 
 ## 8 函数签名
