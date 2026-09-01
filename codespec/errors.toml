@@ -224,6 +224,17 @@ message = "Invalid image dimensions (width/height is 0 or exceeds the limit)"
 hint = "Check image dimensions or use a valid-size resource"
 
 [[error]]
+enum = "IOImageEncodeFailed"
+slug = "io-image-encode-failed"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = false
+message = "Image encode failed"
+hint = "Check image pixel data validity or encoder options (quality/format)"
+
+[[error]]
 enum = "ValidationFailed"
 slug = "validation-failed"
 category = "validation"

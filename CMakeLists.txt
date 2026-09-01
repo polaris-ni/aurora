@@ -73,9 +73,6 @@ include(AuroraCcache)
 # ---- 三方字体依赖（FreeType + HarfBuzz 源码构建）----
 include(AuroraThirdParty)
 
-# ---- 图片编解码器外部库（libjpeg-turbo / libwebp / wuffs）----
-include(AuroraImageCodecs)
-
 # NOMINMAX：抑制 <windows.h> 的 min/max 宏，保证 std::min/std::max 在 Windows 上可用
 # （preferences.cpp 等直接 include <windows.h> 并使用 std::max；第三方库同样需要，故保持全局定义）。
 # 告警标志改为 aurora 目标级（见下方 add_library(aurora ...) 之后），不再全局注入，
@@ -144,6 +141,11 @@ target_compile_features(aurora PUBLIC cxx_std_20)
 target_compile_options(aurora PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
 # FreeType：PUBLIC 链接使任意消费者（demo/测试/工具）静态链入，无需自行配置。
 target_link_libraries(aurora PUBLIC freetype harfbuzz)
+
+# ---- 图片编解码器外部库（libjpeg-turbo / libwebp / wuffs）----
+# ⚠️ 必须在 add_library(aurora ...) 之后 include：本模块内部以 target_link_libraries(aurora ...)
+# 把各 codec 的 OBJECT 库链入 aurora，若 aurora 目标尚未创建会报 "not built by this project"。
+include(AuroraImageCodecs)
 
 # 三方库 harfbuzz 从源码编译（src/harfbuzz.cc 合并源），其 hb-algs.hh:1146 的 memcmp 边界分析
 # 在 -O2/-O3 内联展开时误报 -Wstringop-overread（"exceeds source size"）。该告警对三方代码

@@ -25,11 +25,49 @@ if (AURORA_BUILD_IMAGE_JPEG)
     add_compile_definitions(AURORA_BUILD_IMAGE_JPEG)
 
     set(_JPEG_SRC ${CMAKE_SOURCE_DIR}/third_party/libjpeg-turbo)
-    # 由模板生成 jconfig.h（MinGW/Windows 默认值）
+    # jpeg_turbo_codec.cpp 以 <jpeglib.h> 引用 libjpeg-turbo 头，需要把其 src 目录
+    # 加入 aurora 目标的私有 include 路径（jconfig.h/jconfigint.h/jversion.h 由上方
+    # configure_file 生成到 gen/jpeg，同样需加入）。
+    target_include_directories(aurora PRIVATE
+            ${_JPEG_SRC}/src
+            ${CMAKE_BINARY_DIR}/gen/jpeg)
+    # 由模板生成 jconfig.h / jconfigint.h（MinGW/Windows 默认值）。
+    # 仅编译 src/*.c（不含 simd/），故 WITH_SIMD / 算术编码一律关闭；
+    # 下方临时设置与模板占位同名的变量供 @ONLY 替换，#cmakedefine 行在无对应变量时
+    # 自动展开为 #undef。生成后立即 unset，避免污染外层作用域。
+    # JPEG_LIB_VERSION=80 对应 libjpeg v8 ABI（libjpeg-turbo 默认）。
+    set(JPEG_LIB_VERSION "80")
+    set(VERSION "3.2.0")
+    set(LIBJPEG_TURBO_VERSION_NUMBER "3020000")
+    set(COPYRIGHT_YEAR "2026")
+    set(BUILD "")
+    set(HIDDEN "")
+    set(INLINE "inline")
+    set(THREAD_LOCAL "__thread")
+    set(SIZE_T "${CMAKE_SIZEOF_VOID_P}")
+    set(SIMD_ARCHITECTURE "0")
     configure_file(
             ${_JPEG_SRC}/src/jconfig.h.in
             ${CMAKE_BINARY_DIR}/gen/jpeg/jconfig.h
             @ONLY)
+    configure_file(
+            ${_JPEG_SRC}/src/jconfigint.h.in
+            ${CMAKE_BINARY_DIR}/gen/jpeg/jconfigint.h
+            @ONLY)
+    configure_file(
+            ${_JPEG_SRC}/src/jversion.h.in
+            ${CMAKE_BINARY_DIR}/gen/jpeg/jversion.h
+            @ONLY)
+    unset(JPEG_LIB_VERSION)
+    unset(VERSION)
+    unset(LIBJPEG_TURBO_VERSION_NUMBER)
+    unset(COPYRIGHT_YEAR)
+    unset(BUILD)
+    unset(HIDDEN)
+    unset(INLINE)
+    unset(THREAD_LOCAL)
+    unset(SIZE_T)
+    unset(SIMD_ARCHITECTURE)
     add_library(aurora_jpeg OBJECT
             ${_JPEG_SRC}/src/jcapimin.c ${_JPEG_SRC}/src/jcapistd.c ${_JPEG_SRC}/src/jcarith.c
             ${_JPEG_SRC}/src/jccoefct.c ${_JPEG_SRC}/src/jccolor.c ${_JPEG_SRC}/src/jcdctmgr.c
@@ -67,6 +105,7 @@ if (AURORA_BUILD_IMAGE_WEBP)
     file(GLOB_RECURSE _WEBP_C ${_WEBP_SRC}/src/*.c)
     add_library(aurora_webp OBJECT ${_WEBP_C})
     target_include_directories(aurora_webp PRIVATE
+            ${_WEBP_SRC}
             ${_WEBP_SRC}/src
             ${_WEBP_SRC}/src/webp
             ${_WEBP_SRC}/src/dec
@@ -77,6 +116,8 @@ if (AURORA_BUILD_IMAGE_WEBP)
             ${_WEBP_SRC}/src/demux)
     target_compile_definitions(aurora_webp PRIVATE WEBP_HAVE_SSE2=0)
     target_compile_options(aurora_webp PRIVATE -w)
+    # webp_codec.cpp 以 <webp/decode.h> 引用 libwebp 公共头，需把其 src 目录加入 aurora 的 include 路径。
+    target_include_directories(aurora PRIVATE ${_WEBP_SRC}/src)
     target_link_libraries(aurora PRIVATE aurora_webp)
 endif ()
 
