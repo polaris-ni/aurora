@@ -10,14 +10,16 @@
 #define _WIN32_WINNT 0x0601
 #endif
 #ifndef _WIN32_IE
-#define _WIN32_IE 0x0600
+#define WIN32_IE 0x0600 // NOLINT(cppcoreguidelines-macro-usage, readability-identifier-naming): Windows SDK 版本宏
 #endif
-#define WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+// clang-format off
 #include <windows.h>
 #include <shellapi.h> // 须在 windows.h 之后：WIN32_LEAN_AND_MEAN 会排除其自动包含；EXTERN_C 由 windows.h/winnt.h 提供
+// clang-format on
 #endif
 #include <string>
 
@@ -36,22 +38,23 @@ struct SystemTray::Impl {
     bool visible = false;
     UINT taskbar_created = 0;
 
-    static constexpr UINT AURORA_CALLBACK_MAG = WM_APP + 1;
+    static constexpr UINT m_aurora_callback_mag = WM_APP + 1;
 
-    bool create_window();
+    auto create_window() -> bool;
     void destroy_window();
-    bool add_icon();
+    auto add_icon() -> bool;
     void remove_icon();
     void update_icon(const std::string &path);
     void update_tip();
     void show_balloon_impl(const std::string &title, const std::string &msg);
+    // NOLINTNEXTLINE(modernize-use-trailing-return-type): CALLBACK 调用约定下尾返回类型会改变签名语义
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 
     /// @brief 递归构建 Win32 HMENU：从 MenuItem 声明式模型转换为原生菜单。
     /// 每个可点击项用 WM_COMMAND (WM_APP+2 + index) 标识，由 show_context_menu 分发。
     static auto build_hmenu(const std::vector<MenuItem> &items, UINT &cmd_id) -> HMENU;
     /// @brief 弹出右键菜单：构建 HMENU → TrackPopupMenu → 分发 WM_COMMAND。
-    void show_context_menu();
+    void show_context_menu() const;
 #endif
 };
 
@@ -100,7 +103,7 @@ SystemTray::~SystemTray() {
     if (impl_) {
         impl_->remove_icon();
         impl_->destroy_window();
-        if (impl_->hicon) {
+        if (impl_->hicon != nullptr) {
             DestroyIcon(impl_->hicon);
         }
     }
@@ -158,23 +161,26 @@ void SystemTray::on_activate(std::function<void()> cb) { on_activate_cb_ = std::
 void SystemTray::set_context_menu(std::vector<MenuItem> items) { context_menu_items_ = std::move(items); }
 
 #ifdef AURORA_PLATFORM_WINDOWS
+// NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-pointer-arithmetic,
+// cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-pro-type-union-access,
+// performance-no-int-to-ptr): Win32 Shell_NotifyIcon/HMENU 句柄与字节搬运不可避免
 
-bool SystemTray::Impl::create_window() {
-    static constexpr wchar_t kClass[] = L"AuroraSystemTrayClass";
+auto SystemTray::Impl::create_window() -> bool {
+    static constexpr const wchar_t *k_class = L"AuroraSystemTrayClass";
     static bool registered = false;
     if (!registered) {
         WNDCLASSEXW wc{};
         wc.cbSize = sizeof(wc);
         wc.lpfnWndProc = &SystemTray::Impl::wnd_proc;
         wc.hInstance = GetModuleHandleW(nullptr);
-        wc.lpszClassName = kClass;
+        wc.lpszClassName = k_class;
         if (RegisterClassExW(&wc) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
             AURORA_LOG_WARN("system_tray", "RegisterClassExW 失败");
         }
         registered = true;
     }
-    hwnd = CreateWindowExW(0, kClass, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), this);
-    if (!hwnd) {
+    hwnd = CreateWindowExW(0, k_class, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), this);
+    if (hwnd == nullptr) {
         AURORA_LOG_WARN("system_tray", "CreateWindowExW(HWND_MESSAGE) 失败");
         return false;
     }
@@ -184,26 +190,26 @@ bool SystemTray::Impl::create_window() {
 }
 
 void SystemTray::Impl::destroy_window() {
-    if (hwnd) {
+    if (hwnd != nullptr) {
         DestroyWindow(hwnd);
         hwnd = nullptr;
     }
 }
 
-bool SystemTray::Impl::add_icon() {
-    if (!hwnd) {
+auto SystemTray::Impl::add_icon() -> bool {
+    if (hwnd == nullptr) {
         return false;
     }
     nid.cbSize = sizeof(NOTIFYICONDATAW);
     nid.hWnd = hwnd;
     nid.uID = 1;
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
-    nid.uCallbackMessage = AURORA_CALLBACK_MAG;
-    nid.hIcon = hicon ? hicon : LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
+    nid.uCallbackMessage = m_aurora_callback_mag;
+    nid.hIcon = (hicon != nullptr) ? hicon : LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
     nid.uVersion = NOTIFYICON_VERSION_4;
     update_tip();
     const BOOL ok = Shell_NotifyIconW(NIM_ADD, &nid);
-    if (ok) {
+    if (ok != 0) {
         Shell_NotifyIconW(NIM_SETVERSION, &nid);
         visible = true;
     } else {
@@ -213,22 +219,22 @@ bool SystemTray::Impl::add_icon() {
 }
 
 void SystemTray::Impl::remove_icon() {
-    if (hwnd && visible) {
+    if ((hwnd != nullptr) && visible) {
         Shell_NotifyIconW(NIM_DELETE, &nid);
         visible = false;
     }
 }
 
 void SystemTray::Impl::update_tip() {
-    if (!hwnd) {
+    if (hwnd == nullptr) {
         return;
     }
-    const std::wstring tip = aurora::internal::utf8_to_wstr(owner ? owner->tray_title_ : std::string{});
-    constexpr size_t kMax = (sizeof(nid.szTip) / sizeof(wchar_t)) - 1;
+    const std::wstring tip = aurora::internal::utf8_to_wstr((owner != nullptr) ? owner->tray_title_ : std::string{});
+    constexpr size_t k_max = (sizeof(nid.szTip) / sizeof(wchar_t)) - 1;
     // 有界拷贝，避免 wcsncpy 的 MSVC 弃用告警；保证以 null 结尾。
     const wchar_t *src = tip.c_str();
     size_t i = 0;
-    for (; i < kMax && src[i] != L'\0'; ++i) {
+    for (; i < k_max && src[i] != L'\0'; ++i) {
         nid.szTip[i] = src[i];
     }
     nid.szTip[i] = L'\0';
@@ -239,7 +245,7 @@ void SystemTray::Impl::update_tip() {
 }
 
 void SystemTray::Impl::update_icon(const std::string &path) {
-    if (hicon) {
+    if (hicon != nullptr) {
         DestroyIcon(hicon);
         hicon = nullptr;
     }
@@ -248,30 +254,30 @@ void SystemTray::Impl::update_icon(const std::string &path) {
                                               LR_LOADFROMFILE | LR_DEFAULTSIZE));
     }
     if (visible) {
-        nid.hIcon = hicon ? hicon : LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
+        nid.hIcon = (hicon != nullptr) ? hicon : LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         Shell_NotifyIconW(NIM_MODIFY, &nid);
     }
 }
 
 void SystemTray::Impl::show_balloon_impl(const std::string &title, const std::string &msg) {
-    if (!hwnd) {
+    if (hwnd == nullptr) {
         return;
     }
     const std::wstring wtitle = aurora::internal::utf8_to_wstr(title);
     const std::wstring wmsg = aurora::internal::utf8_to_wstr(msg);
-    constexpr size_t kMaxTitle = (sizeof(nid.szInfoTitle) / sizeof(wchar_t)) - 1;
-    constexpr size_t kMaxMsg = (sizeof(nid.szInfo) / sizeof(wchar_t)) - 1;
+    constexpr size_t k_max_title = (sizeof(nid.szInfoTitle) / sizeof(wchar_t)) - 1;
+    constexpr size_t k_max_msg = (sizeof(nid.szInfo) / sizeof(wchar_t)) - 1;
     // 有界拷贝，避免 wcsncpy 的 MSVC 弃用告警；保证以 null 结尾。
     const wchar_t *ts = wtitle.c_str();
     size_t it = 0;
-    for (; it < kMaxTitle && ts[it] != L'\0'; ++it) {
+    for (; it < k_max_title && ts[it] != L'\0'; ++it) {
         nid.szInfoTitle[it] = ts[it];
     }
     nid.szInfoTitle[it] = L'\0';
     const wchar_t *ms = wmsg.c_str();
     size_t im = 0;
-    for (; im < kMaxMsg && ms[im] != L'\0'; ++im) {
+    for (; im < k_max_msg && ms[im] != L'\0'; ++im) {
         nid.szInfo[im] = ms[im];
     }
     nid.szInfo[im] = L'\0';
@@ -285,10 +291,11 @@ void SystemTray::Impl::show_balloon_impl(const std::string &title, const std::st
     }
 }
 
+// NOLINTNEXTLINE(modernize-use-trailing-return-type): CALLBACK 调用约定下尾返回类型会改变签名语义
 LRESULT CALLBACK SystemTray::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     auto *impl = reinterpret_cast<SystemTray::Impl *>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-    if (msg == SystemTray::Impl::AURORA_CALLBACK_MAG) {
-        if (impl) {
+    if (msg == SystemTray::Impl::m_aurora_callback_mag) {
+        if (impl != nullptr) {
             switch (lp) {
             case WM_LBUTTONUP:
             case NIN_SELECT:
@@ -301,7 +308,7 @@ LRESULT CALLBACK SystemTray::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPAR
         }
         return 0;
     }
-    if (impl && impl->taskbar_created && msg == impl->taskbar_created) {
+    if ((impl != nullptr) && (impl->taskbar_created != 0u) && msg == impl->taskbar_created) {
         impl->add_icon(); // 资源管理器重启后重新添加图标
         return 0;
     }
@@ -310,11 +317,10 @@ LRESULT CALLBACK SystemTray::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPAR
 
 auto SystemTray::Impl::build_hmenu(const std::vector<MenuItem> &items, UINT &cmd_id) -> HMENU {
     const HMENU menu = CreatePopupMenu();
-    if (!menu) {
+    if (menu == nullptr) {
         return nullptr;
     }
-    for (std::size_t i = 0; i < items.size(); ++i) {
-        const MenuItem &item = items[i];
+    for (const auto &item : items) {
         if (item.separator) {
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             continue;
@@ -339,15 +345,15 @@ auto SystemTray::Impl::build_hmenu(const std::vector<MenuItem> &items, UINT &cmd
     return menu;
 }
 
-void SystemTray::Impl::show_context_menu() {
-    if (!hwnd || !owner || owner->context_menu_items_.empty()) {
+void SystemTray::Impl::show_context_menu() const {
+    if ((hwnd == nullptr) || (owner == nullptr) || owner->context_menu_items_.empty()) {
         return;
     }
 
     // 扁平化菜单项以便按 cmd_id 索引回调
     std::vector<const MenuItem *> flat;
     std::function<void(const std::vector<MenuItem> &)> flatten;
-    flatten = [&](const std::vector<MenuItem> &items) {
+    flatten = [&](const std::vector<MenuItem> &items) -> void {
         for (const auto &item : items) {
             if (item.separator) {
                 continue;
@@ -363,7 +369,7 @@ void SystemTray::Impl::show_context_menu() {
 
     UINT cmd_id = WM_APP + 2;
     const HMENU menu = build_hmenu(owner->context_menu_items_, cmd_id);
-    if (!menu) {
+    if (menu == nullptr) {
         return;
     }
 
@@ -380,13 +386,16 @@ void SystemTray::Impl::show_context_menu() {
 
     // 分发点击回调
     if (cmd >= WM_APP + 2) {
-        const std::size_t idx = static_cast<std::size_t>(cmd - WM_APP - 2);
+        const auto idx = static_cast<std::size_t>(cmd - WM_APP - 2);
         if (idx < flat.size() && flat[idx]->on_click) {
             flat[idx]->on_click();
         }
     }
 }
 
-#endif // AURORA_PLATFORM_WINDOWS
+#endif // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-pointer-arithmetic,
+       // cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-pro-type-union-access,
+       // performance-no-int-to-ptr)
+       // AURORA_PLATFORM_WINDOWS
 
 } // namespace aurora

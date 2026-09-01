@@ -19,8 +19,9 @@ auto schema_cache() -> std::map<std::string, Json> & {
 
 /// @brief 确保核心 widget 已注册并缓存 schema。
 auto ensure_schemas() -> void {
-    if (!schema_cache().empty())
+    if (!schema_cache().empty()) {
         return;
+    }
     serialization::register_core_widgets();
     for (const auto &s : list_all_schemas()) {
         if (s.contains("type") && s["type"].is_string()) {
@@ -37,19 +38,25 @@ auto get_schema(const std::string &type) -> const Json * {
 }
 
 /// @brief JSON 值类型名称（用于错误信息）。
-auto json_type_name(const Json &v) -> std::string {
-    if (v.is_string())
+auto json_type_name(const Json &v) -> std::string_view {
+    if (v.is_string()) {
         return "string";
-    if (v.is_number())
+    }
+    if (v.is_number()) {
         return "number";
-    if (v.is_boolean())
+    }
+    if (v.is_boolean()) {
         return "bool";
-    if (v.is_object())
+    }
+    if (v.is_object()) {
         return "object";
-    if (v.is_array())
+    }
+    if (v.is_array()) {
         return "array";
-    if (v.is_null())
+    }
+    if (v.is_null()) {
         return "null";
+    }
     return "unknown";
 }
 
@@ -85,26 +92,34 @@ auto type_matches(const Json &value, const std::string &declared_type) -> bool {
 }
 
 /// @brief 递归验证 UI 树节点。
+/// @param node 要验证的 UI 节点 JSON
+/// @param path 当前节点在 UI 树中的路径
+/// @param errors 收集验证错误的输出列表
 /// @param depth 当前嵌套深度（根为 0）
 /// @param max_depth 最大允许深度（默认 AURORA_DEFAULT_MAX_WIDGET_DEPTH）
+// NOLINTNEXTLINE(readability-function-cognitive-complexity): 递归校验分支较多，复杂度 41 超阈值 25，重构收益低
 auto validate_node(const Json &node, const std::string &path, std::vector<ValidationError> &errors,
                    std::size_t depth = 0, std::size_t max_depth = AURORA_DEFAULT_MAX_WIDGET_DEPTH) -> void {
     // 0. 深度守卫（规格 §2.4 有界层深度）
     if (depth > max_depth) {
-        errors.push_back(
-            { path, "nesting depth exceeded maximum of " + std::to_string(max_depth) + " (possible infinite recursion)",
-              "reduce the nesting depth or use a Repeater for dynamic lists" });
+        errors.push_back({ .path = path,
+                           .message = "nesting depth exceeded maximum of " + std::to_string(max_depth) +
+                                      " (possible infinite recursion)",
+                           .suggestion = "reduce the nesting depth or use a Repeater for dynamic lists" });
         return; // 不再递归验证更深层级
     }
 
     // 1. 必须有 type 字段
     if (!node.is_object()) {
-        errors.push_back({ path, "node must be a JSON object", "wrap the value in an object with a \"type\" field" });
+        errors.push_back({ .path = path,
+                           .message = "node must be a JSON object",
+                           .suggestion = "wrap the value in an object with a \"type\" field" });
         return;
     }
     if (!node.contains("type") || !node["type"].is_string()) {
-        errors.push_back({ path, "missing or invalid \"type\" field",
-                           "add \"type\": \"WidgetName\" (e.g. \"Text\", \"Button\", \"Column\")" });
+        errors.push_back({ .path = path,
+                           .message = "missing or invalid \"type\" field",
+                           .suggestion = R"(add "type": "WidgetName" (e.g. "Text", "Button", "Column"))" });
         return;
     }
 
@@ -116,20 +131,24 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
     if (schema == nullptr) {
         // 收集已知类型列表作为建议
         std::string known;
-        for (const auto &kv : schema_cache()) {
-            if (!known.empty())
+        for (const auto &kv : schema_cache() | std::views::keys) {
+            if (!known.empty()) {
                 known += ", ";
-            known += kv.first;
+            }
+            known += kv;
         }
-        errors.push_back({ type_path, "unknown widget type: \"" + type + "\"", "use one of: " + known });
+        errors.push_back({ .path = type_path,
+                           .message = "unknown widget type: \"" + type + "\"",
+                           .suggestion = "use one of: " + known });
         return; // 未知类型无法继续验证属性
     }
 
     // 3. 验证 props
     const std::string props_path = path + ".props";
     if (node.contains("props") && !node["props"].is_object()) {
-        errors.push_back(
-            { props_path, "\"props\" must be a JSON object", "change to an object, e.g. {\"text\": \"Hello\"}" });
+        errors.push_back({ .path = props_path,
+                           .message = "\"props\" must be a JSON object",
+                           .suggestion = R"(change to an object, e.g. {"text": "Hello"})" });
     }
 
     Json empty_props = Json::object();
@@ -138,23 +157,43 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
     // 3a. 检查必填属性
     if (schema->contains("prop_descriptors") && (*schema)["prop_descriptors"].is_array()) {
         for (const auto &pd : (*schema)["prop_descriptors"]) {
-            const std::string pname = pd.value("name", "");
+            const std::string p_name = pd.value("name", "");
             const bool required = pd.value("required", false);
             const std::string ptype = pd.value("type", "");
 
-            if (required && !props.contains(pname)) {
-                errors.push_back({ props_path + "." + pname, "missing required prop: \"" + pname + "\"",
-                                   "add \"" + pname + "\": <" + ptype + "> to props" });
+            if (required && !props.contains(p_name)) {
+                std::string p_path;
+                p_path += props_path;
+                p_path += '.';
+                p_path += p_name;
+                std::string msg = "missing required prop: \"";
+                msg += p_name;
+                msg += '\"';
+                std::string sug = "add \"";
+                sug += p_name;
+                sug += "\": <";
+                sug += ptype;
+                sug += "> to props";
+                errors.push_back({ .path = p_path, .message = msg, .suggestion = sug });
                 continue;
             }
 
             // 3b. 检查类型匹配
-            if (props.contains(pname) && !ptype.empty()) {
-                if (!type_matches(props[pname], ptype)) {
-                    errors.push_back({ props_path + "." + pname,
-                                       "type mismatch: prop \"" + pname + "\" expects " + ptype + " but got " +
-                                           json_type_name(props[pname]),
-                                       "change the value to a " + ptype });
+            if (props.contains(p_name) && !ptype.empty()) {
+                if (!type_matches(props[p_name], ptype)) {
+                    std::string p_path;
+                    p_path += props_path;
+                    p_path += '.';
+                    p_path += p_name;
+                    std::string msg = "type mismatch: prop \"";
+                    msg += p_name;
+                    msg += "\" expects ";
+                    msg += ptype;
+                    msg += " but got ";
+                    msg += json_type_name(props[p_name]);
+                    std::string sug = "change the value to a ";
+                    sug += ptype;
+                    errors.push_back({ .path = p_path, .message = msg, .suggestion = sug });
                 }
             }
         }
@@ -166,17 +205,21 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
 
     if (node.contains("children")) {
         if (!node["children"].is_array()) {
-            errors.push_back({ children_path, "\"children\" must be an array", "change to an array of node objects" });
+            errors.push_back({ .path = children_path,
+                               .message = "\"children\" must be an array",
+                               .suggestion = "change to an array of node objects" });
         } else {
             if (children_policy == "none" && !node["children"].empty()) {
-                errors.push_back({ children_path,
-                                   "widget \"" + type + "\" does not accept children (children_policy=none)",
-                                   "remove the \"children\" field or use a container widget (Column/Row/Stack)" });
+                errors.push_back(
+                    { .path = children_path,
+                      .message = "widget \"" + type + "\" does not accept children (children_policy=none)",
+                      .suggestion = "remove the \"children\" field or use a container widget (Column/Row/Stack)" });
             } else if (children_policy == "single" && node["children"].size() > 1) {
-                errors.push_back({ children_path,
-                                   "widget \"" + type + "\" accepts at most 1 child but got " +
-                                       std::to_string(node["children"].size()),
-                                   "reduce children to a single element or use a multi-child container" });
+                errors.push_back(
+                    { .path = children_path,
+                      .message = "widget \"" + type + "\" accepts at most 1 child but got " +
+                                 std::to_string(node["children"].size()),
+                      .suggestion = "reduce children to a single element or use a multi-child container" });
             }
 
             // 递归验证子节点（深度 +1）

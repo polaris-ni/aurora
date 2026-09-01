@@ -1,6 +1,5 @@
 #pragma once
 
-#include <chrono>
 #include <fstream>
 #include <functional>
 #include <string>
@@ -51,18 +50,21 @@ class HotReload {
         } catch (...) {
             return nullptr;
         }
-        if (json.empty())
+        if (json.empty()) {
             return nullptr;
-        if (json == m_last_json)
+        }
+        if (json == m_last_json) {
             return nullptr;
+        }
 
         // 保存 State：遍历旧树，key="id" 属性值 → State 快照
         preserve_state();
 
         // 重建
         auto root = serialization::from_json(json);
-        if (!root.ok())
+        if (!root.ok()) {
             return nullptr;
+        }
 
         // 恢复 State
         restore_state(root.value().get());
@@ -76,24 +78,27 @@ class HotReload {
     [[nodiscard]] auto root() const -> std::shared_ptr<Widget> { return m_last_root; }
 
   private:
-    auto load_json() const -> Json {
-        if (m_loader)
+    [[nodiscard]] auto load_json() const -> Json {
+        if (m_loader) {
             return m_loader();
+        }
         std::ifstream f(m_path);
-        if (!f.is_open())
+        if (!f.is_open()) {
             return {};
+        }
         return Json::parse(f, nullptr, false);
     }
 
     void preserve_state() {
         m_saved_state.clear();
-        if (!m_last_root)
+        if (!m_last_root) {
             return;
+        }
         collect_state(*m_last_root, "");
     }
 
-    void collect_state(const Widget &w, const std::string &path) {
-        std::string key = path;
+    static void collect_state(const Widget &w, const std::string &path) {
+        const std::string &key = path;
         // 用序列化时的 id 属性作为 key（Widget::serialize_props 包含 id）
         // State 提取：从 Widget 的 State 派生类中读取（通过 inline 访问器）
         // 简化：仅保存 Widget::id()? 序列化 props 中的 id 字段
@@ -103,7 +108,7 @@ class HotReload {
         (void)w;
     }
 
-    void restore_state([[maybe_unused]] Widget *w) {
+    static void restore_state([[maybe_unused]] Widget *w) {
         // 反向匹配 restore
     }
 

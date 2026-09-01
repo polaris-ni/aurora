@@ -4,20 +4,18 @@
 #include <array>
 #include <chrono>
 #include <cmath>
-#include <cstdio>
 #include <string>
 #include <vector>
 
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
-#include "aurora/environment/media_query.h" // MediaQuery::of(ctx)：安全区（CSD 标题栏）偏移
+#include "aurora/core/string_util.h"
+#include "aurora/environment/media_query.h"
 #include "aurora/perf/counters.h"
 #include "aurora/perf/profiler.h"
 #include "aurora/render/painter.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
-
-#include "aurora/core/string_util.h"   // internal::string_format（收敛 snprintf 样板）
 
 namespace aurora {
 
@@ -40,14 +38,16 @@ class FrameStats {
 
     /// @brief 记录一帧耗时（秒）。
     ///
-    /// 若 dt 对应的毫秒值超过 IDLE_THRESHOLD_MS，视为 idle 段：
+    /// 若 dt 对应的毫秒值超过 m_idle_threshold_ms，视为 idle 段：
     /// 按帧预算折算跳过帧数，仅递增 idle/total 计数器，不记入环形缓冲区。
     auto record(double dt_seconds) -> void {
-        if (dt_seconds <= 0.0) return;
+        if (dt_seconds <= 0.0) {
+            return;
+        }
         double dt_ms = dt_seconds * 1000.0;
         // Idle 检测：帧间隔远超阈值 → 视为 idle 段（仅计计数器，不记入帧时间窗口）
-        if (dt_ms > IDLE_THRESHOLD_MS) {
-            std::size_t skipped = static_cast<std::size_t>(dt_ms / m_frame_budget_ms);
+        if (dt_ms > m_idle_threshold_ms) {
+            auto skipped = static_cast<std::size_t>(dt_ms / m_frame_budget_ms);
             if (skipped > 0) {
                 m_idle_frames += skipped;
                 m_total_frames += skipped;
@@ -55,21 +55,25 @@ class FrameStats {
             }
         }
         // 如果缓冲区已满，减去即将被覆盖的旧值
-        if (m_count == AURORA_WINDOW_SIZE) {
-            double old = m_frames[m_head];
+        if (m_count == m_aurora_window_size) {
+            double old = m_frames.at(m_head);
             m_sum -= old;
             m_sum_sq -= old * old;
         }
-        m_frames[m_head] = dt_seconds;
+        m_frames.at(m_head) = dt_seconds;
         m_sum += dt_seconds;
         m_sum_sq += dt_seconds * dt_seconds;
-        m_head = (m_head + 1) % AURORA_WINDOW_SIZE;
-        if (m_count < AURORA_WINDOW_SIZE) ++m_count;
+        m_head = (m_head + 1) % m_aurora_window_size;
+        if (m_count < m_aurora_window_size) {
+            ++m_count;
+        }
         ++m_total_frames;
         // 掉帧/hitch 检测
         if (dt_ms > m_frame_budget_ms) {
             ++m_dropped;
-            if (dt_ms > m_frame_budget_ms * 2.0) ++m_hitch;
+            if (dt_ms > m_frame_budget_ms * 2.0) {
+                ++m_hitch;
+            }
         }
     }
 
@@ -81,58 +85,72 @@ class FrameStats {
 
     /// @brief 滑动窗口平均 FPS（无数据返回 0）。
     [[nodiscard]] auto fps() const -> double {
-        if (m_count == 0) return 0.0;
+        if (m_count == 0) {
+            return 0.0;
+        }
         return m_sum > 0.0 ? static_cast<double>(m_count) / m_sum : 0.0;
     }
 
     /// @brief 滑动窗口平均帧时间（毫秒）。
     [[nodiscard]] auto avg_frame_ms() const -> double {
-        if (m_count == 0) return 0.0;
+        if (m_count == 0) {
+            return 0.0;
+        }
         return m_sum / static_cast<double>(m_count) * 1000.0;
     }
 
     /// @brief 窗口内最差帧时间（毫秒）。
     [[nodiscard]] auto worst_frame_ms() const -> double {
-        if (m_count == 0) return 0.0;
+        if (m_count == 0) {
+            return 0.0;
+        }
         double worst = 0.0;
         for (std::size_t i = 0; i < m_count; ++i) {
-            std::size_t idx = (m_head + AURORA_WINDOW_SIZE - 1 - i) % AURORA_WINDOW_SIZE;
-            worst = std::max(worst, m_frames[idx]);
+            std::size_t idx = (m_head + m_aurora_window_size - 1 - i) % m_aurora_window_size;
+            worst = std::max(worst, m_frames.at(idx));
         }
         return worst * 1000.0;
     }
 
     /// @brief 帧时间标准差（毫秒）。
     [[nodiscard]] auto jitter_ms() const -> double {
-        if (m_count < 2) return 0.0;
-        double mean = m_sum / m_count;
-        double var = (m_sum_sq / m_count) - (mean * mean);
+        if (m_count < 2) {
+            return 0.0;
+        }
+        double mean = m_sum / static_cast<double>(m_count);
+        double var = (m_sum_sq / static_cast<double>(m_count)) - (mean * mean);
         return var > 0.0 ? std::sqrt(var) * 1000.0 : 0.0;
     }
 
     /// @brief 百分位帧时间（毫秒），p 范围 [0,1]。
     [[nodiscard]] auto percentile_ms(double p) const -> double {
-        if (m_count == 0) return 0.0;
-        std::array<double, AURORA_WINDOW_SIZE> sorted{};
+        if (m_count == 0) {
+            return 0.0;
+        }
+        std::array<double, m_aurora_window_size> sorted{};
         std::size_t n = m_count;
         for (std::size_t i = 0; i < n; ++i) {
-            std::size_t idx = (m_head + AURORA_WINDOW_SIZE - n + i) % AURORA_WINDOW_SIZE;
-            sorted[i] = m_frames[idx];
+            std::size_t idx = (m_head + m_aurora_window_size - n + i) % m_aurora_window_size;
+            sorted.at(i) = m_frames.at(idx);
         }
-        std::sort(sorted.begin(), sorted.begin() + n);
+        std::sort(sorted.begin(), std::next(sorted.begin(), static_cast<std::ptrdiff_t>(n)));
         double idx = p * static_cast<double>(n - 1);
-        std::size_t lo = static_cast<std::size_t>(idx);
+        auto lo = static_cast<std::size_t>(idx);
         std::size_t hi = lo + 1;
-        if (hi >= n) return sorted[n - 1] * 1000.0;
+        if (hi >= n) {
+            return sorted.at(n - 1) * 1000.0;
+        }
         double frac = idx - static_cast<double>(lo);
-        return (sorted[lo] * (1.0 - frac) + sorted[hi] * frac) * 1000.0;
+        return ((sorted.at(lo) * (1.0 - frac)) + (sorted.at(hi) * frac)) * 1000.0;
     }
 
     /// @brief 获取窗口内第 i 帧的帧时间（秒），i=0 为最新帧。
     [[nodiscard]] auto frame_at(std::size_t i) const -> double {
-        if (i >= m_count) return 0.0;
-        std::size_t idx = (m_head + AURORA_WINDOW_SIZE - 1 - i) % AURORA_WINDOW_SIZE;
-        return m_frames[idx];
+        if (i >= m_count) {
+            return 0.0;
+        }
+        std::size_t idx = (m_head + m_aurora_window_size - 1 - i) % m_aurora_window_size;
+        return m_frames.at(idx);
     }
 
     /// @brief 有效帧数。
@@ -150,14 +168,14 @@ class FrameStats {
 
     /// @brief 记录分阶段计时（毫秒）。
     auto record_phases(double layout_ms, double paint_ms, double present_ms) -> void {
-        if (m_phase_count == PHASE_WINDOW) {
-            m_layout_sum -= m_layout_ms[m_phase_head];
-            m_paint_sum -= m_paint_ms[m_phase_head];
-            m_present_sum -= m_present_ms[m_phase_head];
+        if (m_phase_count == m_phase_window) {
+            m_layout_sum -= m_layout_ms.at(m_phase_head);
+            m_paint_sum -= m_paint_ms.at(m_phase_head);
+            m_present_sum -= m_present_ms.at(m_phase_head);
         }
-        m_layout_ms[m_phase_head] = layout_ms;
-        m_paint_ms[m_phase_head] = paint_ms;
-        m_present_ms[m_phase_head] = present_ms;
+        m_layout_ms.at(m_phase_head) = layout_ms;
+        m_paint_ms.at(m_phase_head) = paint_ms;
+        m_present_ms.at(m_phase_head) = present_ms;
         m_layout_sum += layout_ms;
         m_paint_sum += paint_ms;
         m_present_sum += present_ms;
@@ -168,22 +186,26 @@ class FrameStats {
         m_layout_sum = m_layout_sum < 0.0 ? 0.0 : m_layout_sum;
         m_paint_sum = m_paint_sum < 0.0 ? 0.0 : m_paint_sum;
         m_present_sum = m_present_sum < 0.0 ? 0.0 : m_present_sum;
-        m_phase_head = (m_phase_head + 1) % PHASE_WINDOW;
-        if (m_phase_count < PHASE_WINDOW) ++m_phase_count;
+        m_phase_head = (m_phase_head + 1) % m_phase_window;
+        if (m_phase_count < m_phase_window) {
+            ++m_phase_count;
+        }
     }
 
     [[nodiscard]] auto avg_layout_ms() const -> double {
-        return m_phase_count > 0 ? m_layout_sum / m_phase_count : 0.0;
+        return m_phase_count > 0 ? m_layout_sum / static_cast<double>(m_phase_count) : 0.0;
     }
-    [[nodiscard]] auto avg_paint_ms() const -> double { return m_phase_count > 0 ? m_paint_sum / m_phase_count : 0.0; }
+    [[nodiscard]] auto avg_paint_ms() const -> double {
+        return m_phase_count > 0 ? m_paint_sum / static_cast<double>(m_phase_count) : 0.0;
+    }
     [[nodiscard]] auto avg_present_ms() const -> double {
-        return m_phase_count > 0 ? m_present_sum / m_phase_count : 0.0;
+        return m_phase_count > 0 ? m_present_sum / static_cast<double>(m_phase_count) : 0.0;
     }
 
     /// @brief 累计帧数。
     [[nodiscard]] auto total_frames() const -> std::size_t { return m_total_frames; }
 
-    // ---- 帧循环唤醒/睡眠观测（CPU 性能专项阶段 C）----
+    // ---- 帧循环唤醒/睡眠观测 ----
 
     /// @brief 记录一次帧循环等待（`Window::run` 每次 `wait_events` 返回后调用）。
     auto record_wait(double waited_ms) -> void {
@@ -202,14 +224,18 @@ class FrameStats {
 
     /// @brief 每秒唤醒次数（自首次等待起的墙钟均值；无数据返回 0）。
     [[nodiscard]] auto wakeups_per_sec() const -> double {
-        if (!m_wait_epoch_set) return 0.0;
+        if (!m_wait_epoch_set) {
+            return 0.0;
+        }
         const double s = std::chrono::duration<double>(m_last_wait_end - m_wait_epoch).count();
         return s > 0.0 ? static_cast<double>(m_wakeups) / s : 0.0;
     }
 
     /// @brief 睡眠占比（等待总时长 / 墙钟总时长，[0,1]；靠近 1 = 几乎全程睡眠）。
     [[nodiscard]] auto sleep_ratio() const -> double {
-        if (!m_wait_epoch_set) return 0.0;
+        if (!m_wait_epoch_set) {
+            return 0.0;
+        }
         const double wall_ms = std::chrono::duration<double, std::milli>(m_last_wait_end - m_wait_epoch).count();
         return wall_ms > 0.0 ? std::min(1.0, m_wait_total_ms / wall_ms) : 0.0;
     }
@@ -241,11 +267,11 @@ class FrameStats {
     }
 
   private:
-    static constexpr std::size_t AURORA_WINDOW_SIZE = 128; ///< 环形缓冲区帧数（约 2 秒 @60fps）
+    static constexpr std::size_t m_aurora_window_size = 128; ///< 环形缓冲区帧数（约 2 秒 @60fps）
 
-    std::array<double, AURORA_WINDOW_SIZE> m_frames{};
+    std::array<double, m_aurora_window_size> m_frames{};
     std::size_t m_head = 0;  ///< 下一个写入位置
-    std::size_t m_count = 0; ///< 当前有效帧数（<= AURORA_WINDOW_SIZE）
+    std::size_t m_count = 0; ///< 当前有效帧数（<= m_aurora_window_size）
     std::size_t m_total_frames = 0;
 
     double m_sum = 0.0;               ///< 窗口总和
@@ -256,12 +282,12 @@ class FrameStats {
     std::size_t m_idle_frames = 0;    ///< 累计 idle 跳过帧数
     double m_frame_budget_ms = 16.67; ///< 帧预算目标
 
-    static constexpr double IDLE_THRESHOLD_MS = 100.0; ///< idle 检测阈值（毫秒）
+    static constexpr double m_idle_threshold_ms = 100.0; ///< idle 检测阈值（毫秒）
 
-    static constexpr std::size_t PHASE_WINDOW = 64;
-    std::array<double, PHASE_WINDOW> m_layout_ms{};
-    std::array<double, PHASE_WINDOW> m_paint_ms{};
-    std::array<double, PHASE_WINDOW> m_present_ms{};
+    static constexpr std::size_t m_phase_window = 64;
+    std::array<double, m_phase_window> m_layout_ms{};
+    std::array<double, m_phase_window> m_paint_ms{};
+    std::array<double, m_phase_window> m_present_ms{};
     std::size_t m_phase_head = 0;
     std::size_t m_phase_count = 0;
     double m_layout_sum = 0;
@@ -269,11 +295,11 @@ class FrameStats {
     double m_present_sum = 0;
 
     // 帧循环唤醒/睡眠观测（阶段 C）
-    std::size_t m_wakeups = 0;                               ///< 累计唤醒次数（wait_events 返回计数）。
-    double m_wait_total_ms = 0.0;                            ///< 累计等待时长（毫秒）。
-    bool m_wait_epoch_set = false;                           ///< 是否已记录首次等待（墙钟基准有效）。
-    std::chrono::steady_clock::time_point m_wait_epoch{};    ///< 首次等待时刻（墙钟基准）。
-    std::chrono::steady_clock::time_point m_last_wait_end{}; ///< 最近一次等待结束时刻。
+    std::size_t m_wakeups = 0;                             ///< 累计唤醒次数（wait_events 返回计数）。
+    double m_wait_total_ms = 0.0;                          ///< 累计等待时长（毫秒）。
+    bool m_wait_epoch_set = false;                         ///< 是否已记录首次等待（墙钟基准有效）。
+    std::chrono::steady_clock::time_point m_wait_epoch;    ///< 首次等待时刻（墙钟基准）。
+    std::chrono::steady_clock::time_point m_last_wait_end; ///< 最近一次等待结束时刻。
 };
 
 /**
@@ -305,8 +331,8 @@ class PerfOverlay : public SingleChild {
         return WidgetDescriptor{
             .name = "PerfOverlay",
             .properties = {
-                { "visible", "bool", "true", false, "是否显示统计", "boolean" },
-                { "show_counters", "bool", "true", false, "是否显示渲染计数器与长任务行", "boolean" },
+                { .name="visible", .type="bool", .default_value="true", .required=false, .note="是否显示统计", .json_type="boolean" },
+                { .name="show_counters", .type="bool", .default_value="true", .required=false, .note="是否显示渲染计数器与长任务行", .json_type="boolean" },
             },
             .events = {},
             .children_policy = "single",
@@ -340,21 +366,21 @@ class PerfOverlay : public SingleChild {
             return "FPS — (采样中) | P99 — | jitter —";
         }
         return aurora::internal::string_format("FPS %.1f (avg %.1f) | P99 %.1fms | jitter %.1fms", s.fps(),
-                      s.avg_frame_ms(), s.percentile_ms(0.99), s.jitter_ms());
+                                               s.avg_frame_ms(), s.percentile_ms(0.99), s.jitter_ms());
     }
 
     /// @brief 第二行统计文本：dropped + hitch + idle。
     [[nodiscard]] static auto stats_line2() -> std::string {
         const FrameStats &s = FrameStats::instance();
         return aurora::internal::string_format("dropped: %zu | hitch: %zu | idle: %zu", s.dropped_frame_count(),
-                      s.hitch_count(), s.idle_frame_count());
+                                               s.hitch_count(), s.idle_frame_count());
     }
 
     /// @brief 第三行统计文本：唤醒频率 + 睡眠占比（事件驱动帧循环观测，阶段 C）。
     [[nodiscard]] static auto stats_line3() -> std::string {
         const FrameStats &s = FrameStats::instance();
         return aurora::internal::string_format("wakeups/s: %.1f | sleep: %.0f%%", s.wakeups_per_sec(),
-                      s.sleep_ratio() * 100.0);
+                                               s.sleep_ratio() * 100.0);
     }
 
     /**
@@ -369,7 +395,7 @@ class PerfOverlay : public SingleChild {
         } else {
             const RenderCounters &c = RenderCounters::current();
             return aurora::internal::string_format("nodes L%u/P%u | DL rec%u/rep%u | glyph %u", c.layout_nodes,
-                          c.paint_nodes, c.dl_records, c.dl_replays, c.glyphs_rendered);
+                                                   c.paint_nodes, c.dl_records, c.dl_replays, c.glyphs_rendered);
         }
     }
 
@@ -379,16 +405,17 @@ class PerfOverlay : public SingleChild {
             return "dirty/long-task: profiling off";
         } else {
             const RenderCounters &c = RenderCounters::current();
-            return aurora::internal::string_format("dirty %u (%.0f%%)%s | long %llu", c.dirty_rect_count,
-                          c.dirty_area_ratio * 100.0, c.full_redraw ? " FULL" : "",
-                          static_cast<unsigned long long>(Profiler::instance().total_long_task_count()));
+            return aurora::internal::string_format(
+                "dirty %u (%.0f%%)%s | long %llu", c.dirty_rect_count, c.dirty_area_ratio * 100.0,
+                c.full_redraw ? " FULL" : "",
+                static_cast<unsigned long long>(Profiler::instance().total_long_task_count()));
         }
     }
 
     /// @brief 计数器行的告警颜色：发生整帧重绘时转红（本专项要消灭的场景）。
     [[nodiscard]] static auto counters_color() -> Color {
         if constexpr (!profiling_enabled()) {
-            return Color(140, 140, 140, 255); // 灰色 — 数据不可用
+            return { 140, 140, 140, 255 }; // 灰色 — 数据不可用
         } else {
             return RenderCounters::current().full_redraw ? Color(255, 60, 60, 255) : Color(200, 200, 200, 255);
         }
@@ -396,19 +423,25 @@ class PerfOverlay : public SingleChild {
 
     /// @brief 根据 FPS 值返回告警颜色。
     [[nodiscard]] static auto fps_color(double fps) -> Color {
-        if (fps >= 55.0) return Color(0, 255, 128, 255); // 绿色 — 流畅
-        if (fps >= 30.0) return Color(255, 200, 0, 255); // 黄色 — 卡顿警告
-        return Color(255, 60, 60, 255);                  // 红色 — 严重卡顿
+        if (fps >= 55.0) {
+            return { 0, 255, 128, 255 }; // 绿色 — 流畅
+        }
+        if (fps >= 30.0) {
+            return { 255, 200, 0, 255 }; // 黄色 — 卡顿警告
+        }
+        return { 255, 60, 60, 255 }; // 红色 — 严重卡顿
     }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         Size self = c.max;
-        if (!c.max.is_finite()) self = Size{ 320.0f, 240.0f };
+        if (!c.max.is_finite()) {
+            self = Size{ .width = 320.0f, .height = 240.0f };
+        }
         if (m_child) {
-            const Constraints inner{ Size{ 0.0f, 0.0f }, self };
+            const Constraints inner{ .min = Size{ .width = 0.0f, .height = 0.0f }, .max = self };
             m_child.widget().layout(inner, ctx);
-            m_child.set_bounds(Rect{ Point{ 0.0f, 0.0f }, self });
+            m_child.set_bounds(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = self });
         }
         return c.constrain(self);
     }
@@ -417,7 +450,9 @@ class PerfOverlay : public SingleChild {
         if (m_child) {
             m_child.widget().paint(p, bounds, ctx);
         }
-        if (!m_visible) return;
+        if (!m_visible) {
+            return;
+        }
 
         const FrameStats &s = FrameStats::instance();
         Font f;
@@ -431,14 +466,14 @@ class PerfOverlay : public SingleChild {
         // 基础三行 + 可选的计数器/脏区两行（渲染性能专项 Phase 0）
         const int line_count = m_show_counters ? 5 : 3;
         const float text_total_h = line_h * static_cast<float>(line_count);
-        const float total_h = text_total_h + graph_h + pad * 2;
+        const float total_h = text_total_h + graph_h + (pad * 2);
 
         // 面板位置（右上角）：Y 额外下沉安全区顶部（Wayland CSD 标题栏高度，
         // 经 content_inset → MediaQuery.padding 注入；无装饰后端为 0），避免被标题栏遮挡。
         const EdgeInsets safe = MediaQuery::of(ctx).padding;
         const float x = bounds.origin.x + bounds.size.width - w - 8.0f;
         const float y = bounds.origin.y + 8.0f + safe.top;
-        const Rect box{ Point{ x, y }, Size{ w, total_h } };
+        const Rect box{ .origin = Point{ .x = x, .y = y }, .size = Size{ .width = w, .height = total_h } };
 
         // 背景（不透明）：作为独立 HUD 层合成时需叠在「保留自上一帧」的主缓冲之上，
         // 透明面板会在 partial-clip 帧与旧 HUD 像素二次混合产生重影，故此处必须为不透明。
@@ -447,8 +482,10 @@ class PerfOverlay : public SingleChild {
         // 逐行绘制：行号自增，避免新增行时手工累加各行高度出错
         int line_index = 0;
         const auto draw_line = [&](const std::string &text, const Color &color) -> void {
-            const float ly = y + pad + line_h * static_cast<float>(line_index++);
-            p.draw_text(Rect{ Point{ x + pad, ly }, Size{ w - pad * 2, line_h } }, text, f, color);
+            const float ly = y + pad + (line_h * static_cast<float>(line_index++));
+            p.draw_text(Rect{ .origin = Point{ .x = x + pad, .y = ly },
+                              .size = Size{ .width = w - (pad * 2), .height = line_h } },
+                        text, f, color);
         };
 
         // 第一行：FPS + P99 + jitter（颜色告警）
@@ -466,7 +503,7 @@ class PerfOverlay : public SingleChild {
         // 帧时间条形图
         const float graph_x = x + pad;
         const float graph_y = y + pad + text_total_h;
-        constexpr float graph_w = w - pad * 2;
+        constexpr float graph_w = w - (pad * 2);
         const double budget_ms = s.frame_budget_ms();
         constexpr std::size_t max_bars = 64;
         const std::size_t bar_count = std::min(s.window_size(), max_bars);
@@ -476,10 +513,12 @@ class PerfOverlay : public SingleChild {
             const double frame_ms = s.frame_at(i) * 1000.0; // frame_at 返回秒
             float bar_h = static_cast<float>(frame_ms / budget_ms) * graph_h;
             bar_h = std::min(bar_h, graph_h);
-            const float bx = graph_x + static_cast<float>(i) * bar_w;
+            const float bx = graph_x + (static_cast<float>(i) * bar_w);
             const float by = graph_y + graph_h - bar_h;
             const Color bar_color = (frame_ms > budget_ms) ? Color(255, 60, 60, 200) : Color(0, 255, 128, 200);
-            p.fill_rect(Rect{ Point{ bx, by }, Size{ std::max(bar_w - 1.0f, 1.0f), bar_h } }, bar_color);
+            p.fill_rect(Rect{ .origin = Point{ .x = bx, .y = by },
+                              .size = Size{ .width = std::max(bar_w - 1.0f, 1.0f), .height = bar_h } },
+                        bar_color);
         }
         // 注：2Hz 低频刷新不再由本控件 self-mark 驱动（否则作为根控件会标脏整屏触发整树重绘，
         // 约 ~24ms，是 P99 尖峰来源）。改为由 Window 的 HUD 层在 present_root 中以 2Hz 重绘

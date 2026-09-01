@@ -168,7 +168,7 @@
 #include "aurora/widget/toast.h"
 #include "aurora/widget/toolbar.h"
 #include "aurora/widget/widget.h"
-#include "aurora/window/frame_pacing.h" // compute_wait_timeout：事件驱动帧循环调度决策（CPU 性能专项）
+#include "aurora/window/frame_pacing.h" // compute_wait_timeout：事件驱动帧循环调度决策
 #include "aurora/window/platform.h"     // au::platform()：平台与运行环境显式查询
 #include "aurora/window/surface.h"
 #include "aurora/window/window.h"

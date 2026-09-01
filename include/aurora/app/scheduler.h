@@ -13,7 +13,7 @@ namespace detail {
 struct TimerEntry {
     std::chrono::steady_clock::duration deadline{}; ///< 相对调度器内部时钟的截止时刻。
     std::chrono::steady_clock::duration period{};   ///< 周期（一次性任务为 0）。
-    std::function<void()> callback{};               ///< 到期回调（主线程触发）。
+    std::function<void()> callback;                 ///< 到期回调（主线程触发）。
     bool recurring = false;                         ///< true=周期任务，false=一次性。
     bool cancelled = false;                         ///< cancel() 置位；触发前校验避免悬空。
 };
@@ -118,8 +118,9 @@ class Scheduler {
             }
         }
         // 剪除已取消的一次性条目；周期条目保留至 cancel() 才移除。
-        std::erase_if(m_entries,
-                      [](const std::shared_ptr<detail::TimerEntry> &e) { return e->cancelled && !e->recurring; });
+        std::erase_if(m_entries, [](const std::shared_ptr<detail::TimerEntry> &e) -> bool {
+            return e->cancelled && !e->recurring;
+        });
     }
 
     /// @brief 取消全部任务（含周期任务）并清空。
@@ -131,7 +132,7 @@ class Scheduler {
     }
 
     /// @brief 最近一个待触发任务的剩余毫秒（已到期钳为 0；无任务返回 -1），
-    /// 供帧调度决策取值（CPU 性能专项阶段 A3）：idle 帧睡到最近到期时刻即可。
+    /// 供帧调度决策取值：idle 帧睡到最近到期时刻即可。
     [[nodiscard]] auto next_deadline_ms() const -> double {
         double best = -1.0;
         for (const auto &e : m_entries) {
@@ -149,15 +150,15 @@ class Scheduler {
 
     /// @brief 当前运行中的应用级调度器（由 `Application::run()` 起止设置）。
     ///        组件级 `Timer` 在 `on_mount` 时取用；无运行中 App 时返回 nullptr。
-    [[nodiscard]] static auto current() -> Scheduler * { return g_current; }
+    [[nodiscard]] static auto current() -> Scheduler * { return m_current; }
 
     /// @brief 设置/清除当前运行实例（线程局部；`Application::run()` 内部调用）。
-    static auto set_current(Scheduler *s) -> void { g_current = s; }
+    static auto set_current(Scheduler *s) -> void { m_current = s; }
 
   private:
     std::vector<std::shared_ptr<detail::TimerEntry>> m_entries;
     Duration m_elapsed{ Duration::zero() };
-    static inline thread_local Scheduler *g_current = nullptr;
+    static inline thread_local Scheduler *m_current = nullptr;
 };
 
 } // namespace aurora

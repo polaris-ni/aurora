@@ -9,7 +9,7 @@
 #include "aurora/core/platform.h"
 
 #ifdef AURORA_PLATFORM_WINDOWS
-#define WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -21,7 +21,7 @@
 #include <cstdio>
 #endif
 
-#if defined(AURORA_PLATFORM_MACOS)
+#ifdef AURORA_PLATFORM_MACOS
 #include <array>
 #include <cstdio>
 #endif
@@ -63,7 +63,7 @@ auto Clipboard::set_text(const std::string &text) -> void {
     if (text.empty()) {
         return;
     }
-    if (!OpenClipboard(nullptr)) {
+    if (OpenClipboard(nullptr) == 0) {
         AURORA_LOG_WARN("clipboard", "OpenClipboard failed");
         return;
     }
@@ -102,7 +102,7 @@ auto Clipboard::set_text(const std::string &text) -> void {
 
 auto Clipboard::get_text() -> std::string {
 #ifdef AURORA_PLATFORM_WINDOWS
-    if (!OpenClipboard(nullptr)) {
+    if (OpenClipboard(nullptr) == 0) {
         AURORA_LOG_WARN("clipboard", "OpenClipboard failed (get_text)");
         return {};
     }
@@ -135,6 +135,8 @@ auto Clipboard::get_text() -> std::string {
 }
 
 auto Clipboard::set_image(const Image &img) -> void {
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast): Win32
+    // HGLOBAL 字节搬运不可避免
 #ifdef AURORA_PLATFORM_WINDOWS
     if (img.width <= 0 || img.height <= 0 || img.pixels.empty()) {
         return; // 空图像早退（不清除已有内容）
@@ -148,7 +150,7 @@ auto Clipboard::set_image(const Image &img) -> void {
         AURORA_LOG_WARN("clipboard", "set_image: image too large or pixel buffer size mismatch");
         return; // 早退，不清除已有内容
     }
-    if (!OpenClipboard(nullptr)) {
+    if (OpenClipboard(nullptr) == 0) {
         AURORA_LOG_WARN("clipboard", "OpenClipboard failed (set_image)");
         return;
     }
@@ -196,16 +198,18 @@ auto Clipboard::set_image(const Image &img) -> void {
     (void)img;
     AURORA_LOG_DEBUG("clipboard", "set_image no-op on this platform");
 #endif
-}
+} // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 
 auto Clipboard::get_image() -> Image {
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast): Win32
+    // HGLOBAL 字节搬运不可避免
 #ifdef AURORA_PLATFORM_WINDOWS
     Image out;
-    if (!OpenClipboard(nullptr)) {
+    if (OpenClipboard(nullptr) == 0) {
         AURORA_LOG_WARN("clipboard", "OpenClipboard failed (get_image)");
         return out;
     }
-    if (!IsClipboardFormatAvailable(CF_DIB)) {
+    if (IsClipboardFormatAvailable(CF_DIB) == 0) {
         CloseClipboard();
         return out;
     }
@@ -287,6 +291,6 @@ auto Clipboard::get_image() -> Image {
     AURORA_LOG_DEBUG("clipboard", "get_image no-op on this platform");
     return Image{};
 #endif
-}
+} // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 
 } // namespace aurora

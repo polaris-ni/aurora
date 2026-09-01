@@ -80,7 +80,7 @@ auto create_window(const HeadlessOptions &opts) -> Result<std::unique_ptr<Window
 
 #ifdef AURORA_BACKEND_WIN32
 auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> {
-    // 渲染后端偏好（CPU 性能专项阶段 B1）：统一的硬件加速可选开关。
+    // 渲染后端偏好：统一的硬件加速可选开关。
 #ifdef AURORA_BACKEND_D3D11
     if (opts.renderer == RendererPreference::Auto || opts.renderer == RendererPreference::GpuD3D11) {
         auto gpu = std::make_unique<D3D11Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -28,31 +29,37 @@ struct KeyCombo {
 
     /// @brief 检查键盘事件是否匹配本组合（按下事件 + 键码 + 修饰键完全一致）。
     [[nodiscard]] auto matches(const KeyEvent &e) const -> bool {
-        if (e.action != KeyAction::Down)
+        if (e.action != KeyAction::Down) {
             return false;
-        if (static_cast<KeyCode>(e.key) != key)
+        }
+        if (static_cast<KeyCode>(e.key) != key) {
             return false;
+        }
         return static_cast<std::uint8_t>(e.modifiers) == static_cast<std::uint8_t>(modifiers);
     }
 
     /// @brief 可读文本（如 "Ctrl+Shift+O"），用于菜单显示与调试。
     [[nodiscard]] auto to_string() const -> std::string {
         std::string s;
-        if ((modifiers & ModifierKey::Control) != 0)
+        if ((modifiers & ModifierKey::Control) != 0) { // NOLINT(*-redundant-parentheses)
             s += "Ctrl+";
-        if ((modifiers & ModifierKey::Shift) != 0)
+        }
+        if ((modifiers & ModifierKey::Shift) != 0) { // NOLINT(*-redundant-parentheses)
             s += "Shift+";
-        if ((modifiers & ModifierKey::Alt) != 0)
+        }
+        if ((modifiers & ModifierKey::Alt) != 0) { // NOLINT(*-redundant-parentheses)
             s += "Alt+";
-        if ((modifiers & ModifierKey::Meta) != 0)
+        }
+        if ((modifiers & ModifierKey::Meta) != 0) { // NOLINT(*-redundant-parentheses)
             s += "Meta+";
+        }
         s += key_name(key);
         return s;
     }
 };
 
 /// @brief 快捷键作用域。
-enum class ShortcutScope {
+enum class ShortcutScope : std::uint8_t {
     Global, ///< 全局：无论焦点在哪都响应
     Focus,  ///< 焦点：仅当作用域内控件持有焦点时响应
 };
@@ -84,7 +91,11 @@ class ShortcutRegistry {
     auto add(KeyCombo combo, std::function<void()> action, ShortcutScope scope = ShortcutScope::Global,
              std::string description = {}) -> int {
         const int id = m_next_id++;
-        m_bindings.push_back({ id, ShortcutBinding{ combo, std::move(action), scope, true, std::move(description) } });
+        m_bindings.emplace_back(id, ShortcutBinding{ .combo = combo,
+                                                     .action = std::move(action),
+                                                     .scope = scope,
+                                                     .enabled = true,
+                                                     .description = std::move(description) });
         return id;
     }
 
@@ -109,17 +120,22 @@ class ShortcutRegistry {
     }
 
     /// @brief 尝试处理键盘事件：匹配到已启用的绑定则执行动作并返回 true（消费）。
+    /// @param e key event
     /// @param has_focus_widget 当前是否有焦点控件（Focus 作用域绑定仅在有焦点时触发）
-    auto handle(const KeyEvent &e, bool has_focus_widget = false) -> bool {
-        for (const auto &kv : m_bindings) {
-            const ShortcutBinding &b = kv.second;
-            if (!b.enabled)
+    [[nodiscard]] auto handle(const KeyEvent &e, bool has_focus_widget = false) const -> bool {
+        // NOLINTNEXTLINE(readability-use-anyofallof): 循环含副作用（执行动作并提前返回）
+        for (const auto &kv : m_bindings | std::views::values) {
+            const ShortcutBinding &b = kv;
+            if (!b.enabled) {
                 continue;
-            if (b.scope == ShortcutScope::Focus && !has_focus_widget)
+            }
+            if (b.scope == ShortcutScope::Focus && !has_focus_widget) {
                 continue;
+            }
             if (b.combo.matches(e)) {
-                if (b.action)
+                if (b.action) {
                     b.action();
+                }
                 return true;
             }
         }
@@ -133,8 +149,9 @@ class ShortcutRegistry {
     [[nodiscard]] auto bindings() const -> std::vector<ShortcutBinding> {
         std::vector<ShortcutBinding> out;
         out.reserve(m_bindings.size());
-        for (const auto &kv : m_bindings)
-            out.push_back(kv.second);
+        for (const auto &kv : m_bindings | std::views::values) {
+            out.push_back(kv);
+        }
         return out;
     }
 

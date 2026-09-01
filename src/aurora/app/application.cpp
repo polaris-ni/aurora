@@ -6,14 +6,14 @@ namespace aurora {
 
 auto Application::dispatch_click(float x, float y) -> void {
     MouseEvent e;
-    e.position = Point{ x, y };
+    e.position = Point{ .x = x, .y = y };
     e.action = MouseAction::Press;
     m_mouse.dispatch_mouse(m_scene.root(), e, &m_focus);
 }
 
 auto Application::dispatch_pointer(float x, float y, MouseAction action) -> void {
     MouseEvent e;
-    e.position = Point{ x, y };
+    e.position = Point{ .x = x, .y = y };
     e.action = action;
     m_mouse.dispatch_mouse(m_scene.root(), e, &m_focus);
 }

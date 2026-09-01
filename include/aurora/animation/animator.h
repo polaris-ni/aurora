@@ -98,8 +98,7 @@ class Animator {
         std::erase_if(m_on_tick, [&c](const Binding &b) -> bool { return b.owner == &c; });
     }
 
-    /// @brief 是否有运行中的控制器（Forward/Reverse），供帧调度决策取值
-    /// （CPU 性能专项阶段 A3）：无活跃动画时 idle 帧可阻塞等待事件。
+    /// @brief 是否有运行中的控制器（Forward/Reverse），供帧调度决策取值，无活跃动画时 idle 帧可阻塞等待事件。
     [[nodiscard]] auto has_active() const -> bool {
         return std::ranges::any_of(
             m_controllers, [](const AnimationController *c) -> bool { return c != nullptr && c->is_animating(); });

@@ -45,7 +45,7 @@ namespace aurora {
         }
 
         const std::string t = n.widget().type_name();
-        auto made = serialization::WidgetRegistry::instance().make(t, Json::object());
+        const auto made = serialization::WidgetRegistry::instance().make(t, Json::object());
         // 比对枚举而非字符串字面量：slug 拼写漂移（曾误写为 "unknown-widget-type"）会让
         // 未注册控件被静默判为合法。code_enum 由 g_error_table 表驱动注入，无拼写风险。
         if (!made && made.error().code_enum == ErrorCode::WidgetUnknownType) {
@@ -64,8 +64,9 @@ namespace aurora {
     };
 
     walk(root, 0);
-    if (!errs.empty())
+    if (!errs.empty()) {
         return errs.front();
+    }
     return Result{ true };
 }
 

@@ -90,7 +90,7 @@ target_include_directories(bench_scroll PRIVATE "${CMAKE_SOURCE_DIR}/examples/de
 # Win32 上屏诊断基准：拆分拖选帧的 paint / GDI blit 成本（非 CTest；无 Win32 后端时直接跳过）。
 aurora_add_tool(bench_win32_present tools/bench_win32_present.cpp)
 
-# 空闲 CPU 基准（CPU 性能专项阶段 A5）：验证事件驱动帧循环的静态界面 CPU 占比与
+# 空闲 CPU 基准：验证事件驱动帧循环的静态界面 CPU 占比与
 # 活跃帧 max_fps 节流（非 CTest；无 Win32 后端时直接跳过）。
 aurora_add_tool(bench_idle_cpu tools/bench_idle_cpu.cpp)
 

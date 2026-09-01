@@ -6,14 +6,15 @@
 #include "aurora/window/window.h" // Window（move_window_to_display 参数；两分支均需）
 
 #ifdef AURORA_PLATFORM_WINDOWS
-#define WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
 
-namespace aurora {
-namespace app {
+
+namespace aurora::app {
+// NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast, performance-no-int-to-ptr): Win32 句柄/LPARAM 转换不可避免
 
 namespace {
 auto to_display(HMONITOR hmon, HDC hdc) -> Display {
@@ -33,11 +34,11 @@ auto to_display(HMONITOR hmon, HDC hdc) -> Display {
         }
     }
     const RECT &r = mi.rcMonitor;
-    d.bounds = Rect{ Point{ static_cast<float>(r.left), static_cast<float>(r.top) },
-                     Size{ static_cast<float>(r.right - r.left), static_cast<float>(r.bottom - r.top) } };
+    d.bounds = Rect{ .origin=Point{ .x=static_cast<float>(r.left), .y=static_cast<float>(r.top) },
+                     .size=Size{ .width=static_cast<float>(r.right - r.left), .height=static_cast<float>(r.bottom - r.top) } };
     const RECT &w = mi.rcWork;
-    d.work_area = Rect{ Point{ static_cast<float>(w.left), static_cast<float>(w.top) },
-                        Size{ static_cast<float>(w.right - w.left), static_cast<float>(w.bottom - w.top) } };
+    d.work_area = Rect{ .origin=Point{ .x=static_cast<float>(w.left), .y=static_cast<float>(w.top) },
+                        .size=Size{ .width=static_cast<float>(w.right - w.left), .height=static_cast<float>(w.bottom - w.top) } };
     const int dpi = GetDeviceCaps(hdc, LOGPIXELSX);
     d.scale_factor = (dpi > 0) ? (static_cast<float>(dpi) / 96.0f) : 1.0f;
     d.is_primary = ((mi.dwFlags & MONITORINFOF_PRIMARY) != 0);
@@ -66,8 +67,8 @@ auto primary_display() -> Display {
     Display d;
     d.id = -1;
     d.name = "default";
-    d.bounds = Rect{ Point{ 0.0f, 0.0f }, Size{ 1920.0f, 1080.0f } };
-    d.work_area = Rect{ Point{ 0.0f, 0.0f }, Size{ 1920.0f, 1080.0f } };
+    d.bounds = Rect{ .origin=Point{ .x=0.0f, .y=0.0f }, .size=Size{ .width=1920.0f, .height=1080.0f } };
+    d.work_area = Rect{ .origin=Point{ .x=0.0f, .y=0.0f }, .size=Size{ .width=1920.0f, .height=1080.0f } };
     d.scale_factor = 1.0f;
     d.is_primary = true;
     return d;
@@ -83,24 +84,27 @@ auto move_window_to_display(Window &win, int display_id) -> void {
         }
     }
     Display fallback;
-    if (!target) {
+    if (target == nullptr) {
         fallback = primary_display();
         target = &fallback;
     }
-    const HWND hwnd = reinterpret_cast<HWND>(win.surface().native_handle());
-    if (!hwnd)
+    auto *const hwnd = static_cast<HWND>(win.surface().native_handle());
+    if (hwnd == nullptr) {
         return; // 无头/未知后端：no-op
+    }
     // 以目标显示器中心（物理像素）定位其 HMONITOR。
-    const float cx = target->bounds.origin.x + target->bounds.size.width * 0.5f;
-    const float cy = target->bounds.origin.y + target->bounds.size.height * 0.5f;
-    POINT phys{ static_cast<LONG>(std::lround(cx)), static_cast<LONG>(std::lround(cy)) };
+    const float cx = target->bounds.origin.x + (target->bounds.size.width * 0.5f);
+    const float cy = target->bounds.origin.y + (target->bounds.size.height * 0.5f);
+    const POINT phys{ .x=static_cast<LONG>(std::lround(cx)), .y=static_cast<LONG>(std::lround(cy)) };
     const HMONITOR hmon = MonitorFromPoint(phys, MONITOR_DEFAULTTONEAREST);
-    if (!hmon)
+    if (hmon == nullptr) {
         return;
+    }
     MONITORINFO mi{};
     mi.cbSize = sizeof(MONITORINFO);
-    if (!GetMonitorInfo(hmon, &mi))
+    if (!GetMonitorInfo(hmon, &mi)) {
         return;
+    }
     RECT wr{};
     GetWindowRect(hwnd, &wr);
     const int w = wr.right - wr.left;
@@ -121,8 +125,9 @@ auto display_containing(Point p) -> Display {
     return primary_display();
 }
 
-} // namespace app
-} // namespace aurora
+} // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast, performance-no-int-to-ptr)
+  // namespace aurora::app
+
 
 #else
 

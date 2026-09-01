@@ -10,14 +10,13 @@
 #define _WIN32_WINNT 0x0601 // Vista+：IFileOpenDialog / IFileSaveDialog
 #endif
 #ifndef _WIN32_IE
-#define _WIN32_IE 0x0600
+#define WIN32_IE 0x0600 // NOLINT(cppcoreguidelines-macro-usage, readability-identifier-naming): Windows SDK 版本宏
 #endif
-#define WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <objbase.h>
-#include <shellapi.h>
 #include <shobjidl.h>
 #include <string>
 #include <windows.h>
@@ -26,15 +25,14 @@
 #include "aurora/core/log.h"
 #include "aurora/core/utf8.h" // internal::utf8_to_wstr / wstr_to_utf8（收口 dup-1 重复实现）
 
-namespace aurora {
-namespace file_dialog {
+namespace aurora::file_dialog {
 namespace {
 
 // RAII COM 初始化：优先 STA，遇到进程已为 MTA 时回退 MTA；仅在本作用域首次初始化时才 Uninitialize。
 struct ComInit {
     HRESULT hr;
-    ComInit() {
-        hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    ComInit() : hr(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)) {
+
         if (hr == RPC_E_CHANGED_MODE) {
             hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED | COINIT_DISABLE_OLE1DDE);
         }
@@ -45,6 +43,11 @@ struct ComInit {
         }
     }
     explicit operator bool() const { return SUCCEEDED(hr); }
+
+    ComInit(const ComInit &) = delete;
+    auto operator=(const ComInit &) -> ComInit & = delete;
+    ComInit(ComInit &&) = delete;
+    auto operator=(ComInit &&) -> ComInit & = delete;
 };
 
 // 把筛选器列表写入对话框；names/specs 须保持存活（COMDLG_FILTERSPEC 只存指针）。
@@ -60,7 +63,7 @@ void apply_filters(IFileDialog *dlg, const std::vector<Filter> &filters) {
         names.push_back(aurora::internal::utf8_to_wstr(f.name));
         std::wstring joined;
         for (size_t i = 0; i < f.extensions.size(); ++i) {
-            if (i) {
+            if (i != 0u) {
                 joined += L';';
             }
             joined += aurora::internal::utf8_to_wstr(f.extensions[i]);
@@ -85,6 +88,7 @@ template<typename Dlg, typename Collect> auto show_dialog(Dlg *dlg, Collect coll
 }
 
 } // namespace
+// NOLINTNEXTLINE(readability-function-cognitive-complexity): 对话框结果收集分支较多，复杂度 26 略超阈值 25
 auto open_file(const Options &opts) -> Result<std::vector<std::string>> {
     if (!headless_open_result.empty()) {
         return headless_open_result;
@@ -98,9 +102,10 @@ auto open_file(const Options &opts) -> Result<std::vector<std::string>> {
         return make_error(ErrorCode::PlatformComInitFailed, "CoInitializeEx failed");
     }
     IFileOpenDialog *pfd = nullptr;
-    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog,
-                                  reinterpret_cast<void **>(&pfd));
-    if (FAILED(hr) || !pfd) {
+    HRESULT hr =
+        CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog,
+                         reinterpret_cast<void **>(&pfd)); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (FAILED(hr) || (pfd == nullptr)) {
         AURORA_LOG_WARN("file_dialog", "CoCreateInstance(IFileOpenDialog) 失败");
         return make_error(ErrorCode::PlatformDialogCreateFailed, "CoCreateInstance(IFileOpenDialog) failed");
     }
@@ -154,9 +159,10 @@ auto save_file(const Options &opts) -> Result<std::string> {
         return make_error(ErrorCode::PlatformComInitFailed, "CoInitializeEx failed");
     }
     IFileSaveDialog *pfs = nullptr;
-    HRESULT hr = CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileSaveDialog,
-                                  reinterpret_cast<void **>(&pfs));
-    if (FAILED(hr) || !pfs) {
+    HRESULT hr =
+        CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileSaveDialog,
+                         reinterpret_cast<void **>(&pfs)); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (FAILED(hr) || (pfs == nullptr)) {
         AURORA_LOG_WARN("file_dialog", "CoCreateInstance(IFileSaveDialog) 失败");
         return make_error(ErrorCode::PlatformDialogCreateFailed, "CoCreateInstance(IFileSaveDialog) failed");
     }
@@ -198,9 +204,10 @@ auto open_folder(const Options &opts) -> Result<std::string> {
         return make_error(ErrorCode::PlatformComInitFailed, "CoInitializeEx failed");
     }
     IFileOpenDialog *pfd = nullptr;
-    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog,
-                                  reinterpret_cast<void **>(&pfd));
-    if (FAILED(hr) || !pfd) {
+    HRESULT hr =
+        CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog,
+                         reinterpret_cast<void **>(&pfd)); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (FAILED(hr) || (pfd == nullptr)) {
         AURORA_LOG_WARN("file_dialog", "CoCreateInstance(IFileOpenDialog) 失败");
         return make_error(ErrorCode::PlatformDialogCreateFailed, "CoCreateInstance(IFileOpenDialog) failed");
     }
@@ -228,7 +235,6 @@ auto open_folder(const Options &opts) -> Result<std::string> {
     return out.empty() ? std::string{} : out.front();
 }
 
-} // namespace file_dialog
-} // namespace aurora
+} // namespace aurora::file_dialog
 
 #endif // AURORA_PLATFORM_WINDOWS

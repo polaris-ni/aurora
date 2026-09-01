@@ -814,7 +814,7 @@ class Window {
 
     /// @brief 若启用 HUD 叠加层，按需重绘并合成到主缓冲；返回是否发生了 HUD 刷新。
     [[nodiscard]] auto compose_hud_maybe(Painter &p, const BuildContext &ctx) -> bool {
-        // ---- 分层 HUD 叠加层（CPU 性能专项选项 A）----
+        // ---- 分层 HUD 叠加层 ----
         // 叠加层独立于 widget 树，仅以 ~2Hz 重绘离屏缓冲；每帧（full / partial 均）合成到主缓冲。
         // 面板为不透明，故叠在「保留自上一帧」的主缓冲之上不会产生重影；app 树仅在自身脏时重绘，
         // 叠加层刷新开销被隔离在离屏缓冲内（~1–2ms），不再触发整树重绘。

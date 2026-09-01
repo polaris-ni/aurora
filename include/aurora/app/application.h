@@ -109,10 +109,12 @@ class Application {
     ///        （如把共享状态写入 Reactive 标签）。默认为空。
     auto set_on_frame(std::function<void()> cb) -> void { m_on_frame = std::move(cb); }
 
-    /// @brief 设置 HUD 叠加层（分层 HUD，CPU 性能专项选项 A）。
+    /// @brief 设置 HUD 叠加层（分层 HUD）。
     /// 转发给组合的后端 `Window`；叠加层独立于 widget 树渲染，详见 `Window::set_overlay`。
-    auto set_overlay(std::shared_ptr<Widget> overlay) -> void {
-        if (m_window) m_window->set_overlay(std::move(overlay));
+    auto set_overlay(std::shared_ptr<Widget> overlay) const -> void {
+        if (m_window) {
+            m_window->set_overlay(std::move(overlay));
+        }
     }
 
     /// @brief 当前窗口可见性状态（响应式：在 `Effect` 内读取可自动订阅刷新）。
@@ -136,7 +138,7 @@ class Application {
 
     /// @brief 运行帧循环：每帧 pump 事件（→ 集中派发）→ 渲染根 → tick；到 should_close 退出。
     ///
-    /// 事件驱动帧循环（CPU 性能专项阶段 A）：每帧末尾经 `compute_wait_timeout` 决策下次唤醒——
+    /// 事件驱动帧循环：每帧末尾经 `compute_wait_timeout` 决策下次唤醒——
     /// 有脏区/动画时按帧预算（`WindowOptions::max_fps`）节流；完全空闲时阻塞等待事件或
     /// 最近定时任务到期（静态界面 CPU 趋近 0）；`power_saving=false` 退回旧忙轮询。
     /// 同时安装主线程投递器：`au::async` 的 then 回调经队列回投主线程，并 `request_wake`
@@ -172,7 +174,9 @@ class Application {
                 const double dt = std::chrono::duration<double>(now - last).count();
                 last = now;
                 drain_posted(); // 先执行后台回投的主线程工作（可能标脏，当帧即可刷新）
-                if (m_on_frame) m_on_frame();
+                if (m_on_frame) {
+                    m_on_frame();
+                }
                 tick();
                 m_anim.tick(dt);
                 m_sched.tick(dt); // 定时任务随帧推进（在 present 前触发，当帧 UI 即可刷新）
@@ -255,7 +259,7 @@ class Application {
     /// 经 `EventDispatcher` 路径触发 `on_file_drop`（§ 平台 Shell）。
     auto dispatch_file_drop(const std::vector<std::string> &paths, float x, float y) -> void {
         FileDropEvent e;
-        e.position = Point{ x, y };
+        e.position = Point{ .x = x, .y = y };
         e.paths = paths;
         dispatch(e);
     }
@@ -319,8 +323,8 @@ class Application {
     auto attach_window(std::unique_ptr<Window> w) -> void {
         m_window = std::move(w);
         m_window->surface().set_event_handler([this](Event &e) -> void { dispatch(e); });
-        m_window->surface().set_window_state_handler([this](WindowState s) { on_window_state_changed(s); });
-        m_window->surface().set_window_mode_handler([this](WindowMode m) { on_window_mode_changed(m); });
+        m_window->surface().set_window_state_handler([this](WindowState s) -> void { on_window_state_changed(s); });
+        m_window->surface().set_window_mode_handler([this](WindowMode m) -> void { on_window_mode_changed(m); });
     }
 
     /// @brief 排水跨线程回投队列（主线程，每帧开头/退出前调用；阶段 A2）。
@@ -394,7 +398,7 @@ class App {
     }
     /// @brief 设置逻辑尺寸（设备无关像素）。
     auto size(int w, int h) -> App & {
-        m_size = Size{ static_cast<float>(w), static_cast<float>(h) };
+        m_size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) };
         return *this;
     }
     /// @brief 设置根 widget 树。
@@ -407,7 +411,7 @@ class App {
         m_on_frame = std::move(cb);
         return *this;
     }
-    /// @brief 设置 HUD 叠加层（分层 HUD，CPU 性能专项选项 A）。
+    /// @brief 设置 HUD 叠加层（分层 HUD）。
     /// 转发给组合的后端 `Window`；叠加层独立于 widget 树渲染（如 `PerfOverlay`）。
     auto overlay(std::shared_ptr<Widget> w) -> App & {
         m_overlay = std::move(w);
@@ -427,7 +431,7 @@ class App {
 
     /// @brief 构建 `Application` 并进入帧循环。后端选择优先级：
     ///        自定义 Surface（`.surface()`）> 预组装 Window（`.window()`）> 自动检测（默认）。
-    auto run() -> void {
+    auto run() -> void { // NOLINT(*-function-cognitive-complexity)
         Scene scene{ std::move(m_view) };
         WindowOptions opts;
         opts.title = m_title;
@@ -435,15 +439,23 @@ class App {
         opts.max_frames = m_max_frames;
         if (m_custom_surface) {
             Application app{ std::move(scene), std::move(m_custom_surface), opts };
-            if (m_on_frame) app.set_on_frame(m_on_frame);
+            if (m_on_frame) {
+                app.set_on_frame(m_on_frame);
+            }
             app.set_strict_mode(m_strict);
-            if (m_overlay) app.set_overlay(std::move(m_overlay));
+            if (m_overlay) {
+                app.set_overlay(std::move(m_overlay));
+            }
             app.run();
         } else if (m_custom_window) {
             Application app{ std::move(scene), std::move(m_custom_window), opts };
-            if (m_on_frame) app.set_on_frame(m_on_frame);
+            if (m_on_frame) {
+                app.set_on_frame(m_on_frame);
+            }
             app.set_strict_mode(m_strict);
-            if (m_overlay) app.set_overlay(std::move(m_overlay));
+            if (m_overlay) {
+                app.set_overlay(std::move(m_overlay));
+            }
             app.run();
         } else {
             auto kind = auto_detect_surface();
@@ -451,17 +463,23 @@ class App {
             switch (kind) {
 #ifdef AURORA_BACKEND_HEADLESS
             case SurfaceKind::Headless:
-                if (auto res = create_window(HeadlessOptions{ opts })) window = std::move(res.value());
+                if (auto res = create_window(HeadlessOptions{ opts })) {
+                    window = std::move(res.value());
+                }
                 break;
 #endif
 #ifdef AURORA_BACKEND_WIN32
             case SurfaceKind::Win32:
-                if (auto res = create_window(Win32Options{ opts })) window = std::move(res.value());
+                if (auto res = create_window(Win32Options{ opts })) {
+                    window = std::move(res.value());
+                }
                 break;
 #endif
 #ifdef AURORA_BACKEND_GLFW
             case SurfaceKind::Glfw:
-                if (auto res = create_window(GlfwOptions{ opts })) window = std::move(res.value());
+                if (auto res = create_window(GlfwOptions{ opts })) {
+                    window = std::move(res.value());
+                }
                 break;
 #endif
 #ifdef AURORA_BACKEND_X11
@@ -487,9 +505,13 @@ class App {
             default: break;
             }
             Application app{ std::move(scene), std::move(window), opts };
-            if (m_on_frame) app.set_on_frame(m_on_frame);
+            if (m_on_frame) {
+                app.set_on_frame(m_on_frame);
+            }
             app.set_strict_mode(m_strict);
-            if (m_overlay) app.set_overlay(std::move(m_overlay));
+            if (m_overlay) {
+                app.set_overlay(std::move(m_overlay));
+            }
             app.run();
         }
     }
@@ -497,7 +519,7 @@ class App {
   private:
     Node m_view;
     std::string m_title{ "Aurora" };
-    Size m_size{ 800.0f, 600.0f };
+    Size m_size{ .width = 800.0f, .height = 600.0f };
     int m_max_frames = -1;
     StrictMode m_strict = StrictMode::Off;
     std::function<void()> m_on_frame;
@@ -507,6 +529,7 @@ class App {
 };
 
 /// @brief 便捷构造：返回流式构建器（§4.5）。
+// NOLINTNEXTLINE(readability-identifier-naming): 工厂名 `App` 与类型同名，保持 CamelCase 以匹配流式 DSL
 [[nodiscard]] inline auto App() -> App { return App::make(); }
 
 } // namespace aurora

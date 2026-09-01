@@ -1,7 +1,7 @@
 #pragma once
 
+#include <array>
 #include <string>
-#include <vector>
 
 #include "aurora/core/result.h"
 #include "aurora/widget/serialization.h"
@@ -18,29 +18,37 @@ namespace aurora {
 /// @note Side-effects: none
 /// @note Rebuildable: no
 [[nodiscard]] inline auto generate_ui(const std::string &description) -> Result<Json> {
-    if (description.empty())
+    if (description.empty()) {
         return make_error(ErrorCode::GenerateUiEmpty, "empty description");
+    }
 
     Json tree = Json::object();
     Json children = Json::array();
 
     // 关键词 → 类型映射
-    static const struct {
+    struct Entry {
         std::string keyword;
         std::string type;
         std::string text;
-    } kMap[] = {
-        { "button", "Button", "Button" }, { "text", "Text", "Text" }, { "label", "Text", "Text" },
-        { "column", "Column", "" },       { "row", "Row", "" },       { "checkbox", "Checkbox", "" },
-        { "switch", "Switch", "" },       { "slider", "Slider", "" },
     };
+    static const std::array<Entry, 8> k_map = { {
+        { .keyword = "button", .type = "Button", .text = "Button" },
+        { .keyword = "text", .type = "Text", .text = "Text" },
+        { .keyword = "label", .type = "Text", .text = "Text" },
+        { .keyword = "column", .type = "Column", .text = "" },
+        { .keyword = "row", .type = "Row", .text = "" },
+        { .keyword = "checkbox", .type = "Checkbox", .text = "" },
+        { .keyword = "switch", .type = "Switch", .text = "" },
+        { .keyword = "slider", .type = "Slider", .text = "" },
+    } };
 
-    for (const auto &m : kMap) {
+    for (const auto &m : k_map) {
         if (description.find(m.keyword) != std::string::npos) {
             Json node;
             node["type"] = m.type;
-            if (!m.text.empty())
+            if (!m.text.empty()) {
                 node["props"]["text"] = m.text;
+            }
             children.push_back(node);
         }
     }
@@ -64,8 +72,9 @@ namespace aurora {
 /// @brief 快速验证：描述 → JSON → from_json 往返成功即表示 schema 匹配。
 [[nodiscard]] inline auto validate_generate_ui(const std::string &desc) -> bool {
     auto r = generate_ui(desc);
-    if (!r.ok())
+    if (!r.ok()) {
         return false;
+    }
     // generate_ui 返回带 "node" 包装的树，from_json 需要顶层 "type" 的节点对象。
     const Json &node = r.value().value("node", Json::object());
     auto w = serialization::from_json(node);

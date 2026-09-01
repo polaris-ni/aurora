@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "aurora/app/menu.h"
-#include "aurora/core/platform.h"
 
 namespace aurora {
 

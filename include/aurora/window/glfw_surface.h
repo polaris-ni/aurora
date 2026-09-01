@@ -71,7 +71,7 @@ class GlfwSurface : public Surface {
     [[nodiscard]] auto should_close() const -> bool override;
 
     auto poll_platform_events() -> void override;
-    /// @brief 阻塞等待事件或超时（CPU 性能专项阶段 A）：`glfwWaitEventsTimeout`。
+    /// @brief 阻塞等待事件或超时：`glfwWaitEventsTimeout`。
     /// 无限等待按 1s 分段兜底（防丢唤醒死等）。
     auto wait_events(double timeout_ms) -> void override;
     /// @brief 跨线程唤醒：`glfwPostEmptyEvent` 使阻塞在 wait_events 的主循环立即返回（线程安全）。

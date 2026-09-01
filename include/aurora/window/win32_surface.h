@@ -117,7 +117,7 @@ class Win32Surface final : public Surface {
     [[nodiscard]] auto scale_factor() const -> float override { return m_win->scale_factor(); }
     [[nodiscard]] auto should_close() const -> bool override { return m_win->should_close(); }
     auto poll_platform_events() -> void override { m_win->poll_platform_events(); }
-    /// @brief 阻塞等待消息或超时（转发共享宿主；CPU 性能专项阶段 A）。
+    /// @brief 阻塞等待消息或超时（转发共享宿主）。
     auto wait_events(double timeout_ms) -> void override { m_win->wait_events(timeout_ms); }
     /// @brief 跨线程唤醒主循环（转发共享宿主；PostMessage 线程安全）。
     auto request_wake() -> void override { m_win->request_wake(); }
