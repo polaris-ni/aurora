@@ -183,9 +183,9 @@ cmake -S . -B build -DAURORA_LAYOUT_CACHE=OFF -DAURORA_DISPLAY_LIST=OFF
 
 | 生成器 | 源 | 写入段 |
 |:---|:---|:---|
-| `gen_error_codes`（`tools/gen_error_codes.cpp`） | `codespec/errors.toml` | `error_codes` |
-| `gen_api_tools`（`tools/gen_api.cpp`） | 库注册表 | `widgets` / `enums` / `layout_rules` / `state_patterns`，并 merge 现有 `error_codes` + `debug` |
-| `gen_debug_api`（`tools/gen_debug_api.cpp`） | `codespec/debug_api.toml` | `debug`（仅声明 `aurora::debug` 公共自由函数） |
+| `gen_error_codes`（`tools/gen/gen_error_codes.cpp`） | `codespec/errors.toml` | `error_codes` |
+| `gen_api_tools`（`tools/gen/gen_api.cpp`） | 库注册表 | `widgets` / `enums` / `layout_rules` / `state_patterns`，并 merge 现有 `error_codes` + `debug` |
+| `gen_debug_api`（`tools/gen/gen_debug_api.cpp`） | `codespec/debug_api.toml` | `debug`（仅声明 `aurora::debug` 公共自由函数） |
 
 ```powershell
 cmake --build build --target aurora_api_json        # gen_api_tools 直写 aurora_api.json
@@ -226,8 +226,8 @@ cmake -S . -B build -DAURORA_ENABLE_COVERAGE=ON
 cmake --build build --target coverage -- -j $env:NUMBER_OF_PROCESSORS
 ```
 
-- GCC：ctest 后经 `tools/coverage_report.ps1` 聚合 gcov 行覆盖。
-- Clang：ctest 在 `LLVM_PROFILE_FILE=<build>/profraw/aurora-%p.profraw`（按 pid 分文件，并行不互覆）环境下运行，再经 `tools/coverage_report_llvm.ps1`（`llvm-profdata merge` + `llvm-cov report`）输出终端摘要。
+- GCC：ctest 后经 `tools/coverage/coverage_report.ps1` 聚合 gcov 行覆盖。
+- Clang：ctest 在 `LLVM_PROFILE_FILE=<build>/profraw/aurora-%p.profraw`（按 pid 分文件，并行不互覆）环境下运行，再经 `tools/coverage/coverage_report_llvm.ps1`（`llvm-profdata merge` + `llvm-cov report`）输出终端摘要。
 
 ### 4.1 `AURORA_ENABLE_PROFILING`（三态）
 

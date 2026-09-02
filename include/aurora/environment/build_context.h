@@ -27,7 +27,7 @@ class BuildContext {
     /// @note `template` 消歧义必需：Environment 在本头仅前向声明，解析期无法得知 get 是模板，
     /// 缺它时任何先于 environment.h 包含本头的 TU 均无法通过编译。
     template<typename T> [[nodiscard]] auto environment() const -> const T * {
-        return env != nullptr ? env->get<T>() : nullptr;
+        return env != nullptr ? env->template get<T>() : nullptr;
     }
 };
 

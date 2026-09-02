@@ -77,7 +77,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 ## 4 模块映射
 
-路径前缀均为 `include/aurora/`，实现位于 `src/aurora/`（静态库）。头文件引用的最终校验见 `tools/check_arch_module_map.py`（缺失 / 歧义 / 错位引用返回非零退出码，可作 CI 门禁）。
+路径前缀均为 `include/aurora/`，实现位于 `src/aurora/`（静态库）。头文件引用的最终校验见 `tools/check/check_arch_module_map.py`（缺失 / 歧义 / 错位引用返回非零退出码，可作 CI 门禁）。
 
 ### 4.1 基础层与响应式核心
 
@@ -352,7 +352,7 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 ## 12 错误处理架构
 
-错误处理遵循「**机器可解析的错误**」约束。错误码目录（数据）由 `tools/gen_error_codes.cpp` 自动生成并维护于 [`ERROR_CATALOG.md`](ERROR_CATALOG.md)，**请勿手改**。编码层面的写法规则见 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §1。
+错误处理遵循「**机器可解析的错误**」约束。错误码目录（数据）由 `tools/gen/gen_error_codes.cpp` 自动生成并维护于 [`ERROR_CATALOG.md`](ERROR_CATALOG.md)，**请勿手改**。编码层面的写法规则见 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §1。
 
 ### 12.1 设计目标
 
@@ -385,7 +385,7 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 ```text
 codespec/errors.toml          (源：slug / severity / category / 元数据 / message 模板)
-        │  tools/gen_error_codes.cpp
+        │  tools/gen/gen_error_codes.cpp
         ▼
   include/aurora/core/error_codes.gen.h   (ErrorCode 枚举 + 表)
   codespec/ERROR_CATALOG.md               (人类可读目录)

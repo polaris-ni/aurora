@@ -331,7 +331,7 @@ au::Column{}
 
 ### 7.3 共享枚举
 
-跨控件共享枚举统一定义于 `core/enums.h`，经 `props_io.h` 提供 `*_to_json` / `json_to_*` 互转供各控件 `serialize_props` / `deserialize_props` 使用，并登记于 `tools/gen_api.cpp` 的 `known_enums()`，供 `aurora_api.json` 与代码生成工具消费。
+跨控件共享枚举统一定义于 `core/enums.h`，经 `props_io.h` 提供 `*_to_json` / `json_to_*` 互转供各控件 `serialize_props` / `deserialize_props` 使用，并登记于 `tools/gen/gen_api.cpp` 的 `known_enums()`，供 `aurora_api.json` 与代码生成工具消费。
 
 | 枚举 | 取值 | 用途 |
 |:---|:---|:---|

@@ -1,0 +1,18 @@
+{
+  "source": "本机时间类门槛 —— 受机器负载/编译器/后台进程影响，不进 CI，仅本机趋势对比。",
+  "note": "time-class gates 不进 CTest；计数类 G-5~G-8 由 tests/test_scroll_regression.cpp 锁进 CTest（PROFILING=ON）。",
+  "scene": "google_play",
+  "repeat": 3,
+  "gates": [
+    { "id": "G-1",  "metric": "scroll p99 (ms, best-of)",     "threshold": 16.67, "counted": true  },
+    { "id": "G-2",  "metric": "scroll worst (ms)",            "threshold": 33.3,  "counted": true  },
+    { "id": "G-3",  "metric": "scroll jitter (ms)",           "threshold": 2.0,   "counted": true  },
+    { "id": "G-4",  "metric": "long tasks / 300",             "threshold": 3,     "counted": true  },
+    { "id": "G-9",  "metric": "frame layout max (ms)",        "threshold": 1.5,   "counted": false },
+    { "id": "G-10", "metric": "frame paint max (ms)",         "threshold": 10.0,  "counted": false },
+    { "id": "G-11", "metric": "frame present max (ms)",       "threshold": 3.0,   "counted": false },
+    { "id": "G-12", "metric": "text_cjk_12lines @1080p",      "threshold": 3.0,   "counted": true  },
+    { "id": "G-13", "metric": "linear_gradient_full @1080p",  "threshold": 8.0,   "counted": true  },
+    { "id": "G-14", "metric": "radial_gradient_full @1080p",  "threshold": 8.0,   "counted": true  }
+  ]
+}

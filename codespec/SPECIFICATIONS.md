@@ -199,7 +199,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 |:---|:---|
 | [`errors.toml`](errors.toml) | 错误码单一声明源（slug / severity / category / 元数据 / message 模板） |
 | [`debug_api.toml`](debug_api.toml) | `aurora::debug` 公共自由函数声明源 |
-| [`ERROR_CATALOG.md`](ERROR_CATALOG.md) | 由 `tools/gen_error_codes.cpp` 生成的错误码全量清单（**生成物，勿手改**） |
+| [`ERROR_CATALOG.md`](ERROR_CATALOG.md) | 由 `tools/gen/gen_error_codes.cpp` 生成的错误码全量清单（**生成物，勿手改**） |
 
 三个文件路径被 `tools/` 与 `src/aurora/core/diagnostics.cpp` 硬编码，**不可移动或改名**。
 

@@ -4,7 +4,7 @@
 # Declares all public free functions under the `aurora::debug` namespace
 # (excluding internal `detail::` symbols).
 #
-# Consumed by tools/gen_debug_api.cpp to generate the "debug" section of
+# Consumed by tools/gen/gen_debug_api.cpp to generate the "debug" section of
 # aurora_api.json (merge-only). Edit here -> rerun
 # `cmake --build build --target gen_debug_api_json` -> JSON stays in sync,
 # no manual edits to GUIDELINE.md required (eliminates doc drift).

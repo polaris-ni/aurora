@@ -49,7 +49,7 @@
 
 ### 3.2 覆盖率工作流
 
-行覆盖率以 GCC `--coverage` 构建（CMake 开关 `AURORA_ENABLE_COVERAGE=ON`）并跑完 CTest 后，用 `tools/coverage_report.sh`（Linux / macOS）或 `tools/coverage_report.ps1`（Windows）聚合为终端摘要 + `<build_dir>/coverage.csv`，此为唯一口径。
+行覆盖率以 GCC `--coverage` 构建（CMake 开关 `AURORA_ENABLE_COVERAGE=ON`）并跑完 CTest 后，用 `tools/coverage/coverage_report.sh`（Linux / macOS）或 `tools/coverage/coverage_report.ps1`（Windows）聚合为终端摘要 + `<build_dir>/coverage.csv`，此为唯一口径。
 
 - 逐源文件阈值 **90%**；低于阈值的文件须在其宿主测试文件头部以「覆盖率说明」注明现状与归类（补测缺口 / 平台门控豁免 / 数据头噪声），不得静默留白。
 - 平台门控后端（Win32 / macOS / WASM / D3D11 等）在非对应平台天然 0 覆盖；纯数据 / 生成头（如 `render/bitmap_font.h`、`core/error_codes.gen.h`）的 constexpr 初始化无运行时计数。二者均按豁免处理。

@@ -1,6 +1,6 @@
 # Aurora 错误码目录（自动生成）
 
-> 由 `tools/gen_error_codes.cpp` 从 `codespec/errors.toml` 生成，**请勿手改**。
+> 由 `tools/gen/gen_error_codes.cpp` 从 `codespec/errors.toml` 生成，**请勿手改**。
 > `slug` 为冻结对外契约，跨语言/JSON/日志只认它；`enum` 为 C++ 标识符，可自由改名。
 
 | # | enum | slug | category | severity | auto_fixable | fix_category | retryable | message | hint |

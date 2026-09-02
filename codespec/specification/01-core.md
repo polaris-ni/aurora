@@ -95,7 +95,7 @@ struct Constraints {
 
 `code`（冻结 slug）、`message`、`suggestion`、`docs`、`where`、`hint`、`code_enum`、`severity`、`category`、`auto_fixable`、`retryable`、`fix_category`、`fix_params`。
 
-错误码的**单一声明源**是 [`errors.toml`](../errors.toml)，由 `tools/gen_error_codes.cpp` 生成 `error_codes.gen.h`、[`ERROR_CATALOG.md`](../ERROR_CATALOG.md) 与 `aurora_api.json`。新增或修改错误码只改 `errors.toml` 后重跑生成器，不手改产物。
+错误码的**单一声明源**是 [`errors.toml`](../errors.toml)，由 `tools/gen/gen_error_codes.cpp` 生成 `error_codes.gen.h`、[`ERROR_CATALOG.md`](../ERROR_CATALOG.md) 与 `aurora_api.json`。新增或修改错误码只改 `errors.toml` 后重跑生成器，不手改产物。
 
 ### 3.2 Result\<T\>
 

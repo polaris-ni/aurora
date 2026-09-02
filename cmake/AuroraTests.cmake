@@ -35,6 +35,9 @@ if (AURORA_BUILD_TESTS)
     aurora_setup_consumer_target(aurora_test_runner
             "${CMAKE_CURRENT_SOURCE_DIR}/tests"
             "${CMAKE_CURRENT_SOURCE_DIR}/examples/demos")
+    # 暴露工具链共享头（tools/include）：部分测试需复用 known_enums.h / au_lint_core.h 等
+    # 单一来源，避免与工具实现漂移（known_enums 取值守护、au-lint 核心逻辑单测）。
+    target_include_directories(aurora_test_runner PRIVATE "${CMAKE_SOURCE_DIR}/tools/include")
     # 标记测试目标，供 AuroraInstrumentation 注入 AURORA_ENABLE_DEBUG（与库体编译分支对齐），
     # 使 DEBUG 成功路径可在测试中编译/调用；宏保持 PRIVATE，不导出给外部消费者 ABI。
     set_property(GLOBAL APPEND PROPERTY _aurora_test_targets aurora_test_runner)
@@ -87,4 +90,23 @@ if (AURORA_BUILD_TESTS)
                     -DRUNNER=$<TARGET_FILE:aurora_test_runner>
                     -DEXPECT=${_expect_file}
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/AuroraCheckTestRegistry.cmake")
+
+    # ---- 静态校验 / 门禁脚本（tools/check/*.py）注册为 CTest 用例 ----
+    # 跨平台 Python 解释器探测；找不到则不注册（不阻断 C++ 测试）。
+    find_program(PYTHON3_EXE NAMES python3 python)
+    if (PYTHON3_EXE)
+        set(_check_dir "${CMAKE_SOURCE_DIR}/tools/check")
+        # 校验 codespec 模块映射文档中的文件引用是否仍存在于仓库。
+        add_test(NAME check_arch_module_map
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_arch_module_map.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 生成器 aurora_api.json 合并不截断回归（直接调用真实构建产物）。
+        add_test(NAME check_gen_api_merge
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_gen_api_merge.py" "${CMAKE_BINARY_DIR}"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 版本一致性门禁（CHANGELOG.currentVersion 必须等于库版本；描述性口径不符仅告警）。
+        add_test(NAME check_version_consistency
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_version_consistency.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    endif ()
 endif ()

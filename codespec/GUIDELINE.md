@@ -338,14 +338,14 @@ opts.renderer = au::RendererPreference::GpuD3D11;  // 不可用时 create_window
 
 > 硬规则：**时间类**门槛一律在 `Release + PROFILING=OFF` 下测量；**计数类**门槛（`RenderCounters` 各字段、脏区面积、整帧重绘帧数）在 `Release + PROFILING=ON` 下测量。Debug 默认开 PROFILING，禁止拿 Debug 数据填基线表。
 
-**原语 / 整帧光栅基准**（`tools/bench_render.cpp`，输出 markdown 表到 stdout）：
+**原语 / 整帧光栅基准**（`tools/bench/bench_render.cpp`，输出 markdown 表到 stdout）：
 
 ```bash
 cmake --build build --target bench_render
 ./build/bench_render.exe          # 场景 × 分辨率 × scale 的 ms/帧矩阵
 ```
 
-**滚动场景基准**（`tools/bench_scroll.cpp`，用 `ScrollBenchHarness` 对业务树确定性采样）：
+**滚动场景基准**（`tools/bench/bench_scroll.cpp`，用 `ScrollBenchHarness` 对业务树确定性采样）：
 
 ```bash
 cmake --build build --target bench_scroll
@@ -891,11 +891,11 @@ auto MyWidget::on_paint(au::Painter &p, const au::Rect &r, const au::BuildContex
 
 ### 27.6 调试 API 目录（自动生成）
 
-`aurora::debug` 命名空间下的全部公共自由函数由 `tools/gen_debug_api.cpp` 从声明源 [`debug_api.toml`](debug_api.toml) 自动生成到 `aurora_api.json` 的 `"debug"` 段（**单一权威目录**）。新增 / 改名调试函数时，**只改 `debug_api.toml`** 再重跑生成器：
+`aurora::debug` 命名空间下的全部公共自由函数由 `tools/gen/gen_debug_api.cpp` 从声明源 [`debug_api.toml`](debug_api.toml) 自动生成到 `aurora_api.json` 的 `"debug"` 段（**单一权威目录**）。新增 / 改名调试函数时，**只改 `debug_api.toml`** 再重跑生成器：
 
 ```bash
 cmake --build build --target gen_debug_api_json   # 读 debug_api.toml → 更新 aurora_api.json 的 debug 段
-python tools/check_gen_api_merge.py build         # 回归：损坏现有文件不截断、merge 保留其它段
+python tools/check/check_gen_api_merge.py build         # 回归：损坏现有文件不截断、merge 保留其它段
 ```
 
 生成器为 merge-only：读现有 `aurora_api.json` 的全部其它段（`widgets` / `enums` / `error_codes` / …），仅覆盖 `debug` 段写回；现有文件损坏时直接报错退出、绝不写空对象。`gen_error_codes` / `gen_api_tools` 亦已加固同样的防护并保留 `debug` 段。

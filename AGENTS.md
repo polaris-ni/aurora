@@ -33,7 +33,7 @@
 | `examples/`         | 示例：每个组件一个 `demo_<组件>.cpp` 位于 `examples/demos/`（1:1，CMake 自动 GLOB）；`examples/demos/demo_common.h` 含 `Card`/`BrandBadge`/`GradientTitle` 等demo使用的全局控件 |
 | `tests/`            | 独立可执行测试 + CTest（`tests/*.cpp`）                                                                                                                                         |
 | `third_party/`      | 三方库文件                                                                                                                                                                      |
-| `tools/`            | API 生成与辅助工具（`gen_api.cpp` 编译目标为 `gen_api_tools`，生成 `aurora_api.json`；CMake 聚合目标 `aurora_api_json`） |
+| `tools/`            | 工具链，按职责分子目录：`gen/`（三生成器 `gen_api`/`gen_error_codes`/`gen_debug_api`）、`servers/`（mcp / lsp / cli / au-lint）、`bench/`（4 基准 + `bench_common.h`）、`check/`（校验与门禁脚本 + `perf_gates.json`）、`coverage/`（GCC/Clang/LLVM 覆盖率聚合）、`include/`（共享头，含枚举 SSOT `known_enums.h` 与 LSP 三层 `lsp_*.h`）。API 生成落盘 `aurora_api.json`，CMake 聚合目标 `aurora_api_json`；详见 `cmake/AuroraTools.cmake` 与 `cmake/AuroraInstrumentation.cmake` |
 | `cmake/`            | CMake 模块（顶层 `CMakeLists.txt` 只做编排）：`AuroraThirdParty`（三方构建）/`AuroraImageCodecs`（图片编解码）/`AuroraCcache`（编译缓存）/`AuroraSimd`（SIMD）/`AuroraBackends`（后端开关）/`AuroraTools`（工具）/`AuroraDemos`（示例）/`AuroraTests`（测试）/`AuroraInstrumentation`（插桩）/`AuroraInstall`（安装），共 10 个；布局与职责详见 `codespec/BUILD_OPTIONS.md` §1.1 |
 | `codespec/`         | **全部项目文档**（需求/架构/规范/指南/概念），见下方导航表                                                                                                                      |
 | `build/`            | 构建产物，CMake 生成，不纳入版本管理                                                                                                                                            |
@@ -113,7 +113,7 @@
 |:---|:---|
 | `errors.toml` | 错误码单一声明源（slug / severity / category / message 模板） |
 | `debug_api.toml` | `aurora::debug` 公共自由函数声明源 |
-| `ERROR_CATALOG.md` | `tools/gen_error_codes.cpp` 生成的错误码全量清单（**生成物，勿手改**） |
+| `ERROR_CATALOG.md` | `tools/gen/gen_error_codes.cpp` 生成的错误码全量清单（**生成物，勿手改**） |
 
 三个文件路径被 `tools/` 与 `src/aurora/core/diagnostics.cpp` 硬编码。
 

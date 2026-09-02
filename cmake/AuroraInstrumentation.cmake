@@ -54,9 +54,9 @@ if (AURORA_ENABLE_COVERAGE)
         _aurora_instrument_all_targets(--coverage -O0 -g)
     endif ()
 
-    # 覆盖率终端摘要：Linux/macOS 走 gcov + tools/coverage_report.sh；
-    # Windows 走 tools/coverage_report.ps1；Clang 走 LLVM 原生
-    # source-based（llvm-profdata merge + llvm-cov report，tools/coverage_report_llvm.ps1）。
+    # 覆盖率终端摘要：Linux/macOS 走 gcov + tools/coverage/coverage_report.sh；
+    # Windows 走 tools/coverage/coverage_report.ps1；Clang 走 LLVM 原生
+    # source-based（llvm-profdata merge + llvm-cov report，tools/coverage/coverage_report_llvm.ps1）。
     # 用法：cmake -S . -B build -DAURORA_ENABLE_COVERAGE=ON ... && cmake --build build --target coverage
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         # LLVM_PROFILE_FILE 用 %p（pid）模板：ctest 并行多进程各写独立 .profraw，不互相覆盖。
@@ -65,7 +65,7 @@ if (AURORA_ENABLE_COVERAGE)
                 COMMAND ${CMAKE_COMMAND} -E env "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/profraw/aurora-%p.profraw"
                 ${CMAKE_CTEST_COMMAND} --output-on-failure
                 COMMAND powershell -NoProfile -ExecutionPolicy Bypass
-                -File "${CMAKE_SOURCE_DIR}/tools/coverage_report_llvm.ps1"
+                -File "${CMAKE_SOURCE_DIR}/tools/coverage/coverage_report_llvm.ps1"
                 -BuildDir "${CMAKE_BINARY_DIR}"
                 -SrcRoot "${CMAKE_SOURCE_DIR}"
                 -LlvmBin "${_aurora_llvm_bin}"
@@ -76,7 +76,7 @@ if (AURORA_ENABLE_COVERAGE)
             add_custom_target(coverage
                     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
                     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
-                    -File "${CMAKE_SOURCE_DIR}/tools/coverage_report.ps1"
+                    -File "${CMAKE_SOURCE_DIR}/tools/coverage/coverage_report.ps1"
                     -BuildDir "${CMAKE_BINARY_DIR}"
                     -SrcRoot "${CMAKE_SOURCE_DIR}"
                     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
@@ -84,7 +84,7 @@ if (AURORA_ENABLE_COVERAGE)
         else ()
             add_custom_target(coverage
                     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-                    COMMAND bash "${CMAKE_SOURCE_DIR}/tools/coverage_report.sh"
+                    COMMAND bash "${CMAKE_SOURCE_DIR}/tools/coverage/coverage_report.sh"
                     "${CMAKE_BINARY_DIR}"
                     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
                     COMMENT "Running ctest then aggregating gcov line coverage via coverage_report.sh (terminal summary, no HTML)")
