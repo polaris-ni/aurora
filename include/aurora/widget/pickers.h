@@ -8,7 +8,7 @@
 
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
-#include "aurora/core/string_util.h" // internal::string_format锛堟敹鏁?snprintf 鏍锋澘锛?#10;#include "aurora/render/painter.h"
+#include "aurora/core/string_util.h"
 #include "aurora/state/state.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
@@ -51,9 +51,7 @@ struct TimeOfDay {
 
     [[nodiscard]] auto is_valid() const -> bool { return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59; }
 
-    [[nodiscard]] auto to_string() const -> std::string {
-        return internal::string_format("%02d:%02d", hour, minute);
-    }
+    [[nodiscard]] auto to_string() const -> std::string { return internal::string_format("%02d:%02d", hour, minute); }
 
     auto operator==(const TimeOfDay &o) const -> bool = default;
 };

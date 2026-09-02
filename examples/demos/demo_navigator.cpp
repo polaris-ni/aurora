@@ -47,7 +47,7 @@ auto main() -> int {
     au::Scene scene{ au::Node{ host } };
     au::WindowOptions opts;
     opts.size = au::Size{ .width = 420.0f, .height = 320.0f };
-    opts.title = "Navigator 深层链接";
+    opts.title = "Navigator deep link";
     auto win_res = create_native_window(opts);
     au::Application app{ std::move(scene), win_res ? std::move(win_res.value()) : nullptr, opts };
     app.set_on_frame([&anim]() -> void { anim.tick(1.0 / 60.0); });

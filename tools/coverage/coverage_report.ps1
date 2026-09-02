@@ -54,9 +54,9 @@ if ($gcdas.Count -gt 0) {
 }
 
 # ---------------------------------------------------------------------------
-# (A') HTML 报告（可选增强）：用 gcov_aggregate.py 自绘 HTML + CSV（GCC 分支与
-#      coverage_report.sh / LLVM 分支共享同一形态）。依赖 python3 + 同目录 gcov_aggregate.py；
-#      缺失时静默跳过，不阻断本机诊断。
+# (A') HTML report (optional enhancement): use gcov_aggregate.py to draw HTML + CSV (shared shape
+#      with the GCC branch and coverage_report.sh / LLVM branch). Depends on python3 +
+#      gcov_aggregate.py in the same directory; silently skipped if missing, does not block local diagnosis.
 # ---------------------------------------------------------------------------
 $py = $null
 foreach ($c in 'python3', 'python') { if (Get-Command $c -ErrorAction SilentlyContinue) { $py = $c; break } }
@@ -73,7 +73,7 @@ if ($py -and $gcdas.Count -gt 0) {
         & $py $agg $inter --src-root $SrcRoot `
             --html (Join-Path $BuildDir 'coverage.html') `
             --csv  (Join-Path $BuildDir 'coverage.csv')
-        Write-Host ('HTML 报告: ' + (Join-Path $BuildDir 'coverage.html'))
+        Write-Host ('HTML report: ' + (Join-Path $BuildDir 'coverage.html'))
     }
 }
 

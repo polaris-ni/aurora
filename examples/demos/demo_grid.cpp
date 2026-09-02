@@ -10,9 +10,9 @@ auto main() -> int {
     }
 
     au::Node root = au::Column{
-        GradientTitle{ "Grid 控件" },
+        GradientTitle{ "Grid widget" },
         gap(12),
-        au::Text{ au::LocalizedString{ "3 列网格" } },
+        au::Text{ au::LocalizedString{ "3-column grid" } },
         au::Grid{ au::GridProps{ .children = std::move(cells), .columns = 3 } },
     };
     return run_demo(Card{ std::move(root) }, "Grid · Aurora Demo", 520.0f, 420.0f);

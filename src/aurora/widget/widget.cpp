@@ -9,7 +9,7 @@
 #include "aurora/event/focus.h"
 #include "aurora/modifier/modifier.h"
 #include "aurora/perf/counters.h"
-#include "aurora/render/detail/paint_timing.h" // [鎬ц兘鎺掓煡] g_pt.paint_nodes / g_pt.dl_replays 闀滃儚
+#include "aurora/render/detail/paint_timing.h"
 #include "aurora/render/painter.h"
 
 namespace aurora {

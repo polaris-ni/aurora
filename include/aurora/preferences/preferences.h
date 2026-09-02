@@ -13,7 +13,7 @@
 #include "aurora/core/result.h"
 #include "aurora/state/binding.h"
 #include "aurora/state/state.h"
-#include "aurora/widget/props_io.h" // Json = nlohmann::json
+#include "aurora/widget/props_io.h"
 
 namespace aurora::preferences {
 

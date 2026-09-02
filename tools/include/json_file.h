@@ -1,11 +1,13 @@
 // ============================================================================
-// json_file.h — 文件读取原语（JSON / 原始文本）
+// json_file.h — file-reading primitives (JSON / raw text)
 // ----------------------------------------------------------------------------
-// 零 aurora 依赖（仅标准库 + nlohmann/json）。由 aurora_cli / au-lint 复用，
-// 避免「ifstream + rdbuf 读到 string/Json」两份重复实现。
+// Zero aurora dependencies (standard library + nlohmann/json only). Reused by
+// aurora_cli / aurora_lint to avoid two duplicate implementations of
+// "ifstream + rdbuf reading into string/Json".
 //
-// 注意：读取失败返回空值（Json{} / ""），不在此处打印日志 —— 调用方负责诊断，
-// 与抽取前的行为一致（cli 在 read_json_file 返回后自判 is_discarded 再报错）。
+// Note: on read failure an empty value is returned (Json{} / ""), and nothing is logged here —
+// the caller is responsible for diagnostics, consistent with the behavior before extraction
+// (the cli checks is_discarded itself after read_json_file returns and then reports the error).
 // ============================================================================
 #pragma once
 
@@ -17,7 +19,7 @@
 
 namespace aurora::tools {
 
-// 从文件读取并解析 JSON；失败（打不开 / 解析错）返回 discarded Json。
+// Read and parse JSON from a file; on failure (cannot open / parse error) return a discarded Json.
 inline auto read_json_file(const std::string &path) -> nlohmann::json {
     std::ifstream f(path);
     if (!f.is_open()) {
@@ -28,7 +30,7 @@ inline auto read_json_file(const std::string &path) -> nlohmann::json {
     return nlohmann::json::parse(ss.str(), nullptr, false);
 }
 
-// 从文件读取原始文本；失败返回空串。
+// Read raw text from a file; on failure return an empty string.
 inline auto read_text_file(const std::string &path) -> std::string {
     const std::ifstream in(path, std::ios::binary);
     if (!in) {

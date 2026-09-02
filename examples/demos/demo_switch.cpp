@@ -3,15 +3,15 @@
 
 auto main() -> int {
     auto on = std::make_shared<au::State<bool>>(false);
-    auto label = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{ "关" });
+    auto label = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{ "Off" });
 
     au::Switch sw{ au::Reactive{ on }, [on, label](bool v) -> void {
                       on->set(v);
-                      label->set(au::LocalizedString{ v ? "开" : "关" });
+                      label->set(au::LocalizedString{ v ? "On" : "Off" });
                   } };
 
     au::Node root = au::Column{
-        GradientTitle{ "Switch 控件" },
+        GradientTitle{ "Switch widget" },
         gap(12),
         au::Row{ std::move(sw), au::Text{ au::TextProps{ .content = au::Reactive{ label } } } },
     };

@@ -1,10 +1,13 @@
-// Win32 上屏诊断基准（非 CTest）：拆分「拖选帧」的 paint 与 present(GDI blit) 成本。
+// Win32 present diagnostic benchmark (non-CTest): split the paint and present (GDI blit) cost of a
+// drag-select frame.
 //
-// 背景：全屏拖选高亮不跟手——字符命中 O(n²) 与逐像素白扫修掉后，剩余的面积级成本
-// 候选是 present() 的整窗 SetDIBitsToDevice（脏区再小也推整个帧缓冲）。本工具在真实
-// Win32 窗口上分别计时：① 整窗 blit；② 仅段落脏区的 paint-only present_root 整帧，
-// 用数据决定是否值得做「脏区带状 blit」。
-// 用法：./bench_win32_present（无 Win32 环境直接跳过，返回 0）
+// Background: full-screen drag-select highlight lags behind the cursor -- after fixing the O(n^2)
+// glyph hit and per-pixel white scan, the remaining area-level cost candidate is present()'s
+// full-window SetDIBitsToDevice (the dirty region is pushed as a whole frame buffer no matter how
+// small). This tool times them separately on a real Win32 window: (1) full-window blit; (2) only
+// the paragraph dirty region's paint-only present_root for a whole frame, to decide with data
+// whether a "dirty-region banded blit" is worth doing.
+// Usage: ./bench_win32_present (skipped with return code 0 when there is no Win32 environment)
 #include "aurora/aurora.h"
 
 #include "bench_common.h"
@@ -56,7 +59,8 @@ auto main() -> int {
 #else
     enable_dpi_awareness();
 
-    // 贴近全屏：请求超大逻辑尺寸，实际被钳到屏幕（begin_frame 按真实客户区分配缓冲）。
+    // Approximate fullscreen: request an oversized logical size; it is actually clamped to the
+    // screen (begin_frame allocates the buffer from the real client area).
     WindowOptions wopts;
     wopts.size = Size{ .width = 4000.0f, .height = 3000.0f };
     wopts.title = "bench_win32_present";
@@ -67,7 +71,8 @@ auto main() -> int {
     }
     auto win = std::move(win_res.value());
 
-    // 与 demo_text 同构的树：长段落（Justify，多行）+ 若干短文本。
+    // A tree with the same shape as demo_text: a long paragraph (Justify, multi-line) + several
+    // short texts.
     const LocalizedString k_para = "The quick brown fox jumps over the lazy dog while a silent river flows "
                                    "beyond the quiet hills and the pale moon rises above the sleeping town. "
                                    "The quick brown fox jumps over the lazy dog while a silent river flows "
@@ -78,23 +83,24 @@ auto main() -> int {
     kids.reserve(9);
     for (int i = 0; i < 8; ++i) {
         kids.emplace_back(std::make_shared<Text>(
-            TextProps{ .content = LocalizedString{ "line " + std::to_string(i) + " · 文本行内容示例" },
+            TextProps{ .content = LocalizedString{ "line " + std::to_string(i) + " · sample line content" },
                        .font = Font{ .size_pt = 16.0f } }));
     }
     kids.emplace_back(para);
     Node root{ std::make_shared<Column>(ColumnProps{ .children = std::move(kids) }) };
 
-    (void)win->present_root(root); // 首帧全绘（mount + layout + paint + present）
+    (void)win->present_root(root); // First frame full paint (mount + layout + paint + present)
     const Size logical = win->size();
     const float scale = win->surface().scale_factor();
     AURORA_LOG_RAW("bench", "window: ", ffmt(0, logical.width), "x", ffmt(0, logical.height), " dp @ ", ffmt(2, scale),
                    "x = ", static_cast<int>(logical.width * scale), "x", static_cast<int>(logical.height * scale),
                    " px\n");
 
-    // ① 纯 blit：present() 整窗 SetDIBitsToDevice（不重绘）。
+    // (1) pure blit: present() does a full-window SetDIBitsToDevice (no repaint).
     bench_row("present_full_blit", time_ms([&]() -> void { (void)win->present(); }, 3, 30));
 
-    // ② 拖选帧端到端：段落标脏 → present_root（脏区裁剪 paint + 整窗 blit）。
+    // (2) drag-select frame end-to-end: mark paragraph dirty -> present_root (dirty-region clipped
+    // paint + full-window blit).
     bench_row("drag_frame_paint+blit", time_ms(
                                            [&]() -> void {
                                                win->mark_dirty(para->paint_bounds());
@@ -102,7 +108,7 @@ auto main() -> int {
                                            },
                                            3, 30));
 
-    // ③ 全量重绘帧（对照）：force_full_redraw → present_root。
+    // (3) full-redraw frame (control): force_full_redraw -> present_root.
     bench_row("full_redraw_frame", time_ms(
                                        [&]() -> void {
                                            win->force_full_redraw();
@@ -110,10 +116,11 @@ auto main() -> int {
                                        },
                                        3, 30));
 
-    // ④ 实验：常驻 DIB section + BitBlt 能否替代 SetDIBitsToDevice 全量路径——
-    // 最大化/resize 必走全量 blit（~130ms），若 DIB section 路径显著更快则改造 present()。
-    // 变体 A：BI_RGB(BGRA 原生序) section，CPU 做 RGBA→BGRA swizzle 后 BitBlt；
-    // 变体 B：BI_BITFIELDS(RGBA 掩码) section，memcpy 后 BitBlt（swizzle 交给 GDI）。
+    // (4) experiment: can a persistent DIB section + BitBlt replace the SetDIBitsToDevice full path
+    // -- maximize/resize always take the full blit (~130ms); if the DIB section path is
+    // significantly faster, rework present().
+    // Variant A: BI_RGB (native BGRA order) section, CPU does RGBA->BGRA swizzle then BitBlt;
+    // Variant B: BI_BITFIELDS (RGBA mask) section, memcpy then BitBlt (swizzle handed to GDI).
     {
         auto *ws = dynamic_cast<Win32Surface *>(&win->surface());
         Painter &pt = win->surface().painter();
@@ -124,7 +131,7 @@ auto main() -> int {
             HWND hwnd = static_cast<HWND>(ws->hwnd());
             HDC wdc = GetDC(hwnd);
 
-            // 变体 A：BGRA 原生 section + swizzle
+            // Variant A: native BGRA section + swizzle
             HDC mdc_a = CreateCompatibleDC(wdc);
             BITMAPINFO bi_a{};
             bi_a.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -157,7 +164,7 @@ auto main() -> int {
                                               },
                                               2, 10));
 
-            // 变体 B：RGBA 掩码 section + memcpy（swizzle 由 GDI 在 BitBlt 时做）
+            // Variant B: RGBA mask section + memcpy (swizzle done by GDI during BitBlt)
             HDC mdc_b = CreateCompatibleDC(wdc);
             struct Bmi {
                 BITMAPINFOHEADER hdr;
@@ -200,28 +207,29 @@ auto main() -> int {
         }
     }
 
-    // ⑤ D3D11 变体（仅 AURORA_BACKEND_D3D11=ON 时）：同尺寸窗口下对比
-    // GPU 上屏的全量上传 present 与脏矩形增量上传 present（量化 GDI → D3D11 收益）。
+    // (5) D3D11 variant (only when AURORA_BACKEND_D3D11=ON): compare, under same-sized windows,
+    // between full-upload GPU present and dirty-rect incremental-upload present (quantify the
+    // GDI -> D3D11 gain).
 #ifdef AURORA_BACKEND_D3D11
     {
         using aurora::D3D11Surface;
         auto gpu = std::make_unique<D3D11Surface>(static_cast<int>(logical.width), static_cast<int>(logical.height),
                                                   "bench d3d11", aurora::WindowStyleOptions{});
         if (gpu->is_available()) {
-            gpu->set_vsync(false); // 关 vsync：计时反映上传+绘制成本，不含 vblank 等待
+            gpu->set_vsync(false); // vsync off: timing reflects upload+draw cost, excluding vblank wait
             const int gw = static_cast<int>(logical.width);
             const int gh = static_cast<int>(logical.height);
             (void)gpu->begin_frame(gw, gh);
             gpu->painter().fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = logical },
                                      Color{ 230, 230, 235, 255 });
-            // 全量上传 + 呈现（脏区空 = 整帧）。
+            // Full upload + present (empty dirty region = whole frame).
             bench_row("d3d11_present_full", time_ms(
                                                 [&]() -> void {
                                                     gpu->set_present_dirty({});
                                                     (void)gpu->present();
                                                 },
                                                 3, 30));
-            // 增量上传：仅一条段落大小的脏带（与拖选帧同量级）。
+            // Incremental upload: only a paragraph-sized dirty band (same magnitude as a drag-select frame).
             const float s = gpu->scale_factor();
             const Rect band{ .origin = Point{ .x = 0.0f, .y = 100.0f * s },
                              .size = Size{ .width = logical.width * s, .height = 160.0f * s } };

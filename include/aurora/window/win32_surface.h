@@ -19,7 +19,7 @@
 
 #include "aurora/core/result.h"
 #include "aurora/core/types.h"
-#include "aurora/environment/media_query.h" // win32_media_query 返回 MediaQuery
+#include "aurora/environment/media_query.h"
 #include "aurora/render/painter.h"
 #include "aurora/window/surface.h"
 #include "aurora/window/win32_window.h"

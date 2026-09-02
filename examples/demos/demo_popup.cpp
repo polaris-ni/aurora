@@ -3,15 +3,15 @@
 
 auto main() -> int {
     auto popup = std::make_shared<au::Popup>(au::Node{ au::Column{
-        au::Text{ "弹出内容" },
-        au::Text{ "点击外部关闭" },
+        au::Text{ "Popup content" },
+        au::Text{ "Click outside to close" },
     } });
 
-    au::Button open_btn{ au::ButtonProps{ .label = "打开 Popup" } };
+    au::Button open_btn{ au::ButtonProps{ .label = "Open Popup" } };
     open_btn.on_click = [popup]() -> void { popup->open_at(au::Point{ .x = 140.0f, .y = 120.0f }); };
 
     au::Node root = au::Column{
-        GradientTitle{ "Popup / Overlay 控件" },
+        GradientTitle{ "Popup / Overlay widget" },
         gap(12),
         std::move(open_btn),
         au::Node{ std::shared_ptr<au::Widget>(popup) },

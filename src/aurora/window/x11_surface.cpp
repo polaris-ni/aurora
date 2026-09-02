@@ -26,8 +26,8 @@
 #include "aurora/core/log.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
-#include "aurora/render/png.h"        // write_png锛堢湡瀹炵獥鍙ｆ埅鍥撅級
-#include "aurora/window/keysym_map.h" // detail::keysym_to_keycode 鍏变韩鏄犲皠
+#include "aurora/render/png.h"
+#include "aurora/window/keysym_map.h"
 #include "aurora/window/window_state.h"
 
 namespace {

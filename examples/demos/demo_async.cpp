@@ -40,10 +40,10 @@ auto main() -> int {
     au::launch(demo_coro());
 
     au::Node root = au::Column{
-        GradientTitle{ "异步 / Async" },
+        GradientTitle{ "Async" },
         gap(12),
-        au::Text{ au::LocalizedString{ "后台任务经 au::async().with_timeout().then() 回调" } },
-        au::Text{ au::LocalizedString{ "协程：co_await au::co_async(...) 续体回主线程" } },
+        au::Text{ au::LocalizedString{ "Background task via au::async().with_timeout().then() callback" } },
+        au::Text{ au::LocalizedString{ "Coroutine: co_await au::co_async(...) continuation on main thread" } },
         au::Text{ au::TextProps{ .content = au::Reactive{ status } } },
     };
     return run_demo(Card{ std::move(root) }, "Async · Aurora Demo", 520.0f, 360.0f);

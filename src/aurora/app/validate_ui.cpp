@@ -5,7 +5,7 @@
 #include <sstream>
 
 #include "aurora/widget/serialization.h"
-#include "aurora/widget/widget.h" // AURORA_DEFAULT_MAX_WIDGET_DEPTH
+#include "aurora/widget/widget.h"
 
 namespace aurora {
 

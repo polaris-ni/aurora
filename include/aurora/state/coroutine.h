@@ -7,7 +7,7 @@
 #include <optional>
 #include <utility>
 
-#include "aurora/state/async.h" // 复用 ThreadPool / detail::invoke_safe / detail::post_to_main
+#include "aurora/state/async.h"
 
 namespace aurora {
 
@@ -52,7 +52,7 @@ template<typename T> class CoroTask {
 
         auto get_return_object() -> CoroTask { return CoroTask{ m_shared }; }
         // NOLINTNEXTLINE
-        auto initial_suspend() -> std::suspend_never { return {}; }        // 立即开始执行
+        auto initial_suspend() -> std::suspend_never { return {}; } // 立即开始执行
         // NOLINTNEXTLINE
         auto final_suspend() noexcept -> std::suspend_never { return {}; } // 结束即销毁帧
         auto return_value(T v) -> void { m_shared->m_result = Result<T>{ std::move(v) }; }

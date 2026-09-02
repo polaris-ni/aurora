@@ -58,15 +58,11 @@ namespace aurora {
  * @endcode
  */
 namespace literals {
-[[nodiscard]] constexpr auto operator""_dp(long double v) noexcept -> Length {
-    return dp(static_cast<float>(v));
-}
+[[nodiscard]] constexpr auto operator""_dp(long double v) noexcept -> Length { return dp(static_cast<float>(v)); }
 [[nodiscard]] constexpr auto operator""_dp(unsigned long long v) noexcept -> Length {
     return dp(static_cast<float>(v));
 }
-[[nodiscard]] constexpr auto operator""_px(long double v) noexcept -> Length {
-    return px(static_cast<float>(v));
-}
+[[nodiscard]] constexpr auto operator""_px(long double v) noexcept -> Length { return px(static_cast<float>(v)); }
 [[nodiscard]] constexpr auto operator""_px(unsigned long long v) noexcept -> Length {
     return px(static_cast<float>(v));
 }

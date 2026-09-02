@@ -16,7 +16,7 @@ namespace aurora {
  * 灰底、警示色边框、显示说明文字的盒子，使局部错误不致拖垮整棵 UI。
  *
  * @code
- *   auto fallback = au::Placeholder{ .message = "Button 暂不支持序列化" };
+ *   auto fallback = au::Placeholder{ .message = "Button does not support serialization yet" };
  * @endcode
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
@@ -57,9 +57,9 @@ class Placeholder : public Widget {
         return WidgetDescriptor{
             .name = "Placeholder",
             .properties = {
-                { .name = "message", .type = "string", .default_value = "\"\"", .required = false, .note = "说明文字", .json_type = "string" },
-                { .name = "background_color", .type = "Color", .default_value = "{242,242,242,255}", .required = false, .note = "背景色", .json_type = "array" },
-                { .name = "border_color", .type = "Color", .default_value = "{192,57,43,255}", .required = false, .note = "边框色", .json_type = "array" },
+                { .name = "message", .type = "string", .default_value = "\"\"", .required = false, .note = "Placeholder text", .json_type = "string" },
+                { .name = "background_color", .type = "Color", .default_value = "{242,242,242,255}", .required = false, .note = "Background color", .json_type = "array" },
+                { .name = "border_color", .type = "Color", .default_value = "{192,57,43,255}", .required = false, .note = "Border color", .json_type = "array" },
                 { .name = "text_color", .type = "Color", .default_value = "{85,85,85,255}", .required = false, .note = "文字色", .json_type = "array" },
                 { .name = "width", .type = "Length", .default_value = "auto", .required = false, .note = "", .json_type = "array" },
                 { .name = "height", .type = "Length", .default_value = "auto", .required = false, .note = "", .json_type = "array" },

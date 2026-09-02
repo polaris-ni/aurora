@@ -10,13 +10,13 @@
 #include "aurora/animation/easing.h"
 #include "aurora/animation/timeline.h"
 #include "aurora/core/types.h"
-#include "aurora/navigation/hero.h" // HeroRegistry
+#include "aurora/navigation/hero.h"
 #include "aurora/navigation/navigator.h"
-#include "aurora/navigation/route.h" // TransitionKind, RouteTransition
+#include "aurora/navigation/route.h"
 #include "aurora/navigation/transition_layer.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
-#include "aurora/widget/provider.h" // Provider<HeroRegistry>
+#include "aurora/widget/provider.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {

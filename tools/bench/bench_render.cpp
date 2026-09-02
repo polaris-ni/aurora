@@ -1,17 +1,19 @@
-// 渲染基准：用 HeadlessSurface + aurora::Painter 在多种分辨率/缩放下，
-// 对绘制原语与端到端 widget 树整帧 paint 做计时基线。
+// Rendering benchmark: use HeadlessSurface + aurora::Painter at multiple resolutions/scales to
+// produce timing baselines for drawing primitives and end-to-end widget-tree whole-frame paint.
 //
-// 说明：
-// - 本程序是「基准/诊断」工具，非单元测试，不接入 CTest（计时受环境抖动影响，无稳定断言）。
-// - 输出结构化表格（stdout，markdown），便于横向比较不同尺寸/缩放下的绘制成本。
-// - scale 经 `aurora::Painter::set_scale` 真实生效（逻辑 dp × scale → 物理像素缓冲），
-//   覆盖高 DPI 文字光栅等 scale 敏感路径，而非单纯放大分辨率。
-// - 用法：./bench_render
+// Notes:
+// - This program is a "benchmark/diagnostic" tool, not a unit test; it is not wired into CTest
+//   (timings are affected by environment jitter, no stable assertions).
+// - Output is a structured table (stdout, markdown) for cross-comparing draw cost across sizes/scales.
+// - scale takes real effect through `aurora::Painter::set_scale` (logical dp x scale -> physical pixel
+//   buffer), covering scale-sensitive paths such as high-DPI text rasterization rather than simply
+//   upscaling the resolution.
+// - Usage: ./bench_render
 //
-// 维度矩阵：逻辑尺寸 1280×720 / 1920×1080 / 2560×1440；缩放 1.0 / 1.5 / 2.0。
-// 原语场景：全屏不透明/半透明 fill_rect、线性/径向渐变、阴影、blur（多半径）、
-// composite（旋转+缩放）、圆角裁剪填充、文本（含 CJK）；端到端：widget 树整帧、
-// 单控件变脏（脏区裁剪路径）、单次 hit_test。
+// Dimension matrix: logical sizes 1280x720 / 1920x1080 / 2560x1440; scales 1.0 / 1.5 / 2.0.
+// Primitive scenes: full-screen opaque/translucent fill_rect, linear/radial gradient, shadow, blur
+// (multiple radii), composite (rotate + scale), rounded-clip fill, text (incl. CJK); end-to-end:
+// widget-tree whole frame, single-control dirtying (dirty-region clip path), single hit_test.
 #include <functional>
 #include <memory>
 #include <string>
@@ -26,7 +28,7 @@
 
 namespace {
 
-// 创建已定尺寸的 Headless 窗口（先设 scale 再 begin_frame，物理缓冲 = 逻辑 × scale）。
+// Create a fixed-size Headless window (set scale before begin_frame; physical buffer = logical x scale).
 auto make_window(int w, int h, float scale) -> au::Window {
     auto surface = std::make_unique<aurora::HeadlessSurface>();
     surface->painter().set_scale(scale);
@@ -34,14 +36,15 @@ auto make_window(int w, int h, float scale) -> au::Window {
     return aurora::Window{ std::move(surface) };
 }
 
-// 打一行表：场景 | 逻辑尺寸 | scale | 物理尺寸 | ms/帧。
+// Print one table row: scene | logical size | scale | physical size | ms/frame.
 auto report(const char *scene, const std::string &size_label, float s, int dev_w, int dev_h, double ms) -> void {
     AURORA_LOG_RAW("bench", "| ", scene, " | ", size_label, " | ", aurora::bench::ffmt(1, s), " | ", dev_w, "x", dev_h,
                    " | ", aurora::bench::ffmt(3, ms), " |\n");
 }
 
-// 端到端 widget 树：20 行 × 10 列 aurora::Chip（含标签文本），覆盖布局 + 文本 + 背景绘制。
-// out_probe 返回其中一个 chip，供「单控件变脏」场景改色标脏。
+// End-to-end widget tree: 20 rows x 10 cols of aurora::Chip (with label text), covering layout +
+// text + background drawing.
+// out_probe returns one of the chips for the "single-control dirtying" scene to change color and mark dirty.
 auto build_tree(std::shared_ptr<aurora::Chip> *out_probe) -> aurora::Node {
     std::vector<aurora::Node> rows;
     for (int r = 0; r < 20; ++r) {
@@ -59,11 +62,12 @@ auto build_tree(std::shared_ptr<aurora::Chip> *out_probe) -> aurora::Node {
     return aurora::Node{ std::make_shared<aurora::Column>(aurora::ColumnProps{ .children = std::move(rows) }) };
 }
 
-// 代表性文本（拉丁 + 数字 + CJK 中日韩），覆盖回退链与图集缓存路径。
+// Representative text (Latin + digits + CJK) covering the fallback chain and atlas-cache paths.
 constexpr auto AURORA_BENCH_TEXT = "The quick brown fox jumps 0123456789 灰狐跳过懒狗 こんにちは世界 안녕하세요";
 
-// 滚动场景内容树：`aurora::Scroll` 包一列 200 个 aurora::Chip（含标签文本），内容远高于视口，
-// 供 aurora::ScrollBenchHarness 跑确定性滚动序列（时间类门槛的本机口径）。
+// Scroll-scene content tree: `aurora::Scroll` wrapping a column of 200 aurora::Chip (with label
+// text), content far taller than the viewport, for aurora::ScrollBenchHarness to run deterministic
+// scroll sequences (local convention for time-based gates).
 auto build_scroll_tree() -> aurora::Node {
     std::vector<aurora::Node> items;
     items.reserve(200);
@@ -83,8 +87,8 @@ auto main() -> int {
     const std::vector<std::pair<int, int>> bases = { { 1280, 720 }, { 1920, 1080 }, { 2560, 1440 } };
     const std::vector scales = { 1.0f, 1.5f, 2.0f };
     constexpr int warmup = 3;
-    constexpr int fast_iters = 20; // fill/渐变/文本/裁剪等快场景
-    constexpr int slow_iters = 8;  // 阴影/blur/composite/端到端等慢场景
+    constexpr int fast_iters = 20; // fast scenes: fill/gradient/text/clip, etc.
+    constexpr int slow_iters = 8;  // slow scenes: shadow/blur/composite/end-to-end, etc.
 
     AURORA_LOG_RAW("bench", "| scene | size (logical) | scale | device | ms/frame |\n");
     AURORA_LOG_RAW("bench", "|---|---|---|---|---|\n");
@@ -97,24 +101,25 @@ auto main() -> int {
             const aurora::Rect full{ .origin = aurora::Point{ .x = 0, .y = 0 },
                                      .size = aurora::Size{ .width = w, .height = h } };
 
-            // 独立 aurora::Painter：逻辑 bw×bh，物理 ×scale（原语基准不经 Window/widget 层）。
+            // Standalone aurora::Painter: logical bw x bh, physical x scale (primitive benchmark does
+            // not go through the Window/widget layer).
             aurora::Painter p;
             p.set_scale(s);
             p.begin(bw, bh);
             const int dw = p.width();
             const int dh = p.height();
 
-            // 1) 全屏不透明 fill_rect（行级快路径）。
+            // 1) full-screen opaque fill_rect (row-level fast path).
             report("fill_opaque_full", size_label, s, dw, dh,
                    aurora::bench::time_ms([&]() -> void { p.fill_rect(full, aurora::Color{ 30, 120, 200, 255 }); },
                                           warmup, fast_iters));
 
-            // 2) 全屏半透明 fill_rect（逐像素 source-over）。
+            // 2) full-screen translucent fill_rect (per-pixel source-over).
             report("fill_alpha_full", size_label, s, dw, dh,
                    aurora::bench::time_ms([&]() -> void { p.fill_rect(full, aurora::Color{ 255, 200, 0, 128 }); },
                                           warmup, fast_iters));
 
-            // 3) 全屏线性渐变。
+            // 3) full-screen linear gradient.
             const std::vector gcolors = { aurora::Color{ 250, 250, 255, 255 }, aurora::Color{ 30, 30, 60, 255 } };
             const std::vector gstops = { 0.0f, 1.0f };
             report("linear_gradient_full", size_label, s, dw, dh,
@@ -125,7 +130,7 @@ auto main() -> int {
                        },
                        warmup, fast_iters));
 
-            // 4) 全屏径向渐变。
+            // 4) full-screen radial gradient.
             report("radial_gradient_full", size_label, s, dw, dh,
                    aurora::bench::time_ms(
                        [&]() -> void {
@@ -134,7 +139,7 @@ auto main() -> int {
                        },
                        warmup, fast_iters));
 
-            // 5) 阴影（400×300 卡片形状，blur 16）。
+            // 5) shadow (400x300 card shape, blur 16).
             constexpr aurora::Rect card{ .origin = aurora::Point{ .x = 40, .y = 40 },
                                          .size = aurora::Size{ .width = 400, .height = 300 } };
             report("shadow_card", size_label, s, dw, dh,
@@ -142,7 +147,7 @@ auto main() -> int {
                        [&]() -> void { p.draw_shadow(card, 4.0f, 8.0f, 16.0f, aurora::Color{ 0, 0, 0, 96 }); }, warmup,
                        slow_iters));
 
-            // 6) blur_region 多半径（固定 320×240 区域，毛玻璃典型量级）。
+            // 6) blur_region at multiple radii (fixed 320x240 area, typical frosted-glass magnitude).
             constexpr aurora::Rect blur_area{ .origin = aurora::Point{ .x = 60, .y = 60 },
                                               .size = aurora::Size{ .width = 320, .height = 240 } };
             report("blur_r4", size_label, s, dw, dh,
@@ -150,7 +155,8 @@ auto main() -> int {
             report("blur_r16", size_label, s, dw, dh,
                    aurora::bench::time_ms([&]() -> void { p.blur_region(blur_area, 16.0f); }, warmup, slow_iters));
 
-            // 7) composite：256×256 离屏子树旋转 30° + 缩放 1.2 合成（修饰变换路径）。
+            // 7) composite: 256x256 offscreen subtree rotated 30 deg + scaled 1.2, composited (modifier-transform
+            // path).
             aurora::Painter off;
             off.set_scale(s);
             off.begin(256, 256);
@@ -163,7 +169,7 @@ auto main() -> int {
             report("composite_rot_scale", size_label, s, dw, dh,
                    aurora::bench::time_ms([&]() -> void { p.composite(off, m); }, warmup, slow_iters));
 
-            // 8) 圆角裁剪 + 全屏填充（SDF coverage 抗锯齿裁剪路径）。
+            // 8) rounded clip + full-screen fill (SDF coverage anti-aliased clip path).
             report("rounded_clip_fill", size_label, s, dw, dh,
                    aurora::bench::time_ms(
                        [&]() -> void {
@@ -173,7 +179,7 @@ auto main() -> int {
                        },
                        warmup, fast_iters));
 
-            // 9) 文本（含 CJK）：12 行代表串（图集命中后的稳态绘制成本）。
+            // 9) text (incl. CJK): 12 lines of the representative string (steady-state draw cost after atlas hits).
             const aurora::Font tf{ .size_pt = 14.0f };
             report("text_cjk_12lines", size_label, s, dw, dh,
                    aurora::bench::time_ms(
@@ -189,12 +195,13 @@ auto main() -> int {
                        },
                        warmup, fast_iters));
 
-            // 10) 端到端：widget 树整帧 present_root（布局 + 文本 + 背景）。
+            // 10) end-to-end: widget-tree whole-frame present_root (layout + text + background).
             {
                 aurora::Window win = make_window(bw, bh, s);
                 std::shared_ptr<aurora::Chip> probe;
                 aurora::Node root = build_tree(&probe);
-                // 强制整帧重绘以测量真实绘制成本（否则静态树被 idle 跳帧优化跳过，测得 0）。
+                // Force a whole-frame redraw to measure the true draw cost (otherwise the static tree is
+                // skipped by the idle frame-drop optimization, reading 0).
                 report("tree_full_redraw", size_label, s, dw, dh,
                        aurora::bench::time_ms(
                            [&]() -> void {
@@ -203,8 +210,9 @@ auto main() -> int {
                            },
                            warmup, slow_iters));
 
-                // 11) 单控件变脏：只有一个 aurora::Chip 改背景色 → 脏区裁剪绘制路径（对比整树重绘收益）。
-                (void)win.present_root(root); // 确保接线 on_dirty 且首帧已全绘
+                // 11) single-control dirtying: only one aurora::Chip changes background color -> dirty-region
+                // clip draw path (compare against whole-tree redraw cost).
+                (void)win.present_root(root); // ensure on_dirty is wired and the first frame is fully painted
                 int flip = 0;
                 report("tree_dirty_one_chip", size_label, s, dw, dh,
                        aurora::bench::time_ms(
@@ -217,7 +225,7 @@ auto main() -> int {
                            },
                            warmup, slow_iters));
 
-                // 12) 单次 hit_test（事件命中成本，均摊 1000 次）。
+                // 12) single hit_test (event hit cost, amortized over 1000 runs).
                 aurora::Widget &rw = root.widget();
                 const aurora::Point probe_pt{ .x = w * 0.5f, .y = h * 0.5f };
                 report("hit_test_x1000", size_label, s, dw, dh,
@@ -232,8 +240,10 @@ auto main() -> int {
         }
     }
 
-    // 13) 字符级命中（拖选每个 Move 事件的成本，均摊 100 次）：行长 × scale 两维——
-    // 全屏后段落不折行、单行码点数翻倍，命中若为 O(n²)（逐边界重算前缀）则成本按平方涨。
+    // 13) character-level hit (cost of hit-testing every Move event, amortized over 100 runs): line
+    // length x scale in two dimensions -- after fullscreen the paragraph does not wrap and the
+    // single-line code-point count doubles; if the hit is O(n^2) (recomputing the prefix at each
+    // boundary) the cost grows quadratically.
     {
         const std::string seg = "The pale illimitable moonlit hills still fill the silent mill. ";
         for (const int reps : { 1, 4 }) {
@@ -257,10 +267,11 @@ auto main() -> int {
         }
     }
 
-    // 14) 滚动场景：复用 aurora::ScrollBenchHarness 跑确定性滚动序列，产出 p99 / jitter /
-    // full_redraw_frames 与 RenderCounters 基线。时间类门槛受环境抖动
-    // 影响，不进 CTest；本机趋势对比见 check_perf_gates.ps1。计数类门槛由
-    // tests/test_scroll_regression.cpp 锁进 CTest（build-prof）。
+    // 14) scroll scene: reuse aurora::ScrollBenchHarness to run a deterministic scroll sequence,
+    // producing p99 / jitter / full_redraw_frames and RenderCounters baselines. Time-based gates are
+    // affected by environment jitter and excluded from CTest; local trend comparison is in
+    // tools/check/check_perf_gates.ps1. Counter-based gates are locked into CTest by
+    // tests/test_scroll_regression.cpp (build-prof).
     {
         aurora::ScrollBenchHarness::Config cfg;
         cfg.name = "bench_render-scroll";
@@ -268,8 +279,9 @@ auto main() -> int {
                                                        aurora::Size{ .width = 1100.0f, .height = 760.0f }, cfg);
         AURORA_LOG_RAW("bench", "\n## scroll scenario (aurora::ScrollBenchHarness, 1100x760 dp, 300 frames)\n\n");
         AURORA_LOG_RAW("bench", r.to_markdown(), "\n");
-        AURORA_LOG_RAW("bench", "> 时间类门槛（G-1~G-14）受环境抖动影响，不进 CTest；本机趋势对比见 "
-                                "tools/check/check_perf_gates.ps1。\n");
+        AURORA_LOG_RAW("bench", "> time-based gates (G-1~G-14) are affected by environment jitter and excluded from "
+                                "CTest; local trend comparison see "
+                                "tools/check/check_perf_gates.ps1.\n");
     }
 
     AURORA_LOG_RAW("bench", "\n", aurora::bench::AURORA_BENCH_DISCLAIMER, "\n");

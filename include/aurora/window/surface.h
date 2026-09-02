@@ -12,8 +12,8 @@
 #include "aurora/event/event.h"
 #include "aurora/render/painter.h"
 #include "aurora/render/png.h"
-#include "aurora/window/title_bar_style.h" // TitleBarStyle：CSD 自绘标题栏样式值类型
-#include "aurora/window/window_state.h"    // WindowState / WindowMode 及纯函数
+#include "aurora/window/title_bar_style.h"
+#include "aurora/window/window_state.h"
 
 namespace aurora {
 

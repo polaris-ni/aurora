@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 # ============================================================================
-# check_version_consistency.py — 版本一致性门禁
+# check_version_consistency.py - version-consistency gate
 # ----------------------------------------------------------------------------
-# 校验点：
-#   1) [阻断] codespec/CHANGELOG.json 的 currentVersion 必须等于库的真实版本
-#      （include/aurora/core/version.h 的 AURORA_VERSION_STRING）。
-#      二者长期靠人手对齐，曾出现 CHANGELOG 领先/落后库版本的情况；不一致则
-#      发布时搬运到别处的版本号（CLI/README/文档）会基于错误基准。
-#   2) [非阻断] CHANGELOG.json 正文（如历史条目里「NNN 个独立可执行测试」等口径描述）
-#      若与仓库实际测得的数量不符，仅告警不报错（描述性文字会随重构自然过时，
-#      不应阻断 CI；例如早期写「188 个独立可执行测试」，实际 tests/*.cpp 已增至 191）。
+# Check points:
+#   1) [blocking] codespec/CHANGELOG.json's currentVersion must equal the library's true version
+#      (AURORA_VERSION_STRING in include/aurora/core/version.h).
+#      The two were long kept in sync manually and sometimes CHANGELOG led or lagged the library
+#      version; if they mismatch, version numbers copied elsewhere at release (CLI/README/docs) would
+#      be based on the wrong baseline.
+#   2) [non-blocking] CHANGELOG.json body prose (e.g. the "NNN standalone executable tests" style
+#      wording in historical entries), if it disagrees with the count actually measured in the repo,
+#      only warns, does not error (descriptive text naturally goes stale with refactors and should not
+#      block CI; e.g. an early "188 standalone executable tests" while tests/*.cpp had grown to 191).
 #
-# 退出码：仅当第 1 项不一致时为 1；否则 0（第 2 项无论是否命中均返回 0）。
+# Exit code: 1 only when item 1 mismatches; otherwise 0 (item 2 always returns 0 whether or not it fires).
 #
-# 用法：
-#   python3 tools/check_version_consistency.py [--root <aurora_root>]
+# Usage:
+#   python3 tools/check/check_version_consistency.py [--root <aurora_root>]
 # ============================================================================
 import argparse
 import glob
@@ -25,7 +27,8 @@ import sys
 
 
 def repo_root_of(path):
-    """向上查找含 CMakeLists.txt 的仓库根（脚本位于 tools/check/ 时仍可正确定位）。"""
+    """Walk up to find the repo root containing CMakeLists.txt (still resolves correctly when the
+    script lives under tools/check/)."""
     d = os.path.dirname(os.path.abspath(path))
     while d and d != os.path.dirname(d):
         if os.path.isfile(os.path.join(d, "CMakeLists.txt")):
@@ -35,11 +38,11 @@ def repo_root_of(path):
 
 
 def read_library_version(include_root):
-    """从 version.h 还原 AURORA_VERSION_STRING 的实际值。
+    """Reconstruct the actual value of AURORA_VERSION_STRING from version.h.
 
-    AURORA_VERSION_STRING 本身在 version.h 中是宏拼接
-    （AURORA_VERSION_NUMERIC "-" AURORA_VERSION_SUFFIX_STR），非字面串，
-    故改为读取 MAJOR/MINOR/PATCH 与可选 SUFFIX 后自行拼装。
+    AURORA_VERSION_STRING itself is a macro concatenation in version.h
+    (AURORA_VERSION_NUMERIC "-" AURORA_VERSION_SUFFIX_STR), not a literal string, so instead read
+    MAJOR/MINOR/PATCH and the optional SUFFIX and assemble them here.
     """
     path = os.path.join(include_root, "aurora", "core", "version.h")
     if not os.path.isfile(path):
@@ -76,21 +79,21 @@ def count_test_sources(root):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default=None, help="Aurora 仓库根目录（默认脚本上级两级）")
+    ap.add_argument("--root", default=None, help="Aurora repo root (default: two levels above this script)")
     args = ap.parse_args()
     root = args.root or repo_root_of(__file__)
 
     include_root = os.path.join(root, "include")
     changelog = os.path.join(root, "CHANGELOG.json")
 
-    # ---- 第 1 项：阻断级版本一致 ----
+    # ---- Item 1: blocking version consistency ----
     lib_ver = read_library_version(include_root)
     if lib_ver is None:
-        print(f"[ERR] 无法读取库版本：{include_root}/aurora/core/version.h", file=sys.stderr)
+        print(f"[ERR] cannot read library version: {include_root}/aurora/core/version.h", file=sys.stderr)
         return 2
 
     if not os.path.isfile(changelog):
-        print(f"[ERR] 找不到 CHANGELOG.json：{changelog}", file=sys.stderr)
+        print(f"[ERR] CHANGELOG.json not found: {changelog}", file=sys.stderr)
         return 2
 
     with open(changelog, encoding="utf-8") as f:
@@ -98,33 +101,34 @@ def main():
     try:
         changelog_doc = json.loads(changelog_text)
     except json.JSONDecodeError as e:
-        print(f"[ERR] CHANGELOG.json 解析失败：{e}", file=sys.stderr)
+        print(f"[ERR] CHANGELOG.json parse failed: {e}", file=sys.stderr)
         return 2
 
     current = changelog_doc.get("currentVersion")
     if not current:
-        print("[FAIL] CHANGELOG.json 缺少 currentVersion 字段")
+        print("[FAIL] CHANGELOG.json is missing the currentVersion field")
         return 1
     if current != lib_ver:
-        print(f"[FAIL] 版本不一致：CHANGELOG.currentVersion={current} 但库 AURORA_VERSION_STRING={lib_ver}")
+        print(f"[FAIL] version mismatch: CHANGELOG.currentVersion={current} but library AURORA_VERSION_STRING={lib_ver}")
         return 1
 
-    # ---- 第 2 项：非阻断口径告警 ----
+    # ---- Item 2: non-blocking wording warning ----
     warnings = []
-    # 匹配形如「188 个独立可执行测试」的口径描述（数字 + 个独立可执行测试）。
+    # Matches wording like "188 standalone executable tests" (digits + standalone executable tests).
+    # The pattern matches the Chinese phrase still used in CHANGELOG.json prose, e.g. "188 个独立可执行测试".
     for m in re.finditer(r"(\d+)\s*个独立可执行测试", changelog_text):
         stated = int(m.group(1))
         actual = count_test_sources(root)
         if stated != actual:
             warnings.append(
-                f"CHANGELOG.json 描述「{stated} 个独立可执行测试」，但 tests/*.cpp 实际有 {actual} 个"
+                f"CHANGELOG.json states \"{stated} standalone executable tests\", but tests/*.cpp actually has {actual}"
             )
-    # 如后续文档出现其它「N 个用例/测试」类口径，可在此追加比对规则。
+    # If other "N cases/tests"-style wording appears in docs later, add comparison rules here.
 
-    print(f"[PASS] 版本一致：currentVersion={current} == 库 {lib_ver}")
+    print(f"[PASS] versions match: currentVersion={current} == library {lib_ver}")
     if warnings:
         for w in warnings:
-            print(f"[WARN] {w}（非阻断：描述性文字随重构自然过时，请择机同步）")
+            print(f"[WARN] {w} (non-blocking: descriptive text naturally goes stale with refactors; sync when convenient)")
     return 0
 
 

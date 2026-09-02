@@ -3,7 +3,7 @@
 
 auto main() -> int {
     const auto prog = std::make_shared<au::State<double>>(0.4);
-    const auto label = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{ "进度 40%" });
+    const auto label = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{ "Progress 40%" });
 
     au::ProgressIndicator pi{ au::Reactive{ prog } };
     pi.set_color(pal::AURORA_PRIMARY);
@@ -13,7 +13,7 @@ auto main() -> int {
     pi2.set_color(pal::AURORA_OK);
 
     au::Node root = au::Column{
-        GradientTitle{ "Progress 控件" },
+        GradientTitle{ "Progress widget" },
         gap(12),
         std::move(pi),
         au::Text{ au::TextProps{ .content = au::Reactive{ label } } },

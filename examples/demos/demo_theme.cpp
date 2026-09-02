@@ -43,9 +43,9 @@ auto main() -> int {
     auto dark = au::Theme::dark();
 
     au::Node root = au::Column{
-        GradientTitle{ "主题 / Theme" },
+        GradientTitle{ "Theme" },
         gap(12),
-        au::Text{ au::LocalizedString{ "ThemeProvider 注入后控件读取 ctx.environment<Theme>()" } },
+        au::Text{ au::LocalizedString{ "After ThemeProvider injection, widgets read ctx.environment<Theme>()" } },
         gap(8),
         au::ThemeProvider{ light, ThemedBox{ "light theme" } },
         gap(8),

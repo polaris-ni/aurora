@@ -67,7 +67,7 @@ auto main() -> int {
         gap(8),
         std::move(anim),
         gap(8),
-        au::Text{ au::LocalizedString{ "最小化或切到其它窗口 → 动画暂停；回到前台 → 恢复" } },
+        au::Text{ au::LocalizedString{ "Minimize or switch to another window -> animation pauses; return to foreground -> resumes" } },
     };
 
     au::Scene scene{ std::move(root) };

@@ -25,9 +25,9 @@ auto build_root() -> au::Node {
             GradientTitle("GLFW + OpenGL"),
             BrandBadge("Software Painter -> GL Texture", pal::AURORA_PRIMARY),
             gap(4),
-            Card(au::Text("本窗口由 GlfwSurface 呈现：Painter 软件光栅，每帧上传为一张 OpenGL 纹理。")),
-            Card(au::Text("鼠标 / 键盘 / 滚轮 / 文本输入经 GLFW 翻译为 aurora::Event 后统一派发。")),
-            Card(au::Text("拖拽窗口边缘缩放：resize 事件驱动重新布局与重绘。")),
+            Card(au::Text("This window is presented by GlfwSurface: software Painter raster, uploaded as an OpenGL texture each frame.")),
+            Card(au::Text("Mouse / keyboard / wheel / text input are translated by GLFW into aurora::Event then dispatched uniformly.")),
+            Card(au::Text("Drag window edge to resize: resize event drives relayout and redraw.")),
             gap(8),
         },
         pal::AURORA_BG);
@@ -54,11 +54,11 @@ auto main() -> int {
         if (win_res) {
             win = std::move(win_res.value());
         } else {
-            AURORA_LOG_ERROR("demo", "[demo_glfw_surface] create_window 失败: ", win_res.error().message);
+            AURORA_LOG_ERROR("demo", "[demo_glfw_surface] create_window failed: ", win_res.error().message);
         }
     } catch (const std::exception &e) {
         // GlfwSurface 构造在 glfwInit/glfwCreateWindow 失败时抛 std::runtime_error。
-        AURORA_LOG_ERROR("demo", "[demo_glfw_surface] GlfwSurface 初始化异常: ", e.what());
+        AURORA_LOG_ERROR("demo", "[demo_glfw_surface] GlfwSurface init exception: ", e.what());
     }
 
     if (win) {
@@ -75,7 +75,7 @@ auto main() -> int {
             }
         });
 
-        AURORA_LOG_INFO("demo", "[demo_glfw_surface] 已弹出 GLFW 窗口（关闭窗口以结束）");
+        AURORA_LOG_INFO("demo", "[demo_glfw_surface] GLFW window shown (close window to exit)");
         win->run([&]() -> void {
             const auto t0 = std::chrono::steady_clock::now();
             (void)win->present_root(root);
@@ -88,7 +88,7 @@ auto main() -> int {
         });
         return 0;
     }
-    AURORA_LOG_WARN("demo", "[demo_glfw_surface] GLFW 后端不可用，回退无头 PNG 渲染");
+    AURORA_LOG_WARN("demo", "[demo_glfw_surface] GLFW backend unavailable, falling back to headless PNG render");
 #endif
 
     std::error_code ec;
@@ -96,9 +96,9 @@ auto main() -> int {
     au::Scene scene{ root };
     auto r = scene.render_to_png("build/demo_glfw_surface.png", 560, 380);
     if (r) {
-        AURORA_LOG_INFO("demo", "[demo_glfw_surface] 已渲染 build/demo_glfw_surface.png");
+        AURORA_LOG_INFO("demo", "[demo_glfw_surface] rendered build/demo_glfw_surface.png");
     } else {
-        AURORA_LOG_ERROR("demo", "[demo_glfw_surface] 无头渲染失败: ", r.error().message);
+        AURORA_LOG_ERROR("demo", "[demo_glfw_surface] headless render failed: ", r.error().message);
     }
     return 0;
 }

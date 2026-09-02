@@ -12,7 +12,8 @@
 namespace aurora {
 
 /**
- * @brief i18n 字符串表（运行时，specification/07-environment-modifier.md §6 国际化）：按 Locale 查 key → 模板，并格式化。
+ * @brief i18n 字符串表（运行时，specification/07-environment-modifier.md §6 国际化）：按 Locale 查 key →
+ * 模板，并格式化。
  *
  * 模板语法：
  * - 位置占位：`{0}` `{1}` … 用 args[i] 替换。

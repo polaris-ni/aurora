@@ -22,17 +22,17 @@ auto main() -> int {
 
     // 配置声明式标题栏（经 WindowChrome 驱动窗口；headless 无 chrome 时交互安全跳过）。
     au::TitleBar titlebar;
-    titlebar.set_title("Aurora 标题栏演示")
+    titlebar.set_title("Aurora TitleBar Demo")
         .set_subtitle("Borderless + WindowChrome")
-        .add_action({ .label = "设置", .on_click = []() -> void { AURORA_LOG_INFO("demo", "settings clicked"); } })
+        .add_action({ .label = "Settings", .on_click = []() -> void { AURORA_LOG_INFO("demo", "settings clicked"); } })
         .add_snap_action(
-            { .label = "左半屏(自定义)", .on_click = []() -> void { AURORA_LOG_INFO("demo", "custom snap action"); } });
+            { .label = "Left half screen (custom)", .on_click = []() -> void { AURORA_LOG_INFO("demo", "custom snap action"); } });
 
     au::Node root = au::Column{
         au::Node{ std::move(titlebar) },
         gap(12),
-        GradientTitle{ "TitleBar 标题栏" },
-        au::Text{ "窗口动作经 WindowChrome 下发；悬停最大化钮试试 Snap 弹窗" },
+        GradientTitle{ "TitleBar" },
+        au::Text{ "Window actions dispatched via WindowChrome; hover maximize button to try Snap popup" },
     };
 
     au::FocusManager fm;
@@ -45,15 +45,15 @@ auto main() -> int {
 
     auto win_res = au::create_native_window(wopts);
     if (!win_res) {
-        AURORA_LOG_ERROR("demo", "[demo_title_bar] 窗口创建失败: ", win_res.error().message, "，回退无头渲染");
+        AURORA_LOG_ERROR("demo", "[demo_title_bar] window creation failed: ", win_res.error().message, ", falling back to headless render");
         std::error_code ec;
         std::filesystem::create_directories("build", ec);
         au::Scene scene{ root };
         auto r = scene.render_to_png("build/demo_title_bar.png", static_cast<int>(w), static_cast<int>(h));
         if (r) {
-            AURORA_LOG_INFO("demo", "[demo_title_bar] 已渲染 build/demo_title_bar.png");
+            AURORA_LOG_INFO("demo", "[demo_title_bar] rendered build/demo_title_bar.png");
         } else {
-            AURORA_LOG_ERROR("demo", "[demo_title_bar] 无头渲染失败: ", r.error().message);
+            AURORA_LOG_ERROR("demo", "[demo_title_bar] headless render failed: ", r.error().message);
         }
         return 0;
     }
@@ -72,7 +72,7 @@ auto main() -> int {
         }
     });
 
-    AURORA_LOG_INFO("demo", "[demo_title_bar] 已弹出窗口（关闭窗口以结束）");
+    AURORA_LOG_INFO("demo", "[demo_title_bar] window shown (close window to exit)");
     // 与 run_demo 同款事件驱动帧循环（present_root 内部按需 begin，勿手调 begin_frame）。
     win->run([&]() -> void { (void)win->present_root(root); });
     return 0;

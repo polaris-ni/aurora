@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "aurora/widget/props_io.h" // Json
+#include "aurora/widget/props_io.h"
 
 namespace aurora {
 

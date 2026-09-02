@@ -7,11 +7,11 @@ auto main() -> int {
     auto mq = au::MediaQuery::of(2.0);
 
     au::Node content = au::Column{
-        GradientTitle{ "Provider 三件套" },
+        GradientTitle{ "Provider trio" },
         gap(12),
         au::Text{ au::LocalizedString{ "ThemeProvider / LocaleProvider / MediaQueryProvider" } },
         BrandBadge{ "brand badge", pal::AURORA_PRIMARY },
-        au::Text{ au::LocalizedString{ "scale = 2.0（来自 MediaQuery）" } },
+        au::Text{ au::LocalizedString{ "scale = 2.0 (from MediaQuery)" } },
     };
 
     au::Node root =

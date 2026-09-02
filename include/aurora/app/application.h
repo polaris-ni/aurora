@@ -18,12 +18,12 @@
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/event.h"
 #include "aurora/event/focus.h"
-#include "aurora/state/async.h" // Task::set_main_poster（跨线程回投经 request_wake 唤醒）
+#include "aurora/state/async.h"
 #include "aurora/state/state.h"
 #include "aurora/widget/widget.h"
-#include "aurora/window/frame_pacing.h" // compute_wait_timeout（帧调度决策）
+#include "aurora/window/frame_pacing.h"
 #include "aurora/window/window.h"
-#include "aurora/window/window_state.h" // WindowState / WindowMode 及纯函数
+#include "aurora/window/window_state.h"
 
 namespace aurora {
 
@@ -145,8 +145,10 @@ class Application {
     /// 唤醒睡眠中的帧循环（无运行循环时行为不变：直接在完成线程调用）。
     AURORA_MAIN_THREAD auto run() -> void {
         if (!m_window) {
-            AURORA_LOG_WARN("app", "run() 无可用 Window 后端；请用 Application(Scene, unique_ptr<Window>)（Window 由 "
-                                   "au::create_window(XxxOptions) 产出）或 Application(Scene, unique_ptr<Surface>)。");
+            AURORA_LOG_WARN(
+                "app",
+                "run() has no available Window backend; use Application(Scene, unique_ptr<Window>) (Window provided by "
+                "produced by au::create_window(XxxOptions)) or Application(Scene, unique_ptr<Surface>).");
             return;
         }
         const StrictMode prev_strict = aurora::strict_mode();
@@ -362,7 +364,8 @@ class Application {
     std::vector<std::function<void()>> m_posted;               ///< 待主线程执行的回投工作。
 };
 
-/// @brief 流式应用构建器（specification/06-app-platform.md §4）：`au::App().title("X").size(800,600).view(root).run()`。
+/// @brief 流式应用构建器（specification/06-app-platform.md
+/// §4）：`au::App().title("X").size(800,600).view(root).run()`。
 ///
 /// 与既有 `Application` 构造语义一致：`run()` 内部构造 `Application` 并进入帧循环，不破坏旧用法。
 /// 后端可由 `.window()`（预组装 Window）/ `.surface()`（自定义 Surface）指定，

@@ -43,7 +43,7 @@ struct MacOSSurface::Impl {
         (void)w;
         (void)h;
         (void)title;
-        AURORA_LOG_INFO("macos_surface", "create_window stub (macOS 环境实写)");
+        AURORA_LOG_INFO("macos_surface", "create_window stub (implement for macOS)");
         return true;
     }
 
@@ -84,7 +84,7 @@ auto MacOSSurface::present() -> Result<bool> {
     // 4. 在 NSView drawRect: 中 [ctx drawImage:cgImage inRect:viewBounds]
     // 5. CGImageRelease
     // 注意：macOS 的 NSView 可能异步 drawRect:，需要 setNeedsDisplay: 触发
-    AURORA_LOG_DEBUG("macos_surface", "present stub (macOS 环境实写)");
+    AURORA_LOG_DEBUG("macos_surface", "present stub (implement for macOS)");
     return true;
 }
 

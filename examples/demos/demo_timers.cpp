@@ -64,7 +64,7 @@ static auto build_auto_reveal() -> au::Node {
 
 static auto build_root() -> au::Node {
     return au::Column{
-        GradientTitle{ "定时任务 / Timer" }, gap(12), build_clock(), build_countdown(), build_auto_reveal(),
+        GradientTitle{ "Timer" }, gap(12), build_clock(), build_countdown(), build_auto_reveal(),
     };
 }
 

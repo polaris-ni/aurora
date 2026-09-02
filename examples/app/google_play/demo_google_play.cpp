@@ -131,7 +131,7 @@ auto main() -> int {
         });
         if (inspector->start(6280)) {
             AURORA_LOG_RAW("demo", "InspectorServer: http://127.0.0.1:6280",
-                           "  (tree/perf/snapshot/pick/flags 实时检视)\n");
+                           "  (tree/perf/snapshot/pick/flags live inspection)\n");
         } else {
             AURORA_LOG_RAW("demo", "InspectorServer: failed to start on port 6280\n");
         }

@@ -29,7 +29,7 @@ auto main() -> int {
     add.on_click = [todos]() -> void { todos->dispatch(au::Action{ "add", std::string{ "gamma" } }); };
 
     au::Node root = au::Column{
-        GradientTitle{ "State / 响应式" },
+        GradientTitle{ "State / Reactivity" },
         gap(12),
         au::Text{ au::LocalizedString{ status.get() } },
         std::move(up),

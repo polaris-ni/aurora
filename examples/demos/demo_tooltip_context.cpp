@@ -3,20 +3,20 @@
 
 auto main() -> int {
     // Tooltip：悬停 500ms 显示提示
-    au::Text hover_me{ "悬停我 500ms 看提示" };
-    hover_me.modifier.set(au::Modifier{}.tooltip("这是 Tooltip 提示气泡"));
+    au::Text hover_me{ "Hover me 500ms for tooltip" };
+    hover_me.modifier.set(au::Modifier{}.tooltip("This is a Tooltip bubble"));
 
     // ContextMenu：右键弹出菜单
-    au::Text right_click_me{ "右键我弹出菜单" };
+    au::Text right_click_me{ "Right-click me for context menu" };
     right_click_me.modifier.set(au::Modifier{}.context_menu({
-        au::MenuItem{ "复制", []() -> void { AURORA_LOG_INFO("demo", "复制"); } },
-        au::MenuItem{ "粘贴", []() -> void { AURORA_LOG_INFO("demo", "粘贴"); } },
+        au::MenuItem{ "Copy", []() -> void { AURORA_LOG_INFO("demo", "Copy"); } },
+        au::MenuItem{ "Paste", []() -> void { AURORA_LOG_INFO("demo", "Paste"); } },
         au::MenuItem::separator_item(),
-        au::MenuItem{ "删除", []() -> void { AURORA_LOG_INFO("demo", "删除"); } },
+        au::MenuItem{ "Delete", []() -> void { AURORA_LOG_INFO("demo", "Delete"); } },
     }));
 
     // blur：内容模糊
-    au::Text blurred{ "这段文字被模糊了" };
+    au::Text blurred{ "This text is blurred" };
     blurred.modifier.set(au::Modifier{}.background(au::Color(255, 235, 190, 255)).blur(2.0f));
 
     au::Node root = au::Column{

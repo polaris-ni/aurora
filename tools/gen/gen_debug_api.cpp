@@ -1,20 +1,24 @@
 // ============================================================================
-// gen_debug_api — Aurora 调试能力 API 生成器
+// gen_debug_api — Aurora debug-capability API generator
 // ----------------------------------------------------------------------------
-// 读取 codespec/debug_api.toml（单一声明源），产出 aurora_api.json 的 "debug" 段。
+// Reads codespec/debug_api.toml (single declaration source) and produces the
+// "debug" section of aurora_api.json.
 //
-// 行为：merge-only —— 读取现有 aurora_api.json 的全部其它段（widgets / enums /
-//       error_codes / layout_rules / state_patterns / ...），仅写入 / 覆盖 "debug"
-//       段后写回原文件。这样无论本工具与 gen_api_tools / gen_error_codes 以何种顺序运行，
-//       都不会相互清掉对方的段。
+// Behavior: merge-only — reads all other sections of the existing aurora_api.json
+//       (widgets / enums / error_codes / layout_rules / state_patterns / ...),
+//       writes/overwrites only the "debug" section, then writes the file back.
+//       This way, no matter what order this tool, gen_api_tools and gen_error_codes
+//       run in, they never wipe each other's sections.
 //
-// 截断防护（对应 gen_error_codes 的历史陷阱）：
-//   - 现有 aurora_api.json 打开失败（文件缺失） → 视为首次生成，从空对象起；
-//   - 现有文件解析失败（疑似损坏 / 截断） → 报错退出，**绝不写空对象**，
-//     以免覆盖掉好的其它段（widgets/enums/error_codes 等永久丢失）。
+// Truncation protection (mirroring the historical pitfall of gen_error_codes):
+//   - failure to open the existing aurora_api.json (missing file) → treat as first
+//     generation, start from an empty object;
+//   - failure to parse the existing file (suspected corruption / truncation) →
+//     report the error and exit, **never write an empty object**, so as not to
+//     overwrite good sections (widgets/enums/error_codes would be lost forever).
 //
-// 注意：本工具为构建期生成器，不链接 Aurora 库，不依赖 Aurora 头文件，
-//       仅使用标准库与 third_party/nlohmann/json.hpp。
+// Note: this tool is a build-time generator; it does not link the Aurora library and does not
+//       depend on Aurora headers — it only uses the standard library and third_party/nlohmann/json.hpp.
 // ============================================================================
 #include <fstream>
 #include <iostream>
@@ -26,14 +30,15 @@
 #include "api_json_merge.h"
 #include "toml_lines.h"
 
-// 版本单一事实来源（AURORA_VERSION_STRING）。本生成器不链接 aurora，仅借用此纯宏头
-// （不引入任何链接符号）；未注入版本宏时回退到 version.h 内置默认值，与库当前版本一致。
+// Single source of truth for the version (AURORA_VERSION_STRING). This generator does not link aurora;
+// it only borrows this macro-only header (introducing no link symbols); when the version macros are not
+// injected it falls back to the built-in default in version.h, consistent with the current library version.
 #include "aurora/core/version.h"
 
 namespace {
 
-// 本工具为构建期生成器，不链接 Aurora 库，故无法使用 aurora 的 Logger。
-// 所有诊断输出统一经由 err() 收口（一处定义、统一前缀）。
+// This tool is a build-time generator and does not link Aurora, so aurora's Logger is unavailable.
+// All diagnostic output is funneled through err() (single definition, uniform prefix).
 auto err(const std::string &msg) -> void { std::cerr << "[gen_debug_api] " << msg << "\n"; }
 
 struct DebugEntry {
@@ -45,19 +50,19 @@ struct DebugEntry {
     std::string header;
 };
 
-// trim / parse_kv / unquote 由 toml_lines.h 提供（与 gen_error_codes 共用）。
+// trim / parse_kv / unquote are provided by toml_lines.h (shared with gen_error_codes).
 
 // NOLINTNEXTLINE(*-function-cognitive-complexity)
 auto parse_toml(const std::string &path, std::vector<DebugEntry> &out) -> bool {
     std::ifstream in(path);
     if (!in) {
-        err("无法打开输入文件: " + path);
+        err("cannot open input file: " + path);
         return false;
     }
     std::string line;
     DebugEntry *cur = nullptr;
     while (std::getline(in, line)) {
-        std::string t = trim(line);
+        const std::string t = trim(line);
         if (t.empty() || t[0] == '#') {
             continue;
         }
@@ -66,7 +71,7 @@ auto parse_toml(const std::string &path, std::vector<DebugEntry> &out) -> bool {
             cur = &out.back();
             continue;
         }
-        if (!t.empty() && t[0] == '[') { // 顶层表，忽略
+        if (!t.empty() && t[0] == '[') { // top-level table, ignored
             cur = nullptr;
             continue;
         }
@@ -90,7 +95,7 @@ auto parse_toml(const std::string &path, std::vector<DebugEntry> &out) -> bool {
     }
     for (auto &e : out) {
         if (e.name.empty() || e.signature.empty()) {
-            err("调试函数条目缺少 name/signature");
+            err("debug function entry missing name/signature");
             return false;
         }
         if (e.since.empty()) {
@@ -122,7 +127,8 @@ auto gen_debug_json(const std::vector<DebugEntry> &entries) -> nlohmann::json {
 
 } // namespace
 
-// NOLINTNEXTLINE(bugprone-exception-escape) — main 错误经 err() 打印 + return 退出；静态分析对上游 parse_toml / merge_api_json_section 保守
+// NOLINTNEXTLINE(bugprone-exception-escape) — main errors are printed via err() then return; static analysis is
+// conservative about upstream parse_toml / merge_api_json_section
 auto main(int argc, char **argv) -> int {
     // NOLINTBEGIN(*-pro-bounds-pointer-arithmetic)
     const std::string toml = (argc > 1) ? argv[1] : "codespec/debug_api.toml";
@@ -131,15 +137,16 @@ auto main(int argc, char **argv) -> int {
 
     std::vector<DebugEntry> entries;
     if (!parse_toml(toml, entries) || entries.empty()) {
-        err("解析失败或为空");
+        err("parse failed or empty");
         return 1;
     }
 
-    // 读取现有文件（merge-only）；损坏则中止，避免截断其它段。语义由 api_json_merge.h 提供。
+    // Read the existing file (merge-only); abort if corrupt to avoid truncating other sections.
+    // Semantics are provided by api_json_merge.h.
     if (!aurora::tools::merge_api_json_section(api, "debug", gen_debug_json(entries), err)) {
         return 1;
     }
 
-    err("生成完成：" + std::to_string(entries.size()) + " 个调试 API (" + api + ")");
+    err("generation complete: " + std::to_string(entries.size()) + " debug APIs (" + api + ")");
     return 0;
 }

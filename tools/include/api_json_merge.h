@@ -1,16 +1,20 @@
 // ============================================================================
-// api_json_merge.h — aurora_api.json 的「段合并」原语（merge-only）
+// api_json_merge.h — aurora_api.json "section merge" primitive (merge-only)
 // ----------------------------------------------------------------------------
-// 仅依赖标准库与 nlohmann/json，零 Aurora 依赖。由 gen_error_codes / gen_debug_api 复用，
-// 避免「读取现有文件 → 若损坏则中止（绝不截断其它段）→ 写入指定段 → 整体写回」两份重复实现。
+// Depends only on the standard library and nlohmann/json, zero Aurora dependencies. Reused by
+// gen_error_codes / gen_debug_api to avoid two duplicate implementations of "read existing file →
+// abort if corrupt (never truncate other sections) → write the target section → write the whole
+// file back".
 //
-// 行为契约（与抽取前逐字一致）：
-//   - 文件缺失 → 视为首次生成，从空对象起（无其它段可保护）；
-//   - 文件解析失败（疑似损坏 / 截断）→ 报告错误并返回 false，绝不写空对象覆盖其它段；
-//   - 解析结果非对象 → 报告错误并返回 false；
-//   - 否则 doc[section] = value 后以 dump(2) 整体写回。
+// Behavior contract (verbatim as before extraction):
+//   - file missing → treat as first generation, start from an empty object (no other sections to protect);
+//   - file parse failure (suspected corruption / truncation) → report an error and return false,
+//     never write an empty object over other sections;
+//   - parse result is not an object → report an error and return false;
+//   - otherwise set doc[section] = value and write the whole document back with dump(2).
 //
-// report 为调用方的诊断收口函数（如各生成器的 err()），错误信息前缀由调用方决定。
+// report is the caller's diagnostic funnel (e.g. each generator's err()); the error message prefix
+// is decided by the caller.
 // ============================================================================
 #pragma once
 
@@ -34,7 +38,7 @@ inline auto merge_api_json_section(const std::string &path, const std::string &s
                 return false;
             }
         } else {
-            // 文件缺失：首次生成，从空对象起（无其它段可保护）。
+            // file missing: first generation, start from an empty object (no other sections to protect).
             doc = nlohmann::json::object();
         }
     }

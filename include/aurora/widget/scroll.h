@@ -9,7 +9,7 @@
 #include "aurora/core/transform.h"
 #include "aurora/event/event.h"
 #include "aurora/perf/counters.h"
-#include "aurora/render/detail/paint_timing.h" // detail::paint_timing().scroll_redraws/blits
+#include "aurora/render/detail/paint_timing.h"
 #include "aurora/render/painter.h"
 #include "aurora/widget/widget.h"
 

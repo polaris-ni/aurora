@@ -38,9 +38,10 @@ namespace aurora {
     std::vector<Error> errs;
     std::function<void(const Node &, int)> walk = [&](const Node &n, int depth) -> void {
         if (depth > max_depth) {
-            errs.push_back(make_error(ErrorCode::ValidationTreeTooDeep,
-                                      "UI 树深度 " + std::to_string(depth) + " 超过上限 " + std::to_string(max_depth),
-                                      "减少嵌套层级，或提高 validate 的 max_depth 参数"));
+            errs.push_back(
+                make_error(ErrorCode::ValidationTreeTooDeep,
+                           "UI tree depth " + std::to_string(depth) + " exceeds limit " + std::to_string(max_depth),
+                           "Reduce nesting level, or increase the max_depth parameter of validate"));
             return;
         }
 
@@ -49,14 +50,16 @@ namespace aurora {
         // 比对枚举而非字符串字面量：slug 拼写漂移（曾误写为 "unknown-widget-type"）会让
         // 未注册控件被静默判为合法。code_enum 由 g_error_table 表驱动注入，无拼写风险。
         if (!made && made.error().code_enum == ErrorCode::WidgetUnknownType) {
-            errs.push_back(make_error(ErrorCode::ValidationUnknownWidget, "未知控件类型 '" + t + "'",
-                                      "检查类型名拼写，或先以 WidgetRegistry::instance().register_factory 注册该控件"));
+            errs.push_back(make_error(ErrorCode::ValidationUnknownWidget, "Unknown widget type '" + t + "'",
+                                      "Check type name spelling, or register the widget with "
+                                      "WidgetRegistry::instance().register_factory first"));
         }
 
         for (const Node &c : n.widget().child_nodes()) {
             if (!c) {
-                errs.push_back(make_error(ErrorCode::ValidationNullChild, "控件 '" + t + "' 包含空子节点（nullptr）",
-                                          "使用条件构造（如 Show）或确保 children 中无 nullptr"));
+                errs.push_back(make_error(
+                    ErrorCode::ValidationNullChild, "Widget '" + t + "' contains a null child node (nullptr)",
+                    "Use conditional construction (e.g. Show) or ensure children contains no nullptr"));
                 continue;
             }
             walk(c, depth + 1);

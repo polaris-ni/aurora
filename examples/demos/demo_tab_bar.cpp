@@ -3,16 +3,16 @@
 
 auto main() -> int {
     std::vector<au::Tab> tabs;
-    tabs.push_back(au::Tab{ .label = "首页", .content = au::Node{ au::Text{ "首页内容" } }, .closable = false });
-    tabs.push_back(au::Tab{ .label = "编辑", .content = au::Node{ au::Text{ "编辑内容" } }, .closable = false });
+    tabs.push_back(au::Tab{ .label = "Home", .content = au::Node{ au::Text{ "Home content" } }, .closable = false });
+    tabs.push_back(au::Tab{ .label = "Edit", .content = au::Node{ au::Text{ "Edit content" } }, .closable = false });
     tabs.push_back(
-        au::Tab{ .label = "预览", .content = au::Node{ au::Text{ "预览内容（可关闭）" } }, .closable = true });
+        au::Tab{ .label = "Preview", .content = au::Node{ au::Text{ "Preview content (closable)" } }, .closable = true });
 
     au::TabBar tab_bar{ std::move(tabs) };
-    tab_bar.set_on_change([](int i) -> void { AURORA_LOG_INFO("demo", "切换到标签 ", i); });
+    tab_bar.set_on_change([](int i) -> void { AURORA_LOG_INFO("demo", "Switch to tab ", i); });
 
     au::Node root = au::Column{
-        GradientTitle{ "TabBar 控件" },
+        GradientTitle{ "TabBar widget" },
         gap(12),
         std::move(tab_bar),
     };

@@ -8,12 +8,12 @@ auto main() -> int {
     toggle.on_click = [visible]() -> void { visible->set(!visible->get()); };
 
     au::Node root = au::Column{
-        GradientTitle{ "Show 控件" },
+        GradientTitle{ "Show widget" },
         gap(12),
         std::move(toggle),
         gap(8),
         au::Show{ visible, BrandBadge{ "promo banner", pal::AURORA_ACCENT } },
-        au::Text{ au::LocalizedString{ "点击按钮显隐上方徽章" } },
+        au::Text{ au::LocalizedString{ "Click button to show/hide badge above" } },
     };
     return run_demo(Card{ std::move(root) }, "Show · Aurora Demo", 520.0f, 380.0f);
 }

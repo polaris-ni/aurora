@@ -2,9 +2,9 @@
 #include "demo_common.h"
 
 auto main() -> int {
-    au::Button run_btn{ au::ButtonProps{ .label = "运行" } };
+    au::Button run_btn{ au::ButtonProps{ .label = "Run" } };
     run_btn.on_click = []() -> void { AURORA_LOG_INFO("demo", "Run"); };
-    au::Button stop_btn{ au::ButtonProps{ .label = "停止" } };
+    au::Button stop_btn{ au::ButtonProps{ .label = "Stop" } };
 
     std::vector<au::Node> tool_kids;
     tool_kids.emplace_back(std::move(run_btn));
@@ -12,7 +12,7 @@ auto main() -> int {
     au::ToolBar toolbar{ std::move(tool_kids) };
 
     std::vector<au::Node> status_kids;
-    status_kids.emplace_back(au::Text{ "就绪" });
+    status_kids.emplace_back(au::Text{ "Ready" });
     status_kids.emplace_back(au::Text{ "UTF-8" });
     status_kids.emplace_back(au::Text{ "Ln 1, Col 1" }); // 尾项自动右对齐
     au::StatusBar statusbar{ std::move(status_kids) };
@@ -21,7 +21,7 @@ auto main() -> int {
         std::move(toolbar),
         gap(8),
         GradientTitle{ "ToolBar / StatusBar" },
-        au::Text{ "顶部工具栏 + 底部状态栏" },
+        au::Text{ "Top toolbar + bottom status bar" },
         gap(8),
         std::move(statusbar),
     };

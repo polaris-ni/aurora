@@ -3,7 +3,7 @@
 #include <functional>
 #include <utility>
 
-#include "aurora/widget/descriptor.h" // WidgetDescriptor / PropDescriptor（自描述）
+#include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {

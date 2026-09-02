@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "aurora/core/types.h" // Rect
+#include "aurora/core/types.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {

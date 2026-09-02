@@ -112,9 +112,9 @@ auto ProgressDialog::describe_static() -> WidgetDescriptor {
     return WidgetDescriptor{
         .name = "ProgressDialog",
         .properties = {
-            { .name = "message", .type = "string", .default_value = "\"\"", .required = false, .note = "消息文本", .json_type = "string" },
-            { .name = "progress", .type = "float", .default_value = "-1", .required = false, .note = "进度(0..1，-1=不确定)", .json_type = "number", .enum_values = {}, .min_value = "-1", .max_value = "1" },
-            { .name = "open", .type = "bool", .default_value = "false", .required = false, .note = "是否显示", .json_type = "boolean" },
+            { .name = "message", .type = "string", .default_value = "\"\"", .required = false, .note = "Message text", .json_type = "string" },
+            { .name = "progress", .type = "float", .default_value = "-1", .required = false, .note = "Progress (0..1, -1=indeterminate)", .json_type = "number", .enum_values = {}, .min_value = "-1", .max_value = "1" },
+            { .name = "open", .type = "bool", .default_value = "false", .required = false, .note = "Whether to show", .json_type = "boolean" },
             { .name = "cancellable", .type = "bool", .default_value = "true", .required = false, .note = "是否可取消", .json_type = "boolean" },
         },
         .events = { "on_cancel" },

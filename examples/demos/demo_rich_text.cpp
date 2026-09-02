@@ -10,14 +10,14 @@
 auto main() -> int {
     using au::TextSpan;
     auto spans = std::vector{
-        TextSpan{ .text = au::LocalizedString{ "富文本标题 " },
+        TextSpan{ .text = au::LocalizedString{ "Rich text title " },
                   .font = au::Font{ .size_pt = 20.0f, .weight = 700 },
                   .color = pal::AURORA_PRIMARY },
-        TextSpan{ .text = au::LocalizedString{ "普通正文，支持 " }, .font = au::Font{}, .color = pal::AURORA_TEXT },
-        TextSpan{ .text = au::LocalizedString{ "红色强调" },
+        TextSpan{ .text = au::LocalizedString{ "Normal body text, supports " }, .font = au::Font{}, .color = pal::AURORA_TEXT },
+        TextSpan{ .text = au::LocalizedString{ "red emphasis" },
                   .font = au::Font{ .size_pt = 16.0f },
                   .color = au::Color{ 200, 0, 0, 255 } },
-        TextSpan{ .text = au::LocalizedString{ " 与静音色收尾。" },
+        TextSpan{ .text = au::LocalizedString{ " and muted color at the end." },
                   .font = au::Font{ .size_pt = 14.0f },
                   .color = pal::AURORA_MUTED },
     };
@@ -25,7 +25,7 @@ auto main() -> int {
     au::RichText rt{ au::Reactive{ state } };
 
     au::Node root = au::Column{
-        GradientTitle{ "RichText 控件" },
+        GradientTitle{ "RichText widget" },
         gap(12),
         std::move(rt),
     };

@@ -1,15 +1,17 @@
-// 滚动性能基准：用 `ScrollBenchHarness` 在 Headless 下
-// 对「真实业务树」跑确定性滚动序列，产出 p99 / jitter / full_redraw_frames 与
-// RenderCounters 基线，供「优化前 / 优化后」对照表取数。
+// Scroll performance benchmark: use `ScrollBenchHarness` under Headless to run deterministic scroll
+// sequences against a "real workload tree", producing p99 / jitter / full_redraw_frames and
+// RenderCounters baselines for "before-optimization / after-optimization" comparison tables.
 //
-// 说明：
-// - 本程序是「基准/诊断」工具，非单元测试，不接入 CTest（时间读数受环境抖动影响）。
-//   但其中的**计数器读数在 Headless 下是确定的**，回归断言由 tests/test_scroll_bench.cpp 承担。
-// - 计数器需 `AURORA_ENABLE_PROFILING=ON` 的构建才有值；时间读数应在 Release + PROFILING=OFF
-//   下采集（见 codespec/BUILD_OPTIONS.md）。
-// - 输出经 AURORA_LOG_RAW 走 stdout（项目硬规则第 8 条：程序产品输出用 raw 通道）。
+// Notes:
+// - This program is a "benchmark/diagnostic" tool, not a unit test; it is not wired into CTest
+//   (timings are affected by environment jitter). But the counter readings are deterministic under
+//   Headless; the regression assertions are owned by tests/test_scroll_bench.cpp.
+// - Counters only have values in a build with `AURORA_ENABLE_PROFILING=ON`; timings should be
+//   collected in Release + PROFILING=OFF (see codespec/BUILD_OPTIONS.md).
+// - Output goes to stdout via AURORA_LOG_RAW (project hard rule #8: program product output uses the
+//   raw channel).
 //
-// 用法：
+// Usage:
 //   bench_scroll [--scene google_play|synthetic|lazy|grid|all] [--frames N] [--warmup N]
 //                [--delta DP] [--scale X] [--fling] [--repeat N] [--format md|json|csv]
 #include <algorithm>
@@ -47,8 +49,10 @@ using aurora::Size;
 
 namespace {
 
-/// @brief 合成对照场景：与 demo 解耦的稳定长列表，供无 demo 环境/CI 做趋势对照。
-/// 200 行 × 6 个 Chip，内容总高远超视口，滚动全程都在真实内容上。
+/// @brief Synthetic control scene: a stable long list decoupled from the demo, for trend comparison
+/// in demo-less environments / CI.
+/// 200 rows x 6 Chips; total content height far exceeds the viewport, so the whole scroll runs on
+/// real content.
 [[nodiscard]] auto build_synthetic_tree() -> Node {
     std::vector<Node> rows;
     rows.reserve(200);
@@ -66,16 +70,19 @@ namespace {
     return Node{ std::make_shared<Scroll>(ScrollProps{ .child = Node{ std::move(col) } }) };
 }
 
-/// @brief 真实业务场景：`demo_google_play` 的内容树（AppShell，不含 NavigatorHost 转场）。
-/// 静态持有 Reactive 与 repo 引用，保证节点在 harness 运行期间存活。
+/// @brief Real-world scenario: the content tree of `demo_google_play` (AppShell, without the
+/// NavigatorHost transition).
+/// Holds Reactive and repo references statically to keep the nodes alive for the duration of the
+/// harness run.
 [[nodiscard]] auto build_google_play_tree(Reactive<bool> &dark) -> Node {
     auto &repo = gp::repository();
-    auto on_open = [](const std::string &) -> void {}; // 基准不做导航跳转
+    auto on_open = [](const std::string &) -> void {}; // benchmark does not navigate
     return Node{ std::make_shared<gp::ui::AppShell>(&repo, on_open, &dark) };
 }
 
-/// @brief L5-C 隔离场景：LazyList 自驱滚动路径（不经外层 Scroll 缓冲）。
-/// 2000 行 × 单 Chip 卡片，虚拟化只实例化可见窗口，滚动全程都在真实内容上。
+/// @brief L5-C isolated scenario: LazyList self-driven scroll path (not via the outer Scroll buffer).
+/// 2000 rows x single-Chip cards; virtualization only instantiates the visible window, so the whole
+/// scroll runs on real content.
 [[nodiscard]] auto build_lazy_tree() -> Node {
     constexpr int items = 2000;
     auto builder = [](int i) -> Node {
@@ -86,11 +93,14 @@ namespace {
     return Node{ std::make_shared<LazyList>(items, builder, 48.0f) };
 }
 
-/// @brief L5-C 场景：GridView 自驱滚动路径（根级 GridView，不经外层 Scroll）。
-/// GridView 作为根级可滚动控件接收窗口有限约束，虚拟化只实例化可见行，滚动全程都在真实内容上。
-/// 注：GridView 在宽松（infinite）约束下会塌缩到 320×480 回退尺寸，故不可包在 Scroll 内测
-/// （那会让它失去可滚内容）；这里的根级用法与 demo_google_play 的 make_grid 一致。
-/// 2000 项 × 4 列 × 单 Chip 卡片。
+/// @brief L5-C scenario: GridView self-driven scroll path (root-level GridView, not via the outer
+/// Scroll).
+/// As a root-level scrollable control, GridView receives a window-limited constraint; virtualization
+/// only instantiates the visible rows, so the whole scroll runs on real content.
+/// Note: under a loose (infinite) constraint GridView collapses to a 320x480 fallback size, so it
+/// must not be wrapped in a Scroll for measurement (that would strip it of scrollable content); the
+/// root-level usage here matches demo_google_play's make_grid.
+/// 2000 items x 4 columns x single-Chip cards.
 [[nodiscard]] auto build_grid_tree() -> Node {
     constexpr int items = 2000;
     constexpr int cols = 4;
@@ -102,7 +112,7 @@ namespace {
     return Node{ std::make_shared<GridView>(items, cols, builder, 96.0f) };
 }
 
-/// @brief 打一段场景报告（按 format 选择渲染形态）。
+/// @brief Emit a scene report (rendering form selected by format).
 auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &csv_header_written) -> void {
     if (format == "json") {
         AURORA_LOG_RAW("bench", r.to_json(), "\n");
@@ -117,14 +127,16 @@ auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &
     }
 }
 
-/// @brief 取下一个参数值，缺失时返回默认值（不抛异常，工具容错优先）。
+/// @brief Fetch the next argument value, returning a default when missing (never throws; tool
+/// tolerates faults first).
 [[nodiscard]] auto arg_value(const std::vector<std::string_view> &args, int i, std::string_view fallback)
     -> std::string {
     const auto next = static_cast<std::size_t>(i) + 1U;
     return (next < args.size()) ? std::string{ args[next] } : std::string{ fallback };
 }
 
-/// @brief 安全解析整数参数（不抛异常，整串消耗才生效）。
+/// @brief Safely parse an integer argument (never throws; only the whole string being consumed is
+/// accepted).
 [[nodiscard]] auto parse_int(const std::string &s, int fallback) -> int {
     char *end = nullptr;
     const long v = std::strtol(s.c_str(), &end, 10);
@@ -138,7 +150,8 @@ auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &
     return static_cast<int>(v);
 }
 
-/// @brief 安全解析浮点参数（不抛异常，整串消耗才生效）。
+/// @brief Safely parse a float argument (never throws; only the whole string being consumed is
+/// accepted).
 [[nodiscard]] auto parse_float(const std::string &s, float fallback) -> float {
     char *end = nullptr;
     const double v = std::strtod(s.c_str(), &end);
@@ -148,23 +161,30 @@ auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &
     return static_cast<float>(v);
 }
 
-/// @brief 重复采样取最优（p99 最小的一次）。
+/// @brief Repeat sampling and take the best (the lowest p99).
 ///
-/// **为什么取 min 而不是平均**：同配置 300 帧实测，`avg`/`p50` 稳定在 ±2%，但 p99 波动
-/// ±6~11%、`worst` 可达 ±65%。这些噪声是**加性**的——OS 抢占、缺页、热节流只会让帧变慢，
-/// 不会让它变快。所以多次采样中最快的一次最接近「这台机器上真实的渲染成本」；取平均等于
-/// 把噪声写进基线，门槛会随机器负载漂移。计数器是确定性的，取哪一次都一样。
+/// **Why take min instead of average**: measured on 300 frames at the same config, `avg`/`p50`
+/// stay within +/-2%, but p99 fluctuates +/-6~11% and `worst` can reach +/-65%. This noise is
+/// **additive** -- OS preemption, page faults, and thermal throttling only make frames slower,
+/// never faster. So the fastest sample across multiple runs is closest to "the true rendering cost
+/// on this machine"; averaging writes the noise into the baseline and the threshold drifts with
+/// machine load. The counters are deterministic, so any single run is equivalent.
 ///
-/// **已知偏置（务必知情）**：本函数在**同一进程内**重复。实测同进程第 1 次 p99 ≈ 11.8ms，
-/// 第 2/3 次稳定在 ≈ 18.7ms——27MB 级离屏缓冲反复申请/释放造成的堆碎片与缺页开销，与被测
-/// 渲染逻辑无关。min 统计量恰好会选中第 1 次（最干净的样本），所以结论方向是**保守**的
-/// （只会高报耗时，不会低报）。要拿严格可比的时间读数，请用**独立进程**多次调用取最小值：
-/// `for i in 1 2 3; do bench_scroll --scene X --format csv; done`（独立进程取数协议）。
+/// **Known bias (must be aware)**: this function repeats **within the same process**. Measured in
+/// the same process, the 1st p99 is ~11.8ms while the 2nd/3rd stabilize at ~18.7ms -- a 27MB-class
+/// offscreen buffer being repeatedly allocated/freed causes heap fragmentation and page-fault
+/// overhead unrelated to the rendering logic under test. The min statistic happens to select the 1st
+/// run (the cleanest sample), so the conclusion direction is **conservative** (it only over-reports
+/// cost, never under-reports). To get strictly comparable timings, call it multiple times in
+/// **separate processes** and take the minimum:
+/// `for i in 1 2 3; do bench_scroll --scene X --format csv; done` (separate-process sampling
+/// protocol).
 ///
-/// @param build    每次重跑都重建一棵全新的树（避免上次采样残留的缓存/动画状态影响下一次）
-/// @param viewport 视口尺寸（逻辑 dp），与目标窗口分辨率一致
-/// @param cfg      滚动配置：帧数、warmup、delta、fling 等
-/// @param repeat   重复次数，< 1 视为 1
+/// @param build    rebuild a brand-new tree on every rerun (avoid leftover cache/animation state
+///                from the previous sample affecting the next)
+/// @param viewport viewport size (logical dp), matching the target window resolution
+/// @param cfg      scroll config: frames, warmup, delta, fling, etc.
+/// @param repeat   repeat count; < 1 is treated as 1
 [[nodiscard]] auto run_best_of(const std::function<Node()> &build, Size viewport, const ScrollBenchHarness::Config &cfg,
                                int repeat) -> std::pair<ScrollBenchHarness::Result, std::string> {
     const int n = repeat > 0 ? repeat : 1;
@@ -185,10 +205,11 @@ auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &
         const double lo = sorted.front();
         const double hi = sorted.back();
         const double mid = sorted[sorted.size() / 2];
-        note = "> best-of-" + std::to_string(n) + "：p99 跨次 " + std::to_string(lo) + " / " + std::to_string(mid) +
-               " / " + std::to_string(hi) +
-               " ms（min / median / max），下表取最小的一次。\n"
-               "> 注意同进程重复存在系统性偏置（后续次因堆碎片偏慢），严格取数请用独立进程多次调用。\n\n";
+        note = "> best-of-" + std::to_string(n) + ": p99 across runs " + std::to_string(lo) + " / " +
+               std::to_string(mid) + " / " + std::to_string(hi) +
+               " ms (min / median / max); the table below takes the lowest run.\n"
+               "> Note: same-process repetition has a systematic bias (later runs are slower due to heap "
+               "fragmentation); for strict sampling, call it multiple times in separate processes.\n\n";
     }
     return { std::move(best), std::move(note) };
 }
@@ -238,19 +259,23 @@ auto main(int argc, char **argv) -> int { // NOLINT(*-function-cognitive-complex
                          "                    [--delta DP] [--scale X] [--fling] [--repeat N]\n"
                          "                    [--format md|json|csv]\n"
                          "\n"
-                         "  --scene    google_play / synthetic / lazy / grid / all（默认 all）\n"
-                         "              lazy / grid 为 L5-C 隔离场景：直接以 LazyList / GridView 为根，\n"
-                         "              测量二者自驱滚动路径（不经外层 Scroll 离屏缓冲）\n"
-                         "  --delta DP   每帧滚动距离，单位逻辑 dp（默认 12 ≈ 720 dp/s @60fps）\n"
-                         "  --repeat N   同进程重复 N 次取 p99 最小的一次（结论保守，只会高报）\n"
-                         "               严格取数请用独立进程多次调用取最小值：\n"
+                         "  --scene    google_play / synthetic / lazy / grid / all (default all)\n"
+                         "              lazy / grid are L5-C isolated scenes: use LazyList / GridView\n"
+                         "              directly as roots to measure their self-driven scroll paths\n"
+                         "              (not via the outer Scroll offscreen buffer)\n"
+                         "  --delta DP   scroll distance per frame, in logical dp (default 12 ~ 720 dp/s @60fps)\n"
+                         "  --repeat N   repeat N times in the same process, take the lowest p99 (conservative,\n"
+                         "              only over-reports)\n"
+                         "              for strict sampling, call it multiple times in separate processes:\n"
                          "                 for i in 1 2 3; do bench_scroll --scene X --format csv; done\n"
-                         "               计数器读数是确定性的，单次即可；仅时间读数需要重复。\n");
+                         "              counter readings are deterministic, one shot suffices; only timings need\n"
+                         "              repetition.\n");
             return 0;
         }
     }
 
-    constexpr Size viewport{ .width = 1100.0f, .height = 760.0f }; // 约定口径：与 demo_google_play 窗口一致
+    constexpr Size viewport{ .width = 1100.0f,
+                             .height = 760.0f }; // agreed convention: matches the demo_google_play window
     bool csv_header_written = false;
 
     if (format == "md") {
@@ -258,9 +283,9 @@ auto main(int argc, char **argv) -> int { // NOLINT(*-function-cognitive-complex
                        std::to_string(static_cast<double>(cfg.scale)), "\n- frames: ", std::to_string(cfg.frames),
                        " (warmup ", std::to_string(cfg.warmup_frames), ")\n- mode: ", cfg.fling ? "fling" : "uniform",
                        ", delta/frame: ", std::to_string(static_cast<double>(cfg.delta_per_frame)), " dp",
-                       "\n- repeat: ", std::to_string(repeat), (repeat > 1 ? "（取 p99 最小的一次）" : ""),
-                       "\n- profiling: ", profiling_enabled() ? "ON（计数器有效）" : "OFF（计数器恒为 0，仅看时间）",
-                       "\n\n");
+                       "\n- repeat: ", std::to_string(repeat), (repeat > 1 ? " (lowest p99 run)" : ""),
+                       "\n- profiling: ",
+                       profiling_enabled() ? "ON (counters valid)" : "OFF (counters always 0, time only)", "\n\n");
     }
 
     bool any_untrustworthy = false;
@@ -299,7 +324,7 @@ auto main(int argc, char **argv) -> int { // NOLINT(*-function-cognitive-complex
     }
 
     if (scene == "google_play" || scene == "all") {
-        // dark 必须活过整段采样：AppShell 只持有指针。
+        // dark must outlive the whole sampling: AppShell only holds a pointer.
         Reactive<bool> dark{ false };
         ScrollBenchHarness::Config c = cfg;
         c.name = cfg.fling ? "google_play-fling" : "google_play-uniform";
@@ -312,8 +337,10 @@ auto main(int argc, char **argv) -> int { // NOLINT(*-function-cognitive-complex
     }
 
     if (any_untrustworthy) {
-        // 非零退出码：基线采集脚本据此拒绝把不可信读数写进对照表。
-        AURORA_LOG_ERROR("bench", "至少有一个场景的读数不可信（未找到滚动容器 / 存在 idle 跳帧），已置非零退出码");
+        // Non-zero exit code: the baseline collection script uses this to refuse writing untrusted
+        // readings into the comparison table.
+        AURORA_LOG_ERROR("bench", "At least one scenario reading is unreliable (scroll container not found / idle "
+                                  "frame drops); non-zero exit code set");
         return 2;
     }
     return 0;

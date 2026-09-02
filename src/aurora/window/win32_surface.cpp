@@ -6,8 +6,8 @@
 #include <cmath>
 #include <cstdint>
 
-#include "aurora/window/swizzle.h"       // swizzle_rgba_to_bgra 共享实现
-#include "aurora/window/win32_capture.h" // detail::capture_window_by_hwnd（真实窗口截图）
+#include "aurora/window/swizzle.h"
+#include "aurora/window/win32_capture.h"
 
 namespace aurora {
 

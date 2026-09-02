@@ -37,7 +37,7 @@ $merged = Join-Path $BuildDir 'aurora.profdata'
 & $profdata merge -sparse -o $merged @($raws | ForEach-Object { $_.FullName })
 if ($LASTEXITCODE -ne 0) { Write-Host 'ERROR: llvm-profdata merge failed.'; exit 1 }
 
-# 覆盖映射存于各插桩可执行文件：主二进制 + 其余经 -object 追加（llvm-cov 多对象聚合）。
+# Coverage mapping is stored in each instrumented executable: the main binary + the rest appended via -object (llvm-cov multi-object aggregation).
 $exes = Get-ChildItem -Path $BuildDir -Filter *.exe -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -match '^(test_|bench_|demo_|aurora_|au-|gen_|ai_)' }
 if (-not $exes -or $exes.Count -eq 0) {
@@ -53,7 +53,7 @@ Write-Host '=== llvm-cov line coverage (src/ + include/aurora) ==='
     ("--ignore-filename-regex=third_party|_deps|tests[\\/]|tools[\\/]|examples[\\/]")
 if ($LASTEXITCODE -ne 0) { Write-Host 'ERROR: llvm-cov report failed.'; exit 1 }
 
-# ---- HTML 报告（增强，可选）：llvm-cov show -format=html 自绘交互式报告 ----
+# ---- HTML report (enhanced, optional): llvm-cov show -format=html self-drawn interactive report ----
 $htmlDir = Join-Path $BuildDir 'coverage-html'
 Write-Host ('=== llvm-cov HTML report -> ' + $htmlDir + ' ===')
 & $llvmcov show ($exes[0].FullName) @objArgs `
@@ -61,6 +61,6 @@ Write-Host ('=== llvm-cov HTML report -> ' + $htmlDir + ' ===')
     ("--ignore-filename-regex=third_party|_deps|tests[\\/]|tools[\\/]|examples[\\/]") `
     "-format=html" `
     ("-output-dir=" + $htmlDir)
-if ($LASTEXITCODE -ne 0) { Write-Host 'WARNING: llvm-cov show (HTML) 失败，仅终端报告可用。' }
+if ($LASTEXITCODE -ne 0) { Write-Host 'WARNING: llvm-cov show (HTML) failed; only terminal report available.' }
 
 

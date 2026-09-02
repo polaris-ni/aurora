@@ -38,7 +38,7 @@
 #include "aurora/window/x11_surface.h"
 #endif
 #ifdef AURORA_BACKEND_WAYLAND
-#include <cstdlib> // std::getenv：运行期 Wayland/X11 会话探测
+#include <cstdlib>
 
 #include "aurora/window/wayland_surface.h"
 #endif

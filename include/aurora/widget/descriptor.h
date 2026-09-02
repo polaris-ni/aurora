@@ -7,7 +7,7 @@
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/result.h"
 #include "aurora/i18n/localized_string.h"
-#include "aurora/widget/props_io.h" // Json
+#include "aurora/widget/props_io.h"
 
 namespace aurora {
 
@@ -244,7 +244,7 @@ template<typename T> auto validate_or_default(const Json &j, const PropDescripto
     if (r) {
         return r.value();
     }
-    Diagnostics::degraded("属性 '" + desc.name + "' 非法: " + r.error().message, desc.name, r.error().code);
+    Diagnostics::degraded("Property '" + desc.name + "' is invalid: " + r.error().message, desc.name, r.error().code);
     return fallback;
 }
 

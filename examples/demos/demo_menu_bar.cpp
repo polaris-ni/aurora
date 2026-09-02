@@ -29,8 +29,8 @@ auto main() -> int {
     au::Node root = au::Column{
         au::MenuBar{ std::move(menus) },
         gap(12),
-        GradientTitle{ "MenuBar 菜单栏" },
-        au::Text{ "点击顶部菜单展开下拉" },
+         GradientTitle{ "MenuBar" },
+        au::Text{ "Click top menu to expand dropdown" },
     };
     return run_demo(std::move(root), "MenuBar · Aurora Demo", 520.0f, 360.0f);
 }

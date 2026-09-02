@@ -28,7 +28,8 @@ struct RouteTransition {
 };
 
 /**
- * @brief 路由：一个页面（子树根）。对应 specification/05-event-navigation.md §7.1 的 `Route`（"即一个 Scene 或子树根"）。
+ * @brief 路由：一个页面（子树根）。对应 specification/05-event-navigation.md §7.1 的 `Route`（"即一个 Scene
+ * 或子树根"）。
  *
  * 持有 widget 树根节点、可选名称与转场配置。`Node` 内部为 `shared_ptr`，故 `Route`
  * 可安全拷贝/移动。

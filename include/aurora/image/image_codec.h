@@ -10,9 +10,9 @@
 #include <string_view>
 #include <vector>
 
-#include "aurora/core/image.h" // Image：解码结果的统一像素载体（RGBA8 紧密打包）
+#include "aurora/core/image.h"
 #include "aurora/core/result.h"
-#include "aurora/core/types.h" // Size
+#include "aurora/core/types.h"
 
 namespace aurora::image {
 

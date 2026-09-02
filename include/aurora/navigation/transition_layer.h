@@ -6,10 +6,10 @@
 #include <unordered_set>
 #include <vector>
 
-#include "aurora/animation/timeline.h" // lerp(Rect)
+#include "aurora/animation/timeline.h"
 #include "aurora/core/types.h"
-#include "aurora/navigation/hero.h"  // HeroRegistry / HeroEntry
-#include "aurora/navigation/route.h" // TransitionKind
+#include "aurora/navigation/hero.h"
+#include "aurora/navigation/route.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
 #include "aurora/widget/widget.h"

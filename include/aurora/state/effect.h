@@ -52,7 +52,7 @@ class Effect {
     }
 
     /// @brief 由 SignalView::get() 调用，登记依赖（含锚点以支持失效探测）。
-    auto add_dep(SignalViewBase &s) -> void { m_deps.push_back(EffectDep{ .raw=&s, .anchor=s.anchor() }); }
+    auto add_dep(SignalViewBase &s) -> void { m_deps.push_back(EffectDep{ .raw = &s, .anchor = s.anchor() }); }
 
     /// @brief 是否已释放（供 State::notify 跳过失效观察者）。
     [[nodiscard]] auto is_disposed() const noexcept -> bool { return m_disposed; }

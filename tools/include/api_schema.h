@@ -1,10 +1,11 @@
 // ============================================================================
-// api_schema.h — aurora_api.json「骨架」组装原语
+// api_schema.h — aurora_api.json "skeleton" assembly primitive
 // ----------------------------------------------------------------------------
-// 由 gen_api_tools / aurora_cli / aurora_mcp 复用，避免 library/language/include/alias
-// + widgets 枚举 + enums 段三份重复构建。widgets 枚举经由 WidgetRegistry + component_schema，
-// 与 serialization::list_all_schemas() 逐字等价（见 src/aurora/widget/serialization.cpp），
-// 故抽取后生成的 aurora_api.json 内容不变。
+// Reused by gen_api_tools / aurora_cli / aurora_mcp to avoid three duplicate constructions of
+// library/language/include/alias + the widgets enumeration + the enums section. The widgets
+// enumeration goes through WidgetRegistry + component_schema and is verbatim equivalent to
+// serialization::list_all_schemas() (see src/aurora/widget/serialization.cpp), so the generated
+// aurora_api.json content is unchanged after extraction.
 // ============================================================================
 #pragma once
 

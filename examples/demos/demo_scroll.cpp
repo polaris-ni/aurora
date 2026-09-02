@@ -13,9 +13,9 @@ auto main() -> int {
     scroll.modifier.set(au::Modifier{}.size(360.0f, 240.0f).border(1.0f, pal::AURORA_BORDER));
 
     au::Node root = au::Column{
-        GradientTitle{ "Scroll 控件" },
+        GradientTitle{ "Scroll widget" },
         gap(12),
-        au::Text{ au::LocalizedString{ "可滚动区域（滚轮滚动）" } },
+        au::Text{ au::LocalizedString{ "Scrollable area (wheel scroll)" } },
         std::move(scroll),
     };
     return run_demo(Card{ std::move(root) }, "Scroll · Aurora Demo", 520.0f, 420.0f);

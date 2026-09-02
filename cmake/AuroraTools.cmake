@@ -6,7 +6,7 @@
 #
 # 目录约定（重构后 tools/ 按职责分子目录，详见 AGENTS.md §2）：
 #   gen/      构建期生成器（gen_error_codes / gen_debug_api 不链接 aurora）
-#   servers/  常驻与命令行服务端（MCP / LSP / CLI / au-lint）
+#   servers/  常驻与命令行服务端（MCP / LSP / CLI / aurora_lint）
 #   bench/    性能基准（共享头 bench_common.h 与本目录同级）
 #   check/    静态校验与门禁脚本（.py / .ps1）
 #   coverage/ 覆盖率聚合脚本
@@ -81,7 +81,7 @@ add_custom_target(gen_debug_api_json
 add_dependencies(gen_debug_api_json gen_debug_api)
 
 # 工具：序列化 UI 树结构化检查器（独立 CLI 二进制，非 MCP/CLI 暴露）。
-aurora_add_tool(au-lint tools/servers/au-lint.cpp)
+aurora_add_tool(aurora_lint tools/servers/aurora_lint.cpp)
 
 # MCP Server：stdio JSON-RPC 2.0，供 AI Agent 直接调用。
 aurora_add_tool(aurora_mcp tools/servers/aurora_mcp.cpp)

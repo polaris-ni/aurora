@@ -8,9 +8,9 @@
 #include <functional>
 #include <vector>
 
-#include "aurora/modifier/modifier_base.h" // ModifierNode::PaintKind::CacheLayer
-#include "aurora/render/painter.h"         // Painter::draw_rect / fill_rect
-#include "aurora/widget/widget.h"          // Widget / HitNode
+#include "aurora/modifier/modifier_base.h"
+#include "aurora/render/painter.h"
+#include "aurora/widget/widget.h"
 
 namespace aurora::debug {
 

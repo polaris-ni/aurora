@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-check_arch_module_map.py — 校验 codespec ARCHITECTURE_RUNTIME §4 模块映射中的头/源文件引用。
+check_arch_module_map.py - validate header/source file references in the codespec ARCHITECTURE_RUNTIME §4 module map.
 
-规则：
-- 仅扫描 `## 4. 模块映射` 到下一个 `## ` 之间的内容。
-- 提取所有反引号包裹、以源代码扩展名结尾的 token（.h/.hpp/.hh/.cpp/.cc/.cxx/.inl）。
-  - 类型名/符号（如 `Result<T>`、`Signal`、`Window`）无扩展名，自动排除。
-  - 目录引用（如 `core/`）无扩展名，自动排除。
-- 解析策略：
-  - 含 `/` 的 token 视为相对 include/aurora/ (头) 或 src/aurora/ (实现) 的完整路径。
-  - 裸文件名（无 `/`）结合「最近一行表格的『路径』单元格」的目录前缀推断；
-    若无法锚定，则在对应根目录下回退全量搜索。
-- 输出逐条 STATUS（OK / MISSING / AMBIGUOUS / FALLBACK）与汇总。
-- 退出码：存在 MISSING 或 AMBIGUOUS → 1（可接入 CI 门禁）；否则 0。
+Rules:
+- Only scan the content between "## 4. Module Map" and the next "## ".
+- Extract all backtick-wrapped tokens ending in a source extension (.h/.hpp/.hh/.cpp/.cc/.cxx/.inl).
+  - Type names/symbols (e.g. `Result<T>`, `Signal`, `Window`) have no extension and are excluded automatically.
+  - Directory references (e.g. `core/`) have no extension and are excluded automatically.
+- Resolution strategy:
+  - Tokens containing "/" are treated as full paths relative to include/aurora/ (headers) or src/aurora/ (impl).
+  - Bare filenames (no "/") are inferred from the directory prefix of the nearest table row's "path" cell;
+    if they cannot be anchored, fall back to a full search under the corresponding root.
+- Output per-entry STATUS (OK / MISSING / AMBIGUOUS / FALLBACK) and a summary.
+- Exit code: MISSING or AMBIGUOUS present -> 1 (can be wired into CI); otherwise 0.
 
-用法：
+Usage:
   python3 tools/check/check_arch_module_map.py [--root <aurora_root>]
 """
 import argparse
@@ -24,7 +24,8 @@ import sys
 
 
 def repo_root_of(path):
-    """向上查找含 CMakeLists.txt 的仓库根（脚本位于 tools/check/ 时仍可正确定位）。"""
+    """Walk up to find the repo root containing CMakeLists.txt (still resolves correctly when the
+    script lives under tools/check/)."""
     d = os.path.dirname(os.path.abspath(path))
     while d and d != os.path.dirname(d):
         if os.path.isfile(os.path.join(d, "CMakeLists.txt")):
@@ -39,11 +40,11 @@ IMPL_EXT = {".cpp", ".cc", ".cxx"}
 SRC_EXT = HEADER_EXT | IMPL_EXT
 
 TOKEN_RE = re.compile(r"`([^`]+)`")
-FILE_RE = re.compile(r"^[\w./\\-]+$")  # 反引号内须为合法路径字符
+FILE_RE = re.compile(r"^[\w./\\-]+$")  # backtick content must be valid path characters
 
 
 def iter_section4_lines(lines):
-    """yield 仅 §4 区段的行（含 §4 标题，止于下一个 `## `）。"""
+    """Yield only the lines of the §4 section (including the §4 heading, stopping at the next "## ")."""
     in_sec = False
     for ln in lines:
         if ln.startswith("## 4."):
@@ -57,7 +58,7 @@ def iter_section4_lines(lines):
 
 
 def parse_table_row(line):
-    """若为 3 列表格行，返回 (模块, 路径单元格, 整行文本)；否则 None。"""
+    """If this is a 3-column table row, return (module, path cell, full line text); otherwise None."""
     s = line.strip()
     if not s.startswith("|"):
         return None
@@ -69,17 +70,17 @@ def parse_table_row(line):
 
 def collect_refs(lines):
     """
-    返回 refs: list of dict {token, base_dir, hint_dir, section_no, line_no, in_table}
-    base_dir 解析优先级（见 resolve）：
-      - 表格行内 token：用本行「路径」列目录（最精确）。
-      - 自由文本/列表项 token：用正文提示词目录（如 `（include/aurora/storage/）`）优先，
-        其次用最近表格行的模块目录（inherited，如 §4.3 列表项继承 window/）。
-      - 顶层入口头（aurora.h 等）：直接核对 include/aurora/<tok>。
+    Returns refs: list of dict {token, base_dir, hint_dir, section_no, line_no, in_table}
+    base_dir resolution priority (see resolve):
+      - token inside a table row: use the row's "path" column directory (most precise).
+      - token in free text / list item: prefer the body's hint directory (e.g. `(include/aurora/storage/)`),
+        otherwise the nearest table row's module directory (inherited, e.g. §4.3 list items inherit window/).
+      - top-level entry header (aurora.h etc.): check include/aurora/<tok> directly.
     """
-    hint_re = re.compile(r"include/aurora/([A-Za-z_][\w/]*/)")  # 捕获形如 storage/ 的目录
+    hint_re = re.compile(r"include/aurora/([A-Za-z_][\w/]*/)")  # capture a directory like storage/
     refs = []
-    inherited_base = None  # 最近表格行的模块目录（供自由文本继承）
-    last_hint_dir = None  # 最近正文提示词目录
+    inherited_base = None  # nearest table row's module directory (inherited by free text)
+    last_hint_dir = None  # nearest body hint directory
     sec_no = None
     line_no = 0
     for raw in lines:
@@ -100,7 +101,7 @@ def collect_refs(lines):
                 if pt.endswith("/") and "/" not in pt[:-1]:
                     row_base = pt
                     inherited_base = pt
-        # 自由文本/列表项：提示词目录优先，否则继承本模块目录
+        # Free text / list item: hint directory first, otherwise inherit the module directory
         eff_base = row_base if row is not None else (last_hint_dir or inherited_base)
         for tok in TOKEN_RE.findall(raw):
             if not FILE_RE.match(tok):
@@ -120,14 +121,15 @@ def collect_refs(lines):
 
 
 def resolve(tok, base_dir, hint_dir, include_root, src_root):
-    """返回 (status, resolved_path)。
+    """Return (status, resolved_path).
 
-    status 语义：
-      OK        锚定目录/完整路径下存在
-      MISPLACED 锚定目录（行内「路径」列）下不存在，但在别处找到 → 文档写错模块归属（硬失败）
-      FALLBACK  无锚定目录、经回退搜索解析（建议文档显式化路径）
-      MISSING   任何位置都不存在
-      AMBIGUOUS 回退搜索命中多处
+    status semantics:
+      OK        exists under the anchored directory / full path
+      MISPLACED not found under the anchored directory (the row's "path" column) but found elsewhere
+               -> doc has wrong module attribution (hard fail)
+      FALLBACK  no anchored directory; resolved via fallback search (prefer making the doc explicit)
+      MISSING   does not exist anywhere
+      AMBIGUOUS fallback search hit multiple locations
     """
     ext = os.path.splitext(tok)[1].lower()
     is_impl = ext in IMPL_EXT
@@ -139,30 +141,31 @@ def resolve(tok, base_dir, hint_dir, include_root, src_root):
         if os.path.isfile(alt):
             return "OK", os.path.relpath(alt)
         return "MISSING", tok
-    # 裸文件名：优先用行内「路径」列锚定
+    # Bare filename: prefer anchoring via the row's "path" column
     if base_dir:
         anchored = os.path.join((src_root if is_impl else include_root), base_dir, tok)
         if os.path.isfile(anchored):
             return "OK", os.path.relpath(anchored)
-        # 锚定处不存在 → 全量搜索，若别处存在则为「错位」（文档模块归属写错）
+        # Not at the anchor -> full search; if it exists elsewhere it is "misplaced" (wrong doc module attribution)
         root = src_root if is_impl else include_root
         hits = [os.path.relpath(os.path.join(dp, tok))
                 for dp, _, fn in os.walk(root) if tok in fn]
         if len(hits) == 1:
-            return "MISPLACED", f"文档写于 `{base_dir}{tok}`，实际位于 `{hits[0]}`"
+            return "MISPLACED", f"document written as `{base_dir}{tok}`, actually located at `{hits[0]}`"
         if len(hits) > 1:
-            return "MISPLACED", f"文档写于 `{base_dir}{tok}`，实际多处: " + " | ".join(hits)
+            return "MISPLACED", f"document written as `{base_dir}{tok}`, actually at multiple locations: " + " | ".join(
+                hits)
         return "MISSING", f"{base_dir}{tok}"
-    # 无行内锚定：用正文提示词目录（如 `（include/aurora/storage/）`）锚定
+    # No in-row anchor: use the body hint directory (e.g. `(include/aurora/storage/)`)
     if hint_dir:
         anchored = os.path.join((src_root if is_impl else include_root), hint_dir, tok)
         if os.path.isfile(anchored):
             return "OK", os.path.relpath(anchored)
-    # 顶层入口头（aurora.h / aurora_fwd.h 等直接在 include/aurora/ 下）
+    # Top-level entry headers (aurora.h / aurora_fwd.h etc., directly under include/aurora/)
     top = os.path.join(include_root, tok)
     if os.path.isfile(top):
         return "OK", os.path.relpath(top)
-    # 回退：全量搜索
+    # Fallback: full search
     root = src_root if is_impl else include_root
     hits = [os.path.relpath(os.path.join(dp, tok))
             for dp, _, fn in os.walk(root) if tok in fn]
@@ -175,7 +178,7 @@ def resolve(tok, base_dir, hint_dir, include_root, src_root):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default=None, help="Aurora 仓库根目录（默认脚本上级两级）")
+    ap.add_argument("--root", default=None, help="Aurora repo root (default: two levels above this script)")
     args = ap.parse_args()
     root = args.root or repo_root_of(__file__)
     doc_path = os.path.join(root, DOC_REL)
@@ -183,10 +186,10 @@ def main():
     src_root = os.path.join(root, "src", "aurora")
 
     if not os.path.isfile(doc_path):
-        print(f"[ERR] 找不到文档: {doc_path}", file=sys.stderr)
+        print(f"[ERR] document not found: {doc_path}", file=sys.stderr)
         return 2
     if not os.path.isdir(include_root):
-        print(f"[ERR] 找不到头目录: {include_root}", file=sys.stderr)
+        print(f"[ERR] header dir not found: {include_root}", file=sys.stderr)
         return 2
 
     with open(doc_path, encoding="utf-8") as f:
@@ -194,7 +197,7 @@ def main():
     sec_lines = list(iter_section4_lines(lines))
     refs = collect_refs(sec_lines)
 
-    # 去重（同 token 同锚定只报一次）
+    # Dedupe (same token + same anchor reported once)
     seen = set()
     rows = []
     for r in refs:
@@ -205,14 +208,14 @@ def main():
         seen.add(key)
         rows.append((r, status, resolved))
 
-    # 打印报告
-    print(f"模块映射一致性校验 — {DOC_REL}")
-    print(f"扫描到文件引用 {len(rows)} 条（含回退/歧义去重后）\n")
+    # Print report
+    print(f"Module-map consistency check — {DOC_REL}")
+    print(f"Scanned {len(rows)} file references (after dedup of fallback/ambiguous)\n")
     print(f"{'STATUS':<10} {'SEC':<6} {'TOKEN':<34} RESOLVED")
     print("-" * 90)
     n_ok = n_miss = n_amb = n_fb = n_mis = 0
     for r, status, resolved in rows:
-        loc = f"[{r['sec'] or '?'} : L{r['line']}]"
+        loc = f"[{r['sec'] or '?'}: L{r['line']}]"
         print(f"{status:<10} {loc:<16} {r['token']:<30} {resolved}")
         if status == "OK":
             n_ok += 1
@@ -228,11 +231,12 @@ def main():
     print("-" * 90)
     print(f"OK={n_ok}  FALLBACK={n_fb}  MISPLACED={n_mis}  MISSING={n_miss}  AMBIGUOUS={n_amb}")
     if n_miss or n_amb or n_mis:
-        print("\n[FAIL] 存在缺失/歧义/错位引用，请修正文档或代码。")
+        print("\n[FAIL] missing/ambiguous/misplaced references exist; fix the docs or code.")
         return 1
     if n_fb:
-        print("\n[WARN] 部分引用经回退搜索解析（文档未显式给出路径前缀），建议显式化。")
-    print("\n[PASS] 无缺失/歧义/错位引用。")
+        print(
+            "\n[WARN] some references resolved via fallback search (docs did not give an explicit path prefix); prefer making them explicit.")
+    print("\n[PASS] no missing/ambiguous/misplaced references.")
     return 0
 
 

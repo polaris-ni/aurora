@@ -13,12 +13,12 @@ auto main() -> int {
     au::serialization::apply_patch(ja, d);
 
     au::Node root = au::Column{
-        GradientTitle{ "序列化 / Serialization" },
+        GradientTitle{ "Serialization" },
         gap(12),
         au::Text{ au::LocalizedString{ "to_json → diff → apply_patch" } },
         au::Text{ au::LocalizedString{ "patch ops = " + std::to_string(d.size()) } },
         au::Text{
-            au::LocalizedString{ "WidgetRegistry 类型数 = " +
+            au::LocalizedString{ "WidgetRegistry type count = " +
                                  std::to_string(au::serialization::WidgetRegistry::instance().list_types().size()) } },
     };
     return run_demo(Card{ std::move(root) }, "Serialization · Aurora Demo", 520.0f, 420.0f);

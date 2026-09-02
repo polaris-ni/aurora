@@ -84,7 +84,7 @@ class Storage {
             return Result<T>{ rec.error() };
         }
         if (rec.value().type != storage_type_name<T>() && rec.value().type != "__raw__") {
-            return Result<T>{ make_error(ErrorCode::StorageTypeMismatch, "类型化读取类型不匹配") };
+            return Result<T>{ make_error(ErrorCode::StorageTypeMismatch, "Typed read type mismatch") };
         }
         T out{};
         if (rec.value().encoding == StorageEncoding::Binary) {
@@ -102,7 +102,8 @@ class Storage {
                     return Result<T>{ r.error() };
                 }
             } else {
-                return Result<T>{ make_error(ErrorCode::StorageEncodingMismatch, "类型 T 仅支持 JSON 序列化") };
+                return Result<T>{ make_error(ErrorCode::StorageEncodingMismatch,
+                                             "Type T only supports JSON serialization") };
             }
         } else {
             if constexpr (StorageSerializable<T>) {
@@ -119,7 +120,8 @@ class Storage {
                     return Result<T>{ r.error() };
                 }
             } else {
-                return Result<T>{ make_error(ErrorCode::StorageEncodingMismatch, "类型 T 仅支持二进制序列化") };
+                return Result<T>{ make_error(ErrorCode::StorageEncodingMismatch,
+                                             "Type T only supports binary serialization") };
             }
         }
         return Result<T>{ std::move(out) };

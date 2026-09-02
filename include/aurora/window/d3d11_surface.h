@@ -12,7 +12,7 @@
 #include "aurora/core/types.h"
 #include "aurora/render/painter.h"
 #include "aurora/window/surface.h"
-#include "aurora/window/win32_window.h" // 共享宿主：窗口/事件/DPI/同步重渲染
+#include "aurora/window/win32_window.h"
 
 namespace aurora {
 

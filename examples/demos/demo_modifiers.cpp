@@ -6,11 +6,11 @@ auto main() -> int {
     padded.modifier.set(
         au::Modifier{}.padding(14.0f).background(pal::AURORA_PRIMARY_SOFT).border(1.0f, pal::AURORA_BORDER));
 
-    au::Text clipped{ au::LocalizedString{ "长文本被 clip 裁剪到 160x28" } };
+    au::Text clipped{ au::LocalizedString{ "Long text clipped to 160x28" } };
     clipped.modifier.set(
         au::Modifier{}.size(160.0f, 28.0f).background(pal::AURORA_SURFACE).clip().border(1.0f, pal::AURORA_BORDER));
 
-    au::Text clickable{ au::LocalizedString{ "clickable（点击有回调）" } };
+    au::Text clickable{ au::LocalizedString{ "clickable (tap callback)" } };
     clickable.modifier.set(au::Modifier{}.padding(10.0f).background(pal::AURORA_OK).clickable([]() -> void {
         AURORA_LOG_INFO("demo", "[modifiers] clicked");
     }));
@@ -22,7 +22,7 @@ auto main() -> int {
     fill.modifier.set(au::Modifier{}.fill_max_width().padding(8.0f).background(pal::AURORA_WARN));
 
     au::Node root = au::Column{
-        GradientTitle{ "Modifier 控件" },
+        GradientTitle{ "Modifier widget" },
         gap(10),
         std::move(padded),
         gap(8),

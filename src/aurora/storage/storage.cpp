@@ -35,8 +35,9 @@ auto default_slot() -> auto & {
 auto Storage::create(FilesystemOptions opts) -> Result<Storage> {
     auto be = std::make_unique<FilesystemBackend>(std::move(opts));
     if (!be->is_open()) {
-        return Result<Storage>{ make_error(ErrorCode::StorageBackendUnavailable,
-                                           "默认文件系统存储打开失败：目录不可写或锁获取失败") };
+        return Result<Storage>{ make_error(
+            ErrorCode::StorageBackendUnavailable,
+            "Default filesystem storage open failed: directory not writable or lock acquisition failed") };
     }
     return Result{ Storage(std::move(be)) };
 }
@@ -64,7 +65,7 @@ auto Storage::get(const std::string &id) const -> Result<Json> {
     }
     if (rec.value().encoding != StorageEncoding::Json) {
         return Result<Json>{ make_error(ErrorCode::StorageEncodingMismatch,
-                                        "记录以二进制存储，无法以 JSON 通道读取: " + id) };
+                                        "Record stored in binary, cannot read via JSON channel: " + id) };
     }
     return Result{ std::get<Json>(rec.value().payload) };
 }
@@ -111,7 +112,7 @@ auto Storage::get_bytes(const std::string &id) const -> Result<StorageBytes> {
     }
     if (rec.value().encoding != StorageEncoding::Binary) {
         return Result<StorageBytes>{ make_error(ErrorCode::StorageEncodingMismatch,
-                                                "记录以 JSON 存储，无法以二进制通道读取: " + id) };
+                                                "Record stored as JSON, cannot read via binary channel: " + id) };
     }
     return Result{ std::get<StorageBytes>(rec.value().payload) };
 }
@@ -167,7 +168,7 @@ auto Storage::async_get(const std::string &id) const -> Task<Json> {
         }
         if (rec.value().encoding != StorageEncoding::Json) {
             return Result<Json>{ make_error(ErrorCode::StorageEncodingMismatch,
-                                            "记录以二进制存储，无法以 JSON 通道读取: " + idc) };
+                                            "Record stored in binary, cannot read via JSON channel: " + idc) };
         }
         return Result{ std::get<Json>(rec.value().payload) };
     });

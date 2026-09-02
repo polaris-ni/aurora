@@ -2,13 +2,13 @@
 #include "demo_common.h"
 
 auto main() -> int {
-    auto splitter = au::HSplitter(au::Node{ au::Column{ au::Text{ "侧边栏" }, au::Text{ "拖动分隔条调整" } } },
-                                  au::Node{ au::Column{ au::Text{ "主内容区" } } }, 0.3f);
+    auto splitter = au::HSplitter(au::Node{ au::Column{ au::Text{ "Sidebar" }, au::Text{ "Drag divider to adjust" } } },
+                                  au::Node{ au::Column{ au::Text{ "Main content area" } } }, 0.3f);
     splitter.set_min_sizes(80.0f, 120.0f);
-    splitter.set_on_ratio_change([](float r) -> void { AURORA_LOG_INFO("demo", "比例: ", r); });
+    splitter.set_on_ratio_change([](float r) -> void { AURORA_LOG_INFO("demo", "Ratio: ", r); });
 
     au::Node root = au::Column{
-        GradientTitle{ "Splitter 分割器" },
+        GradientTitle{ "Splitter" },
         gap(12),
         std::move(splitter),
     };

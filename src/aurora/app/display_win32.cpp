@@ -3,7 +3,7 @@
 #include <cmath>
 
 #include "aurora/app/display.h"
-#include "aurora/window/window.h" // Window（move_window_to_display 参数；两分支均需）
+#include "aurora/window/window.h"
 
 #ifdef AURORA_PLATFORM_WINDOWS
 #define WIN32_LEAN_AND_MEAN // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名

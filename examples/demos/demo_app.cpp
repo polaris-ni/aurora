@@ -18,6 +18,6 @@ auto main() -> int {
                                                          std::move(line2),
                                                      } } };
 
-    aurora::App().title("au::App() 流式封装").size(420, 300).view(std::move(root)).run();
+    aurora::App().title("au::App() fluent wrapper").size(420, 300).view(std::move(root)).run();
     return 0;
 }

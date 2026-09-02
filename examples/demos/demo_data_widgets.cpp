@@ -4,10 +4,10 @@
 auto main() -> int {
     // DataTable：可排序表格
     std::vector<au::DataColumn> cols;
-    cols.push_back(au::DataColumn{ .label = "姓名", .width = 100.0f, .sortable = true });
-    cols.push_back(au::DataColumn{ .label = "年龄", .width = 60.0f, .sortable = true });
+    cols.push_back(au::DataColumn{ .label = "Name", .width = 100.0f, .sortable = true });
+    cols.push_back(au::DataColumn{ .label = "Age", .width = 60.0f, .sortable = true });
     au::DataTable table{ std::move(cols), { { "Alice", "30" }, { "Bob", "25" }, { "Carol", "35" } } };
-    table.set_on_select([](int r) -> void { AURORA_LOG_INFO("demo", "选中行: ", r); });
+    table.set_on_select([](int r) -> void { AURORA_LOG_INFO("demo", "Selected row: ", r); });
 
     // TreeView：层级树
     au::TreeItem src;

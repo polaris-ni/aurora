@@ -9,22 +9,21 @@
 #include <string_view>
 #include <vector>
 
-#include "aurora/widget/node.h"      // Node 完整定义（析构在 widget.cpp）：使 std::vector<Node> 成员在头文件中可见完整类型
-#include "aurora/core/assert.h"      // AURORA_ASSERT：脏标记必达渲染根的 StrictMode 不变量
-#include "aurora/core/strict_mode.h" // strict_mode()：同上（仅严格模式下校验）
+#include "aurora/core/assert.h"
+#include "aurora/core/strict_mode.h"
 #include "aurora/core/types.h"
+#include "aurora/debug/debug_trace.h"
 #include "aurora/environment/environment.h"
 #include "aurora/event/event.h"
 #include "aurora/modifier/modifier.h"
-#include "aurora/render/display_list.h" // Display List 缓存成员
-#include "aurora/render/painter.h"      // 使 unique_ptr<Painter> 缓存成员可完整析构
+#include "aurora/render/display_list.h"
+#include "aurora/render/painter.h"
 #include "aurora/state/effect.h"
 #include "aurora/state/reactive.h"
 #include "aurora/state/signal_view.h"
-#include "aurora/widget/descriptor.h" // WidgetDescriptor / PropDescriptor（自描述）
-#include "aurora/widget/props_io.h"   // Json / lengthToJson / colorToJson（序列化）
-
-#include "aurora/debug/debug_trace.h" // why_trace：DirtyKind + detail::record_dirty（轻量，不 include widget.h）
+#include "aurora/widget/descriptor.h"
+#include "aurora/widget/node.h"
+#include "aurora/widget/props_io.h"
 
 namespace aurora {
 
@@ -358,7 +357,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     virtual auto tick(std::chrono::steady_clock::time_point now) -> void {
         if (!m_needs_gesture_tick) {
             return;
-}
+        }
         tick_gestures(now);
     }
 
@@ -445,7 +444,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
     [[nodiscard]] virtual auto validate_props() const -> Result<void> { return Result<void>{}; }
 
     /// @brief 反序列化时接纳子节点列表（Container 覆写；默认无子节点）。
-    virtual auto adopt_children(std::vector<Node> && /*kids*/) -> void {} // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+    virtual auto adopt_children(std::vector<Node> && /*kids*/) -> void {
+    } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
 
     /// @brief 遍历直接子节点（结构快照用；默认无子节点）。
     virtual auto for_each_child(const std::function<void(const Widget &)> & /*fn*/) const -> void {}
@@ -541,13 +541,13 @@ class Widget : public std::enable_shared_from_this<Widget> {
     Size m_cached_size{};                ///< 上一次成功布局得到的尺寸
     Widget *m_layout_parent = nullptr;   ///< 布局父节点（容器在布局入口设置）
     bool m_is_relayout_boundary = false; ///< 显式重排边界声明（见 is_relayout_boundary）
-    bool m_mounted = false;          ///< 是否已挂载（mount 幂等保护，避免转场切换复用同一 widget 实例时重复订阅信号）
-    bool m_pressed = false;          ///< 指针是否在本控件上按下（用于识别一次完整点击）
-    bool m_hover = false;            ///< 指针是否悬停在本控件上（EventDispatcher 命中链 diff 维护）
-    bool m_click_pending = false;    ///< 本次按下后待触发点击（松开且未达长按/拖拽阈值时触发）
-    bool m_drag_moved = false;       ///< 本次按下后是否发生超过阈值的移动（用于抑制点击）
-    Point m_press_pos{ .x=0.0f, .y=0.0f }; ///< 本次按下的绝对坐标（拖拽位移基准）
-    Point m_last_drag_pos{ .x=0.0f, .y=0.0f }; ///< 上次 Move 的绝对坐标（计算拖拽增量）
+    bool m_mounted = false;       ///< 是否已挂载（mount 幂等保护，避免转场切换复用同一 widget 实例时重复订阅信号）
+    bool m_pressed = false;       ///< 指针是否在本控件上按下（用于识别一次完整点击）
+    bool m_hover = false;         ///< 指针是否悬停在本控件上（EventDispatcher 命中链 diff 维护）
+    bool m_click_pending = false; ///< 本次按下后待触发点击（松开且未达长按/拖拽阈值时触发）
+    bool m_drag_moved = false;    ///< 本次按下后是否发生超过阈值的移动（用于抑制点击）
+    Point m_press_pos{ .x = 0.0f, .y = 0.0f };     ///< 本次按下的绝对坐标（拖拽位移基准）
+    Point m_last_drag_pos{ .x = 0.0f, .y = 0.0f }; ///< 上次 Move 的绝对坐标（计算拖拽增量）
 
     Length m_width;                                          ///< 显式宽度意图（默认 WrapContent）
     Length m_height;                                         ///< 显式高度意图（默认 WrapContent）
@@ -594,7 +594,6 @@ class Widget : public std::enable_shared_from_this<Widget> {
         effects.push_back(std::move(e));
     }
 
-
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     std::vector<std::unique_ptr<Effect>> m_effects;
     bool m_focusable = true;   ///< 是否可参与焦点序（specification/05-event-navigation.md §4）
@@ -611,15 +610,15 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @param visual_box  控件视觉矩形（含 Padding/Border 的完整盒子，用于背景/裁剪/边框/阴影）。
     /// @param content_box 内容矩形（已含 Align/Offset/Padding 平移；用于子节点 on_paint）。
     /// @param ctx context
-    virtual auto paint_content(Painter &p, const Rect &visual_box, const Rect &content_box,
-                               const BuildContext &ctx) -> void;
+    virtual auto paint_content(Painter &p, const Rect &visual_box, const Rect &content_box, const BuildContext &ctx)
+        -> void;
 
     /// @brief 把整棵子树渲染到目标缓冲（局部坐标），供直接绘制与离屏缓存复用。
     auto render_into(Painter &dst, const Rect &local, const BuildContext &ctx) -> void;
 
     /// @brief 离屏缓存（`Modifier::cache_layer`）状态：缓存位图、尺寸与失效标志。
     mutable std::unique_ptr<Painter> m_paint_cache;
-    mutable Size m_paint_cache_size{ .width=0.0f, .height=0.0f };
+    mutable Size m_paint_cache_size{ .width = 0.0f, .height = 0.0f };
     mutable bool m_paint_cache_valid = false;
 
 #ifdef AURORA_DISPLAY_LIST
@@ -677,7 +676,7 @@ class Container : public Widget {
 #endif
         for (Node &child : m_children) {
             const Rect cb = child.bounds();
-            const auto global{ Rect{ .origin=bounds.origin + cb.origin, .size=cb.size } };
+            const auto global{ Rect{ .origin = bounds.origin + cb.origin, .size = cb.size } };
 #ifdef AURORA_OCCLUSION_CULLING
             // 遮挡剔除：子控件全局盒与裁剪区无交集则整棵子树跳过（保守外接矩形判定）。
             if (!global.intersects(clip)) {
@@ -692,12 +691,12 @@ class Container : public Widget {
         // 反向遍历：与 on_paint 的绘制顺序一致（后者绘制=视觉顶层），
         // 因此重叠子节点中「视觉在最上层」的控件优先命中，避免底层控件在重叠区
         // 抢走本应属于顶层控件的事件（即「顶层控件被底层控件遮挡」问题）。
-        for (auto & child : std::views::reverse(m_children)) {
+        for (auto &child : std::views::reverse(m_children)) {
             const Rect cb = child.bounds();
             // local 处于本容器局部坐标系：子节点位置为 cb（相对本容器内容区）。
             if (cb.contains(local)) {
                 // 向下传递子节点“全局”盒（本容器全局原点 + 子相对原点），供更深层级本地化。
-                const auto global{ Rect{ .origin=bounds.origin + cb.origin, .size=cb.size } };
+                const auto global{ Rect{ .origin = bounds.origin + cb.origin, .size = cb.size } };
                 Widget *r = child.widget().hit_test(local - cb.origin, global, ctx);
                 if (r != nullptr) {
                     return r;
@@ -710,11 +709,11 @@ class Container : public Widget {
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
         // 同样反向遍历，使重叠时视觉顶层控件成为命中链最深（最后派发）目标。
-        for (auto & child : std::views::reverse(m_children)) {
+        for (auto &child : std::views::reverse(m_children)) {
             const Rect cb = child.bounds();
             if (cb.contains(local)) {
                 // global.origin 即子节点全局 origin，随命中链带入，供派发器本地化坐标。
-                const auto global{ Rect{ .origin=bounds.origin + cb.origin, .size=cb.size } };
+                const auto global{ Rect{ .origin = bounds.origin + cb.origin, .size = cb.size } };
                 std::vector<HitNode> r = child.widget().hit_test_chain(local - cb.origin, global, ctx);
                 if (!r.empty()) {
                     return r;
@@ -755,7 +754,9 @@ class Container : public Widget {
         }
     }
 
-    auto adopt_children(std::vector<Node> &&kids) -> void override { m_children = std::move(kids); } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+    auto adopt_children(std::vector<Node> &&kids) -> void override {
+        m_children = std::move(kids);
+    } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
 
     [[nodiscard]] auto child_nodes() const -> const std::vector<Node> & override { return m_children; }
 
@@ -799,7 +800,7 @@ class LeafWidget : public Widget {
         (void)ctx;
         // local 是相对本 widget 原点的局部坐标，需与“局部矩形”（原点 0）比较；
         // bounds 含绝对 origin，直接用 bounds.contains(local) 会使非原点控件永远命中失败。
-        return Rect{ .origin=Point{ .x=0.0f, .y=0.0f }, .size=bounds.size }.contains(local) ? this : nullptr;
+        return Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = bounds.size }.contains(local) ? this : nullptr;
     }
 
 #pragma GCC diagnostic push
@@ -812,7 +813,7 @@ class LeafWidget : public Widget {
         // bounds.origin 即本控件全局 origin，随命中链带入，供派发器本地化坐标。
         // weak_from_this() 返回的 weak_ptr 已被安全拷贝进 HitNode（非悬垂）；
         // 此处抑制 GCC 对该标准库惯用法的已知 -Wdangling-pointer 误报。
-        return Rect{ .origin=Point{ .x=0.0f, .y=0.0f }, .size=bounds.size }.contains(local)
+        return Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = bounds.size }.contains(local)
                    ? std::vector{ HitNode{ this, weak_from_this(), bounds.origin } }
                    : std::vector<HitNode>{};
     }
@@ -879,7 +880,7 @@ class SingleChild : public Widget {
             m_child_view.clear();
             if (m_child) {
                 m_child_view.push_back(m_child);
-}
+            }
             m_child_view_valid = true;
         }
         return m_child_view;

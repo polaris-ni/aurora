@@ -8,21 +8,21 @@ auto main() -> int {
     start.modifier.set(
         au::Modifier{}.size(280.0f, 80.0f).background(pal::AURORA_SURFACE).border(1.0f, pal::AURORA_BORDER));
 
-    au::Row space_between{ au::RowProps{ .children = { au::Text{ au::LocalizedString{ "左" } },
-                                                       au::Text{ au::LocalizedString{ "中" } },
-                                                       au::Text{ au::LocalizedString{ "右" } } },
+    au::Row space_between{ au::RowProps{ .children = { au::Text{ au::LocalizedString{ "Left" } },
+                                                       au::Text{ au::LocalizedString{ "Middle" } },
+                                                       au::Text{ au::LocalizedString{ "Right" } } },
                                          .flex = au::Flex{ .main_axis = au::MainAxisAlignment::SpaceBetween,
                                                            .cross_axis = au::CrossAxisAlignment::Center } } };
     space_between.modifier.set(
         au::Modifier{}.size(280.0f, 80.0f).background(pal::AURORA_SURFACE).border(1.0f, pal::AURORA_BORDER));
 
     au::Node root = au::Column{
-        GradientTitle{ "Row 控件" },
+        GradientTitle{ "Row widget" },
         gap(12),
-        au::Text{ au::LocalizedString{ "主轴 Start" } },
+        au::Text{ au::LocalizedString{ "Main axis Start" } },
         std::move(start),
         gap(12),
-        au::Text{ au::LocalizedString{ "主轴 SpaceBetween" } },
+        au::Text{ au::LocalizedString{ "Main axis SpaceBetween" } },
         std::move(space_between),
     };
     return run_demo(Card{ std::move(root) }, "Row · Aurora Demo", 560.0f, 460.0f);

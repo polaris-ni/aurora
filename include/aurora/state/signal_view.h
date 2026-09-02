@@ -29,7 +29,7 @@ using ConnectionPtr = std::shared_ptr<Connection>;
  * @note Side-effects: none
  * @note Rebuildable: no
  */
-class SignalViewBase {  // NOLINT(cppcoreguidelines-special-member-functions)
+class SignalViewBase { // NOLINT(cppcoreguidelines-special-member-functions)
   public:
     // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
     virtual ~SignalViewBase() = default;

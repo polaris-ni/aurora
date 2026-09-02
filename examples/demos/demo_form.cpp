@@ -8,22 +8,22 @@ auto main() -> int {
 
     au::FormField name_field{ au::Node{ std::shared_ptr<au::Widget>(name_input) },
                               [name_input]() -> std::string { return name_input->value(); },
-                              au::validators::required("姓名不能为空") };
+                              au::validators::required("Name cannot be empty") };
     au::FormField email_field{ au::Node{ std::shared_ptr<au::Widget>(email_input) },
                                [email_input]() -> std::string { return email_input->value(); },
-                               au::validators::combine({ au::validators::required("邮箱不能为空"),
-                                                         au::validators::email("邮箱格式非法") }) };
+                               au::validators::combine({ au::validators::required("Email cannot be empty"),
+                                                         au::validators::email("Email format invalid") }) };
 
     std::vector<au::Node> fields;
     fields.emplace_back(std::move(name_field));
     fields.emplace_back(std::move(email_field));
-    auto form = std::make_shared<au::Form>(std::move(fields), []() -> void { AURORA_LOG_INFO("demo", "提交成功!"); });
+    auto form = std::make_shared<au::Form>(std::move(fields), []() -> void { AURORA_LOG_INFO("demo", "Submit success!"); });
 
-    au::Button submit{ au::ButtonProps{ .label = "提交" } };
-    submit.on_click = [form]() -> void { AURORA_LOG_INFO("demo", form->submit() ? "通过" : "验证失败"); };
+    au::Button submit{ au::ButtonProps{ .label = "Submit" } };
+    submit.on_click = [form]() -> void { AURORA_LOG_INFO("demo", form->submit() ? "Pass" : "Validation failed"); };
 
     au::Node root = au::Column{
-        GradientTitle{ "Form 表单验证" },
+        GradientTitle{ "Form validation" },
         gap(12),
         au::Node{ std::shared_ptr<au::Widget>(form) },
         gap(12),

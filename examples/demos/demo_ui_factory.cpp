@@ -6,10 +6,10 @@
 
 auto main() -> int {
     au::Column root;
-    au::ui::label(root, "Aurora UI 工厂层 Demo");
-    au::ui::label(root, "下方控件由 au::ui:: 工厂自动加入根容器");
-    au::ui::button(root, "点我", au::ButtonProps{}, []() -> void { /* 演示：点击无副作用 */ });
-    au::ui::input(root, "可编辑文本");
+    au::ui::label(root, "Aurora UI factory layer demo");
+    au::ui::label(root, "Controls below are automatically added to root container by au::ui:: factory");
+    au::ui::button(root, "Click me", au::ButtonProps{}, []() -> void { /* 演示：点击无副作用 */ });
+    au::ui::input(root, "Editable text");
     au::ui::checkbox(root, au::Reactive{ true });
     au::ui::slider(root, au::Reactive{ 0.5 });
 

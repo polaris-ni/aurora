@@ -307,16 +307,16 @@ inline auto palette_of(int seed) -> std::pair<Color, Color> {
 
 inline auto subcategories_of(const std::string &cat) -> std::vector<std::string> {
     if (cat == "apps") {
-        return { "社交", "效率", "工具", "摄影", "通讯", "财务" };
+        return { "Social", "Productivity", "Tools", "Photography", "Communication", "Finance" };
     }
     if (cat == "games") {
-        return { "动作", "益智", "策略", "休闲", "竞速" };
+        return { "Action", "Puzzle", "Strategy", "Casual", "Racing" };
     }
     if (cat == "movies") {
-        return { "新上线", "热门", "高分", "喜剧", "动作" };
+        return { "New releases", "Popular", "Top rated", "Comedy", "Action" };
     }
     if (cat == "books") {
-        return { "小说", "非虚构", "漫画", "教材", "言情" };
+        return { "Novels", "Non-fiction", "Comics", "Textbooks", "Romance" };
     }
     return {};
 }
@@ -361,8 +361,9 @@ inline auto default_local_catalog() -> CatalogPtr {
             a.color_b = pal.second;
             a.icon = make_app_icon(pal.first, pal.second, static_cast<int>(rng()));
             a.is_app = (cat == "apps" || cat == "games");
-            a.description = "这是一款" + a.category + "类应用：" + a.name + "。它提供流畅的体验与精美的界面，由 " +
-                            a.developer + " 精心打造。";
+            a.description = "This is a " + a.category + " app:" + a.name +
+                            ". It offers a smooth experience and beautiful interface, created by " + a.developer +
+                            " with care.";
             items.push_back(std::move(a));
             ++n;
         }
@@ -460,12 +461,13 @@ class PlayRepository {
     [[nodiscard]] auto reviews(const std::string &id) const -> std::vector<Review> {
         std::vector<Review> out;
         std::mt19937 rng(std::hash<std::string>{}(id));
-        static const std::vector<std::string> users = {
-            "Alex", "Sam", "李雷", "韩梅", "Jordan", "Priya", "Tom", "小林"
+        static const std::vector<std::string> users = { "Alex",   "Sam",   "Li Lei", "Han Mei",
+                                                        "Jordan", "Priya", "Tom",    "Xiao Lin" };
+        static const std::vector<std::string> texts = {
+            "Very useful, beautiful interface!",   "A few minor bugs, but overall good.",
+            "Must-have app, highly recommended.",  "Occasionally slow to load, hope to optimize.",
+            "Rich features, beyond expectations.", "Comfortable design, smooth experience."
         };
-        static const std::vector<std::string> texts = { "非常好用，界面漂亮！", "有些小 bug，但整体不错。",
-                                                        "必备应用，强烈推荐。", "加载偶尔慢，希望优化。",
-                                                        "功能丰富，超出预期。", "设计很舒服，体验流畅。" };
         const int k = 3 + static_cast<int>(rng() % 3);
         for (int i = 0; i < k; ++i) {
             Review r;

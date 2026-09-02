@@ -5,8 +5,8 @@
 
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
-#include "aurora/window/surface.h"      // WindowStyleOptions / EventHandler / WindowStateHandler / WindowModeHandler
-#include "aurora/window/window_state.h" // WindowState / WindowMode
+#include "aurora/window/surface.h"
+#include "aurora/window/window_state.h"
 
 // 共享 Win32 窗口宿主：仅依赖 Windows SDK（user32/gdi32），零三方依赖。
 // 把「窗口创建 / 消息泵 / 事件翻译 / DPI / WM_PAINT·WM_SIZE 同步重渲染 / 白闪修复刷」

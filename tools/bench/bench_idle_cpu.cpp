@@ -1,10 +1,12 @@
-// 空闲 CPU 基准（非 CTest）：验证事件驱动帧循环的静态界面 CPU 占用与活跃帧节流。
+// Idle-CPU benchmark (not CTest): verifies the CPU usage of the event-driven frame loop on a static
+// UI and the throttling of active frames.
 //
-// 场景 ①（idle）：静态文本场景运行 ~3 秒（power_saving 默认开），经 GetProcessTimes
-// 计算「进程 CPU 时间 / 墙钟」占比，验收目标 < 5%（改造前忙轮询恒 ≈ 100% 单核）。
-// 场景 ②（active）：每帧强制标脏（模拟持续动画），验证帧率被钳制在 max_fps 附近，
-// 而非旧忙轮询的不限速空转。
-// 用法：./bench_idle_cpu（无 Win32 环境直接跳过，返回 0）
+// Scenario ① (idle): run a static-text scene for ~3 seconds (power_saving on by default) and compute
+// the "process CPU time / wall clock" ratio via GetProcessTimes; the acceptance target is < 5%
+// (before the rework, busy polling stayed at ~100% of one core).
+// Scenario ② (active): force a dirty mark every frame (simulating continuous animation) to verify
+// the frame rate is clamped near max_fps instead of the old unbounded busy-polling spin.
+// Usage: ./bench_idle_cpu (skipped with return code 0 when there is no Win32 environment)
 #include "aurora/aurora.h"
 
 #include "bench_common.h"
@@ -25,7 +27,7 @@
 
 namespace {
 #ifdef AURORA_BACKEND_WIN32
-// 进程累计 CPU 时间（kernel + user，毫秒）。
+// Cumulative process CPU time (kernel + user, in milliseconds).
 auto process_cpu_ms() -> double {
     FILETIME create{};
     FILETIME exit_t{};
@@ -38,19 +40,19 @@ auto process_cpu_ms() -> double {
         ULARGE_INTEGER u;
         u.LowPart = ft.dwLowDateTime;
         u.HighPart = ft.dwHighDateTime;
-        return static_cast<double>(u.QuadPart) / 10000.0; // 100ns → ms
+        return static_cast<double>(u.QuadPart) / 10000.0; // 100ns -> ms
     };
     return to_ms(kernel) + to_ms(user);
 }
 
 struct RunResult {
-    double cpu_ratio = 0.0; ///< 进程 CPU 时间 / 墙钟
-    double fps = 0.0;       ///< 有效渲染帧率（idle 跳帧不计）
+    double cpu_ratio = 0.0; ///< process CPU time / wall clock
+    double fps = 0.0;       ///< effective render frame rate (idle skipped frames not counted)
     double wakeup_per_s = 0.0;
     std::size_t total_frames = 0;
 };
 
-// 运行一个场景 duration_ms 后经 WM_CLOSE 退出，返回 CPU 占比与帧统计。
+// Run a scenario for duration_ms, then exit via WM_CLOSE; returns the CPU ratio and frame stats.
 auto run_scenario(bool force_redraw_each_frame, int duration_ms) -> RunResult {
     au::FrameStats::instance().reset();
     au::Scene scene{ au::Text("bench_idle_cpu: static scene") };
@@ -62,7 +64,8 @@ auto run_scenario(bool force_redraw_each_frame, int duration_ms) -> RunResult {
         return {};
     }
     au::Application app{ std::move(scene), std::move(win_res.value()), w_opts };
-    // 到时经 WM_CLOSE 结束帧循环（定时任务本身即唤醒源：idle 循环睡到到期时刻）。
+    // End the frame loop at the deadline via WM_CLOSE (the timer task itself is a wakeup source:
+    // the idle loop sleeps until the deadline).
     auto *hwnd = static_cast<HWND>(app.window()->surface().native_handle());
     (void)app.scheduler().set_timeout(std::chrono::milliseconds(duration_ms), [hwnd]() -> void {
         if (hwnd) {
@@ -70,10 +73,12 @@ auto run_scenario(bool force_redraw_each_frame, int duration_ms) -> RunResult {
         }
     });
     if (force_redraw_each_frame) {
-        // 模拟持续重绘（如视频/每帧变化内容）：关闭脏追踪 → 每帧全绘，
-        // has_pending_dirty 恒真 → 活跃帧路径按 max_fps 帧预算节流（而非旧忙轮询不限速）。
-        // 注：在 on_frame 里手动标脏会被同帧 present 消费，决策时已无脏；
-        // 持续重绘场景的配套 opt-out 即 enable_dirty_tracking(false)（或 power_saving=false）。
+        // Simulate continuous redraw (e.g. video / per-frame changing content): disable dirty
+        // tracking -> full paint every frame, has_pending_dirty is always true -> the active-frame
+        // path throttles by the max_fps frame budget (instead of the old unbounded busy polling).
+        // Note: marking dirty manually inside on_frame is consumed by the same frame's present, so
+        // no dirty remains at decision time; the companion opt-out for continuous-redraw scenarios
+        // is enable_dirty_tracking(false) (or power_saving=false).
         app.window()->enable_dirty_tracking(false);
     }
     const double cpu0 = process_cpu_ms();
@@ -101,7 +106,7 @@ auto main() -> int {
     au::enable_dpi_awareness();
     int failures = 0;
 
-    // ---- 场景 ①：静态界面 idle（验收：CPU 占比 < 5%）----
+    // ---- scenario 1: static UI idle (acceptance: CPU ratio < 5%) ----
     const RunResult idle = run_scenario(false, 3000);
     AURORA_LOG_RAW("bench", "[idle 3s]   cpu ", aurora::bench::ffmt(1, idle.cpu_ratio * 100.0), "% | render fps ",
                    aurora::bench::ffmt(1, idle.fps), " | wakeup/s ", aurora::bench::ffmt(1, idle.wakeup_per_s), "\n");
@@ -112,11 +117,13 @@ auto main() -> int {
         AURORA_LOG_RAW("bench", "[idle 3s]   PASS: cpu ratio < 5%\n");
     }
 
-    // ---- 场景 ②：持续重绘 active（验收：帧率钳制在 max_fps=60 附近，非无限空转）----
+    // ---- scenario 2: continuous-redraw active (acceptance: frame rate clamped near max_fps=60,
+    // not an unbounded spin) ----
     const RunResult active = run_scenario(true, 3000);
     AURORA_LOG_RAW("bench", "[active 3s] cpu ", aurora::bench::ffmt(1, active.cpu_ratio * 100.0), "% | render fps ",
                    aurora::bench::ffmt(1, active.fps), "\n");
-    // 容差放宽（vsync/调度粒度/慢机器）：30 ~ 90 fps 视为「已节流且仍在渲染」。
+    // Tolerance is relaxed (vsync / scheduling granularity / slow machines): 30 ~ 90 fps counts as
+    // "throttled and still rendering".
     if (active.fps < 30.0 || active.fps > 90.0) {
         AURORA_LOG_RAW("bench", "[active 3s] FAIL: fps not clamped near max_fps=60\n");
         ++failures;

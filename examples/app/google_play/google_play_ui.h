@@ -121,10 +121,10 @@ inline auto tab_category(int tab) -> std::string_view {
 
 inline auto tab_label(int tab) -> std::string_view {
     switch (tab) {
-    case 1: return "游戏";
-    case 2: return "影音";
-    case 3: return "图书";
-    default: return "应用";
+    case 1: return "Games";
+    case 2: return "Movies & Music";
+    case 3: return "Books";
+    default: return "Apps";
     }
 }
 
@@ -924,7 +924,7 @@ class SectionHeader : public au::LeafWidget {
         p.draw_text(au::Rect{ .origin = au::Point{ .x = b.origin.x + s + 8.0f, .y = b.origin.y },
                               .size = au::Size{ .width = b.size.width - s - 80.0f, .height = b.size.height } },
                     title, au::Font{ .size_pt = 17.0f, .weight = 700 }, th.text);
-        const std::string more = "查看全部";
+        const std::string more = "See all";
         const float mw = au::render::FontEngine::measure_width(more, au::Font{ .size_pt = 13.0f });
         draw_chevron_right(
             p,
@@ -1158,7 +1158,7 @@ class BodyView : public au::Container {
 
         // 首屏骨架屏：加载期用微光占位替代真实内容
         if (GpClock::now() < m_skeleton_until) {
-            auto sk = std::make_shared<SkeletonScreen>();
+            const auto sk = std::make_shared<SkeletonScreen>();
             sk->m_dark = m_dark;
             add(au::Node{ sk });
             return c.constrain(au::Size{ .width = w, .height = 760.0f });
@@ -1169,13 +1169,13 @@ class BodyView : public au::Container {
         const std::string q = m_search->get();
 
         if (!q.empty()) {
-            add(make_header("搜索", 0));
-            auto res = m_repo->search(q);
+            add(make_header("Search", 0));
+            const auto res = m_repo->search(q);
             if (res.empty()) {
                 const GPTheme th = gp_theme(m_dark != nullptr && m_dark->get());
-                auto empty =
+                const auto empty =
                     std::make_shared<au::Canvas>(300.0f, 120.0f, [th](au::Painter &p, const au::Rect &b) -> void {
-                        p.draw_text(au::Rect{ .origin = b.origin, .size = b.size }, "未找到相关应用",
+                        p.draw_text(au::Rect{ .origin = b.origin, .size = b.size }, "No related apps found",
                                     au::Font{ .size_pt = 15.0f }, th.text_secondary);
                     });
                 add(au::Node{ empty });
@@ -1183,8 +1183,8 @@ class BodyView : public au::Container {
                 add(make_grid(res, (w > 760.0f) ? 4 : 3));
             }
         } else {
-            const std::string cat = std::string(tab_category(tab));
-            add(make_header("精品推荐", cat_icon(cat)));
+            const auto cat = std::string(tab_category(tab));
+            add(make_header("Featured", cat_icon(cat)));
             auto feat = m_repo->featured();
             std::vector<gp::AppItem> fcat;
             for (const auto &a : feat) {
@@ -1197,7 +1197,7 @@ class BodyView : public au::Container {
             }
             add(make_banner_carousel(fcat));
 
-            add(make_header("为你推荐", cat_icon(cat)));
+            add(make_header("Recommended for you", cat_icon(cat)));
             const auto rec = m_repo->list_by_category(cat);
             add(make_reco_row(rec));
 
@@ -1211,7 +1211,7 @@ class BodyView : public au::Container {
 
   private:
     auto make_header(const std::string &title, int icon) const -> au::Node {
-        auto h = std::make_shared<SectionHeader>();
+        const auto h = std::make_shared<SectionHeader>();
         h->title = title;
         h->icon = icon;
         h->m_dark = m_dark;
@@ -1220,10 +1220,10 @@ class BodyView : public au::Container {
 
     auto make_grid(const std::vector<gp::AppItem> &items, int cols) const -> au::Node {
         auto ptr = std::make_shared<std::vector<gp::AppItem>>(items);
-        auto g = std::make_shared<au::GridView>(
+        const auto g = std::make_shared<au::GridView>(
             static_cast<int>(ptr->size()), cols,
             [ptr, this](int i) -> au::Node {
-                auto cell = std::make_shared<AppCell>();
+                const auto cell = std::make_shared<AppCell>();
                 cell->m_item = &ptr->at(i);
                 cell->on_open = m_on_open;
                 cell->m_dark = m_dark;
@@ -1416,14 +1416,14 @@ class AppShell : public au::Container {
     auto build_top_bar(const au::BuildContext &ctx) -> au::Node {
         (void)ctx;
         const GPTheme th = gp_theme(m_dark != nullptr && m_dark->get());
-        auto row = std::make_shared<au::Row>();
+        const auto row = std::make_shared<au::Row>();
         row->modifier = au::Modifier{}.background(th.surface_3).border(1.0f, th.divider);
 
-        auto menu = std::make_shared<au::Canvas>(
+        const auto menu = std::make_shared<au::Canvas>(
             40.0f, 40.0f, [th](au::Painter &p, const au::Rect &b) -> void { draw_menu_icon(p, b, th.text_secondary); });
         row->add(au::Node{ menu });
 
-        auto title = std::make_shared<au::Text>(au::TextProps{
+        const auto title = std::make_shared<au::Text>(au::TextProps{
             .content = "Google Play",
             .font = au::Font{ .size_pt = 20.0f, .weight = 700 },
             .text_color = th.primary,
@@ -1432,27 +1432,30 @@ class AppShell : public au::Container {
             au::Modifier{}.padding(au::EdgeInsets{ .left = 0.0f, .top = 8.0f, .right = 0.0f, .bottom = 8.0f });
         row->add(au::Node{ title });
 
-        auto search_row = std::make_shared<au::Row>();
+        const auto search_row = std::make_shared<au::Row>();
         search_row->modifier =
             au::Modifier{}
                 .expand()
                 .background(th.search_bg)
                 .clip_rounded(22.0f)
                 .padding(au::EdgeInsets{ .left = 8.0f, .top = 12.0f, .right = 8.0f, .bottom = 12.0f });
-        auto search_icon = std::make_shared<au::Canvas>(20.0f, 20.0f, [th](au::Painter &p, const au::Rect &b) -> void {
-            draw_search_icon(p, b, th.text_secondary);
-        });
+        const auto search_icon =
+            std::make_shared<au::Canvas>(20.0f, 20.0f, [th](au::Painter &p, const au::Rect &b) -> void {
+                draw_search_icon(p, b, th.text_secondary);
+            });
         search_row->add(au::Node{ search_icon });
-        auto input = std::make_shared<au::TextInput>(au::TextInputProps{ .placeholder = "搜索应用和游戏" });
+        const auto input =
+            std::make_shared<au::TextInput>(au::TextInputProps{ .placeholder = "Search apps and games" });
         input->set_on_changed([this](const std::string &t) -> void { m_search.set(t); });
         input->modifier = au::Modifier{}.expand();
         search_row->add(au::Node{ input });
         row->add(au::Node{ search_row });
 
-        auto theme_btn = std::make_shared<au::Canvas>(40.0f, 40.0f, [this](au::Painter &p, const au::Rect &b) -> void {
-            const bool dark = m_dark != nullptr && m_dark->get();
-            draw_theme_icon(p, b, dark);
-        });
+        const auto theme_btn =
+            std::make_shared<au::Canvas>(40.0f, 40.0f, [this](au::Painter &p, const au::Rect &b) -> void {
+                const bool dark = m_dark != nullptr && m_dark->get();
+                draw_theme_icon(p, b, dark);
+            });
         theme_btn->modifier = au::Modifier{}.clickable([this]() -> void {
             if (m_dark != nullptr) {
                 m_dark->set(!m_dark->get());
@@ -1544,7 +1547,7 @@ class DetailPage : public au::Container {
             110.0f, 16.0f, [app](au::Painter &p, const au::Rect &b) -> void { paint_stars(p, b, app.rating); });
         info->add(au::Node{ stars });
 
-        auto btn = std::make_shared<au::Button>("安装");
+        auto btn = std::make_shared<au::Button>("Install");
         btn->background(th.primary);
         btn->text_color(th.on_primary);
         btn->set_corner_radius(20.0f);
@@ -1553,10 +1556,10 @@ class DetailPage : public au::Container {
             const bool now = !m_installed.get();
             m_installed.set(now);
             if (now) {
-                btn->set_label("打开");
+                btn->set_label("Open");
                 btn->background(au::Color{ 0x0F, 0x9D, 0x58, 0xFF });
             } else {
-                btn->set_label("安装");
+                btn->set_label("Install");
                 btn->background(th.primary);
             }
         });
@@ -1579,7 +1582,7 @@ class DetailPage : public au::Container {
             au::EdgeInsets{ .left = 0.0f, .top = 12.0f, .right = 0.0f, .bottom = 0.0f });
         right->add(au::Node{ std::make_shared<au::Canvas>(
             120.0f, 16.0f, [app](au::Painter &p, const au::Rect &b) -> void { paint_stars(p, b, app.rating); }) });
-        right->add(text_node(app.downloads + " 次下载", 12.0f, 400, th.text_secondary));
+        right->add(text_node(app.downloads + " downloads", 12.0f, 400, th.text_secondary));
         rating_card->add(au::Node{ right });
         col->add(au::Node{ rating_card });
 
@@ -1588,7 +1591,7 @@ class DetailPage : public au::Container {
         auto shot_row = std::make_shared<au::LazyRow>(
             static_cast<int>(shots_ptr->size()),
             [shots_ptr, th](int i) -> au::Node {
-                auto c = std::make_shared<au::Canvas>(
+                const auto c = std::make_shared<au::Canvas>(
                     250.0f, 140.0f, [shots_ptr, th, i](au::Painter &p, const au::Rect &b) -> void {
                         p.draw_shadow(b, 0.0f, 3.0f, 8.0f, th.shadow);
                         p.fill_rounded_rect(b, 12.0f, th.surface);
@@ -1622,17 +1625,17 @@ class DetailPage : public au::Container {
                               .clip_rounded(16.0f)
                               .padding(au::EdgeInsets{ .left = 12.0f, .top = 12.0f, .right = 12.0f, .bottom = 12.0f });
         auto add_row = [&](const std::string &k, const std::string &v) -> void {
-            auto r = std::make_shared<au::Row>();
+            const auto r = std::make_shared<au::Row>();
             r->add(text_node(k, 13.0f, 400, th.text_secondary));
             auto val = text_node(v, 13.0f, 600, th.text);
             val.widget().modifier = au::Modifier{}.expand();
             r->add(val);
             about->add(au::Node{ r });
         };
-        add_row("大小", std::to_string(static_cast<int>(app.size_mb)) + " MB");
-        add_row("下载量", app.downloads);
-        add_row("版本", app.version);
-        add_row("更新时间", app.updated);
+        add_row("Size", std::to_string(static_cast<int>(app.size_mb)) + " MB");
+        add_row("Downloads", app.downloads);
+        add_row("Version", app.version);
+        add_row("Updated", app.updated);
         auto about_wrap = au::Node{ about };
         about_wrap.widget().modifier = au::Modifier{}.fill_max_width().padding(
             au::EdgeInsets{ .left = 8.0f, .top = 16.0f, .right = 8.0f, .bottom = 16.0f });
@@ -1640,7 +1643,7 @@ class DetailPage : public au::Container {
 
         // 评价
         {
-            auto hd = text_node("评价", 16.0f, 700, th.text);
+            auto hd = text_node("Reviews", 16.0f, 700, th.text);
             hd.widget().modifier = au::Modifier{}.fill_max_width().padding(
                 au::EdgeInsets{ .left = 8.0f, .top = 16.0f, .right = 4.0f, .bottom = 16.0f });
             col->add(hd);

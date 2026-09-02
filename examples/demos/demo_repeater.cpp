@@ -31,9 +31,9 @@ auto main() -> int {
     b_add.on_click = [todos]() -> void { todos->dispatch(au::Action{ "add", std::string{ "new task" } }); };
 
     au::Node root = au::Column{
-        GradientTitle{ "Repeater 控件" },
+        GradientTitle{ "Repeater widget" },
         gap(12),
-        au::Text{ au::LocalizedString{ "由 State<vector<T>> 驱动的列表" } },
+        au::Text{ au::LocalizedString{ "List driven by State<vector<T>>" } },
         au::Repeater<Todo>(signal,
                            [](const Todo &t, int) -> au::Row {
                                const std::string mark = t.done ? "[x] " : "[ ] ";

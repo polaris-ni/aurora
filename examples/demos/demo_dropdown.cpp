@@ -2,7 +2,7 @@
 #include "demo_common.h"
 
 auto main() -> int {
-    auto label = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{ "已选: Medium" });
+    auto label = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{ "Selected: Medium" });
 
     au::Dropdown dd{ std::vector<std::string>{ "Small", "Medium", "Large", "X-Large" }, 1 };
     dd.set_on_change([label](int i) -> void {
@@ -11,11 +11,11 @@ auto main() -> int {
             return;
         }
         // NOLINTNEXTLINE(*-pro-bounds-constant-array-index)
-        label->set(au::LocalizedString{ std::string("已选: ") + aurora_names[static_cast<std::size_t>(i)] });
+        label->set(au::LocalizedString{ std::string("Selected: ") + aurora_names[static_cast<std::size_t>(i)] });
     });
 
     au::Node root = au::Column{
-        GradientTitle{ "Dropdown 下拉选择" },
+        GradientTitle{ "Dropdown selector" },
         gap(12),
         std::move(dd),
         gap(12),

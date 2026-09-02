@@ -6,7 +6,7 @@
 #include <string_view>
 #include <type_traits>
 
-#include "aurora/core/types.h" // Rect
+#include "aurora/core/types.h"
 
 namespace aurora {
 

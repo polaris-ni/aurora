@@ -260,7 +260,7 @@ FilesystemBackend::FilesystemBackend(FilesystemOptions opts) : m_opts(std::move(
 
 auto FilesystemBackend::put_record(const std::string &id, const StorageRecord &rec) -> Result<void> {
     if (!m_open) {
-        return Result<void>{ make_error(ErrorCode::StorageBackendUnavailable, "文件系统后端未打开: " + id) };
+        return Result<void>{ make_error(ErrorCode::StorageBackendUnavailable, "Filesystem backend not opened: " + id) };
     }
     const auto enc = b64url_encode(id);
     const auto json_path = m_root / (enc + ".json");
@@ -277,7 +277,8 @@ auto FilesystemBackend::put_record(const std::string &id, const StorageRecord &r
         const auto &bytes = std::get<StorageBytes>(rec.payload);
         std::error_code ec;
         if (!atomic_write_bytes(bin_path, bytes, ec)) {
-            return Result<void>{ make_error(ErrorCode::StorageIoError, "写入二进制 sidecar 失败: " + ec.message()) };
+            return Result<void>{ make_error(ErrorCode::StorageIoError,
+                                            "Failed to write binary sidecar: " + ec.message()) };
         }
         env["blob_ref"] = enc + ".bin";
     } else {
@@ -290,26 +291,28 @@ auto FilesystemBackend::put_record(const std::string &id, const StorageRecord &r
 
     std::error_code ec;
     if (!atomic_write_text(json_path, env.dump(2), ec)) {
-        return Result<void>{ make_error(ErrorCode::StorageIoError, "写入记录文件失败: " + ec.message()) };
+        return Result<void>{ make_error(ErrorCode::StorageIoError, "Failed to write record file: " + ec.message()) };
     }
     return Result<void>{};
 }
 
 auto FilesystemBackend::get_record(const std::string &id) -> Result<StorageRecord> {
     if (!m_open) {
-        return Result<StorageRecord>{ make_error(ErrorCode::StorageBackendUnavailable, "文件系统后端未打开: " + id) };
+        return Result<StorageRecord>{ make_error(ErrorCode::StorageBackendUnavailable,
+                                                 "Filesystem backend not opened: " + id) };
     }
     const auto enc = b64url_encode(id);
     const auto json_path = m_root / (enc + ".json");
 
     std::error_code ec;
     if (!std::filesystem::exists(json_path, ec)) {
-        return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordNotFound, "记录文件不存在: " + id) };
+        return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordNotFound,
+                                                 "Record file does not exist: " + id) };
     }
 
     std::ifstream f(json_path, std::ios::binary);
     if (!f) {
-        return Result<StorageRecord>{ make_error(ErrorCode::StorageIoError, "无法打开记录文件: " + id) };
+        return Result<StorageRecord>{ make_error(ErrorCode::StorageIoError, "Failed to open record file: " + id) };
     }
     std::stringstream ss;
     ss << f.rdbuf();
@@ -318,10 +321,10 @@ auto FilesystemBackend::get_record(const std::string &id) -> Result<StorageRecor
     try {
         env = Json::parse(ss.str());
     } catch (...) {
-        return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordCorrupt, "记录 JSON 解析失败: " + id) };
+        return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordCorrupt, "Record JSON parse failed: " + id) };
     }
     if (!env.is_object()) {
-        return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordCorrupt, "记录结构非法: " + id) };
+        return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordCorrupt, "Record structure invalid: " + id) };
     }
 
     StorageRecord rec;
@@ -335,11 +338,13 @@ auto FilesystemBackend::get_record(const std::string &id) -> Result<StorageRecor
     if (rec.encoding == StorageEncoding::Binary) {
         const auto bin_path = m_root / (enc + ".bin");
         if (!std::filesystem::exists(bin_path, ec)) {
-            return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordCorrupt, "二进制 sidecar 缺失: " + id) };
+            return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordCorrupt,
+                                                     "Binary sidecar missing: " + id) };
         }
         std::ifstream bf(bin_path, std::ios::binary);
         if (!bf) {
-            return Result<StorageRecord>{ make_error(ErrorCode::StorageIoError, "无法打开二进制 sidecar: " + id) };
+            return Result<StorageRecord>{ make_error(ErrorCode::StorageIoError,
+                                                     "Failed to open binary sidecar: " + id) };
         }
         const std::string content((std::istreambuf_iterator<char>(bf)), std::istreambuf_iterator<char>());
         std::vector<std::byte> bytes(content.size());
@@ -350,7 +355,8 @@ auto FilesystemBackend::get_record(const std::string &id) -> Result<StorageRecor
         rec.blob_ref = enc + ".bin";
     } else {
         if (!env.contains("payload")) {
-            return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordCorrupt, "JSON 记录缺少 payload: " + id) };
+            return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordCorrupt,
+                                                     "JSON record missing payload: " + id) };
         }
         rec.payload = env["payload"];
     }
@@ -359,7 +365,7 @@ auto FilesystemBackend::get_record(const std::string &id) -> Result<StorageRecor
 
 auto FilesystemBackend::remove(const std::string &id) -> Result<void> {
     if (!m_open) {
-        return Result<void>{ make_error(ErrorCode::StorageBackendUnavailable, "文件系统后端未打开: " + id) };
+        return Result<void>{ make_error(ErrorCode::StorageBackendUnavailable, "Filesystem backend not opened: " + id) };
     }
     const auto enc = b64url_encode(id);
     std::error_code ec;
@@ -371,7 +377,7 @@ auto FilesystemBackend::remove(const std::string &id) -> Result<void> {
 auto FilesystemBackend::list() -> Result<std::vector<std::string>> {
     if (!m_open) {
         return Result<std::vector<std::string>>{ make_error(ErrorCode::StorageBackendUnavailable,
-                                                            "文件系统后端未打开") };
+                                                            "Filesystem backend not opened") };
     }
     std::vector<std::string> ids;
     std::error_code ec;
@@ -387,7 +393,7 @@ auto FilesystemBackend::list() -> Result<std::vector<std::string>> {
     }
     if (ec) {
         return Result<std::vector<std::string>>{ make_error(ErrorCode::StorageIoError,
-                                                            "列举目录失败: " + ec.message()) };
+                                                            "Failed to enumerate directory: " + ec.message()) };
     }
     return Result<std::vector<std::string>>{ std::move(ids) };
 }

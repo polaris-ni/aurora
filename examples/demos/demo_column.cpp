@@ -16,12 +16,12 @@ auto main() -> int {
         au::Modifier{}.size(240.0f, 160.0f).background(pal::AURORA_SURFACE).border(1.0f, pal::AURORA_BORDER));
 
     au::Node root = au::Column{
-        GradientTitle{ "Column 控件" },
+        GradientTitle{ "Column widget" },
         gap(12),
-        au::Text{ au::LocalizedString{ "主轴 Start（顶端排列）" } },
+        au::Text{ au::LocalizedString{ "Main axis Start (top aligned)" } },
         std::move(start),
         gap(12),
-        au::Text{ au::LocalizedString{ "主轴 + 交叉轴 Center" } },
+        au::Text{ au::LocalizedString{ "Main axis + cross axis Center" } },
         std::move(center),
     };
     return run_demo(Card{ std::move(root) }, "Column · Aurora Demo", 560.0f, 560.0f);

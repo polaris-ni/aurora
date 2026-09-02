@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstring>
 
-#include "aurora/core/string_util.h" // internal::string_format（收敛 snprintf 样板）
+#include "aurora/core/string_util.h"
 
 namespace aurora {
 

@@ -9,7 +9,7 @@
 #include "aurora/state/binding.h"
 #include "aurora/state/reactive.h"
 #include "aurora/state/signal_view.h"
-#include "aurora/theming/theme_scope.h" // inherit_theme：active_color 未显式设置时跟随主题 primary
+#include "aurora/theming/theme_scope.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {

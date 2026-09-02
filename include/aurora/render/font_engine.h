@@ -8,8 +8,8 @@
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/core/types.h"
-#include "aurora/render/painter.h"      // Painter 位于 aurora 命名空间；FontEngine 依赖其混合接口
-#include "aurora/render/text_aa_mode.h" // TextAAMode 单一定义（避免与 font_engine.h 重复定义）
+#include "aurora/render/painter.h"
+#include "aurora/render/text_aa_mode.h"
 
 namespace aurora::render {
 

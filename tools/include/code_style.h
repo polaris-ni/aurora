@@ -1,8 +1,9 @@
 // ============================================================================
-// code_style.h — CodeStyle 字符串解析原语
+// code_style.h — CodeStyle string-parsing primitive
 // ----------------------------------------------------------------------------
-// 由 aurora_cli / aurora_mcp 复用，避免「"step" -> StepByStep / "di" -> DesignatedInit」
-// 两份重复的 if-else 解析。枚举定义在 include/aurora/widget/codegen.h。
+// Reused by aurora_cli / aurora_mcp to avoid two duplicate if-else parsers for
+// "step" -> StepByStep / "di" -> DesignatedInit. The enum is defined in
+// include/aurora/widget/codegen.h.
 // ============================================================================
 #pragma once
 
@@ -14,7 +15,7 @@ namespace aurora::tools {
 
 using serialization::CodeStyle;
 
-// 将 to-code / to-yaml 的 style 参数解析为 CodeStyle 枚举；未知值回退 Fluent。
+// Parse the style argument of to-code / to-yaml into a CodeStyle enum; unknown values fall back to Fluent.
 inline auto parse_code_style(const std::string &style_str) -> CodeStyle {
     auto style = CodeStyle::Fluent;
     if (style_str == "step") {

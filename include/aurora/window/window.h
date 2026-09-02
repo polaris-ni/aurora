@@ -10,21 +10,21 @@
 #include "aurora/app/perf_overlay.h"
 #include "aurora/core/assert.h"
 #include "aurora/core/result.h"
-#include "aurora/core/strict_mode.h" // strict_mode()：StrictMode 影子校验
+#include "aurora/core/strict_mode.h"
 #include "aurora/core/thread.h"
-#include "aurora/core/transform.h" // Matrix2D::from_translate：HUD 层合成
+#include "aurora/core/transform.h"
 #include "aurora/core/types.h"
-#include "aurora/debug/debug_paint.h" // 可视化调试叠层（AURORA_ENABLE_DEBUG 门控；Release 为零开销 no-op）
+#include "aurora/debug/debug_paint.h"
 #include "aurora/environment/environment.h"
 #include "aurora/environment/media_query.h"
 #include "aurora/perf/profiler.h"
-#include "aurora/render/detail/paint_timing.h" // [性能排查] detail::PaintTimer / paint_timing()：整段 widget 绘制计时
+#include "aurora/render/detail/paint_timing.h"
 #include "aurora/render/dirty_region.h"
 #include "aurora/render/painter.h"
 #include "aurora/widget/widget.h"
 #include "aurora/window/surface.h"
-#include "aurora/window/window_chrome.h" // WindowChrome：窗口 chrome 服务（present_root 注入根环境）
-#include "aurora/window/window_state.h"  // WindowState / WindowMode 及纯函数
+#include "aurora/window/window_chrome.h"
+#include "aurora/window/window_state.h"
 
 namespace aurora {
 
@@ -303,7 +303,8 @@ class Window {
     /// @brief 设置当前窗口几何态快照（由 `Application` 在状态变化时调用）。
     auto set_window_mode(WindowMode m) -> void { m_window_mode = m; }
 
-    /// @brief pump 平台事件（→ 经 Surface::set_event_handler 上抛给 Application 集中派发，specification/06-app-platform.md §3.1）。
+    /// @brief pump 平台事件（→ 经 Surface::set_event_handler 上抛给 Application
+    /// 集中派发，specification/06-app-platform.md §3.1）。
     auto pump_events() const -> void { m_surface->poll_platform_events(); }
 
     /// @brief 渲染单帧到后端缓冲（不 swap；present() 才提交）。
@@ -533,9 +534,9 @@ class Window {
     }
     bool m_first_frame = true;                         ///< 首帧强制全绘。
     Size m_last_size{ .width = 0.0f, .height = 0.0f }; ///< 上帧窗口尺寸（resize 检测）。
-    Node m_last_root{};                                ///< 上一次 present 的根（导航切换检测）。
+    Node m_last_root;                                  ///< 上一次 present 的根（导航切换检测）。
     bool m_root_mounted = false;                       ///< 当前根是否已挂载（接线响应式订阅）。
-    Node m_cached_root{};                              ///< 最近一次 present_root 的根，供 resize 同步重渲染。
+    Node m_cached_root;                                ///< 最近一次 present_root 的根，供 resize 同步重渲染。
     bool m_present_wired = false;                      ///< present-request 回调是否已接线到 Surface。
     bool m_presenting = false;                         ///< present_root 重入护栏（同步重渲染回调用）。
     bool m_system_redraw = false; ///< 本次 present_root 由系统重绘请求驱动（WM_PAINT 等）：跳帧时仍须重新上屏。

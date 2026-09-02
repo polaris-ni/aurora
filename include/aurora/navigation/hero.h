@@ -6,7 +6,7 @@
 #include <unordered_set>
 
 #include "aurora/core/types.h"
-#include "aurora/environment/environment.h" // 完整定义 Environment（会随后包含 build_context.h）
+#include "aurora/environment/environment.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -17,7 +17,7 @@ namespace aurora {
  */
 struct HeroEntry {
     Rect bounds{}; ///< 该 Hero 在所属页面内的绝对包围盒（paint 阶段捕获）。
-    Node child;  ///< 共享元素内容（用于覆盖层插值绘制）。
+    Node child;    ///< 共享元素内容（用于覆盖层插值绘制）。
 };
 
 /**
@@ -62,7 +62,8 @@ class Hero : public SingleChild {
         }
     }
     /// @brief 单子控件：序列化重建时取首个子节点作为 child。
-    auto adopt_children(std::vector<Node> &&kids) -> void override { // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+    auto adopt_children(std::vector<Node> &&kids)
+        -> void override { // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
         if (!kids.empty()) {
             m_child = std::move(kids.front());
         }

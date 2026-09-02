@@ -11,9 +11,9 @@
 #include <vector>
 #include <windows.h>
 
-#include "aurora/core/result.h"    // Result, ErrorCode, make_error
-#include "aurora/render/png.h"     // write_png
-#include "aurora/window/swizzle.h" // swizzle_bgra_to_rgba
+#include "aurora/core/result.h"
+#include "aurora/render/png.h"
+#include "aurora/window/swizzle.h"
 
 // PW_RENDERFULLCONTENT 自 Windows 8.1（_WIN32_WINNT >= 0x0603）起才在 winuser.h 中定义。
 // 本项目未全局抬升 _WIN32_WINNT（file_dialog/system_tray 等 TU 仍按 0x0601 编译，且 windows.h 可能被

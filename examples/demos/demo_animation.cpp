@@ -66,11 +66,11 @@ auto main() -> int {
     stage.modifier.set(au::Modifier{}.size(stage_size, stage_size).clip());
 
     au::Node root = au::Column{
-        GradientTitle{ "动画 / Animation" },
+        GradientTitle{ "Animation" },
         gap(12),
-        au::Text{ au::LocalizedString{ "背景色呼吸" } },
+        au::Text{ au::LocalizedString{ "Background color breathing" } },
         au::Node{ box },
-        au::Text{ au::LocalizedString{ "来回缩放" } },
+        au::Text{ au::LocalizedString{ "Ping-pong scaling" } },
         au::Node{ std::move(stage) },
         au::Text{ au::LocalizedString{ "curve@0.5 = " + std::to_string(curved) } },
         au::Text{ au::LocalizedString{ "spring value = " + std::to_string(sprung) } },

@@ -18,14 +18,14 @@
 #endif
 // clang-format off
 #include <windows.h>
-#include <shellapi.h> // 须在 windows.h 之后：WIN32_LEAN_AND_MEAN 会排除其自动包含；EXTERN_C 由 windows.h/winnt.h 提供
+#include <shellapi.h>
 // clang-format on
 #endif
 #include <string>
 
 #include "aurora/app/system_tray.h"
 #include "aurora/core/log.h"
-#include "aurora/core/utf8.h" // internal::utf8_to_wstr（收口 dup-1 重复实现）
+#include "aurora/core/utf8.h"
 
 namespace aurora {
 
@@ -175,13 +175,13 @@ auto SystemTray::Impl::create_window() -> bool {
         wc.hInstance = GetModuleHandleW(nullptr);
         wc.lpszClassName = k_class;
         if (RegisterClassExW(&wc) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-            AURORA_LOG_WARN("system_tray", "RegisterClassExW 失败");
+            AURORA_LOG_WARN("system_tray", "RegisterClassExW failed");
         }
         registered = true;
     }
     hwnd = CreateWindowExW(0, k_class, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), this);
     if (hwnd == nullptr) {
-        AURORA_LOG_WARN("system_tray", "CreateWindowExW(HWND_MESSAGE) 失败");
+        AURORA_LOG_WARN("system_tray", "CreateWindowExW(HWND_MESSAGE) failed");
         return false;
     }
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
@@ -213,7 +213,7 @@ auto SystemTray::Impl::add_icon() -> bool {
         Shell_NotifyIconW(NIM_SETVERSION, &nid);
         visible = true;
     } else {
-        AURORA_LOG_WARN("system_tray", "Shell_NotifyIconW(NIM_ADD) 失败（可能无 shell 会话）");
+        AURORA_LOG_WARN("system_tray", "Shell_NotifyIconW(NIM_ADD) failed (possibly no shell session)");
     }
     return ok != FALSE;
 }

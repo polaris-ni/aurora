@@ -23,32 +23,32 @@ auto main() -> int {
     };
 
     au::Node root = au::Column{
-        GradientTitle{ "OverflowStrategy 溢出策略" },
+        GradientTitle{ "OverflowStrategy" },
         gap(12),
 
         Card{
-            au::Text{ au::LocalizedString{ "Visible（默认）：子内容溢出可见" } },
+            au::Text{ au::LocalizedString{ "Visible (default): overflow child content visible" } },
             gap(8),
             make_overflow_box(au::OverflowStrategy::Visible, "Visible: content overflows"),
         },
         gap(12),
 
         Card{
-            au::Text{ au::LocalizedString{ "Hidden：溢出部分裁剪隐藏" } },
+            au::Text{ au::LocalizedString{ "Hidden: overflow part clipped" } },
             gap(8),
             make_overflow_box(au::OverflowStrategy::Hidden, "Hidden: content clipped"),
         },
         gap(12),
 
         Card{
-            au::Text{ au::LocalizedString{ "Clip：同 Hidden，保留 hit-test（预留语义）" } },
+            au::Text{ au::LocalizedString{ "Clip: same as Hidden, keeps hit-test (reserved semantics)" } },
             gap(8),
             make_overflow_box(au::OverflowStrategy::Clip, "Clip: clipped + hit-test"),
         },
         gap(12),
 
         Card{
-            au::Text{ au::LocalizedString{ "Scroll：溢出可滚动（预留，当前等同 Hidden）" } },
+            au::Text{ au::LocalizedString{ "Scroll: overflow scrollable (reserved, currently same as Hidden)" } },
             gap(8),
             make_overflow_box(au::OverflowStrategy::Scroll, "Scroll: scrollable (placeholder)"),
         },

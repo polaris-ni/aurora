@@ -43,7 +43,7 @@ auto main() -> int {
         au::Scene scene{ au::Text{ au::TextProps{ .content = au::LocalizedString{ "Custom Surface" } } } };
         au::Application app{ std::move(scene), std::make_unique<DemoSurface>() };
         auto r = app.render_to_png("build/demo_custom_surface_custom.png");
-        AURORA_LOG_INFO("demo", "[demo_custom_surface] 自定义 Surface PNG: ", (r ? "OK" : r.error().message));
+        AURORA_LOG_INFO("demo", "[demo_custom_surface] custom Surface PNG: ", (r ? "OK" : r.error().message));
     }
 
     // 方案 B：特化选项经工厂组装 Window 后交给流式 App（Headless 写 PNG，frames(1) 后退出）。

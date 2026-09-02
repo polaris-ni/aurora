@@ -30,9 +30,9 @@ auto main() -> int {
     btn_row.set_gap(12); // 相邻按钮间的水平间距（主轴为水平，真正的 gap）
 
     au::Node root = au::Column{
-        // GradientTitle{ "Button 控件" },
+        // GradientTitle{ "Button widget" },
         // gap(100),
-        au::Text{ au::LocalizedString{ "点击按钮改变计数（运行日志可见）" } },
+        au::Text{ au::LocalizedString{ "Click button to change counter (visible in run log)" } },
         std::move(btn_row),
     };
     return run_demo(Card{ std::move(root) }, "Button · Aurora Demo", 520.0f, 380.0f);

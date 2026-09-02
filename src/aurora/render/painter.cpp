@@ -6,10 +6,10 @@
 #include <cstring>
 #include <utility>
 
-#include "aurora/core/math.h" // saturate / saturate_u8：像素/覆盖度钳制收口
+#include "aurora/core/math.h"
 #include "aurora/perf/counters.h"
 #include "aurora/render/detail/gamma_lut.h"
-#include "aurora/render/detail/paint_timing.h" // [性能排查] detail::PaintTiming / PaintTimer / paint_timing()
+#include "aurora/render/detail/paint_timing.h"
 #include "aurora/render/detail/painter_simd.h"
 #include "aurora/render/detail/painter_simd.inl"
 #include "aurora/render/display_list.h"

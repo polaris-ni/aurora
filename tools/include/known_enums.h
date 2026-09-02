@@ -1,21 +1,25 @@
 // ============================================================================
-// known_enums — 工具链「已知枚举」登记表的单一来源（SSOT）
+// known_enums — single source of truth (SSOT) for the toolchain "known enums" registry
 // ----------------------------------------------------------------------------
-// 消费方：tools/gen/gen_api.cpp（写 aurora_api.json 的 enums 段）、tools/servers/aurora_mcp.cpp、
-//         tools/servers/aurora_cli.cpp、tools/servers/aurora_lsp.cpp（补全与校验）。
+// Consumers: tools/gen/gen_api.cpp (writes the enums section of aurora_api.json),
+//            tools/servers/aurora_mcp.cpp, tools/servers/aurora_cli.cpp,
+//            tools/servers/aurora_lsp.cpp (completion and validation).
 //
-// 本头存在的原因：此前四份文件各抄一份字面量表，已实际漂移且含错值 —— LSP 的
-// `Alignment` 写成 {Leading, Center, Trailing}（真值是 9 个方位）、其余三份缺
-// `DrawerSide` / `Orientation` / `SplitterOrientation` / `ToastPosition`（均为真实属性类型），
-// 且 `LengthKind` / `Curve` / `ColorPalette` 里登记了代码中不存在的取值，
-// 会让 LSP / MCP 向 AI 推荐出编译不过的名字。
+// Why this header exists: previously four files each kept a hand-copied literal table, which had
+// actually drifted and contained wrong values — the LSP's `Alignment` was written as
+// {Leading, Center, Trailing} (the real value has 9 positions), the other three were missing
+// `DrawerSide` / `Orientation` / `SplitterOrientation` / `ToastPosition` (all real property types),
+// and `LengthKind` / `Curve` / `ColorPalette` registered values that do not exist in the code,
+// which would make the LSP / MCP suggest names that do not compile.
 //
-// 维护规则：
-// 1. 键 = 属性描述符里出现的类型名（`prop_descriptors[].type`），不是随手起的名字；
-//    `Curve` 是 `class Curve`（easing.h:39），其取值来自判别枚举 `CurveKind`。
-//    `ColorPalette` 是 `au::colors::` 下的具名常量集（color.h），非 enum。
-// 2. 取值必须与 `include/aurora/**` 中真实成员逐字一致；新增/改名枚举时同步此处。
-//    `tests/test_known_enums.cpp` 会同时守护「取值存在性」与「属性类型覆盖率」。
+// Maintenance rules:
+// 1. Key = the type name appearing in property descriptors (`prop_descriptors[].type`), not an
+//    arbitrary name; `Curve` is `class Curve` (easing.h:39), whose values come from the
+//    discriminating enum `CurveKind`. `ColorPalette` is a set of named constants under
+//    `au::colors::` (color.h), not an enum.
+// 2. Values must match the real members in `include/aurora/**` verbatim; keep this in sync when
+//    adding or renaming enums. `tests/test_known_enums.cpp` guards both "value existence" and
+//    "property type coverage".
 // ============================================================================
 #pragma once
 
@@ -25,11 +29,12 @@
 
 namespace aurora::tools {
 
-/// @brief 已知枚举登记表（键为类型名，值为该类型可用的成员名，均取自代码真值）。
+/// @brief Known-enums registry (key = type name, value = the member names available for that type,
+/// all taken from the real code values).
 [[nodiscard]] inline auto known_enums() -> std::map<std::string, std::vector<std::string>> {
     std::map<std::string, std::vector<std::string>> enums;
 
-    // ---- 布局与对齐 ----
+    // ---- layout and alignment ----
     enums["Alignment"] = { "TopLeft",     "TopCenter",  "TopRight",     "CenterLeft", "Center",
                            "CenterRight", "BottomLeft", "BottomCenter", "BottomRight" };
     enums["MainAxisAlignment"] = { "Start", "Center", "End", "SpaceBetween", "SpaceAround", "SpaceEvenly" };
@@ -38,7 +43,7 @@ namespace aurora::tools {
     enums["StackFit"] = { "Loose", "Expand", "Passthrough" };
     enums["LengthKind"] = { "WrapContent", "Expand", "Fixed", "Fraction" };
 
-    // ---- 文本 ----
+    // ---- text ----
     enums["TextAlign"] = { "Left", "Right", "Center", "Start", "End", "Justify" };
     enums["TextOverflow"] = { "Clip", "Ellipsis", "Fade" };
     enums["TextDecoration"] = { "None", "Underline", "Overline", "LineThrough" };
@@ -47,15 +52,15 @@ namespace aurora::tools {
     };
     enums["FontStyle"] = { "Normal", "Italic" };
 
-    // ---- 图像 / 媒体 ----
+    // ---- image / media ----
     enums["BoxFit"] = { "Fill", "Contain", "Cover", "FitWidth", "FitHeight", "None", "ScaleDown" };
 
-    // ---- 动画（class Curve 的判别枚举 CurveKind）----
+    // ---- animation (CurveKind, the discriminating enum of class Curve) ----
     enums["Curve"] = { "Linear",      "EaseIn",        "EaseOut",        "EaseInOut",   "EaseInSine",
                        "EaseOutSine", "EaseInOutSine", "EaseInQuad",     "EaseOutQuad", "EaseInOutQuad",
                        "EaseInCubic", "EaseOutCubic",  "EaseInOutCubic", "BounceOut",   "Custom" };
 
-    // ---- 输入 ----
+    // ---- input ----
     enums["KeyCode"] = { "Unknown",
                          "A",
                          "B",
@@ -135,13 +140,14 @@ namespace aurora::tools {
                          "F11",
                          "F12" };
 
-    // ---- 控件专属枚举（此前四份登记表均缺失，导致属性值无法校验 / 补全）----
+    // ---- widget-specific enums (previously missing from all four registries, which made property
+    // values impossible to validate / complete) ----
     enums["DrawerSide"] = { "Left", "Right" };
     enums["Orientation"] = { "Horizontal", "Vertical" };
     enums["SplitterOrientation"] = { "Horizontal", "Vertical" };
     enums["ToastPosition"] = { "Bottom", "Top" };
 
-    // ---- 具名颜色（au::colors::AURORA_*，非 enum，供 Color 属性取值提示）----
+    // ---- named colors (au::colors::AURORA_*, not an enum; provides value hints for the Color property) ----
     enums["ColorPalette"] = { "AURORA_WHITE", "AURORA_BLACK", "AURORA_BLUE",   "AURORA_RED",
                               "AURORA_GREEN", "AURORA_GRAY",  "AURORA_YELLOW", "AURORA_TRANSPARENT" };
 

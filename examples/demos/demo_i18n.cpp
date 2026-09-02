@@ -6,11 +6,11 @@ auto main() -> int {
     const au::LocalizedString greeting = au::LocalizedString::tr("hello_user", { "Ada" });
 
     au::Node content = au::Column{
-        GradientTitle{ "国际化 / i18n" },
+        GradientTitle{ "Internationalization / i18n" },
         gap(12),
         au::Text{ au::LocalizedString{ "Locale: zh-CN" } },
         au::Text{ greeting },
-        au::Text{ au::LocalizedString{ "LocalizedString 经 LocaleProvider 注入语言环境" } },
+        au::Text{ au::LocalizedString{ "LocalizedString injects locale via LocaleProvider" } },
     };
     au::Node root = Card{ au::LocaleProvider{ zh, std::move(content) } };
     return run_demo(std::move(root), "i18n · Aurora Demo", 520.0f, 380.0f);

@@ -187,15 +187,15 @@ inline auto run_demo(au::Node root, const std::string &title, float w, float h) 
 
     auto win_res = au::create_native_window(wopts);
     if (!win_res) {
-        AURORA_LOG_ERROR("demo", "[run_demo] 窗口创建失败: ", win_res.error().message, "，回退无头渲染");
+        AURORA_LOG_ERROR("demo", "[run_demo] window creation failed: ", win_res.error().message, ", falling back to headless render");
         std::error_code ec;
         std::filesystem::create_directories("build", ec);
         au::Scene scene{ root };
         auto r = scene.render_to_png(("build/" + title + ".png").c_str(), static_cast<int>(w), static_cast<int>(h));
         if (r) {
-            AURORA_LOG_INFO("demo", "[run_demo] 已渲染 build/", title, ".png");
+            AURORA_LOG_INFO("demo", "[run_demo] rendered build/", title, ".png");
         } else {
-            AURORA_LOG_ERROR("demo", "[run_demo] 无头渲染失败: ", r.error().message);
+            AURORA_LOG_ERROR("demo", "[run_demo] headless render failed: ", r.error().message);
         }
         return r ? 0 : -1;
     }
@@ -216,7 +216,7 @@ inline auto run_demo(au::Node root, const std::string &title, float w, float h) 
         }
     });
 
-    AURORA_LOG_INFO("demo", "[run_demo] 已弹出窗口: ", title, "（关闭窗口以结束）");
+    AURORA_LOG_INFO("demo", "[run_demo] window shown: ", title, "(close window to exit)");
     // 事件驱动帧循环：经 Window::run 在帧末 wait_events 阻塞，
     // 静态 demo idle 时 CPU 趋近 0（旧忙轮询恒占满一个核）；有脏区时按 60fps 预算节流。
     // demo 无 Animator/Scheduler（需要动画的 demo 用 Application，不走 run_demo），

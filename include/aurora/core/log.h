@@ -1,7 +1,4 @@
 #pragma once
-#include "aurora/core/platform.h"
-
-
 #include <chrono>
 #include <cstdio>
 #include <functional>
@@ -9,7 +6,8 @@
 #include <string>
 #include <string_view>
 
-#include "aurora/core/string_util.h"   // internal::string_format（收敛 snprintf 样板）
+#include "aurora/core/platform.h"
+#include "aurora/core/string_util.h"
 
 namespace aurora {
 
@@ -19,7 +17,7 @@ namespace aurora {
  * 级别自低向高：Trace < Debug < Info < Warn < Error < Fatal。
  * 全局 Logger 只输出 >= 当前阈值的日志（默认 Info）。
  */
-enum class LogLevel:std::uint8_t {
+enum class LogLevel : std::uint8_t {
     Trace = 0u,
     Debug,
     Info,
@@ -31,12 +29,12 @@ enum class LogLevel:std::uint8_t {
 /// @brief 级别转短标签（TRC/DBG/INF/WRN/ERR/FTL）。
 [[nodiscard]] inline auto log_level_label(LogLevel level) noexcept -> std::string_view {
     switch (level) {
-        case LogLevel::Trace: return "TRC";
-        case LogLevel::Debug: return "DBG";
-        case LogLevel::Info: return "INF";
-        case LogLevel::Warn: return "WRN";
-        case LogLevel::Error: return "ERR";
-        case LogLevel::Fatal: return "FTL";
+    case LogLevel::Trace: return "TRC";
+    case LogLevel::Debug: return "DBG";
+    case LogLevel::Info: return "INF";
+    case LogLevel::Warn: return "WRN";
+    case LogLevel::Error: return "ERR";
+    case LogLevel::Fatal: return "FTL";
     }
     return "???";
 }
@@ -56,7 +54,7 @@ enum class LogLevel:std::uint8_t {
 #endif
 
     return aurora::internal::string_format("%04d-%02d-%02d %02d:%02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1,
-                  tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+                                           tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
 }
 
 /**
@@ -109,7 +107,8 @@ class Logger {
     [[nodiscard]] auto is_enabled() const noexcept -> bool;
 
     /// @brief 记录一条日志（供宏调用，自动带 file:line）。
-    auto log(std::string_view file, int line_no, LogLevel level, std::string_view category, std::string_view message) const -> void;
+    auto log(std::string_view file, int line_no, LogLevel level, std::string_view category,
+             std::string_view message) const -> void;
 
     /**
      * @brief 无前缀纯文本输出通道（功能输出，非日志）。
@@ -163,8 +162,8 @@ template<typename... Args> [[nodiscard]] auto log_concat(Args &&...args) -> std:
 #endif
 
 /// @brief 记录一条日志（自动附加 file:line）；消息支持任意数量的类型安全可变参数。
-#define AURORA_LOG(level, category, ...)                                                                                \
-    ::aurora::Logger::instance().log(AURORA_FILE_NAME, __LINE__, (level), (category),                                   \
+#define AURORA_LOG(level, category, ...)                                                                               \
+    ::aurora::Logger::instance().log(AURORA_FILE_NAME, __LINE__, (level), (category),                                  \
                                      ::aurora::detail::log_concat(__VA_ARGS__))
 
 /// @brief 记录 TRACE 级日志（category 后接任意数量的类型安全可变参数）。
@@ -200,22 +199,22 @@ template<typename... Args> [[nodiscard]] auto log_concat(Args &&...args) -> std:
 // `AURORA_TEST_PRINTF_ERR`：先用 `std::snprintf` 写入**内存缓冲**（非标准输出），再经
 // `Logger` 输出，从而把 printf 风格的诊断统一收口到日志接口，避免直接使用 stdout/stderr。
 // 仅作 printf → 日志的兼容桥接，新代码请直接用 `AURORA_LOG_*` / `AURORA_LOG_RAW`。
-#define AURORA_TEST_PRINTF(fmt, ...)                                                                                    \
-    do {                                                                                                                \
-        char _aurora_buf[2048];                                                                                         \
-        std::snprintf(_aurora_buf, sizeof(_aurora_buf), fmt, ## __VA_ARGS__);                                           \
-        std::string_view _aurora_sv{ _aurora_buf };                                                                     \
-        while (!_aurora_sv.empty() && (_aurora_sv.back() == '\n' || _aurora_sv.back() == '\r'))                         \
-            _aurora_sv.remove_suffix(1);                                                                                \
-        AURORA_LOG_INFO("test", _aurora_sv);                                                                            \
+#define AURORA_TEST_PRINTF(fmt, ...)                                                                                   \
+    do {                                                                                                               \
+        char _aurora_buf[2048];                                                                                        \
+        std::snprintf(_aurora_buf, sizeof(_aurora_buf), fmt, ##__VA_ARGS__);                                           \
+        std::string_view _aurora_sv{ _aurora_buf };                                                                    \
+        while (!_aurora_sv.empty() && (_aurora_sv.back() == '\n' || _aurora_sv.back() == '\r'))                        \
+            _aurora_sv.remove_suffix(1);                                                                               \
+        AURORA_LOG_INFO("test", _aurora_sv);                                                                           \
     } while (0)
 
-#define AURORA_TEST_PRINTF_ERR(fmt, ...)                                                                                \
-    do {                                                                                                                \
-        char _aurora_buf[2048];                                                                                         \
-        std::snprintf(_aurora_buf, sizeof(_aurora_buf), fmt, ## __VA_ARGS__);                                           \
-        std::string_view _aurora_sv{ _aurora_buf };                                                                     \
-        while (!_aurora_sv.empty() && (_aurora_sv.back() == '\n' || _aurora_sv.back() == '\r'))                         \
-            _aurora_sv.remove_suffix(1);                                                                                \
-        AURORA_LOG_ERROR("test", _aurora_sv);                                                                           \
+#define AURORA_TEST_PRINTF_ERR(fmt, ...)                                                                               \
+    do {                                                                                                               \
+        char _aurora_buf[2048];                                                                                        \
+        std::snprintf(_aurora_buf, sizeof(_aurora_buf), fmt, ##__VA_ARGS__);                                           \
+        std::string_view _aurora_sv{ _aurora_buf };                                                                    \
+        while (!_aurora_sv.empty() && (_aurora_sv.back() == '\n' || _aurora_sv.back() == '\r'))                        \
+            _aurora_sv.remove_suffix(1);                                                                               \
+        AURORA_LOG_ERROR("test", _aurora_sv);                                                                          \
     } while (0)

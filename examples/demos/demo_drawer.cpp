@@ -4,9 +4,9 @@
 auto main() -> int {
     // PageView：三页可滑动翻页（左右拖拽超过 1/4 宽切页）
     std::vector<au::Node> pages;
-    pages.emplace_back(au::Column{ au::Text{ "第 1 页" }, au::Text{ "左滑翻页" } });
-    pages.emplace_back(au::Column{ au::Text{ "第 2 页" } });
-    pages.emplace_back(au::Column{ au::Text{ "第 3 页" } });
+    pages.emplace_back(au::Column{ au::Text{ "Page 1" }, au::Text{ "Swipe left to flip page" } });
+    pages.emplace_back(au::Column{ au::Text{ "Page 2" } });
+    pages.emplace_back(au::Column{ au::Text{ "Page 3" } });
     au::PageView page_view{ std::move(pages) };
 
     // 抽屉：左侧面板 + 主内容
@@ -16,9 +16,9 @@ auto main() -> int {
             gap(8),
             std::move(page_view),
         } },
-        au::Node{ au::Column{ au::Text{ "侧栏菜单" }, au::Text{ "点击遮罩关闭" } } }, au::DrawerSide::Left, 200.0f);
+        au::Node{ au::Column{ au::Text{ "Sidebar menu" }, au::Text{ "Click overlay to close" } } }, au::DrawerSide::Left, 200.0f);
 
-    au::Button open_btn{ au::ButtonProps{ .label = "打开抽屉" } };
+    au::Button open_btn{ au::ButtonProps{ .label = "Open drawer" } };
     open_btn.on_click = [drawer]() -> void { drawer->set_open(true); };
 
     au::Node root = au::Column{

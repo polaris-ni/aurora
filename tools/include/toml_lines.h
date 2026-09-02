@@ -1,11 +1,13 @@
 // ============================================================================
-// toml_lines.h — 极简 TOML「行」解析原语
+// toml_lines.h — minimal TOML "line" parsing primitives
 // ----------------------------------------------------------------------------
-// 仅依赖标准库，零 Aurora 依赖。由 gen_error_codes / gen_debug_api 复用，
-// 避免「trim / parse_kv / unquote」两份重复实现（二者逐字同义）。
+// Depends only on the standard library, zero Aurora dependencies. Reused by
+// gen_error_codes / gen_debug_api to avoid two duplicate implementations of
+// "trim / parse_kv / unquote" (both meaning exactly the same thing).
 //
-// 这些函数以 inline 形式放在全局命名空间，供各生成器以非限定名直接调用，
-// 与抽取前的匿名命名空间内定义等价；各生成器是独立可执行文件，不存在跨 TU 的 ODR 问题。
+// These functions live in the global namespace as inline definitions so generators can call
+// them by unqualified name, equivalent to the previous definitions inside anonymous namespaces;
+// each generator is a standalone executable, so there is no cross-TU ODR concern.
 // ============================================================================
 #pragma once
 
@@ -24,8 +26,8 @@ inline auto trim(const std::string &s) -> std::string {
     return s.substr(a, b - a);
 }
 
-// 解析 "key = value" 行，value 可为 "str" / true|false / 整数。
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): key/val 语义顺序明确，不可互换
+// Parse a "key = value" line; value may be "str" / true|false / an integer.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): the key/val order is semantically fixed, not interchangeable
 inline auto parse_kv(const std::string &line, std::string &key, std::string &val) -> bool {
     const auto eq = line.find('=');
     if (eq == std::string::npos) {

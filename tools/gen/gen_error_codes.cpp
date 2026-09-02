@@ -1,16 +1,16 @@
 // ============================================================================
-// gen_error_codes — Aurora 错误码生成器
+// gen_error_codes — Aurora error-code generator
 // ----------------------------------------------------------------------------
-// 读取 codespec/errors.toml（单一声明源），产出：
-//   1) include/aurora/core/error_codes.gen.h  (枚举 + ErrorMeta 表 + 查表函数)
-//   2) codespec/ERROR_CATALOG.md              (人类可读目录，自动生成)
-//   3) aurora_api.json 的 "error_codes" 段     (机器可读契约)
+// Reads codespec/errors.toml (single declaration source) and produces:
+//   1) include/aurora/core/error_codes.gen.h  (enum + ErrorMeta table + lookup functions)
+//   2) codespec/ERROR_CATALOG.md              (human-readable catalog, auto-generated)
+//   3) the "error_codes" section of aurora_api.json (machine-readable contract)
 //
-// 用法：gen_error_codes <errors.toml> <error_codes.gen.h> <ERROR_CATALOG.md> <aurora_api.json>
-// 参数为可选，缺省时退化为与 CMAKE_SOURCE_DIR 相关的相对路径。
+// Usage: gen_error_codes <errors.toml> <error_codes.gen.h> <ERROR_CATALOG.md> <aurora_api.json>
+// Arguments are optional; when omitted they default to paths relative to CMAKE_SOURCE_DIR.
 //
-// 注意：本工具为构建期生成器，不链接 Aurora 库，不依赖 Aurora 头文件，
-//       仅使用标准库与 third_party/nlohmann/json.hpp。
+// Note: this tool is a build-time generator; it does not link the Aurora library and does not
+//       depend on Aurora headers — it only uses the standard library and third_party/nlohmann/json.hpp.
 // ============================================================================
 #include <array>
 #include <cctype>
@@ -29,9 +29,9 @@
 
 namespace {
 
-// 本工具为构建期生成器，不链接 Aurora 库，故无法使用 aurora 的 Logger/AURORA_LOG_*。
-// 为遵守「不直接触达标准错误流」的项目约定，所有诊断输出统一经由下方 err() 收口：
-// 一处定义、统一前缀、可随项目后续桥接到日志框架。
+// This tool is a build-time generator and does not link Aurora, so aurora's Logger/AURORA_LOG_* is unavailable.
+// To honor the project convention of "never touching the standard streams directly", all diagnostic output is
+// funneled through err() below: single definition, uniform prefix, ready to be bridged to a logging framework later.
 auto err(const std::string &msg) -> void { std::cerr << "[gen_error_codes] " << msg << "\n"; }
 
 struct ErrorEntry {
@@ -46,16 +46,16 @@ struct ErrorEntry {
     std::string hint;
 };
 
-// category / severity 顺序即生成枚举的底层序，新增需追加到末尾。
-// 用 constexpr std::array 替代 C 数组：避免 C 风格数组告警、满足常量全局命名与边界检查。
-// AURORA_ 前缀：满足全局常量命名规则（GlobalConstantPrefix）。
+// The order of category / severity is the underlying order of the generated enum; append new entries at the end.
+// constexpr std::array is used instead of C arrays: avoids C-style array warnings and satisfies constant global
+// naming and bounds checking. The AURORA_ prefix satisfies the global-constant naming rule (GlobalConstantPrefix).
 constexpr std::array<const char *, 11> AURORA_CATEGORIES = {
     "general",    "layout",   "widget",  "render",     "io",         "validation",
     "navigation", "platform", "runtime", "generation", "diagnostic",
 };
 constexpr std::array<const char *, 4> AURORA_SEVERITIES = { "info", "warning", "error", "fatal" };
 
-// trim / parse_kv / unquote 由 toml_lines.h 提供（与 gen_debug_api 共用）。
+// trim / parse_kv / unquote are provided by toml_lines.h (shared with gen_debug_api).
 
 auto cpp_escape(const std::string &s) -> std::string {
     std::string out;
@@ -73,7 +73,7 @@ auto cpp_escape(const std::string &s) -> std::string {
     return out;
 }
 
-// 首字母大写（category/severity 为单段词）
+// capitalize the first letter (category/severity are single-segment words)
 auto capitalize(const std::string &s) -> std::string {
     if (s.empty()) {
         return s;
@@ -83,7 +83,8 @@ auto capitalize(const std::string &s) -> std::string {
     return r;
 }
 
-// 将解析出的 key/value 写入 ErrorEntry 对应字段（抽离以降低 parse_toml 认知复杂度）。
+// Write a parsed key/value into the corresponding ErrorEntry field (extracted to lower parse_toml cognitive
+// complexity).
 auto apply_field(ErrorEntry &e, const std::string &k, const std::string &v) -> void {
     if (k == "enum") {
         e.enum_name = unquote(v);
@@ -125,7 +126,7 @@ auto parse_toml(const std::string &path, std::vector<ErrorEntry> &out) -> bool {
             cur = &out.back();
             continue;
         }
-        if (!t.empty() && t.at(0) == '[') { // 顶层表，忽略
+        if (!t.empty() && t.at(0) == '[') { // top-level table, ignored
             cur = nullptr;
             continue;
         }
@@ -135,7 +136,7 @@ auto parse_toml(const std::string &path, std::vector<ErrorEntry> &out) -> bool {
             apply_field(*cur, k, v);
         }
     }
-    // 校验
+    // validation
     for (auto &e : out) {
         if (e.enum_name.empty() || e.slug.empty()) {
             err("error entry missing enum/slug");
@@ -151,9 +152,10 @@ auto parse_toml(const std::string &path, std::vector<ErrorEntry> &out) -> bool {
             e.fix_category = "unknown";
         }
     }
-    // 唯一性校验：slug 与 enum 标识符都必须全局唯一。
-    // ERROR_CATALOG 自述 slug 为「冻结对外契约」，重复 slug 会让 slug() 查表只命中首条，
-    // 导致后续错误被静默映射成错误的码；重复 enum 则生成不可编译的重复枚举值。提前中止。
+    // Uniqueness check: both slug and enum identifiers must be globally unique.
+    // The ERROR_CATALOG describes slug as a "frozen external contract"; duplicate slugs make slug() lookup hit only
+    // the first entry, silently mapping later errors to the wrong code; duplicate enums generate uncompilable
+    // duplicate enumerator values. Abort early.
     std::unordered_set<std::string> seen_slug;
     std::unordered_set<std::string> seen_enum;
     for (const auto &e : out) {
@@ -172,8 +174,8 @@ auto parse_toml(const std::string &path, std::vector<ErrorEntry> &out) -> bool {
 auto gen_header(const std::vector<ErrorEntry> &e) -> std::string {
     std::ostringstream o;
     o << "// ============================================================================\n"
-         "// 本文件由 tools/gen/gen_error_codes.cpp 自动生成，请勿手改。\n"
-         "// 修改请编辑 codespec/errors.toml 后重新运行生成器。\n"
+         "// This file is auto-generated by tools/gen/gen_error_codes.cpp; do not edit by hand.\n"
+         "// To change it, edit codespec/errors.toml and re-run the generator.\n"
          "// ============================================================================\n"
          "#pragma once\n"
          "#include <array>\n"
@@ -182,7 +184,7 @@ auto gen_header(const std::vector<ErrorEntry> &e) -> std::string {
          "#include <string_view>\n"
          "#include <unordered_map>\n\n"
          "namespace aurora {\n\n"
-         "/// @brief 错误参数的键值表（message 模板 {key} 由它渲染）\n"
+         "/// @brief key-value table of error args (message template {key} rendered from it)\n"
          "using ErrorParams = std::unordered_map<std::string, std::string>;\n\n";
 
     // ErrorCategory
@@ -209,20 +211,21 @@ auto gen_header(const std::vector<ErrorEntry> &e) -> std::string {
     // ErrorMeta
     o << "struct ErrorMeta {\n"
          "    ErrorCode code;\n"
-         "    std::string_view ident;         // C++ 标识符，如 \"NavDepthExceeded\"（调试用）\n"
-         "    std::string_view slug;          // 冻结对外码，如 \"nav-depth-exceeded\"\n"
+         "    std::string_view ident;         // C++ identifier, e.g. \"NavDepthExceeded\" (debug use)\n"
+         "    std::string_view slug;          // frozen external code, e.g. \"nav-depth-exceeded\"\n"
          "    ErrorCategory category;\n"
          "    ErrorSeverity severity;\n"
          "    bool auto_fixable;\n"
          "    std::string_view fix_category;\n"
          "    bool retryable;\n"
-         "    std::string_view message_tpl;   // 含 {placeholder}\n"
+         "    std::string_view message_tpl;   // contains {placeholder}\n"
          "    std::string_view hint;\n"
          "};\n\n";
 
-    // AURORA_ERROR_TABLE：直接以 std::array<ErrorMeta, N> 聚合初始化承载原始表，
-    // N 由生成时的条目数 e.size() 推导，避免手写 N 与条目数不一致（初始值过多/过少）；
-    // 不使用 C 数组下标，规避 cppcoreguidelines-pro-bounds-constant-array-index。
+    // AURORA_ERROR_TABLE: the raw table is carried directly by aggregate initialization of
+    // std::array<ErrorMeta, N>, where N is derived from the entry count e.size() at generation time,
+    // avoiding a hand-written N that could mismatch the entry count (too many / too few initializers);
+    // no C-array indexing is used, avoiding cppcoreguidelines-pro-bounds-constant-array-index.
     o << "inline constexpr std::array<ErrorMeta, " << e.size() << "> AURORA_ERROR_TABLE = {\n    {\n";
     for (const auto &[enum_name, slug, category, severity, auto_fixable, fix_category, retryable, message, hint] : e) {
         o << "        {\n"
@@ -263,7 +266,7 @@ auto gen_header(const std::vector<ErrorEntry> &e) -> std::string {
          "constexpr auto hint_of(ErrorCode c) -> std::string_view {\n"
          "    return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).hint;\n"
          "}\n"
-         "// 调试用：返回 C++ 标识符（可随改名变），非对外契约\n"
+         "// debug use: returns the C++ identifier (may change on rename), not an external contract\n"
          "constexpr auto to_string(ErrorCode c) -> std::string_view {\n"
          "    return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).ident;\n"
          "}\n\n";
@@ -311,9 +314,10 @@ auto gen_header(const std::vector<ErrorEntry> &e) -> std::string {
 
 auto gen_catalog(const std::vector<ErrorEntry> &e) -> std::string {
     std::ostringstream o;
-    o << "# Aurora 错误码目录（自动生成）\n\n"
-         "> 由 `tools/gen/gen_error_codes.cpp` 从 `codespec/errors.toml` 生成，**请勿手改**。\n"
-         "> `slug` 为冻结对外契约，跨语言/JSON/日志只认它；`enum` 为 C++ 标识符，可自由改名。\n\n"
+    o << "# Aurora Error Code Catalog (auto-generated)\n\n"
+         "> Generated by `tools/gen/gen_error_codes.cpp` from `codespec/errors.toml`; **do not edit by hand**.\n"
+         "> `slug` is the frozen external contract — cross-language/JSON/log consumers must use it; `enum` is the C++ "
+         "identifier and may be renamed freely.\n\n"
          "| # | enum | slug | category | severity | auto_fixable | fix_category | retryable | message | hint |\n"
          "|---|------|------|----------|----------|--------------|--------------|-----------|---------|------|\n";
     for (size_t i = 0; i < e.size(); ++i) {
@@ -322,7 +326,7 @@ auto gen_catalog(const std::vector<ErrorEntry> &e) -> std::string {
           << " | " << (x.auto_fixable ? "true" : "false") << " | " << x.fix_category << " | "
           << (x.retryable ? "true" : "false") << " | " << x.message << " | " << x.hint << " |\n";
     }
-    o << "\n<!-- 计数：共 " << e.size() << " 条错误码 -->\n";
+    o << "\n<!-- count: total " << e.size() << " error codes -->\n";
     return o.str();
 }
 
@@ -346,7 +350,8 @@ auto gen_api_json(const std::vector<ErrorEntry> &e) -> nlohmann::json {
     return arr;
 }
 
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): path/content 语义顺序明确，不可互换
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): the path/content order is semantically fixed, not
+// interchangeable
 void write_file(const std::string &path, const std::string &content) {
     std::ofstream out(path, std::ios::binary);
     out << content;
@@ -354,8 +359,8 @@ void write_file(const std::string &path, const std::string &content) {
 
 } // namespace
 
-// 本工具有意使用异常（如 main 内的 try/catch 解析 json、std::string 内存分配、ofstream 失败），
-// main 不应被强制为 noexcept，故抑制 exception-escape。
+// This tool intentionally uses exceptions (e.g. try/catch around json parsing in main, std::string allocation,
+// ofstream failures), so main should not be forced to noexcept; hence exception-escape is suppressed.
 auto main(int argc, char **argv) -> int { // NOLINT(bugprone-exception-escape)
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-bounds-constant-array-index)
     std::string toml = (argc > 1) ? argv[1] : "codespec/errors.toml";
@@ -373,8 +378,9 @@ auto main(int argc, char **argv) -> int { // NOLINT(bugprone-exception-escape)
     write_file(genh, gen_header(entries));
     write_file(catalog, gen_catalog(entries));
 
-    // 更新 aurora_api.json 的 "error_codes" 段（保留其它键）。merge-only 语义由
-    // api_json_merge.h 提供：截断防护、损坏中止，绝不写空对象覆盖其它段。
+    // Update the "error_codes" section of aurora_api.json (preserving other keys). The merge-only semantics are
+    // provided by api_json_merge.h: truncation protection, abort on corruption, never write an empty object over
+    // other sections.
     if (!aurora::tools::merge_api_json_section(api, "error_codes", gen_api_json(entries), err)) {
         return 1;
     }

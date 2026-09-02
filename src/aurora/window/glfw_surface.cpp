@@ -4,19 +4,19 @@
 
 #ifdef AURORA_BACKEND_GLFW
 
-#include <GL/gl.h> // GL 函数/类型（Windows/GLFW 环境；其他平台可换为 <OpenGL/gl.h>）
+#include <GL/gl.h>
 #include <GLFW/glfw3.h>
 
 #ifdef AURORA_PLATFORM_WINDOWS
 #define GLFW_EXPOSE_NATIVE_WIN32
-#include <GLFW/glfw3native.h> // glfwGetWin32Window
+#include <GLFW/glfw3native.h>
 #endif
 
-#include "aurora/core/utf8.h" // utf8_encode（统一 UTF-8 编码，替代本地 utf8_from_codepoint）
+#include "aurora/core/utf8.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
-#include "aurora/window/win32_capture.h" // detail::capture_window_by_hwnd（Windows 下真实窗口截图；非 Win32 为空）
-#include "aurora/window/window_state.h"  // compute_window_mode / compute_window_state
+#include "aurora/window/win32_capture.h"
+#include "aurora/window/window_state.h"
 
 namespace aurora {
 

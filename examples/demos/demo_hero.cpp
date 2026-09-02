@@ -47,11 +47,11 @@ auto main() -> int {
     host->push(aurora::Route{ make_detail(), "detail", fade }); // 启动即播放共享元素转场
 
     aurora::Scene scene{ aurora::Node{ host } };
-    aurora::WindowOptions wopts;
-    wopts.size = aurora::Size{ .width = 420.0f, .height = 320.0f };
-    wopts.title = "Hero 共享元素转场";
-    auto win_res = create_native_window(wopts);
-    aurora::Application app{ std::move(scene), win_res ? std::move(win_res.value()) : nullptr, wopts };
+    aurora::WindowOptions opts;
+    opts.size = aurora::Size{ .width = 420.0f, .height = 320.0f };
+    opts.title = "Hero shared element transition";
+    auto win_res = create_native_window(opts);
+    aurora::Application app{ std::move(scene), win_res ? std::move(win_res.value()) : nullptr, opts };
     // 驱动 host 绑定的 Animator，使转场进度自动演进（Application 内部 animator 与此独立）。
     app.set_on_frame([&anim]() -> void { anim.tick(1.0 / 60.0); });
     app.run();

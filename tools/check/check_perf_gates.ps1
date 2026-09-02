@@ -1,39 +1,43 @@
 ﻿<#
 .SYNOPSIS
-  本机渲染性能「时间类」门槛一键校验脚本。
+  One-click local check for render-performance "time-class" gates.
 
 .DESCRIPTION
-  驱动 bench_scroll / bench_render 的输出，校验时间类门槛：
-    G-1  滚动 p99 帧时间        ≤ 16.67 ms
-    G-2  滚动 worst 帧时间      ≤ 33.3 ms
-    G-3  滚动 jitter            ≤ 2.0 ms
-    G-4  长任务（>8.33ms）次数   ≤ 3 / 300 帧
-    G-9  帧布局预算 max         ≤ 1.5 ms（信息项）
-    G-10 帧绘制预算 max         ≤ 10.0 ms（信息项）
-    G-11 帧上屏预算 max         ≤ 3.0 ms（信息项）
-    G-12 text_cjk_12lines       ≤ 3.0 ms
-    G-13 linear_gradient_full   ≤ 8.0 ms
-    G-14 radial_gradient_full   ≤ 8.0 ms
+  Drives the output of bench_scroll / bench_render and validates the time-class gates:
+    G-1  scroll p99 frame time         <= 16.67 ms
+    G-2  scroll worst frame time       <= 33.3 ms
+    G-3  scroll jitter                 <= 2.0 ms
+    G-4  long tasks (>8.33 ms) count    <= 3 / 300 frames
+    G-9  frame layout budget max        <= 1.5 ms (info only)
+    G-10 frame paint budget max         <= 10.0 ms (info only)
+    G-11 frame present budget max       <= 3.0 ms (info only)
+    G-12 text_cjk_12lines              <= 3.0 ms
+    G-13 linear_gradient_full          <= 8.0 ms
+    G-14 radial_gradient_full          <= 8.0 ms
 
-  重要约定：
-  - 时间类门槛受机器负载 / 编译器 / 后台进程影响，**不进 CTest**，本脚本仅作本机趋势对比。
-  - 滚动时间读数须按「独立进程多次取最小」：同进程重复会因堆碎片偏慢（bench_scroll.cpp
-    注释已说明），单次 in-process 采样会高报。本脚本对 bench_scroll 起 N 个独立进程取 p99 最小
-    的一次作为代表（best-of），避免误报。
-  - 计数类门槛 G-5~G-8 由 tests/test_scroll_regression.cpp 锁进 CTest（build-prof，PROFILING=ON），
-    本脚本不重复校验。
-  - G-9~G-11 的 frame budget（layout/paint/present max_ms）依赖 PROFILING=ON 构建才会记录 zone 计时，
-    且已知 paint 基线 13.08ms 超 10ms 预算（部分未达标）。故 G-9~G-11 仅作**信息项**：
-    给定 -ProfilingBuild 时解析展示，否则标记 n/a，且不计入本脚本的通过判定。
+  Important conventions:
+  - Time-class gates are affected by machine load / compiler / background processes, so they are
+    **NOT in CTest**; this script is for local trend comparison only.
+  - Scroll timings must follow "take the minimum across multiple independent processes": in-process
+    repetition reads slower due to heap fragmentation (explained in bench_scroll.cpp), and a single
+    in-process sample over-reports. This script launches N independent processes for bench_scroll and
+    takes the lowest p99 as the representative (best-of) to avoid false failures.
+  - Counter-class gates G-5~G-8 are locked into CTest by tests/test_scroll_regression.cpp
+    (build-prof, PROFILING=ON); this script does not re-check them.
+  - G-9~G-11 frame budgets (layout/paint/present max_ms) are only recorded with a PROFILING=ON build,
+    and the known paint baseline 13.08ms exceeds the 10ms budget (some are not met). Hence G-9~G-11
+    are **info-only**: they are parsed and shown when -ProfilingBuild is given, otherwise marked n/a
+    and excluded from this script's pass/fail decision.
 
 .PARAMETER BuildDir
-  含 bench 可执行文件的 Release + PROFILING=OFF 构建目录（默认 "build"）。
+  Release + PROFILING=OFF build dir containing the bench executables (default "build").
 .PARAMETER Scene
-  bench_scroll 场景（默认 "google_play"）；可选 "synthetic"。
+  bench_scroll scene (default "google_play"); "synthetic" also available.
 .PARAMETER Repeat
-  bench_scroll 独立进程采样次数，取 p99 最小的一次（默认 3）。
+  Number of independent bench_scroll process samples; takes the lowest p99 (default 3).
 .PARAMETER ProfilingBuild
-  可选：PROFILING=ON 构建目录，用于解析 G-9~G-11 zone 计时（信息项）。不给则 G-9~G-11 标记 n/a。
+  Optional: PROFILING=ON build dir used to parse G-9~G-11 zone timings (info only). If not given,
+  G-9~G-11 are marked n/a.
 
 .EXAMPLE
   pwsh tools/check/check_perf_gates.ps1
@@ -48,8 +52,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# ---- 门槛来源：优先 perf_gates.json（与脚本同目录），缺失/损坏则回退内置默认 ----
-# 门槛外置，避免改阈值须改脚本；文件缺失时行为不变（回退内置）。
+# ---- Gate source: prefer perf_gates.json (same dir as this script); fall back to built-in defaults
+# if missing/corrupt ---- Externalized thresholds so changing them does not require editing the script;
+# behavior is unchanged when the file is absent (falls back to built-in).
 $BuiltinThr = @{
     'G-1|scroll p99 (ms, best-of)'    = 16.67
     'G-2|scroll worst (ms)'           = 33.3
@@ -70,12 +75,12 @@ if (Test-Path $gateJson) {
         foreach ($g in $cfg.gates) {
             $GateThr["$($g.id)|$($g.metric)"] = [double]$g.threshold
         }
-        Write-Host "已加载 perf_gates.json 门槛（$(($cfg.gates).Count) 条；缺失项回退内置默认）。"
+        Write-Host "Loaded perf_gates.json gates ($(($cfg.gates).Count) entries; missing entries fall back to built-in defaults)."
     } catch {
-        Write-Host "perf_gates.json 解析失败，全部使用内置默认门槛：$_"
+        Write-Host "perf_gates.json parse failed; using all built-in default thresholds: $_"
     }
 } else {
-    Write-Host "未找到 perf_gates.json，使用内置默认门槛（外置门槛请见 tools/check/perf_gates.json）。"
+    Write-Host "perf_gates.json not found; using built-in defaults (externalized gates: tools/check/perf_gates.json)."
 }
 function Get-Thr {
     param([string]$id, [string]$metric)
@@ -88,7 +93,7 @@ function Get-Exe {
     param([string]$dir, [string]$name)
     $p = Join-Path $dir "$name.exe"
     if (-not (Test-Path $p)) {
-        Write-Error "未找到 $p —— 请先在该构建下构建 $name（Release + PROFILING=OFF）"
+        Write-Error "Not found: $p -- build $name in that build first (Release + PROFILING=OFF)"
     }
     return $p
 }
@@ -109,7 +114,7 @@ for ($i = 1; $i -le $Repeat; $i++) {
     if ($p -lt $p99Best) { $p99Best = $p; $bestWorst = $w; $bestJitter = $j; $bestLong = $l }
 }
 
-# ---- G-12 / G-13 / G-14：bench_render 表格解析 ----
+# ---- G-12 / G-13 / G-14: bench_render table parsing ----
 $renderMd = & $benchRender 2>$null
 function Parse-RowMS {
     param([string[]]$lines, [string]$scene)
@@ -122,7 +127,7 @@ function Parse-RowMS {
     }
     return $null
 }
-# 与 G-13/G-14 门槛口径一致：1080p @scale 1.0
+# Consistent with the G-13/G-14 gate convention: 1080p @scale 1.0
 function Parse-RowMSAt {
     param([string[]]$lines, [string]$scene, [string]$size, [string]$scale)
     foreach ($l in $lines) {
@@ -138,7 +143,7 @@ $linG   = Parse-RowMSAt $renderMd 'linear_gradient_full'  '1920x1080' '1.0'
 $radG   = Parse-RowMSAt $renderMd 'radial_gradient_full' '1920x1080' '1.0'
 $textCjk = Parse-RowMSAt $renderMd 'text_cjk_12lines'     '1920x1080' '1.0'
 
-# ---- G-9~G-11（信息项，仅展示，不计入判定）----
+# ---- G-9~G-11 (info only, shown but not counted in the decision) ----
 $paintMax = $null; $layoutMax = $null; $presentMax = $null
 if ($ProfilingBuild -ne "") {
     $pbScroll = Get-Exe $ProfilingBuild "bench_scroll"
@@ -153,7 +158,7 @@ if ($ProfilingBuild -ne "") {
     }
 }
 
-# ---- 评估：解析失败/缺失判 FAIL，G-9~G-11 信息项不计入 ----
+# ---- Evaluation: parse failure/missing => FAIL; G-9~G-11 info items are not counted ----
 $gates = @()
 function Add-Gate {
     param([string]$id, [string]$metric, [object]$val, [double]$thr, [bool]$count = $true)
@@ -172,9 +177,9 @@ Add-Gate 'G-12' 'text_cjk_12lines @1080p'   $textCjk   (Get-Thr 'G-12' 'text_cjk
 Add-Gate 'G-13' 'linear_gradient_full @1080p' $linG     (Get-Thr 'G-13' 'linear_gradient_full @1080p')
 Add-Gate 'G-14' 'radial_gradient_full @1080p' $radG     (Get-Thr 'G-14' 'radial_gradient_full @1080p')
 
-# ---- 输出 ----
+# ---- Output ----
 Write-Host ""
-Write-Host "本机时间类门槛校验  (scene=$Scene, build=$BuildDir, repeat=$Repeat)"
+Write-Host "Local time-class gate check  (scene=$Scene, build=$BuildDir, repeat=$Repeat)"
 Write-Host "=============================================================="
 Write-Host ("{0,-6} {1,-28} {2,12} {3,12} {4,7}" -f 'Gate', 'Metric', 'Measured', 'Threshold', 'Result')
 Write-Host "--------------------------------------------------------------"
@@ -185,15 +190,15 @@ foreach ($g in $gates) {
 $counted = $gates | Where-Object { $_.Counted }
 $allPass = ($counted | Where-Object { -not $_.Pass }).Count -eq 0
 Write-Host "--------------------------------------------------------------"
-Write-Host "G-9~G-11 为信息项（依赖 PROFILING=ON 且 paint 基线已知超 10ms 预算），不计入通过判定。"
+Write-Host "G-9~G-11 are info-only (depend on PROFILING=ON and a known paint baseline over the 10ms budget); excluded from the pass decision."
 if ($allPass) {
-    Write-Host "本机时间类门槛全部通过 ✅（时间类不进 CI，仅本机趋势对比；best-of $Repeat 进程取最小）"
+    Write-Host "All local time-class gates passed ✅ (time-class gates are not in CI; local trend comparison only; best-of $Repeat processes takes the minimum)"
 } else {
-    Write-Host "存在未达标项 ⚠️ —— 时间类受环境抖动影响，先在本机以 best-of 复跑确认是否为偶发；" `
-        + "持续失败再排查根因，不得为达标私自下调门槛。"
+    Write-Host "Some gates not met ⚠️ -- time-class gates are affected by environment jitter; re-run locally with best-of first to confirm it is sporadic; " `
+        + "investigate the root cause on persistent failure; do not lower the threshold just to pass."
 }
 
-# 退出码反映计入项结果；时间类门槛不接入 CI。
+# Exit code reflects the counted items; time-class gates are not wired into CI.
 exit $(if ($allPass) { 0 } else { 1 })
 
 

@@ -1,12 +1,15 @@
 // ============================================================================
-// au_lint_core.h — au-lint 结构化检查核心（可单元测试）
+// au_lint_core.h — aurora_lint structural-check core (unit-testable)
 // ----------------------------------------------------------------------------
-// 把 au-lint 的 lint 逻辑从 au-lint.cpp 的匿名命名空间抽出，作为 inline 自由函数
-// 暴露，供 au-lint 主程序与 tests/test_au_lint.cpp 共用，避免「工具实现 / 测试」
-// 两份重复且漂移。行为与原匿名命名空间实现逐字等价。
+// The lint logic of aurora_lint is extracted from the anonymous namespace in aurora_lint.cpp and
+// exposed as an inline free function, shared by the aurora_lint main program and
+// tests/test_au_lint.cpp, avoiding two duplicate and drifting copies of "tool implementation /
+// test". The behavior is verbatim equivalent to the original anonymous-namespace implementation.
 //
-// 消费方须先确保组件已注册（tests 中调用 aurora::serialization::register_core_widgets()，
-// au-lint 主程序依赖全局静态注册），否则 list_all_components() 为空会把所有类型判为未知。
+// Consumers must ensure components are registered first (tests call
+// aurora::serialization::register_core_widgets(); the aurora_lint main program relies on global
+// static registration), otherwise list_all_components() returns empty and every type is judged
+// unknown.
 // ============================================================================
 #pragma once
 
@@ -19,9 +22,9 @@
 
 namespace aurora::tools {
 
-/// @brief 单条 lint 发现（结构化、机器可读，与 au::ErrorSeverity 对齐）。
+/// @brief A single lint finding (structured, machine-readable, aligned with au::ErrorSeverity).
 struct LintFinding {
-    au::ErrorSeverity severity = ErrorSeverity::Warning; // 与 Diagnostic/Error 对齐
+    ErrorSeverity severity = ErrorSeverity::Warning; // aligned with Diagnostic/Error
     std::string code;
     std::string message;
     std::string path;
@@ -29,10 +32,10 @@ struct LintFinding {
 
 constexpr int AURORA_MAX_LINT_DEPTH = 64;
 
-/// @brief 收集「已知组件类型」集合与「类型 → 已知属性键」映射。
-/// 修饰节点（header-only Modifier<T>，不在 WidgetRegistry 中）显式允许，避免误报。
+/// @brief Collect the set of "known component types" and the "type -> known property keys" mapping.
+/// Modifier nodes (header-only Modifier<T>, not in WidgetRegistry) are explicitly allowed to avoid false positives.
 inline auto load_known_types() -> std::pair<std::set<std::string>, std::map<std::string, std::set<std::string>>> {
-    auto types = au::list_all_components();
+    auto types = list_all_components();
     std::set known(types.begin(), types.end());
 
     for (const char *m : { "Padding", "FlexWeight", "Background", "Border", "Clip", "SizeModifier", "Clickable",
@@ -42,9 +45,9 @@ inline auto load_known_types() -> std::pair<std::set<std::string>, std::map<std:
 
     std::map<std::string, std::set<std::string>> props;
     for (const auto &t : types) {
-        const au::Json schema = au::describe_component(t);
-        // component_schema() 将属性键以「数组」形式返回（见 serialization::component_schema），
-        // 故此处按数组解析（曾误判为 object，导致 unknown-prop 守卫形同虚设）。
+        const Json schema = describe_component(t);
+        // component_schema() returns property keys as an "array" (see serialization::component_schema),
+        // so it is parsed as an array here (it was once misread as an object, making the unknown-prop guard useless).
         if (schema.contains("props") && schema["props"].is_array()) {
             std::set<std::string> keys;
             for (const auto &k : schema["props"]) {
@@ -58,19 +61,19 @@ inline auto load_known_types() -> std::pair<std::set<std::string>, std::map<std:
     return { known, props };
 }
 
-inline void lint_node_impl(const au::Json &node, const std::string &path, int depth, const std::set<std::string> &known,
+inline void lint_node_impl(const Json &node, const std::string &path, int depth, const std::set<std::string> &known,
                            const std::map<std::string, std::set<std::string>> &props, std::vector<LintFinding> &out) {
     if (!node.is_object()) {
         out.push_back({ .severity = ErrorSeverity::Error,
                         .code = "node-not-object",
-                        .message = "UI 树节点必须是对象",
+                        .message = "UI tree node must be an object",
                         .path = path });
         return;
     }
     if (!node.contains("type") || !node["type"].is_string()) {
         out.push_back({ .severity = ErrorSeverity::Error,
                         .code = "node-no-type",
-                        .message = "节点缺少字符串 \"type\" 字段",
+                        .message = "Node missing string \"type\" field",
                         .path = path });
         return;
     }
@@ -79,7 +82,7 @@ inline void lint_node_impl(const au::Json &node, const std::string &path, int de
     if (!known.contains(type)) {
         out.push_back({ .severity = ErrorSeverity::Warning,
                         .code = "unknown-type",
-                        .message = "未知组件/修饰类型: " + type,
+                        .message = "Unknown component/modifier type: " + type,
                         .path = path });
     }
 
@@ -89,7 +92,7 @@ inline void lint_node_impl(const au::Json &node, const std::string &path, int de
                 if (!pit->second.contains(it.key())) {
                     out.push_back({ .severity = ErrorSeverity::Warning,
                                     .code = "unknown-prop",
-                                    .message = "类型 " + type + " 的未知属性: " + it.key(),
+                                    .message = "Type " + type + " has unknown property: " + it.key(),
                                     .path = path });
                 }
             }
@@ -100,7 +103,7 @@ inline void lint_node_impl(const au::Json &node, const std::string &path, int de
         if (!node["children"].is_array()) {
             out.push_back({ .severity = ErrorSeverity::Error,
                             .code = "children-not-array",
-                            .message = "\"children\" 必须是数组",
+                            .message = "\"children\" must be an array",
                             .path = path });
             return;
         }
@@ -108,7 +111,7 @@ inline void lint_node_impl(const au::Json &node, const std::string &path, int de
         if (ch.empty()) {
             out.push_back({ .severity = ErrorSeverity::Info,
                             .code = "empty-container",
-                            .message = type + " 容器没有子节点",
+                            .message = type + " container has no children",
                             .path = path });
         }
         for (std::size_t i = 0; i < ch.size(); ++i) {
@@ -119,12 +122,14 @@ inline void lint_node_impl(const au::Json &node, const std::string &path, int de
     if (depth > AURORA_MAX_LINT_DEPTH) {
         out.push_back({ .severity = ErrorSeverity::Warning,
                         .code = "depth-exceeded",
-                        .message = "UI 树深度超过 " + std::to_string(AURORA_MAX_LINT_DEPTH) + "（可能为无限递归）",
+                        .message = "UI tree depth exceeds " + std::to_string(AURORA_MAX_LINT_DEPTH) +
+                                   " (possible infinite recursion)",
                         .path = path });
     }
 }
 
-/// @brief 对整棵 UI 树做结构化检查，返回全部发现（error 级决定 au-lint 退出码为 1）。
+/// @brief Run a structural check over the whole UI tree and return all findings
+/// (an error-level finding makes aurora_lint exit with code 1).
 inline auto lint_ui_tree(const Json &root) -> std::vector<LintFinding> {
     const auto [known, props] = load_known_types();
     std::vector<LintFinding> out;

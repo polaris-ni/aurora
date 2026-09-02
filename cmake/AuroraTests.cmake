@@ -36,7 +36,7 @@ if (AURORA_BUILD_TESTS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests"
             "${CMAKE_CURRENT_SOURCE_DIR}/examples/app/google_play")
     # 暴露工具链共享头（tools/include）：部分测试需复用 known_enums.h / au_lint_core.h 等
-    # 单一来源，避免与工具实现漂移（known_enums 取值守护、au-lint 核心逻辑单测）。
+    # 单一来源，避免与工具实现漂移（known_enums 取值守护、aurora_lint 核心逻辑单测）。
     target_include_directories(aurora_test_runner PRIVATE "${CMAKE_SOURCE_DIR}/tools/include")
     # 标记测试目标，供 AuroraInstrumentation 注入 AURORA_ENABLE_DEBUG（与库体编译分支对齐），
     # 使 DEBUG 成功路径可在测试中编译/调用；宏保持 PRIVATE，不导出给外部消费者 ABI。

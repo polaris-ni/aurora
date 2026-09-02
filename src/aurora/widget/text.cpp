@@ -2,7 +2,7 @@
 
 #include "aurora/app/clipboard.h"
 #include "aurora/core/diagnostics.h"
-#include "aurora/core/utf8.h" // utf8_cp_len/cp_count/cp_slice锛圱ext::cp_* 濮旀墭鑷虫锛岄€昏緫鍗曟簮锛?#10;#include "aurora/event/keycode.h"
+#include "aurora/core/utf8.h"
 #include "aurora/event/keycode.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/widget/descriptor.h"
@@ -167,8 +167,9 @@ auto Text::deserialize_props(const Json &props) -> void { // NOLINT(readability-
 
 auto Text::validate_props() const -> Result<void> {
     if (font.size_pt <= 0.0f) {
-        return make_error(ErrorCode::WidgetInvalidProp, "Text.font_size 必须 > 0，得到 " + std::to_string(font.size_pt),
-                          "使用正数字号（如 14）");
+        return make_error(ErrorCode::WidgetInvalidProp,
+                          "Text.font_size must be > 0, got " + std::to_string(font.size_pt),
+                          "Use positive font size (e.g. 14)");
     }
     return Result<void>{};
 }

@@ -6,13 +6,13 @@
 
 #include "aurora/app/clipboard.h"
 #include "aurora/core/types.h"
-#include "aurora/core/utf8.h" // aurora::utf8_cp_len / utf8_cp_count / utf8_cp_slice（收口 dup-1）
+#include "aurora/core/utf8.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/reactive.h"
-#include "aurora/theming/theme_scope.h" // inherit_theme：聚焦边框色未显式设置时跟随主题 primary
+#include "aurora/theming/theme_scope.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {

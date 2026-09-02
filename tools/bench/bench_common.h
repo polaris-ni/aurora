@@ -1,7 +1,8 @@
-// tools/bench/bench_common.h — 基准工具公共函数（计时 / 浮点格式化）。
+// tools/bench/bench_common.h — shared benchmark helpers (timing / float formatting).
 //
-// 各 tools/bench_*.cpp 共享，避免每个文件重复定义一份。以 inline 形式提供（头文件内
-// 定义），链接时无 ODR 问题。仅被基准工具使用，不进入 aurora 库体。
+// Shared by the tools/bench_*.cpp files to avoid redefining them in each file. Provided as inline
+// (defined in the header), so there is no ODR problem at link time. Used only by benchmark tools;
+// it is not part of the aurora library body.
 #pragma once
 
 #include <chrono>
@@ -14,7 +15,7 @@
 
 namespace aurora::bench {
 
-// 计时：预热 warmup 次后取 iters 次平均（毫秒/次）。
+// Timing: warm up warmup times, then average over iters runs (milliseconds per run).
 inline auto time_ms(const std::function<void()> &fn, int warmup, int iters) -> double {
     for (int i = 0; i < warmup; ++i) {
         fn();
@@ -27,19 +28,22 @@ inline auto time_ms(const std::function<void()> &fn, int warmup, int iters) -> d
     return std::chrono::duration<double, std::milli>(t1 - t0).count() / static_cast<double>(iters);
 }
 
-// 按指定小数位格式化浮点（raw 通道不带格式控制，需手动控制精度以对齐原 printf）。
+// Format a float with the given number of decimals (the raw channel has no format control, so the
+// precision is set manually to match the original printf output).
 inline auto ffmt(int prec, double v) -> std::string {
     std::ostringstream o;
     o << std::fixed << std::setprecision(prec) << v;
     return o.str();
 }
 
-// 基准产品输出统一免责声明（各 bench_*.cpp 末尾一致：非 CTest 断言，计时受环境抖动影响）。
+// Unified disclaimer for benchmark product output (identical at the end of each bench_*.cpp:
+// not a CTest assertion, timings are affected by environment jitter).
 inline constexpr auto AURORA_BENCH_DISCLAIMER =
-    "(benchmark only — 非 CTest 断言；计时受环境抖动影响，仅作相对基线)";
+    "(benchmark only — not a CTest assertion; timings are affected by environment jitter, for relative baselines only)";
 
-// 打印一行「| 名称 | X.XXX ms |」形式的基准简表行（bench_win32_present 多行同构，bench_render 的
-// 5 列含尺寸表为另一格式，故不共用）。统一后改表头/精度只需改这一处。
+// Print one summary row of the form "| name | X.XXX ms |" (bench_win32_present has multiple rows of
+// this shape; bench_render uses a different 5-column format including size, so it does not share it).
+// After unification, changing the header/precision only needs to happen here.
 inline auto bench_row(const char *name, double ms) -> void {
     AURORA_LOG_RAW("bench", "| ", name, " | ", ffmt(3, ms), " ms |\n");
 }

@@ -8,23 +8,22 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <fcntl.h>
+#include <poll.h>
+#include <unistd.h>
 #include <vector>
 #include <wayland-client.h>
+
+#include <linux/input-event-codes.h>
+#include <sys/mman.h>
+#include <xkbcommon/xkbcommon.h>
 
 #include "aurora/core/log.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
-#include "aurora/window/keysym_map.h" // detail::keysym_to_keycode 共享映射
-#include "aurora/window/swizzle.h"    // swizzle_rgba_to_bgra 共享实现
+#include "aurora/window/keysym_map.h"
+#include "aurora/window/swizzle.h"
 #include "aurora/window/window_state.h"
-// scanner 生成头（build 目录 wayland-gen/，由 CMake AURORA_BACKEND_WAYLAND 分支生成）。
-#include <fcntl.h>
-#include <poll.h>
-#include <unistd.h>
-
-#include <linux/input-event-codes.h> // BTN_LEFT/RIGHT/MIDDLE
-#include <sys/mman.h>
-#include <xkbcommon/xkbcommon.h>
 
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"

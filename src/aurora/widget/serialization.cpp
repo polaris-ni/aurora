@@ -20,8 +20,6 @@
 #include "aurora/widget/text_input.h"
 #include "aurora/widget/timer.h"
 #include "aurora/widget/yaml.h"
-
-// 新增控件
 #include "aurora/app/perf_overlay.h"
 #include "aurora/navigation/hero.h"
 #include "aurora/widget/bottom_nav_bar.h"
@@ -56,9 +54,9 @@ namespace serialization {
 auto WidgetRegistry::make(const std::string &type, const Json &props) const -> Result<std::shared_ptr<Widget>> {
     auto it = m_factories.find(type);
     if (it == m_factories.end()) {
-        return make_error(ErrorCode::WidgetUnknownType, "serialization: 未注册 widget 类型 '" + type +
-                                                            "'（请先用 "
-                                                            "registerFactory 注册）");
+        return make_error(ErrorCode::WidgetUnknownType, "serialization: unregistered widget type '" + type +
+                                                            "' (please first use "
+                                                            "registerFactory to register)");
     }
     auto w = it->second(props);
     if (!w) {
@@ -67,7 +65,7 @@ auto WidgetRegistry::make(const std::string &type, const Json &props) const -> R
     // 构建期约束校验：控件可在 validate_props() 中报告非法内部属性状态；
     // 失败以 degraded 上报（严格模式下由 Diagnostics 升级为硬失败，debug 下 AURORA_ASSERT 触发）。
     if (auto vr = w.value()->validate_props(); !vr) {
-        Diagnostics::degraded("属性校验失败: " + vr.error().message, type, vr.error().code);
+        Diagnostics::degraded("Property validation failed: " + vr.error().message, type, vr.error().code);
     }
     return w;
 }
@@ -247,11 +245,11 @@ namespace {
 /// 上限与 `validate_ui` / `Repeater` 一致取 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`。
 auto from_json_impl(const Json &j, std::size_t depth) -> Result<std::shared_ptr<Widget>> {
     if (depth > AURORA_DEFAULT_MAX_WIDGET_DEPTH) {
-        return make_error(ErrorCode::WidgetDepthExceeded, "serialization: 控件树嵌套深度超过上限（" +
+        return make_error(ErrorCode::WidgetDepthExceeded, "serialization: widget tree nesting depth exceeds limit (" +
                                                               std::to_string(AURORA_DEFAULT_MAX_WIDGET_DEPTH) + "）");
     }
     if (!j.is_object() || !j.contains("type") || !j["type"].is_string()) {
-        return make_error(ErrorCode::IOParseFailed, "serialization: 节点 JSON 必须是含字符串 'type' 字段的对象");
+        return make_error(ErrorCode::IOParseFailed, "serialization: node JSON must be an object with a string 'type' field");
     }
     const std::string type = j["type"].get<std::string>();
     const Json props = j.value("props", Json::object());

@@ -3,7 +3,7 @@
 #include <functional>
 #include <utility>
 
-#include "aurora/widget/provider.h" // Theme, Widget, Node, Provider<Theme>（provides_theme 钩子）
+#include "aurora/widget/provider.h"
 
 namespace aurora {
 

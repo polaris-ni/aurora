@@ -32,9 +32,9 @@ auto main() -> int {
     const auto mq = au::MediaQuery::of(2.0);
 
     au::Node root = au::Column{
-        GradientTitle{ "环境 / Environment" },
+        GradientTitle{ "Environment" },
         gap(12),
-        au::Text{ au::LocalizedString{ "MediaQueryProvider 注入缩放因子" } },
+        au::Text{ au::LocalizedString{ "MediaQueryProvider injects scale factor" } },
         gap(8),
         au::MediaQueryProvider{ mq, EnvReadout{} },
     };

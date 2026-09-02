@@ -19,7 +19,8 @@ auto MemoryBackend::put_record(const std::string &id, const StorageRecord &rec) 
 auto MemoryBackend::get_record(const std::string &id) -> Result<StorageRecord> {
     const auto it = m_store.find(id);
     if (it == m_store.end()) {
-        return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordNotFound, "内存记录不存在: " + id) };
+        return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordNotFound,
+                                                 "In-memory record does not exist: " + id) };
     }
     return Result{ it->second };
 }

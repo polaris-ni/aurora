@@ -11,19 +11,19 @@
 
 // clang-format off
 #include <windows.h>
-#include <windowsx.h> // GET_X_LPARAM / GET_Y_LPARAM / GET_WHEEL_DELTA_WPARAM
-#include <shellapi.h> // DragAcceptFiles / DragQueryFileW / DragFinish / HDROP（文件拖放）；须在 windows.h 之后
+#include <windowsx.h>
+#include <shellapi.h>
 // clang-format on
 
 #include <algorithm>
 #include <cstdint>
 #include <vector>
 
-#include "aurora/core/utf8.h"           // utf8_encode（统一 UTF-8 编码，替代本地 to_utf8）
-#include "aurora/event/event.h"         // Event / MouseEvent / KeyEvent / ScrollEvent / TextInputEvent / FileDropEvent
-#include "aurora/event/keycode.h"       // KeyCode / ModifierKey
-#include "aurora/window/window.h"       // enable_dpi_awareness
-#include "aurora/window/window_state.h" // compute_window_state 纯函数
+#include "aurora/core/utf8.h"
+#include "aurora/event/event.h"
+#include "aurora/event/keycode.h"
+#include "aurora/window/window.h"
+#include "aurora/window/window_state.h"
 
 namespace aurora {
 

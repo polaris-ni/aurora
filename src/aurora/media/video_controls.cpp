@@ -5,11 +5,11 @@
 #include <string>
 
 #include "aurora/core/color.h"
-#include "aurora/core/dimension.h" // au::px
+#include "aurora/core/dimension.h"
 #include "aurora/i18n/localized_string.h"
-#include "aurora/modifier/modifier.h" // Modifier::expand
+#include "aurora/modifier/modifier.h"
 #include "aurora/widget/button.h"
-#include "aurora/widget/containers.h" // Row
+#include "aurora/widget/containers.h"
 #include "aurora/widget/slider.h"
 #include "aurora/widget/text.h"
 

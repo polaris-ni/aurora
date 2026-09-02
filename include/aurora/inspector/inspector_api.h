@@ -8,7 +8,7 @@
 
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/result.h"
-#include "aurora/widget/props_io.h" // Json
+#include "aurora/widget/props_io.h"
 
 namespace aurora {
 

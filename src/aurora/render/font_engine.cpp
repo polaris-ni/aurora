@@ -18,7 +18,7 @@
 #include <hb.h>
 
 #include "aurora/core/log.h"
-#include "aurora/core/utf8.h" // aurora::utf8_cp_len（收口 dup-1 重复实现）
+#include "aurora/core/utf8.h"
 #include "aurora/perf/counters.h"
 #include "aurora/render/bitmap_font.h"
 #include "aurora/render/font_discovery.h"

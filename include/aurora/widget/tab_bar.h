@@ -12,7 +12,7 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
-#include "aurora/theming/theme_scope.h" // inherit_theme：active_color 未显式设置时跟随主题 primary
+#include "aurora/theming/theme_scope.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 

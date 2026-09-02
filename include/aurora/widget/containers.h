@@ -105,8 +105,8 @@ class Column : public Container, public ColumnProps {
     /// @brief 构建期属性约束校验（specification/04-widget.md §2.2）：校验 gap >= 0。
     [[nodiscard]] auto validate_props() const -> Result<void> override {
         if (gap < 0.0f) {
-            return make_error(ErrorCode::WidgetInvalidProp, "布局 gap 必须 >= 0，得到 " + std::to_string(gap),
-                              "使用非负间距");
+            return make_error(ErrorCode::WidgetInvalidProp, "Layout gap must be >= 0, got " + std::to_string(gap),
+                              "Use non-negative spacing");
         }
         return Result<void>{};
     }
@@ -235,8 +235,8 @@ class Row : public Container, public RowProps {
     /// @brief 构建期属性约束校验（specification/04-widget.md §2.2）：校验 gap >= 0。
     [[nodiscard]] auto validate_props() const -> Result<void> override {
         if (gap < 0.0f) {
-            return make_error(ErrorCode::WidgetInvalidProp, "布局 gap 必须 >= 0，得到 " + std::to_string(gap),
-                              "使用非负间距");
+            return make_error(ErrorCode::WidgetInvalidProp, "Layout gap must be >= 0, got " + std::to_string(gap),
+                              "Use non-negative spacing");
         }
         return Result<void>{};
     }

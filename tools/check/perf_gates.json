@@ -1,6 +1,6 @@
 {
-  "source": "本机时间类门槛 —— 受机器负载/编译器/后台进程影响，不进 CI，仅本机趋势对比。",
-  "note": "time-class gates 不进 CTest；计数类 G-5~G-8 由 tests/test_scroll_regression.cpp 锁进 CTest（PROFILING=ON）。",
+  "source": "Local time-class gates -- affected by machine load / compiler / background processes; not in CI, only for local trend comparison.",
+  "note": "Time-class gates are not in CTest; counter-class G-5~G-8 are locked into CTest by tests/test_scroll_regression.cpp (PROFILING=ON).",
   "scene": "google_play",
   "repeat": 3,
   "gates": [

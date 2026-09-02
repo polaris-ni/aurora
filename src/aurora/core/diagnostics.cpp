@@ -4,7 +4,7 @@
 #include <unordered_map>
 
 #include "aurora/core/strict_mode.h"
-#include "aurora/widget/props_io.h" // Json（to_json_line 使用 nlohmann::json）
+#include "aurora/widget/props_io.h"
 
 namespace aurora {
 

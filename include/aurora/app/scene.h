@@ -10,7 +10,8 @@ namespace aurora {
 /**
  * @brief 场景：持有一棵 widget 树，提供无头渲染与结构快照。
  *
- * 对应 specification/06-app-platform.md §2.3 / ARCHITECTURE.md §4.6：`Scene` 只持 widget 树与根环境；`Window` 归 `Application`。
+ * 对应 specification/06-app-platform.md §2.3 / ARCHITECTURE.md §4.6：`Scene` 只持 widget 树与根环境；`Window` 归
+ * `Application`。
  *
  * @note Thread: main-thread only
  * @note Side-effects: none

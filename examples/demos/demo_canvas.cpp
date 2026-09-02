@@ -21,9 +21,9 @@ auto main() -> int {
                      } };
 
     au::Node root = au::Column{
-        GradientTitle{ "Canvas 控件" },
+        GradientTitle{ "Canvas widget" },
         gap(12),
-        au::Text{ au::LocalizedString{ "通过 Painter 回调自由绘制" } },
+        au::Text{ au::LocalizedString{ "Free drawing via Painter callback" } },
         std::move(gauge),
     };
     return run_demo(Card{ std::move(root) }, "Canvas · Aurora Demo", 520.0f, 380.0f);

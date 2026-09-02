@@ -3,17 +3,17 @@
 
 auto main() -> int {
     au::Node bottom =
-        au::Stack{ au::Text{ au::LocalizedString{ "底层文本" } }, au::Text{ au::LocalizedString{ "上层叠加文本" } } };
+        au::Stack{ au::Text{ au::LocalizedString{ "Bottom text" } }, au::Text{ au::LocalizedString{ "Top overlay text" } } };
     au::Node centered =
-        au::Stack{ std::vector<au::Node>{ au::Text{ au::LocalizedString{ "居中叠加" } } }, au::Alignment::Center };
+        au::Stack{ std::vector<au::Node>{ au::Text{ au::LocalizedString{ "Center overlay" } } }, au::Alignment::Center };
 
     au::Node root = au::Column{
-        GradientTitle{ "Stack 控件" },
+        GradientTitle{ "Stack widget" },
         gap(12),
-        au::Text{ au::LocalizedString{ "默认 top-left 叠加" } },
+        au::Text{ au::LocalizedString{ "Default top-left overlay" } },
         std::move(bottom),
         gap(12),
-        au::Text{ au::LocalizedString{ "Alignment::Center 叠加" } },
+        au::Text{ au::LocalizedString{ "Alignment::Center overlay" } },
         std::move(centered),
     };
     return run_demo(Card{ std::move(root) }, "Stack · Aurora Demo", 520.0f, 440.0f);

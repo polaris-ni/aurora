@@ -309,8 +309,8 @@ auto Preferences::load_from_file() -> void {
     }
     std::ifstream in(m_file, std::ios::binary);
     if (!in) {
-        m_load_error = make_error(ErrorCode::PrefsOpenFailed, "无法打开配置文件：" + m_file.string(),
-                                  "检查文件路径与读权限", "", m_file.string());
+        m_load_error = make_error(ErrorCode::PrefsOpenFailed, "Failed to open config file: " + m_file.string(),
+                                  "Check file path and read permission", "", m_file.string());
         m_root = Json::object();
         return;
     }
@@ -329,8 +329,9 @@ auto Preferences::load_from_file() -> void {
         // 应用持久化的墓碑/清空纪元，得到初始内存视图（不复活已删除键）。
         reconcile(m_root, m_versions);
     } catch (const std::exception &e) {
-        m_load_error = make_error(ErrorCode::PrefsParseFailed, std::string("配置文件 JSON 解析失败：") + e.what(),
-                                  "检查文件是否为合法 JSON", "", m_file.string());
+        m_load_error =
+            make_error(ErrorCode::PrefsParseFailed, std::string("Config file JSON parse failed: ") + e.what(),
+                       "Check whether file is valid JSON", "", m_file.string());
         m_root = Json::object();
     }
 }
@@ -477,10 +478,11 @@ auto Preferences::clear_impl(const std::string &scope) -> void {
 
 auto Preferences::flush() -> Result<void> {
     if (m_file.empty()) {
-        return make_error(ErrorCode::PrefsNotPersistent, "Preferences 处于内存模式，无法 flush",
-                          "请在构造时指定文件路径（Preferences(path) / at(path) / with_location(name)）或改用 "
-                          "Preferences::instance(name)",
-                          "", "");
+        return make_error(
+            ErrorCode::PrefsNotPersistent, "Preferences is in memory mode, cannot flush",
+            "Specify file path at construction (Preferences(path) / at(path) / with_location(name)) or use "
+            "Preferences::instance(name)",
+            "", "");
     }
     std::unique_lock lock(m_mutex); // 线程安全：串行化与其他读写
     if (m_opts.auto_create_dir) {
@@ -489,8 +491,8 @@ auto Preferences::flush() -> Result<void> {
     }
     FileLock flock(m_file); // 进程安全：跨进程互斥写
     if (!flock.lock(true)) {
-        return make_error(ErrorCode::IOFileNotFound, "无法获取配置文件锁：" + m_file.string(),
-                          "其他进程可能正在写入，稍后重试", "", m_file.string());
+        return make_error(ErrorCode::IOFileNotFound, "Failed to acquire config file lock: " + m_file.string(),
+                          "Another process may be writing, retry later", "", m_file.string());
     }
     // 读取磁盘现状（其他进程可能已写入或删除键）。
     Json on_disk = Json::object();
@@ -544,12 +546,12 @@ auto Preferences::flush() -> Result<void> {
     {
         std::ofstream out_f(tmp, std::ios::binary | std::ios::trunc);
         if (!out_f) {
-            return make_error(ErrorCode::PrefsWriteFailed, "无法写入临时文件：" + tmp.string(),
-                              "检查目录是否存在及写权限", "", m_file.string());
+            return make_error(ErrorCode::PrefsWriteFailed, "Failed to write temp file: " + tmp.string(),
+                              "Check whether directory exists and write permission", "", m_file.string());
         }
         out_f << content;
         if (!out_f) {
-            return make_error(ErrorCode::PrefsWriteFailed, "写入临时文件失败：" + tmp.string(), "", "",
+            return make_error(ErrorCode::PrefsWriteFailed, "Failed to write temp file: " + tmp.string(), "", "",
                               m_file.string());
         }
     }
@@ -557,22 +559,22 @@ auto Preferences::flush() -> Result<void> {
     std::error_code ec;
     std::filesystem::rename(tmp, m_file, ec);
     if (ec) {
-        return make_error(ErrorCode::PrefsWriteFailed, "重命名临时文件失败：" + ec.message(),
-                          "检查磁盘空间与目标文件权限", "", m_file.string());
+        return make_error(ErrorCode::PrefsWriteFailed, "Failed to rename temp file: " + ec.message(),
+                          "Check disk space and target file permissions", "", m_file.string());
     }
     return {};
 }
 
 auto Preferences::reload() -> Result<void> {
     if (m_file.empty()) {
-        return make_error(ErrorCode::PrefsNotPersistent, "Preferences 处于内存模式，无法 reload",
-                          "请在构造时指定文件路径或改用 Preferences::instance(name)", "", "");
+        return make_error(ErrorCode::PrefsNotPersistent, "Preferences is in memory mode, cannot reload",
+                          "Specify file path at construction or use Preferences::instance(name)", "", "");
     }
     std::unique_lock lock(m_mutex); // 线程安全
     FileLock flock(m_file);         // 进程安全：读时加共享锁，保证读到完整文件
     if (!flock.lock(false)) {
-        return make_error(ErrorCode::IOFileNotFound, "无法获取配置文件锁：" + m_file.string(),
-                          "其他进程可能正在写入，稍后重试", "", m_file.string());
+        return make_error(ErrorCode::IOFileNotFound, "Failed to acquire config file lock: " + m_file.string(),
+                          "Another process may be writing, retry later", "", m_file.string());
     }
     std::error_code ec;
     if (!std::filesystem::exists(m_file, ec)) {
@@ -594,14 +596,14 @@ auto Preferences::reload() -> Result<void> {
     {
         std::ifstream in(m_file, std::ios::binary);
         if (!in) {
-            return make_error(ErrorCode::PrefsOpenFailed, "无法打开配置文件：" + m_file.string(), "", "",
+            return make_error(ErrorCode::PrefsOpenFailed, "Failed to open config file: " + m_file.string(), "", "",
                               m_file.string());
         }
         try {
             in >> whole;
         } catch (const std::exception &e) {
-            return make_error(ErrorCode::PrefsParseFailed, std::string("配置文件 JSON 解析失败：") + e.what(), "", "",
-                              m_file.string());
+            return make_error(ErrorCode::PrefsParseFailed, std::string("Config file JSON parse failed: ") + e.what(),
+                              "", "", m_file.string());
         }
     }
     Json on_disk;

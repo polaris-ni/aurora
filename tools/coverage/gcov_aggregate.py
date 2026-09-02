@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 # ============================================================================
-# gcov_aggregate.py — gcov 覆盖率聚合 + 自绘 HTML 报告
+# gcov_aggregate.py - gcov coverage aggregation + self-drawn HTML report
 # ----------------------------------------------------------------------------
-# 背景：本机 gcov (GCC 16) 无 --html 选项，而 LLVM 分支有 llvm-cov show -format=html。
-# 为让 GCC / LLVM 两个覆盖率分支共享**同一形态**的 HTML 报告，且不强依赖 gcov 版本，
-# 由本脚本自绘 HTML（仅依赖标准库 + 解析 gcov 中间格式）。
+# Background: the local gcov (GCC 16) has no --html option, while the LLVM branch
+# has `llvm-cov show -format=html`. To let the GCC / LLVM coverage branches share a
+# **single-shaped** HTML report without tightly depending on the gcov version, this
+# script draws the HTML itself (standard library only + parsing gcov intermediate format).
 #
-# 输入：gcov 中间格式（GCC >= 9 的 `gcov -i -t` JSON 文档流，或旧式 file:/lcount: 段落）。
-#       多个 .gcda 的 `gcov -i -t` 输出可直接拼接传入（每段自描述）。
-# 输出：
-#   - 终端：总体行覆盖率 + 低于阈值文件清单（升序）+ 公共头↔测试 1:1 映射概览；
-#   - --csv  <path>：完整表 CSV；
-#   - --html <path>：自绘 HTML 报告（汇总表 + 每文件命中/未命中行）。
+# Input: gcov intermediate format (the `gcov -i -t` JSON document stream from GCC >= 9,
+# or the legacy file:/lcount: sections). Multiple .gcda `gcov -i -t` outputs can be
+# concatenated directly (each block is self-describing).
+# Output:
+#   - terminal: overall line coverage + files below the threshold (ascending) +
+#     public-header<->test 1:1 mapping overview;
+#   - --csv  <path>: full table CSV;
+#   - --html <path>: self-drawn HTML report (summary table + per-file hit/miss lines).
 #
-# 用法：
+# Usage:
 #   python3 gcov_aggregate.py <all.gcov> [--src-root <repo>] [--threshold 90]
 #                               [--csv <coverage.csv>] [--html <coverage.html>]
 # ============================================================================
@@ -25,7 +28,7 @@ import sys
 
 
 def parse_intermediate(text, src_root, counts):
-    """解析 gcov 中间格式（JSON 流或旧式 file:/lcount: 段落）到 counts[path][line]=sum。"""
+    """Parse gcov intermediate format (JSON stream or legacy file:/lcount: sections) into counts[path][line]=sum."""
 
     def add(p, line, cnt):
         p = os.path.normpath(p)
@@ -65,8 +68,9 @@ def in_scope(p, src_root):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("input", nargs="+", help="gcov 中间格式文件（可多个）；目录则收集其下 *.gcov")
-    ap.add_argument("--src-root", default=None, help="仓库根（默认脚本上级两级）")
+    ap.add_argument("input", nargs="+",
+                    help="gcov intermediate-format files (multiple allowed); a directory collects *.gcov under it")
+    ap.add_argument("--src-root", default=None, help="repo root (default: two levels above this script)")
     ap.add_argument("--threshold", type=float, default=90.0)
     ap.add_argument("--csv", default=None)
     ap.add_argument("--html", default=None)
@@ -105,12 +109,12 @@ def main():
     overall = 100.0 * overall_c / overall_t if overall_t else 0.0
 
     print("=" * 62)
-    print(f"Aurora 行覆盖率（gcov 聚合, {len(rows)} 个源文件, 阈值 {args.threshold:.0f}%）")
+    print(f"Aurora line coverage (gcov aggregation, {len(rows)} source files, threshold {args.threshold:.0f}%)")
     print("=" * 62)
-    print(f"总体: {overall:.1f}%  ({overall_c}/{overall_t} 可执行行)")
+    print(f"Overall: {overall:.1f}%  ({overall_c}/{overall_t} executable lines)")
 
     low = [r for r in rows if r[0] < args.threshold]
-    print(f"\n低于阈值 {args.threshold:.0f}% 的文件 ({len(low)} 个，升序):")
+    print(f"\nFiles below {args.threshold:.0f}% threshold ({len(low)}, ascending):")
     for pct, rel, c, t, _ in low:
         print(f"  {pct:6.1f}%  {rel}  ({c}/{t})")
 
@@ -120,13 +124,13 @@ def main():
             w.writerow(["coverage_pct", "covered_lines", "executable_lines", "file"])
             for pct, rel, c, t, _ in rows:
                 w.writerow([f"{pct:.1f}", c, t, rel])
-        print(f"\n完整表已写入: {args.csv}")
+        print(f"\nFull table written to: {args.csv}")
 
     if args.html:
         write_html(args.html, rows, overall, overall_c, overall_t, args.threshold)
-        print(f"HTML 报告已写入: {args.html}")
+        print(f"HTML report written to: {args.html}")
 
-    # 公共头 ↔ 测试 1:1 映射概览（项目约定代理指标）
+    # Public-header <-> test 1:1 mapping overview (project's conventional proxy metric)
     inc = os.path.join(src_root, "include", "aurora")
     tests_dir = os.path.join(src_root, "tests")
     headers = []
@@ -141,20 +145,21 @@ def main():
         1 for h in headers
         if os.path.exists(os.path.join(tests_dir, "test_" + os.path.basename(h)[:-2] + ".cpp"))
     )
-    print(f"\n公共头 {len(headers)} 个；同名直测文件 {have_direct} 个"
-          f"（其余经模块宿主测试或映射注释覆盖）")
+    print(f"\n{len(headers)} public headers; {have_direct} have a same-name direct test file "
+          f"(the rest are covered via module host tests or mapping annotations)")
 
     return 0
 
 
 def write_html(path, rows, overall, overall_c, overall_t, threshold):
-    parts = ["<!DOCTYPE html><html lang='zh'><head><meta charset='utf-8'>", "<title>Aurora 行覆盖率报告</title>",
+    parts = ["<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>",
+             "<title>Aurora Line Coverage Report</title>",
              "<style>body{font-family:monospace;margin:2rem}table{border-collapse:collapse;"
              "width:100%}td,th{border:1px solid #ccc;padding:4px 8px;text-align:right}"
              "td.file,th.file{text-align:left}.low{color:#b00}.ok{color:#070}"
              ".miss{background:#fdd}.hit{background:#dfd}pre{margin:0}</style></head><body>",
-             f"<h1>Aurora 行覆盖率报告</h1>",
-             f"<p>总体 <b>{overall:.1f}%</b> ({overall_c}/{overall_t} 可执行行)，阈值 {threshold:.0f}%</p>",
+             f"<h1>Aurora Line Coverage Report</h1>",
+             f"<p>Overall <b>{overall:.1f}%</b> ({overall_c}/{overall_t} executable lines), threshold {threshold:.0f}%</p>",
              "<table><tr><th class='file'>file</th><th>coverage %</th><th>covered</th>"
              "<th>executable</th></tr>"]
     for pct, rel, c, t, _ in rows:
@@ -162,14 +167,14 @@ def write_html(path, rows, overall, overall_c, overall_t, threshold):
         parts.append(f"<tr><td class='file'><a href='#{rel}'>{rel}</a></td>"
                      f"<td class='{cls}'>{pct:.1f}</td><td>{c}</td><td>{t}</td></tr>")
     parts.append("</table>")
-    # 每文件命中/未命中行（仅列出行号，便于点开定位）
+    # Per-file hit/miss lines (only line numbers listed, for quick navigation)
     for pct, rel, c, t, lines in rows:
         miss = sorted(ln for ln, cnt in lines.items() if cnt == 0)
         parts.append(f"<h3 id='{rel}'>{rel} — {pct:.1f}%</h3>")
         if miss:
-            parts.append(f"<p class='miss'>未覆盖行 ({len(miss)}): {', '.join(map(str, miss))}</p>")
+            parts.append(f"<p class='miss'>uncovered lines ({len(miss)}): {', '.join(map(str, miss))}</p>")
         else:
-            parts.append("<p class='hit'>全部覆盖 ✅</p>")
+            parts.append("<p class='hit'>fully covered ✅</p>")
     parts.append("</body></html>")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(parts))

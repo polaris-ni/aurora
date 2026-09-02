@@ -17,7 +17,7 @@ auto main() -> int {
     initial.push_back(title);
 
     au::TextSpan body;
-    body.text.text = "\n支持粗体(Ctrl+B)、斜体(Ctrl+I)、下划线(Ctrl+U)、撤销(Ctrl+Z)、重做(Ctrl+Y)。";
+    body.text.text = "\nSupports bold (Ctrl+B), italic (Ctrl+I), underline (Ctrl+U), undo (Ctrl+Z), redo (Ctrl+Y).";
     body.font.size_pt = 14.0f;
     initial.push_back(body);
 
@@ -26,7 +26,7 @@ auto main() -> int {
     au::Node root = au::Column{
         GradientTitle{ "RichTextEdit" },
         gap(12),
-        au::Text{ "快捷键: Ctrl+B 粗体 | Ctrl+I 斜体 | Ctrl+U 下划线 | Ctrl+Z 撤销 | Ctrl+Y 重做" },
+        au::Text{ "Shortcuts: Ctrl+B bold | Ctrl+I italic | Ctrl+U underline | Ctrl+Z undo | Ctrl+Y redo" },
         au::Node{ std::static_pointer_cast<au::Widget>(editor) },
     };
     return run_demo(Card{ std::move(root) }, "RichTextEdit · Aurora Demo", 640.0f, 400.0f);
