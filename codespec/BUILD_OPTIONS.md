@@ -357,7 +357,6 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `AURORA_UPDATE_GOLDEN` | 非空（如 `1`） | 把当前渲染覆盖为新的 golden（首次生成 / 主动更新真值） |
 | `AURORA_GOLDEN_MAX_DIFF` | 整数 | 像素最大允许色差阈值 |
 | `AURORA_GOLDEN_MAX_PIXELS` | 整数 | 允许不一致像素数上限 |
-| `AURORA_BENCH_SCALE` | 整数倍率（如 `2`） | 仅 `examples/demos/bench_gp_fps.cpp` 使用：模拟真实后端的 DPI 缩放，`2` → 每维 ×2（像素量 ×4） |
 
 > CTest 默认 CWD = `build/`，故依赖相对路径的 golden 测试须从仓库根直接运行可执行文件（仓库 `cmake/AuroraTests.cmake` 已为依赖相对路径的测试显式设置 `WORKING_DIRECTORY` 为仓库根，故 `ctest` 下直接可跑）。
 

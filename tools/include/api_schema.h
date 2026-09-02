@@ -11,6 +11,8 @@
 #include <aurora/aurora.h>
 #include <nlohmann/json.hpp>
 
+#include "known_enums.h"
+
 namespace aurora::tools {
 
 inline auto build_api_skeleton() -> nlohmann::json {

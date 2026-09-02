@@ -1,0 +1,58 @@
+// OverflowStrategy demo：展示不同溢出策略的效果对比。
+#include "demo_common.h"
+
+int main() {
+    au::enable_dpi_awareness();
+    au::init_console();
+
+    // 辅助：创建一个固定尺寸容器，内含超出容器的子内容
+    auto make_overflow_box = [](au::OverflowStrategy strategy, const char *label) -> au::Node {
+        // 子内容：一个比容器大的红色背景 Text
+        auto txt = std::make_shared<au::Text>();
+        txt->content = au::LocalizedString{ std::string{ label } };
+        txt->modifier.set(au::Modifier{}.size(260.0f, 120.0f).background(au::Color{ 220, 50, 50, 255 }));
+
+        // 容器：固定 150x60，绿色背景
+        au::Column col{ au::ColumnProps{ .children = { au::Node{ txt } } } };
+        col.modifier.set(au::Modifier{}
+                             .size(150.0f, 60.0f)
+                             .background(au::Color{ 50, 180, 80, 255 })
+                             .border(1.0f, pal::AURORA_BORDER));
+        col.overflow_strategy(strategy);
+        return col;
+    };
+
+    au::Node root = au::Column{
+        GradientTitle{ "OverflowStrategy 溢出策略" },
+        gap(12),
+
+        Card{
+            au::Text{ au::LocalizedString{ "Visible（默认）：子内容溢出可见" } },
+            gap(8),
+            make_overflow_box(au::OverflowStrategy::Visible, "Visible: content overflows"),
+        },
+        gap(12),
+
+        Card{
+            au::Text{ au::LocalizedString{ "Hidden：溢出部分裁剪隐藏" } },
+            gap(8),
+            make_overflow_box(au::OverflowStrategy::Hidden, "Hidden: content clipped"),
+        },
+        gap(12),
+
+        Card{
+            au::Text{ au::LocalizedString{ "Clip：同 Hidden，保留 hit-test（预留语义）" } },
+            gap(8),
+            make_overflow_box(au::OverflowStrategy::Clip, "Clip: clipped + hit-test"),
+        },
+        gap(12),
+
+        Card{
+            au::Text{ au::LocalizedString{ "Scroll：溢出可滚动（预留，当前等同 Hidden）" } },
+            gap(8),
+            make_overflow_box(au::OverflowStrategy::Scroll, "Scroll: scrollable (placeholder)"),
+        },
+    };
+
+    return run_demo(Card{ std::move(root) }, "OverflowStrategy · Aurora Demo", 520.0f, 680.0f);
+}

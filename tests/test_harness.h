@@ -237,12 +237,16 @@ using aurora::testing::near_f;
 #define AURORA_TEST_IMPL(name, ctr)                                                                                    \
     static void AURORA_TEST_CAT(au_test_body_, ctr)();                                                                 \
     namespace {                                                                                                        \
+    /* NOLINTNEXTLINE */                                                                                               \
     static const ::aurora::testing::Registrar AURORA_TEST_CAT(au_test_reg_,                                            \
                                                               ctr){ name, &AURORA_TEST_CAT(au_test_body_, ctr) };      \
     }                                                                                                                  \
+    /* NOLINTNEXTLINE */                                                                                               \
     static void AURORA_TEST_CAT(au_test_body_, ctr)()
 
-#define AURORA_TEST() AURORA_TEST_IMPL(AURORA_TEST_NAME, __COUNTER__)
+#define AURORA_TEST_COUNTER __COUNTER__
+
+#define AURORA_TEST() AURORA_TEST_IMPL(AURORA_TEST_NAME, AURORA_TEST_COUNTER)
 
 /// 注册一个显式命名的用例（用于单文件多用例拆分；注意名字不得与其他 TU 重复）。
 #define AURORA_TEST_NAMED(test_name) AURORA_TEST_IMPL(test_name, __COUNTER__)
@@ -251,6 +255,7 @@ using aurora::testing::near_f;
 /// skip_reason 传宏标识符（如 AURORA_BACKEND_GLFW），沿用旧 TEST_SKIP 的字符串化语义（# 取字面量）。
 #define AURORA_TEST_SKIP(skip_reason)                                                                                  \
     namespace {                                                                                                        \
+    /* NOLINTNEXTLINE */                                                                                               \
     static const ::aurora::testing::SkipRegistrar AURORA_TEST_CAT(au_test_skip_, __COUNTER__){ AURORA_TEST_NAME,       \
                                                                                                #skip_reason };         \
     }

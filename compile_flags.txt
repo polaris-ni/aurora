@@ -1,4 +1,7 @@
 -xc++
 -std=c++20
 -fcoroutines
+# __COUNTER__ 是测试宏生成唯一注册名所必须的扩展；GCC 构建无此警告，
+# 仅 clangd 分析时以 C2y 扩展提示。该文件仅供 clangd 使用，不影响实际构建。
+-Wno-counter-extension
 -Iinclude
