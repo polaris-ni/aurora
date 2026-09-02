@@ -1,0 +1,5 @@
+{
+  "type": "Column",
+  "props": {},
+  "children": "this should be an array"
+}

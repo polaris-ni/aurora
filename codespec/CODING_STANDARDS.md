@@ -22,7 +22,7 @@
 - **名序一致**：属性 / 参数名序与 React / Flutter 对齐（回调用 `on_xxx` 如 `on_click`，非 `click_handler`；子节点用 `children`；尺寸用 `width` / `height`）。避免自创词序。
 - **默认参数友好**：高频构造提供默认参数 / 便捷工厂（如 `au::colors::AURORA_BLUE`、`dp(16)`），降低记忆负担。
 - **顺序容错**：多参数构造优先用 `XxxProps{...}` 具名聚合（如 `ColumnProps{ .children = ... }`），避免位置参数顺序错误。
-- **强类型几何**：`Length` / `Color` / `Size` / `Point` 为强类型；禁止 `Length(int)` 隐式转换（裸整数编译失败）。已采纳用户字面量 `au::literals`（`100_dp`、`16_ms`、`0xRRGGBB_rgb`），`px(100)` 与 `100_dp` 互补；**禁止头文件全局 `using`，仅 TU 内 `using namespace au::literals`**。
+- **强类型几何**：`Length` / `Color` / `Size` / `Point` 为强类型；禁止 `Length(int)` 隐式转换（裸整数编译失败）。已采纳用户字面量 `au::literals`（`100_dp`、`16_ms`、`0xRRGGBB_rgb`），`px(100)` 与 `100_dp` 互补；**禁止头文件全局 `using`**，字面量只在 TU 内按需引入（示例代码用 `using namespace au::literals;`，测试代码按 §3.1 用 using 声明 / 命名空间别名引入，不得用 using-directive）。
 - **所有权清晰**：资源所有权用 `unique_ptr` / `shared_ptr` 明确；跨边界传递用 `std::move`；`Binding<T>` 为非拥有引用（上游生命周期须更长）。
 - **常量命名**：命名空间 / 文件级与类内 `static constexpr` 常量统一 `AURORA_` 前缀 + `UPPER_CASE` 全大写下划线（如 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`），与 `.clang-tidy` 的 `ConstantPrefix` / `GlobalConstantPrefix` 约束一致；禁止 `k` 前缀 CamelCase。
 - **生命周期回调强类型**：`au::Lifecycle` 的 `on_mount` / `on_unmount`、窗口级 `WindowState` / `WindowMode` 的 `set_on_*` 回调均为具名 `std::function` 强类型（`MountCb = std::function<void(const BuildContext&)>`、`UnmountCb = std::function<void()>`，`WindowStateHandler` / `WindowModeHandler` 同理）；枚举取值穷尽且按「可见性 / 几何态」正交划分（`WindowState` 不并入 `Maximized`），AI 无需猜测「是否还有隐藏状态」。回调均可空（无副作用时不传），且不走异常捕获（与主线程事件回调一致）。
@@ -46,6 +46,9 @@
 - 断言一律走 `test_harness.h` 的 `AURORA_TEST_CHECK*`（非致命，记录后继续）/ `AURORA_TEST_REQUIRE*`（致命，抛 `CheckAbort` 终止本用例）家族，失败计数汇入框架上下文，由 runner 统一决定退出码；**不得自造 `g_test_failures` / `return 0/1` 式退出码**。
 - 后端 / 平台专属用例在 feature 宏未开启的 `#else` 分支以 `AURORA_TEST_SKIP(宏名)` 注册空通过桩。
 - 新增文件漏写注册宏不会报链接错误，由 CTest 的 `registry_integrity` 守护（比对 `runner --list` 与配置期 GLOB 清单）兜底。CTest 粒度不变：每条 = `--run=<stem>`（进程隔离）。
+- **命名可见性**：测试 TU **禁止 using-directive**（`using namespace aurora;` / `using namespace au;` 等），与 clang-tidy 的 `google-build-using-namespace` 检查保持一致。需要裸名时按优先级用：using 声明（`using aurora::Color;`、`using aurora::preferences::Preferences;`）、命名空间别名（`namespace ar = aurora::render;`）、或显式限定（`au::Rect`）。用户字面量按实际用到的后缀逐个声明（`using aurora::literals::operator""_dp;`、`using std::chrono_literals::operator""ms;`）。
+  using 声明 / 别名须放在**使用点之前**的作用域内（分段式测试文件里，各 `namespace sec_xxx { ... }` 段各自引入自己用到的名字），不要图省事放到文件顶部。
+  **禁止**为 using-directive 追加 `NOLINT(google-build-using-namespace)` 之类的抑制：改用声明即可根治，抑制只会掩盖真实告警，且在检查不触发的位置（如函数体内的 using）会形成无效的 NOLINT 噪声。
 
 ### 3.2 覆盖率工作流
 

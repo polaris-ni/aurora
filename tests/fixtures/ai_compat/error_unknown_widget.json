@@ -1,0 +1,6 @@
+{
+  "type": "NotARealWidget",
+  "props": {
+    "text": "does not exist"
+  }
+}

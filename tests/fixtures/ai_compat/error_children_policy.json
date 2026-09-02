@@ -1,0 +1,14 @@
+{
+  "type": "Text",
+  "props": {
+    "content": "Leaf widget should not have children"
+  },
+  "children": [
+    {
+      "type": "Button",
+      "props": {
+        "label": "This should not be here"
+      }
+    }
+  ]
+}

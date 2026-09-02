@@ -1,0 +1,24 @@
+{
+  "type": "Column",
+  "props": {},
+  "children": [
+    {
+      "type": "Text",
+      "props": {
+        "content": "Themed Text",
+        "show": true
+      }
+    },
+    {
+      "type": "Button",
+      "props": {
+        "label": "Themed Button",
+        "show": true
+      }
+    },
+    {
+      "type": "Spacer",
+      "props": {}
+    }
+  ]
+}

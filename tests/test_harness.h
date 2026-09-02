@@ -41,7 +41,7 @@ namespace aurora::testing {
 namespace detail {
 
 /// 检测类型是否可 operator<< 输出（失败详情打印实际值；不可打印类型只输出表达式原文）。
-template<typename T, typename = void> struct IsStreamable : std::false_type {};
+template<typename T, typename = void> struct IsStreamable : std::false_type {}; // NOLINT
 template<typename T>
 struct IsStreamable<T, std::void_t<decltype(std::declval<std::ostream &>() << std::declval<const T &>())>>
     : std::true_type {};
@@ -155,14 +155,13 @@ inline auto record_fail(const char *file, int line, std::string_view what) -> vo
     auto &ctx = current();
     ++ctx.failures;
     // 直接调 Logger::log 以携带断言调用点的 file:line（AURORA_LOG_* 宏会带本函数的位置）。
-    ::aurora::Logger::instance().log(
-        AURORA_FILE_NAME, __LINE__, ::aurora::LogLevel::Error, "test",
-        ::aurora::detail::log_concat("[FAIL] ", ctx.name, " ", file, ":", line, ": ", what));
+    Logger::instance().log(AURORA_FILE_NAME, __LINE__, LogLevel::Error, "test",
+                           aurora::detail::log_concat("[FAIL] ", ctx.name, " ", file, ":", line, ": ", what));
 }
 
 template<typename A, typename B> [[nodiscard]] auto values_detail(const A &a, const B &b) -> std::string {
     if constexpr (IsStreamable<A>::value && IsStreamable<B>::value) {
-        return ::aurora::detail::log_concat(" [actual: ", debug_value(a), " vs ", debug_value(b), "]");
+        return aurora::detail::log_concat(" [actual: ", debug_value(a), " vs ", debug_value(b), "]");
     } else {
         return {};
     }
@@ -195,7 +194,7 @@ auto check_eq(const A &a, const B &b, const char *file, int line, std::string_vi
         }
         return;
     }
-    detail::record_fail(file, line, ::aurora::detail::log_concat(what, detail::values_detail(a, b)));
+    detail::record_fail(file, line, aurora::detail::log_concat(what, detail::values_detail(a, b)));
 }
 
 template<typename A, typename B, typename Eps>
@@ -208,7 +207,7 @@ auto check_near(const A &a, const B &b, const Eps &eps, const char *file, int li
     }
     detail::record_fail(
         file, line,
-        ::aurora::detail::log_concat(what, detail::values_detail(a, b), " [eps ", detail::debug_value(eps), "]"));
+        aurora::detail::log_concat(what, detail::values_detail(a, b), " [eps ", detail::debug_value(eps), "]"));
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +233,16 @@ using aurora::testing::near_f;
 #define AURORA_TEST_CAT(a, b) AURORA_TEST_CAT_I(a, b)
 #define AURORA_TEST_CAT_I(a, b) a##b
 
+// `__COUNTER__` 被 clang 归为 C2y 扩展（-Wc2y-extensions），在每个注册宏展开点报一次；
+// GCC / MSVC 不报。计数器是 TU 内标识符唯一性的必要手段（换 __LINE__ 会让同一行多条注册
+// 重定义），故在宏展开处就地发一条 diagnostic ignored 关掉它：仅 clang 生效，其余编译器展开
+// 为空，避免 -Wunknown-pragmas。代价是该 TU 自首个注册点起不再报 c2y 类扩展告警。
+#ifdef __clang__
+#define AURORA_TEST_NO_C2Y _Pragma("clang diagnostic ignored \"-Wc2y-extensions\"")
+#else
+#define AURORA_TEST_NO_C2Y
+#endif
+
 #define AURORA_TEST_IMPL(name, ctr)                                                                                    \
     static void AURORA_TEST_CAT(au_test_body_, ctr)();                                                                 \
     namespace {                                                                                                        \
@@ -246,14 +255,15 @@ using aurora::testing::near_f;
 
 #define AURORA_TEST_COUNTER __COUNTER__
 
-#define AURORA_TEST() AURORA_TEST_IMPL(AURORA_TEST_NAME, AURORA_TEST_COUNTER)
+#define AURORA_TEST() AURORA_TEST_NO_C2Y AURORA_TEST_IMPL(AURORA_TEST_NAME, AURORA_TEST_COUNTER)
 
 /// 注册一个显式命名的用例（用于单文件多用例拆分；注意名字不得与其他 TU 重复）。
-#define AURORA_TEST_NAMED(test_name) AURORA_TEST_IMPL(test_name, __COUNTER__)
+#define AURORA_TEST_NAMED(test_name) AURORA_TEST_NO_C2Y AURORA_TEST_IMPL(test_name, __COUNTER__)
 
 /// 注册一条 skip 桩：对应 feature 宏未编译进本构建时空通过（放在 #else 分支）。
 /// skip_reason 传宏标识符（如 AURORA_BACKEND_GLFW），沿用旧 TEST_SKIP 的字符串化语义（# 取字面量）。
 #define AURORA_TEST_SKIP(skip_reason)                                                                                  \
+    AURORA_TEST_NO_C2Y                                                                                                 \
     namespace {                                                                                                        \
     /* NOLINTNEXTLINE */                                                                                               \
     static const ::aurora::testing::SkipRegistrar AURORA_TEST_CAT(au_test_skip_, __COUNTER__){ AURORA_TEST_NAME,       \

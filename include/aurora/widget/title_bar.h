@@ -15,6 +15,7 @@
 #include "aurora/window/title_bar_style.h"
 #include "aurora/window/window_chrome.h"
 #include "aurora/window/window_state.h"
+#include "aurora/environment/environment.h"
 
 namespace aurora {
 

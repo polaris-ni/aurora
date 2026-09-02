@@ -17,7 +17,7 @@
 
 namespace {
 
-namespace ut = ::aurora::testing;
+namespace ut = aurora::testing;
 
 /// CLI 解析结果。
 struct CliOptions {
@@ -36,7 +36,7 @@ auto parse_cli(std::span<char *> args, CliOptions &opt) -> bool {
         return true;
     }
     int i = 1;
-    for (char *p : args.subspan(1)) { // 跳过 argv[0]，range-for 免下标/指针算术
+    for (char const *p : args.subspan(1)) { // 跳过 argv[0]，range-for 免下标/指针算术
         const std::string arg(p);
         if (arg == "--") {
             opt.pass_start = i + 1;
@@ -69,7 +69,7 @@ auto set_pass_args(std::span<char *> args, int pass_start) -> void {
     s_pass.clear();
     s_pass.push_back(args.empty() ? "aurora_test_runner" : *args.begin()); // argv[0] 经 *begin() 取，免下标
     if (static_cast<size_t>(pass_start) <= args.size()) {
-        for (char *p : args.subspan(static_cast<size_t>(pass_start))) { // `--` 之后的透传参数
+        for (char const *p : args.subspan(static_cast<size_t>(pass_start))) { // `--` 之后的透传参数
             s_pass.push_back(p);
         }
     }
@@ -133,7 +133,7 @@ auto run_one(const ut::TestCase &t, int &passed, int &failed, int &skipped) -> v
 }
 
 auto parse_and_run(int argc, char **argv) -> int {
-    const std::span<char *> args(argv, argc);
+    const std::span args(argv, argc);
     CliOptions opt;
     if (!parse_cli(args, opt)) {
         return 2;
@@ -167,4 +167,6 @@ auto parse_and_run(int argc, char **argv) -> int {
 
 } // namespace
 
+// 测试入口 main 允许把用例体内抛出的异常传播出去终止进程，无需在此吞掉异常
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int { return parse_and_run(argc, argv); }

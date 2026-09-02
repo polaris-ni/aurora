@@ -1,0 +1,32 @@
+{
+  "type": "Column",
+  "props": {},
+  "children": [
+    {
+      "type": "Text",
+      "props": {
+        "content": "Name:"
+      }
+    },
+    {
+      "type": "TextInput",
+      "props": {}
+    },
+    {
+      "type": "Text",
+      "props": {
+        "content": "Email:"
+      }
+    },
+    {
+      "type": "TextInput",
+      "props": {}
+    },
+    {
+      "type": "Button",
+      "props": {
+        "label": "Submit"
+      }
+    }
+  ]
+}

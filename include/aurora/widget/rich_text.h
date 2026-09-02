@@ -14,6 +14,7 @@
 #include "aurora/state/signal_view.h"
 #include "aurora/widget/text_span.h"
 #include "aurora/widget/widget.h"
+#include "aurora/environment/environment.h"
 
 namespace aurora {
 
@@ -80,7 +81,6 @@ inline auto layout_rich_text(const std::vector<TextSpan> &spans, float max_width
             if (need_space && (cur_w + gap + w > max_width)) {
                 lines.push_back(std::move(cur));
                 cur = detail::RichLine{};
-                cur_w = 0.0f;
                 const float w2 = render::FontEngine::measure_width(word, span.font);
                 cur.words.push_back(
                     detail::RichWord{ .text = word, .font = span.font, .color = span.color, .width = w2 });

@@ -1,0 +1,42 @@
+{
+  "type": "Stack",
+  "props": {},
+  "children": [
+    {
+      "type": "Column",
+      "props": {},
+      "children": [
+        {
+          "type": "Text",
+          "props": {
+            "content": "Top"
+          }
+        },
+        {
+          "type": "Row",
+          "props": {},
+          "children": [
+            {
+              "type": "Text",
+              "props": {
+                "content": "Left"
+              }
+            },
+            {
+              "type": "Text",
+              "props": {
+                "content": "Right"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Button",
+      "props": {
+        "label": "OK"
+      }
+    }
+  ]
+}

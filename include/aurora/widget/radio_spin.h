@@ -9,6 +9,7 @@
 
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
+#include "aurora/event/keycode.h"
 #include "aurora/core/string_util.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"

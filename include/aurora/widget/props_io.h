@@ -17,8 +17,8 @@ using Json = nlohmann::json;
 /// @brief 强类型尺寸意图 → JSON：["px",v] / ["percent",v] / "fill" / "auto"。
 [[nodiscard]] inline auto length_to_json(const Length &len) -> Json {
     switch (len.kind) {
-    case LengthKind::WrapContent: return { "auto" };
-    case LengthKind::Expand: return { "fill" };
+    case LengthKind::WrapContent: return "auto";
+    case LengthKind::Expand: return "fill";
     case LengthKind::Fixed: {
         Json a = Json::array();
         a.push_back("px");
@@ -32,7 +32,7 @@ using Json = nlohmann::json;
         return a;
     }
     }
-    return { "auto" };
+    return "auto";
 }
 
 /// @brief JSON → 强类型尺寸意图（解析 lengthToJson 的输出）。

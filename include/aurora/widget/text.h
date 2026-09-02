@@ -14,6 +14,7 @@
 #include "aurora/i18n/string_table.h"
 #include "aurora/state/reactive.h"
 #include "aurora/widget/widget.h"
+#include "aurora/environment/environment.h"
 
 namespace aurora {
 

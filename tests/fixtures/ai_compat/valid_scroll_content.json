@@ -1,0 +1,40 @@
+{
+  "type": "Scroll",
+  "props": {},
+  "children": [
+    {
+      "type": "Column",
+      "props": {},
+      "children": [
+        {
+          "type": "Text",
+          "props": {
+            "content": "Item 1"
+          }
+        },
+        {
+          "type": "Text",
+          "props": {
+            "content": "Item 2"
+          }
+        },
+        {
+          "type": "Divider",
+          "props": {}
+        },
+        {
+          "type": "Text",
+          "props": {
+            "content": "Item 3"
+          }
+        },
+        {
+          "type": "Button",
+          "props": {
+            "label": "Load More"
+          }
+        }
+      ]
+    }
+  ]
+}
