@@ -1,14 +1,14 @@
 // OverflowStrategy demo：展示不同溢出策略的效果对比。
 #include "demo_common.h"
 
-int main() {
+auto main() -> int {
     au::enable_dpi_awareness();
     au::init_console();
 
     // 辅助：创建一个固定尺寸容器，内含超出容器的子内容
     auto make_overflow_box = [](au::OverflowStrategy strategy, const char *label) -> au::Node {
         // 子内容：一个比容器大的红色背景 Text
-        auto txt = std::make_shared<au::Text>();
+        const auto txt = std::make_shared<au::Text>();
         txt->content = au::LocalizedString{ std::string{ label } };
         txt->modifier.set(au::Modifier{}.size(260.0f, 120.0f).background(au::Color{ 220, 50, 50, 255 }));
 

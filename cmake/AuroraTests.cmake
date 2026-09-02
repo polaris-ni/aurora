@@ -31,10 +31,10 @@ if (AURORA_BUILD_TESTS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/au_test_main.cpp"
             ${AURORA_TEST_SOURCES})
     # 统一配置：链接 aurora + C++20 + 复用消费者 PCH + 告警标志；
-    # tests/ 供 test_harness.h 解析，examples/demos 供 google_play_data/ui 数据层测试。
+    # tests/ 供 test_harness.h 解析，examples/app/google_play 供 google_play_data/ui 数据层测试。
     aurora_setup_consumer_target(aurora_test_runner
             "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-            "${CMAKE_CURRENT_SOURCE_DIR}/examples/demos")
+            "${CMAKE_CURRENT_SOURCE_DIR}/examples/app/google_play")
     # 暴露工具链共享头（tools/include）：部分测试需复用 known_enums.h / au_lint_core.h 等
     # 单一来源，避免与工具实现漂移（known_enums 取值守护、au-lint 核心逻辑单测）。
     target_include_directories(aurora_test_runner PRIVATE "${CMAKE_SOURCE_DIR}/tools/include")

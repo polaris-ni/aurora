@@ -10,6 +10,7 @@ auto main() -> int {
         if (i < 0 || static_cast<std::size_t>(i) >= aurora_names.size()) {
             return;
         }
+        // NOLINTNEXTLINE(*-pro-bounds-constant-array-index)
         label->set(au::LocalizedString{ std::string("已选: ") + aurora_names[static_cast<std::size_t>(i)] });
     });
 

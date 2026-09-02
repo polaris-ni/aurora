@@ -21,7 +21,7 @@ auto main() -> int {
                   .font = au::Font{ .size_pt = 14.0f },
                   .color = pal::AURORA_MUTED },
     };
-    auto state = std::make_shared<au::State<std::vector<TextSpan>>>(std::move(spans));
+    const auto state = std::make_shared<au::State<std::vector<TextSpan>>>(std::move(spans));
     au::RichText rt{ au::Reactive{ state } };
 
     au::Node root = au::Column{

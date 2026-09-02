@@ -15,7 +15,7 @@ auto main() -> int {
             au::Node{ std::move(name_input) },
             au::Node{ std::move(email_input) },
             au::Node{ au::Button{ au::ButtonProps{ .label = "提交" } } },
-            au::Node{ au::Checkbox{ au::Reactive<bool>{ true } } },
+            au::Node{ au::Checkbox{ au::Reactive{ true } } },
         }, .gap = 8.0f } } };
     };
 

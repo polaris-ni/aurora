@@ -11,49 +11,55 @@
 
 #include "demo_common.h"
 
-using namespace aurora;
-using namespace aurora::preferences;
-
 auto main() -> int {
-    const auto dir = std::filesystem::temp_directory_path() / "aurora_prefs_demo";
-    std::filesystem::create_directories(dir);
-    Preferences prefs = Preferences::with_location("demo_settings", dir);
+    try {
+        const auto dir = std::filesystem::temp_directory_path() / "aurora_prefs_demo";
+        std::filesystem::create_directories(dir);
+        au::preferences::Preferences prefs = au::preferences::Preferences::with_location("demo_settings", dir);
 
-    auto show_switch = std::make_shared<State<bool>>(true);
+        auto show_switch = std::make_shared<au::State<bool>>(true);
 
-    // Switch 双向绑定到 "dark_mode"；切换经 on_change 写回并主动 flush 到文件。
-    au::Switch sw{ prefs.binding<bool>("dark_mode", false), [&prefs](bool v) -> void {
-                      prefs.set("dark_mode", v);
-                      (void)prefs.flush(); // 主动刷新到文件
-                  } };
+        // Switch 双向绑定到 "dark_mode"；切换经 on_change 写回并主动 flush 到文件。
+        au::Switch sw{ prefs.binding<bool>("dark_mode", false), [&prefs](bool v) -> void {
+                          prefs.set("dark_mode", v);
+                          (void)prefs.flush(); // 主动刷新到文件
+                      } };
 
-    // 分组演示：把界面偏好放到命名分组 "appearance" 下，以嵌套 JSON 持久化。
-    au::Switch appearance_sw{ prefs.group("appearance").binding<bool>("dark_mode", false), [&prefs](bool v) -> void {
-                                 prefs.group("appearance").set("dark_mode", v);
-                                 (void)prefs.flush();
-                             } };
+        // 分组演示：把界面偏好放到命名分组 "appearance" 下，以嵌套 JSON 持久化。
+        au::Switch appearance_sw{ prefs.group("appearance").binding<bool>("dark_mode", false),
+                                  [&prefs](bool v) -> void {
+                                      prefs.group("appearance").set("dark_mode", v);
+                                      (void)prefs.flush();
+                                  } };
 
-    // 删除该配置项按钮：经 Binding 删除路径移除 dark_mode 并落盘，
-    // 随即隐藏 Switch（避免已销毁的 State 被复用），演示「控件卸载时同步 remove」。
-    au::Button del_btn{ au::ButtonProps{ .label = au::LocalizedString{ "删除 dark_mode 配置项" } } };
-    del_btn.on_click = [&prefs, show_switch]() -> void {
-        prefs.remove("dark_mode");
-        (void)prefs.flush();     // 墓碑随 flush 持久化并跨进程传播
-        show_switch->set(false); // 隐藏绑定的 Switch，避免 dangling State 被访问
-    };
+        // 删除该配置项按钮：经 Binding 删除路径移除 dark_mode 并落盘，
+        // 随即隐藏 Switch（避免已销毁的 State 被复用），演示「控件卸载时同步 remove」。
+        au::Button del_btn{ au::ButtonProps{ .label = au::LocalizedString{ "删除 dark_mode 配置项" } } };
+        del_btn.on_click = [&prefs, show_switch]() -> void {
+            prefs.remove("dark_mode");
+            (void)prefs.flush();     // 墓碑随 flush 持久化并跨进程传播
+            show_switch->set(false); // 隐藏绑定的 Switch，避免 dangling State 被访问
+        };
 
-    au::Node root = au::Column{
-        GradientTitle{ "Preferences 演示" },
-        gap(12.0f),
-        au::Show{ show_switch, au::Row{ std::move(sw), au::Text{ "深色模式（持久化于 " +
-                                                                 prefs.file_path().filename().string() + "）" } } },
-        gap(8.0f),
-        au::Row{ std::move(appearance_sw), au::Text{ "深色模式（分组 appearance，嵌套持久化）" } },
-        gap(8.0f),
-        std::move(del_btn),
-        gap(8.0f),
-        au::Text{ "点击删除后，配置文件中的 dark_mode 被移除（墓碑可靠删除）；重启应用开关恢复默认。" },
-        au::Text{ "关闭窗口后重新运行，未被删除的开关状态会被恢复" },
-    };
-    return run_demo(Card{ std::move(root) }, "Preferences · Aurora Demo", 560.0f, 420.0f);
+        au::Node root = au::Column{
+            GradientTitle{ "Preferences 演示" },
+            gap(12.0f),
+            au::Show{ show_switch, au::Row{ std::move(sw), au::Text{ "深色模式（持久化于 " +
+                                                                     prefs.file_path().filename().string() + "）" } } },
+            gap(8.0f),
+            au::Row{ std::move(appearance_sw), au::Text{ "深色模式（分组 appearance，嵌套持久化）" } },
+            gap(8.0f),
+            std::move(del_btn),
+            gap(8.0f),
+            au::Text{ "点击删除后，配置文件中的 dark_mode 被移除（墓碑可靠删除）；重启应用开关恢复默认。" },
+            au::Text{ "关闭窗口后重新运行，未被删除的开关状态会被恢复" },
+        };
+        return run_demo(Card{ std::move(root) }, "Preferences · Aurora Demo", 560.0f, 420.0f);
+    } catch (const std::exception &e) {
+        AURORA_LOG_ERROR("demo_preferences", "unhandled exception: ", e.what());
+        return 1;
+    } catch (...) {
+        AURORA_LOG_ERROR("demo_preferences", "unhandled unknown exception");
+        return 1;
+    }
 }

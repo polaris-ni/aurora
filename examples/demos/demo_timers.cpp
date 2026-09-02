@@ -41,7 +41,10 @@ static auto build_clock() -> au::Node {
 static auto build_countdown() -> au::Node {
     auto cd = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{ "countdown: 10" });
     return au::Timer(
-        1s, [cd](const au::SignalView<int> &) -> au::Text { return au::Text{ au::TextProps{ .content = au::Reactive{ cd } } }; },
+        1s,
+        [cd](const au::SignalView<int> &) -> au::Text {
+            return au::Text{ au::TextProps{ .content = au::Reactive{ cd } } };
+        },
         [cd](int n) -> void {
             const int left = 10 - n;
             cd->set(au::LocalizedString{ left > 0 ? "countdown: " + std::to_string(left) : "countdown: done" });

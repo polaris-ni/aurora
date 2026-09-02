@@ -10,11 +10,11 @@ auto main() -> int {
     au::ui::label(root, "下方控件由 au::ui:: 工厂自动加入根容器");
     au::ui::button(root, "点我", au::ButtonProps{}, []() -> void { /* 演示：点击无副作用 */ });
     au::ui::input(root, "可编辑文本");
-    au::ui::checkbox(root, au::Reactive<bool>{ true });
-    au::ui::slider(root, au::Reactive<double>{ 0.5 });
+    au::ui::checkbox(root, au::Reactive{ true });
+    au::ui::slider(root, au::Reactive{ 0.5 });
 
     // 包装为根节点并赋予 #id，演示富格式 dump
-    au::Node root_node = au::Node{ std::make_shared<au::Column>(std::move(root)) };
+    auto root_node = au::Node{ std::make_shared<au::Column>(std::move(root)) };
     root_node.set_id("demo-root");
 
     // 富格式文本化（供 AI 解析 / diff / 定位）

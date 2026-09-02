@@ -8,8 +8,8 @@ auto main() -> int {
     au::Node b = au::Column{ au::Text{ au::LocalizedString{ "hello" } }, au::Text{ au::LocalizedString{ "aurora" } } };
 
     au::Json ja = au::serialization::to_json(a.widget());
-    au::Json jb = au::serialization::to_json(b.widget());
-    auto d = au::serialization::diff(ja, jb);
+    const au::Json jb = au::serialization::to_json(b.widget());
+    const auto d = au::serialization::diff(ja, jb);
     au::serialization::apply_patch(ja, d);
 
     au::Node root = au::Column{

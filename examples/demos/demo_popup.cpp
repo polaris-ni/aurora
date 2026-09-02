@@ -8,7 +8,7 @@ auto main() -> int {
     } });
 
     au::Button open_btn{ au::ButtonProps{ .label = "打开 Popup" } };
-    open_btn.on_click = [popup]() -> void { popup->open_at(au::Point{ 140.0f, 120.0f }); };
+    open_btn.on_click = [popup]() -> void { popup->open_at(au::Point{ .x = 140.0f, .y = 120.0f }); };
 
     au::Node root = au::Column{
         GradientTitle{ "Popup / Overlay 控件" },

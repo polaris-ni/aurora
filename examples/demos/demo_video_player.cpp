@@ -50,7 +50,7 @@ class TintedVideoPlayer : public aurora::VideoPlayer {
 } // namespace
 
 auto main() -> int {
-    auto src = std::make_shared<aurora::ImageSequenceSource>(make_frames(48), 24.0); // 2 秒 @ 24fps
+    const auto src = std::make_shared<aurora::ImageSequenceSource>(make_frames(48), 24.0); // 2 秒 @ 24fps
     auto player = std::make_unique<TintedVideoPlayer>();
     player->set_source(src);
     player->width(aurora::px(640));

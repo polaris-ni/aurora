@@ -17,7 +17,7 @@ class DemoSurface : public au::Surface {
     auto begin_frame(int w, int h) -> au::Result<bool> override {
         m_painter.begin(w, h);
         m_size = au::Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) };
-        return au::Result<bool>{ true };
+        return au::Result{ true };
     }
     auto painter() -> au::Painter & override { return m_painter; }
     auto present() -> au::Result<bool> override {

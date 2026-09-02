@@ -59,17 +59,17 @@ constexpr float AURORA_GUTTER = 16.0F;
 class Card : public au::Column {
   public:
     explicit Card(au::Node child, au::Color fill = pal::AURORA_SURFACE)
-        : au::Column{ au::ColumnProps{ .children = { std::move(child) } } } {
+        : Column{ ColumnProps{ .children = { std::move(child) } } } {
         decorate(fill);
     }
 
     /// @brief 便捷构造：扁平罗列子项（Card{ a, b, c }），免写 Node{} 包裹。
-    Card(std::initializer_list<au::Node> kids, au::Color fill = pal::AURORA_SURFACE) : au::Column{ kids } {
+    Card(std::initializer_list<au::Node> kids, au::Color fill = pal::AURORA_SURFACE) : Column{ kids } {
         decorate(fill);
     }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "Card"; }
-    [[nodiscard]] auto describe() const -> au::WidgetDescriptor override { return Column::describe_static(); }
+    [[nodiscard]] auto describe() const -> au::WidgetDescriptor override { return describe_static(); }
 
   private:
     void decorate(au::Color fill) {

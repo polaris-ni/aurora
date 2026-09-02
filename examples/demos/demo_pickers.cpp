@@ -4,10 +4,10 @@
 #include "demo_common.h"
 
 auto main() -> int {
-    au::DatePicker date{ au::Date{ 2026, 7, 25 } };
+    au::DatePicker date{ au::Date{ .year = 2026, .month = 7, .day = 25 } };
     date.set_on_change([](au::Date d) -> void { AURORA_LOG_INFO("demo", "日期: ", d.to_string()); });
 
-    au::TimePicker time{ au::TimeOfDay{ 14, 30 } };
+    au::TimePicker time{ au::TimeOfDay{ .hour = 14, .minute = 30 } };
     time.set_on_change([](au::TimeOfDay t) -> void { AURORA_LOG_INFO("demo", "时间: ", t.to_string()); });
 
     au::ColorPicker color{ au::Color(0, 122, 255, 255) };

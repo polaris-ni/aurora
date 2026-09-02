@@ -62,7 +62,7 @@ auto main() -> int {
 
     // 舞台：固定尺寸 + .clip()，把缩放方块的绘制严格裁在其边界内（治本：
     // 用框架自带裁剪原语保证不越界，而非依赖巧合的空间余量）。
-    au::Stack stage{ std::vector<au::Node>{ au::Node{ scale_inner } }, au::Alignment::Center };
+    au::Stack stage{ std::vector{ au::Node{ scale_inner } }, au::Alignment::Center };
     stage.modifier.set(au::Modifier{}.size(stage_size, stage_size).clip());
 
     au::Node root = au::Column{
@@ -92,7 +92,7 @@ auto main() -> int {
             bounce(pulse);
             bounce(scale_pulse);
             // 按真实帧间隔推进动画控制器。
-            auto now = std::chrono::steady_clock::now();
+            const auto now = std::chrono::steady_clock::now();
             const double dt = std::chrono::duration<double>(now - last).count();
             last = now;
             animator.tick(dt);

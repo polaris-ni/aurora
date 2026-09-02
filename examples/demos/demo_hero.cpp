@@ -20,7 +20,7 @@ auto main() -> int {
 
     // 详情页：Hero("logo") 更大（绿），返回按钮 pop。
     auto make_detail = [host]() -> aurora::Node {
-        aurora::aurora::Text lbl{ "Aurora" };
+        aurora::Text lbl{ "Aurora" };
         lbl.modifier.set(aurora::Modifier{}.background(pal::AURORA_OK).size(160.0f, 120.0f));
         aurora::Hero logo{ "logo", aurora::Node{ std::move(lbl) } };
         auto btn = aurora::Button{ "Back" };
