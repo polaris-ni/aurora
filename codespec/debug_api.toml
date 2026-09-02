@@ -27,7 +27,7 @@
 
 [[function]]
 name = "capture"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "capture(Surface &s, const std::string &path, CaptureSource src = CaptureSource::Framebuffer) -> Result<bool>"
 summary = "Capture a screenshot (software framebuffer / real on-screen window) to a PNG"
@@ -35,7 +35,7 @@ header = "aurora/debug/debug_backend.h"
 
 [[function]]
 name = "resolve_output_path"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "none"
 signature = "resolve_output_path(const std::string &path) -> std::string"
 summary = "Resolve a relative path without a directory into the default output dir; paths with a directory are returned as-is"
@@ -43,7 +43,7 @@ header = "aurora/debug/debug_backend.h"
 
 [[function]]
 name = "set_output_directory"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "none"
 signature = "set_output_directory(const std::string &dir) -> void"
 summary = "Set the default output directory (passing empty string restores the ./aurora_debug/ default)"
@@ -51,7 +51,7 @@ header = "aurora/debug/debug_backend.h"
 
 [[function]]
 name = "output_directory"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "none"
 signature = "output_directory() -> std::string"
 summary = "Current default output directory (lazily computed)"
@@ -59,7 +59,7 @@ header = "aurora/debug/debug_backend.h"
 
 [[function]]
 name = "surface_state"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "surface_state(const Surface &s) -> Json"
 summary = "Runtime snapshot of Surface state (size/scale/frame/...); returns unavailable in Release"
@@ -67,7 +67,7 @@ header = "aurora/debug/debug_backend.h"
 
 [[function]]
 name = "set_flags"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "set_flags(const DebugPaintFlags &f) -> void"
 summary = "Set the global visualization debug-overlay switches (effective under DEBUG, no-op in Release)"
@@ -75,7 +75,7 @@ header = "aurora/debug/debug_paint.h"
 
 [[function]]
 name = "flags"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "flags() -> DebugPaintFlags"
 summary = "Read the global overlay switches (always all-false in Release)"
@@ -83,7 +83,7 @@ header = "aurora/debug/debug_paint.h"
 
 [[function]]
 name = "any_flag_enabled"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "any_flag_enabled() -> bool"
 summary = "Whether any overlay is enabled (always false in Release; lets present_root short-circuit)"
@@ -91,7 +91,7 @@ header = "aurora/debug/debug_paint.h"
 
 [[function]]
 name = "current_debug_frame"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "current_debug_frame() -> std::uint64_t"
 summary = "Current debug frame counter (only needed by repaint_highlight)"
@@ -99,7 +99,7 @@ header = "aurora/debug/debug_paint.h"
 
 [[function]]
 name = "bump_debug_frame"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "bump_debug_frame() -> void"
 summary = "Increment the debug frame counter"
@@ -107,7 +107,7 @@ header = "aurora/debug/debug_paint.h"
 
 [[function]]
 name = "paint_debug_overlays"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "paint_debug_overlays(Painter &p, const Widget &root, const Rect &root_bounds, const BuildContext &ctx) -> void"
 summary = "After painting the whole tree, draw all 5 overlay layers (incl. overdraw heatmap)"
@@ -115,7 +115,7 @@ header = "aurora/debug/debug_paint.h"
 
 [[function]]
 name = "overlay_stats"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "overlay_stats() -> DebugOverlayStats"
 summary = "Overlay drawing statistics (for test assertions)"
@@ -123,7 +123,7 @@ header = "aurora/debug/debug_paint.h"
 
 [[function]]
 name = "reset_overlay_stats"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "reset_overlay_stats() -> void"
 summary = "Reset overlay drawing statistics to zero"
@@ -131,7 +131,7 @@ header = "aurora/debug/debug_paint.h"
 
 [[function]]
 name = "widget_picker"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "widget_picker(Widget &root, const Rect &root_bounds, const BuildContext &ctx, Point screen) -> DebugPickResult"
 summary = "Widget picking: resolve the root->deepest hit chain and the deepest widget info"
@@ -139,7 +139,7 @@ header = "aurora/debug/debug_paint.h"
 
 [[function]]
 name = "widget_tree"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "widget_tree(const Node &root) -> Json"
 summary = "Complete Widget-tree JSON snapshot (type+props+children)"
@@ -147,7 +147,7 @@ header = "aurora/debug/debug_runtime.h"
 
 [[function]]
 name = "perf_snapshot"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "perf_snapshot() -> Json"
 summary = "Performance snapshot JSON (aggregates FrameStats + PerfLog)"
@@ -155,7 +155,7 @@ header = "aurora/debug/debug_runtime.h"
 
 [[function]]
 name = "frame_phase_timeline"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "frame_phase_timeline(std::size_t limit = 64) -> Json"
 summary = "Frame-phase timeline JSON (layout/paint/present timings + ASCII flamegraph)"
@@ -163,7 +163,7 @@ header = "aurora/debug/debug_runtime.h"
 
 [[function]]
 name = "why_trace"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "why_trace(std::size_t limit = 64) -> Json"
 summary = "why-relayout/why-repaint trace JSON (the most recent N mark_needs_* triggers)"
@@ -171,7 +171,7 @@ header = "aurora/debug/debug_runtime.h"
 
 [[function]]
 name = "diagnostics"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "diagnostics() -> Json"
 summary = "Read-only runtime diagnostics snapshot JSON (thin wrapper over Diagnostics)"
@@ -179,7 +179,7 @@ header = "aurora/debug/debug_runtime.h"
 
 [[function]]
 name = "check_render_purity"
-since = "0.5.0"
+since = "1.0.0-alpha.1"
 gated = "AURORA_ENABLE_DEBUG"
 signature = "check_render_purity() -> void"
 summary = "Render-purity check: assert we are in a paint context and catch the anti-pattern of reading the global clock during rendering"

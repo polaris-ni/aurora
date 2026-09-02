@@ -69,6 +69,7 @@ add_dependencies(aurora_api_json gen_api_tools)
 # merge-only：保留其它段，只写 debug 段。运行：cmake --build build --target gen_debug_api_json
 add_executable(gen_debug_api tools/gen/gen_debug_api.cpp)
 target_include_directories(gen_debug_api PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/third_party
         ${CMAKE_SOURCE_DIR}/tools/include)
 set_target_properties(gen_debug_api PROPERTIES CXX_STANDARD 20)

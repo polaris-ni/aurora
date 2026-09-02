@@ -52,7 +52,7 @@ namespace {
 // read_json_file / parse_code_style / build_api_skeleton 由 tools/include 下的共享头提供。
 
 auto print_usage() -> void {
-    AURORA_LOG_RAW("cli", "Aurora CLI v0.8.0 — AI-first GUI 工具链\n\n"
+    AURORA_LOG_RAW("cli", "Aurora CLI v" AURORA_VERSION_STRING " — AI-first GUI 工具链\n\n"
                           "用法：aurora_cli <command> [options]\n\n"
                           "命令：\n"
                           "  components                         列出所有已注册组件类型\n"

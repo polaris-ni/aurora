@@ -26,11 +26,15 @@
 #include "api_json_merge.h"
 #include "toml_lines.h"
 
+// 版本单一事实来源（AURORA_VERSION_STRING）。本生成器不链接 aurora，仅借用此纯宏头
+// （不引入任何链接符号）；未注入版本宏时回退到 version.h 内置默认值，与库当前版本一致。
+#include "aurora/core/version.h"
+
 namespace {
 
 // 本工具为构建期生成器，不链接 Aurora 库，故无法使用 aurora 的 Logger。
 // 所有诊断输出统一经由 err() 收口（一处定义、统一前缀）。
-inline auto err(const std::string &msg) -> void { std::cerr << "[gen_debug_api] " << msg << "\n"; }
+auto err(const std::string &msg) -> void { std::cerr << "[gen_debug_api] " << msg << "\n"; }
 
 struct DebugEntry {
     std::string name;
@@ -90,7 +94,7 @@ auto parse_toml(const std::string &path, std::vector<DebugEntry> &out) -> bool {
             return false;
         }
         if (e.since.empty()) {
-            e.since = "1.0.0-alpha.1";
+            e.since = AURORA_VERSION_STRING;
         }
         if (e.gated.empty()) {
             e.gated = "AURORA_ENABLE_DEBUG";

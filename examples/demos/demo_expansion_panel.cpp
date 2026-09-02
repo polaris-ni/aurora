@@ -4,7 +4,7 @@
 auto main() -> int {
     au::ExpansionPanel details{ "详细信息",
                                 au::Node{ au::Column{
-                                    au::Text{ "版本: 1.0.0.alpha-1" },
+                                    au::Text{ "版本: " AURORA_VERSION_STRING },
                                     au::Text{ "渲染: 软件 Painter（无 GPU）" },
                                     au::Text{ "后端: Headless / Win32 / GLFW" },
                                 } },
