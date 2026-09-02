@@ -5,7 +5,6 @@
 #ifdef AURORA_BACKEND_D3D11
 
 #include <d3d11.h>
-#include <dxgi1_2.h>
 #include <memory>
 #include <string>
 
@@ -101,7 +100,9 @@ class D3D11Surface : public Surface {
 
     ID3D11Device *m_device = nullptr;
     ID3D11DeviceContext *m_ctx = nullptr;
-    IDXGISwapChain1 *m_swap = nullptr;
+    // 由 D3D11CreateDeviceAndSwapChain 创建，返回的是 IDXGISwapChain（非 1 版本）接口；
+    // 本类只用到其 GetBuffer/Present 等 IDXGISwapChain 方法，故按该类型持有，避免向下转换。
+    IDXGISwapChain *m_swap = nullptr;
     ID3D11Texture2D *m_rt = nullptr;
     ID3D11RenderTargetView *m_rtv = nullptr;
     ID3D11Texture2D *m_src = nullptr; ///< 源纹理（CPU 上传目标，与 painter 同尺寸）

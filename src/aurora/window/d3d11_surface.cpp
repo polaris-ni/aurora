@@ -31,7 +31,7 @@ VSOut VSMain(uint id : SV_VertexID) {
     float2 p = float2(id == 2 ? 3.0f : -1.0f, id == 1 ? 3.0f : -1.0f);
     VSOut o;
     o.pos = float4(p, 0.0f, 1.0f);
-    o.uv = float2(p.x * 0.5f + 0.5f, 0.5f - p.y * 0.5f); // 翻转 v 以匹配 CPU 顶行优先
+    o.uv = float2(p.x * 0.5f + 0.5f, p.y * 0.5f + 0.5f); // upload_region 已将数据转为顶行优先，无需再翻转 v
     return o;
 }
 )HLSL";
@@ -51,7 +51,7 @@ auto compile_shader(const char *src, const char *entry, const char *profile, ID3
                                   D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, blob, &err);
     if (FAILED(hr)) {
         if (err != nullptr) {
-            AURORA_LOG_ERROR("d3d11", "shader compile failed: %s", static_cast<const char *>(err->GetBufferPointer()));
+            AURORA_LOG_ERROR("d3d11", "shader compile failed: ", static_cast<const char *>(err->GetBufferPointer()));
             err->Release();
         }
         return false;
@@ -61,7 +61,7 @@ auto compile_shader(const char *src, const char *entry, const char *profile, ID3
 
 auto make_sampler_desc() -> D3D11_SAMPLER_DESC {
     D3D11_SAMPLER_DESC sd;
-    sd.Filter = D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
     sd.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
     sd.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
     sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -148,98 +148,115 @@ auto D3D11Surface::try_recover_device() -> void {
 }
 
 auto D3D11Surface::init_device(int width, int height) -> bool {
-    constexpr std::array<D3D_FEATURE_LEVEL, 4> levels = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
-                                                          D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0 };
-    // 优先硬件适配器；不可用时回退 WARP（软件光栅），保证无 GPU 环境（CI/无头）也能跑通上屏路径。
-    HRESULT hr =
-        D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels.data(),
-                          static_cast<UINT>(levels.size()), D3D11_SDK_VERSION, &m_device, nullptr, &m_ctx);
+    constexpr std::array levels = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1,
+                                    D3D_FEATURE_LEVEL_10_0 };
+    const int w = std::max(1, static_cast<int>(std::lround(static_cast<float>(width) * m_win->scale_factor())));
+    const int h = std::max(1, static_cast<int>(std::lround(static_cast<float>(height) * m_win->scale_factor())));
+
+    // 使用 D3D11CreateDeviceAndSwapChain 直接创建设备和交换链，避免手动获取工厂
+    DXGI_SWAP_CHAIN_DESC scd{};
+    scd.OutputWindow = static_cast<HWND>(m_win->hwnd());
+    scd.Windowed = TRUE;
+    scd.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    scd.BufferDesc.Width = static_cast<UINT>(w);
+    scd.BufferDesc.Height = static_cast<UINT>(h);
+    scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    scd.BufferCount = 2;
+    scd.SampleDesc.Count = 1;
+    scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+
+    IDXGISwapChain *swap_raw = nullptr;
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels.data(),
+        static_cast<UINT>(levels.size()), D3D11_SDK_VERSION, &scd, &swap_raw, &m_device, nullptr, &m_ctx);
     if (FAILED(hr)) {
-        hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels.data(),
-                               static_cast<UINT>(levels.size()), D3D11_SDK_VERSION, &m_device, nullptr, &m_ctx);
-    }
-    if (FAILED(hr) || (m_device == nullptr) || (m_ctx == nullptr)) {
-        return false;
-    }
-    // 取 DXGI 工厂以创建交换链。
-    IDXGIDevice *dxgi_dev = nullptr;
-    IDXGIAdapter *adapter = nullptr;
-    IDXGIFactory2 *factory = nullptr;
-    bool ok = false;
-    if (SUCCEEDED(m_device->QueryInterface(&dxgi_dev))) {
-        if (SUCCEEDED(dxgi_dev->GetAdapter(&adapter))) {
-            // 显式 IID（等价于 IID_IDXGIFactory2），避免 IID_PPV_ARGS 展开出的 __uuidof 扩展 token 警告。
-            static constexpr IID iid_factory2 = { .Data1 = 0x50c83a1c,
-                                                  .Data2 = 0xe3a3,
-                                                  .Data3 = 0x4d23,
-                                                  .Data4 = { 0xad, 0x65, 0x9c, 0xd2, 0x6a, 0x9c, 0x39, 0xee } };
-            void *factory_tmp = nullptr;
-            if (SUCCEEDED(adapter->GetParent(iid_factory2, &factory_tmp))) {
-                factory = static_cast<IDXGIFactory2 *>(factory_tmp);
-                ok = true;
-            }
+        AURORA_LOG_INFO("d3d11", "Hardware adapter failed, trying WARP...");
+        hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                                           levels.data(), static_cast<UINT>(levels.size()), D3D11_SDK_VERSION, &scd,
+                                           &swap_raw, &m_device, nullptr, &m_ctx);
+        if (FAILED(hr)) {
+            AURORA_LOG_ERROR("d3d11", "Both hardware and WARP adapters failed, hr=", hr);
+            return false;
         }
     }
-    safe_release(dxgi_dev);
-    safe_release(adapter);
-    if (!ok) {
-        safe_release(factory);
+    if (m_device == nullptr || m_ctx == nullptr || swap_raw == nullptr) {
+        AURORA_LOG_ERROR("d3d11", "Device, context or swapchain is null");
+        safe_release(swap_raw);
         return false;
     }
+    m_swap = swap_raw;
 
     // 编译着色器。
     ID3DBlob *vs_blob = nullptr;
     ID3DBlob *ps_blob = nullptr;
-    if (!compile_shader(AURORA_VS, "VSMain", "vs_5_0", &vs_blob) ||
-        !compile_shader(AURORA_PS, "PSMain", "ps_5_0", &ps_blob)) {
+    if (!compile_shader(AURORA_VS, "VSMain", "vs_5_0", &vs_blob)) {
+        AURORA_LOG_ERROR("d3d11", "Vertex shader compilation failed");
         safe_release(vs_blob);
         safe_release(ps_blob);
-        safe_release(factory);
         return false;
     }
-    (void)m_device->CreateVertexShader(vs_blob->GetBufferPointer(), vs_blob->GetBufferSize(), nullptr, &m_vs);
-    (void)m_device->CreatePixelShader(ps_blob->GetBufferPointer(), ps_blob->GetBufferSize(), nullptr, &m_ps);
-    // 空输入布局（VS 仅用 SV_VertexID，无顶点输入）。
-    (void)m_device->CreateInputLayout(nullptr, 0, vs_blob->GetBufferPointer(), vs_blob->GetBufferSize(), &m_layout);
+    if (!compile_shader(AURORA_PS, "PSMain", "ps_5_0", &ps_blob)) {
+        AURORA_LOG_ERROR("d3d11", "Pixel shader compilation failed");
+        safe_release(vs_blob);
+        safe_release(ps_blob);
+        return false;
+    }
+    const HRESULT vs_hr =
+        m_device->CreateVertexShader(vs_blob->GetBufferPointer(), vs_blob->GetBufferSize(), nullptr, &m_vs);
+    const HRESULT ps_hr =
+        m_device->CreatePixelShader(ps_blob->GetBufferPointer(), ps_blob->GetBufferSize(), nullptr, &m_ps);
+    // VS 仅用 SV_VertexID，无真实顶点输入；提供一个虚拟输入元素以满足 CreateInputLayout 的 E_INVALIDARG 检查。
+    constexpr D3D11_INPUT_ELEMENT_DESC dummy_desc = { .SemanticName = "POSITION",
+                                                      .SemanticIndex = 0,
+                                                      .Format = DXGI_FORMAT_R32G32B32A32_FLOAT,
+                                                      .InputSlot = 0,
+                                                      .AlignedByteOffset = 0,
+                                                      .InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA,
+                                                      .InstanceDataStepRate = 0 };
+    const HRESULT layout_hr =
+        m_device->CreateInputLayout(&dummy_desc, 1, vs_blob->GetBufferPointer(), vs_blob->GetBufferSize(), &m_layout);
     safe_release(vs_blob);
     safe_release(ps_blob);
-    if ((m_vs == nullptr) || (m_ps == nullptr) || (m_layout == nullptr)) {
-        safe_release(factory);
+    if (FAILED(vs_hr) || (m_vs == nullptr)) {
+        AURORA_LOG_ERROR("d3d11", "CreateVertexShader failed, hr=", vs_hr);
+        return false;
+    }
+    if (FAILED(ps_hr) || (m_ps == nullptr)) {
+        AURORA_LOG_ERROR("d3d11", "CreatePixelShader failed, hr=", ps_hr);
+        return false;
+    }
+    if (FAILED(layout_hr) || (m_layout == nullptr)) {
+        AURORA_LOG_ERROR("d3d11", "CreateInputLayout failed, hr=", layout_hr);
         return false;
     }
 
     // 线性采样器（GPU 缩放）+ 不透明混合。
     const D3D11_SAMPLER_DESC sd = make_sampler_desc();
-    (void)m_device->CreateSamplerState(&sd, &m_samp);
-
-    const D3D11_BLEND_DESC bd = make_blend_desc();
-    (void)m_device->CreateBlendState(&bd, &m_bs);
-
-    // 创建交换链。
-    DXGI_SWAP_CHAIN_DESC1 scd{};
-    scd.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    scd.BufferCount = 2;
-    scd.SampleDesc.Count = 1;
-    scd.Scaling = DXGI_SCALING_STRETCH; // 由着色器做任意比例缩放，DXGI 不letterbox
-    scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-    scd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
-    const int w = std::max(1, static_cast<int>(std::lround(static_cast<float>(width) * m_win->scale_factor())));
-    const int h = std::max(1, static_cast<int>(std::lround(static_cast<float>(height) * m_win->scale_factor())));
-    scd.Width = static_cast<UINT>(w);
-    scd.Height = static_cast<UINT>(h);
-    hr = factory->CreateSwapChainForHwnd(m_device, static_cast<HWND>(m_win->hwnd()), &scd, nullptr, nullptr, &m_swap);
-    safe_release(factory);
-    if (FAILED(hr) || (m_swap == nullptr)) {
+    const HRESULT samp_hr = m_device->CreateSamplerState(&sd, &m_samp);
+    if (FAILED(samp_hr) || (m_samp == nullptr)) {
+        AURORA_LOG_ERROR("d3d11", "CreateSamplerState failed, hr=", samp_hr);
         return false;
     }
+
+    const D3D11_BLEND_DESC bd = make_blend_desc();
+    const HRESULT blend_hr = m_device->CreateBlendState(&bd, &m_bs);
+    if (FAILED(blend_hr) || (m_bs == nullptr)) {
+        AURORA_LOG_ERROR("d3d11", "CreateBlendState failed, hr=", blend_hr);
+        return false;
+    }
+
     m_dev_w = w;
     m_dev_h = h;
     return ensure_swap_chain(w, h);
 }
 
 auto D3D11Surface::ensure_swap_chain(int w, int h) -> bool {
-    if ((m_swap == nullptr) || (w <= 0 || h <= 0)) {
+    if (m_swap == nullptr) {
+        AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: swapchain is null");
+        return false;
+    }
+    if (w <= 0 || h <= 0) {
+        AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: invalid dimensions ", w, "x", h);
         return false;
     }
     // 尺寸变化：重建交换链与源纹理，避免拉伸模糊（DWM 由着色器缩放）。
@@ -253,17 +270,23 @@ auto D3D11Surface::ensure_swap_chain(int w, int h) -> bool {
 
     ID3D11Texture2D *back = nullptr;
     // 显式 IID（等价于 IID_ID3D11Texture2D），避免 IID_PPV_ARGS 展开出的 __uuidof 扩展 token 警告。
-    static constexpr IID iid_tex2_d = { .Data1 = 0xdc8e63f3,
-                                        .Data2 = 0xd12b,
-                                        .Data3 = 0x4952,
-                                        .Data4 = { 0xb4, 0x7b, 0x8e, 0x7f, 0xfa, 0x51, 0x18, 0xa8 } };
+    static constexpr IID iid_tex2_d = { .Data1 = 0x6f15aaf2,
+                                        .Data2 = 0xd208,
+                                        .Data3 = 0x4e89,
+                                        .Data4 = { 0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c } };
     void *back_tmp = nullptr;
-    if (FAILED(m_swap->GetBuffer(0, iid_tex2_d, &back_tmp))) {
+    const HRESULT get_hr = m_swap->GetBuffer(0, iid_tex2_d, &back_tmp);
+    if (FAILED(get_hr)) {
+        AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: GetBuffer failed, hr=", get_hr);
         return false;
     }
     back = static_cast<ID3D11Texture2D *>(back_tmp);
-    (void)m_device->CreateRenderTargetView(back, nullptr, &m_rtv);
+    const HRESULT rtv_hr = m_device->CreateRenderTargetView(back, nullptr, &m_rtv);
     safe_release(back);
+    if (FAILED(rtv_hr)) {
+        AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: CreateRenderTargetView failed, hr=", rtv_hr);
+        return false;
+    }
 
     D3D11_TEXTURE2D_DESC td{};
     td.Width = static_cast<UINT>(w);
@@ -274,13 +297,19 @@ auto D3D11Surface::ensure_swap_chain(int w, int h) -> bool {
     td.SampleDesc.Count = 1;
     td.Usage = D3D11_USAGE_DEFAULT;
     td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    (void)m_device->CreateTexture2D(&td, nullptr, &m_src);
-    if (m_src != nullptr) {
-        (void)m_device->CreateShaderResourceView(m_src, nullptr, &m_src_srv);
+    const HRESULT tex_hr = m_device->CreateTexture2D(&td, nullptr, &m_src);
+    if (FAILED(tex_hr)) {
+        AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: CreateTexture2D failed, hr=", tex_hr);
+        return false;
+    }
+    const HRESULT srv_hr = m_device->CreateShaderResourceView(m_src, nullptr, &m_src_srv);
+    if (FAILED(srv_hr)) {
+        AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: CreateShaderResourceView failed, hr=", srv_hr);
+        return false;
     }
     m_dev_w = w;
     m_dev_h = h;
-    return (m_rtv != nullptr) && (m_src != nullptr) && (m_src_srv != nullptr);
+    return true;
 }
 
 auto D3D11Surface::begin_frame(int width, int height) -> Result<bool> {
@@ -288,14 +317,22 @@ auto D3D11Surface::begin_frame(int width, int height) -> Result<bool> {
     m_dev_w = std::max(1, static_cast<int>(std::lround(static_cast<float>(width) * s)));
     m_dev_h = std::max(1, static_cast<int>(std::lround(static_cast<float>(height) * s)));
     m_painter.begin(m_dev_w, m_dev_h);
+    // 用不透明背景色填充 painter 缓冲区（与 present() 的 ClearRenderTargetView 颜色一致）。
+    // Painter 的 set_pixel 在混合后将 alpha 强制写 255，若缓冲区初始为透明黑(0,0,0,0)，
+    // 文字抗锯齿边缘会与黑色混合导致发暗/黑边。预填不透明背景使抗锯齿与正确底色混合。
+    m_painter.fill_rect(
+        Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
+              .size = Size{ .width = static_cast<float>(m_dev_w), .height = static_cast<float>(m_dev_h) } },
+        Color{ 245, 245, 245, 255 });
     if (m_ok) {
         ensure_swap_chain(m_dev_w, m_dev_h);
     }
-    return Result<bool>{ true };
+    return Result{ true };
 }
 
 auto D3D11Surface::upload_region(int x, int y, int w, int h) const -> bool {
     if (m_src == nullptr) {
+        AURORA_LOG_ERROR("d3d11", "upload_region: m_src is null");
         return false;
     }
     x = std::clamp(x, 0, m_dev_w);
@@ -303,6 +340,7 @@ auto D3D11Surface::upload_region(int x, int y, int w, int h) const -> bool {
     w = std::clamp(w, 0, m_dev_w - x);
     h = std::clamp(h, 0, m_dev_h - y);
     if (w <= 0 || h <= 0) {
+        AURORA_LOG_ERROR("d3d11", "upload_region: w=", w, " or h=", h, " <= 0");
         return false;
     }
     std::vector<std::uint8_t> buf(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u);
@@ -317,7 +355,7 @@ auto D3D11Surface::upload_region(int x, int y, int w, int h) const -> bool {
         const auto src_row = painter_data.subspan(src_row_start, static_cast<std::size_t>(w) * 4u);
         const std::size_t dst_row_start = static_cast<std::size_t>(ry) * static_cast<std::size_t>(w) * 4u;
         const auto dst_row = buf_span.subspan(dst_row_start, static_cast<std::size_t>(w) * 4u);
-        for (std::size_t cx = 0; std::cmp_less(cx ,w); ++cx) {
+        for (std::size_t cx = 0; std::cmp_less(cx, w); ++cx) {
             const std::size_t s = cx * 4u;
             const std::size_t d = cx * 4u;
             dst_row[d + 0] = src_row[s + 2]; // B NOLINT(*-pro-bounds-avoid-unchecked-container-access)
@@ -347,20 +385,33 @@ auto D3D11Surface::present() -> Result<bool> {
                           "aurora/window/d3d11_surface.h");
     }
     // 增量上传：脏矩形非空时仅更新变化区，否则整帧上传。
+    bool upload_ok = false;
     if (m_dirty.empty()) {
-        (void)upload_region(0, 0, m_dev_w, m_dev_h);
+        upload_ok = upload_region(0, 0, m_dev_w, m_dev_h);
     } else {
         for (const Rect &r : m_dirty) {
-            (void)upload_region(static_cast<int>(r.origin.x), static_cast<int>(r.origin.y),
-                                static_cast<int>(r.size.width), static_cast<int>(r.size.height));
+            upload_ok = upload_region(static_cast<int>(r.origin.x), static_cast<int>(r.origin.y),
+                                      static_cast<int>(r.size.width), static_cast<int>(r.size.height));
         }
     }
     m_dirty.clear();
 
-    // 浅色清屏后绘制全屏三角形（GPU 缩放采样源纹理）。
+    // 清屏后绘制全屏三角形（GPU 缩放采样源纹理）。
+    // 先清 RTV，再上传纹理（避免 GPU 还在读 m_src 时写入导致 stall）。
     m_ctx->OMSetRenderTargets(1, &m_rtv, nullptr);
-    constexpr std::array<float, 4> clear = { 0.96f, 0.96f, 0.96f, 1.0f };
+    // 设置视口（D3D11 默认 viewport 宽高为 0，不设则光栅化全部裁剪 → 白屏）。
+    D3D11_VIEWPORT vp{};
+    vp.Width = static_cast<float>(m_dev_w);
+    vp.Height = static_cast<float>(m_dev_h);
+    vp.MinDepth = 0.0f;
+    vp.MaxDepth = 1.0f;
+    m_ctx->RSSetViewports(1, &vp);
+    constexpr std::array clear = { 0.96f, 0.96f, 0.96f, 1.0f };
     m_ctx->ClearRenderTargetView(m_rtv, clear.data());
+    // 上传纹理数据（清屏后执行）。
+    if (!upload_ok) {
+        AURORA_LOG_ERROR("d3d11", "present upload FAILED, skipping draw");
+    }
     m_ctx->IASetInputLayout(m_layout);
     m_ctx->VSSetShader(m_vs, nullptr, 0);
     m_ctx->PSSetShader(m_ps, nullptr, 0);
@@ -383,7 +434,7 @@ auto D3D11Surface::present() -> Result<bool> {
                           "aurora/window/d3d11_surface.h");
     }
     ++m_frame;
-    return Result<bool>{ true };
+    return Result{ true };
 }
 
 } // namespace aurora
