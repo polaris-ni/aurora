@@ -1,46 +1,67 @@
----
-Language: Cpp
-BasedOnStyle: LLVM
+# 基础风格：Google
+BasedOnStyle: Google
+
+# 缩进相关
 IndentWidth: 4
 TabWidth: 4
-UseTab: Never
-ColumnLimit: 120
-BreakBeforeBraces: Attach
-AllowShortFunctionsOnASingleLine: All
-AllowShortIfStatementsOnASingleLine: WithoutElse
-AllowShortLoopsOnASingleLine: false
-AllowShortCaseLabelsOnASingleLine: true
-PointerAlignment: Right
-SpaceAfterTemplateKeyword: false
-SpaceBeforeParens: ControlStatements
-IndentWrappedFunctionNames: false
-Cpp11BracedListStyle: false
-Standard: c++20
-IncludeBlocks: Regroup
-IncludeCategories:
-  - Regex: '^<[^/]+>$'
-    Priority: 1
-  - Regex: '^<.*>$'
-    Priority: 2
-  - Regex: '^"(aurora/.*)"$'
-    Priority: 3
-  - Regex: '.*'
-    Priority: 4
-SortIncludes: CaseInsensitive
-BraceWrapping:
-  AfterClass: false
-  AfterControlStatement: Always
-  AfterEnum: true
-  AfterFunction: true
-  AfterNamespace: true
-  AfterStruct: true
-  AfterUnion: true
-  AfterExternBlock: true
-  BeforeCatch: true
-  BeforeElse: true
-  IndentBraces: false
-  SplitEmptyFunction: false
-  SplitEmptyRecord: false
-  SplitEmptyNamespace: false
+ContinuationIndentWidth: 4
 
-...
+# 行宽
+ColumnLimit: 120
+
+# 指针/引用对齐
+PointerAlignment: Left
+
+# 头文件排序与分组
+SortIncludes: true
+
+# 大括号风格（所有大括号不换行）
+BreakBeforeBraces: Attach
+
+# 短函数允许单行
+AllowShortFunctionsOnASingleLine: All
+
+# 短 if 允许单行（但不省略大括号）
+AllowShortIfStatementsOnASingleLine: WithoutElse
+
+# 短循环不允许单行
+AllowShortLoopsOnASingleLine: false
+
+# 自动添加缺失的大括号（需 clang-format >= 15）
+InsertBraces: true
+
+# 命名空间内容不缩进
+NamespaceIndentation: None
+
+# 访问修饰符缩进（相对 class 缩进 2 空格）
+AccessModifierOffset: -2
+
+# 函数参数紧凑排列
+BinPackArguments: true
+BinPackParameters: BinPack
+
+# 构造函数初始化列表：超长时冒号前换行，尽量打包
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: BinPack
+
+# 二元运算符换行时对齐运算符
+AlignOperands: Align
+
+# switch 中 case 标签缩进
+IndentCaseLabels: true
+
+# 连续空行最多保留 1 行
+MaxEmptyLinesToKeep: 1
+
+# 对齐行尾注释（false：不强制对齐）
+AlignTrailingComments: false
+
+# 预处理指令不缩进
+IndentPPDirectives: None
+
+# 返回类型与函数名自动判断换行
+AlwaysBreakAfterReturnType: None
+
+# 不对齐连续声明和赋值
+AlignConsecutiveDeclarations: false
+AlignConsecutiveAssignments: false

@@ -68,26 +68,43 @@ if (AURORA_BUILD_IMAGE_JPEG)
     unset(THREAD_LOCAL)
     unset(SIZE_T)
     unset(SIMD_ARCHITECTURE)
+    # Precision-dependent sources are compiled via the upstream src/wrapper/*-8/12/16.c
+    # shims, which #define BITS_IN_JSAMPLE before #include-ing the real .c. This is
+    # required because jcinit.c references the 12-bit (and, under C_LOSSLESS_SUPPORTED,
+    # 16-bit) variants of the color converter / downsampler / prep / main / coef
+    # controllers unconditionally; compiling the raw .c directly yields only the 8-bit
+    # symbols and breaks the link (undefined j12init_*). The tool-only rd*/wr* helpers
+    # (cjpeg/djpeg) are intentionally omitted — the codec uses only the libjpeg API.
+    set(_JPEG_WRAP ${_JPEG_SRC}/src/wrapper)
+    # Multi-precision sources are compiled via the upstream src/wrapper/*-8/12/16.c
+    # shims, which #define BITS_IN_JSAMPLE before #include-ing the real .c. This is
+    # required because jcinit.c references the 12-bit (and, under C_LOSSLESS_SUPPORTED,
+    # 16-bit) variants of the color converter / downsampler / prep / main / coef
+    # controllers unconditionally; compiling the raw .c directly yields only the 8-bit
+    # symbols and breaks the link (undefined j12init_*).  Collect all shims by glob
+    # (they are pure library files) but drop the cjpeg/djpeg tool I/O shims, which the
+    # codec does not need, to mirror the upstream JPEG_SOURCES library set.
+    file(GLOB _JPEG_WRAP_SRCS
+            ${_JPEG_WRAP}/*-8.c ${_JPEG_WRAP}/*-12.c ${_JPEG_WRAP}/*-16.c)
+    list(FILTER _JPEG_WRAP_SRCS EXCLUDE REGEX
+            "/(rdppm|wrppm|rdpng|wrpng|wrgif|rdcolmap)-")
+    # Single-precision (8-bit) library sources have no multi-precision wrapper and are
+    # compiled directly.  (src/ also contains turbojpeg / cjpeg / djpeg / jpegtran /
+    # example / test sources, which are intentionally NOT part of the library.)
     add_library(aurora_jpeg OBJECT
-            ${_JPEG_SRC}/src/jcapimin.c ${_JPEG_SRC}/src/jcapistd.c ${_JPEG_SRC}/src/jcarith.c
-            ${_JPEG_SRC}/src/jccoefct.c ${_JPEG_SRC}/src/jccolor.c ${_JPEG_SRC}/src/jcdctmgr.c
-            ${_JPEG_SRC}/src/jchuff.c ${_JPEG_SRC}/src/jcinit.c ${_JPEG_SRC}/src/jcmainct.c
+            ${_JPEG_WRAP_SRCS}
+            ${_JPEG_SRC}/src/jcapimin.c
+            ${_JPEG_SRC}/src/jchuff.c ${_JPEG_SRC}/src/jcicc.c ${_JPEG_SRC}/src/jcinit.c ${_JPEG_SRC}/src/jclhuff.c
             ${_JPEG_SRC}/src/jcmarker.c ${_JPEG_SRC}/src/jcmaster.c ${_JPEG_SRC}/src/jcomapi.c
-            ${_JPEG_SRC}/src/jcparam.c ${_JPEG_SRC}/src/jcphuff.c ${_JPEG_SRC}/src/jcprepct.c
-            ${_JPEG_SRC}/src/jcsample.c ${_JPEG_SRC}/src/jctrans.c ${_JPEG_SRC}/src/jdapimin.c
-            ${_JPEG_SRC}/src/jdapistd.c ${_JPEG_SRC}/src/jdarith.c ${_JPEG_SRC}/src/jdatadst.c
-            ${_JPEG_SRC}/src/jdatasrc.c ${_JPEG_SRC}/src/jdcoefct.c ${_JPEG_SRC}/src/jdcolor.c
-            ${_JPEG_SRC}/src/jddctmgr.c ${_JPEG_SRC}/src/jdhuff.c ${_JPEG_SRC}/src/jdinput.c
-            ${_JPEG_SRC}/src/jdmainct.c ${_JPEG_SRC}/src/jdmarker.c ${_JPEG_SRC}/src/jdmaster.c
-            ${_JPEG_SRC}/src/jdmerge.c ${_JPEG_SRC}/src/jdpostct.c ${_JPEG_SRC}/src/jdsample.c
+            ${_JPEG_SRC}/src/jcparam.c ${_JPEG_SRC}/src/jcphuff.c
+            ${_JPEG_SRC}/src/jctrans.c ${_JPEG_SRC}/src/jdapimin.c
+            ${_JPEG_SRC}/src/jdatadst.c ${_JPEG_SRC}/src/jdatasrc.c
+            ${_JPEG_SRC}/src/jdhuff.c ${_JPEG_SRC}/src/jdicc.c ${_JPEG_SRC}/src/jdinput.c ${_JPEG_SRC}/src/jdlhuff.c
+            ${_JPEG_SRC}/src/jdmarker.c ${_JPEG_SRC}/src/jdmaster.c
+            ${_JPEG_SRC}/src/jdphuff.c
             ${_JPEG_SRC}/src/jdtrans.c ${_JPEG_SRC}/src/jerror.c ${_JPEG_SRC}/src/jfdctflt.c
-            ${_JPEG_SRC}/src/jfdctfst.c ${_JPEG_SRC}/src/jfdctint.c ${_JPEG_SRC}/src/jidctflt.c
-            ${_JPEG_SRC}/src/jidctfst.c ${_JPEG_SRC}/src/jidctint.c ${_JPEG_SRC}/src/jidctred.c
-            ${_JPEG_SRC}/src/jquant1.c ${_JPEG_SRC}/src/jquant2.c ${_JPEG_SRC}/src/jutils.c
-            ${_JPEG_SRC}/src/jmemmgr.c ${_JPEG_SRC}/src/jmemnobs.c ${_JPEG_SRC}/src/jaricom.c
-            ${_JPEG_SRC}/src/rdbmp.c ${_JPEG_SRC}/src/rdppm.c ${_JPEG_SRC}/src/rdgif.c
-            ${_JPEG_SRC}/src/rdtarga.c ${_JPEG_SRC}/src/wrbmp.c ${_JPEG_SRC}/src/wrppm.c
-            ${_JPEG_SRC}/src/wrtarga.c)
+            ${_JPEG_SRC}/src/jmemmgr.c ${_JPEG_SRC}/src/jmemnobs.c ${_JPEG_SRC}/src/jpeg_nbits.c
+            ${_JPEG_SRC}/src/jaricom.c ${_JPEG_SRC}/src/jcarith.c ${_JPEG_SRC}/src/jdarith.c)
     target_include_directories(aurora_jpeg PRIVATE
             ${_JPEG_SRC}/src
             ${CMAKE_BINARY_DIR}/gen/jpeg)
@@ -103,6 +120,16 @@ if (AURORA_BUILD_IMAGE_WEBP)
     add_compile_definitions(AURORA_BUILD_IMAGE_WEBP)
     set(_WEBP_SRC ${CMAKE_SOURCE_DIR}/third_party/libwebp)
     file(GLOB_RECURSE _WEBP_C ${_WEBP_SRC}/src/*.c)
+    # libwebp's enc layer references the SharpYUV RGB->YUV helpers unconditionally
+    # (SharpYuvInit / SharpYuvConvert / SharpYuvGetConversionMatrix). Those live in
+    # the top-level sharpyuv/ directory, which is NOT under src/, so the GLOB above
+    # misses them and the link fails with undefined SharpYuv*.  Add the base
+    # sharpyuv sources plus the x86 SSE2 dispatcher (WEBP_HAVE_SSE2 is defined in
+    # this build, so InitSharpYuvSSE2 is referenced by sharpyuv_dsp.c) and exclude
+    # the ARM NEON file on non-NEON targets.
+    file(GLOB _WEBP_SHARPYUV ${_WEBP_SRC}/sharpyuv/*.c)
+    list(FILTER _WEBP_SHARPYUV EXCLUDE REGEX "sharpyuv_neon\\.c$")
+    list(APPEND _WEBP_C ${_WEBP_SHARPYUV})
     add_library(aurora_webp OBJECT ${_WEBP_C})
     target_include_directories(aurora_webp PRIVATE
             ${_WEBP_SRC}
