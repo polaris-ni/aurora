@@ -1,0 +1,44 @@
+{
+  "schema": "aurora-changelog/1.0",
+  "currentVersion": "1.0.0-alpha.1",
+  "policy": "semver",
+  "freeze": "minor-versions-are-additive",
+  "rules": [
+    "MAJOR: 破坏性 API 变更（类型/签名/行为语义改变），必须提供迁移路径与 codemod。",
+    "MINOR: 向后兼容的新增能力（新控件/新 API/新后端），绝不删除或重命名既有公开符号。",
+    "PATCH: 缺陷修复与文档，无 API 行为变化。",
+    "废弃 API 须先以 [[deprecated]] 标注并保留至少 1 个 MINOR 周期，再于下个 MAJOR 移除。"
+  ],
+  "entries": [
+    {
+      "version": "1.0.0-alpha.1",
+      "date": "2026-08-23",
+      "type": "initial",
+      "summary": "首个公开发布的早期预览开发版：C++20 跨平台 AI-first GUI 库——声明式、响应式、概念可枚举，软件栅格 Painter 渲染（不依赖 GPU），编译型静态库交付。",
+      "breakingChanges": [],
+      "added": [
+        "core/：强类型尺寸与颜色（Length/Color 无裸构造）、Result/Expected 错误模型、错误码目录、UTF-8 工具、结构化日志（Logger）、运行时诊断（Diagnostics）、编译期平台/架构/位宽目标宏（platform.h）、版本常量（version.h）",
+        "widget/：40+ 声明式控件——基础控件（Button/Text/TextInput/Checkbox/Switch/Slider/ProgressIndicator 等）、布局容器（Column/Row/Stack/Grid/Flex/LayoutBuilder）、高级交互（TabBar/MenuBar/ToolBar/Popup/Drawer/Toast/Form/LazyList/GridView/DataTable/TreeView/DatePicker/TimePicker/ColorPicker）、媒体与图形（ImageView/RichText/RichTextEdit/Canvas/Skeleton）",
+        "modifier/：正交修饰层——透明度/旋转/缩放/仿射变换、渐变背景、阴影、模糊、混合模式、着色器遮罩、缓存层",
+        "render/：软件 Painter 栅格内核（SSE2/AVX2 SIMD 双实现逐位一致）、DisplayList 录制回放、脏区追踪、FreeType+HarfBuzz 文本整形、字形图集、SVG 子集光栅化、PNG 离屏导出",
+        "window/：Surface 抽象 + 多后端——HeadlessSurface（内存 PNG）、Win32Surface（GDI）、GlfwSurface、X11Surface、WaylandSurface（wl_shm+xdg-shell+xkbcommon）、WasmSurface（Emscripten）、MacOSSurface、D3D11 硬件上屏偏置；事件驱动帧循环 + 帧节流（空闲 CPU 趋近 0）；自绘标题栏（CSD）体系",
+        "state/：细粒度响应式——Signal/Computed/Effect/Store/UndoStack/Binding、有界线程池 + 协程 co_await 异步、Task 超时与取消",
+        "navigation/：Navigator/Router 声明式路由、深层链接、Hero 共享元素转场、TransitionLayer",
+        "storage/：Storage 门面（信封/类型化/事务/变更通知/异步）+ MemoryBackend/FilesystemBackend（原子写 + 跨进程锁）",
+        "preferences/：JSON 键值配置——版本化 LWW + 墓碑 + 清空纪元的多进程可靠删除语义、键值分组（Group）",
+        "app/：Application 帧调度器（Scheduler）、剪贴板（文本/图像）、文件对话框、系统托盘、快捷键、热重载、性能叠层",
+        "inspector/ 与工具链：本地回环 HTTP 检视服务（REST + debug 端点，DNS rebinding 防护）、aurora-lsp 语言服务器、aurora-mcp MCP Server、aurora_cli 组件发现/校验/渲染/代码生成",
+        "theming/i18n/media/accessibility：主题系统（Theme/StyleProps/ThemeScope）、字符串表与复数规则、视频播放与控制、无障碍树推断",
+        "构建：CMake 静态库 + find_package(Aurora) 安装导出；全量开关见 codespec/BUILD_OPTIONS.md",
+        "tests/：188 个独立可执行测试（CTest）；examples/demos 每公共源文件一个演示"
+      ],
+      "changed": [],
+      "fixed": [],
+      "migrations": [],
+      "notes": [
+        "alpha 版定位：早期预览开发版，API 形态已完整但**尚不构成稳定性承诺**；1.0.0 正式版前仍可能有破坏性调整（将遵循 semver 并在 CHANGELOG 记录迁移路径）。反馈渠道见 README。",
+        "已知限制：MacOSSurface / WasmSurface 为骨架实现；media/ 与 perf/ 模块为 experimental 成熟度；Glfw/X11/Wayland/D3D11 后端默认关闭需 CMake 开启；Windows 为首要测试平台，Linux/macOS 覆盖有限。"
+      ]
+    }
+  ]
+}
