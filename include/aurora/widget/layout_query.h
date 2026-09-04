@@ -28,4 +28,4 @@ namespace aurora {
     return j;
 }
 
-} // namespace aurora
+}  // namespace aurora

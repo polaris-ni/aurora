@@ -6,7 +6,6 @@
 #include <thread>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::co_async;
@@ -23,7 +22,7 @@ void wait_until(std::atomic<bool> const &flag, std::chrono::milliseconds timeout
         std::this_thread::sleep_for(5ms);
     }
 }
-} // namespace
+}  // namespace
 
 // 协程：后台计算后把结果写入共享存储。
 static auto coro_ok(std::shared_ptr<Result<int>> out, std::shared_ptr<std::atomic<bool>> done) -> CoroTask<void> {
@@ -87,6 +86,8 @@ AURORA_TEST() {
     {
         auto acc = std::make_shared<std::atomic<int>>(0);
         auto done = std::make_shared<std::atomic<bool>>(false);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) 捕获为 shared_ptr
+        // 按值拷贝，协程生命周期内引用计数保活，无悬垂
         auto seq = [acc, done]() -> CoroTask<void> {
             Result<int> a = co_await co_async([]() -> int { return 10; });
             if (a) {

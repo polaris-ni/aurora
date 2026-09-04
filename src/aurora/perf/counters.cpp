@@ -101,4 +101,4 @@ auto RenderCounters::to_csv_row() const -> std::string {
     return row;
 }
 
-} // namespace aurora
+}  // namespace aurora

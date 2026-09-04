@@ -29,31 +29,30 @@ namespace {
 
 /// @brief 在高度 bar 内垂直居中的正方形盒（x 为盒左缘）。
 constexpr auto v_centered_square(float x, float bar_height, float side) noexcept -> Rect {
-    return Rect{ .origin = Point{ .x = x, .y = (bar_height - side) * 0.5f },
-                 .size = Size{ .width = side, .height = side } };
+    return Rect{.origin = Point{.x = x, .y = (bar_height - side) * 0.5F}, .size = Size{.width = side, .height = side}};
 }
 
 /// @brief 右侧系按钮布局（Adwaita / Windows）：自右向左 close→max→min。
 /// @return 按钮组朝标题一侧的边缘 x 坐标。
 auto layout_right_buttons(const TitleBarStyle &style, float width, bool resizable, TitleBarGeometry &g) -> float {
     const bool windows = style.button_layout == TitleBarButtonLayout::Windows;
-    const float side = windows ? std::round(style.height * 1.44f) : std::clamp(style.height - 10.0f, 22.0f, 30.0f);
-    const float gap = windows ? 0.0f : 4.0f;    // Windows 无缝排布，间距 0
-    const float margin = windows ? 0.0f : 8.0f; // Windows 贴右上角，无边距
-    float cursor = width - margin;              // 下一个按钮的贴边侧外缘
+    const float side = windows ? std::round(style.height * 1.44F) : std::clamp(style.height - 10.0F, 22.0F, 30.0F);
+    const float gap = windows ? 0.0F : 4.0F;  // Windows 无缝排布，间距 0
+    const float margin = windows ? 0.0F : 8.0F;  // Windows 贴右上角，无边距
+    float cursor = width - margin;  // 下一个按钮的贴边侧外缘
     float group_inner_edge = width - margin;
     const auto place = [&](Rect &dst) -> void {
-        cursor -= side; // 先落盒再扣间距：首个按钮不吃前导间距
-        dst = windows ? Rect{ .origin = Point{ .x = cursor, .y = 0.0f },
-                              .size = Size{ .width = side, .height = style.height } }
-                      : v_centered_square(cursor, style.height, side);
+        cursor -= side;  // 先落盒再扣间距：首个按钮不吃前导间距
+        dst = windows
+                  ? Rect{.origin = Point{.x = cursor, .y = 0.0F}, .size = Size{.width = side, .height = style.height}}
+                  : v_centered_square(cursor, style.height, side);
         group_inner_edge = cursor;
         cursor -= gap;
     };
     if (style.show_close) {
         place(g.close);
     }
-    if (style.show_maximize && resizable) { // resizable=false 时 maximize 盒为空
+    if (style.show_maximize && resizable) {  // resizable=false 时 maximize 盒为空
         place(g.maximize);
     }
     if (style.show_minimize) {
@@ -65,13 +64,13 @@ auto layout_right_buttons(const TitleBarStyle &style, float width, bool resizabl
 /// @brief Mac 左侧系按钮布局：自左向右 close→min→max。
 /// @return 按钮组朝标题一侧的边缘 x 坐标。
 auto layout_left_buttons(const TitleBarStyle &style, bool resizable, TitleBarGeometry &g) -> float {
-    const float d = std::clamp(style.height * 0.4f, 11.0f, 14.0f);
-    float cursor = 8.0f;           // 左缘外边距 8
-    float group_inner_edge = 8.0f; // 无可见按钮时退化为左边距本身
+    const float d = std::clamp(style.height * 0.4F, 11.0F, 14.0F);
+    float cursor = 8.0F;  // 左缘外边距 8
+    float group_inner_edge = 8.0F;  // 无可见按钮时退化为左边距本身
     const auto place = [&](Rect &dst) -> void {
         dst = v_centered_square(cursor, style.height, d);
-        cursor += d + 8.0f;               // 直径 + 间距 8
-        group_inner_edge = cursor - 8.0f; // 最近一个圆的右缘
+        cursor += d + 8.0F;  // 直径 + 间距 8
+        group_inner_edge = cursor - 8.0F;  // 最近一个圆的右缘
     };
     if (style.show_close) {
         place(g.close);
@@ -87,9 +86,9 @@ auto layout_left_buttons(const TitleBarStyle &style, bool resizable, TitleBarGeo
 
 /// @brief 图标槽（16×16 或 height-20 取小者；Mac 排在按钮组右侧 +12）。
 auto layout_icon(const TitleBarStyle &style, bool mac, float group_inner_edge, TitleBarGeometry &g) -> void {
-    const float icon_side = std::min(16.0f, style.height - 20.0f);
-    if (icon_side > 0.0f) {
-        const float icon_x = mac ? group_inner_edge + 12.0f : 12.0f;
+    const float icon_side = std::min(16.0F, style.height - 20.0F);
+    if (icon_side > 0.0F) {
+        const float icon_x = mac ? group_inner_edge + 12.0F : 12.0F;
         g.icon = v_centered_square(icon_x, style.height, icon_side);
     }
 }
@@ -98,31 +97,31 @@ auto layout_icon(const TitleBarStyle &style, bool mac, float group_inner_edge, T
 auto layout_title(const TitleBarStyle &style, float width, bool mac, float group_inner_edge, TitleBarGeometry &g)
     -> void {
     if (style.center_title) {
-        g.title = Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                        .size = Size{ .width = width, .height = style.height } }; // 整宽居中，文字由绘制层水平居中
+        g.title = Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                       .size = Size{.width = width, .height = style.height}};  // 整宽居中，文字由绘制层水平居中
         return;
     }
-    float left = 12.0f;
-    if (g.icon.size.width > 0.0f) {
-        left = g.icon.right() + 8.0f;
+    float left = 12.0F;
+    if (g.icon.size.width > 0.0F) {
+        left = g.icon.right() + 8.0F;
     } else if (mac) {
-        left = group_inner_edge + 8.0f;
+        left = group_inner_edge + 8.0F;
     }
-    const float right = mac ? width - 8.0f : group_inner_edge - 8.0f; // 到按钮组一侧留 8
+    const float right = mac ? width - 8.0F : group_inner_edge - 8.0F;  // 到按钮组一侧留 8
     if (left <= right) {
-        g.title = Rect{ .origin = Point{ .x = left, .y = 0.0f },
-                        .size = Size{ .width = right - left, .height = style.height } };
+        g.title =
+            Rect{.origin = Point{.x = left, .y = 0.0F}, .size = Size{.width = right - left, .height = style.height}};
     }
 }
 
-} // namespace
+}  // namespace
 
 auto title_bar_geometry(float width, const TitleBarStyle &style, bool maximized, bool resizable) -> TitleBarGeometry {
-    (void)maximized; // 按钮盒尺寸不随最大化变化；最大化⇄还原图标由绘制层据该参数切换字形。
+    (void)maximized;  // 按钮盒尺寸不随最大化变化；最大化⇄还原图标由绘制层据该参数切换字形。
 
     TitleBarGeometry g;
-    if (!(width > 0.0f)) {
-        return g; // 退化输入：全空几何（各分区保持默认空盒 Size{0,0}）
+    if (!(width > 0.0F)) {
+        return g;  // 退化输入：全空几何（各分区保持默认空盒 Size{0,0}）
     }
     const bool mac = style.button_layout == TitleBarButtonLayout::Mac;
 
@@ -134,4 +133,4 @@ auto title_bar_geometry(float width, const TitleBarStyle &style, bool maximized,
     return g;
 }
 
-} // namespace aurora
+}  // namespace aurora

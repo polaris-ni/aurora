@@ -33,7 +33,7 @@ namespace aurora {
  * @note Rebuildable: no
  */
 [[nodiscard]] inline auto validate(const Node &root, int max_depth = 64) -> Result<bool> {
-    serialization::register_core_widgets(); // 确保核心控件类型已在注册表
+    serialization::register_core_widgets();  // 确保核心控件类型已在注册表
 
     std::vector<Error> errs;
     std::function<void(const Node &, int)> walk = [&](const Node &n, int depth) -> void {
@@ -70,7 +70,7 @@ namespace aurora {
     if (!errs.empty()) {
         return errs.front();
     }
-    return Result{ true };
+    return Result{true};
 }
 
-} // namespace aurora
+}  // namespace aurora

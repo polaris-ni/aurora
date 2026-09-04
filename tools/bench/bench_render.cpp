@@ -23,7 +23,6 @@
 #include "aurora/event/dispatcher.h"
 #include "aurora/perf/scroll_bench.h"
 #include "aurora/render/font_engine.h"
-
 #include "bench_common.h"
 
 namespace {
@@ -33,7 +32,7 @@ auto make_window(int w, int h, float scale) -> au::Window {
     auto surface = std::make_unique<aurora::HeadlessSurface>();
     surface->painter().set_scale(scale);
     (void)surface->begin_frame(w, h);
-    return aurora::Window{ std::move(surface) };
+    return aurora::Window{std::move(surface)};
 }
 
 // Print one table row: scene | logical size | scale | physical size | ms/frame.
@@ -57,9 +56,9 @@ auto build_tree(std::shared_ptr<aurora::Chip> *out_probe) -> aurora::Node {
             }
             chips.emplace_back(chip);
         }
-        rows.emplace_back(std::make_shared<aurora::Row>(aurora::RowProps{ .children = std::move(chips) }));
+        rows.emplace_back(std::make_shared<aurora::Row>(aurora::RowProps{.children = std::move(chips)}));
     }
-    return aurora::Node{ std::make_shared<aurora::Column>(aurora::ColumnProps{ .children = std::move(rows) }) };
+    return aurora::Node{std::make_shared<aurora::Column>(aurora::ColumnProps{.children = std::move(rows)})};
 }
 
 // Representative text (Latin + digits + CJK) covering the fallback chain and atlas-cache paths.
@@ -76,18 +75,19 @@ auto build_scroll_tree() -> aurora::Node {
         chip->set_label("row " + std::to_string(i));
         items.emplace_back(std::move(chip));
     }
-    auto col = std::make_shared<aurora::Column>(aurora::ColumnProps{ .children = std::move(items) });
-    return aurora::Node{ std::make_shared<aurora::Scroll>(
-        aurora::ScrollProps{ .child = aurora::Node{ std::move(col) } }) };
+    auto col = std::make_shared<aurora::Column>(aurora::ColumnProps{.children = std::move(items)});
+    return aurora::Node{std::make_shared<aurora::Scroll>(aurora::ScrollProps{.child = aurora::Node{std::move(col)}})};
 }
 
-} // namespace
+}  // namespace
 
+// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// try/catch 包装
 auto main() -> int {
-    const std::vector<std::pair<int, int>> bases = { { 1280, 720 }, { 1920, 1080 }, { 2560, 1440 } };
-    const std::vector scales = { 1.0f, 1.5f, 2.0f };
+    const std::vector<std::pair<int, int>> bases = {{1280, 720}, {1920, 1080}, {2560, 1440}};
+    const std::vector scales = {1.0F, 1.5F, 2.0F};
     constexpr int warmup = 3;
-    constexpr int fast_iters = 20; // fast scenes: fill/gradient/text/clip, etc.
+    constexpr int fast_iters = 20;  // fast scenes: fill/gradient/text/clip, etc.
     constexpr int slow_iters = 8;  // slow scenes: shadow/blur/composite/end-to-end, etc.
 
     AURORA_LOG_RAW("bench", "| scene | size (logical) | scale | device | ms/frame |\n");
@@ -98,8 +98,8 @@ auto main() -> int {
             const std::string size_label = std::to_string(bw) + "x" + std::to_string(bh);
             const auto w = static_cast<float>(bw);
             const auto h = static_cast<float>(bh);
-            const aurora::Rect full{ .origin = aurora::Point{ .x = 0, .y = 0 },
-                                     .size = aurora::Size{ .width = w, .height = h } };
+            const aurora::Rect full{.origin = aurora::Point{.x = 0, .y = 0},
+                                    .size = aurora::Size{.width = w, .height = h}};
 
             // Standalone aurora::Painter: logical bw x bh, physical x scale (primitive benchmark does
             // not go through the Window/widget layer).
@@ -111,22 +111,22 @@ auto main() -> int {
 
             // 1) full-screen opaque fill_rect (row-level fast path).
             report("fill_opaque_full", size_label, s, dw, dh,
-                   aurora::bench::time_ms([&]() -> void { p.fill_rect(full, aurora::Color{ 30, 120, 200, 255 }); },
+                   aurora::bench::time_ms([&]() -> void { p.fill_rect(full, aurora::Color{30, 120, 200, 255}); },
                                           warmup, fast_iters));
 
             // 2) full-screen translucent fill_rect (per-pixel source-over).
             report("fill_alpha_full", size_label, s, dw, dh,
-                   aurora::bench::time_ms([&]() -> void { p.fill_rect(full, aurora::Color{ 255, 200, 0, 128 }); },
-                                          warmup, fast_iters));
+                   aurora::bench::time_ms([&]() -> void { p.fill_rect(full, aurora::Color{255, 200, 0, 128}); }, warmup,
+                                          fast_iters));
 
             // 3) full-screen linear gradient.
-            const std::vector gcolors = { aurora::Color{ 250, 250, 255, 255 }, aurora::Color{ 30, 30, 60, 255 } };
-            const std::vector gstops = { 0.0f, 1.0f };
+            const std::vector gcolors = {aurora::Color{250, 250, 255, 255}, aurora::Color{30, 30, 60, 255}};
+            const std::vector gstops = {0.0F, 1.0F};
             report("linear_gradient_full", size_label, s, dw, dh,
                    aurora::bench::time_ms(
                        [&]() -> void {
-                           p.draw_linear_gradient(full, aurora::Point{ .x = 0, .y = 0 },
-                                                  aurora::Point{ .x = w, .y = h }, gcolors, gstops);
+                           p.draw_linear_gradient(full, aurora::Point{.x = 0, .y = 0}, aurora::Point{.x = w, .y = h},
+                                                  gcolors, gstops);
                        },
                        warmup, fast_iters));
 
@@ -134,38 +134,38 @@ auto main() -> int {
             report("radial_gradient_full", size_label, s, dw, dh,
                    aurora::bench::time_ms(
                        [&]() -> void {
-                           p.draw_radial_gradient(full, aurora::Point{ .x = w * 0.5f, .y = h * 0.5f }, w * 0.5f,
-                                                  gcolors, gstops);
+                           p.draw_radial_gradient(full, aurora::Point{.x = w * 0.5F, .y = h * 0.5F}, w * 0.5F, gcolors,
+                                                  gstops);
                        },
                        warmup, fast_iters));
 
             // 5) shadow (400x300 card shape, blur 16).
-            constexpr aurora::Rect card{ .origin = aurora::Point{ .x = 40, .y = 40 },
-                                         .size = aurora::Size{ .width = 400, .height = 300 } };
+            constexpr aurora::Rect card{.origin = aurora::Point{.x = 40, .y = 40},
+                                        .size = aurora::Size{.width = 400, .height = 300}};
             report("shadow_card", size_label, s, dw, dh,
                    aurora::bench::time_ms(
-                       [&]() -> void { p.draw_shadow(card, 4.0f, 8.0f, 16.0f, aurora::Color{ 0, 0, 0, 96 }); }, warmup,
+                       [&]() -> void { p.draw_shadow(card, 4.0F, 8.0F, 16.0F, aurora::Color{0, 0, 0, 96}); }, warmup,
                        slow_iters));
 
             // 6) blur_region at multiple radii (fixed 320x240 area, typical frosted-glass magnitude).
-            constexpr aurora::Rect blur_area{ .origin = aurora::Point{ .x = 60, .y = 60 },
-                                              .size = aurora::Size{ .width = 320, .height = 240 } };
+            constexpr aurora::Rect blur_area{.origin = aurora::Point{.x = 60, .y = 60},
+                                             .size = aurora::Size{.width = 320, .height = 240}};
             report("blur_r4", size_label, s, dw, dh,
-                   aurora::bench::time_ms([&]() -> void { p.blur_region(blur_area, 4.0f); }, warmup, slow_iters));
+                   aurora::bench::time_ms([&]() -> void { p.blur_region(blur_area, 4.0F); }, warmup, slow_iters));
             report("blur_r16", size_label, s, dw, dh,
-                   aurora::bench::time_ms([&]() -> void { p.blur_region(blur_area, 16.0f); }, warmup, slow_iters));
+                   aurora::bench::time_ms([&]() -> void { p.blur_region(blur_area, 16.0F); }, warmup, slow_iters));
 
             // 7) composite: 256x256 offscreen subtree rotated 30 deg + scaled 1.2, composited (modifier-transform
             // path).
             aurora::Painter off;
             off.set_scale(s);
             off.begin(256, 256);
-            off.fill_rect(aurora::Rect{ .origin = aurora::Point{ .x = 0, .y = 0 },
-                                        .size = aurora::Size{ .width = 256, .height = 256 } },
-                          aurora::Color{ 200, 80, 40, 255 });
-            constexpr aurora::Point cc{ .x = 128.0f, .y = 128.0f };
-            const aurora::Matrix2D m = aurora::Matrix2D::from_rotate_about(30.0f, cc).compose(
-                aurora::Matrix2D::from_scale_about(1.2f, 1.2f, cc));
+            off.fill_rect(aurora::Rect{.origin = aurora::Point{.x = 0, .y = 0},
+                                       .size = aurora::Size{.width = 256, .height = 256}},
+                          aurora::Color{200, 80, 40, 255});
+            constexpr aurora::Point cc{.x = 128.0F, .y = 128.0F};
+            const aurora::Matrix2D m = aurora::Matrix2D::from_rotate_about(30.0F, cc).compose(
+                aurora::Matrix2D::from_scale_about(1.2F, 1.2F, cc));
             report("composite_rot_scale", size_label, s, dw, dh,
                    aurora::bench::time_ms([&]() -> void { p.composite(off, m); }, warmup, slow_iters));
 
@@ -173,27 +173,27 @@ auto main() -> int {
             report("rounded_clip_fill", size_label, s, dw, dh,
                    aurora::bench::time_ms(
                        [&]() -> void {
-                           p.push_clip_rounded(full, 24.0f);
-                           p.fill_rect(full, aurora::Color{ 80, 160, 90, 255 });
+                           p.push_clip_rounded(full, 24.0F);
+                           p.fill_rect(full, aurora::Color{80, 160, 90, 255});
                            p.pop_clip();
                        },
                        warmup, fast_iters));
 
             // 9) text (incl. CJK): 12 lines of the representative string (steady-state draw cost after atlas hits).
-            const aurora::Font tf{ .size_pt = 14.0f };
-            report("text_cjk_12lines", size_label, s, dw, dh,
-                   aurora::bench::time_ms(
-                       [&]() -> void {
-                           for (int line = 0; line < 12; ++line) {
-                               p.draw_text(
-                                   aurora::Rect{
-                                       .origin =
-                                           aurora::Point{ .x = 8.0f, .y = 16.0f + (22.0f * static_cast<float>(line)) },
-                                       .size = aurora::Size{ .width = w - 16.0f, .height = 22.0f } },
-                                   AURORA_BENCH_TEXT, tf, aurora::Color{ 20, 20, 20, 255 });
-                           }
-                       },
-                       warmup, fast_iters));
+            const aurora::Font tf{.size_pt = 14.0F};
+            report(
+                "text_cjk_12lines", size_label, s, dw, dh,
+                aurora::bench::time_ms(
+                    [&]() -> void {
+                        for (int line = 0; line < 12; ++line) {
+                            p.draw_text(
+                                aurora::Rect{
+                                    .origin = aurora::Point{.x = 8.0F, .y = 16.0F + (22.0F * static_cast<float>(line))},
+                                    .size = aurora::Size{.width = w - 16.0F, .height = 22.0F}},
+                                AURORA_BENCH_TEXT, tf, aurora::Color{20, 20, 20, 255});
+                        }
+                    },
+                    warmup, fast_iters));
 
             // 10) end-to-end: widget-tree whole-frame present_root (layout + text + background).
             {
@@ -212,22 +212,21 @@ auto main() -> int {
 
                 // 11) single-control dirtying: only one aurora::Chip changes background color -> dirty-region
                 // clip draw path (compare against whole-tree redraw cost).
-                (void)win.present_root(root); // ensure on_dirty is wired and the first frame is fully painted
+                (void)win.present_root(root);  // ensure on_dirty is wired and the first frame is fully painted
                 int flip = 0;
                 report("tree_dirty_one_chip", size_label, s, dw, dh,
                        aurora::bench::time_ms(
                            [&]() -> void {
                                ++flip;
-                               // NOLINTNEXTLINE(*-signed-bitwise)
-                               probe->set_background((flip & 1) != 0 ? aurora::Color{ 220, 60, 60, 255 }
-                                                                     : aurora::Color{ 60, 60, 220, 255 });
+                               probe->set_background((flip & 1) != 0 ? aurora::Color{220, 60, 60, 255}
+                                                                     : aurora::Color{60, 60, 220, 255});
                                (void)win.present_root(root);
                            },
                            warmup, slow_iters));
 
                 // 12) single hit_test (event hit cost, amortized over 1000 runs).
                 aurora::Widget &rw = root.widget();
-                const aurora::Point probe_pt{ .x = w * 0.5f, .y = h * 0.5f };
+                const aurora::Point probe_pt{.x = w * 0.5F, .y = h * 0.5F};
                 report("hit_test_x1000", size_label, s, dw, dh,
                        aurora::bench::time_ms(
                            [&]() -> void {
@@ -246,20 +245,20 @@ auto main() -> int {
     // boundary) the cost grows quadratically.
     {
         const std::string seg = "The pale illimitable moonlit hills still fill the silent mill. ";
-        for (const int reps : { 1, 4 }) {
+        for (const int reps : {1, 4}) {
             std::string line;
             for (int i = 0; i < reps; ++i) {
                 line += seg;
             }
-            for (const float s : { 1.0f, 1.5f }) {
-                const aurora::Font f{ .size_pt = 15.0f };
+            for (const float s : {1.0F, 1.5F}) {
+                const aurora::Font f{.size_pt = 15.0F};
                 constexpr aurora::render::TextLayoutOpts o{};
                 const float w = aurora::render::FontEngine::display_width(line, f, o, s);
                 report(("char_hit_x100_n" + std::to_string(line.size())).c_str(), "-", s, 0, 0,
                        aurora::bench::time_ms(
                            [&]() -> void {
                                for (int i = 0; i < 100; ++i) {
-                                   (void)aurora::render::FontEngine::display_hit_test_char(line, w * 0.7f, f, o, s);
+                                   (void)aurora::render::FontEngine::display_hit_test_char(line, w * 0.7F, f, o, s);
                                }
                            },
                            1, 5));
@@ -275,13 +274,14 @@ auto main() -> int {
     {
         aurora::ScrollBenchHarness::Config cfg;
         cfg.name = "bench_render-scroll";
-        const auto r = aurora::ScrollBenchHarness::run(build_scroll_tree(),
-                                                       aurora::Size{ .width = 1100.0f, .height = 760.0f }, cfg);
+        const auto r =
+            aurora::ScrollBenchHarness::run(build_scroll_tree(), aurora::Size{.width = 1100.0F, .height = 760.0F}, cfg);
         AURORA_LOG_RAW("bench", "\n## scroll scenario (aurora::ScrollBenchHarness, 1100x760 dp, 300 frames)\n\n");
         AURORA_LOG_RAW("bench", r.to_markdown(), "\n");
-        AURORA_LOG_RAW("bench", "> time-based gates (G-1~G-14) are affected by environment jitter and excluded from "
-                                "CTest; local trend comparison see "
-                                "tools/check/check_perf_gates.ps1.\n");
+        AURORA_LOG_RAW("bench",
+                       "> time-based gates (G-1~G-14) are affected by environment jitter and excluded from "
+                       "CTest; local trend comparison see "
+                       "tools/check/check_perf_gates.ps1.\n");
     }
 
     AURORA_LOG_RAW("bench", "\n", aurora::bench::AURORA_BENCH_DISCLAIMER, "\n");

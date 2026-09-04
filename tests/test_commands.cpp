@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 namespace commands = aurora::commands;
@@ -71,7 +70,7 @@ AURORA_TEST() {
 
     // 10) 无捕获 lambda 也执行。
     bool nocap = false;
-    commands::run_raw([]() -> void {}); // 空回调
+    commands::run_raw([]() -> void {});  // 空回调
     commands::run_raw([&nocap]() -> void { nocap = true; });
     AURORA_TEST_CHECK(nocap);
 
@@ -81,7 +80,7 @@ AURORA_TEST() {
         v.push_back(3);
         v.push_back(5);
     });
-    AURORA_TEST_CHECK(v.size() == 2 && v[0] == 3 && v[1] == 5);
+    AURORA_TEST_CHECK(v.size() == 2 && v.at(0) == 3 && v.at(1) == 5);
 
     // 12) 引用捕获：run_raw 返回后外部可见改变。
     std::string log;

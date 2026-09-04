@@ -9,7 +9,6 @@
 // whether a "dirty-region banded blit" is worth doing.
 // Usage: ./bench_win32_present (skipped with return code 0 when there is no Win32 environment)
 #include "aurora/aurora.h"
-
 #include "bench_common.h"
 
 #ifdef AURORA_BACKEND_WIN32
@@ -62,9 +61,9 @@ auto main() -> int {
     // Approximate fullscreen: request an oversized logical size; it is actually clamped to the
     // screen (begin_frame allocates the buffer from the real client area).
     WindowOptions wopts;
-    wopts.size = Size{ .width = 4000.0f, .height = 3000.0f };
+    wopts.size = Size{.width = 4000.0F, .height = 3000.0F};
     wopts.title = "bench_win32_present";
-    auto win_res = create_window(Win32Options{ wopts });
+    auto win_res = create_window(Win32Options{wopts});
     if (!win_res) {
         AURORA_LOG_RAW("bench", "bench_win32_present: window creation failed (", win_res.error().message, "), skip\n");
         return 0;
@@ -73,23 +72,24 @@ auto main() -> int {
 
     // A tree with the same shape as demo_text: a long paragraph (Justify, multi-line) + several
     // short texts.
-    const LocalizedString k_para = "The quick brown fox jumps over the lazy dog while a silent river flows "
-                                   "beyond the quiet hills and the pale moon rises above the sleeping town. "
-                                   "The quick brown fox jumps over the lazy dog while a silent river flows "
-                                   "beyond the quiet hills and the pale moon rises above the sleeping town.";
+    const LocalizedString k_para =
+        "The quick brown fox jumps over the lazy dog while a silent river flows "
+        "beyond the quiet hills and the pale moon rises above the sleeping town. "
+        "The quick brown fox jumps over the lazy dog while a silent river flows "
+        "beyond the quiet hills and the pale moon rises above the sleeping town.";
     auto para = std::make_shared<Text>(TextProps{
-        .content = k_para, .font = Font{ .size_pt = 15.0f }, .text_align = TextAlign::Justify, .soft_wrap = true });
+        .content = k_para, .font = Font{.size_pt = 15.0F}, .text_align = TextAlign::Justify, .soft_wrap = true});
     std::vector<Node> kids;
     kids.reserve(9);
     for (int i = 0; i < 8; ++i) {
         kids.emplace_back(std::make_shared<Text>(
-            TextProps{ .content = LocalizedString{ "line " + std::to_string(i) + " · sample line content" },
-                       .font = Font{ .size_pt = 16.0f } }));
+            TextProps{.content = LocalizedString{"line " + std::to_string(i) + " · sample line content"},
+                      .font = Font{.size_pt = 16.0F}}));
     }
     kids.emplace_back(para);
-    Node root{ std::make_shared<Column>(ColumnProps{ .children = std::move(kids) }) };
+    Node root{std::make_shared<Column>(ColumnProps{.children = std::move(kids)})};
 
-    (void)win->present_root(root); // First frame full paint (mount + layout + paint + present)
+    (void)win->present_root(root);  // First frame full paint (mount + layout + paint + present)
     const Size logical = win->size();
     const float scale = win->surface().scale_factor();
     AURORA_LOG_RAW("bench", "window: ", ffmt(0, logical.width), "x", ffmt(0, logical.height), " dp @ ", ffmt(2, scale),
@@ -151,9 +151,13 @@ auto main() -> int {
             bench_row("dibA_swizzle_only", time_ms(
                                                [&]() -> void {
                                                    for (std::size_t i = 0; i < n; ++i) {
+                                                       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                                                       // 基准测量热路径：.at() 的边界检查开销会影响计时
                                                        const std::uint32_t px = src[i];
-                                                       dst_a[i] = (px & 0xFF00FF00u) | ((px & 0xFFu) << 16U) |
-                                                                  ((px >> 16U) & 0xFFu);
+                                                       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                                                       // 基准测量热路径：.at() 的边界检查开销会影响计时
+                                                       dst_a[i] = (px & 0xFF00FF00U) | ((px & 0xFFU) << 16U) |
+                                                                  ((px >> 16U) & 0xFFU);
                                                    }
                                                },
                                                2, 10));
@@ -176,18 +180,24 @@ auto main() -> int {
             bi_b.hdr.biPlanes = 1;
             bi_b.hdr.biBitCount = 32;
             bi_b.hdr.biCompression = BI_BITFIELDS;
-            bi_b.masks[0] = 0x000000FFu;
-            bi_b.masks[1] = 0x0000FF00u;
-            bi_b.masks[2] = 0x00FF0000u;
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 的边界检查开销会影响计时
+            bi_b.masks[0] = 0x000000FFU;
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 的边界检查开销会影响计时
+            bi_b.masks[1] = 0x0000FF00U;
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 的边界检查开销会影响计时
+            bi_b.masks[2] = 0x00FF0000U;
             void *bits_b = nullptr;
             HBITMAP dib_b = CreateDIBSection(
                 wdc,
-                static_cast<BITMAPINFO *>(static_cast<void *>(&bi_b)), // NOLINT(bugprone-casting-through-void)
+                static_cast<BITMAPINFO *>(static_cast<void *>(&bi_b)),  // NOLINT(bugprone-casting-through-void)
                 DIB_RGB_COLORS, &bits_b, nullptr, 0);
             if (dib_b != nullptr) {
                 HGDIOBJ old_b = SelectObject(mdc_b, dib_b);
                 bench_row("dibB_memcpy_only",
-                          time_ms([&]() -> void { std::memcpy(bits_b, pt.data(), n * 4u); }, 2, 10));
+                          time_ms([&]() -> void { std::memcpy(bits_b, pt.data(), n * 4U); }, 2, 10));
                 bench_row("dibB_bitblt_only", time_ms(
                                                   [&]() -> void {
                                                       BitBlt(wdc, 0, 0, w, h, mdc_b, 0, 0, SRCCOPY);
@@ -216,12 +226,12 @@ auto main() -> int {
         auto gpu = std::make_unique<D3D11Surface>(static_cast<int>(logical.width), static_cast<int>(logical.height),
                                                   "bench d3d11", aurora::WindowStyleOptions{});
         if (gpu->is_available()) {
-            gpu->set_vsync(false); // vsync off: timing reflects upload+draw cost, excluding vblank wait
+            gpu->set_vsync(false);  // vsync off: timing reflects upload+draw cost, excluding vblank wait
             const int gw = static_cast<int>(logical.width);
             const int gh = static_cast<int>(logical.height);
             (void)gpu->begin_frame(gw, gh);
-            gpu->painter().fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = logical },
-                                     Color{ 230, 230, 235, 255 });
+            gpu->painter().fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = logical},
+                                     Color{230, 230, 235, 255});
             // Full upload + present (empty dirty region = whole frame).
             bench_row("d3d11_present_full", time_ms(
                                                 [&]() -> void {
@@ -231,11 +241,11 @@ auto main() -> int {
                                                 3, 30));
             // Incremental upload: only a paragraph-sized dirty band (same magnitude as a drag-select frame).
             const float s = gpu->scale_factor();
-            const Rect band{ .origin = Point{ .x = 0.0f, .y = 100.0f * s },
-                             .size = Size{ .width = logical.width * s, .height = 160.0f * s } };
+            const Rect band{.origin = Point{.x = 0.0F, .y = 100.0F * s},
+                            .size = Size{.width = logical.width * s, .height = 160.0F * s}};
             bench_row("d3d11_present_dirty_band", time_ms(
                                                       [&]() -> void {
-                                                          gpu->set_present_dirty({ band });
+                                                          gpu->set_present_dirty({band});
                                                           (void)gpu->present();
                                                       },
                                                       3, 30));
@@ -243,7 +253,7 @@ auto main() -> int {
             AURORA_LOG_RAW("bench", "| d3d11 | no adapter, skip |\n");
         }
     }
-#endif // AURORA_BACKEND_D3D11
+#endif  // AURORA_BACKEND_D3D11
 
     AURORA_LOG_RAW("bench", "\n", AURORA_BENCH_DISCLAIMER, "\n");
     return 0;

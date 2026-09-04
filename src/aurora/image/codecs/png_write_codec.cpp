@@ -22,9 +22,10 @@ class PngWriteCodec : public ImageCodec {
     }
 };
 
-} // namespace
+}  // namespace
 
-// NOLINTNEXTLINE(misc-use-internal-linkage): 工厂函数供 registry.cpp 跨 TU 调用，需外部链接
-auto create_png_write_codec() -> std::shared_ptr<ImageCodec> { return std::make_shared<PngWriteCodec>(); }
+auto create_png_write_codec() -> std::shared_ptr<ImageCodec> {
+    return std::make_shared<PngWriteCodec>();
+}
 
-} // namespace aurora::image
+}  // namespace aurora::image

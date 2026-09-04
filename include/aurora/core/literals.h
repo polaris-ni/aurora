@@ -26,4 +26,4 @@
 namespace aurora {
 // 便捷别名：在 TU 内 `using namespace au::literals;` 即可使用全部 UDL。
 // 此处仅作文档锚点，无额外符号。
-} // namespace aurora
+}  // namespace aurora

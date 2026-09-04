@@ -16,21 +16,21 @@ namespace aurora {
 /// @note Side-effects: none
 /// @note Rebuildable: no
 struct PropDescriptor {
-    std::string name;          ///< 属性键名（序列化键），如 "label"
-    std::string type;          ///< C++ 类型名，如 "LocalizedString"
-    std::string default_value; ///< 字符串化默认值，如 "\"\""
-    bool required = false;     ///< 是否必填
-    std::string note;          ///< 可选说明（人类/AI 可读）
+    std::string name;  ///< 属性键名（序列化键），如 "label"
+    std::string type;  ///< C++ 类型名，如 "LocalizedString"
+    std::string default_value;  ///< 字符串化默认值，如 "\"\""
+    bool required = false;  ///< 是否必填
+    std::string note;  ///< 可选说明（人类/AI 可读）
 
     // ---- JSON Schema 约束字段（编译期零开销，仅 Schema 生成时读取） ----
-    std::string json_type;                   ///< JSON Schema 类型（"string"/"number"/"boolean"/"array"/"object"）
-    std::vector<std::string> enum_values;    ///< 枚举合法值列表（如 ["Left","Right","Center"]）
-    std::string min_value;                   ///< 数值最小（如 "0"）
-    std::string max_value;                   ///< 数值最大（如 "100"）
-    std::string pattern;                     ///< 字符串格式（如 "color-rgba"）
-    std::string constraint;                  ///< 自由约束描述（如 "corner_radius >= 0"）
-    std::vector<std::string> requires_props; ///< 属性依赖（如 border_color 要求 border_width > 0）
-    std::vector<std::string> conflicts_with; ///< 属性互斥
+    std::string json_type;  ///< JSON Schema 类型（"string"/"number"/"boolean"/"array"/"object"）
+    std::vector<std::string> enum_values;  ///< 枚举合法值列表（如 ["Left","Right","Center"]）
+    std::string min_value;  ///< 数值最小（如 "0"）
+    std::string max_value;  ///< 数值最大（如 "100"）
+    std::string pattern;  ///< 字符串格式（如 "color-rgba"）
+    std::string constraint;  ///< 自由约束描述（如 "corner_radius >= 0"）
+    std::vector<std::string> requires_props;  ///< 属性依赖（如 border_color 要求 border_width > 0）
+    std::vector<std::string> conflicts_with;  ///< 属性互斥
 };
 
 /// @brief 控件完整自描述元数据（规格附录 B：运行时自描述能力）。
@@ -48,16 +48,16 @@ struct PropDescriptor {
 /// @note Side-effects: none
 /// @note Rebuildable: no
 struct WidgetDescriptor {
-    std::string name;                       ///< 控件类型名，如 "Button"
-    std::string ns = "aurora";              ///< 命名空间
-    std::vector<PropDescriptor> properties; ///< 属性列表
-    std::vector<std::string> events;        ///< 事件/回调名列表，如 ["on_click"]
-    std::string children_policy;            ///< 子节点策略："none" | "single" | "multiple"
+    std::string name;  ///< 控件类型名，如 "Button"
+    std::string ns = "aurora";  ///< 命名空间
+    std::vector<PropDescriptor> properties;  ///< 属性列表
+    std::vector<std::string> events;  ///< 事件/回调名列表，如 ["on_click"]
+    std::string children_policy;  ///< 子节点策略："none" | "single" | "multiple"
 
     // ---- Schema 扩展字段（可选，空时不输出） ----
-    std::vector<std::string> allowed_child_types; ///< 合法子类型（空 = 任意）
-    std::vector<std::string> invariants;          ///< 控件级不变量描述
-    std::vector<std::string> examples;            ///< 构造示例代码
+    std::vector<std::string> allowed_child_types;  ///< 合法子类型（空 = 任意）
+    std::vector<std::string> invariants;  ///< 控件级不变量描述
+    std::vector<std::string> examples;  ///< 构造示例代码
 };
 
 /// @brief 把 PropDescriptor 序列化为 JSON 对象。
@@ -79,10 +79,12 @@ struct WidgetDescriptor {
 /// @return 成功返回解析后的 T 值，失败返回 Error（含 ErrorCode）
 /// @note Thread: main-thread only
 /// @note Side-effects: none
-template<typename T> auto validate_prop(const Json &j, const PropDescriptor &desc) -> Result<T>;
+template <typename T>
+auto validate_prop(const Json &j, const PropDescriptor &desc) -> Result<T>;
 
 // ---- Color 特化：数组长度 >= 4，值在 0-255 ----
-template<> inline auto validate_prop<Color>(const Json &j, const PropDescriptor & /*desc*/) -> Result<Color> {
+template <>
+inline auto validate_prop<Color>(const Json &j, const PropDescriptor & /*desc*/) -> Result<Color> {
     if (!j.is_array() || j.size() < 4) {
         return make_error(ErrorCode::WidgetInvalidProp, "Color expects array of >= 4 numbers [r,g,b,a]");
     }
@@ -123,33 +125,35 @@ inline auto parse_constraint_int(const std::string &s, int &out) -> bool {
     }
 }
 
-template<> inline auto validate_prop<float>(const Json &j, const PropDescriptor &desc) -> Result<float> {
+template <>
+inline auto validate_prop<float>(const Json &j, const PropDescriptor &desc) -> Result<float> {
     if (!j.is_number()) {
         return make_error(ErrorCode::WidgetInvalidProp,
                           "Property '" + desc.name + "' expects number, got " + std::string(j.type_name()));
     }
     const float v = j.get<float>();
     if (!desc.min_value.empty()) {
-        float lo = 0.0f;
+        float lo = 0.0F;
         if (parse_constraint_float(desc.min_value, lo) && v < lo) {
-            return make_error(ErrorCode::WidgetPropConstraintViolated, "Property '" + desc.name +
-                                                                           "' must be >= " + desc.min_value + ", got " +
-                                                                           std::to_string(v));
+            return make_error(
+                ErrorCode::WidgetPropConstraintViolated,
+                "Property '" + desc.name + "' must be >= " + desc.min_value + ", got " + std::to_string(v));
         }
     }
     if (!desc.max_value.empty()) {
-        float hi = 0.0f;
+        float hi = 0.0F;
         if (parse_constraint_float(desc.max_value, hi) && v > hi) {
-            return make_error(ErrorCode::WidgetPropConstraintViolated, "Property '" + desc.name +
-                                                                           "' must be <= " + desc.max_value + ", got " +
-                                                                           std::to_string(v));
+            return make_error(
+                ErrorCode::WidgetPropConstraintViolated,
+                "Property '" + desc.name + "' must be <= " + desc.max_value + ", got " + std::to_string(v));
         }
     }
     return v;
 }
 
 // ---- int 特化：根据 desc.min_value / desc.max_value 检查范围 ----
-template<> inline auto validate_prop<int>(const Json &j, const PropDescriptor &desc) -> Result<int> {
+template <>
+inline auto validate_prop<int>(const Json &j, const PropDescriptor &desc) -> Result<int> {
     if (!j.is_number()) {
         return make_error(ErrorCode::WidgetInvalidProp,
                           "Property '" + desc.name + "' expects integer, got " + std::string(j.type_name()));
@@ -158,24 +162,25 @@ template<> inline auto validate_prop<int>(const Json &j, const PropDescriptor &d
     if (!desc.min_value.empty()) {
         int lo = 0;
         if (parse_constraint_int(desc.min_value, lo) && v < lo) {
-            return make_error(ErrorCode::WidgetPropConstraintViolated, "Property '" + desc.name +
-                                                                           "' must be >= " + desc.min_value + ", got " +
-                                                                           std::to_string(v));
+            return make_error(
+                ErrorCode::WidgetPropConstraintViolated,
+                "Property '" + desc.name + "' must be >= " + desc.min_value + ", got " + std::to_string(v));
         }
     }
     if (!desc.max_value.empty()) {
         int hi = 0;
         if (parse_constraint_int(desc.max_value, hi) && v > hi) {
-            return make_error(ErrorCode::WidgetPropConstraintViolated, "Property '" + desc.name +
-                                                                           "' must be <= " + desc.max_value + ", got " +
-                                                                           std::to_string(v));
+            return make_error(
+                ErrorCode::WidgetPropConstraintViolated,
+                "Property '" + desc.name + "' must be <= " + desc.max_value + ", got " + std::to_string(v));
         }
     }
     return v;
 }
 
 // ---- bool 特化：布尔类型检查 ----
-template<> inline auto validate_prop<bool>(const Json &j, const PropDescriptor &desc) -> Result<bool> {
+template <>
+inline auto validate_prop<bool>(const Json &j, const PropDescriptor &desc) -> Result<bool> {
     if (!j.is_boolean()) {
         return make_error(ErrorCode::WidgetInvalidProp,
                           "Property '" + desc.name + "' expects boolean, got " + std::string(j.type_name()));
@@ -184,17 +189,18 @@ template<> inline auto validate_prop<bool>(const Json &j, const PropDescriptor &
 }
 
 // ---- LocalizedString 特化：字符串类型检查 ----
-template<>
+template <>
 inline auto validate_prop<LocalizedString>(const Json &j, const PropDescriptor &desc) -> Result<LocalizedString> {
     if (!j.is_string()) {
         return make_error(ErrorCode::WidgetInvalidProp,
                           "Property '" + desc.name + "' expects string, got " + std::string(j.type_name()));
     }
-    return LocalizedString{ j.get<std::string>() };
+    return LocalizedString{j.get<std::string>()};
 }
 
 // ---- Length 特化：value >= 0（当 kind 为 Fixed 或 Fraction 时） ----
-template<> inline auto validate_prop<Length>(const Json &j, const PropDescriptor & /*desc*/) -> Result<Length> {
+template <>
+inline auto validate_prop<Length>(const Json &j, const PropDescriptor & /*desc*/) -> Result<Length> {
     if (j.is_string()) {
         const std::string s = j.get<std::string>();
         if (s == "auto" || s == "fill") {
@@ -207,7 +213,7 @@ template<> inline auto validate_prop<Length>(const Json &j, const PropDescriptor
             return make_error(ErrorCode::WidgetInvalidProp, "Length value must be a number");
         }
         const float v = j[1].get<float>();
-        if (v < 0.0f) {
+        if (v < 0.0F) {
             return make_error(ErrorCode::WidgetPropConstraintViolated,
                               "Length value must be >= 0, got " + std::to_string(v));
         }
@@ -217,17 +223,18 @@ template<> inline auto validate_prop<Length>(const Json &j, const PropDescriptor
 }
 
 // ---- EdgeInsets 特化：对象类型检查，各字段 >= 0 ----
-template<> inline auto validate_prop<EdgeInsets>(const Json &j, const PropDescriptor & /*desc*/) -> Result<EdgeInsets> {
+template <>
+inline auto validate_prop<EdgeInsets>(const Json &j, const PropDescriptor & /*desc*/) -> Result<EdgeInsets> {
     if (!j.is_object()) {
         return make_error(ErrorCode::WidgetInvalidProp, "EdgeInsets expects an object {left,top,right,bottom}");
     }
-    constexpr std::array<const char *, 4> fields = { "left", "top", "right", "bottom" };
+    constexpr std::array<const char *, 4> fields = {"left", "top", "right", "bottom"};
     for (const char *f : fields) {
         if (j.contains(f)) {
             if (!j[f].is_number()) {
                 return make_error(ErrorCode::WidgetInvalidProp, std::string("EdgeInsets.") + f + " must be a number");
             }
-            if (j[f].get<float>() < 0.0f) {
+            if (j[f].get<float>() < 0.0F) {
                 return make_error(ErrorCode::WidgetPropConstraintViolated,
                                   std::string("EdgeInsets.") + f + " must be >= 0");
             }
@@ -239,7 +246,8 @@ template<> inline auto validate_prop<EdgeInsets>(const Json &j, const PropDescri
 // ---- validate_or_default<T>：反序列化约束助手 ----
 /// @brief 用 validate_prop 校验 JSON 值；合法返回解析值，非法回退默认值并经 Diagnostics::degraded 上报。
 /// @note 适用于 deserialize_props 中「非法输入安全降级」场景；严格模式下 degraded 升级为硬失败。
-template<typename T> auto validate_or_default(const Json &j, const PropDescriptor &desc, T fallback) -> T {
+template <typename T>
+auto validate_or_default(const Json &j, const PropDescriptor &desc, T fallback) -> T {
     auto r = validate_prop<T>(j, desc);
     if (r) {
         return r.value();
@@ -278,4 +286,4 @@ inline auto validate_enum_string(const Json &j, const PropDescriptor &desc, Erro
     return true;
 }
 
-} // namespace aurora
+}  // namespace aurora

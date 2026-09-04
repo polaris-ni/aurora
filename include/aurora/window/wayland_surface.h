@@ -60,7 +60,7 @@ class WaylandSurface final : public Surface {
     [[nodiscard]] auto data() const -> const std::uint8_t * override;
     [[nodiscard]] auto size() const -> Size override;
     /// @brief begin_frame 铺的浅色底色（与 begin_frame 内 fill_rect 同色）：供脏区裁剪重绘重铺底色。
-    [[nodiscard]] auto clear_color() const -> Color override { return Color{ 245, 245, 247, 255 }; }
+    [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
     /// @brief 像素密度：wl_output scale（整数缩放），多屏取窗口所在输出。
     [[nodiscard]] auto scale_factor() const -> float override;
     [[nodiscard]] auto should_close() const -> bool override;
@@ -104,9 +104,9 @@ class WaylandSurface final : public Surface {
     struct Impl;
 
   private:
-    std::unique_ptr<Impl> m_impl;
+    std::unique_ptr<Impl> impl_;
 };
 
-} // namespace aurora
+}  // namespace aurora
 
-#endif // AURORA_BACKEND_WAYLAND / AURORA_PLATFORM_LINUX
+#endif  // AURORA_BACKEND_WAYLAND / AURORA_PLATFORM_LINUX

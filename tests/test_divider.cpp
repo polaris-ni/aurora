@@ -36,40 +36,46 @@ template<typename W> static auto roundtrip(const Json &props, const std::string 
 static void test_props() {
     Divider d;
     d.orientation = Orientation::Vertical;
-    d.set_indent(4.0f).set_end_indent(6.0f);
+    d.set_indent(4.0F).set_end_indent(6.0F);
     d.color = Color::red();
-    d.thickness = 2.0f;
+    d.thickness = 2.0F;
     Json j;
     d.serialize_props(j);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["orientation"].get<std::string>() == "vertical", "divider vertical");
-    AURORA_TEST_CHECK_MSG(near_f(j["indent"].get<float>(), 4.0f), "divider indent=4");
-    AURORA_TEST_CHECK_MSG(near_f(j["end_indent"].get<float>(), 6.0f), "divider end_indent=6");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(near_f(j["indent"].get<float>(), 4.0F), "divider indent=4");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(near_f(j["end_indent"].get<float>(), 6.0F), "divider end_indent=6");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["color"][0].get<int>() == 255, "divider color=red");
 
     Divider e;
     e.deserialize_props(j);
     Json k;
     e.serialize_props(k);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(k["orientation"].get<std::string>() == "vertical", "divider rt vertical");
-    AURORA_TEST_CHECK_MSG(near_f(k["end_indent"].get<float>(), 6.0f), "divider rt end_indent");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(near_f(k["end_indent"].get<float>(), 6.0F), "divider rt end_indent");
 }
 
 static void test_layout() {
     Divider d{};
     AURORA_TEST_CHECK_MSG(d.orientation == Orientation::Horizontal, "Divider: default horizontal");
-    AURORA_TEST_CHECK_MSG(near_f(d.thickness, 1.0f), "Divider: default thickness 1");
-    Divider dv{ DividerProps{ .orientation = Orientation::Vertical, .thickness = 2.0f } };
+    AURORA_TEST_CHECK_MSG(near_f(d.thickness, 1.0F), "Divider: default thickness 1");
+    Divider dv{DividerProps{.orientation = Orientation::Vertical, .thickness = 2.0F}};
     AURORA_TEST_CHECK_MSG(dv.orientation == Orientation::Vertical, "Divider: config vertical");
-    AURORA_TEST_CHECK_MSG(near_f(dv.thickness, 2.0f), "Divider: config thickness 2");
+    AURORA_TEST_CHECK_MSG(near_f(dv.thickness, 2.0F), "Divider: config thickness 2");
 
     constexpr BuildContext ctx;
     d.layout(Constraints{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 100, .height = 100 } }, ctx);
-    AURORA_TEST_CHECK_MSG(near_f(d.size().height, 1.0f), "Divider: horizontal height = thickness");
-    AURORA_TEST_CHECK_MSG(near_f(d.size().width, 100.0f), "Divider: horizontal fills width");
+    AURORA_TEST_CHECK_MSG(near_f(d.size().height, 1.0F), "Divider: horizontal height = thickness");
+    AURORA_TEST_CHECK_MSG(near_f(d.size().width, 100.0F), "Divider: horizontal fills width");
 
     dv.layout(Constraints{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 100, .height = 100 } }, ctx);
-    AURORA_TEST_CHECK_MSG(near_f(dv.size().width, 2.0f), "Divider: vertical width = thickness");
-    AURORA_TEST_CHECK_MSG(near_f(dv.size().height, 100.0f), "Divider: vertical fills height");
+    AURORA_TEST_CHECK_MSG(near_f(dv.size().width, 2.0F), "Divider: vertical width = thickness");
+    AURORA_TEST_CHECK_MSG(near_f(dv.size().height, 100.0F), "Divider: vertical fills height");
 }
 
 static void test_roundtrip() {
@@ -78,14 +84,16 @@ static void test_roundtrip() {
 
     const auto w = std::make_shared<Divider>();
     w->orientation = Orientation::Vertical;
-    w->thickness = 2.0f;
+    w->thickness = 2.0F;
     Json j = serialization::to_json(*w);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     const Json &p = j["props"];
     AURORA_TEST_CHECK_MSG(p.contains("orientation"), "Divider serialization orientation");
-    AURORA_TEST_CHECK_MSG(p.contains("thickness") && p["thickness"].get<float>() == 2.0f,
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(p.contains("thickness") && p["thickness"].get<float>() == 2.0F,
                           "Divider serialization thickness");
     const auto back = roundtrip<Divider>(j, "Divider");
-    AURORA_TEST_CHECK_MSG(back && back->thickness == 2.0f, "Divider roundtrip preserves thickness");
+    AURORA_TEST_CHECK_MSG(back && back->thickness == 2.0F, "Divider roundtrip preserves thickness");
 }
 
 AURORA_TEST() {

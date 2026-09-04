@@ -3,7 +3,6 @@
 #include <string>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -26,26 +25,26 @@ class UnregisteredBox : public Widget {
     void collect_signals(std::vector<SignalViewBase *> & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "UnregisteredBox"; }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
-        return WidgetDescriptor{ .name = "UnregisteredBox", .children_policy = "none" };
+        return WidgetDescriptor{.name = "UnregisteredBox", .children_policy = "none"};
     }
 
   protected:
     void on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) override {}
 
     auto on_layout(const Constraints & /*c*/, const BuildContext & /*ctx*/) -> Size override {
-        return Size{ .width = 10.0f, .height = 10.0f };
+        return Size{.width = 10.0F, .height = 10.0F};
     }
 };
-} // namespace
+}  // namespace
 
 static void test_validate_valid() {
     // Column / Spacer 已在核心注册表，合法树应通过。
-    auto ok = validate(Node{ Column{ Spacer{}, Spacer{} } });
+    auto ok = validate(Node{Column{Spacer{}, Spacer{}}});
     AURORA_TEST_CHECK_MSG(ok.ok() && ok.value() == true, "validate: valid tree -> ok(true)");
 }
 
 static void test_validate_unknown_widget() {
-    const auto res = validate(Node{ UnregisteredBox{} });
+    const auto res = validate(Node{UnregisteredBox{}});
     AURORA_TEST_CHECK_MSG(!res.ok(), "validate: unregistered type -> not ok");
     // 成功态上调用 Result::error() 会抛 std::bad_variant_access，故先短路。
     if (res.ok()) {
@@ -57,7 +56,7 @@ static void test_validate_unknown_widget() {
 
 static void test_validate_null_child() {
     // Column 两个子项均为空 Node（nullptr），应报 NullChild。
-    const auto res = validate(Node{ Column{ Node{}, Node{} } });
+    const auto res = validate(Node{Column{Node{}, Node{}}});
     AURORA_TEST_CHECK_MSG(!res.ok(), "validate: null child -> not ok");
     if (res.ok()) {
         return;
@@ -68,7 +67,7 @@ static void test_validate_null_child() {
 
 static void test_validate_depth_limit() {
     // 3 层 Column 嵌套 + Spacer，max_depth=2 应触发 TreeTooDeep。
-    const auto res = validate(Node{ Column{ Column{ Column{ Spacer{} } } } }, 2);
+    const auto res = validate(Node{Column{Column{Column{Spacer{}}}}}, 2);
     AURORA_TEST_CHECK_MSG(!res.ok(), "validate: too deep -> not ok");
     if (res.ok()) {
         return;

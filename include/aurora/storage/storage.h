@@ -16,8 +16,8 @@
 #include "aurora/core/result.h"
 #include "aurora/state/async.h"
 #include "aurora/state/subscription.h"
-#include "aurora/storage/backend.h"
 #include "aurora/storage/serializable.h"
+#include "aurora/storage/storage_backend.h"
 #include "aurora/storage/storage_types.h"
 
 namespace aurora::storage {
@@ -32,18 +32,18 @@ class Storage {
 
     // ---------- 原始 JSON 记录 API（用户视角 id → Json value；内部自动信封化） ----------
     [[nodiscard]] auto put(const std::string &id, const Json &value) const -> Result<void>;
-    [[nodiscard]] auto get(const std::string &id) const -> Result<Json>; ///< 返回 JSON payload（裸 value）
+    [[nodiscard]] auto get(const std::string &id) const -> Result<Json>;  ///< 返回 JSON payload（裸 value）
     [[nodiscard]] auto remove(const std::string &id) const -> Result<void>;
     [[nodiscard]] auto list() const -> Result<std::vector<std::string>>;
     [[nodiscard]] auto contains(const std::string &id) const -> Result<bool>;
     [[nodiscard]] auto clear() const -> Result<void>;
-    auto flush() const -> Result<void>;
+    [[nodiscard]] auto flush() const -> Result<void>;
 
     // ---------- 二进制载荷 API（variant 放宽，对标 Room BLOB / Realm data / Hive 二进制） ----------
     [[nodiscard]] auto put(const std::string &id, const StorageBytes &value) const -> Result<void>;
-    [[nodiscard]] auto get_bytes(const std::string &id) const -> Result<StorageBytes>; ///< 仅取二进制载荷
+    [[nodiscard]] auto get_bytes(const std::string &id) const -> Result<StorageBytes>;  ///< 仅取二进制载荷
     [[nodiscard]] auto get_value(const std::string &id) const
-        -> Result<StorageValue>; ///< 返回原始 variant（Json 或 bytes）
+        -> Result<StorageValue>;  ///< 返回原始 variant（Json 或 bytes）
 
     // ---------- 信封级 API（含元数据/迁移时使用） ----------
     [[nodiscard]] auto put_record(const std::string &id, const StorageRecord &rec) const -> Result<void>;
@@ -62,7 +62,8 @@ class Storage {
     [[nodiscard]] auto transaction(std::function<Result<void>(Storage &)> body) -> Result<void>;
 
     // ---------- 类型化便捷层（核心抽象接入点） ----------
-    template<StorageStorable T> [[nodiscard]] auto put(const std::string &id, const T &obj) -> Result<void> {
+    template <StorageStorable T>
+    [[nodiscard]] auto put(const std::string &id, const T &obj) -> Result<void> {
         StorageRecord rec;
         rec.id = id;
         rec.type = storage_type_name<T>();
@@ -78,13 +79,14 @@ class Storage {
         return put_record(id, rec);
     }
 
-    template<StorageStorable T> [[nodiscard]] auto get(const std::string &id) -> Result<T> { // NOLINT
-        auto rec = m_backend->get_record(id);
+    template <StorageStorable T>
+    [[nodiscard]] auto get(const std::string &id) -> Result<T> {  // NOLINT
+        auto rec = backend_->get_record(id);
         if (!rec) {
-            return Result<T>{ rec.error() };
+            return Result<T>{rec.error()};
         }
         if (rec.value().type != storage_type_name<T>() && rec.value().type != "__raw__") {
-            return Result<T>{ make_error(ErrorCode::StorageTypeMismatch, "Typed read type mismatch") };
+            return Result<T>{make_error(ErrorCode::StorageTypeMismatch, "Typed read type mismatch")};
         }
         T out{};
         if (rec.value().encoding == StorageEncoding::Binary) {
@@ -93,17 +95,17 @@ class Storage {
                 if (rec.value().version < storage_version<T>()) {
                     auto migrated = migrate_storage<T>(rec.value().version, std::move(bytes));
                     if (!migrated) {
-                        return Result<T>{ migrated.error() };
+                        return Result<T>{migrated.error()};
                     }
                     bytes = std::move(migrated.value());
                 }
                 auto r = from_storage_bytes(out, bytes);
                 if (!r) {
-                    return Result<T>{ r.error() };
+                    return Result<T>{r.error()};
                 }
             } else {
-                return Result<T>{ make_error(ErrorCode::StorageEncodingMismatch,
-                                             "Type T only supports JSON serialization") };
+                return Result<T>{
+                    make_error(ErrorCode::StorageEncodingMismatch, "Type T only supports JSON serialization")};
             }
         } else {
             if constexpr (StorageSerializable<T>) {
@@ -111,23 +113,23 @@ class Storage {
                 if (rec.value().version < storage_version<T>()) {
                     auto migrated = migrate_storage<T>(rec.value().version, std::move(j));
                     if (!migrated) {
-                        return Result<T>{ migrated.error() };
+                        return Result<T>{migrated.error()};
                     }
                     j = std::move(migrated.value());
                 }
                 auto r = from_storage_json(out, j);
                 if (!r) {
-                    return Result<T>{ r.error() };
+                    return Result<T>{r.error()};
                 }
             } else {
-                return Result<T>{ make_error(ErrorCode::StorageEncodingMismatch,
-                                             "Type T only supports binary serialization") };
+                return Result<T>{
+                    make_error(ErrorCode::StorageEncodingMismatch, "Type T only supports binary serialization")};
             }
         }
-        return Result<T>{ std::move(out) };
+        return Result<T>{std::move(out)};
     }
 
-    template<StorageStorable T>
+    template <StorageStorable T>
     [[nodiscard]] auto async_put(const std::string &id, const T &obj) -> aurora::Task<void> {
         StorageRecord rec;
         rec.id = id;
@@ -141,12 +143,12 @@ class Storage {
             rec.encoding = StorageEncoding::Json;
             rec.payload = to_storage_json(obj);
         }
-        auto *be = m_backend.get();
+        auto *be = backend_.get();
         const std::string &idc = id;
         auto task = aurora::async([be, idc, rec]() -> Result<void> { return be->put_record(idc, rec); });
         task.then([this, idc](const Result<void> &r) -> auto {
             if (r.ok()) {
-                emit_change({ .op = StorageChange::Operation::Put, .id = idc });
+                emit_change({.op = StorageChange::Operation::Put, .id = idc});
             }
         });
         return task;
@@ -160,25 +162,25 @@ class Storage {
     [[nodiscard]] static auto default_instance() -> Storage &;
 
   private:
-    explicit Storage(std::unique_ptr<StorageBackend> b) : m_backend(std::move(b)) {}
+    explicit Storage(std::unique_ptr<StorageBackend> b) : backend_(std::move(b)) {}
 
     void emit_change(const StorageChange &ch) const;
 
-    std::unique_ptr<StorageBackend> m_backend;
+    std::unique_ptr<StorageBackend> backend_;
 
     /// 事务内抑制逐操作通知，提交后统一发 Batch。经 m_listener_mutex 保护：异步 API
     /// 的回调可能在 worker 线程发射变更，与主线程事务并发访问此标志（atomic 会使
     /// Storage 失去移动性、破坏 Result<Storage>，故用锁）。
-    bool m_notify_suppressed{ false };
+    bool notify_suppressed_{false};
 
     // 变更监听器注册表（RAII via aurora::Subscription）
     struct Listener {
         std::uint64_t id;
         StorageChangeCallback cb;
     };
-    std::vector<Listener> m_listeners;
-    std::uint64_t m_listener_seq = 1;
-    std::unique_ptr<std::mutex> m_listener_mutex = std::make_unique<std::mutex>();
+    std::vector<Listener> listeners_;
+    std::uint64_t listener_seq_ = 1;
+    std::unique_ptr<std::mutex> listener_mutex_ = std::make_unique<std::mutex>();
 };
 
-} // namespace aurora::storage
+}  // namespace aurora::storage

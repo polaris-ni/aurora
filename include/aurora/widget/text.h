@@ -10,32 +10,32 @@
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/enums.h"
 #include "aurora/core/font.h"
+#include "aurora/environment/environment.h"
 #include "aurora/i18n/localized_string.h"
 #include "aurora/i18n/string_table.h"
 #include "aurora/state/reactive.h"
 #include "aurora/widget/widget.h"
-#include "aurora/environment/environment.h"
 
 namespace aurora {
 
 /// @brief Text 属性（聚合，AI 用指定初始化器填写）。
 struct TextProps {
-    Reactive<LocalizedString> content; ///< 文本内容（可由字符串隐式构造）
-    Font font = Font{};                ///< 字体（默认 14pt）
-    Color text_color = Color::black(); ///< 文字色（默认黑）
+    Reactive<LocalizedString> content;  ///< 文本内容（可由字符串隐式构造）
+    Font font = Font{};  ///< 字体（默认 14pt）
+    Color text_color = Color::black();  ///< 文字色（默认黑）
 
     // ---- 文本排版（参考 Flutter TextStyle / Text） ----
-    TextAlign text_align = TextAlign::Left;           ///< 水平对齐
-    int max_lines = 0;                                ///< 最大行数（0=不限）；超出按 overflow 处理
-    TextOverflow overflow = TextOverflow::Clip;       ///< 超出 max_lines 时的处理
-    bool soft_wrap = true;                            ///< 是否按宽度自动换行
-    float line_height = 1.0f;                         ///< 行高倍数（相对字高）
-    float letter_spacing = 0.0f;                      ///< 字形间距（FontEngine 暂不支持 → 优雅降级）
-    float word_spacing = 0.0f;                        ///< 词间距（FontEngine 暂不支持 → 优雅降级）
-    FontStyle font_style = FontStyle::Normal;         ///< 字形风格（Italic 暂降级为 Normal）
-    TextDecoration decoration = TextDecoration::None; ///< 装饰线（可按位组合）
-    Color decoration_color = Color::black();          ///< 装饰线颜色（默认同文字色）
-    Color background_color = Color{ 0, 0, 0, 0 };     ///< 文本底色（alpha=0 表示无）
+    TextAlign text_align = TextAlign::Left;  ///< 水平对齐
+    int max_lines = 0;  ///< 最大行数（0=不限）；超出按 overflow 处理
+    TextOverflow overflow = TextOverflow::Clip;  ///< 超出 max_lines 时的处理
+    bool soft_wrap = true;  ///< 是否按宽度自动换行
+    float line_height = 1.0F;  ///< 行高倍数（相对字高）
+    float letter_spacing = 0.0F;  ///< 字形间距（FontEngine 暂不支持 → 优雅降级）
+    float word_spacing = 0.0F;  ///< 词间距（FontEngine 暂不支持 → 优雅降级）
+    FontStyle font_style = FontStyle::Normal;  ///< 字形风格（Italic 暂降级为 Normal）
+    TextDecoration decoration = TextDecoration::None;  ///< 装饰线（可按位组合）
+    Color decoration_color = Color::black();  ///< 装饰线颜色（默认同文字色）
+    Color background_color = Color{0, 0, 0, 0};  ///< 文本底色（alpha=0 表示无）
 
     /// @brief 逐控件抗锯齿覆写：nullopt = 用进程级 `text_aa_mode()`（默认 ClearType）；
     ///        设为 `Supersample` 可让本控件文字在彩色/动画/渐变背景上避免 ClearType 子像素白边
@@ -67,9 +67,9 @@ class Text : public LeafWidget, public TextProps {
 
     // 非正数降级为 14pt 并产生诊断（需求 #21）。
     auto font_size(float pt) -> Text & {
-        if (pt <= 0.0f) {
+        if (pt <= 0.0F) {
             Diagnostics::degraded("widget", "Text 字号 <= 0 已降级为 14pt");
-            font.size_pt = 14.0f;
+            font.size_pt = 14.0F;
         } else {
             font.size_pt = pt;
         }
@@ -184,9 +184,9 @@ class Text : public LeafWidget, public TextProps {
     /// @brief 失焦时取消选区。
     auto on_focus_change(bool focused) -> void override {
         if (!focused) {
-            m_sel_end = m_no_sel; // 标记无选区（含头含尾模型下，起点=终点表示 1 字符而非无选区）
-            m_sel_start = m_caret;
-            m_selecting = false;
+            sel_end_ = NO_SEL;  // 标记无选区（含头含尾模型下，起点=终点表示 1 字符而非无选区）
+            sel_start_ = caret_;
+            selecting_ = false;
             mark_needs_paint();
         }
         Widget::on_focus_change(focused);
@@ -196,14 +196,14 @@ class Text : public LeafWidget, public TextProps {
     /// 与命中测试/高亮/复制等下游逻辑兼容。无选区时返回 {0, 0}。
     [[nodiscard]] auto selection() const -> std::pair<size_t, size_t> {
         if (!has_selection()) {
-            return { m_caret, m_caret };
+            return {caret_, caret_};
         }
-        const size_t a = std::min(m_sel_start, m_sel_end);
-        const size_t b = std::max(m_sel_start, m_sel_end);
-        return { a, b + 1 };
+        const size_t a = std::min(sel_start_, sel_end_);
+        const size_t b = std::max(sel_start_, sel_end_);
+        return {a, b + 1};
     }
-    [[nodiscard]] auto has_selection() const -> bool { return m_sel_end != m_no_sel; }
-    [[nodiscard]] auto display_text() const -> const std::string & { return m_display_text; }
+    [[nodiscard]] auto has_selection() const -> bool { return sel_end_ != NO_SEL; }
+    [[nodiscard]] auto display_text() const -> const std::string & { return display_text_; }
 
   protected:
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override;
@@ -212,20 +212,20 @@ class Text : public LeafWidget, public TextProps {
 
   private:
     /// @brief 无选区哨兵：m_sel_end 取此值时表示当前没有选区。
-    static constexpr size_t m_no_sel = static_cast<size_t>(-1);
+    static constexpr size_t NO_SEL = static_cast<size_t>(-1);
 
-    size_t m_sel_start = 0;              ///< 选区起点（含入的码点下标：该字符被选中）
-    size_t m_sel_end = m_no_sel;         ///< 选区终点（含入的码点下标；= m_no_sel 表示无选区）
-    size_t m_caret = 0;                  ///< 光标（caret 位置，0..码点数；用于键盘导航）
-    bool m_selecting = false;            ///< 是否正在拖选
-    std::string m_display_text;          ///< 最近一次绘制所用显示文本（命中测试/选区使用）
-    std::string m_cached_resolved_text;  ///< 缓存的 resolved_text 结果（避免每帧重复解析）
-    bool m_resolved_dirty = true;        ///< resolved 缓存是否需重新计算
-    std::vector<std::string> m_lines;    ///< 最近一次布局所得折行结果（绘制复用）
-    std::vector<size_t> m_line_cp_start; ///< 每个可视行首字符在 m_display_text 中的码点下标
-    float m_line_h = 0.0f;               ///< 行高（含 line_height 倍数）
-    float m_layout_w = 0.0f;             ///< 最近一次布局所得控件宽度（命中测试按对齐偏移需要）
-    float m_paint_scale = 1.0f;          ///< 最近一次绘制的帧缓冲像素比（dp→物理；实显 caret 校正用）
+    size_t sel_start_ = 0;  ///< 选区起点（含入的码点下标：该字符被选中）
+    size_t sel_end_ = NO_SEL;  ///< 选区终点（含入的码点下标；= AURORA_NO_SEL 表示无选区）
+    size_t caret_ = 0;  ///< 光标（caret 位置，0..码点数；用于键盘导航）
+    bool selecting_ = false;  ///< 是否正在拖选
+    std::string display_text_;  ///< 最近一次绘制所用显示文本（命中测试/选区使用）
+    std::string cached_resolved_text_;  ///< 缓存的 resolved_text 结果（避免每帧重复解析）
+    bool resolved_dirty_ = true;  ///< resolved 缓存是否需重新计算
+    std::vector<std::string> lines_;  ///< 最近一次布局所得折行结果（绘制复用）
+    std::vector<size_t> line_cp_start_;  ///< 每个可视行首字符在 m_display_text 中的码点下标
+    float line_h_ = 0.0F;  ///< 行高（含 line_height 倍数）
+    float layout_w_ = 0.0F;  ///< 最近一次布局所得控件宽度（命中测试按对齐偏移需要）
+    float paint_scale_ = 1.0F;  ///< 最近一次绘制的帧缓冲像素比（dp→物理；实显 caret 校正用）
 
     static auto split_words(const std::string &text) -> std::vector<std::string>;
     /// @brief 折行结果：lines=可视行文本，cp_start=各行首字符在原始 text 中的码点下标（一一对应）。
@@ -242,11 +242,11 @@ class Text : public LeafWidget, public TextProps {
 
     /// @brief Justify 行逐词布局项（与 on_paint 两端对齐绘制严格一致）。
     struct JustifiedWord {
-        std::string text;    ///< 词内容（不含空格）
-        size_t cp_begin = 0; ///< 词首字符在行内的码点下标
-        size_t cp_end = 0;   ///< 词尾后一位置（行内码点下标，不含）
-        float x = 0.0f;      ///< 词左缘相对行左缘的 x
-        float w = 0.0f;      ///< 词自然宽度
+        std::string text;  ///< 词内容（不含空格）
+        size_t cp_begin = 0;  ///< 词首字符在行内的码点下标
+        size_t cp_end = 0;  ///< 词尾后一位置（行内码点下标，不含）
+        float x = 0.0F;  ///< 词左缘相对行左缘的 x
+        float w = 0.0F;  ///< 词自然宽度
     };
     /// @brief 计算 Justify 行的逐词均分布局（剩余宽度均分进词间隙）；
     ///        词数 < 2 时返回空（该行不做两端对齐，与 on_paint 一致）。
@@ -266,4 +266,4 @@ class Text : public LeafWidget, public TextProps {
                                      float avail) const -> std::pair<size_t, size_t>;
 };
 
-} // namespace aurora
+}  // namespace aurora

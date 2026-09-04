@@ -40,13 +40,13 @@ namespace {
 /// @brief 焦点变更追踪控件（验证 FocusManager 的获焦/失焦通知）。
 class FocusSpy : public aurora::LeafWidget {
   public:
-    int gained = 0;
-    int lost = 0;
+    int gained_ = 0;
+    int lost_ = 0;
     void on_focus_change(bool focused) override {
         if (focused) {
-            ++gained;
+            ++gained_;
         } else {
-            ++lost;
+            ++lost_;
         }
     }
     void collect_signals(std::vector<aurora::SignalViewBase *> & /*out*/) override {}
@@ -57,7 +57,7 @@ class FocusSpy : public aurora::LeafWidget {
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(Size{ .width = 40.0f, .height = 20.0f });
+        return c.constrain(Size{.width = 40.0F, .height = 20.0F});
     }
     void on_paint(aurora::Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) override {}
 };
@@ -76,14 +76,13 @@ AURORA_TEST() {
     BuildContext ctx;
     col.mount(ctx);
     Constraints cc;
-    cc.min = Size{ .width = 0.0f, .height = 0.0f };
-    cc.max = Size{ .width = 640.0f, .height = 480.0f };
+    cc.min = Size{.width = 0.0F, .height = 0.0F};
+    cc.max = Size{.width = 640.0F, .height = 480.0F};
     col.layout(cc, ctx);
 
     aurora::Painter p;
     p.begin(640, 480);
-    col.paint(p, Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = 640.0f, .height = 480.0f } },
-              ctx);
+    col.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 640.0F, .height = 480.0F}}, ctx);
 
     FocusManager fm;
     fm.set_root(&col);
@@ -107,32 +106,33 @@ AURORA_TEST() {
     AURORA_TEST_CHECK(fm.focused() == ti_a.get()); // 循环回起点
 
     // 4) 焦点变更通知：spy 在序列中获焦一次、失焦一次。
-    AURORA_TEST_CHECK(spy->gained == 1);
-    AURORA_TEST_CHECK(spy->lost == 1);
+    AURORA_TEST_CHECK(spy->gained_ == 1);
+    AURORA_TEST_CHECK(spy->lost_ == 1);
 
     // 5) Shift+Tab 后退（spy 再次获焦，gained 增为 2）。
     fm.move_focus(FocusDirection::Backward);
     AURORA_TEST_CHECK(fm.focused() == spy.get());
-    AURORA_TEST_CHECK(spy->gained == 2);
+    AURORA_TEST_CHECK(spy->gained_ == 2);
 
     // 6) 键盘经 FocusManager 派发到焦点 widget：文本输入 + 退格。
     fm.set_focus(ti_b.get());
     TextInputEvent te;
-    te.text = "x";
+    te.text_ = "x";
     AURORA_TEST_CHECK(aurora::EventDispatcher::dispatch(col, te, fm));
-    te.text = "y";
+    te.text_ = "y";
     AURORA_TEST_CHECK(aurora::EventDispatcher::dispatch(col, te, fm));
     AURORA_TEST_CHECK(ti_b->value() == "xy");
 
     KeyEvent back;
-    back.action = KeyAction::Down;
-    back.key = static_cast<int>(KeyCode::Backspace);
+    back.action_ = KeyAction::Down;
+    back.key_ = static_cast<int>(KeyCode::Backspace);
     AURORA_TEST_CHECK(aurora::EventDispatcher::dispatch(col, back, fm)); // 派发到 tiB
     AURORA_TEST_CHECK(ti_b->value() == "x");
 
     // 7) 点击 TextInput 经 request_focus 获焦。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     const Rect ab = col.child_nodes()[0].bounds();
-    const Point ac{ .x = ab.origin.x + (ab.size.width / 2.0f), .y = ab.origin.y + (ab.size.height / 2.0f) };
+    const Point ac{.x = ab.origin.x + (ab.size.width / 2.0F), .y = ab.origin.y + (ab.size.height / 2.0F)};
     MouseEvent click;
     click.position = ac;
     click.action = MouseAction::Press;
@@ -142,14 +142,14 @@ AURORA_TEST() {
 
     // 8) Tab 键经事件分发器触发焦点移动（而非被焦点 widget 消费）。
     KeyEvent tab;
-    tab.action = KeyAction::Down;
-    tab.key = static_cast<int>(KeyCode::Tab);
+    tab.action_ = KeyAction::Down;
+    tab.key_ = static_cast<int>(KeyCode::Tab);
     AURORA_TEST_CHECK(aurora::EventDispatcher::dispatch(col, tab, fm)); // 焦点前进到 tiB
     AURORA_TEST_CHECK(fm.focused() == ti_b.get());
 
     // 9) Shift+Tab 后退（带修饰键位）。
     KeyEvent shift_tab = tab;
-    shift_tab.modifiers = aurora::ModifierKey::Shift;
+    shift_tab.modifiers_ = aurora::ModifierKey::Shift;
     AURORA_TEST_CHECK(aurora::EventDispatcher::dispatch(col, shift_tab, fm));
     AURORA_TEST_CHECK(fm.focused() == ti_a.get());
 

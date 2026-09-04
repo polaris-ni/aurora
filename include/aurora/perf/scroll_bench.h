@@ -47,22 +47,22 @@ class ScrollBenchHarness {
   public:
     /// @brief 采样配置。
     struct Config {
-        int frames = 300; ///< 采样帧数（不含 warmup）
+        int frames = 300;  ///< 采样帧数（不含 warmup）
 
         /// @brief 每帧滚动距离，单位**逻辑 dp**（正值 = 向下滚，露出下方内容）。
         ///
         /// 刻意不用「滚轮单位」：`Scroll::step` 默认 16 dp/单位，而 `LazyList` / `GridView`
         /// 各有自己的步长，同一个滚轮增量在不同控件上位移不同，跨场景不可比。harness 在
         /// 采样前用一次单位增量实测 dp/unit 做标定，再把这里的 dp 换算回控件单位下发。
-        /// 默认 12 dp/帧 ≈ 720 dp/s @60fps，是一个真实的匀速滚动速度。
-        float delta_per_frame = 12.0f;
-        bool fling = false;     ///< true = 惯性衰减序列；false = 匀速
-        int warmup_frames = 30; ///< 预热帧数（不计入统计，用于消化首帧布局/入场动画）
+        /// 默认 12 dp/帧 ≈ 720 dp/s @60Fps，是一个真实的匀速滚动速度。
+        float delta_per_frame = 12.0F;
+        bool fling = false;  ///< true = 惯性衰减序列；false = 匀速
+        int warmup_frames = 30;  ///< 预热帧数（不计入统计，用于消化首帧布局/入场动画）
 
-        float scale = 1.0f;             ///< 设备像素缩放（经 `Painter::set_scale` 真实生效）
-        bool auto_reverse = true;       ///< 触顶/触底自动反向，保证每帧都是真实滚动帧
-        double frame_budget_ms = 16.67; ///< 帧预算，决定 `over_budget_frames`
-        std::string name = "scroll";    ///< 会话名，写入报告标题
+        float scale = 1.0F;  ///< 设备像素缩放（经 `Painter::set_scale` 真实生效）
+        bool auto_reverse = true;  ///< 触顶/触底自动反向，保证每帧都是真实滚动帧
+        double frame_budget_ms = 16.67;  ///< 帧预算，决定 `over_budget_frames`
+        std::string name = "scroll";  ///< 会话名，写入报告标题
 
         // ---- 落定（settle）阶段：warmup 之前，不滚动，只空转帧 ----
         //
@@ -76,14 +76,14 @@ class ScrollBenchHarness {
         //    原理上永远不会 idle，只能按时间给足首屏瞬态）。
         // 只有帧数撞到 `settle_max_frames` 才判未落定。骨架屏是否真的退场，不靠这里
         // 猜，而由采样前后两次行程复测（`Result::geometry_stable()`）事后证伪。
-        double settle_ms = 1500.0;    ///< 落定阶段墙钟目标（达到即视为落定）；0 = 关闭
+        double settle_ms = 1500.0;  ///< 落定阶段墙钟目标（达到即视为落定）；0 = 关闭
         int settle_idle_frames = 24;  ///< 连续这么多帧无脏即提前判定已落定
-        int settle_max_frames = 4000; ///< 落定阶段帧数硬上限（唯一的失败出口）
+        int settle_max_frames = 4000;  ///< 落定阶段帧数硬上限（唯一的失败出口）
 
         // ---- fling 模式参数（`fling = false` 时忽略）----
-        float fling_boost = 4.0f;  ///< 起始速度 = `delta_per_frame * fling_boost`（dp/帧）
-        float fling_decay = 0.94f; ///< 每帧速度衰减系数，(0,1)
-        float fling_cutoff = 0.5f; ///< 速度（dp/帧）低于此值判定为静止，随即发起下一次 fling
+        float fling_boost = 4.0F;  ///< 起始速度 = `delta_per_frame * fling_boost`（dp/帧）
+        float fling_decay = 0.94F;  ///< 每帧速度衰减系数，(0,1)
+        float fling_cutoff = 0.5F;  ///< 速度（dp/帧）低于此值判定为静止，随即发起下一次 fling
     };
 
     /**
@@ -96,33 +96,33 @@ class ScrollBenchHarness {
     struct Result {
         /// @brief 落定阶段的退出原因（写进报告，避免「落定成功」是怎么来的说不清）。
         enum class SettleReason : std::uint8_t {
-            Disabled,   ///< `settle_ms <= 0`，调用方主动关闭
-            Idle,       ///< 连续无脏收敛（静态树）
-            TimeBudget, ///< 墙钟达标（含永动动画的树，正常路径）
-            FrameCap,   ///< 撞帧数上限，**未落定**
+            Disabled,  ///< `settle_ms <= 0`，调用方主动关闭
+            Idle,  ///< 连续无脏收敛（静态树）
+            TimeBudget,  ///< 墙钟达标（含永动动画的树，正常路径）
+            FrameCap,  ///< 撞帧数上限，**未落定**
         };
 
-        PerfReport report{}; ///< 完整帧统计（markdown / json / csv 由它渲染）
-        Size viewport{};     ///< 本次采样的视口逻辑尺寸（dp）
+        PerfReport report{};  ///< 完整帧统计（markdown / json / csv 由它渲染）
+        Size viewport{};  ///< 本次采样的视口逻辑尺寸（dp）
 
         // ---- 自证字段：先验伪，再看性能数 ----
-        bool scrollable_found = false;                       ///< 是否在树中定位到垂直可滚动控件
-        std::size_t moved_frames = 0;                        ///< 实际产生位移的采样帧数（应 == frames）
-        std::size_t idle_frames = 0;                         ///< 被 idle 跳帧优化跳过的采样帧数（应为 0）
-        std::size_t reversals = 0;                           ///< 触边反向次数（占比过高说明内容太短，读数无参考价值）
-        double scrolled_px = 0.0;                            ///< 累计位移绝对值（逻辑 dp）
-        float final_offset = 0.0f;                           ///< 结束时的滚动偏移（逻辑 dp）
-        float max_offset = 0.0f;                             ///< 采样**前**实测行程（内容高 − 滚动视口高，逻辑 dp）
-        float max_offset_end = 0.0f;                         ///< 采样**后**复测行程；与上者不等 = 采样期内容还在变
-        float scroll_viewport_h = 0.0f;                      ///< 滚动容器自身视口高（≠ 窗口视口高，顶栏/底栏会挤占）
-        float dp_per_unit = 0.0f;                            ///< 标定所得：一个滚轮单位在被测控件上等于多少 dp
-        std::size_t settle_frames = 0;                       ///< 落定阶段耗用帧数
-        double settle_ms = 0.0;                              ///< 落定阶段耗用墙钟毫秒
-        bool settled = false;                                ///< 落定阶段是否正常结束（false = 撞帧数上限）
-        SettleReason settle_reason = SettleReason::FrameCap; ///< 落定退出原因
+        bool scrollable_found = false;  ///< 是否在树中定位到垂直可滚动控件
+        std::size_t moved_frames = 0;  ///< 实际产生位移的采样帧数（应 == frames）
+        std::size_t idle_frames = 0;  ///< 被 idle 跳帧优化跳过的采样帧数（应为 0）
+        std::size_t reversals = 0;  ///< 触边反向次数（占比过高说明内容太短，读数无参考价值）
+        double scrolled_px = 0.0;  ///< 累计位移绝对值（逻辑 dp）
+        float final_offset = 0.0F;  ///< 结束时的滚动偏移（逻辑 dp）
+        float max_offset = 0.0F;  ///< 采样**前**实测行程（内容高 − 滚动视口高，逻辑 dp）
+        float max_offset_end = 0.0F;  ///< 采样**后**复测行程；与上者不等 = 采样期内容还在变
+        float scroll_viewport_h = 0.0F;  ///< 滚动容器自身视口高（≠ 窗口视口高，顶栏/底栏会挤占）
+        float dp_per_unit = 0.0F;  ///< 标定所得：一个滚轮单位在被测控件上等于多少 dp
+        std::size_t settle_frames = 0;  ///< 落定阶段耗用帧数
+        double settle_ms = 0.0;  ///< 落定阶段耗用墙钟毫秒
+        bool settled = false;  ///< 落定阶段是否正常结束（false = 撞帧数上限）
+        SettleReason settle_reason = SettleReason::FrameCap;  ///< 落定退出原因
 
         /// @brief 触边反向帧占比上限：超过则判定内容太短，整段读数以触边行为为主。
-        static constexpr double kMaxReversalRatio = 0.10; // NOLINT(readability-identifier-naming)
+        static constexpr double kMaxReversalRatio = 0.10;  // NOLINT(readability-identifier-naming)
 
         /// @brief 采样期间内容几何是否稳定（采样前后行程一致）。
         ///
@@ -186,4 +186,4 @@ class ScrollBenchHarness {
     [[nodiscard]] static auto run(Node root, Size viewport) -> Result;
 };
 
-} // namespace aurora
+}  // namespace aurora

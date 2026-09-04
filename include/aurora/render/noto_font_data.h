@@ -9,4 +9,4 @@ namespace aurora::render {
 // 编译/链接体积与耗时显著膨胀。通过函数返回 span 而非 extern 变量：
 // 调用方无需自行拼接 size，杜绝越界；字体仅加载期低频读取，span 返回值开销可忽略。
 auto noto_sans_ttf() -> std::span<const std::uint8_t>;
-} // namespace aurora::render
+}  // namespace aurora::render

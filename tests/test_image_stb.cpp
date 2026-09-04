@@ -6,7 +6,6 @@
 #include <string>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::Image;
@@ -21,7 +20,7 @@ AURORA_TEST() {
 
     // 1) 无头渲染生成合法 PNG。
     {
-        auto root = Node{ Text{ "png" } };
+        auto root = Node{Text{"png"}};
         auto rp = render_to_png(root, 48, 24, png_path.c_str());
         AURORA_TEST_CHECK(rp.ok());
     }
@@ -67,7 +66,7 @@ AURORA_TEST() {
         }
         auto bad = Image::load(path);
         AURORA_TEST_CHECK(!bad.ok());
-        AURORA_TEST_CHECK(bad.error().code == "io-image-decode-failed"); // 文件存在但内容损坏 → stb 解码失败
+        AURORA_TEST_CHECK(bad.error().code == "io-image-decode-failed");  // 文件存在但内容损坏 → stb 解码失败
         std::remove(path.c_str());
     }
 

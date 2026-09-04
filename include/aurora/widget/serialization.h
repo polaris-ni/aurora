@@ -30,9 +30,9 @@ namespace serialization {
 
 /// @brief 单个 JSON Patch 操作（"replace" / "add" / "remove"），path 为 JSON pointer。
 struct JsonPatchOp {
-    std::string op;   ///< "replace" | "add" | "remove"
-    std::string path; ///< JSON pointer，如 "/children/0/props/show"
-    Json value;       ///< 操作值（remove 时为空）
+    std::string op;  ///< "replace" | "add" | "remove"
+    std::string path;  ///< JSON pointer，如 "/children/0/props/show"
+    Json value;  ///< 操作值（remove 时为空）
 };
 
 /// @brief 把 widget 子树序列化为 JSON 结构快照。
@@ -49,7 +49,7 @@ class WidgetRegistry {
         return reg;
     }
 
-    auto register_factory(const std::string &type, WidgetFactory fn) -> void { m_factories[type] = std::move(fn); }
+    auto register_factory(const std::string &type, WidgetFactory fn) -> void { factories_[type] = std::move(fn); }
 
     [[nodiscard]] auto make(const std::string &type, const Json &props) const -> Result<std::shared_ptr<Widget>>;
 
@@ -57,7 +57,7 @@ class WidgetRegistry {
     [[nodiscard]] auto list_types() const -> std::vector<std::string>;
 
   private:
-    std::map<std::string, WidgetFactory> m_factories;
+    std::map<std::string, WidgetFactory> factories_;
 };
 
 /// @brief 注册核心 widget 工厂（Text/Button/Column/Row）。幂等，可重复调用。
@@ -84,7 +84,7 @@ auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void;
 /// Delegates to to_json(w) then yaml.h's to_yaml(Json).
 [[nodiscard]] auto to_yaml(const Widget &w) -> std::string;
 
-} // namespace serialization
+}  // namespace serialization
 
 /// @brief 列出所有已注册组件类型名（反射，specification/08-tooling.md §2.3）。
 [[nodiscard]] auto list_all_components() -> std::vector<std::string>;
@@ -98,4 +98,4 @@ auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void;
 /// @brief 返回所有已注册组件的完整 schema（含 describe 元数据）。
 [[nodiscard]] auto list_all_schemas() -> std::vector<Json>;
 
-} // namespace aurora
+}  // namespace aurora

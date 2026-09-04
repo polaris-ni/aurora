@@ -39,10 +39,10 @@ auto MediaQuery::of(const BuildContext &ctx) -> const MediaQuery & {
         return *p;
     }
     // 无 Provider 注入：返回进程级默认实例（调用方应据此降级渲染/布局）。
-    static constexpr MediaQuery default_instance{};
-    return default_instance;
+    static constexpr MediaQuery DEFAULT_INSTANCE{};
+    return DEFAULT_INSTANCE;
 }
 
 auto media_query_of(const BuildContext &ctx) -> const MediaQuery * { return ctx.environment<MediaQuery>(); }
 
-} // namespace aurora
+}  // namespace aurora

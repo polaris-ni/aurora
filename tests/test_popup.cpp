@@ -5,7 +5,6 @@
 #include "aurora/widget/button.h"
 #include "aurora/widget/popup.h"
 #include "aurora/widget/text.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -25,11 +24,11 @@ namespace {
 
 auto make_text(const char *s) -> Node {
     auto t = Text();
-    t.content = LocalizedString{ s };
-    return Node(std::move(t));
+    t.content = LocalizedString{s};
+    return Node{std::move(t)};
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     // ---- 1. Popup 初始关闭，常规流零尺寸 ----
@@ -40,33 +39,33 @@ AURORA_TEST() {
         BuildContext ctx;
         popup->mount(ctx);
         Constraints c;
-        c.min = Size{ .width = 0.0f, .height = 0.0f };
-        c.max = Size{ .width = 640.0f, .height = 480.0f };
+        c.min = Size{.width = 0.0F, .height = 0.0F};
+        c.max = Size{.width = 640.0F, .height = 480.0F};
         const Size s = popup->layout(c, ctx);
-        AURORA_TEST_CHECK(s.width == 0.0f);
-        AURORA_TEST_CHECK(s.height == 0.0f);
+        AURORA_TEST_CHECK(s.width == 0.0F);
+        AURORA_TEST_CHECK(s.height == 0.0F);
     }
 
     // ---- 2. open_at 打开并布局内容 ----
     {
         auto popup = std::make_shared<Popup>(make_text("hello popup"));
-        popup->open_at(Point{ .x = 100.0f, .y = 50.0f });
+        popup->open_at(Point{.x = 100.0F, .y = 50.0F});
         AURORA_TEST_CHECK(popup->is_open());
-        AURORA_TEST_CHECK(popup->anchor().x == 100.0f);
-        AURORA_TEST_CHECK(popup->anchor().y == 50.0f);
+        AURORA_TEST_CHECK(popup->anchor().x == 100.0F);
+        AURORA_TEST_CHECK(popup->anchor().y == 50.0F);
 
         BuildContext ctx;
         popup->mount(ctx);
         Constraints c;
-        c.min = Size{ .width = 0.0f, .height = 0.0f };
-        c.max = Size{ .width = 640.0f, .height = 480.0f };
+        c.min = Size{.width = 0.0F, .height = 0.0F};
+        c.max = Size{.width = 640.0F, .height = 480.0F};
         popup->layout(c, ctx);
 
         // 内容盒有实际尺寸
         const Rect cb = popup->content_bounds();
-        AURORA_TEST_CHECK(cb.origin.x == 100.0f);
-        AURORA_TEST_CHECK(cb.size.width > 0.0f);
-        AURORA_TEST_CHECK(cb.size.height > 0.0f);
+        AURORA_TEST_CHECK(cb.origin.x == 100.0F);
+        AURORA_TEST_CHECK(cb.size.width > 0.0F);
+        AURORA_TEST_CHECK(cb.size.height > 0.0F);
     }
 
     // ---- 3. close 触发回调 ----
@@ -75,7 +74,7 @@ AURORA_TEST() {
         int closed = 0;
         popup->set_on_close([&closed]() -> void { ++closed; });
 
-        popup->open_at(Point{ .x = 0.0f, .y = 0.0f });
+        popup->open_at(Point{.x = 0.0F, .y = 0.0F});
         popup->close();
         AURORA_TEST_CHECK(closed == 1);
         AURORA_TEST_CHECK(!popup->is_open());
@@ -88,23 +87,23 @@ AURORA_TEST() {
     // ---- 4. handle_outside_click：外部点击关闭 ----
     {
         auto popup = std::make_shared<Popup>(make_text("dismiss me"));
-        popup->open_at(Point{ .x = 100.0f, .y = 100.0f });
+        popup->open_at(Point{.x = 100.0F, .y = 100.0F});
 
         BuildContext ctx;
         popup->mount(ctx);
         Constraints c;
-        c.min = Size{ .width = 0.0f, .height = 0.0f };
-        c.max = Size{ .width = 640.0f, .height = 480.0f };
+        c.min = Size{.width = 0.0F, .height = 0.0F};
+        c.max = Size{.width = 640.0F, .height = 480.0F};
         popup->layout(c, ctx);
 
         // 点击内容内部：不关闭
         const Rect cb = popup->content_bounds();
-        const Point inside{ .x = cb.origin.x + 1.0f, .y = cb.origin.y + 1.0f };
+        const Point inside{.x = cb.origin.x + 1.0F, .y = cb.origin.y + 1.0F};
         AURORA_TEST_CHECK(!popup->handle_outside_click(inside));
         AURORA_TEST_CHECK(popup->is_open());
 
         // 点击外部：关闭
-        AURORA_TEST_CHECK(popup->handle_outside_click(Point{ 500.0f, 400.0f }));
+        AURORA_TEST_CHECK(popup->handle_outside_click(Point{500.0F, 400.0F}));
         AURORA_TEST_CHECK(!popup->is_open());
     }
 
@@ -112,16 +111,16 @@ AURORA_TEST() {
     {
         auto popup = std::make_shared<Popup>(make_text("sticky"));
         popup->set_dismiss_on_outside_click(false);
-        popup->open_at(Point{ .x = 10.0f, .y = 10.0f });
+        popup->open_at(Point{.x = 10.0F, .y = 10.0F});
 
         BuildContext ctx;
         popup->mount(ctx);
         Constraints c;
-        c.min = Size{ .width = 0.0f, .height = 0.0f };
-        c.max = Size{ .width = 640.0f, .height = 480.0f };
+        c.min = Size{.width = 0.0F, .height = 0.0F};
+        c.max = Size{.width = 640.0F, .height = 480.0F};
         popup->layout(c, ctx);
 
-        AURORA_TEST_CHECK(!popup->handle_outside_click(Point{ 600.0f, 400.0f }));
+        AURORA_TEST_CHECK(!popup->handle_outside_click(Point{600.0F, 400.0F}));
         AURORA_TEST_CHECK(popup->is_open());
     }
 
@@ -131,7 +130,7 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(host->overlay_count() == 0);
 
         auto popup = Popup(make_text("overlay 1"));
-        popup.open_at(Point{ .x = 50.0f, .y = 50.0f });
+        popup.open_at(Point{.x = 50.0F, .y = 50.0F});
         const std::size_t idx = host->add_overlay(Node(std::move(popup)));
         AURORA_TEST_CHECK(idx == 1);
         AURORA_TEST_CHECK(host->overlay_count() == 1);
@@ -149,46 +148,45 @@ AURORA_TEST() {
         auto host = std::make_shared<OverlayHost>(make_text("base"));
 
         auto popup = Popup(make_text("floating"));
-        popup.open_at(Point{ .x = 200.0f, .y = 100.0f });
+        popup.open_at(Point{.x = 200.0F, .y = 100.0F});
         host->add_overlay(Node(std::move(popup)));
 
         BuildContext ctx;
         host->mount(ctx);
         Constraints c;
-        c.min = Size{ .width = 0.0f, .height = 0.0f };
-        c.max = Size{ .width = 640.0f, .height = 480.0f };
+        c.min = Size{.width = 0.0F, .height = 0.0F};
+        c.max = Size{.width = 640.0F, .height = 480.0F};
         const Size s = host->layout(c, ctx);
-        AURORA_TEST_CHECK(s.width == 640.0f);
-        AURORA_TEST_CHECK(s.height == 480.0f);
+        AURORA_TEST_CHECK(s.width == 640.0F);
+        AURORA_TEST_CHECK(s.height == 480.0F);
 
         // 外部点击关闭浮层
-        AURORA_TEST_CHECK(host->handle_outside_click(Point{ 600.0f, 400.0f }));
+        AURORA_TEST_CHECK(host->handle_outside_click(Point{600.0F, 400.0F}));
         // 再次点击无浮层可关
-        AURORA_TEST_CHECK(!host->handle_outside_click(Point{ 600.0f, 400.0f }));
+        AURORA_TEST_CHECK(!host->handle_outside_click(Point{600.0F, 400.0F}));
     }
 
     // ---- 8. Popup 命中测试（打开时命中内容按钮）----
     {
         int clicked = 0;
-        auto btn = Button(ButtonProps{ .label = "hit me" });
+        auto btn = Button(ButtonProps{.label = "hit me"});
         btn.set_on_click([&clicked]() -> void { ++clicked; });
 
         auto popup = std::make_shared<Popup>(Node(std::move(btn)));
-        popup->open_at(Point{ .x = 100.0f, .y = 100.0f });
+        popup->open_at(Point{.x = 100.0F, .y = 100.0F});
 
         BuildContext ctx;
         popup->mount(ctx);
         Constraints c;
-        c.min = Size{ .width = 0.0f, .height = 0.0f };
-        c.max = Size{ .width = 640.0f, .height = 480.0f };
+        c.min = Size{.width = 0.0F, .height = 0.0F};
+        c.max = Size{.width = 640.0F, .height = 480.0F};
         popup->layout(c, ctx);
 
         // Popup 布局盒在原点（零尺寸），命中需将全局坐标映射到内容
-        constexpr Rect popup_bounds{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                                     .size = Size{ .width = 0.0f, .height = 0.0f } };
+        constexpr Rect popup_bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 0.0F, .height = 0.0F}};
         const Rect content = popup->content_bounds();
-        const Point hit_global{ .x = content.origin.x + (content.size.width / 2.0f),
-                                .y = content.origin.y + (content.size.height / 2.0f) };
+        const Point hit_global{.x = content.origin.x + (content.size.width / 2.0F),
+                               .y = content.origin.y + (content.size.height / 2.0F)};
         // local == global（popup 布局盒原点在 0,0）
         aurora::Widget *hit = popup->hit_test(hit_global, popup_bounds, ctx);
         AURORA_TEST_CHECK(hit != nullptr);
@@ -202,20 +200,28 @@ AURORA_TEST() {
     // ---- 9. 序列化往返 ----
     {
         auto popup = std::make_shared<Popup>(make_text("ser"));
-        popup->open_at(Point{ .x = 30.0f, .y = 40.0f });
+        popup->open_at(Point{.x = 30.0F, .y = 40.0F});
         popup->set_dismiss_on_outside_click(false);
 
         aurora::Json props;
         popup->serialize_props(props);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["open"].get<bool>());
-        AURORA_TEST_CHECK(props["anchor_x"].get<float>() == 30.0f);
-        AURORA_TEST_CHECK(props["anchor_y"].get<float>() == 40.0f);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(props["anchor_x"].get<float>() == 30.0F);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(props["anchor_y"].get<float>() == 40.0F);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(!props["dismiss_on_outside_click"].get<bool>());
 
         auto popup2 = std::make_shared<Popup>(make_text("de"));
         popup2->deserialize_props(props);
         AURORA_TEST_CHECK(popup2->is_open());
-        AURORA_TEST_CHECK(popup2->anchor().x == 30.0f);
+        AURORA_TEST_CHECK(popup2->anchor().x == 30.0F);
         AURORA_TEST_CHECK(!popup2->dismiss_on_outside_click());
     }
 }

@@ -1,11 +1,10 @@
-// test_dialog.cpp — 对话框控件测试（v0.10.0-beta）。
+// test_dialog.cpp — 对话框控件测试。
 
 #include <string>
 
 #include "aurora/aurora.h"
 #include "aurora/render/offscreen.h"
 #include "aurora/widget/dialog.h"
-
 #include "test_harness.h"
 
 using aurora::alert;
@@ -51,7 +50,7 @@ static void test_dialog_content() {
 
 static void test_alert_factory() {
     Node n = alert("Error", "Something went wrong", []() -> void {});
-    AURORA_TEST_CHECK(static_cast<bool>(n)); // 非空节点
+    AURORA_TEST_CHECK(static_cast<bool>(n));  // 非空节点
     AURORA_TEST_CHECK(std::string(n.widget().type_name()) == "Column");
 }
 
@@ -72,10 +71,16 @@ static void test_dialog_layout() {
 
     Node root(std::move(dlg));
     Json snap = render_to_logical_snapshot(root, 800, 600);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["type"] == "Dialog");
     // 对话框应占满视口
-    AURORA_TEST_CHECK(snap["box"]["w"].get<float>() == 800.0f);
-    AURORA_TEST_CHECK(snap["box"]["h"].get<float>() == 600.0f);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK(snap["box"]["w"].get<float>() == 800.0F);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK(snap["box"]["h"].get<float>() == 600.0F);
 }
 
 // ---------- Dialog 关闭时不渲染 ----------
@@ -86,8 +91,12 @@ static void test_dialog_closed_invisible() {
     Node root(std::move(dlg));
     Json snap = render_to_logical_snapshot(root, 800, 600);
     // 关闭时尺寸为 0
-    AURORA_TEST_CHECK(snap["box"]["w"].get<float>() == 0.0f);
-    AURORA_TEST_CHECK(snap["box"]["h"].get<float>() == 0.0f);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK(snap["box"]["w"].get<float>() == 0.0F);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK(snap["box"]["h"].get<float>() == 0.0F);
 }
 
 AURORA_TEST() {

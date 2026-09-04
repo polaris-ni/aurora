@@ -16,7 +16,7 @@ namespace aurora::internal {
 // UTF-16（wchar_t）宽串 → UTF-8 字节串。空指针/空串/失败返回空 string。
 [[nodiscard]] auto wstr_to_utf8(const wchar_t *ws) -> std::string;
 
-} // namespace aurora::internal
+}  // namespace aurora::internal
 #endif
 
 // 跨平台纯逻辑：Unicode 码点 ↔ UTF-8（1~4 字节，完整 Unicode 含辅助平面）。
@@ -37,4 +37,4 @@ namespace aurora {
 // 取 [start, start+count) 区间的码点子串（越界自动截断）。
 [[nodiscard]] auto utf8_cp_slice(const std::string &s, std::size_t start, std::size_t count) -> std::string;
 
-} // namespace aurora
+}  // namespace aurora

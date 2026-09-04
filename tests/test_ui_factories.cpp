@@ -13,7 +13,6 @@
 #include "aurora/widget/slider.h"
 #include "aurora/widget/text.h"
 #include "aurora/widget/text_input.h"
-
 #include "test_harness.h"
 
 using aurora::Button;
@@ -68,14 +67,14 @@ static void test_input_factory() {
 
 static void test_checkbox_slider_factories() {
     Column root;
-    Checkbox *const c = checkbox(root, Reactive{ false });
+    Checkbox *const c = checkbox(root, Reactive{false});
     AURORA_TEST_CHECK(c != nullptr);
     AURORA_TEST_CHECK_MSG(std::string(c->type_name()) == "Checkbox", "checkbox returns Checkbox*");
     // bool 初值重载
     Checkbox const *c2 = checkbox(root, true);
     AURORA_TEST_CHECK(c2 != nullptr);
 
-    Slider *const s = slider(root, Reactive{ 0.5 });
+    Slider *const s = slider(root, Reactive{0.5});
     AURORA_TEST_CHECK(s != nullptr);
     AURORA_TEST_CHECK_MSG(std::string(s->type_name()) == "Slider", "slider returns Slider*");
     Slider const *s2 = slider(root, 0.25);
@@ -84,7 +83,7 @@ static void test_checkbox_slider_factories() {
 
 static void test_lazy_list_factory() {
     Column root;
-    auto const *ll = lazy_list(root, 1000, [](int i) -> Node { return Node{ Text(std::to_string(i)) }; }, 24.0f);
+    auto const *ll = lazy_list(root, 1000, [](int i) -> Node { return Node{Text(std::to_string(i))}; }, 24.0F);
     AURORA_TEST_CHECK(ll != nullptr);
     AURORA_TEST_CHECK_MSG(std::string(ll->type_name()) == "LazyList", "lazy_list returns LazyList*");
 }
@@ -113,7 +112,7 @@ static void test_container_factories() {
 }
 
 static void test_node_id() {
-    Node n{ Text{ "X" } };
+    Node n{Text{"X"}};
     AURORA_TEST_CHECK_MSG(n.id().empty(), "default id empty");
     n.set_id("lbl");
     AURORA_TEST_CHECK_MSG(n.id() == "lbl", "set_id / id round-trip");

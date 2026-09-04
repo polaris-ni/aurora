@@ -7,12 +7,11 @@
 //   MenuItem::separator_item()        -> test_separator_item
 //   MenuItem::is_submenu()/children   -> test_submenu
 //   checkable/checked/enabled 字段    -> test_state_flags
-//   shortcut_text/icon                -> test_shortcut_and_icon
+//   shortcut_text/icon_                -> test_shortcut_and_icon
 
 #include <string>
 
 #include "aurora/app/menu.h"
-
 #include "test_harness.h"
 
 using aurora::MenuItem;
@@ -35,7 +34,7 @@ void test_default_fields() {
 
 void test_explicit_ctor() {
     bool clicked = false;
-    const MenuItem item{ "打开", [&clicked] -> void { clicked = true; } };
+    const MenuItem item{"打开", [&clicked] -> void { clicked = true; }};
     AURORA_TEST_CHECK_MSG(item.label == "打开", "label forwarded");
     AURORA_TEST_CHECK(item.enabled);
     item.on_click();
@@ -44,7 +43,7 @@ void test_explicit_ctor() {
 
 void test_on_click_invoked() {
     int count = 0;
-    const MenuItem item{ "计数", [&count] -> void { ++count; } };
+    const MenuItem item{"计数", [&count] -> void { ++count; }};
     item.on_click();
     item.on_click();
     AURORA_TEST_CHECK_EQ(count, 2);
@@ -59,22 +58,26 @@ void test_separator_item() {
 }
 
 void test_submenu() {
-    MenuItem sub{ "子项" };
-    MenuItem parent{ "父项" };
+    MenuItem sub{"子项"};
+    MenuItem parent{"父项"};
     parent.children.push_back(sub);
     parent.children.push_back(MenuItem::separator_item());
     AURORA_TEST_CHECK(parent.is_submenu());
     AURORA_TEST_CHECK_EQ(parent.children.size(), static_cast<size_t>(2));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_FALSE(parent.children[0].is_submenu());
 
-    MenuItem nested{ "嵌套" };
+    MenuItem nested{"嵌套"};
     nested.children.emplace_back("更深");
     parent.children.push_back(nested);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(parent.children[2].is_submenu());
 }
 
 void test_state_flags() {
-    MenuItem item{ "勾选项" };
+    MenuItem item{"勾选项"};
     item.checkable = true;
     item.checked = true;
     item.enabled = false;
@@ -88,14 +91,14 @@ void test_state_flags() {
 }
 
 void test_shortcut_and_icon() {
-    MenuItem item{ "另存为", {} };
+    MenuItem item{"另存为", {}};
     item.shortcut_text = "Shift+Ctrl+S";
     AURORA_TEST_CHECK_MSG(item.shortcut_text == "Shift+Ctrl+S", "shortcut text kept");
     item.icon.clear();
     AURORA_TEST_CHECK(item.icon.empty());
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     test_default_fields();

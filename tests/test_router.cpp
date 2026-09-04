@@ -2,7 +2,6 @@
 #include <string>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::Column;
@@ -20,11 +19,11 @@ AURORA_TEST() {
     AURORA_TEST_CHECK(!r.has("home"));
 
     // 2) 登记 home 路由。
-    r.register_route("home", []() -> Route { return Route{ Node{ Text{ "home" } } }; });
+    r.register_route("home", []() -> Route { return Route{Node{Text{"home"}}}; });
     AURORA_TEST_CHECK(r.has("home"));
 
     // 3) 登记第二个路由（settings）。
-    r.register_route("settings", []() -> Route { return Route{ Node{ Column{ Node{ Text{ "s" } } } } }; });
+    r.register_route("settings", []() -> Route { return Route{Node{Column{Node{Text{"s"}}}}}; });
     AURORA_TEST_CHECK(r.has("settings"));
 
     // 4) 未登记名称仍为 false。

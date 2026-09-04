@@ -27,13 +27,13 @@ namespace aurora {
  */
 class ThemeScope : public Provider<Theme> {
   public:
-    using Provider<Theme>::Provider; ///< 复用 Provider<Theme>(Theme, Node/Widget) 构造
+    using Provider<Theme>::Provider;  ///< 复用 Provider<Theme>(Theme, Node/Widget) 构造
 
     /// @brief 运行时换肤：用共享 `State<Theme>` 注入，主题变化自动重渲染子树。
     explicit ThemeScope(std::shared_ptr<State<Theme>> theme, Node child)
         : Provider<Theme>(std::move(theme), std::move(child)) {}
 
-    template<typename W>
+    template <typename W>
         requires std::derived_from<W, Widget>
     explicit ThemeScope(std::shared_ptr<State<Theme>> theme, W &&child)
         : Provider(std::move(theme), std::forward<W>(child)) {}
@@ -55,4 +55,4 @@ class ThemeScope : public Provider<Theme> {
     return t != nullptr ? *t : Theme::light();
 }
 
-} // namespace aurora
+}  // namespace aurora

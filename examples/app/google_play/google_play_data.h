@@ -12,7 +12,6 @@
 #include "aurora/core/color.h"
 #include "aurora/core/image.h"
 #include "aurora/core/types.h"
-
 #include "nlohmann/json.hpp"
 
 namespace gp {
@@ -24,7 +23,7 @@ using nlohmann::json;
 /// @brief 单条用户评价。
 struct Review {
     std::string user;
-    float rating = 0.0f;
+    float rating = 0.0F;
     std::string text;
     std::string date;
 };
@@ -34,20 +33,20 @@ struct AppItem {
     std::string id;
     std::string name;
     std::string developer;
-    std::string category; ///< 顶层类目：Apps / Games / Movies / Books
+    std::string category;  ///< 顶层类目：Apps / Games / Movies / Books
     std::string subcategory;
-    float rating = 0.0f; ///< 0..5
+    float rating = 0.0F;  ///< 0..5
     int rating_count = 0;
-    std::string downloads; ///< 如 "1M+"
-    float size_mb = 0.0f;
+    std::string downloads;  ///< 如 "1M+"
+    float size_mb = 0.0F;
     std::string version;
     std::string updated;
-    Color color_a{ 0x1A, 0x73, 0xE8, 0xFF };
-    Color color_b{ 0x34, 0xA8, 0x53, 0xFF };
-    Image icon; ///< 程序化合成图标
+    Color color_a{0x1A, 0x73, 0xE8, 0xFF};
+    Color color_b{0x34, 0xA8, 0x53, 0xFF};
+    Image icon;  ///< 程序化合成图标
     std::vector<Image> screenshots;
     std::string description;
-    bool is_app = true; ///< true=应用/游戏，false=影音/图书
+    bool is_app = true;  ///< true=应用/游戏，false=影音/图书
 };
 
 /// @brief 数据请求（被 hook 消费，模拟 API endpoint + 查询参数）。
@@ -62,13 +61,13 @@ inline auto make_gradient(int w, int h, Color a, Color b, uint32_t seed) -> Imag
     img.width = w;
     img.height = h;
     img.pixels.resize(static_cast<size_t>(w) * static_cast<size_t>(h) * 4, 0);
-    std::mt19937 rng((seed * 2654435761u) + 12345u);
+    const std::mt19937 rng((seed * 2654435761U) + 12345U);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             const float t = static_cast<float>(y) / static_cast<float>(std::max(1, h - 1));
-            const auto r = static_cast<uint8_t>(static_cast<float>(a.m_r) + (static_cast<float>(b.m_r - a.m_r) * t));
-            const auto g = static_cast<uint8_t>(static_cast<float>(a.m_g) + (static_cast<float>(b.m_g - a.m_g) * t));
-            const auto bl = static_cast<uint8_t>(static_cast<float>(a.m_b) + (static_cast<float>(b.m_b - a.m_b) * t));
+            const auto r = static_cast<uint8_t>(static_cast<float>(a.r) + (static_cast<float>(b.r - a.r) * t));
+            const auto g = static_cast<uint8_t>(static_cast<float>(a.g) + (static_cast<float>(b.g - a.g) * t));
+            const auto bl = static_cast<uint8_t>(static_cast<float>(a.b) + (static_cast<float>(b.b - a.b) * t));
             const size_t idx = ((static_cast<size_t>(y) * static_cast<size_t>(w)) + x) * 4;
             img.pixels[idx] = r;
             img.pixels[idx + 1] = g;
@@ -85,10 +84,10 @@ inline auto set_px(Image &img, int x, int y, Color c) -> void {
         return;
     }
     const size_t idx = ((static_cast<size_t>(y) * img.width) + x) * 4;
-    img.pixels[idx] = c.m_r;
-    img.pixels[idx + 1] = c.m_g;
-    img.pixels[idx + 2] = c.m_b;
-    img.pixels[idx + 3] = c.m_a;
+    img.pixels[idx] = c.r;
+    img.pixels[idx + 1] = c.g;
+    img.pixels[idx + 2] = c.b;
+    img.pixels[idx + 3] = c.a;
 }
 
 /// @brief 把颜色 c（自带 alpha）以覆盖度 a(0..1) 合成到像素上，得到抗锯齿边缘。
@@ -96,27 +95,27 @@ inline auto blend_px(Image &img, int x, int y, Color c, float a) -> void {
     if (x < 0 || y < 0 || x >= img.width || y >= img.height) {
         return;
     }
-    a *= static_cast<float>(c.m_a) / 255.0f; // 叠加 motif 自身透明度
-    if (a >= 1.0f) {
-        set_px(img, x, y, Color{ c.m_r, c.m_g, c.m_b, 0xFF });
+    a *= static_cast<float>(c.a) / 255.0F;  // 叠加 motif 自身透明度
+    if (a >= 1.0F) {
+        set_px(img, x, y, Color{c.r, c.g, c.b, 0xFF});
         return;
     }
-    if (a <= 0.0f) {
+    if (a <= 0.0F) {
         return;
     }
     const size_t idx = ((static_cast<size_t>(y) * img.width) + x) * 4;
     const float sa = a;
-    const float da = static_cast<float>(img.pixels[idx + 3]) / 255.0f;
-    const float out_a = sa + (da * (1.0f - sa));
-    if (out_a > 0.0f) {
+    const float da = static_cast<float>(img.pixels[idx + 3]) / 255.0F;
+    const float out_a = sa + (da * (1.0F - sa));
+    if (out_a > 0.0F) {
         img.pixels[idx] = static_cast<uint8_t>(
-            ((static_cast<float>(c.m_r) * sa) + (static_cast<float>(img.pixels[idx]) * da * (1.0f - sa))) / out_a);
+            ((static_cast<float>(c.r) * sa) + (static_cast<float>(img.pixels[idx]) * da * (1.0F - sa))) / out_a);
         img.pixels[idx + 1] = static_cast<uint8_t>(
-            ((static_cast<float>(c.m_g) * sa) + (static_cast<float>(img.pixels[idx + 1]) * da * (1.0f - sa))) / out_a);
+            ((static_cast<float>(c.g) * sa) + (static_cast<float>(img.pixels[idx + 1]) * da * (1.0F - sa))) / out_a);
         img.pixels[idx + 2] = static_cast<uint8_t>(
-            ((static_cast<float>(c.m_b) * sa) + (static_cast<float>(img.pixels[idx + 2]) * da * (1.0f - sa))) / out_a);
+            ((static_cast<float>(c.b) * sa) + (static_cast<float>(img.pixels[idx + 2]) * da * (1.0F - sa))) / out_a);
     }
-    img.pixels[idx + 3] = static_cast<uint8_t>(out_a * 255.0f);
+    img.pixels[idx + 3] = static_cast<uint8_t>(out_a * 255.0F);
 }
 
 /// @brief 抗锯齿实心圆：基于距离场 + 像素覆盖度（消除边缘毛刺）。
@@ -125,11 +124,11 @@ inline auto fill_circle(Image &img, int cx, int cy, int rad, Color c) -> void {
     const int m = rad + 1;
     for (int y = cy - m; y <= cy + m; ++y) {
         for (int x = cx - m; x <= cx + m; ++x) {
-            const float dx = (static_cast<float>(x) + 0.5f) - static_cast<float>(cx);
-            const float dy = (static_cast<float>(y) + 0.5f) - static_cast<float>(cy);
+            const float dx = (static_cast<float>(x) + 0.5F) - static_cast<float>(cx);
+            const float dy = (static_cast<float>(y) + 0.5F) - static_cast<float>(cy);
             const float d = std::sqrt((dx * dx) + (dy * dy));
-            const float cov = std::clamp(r - d + 0.5f, 0.0f, 1.0f);
-            if (cov > 0.0f) {
+            const float cov = std::clamp(r - d + 0.5F, 0.0F, 1.0F);
+            if (cov > 0.0F) {
                 blend_px(img, x, y, c, cov);
             }
         }
@@ -138,23 +137,23 @@ inline auto fill_circle(Image &img, int cx, int cy, int rad, Color c) -> void {
 
 /// @brief 抗锯齿圆角矩形：基于有符号距离场（SDF）+ 像素覆盖度。
 inline auto fill_rounded_rect(Image &img, int x0, int y0, int x1, int y1, int r, Color c) -> void {
-    const float cx = static_cast<float>(x0 + x1) * 0.5f;
-    const float cy = static_cast<float>(y0 + y1) * 0.5f;
-    const float hx = static_cast<float>(x1 - x0) * 0.5f;
-    const float hy = static_cast<float>(y1 - y0) * 0.5f;
+    const float cx = static_cast<float>(x0 + x1) * 0.5F;
+    const float cy = static_cast<float>(y0 + y1) * 0.5F;
+    const float hx = static_cast<float>(x1 - x0) * 0.5F;
+    const float hy = static_cast<float>(y1 - y0) * 0.5F;
     const auto rad = static_cast<float>(r);
     const int pad = r + 2;
     for (int y = y0 - pad; y <= y1 + pad; ++y) {
         for (int x = x0 - pad; x <= x1 + pad; ++x) {
-            const float px = static_cast<float>(x) + 0.5f;
-            const float py = static_cast<float>(y) + 0.5f;
+            const float px = static_cast<float>(x) + 0.5F;
+            const float py = static_cast<float>(y) + 0.5F;
             const float dx = std::fabs(px - cx) - (hx - rad);
             const float dy = std::fabs(py - cy) - (hy - rad);
-            const float ox = std::max(dx, 0.0f);
-            const float oy = std::max(dy, 0.0f);
-            const float sd = std::sqrt((ox * ox) + (oy * oy)) - rad; // <0 在内部
-            const float cov = std::clamp(0.5f - sd, 0.0f, 1.0f);
-            if (cov > 0.0f) {
+            const float ox = std::max(dx, 0.0F);
+            const float oy = std::max(dy, 0.0F);
+            const float sd = std::sqrt((ox * ox) + (oy * oy)) - rad;  // <0 在内部
+            const float cov = std::clamp(0.5F - sd, 0.0F, 1.0F);
+            if (cov > 0.0F) {
                 blend_px(img, x, y, c, cov);
             }
         }
@@ -169,7 +168,7 @@ inline auto fill_triangle(Image &img, float ax, float ay, float bx, float by, fl
     const float e1y = dy - by;
     const float e2x = ax - dx;
     const float e2y = ay - dy;
-    const float sign = ((e0x * e2y) - (e0y * e2x)) >= 0.0f ? 1.0f : -1.0f;
+    const float sign = ((e0x * e2y) - (e0y * e2x)) >= 0.0F ? 1.0F : -1.0F;
     const float minx = std::fmin(std::fmin(ax, bx), dx);
     const float maxx = std::fmax(std::fmax(ax, bx), dx);
     const float miny = std::fmin(std::fmin(ay, by), dy);
@@ -179,13 +178,13 @@ inline auto fill_triangle(Image &img, float ax, float ay, float bx, float by, fl
     const int y0 = static_cast<int>(std::floor(miny)) - 1;
     const int y1 = static_cast<int>(std::ceil(maxy)) + 1;
     const auto proj = [](float vd, float ed) -> float {
-        const float t = ed > 0.0f ? vd / ed : 0.0f;
-        return std::clamp(t, 0.0f, 1.0f);
+        const float t = ed > 0.0F ? vd / ed : 0.0F;
+        return std::clamp(t, 0.0F, 1.0F);
     };
     for (int y = y0; y <= y1; ++y) {
         for (int x = x0; x <= x1; ++x) {
-            const float px = static_cast<float>(x) + 0.5f;
-            const float py = static_cast<float>(y) + 0.5f;
+            const float px = static_cast<float>(x) + 0.5F;
+            const float py = static_cast<float>(y) + 0.5F;
             const float v0x = px - ax;
             const float v0y = py - ay;
             const float v1x = px - bx;
@@ -209,9 +208,9 @@ inline auto fill_triangle(Image &img, float ax, float ay, float bx, float by, fl
             const float w2 = sign * ((v2x * e2y) - (v2y * e2x));
             const float md = std::fmin(std::fmin(d0, d1), d2);
             const float mw = std::fmin(std::fmin(w0, w1), w2);
-            const float sd = -std::sqrt(md) * (mw >= 0.0f ? 1.0f : -1.0f);
-            const float cov = std::clamp(0.5f - sd, 0.0f, 1.0f);
-            if (cov > 0.0f) {
+            const float sd = -std::sqrt(md) * (mw >= 0.0F ? 1.0F : -1.0F);
+            const float cov = std::clamp(0.5F - sd, 0.0F, 1.0F);
+            if (cov > 0.0F) {
                 blend_px(img, x, y, c, cov);
             }
         }
@@ -226,31 +225,31 @@ inline auto fill_triangle(Image &img, float ax, float ay, float bx, float by, fl
 inline auto make_app_icon(Color a, Color b, int motif) -> Image {
     constexpr int side = 128;
     Image img = make_gradient(side, side, a, b, static_cast<uint32_t>(motif + 1));
-    constexpr Color white{ 0xFF, 0xFF, 0xFF, 0xD9 };
+    constexpr Color white{0xFF, 0xFF, 0xFF, 0xD9};
     constexpr int cx = side / 2;
-    constexpr int cy = side / 2; // 居中（96,96）
+    constexpr int cy = side / 2;  // 居中（96,96）
     switch (motif % 4) {
-    case 0: // 圆
-        fill_circle(img, cx, cy, 34, white);
-        break;
-    case 1: { // 三角/菱形（播放键），抗锯齿
-        fill_triangle(img, static_cast<float>(cx), 64.0f, static_cast<float>(cx - 30), 96.0f,
-                      static_cast<float>(cx + 30), 96.0f, white);
-        fill_triangle(img, static_cast<float>(cx - 30), 96.0f, static_cast<float>(cx + 30), 96.0f,
-                      static_cast<float>(cx), 128.0f, white);
-        break;
-    }
-    case 2: { // 聊天气泡：针对 "Chat" 等应用，避免像白方块
-        // 气泡主体：横向圆角矩形（已抗锯齿）
-        fill_rounded_rect(img, 68, 72, 124, 108, 12, white);
-        // 左下小尾巴（抗锯齿三角形）
-        fill_triangle(img, 80.0f, 108.0f, 96.0f, 108.0f, 68.0f, 124.0f, white);
-        break;
-    }
-    default: // 双圆
-        fill_circle(img, cx - 22, cy, 22, white);
-        fill_circle(img, cx + 22, cy, 22, white);
-        break;
+        case 0:  // 圆
+            fill_circle(img, cx, cy, 34, white);
+            break;
+        case 1: {  // 三角/菱形（播放键），抗锯齿
+            fill_triangle(img, static_cast<float>(cx), 64.0F, static_cast<float>(cx - 30), 96.0F,
+                          static_cast<float>(cx + 30), 96.0F, white);
+            fill_triangle(img, static_cast<float>(cx - 30), 96.0F, static_cast<float>(cx + 30), 96.0F,
+                          static_cast<float>(cx), 128.0F, white);
+            break;
+        }
+        case 2: {  // 聊天气泡：针对 "Chat" 等应用，避免像白方块
+            // 气泡主体：横向圆角矩形（已抗锯齿）
+            fill_rounded_rect(img, 68, 72, 124, 108, 12, white);
+            // 左下小尾巴（抗锯齿三角形）
+            fill_triangle(img, 80.0F, 108.0F, 96.0F, 108.0F, 68.0F, 124.0F, white);
+            break;
+        }
+        default:  // 双圆
+            fill_circle(img, cx - 22, cy, 22, white);
+            fill_circle(img, cx + 22, cy, 22, white);
+            break;
     }
     return img;
 }
@@ -258,8 +257,8 @@ inline auto make_app_icon(Color a, Color b, int motif) -> Image {
 /// @brief 合成截图预览（渐变 + 简单形状装饰）。
 inline auto make_screenshot(Color a, Color b, int idx) -> Image {
     Image img = make_gradient(280, 160, a, b, static_cast<uint32_t>((idx * 31) + 7));
-    constexpr Color white{ 0xFF, 0xFF, 0xFF, 0x55 };
-    constexpr Color dark{ 0x20, 0x21, 0x24, 0x66 };
+    constexpr Color white{0xFF, 0xFF, 0xFF, 0x55};
+    constexpr Color dark{0x20, 0x21, 0x24, 0x66};
     // 顶部栏
     for (int y = 0; y < 18; ++y) {
         for (int x = 0; x < img.width; ++x) {
@@ -279,7 +278,7 @@ inline auto make_screenshot(Color a, Color b, int idx) -> Image {
 /// @brief 合成 Featured 横幅（宽幅渐变 + 留白）。
 inline auto make_banner(Color a, Color b, int idx) -> Image {
     Image img = make_gradient(460, 200, a, b, static_cast<uint32_t>((idx * 17) + 3));
-    constexpr Color white{ 0xFF, 0xFF, 0xFF, 0x33 };
+    constexpr Color white{0xFF, 0xFF, 0xFF, 0x33};
     for (int i = 0; i < 3; ++i) {
         fill_circle(img, 80 + (i * 150), 100 + ((i % 2) * 30), 30, white);
     }
@@ -292,54 +291,54 @@ using CatalogPtr = std::shared_ptr<const std::vector<AppItem>>;
 using DataHook = std::function<CatalogPtr(const DataRequest &)>;
 
 inline auto palette_of(int seed) -> std::pair<Color, Color> {
-    static const std::vector<std::pair<Color, Color>> pal = {
-        { { 0x1A, 0x73, 0xE8, 0xFF }, { 0x34, 0xA8, 0x53, 0xFF } }, // 蓝-绿
-        { { 0xEA, 0x43, 0x35, 0xFF }, { 0xFB, 0xBC, 0x04, 0xFF } }, // 红-黄
-        { { 0x42, 0x85, 0xF4, 0xFF }, { 0x1A, 0x73, 0xE8, 0xFF } }, // 蓝-蓝
-        { { 0x34, 0xA8, 0x53, 0xFF }, { 0xFB, 0xBC, 0x04, 0xFF } }, // 绿-黄
-        { { 0x9C, 0x27, 0xB0, 0xFF }, { 0xEA, 0x43, 0x35, 0xFF } }, // 紫-红
-        { { 0x00, 0x96, 0x88, 0xFF }, { 0x42, 0x85, 0xF4, 0xFF } }, // 青-蓝
-        { { 0xFB, 0xBC, 0x04, 0xFF }, { 0xEA, 0x43, 0x35, 0xFF } }, // 黄-红
-        { { 0x5F, 0x63, 0x68, 0xFF }, { 0x42, 0x85, 0xF4, 0xFF } }, // 灰-蓝
+    static const std::vector<std::pair<Color, Color>> PAL = {
+        {{0x1A, 0x73, 0xE8, 0xFF}, {0x34, 0xA8, 0x53, 0xFF}},  // 蓝-绿
+        {{0xEA, 0x43, 0x35, 0xFF}, {0xFB, 0xBC, 0x04, 0xFF}},  // 红-黄
+        {{0x42, 0x85, 0xF4, 0xFF}, {0x1A, 0x73, 0xE8, 0xFF}},  // 蓝-蓝
+        {{0x34, 0xA8, 0x53, 0xFF}, {0xFB, 0xBC, 0x04, 0xFF}},  // 绿-黄
+        {{0x9C, 0x27, 0xB0, 0xFF}, {0xEA, 0x43, 0x35, 0xFF}},  // 紫-红
+        {{0x00, 0x96, 0x88, 0xFF}, {0x42, 0x85, 0xF4, 0xFF}},  // 青-蓝
+        {{0xFB, 0xBC, 0x04, 0xFF}, {0xEA, 0x43, 0x35, 0xFF}},  // 黄-红
+        {{0x5F, 0x63, 0x68, 0xFF}, {0x42, 0x85, 0xF4, 0xFF}},  // 灰-蓝
     };
-    return pal[static_cast<size_t>(seed) % pal.size()];
+    return PAL[static_cast<size_t>(seed) % PAL.size()];
 }
 
 inline auto subcategories_of(const std::string &cat) -> std::vector<std::string> {
     if (cat == "apps") {
-        return { "Social", "Productivity", "Tools", "Photography", "Communication", "Finance" };
+        return {"Social", "Productivity", "Tools", "Photography", "Communication", "Finance"};
     }
     if (cat == "games") {
-        return { "Action", "Puzzle", "Strategy", "Casual", "Racing" };
+        return {"Action", "Puzzle", "Strategy", "Casual", "Racing"};
     }
     if (cat == "movies") {
-        return { "New releases", "Popular", "Top rated", "Comedy", "Action" };
+        return {"New releases", "Popular", "Top rated", "Comedy", "Action"};
     }
     if (cat == "books") {
-        return { "Novels", "Non-fiction", "Comics", "Textbooks", "Romance" };
+        return {"Novels", "Non-fiction", "Comics", "Textbooks", "Romance"};
     }
     return {};
 }
 
 inline auto default_local_catalog() -> CatalogPtr {
-    static const std::vector<std::pair<std::string, std::vector<std::string>>> name_parts = {
-        { "apps",
-          { "Chat", "Photo", "Note", "Maps", "Mail", "Clock", "Weather", "Wallet", "Scanner", "Browser", "Calendar",
-            "Music" } },
-        { "games", { "Quest", "Blast", "Puzzle", "Racer", "Empire", "Dash", "Heroes", "Galaxy", "Ninja", "Tower" } },
-        { "movies", { "Horizon", "Legacy", "Shadow", "Spark", "Voyage", "Echo", "Rally", "Storm" } },
-        { "books", { "Saga", "Chronicle", "Tales", "Manual", "Prose", "Atlas", "Verse", "Codex" } },
+    static const std::vector<std::pair<std::string, std::vector<std::string>>> NAME_PARTS = {
+        {"apps",
+         {"Chat", "Photo", "Note", "Maps", "Mail", "Clock", "Weather", "Wallet", "Scanner", "Browser", "Calendar",
+          "Music"}},
+        {"games", {"Quest", "Blast", "Puzzle", "Racer", "Empire", "Dash", "Heroes", "Galaxy", "Ninja", "Tower"}},
+        {"movies", {"Horizon", "Legacy", "Shadow", "Spark", "Voyage", "Echo", "Rally", "Storm"}},
+        {"books", {"Saga", "Chronicle", "Tales", "Manual", "Prose", "Atlas", "Verse", "Codex"}},
     };
-    static const std::vector<std::string> devs = { "Aurora Labs", "Nimbus", "Pixel Forge", "BlueStack",
-                                                   "Orbit Inc",   "Quasar", "Vertex",      "Lumen" };
+    static const std::vector<std::string> DEVS = {"Aurora Labs", "Nimbus", "Pixel Forge", "BlueStack",
+                                                  "Orbit Inc",   "Quasar", "Vertex",      "Lumen"};
 
     // NOLINTNEXTLINE(bugprone-random-generator-seed) 固定种子：demo 目录数据需确定性可复现
-    std::mt19937 rng(20260802u);
-    auto cat_list = std::vector<std::string>{ "apps", "games", "movies", "books" };
+    std::mt19937 rng(20260802U);
+    auto cat_list = std::vector<std::string>{"apps", "games", "movies", "books"};
     std::vector<AppItem> items;
     int n = 0;
     for (const auto &cat : cat_list) {
-        const auto &parts = name_parts[static_cast<size_t>(std::ranges::find(cat_list, cat) - cat_list.begin())].second;
+        const auto &parts = NAME_PARTS[static_cast<size_t>(std::ranges::find(cat_list, cat) - cat_list.begin())].second;
         const auto subs = subcategories_of(cat);
         constexpr int per_cat = 48;
         for (int i = 0; i < per_cat; ++i) {
@@ -347,16 +346,16 @@ inline auto default_local_catalog() -> CatalogPtr {
             const int part = static_cast<int>(rng() % parts.size());
             a.id = cat.substr(0, 1) + std::to_string(n);
             a.name = parts[part] + " " + std::to_string(1 + (i / parts.size()));
-            a.developer = devs[static_cast<size_t>(rng() % devs.size())];
+            a.developer = DEVS[static_cast<size_t>(rng() % DEVS.size())];
             a.category = cat;
             a.subcategory = subs[static_cast<size_t>(rng() % subs.size())];
-            a.rating = 3.4f + (static_cast<float>(rng() % 160) / 100.0f); // 3.4..5.0
+            a.rating = 3.4F + (static_cast<float>(rng() % 160) / 100.0F);  // 3.4..5.0
             a.rating_count = 100 + static_cast<int>(rng() % 90000);
             a.downloads = std::to_string(1 + (rng() % 500)) + "M+";
-            a.size_mb = 8.0f + static_cast<float>(rng() % 240);
+            a.size_mb = 8.0F + static_cast<float>(rng() % 240);
             a.version = "1." + std::to_string(rng() % 20) + "." + std::to_string(rng() % 10);
             a.updated = "2026-0" + std::to_string(1 + (rng() % 7)) + "-1" + std::to_string(1 + (rng() % 8));
-            auto pal = palette_of(static_cast<int>(rng()));
+            const auto pal = palette_of(static_cast<int>(rng()));
             a.color_a = pal.first;
             a.color_b = pal.second;
             a.icon = make_app_icon(pal.first, pal.second, static_cast<int>(rng()));
@@ -373,27 +372,27 @@ inline auto default_local_catalog() -> CatalogPtr {
 
 /// @brief 真实数据层：Repository 形态与真实 API 一致，仅数据源被 hook 替换（不联网）。
 class PlayRepository {
-    DataHook m_hook = [](const DataRequest &) -> CatalogPtr { return default_local_catalog(); };
-    mutable CatalogPtr m_catalog;
-    mutable std::unordered_map<std::string, std::vector<Image>> m_shot_cache;
+    DataHook hook_ = [](const DataRequest &) -> CatalogPtr { return default_local_catalog(); };
+    mutable CatalogPtr catalog_;
+    mutable std::unordered_map<std::string, std::vector<Image>> shot_cache_;
 
     void ensure() const {
-        if (!m_catalog) {
-            m_catalog = m_hook ? m_hook({ .endpoint = "catalog", .params = {} }) : default_local_catalog();
+        if (!catalog_) {
+            catalog_ = hook_ ? hook_({.endpoint = "catalog", .params = {}}) : default_local_catalog();
         }
     }
 
   public:
     /// @brief 注入替换数据源 hook（默认本地合成）。
     void set_data_hook(DataHook h) {
-        m_hook = std::move(h);
-        m_catalog.reset();
-        m_shot_cache.clear();
+        hook_ = std::move(h);
+        catalog_.reset();
+        shot_cache_.clear();
     }
 
     [[nodiscard]] auto all() const -> std::vector<AppItem> {
         ensure();
-        return *m_catalog;
+        return *catalog_;
     }
     [[nodiscard]] auto featured() const -> std::vector<AppItem> {
         auto v = all();
@@ -449,7 +448,7 @@ class PlayRepository {
     }
     [[nodiscard]] auto detail(const std::string &id) const -> AppItem {
         ensure();
-        for (const auto &a : *m_catalog) {
+        for (const auto &a : *catalog_) {
             if (a.id == id) {
                 return a;
             }
@@ -461,19 +460,18 @@ class PlayRepository {
     [[nodiscard]] auto reviews(const std::string &id) const -> std::vector<Review> {
         std::vector<Review> out;
         std::mt19937 rng(std::hash<std::string>{}(id));
-        static const std::vector<std::string> users = { "Alex",   "Sam",   "Li Lei", "Han Mei",
-                                                        "Jordan", "Priya", "Tom",    "Xiao Lin" };
-        static const std::vector<std::string> texts = {
+        static const std::vector<std::string> USERS = {"Alex",   "Sam",   "Li Lei", "Han Mei",
+                                                       "Jordan", "Priya", "Tom",    "Xiao Lin"};
+        static const std::vector<std::string> TEXTS = {
             "Very useful, beautiful interface!",   "A few minor bugs, but overall good.",
             "Must-have app, highly recommended.",  "Occasionally slow to load, hope to optimize.",
-            "Rich features, beyond expectations.", "Comfortable design, smooth experience."
-        };
+            "Rich features, beyond expectations.", "Comfortable design, smooth experience."};
         const int k = 3 + static_cast<int>(rng() % 3);
         for (int i = 0; i < k; ++i) {
             Review r;
-            r.user = users[static_cast<size_t>(rng() % users.size())];
-            r.rating = 3.0f + (static_cast<float>(rng() % 20) / 10.0f);
-            r.text = texts[static_cast<size_t>(rng() % texts.size())];
+            r.user = USERS[static_cast<size_t>(rng() % USERS.size())];
+            r.rating = 3.0F + (static_cast<float>(rng() % 20) / 10.0F);
+            r.text = TEXTS[static_cast<size_t>(rng() % TEXTS.size())];
             r.date = "2026-0" + std::to_string(1 + (rng() % 7)) + "-0" + std::to_string(1 + (rng() % 8));
             out.push_back(std::move(r));
         }
@@ -481,8 +479,8 @@ class PlayRepository {
     }
     /// @brief 懒生成并缓存截图（详情页使用）。
     [[nodiscard]] auto screenshots_for(const std::string &id) const -> std::vector<Image> {
-        const auto it = m_shot_cache.find(id);
-        if (it != m_shot_cache.end()) {
+        const auto it = shot_cache_.find(id);
+        if (it != shot_cache_.end()) {
             return it->second;
         }
         const AppItem a = detail(id);
@@ -491,7 +489,7 @@ class PlayRepository {
         for (int i = 0; i < 4; ++i) {
             shots.push_back(make_screenshot(a.color_a, a.color_b, i));
         }
-        m_shot_cache[id] = shots;
+        shot_cache_[id] = shots;
         return shots;
     }
 };
@@ -502,4 +500,4 @@ inline auto repository() -> PlayRepository & {
     return repo;
 }
 
-} // namespace gp
+}  // namespace gp

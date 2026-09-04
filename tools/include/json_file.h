@@ -12,10 +12,9 @@
 #pragma once
 
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <sstream>
 #include <string>
-
-#include <nlohmann/json.hpp>
 
 namespace aurora::tools {
 
@@ -41,4 +40,4 @@ inline auto read_text_file(const std::string &path) -> std::string {
     return ss.str();
 }
 
-} // namespace aurora::tools
+}  // namespace aurora::tools

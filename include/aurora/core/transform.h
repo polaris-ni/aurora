@@ -29,21 +29,21 @@ struct Matrix2D {
 
     /// @brief 平移矩阵。
     [[nodiscard]] static auto from_translate(float dx, float dy) -> Matrix2D {
-        return Matrix2D{ .m11 = 1, .m12 = 0, .m21 = 0, .m22 = 1, .tx = dx, .ty = dy };
+        return Matrix2D{.m11 = 1, .m12 = 0, .m21 = 0, .m22 = 1, .tx = dx, .ty = dy};
     }
 
     /// @brief 以原点为轴的旋转矩阵（角度，顺时针为正，与屏幕 y 轴向下一致）。
     /// 约定 apply(x,y) = (m11*x + m12*y, m21*x + m22*y)，旋转 90° 满足 (1,0) -> (0,1)。
     [[nodiscard]] static auto from_rotate(float degrees) -> Matrix2D {
-        const float r = degrees * std::numbers::pi_v<float> / 180.0f;
+        const float r = degrees * std::numbers::pi_v<float> / 180.0F;
         const float cs = std::cos(r);
         const float sn = std::sin(r);
-        return Matrix2D{ .m11 = cs, .m12 = -sn, .m21 = sn, .m22 = cs, .tx = 0, .ty = 0 };
+        return Matrix2D{.m11 = cs, .m12 = -sn, .m21 = sn, .m22 = cs, .tx = 0, .ty = 0};
     }
 
     /// @brief 非均匀缩放矩阵。
     [[nodiscard]] static auto from_scale(float sx, float sy) -> Matrix2D {
-        return Matrix2D{ .m11 = sx, .m12 = 0, .m21 = 0, .m22 = sy, .tx = 0, .ty = 0 };
+        return Matrix2D{.m11 = sx, .m12 = 0, .m21 = 0, .m22 = sy, .tx = 0, .ty = 0};
     }
 
     /// @brief 绕任意点旋转：translate(c) * rotate(deg) * translate(-c)。
@@ -75,7 +75,7 @@ struct Matrix2D {
     /// @brief 求逆；退化时返回单位矩阵并上报降级诊断。
     [[nodiscard]] auto inverse() const -> Matrix2D {
         const float det = (m11 * m22) - (m12 * m21);
-        if (std::fabs(det) < 1e-6f) {
+        if (std::fabs(det) < 1e-6F) {
             Diagnostics::degraded("Matrix2D 行列式≈0，已降级为单位矩阵", "Matrix2D::inverse", "matrix2d-degenerate");
             return Matrix2D{};
         }
@@ -95,7 +95,7 @@ struct Matrix2D {
 
     /// @brief 点映射。
     [[nodiscard]] auto apply_to_point(Point p) const -> Point {
-        return Point{ .x = (m11 * p.x) + (m12 * p.y) + tx, .y = (m21 * p.x) + (m22 * p.y) + ty };
+        return Point{.x = (m11 * p.x) + (m12 * p.y) + tx, .y = (m21 * p.x) + (m22 * p.y) + ty};
     }
 
     /// @brief 是否近似单位矩阵（用于走恒等快速路径）。
@@ -104,4 +104,4 @@ struct Matrix2D {
     }
 };
 
-} // namespace aurora
+}  // namespace aurora

@@ -17,7 +17,6 @@
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -45,19 +44,19 @@ AURORA_TEST() {
     // ---- 1. size 强制尺寸 ----
     {
         auto t = std::make_shared<Text>();
-        t->content = LocalizedString{ "sized" };
-        t->modifier.set(aurora::Modifier{}.size(120.0f, 40.0f));
+        t->content = LocalizedString{"sized"};
+        t->modifier.set(aurora::Modifier{}.size(120.0F, 40.0F));
 
         BuildContext ctx;
         t->mount(ctx);
         Constraints cc;
-        cc.min = Size{ .width = 0.0f, .height = 0.0f };
-        cc.max = Size{ .width = 640.0f, .height = 480.0f };
+        cc.min = Size{.width = 0.0F, .height = 0.0F};
+        cc.max = Size{.width = 640.0F, .height = 480.0F};
         t->layout(cc, ctx);
 
         const Size bs = t->size();
         AURORA_TEST_PRINTF("size:        got %.0fx%.0f (expect 120x40)\n", bs.width, bs.height);
-        if (bs.width != 120.0f || bs.height != 40.0f) {
+        if (bs.width != 120.0F || bs.height != 40.0F) {
             AURORA_LOG_INFO("test", "  FAIL: size modifier did not force dimensions");
             ++failures;
         }
@@ -66,19 +65,19 @@ AURORA_TEST() {
     // ---- 2. fill_max_width 填充父宽 ----
     {
         auto t = std::make_shared<Text>();
-        t->content = LocalizedString{ "fill" };
+        t->content = LocalizedString{"fill"};
         t->modifier.set(aurora::Modifier{}.fill_max_width());
 
         BuildContext ctx;
         t->mount(ctx);
         Constraints cc;
-        cc.min = Size{ .width = 0.0f, .height = 0.0f };
-        cc.max = Size{ .width = 640.0f, .height = 480.0f };
+        cc.min = Size{.width = 0.0F, .height = 0.0F};
+        cc.max = Size{.width = 640.0F, .height = 480.0F};
         t->layout(cc, ctx);
 
         const Size bs = t->size();
         AURORA_TEST_PRINTF("fill_max_width: got %.0f (expect 640)\n", bs.width);
-        if (bs.width != 640.0f) {
+        if (bs.width != 640.0F) {
             AURORA_LOG_INFO("test", "  FAIL: fill_max_width did not fill parent width");
             ++failures;
         }
@@ -86,32 +85,33 @@ AURORA_TEST() {
 
     // ---- 3. border + clip + background 绘制不崩溃，且裁剪栈平衡 ----
     {
-        State count{ 0 };
+        State count{0};
         auto btn = std::make_shared<Button>();
-        btn->label = Reactive{ LocalizedString{ "hit" } };
+        btn->label = Reactive{LocalizedString{"hit"}};
         btn->on_click = [&count]() -> void { count.set(count.get() + 1); };
         btn->modifier.set(aurora::Modifier{}
-                              .size(80.0f, 30.0f)
-                              .background(Color{ 0, 120, 215, 255 })
-                              .border(2.0f, Color{ 255, 0, 0, 255 })
+                              .size(80.0F, 30.0F)
+                              .background(Color{0, 120, 215, 255})
+                              .border(2.0F, Color{255, 0, 0, 255})
                               .clip());
 
-        Column col{ ColumnProps{ .children = { Node{ btn } } } };
+        Column col{ColumnProps{.children = {Node{btn}}}};
         BuildContext ctx;
         col.mount(ctx);
         Constraints cc;
-        cc.min = Size{ .width = 0.0f, .height = 0.0f };
-        cc.max = Size{ .width = 640.0f, .height = 480.0f };
+        cc.min = Size{.width = 0.0F, .height = 0.0F};
+        cc.max = Size{.width = 640.0F, .height = 480.0F};
         col.layout(cc, ctx);
 
         aurora::Painter p;
         p.begin(640, 480);
-        col.paint(p, Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = 640.0f, .height = 480.0f } },
-                  ctx);
+        col.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 640.0F, .height = 480.0F}}, ctx);
 
         // 点击仍应命中（Clickable 与新修饰共存）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const Rect bb = col.child_nodes()[0].bounds();
-        const Point center{ .x = bb.origin.x + (bb.size.width / 2.0f), .y = bb.origin.y + (bb.size.height / 2.0f) };
+        const Point center{.x = bb.origin.x + (bb.size.width / 2.0F), .y = bb.origin.y + (bb.size.height / 2.0F)};
         MouseEvent press;
         press.position = center;
         press.action = MouseAction::Press;

@@ -10,7 +10,7 @@
 
 #include <memory>
 
-#include "aurora/storage/backend.h"
+#include "aurora/storage/storage_backend.h"
 #include "aurora/storage/storage_types.h"
 
 namespace aurora::storage {
@@ -20,7 +20,7 @@ class FilesystemBackend : public StorageBackend {
     explicit FilesystemBackend(FilesystemOptions opts = {});
 
     /// @brief 后端是否成功打开（目录可写、锁可获取）。`Storage::create` 据它返回 Result。
-    [[nodiscard]] auto is_open() const -> bool { return m_open; }
+    [[nodiscard]] auto is_open() const -> bool { return open_; }
 
     [[nodiscard]] auto put_record(const std::string &id, const StorageRecord &rec) -> Result<void> override;
     [[nodiscard]] auto get_record(const std::string &id) -> Result<StorageRecord> override;
@@ -31,10 +31,10 @@ class FilesystemBackend : public StorageBackend {
     /// @brief 获取跨进程 advisory 锁（Windows LockFileEx / POSIX flock）；失败返回 false。
     [[nodiscard]] auto acquire_lock() -> bool;
 
-    FilesystemOptions m_opts;
-    std::filesystem::path m_root;
-    bool m_open = false;
-    std::shared_ptr<void> m_lock = nullptr; ///< 跨进程锁句柄（RAII），无锁时为 nullptr
+    FilesystemOptions opts_;
+    std::filesystem::path root_;
+    bool open_ = false;
+    std::shared_ptr<void> lock_ = nullptr;  ///< 跨进程锁句柄（RAII），无锁时为 nullptr
 };
 
-} // namespace aurora::storage
+}  // namespace aurora::storage

@@ -36,12 +36,12 @@ AURORA_TEST() {
     AURORA_TEST_CHECK(bf.ok());
     au::Painter &p = surf->painter();
     AURORA_TEST_CHECK(p.width() > 0 && p.height() > 0);
-    p.fill_rect(au::Rect{ au::Point{ 10.0f, 10.0f }, au::Size{ 50.0f, 30.0f } }, au::Color{ 30, 120, 220, 255 });
+    p.fill_rect(au::Rect{au::Point{10.0f, 10.0f}, au::Size{50.0f, 30.0f}}, au::Color{30, 120, 220, 255});
     auto pr = surf->present();
     AURORA_TEST_CHECK(pr.ok());
 
     // 契约 3：连续 present 不失败（双缓冲槽轮换；槽 busy 时 roundtrip 等 release）。
-    surf->set_present_dirty({ au::Rect{ au::Point{ 0.0f, 0.0f }, au::Size{ 16.0f, 16.0f } } });
+    surf->set_present_dirty({au::Rect{au::Point{0.0f, 0.0f}, au::Size{16.0f, 16.0f}}});
     AURORA_TEST_CHECK(surf->present().ok());
     AURORA_TEST_CHECK(surf->present().ok());
 
@@ -49,13 +49,13 @@ AURORA_TEST() {
     surf->set_title("aurora-wayland-test-renamed");
     surf->poll_platform_events();
     surf->request_wake();
-    surf->wait_events(1000); // 有唤醒信号：应远早于超时返回
-    AURORA_TEST_CHECK(true); // 抵达此处即未死锁/未崩溃
+    surf->wait_events(1000);  // 有唤醒信号：应远早于超时返回
+    AURORA_TEST_CHECK(true);  // 抵达此处即未死锁/未崩溃
 
     // 契约 5：类型安全工厂成功创建 Window，并可 pump + present。
     {
         au::WaylandOptions opts;
-        opts.size = au::Size{ 240.0f, 160.0f };
+        opts.size = au::Size{240.0f, 160.0f};
         opts.title = "aurora-wayland-factory";
         auto win = au::create_window(opts);
         AURORA_TEST_CHECK(win.ok());
@@ -80,7 +80,7 @@ AURORA_TEST() {
         cs.decoration = au::DecorationPolicy::ClientSide;
         au::WaylandSurface w_cs(200, 120, "csd-client", cs);
         AURORA_TEST_CHECK(w_cs.is_available());
-        AURORA_TEST_CHECK(w_cs.content_inset().top == 36.0f); // 自绘标题栏高度
+        AURORA_TEST_CHECK(w_cs.content_inset().top == 36.0f);  // 自绘标题栏高度
         AURORA_TEST_CHECK(w_cs.content_inset().left == 0.0f && w_cs.content_inset().bottom == 0.0f);
 
         au::WindowStyleOptions bl;
@@ -88,7 +88,7 @@ AURORA_TEST() {
         au::WaylandSurface w_bl(200, 120, "csd-borderless", bl);
         AURORA_TEST_CHECK(w_bl.is_available());
         AURORA_TEST_CHECK(w_bl.content_inset().top == 0.0f);  // 无标题栏
-        AURORA_TEST_CHECK(w_bl.content_inset().left == 6.0f); // 保留可缩放边框
+        AURORA_TEST_CHECK(w_bl.content_inset().left == 6.0f);  // 保留可缩放边框
         AURORA_TEST_CHECK(w_bl.content_inset().right == 6.0f && w_bl.content_inset().bottom == 6.0f);
 
         au::WindowStyleOptions fl;
@@ -109,7 +109,7 @@ AURORA_TEST() {
     }
 }
 
-#else // !AURORA_BACKEND_WAYLAND
+#else  // !AURORA_BACKEND_WAYLAND
 
 AURORA_TEST_SKIP(AURORA_BACKEND_WAYLAND)
 

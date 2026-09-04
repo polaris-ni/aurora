@@ -10,7 +10,6 @@
 #ifdef AURORA_BUILD_IMAGE_PNG
 
 #include "aurora/core/image.h"
-
 #include "wuffs/release/c/wuffs-v0.3.c"
 
 namespace aurora::image {
@@ -56,14 +55,14 @@ class GifWuffsCodec : public ImageCodec {
     [[nodiscard]] auto decode_animated(std::span<const std::uint8_t> data, const DecodeOptions & /*opt*/) const
         -> Result<AnimatedImage> override {
         // 解码器结构体在非 WUFFS_IMPLEMENTATION 单元中默认构造被删除，必须用 alloc()。
-        auto deleter = [](void *p) -> void { std::free(p); }; // NOLINT(*-no-malloc)
+        auto deleter = [](void *p) -> void { std::free(p); };  // NOLINT(*-no-malloc)
         std::unique_ptr<wuffs_gif__decoder, decltype(deleter)> dec(wuffs_gif__decoder__alloc(), deleter);
         if (!dec) {
             return make_error(ErrorCode::IOImageDecodeFailed, "wuffs gif: alloc failed");
         }
 
         wuffs_base__io_buffer src{};
-        src.data.ptr = const_cast<uint8_t *>(data.data()); // NOLINT(*-pro-type-const-cast)
+        src.data.ptr = const_cast<uint8_t *>(data.data());  // NOLINT(*-pro-type-const-cast)
         src.data.len = data.size();
         src.meta.wi = data.size();
         src.meta.closed = true;
@@ -106,7 +105,7 @@ class GifWuffsCodec : public ImageCodec {
         while (true) {
             status = wuffs_gif__decoder__decode_frame_config(dec.get(), &fc, &src);
             if (status.repr != nullptr) {
-                break; // 帧序列结束
+                break;  // 帧序列结束
             }
             const std::int64_t flicks = wuffs_base__frame_config__duration(&fc);
             const std::chrono::milliseconds dur = wuffs_duration_to_ms(flicks);
@@ -119,15 +118,15 @@ class GifWuffsCodec : public ImageCodec {
             Image frame;
             frame.width = w;
             frame.height = h;
-            frame.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u);
+            frame.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U);
             for (int y = 0; y < h; ++y) {
-                const std::uint8_t *s = plane.ptr + (static_cast<std::size_t>(y) * plane.stride); // NOLINT
+                const std::uint8_t *s = plane.ptr + (static_cast<std::size_t>(y) * plane.stride);  // NOLINT
                 std::uint8_t *d =
-                    frame.pixels.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) * 4u); // NOLINT
-                std::memcpy(d, s, static_cast<std::size_t>(w) * 4u);
+                    frame.pixels.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) * 4u);  // NOLINT
+                std::memcpy(d, s, static_cast<std::size_t>(w) * 4U);
             }
             anim.frames.emplace_back(ImageFrame{
-                .image = std::make_shared<Image>(std::move(frame)), .duration = dur, .blend = 0, .dispose = 0 });
+                .image = std::make_shared<Image>(std::move(frame)), .duration = dur, .blend = 0, .dispose = 0});
         }
 
         if (anim.frames.empty()) {
@@ -137,11 +136,10 @@ class GifWuffsCodec : public ImageCodec {
     }
 };
 
-} // namespace
+}  // namespace
 
-// NOLINTNEXTLINE(misc-use-internal-linkage): 工厂函数供 registry.cpp 跨 TU 调用，需外部链接
 auto create_gif_wuffs_codec() -> std::shared_ptr<ImageCodec> { return std::make_shared<GifWuffsCodec>(); }
 
-} // namespace aurora::image
+}  // namespace aurora::image
 
-#endif // AURORA_BUILD_IMAGE_PNG
+#endif  // AURORA_BUILD_IMAGE_PNG

@@ -13,18 +13,18 @@
 // ============================================================================
 #pragma once
 
+#include <aurora/aurora.h>
+
 #include <map>
 #include <set>
 #include <string>
 #include <vector>
 
-#include <aurora/aurora.h>
-
 namespace aurora::tools {
 
 /// @brief A single lint finding (structured, machine-readable, aligned with au::ErrorSeverity).
 struct LintFinding {
-    ErrorSeverity severity = ErrorSeverity::Warning; // aligned with Diagnostic/Error
+    ErrorSeverity severity = ErrorSeverity::Warning;  // aligned with Diagnostic/Error
     std::string code;
     std::string message;
     std::string path;
@@ -38,8 +38,8 @@ inline auto load_known_types() -> std::pair<std::set<std::string>, std::map<std:
     auto types = list_all_components();
     std::set known(types.begin(), types.end());
 
-    for (const char *m : { "Padding", "FlexWeight", "Background", "Border", "Clip", "SizeModifier", "Clickable",
-                           "IgnorePointer", "Opacity", "Transform", "Align", "Center", "Expanded", "Flexible" }) {
+    for (const char *m : {"Padding", "FlexWeight", "Background", "Border", "Clip", "SizeModifier", "Clickable",
+                          "IgnorePointer", "Opacity", "Transform", "Align", "Center", "Expanded", "Flexible"}) {
         known.insert(m);
     }
 
@@ -58,42 +58,42 @@ inline auto load_known_types() -> std::pair<std::set<std::string>, std::map<std:
             props[t] = std::move(keys);
         }
     }
-    return { known, props };
+    return {known, props};
 }
 
 inline void lint_node_impl(const Json &node, const std::string &path, int depth, const std::set<std::string> &known,
                            const std::map<std::string, std::set<std::string>> &props, std::vector<LintFinding> &out) {
     if (!node.is_object()) {
-        out.push_back({ .severity = ErrorSeverity::Error,
-                        .code = "node-not-object",
-                        .message = "UI tree node must be an object",
-                        .path = path });
+        out.push_back({.severity = ErrorSeverity::Error,
+                       .code = "node-not-object",
+                       .message = "UI tree node must be an object",
+                       .path = path});
         return;
     }
     if (!node.contains("type") || !node["type"].is_string()) {
-        out.push_back({ .severity = ErrorSeverity::Error,
-                        .code = "node-no-type",
-                        .message = "Node missing string \"type\" field",
-                        .path = path });
+        out.push_back({.severity = ErrorSeverity::Error,
+                       .code = "node-no-type",
+                       .message = "Node missing string \"type\" field",
+                       .path = path});
         return;
     }
 
     const std::string type = node["type"].get<std::string>();
     if (!known.contains(type)) {
-        out.push_back({ .severity = ErrorSeverity::Warning,
-                        .code = "unknown-type",
-                        .message = "Unknown component/modifier type: " + type,
-                        .path = path });
+        out.push_back({.severity = ErrorSeverity::Warning,
+                       .code = "unknown-type",
+                       .message = "Unknown component/modifier type: " + type,
+                       .path = path});
     }
 
     if (node.contains("props") && node["props"].is_object()) {
         if (auto pit = props.find(type); pit != props.end()) {
             for (auto it = node["props"].begin(); it != node["props"].end(); ++it) {
                 if (!pit->second.contains(it.key())) {
-                    out.push_back({ .severity = ErrorSeverity::Warning,
-                                    .code = "unknown-prop",
-                                    .message = "Type " + type + " has unknown property: " + it.key(),
-                                    .path = path });
+                    out.push_back({.severity = ErrorSeverity::Warning,
+                                   .code = "unknown-prop",
+                                   .message = "Type " + type + " has unknown property: " + it.key(),
+                                   .path = path});
                 }
             }
         }
@@ -101,18 +101,18 @@ inline void lint_node_impl(const Json &node, const std::string &path, int depth,
 
     if (node.contains("children")) {
         if (!node["children"].is_array()) {
-            out.push_back({ .severity = ErrorSeverity::Error,
-                            .code = "children-not-array",
-                            .message = "\"children\" must be an array",
-                            .path = path });
+            out.push_back({.severity = ErrorSeverity::Error,
+                           .code = "children-not-array",
+                           .message = "\"children\" must be an array",
+                           .path = path});
             return;
         }
         const auto &ch = node["children"];
         if (ch.empty()) {
-            out.push_back({ .severity = ErrorSeverity::Info,
-                            .code = "empty-container",
-                            .message = type + " container has no children",
-                            .path = path });
+            out.push_back({.severity = ErrorSeverity::Info,
+                           .code = "empty-container",
+                           .message = type + " container has no children",
+                           .path = path});
         }
         for (std::size_t i = 0; i < ch.size(); ++i) {
             lint_node_impl(ch.at(i), path + "/children/" + std::to_string(i), depth + 1, known, props, out);
@@ -120,11 +120,11 @@ inline void lint_node_impl(const Json &node, const std::string &path, int depth,
     }
 
     if (depth > AURORA_MAX_LINT_DEPTH) {
-        out.push_back({ .severity = ErrorSeverity::Warning,
-                        .code = "depth-exceeded",
-                        .message = "UI tree depth exceeds " + std::to_string(AURORA_MAX_LINT_DEPTH) +
-                                   " (possible infinite recursion)",
-                        .path = path });
+        out.push_back({.severity = ErrorSeverity::Warning,
+                       .code = "depth-exceeded",
+                       .message = "UI tree depth exceeds " + std::to_string(AURORA_MAX_LINT_DEPTH) +
+                                  " (possible infinite recursion)",
+                       .path = path});
     }
 }
 
@@ -137,4 +137,4 @@ inline auto lint_ui_tree(const Json &root) -> std::vector<LintFinding> {
     return out;
 }
 
-} // namespace aurora::tools
+}  // namespace aurora::tools

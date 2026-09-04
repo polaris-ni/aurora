@@ -5,7 +5,6 @@
 #include "aurora/aurora.h"
 #include "aurora/core/diagnostics.h"
 #include "aurora/widget/descriptor.h"
-
 #include "test_harness.h"
 
 using aurora::Color;
@@ -22,11 +21,11 @@ using aurora::Text;
 
 // ---- validate_prop<Color> ----
 static void test_validate_color() {
-    PropDescriptor desc{ .name = "color" };
+    PropDescriptor desc{.name = "color"};
 
     // 合法：4 元素数组，值在 0-255
     {
-        Json j = Json::array({ 255, 128, 0, 255 });
+        Json j = Json::array({255, 128, 0, 255});
         auto r = validate_prop<Color>(j, desc);
         AURORA_TEST_CHECK_MSG(r.ok(), "validate_prop<Color>: valid [255,128,0,255]");
         AURORA_TEST_CHECK_MSG(r.ok() && r.value().m_r == 255 && r.value().m_g == 128,
@@ -34,7 +33,7 @@ static void test_validate_color() {
     }
     // 非法：数组太短
     {
-        Json j = Json::array({ 255, 128 });
+        Json j = Json::array({255, 128});
         auto r = validate_prop<Color>(j, desc);
         AURORA_TEST_CHECK_MSG(!r.ok(), "validate_prop<Color>: short array rejected");
         AURORA_TEST_CHECK_MSG(!r.ok() && r.error().code_enum == ErrorCode::WidgetInvalidProp,
@@ -42,7 +41,7 @@ static void test_validate_color() {
     }
     // 非法：值超出范围
     {
-        Json j = Json::array({ 256, 0, 0, 255 });
+        Json j = Json::array({256, 0, 0, 255});
         auto r = validate_prop<Color>(j, desc);
         AURORA_TEST_CHECK_MSG(!r.ok(), "validate_prop<Color>: out-of-range value rejected");
     }
@@ -57,28 +56,28 @@ static void test_validate_color() {
 // ---- validate_prop<float> ----
 static void test_validate_float() {
     // 有范围约束：min_value="0", max_value="100"
-    PropDescriptor desc{ .name = "opacity", .min_value = "0", .max_value = "100" };
+    PropDescriptor desc{.name = "opacity", .min_value = "0", .max_value = "100"};
     {
-        Json j = 50.0f;
+        Json j = 50.0F;
         auto r = validate_prop<float>(j, desc);
         AURORA_TEST_CHECK_MSG(r.ok(), "validate_prop<float>: 50 in [0,100]");
     }
     {
-        Json j = -1.0f;
+        Json j = -1.0F;
         auto r = validate_prop<float>(j, desc);
         AURORA_TEST_CHECK_MSG(!r.ok(), "validate_prop<float>: -1 below min");
         AURORA_TEST_CHECK_MSG(!r.ok() && r.error().code_enum == ErrorCode::WidgetPropConstraintViolated,
                               "validate_prop<float>: correct ErrorCode for range violation");
     }
     {
-        Json j = 101.0f;
+        Json j = 101.0F;
         auto r = validate_prop<float>(j, desc);
         AURORA_TEST_CHECK_MSG(!r.ok(), "validate_prop<float>: 101 above max");
     }
     // 无范围约束
-    PropDescriptor desc_no_range{ .name = "any_float" };
+    PropDescriptor desc_no_range{.name = "any_float"};
     {
-        Json j = -999.0f;
+        Json j = -999.0F;
         auto r = validate_prop<float>(j, desc_no_range);
         AURORA_TEST_CHECK_MSG(r.ok(), "validate_prop<float>: no constraint accepts any number");
     }
@@ -94,7 +93,7 @@ static void test_validate_float() {
 
 // ---- validate_prop<int> ----
 static void test_validate_int() {
-    PropDescriptor desc{ .name = "max_lines", .min_value = "1" };
+    PropDescriptor desc{.name = "max_lines", .min_value = "1"};
     {
         Json j = 5;
         auto r = validate_prop<int>(j, desc);
@@ -109,7 +108,7 @@ static void test_validate_int() {
 
 // ---- validate_prop<bool> ----
 static void test_validate_bool() {
-    PropDescriptor desc{ .name = "visible" };
+    PropDescriptor desc{.name = "visible"};
     {
         Json j = true;
         auto r = validate_prop<bool>(j, desc);
@@ -124,7 +123,7 @@ static void test_validate_bool() {
 
 // ---- validate_prop<LocalizedString> ----
 static void test_validate_localized_string() {
-    PropDescriptor desc{ .name = "label" };
+    PropDescriptor desc{.name = "label"};
     {
         Json j = "Hello";
         auto r = validate_prop<LocalizedString>(j, desc);
@@ -140,7 +139,7 @@ static void test_validate_localized_string() {
 
 // ---- validate_prop<Length> ----
 static void test_validate_length() {
-    PropDescriptor desc{ .name = "width" };
+    PropDescriptor desc{.name = "width"};
     // auto / fill
     {
         Json j = "auto";
@@ -154,12 +153,12 @@ static void test_validate_length() {
     }
     // fixed(px) >= 0
     {
-        Json j = Json::array({ "px", 10.0f });
+        Json j = Json::array({"px", 10.0F});
         auto r = validate_prop<Length>(j, desc);
         AURORA_TEST_CHECK_MSG(r.ok(), "validate_prop<Length>: [px, 10] valid");
     }
     {
-        Json j = Json::array({ "px", -5.0f });
+        Json j = Json::array({"px", -5.0F});
         auto r = validate_prop<Length>(j, desc);
         AURORA_TEST_CHECK_MSG(!r.ok(), "validate_prop<Length>: [px, -5] rejected");
         AURORA_TEST_CHECK_MSG(!r.ok() && r.error().code_enum == ErrorCode::WidgetPropConstraintViolated,
@@ -175,14 +174,14 @@ static void test_validate_length() {
 
 // ---- validate_prop<EdgeInsets> ----
 static void test_validate_edge_insets() {
-    PropDescriptor desc{ .name = "padding" };
+    PropDescriptor desc{.name = "padding"};
     {
-        Json j = Json::object({ { "left", 10.0f }, { "top", 5.0f }, { "right", 10.0f }, { "bottom", 5.0f } });
+        Json j = Json::object({{"left", 10.0F}, {"top", 5.0F}, {"right", 10.0F}, {"bottom", 5.0F}});
         auto r = validate_prop<EdgeInsets>(j, desc);
         AURORA_TEST_CHECK_MSG(r.ok(), "validate_prop<EdgeInsets>: valid object");
     }
     {
-        Json j = Json::object({ { "left", -1.0f } });
+        Json j = Json::object({{"left", -1.0F}});
         auto r = validate_prop<EdgeInsets>(j, desc);
         AURORA_TEST_CHECK_MSG(!r.ok(), "validate_prop<EdgeInsets>: negative field rejected");
     }
@@ -195,7 +194,7 @@ static void test_validate_edge_insets() {
 
 // ---- validate_enum_string ----
 static void test_validate_enum_string_fn() {
-    PropDescriptor desc{ .name = "text_align", .enum_values = { "Left", "Right", "Center" } };
+    PropDescriptor desc{.name = "text_align", .enum_values = {"Left", "Right", "Center"}};
     Error err;
     {
         Json j = "Center";
@@ -222,9 +221,15 @@ static void test_text_deserialize_diagnostics() {
 
     Text t;
     Json bad_props = Json::object();
-    bad_props["font_size"] = "not-a-number"; // 类型错误
-    bad_props["color"] = "not-a-color";      // 类型错误
-    bad_props["soft_wrap"] = 42;             // 类型错误
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    bad_props["font_size"] = "not-a-number";  // 类型错误
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    bad_props["color"] = "not-a-color";  // 类型错误
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    bad_props["soft_wrap"] = 42;  // 类型错误
 
     t.deserialize_props(bad_props);
 
@@ -247,8 +252,14 @@ static void test_text_deserialize_valid_no_diagnostics() {
 
     Text t;
     Json good_props = Json::object();
-    good_props["font_size"] = 14.0f;
-    good_props["color"] = Json::array({ 255, 0, 0, 255 });
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    good_props["font_size"] = 14.0F;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    good_props["color"] = Json::array({255, 0, 0, 255});
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     good_props["soft_wrap"] = true;
 
     t.deserialize_props(good_props);

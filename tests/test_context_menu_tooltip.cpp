@@ -13,7 +13,6 @@
 #include "aurora/event/event.h"
 #include "aurora/modifier/modifier.h"
 #include "aurora/widget/text.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -30,7 +29,7 @@ using aurora::TooltipNode;
 AURORA_TEST() {
     // ---- 1. MenuItem 基本构造 ----
     {
-        MenuItem item{ "Open", []() -> void {} };
+        MenuItem item{"Open", []() -> void {}};
         AURORA_TEST_CHECK(item.label == "Open");
         AURORA_TEST_CHECK(!item.separator);
         AURORA_TEST_CHECK(!item.is_submenu());
@@ -39,16 +38,16 @@ AURORA_TEST() {
         auto sep = MenuItem::separator_item();
         AURORA_TEST_CHECK(sep.separator);
 
-        MenuItem parent{ "File" };
+        MenuItem parent{"File"};
         parent.children.emplace_back("New");
         AURORA_TEST_CHECK(parent.is_submenu());
     }
 
     // ---- 2. TooltipNode 计时逻辑 ----
     {
-        TooltipNode tt{ "Hello Tooltip", 100.0f };
+        TooltipNode tt{"Hello Tooltip", 100.0F};
         AURORA_TEST_CHECK(tt.text() == "Hello Tooltip");
-        AURORA_TEST_CHECK(tt.delay_ms() == 100.0f);
+        AURORA_TEST_CHECK(tt.delay_ms() == 100.0F);
         AURORA_TEST_CHECK(!tt.is_visible());
 
         // 未 hover 时 tick 不触发
@@ -72,15 +71,15 @@ AURORA_TEST() {
 
     // ---- 3. ContextMenuNode 打开/关闭 ----
     {
-        std::vector items = { MenuItem{ "Copy" }, MenuItem{ "Paste" } };
-        ContextMenuNode cm{ items };
+        std::vector items = {MenuItem{"Copy"}, MenuItem{"Paste"}};
+        ContextMenuNode cm{items};
         AURORA_TEST_CHECK(!cm.is_open());
         AURORA_TEST_CHECK(cm.items().size() == 2);
 
-        cm.open_at(Point{ .x = 100.0f, .y = 200.0f });
+        cm.open_at(Point{.x = 100.0F, .y = 200.0F});
         AURORA_TEST_CHECK(cm.is_open());
-        AURORA_TEST_CHECK(cm.position().x == 100.0f);
-        AURORA_TEST_CHECK(cm.position().y == 200.0f);
+        AURORA_TEST_CHECK(cm.position().x == 100.0F);
+        AURORA_TEST_CHECK(cm.position().y == 200.0F);
 
         cm.close();
         AURORA_TEST_CHECK(!cm.is_open());
@@ -88,7 +87,7 @@ AURORA_TEST() {
 
     // ---- 4. Modifier 工厂方法 ----
     {
-        auto mod = Modifier{}.tooltip("Tip text", 300.0f).context_menu({ MenuItem{ "Action" } });
+        auto mod = Modifier{}.tooltip("Tip text", 300.0F).context_menu({MenuItem{"Action"}});
 
         AURORA_TEST_CHECK(mod.nodes().size() == 2);
         AURORA_TEST_CHECK(mod.has_context_menu());
@@ -102,7 +101,7 @@ AURORA_TEST() {
 
     // ---- 5. Modifier Tooltip 计时驱动 ----
     {
-        auto mod = Modifier{}.tooltip("Delayed", 50.0f);
+        auto mod = Modifier{}.tooltip("Delayed", 50.0F);
         auto now = std::chrono::steady_clock::now();
 
         mod.tooltip_hover_start(now);
@@ -118,17 +117,17 @@ AURORA_TEST() {
 
     // ---- 6. Modifier ContextMenu 打开/关闭 ----
     {
-        auto mod = Modifier{}.context_menu({ MenuItem{ "Edit" }, MenuItem{ "Delete" } });
-        AURORA_TEST_CHECK(!mod.has_context_menu() == false); // has_context_menu == true
+        auto mod = Modifier{}.context_menu({MenuItem{"Edit"}, MenuItem{"Delete"}});
+        AURORA_TEST_CHECK(!mod.has_context_menu() == false);  // has_context_menu == true
         AURORA_TEST_CHECK(mod.has_context_menu());
 
-        mod.open_context_menu(Point{ .x = 50.0f, .y = 75.0f });
+        mod.open_context_menu(Point{.x = 50.0F, .y = 75.0F});
         auto items = mod.active_context_menu_items();
         AURORA_TEST_CHECK(items.size() == 2);
-        AURORA_TEST_CHECK(items[0].label == "Edit");
+        AURORA_TEST_CHECK(items.at(0).label == "Edit");
         auto pos = mod.active_context_menu_position();
-        AURORA_TEST_CHECK(pos.x == 50.0f);
-        AURORA_TEST_CHECK(pos.y == 75.0f);
+        AURORA_TEST_CHECK(pos.x == 50.0F);
+        AURORA_TEST_CHECK(pos.y == 75.0F);
 
         mod.close_context_menu();
         AURORA_TEST_CHECK(mod.active_context_menu_items().empty());
@@ -137,7 +136,7 @@ AURORA_TEST() {
     // ---- 7. Widget 右键事件拦截 ----
     {
         auto t = std::make_shared<Text>();
-        t->modifier.set(Modifier{}.context_menu({ MenuItem{ "Cut" } }));
+        t->modifier.set(Modifier{}.context_menu({MenuItem{"Cut"}}));
 
         BuildContext ctx;
         t->mount(ctx);
@@ -146,21 +145,21 @@ AURORA_TEST() {
         MouseEvent e;
         e.button = MouseButton::Right;
         e.action = MouseAction::Press;
-        e.position = Point{ .x = 10.0f, .y = 10.0f };
+        e.position = Point{.x = 10.0F, .y = 10.0F};
         t->on_pointer_event(e);
-        AURORA_TEST_CHECK(e.handled);
+        AURORA_TEST_CHECK(e.is_handled_);
 
         // 上下文菜单应已打开
         auto items = t->modifier.get().active_context_menu_items();
         AURORA_TEST_CHECK(items.size() == 1);
-        AURORA_TEST_CHECK(items[0].label == "Cut");
+        AURORA_TEST_CHECK(items.at(0).label == "Cut");
 
         // 左键按下不应触发上下文菜单
         t->modifier.get().close_context_menu();
         MouseEvent e2;
         e2.button = MouseButton::Left;
         e2.action = MouseAction::Press;
-        e2.position = Point{ .x = 10.0f, .y = 10.0f };
+        e2.position = Point{.x = 10.0F, .y = 10.0F};
         t->on_pointer_event(e2);
         AURORA_TEST_CHECK(t->modifier.get().active_context_menu_items().empty());
     }
@@ -168,7 +167,7 @@ AURORA_TEST() {
     // ---- 8. Widget tick 驱动 Tooltip ----
     {
         auto t = std::make_shared<Text>();
-        t->modifier.set(Modifier{}.tooltip("Widget Tip", 80.0f));
+        t->modifier.set(Modifier{}.tooltip("Widget Tip", 80.0F));
 
         BuildContext ctx;
         t->mount(ctx);
@@ -187,30 +186,32 @@ AURORA_TEST() {
 
     // ---- 9. Tooltip 负值延迟降级为 0 ----
     {
-        TooltipNode tt{ "Instant", -10.0f };
-        AURORA_TEST_CHECK(tt.delay_ms() == 0.0f);
+        TooltipNode tt{"Instant", -10.0F};
+        AURORA_TEST_CHECK(tt.delay_ms() == 0.0F);
 
         auto now = std::chrono::steady_clock::now();
         tt.hover_start(now);
-        tt.tick(now); // 0ms 延迟，立即触发
+        tt.tick(now);  // 0ms 延迟，立即触发
         AURORA_TEST_CHECK(tt.is_visible());
     }
 
     // ---- 10. ContextMenu 多菜单项含子菜单 ----
     {
-        MenuItem file{ "File" };
+        MenuItem file{"File"};
         file.children.emplace_back("New");
         file.children.emplace_back("Open");
         file.children.push_back(MenuItem::separator_item());
         file.children.emplace_back("Exit");
 
-        auto mod = Modifier{}.context_menu({ file, MenuItem{ "Help" } });
-        mod.open_context_menu(Point{ .x = 0.0f, .y = 0.0f });
+        auto mod = Modifier{}.context_menu({file, MenuItem{"Help"}});
+        mod.open_context_menu(Point{.x = 0.0F, .y = 0.0F});
 
         auto items = mod.active_context_menu_items();
         AURORA_TEST_CHECK(items.size() == 2);
-        AURORA_TEST_CHECK(items[0].is_submenu());
-        AURORA_TEST_CHECK(items[0].children.size() == 4);
-        AURORA_TEST_CHECK(items[0].children[2].separator);
+        AURORA_TEST_CHECK(items.at(0).is_submenu());
+        AURORA_TEST_CHECK(items.at(0).children.size() == 4);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(items.at(0).children[2].separator);
     }
 }

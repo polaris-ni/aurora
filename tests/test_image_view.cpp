@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 namespace serialization = aurora::serialization;
@@ -39,43 +38,43 @@ static void test_image_view() {
     img.height = 24;
     img.pixels = std::vector<uint8_t>(static_cast<size_t>(img.width) * img.height * 4, 255);
 
-    ImageView iv{ img };
+    ImageView iv{img};
     BuildContext ctx;
     iv.mount(ctx);
-    Constraints c{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 100, .height = 100 } };
+    Constraints c{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 100, .height = 100}};
     iv.layout(c, ctx);
     const Size s = iv.size();
 
-    AURORA_TEST_CHECK(near_f(s.width, 32.0f));
-    AURORA_TEST_CHECK(near_f(s.height, 24.0f));
+    AURORA_TEST_CHECK(near_f(s.width, 32.0F));
+    AURORA_TEST_CHECK(near_f(s.height, 24.0F));
     AURORA_TEST_CHECK(std::string(iv.type_name()) == "Image");
     AURORA_TEST_CHECK(iv.bitmap.width == 32 && iv.bitmap.height == 24);
 
     // 固定宽度覆盖：高度仍按内容自然尺寸。
-    ImageView iv_w{ img };
+    ImageView iv_w{img};
     BuildContext ctx_w;
     iv_w.mount(ctx_w);
     iv_w.width(Length::fixed(80));
     iv_w.layout(c, ctx_w);
-    AURORA_TEST_CHECK(near_f(iv_w.size().width, 80.0f));
-    AURORA_TEST_CHECK(near_f(iv_w.size().height, 24.0f));
+    AURORA_TEST_CHECK(near_f(iv_w.size().width, 80.0F));
+    AURORA_TEST_CHECK(near_f(iv_w.size().height, 24.0F));
 
     // 固定高度覆盖：宽度仍按内容自然尺寸。
-    ImageView iv_h{ img };
+    ImageView iv_h{img};
     BuildContext ctx_h;
     iv_h.mount(ctx_h);
     iv_h.height(Length::fixed(60));
     iv_h.layout(c, ctx_h);
-    AURORA_TEST_CHECK(near_f(iv_h.size().height, 60.0f));
-    AURORA_TEST_CHECK(near_f(iv_h.size().width, 32.0f));
+    AURORA_TEST_CHECK(near_f(iv_h.size().height, 60.0F));
+    AURORA_TEST_CHECK(near_f(iv_h.size().width, 32.0F));
 
     // 0x0 图像回退到 100x100 自然尺寸。
-    ImageView iv0{ Image{} };
+    ImageView iv0{Image{}};
     BuildContext ctx0;
     iv0.mount(ctx0);
     iv0.layout(c, ctx0);
-    AURORA_TEST_CHECK(near_f(iv0.size().width, 100.0f));
-    AURORA_TEST_CHECK(near_f(iv0.size().height, 100.0f));
+    AURORA_TEST_CHECK(near_f(iv0.size().width, 100.0F));
+    AURORA_TEST_CHECK(near_f(iv0.size().height, 100.0F));
 
     // from_file 缺失文件 → 返回空图像（不抛异常）。
     auto missing = ImageView::from_file("does_not_exist.png");
@@ -83,11 +82,19 @@ static void test_image_view() {
     AURORA_TEST_CHECK(missing.bitmap.width == 0 && missing.bitmap.height == 0);
 
     // source 序列化：props 含 source / image_width / image_height。
-    ImageView iv_src{ ImageViewProps{ .bitmap = img, .source = std::string("logo.png") } };
+    ImageView iv_src{ImageViewProps{.bitmap = img, .source = std::string("logo.png")}};
     auto js = serialization::to_json(iv_src);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(js.contains("type") && js["type"].get<std::string>() == "Image");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(js["props"].contains("source") && js["props"]["source"].get<std::string>() == "logo.png");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(js["props"]["image_width"].get<int>() == 32);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(js["props"]["image_height"].get<int>() == 24);
 
     // 真实 PNG 加载（走 stb）：解码成功且尺寸、像素长度正确。
@@ -100,18 +107,18 @@ static void test_image_view() {
         const Image &g = gr.value();
         AURORA_TEST_CHECK(g.width > 0 && g.height > 0);
         AURORA_TEST_CHECK(g.pixels.size() == static_cast<size_t>(g.width) * g.height * 4);
-        ImageView ivg{ g };
+        ImageView ivg{g};
         AURORA_TEST_CHECK(ivg.bitmap.width == g.width && ivg.bitmap.height == g.height);
     }
 
     // 约束上限裁剪：max=(20,20)，自然尺寸(32,24) 被夹到 (20,20)。
-    ImageView iv_big{ img };
+    ImageView iv_big{img};
     BuildContext ctx_b;
     iv_big.mount(ctx_b);
-    Constraints tight{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 20, .height = 20 } };
+    Constraints tight{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 20, .height = 20}};
     iv_big.layout(tight, ctx_b);
-    AURORA_TEST_CHECK(near_f(iv_big.size().width, 20.0f));
-    AURORA_TEST_CHECK(near_f(iv_big.size().height, 20.0f));
+    AURORA_TEST_CHECK(near_f(iv_big.size().width, 20.0F));
+    AURORA_TEST_CHECK(near_f(iv_big.size().height, 20.0F));
 }
 
 AURORA_TEST() {

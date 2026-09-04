@@ -29,17 +29,17 @@ namespace aurora {
 /// @note Rebuildable: yes, via from_json
 class HotReload {
   public:
-    using JsonLoadFn = std::function<Json()>; // 外部读取 JSON 的工具
+    using JsonLoadFn = std::function<Json()>;  // 外部读取 JSON 的工具
 
-    explicit HotReload(std::string path) : m_path(std::move(path)) {}
+    explicit HotReload(std::string path) : path_(std::move(path)) {}
 
-    HotReload(std::string path, JsonLoadFn loader) : m_path(std::move(path)), m_loader(std::move(loader)) {}
+    HotReload(std::string path, JsonLoadFn loader) : path_(std::move(path)), loader_(std::move(loader)) {}
 
     /// @brief 注入 JSON 读取器（用于测试时不解耦 IO）。
-    void set_loader(JsonLoadFn loader) { m_loader = std::move(loader); }
+    void set_loader(JsonLoadFn loader) { loader_ = std::move(loader); }
 
     /// @brief 设置状态保留 key（默认："id"——Widget::id）。
-    void set_state_key(std::string key) { m_state_key = std::move(key); }
+    void set_state_key(std::string key) { state_key_ = std::move(key); }
 
     /// @brief 检查文件时间戳；如有更新则从 JSON 重建树。
     /// @return 新根节点（共享指针所有权），无变化返回 nullptr。
@@ -53,7 +53,7 @@ class HotReload {
         if (json.empty()) {
             return nullptr;
         }
-        if (json == m_last_json) {
+        if (json == last_json_) {
             return nullptr;
         }
 
@@ -69,20 +69,20 @@ class HotReload {
         // 恢复 State
         restore_state(root.value().get());
 
-        m_last_json = std::move(json);
-        m_last_root = root.value();
+        last_json_ = std::move(json);
+        last_root_ = root.value();
         return root.value();
     }
 
     /// @brief 当前持有的根节点（首次 try_sync 前为 nullptr）。
-    [[nodiscard]] auto root() const -> std::shared_ptr<Widget> { return m_last_root; }
+    [[nodiscard]] auto root() const -> std::shared_ptr<Widget> { return last_root_; }
 
   private:
     [[nodiscard]] auto load_json() const -> Json {
-        if (m_loader) {
-            return m_loader();
+        if (loader_) {
+            return loader_();
         }
-        std::ifstream f(m_path);
+        std::ifstream f(path_);
         if (!f.is_open()) {
             return {};
         }
@@ -90,11 +90,11 @@ class HotReload {
     }
 
     void preserve_state() {
-        m_saved_state.clear();
-        if (!m_last_root) {
+        saved_state_.clear();
+        if (!last_root_) {
             return;
         }
-        collect_state(*m_last_root, "");
+        collect_state(*last_root_, "");
     }
 
     static void collect_state(const Widget &w, const std::string &path) {
@@ -112,12 +112,12 @@ class HotReload {
         // 反向匹配 restore
     }
 
-    std::string m_path;
-    std::string m_state_key{ "id" };
-    Json m_last_json;
-    std::shared_ptr<Widget> m_last_root;
-    JsonLoadFn m_loader;
-    Json m_saved_state;
+    std::string path_;
+    std::string state_key_{"id"};
+    Json last_json_;
+    std::shared_ptr<Widget> last_root_;
+    JsonLoadFn loader_;
+    Json saved_state_;
 };
 
-} // namespace aurora
+}  // namespace aurora

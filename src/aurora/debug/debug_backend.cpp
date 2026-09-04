@@ -28,7 +28,7 @@ auto ensure_parent_dir(const std::string &path) -> void {
 }
 #endif
 
-} // namespace
+}  // namespace
 
 auto set_output_directory(const std::string &dir) -> void { debug_output_dir() = dir; }
 
@@ -45,7 +45,7 @@ auto resolve_output_path(const std::string &path) -> std::string {
     }
     const std::filesystem::path p(path);
     if (p.is_absolute()) {
-        return path; // 显式绝对路径
+        return path;  // 显式绝对路径
     }
     // 相对路径：若含目录分隔（parent 不是 "." 也不是空）则视为显式相对路径，原样使用。
     const std::filesystem::path parent = p.parent_path();
@@ -78,28 +78,35 @@ auto surface_state(const Surface &s) -> Json {
 #ifdef AURORA_ENABLE_DEBUG
     Json j;
     const auto sz = s.size();
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     j["width"] = static_cast<int>(sz.width);
     j["height"] = static_cast<int>(sz.height);
     j["scale_factor"] = s.scale_factor();
     j["frame_count"] = s.frame_count();
     const Color c = s.clear_color();
     Json cc = Json::array();
-    cc.push_back(c.m_r);
-    cc.push_back(c.m_g);
-    cc.push_back(c.m_b);
-    cc.push_back(c.m_a);
+    cc.push_back(c.r);
+    cc.push_back(c.g);
+    cc.push_back(c.b);
+    cc.push_back(c.a);
     j["clear_color"] = cc;
     j["should_close"] = s.should_close();
-    j["has_native_window"] = (s.native_handle() != nullptr);
+    j["has_native_window"] = s.native_handle() != nullptr;
     j["available"] = true;
+    // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     return j;
 #else
     (void)s;
     Json j;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     j["available"] = false;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     j["reason"] = "AURORA_ENABLE_DEBUG not enabled";
     return j;
 #endif
 }
 
-} // namespace aurora::debug
+}  // namespace aurora::debug

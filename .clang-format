@@ -65,3 +65,5 @@ AlwaysBreakAfterReturnType: None
 # 不对齐连续声明和赋值
 AlignConsecutiveDeclarations: false
 AlignConsecutiveAssignments: false
+
+RemoveParentheses: ReturnStatement

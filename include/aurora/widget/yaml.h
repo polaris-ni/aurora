@@ -40,7 +40,7 @@ namespace detail {
                 ++i;
             }
             if (i == s.size()) {
-                return true; // 纯整数
+                return true;  // 纯整数
             }
         }
     }
@@ -51,14 +51,14 @@ namespace detail {
         char *end = nullptr;
         (void)std::strtod(begin, &end);
         if (end != nullptr && static_cast<std::size_t>(end - begin) == s.size()) {
-            return true; // 整个字符串被解析为数字
+            return true;  // 整个字符串被解析为数字
         }
     }
 
     // 含 YAML 特殊字符
-    static const std::string special = ":#{}[],&*?|-<>=!%@`\\\"";
+    static const std::string SPECIAL = ":#{}[],&*?|-<>=!%@`\\\"";
     for (const char c : s) {
-        if (special.find(c) != std::string::npos) {
+        if (SPECIAL.find(c) != std::string::npos) {
             return true;
         }
     }
@@ -73,12 +73,24 @@ namespace detail {
     std::string out = "\"";
     for (const char c : s) {
         switch (c) {
-        case '"': out += "\\\""; break;
-        case '\\': out += "\\\\"; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default: out += c; break;
+            case '"':
+                out += "\\\"";
+                break;
+            case '\\':
+                out += "\\\\";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            default:
+                out += c;
+                break;
         }
     }
     out += '"';
@@ -132,7 +144,7 @@ namespace detail {
     if (j.is_string()) {
         return emit_string(j);
     }
-    return "null"; // fallback
+    return "null";  // fallback
 }
 
 /// @brief 将 JSON 数组转为 YAML 数组字符串。
@@ -210,10 +222,10 @@ namespace detail {
     return emit_scalar(j);
 }
 
-} // namespace detail
+}  // namespace detail
 
 /// @brief 将 JSON 值转换为 YAML 格式字符串（2 空格缩进）。
 [[nodiscard]] inline auto to_yaml(const Json &j, int indent = 0) -> std::string { return detail::yaml_emit(j, indent); }
 
-} // namespace serialization
-} // namespace aurora
+}  // namespace serialization
+}  // namespace aurora

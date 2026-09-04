@@ -30,21 +30,29 @@ enum class Alignment : std::uint8_t {
 
 /// @brief 返回子项相对容器的对齐原点（左上角），使子项按 `a` 定位。
 inline auto align_origin(Alignment a, Size child_size, Size container_size) -> Point {
-    const float cx = (container_size.width - child_size.width) * 0.5f;
-    const float cy = (container_size.height - child_size.height) * 0.5f;
+    const float cx = (container_size.width - child_size.width) * 0.5F;
+    const float cy = (container_size.height - child_size.height) * 0.5F;
     switch (a) {
-    case Alignment::TopLeft: return Point{ .x = 0.0f, .y = 0.0f };
-    case Alignment::TopCenter: return Point{ .x = cx, .y = 0.0f };
-    case Alignment::TopRight: return Point{ .x = container_size.width - child_size.width, .y = 0.0f };
-    case Alignment::CenterLeft: return Point{ .x = 0.0f, .y = cy };
-    case Alignment::Center: return Point{ .x = cx, .y = cy };
-    case Alignment::CenterRight: return Point{ .x = container_size.width - child_size.width, .y = cy };
-    case Alignment::BottomLeft: return Point{ .x = 0.0f, .y = container_size.height - child_size.height };
-    case Alignment::BottomCenter: return Point{ .x = cx, .y = container_size.height - child_size.height };
-    case Alignment::BottomRight:
-        return Point{ .x = container_size.width - child_size.width, .y = container_size.height - child_size.height };
+        case Alignment::TopLeft:
+            return Point{.x = 0.0F, .y = 0.0F};
+        case Alignment::TopCenter:
+            return Point{.x = cx, .y = 0.0F};
+        case Alignment::TopRight:
+            return Point{.x = container_size.width - child_size.width, .y = 0.0F};
+        case Alignment::CenterLeft:
+            return Point{.x = 0.0F, .y = cy};
+        case Alignment::Center:
+            return Point{.x = cx, .y = cy};
+        case Alignment::CenterRight:
+            return Point{.x = container_size.width - child_size.width, .y = cy};
+        case Alignment::BottomLeft:
+            return Point{.x = 0.0F, .y = container_size.height - child_size.height};
+        case Alignment::BottomCenter:
+            return Point{.x = cx, .y = container_size.height - child_size.height};
+        case Alignment::BottomRight:
+            return Point{.x = container_size.width - child_size.width, .y = container_size.height - child_size.height};
     }
-    return Point{ .x = 0.0f, .y = 0.0f };
+    return Point{.x = 0.0F, .y = 0.0F};
 }
 
-} // namespace aurora
+}  // namespace aurora

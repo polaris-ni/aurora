@@ -19,13 +19,11 @@
 #include <cmath>
 #include <cstddef>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
-#include <nlohmann/json.hpp>
-
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::Column;
@@ -42,13 +40,13 @@ using aurora::Size;
 using aurora::Spacer;
 
 using Json = nlohmann::json;
-using Result_ = ScrollBenchHarness::Result;
+using Result = ScrollBenchHarness::Result;
 using SettleReason = ScrollBenchHarness::Result::SettleReason;
 
 namespace {
 
 /// @brief 每个内容块的固定高（dp）。用 `Length::fixed` 而非文本，几何完全脱离字体度量。
-constexpr float AURORA_K_BLOCK_H = 40.0f;
+constexpr float AURORA_K_BLOCK_H = 40.0F;
 
 /// @brief 合成可滚动树：`Scroll` 包 `Column`，Column 内 `rows` 个固定高块。
 /// @note 用 `Spacer(false)` 作块体：它不绘制、不测字，`height(fixed)` 后尺寸严格可预测。
@@ -58,11 +56,11 @@ constexpr float AURORA_K_BLOCK_H = 40.0f;
     for (int i = 0; i < rows; ++i) {
         auto block = std::make_shared<Spacer>(false);
         block->height(Length::fixed(AURORA_K_BLOCK_H));
-        block->width(Length::fixed(200.0f));
+        block->width(Length::fixed(200.0F));
         items.emplace_back(std::move(block));
     }
-    auto col = std::make_shared<Column>(ColumnProps{ .children = std::move(items) });
-    return Node{ std::make_shared<Scroll>(ScrollProps{ .child = Node{ std::move(col) } }) };
+    auto col = std::make_shared<Column>(ColumnProps{.children = std::move(items)});
+    return Node{std::make_shared<Scroll>(ScrollProps{.child = Node{std::move(col)}})};
 }
 
 /// @brief 无滚动容器的树（纯 Column），用于验证 `scrollable_found == false`。
@@ -73,7 +71,7 @@ constexpr float AURORA_K_BLOCK_H = 40.0f;
         block->height(Length::fixed(AURORA_K_BLOCK_H));
         items.emplace_back(std::move(block));
     }
-    return Node{ std::make_shared<Column>(ColumnProps{ .children = std::move(items) }) };
+    return Node{std::make_shared<Column>(ColumnProps{.children = std::move(items)})};
 }
 
 /// @brief 单测口径的小规模配置：静态树能秒收敛，不必等默认的 1500ms / 300 帧。
@@ -82,7 +80,7 @@ constexpr float AURORA_K_BLOCK_H = 40.0f;
     cfg.name = std::move(name);
     cfg.frames = 30;
     cfg.warmup_frames = 5;
-    cfg.delta_per_frame = 12.0f;
+    cfg.delta_per_frame = 12.0F;
     cfg.settle_ms = 200.0;
     cfg.settle_idle_frames = 3;
     cfg.settle_max_frames = 400;
@@ -90,20 +88,20 @@ constexpr float AURORA_K_BLOCK_H = 40.0f;
 }
 
 /// @brief 造一份「各项都合格」的 Result，供逐条翻假验证 trustworthy() 的每个子条件。
-[[nodiscard]] auto make_valid_result() -> Result_ {
-    Result_ r;
+[[nodiscard]] auto make_valid_result() -> Result {
+    Result r;
     r.report.frame_count = 100;
-    r.viewport = Size{ .width = 400.0f, .height = 300.0f };
+    r.viewport = Size{.width = 400.0F, .height = 300.0F};
     r.scrollable_found = true;
     r.moved_frames = 100;
     r.idle_frames = 0;
     r.reversals = 0;
     r.scrolled_px = 1200.0;
-    r.final_offset = 1200.0f;
-    r.max_offset = 3700.0f;
-    r.max_offset_end = 3700.0f;
-    r.scroll_viewport_h = 300.0f;
-    r.dp_per_unit = 16.0f;
+    r.final_offset = 1200.0F;
+    r.max_offset = 3700.0F;
+    r.max_offset_end = 3700.0F;
+    r.scroll_viewport_h = 300.0F;
+    r.dp_per_unit = 16.0F;
     r.settle_frames = 10;
     r.settle_ms = 50.0;
     r.settled = true;
@@ -112,7 +110,7 @@ constexpr float AURORA_K_BLOCK_H = 40.0f;
 }
 
 /// @brief 统计 CSV 字段数（本模块字段值不含逗号）。
-[[nodiscard]] auto csv_field_count(const std::string &row) -> std::size_t {
+[[nodiscard]] auto csv_field_count(const std::string& row) -> std::size_t {
     if (row.empty()) {
         return 0;
     }
@@ -131,55 +129,55 @@ constexpr float AURORA_K_BLOCK_H = 40.0f;
 
 // ---- Test 1: geometry_stable —— 采样前后行程差 < 0.5dp ----
 auto test_geometry_stable() -> void {
-    Result_ r = make_valid_result();
+    Result r = make_valid_result();
 
     AURORA_TEST_CHECK_MSG(r.geometry_stable(), "Test1: travel identical before/after -> stable");
 
-    r.max_offset_end = r.max_offset + 0.4f;
+    r.max_offset_end = r.max_offset + 0.4F;
     AURORA_TEST_CHECK_MSG(r.geometry_stable(), "Test1: diff 0.4dp (< 0.5 tolerance) still stable");
 
-    r.max_offset_end = r.max_offset + 0.6f;
+    r.max_offset_end = r.max_offset + 0.6F;
     AURORA_TEST_CHECK_MSG(!r.geometry_stable(), "Test1: diff 0.6dp judged unstable");
 
     // 骨架屏中途退场的典型形态：采样后内容变高，行程随之变大。
-    r.max_offset = 364.0f;
-    r.max_offset_end = 2200.0f;
+    r.max_offset = 364.0F;
+    r.max_offset_end = 2200.0F;
     AURORA_TEST_CHECK_MSG(!r.geometry_stable(), "Test1: content grew during sampling (skeleton exit) judged unstable");
 }
 
 // ---- Test 2: content_screens —— 内容是滚动容器视口的多少倍 ----
 auto test_content_screens() -> void {
-    Result_ r = make_valid_result();
+    Result r = make_valid_result();
 
-    r.scroll_viewport_h = 300.0f;
-    r.max_offset = 300.0f; // 内容 = 视口 + 行程 = 600 = 2 屏
-    AURORA_TEST_CHECK_MSG(near_f(r.content_screens(), 2.0f, 1e-4f),
+    r.scroll_viewport_h = 300.0F;
+    r.max_offset = 300.0F;  // 内容 = 视口 + 行程 = 600 = 2 屏
+    AURORA_TEST_CHECK_MSG(near_f(r.content_screens(), 2.0F, 1e-4F),
                           "Test2: travel = one screen -> content 2.00 screens");
 
-    r.max_offset = 0.0f;
-    AURORA_TEST_CHECK_MSG(near_f(r.content_screens(), 1.0f, 1e-4f), "Test2: travel 0 -> content exactly 1 screen");
+    r.max_offset = 0.0F;
+    AURORA_TEST_CHECK_MSG(near_f(r.content_screens(), 1.0F, 1e-4F), "Test2: travel 0 -> content exactly 1 screen");
 
-    r.scroll_viewport_h = 0.0f;
-    AURORA_TEST_CHECK_MSG(near_f(r.content_screens(), 0.0f, 1e-4f),
+    r.scroll_viewport_h = 0.0F;
+    AURORA_TEST_CHECK_MSG(near_f(r.content_screens(), 0.0F, 1e-4F),
                           "Test2: returns 0 when viewport height unknown (0), no division by zero");
 
     // 用「滚动容器自身视口」而非窗口视口：AppShell 的顶栏/底栏会挤占上百 dp，
     // 用窗口高算会把「内容不足两屏」误判成「够滚」。
-    r.scroll_viewport_h = 640.0f;
-    r.max_offset = 364.0f;
-    r.viewport = Size{ .width = 1100.0f, .height = 760.0f };
-    AURORA_TEST_CHECK_MSG(r.content_screens() < 2.0f,
+    r.scroll_viewport_h = 640.0F;
+    r.max_offset = 364.0F;
+    r.viewport = Size{.width = 1100.0F, .height = 760.0F};
+    AURORA_TEST_CHECK_MSG(r.content_screens() < 2.0F,
                           "Test2: google_play metric (640dp viewport / 364dp travel) judged under two screens");
 }
 
 // ---- Test 3: reversal_ratio ----
 auto test_reversal_ratio() -> void {
-    Result_ r = make_valid_result();
+    Result r = make_valid_result();
 
     r.reversals = 0;
     AURORA_TEST_CHECK_MSG(near_d(r.reversal_ratio(), 0.0, 1e-9), "Test3: no reversal -> ratio 0");
 
-    r.reversals = 5; // frame_count = 100
+    r.reversals = 5;  // frame_count = 100
     AURORA_TEST_CHECK_MSG(near_d(r.reversal_ratio(), 0.05, 1e-9), "Test3: 5/100 → 0.05");
 
     r.report.frame_count = 0;
@@ -192,52 +190,52 @@ auto test_trustworthy_conditions() -> void {
     AURORA_TEST_CHECK_MSG(make_valid_result().trustworthy(), "Test4: all-valid baseline sample judged trustworthy");
 
     {
-        Result_ r = make_valid_result();
+        Result r = make_valid_result();
         r.scrollable_found = false;
         AURORA_TEST_CHECK_MSG(!r.trustworthy(), "Test4: scroll control not located -> untrustworthy");
     }
     {
-        Result_ r = make_valid_result();
+        Result r = make_valid_result();
         r.settled = false;
         AURORA_TEST_CHECK_MSG(!r.trustworthy(), "Test4: hit frame cap during settle -> untrustworthy");
     }
     {
-        Result_ r = make_valid_result();
+        Result r = make_valid_result();
         r.report.frame_count = 0;
         r.moved_frames = 0;
         AURORA_TEST_CHECK_MSG(!r.trustworthy(), "Test4: zero sampled frames -> untrustworthy");
     }
     {
-        Result_ r = make_valid_result();
-        r.moved_frames = 99; // 有一帧没滚起来
+        Result r = make_valid_result();
+        r.moved_frames = 99;  // 有一帧没滚起来
         AURORA_TEST_CHECK_MSG(!r.trustworthy(), "Test4: a sampled frame produced no movement -> untrustworthy");
     }
     {
-        Result_ r = make_valid_result();
+        Result r = make_valid_result();
         r.idle_frames = 1;
         AURORA_TEST_CHECK_MSG(!r.trustworthy(),
                               "Test4: idle frame skip present -> untrustworthy (measured skip, not render)");
     }
     {
-        Result_ r = make_valid_result();
-        r.max_offset = 0.0f;
-        r.max_offset_end = 0.0f;
+        Result r = make_valid_result();
+        r.max_offset = 0.0F;
+        r.max_offset_end = 0.0F;
         AURORA_TEST_CHECK_MSG(!r.trustworthy(), "Test4: travel 0 (tree not scrollable at all) -> untrustworthy");
     }
     {
-        Result_ r = make_valid_result();
-        r.max_offset_end = 2200.0f; // 采样期内容还在长
+        Result r = make_valid_result();
+        r.max_offset_end = 2200.0F;  // 采样期内容还在长
         AURORA_TEST_CHECK_MSG(!r.trustworthy(), "Test4: geometry unstable -> untrustworthy");
     }
     {
-        Result_ r = make_valid_result();
-        r.reversals = 11; // 11/100 = 11% > 10%
+        Result r = make_valid_result();
+        r.reversals = 11;  // 11/100 = 11% > 10%
         AURORA_TEST_CHECK_MSG(!r.trustworthy(), "Test4: reversal ratio over 10% -> untrustworthy (content too short)");
 
-        r.reversals = 10; // 恰好 10%，边界取闭区间
+        r.reversals = 10;  // 恰好 10%，边界取闭区间
         AURORA_TEST_CHECK_MSG(r.trustworthy(), "Test4: reversal ratio exactly 10% still trustworthy (closed interval)");
     }
-    AURORA_TEST_CHECK_MSG(near_d(Result_::kMaxReversalRatio, 0.10, 1e-9),
+    AURORA_TEST_CHECK_MSG(near_d(Result::kMaxReversalRatio, 0.10, 1e-9),
                           "Test4: reversal ratio threshold constant is 0.10");
 }
 
@@ -245,13 +243,13 @@ auto test_trustworthy_conditions() -> void {
 auto test_settle_reason_semantics() -> void {
     // settled 与 settle_reason 是两个字段，但语义上一一对应：
     // Disabled / Idle / TimeBudget 都是正常落定，只有 FrameCap 是未落定。
-    for (const SettleReason reason : { SettleReason::Disabled, SettleReason::Idle, SettleReason::TimeBudget }) {
-        Result_ r = make_valid_result();
+    for (const SettleReason reason : {SettleReason::Disabled, SettleReason::Idle, SettleReason::TimeBudget}) {
+        Result r = make_valid_result();
         r.settle_reason = reason;
         r.settled = true;
         AURORA_TEST_CHECK_MSG(r.trustworthy(), "Test5: Disabled / Idle / TimeBudget all treated as normal settle");
     }
-    Result_ capped = make_valid_result();
+    Result capped = make_valid_result();
     capped.settle_reason = SettleReason::FrameCap;
     capped.settled = false;
     AURORA_TEST_CHECK_MSG(!capped.trustworthy(), "Test5: FrameCap treated as not settled -> untrustworthy");
@@ -259,10 +257,10 @@ auto test_settle_reason_semantics() -> void {
 
 // ---- Test 6: 序列化——CSV 列对齐、JSON 可解析、Markdown 含判定行 ----
 auto test_serialization() -> void {
-    Result_ r = make_valid_result();
+    Result r = make_valid_result();
     r.report.name = "unit";
 
-    const std::size_t hn = csv_field_count(Result_::csv_header());
+    const std::size_t hn = csv_field_count(Result::csv_header());
     const std::size_t rn = csv_field_count(r.to_csv_row());
     AURORA_TEST_CHECK_MSG(hn == rn, "Test6: CSV header column count matches data row column count");
     AURORA_TEST_CHECK_MSG(hn > csv_field_count(PerfReport::csv_header()),
@@ -276,6 +274,8 @@ auto test_serialization() -> void {
                               "Test6: JSON contains human-readable settle_reason");
         AURORA_TEST_CHECK_MSG(near_d(j.value("dp_per_unit", 0.0), 16.0, 1e-3),
                               "Test6: JSON contains calibration factor");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(j.contains("report") && j["report"].is_object(),
                               "Test6: JSON embeds complete report object");
     }
@@ -288,7 +288,7 @@ auto test_serialization() -> void {
                           "Test6: Markdown contains geometry-stable line");
 
     // 不可信时 Markdown 必须显式喊出来，不能只在数字里体现。
-    Result_ bad = make_valid_result();
+    Result bad = make_valid_result();
     bad.scrollable_found = false;
     AURORA_TEST_CHECK_MSG(bad.to_markdown().find("FAIL") != std::string::npos,
                           "Test6: untrustworthy result marked FAIL in Markdown");
@@ -299,9 +299,9 @@ auto test_serialization() -> void {
 // =========================================================================
 
 // ---- Test 7: 正常场景——定位、标定、每帧真滚、判为可信 ----
-auto test_run_scrollable() -> Result_ {
+auto test_run_scrollable() -> Result {
     const auto cfg = small_config("unit-scrollable");
-    const Result_ r = ScrollBenchHarness::run(build_scrollable(100), Size{ .width = 400.0f, .height = 300.0f }, cfg);
+    const Result r = ScrollBenchHarness::run(build_scrollable(100), Size{.width = 400.0F, .height = 300.0F}, cfg);
 
     AURORA_TEST_CHECK_MSG(r.scrollable_found, "Test7: located Scroll container");
     AURORA_TEST_CHECK_MSG(r.settled, "Test7: settle phase ended normally");
@@ -315,20 +315,20 @@ auto test_run_scrollable() -> Result_ {
     AURORA_TEST_CHECK_MSG(r.reversals == 0, "Test7: content long enough, no edge reversal throughout");
 
     // 几何：100 块 × 40dp = 4000dp 内容，300dp 视口 → 行程 ≈ 3700dp（Column 间距可能微调）。
-    AURORA_TEST_CHECK_MSG(r.max_offset > 3000.0f, "Test7: measured travel > 3000dp (content 4000dp / viewport 300dp)");
+    AURORA_TEST_CHECK_MSG(r.max_offset > 3000.0F, "Test7: measured travel > 3000dp (content 4000dp / viewport 300dp)");
     AURORA_TEST_CHECK_MSG(r.geometry_stable(), "Test7: travel consistent before/after sampling (content static)");
-    AURORA_TEST_CHECK_MSG(near_f(r.scroll_viewport_h, 300.0f, 1.0f),
+    AURORA_TEST_CHECK_MSG(near_f(r.scroll_viewport_h, 300.0F, 1.0F),
                           "Test7: scroll container viewport height == window height (no top/bottom bar squeeze)");
-    AURORA_TEST_CHECK_MSG(r.content_screens() > 2.0f, "Test7: content exceeds two screens");
+    AURORA_TEST_CHECK_MSG(r.content_screens() > 2.0F, "Test7: content exceeds two screens");
 
     // 标定：`Scroll::step` 默认 16dp/滚轮单位，harness 应实测出这个系数。
-    AURORA_TEST_CHECK_MSG(near_f(r.dp_per_unit, 16.0f, 0.01f),
+    AURORA_TEST_CHECK_MSG(near_f(r.dp_per_unit, 16.0F, 0.01F),
                           "Test7: dp_per_unit calibrated to 16.0 (Scroll::step default)");
 
     // 位移量：30 帧 × 12dp/帧 = 360dp（标定生效后，配置里的 dp 就是真实 dp）。
     AURORA_TEST_CHECK_MSG(near_d(r.scrolled_px, 360.0, 1.0),
                           "Test7: accumulated offset ~= 30x12 = 360dp (dp-calibrated)");
-    AURORA_TEST_CHECK_MSG(r.final_offset > 0.0f, "Test7: offset positive at end");
+    AURORA_TEST_CHECK_MSG(r.final_offset > 0.0F, "Test7: offset positive at end");
 
     AURORA_TEST_CHECK_MSG(r.trustworthy(), "Test7: overall judged trustworthy");
 
@@ -342,7 +342,7 @@ auto test_run_scrollable() -> Result_ {
         AURORA_TEST_CHECK_MSG(
             r.counters_max().scroll_buffer_bytes > 0,
             "Test7[PROFILING=ON]: Scroll offscreen-buffer byte count is instrumented (anchor for gate G-8)");
-    } else { // NOLINT
+    } else {  // NOLINT
         AURORA_TEST_CHECK_MSG(r.counters_sum().paint_nodes == 0,
                               "Test7[PROFILING=OFF]: counters stay 0 (instrumentation compiled out)");
     }
@@ -353,12 +353,12 @@ auto test_run_scrollable() -> Result_ {
 auto test_run_too_short() -> void {
     auto cfg = small_config("unit-too-short");
     // 2 块 × 40dp = 80dp 内容，300dp 视口 → 根本没得滚。
-    const Result_ r = ScrollBenchHarness::run(build_scrollable(2), Size{ .width = 400.0f, .height = 300.0f }, cfg);
+    const Result r = ScrollBenchHarness::run(build_scrollable(2), Size{.width = 400.0F, .height = 300.0F}, cfg);
 
     AURORA_TEST_CHECK_MSG(r.scrollable_found,
                           "Test8: still located Scroll container (control present, just nothing scrollable)");
-    AURORA_TEST_CHECK_MSG(near_f(r.max_offset, 0.0f, 0.01f), "Test8: measured travel is 0");
-    AURORA_TEST_CHECK_MSG(near_f(r.dp_per_unit, 0.0f, 1e-6f),
+    AURORA_TEST_CHECK_MSG(near_f(r.max_offset, 0.0F, 0.01F), "Test8: measured travel is 0");
+    AURORA_TEST_CHECK_MSG(near_f(r.dp_per_unit, 0.0F, 1e-6F),
                           "Test8: skip calibration when not scrollable, dp_per_unit stays 0");
     AURORA_TEST_CHECK_MSG(r.moved_frames == 0, "Test8: no frame produced any movement");
     AURORA_TEST_CHECK_MSG(!r.trustworthy(), "Test8: judged untrustworthy (this is exactly why the harness exists)");
@@ -368,10 +368,10 @@ auto test_run_too_short() -> void {
 // ---- Test 9: 树里没有滚动容器 ----
 auto test_run_no_scrollable() -> void {
     const auto cfg = small_config("unit-no-scrollable");
-    const Result_ r = ScrollBenchHarness::run(build_static_tree(), Size{ .width = 400.0f, .height = 300.0f }, cfg);
+    const Result r = ScrollBenchHarness::run(build_static_tree(), Size{.width = 400.0F, .height = 300.0F}, cfg);
 
     AURORA_TEST_CHECK_MSG(!r.scrollable_found, "Test9: scrollable_found == false");
-    AURORA_TEST_CHECK_MSG(near_f(r.scroll_viewport_h, 0.0f, 1e-6f),
+    AURORA_TEST_CHECK_MSG(near_f(r.scroll_viewport_h, 0.0F, 1e-6F),
                           "Test9: viewport height 0 when no scroll container");
     AURORA_TEST_CHECK_MSG(r.moved_frames == 0, "Test9: no movement");
     AURORA_TEST_CHECK_MSG(!r.trustworthy(), "Test9: judged untrustworthy");
@@ -383,15 +383,15 @@ auto test_run_no_scrollable() -> void {
 auto test_run_invalid_input() -> void {
     const auto cfg = small_config("unit-invalid");
 
-    const Result_ empty = ScrollBenchHarness::run(Node{}, Size{ .width = 400.0f, .height = 300.0f }, cfg);
+    const Result empty = ScrollBenchHarness::run(Node{}, Size{.width = 400.0F, .height = 300.0F}, cfg);
     AURORA_TEST_CHECK_MSG(!empty.scrollable_found && !empty.trustworthy(),
                           "Test10: empty node -> untrustworthy, no crash");
     AURORA_TEST_CHECK_MSG(empty.report.frame_count == 0, "Test10: empty node does not enter sampling");
 
-    const Result_ zero = ScrollBenchHarness::run(build_scrollable(50), Size{ .width = 0.0f, .height = 0.0f }, cfg);
+    const Result zero = ScrollBenchHarness::run(build_scrollable(50), Size{.width = 0.0F, .height = 0.0F}, cfg);
     AURORA_TEST_CHECK_MSG(!zero.trustworthy(), "Test10: zero-size viewport -> untrustworthy, no crash");
 
-    const Result_ neg = ScrollBenchHarness::run(build_scrollable(50), Size{ .width = 400.0f, .height = -10.0f }, cfg);
+    const Result neg = ScrollBenchHarness::run(build_scrollable(50), Size{.width = 400.0F, .height = -10.0F}, cfg);
     AURORA_TEST_CHECK_MSG(!neg.trustworthy(), "Test10: negative-height viewport -> untrustworthy, no crash");
 }
 
@@ -400,7 +400,7 @@ auto test_settle_disabled() -> void {
     auto cfg = small_config("unit-no-settle");
     cfg.settle_ms = 0.0;
 
-    const Result_ r = ScrollBenchHarness::run(build_scrollable(100), Size{ .width = 400.0f, .height = 300.0f }, cfg);
+    const Result r = ScrollBenchHarness::run(build_scrollable(100), Size{.width = 400.0F, .height = 300.0F}, cfg);
     AURORA_TEST_CHECK_MSG(r.settled, "Test11: settle_ms = 0 treated as settled (caller explicitly disabled)");
     AURORA_TEST_CHECK_MSG(r.settle_reason == SettleReason::Disabled, "Test11: exit reason annotated as Disabled");
     AURORA_TEST_CHECK_MSG(r.settle_frames == 0, "Test11: no settle frames consumed");
@@ -409,10 +409,9 @@ auto test_settle_disabled() -> void {
 }
 
 // ---- Test 12: 确定性——同树同配置两次运行，几何类读数逐位相同 ----
-auto test_determinism(const Result_ &first) -> void {
+auto test_determinism(const Result& first) -> void {
     const auto cfg = small_config("unit-scrollable");
-    const Result_ second =
-        ScrollBenchHarness::run(build_scrollable(100), Size{ .width = 400.0f, .height = 300.0f }, cfg);
+    const Result second = ScrollBenchHarness::run(build_scrollable(100), Size{.width = 400.0F, .height = 300.0F}, cfg);
 
     AURORA_TEST_CHECK_MSG(second.moved_frames == first.moved_frames, "Test12: moved_frames reproducible");
     AURORA_TEST_CHECK_MSG(second.reversals == first.reversals, "Test12: reversals reproducible");
@@ -439,7 +438,7 @@ auto test_fling_mode() -> void {
     auto cfg = small_config("unit-fling");
     cfg.fling = true;
 
-    const Result_ r = ScrollBenchHarness::run(build_scrollable(400), Size{ .width = 400.0f, .height = 300.0f }, cfg);
+    const Result r = ScrollBenchHarness::run(build_scrollable(400), Size{.width = 400.0F, .height = 300.0F}, cfg);
     AURORA_TEST_CHECK_MSG(r.scrollable_found, "Test13: fling mode still locates scroll container");
     AURORA_TEST_CHECK_MSG(r.moved_frames == 30, "Test13: fling mode still produces movement each frame");
     AURORA_TEST_CHECK_MSG(r.scrolled_px > 360.0,
@@ -450,14 +449,14 @@ auto test_fling_mode() -> void {
 // ---- Test 14: scale 参数真实生效（不改变逻辑几何）----
 auto test_scale() -> void {
     auto cfg = small_config("unit-scale2x");
-    cfg.scale = 2.0f;
+    cfg.scale = 2.0F;
 
-    const Result_ r = ScrollBenchHarness::run(build_scrollable(100), Size{ .width = 400.0f, .height = 300.0f }, cfg);
+    const Result r = ScrollBenchHarness::run(build_scrollable(100), Size{.width = 400.0F, .height = 300.0F}, cfg);
     AURORA_TEST_CHECK_MSG(r.trustworthy(), "Test14: readings still trustworthy under scale = 2.0");
     // 视口尺寸是**逻辑 dp**，缩放只影响物理像素，逻辑几何必须保持不变。
-    AURORA_TEST_CHECK_MSG(near_f(r.scroll_viewport_h, 300.0f, 1.0f),
+    AURORA_TEST_CHECK_MSG(near_f(r.scroll_viewport_h, 300.0F, 1.0F),
                           "Test14: logical viewport height independent of scale");
-    AURORA_TEST_CHECK_MSG(near_f(r.dp_per_unit, 16.0f, 0.01f), "Test14: calibration factor independent of scale");
+    AURORA_TEST_CHECK_MSG(near_f(r.dp_per_unit, 16.0F, 0.01F), "Test14: calibration factor independent of scale");
 
     if constexpr (profiling_enabled()) {
         AURORA_TEST_CHECK_MSG(r.counters_sum().pixels_filled > 0,
@@ -465,7 +464,7 @@ auto test_scale() -> void {
     }
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_scroll_bench ===\n");
@@ -479,7 +478,7 @@ AURORA_TEST() {
     test_serialization();
 
     // 二、真实 Headless 采样
-    const Result_ baseline = test_run_scrollable();
+    const Result baseline = test_run_scrollable();
     test_run_too_short();
     test_run_no_scrollable();
     test_run_invalid_input();

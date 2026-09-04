@@ -47,8 +47,8 @@ class RichTextEdit : public LeafWidget {
     /// @brief 纯文本内容（所有字符拼接）。
     [[nodiscard]] auto plain_text() const -> std::string {
         std::string out;
-        out.reserve(m_doc.size());
-        for (const auto &sc : m_doc) {
+        out.reserve(doc_.size());
+        for (const auto &sc : doc_) {
             out.push_back(sc.ch);
         }
         return out;
@@ -57,7 +57,7 @@ class RichTextEdit : public LeafWidget {
     /// @brief 导出为 TextSpan 序列（连续同样式字符合并）。
     [[nodiscard]] auto to_spans() const -> std::vector<TextSpan> {
         std::vector<TextSpan> out;
-        for (const auto &sc : m_doc) {
+        for (const auto &sc : doc_) {
             if (!out.empty() && out.back().font == sc.font && out.back().color == sc.color) {
                 out.back().text.text.push_back(sc.ch);
             } else {
@@ -73,74 +73,74 @@ class RichTextEdit : public LeafWidget {
 
     /// @brief 从 TextSpan 序列加载文档。
     auto load_spans(const std::vector<TextSpan> &spans) -> void {
-        m_doc.clear();
+        doc_.clear();
         for (const auto &s : spans) {
             for (const char ch : s.text.text) {
-                m_doc.push_back(StyledChar{ .ch = ch, .font = s.font, .color = s.color, .underline = false });
+                doc_.push_back(StyledChar{.ch = ch, .font = s.font, .color = s.color, .underline = false});
             }
         }
-        m_caret = 0;
-        m_sel_start = m_sel_end = 0;
+        caret_ = 0;
+        sel_start_ = sel_end_ = 0;
         mark_needs_paint();
     }
 
     // ---- 当前输入样式 ----
 
-    [[nodiscard]] auto current_font() const -> Font { return m_cur_font; }
+    [[nodiscard]] auto current_font() const -> Font { return cur_font_; }
     auto set_current_font(Font f) -> RichTextEdit & {
-        m_cur_font = std::move(f);
+        cur_font_ = std::move(f);
         return *this;
     }
-    [[nodiscard]] auto current_color() const -> Color { return m_cur_color; }
+    [[nodiscard]] auto current_color() const -> Color { return cur_color_; }
     auto set_current_color(Color c) -> RichTextEdit & {
-        m_cur_color = c;
+        cur_color_ = c;
         return *this;
     }
-    [[nodiscard]] auto current_underline() const -> bool { return m_cur_underline; }
+    [[nodiscard]] auto current_underline() const -> bool { return cur_underline_; }
     auto set_current_underline(bool v) -> RichTextEdit & {
-        m_cur_underline = v;
+        cur_underline_ = v;
         return *this;
     }
 
     /// @brief 切换当前字体粗体（weight 400 ↔ 700）。
-    auto toggle_bold() -> void { m_cur_font.weight = (m_cur_font.weight >= 700) ? 400 : 700; }
+    auto toggle_bold() -> void { cur_font_.weight = (cur_font_.weight >= 700) ? 400 : 700; }
     /// @brief 切换当前字体斜体（通过 family 后缀 "*" 模拟，实际渲染依赖 FontEngine）。
     auto toggle_italic() -> void {
         // 简化：用 family 尾部标记；真实场景需 Font::italic 字段。
-        if (m_cur_font.family.size() >= 2 && m_cur_font.family.back() == 'I' &&
-            m_cur_font.family[m_cur_font.family.size() - 2] == '/') {
-            m_cur_font.family = m_cur_font.family.substr(0, m_cur_font.family.size() - 2);
+        if (cur_font_.family.size() >= 2 && cur_font_.family.back() == 'I' &&
+            cur_font_.family[cur_font_.family.size() - 2] == '/') {
+            cur_font_.family = cur_font_.family.substr(0, cur_font_.family.size() - 2);
         } else {
-            m_cur_font.family += "/I";
+            cur_font_.family += "/I";
         }
     }
     /// @brief 切换当前下划线。
-    auto toggle_underline() -> void { m_cur_underline = !m_cur_underline; }
+    auto toggle_underline() -> void { cur_underline_ = !cur_underline_; }
 
     // ---- UndoStack 集成 ----
 
     auto set_undo_stack(UndoStack *stack) -> RichTextEdit & {
-        m_undo = stack;
+        undo_ = stack;
         return *this;
     }
-    [[nodiscard]] auto undo_stack() const -> UndoStack * { return m_undo; }
+    [[nodiscard]] auto undo_stack() const -> UndoStack * { return undo_; }
 
     // ---- 光标 / 选区 ----
 
-    [[nodiscard]] auto caret() const -> std::size_t { return m_caret; }
-    [[nodiscard]] auto selection_start() const -> std::size_t { return m_sel_start; }
-    [[nodiscard]] auto selection_end() const -> std::size_t { return m_sel_end; }
-    [[nodiscard]] auto has_selection() const -> bool { return m_sel_start != m_sel_end; }
+    [[nodiscard]] auto caret() const -> std::size_t { return caret_; }
+    [[nodiscard]] auto selection_start() const -> std::size_t { return sel_start_; }
+    [[nodiscard]] auto selection_end() const -> std::size_t { return sel_end_; }
+    [[nodiscard]] auto has_selection() const -> bool { return sel_start_ != sel_end_; }
 
     [[nodiscard]] auto selected_text() const -> std::string {
         if (!has_selection()) {
             return {};
         }
-        const auto a = std::min(m_sel_start, m_sel_end);
-        const auto b = std::max(m_sel_start, m_sel_end);
+        const auto a = std::min(sel_start_, sel_end_);
+        const auto b = std::max(sel_start_, sel_end_);
         std::string out;
-        for (auto i = a; i < b && i < m_doc.size(); ++i) {
-            out.push_back(m_doc[i].ch);
+        for (auto i = a; i < b && i < doc_.size(); ++i) {
+            out.push_back(doc_[i].ch);
         }
         return out;
     }
@@ -165,7 +165,7 @@ class RichTextEdit : public LeafWidget {
         if (!e.text.empty()) {
             do_insert(e.text);
             mark_needs_paint();
-            e.handled = true;
+            e.is_handled = true;
         }
     }
 
@@ -222,16 +222,16 @@ class RichTextEdit : public LeafWidget {
     auto paint_cursor(Painter &p, const Rect &bounds) const -> void;
 
     // ---- 数据成员 ----
-    std::vector<StyledChar> m_doc;
-    std::size_t m_caret = 0;
-    std::size_t m_sel_start = 0;
-    std::size_t m_sel_end = 0;
-    Font m_cur_font{};
-    Color m_cur_color = Color::black();
-    bool m_cur_underline = false;
-    UndoStack *m_undo = nullptr;
-    float m_line_height = 20.0f;
-    std::vector<Line> m_lines;
+    std::vector<StyledChar> doc_;
+    std::size_t caret_ = 0;
+    std::size_t sel_start_ = 0;
+    std::size_t sel_end_ = 0;
+    Font cur_font_{};
+    Color cur_color_ = Color::black();
+    bool cur_underline_ = false;
+    UndoStack *undo_ = nullptr;
+    float line_height_ = 20.0F;
+    std::vector<Line> lines_;
 };
 
-} // namespace aurora
+}  // namespace aurora

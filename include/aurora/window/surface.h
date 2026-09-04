@@ -26,36 +26,36 @@ namespace aurora {
 /// 决定「标题栏/边框由谁绘制、无原生装饰（如 GNOME 不支持 xdg-decoration）时如何兜底」，
 /// 使窗口在缺标题栏或显式无边框时仍可移动/缩放/关闭——即「无标题栏也能正常运行」。
 enum class DecorationPolicy : std::uint8_t {
-    Auto,       ///< 自动：优先协商服务端装饰（SSD）；不可用时回退客户端自绘（CSD）标题栏。
-    ServerSide, ///< 强制服务端装饰（KDE 原生标题栏）；不可用时回退 CSD 兜底。
-    ClientSide, ///< 强制客户端自绘 CSD 标题栏（即便 compositor 支持 SSD）。
-    Borderless, ///< 无标题栏：保留可拖拽缩放边框；移动靠修饰键拖拽（Super/Alt + 拖拽）。
+    Auto,  ///< 自动：优先协商服务端装饰（SSD）；不可用时回退客户端自绘（CSD）标题栏。
+    ServerSide,  ///< 强制服务端装饰（KDE 原生标题栏）；不可用时回退 CSD 兜底。
+    ClientSide,  ///< 强制客户端自绘 CSD 标题栏（即便 compositor 支持 SSD）。
+    Borderless,  ///< 无标题栏：保留可拖拽缩放边框；移动靠修饰键拖拽（Super/Alt + 拖拽）。
     Frameless,  ///< 完全无装饰：应用自绘全部 UI，并经程序化 API（close/minimize/...）驱动窗口状态。
 };
 
 /// @brief 可缩放窗口边缘（begin_window_resize 参数；跨后端声明，各 Surface 按平台语义映射）。
 /// 枚举值序即后端映射表的公共契约（Wayland kMap / Win32 kHt 均按下标取用），不得重排。
 enum class WindowResizeEdge : std::uint8_t {
-    None,        ///< 无效/哨兵：不发起缩放（下标 0，后端据此拒绝）。
-    Top,         ///< 上边缘
-    Bottom,      ///< 下边缘
-    Left,        ///< 左边缘
-    Right,       ///< 右边缘
-    TopLeft,     ///< 左上角
-    TopRight,    ///< 右上角
+    None,  ///< 无效/哨兵：不发起缩放（下标 0，后端据此拒绝）。
+    Top,  ///< 上边缘
+    Bottom,  ///< 下边缘
+    Left,  ///< 左边缘
+    Right,  ///< 右边缘
+    TopLeft,  ///< 左上角
+    TopRight,  ///< 右上角
     BottomLeft,  ///< 左下角
-    BottomRight, ///< 右下角
+    BottomRight,  ///< 右下角
 };
 
 struct WindowStyleOptions {
-    bool always_on_top = false; ///< 置顶（始终浮在普通窗口之上）
-    bool frameless = false;     ///< 无边框（无标题栏/边框；自行实现拖拽/关闭）。等价于 DecorationPolicy::Frameless。
-    DecorationPolicy decoration = DecorationPolicy::Auto; ///< 装饰策略（见 DecorationPolicy）。
-    bool transparent = false;                             ///< 透明窗口（Win32: WS_EX_LAYERED）
-    bool resizable = true;                                ///< 可调大小（false = 固定尺寸，去最大化按钮）
-    Size min_size{ .width = 0.0f, .height = 0.0f };       ///< 最小逻辑尺寸（0 = 不限）
-    Size max_size{ .width = 0.0f, .height = 0.0f };       ///< 最大逻辑尺寸（0 = 不限）
-    TitleBarStyle title_bar{};                            ///< CSD 自绘标题栏样式（Wayland/X11 等客户端装饰后端使用）
+    bool always_on_top = false;  ///< 置顶（始终浮在普通窗口之上）
+    bool frameless = false;  ///< 无边框（无标题栏/边框；自行实现拖拽/关闭）。等价于 DecorationPolicy::Frameless。
+    DecorationPolicy decoration = DecorationPolicy::Auto;  ///< 装饰策略（见 DecorationPolicy）。
+    bool transparent = false;  ///< 透明窗口（Win32: WS_EX_LAYERED）
+    bool resizable = true;  ///< 可调大小（false = 固定尺寸，去最大化按钮）
+    Size min_size{.width = 0.0F, .height = 0.0F};  ///< 最小逻辑尺寸（0 = 不限）
+    Size max_size{.width = 0.0F, .height = 0.0F};  ///< 最大逻辑尺寸（0 = 不限）
+    TitleBarStyle title_bar{};  ///< CSD 自绘标题栏样式（Wayland/X11 等客户端装饰后端使用）
 };
 
 /**
@@ -87,7 +87,7 @@ class Surface {
     /// @brief 当前表面尺寸（设备像素）。
     [[nodiscard]] virtual auto size() const -> Size = 0;
     /// @brief 设备像素密度（dpi / 160）。
-    [[nodiscard]] virtual auto scale_factor() const -> float { return 1.0f; }
+    [[nodiscard]] virtual auto scale_factor() const -> float { return 1.0F; }
     /// @brief 平台是否已请求关闭（帧循环据此退出）。
     [[nodiscard]] virtual auto should_close() const -> bool { return false; }
     /// @brief 轮询平台原生事件（无头实现为空操作）。
@@ -131,17 +131,17 @@ class Surface {
 
     /// @brief 注册窗口可见性状态上报句柄（默认存入 `m_window_state_handler`；
     /// 真实后端可覆盖以叠加本地状态记录）。
-    virtual auto set_window_state_handler(WindowStateHandler h) -> void { m_window_state_handler = std::move(h); }
+    virtual auto set_window_state_handler(WindowStateHandler h) -> void { window_state_handler_ = std::move(h); }
     /// @brief 注册窗口几何态上报句柄（默认存入 `m_window_mode_handler`；
     /// 真实后端可覆盖以叠加本地状态记录）。
-    virtual auto set_window_mode_handler(WindowModeHandler h) -> void { m_window_mode_handler = std::move(h); }
+    virtual auto set_window_mode_handler(WindowModeHandler h) -> void { window_mode_handler_ = std::move(h); }
 
     /// @brief 立即重绘请求回调。
     /// 后端在窗口几何变化/系统要求重绘（如 Win32 `WM_SIZE`/`WM_PAINT`）时调用，
     /// 由 `Window` 接为「对当前缓存根再渲染一帧」，使帧缓冲在 DWM 合成前已为新尺寸内容，
     /// 从根源消除最大化白闪。`Headless`/`GLFW` 不调用该回调（默认空实现），行为不变。
     using PresentRequest = std::function<void()>;
-    virtual auto set_present_request(PresentRequest h) -> void { m_present_request = std::move(h); }
+    virtual auto set_present_request(PresentRequest h) -> void { present_request_ = std::move(h); }
 
     /// @brief 增量上屏脏区（设备坐标）：`Window` 在 present 前、脏追踪 clear 前调用，
     /// 供支持增量上传的后端（如 D3D11）仅更新变化区；默认空实现（GDI 全量 blit 忽略）。
@@ -153,7 +153,7 @@ class Surface {
     /// 否则脏区内无不透明背景的控件（如裸 `Text`、无背景的 `LazyList` 子项）会露出零基底（黑）。
     /// 默认透明（0,0,0,0），对应 `begin_frame` 仅 `painter().begin()` 不铺底色的后端
     /// （Headless/D3D11）；铺浅色底的窗口后端（Win32/GLFW/X11/Wayland）覆盖返回其底色。
-    [[nodiscard]] virtual auto clear_color() const -> Color { return Color{ 0, 0, 0, 0 }; }
+    [[nodiscard]] virtual auto clear_color() const -> Color { return Color{0, 0, 0, 0}; }
 
     /// @brief 运行时更新窗口标题（默认空实现；Win32 后端经 SetWindowText 生效，Headless/GLFW 忽略）。
     virtual auto set_title(const std::string & /*title*/) -> void {}
@@ -164,7 +164,7 @@ class Surface {
     /// @brief 运行期更新 CSD 标题栏图标（默认空实现）。参数取 `std::shared_ptr<Image>`：
     /// `Image` 内嵌整幅像素缓冲（`std::vector<std::uint8_t>`，见 core/image.h）非轻拷贝，
     /// 共享指针避免按值深拷贝像素或悬挂引用。
-    virtual auto set_title_bar_icon(const std::shared_ptr<Image> & /*icon*/) -> void {}
+    virtual auto set_title_bar_icon(const std::shared_ptr<Image> & /*icon_*/) -> void {}
 
     /// @brief 客户端装饰预留给应用内容的安全区内边距（逻辑 dp）：CSD 标题栏/边框占用的区域。
     /// 默认 0（无装饰）；Wayland CSD 下返回标题栏高度（顶）与边框厚度（四周）。
@@ -203,16 +203,16 @@ class Surface {
     [[nodiscard]] virtual auto save_snapshot(const std::string &path) -> Result<bool> {
         const std::uint8_t *px = data();
         if (px == nullptr) {
-            return Result<bool>{ make_error(
-                ErrorCode::GeneralNotSupported,
-                "save_snapshot: Surface::data() returned nullptr (framebuffer capture unavailable)") };
+            return Result<bool>{
+                make_error(ErrorCode::GeneralNotSupported,
+                           "save_snapshot: Surface::data() returned nullptr (framebuffer capture unavailable)")};
         }
         const auto sz = framebuffer_size();
         const auto r = write_png(path.c_str(), static_cast<int>(sz.width), static_cast<int>(sz.height), px);
         if (!r) {
-            return Result<bool>{ r.error() };
+            return Result<bool>{r.error()};
         }
-        return Result<bool>{ true };
+        return Result<bool>{true};
     }
 
     /// @brief 导出真实屏幕窗口为 PNG（含 OS 装饰，尽力）。
@@ -220,9 +220,9 @@ class Surface {
     /// Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。本方法**始终声明**。
     [[nodiscard]] virtual auto capture_window(const std::string &path) -> Result<bool> {
         (void)path;
-        return Result<bool>{ make_error(
+        return Result<bool>{make_error(
             ErrorCode::GeneralNotSupported,
-            "capture_window: not supported on this backend (only Win32/X11/GLFW provide OS window capture)") };
+            "capture_window: not supported on this backend (only Win32/X11/GLFW provide OS window capture)")};
     }
 
     /// @brief 已呈现帧数（诊断/测试用；默认 0）。
@@ -236,23 +236,23 @@ class Surface {
   protected:
     /// @brief 上报当前窗口可见性状态（由真实后端在状态变化时调用）。
     auto notify_window_state(WindowState s) const -> void {
-        if (m_window_state_handler) {
-            m_window_state_handler(s);
+        if (window_state_handler_) {
+            window_state_handler_(s);
         }
     }
     /// @brief 上报当前窗口几何态（由真实后端在几何态变化时调用）。
     auto notify_window_mode(WindowMode m) const -> void {
-        if (m_window_mode_handler) {
-            m_window_mode_handler(m);
+        if (window_mode_handler_) {
+            window_mode_handler_(m);
         }
     }
 
-    WindowStateHandler m_window_state_handler; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+    WindowStateHandler window_state_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
                                                ///< 窗口可见性状态上报句柄（子类经 set_* 注册）。
-    WindowModeHandler m_window_mode_handler;   // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
-                                               ///< 窗口几何态上报句柄（子类经 set_* 注册）。
-    PresentRequest m_present_request;          // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
-                                               ///< 立即重绘请求（子类在几何变化/WM_PAINT 时调用；默认空）。
+    WindowModeHandler window_mode_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+                                             ///< 窗口几何态上报句柄（子类经 set_* 注册）。
+    PresentRequest present_request_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+                                      ///< 立即重绘请求（子类在几何变化/WM_PAINT 时调用；默认空）。
 };
 
 #ifdef AURORA_BACKEND_HEADLESS
@@ -267,36 +267,36 @@ class HeadlessSurface : public Surface {
     /// @param png_path 非空时每次 `present()` 写出 PNG（覆盖同名文件）。
     /// @param size 初始逻辑尺寸；传入后可让 `size()` 在 `begin_frame` 之前即返回正确值，
     /// 避免 `Window::present_root` 首次读取到 0 尺寸把整棵树布局到 0×0 而白屏（HEADLESS 后端特有）。
-    explicit HeadlessSurface(std::string png_path = "", Size size = Size{ .width = 0.0f, .height = 0.0f })
-        : m_png_path(std::move(png_path)), m_size(size) {}
+    explicit HeadlessSurface(std::string png_path = "", Size size = Size{.width = 0.0F, .height = 0.0F})
+        : png_path_(std::move(png_path)), size_(size) {}
 
     /// @brief 设置/更换 PNG 输出路径（空串表示仅留在内存）。
-    auto set_png_path(std::string png_path) -> void { m_png_path = std::move(png_path); }
+    auto set_png_path(std::string png_path) -> void { png_path_ = std::move(png_path); }
     /// @brief 已呈现帧数（测试与诊断用）。
-    [[nodiscard]] auto frame_count() const -> int override { return m_frame; }
+    [[nodiscard]] auto frame_count() const -> int override { return frame_; }
 
     /// @brief 无头后端不等待（no-op）：测试以 `max_frames` 有限循环驱动，
     /// 引入等待会拖慢 ctest 且破坏确定性；行为与历史完全一致。
     auto wait_events(double /*timeout_ms*/) -> void override {}
 
     [[nodiscard]] auto begin_frame(int width, int height) -> Result<bool> override {
-        m_painter.begin(width, height);
-        m_size = Size{ .width = static_cast<float>(width), .height = static_cast<float>(height) };
-        return Result<bool>{ true };
+        painter_.begin(width, height);
+        size_ = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)};
+        return Result<bool>{true};
     }
-    [[nodiscard]] auto painter() -> Painter & override { return m_painter; }
+    [[nodiscard]] auto painter() -> Painter & override { return painter_; }
     [[nodiscard]] auto present() -> Result<bool> override {
-        ++m_frame;
-        if (!m_png_path.empty()) {
-            auto r = write_png(m_png_path.c_str(), m_painter.width(), m_painter.height(), m_painter.data());
+        ++frame_;
+        if (!png_path_.empty()) {
+            auto r = write_png(png_path_.c_str(), painter_.width(), painter_.height(), painter_.data());
             if (!r) {
                 return r;
             }
         }
-        return Result<bool>{ true };
+        return Result<bool>{true};
     }
-    [[nodiscard]] auto size() const -> Size override { return m_size; }
-    [[nodiscard]] auto data() const -> const std::uint8_t * override { return m_painter.data(); }
+    [[nodiscard]] auto size() const -> Size override { return size_; }
+    [[nodiscard]] auto data() const -> const std::uint8_t * override { return painter_.data(); }
 
     /// @brief 测试 seams：在无 OS 窗口下确定性驱动窗口级状态（供 `test_window_state` 使用）。
     auto simulate_window_state(WindowState s) const -> void { notify_window_state(s); }
@@ -305,18 +305,18 @@ class HeadlessSurface : public Surface {
     /// @brief 测试 seams：模拟系统重绘请求（如 Win32 最小化还原后的 WM_PAINT），
     /// 触发 `Window` 接线的同步重渲染回调；未接线时 no-op。
     auto simulate_present_request() const -> void {
-        if (m_present_request) {
-            m_present_request();
+        if (present_request_) {
+            present_request_();
         }
     }
 
   private:
-    Painter m_painter;
+    Painter painter_;
     // 声明顺序须与构造函数初始化列表一致（m_png_path 先于 m_size），否则触发 -Wreorder。
-    std::string m_png_path;
-    Size m_size{ .width = 0.0f, .height = 0.0f };
-    int m_frame = 0;
+    std::string png_path_;
+    Size size_{.width = 0.0F, .height = 0.0F};
+    int frame_ = 0;
 };
-#endif // AURORA_BACKEND_HEADLESS
+#endif  // AURORA_BACKEND_HEADLESS
 
-} // namespace aurora
+}  // namespace aurora

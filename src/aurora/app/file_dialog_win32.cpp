@@ -7,19 +7,20 @@
 #include "aurora/core/platform.h"
 #ifdef AURORA_PLATFORM_WINDOWS
 #ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0601 // Vista+：IFileOpenDialog / IFileSaveDialog
+#define AURORA_WI_N32_WINNT 0x0601  // NOLINT(cppcoreguidelines-macro-usage) Vista+：IFileOpenDialog / IFileSaveDialog
 #endif
 #ifndef _WIN32_IE
-#define WIN32_IE 0x0600 // NOLINT(cppcoreguidelines-macro-usage, readability-identifier-naming): Windows SDK 版本宏
+#define WIN32_IE 0x0600  // NOLINT(cppcoreguidelines-macro-usage, readability-identifier-naming): Windows SDK 版本宏
 #endif
-#define WIN32_LEAN_AND_MEAN // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名
+#define WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <objbase.h>
 #include <shobjidl.h>
-#include <string>
 #include <windows.h>
+
+#include <string>
 
 #include "aurora/app/file_dialog.h"
 #include "aurora/core/log.h"
@@ -32,7 +33,6 @@ namespace {
 struct ComInit {
     HRESULT hr;
     ComInit() : hr(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)) {
-
         if (hr == RPC_E_CHANGED_MODE) {
             hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED | COINIT_DISABLE_OLE1DDE);
         }
@@ -63,19 +63,22 @@ void apply_filters(IFileDialog *dlg, const std::vector<Filter> &filters) {
         names.push_back(aurora::internal::utf8_to_wstr(f.name));
         std::wstring joined;
         for (size_t i = 0; i < f.extensions.size(); ++i) {
-            if (i != 0u) {
+            if (i != 0U) {
                 joined += L';';
             }
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             joined += aurora::internal::utf8_to_wstr(f.extensions[i]);
         }
         specs.push_back(joined);
-        fspecs.push_back({ .pszName = names.back().c_str(), .pszSpec = specs.back().c_str() });
+        fspecs.push_back({.pszName = names.back().c_str(), .pszSpec = specs.back().c_str()});
     }
-    dlg->SetFileTypes(static_cast<UINT>(fspecs.size()), fspecs.data());
+    (void)dlg->SetFileTypes(static_cast<UINT>(fspecs.size()), fspecs.data());
 }
 
 // 统一：显示对话框；取消/失败时返回空结果（不抛异常）。out 经回调收集路径。
-template<typename Dlg, typename Collect> auto show_dialog(Dlg *dlg, Collect collect) -> std::vector<std::string> {
+template <typename Dlg, typename Collect>
+auto show_dialog(Dlg *dlg, Collect collect) -> std::vector<std::string> {
     const HRESULT hr = dlg->Show(nullptr);
     if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED) || hr == S_FALSE) {
         return {};
@@ -87,8 +90,7 @@ template<typename Dlg, typename Collect> auto show_dialog(Dlg *dlg, Collect coll
     return collect(dlg);
 }
 
-} // namespace
-// NOLINTNEXTLINE(readability-function-cognitive-complexity): 对话框结果收集分支较多，复杂度 26 略超阈值 25
+}  // namespace
 auto open_file(const Options &opts) -> Result<std::vector<std::string>> {
     if (!headless_open_result.empty()) {
         return headless_open_result;
@@ -104,17 +106,17 @@ auto open_file(const Options &opts) -> Result<std::vector<std::string>> {
     IFileOpenDialog *pfd = nullptr;
     HRESULT hr =
         CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog,
-                         reinterpret_cast<void **>(&pfd)); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                         reinterpret_cast<void **>(&pfd));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     if (FAILED(hr) || (pfd == nullptr)) {
         AURORA_LOG_WARN("file_dialog", "CoCreateInstance(IFileOpenDialog) failed");
         return make_error(ErrorCode::PlatformDialogCreateFailed, "CoCreateInstance(IFileOpenDialog) failed");
     }
     DWORD flags = 0;
     if (SUCCEEDED(pfd->GetOptions(&flags))) {
-        pfd->SetOptions(flags | FOS_ALLOWMULTISELECT | FOS_FORCEFILESYSTEM);
+        (void)pfd->SetOptions(flags | FOS_ALLOWMULTISELECT | FOS_FORCEFILESYSTEM);
     }
     if (!opts.title.empty()) {
-        pfd->SetTitle(aurora::internal::utf8_to_wstr(opts.title).c_str());
+        (void)pfd->SetTitle(aurora::internal::utf8_to_wstr(opts.title).c_str());
     }
     // 注：initial_dir 预选目录需要 Vista+ 的 SHCreateItemFromParsingName，当前 MinGW 工具链未提供，
     // 故暂不接线（Options 字段保留，向后兼容）；后续可改用 IShellFolder 桌面目录解析。
@@ -161,17 +163,17 @@ auto save_file(const Options &opts) -> Result<std::string> {
     IFileSaveDialog *pfs = nullptr;
     HRESULT hr =
         CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileSaveDialog,
-                         reinterpret_cast<void **>(&pfs)); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                         reinterpret_cast<void **>(&pfs));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     if (FAILED(hr) || (pfs == nullptr)) {
         AURORA_LOG_WARN("file_dialog", "CoCreateInstance(IFileSaveDialog) failed");
         return make_error(ErrorCode::PlatformDialogCreateFailed, "CoCreateInstance(IFileSaveDialog) failed");
     }
     DWORD flags = 0;
     if (SUCCEEDED(pfs->GetOptions(&flags))) {
-        pfs->SetOptions(flags | FOS_OVERWRITEPROMPT | FOS_FORCEFILESYSTEM);
+        (void)pfs->SetOptions(flags | FOS_OVERWRITEPROMPT | FOS_FORCEFILESYSTEM);
     }
     if (!opts.title.empty()) {
-        pfs->SetTitle(aurora::internal::utf8_to_wstr(opts.title).c_str());
+        (void)pfs->SetTitle(aurora::internal::utf8_to_wstr(opts.title).c_str());
     }
     apply_filters(pfs, opts.filters);
     auto out = show_dialog(pfs, [](IFileDialog *d) -> std::vector<std::string> {
@@ -185,7 +187,7 @@ auto save_file(const Options &opts) -> Result<std::string> {
             }
             result->Release();
         }
-        return std::vector<std::string>{ path };
+        return std::vector<std::string>{path};
     });
     pfs->Release();
     return out.empty() ? std::string{} : out.front();
@@ -204,19 +206,19 @@ auto open_folder(const Options &opts) -> Result<std::string> {
         return make_error(ErrorCode::PlatformComInitFailed, "CoInitializeEx failed");
     }
     IFileOpenDialog *pfd = nullptr;
-    HRESULT hr =
+    const HRESULT hr =
         CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog,
-                         reinterpret_cast<void **>(&pfd)); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                         reinterpret_cast<void **>(&pfd));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     if (FAILED(hr) || (pfd == nullptr)) {
         AURORA_LOG_WARN("file_dialog", "CoCreateInstance(IFileOpenDialog) failed");
         return make_error(ErrorCode::PlatformDialogCreateFailed, "CoCreateInstance(IFileOpenDialog) failed");
     }
     DWORD flags = 0;
     if (SUCCEEDED(pfd->GetOptions(&flags))) {
-        pfd->SetOptions(flags | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+        (void)pfd->SetOptions(flags | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
     }
     if (!opts.title.empty()) {
-        pfd->SetTitle(aurora::internal::utf8_to_wstr(opts.title).c_str());
+        (void)pfd->SetTitle(aurora::internal::utf8_to_wstr(opts.title).c_str());
     }
     auto out = show_dialog(pfd, [](IFileDialog *d) -> std::vector<std::string> {
         IShellItem *result = nullptr;
@@ -229,12 +231,12 @@ auto open_folder(const Options &opts) -> Result<std::string> {
             }
             result->Release();
         }
-        return std::vector<std::string>{ path };
+        return std::vector<std::string>{path};
     });
     pfd->Release();
     return out.empty() ? std::string{} : out.front();
 }
 
-} // namespace aurora::file_dialog
+}  // namespace aurora::file_dialog
 
-#endif // AURORA_PLATFORM_WINDOWS
+#endif  // AURORA_PLATFORM_WINDOWS

@@ -25,13 +25,14 @@ namespace aurora::ui {
 namespace detail {
 /// @brief 构造 `T` 控件、包成 `Node` 并追加到父容器，返回强类型裸指针。
 /// @note 指针生命周期由父树 `shared_ptr` 持有，父树销毁后即失效，调用方勿长期持有。
-template<typename T, typename... Args> [[nodiscard]] inline auto make_add(Container &parent, Args &&...args) -> T * {
+template <typename T, typename... Args>
+[[nodiscard]] auto make_add(Container &parent, Args &&...args) -> T * {
     Node node(std::make_shared<T>(std::forward<Args>(args)...));
     T *raw = static_cast<T *>(&node.widget());
     parent.add(node);
     return raw;
 }
-} // namespace detail
+}  // namespace detail
 
 /// @brief 文本标签。`text` 为主文案（覆盖 `props.content`）。
 inline auto label(Container &parent, std::string_view text, TextProps props = {}) -> Text * {
@@ -62,7 +63,7 @@ inline auto checkbox(Container &parent, Reactive<bool> checked, std::function<vo
     return detail::make_add<Checkbox>(parent, std::move(checked), std::move(on_changed));
 }
 inline auto checkbox(Container &parent, bool initial, std::function<void(bool)> on_changed = {}) -> Checkbox * {
-    return checkbox(parent, Reactive<bool>{ initial }, std::move(on_changed));
+    return checkbox(parent, Reactive<bool>{initial}, std::move(on_changed));
 }
 
 /// @brief 滑块（双模：`Reactive<double>` 或简单 `double` 初值）。
@@ -70,7 +71,7 @@ inline auto slider(Container &parent, Reactive<double> value, std::function<void
     return detail::make_add<Slider>(parent, std::move(value), std::move(on_changed));
 }
 inline auto slider(Container &parent, double initial, std::function<void(double)> on_changed = {}) -> Slider * {
-    return slider(parent, Reactive<double>{ initial }, std::move(on_changed));
+    return slider(parent, Reactive<double>{initial}, std::move(on_changed));
 }
 
 /// @brief 纵向盒子容器（`Column` 的语法糖）。
@@ -94,7 +95,7 @@ inline auto scroll(Container &parent, ScrollProps props = {}) -> Scroll * {
     return detail::make_add<Scroll>(parent, std::move(props));
 }
 /// @brief 横向虚拟列表（`LazyRow`）。`builder` 在可见窗口内惰性构造子项。
-inline auto lazy_row(Container &parent, int count, LazyRow::ItemBuilder builder, float item_extent = 96.0f)
+inline auto lazy_row(Container &parent, int count, LazyRow::ItemBuilder builder, float item_extent = 96.0F)
     -> LazyRow * {
     auto *w = detail::make_add<LazyRow>(parent, count, std::move(builder), item_extent);
     return w;
@@ -104,7 +105,7 @@ inline auto lazy_row(Container &parent, LazyRowProps props) -> LazyRow * {
     return detail::make_add<LazyRow>(parent, std::move(props));
 }
 /// @brief 纵向虚拟列表（`LazyList`）。`builder` 在可见窗口内惰性构造子项。
-inline auto lazy_list(Container &parent, int count, LazyList::ItemBuilder builder, float item_extent = 48.0f)
+inline auto lazy_list(Container &parent, int count, LazyList::ItemBuilder builder, float item_extent = 48.0F)
     -> LazyList * {
     return detail::make_add<LazyList>(parent, count, std::move(builder), item_extent);
 }
@@ -113,4 +114,4 @@ inline auto bottom_nav_bar(Container &parent, BottomNavBarProps props) -> Bottom
     return detail::make_add<BottomNavBar>(parent, std::move(props));
 }
 
-} // namespace aurora::ui
+}  // namespace aurora::ui

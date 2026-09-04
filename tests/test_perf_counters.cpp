@@ -10,12 +10,10 @@
 // 其余用例（add / merge_max / 序列化）与开关无关，属纯数据结构行为。
 #include <cstddef>
 #include <cstdint>
+#include <nlohmann/json.hpp>
 #include <string>
 
-#include <nlohmann/json.hpp>
-
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::profiling_enabled;
@@ -109,7 +107,7 @@ auto test_merge_max() -> void {
     RenderCounters a = make_filled(50);
     const RenderCounters b = make_filled(5);
 
-    a.merge_max(b); // a 全面更大，应保持不变
+    a.merge_max(b);  // a 全面更大，应保持不变
     AURORA_TEST_CHECK_MSG(a.draw_calls == 50 && a.scroll_buffer_bytes == 65,
                           "Test3: merging smaller value does not change peak");
 
@@ -144,9 +142,9 @@ auto test_to_json() -> void {
     }
 
     AURORA_TEST_CHECK_MSG(j.size() == 18, "Test4: JSON key count == struct field count (18)");
-    AURORA_TEST_CHECK_MSG(j.value("draw_calls", 0u) == 7u, "Test4: draw_calls correct");
-    AURORA_TEST_CHECK_MSG(j.value("scroll_buffer_bytes", 0ull) == 22ull, "Test4: scroll_buffer_bytes correct");
-    AURORA_TEST_CHECK_MSG(j.value("relayout_boundaries_hit", 0u) == 20u, "Test4: relayout_boundaries_hit correct");
+    AURORA_TEST_CHECK_MSG(j.value("draw_calls", 0U) == 7U, "Test4: draw_calls correct");
+    AURORA_TEST_CHECK_MSG(j.value("scroll_buffer_bytes", 0ULL) == 22ULL, "Test4: scroll_buffer_bytes correct");
+    AURORA_TEST_CHECK_MSG(j.value("relayout_boundaries_hit", 0U) == 20U, "Test4: relayout_boundaries_hit correct");
     AURORA_TEST_CHECK_MSG(j.value("full_redraw", false), "Test4: full_redraw serialized as JSON boolean");
     AURORA_TEST_CHECK_MSG(near_d(j.value("dirty_area_ratio", 0.0), 0.25, 1e-4), "Test4: dirty_area_ratio correct");
 }
@@ -194,28 +192,28 @@ auto test_macro_branch_determinism() -> void {
     int evaluated = 0;
     const auto value_with_side_effect = [&evaluated]() -> std::uint32_t {
         ++evaluated;
-        return 5u;
+        return 5U;
     };
 
     AURORA_PROFILE_COUNT(draw_calls, value_with_side_effect());
-    AURORA_PROFILE_COUNT(draw_calls, 3u);
+    AURORA_PROFILE_COUNT(draw_calls, 3U);
     AURORA_PROFILE_SET(full_redraw, true);
-    AURORA_PROFILE_COUNT(scroll_buffer_bytes, 1024ull);
+    AURORA_PROFILE_COUNT(scroll_buffer_bytes, 1024ULL);
 
     if constexpr (profiling_enabled()) {
-        AURORA_TEST_CHECK_MSG(c.draw_calls == 8u, "Test7[ON]: AURORA_PROFILE_COUNT accumulation works (5+3)");
+        AURORA_TEST_CHECK_MSG(c.draw_calls == 8U, "Test7[ON]: AURORA_PROFILE_COUNT accumulation works (5+3)");
         AURORA_TEST_CHECK_MSG(c.full_redraw, "Test7[ON]: AURORA_PROFILE_SET assignment works");
-        AURORA_TEST_CHECK_MSG(c.scroll_buffer_bytes == 1024ull, "Test7[ON]: 64-bit field accumulation works");
+        AURORA_TEST_CHECK_MSG(c.scroll_buffer_bytes == 1024ULL, "Test7[ON]: 64-bit field accumulation works");
         AURORA_TEST_CHECK_MSG(evaluated == 1, "Test7[ON]: macro argument evaluated exactly once");
-    } else { // NOLINT
-        AURORA_TEST_CHECK_MSG(c.draw_calls == 0u, "Test7[OFF]: AURORA_PROFILE_COUNT produces no writes");
+    } else {  // NOLINT
+        AURORA_TEST_CHECK_MSG(c.draw_calls == 0U, "Test7[OFF]: AURORA_PROFILE_COUNT produces no writes");
         AURORA_TEST_CHECK_MSG(!c.full_redraw, "Test7[OFF]: AURORA_PROFILE_SET produces no writes");
 
-        AURORA_TEST_CHECK_MSG(c.scroll_buffer_bytes == 0ull, "Test7[OFF]: 64-bit field stays 0");
+        AURORA_TEST_CHECK_MSG(c.scroll_buffer_bytes == 0ULL, "Test7[OFF]: 64-bit field stays 0");
         AURORA_TEST_CHECK_MSG(evaluated == 0,
                               "Test7[OFF]: macro argument evaluated zero times (so args must have no side effects)");
     }
-    (void)value_with_side_effect; // OFF 构建下宏把它整个丢弃，显式消费以免 -Wunused
+    (void)value_with_side_effect;  // OFF 构建下宏把它整个丢弃，显式消费以免 -Wunused
 
     c.reset();
 }
@@ -232,8 +230,8 @@ auto test_macro_syntax_forms() -> void {
         AURORA_PROFILE_COUNT(paint_nodes, 1);
     }
 
-    constexpr std::uint32_t expected_rects = profiling_enabled() ? 1u : 0u;
-    constexpr std::uint32_t expected_nodes = profiling_enabled() ? 3u : 0u;
+    constexpr std::uint32_t expected_rects = profiling_enabled() ? 1U : 0U;
+    constexpr std::uint32_t expected_nodes = profiling_enabled() ? 3U : 0U;
     AURORA_TEST_CHECK_MSG(c.fill_rects == expected_rects, "Test8: macro behaves correctly in brace-less if branch");
     AURORA_TEST_CHECK_MSG(c.paint_nodes == expected_nodes, "Test8: macro behaves correctly in brace-less for body");
 
@@ -253,7 +251,7 @@ auto test_profiling_enabled_constexpr() -> void {
     AURORA_TEST_PRINTF("      (build profile: profiling=%s)\n", on ? "ON" : "OFF");
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_perf_counters ===\n");

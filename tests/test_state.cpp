@@ -9,7 +9,6 @@
 #include <thread>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::Action;
@@ -28,13 +27,13 @@ using std::reduce;
 
 // ---- State 读写 / 订阅(Effect 依赖追踪) ----
 static void test_state() {
-    State s{ 0 };
+    State s{0};
     AURORA_TEST_CHECK_MSG(s.get() == 0, "State: initial value");
     int observed = -1;
     Effect e([&]() -> void { observed = s.get(); });
-    e.run(); // 首次运行登记 s 为依赖
+    e.run();  // 首次运行登记 s 为依赖
     AURORA_TEST_CHECK_MSG(observed == 0, "State: Effect reads initial value");
-    s.set(5); // 触发依赖 Effect 重跑
+    s.set(5);  // 触发依赖 Effect 重跑
     AURORA_TEST_CHECK_MSG(observed == 5, "State: set notifies dependent Effect");
     AURORA_TEST_CHECK_MSG(!e.is_disposed(), "Effect: not disposed");
     e.dispose();
@@ -53,8 +52,8 @@ static void test_state() {
 
 // ---- Computed 依赖追踪 / 重算 ----
 static void test_computed() {
-    State a{ 1 };
-    State b{ 2 };
+    State a{1};
+    State b{2};
     const Computed<int> c([&]() -> int { return a.get() + b.get(); });
     AURORA_TEST_CHECK_MSG(c.get() == 3, "Computed: initial derived value");
     a.set(10);
@@ -71,8 +70,8 @@ static void test_computed() {
 
 // ---- Binding ----
 static void test_binding() {
-    State s{ 5 };
-    Binding bd{ s };
+    State s{5};
+    Binding bd{s};
     AURORA_TEST_CHECK_MSG(bd.bound(), "Binding: bound() true after construction");
     AURORA_TEST_CHECK_MSG(bd.get() == 5, "Binding: get() forwards to State");
     bd.set(9);
@@ -86,16 +85,16 @@ static void test_binding() {
 
 // ---- Reactive ----
 static void test_reactive() {
-    Reactive r{ 3 };
+    Reactive r{3};
     AURORA_TEST_CHECK_MSG(r.get() == 3, "Reactive: value ctor");
-    const Reactive r2 = 7; // 隐式转换
+    const Reactive r2 = 7;  // 隐式转换
     AURORA_TEST_CHECK_MSG(r2.get() == 7, "Reactive: implicit value ctor");
     r.set(4);
     AURORA_TEST_CHECK_MSG(r.get() == 4, "Reactive: set()");
     AURORA_TEST_CHECK_MSG(r.state().get() == 4, "Reactive: state() exposes underlying State");
 
     const auto shared = std::make_shared<State<int>>(100);
-    const Reactive r3{ shared };
+    const Reactive r3{shared};
     AURORA_TEST_CHECK_MSG(r3.get() == 100, "Reactive: from shared State");
     shared->set(200);
     AURORA_TEST_CHECK_MSG(r3.get() == 200, "Reactive: shares upstream State value");
@@ -103,58 +102,58 @@ static void test_reactive() {
 
 // ---- SignalView 基类接口 ----
 static void test_signal_view() {
-    const State<std::string> s{ "hi" };
+    const State<std::string> s{"hi"};
     const SignalView<std::string> &sv = s;
     AURORA_TEST_CHECK_MSG(sv.get() == "hi", "SignalView: get() via base ref");
 }
 
 // ---- Store / Action / Reducer ----
 struct Counter {
-    int count = 0;
+    int count_ = 0;
 };
 
 static void test_store() {
     const Reducer<Counter> reduce = [](const Counter &s, const Action &a) -> Counter {
         Counter n = s;
         if (a.type == "inc") {
-            ++n.count;
+            ++n.count_;
         } else if (a.type == "set") {
             if (const int *p = a.payload_as<int>()) {
-                n.count = *p;
+                n.count_ = *p;
             }
         }
         return n;
     };
 
     const auto store = make_store(Counter{}, reduce);
-    AURORA_TEST_CHECK_MSG(store->get_state().count == 0, "Store: initial state");
+    AURORA_TEST_CHECK_MSG(store->get_state().count_ == 0, "Store: initial state");
 
-    store->dispatch(Action{ "inc" });
-    AURORA_TEST_CHECK_MSG(store->get_state().count == 1, "Store: dispatch inc");
+    store->dispatch(Action{"inc"});
+    AURORA_TEST_CHECK_MSG(store->get_state().count_ == 1, "Store: dispatch inc");
 
-    const Action set_a{ "set", 42 };
+    const Action set_a{"set", 42};
     store->dispatch(set_a);
-    AURORA_TEST_CHECK_MSG(store->get_state().count == 42, "Store: dispatch set with payload");
+    AURORA_TEST_CHECK_MSG(store->get_state().count_ == 42, "Store: dispatch set with payload");
     const int *p = set_a.payload_as<int>();
     AURORA_TEST_CHECK_MSG(p != nullptr && *p == 42, "Action: payload_as<int> recovers value");
     // 注：payload_as<T>() 仅做空指针检查，不做类型校验（按值类型擦除存储）。
     // 调用方须保证类型匹配；不匹配时行为是未定义，这里只断言合法用法与空载荷。
 
-    const Action no_payload{ "inc" };
+    const Action no_payload{"inc"};
     AURORA_TEST_CHECK_MSG(no_payload.payload_as<int>() == nullptr, "Action: no payload returns null");
 
     int calls = 0;
     const auto unsub = store->subscribe([&](const Counter &, const Counter &) -> void { ++calls; });
-    store->dispatch(Action{ "inc" });
+    store->dispatch(Action{"inc"});
     AURORA_TEST_CHECK_MSG(calls == 1, "Store: listener called on dispatch");
     unsub();
-    store->dispatch(Action{ "inc" });
+    store->dispatch(Action{"inc"});
     AURORA_TEST_CHECK_MSG(calls == 1, "Store: listener removed after unsubscribe");
 
     const auto sig = store->as_signal();
-    AURORA_TEST_CHECK_MSG(sig->get().count == 44, "Store: as_signal reflects current state");
-    store->dispatch(Action{ "inc" });
-    AURORA_TEST_CHECK_MSG(sig->get().count == 45, "Store: as_signal updates on dispatch");
+    AURORA_TEST_CHECK_MSG(sig->get().count_ == 44, "Store: as_signal reflects current state");
+    store->dispatch(Action{"inc"});
+    AURORA_TEST_CHECK_MSG(sig->get().count_ == 45, "Store: as_signal updates on dispatch");
 }
 
 // ---- async ----

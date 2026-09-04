@@ -3467,7 +3467,7 @@
       "dynamic_children": false,
       "events": [],
       "examples": [
-        "au::LazyList(10000, [](int i){ return au::Text(std::to_string(i)); }, 48.0f)"
+        "au::LazyList(10000, [](int i){ return au::Text(std::to_string(i)); }, 48.0F)"
       ],
       "invariants": [
         "count >= 0",

@@ -10,54 +10,54 @@ namespace aurora {
 namespace {
 
 struct FlexLayoutContext {
-    Flex m_config;
-    Constraints m_parent;
-    std::vector<FlexItem> m_items;
-    bool m_horizontal;
-    bool m_reverse;
-    int m_main_axis;
-    float m_inf;
-    bool m_main_finite;
+    Flex config;
+    Constraints parent;
+    std::vector<FlexItem> items;
+    bool horizontal;
+    bool reverse;
+    int main_axis;
+    float inf;
+    bool main_finite;
 
-    float m_parent_max_main;
-    float m_parent_min_main;
-    float m_parent_max_cross;
-    float m_parent_min_cross;
-    float m_gap;
+    float parent_max_main;
+    float parent_min_main;
+    float parent_max_cross;
+    float parent_min_cross;
+    float gap;
 
     // ---- 工作态（逐趟累积）----
     std::vector<Size> sizes;
-    float used_main = 0.0f;
-    float max_cross = 0.0f;
-    float total_flex = 0.0f;
+    float used_main = 0.0F;
+    float max_cross = 0.0F;
+    float total_flex = 0.0F;
 
-    float container_main = 0.0f;
-    float container_cross = 0.0f;
-    float free_space = 0.0f;
+    float container_main = 0.0F;
+    float container_cross = 0.0F;
+    float free_space = 0.0F;
 
-    float leading = 0.0f;
-    float between = 0.0f;
+    float leading = 0.0F;
+    float between = 0.0F;
 
     FlexLayoutContext(const Flex &cfg, const Constraints &p, const std::vector<FlexItem> &it)
-        : m_config(cfg), m_parent(p), m_items(it),
-          m_horizontal(cfg.direction == FlexDirection::Row || cfg.direction == FlexDirection::RowReverse),
-          m_reverse(cfg.direction == FlexDirection::RowReverse || cfg.direction == FlexDirection::ColumnReverse),
-          m_main_axis(m_horizontal ? 0 : 1), m_inf(Size::infinity().width), m_main_finite(p_max_main() != m_inf),
-          m_parent_max_main(p_max_main()), m_parent_min_main(p_min_main()), m_parent_max_cross(p_max_cross()),
-          m_parent_min_cross(p_min_cross()), m_gap(cfg.gap > 0.0f ? cfg.gap : 0.0f), sizes(it.size(), Size{}) {}
+        : config(cfg), parent(p), items(it),
+          horizontal(cfg.direction == FlexDirection::Row || cfg.direction == FlexDirection::RowReverse),
+          reverse(cfg.direction == FlexDirection::RowReverse || cfg.direction == FlexDirection::ColumnReverse),
+          main_axis(horizontal ? 0 : 1), inf(Size::infinity().width), main_finite(p_max_main() != inf),
+          parent_max_main(p_max_main()), parent_min_main(p_min_main()), parent_max_cross(p_max_cross()),
+          parent_min_cross(p_min_cross()), gap(cfg.gap > 0.0F ? cfg.gap : 0.0F), sizes(it.size(), Size{}) {}
 
     // ---- 轴访问器（与主轴/交叉轴选择绑定）----
-    [[nodiscard]] auto get_main(const Size &s) const -> float { return m_main_axis == 0 ? s.width : s.height; }
-    [[nodiscard]] auto get_cross(const Size &s) const -> float { return m_main_axis == 1 ? s.width : s.height; }
+    [[nodiscard]] auto get_main(const Size &s) const -> float { return main_axis == 0 ? s.width : s.height; }
+    [[nodiscard]] auto get_cross(const Size &s) const -> float { return main_axis == 1 ? s.width : s.height; }
     auto set_main(Size &s, float v) const -> void {
-        if (m_main_axis == 0) {
+        if (main_axis == 0) {
             s.width = v;
         } else {
             s.height = v;
         }
     }
     auto set_cross(Size &s, float v) const -> void {
-        if (m_main_axis == 1) {
+        if (main_axis == 1) {
             s.width = v;
         } else {
             s.height = v;
@@ -66,56 +66,72 @@ struct FlexLayoutContext {
 
   private:
     [[nodiscard]] auto p_max_main() const -> float {
-        return m_main_axis == 0 ? m_parent.max.width : m_parent.max.height;
+        return main_axis == 0 ? parent.max.width : parent.max.height;
     }
     [[nodiscard]] auto p_min_main() const -> float {
-        return m_main_axis == 0 ? m_parent.min.width : m_parent.min.height;
+        return main_axis == 0 ? parent.min.width : parent.min.height;
     }
     [[nodiscard]] auto p_max_cross() const -> float {
-        return m_main_axis == 1 ? m_parent.max.width : m_parent.max.height;
+        return main_axis == 1 ? parent.max.width : parent.max.height;
     }
     [[nodiscard]] auto p_min_cross() const -> float {
-        return m_main_axis == 1 ? m_parent.min.width : m_parent.min.height;
+        return main_axis == 1 ? parent.min.width : parent.min.height;
     }
 
   public:
     // 阶段一(A)+ (B) + 固定间距计入：先测量非 flex 子项，再按权重瓜分剩余主轴，最后把
     // 相邻子项间的固定间距计入容器主轴占用。
     auto measure_pass() -> void {
-        const size_t n = m_items.size();
+        const size_t n = items.size();
         for (size_t i = 0; i < n; ++i) {
-            if (m_items[i].flex > 0.0f && m_main_finite) {
-                total_flex += m_items[i].flex; // 延后到阶段一(B)
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 的边界检查开销会影响计时
+            if (items[i].flex > 0.0F && main_finite) {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+                // 的边界检查开销会影响计时
+                total_flex += items[i].flex;  // 延后到阶段一(B)
                 continue;
             }
             Constraints cc;
-            set_main(cc.min, 0.0f);
-            set_cross(cc.min, m_parent_min_cross);
-            const float remaining = m_main_finite ? std::max(0.0f, m_parent_max_main - used_main) : m_inf;
+            set_main(cc.min, 0.0F);
+            set_cross(cc.min, parent_min_cross);
+            const float remaining = main_finite ? std::max(0.0F, parent_max_main - used_main) : inf;
             set_main(cc.max, remaining);
-            set_cross(cc.max, m_parent_max_cross);
-            const Size s = m_items[i].do_measure(cc);
+            set_cross(cc.max, parent_max_cross);
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 的边界检查开销会影响计时
+            const Size s = items[i].do_measure(cc);
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 的边界检查开销会影响计时
             sizes[i] = s;
             used_main += get_main(s);
             max_cross = std::max(max_cross, get_cross(s));
         }
 
         // flex 子项按权重瓜分剩余主轴空间（仅主轴有限时才有意义）。
-        if (m_main_finite && total_flex > 0.0f) {
+        if (main_finite && total_flex > 0.0F) {
             // 固定间距（相邻子项间）须先从可用主轴空间中扣除，否则 flex 子项会溢出容器。
-            const float total_gap = (n > 1) ? static_cast<float>(n - 1) * m_gap : 0.0f;
-            const float free = std::max(0.0f, m_parent_max_main - used_main - total_gap);
+            const float total_gap = (n > 1) ? static_cast<float>(n - 1) * gap : 0.0F;
+            const float free = std::max(0.0F, parent_max_main - used_main - total_gap);
             for (size_t i = 0; i < n; ++i) {
-                if (m_items[i].flex <= 0.0f) {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+                // 的边界检查开销会影响计时
+                if (items[i].flex <= 0.0F) {
                     continue;
                 }
-                const float alloc = free * m_items[i].flex / total_flex;
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+                // 的边界检查开销会影响计时
+                const float alloc = free * items[i].flex / total_flex;
                 Constraints cc;
-                set_main(cc.min, 0.0f);
-                set_cross(cc.min, m_parent_min_cross);
-                set_main(cc.max, std::max(0.0f, alloc));
-                set_cross(cc.max, m_parent_max_cross);
-                const Size s = m_items[i].do_measure(cc);
+                set_main(cc.min, 0.0F);
+                set_cross(cc.min, parent_min_cross);
+                set_main(cc.max, std::max(0.0F, alloc));
+                set_cross(cc.max, parent_max_cross);
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+                // 的边界检查开销会影响计时
+                const Size s = items[i].do_measure(cc);
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+                // 的边界检查开销会影响计时
                 sizes[i] = s;
                 used_main += get_main(s);
                 max_cross = std::max(max_cross, get_cross(s));
@@ -124,7 +140,7 @@ struct FlexLayoutContext {
 
         // 固定间距占用（相邻子项间）：计入容器主轴尺寸，使 gap 成为布局的内在部分。
         if (n > 1) {
-            used_main += static_cast<float>(n - 1) * m_gap;
+            used_main += static_cast<float>(n - 1) * gap;
         }
     }
 
@@ -134,15 +150,15 @@ struct FlexLayoutContext {
         // MainAxisSize::Max：把容器主轴撑满父级可用主轴空间（仅当主轴约束有限时），
         // 从而产生可见自由空间，使 main_axis 对齐（Center/End/Space*）真正生效。
         // MainAxisSize::Min（默认）：容器主轴取内容所需尺寸，与历史行为保持一致。
-        if (m_config.main_axis_size == MainAxisSize::Max && m_main_finite) {
-            container_main = m_parent_max_main;
+        if (config.main_axis_size == MainAxisSize::Max && main_finite) {
+            container_main = parent_max_main;
         } else {
-            container_main = std::clamp(used_main, m_parent_min_main, m_parent_max_main);
+            container_main = std::clamp(used_main, parent_min_main, parent_max_main);
         }
         free_space = container_main - used_main;
-        free_space = std::max(free_space, 0.0f);
+        free_space = std::max(free_space, 0.0F);
 
-        container_cross = std::clamp(max_cross, m_parent_min_cross, m_parent_max_cross);
+        container_cross = std::clamp(max_cross, parent_min_cross, parent_max_cross);
     }
 
     // 交叉轴对齐 pass（容器交叉轴尺寸已定，此处仅为语义分组占位，保持 pass 边界清晰）。
@@ -152,80 +168,90 @@ struct FlexLayoutContext {
 
     // 主轴对齐 pass：由 main_axis 对齐方式推出首项前导间距 leading 与子项间间距 between。
     auto main_axis_align_pass() -> void {
-        const size_t n = m_items.size();
+        const size_t n = items.size();
         if (n == 0) {
             return;
         }
-        switch (m_config.main_axis) {
-        case MainAxisAlignment::Start:
-            leading = 0.0f;
-            between = 0.0f;
-            break;
-        case MainAxisAlignment::Center:
-            leading = free_space / 2.0f;
-            between = 0.0f;
-            break;
-        case MainAxisAlignment::End:
-            leading = free_space;
-            between = 0.0f;
-            break;
-        case MainAxisAlignment::SpaceBetween:
-            leading = 0.0f;
-            between = (n > 1) ? (free_space / static_cast<float>(n - 1)) : 0.0f;
-            break;
-        case MainAxisAlignment::SpaceAround:
-            leading = free_space / static_cast<float>(n) / 2.0f;
-            between = free_space / static_cast<float>(n);
-            break;
-        case MainAxisAlignment::SpaceEvenly:
-            leading = free_space / static_cast<float>(n + 1);
-            between = free_space / static_cast<float>(n + 1);
-            break;
+        switch (config.main_axis) {
+            case MainAxisAlignment::Start:
+                leading = 0.0F;
+                between = 0.0F;
+                break;
+            case MainAxisAlignment::Center:
+                leading = free_space / 2.0F;
+                between = 0.0F;
+                break;
+            case MainAxisAlignment::End:
+                leading = free_space;
+                between = 0.0F;
+                break;
+            case MainAxisAlignment::SpaceBetween:
+                leading = 0.0F;
+                between = (n > 1) ? (free_space / static_cast<float>(n - 1)) : 0.0F;
+                break;
+            case MainAxisAlignment::SpaceAround:
+                leading = free_space / static_cast<float>(n) / 2.0F;
+                between = free_space / static_cast<float>(n);
+                break;
+            case MainAxisAlignment::SpaceEvenly:
+                leading = free_space / static_cast<float>(n + 1);
+                between = free_space / static_cast<float>(n + 1);
+                break;
         }
     }
 
     // 定位后处理 pass：逐子项定位（主轴：前导 + 累加；交叉轴：按对齐方式），
     // 反向布局时沿主轴镜像每个子项位置（对齐语义随之反向，与 Flutter 一致）。
     auto place_children_pass(std::vector<Rect> &rects) const -> void {
-        const size_t n = m_items.size();
+        const size_t n = items.size();
         rects.resize(n);
         float pos = leading;
         for (size_t i = 0; i < n; ++i) {
             if (i > 0) {
-                pos += m_gap; // 相邻子项间的固定间距（首个子项前不加）
+                pos += gap;  // 相邻子项间的固定间距（首个子项前不加）
             }
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 的边界检查开销会影响计时
             Size s = sizes[i];
             float cross_size = get_cross(s);
-            float cross_pos = 0.0f;
-            switch (m_config.cross_axis) {
-            case CrossAxisAlignment::Start: cross_pos = 0.0f; break;
-            case CrossAxisAlignment::Center: cross_pos = (container_cross - cross_size) / 2.0f; break;
-            case CrossAxisAlignment::End: cross_pos = container_cross - cross_size; break;
-            case CrossAxisAlignment::Stretch:
-                cross_size = container_cross;
-                cross_pos = 0.0f;
-                break;
+            float cross_pos = 0.0F;
+            switch (config.cross_axis) {
+                case CrossAxisAlignment::Start:
+                    cross_pos = 0.0F;
+                    break;
+                case CrossAxisAlignment::Center:
+                    cross_pos = (container_cross - cross_size) / 2.0F;
+                    break;
+                case CrossAxisAlignment::End:
+                    cross_pos = container_cross - cross_size;
+                    break;
+                case CrossAxisAlignment::Stretch:
+                    cross_size = container_cross;
+                    cross_pos = 0.0F;
+                    break;
             }
-            cross_pos = std::max(cross_pos, 0.0f);
+            cross_pos = std::max(cross_pos, 0.0F);
 
             Point origin;
             Size rsize;
-            if (m_horizontal) {
-                origin = Point{ .x = pos, .y = cross_pos };
-                rsize = Size{ .width = s.width, .height = cross_size };
+            if (horizontal) {
+                origin = Point{.x = pos, .y = cross_pos};
+                rsize = Size{.width = s.width, .height = cross_size};
             } else {
-                origin = Point{ .x = cross_pos, .y = pos };
-                rsize = Size{ .width = cross_size, .height = s.height };
+                origin = Point{.x = cross_pos, .y = pos};
+                rsize = Size{.width = cross_size, .height = s.height};
             }
-            rects[i] = Rect{ .origin = origin, .size = rsize };
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 的边界检查开销会影响计时
+            rects[i] = Rect{.origin = origin, .size = rsize};
             pos += get_main(s) + between;
         }
 
-        if (m_reverse) {
+        if (reverse) {
             for (Rect &r : rects) {
                 const float m = get_main(r.size);
-                const float start_m = m_horizontal ? r.origin.x : r.origin.y;
-                if (m_horizontal) {
+                const float start_m = horizontal ? r.origin.x : r.origin.y;
+                if (horizontal) {
                     r.origin.x = container_main - (start_m + m);
                 } else {
                     r.origin.y = container_main - (start_m + m);
@@ -235,7 +261,7 @@ struct FlexLayoutContext {
     }
 };
 
-} // namespace
+}  // namespace
 
 auto FlexLayouter::layout(const Flex &config, const Constraints &parent, const std::vector<FlexItem> &items)
     -> FlexLayout {
@@ -255,12 +281,12 @@ auto FlexLayouter::layout(const Flex &config, const Constraints &parent, const s
 
     FlexLayout result;
     result.children = std::move(rects);
-    if (ctx.m_horizontal) {
-        result.size = Size{ .width = ctx.container_main, .height = ctx.container_cross };
+    if (ctx.horizontal) {
+        result.size = Size{.width = ctx.container_main, .height = ctx.container_cross};
     } else {
-        result.size = Size{ .width = ctx.container_cross, .height = ctx.container_main };
+        result.size = Size{.width = ctx.container_cross, .height = ctx.container_main};
     }
     return result;
 }
 
-} // namespace aurora
+}  // namespace aurora

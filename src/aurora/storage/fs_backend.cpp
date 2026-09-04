@@ -23,23 +23,21 @@
 #include "aurora/preferences/preferences.h"
 
 #ifdef AURORA_PLATFORM_WINDOWS
-#define WIN32_LEAN_AND_MEAN // NOLINT(*-identifier-naming)
+#define WIN32_LEAN_AND_MEAN  // NOLINT(*-identifier-naming)
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
 #else
 #include <fcntl.h>
-#include <unistd.h>
-
 #include <sys/file.h>
+#include <unistd.h>
 #endif
 
 namespace aurora::storage {
 
 namespace {
 
-// NOLINTNEXTLINE(*-avoid-c-arrays)
 constexpr char AURORA_B64_URL[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 // id → 文件名安全编码（base64url，无填充）。
@@ -47,9 +45,9 @@ constexpr char AURORA_B64_URL[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrs
     std::string out;
     out.reserve(((in.size() + 2) / 3) * 4);
     std::size_t i = 0;
-    // NOLINTBEGIN(*-pro-bounds-constant-array-index)
+    // NOLINTBEGIN(*-pro-bounds-constant-array-index,*-signed-bitwise,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     while (i + 2 < in.size()) {
-        const std::uint32_t n = (static_cast<std::uint8_t>(in[i]) << 16U) | // NOLINT(*-signed-bitwise)
+        const std::uint32_t n = (static_cast<std::uint8_t>(in[i]) << 16U) |
                                 (static_cast<std::uint8_t>(in[i + 1]) << 8U) | static_cast<std::uint8_t>(in[i + 2]);
         out.push_back(AURORA_B64_URL[(n >> 18U) & 63U]);
         out.push_back(AURORA_B64_URL[(n >> 12U) & 63U]);
@@ -63,13 +61,13 @@ constexpr char AURORA_B64_URL[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrs
         out.push_back(AURORA_B64_URL[(n >> 18U) & 63U]);
         out.push_back(AURORA_B64_URL[(n >> 12U) & 63U]);
     } else if (rem == 2) {
-        const std::uint32_t n = // NOLINTNEXTLINE(*-signed-bitwise)
+        const std::uint32_t n =
             (static_cast<std::uint8_t>(in[i]) << 16U) | (static_cast<std::uint8_t>(in[i + 1]) << 8U);
         out.push_back(AURORA_B64_URL[(n >> 18U) & 63U]);
         out.push_back(AURORA_B64_URL[(n >> 12U) & 63U]);
         out.push_back(AURORA_B64_URL[(n >> 6U) & 63U]);
     }
-    // NOLINTEND(*-pro-bounds-constant-array-index)
+    // NOLINTEND(*-pro-bounds-constant-array-index,*-signed-bitwise,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     return out;
 }
 
@@ -102,7 +100,7 @@ constexpr char AURORA_B64_URL[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrs
         if (v < 0) {
             continue;
         }
-        acc = (acc << 6U) | v; // NOLINT(*-signed-bitwise)
+        acc = (acc << 6U) | v;  // NOLINT(*-signed-bitwise)
         bits += 6;
         if (bits >= 8) {
             bits -= 8;
@@ -118,14 +116,14 @@ constexpr char AURORA_B64_URL[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrs
 
 [[nodiscard]] auto ms_to_mtime(std::int64_t ms) -> std::chrono::system_clock::time_point {
     if (ms <= 0) {
-        return {}; // 缺失/未知 → epoch
+        return {};  // 缺失/未知 → epoch
     }
     return std::chrono::system_clock::time_point(std::chrono::milliseconds(ms));
 }
 
 // 目录是否可写：写删一个探针文件验证。
 [[nodiscard]] auto dir_is_writable(const std::filesystem::path &dir) -> bool {
-    auto probe = dir / ".aurora_write_probe";
+    const auto probe = dir / ".aurora_write_probe";
     std::error_code ec;
     std::ofstream f(probe, std::ios::binary | std::ios::trunc);
     const bool ok = static_cast<bool>(f);
@@ -197,38 +195,38 @@ constexpr char AURORA_B64_URL[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrs
     return true;
 }
 
-} // namespace
+}  // namespace
 
-FilesystemBackend::FilesystemBackend(FilesystemOptions opts) : m_opts(std::move(opts)) {
-    if (m_opts.root.empty()) {
-        m_root = aurora::preferences::Preferences::default_config_dir() / "aurora_storage";
+FilesystemBackend::FilesystemBackend(FilesystemOptions opts) : opts_(std::move(opts)) {
+    if (opts_.root.empty()) {
+        root_ = aurora::preferences::Preferences::default_config_dir() / "aurora_storage";
     } else {
-        m_root = m_opts.root;
+        root_ = opts_.root;
     }
 
     std::error_code ec;
-    if (m_opts.auto_create_dir) {
-        std::filesystem::create_directories(m_root, ec);
+    if (opts_.auto_create_dir) {
+        std::filesystem::create_directories(root_, ec);
         if (ec) {
-            return; // m_open 保持 false
+            return;  // m_open 保持 false
         }
-    } else if (!std::filesystem::is_directory(m_root, ec)) {
+    } else if (!std::filesystem::is_directory(root_, ec)) {
         return;
     }
 
-    if (!dir_is_writable(m_root)) {
+    if (!dir_is_writable(root_)) {
         return;
     }
 
-    if (m_opts.cross_process_lock && !acquire_lock()) {
+    if (opts_.cross_process_lock && !acquire_lock()) {
         return;
     }
 
-    m_open = true;
+    open_ = true;
 }
 
 [[nodiscard]] auto FilesystemBackend::acquire_lock() -> bool {
-    const auto lock_path = m_root / "aurora_storage.lock";
+    const auto lock_path = root_ / "aurora_storage.lock";
 #ifdef AURORA_PLATFORM_WINDOWS
     const auto wpath = lock_path.wstring();
     const HANDLE h = CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
@@ -241,7 +239,7 @@ FilesystemBackend::FilesystemBackend(FilesystemOptions opts) : m_opts(std::move(
         CloseHandle(h);
         return false;
     }
-    m_lock = std::shared_ptr<void>(h, [](void *p) -> void { CloseHandle(p); });
+    lock_ = std::shared_ptr<void>(h, [](void *p) -> void { CloseHandle(p); });
     return true;
 #else
     const int fd = ::open(lock_path.string().c_str(), O_RDWR | O_CREAT, 0644);
@@ -252,67 +250,80 @@ FilesystemBackend::FilesystemBackend(FilesystemOptions opts) : m_opts(std::move(
         ::close(fd);
         return false;
     }
-    m_lock = std::shared_ptr<void>(reinterpret_cast<void *>(static_cast<intptr_t>(fd)),
-                                   [](void *p) { ::close(static_cast<int>(reinterpret_cast<intptr_t>(p))); });
+    lock_ = std::shared_ptr<void>(reinterpret_cast<void *>(static_cast<intptr_t>(fd)),
+                                  [](void *p) { ::close(static_cast<int>(reinterpret_cast<intptr_t>(p))); });
     return true;
 #endif
 }
 
 auto FilesystemBackend::put_record(const std::string &id, const StorageRecord &rec) -> Result<void> {
-    if (!m_open) {
-        return Result<void>{ make_error(ErrorCode::StorageBackendUnavailable, "Filesystem backend not opened: " + id) };
+    if (!open_) {
+        return Result<void>{make_error(ErrorCode::StorageBackendUnavailable, "Filesystem backend not opened: " + id)};
     }
     const auto enc = b64url_encode(id);
-    const auto json_path = m_root / (enc + ".json");
+    const auto json_path = root_ / (enc + ".json");
 
     Json env = Json::object();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     env["id"] = rec.id.empty() ? id : rec.id;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     env["type"] = rec.type;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     env["version"] = rec.version;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     env["encoding"] = (rec.encoding == StorageEncoding::Binary) ? "binary" : "json";
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     env["mtime"] = mtime_to_ms(rec.mtime);
 
     if (rec.encoding == StorageEncoding::Binary) {
-        const auto bin_path = m_root / (enc + ".bin");
+        const auto bin_path = root_ / (enc + ".bin");
         const auto &bytes = std::get<StorageBytes>(rec.payload);
         std::error_code ec;
         if (!atomic_write_bytes(bin_path, bytes, ec)) {
-            return Result<void>{ make_error(ErrorCode::StorageIoError,
-                                            "Failed to write binary sidecar: " + ec.message()) };
+            return Result<void>{
+                make_error(ErrorCode::StorageIoError, "Failed to write binary sidecar: " + ec.message())};
         }
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         env["blob_ref"] = enc + ".bin";
     } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         env["payload"] = std::get<Json>(rec.payload);
         // 记录由 Binary 改写为 Json 时清理旧 sidecar：残留的 <id>.bin 既是磁盘泄漏，
         // 也让已删除的二进制载荷继续躺在盘上（泄露面）。删除失败不阻断主流程。
         std::error_code rm_ec;
-        std::filesystem::remove(m_root / (enc + ".bin"), rm_ec);
+        std::filesystem::remove(root_ / (enc + ".bin"), rm_ec);
     }
 
     std::error_code ec;
     if (!atomic_write_text(json_path, env.dump(2), ec)) {
-        return Result<void>{ make_error(ErrorCode::StorageIoError, "Failed to write record file: " + ec.message()) };
+        return Result<void>{make_error(ErrorCode::StorageIoError, "Failed to write record file: " + ec.message())};
     }
     return Result<void>{};
 }
 
 auto FilesystemBackend::get_record(const std::string &id) -> Result<StorageRecord> {
-    if (!m_open) {
-        return Result<StorageRecord>{ make_error(ErrorCode::StorageBackendUnavailable,
-                                                 "Filesystem backend not opened: " + id) };
+    if (!open_) {
+        return Result<StorageRecord>{
+            make_error(ErrorCode::StorageBackendUnavailable, "Filesystem backend not opened: " + id)};
     }
     const auto enc = b64url_encode(id);
-    const auto json_path = m_root / (enc + ".json");
+    const auto json_path = root_ / (enc + ".json");
 
     std::error_code ec;
     if (!std::filesystem::exists(json_path, ec)) {
-        return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordNotFound,
-                                                 "Record file does not exist: " + id) };
+        return Result<StorageRecord>{make_error(ErrorCode::StorageRecordNotFound, "Record file does not exist: " + id)};
     }
 
     std::ifstream f(json_path, std::ios::binary);
     if (!f) {
-        return Result<StorageRecord>{ make_error(ErrorCode::StorageIoError, "Failed to open record file: " + id) };
+        return Result<StorageRecord>{make_error(ErrorCode::StorageIoError, "Failed to open record file: " + id)};
     }
     std::stringstream ss;
     ss << f.rdbuf();
@@ -321,67 +332,69 @@ auto FilesystemBackend::get_record(const std::string &id) -> Result<StorageRecor
     try {
         env = Json::parse(ss.str());
     } catch (...) {
-        return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordCorrupt, "Record JSON parse failed: " + id) };
+        return Result<StorageRecord>{make_error(ErrorCode::StorageRecordCorrupt, "Record JSON parse failed: " + id)};
     }
     if (!env.is_object()) {
-        return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordCorrupt, "Record structure invalid: " + id) };
+        return Result<StorageRecord>{make_error(ErrorCode::StorageRecordCorrupt, "Record structure invalid: " + id)};
     }
 
     StorageRecord rec;
     rec.id = env.value("id", id);
     rec.type = env.value("type", "");
-    rec.version = env.value("version", 1u);
+    rec.version = env.value("version", 1U);
     const std::string enc_str = env.value("encoding", "json");
     rec.encoding = enc_str == "binary" ? StorageEncoding::Binary : StorageEncoding::Json;
-    rec.mtime = ms_to_mtime(env.value("mtime", std::int64_t{ 0 }));
+    rec.mtime = ms_to_mtime(env.value("mtime", std::int64_t{0}));
 
     if (rec.encoding == StorageEncoding::Binary) {
-        const auto bin_path = m_root / (enc + ".bin");
+        const auto bin_path = root_ / (enc + ".bin");
         if (!std::filesystem::exists(bin_path, ec)) {
-            return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordCorrupt,
-                                                     "Binary sidecar missing: " + id) };
+            return Result<StorageRecord>{make_error(ErrorCode::StorageRecordCorrupt, "Binary sidecar missing: " + id)};
         }
         std::ifstream bf(bin_path, std::ios::binary);
         if (!bf) {
-            return Result<StorageRecord>{ make_error(ErrorCode::StorageIoError,
-                                                     "Failed to open binary sidecar: " + id) };
+            return Result<StorageRecord>{make_error(ErrorCode::StorageIoError, "Failed to open binary sidecar: " + id)};
         }
-        const std::string content((std::istreambuf_iterator<char>(bf)), std::istreambuf_iterator<char>());
+        const std::string content(std::istreambuf_iterator<char>(bf), std::istreambuf_iterator<char>{});
         std::vector<std::byte> bytes(content.size());
         for (std::size_t i = 0; i < content.size(); ++i) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             bytes[i] = static_cast<std::byte>(content[i]);
         }
         rec.payload = std::move(bytes);
         rec.blob_ref = enc + ".bin";
     } else {
         if (!env.contains("payload")) {
-            return Result<StorageRecord>{ make_error(ErrorCode::StorageRecordCorrupt,
-                                                     "JSON record missing payload: " + id) };
+            return Result<StorageRecord>{
+                make_error(ErrorCode::StorageRecordCorrupt, "JSON record missing payload: " + id)};
         }
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         rec.payload = env["payload"];
     }
-    return Result<StorageRecord>{ std::move(rec) };
+    return Result<StorageRecord>{std::move(rec)};
 }
 
 auto FilesystemBackend::remove(const std::string &id) -> Result<void> {
-    if (!m_open) {
-        return Result<void>{ make_error(ErrorCode::StorageBackendUnavailable, "Filesystem backend not opened: " + id) };
+    if (!open_) {
+        return Result<void>{make_error(ErrorCode::StorageBackendUnavailable, "Filesystem backend not opened: " + id)};
     }
     const auto enc = b64url_encode(id);
     std::error_code ec;
-    std::filesystem::remove(m_root / (enc + ".json"), ec);
-    std::filesystem::remove(m_root / (enc + ".bin"), ec);
-    return Result<void>{}; // 幂等
+    std::filesystem::remove(root_ / (enc + ".json"), ec);
+    std::filesystem::remove(root_ / (enc + ".bin"), ec);
+    return Result<void>{};  // 幂等
 }
 
 auto FilesystemBackend::list() -> Result<std::vector<std::string>> {
-    if (!m_open) {
-        return Result<std::vector<std::string>>{ make_error(ErrorCode::StorageBackendUnavailable,
-                                                            "Filesystem backend not opened") };
+    if (!open_) {
+        return Result<std::vector<std::string>>{
+            make_error(ErrorCode::StorageBackendUnavailable, "Filesystem backend not opened")};
     }
     std::vector<std::string> ids;
     std::error_code ec;
-    for (const auto &p : std::filesystem::directory_iterator(m_root, ec)) {
+    for (const auto &p : std::filesystem::directory_iterator(root_, ec)) {
         if (!p.is_regular_file()) {
             continue;
         }
@@ -392,10 +405,10 @@ auto FilesystemBackend::list() -> Result<std::vector<std::string>> {
         }
     }
     if (ec) {
-        return Result<std::vector<std::string>>{ make_error(ErrorCode::StorageIoError,
-                                                            "Failed to enumerate directory: " + ec.message()) };
+        return Result<std::vector<std::string>>{
+            make_error(ErrorCode::StorageIoError, "Failed to enumerate directory: " + ec.message())};
     }
-    return Result<std::vector<std::string>>{ std::move(ids) };
+    return Result<std::vector<std::string>>{std::move(ids)};
 }
 
-} // namespace aurora::storage
+}  // namespace aurora::storage

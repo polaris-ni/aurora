@@ -6,7 +6,6 @@
 #include "aurora/ui/factories.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/text_input.h"
-
 #include "test_harness.h"
 
 using aurora::Button;
@@ -38,6 +37,8 @@ static void test_expect_text_count_tree() {
 
     const auto kids = env.root_widget->child_nodes();
     AURORA_TEST_CHECK_MSG(!kids.empty(), "root has children");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     expect_visible(kids[0]);
 }
 
@@ -64,9 +65,13 @@ static void test_expect_bounds_smoke() {
     pump(env);
     const auto kids = env.root_widget->child_nodes();
     AURORA_TEST_CHECK_MSG(!kids.empty(), "root has a child");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     const Rect b = kids[0].bounds();
-    AURORA_TEST_CHECK_MSG(b.size.width > 0.0f, "text node laid out with nonzero width");
-    expect_bounds(kids[0], b); // 自洽：期望等于实际应通过
+    AURORA_TEST_CHECK_MSG(b.size.width > 0.0F, "text node laid out with nonzero width");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    expect_bounds(kids[0], b);  // 自洽：期望等于实际应通过
 }
 
 AURORA_TEST() {

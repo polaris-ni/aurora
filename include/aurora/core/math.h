@@ -16,10 +16,10 @@ namespace aurora {
 //   - `saturate_u8`: 先 `std::clamp(x, 0, 255)` 再 `static_cast<std::uint8_t>`，
 //                    越界夹到 0/255，与原 `static_cast<std::uint8_t>(std::clamp(v, 0, 255))` 完全等价。
 
-constexpr auto saturate(float x) noexcept -> float { return std::clamp(x, 0.0f, 1.0f); }
+constexpr auto saturate(float x) noexcept -> float { return std::clamp(x, 0.0F, 1.0F); }
 
 constexpr auto saturate_u8(float x) noexcept -> std::uint8_t {
-    return static_cast<std::uint8_t>(std::clamp(x, 0.0f, 255.0f));
+    return static_cast<std::uint8_t>(std::clamp(x, 0.0F, 255.0F));
 }
 
-} // namespace aurora
+}  // namespace aurora

@@ -11,7 +11,7 @@
 namespace au = aurora;
 
 // 编译期验证宏：每个控件类型必须可默认构造
-#define CHECK_DEFAULT_CONSTRUCT(T)                                                                                     \
+#define CHECK_DEFAULT_CONSTRUCT(T) \
     static_assert(std::is_default_constructible_v<T>, #T " must be default constructible");
 
 // ---- 基础控件 ----

@@ -19,7 +19,7 @@ enum class SimdLevel : std::uint8_t { Scalar, SSE2, AVX2 };
 // x86 架构判定：SSE2/AVX2 内置函数与 target 属性仅 x86 可用；非 x86（ARM/NEON，本轮暂缓）
 // 回落 Scalar，分发只走标量黄金路径。定义 AURORA_SIMD_X86 供 .inl / 测试统一判定。
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-#define AURORA_SIMD_X86 1 // NOLINT(*-macro-usage)
+#define AURORA_SIMD_X86 1  // NOLINT(*-macro-usage)
 #endif
 
 // 运行时探测一次；x86-64 至少 SSE2，AVX2 按需。
@@ -32,8 +32,8 @@ auto ensure_simd_init() noexcept -> void;
 // inline 变量替代「extern 声明 + 外部定义」两段式：链接器保证跨 TU 单一对象，
 // 且 dispatch 热路径 switch(g_simd_level) 可直读，零间接开销；刻意不包访问器，
 // 避免热路径函数调用。非 SIMD 构建下该变量无引用者（仅一字节枚举，无副作用）。
-inline SimdLevel g_simd_level = SimdLevel::SSE2; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables): x86-64
-                                                 // 基线；运行时 detect 后可能升为 AVX2
+inline SimdLevel g_simd_level = SimdLevel::SSE2;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables): x86-64
+                                                  // 基线；运行时 detect 后可能升为 AVX2
 
 // ---- 标量黄金参考（与现有像素逐位一致）----
 // 伽马混合：逐通道 alpha（ar/ag/ab），覆盖文本 AA 的 per-channel 覆盖率。
@@ -87,9 +87,14 @@ inline auto blend_srgb_over_region(std::uint8_t *px, std::uint8_t sr, std::uint8
     ensure_simd_init();
 #ifdef AURORA_SIMD_X86
     switch (g_simd_level) {
-    case SimdLevel::AVX2: blend_srgb_over_region_avx2(px, sr, sg, sb, ar, ag, ab, n); return;
-    case SimdLevel::SSE2: blend_srgb_over_region_sse2(px, sr, sg, sb, ar, ag, ab, n); return;
-    default: break;
+        case SimdLevel::AVX2:
+            blend_srgb_over_region_avx2(px, sr, sg, sb, ar, ag, ab, n);
+            return;
+        case SimdLevel::SSE2:
+            blend_srgb_over_region_sse2(px, sr, sg, sb, ar, ag, ab, n);
+            return;
+        default:
+            break;
     }
 #endif
     blend_srgb_over_region_scalar(px, sr, sg, sb, ar, ag, ab, n);
@@ -99,9 +104,14 @@ inline auto blend_linear_region(std::uint8_t *px, std::uint8_t sr, std::uint8_t 
     ensure_simd_init();
 #ifdef AURORA_SIMD_X86
     switch (g_simd_level) {
-    case SimdLevel::AVX2: blend_linear_region_avx2(px, sr, sg, sb, fa, finv, n); return;
-    case SimdLevel::SSE2: blend_linear_region_sse2(px, sr, sg, sb, fa, finv, n); return;
-    default: break;
+        case SimdLevel::AVX2:
+            blend_linear_region_avx2(px, sr, sg, sb, fa, finv, n);
+            return;
+        case SimdLevel::SSE2:
+            blend_linear_region_sse2(px, sr, sg, sb, fa, finv, n);
+            return;
+        default:
+            break;
     }
 #endif
     blend_linear_region_scalar(px, sr, sg, sb, fa, finv, n);
@@ -112,9 +122,14 @@ inline auto blur_region(std::uint8_t *pixels, int full_width, int x0, int y0, in
     ensure_simd_init();
 #ifdef AURORA_SIMD_X86
     switch (g_simd_level) {
-    case SimdLevel::AVX2: blur_region_avx2(pixels, full_width, x0, y0, rw, rh, r); return;
-    case SimdLevel::SSE2: blur_region_sse2(pixels, full_width, x0, y0, rw, rh, r); return;
-    default: break;
+        case SimdLevel::AVX2:
+            blur_region_avx2(pixels, full_width, x0, y0, rw, rh, r);
+            return;
+        case SimdLevel::SSE2:
+            blur_region_sse2(pixels, full_width, x0, y0, rw, rh, r);
+            return;
+        default:
+            break;
     }
 #endif
     blur_region_scalar(pixels, full_width, x0, y0, rw, rh, r);
@@ -128,21 +143,22 @@ inline auto gradient_linear_fill(std::uint8_t *row, int x0, int n, float sx, flo
     ensure_simd_init();
 #ifdef AURORA_SIMD_X86
     switch (g_simd_level) {
-    case SimdLevel::AVX2: {
-        const int d = gradient_linear_scanline_avx2(row, x0, n, sx, py, dx, dy, inv_len_sq, c0, c1, stop0, range);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        gradient_linear_scanline_scalar(row + (static_cast<std::size_t>(d) * 4u), x0 + d, n - d, sx, py, dx, dy,
-                                        inv_len_sq, c0, c1, stop0, range);
-        return;
-    }
-    case SimdLevel::SSE2: {
-        const int d = gradient_linear_scanline_sse2(row, x0, n, sx, py, dx, dy, inv_len_sq, c0, c1, stop0, range);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        gradient_linear_scanline_scalar(row + (static_cast<std::size_t>(d) * 4u), x0 + d, n - d, sx, py, dx, dy,
-                                        inv_len_sq, c0, c1, stop0, range);
-        return;
-    }
-    default: break;
+        case SimdLevel::AVX2: {
+            const int d = gradient_linear_scanline_avx2(row, x0, n, sx, py, dx, dy, inv_len_sq, c0, c1, stop0, range);
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            gradient_linear_scanline_scalar(row + (static_cast<std::size_t>(d) * 4U), x0 + d, n - d, sx, py, dx, dy,
+                                            inv_len_sq, c0, c1, stop0, range);
+            return;
+        }
+        case SimdLevel::SSE2: {
+            const int d = gradient_linear_scanline_sse2(row, x0, n, sx, py, dx, dy, inv_len_sq, c0, c1, stop0, range);
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            gradient_linear_scanline_scalar(row + (static_cast<std::size_t>(d) * 4U), x0 + d, n - d, sx, py, dx, dy,
+                                            inv_len_sq, c0, c1, stop0, range);
+            return;
+        }
+        default:
+            break;
     }
 #endif
     gradient_linear_scanline_scalar(row, x0, n, sx, py, dx, dy, inv_len_sq, c0, c1, stop0, range);
@@ -152,21 +168,22 @@ inline auto gradient_radial_fill(std::uint8_t *row, int x0, int n, float cx, flo
     ensure_simd_init();
 #ifdef AURORA_SIMD_X86
     switch (g_simd_level) {
-    case SimdLevel::AVX2: {
-        const int d = gradient_radial_scanline_avx2(row, x0, n, cx, py, inv_r, c0, c1, stop0, range);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        gradient_radial_scanline_scalar(row + (static_cast<std::size_t>(d) * 4u), x0 + d, n - d, cx, py, inv_r, c0, c1,
-                                        stop0, range);
-        return;
-    }
-    case SimdLevel::SSE2: {
-        const int d = gradient_radial_scanline_sse2(row, x0, n, cx, py, inv_r, c0, c1, stop0, range);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        gradient_radial_scanline_scalar(row + (static_cast<std::size_t>(d) * 4u), x0 + d, n - d, cx, py, inv_r, c0, c1,
-                                        stop0, range);
-        return;
-    }
-    default: break;
+        case SimdLevel::AVX2: {
+            const int d = gradient_radial_scanline_avx2(row, x0, n, cx, py, inv_r, c0, c1, stop0, range);
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            gradient_radial_scanline_scalar(row + (static_cast<std::size_t>(d) * 4U), x0 + d, n - d, cx, py, inv_r, c0,
+                                            c1, stop0, range);
+            return;
+        }
+        case SimdLevel::SSE2: {
+            const int d = gradient_radial_scanline_sse2(row, x0, n, cx, py, inv_r, c0, c1, stop0, range);
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            gradient_radial_scanline_scalar(row + (static_cast<std::size_t>(d) * 4U), x0 + d, n - d, cx, py, inv_r, c0,
+                                            c1, stop0, range);
+            return;
+        }
+        default:
+            break;
     }
 #endif
     gradient_radial_scanline_scalar(row, x0, n, cx, py, inv_r, c0, c1, stop0, range);
@@ -196,4 +213,4 @@ inline auto gradient_radial_fill(std::uint8_t *row, int x0, int n, float cx, flo
 }
 #endif
 
-} // namespace aurora::detail
+}  // namespace aurora::detail

@@ -39,8 +39,8 @@
 #define AURORA_VERSION_STR2(x) #x
 #define AURORA_VERSION_STR(x) AURORA_VERSION_STR2(x)
 
-#define AURORA_VERSION_NUMERIC                                                                                         \
-    AURORA_VERSION_STR(AURORA_VERSION_MAJOR)                                                                           \
+#define AURORA_VERSION_NUMERIC               \
+    AURORA_VERSION_STR(AURORA_VERSION_MAJOR) \
     "." AURORA_VERSION_STR(AURORA_VERSION_MINOR) "." AURORA_VERSION_STR(AURORA_VERSION_PATCH)
 
 /// @brief 完整 semver 版本串，如 "1.0.0-alpha.1"（稳定版无后缀）。

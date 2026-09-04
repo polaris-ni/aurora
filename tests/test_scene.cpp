@@ -4,7 +4,6 @@
 #include <string>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::Column;
@@ -16,7 +15,7 @@ AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_scene ===\n");
 
     // 1) 单节点场景构造。
-    Scene scene{ Node{ Text{ "hi" } } };
+    Scene scene{Node{Text{"hi"}}};
     AURORA_TEST_CHECK(true);
 
     // 2) root() 返回非空的 Widget 引用（类型正确）。
@@ -28,7 +27,7 @@ AURORA_TEST() {
     // 4) 渲染布局后 root() 有确定的非负尺寸。
     auto rp = scene.render_to_png("scene_single.tmp.png", 80, 40);
     AURORA_TEST_CHECK(rp.ok());
-    AURORA_TEST_CHECK(scene.root().size().width >= 0.0f && scene.root().size().height >= 0.0f);
+    AURORA_TEST_CHECK(scene.root().size().width >= 0.0F && scene.root().size().height >= 0.0F);
 
     // 5) 单节点 serialize 含 "type" 与 "size" 键。
     std::string s = scene.serialize();
@@ -39,7 +38,7 @@ AURORA_TEST() {
     AURORA_TEST_CHECK(s.find("children") == std::string::npos);
 
     // 7) 嵌套 Column→Text 场景 serialize 含 "children"。
-    Scene nested{ Node{ Column{ Node{ Text{ "a" } }, Node{ Text{ "b" } } } } };
+    Scene nested{Node{Column{Node{Text{"a"}}, Node{Text{"b"}}}}};
     auto nrp = nested.render_to_png("scene_nested.tmp.png", 80, 40);
     AURORA_TEST_CHECK(nrp.ok());
     std::string ns = nested.serialize();

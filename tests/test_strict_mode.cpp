@@ -8,7 +8,6 @@
 #include "aurora/aurora.h"
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/strict_mode.h"
-
 #include "test_harness.h"
 
 using aurora::App;
@@ -25,8 +24,8 @@ namespace {
 
 // 验证 Application 上下文的 set/get 往返。
 void test_application_strict_mode() {
-    Scene scene{ Node{ Text{ "x" } } };
-    Application app{ std::move(scene), 320, 240 };
+    Scene scene{Node{Text{"x"}}};
+    Application app{std::move(scene), 320, 240};
 
     app.set_strict_mode(StrictMode::On);
     AURORA_TEST_CHECK(app.strict_mode() == StrictMode::On);
@@ -46,7 +45,7 @@ void test_app_builder_strict_mode() {
         .size(50, 50)
         .strict_mode(StrictMode::On)
         .window(win_res ? std::move(win_res.value()) : nullptr)
-        .view(Node{ Text{ "x" } })
+        .view(Node{Text{"x"}})
         .frames(1)
         .run();
     // run() 不论是否套用，都应还原线程级严格模式（不泄漏到同线程后续运行）。
@@ -71,22 +70,22 @@ void test_strict_failure_is_fatal() {
         thrown = true;
         AURORA_TEST_CHECK(std::string(e.what()) == "strict-failure");
     }
-    AURORA_TEST_CHECK(thrown);            // 严格模式下降级确实致命
-    AURORA_TEST_CHECK(!captured.empty()); // 处理器收到消息
+    AURORA_TEST_CHECK(thrown);  // 严格模式下降级确实致命
+    AURORA_TEST_CHECK(!captured.empty());  // 处理器收到消息
     AURORA_TEST_CHECK(captured.find("bad color") != std::string::npos);
 
     // 非严格模式：仅记录，不触发硬失败。
     set_strict_mode(StrictMode::Off);
     captured.clear();
     Diagnostics::degraded("another", "paint", "render-degraded");
-    AURORA_TEST_CHECK(captured.empty()); // 未触发处理器
+    AURORA_TEST_CHECK(captured.empty());  // 未触发处理器
 
     // 恢复默认（生产默认 std::terminate）。
     set_strict_failure_handler(nullptr);
     set_strict_mode(StrictMode::Off);
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     test_application_strict_mode();

@@ -1,7 +1,7 @@
 #pragma once
 
 // ============================================================================
-// backend.h — 存储后端抽象接口（对标 Surface）
+// storage_backend.h — 存储后端抽象接口（对标 Surface）
 // ----------------------------------------------------------------------------
 // 所有后端（Memory / Filesystem / 未来的 Sqlite）实现此接口。纯虚方法为最小契约，
 // 其余给默认实现（经 `Storage` 门面转发），减少各后端样板。后端只认 `StorageRecord`
@@ -52,12 +52,12 @@ class StorageBackend {
     [[nodiscard]] virtual auto contains(const std::string &id) -> Result<bool> {
         auto r = get_record(id);
         if (r) {
-            return Result<bool>{ true };
+            return Result<bool>{true};
         }
         if (r.error().code_enum == ErrorCode::StorageRecordNotFound) {
-            return Result<bool>{ false };
+            return Result<bool>{false};
         }
-        return Result<bool>{ r.error() };
+        return Result<bool>{r.error()};
     }
 
     /// @brief 清空全部记录；经 transaction + remove 实现（后端可覆写为单语句）。
@@ -65,7 +65,7 @@ class StorageBackend {
         return transaction([this](StorageBackend &) -> Result<void> {
             auto ids = list();
             if (!ids) {
-                return Result<void>{ ids.error() };
+                return Result<void>{ids.error()};
             }
             for (const auto &id : ids.value()) {
                 if (auto e = remove(id); !e) {
@@ -83,4 +83,4 @@ class StorageBackend {
     virtual auto close() -> Result<void> { return Result<void>{}; }
 };
 
-} // namespace aurora::storage
+}  // namespace aurora::storage

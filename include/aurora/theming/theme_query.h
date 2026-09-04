@@ -47,4 +47,4 @@ namespace aurora {
 /// @brief 解析整树根所处位置的生效主题（便捷重载）。
 [[nodiscard]] inline auto resolve_theme(const Node &root) -> Theme { return resolve_theme(root, root.widget()); }
 
-} // namespace aurora
+}  // namespace aurora

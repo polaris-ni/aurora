@@ -23,7 +23,7 @@ namespace detail {
  */
 inline const std::chrono::steady_clock::time_point AURORA_PERF_EPOCH = std::chrono::steady_clock::now();
 
-} // namespace detail
+}  // namespace detail
 
 /**
  * @brief 单调秒表：构造即开始计时。
@@ -48,24 +48,24 @@ inline const std::chrono::steady_clock::time_point AURORA_PERF_EPOCH = std::chro
 class Stopwatch {
   public:
     /// @brief 构造即开始计时。
-    Stopwatch() noexcept : m_start(Clock::now()) {}
+    Stopwatch() noexcept : start_(Clock::now()) {}
 
     /// @brief 重新开始计时（丢弃已累计时长）。
-    auto reset() noexcept -> void { m_start = Clock::now(); }
+    auto reset() noexcept -> void { start_ = Clock::now(); }
 
     /// @brief 自构造/上次 `reset()` 起经过的毫秒数。
     [[nodiscard]] auto elapsed_ms() const noexcept -> double {
-        return std::chrono::duration<double, std::milli>(Clock::now() - m_start).count();
+        return std::chrono::duration<double, std::milli>(Clock::now() - start_).count();
     }
 
     /// @brief 自构造/上次 `reset()` 起经过的微秒数。
     [[nodiscard]] auto elapsed_us() const noexcept -> double {
-        return std::chrono::duration<double, std::micro>(Clock::now() - m_start).count();
+        return std::chrono::duration<double, std::micro>(Clock::now() - start_).count();
     }
 
     /// @brief 自构造/上次 `reset()` 起经过的纳秒数（整数，用于需要精确累加的场合）。
     [[nodiscard]] auto elapsed_ns() const noexcept -> std::int64_t {
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - m_start).count();
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start_).count();
     }
 
     /**
@@ -74,8 +74,8 @@ class Stopwatch {
      */
     auto lap_ms() noexcept -> double {
         const auto now = Clock::now();
-        const double ms = std::chrono::duration<double, std::milli>(now - m_start).count();
-        m_start = now;
+        const double ms = std::chrono::duration<double, std::milli>(now - start_).count();
+        start_ = now;
         return ms;
     }
 
@@ -92,7 +92,7 @@ class Stopwatch {
   private:
     using Clock = std::chrono::steady_clock;
 
-    Clock::time_point m_start;
+    Clock::time_point start_;
 };
 
-} // namespace aurora
+}  // namespace aurora

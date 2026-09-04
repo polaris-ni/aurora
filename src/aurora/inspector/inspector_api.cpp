@@ -47,7 +47,7 @@ auto Inspector::get_prop_value(const Widget &w, std::string_view key) -> Json {
     Json props = Json::object();
     w.serialize_props(props);
     if (props.contains(std::string(key))) {
-        return props[std::string(key)];
+        return props[std::string(key)];  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
     }
     return Json{};
 }
@@ -65,10 +65,12 @@ auto Inspector::apply_patch(Node &root, const Json &patch) -> Result<void> {
         if (!op.is_object() || !op.contains("path") || !op.contains("value")) {
             continue;
         }
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         const std::string path_str = op["path"].get<std::string>();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         const Json &value = op["value"];
         // path 格式: "/widget_path/prop_name" — 最后一段为属性名
-        auto last_slash = path_str.rfind('/');
+        const auto last_slash = path_str.rfind('/');
         if (last_slash == std::string::npos) {
             // 根节点属性
             set_widget_prop(root.widget(), path_str, value);
@@ -76,7 +78,7 @@ auto Inspector::apply_patch(Node &root, const Json &patch) -> Result<void> {
             std::string widget_path = path_str.substr(0, last_slash);
             std::string prop_name = path_str.substr(last_slash + 1);
             // 跳过前导 '/'
-            if (!widget_path.empty() && widget_path[0] == '/') {
+            if (!widget_path.empty() && widget_path.at(0) == '/') {
                 widget_path = widget_path.substr(1);
             }
             Node target = find_node_by_path(root, widget_path);
@@ -94,7 +96,7 @@ auto Inspector::apply_patch(Node &root, const Json &patch) -> Result<void> {
 
 auto Inspector::simulate_click(Widget &w) -> Result<void> {
     // 在 Widget 自身中心触发一次 press + release，走完整的命中测试 + 冒泡派发路径。
-    const Point center{ .x = w.size().width * 0.5f, .y = w.size().height * 0.5f };
+    const Point center{.x = w.size().width * 0.5F, .y = w.size().height * 0.5F};
     MouseEvent press;
     press.action = MouseAction::Press;
     press.button = MouseButton::Left;
@@ -110,7 +112,7 @@ auto Inspector::simulate_scroll(Widget &w, float dx, float dy) -> Result<void> {
     ScrollEvent e;
     e.delta_x = dx;
     e.delta_y = dy;
-    e.position = Point{ .x = w.size().width * 0.5f, .y = w.size().height * 0.5f };
+    e.position = Point{.x = w.size().width * 0.5F, .y = w.size().height * 0.5F};
     EventDispatcher::dispatch(w, e);
     return Result<void>{};
 }
@@ -185,7 +187,7 @@ auto next_sub_id() -> std::size_t & {
     static std::size_t id = 0;
     return id;
 }
-} // namespace
+}  // namespace
 
 auto Inspector::subscribe_changes(ChangeCallback cb) -> std::size_t {
     std::scoped_lock lock(subscribers_mutex());
@@ -208,4 +210,4 @@ void Inspector::notify_changes(const Json &patch) {
     }
 }
 
-} // namespace aurora
+}  // namespace aurora

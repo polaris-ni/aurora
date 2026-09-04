@@ -13,50 +13,50 @@ namespace aurora {
 /// 布局时占满父约束（fill），绘制时把内容平移到对齐子矩形；不影响命中（命中区随之平移）。
 class AlignNode : public ModifierNode {
   public:
-    explicit AlignNode(Alignment align) : m_align(align) {}
+    explicit AlignNode(Alignment align) : align_(align) {}
 
     [[nodiscard]] auto kind() const -> Kind override { return Kind::Transform; }
 
     auto layout(const Constraints &c, const std::function<Size(const Constraints &)> &measure_child) const
         -> Size override {
         const Size child = measure_child(c);
-        m_child_size = child;
-        Size self = c.max; // 占满父级（Align 默认填满可用空间）
+        child_size_ = child;
+        Size self = c.max;  // 占满父级（Align 默认填满可用空间）
         if (!c.max.is_finite()) {
-            self = child; // 父级无限时退化为内容尺寸
+            self = child;  // 父级无限时退化为内容尺寸
         }
         return c.constrain(self);
     }
 
-    [[nodiscard]] auto align() const -> Alignment { return m_align; }
-    [[nodiscard]] auto child_size() const -> Size { return m_child_size; }
+    [[nodiscard]] auto align() const -> Alignment { return align_; }
+    [[nodiscard]] auto child_size() const -> Size { return child_size_; }
 
   private:
-    Alignment m_align;
-    mutable Size m_child_size{ .width = 0.0f, .height = 0.0f };
+    Alignment align_;
+    mutable Size child_size_{.width = 0.0F, .height = 0.0F};
 };
 
 /// @brief 偏移修饰（Transform 切片）：把内容按 (dx,dy) 视觉平移，不改变布局尺寸/命中逻辑。
 class OffsetNode : public ModifierNode {
   public:
-    OffsetNode(float dx, float dy) : m_dx(dx), m_dy(dy) {}
+    OffsetNode(float dx, float dy) : dx_(dx), dy_(dy) {}
 
     [[nodiscard]] auto kind() const -> Kind override { return Kind::Transform; }
 
     auto layout(const Constraints &c, const std::function<Size(const Constraints &)> &measure_child) const
         -> Size override {
         const Size child = measure_child(c);
-        m_child_size = child;
+        child_size_ = child;
         return c.constrain(child);
     }
 
-    [[nodiscard]] auto dx() const -> float { return m_dx; }
-    [[nodiscard]] auto dy() const -> float { return m_dy; }
+    [[nodiscard]] auto dx() const -> float { return dx_; }
+    [[nodiscard]] auto dy() const -> float { return dy_; }
 
   private:
-    float m_dx = 0.0f;
-    float m_dy = 0.0f;
-    mutable Size m_child_size{ .width = 0.0f, .height = 0.0f };
+    float dx_ = 0.0F;
+    float dy_ = 0.0F;
+    mutable Size child_size_{.width = 0.0F, .height = 0.0F};
 };
 
 /// @brief 仿射变换修饰（Transform 切片）：旋转 / 缩放 / 任意矩阵，绕内容盒中心作用。
@@ -65,13 +65,13 @@ class TransformNode : public ModifierNode {
   public:
     enum class Operation : std::uint8_t {
         Rotate,  ///< 绕内容中心旋转（角度）
-        ScaleXY, ///< 绕内容中心非均匀缩放
-        Raw,     ///< 用户提供的原始矩阵（关于原点，自行负责中心化）
+        ScaleXY,  ///< 绕内容中心非均匀缩放
+        Raw,  ///< 用户提供的原始矩阵（关于原点，自行负责中心化）
     };
 
-    explicit TransformNode(float degrees) : m_op(Operation::Rotate), m_a(degrees) {}
-    TransformNode(float sx, float sy) : m_op(Operation::ScaleXY), m_a(sx), m_b(sy) {}
-    explicit TransformNode(const Matrix2D &m) : m_op(Operation::Raw), m_raw(m) {}
+    explicit TransformNode(float degrees) : op_(Operation::Rotate), a_(degrees) {}
+    TransformNode(float sx, float sy) : op_(Operation::ScaleXY), a_(sx), b_(sy) {}
+    explicit TransformNode(const Matrix2D &m) : op_(Operation::Raw), raw_(m) {}
 
     [[nodiscard]] auto kind() const -> Kind override { return Kind::Transform; }
 
@@ -82,20 +82,23 @@ class TransformNode : public ModifierNode {
 
     /// @brief 绕内容盒中心构造本节点矩阵（content 为当前已知内容盒尺寸）。
     [[nodiscard]] auto matrix(const Size &content) const -> Matrix2D {
-        const Point center{ .x = content.width / 2.0f, .y = content.height / 2.0f };
-        switch (m_op) {
-        case Operation::Rotate: return Matrix2D::from_rotate_about(m_a, center);
-        case Operation::ScaleXY: return Matrix2D::from_scale_about(m_a, m_b, center);
-        case Operation::Raw: return m_raw;
+        const Point center{.x = content.width / 2.0F, .y = content.height / 2.0F};
+        switch (op_) {
+            case Operation::Rotate:
+                return Matrix2D::from_rotate_about(a_, center);
+            case Operation::ScaleXY:
+                return Matrix2D::from_scale_about(a_, b_, center);
+            case Operation::Raw:
+                return raw_;
         }
         return Matrix2D{};
     }
 
   private:
-    Operation m_op;
-    float m_a = 0.0f;
-    float m_b = 0.0f;
-    Matrix2D m_raw{};
+    Operation op_;
+    float a_ = 0.0F;
+    float b_ = 0.0F;
+    Matrix2D raw_{};
 };
 
-} // namespace aurora
+}  // namespace aurora

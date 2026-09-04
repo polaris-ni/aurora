@@ -29,11 +29,11 @@ namespace aurora {
 namespace {
 // 把逻辑 dp 矩形按 device pixel ratio 放大为物理像素矩形（几何绘制用）。
 auto scale_rect(const Rect &r, float s) -> Rect {
-    return Rect{ .origin = Point{ .x = r.origin.x * s, .y = r.origin.y * s },
-                 .size = Size{ .width = r.size.width * s, .height = r.size.height * s } };
+    return Rect{.origin = Point{.x = r.origin.x * s, .y = r.origin.y * s},
+                .size = Size{.width = r.size.width * s, .height = r.size.height * s}};
 }
 
-} // namespace
+}  // namespace
 
 // SIMD 双实现：标量参考与 SIMD 路径逐位一致。
 // gamma LUT / 标量 golden 混合实现见 aurora/render/detail/gamma_lut.{h,cpp} 与 painter_simd.inl。
@@ -50,9 +50,9 @@ using aurora::detail::linear_to_srgb;
 // [性能排查] 各光栅热点耗时累加器（结构/计时器/访问器见 detail/paint_timing.h）。
 // 性能排查累加器为跨函数共享的可变模块状态，设计为有意的命名空间级全局；见 paint_timing()/paint_timing_last()。
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-detail::PaintTiming g_pt; // 当前帧累加器（aurora::g_pt）
+detail::PaintTiming g_pt;  // 当前帧累加器（aurora::g_pt）
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-detail::PaintTiming g_pt_last; // 上一完成绘制帧快照
+detail::PaintTiming g_pt_last;  // 上一完成绘制帧快照
 
 auto detail::paint_timing() -> detail::PaintTiming & { return g_pt; }
 auto detail::paint_timing_last() -> const detail::PaintTiming & { return g_pt_last; }
@@ -66,7 +66,7 @@ auto detail::commit_paint_frame(bool drew) -> void {
     const std::uint64_t r1 = g_pt.scroll_r_band;
     const std::uint64_t r2 = g_pt.scroll_r_reanchor;
     const std::uint64_t r3 = g_pt.scroll_r_blit;
-    g_pt = detail::PaintTiming{}; // 当前帧清零，下帧从零计
+    g_pt = detail::PaintTiming{};  // 当前帧清零，下帧从零计
     g_pt.scroll_r_whole = r0;
     g_pt.scroll_r_band = r1;
     g_pt.scroll_r_reanchor = r2;
@@ -116,7 +116,7 @@ static auto paint_timing_to_json(const detail::PaintTiming &t, double divisor) -
 // 仅供 DEBUG 排查，不用于生产。
 auto paint_primitive_timing_json(double per_frame_divisor) -> std::string {
     const std::string s = paint_timing_to_json(g_pt, per_frame_divisor);
-    g_pt = detail::PaintTiming{}; // 读取后清零
+    g_pt = detail::PaintTiming{};  // 读取后清零
     return s;
 }
 
@@ -142,7 +142,7 @@ auto Painter::rounded_full_x_range(const ClipRegion &cr, int y, float t) -> std:
     const float hh = (bottom - top) * 0.5f;
     const float py = std::fabs(static_cast<float>(y) - cy) - hh + rad;
     if (py > -t) {
-        return { 0, 0 };
+        return {0, 0};
     }
     float half_range = NAN;
     if (py <= 0.0f) {
@@ -150,7 +150,7 @@ auto Painter::rounded_full_x_range(const ClipRegion &cr, int y, float t) -> std:
     } else {
         const float disc = (t * t) - (py * py);
         if (disc < 0.0f) {
-            return { 0, 0 };
+            return {0, 0};
         }
         half_range = hw - rad + std::sqrt(disc);
     }
@@ -158,7 +158,7 @@ auto Painter::rounded_full_x_range(const ClipRegion &cr, int y, float t) -> std:
     int x1 = static_cast<int>(std::ceil(cx + half_range)) + 1;
     x0 = std::max(x0, static_cast<int>(std::ceil(left)));
     x1 = std::min(x1, static_cast<int>(std::floor(right)) + 1);
-    return { x0, x1 };
+    return {x0, x1};
 }
 
 // 逐像素原语的迭代范围收缩：与裁剪栈各矩形求交（物理像素，取整与 fill_rect 快路径/
@@ -167,7 +167,7 @@ auto Painter::rounded_full_x_range(const ClipRegion &cr, int y, float t) -> std:
 // 迭代，结果逐位不变；部分脏区重绘（push_clip 脏矩形）下避免全屏逐像素白扫
 // （全屏圆角背景/渐变/阴影在拖选帧扫全窗，大窗口下数十 ms/帧）。
 auto Painter::shrink_to_clips(int &x0, int &y0, int &x1, int &y1) const -> bool {
-    for (const ClipRegion &cr : m_clip_stack) {
+    for (const ClipRegion &cr : clip_stack_) {
         x0 = std::max(x0, static_cast<int>(std::ceil(cr.rect.origin.x)));
         y0 = std::max(y0, static_cast<int>(std::ceil(cr.rect.origin.y)));
         x1 = std::min(x1, static_cast<int>(std::floor(cr.rect.right())) + 1);
@@ -178,26 +178,26 @@ auto Painter::shrink_to_clips(int &x0, int &y0, int &x1, int &y1) const -> bool 
 
 auto Painter::begin(int width, int height) -> void {
     // 逻辑 dp 尺寸 → 物理像素缓冲（高 DPI 清晰、1:1 贴窗口）。
-    m_width = static_cast<int>(std::lround(width * m_scale));
-    m_height = static_cast<int>(std::lround(height * m_scale));
-    if (m_width <= 0) {
-        m_width = 1;
+    width_ = static_cast<int>(std::lround(width * scale_));
+    height_ = static_cast<int>(std::lround(height * scale_));
+    if (width_ <= 0) {
+        width_ = 1;
     }
-    if (m_height <= 0) {
-        m_height = 1;
+    if (height_ <= 0) {
+        height_ = 1;
     }
-    m_pixels.assign(static_cast<size_t>(m_width) * static_cast<size_t>(m_height) * 4u, 0);
+    pixels_.assign(static_cast<size_t>(width_) * static_cast<size_t>(height_) * 4u, 0);
     // 新帧裁剪栈归零兜底：push/pop 由调用方配对，但若某处失衡（历史上曾因
     // push_clip_rounded 双压泄漏造成整窗白屏），不得跨帧扩散。
-    m_clip_stack.clear();
-    m_has_rounded_clip = false;
+    clip_stack_.clear();
+    has_rounded_clip_ = false;
 }
 
-auto Painter::width() const -> int { return m_width; }
+auto Painter::width() const -> int { return width_; }
 
-auto Painter::height() const -> int { return m_height; }
+auto Painter::height() const -> int { return height_; }
 
-auto Painter::data() const -> const std::uint8_t * { return m_pixels.data(); }
+auto Painter::data() const -> const std::uint8_t * { return pixels_.data(); }
 
 auto Painter::fill_rect(const Rect &r, Color c) -> void {
     if (is_recording()) {
@@ -205,21 +205,21 @@ auto Painter::fill_rect(const Rect &r, Color c) -> void {
         cmd.kind = CmdKind::FillRect;
         cmd.bounds = r;
         cmd.color = c;
-        m_recording_stack.back()->push_cmd(cmd);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
-    const Rect pr = scale_rect(r, m_scale);
+    const Rect pr = scale_rect(r, scale_);
     int x0 = static_cast<int>(std::floor(std::max(0.0f, pr.origin.x)));
     int y0 = static_cast<int>(std::floor(std::max(0.0f, pr.origin.y)));
-    int x1 = static_cast<int>(std::ceil(std::min(static_cast<float>(m_width), pr.origin.x + pr.size.width)));
-    int y1 = static_cast<int>(std::ceil(std::min(static_cast<float>(m_height), pr.origin.y + pr.size.height)));
+    int x1 = static_cast<int>(std::ceil(std::min(static_cast<float>(width_), pr.origin.x + pr.size.width)));
+    int y1 = static_cast<int>(std::ceil(std::min(static_cast<float>(height_), pr.origin.y + pr.size.height)));
     if (x0 >= x1 || y0 >= y1) {
         return;
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
     AURORA_PROFILE_COUNT(fill_rects, 1);
     AURORA_PROFILE_COUNT(pixels_filled, static_cast<std::uint64_t>(x1 - x0) * static_cast<std::uint64_t>(y1 - y0));
-    detail::PaintTimer guard{ &g_pt.fill };
+    detail::PaintTimer guard{&g_pt.fill};
     // 快速路径命中即绘制并返回；否则 x0..y1 保持未裁剪交集，交由慢路径处理。
     if (fill_rect_fast_path(x0, y0, x1, y1, c)) {
         return;
@@ -232,9 +232,9 @@ auto Painter::fill_rect_fast_path(int &x0, int &y0, int &x1, int &y1, Color c) -
     // 整行写入，避免逐像素的裁剪栈遍历与浮点混合——全屏背景/容器底色/选区高亮
     // 都走此路径；最大化窗口（如 2560×1440 物理）下逐像素路径单次全屏填充 >10ms，
     // 每帧两次全屏填充（清屏 + 容器背景）即是拖选时选区高亮卡顿的主因。
-    bool rect_clips_only = (m_global_alpha == 1.0);
+    bool rect_clips_only = (global_alpha_ == 1.0);
     if (rect_clips_only) {
-        for (const ClipRegion &cr : m_clip_stack) {
+        for (const ClipRegion &cr : clip_stack_) {
             if (cr.rounded && cr.radius > 0.0f) {
                 rect_clips_only = false;
                 break;
@@ -247,7 +247,7 @@ auto Painter::fill_rect_fast_path(int &x0, int &y0, int &x1, int &y1, Color c) -
 
     // 与 coverage 的 contains 语义像素级等价：保留 x ∈ [ceil(origin.x), floor(right())]
     // （contains 含右/下边界），故上界为 floor(...)+1（半开）。
-    for (const ClipRegion &cr : m_clip_stack) {
+    for (const ClipRegion &cr : clip_stack_) {
         x0 = std::max(x0, static_cast<int>(std::ceil(cr.rect.origin.x)));
         y0 = std::max(y0, static_cast<int>(std::ceil(cr.rect.origin.y)));
         x1 = std::min(x1, static_cast<int>(std::floor(cr.rect.right())) + 1);
@@ -255,27 +255,27 @@ auto Painter::fill_rect_fast_path(int &x0, int &y0, int &x1, int &y1, Color c) -
     }
     x0 = std::max(x0, 0);
     y0 = std::max(y0, 0);
-    x1 = std::min(x1, m_width);
-    y1 = std::min(y1, m_height);
+    x1 = std::min(x1, width_);
+    y1 = std::min(y1, height_);
     if (x0 >= x1 || y0 >= y1) {
         return true;
     }
     const std::size_t row_bytes = static_cast<std::size_t>(x1 - x0) * 4u;
     std::uint8_t *first =
-        m_pixels.data() +
-        (((static_cast<std::size_t>(y0) * static_cast<std::size_t>(m_width)) + static_cast<std::size_t>(x0)) * 4u);
-    if (c.m_a == 255) {
+        pixels_.data() +
+        (((static_cast<std::size_t>(y0) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x0)) * 4u);
+    if (c.a == 255) {
         // 不透明覆写：构造首行后其余行整行 memcpy（与 set_pixel 在 a=255 时结果一致）。
         for (int x = 0; x < x1 - x0; ++x) {
-            first[(static_cast<std::size_t>(x) * 4u) + 0u] = c.m_r;
-            first[(static_cast<std::size_t>(x) * 4u) + 1u] = c.m_g;
-            first[(static_cast<std::size_t>(x) * 4u) + 2u] = c.m_b;
+            first[(static_cast<std::size_t>(x) * 4u) + 0u] = c.r;
+            first[(static_cast<std::size_t>(x) * 4u) + 1u] = c.g;
+            first[(static_cast<std::size_t>(x) * 4u) + 2u] = c.b;
             first[(static_cast<std::size_t>(x) * 4u) + 3u] = 255;
         }
         for (int y = y0 + 1; y < y1; ++y) {
-            std::memcpy(m_pixels.data() + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) +
-                                            static_cast<std::size_t>(x0)) *
-                                           4u),
+            std::memcpy(pixels_.data() + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) +
+                                           static_cast<std::size_t>(x0)) *
+                                          4u),
                         first, row_bytes);
         }
     } else {
@@ -283,18 +283,18 @@ auto Painter::fill_rect_fast_path(int &x0, int &y0, int &x1, int &y1, Color c) -
         // 省去逐像素的越界/裁剪/全局透明度开销。
         // 注意：必须乘以全局透明度 m_global_alpha（转场淡入淡出依赖），
         // 与 set_pixel 的 c.a *= m_global_alpha 语义一致。
-        const float a = (static_cast<float>(c.m_a) * static_cast<float>(m_global_alpha)) / 255.0f;
+        const float a = (static_cast<float>(c.a) * static_cast<float>(global_alpha_)) / 255.0f;
         const float inv = 1.0f - a;
         for (int y = y0; y < y1; ++y) {
             std::uint8_t *row =
-                m_pixels.data() +
-                (((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) + static_cast<std::size_t>(x0)) *
+                pixels_.data() +
+                (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x0)) *
                  4u);
             for (int x = 0; x < x1 - x0; ++x) {
                 std::uint8_t *px = row + (static_cast<std::size_t>(x) * 4u);
-                px[0] = static_cast<std::uint8_t>((px[0] * inv) + (c.m_r * a));
-                px[1] = static_cast<std::uint8_t>((px[1] * inv) + (c.m_g * a));
-                px[2] = static_cast<std::uint8_t>((px[2] * inv) + (c.m_b * a));
+                px[0] = static_cast<std::uint8_t>((px[0] * inv) + (c.r * a));
+                px[1] = static_cast<std::uint8_t>((px[1] * inv) + (c.g * a));
+                px[2] = static_cast<std::uint8_t>((px[2] * inv) + (c.b * a));
                 px[3] = 255;
             }
         }
@@ -315,8 +315,8 @@ auto Painter::fill_rect_slow_path(int x0, int y0, int x1, int y1, Color c) -> vo
     // 必须夹回缓冲，否则下方逐像素内联快写会越界写（0xC0000005）。
     x0 = std::max(x0, 0);
     y0 = std::max(y0, 0);
-    x1 = std::min(x1, m_width);
-    y1 = std::min(y1, m_height);
+    x1 = std::min(x1, width_);
+    y1 = std::min(y1, height_);
     if (x0 >= x1 || y0 >= y1) {
         return;
     }
@@ -327,14 +327,14 @@ auto Painter::fill_rect_slow_path(int x0, int y0, int x1, int y1, Color c) -> vo
         float threshold;
     };
     std::vector<RoundedInfo> rounded_clips;
-    for (const ClipRegion &cr : m_clip_stack) {
+    for (const ClipRegion &cr : clip_stack_) {
         if (cr.rounded && cr.radius > 0.0f) {
-            rounded_clips.push_back({ .cr = &cr, .threshold = cr.anti_alias ? -0.5f : 0.0f });
+            rounded_clips.push_back({.cr = &cr, .threshold = cr.anti_alias ? -0.5f : 0.0f});
         }
     }
     // 慢路径逐像素 source-over 仍须乘以全局透明度 m_global_alpha（与 set_pixel 一致），
     // 否则 set_alpha(<1) 淡入淡出对矩形填充无效（转场/全局淡变）。
-    const float fa = (static_cast<float>(c.m_a) * static_cast<float>(m_global_alpha)) / 255.0f;
+    const float fa = (static_cast<float>(c.a) * static_cast<float>(global_alpha_)) / 255.0f;
     const float finv = 1.0f - fa;
     for (int y = y0; y < y1; ++y) {
         // 全覆写 x 范围 = 所有圆角裁剪各行全覆写范围的交集
@@ -346,7 +346,7 @@ auto Painter::fill_rect_slow_path(int x0, int y0, int x1, int y1, Color c) -> vo
             safe_x1 = std::min(safe_x1, fx1);
         }
         if (safe_x0 > safe_x1) {
-            safe_x0 = safe_x1 = x0; // 退化：全行走逐像素
+            safe_x0 = safe_x1 = x0;  // 退化：全行走逐像素
         }
         // 左过渡区（圆弧）：逐像素 coverage
         for (int x = x0; x < safe_x0; ++x) {
@@ -354,11 +354,11 @@ auto Painter::fill_rect_slow_path(int x0, int y0, int x1, int y1, Color c) -> vo
         }
         // 行内快速路径：coverage 恒为 1，直接 source-over（与 set_pixel 位级一致）
         if (safe_x0 < safe_x1) {
-            std::uint8_t *row = m_pixels.data() + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) +
-                                                    static_cast<std::size_t>(safe_x0)) *
-                                                   4u);
+            std::uint8_t *row = pixels_.data() + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) +
+                                                   static_cast<std::size_t>(safe_x0)) *
+                                                  4u);
             const int count = safe_x1 - safe_x0;
-            blend_linear_region(row, c.m_r, c.m_g, c.m_b, fa, finv, count);
+            blend_linear_region(row, c.r, c.g, c.b, fa, finv, count);
         }
         // 右过渡区（圆弧）：逐像素 coverage
         for (int x = safe_x1; x < x1; ++x) {
@@ -373,21 +373,21 @@ auto Painter::draw_rect(const Rect &r, Color c) -> void {
         cmd.kind = CmdKind::DrawRect;
         cmd.bounds = r;
         cmd.color = c;
-        m_recording_stack.back()->push_cmd(cmd);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
     const float x0 = r.origin.x;
     const float y0 = r.origin.y;
     const float w = r.size.width;
     const float h = r.size.height;
-    fill_rect(Rect{ .origin = Point{ .x = x0, .y = y0 }, .size = Size{ .width = w, .height = 1.0f } }, c);
-    fill_rect(Rect{ .origin = Point{ .x = x0, .y = y0 + std::max(0.0f, h - 1.0f) },
-                    .size = Size{ .width = w, .height = 1.0f } },
-              c);
-    fill_rect(Rect{ .origin = Point{ .x = x0, .y = y0 }, .size = Size{ .width = 1.0f, .height = h } }, c);
-    fill_rect(Rect{ .origin = Point{ .x = x0 + std::max(0.0f, w - 1.0f), .y = y0 },
-                    .size = Size{ .width = 1.0f, .height = h } },
-              c);
+    fill_rect(Rect{.origin = Point{.x = x0, .y = y0}, .size = Size{.width = w, .height = 1.0f}}, c);
+    fill_rect(
+        Rect{.origin = Point{.x = x0, .y = y0 + std::max(0.0f, h - 1.0f)}, .size = Size{.width = w, .height = 1.0f}},
+        c);
+    fill_rect(Rect{.origin = Point{.x = x0, .y = y0}, .size = Size{.width = 1.0f, .height = h}}, c);
+    fill_rect(
+        Rect{.origin = Point{.x = x0 + std::max(0.0f, w - 1.0f), .y = y0}, .size = Size{.width = 1.0f, .height = h}},
+        c);
 }
 
 auto Painter::draw_line(Point a, Point b, float width, Color c) -> void {
@@ -398,20 +398,20 @@ auto Painter::draw_line(Point a, Point b, float width, Color c) -> void {
         cmd.pt1 = b;
         cmd.f0 = width;
         cmd.color = c;
-        m_recording_stack.back()->push_cmd(cmd);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
-    if (width <= 0.0f || c.m_a == 0) {
+    if (width <= 0.0f || c.a == 0) {
         return;
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
-    detail::PaintTimer guard{ &g_pt.line };
+    detail::PaintTimer guard{&g_pt.line};
     // 逻辑 dp → 物理像素；半宽 + 1px 羽化带决定包围盒。
-    const float ax = a.x * m_scale;
-    const float ay = a.y * m_scale;
-    const float bx = b.x * m_scale;
-    const float by = b.y * m_scale;
-    const float hw = width * m_scale * 0.5f;
+    const float ax = a.x * scale_;
+    const float ay = a.y * scale_;
+    const float bx = b.x * scale_;
+    const float by = b.y * scale_;
+    const float hw = width * scale_ * 0.5f;
     const float pad = hw + 1.0f;
     int x0 = static_cast<int>(std::floor(std::min(ax, bx) - pad));
     int y0 = static_cast<int>(std::floor(std::min(ay, by) - pad));
@@ -419,8 +419,8 @@ auto Painter::draw_line(Point a, Point b, float width, Color c) -> void {
     int y1 = static_cast<int>(std::ceil(std::max(ay, by) + pad)) + 1;
     x0 = std::max(x0, 0);
     y0 = std::max(y0, 0);
-    x1 = std::min(x1, m_width);
-    y1 = std::min(y1, m_height);
+    x1 = std::min(x1, width_);
+    y1 = std::min(y1, height_);
     if (!shrink_to_clips(x0, y0, x1, y1)) {
         return;
     }
@@ -436,13 +436,13 @@ auto Painter::draw_line(Point a, Point b, float width, Color c) -> void {
             const float ex = px - (t * dx);
             const float ey = py - (t * dy);
             const float dist = std::sqrt((ex * ex) + (ey * ey));
-            const float cov = aurora::saturate(hw + 0.5f - dist); // 1px 羽化
+            const float cov = aurora::saturate(hw + 0.5f - dist);  // 1px 羽化
             if (cov <= 0.0f) {
                 continue;
             }
             Color pc = c;
-            pc.m_a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.m_a) * cov));
-            set_pixel(x, y, pc); // set_pixel 另行应用裁剪 coverage 与全局透明度
+            pc.a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.a) * cov));
+            set_pixel(x, y, pc);  // set_pixel 另行应用裁剪 coverage 与全局透明度
         }
     }
 }
@@ -466,18 +466,18 @@ auto Painter::draw_rounded_border(const Rect &r, float radius, float thickness, 
         cmd.f0 = radius;
         cmd.f1 = thickness;
         cmd.color = c;
-        m_recording_stack.back()->push_cmd(cmd);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
-    if (thickness <= 0.0f || c.m_a == 0 || r.size.width <= 0.0f || r.size.height <= 0.0f) {
+    if (thickness <= 0.0f || c.a == 0 || r.size.width <= 0.0f || r.size.height <= 0.0f) {
         return;
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
-    detail::PaintTimer guard{ &g_pt.border };
+    detail::PaintTimer guard{&g_pt.border};
     // 圆角矩形 SDF 带状覆盖度：外缘 d=0、内缘 d=-t（向内描边），两侧各 0.5px 羽化。
-    const Rect pr = scale_rect(r, m_scale);
-    const float t = thickness * m_scale;
-    const float rad = std::min(radius * m_scale, std::min(pr.size.width, pr.size.height) * 0.5f);
+    const Rect pr = scale_rect(r, scale_);
+    const float t = thickness * scale_;
+    const float rad = std::min(radius * scale_, std::min(pr.size.width, pr.size.height) * 0.5f);
     const float cx = pr.origin.x + (pr.size.width * 0.5f);
     const float cy = pr.origin.y + (pr.size.height * 0.5f);
     const float hw = pr.size.width * 0.5f;
@@ -488,8 +488,8 @@ auto Painter::draw_rounded_border(const Rect &r, float radius, float thickness, 
     int y1 = static_cast<int>(std::ceil(pr.bottom() + 1.0f)) + 1;
     x0 = std::max(x0, 0);
     y0 = std::max(y0, 0);
-    x1 = std::min(x1, m_width);
-    y1 = std::min(y1, m_height);
+    x1 = std::min(x1, width_);
+    y1 = std::min(y1, height_);
     if (!shrink_to_clips(x0, y0, x1, y1)) {
         return;
     }
@@ -502,7 +502,7 @@ auto Painter::draw_rounded_border(const Rect &r, float radius, float thickness, 
     for (int y = y0; y < y1; ++y) {
         for (int x = x0; x < x1; ++x) {
             if (y >= sy0 && y <= sy1 && x >= sx0 && x <= sx1) {
-                x = sx1; // 内部安全区：跳到右缘（循环自增后继续扫右侧边框）
+                x = sx1;  // 内部安全区：跳到右缘（循环自增后继续扫右侧边框）
                 continue;
             }
             // 圆角矩形 SDF（像素中心采样）。
@@ -518,7 +518,7 @@ auto Painter::draw_rounded_border(const Rect &r, float radius, float thickness, 
                 continue;
             }
             Color pc = c;
-            pc.m_a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.m_a) * cov));
+            pc.a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.a) * cov));
             set_pixel(x, y, pc);
         }
     }
@@ -529,18 +529,18 @@ auto Painter::clear_rect(const Rect &r) -> void {
         DrawCmd cmd;
         cmd.kind = CmdKind::ClearRect;
         cmd.bounds = r;
-        m_recording_stack.back()->push_cmd(cmd);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
     // 新帧零基底重置：直接写零，不走混合/裁剪/全局透明度。取整与 fill_rect 快路径的
     // 裁剪收缩语义一致（保留 x ∈ [ceil(l), floor(r)]，含右/下边界），保证被后续裁剪绘制
     // 触及的每个像素都先回到与 begin 后一致的零基底。
-    detail::PaintTimer guard{ &g_pt.clear };
-    const Rect pr = scale_rect(r, m_scale);
+    detail::PaintTimer guard{&g_pt.clear};
+    const Rect pr = scale_rect(r, scale_);
     const int x0 = std::max(0, static_cast<int>(std::ceil(pr.origin.x)));
     const int y0 = std::max(0, static_cast<int>(std::ceil(pr.origin.y)));
-    const int x1 = std::min(m_width, static_cast<int>(std::floor(pr.right())) + 1);
-    const int y1 = std::min(m_height, static_cast<int>(std::floor(pr.bottom())) + 1);
+    const int x1 = std::min(width_, static_cast<int>(std::floor(pr.right())) + 1);
+    const int y1 = std::min(height_, static_cast<int>(std::floor(pr.bottom())) + 1);
     if (x0 >= x1 || y0 >= y1) {
         return;
     }
@@ -548,9 +548,9 @@ auto Painter::clear_rect(const Rect &r) -> void {
     AURORA_PROFILE_COUNT(pixels_filled, static_cast<std::uint64_t>(x1 - x0) * static_cast<std::uint64_t>(y1 - y0));
     const std::size_t row_bytes = static_cast<std::size_t>(x1 - x0) * 4u;
     for (int y = y0; y < y1; ++y) {
-        std::memset(m_pixels.data() + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) +
-                                        static_cast<std::size_t>(x0)) *
-                                       4u),
+        std::memset(pixels_.data() + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) +
+                                       static_cast<std::size_t>(x0)) *
+                                      4u),
                     0, row_bytes);
     }
 }
@@ -561,29 +561,29 @@ auto Painter::shift_pixels(float dy) -> void {
         // 录制态静默忽略，避免录出与回放不一致的半成品。
         return;
     }
-    detail::PaintTimer guard{ &g_pt.shift };
-    if (m_pixels.empty() || m_width <= 0 || m_height <= 0) {
+    detail::PaintTimer guard{&g_pt.shift};
+    if (pixels_.empty() || width_ <= 0 || height_ <= 0) {
         return;
     }
     // 逻辑 dp → 物理行数（与 begin 的 lround 取整一致）。
-    const int shift = static_cast<int>(std::lround(dy * m_scale));
+    const int shift = static_cast<int>(std::lround(dy * scale_));
     if (shift == 0) {
         return;
     }
     const int abs_shift = shift > 0 ? shift : -shift;
-    const std::size_t row_bytes = static_cast<std::size_t>(m_width) * 4u;
-    std::uint8_t *base = m_pixels.data();
+    const std::size_t row_bytes = static_cast<std::size_t>(width_) * 4u;
+    std::uint8_t *base = pixels_.data();
     AURORA_PROFILE_COUNT(draw_calls, 1);
-    if (abs_shift >= m_height) {
+    if (abs_shift >= height_) {
         // 位移超过缓冲高度：无像素可复用，整块回到零基底。
-        AURORA_PROFILE_COUNT(pixels_filled, static_cast<std::uint64_t>(m_width) * static_cast<std::uint64_t>(m_height));
-        std::memset(base, 0, m_pixels.size());
+        AURORA_PROFILE_COUNT(pixels_filled, static_cast<std::uint64_t>(width_) * static_cast<std::uint64_t>(height_));
+        std::memset(base, 0, pixels_.size());
         return;
     }
-    const auto keep_rows = static_cast<std::size_t>(m_height - abs_shift);
+    const auto keep_rows = static_cast<std::size_t>(height_ - abs_shift);
     const std::size_t keep_bytes = keep_rows * row_bytes;
     const std::size_t gap_bytes = static_cast<std::size_t>(abs_shift) * row_bytes;
-    AURORA_PROFILE_COUNT(pixels_filled, static_cast<std::uint64_t>(m_width) * static_cast<std::uint64_t>(m_height));
+    AURORA_PROFILE_COUNT(pixels_filled, static_cast<std::uint64_t>(width_) * static_cast<std::uint64_t>(height_));
     if (shift > 0) {
         // 内容下移：行 [0, keep_rows) → [abs_shift, m_height)，顶部 abs_shift 行让出。
         std::memmove(base + gap_bytes, base, keep_bytes);
@@ -604,10 +604,10 @@ auto Painter::draw_text(const Rect &r, const std::string &s, const Font &f, Colo
     AURORA_PROFILE_COUNT(draw_texts, 1);
     // 委托给 FontEngine：真实字体渲染（Windows/GDI）或回退内置位图字体。
     // 原点换算为物理像素（FontEngine 以物理分辨率光栅字形并逐物理像素写入，不再乘 scale）。
-    const float sc = m_scale;
-    const Rect pr{ .origin = Point{ .x = r.origin.x * sc, .y = r.origin.y * sc }, .size = r.size };
+    const float sc = scale_;
+    const Rect pr{.origin = Point{.x = r.origin.x * sc, .y = r.origin.y * sc}, .size = r.size};
     {
-        detail::PaintTimer guard{ &g_pt.text };
+        detail::PaintTimer guard{&g_pt.text};
         render::FontEngine::draw_text(*this, pr, s, f, c);
     }
 }
@@ -620,10 +620,10 @@ auto Painter::draw_text(const Rect &r, const std::string &s, const Font &f, Colo
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
     AURORA_PROFILE_COUNT(draw_texts, 1);
-    const float sc = m_scale;
-    const Rect pr{ .origin = Point{ .x = r.origin.x * sc, .y = r.origin.y * sc }, .size = r.size };
+    const float sc = scale_;
+    const Rect pr{.origin = Point{.x = r.origin.x * sc, .y = r.origin.y * sc}, .size = r.size};
     {
-        detail::PaintTimer guard{ &g_pt.text };
+        detail::PaintTimer guard{&g_pt.text};
         render::FontEngine::draw_text(*this, pr, s, f, c, opts);
     }
 }
@@ -636,10 +636,10 @@ auto Painter::draw_text(const Rect &r, const std::string &s, const Font &f, Colo
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
     AURORA_PROFILE_COUNT(draw_texts, 1);
-    const float sc = m_scale;
-    const Rect pr{ .origin = Point{ .x = r.origin.x * sc, .y = r.origin.y * sc }, .size = r.size };
+    const float sc = scale_;
+    const Rect pr{.origin = Point{.x = r.origin.x * sc, .y = r.origin.y * sc}, .size = r.size};
     {
-        detail::PaintTimer guard{ &g_pt.text };
+        detail::PaintTimer guard{&g_pt.text};
         render::FontEngine::draw_text(*this, pr, s, f, c, aa_mode, opts);
     }
 }
@@ -653,11 +653,11 @@ auto Painter::draw_image(const Image &img, const Rect &dest) -> void {
         DrawCmd cmd;
         cmd.kind = CmdKind::DrawImage;
         cmd.bounds = dest;
-        cmd.image_idx = m_recording_stack.back()->add_image(img);
-        m_recording_stack.back()->push_cmd(cmd);
+        cmd.image_idx = recording_stack_.back()->add_image(img);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
-    detail::PaintTimer guard{ &g_pt.image };
+    detail::PaintTimer guard{&g_pt.image};
     if (img.pixels.empty() || img.width <= 0 || img.height <= 0) {
         return;
     }
@@ -669,13 +669,13 @@ auto Painter::draw_image(const Image &img, const Rect &dest) -> void {
         static_cast<std::uint64_t>(img.width) * static_cast<std::uint64_t>(img.height) * 4u) {
         return;
     }
-    const Rect pd = scale_rect(dest, m_scale);
+    const Rect pd = scale_rect(dest, scale_);
     int dx0 = static_cast<int>(std::floor(std::max(0.0f, pd.origin.x)));
     int dy0 = static_cast<int>(std::floor(std::max(0.0f, pd.origin.y)));
-    int dx1 = static_cast<int>(std::ceil(std::min(static_cast<float>(m_width), pd.origin.x + pd.size.width)));
-    int dy1 = static_cast<int>(std::ceil(std::min(static_cast<float>(m_height), pd.origin.y + pd.size.height)));
+    int dx1 = static_cast<int>(std::ceil(std::min(static_cast<float>(width_), pd.origin.x + pd.size.width)));
+    int dy1 = static_cast<int>(std::ceil(std::min(static_cast<float>(height_), pd.origin.y + pd.size.height)));
     if (!shrink_to_clips(dx0, dy0, dx1, dy1)) {
-        return; // 裁剪外纯白扫（set_pixel 恒丢弃），直接早退
+        return;  // 裁剪外纯白扫（set_pixel 恒丢弃），直接早退
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
     AURORA_PROFILE_COUNT(pixels_filled, static_cast<std::uint64_t>(std::max(0, dx1 - dx0)) *
@@ -735,7 +735,7 @@ auto Painter::draw_image(const Image &img, const Rect &dest) -> void {
                 b = ch(2);
             }
             const std::uint8_t a = pa >= 1.0f ? 0xFF : static_cast<std::uint8_t>(pa * 255.0f);
-            set_pixel(x, y, Color{ r, g, b, a });
+            set_pixel(x, y, Color{r, g, b, a});
         }
     }
 }
@@ -745,25 +745,25 @@ auto Painter::push_clip(const Rect &r) -> void {
         DrawCmd cmd;
         cmd.kind = CmdKind::PushClip;
         cmd.bounds = r;
-        m_recording_stack.back()->push_cmd(cmd);
+        recording_stack_.back()->push_cmd(cmd);
         // 录制模式下同步维护裁剪栈，使 clip_bounds() 在录制期间返回正确区域
     }
-    if (m_clip_stack.empty()) {
-        m_clip_stack.push_back(
-            ClipRegion{ .rect = scale_rect(r, m_scale), .rounded = false, .radius = 0.0f, .anti_alias = false });
+    if (clip_stack_.empty()) {
+        clip_stack_.push_back(
+            ClipRegion{.rect = scale_rect(r, scale_), .rounded = false, .radius = 0.0f, .anti_alias = false});
         return;
     }
-    const Rect &top = m_clip_stack.back().rect;
-    const Rect pr = scale_rect(r, m_scale);
+    const Rect &top = clip_stack_.back().rect;
+    const Rect pr = scale_rect(r, scale_);
     const float x = std::max(top.origin.x, pr.origin.x);
     const float y = std::max(top.origin.y, pr.origin.y);
     const float right = std::min(top.right(), pr.right());
     const float bottom = std::min(top.bottom(), pr.bottom());
-    m_clip_stack.push_back(ClipRegion{
-        .rect = Rect{ .origin = Point{ .x = x, .y = y },
-                      .size = Size{ .width = std::max(0.0f, right - x), .height = std::max(0.0f, bottom - y) } },
-        .rounded = false,
-        .radius = 0.0f });
+    clip_stack_.push_back(
+        ClipRegion{.rect = Rect{.origin = Point{.x = x, .y = y},
+                                .size = Size{.width = std::max(0.0f, right - x), .height = std::max(0.0f, bottom - y)}},
+                   .rounded = false,
+                   .radius = 0.0f});
     // push_clip 只压矩形，m_has_rounded_clip 不变
 }
 
@@ -774,7 +774,7 @@ auto Painter::push_clip_rounded(const Rect &r, float radius, bool anti_alias) ->
         cmd.bounds = r;
         cmd.f0 = radius;
         cmd.rounded_aa = anti_alias;
-        m_recording_stack.back()->push_cmd(cmd);
+        recording_stack_.back()->push_cmd(cmd);
         // 录制模式下同步维护裁剪栈，使 clip_bounds() 在录制期间返回正确区域
     }
     // 每次调用只压入一个 ClipRegion（与 pop_clip 一对一）：旧版误压两个（先压自身再压
@@ -782,63 +782,63 @@ auto Painter::push_clip_rounded(const Rect &r, float radius, bool anti_alias) ->
     // （整窗白屏只剩最后一个圆角控件）。保留原始圆角矩形几何（SDF 形状正确）；
     // 与既有裁剪的交集由 coverage/快路径遍历所有栈层天然实现（AND 语义），无需显式求交。
     // anti_alias 始终透传，首个圆角裁剪也不退化。
-    m_clip_stack.push_back(
-        ClipRegion{ .rect = scale_rect(r, m_scale), .rounded = true, .radius = radius, .anti_alias = anti_alias });
-    m_has_rounded_clip = true;
+    clip_stack_.push_back(
+        ClipRegion{.rect = scale_rect(r, scale_), .rounded = true, .radius = radius, .anti_alias = anti_alias});
+    has_rounded_clip_ = true;
 }
 
 auto Painter::pop_clip() -> void {
     if (is_recording()) {
         DrawCmd cmd;
         cmd.kind = CmdKind::PopClip;
-        m_recording_stack.back()->push_cmd(cmd);
+        recording_stack_.back()->push_cmd(cmd);
         // 录制模式下同步维护裁剪栈
     }
-    if (!m_clip_stack.empty()) {
-        m_clip_stack.pop_back();
+    if (!clip_stack_.empty()) {
+        clip_stack_.pop_back();
         // 弹出后重新计算圆角标志（可能弹出了唯一的圆角裁剪）
-        m_has_rounded_clip = false;
-        for (const ClipRegion &cr : m_clip_stack) {
+        has_rounded_clip_ = false;
+        for (const ClipRegion &cr : clip_stack_) {
             if (cr.rounded && cr.radius > 0.0f) {
-                m_has_rounded_clip = true;
+                has_rounded_clip_ = true;
                 break;
             }
         }
     }
 }
 
-auto Painter::has_clip() const -> bool { return !m_clip_stack.empty(); }
+auto Painter::has_clip() const -> bool { return !clip_stack_.empty(); }
 
 auto Painter::clip_bounds() const -> Rect {
-    if (m_clip_stack.empty()) {
+    if (clip_stack_.empty()) {
         // 无裁剪：返回整块画布（逻辑 dp）
-        return Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                     .size = Size{ .width = static_cast<float>(m_width), .height = static_cast<float>(m_height) } };
+        return Rect{.origin = Point{.x = 0.0f, .y = 0.0f},
+                    .size = Size{.width = static_cast<float>(width_), .height = static_cast<float>(height_)}};
     }
     // m_clip_stack.back().rect 已是各层矩形裁剪的交集（物理像素，pushClip 时与上一层取交），
     // 圆角裁剪退化为其外接矩形（保守，保证不误剔除）。转回逻辑 dp 以匹配控件全局坐标。
-    const Rect &pr = m_clip_stack.back().rect;
-    const float inv = m_scale > 0.0f ? 1.0f / m_scale : 1.0f;
-    return Rect{ .origin = Point{ .x = pr.origin.x * inv, .y = pr.origin.y * inv },
-                 .size = Size{ .width = pr.size.width * inv, .height = pr.size.height * inv } };
+    const Rect &pr = clip_stack_.back().rect;
+    const float inv = scale_ > 0.0f ? 1.0f / scale_ : 1.0f;
+    return Rect{.origin = Point{.x = pr.origin.x * inv, .y = pr.origin.y * inv},
+                .size = Size{.width = pr.size.width * inv, .height = pr.size.height * inv}};
 }
 
 auto Painter::record(DisplayList &dl) -> void {
     dl.clear();
-    m_recording_stack.push_back(&dl);
-    m_rec_dynamic.push_back(0);
+    recording_stack_.push_back(&dl);
+    rec_dynamic_.push_back(0);
 }
 
 auto Painter::stop() -> void {
-    if (!m_recording_stack.empty()) {
-        m_recording_stack.pop_back();
-        m_rec_dynamic.pop_back();
+    if (!recording_stack_.empty()) {
+        recording_stack_.pop_back();
+        rec_dynamic_.pop_back();
     }
 }
 
 auto Painter::mark_recording_dynamic() -> void {
     // 置全部层级：任何录制了动态内容的祖先都不应缓存其 Display List。
-    for (auto &d : m_rec_dynamic) {
+    for (auto &d : rec_dynamic_) {
         d = 1;
     }
 }
@@ -849,13 +849,13 @@ auto Painter::record_text_cmd(const Rect &r, const std::string &s, const Font &f
     cmd.kind = CmdKind::DrawText;
     cmd.bounds = r;
     cmd.color = c;
-    cmd.font_idx = m_recording_stack.back()->add_font(f);
+    cmd.font_idx = recording_stack_.back()->add_font(f);
     cmd.aa_mode = aa;
     cmd.text_ls = opts.letter_spacing;
     cmd.text_ws = opts.word_spacing;
     cmd.text_italic = opts.italic;
-    cmd.str_idx = m_recording_stack.back()->add_string(s);
-    m_recording_stack.back()->push_cmd(cmd);
+    cmd.str_idx = recording_stack_.back()->add_string(s);
+    recording_stack_.back()->push_cmd(cmd);
 }
 
 namespace {
@@ -867,7 +867,7 @@ auto sd_round_rect(float x, float y, const Rect &r, float rad) -> float {
     const float bottom = r.bottom();
     const float half_w = (right - left) * 0.5f;
     const float half_h = (bottom - top) * 0.5f;
-    rad = std::min({ rad, half_w, half_h });
+    rad = std::min({rad, half_w, half_h});
     const float px = x - ((left + right) * 0.5f);
     const float py = y - ((top + bottom) * 0.5f);
     const float qx = std::fabs(px) - half_w + rad;
@@ -876,10 +876,10 @@ auto sd_round_rect(float x, float y, const Rect &r, float rad) -> float {
         std::sqrt((std::max(qx, 0.0f) * std::max(qx, 0.0f)) + (std::max(qy, 0.0f) * std::max(qy, 0.0f)));
     return std::min(std::max(qx, qy), 0.0f) + outside - rad;
 }
-} // namespace
+}  // namespace
 
 auto Painter::ClipRegion::coverage(float x, float y) const -> float {
-    if (!rect.contains(Point{ .x = x, .y = y })) {
+    if (!rect.contains(Point{.x = x, .y = y})) {
         return 0.0f;
     }
     if (!rounded || radius <= 0.0f) {
@@ -887,139 +887,138 @@ auto Painter::ClipRegion::coverage(float x, float y) const -> float {
     }
     const float d = sd_round_rect(x, y, rect, radius);
     if (!anti_alias) {
-        return d <= 0.0f ? 1.0f : 0.0f; // 硬遮罩（无羽化）
+        return d <= 0.0f ? 1.0f : 0.0f;  // 硬遮罩（无羽化）
     }
-    return std::max(0.0f, std::min(1.0f, 0.5f - d)); // 1px 抗锯齿羽化
+    return std::max(0.0f, std::min(1.0f, 0.5f - d));  // 1px 抗锯齿羽化
 }
 
 auto Painter::get_pixel(int x, int y) const -> Color {
-    if (x < 0 || y < 0 || x >= m_width || y >= m_height) {
-        return Color{ 0, 0, 0, 0 }; // 越界返回透明色（而非默认 a=255 的不透明黑）
+    if (x < 0 || y < 0 || x >= width_ || y >= height_) {
+        return Color{0, 0, 0, 0};  // 越界返回透明色（而非默认 a=255 的不透明黑）
     }
     const std::size_t i =
-        ((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) + static_cast<std::size_t>(x)) * 4u;
+        ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x)) * 4u;
     return Color{
-        m_pixels[i + 0],
-        m_pixels[i + 1],
-        m_pixels[i + 2],
-        m_pixels[i + 3],
+        pixels_[i + 0],
+        pixels_[i + 1],
+        pixels_[i + 2],
+        pixels_[i + 3],
     };
 }
 
 auto Painter::set_pixel(int x, int y, Color c) -> void {
     init_gamma_tables();
-    if (x < 0 || y < 0 || x >= m_width || y >= m_height) {
+    if (x < 0 || y < 0 || x >= width_ || y >= height_) {
         return;
     }
     // 应用全局透明度（转场淡入淡出）。
-    c.m_a = static_cast<std::uint8_t>(std::max(0.0, std::min(255.0, static_cast<double>(c.m_a) * m_global_alpha)));
+    c.a = static_cast<std::uint8_t>(std::max(0.0, std::min(255.0, static_cast<double>(c.a) * global_alpha_)));
     // 快速路径：无圆角裁剪时跳过逐 clip 的 coverage 浮点计算——文本渲染
     // （blend_pixel/blend_subpixel）每像素都走此路径，裁剪栈遍历 + SDF coverage
     // 在大窗口下逐像素开销显著。纯矩形裁剪只需边界检查（coverage 恒为 1）。
-    if (!m_has_rounded_clip) {
+    if (!has_rounded_clip_) {
         // 纯矩形裁剪：coverage 恒为 1（已在矩形内）或 0（在矩形外），
         // 用整数边界检查替代逐 clip 浮点 coverage 遍历。
-        for (const ClipRegion &cr : m_clip_stack) {
+        for (const ClipRegion &cr : clip_stack_) {
             const int cx0 = static_cast<int>(std::ceil(cr.rect.origin.x));
             const int cy0 = static_cast<int>(std::ceil(cr.rect.origin.y));
-            const int cx1 = static_cast<int>(std::floor(cr.rect.right())); // 含右/下边界
+            const int cx1 = static_cast<int>(std::floor(cr.rect.right()));  // 含右/下边界
             const int cy1 = static_cast<int>(std::floor(cr.rect.bottom()));
             if (x < cx0 || x > cx1 || y < cy0 || y > cy1) {
-                return; // 被某层矩形裁剪裁掉
+                return;  // 被某层矩形裁剪裁掉
             }
         }
         const std::size_t i =
-            ((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) + static_cast<std::size_t>(x)) * 4u;
+            ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x)) * 4u;
         // 不透明快路径：当 global_alpha×c.a 仍为全不透明（a==1）时，
         // sRGB↔线性往返是恒等映射（g_gamma_tables.srgb_to_linear / g_gamma_tables.linear_to_srgb
         // 逐值互逆，已验证 0..255 全位级一致），故结果数学上等价于直接写入 sRGB 颜色 c，
         // 跳过 9 次 gamma LUT 往返。
         // 与旧实现位级一致，且对渐变/不透明填充/文字等 opaque 绘制普遍提速。
-        if (c.m_a == 255) {
-            m_pixels[i + 0] = c.m_r;
-            m_pixels[i + 1] = c.m_g;
-            m_pixels[i + 2] = c.m_b;
-            m_pixels[i + 3] = 255;
+        if (c.a == 255) {
+            pixels_[i + 0] = c.r;
+            pixels_[i + 1] = c.g;
+            pixels_[i + 2] = c.b;
+            pixels_[i + 3] = 255;
             return;
         }
         // coverage == 1.0，直接 source-over 混合（在线性光空间进行，避免 sRGB 空间
         // 线性 alpha 造成的半透明边缘发暗/文字发虚）。
-        const float a = c.m_a / 255.0f;
-        blend_srgb_over_region(&m_pixels[i], c.m_r, c.m_g, c.m_b, a, a, a, 1);
+        const float a = c.a / 255.0f;
+        blend_srgb_over_region(&pixels_[i], c.r, c.g, c.b, a, a, a, 1);
         return;
     }
     // 慢路径：圆角裁剪（SDF 覆盖度 0..1 抗锯齿）
-    if (!m_clip_stack.empty()) {
+    if (!clip_stack_.empty()) {
         float cov = 1.0f;
-        for (const ClipRegion &cr : m_clip_stack) {
+        for (const ClipRegion &cr : clip_stack_) {
             cov *= cr.coverage(static_cast<float>(x), static_cast<float>(y));
         }
         if (cov <= 0.0f) {
-            return; // 被裁剪区域外（含圆角硬边）
+            return;  // 被裁剪区域外（含圆角硬边）
         }
-        c.m_a = static_cast<std::uint8_t>(std::max(0.0, std::min(255.0, static_cast<double>(c.m_a) * cov)));
+        c.a = static_cast<std::uint8_t>(std::max(0.0, std::min(255.0, static_cast<double>(c.a) * cov)));
     }
     // 边界检查：圆角/SDF 裁剪路径下 coverage 不直接限制整数坐标范围（如 clip 落在窗口
     // 角落或调用方传入负坐标），务必防止 m_pixels 越界写导致访问违规（0xC0000005）。
-    if (x < 0 || y < 0 || x >= m_width || y >= m_height) {
+    if (x < 0 || y < 0 || x >= width_ || y >= height_) {
         return;
     }
     const std::size_t i =
-        ((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) + static_cast<std::size_t>(x)) * 4u;
-    const float a = c.m_a / 255.0f;
-    m_pixels[i + 0] = blend_srgb_over(m_pixels[i + 0], c.m_r, a);
-    m_pixels[i + 1] = blend_srgb_over(m_pixels[i + 1], c.m_g, a);
-    m_pixels[i + 2] = blend_srgb_over(m_pixels[i + 2], c.m_b, a);
-    m_pixels[i + 3] = 255;
+        ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x)) * 4u;
+    const float a = c.a / 255.0f;
+    pixels_[i + 0] = blend_srgb_over(pixels_[i + 0], c.r, a);
+    pixels_[i + 1] = blend_srgb_over(pixels_[i + 1], c.g, a);
+    pixels_[i + 2] = blend_srgb_over(pixels_[i + 2], c.b, a);
+    pixels_[i + 3] = 255;
 }
 
 auto Painter::blend_subpixel(int x, int y, Color c, std::uint8_t cr, std::uint8_t cg, std::uint8_t cb) -> void {
     init_gamma_tables();
-    if (x < 0 || y < 0 || x >= m_width || y >= m_height) {
+    if (x < 0 || y < 0 || x >= width_ || y >= height_) {
         return;
     }
     float cov = 1.0f;
-    if (!m_has_rounded_clip) {
+    if (!has_rounded_clip_) {
         // 快速路径：纯矩形裁剪，coverage 恒为 1 或 0（整数边界检查）
-        for (const ClipRegion &cr2 : m_clip_stack) {
+        for (const ClipRegion &cr2 : clip_stack_) {
             const int cx0 = static_cast<int>(std::ceil(cr2.rect.origin.x));
             const int cy0 = static_cast<int>(std::ceil(cr2.rect.origin.y));
-            const int cx1 = static_cast<int>(std::floor(cr2.rect.right())); // 含右/下边界
+            const int cx1 = static_cast<int>(std::floor(cr2.rect.right()));  // 含右/下边界
             const int cy1 = static_cast<int>(std::floor(cr2.rect.bottom()));
             if (x < cx0 || x > cx1 || y < cy0 || y > cy1) {
                 return;
             }
         }
         // cov 保持 1.0
-    } else if (!m_clip_stack.empty()) {
+    } else if (!clip_stack_.empty()) {
         // 慢路径：圆角裁剪 SDF 覆盖度
-        for (const ClipRegion &cr2 : m_clip_stack) {
+        for (const ClipRegion &cr2 : clip_stack_) {
             cov *= cr2.coverage(static_cast<float>(x), static_cast<float>(y));
         }
         if (cov <= 0.0f) {
             return;
         }
     }
-    cov *= m_global_alpha;
+    cov *= global_alpha_;
     // 边界检查：同 set_pixel 慢路径，防止圆角/SDF 裁剪下越界写（0xC0000005）。
-    if (x < 0 || y < 0 || x >= m_width || y >= m_height) {
+    if (x < 0 || y < 0 || x >= width_ || y >= height_) {
         return;
     }
     const float fr = (cr / 255.0f) * cov;
     const float fg = (cg / 255.0f) * cov;
     const float fb = (cb / 255.0f) * cov;
     const std::size_t i =
-        ((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) + static_cast<std::size_t>(x)) * 4u;
-    blend_srgb_over_region(&m_pixels[i], c.m_r, c.m_g, c.m_b, fr, fg, fb, 1);
+        ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x)) * 4u;
+    blend_srgb_over_region(&pixels_[i], c.r, c.g, c.b, fr, fg, fb, 1);
 }
 
-auto Painter::blend_subpixel_span(int x0, int y, Color c, const std::uint8_t *src, int n, bool lcd,
-                                  float src_alpha) // NOLINT(readability-function-cognitive-complexity)
+auto Painter::blend_subpixel_span(int x0, int y, Color c, const std::uint8_t *src, int n, bool lcd, float src_alpha)
     -> void {
     if (n <= 0) {
         return;
     }
-    if (is_recording() || m_has_rounded_clip) {
+    if (is_recording() || has_rounded_clip_) {
         // 录制态 / 圆角 SDF 裁剪：逐像素回退（语义不同，不能批量）
         if (lcd) {
             for (int x = 0; x < n; ++x) {
@@ -1033,28 +1032,28 @@ auto Painter::blend_subpixel_span(int x0, int y, Color c, const std::uint8_t *sr
         return;
     }
     init_gamma_tables();
-    if (y < 0 || y >= m_height) {
+    if (y < 0 || y >= height_) {
         return;
     }
     // 纯矩形裁剪栈：求 x 区间与全部裁剪矩形 + 屏幕边界的交集（只算一次，不必逐像素遍历）。
     int x_lo = x0;
     int x_hi = x0 + n - 1;
-    for (const ClipRegion &cr2 : m_clip_stack) {
+    for (const ClipRegion &cr2 : clip_stack_) {
         const int cx0 = static_cast<int>(std::ceil(cr2.rect.origin.x));
         const int cx1 = static_cast<int>(std::floor(cr2.rect.right()));
         x_lo = std::max(cx0, x_lo);
         x_hi = std::min(cx1, x_hi);
     }
     x_lo = std::max(x_lo, 0);
-    x_hi = std::min(x_hi, m_width - 1);
+    x_hi = std::min(x_hi, width_ - 1);
     if (x_lo > x_hi) {
         return;
     }
     // 源色线性光（整段恒定，逐像素仅查一次，省去每像素 3 次 srgb_to_linear 查表）。
-    const float sr_lin[3] = { g_gamma_tables.srgb_to_linear[c.m_r], g_gamma_tables.srgb_to_linear[c.m_g],
-                              g_gamma_tables.srgb_to_linear[c.m_b] };
-    const float cov = static_cast<float>(m_global_alpha) * src_alpha;
-    const std::size_t row_base = static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width);
+    const float sr_lin[3] = {g_gamma_tables.srgb_to_linear[c.r], g_gamma_tables.srgb_to_linear[c.g],
+                             g_gamma_tables.srgb_to_linear[c.b]};
+    const float cov = static_cast<float>(global_alpha_) * src_alpha;
+    const std::size_t row_base = static_cast<std::size_t>(y) * static_cast<std::size_t>(width_);
     for (int x = x_lo; x <= x_hi; ++x) {
         const int k = x - x0;
         const std::uint8_t cr = lcd ? src[(k * 3) + 0] : src[k];
@@ -1064,10 +1063,10 @@ auto Painter::blend_subpixel_span(int x0, int y, Color c, const std::uint8_t *sr
         const float fg = (cg / 255.0f) * cov;
         const float fb = (cb / 255.0f) * cov;
         if (fr <= 0.0f && fg <= 0.0f && fb <= 0.0f) {
-            continue; // 零覆盖像素跳过（等同原 blend_subpixel 的 continue）
+            continue;  // 零覆盖像素跳过（等同原 blend_subpixel 的 continue）
         }
         const std::size_t i = (row_base + static_cast<std::size_t>(x)) * 4u;
-        std::uint8_t *p = &m_pixels[i];
+        std::uint8_t *p = &pixels_[i];
         // gamma-correct source-over（逐位等价于 blend_srgb_over），已验证与旧实现位级一致。
         p[0] = linear_to_srgb((sr_lin[0] * fr) + (g_gamma_tables.srgb_to_linear[p[0]] * (1.0f - fr)));
         p[1] = linear_to_srgb((sr_lin[1] * fg) + (g_gamma_tables.srgb_to_linear[p[1]] * (1.0f - fg)));
@@ -1081,26 +1080,26 @@ auto Painter::set_alpha(double a) -> void {
         DrawCmd cmd;
         cmd.kind = CmdKind::SetAlpha;
         cmd.alpha = (a < 0.0) ? 0.0 : (a > 1.0 ? 1.0 : a);
-        m_recording_stack.back()->push_cmd(cmd);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
-    m_global_alpha = (a < 0.0) ? 0.0 : (a > 1.0 ? 1.0 : a);
+    global_alpha_ = (a < 0.0) ? 0.0 : (a > 1.0 ? 1.0 : a);
 }
 
 auto Painter::composite(const Painter &src, const Matrix2D &matrix) -> void {
     if (is_recording()) {
         DrawCmd cmd;
         cmd.kind = CmdKind::Composite;
-        cmd.matrix_idx = m_recording_stack.back()->add_matrix(matrix);
-        cmd.composite_scale = src.m_scale;
-        cmd.image_idx = m_recording_stack.back()->add_image(src.to_image());
-        m_recording_stack.back()->push_cmd(cmd);
+        cmd.matrix_idx = recording_stack_.back()->add_matrix(matrix);
+        cmd.composite_scale = src.scale_;
+        cmd.image_idx = recording_stack_.back()->add_image(src.to_image());
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
-    if (m_width <= 0 || m_height <= 0 || src.width() <= 0 || src.height() <= 0) {
+    if (width_ <= 0 || height_ <= 0 || src.width() <= 0 || src.height() <= 0) {
         return;
     }
-    composite_pixels(src.m_pixels.data(), src.width(), src.height(), src.m_scale, matrix);
+    composite_pixels(src.pixels_.data(), src.width(), src.height(), src.scale_, matrix);
 }
 
 auto Painter::composite(const Image &src, const Matrix2D &matrix, float src_scale) -> void {
@@ -1110,13 +1109,13 @@ auto Painter::composite(const Image &src, const Matrix2D &matrix, float src_scal
     if (is_recording()) {
         DrawCmd cmd;
         cmd.kind = CmdKind::Composite;
-        cmd.matrix_idx = m_recording_stack.back()->add_matrix(matrix);
+        cmd.matrix_idx = recording_stack_.back()->add_matrix(matrix);
         cmd.composite_scale = src_scale;
-        cmd.image_idx = m_recording_stack.back()->add_image(src);
-        m_recording_stack.back()->push_cmd(cmd);
+        cmd.image_idx = recording_stack_.back()->add_image(src);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
-    if (m_width <= 0 || m_height <= 0 || src.width <= 0 || src.height <= 0) {
+    if (width_ <= 0 || height_ <= 0 || src.width <= 0 || src.height <= 0) {
         return;
     }
     // 同 draw_image：composite_pixels 按 width/height 索引裸指针，
@@ -1130,29 +1129,28 @@ auto Painter::composite(const Image &src, const Matrix2D &matrix, float src_scal
 
 auto Painter::to_image() const -> Image {
     Image img;
-    img.width = m_width;
-    img.height = m_height;
-    img.pixels = m_pixels; // 拷贝设备像素缓冲
+    img.width = width_;
+    img.height = height_;
+    img.pixels = pixels_;  // 拷贝设备像素缓冲
     return img;
 }
 
-auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float sscale, const Matrix2D &matrix)
-    -> void { // NOLINT(readability-function-cognitive-complexity)
-    detail::PaintTimer guard{ &g_pt.composite };
+auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float sscale, const Matrix2D &matrix) -> void {
+    detail::PaintTimer guard{&g_pt.composite};
     const float lw = static_cast<float>(sw) / sscale;
     const float lh = static_cast<float>(sh) / sscale;
 
     // 源内容四角在逻辑空间的包围盒（物理像素），用于限定遍历范围。
-    const Point corners[4] = { Point{ .x = 0, .y = 0 }, Point{ .x = lw, .y = 0 }, Point{ .x = 0, .y = lh },
-                               Point{ .x = lw, .y = lh } };
-    int minx = m_width;
-    int miny = m_height;
+    const Point corners[4] = {Point{.x = 0, .y = 0}, Point{.x = lw, .y = 0}, Point{.x = 0, .y = lh},
+                              Point{.x = lw, .y = lh}};
+    int minx = width_;
+    int miny = height_;
     int maxx = 0;
     int maxy = 0;
     for (auto corner : corners) {
         Point p = matrix.apply_to_point(corner);
-        p.x *= m_scale;
-        p.y *= m_scale;
+        p.x *= scale_;
+        p.y *= scale_;
         minx = std::min(minx, static_cast<int>(std::floor(p.x)));
         miny = std::min(miny, static_cast<int>(std::floor(p.y)));
         maxx = std::max(maxx, static_cast<int>(std::ceil(p.x)));
@@ -1160,8 +1158,8 @@ auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float s
     }
     minx = std::max(0, minx);
     miny = std::max(0, miny);
-    maxx = std::min(m_width - 1, maxx);
-    maxy = std::min(m_height - 1, maxy);
+    maxx = std::min(width_ - 1, maxx);
+    maxy = std::min(height_ - 1, maxy);
     {
         // 收缩进裁剪交集（半开→闭区间适配）：裁剪外像素 set_pixel 恒丢弃。
         int cx1 = maxx + 1;
@@ -1186,21 +1184,21 @@ auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float s
     // 前置条件：范围已收缩进裁剪交集（shrink_to_clips 与 set_pixel 的矩形裁剪判据逐字一致，
     // 故区间内像素必然通过裁剪）；圆角裁剪按 SDF 覆盖度加权、global_alpha<1 需按像素乘 alpha，
     // 二者 set_pixel 另有语义，保守回退慢路径。
-    if (matrix.m11 == 1.0f && matrix.m12 == 0.0f && matrix.m21 == 0.0f && matrix.m22 == 1.0f && sscale == m_scale &&
-        !m_has_rounded_clip && m_global_alpha == 1.0) {
-        init_gamma_tables(); // set_pixel 每次调用前置；快路径直接混合，须自行确保 LUT 就绪
+    if (matrix.m11 == 1.0f && matrix.m12 == 0.0f && matrix.m21 == 0.0f && matrix.m22 == 1.0f && sscale == scale_ &&
+        !has_rounded_clip_ && global_alpha_ == 1.0) {
+        init_gamma_tables();  // set_pixel 每次调用前置；快路径直接混合，须自行确保 LUT 就绪
         // 单线程 UI 每帧复用，避免逐帧分配（表长 = 目标遍历宽/高，量级为视口尺寸）。
         static thread_local std::vector<int> sx_map;
         static thread_local std::vector<int> sy_map;
         sx_map.resize(static_cast<std::size_t>(maxx) - static_cast<std::size_t>(minx) + 1u);
         sy_map.resize(static_cast<std::size_t>(maxy) - static_cast<std::size_t>(miny) + 1u);
         for (int x = minx; x <= maxx; ++x) {
-            const Point lp = inv.apply_to_point(Point{ .x = (x + 0.5f) / m_scale, .y = 0.0f });
+            const Point lp = inv.apply_to_point(Point{.x = (x + 0.5f) / scale_, .y = 0.0f});
             sx_map[static_cast<std::size_t>(x - minx)] =
                 (lp.x >= 0.0f && lp.x < lw) ? static_cast<int>(std::floor(lp.x * sscale)) : -1;
         }
         for (int y = miny; y <= maxy; ++y) {
-            const Point lp = inv.apply_to_point(Point{ .x = 0.0f, .y = (y + 0.5f) / m_scale });
+            const Point lp = inv.apply_to_point(Point{.x = 0.0f, .y = (y + 0.5f) / scale_});
             sy_map[static_cast<std::size_t>(y - miny)] =
                 (lp.y >= 0.0f && lp.y < lh) ? static_cast<int>(std::floor(lp.y * sscale)) : -1;
         }
@@ -1213,7 +1211,7 @@ auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float s
         while (vx1 >= vx0 && sx_map[static_cast<std::size_t>(vx1 - minx)] < 0) {
             --vx1;
         }
-        const std::size_t dst_stride = static_cast<std::size_t>(m_width) * 4u;
+        const std::size_t dst_stride = static_cast<std::size_t>(width_) * 4u;
         const std::size_t src_stride = static_cast<std::size_t>(sw) * 4u;
         for (int y = miny; y <= maxy; ++y) {
             const int sy = sy_map[static_cast<std::size_t>(y - miny)];
@@ -1221,7 +1219,7 @@ auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float s
                 continue;
             }
             const std::uint8_t *srow = spix + (static_cast<std::size_t>(sy) * src_stride);
-            std::uint8_t *drow = m_pixels.data() + (static_cast<std::size_t>(y) * dst_stride);
+            std::uint8_t *drow = pixels_.data() + (static_cast<std::size_t>(y) * dst_stride);
             for (int x = vx0; x <= vx1; ++x) {
                 const int sx = sx_map[static_cast<std::size_t>(x - minx)];
                 if (sx < 0) {
@@ -1230,7 +1228,7 @@ auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float s
                 const std::uint8_t *sp = srow + (static_cast<std::size_t>(sx) * 4u);
                 const std::uint8_t sa = sp[3];
                 if (sa == 0) {
-                    continue; // 与慢路径的 c.a > 0 判据一致（全透明源不写目标）
+                    continue;  // 与慢路径的 c.a > 0 判据一致（全透明源不写目标）
                 }
                 std::uint8_t *dp = drow + (static_cast<std::size_t>(x) * 4u);
                 if (sa == 255) {
@@ -1250,15 +1248,15 @@ auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float s
 
     for (int y = miny; y <= maxy; ++y) {
         for (int x = minx; x <= maxx; ++x) {
-            const Point phys{ .x = (x + 0.5f) / m_scale, .y = (y + 0.5f) / m_scale };
+            const Point phys{.x = (x + 0.5f) / scale_, .y = (y + 0.5f) / scale_};
             const Point lp = inv.apply_to_point(phys);
             if (lp.x >= 0.0f && lp.x < lw && lp.y >= 0.0f && lp.y < lh) {
                 const int sx = static_cast<int>(std::floor(lp.x * sscale));
                 const int sy = static_cast<int>(std::floor(lp.y * sscale));
                 const std::size_t si = ((static_cast<std::size_t>(sy) * sw) + sx) * 4u;
-                const Color c{ spix[si + 0], spix[si + 1], spix[si + 2], spix[si + 3] };
-                if (c.m_a > 0) {
-                    set_pixel(x, y, c); // 经裁剪栈 + global_alpha（透明度统一生效）
+                const Color c{spix[si + 0], spix[si + 1], spix[si + 2], spix[si + 3]};
+                if (c.a > 0) {
+                    set_pixel(x, y, c);  // 经裁剪栈 + global_alpha（透明度统一生效）
                 }
             }
         }
@@ -1289,53 +1287,51 @@ inline auto sample_gradient(const std::vector<Color> &colors, const std::vector<
             const Color &a = colors[i];
             const Color &b = colors[i + 1];
             return Color{
-                static_cast<std::uint8_t>(a.m_r + ((b.m_r - a.m_r) * frac)),
-                static_cast<std::uint8_t>(a.m_g + ((b.m_g - a.m_g) * frac)),
-                static_cast<std::uint8_t>(a.m_b + ((b.m_b - a.m_b) * frac)),
-                static_cast<std::uint8_t>(a.m_a + ((b.m_a - a.m_a) * frac)),
+                static_cast<std::uint8_t>(a.r + ((b.r - a.r) * frac)),
+                static_cast<std::uint8_t>(a.g + ((b.g - a.g) * frac)),
+                static_cast<std::uint8_t>(a.b + ((b.b - a.b) * frac)),
+                static_cast<std::uint8_t>(a.a + ((b.a - a.a) * frac)),
             };
         }
     }
     return colors.back();
 }
-} // namespace
+}  // namespace
 
-auto Painter::draw_linear_gradient(
-    const Rect &area, Point start, Point end,
-    const std::vector<Color> &colors, // NOLINT(readability-function-cognitive-complexity)
-    const std::vector<float> &stops) -> void {
+auto Painter::draw_linear_gradient(const Rect &area, Point start, Point end, const std::vector<Color> &colors,
+                                   const std::vector<float> &stops) -> void {
     if (is_recording()) {
         DrawCmd cmd;
         cmd.kind = CmdKind::LinearGradient;
         cmd.bounds = area;
         cmd.pt0 = start;
         cmd.pt1 = end;
-        cmd.col_idx = m_recording_stack.back()->add_colors(colors);
-        cmd.flt_idx = m_recording_stack.back()->add_floats(stops);
-        m_recording_stack.back()->push_cmd(cmd);
+        cmd.col_idx = recording_stack_.back()->add_colors(colors);
+        cmd.flt_idx = recording_stack_.back()->add_floats(stops);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
-    detail::PaintTimer guard{ &g_pt.gradient };
+    detail::PaintTimer guard{&g_pt.gradient};
     if (colors.empty() || stops.empty()) {
         return;
     }
-    const Rect pr = scale_rect(area, m_scale);
+    const Rect pr = scale_rect(area, scale_);
     int x0 = static_cast<int>(std::floor(std::max(0.0f, pr.origin.x)));
     int y0 = static_cast<int>(std::floor(std::max(0.0f, pr.origin.y)));
-    int x1 = static_cast<int>(std::ceil(std::min(static_cast<float>(m_width), pr.origin.x + pr.size.width)));
-    int y1 = static_cast<int>(std::ceil(std::min(static_cast<float>(m_height), pr.origin.y + pr.size.height)));
+    int x1 = static_cast<int>(std::ceil(std::min(static_cast<float>(width_), pr.origin.x + pr.size.width)));
+    int y1 = static_cast<int>(std::ceil(std::min(static_cast<float>(height_), pr.origin.y + pr.size.height)));
     if (!shrink_to_clips(x0, y0, x1, y1)) {
-        return; // 裁剪外纯白扫
+        return;  // 裁剪外纯白扫
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
     AURORA_PROFILE_COUNT(pixels_filled, static_cast<std::uint64_t>(std::max(0, x1 - x0)) *
                                             static_cast<std::uint64_t>(std::max(0, y1 - y0)));
 
     // 渐变方向向量（物理像素空间）
-    const float sx = start.x * m_scale;
-    const float sy = start.y * m_scale;
-    const float ex = end.x * m_scale;
-    const float ey = end.y * m_scale;
+    const float sx = start.x * scale_;
+    const float sy = start.y * scale_;
+    const float ex = end.x * scale_;
+    const float ey = end.y * scale_;
     float dx = ex - sx;
     float dy = ey - sy;
     const float len_sq = (dx * dx) + (dy * dy);
@@ -1346,20 +1342,19 @@ auto Painter::draw_linear_gradient(
     }
     const float inv_len_sq = 1.0f / len_sq;
 
-    const bool fast = !m_has_rounded_clip && m_clip_stack.empty();
+    const bool fast = !has_rounded_clip_ && clip_stack_.empty();
     // SIMD 扫描线快路径：仅双色标 + 全不透明（a=255）且无任何裁剪时启用，与标量黄金逐位一致；
     // 其余回落「圆角/矩形裁剪感知」优化路径（见下），再不行才逐像素 set_pixel。
-    const bool simd_grad =
-        fast && colors.size() == 2 && stops.size() == 2 && colors[0].m_a == 255 && colors[1].m_a == 255;
+    const bool simd_grad = fast && colors.size() == 2 && stops.size() == 2 && colors[0].a == 255 && colors[1].a == 255;
     if (simd_grad) {
         for (int y = y0; y < y1; ++y) {
             std::uint8_t *row =
-                m_pixels.data() +
-                (((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) + static_cast<std::size_t>(x0)) *
+                pixels_.data() +
+                (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x0)) *
                  4u);
             const int w = x1 - x0;
-            const std::uint8_t g0[4] = { colors[0].m_r, colors[0].m_g, colors[0].m_b, 255 };
-            const std::uint8_t g1[4] = { colors[1].m_r, colors[1].m_g, colors[1].m_b, 255 };
+            const std::uint8_t g0[4] = {colors[0].r, colors[0].g, colors[0].b, 255};
+            const std::uint8_t g1[4] = {colors[1].r, colors[1].g, colors[1].b, 255};
             const float py = (static_cast<float>(y) - sy) * dy;
             gradient_linear_fill(row, x0, w, sx, py, dx, dy, inv_len_sq, g0, g1, stops[0], stops[1] - stops[0]);
         }
@@ -1375,16 +1370,16 @@ auto Painter::draw_linear_gradient(
         float threshold;
     };
     std::vector<GradRoundedInfo> rounded_clips;
-    for (const ClipRegion &cr : m_clip_stack) {
+    for (const ClipRegion &cr : clip_stack_) {
         if (cr.rounded && cr.radius > 0.0f) {
-            rounded_clips.push_back({ .cr = &cr, .threshold = cr.anti_alias ? -0.5f : 0.0f });
+            rounded_clips.push_back({.cr = &cr, .threshold = cr.anti_alias ? -0.5f : 0.0f});
         }
     }
-    const auto ga = static_cast<float>(m_global_alpha); // 与 set_pixel 一致的全局透明度
+    const auto ga = static_cast<float>(global_alpha_);  // 与 set_pixel 一致的全局透明度
     for (int y = y0; y < y1; ++y) {
         std::uint8_t *row =
-            m_pixels.data() +
-            (((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) + static_cast<std::size_t>(x0)) * 4u);
+            pixels_.data() +
+            (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x0)) * 4u);
         // 本行全覆写 x 区间 = 所有圆角裁剪各行全覆写范围的交集（无圆角裁剪时即 [x0,x1)）。
         int safe_x0 = x0;
         int safe_x1 = x1;
@@ -1394,7 +1389,7 @@ auto Painter::draw_linear_gradient(
             safe_x1 = std::min(safe_x1, fx1);
         }
         if (safe_x0 >= safe_x1) {
-            safe_x0 = safe_x1 = x0; // 退化：整行走逐像素 set_pixel
+            safe_x0 = safe_x1 = x0;  // 退化：整行走逐像素 set_pixel
         }
         // 左过渡区（圆弧）：逐像素 coverage（set_pixel 含裁剪 + gamma）
         for (int x = x0; x < safe_x0; ++x) {
@@ -1405,25 +1400,25 @@ auto Painter::draw_linear_gradient(
         // 行内全覆写区：coverage 恒为 1，直接 source-over（与 set_pixel 位级一致）
         if (safe_x0 < safe_x1) {
             float t = (((static_cast<float>(safe_x0) - sx) * dx) + ((static_cast<float>(y) - sy) * dy)) * inv_len_sq;
-            const float t_step = dx * inv_len_sq; // 沿 +x 每像素 t 增量（t 沿 x 线性）
+            const float t_step = dx * inv_len_sq;  // 沿 +x 每像素 t 增量（t 沿 x 线性）
             for (int x = safe_x0; x < safe_x1; ++x) {
                 t = std::max(0.0f, std::min(1.0f, t));
                 const Color c = sample_gradient(colors, stops, t);
                 t += t_step;
                 std::uint8_t *p = row + (static_cast<std::size_t>(x - x0) * 4u);
                 // 与 set_pixel 一致：先按全局透明度折算 alpha，再判不透明快路径 / gamma 混合。
-                const int ca = static_cast<int>(std::lround(static_cast<double>(c.m_a) * ga));
+                const int ca = static_cast<int>(std::lround(static_cast<double>(c.a) * ga));
                 const int ca_c = ca > 255 ? 255 : ca;
                 if (ca_c >= 255) {
-                    p[0] = c.m_r;
-                    p[1] = c.m_g;
-                    p[2] = c.m_b;
+                    p[0] = c.r;
+                    p[1] = c.g;
+                    p[2] = c.b;
                     p[3] = 255;
                 } else if (ca_c <= 0) {
                     continue;
                 } else {
                     const float a = static_cast<float>(ca_c) / 255.0f;
-                    blend_srgb_over_region(p, c.m_r, c.m_g, c.m_b, a, a, a, 1);
+                    blend_srgb_over_region(p, c.r, c.g, c.b, a, a, a, 1);
                 }
             }
         }
@@ -1436,56 +1431,53 @@ auto Painter::draw_linear_gradient(
     }
 }
 
-auto Painter::draw_radial_gradient(
-    const Rect &area, Point center, float radius,
-    const std::vector<Color> &colors, // NOLINT(readability-function-cognitive-complexity)
-    const std::vector<float> &stops) -> void {
+auto Painter::draw_radial_gradient(const Rect &area, Point center, float radius, const std::vector<Color> &colors,
+                                   const std::vector<float> &stops) -> void {
     if (is_recording()) {
         DrawCmd cmd;
         cmd.kind = CmdKind::RadialGradient;
         cmd.bounds = area;
         cmd.pt0 = center;
         cmd.f0 = radius;
-        cmd.col_idx = m_recording_stack.back()->add_colors(colors);
-        cmd.flt_idx = m_recording_stack.back()->add_floats(stops);
-        m_recording_stack.back()->push_cmd(cmd);
+        cmd.col_idx = recording_stack_.back()->add_colors(colors);
+        cmd.flt_idx = recording_stack_.back()->add_floats(stops);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
-    detail::PaintTimer guard{ &g_pt.gradient };
+    detail::PaintTimer guard{&g_pt.gradient};
     if (colors.empty() || stops.empty() || radius <= 0.0f) {
         return;
     }
-    const Rect pr = scale_rect(area, m_scale);
+    const Rect pr = scale_rect(area, scale_);
     int x0 = static_cast<int>(std::floor(std::max(0.0f, pr.origin.x)));
     int y0 = static_cast<int>(std::floor(std::max(0.0f, pr.origin.y)));
-    int x1 = static_cast<int>(std::ceil(std::min(static_cast<float>(m_width), pr.origin.x + pr.size.width)));
-    int y1 = static_cast<int>(std::ceil(std::min(static_cast<float>(m_height), pr.origin.y + pr.size.height)));
+    int x1 = static_cast<int>(std::ceil(std::min(static_cast<float>(width_), pr.origin.x + pr.size.width)));
+    int y1 = static_cast<int>(std::ceil(std::min(static_cast<float>(height_), pr.origin.y + pr.size.height)));
     if (!shrink_to_clips(x0, y0, x1, y1)) {
-        return; // 裁剪外纯白扫
+        return;  // 裁剪外纯白扫
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
     AURORA_PROFILE_COUNT(pixels_filled, static_cast<std::uint64_t>(std::max(0, x1 - x0)) *
                                             static_cast<std::uint64_t>(std::max(0, y1 - y0)));
 
-    const float cx = center.x * m_scale;
-    const float cy = center.y * m_scale;
-    const float r = radius * m_scale;
+    const float cx = center.x * scale_;
+    const float cy = center.y * scale_;
+    const float r = radius * scale_;
     const float inv_r = 1.0f / r;
 
-    const bool fast = !m_has_rounded_clip && m_clip_stack.empty();
+    const bool fast = !has_rounded_clip_ && clip_stack_.empty();
     // SIMD 扫描线快路径：仅双色标 + 全不透明（a=255）且无任何裁剪时启用，与标量黄金逐位一致。
-    const bool simd_grad =
-        fast && colors.size() == 2 && stops.size() == 2 && colors[0].m_a == 255 && colors[1].m_a == 255;
+    const bool simd_grad = fast && colors.size() == 2 && stops.size() == 2 && colors[0].a == 255 && colors[1].a == 255;
     if (simd_grad) {
         for (int y = y0; y < y1; ++y) {
             std::uint8_t *row =
-                m_pixels.data() +
-                (((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) + static_cast<std::size_t>(x0)) *
+                pixels_.data() +
+                (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x0)) *
                  4u);
             const int w = x1 - x0;
-            const std::uint8_t g0[4] = { colors[0].m_r, colors[0].m_g, colors[0].m_b, 255 };
-            const std::uint8_t g1[4] = { colors[1].m_r, colors[1].m_g, colors[1].m_b, 255 };
-            const float py = (static_cast<float>(y) - cy) * (static_cast<float>(y) - cy); // (y - cy)^2
+            const std::uint8_t g0[4] = {colors[0].r, colors[0].g, colors[0].b, 255};
+            const std::uint8_t g1[4] = {colors[1].r, colors[1].g, colors[1].b, 255};
+            const float py = (static_cast<float>(y) - cy) * (static_cast<float>(y) - cy);  // (y - cy)^2
             gradient_radial_fill(row, x0, w, cx, py, inv_r, g0, g1, stops[0], stops[1] - stops[0]);
         }
         return;
@@ -1498,16 +1490,16 @@ auto Painter::draw_radial_gradient(
         float threshold;
     };
     std::vector<GradRoundedInfo> rounded_clips;
-    for (const ClipRegion &cr : m_clip_stack) {
+    for (const ClipRegion &cr : clip_stack_) {
         if (cr.rounded && cr.radius > 0.0f) {
-            rounded_clips.push_back({ .cr = &cr, .threshold = cr.anti_alias ? -0.5f : 0.0f });
+            rounded_clips.push_back({.cr = &cr, .threshold = cr.anti_alias ? -0.5f : 0.0f});
         }
     }
-    const auto ga = static_cast<float>(m_global_alpha); // 与 set_pixel 一致的全局透明度
+    const auto ga = static_cast<float>(global_alpha_);  // 与 set_pixel 一致的全局透明度
     for (int y = y0; y < y1; ++y) {
         std::uint8_t *row =
-            m_pixels.data() +
-            (((static_cast<std::size_t>(y) * static_cast<std::size_t>(m_width)) + static_cast<std::size_t>(x0)) * 4u);
+            pixels_.data() +
+            (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x0)) * 4u);
         int safe_x0 = x0;
         int safe_x1 = x1;
         for (const auto &ri : rounded_clips) {
@@ -1535,18 +1527,18 @@ auto Painter::draw_radial_gradient(
                 float t = std::max(0.0f, std::min(1.0f, dist * inv_r));
                 const Color c = sample_gradient(colors, stops, t);
                 std::uint8_t *p = row + (static_cast<std::size_t>(x - x0) * 4u);
-                const int ca = static_cast<int>(std::lround(static_cast<double>(c.m_a) * ga));
+                const int ca = static_cast<int>(std::lround(static_cast<double>(c.a) * ga));
                 const int ca_c = ca > 255 ? 255 : ca;
                 if (ca_c >= 255) {
-                    p[0] = c.m_r;
-                    p[1] = c.m_g;
-                    p[2] = c.m_b;
+                    p[0] = c.r;
+                    p[1] = c.g;
+                    p[2] = c.b;
                     p[3] = 255;
                 } else if (ca_c <= 0) {
                     continue;
                 } else {
                     const float a = static_cast<float>(ca_c) / 255.0f;
-                    blend_srgb_over_region(p, c.m_r, c.m_g, c.m_b, a, a, a, 1);
+                    blend_srgb_over_region(p, c.r, c.g, c.b, a, a, a, 1);
                 }
             }
         }
@@ -1561,8 +1553,7 @@ auto Painter::draw_radial_gradient(
     }
 }
 
-auto Painter::draw_shadow(const Rect &shape, float offset_x, float offset_y, float blur_radius, Color color)
-    -> void { // NOLINT(readability-function-cognitive-complexity)
+auto Painter::draw_shadow(const Rect &shape, float offset_x, float offset_y, float blur_radius, Color color) -> void {
     if (is_recording()) {
         DrawCmd cmd;
         cmd.kind = CmdKind::Shadow;
@@ -1571,12 +1562,12 @@ auto Painter::draw_shadow(const Rect &shape, float offset_x, float offset_y, flo
         cmd.f1 = offset_y;
         cmd.f2 = blur_radius;
         cmd.color = color;
-        m_recording_stack.back()->push_cmd(cmd);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
     // 阴影矩形（偏移后）
-    const Rect shadow_rect{ .origin = Point{ .x = shape.origin.x + offset_x, .y = shape.origin.y + offset_y },
-                            .size = shape.size };
+    const Rect shadow_rect{.origin = Point{.x = shape.origin.x + offset_x, .y = shape.origin.y + offset_y},
+                           .size = shape.size};
 
     if (blur_radius <= 0.0f) {
         // 硬边阴影
@@ -1586,23 +1577,23 @@ auto Painter::draw_shadow(const Rect &shape, float offset_x, float offset_y, flo
 
     // 模糊阴影：扩展区域并逐像素计算覆盖度（简化高斯：距离衰减）
     const float expand = blur_radius * 2.0f;
-    const Rect expanded{ .origin = Point{ .x = shadow_rect.origin.x - expand, .y = shadow_rect.origin.y - expand },
-                         .size = Size{ .width = shadow_rect.size.width + (expand * 2.0f),
-                                       .height = shadow_rect.size.height + (expand * 2.0f) } };
+    const Rect expanded{.origin = Point{.x = shadow_rect.origin.x - expand, .y = shadow_rect.origin.y - expand},
+                        .size = Size{.width = shadow_rect.size.width + (expand * 2.0f),
+                                     .height = shadow_rect.size.height + (expand * 2.0f)}};
 
-    const Rect pr = scale_rect(expanded, m_scale);
+    const Rect pr = scale_rect(expanded, scale_);
     int x0 = static_cast<int>(std::floor(std::max(0.0f, pr.origin.x)));
     int y0 = static_cast<int>(std::floor(std::max(0.0f, pr.origin.y)));
-    int x1 = static_cast<int>(std::ceil(std::min(static_cast<float>(m_width), pr.origin.x + pr.size.width)));
-    int y1 = static_cast<int>(std::ceil(std::min(static_cast<float>(m_height), pr.origin.y + pr.size.height)));
+    int x1 = static_cast<int>(std::ceil(std::min(static_cast<float>(width_), pr.origin.x + pr.size.width)));
+    int y1 = static_cast<int>(std::ceil(std::min(static_cast<float>(height_), pr.origin.y + pr.size.height)));
     if (!shrink_to_clips(x0, y0, x1, y1)) {
-        return; // 裁剪外纯白扫（blend_pixel 经 set_pixel 恒丢弃）
+        return;  // 裁剪外纯白扫（blend_pixel 经 set_pixel 恒丢弃）
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
 
     // 阴影矩形（物理像素）
-    const Rect spr = scale_rect(shadow_rect, m_scale);
-    const float blur_px = blur_radius * m_scale;
+    const Rect spr = scale_rect(shadow_rect, scale_);
+    const float blur_px = blur_radius * scale_;
     const float inv_blur = 1.0f / (blur_px > 0.0f ? blur_px : 1.0f);
 
     // 性能优化：阴影内部（矩形内）衰减因子恒为 1，等效于整块 fill_rect——直接走半透明
@@ -1610,7 +1601,7 @@ auto Painter::draw_shadow(const Rect &shape, float offset_x, float offset_y, flo
     // 多单元格 / banner 卡片）的重栅开销。仅对「扩展区 − 内部矩形」的边缘环做距离衰减羽化。
     fill_rect(shadow_rect, color);
 
-    detail::PaintTimer guard{ &g_pt.shadow };
+    detail::PaintTimer guard{&g_pt.shadow};
     // 内部矩形的物理像素边界取与 fill_rect 一致的 ceil/floor（含右/下边界），
     // 使边缘环恰好从 fill 之外开始，不重不漏。
     const int si0 = static_cast<int>(std::ceil(spr.origin.x));
@@ -1650,8 +1641,8 @@ auto Painter::draw_shadow(const Rect &shape, float offset_x, float offset_y, flo
 
             if (alpha_factor > 0.0f) {
                 Color c = color;
-                c.m_a = static_cast<std::uint8_t>(color.m_a * alpha_factor);
-                if (c.m_a > 0) {
+                c.a = static_cast<std::uint8_t>(color.a * alpha_factor);
+                if (c.a > 0) {
                     blend_pixel(x, y, c);
                 }
             }
@@ -1665,32 +1656,32 @@ auto Painter::blur_region(const Rect &region, float radius) -> void {
         cmd.kind = CmdKind::BlurRegion;
         cmd.bounds = region;
         cmd.f0 = radius;
-        m_recording_stack.back()->push_cmd(cmd);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
-    detail::PaintTimer guard{ &g_pt.blur };
-    if (radius <= 0.0f || m_width <= 0 || m_height <= 0) {
+    detail::PaintTimer guard{&g_pt.blur};
+    if (radius <= 0.0f || width_ <= 0 || height_ <= 0) {
         return;
     }
     // 物理像素区域与模糊半径
-    const Rect pr = scale_rect(region, m_scale);
+    const Rect pr = scale_rect(region, scale_);
     const int x0 = std::max(0, static_cast<int>(std::floor(pr.origin.x)));
     const int y0 = std::max(0, static_cast<int>(std::floor(pr.origin.y)));
-    const int x1 = std::min(m_width, static_cast<int>(std::ceil(pr.origin.x + pr.size.width)));
-    const int y1 = std::min(m_height, static_cast<int>(std::ceil(pr.origin.y + pr.size.height)));
+    const int x1 = std::min(width_, static_cast<int>(std::ceil(pr.origin.x + pr.size.width)));
+    const int y1 = std::min(height_, static_cast<int>(std::ceil(pr.origin.y + pr.size.height)));
     if (x1 <= x0 || y1 <= y0) {
         return;
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
     AURORA_PROFILE_COUNT(pixels_filled, static_cast<std::uint64_t>(x1 - x0) * static_cast<std::uint64_t>(y1 - y0));
-    const int r = std::max(1, static_cast<int>(radius * m_scale));
+    const int r = std::max(1, static_cast<int>(radius * scale_));
     const int rw = x1 - x0;
     const int rh = y1 - y0;
 
     // 分离式两遍 box blur（水平 → 垂直），边缘采样钳制到区域内（不漏采区外像素，
     // 毛玻璃语义下区域外背景不参与）。临时缓冲避免读写串扰。
     // SIMD 双实现：标量黄金 / SSE2 / AVX2 逐位一致，分发由 g_simd_level 决定。
-    aurora::detail::blur_region(m_pixels.data(), m_width, x0, y0, rw, rh, r);
+    aurora::detail::blur_region(pixels_.data(), width_, x0, y0, rw, rh, r);
 }
 
 auto Painter::blend_region(const Rect &region, BlendMode mode, Color tint, float strength) -> void {
@@ -1701,92 +1692,92 @@ auto Painter::blend_region(const Rect &region, BlendMode mode, Color tint, float
         cmd.blend_mode = mode;
         cmd.color = tint;
         cmd.f0 = strength;
-        m_recording_stack.back()->push_cmd(cmd);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
-    detail::PaintTimer guard{ &g_pt.region };
-    if (m_width <= 0 || m_height <= 0) {
+    detail::PaintTimer guard{&g_pt.region};
+    if (width_ <= 0 || height_ <= 0) {
         return;
     }
     strength = aurora::saturate(strength);
     if (strength <= 0.0f) {
         return;
     }
-    const Rect pr = scale_rect(region, m_scale);
+    const Rect pr = scale_rect(region, scale_);
     const int x0 = std::max(0, static_cast<int>(std::floor(pr.origin.x)));
     const int y0 = std::max(0, static_cast<int>(std::floor(pr.origin.y)));
-    const int x1 = std::min(m_width, static_cast<int>(std::ceil(pr.origin.x + pr.size.width)));
-    const int y1 = std::min(m_height, static_cast<int>(std::ceil(pr.origin.y + pr.size.height)));
+    const int x1 = std::min(width_, static_cast<int>(std::ceil(pr.origin.x + pr.size.width)));
+    const int y1 = std::min(height_, static_cast<int>(std::ceil(pr.origin.y + pr.size.height)));
     if (x1 <= x0 || y1 <= y0) {
         return;
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
     AURORA_PROFILE_COUNT(pixels_filled, static_cast<std::uint64_t>(x1 - x0) * static_cast<std::uint64_t>(y1 - y0));
-    const int tr = tint.m_r;
-    const int tg = tint.m_g;
-    const int tb = tint.m_b;
+    const int tr = tint.r;
+    const int tg = tint.g;
+    const int tb = tint.b;
     for (int y = y0; y < y1; ++y) {
         for (int x = x0; x < x1; ++x) {
-            const std::size_t i = ((static_cast<std::size_t>(y) * m_width) + x) * 4;
-            const int sr = m_pixels[i];
-            const int sg = m_pixels[i + 1];
-            const int sb = m_pixels[i + 2];
+            const std::size_t i = ((static_cast<std::size_t>(y) * width_) + x) * 4;
+            const int sr = pixels_[i];
+            const int sg = pixels_[i + 1];
+            const int sb = pixels_[i + 2];
             int r = 0;
             int g = 0;
             int b = 0;
             switch (mode) {
-            case BlendMode::Normal:
-                r = tr;
-                g = tg;
-                b = tb;
-                break;
-            case BlendMode::Multiply:
-                r = sr * tr / 255;
-                g = sg * tg / 255;
-                b = sb * tb / 255;
-                break;
-            case BlendMode::Screen:
-                r = 255 - ((255 - sr) * (255 - tr) / 255);
-                g = 255 - ((255 - sg) * (255 - tg) / 255);
-                b = 255 - ((255 - sb) * (255 - tb) / 255);
-                break;
-            case BlendMode::Overlay:
-                r = sr < 128 ? 2 * sr * tr / 255 : 255 - (2 * (255 - sr) * (255 - tr) / 255);
-                g = sg < 128 ? 2 * sg * tg / 255 : 255 - (2 * (255 - sg) * (255 - tg) / 255);
-                b = sb < 128 ? 2 * sb * tb / 255 : 255 - (2 * (255 - sb) * (255 - tb) / 255);
-                break;
-            case BlendMode::Darken:
-                r = std::min(sr, tr);
-                g = std::min(sg, tg);
-                b = std::min(sb, tb);
-                break;
-            case BlendMode::Lighten:
-                r = std::max(sr, tr);
-                g = std::max(sg, tg);
-                b = std::max(sb, tb);
-                break;
-            case BlendMode::Difference:
-                r = std::abs(sr - tr);
-                g = std::abs(sg - tg);
-                b = std::abs(sb - tb);
-                break;
-            case BlendMode::Exclusion:
-                r = sr + tr - (2 * sr * tr / 255);
-                g = sg + tg - (2 * sg * tg / 255);
-                b = sb + tb - (2 * sb * tb / 255);
-                break;
-            default:
-                r = sr;
-                g = sg;
-                b = sb;
-                break;
+                case BlendMode::Normal:
+                    r = tr;
+                    g = tg;
+                    b = tb;
+                    break;
+                case BlendMode::Multiply:
+                    r = sr * tr / 255;
+                    g = sg * tg / 255;
+                    b = sb * tb / 255;
+                    break;
+                case BlendMode::Screen:
+                    r = 255 - ((255 - sr) * (255 - tr) / 255);
+                    g = 255 - ((255 - sg) * (255 - tg) / 255);
+                    b = 255 - ((255 - sb) * (255 - tb) / 255);
+                    break;
+                case BlendMode::Overlay:
+                    r = sr < 128 ? 2 * sr * tr / 255 : 255 - (2 * (255 - sr) * (255 - tr) / 255);
+                    g = sg < 128 ? 2 * sg * tg / 255 : 255 - (2 * (255 - sg) * (255 - tg) / 255);
+                    b = sb < 128 ? 2 * sb * tb / 255 : 255 - (2 * (255 - sb) * (255 - tb) / 255);
+                    break;
+                case BlendMode::Darken:
+                    r = std::min(sr, tr);
+                    g = std::min(sg, tg);
+                    b = std::min(sb, tb);
+                    break;
+                case BlendMode::Lighten:
+                    r = std::max(sr, tr);
+                    g = std::max(sg, tg);
+                    b = std::max(sb, tb);
+                    break;
+                case BlendMode::Difference:
+                    r = std::abs(sr - tr);
+                    g = std::abs(sg - tg);
+                    b = std::abs(sb - tb);
+                    break;
+                case BlendMode::Exclusion:
+                    r = sr + tr - (2 * sr * tr / 255);
+                    g = sg + tg - (2 * sg * tg / 255);
+                    b = sb + tb - (2 * sb * tb / 255);
+                    break;
+                default:
+                    r = sr;
+                    g = sg;
+                    b = sb;
+                    break;
             }
             const int fr = sr + static_cast<int>(strength * (r - sr));
             const int fg = sg + static_cast<int>(strength * (g - sg));
             const int fb = sb + static_cast<int>(strength * (b - sb));
-            m_pixels[i] = aurora::saturate_u8(fr);
-            m_pixels[i + 1] = aurora::saturate_u8(fg);
-            m_pixels[i + 2] = aurora::saturate_u8(fb);
+            pixels_[i] = aurora::saturate_u8(fr);
+            pixels_[i + 1] = aurora::saturate_u8(fg);
+            pixels_[i + 2] = aurora::saturate_u8(fb);
         }
     }
 }
@@ -1798,22 +1789,22 @@ auto Painter::mask_region(const Rect &region, ShaderMaskKind kind, float strengt
         cmd.bounds = region;
         cmd.mask_kind = kind;
         cmd.f0 = strength;
-        m_recording_stack.back()->push_cmd(cmd);
+        recording_stack_.back()->push_cmd(cmd);
         return;
     }
-    detail::PaintTimer guard{ &g_pt.region };
-    if (m_width <= 0 || m_height <= 0) {
+    detail::PaintTimer guard{&g_pt.region};
+    if (width_ <= 0 || height_ <= 0) {
         return;
     }
     strength = aurora::saturate(strength);
     if (strength <= 0.0f) {
         return;
     }
-    const Rect pr = scale_rect(region, m_scale);
+    const Rect pr = scale_rect(region, scale_);
     const int x0 = std::max(0, static_cast<int>(std::floor(pr.origin.x)));
     const int y0 = std::max(0, static_cast<int>(std::floor(pr.origin.y)));
-    const int x1 = std::min(m_width, static_cast<int>(std::ceil(pr.origin.x + pr.size.width)));
-    const int y1 = std::min(m_height, static_cast<int>(std::ceil(pr.origin.y + pr.size.height)));
+    const int x1 = std::min(width_, static_cast<int>(std::ceil(pr.origin.x + pr.size.width)));
+    const int y1 = std::min(height_, static_cast<int>(std::ceil(pr.origin.y + pr.size.height)));
     if (x1 <= x0 || y1 <= y0) {
         return;
     }
@@ -1830,27 +1821,33 @@ auto Painter::mask_region(const Rect &region, ShaderMaskKind kind, float strengt
             const float fy = static_cast<float>(y - y0);
             float base = NAN;
             switch (kind) {
-            case ShaderMaskKind::LinearFade: base = 1.0f - (fy / rh); break;
-            case ShaderMaskKind::LinearRise: base = fy / rh; break;
-            case ShaderMaskKind::RadialFade: {
-                const float dx = fx - cx;
-                const float dy = fy - cy;
-                base = 1.0f - (std::sqrt((dx * dx) + (dy * dy)) / max_r);
-                break;
-            }
-            default: base = 1.0f; break;
+                case ShaderMaskKind::LinearFade:
+                    base = 1.0f - (fy / rh);
+                    break;
+                case ShaderMaskKind::LinearRise:
+                    base = fy / rh;
+                    break;
+                case ShaderMaskKind::RadialFade: {
+                    const float dx = fx - cx;
+                    const float dy = fy - cy;
+                    base = 1.0f - (std::sqrt((dx * dx) + (dy * dy)) / max_r);
+                    break;
+                }
+                default:
+                    base = 1.0f;
+                    break;
             }
             base = aurora::saturate(base);
             const float factor = 1.0f - (strength * (1.0f - base));
-            const std::size_t i = ((static_cast<std::size_t>(y) * m_width) + x) * 4;
-            m_pixels[i] = aurora::saturate_u8(static_cast<int>(m_pixels[i] * factor));
-            m_pixels[i + 1] = aurora::saturate_u8(static_cast<int>(m_pixels[i + 1] * factor));
-            m_pixels[i + 2] = aurora::saturate_u8(static_cast<int>(m_pixels[i + 2] * factor));
+            const std::size_t i = ((static_cast<std::size_t>(y) * width_) + x) * 4;
+            pixels_[i] = aurora::saturate_u8(static_cast<int>(pixels_[i] * factor));
+            pixels_[i + 1] = aurora::saturate_u8(static_cast<int>(pixels_[i + 1] * factor));
+            pixels_[i + 2] = aurora::saturate_u8(static_cast<int>(pixels_[i + 2] * factor));
         }
     }
 }
 
-} // namespace aurora
+}  // namespace aurora
 // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-narrowing-conversions,
 // bugprone-narrowing-conversions, readability-math-missing-parentheses, cppcoreguidelines-avoid-c-arrays,
 // modernize-avoid-c-arrays, cppcoreguidelines-pro-type-reinterpret-cast,

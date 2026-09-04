@@ -11,7 +11,7 @@ class ThemedControls : public au::VideoControls {
   public:
     explicit ThemedControls(au::VideoController *c) : VideoControls(c) {}
     auto init() -> void { build_children(); } // 构造后调用，避免构造体内虚函数调用
-    auto build_called() const -> bool { return m_build_called; }
+    auto build_called() const -> bool { return m_build_called_; }
     auto probe_play() const -> au::Button * { return play_button(); }
     auto probe_time() const -> au::Text * { return time_text(); }
     auto probe_mute() const -> au::Button * { return mute_button(); }
@@ -19,11 +19,11 @@ class ThemedControls : public au::VideoControls {
   protected:
     auto build_children() -> void override {
         VideoControls::build_children();
-        m_build_called = true;
+        m_build_called_ = true;
     }
 
   private:
-    bool m_build_called = false;
+    bool m_build_called_ = false;
 };
 } // namespace
 

@@ -17,14 +17,14 @@ auto Diagnostic::to_json_line() const -> std::string {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     j["message"] = message;
     if (!where.empty()) {
-        j["where"] = where; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        j["where"] = where;  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     }
     if (!code.empty()) {
-        j["code"] = code; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        j["code"] = code;  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     }
     if (fix && fix->has_auto_fix()) {
-        j["fix_code"] = fix->code;        // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        j["fix_desc"] = fix->description; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        j["fix_code"] = fix->code;  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        j["fix_desc"] = fix->description;  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     }
     return j.dump();
 }
@@ -62,10 +62,10 @@ void Diagnostics::report(std::string_view message, std::string_view where, std::
     Logger::instance().log(AURORA_FILE_NAME, __LINE__, lvl, "diagnostics", line);
 
     Diagnostics &self = instance();
-    self.m_log.push_back(d);
-    self.m_recent.push_back(d);
-    if (self.m_recent.size() > AURORA_RECENT_CAP) {
-        self.m_recent.erase(self.m_recent.begin());
+    self.log_.push_back(d);
+    self.recent_.push_back(d);
+    if (self.recent_.size() > AURORA_RECENT_CAP) {
+        self.recent_.erase(self.recent_.begin());
     }
 }
 
@@ -83,14 +83,14 @@ void Diagnostics::degraded(std::string_view message, std::string_view where, std
 }
 
 auto Diagnostics::take() -> std::vector<Diagnostic> {
-    std::vector<Diagnostic> out = std::move(instance().m_log);
-    instance().m_log.clear();
+    std::vector<Diagnostic> out = std::move(instance().log_);
+    instance().log_.clear();
     return out;
 }
 
-auto Diagnostics::count() -> std::size_t { return instance().m_log.size(); }
+auto Diagnostics::count() -> std::size_t { return instance().log_.size(); }
 
-auto Diagnostics::get_last_diagnostics() -> std::vector<Diagnostic> { return instance().m_recent; }
+auto Diagnostics::get_last_diagnostics() -> std::vector<Diagnostic> { return instance().recent_; }
 
 auto Diagnostics::explain_diagnostic(std::string_view code) -> std::string {
     // 表驱动：诊断码即 errors.toml 的 slug，解释文本取自 ErrorMeta.hint（单一声明源）。
@@ -112,7 +112,7 @@ auto Diagnostics::instance() -> Diagnostics & {
 
 auto Diagnostics::collect_fixes() -> std::vector<FixSuggestion> {
     std::vector<FixSuggestion> out;
-    for (const auto &d : instance().m_recent) {
+    for (const auto &d : instance().recent_) {
         if (d.fix && (!d.fix->code.empty() || d.fix->has_auto_fix())) {
             out.push_back(*d.fix);
         }
@@ -121,11 +121,12 @@ auto Diagnostics::collect_fixes() -> std::vector<FixSuggestion> {
 }
 
 auto Diagnostics::apply_fix(std::string_view code) -> bool {
-    const std::string key{ code };
-    const auto it = std::ranges::find_if(instance().m_recent, [&](const Diagnostic &d) -> bool {
+    const std::string key{code};
+    const auto it = std::ranges::find_if(instance().recent_, [&](const Diagnostic &d) -> bool {
         return d.fix && d.fix->code == key && d.fix->has_auto_fix();
     });
-    if (it != instance().m_recent.end() && it->fix) {
+    if (it != instance().recent_.end() && it->fix) {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access) it->fix 已在本行条件中判 engaged，此处解引用安全
         it->fix->auto_fix();
         return true;
     }
@@ -140,7 +141,7 @@ auto fix_registry() -> auto & {
     static std::unordered_map<ErrorCode, FixSuggestion> registry;
     return registry;
 }
-} // namespace
+}  // namespace
 
 auto Diagnostics::register_fix(ErrorCode code, FixSuggestion fix) -> void { fix_registry()[code] = std::move(fix); }
 
@@ -165,4 +166,4 @@ auto Diagnostics::apply_fix(ErrorCode code) -> bool {
     return false;
 }
 
-} // namespace aurora
+}  // namespace aurora

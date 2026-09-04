@@ -15,7 +15,7 @@
 
 namespace aurora {
 
-class Node; // 前向声明（widget_tree 入参按引用使用）
+class Node;  // 前向声明（widget_tree 入参按引用使用）
 
 namespace debug {
 
@@ -43,5 +43,5 @@ namespace debug {
 /// @note Release 返回 `{"available":false, ...}`。
 [[nodiscard]] auto diagnostics() -> Json;
 
-} // namespace debug
-} // namespace aurora
+}  // namespace debug
+}  // namespace aurora

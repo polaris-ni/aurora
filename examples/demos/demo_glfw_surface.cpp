@@ -25,16 +25,20 @@ auto build_root() -> au::Node {
             GradientTitle("GLFW + OpenGL"),
             BrandBadge("Software Painter -> GL Texture", pal::AURORA_PRIMARY),
             gap(4),
-            Card(au::Text("This window is presented by GlfwSurface: software Painter raster, uploaded as an OpenGL texture each frame.")),
-            Card(au::Text("Mouse / keyboard / wheel / text input are translated by GLFW into aurora::Event then dispatched uniformly.")),
+            Card(au::Text("This window is presented by GlfwSurface: software Painter raster, uploaded as an OpenGL "
+                          "texture each frame.")),
+            Card(au::Text("Mouse / keyboard / wheel / text input are translated by GLFW into aurora::Event then "
+                          "dispatched uniformly.")),
             Card(au::Text("Drag window edge to resize: resize event drives relayout and redraw.")),
             gap(8),
         },
         pal::AURORA_BG);
 }
 
-} // namespace
+}  // namespace
 
+// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// try/catch 包装
 auto main() -> int {
     au::enable_dpi_awareness();
     au::init_console();
@@ -45,7 +49,7 @@ auto main() -> int {
 
 #ifdef AURORA_BACKEND_GLFW
     au::GlfwOptions opts;
-    opts.size = au::Size{ .width = 560.0f, .height = 380.0f };
+    opts.size = au::Size{.width = 560.0F, .height = 380.0F};
     opts.title = "demo_glfw_surface";
 
     std::unique_ptr<au::Window> win;
@@ -93,7 +97,7 @@ auto main() -> int {
 
     std::error_code ec;
     std::filesystem::create_directories("build", ec);
-    au::Scene scene{ root };
+    au::Scene scene{root};
     auto r = scene.render_to_png("build/demo_glfw_surface.png", 560, 380);
     if (r) {
         AURORA_LOG_INFO("demo", "[demo_glfw_surface] rendered build/demo_glfw_surface.png");

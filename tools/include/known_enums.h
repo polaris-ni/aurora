@@ -35,123 +35,121 @@ namespace aurora::tools {
     std::map<std::string, std::vector<std::string>> enums;
 
     // ---- layout and alignment ----
-    enums["Alignment"] = { "TopLeft",     "TopCenter",  "TopRight",     "CenterLeft", "Center",
-                           "CenterRight", "BottomLeft", "BottomCenter", "BottomRight" };
-    enums["MainAxisAlignment"] = { "Start", "Center", "End", "SpaceBetween", "SpaceAround", "SpaceEvenly" };
-    enums["CrossAxisAlignment"] = { "Start", "Center", "End", "Stretch" };
-    enums["MainAxisSize"] = { "Min", "Max" };
-    enums["StackFit"] = { "Loose", "Expand", "Passthrough" };
-    enums["LengthKind"] = { "WrapContent", "Expand", "Fixed", "Fraction" };
+    enums["Alignment"] = {"TopLeft",     "TopCenter",  "TopRight",     "CenterLeft", "Center",
+                          "CenterRight", "BottomLeft", "BottomCenter", "BottomRight"};
+    enums["MainAxisAlignment"] = {"Start", "Center", "End", "SpaceBetween", "SpaceAround", "SpaceEvenly"};
+    enums["CrossAxisAlignment"] = {"Start", "Center", "End", "Stretch"};
+    enums["MainAxisSize"] = {"Min", "Max"};
+    enums["StackFit"] = {"Loose", "Expand", "Passthrough"};
+    enums["LengthKind"] = {"WrapContent", "Expand", "Fixed", "Fraction"};
 
     // ---- text ----
-    enums["TextAlign"] = { "Left", "Right", "Center", "Start", "End", "Justify" };
-    enums["TextOverflow"] = { "Clip", "Ellipsis", "Fade" };
-    enums["TextDecoration"] = { "None", "Underline", "Overline", "LineThrough" };
-    enums["FontWeight"] = {
-        "Thin", "ExtraLight", "Light", "Normal", "Medium", "SemiBold", "Bold", "ExtraBold", "Black"
-    };
-    enums["FontStyle"] = { "Normal", "Italic" };
+    enums["TextAlign"] = {"Left", "Right", "Center", "Start", "End", "Justify"};
+    enums["TextOverflow"] = {"Clip", "Ellipsis", "Fade"};
+    enums["TextDecoration"] = {"None", "Underline", "Overline", "LineThrough"};
+    enums["FontWeight"] = {"Thin", "ExtraLight", "Light", "Normal", "Medium", "SemiBold", "Bold", "ExtraBold", "Black"};
+    enums["FontStyle"] = {"Normal", "Italic"};
 
     // ---- image / media ----
-    enums["BoxFit"] = { "Fill", "Contain", "Cover", "FitWidth", "FitHeight", "None", "ScaleDown" };
+    enums["BoxFit"] = {"Fill", "Contain", "Cover", "FitWidth", "FitHeight", "None", "ScaleDown"};
 
     // ---- animation (CurveKind, the discriminating enum of class Curve) ----
-    enums["Curve"] = { "Linear",      "EaseIn",        "EaseOut",        "EaseInOut",   "EaseInSine",
-                       "EaseOutSine", "EaseInOutSine", "EaseInQuad",     "EaseOutQuad", "EaseInOutQuad",
-                       "EaseInCubic", "EaseOutCubic",  "EaseInOutCubic", "BounceOut",   "Custom" };
+    enums["Curve"] = {"Linear",      "EaseIn",        "EaseOut",        "EaseInOut",   "EaseInSine",
+                      "EaseOutSine", "EaseInOutSine", "EaseInQuad",     "EaseOutQuad", "EaseInOutQuad",
+                      "EaseInCubic", "EaseOutCubic",  "EaseInOutCubic", "BounceOut",   "Custom"};
 
     // ---- input ----
-    enums["KeyCode"] = { "Unknown",
-                         "A",
-                         "B",
-                         "C",
-                         "D",
-                         "E",
-                         "F",
-                         "G",
-                         "H",
-                         "I",
-                         "J",
-                         "K",
-                         "L",
-                         "M",
-                         "N",
-                         "O",
-                         "P",
-                         "Q",
-                         "R",
-                         "S",
-                         "T",
-                         "U",
-                         "V",
-                         "W",
-                         "X",
-                         "Y",
-                         "Z",
-                         "D0",
-                         "D1",
-                         "D2",
-                         "D3",
-                         "D4",
-                         "D5",
-                         "D6",
-                         "D7",
-                         "D8",
-                         "D9",
-                         "Space",
-                         "Enter",
-                         "Escape",
-                         "Tab",
-                         "Backspace",
-                         "Delete",
-                         "ArrowLeft",
-                         "ArrowRight",
-                         "ArrowUp",
-                         "ArrowDown",
-                         "Shift",
-                         "Control",
-                         "Alt",
-                         "Meta",
-                         "Home",
-                         "End",
-                         "PageUp",
-                         "PageDown",
-                         "Minus",
-                         "Equal",
-                         "LeftBracket",
-                         "RightBracket",
-                         "Backslash",
-                         "Semicolon",
-                         "Quote",
-                         "Comma",
-                         "Period",
-                         "Slash",
-                         "Backquote",
-                         "F1",
-                         "F2",
-                         "F3",
-                         "F4",
-                         "F5",
-                         "F6",
-                         "F7",
-                         "F8",
-                         "F9",
-                         "F10",
-                         "F11",
-                         "F12" };
+    enums["KeyCode"] = {"Unknown",
+                        "A",
+                        "B",
+                        "C",
+                        "D",
+                        "E",
+                        "F",
+                        "G",
+                        "H",
+                        "I",
+                        "J",
+                        "K",
+                        "L",
+                        "M",
+                        "N",
+                        "O",
+                        "P",
+                        "Q",
+                        "R",
+                        "S",
+                        "T",
+                        "U",
+                        "V",
+                        "W",
+                        "X",
+                        "Y",
+                        "Z",
+                        "D0",
+                        "D1",
+                        "D2",
+                        "D3",
+                        "D4",
+                        "D5",
+                        "D6",
+                        "D7",
+                        "D8",
+                        "D9",
+                        "Space",
+                        "Enter",
+                        "Escape",
+                        "Tab",
+                        "Backspace",
+                        "Delete",
+                        "ArrowLeft",
+                        "ArrowRight",
+                        "ArrowUp",
+                        "ArrowDown",
+                        "Shift",
+                        "Control",
+                        "Alt",
+                        "Meta",
+                        "Home",
+                        "End",
+                        "PageUp",
+                        "PageDown",
+                        "Minus",
+                        "Equal",
+                        "LeftBracket",
+                        "RightBracket",
+                        "Backslash",
+                        "Semicolon",
+                        "Quote",
+                        "Comma",
+                        "Period",
+                        "Slash",
+                        "Backquote",
+                        "F1",
+                        "F2",
+                        "F3",
+                        "F4",
+                        "F5",
+                        "F6",
+                        "F7",
+                        "F8",
+                        "F9",
+                        "F10",
+                        "F11",
+                        "F12"};
 
     // ---- widget-specific enums (previously missing from all four registries, which made property
     // values impossible to validate / complete) ----
-    enums["DrawerSide"] = { "Left", "Right" };
-    enums["Orientation"] = { "Horizontal", "Vertical" };
-    enums["SplitterOrientation"] = { "Horizontal", "Vertical" };
-    enums["ToastPosition"] = { "Bottom", "Top" };
+    enums["DrawerSide"] = {"Left", "Right"};
+    enums["Orientation"] = {"Horizontal", "Vertical"};
+    enums["SplitterOrientation"] = {"Horizontal", "Vertical"};
+    enums["ToastPosition"] = {"Bottom", "Top"};
 
     // ---- named colors (au::colors::AURORA_*, not an enum; provides value hints for the Color property) ----
-    enums["ColorPalette"] = { "AURORA_WHITE", "AURORA_BLACK", "AURORA_BLUE",   "AURORA_RED",
-                              "AURORA_GREEN", "AURORA_GRAY",  "AURORA_YELLOW", "AURORA_TRANSPARENT" };
+    enums["ColorPalette"] = {"AURORA_WHITE", "AURORA_BLACK", "AURORA_BLUE",   "AURORA_RED",
+                             "AURORA_GREEN", "AURORA_GRAY",  "AURORA_YELLOW", "AURORA_TRANSPARENT"};
 
     return enums;
 }
 
-} // namespace aurora::tools
+}  // namespace aurora::tools

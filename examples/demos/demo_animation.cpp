@@ -12,7 +12,6 @@
 // 绝不波及下方兄弟控件。下方 kStage 由缩放参数推导，改缩放上限也不会回归。
 #include "aurora/animation/animator.h"
 #include "aurora/app/application.h"
-
 #include "demo_common.h"
 
 // 让一个 AnimationController 在端点自动反向，形成来回循环。
@@ -24,27 +23,29 @@ static auto bounce(au::AnimationController &c) -> void {
     }
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// try/catch 包装
 auto main() -> int {
     // —— 背景色呼吸动画 ——
-    au::AnimationController pulse{ 1.6 };
-    au::Tween tint{ au::Color{ 59, 130, 246 }, au::Color{ 236, 72, 153 } };
-    au::State tinted{ au::Color{ 59, 130, 246 } };
+    au::AnimationController pulse{1.6};
+    au::Tween tint{au::Color{59, 130, 246}, au::Color{236, 72, 153}};
+    au::State tinted{au::Color{59, 130, 246}};
     // —— 来回缩放动画 ——
-    au::AnimationController scale_pulse{ 1.2 };
-    au::Tween scaler{ 0.6F, 1.4F };
-    au::State scale_v{ 0.6F };
+    au::AnimationController scale_pulse{1.2};
+    au::Tween scaler{0.6F, 1.4F};
+    au::State scale_v{0.6F};
 
     au::Animator animator;
     animator.bind(pulse, tint, tinted);
     animator.bind(scale_pulse, scaler, scale_v);
 
-    au::Curve curve{ au::CurveKind::EaseInOut };
-    au::SpringSimulation spring{ au::SpringDescription{ .stiffness = 180.0, .damping = 20.0 }, 0.0, 1.0 };
-    au::Keyframes<au::Color> kf{ std::vector<au::Keyframes<au::Color>::Stop>{
-        { .time = 0.0, .value = au::Color{ 59, 130, 246 } },
-        { .time = 0.5, .value = au::Color{ 236, 72, 153 } },
-        { .time = 1.0, .value = au::Color{ 34, 197, 94 } },
-    } };
+    au::Curve curve{au::CurveKind::EaseInOut};
+    au::SpringSimulation spring{au::SpringDescription{.stiffness = 180.0, .damping = 20.0}, 0.0, 1.0};
+    au::Keyframes<au::Color> kf{std::vector<au::Keyframes<au::Color>::Stop>{
+        {.time = 0.0, .value = au::Color{59, 130, 246}},
+        {.time = 0.5, .value = au::Color{236, 72, 153}},
+        {.time = 1.0, .value = au::Color{34, 197, 94}},
+    }};
 
     // 一次性计算的演示值（静态展示，不参与动画循环）。
     const double curved = curve.transform(0.5);
@@ -53,33 +54,33 @@ auto main() -> int {
 
     // 缩放演示的几何参数：须与 scaler 上限一致，舞台尺寸由之推导，
     // 使最大缩放（kBaseBox * kMaxScale）仍完整落在带 .clip() 的舞台内。
-    constexpr float base_box = 80.0f;
-    constexpr float max_scale = 1.4f;                           // 与 scaler 上限一致
-    constexpr float stage_size = (base_box * max_scale) + 8.0f; // 留余量，最大缩放仍可见、不贴边
+    constexpr float base_box = 80.0F;
+    constexpr float max_scale = 1.4F;  // 与 scaler 上限一致
+    constexpr float stage_size = (base_box * max_scale) + 8.0F;  // 留余量，最大缩放仍可见、不贴边
     // 两个 widget 以 shared_ptr 持有，便于每帧更新其修饰（动画色 / 缩放）。
-    auto box = std::make_shared<au::Text>(au::LocalizedString{ "color pulse" });
-    auto scale_inner = std::make_shared<au::Text>(au::LocalizedString{ "scale" });
+    auto box = std::make_shared<au::Text>(au::LocalizedString{"color pulse"});
+    auto scale_inner = std::make_shared<au::Text>(au::LocalizedString{"scale"});
 
     // 舞台：固定尺寸 + .clip()，把缩放方块的绘制严格裁在其边界内（治本：
     // 用框架自带裁剪原语保证不越界，而非依赖巧合的空间余量）。
-    au::Stack stage{ std::vector{ au::Node{ scale_inner } }, au::Alignment::Center };
+    au::Stack stage{std::vector{au::Node{scale_inner}}, au::Alignment::Center};
     stage.modifier.set(au::Modifier{}.size(stage_size, stage_size).clip());
 
     au::Node root = au::Column{
-        GradientTitle{ "Animation" },
+        GradientTitle{"Animation"},
         gap(12),
-        au::Text{ au::LocalizedString{ "Background color breathing" } },
-        au::Node{ box },
-        au::Text{ au::LocalizedString{ "Ping-pong scaling" } },
-        au::Node{ std::move(stage) },
-        au::Text{ au::LocalizedString{ "curve@0.5 = " + std::to_string(curved) } },
-        au::Text{ au::LocalizedString{ "spring value = " + std::to_string(sprung) } },
-        au::Text{ au::LocalizedString{ "keyframe@0.5 = rgb(" + std::to_string(kf_color.m_r) + "," +
-                                       std::to_string(kf_color.m_g) + "," + std::to_string(kf_color.m_b) + ")" } },
+        au::Text{au::LocalizedString{"Background color breathing"}},
+        au::Node{box},
+        au::Text{au::LocalizedString{"Ping-pong scaling"}},
+        au::Node{std::move(stage)},
+        au::Text{au::LocalizedString{"curve@0.5 = " + std::to_string(curved)}},
+        au::Text{au::LocalizedString{"spring value = " + std::to_string(sprung)}},
+        au::Text{au::LocalizedString{"keyframe@0.5 = rgb(" + std::to_string(kf_color.r) + "," +
+                                     std::to_string(kf_color.g) + "," + std::to_string(kf_color.b) + ")"}},
     };
 
     // 启动两个动画并进入帧循环。
-    pulse.forward(); // 进入 Forward 状态，tick 才会推进进度
+    pulse.forward();  // 进入 Forward 状态，tick 才会推进进度
     scale_pulse.forward();
 
     auto last = std::chrono::steady_clock::now();
@@ -98,14 +99,14 @@ auto main() -> int {
             animator.tick(dt);
             // 每帧把当前动画值写回修饰（present_root 会重绘）。
             box->modifier.set(au::Modifier{}
-                                  .padding(16.0f)
-                                  .size(180.0f, 60.0f)
+                                  .padding(16.0F)
+                                  .size(180.0F, 60.0F)
                                   .background(tinted.get())
                                   .align(au::Alignment::Center));
             // 缩放作用在内层方块上；舞台的 .clip() 保证任何超出只裁在舞台内。
             scale_inner->modifier.set(au::Modifier{}
                                           .size(base_box, base_box)
-                                          .background(au::Color{ 34, 197, 94 })
+                                          .background(au::Color{34, 197, 94})
                                           .align(au::Alignment::Center)
                                           .scale(scale_v.get()));
         })

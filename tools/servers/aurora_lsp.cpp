@@ -23,10 +23,11 @@
 
 #include "aurora/aurora.h"
 #include "aurora/widget/serialization.h"
-
 #include "known_enums.h"
 #include "lsp_features.h"
 #include "nlohmann/json.hpp"
+
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
 // ----------------------------- global state ----------------------------------
 static auto docs() -> std::map<std::string, std::string> & {
@@ -34,8 +35,8 @@ static auto docs() -> std::map<std::string, std::string> & {
     return s;
 }
 
-static auto schema() -> const au::tools::Schema & {                // NOLINT(*-function-cognitive-complexity)
-    static const au::tools::Schema s = []() -> au::tools::Schema { // NOLINT(*-function-cognitive-complexity)
+static auto schema() -> const au::tools::Schema & {
+    static const au::tools::Schema S = []() -> au::tools::Schema {
         au::tools::Schema result;
         for (const auto &kv : au::tools::known_enums()) {
             au::tools::EnumSchema e;
@@ -100,7 +101,7 @@ static auto schema() -> const au::tools::Schema & {                // NOLINT(*-f
         }
         return result;
     }();
-    return s;
+    return S;
 }
 
 // ----------------------------- JSON-RPC transport ---------------------------
@@ -120,12 +121,12 @@ static auto read_message(std::string &out) -> bool {
             return false;
         }
         if (line.empty()) {
-            break; // empty line ends the header
+            break;  // empty line ends the header
         }
         if (line.starts_with("Content-Length:")) {
             try {
                 content_length = std::stoi(line.substr(std::string("Content-Length:").size()));
-            } catch (...) { // NOLINT(*-empty-catch)
+            } catch (...) {  // NOLINT(*-empty-catch)
             }
         }
     }
@@ -201,7 +202,7 @@ static auto kind_to_int(const std::string &k) -> int {
 // ----------------------------- capability handling ---------------------------
 static auto on_initialize(const au::Json & /*params*/) -> au::Json {
     au::Json caps = au::Json::object();
-    caps["textDocumentSync"] = 1; // full sync
+    caps["textDocumentSync"] = 1;  // full sync
     au::Json comp = au::Json::object();
     au::Json trig = au::Json::array();
     trig.push_back(".");
@@ -286,7 +287,7 @@ static auto on_completion(const au::Json &params) -> au::Json {
 static auto on_hover(const au::Json &params) -> au::Json {
     const std::string text = doc_text(params);
     if (text.empty()) {
-        return {}; // null
+        return {};  // null
     }
     const au::Json &pos = params["position"];
     const size_t line = pos["line"].get<size_t>();
@@ -339,7 +340,7 @@ static auto on_code_action(const au::Json &params) -> au::Json {
 }
 
 // ----------------------------- main loop -------------------------------------
-auto main() -> int { // NOLINT(*-exception-escape, *-function-cognitive-complexity)
+auto main() -> int {  // NOLINT(*-exception-escape, *-function-cognitive-complexity)
 #ifdef AURORA_PLATFORM_WINDOWS
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
@@ -389,7 +390,7 @@ auto main() -> int { // NOLINT(*-exception-escape, *-function-cognitive-complexi
             } else if (method == "textDocument/codeAction") {
                 send_response(id, on_code_action(params));
             } else if (method == "shutdown" || !id.is_null()) {
-                send_response(id, au::Json()); // shutdown or unknown method
+                send_response(id, au::Json());  // shutdown or unknown method
             }
         } catch (const std::exception &e) {
             AURORA_LOG_ERROR("lsp", "[aurora-lsp] error handling ", method, ": ", e.what());
@@ -400,3 +401,5 @@ auto main() -> int { // NOLINT(*-exception-escape, *-function-cognitive-complexi
     }
     return 0;
 }
+
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)

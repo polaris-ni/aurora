@@ -7,7 +7,6 @@
 // 未开启任何后端宏时整头为空，属编译期形态而非运行期逻辑。
 
 #include "aurora/window/native_surfaces.h"
-
 #include "test_harness.h"
 
 namespace {
@@ -17,6 +16,6 @@ void test_header_available() {
     AURORA_TEST_CHECK_MSG(true, "native_surfaces header included");
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() { test_header_available(); }

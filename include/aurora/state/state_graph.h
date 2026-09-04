@@ -26,22 +26,22 @@ class StateGraph {
   public:
     struct Node {
         std::string id;
-        std::string kind; // "state" | "effect"
+        std::string kind;  // "state" | "effect"
     };
     struct Edge {
         std::string from;
         std::string to;
-        std::string kind; // "observes" | "depends"
+        std::string kind;  // "observes" | "depends"
     };
 
     [[nodiscard]] static auto nodes() -> std::vector<Node> {
         std::vector<Node> out;
         for (const auto &[raw, anchor] : detail::registry_states()) {
             if (!anchor.lock()) {
-                continue; // 已析构，跳过陈旧条目
+                continue;  // 已析构，跳过陈旧条目
             }
             if (raw != nullptr) {
-                out.push_back({ .id = ptr_id(raw), .kind = "state" });
+                out.push_back({.id = ptr_id(raw), .kind = "state"});
             }
         }
         for (const auto &ent : detail::registry_effects()) {
@@ -50,7 +50,7 @@ class StateGraph {
             }
             const Effect *e = ent.raw;
             if (e != nullptr && !e->is_disposed()) {
-                out.push_back({ .id = ptr_id(e), .kind = "effect" });
+                out.push_back({.id = ptr_id(e), .kind = "effect"});
             }
         }
         return out;
@@ -60,13 +60,13 @@ class StateGraph {
         std::vector<Edge> out;
         for (const auto &ent : detail::registry_states()) {
             if (!ent.anchor.lock()) {
-                continue; // 已析构，跳过陈旧条目
+                continue;  // 已析构，跳过陈旧条目
             }
             const StateBase *s = ent.raw;
             if (s == nullptr) {
                 continue;
             }
-            for (const auto &c : s->m_observers) {
+            for (const auto &c : s->observers_) {
                 // 仅当 Effect 锚点存活（effect 锁定成功）时才读取 effect_raw，
                 // 否则为失效边，直接跳过（避免解引用已析构 Effect）。
                 if (!c->effect.lock()) {
@@ -76,7 +76,7 @@ class StateGraph {
                 if (e->is_disposed()) {
                     continue;
                 }
-                out.push_back({ .from = ptr_id(s), .to = ptr_id(e), .kind = "observes" });
+                out.push_back({.from = ptr_id(s), .to = ptr_id(e), .kind = "observes"});
             }
         }
         for (const auto &[raw, anchor] : detail::registry_effects()) {
@@ -87,9 +87,9 @@ class StateGraph {
             if ((e == nullptr) || e->is_disposed()) {
                 continue;
             }
-            for (const auto &[dep_raw, dep_anchor] : e->m_deps) {
+            for (const auto &[dep_raw, dep_anchor] : e->deps_) {
                 if (dep_anchor.lock()) {
-                    out.push_back({ .from = ptr_id(e), .to = ptr_id(dep_raw), .kind = "depends" });
+                    out.push_back({.from = ptr_id(e), .to = ptr_id(dep_raw), .kind = "depends"});
                 }
             }
         }
@@ -101,20 +101,20 @@ class StateGraph {
         Json n = Json::array();
         for (const auto &[id, kind] : nodes()) {
             Json o = Json::object();
-            o["id"] = id;     // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
-            o["kind"] = kind; // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+            o["id"] = id;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+            o["kind"] = kind;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
             n.push_back(o);
         }
         Json e = Json::array();
         for (const auto &[from, to, kind] : edges()) {
             Json o = Json::object();
-            o["from"] = from; // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
-            o["to"] = to;     // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
-            o["kind"] = kind; // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+            o["from"] = from;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+            o["to"] = to;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+            o["kind"] = kind;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
             e.push_back(o);
         }
-        j["nodes"] = n; // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
-        j["edges"] = e; // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        j["nodes"] = n;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        j["edges"] = e;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
         return j;
     }
 
@@ -145,4 +145,4 @@ class StateGraph {
 [[nodiscard]] inline auto state_graph() -> Json { return StateGraph::to_json(); }
 [[nodiscard]] inline auto state_graph_text() -> std::string { return StateGraph::to_text(); }
 
-} // namespace aurora
+}  // namespace aurora

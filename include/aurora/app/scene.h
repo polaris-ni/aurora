@@ -19,16 +19,16 @@ namespace aurora {
  */
 class Scene {
   public:
-    explicit Scene(Node root) : m_root(std::move(root)) {}
+    explicit Scene(Node root) : root_(std::move(root)) {}
 
-    [[nodiscard]] auto root() -> Widget & { return m_root.widget(); }
+    [[nodiscard]] auto root() -> Widget & { return root_.widget(); }
 
     /// @brief 返回根节点（供事件派发读取根命中矩形；几何权威在 Node）。
-    [[nodiscard]] auto root_node() -> Node & { return m_root; }
+    [[nodiscard]] auto root_node() -> Node & { return root_; }
 
     /// @brief 无头渲染为 PNG（specification/03-layout-render.md §8.4）。
     [[nodiscard]] auto render_to_png(const char *path, int width, int height) -> Result<bool> {
-        return aurora::render_to_png(m_root, width, height, path);
+        return aurora::render_to_png(root_, width, height, path);
     }
 
     /// @brief 结构快照（JSON）：用于 golden 比对（specification/06-app-platform.md §12.2，跨平台稳定）。
@@ -37,7 +37,7 @@ class Scene {
   private:
     static auto serialize_widget(const Widget &w, std::string &out) -> void;
 
-    Node m_root;
+    Node root_;
 };
 
-} // namespace aurora
+}  // namespace aurora

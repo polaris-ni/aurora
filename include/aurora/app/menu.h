@@ -17,15 +17,15 @@ namespace aurora {
  * @note Rebuildable: no
  */
 struct MenuItem {
-    std::string label;              ///< 显示文本（分隔符时为空）
-    std::function<void()> on_click; ///< 点击回调
-    std::vector<MenuItem> children; ///< 子菜单（非空时渲染为子菜单箭头）
-    bool separator = false;         ///< 是否为分隔符
-    bool checkable = false;         ///< 是否可勾选
-    bool checked = false;           ///< 当前勾选状态（checkable 时有效）
-    bool enabled = true;            ///< 是否可用（false 时灰显、不响应点击）
-    std::string shortcut_text;      ///< 快捷键提示文本（如 "Ctrl+O"，仅显示）
-    std::string icon;               ///< 图标标识（预留，当前未渲染）
+    std::string label;  ///< 显示文本（分隔符时为空）
+    std::function<void()> on_click;  ///< 点击回调
+    std::vector<MenuItem> children;  ///< 子菜单（非空时渲染为子菜单箭头）
+    bool separator = false;  ///< 是否为分隔符
+    bool checkable = false;  ///< 是否可勾选
+    bool checked = false;  ///< 当前勾选状态（checkable 时有效）
+    bool enabled = true;  ///< 是否可用（false 时灰显、不响应点击）
+    std::string shortcut_text;  ///< 快捷键提示文本（如 "Ctrl+O"，仅显示）
+    std::string icon;  ///< 图标标识（预留，当前未渲染）
 
     /// @brief 构造普通菜单项。
     MenuItem() = default;
@@ -43,4 +43,4 @@ struct MenuItem {
     [[nodiscard]] auto is_submenu() const -> bool { return !children.empty(); }
 };
 
-} // namespace aurora
+}  // namespace aurora

@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::Alignment;
@@ -18,19 +17,19 @@ using aurora::StackFit;
 using aurora::Text;
 
 static void test_stack() {
-    Stack st{ std::vector{ Node{ Text{ "a" } }, Node{ Text{ "b" } } }, Alignment::Center };
+    Stack st{std::vector{Node{Text{"a"}}, Node{Text{"b"}}}, Alignment::Center};
     constexpr BuildContext ctx;
     st.mount(ctx);
-    constexpr Constraints c{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 100, .height = 100 } };
+    constexpr Constraints c{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 100, .height = 100}};
     st.layout(c, ctx);
-    AURORA_TEST_CHECK_MSG(st.size().width >= 0.0f && st.size().height >= 0.0f, "Stack: layout ok");
+    AURORA_TEST_CHECK_MSG(st.size().width >= 0.0F && st.size().height >= 0.0F, "Stack: layout ok");
 
-    Stack expand{ std::vector{ Node{ Text{ "x" } } }, Alignment::TopLeft };
+    Stack expand{std::vector{Node{Text{"x"}}}, Alignment::TopLeft};
     expand.set_fit(StackFit::Expand);
     constexpr BuildContext ctx2;
     expand.mount(ctx2);
     expand.layout(c, ctx2);
-    AURORA_TEST_CHECK_MSG(expand.size().width >= 0.0f, "Stack: Expand fit ok");
+    AURORA_TEST_CHECK_MSG(expand.size().width >= 0.0F, "Stack: Expand fit ok");
 }
 
 AURORA_TEST() {

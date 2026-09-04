@@ -17,10 +17,10 @@ enum class Orientation : std::uint8_t {
 /// @brief 分隔线属性（聚合，AI 用指定初始化器填写）。
 struct DividerProps {
     Orientation orientation = Orientation::Horizontal;
-    float thickness = 1.0f;
-    Color color = Color{ 200, 200, 200, 255 };
-    float indent = 0.0f;     ///< 起点缩进 dp（横向为左缩进，纵向为上缩进）
-    float end_indent = 0.0f; ///< 终点缩进 dp（横向为右缩进，纵向为下缩进）
+    float thickness = 1.0F;
+    Color color = Color{200, 200, 200, 255};
+    float indent = 0.0F;  ///< 起点缩进 dp（横向为左缩进，纵向为上缩进）
+    float end_indent = 0.0F;  ///< 终点缩进 dp（横向为右缩进，纵向为下缩进）
 };
 
 /**
@@ -53,19 +53,67 @@ class Divider : public LeafWidget, public DividerProps {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "Divider",
-            .properties = {
-                { .name="orientation", .type="Orientation", .default_value="horizontal", .required=false, .note="方向", .json_type="string", .enum_values={"Horizontal", "Vertical"} },
-                { .name="thickness", .type="float", .default_value="1.0", .required=false, .note="线粗(dp)", .json_type="number", .enum_values={}, .min_value="0" },
-                { .name="color", .type="Color", .default_value="{200,200,200,255}", .required=false, .note="颜色", .json_type="array" },
-                { .name="indent", .type="float", .default_value="0.0", .required=false, .note="起点缩进(dp)", .json_type="number", .enum_values={}, .min_value="0" },
-                { .name="end_indent", .type="float", .default_value="0.0", .required=false, .note="终点缩进(dp)", .json_type="number", .enum_values={}, .min_value="0" },
-                { .name="width", .type="Length", .default_value="auto", .required=false, .note="", .json_type="array" },
-                { .name="height", .type="Length", .default_value="auto", .required=false, .note="", .json_type="array" },
-                { .name="show", .type="bool", .default_value="true", .required=false, .note="", .json_type="boolean" },
-            },
+            .properties =
+                {
+                    {.name = "orientation",
+                     .type = "Orientation",
+                     .default_value = "horizontal",
+                     .required = false,
+                     .note = "方向",
+                     .json_type = "string",
+                     .enum_values = {"Horizontal", "Vertical"}},
+                    {.name = "thickness",
+                     .type = "float",
+                     .default_value = "1.0",
+                     .required = false,
+                     .note = "线粗(dp)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "color",
+                     .type = "Color",
+                     .default_value = "{200,200,200,255}",
+                     .required = false,
+                     .note = "颜色",
+                     .json_type = "array"},
+                    {.name = "indent",
+                     .type = "float",
+                     .default_value = "0.0",
+                     .required = false,
+                     .note = "起点缩进(dp)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "end_indent",
+                     .type = "float",
+                     .default_value = "0.0",
+                     .required = false,
+                     .note = "终点缩进(dp)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "width",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "height",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "show",
+                     .type = "bool",
+                     .default_value = "true",
+                     .required = false,
+                     .note = "",
+                     .json_type = "boolean"},
+                },
             .events = {},
             .children_policy = "none",
-            .examples = { "au::Divider()", "au::Divider(au::DividerProps{ .orientation = Orientation::Vertical })" },
+            .examples = {"au::Divider()", "au::Divider(au::DividerProps{ .orientation = Orientation::Vertical })"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
@@ -104,30 +152,30 @@ class Divider : public LeafWidget, public DividerProps {
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         if (orientation == Orientation::Vertical) {
-            return c.constrain(Size{ .width = thickness, .height = c.max.height });
+            return c.constrain(Size{.width = thickness, .height = c.max.height});
         }
-        return c.constrain(Size{ .width = c.max.width, .height = thickness });
+        return c.constrain(Size{.width = c.max.width, .height = thickness});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
         if (orientation == Orientation::Vertical) {
             const float y0 = bounds.origin.y + indent;
             const float h = bounds.size.height - indent - end_indent;
-            if (h > 0.0f) {
-                const Rect r{ .origin = Point{ .x = bounds.origin.x, .y = y0 },
-                              .size = Size{ .width = thickness, .height = h } };
+            if (h > 0.0F) {
+                const Rect r{.origin = Point{.x = bounds.origin.x, .y = y0},
+                             .size = Size{.width = thickness, .height = h}};
                 p.fill_rect(r, color);
             }
         } else {
             const float x0 = bounds.origin.x + indent;
             const float w = bounds.size.width - indent - end_indent;
-            if (w > 0.0f) {
-                const Rect r{ .origin = Point{ .x = x0, .y = bounds.origin.y },
-                              .size = Size{ .width = w, .height = thickness } };
+            if (w > 0.0F) {
+                const Rect r{.origin = Point{.x = x0, .y = bounds.origin.y},
+                             .size = Size{.width = w, .height = thickness}};
                 p.fill_rect(r, color);
             }
         }
     }
 };
 
-} // namespace aurora
+}  // namespace aurora

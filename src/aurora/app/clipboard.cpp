@@ -146,7 +146,7 @@ auto Clipboard::set_image(const Image &img) -> void {
     // 防止构造不一致的 Image 导致越界读。
     constexpr std::int64_t k_max_clipboard_dim = 16384;
     if (img.width > k_max_clipboard_dim || img.height > k_max_clipboard_dim ||
-        img.pixels.size() != static_cast<std::size_t>(img.width) * static_cast<std::size_t>(img.height) * 4u) {
+        img.pixels.size() != static_cast<std::size_t>(img.width) * static_cast<std::size_t>(img.height) * 4U) {
         AURORA_LOG_WARN("clipboard", "set_image: image too large or pixel buffer size mismatch");
         return; // 早退，不清除已有内容
     }
@@ -157,7 +157,7 @@ auto Clipboard::set_image(const Image &img) -> void {
     EmptyClipboard();
     const int w = img.width;
     const int h = img.height;
-    const std::uint64_t stride64 = static_cast<std::uint64_t>(w) * 4u; // 32bpp
+    const std::uint64_t stride64 = static_cast<std::uint64_t>(w) * 4U;  // 32bpp
     const std::uint64_t dib_size64 = sizeof(BITMAPINFOHEADER) + (stride64 * static_cast<std::uint64_t>(h));
     const HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(dib_size64));
     if (hg == nullptr) {
@@ -183,7 +183,7 @@ auto Clipboard::set_image(const Image &img) -> void {
     const std::uint8_t *src = img.pixels.data();
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            const std::uint8_t *px = src + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + x) * 4u);
+            const std::uint8_t* px = src + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + x) * 4U);
             // RGBA8 → BGRA（CF_DIB 32bpp BI_RGB 期望 BGRX/BGRA）。
             *dst++ = px[2];
             *dst++ = px[1];
@@ -245,9 +245,9 @@ auto Clipboard::get_image() -> Image {
     }
     // 全部用 64 位算术：biSize/biClrUsed 可被构造成 0xFFFFFFF0 之类，32 位下会回绕，
     // 使 off/src_stride 变成看似合法的小值而绕过下面的容量检查。
-    const std::uint64_t off = static_cast<std::uint64_t>(bi->biSize) + (static_cast<std::uint64_t>(bi->biClrUsed) * 4u);
+    const std::uint64_t off = static_cast<std::uint64_t>(bi->biSize) + (static_cast<std::uint64_t>(bi->biClrUsed) * 4U);
     const std::uint64_t src_stride =
-        (((static_cast<std::uint64_t>(w) * static_cast<std::uint64_t>(bpp)) + 31u) / 32u) * 4u;
+        (((static_cast<std::uint64_t>(w) * static_cast<std::uint64_t>(bpp)) + 31U) / 32U) * 4U;
     // 像素区必须完整落在剪贴板块内；off 还须至少跳过它自称的头部。
     if (off < sizeof(BITMAPINFOHEADER) || off > avail ||
         src_stride * static_cast<std::uint64_t>(hgt) > static_cast<std::uint64_t>(avail) - off) {
@@ -257,23 +257,23 @@ auto Clipboard::get_image() -> Image {
     }
     out.width = w;
     out.height = hgt;
-    out.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(hgt) * 4u, 0u);
+    out.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(hgt) * 4U, 0U);
     const std::uint8_t *src = p + off;
     for (int y = 0; y < hgt; ++y) {
         // 自底向上（biHeight>0）时 DIB 首行是图像底部；top-down 时首行是顶部。
         const int sy = top_down ? y : (hgt - 1 - y);
         const std::uint8_t *row = src + (static_cast<std::size_t>(sy) * src_stride);
         for (int x = 0; x < w; ++x) {
-            std::uint8_t *px =
-                out.pixels.data() + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + x) * 4u);
+            std::uint8_t* px =
+                out.pixels.data() + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + x) * 4U);
             if (bpp == 32) {
-                const std::uint8_t *s = row + (static_cast<std::size_t>(x) * 4u);
+                const std::uint8_t* s = row + (static_cast<std::size_t>(x) * 4U);
                 px[0] = s[2];
                 px[1] = s[1];
                 px[2] = s[0];
                 px[3] = s[3]; // BGRA → RGBA
             } else if (bpp == 24) {
-                const std::uint8_t *s = row + (static_cast<std::size_t>(x) * 3u);
+                const std::uint8_t* s = row + (static_cast<std::size_t>(x) * 3U);
                 px[0] = s[2];
                 px[1] = s[1];
                 px[2] = s[0];

@@ -24,6 +24,7 @@
 - **顺序容错**：多参数构造优先用 `XxxProps{...}` 具名聚合（如 `ColumnProps{ .children = ... }`），避免位置参数顺序错误。
 - **强类型几何**：`Length` / `Color` / `Size` / `Point` 为强类型；禁止 `Length(int)` 隐式转换（裸整数编译失败）。已采纳用户字面量 `au::literals`（`100_dp`、`16_ms`、`0xRRGGBB_rgb`），`px(100)` 与 `100_dp` 互补；**禁止头文件全局 `using`**，字面量只在 TU 内按需引入（示例代码用 `using namespace au::literals;`，测试代码按 §3.1 用 using 声明 / 命名空间别名引入，不得用 using-directive）。
 - **所有权清晰**：资源所有权用 `unique_ptr` / `shared_ptr` 明确；跨边界传递用 `std::move`；`Binding<T>` 为非拥有引用（上游生命周期须更长）。
+- **成员变量命名**：`struct` 成员与类 `public` 成员用**裸名**（无前缀、无后缀，如 `Color::r`、`DragData::mime_type`）；类的 `protected` / `private` 非静态成员统一**尾部下划线**后缀（如 `children_`、`value_`、`on_close_`）；**全仓禁止 `m_` 前缀**。`static` 常量按本条「常量命名」走 `UPPER_CASE`（如 `NO_SEL`）；`static` 可变成员、`static` `protected`/`private` 成员规则与普通成员一致（尾部下划线）。此约束与 `.clang-tidy` 的 `MemberCase` / `ProtectedMemberSuffix` / `PrivateMemberSuffix` / `ClassStatic*MemberSuffix` / `StaticConstantCase` 一致。
 - **常量命名**：命名空间 / 文件级与类内 `static constexpr` 常量统一 `AURORA_` 前缀 + `UPPER_CASE` 全大写下划线（如 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`），与 `.clang-tidy` 的 `ConstantPrefix` / `GlobalConstantPrefix` 约束一致；禁止 `k` 前缀 CamelCase。
 - **生命周期回调强类型**：`au::Lifecycle` 的 `on_mount` / `on_unmount`、窗口级 `WindowState` / `WindowMode` 的 `set_on_*` 回调均为具名 `std::function` 强类型（`MountCb = std::function<void(const BuildContext&)>`、`UnmountCb = std::function<void()>`，`WindowStateHandler` / `WindowModeHandler` 同理）；枚举取值穷尽且按「可见性 / 几何态」正交划分（`WindowState` 不并入 `Maximized`），AI 无需猜测「是否还有隐藏状态」。回调均可空（无副作用时不传），且不走异常捕获（与主线程事件回调一致）。
 
@@ -142,7 +143,7 @@
 
 模板 / 宏等元编程仅用于「无法用普通函数表达」之处（如 `State` / `Signal` / `Modifier` 的声明式组合）；禁止为「炫技」引入深层模板，避免 AI 难以展开实例化错误。
 
-**控件样板减负同样遵循此原则**：基类以**非模板虚函数默认实现**消除重复——`Widget::describe()` 默认返回 `{ .name = type_name() }`、`Container::collect_signals()` 默认遍历 `m_children` 收集子节点信号，新增控件只需实现 `type_name()`（+ `describe_static()`）。**禁止为减负引入 CRTP / 模板基类**：那会把实现搬进头文件，破坏声明 / 实现分离，并增大 AI 理解单函数所需加载的上下文。
+**控件样板减负同样遵循此原则**：基类以**非模板虚函数默认实现**消除重复——`Widget::describe()` 默认返回 `{ .name = type_name() }`、`Container::collect_signals()` 默认遍历 `children_` 收集子节点信号，新增控件只需实现 `type_name()`（+ `describe_static()`）。**禁止为减负引入 CRTP / 模板基类**：那会把实现搬进头文件，破坏声明 / 实现分离，并增大 AI 理解单函数所需加载的上下文。
 
 **同步流程（强制执行）**：
 
@@ -178,7 +179,7 @@
 
 ### 6.7 平台后端头必须 pimpl 隔离（硬规则）
 
-任何依赖平台 SDK 的 `Surface` / 窗口宿主类，其**公共头不得包含平台重型头**（`<windows.h>`、`<windowsx.h>`、`<GLFW/glfw3.h>`、`<GL/gl.h>`、`<X11/Xlib.h>`、`wayland-client.h`、AppKit 等），一律以 `std::unique_ptr<Impl> m_pimpl` 形式把细节收进对应 `.cpp`。
+任何依赖平台 SDK 的 `Surface` / 窗口宿主类，其**公共头不得包含平台重型头**（`<windows.h>`、`<windowsx.h>`、`<GLFW/glfw3.h>`、`<GL/gl.h>`、`<X11/Xlib.h>`、`wayland-client.h`、AppKit 等），一律以 `std::unique_ptr<Impl> pimpl_` 形式把细节收进对应 `.cpp`。
 
 - **动机**：① 头依赖收敛——消费者 TU 不因「某后端被开启」而被拉入数万行平台头；② 宏污染隔离——`<windows.h>` 的 `min` / `max` / `ERROR`、Xlib 的 `None` / `Bool` / `Status` 不再泄漏到用户命名空间；③ 增量编译——改后端实现只重编 1 个 TU。
 - **句柄暴露**：确需向外暴露原生句柄时，返回 **`void*`** 而非平台类型（如 `hwnd() -> void*`），调用方在自身已含平台头的 TU 内 `static_cast<HWND>(...)` 还原。此类访问器属「平台逃生舱」，其静态类型不计入 API 稳定性承诺。
@@ -285,7 +286,7 @@
 |:---|:---|:---|
 | `utf8_encode` / `utf8_cp_len` / `utf8_cp_count` / `utf8_cp_slice` | `core/utf8.h` | header-only、零依赖、可被常量上下文使用，供 widget / window 统一调用以消除重复编码实现 |
 | `aurora::internal::string_format` | `core/string_util.h` + `.cpp` | printf 风格、`vsnprintf` 自动扩容；**仅内部使用、不进 `aurora.h` 公共导出**，用于收敛各模块 `std::snprintf` 进栈缓冲的重复样板 |
-| `aurora::saturate(float)` / `saturate_u8(float)` | `core/math.h` | header-only，收口渲染热路径中散落的 `std::clamp(x, 0, 255)` / `std::clamp(x, 0.0f, 1.0f)` 样板；**不抽取与 `std` 重复的通用 `clamp` / `lerp`**。`saturate_u8` 保留 `static_cast<uint8_t>` 的截断（向零）语义 |
+| `aurora::saturate(float)` / `saturate_u8(float)` | `core/math.h` | header-only，收口渲染热路径中散落的 `std::clamp(x, 0, 255)` / `std::clamp(x, 0.0F, 1.0F)` 样板；**不抽取与 `std` 重复的通用 `clamp` / `lerp`**。`saturate_u8` 保留 `static_cast<uint8_t>` 的截断（向零）语义 |
 
 **归属原则**：跨多模块高频且语义中立的纯函数收口 `core/`；单领域复用就近归入所属模块；平台特定逻辑保留在对应后端（如 `window/swizzle.h`），不污染 `core/`。
 

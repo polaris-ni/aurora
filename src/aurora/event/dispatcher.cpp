@@ -32,7 +32,7 @@ auto deliver_chain(std::vector<HitNode> &chain, MouseEvent &e) -> void {
         }
         e.local_position = global - it.origin;
         sp->on_pointer_event(e);
-        if (e.handled) {
+        if (e.is_handled) {
             break;
         }
     }
@@ -67,7 +67,7 @@ auto EventDispatcher::update_hover(const std::vector<HitNode> &chain) -> void {
         }
         return std::ranges::any_of(c, [w](const HitNode &n) -> bool { return n.get() == w; });
     };
-    for (const HitNode &old_n : m_hover_chain) {
+    for (const HitNode &old_n : hover_chain_) {
         Widget *sp = old_n.get();
         if (sp == nullptr) {
             continue; // 已回收，跳过离开通知
@@ -81,11 +81,11 @@ auto EventDispatcher::update_hover(const std::vector<HitNode> &chain) -> void {
         if (sp == nullptr) {
             continue;
         }
-        if (!contains(m_hover_chain, sp)) {
+        if (!contains(hover_chain_, sp)) {
             sp->on_hover_change(true);
         }
     }
-    m_hover_chain = chain;
+    hover_chain_ = chain;
 }
 
 auto EventDispatcher::dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *fm) -> bool {
@@ -112,18 +112,18 @@ auto EventDispatcher::dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *
             fm->set_focus(focus_target_of(chain));
         }
         deliver_chain(chain, e);
-        m_pointer_capture[key] = std::move(chain);
+        pointer_capture_[key] = std::move(chain);
         set_current_focus_manager(prev);
         return true;
     }
 
     // Move / Release：已对当前指针建立捕获则复用缓存命中链（无视实时命中测试），
     // 使光标移出根/窗口外、或落入重叠兄弟控件时仍连续派发给按下时的目标。
-    auto cit = m_pointer_capture.find(key);
-    if (cit != m_pointer_capture.end()) {
+    const auto cit = pointer_capture_.find(key);
+    if (cit != pointer_capture_.end()) {
         std::vector<HitNode> chain = cit->second; // 复制：Release 会擦除原链
         if (e.action == MouseAction::Release) {
-            m_pointer_capture.erase(cit);
+            pointer_capture_.erase(cit);
         }
         deliver_chain(chain, e);
         set_current_focus_manager(prev);
@@ -162,9 +162,9 @@ struct TouchRoute {
     TouchRoute r;
     const auto cit = capture.find(p.id);
     const bool was_down = (cit != capture.end());
-    if (p.active) {
+    if (p.is_active) {
         if (was_down) {
-            r.chain = cit->second; // 活跃期复用缓存链
+            r.chain = cit->second;  // 活跃期复用缓存链
             r.action = MouseAction::Move;
             return r;
         }
@@ -212,7 +212,7 @@ auto deliver_synthesized(const std::vector<HitNode> &chain, const TouchPoint &p,
         }
         me.local_position = p.position - it.origin;
         sp->on_pointer_event(me);
-        if (me.handled) {
+        if (me.is_handled) {
             break; // 某级消费即停止冒泡
         }
     }
@@ -227,7 +227,7 @@ auto TouchDispatcher::dispatch(Widget &root, TouchEvent &e, FocusManager *fm) ->
     const Rect root_rect{ .origin = Point(), .size = root.size() };
 
     for (const TouchPoint &p : e.points) {
-        const TouchRoute route = route_touch_point(root, root_rect, m_pointer_capture, p);
+        const TouchRoute route = route_touch_point(root, root_rect, pointer_capture_, p);
         if (route.chain.empty()) {
             continue; // 抬起的悬空点 / 完全未命中
         }
@@ -275,14 +275,14 @@ struct MergedModifiers {
 
 [[nodiscard]] auto merge_modifiers(const KeyEvent &e) -> MergedModifiers {
     return MergedModifiers{
-        .shift = (static_cast<unsigned>(e.modifiers & ModifierKey::Shift) != 0u),
-        .control = (static_cast<unsigned>(e.modifiers & ModifierKey::Control) != 0u),
-        .alt = (static_cast<unsigned>(e.modifiers & ModifierKey::Alt) != 0u),
-        .meta = (static_cast<unsigned>(e.modifiers & ModifierKey::Meta) != 0u),
+        .shift = (static_cast<unsigned>(e.modifiers & ModifierKey::Shift) != 0U),
+        .control = (static_cast<unsigned>(e.modifiers & ModifierKey::Control) != 0U),
+        .alt = (static_cast<unsigned>(e.modifiers & ModifierKey::Alt) != 0U),
+        .meta = (static_cast<unsigned>(e.modifiers & ModifierKey::Meta) != 0U),
     };
 }
 
-// ③ 快捷键匹配：Tab / 方向键 / Enter·Space 的全局快捷键。命中并消费返回 handled 结果；
+// ③ 快捷键匹配：Tab / 方向键 / Enter·Space 的全局快捷键。命中并消费返回 is_handled_ 结果；
 // 否则返回 nullopt，交由焦点路由把事件交给当前焦点控件（如文本框内部光标/选区）。
 [[nodiscard]] auto match_shortcut(KeyEvent &e, FocusManager &fm, KeyCategory cat, const MergedModifiers &mods)
     -> std::optional<bool> {
@@ -292,10 +292,10 @@ struct MergedModifiers {
     switch (cat) {
     case KeyCategory::Tab: // Tab 序导航：Shift+Tab 后退，否则前进（specification/05-event-navigation.md §4）
         fm.move_focus(mods.shift ? FocusDirection::Backward : FocusDirection::Forward);
-        e.handled = true;
+        e.is_handled = true;
         return true;
     case KeyCategory::Arrow: {
-        FocusDirection dir = FocusDirection::Forward;
+        auto  dir = FocusDirection::Forward;
         switch (static_cast<KeyCode>(e.key)) {
         case KeyCode::ArrowUp: dir = FocusDirection::Up; break;
         case KeyCode::ArrowDown: dir = FocusDirection::Down; break;
@@ -304,7 +304,7 @@ struct MergedModifiers {
         default: return std::nullopt;
         }
         if (fm.move_focus(dir)) {
-            e.handled = true;
+            e.is_handled = true;
             return true;
         }
         // 方向键但焦点未能移动：继续交给焦点控件（如文本框内部光标移动）
@@ -316,7 +316,7 @@ struct MergedModifiers {
             return std::nullopt; // 无焦点控件则不消费
         }
         focused->activate();
-        e.handled = true;
+        e.is_handled = true;
         return true;
     }
     default: return std::nullopt;
@@ -329,7 +329,7 @@ struct MergedModifiers {
         return false;
     }
     focused->on_key_event(e);
-    return e.handled;
+    return e.is_handled;
 }
 
 } // namespace
@@ -368,7 +368,7 @@ auto EventDispatcher::dispatch(Widget &root, FileDropEvent &e) -> bool {
         return false;
     }
     target->on_file_drop(e);
-    return e.handled;
+    return e.is_handled;
 }
 
 auto EventDispatcher::dispatch(Widget & /*root*/, TextInputEvent &e, FocusManager &fm) -> bool {
@@ -381,7 +381,7 @@ auto EventDispatcher::dispatch(Widget & /*root*/, TextInputEvent &e, FocusManage
     }
     focused->on_text_input(e);
     set_current_focus_manager(prev);
-    return e.handled;
+    return e.is_handled;
 }
 
 } // namespace aurora

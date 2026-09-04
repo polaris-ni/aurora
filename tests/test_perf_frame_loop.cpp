@@ -11,7 +11,6 @@
 #include "aurora/app/perf_overlay.h"
 #include "aurora/aurora.h"
 #include "aurora/window/surface.h"
-
 #include "test_harness.h"
 
 using aurora::Application;
@@ -37,33 +36,33 @@ namespace {
 // 最小自定义 Surface（不依赖任何内置后端），用于 headless 帧循环测试。
 struct MinSurface : Surface {
     auto begin_frame(int w, int h) -> Result<bool> override {
-        m_painter.begin(w, h);
-        m_size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) };
-        return Result{ true };
+        m_painter_.begin(w, h);
+        m_size_ = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
+        return Result{true};
     }
-    auto painter() -> Painter & override { return m_painter; }
+    auto painter() -> Painter & override { return m_painter_; }
     auto present() -> Result<bool> override {
-        ++m_frames;
-        return Result{ true };
+        ++m_frames_;
+        return Result{true};
     }
-    [[nodiscard]] auto size() const -> Size override { return m_size; }
-    [[nodiscard]] auto frame_count() const -> int override { return m_frames; }
-    Painter m_painter;
-    Size m_size{ .width = 0.0f, .height = 0.0f };
-    int m_frames = 0;
+    [[nodiscard]] auto size() const -> Size override { return m_size_; }
+    [[nodiscard]] auto frame_count() const -> int override { return m_frames_; }
+    Painter m_painter_;
+    Size m_size_{.width = 0.0F, .height = 0.0F};
+    int m_frames_ = 0;
 };
 
 // 构建标准化场景：Column 内放标题 + 20 个按钮，模拟中等复杂度 widget 树。
 auto build_scene() -> Node {
     std::vector<Node> children;
     children.reserve(21);
-    children.emplace_back(Text{ TextProps{ .content = LocalizedString{ "Performance Benchmark" } } });
+    children.emplace_back(Text{TextProps{.content = LocalizedString{"Performance Benchmark"}}});
     for (int i = 0; i < 20; ++i) {
         char label[32];
         std::snprintf(label, sizeof(label), "Button %d", i + 1);
         children.emplace_back(Button(std::string(label)));
     }
-    return Node{ Column{ ColumnProps{ .children = std::move(children) } } };
+    return Node{Column{ColumnProps{.children = std::move(children)}}};
 }
 
 // 使用 Application + 自定义 Surface 运行 N 帧。
@@ -71,11 +70,11 @@ auto build_scene() -> Node {
 void run_app(int frames, Node view, const std::function<void(Application &)> &on_frame = {}) {
     WindowOptions opts;
     opts.title = "perf_bench";
-    opts.size = Size{ .width = 800.0f, .height = 600.0f };
+    opts.size = Size{.width = 800.0F, .height = 600.0F};
     opts.max_frames = frames;
-    opts.power_saving = false; // 基准测原始帧速度：退出事件驱动节流
-    Scene scene{ std::move(view) };
-    Application app{ std::move(scene), std::make_unique<MinSurface>(), opts };
+    opts.power_saving = false;  // 基准测原始帧速度：退出事件驱动节流
+    Scene scene{std::move(view)};
+    Application app{std::move(scene), std::make_unique<MinSurface>(), opts};
     if (on_frame) {
         app.set_on_frame([&]() -> void { on_frame(app); });
     }
@@ -124,14 +123,14 @@ void test_animated_scene() {
 
     // 构建含动画的场景：on_frame 回调驱动 TweenAnimation 每帧 tick，
     // 同时 force_full_redraw() 确保每帧实际渲染。
-    TweenAnimation anim{ 0.0f };
-    anim.animate_to(1.0f, 0.5); // 0.5 秒过渡
+    TweenAnimation anim{0.0F};
+    anim.animate_to(1.0F, 0.5);  // 0.5 秒过渡
 
     run_app(100, build_scene(), [&](const Application &app) -> void {
         // 模拟每帧 tick（约 16ms）；动画结束后重新启动以持续驱动。
         anim.tick(0.016);
         if (!anim.is_animating()) {
-            anim.animate_to(anim.get() > 0.5f ? 0.0f : 1.0f, 0.5);
+            anim.animate_to(anim.get() > 0.5F ? 0.0F : 1.0F, 0.5);
         }
         if (app.window()) {
             app.window()->force_full_redraw();
@@ -259,7 +258,7 @@ void test_overlay_hud() {
     AURORA_TEST_PRINTF("  overlay HUD layer path exercised without errors\n");
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     test_basic_frame_loop();

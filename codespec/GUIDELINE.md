@@ -45,7 +45,7 @@ int main() {
     fm.set_root(&root.widget());
 
     au::GlfwOptions opts;                       // size/title 继承自 WindowOptions，逐字段赋值
-    opts.size = au::Size{480.0f, 320.0f};
+    opts.size = au::Size{480.0F, 320.0F};
     opts.title = "Hello";
     // 类型安全工厂强制走 GLFW（绕过 create_native_window 的平台优先级）
     auto win_res = au::create_window(opts);
@@ -223,9 +223,9 @@ au::Checkbox cb{ au::Reactive<bool>{ true } };
 cb.set_active_color(au::Color{ 46, 160, 67, 255 })   // 勾选填充色（不设则跟随主题 primary）
   .set_check_color(au::colors::AURORA_WHITE)                // 勾号颜色
   .set_border_color(au::Color{ 140, 140, 146, 255 }) // 未勾选描边色
-  .set_size(28.0f)                                   // 方框边长 dp
-  .set_corner_radius(9.0f)                           // 圆角（<0 自动 = 边长 ×0.2）
-  .set_border_width(2.0f)                            // 描边宽
+  .set_size(28.0F)                                   // 方框边长 dp
+  .set_corner_radius(9.0F)                           // 圆角（<0 自动 = 边长 ×0.2）
+  .set_border_width(2.0F)                            // 描边宽
   .set_enabled(false);                               // 禁用：灰化且不响应点击
 ```
 
@@ -367,7 +367,7 @@ au::ScrollBenchHarness::Config cfg{};
 cfg.name = "my-scroll-tree";
 cfg.frames = 300;
 cfg.warmup_frames = 30;
-cfg.delta_per_frame = 12.0f;   // 单位 dp；harness 运行期标定 dp_per_unit 后换算下发
+cfg.delta_per_frame = 12.0F;   // 单位 dp；harness 运行期标定 dp_per_unit 后换算下发
 const auto r = au::ScrollBenchHarness::run(build_my_tree(), au::Size{ 1100, 760 }, cfg);
 if (!r.trustworthy()) {
     AURORA_LOG_ERROR("bench", "采样不可信：", r.to_markdown());
@@ -641,7 +641,7 @@ auto items = au::widget_tree_to_items(root);      // 控件树 → TreeItem 树
 auto json  = au::dump_tree_json_full(root);       // 含属性的完整 JSON 快照
 auto node  = au::find_node_by_path(root, "0/1");  // 按路径定位节点
 auto props = au::get_widget_props(root.widget()); // 属性快照
-au::set_widget_prop(root.widget(), "gap", au::Json(12.0f)); // 属性回写
+au::set_widget_prop(root.widget(), "gap", au::Json(12.0F)); // 属性回写
 ```
 
 ### 22.2 InspectorServer
@@ -703,7 +703,7 @@ au::Column list{ au::ColumnProps{ .children = {
     au::Text("行 1"), au::Text("行 2"), /* …长列表… */ } } };
 
 // 方式 1：配置块构造（可设 step / overscan）
-au::Scroll scroll{ au::ScrollProps{ .child = std::move(list), .step = 16.0f } };
+au::Scroll scroll{ au::ScrollProps{ .child = std::move(list), .step = 16.0F } };
 
 // 方式 2：便捷构造（取首项为唯一子节点）
 au::Node n = au::Scroll{ au::Column{ au::Text("A"), au::Text("B") } };
@@ -758,11 +758,11 @@ btn.background(au::colors::AURORA_TRANSPARENT)
    .text_color(au::Color{ 0, 90, 200, 255 })
    .set_border(au::Color{ 0, 90, 200, 255 }, 1.5f)
    .set_hover_color(au::Color{ 0, 90, 200, 24 })   // 不设则由背景色自动调暗
-   .set_min_size(96.0f, 36.0f);
+   .set_min_size(96.0F, 36.0F);
 
 // 步进滑块 + 自定义轨道 / 滑块；active_color 不设则跟随主题 primary
 auto sl = au::Slider();
-sl.set_range(0, 100).set_step(5).set_track_height(8.0f).set_thumb_size(22.0f);
+sl.set_range(0, 100).set_step(5).set_track_height(8.0F).set_thumb_size(22.0F);
 
 // 密码输入框：掩码 + 限长 + 提交回调
 auto pwd = au::TextInput();
@@ -780,7 +780,7 @@ class DiamondSlider : public au::Slider {
                      const au::Rect &track, au::Color c) -> void override {
         const float cx = track.origin.x + value_fraction() * track.size.width;
         const float cy = bounds.origin.y + bounds.size.height * 0.5f;
-        p.fill_rounded_rect({ { cx - 6.0f, cy - 6.0f }, { 12.0f, 12.0f } }, 3.0f, c);
+        p.fill_rounded_rect({ { cx - 6.0F, cy - 6.0F }, { 12.0F, 12.0F } }, 3.0F, c);
     }
 };
 
@@ -789,7 +789,7 @@ class GradientButton : public au::Button {
   protected:
     auto paint_background(au::Painter &p, const au::Rect &b, au::Color bg) -> void override {
         p.draw_linear_gradient(b, b.origin, { b.right(), b.bottom() },
-                               { bg, bg.shaded(0.7f) }, { 0.0f, 1.0f });
+                               { bg, bg.shaded(0.7f) }, { 0.0F, 1.0F });
     }
 };
 ```

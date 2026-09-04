@@ -7,7 +7,6 @@
 #include <cstdio>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::FrameStats;
@@ -43,9 +42,9 @@ static void test_worst_frame_ms() {
     auto &fs = FrameStats::instance();
     fs.reset();
 
-    fs.record(0.016); // 16ms
-    fs.record(0.050); // 50ms (slow frame)
-    fs.record(0.016); // 16ms
+    fs.record(0.016);  // 16ms
+    fs.record(0.050);  // 50ms (slow frame)
+    fs.record(0.016);  // 16ms
 
     AURORA_TEST_CHECK_MSG(near_d(fs.worst_frame_ms(), 50.0, 0.1), "Test3: worst_frame_ms() ~50.0");
 }
@@ -69,7 +68,7 @@ static void test_percentile_ms() {
 
     // 记录 100 帧，帧时间从 1ms 到 100ms 递增（避免超过 IDLE_THRESHOLD_MS=100ms）
     for (int i = 0; i < 100; ++i) {
-        fs.record(0.001 + (i * 0.001)); // 1ms, 2ms, ..., 100ms
+        fs.record(0.001 + (i * 0.001));  // 1ms, 2ms, ..., 100ms
     }
 
     // P50 应接近 50ms，P99 应接近 100ms
@@ -83,10 +82,10 @@ static void test_dropped_and_hitch() {
     fs.reset();
     fs.set_frame_budget_ms(16.67);
 
-    fs.record(0.010); // 10ms - OK
-    fs.record(0.020); // 20ms - dropped (> 16.67ms)
-    fs.record(0.040); // 40ms - hitch (> 33.34ms)
-    fs.record(0.010); // 10ms - OK
+    fs.record(0.010);  // 10ms - OK
+    fs.record(0.020);  // 20ms - dropped (> 16.67ms)
+    fs.record(0.040);  // 40ms - hitch (> 33.34ms)
+    fs.record(0.010);  // 10ms - OK
 
     AURORA_TEST_CHECK_MSG(fs.dropped_frame_count() == 2, "Test6: dropped_frame_count() == 2");
     AURORA_TEST_CHECK_MSG(fs.hitch_count() == 1, "Test6: hitch_count() == 1");
@@ -111,8 +110,8 @@ static void test_auto_idle_detection() {
     auto &fs = FrameStats::instance();
     fs.reset();
 
-    fs.record(0.016); // 16ms - normal
-    fs.record(0.200); // 200ms - auto idle (200/16.67 ≈ 12 frames skipped)
+    fs.record(0.016);  // 16ms - normal
+    fs.record(0.200);  // 200ms - auto idle (200/16.67 ≈ 12 frames skipped)
 
     AURORA_TEST_CHECK_MSG(fs.idle_frame_count() > 0, "Test8: idle_frame_count() > 0 after 200ms gap");
     AURORA_TEST_CHECK_MSG(fs.window_size() == 1, "Test8: window_size() == 1 (idle frames not in buffer)");
@@ -156,9 +155,9 @@ static void test_frame_at() {
     auto &fs = FrameStats::instance();
     fs.reset();
 
-    fs.record(0.010); // frame 0
-    fs.record(0.020); // frame 1
-    fs.record(0.030); // frame 2
+    fs.record(0.010);  // frame 0
+    fs.record(0.020);  // frame 1
+    fs.record(0.030);  // frame 2
 
     AURORA_TEST_CHECK_MSG(near_d(fs.frame_at(0), 0.030, 0.0001), "Test11: frame_at(0) ~0.030 (newest)");
     AURORA_TEST_CHECK_MSG(near_d(fs.frame_at(1), 0.020, 0.0001), "Test11: frame_at(1) ~0.020");

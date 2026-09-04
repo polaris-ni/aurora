@@ -23,14 +23,15 @@ enum class StrictMode : std::uint8_t { Off = 0, On = 1 };
 
 namespace detail {
 /// @brief 线程局部存储，避免多线程数据竞争。
-inline thread_local auto tl_strict_mode = StrictMode::Off; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+inline thread_local auto tl_strict_mode = StrictMode::Off;
 
 /// @brief 严格模式失败处理器（可注入，便于测试拦截真实致命失败）。
 /// 生产默认（handler 为空）直接 `std::terminate()`；测试可注入抛异常或记录的处理器。
 using StrictFailureHandler = std::function<void(std::string_view)>;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 inline StrictFailureHandler g_strict_failure_handler = nullptr;
-} // namespace detail
+}  // namespace detail
 
 [[nodiscard]] inline auto strict_mode() -> StrictMode { return detail::tl_strict_mode; }
 
@@ -52,9 +53,9 @@ inline auto set_strict_failure_handler(detail::StrictFailureHandler h) -> void {
     AURORA_LOG_FATAL("strict", message);
     if (detail::g_strict_failure_handler) {
         detail::g_strict_failure_handler(message);
-        std::terminate(); // handler 未终止则兜底，确保不穿透
+        std::terminate();  // handler 未终止则兜底，确保不穿透
     }
     std::terminate();
 }
 
-} // namespace aurora
+}  // namespace aurora

@@ -25,5 +25,5 @@ namespace detail {
 /// @note Release 构建下本函数无调用方（`widget.h` 调用点被 `#ifdef` 包裹），不会产生未定义引用。
 auto record_dirty(DirtyKind kind, const char *type_name, std::uint64_t frame, bool propagated) -> void;
 
-} // namespace detail
-} // namespace aurora::debug
+}  // namespace detail
+}  // namespace aurora::debug

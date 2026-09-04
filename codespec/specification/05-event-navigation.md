@@ -186,16 +186,16 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 既有 `AnimationController` / `AnimatedValue` 的直接构造方式保留。
 
 ```cpp
-au::State<float> opacity{0.0f};
+au::State<float> opacity{0.0F};
 
 // 形态一：统一入口 + 自动接入帧循环
 au::Animator anim;
-auto handle = au::animate(opacity, au::Tween<float>(0.0f, 1.0f, au::Curves::ease_in_out()), 0.3, anim);
+auto handle = au::animate(opacity, au::Tween<float>(0.0F, 1.0F, au::Curves::ease_in_out()), 0.3, anim);
 handle.on_completed([](){ /* 动画结束 */ });
 // 每帧：anim.tick(dt);  →  opacity 从 0 渐变到 1，组件自动重绘
 
 // 形态二：无 Animator 时手动自驱动
-auto h2 = au::animate(opacity, au::Tween<float>(1.0f, 0.0f, au::Curves::linear()), 0.3);
+auto h2 = au::animate(opacity, au::Tween<float>(1.0F, 0.0F, au::Curves::linear()), 0.3);
 // 每帧：h2.tick(dt);
 ```
 

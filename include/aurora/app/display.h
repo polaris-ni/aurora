@@ -13,12 +13,12 @@ namespace aurora {
 /// @note Side-effects: none
 /// @note Rebuildable: no
 struct Display {
-    int id = 0;                ///< 平台分配的稳定标识（<0 表示无主/默认屏）
-    std::string name;          ///< 显示器名称（如 "\\.\DISPLAY1"）
-    Rect bounds;               ///< 整个显示器区域（物理像素，与 Windows 虚拟屏幕坐标系一致，含任务栏）
-    Rect work_area;            ///< 工作区（物理像素，排除系统任务栏/停靠栏）
-    float scale_factor = 1.0f; ///< DPI 缩放（dpi/96），用于 hidpi 适配
-    bool is_primary = false;   ///< 是否主显示器
+    int id = 0;  ///< 平台分配的稳定标识（<0 表示无主/默认屏）
+    std::string name;  ///< 显示器名称（如 "\\.\DISPLAY1"）
+    Rect bounds;  ///< 整个显示器区域（物理像素，与 Windows 虚拟屏幕坐标系一致，含任务栏）
+    Rect work_area;  ///< 工作区（物理像素，排除系统任务栏/停靠栏）
+    float scale_factor = 1.0F;  ///< DPI 缩放（dpi/96），用于 hidpi 适配
+    bool is_primary = false;  ///< 是否主显示器
 };
 
 namespace app {
@@ -37,5 +37,5 @@ auto move_window_to_display(Window &win, int display_id) -> void;
 /// @brief 返回包含给定点的显示器；落点不在任何显示器内时回退主显示器。
 [[nodiscard]] auto display_containing(Point p) -> Display;
 
-} // namespace app
-} // namespace aurora
+}  // namespace app
+}  // namespace aurora

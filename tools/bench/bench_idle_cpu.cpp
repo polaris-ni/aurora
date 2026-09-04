@@ -8,15 +8,14 @@
 // the frame rate is clamped near max_fps instead of the old unbounded busy-polling spin.
 // Usage: ./bench_idle_cpu (skipped with return code 0 when there is no Win32 environment)
 #include "aurora/aurora.h"
-
 #include "bench_common.h"
 
 #ifdef AURORA_BACKEND_WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#ifndef WIN32_LEAN_AND_MEAN // NOLINT(*-identifier-naming)
-#define WIN32_LEAN_AND_MEAN
+#ifndef WIN32_LEAN_AND_MEAN  // NOLINT(*-identifier-naming)
+#define AURORA_WI_N32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
 #endif
@@ -40,14 +39,14 @@ auto process_cpu_ms() -> double {
         ULARGE_INTEGER u;
         u.LowPart = ft.dwLowDateTime;
         u.HighPart = ft.dwHighDateTime;
-        return static_cast<double>(u.QuadPart) / 10000.0; // 100ns -> ms
+        return static_cast<double>(u.QuadPart) / 10000.0;  // 100ns -> ms
     };
     return to_ms(kernel) + to_ms(user);
 }
 
 struct RunResult {
-    double cpu_ratio = 0.0; ///< process CPU time / wall clock
-    double fps = 0.0;       ///< effective render frame rate (idle skipped frames not counted)
+    double cpu_ratio = 0.0;  ///< process CPU time / wall clock
+    double fps = 0.0;  ///< effective render frame rate (idle skipped frames not counted)
     double wakeup_per_s = 0.0;
     std::size_t total_frames = 0;
 };
@@ -55,15 +54,15 @@ struct RunResult {
 // Run a scenario for duration_ms, then exit via WM_CLOSE; returns the CPU ratio and frame stats.
 auto run_scenario(bool force_redraw_each_frame, int duration_ms) -> RunResult {
     au::FrameStats::instance().reset();
-    au::Scene scene{ au::Text("bench_idle_cpu: static scene") };
+    au::Scene scene{au::Text("bench_idle_cpu: static scene")};
     au::WindowOptions w_opts;
-    w_opts.size = au::Size{ .width = 640.0f, .height = 480.0f };
+    w_opts.size = au::Size{.width = 640.0F, .height = 480.0F};
     w_opts.title = force_redraw_each_frame ? "bench_idle_cpu (active)" : "bench_idle_cpu (idle)";
-    auto win_res = au::create_window(au::Win32Options{ w_opts });
+    auto win_res = au::create_window(au::Win32Options{w_opts});
     if (!win_res) {
         return {};
     }
-    au::Application app{ std::move(scene), std::move(win_res.value()), w_opts };
+    au::Application app{std::move(scene), std::move(win_res.value()), w_opts};
     // End the frame loop at the deadline via WM_CLOSE (the timer task itself is a wakeup source:
     // the idle loop sleeps until the deadline).
     auto *hwnd = static_cast<HWND>(app.window()->surface().native_handle());
@@ -95,9 +94,11 @@ auto run_scenario(bool force_redraw_each_frame, int duration_ms) -> RunResult {
     r.total_frames = s.total_frames();
     return r;
 }
-#endif // AURORA_BACKEND_WIN32
-} // namespace
+#endif  // AURORA_BACKEND_WIN32
+}  // namespace
 
+// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// try/catch 包装
 auto main() -> int {
 #ifndef AURORA_BACKEND_WIN32
     AURORA_LOG_RAW("bench", "bench_idle_cpu: no Win32 backend, skip\n");

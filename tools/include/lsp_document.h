@@ -18,24 +18,24 @@ namespace aurora::tools {
 struct PropUse {
     std::string name;
     size_t line = 0;
-    size_t col = 0; // starting column of the property name (the dot is before name)
+    size_t col = 0;  // starting column of the property name (the dot is before name)
 };
 
 struct Block {
-    std::string type;      // the raw name after au::, e.g. "Button" / "ButtonProps"
-    bool is_props = false; // whether type ends with Props
+    std::string type;  // the raw name after au::, e.g. "Button" / "ButtonProps"
+    bool is_props = false;  // whether type ends with Props
     bool is_closed =
-        false; // whether a matching closing brace was found (unclosed blocks are used for completion context)
+        false;  // whether a matching closing brace was found (unclosed blocks are used for completion context)
     size_t start_line = 0, start_col = 0;
     size_t end_line = 0, end_col = 0;
-    size_t start_depth_was = 0; // brace depth before the opening brace
-    std::vector<PropUse> props; // designated-initializer properties appearing inside the block
+    size_t start_depth_was = 0;  // brace depth before the opening brace
+    std::vector<PropUse> props;  // designated-initializer properties appearing inside the block
 };
 
 struct TypeRef {
-    std::string name; // name after au:: (without au::)
+    std::string name;  // name after au:: (without au::)
     size_t line = 0;
-    size_t col = 0; // starting column of au:: (the name starts at col+3)
+    size_t col = 0;  // starting column of au:: (the name starts at col+3)
 };
 
 struct Document {
@@ -62,11 +62,13 @@ struct Document {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
 }
 
+// NOLINTBEGIN(*-pro-bounds-avoid-unchecked-container-access)
+
 // Small helper: join strings.
 [[nodiscard]] inline auto join(const std::vector<std::string> &vs, const std::string &sep) -> std::string {
     std::string r;
     for (size_t i = 0; i < vs.size(); ++i) {
-        if (i != 0u) {
+        if (i != 0U) {
             r += sep;
         }
         r += vs[i];
@@ -94,7 +96,6 @@ struct Document {
 
 // Skip comments and string literals to avoid mistaking "au::" inside a string for a reference.
 // Returns the advanced index (pointing at the start of non-skipped content, or text.size()).
-// NOLINTNEXTLINE(*-function-cognitive-complexity)
 [[nodiscard]] inline auto skip_trivia(const std::string &text, size_t i) -> size_t {
     const size_t n = text.size();
     if (i + 1 < n) {
@@ -110,13 +111,13 @@ struct Document {
             while (j + 1 < n && (text[j] != '*' || text[j + 1] != '/')) {
                 ++j;
             }
-            return (j + 1 < n) ? j + 2 : n;
+            return j + 1 < n ? j + 2 : n;
         }
         if (text[i] == '"') {
             size_t j = i + 1;
             while (j < n && text[j] != '"') {
                 if (text[j] == '\\') {
-                    ++j; // skip escapes
+                    ++j;  // skip escapes
                 }
                 ++j;
             }
@@ -137,11 +138,10 @@ struct Document {
 }
 
 // Parse the document and build blocks / refs.
-// NOLINTNEXTLINE(*-function-cognitive-complexity)
 [[nodiscard]] inline auto analyze(const std::string &text) -> Document {
     Document doc;
     const size_t n = text.size();
-    std::vector<Block> open; // nesting stack
+    std::vector<Block> open;  // nesting stack
     size_t depth = 0;
     [[maybe_unused]] size_t line = 0;
 
@@ -157,7 +157,7 @@ struct Document {
                 ++col;
             }
         }
-        return { ln, col };
+        return {ln, col};
     };
 
     for (size_t i = 0; i < n;) {
@@ -225,7 +225,7 @@ struct Document {
                 auto [sl, sc] = line_col_of(i);
                 b.start_line = sl;
                 b.start_col = sc;
-                b.start_depth_was = depth; // record the depth before the opening brace
+                b.start_depth_was = depth;  // record the depth before the opening brace
                 open.push_back(std::move(b));
                 // handle this '{': depth +1, i jumps to k+1.
                 ++depth;
@@ -234,7 +234,7 @@ struct Document {
             }
             if (!name.empty()) {
                 auto [rl, rc] = line_col_of(i);
-                doc.refs.push_back({ .name = name, .line = rl, .col = rc });
+                doc.refs.push_back({.name = name, .line = rl, .col = rc});
             }
             i = j;
             continue;
@@ -249,7 +249,7 @@ struct Document {
             if (j > i + 1) {
                 std::string p_name = text.substr(i + 1, j - (i + 1));
                 auto [pl, pc] = line_col_of(i + 1);
-                open.back().props.push_back({ .name = p_name, .line = pl, .col = pc });
+                open.back().props.push_back({.name = p_name, .line = pl, .col = pc});
                 i = j;
                 continue;
             }
@@ -269,4 +269,6 @@ struct Document {
     return doc;
 }
 
-} // namespace aurora::tools
+// NOLINTEND(*-pro-bounds-avoid-unchecked-container-access)
+
+}  // namespace aurora::tools

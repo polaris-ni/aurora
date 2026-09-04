@@ -13,9 +13,9 @@ namespace aurora {
  * `text` 为 `LocalizedString`，渲染时经 `defaultStringTable` + 当前 `Locale` 解析，支持 i18n。
  */
 struct TextSpan {
-    LocalizedString text;         ///< 片段文本（支持 i18n 查表）
-    Font font = Font{};           ///< 字体（字号 / 字重 / 字族）
-    Color color = Color::black(); ///< 文本颜色
+    LocalizedString text;  ///< 片段文本（支持 i18n 查表）
+    Font font = Font{};  ///< 字体（字号 / 字重 / 字族）
+    Color color = Color::black();  ///< 文本颜色
 };
 
-} // namespace aurora
+}  // namespace aurora

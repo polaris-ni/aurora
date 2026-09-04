@@ -9,7 +9,6 @@
 
 #include "aurora/core/platform.h"
 #include "aurora/inspector/inspector_server.h"
-
 #include "test_harness.h"
 
 #ifndef AURORA_INSPECTOR_SERVER_ENABLED
@@ -22,21 +21,20 @@ AURORA_TEST() {
 
 #else
 
+#include <nlohmann/json.hpp>
 #include <sstream>
 #include <string>
-
-#include <nlohmann/json.hpp>
 
 #ifdef AURORA_PLATFORM_WINDOWS
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
-#include <cerrno>
-#include <unistd.h>
-
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <unistd.h>
+
+#include <cerrno>
 using SOCKET = int;
 constexpr SOCKET INVALID_SOCKET = -1;
 struct WSADATA {
@@ -54,12 +52,12 @@ inline int closesocket(SOCKET s) { return ::close(s); }
 #include "aurora/window/surface.h"
 #include "aurora/window/window.h"
 
-#define TEST_ASSERT(cond, msg)                                                                                         \
-    do {                                                                                                               \
-        if (!(cond)) {                                                                                                 \
-            std::fprintf(stderr, "FAIL: %s (line %d): %s\n", #cond, __LINE__, msg);                                    \
-            return 1;                                                                                                  \
-        }                                                                                                              \
+#define TEST_ASSERT(cond, msg)                                                      \
+    do {                                                                            \
+        if (!(cond)) {                                                              \
+            std::fprintf(stderr, "FAIL: %s (line %d): %s\n", #cond, __LINE__, msg); \
+            return 1;                                                               \
+        }                                                                           \
     } while (0)
 
 #define TEST_PASS(name) std::fprintf(stderr, "  PASS: %s\n", name)
@@ -71,7 +69,9 @@ static auto make_dummy_root() -> aurora::Node { return aurora::Node{}; }
 static auto http_send(uint16_t port, const std::string &method, const std::string &path, const std::string &body)
     -> std::string {
     WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return {};
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        return {};
+    }
     SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == INVALID_SOCKET) {
         WSACleanup();
@@ -99,8 +99,9 @@ static auto http_send(uint16_t port, const std::string &method, const std::strin
     std::string resp;
     char buf[4096];
     int n;
-    while ((n = recv(sock, buf, sizeof(buf), 0)) > 0)
+    while ((n = recv(sock, buf, sizeof(buf), 0)) > 0) {
         resp.append(buf, static_cast<std::size_t>(n));
+    }
     closesocket(sock);
     WSACleanup();
     return resp;
@@ -115,18 +116,25 @@ struct HttpParsed {
 static auto http_parse(const std::string &resp) -> HttpParsed {
     HttpParsed r;
     const auto sp = resp.find(' ');
-    if (sp == std::string::npos) return r;
+    if (sp == std::string::npos) {
+        return r;
+    }
     const auto sp2 = resp.find(' ', sp + 1);
-    if (sp2 == std::string::npos) return r;
+    if (sp2 == std::string::npos) {
+        return r;
+    }
     r.status = std::stoi(resp.substr(sp + 1, sp2 - sp - 1));
     const auto hend = resp.find("\r\n\r\n");
-    if (hend == std::string::npos) return r;
+    if (hend == std::string::npos) {
+        return r;
+    }
     const std::string head = resp.substr(0, hend);
     const auto ct = head.find("Content-Type:");
     if (ct != std::string::npos) {
         auto cs = ct + 13;
-        while (cs < head.size() && (head[cs] == ' ' || head[cs] == '\t'))
+        while (cs < head.size() && (head[cs] == ' ' || head[cs] == '\t')) {
             ++cs;
+        }
         auto ce = head.find("\r\n", cs);
         r.content_type = head.substr(cs, ce - cs);
     }
@@ -134,8 +142,9 @@ static auto http_parse(const std::string &resp) -> HttpParsed {
     const auto cl = head.find("Content-Length:");
     if (cl != std::string::npos) {
         auto cs = cl + 15;
-        while (cs < head.size() && head[cs] == ' ')
+        while (cs < head.size() && head[cs] == ' ') {
             ++cs;
+        }
         auto ce = head.find("\r\n", cs);
         clen = std::stoi(head.substr(cs, ce - cs));
     }
@@ -211,9 +220,9 @@ AURORA_TEST() {
     {
         // 构造一棵含可拾取子控件的树，经 Window + present_root 完成真正 paint
         // （paint_bounds 有效，pick 才能命中；render_to_logical_snapshot 只 layout 不 paint）。
-        Window window{ std::make_unique<HeadlessSurface>("", Size{ 400.0f, 300.0f }) };
+        Window window{std::make_unique<HeadlessSurface>("", Size{400.0f, 300.0f})};
         auto root_widget = std::make_shared<Column>();
-        Node root{ root_widget };
+        Node root{root_widget};
         // 用 Button 作可拾取子控件：set_on_click 后置位 on_click，wants_click()==true，
         // 才会进入命中链（裸 Container/Column 仅背景、不想要点击，不会命中）。
         auto child = std::make_shared<Button>();
@@ -221,7 +230,7 @@ AURORA_TEST() {
         child->set_on_click([]() {});
         child->width(px(80.0f));
         child->height(px(40.0f));
-        root_widget->add(Node{ child });
+        root_widget->add(Node{child});
         const auto pr = window.present_root(root);
         TEST_ASSERT(static_cast<bool>(pr), "present_root should succeed");
 
@@ -289,7 +298,9 @@ AURORA_TEST() {
                 try {
                     nlohmann::json j = nlohmann::json::parse(r.body);
                     ok = j.is_object();
-                    if (j.contains("status")) st = j["status"].get<std::string>();
+                    if (j.contains("status")) {
+                        st = j["status"].get<std::string>();
+                    }
                 } catch (...) {
                 }
                 TEST_ASSERT(ok && st == "ok", "flags: status == ok");
@@ -322,8 +333,9 @@ AURORA_TEST() {
                     hit = j.value("hit", false);
                     if (j.contains("chain") && j["chain"].is_array()) {
                         for (const auto &n : j["chain"]) {
-                            if (n.contains("type_name") && n["type_name"].get<std::string>() == child->type_name())
+                            if (n.contains("type_name") && n["type_name"].get<std::string>() == child->type_name()) {
                                 saw_child = true;
+                            }
                         }
                     }
                 } catch (...) {
@@ -344,14 +356,14 @@ AURORA_TEST() {
     // Test 7: 基础 REST 端点（tree/widget/{path}/PUT widget/{path}/{prop}/components/yaml/to_code）
     // 补齐此前未覆盖的 6 个端点，端到端断言 JSON 响应且 PUT 改写后 GET 可见、to_code 多 style 生效。
     {
-        Window window{ std::make_unique<HeadlessSurface>("", Size{ 400.0f, 300.0f }) };
+        Window window{std::make_unique<HeadlessSurface>("", Size{400.0f, 300.0f})};
         auto root_widget = std::make_shared<Column>();
         auto child = std::make_shared<Button>();
         child->set_label("Hello");
         child->width(px(80.0f));
         child->height(px(40.0f));
-        root_widget->add(Node{ child });
-        Node root{ root_widget };
+        root_widget->add(Node{child});
+        Node root{root_widget};
         const auto pr = window.present_root(root);
         TEST_ASSERT(static_cast<bool>(pr), "present_root should succeed (Test 7)");
 
@@ -405,8 +417,9 @@ AURORA_TEST() {
                 try {
                     nlohmann::json j = nlohmann::json::parse(g.body);
                     // get_widget_props 返回 { "descriptor": ..., "values": { ... } }
-                    if (j.contains("values") && j["values"].contains("label"))
+                    if (j.contains("values") && j["values"].contains("label")) {
                         saw = j["values"]["label"].get<std::string>() == "Changed";
+                    }
                 } catch (...) {
                 }
                 TEST_ASSERT(saw, "widget PUT: GET reflects changed label");
@@ -482,4 +495,4 @@ AURORA_TEST() {
     return 0;
 }
 
-#endif // AURORA_INSPECTOR_SERVER_ENABLED
+#endif  // AURORA_INSPECTOR_SERVER_ENABLED

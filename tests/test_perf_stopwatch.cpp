@@ -11,7 +11,6 @@
 #include <cstdint>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::Stopwatch;
@@ -23,7 +22,7 @@ auto busy_wait_ms(double target_ms) -> void {
     const Stopwatch sw;
     volatile double sink = 0.0;
     while (sw.elapsed_ms() < target_ms) {
-        sink += 1.0; // 防止循环被优化掉
+        sink += 1.0;  // 防止循环被优化掉
     }
     (void)sink;
 }
@@ -123,7 +122,7 @@ auto test_instances_independent() -> void {
     AURORA_TEST_CHECK_MSG(older.elapsed_ms() >= 5.0, "Test7: earlier-constructed instance accumulated >= 5ms");
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_perf_stopwatch ===\n");

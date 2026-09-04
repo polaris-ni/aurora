@@ -17,7 +17,6 @@
 #include "aurora/core/color.h"
 #include "aurora/render/display_list.h"
 #include "aurora/render/painter.h"
-
 #include "test_harness.h"
 
 using aurora::Color;
@@ -35,6 +34,8 @@ namespace aurora::tests::sec_painter_aa {
 static auto lum(const Painter &p, int x, int y) -> int {
     const uint8_t *d = p.data();
     const int i = ((y * p.width()) + x) * 4;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
     return d[i];
 }
 
@@ -45,15 +46,15 @@ static void run() {
     p.begin(w, h);
 
     // 背景白
-    p.fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                      .size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) } },
+    p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                     .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                 Color::white());
 
     // 圆角裁剪（默认抗锯齿）+ 黑填充
-    p.push_clip_rounded(
-        Rect{ .origin = Point{ .x = 10.0f, .y = 10.0f }, .size = Size{ .width = 80.0f, .height = 80.0f } }, 20.0f);
-    p.fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                      .size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) } },
+    p.push_clip_rounded(Rect{.origin = Point{.x = 10.0F, .y = 10.0F}, .size = Size{.width = 80.0F, .height = 80.0F}},
+                        20.0F);
+    p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                     .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                 Color::black());
     p.pop_clip();
 
@@ -77,14 +78,13 @@ static void run() {
     // 硬遮罩模式：圆角边界不应有灰阶像素（仅纯黑/纯白）
     Painter p2;
     p2.begin(w, h);
-    p2.fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                       .size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) } },
+    p2.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                      .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                  Color::white());
-    p2.push_clip_rounded(
-        Rect{ .origin = Point{ .x = 10.0f, .y = 10.0f }, .size = Size{ .width = 80.0f, .height = 80.0f } }, 20.0f,
-        false);
-    p2.fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                       .size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) } },
+    p2.push_clip_rounded(Rect{.origin = Point{.x = 10.0F, .y = 10.0F}, .size = Size{.width = 80.0F, .height = 80.0F}},
+                         20.0F, false);
+    p2.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                      .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                  Color::black());
     p2.pop_clip();
     bool found_aa_hard = false;
@@ -102,8 +102,8 @@ static void run() {
     {
         Painter p3;
         p3.begin(8, 8);
-        p3.fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = 8.0f, .height = 8.0f } },
-                     Color{ 10, 20, 30, 255 });
+        p3.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 8.0F, .height = 8.0F}},
+                     Color{10, 20, 30, 255});
         const Color oob = p3.get_pixel(-1, -1);
         AURORA_TEST_CHECK(oob.m_r == 0 && oob.m_g == 0 && oob.m_b == 0 && oob.m_a == 0);
         const Color c = p3.get_pixel(3, 3);
@@ -117,47 +117,44 @@ static void run() {
     {
         Painter p4;
         p4.begin(w, h);
-        p4.fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                           .size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) } },
+        p4.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                          .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                      Color::white());
         p4.push_clip_rounded(
-            Rect{ .origin = Point{ .x = 10.0f, .y = 10.0f }, .size = Size{ .width = 80.0f, .height = 80.0f } }, 20.0f);
+            Rect{.origin = Point{.x = 10.0F, .y = 10.0F}, .size = Size{.width = 80.0F, .height = 80.0F}}, 20.0F);
         // 正常填充（会被圆角裁剪到 clip 内黑、clip 外白）——建立期望基准
-        p4.fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                           .size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) } },
+        p4.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                          .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                      Color::black());
         // 负坐标与超界坐标（慢路径此前无边界检查，会 (负y*width+x)*4u 下溢越界）
-        p4.fill_rect(
-            Rect{ .origin = Point{ .x = -40.0f, .y = -40.0f }, .size = Size{ .width = 60.0f, .height = 60.0f } },
-            Color::black());
-        p4.fill_rect(
-            Rect{ .origin = Point{ .x = 1000.0f, .y = 1000.0f }, .size = Size{ .width = 60.0f, .height = 60.0f } },
-            Color::black());
+        p4.fill_rect(Rect{.origin = Point{.x = -40.0F, .y = -40.0F}, .size = Size{.width = 60.0F, .height = 60.0F}},
+                     Color::black());
+        p4.fill_rect(Rect{.origin = Point{.x = 1000.0F, .y = 1000.0F}, .size = Size{.width = 60.0F, .height = 60.0F}},
+                     Color::black());
         // 半透明 blend 同样走慢路径
-        p4.fill_rect(
-            Rect{ .origin = Point{ .x = -10.0f, .y = 50.0f }, .size = Size{ .width = 20.0f, .height = 20.0f } },
-            Color{ 0, 0, 0, 128 });
+        p4.fill_rect(Rect{.origin = Point{.x = -10.0F, .y = 50.0F}, .size = Size{.width = 20.0F, .height = 20.0F}},
+                     Color{0, 0, 0, 128});
         p4.pop_clip();
         // 越界填充不应影响裁剪内已有正确像素（中心仍应为白底被圆角裁剪后的结果）
-        AURORA_TEST_CHECK(lum(p4, 50, 50) < 40); // 裁剪内被黑填充
+        AURORA_TEST_CHECK(lum(p4, 50, 50) < 40);  // 裁剪内被黑填充
         AURORA_TEST_CHECK(lum(p4, 2, 2) > 210);  // 裁剪外保持白
         // 到达此处即说明慢路径未越界崩溃
     }
 
     AURORA_LOG_INFO("test", "painter_aa_test: ALL PASS");
 }
-} // namespace aurora::tests::sec_painter_aa
+}  // namespace aurora::tests::sec_painter_aa
 
 namespace aurora::tests::sec_painter_fill_fast {
 
 // 与 Painter::set_pixel 相同的 source-over 浮点公式（位级参考）。
 static auto blend_ref(Color dst, Color src) -> Color {
-    const float a = static_cast<float>(src.m_a) / 255.0f;
-    const float inv = 1.0f - a;
+    const float a = static_cast<float>(src.m_a) / 255.0F;
+    const float inv = 1.0F - a;
     const auto blend = [a, inv](std::uint8_t d, std::uint8_t s) -> std::uint8_t {
         return static_cast<std::uint8_t>((static_cast<float>(d) * inv) + (static_cast<float>(s) * a));
     };
-    return Color{ blend(dst.m_r, src.m_r), blend(dst.m_g, src.m_g), blend(dst.m_b, src.m_b), 255 };
+    return Color{blend(dst.m_r, src.m_r), blend(dst.m_g, src.m_g), blend(dst.m_b, src.m_b), 255};
 }
 
 static void run() {
@@ -165,14 +162,14 @@ static void run() {
     {
         Painter p;
         p.begin(64, 48);
-        p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 64, .height = 48 } },
-                    Color{ 10, 200, 30, 255 });
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 64, .height = 48}},
+                    Color{10, 200, 30, 255});
         const Color bg = p.get_pixel(5, 5);
         AURORA_TEST_CHECK(bg.m_r == 10 && bg.m_g == 200 && bg.m_b == 30);
 
-        p.fill_rect(Rect{ .origin = Point{ .x = 8.4f, .y = 6.7f }, .size = Size{ .width = 20.3f, .height = 10.2f } },
-                    Color{ 80, 120, 220, 110 });
-        const Color exp = blend_ref(Color{ 10, 200, 30, 255 }, Color{ 80, 120, 220, 110 });
+        p.fill_rect(Rect{.origin = Point{.x = 8.4F, .y = 6.7F}, .size = Size{.width = 20.3F, .height = 10.2F}},
+                    Color{80, 120, 220, 110});
+        const Color exp = blend_ref(Color{10, 200, 30, 255}, Color{80, 120, 220, 110});
         // 覆盖区内部（远离边界取整）逐点等于参考混合值
         bool inner_ok = true;
         for (int y = 8; y <= 15; ++y) {
@@ -195,15 +192,15 @@ static void run() {
     {
         Painter p;
         p.begin(64, 48);
-        p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 64, .height = 48 } },
-                    Color{ 255, 255, 255, 255 });
-        p.push_clip(Rect{ .origin = Point{ .x = 10, .y = 10 }, .size = Size{ .width = 20, .height = 10 } });
-        p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 64, .height = 48 } },
-                    Color{ 0, 0, 0, 255 });
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 64, .height = 48}},
+                    Color{255, 255, 255, 255});
+        p.push_clip(Rect{.origin = Point{.x = 10, .y = 10}, .size = Size{.width = 20, .height = 10}});
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 64, .height = 48}},
+                    Color{0, 0, 0, 255});
         p.pop_clip();
         auto black = [&](int x, int y) -> bool { return p.get_pixel(x, y).m_r == 0; };
         AURORA_TEST_CHECK(black(10, 10) && black(30, 20));  // 含头含尾（contains 含右/下边界）
-        AURORA_TEST_CHECK(!black(9, 10) && !black(31, 20)); // 裁剪外
+        AURORA_TEST_CHECK(!black(9, 10) && !black(31, 20));  // 裁剪外
         AURORA_TEST_CHECK(!black(10, 9) && !black(10, 21));
         AURORA_LOG_INFO("test", "[2] rect-clip boundary matches contains() semantics OK");
     }
@@ -212,14 +209,13 @@ static void run() {
     {
         Painter p;
         p.begin(64, 64);
-        p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 64, .height = 64 } },
-                    Color{ 255, 255, 255, 255 });
-        p.push_clip_rounded(Rect{ .origin = Point{ .x = 8, .y = 8 }, .size = Size{ .width = 48, .height = 48 } },
-                            16.0f);
-        p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 64, .height = 64 } },
-                    Color{ 0, 0, 0, 255 });
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 64, .height = 64}},
+                    Color{255, 255, 255, 255});
+        p.push_clip_rounded(Rect{.origin = Point{.x = 8, .y = 8}, .size = Size{.width = 48, .height = 48}}, 16.0F);
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 64, .height = 64}},
+                    Color{0, 0, 0, 255});
         p.pop_clip();
-        AURORA_TEST_CHECK(p.get_pixel(32, 32).m_r == 0); // 中心被填充
+        AURORA_TEST_CHECK(p.get_pixel(32, 32).m_r == 0);  // 中心被填充
         AURORA_TEST_CHECK(p.get_pixel(9, 9).m_r > 200);  // 圆角角外仍是白（被 SDF 裁掉）
         AURORA_LOG_INFO("test", "[3] rounded-clip slow path unchanged OK");
     }
@@ -228,18 +224,18 @@ static void run() {
     {
         Painter p;
         p.begin(16, 16);
-        p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 16, .height = 16 } },
-                    Color{ 255, 255, 255, 255 });
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 16, .height = 16}},
+                    Color{255, 255, 255, 255});
         p.set_alpha(0.5);
-        p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 16, .height = 16 } },
-                    Color{ 0, 0, 0, 255 });
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 16, .height = 16}},
+                    Color{0, 0, 0, 255});
         p.set_alpha(1.0);
         const Color c = p.get_pixel(8, 8);
-        AURORA_TEST_CHECK(c.m_r > 100 && c.m_r < 155); // ≈127：半透明合成而非全黑覆写
+        AURORA_TEST_CHECK(c.m_r > 100 && c.m_r < 155);  // ≈127：半透明合成而非全黑覆写
         AURORA_LOG_INFO("test", "[4] global-alpha slow path unchanged OK");
     }
 }
-} // namespace aurora::tests::sec_painter_fill_fast
+}  // namespace aurora::tests::sec_painter_fill_fast
 
 namespace aurora::tests::sec_painter_primitives {
 namespace au = aurora;
@@ -248,24 +244,24 @@ namespace {
 auto near_color(Color a, Color b, const int tol = 8) -> bool {
     return std::abs(a.m_r - b.m_r) <= tol && std::abs(a.m_g - b.m_g) <= tol && std::abs(a.m_b - b.m_b) <= tol;
 }
-} // namespace
+}  // namespace
 
 static void run() {
-    constexpr Color bg{ 255, 255, 255, 255 };
-    constexpr Color red{ 255, 0, 0, 255 };
+    constexpr Color bg{255, 255, 255, 255};
+    constexpr Color red{255, 0, 0, 255};
 
     // ---- 1. draw_line：水平线中心实体、远处不受影响、端点外圆帽内 ----
     {
         Painter p;
         p.begin(64, 64);
-        p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 64, .height = 64 } }, bg);
-        p.draw_line(Point{ .x = 10.0f, .y = 32.0f }, Point{ .x = 54.0f, .y = 32.0f }, 4.0f, red);
-        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 32), red)); // 线心
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 64, .height = 64}}, bg);
+        p.draw_line(Point{.x = 10.0F, .y = 32.0F}, Point{.x = 54.0F, .y = 32.0F}, 4.0F, red);
+        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 32), red));  // 线心
         AURORA_TEST_CHECK(near_color(p.get_pixel(32, 10), bg));  // 远离线
-        AURORA_TEST_CHECK(near_color(p.get_pixel(5, 32), bg));   // 起点圆帽以外
+        AURORA_TEST_CHECK(near_color(p.get_pixel(5, 32), bg));  // 起点圆帽以外
         // 抗锯齿：分数坐标线段的羽化带像素应为红白过渡色（整对齐线段覆盖度恰为 0/1，
         // 故另画一条 y=48.25 的线验证 AA：像素 y=50 中心 50.5，dist=2.25 → cov=0.25）
-        p.draw_line(Point{ .x = 10.0f, .y = 48.25f }, Point{ .x = 54.0f, .y = 48.25f }, 4.0f, red);
+        p.draw_line(Point{.x = 10.0F, .y = 48.25F}, Point{.x = 54.0F, .y = 48.25F}, 4.0F, red);
         const Color edge = p.get_pixel(32, 50);
         AURORA_TEST_CHECK(edge.m_r > 200 && edge.m_g > 30 && edge.m_g < 240);
     }
@@ -274,9 +270,9 @@ static void run() {
     {
         Painter p;
         p.begin(64, 64);
-        p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 64, .height = 64 } }, bg);
-        p.draw_line(Point{ .x = 16.0f, .y = 16.0f }, Point{ .x = 48.0f, .y = 48.0f }, 3.0f, red);
-        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 32), red)); // 对角线中点
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 64, .height = 64}}, bg);
+        p.draw_line(Point{.x = 16.0F, .y = 16.0F}, Point{.x = 48.0F, .y = 48.0F}, 3.0F, red);
+        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 32), red));  // 对角线中点
         AURORA_TEST_CHECK(near_color(p.get_pixel(48, 16), bg));  // 反对角不受影响
     }
 
@@ -284,18 +280,16 @@ static void run() {
     {
         Painter p;
         p.begin(64, 64);
-        p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 64, .height = 64 } }, bg);
-        p.fill_rounded_rect(Rect{ .origin = Point{ .x = 8, .y = 8 }, .size = Size{ .width = 48, .height = 48 } }, 12.0f,
-                            red);
-        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 32), red)); // 中心
-        AURORA_TEST_CHECK(near_color(p.get_pixel(9, 9), bg));    // 圆角外角落
-        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 10), red)); // 上边中部（非角落）
-                                                                 // radius <= 0 退化为 fill_rect（角落也填充）
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 64, .height = 64}}, bg);
+        p.fill_rounded_rect(Rect{.origin = Point{.x = 8, .y = 8}, .size = Size{.width = 48, .height = 48}}, 12.0F, red);
+        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 32), red));  // 中心
+        AURORA_TEST_CHECK(near_color(p.get_pixel(9, 9), bg));  // 圆角外角落
+        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 10), red));  // 上边中部（非角落）
+                                                                  // radius <= 0 退化为 fill_rect（角落也填充）
         Painter q;
         q.begin(32, 32);
-        q.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 32, .height = 32 } }, bg);
-        q.fill_rounded_rect(Rect{ .origin = Point{ .x = 4, .y = 4 }, .size = Size{ .width = 24, .height = 24 } }, 0.0f,
-                            red);
+        q.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 32, .height = 32}}, bg);
+        q.fill_rounded_rect(Rect{.origin = Point{.x = 4, .y = 4}, .size = Size{.width = 24, .height = 24}}, 0.0F, red);
         AURORA_TEST_CHECK(near_color(q.get_pixel(5, 5), red));
     }
 
@@ -305,11 +299,10 @@ static void run() {
     {
         Painter p;
         p.begin(64, 64);
-        p.fill_rounded_rect(Rect{ .origin = Point{ .x = 4, .y = 4 }, .size = Size{ .width = 16, .height = 16 } }, 4.0f,
-                            red);
-        AURORA_TEST_CHECK_FALSE(p.has_clip()); // 配对后裁剪栈必须归零
-                                               // 圆角控件之后的普通绘制不得被残留裁剪吞掉
-        p.fill_rect(Rect{ .origin = Point{ .x = 40, .y = 40 }, .size = Size{ .width = 16, .height = 16 } }, red);
+        p.fill_rounded_rect(Rect{.origin = Point{.x = 4, .y = 4}, .size = Size{.width = 16, .height = 16}}, 4.0F, red);
+        AURORA_TEST_CHECK_FALSE(p.has_clip());  // 配对后裁剪栈必须归零
+                                                // 圆角控件之后的普通绘制不得被残留裁剪吞掉
+        p.fill_rect(Rect{.origin = Point{.x = 40, .y = 40}, .size = Size{.width = 16, .height = 16}}, red);
         AURORA_TEST_CHECK(near_color(p.get_pixel(48, 48), red));
     }
 
@@ -317,23 +310,23 @@ static void run() {
     {
         Painter p;
         p.begin(64, 64);
-        p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 64, .height = 64 } }, bg);
-        p.draw_rounded_border(Rect{ .origin = Point{ .x = 8, .y = 8 }, .size = Size{ .width = 48, .height = 48 } },
-                              8.0f, 3.0f, red);
-        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 9), red)); // 上边框带内（向内描边：y ∈ [8, 11]）
-        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 32), bg)); // 内部
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 64, .height = 64}}, bg);
+        p.draw_rounded_border(Rect{.origin = Point{.x = 8, .y = 8}, .size = Size{.width = 48, .height = 48}}, 8.0F,
+                              3.0F, red);
+        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 9), red));  // 上边框带内（向内描边：y ∈ [8, 11]）
+        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 32), bg));  // 内部
         AURORA_TEST_CHECK(near_color(p.get_pixel(32, 4), bg));  // 外部
-        AURORA_TEST_CHECK(near_color(p.get_pixel(9, 32), red)); // 左边框带内
+        AURORA_TEST_CHECK(near_color(p.get_pixel(9, 32), red));  // 左边框带内
     }
 
     // ---- 5. draw_rounded_border 圆环（radius = 半径）：RadioButton 外圈几何 ----
     {
         Painter p;
         p.begin(64, 64);
-        p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 64, .height = 64 } }, bg);
-        p.draw_rounded_border(Rect{ .origin = Point{ .x = 16, .y = 16 }, .size = Size{ .width = 32, .height = 32 } },
-                              16.0f, 3.0f, red);
-        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 17), red)); // 顶部环带
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 64, .height = 64}}, bg);
+        p.draw_rounded_border(Rect{.origin = Point{.x = 16, .y = 16}, .size = Size{.width = 32, .height = 32}}, 16.0F,
+                              3.0F, red);
+        AURORA_TEST_CHECK(near_color(p.get_pixel(32, 17), red));  // 顶部环带
         AURORA_TEST_CHECK(near_color(p.get_pixel(32, 32), bg));  // 圆心
         AURORA_TEST_CHECK(near_color(p.get_pixel(17, 17), bg));  // 外接矩形角落（圆环之外）
     }
@@ -342,19 +335,19 @@ static void run() {
     {
         Painter direct;
         direct.begin(64, 64);
-        direct.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 64, .height = 64 } }, bg);
-        direct.draw_line(Point{ .x = 10, .y = 32 }, Point{ .x = 54, .y = 32 }, 4.0f, red);
-        direct.draw_rounded_border(Rect{ .origin = Point{ .x = 8, .y = 8 }, .size = Size{ .width = 48, .height = 48 } },
-                                   8.0f, 2.0f, red);
+        direct.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 64, .height = 64}}, bg);
+        direct.draw_line(Point{.x = 10, .y = 32}, Point{.x = 54, .y = 32}, 4.0F, red);
+        direct.draw_rounded_border(Rect{.origin = Point{.x = 8, .y = 8}, .size = Size{.width = 48, .height = 48}}, 8.0F,
+                                   2.0F, red);
 
         Painter replayed;
         replayed.begin(64, 64);
-        replayed.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 64, .height = 64 } }, bg);
+        replayed.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 64, .height = 64}}, bg);
         DisplayList dl;
         replayed.record(dl);
-        replayed.draw_line(Point{ .x = 10, .y = 32 }, Point{ .x = 54, .y = 32 }, 4.0f, red);
-        replayed.draw_rounded_border(
-            Rect{ .origin = Point{ .x = 8, .y = 8 }, .size = Size{ .width = 48, .height = 48 } }, 8.0f, 2.0f, red);
+        replayed.draw_line(Point{.x = 10, .y = 32}, Point{.x = 54, .y = 32}, 4.0F, red);
+        replayed.draw_rounded_border(Rect{.origin = Point{.x = 8, .y = 8}, .size = Size{.width = 48, .height = 48}},
+                                     8.0F, 2.0F, red);
         replayed.stop();
         dl.replay(replayed);
 
@@ -373,7 +366,7 @@ static void run() {
                               "DisplayList replay bit-identical to direct draw (draw_line + rounded_border)");
     }
 }
-} // namespace aurora::tests::sec_painter_primitives
+}  // namespace aurora::tests::sec_painter_primitives
 
 namespace aurora::tests::sec_painter_shift_pixels {
 
@@ -383,9 +376,9 @@ namespace {
 auto fill_row_ramp(Painter &p, int w, int h) -> void {
     for (int y = 0; y < h; ++y) {
         const auto v = static_cast<std::uint8_t>(10 + y);
-        p.fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = static_cast<float>(y) },
-                          .size = Size{ .width = static_cast<float>(w), .height = 1.0f } },
-                    Color{ v, v, v, 255 });
+        p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = static_cast<float>(y)},
+                         .size = Size{.width = static_cast<float>(w), .height = 1.0F}},
+                    Color{v, v, v, 255});
     }
 }
 
@@ -398,15 +391,23 @@ auto make_rgba_probe(int w, int h) -> Image {
     Image img;
     img.width = w;
     img.height = h;
-    img.pixels.assign(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u, 0);
+    img.pixels.assign(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U, 0);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             const std::size_t i =
-                ((static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + static_cast<std::size_t>(x)) * 4u;
+                ((static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + static_cast<std::size_t>(x)) * 4U;
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             img.pixels[i + 0] = static_cast<std::uint8_t>((x * 7) + 3);
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             img.pixels[i + 1] = static_cast<std::uint8_t>((y * 11) + 5);
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             img.pixels[i + 2] = static_cast<std::uint8_t>((x + y) * 5);
             // 三类 alpha 轮转：0（跳过）/ 128（混合）/ 255（覆写）。
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             img.pixels[i + 3] = static_cast<std::uint8_t>((x + y) % 3 == 0 ? 0 : ((x + y) % 3 == 1 ? 128 : 255));
         }
     }
@@ -418,10 +419,12 @@ auto pixels_identical(const Painter &a, const Painter &b) -> bool {
     if (a.width() != b.width() || a.height() != b.height()) {
         return false;
     }
-    const std::size_t n = static_cast<std::size_t>(a.width()) * static_cast<std::size_t>(a.height()) * 4u;
+    const std::size_t n = static_cast<std::size_t>(a.width()) * static_cast<std::size_t>(a.height()) * 4U;
     const std::uint8_t *pa = a.data();
     const std::uint8_t *pb = b.data();
     for (std::size_t i = 0; i < n; ++i) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
         if (pa[i] != pb[i]) {
             return false;
         }
@@ -429,7 +432,7 @@ auto pixels_identical(const Painter &a, const Painter &b) -> bool {
     return true;
 }
 
-} // namespace
+}  // namespace
 
 static void run() {
     AURORA_TEST_PRINTF("=== test_painter_shift_pixels ===\n");
@@ -439,7 +442,7 @@ static void run() {
         Painter p;
         p.begin(4, 8);
         fill_row_ramp(p, 4, 8);
-        p.shift_pixels(3.0f);
+        p.shift_pixels(3.0F);
         AURORA_TEST_CHECK_MSG(row_mark(p, 0) == 0 && row_mark(p, 1) == 0 && row_mark(p, 2) == 0,
                               "shift(+3): top 3 rows yield zero baseline");
         AURORA_TEST_CHECK_MSG(row_mark(p, 3) == 10 && row_mark(p, 4) == 11 && row_mark(p, 7) == 14,
@@ -451,7 +454,7 @@ static void run() {
         Painter p;
         p.begin(4, 8);
         fill_row_ramp(p, 4, 8);
-        p.shift_pixels(-3.0f);
+        p.shift_pixels(-3.0F);
         AURORA_TEST_CHECK_MSG(row_mark(p, 0) == 13 && row_mark(p, 4) == 17, "shift(-3): old rows 3..7 moved to 0..4");
         AURORA_TEST_CHECK_MSG(row_mark(p, 5) == 0 && row_mark(p, 6) == 0 && row_mark(p, 7) == 0,
                               "shift(-3): bottom 3 rows yield zero baseline");
@@ -462,7 +465,7 @@ static void run() {
         Painter p;
         p.begin(4, 8);
         fill_row_ramp(p, 4, 8);
-        p.shift_pixels(100.0f);
+        p.shift_pixels(100.0F);
         bool all_zero = true;
         for (int y = 0; y < 8; ++y) {
             all_zero = all_zero && row_mark(p, y) == 0;
@@ -472,7 +475,7 @@ static void run() {
         Painter q;
         q.begin(4, 8);
         fill_row_ramp(q, 4, 8);
-        q.shift_pixels(-8.0f); // 恰好等于高度，同样无可复用像素
+        q.shift_pixels(-8.0F);  // 恰好等于高度，同样无可复用像素
         bool q_zero = true;
         for (int y = 0; y < 8; ++y) {
             q_zero = q_zero && row_mark(q, y) == 0;
@@ -485,9 +488,9 @@ static void run() {
         Painter p;
         p.begin(4, 8);
         fill_row_ramp(p, 4, 8);
-        p.shift_pixels(0.0f);
+        p.shift_pixels(0.0F);
         AURORA_TEST_CHECK_MSG(row_mark(p, 0) == 10 && row_mark(p, 7) == 17, "shift(0): pixels unchanged");
-        p.shift_pixels(0.2f); // lround(0.2) == 0
+        p.shift_pixels(0.2F);  // lround(0.2) == 0
         AURORA_TEST_CHECK_MSG(row_mark(p, 0) == 10 && row_mark(p, 7) == 17,
                               "shift(0.2): rounded to 0 rows, pixels unchanged");
     }
@@ -495,16 +498,16 @@ static void run() {
     // ---- 5) scale ≠ 1：dy 为逻辑 dp，按 scale 换算物理行 ----
     {
         Painter p;
-        p.set_scale(2.0f);
-        p.begin(4, 8); // 物理 8×16
+        p.set_scale(2.0F);
+        p.begin(4, 8);  // 物理 8×16
         AURORA_TEST_CHECK_MSG(p.height() == 16, "scale=2: physical height is 16");
         for (int y = 0; y < 16; ++y) {
             // 直接按物理行写标记：fill_rect 走逻辑 dp，这里要精确控制物理行。
-            p.fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = static_cast<float>(y) / 2.0f },
-                              .size = Size{ .width = 4.0f, .height = 0.5f } },
-                        Color{ static_cast<std::uint8_t>(10 + y), 0, 0, 255 });
+            p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = static_cast<float>(y) / 2.0F},
+                             .size = Size{.width = 4.0F, .height = 0.5F}},
+                        Color{static_cast<std::uint8_t>(10 + y), 0, 0, 255});
         }
-        p.shift_pixels(1.5f); // 物理位移 lround(1.5*2) = 3 行
+        p.shift_pixels(1.5F);  // 物理位移 lround(1.5*2) = 3 行
         AURORA_TEST_CHECK_MSG(row_mark(p, 0) == 0 && row_mark(p, 2) == 0,
                               "scale=2 shift(1.5dp): top 3 physical rows yield");
         AURORA_TEST_CHECK_MSG(row_mark(p, 3) == 10, "scale=2 shift(1.5dp): physical row 0 moved to 3");
@@ -517,7 +520,7 @@ static void run() {
         fill_row_ramp(p, 4, 8);
         DisplayList dl;
         p.record(dl);
-        p.shift_pixels(4.0f);
+        p.shift_pixels(4.0F);
         p.stop();
         AURORA_TEST_CHECK_MSG(row_mark(p, 0) == 10 && row_mark(p, 7) == 17,
                               "shift_pixels in recording mode does not modify framebuffer");
@@ -531,18 +534,17 @@ static void run() {
 
         Painter fast;
         fast.begin(16, 16);
-        fast.fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = 16.0f, .height = 16.0f } },
-                       Color{ 30, 60, 90, 255 });
-        fast.composite(probe, Matrix2D::from_translate(3.0f, 4.0f), 1.0f);
+        fast.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 16.0F, .height = 16.0F}},
+                       Color{30, 60, 90, 255});
+        fast.composite(probe, Matrix2D::from_translate(3.0F, 4.0F), 1.0F);
 
         Painter slow;
         slow.begin(16, 16);
-        slow.fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = 16.0f, .height = 16.0f } },
-                       Color{ 30, 60, 90, 255 });
+        slow.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 16.0F, .height = 16.0F}},
+                       Color{30, 60, 90, 255});
         slow.push_clip_rounded(
-            Rect{ .origin = Point{ .x = -8.0f, .y = -8.0f }, .size = Size{ .width = 32.0f, .height = 32.0f } }, 0.0f,
-            true);
-        slow.composite(probe, Matrix2D::from_translate(3.0f, 4.0f), 1.0f);
+            Rect{.origin = Point{.x = -8.0F, .y = -8.0F}, .size = Size{.width = 32.0F, .height = 32.0F}}, 0.0F, true);
+        slow.composite(probe, Matrix2D::from_translate(3.0F, 4.0F), 1.0F);
         slow.pop_clip();
 
         AURORA_TEST_CHECK_MSG(pixels_identical(fast, slow),
@@ -555,14 +557,13 @@ static void run() {
 
         Painter fast;
         fast.begin(16, 16);
-        fast.composite(probe, Matrix2D::from_translate(2.4f, -1.7f), 1.0f);
+        fast.composite(probe, Matrix2D::from_translate(2.4F, -1.7F), 1.0F);
 
         Painter slow;
         slow.begin(16, 16);
         slow.push_clip_rounded(
-            Rect{ .origin = Point{ .x = -8.0f, .y = -8.0f }, .size = Size{ .width = 32.0f, .height = 32.0f } }, 0.0f,
-            true);
-        slow.composite(probe, Matrix2D::from_translate(2.4f, -1.7f), 1.0f);
+            Rect{.origin = Point{.x = -8.0F, .y = -8.0F}, .size = Size{.width = 32.0F, .height = 32.0F}}, 0.0F, true);
+        slow.composite(probe, Matrix2D::from_translate(2.4F, -1.7F), 1.0F);
         slow.pop_clip();
 
         AURORA_TEST_CHECK_MSG(pixels_identical(fast, slow),
@@ -574,17 +575,16 @@ static void run() {
         const Image probe = make_rgba_probe(12, 10);
 
         Painter fast;
-        fast.set_scale(2.0f);
+        fast.set_scale(2.0F);
         fast.begin(16, 16);
-        fast.composite(probe, Matrix2D::from_translate(1.5f, 2.5f), 2.0f);
+        fast.composite(probe, Matrix2D::from_translate(1.5F, 2.5F), 2.0F);
 
         Painter slow;
-        slow.set_scale(2.0f);
+        slow.set_scale(2.0F);
         slow.begin(16, 16);
         slow.push_clip_rounded(
-            Rect{ .origin = Point{ .x = -8.0f, .y = -8.0f }, .size = Size{ .width = 40.0f, .height = 40.0f } }, 0.0f,
-            true);
-        slow.composite(probe, Matrix2D::from_translate(1.5f, 2.5f), 2.0f);
+            Rect{.origin = Point{.x = -8.0F, .y = -8.0F}, .size = Size{.width = 40.0F, .height = 40.0F}}, 0.0F, true);
+        slow.composite(probe, Matrix2D::from_translate(1.5F, 2.5F), 2.0F);
         slow.pop_clip();
 
         AURORA_TEST_CHECK_MSG(pixels_identical(fast, slow), "composite fast path bit-identical to slow path (scale=2)");
@@ -598,14 +598,13 @@ static void run() {
 
         Painter fast;
         fast.begin(16, 16);
-        fast.composite(src, Matrix2D::from_translate(2.0f, 3.0f));
+        fast.composite(src, Matrix2D::from_translate(2.0F, 3.0F));
 
         Painter slow;
         slow.begin(16, 16);
         slow.push_clip_rounded(
-            Rect{ .origin = Point{ .x = -8.0f, .y = -8.0f }, .size = Size{ .width = 32.0f, .height = 32.0f } }, 0.0f,
-            true);
-        slow.composite(src, Matrix2D::from_translate(2.0f, 3.0f));
+            Rect{.origin = Point{.x = -8.0F, .y = -8.0F}, .size = Size{.width = 32.0F, .height = 32.0F}}, 0.0F, true);
+        slow.composite(src, Matrix2D::from_translate(2.0F, 3.0F));
         slow.pop_clip();
 
         AURORA_TEST_CHECK_MSG(pixels_identical(fast, slow), "composite(Painter) fast path bit-identical to slow path");
@@ -616,15 +615,15 @@ static void run() {
         const Image probe = make_rgba_probe(8, 8);
         Painter a;
         a.begin(16, 16);
-        a.composite(probe, Matrix2D::from_rotate(90.0f).compose(Matrix2D::from_translate(4.0f, 4.0f)), 1.0f);
+        a.composite(probe, Matrix2D::from_rotate(90.0F).compose(Matrix2D::from_translate(4.0F, 4.0F)), 1.0F);
         Painter b;
         b.begin(16, 16);
-        b.composite(probe, Matrix2D::from_rotate(90.0f).compose(Matrix2D::from_translate(4.0f, 4.0f)), 1.0f);
+        b.composite(probe, Matrix2D::from_rotate(90.0F).compose(Matrix2D::from_translate(4.0F, 4.0F)), 1.0F);
         AURORA_TEST_CHECK_MSG(pixels_identical(a, b),
                               "rotation matrix takes slow path and result is stable/reproducible");
     }
 }
-} // namespace aurora::tests::sec_painter_shift_pixels
+}  // namespace aurora::tests::sec_painter_shift_pixels
 
 AURORA_TEST() {
     aurora::tests::sec_painter_aa::run();

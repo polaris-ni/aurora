@@ -8,7 +8,7 @@
 
 namespace aurora {
 
-class Painter; // 前向声明；实际绘制在 widget 模块按节点种类解释
+class Painter;  // 前向声明；实际绘制在 widget 模块按节点种类解释
 
 /**
  * @brief 修饰节点基类（布局 / 绘制 / 输入 正交切片）。
@@ -31,25 +31,25 @@ class Painter; // 前向声明；实际绘制在 widget 模块按节点种类解
 class ModifierNode {
   public:
     enum class Kind : std::uint8_t {
-        Layout,    ///< 影响测量（如 Padding）
-        Paint,     ///< 影响绘制（如 Background）
-        Input,     ///< 影响输入（如 Clickable）
-        Transform, ///< 影响绘制期平移/对齐（如 Align / Offset）
+        Layout,  ///< 影响测量（如 Padding）
+        Paint,  ///< 影响绘制（如 Background）
+        Input,  ///< 影响输入（如 Clickable）
+        Transform,  ///< 影响绘制期平移/对齐（如 Align / Offset）
     };
 
     /// @brief Paint 切片细分子类型（供 switch 分发替代 dynamic_cast）。
     enum class PaintKind : std::uint8_t {
-        None,               ///< 非 Paint 节点（默认）
-        Background,         ///< Background
-        GradientBackground, ///< GradientBackground
-        Shadow,             ///< ShadowNode
-        Blend,              ///< BlendNode
-        ShaderMask,         ///< ShaderMaskNode
-        CacheLayer,         ///< CacheLayerNode
-        Border,             ///< Border
-        Clip,               ///< Clip
-        ClipRounded,        ///< ClipRounded
-        Blur,               ///< BlurNode
+        None,  ///< 非 Paint 节点（默认）
+        Background,  ///< Background
+        GradientBackground,  ///< GradientBackground
+        Shadow,  ///< ShadowNode
+        Blend,  ///< BlendNode
+        ShaderMask,  ///< ShaderMaskNode
+        CacheLayer,  ///< CacheLayerNode
+        Border,  ///< Border
+        Clip,  ///< Clip
+        ClipRounded,  ///< ClipRounded
+        Blur,  ///< BlurNode
     };
 
     ModifierNode() = default;
@@ -70,7 +70,7 @@ class ModifierNode {
 
     /// @brief Flex 权重（仅 `FlexWeight` 节点覆盖；其余节点返回 0 = 不扩展）。
     /// 由 Row/Column 在 flex 布局时读取，用于瓜分主轴剩余空间（对应 Expand）。
-    [[nodiscard]] virtual auto flex_weight() const -> float { return 0.0f; }
+    [[nodiscard]] virtual auto flex_weight() const -> float { return 0.0F; }
 
     /// @brief 触发点击回调（仅 `Clickable` 节点覆盖；其余节点为空操作）。
     /// 由事件派发器在命中目标上调用（架构 §7 事件与命中测试）。
@@ -81,4 +81,4 @@ class ModifierNode {
     virtual auto on_touch(const TouchEvent & /*e*/) const -> void {}
 };
 
-} // namespace aurora
+}  // namespace aurora

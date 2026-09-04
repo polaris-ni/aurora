@@ -17,7 +17,6 @@
 #include <vector>
 
 #include "aurora/render/detail/painter_simd.inl"
-
 #include "test_harness.h"
 
 namespace {
@@ -28,6 +27,8 @@ void fill_random(std::uint8_t *buf, const std::size_t n, std::uint32_t seed) {
     std::mt19937 rng(seed);
     std::uniform_int_distribution dist(0, 255);
     for (std::size_t i = 0; i < n; ++i) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
         buf[i] = static_cast<std::uint8_t>(dist(rng));
     }
 }
@@ -35,7 +36,9 @@ void fill_random(std::uint8_t *buf, const std::size_t n, std::uint32_t seed) {
 auto rgb_equal(const std::uint8_t *a, const std::uint8_t *b, int n) -> bool {
     for (int i = 0; i < n; ++i) {
         for (int c = 0; c < 3; ++c) {
-            if (a[(static_cast<std::size_t>(i) * 4u) + c] != b[(static_cast<std::size_t>(i) * 4u) + c]) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
+            if (a[(static_cast<std::size_t>(i) * 4U) + c] != b[(static_cast<std::size_t>(i) * 4U) + c]) {
                 return false;
             }
         }
@@ -43,7 +46,7 @@ auto rgb_equal(const std::uint8_t *a, const std::uint8_t *b, int n) -> bool {
     return true;
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     using aurora::detail::blend_linear_region;
@@ -63,11 +66,11 @@ AURORA_TEST() {
 
     // 每通道 alpha 角用例：纯 0 / 纯 1 / 均匀半透 / 非对称 / 单通道覆盖（模拟文本 AA 的 fr/fg/fb）。
     const std::vector<std::array<float, 3>> alpha_cases = {
-        { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 0.5f, 0.5f, 0.5f }, { 0.25f, 0.75f, 0.1f },
-        { 0.0f, 0.5f, 1.0f }, { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f },
+        {0.0F, 0.0F, 0.0F}, {1.0F, 1.0F, 1.0F}, {0.5F, 0.5F, 0.5F}, {0.25F, 0.75F, 0.1F},
+        {0.0F, 0.5F, 1.0F}, {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F},
     };
     // 覆盖非 4/8 倍数宽与边界。
-    const std::vector widths = { 0, 1, 3, 4, 7, 8, 15, 16, 31, 32, 33, 63, 64 };
+    const std::vector widths = {0, 1, 3, 4, 7, 8, 15, 16, 31, 32, 33, 63, 64};
 
     int cases = 0;
 
@@ -88,15 +91,23 @@ AURORA_TEST() {
                     if (n > AURORA_TEST_MAX_N) {
                         continue;
                     }
-                    std::memcpy(buf_scalar.data(), ref.data(), static_cast<std::size_t>(n) * 4u);
-                    std::memcpy(buf_sse2.data(), ref.data(), static_cast<std::size_t>(n) * 4u);
-                    std::memcpy(buf_avx2.data(), ref.data(), static_cast<std::size_t>(n) * 4u);
-                    std::memcpy(buf_disp.data(), ref.data(), static_cast<std::size_t>(n) * 4u);
+                    std::memcpy(buf_scalar.data(), ref.data(), static_cast<std::size_t>(n) * 4U);
+                    std::memcpy(buf_sse2.data(), ref.data(), static_cast<std::size_t>(n) * 4U);
+                    std::memcpy(buf_avx2.data(), ref.data(), static_cast<std::size_t>(n) * 4U);
+                    std::memcpy(buf_disp.data(), ref.data(), static_cast<std::size_t>(n) * 4U);
 
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                     blend_srgb_over_region_scalar(buf_scalar.data(), sr, sg, sb, a[0], a[1], a[2], n);
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                     blend_srgb_over_region(buf_disp.data(), sr, sg, sb, a[0], a[1], a[2], n);
 #if defined(AURORA_ENABLE_SIMD) && defined(AURORA_SIMD_X86)
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                     aurora::detail::blend_srgb_over_region_sse2(buf_sse2.data(), sr, sg, sb, a[0], a[1], a[2], n);
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                     aurora::detail::blend_srgb_over_region_avx2(buf_avx2.data(), sr, sg, sb, a[0], a[1], a[2], n);
                     AURORA_TEST_CHECK_MSG(rgb_equal(buf_scalar.data(), buf_sse2.data(), n),
                                           "gamma: sse2 vs scalar mismatch");
@@ -118,22 +129,22 @@ AURORA_TEST() {
         std::array<std::uint8_t, static_cast<std::size_t>(AURORA_TEST_MAX_N) * 4> buf_avx2{};
         std::array<std::uint8_t, static_cast<std::size_t>(AURORA_TEST_MAX_N) * 4> buf_disp{};
         std::array<std::uint8_t, static_cast<std::size_t>(AURORA_TEST_MAX_N) * 4> ref{};
-        const std::vector alpha_f = { 0.0f, 0.333f, 0.5f, 0.75f, 1.0f };
+        const std::vector alpha_f = {0.0F, 0.333F, 0.5F, 0.75F, 1.0F};
         for (std::uint32_t seed = 1; seed <= 200; ++seed) {
-            fill_random(ref.data(), static_cast<std::size_t>(AURORA_TEST_MAX_N) * 4, (seed * 31u) + 5u);
+            fill_random(ref.data(), static_cast<std::size_t>(AURORA_TEST_MAX_N) * 4, (seed * 31U) + 5U);
             const auto sr = static_cast<std::uint8_t>((seed * 3) & 0xFFU);
             const auto sg = static_cast<std::uint8_t>((seed * 11) & 0xFFU);
             const auto sb = static_cast<std::uint8_t>((seed * 17) & 0xFFU);
             for (float fa : alpha_f) {
-                const float finv = 1.0f - fa;
+                const float finv = 1.0F - fa;
                 for (int n : widths) {
                     if (n > AURORA_TEST_MAX_N) {
                         continue;
                     }
-                    std::memcpy(buf_scalar.data(), ref.data(), static_cast<std::size_t>(n) * 4u);
-                    std::memcpy(buf_sse2.data(), ref.data(), static_cast<std::size_t>(n) * 4u);
-                    std::memcpy(buf_avx2.data(), ref.data(), static_cast<std::size_t>(n) * 4u);
-                    std::memcpy(buf_disp.data(), ref.data(), static_cast<std::size_t>(n) * 4u);
+                    std::memcpy(buf_scalar.data(), ref.data(), static_cast<std::size_t>(n) * 4U);
+                    std::memcpy(buf_sse2.data(), ref.data(), static_cast<std::size_t>(n) * 4U);
+                    std::memcpy(buf_avx2.data(), ref.data(), static_cast<std::size_t>(n) * 4U);
+                    std::memcpy(buf_disp.data(), ref.data(), static_cast<std::size_t>(n) * 4U);
 
                     blend_linear_region_scalar(buf_scalar.data(), sr, sg, sb, fa, finv, n);
                     blend_linear_region(buf_disp.data(), sr, sg, sb, fa, finv, n);
@@ -155,8 +166,8 @@ AURORA_TEST() {
 
     // ---------- 整数 box blur 逐位一致 ----------
     {
-        const std::vector sizes = { 1, 2, 4, 7, 8, 15, 16, 33, 64 };
-        const std::vector radii = { 1, 2, 5, 10, 30 }; // 含 r >> 尺寸，强压边缘 clamp
+        const std::vector sizes = {1, 2, 4, 7, 8, 15, 16, 33, 64};
+        const std::vector radii = {1, 2, 5, 10, 30};  // 含 r >> 尺寸，强压边缘 clamp
         std::vector<std::uint8_t> ref;
         std::vector<std::uint8_t> buf_scalar;
         std::vector<std::uint8_t> buf_sse2;
@@ -169,7 +180,7 @@ AURORA_TEST() {
                     if (npix == 0) {
                         continue;
                     }
-                    const std::size_t bytes = npix * 4u;
+                    const std::size_t bytes = npix * 4U;
                     ref.assign(bytes, 0);
                     buf_scalar.assign(bytes, 0);
                     buf_sse2.assign(bytes, 0);
@@ -178,6 +189,8 @@ AURORA_TEST() {
                     std::mt19937 rng(static_cast<std::uint32_t>((rw * 131) + (rh * 17) + (r * 3) + 1));
                     std::uniform_int_distribution dist(0, 255);
                     for (std::size_t i = 0; i < bytes; ++i) {
+                        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                         ref[i] = static_cast<std::uint8_t>(dist(rng));
                     }
                     std::memcpy(buf_scalar.data(), ref.data(), bytes);
@@ -211,23 +224,26 @@ AURORA_TEST() {
         std::array<std::uint8_t, static_cast<std::size_t>(AURORA_TEST_MAX_N) * 4> buf_disp{};
         // 端点色（双色标、全不透明）：亮→暗、黑→白、红→绿、一般色、同色退化，覆盖不同通道差符号。
         const std::vector<std::array<std::uint8_t, 4>> color_pairs = {
-            { 250, 250, 255, 255 }, { 30, 30, 60, 255 }, { 0, 0, 0, 255 },     { 255, 255, 255, 255 },
-            { 255, 0, 0, 255 },     { 0, 255, 0, 255 },  { 10, 200, 50, 255 }, { 230, 20, 180, 255 },
-            { 0, 0, 0, 255 },       { 0, 0, 0, 255 },
+            {250, 250, 255, 255}, {30, 30, 60, 255},  {0, 0, 0, 255},      {255, 255, 255, 255}, {255, 0, 0, 255},
+            {0, 255, 0, 255},     {10, 200, 50, 255}, {230, 20, 180, 255}, {0, 0, 0, 255},       {0, 0, 0, 255},
         };
-        const std::vector gwidths = { 1, 3, 4, 5, 7, 8, 13, 15, 16, 17, 31, 32, 33, 63, 64 };
-        const std::vector stop0s = { 0.0f, 0.25f, 0.5f };
-        const std::vector ranges = { 0.5f, 1.0f };
+        const std::vector gwidths = {1, 3, 4, 5, 7, 8, 13, 15, 16, 17, 31, 32, 33, 63, 64};
+        const std::vector stop0s = {0.0F, 0.25F, 0.5F};
+        const std::vector ranges = {0.5F, 1.0F};
         // 逐位一致性校验要求结果可复现，固定种子为预期行为，非缺陷。
         // NOLINTNEXTLINE(bugprone-random-generator-seed)
-        std::mt19937 rng(20240811u);
-        std::uniform_real_distribution fr(-50.0f, 200.0f);
-        std::uniform_real_distribution fpos(0.001f, 50.0f);
+        std::mt19937 rng(20240811U);
+        std::uniform_real_distribution fr(-50.0F, 200.0F);
+        std::uniform_real_distribution fpos(0.001F, 50.0F);
 
         // 线性渐变：扫描线逐位一致
         for (std::size_t cp = 0; cp + 1 < color_pairs.size(); cp += 2) {
-            const std::uint8_t c0[4] = { color_pairs[cp][0], color_pairs[cp][1], color_pairs[cp][2], 255 };
-            const std::uint8_t c1[4] = { color_pairs[cp + 1][0], color_pairs[cp + 1][1], color_pairs[cp + 1][2], 255 };
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            const std::uint8_t c0[4] = {color_pairs[cp][0], color_pairs[cp][1], color_pairs[cp][2], 255};
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            const std::uint8_t c1[4] = {color_pairs[cp + 1][0], color_pairs[cp + 1][1], color_pairs[cp + 1][2], 255};
             for (float stop0 : stop0s) {
                 for (float range : ranges) {
                     for (int n : gwidths) {
@@ -239,13 +255,13 @@ AURORA_TEST() {
                         const float sy = fr(rng);
                         const float dy = fpos(rng);
                         const float len_sq = (dx * dx) + (dy * dy);
-                        const float inv_len_sq = len_sq > 0.001f ? 1.0f / len_sq : 0.0f;
+                        const float inv_len_sq = len_sq > 0.001F ? 1.0F / len_sq : 0.0F;
                         for (int yk = 0; yk < 4; ++yk) {
                             const float py = (static_cast<float>(yk) - sy) * dy;
-                            std::memset(buf_scalar.data(), 0, static_cast<std::size_t>(n) * 4u);
-                            std::memset(buf_sse2.data(), 0, static_cast<std::size_t>(n) * 4u);
-                            std::memset(buf_avx2.data(), 0, static_cast<std::size_t>(n) * 4u);
-                            std::memset(buf_disp.data(), 0, static_cast<std::size_t>(n) * 4u);
+                            std::memset(buf_scalar.data(), 0, static_cast<std::size_t>(n) * 4U);
+                            std::memset(buf_sse2.data(), 0, static_cast<std::size_t>(n) * 4U);
+                            std::memset(buf_avx2.data(), 0, static_cast<std::size_t>(n) * 4U);
+                            std::memset(buf_disp.data(), 0, static_cast<std::size_t>(n) * 4U);
                             gradient_linear_scanline_scalar(buf_scalar.data(), 0, n, sx, py, dx, dy, inv_len_sq, c0, c1,
                                                             stop0, range);
                             gradient_linear_fill(buf_disp.data(), 0, n, sx, py, dx, dy, inv_len_sq, c0, c1, stop0,
@@ -270,8 +286,12 @@ AURORA_TEST() {
         }
         // 径向渐变：扫描线逐位一致（cy=0，扫多条 py 行）
         for (std::size_t cp = 0; cp + 1 < color_pairs.size(); cp += 2) {
-            const std::uint8_t c0[4] = { color_pairs[cp][0], color_pairs[cp][1], color_pairs[cp][2], 255 };
-            const std::uint8_t c1[4] = { color_pairs[cp + 1][0], color_pairs[cp + 1][1], color_pairs[cp + 1][2], 255 };
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            const std::uint8_t c0[4] = {color_pairs[cp][0], color_pairs[cp][1], color_pairs[cp][2], 255};
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            const std::uint8_t c1[4] = {color_pairs[cp + 1][0], color_pairs[cp + 1][1], color_pairs[cp + 1][2], 255};
             for (float stop0 : stop0s) {
                 for (float range : ranges) {
                     for (int n : gwidths) {
@@ -279,13 +299,13 @@ AURORA_TEST() {
                             continue;
                         }
                         const float cx = fr(rng);
-                        const float inv_r = 1.0f / fpos(rng);
+                        const float inv_r = 1.0F / fpos(rng);
                         for (int yk = 0; yk < 4; ++yk) {
-                            const float py = static_cast<float>(yk) * static_cast<float>(yk); // (y-cy)^2, cy=0
-                            std::memset(buf_scalar.data(), 0, static_cast<std::size_t>(n) * 4u);
-                            std::memset(buf_sse2.data(), 0, static_cast<std::size_t>(n) * 4u);
-                            std::memset(buf_avx2.data(), 0, static_cast<std::size_t>(n) * 4u);
-                            std::memset(buf_disp.data(), 0, static_cast<std::size_t>(n) * 4u);
+                            const float py = static_cast<float>(yk) * static_cast<float>(yk);  // (y-cy)^2, cy=0
+                            std::memset(buf_scalar.data(), 0, static_cast<std::size_t>(n) * 4U);
+                            std::memset(buf_sse2.data(), 0, static_cast<std::size_t>(n) * 4U);
+                            std::memset(buf_avx2.data(), 0, static_cast<std::size_t>(n) * 4U);
+                            std::memset(buf_disp.data(), 0, static_cast<std::size_t>(n) * 4U);
                             gradient_radial_scanline_scalar(buf_scalar.data(), 0, n, cx, py, inv_r, c0, c1, stop0,
                                                             range);
                             gradient_radial_fill(buf_disp.data(), 0, n, cx, py, inv_r, c0, c1, stop0, range);

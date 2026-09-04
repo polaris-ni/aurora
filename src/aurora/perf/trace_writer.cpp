@@ -44,8 +44,8 @@ auto append_escaped(std::string &out, const char *s) -> void {
 } // namespace
 
 TraceWriter::TraceWriter() {
-    m_events.reserve(m_capacity);
-    m_counters.reserve(m_counter_capacity);
+    events_.reserve(capacity_);
+    counters_.reserve(counter_capacity_);
 }
 
 auto TraceWriter::instance() -> TraceWriter & {
@@ -59,19 +59,19 @@ auto TraceWriter::instance() -> TraceWriter & {
 
 auto TraceWriter::begin_capture() -> void {
     clear();
-    m_capturing = true;
+    capturing_ = true;
 }
 
-auto TraceWriter::end_capture() -> void { m_capturing = false; }
+auto TraceWriter::end_capture() -> void { capturing_ = false; }
 
-auto TraceWriter::capturing() const -> bool { return m_capturing; }
+auto TraceWriter::capturing() const -> bool { return capturing_; }
 
 // ---------------------------------------------------------------------------
 // 采集（热路径：仅 POD 拷贝，容量已预留）
 // ---------------------------------------------------------------------------
 
 auto TraceWriter::capture_frame(const Profiler &prof) -> void {
-    if (!m_capturing) {
+    if (!capturing_) {
         return;
     }
 
@@ -80,11 +80,11 @@ auto TraceWriter::capture_frame(const Profiler &prof) -> void {
     const double threshold = prof.long_task_threshold_ms();
 
     for (const ZoneSample &z : prof.frame_zones()) {
-        if (m_events.size() >= m_capacity) {
-            ++m_dropped;
+        if (events_.size() >= capacity_) {
+            ++dropped_;
             continue;
         }
-        m_events.push_back(TraceEvent{
+        events_.push_back(TraceEvent{
             .name = z.name,
             .ts_ms = frame_start + z.start_ms,
             .dur_ms = z.duration_ms,
@@ -97,26 +97,26 @@ auto TraceWriter::capture_frame(const Profiler &prof) -> void {
 }
 
 auto TraceWriter::capture_counters(std::uint64_t frame_index, double ts_ms, const RenderCounters &counters) -> void {
-    if (!m_capturing) {
+    if (!capturing_) {
         return;
     }
-    if (m_counters.size() >= m_counter_capacity) {
-        ++m_dropped;
+    if (counters_.size() >= counter_capacity_) {
+        ++dropped_;
         return;
     }
-    m_counters.push_back(TraceCounterSample{ .ts_ms = ts_ms, .frame_index = frame_index, .counters = counters });
+    counters_.push_back(TraceCounterSample{ .ts_ms = ts_ms, .frame_index = frame_index, .counters = counters });
 }
 
 auto TraceWriter::add_complete_event(const char *name, double ts_ms, double dur_ms, std::uint16_t depth,
                                      std::uint64_t frame_index) -> void {
-    if (!m_capturing) {
+    if (!capturing_) {
         return;
     }
-    if (m_events.size() >= m_capacity) {
-        ++m_dropped;
+    if (events_.size() >= capacity_) {
+        ++dropped_;
         return;
     }
-    m_events.push_back(TraceEvent{ .name = name,
+    events_.push_back(TraceEvent{ .name = name,
                                    .ts_ms = ts_ms,
                                    .dur_ms = dur_ms,
                                    .frame_index = frame_index,
@@ -126,14 +126,14 @@ auto TraceWriter::add_complete_event(const char *name, double ts_ms, double dur_
 }
 
 auto TraceWriter::add_instant_event(const char *name, double ts_ms, std::uint64_t frame_index) -> void {
-    if (!m_capturing) {
+    if (!capturing_) {
         return;
     }
-    if (m_events.size() >= m_capacity) {
-        ++m_dropped;
+    if (events_.size() >= capacity_) {
+        ++dropped_;
         return;
     }
-    m_events.push_back(TraceEvent{ .name = name,
+    events_.push_back(TraceEvent{ .name = name,
                                    .ts_ms = ts_ms,
                                    .dur_ms = 0.0,
                                    .frame_index = frame_index,
@@ -146,32 +146,32 @@ auto TraceWriter::add_instant_event(const char *name, double ts_ms, std::uint64_
 // 查询与容量
 // ---------------------------------------------------------------------------
 
-auto TraceWriter::event_count() const -> std::size_t { return m_events.size(); }
+auto TraceWriter::event_count() const -> std::size_t { return events_.size(); }
 
-auto TraceWriter::counter_sample_count() const -> std::size_t { return m_counters.size(); }
+auto TraceWriter::counter_sample_count() const -> std::size_t { return counters_.size(); }
 
-auto TraceWriter::dropped_events() const -> std::uint64_t { return m_dropped; }
+auto TraceWriter::dropped_events() const -> std::uint64_t { return dropped_; }
 
-auto TraceWriter::events() const -> const std::vector<TraceEvent> & { return m_events; }
+auto TraceWriter::events() const -> const std::vector<TraceEvent> & { return events_; }
 
-auto TraceWriter::counter_samples() const -> const std::vector<TraceCounterSample> & { return m_counters; }
+auto TraceWriter::counter_samples() const -> const std::vector<TraceCounterSample> & { return counters_; }
 
 auto TraceWriter::set_capacity(std::size_t events, std::size_t counter_samples) -> void {
-    m_capacity = events == 0 ? 1 : events;
-    m_counter_capacity = counter_samples == 0 ? 1 : counter_samples;
-    m_events.clear();
-    m_counters.clear();
-    m_events.reserve(m_capacity);
-    m_counters.reserve(m_counter_capacity);
-    m_dropped = 0;
+    capacity_ = events == 0 ? 1 : events;
+    counter_capacity_ = counter_samples == 0 ? 1 : counter_samples;
+    events_.clear();
+    counters_.clear();
+    events_.reserve(capacity_);
+    counters_.reserve(counter_capacity_);
+    dropped_ = 0;
 }
 
-auto TraceWriter::capacity() const -> std::size_t { return m_capacity; }
+auto TraceWriter::capacity() const -> std::size_t { return capacity_; }
 
 auto TraceWriter::clear() -> void {
-    m_events.clear();
-    m_counters.clear();
-    m_dropped = 0;
+    events_.clear();
+    counters_.clear();
+    dropped_ = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ auto TraceWriter::clear() -> void {
 auto TraceWriter::to_json() const -> std::string {
     std::string out;
     // 粗估：每条事件约 160 字节，计数事件约 400 字节，一次性预留避免反复扩容。
-    out.reserve((m_events.size() * 160) + (m_counters.size() * 400) + 256);
+    out.reserve((events_.size() * 160) + (counters_.size() * 400) + 256);
 
     out += "[\n";
 
@@ -204,7 +204,7 @@ auto TraceWriter::to_json() const -> std::string {
                                            AURORA_TRACE_PID, AURORA_TRACE_TID);
 
     // ---- zone / 瞬时事件 ----
-    for (const TraceEvent &e : m_events) {
+    for (const TraceEvent &e : events_) {
         sep();
         out += R"({"name":")";
         append_escaped(out, e.name);
@@ -223,7 +223,7 @@ auto TraceWriter::to_json() const -> std::string {
     }
 
     // ---- 计数器轨道（每帧一条，Perfetto 中每个 key 渲染为一条曲线）----
-    for (const TraceCounterSample &s : m_counters) {
+    for (const TraceCounterSample &s : counters_) {
         const RenderCounters &c = s.counters;
         sep();
         out += aurora::internal::string_format(

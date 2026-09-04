@@ -14,8 +14,8 @@ namespace aurora {
 
 /// @brief 单帧视频画面（已解码 RGBA8 像素，与 `core::Image` 同构，可直接 `Painter::draw_image`）。
 struct VideoFrame {
-    Image image;                        ///< 解码后的像素（RGBA8）。
-    std::chrono::microseconds pts{ 0 }; ///< 该帧的呈现时间戳（相对起点）。
+    Image image;  ///< 解码后的像素（RGBA8）。
+    std::chrono::microseconds pts{0};  ///< 该帧的呈现时间戳（相对起点）。
 };
 
 /// @brief 视频源抽象（**核心扩展点①**：可插拔解码/源）。
@@ -54,7 +54,7 @@ class VideoSource {
     virtual auto seek(std::chrono::microseconds pos) -> void = 0;
     [[nodiscard]] virtual auto position() const -> std::chrono::microseconds = 0;
 
-    virtual auto set_volume(double v) -> void = 0; ///< v ∈ [0,1]
+    virtual auto set_volume(double v) -> void = 0;  ///< v ∈ [0,1]
     virtual auto set_muted(bool m) -> void = 0;
 
     /// @brief 拉模型：取 `pos` 时刻的帧。
@@ -66,9 +66,8 @@ class VideoSource {
     // 推模型回调以值接收std::function，契约接口不改const，以免破坏override
     virtual auto set_frame_callback(std::function<void(const VideoFrame &)> /*cb*/) -> void {}
     /// @brief 推送音频 PCM（16-bit）样本，供 `AudioSink` 播放。
-    virtual auto
-    set_audio_callback(std::function<void(std::span<const std::int16_t>, int /*sample_rate*/, int /*channels*/)> /*cb*/)
-        -> void {}
+    virtual auto set_audio_callback(
+        std::function<void(std::span<const std::int16_t>, int /*sample_rate*/, int /*channels*/)> /*cb*/) -> void {}
     /// @brief 播放状态变化回调（true=播放中）。
     virtual auto set_state_callback(std::function<void(bool /*playing*/)> /*cb*/) -> void {}
     // NOLINTEND(performance-unnecessary-value-param)
@@ -88,7 +87,7 @@ class AudioSink {
     virtual ~AudioSink() = default;
     /// @brief 写入一包 16-bit PCM 采样。
     virtual auto play_samples(std::span<const std::int16_t> pcm, int sample_rate, int channels) -> void = 0;
-    virtual auto set_volume(double v) -> void = 0; ///< v ∈ [0,1]
+    virtual auto set_volume(double v) -> void = 0;  ///< v ∈ [0,1]
     virtual auto set_muted(bool m) -> void = 0;
 };
 
@@ -106,12 +105,12 @@ class VideoController {
     virtual ~VideoController() = default;
 
     virtual auto toggle_play() -> void = 0;
-    virtual auto seek_fraction(double f) -> void = 0; ///< f ∈ [0,1]
-    virtual auto set_volume(double v) -> void = 0;    ///< v ∈ [0,1]
+    virtual auto seek_fraction(double f) -> void = 0;  ///< f ∈ [0,1]
+    virtual auto set_volume(double v) -> void = 0;  ///< v ∈ [0,1]
     virtual auto set_muted(bool m) -> void = 0;
 
     [[nodiscard]] virtual auto is_playing() const -> bool = 0;
-    [[nodiscard]] virtual auto position_fraction() const -> double = 0; ///< ∈ [0,1]
+    [[nodiscard]] virtual auto position_fraction() const -> double = 0;  ///< ∈ [0,1]
     [[nodiscard]] virtual auto duration() const -> std::chrono::microseconds = 0;
     [[nodiscard]] virtual auto volume() const -> double = 0;
     [[nodiscard]] virtual auto muted() const -> bool = 0;
@@ -123,4 +122,4 @@ class VideoController {
     [[nodiscard]] virtual auto muted_signal() -> Reactive<bool> * = 0;
 };
 
-} // namespace aurora
+}  // namespace aurora

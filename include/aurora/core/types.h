@@ -12,14 +12,14 @@ namespace aurora {
 /// @note Thread: thread-safe
 /// @note Side-effects: pure
 struct Point {
-    float x = 0.0f;
-    float y = 0.0f;
+    float x = 0.0F;
+    float y = 0.0F;
 
     [[nodiscard]] constexpr auto operator+(const Point &o) const noexcept -> Point {
-        return Point{ .x = x + o.x, .y = y + o.y };
+        return Point{.x = x + o.x, .y = y + o.y};
     }
     [[nodiscard]] constexpr auto operator-(const Point &o) const noexcept -> Point {
-        return Point{ .x = x - o.x, .y = y - o.y };
+        return Point{.x = x - o.x, .y = y - o.y};
     }
 };
 
@@ -27,8 +27,8 @@ struct Point {
 /// @note Thread: thread-safe
 /// @note Side-effects: pure
 struct Size {
-    float width = 0.0f;
-    float height = 0.0f;
+    float width = 0.0F;
+    float height = 0.0F;
 
     /// @brief 表示"不限制"的尺寸（用于 wrap_content / 安卓 UNSPECIFIED）。
     [[nodiscard]] static constexpr auto infinity() noexcept -> Size {
@@ -39,13 +39,13 @@ struct Size {
     }
 
     [[nodiscard]] constexpr auto operator*(float s) const noexcept -> Size {
-        return Size{ .width = width * s, .height = height * s };
+        return Size{.width = width * s, .height = height * s};
     }
     [[nodiscard]] constexpr auto operator+(const Size &o) const noexcept -> Size {
-        return Size{ .width = width + o.width, .height = height + o.height };
+        return Size{.width = width + o.width, .height = height + o.height};
     }
     [[nodiscard]] constexpr auto operator-(const Size &o) const noexcept -> Size {
-        return Size{ .width = width - o.width, .height = height - o.height };
+        return Size{.width = width - o.width, .height = height - o.height};
     }
     [[nodiscard]] constexpr auto is_finite() const noexcept -> bool {
         return width != std::numeric_limits<float>::infinity() && height != std::numeric_limits<float>::infinity();
@@ -85,10 +85,10 @@ struct Rect {
 /// @note Thread: thread-safe
 /// @note Side-effects: pure
 struct EdgeInsets {
-    float left = 0.0f;
-    float top = 0.0f;
-    float right = 0.0f;
-    float bottom = 0.0f;
+    float left = 0.0F;
+    float top = 0.0F;
+    float right = 0.0F;
+    float bottom = 0.0F;
 
     [[nodiscard]] auto horizontal() const noexcept -> float { return left + right; }
     [[nodiscard]] auto vertical() const noexcept -> float { return top + bottom; }
@@ -96,10 +96,10 @@ struct EdgeInsets {
 
 /// @brief 尺寸意图（参考安卓 wrap_content / match_parent / exact，但编码为单一枚举）。
 enum class LengthKind : std::uint8_t {
-    WrapContent, ///< 按内容决定（max = 无限）
-    Expand,      ///< 填满父级可用空间（max = parentSize）
-    Fixed,       ///< 精准固定尺寸（min == max）
-    Fraction,    ///< 占父级比例（min == max == parent * value）
+    WrapContent,  ///< 按内容决定（max = 无限）
+    Expand,  ///< 填满父级可用空间（max = parentSize）
+    Fixed,  ///< 精准固定尺寸（min == max）
+    Fraction,  ///< 占父级比例（min == max == parent * value）
 };
 
 /// @brief 尺寸意图值：AI 直接写在 width/height 属性上。
@@ -107,20 +107,20 @@ enum class LengthKind : std::uint8_t {
 /// @note Side-effects: pure
 struct Length {
     LengthKind kind = LengthKind::WrapContent;
-    float value = 0.0f; ///< Fixed: 像素；Fraction: 比例(0~1)
+    float value = 0.0F;  ///< Fixed: 像素；Fraction: 比例(0~1)
 
     constexpr Length() noexcept = default;
-    constexpr Length(LengthKind k, float v = 0.0f) noexcept : kind(k), value(v) {}
+    constexpr Length(LengthKind k, float v = 0.0F) noexcept : kind(k), value(v) {}
 
-    [[nodiscard]] static constexpr auto wrap() noexcept -> Length { return Length{ LengthKind::WrapContent }; }
-    [[nodiscard]] static constexpr auto expand() noexcept -> Length { return Length{ LengthKind::Expand }; }
+    [[nodiscard]] static constexpr auto wrap() noexcept -> Length { return Length{LengthKind::WrapContent}; }
+    [[nodiscard]] static constexpr auto expand() noexcept -> Length { return Length{LengthKind::Expand}; }
     [[nodiscard]] static constexpr auto fixed(float px) noexcept -> Length {
-        AURORA_ASSERT(px >= 0.0f, "Length::fixed requires non-negative pixels");
-        return Length{ LengthKind::Fixed, px };
+        AURORA_ASSERT(px >= 0.0F, "Length::fixed requires non-negative pixels");
+        return Length{LengthKind::Fixed, px};
     }
     [[nodiscard]] static constexpr auto ratio(float f) noexcept -> Length {
-        AURORA_ASSERT(f >= 0.0f && f <= 1.0f, "Length::ratio requires a fraction in [0, 1]");
-        return Length{ LengthKind::Fraction, f };
+        AURORA_ASSERT((f >= 0.0F && f <= 1.0F), "Length::ratio requires a fraction in [0, 1]");
+        return Length{LengthKind::Fraction, f};
     }
 };
 
@@ -149,6 +149,6 @@ struct Constraints {
     [[nodiscard]] auto operator!=(const Constraints &o) const noexcept -> bool { return !(*this == o); }
 };
 
-} // namespace aurora
+}  // namespace aurora
 
 #include "aurora/core/dimension.h"

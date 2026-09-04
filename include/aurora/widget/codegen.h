@@ -19,15 +19,15 @@ namespace aurora::serialization {
 /// @note Side-effects: none
 /// @note Rebuildable: no
 enum class CodeStyle : std::uint8_t {
-    Fluent,         // 扁平/链式：au::Column{ a, b }; au::Button{ .label = "OK" }
-    StepByStep,     // 分步赋值：auto btn = au::Button{}; btn.label = "OK";
-    DesignatedInit, // 指定初始化器：au::Button{ .label = "OK", .children = {...} }
+    Fluent,  // 扁平/链式：au::Column{ a, b }; au::Button{ .label = "OK" }
+    StepByStep,  // 分步赋值：auto btn = au::Button{}; btn.label = "OK";
+    DesignatedInit,  // 指定初始化器：au::Button{ .label = "OK", .children = {...} }
 };
 
 namespace detail {
 /// 多子扁平容器（直接罗列子项，免 Props 包裹）。
 [[nodiscard]] constexpr auto is_flat_container(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 6> k_flat = { "Column", "Row", "Stack", "Grid", "Scroll", "Card" };
+    constexpr std::array<std::string_view, 6> k_flat = {"Column", "Row", "Stack", "Grid", "Scroll", "Card"};
     return std::ranges::find(k_flat, type) != k_flat.end();
 }
 
@@ -36,14 +36,14 @@ namespace detail {
     if (type == "Image") {
         return "ImageView";
     }
-    return std::string{ type };
+    return std::string{type};
 }
 /// @brief 把序列化 type 名映射到其 Props 聚合类型名。
 [[nodiscard]] inline auto cpp_props(std::string_view type) -> std::string {
     if (type == "Image") {
         return "ImageViewProps";
     }
-    return std::string{ type } + std::string{ "Props" };
+    return std::string{type} + std::string{"Props"};
 }
 
 // ---------- emit_props 辅助：枚举映射 + 值分派 ----------
@@ -58,29 +58,29 @@ namespace detail {
 ///       `SplitterOrientation`（两者取值集同名）。要正确输出必须按 `prop_descriptors[].type`
 ///       分派（需把属性声明类型透传进 emit_prop_value），故此处刻意不登记，避免猜错类型。
 [[nodiscard]] inline auto enum_type_for_key(const std::string &key) -> std::string {
-    static const std::unordered_map<std::string, std::string> m = {
-        { "text_align", "TextAlign" },
-        { "text_overflow", "TextOverflow" },
-        { "overflow", "TextOverflow" },     // Text 的真实属性名
-        { "decoration", "TextDecoration" }, // Text 的真实属性名（字符串形态；数组形态另处理）
-        { "main_axis_alignment", "MainAxisAlignment" },
-        { "cross_axis_alignment", "CrossAxisAlignment" },
-        { "main_axis_size", "MainAxisSize" },
-        { "stack_fit", "StackFit" },
-        { "alignment", "Alignment" }, // Stack 的真实属性名
-        { "box_fit", "BoxFit" },
-        { "overflow_strategy", "OverflowStrategy" },
-        { "font_style", "FontStyle" },
-        { "side", "DrawerSide" },        // Drawer 的真实属性名
-        { "position", "ToastPosition" }, // ToastHost 的真实属性名
+    static const std::unordered_map<std::string, std::string> M = {
+        {"text_align", "TextAlign"},
+        {"text_overflow", "TextOverflow"},
+        {"overflow", "TextOverflow"},  // Text 的真实属性名
+        {"decoration", "TextDecoration"},  // Text 的真实属性名（字符串形态；数组形态另处理）
+        {"main_axis_alignment", "MainAxisAlignment"},
+        {"cross_axis_alignment", "CrossAxisAlignment"},
+        {"main_axis_size", "MainAxisSize"},
+        {"stack_fit", "StackFit"},
+        {"alignment", "Alignment"},  // Stack 的真实属性名
+        {"box_fit", "BoxFit"},
+        {"overflow_strategy", "OverflowStrategy"},
+        {"font_style", "FontStyle"},
+        {"side", "DrawerSide"},  // Drawer 的真实属性名
+        {"position", "ToastPosition"},  // ToastHost 的真实属性名
     };
-    const auto it = m.find(key);
-    return it != m.end() ? it->second : std::string{};
+    const auto it = M.find(key);
+    return it != M.end() ? it->second : std::string{};
 }
 
 /// @brief 把 PascalCase 枚举值字符串转为 codegen 用的 EnumType::Value 表达式。
 [[nodiscard]] inline auto emit_enum_value(std::string_view enum_type, std::string_view json_val) -> std::string {
-    return std::string{ enum_type } + std::string{ "::" } + std::string{ json_val };
+    return std::string{enum_type} + std::string{"::"} + std::string{json_val};
 }
 
 /// @brief FontWeight 特殊处理：JSON 存储为数值字符串 "100".."900"。
@@ -94,21 +94,31 @@ namespace detail {
         w = value.get<int>();
     }
     switch (w) {
-    case 100: return "FontWeight::Thin";
-    case 200: return "FontWeight::ExtraLight";
-    case 300: return "FontWeight::Light";
-    case 400: return "FontWeight::Normal";
-    case 500: return "FontWeight::Medium";
-    case 600: return "FontWeight::SemiBold";
-    case 700: return "FontWeight::Bold";
-    case 800: return "FontWeight::ExtraBold";
-    case 900: return "FontWeight::Black";
-    default: return "FontWeight::Normal";
+        case 100:
+            return "FontWeight::Thin";
+        case 200:
+            return "FontWeight::ExtraLight";
+        case 300:
+            return "FontWeight::Light";
+        case 400:
+            return "FontWeight::Normal";
+        case 500:
+            return "FontWeight::Medium";
+        case 600:
+            return "FontWeight::SemiBold";
+        case 700:
+            return "FontWeight::Bold";
+        case 800:
+            return "FontWeight::ExtraBold";
+        case 900:
+            return "FontWeight::Black";
+        default:
+            return "FontWeight::Normal";
     }
 }
 
 /// @brief TextDecoration 特殊处理：JSON 存储为字符串数组 ["Underline", ...]。
-[[nodiscard]] inline auto emit_text_decoration(const Json &value) // NOLINT
+[[nodiscard]] inline auto emit_text_decoration(const Json &value)  // NOLINT
     -> std::string {
     if (value.is_array()) {
         std::string result{};
@@ -157,19 +167,31 @@ namespace detail {
     out.reserve(s.size() + 8);
     for (const char c : s) {
         switch (c) {
-        case '"': out += "\\\""; break;
-        case '\\': out += "\\\\"; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default: out += c; break;
+            case '"':
+                out += "\\\"";
+                break;
+            case '\\':
+                out += "\\\\";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            default:
+                out += c;
+                break;
         }
     }
     return out;
 }
 
 /// @brief 智能分派：根据 key 名称和 value 的 JSON 类型生成 C++ 表达式。
-[[nodiscard]] inline auto emit_prop_value(const std::string &key, const Json &value) -> std::string { // NOLINT
+[[nodiscard]] inline auto emit_prop_value(const std::string &key, const Json &value) -> std::string {  // NOLINT
     // --- 枚举属性（string → EnumType::Value）---
     if (value.is_string()) {
         const std::string enum_type = enum_type_for_key(key);
@@ -208,16 +230,16 @@ namespace detail {
         if (value.size() == 2 && value[0].is_string()) {
             const std::string unit = value[0].get<std::string>();
             if (unit == "px") {
-                return std::string{ "au::px(" } + std::to_string(value[1].get<float>()) + std::string{ ")" };
+                return std::string{"au::px("} + std::to_string(value[1].get<float>()) + std::string{")"};
             }
             if (unit == "percent") {
-                return std::string{ "au::percent(" } + std::to_string(value[1].get<float>()) + std::string{ ")" };
+                return std::string{"au::percent("} + std::to_string(value[1].get<float>()) + std::string{")"};
             }
         }
         if (value.size() >= 4 && value[0].is_number()) {
-            return std::string{ "Color{" } + std::to_string(value[0].get<int>()) + std::string{ "," } +
-                   std::to_string(value[1].get<int>()) + std::string{ "," } + std::to_string(value[2].get<int>()) +
-                   std::string{ "," } + std::to_string(value[3].get<int>()) + std::string{ "}" };
+            return std::string{"Color{"} + std::to_string(value[0].get<int>()) + std::string{","} +
+                   std::to_string(value[1].get<int>()) + std::string{","} + std::to_string(value[2].get<int>()) +
+                   std::string{","} + std::to_string(value[3].get<int>()) + std::string{"}"};
         }
         if (key == "text_decoration") {
             return emit_text_decoration(value);
@@ -226,18 +248,18 @@ namespace detail {
     // --- object: EdgeInsets {top,right,bottom,left} | legacy Length {value,unit} ---
     if (value.is_object()) {
         if (value.contains("top") && value.contains("left") && value.contains("right") && value.contains("bottom")) {
-            return std::string{ "EdgeInsets{" } + std::to_string(value["top"].get<float>()) + std::string{ "," } +
-                   std::to_string(value["right"].get<float>()) + std::string{ "," } +
-                   std::to_string(value["bottom"].get<float>()) + std::string{ "," } +
-                   std::to_string(value["left"].get<float>()) + std::string{ "}" };
+            return std::string{"EdgeInsets{"} + std::to_string(value["top"].get<float>()) + std::string{","} +
+                   std::to_string(value["right"].get<float>()) + std::string{","} +
+                   std::to_string(value["bottom"].get<float>()) + std::string{","} +
+                   std::to_string(value["left"].get<float>()) + std::string{"}"};
         }
         if (value.contains("value") && value.contains("unit")) {
             const auto unit = value["unit"].get<std::string>();
             const auto v = value["value"].get<float>();
             if (unit == "pct") {
-                return std::string{ "au::percent(" } + std::to_string(v) + std::string{ ")" };
+                return std::string{"au::percent("} + std::to_string(v) + std::string{")"};
             }
-            return std::string{ "au::px(" } + std::to_string(v) + std::string{ ")" };
+            return std::string{"au::px("} + std::to_string(v) + std::string{")"};
         }
     }
     // --- fallback ---
@@ -264,12 +286,12 @@ namespace detail {
     }
     return out;
 }
-} // namespace detail
+}  // namespace detail
 
 /// @brief 生成 "au::Type{ ... }" 形式（指定初始化器），indent 为缩进空格数。
 [[nodiscard]] inline auto to_code_di(const Json &node, int indent) -> std::string {
     const std::string pad(static_cast<std::size_t>(indent) * 4, ' ');
-    const std::string pad2 = pad + std::string{ "    " };
+    const std::string pad2 = pad + std::string{"    "};
     const std::string type = node.contains("type") ? node["type"].get<std::string>() : "Column";
     const Json &props = node.contains("props") ? node["props"] : Json::object();
     const bool has_children = node.contains("children") && node["children"].is_array() && !node["children"].empty();
@@ -305,13 +327,13 @@ namespace detail {
     const std::string type = node.contains("type") ? node["type"].get<std::string>() : "Column";
     const Json &props = node.contains("props") ? node["props"] : Json::object();
     const bool has_children = node.contains("children") && node["children"].is_array() && !node["children"].empty();
-    const std::string var = std::string{ "__w" } + std::to_string(counter++);
+    const std::string var = std::string{"__w"} + std::to_string(counter++);
     os << pad << "auto " << var << " = au::" << detail::cpp_class(type) << "{};\n";
     auto assign = detail::emit_props(props, ".");
     if (!assign.empty()) {
         std::string::size_type pos = 0;
         while ((pos = assign.find('.', pos)) != std::string::npos) {
-            assign.replace(pos, 1, var + std::string{ "." });
+            assign.replace(pos, 1, var + std::string{"."});
             pos += var.size() + 1;
         }
         os << pad << assign << ";\n";
@@ -341,7 +363,7 @@ namespace detail {
  */
 [[nodiscard]] inline auto to_code(const Json &node, int indent = 0) -> std::string {
     const std::string pad(static_cast<std::size_t>(indent) * 4, ' ');
-    const std::string pad2 = pad + std::string{ "    " };
+    const std::string pad2 = pad + std::string{"    "};
     const std::string type = node.contains("type") ? node["type"].get<std::string>() : "Column";
     const Json &props = node.contains("props") ? node["props"] : Json::object();
     const bool has_children = node.contains("children") && node["children"].is_array() && !node["children"].empty();
@@ -391,19 +413,21 @@ namespace detail {
 /// @brief 按指定风格生成代码（需求 #22）。默认 Fluent，与 to_code(node, int) 行为一致。
 [[nodiscard]] inline auto to_code(const Json &node, CodeStyle style, int indent = 0) -> std::string {
     switch (style) {
-    case CodeStyle::DesignatedInit: return to_code_di(node, indent);
-    case CodeStyle::StepByStep: {
-        std::ostringstream os{};
-        int counter = 0;
-        (void)to_code_sb(node, indent, os, counter);
-        return os.str();
-    }
-    case CodeStyle::Fluent:
-    default: return to_code(node, indent);
+        case CodeStyle::DesignatedInit:
+            return to_code_di(node, indent);
+        case CodeStyle::StepByStep: {
+            std::ostringstream os{};
+            int counter = 0;
+            (void)to_code_sb(node, indent, os, counter);
+            return os.str();
+        }
+        case CodeStyle::Fluent:
+        default:
+            return to_code(node, indent);
     }
 }
 
 /// @brief 便捷：直接对 widget 取快照再生成代码。
 [[nodiscard]] inline auto to_code(const Widget &w) -> std::string { return to_code(to_json(w)); }
 
-} // namespace aurora::serialization
+}  // namespace aurora::serialization

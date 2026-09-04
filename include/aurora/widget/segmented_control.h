@@ -34,84 +34,146 @@ class SegmentedControl : public LeafWidget {
   public:
     SegmentedControl() = default;
     explicit SegmentedControl(std::vector<std::string> segments, int selected = 0)
-        : m_segments(std::move(segments)), m_selected(selected) {}
+        : segments_(std::move(segments)), selected_(selected) {}
 
     [[nodiscard]] auto type_name() const -> const char * override { return "SegmentedControl"; }
-    [[nodiscard]] auto segments() const -> const std::vector<std::string> & { return m_segments; }
-    [[nodiscard]] auto selected() const -> int { return m_selected; }
+    [[nodiscard]] auto segments() const -> const std::vector<std::string> & { return segments_; }
+    [[nodiscard]] auto selected() const -> int { return selected_; }
     auto set_selected(int i) -> SegmentedControl & {
-        m_selected = i;
+        selected_ = i;
         mark_needs_paint();
         return *this;
     }
     auto set_on_change(std::function<void(int)> cb) -> SegmentedControl & {
-        m_on_change = std::move(cb);
+        on_change_ = std::move(cb);
         return *this;
     }
 
     /// @brief 设置选中段填充色（链式）。不调用则跟随主题 `Theme::primary`。
     auto set_active_color(Color c) -> SegmentedControl & {
-        m_active_color = c;
+        active_color_ = c;
         mark_needs_paint();
         return *this;
     }
     /// @brief 设置未选中段文本色（链式）。
     auto set_text_color(Color c) -> SegmentedControl & {
-        m_text_color = c;
+        text_color_ = c;
         mark_needs_paint();
         return *this;
     }
     /// @brief 设置选中段文本色（链式）。
     auto set_selected_text_color(Color c) -> SegmentedControl & {
-        m_selected_text_color = c;
+        selected_text_color_ = c;
         mark_needs_paint();
         return *this;
     }
     /// @brief 设置外框边框色（链式）。
     auto set_border_color(Color c) -> SegmentedControl & {
-        m_border_color = c;
+        border_color_ = c;
         mark_needs_paint();
         return *this;
     }
     /// @brief 设置字号 pt（链式）。
     auto set_font_size(float s) -> SegmentedControl & {
-        m_font_size = s > 0.0f ? s : 14.0f;
+        font_size_ = s > 0.0F ? s : 14.0F;
         mark_needs_layout();
         return *this;
     }
     /// @brief 设置外框圆角半径 dp（链式；0 = 直角）。
     auto set_corner_radius(float r) -> SegmentedControl & {
-        m_corner_radius = r >= 0.0f ? r : 0.0f;
+        corner_radius_ = r >= 0.0F ? r : 0.0F;
         mark_needs_paint();
         return *this;
     }
     /// @brief 设置是否启用（链式）；禁用态灰化绘制并忽略点击。
     auto set_enabled(bool v) -> SegmentedControl & {
-        m_enabled = v;
+        enabled_ = v;
         mark_needs_paint();
         return *this;
     }
-    [[nodiscard]] auto enabled() const -> bool { return m_enabled; }
+    [[nodiscard]] auto enabled() const -> bool { return enabled_; }
 
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "SegmentedControl",
-            .properties = {
-                { .name = "selected", .type = "int", .default_value = "0", .required = false, .note = "选中序号", .json_type = "integer", .enum_values = {}, .min_value = "0" },
-                { .name = "active_color", .type = "Color", .default_value = "theme.primary", .required = false, .note = "选中段填充色（缺省跟随主题 primary）", .json_type = "array" },
-                { .name = "text_color", .type = "Color", .default_value = "Color::black()", .required = false, .note = "未选中段文本色", .json_type = "array" },
-                { .name = "selected_text_color", .type = "Color", .default_value = "Color::white()", .required = false, .note = "选中段文本色", .json_type = "array" },
-                { .name = "border_color", .type = "Color", .default_value = "{200,200,200,255}", .required = false, .note = "外框边框色", .json_type = "array" },
-                { .name = "font_size", .type = "float", .default_value = "14.0", .required = false, .note = "字号(pt)", .json_type = "number", .enum_values = {}, .min_value = "0" },
-                { .name = "corner_radius", .type = "float", .default_value = "6.0", .required = false, .note = "外框圆角半径(dp)", .json_type = "number", .enum_values = {}, .min_value = "0" },
-                { .name = "enabled", .type = "bool", .default_value = "true", .required = false, .note = "是否可交互（禁用灰化）", .json_type = "boolean" },
-                { .name = "width", .type = "Length", .default_value = "auto", .required = false, .note = "", .json_type = "array" },
-                { .name = "height", .type = "Length", .default_value = "auto", .required = false, .note = "", .json_type = "array" },
-                { .name = "show", .type = "bool", .default_value = "true", .required = false, .note = "", .json_type = "boolean" },
-            },
-            .events = { "on_change" },
+            .properties =
+                {
+                    {.name = "selected",
+                     .type = "int",
+                     .default_value = "0",
+                     .required = false,
+                     .note = "选中序号",
+                     .json_type = "integer",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "active_color",
+                     .type = "Color",
+                     .default_value = "theme.primary",
+                     .required = false,
+                     .note = "选中段填充色（缺省跟随主题 primary）",
+                     .json_type = "array"},
+                    {.name = "text_color",
+                     .type = "Color",
+                     .default_value = "Color::black()",
+                     .required = false,
+                     .note = "未选中段文本色",
+                     .json_type = "array"},
+                    {.name = "selected_text_color",
+                     .type = "Color",
+                     .default_value = "Color::white()",
+                     .required = false,
+                     .note = "选中段文本色",
+                     .json_type = "array"},
+                    {.name = "border_color",
+                     .type = "Color",
+                     .default_value = "{200,200,200,255}",
+                     .required = false,
+                     .note = "外框边框色",
+                     .json_type = "array"},
+                    {.name = "font_size",
+                     .type = "float",
+                     .default_value = "14.0",
+                     .required = false,
+                     .note = "字号(pt)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "corner_radius",
+                     .type = "float",
+                     .default_value = "6.0",
+                     .required = false,
+                     .note = "外框圆角半径(dp)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "enabled",
+                     .type = "bool",
+                     .default_value = "true",
+                     .required = false,
+                     .note = "是否可交互（禁用灰化）",
+                     .json_type = "boolean"},
+                    {.name = "width",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "height",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "show",
+                     .type = "bool",
+                     .default_value = "true",
+                     .required = false,
+                     .note = "",
+                     .json_type = "boolean"},
+                },
+            .events = {"on_change"},
             .children_policy = "none",
-            .examples = { R"(au::SegmentedControl({"Day", "Week", "Month"}, 0))" },
+            .examples = {R"(au::SegmentedControl({"Day", "Week", "Month"}, 0))"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
@@ -119,20 +181,20 @@ class SegmentedControl : public LeafWidget {
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
 
     auto on_pointer_event(MouseEvent &e) -> void override {
-        if (!m_enabled) {
-            e.handled = true; // 禁用态吞掉点击（不冒泡），不切换
+        if (!enabled_) {
+            e.is_handled = true;  // 禁用态吞掉点击（不冒泡），不切换
             return;
         }
         if (e.action == MouseAction::Press && e.button == MouseButton::Left) {
-            const Font f{ .size_pt = m_font_size };
-            float x = 0.0f;
-            for (size_t i = 0; i < m_segments.size(); ++i) {
-                const float sw = render::FontEngine::measure_width(m_segments[i], f) + 24.0f;
+            const Font f{.size_pt = font_size_};
+            float x = 0.0F;
+            for (size_t i = 0; i < segments_.size(); ++i) {
+                const float sw = render::FontEngine::measure_width(segments_[i], f) + 24.0F;
                 if (e.local_position.x >= x && e.local_position.x < x + sw) {
-                    if (std::cmp_not_equal(m_selected, i)) {
-                        m_selected = static_cast<int>(i);
-                        if (m_on_change) {
-                            m_on_change(m_selected);
+                    if (std::cmp_not_equal(selected_, i)) {
+                        selected_ = static_cast<int>(i);
+                        if (on_change_) {
+                            on_change_(selected_);
                         }
                         mark_needs_paint();
                     }
@@ -140,104 +202,104 @@ class SegmentedControl : public LeafWidget {
                 }
                 x += sw;
             }
-            e.handled = true;
+            e.is_handled = true;
         }
     }
 
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["selected"] = m_selected;
+        props["selected"] = selected_;
         Json segs = Json::array();
-        for (const auto &s : m_segments) {
+        for (const auto &s : segments_) {
             segs.push_back(s);
         }
         props["segments"] = segs;
-        if (m_active_color.has_value()) {
-            props["active_color"] = color_to_json(*m_active_color); // 未设置不输出：保留「跟随主题」语义
+        if (active_color_.has_value()) {
+            props["active_color"] = color_to_json(*active_color_);  // 未设置不输出：保留「跟随主题」语义
         }
-        props["text_color"] = color_to_json(m_text_color);
-        props["selected_text_color"] = color_to_json(m_selected_text_color);
-        props["border_color"] = color_to_json(m_border_color);
-        props["font_size"] = m_font_size;
-        props["corner_radius"] = m_corner_radius;
-        props["enabled"] = m_enabled;
+        props["text_color"] = color_to_json(text_color_);
+        props["selected_text_color"] = color_to_json(selected_text_color_);
+        props["border_color"] = color_to_json(border_color_);
+        props["font_size"] = font_size_;
+        props["corner_radius"] = corner_radius_;
+        props["enabled"] = enabled_;
     }
 
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("selected")) {
-            m_selected = props["selected"].get<int>();
+            selected_ = props["selected"].get<int>();
         }
         if (props.contains("segments") && props["segments"].is_array()) {
-            m_segments.clear();
+            segments_.clear();
             for (const auto &s : props["segments"]) {
-                m_segments.push_back(s.get<std::string>());
+                segments_.push_back(s.get<std::string>());
             }
         }
         if (props.contains("active_color")) {
-            m_active_color = json_to_color(props["active_color"]);
+            active_color_ = json_to_color(props["active_color"]);
         }
         if (props.contains("text_color")) {
-            m_text_color = json_to_color(props["text_color"]);
+            text_color_ = json_to_color(props["text_color"]);
         }
         if (props.contains("selected_text_color")) {
-            m_selected_text_color = json_to_color(props["selected_text_color"]);
+            selected_text_color_ = json_to_color(props["selected_text_color"]);
         }
         if (props.contains("border_color")) {
-            m_border_color = json_to_color(props["border_color"]);
+            border_color_ = json_to_color(props["border_color"]);
         }
         if (props.contains("font_size")) {
-            m_font_size = props["font_size"].get<float>();
+            font_size_ = props["font_size"].get<float>();
         }
         if (props.contains("corner_radius")) {
-            m_corner_radius = props["corner_radius"].get<float>();
+            corner_radius_ = props["corner_radius"].get<float>();
         }
         if (props.contains("enabled")) {
-            m_enabled = props["enabled"].get<bool>();
+            enabled_ = props["enabled"].get<bool>();
         }
     }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        const Font f{ .size_pt = m_font_size };
-        const float seg_h = render::FontEngine::measure_height(f) + 12.0f;
-        float total_w = 0.0f;
-        for (const auto &s : m_segments) {
-            total_w += render::FontEngine::measure_width(s, f) + 24.0f;
+        const Font f{.size_pt = font_size_};
+        const float seg_h = render::FontEngine::measure_height(f) + 12.0F;
+        float total_w = 0.0F;
+        for (const auto &s : segments_) {
+            total_w += render::FontEngine::measure_width(s, f) + 24.0F;
         }
-        return c.constrain(Size{ .width = total_w, .height = seg_h });
+        return c.constrain(Size{.width = total_w, .height = seg_h});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        const Font f{ .size_pt = m_font_size };
+        const Font f{.size_pt = font_size_};
         // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
-        Color accent = m_active_color.value_or(inherit_theme(ctx).primary);
-        Color text = m_text_color;
-        Color sel_text = m_selected_text_color;
-        Color border = m_border_color;
-        if (!m_enabled) {
-            accent = Color{ 176, 176, 180, 255 };
-            text = Color{ 168, 168, 172, 255 };
-            sel_text = Color{ 240, 240, 242, 255 };
-            border = Color{ 215, 215, 219, 255 };
+        Color accent = active_color_.value_or(inherit_theme(ctx).primary);
+        Color text = text_color_;
+        Color sel_text = selected_text_color_;
+        Color border = border_color_;
+        if (!enabled_) {
+            accent = Color{176, 176, 180, 255};
+            text = Color{168, 168, 172, 255};
+            sel_text = Color{240, 240, 242, 255};
+            border = Color{215, 215, 219, 255};
         }
         // 外框（圆角裁剪保证选中段填充不溢出圆角）
-        if (m_corner_radius > 0.0f) {
-            p.push_clip_rounded(bounds, m_corner_radius);
+        if (corner_radius_ > 0.0F) {
+            p.push_clip_rounded(bounds, corner_radius_);
         }
         float x = bounds.origin.x;
-        for (size_t i = 0; i < m_segments.size(); ++i) {
-            const float sw = render::FontEngine::measure_width(m_segments[i], f) + 24.0f;
-            const Rect seg{ .origin = Point{ .x = x, .y = bounds.origin.y },
-                            .size = Size{ .width = sw, .height = bounds.size.height } };
-            paint_segment(p, i, seg, std::cmp_equal(i, m_selected), f, accent, text, sel_text);
+        for (size_t i = 0; i < segments_.size(); ++i) {
+            const float sw = render::FontEngine::measure_width(segments_[i], f) + 24.0F;
+            const Rect seg{.origin = Point{.x = x, .y = bounds.origin.y},
+                           .size = Size{.width = sw, .height = bounds.size.height}};
+            paint_segment(p, i, seg, std::cmp_equal(i, selected_), f, accent, text, sel_text);
             x += sw;
         }
-        if (m_corner_radius > 0.0f) {
+        if (corner_radius_ > 0.0F) {
             p.pop_clip();
         }
-        if (m_corner_radius > 0.0f) {
-            p.draw_rounded_border(bounds, m_corner_radius, 1.0f, border);
+        if (corner_radius_ > 0.0F) {
+            p.draw_rounded_border(bounds, corner_radius_, 1.0F, border);
         } else {
             p.draw_rect(bounds, border);
         }
@@ -249,23 +311,23 @@ class SegmentedControl : public LeafWidget {
         if (selected) {
             p.fill_rect(seg, accent);
         }
-        p.draw_text(Rect{ .origin = Point{ .x = seg.origin.x + 12.0f, .y = seg.origin.y + 6.0f },
-                          .size = Size{ .width = seg.size.width - 24.0f, .height = seg.size.height } },
-                    m_segments[index], f, selected ? sel_text : text);
+        p.draw_text(Rect{.origin = Point{.x = seg.origin.x + 12.0F, .y = seg.origin.y + 6.0F},
+                         .size = Size{.width = seg.size.width - 24.0F, .height = seg.size.height}},
+                    segments_[index], f, selected ? sel_text : text);
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    std::vector<std::string> m_segments;
-    int m_selected = 0;
-    std::function<void(int)> m_on_change;
-    std::optional<Color> m_active_color;                ///< 选中段填充色；空 = 跟随主题 primary
-    Color m_text_color = Color::black();                ///< 未选中段文本色
-    Color m_selected_text_color = Color::white();       ///< 选中段文本色
-    Color m_border_color = Color{ 200, 200, 200, 255 }; ///< 外框边框色
-    float m_font_size = 14.0f;                          ///< 字号 pt
-    float m_corner_radius = 6.0f;                       ///< 外框圆角半径 dp；0 = 直角
-    bool m_enabled = true;                              ///< 禁用态灰化并忽略点击
+    std::vector<std::string> segments_;
+    int selected_ = 0;
+    std::function<void(int)> on_change_;
+    std::optional<Color> active_color_;  ///< 选中段填充色；空 = 跟随主题 primary
+    Color text_color_ = Color::black();  ///< 未选中段文本色
+    Color selected_text_color_ = Color::white();  ///< 选中段文本色
+    Color border_color_ = Color{200, 200, 200, 255};  ///< 外框边框色
+    float font_size_ = 14.0F;  ///< 字号 pt
+    float corner_radius_ = 6.0F;  ///< 外框圆角半径 dp；0 = 直角
+    bool enabled_ = true;  ///< 禁用态灰化并忽略点击
     // NOLINTEND(*-non-private-member-variables-in-classes)
 };
 
-} // namespace aurora
+}  // namespace aurora

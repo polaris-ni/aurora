@@ -12,9 +12,8 @@
 #include <string>
 #include <vector>
 
-#include "aurora/aurora.h"
-
 #include "api_schema.h"
+#include "aurora/aurora.h"
 #include "known_enums.h"
 
 namespace {
@@ -23,8 +22,10 @@ namespace {
 // values must match the real enum members in include/aurora/** verbatim (guarded by tests/test_known_enums.cpp).
 auto known_enums() -> std::map<std::string, std::vector<std::string>> { return aurora::tools::known_enums(); }
 
-} // namespace
+}  // namespace
 
+// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// try/catch 包装
 auto main(int argc, char **argv) -> int {
     aurora::serialization::register_core_widgets();
 
@@ -34,86 +35,170 @@ auto main(int argc, char **argv) -> int {
     aurora::storage::Json layout_rules = aurora::storage::Json::object();
     {
         aurora::storage::Json flex = aurora::storage::Json::object();
-        flex["description"] = "Flex layout (Column/Row): children are laid out along the main axis, aligned on the cross axis";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        flex["description"] =
+            "Flex layout (Column/Row): children are laid out along the main axis, aligned on the cross axis";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         flex["main_axis_alignment"] = known_enums()["MainAxisAlignment"];
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         flex["cross_axis_alignment"] = known_enums()["CrossAxisAlignment"];
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         flex["main_axis_size"] = known_enums()["MainAxisSize"];
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         flex["gap_constraint"] = "gap >= 0";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         layout_rules["flex"] = flex;
 
         aurora::storage::Json stack = aurora::storage::Json::object();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         stack["description"] = "Stack layout: children are layered, later-drawn ones on top";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         stack["fit"] = known_enums()["StackFit"];
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         layout_rules["stack"] = stack;
 
         aurora::storage::Json grid = aurora::storage::Json::object();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         grid["description"] = "Grid layout: a two-dimensional grid with a fixed column count";
-        grid["required_props"] = aurora::storage::Json::array({ "columns" });
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        grid["required_props"] = aurora::storage::Json::array({"columns"});
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         grid["column_constraint"] = "columns >= 1";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         layout_rules["grid"] = grid;
 
         aurora::storage::Json length = aurora::storage::Json::object();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         length["description"] = "Length type: auto | fill | [px, v] | [percent, v]";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         length["auto"] = "WrapContent, sized by its content";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         length["fill"] = "Expand, absorb the remaining space";
-        length["px_example"] = aurora::storage::Json::array({ "px", 100 });
-        length["percent_example"] = aurora::storage::Json::array({ "percent", 50 });
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        length["px_example"] = aurora::storage::Json::array({"px", 100});
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        length["percent_example"] = aurora::storage::Json::array({"percent", 50});
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         layout_rules["length"] = length;
 
         aurora::storage::Json edge_insets = aurora::storage::Json::object();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         edge_insets["description"] = "EdgeInsets object: {left, top, right, bottom}, unit dp";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         layout_rules["edge_insets"] = edge_insets;
 
         aurora::storage::Json color = aurora::storage::Json::object();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         color["description"] = "Color type: [r, g, b, a], each component 0-255";
-        color["example"] = aurora::storage::Json::array({ 255, 128, 0, 255 });
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        color["example"] = aurora::storage::Json::array({255, 128, 0, 255});
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         layout_rules["color"] = color;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     api["layout_rules"] = layout_rules;
 
     // ---- state_patterns: usage scenarios and JSON examples for the three state patterns ----
     aurora::storage::Json state_patterns = aurora::storage::Json::array();
     {
         aurora::storage::Json p1 = aurora::storage::Json::object();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         p1["name"] = "simple_value";
-        p1["description"] = "Simple value state: the widget holds a single mutable value and notifies via the on_changed callback";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        p1["description"] =
+            "Simple value state: the widget holds a single mutable value and notifies via the on_changed callback";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         p1["applicable_widgets"] = aurora::storage::Json::array(
-            { "TextInput", "Slider", "Checkbox", "Switch", "Dropdown", "RadioGroup", "SegmentedControl", "TabBar" });
+            {"TextInput", "Slider", "Checkbox", "Switch", "Dropdown", "RadioGroup", "SegmentedControl", "TabBar"});
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         p1["json_example"] =
             R"({"type": "TextInput", "props": {"value": "hello"}, "events": {"on_changed": "handler_name"}})";
         state_patterns.push_back(p1);
 
         aurora::storage::Json p2 = aurora::storage::Json::object();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         p2["name"] = "selection_index";
-        p2["description"] = "Selection index state: one item is selected from an options list, managed via selected_index and on_change";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        p2["description"] =
+            "Selection index state: one item is selected from an options list, managed via selected_index and "
+            "on_change";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         p2["applicable_widgets"] =
-            aurora::storage::Json::array({ "Dropdown", "RadioGroup", "SegmentedControl", "TabBar" });
+            aurora::storage::Json::array({"Dropdown", "RadioGroup", "SegmentedControl", "TabBar"});
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         p2["json_example"] =
             R"({"type": "Dropdown", "props": {"options": ["A","B","C"], "selected_index": 1}, "events": {"on_change": "handler"}})";
         state_patterns.push_back(p2);
 
         aurora::storage::Json p3 = aurora::storage::Json::object();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         p3["name"] = "toggle_state";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         p3["description"] = "Toggle state: a boolean toggle, managed via checked/value and on_changed/on_toggled";
-        p3["applicable_widgets"] = aurora::storage::Json::array({ "Checkbox", "Switch", "ExpansionPanel" });
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        p3["applicable_widgets"] = aurora::storage::Json::array({"Checkbox", "Switch", "ExpansionPanel"});
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         p3["json_example"] =
             R"({"type": "Checkbox", "props": {"checked": false}, "events": {"on_changed": "handler"}})";
         state_patterns.push_back(p3);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     api["state_patterns"] = state_patterns;
 
     // Preserve the error_codes section generated by gen_error_codes so a full rewrite does not overwrite it.
-    if (argc > 1 && std::string(argv[1]) != "-") {    // NOLINT(*-pro-bounds-pointer-arithmetic)
-        std::ifstream ein(argv[1], std::ios::binary); // NOLINT(*-pro-bounds-pointer-arithmetic)
+    if (argc > 1 && std::string(argv[1]) != "-") {  // NOLINT(*-pro-bounds-pointer-arithmetic)
+        std::ifstream ein(argv[1], std::ios::binary);  // NOLINT(*-pro-bounds-pointer-arithmetic)
         if (ein) {
             try {
                 nlohmann::json existing = nlohmann::json::parse(ein);
                 if (existing.contains("error_codes")) {
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                     api["error_codes"] = existing["error_codes"];
                 }
                 // Preserve the debug section generated by gen_debug_api (same merge-only pattern) so a full
                 // rewrite does not overwrite it.
                 if (existing.contains("debug")) {
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                     api["debug"] = existing["debug"];
                 }
                 // NOLINTNEXTLINE(*-empty-catch)
@@ -126,7 +211,7 @@ auto main(int argc, char **argv) -> int {
     // When a file path argument is given, write the file directly (cross-platform, for the CMake target
     // aurora_api_json); otherwise write to stdout, preserving the `gen_api_tools > aurora_api.json` manual
     // redirection usage.
-    char *argv1 = argv[1]; // NOLINT(*-pro-bounds-pointer-arithmetic)
+    char *argv1 = argv[1];  // NOLINT(*-pro-bounds-pointer-arithmetic)
     if (argc > 1 && std::string(argv1) != "-") {
         std::ofstream out(argv1, std::ios::binary);
         if (!out) {

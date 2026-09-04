@@ -33,7 +33,7 @@ constexpr unsigned long AURORA_KEYSYM_bracket_left = 0x5B, AURORA_KEYSYM_bracket
 constexpr unsigned long AURORA_KEYSYM_semicolon = 0x3B, AURORA_KEYSYM_apostrophe = 0x27;
 constexpr unsigned long AURORA_KEYSYM_comma = 0x2C, AURORA_KEYSYM_period = 0x2E, AURORA_KEYSYM_slash = 0x2F,
                         AURORA_KEYSYM_grave = 0x60;
-} // namespace keysym
+}  // namespace keysym
 
 /// @brief keysym（X11 或 XKB，数值相同）→ 平台无关 KeyCode。
 inline auto keysym_to_keycode(unsigned long ks) -> KeyCode {
@@ -51,42 +51,72 @@ inline auto keysym_to_keycode(unsigned long ks) -> KeyCode {
         return static_cast<KeyCode>(static_cast<int>(KeyCode::F1) + static_cast<int>(ks - AURORA_KEYSYM_F1));
     }
     switch (ks) {
-    case AURORA_KEYSYM_Return:
-    case AURORA_KEYSYM_KP_Enter: return KeyCode::Enter;
-    case AURORA_KEYSYM_Escape: return KeyCode::Escape;
-    case AURORA_KEYSYM_Tab: return KeyCode::Tab;
-    case AURORA_KEYSYM_BackSpace: return KeyCode::Backspace;
-    case AURORA_KEYSYM_Delete: return KeyCode::Delete;
-    case AURORA_KEYSYM_space: return KeyCode::Space;
-    case AURORA_KEYSYM_Left: return KeyCode::ArrowLeft;
-    case AURORA_KEYSYM_Right: return KeyCode::ArrowRight;
-    case AURORA_KEYSYM_Up: return KeyCode::ArrowUp;
-    case AURORA_KEYSYM_Down: return KeyCode::ArrowDown;
-    case AURORA_KEYSYM_Shift_L:
-    case AURORA_KEYSYM_Shift_R: return KeyCode::Shift;
-    case AURORA_KEYSYM_Control_L:
-    case AURORA_KEYSYM_Control_R: return KeyCode::Control;
-    case AURORA_KEYSYM_Alt_L:
-    case AURORA_KEYSYM_Alt_R: return KeyCode::Alt;
-    case AURORA_KEYSYM_Super_L:
-    case AURORA_KEYSYM_Super_R: return KeyCode::Meta;
-    case AURORA_KEYSYM_Home: return KeyCode::Home;
-    case AURORA_KEYSYM_End: return KeyCode::End;
-    case AURORA_KEYSYM_Prior: return KeyCode::PageUp;
-    case AURORA_KEYSYM_Next: return KeyCode::PageDown;
-    case AURORA_KEYSYM_minus: return KeyCode::Minus;
-    case AURORA_KEYSYM_equal: return KeyCode::Equal;
-    case AURORA_KEYSYM_bracket_left: return KeyCode::LeftBracket;
-    case AURORA_KEYSYM_bracket_right: return KeyCode::RightBracket;
-    case AURORA_KEYSYM_backslash: return KeyCode::Backslash;
-    case AURORA_KEYSYM_semicolon: return KeyCode::Semicolon;
-    case AURORA_KEYSYM_apostrophe: return KeyCode::Quote;
-    case AURORA_KEYSYM_comma: return KeyCode::Comma;
-    case AURORA_KEYSYM_period: return KeyCode::Period;
-    case AURORA_KEYSYM_slash: return KeyCode::Slash;
-    case AURORA_KEYSYM_grave: return KeyCode::Backquote;
-    default: return KeyCode::Unknown;
+        case AURORA_KEYSYM_Return:
+        case AURORA_KEYSYM_KP_Enter:
+            return KeyCode::Enter;
+        case AURORA_KEYSYM_Escape:
+            return KeyCode::Escape;
+        case AURORA_KEYSYM_Tab:
+            return KeyCode::Tab;
+        case AURORA_KEYSYM_BackSpace:
+            return KeyCode::Backspace;
+        case AURORA_KEYSYM_Delete:
+            return KeyCode::Delete;
+        case AURORA_KEYSYM_space:
+            return KeyCode::Space;
+        case AURORA_KEYSYM_Left:
+            return KeyCode::ArrowLeft;
+        case AURORA_KEYSYM_Right:
+            return KeyCode::ArrowRight;
+        case AURORA_KEYSYM_Up:
+            return KeyCode::ArrowUp;
+        case AURORA_KEYSYM_Down:
+            return KeyCode::ArrowDown;
+        case AURORA_KEYSYM_Shift_L:
+        case AURORA_KEYSYM_Shift_R:
+            return KeyCode::Shift;
+        case AURORA_KEYSYM_Control_L:
+        case AURORA_KEYSYM_Control_R:
+            return KeyCode::Control;
+        case AURORA_KEYSYM_Alt_L:
+        case AURORA_KEYSYM_Alt_R:
+            return KeyCode::Alt;
+        case AURORA_KEYSYM_Super_L:
+        case AURORA_KEYSYM_Super_R:
+            return KeyCode::Meta;
+        case AURORA_KEYSYM_Home:
+            return KeyCode::Home;
+        case AURORA_KEYSYM_End:
+            return KeyCode::End;
+        case AURORA_KEYSYM_Prior:
+            return KeyCode::PageUp;
+        case AURORA_KEYSYM_Next:
+            return KeyCode::PageDown;
+        case AURORA_KEYSYM_minus:
+            return KeyCode::Minus;
+        case AURORA_KEYSYM_equal:
+            return KeyCode::Equal;
+        case AURORA_KEYSYM_bracket_left:
+            return KeyCode::LeftBracket;
+        case AURORA_KEYSYM_bracket_right:
+            return KeyCode::RightBracket;
+        case AURORA_KEYSYM_backslash:
+            return KeyCode::Backslash;
+        case AURORA_KEYSYM_semicolon:
+            return KeyCode::Semicolon;
+        case AURORA_KEYSYM_apostrophe:
+            return KeyCode::Quote;
+        case AURORA_KEYSYM_comma:
+            return KeyCode::Comma;
+        case AURORA_KEYSYM_period:
+            return KeyCode::Period;
+        case AURORA_KEYSYM_slash:
+            return KeyCode::Slash;
+        case AURORA_KEYSYM_grave:
+            return KeyCode::Backquote;
+        default:
+            return KeyCode::Unknown;
     }
 }
 
-} // namespace aurora::detail
+}  // namespace aurora::detail

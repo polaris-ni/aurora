@@ -10,6 +10,7 @@
 #pragma once
 
 #include <aurora/aurora.h>
+
 #include <nlohmann/json.hpp>
 
 #include "known_enums.h"
@@ -45,4 +46,4 @@ inline auto build_api_skeleton() -> nlohmann::json {
     return api;
 }
 
-} // namespace aurora::tools
+}  // namespace aurora::tools

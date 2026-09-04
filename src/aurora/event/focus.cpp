@@ -16,19 +16,19 @@ namespace {
     thread_local FocusManager *slot = nullptr;
     return slot;
 }
-} // namespace
+}  // namespace
 
 auto current_focus_manager() noexcept -> FocusManager * { return focus_manager_slot(); }
 
 auto set_current_focus_manager(FocusManager *fm) noexcept -> void { focus_manager_slot() = fm; }
 
-auto FocusManager::set_root(Widget *root) -> void { m_root = root; }
+auto FocusManager::set_root(Widget *root) -> void { root_ = root; }
 
 auto FocusManager::live_focused() const -> Widget * {
-    if (m_focused_guarded) {
-        return m_focused_guard.lock().get(); // 由 shared_ptr 持有：回收后为 nullptr
+    if (focused_guarded_) {
+        return focused_guard_.lock().get();  // 由 shared_ptr 持有：回收后为 nullptr
     }
-    return m_focused; // 栈/成员对象：生命周期由持有者保证
+    return focused_;  // 栈/成员对象：生命周期由持有者保证
 }
 
 auto FocusManager::focused() const -> Widget * { return live_focused(); }
@@ -43,30 +43,30 @@ auto FocusManager::set_focus(Widget *w, FocusDirection /*reason*/) -> void {
     if (w == old) {
         return;
     }
-    m_focused = w;
+    focused_ = w;
     // 记录生命周期守卫：能 lock 成功即说明该控件由 shared_ptr 持有（此刻它必然存活）。
-    m_focused_guard = (w != nullptr) ? w->weak_from_this() : std::weak_ptr<Widget>{};
-    m_focused_guarded = (w != nullptr) && (m_focused_guard.lock() != nullptr);
+    focused_guard_ = (w != nullptr) ? w->weak_from_this() : std::weak_ptr<Widget>{};
+    focused_guarded_ = (w != nullptr) && (focused_guard_.lock() != nullptr);
     if (old != nullptr) {
         old->on_focus_change(false);
     }
     if (w != nullptr) {
         w->on_focus_change(true);
     }
-    if (m_on_change) {
-        m_on_change(old, w);
+    if (on_change_) {
+        on_change_(old, w);
     }
 }
 
 auto FocusManager::clear() -> void { set_focus(nullptr); }
 
-auto FocusManager::set_on_change(std::function<void(Widget *, Widget *)> cb) -> void { m_on_change = std::move(cb); }
+auto FocusManager::set_on_change(std::function<void(Widget *, Widget *)> cb) -> void { on_change_ = std::move(cb); }
 
 auto FocusManager::move_focus(FocusDirection dir) -> bool {
-    if (m_root == nullptr) {
+    if (root_ == nullptr) {
         return false;
     }
-    std::vector<Widget *> candidates = collect_focusable(*m_root);
+    std::vector<Widget *> candidates = collect_focusable(*root_);
     if (candidates.empty()) {
         return false;
     }
@@ -85,7 +85,7 @@ auto FocusManager::move_focus(FocusDirection dir) -> bool {
         const size_t idx = it == candidates.end() ? 0 : static_cast<size_t>(it - candidates.begin());
         const size_t n = candidates.size();
         const size_t next = backward ? (idx + n - 1) % n : (idx + 1) % n;
-        set_focus(candidates[next], dir); // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        set_focus(candidates[next], dir);  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
         return true;
     }
 
@@ -96,8 +96,8 @@ auto FocusManager::move_focus(FocusDirection dir) -> bool {
     }
 
     const auto [origin, size] = cur_focus->focus_bounds();
-    const float cx = origin.x + (size.width * 0.5f);
-    const float cy = origin.y + (size.height * 0.5f);
+    const float cx = origin.x + (size.width * 0.5F);
+    const float cy = origin.y + (size.height * 0.5F);
 
     Widget *best = nullptr;
     float best_score = std::numeric_limits<float>::max();
@@ -107,36 +107,37 @@ auto FocusManager::move_focus(FocusDirection dir) -> bool {
             continue;
         }
         const auto [r_origin, r_size] = w->focus_bounds();
-        const float wx = r_origin.x + (r_size.width * 0.5f);
-        const float wy = r_origin.y + (r_size.height * 0.5f);
+        const float wx = r_origin.x + (r_size.width * 0.5F);
+        const float wy = r_origin.y + (r_size.height * 0.5F);
 
         // 检查候选是否在指定方向上
         bool in_direction = false;
-        float primary_dist = 0.0f;
-        float secondary_dist = 0.0f;
+        float primary_dist = 0.0F;
+        float secondary_dist = 0.0F;
 
         switch (dir) {
-        case FocusDirection::Up:
-            in_direction = (wy < cy);
-            primary_dist = cy - wy;
-            secondary_dist = std::abs(wx - cx);
-            break;
-        case FocusDirection::Down:
-            in_direction = (wy > cy);
-            primary_dist = wy - cy;
-            secondary_dist = std::abs(wx - cx);
-            break;
-        case FocusDirection::Left:
-            in_direction = (wx < cx);
-            primary_dist = cx - wx;
-            secondary_dist = std::abs(wy - cy);
-            break;
-        case FocusDirection::Right:
-            in_direction = (wx > cx);
-            primary_dist = wx - cx;
-            secondary_dist = std::abs(wy - cy);
-            break;
-        default: break;
+            case FocusDirection::Up:
+                in_direction = (wy < cy);
+                primary_dist = cy - wy;
+                secondary_dist = std::abs(wx - cx);
+                break;
+            case FocusDirection::Down:
+                in_direction = (wy > cy);
+                primary_dist = wy - cy;
+                secondary_dist = std::abs(wx - cx);
+                break;
+            case FocusDirection::Left:
+                in_direction = (wx < cx);
+                primary_dist = cx - wx;
+                secondary_dist = std::abs(wy - cy);
+                break;
+            case FocusDirection::Right:
+                in_direction = (wx > cx);
+                primary_dist = wx - cx;
+                secondary_dist = std::abs(wy - cy);
+                break;
+            default:
+                break;
         }
 
         if (!in_direction) {
@@ -144,7 +145,7 @@ auto FocusManager::move_focus(FocusDirection dir) -> bool {
         }
 
         // 评分：主方向距离 + 垂直偏移惩罚（2x）
-        const float score = primary_dist + (secondary_dist * 2.0f);
+        const float score = primary_dist + (secondary_dist * 2.0F);
         if (score < best_score) {
             best_score = score;
             best = w;
@@ -158,7 +159,7 @@ auto FocusManager::move_focus(FocusDirection dir) -> bool {
     return false;
 }
 
-auto FocusManager::collect_focusable(Widget &root) -> std::vector<Widget *> {
+auto FocusManager::collect_focusable(const Widget &root) -> std::vector<Widget *> {
     std::vector<Widget *> out;
     collect_focusable_impl(root, out);
     std::ranges::stable_sort(out,
@@ -168,16 +169,16 @@ auto FocusManager::collect_focusable(Widget &root) -> std::vector<Widget *> {
 
 auto FocusManager::collect_focusable_impl(const Widget &w, std::vector<Widget *> &out) -> void {
     if (!w.show.get()) {
-        return; // 不可见控件不参与焦点序
+        return;  // 不可见控件不参与焦点序
     }
     if (w.focusable()) {
         // 子控件遍历（`for_each_child` / `child_nodes`）只暴露 const 视图，但焦点候选必须存为
         // 可写 `Widget*`（`move_focus` 后续的 `set_focus` 要调用 `on_focus_change` 改控件焦点态）。
         // 控件本身并非 const 对象（根来自 `FocusManager::set_root(Widget*)`），此处去 const 不改变
         // 任何对象，是遍历 API 受限下唯一且必要的转换点；遍历全程只读，不修改子控件。
-        out.push_back(const_cast<Widget *>(&w)); // NOLINT(cppcoreguidelines-pro-type-const-cast)
+        out.push_back(const_cast<Widget *>(&w));  // NOLINT(cppcoreguidelines-pro-type-const-cast)
     }
     w.for_each_child([&](const Widget &child) -> void { collect_focusable_impl(child, out); });
 }
 
-} // namespace aurora
+}  // namespace aurora

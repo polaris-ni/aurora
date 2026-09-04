@@ -48,7 +48,7 @@ namespace aurora {
 
 /// @brief Trace Event 相位（对应规范的 `ph` 字段，只用到本项目需要的三种）。
 enum class TracePhase : std::uint8_t {
-    Complete, ///< `"X"`：带时长的完整事件（zone），构成火焰图的一根柱子
+    Complete,  ///< `"X"`：带时长的完整事件（zone），构成火焰图的一根柱子
     Instant,  ///< `"i"`：瞬时标记（帧边界、长任务点）
 };
 
@@ -58,20 +58,20 @@ enum class TracePhase : std::uint8_t {
  * @warning `name` 为不拥有所有权的静态字符串指针，生命周期须覆盖整个进程。
  */
 struct TraceEvent {
-    const char *name = nullptr;              ///< 静态字符串，不拥有所有权
-    double ts_ms = 0.0;                      ///< 绝对时刻（`Stopwatch::now_ms()` 口径）
-    double dur_ms = 0.0;                     ///< 时长；`Instant` 相位下无意义
-    std::uint64_t frame_index = 0;           ///< 所属帧序号（写入 `args.frame`）
-    std::uint16_t depth = 0;                 ///< 嵌套深度（写入 `args.depth`）
-    TracePhase phase = TracePhase::Complete; ///< 事件相位
-    bool long_task = false;                  ///< 是否被判定为长任务（写入 `args.long_task`）
+    const char *name = nullptr;  ///< 静态字符串，不拥有所有权
+    double ts_ms = 0.0;  ///< 绝对时刻（`Stopwatch::now_ms()` 口径）
+    double dur_ms = 0.0;  ///< 时长；`Instant` 相位下无意义
+    std::uint64_t frame_index = 0;  ///< 所属帧序号（写入 `args.frame`）
+    std::uint16_t depth = 0;  ///< 嵌套深度（写入 `args.depth`）
+    TracePhase phase = TracePhase::Complete;  ///< 事件相位
+    bool long_task = false;  ///< 是否被判定为长任务（写入 `args.long_task`）
 };
 
 /// @brief 计数器采样点：一帧的 `RenderCounters` 快照（写为 `ph:"C"` 计数事件）。
 struct TraceCounterSample {
-    double ts_ms = 0.0;            ///< 绝对时刻
-    std::uint64_t frame_index = 0; ///< 帧序号
-    RenderCounters counters{};     ///< 当帧计数快照
+    double ts_ms = 0.0;  ///< 绝对时刻
+    std::uint64_t frame_index = 0;  ///< 帧序号
+    RenderCounters counters{};  ///< 当帧计数快照
 };
 
 /**
@@ -91,10 +91,10 @@ struct TraceCounterSample {
 class TraceWriter {
   public:
     /// @brief 默认事件容量（约覆盖 300 帧 × 200 zone；超出即丢弃并计数）。
-    static constexpr std::size_t AURORA_DEFAULT_CAPACITY = 65536; // NOLINT(readability-identifier-naming)
+    static constexpr std::size_t AURORA_DEFAULT_CAPACITY = 65536;  // NOLINT(readability-identifier-naming)
 
     /// @brief 默认计数器采样容量（约 4096 帧）。
-    static constexpr std::size_t AURORA_DEFAULT_COUNTER_CAPACITY = 4096; // NOLINT(readability-identifier-naming)
+    static constexpr std::size_t AURORA_DEFAULT_COUNTER_CAPACITY = 4096;  // NOLINT(readability-identifier-naming)
 
     /// @brief 取得全局唯一实例。
     [[nodiscard]] static auto instance() -> TraceWriter &;
@@ -185,13 +185,13 @@ class TraceWriter {
   private:
     TraceWriter();
 
-    bool m_capturing = false;
-    std::size_t m_capacity = AURORA_DEFAULT_CAPACITY;
-    std::size_t m_counter_capacity = AURORA_DEFAULT_COUNTER_CAPACITY;
-    std::uint64_t m_dropped = 0;
+    bool capturing_ = false;
+    std::size_t capacity_ = AURORA_DEFAULT_CAPACITY;
+    std::size_t counter_capacity_ = AURORA_DEFAULT_COUNTER_CAPACITY;
+    std::uint64_t dropped_ = 0;
 
-    std::vector<TraceEvent> m_events;
-    std::vector<TraceCounterSample> m_counters;
+    std::vector<TraceEvent> events_;
+    std::vector<TraceCounterSample> counters_;
 };
 
-} // namespace aurora
+}  // namespace aurora

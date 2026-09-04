@@ -33,7 +33,7 @@ class Router {
     [[nodiscard]] auto build_root(const std::string &name) const -> Node;
 
   private:
-    std::unordered_map<std::string, RouteBuilder> m_routes;
+    std::unordered_map<std::string, RouteBuilder> routes_;
 };
 
-} // namespace aurora
+}  // namespace aurora

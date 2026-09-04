@@ -26,15 +26,15 @@ struct BottomNavBarProps {
     std::vector<BottomNavItem> items;
     int selected_index = 0;
     std::function<void(int)> on_select;
-    float bar_height = 64.0f;
-    float selected_color = 0.0f; ///< 占位：实际配色在 on_paint 内由 selected_index 决定
+    float bar_height = 64.0F;
+    float selected_color = 0.0F;  ///< 占位：实际配色在 on_paint 内由 selected_index 决定
 };
 
 /**
  * @brief 底部导航栏（Material 风格）：等分宽度的若干 tab，选中态高亮。
  *
  * 自身为单控件（非容器），点击命中对应 tab 触发 `on_select(index)`。图标由
- * `BottomNavItem::icon` 绘制器以 `Painter` 回调绘制，文案以 `Text` 节点绘制。
+ * `BottomNavItem::icon_` 绘制器以 `Painter` 回调绘制，文案以 `Text` 节点绘制。
  * 选中态由 `selected_index` 驱动重绘，宿主通常以 `State<int>` 持有并重建页面。
  *
  * 采用继承式双模 API：`BottomNavBarProps` 字段即本控件公有字段。
@@ -59,22 +59,32 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "BottomNavBar",
-            .properties = {
-                { .name="selected_index", .type="int", .default_value="0", .required=false, .note="当前选中项下标" },
-                { .name="bar_height", .type="float", .default_value="64.0", .required=false, .note="导航栏高度(px)" },
-            },
-            .events = { { "on_select", "void(int)", "点击某项时回调（参数为下标）" } },
+            .properties =
+                {
+                    {.name = "selected_index",
+                     .type = "int",
+                     .default_value = "0",
+                     .required = false,
+                     .note = "当前选中项下标"},
+                    {.name = "bar_height",
+                     .type = "float",
+                     .default_value = "64.0",
+                     .required = false,
+                     .note = "导航栏高度(px)"},
+                },
+            .events = {{"on_select", "void(int)", "点击某项时回调（参数为下标）"}},
             .children_policy = "none",
-            .examples = { "au::BottomNavBar{ au::BottomNavBarProps{ .items = {...}, .on_select = [](int){} } }" },
+            .examples = {"au::BottomNavBar{ au::BottomNavBarProps{ .items = {...}, .on_select = [](int){} } }"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["selected_index"] = selected_index;
+        props["selected_index"] = selected_index;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
         props["bar_height"] = bar_height;
     }
+
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("selected_index")) {
@@ -113,7 +123,7 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
                 if (on_select) {
                     on_select(idx);
                 }
-                e.handled = true;
+                e.is_handled = true;
             }
         }
     }
@@ -121,17 +131,17 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         const float h = std::min(bar_height, c.max.height);
-        return c.constrain(Size{ .width = c.max.width, .height = h });
+        return c.constrain(Size{.width = c.max.width, .height = h});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         p.push_clip(bounds);
         // 背景条
-        p.fill_rect(bounds, Color{ 0xFF, 0xFF, 0xFF, 0xFF });
+        p.fill_rect(bounds, Color{0xFF, 0xFF, 0xFF, 0xFF});
         // 顶部发丝分隔线
-        p.draw_line(Point{ .x = bounds.origin.x, .y = bounds.origin.y },
-                    Point{ .x = bounds.origin.x + bounds.size.width, .y = bounds.origin.y }, 1.0f,
-                    Color{ 0xDA, 0xDC, 0xE0, 0xFF });
+        p.draw_line(Point{.x = bounds.origin.x, .y = bounds.origin.y},
+                    Point{.x = bounds.origin.x + bounds.size.width, .y = bounds.origin.y}, 1.0F,
+                    Color{0xDA, 0xDC, 0xE0, 0xFF});
 
         const int n = static_cast<int>(items.size());
         if (n == 0) {
@@ -139,59 +149,58 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
             return;
         }
         const float cell_w = bounds.size.width / static_cast<float>(n);
-        constexpr Color color_blue{ 0x1A, 0x73, 0xE8, 0xFF };
-        constexpr Color color_gray{ 0x5F, 0x63, 0x68, 0xFF };
-        constexpr Color color_pill{ 0xE8, 0xF0, 0xFE, 0xFF };
+        constexpr Color color_blue{0x1A, 0x73, 0xE8, 0xFF};
+        constexpr Color color_gray{0x5F, 0x63, 0x68, 0xFF};
+        constexpr Color color_pill{0xE8, 0xF0, 0xFE, 0xFF};
 
         for (int i = 0; i < n; ++i) {
             const bool sel = i == selected_index;
-            const Rect cell{ .origin =
-                                 Point{ .x = bounds.origin.x + static_cast<float>(i) * cell_w, .y = bounds.origin.y },
-                             .size = Size{ .width = cell_w, .height = bounds.size.height } };
+            const Rect cell{
+                .origin = Point{.x = bounds.origin.x + (static_cast<float>(i) * cell_w), .y = bounds.origin.y},
+                .size = Size{.width = cell_w, .height = bounds.size.height}};
             if (sel) {
-                const Rect pill{ .origin = Point{ .x = cell.origin.x + cell_w * 0.15f, .y = cell.origin.y + 8.0f },
-                                 .size = Size{ .width = cell_w * 0.70f, .height = cell.size.height - 16.0f } };
-                p.fill_rounded_rect(pill, 16.0f, color_pill);
+                const Rect pill{.origin = Point{.x = cell.origin.x + (cell_w * 0.15F), .y = cell.origin.y + 8.0F},
+                                .size = Size{.width = cell_w * 0.70F, .height = cell.size.height - 16.0F}};
+                p.fill_rounded_rect(pill, 16.0F, color_pill);
             }
             // 图标区（顶部居中）
-            const Rect icon_rect{ .origin =
-                                      Point{ .x = cell.origin.x + cell_w * 0.5f - 13.0f, .y = cell.origin.y + 10.0f },
-                                  .size = Size{ .width = 26.0f, .height = 26.0f } };
+            const Rect icon_rect{
+                .origin = Point{.x = cell.origin.x + (cell_w * 0.5F) - 13.0F, .y = cell.origin.y + 10.0F},
+                .size = Size{.width = 26.0F, .height = 26.0F}};
             if (items[i].icon) {
                 items[i].icon(p, icon_rect, sel);
             }
 
             // 文案（图标下方居中）
-            const Rect label_rect{ .origin = Point{ .x = cell.origin.x + 4.0f,
-                                                    .y = cell.origin.y + cell.size.height - 22.0f },
-                                   .size = Size{ .width = cell_w - 8.0f, .height = 16.0f } };
+            const Rect label_rect{
+                .origin = Point{.x = cell.origin.x + 4.0F, .y = cell.origin.y + cell.size.height - 22.0F},
+                .size = Size{.width = cell_w - 8.0F, .height = 16.0F}};
             auto label = std::make_shared<Text>(items[i].label);
             label->text_color = sel ? color_blue : color_gray;
-            label->font.size_pt = 12.0f;
+            label->font.size_pt = 12.0F;
             label->text_align = TextAlign::Center;
-            Node ln{ label };
-            ln.widget().layout(Constraints{ .min = Size{ .width = 0.0f, .height = 0.0f }, .max = label_rect.size },
-                               ctx);
+            Node ln{label};
+            ln.widget().layout(Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = label_rect.size}, ctx);
             ln.widget().paint(p, label_rect, ctx);
         }
         p.pop_clip();
     }
 
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext & /*ctx*/) -> Widget * override {
-        return Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = bounds.size }.contains(local) ? this : nullptr;
+        return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local) ? this : nullptr;
     }
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdangling-pointer"
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
-        if (!Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = bounds.size }.contains(local)) {
+        if (!Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local)) {
             return {};
         }
         (void)ctx;
-        return std::vector{ HitNode{ this, weak_from_this(), bounds.origin } };
+        return std::vector{HitNode{this, weak_from_this(), bounds.origin}};
     }
 #pragma GCC diagnostic pop
 };
 
-} // namespace aurora
+}  // namespace aurora

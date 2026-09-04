@@ -14,7 +14,6 @@
 #include "aurora/aurora.h"
 #include "aurora/theming/theme_query.h"
 #include "aurora/widget/text.h"
-
 #include "test_harness.h"
 
 using aurora::Color;
@@ -32,7 +31,7 @@ AURORA_TEST() {
     {
         Theme theme;
         theme.set_token("color.brand", Color::red());
-        theme.set_token("font.body", Font{ .family = "serif", .size_pt = 20 });
+        theme.set_token("font.body", Font{.family = "serif", .size_pt = 20});
         theme.set_token("space.md", 16.0);
 
         auto c = theme.token("color.brand");
@@ -61,12 +60,12 @@ AURORA_TEST() {
         auto target = std::make_shared<Text>();
 
         Theme inner;
-        inner.set_token("brand", Color::blue()); // 同 token 名，内层覆盖
+        inner.set_token("brand", Color::blue());  // 同 token 名，内层覆盖
         inner.set_token("accent", Color::green());
-        auto scope_inner = std::make_shared<ThemeScope>(inner, Node{ std::static_pointer_cast<Widget>(target) });
-        auto scope_outer = std::make_shared<ThemeScope>(outer, Node{ std::static_pointer_cast<Widget>(scope_inner) });
+        auto scope_inner = std::make_shared<ThemeScope>(inner, Node{std::static_pointer_cast<Widget>(target)});
+        auto scope_outer = std::make_shared<ThemeScope>(outer, Node{std::static_pointer_cast<Widget>(scope_inner)});
 
-        Theme merged = resolve_theme(Node{ std::static_pointer_cast<Widget>(scope_outer) }, *target);
+        Theme merged = resolve_theme(Node{std::static_pointer_cast<Widget>(scope_outer)}, *target);
 
         // 最近生效值：内层 brand 覆盖外层 brand
         auto brand = merged.token("brand");
@@ -88,19 +87,19 @@ AURORA_TEST() {
         Theme theme;
         theme.set_token("color.brand", Color::red());
         theme.set_token("space.md", 16.0);
-        theme.set_token("font.body", Font{ .family = "serif", .size_pt = 20 });
+        theme.set_token("font.body", Font{.family = "serif", .size_pt = 20});
 
         // 3a. 字段填具体值 → 直接返回，不走令牌
         {
             StyleProps sp;
             sp.background = Color::green();
             sp.corner_radius = 8.0;
-            sp.font = Font{ .family = "mono" };
+            sp.font = Font{.family = "mono"};
             auto r = sp.resolve(theme);
             AURORA_TEST_CHECK_EQ(r.background, Color::green());
             AURORA_TEST_CHECK_NEAR(r.corner_radius, 8.0, 1e-9);
             AURORA_TEST_CHECK_EQ(r.font.family, std::string("mono"));
-            AURORA_TEST_CHECK_NEAR(r.padding, 0.0, 1e-9); // 未设 → 默认
+            AURORA_TEST_CHECK_NEAR(r.padding, 0.0, 1e-9);  // 未设 → 默认
         }
 
         // 3b. 字段填令牌名 → 从 Theme 解析
@@ -113,7 +112,7 @@ AURORA_TEST() {
             AURORA_TEST_CHECK_EQ(r.background, Color::red());
             AURORA_TEST_CHECK_NEAR(r.padding, 16.0, 1e-9);
             AURORA_TEST_CHECK_EQ(r.font.family, std::string("serif"));
-            AURORA_TEST_CHECK_NEAR(r.font.size_pt, 20.0f, 1e-3f);
+            AURORA_TEST_CHECK_NEAR(r.font.size_pt, 20.0F, 1e-3F);
         }
 
         // 3c. 令牌缺失 → 回退 fallback

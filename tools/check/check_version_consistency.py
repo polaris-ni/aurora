@@ -109,7 +109,8 @@ def main():
         print("[FAIL] CHANGELOG.json is missing the currentVersion field")
         return 1
     if current != lib_ver:
-        print(f"[FAIL] version mismatch: CHANGELOG.currentVersion={current} but library AURORA_VERSION_STRING={lib_ver}")
+        print(
+            f"[FAIL] version mismatch: CHANGELOG.currentVersion={current} but library AURORA_VERSION_STRING={lib_ver}")
         return 1
 
     # ---- Item 2: non-blocking wording warning ----
@@ -128,7 +129,8 @@ def main():
     print(f"[PASS] versions match: currentVersion={current} == library {lib_ver}")
     if warnings:
         for w in warnings:
-            print(f"[WARN] {w} (non-blocking: descriptive text naturally goes stale with refactors; sync when convenient)")
+            print(
+                f"[WARN] {w} (non-blocking: descriptive text naturally goes stale with refactors; sync when convenient)")
     return 0
 
 

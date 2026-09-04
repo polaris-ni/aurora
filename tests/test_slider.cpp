@@ -54,9 +54,13 @@ static void test_props() {
     sl.set_active_color(Color::red()).set_inactive_color(Color::blue()).set_range(-1.0, 1.0);
     Json j;
     sl.serialize_props(j);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["active_color"][0].get<int>() == 255, "slider active=red");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["inactive_color"][2].get<int>() == 255, "slider inactive=blue");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["min"].get<double>(), -1.0), "slider min=-1");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["max"].get<double>(), 1.0), "slider max=1");
 }
 
@@ -76,7 +80,7 @@ static void test_interaction() {
     constexpr BuildContext ctx;
     sl2.layout(Constraints{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 200, .height = 200 } }, ctx);
 
-    fire(sl2, make_press(100.0f, 12.0f));
+    fire(sl2, make_press(100.0F, 12.0F));
     AURORA_TEST_CHECK_MSG(near_d(sl2.value(), 0.5, 1e-2), "Slider: press at midpoint sets ~0.5");
 
     State st{ 0.3 };
@@ -93,6 +97,7 @@ static void test_roundtrip() {
     w->set_range(0.0, 10.0);
     w->set_value(3.5);
     Json j = serialization::to_json(*w);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["props"].contains("value") && j["props"]["value"].get<double>() == 3.5,
                           "Slider serialization value");
     const auto back = roundtrip<Slider>(j, "Slider");
@@ -113,7 +118,7 @@ static void test_modern_props() {
     constexpr BuildContext ctx;
     sl2.layout(Constraints{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 200, .height = 200 } }, ctx);
     sl2.set_enabled(false);
-    fire(sl2, make_press(100.0f, 12.0f));
+    fire(sl2, make_press(100.0F, 12.0F));
     AURORA_TEST_CHECK_MSG(near_d(sl2.value(), 0.2), "Slider: disabled ignores click, value unchanged");
 
     // 新属性序列化往返；active_color 未设置不输出（跟随主题）
@@ -123,13 +128,18 @@ static void test_modern_props() {
     AURORA_TEST_CHECK_MSG(!j0.contains("active_color"), "Slider: unset active_color not serialized (follows theme)");
 
     Slider sl4;
-    sl4.set_thumb_color(Color::red()).set_track_height(8.0f).set_thumb_size(20.0f).set_step(0.5).set_enabled(false);
+    sl4.set_thumb_color(Color::red()).set_track_height(8.0F).set_thumb_size(20.0F).set_step(0.5).set_enabled(false);
     Json j;
     sl4.serialize_props(j);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["thumb_color"][0].get<int>() == 255, "Slider: thumb_color serialization");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["track_height"].get<double>(), 8.0), "Slider: track_height serialization");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["thumb_size"].get<double>(), 20.0), "Slider: thumb_size serialization");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["step"].get<double>(), 0.5), "Slider: step serialization");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["enabled"].get<bool>() == false, "Slider: enabled serialization");
 
     Slider sl5;

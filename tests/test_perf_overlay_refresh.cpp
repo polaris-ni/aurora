@@ -22,7 +22,6 @@
 #include "aurora/app/perf_overlay.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/widget.h"
-
 #include "test_harness.h"
 
 namespace au = aurora;
@@ -32,6 +31,8 @@ static auto capture_surface(const au::Surface &s, std::vector<std::uint8_t> &out
     const int w = static_cast<int>(s.size().width);
     const int h = static_cast<int>(s.size().height);
     const std::uint8_t *buf = s.data();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
     out.assign(buf, buf + (static_cast<size_t>(w) * h * 4));
 }
 
@@ -40,7 +41,7 @@ static auto pixel_diff(const std::vector<std::uint8_t> &a, const std::vector<std
     long d = 0;
     const size_t n = a.size() < b.size() ? a.size() : b.size();
     for (size_t i = 0; i < n; ++i) {
-        if (a[i] != b[i]) {
+        if (a.at(i) != b.at(i)) {
             ++d;
         }
     }
@@ -50,12 +51,12 @@ static auto pixel_diff(const std::vector<std::uint8_t> &a, const std::vector<std
 AURORA_TEST() {
     au::FrameStats::instance().reset();
 
-    au::Scene scene{ au::Node{ std::make_shared<au::Column>() } };
+    au::Scene scene{au::Node{std::make_shared<au::Column>()}};
     au::WindowOptions opts;
-    opts.size = au::Size{ .width = 1100.0f, .height = 760.0f };
-    auto win_res = au::create_window(au::HeadlessOptions{ opts });
+    opts.size = au::Size{.width = 1100.0F, .height = 760.0F};
+    auto win_res = au::create_window(au::HeadlessOptions{opts});
     AURORA_TEST_CHECK(static_cast<bool>(win_res));
-    au::Application app{ std::move(scene), std::move(win_res.value()), opts };
+    au::Application app{std::move(scene), std::move(win_res.value()), opts};
 
     // 叠加层（保留引用以便断言机制修复）
     auto ov = std::make_shared<au::PerfOverlay>();
@@ -93,7 +94,7 @@ AURORA_TEST() {
     const auto bright_count = [&](const std::vector<std::uint8_t> &buf) -> long {
         long c = 0;
         for (size_t i = 0; i + 3 < buf.size(); i += 4) {
-            if (buf[i] + buf[i + 1] + buf[i + 2] > 300) {
+            if (buf.at(i) + buf.at(i + 1) + buf.at(i + 2) > 300) {
                 ++c;
             }
         }
@@ -125,6 +126,7 @@ AURORA_TEST() {
         diff);
 
     // 行为断言：叠加层未被冻结——两次抓取的像素应显著不同
-    AURORA_TEST_CHECK_MSG(diff > 500, "PerfOverlay should refresh live: two-frame pixel diff should be significant "
-                                      "(>500B). If 0, frozen at first frame by DL");
+    AURORA_TEST_CHECK_MSG(diff > 500,
+                          "PerfOverlay should refresh live: two-frame pixel diff should be significant "
+                          "(>500B). If 0, frozen at first frame by DL");
 }

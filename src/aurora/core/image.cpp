@@ -13,7 +13,7 @@ auto read_le32(const std::vector<std::uint8_t> &b, std::size_t off) -> std::uint
     std::uint32_t v = 0;
     for (int i = 3; i >= 0; --i) {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        v = (v << 8u) | static_cast<std::uint32_t>(b[off + static_cast<std::size_t>(i)]);
+        v = (v << 8U) | static_cast<std::uint32_t>(b[off + static_cast<std::size_t>(i)]);
     }
     return v;
 }
@@ -28,9 +28,9 @@ auto read_le16(const std::vector<std::uint8_t> &b, std::size_t off) -> std::uint
 
 /// @brief BMP 宽高上限（BITMAPINFOHEADER 字段为 32 位，但实际不可能这么大）：
 /// 用于在任何算术之前截断攻击者可控的维度，避免 `w * 3` 这类 int 运算溢出（UB）。
-constexpr std::uint32_t AURORA_BMP_MAX_DIMENSION = 65535u;
+constexpr std::uint32_t AURORA_BMP_MAX_DIMENSION = 65535U;
 
-} // namespace
+}  // namespace
 
 namespace detail {
 
@@ -57,7 +57,7 @@ auto load_bmp(const std::vector<std::uint8_t> &b) -> Result<Image> {
     }
     const int w = static_cast<int>(raw_w);
     const int h = static_cast<int>(raw_h);
-    const std::size_t row_bytes = (((static_cast<std::size_t>(raw_w) * 3u) + 3u) / 4u) * 4u; // 4 字节对齐
+    const std::size_t row_bytes = (((static_cast<std::size_t>(raw_w) * 3U) + 3U) / 4U) * 4U;  // 4 字节对齐
     // 像素区必须完整存在于文件内：此前仅校验 data_off 落在缓冲内，导致一个 55 字节的
     // 文件即可声明 1000×1000 并从堆上越界读出 ~3MB 相邻内存返回给调用方（堆信息泄露）。
     // 用 64 位算术求所需字节数，使 32 位目标上 row_bytes * h 也不会回绕而放行。
@@ -68,24 +68,24 @@ auto load_bmp(const std::vector<std::uint8_t> &b) -> Result<Image> {
     Image img;
     img.width = w;
     img.height = h;
-    img.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u);
+    img.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U);
     for (int y = 0; y < h; ++y) {
         // BMP 行自底向上：文件第 y 行对应图像第 (h-1-y) 行
         const std::size_t src_row = data_off + (static_cast<std::size_t>(y) * row_bytes);
-        const std::size_t dst_row = static_cast<std::size_t>(h - 1 - y) * static_cast<std::size_t>(w) * 4u;
+        const std::size_t dst_row = static_cast<std::size_t>(h - 1 - y) * static_cast<std::size_t>(w) * 4U;
         for (int x = 0; x < w; ++x) {
-            const std::size_t s = src_row + (static_cast<std::size_t>(x) * 3u);
-            const std::size_t d = dst_row + (static_cast<std::size_t>(x) * 4u);
-            img.pixels[d + 0] = b[s + 2]; // R  NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            img.pixels[d + 1] = b[s + 1]; // G  NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            img.pixels[d + 2] = b[s + 0]; // B  NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            img.pixels[d + 3] = 255;      // A  NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            const std::size_t s = src_row + (static_cast<std::size_t>(x) * 3U);
+            const std::size_t d = dst_row + (static_cast<std::size_t>(x) * 4U);
+            img.pixels[d + 0] = b[s + 2];  // R  NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            img.pixels[d + 1] = b[s + 1];  // G  NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            img.pixels[d + 2] = b[s + 0];  // B  NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            img.pixels[d + 3] = 255;  // A  NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         }
     }
     return img;
 }
 
-} // namespace detail
+}  // namespace detail
 
 auto Image::load(std::string_view path) -> Result<Image> {
     // 统一委托给 ImageCodecRegistry（按扩展名/嗅探自动选择编解码器）。
@@ -98,11 +98,11 @@ auto Image::load_svg(std::string_view path, int target_w, int target_h) -> Resul
     if (!f) {
         return make_error(ErrorCode::IOFileNotFound, std::string("Image::load_svg: cannot open file: ") + p);
     }
-    std::vector<std::uint8_t> buf((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    const std::vector<std::uint8_t> buf(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>{});
     if (buf.empty()) {
         return make_error(ErrorCode::IOFileNotFound, std::string("Image::load_svg: empty file: ") + p);
     }
     return detail::load_image_svg(buf, target_w, target_h);
 }
 
-} // namespace aurora
+}  // namespace aurora

@@ -9,7 +9,6 @@
 #include <string_view>
 
 #include "aurora/event/keycode.h"
-
 #include "test_harness.h"
 
 using aurora::KeyCode;
@@ -21,26 +20,28 @@ void test_key_name_all_values() {
     for (int v = static_cast<int>(KeyCode::Unknown); v <= static_cast<int>(KeyCode::F12); ++v) {
         const auto k = static_cast<KeyCode>(v);
         AURORA_TEST_CHECK(key_name(k) != nullptr);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
         AURORA_TEST_CHECK(key_name(k)[0] != '\0');
     }
 }
 
 void test_key_name_samples() {
-    AURORA_TEST_CHECK(std::string_view{ key_name(KeyCode::Unknown) } == "Unknown");
-    AURORA_TEST_CHECK(std::string_view{ key_name(KeyCode::A) } == "A");
-    AURORA_TEST_CHECK(std::string_view{ key_name(KeyCode::D0) } == "0");
-    AURORA_TEST_CHECK(std::string_view{ key_name(KeyCode::D9) } == "9");
-    AURORA_TEST_CHECK(std::string_view{ key_name(KeyCode::Escape) } == "Escape");
-    AURORA_TEST_CHECK(std::string_view{ key_name(KeyCode::Enter) } == "Enter");
-    AURORA_TEST_CHECK(std::string_view{ key_name(KeyCode::Space) } == "Space");
-    AURORA_TEST_CHECK(std::string_view{ key_name(KeyCode::ArrowLeft) } == "ArrowLeft");
-    AURORA_TEST_CHECK(std::string_view{ key_name(KeyCode::ArrowDown) } == "ArrowDown");
-    AURORA_TEST_CHECK(std::string_view{ key_name(KeyCode::Shift) } == "Shift");
-    AURORA_TEST_CHECK(std::string_view{ key_name(KeyCode::F1) } == "F1");
-    AURORA_TEST_CHECK(std::string_view{ key_name(KeyCode::F12) } == "F12");
+    AURORA_TEST_CHECK(std::string_view{key_name(KeyCode::Unknown)} == "Unknown");
+    AURORA_TEST_CHECK(std::string_view{key_name(KeyCode::A)} == "A");
+    AURORA_TEST_CHECK(std::string_view{key_name(KeyCode::D0)} == "0");
+    AURORA_TEST_CHECK(std::string_view{key_name(KeyCode::D9)} == "9");
+    AURORA_TEST_CHECK(std::string_view{key_name(KeyCode::Escape)} == "Escape");
+    AURORA_TEST_CHECK(std::string_view{key_name(KeyCode::Enter)} == "Enter");
+    AURORA_TEST_CHECK(std::string_view{key_name(KeyCode::Space)} == "Space");
+    AURORA_TEST_CHECK(std::string_view{key_name(KeyCode::ArrowLeft)} == "ArrowLeft");
+    AURORA_TEST_CHECK(std::string_view{key_name(KeyCode::ArrowDown)} == "ArrowDown");
+    AURORA_TEST_CHECK(std::string_view{key_name(KeyCode::Shift)} == "Shift");
+    AURORA_TEST_CHECK(std::string_view{key_name(KeyCode::F1)} == "F1");
+    AURORA_TEST_CHECK(std::string_view{key_name(KeyCode::F12)} == "F12");
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     test_key_name_all_values();

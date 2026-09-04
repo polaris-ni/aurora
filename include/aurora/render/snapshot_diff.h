@@ -12,11 +12,11 @@ namespace aurora {
  * @brief 快照对比结果（specification/03-layout-render.md §8.4）。
  */
 struct SnapshotDiff {
-    bool size_mismatch = false;       ///< 尺寸不一致（其余字段无意义）
-    std::size_t pixel_diff_count = 0; ///< 超过容差的像素数
-    int max_color_delta = 0;          ///< 最大单通道差值（0..255）
-    double diff_ratio = 0.0;          ///< 差异像素占比（0..1）
-    Image diff_image;                 ///< 差异可视化图（差异处红色，相同处原图淡化）
+    bool size_mismatch = false;  ///< 尺寸不一致（其余字段无意义）
+    std::size_t pixel_diff_count = 0;  ///< 超过容差的像素数
+    int max_color_delta = 0;  ///< 最大单通道差值（0..255）
+    double diff_ratio = 0.0;  ///< 差异像素占比（0..1）
+    Image diff_image;  ///< 差异可视化图（差异处红色，相同处原图淡化）
 
     /// @brief 按阈值判定是否通过（差异占比 <= max_ratio）。
     [[nodiscard]] auto passed(double max_ratio = 0.0) const -> bool {
@@ -78,4 +78,4 @@ struct SnapshotDiff {
     return out;
 }
 
-} // namespace aurora
+}  // namespace aurora

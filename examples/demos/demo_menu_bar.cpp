@@ -1,19 +1,21 @@
 // MenuBar 控件 demo：File/Edit/Help 三个顶级菜单，含分隔符与禁用项。
 #include "demo_common.h"
 
+// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// try/catch 包装
 auto main() -> int {
     au::Menu file;
     file.title = "File";
     file.items.emplace_back("New", []() -> void { AURORA_LOG_INFO("demo", "New"); });
     file.items.emplace_back("Open...", []() -> void { AURORA_LOG_INFO("demo", "Open"); });
     file.items.push_back(au::MenuItem::separator_item());
-    au::MenuItem locked{ "Locked Action" };
+    au::MenuItem locked{"Locked Action"};
     locked.enabled = false;
     file.items.push_back(locked);
 
     au::Menu edit;
     edit.title = "Edit";
-    au::MenuItem copy{ "Copy", []() -> void { AURORA_LOG_INFO("demo", "Copy"); } };
+    au::MenuItem copy{"Copy", []() -> void { AURORA_LOG_INFO("demo", "Copy"); }};
     copy.shortcut_text = "Ctrl+C";
     edit.items.push_back(copy);
 
@@ -27,10 +29,10 @@ auto main() -> int {
     menus.push_back(std::move(help));
 
     au::Node root = au::Column{
-        au::MenuBar{ std::move(menus) },
+        au::MenuBar{std::move(menus)},
         gap(12),
-         GradientTitle{ "MenuBar" },
-        au::Text{ "Click top menu to expand dropdown" },
+        GradientTitle{"MenuBar"},
+        au::Text{"Click top menu to expand dropdown"},
     };
-    return run_demo(std::move(root), "MenuBar · Aurora Demo", 520.0f, 360.0f);
+    return run_demo(std::move(root), "MenuBar · Aurora Demo", 520.0F, 360.0F);
 }

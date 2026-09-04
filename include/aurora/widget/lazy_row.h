@@ -13,11 +13,11 @@ namespace aurora {
 
 /// @brief 横向虚拟列表属性（聚合）：主轴为水平的按需虚拟化列表。
 struct LazyRowProps {
-    int item_count = 0;                    ///< 子项总数
-    float item_extent = 96.0f;             ///< 每个子项的固定宽度（主轴尺寸）
-    EdgeInsets padding;                    ///< 内边距
-    float cache_extent = 0.0f;             ///< 视口外预构建缓冲（主轴像素）
-    std::function<Node(int)> item_builder; ///< 子项构造器（按需惰性调用）
+    int item_count = 0;  ///< 子项总数
+    float item_extent = 96.0F;  ///< 每个子项的固定宽度（主轴尺寸）
+    EdgeInsets padding;  ///< 内边距
+    float cache_extent = 0.0F;  ///< 视口外预构建缓冲（主轴像素）
+    std::function<Node(int)> item_builder;  ///< 子项构造器（按需惰性调用）
 };
 
 /**
@@ -43,13 +43,13 @@ class LazyRow : public Widget, public LazyRowProps {
         padding = props.padding;
         cache_extent = props.cache_extent;
         item_builder = std::move(props.item_builder);
-        set_relayout_boundary(true); // 视口尺寸由父约束决定、不依赖子节点（虚拟化）
+        set_relayout_boundary(true);  // 视口尺寸由父约束决定、不依赖子节点（虚拟化）
     }
-    LazyRow(int count, ItemBuilder builder, float item_extent = 96.0f)
-        : m_item_count(count), m_item_builder(std::move(builder)), m_item_extent(item_extent) {
+    LazyRow(int count, ItemBuilder builder, float item_extent = 96.0F)
+        : item_count_(count), item_builder_(std::move(builder)), item_extent_(item_extent) {
         item_count = count;
-        item_builder = m_item_builder;
-        set_relayout_boundary(true); // 视口尺寸由父约束决定、不依赖子节点（虚拟化）
+        item_builder = item_builder_;
+        set_relayout_boundary(true);  // 视口尺寸由父约束决定、不依赖子节点（虚拟化）
     }
 
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
@@ -59,14 +59,23 @@ class LazyRow : public Widget, public LazyRowProps {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "LazyRow",
-            .properties = {
-                { .name = "item_count", .type = "int", .default_value = "0", .required = false, .note = "子项总数" },
-                { .name = "item_extent", .type = "float", .default_value = "96.0", .required = false, .note = "子项固定宽度(px)" },
-                { .name = "cache_extent", .type = "float", .default_value = "0.0", .required = false, .note = "视口外预构建缓冲(px)" },
-            },
-            .events = { { "on_item_click", "void(int)", "子项被点击时回调（参数为索引）" } },
+            .properties =
+                {
+                    {.name = "item_count", .type = "int", .default_value = "0", .required = false, .note = "子项总数"},
+                    {.name = "item_extent",
+                     .type = "float",
+                     .default_value = "96.0",
+                     .required = false,
+                     .note = "子项固定宽度(px)"},
+                    {.name = "cache_extent",
+                     .type = "float",
+                     .default_value = "0.0",
+                     .required = false,
+                     .note = "视口外预构建缓冲(px)"},
+                },
+            .events = {{"on_item_click", "void(int)", "子项被点击时回调（参数为索引）"}},
             .children_policy = "virtual",
-            .examples = { "au::LazyRow{ 10, [](int i){ return au::Text(std::to_string(i)); } }" },
+            .examples = {"au::LazyRow{ 10, [](int i){ return au::Text(std::to_string(i)); } }"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
@@ -74,18 +83,18 @@ class LazyRow : public Widget, public LazyRowProps {
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         props["item_count"] = item_count;
-        props["item_extent"] = m_item_extent;
+        props["item_extent"] = item_extent_;
         props["cache_extent"] = cache_extent;
     }
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("item_count")) {
             item_count = props["item_count"].get<int>();
-            m_item_count = item_count;
+            item_count_ = item_count;
         }
         if (props.contains("item_extent")) {
-            m_item_extent = props["item_extent"].get<float>();
-            item_extent = m_item_extent;
+            item_extent_ = props["item_extent"].get<float>();
+            item_extent = item_extent_;
         }
         if (props.contains("cache_extent")) {
             cache_extent = props["cache_extent"].get<float>();
@@ -95,20 +104,20 @@ class LazyRow : public Widget, public LazyRowProps {
     // ---- 双模 setter ----
     auto set_item_count(int c) -> LazyRow & {
         item_count = c;
-        m_item_count = c;
-        m_built.clear();
+        item_count_ = c;
+        built_.clear();
         mark_needs_layout();
         return *this;
     }
     auto set_item_builder(ItemBuilder b) -> LazyRow & {
-        m_item_builder = std::move(b);
-        item_builder = m_item_builder;
-        m_built.clear();
+        item_builder_ = std::move(b);
+        item_builder = item_builder_;
+        built_.clear();
         mark_needs_layout();
         return *this;
     }
     auto set_item_extent(float e) -> LazyRow & {
-        m_item_extent = e;
+        item_extent_ = e;
         item_extent = e;
         mark_needs_layout();
         return *this;
@@ -125,102 +134,100 @@ class LazyRow : public Widget, public LazyRowProps {
     }
     /// @brief 设置子项点击回调（参数为子项索引）。
     auto set_on_item_click(std::function<void(int)> cb) -> LazyRow & {
-        m_on_item_click = std::move(cb);
+        on_item_click_ = std::move(cb);
         return *this;
     }
 
     auto on_scroll(ScrollEvent &e) -> void override {
-        const float vw = std::max(1.0f, size().width - padding.left - padding.right);
-        const float max_off = std::max(0.0f, m_full_content - vw);
-        m_offset = std::max(0.0f, std::min(max_off, m_offset + (e.delta_y * m_item_extent * 0.5f)));
-        e.handled = true;
+        const float vw = std::max(1.0F, size().width - padding.left - padding.right);
+        const float max_off = std::max(0.0F, full_content_ - vw);
+        offset_ = std::max(0.0F, std::min(max_off, offset_ + (e.delta_y * item_extent_ * 0.5F)));
+        e.is_handled = true;
         mark_needs_paint();
     }
 
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (e.action == MouseAction::Press) {
-            m_pressed = true;
-            m_dragging = false;
-            m_press_local = e.local_position;
-            m_press_index = index_at(e.local_position.x);
-            m_last_drag_x = e.local_position.x;
+            pressed_ = true;
+            dragging_ = false;
+            press_local_ = e.local_position;
+            press_index_ = index_at(e.local_position.x);
+            last_drag_x_ = e.local_position.x;
         } else if (e.action == MouseAction::Move) {
-            if (m_pressed) {
-                const float dx = e.local_position.x - m_last_drag_x;
-                if (std::fabs(e.local_position.x - m_press_local.x) > 4.0f) {
-                    m_dragging = true;
+            if (pressed_) {
+                const float dx = e.local_position.x - last_drag_x_;
+                if (std::fabs(e.local_position.x - press_local_.x) > 4.0F) {
+                    dragging_ = true;
                 }
-                if (m_dragging) {
-                    const float vw = std::max(1.0f, size().width - padding.left - padding.right);
-                    const float max_off = std::max(0.0f, m_full_content - vw);
-                    m_offset = std::max(0.0f, std::min(max_off, m_offset - dx));
-                    m_last_drag_x = e.local_position.x;
-                    e.handled = true;
+                if (dragging_) {
+                    const float vw = std::max(1.0F, size().width - padding.left - padding.right);
+                    const float max_off = std::max(0.0F, full_content_ - vw);
+                    offset_ = std::max(0.0F, std::min(max_off, offset_ - dx));
+                    last_drag_x_ = e.local_position.x;
+                    e.is_handled = true;
                     mark_needs_paint();
                 }
             }
         } else if (e.action == MouseAction::Release) {
-            if (m_pressed && !m_dragging && m_press_index >= 0 && m_press_index < m_item_count) {
-                if (m_on_item_click) {
-                    m_on_item_click(m_press_index);
+            if (pressed_ && !dragging_ && press_index_ >= 0 && press_index_ < item_count_) {
+                if (on_item_click_) {
+                    on_item_click_(press_index_);
                 }
-                e.handled = true;
+                e.is_handled = true;
             }
-            m_pressed = false;
-            m_dragging = false;
+            pressed_ = false;
+            dragging_ = false;
         }
     }
 
   protected:
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext & /*ctx*/) -> Widget * override {
-        return Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = bounds.size }.contains(local) ? this : nullptr;
+        return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local) ? this : nullptr;
     }
 
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         const float h_pad = padding.left + padding.right;
         const float v_pad = padding.top + padding.bottom;
-        const float full = (static_cast<float>(m_item_count) * m_item_extent) + h_pad;
-        const float h = m_item_extent + v_pad;
-        m_full_content = full;
-        return c.constrain(Size{ .width = full, .height = h });
+        const float full = (static_cast<float>(item_count_) * item_extent_) + h_pad;
+        const float h = item_extent_ + v_pad;
+        full_content_ = full;
+        return c.constrain(Size{.width = full, .height = h});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         p.push_clip(bounds);
         const float v_pad = padding.top + padding.bottom;
-        const float ch = std::max(1.0f, bounds.size.height - v_pad);
-        const int first = std::max(0, static_cast<int>(std::floor((m_offset - cache_extent) / m_item_extent)));
+        const float ch = std::max(1.0F, bounds.size.height - v_pad);
+        const int first = std::max(0, static_cast<int>(std::floor((offset_ - cache_extent) / item_extent_)));
         const int last = std::min(
-            m_item_count - 1,
-            static_cast<int>(std::floor((m_offset + bounds.size.width - padding.left + cache_extent) / m_item_extent)));
+            item_count_ - 1,
+            static_cast<int>(std::floor((offset_ + bounds.size.width - padding.left + cache_extent) / item_extent_)));
         // 标注：本帧不需要但仍在缓存中的子项回收
-        for (size_t i = 0; i < m_built.size(); ++i) {
-            if (m_built[i] && (std::cmp_less(i, first) || std::cmp_greater(i, last))) {
-                m_built[i] = Node{};
+        for (size_t i = 0; i < built_.size(); ++i) {
+            if (built_[i] && (std::cmp_less(i, first) || std::cmp_greater(i, last))) {
+                built_[i] = Node{};
             }
         }
-        if (m_built.size() <= static_cast<size_t>(last)) {
-            m_built.resize(static_cast<size_t>(last) + 1);
+        if (built_.size() <= static_cast<size_t>(last)) {
+            built_.resize(static_cast<size_t>(last) + 1);
         }
 
         for (int i = first; i <= last; ++i) {
-            if (std::cmp_greater_equal(i, m_built.size())) {
-                m_built.resize(static_cast<size_t>(i) + 1);
+            if (std::cmp_greater_equal(i, built_.size())) {
+                built_.resize(static_cast<size_t>(i) + 1);
             }
-            if (!m_built[i]) {
-                if (m_item_builder) {
-                    m_built[i] = Node{ m_item_builder(i) };
+            if (!built_[i]) {
+                if (item_builder_) {
+                    built_[i] = Node{item_builder_(i)};
                 } else {
                     continue;
                 }
             }
-            const float x = padding.left + (static_cast<float>(i) * m_item_extent) - m_offset;
-            const Rect cb{ .origin = Point{ .x = x, .y = padding.top },
-                           .size = Size{ .width = m_item_extent, .height = ch } };
-            m_built[i].set_bounds(cb);
-            m_built[i].widget().layout(Constraints{ .min = Size{ .width = 0.0f, .height = 0.0f }, .max = cb.size },
-                                       ctx);
-            m_built[i].widget().paint(p, Rect{ .origin = bounds.origin + cb.origin, .size = cb.size }, ctx);
+            const float x = padding.left + (static_cast<float>(i) * item_extent_) - offset_;
+            const Rect cb{.origin = Point{.x = x, .y = padding.top}, .size = Size{.width = item_extent_, .height = ch}};
+            built_[i].set_bounds(cb);
+            built_[i].widget().layout(Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = cb.size}, ctx);
+            built_[i].widget().paint(p, Rect{.origin = bounds.origin + cb.origin, .size = cb.size}, ctx);
         }
         p.pop_clip();
     }
@@ -229,38 +236,38 @@ class LazyRow : public Widget, public LazyRowProps {
 #pragma GCC diagnostic ignored "-Wdangling-pointer"
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
-        if (!Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = bounds.size }.contains(local)) {
+        if (!Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local)) {
             return {};
         }
         (void)ctx;
         // 虚拟化子项不以稳定控件形态参与命中链：横向列表自身作为点击/滚动叶。
-        return std::vector{ HitNode{ this, weak_from_this(), bounds.origin } };
+        return std::vector{HitNode{this, weak_from_this(), bounds.origin}};
     }
 #pragma GCC diagnostic pop
 
   private:
     [[nodiscard]] auto index_at(float local_x) const -> int {
-        const float idx = std::floor((local_x - padding.left + m_offset) / m_item_extent);
+        const float idx = std::floor((local_x - padding.left + offset_) / item_extent_);
         const int i = static_cast<int>(idx);
-        if (i < 0 || i >= m_item_count) {
+        if (i < 0 || i >= item_count_) {
             return -1;
         }
         return i;
     }
 
-    int m_item_count = 0;
-    ItemBuilder m_item_builder;
-    float m_item_extent = 96.0f;
-    float m_full_content = 0.0f;
-    float m_offset = 0.0f;
-    std::vector<Node> m_built;
+    int item_count_ = 0;
+    ItemBuilder item_builder_;
+    float item_extent_ = 96.0F;
+    float full_content_ = 0.0F;
+    float offset_ = 0.0F;
+    std::vector<Node> built_;
 
-    std::function<void(int)> m_on_item_click;
-    bool m_pressed = false;
-    bool m_dragging = false;
-    Point m_press_local{ .x = 0.0f, .y = 0.0f };
-    float m_last_drag_x = 0.0f;
-    int m_press_index = -1;
+    std::function<void(int)> on_item_click_;
+    bool pressed_ = false;
+    bool dragging_ = false;
+    Point press_local_{.x = 0.0F, .y = 0.0F};
+    float last_drag_x_ = 0.0F;
+    int press_index_ = -1;
 };
 
-} // namespace aurora
+}  // namespace aurora

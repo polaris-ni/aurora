@@ -21,4 +21,4 @@ enum class TextAAMode : std::uint8_t {
     ClearType,
 };
 
-} // namespace aurora::render
+}  // namespace aurora::render

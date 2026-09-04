@@ -11,7 +11,6 @@ namespace aurora::internal {
 /// @return 格式化结果；若格式化失败返回空串。
 // 故意保留 printf 风格 C 可变参包装：收敛各模块 snprintf 样板，并保持 68+ 处调用点语义不变。
 // 项目 .clang-tidy 已禁用 cppcoreguidelines-pro-type-vararg；类型安全替代见 std::format。
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
 [[nodiscard]] auto string_format(const char *fmt, ...) -> std::string;
 
-} // namespace aurora::internal
+}  // namespace aurora::internal

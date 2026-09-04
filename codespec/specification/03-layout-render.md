@@ -308,7 +308,7 @@ b.width(au::px(120)); // 宽度意图走 Widget::width(Length)，返回 Widget&�
 auto row = au::Row(au::RowProps{
     // 指定初始化器须按成员声明序：RowProps 中 children 在前、gap 在后
     .children = { au::Node{ std::move(a) }, au::Node{ std::move(b) } },
-    .gap = 8.0f,
+    .gap = 8.0F,
 });
 row.modifier = au::Modifier{}.padding(8);
 ```
@@ -324,7 +324,7 @@ au::Column{}
     .set_main_axis_alignment(au::MainAxisAlignment::Center)     // 主轴居中
     .set_cross_axis_alignment(au::CrossAxisAlignment::Stretch)  // 交叉轴拉伸填满
     .set_main_axis_size(au::MainAxisSize::Max)                  // 撑满父级主轴 → 对齐可见
-    .set_gap(8.0f);
+    .set_gap(8.0F);
 ```
 
 三者均为**固有属性**，随 `Column` / `Row` 序列化（键 `main_axis_alignment` / `cross_axis_alignment` / `main_axis_size` / `gap`），可经 `to_json` / `from_json` / `diff` / `apply_patch` 往返。
@@ -585,7 +585,7 @@ au::Node btn_node{ au::Button(au::ButtonProps{ .label = "Test" }) };
 btn_node->width(au::px(100)).height(au::px(40));
 const au::Json snap = au::render_to_logical_snapshot(btn_node, 100, 40);
 TCHECK(std::string{ snap["type"].get<std::string>() } == "Button");
-TCHECK(std::abs(snap["box"]["w"].get<float>() - 100.0f) < 0.001f);
+TCHECK(std::abs(snap["box"]["w"].get<float>() - 100.0F) < 0.001f);
 ```
 
 **关键约束：** 快照格式是**平台无关的逻辑描述**（JSON 树 + 盒模型），不是像素位图。AI 的调试闭环只需要 Level 1 + Level 2，完全无头运行。

@@ -5,14 +5,14 @@
 namespace aurora {
 
 auto Router::register_route(std::string name, RouteBuilder builder) -> void {
-    m_routes[std::move(name)] = std::move(builder);
+    routes_[std::move(name)] = std::move(builder);
 }
 
-auto Router::has(const std::string &name) const -> bool { return m_routes.contains(name); }
+auto Router::has(const std::string &name) const -> bool { return routes_.contains(name); }
 
 auto Router::build(const std::string &name) const -> std::optional<Route> {
-    const auto it = m_routes.find(name);
-    if (it == m_routes.end()) {
+    const auto it = routes_.find(name);
+    if (it == routes_.end()) {
         return std::nullopt;
     }
     return it->second();
@@ -26,4 +26,4 @@ auto Router::build_root(const std::string &name) const -> Node {
     return Node{};
 }
 
-} // namespace aurora
+}  // namespace aurora

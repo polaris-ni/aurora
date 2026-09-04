@@ -15,8 +15,8 @@ namespace aurora {
 
 /// @brief ImageView 属性（聚合）：位图图片。
 struct ImageViewProps {
-    Image bitmap{};                                   ///< 已解码图像（可空）
-    std::optional<std::string> source = std::nullopt; ///< 源文件路径（用于序列化/占位）
+    Image bitmap{};  ///< 已解码图像（可空）
+    std::optional<std::string> source = std::nullopt;  ///< 源文件路径（用于序列化/占位）
 };
 
 /**
@@ -44,7 +44,7 @@ struct ImageViewProps {
 class ImageView : public Widget, public ImageViewProps {
   public:
     ImageView() = default;
-    explicit ImageView(Image bmp) : ImageViewProps{ .bitmap = std::move(bmp) } {}
+    explicit ImageView(Image bmp) : ImageViewProps{.bitmap = std::move(bmp)} {}
 
     ImageView(ImageViewProps props) : ImageViewProps(std::move(props)) {}
 
@@ -52,9 +52,9 @@ class ImageView : public Widget, public ImageViewProps {
     [[nodiscard]] static auto from_file(std::string_view path) -> ImageView {
         auto r = Image::load(path);
         if (r) {
-            return ImageView{ std::move(r.value()) };
+            return ImageView{std::move(r.value())};
         }
-        return ImageView{ Image{} };
+        return ImageView{Image{}};
     }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "Image"; }
@@ -63,17 +63,52 @@ class ImageView : public Widget, public ImageViewProps {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "Image",
-            .properties = {
-                { .name="source", .type="string", .default_value="nullopt", .required=false, .note="源文件路径", .json_type="string" },
-                { .name="image_width", .type="int", .default_value="0", .required=false, .note="图像宽度(px)", .json_type="integer", .enum_values={}, .min_value="0" },
-                { .name="image_height", .type="int", .default_value="0", .required=false, .note="图像高度(px)", .json_type="integer", .enum_values={}, .min_value="0" },
-                { .name="width", .type="Length", .default_value="auto", .required=false, .note="", .json_type="array" },
-                { .name="height", .type="Length", .default_value="auto", .required=false, .note="", .json_type="array" },
-                { .name="show", .type="bool", .default_value="true", .required=false, .note="", .json_type="boolean" },
-            },
+            .properties =
+                {
+                    {.name = "source",
+                     .type = "string",
+                     .default_value = "nullopt",
+                     .required = false,
+                     .note = "源文件路径",
+                     .json_type = "string"},
+                    {.name = "image_width",
+                     .type = "int",
+                     .default_value = "0",
+                     .required = false,
+                     .note = "图像宽度(px)",
+                     .json_type = "integer",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "image_height",
+                     .type = "int",
+                     .default_value = "0",
+                     .required = false,
+                     .note = "图像高度(px)",
+                     .json_type = "integer",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "width",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "height",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "show",
+                     .type = "bool",
+                     .default_value = "true",
+                     .required = false,
+                     .note = "",
+                     .json_type = "boolean"},
+                },
             .events = {},
             .children_policy = "none",
-            .examples = { "au::ImageView::from_file(\"logo.png\")" },
+            .examples = {"au::ImageView::from_file(\"logo.png\")"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
@@ -98,34 +133,34 @@ class ImageView : public Widget, public ImageViewProps {
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        const float natural_w = bitmap.width > 0 ? static_cast<float>(bitmap.width) : 100.0f;
-        const float natural_h = bitmap.height > 0 ? static_cast<float>(bitmap.height) : 100.0f;
+        const float natural_w = bitmap.width > 0 ? static_cast<float>(bitmap.width) : 100.0F;
+        const float natural_h = bitmap.height > 0 ? static_cast<float>(bitmap.height) : 100.0F;
         const float w = resolve_width(c, natural_w);
         const float h = resolve_height(c, natural_h);
-        return c.constrain(Size{ .width = w, .height = h });
+        return c.constrain(Size{.width = w, .height = h});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
         if (!bitmap.pixels.empty()) {
             p.draw_image(bitmap, bounds);
         } else {
-            p.draw_rect(bounds, Color{ 180, 180, 180, 255 }); // 占位框
+            p.draw_rect(bounds, Color{180, 180, 180, 255});  // 占位框
         }
     }
 
   private:
     auto resolve_width(const Constraints &c, float natural) const -> float {
-        if (m_width.kind == LengthKind::Fixed) {
-            return std::max(c.min.width, std::min(m_width.value, c.max.width));
+        if (width_.kind == LengthKind::Fixed) {
+            return std::max(c.min.width, std::min(width_.value, c.max.width));
         }
         return std::max(c.min.width, std::min(natural, c.max.width));
     }
     auto resolve_height(const Constraints &c, float natural) const -> float {
-        if (m_height.kind == LengthKind::Fixed) {
-            return std::max(c.min.height, std::min(m_height.value, c.max.height));
+        if (height_.kind == LengthKind::Fixed) {
+            return std::max(c.min.height, std::min(height_.value, c.max.height));
         }
         return std::max(c.min.height, std::min(natural, c.max.height));
     }
 };
 
-} // namespace aurora
+}  // namespace aurora

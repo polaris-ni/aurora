@@ -31,8 +31,8 @@ class ThreadPool {
     /// @brief 默认 worker 数：`hardware_concurrency()`，下限 2（单核/查询失败时为 2）。
     [[nodiscard]] static auto default_worker_count() -> std::size_t {
         const unsigned hc = std::thread::hardware_concurrency();
-        if (hc < 2u) {
-            return 2u;
+        if (hc < 2U) {
+            return 2U;
         }
         return hc;
     }
@@ -42,20 +42,20 @@ class ThreadPool {
         if (worker_count == 0) {
             worker_count = default_worker_count();
         }
-        m_workers.reserve(worker_count);
+        workers_.reserve(worker_count);
         for (std::size_t i = 0; i < worker_count; ++i) {
-            m_workers.emplace_back([this]() -> void { worker_loop(); });
+            workers_.emplace_back([this]() -> void { worker_loop(); });
         }
     }
 
     /// @brief 停止并 join 全部 worker（RAII 安全，无悬挂线程）。
     ~ThreadPool() {
         {
-            std::scoped_lock lock(m_mutex);
-            m_stop = true;
+            std::scoped_lock lock(mutex_);
+            stop_ = true;
         }
-        m_cv.notify_all();
-        for (std::thread &w : m_workers) {
+        cv_.notify_all();
+        for (std::thread &w : workers_) {
             if (w.joinable()) {
                 w.join();
             }
@@ -68,12 +68,12 @@ class ThreadPool {
     auto operator=(ThreadPool &&) -> ThreadPool & = delete;
 
     /// @brief 当前 worker 线程数。
-    [[nodiscard]] auto worker_count() const -> std::size_t { return m_workers.size(); }
+    [[nodiscard]] auto worker_count() const -> std::size_t { return workers_.size(); }
 
     /// @brief 当前排队未执行的任务数（近似值，仅供诊断）。
     [[nodiscard]] auto pending_count() const -> std::size_t {
-        std::scoped_lock lock(m_mutex);
-        return m_queue.size();
+        std::scoped_lock lock(mutex_);
+        return queue_.size();
     }
 
     /**
@@ -84,17 +84,25 @@ class ThreadPool {
      */
     auto execute(std::function<void()> job) -> void {
         {
-            std::scoped_lock lock(m_mutex);
-            m_queue.push(std::move(job));
+            std::scoped_lock lock(mutex_);
+            // 契约（见上方注释）：fire-and-forget 任务的异常在此吞掉，绝不跨出 worker 线程。
+            queue_.emplace([job = std::move(job)]() mutable -> void {
+                try {
+                    job();
+                } catch (...) { // NOLINT(*-empty-catch)
+                    // fire-and-forget：无处投递异常，吞掉即最后一道屏障
+                }
+            });
         }
-        m_cv.notify_one();
+        cv_.notify_one();
     }
 
     /**
      * @brief 提交一个任务并返回 `std::future<R>` 取结果/异常（异常经 future 传播）。
      * @tparam F 可调用体，返回 `R`（`void` 亦可）。
      */
-    template<typename F> auto submit(F &&f) -> std::future<std::invoke_result_t<F>> {
+    template <typename F>
+    auto submit(F &&f) -> std::future<std::invoke_result_t<F>> {
         using R = std::invoke_result_t<F>;
         auto promise = std::make_shared<std::promise<R>>();
         std::future<R> fut = promise->get_future();
@@ -127,23 +135,23 @@ class ThreadPool {
         for (;;) {
             std::function<void()> job;
             {
-                std::unique_lock<std::mutex> lock(m_mutex);
-                m_cv.wait(lock, [this]() -> bool { return m_stop || !m_queue.empty(); });
-                if (m_stop && m_queue.empty()) {
+                std::unique_lock<std::mutex> lock(mutex_);
+                cv_.wait(lock, [this]() -> bool { return stop_ || !queue_.empty(); });
+                if (stop_ && queue_.empty()) {
                     return;
                 }
-                job = std::move(m_queue.front());
-                m_queue.pop();
+                job = std::move(queue_.front());
+                queue_.pop();
             }
-            job(); // 在 worker 线程执行；异常由 job 内部（execute 包裹）捕获，不跨出。
+            job();  // 在 worker 线程执行；异常由 job 内部（execute 包裹）捕获，不跨出。
         }
     }
 
-    mutable std::mutex m_mutex;
-    std::condition_variable m_cv;
-    std::queue<std::function<void()>> m_queue;
-    std::vector<std::thread> m_workers;
-    bool m_stop = false;
+    mutable std::mutex mutex_;
+    std::condition_variable cv_;
+    std::queue<std::function<void()>> queue_;
+    std::vector<std::thread> workers_;
+    bool stop_ = false;
 };
 
-} // namespace aurora
+}  // namespace aurora

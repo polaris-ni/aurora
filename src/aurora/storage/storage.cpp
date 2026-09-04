@@ -28,18 +28,18 @@ auto default_slot() -> auto & {
     static std::unique_ptr<Storage> s;
     return s;
 }
-} // namespace
+}  // namespace
 
 // ---------- 工厂 ----------
 
 auto Storage::create(FilesystemOptions opts) -> Result<Storage> {
     auto be = std::make_unique<FilesystemBackend>(std::move(opts));
     if (!be->is_open()) {
-        return Result<Storage>{ make_error(
-            ErrorCode::StorageBackendUnavailable,
-            "Default filesystem storage open failed: directory not writable or lock acquisition failed") };
+        return Result<Storage>{
+            make_error(ErrorCode::StorageBackendUnavailable,
+                       "Default filesystem storage open failed: directory not writable or lock acquisition failed")};
     }
-    return Result{ Storage(std::move(be)) };
+    return Result{Storage(std::move(be))};
 }
 
 auto Storage::create(std::unique_ptr<StorageBackend> backend) -> Storage { return Storage(std::move(backend)); }
@@ -59,38 +59,38 @@ auto Storage::put(const std::string &id, const Json &value) const -> Result<void
 }
 
 auto Storage::get(const std::string &id) const -> Result<Json> {
-    auto rec = m_backend->get_record(id);
+    auto rec = backend_->get_record(id);
     if (!rec) {
-        return Result<Json>{ rec.error() };
+        return Result<Json>{rec.error()};
     }
     if (rec.value().encoding != StorageEncoding::Json) {
-        return Result<Json>{ make_error(ErrorCode::StorageEncodingMismatch,
-                                        "Record stored in binary, cannot read via JSON channel: " + id) };
+        return Result<Json>{make_error(ErrorCode::StorageEncodingMismatch,
+                                       "Record stored in binary, cannot read via JSON channel: " + id)};
     }
-    return Result{ std::get<Json>(rec.value().payload) };
+    return Result{std::get<Json>(rec.value().payload)};
 }
 
 auto Storage::remove(const std::string &id) const -> Result<void> {
-    auto r = m_backend->remove(id);
+    auto r = backend_->remove(id);
     if (r) {
-        emit_change({ .op = StorageChange::Operation::Remove, .id = id });
+        emit_change({.op = StorageChange::Operation::Remove, .id = id});
     }
     return r;
 }
 
-auto Storage::list() const -> Result<std::vector<std::string>> { return m_backend->list(); }
+auto Storage::list() const -> Result<std::vector<std::string>> { return backend_->list(); }
 
-auto Storage::contains(const std::string &id) const -> Result<bool> { return m_backend->contains(id); }
+auto Storage::contains(const std::string &id) const -> Result<bool> { return backend_->contains(id); }
 
 auto Storage::clear() const -> Result<void> {
-    auto r = m_backend->clear();
+    auto r = backend_->clear();
     if (r) {
-        emit_change({ .op = StorageChange::Operation::Clear, .id = "" });
+        emit_change({.op = StorageChange::Operation::Clear, .id = ""});
     }
     return r;
 }
 
-auto Storage::flush() const -> Result<void> { return m_backend->flush(); }
+auto Storage::flush() const -> Result<void> { return backend_->flush(); }
 
 // ---------- 二进制载荷 API ----------
 
@@ -106,36 +106,36 @@ auto Storage::put(const std::string &id, const StorageBytes &value) const -> Res
 }
 
 auto Storage::get_bytes(const std::string &id) const -> Result<StorageBytes> {
-    auto rec = m_backend->get_record(id);
+    auto rec = backend_->get_record(id);
     if (!rec) {
-        return Result<StorageBytes>{ rec.error() };
+        return Result<StorageBytes>{rec.error()};
     }
     if (rec.value().encoding != StorageEncoding::Binary) {
-        return Result<StorageBytes>{ make_error(ErrorCode::StorageEncodingMismatch,
-                                                "Record stored as JSON, cannot read via binary channel: " + id) };
+        return Result<StorageBytes>{make_error(ErrorCode::StorageEncodingMismatch,
+                                               "Record stored as JSON, cannot read via binary channel: " + id)};
     }
-    return Result{ std::get<StorageBytes>(rec.value().payload) };
+    return Result{std::get<StorageBytes>(rec.value().payload)};
 }
 
 auto Storage::get_value(const std::string &id) const -> Result<StorageValue> {
-    auto rec = m_backend->get_record(id);
+    auto rec = backend_->get_record(id);
     if (!rec) {
-        return Result<StorageValue>{ rec.error() };
+        return Result<StorageValue>{rec.error()};
     }
-    return Result{ rec.value().payload };
+    return Result{rec.value().payload};
 }
 
 // ---------- 信封级 API ----------
 
 auto Storage::put_record(const std::string &id, const StorageRecord &rec) const -> Result<void> {
-    auto r = m_backend->put_record(id, rec);
+    auto r = backend_->put_record(id, rec);
     if (r) {
-        emit_change({ .op = StorageChange::Operation::Put, .id = id });
+        emit_change({.op = StorageChange::Operation::Put, .id = id});
     }
     return r;
 }
 
-auto Storage::get_record(const std::string &id) const -> Result<StorageRecord> { return m_backend->get_record(id); }
+auto Storage::get_record(const std::string &id) const -> Result<StorageRecord> { return backend_->get_record(id); }
 
 // ---------- 异步 API ----------
 
@@ -147,30 +147,36 @@ auto Storage::async_put(const std::string &id, const Json &value) const -> Task<
     rec.encoding = StorageEncoding::Json;
     rec.payload = value;
     rec.mtime = now_tp();
-    auto *be = m_backend.get();
+    auto *be = backend_.get();
     const std::string &idc = id;
+    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
     auto task = async([be, idc, rec]() -> Result<void> { return be->put_record(idc, rec); });
+    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
     task.then([this, idc](const Result<void> &r) -> void {
         if (r.ok()) {
-            emit_change({ .op = StorageChange::Operation::Put, .id = idc });
+            emit_change({.op = StorageChange::Operation::Put, .id = idc});
         }
     });
     return task;
 }
 
 auto Storage::async_get(const std::string &id) const -> Task<Json> {
-    auto *be = m_backend.get();
+    auto *be = backend_.get();
     const std::string &idc = id;
+    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
     return async([be, idc]() -> Result<Json> {
         auto rec = be->get_record(idc);
         if (!rec) {
-            return Result<Json>{ rec.error() };
+            return Result<Json>{rec.error()};
         }
         if (rec.value().encoding != StorageEncoding::Json) {
-            return Result<Json>{ make_error(ErrorCode::StorageEncodingMismatch,
-                                            "Record stored in binary, cannot read via JSON channel: " + idc) };
+            return Result<Json>{make_error(ErrorCode::StorageEncodingMismatch,
+                                           "Record stored in binary, cannot read via JSON channel: " + idc)};
         }
-        return Result{ std::get<Json>(rec.value().payload) };
+        return Result{std::get<Json>(rec.value().payload)};
     });
 }
 
@@ -182,43 +188,53 @@ auto Storage::async_put(const std::string &id, const StorageBytes &value) const 
     rec.encoding = StorageEncoding::Binary;
     rec.payload = value;
     rec.mtime = now_tp();
-    auto *be = m_backend.get();
+    auto *be = backend_.get();
     const std::string &idc = id;
+    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
     auto task = async([be, idc, rec]() -> Result<void> { return be->put_record(idc, rec); });
+    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
     task.then([this, idc](const Result<void> &r) -> void {
         if (r.ok()) {
-            emit_change({ .op = StorageChange::Operation::Put, .id = idc });
+            emit_change({.op = StorageChange::Operation::Put, .id = idc});
         }
     });
     return task;
 }
 
 auto Storage::async_get_value(const std::string &id) const -> Task<StorageValue> {
-    auto *be = m_backend.get();
+    auto *be = backend_.get();
     const std::string &idc = id;
+    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
     return async([be, idc]() -> Result<StorageValue> {
         auto rec = be->get_record(idc);
         if (!rec) {
-            return Result<StorageValue>{ rec.error() };
+            return Result<StorageValue>{rec.error()};
         }
-        return Result<StorageValue>{ rec.value().payload };
+        return Result<StorageValue>{rec.value().payload};
     });
 }
 
 auto Storage::async_remove(const std::string &id) const -> Task<void> {
-    auto *be = m_backend.get();
+    auto *be = backend_.get();
     const std::string &idc = id;
+    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
     auto task = async([be, idc]() -> Result<void> { return be->remove(idc); });
+    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
     task.then([this, idc](const Result<void> &r) -> void {
         if (r.ok()) {
-            emit_change({ .op = StorageChange::Operation::Remove, .id = idc });
+            emit_change({.op = StorageChange::Operation::Remove, .id = idc});
         }
     });
     return task;
 }
 
 auto Storage::async_list() const -> Task<std::vector<std::string>> {
-    auto *be = m_backend.get();
+    auto *be = backend_.get();
     return async([be]() -> Result<std::vector<std::string>> { return be->list(); });
 }
 
@@ -231,21 +247,21 @@ auto Storage::transaction(std::function<Result<void>(Storage &)> body) -> Result
     struct NotifySuppressGuard {
         Storage *s;
         explicit NotifySuppressGuard(Storage *storage) : s(storage) {
-            std::scoped_lock lock(*s->m_listener_mutex);
-            s->m_notify_suppressed = true;
+            std::scoped_lock lock(*s->listener_mutex_);
+            s->notify_suppressed_ = true;
         }
         ~NotifySuppressGuard() {
-            std::scoped_lock lock(*s->m_listener_mutex);
-            s->m_notify_suppressed = false;
+            std::scoped_lock lock(*s->listener_mutex_);
+            s->notify_suppressed_ = false;
         }
         NotifySuppressGuard(const NotifySuppressGuard &) = delete;
         auto operator=(const NotifySuppressGuard &) -> NotifySuppressGuard & = delete;
         NotifySuppressGuard(NotifySuppressGuard &&) = delete;
         auto operator=(NotifySuppressGuard &&) -> NotifySuppressGuard & = delete;
     } guard(this);
-    auto r = m_backend->transaction([this, &body](StorageBackend &) -> Result<void> { return body(*this); });
+    auto r = backend_->transaction([this, &body](StorageBackend &) -> Result<void> { return body(*this); });
     if (r) {
-        emit_change({ .op = StorageChange::Operation::Batch, .id = "" });
+        emit_change({.op = StorageChange::Operation::Batch, .id = ""});
     }
     return r;
 }
@@ -255,16 +271,16 @@ auto Storage::transaction(std::function<Result<void>(Storage &)> body) -> Result
 auto Storage::on_change(StorageChangeCallback cb) -> Subscription {
     std::uint64_t id = 0;
     {
-        std::scoped_lock lock(*m_listener_mutex);
-        id = m_listener_seq++;
-        m_listeners.push_back({ .id = id, .cb = std::move(cb) });
+        std::scoped_lock lock(*listener_mutex_);
+        id = listener_seq_++;
+        listeners_.push_back({.id = id, .cb = std::move(cb)});
     }
     auto *self = this;
     return Subscription([self, id]() -> void {
-        std::scoped_lock lock(*self->m_listener_mutex);
-        const auto it = std::ranges::find_if(self->m_listeners, [id](const Listener &l) -> bool { return l.id == id; });
-        if (it != self->m_listeners.end()) {
-            self->m_listeners.erase(it);
+        std::scoped_lock lock(*self->listener_mutex_);
+        const auto it = std::ranges::find_if(self->listeners_, [id](const Listener &l) -> bool { return l.id == id; });
+        if (it != self->listeners_.end()) {
+            self->listeners_.erase(it);
         }
     });
 }
@@ -272,12 +288,12 @@ auto Storage::on_change(StorageChangeCallback cb) -> Subscription {
 void Storage::emit_change(const StorageChange &ch) const {
     std::vector<StorageChangeCallback> cbs;
     {
-        std::scoped_lock lock(*m_listener_mutex);
-        if (m_notify_suppressed) { // 事务抑制检查在锁内：与 transaction 的置位/复位互斥
+        std::scoped_lock lock(*listener_mutex_);
+        if (notify_suppressed_) {  // 事务抑制检查在锁内：与 transaction 的置位/复位互斥
             return;
         }
-        cbs.reserve(m_listeners.size());
-        for (const auto &l : m_listeners) {
+        cbs.reserve(listeners_.size());
+        for (const auto &l : listeners_) {
             cbs.push_back(l.cb);
         }
     }
@@ -304,4 +320,4 @@ auto Storage::default_instance() -> Storage & {
     return *slot;
 }
 
-} // namespace aurora::storage
+}  // namespace aurora::storage

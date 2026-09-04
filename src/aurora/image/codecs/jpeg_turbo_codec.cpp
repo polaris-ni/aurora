@@ -20,7 +20,7 @@ namespace aurora::image {
 namespace {
 
 struct JpegErrorMgr {
-    struct jpeg_error_mgr pub;
+    jpeg_error_mgr pub;
     std::jmp_buf jb;
 };
 
@@ -65,12 +65,12 @@ class JpegTurboCodec : public ImageCodec {
         const unsigned int row_stride = cinfo.output_width * static_cast<unsigned int>(cinfo.output_components);
         img.width = w;
         img.height = h;
-        img.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u);
+        img.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U);
 
         std::vector<std::uint8_t *> rows(static_cast<std::size_t>(h));
         for (int y = 0; y < h; ++y) {
             rows[static_cast<std::size_t>(y)] =
-                img.pixels.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(row_stride)); // NOLINT
+                img.pixels.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(row_stride));  // NOLINT
         }
         while (cinfo.output_scanline < cinfo.output_height) {
             jpeg_read_scanlines(&cinfo, &rows[cinfo.output_scanline], cinfo.output_height - cinfo.output_scanline);
@@ -82,7 +82,7 @@ class JpegTurboCodec : public ImageCodec {
 
     [[nodiscard]] auto encode(const Image &img, const EncodeOptions &opt) const
         -> Result<std::vector<std::uint8_t>> override {
-        const int quality = opt.quality > 0 ? opt.quality : 90;
+        volatile const int quality = opt.quality > 0 ? opt.quality : 90;
         jpeg_compress_struct cinfo{};
         JpegErrorMgr err_mgr{};
         cinfo.err = jpeg_std_error(&err_mgr.pub);
@@ -105,10 +105,10 @@ class JpegTurboCodec : public ImageCodec {
         jpeg_set_quality(&cinfo, quality, TRUE);
 
         jpeg_start_compress(&cinfo, TRUE);
-        const unsigned int row_stride = static_cast<unsigned int>(img.width) * 4u;
+        const unsigned int row_stride = static_cast<unsigned int>(img.width) * 4U;
         std::vector<std::uint8_t *> rows(static_cast<std::size_t>(img.height));
         for (int y = 0; y < img.height; ++y) {
-            rows[static_cast<std::size_t>(y)] = const_cast<std::uint8_t *>(img.pixels.data()) + // NOLINT
+            rows[static_cast<std::size_t>(y)] = const_cast<std::uint8_t *>(img.pixels.data()) +  // NOLINT
                                                 (static_cast<std::size_t>(y) * static_cast<std::size_t>(row_stride));
         }
         while (cinfo.next_scanline < cinfo.image_height) {
@@ -119,16 +119,15 @@ class JpegTurboCodec : public ImageCodec {
 
         std::vector<std::uint8_t> out(out_size);
         std::copy_n(out_buf, out_size, out.data());
-        free(out_buf); // NOLINT(*-no-malloc)
+        free(out_buf);  // NOLINT(*-no-malloc)
         return out;
     }
 };
 
-} // namespace
+}  // namespace
 
-// NOLINTNEXTLINE(misc-use-internal-linkage): 工厂函数供 registry.cpp 跨 TU 调用，需外部链接
 auto create_jpeg_turbo_codec() -> std::shared_ptr<ImageCodec> { return std::make_shared<JpegTurboCodec>(); }
 
-} // namespace aurora::image
+}  // namespace aurora::image
 
-#endif // AURORA_BUILD_IMAGE_JPEG
+#endif  // AURORA_BUILD_IMAGE_JPEG

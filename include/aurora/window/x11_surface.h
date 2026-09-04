@@ -56,7 +56,7 @@ class X11Surface final : public Surface {
     [[nodiscard]] auto capture_window(const std::string &path) -> Result<bool> override;
     [[nodiscard]] auto size() const -> Size override;
     /// @brief begin_frame 铺的浅色底色（与 begin_frame 内 fill_rect 同色）：供脏区裁剪重绘重铺底色。
-    [[nodiscard]] auto clear_color() const -> Color override { return Color{ 245, 245, 247, 255 }; }
+    [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
     /// @brief 像素密度：解析 X 资源 `Xft.dpi`（dpi/96），无声明时 1.0。
     [[nodiscard]] auto scale_factor() const -> float override;
     [[nodiscard]] auto should_close() const -> bool override;
@@ -78,10 +78,10 @@ class X11Surface final : public Surface {
     [[nodiscard]] auto native_handle() const -> void * override;
 
   private:
-    struct Impl; ///< 全部 Xlib 状态（Display/Window/GC/XImage/XIM/唤醒管道），见 x11_surface.cpp。
-    std::unique_ptr<Impl> m_impl;
+    struct Impl;  ///< 全部 Xlib 状态（Display/Window/GC/XImage/XIM/唤醒管道），见 x11_surface.cpp。
+    std::unique_ptr<Impl> impl_;
 };
 
-} // namespace aurora
+}  // namespace aurora
 
-#endif // AURORA_BACKEND_X11 / AURORA_PLATFORM_LINUX
+#endif  // AURORA_BACKEND_X11 / AURORA_PLATFORM_LINUX

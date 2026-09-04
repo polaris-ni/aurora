@@ -39,3 +39,40 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
+
+  # ----------------------------------------------------------------------------
+  # P5 门禁：clang-tidy 全量 lint（非 third_party 翻译单元，去重后 0 finding 才通过）
+  # 版本钉死 clang-tidy-22，与本地 proved 组合（gcc 编译数据库 + clang-tidy 22.1.2 → 0 findings）
+  # 保持一致，避免不同 clang 版本漂移导致门禁误报。仅跑 ubuntu-latest，因为
+  # windows/msvc 与 macos 矩阵默认无 clang-tidy，且 lint 与平台无关（纯静态分析）。
+  # 依赖 AuroraLint.cmake 提供的 `lint` 目标（需 configure 时 clang-tidy 在 PATH 上）。
+  # 双 Pass：分别强制 -DAURORA_ENABLE_DEBUG=OFF / =ON，各自独立编译数据库，
+  # 以覆盖 #if（debug-ON，真实 Phase4/5 逻辑）与 #else（debug-OFF）两分支——
+  # AURORA_ENABLE_DEBUG=AUTO 是 generator expression，单配置只分析一分支，门禁天然盲一半。
+  # ----------------------------------------------------------------------------
+  lint:
+    name: clang-tidy (P5 gate, dual-pass)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-tidy-22
+        run: |
+          sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          echo "deb http://apt.llvm.org/ubuntu/ llvm-toolchain-ubuntu-$(lsb_release -cs) 22" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          sudo apt-get update -y
+          sudo apt-get install -y clang-tidy-22
+          sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
+
+      - name: Configure (debug OFF, export compile_commands.json)
+        run: cmake -S . -B build-lint-off -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_DEBUG=OFF
+
+      - name: Lint (debug OFF branch, fails on any warning+ finding)
+        run: cmake --build build-lint-off --target lint
+
+      - name: Configure (debug ON, export compile_commands.json)
+        run: cmake -S . -B build-lint-on -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_DEBUG=ON
+
+      - name: Lint (debug ON branch, fails on any warning+ finding)
+        run: cmake --build build-lint-on --target lint

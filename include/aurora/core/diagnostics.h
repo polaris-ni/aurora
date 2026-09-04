@@ -19,9 +19,9 @@ namespace aurora {
  * @note Side-effects: none
  */
 struct FixSuggestion {
-    std::string code;               ///< 机器可读标识（与 Diagnostic::code 对应）
-    std::string description;        ///< 人类可读修复说明
-    std::function<void()> auto_fix; ///< 可选：自动修复回调（无则仅提示）
+    std::string code;  ///< 机器可读标识（与 Diagnostic::code 对应）
+    std::string description;  ///< 人类可读修复说明
+    std::function<void()> auto_fix;  ///< 可选：自动修复回调（无则仅提示）
 
     [[nodiscard]] auto has_auto_fix() const -> bool { return static_cast<bool>(auto_fix); }
 };
@@ -39,13 +39,13 @@ struct FixSuggestion {
  * @note Side-effects: none
  */
 struct Diagnostic {
-    ErrorSeverity severity = ErrorSeverity::Warning; ///< 与 Error 的 ErrorSeverity 对齐
-    ErrorCategory category = ErrorCategory::General; ///< 与 Error 的 ErrorCategory 对齐
-    std::string message;                             ///< 人类可读描述
-    std::string where;                               ///< 可选：位置（file:line 或 widget 类型）
-    std::string code;                                ///< 机器可读标识（冻结 slug，可为空）
-    ErrorCode code_enum = ErrorCode::GeneralUnknown; ///< 与 code 对应的枚举（无码时为 GeneralUnknown）
-    std::optional<FixSuggestion> fix;                ///< 可选：结构化修复建议
+    ErrorSeverity severity = ErrorSeverity::Warning;  ///< 与 Error 的 ErrorSeverity 对齐
+    ErrorCategory category = ErrorCategory::General;  ///< 与 Error 的 ErrorCategory 对齐
+    std::string message;  ///< 人类可读描述
+    std::string where;  ///< 可选：位置（file:line 或 widget 类型）
+    std::string code;  ///< 机器可读标识（冻结 slug，可为空）
+    ErrorCode code_enum = ErrorCode::GeneralUnknown;  ///< 与 code 对应的枚举（无码时为 GeneralUnknown）
+    std::optional<FixSuggestion> fix;  ///< 可选：结构化修复建议
 
     /// @brief 便于遗留 / 测试按字符串比较 severity（如 `dg.severity == "warn"`）。
     /// @note 新代码应直接用 `ErrorSeverity` 枚举比较，避免字符串字面量。
@@ -122,8 +122,8 @@ class Diagnostics {
   private:
     static auto instance() -> Diagnostics &;
 
-    std::vector<Diagnostic> m_log;    ///< 累计（take 时清空）
-    std::vector<Diagnostic> m_recent; ///< 环形缓冲（保留最近 AURORA_RECENT_CAP 条）
+    std::vector<Diagnostic> log_;  ///< 累计（take 时清空）
+    std::vector<Diagnostic> recent_;  ///< 环形缓冲（保留最近 AURORA_RECENT_CAP 条）
 };
 
-} // namespace aurora
+}  // namespace aurora

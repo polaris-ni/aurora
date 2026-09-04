@@ -1,7 +1,6 @@
 #pragma once
 
 #include <chrono>
-#include <string>
 #include <vector>
 
 #include "aurora/core/image.h"
@@ -23,34 +22,34 @@ class ImageSequenceSource : public VideoSource {
   public:
     ImageSequenceSource() = default;
     explicit ImageSequenceSource(std::vector<Image> frames, double fps = 24.0)
-        : m_frames(std::move(frames)), m_fps(fps) {}
+        : frames_(std::move(frames)), fps_(fps) {}
 
     /// @brief 直接喂入已解码帧（不读文件）。
-    auto set_frames(std::vector<Image> frames) -> void { m_frames = std::move(frames); }
-    auto append_frame(Image frame) -> void { m_frames.push_back(std::move(frame)); }
+    auto set_frames(std::vector<Image> frames) -> void { frames_ = std::move(frames); }
+    auto append_frame(Image frame) -> void { frames_.push_back(std::move(frame)); }
     /// @brief 设定帧率（fps，>0）。
     auto set_fps(double fps) -> void {
         if (fps > 0.0) {
-            m_fps = fps;
+            fps_ = fps;
         }
     }
-    [[nodiscard]] auto fps() const -> double { return m_fps; }
-    [[nodiscard]] auto frame_count() const -> size_t { return m_frames.size(); }
+    [[nodiscard]] auto fps() const -> double { return fps_; }
+    [[nodiscard]] auto frame_count() const -> size_t { return frames_.size(); }
 
     /// @brief 打开：uri 为 `;` / `|` 分隔的若干图片路径时逐张加载；单路径则作为单帧静画。
     [[nodiscard]] auto open(std::string_view uri) -> Result<bool> override;
-    auto close() -> void override { m_frames.clear(); }
+    auto close() -> void override { frames_.clear(); }
 
-    [[nodiscard]] auto has_video() const -> bool override { return !m_frames.empty(); }
+    [[nodiscard]] auto has_video() const -> bool override { return !frames_.empty(); }
     [[nodiscard]] auto has_audio() const -> bool override { return false; }
     [[nodiscard]] auto natural_size() const -> Size override;
     [[nodiscard]] auto duration() const -> std::chrono::microseconds override;
 
-    auto play() -> void override { m_playing = true; }
-    auto pause() -> void override { m_playing = false; }
-    [[nodiscard]] auto is_playing() const -> bool override { return m_playing; }
+    auto play() -> void override { playing_ = true; }
+    auto pause() -> void override { playing_ = false; }
+    [[nodiscard]] auto is_playing() const -> bool override { return playing_; }
     auto seek(std::chrono::microseconds pos) -> void override;
-    [[nodiscard]] auto position() const -> std::chrono::microseconds override { return m_pos; }
+    [[nodiscard]] auto position() const -> std::chrono::microseconds override { return pos_; }
 
     auto set_volume(double /*v*/) -> void override {}
     auto set_muted(bool /*m*/) -> void override {}
@@ -58,10 +57,10 @@ class ImageSequenceSource : public VideoSource {
     [[nodiscard]] auto frame_at(std::chrono::microseconds pos) -> Result<VideoFrame> override;
 
   private:
-    std::vector<Image> m_frames;
-    double m_fps = 24.0;
-    bool m_playing = false;
-    std::chrono::microseconds m_pos{ 0 };
+    std::vector<Image> frames_;
+    double fps_ = 24.0;
+    bool playing_ = false;
+    std::chrono::microseconds pos_{0};
 };
 
-} // namespace aurora
+}  // namespace aurora

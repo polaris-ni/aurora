@@ -21,25 +21,25 @@ namespace aurora {
  * @endcode
  */
 struct TODO {
-    std::string m_what;
+    std::string what;
 
-    explicit TODO(std::string what) : m_what(std::move(what)) {}
+    explicit TODO(std::string what) : what(std::move(what)) {}
 
     /// @brief 转换为任意回调签名；调用时记录警告（不抛异常、不崩溃）。
-    template<typename Signature>
-    operator std::function<Signature>() const // NOLINT：故意的隐式转换
+    template <typename Signature>
+    operator std::function<Signature>() const  // NOLINT：故意的隐式转换
     {
-        std::string desc = m_what;
+        std::string desc = what;
         using Ret = std::function<Signature>::result_type;
-        return std::function<Signature>{ [desc](auto &&...) -> Ret {
+        return std::function<Signature>{[desc](auto &&...) -> Ret {
             Diagnostics::warn("TODO", desc);
             if constexpr (!std::is_void_v<Ret>) {
                 return Ret{};
             } else {
                 return;
             }
-        } };
+        }};
     }
 };
 
-} // namespace aurora
+}  // namespace aurora

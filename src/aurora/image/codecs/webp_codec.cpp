@@ -43,7 +43,7 @@ class WebpCodec : public ImageCodec {
         Image img;
         img.width = w;
         img.height = h;
-        const std::size_t pixel_count = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u;
+        const std::size_t pixel_count = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U;
         img.pixels.resize(pixel_count);
         std::copy_n(rgba, pixel_count, img.pixels.data());
         WebPFree(rgba);
@@ -61,7 +61,7 @@ class WebpCodec : public ImageCodec {
         }
         AnimatedImage anim;
         anim.loop_count = static_cast<int>(WebPDemuxGetI(demux, WEBP_FF_LOOP_COUNT));
-        std::uint32_t flags = WebPDemuxGetI(demux, WEBP_FF_FORMAT_FLAGS);
+        const std::uint32_t flags = WebPDemuxGetI(demux, WEBP_FF_FORMAT_FLAGS);
         (void)flags;
 
         WebPIterator iter{};
@@ -80,10 +80,10 @@ class WebpCodec : public ImageCodec {
                     WebPFree(rgba);
                     anim.width = w;
                     anim.height = h;
-                    anim.frames.emplace_back(ImageFrame{ .image = std::make_shared<Image>(std::move(frame)),
-                                                         .duration = std::chrono::milliseconds(iter.duration),
-                                                         .blend = 0,
-                                                         .dispose = 0 });
+                    anim.frames.emplace_back(ImageFrame{.image = std::make_shared<Image>(std::move(frame)),
+                                                        .duration = std::chrono::milliseconds(iter.duration),
+                                                        .blend = 0,
+                                                        .dispose = 0});
                 }
             } while (WebPDemuxNextFrame(&iter) != 0);
             WebPDemuxReleaseIterator(&iter);
@@ -116,11 +116,10 @@ class WebpCodec : public ImageCodec {
     }
 };
 
-} // namespace
+}  // namespace
 
-// NOLINTNEXTLINE(misc-use-internal-linkage): 工厂函数供 registry.cpp 跨 TU 调用，需外部链接
 auto create_webp_codec() -> std::shared_ptr<ImageCodec> { return std::make_shared<WebpCodec>(); }
 
-} // namespace aurora::image
+}  // namespace aurora::image
 
-#endif // AURORA_BUILD_IMAGE_WEBP
+#endif  // AURORA_BUILD_IMAGE_WEBP

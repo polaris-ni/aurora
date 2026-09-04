@@ -44,7 +44,7 @@ static void test_damping_branches() {
     bool monotonic = true;
     double prev = under.value(0.0);
     // 步长 0.1 非二进制精确值，改写成整型计数会漂移采样时刻、改变断言取点，故保留浮点循环
-    // NOLINTNEXTLINE(bugprone-float-loop-counter)
+    // NOLINTNEXTLINE(bugprone-float-loop-counter,clang-analyzer-security.FloatLoopCounter)
     for (double tt = 0.1; tt <= 3.0; tt += 0.1) {
         const double v = over.value(tt);
         if (v < prev - 1e-9) {

@@ -36,16 +36,16 @@ class VideoControls : public Container {
 
     // NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes):
     // 受保护子控件指针为有意设计，供子类换肤/重排访问
-    VideoController *m_controller = nullptr;
+    VideoController *controller_ = nullptr;
 
-    Button *m_play_btn = nullptr;
-    Text *m_time_text = nullptr;
-    Button *m_mute_btn = nullptr;
+    Button *play_btn_ = nullptr;
+    Text *time_text_ = nullptr;
+    Button *mute_btn_ = nullptr;
     // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
 
-    [[nodiscard]] auto play_button() const -> Button * { return m_play_btn; }
-    [[nodiscard]] auto time_text() const -> Text * { return m_time_text; }
-    [[nodiscard]] auto mute_button() const -> Button * { return m_mute_btn; }
+    [[nodiscard]] auto play_button() const -> Button * { return play_btn_; }
+    [[nodiscard]] auto time_text() const -> Text * { return time_text_; }
+    [[nodiscard]] auto mute_button() const -> Button * { return mute_btn_; }
 
     virtual auto build_children() -> void;
 
@@ -53,4 +53,4 @@ class VideoControls : public Container {
     static auto format_time(long long ms) -> std::string;
 };
 
-} // namespace aurora
+}  // namespace aurora

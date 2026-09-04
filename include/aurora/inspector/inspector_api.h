@@ -107,4 +107,4 @@ class Inspector {
     static void notify_changes(const Json &patch);
 };
 
-} // namespace aurora
+}  // namespace aurora

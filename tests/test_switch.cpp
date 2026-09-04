@@ -28,13 +28,13 @@ using aurora::Widget;
 
 using Json = nlohmann::json;
 
-static auto const make_press(float x, const float y) -> MouseEvent {
+static auto make_press(float x, const float y) -> MouseEvent {
     MouseEvent e;
     e.action = MouseAction::Press;
     e.position = Point{ .x = x, .y = y };
     return e;
 }
-static auto const make_release(float x, const float y) -> MouseEvent {
+static auto make_release(float x, const float y) -> MouseEvent {
     MouseEvent e;
     e.action = MouseAction::Release;
     e.position = Point{ .x = x, .y = y };
@@ -61,14 +61,18 @@ static void test_props() {
     s.set_active_color(Color::red()).set_inactive_color(Color::blue()).set_thumb_color(Color::green());
     Json j;
     s.serialize_props(j);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["active_color"][0].get<int>() == 255, "switch active=red");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["inactive_color"][2].get<int>() == 255, "switch inactive=blue");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["thumb_color"][1].get<int>() == Color::green().m_g, "switch thumb=green");
 
     Switch t;
     t.deserialize_props(j);
     Json k;
     t.serialize_props(k);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(k["inactive_color"][2].get<int>() == 255, "switch rt inactive");
 }
 
@@ -102,6 +106,7 @@ static void test_roundtrip() {
     const auto w = std::make_shared<Switch>();
     w->set_value(true);
     Json j = serialization::to_json(*w);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["props"].contains("checked") && j["props"]["checked"].get<bool>() == true,
                           "Switch serialization checked");
     const auto back = roundtrip<Switch>(j, "Switch");
@@ -128,27 +133,33 @@ static void test_modern_props() {
 
     // 新属性往返：轨道尺寸/滑块边距/描边/禁用
     Switch s1;
-    s1.set_track_size(52.0f, 30.0f).set_thumb_inset(3.0f).set_border(Color::red(), 2.0f).set_enabled(false);
+    s1.set_track_size(52.0F, 30.0F).set_thumb_inset(3.0F).set_border(Color::red(), 2.0F).set_enabled(false);
     Json j;
     s1.serialize_props(j);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["track_width"].get<double>(), 52.0), "Switch: track_width serialization");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["track_height"].get<double>(), 30.0), "Switch: track_height serialization");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["thumb_inset"].get<double>(), 3.0), "Switch: thumb_inset serialization");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["border_color"][0].get<int>() == 255 && near_d(j["border_width"].get<double>(), 2.0),
                           "Switch: border serialization");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["enabled"].get<bool>() == false, "Switch: enabled serialization");
 
     Switch s2;
     s2.deserialize_props(j);
     Json k;
     s2.serialize_props(k);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(k["track_width"].get<double>(), 52.0), "Switch: track_width roundtrip");
     AURORA_TEST_CHECK_MSG(s2.enabled() == false, "Switch: enabled roundtrip");
 
     // 布局尺寸随 track_size 变化
     const BuildContext ctx;
     Switch s3;
-    s3.set_track_size(60.0f, 32.0f);
+    s3.set_track_size(60.0F, 32.0F);
     const Size sz = s3.layout(
         Constraints{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 500, .height = 500 } }, ctx);
     AURORA_TEST_CHECK_MSG(near_d(sz.width, 60.0) && near_d(sz.height, 32.0), "Switch: layout follows track_size");

@@ -20,8 +20,8 @@ namespace aurora {
  * @note Rebuildable: no
  */
 struct KeyCombo {
-    ModifierKey modifiers = ModifierKey::None; ///< 修饰键组合（Ctrl/Shift/Alt/Meta 位掩码）
-    KeyCode key = KeyCode::Unknown;            ///< 主键
+    ModifierKey modifiers = ModifierKey::None;  ///< 修饰键组合（Ctrl/Shift/Alt/Meta 位掩码）
+    KeyCode key = KeyCode::Unknown;  ///< 主键
 
     KeyCombo() = default;
     KeyCombo(ModifierKey mods, KeyCode k) : modifiers(mods), key(k) {}
@@ -41,16 +41,16 @@ struct KeyCombo {
     /// @brief 可读文本（如 "Ctrl+Shift+O"），用于菜单显示与调试。
     [[nodiscard]] auto to_string() const -> std::string {
         std::string s;
-        if ((modifiers & ModifierKey::Control) != 0) { // NOLINT(*-redundant-parentheses)
+        if ((modifiers & ModifierKey::Control) != 0) {  // NOLINT(*-redundant-parentheses)
             s += "Ctrl+";
         }
-        if ((modifiers & ModifierKey::Shift) != 0) { // NOLINT(*-redundant-parentheses)
+        if ((modifiers & ModifierKey::Shift) != 0) {  // NOLINT(*-redundant-parentheses)
             s += "Shift+";
         }
-        if ((modifiers & ModifierKey::Alt) != 0) { // NOLINT(*-redundant-parentheses)
+        if ((modifiers & ModifierKey::Alt) != 0) {  // NOLINT(*-redundant-parentheses)
             s += "Alt+";
         }
-        if ((modifiers & ModifierKey::Meta) != 0) { // NOLINT(*-redundant-parentheses)
+        if ((modifiers & ModifierKey::Meta) != 0) {  // NOLINT(*-redundant-parentheses)
             s += "Meta+";
         }
         s += key_name(key);
@@ -60,17 +60,17 @@ struct KeyCombo {
 
 /// @brief 快捷键作用域。
 enum class ShortcutScope : std::uint8_t {
-    Global, ///< 全局：无论焦点在哪都响应
+    Global,  ///< 全局：无论焦点在哪都响应
     Focus,  ///< 焦点：仅当作用域内控件持有焦点时响应
 };
 
 /// @brief 单条快捷键绑定：键组合 -> 动作。
 struct ShortcutBinding {
-    KeyCombo combo;                              ///< 触发键组合
-    std::function<void()> action;                ///< 触发动作
-    ShortcutScope scope = ShortcutScope::Global; ///< 作用域
-    bool enabled = true;                         ///< 是否启用
-    std::string description;                     ///< 描述（供调试/帮助面板）
+    KeyCombo combo;  ///< 触发键组合
+    std::function<void()> action;  ///< 触发动作
+    ShortcutScope scope = ShortcutScope::Global;  ///< 作用域
+    bool enabled = true;  ///< 是否启用
+    std::string description;  ///< 描述（供调试/帮助面板）
 };
 
 /**
@@ -90,20 +90,20 @@ class ShortcutRegistry {
     /// @brief 注册一条快捷键绑定，返回绑定 ID（用于解绑）。
     auto add(KeyCombo combo, std::function<void()> action, ShortcutScope scope = ShortcutScope::Global,
              std::string description = {}) -> int {
-        const int id = m_next_id++;
-        m_bindings.emplace_back(id, ShortcutBinding{ .combo = combo,
-                                                     .action = std::move(action),
-                                                     .scope = scope,
-                                                     .enabled = true,
-                                                     .description = std::move(description) });
+        const int id = next_id_++;
+        bindings_.emplace_back(id, ShortcutBinding{.combo = combo,
+                                                   .action = std::move(action),
+                                                   .scope = scope,
+                                                   .enabled = true,
+                                                   .description = std::move(description)});
         return id;
     }
 
     /// @brief 解绑指定 ID 的快捷键。
     auto remove(int id) -> void {
-        for (auto it = m_bindings.begin(); it != m_bindings.end(); ++it) {
+        for (auto it = bindings_.begin(); it != bindings_.end(); ++it) {
             if (it->first == id) {
-                m_bindings.erase(it);
+                bindings_.erase(it);
                 return;
             }
         }
@@ -111,7 +111,7 @@ class ShortcutRegistry {
 
     /// @brief 启用/禁用指定 ID 的快捷键。
     auto set_enabled(int id, bool enabled) -> void {
-        for (auto &kv : m_bindings) {
+        for (auto &kv : bindings_) {
             if (kv.first == id) {
                 kv.second.enabled = enabled;
                 return;
@@ -124,7 +124,7 @@ class ShortcutRegistry {
     /// @param has_focus_widget 当前是否有焦点控件（Focus 作用域绑定仅在有焦点时触发）
     [[nodiscard]] auto handle(const KeyEvent &e, bool has_focus_widget = false) const -> bool {
         // NOLINTNEXTLINE(readability-use-anyofallof): 循环含副作用（执行动作并提前返回）
-        for (const auto &kv : m_bindings | std::views::values) {
+        for (const auto &kv : bindings_ | std::views::values) {
             const ShortcutBinding &b = kv;
             if (!b.enabled) {
                 continue;
@@ -143,24 +143,24 @@ class ShortcutRegistry {
     }
 
     /// @brief 已注册绑定数。
-    [[nodiscard]] auto count() const -> std::size_t { return m_bindings.size(); }
+    [[nodiscard]] auto count() const -> std::size_t { return bindings_.size(); }
 
     /// @brief 枚举全部绑定（帮助面板/调试用）。
     [[nodiscard]] auto bindings() const -> std::vector<ShortcutBinding> {
         std::vector<ShortcutBinding> out;
-        out.reserve(m_bindings.size());
-        for (const auto &kv : m_bindings | std::views::values) {
+        out.reserve(bindings_.size());
+        for (const auto &kv : bindings_ | std::views::values) {
             out.push_back(kv);
         }
         return out;
     }
 
     /// @brief 清空全部绑定。
-    auto clear() -> void { m_bindings.clear(); }
+    auto clear() -> void { bindings_.clear(); }
 
   private:
-    std::vector<std::pair<int, ShortcutBinding>> m_bindings;
-    int m_next_id = 1;
+    std::vector<std::pair<int, ShortcutBinding>> bindings_;
+    int next_id_ = 1;
 };
 
-} // namespace aurora
+}  // namespace aurora

@@ -6,14 +6,13 @@
 #include <vector>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::Diagnostics;
 using aurora::FixSuggestion;
 
 AURORA_TEST() {
-    Diagnostics::take(); // 清空累计
+    Diagnostics::take();  // 清空累计
 
     bool fixed = false;
     FixSuggestion fix;

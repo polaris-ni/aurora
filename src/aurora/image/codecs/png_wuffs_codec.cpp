@@ -11,7 +11,6 @@
 // 以头文件库方式包含 wuffs 单文件 C 库（仅声明；WUFFS_IMPLEMENTATION 由
 // cmake 中 aurora_wuffs OBJECT 库定义，链接进 aurora 提供实现）。
 #include "aurora/core/image.h"
-
 #include "wuffs/release/c/wuffs-v0.3.c"
 
 namespace aurora::image {
@@ -33,14 +32,14 @@ class PngWuffsCodec : public ImageCodec {
         -> Result<Image> override {
         // 解码器结构体在非 WUFFS_IMPLEMENTATION 单元中默认构造被删除，必须用 alloc()
         // （内部 calloc + initialize）。unique_ptr + std::free 负责释放。
-        auto deleter = [](void *p) -> void { std::free(p); }; // NOLINT(*-no-malloc)
-        std::unique_ptr<wuffs_png__decoder, decltype(deleter)> dec(wuffs_png__decoder__alloc(), deleter);
+        auto deleter = [](void *p) -> void { std::free(p); };  // NOLINT(*-no-malloc)
+        const std::unique_ptr<wuffs_png__decoder, decltype(deleter)> dec(wuffs_png__decoder__alloc(), deleter);
         if (!dec) {
             return make_error(ErrorCode::IOImageDecodeFailed, "wuffs png: alloc failed");
         }
 
         wuffs_base__io_buffer src{};
-        src.data.ptr = const_cast<std::uint8_t *>(data.data()); // NOLINT(*-pro-type-const-cast)
+        src.data.ptr = const_cast<std::uint8_t *>(data.data());  // NOLINT(*-pro-type-const-cast)
         src.data.len = data.size();
         src.meta.wi = data.size();
         src.meta.closed = true;
@@ -82,23 +81,22 @@ class PngWuffsCodec : public ImageCodec {
         Image img;
         img.width = w;
         img.height = h;
-        img.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u);
+        img.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U);
         for (int y = 0; y < h; ++y) {
             // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
             const std::uint8_t *s = plane.ptr + (static_cast<std::size_t>(y) * plane.stride);
-            std::uint8_t *d = img.pixels.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) * 4u);
+            std::uint8_t *d = img.pixels.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) * 4U);
             // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-            std::memcpy(d, s, static_cast<std::size_t>(w) * 4u);
+            std::memcpy(d, s, static_cast<std::size_t>(w) * 4U);
         }
         return img;
     }
 };
 
-} // namespace
+}  // namespace
 
-// NOLINTNEXTLINE(misc-use-internal-linkage): 工厂函数供 registry.cpp 跨 TU 调用，需外部链接
 auto create_png_wuffs_codec() -> std::shared_ptr<ImageCodec> { return std::make_shared<PngWuffsCodec>(); }
 
-} // namespace aurora::image
+}  // namespace aurora::image
 
-#endif // AURORA_BUILD_IMAGE_PNG
+#endif  // AURORA_BUILD_IMAGE_PNG

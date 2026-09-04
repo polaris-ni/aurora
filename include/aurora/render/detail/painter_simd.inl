@@ -76,7 +76,7 @@ inline auto blur_region_scalar(std::uint8_t *pixels, int full_width, int x0, int
     // 第一遍：水平模糊（帧缓冲 → tmp）
     for (int y = 0; y < rh; ++y) {
         for (int x = 0; x < rw; ++x) {
-            int acc[4] = { 0, 0, 0, 0 };
+            int acc[4] = {0, 0, 0, 0};
             for (int k = -r; k <= r; ++k) {
                 const int sx = std::clamp(x + k, 0, rw - 1);
                 const std::size_t src = (static_cast<std::size_t>(y0 + y) * full_width + (x0 + sx)) * 4;
@@ -95,7 +95,7 @@ inline auto blur_region_scalar(std::uint8_t *pixels, int full_width, int x0, int
     // 第二遍：垂直模糊（tmp → 帧缓冲）
     for (int y = 0; y < rh; ++y) {
         for (int x = 0; x < rw; ++x) {
-            int acc[4] = { 0, 0, 0, 0 };
+            int acc[4] = {0, 0, 0, 0};
             for (int k = -r; k <= r; ++k) {
                 const int sy = std::clamp(y + k, 0, rh - 1);
                 const std::size_t src = (static_cast<std::size_t>(sy) * rw + x) * 4;
@@ -121,13 +121,13 @@ inline auto blur_region_scalar(std::uint8_t *pixels, int full_width, int x0, int
 inline auto gradient_linear_scanline_scalar(std::uint8_t *row, int x0, int n, float sx, float py, float dx, float dy,
                                             float inv_len_sq, const std::uint8_t *c0, const std::uint8_t *c1,
                                             float stop0, float range) -> int {
-    (void)dy; // 线性扫描线中 dy 已折叠进 py（调用方逐行预计算），此处不使用。
+    (void)dy;  // 线性扫描线中 dy 已折叠进 py（调用方逐行预计算），此处不使用。
     for (int k = 0; k < n; ++k) {
         const float x = static_cast<float>(x0 + k);
         const float px = (x - sx) * dx + py;
         float t = px * inv_len_sq;
-        t = std::max(0.0f, std::min(1.0f, t));
-        const float frac = (range > 0.0f) ? (t - stop0) / range : 0.0f;
+        t = std::max(0.0F, std::min(1.0F, t));
+        const float frac = (range > 0.0F) ? (t - stop0) / range : 0.0F;
         std::uint8_t *p = row + static_cast<std::size_t>(k) * 4u;
         for (int c = 0; c < 3; ++c) {
             const float val = static_cast<float>(c0[c]) + static_cast<float>(c1[c] - c0[c]) * frac;
@@ -152,8 +152,8 @@ inline auto gradient_radial_scanline_scalar(std::uint8_t *row, int x0, int n, fl
         const float px = x - cx;
         const float dist = std::sqrt(px * px + py);
         float t = dist * inv_r;
-        t = std::max(0.0f, std::min(1.0f, t));
-        const float frac = (range > 0.0f) ? (t - stop0) / range : 0.0f;
+        t = std::max(0.0F, std::min(1.0F, t));
+        const float frac = (range > 0.0F) ? (t - stop0) / range : 0.0F;
         std::uint8_t *p = row + static_cast<std::size_t>(k) * 4u;
         for (int c = 0; c < 3; ++c) {
             const float val = static_cast<float>(c0[c]) + static_cast<float>(c1[c] - c0[c]) * frac;
@@ -203,9 +203,9 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blend_srgb_over_region_sse2(std:
             const float dsf = (c == 0 ? ds_r : (c == 1 ? ds_g : ds_b));
             const float aaf = (c == 0 ? ar : (c == 1 ? ag : ab));
             const __m128 v =
-                _mm_add_ps(_mm_mul_ps(dv, _mm_set1_ps(1.0f - aaf)), _mm_mul_ps(_mm_set1_ps(dsf), _mm_set1_ps(aaf)));
+                _mm_add_ps(_mm_mul_ps(dv, _mm_set1_ps(1.0F - aaf)), _mm_mul_ps(_mm_set1_ps(dsf), _mm_set1_ps(aaf)));
             const __m128 t = _mm_add_ps(_mm_mul_ps(v, v4095), v05);
-            __m128i idx = _mm_cvttps_epi32(t); // 向零截断，等同 (int)float
+            __m128i idx = _mm_cvttps_epi32(t);  // 向零截断，等同 (int)float
             idx = _mm_max_epi32(idx, v0);
             idx = _mm_min_epi32(idx, v4095i);
             alignas(16) int iarr[4];
@@ -279,14 +279,14 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_linear_scanline_sse2(st
     const __m128 vstop0 = _mm_set1_ps(stop0);
     const __m128 vrange = _mm_set1_ps(range);
     const __m128 vzero = _mm_setzero_ps();
-    const __m128 vone = _mm_set1_ps(1.0f);
+    const __m128 vone = _mm_set1_ps(1.0F);
     const __m128i vi0 = _mm_setzero_si128();
     const __m128i vi255 = _mm_set1_epi32(255);
-    const __m128 vc0[3] = { _mm_set1_ps(static_cast<float>(c0[0])), _mm_set1_ps(static_cast<float>(c0[1])),
-                            _mm_set1_ps(static_cast<float>(c0[2])) };
-    const __m128 vdiff[3] = { _mm_set1_ps(static_cast<float>(c1[0] - c0[0])),
-                              _mm_set1_ps(static_cast<float>(c1[1] - c0[1])),
-                              _mm_set1_ps(static_cast<float>(c1[2] - c0[2])) };
+    const __m128 vc0[3] = {_mm_set1_ps(static_cast<float>(c0[0])), _mm_set1_ps(static_cast<float>(c0[1])),
+                           _mm_set1_ps(static_cast<float>(c0[2]))};
+    const __m128 vdiff[3] = {_mm_set1_ps(static_cast<float>(c1[0] - c0[0])),
+                             _mm_set1_ps(static_cast<float>(c1[1] - c0[1])),
+                             _mm_set1_ps(static_cast<float>(c1[2] - c0[2]))};
     int i = 0;
     for (; i + 4 <= n; i += 4) {
         const __m128 vx = _mm_setr_ps(static_cast<float>(x0 + i), static_cast<float>(x0 + i + 1),
@@ -294,7 +294,7 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_linear_scanline_sse2(st
         const __m128 vpx = _mm_add_ps(_mm_mul_ps(_mm_sub_ps(vx, vsx), vdx), vpy);
         __m128 t = _mm_mul_ps(vpx, vinv);
         t = _mm_max_ps(vzero, _mm_min_ps(vone, t));
-        __m128 frac = (range > 0.0f) ? _mm_div_ps(_mm_sub_ps(t, vstop0), vrange) : vzero;
+        __m128 frac = (range > 0.0F) ? _mm_div_ps(_mm_sub_ps(t, vstop0), vrange) : vzero;
         std::uint8_t *base = row + static_cast<std::size_t>(i) * 4u;
         for (int c = 0; c < 3; ++c) {
             const __m128 val = _mm_add_ps(vc0[c], _mm_mul_ps(vdiff[c], frac));
@@ -320,23 +320,25 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_linear_scanline_sse2(st
     return i;
 }
 
-inline AURORA_SSE41_TARGET AURORA_NOINLINE auto
-gradient_radial_scanline_sse2(std::uint8_t *row, int x0, int n, float cx, float py, float inv_r, const std::uint8_t *c0,
-                              const std::uint8_t *c1, float stop0, float range) -> int {
+inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_radial_scanline_sse2(std::uint8_t *row, int x0, int n,
+                                                                              float cx, float py, float inv_r,
+                                                                              const std::uint8_t *c0,
+                                                                              const std::uint8_t *c1, float stop0,
+                                                                              float range) -> int {
     const __m128 vcx = _mm_set1_ps(cx);
     const __m128 vpy = _mm_set1_ps(py);
     const __m128 vinv_r = _mm_set1_ps(inv_r);
     const __m128 vstop0 = _mm_set1_ps(stop0);
     const __m128 vrange = _mm_set1_ps(range);
     const __m128 vzero = _mm_setzero_ps();
-    const __m128 vone = _mm_set1_ps(1.0f);
+    const __m128 vone = _mm_set1_ps(1.0F);
     const __m128i vi0 = _mm_setzero_si128();
     const __m128i vi255 = _mm_set1_epi32(255);
-    const __m128 vc0[3] = { _mm_set1_ps(static_cast<float>(c0[0])), _mm_set1_ps(static_cast<float>(c0[1])),
-                            _mm_set1_ps(static_cast<float>(c0[2])) };
-    const __m128 vdiff[3] = { _mm_set1_ps(static_cast<float>(c1[0] - c0[0])),
-                              _mm_set1_ps(static_cast<float>(c1[1] - c0[1])),
-                              _mm_set1_ps(static_cast<float>(c1[2] - c0[2])) };
+    const __m128 vc0[3] = {_mm_set1_ps(static_cast<float>(c0[0])), _mm_set1_ps(static_cast<float>(c0[1])),
+                           _mm_set1_ps(static_cast<float>(c0[2]))};
+    const __m128 vdiff[3] = {_mm_set1_ps(static_cast<float>(c1[0] - c0[0])),
+                             _mm_set1_ps(static_cast<float>(c1[1] - c0[1])),
+                             _mm_set1_ps(static_cast<float>(c1[2] - c0[2]))};
     int i = 0;
     for (; i + 4 <= n; i += 4) {
         const __m128 vx = _mm_setr_ps(static_cast<float>(x0 + i), static_cast<float>(x0 + i + 1),
@@ -345,7 +347,7 @@ gradient_radial_scanline_sse2(std::uint8_t *row, int x0, int n, float cx, float 
         const __m128 vdist = _mm_sqrt_ps(_mm_add_ps(_mm_mul_ps(vpx, vpx), vpy));
         __m128 t = _mm_mul_ps(vdist, vinv_r);
         t = _mm_max_ps(vzero, _mm_min_ps(vone, t));
-        __m128 frac = (range > 0.0f) ? _mm_div_ps(_mm_sub_ps(t, vstop0), vrange) : vzero;
+        __m128 frac = (range > 0.0F) ? _mm_div_ps(_mm_sub_ps(t, vstop0), vrange) : vzero;
         std::uint8_t *base = row + static_cast<std::size_t>(i) * 4u;
         for (int c = 0; c < 3; ++c) {
             const __m128 val = _mm_add_ps(vc0[c], _mm_mul_ps(vdiff[c], frac));
@@ -371,7 +373,7 @@ gradient_radial_scanline_sse2(std::uint8_t *row, int x0, int n, float cx, float 
     return i;
 }
 
-#endif // AURORA_SIMD_X86 (SSE2 implementations)
+#endif  // AURORA_SIMD_X86 (SSE2 implementations)
 
 #if defined(__GNUC__) || defined(__clang__)
 #if defined(AURORA_SIMD_X86)
@@ -401,7 +403,7 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto blend_srgb_over_region_avx2(std::
             const __m256 dv = _mm256_setr_ps(dl0, dl1, dl2, dl3, dl4, dl5, dl6, dl7);
             const float dsf = (c == 0 ? ds_r : (c == 1 ? ds_g : ds_b));
             const float aaf = (c == 0 ? ar : (c == 1 ? ag : ab));
-            const __m256 v = _mm256_add_ps(_mm256_mul_ps(dv, _mm256_set1_ps(1.0f - aaf)),
+            const __m256 v = _mm256_add_ps(_mm256_mul_ps(dv, _mm256_set1_ps(1.0F - aaf)),
                                            _mm256_mul_ps(_mm256_set1_ps(dsf), _mm256_set1_ps(aaf)));
             const __m256 t = _mm256_add_ps(_mm256_mul_ps(v, v4095), v05);
             __m256i idx = _mm256_cvttps_epi32(t);
@@ -491,14 +493,14 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_linear_scanline_avx2(std
     const __m256 vstop0 = _mm256_set1_ps(stop0);
     const __m256 vrange = _mm256_set1_ps(range);
     const __m256 vzero = _mm256_setzero_ps();
-    const __m256 vone = _mm256_set1_ps(1.0f);
+    const __m256 vone = _mm256_set1_ps(1.0F);
     const __m256i vi0 = _mm256_setzero_si256();
     const __m256i vi255 = _mm256_set1_epi32(255);
-    const __m256 vc0[3] = { _mm256_set1_ps(static_cast<float>(c0[0])), _mm256_set1_ps(static_cast<float>(c0[1])),
-                            _mm256_set1_ps(static_cast<float>(c0[2])) };
-    const __m256 vdiff[3] = { _mm256_set1_ps(static_cast<float>(c1[0] - c0[0])),
-                              _mm256_set1_ps(static_cast<float>(c1[1] - c0[1])),
-                              _mm256_set1_ps(static_cast<float>(c1[2] - c0[2])) };
+    const __m256 vc0[3] = {_mm256_set1_ps(static_cast<float>(c0[0])), _mm256_set1_ps(static_cast<float>(c0[1])),
+                           _mm256_set1_ps(static_cast<float>(c0[2]))};
+    const __m256 vdiff[3] = {_mm256_set1_ps(static_cast<float>(c1[0] - c0[0])),
+                             _mm256_set1_ps(static_cast<float>(c1[1] - c0[1])),
+                             _mm256_set1_ps(static_cast<float>(c1[2] - c0[2]))};
     int i = 0;
     for (; i + 8 <= n; i += 8) {
         const __m256 vx = _mm256_setr_ps(static_cast<float>(x0 + i), static_cast<float>(x0 + i + 1),
@@ -508,7 +510,7 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_linear_scanline_avx2(std
         const __m256 vpx = _mm256_add_ps(_mm256_mul_ps(_mm256_sub_ps(vx, vsx), vdx), vpy);
         __m256 t = _mm256_mul_ps(vpx, vinv);
         t = _mm256_max_ps(vzero, _mm256_min_ps(vone, t));
-        __m256 frac = (range > 0.0f) ? _mm256_div_ps(_mm256_sub_ps(t, vstop0), vrange) : vzero;
+        __m256 frac = (range > 0.0F) ? _mm256_div_ps(_mm256_sub_ps(t, vstop0), vrange) : vzero;
         std::uint8_t *base = row + static_cast<std::size_t>(i) * 4u;
         for (int c = 0; c < 3; ++c) {
             const __m256 val = _mm256_add_ps(vc0[c], _mm256_mul_ps(vdiff[c], frac));
@@ -537,23 +539,25 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_linear_scanline_avx2(std
     return i;
 }
 
-AURORA_AVX2_TARGET AURORA_NOINLINE inline auto
-gradient_radial_scanline_avx2(std::uint8_t *row, int x0, int n, float cx, float py, float inv_r, const std::uint8_t *c0,
-                              const std::uint8_t *c1, float stop0, float range) -> int {
+AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_radial_scanline_avx2(std::uint8_t *row, int x0, int n, float cx,
+                                                                             float py, float inv_r,
+                                                                             const std::uint8_t *c0,
+                                                                             const std::uint8_t *c1, float stop0,
+                                                                             float range) -> int {
     const __m256 vcx = _mm256_set1_ps(cx);
     const __m256 vpy = _mm256_set1_ps(py);
     const __m256 vinv_r = _mm256_set1_ps(inv_r);
     const __m256 vstop0 = _mm256_set1_ps(stop0);
     const __m256 vrange = _mm256_set1_ps(range);
     const __m256 vzero = _mm256_setzero_ps();
-    const __m256 vone = _mm256_set1_ps(1.0f);
+    const __m256 vone = _mm256_set1_ps(1.0F);
     const __m256i vi0 = _mm256_setzero_si256();
     const __m256i vi255 = _mm256_set1_epi32(255);
-    const __m256 vc0[3] = { _mm256_set1_ps(static_cast<float>(c0[0])), _mm256_set1_ps(static_cast<float>(c0[1])),
-                            _mm256_set1_ps(static_cast<float>(c0[2])) };
-    const __m256 vdiff[3] = { _mm256_set1_ps(static_cast<float>(c1[0] - c0[0])),
-                              _mm256_set1_ps(static_cast<float>(c1[1] - c0[1])),
-                              _mm256_set1_ps(static_cast<float>(c1[2] - c0[2])) };
+    const __m256 vc0[3] = {_mm256_set1_ps(static_cast<float>(c0[0])), _mm256_set1_ps(static_cast<float>(c0[1])),
+                           _mm256_set1_ps(static_cast<float>(c0[2]))};
+    const __m256 vdiff[3] = {_mm256_set1_ps(static_cast<float>(c1[0] - c0[0])),
+                             _mm256_set1_ps(static_cast<float>(c1[1] - c0[1])),
+                             _mm256_set1_ps(static_cast<float>(c1[2] - c0[2]))};
     int i = 0;
     for (; i + 8 <= n; i += 8) {
         const __m256 vx = _mm256_setr_ps(static_cast<float>(x0 + i), static_cast<float>(x0 + i + 1),
@@ -564,7 +568,7 @@ gradient_radial_scanline_avx2(std::uint8_t *row, int x0, int n, float cx, float 
         const __m256 vdist = _mm256_sqrt_ps(_mm256_add_ps(_mm256_mul_ps(vpx, vpx), vpy));
         __m256 t = _mm256_mul_ps(vdist, vinv_r);
         t = _mm256_max_ps(vzero, _mm256_min_ps(vone, t));
-        __m256 frac = (range > 0.0f) ? _mm256_div_ps(_mm256_sub_ps(t, vstop0), vrange) : vzero;
+        __m256 frac = (range > 0.0F) ? _mm256_div_ps(_mm256_sub_ps(t, vstop0), vrange) : vzero;
         std::uint8_t *base = row + static_cast<std::size_t>(i) * 4u;
         for (int c = 0; c < 3; ++c) {
             const __m256 val = _mm256_add_ps(vc0[c], _mm256_mul_ps(vdiff[c], frac));
@@ -593,8 +597,8 @@ gradient_radial_scanline_avx2(std::uint8_t *row, int x0, int n, float cx, float 
     return i;
 }
 
-#endif // AURORA_SIMD_X86 (AVX2 implementations)
-#endif // GNUC/Clang
+#endif  // AURORA_SIMD_X86 (AVX2 implementations)
+#endif  // GNUC/Clang
 
 // ---------------- 整数 box blur SIMD 双实现（WS-4：blur_region 栅格原语）----------------
 // 分离式两遍整数 box blur，逐位一致镜像 blur_region_scalar。
@@ -617,7 +621,7 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto box_blur_line_sse2(std::uint8_t 
                                                                    const std::uint8_t *src, int src_step, int n, int r)
     -> void {
     const int denom = 2 * r + 1;
-    alignas(16) int seed[4] = { 0, 0, 0, 0 };
+    alignas(16) int seed[4] = {0, 0, 0, 0};
     for (int k = -r; k <= r; ++k) {
         const int idx = std::clamp(k, 0, n - 1);
         const std::uint8_t *p = src + static_cast<std::size_t>(idx) * src_step;
@@ -670,7 +674,7 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blur_region_sse2(std::uint8_t *p
         box_blur_line_sse2(dst, fb_stride, src, tmp_stride, rh, r);
     }
 }
-#endif // AURORA_SIMD_X86 (SSE2 blur)
+#endif  // AURORA_SIMD_X86 (SSE2 blur)
 
 #if defined(__GNUC__) || defined(__clang__)
 #if defined(AURORA_SIMD_X86)
@@ -684,7 +688,7 @@ inline AURORA_AVX2_TARGET AURORA_NOINLINE auto box_blur_line_avx2(std::uint8_t *
                                                                   const std::uint8_t *src, int src_step, int n, int r)
     -> void {
     const int denom = 2 * r + 1;
-    alignas(32) int seed[8] = { 0 };
+    alignas(32) int seed[8] = {0};
     for (int k = -r; k <= r; ++k) {
         const int idx = std::clamp(k, 0, n - 1);
         const std::uint8_t *p = src + static_cast<std::size_t>(idx) * src_step;
@@ -731,8 +735,8 @@ inline AURORA_AVX2_TARGET AURORA_NOINLINE auto blur_region_avx2(std::uint8_t *pi
         box_blur_line_avx2(dst, fb_stride, src, tmp_stride, rh, r);
     }
 }
-#endif // AURORA_SIMD_X86 (AVX2 blur)
-#endif // GNUC/Clang
+#endif  // AURORA_SIMD_X86 (AVX2 blur)
+#endif  // GNUC/Clang
 
 // ---------------- 运行时探测 / 分发初始化 ----------------
 // g_simd_level 定义在 painter_simd.h（inline 变量），此处仅实现探测/赋值。
@@ -744,9 +748,9 @@ inline auto detect_simd_level() noexcept -> SimdLevel {
         return SimdLevel::AVX2;
     }
 #endif
-    return SimdLevel::SSE2; // x86-64 恒有 SSE2
+    return SimdLevel::SSE2;  // x86-64 恒有 SSE2
 #else
-    return SimdLevel::Scalar; // ARM/NEON 暂缓
+    return SimdLevel::Scalar;  // ARM/NEON 暂缓
 #endif
 }
 
@@ -758,9 +762,9 @@ inline auto ensure_simd_init() noexcept -> void {
     }
 }
 
-#endif // AURORA_ENABLE_SIMD
+#endif  // AURORA_ENABLE_SIMD
 
-} // namespace aurora::detail
+}  // namespace aurora::detail
 // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-narrowing-conversions,
 // bugprone-narrowing-conversions, readability-math-missing-parentheses, cppcoreguidelines-avoid-c-arrays,
 // modernize-avoid-c-arrays, cppcoreguidelines-pro-type-reinterpret-cast,

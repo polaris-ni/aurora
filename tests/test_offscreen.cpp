@@ -15,7 +15,6 @@
 #include "aurora/aurora.h"
 #include "aurora/core/image.h"
 #include "aurora/render/offscreen.h"
-
 #include "test_harness.h"
 
 namespace aurora::tests::sec_golden {
@@ -35,6 +34,8 @@ namespace {
     out.resize(static_cast<std::size_t>(sz));
     f.seekg(0, std::ios::beg);
     if (sz > 0) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) std::istream::read 需要 char*；uint8_t 与 char
+        // 布局兼容，互转安全
         f.read(reinterpret_cast<char *>(out.data()), sz);
     }
     return true;
@@ -56,29 +57,31 @@ auto render_to_rgba(Widget &root, const int w, const int h) -> std::vector<std::
     root.mount(ctx);
 
     Constraints c;
-    c.min = Size{ .width = 0.0f, .height = 0.0f };
-    c.max = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) };
+    c.min = Size{.width = 0.0F, .height = 0.0F};
+    c.max = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
     root.layout(c, ctx);
 
     Painter painter;
     painter.begin(w, h);
     root.paint(painter,
-               Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                     .size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) } },
+               Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                    .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                ctx);
 
-    const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u;
+    const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U;
     const std::uint8_t *d = painter.data();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic, modernize-return-braced-init-list)
+    // 测试助手：缓冲区间算术；范围构造保留圆括号（braced-init 会变 initializer_list）
     return std::vector(d, d + n);
 }
 
 // ---- 像素级 diff 统计 ----
 struct DiffStat {
-    long mismatched = 0;      ///< 超过容差的像素数
-    int max_channel_diff = 0; ///< 单通道最大绝对差
-    int first_x = -1;
-    int first_y = -1;          ///< 首个差异像素坐标
-    double mean_abs_err = 0.0; ///< 平均绝对差（逐像素最大通道差均值）
+    long mismatched_ = 0;  ///< 超过容差的像素数
+    int max_channel_diff_ = 0;  ///< 单通道最大绝对差
+    int first_x_ = -1;
+    int first_y_ = -1;  ///< 首个差异像素坐标
+    double mean_abs_err_ = 0.0;  ///< 平均绝对差（逐像素最大通道差均值）
 };
 
 auto pixel_diff(const std::vector<std::uint8_t> &a, const std::vector<std::uint8_t> &b, const int w, const int h,
@@ -87,28 +90,30 @@ auto pixel_diff(const std::vector<std::uint8_t> &a, const std::vector<std::uint8
     const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
     long err_sum = 0;
     for (std::size_t i = 0; i < n; ++i) {
-        const std::uint8_t *pa = &a[i * 4u];
-        const std::uint8_t *pb = &b[i * 4u];
+        const std::uint8_t *pa = &a.at(i * 4U);
+        const std::uint8_t *pb = &b.at(i * 4U);
         int m = 0;
         for (int k = 0; k < 4; ++k) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
             const int d = std::abs(static_cast<int>(pa[k]) - static_cast<int>(pb[k]));
             m = std::max(d, m);
         }
         err_sum += m;
-        s.max_channel_diff = std::max(m, s.max_channel_diff);
+        s.max_channel_diff_ = std::max(m, s.max_channel_diff_);
         if (m > tol) {
-            ++s.mismatched;
-            if (s.first_x < 0) {
-                s.first_x = static_cast<int>(i % static_cast<std::size_t>(w));
-                s.first_y = static_cast<int>(i / static_cast<std::size_t>(w));
+            ++s.mismatched_;
+            if (s.first_x_ < 0) {
+                s.first_x_ = static_cast<int>(i % static_cast<std::size_t>(w));
+                s.first_y_ = static_cast<int>(i / static_cast<std::size_t>(w));
             }
         }
     }
-    s.mean_abs_err = static_cast<double>(err_sum) / static_cast<double>(n);
+    s.mean_abs_err_ = static_cast<double>(err_sum) / static_cast<double>(n);
     return s;
 }
 
-} // namespace
+}  // namespace
 
 /**
  * @brief 像素级 golden 回归测试（specification/03-layout-render.md §10.1）：确定性地把固定控件树渲染为 RGBA8，
@@ -130,7 +135,7 @@ static auto run() -> int {
 
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable : 4996) // getenv 在 MSVC/clang-cl 下被标为"不安全"，但它是标准可移植接口
+#pragma warning(disable : 4996)  // getenv 在 MSVC/clang-cl 下被标为"不安全"，但它是标准可移植接口
 #endif
     const char *golden_dir = std::getenv("AURORA_GOLDEN_DIR");
     const std::string dir = (golden_dir != nullptr) ? std::string(golden_dir) : std::string("tests/golden");
@@ -138,11 +143,13 @@ static auto run() -> int {
     const std::string golden_path = dir + "/golden_basic_column.png";
 
     Node root = Column{
-        Text{ LocalizedString{ "Hello, Aurora" } },
-        Text{ LocalizedString{ "Pixel golden test" } },
+        Text{LocalizedString{"Hello, Aurora"}},
+        Text{LocalizedString{"Pixel golden test"}},
     };
 
     // ---- 更新模式：用与校验完全一致的 RGBA8 缓冲写出 PNG 真值（避免 PNG 编解码往返引入的微小 alpha 抖动）----
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
     if (const char *update = std::getenv("AURORA_UPDATE_GOLDEN"); (update != nullptr) && update[0] != '\0') {
         const std::vector<std::uint8_t> buf = render_to_rgba(root.widget(), w, h);
         if (!write_png(out_path.c_str(), w, h, buf.data())) {
@@ -190,12 +197,12 @@ static auto run() -> int {
 
     const DiffStat s = pixel_diff(buf, golden.pixels, w, h, tol);
 
-    if (s.mismatched > max_pixels) {
-        AURORA_LOG_ERROR("test", "[golden] MISMATCH: ", s.mismatched, "/", (static_cast<long>(w) * h),
-                         " pixels differ (max channel delta=", s.max_channel_diff, ", mean abs err=", s.mean_abs_err,
+    if (s.mismatched_ > max_pixels) {
+        AURORA_LOG_ERROR("test", "[golden] MISMATCH: ", s.mismatched_, "/", static_cast<long>(w) * h,
+                         " pixels differ (max channel delta=", s.max_channel_diff_, ", mean abs err=", s.mean_abs_err_,
                          ")");
-        if (s.first_x >= 0) {
-            AURORA_LOG_ERROR("test", ", first diff at (", s.first_x, ",", s.first_y, ")");
+        if (s.first_x_ >= 0) {
+            AURORA_LOG_ERROR("test", ", first diff at (", s.first_x_, ",", s.first_y_, ")");
         }
         AURORA_LOG_ERROR("test", "\n  tolerance: max_channel_diff=", tol, " max_pixels=", max_pixels,
                          "\n  current render written to: ", out_path, " (for visual diff)");
@@ -204,11 +211,11 @@ static auto run() -> int {
         return 1;
     }
 
-    AURORA_LOG_INFO("test", "[golden] OK: ", s.mismatched, " mismatched pixels (of ", (static_cast<long>(w) * h),
-                    "), max channel delta=", s.max_channel_diff, ", mean abs err=", s.mean_abs_err);
+    AURORA_LOG_INFO("test", "[golden] OK: ", s.mismatched_, " mismatched pixels (of ", static_cast<long>(w) * h,
+                    "), max channel delta=", s.max_channel_diff_, ", mean abs err=", s.mean_abs_err_);
     return 0;
 }
-} // namespace aurora::tests::sec_golden
+}  // namespace aurora::tests::sec_golden
 
 AURORA_TEST() {
     // sec_golden::run() 以返回码表达 golden 比对结论（0=一致，非0=缺真值/维度不符/像素超差），

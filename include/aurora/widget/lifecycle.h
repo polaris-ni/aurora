@@ -46,11 +46,11 @@ class Lifecycle : public SingleChild {
     /// @param on_mount   挂载后恰好触发一次的用户回调（可访问 `BuildContext`，如读环境注入）。
     /// @param on_unmount 控件销毁时触发的清理回调；可空（留空表示无需清理）。
     Lifecycle(Node child, MountCb on_mount, UnmountCb on_unmount = {})
-        : SingleChild(std::move(child)), m_on_mount(std::move(on_mount)), m_on_unmount(std::move(on_unmount)) {}
+        : SingleChild(std::move(child)), on_mount_(std::move(on_mount)), on_unmount_(std::move(on_unmount)) {}
 
     ~Lifecycle() override {
-        if (m_on_unmount) {
-            m_on_unmount();
+        if (on_unmount_) {
+            on_unmount_();
         }
     }
 
@@ -65,42 +65,48 @@ class Lifecycle : public SingleChild {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "Lifecycle",
-            .properties = {
-                { .name = "on_mount",
-                  .type = "std::function<void(const BuildContext&)>",
-                  .default_value = "—",
-                  .required = true,
-                  .note = "挂载后恰好触发一次的用户回调（访问 BuildContext：环境注入、尺寸等）" },
-                { .name = "on_unmount", .type = "std::function<void()>", .default_value = "nullptr", .required = false, .note = "控件销毁时触发的清理回调（可空）" },
-            },
-            .events = { "on_mount", "on_unmount" },
+            .properties =
+                {
+                    {.name = "on_mount",
+                     .type = "std::function<void(const BuildContext&)>",
+                     .default_value = "—",
+                     .required = true,
+                     .note = "挂载后恰好触发一次的用户回调（访问 BuildContext：环境注入、尺寸等）"},
+                    {.name = "on_unmount",
+                     .type = "std::function<void()>",
+                     .default_value = "nullptr",
+                     .required = false,
+                     .note = "控件销毁时触发的清理回调（可空）"},
+                },
+            .events = {"on_mount", "on_unmount"},
             .children_policy = "single",
-            .examples = {
-                "au::Lifecycle(au::Text(\"hi\"), [](const au::BuildContext&){ start(); }, [](){ stop(); });",
-            },
+            .examples =
+                {
+                    "au::Lifecycle(au::Text(\"hi\"), [](const au::BuildContext&){ start(); }, [](){ stop(); });",
+                },
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
-        (void)out; // Lifecycle 无自有响应式信号；子节点信号在其 mount 时独立收集
+        (void)out;  // Lifecycle 无自有响应式信号；子节点信号在其 mount 时独立收集
     }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        return m_child ? m_child.widget().layout(c, ctx) : Size{};
+        return child_ ? child_.widget().layout(c, ctx) : Size{};
     }
 
     auto on_mount(const BuildContext &ctx) -> void override {
-        SingleChild::on_mount(ctx); // 先递归挂载子节点（注册其响应式依赖）
-        if (m_on_mount) {
-            m_on_mount(ctx);
+        SingleChild::on_mount(ctx);  // 先递归挂载子节点（注册其响应式依赖）
+        if (on_mount_) {
+            on_mount_(ctx);
         }
     }
 
   private:
-    MountCb m_on_mount;
-    UnmountCb m_on_unmount;
+    MountCb on_mount_;
+    UnmountCb on_unmount_;
 };
 
-} // namespace aurora
+}  // namespace aurora

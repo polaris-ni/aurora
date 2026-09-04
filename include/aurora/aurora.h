@@ -170,4 +170,4 @@
 #include "aurora/window/surface.h"
 #include "aurora/window/window.h"
 
-namespace au = aurora; ///< 推荐短别名（需求 #2）。`au::colors::Red` 经别名直接可用。
+namespace au = aurora;  ///< 推荐短别名（需求 #2）。`au::colors::Red` 经别名直接可用。

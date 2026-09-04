@@ -32,43 +32,43 @@ class Subscription {
     Subscription() = default;
 
     /// @brief 由取消句柄构造；空句柄表示"未订阅/已释放"。
-    explicit Subscription(std::function<void()> cancel) : m_cancel(std::move(cancel)) {}
+    explicit Subscription(std::function<void()> cancel) : cancel_(std::move(cancel)) {}
 
     ~Subscription() { reset(); }
 
     Subscription(const Subscription &) = delete;
     auto operator=(const Subscription &) -> Subscription & = delete;
 
-    Subscription(Subscription &&o) noexcept : m_cancel(std::move(o.m_cancel)) { o.m_cancel = nullptr; }
+    Subscription(Subscription &&o) noexcept : cancel_(std::move(o.cancel_)) { o.cancel_ = nullptr; }
     auto operator=(Subscription &&o) noexcept -> Subscription & {
         if (this != &o) {
             reset();
-            m_cancel = std::move(o.m_cancel);
-            o.m_cancel = nullptr;
+            cancel_ = std::move(o.cancel_);
+            o.cancel_ = nullptr;
         }
         return *this;
     }
 
     /// @brief 是否持有有效（未取消）的订阅。
-    [[nodiscard]] auto active() const -> bool { return static_cast<bool>(m_cancel); }
+    [[nodiscard]] auto active() const -> bool { return static_cast<bool>(cancel_); }
 
     /// @brief 立即取消订阅（幂等；重复调用安全）。
     auto reset() -> void {
-        if (m_cancel) {
-            auto fn = std::move(m_cancel);
+        if (cancel_) {
+            auto fn = std::move(cancel_);
             fn();
         }
     }
 
     /// @brief 放弃所有权并返回底层取消句柄（调用后析构不再取消）。
     [[nodiscard]] auto release() -> std::function<void()> {
-        auto fn = std::move(m_cancel);
-        m_cancel = nullptr;
+        auto fn = std::move(cancel_);
+        cancel_ = nullptr;
         return fn;
     }
 
   private:
-    std::function<void()> m_cancel;
+    std::function<void()> cancel_;
 };
 
 /**
@@ -90,11 +90,11 @@ class Subscription {
  * @note Thread: main-thread only
  * @note Rebuildable: no
  */
-template<typename T, typename F>
+template <typename T, typename F>
     requires std::invocable<F, const T &>
 auto bind(SignalView<T> &src, F &&fn) -> Subscription {
     auto eff = std::make_shared<Effect>([&src, f = std::forward<F>(fn)]() -> auto { f(src.get()); });
-    eff->run(); // 首次应用当前值并登记依赖
+    eff->run();  // 首次应用当前值并登记依赖
     // 取消句柄持有 eff 使其存活至 dispose；dispose 会从 src 观察者列表摘除本 Effect。
     return Subscription([eff]() -> auto { eff->dispose(); });
 }
@@ -111,11 +111,11 @@ auto bind(SignalView<T> &src, F &&fn) -> Subscription {
  * @note Thread: main-thread only
  * @note Rebuildable: no
  */
-template<typename S, typename F>
+template <typename S, typename F>
     requires std::invocable<F, const S &>
 auto bind(Store<S> &store, F &&fn) -> Subscription {
     auto cancel = store.subscribe([f = std::forward<F>(fn)](const S &next, const S &) -> auto { f(next); });
     return Subscription(std::move(cancel));
 }
 
-} // namespace aurora
+}  // namespace aurora

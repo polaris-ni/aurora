@@ -19,11 +19,10 @@
 #include "aurora/widget/widget.h"
 #include "aurora/window/win32_surface.h"
 #include "aurora/window/window.h"
-
 #include "test_harness.h"
 #ifdef AURORA_BACKEND_WIN32
 #include <windows.h>
-#endif // AURORA_BACKEND_WIN32
+#endif  // AURORA_BACKEND_WIN32
 
 namespace aurora::tests::sec_win32_black_screen {
 
@@ -34,19 +33,19 @@ namespace {
 class RootStub : public LeafWidget {
   public:
     [[nodiscard]] auto type_name() const -> const char * override { return "RootStub"; }
-    [[nodiscard]] static auto describe_static() -> WidgetDescriptor { return WidgetDescriptor{ .name = "RootStub" }; }
+    [[nodiscard]] static auto describe_static() -> WidgetDescriptor { return WidgetDescriptor{.name = "RootStub"}; }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(Size{ .width = 100.0f, .height = 30.0f });
+        return c.constrain(Size{.width = 100.0F, .height = 30.0F});
     }
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
-        p.fill_rect(bounds, Color{ 200, 200, 200, 255 });
+        p.fill_rect(bounds, Color{200, 200, 200, 255});
     }
 };
 
-} // namespace
+}  // namespace
 
 static void run() {
     const auto surf = std::make_shared<Win32Surface>(640, 360, "black");
@@ -59,7 +58,7 @@ static void run() {
     AURORA_TEST_CHECK(h != nullptr);
     // 直接同步发送 WM_PAINT，验证 wnd_proc 分支存在且能安全呈现。
     (void)SendMessageA(h, WM_PAINT, 0, 0);
-    AURORA_TEST_CHECK(true); // 抵达此处说明 WM_PAINT 处理未崩溃
+    AURORA_TEST_CHECK(true);  // 抵达此处说明 WM_PAINT 处理未崩溃
 
     // 契约 3：最大化时 WM_SIZE 同步触发一次重渲染（消除放大区域白闪）。
     // 构造带真实根控件的 Window（其构造会把 present-request 接为 present_root），
@@ -68,10 +67,10 @@ static void run() {
     {
         auto white_surf = std::make_unique<Win32Surface>(640, 360, "white");
         Win32Surface *ws = white_surf.get();
-        auto win = Window{ std::move(white_surf) };
+        auto win = Window{std::move(white_surf)};
         const auto stub = std::make_shared<RootStub>();
         Node root = std::static_pointer_cast<Widget>(stub);
-        const auto first = win.present_root(root); // 设置 m_cached_root 并渲染首帧
+        const auto first = win.present_root(root);  // 设置 m_cached_root 并渲染首帧
         AURORA_TEST_CHECK(first.ok());
         const int before = ws->present_count();
         const int before_w = ws->painter().width();
@@ -79,8 +78,8 @@ static void run() {
         ShowWindow(static_cast<HWND>(ws->hwnd()), SW_MAXIMIZE);
         win.pump_events();
         const int after = ws->present_count();
-        AURORA_TEST_CHECK(after > before);                   // WM_SIZE 同步触发了重渲染
-        AURORA_TEST_CHECK(ws->painter().width() > before_w); // 离屏缓冲已按新尺寸重分配（无白闪）
+        AURORA_TEST_CHECK(after > before);  // WM_SIZE 同步触发了重渲染
+        AURORA_TEST_CHECK(ws->painter().width() > before_w);  // 离屏缓冲已按新尺寸重分配（无白闪）
     }
 }
 
@@ -89,50 +88,50 @@ static void run() {
 static void run() { AURORA_TEST_PRINTF("skip: AURORA_BACKEND_WIN32 not compiled into this build"); }
 
 #endif
-} // namespace aurora::tests::sec_win32_black_screen
+}  // namespace aurora::tests::sec_win32_black_screen
 
 namespace aurora::tests::sec_win32_button_click {
 #ifdef AURORA_BACKEND_WIN32
 
 namespace {
 [[maybe_unused]] auto gap(float h) -> Node {
-    Text t{ " " };
+    Text t{" "};
     t.modifier.set(Modifier{}.height(h));
-    return Node{ std::move(t) };
+    return Node{std::move(t)};
 }
 class Card : public Column {
   public:
-    explicit Card(Node child) : Column{ ColumnProps{ .children = { std::move(child) } } } {
-        this->modifier.set(Modifier{}.padding(14.0f).background(Color{ 255, 255, 255 }));
+    explicit Card(Node child) : Column{ColumnProps{.children = {std::move(child)}}} {
+        this->modifier.set(Modifier{}.padding(14.0F).background(Color{255, 255, 255}));
     }
 };
-} // namespace
+}  // namespace
 
 static void run() {
     BuildContext ctx;
 
     auto counter = std::make_shared<State<int>>(0);
-    auto count_text = std::make_shared<State<LocalizedString>>(LocalizedString{ "count = 0" });
+    auto count_text = std::make_shared<State<LocalizedString>>(LocalizedString{"count = 0"});
     const auto apply = [counter, count_text](int next) -> void {
         counter->set(next);
-        count_text->set(LocalizedString{ "count = " + std::to_string(next) });
+        count_text->set(LocalizedString{"count = " + std::to_string(next)});
     };
 
-    Button b_plus{ ButtonProps{ .label = LocalizedString{ "+1" } } };
+    Button b_plus{ButtonProps{.label = LocalizedString{"+1"}}};
     b_plus.on_click = [counter, apply]() -> void { apply(counter->get() + 1); };
 
-    Node root = Column{ Text{ LocalizedString{ "点击 +1 按钮改变计数" } },
-                        Text{ TextProps{ .content = Reactive{ count_text } } }, Row{ Node{ std::move(b_plus) } } };
-    Node card = Card{ std::move(root) };
+    Node root = Column{Text{LocalizedString{"点击 +1 按钮改变计数"}}, Text{TextProps{.content = Reactive{count_text}}},
+                       Row{Node{std::move(b_plus)}}};
+    Node card = Card{std::move(root)};
 
     WindowOptions opts;
-    opts.size = Size{ .width = 520.0f, .height = 380.0f };
+    opts.size = Size{.width = 520.0F, .height = 380.0F};
     opts.title = "Win32ClickE2E";
 
-    auto win_res = create_window(Win32Options{ opts });
+    auto win_res = create_window(Win32Options{opts});
     if (!win_res) {
         AURORA_LOG_ERROR("test", "[win32_button_click_test] window creation failed: ", win_res.error().message);
-        return; // 非致命：无显示环境跳过
+        return;  // 非致命：无显示环境跳过
     }
     auto win = std::move(win_res.value());
 
@@ -140,7 +139,7 @@ static void run() {
     win->surface().set_event_handler([&](Event &e) -> void {
         auto &wd = card.widget();
         if (auto *me = dynamic_cast<MouseEvent *>(&e)) {
-            const auto chain = wd.hit_test_chain(me->position, Rect{ .origin = Point{}, .size = wd.size() }, ctx);
+            const auto chain = wd.hit_test_chain(me->position, Rect{.origin = Point{}, .size = wd.size()}, ctx);
             for (const auto &hn : chain) {
                 Widget const *w = hn.get();
                 if (w && std::string(w->type_name()) == "Button") {
@@ -169,17 +168,17 @@ static void run() {
     }
 
     // 找落在 +1 按钮中心的一个 dp 坐标
-    Point target{ .x = 0.0f, .y = 0.0f };
+    Point target{.x = 0.0F, .y = 0.0F};
     bool found = false;
     for (int ix = 0; static_cast<float>(ix) < logical.width; ix += 2) {
         const auto x = static_cast<float>(ix);
         for (int iy = 0; static_cast<float>(iy) < logical.height; iy += 2) {
             const auto y = static_cast<float>(iy);
-            auto chain = card.widget().hit_test_chain(Point{ .x = x, .y = y }, card.bounds(), ctx);
+            auto chain = card.widget().hit_test_chain(Point{.x = x, .y = y}, card.bounds(), ctx);
             for (auto &hn : chain) {
                 Widget *w = hn.get();
                 if ((w != nullptr) && std::string(w->type_name()) == "Button") {
-                    target = Point{ .x = x, .y = y };
+                    target = Point{.x = x, .y = y};
                     found = true;
                     break;
                 }
@@ -240,7 +239,7 @@ static void run() {
 void run() { AURORA_TEST_PRINTF("skip: AURORA_BACKEND_WIN32 not compiled into this build"); }
 
 #endif
-} // namespace aurora::tests::sec_win32_button_click
+}  // namespace aurora::tests::sec_win32_button_click
 
 namespace aurora::tests::sec_count_display_col {
 #ifdef AURORA_BACKEND_WIN32
@@ -248,37 +247,37 @@ namespace au = aurora;
 
 namespace {
 auto gap(float h) -> Node {
-    Text t{ " " };
+    Text t{" "};
     t.modifier.set(Modifier{}.height(h));
-    return Node{ std::move(t) };
+    return Node{std::move(t)};
 }
-} // namespace
+}  // namespace
 
 static void run() {
     BuildContext ctx;
 
     auto counter = std::make_shared<State<int>>(0);
-    auto count_text = std::make_shared<State<LocalizedString>>(LocalizedString{ "count = 0" });
+    auto count_text = std::make_shared<State<LocalizedString>>(LocalizedString{"count = 0"});
     const auto apply = [counter, count_text](int next) -> void {
         counter->set(next);
-        count_text->set(LocalizedString{ "count = " + std::to_string(next) });
+        count_text->set(LocalizedString{"count = " + std::to_string(next)});
     };
 
-    Button b_plus{ ButtonProps{ .label = LocalizedString{ "+1" } } };
+    Button b_plus{ButtonProps{.label = LocalizedString{"+1"}}};
     b_plus.on_click = [counter, apply]() -> void { apply(counter->get() + 1); };
 
     // 原始布局：计数 Text 在 Column 中（与按钮 Row 并列）
     Node root = Column{
         gap(12),
-        Text{ TextProps{ .content = Reactive{ count_text } } },
-        Row{ Node{ std::move(b_plus) } },
+        Text{TextProps{.content = Reactive{count_text}}},
+        Row{Node{std::move(b_plus)}},
     };
 
     WindowOptions opts;
-    opts.size = Size{ .width = 520.0f, .height = 380.0f };
+    opts.size = Size{.width = 520.0F, .height = 380.0F};
     opts.title = "CountDisplayCol";
 
-    auto win_res = create_window(Win32Options{ opts });
+    auto win_res = create_window(Win32Options{opts});
     if (!win_res) {
         AURORA_LOG_ERROR("test", "[count_display_col_test] window creation failed: ", win_res.error().message);
         return; /* 无显示环境：优雅跳过，不计失败 */
@@ -306,17 +305,17 @@ static void run() {
     }
 
     // 找到 +1 按钮在 dp 坐标下的命中中心点
-    Point target{ .x = 0.0f, .y = 0.0f };
+    Point target{.x = 0.0F, .y = 0.0F};
     bool found = false;
     for (int ix = 0; static_cast<float>(ix) < logical.width; ix += 2) {
         const auto x = static_cast<float>(ix);
         for (int iy = 0; static_cast<float>(iy) < logical.height; iy += 2) {
             const auto y = static_cast<float>(iy);
-            auto chain = root.widget().hit_test_chain(Point{ .x = x, .y = y }, root.bounds(), ctx);
+            auto chain = root.widget().hit_test_chain(Point{.x = x, .y = y}, root.bounds(), ctx);
             for (auto &hn : chain) {
                 Widget *w = hn.get();
                 if ((w != nullptr) && std::string(w->type_name()) == "Button") {
-                    target = Point{ .x = x, .y = y };
+                    target = Point{.x = x, .y = y};
                     found = true;
                     break;
                 }
@@ -336,7 +335,7 @@ static void run() {
 
     auto loop_once = [&]() -> void {
         win->pump_events();
-        (void)win->present_root(root); // begin_frame 由 present_root 内部按需调用，外层不得手调
+        (void)win->present_root(root);  // begin_frame 由 present_root 内部按需调用，外层不得手调
     };
     for (int f = 0; f < 3; ++f) {
         loop_once();
@@ -395,7 +394,7 @@ static void run() {
 static void run() { AURORA_TEST_PRINTF("skip: AURORA_BACKEND_WIN32 not compiled into this build"); }
 
 #endif
-} // namespace aurora::tests::sec_count_display_col
+}  // namespace aurora::tests::sec_count_display_col
 
 AURORA_TEST() {
     aurora::tests::sec_win32_black_screen::run();

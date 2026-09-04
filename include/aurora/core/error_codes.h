@@ -9,4 +9,4 @@
 // ============================================================================
 #include "aurora/core/error_codes.gen.h"
 
-namespace aurora {} // namespace aurora
+namespace aurora {}  // namespace aurora

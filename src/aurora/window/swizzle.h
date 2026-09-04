@@ -14,7 +14,7 @@ namespace aurora {
 inline auto swizzle_rgba_to_bgra(const std::uint32_t *src, std::uint32_t *dst, std::size_t count) -> void {
     for (std::size_t i = 0; i < count; ++i) {
         const std::uint32_t px = src[i];
-        dst[i] = (px & 0xFF00FF00U) | ((px & 0xFFu) << 16U) | ((px >> 16U) & 0xFFU);
+        dst[i] = (px & 0xFF00FF00U) | ((px & 0xFFU) << 16U) | ((px >> 16U) & 0xFFU);
     }
 }
 
@@ -24,10 +24,10 @@ inline auto swizzle_rgba_to_bgra(const std::uint32_t *src, std::uint32_t *dst, s
 inline auto swizzle_bgra_to_rgba(const std::uint32_t *src, std::uint32_t *dst, std::size_t count) -> void {
     for (std::size_t i = 0; i < count; ++i) {
         const std::uint32_t px = src[i];
-        dst[i] = (px & 0xFF00FF00U) | ((px & 0xFFu) << 16U) | ((px >> 16U) & 0xFFU);
+        dst[i] = (px & 0xFF00FF00U) | ((px & 0xFFU) << 16U) | ((px >> 16U) & 0xFFU);
     }
 }
 
 // NOLINTEND(*-pro-bounds-pointer-arithmetic)
 
-} // namespace aurora
+}  // namespace aurora

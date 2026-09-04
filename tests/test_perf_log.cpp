@@ -13,7 +13,6 @@
 #include <string>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::FrameStats;
@@ -57,7 +56,7 @@ void test_csv_header() {
 
 void test_snapshots_contain_metrics() {
     reset();
-    PerfLog::enable(1000000); // 测试期间不触发周期摘要
+    PerfLog::enable(1000000);  // 测试期间不触发周期摘要
     // 喂几帧真实统计，使 FrameStats 窗口非空
     auto &stats = FrameStats::instance();
     stats.reset();
@@ -74,7 +73,7 @@ void test_snapshots_contain_metrics() {
     reset();
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     test_enable_disable();

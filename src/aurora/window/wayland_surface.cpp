@@ -5,18 +5,18 @@
 
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_WAYLAND)
 
+#include <fcntl.h>
+#include <linux/input-event-codes.h>
+#include <poll.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <wayland-client.h>
+#include <xkbcommon/xkbcommon.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <fcntl.h>
-#include <poll.h>
-#include <unistd.h>
 #include <vector>
-#include <wayland-client.h>
-
-#include <linux/input-event-codes.h>
-#include <sys/mman.h>
-#include <xkbcommon/xkbcommon.h>
 
 #include "aurora/core/log.h"
 #include "aurora/event/event.h"
@@ -24,7 +24,6 @@
 #include "aurora/window/keysym_map.h"
 #include "aurora/window/swizzle.h"
 #include "aurora/window/window_state.h"
-
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -32,13 +31,13 @@ namespace aurora {
 namespace {
 /// @brief xkb keysym → 平台无关 KeyCode（Wayland 后端入口；映射逻辑见 detail::keysym_to_keycode）。
 auto from_xkb_keysym(xkb_keysym_t ks) -> KeyCode { return detail::keysym_to_keycode(static_cast<unsigned long>(ks)); }
-} // namespace
+}  // namespace
 
 /// @brief WaylandSurface 的全部平台状态（pimpl）：公共头零 Wayland 依赖。
 /// 嵌套类型可访问外围类 protected 成员（notify_window_state/m_present_request），
 /// C 回调经 static thunk 转发到本结构的成员函数。
 struct WaylandSurface::Impl {
-    WaylandSurface *self = nullptr; ///< 反向指针：listener 内上抛 notify_*/m_present_request。
+    WaylandSurface *self = nullptr;  ///< 反向指针：listener 内上抛 notify_*/m_present_request。
     // 核心 globals（registry 绑定）。
     wl_display *dpy = nullptr;
     wl_registry *registry = nullptr;
@@ -83,10 +82,10 @@ struct WaylandSurface::Impl {
     Slot slots[2];
 
     Painter painter;
-    std::vector<Rect> present_dirty; ///< 本帧增量 damage 脏区（设备坐标；空=全量）。
-    Size size{ 0.0f, 0.0f };         ///< 逻辑 dp（Wayland 表面坐标即逻辑坐标）。
+    std::vector<Rect> present_dirty;  ///< 本帧增量 damage 脏区（设备坐标；空=全量）。
+    Size size{0.0F, 0.0F};  ///< 逻辑 dp（Wayland 表面坐标即逻辑坐标）。
     int scale = 1;
-    bool configured = false; ///< 收到首个 xdg_surface.configure 前不得 attach buffer。
+    bool configured = false;  ///< 收到首个 xdg_surface.configure 前不得 attach buffer。
     // xdg_toplevel.configure 暂存（ack 于 xdg_surface.configure 时统一应用）。
     std::int32_t pending_w = 0;
     std::int32_t pending_h = 0;
@@ -101,7 +100,7 @@ struct WaylandSurface::Impl {
     WindowMode mode = WindowMode::Normal;
     Surface::EventHandler handler;
     // 自唤醒管道（request_wake → wait_events poll 立即返回）。
-    int wake_fd[2] = { -1, -1 };
+    int wake_fd[2] = {-1, -1};
     // 指针表面坐标（逻辑 px；Wayland 事件坐标天然为表面坐标，无需除 scale）。
     double ptr_x = 0.0;
     double ptr_y = 0.0;
@@ -113,22 +112,22 @@ struct WaylandSurface::Impl {
     // 三者组合覆盖了 Auto/ServerSide/ClientSide/Borderless/Frameless 全部策略，
     // 确保「无标题栏也能移动/缩放/关闭」：KDE（SSD）全 false；GNOME（无 SSD）走 CSD 兜底。
     DecorationPolicy deco_policy = DecorationPolicy::Auto;
-    bool csd_title = false;              ///< 自绘标题栏（移动 + 关闭按钮）
-    bool csd_border = false;             ///< 自绘可缩放边框
-    bool mod_move = false;               ///< 修饰键拖拽移动（无标题栏时）
-    std::string title;                   ///< 标题（用于 CSD 标题栏文字）
-    TitleBarStyle tb_style{};            ///< CSD 标题栏样式（构造自 WindowStyleOptions::title_bar；运行期可热更）
-    std::shared_ptr<Image> tb_icon;      ///< CSD 标题栏图标（shared_ptr 共享像素；set_title_bar_icon 存入）
-    bool resizable = true;               ///< 可调大小（false = 固定尺寸，最大化按钮隐藏）
-    int hovered_btn = -1;                ///< 当前悬停的标题栏按钮索引（-1 = 无悬停）
-    bool fs_bar_revealed = false;        ///< 全屏揭示条是否展开（覆盖层语义，不回流布局）
-    int border = 6;                      ///< 可拖拽缩放边框厚度（逻辑 px）
-    bool csd_grab = false;               ///< 当前是否处于 CSD/修饰键拖拽交互中（吞噬指针事件）
-    std::uint32_t last_press_serial = 0; ///< 最近按键 serial：控件经 begin_window_move/resize 同步调用时有效
+    bool csd_title = false;  ///< 自绘标题栏（移动 + 关闭按钮）
+    bool csd_border = false;  ///< 自绘可缩放边框
+    bool mod_move = false;  ///< 修饰键拖拽移动（无标题栏时）
+    std::string title;  ///< 标题（用于 CSD 标题栏文字）
+    TitleBarStyle tb_style{};  ///< CSD 标题栏样式（构造自 WindowStyleOptions::title_bar；运行期可热更）
+    std::shared_ptr<Image> tb_icon;  ///< CSD 标题栏图标（shared_ptr 共享像素；set_title_bar_icon 存入）
+    bool resizable = true;  ///< 可调大小（false = 固定尺寸，最大化按钮隐藏）
+    int hovered_btn = -1;  ///< 当前悬停的标题栏按钮索引（-1 = 无悬停）
+    bool fs_bar_revealed = false;  ///< 全屏揭示条是否展开（覆盖层语义，不回流布局）
+    int border = 6;  ///< 可拖拽缩放边框厚度（逻辑 px）
+    bool csd_grab = false;  ///< 当前是否处于 CSD/修饰键拖拽交互中（吞噬指针事件）
+    std::uint32_t last_press_serial = 0;  ///< 最近按键 serial：控件经 begin_window_move/resize 同步调用时有效
     // 双击标题栏最大化检测（Wayland 不提供双击事件，客户端自行追踪）。
-    std::uint32_t last_click_time = 0; ///< 上次标题栏点击时间（ms，自某基准）
-    double last_click_x = 0.0;         ///< 上次点击 X
-    double last_click_y = 0.0;         ///< 上次点击 Y
+    std::uint32_t last_click_time = 0;  ///< 上次标题栏点击时间（ms，自某基准）
+    double last_click_x = 0.0;  ///< 上次点击 X
+    double last_click_y = 0.0;  ///< 上次点击 Y
 
     auto update_state() -> void {
         const WindowState want = compute_window_state(minimized, active);
@@ -145,7 +144,7 @@ struct WaylandSurface::Impl {
         MouseEvent e;
         e.action = action;
         e.button = button;
-        e.position = Point{ lx, ly };
+        e.position = Point{lx, ly};
         handler(e);
     }
 
@@ -157,12 +156,12 @@ struct WaylandSurface::Impl {
             want = std::max(want, o.scale);
         }
         if (compositor_version < 3U) {
-            want = 1; // set_buffer_scale 需 wl_surface v3：不支持则退化 1x
+            want = 1;  // set_buffer_scale 需 wl_surface v3：不支持则退化 1x
         }
         if (want != scale) {
             scale = want;
-            if (self->m_present_request) {
-                self->m_present_request();
+            if (self->present_request_) {
+                self->present_request_();
             }
         }
     }
@@ -196,11 +195,11 @@ struct WaylandSurface::Impl {
         -> void;
     /// 请求立即重绘（嵌套类可访基类 protected 的 m_present_request；供匿名空间自由函数复用）。
     auto request_repaint() -> void {
-        if (self != nullptr && self->m_present_request) {
-            self->m_present_request();
+        if (self != nullptr && self->present_request_) {
+            self->present_request_();
         }
     }
-    auto draw_decoration(Painter &p) const -> void; ///< 自绘装饰：标题栏（csd_title）+ 边框（csd_border）
+    auto draw_decoration(Painter &p) const -> void;  ///< 自绘装饰：标题栏（csd_title）+ 边框（csd_border）
 };
 
 namespace {
@@ -208,18 +207,18 @@ using Impl = WaylandSurface::Impl;
 
 // ---- wl_buffer：release = 合成器归还缓冲（槽复用）。 ----
 void buf_release(void *data, wl_buffer * /*b*/) { static_cast<Impl::Slot *>(data)->busy = false; }
-constexpr wl_buffer_listener BUFFER_LISTENER = { buf_release };
+constexpr wl_buffer_listener BUFFER_LISTENER = {buf_release};
 
 // ---- xdg_wm_base：ping/pong 保活（不回应会被合成器判定无响应）。 ----
 void wm_ping(void * /*data*/, xdg_wm_base *wb, std::uint32_t serial) { xdg_wm_base_pong(wb, serial); }
-constexpr xdg_wm_base_listener WM_BASE_LISTENER = { wm_ping };
+constexpr xdg_wm_base_listener WM_BASE_LISTENER = {wm_ping};
 
 // ---- xdg_surface / xdg_toplevel：configure 驱动尺寸与几何态。 ----
 void xs_configure(void *data, xdg_surface * /*xs*/, std::uint32_t serial) {
     static_cast<Impl *>(data)->on_xdg_surface_configure(serial);
 }
 
-constexpr xdg_surface_listener XDG_SURFACE_LISTENER = { xs_configure };
+constexpr xdg_surface_listener XDG_SURFACE_LISTENER = {xs_configure};
 
 void tl_configure(void *data, xdg_toplevel * /*tl*/, std::int32_t w, std::int32_t h, wl_array *states) {
     static_cast<Impl *>(data)->on_toplevel_configure(w, h, states);
@@ -231,7 +230,7 @@ void tl_bounds(void * /*data*/, xdg_toplevel * /*tl*/, std::int32_t /*w*/, std::
 
 void tl_caps(void * /*data*/, xdg_toplevel * /*tl*/, wl_array * /*caps*/) {}
 
-constexpr xdg_toplevel_listener TOP_LEVEL_LISTENER = { tl_configure, tl_close, tl_bounds, tl_caps };
+constexpr xdg_toplevel_listener TOP_LEVEL_LISTENER = {tl_configure, tl_close, tl_bounds, tl_caps};
 
 // ---- wl_pointer：进入/离开/移动/按键/滚轮 → MouseEvent/ScrollEvent。 ----
 void ptr_enter(void *data, wl_pointer * /*p*/, std::uint32_t /*serial*/, wl_surface * /*s*/, wl_fixed_t sx,
@@ -244,7 +243,7 @@ void ptr_enter(void *data, wl_pointer * /*p*/, std::uint32_t /*serial*/, wl_surf
 
 void ptr_leave(void *data, wl_pointer * /*p*/, std::uint32_t /*serial*/, wl_surface * /*s*/) {
     // 光标离开窗口：合成一次远离窗口的 Move → 清除全部悬停态（对齐 WM_MOUSELEAVE / X11 LeaveNotify）。
-    static_cast<Impl *>(data)->send_mouse(MouseAction::Move, MouseButton::Left, -10000.0f, -10000.0f);
+    static_cast<Impl *>(data)->send_mouse(MouseAction::Move, MouseButton::Left, -10000.0F, -10000.0F);
 }
 
 void ptr_motion(void *data, wl_pointer * /*p*/, std::uint32_t /*time*/, wl_fixed_t sx, wl_fixed_t sy) {
@@ -255,20 +254,21 @@ void ptr_motion(void *data, wl_pointer * /*p*/, std::uint32_t /*time*/, wl_fixed
     bool want_repaint = false;
     if (d.csd_title) {
         const double th = static_cast<double>(d.tb_style.height);
-        int hov = -1; // 序号约定：0=min / 1=max / 2=close（与 draw_decoration 消费端一致）
+        int hov = -1;  // 序号约定：0=min / 1=max / 2=close（与 draw_decoration 消费端一致）
         if (d.ptr_y >= 0.0 && d.ptr_y < th) {
             const TitleBarGeometry g = title_bar_geometry(static_cast<float>(d.size.width), d.tb_style,
                                                           d.mode == WindowMode::Maximized, d.resizable);
             const auto in_btn = [](const Rect &r, double px, double py) {
-                return r.size.width > 0.0f && px >= r.origin.x && px < r.origin.x + r.size.width && py >= r.origin.y &&
+                return r.size.width > 0.0F && px >= r.origin.x && px < r.origin.x + r.size.width && py >= r.origin.y &&
                        py < r.origin.y + r.size.height;
             };
-            if (in_btn(g.minimize, d.ptr_x, d.ptr_y))
+            if (in_btn(g.minimize, d.ptr_x, d.ptr_y)) {
                 hov = 0;
-            else if (in_btn(g.maximize, d.ptr_x, d.ptr_y))
+            } else if (in_btn(g.maximize, d.ptr_x, d.ptr_y)) {
                 hov = 1;
-            else if (in_btn(g.close, d.ptr_x, d.ptr_y))
+            } else if (in_btn(g.close, d.ptr_x, d.ptr_y)) {
                 hov = 2;
+            }
         }
         if (hov != d.hovered_btn) {
             d.hovered_btn = hov;
@@ -278,23 +278,24 @@ void ptr_motion(void *data, wl_pointer * /*p*/, std::uint32_t /*time*/, wl_fixed
     if (d.mode == WindowMode::FullScreen) {
         // 顶边揭示状态机：近顶 6px 展开；指针下离栏区（height+4 缓冲）后收回。
         bool reveal = d.fs_bar_revealed;
-        if (!reveal && d.ptr_y < 6.0)
+        if (!reveal && d.ptr_y < 6.0) {
             reveal = true;
-        else if (reveal && d.ptr_y > static_cast<double>(d.tb_style.height) + 4.0)
+        } else if (reveal && d.ptr_y > static_cast<double>(d.tb_style.height) + 4.0) {
             reveal = false;
+        }
         if (reveal != d.fs_bar_revealed) {
             d.fs_bar_revealed = reveal;
             want_repaint = true;
         }
     } else if (d.fs_bar_revealed) {
-        d.fs_bar_revealed = false; // 非全屏一律复位揭示态
+        d.fs_bar_revealed = false;  // 非全屏一律复位揭示态
         want_repaint = true;
     }
     if (want_repaint) {
-        d.request_repaint(); // 经 Impl 辅助方法触发重绘
+        d.request_repaint();  // 经 Impl 辅助方法触发重绘
     }
     if (d.csd_grab) {
-        return; // CSD 拖拽中：位置已记录，不转发悬停事件给应用
+        return;  // CSD 拖拽中：位置已记录，不转发悬停事件给应用
     }
     d.send_mouse(MouseAction::Move, MouseButton::Left, static_cast<float>(d.ptr_x), static_cast<float>(d.ptr_y));
 }
@@ -313,7 +314,7 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
         return;
     }
 
-    d.last_press_serial = serial; // 缓存本次按键 serial：xdg move/resize 协议要求
+    d.last_press_serial = serial;  // 缓存本次按键 serial：xdg move/resize 协议要求
 
     // ── 右键标题栏 → 合成器原生窗口菜单（xdg-shell 标准协议；GNOME/KDE 均实现）。
     //    仅在自绘标题栏上拦截；其余区域右键照常转发应用。──
@@ -346,7 +347,7 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
             const TitleBarGeometry g =
                 title_bar_geometry(static_cast<float>(W), d.tb_style, d.mode == WindowMode::Maximized, d.resizable);
             const auto hit_btn = [&](const Rect &r) {
-                return r.size.width > 0.0f && x >= r.origin.x && x < r.origin.x + r.size.width && y >= r.origin.y &&
+                return r.size.width > 0.0F && x >= r.origin.x && x < r.origin.x + r.size.width && y >= r.origin.y &&
                        y < r.origin.y + r.size.height;
             };
 
@@ -452,9 +453,9 @@ void ptr_axis(void *data, wl_pointer * /*p*/, std::uint32_t /*time*/, std::uint3
     }
     // Wayland axis 正值 = 内容向下/向右滚动，量纲为表面像素（一格滚轮约 10–15px）；
     // 归一到 aurora 约定：上滚为正、约一格 ±1（与 X11 Button4/5 幅度一致）。
-    const float amount = static_cast<float>(wl_fixed_to_double(value)) / 10.0f;
+    const float amount = static_cast<float>(wl_fixed_to_double(value)) / 10.0F;
     ScrollEvent se;
-    se.position = Point{ static_cast<float>(d.ptr_x), static_cast<float>(d.ptr_y) };
+    se.position = Point{static_cast<float>(d.ptr_x), static_cast<float>(d.ptr_y)};
     if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL) {
         se.delta_y = -amount;
     } else {
@@ -471,9 +472,8 @@ void ptr_axis_stop(void * /*d*/, wl_pointer * /*p*/, std::uint32_t /*t*/, std::u
 
 void ptr_axis_discrete(void * /*d*/, wl_pointer * /*p*/, std::uint32_t /*axis*/, std::int32_t /*n*/) {}
 
-constexpr wl_pointer_listener POINTER_LISTENER = { ptr_enter,       ptr_leave,     ptr_motion,
-                                                   ptr_button,      ptr_axis,      ptr_frame,
-                                                   ptr_axis_source, ptr_axis_stop, ptr_axis_discrete };
+constexpr wl_pointer_listener POINTER_LISTENER = {ptr_enter, ptr_leave,       ptr_motion,    ptr_button,       ptr_axis,
+                                                  ptr_frame, ptr_axis_source, ptr_axis_stop, ptr_axis_discrete};
 
 // ---- wl_keyboard：keymap（xkbcommon）/enter/leave/key/modifiers。 ----
 void kb_keymap(void *data, wl_keyboard * /*k*/, std::uint32_t format, std::int32_t fd, std::uint32_t sz) {
@@ -511,7 +511,7 @@ void kb_repeat(void * /*data*/, wl_keyboard * /*k*/, std::int32_t /*rate*/, std:
     // 文本编辑长按重复输入留待后续（与 X11 DetectableAutoRepeat 行为差异已知）。
 }
 
-constexpr wl_keyboard_listener KEYBOARD_LISTENER = { kb_keymap, kb_enter, kb_leave, kb_key, kb_modifiers, kb_repeat };
+constexpr wl_keyboard_listener KEYBOARD_LISTENER = {kb_keymap, kb_enter, kb_leave, kb_key, kb_modifiers, kb_repeat};
 
 // ---- wl_seat：能力增减 → 惰性获取 pointer/keyboard。 ----
 void seat_caps(void *data, wl_seat * /*s*/, std::uint32_t caps) {
@@ -520,7 +520,7 @@ void seat_caps(void *data, wl_seat * /*s*/, std::uint32_t caps) {
 
 void seat_name(void * /*data*/, wl_seat * /*s*/, const char * /*name*/) {}
 
-constexpr wl_seat_listener SEAT_LISTENER = { seat_caps, seat_name };
+constexpr wl_seat_listener SEAT_LISTENER = {seat_caps, seat_name};
 
 // ---- wl_output：scale 事件（HiDPI）。 ----
 void out_geometry(void * /*d*/, wl_output * /*o*/, std::int32_t, std::int32_t, std::int32_t, std::int32_t, std::int32_t,
@@ -543,7 +543,7 @@ void out_name(void * /*d*/, wl_output * /*o*/, const char * /*name*/) {}
 
 void out_desc(void * /*d*/, wl_output * /*o*/, const char * /*desc*/) {}
 
-constexpr wl_output_listener OUTPUT_LISTENER = { out_geometry, out_mode, out_done, out_scale, out_name, out_desc };
+constexpr wl_output_listener OUTPUT_LISTENER = {out_geometry, out_mode, out_done, out_scale, out_name, out_desc};
 
 // ---- wl_registry：globals 绑定。 ----
 void reg_global(void *data, wl_registry * /*r*/, std::uint32_t name, const char *iface, std::uint32_t version) {
@@ -552,8 +552,8 @@ void reg_global(void *data, wl_registry * /*r*/, std::uint32_t name, const char 
 
 void reg_global_remove(void * /*data*/, wl_registry * /*r*/, std::uint32_t /*name*/) {}
 
-constexpr wl_registry_listener RETISTERY_LISTENER = { reg_global, reg_global_remove };
-} // namespace
+constexpr wl_registry_listener RETISTERY_LISTENER = {reg_global, reg_global_remove};
+}  // namespace
 
 auto WaylandSurface::Impl::on_global(std::uint32_t name, const char *iface, std::uint32_t version) -> void {
     if (std::strcmp(iface, wl_compositor_interface.name) == 0) {
@@ -588,7 +588,7 @@ auto WaylandSurface::Impl::on_xdg_surface_configure(std::uint32_t serial) -> voi
     // 应用 xdg_toplevel.configure 暂存：尺寸（0=客户端自定，保持现值）与几何态。
     bool resized = false;
     if (pending_w > 0 && pending_h > 0) {
-        const Size want{ static_cast<float>(pending_w), static_cast<float>(pending_h) };
+        const Size want{static_cast<float>(pending_w), static_cast<float>(pending_h)};
         if (want.width != size.width || want.height != size.height) {
             size = want;
             resized = true;
@@ -608,10 +608,10 @@ auto WaylandSurface::Impl::on_xdg_surface_configure(std::uint32_t serial) -> voi
         active = pending_act;
         update_state();
     }
-    if (resized && self->m_present_request) {
+    if (resized && self->present_request_) {
         // 几何变化当下同步重渲染（对齐 Win32 WM_SIZE / X11 ConfigureNotify）：
         // 下一次 commit 的缓冲已为新尺寸内容，无黑边/残留。
-        self->m_present_request();
+        self->present_request_();
     }
 }
 
@@ -626,11 +626,20 @@ auto WaylandSurface::Impl::on_toplevel_configure(std::int32_t w, std::int32_t h,
     const std::size_t n = states->size / sizeof(std::uint32_t);
     for (std::size_t i = 0; i < n; ++i) {
         switch (arr[i]) {
-        case XDG_TOPLEVEL_STATE_MAXIMIZED: pending_max = true; break;
-        case XDG_TOPLEVEL_STATE_FULLSCREEN: pending_fs = true; break;
-        case XDG_TOPLEVEL_STATE_ACTIVATED: pending_act = true; break;
-        case XDG_TOPLEVEL_STATE_SUSPENDED: pending_susp = true; break;
-        default: break;
+            case XDG_TOPLEVEL_STATE_MAXIMIZED:
+                pending_max = true;
+                break;
+            case XDG_TOPLEVEL_STATE_FULLSCREEN:
+                pending_fs = true;
+                break;
+            case XDG_TOPLEVEL_STATE_ACTIVATED:
+                pending_act = true;
+                break;
+            case XDG_TOPLEVEL_STATE_SUSPENDED:
+                pending_susp = true;
+                break;
+            default:
+                break;
         }
     }
 }
@@ -709,7 +718,7 @@ auto WaylandSurface::Impl::on_key(std::uint32_t key, std::uint32_t state_v) cons
     if (!handler || xkb_st == nullptr) {
         return;
     }
-    const xkb_keycode_t kc = key + 8U; // evdev → xkb keycode 偏移（约定）
+    const xkb_keycode_t kc = key + 8U;  // evdev → xkb keycode 偏移（约定）
     const xkb_keysym_t sym = xkb_state_key_get_one_sym(xkb_st, kc);
     KeyEvent e;
     e.action = (state_v == WL_KEYBOARD_KEY_STATE_PRESSED) ? KeyAction::Down : KeyAction::Up;
@@ -754,7 +763,7 @@ auto WaylandSurface::Impl::ensure_slot(Slot &s, int w, int h) const -> bool {
     wl_shm_pool *pool = wl_shm_create_pool(shm, fd, static_cast<std::int32_t>(bytes));
     s.buf = wl_shm_pool_create_buffer(pool, 0, w, h, static_cast<std::int32_t>(stride), WL_SHM_FORMAT_XRGB8888);
     wl_shm_pool_destroy(pool);
-    ::close(fd); // pool 已持有 fd 引用，本端句柄可关
+    ::close(fd);  // pool 已持有 fd 引用，本端句柄可关
     if (s.buf == nullptr) {
         munmap(map, bytes);
         return false;
@@ -788,13 +797,14 @@ auto WaylandSurface::Impl::pick_slot(int w, int h) -> Slot * {
 // =============================================================================
 
 WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const WindowStyleOptions &style)
-    : m_impl(std::make_unique<Impl>()) {
-    Impl &d = *m_impl;
+    : impl_(std::make_unique<Impl>()) {
+    Impl &d = *impl_;
     d.self = this;
     d.dpy = wl_display_connect(nullptr);
     if (d.dpy == nullptr) {
-        AURORA_LOG_WARN("window", "WaylandSurface: wl_display_connect failed (WAYLAND_DISPLAY unset or "
-                                  "unreachable); surface unavailable, factory will return an error.");
+        AURORA_LOG_WARN("window",
+                        "WaylandSurface: wl_display_connect failed (WAYLAND_DISPLAY unset or "
+                        "unreachable); surface unavailable, factory will return an error.");
         return;
     }
     d.registry = wl_display_get_registry(d.dpy);
@@ -803,8 +813,9 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
     wl_display_roundtrip(d.dpy);
     wl_display_roundtrip(d.dpy);
     if (d.compositor == nullptr || d.shm == nullptr || d.wm_base == nullptr) {
-        AURORA_LOG_WARN("window", "WaylandSurface: required globals missing (wl_compositor/wl_shm/xdg_wm_base); "
-                                  "surface unavailable.");
+        AURORA_LOG_WARN("window",
+                        "WaylandSurface: required globals missing (wl_compositor/wl_shm/xdg_wm_base); "
+                        "surface unavailable.");
         wl_display_disconnect(d.dpy);
         d.dpy = nullptr;
         return;
@@ -823,11 +834,11 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
         xdg_toplevel_set_min_size(d.toplevel, w, h);
         xdg_toplevel_set_max_size(d.toplevel, w, h);
     } else {
-        if (style.min_size.width > 0.0f || style.min_size.height > 0.0f) {
+        if (style.min_size.width > 0.0F || style.min_size.height > 0.0F) {
             xdg_toplevel_set_min_size(d.toplevel, static_cast<std::int32_t>(style.min_size.width),
                                       static_cast<std::int32_t>(style.min_size.height));
         }
-        if (style.max_size.width > 0.0f || style.max_size.height > 0.0f) {
+        if (style.max_size.width > 0.0F || style.max_size.height > 0.0F) {
             xdg_toplevel_set_max_size(d.toplevel, static_cast<std::int32_t>(style.max_size.width),
                                       static_cast<std::int32_t>(style.max_size.height));
         }
@@ -849,41 +860,46 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
     }
     // 依策略决定自绘装饰形态：标题栏（移动+关闭）/ 边框（缩放）/ 修饰键拖拽移动。
     switch (pol) {
-    case DecorationPolicy::Auto:       // 有 SSD 用原生；无 SSD（GNOME）自绘兜底。
-    case DecorationPolicy::ServerSide: // 强制服务端；不可用时退化为自绘兜底（避免不可操作）。
-        d.csd_title = !ssd_available;
-        d.csd_border = d.csd_title;
-        break;
-    case DecorationPolicy::ClientSide: // 强制自绘标题栏（即便 KDE 支持 SSD）；不画边框。
-        // 边缘缩放仍可用：ptr_button 的 `csd_border || csd_title` 分支保留左/右/下热区，
-        // 顶部被标题栏覆盖；content_inset 仅报告标题栏，不额外留边框。
-        d.csd_title = true;
-        d.csd_border = false;
-        break;
-    case DecorationPolicy::Borderless: // 无标题栏：可缩放边框；移动靠修饰键拖拽。
-        d.csd_title = false;
-        d.csd_border = true;
-        d.mod_move = true;
-        break;
-    case DecorationPolicy::Frameless: // 完全无装饰：应用自绘 + 程序化 API；移动靠修饰键拖拽。
-        d.csd_title = false;
-        d.csd_border = false;
-        d.mod_move = true;
-        break;
+        case DecorationPolicy::Auto:  // 有 SSD 用原生；无 SSD（GNOME）自绘兜底。
+        case DecorationPolicy::ServerSide:  // 强制服务端；不可用时退化为自绘兜底（避免不可操作）。
+            d.csd_title = !ssd_available;
+            d.csd_border = d.csd_title;
+            break;
+        case DecorationPolicy::ClientSide:  // 强制自绘标题栏（即便 KDE 支持 SSD）；不画边框。
+            // 边缘缩放仍可用：ptr_button 的 `csd_border || csd_title` 分支保留左/右/下热区，
+            // 顶部被标题栏覆盖；content_inset 仅报告标题栏，不额外留边框。
+            d.csd_title = true;
+            d.csd_border = false;
+            break;
+        case DecorationPolicy::Borderless:  // 无标题栏：可缩放边框；移动靠修饰键拖拽。
+            d.csd_title = false;
+            d.csd_border = true;
+            d.mod_move = true;
+            break;
+        case DecorationPolicy::Frameless:  // 完全无装饰：应用自绘 + 程序化 API；移动靠修饰键拖拽。
+            d.csd_title = false;
+            d.csd_border = false;
+            d.mod_move = true;
+            break;
     }
     if (!ssd_available && pol != DecorationPolicy::Frameless && pol != DecorationPolicy::Borderless) {
-        AURORA_LOG_INFO("window", "WaylandSurface: compositor lacks xdg-decoration (GNOME): falling back to "
-                                  "client-side decoration (drawn title bar).");
+        AURORA_LOG_INFO("window",
+                        "WaylandSurface: compositor lacks xdg-decoration (GNOME): falling back to "
+                        "client-side decoration (drawn title bar).");
     }
     d.title = title;
-    d.tb_style = style.title_bar; // CSD 标题栏样式（运行期可经 set_title_bar_style 热更）
+    d.tb_style = style.title_bar;  // CSD 标题栏样式（运行期可经 set_title_bar_style 热更）
     d.resizable = style.resizable;
     if (pipe2(d.wake_fd, O_NONBLOCK | O_CLOEXEC) != 0) {
         d.wake_fd[0] = d.wake_fd[1] = -1;
     }
-    if (w <= 0) w = 320;
-    if (h <= 0) h = 240;
-    d.size = Size{ static_cast<float>(w), static_cast<float>(h) };
+    if (w <= 0) {
+        w = 320;
+    }
+    if (h <= 0) {
+        h = 240;
+    }
+    d.size = Size{static_cast<float>(w), static_cast<float>(h)};
     // 首次 commit（无缓冲）宣告表面存在 → 合成器回 configure；阻塞等到 configured
     // 才允许 attach（xdg-shell 协议要求，违者 protocol error 断链）。
     wl_surface_commit(d.surface);
@@ -894,45 +910,81 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
 }
 
 WaylandSurface::~WaylandSurface() {
-    Impl &d = *m_impl;
+    Impl &d = *impl_;
     // 先断开全部上层回调再销毁（对齐 Win32/X11 析构次序教训：销毁期间不得回调已亡上层）。
     d.handler = nullptr;
-    m_window_state_handler = nullptr;
-    m_window_mode_handler = nullptr;
-    m_present_request = nullptr;
+    window_state_handler_ = nullptr;
+    window_mode_handler_ = nullptr;
+    present_request_ = nullptr;
     if (d.dpy != nullptr) {
         for (Impl::Slot &s : d.slots) {
             d.release_slot(s);
         }
-        if (d.deco != nullptr) zxdg_toplevel_decoration_v1_destroy(d.deco);
-        if (d.deco_mgr != nullptr) zxdg_decoration_manager_v1_destroy(d.deco_mgr);
-        if (d.pointer != nullptr) wl_pointer_destroy(d.pointer);
-        if (d.keyboard != nullptr) wl_keyboard_destroy(d.keyboard);
-        if (d.seat != nullptr) wl_seat_destroy(d.seat);
-        for (Impl::OutputInfo &o : d.outputs) {
-            if (o.out != nullptr) wl_output_destroy(o.out);
+        if (d.deco != nullptr) {
+            zxdg_toplevel_decoration_v1_destroy(d.deco);
         }
-        if (d.toplevel != nullptr) xdg_toplevel_destroy(d.toplevel);
-        if (d.xsurface != nullptr) xdg_surface_destroy(d.xsurface);
-        if (d.surface != nullptr) wl_surface_destroy(d.surface);
-        if (d.wm_base != nullptr) xdg_wm_base_destroy(d.wm_base);
-        if (d.shm != nullptr) wl_shm_destroy(d.shm);
-        if (d.compositor != nullptr) wl_compositor_destroy(d.compositor);
-        if (d.registry != nullptr) wl_registry_destroy(d.registry);
+        if (d.deco_mgr != nullptr) {
+            zxdg_decoration_manager_v1_destroy(d.deco_mgr);
+        }
+        if (d.pointer != nullptr) {
+            wl_pointer_destroy(d.pointer);
+        }
+        if (d.keyboard != nullptr) {
+            wl_keyboard_destroy(d.keyboard);
+        }
+        if (d.seat != nullptr) {
+            wl_seat_destroy(d.seat);
+        }
+        for (Impl::OutputInfo &o : d.outputs) {
+            if (o.out != nullptr) {
+                wl_output_destroy(o.out);
+            }
+        }
+        if (d.toplevel != nullptr) {
+            xdg_toplevel_destroy(d.toplevel);
+        }
+        if (d.xsurface != nullptr) {
+            xdg_surface_destroy(d.xsurface);
+        }
+        if (d.surface != nullptr) {
+            wl_surface_destroy(d.surface);
+        }
+        if (d.wm_base != nullptr) {
+            xdg_wm_base_destroy(d.wm_base);
+        }
+        if (d.shm != nullptr) {
+            wl_shm_destroy(d.shm);
+        }
+        if (d.compositor != nullptr) {
+            wl_compositor_destroy(d.compositor);
+        }
+        if (d.registry != nullptr) {
+            wl_registry_destroy(d.registry);
+        }
         wl_display_flush(d.dpy);
         wl_display_disconnect(d.dpy);
     }
-    if (d.xkb_st != nullptr) xkb_state_unref(d.xkb_st);
-    if (d.keymap != nullptr) xkb_keymap_unref(d.keymap);
-    if (d.xkb_ctx != nullptr) xkb_context_unref(d.xkb_ctx);
-    if (d.wake_fd[0] >= 0) ::close(d.wake_fd[0]);
-    if (d.wake_fd[1] >= 0) ::close(d.wake_fd[1]);
+    if (d.xkb_st != nullptr) {
+        xkb_state_unref(d.xkb_st);
+    }
+    if (d.keymap != nullptr) {
+        xkb_keymap_unref(d.keymap);
+    }
+    if (d.xkb_ctx != nullptr) {
+        xkb_context_unref(d.xkb_ctx);
+    }
+    if (d.wake_fd[0] >= 0) {
+        ::close(d.wake_fd[0]);
+    }
+    if (d.wake_fd[1] >= 0) {
+        ::close(d.wake_fd[1]);
+    }
 }
 
-auto WaylandSurface::is_available() const -> bool { return m_impl->dpy != nullptr && m_impl->surface != nullptr; }
+auto WaylandSurface::is_available() const -> bool { return impl_->dpy != nullptr && impl_->surface != nullptr; }
 
 auto WaylandSurface::begin_frame(int width, int height) -> Result<bool> {
-    Impl &d = *m_impl;
+    Impl &d = *impl_;
     // 新帧默认全量上屏；present_root 会在 present 前重新 set_present_dirty。
     d.present_dirty.clear();
     d.painter.set_scale(static_cast<float>(d.scale));
@@ -940,8 +992,12 @@ auto WaylandSurface::begin_frame(int width, int height) -> Result<bool> {
     // 调用方入参可能滞后一帧，以 d.size 为准保证缓冲与表面 1:1 吻合）。
     int lw = static_cast<int>(std::lround(d.size.width));
     int lh = static_cast<int>(std::lround(d.size.height));
-    if (lw <= 0) lw = width > 0 ? width : 1;
-    if (lh <= 0) lh = height > 0 ? height : 1;
+    if (lw <= 0) {
+        lw = width > 0 ? width : 1;
+    }
+    if (lh <= 0) {
+        lh = height > 0 ? height : 1;
+    }
     // Painter 缓冲按物理分辨率分配（逻辑 × scale）：与 painter.width()（物理）比较判重建。
     const int phys_w = lw * d.scale;
     const int phys_h = lh * d.scale;
@@ -949,17 +1005,17 @@ auto WaylandSurface::begin_frame(int width, int height) -> Result<bool> {
         d.painter.begin(lw, lh);
     }
     // 浅色背景：默认文字为黑色，需浅色底才可见（与 Win32/GLFW/X11 后端一致）。
-    d.painter.fill_rect(Rect{ Point{ 0.0f, 0.0f },
-                              Size{ static_cast<float>(d.painter.width()), static_cast<float>(d.painter.height()) } },
-                        Color{ 245, 245, 247, 255 });
-    return Result<bool>{ true };
+    d.painter.fill_rect(
+        Rect{Point{0.0F, 0.0F}, Size{static_cast<float>(d.painter.width()), static_cast<float>(d.painter.height())}},
+        Color{245, 245, 247, 255});
+    return Result<bool>{true};
 }
 
-auto WaylandSurface::painter() -> Painter & { return m_impl->painter; }
+auto WaylandSurface::painter() -> Painter & { return impl_->painter; }
 
 auto WaylandSurface::data() const -> const std::uint8_t * {
-    if (m_impl && m_impl->painter.data() != nullptr) {
-        return m_impl->painter.data();
+    if (impl_ && impl_->painter.data() != nullptr) {
+        return impl_->painter.data();
     }
     return nullptr;
 }
@@ -977,17 +1033,17 @@ auto WaylandSurface::Impl::draw_decoration(Painter &p) const -> void {
 
     if (csd_title) {
         // 标题栏背景。
-        p.fill_rect(Rect{ Point{ 0.0f, 0.0f }, Size{ W, tb_style.height } }, bg);
+        p.fill_rect(Rect{Point{0.0F, 0.0F}, Size{W, tb_style.height}}, bg);
 
         // 图标槽（set_title_bar_icon 注入后显示；无图标留白，几何预留位不变）。
-        if (tb_icon != nullptr && g.icon.size.width > 0.0f) {
+        if (tb_icon != nullptr && g.icon.size.width > 0.0F) {
             p.draw_image(*tb_icon, g.icon);
         }
 
         // 标题文字（draw_text 缺字体时回退内置位图字体，不依赖 FontEngine）。
-        if (tb_style.show_title && !title.empty() && g.title.size.width > 0.0f) {
+        if (tb_style.show_title && !title.empty() && g.title.size.width > 0.0F) {
             Font f;
-            f.size_pt = 13.0f;
+            f.size_pt = 13.0F;
             f.weight = 500;
             p.draw_text(g.title, title, f, fg);
         }
@@ -996,84 +1052,102 @@ auto WaylandSurface::Impl::draw_decoration(Painter &p) const -> void {
         const int hb = hovered_btn;
 
         auto center_of = [](const Rect &r) {
-            return Point{ r.origin.x + r.size.width * 0.5f, r.origin.y + r.size.height * 0.5f };
+            return Point{r.origin.x + r.size.width * 0.5f, r.origin.y + r.size.height * 0.5f};
         };
         auto glyph_min = [&](const Rect &r, float lw, const Color &c) {
             const Point m = center_of(r);
-            const float e = r.size.width / 3.0f;
-            p.draw_line(Point{ m.x - e, m.y }, Point{ m.x + e, m.y }, lw, c);
+            const float e = r.size.width / 3.0F;
+            p.draw_line(Point{m.x - e, m.y}, Point{m.x + e, m.y}, lw, c);
         };
         auto glyph_max = [&](const Rect &r, float lw, const Color &c) {
             const Point m = center_of(r);
             const float e = r.size.width / 3.6f;
             if (mode != WindowMode::Maximized) {
                 // □ 空心方框。
-                p.draw_line(Point{ m.x - e, m.y - e }, Point{ m.x + e, m.y - e }, lw, c);
-                p.draw_line(Point{ m.x + e, m.y - e }, Point{ m.x + e, m.y + e }, lw, c);
-                p.draw_line(Point{ m.x + e, m.y + e }, Point{ m.x - e, m.y + e }, lw, c);
-                p.draw_line(Point{ m.x - e, m.y + e }, Point{ m.x - e, m.y - e }, lw, c);
+                p.draw_line(Point{m.x - e, m.y - e}, Point{m.x + e, m.y - e}, lw, c);
+                p.draw_line(Point{m.x + e, m.y - e}, Point{m.x + e, m.y + e}, lw, c);
+                p.draw_line(Point{m.x + e, m.y + e}, Point{m.x - e, m.y + e}, lw, c);
+                p.draw_line(Point{m.x - e, m.y + e}, Point{m.x - e, m.y - e}, lw, c);
             } else {
                 // ▯ 还原：前实框 + 右上错位背框（双框表达「已最大化，点击还原」）。
                 const float o = e * 0.45f;
-                p.draw_line(Point{ m.x - e, m.y + o - e }, Point{ m.x + e, m.y + o - e }, lw, c);
-                p.draw_line(Point{ m.x + e, m.y + o - e }, Point{ m.x + e, m.y + o + e }, lw, c);
-                p.draw_line(Point{ m.x + e, m.y + o + e }, Point{ m.x - e, m.y + o + e }, lw, c);
-                p.draw_line(Point{ m.x - e, m.y + o + e }, Point{ m.x - e, m.y + o - e }, lw, c);
-                p.draw_line(Point{ m.x - e + o, m.y - e }, Point{ m.x + e + o, m.y - e }, lw, c);
-                p.draw_line(Point{ m.x + e + o, m.y - e }, Point{ m.x + e + o, m.y + e }, lw, c);
-                p.draw_line(Point{ m.x + e + o, m.y + e }, Point{ m.x - e + o, m.y + e }, lw, c);
-                p.draw_line(Point{ m.x - e + o, m.y + e }, Point{ m.x - e + o, m.y - e }, lw, c);
+                p.draw_line(Point{m.x - e, m.y + o - e}, Point{m.x + e, m.y + o - e}, lw, c);
+                p.draw_line(Point{m.x + e, m.y + o - e}, Point{m.x + e, m.y + o + e}, lw, c);
+                p.draw_line(Point{m.x + e, m.y + o + e}, Point{m.x - e, m.y + o + e}, lw, c);
+                p.draw_line(Point{m.x - e, m.y + o + e}, Point{m.x - e, m.y + o - e}, lw, c);
+                p.draw_line(Point{m.x - e + o, m.y - e}, Point{m.x + e + o, m.y - e}, lw, c);
+                p.draw_line(Point{m.x + e + o, m.y - e}, Point{m.x + e + o, m.y + e}, lw, c);
+                p.draw_line(Point{m.x + e + o, m.y + e}, Point{m.x - e + o, m.y + e}, lw, c);
+                p.draw_line(Point{m.x - e + o, m.y + e}, Point{m.x - e + o, m.y - e}, lw, c);
             }
         };
         auto glyph_close = [&](const Rect &r, float lw, const Color &c) {
             const Point m = center_of(r);
-            const float e = r.size.width / 3.0f;
-            p.draw_line(Point{ m.x - e, m.y - e }, Point{ m.x + e, m.y + e }, lw, c);
-            p.draw_line(Point{ m.x + e, m.y - e }, Point{ m.x - e, m.y + e }, lw, c);
+            const float e = r.size.width / 3.0F;
+            p.draw_line(Point{m.x - e, m.y - e}, Point{m.x + e, m.y + e}, lw, c);
+            p.draw_line(Point{m.x + e, m.y - e}, Point{m.x - e, m.y + e}, lw, c);
         };
 
         if (tb_style.button_layout == TitleBarButtonLayout::Adwaita) {
             // Adwaita：扁平单色符号，悬停浮出圆形底（关闭钮红底为其视觉签名）。
-            if (g.minimize.size.width > 0.0f) {
-                if (hb == 0) p.fill_rounded_rect(g.minimize, g.minimize.size.width * 0.5f, tb_style.hover_tint);
+            if (g.minimize.size.width > 0.0F) {
+                if (hb == 0) {
+                    p.fill_rounded_rect(g.minimize, g.minimize.size.width * 0.5f, tb_style.hover_tint);
+                }
                 glyph_min(g.minimize, 1.5f, fg);
             }
-            if (g.maximize.size.width > 0.0f) {
-                if (hb == 1) p.fill_rounded_rect(g.maximize, g.maximize.size.width * 0.5f, tb_style.hover_tint);
+            if (g.maximize.size.width > 0.0F) {
+                if (hb == 1) {
+                    p.fill_rounded_rect(g.maximize, g.maximize.size.width * 0.5f, tb_style.hover_tint);
+                }
                 glyph_max(g.maximize, 1.5f, fg);
             }
-            if (g.close.size.width > 0.0f) {
-                if (hb == 2) p.fill_rounded_rect(g.close, g.close.size.width * 0.5f, tb_style.close_hover);
-                glyph_close(g.close, 1.5f, Color{ 255, 255, 255, 235 });
+            if (g.close.size.width > 0.0F) {
+                if (hb == 2) {
+                    p.fill_rounded_rect(g.close, g.close.size.width * 0.5f, tb_style.close_hover);
+                }
+                glyph_close(g.close, 1.5f, Color{255, 255, 255, 235});
             }
         } else if (tb_style.button_layout == TitleBarButtonLayout::Windows) {
             // Windows：整高矩形热区，悬停整块填充。
-            if (g.minimize.size.width > 0.0f) {
-                if (hb == 0) p.fill_rect(g.minimize, tb_style.hover_tint);
+            if (g.minimize.size.width > 0.0F) {
+                if (hb == 0) {
+                    p.fill_rect(g.minimize, tb_style.hover_tint);
+                }
                 glyph_min(g.minimize, 1.2f, fg);
             }
-            if (g.maximize.size.width > 0.0f) {
-                if (hb == 1) p.fill_rect(g.maximize, tb_style.hover_tint);
+            if (g.maximize.size.width > 0.0F) {
+                if (hb == 1) {
+                    p.fill_rect(g.maximize, tb_style.hover_tint);
+                }
                 glyph_max(g.maximize, 1.2f, fg);
             }
-            if (g.close.size.width > 0.0f) {
-                if (hb == 2) p.fill_rect(g.close, tb_style.close_hover);
-                glyph_close(g.close, 1.2f, Color{ 255, 255, 255, 235 });
+            if (g.close.size.width > 0.0F) {
+                if (hb == 2) {
+                    p.fill_rect(g.close, tb_style.close_hover);
+                }
+                glyph_close(g.close, 1.2f, Color{255, 255, 255, 235});
             }
         } else {
             // macOS：常显三色圆点，悬停浮现深色符号（close/min/max 左→右序由几何层保证）。
-            const Color sym{ 0x3D, 0x3D, 0x3D, 210 };
-            if (g.minimize.size.width > 0.0f) {
-                p.fill_rounded_rect(g.minimize, g.minimize.size.width * 0.5f, Color{ 0xFE, 0xBC, 0x2E, 255 });
-                if (hb == 0) glyph_min(g.minimize, 1.2f, sym);
+            const Color sym{0x3D, 0x3D, 0x3D, 210};
+            if (g.minimize.size.width > 0.0F) {
+                p.fill_rounded_rect(g.minimize, g.minimize.size.width * 0.5f, Color{0xFE, 0xBC, 0x2E, 255});
+                if (hb == 0) {
+                    glyph_min(g.minimize, 1.2f, sym);
+                }
             }
-            if (g.maximize.size.width > 0.0f) {
-                p.fill_rounded_rect(g.maximize, g.maximize.size.width * 0.5f, Color{ 0x28, 0xC8, 0x40, 255 });
-                if (hb == 1) glyph_max(g.maximize, 1.2f, sym);
+            if (g.maximize.size.width > 0.0F) {
+                p.fill_rounded_rect(g.maximize, g.maximize.size.width * 0.5f, Color{0x28, 0xC8, 0x40, 255});
+                if (hb == 1) {
+                    glyph_max(g.maximize, 1.2f, sym);
+                }
             }
-            if (g.close.size.width > 0.0f) {
-                p.fill_rounded_rect(g.close, g.close.size.width * 0.5f, Color{ 0xFF, 0x5F, 0x57, 255 });
-                if (hb == 2) glyph_close(g.close, 1.2f, sym);
+            if (g.close.size.width > 0.0F) {
+                p.fill_rounded_rect(g.close, g.close.size.width * 0.5f, Color{0xFF, 0x5F, 0x57, 255});
+                if (hb == 2) {
+                    glyph_close(g.close, 1.2f, sym);
+                }
             }
         }
     }
@@ -1081,9 +1155,9 @@ auto WaylandSurface::Impl::draw_decoration(Painter &p) const -> void {
 }
 
 auto WaylandSurface::present() -> Result<bool> {
-    Impl &d = *m_impl;
+    Impl &d = *impl_;
     if (d.dpy != nullptr && d.configured && d.painter.data() != nullptr) {
-        const int w = d.painter.width(); // 物理像素（Painter 按 scale 放大分配）
+        const int w = d.painter.width();  // 物理像素（Painter 按 scale 放大分配）
         const int h = d.painter.height();
         Impl::Slot *slot = d.pick_slot(w, h);
         if (slot == nullptr) {
@@ -1125,23 +1199,23 @@ auto WaylandSurface::present() -> Result<bool> {
     }
     // 脏区一次性消费：下一帧未重新设置则回到全量（安全兜底）。
     d.present_dirty.clear();
-    return Result<bool>{ true };
+    return Result<bool>{true};
 }
 
-auto WaylandSurface::size() const -> Size { return m_impl->size; }
+auto WaylandSurface::size() const -> Size { return impl_->size; }
 
-auto WaylandSurface::scale_factor() const -> float { return static_cast<float>(m_impl->scale); }
+auto WaylandSurface::scale_factor() const -> float { return static_cast<float>(impl_->scale); }
 
-auto WaylandSurface::should_close() const -> bool { return m_impl->close_requested; }
+auto WaylandSurface::should_close() const -> bool { return impl_->close_requested; }
 
 auto WaylandSurface::set_present_dirty(const std::vector<Rect> &device_rects) -> void {
-    m_impl->present_dirty = device_rects;
+    impl_->present_dirty = device_rects;
 }
 
-auto WaylandSurface::set_event_handler(const EventHandler &h) -> void { m_impl->handler = h; }
+auto WaylandSurface::set_event_handler(const EventHandler &h) -> void { impl_->handler = h; }
 
 auto WaylandSurface::set_title(const std::string &title) -> void {
-    Impl &d = *m_impl;
+    Impl &d = *impl_;
     d.title = title;
     if (d.toplevel != nullptr) {
         xdg_toplevel_set_title(d.toplevel, title.c_str());
@@ -1151,10 +1225,10 @@ auto WaylandSurface::set_title(const std::string &title) -> void {
 
 auto WaylandSurface::begin_window_move() -> void {
     // 控件（自绘 TitleBar 等）在 Press 派发栈内同步调用：last_press_serial 即触发键 serial。
-    if (m_impl->toplevel != nullptr && m_impl->seat != nullptr) {
-        xdg_toplevel_move(m_impl->toplevel, m_impl->seat, m_impl->last_press_serial);
-        wl_surface_commit(m_impl->surface);
-        wl_display_flush(m_impl->dpy);
+    if (impl_->toplevel != nullptr && impl_->seat != nullptr) {
+        xdg_toplevel_move(impl_->toplevel, impl_->seat, impl_->last_press_serial);
+        wl_surface_commit(impl_->surface);
+        wl_display_flush(impl_->dpy);
     }
 }
 
@@ -1166,51 +1240,51 @@ auto WaylandSurface::begin_window_resize(WindowResizeEdge edge) -> void {
         XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT, XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT, XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT,
     };
     const auto idx = static_cast<std::size_t>(edge);
-    if (idx == 0 || idx >= std::size(kMap) || m_impl->toplevel == nullptr || m_impl->seat == nullptr) {
+    if (idx == 0 || idx >= std::size(kMap) || impl_->toplevel == nullptr || impl_->seat == nullptr) {
         return;
     }
-    xdg_toplevel_resize(m_impl->toplevel, m_impl->seat, m_impl->last_press_serial, kMap[idx]);
-    wl_surface_commit(m_impl->surface);
-    wl_display_flush(m_impl->dpy);
+    xdg_toplevel_resize(impl_->toplevel, impl_->seat, impl_->last_press_serial, kMap[idx]);
+    wl_surface_commit(impl_->surface);
+    wl_display_flush(impl_->dpy);
 }
 
 auto WaylandSurface::set_title_bar_style(const TitleBarStyle &style) -> void {
-    Impl &d = *m_impl;
+    Impl &d = *impl_;
     d.tb_style = style;
-    if (m_present_request) { // 立即重绘（回调挂在基类 self 上，仿 refresh_scale() 既有模式）
-        m_present_request();
+    if (present_request_) {  // 立即重绘（回调挂在基类 self 上，仿 refresh_scale() 既有模式）
+        present_request_();
     }
 }
 
 auto WaylandSurface::set_title_bar_icon(const std::shared_ptr<Image> &icon) -> void {
-    Impl &d = *m_impl;
-    d.tb_icon = icon;        // 共享所有权存储；绘制层经 draw_decoration 取用
-    if (m_present_request) { // 立即重绘，使新图标下帧可见
-        m_present_request();
+    Impl &d = *impl_;
+    d.tb_icon = icon;  // 共享所有权存储；绘制层经 draw_decoration 取用
+    if (present_request_) {  // 立即重绘，使新图标下帧可见
+        present_request_();
     }
 }
 
-auto WaylandSurface::native_handle() const -> void * { return static_cast<void *>(m_impl->surface); }
+auto WaylandSurface::native_handle() const -> void * { return static_cast<void *>(impl_->surface); }
 
 auto WaylandSurface::content_inset() const -> EdgeInsets {
-    const Impl &d = *m_impl;
-    float tb = d.csd_title ? d.tb_style.height : 0.0f;
+    const Impl &d = *impl_;
+    float tb = d.csd_title ? d.tb_style.height : 0.0F;
     if (d.mode == WindowMode::FullScreen) {
-        tb = 0.0f; // 全屏下标题栏退化为揭示条（覆盖层），不回流应用布局，故安全区 top 归零
+        tb = 0.0F;  // 全屏下标题栏退化为揭示条（覆盖层），不回流应用布局，故安全区 top 归零
     }
-    const float b = d.csd_border ? static_cast<float>(d.border) : 0.0f;
-    return EdgeInsets{ b, tb, b, b }; // 顺序：left, top, right, bottom
+    const float b = d.csd_border ? static_cast<float>(d.border) : 0.0F;
+    return EdgeInsets{b, tb, b, b};  // 顺序：left, top, right, bottom
 }
 
 auto WaylandSurface::close() -> void {
-    Impl &d = *m_impl;
+    Impl &d = *impl_;
     if (d.toplevel != nullptr) {
-        d.close_requested = true; // 下帧主循环据 should_close() 退出；等价于用户点 ×。
+        d.close_requested = true;  // 下帧主循环据 should_close() 退出；等价于用户点 ×。
     }
 }
 
 auto WaylandSurface::minimize() -> void {
-    Impl &d = *m_impl;
+    Impl &d = *impl_;
     if (d.toplevel != nullptr) {
         xdg_toplevel_set_minimized(d.toplevel);
         // xdg-shell 协议：状态请求须经 commit 才被合成器处理。
@@ -1220,7 +1294,7 @@ auto WaylandSurface::minimize() -> void {
 }
 
 auto WaylandSurface::toggle_maximize() -> void {
-    Impl &d = *m_impl;
+    Impl &d = *impl_;
     if (d.toplevel == nullptr) {
         return;
     }
@@ -1234,7 +1308,7 @@ auto WaylandSurface::toggle_maximize() -> void {
 }
 
 auto WaylandSurface::set_fullscreen(bool on) -> void {
-    Impl &d = *m_impl;
+    Impl &d = *impl_;
     if (d.toplevel == nullptr) {
         return;
     }
@@ -1248,7 +1322,7 @@ auto WaylandSurface::set_fullscreen(bool on) -> void {
 }
 
 auto WaylandSurface::poll_platform_events() -> void {
-    Impl &d = *m_impl;
+    Impl &d = *impl_;
     if (d.dpy == nullptr) {
         return;
     }
@@ -1257,7 +1331,7 @@ auto WaylandSurface::poll_platform_events() -> void {
         wl_display_dispatch_pending(d.dpy);
     }
     wl_display_flush(d.dpy);
-    struct pollfd pfd{ wl_display_get_fd(d.dpy), POLLIN, 0 };
+    struct pollfd pfd{wl_display_get_fd(d.dpy), POLLIN, 0};
     if (::poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN) != 0) {
         wl_display_read_events(d.dpy);
     } else {
@@ -1271,12 +1345,12 @@ auto WaylandSurface::poll_platform_events() -> void {
 }
 
 auto WaylandSurface::wait_events(double timeout_ms) -> void {
-    Impl &d = *m_impl;
+    Impl &d = *impl_;
     if (d.dpy == nullptr || timeout_ms == 0.0 || d.close_requested) {
         return;
     }
     if (wl_display_prepare_read(d.dpy) != 0) {
-        return; // 队列已有未处理事件：立即回到帧循环消费
+        return;  // 队列已有未处理事件：立即回到帧循环消费
     }
     wl_display_flush(d.dpy);
     // 无限等待按 1000ms 分段兜底（对齐 Win32/X11）：唤醒渠道丢失也最迟 1s 自然醒。
@@ -1308,12 +1382,12 @@ auto WaylandSurface::wait_events(double timeout_ms) -> void {
 }
 
 auto WaylandSurface::request_wake() -> void {
-    Impl &d = *m_impl;
+    Impl &d = *impl_;
     if (d.wake_fd[1] >= 0) {
         constexpr char b = 1;
-        [[maybe_unused]] const ssize_t rc = ::write(d.wake_fd[1], &b, 1); // 满管道丢弃亦可：已有待读字节必醒
+        [[maybe_unused]] const ssize_t rc = ::write(d.wake_fd[1], &b, 1);  // 满管道丢弃亦可：已有待读字节必醒
     }
 }
-} // namespace aurora
+}  // namespace aurora
 
-#endif // AURORA_BACKEND_WAYLAND / AURORA_PLATFORM_LINUX
+#endif  // AURORA_BACKEND_WAYLAND / AURORA_PLATFORM_LINUX

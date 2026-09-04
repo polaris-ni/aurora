@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -28,53 +27,55 @@ namespace {
 
 class CountingBox : public LeafWidget {
   public:
-    Size sz{ .width = 100.0f, .height = 20.0f };
-    Color color{ 255, 0, 0, 255 };
+    Size sz_{.width = 100.0F, .height = 20.0F};
+    Color color_{255, 0, 0, 255};
     static int m_paint_count;
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(sz); }
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(sz_); }
     void on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) override {
         ++m_paint_count;
-        p.fill_rect(b, color);
+        p.fill_rect(b, color_);
     }
     void collect_signals(std::vector<SignalViewBase *> & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "CountingBox"; }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
-        return WidgetDescriptor{ .name = "CountingBox", .children_policy = "none" };
+        return WidgetDescriptor{.name = "CountingBox", .children_policy = "none"};
     }
 };
 int CountingBox::m_paint_count = 0;
 
 struct RenderResult {
-    std::vector<std::uint8_t> pixels;
-    int w = 0, h = 0;
+    std::vector<std::uint8_t> pixels_;
+    int w_ = 0, h_ = 0;
     [[nodiscard]] auto at(int x, const int y, const int ch) const -> std::uint8_t {
-        const std::size_t off = ((static_cast<std::size_t>(y) * w) + x) * 4;
-        return pixels[off + ch];
+        const std::size_t off = ((static_cast<std::size_t>(y) * w_) + x) * 4;
+        return pixels_.at(off + ch);
     }
 };
 
 auto render_in_root(std::shared_ptr<Widget> w, const int ww, const int hh) -> RenderResult {
-    auto const root = std::make_shared<Stack>(std::vector{ Node{ std::move(w) } });
+    auto const root = std::make_shared<Stack>(std::vector{Node{std::move(w)}});
     const BuildContext ctx;
     root->mount(ctx);
     Constraints c;
-    c.min = Size{ .width = 0.0f, .height = 0.0f };
-    c.max = Size{ .width = static_cast<float>(ww), .height = static_cast<float>(hh) };
+    c.min = Size{.width = 0.0F, .height = 0.0F};
+    c.max = Size{.width = static_cast<float>(ww), .height = static_cast<float>(hh)};
     root->layout(c, ctx);
     Painter p;
     p.begin(ww, hh);
     root->paint(p,
-                Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                      .size = Size{ .width = static_cast<float>(ww), .height = static_cast<float>(hh) } },
+                Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                     .size = Size{.width = static_cast<float>(ww), .height = static_cast<float>(hh)}},
                 ctx);
     const std::uint8_t *d = p.data();
     RenderResult r;
-    r.w = ww;
-    r.h = hh;
-    r.pixels.assign(d, d + (static_cast<std::size_t>(ww) * hh * 4));
+    r.w_ = ww;
+    r.h_ = hh;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
+    r.pixels_.assign(d, d + (static_cast<std::size_t>(ww) * hh * 4));
     return r;
 }
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     CountingBox::m_paint_count = 0;
@@ -98,7 +99,7 @@ AURORA_TEST() {
     AURORA_TEST_CHECK_MSG(r3.at(50, 10, 0) == 255, "re-rendered paint shows red");
 
     // 尺寸变化使缓存失效：须先 mark_needs_layout（布局缓存契约——改变影响布局的属性须标脏）。
-    cb->sz = Size{ .width = 50.0f, .height = 20.0f };
+    cb->sz_ = Size{.width = 50.0F, .height = 20.0F};
     cb->mark_needs_layout();
     const auto r4 = render_in_root(cb, 200, 200);
     AURORA_TEST_CHECK_MSG(CountingBox::m_paint_count == 3, "size change invalidates cache (count=3)");

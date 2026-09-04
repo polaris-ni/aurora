@@ -11,7 +11,8 @@ namespace aurora {
  *
  * 单线程 UI 假设（与库一致），故未加锁。`subscribe` 返回 `Subscription`，其析构自动退订。
  */
-template<typename T> class EventStream {
+template <typename T>
+class EventStream {
     using Fn = std::function<void(const T &)>;
 
   public:
@@ -19,41 +20,55 @@ template<typename T> class EventStream {
     class Subscription {
       public:
         Subscription() = default;
-        Subscription(std::size_t id, EventStream *host) : m_id(id), m_host(host) {}
+        Subscription(std::size_t id, EventStream *host) : id_(id), host_(host) {}
         ~Subscription() { reset(); }
 
-        auto reset() -> void {
-            if (m_host != nullptr) {
-                m_host->unsubscribe(m_id);
+        Subscription(const Subscription &) = delete;
+        auto operator=(const Subscription &) -> Subscription & = delete;
+
+        Subscription(Subscription &&o) noexcept : id_(o.id_), host_(o.host_) { o.host_ = nullptr; }
+        auto operator=(Subscription &&o) noexcept -> Subscription & {
+            if (this != &o) {
+                reset();
+                id_ = o.id_;
+                host_ = o.host_;
+                o.host_ = nullptr;
             }
-            m_host = nullptr;
+            return *this;
         }
-        [[nodiscard]] explicit operator bool() const { return m_host != nullptr; }
+
+        auto reset() -> void {
+            if (host_ != nullptr) {
+                host_->unsubscribe(id_);
+            }
+            host_ = nullptr;
+        }
+        [[nodiscard]] explicit operator bool() const { return host_ != nullptr; }
 
       private:
-        std::size_t m_id = 0;
-        EventStream *m_host = nullptr;
+        std::size_t id_ = 0;
+        EventStream *host_ = nullptr;
     };
 
     /// @brief 订阅事件；返回订阅句柄（RAII 退订）。
     [[nodiscard]] auto subscribe(Fn cb) -> Subscription {
-        const std::size_t id = ++m_next_id;
-        m_map[id] = std::move(cb);
+        const std::size_t id = ++next_id_;
+        map_[id] = std::move(cb);
         return Subscription(id, this);
     }
 
     /// @brief 发射一个事件值给所有订阅者。
     auto emit(const T &v) -> void {
-        for (auto &kv : m_map) {
+        for (auto &kv : map_) {
             kv.second(v);
         }
     }
 
-    auto unsubscribe(std::size_t id) -> void { m_map.erase(id); }
+    auto unsubscribe(std::size_t id) -> void { map_.erase(id); }
 
   private:
-    std::map<std::size_t, Fn> m_map;
-    std::size_t m_next_id = 0;
+    std::map<std::size_t, Fn> map_;
+    std::size_t next_id_ = 0;
 };
 
-} // namespace aurora
+}  // namespace aurora

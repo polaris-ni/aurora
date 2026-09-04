@@ -8,7 +8,7 @@
 
 namespace aurora {
 
-struct Image; // 前向声明：供 detail::loadImage* 返回类型（完整定义见下方）。
+struct Image;  // 前向声明：供 detail::loadImage* 返回类型（完整定义见下方）。
 
 // 由 src/aurora/core/image_stb.cpp（stb_image）提供：解码 PNG/JPG/GIF 等通用格式。
 // 由 src/aurora/core/image_svg.cpp 提供：内置 SVG 子集光栅化。
@@ -18,13 +18,13 @@ namespace detail {
 [[nodiscard]] auto load_image_svg(const std::vector<std::uint8_t> &buf, int target_w, int target_h) -> Result<Image>;
 // 解析未压缩 24 位 BMP（BGR，自底向上，行 4 字节对齐）→ RGBA8。供 BmpCodec 与 Image::load 复用。
 [[nodiscard]] auto load_bmp(const std::vector<std::uint8_t> &b) -> Result<Image>;
-} // namespace detail
+}  // namespace detail
 
 /// @brief 图像资源：像素以 RGBA8 线性存储。
 struct Image {
     int width = 0;
     int height = 0;
-    std::vector<std::uint8_t> pixels; ///< RGBA8，长度 = width*height*4
+    std::vector<std::uint8_t> pixels;  ///< RGBA8，长度 = width*height*4
 
     /// @brief 从文件加载。
     /// 分发策略：未压缩 24 位 BMP 走内置解码；PNG/JPG/GIF/TGA/HDR 等走 vendored
@@ -37,4 +37,4 @@ struct Image {
     [[nodiscard]] static auto load_svg(std::string_view path, int target_w = 0, int target_h = 0) -> Result<Image>;
 };
 
-} // namespace aurora
+}  // namespace aurora

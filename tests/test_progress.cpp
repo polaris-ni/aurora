@@ -40,13 +40,16 @@ static void test_props() {
     p.set_color(Color::red()).set_track_color(Color::blue());
     Json j;
     p.serialize_props(j);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["color"][0].get<int>() == 255, "progress color=red");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["track_color"][2].get<int>() == 255, "progress track=blue");
 
     ProgressIndicator q;
     q.deserialize_props(j);
     Json k;
     q.serialize_props(k);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(k["color"][0].get<int>() == 255, "progress rt color");
 }
 
@@ -73,6 +76,7 @@ static void test_roundtrip() {
     const auto w = std::make_shared<ProgressIndicator>();
     w->set_value(0.3);
     Json j = serialization::to_json(*w);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["props"].contains("value") && j["props"]["value"].get<double>() == 0.3,
                           "ProgressIndicator serialization value");
     const auto back = roundtrip<ProgressIndicator>(j, "ProgressIndicator");
@@ -88,10 +92,12 @@ static void test_modern_props() {
 
     // 厚度/圆角往返；布局高度随 thickness
     ProgressIndicator p1;
-    p1.set_thickness(10.0f).set_corner_radius(3.0f);
+    p1.set_thickness(10.0F).set_corner_radius(3.0F);
     Json j;
     p1.serialize_props(j);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["thickness"].get<double>(), 10.0), "Progress: thickness serialization");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["corner_radius"].get<double>(), 3.0), "Progress: corner_radius serialization");
 
     ProgressIndicator p2;

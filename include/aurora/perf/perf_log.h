@@ -55,9 +55,9 @@ class PerfLog {
   private:
     static auto log_summary() -> void;
 
-    static inline bool s_enabled = false; // NOLINT(readability-identifier-naming)
-    static inline int s_interval = 300;   // NOLINT(readability-identifier-naming)
-    static inline int s_counter = 0;      // NOLINT(readability-identifier-naming)
+    static inline bool s_enabled_ = false;  // NOLINT(readability-identifier-naming)
+    static inline int s_interval_ = 300;  // NOLINT(readability-identifier-naming)
+    static inline int s_counter_ = 0;  // NOLINT(readability-identifier-naming)
 };
 
-} // namespace aurora
+}  // namespace aurora

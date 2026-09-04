@@ -18,4 +18,4 @@ struct Locale {
     [[nodiscard]] auto tag() const -> std::string { return region.empty() ? language : (language + "-" + region); }
 };
 
-} // namespace aurora
+}  // namespace aurora

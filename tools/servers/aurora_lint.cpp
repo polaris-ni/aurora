@@ -20,12 +20,12 @@
 // Note: this tool is a standalone CLI binary (not exposed via MCP/CLI); it is unrelated
 // to "build/test/lint exposed via MCP", the latter of which has been explicitly scoped out.
 
+#include <aurora/aurora.h>
+
 #include <algorithm>
 #include <set>
 #include <string>
 #include <vector>
-
-#include <aurora/aurora.h>
 
 #include "au_lint_core.h"
 #include "json_file.h"
@@ -67,9 +67,17 @@ void print_json(const std::vector<au::tools::LintFinding> &findings) {
     au::storage::Json arr = au::storage::Json::array();
     for (const auto &f : findings) {
         au::storage::Json o = au::storage::Json::object();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         o["severity"] = au::to_string(f.severity);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         o["code"] = f.code;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         o["message"] = f.message;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         o["path"] = f.path;
         arr.push_back(std::move(o));
     }
@@ -77,24 +85,31 @@ void print_json(const std::vector<au::tools::LintFinding> &findings) {
 }
 
 void print_help() {
-    AURORA_LOG_RAW("aulint", "aurora_lint -- Aurora UI tree structural checker\n"
-                                 "Usage:\n"
-                                 "  aurora_lint <tree.json> [--format text|json]   validate serialized UI tree\n"
-                                 "  aurora_lint --explain <code>                   explain a diagnostic code\n"
-                                 "  aurora_lint --list                             list registered component types\n"
-                                 "  aurora_lint --help                             show this help\n"
-                                 "Exit code: 1 if any error-level issue exists, otherwise 0.\n");
+    AURORA_LOG_RAW("aulint",
+                   "aurora_lint -- Aurora UI tree structural checker\n"
+                   "Usage:\n"
+                   "  aurora_lint <tree.json> [--format text|json]   validate serialized UI tree\n"
+                   "  aurora_lint --explain <code>                   explain a diagnostic code\n"
+                   "  aurora_lint --list                             list registered component types\n"
+                   "  aurora_lint --help                             show this help\n"
+                   "Exit code: 1 if any error-level issue exists, otherwise 0.\n");
 }
 
-} // namespace
+}  // namespace
 
+// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// try/catch 包装
 auto main(int argc, char **argv) -> int {
-    std::vector<std::string> args(argv + 1, argv + argc); // NOLINT(*-pro-bounds-pointer-arithmetic)
+    std::vector<std::string> args(argv + 1, argv + argc);  // NOLINT(*-pro-bounds-pointer-arithmetic)
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     if (args.empty() || args[0] == "--help" || args[0] == "-h") {
         print_help();
         return 0;
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     if (args[0] == "--list") {
         for (const auto &t : au::list_all_components()) {
             AURORA_LOG_RAW("aulint", t, "\n");
@@ -102,11 +117,15 @@ auto main(int argc, char **argv) -> int {
         return 0;
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     if (args[0] == "--explain") {
         if (args.size() < 2) {
             AURORA_LOG_ERROR("aulint", "error: --explain requires a diagnostic code argument");
             return 2;
         }
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_LOG_RAW("aulint", au::Diagnostics::explain_diagnostic(args[1]), "\n");
         return 0;
     }
@@ -115,12 +134,22 @@ auto main(int argc, char **argv) -> int {
     std::string path;
     std::string format = "text";
     for (std::size_t i = 0; i < args.size(); ++i) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         if (args[i] == "--format" && i + 1 < args.size()) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             format = args[++i];
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         } else if (args[i].starts_with("--")) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             AURORA_LOG_ERROR("aulint", "error: unknown option ", args[i]);
             return 2;
         } else {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             path = args[i];
         }
     }

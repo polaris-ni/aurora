@@ -15,14 +15,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <sstream>
 #include <string>
 #include <utility>
 
-#include <nlohmann/json.hpp>
-
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::ErrorCode;
@@ -54,6 +52,8 @@ auto fresh() -> TraceWriter & {
 /// @brief 在事件数组中找到首个满足 `name` 与 `ph` 的元素下标；找不到返回 npos。
 [[nodiscard]] auto find_event(const Json &arr, const char *name, const char *ph) -> std::size_t {
     for (std::size_t i = 0; i < arr.size(); ++i) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const Json &e = arr[i];
         if (e.value("name", std::string{}) == name && e.value("ph", std::string{}) == ph) {
             return i;
@@ -141,6 +141,8 @@ auto test_json_structure() -> void {
     AURORA_TEST_CHECK_MSG(std::cmp_not_equal(pn, -1), "Test3: contains process_name metadata event");
     AURORA_TEST_CHECK_MSG(std::cmp_not_equal(tn, -1), "Test3: contains thread_name metadata event");
     if (std::cmp_not_equal(pn, -1)) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(j[pn]["args"].value("name", std::string{}) == "aurora", "Test3: process name is aurora");
     }
 }
@@ -159,10 +161,12 @@ auto test_complete_event_fields() -> void {
 
     const std::size_t idx = find_event(j, "paint", "X");
     AURORA_TEST_CHECK_MSG(std::cmp_not_equal(idx, -1), "Test4: found ph==\"X\" paint event");
-    if (std::cmp_equal(idx, -1)) { // NOLINT
+    if (std::cmp_equal(idx, -1)) {  // NOLINT
         return;
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     const Json &e = j[idx];
     AURORA_TEST_CHECK_MSG(e.value("cat", std::string{}) == "aurora", "Test4: cat == aurora");
     AURORA_TEST_CHECK_MSG(near_d(e.value("ts", 0.0), 10000.0, 1e-3),
@@ -170,8 +174,14 @@ auto test_complete_event_fields() -> void {
     AURORA_TEST_CHECK_MSG(near_d(e.value("dur", 0.0), 2500.0, 1e-3),
                           "Test4: dur written in microseconds (2.5ms → 2500us)");
     AURORA_TEST_CHECK_MSG(e.contains("pid") && e.contains("tid"), "Test4: contains pid / tid");
-    AURORA_TEST_CHECK_MSG(e["args"].value("frame", 0ull) == 42ull, "Test4: args.frame == 42");
-    AURORA_TEST_CHECK_MSG(e["args"].value("depth", 0u) == 3u, "Test4: args.depth == 3");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(e["args"].value("frame", 0ULL) == 42ULL, "Test4: args.frame == 42");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(e["args"].value("depth", 0U) == 3U, "Test4: args.depth == 3");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(e["args"].contains("long_task"), "Test4: contains args.long_task attribution field");
 }
 
@@ -189,10 +199,12 @@ auto test_instant_event_fields() -> void {
 
     const std::size_t idx = find_event(j, "frame-start", "i");
     AURORA_TEST_CHECK_MSG(std::cmp_not_equal(idx, -1), "Test5: found ph==\"i\" instant event");
-    if (std::cmp_equal(idx, -1)) { // NOLINT
+    if (std::cmp_equal(idx, -1)) {  // NOLINT
         return;
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     const Json &e = j[idx];
     AURORA_TEST_CHECK_MSG(near_d(e.value("ts", 0.0), 7000.0, 1e-3), "Test5: ts written in microseconds");
     AURORA_TEST_CHECK_MSG(!e.contains("dur"), "Test5: instant event does not write dur");
@@ -222,17 +234,21 @@ auto test_counter_track() -> void {
 
     const std::size_t idx = find_event(j, "RenderCounters", "C");
     AURORA_TEST_CHECK_MSG(std::cmp_not_equal(idx, -1), "Test6: found ph==\"C\" counter event");
-    if (std::cmp_equal(idx, -1)) { // NOLINT
+    if (std::cmp_equal(idx, -1)) {  // NOLINT
         return;
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     const Json &args = j[idx]["args"];
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j[idx].value("ts", 0.0), 3000.0, 1e-3),
                           "Test6: counter event ts written in microseconds");
-    AURORA_TEST_CHECK_MSG(args.value("frame", 0ull) == 5ull, "Test6: args.frame == 5");
-    AURORA_TEST_CHECK_MSG(args.value("draw_calls", 0u) == 11u, "Test6: args.draw_calls == 11");
-    AURORA_TEST_CHECK_MSG(args.value("layout_nodes", 0u) == 22u, "Test6: args.layout_nodes == 22");
-    AURORA_TEST_CHECK_MSG(args.value("paint_nodes", 0u) == 33u, "Test6: args.paint_nodes == 33");
+    AURORA_TEST_CHECK_MSG(args.value("frame", 0ULL) == 5ULL, "Test6: args.frame == 5");
+    AURORA_TEST_CHECK_MSG(args.value("draw_calls", 0U) == 11U, "Test6: args.draw_calls == 11");
+    AURORA_TEST_CHECK_MSG(args.value("layout_nodes", 0U) == 22U, "Test6: args.layout_nodes == 22");
+    AURORA_TEST_CHECK_MSG(args.value("paint_nodes", 0U) == 33U, "Test6: args.paint_nodes == 33");
     AURORA_TEST_CHECK_MSG(args.value("full_redraw", 0) == 1,
                           "Test6: full_redraw written as 0/1 (Perfetto counter track needs numeric)");
 }
@@ -262,7 +278,7 @@ auto test_capture_frame() -> void {
     p.end_frame();
 
     tw.begin_capture();
-    tw.capture_frame(p); // 须在 end_frame 之后、下一次 begin_frame 之前
+    tw.capture_frame(p);  // 须在 end_frame 之后、下一次 begin_frame 之前
     tw.end_capture();
 
     AURORA_TEST_CHECK_MSG(tw.event_count() == 2, "Test7: transcribes 2 zone events");
@@ -361,7 +377,7 @@ auto test_tracing_switch() -> void {
     }
     tw.end_capture();
 
-    if constexpr (on) { // NOLINT
+    if constexpr (on) {  // NOLINT
         AURORA_TEST_CHECK_MSG(tw.event_count() >= 1, "Test10[TRACING=ON]: FrameScope auto-feeds zone event");
         AURORA_TEST_CHECK_MSG(tw.counter_sample_count() == 1,
                               "Test10[TRACING=ON]: FrameScope auto-feeds counter sample");
@@ -375,7 +391,7 @@ auto test_tracing_switch() -> void {
     RenderCounters::current().reset();
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_perf_trace_format ===\n");

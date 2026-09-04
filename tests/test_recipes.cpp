@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -40,56 +39,56 @@ static void render_tree(Widget &w, const float ww, const float hh) {
     constexpr BuildContext ctx;
     w.mount(ctx);
     Constraints cc;
-    cc.min = Size{ .width = 0.0f, .height = 0.0f };
-    cc.max = Size{ .width = ww, .height = hh };
+    cc.min = Size{.width = 0.0F, .height = 0.0F};
+    cc.max = Size{.width = ww, .height = hh};
     w.layout(cc, ctx);
     Painter p;
     p.begin(static_cast<int>(ww), static_cast<int>(hh));
-    w.paint(p, Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = ww, .height = hh } }, ctx);
+    w.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = ww, .height = hh}}, ctx);
 }
 
 static void test_recipes() {
-    auto f = form_layout({ FormRow{ .label = "Name", .field = Node{ TextInput{} } },
-                           FormRow{ .label = "Age", .field = Node{ Checkbox{ Reactive{ false } } } } });
-    AURORA_TEST_CHECK_MSG(std::string{ f.widget().type_name() } == "Column", "formLayout -> Column");
+    auto f = form_layout({FormRow{.label = "Name", .field = Node{TextInput{}}},
+                          FormRow{.label = "Age", .field = Node{Checkbox{Reactive{false}}}}});
+    AURORA_TEST_CHECK_MSG(std::string{f.widget().type_name()} == "Column", "formLayout -> Column");
 
-    auto bar = toolbar({ Node{ Button{ "A" } }, Node{ Button{ "B" } } });
-    AURORA_TEST_CHECK_MSG(std::string{ bar.widget().type_name() } == "Row", "toolbar -> Row");
+    auto bar = toolbar({Node{Button{"A"}}, Node{Button{"B"}}});
+    AURORA_TEST_CHECK_MSG(std::string{bar.widget().type_name()} == "Row", "toolbar -> Row");
 
-    auto side = sidebar({ Node{ Text{ "Home" } }, Node{ Text{ "Settings" } } });
-    AURORA_TEST_CHECK_MSG(std::string{ side.widget().type_name() } == "Column", "sidebar -> Column");
+    auto side = sidebar({Node{Text{"Home"}}, Node{Text{"Settings"}}});
+    AURORA_TEST_CHECK_MSG(std::string{side.widget().type_name()} == "Column", "sidebar -> Column");
 
-    auto menu = menu_bar({ Node{ Button{ "F" } }, Node{ Button{ "E" } } });
-    AURORA_TEST_CHECK_MSG(std::string{ menu.widget().type_name() } == "Row", "menuBar -> Row");
+    auto menu = menu_bar({Node{Button{"F"}}, Node{Button{"E"}}});
+    AURORA_TEST_CHECK_MSG(std::string{menu.widget().type_name()} == "Row", "menuBar -> Row");
 
-    auto list = list_view({ Node{ Text{ "1" } }, Node{ Text{ "2" } } });
-    AURORA_TEST_CHECK_MSG(std::string{ list.widget().type_name() } == "Scroll", "listView -> Scroll");
+    auto list = list_view({Node{Text{"1"}}, Node{Text{"2"}}});
+    AURORA_TEST_CHECK_MSG(std::string{list.widget().type_name()} == "Scroll", "listView -> Scroll");
 
-    auto tabs = tab_view({ TabPage{ .title = "A", .content = Node{ Text{ "Page A" } } },
-                           TabPage{ .title = "B", .content = Node{ Text{ "Page B" } } } });
-    AURORA_TEST_CHECK_MSG(std::string{ tabs.widget().type_name() } == "Column", "tabView -> Column");
+    auto tabs = tab_view({TabPage{.title = "A", .content = Node{Text{"Page A"}}},
+                          TabPage{.title = "B", .content = Node{Text{"Page B"}}}});
+    AURORA_TEST_CHECK_MSG(std::string{tabs.widget().type_name()} == "Column", "tabView -> Column");
 }
 
 static void test_recipes_render() {
-    const auto form = form_layout({ FormRow{ .label = "Name", .field = Node{ TextInput{} } },
-                                    FormRow{ .label = "Age", .field = Node{ Checkbox{ Reactive{ false } } } } });
-    const auto tabs = tab_view({ TabPage{ .title = "A", .content = Node{ Text{ "Page A" } } },
-                                 TabPage{ .title = "B", .content = Node{ Text{ "Page B" } } } });
-    auto root = Column{ ColumnProps{
-        .children = {
-            Node{ toolbar({ Node{ Button{ "File" } }, Node{ Button{ "Edit" } } }) },
-            Node{ menu_bar({ Node{ Button{ "File" } }, Node{ Button{ "Edit" } } }) },
-            Node{ sidebar({ Node{ Text{ "Home" } }, Node{ Text{ "Settings" } } }, 160.0f) },
-            Node{ list_view({ Node{ Text{ "Item 1" } }, Node{ Text{ "Item 2" } }, Node{ Text{ "Item 3" } } }) },
-            Node{ form },
-            Node{ tabs },
-        } } };
-    render_tree(root, 480.0f, 640.0f);
+    const auto form = form_layout({FormRow{.label = "Name", .field = Node{TextInput{}}},
+                                   FormRow{.label = "Age", .field = Node{Checkbox{Reactive{false}}}}});
+    const auto tabs = tab_view({TabPage{.title = "A", .content = Node{Text{"Page A"}}},
+                                TabPage{.title = "B", .content = Node{Text{"Page B"}}}});
+    auto root =
+        Column{ColumnProps{.children = {
+                               Node{toolbar({Node{Button{"File"}}, Node{Button{"Edit"}}})},
+                               Node{menu_bar({Node{Button{"File"}}, Node{Button{"Edit"}}})},
+                               Node{sidebar({Node{Text{"Home"}}, Node{Text{"Settings"}}}, 160.0F)},
+                               Node{list_view({Node{Text{"Item 1"}}, Node{Text{"Item 2"}}, Node{Text{"Item 3"}}})},
+                               Node{form},
+                               Node{tabs},
+                           }}};
+    render_tree(root, 480.0F, 640.0F);
     AURORA_TEST_CHECK_MSG(true, "recipes (form/toolbar/sidebar/menuBar/listView/tabView) render");
 
     const Rect bb = tabs.bounds();
     MouseEvent e;
-    e.position = Point{ .x = bb.origin.x + bb.size.width - 10.0f, .y = bb.origin.y + 10.0f };
+    e.position = Point{.x = bb.origin.x + bb.size.width - 10.0F, .y = bb.origin.y + 10.0F};
     e.action = MouseAction::Press;
     EventDispatcher::dispatch(root, e);
     e.action = MouseAction::Release;

@@ -52,8 +52,8 @@ namespace aurora {
 namespace serialization {
 
 auto WidgetRegistry::make(const std::string &type, const Json &props) const -> Result<std::shared_ptr<Widget>> {
-    auto it = m_factories.find(type);
-    if (it == m_factories.end()) {
+    auto it = factories_.find(type);
+    if (it == factories_.end()) {
         return make_error(ErrorCode::WidgetUnknownType, "serialization: unregistered widget type '" + type +
                                                             "' (please first use "
                                                             "registerFactory to register)");
@@ -72,8 +72,8 @@ auto WidgetRegistry::make(const std::string &type, const Json &props) const -> R
 
 auto WidgetRegistry::list_types() const -> std::vector<std::string> {
     std::vector<std::string> out;
-    out.reserve(m_factories.size());
-    for (const auto &kv : m_factories | std::views::keys) {
+    out.reserve(factories_.size());
+    for (const auto &kv : factories_ | std::views::keys) {
         out.push_back(kv);
     }
     return out;
@@ -81,15 +81,18 @@ auto WidgetRegistry::list_types() const -> std::vector<std::string> {
 
 auto to_json(const Widget &w) -> Json {
     Json j = Json::object();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     j["type"] = w.type_name();
 
     Json props = Json::object();
     w.serialize_props(props);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     j["props"] = props;
 
     Json children = Json::array();
     w.for_each_child([&](const Widget &c) -> void { children.push_back(to_json(c)); });
     if (!children.empty()) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         j["children"] = children;
     }
     return j;
@@ -117,6 +120,7 @@ template<class T, class... CtorArgs> auto reg_default(const char *name, CtorArgs
 template<class T, class... CtorArgs> auto reg_no_props(const char *name, CtorArgs... ctor_args) -> void {
     auto captured = std::make_tuple(std::move(ctor_args)...);
     WidgetRegistry::instance().register_factory(
+        // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
         name, [captured = std::move(captured)](const Json & /*props*/) -> Result<std::shared_ptr<Widget>> {
             auto w = std::apply(
                 []<class... Args>(Args &&...a) -> std::shared_ptr<T> { // NOLINT
@@ -158,7 +162,7 @@ auto register_core_widgets() -> void {
     reg_default<Column>("Column");
     reg_default<Row>("Row");
     reg_default<ImageView>("Image", Image{});
-    // 媒体子系统（v0.20.0）：VideoPlayer 默认含 VideoControls 叠层；后者控制器由父播放器注入，
+    // 媒体子系统：VideoPlayer 默认含 VideoControls 叠层；后者控制器由父播放器注入，
     // 独立反序列化时传 nullptr（控件内部已做空指针保护）。
     reg_default<VideoPlayer>("VideoPlayer");
     reg_default<VideoControls>("VideoControls", nullptr);
@@ -248,9 +252,11 @@ auto from_json_impl(const Json &j, std::size_t depth) -> Result<std::shared_ptr<
         return make_error(ErrorCode::WidgetDepthExceeded, "serialization: widget tree nesting depth exceeds limit (" +
                                                               std::to_string(AURORA_DEFAULT_MAX_WIDGET_DEPTH) + "）");
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     if (!j.is_object() || !j.contains("type") || !j["type"].is_string()) {
         return make_error(ErrorCode::IOParseFailed, "serialization: node JSON must be an object with a string 'type' field");
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     const std::string type = j["type"].get<std::string>();
     const Json props = j.value("props", Json::object());
 
@@ -260,8 +266,10 @@ auto from_json_impl(const Json &j, std::size_t depth) -> Result<std::shared_ptr<
     }
     std::shared_ptr<Widget> w = std::move(wres.value());
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     if (j.contains("children") && j["children"].is_array()) {
         std::vector<Node> kids;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         for (const auto &cj : j["children"]) {
             auto cres = from_json_impl(cj, depth + 1);
             if (!cres) {
@@ -358,6 +366,7 @@ auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void {
                 target.erase(ptr);
             }
         } else {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             target[ptr] = op.value; // replace / add
         }
 #ifdef _MSC_VER
@@ -376,38 +385,50 @@ auto is_container_type(const std::string &t) -> bool {
 }
 } // namespace
 
-auto component_schema(const std::string &name) -> Json { // NOLINT(readability-function-cognitive-complexity)
+auto component_schema(const std::string &name) -> Json {
     Json w = Json::object();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     w["type"] = name;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     w["container"] = is_container_type(name);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     w["is_container"] = is_container_type(name);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     w["is_layout"] = is_container_type(name); // 多子布局容器即 layout 型
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     w["is_clickable"] = name == "Button";
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     w["dynamic_children"] = (name == "Repeater" || name == "Canvas");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     w["thread"] = "main";
     Json props = Json::object();
     auto inst = WidgetRegistry::instance().make(name, Json::object());
     if (inst) {
         inst.value()->serialize_props(props);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         w["default_props"] = props; // serialize_props 已写入含默认值的属性对象
 
-        // 附录 B 自描述元数据（v0.7.0 新增）
+        // 附录 B 自描述元数据
         const WidgetDescriptor desc = inst.value()->describe();
         Json prop_desc = Json::array();
         for (const auto &pd : desc.properties) {
             prop_desc.push_back(descriptor_to_json(pd));
         }
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         w["prop_descriptors"] = prop_desc;
         Json events = Json::array();
         for (const auto &e : desc.events) {
             events.push_back(e);
         }
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         w["events"] = events;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         w["children_policy"] = desc.children_policy;
         Json examples = Json::array();
         for (const auto &ex : desc.examples) {
             examples.push_back(ex);
         }
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         w["examples"] = examples;
 
         // ---- Schema 扩展：props_schema / children_types / constraints ----
@@ -416,6 +437,7 @@ auto component_schema(const std::string &name) -> Json { // NOLINT(readability-f
         for (const auto &pd : desc.properties) {
             Json ps = Json::object();
             if (!pd.json_type.empty()) {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                 ps["type"] = pd.json_type;
             }
             if (!pd.enum_values.empty()) {
@@ -423,30 +445,39 @@ auto component_schema(const std::string &name) -> Json { // NOLINT(readability-f
                 for (const auto &v : pd.enum_values) {
                     ev.push_back(v);
                 }
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                 ps["enum"] = ev;
             }
             if (!pd.min_value.empty()) {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                 ps["minimum"] = pd.min_value;
             }
             if (!pd.max_value.empty()) {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                 ps["maximum"] = pd.max_value;
             }
             if (!pd.default_value.empty()) {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                 ps["default"] = pd.default_value;
             }
             if (!pd.note.empty()) {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                 ps["description"] = pd.note;
             }
             if (!pd.constraint.empty()) {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                 ps["constraint"] = pd.constraint;
                 constraints.push_back(pd.constraint);
             }
             if (!ps.empty()) {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                 props_schema[pd.name] = ps;
             }
         }
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         w["props_schema"] = props_schema;
         if (!constraints.empty()) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             w["constraints"] = constraints;
         }
 
@@ -455,6 +486,7 @@ auto component_schema(const std::string &name) -> Json { // NOLINT(readability-f
             children_types.push_back(ct);
         }
         if (!children_types.empty()) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             w["children_types"] = children_types;
         }
 
@@ -463,19 +495,26 @@ auto component_schema(const std::string &name) -> Json { // NOLINT(readability-f
             invariants.push_back(inv);
         }
         if (!invariants.empty()) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             w["invariants"] = invariants;
         }
     } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         w["default_props"] = Json::object();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         w["prop_descriptors"] = Json::array();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         w["events"] = Json::array();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         w["children_policy"] = "none";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         w["examples"] = Json::array();
     }
     Json prop_keys = Json::array();
     for (auto it = props.begin(); it != props.end(); ++it) {
         prop_keys.push_back(it.key());
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     w["props"] = prop_keys;
     return w;
 }

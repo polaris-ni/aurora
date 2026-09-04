@@ -21,19 +21,19 @@
 
 namespace aurora {
 
-class Widget;       // 前向声明：仅在声明中按引用使用
-class Painter;      // 前向声明
-class BuildContext; // 前向声明
+class Widget;  // 前向声明：仅在声明中按引用使用
+class Painter;  // 前向声明
+class BuildContext;  // 前向声明
 
 namespace debug {
 
 /// @brief 可视化调试叠层开关（全部默认 off）。任一开启即进入叠层绘制分支。
 struct DebugPaintFlags {
-    bool layout_guides = false;       ///< render box 边框 / 对齐参考（对齐 Flutter debugPaintSizeEnabled）。
-    bool relayout_boundaries = false; ///< 重排边界框（复用 `Widget::is_relayout_boundary()`）。
-    bool layer_borders = false;       ///< 离屏缓存层（含 `cache_layer()` 修饰）边框。
-    bool repaint_highlight = false;   ///< 本帧实际重绘的控件循环色高亮（rainbow）。
-    bool overdraw = false;            ///< 控件粒度过度绘制热力图（painter_bounds 半透明叠加）。
+    bool layout_guides = false;  ///< render box 边框 / 对齐参考（对齐 Flutter debugPaintSizeEnabled）。
+    bool relayout_boundaries = false;  ///< 重排边界框（复用 `Widget::is_relayout_boundary()`）。
+    bool layer_borders = false;  ///< 离屏缓存层（含 `cache_layer()` 修饰）边框。
+    bool repaint_highlight = false;  ///< 本帧实际重绘的控件循环色高亮（rainbow）。
+    bool overdraw = false;  ///< 控件粒度过度绘制热力图（painter_bounds 半透明叠加）。
 };
 
 /// @brief 设置全局叠层开关（DEBUG 下生效；Release 为 no-op）。
@@ -59,11 +59,11 @@ auto paint_debug_overlays(Painter &p, const Widget &root, const Rect &root_bound
 
 /// @brief 叠层绘制统计（供测试断言，无需检查像素）。每次 `paint_debug_overlays` 前清零。
 struct DebugOverlayStats {
-    std::uint64_t layout_guides_drawn = 0;       ///< 绘制了 layout_guides 边框的控件数。
-    std::uint64_t relayout_boundaries_drawn = 0; ///< 绘制了 relayout boundary 边框的控件数。
-    std::uint64_t layer_borders_drawn = 0;       ///< 绘制了缓存层边框的控件数。
-    std::uint64_t repaint_highlight_drawn = 0;   ///< 被 repaint_highlight 高亮的控件数。
-    std::uint64_t overdraw_regions_drawn = 0;    ///< 参与 overdraw 热力图叠加的控件（非根）数。
+    std::uint64_t layout_guides_drawn = 0;  ///< 绘制了 layout_guides 边框的控件数。
+    std::uint64_t relayout_boundaries_drawn = 0;  ///< 绘制了 relayout boundary 边框的控件数。
+    std::uint64_t layer_borders_drawn = 0;  ///< 绘制了缓存层边框的控件数。
+    std::uint64_t repaint_highlight_drawn = 0;  ///< 被 repaint_highlight 高亮的控件数。
+    std::uint64_t overdraw_regions_drawn = 0;  ///< 参与 overdraw 热力图叠加的控件（非根）数。
 };
 
 [[nodiscard]] auto overlay_stats() -> DebugOverlayStats;
@@ -71,14 +71,14 @@ auto reset_overlay_stats() -> void;
 
 /// @brief 控件拾取结果中的单层节点。
 struct DebugPickNode {
-    std::string type_name; ///< 命中控件类型名（`Widget::type_name()`）。
-    Rect bounds;           ///< 该控件全局盒（`paint_bounds()`）。
+    std::string type_name;  ///< 命中控件类型名（`Widget::type_name()`）。
+    Rect bounds;  ///< 该控件全局盒（`paint_bounds()`）。
 };
 
 /// @brief 控件拾取结果：根→最深的完整命中链 + 是否命中。
 struct DebugPickResult {
-    std::vector<DebugPickNode> chain; ///< 命中链（chain[0] = 根，末元素 = 最深命中控件）。
-    bool hit = false;                 ///< 是否在 `screen` 处命中任意控件。
+    std::vector<DebugPickNode> chain;  ///< 命中链（chain[0] = 根，末元素 = 最深命中控件）。
+    bool hit = false;  ///< 是否在 `screen` 处命中任意控件。
 };
 
 /// @brief 控件拾取：输入根控件与屏幕（窗口逻辑 dp）坐标，复用 `Widget::hit_test_chain`
@@ -92,5 +92,5 @@ struct DebugPickResult {
 [[nodiscard]] auto widget_picker(Widget &root, const Rect &root_bounds, const BuildContext &ctx, Point screen)
     -> DebugPickResult;
 
-} // namespace debug
-} // namespace aurora
+}  // namespace debug
+}  // namespace aurora

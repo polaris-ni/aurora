@@ -12,10 +12,10 @@ namespace aurora {
 
 /// @brief 动画状态（对应 Flutter `AnimationStatus`）。
 enum class AnimationStatus : std::uint8_t {
-    Dismissed, ///< 在起点（进度 0）
-    Forward,   ///< 正向播放中
-    Reverse,   ///< 反向播放中
-    Completed, ///< 在终点（进度 1）
+    Dismissed,  ///< 在起点（进度 0）
+    Forward,  ///< 正向播放中
+    Reverse,  ///< 反向播放中
+    Completed,  ///< 在终点（进度 1）
 };
 
 /**
@@ -31,19 +31,19 @@ enum class AnimationStatus : std::uint8_t {
 class AnimationController {
   public:
     explicit AnimationController(double duration_seconds, double value = 0.0)
-        : m_duration(std::max(duration_seconds, 1e-6)), m_value(value) {}
+        : duration_(std::max(duration_seconds, 1e-6)), value_(value) {}
 
-    [[nodiscard]] auto value() const -> double { return m_value; }
-    [[nodiscard]] auto status() const -> AnimationStatus { return m_status; }
-    [[nodiscard]] auto duration() const -> double { return m_duration; }
-    [[nodiscard]] auto is_dismissed() const -> bool { return m_status == AnimationStatus::Dismissed; }
-    [[nodiscard]] auto is_completed() const -> bool { return m_status == AnimationStatus::Completed; }
+    [[nodiscard]] auto value() const -> double { return value_; }
+    [[nodiscard]] auto status() const -> AnimationStatus { return status_; }
+    [[nodiscard]] auto duration() const -> double { return duration_; }
+    [[nodiscard]] auto is_dismissed() const -> bool { return status_ == AnimationStatus::Dismissed; }
+    [[nodiscard]] auto is_completed() const -> bool { return status_ == AnimationStatus::Completed; }
     [[nodiscard]] auto is_animating() const -> bool {
-        return m_status == AnimationStatus::Forward || m_status == AnimationStatus::Reverse;
+        return status_ == AnimationStatus::Forward || status_ == AnimationStatus::Reverse;
     }
     /// @brief 本帧 value 是否发生变化（供 Animator 决定是否需要写目标 State）。
-    [[nodiscard]] auto dirty() const -> bool { return m_dirty; }
-    auto clear_dirty() -> void { m_dirty = false; }
+    [[nodiscard]] auto dirty() const -> bool { return dirty_; }
+    auto clear_dirty() -> void { dirty_ = false; }
 
     /// @brief 正向播放（可选从 from 起步）。
     auto forward(double from = -1.0) -> void;
@@ -61,10 +61,10 @@ class AnimationController {
     auto tick(double dt_seconds) -> void;
 
   private:
-    double m_duration = 0.0;
-    double m_value = 0.0;
-    AnimationStatus m_status = AnimationStatus::Dismissed;
-    bool m_dirty = false;
+    double duration_ = 0.0;
+    double value_ = 0.0;
+    AnimationStatus status_ = AnimationStatus::Dismissed;
+    bool dirty_ = false;
 };
 
 /**
@@ -84,7 +84,7 @@ class Animator {
     /// @warning 登记的是裸指针。若控制器的生命周期短于本 `Animator`（典型：作为某个
     ///          widget 的成员），**必须**在其析构前调用 `remove(c)`，否则下一帧
     ///          `tick` 会写入已释放内存。
-    auto drive(AnimationController &c) -> void { m_controllers.push_back(&c); }
+    auto drive(AnimationController &c) -> void { controllers_.push_back(&c); }
 
     /// @brief 注销控制器及其经 `bind()` 建立的所有绑定。
     ///
@@ -94,14 +94,14 @@ class Animator {
     /// 解引用悬垂指针（use-after-free）。
     /// @param c 待注销的控制器；未登记过时为无操作。
     auto remove(const AnimationController &c) -> void {
-        std::erase(m_controllers, &c);
-        std::erase_if(m_on_tick, [&c](const Binding &b) -> bool { return b.owner == &c; });
+        std::erase(controllers_, &c);
+        std::erase_if(on_tick_, [&c](const Binding &b) -> bool { return b.owner == &c; });
     }
 
     /// @brief 是否有运行中的控制器（Forward/Reverse），供帧调度决策取值，无活跃动画时 idle 帧可阻塞等待事件。
     [[nodiscard]] auto has_active() const -> bool {
         return std::ranges::any_of(
-            m_controllers, [](const AnimationController *c) -> bool { return c != nullptr && c->is_animating(); });
+            controllers_, [](const AnimationController *c) -> bool { return c != nullptr && c->is_animating(); });
     }
 
     /// @brief 推进所有控制器并应用所有绑定（在帧边界调用一次）。
@@ -109,27 +109,29 @@ class Animator {
 
     /// @brief 追加一帧回调（在 tick 中于所有控制器推进后、clear_dirty 前执行）。
     auto add_binding(std::function<void()> fn) -> void {
-        m_on_tick.push_back(Binding{ .owner = nullptr, .fn = std::move(fn) });
+        on_tick_.push_back(Binding{.owner = nullptr, .fn = std::move(fn)});
     }
 
     /// @brief 绑定 (控制器 + 补间) → 目标 State：每帧把插值写入 State。
-    template<typename T> auto bind(AnimationController &c, Tween<T> tw, State<T> &target) -> void {
+    template <typename T>
+    auto bind(AnimationController &c, Tween<T> tw, State<T> &target) -> void {
         drive(c);
-        m_on_tick.push_back(Binding{ &c, [&c, tw, &target]() -> auto {
-                                        if (c.dirty()) {
-                                            target.set(tw.value(c.value()));
-                                        }
-                                    } });
+        on_tick_.push_back(Binding{&c, [&c, tw, &target]() -> auto {
+                                       if (c.dirty()) {
+                                           target.set(tw.value(c.value()));
+                                       }
+                                   }});
     }
 
     /// @brief 绑定 (控制器 + 关键帧) → 目标 State。
-    template<typename T> auto bind(AnimationController &c, Keyframes<T> kf, State<T> &target) -> void {
+    template <typename T>
+    auto bind(AnimationController &c, Keyframes<T> kf, State<T> &target) -> void {
         drive(c);
-        m_on_tick.push_back(Binding{ &c, [&c, kf, &target]() -> auto {
-                                        if (c.dirty()) {
-                                            target.set(kf.value(c.value()));
-                                        }
-                                    } });
+        on_tick_.push_back(Binding{&c, [&c, kf, &target]() -> auto {
+                                       if (c.dirty()) {
+                                           target.set(kf.value(c.value()));
+                                       }
+                                   }});
     }
 
   private:
@@ -139,8 +141,8 @@ class Animator {
         std::function<void()> fn;
     };
 
-    std::vector<AnimationController *> m_controllers; ///< 非拥有
-    std::vector<Binding> m_on_tick;
+    std::vector<AnimationController *> controllers_;  ///< 非拥有
+    std::vector<Binding> on_tick_;
 };
 
 /**
@@ -155,42 +157,46 @@ class Animator {
  * @note Side-effects: none
  * @note Rebuildable: no
  */
-template<typename T> class AnimatedValue {
+template <typename T>
+class AnimatedValue {
   public:
     struct Payload {
-        State<T> *target;               ///< 非拥有：目标 State 必须比本动画存活更久
-        AnimationController controller; ///< 拥有的驱动控制器
-        Tween<T> tween;                 ///< 拥有的补间（含曲线）
+        State<T> *target;  ///< 非拥有：目标 State 必须比本动画存活更久
+        AnimationController controller;  ///< 拥有的驱动控制器
+        Tween<T> tween;  ///< 拥有的补间（含曲线）
         std::function<void()> on_completed;
         bool fired_completed = false;
     };
 
     AnimatedValue(State<T> &target, Tween<T> tw, double duration_seconds)
-        : m(std::make_shared<Payload>(
-              Payload{ &target, AnimationController{ duration_seconds }, std::move(tw), {}, false })) {}
+        : m_(std::make_shared<Payload>(Payload{.target = &target,
+                                               .controller = AnimationController{duration_seconds},
+                                               .tween = std::move(tw),
+                                               .on_completed = {},
+                                               .fired_completed = false})) {}
 
-    [[nodiscard]] auto controller() -> AnimationController & { return m->controller; }
-    [[nodiscard]] auto tween() -> Tween<T> & { return m->tween; }
+    [[nodiscard]] auto controller() -> AnimationController & { return m_->controller; }
+    [[nodiscard]] auto tween() -> Tween<T> & { return m_->tween; }
 
     /// @brief 开始正向播放（可选从 from∈[0,1] 起步）。
-    auto forward(double from = -1.0) -> void { m->controller.forward(from); }
+    auto forward(double from = -1.0) -> void { m_->controller.forward(from); }
 
     /// @brief 当前归一化进度 t∈[0,1]（控制器原始输出，未经曲线）。
-    [[nodiscard]] auto progress() const -> double { return m->controller.value(); }
+    [[nodiscard]] auto progress() const -> double { return m_->controller.value(); }
 
     /// @brief 目标 State 当前值（补间插值后的落点）。
-    [[nodiscard]] auto current() const -> T { return m->target->get(); }
+    [[nodiscard]] auto current() const -> T { return m_->target->get(); }
 
-    [[nodiscard]] auto status() const -> AnimationStatus { return m->controller.status(); }
-    [[nodiscard]] auto is_completed() const -> bool { return m->controller.is_completed(); }
+    [[nodiscard]] auto status() const -> AnimationStatus { return m_->controller.status(); }
+    [[nodiscard]] auto is_completed() const -> bool { return m_->controller.is_completed(); }
 
     /// @brief 注册"到达终点（Completed）"的一次性回调（重复到达不会重复触发）。
-    auto on_completed(std::function<void()> cb) -> void { m->on_completed = std::move(cb); }
+    auto on_completed(std::function<void()> cb) -> void { m_->on_completed = std::move(cb); }
 
     /// @brief 把本动画接入 Animator 的帧循环（驱动与写回委托给 Animator，句柄可离开作用域）。
     auto attach(Animator &a) -> void {
-        a.drive(m->controller);
-        auto p = m;
+        a.drive(m_->controller);
+        auto p = m_;
         a.add_binding([p]() -> void {
             if (p->controller.dirty()) {
                 p->target->set(p->tween.value(p->controller.value()));
@@ -206,21 +212,21 @@ template<typename T> class AnimatedValue {
 
     /// @brief 自驱动一帧（无 Animator 时手动推进）：推进控制器 → 写回目标 → 触发 completed。
     auto tick(double dt_seconds) -> void {
-        m->controller.tick(dt_seconds);
-        if (m->controller.dirty()) {
-            m->target->set(m->tween.value(m->controller.value()));
-            if (m->controller.is_completed() && !m->fired_completed) {
-                m->fired_completed = true;
-                if (m->on_completed) {
-                    m->on_completed();
+        m_->controller.tick(dt_seconds);
+        if (m_->controller.dirty()) {
+            m_->target->set(m_->tween.value(m_->controller.value()));
+            if (m_->controller.is_completed() && !m_->fired_completed) {
+                m_->fired_completed = true;
+                if (m_->on_completed) {
+                    m_->on_completed();
                 }
             }
         }
-        m->controller.clear_dirty();
+        m_->controller.clear_dirty();
     }
 
   private:
-    std::shared_ptr<Payload> m;
+    std::shared_ptr<Payload> m_;
 };
 
 /**
@@ -241,14 +247,15 @@ template<typename T> class AnimatedValue {
  *
  * @note Thread: main-thread only
  */
-template<typename T> auto animate(State<T> &target, Tween<T> tw, double duration_s) -> AnimatedValue<T> {
-    AnimatedValue<T> av{ target, std::move(tw), duration_s };
+template <typename T>
+auto animate(State<T> &target, Tween<T> tw, double duration_s) -> AnimatedValue<T> {
+    AnimatedValue<T> av{target, std::move(tw), duration_s};
     av.forward(0.0);
     return av;
 }
 
 /// @brief 同上，并自动接入指定 `Animator` 的帧循环（最常用形态）。
-template<typename T>
+template <typename T>
 auto animate(State<T> &target, Tween<T> tw, double duration_s, Animator &anim) -> AnimatedValue<T> {
     AnimatedValue<T> av = animate(target, std::move(tw), duration_s);
     av.attach(anim);
@@ -260,8 +267,8 @@ auto animate(State<T> &target, Tween<T> tw, double duration_s, Animator &anim) -
  *
  * 用法：
  * @code
- *   TweenAnimation<float> anim(0.0f);
- *   anim.animate_to(1.0f, 0.3, Curves::ease_in_out());
+ *   TweenAnimation<float> anim(0.0F);
+ *   anim.animate_to(1.0F, 0.3, Curves::ease_in_out());
  *   // 每帧：anim.tick(dt);
  *   float val = anim.get();  // 0→1 过渡中的当前值
  * @endcode
@@ -270,46 +277,47 @@ auto animate(State<T> &target, Tween<T> tw, double duration_s, Animator &anim) -
  * @note Side-effects: none
  * @note Rebuildable: no
  */
-template<typename T> class TweenAnimation {
+template <typename T>
+class TweenAnimation {
   public:
-    explicit TweenAnimation(T initial) : m_state(initial), m_current(std::move(initial)) {}
+    explicit TweenAnimation(T initial) : state_(initial), current_(std::move(initial)) {}
 
     /// @brief 启动到 target 的动画。
     auto animate_to(T target, double duration_seconds, Curve curve = Curve{}) -> void {
-        m_tween = Tween<T>(m_current, std::move(target), std::move(curve));
-        m_controller = AnimationController(duration_seconds);
-        m_controller.forward(0.0);
-        m_animating = true;
+        tween_ = Tween<T>(current_, std::move(target), std::move(curve));
+        controller_ = AnimationController(duration_seconds);
+        controller_.forward(0.0);
+        animating_ = true;
     }
 
     /// @brief 每帧推进（由帧循环调用）。
     auto tick(double dt_seconds) -> void {
-        if (!m_animating) {
+        if (!animating_) {
             return;
         }
-        m_controller.tick(dt_seconds);
-        m_current = m_tween.value(m_controller.value());
-        m_state.set(m_current);
-        if (!m_controller.is_animating()) {
-            m_animating = false;
+        controller_.tick(dt_seconds);
+        current_ = tween_.value(controller_.value());
+        state_.set(current_);
+        if (!controller_.is_animating()) {
+            animating_ = false;
         }
     }
 
     /// @brief 当前值。
-    [[nodiscard]] auto get() const -> T { return m_current; }
+    [[nodiscard]] auto get() const -> T { return current_; }
 
     /// @brief 是否正在动画中。
-    [[nodiscard]] auto is_animating() const -> bool { return m_animating; }
+    [[nodiscard]] auto is_animating() const -> bool { return animating_; }
 
     /// @brief 作为信号访问（供响应式绑定）。
-    [[nodiscard]] auto as_signal() -> State<T> & { return m_state; }
+    [[nodiscard]] auto as_signal() -> State<T> & { return state_; }
 
   private:
-    State<T> m_state;
-    T m_current;
-    Tween<T> m_tween;
-    AnimationController m_controller{ 1.0 };
-    bool m_animating = false;
+    State<T> state_;
+    T current_;
+    Tween<T> tween_;
+    AnimationController controller_{1.0};
+    bool animating_ = false;
 };
 
-} // namespace aurora
+}  // namespace aurora

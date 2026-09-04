@@ -13,9 +13,9 @@ namespace aurora {
 
 /// @brief 容器布局上下文：打包 children 指针 + 索引 + BuildContext 指针，供 trampoline 解包。
 struct ContainerLayoutCtx : LayoutCtxBase {
-    Node *children{};                ///< 子节点数组首元素
-    size_t index = 0;                ///< 当前子项索引
-    const BuildContext *build_ctx{}; ///< 构建上下文
+    Node *children{};  ///< 子节点数组首元素
+    size_t index = 0;  ///< 当前子项索引
+    const BuildContext *build_ctx{};  ///< 构建上下文
 };
 
 /// @brief ContainerLayoutCtx 的 trampoline：void* → 具体类型 → 调用 widget.layout。
@@ -28,8 +28,8 @@ inline auto container_measure(void *ctx, const Constraints &c) -> Size {
 /// @brief Column 属性（聚合）。
 struct ColumnProps {
     std::vector<Node> children;
-    Flex flex{ .direction = FlexDirection::Column }; ///< flex 参数：主轴/交叉轴对齐（默认纵向）。
-    float gap = 0.0f;                                ///< 相邻子项固定间距（像素）；>0 时覆盖 `flex.gap`。
+    Flex flex{.direction = FlexDirection::Column};  ///< flex 参数：主轴/交叉轴对齐（默认纵向）。
+    float gap = 0.0F;  ///< 相邻子项固定间距（像素）；>0 时覆盖 `flex.gap`。
 };
 
 /**
@@ -44,7 +44,7 @@ class Column : public Container, public ColumnProps {
   public:
     Column() = default;
     explicit Column(ColumnProps props) {
-        m_children = std::move(props.children);
+        children_ = std::move(props.children);
         flex = props.flex;
         gap = props.gap;
     }
@@ -97,14 +97,14 @@ class Column : public Container, public ColumnProps {
             flex.main_axis_size = json_to_main_axis_size(props["main_axis_size"]);
         }
         if (props.contains("gap")) {
-            static const PropDescriptor d_gap{ .name = "gap", .json_type = "number", .min_value = "0" };
-            gap = validate_or_default<float>(props["gap"], d_gap, 0.0f);
+            static const PropDescriptor D_GAP{.name = "gap", .json_type = "number", .min_value = "0"};
+            gap = validate_or_default<float>(props["gap"], D_GAP, 0.0F);
         }
     }
 
     /// @brief 构建期属性约束校验（specification/04-widget.md §2.2）：校验 gap >= 0。
     [[nodiscard]] auto validate_props() const -> Result<void> override {
-        if (gap < 0.0f) {
+        if (gap < 0.0F) {
             return make_error(ErrorCode::WidgetInvalidProp, "Layout gap must be >= 0, got " + std::to_string(gap),
                               "Use non-negative spacing");
         }
@@ -117,42 +117,80 @@ class Column : public Container, public ColumnProps {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "Column",
-            .properties = {
-                { .name="main_axis_alignment", .type="MainAxisAlignment", .default_value="Start", .required=false, .note="主轴对齐", .json_type="string",
-                  .enum_values={"Start", "Center", "End", "SpaceBetween", "SpaceAround", "SpaceEvenly"} },
-                { .name="cross_axis_alignment", .type="CrossAxisAlignment", .default_value="Start", .required=false, .note="交叉轴对齐", .json_type="string",
-                  .enum_values={"Start", "Center", "End", "Stretch"} },
-                { .name="main_axis_size", .type="MainAxisSize", .default_value="Min", .required=false, .note="主轴尺寸策略", .json_type="string",
-                  .enum_values={"Min", "Max"} },
-                { .name="gap", .type="float", .default_value="0.0", .required=false, .note="子项间距(px)", .json_type="number", .enum_values={}, .min_value="0" },
-                { .name="width", .type="Length", .default_value="auto", .required=false, .note="", .json_type="array" },
-                { .name="height", .type="Length", .default_value="auto", .required=false, .note="", .json_type="array" },
-                { .name="show", .type="bool", .default_value="true", .required=false, .note="", .json_type="boolean" },
-            },
+            .properties =
+                {
+                    {.name = "main_axis_alignment",
+                     .type = "MainAxisAlignment",
+                     .default_value = "Start",
+                     .required = false,
+                     .note = "主轴对齐",
+                     .json_type = "string",
+                     .enum_values = {"Start", "Center", "End", "SpaceBetween", "SpaceAround", "SpaceEvenly"}},
+                    {.name = "cross_axis_alignment",
+                     .type = "CrossAxisAlignment",
+                     .default_value = "Start",
+                     .required = false,
+                     .note = "交叉轴对齐",
+                     .json_type = "string",
+                     .enum_values = {"Start", "Center", "End", "Stretch"}},
+                    {.name = "main_axis_size",
+                     .type = "MainAxisSize",
+                     .default_value = "Min",
+                     .required = false,
+                     .note = "主轴尺寸策略",
+                     .json_type = "string",
+                     .enum_values = {"Min", "Max"}},
+                    {.name = "gap",
+                     .type = "float",
+                     .default_value = "0.0",
+                     .required = false,
+                     .note = "子项间距(px)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "width",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "height",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "show",
+                     .type = "bool",
+                     .default_value = "true",
+                     .required = false,
+                     .note = "",
+                     .json_type = "boolean"},
+                },
             .events = {},
             .children_policy = "multiple",
             .allowed_child_types = {},
-            .invariants = { "gap >= 0" },
-            .examples = { R"(au::Column{ au::Text("A"), au::Text("B") })" },
+            .invariants = {"gap >= 0"},
+            .examples = {R"(au::Column{ au::Text("A"), au::Text("B") })"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        std::vector<ContainerLayoutCtx> ctxs(m_children.size());
+        std::vector<ContainerLayoutCtx> ctxs(children_.size());
         std::vector<FlexItem> items;
-        items.reserve(m_children.size());
-        for (size_t i = 0; i < m_children.size(); ++i) {
-            ctxs[i] = ContainerLayoutCtx{ {}, m_children.data(), i, &ctx };
-            const float w = m_children[i].widget().modifier.get().flex_weight();
+        items.reserve(children_.size());
+        for (size_t i = 0; i < children_.size(); ++i) {
+            ctxs[i] = ContainerLayoutCtx{{}, children_.data(), i, &ctx};
+            const float w = children_[i].widget().modifier.get().flex_weight();
             items.push_back(FlexItem::make<ContainerLayoutCtx>(w, &ctxs[i], container_measure));
         }
         Flex cfg = flex;
-        cfg.gap = gap > 0.0f ? gap : flex.gap;
+        cfg.gap = gap > 0.0F ? gap : flex.gap;
         const FlexLayout result = FlexLayouter::layout(cfg, c, items);
-        for (size_t i = 0; i < m_children.size(); ++i) {
-            m_children[i].set_bounds(result.children[i]);
+        for (size_t i = 0; i < children_.size(); ++i) {
+            children_[i].set_bounds(result.children[i]);
         }
         return c.constrain(result.size);
     }
@@ -161,8 +199,8 @@ class Column : public Container, public ColumnProps {
 /// @brief Row 属性（聚合）。
 struct RowProps {
     std::vector<Node> children;
-    Flex flex{ .direction = FlexDirection::Row }; ///< flex 参数：主轴/交叉轴对齐（默认横向）。
-    float gap = 0.0f;                             ///< 相邻子项固定间距（像素）；>0 时覆盖 `flex.gap`。
+    Flex flex{.direction = FlexDirection::Row};  ///< flex 参数：主轴/交叉轴对齐（默认横向）。
+    float gap = 0.0F;  ///< 相邻子项固定间距（像素）；>0 时覆盖 `flex.gap`。
 };
 
 /**
@@ -174,7 +212,7 @@ class Row : public Container, public RowProps {
   public:
     Row() = default;
     explicit Row(RowProps props) {
-        m_children = std::move(props.children);
+        children_ = std::move(props.children);
         flex = props.flex;
         gap = props.gap;
     }
@@ -227,14 +265,14 @@ class Row : public Container, public RowProps {
             flex.main_axis_size = json_to_main_axis_size(props["main_axis_size"]);
         }
         if (props.contains("gap")) {
-            static const PropDescriptor d_gap{ .name = "gap", .json_type = "number", .min_value = "0" };
-            gap = validate_or_default<float>(props["gap"], d_gap, 0.0f);
+            static const PropDescriptor D_GAP{.name = "gap", .json_type = "number", .min_value = "0"};
+            gap = validate_or_default<float>(props["gap"], D_GAP, 0.0F);
         }
     }
 
     /// @brief 构建期属性约束校验（specification/04-widget.md §2.2）：校验 gap >= 0。
     [[nodiscard]] auto validate_props() const -> Result<void> override {
-        if (gap < 0.0f) {
+        if (gap < 0.0F) {
             return make_error(ErrorCode::WidgetInvalidProp, "Layout gap must be >= 0, got " + std::to_string(gap),
                               "Use non-negative spacing");
         }
@@ -247,45 +285,83 @@ class Row : public Container, public RowProps {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "Row",
-            .properties = {
-                { .name="main_axis_alignment", .type="MainAxisAlignment", .default_value="Start", .required=false, .note="主轴对齐", .json_type="string",
-                  .enum_values={"Start", "Center", "End", "SpaceBetween", "SpaceAround", "SpaceEvenly"} },
-                { .name="cross_axis_alignment", .type="CrossAxisAlignment", .default_value="Start", .required=false, .note="交叉轴对齐", .json_type="string",
-                  .enum_values={"Start", "Center", "End", "Stretch"} },
-                { .name="main_axis_size", .type="MainAxisSize", .default_value="Min", .required=false, .note="主轴尺寸策略", .json_type="string",
-                  .enum_values={"Min", "Max"} },
-                { .name="gap", .type="float", .default_value="0.0", .required=false, .note="子项间距(px)", .json_type="number", .enum_values={}, .min_value="0" },
-                { .name="width", .type="Length", .default_value="auto", .required=false, .note="", .json_type="array" },
-                { .name="height", .type="Length", .default_value="auto", .required=false, .note="", .json_type="array" },
-                { .name="show", .type="bool", .default_value="true", .required=false, .note="", .json_type="boolean" },
-            },
+            .properties =
+                {
+                    {.name = "main_axis_alignment",
+                     .type = "MainAxisAlignment",
+                     .default_value = "Start",
+                     .required = false,
+                     .note = "主轴对齐",
+                     .json_type = "string",
+                     .enum_values = {"Start", "Center", "End", "SpaceBetween", "SpaceAround", "SpaceEvenly"}},
+                    {.name = "cross_axis_alignment",
+                     .type = "CrossAxisAlignment",
+                     .default_value = "Start",
+                     .required = false,
+                     .note = "交叉轴对齐",
+                     .json_type = "string",
+                     .enum_values = {"Start", "Center", "End", "Stretch"}},
+                    {.name = "main_axis_size",
+                     .type = "MainAxisSize",
+                     .default_value = "Min",
+                     .required = false,
+                     .note = "主轴尺寸策略",
+                     .json_type = "string",
+                     .enum_values = {"Min", "Max"}},
+                    {.name = "gap",
+                     .type = "float",
+                     .default_value = "0.0",
+                     .required = false,
+                     .note = "子项间距(px)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "width",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "height",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "show",
+                     .type = "bool",
+                     .default_value = "true",
+                     .required = false,
+                     .note = "",
+                     .json_type = "boolean"},
+                },
             .events = {},
             .children_policy = "multiple",
             .allowed_child_types = {},
-            .invariants = { "gap >= 0" },
-            .examples = { R"(au::Row{ au::Text("A"), au::Text("B") })" },
+            .invariants = {"gap >= 0"},
+            .examples = {R"(au::Row{ au::Text("A"), au::Text("B") })"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        std::vector<ContainerLayoutCtx> ctxs(m_children.size());
+        std::vector<ContainerLayoutCtx> ctxs(children_.size());
         std::vector<FlexItem> items;
-        items.reserve(m_children.size());
-        for (size_t i = 0; i < m_children.size(); ++i) {
-            ctxs[i] = ContainerLayoutCtx{ {}, m_children.data(), i, &ctx };
-            const float w = m_children[i].widget().modifier.get().flex_weight();
+        items.reserve(children_.size());
+        for (size_t i = 0; i < children_.size(); ++i) {
+            ctxs[i] = ContainerLayoutCtx{{}, children_.data(), i, &ctx};
+            const float w = children_[i].widget().modifier.get().flex_weight();
             items.push_back(FlexItem::make<ContainerLayoutCtx>(w, &ctxs[i], container_measure));
         }
         Flex cfg = flex;
-        cfg.gap = gap > 0.0f ? gap : flex.gap;
+        cfg.gap = gap > 0.0F ? gap : flex.gap;
         const FlexLayout result = FlexLayouter::layout(cfg, c, items);
-        for (size_t i = 0; i < m_children.size(); ++i) {
-            m_children[i].set_bounds(result.children[i]);
+        for (size_t i = 0; i < children_.size(); ++i) {
+            children_[i].set_bounds(result.children[i]);
         }
         return c.constrain(result.size);
     }
 };
 
-} // namespace aurora
+}  // namespace aurora

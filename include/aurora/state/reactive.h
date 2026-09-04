@@ -19,9 +19,10 @@ namespace aurora {
  * @note Thread: main-thread only
  * @note Side-effects: none
  */
-template<typename T> class Reactive : public SignalView<T> {
+template <typename T>
+class Reactive : public SignalView<T> {
   public:
-    Reactive(T v = T{}) : m_state(std::make_shared<State<T>>(std::move(v))) {} // NOLINT(google-explicit-constructor)
+    Reactive(T v = T{}) : state_(std::make_shared<State<T>>(std::move(v))) {}
 
     /// @brief 由可转换为 T 的值构造（如 `const char*` → `LocalizedString`），
     /// 使 `Text{ .content = "Hi" }` 这类写法可直接编译（specification/02-state.md §2.2）。
@@ -30,25 +31,25 @@ template<typename T> class Reactive : public SignalView<T> {
     ///       `Reactive<Color> bg = Color::blue();` 与 `content = "Hi";`（先隐式构造成
     ///       `Reactive<T>` 再走隐式拷贝赋值）。标 explicit 会让全库 `Text/Button/Slider/
     ///       TextInput` 的赋值与默认值初始化全部编译失败。
-    template<typename U>
+    template <typename U>
         requires std::convertible_to<U, T>
-    Reactive(U &&u) : m_state(std::make_shared<State<T>>(std::forward<U>(u))) {} // NOLINT(google-explicit-constructor)
+    Reactive(U &&u) : state_(std::make_shared<State<T>>(std::forward<U>(u))) {}
 
     /// @brief 由共享的 `State<T>` 构造：与外部状态共享同一源，变化即触发依赖刷新
     /// （用于 `Provider`/`ThemeScope` 接受 `State<T>` 实现运行时换肤/换区域）。
-    explicit Reactive(std::shared_ptr<State<T>> s) : m_state(std::move(s)) {}
+    explicit Reactive(std::shared_ptr<State<T>> s) : state_(std::move(s)) {}
 
-    [[nodiscard]] auto get() const -> const T & override { return m_state->get(); }
+    [[nodiscard]] auto get() const -> const T & override { return state_->get(); }
 
-    auto set(T v) -> void { m_state->set(std::move(v)); }
+    auto set(T v) -> void { state_->set(std::move(v)); }
 
-    auto subscribe(Effect &e) -> void override { m_state->subscribe(e); }
+    auto subscribe(Effect &e) -> void override { state_->subscribe(e); }
 
     /// @brief 取底层 State（供需要直接持有信号的场景）。
-    [[nodiscard]] auto state() -> State<T> & { return *m_state; }
+    [[nodiscard]] auto state() -> State<T> & { return *state_; }
 
   private:
-    std::shared_ptr<State<T>> m_state;
+    std::shared_ptr<State<T>> state_;
 };
 
-} // namespace aurora
+}  // namespace aurora

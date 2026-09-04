@@ -31,21 +31,21 @@ namespace aurora {
 class VideoPlayer : public Container, public VideoController {
   public:
     VideoPlayer() = default;
-    explicit VideoPlayer(std::shared_ptr<VideoSource> src) : m_source(std::move(src)) {}
+    explicit VideoPlayer(std::shared_ptr<VideoSource> src) : source_(std::move(src)) {}
 
     /// @brief 设置 / 获取解码源。
-    auto set_source(std::shared_ptr<VideoSource> src) -> void { m_source = std::move(src); }
-    [[nodiscard]] auto source() const -> std::shared_ptr<VideoSource> { return m_source; }
+    auto set_source(std::shared_ptr<VideoSource> src) -> void { source_ = std::move(src); }
+    [[nodiscard]] auto source() const -> std::shared_ptr<VideoSource> { return source_; }
 
     /// @brief 适配模式（letterbox）：Contain 留黑边 / Fill 拉伸 / Cover 裁剪。
-    auto set_fit(BoxFit fit) -> void { m_fit = fit; }
-    [[nodiscard]] auto fit() const -> BoxFit { return m_fit; }
+    auto set_fit(BoxFit fit) -> void { fit_ = fit; }
+    [[nodiscard]] auto fit() const -> BoxFit { return fit_; }
 
     /// @brief 播放控制（公开便捷封装）。
     auto play() -> void;
     auto pause() -> void;
     auto toggle_play() -> void override;
-    [[nodiscard]] auto is_playing() const -> bool override { return m_playing; }
+    [[nodiscard]] auto is_playing() const -> bool override { return playing_; }
     auto seek(std::chrono::microseconds pos) -> void;
     auto seek_fraction(double f) -> void override;
     [[nodiscard]] auto position() const -> std::chrono::microseconds;
@@ -53,12 +53,12 @@ class VideoPlayer : public Container, public VideoController {
     [[nodiscard]] auto duration() const -> std::chrono::microseconds override;
     auto set_volume(double v) -> void override;
     auto set_muted(bool m) -> void override;
-    [[nodiscard]] auto volume() const -> double override { return m_volume.get(); }
-    [[nodiscard]] auto muted() const -> bool override { return m_muted.get(); }
+    [[nodiscard]] auto volume() const -> double override { return volume_.get(); }
+    [[nodiscard]] auto muted() const -> bool override { return muted_.get(); }
 
     /// @brief 显示 / 隐藏控件叠层。
     auto set_show_controls(bool show) -> void;
-    [[nodiscard]] auto show_controls() const -> bool { return m_show_controls; }
+    [[nodiscard]] auto show_controls() const -> bool { return show_controls_; }
 
     /// @brief 整体替换控件叠层（传入 nullptr 表示无控件）。
     auto set_controls(std::unique_ptr<Widget> controls) -> void;
@@ -66,14 +66,14 @@ class VideoPlayer : public Container, public VideoController {
     [[nodiscard]] virtual auto create_default_controls() -> std::unique_ptr<Widget>;
 
     /// @brief 点击 / 双击手势回调（非子类场景的快捷扩展）。
-    auto set_on_tap(std::function<void()> fn) -> void { m_on_tap = std::move(fn); }
-    auto set_on_double_tap(std::function<void()> fn) -> void { m_on_double_tap = std::move(fn); }
+    auto set_on_tap(std::function<void()> fn) -> void { on_tap_ = std::move(fn); }
+    auto set_on_double_tap(std::function<void()> fn) -> void { on_double_tap_ = std::move(fn); }
 
     // ---- VideoController 实现（供控件解耦绑定） ----
-    [[nodiscard]] auto playing_signal() -> Reactive<bool> * override { return &m_playing_state; }
-    [[nodiscard]] auto progress_signal() -> Reactive<double> * override { return &m_progress; }
-    [[nodiscard]] auto volume_signal() -> Reactive<double> * override { return &m_volume; }
-    [[nodiscard]] auto muted_signal() -> Reactive<bool> * override { return &m_muted; }
+    [[nodiscard]] auto playing_signal() -> Reactive<bool> * override { return &playing_state_; }
+    [[nodiscard]] auto progress_signal() -> Reactive<double> * override { return &progress_; }
+    [[nodiscard]] auto volume_signal() -> Reactive<double> * override { return &volume_; }
+    [[nodiscard]] auto muted_signal() -> Reactive<bool> * override { return &muted_; }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "VideoPlayer"; }
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
@@ -99,7 +99,7 @@ class VideoPlayer : public Container, public VideoController {
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override;
 
     /// @brief 子类 on_paint 可读取当前解码帧（用于滤镜/水印/叠加）。
-    [[nodiscard]] auto current_frame() const -> const Image & { return m_current_frame; }
+    [[nodiscard]] auto current_frame() const -> const Image & { return current_frame_; }
     /// @brief 子类 on_paint 复用私有 draw_frame 在当前 bounds 绘制帧。
     auto paint_frame(Painter &p, const Rect &bounds) const -> void;
 
@@ -113,24 +113,24 @@ class VideoPlayer : public Container, public VideoController {
     [[nodiscard]] auto resolve_width(const Constraints &c, float natural) const -> float;
     [[nodiscard]] auto resolve_height(const Constraints &c, float natural) const -> float;
 
-    std::shared_ptr<VideoSource> m_source;
-    Image m_current_frame;
-    BoxFit m_fit = BoxFit::Contain;
-    bool m_show_controls = true;
+    std::shared_ptr<VideoSource> source_;
+    Image current_frame_;
+    BoxFit fit_ = BoxFit::Contain;
+    bool show_controls_ = true;
 
-    bool m_playing = false;
-    std::chrono::microseconds m_video_pos{ 0 };
-    std::optional<std::chrono::steady_clock::time_point> m_play_start_wall;
+    bool playing_ = false;
+    std::chrono::microseconds video_pos_{0};
+    std::optional<std::chrono::steady_clock::time_point> play_start_wall_;
 
-    Reactive<bool> m_playing_state{ false };
-    Reactive<double> m_progress{ 0.0 };
-    Reactive<double> m_volume{ 1.0 };
-    Reactive<bool> m_muted{ false };
+    Reactive<bool> playing_state_{false};
+    Reactive<double> progress_{0.0};
+    Reactive<double> volume_{1.0};
+    Reactive<bool> muted_{false};
 
-    bool m_pressed = false;
-    std::chrono::steady_clock::time_point m_last_tap;
-    std::function<void()> m_on_tap;
-    std::function<void()> m_on_double_tap;
+    bool pressed_ = false;
+    std::chrono::steady_clock::time_point last_tap_;
+    std::function<void()> on_tap_;
+    std::function<void()> on_double_tap_;
 };
 
-} // namespace aurora
+}  // namespace aurora

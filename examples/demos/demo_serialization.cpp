@@ -1,11 +1,13 @@
 // 序列化 demo：to_json / diff / apply_patch（不对不可重建控件做 from_json 往返）。
 #include "demo_common.h"
 
+// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// try/catch 包装
 auto main() -> int {
     au::serialization::register_core_widgets();
 
-    au::Node a = au::Column{ au::Text{ au::LocalizedString{ "hello" } }, au::Text{ au::LocalizedString{ "world" } } };
-    au::Node b = au::Column{ au::Text{ au::LocalizedString{ "hello" } }, au::Text{ au::LocalizedString{ "aurora" } } };
+    au::Node a = au::Column{au::Text{au::LocalizedString{"hello"}}, au::Text{au::LocalizedString{"world"}}};
+    au::Node b = au::Column{au::Text{au::LocalizedString{"hello"}}, au::Text{au::LocalizedString{"aurora"}}};
 
     au::Json ja = au::serialization::to_json(a.widget());
     const au::Json jb = au::serialization::to_json(b.widget());
@@ -13,13 +15,13 @@ auto main() -> int {
     au::serialization::apply_patch(ja, d);
 
     au::Node root = au::Column{
-        GradientTitle{ "Serialization" },
+        GradientTitle{"Serialization"},
         gap(12),
-        au::Text{ au::LocalizedString{ "to_json → diff → apply_patch" } },
-        au::Text{ au::LocalizedString{ "patch ops = " + std::to_string(d.size()) } },
+        au::Text{au::LocalizedString{"to_json → diff → apply_patch"}},
+        au::Text{au::LocalizedString{"patch ops = " + std::to_string(d.size())}},
         au::Text{
-            au::LocalizedString{ "WidgetRegistry type count = " +
-                                 std::to_string(au::serialization::WidgetRegistry::instance().list_types().size()) } },
+            au::LocalizedString{"WidgetRegistry type count = " +
+                                std::to_string(au::serialization::WidgetRegistry::instance().list_types().size())}},
     };
-    return run_demo(Card{ std::move(root) }, "Serialization · Aurora Demo", 520.0f, 420.0f);
+    return run_demo(Card{std::move(root)}, "Serialization · Aurora Demo", 520.0F, 420.0F);
 }

@@ -10,7 +10,6 @@
 #include "aurora/core/platform.h"
 #include "aurora/render/offscreen.h"
 #include "aurora/widget/codegen.h"
-
 #include "test_harness.h"
 
 using aurora::describe_component;
@@ -29,7 +28,7 @@ static void test_list_components() {
     register_core_widgets();
     const auto types = list_all_components();
     AURORA_TEST_CHECK(!types.empty());
-    AURORA_TEST_CHECK(types.size() >= 15); // 至少 15 个已注册控件
+    AURORA_TEST_CHECK(types.size() >= 15);  // 至少 15 个已注册控件
 
     // 验证包含已知控件
     bool has_button = false;
@@ -55,16 +54,26 @@ static void test_describe_component() {
     Json schema = describe_component("Button");
     AURORA_TEST_CHECK(!schema.empty());
     AURORA_TEST_CHECK(schema.contains("type"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(schema["type"] == "Button");
     AURORA_TEST_CHECK(schema.contains("prop_descriptors"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(schema["prop_descriptors"].is_array());
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(!schema["prop_descriptors"].empty());
     AURORA_TEST_CHECK(schema.contains("events"));
     AURORA_TEST_CHECK(schema.contains("children_policy"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(schema["children_policy"] == "none");
 
     // 未知组件：describe_component 返回空 Json 对象或不含 prop_descriptors
     Json unknown = describe_component("NonExistentWidget");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(!unknown.contains("prop_descriptors") || unknown["prop_descriptors"].empty());
 }
 
@@ -87,8 +96,14 @@ static void test_search_components() {
 static void test_validate_tree() {
     // 合法树
     Json valid_tree = Json::object();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     valid_tree["type"] = "Column";
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     valid_tree["props"] = Json::object();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     valid_tree["children"] = Json::array();
 
     auto widget = from_json(valid_tree);
@@ -100,8 +115,14 @@ static void test_validate_tree() {
 
     // 非法树（未知类型）
     Json invalid_tree = Json::object();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     invalid_tree["type"] = "UnknownWidget";
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     invalid_tree["props"] = Json::object();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     invalid_tree["children"] = Json::array();
 
     auto widget2 = from_json(invalid_tree);
@@ -109,16 +130,22 @@ static void test_validate_tree() {
     if (widget2.ok()) {
         Node root2(std::move(widget2.value()));
         auto ok2 = validate(root2);
-        AURORA_TEST_CHECK(!ok2.ok()); // validate 应检测到未知类型
+        AURORA_TEST_CHECK(!ok2.ok());  // validate 应检测到未知类型
     } else {
-        AURORA_TEST_CHECK(true); // from_json 直接拒绝也算通过
+        AURORA_TEST_CHECK(true);  // from_json 直接拒绝也算通过
     }
 }
 
 static void test_render_snapshot() {
     Json tree = Json::object();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     tree["type"] = "Text";
-    tree["props"] = Json{ { "content", "Hello" } };
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    tree["props"] = Json{{"content", "Hello"}};
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     tree["children"] = Json::array();
 
     auto widget = from_json(tree);
@@ -127,16 +154,28 @@ static void test_render_snapshot() {
     Node root(std::move(widget.value()));
     Json snapshot = render_to_logical_snapshot(root, 400, 300);
     AURORA_TEST_CHECK(snapshot.contains("type"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snapshot["type"] == "Text");
     AURORA_TEST_CHECK(snapshot.contains("box"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snapshot["box"].contains("w"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snapshot["box"].contains("h"));
 }
 
 static void test_to_code() {
     Json tree = Json::object();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     tree["type"] = "Button";
-    tree["props"] = Json{ { "label", "OK" } };
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    tree["props"] = Json{{"label", "OK"}};
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     tree["children"] = Json::array();
 
     const std::string code = to_code(tree, CodeStyle::Fluent);
@@ -179,7 +218,7 @@ static void test_mcp_protocol_e2e() {
         ret = std::system("build/aurora_mcp </dev/null >/dev/null 2>&1");
     }
 #endif
-    AURORA_TEST_CHECK(ret == 0 || ret == 1); // 正常退出
+    AURORA_TEST_CHECK(ret == 0 || ret == 1);  // 正常退出
 }
 
 AURORA_TEST() {

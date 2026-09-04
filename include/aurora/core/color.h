@@ -8,32 +8,31 @@ namespace aurora {
 /// @note Thread: thread-safe
 /// @note Side-effects: pure
 struct Color {
-    uint8_t m_r = 0;
-    uint8_t m_g = 0;
-    uint8_t m_b = 0;
-    uint8_t m_a = 255;
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+    uint8_t a = 255;
 
     constexpr Color() noexcept = default;
 
-    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     constexpr Color(const uint8_t r, const uint8_t g, const uint8_t b, const uint8_t a = 255) noexcept
-        : m_r(r), m_g(g), m_b(b), m_a(a) {}
+        : r(r), g(g), b(b), a(a) {}
     [[nodiscard]] static constexpr auto from_rgba(const uint8_t r, const uint8_t g, const uint8_t b,
                                                   const uint8_t a = 255) noexcept -> Color {
-        return Color{ r, g, b, a };
+        return Color{r, g, b, a};
     }
-    [[nodiscard]] static constexpr auto white() noexcept -> Color { return Color{ 255, 255, 255 }; }
-    [[nodiscard]] static constexpr auto black() noexcept -> Color { return Color{ 0, 0, 0 }; }
-    [[nodiscard]] static constexpr auto blue() noexcept -> Color { return Color{ 0, 0, 255 }; }
-    [[nodiscard]] static constexpr auto red() noexcept -> Color { return Color{ 255, 0, 0 }; }
-    [[nodiscard]] static constexpr auto green() noexcept -> Color { return Color{ 0, 160, 0 }; }
-    [[nodiscard]] static constexpr auto gray() noexcept -> Color { return Color{ 128, 128, 128 }; }
-    [[nodiscard]] static constexpr auto yellow() noexcept -> Color { return Color{ 255, 255, 0 }; }
-    [[nodiscard]] static constexpr auto transparent() noexcept -> Color { return Color{ 0, 0, 0, 0 }; }
+    [[nodiscard]] static constexpr auto white() noexcept -> Color { return Color{255, 255, 255}; }
+    [[nodiscard]] static constexpr auto black() noexcept -> Color { return Color{0, 0, 0}; }
+    [[nodiscard]] static constexpr auto blue() noexcept -> Color { return Color{0, 0, 255}; }
+    [[nodiscard]] static constexpr auto red() noexcept -> Color { return Color{255, 0, 0}; }
+    [[nodiscard]] static constexpr auto green() noexcept -> Color { return Color{0, 160, 0}; }
+    [[nodiscard]] static constexpr auto gray() noexcept -> Color { return Color{128, 128, 128}; }
+    [[nodiscard]] static constexpr auto yellow() noexcept -> Color { return Color{255, 255, 0}; }
+    [[nodiscard]] static constexpr auto transparent() noexcept -> Color { return Color{0, 0, 0, 0}; }
 
     /// @brief 逐通道相等比较（便于测试/快照断言）。
     [[nodiscard]] constexpr auto operator==(const Color &o) const noexcept -> bool {
-        return m_r == o.m_r && m_g == o.m_g && m_b == o.m_b && m_a == o.m_a;
+        return r == o.r && g == o.g && b == o.b && a == o.a;
     }
     // NOLINTNEXTLINE(*-redundant-parentheses)
     [[nodiscard]] constexpr auto operator!=(const Color &o) const noexcept -> bool { return !(*this == o); }
@@ -43,21 +42,19 @@ struct Color {
     [[nodiscard]] constexpr auto shaded(const float k) const noexcept -> Color {
         const auto mul = [](uint8_t v, float f) -> uint8_t {
             const float x = static_cast<float>(v) * f;
-            if (x >= 255.0f) {
-                return uint8_t{ 255 };
+            if (x >= 255.0F) {
+                return uint8_t{255};
             }
-            if (x <= 0.0f) {
-                return uint8_t{ 0 };
+            if (x <= 0.0F) {
+                return uint8_t{0};
             }
             return static_cast<uint8_t>(x);
         };
-        return Color{ mul(m_r, k), mul(m_g, k), mul(m_b, k), m_a };
+        return Color{mul(r, k), mul(g, k), mul(b, k), a};
     }
 
     /// @brief 替换 alpha 通道（RGB 不变）；用于淡色底/选区高亮等半透明派生色。
-    [[nodiscard]] constexpr auto with_alpha(uint8_t alpha) const noexcept -> Color {
-        return Color{ m_r, m_g, m_b, alpha };
-    }
+    [[nodiscard]] constexpr auto with_alpha(uint8_t alpha) const noexcept -> Color { return Color{r, g, b, alpha}; }
 };
 
 /// @brief 调色板命名空间（需求 #2：具名色集中在扁平的 `au::colors` 下，易发现）。
@@ -71,7 +68,7 @@ constexpr Color AURORA_GREEN = Color::green();
 constexpr Color AURORA_GRAY = Color::gray();
 constexpr Color AURORA_YELLOW = Color::yellow();
 constexpr Color AURORA_TRANSPARENT = Color::transparent();
-} // namespace colors
+}  // namespace colors
 
 /**
  * @brief 颜色字面量（需求 #4，与 `Color(0xFF,0,0)` 构造互补）。
@@ -87,13 +84,13 @@ constexpr Color AURORA_TRANSPARENT = Color::transparent();
  */
 namespace literals {
 [[nodiscard]] constexpr auto operator""_rgb(const unsigned long long v) noexcept -> Color {
-    return Color{ static_cast<uint8_t>((v >> 16U) & 0xFFU), static_cast<uint8_t>((v >> 8U) & 0xFFU),
-                  static_cast<uint8_t>(v & 0xFFU) };
+    return Color{static_cast<uint8_t>((v >> 16U) & 0xFFU), static_cast<uint8_t>((v >> 8U) & 0xFFU),
+                 static_cast<uint8_t>(v & 0xFFU)};
 }
 [[nodiscard]] constexpr auto operator""_rgba(const unsigned long long v) noexcept -> Color {
-    return Color{ static_cast<uint8_t>((v >> 24U) & 0xFFU), static_cast<uint8_t>((v >> 16U) & 0xFFU),
-                  static_cast<uint8_t>((v >> 8U) & 0xFFU), static_cast<uint8_t>(v & 0xFFU) };
+    return Color{static_cast<uint8_t>((v >> 24U) & 0xFFU), static_cast<uint8_t>((v >> 16U) & 0xFFU),
+                 static_cast<uint8_t>((v >> 8U) & 0xFFU), static_cast<uint8_t>(v & 0xFFU)};
 }
-} // namespace literals
+}  // namespace literals
 
-} // namespace aurora
+}  // namespace aurora

@@ -12,4 +12,4 @@ namespace aurora::render {
 /// @brief 释放 FT_Library（进程退出时可选调用）。
 auto ft_shutdown() -> void;
 
-} // namespace aurora::render
+}  // namespace aurora::render

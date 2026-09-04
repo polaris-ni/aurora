@@ -3,7 +3,6 @@
 #include <vector>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::ThreadPool;
@@ -12,14 +11,14 @@ AURORA_TEST() {
     // 1) 并发提交：所有任务都执行完毕。
     {
         ThreadPool pool(4);
-        std::atomic counter{ 0 };
+        std::atomic counter{0};
         std::vector<std::future<void>> futs;
         futs.reserve(200);
         for (int i = 0; i < 200; ++i) {
             futs.push_back(pool.submit([&counter]() -> void { counter.fetch_add(1, std::memory_order_relaxed); }));
         }
         for (auto &f : futs) {
-            f.get(); // 阻塞直到该任务完成（异常经 future 传播）
+            f.get();  // 阻塞直到该任务完成（异常经 future 传播）
         }
         AURORA_TEST_CHECK(counter.load() == 200);
     }
@@ -63,7 +62,7 @@ AURORA_TEST() {
 
     // 6) 析构前排队任务全部执行（join 保证）。
     {
-        std::atomic counter{ 0 };
+        std::atomic counter{0};
         {
             ThreadPool pool(2);
             for (int i = 0; i < 50; ++i) {

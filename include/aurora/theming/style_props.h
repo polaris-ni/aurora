@@ -22,7 +22,8 @@ namespace aurora {
  * @note Thread: thread-safe (pure value type)
  * @note Side-effects: none
  */
-template<typename T> struct TokenOr {
+template <typename T>
+struct TokenOr {
     std::variant<std::string, T> v;
 
     /// @brief 默认构造为「具体默认值」（未设置样式 → 用默认值，而非空令牌名）。
@@ -63,7 +64,7 @@ template<typename T> struct TokenOr {
             }
             return fallback;
         }
-        return std::get<T>(v); // 必为具体值
+        return std::get<T>(v);  // 必为具体值
     }
 };
 
@@ -72,8 +73,8 @@ struct ResolvedStyle {
     Color background;
     Color foreground;
     Font font{};
-    double corner_radius = 0.0; ///< dp
-    double padding = 0.0;       ///< dp
+    double corner_radius = 0.0;  ///< dp
+    double padding = 0.0;  ///< dp
 };
 
 /**
@@ -91,8 +92,8 @@ struct StyleProps {
     TokenOr<Color> background;
     TokenOr<Color> foreground;
     TokenOr<Font> font;
-    TokenOr<double> corner_radius; ///< dp
-    TokenOr<double> padding;       ///< dp
+    TokenOr<double> corner_radius;  ///< dp
+    TokenOr<double> padding;  ///< dp
 
     /// @brief 经 `Theme` 解析为具体样式；字段缺失/不匹配时按类型取合理默认。
     [[nodiscard]] auto resolve(const Theme &theme) const -> ResolvedStyle {
@@ -106,4 +107,4 @@ struct StyleProps {
     }
 };
 
-} // namespace aurora
+}  // namespace aurora

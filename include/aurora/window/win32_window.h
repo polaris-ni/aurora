@@ -75,9 +75,9 @@ class Win32Window {
 
   private:
     struct Impl;
-    std::unique_ptr<Impl> m_pimpl;
+    std::unique_ptr<Impl> pimpl_;
 };
 
-} // namespace aurora
+}  // namespace aurora
 
-#endif // AURORA_BACKEND_WIN32
+#endif  // AURORA_BACKEND_WIN32

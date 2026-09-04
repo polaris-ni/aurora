@@ -26,71 +26,73 @@ auto split_paths(std::string_view uri) -> std::vector<std::string> {
     return out;
 }
 
-} // namespace
+}  // namespace
 
 auto ImageSequenceSource::open(std::string_view uri) -> Result<bool> {
-    m_frames.clear();
-    m_pos = std::chrono::microseconds{ 0 };
-    m_playing = false;
-    auto paths = split_paths(uri);
+    frames_.clear();
+    pos_ = std::chrono::microseconds{0};
+    playing_ = false;
+    const auto paths = split_paths(uri);
     if (paths.empty()) {
-        return Error{ .code = "ImageSequenceSource: empty uri" };
+        return Error{.code = "ImageSequenceSource: empty uri"};
     }
-    for (auto &p : paths) {
+    for (const auto &p : paths) {
         auto r = Image::load(p);
         if (!r) {
-            return r.error(); // 传播加载错误
+            return r.error();  // 传播加载错误
         }
-        m_frames.push_back(std::move(r.value()));
+        frames_.push_back(std::move(r.value()));
     }
     return true;
 }
 
 auto ImageSequenceSource::natural_size() const -> Size {
-    if (m_frames.empty()) {
-        return Size{ .width = 0.0f, .height = 0.0f };
+    if (frames_.empty()) {
+        return Size{.width = 0.0F, .height = 0.0F};
     }
-    return Size{ .width = static_cast<float>(m_frames[0].width), .height = static_cast<float>(m_frames[0].height) };
+    // NOLINTNEXTLINE 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    return Size{.width = static_cast<float>(frames_[0].width), .height = static_cast<float>(frames_[0].height)};
 }
 
 auto ImageSequenceSource::duration() const -> std::chrono::microseconds {
-    if (m_frames.empty() || m_fps <= 0.0) {
-        return std::chrono::microseconds{ 0 };
+    if (frames_.empty() || fps_ <= 0.0) {
+        return std::chrono::microseconds{0};
     }
-    const double secs = static_cast<double>(m_frames.size()) / m_fps;
-    return std::chrono::microseconds{ static_cast<long long>(secs * 1'000'000.0) };
+    const double secs = static_cast<double>(frames_.size()) / fps_;
+    return std::chrono::microseconds{static_cast<long long>(secs * 1'000'000.0)};
 }
 
 auto ImageSequenceSource::seek(std::chrono::microseconds pos) -> void {
     const auto dur = duration();
-    if (pos < std::chrono::microseconds{ 0 }) {
-        pos = std::chrono::microseconds{ 0 };
+    if (pos < std::chrono::microseconds{0}) {
+        pos = std::chrono::microseconds{0};
     }
     if (dur.count() > 0 && pos > dur) {
         pos = dur;
     }
-    m_pos = pos;
+    pos_ = pos;
 }
 
 auto ImageSequenceSource::frame_at(std::chrono::microseconds pos) -> Result<VideoFrame> {
-    if (m_frames.empty()) {
-        return Error{ .code = "ImageSequenceSource: no frames" };
+    if (frames_.empty()) {
+        return Error{.code = "ImageSequenceSource: no frames"};
     }
     const auto dur = duration();
-    if (pos < std::chrono::microseconds{ 0 }) {
-        pos = std::chrono::microseconds{ 0 };
+    if (pos < std::chrono::microseconds{0}) {
+        pos = std::chrono::microseconds{0};
     }
     if (dur.count() > 0 && pos > dur) {
         pos = dur;
     }
     const double t = static_cast<double>(pos.count()) / 1'000'000.0;
-    auto idx = static_cast<size_t>(t * m_fps);
-    if (idx >= m_frames.size()) {
-        idx = m_frames.size() - 1;
+    auto idx = static_cast<size_t>(t * fps_);
+    if (idx >= frames_.size()) {
+        idx = frames_.size() - 1;
     }
-    const double pts_secs = static_cast<double>(idx) / m_fps;
-    return VideoFrame{ .image = m_frames[idx],
-                       .pts = std::chrono::microseconds{ static_cast<long long>(pts_secs * 1'000'000.0) } };
+    const double pts_secs = static_cast<double>(idx) / fps_;
+    // NOLINTNEXTLINE 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    return VideoFrame{.image = frames_[idx],
+                      .pts = std::chrono::microseconds{static_cast<long long>(pts_secs * 1'000'000.0)}};
 }
 
-} // namespace aurora
+}  // namespace aurora

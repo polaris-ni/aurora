@@ -13,7 +13,6 @@
 #include "aurora/core/image.h"
 #include "aurora/render/snapshot_diff.h"
 #include "aurora/state/undo_stack.h"
-
 #include "test_harness.h"
 
 using aurora::compare_snapshots;
@@ -27,13 +26,13 @@ namespace {
 
 /// 临时目录：ctest 把 CWD 设为 build/，相对路径 "build/..." 会失效；用系统临时目录。
 auto tmp_dir() -> std::string {
-    static const std::string dir = []() -> std::string {
+    static const std::string DIR = []() -> std::string {
         const std::string d = (std::filesystem::temp_directory_path() / "aurora_watch_test").string();
         std::error_code ec;
         std::filesystem::create_directories(d, ec);
         return d;
     }();
-    return dir;
+    return DIR;
 }
 
 auto write_file(const std::string &path, const std::string &content) -> void {
@@ -49,7 +48,7 @@ auto make_image(int w, int h, std::uint8_t v) -> Image {
     return img;
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     // ==================== UndoStack ====================
@@ -62,12 +61,12 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(!stack.can_redo());
 
         stack.push(
-            { .redo = [&]() -> void { value = 1; }, .undo = [&]() -> void { value = 0; }, .description = "set 1" });
+            {.redo = [&]() -> void { value = 1; }, .undo = [&]() -> void { value = 0; }, .description = "set 1"});
         AURORA_TEST_CHECK(value == 1);
         AURORA_TEST_CHECK(stack.can_undo());
 
         stack.push(
-            { .redo = [&]() -> void { value = 2; }, .undo = [&]() -> void { value = 1; }, .description = "set 2" });
+            {.redo = [&]() -> void { value = 2; }, .undo = [&]() -> void { value = 1; }, .description = "set 2"});
         AURORA_TEST_CHECK(value == 2);
 
         AURORA_TEST_CHECK(stack.undo());
@@ -77,7 +76,7 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(stack.undo());
         AURORA_TEST_CHECK(value == 0);
         AURORA_TEST_CHECK(!stack.can_undo());
-        AURORA_TEST_CHECK(!stack.undo()); // 到底无操作
+        AURORA_TEST_CHECK(!stack.undo());  // 到底无操作
 
         AURORA_TEST_CHECK(stack.redo());
         AURORA_TEST_CHECK(value == 1);
@@ -90,14 +89,14 @@ AURORA_TEST() {
     {
         UndoStack stack;
         int value = 0;
-        stack.push({ .redo = [&]() -> void { value = 1; }, .undo = [&]() -> void { value = 0; }, .description = "a" });
-        stack.push({ .redo = [&]() -> void { value = 2; }, .undo = [&]() -> void { value = 1; }, .description = "b" });
-        stack.undo(); // 回到 1
-        stack.push({ .redo = [&]() -> void { value = 9; },
-                     .undo = [&]() -> void { value = 1; },
-                     .description = "c" }); // 分支截断
+        stack.push({.redo = [&]() -> void { value = 1; }, .undo = [&]() -> void { value = 0; }, .description = "a"});
+        stack.push({.redo = [&]() -> void { value = 2; }, .undo = [&]() -> void { value = 1; }, .description = "b"});
+        stack.undo();  // 回到 1
+        stack.push({.redo = [&]() -> void { value = 9; },
+                    .undo = [&]() -> void { value = 1; },
+                    .description = "c"});  // 分支截断
         AURORA_TEST_CHECK(value == 9);
-        AURORA_TEST_CHECK(!stack.can_redo()); // b 被丢弃
+        AURORA_TEST_CHECK(!stack.can_redo());  // b 被丢弃
         AURORA_TEST_CHECK(stack.count() == 2);
     }
 
@@ -106,10 +105,10 @@ AURORA_TEST() {
         UndoStack stack;
         stack.set_limit(2);
         int v = 0;
-        stack.push({ .redo = [&]() -> void { ++v; }, .undo = [&]() -> void { --v; }, .description = "one" });
-        stack.push({ .redo = [&]() -> void { ++v; }, .undo = [&]() -> void { --v; }, .description = "two" });
+        stack.push({.redo = [&]() -> void { ++v; }, .undo = [&]() -> void { --v; }, .description = "one"});
+        stack.push({.redo = [&]() -> void { ++v; }, .undo = [&]() -> void { --v; }, .description = "two"});
         stack.push(
-            { .redo = [&]() -> void { ++v; }, .undo = [&]() -> void { --v; }, .description = "three" }); // 挤掉 one
+            {.redo = [&]() -> void { ++v; }, .undo = [&]() -> void { --v; }, .description = "three"});  // 挤掉 one
         AURORA_TEST_CHECK(stack.count() == 2);
         AURORA_TEST_CHECK(stack.undo_description() == "three");
         stack.undo();
@@ -122,18 +121,18 @@ AURORA_TEST() {
         UndoStack stack;
         std::vector<int> order;
         std::vector<UndoCommand> cmds;
-        cmds.push_back({ .redo = [&]() -> void { order.push_back(1); },
-                         .undo = [&]() -> void { order.push_back(-1); },
-                         .description = "s1" });
-        cmds.push_back({ .redo = [&]() -> void { order.push_back(2); },
-                         .undo = [&]() -> void { order.push_back(-2); },
-                         .description = "s2" });
+        cmds.push_back({.redo = [&]() -> void { order.push_back(1); },
+                        .undo = [&]() -> void { order.push_back(-1); },
+                        .description = "s1"});
+        cmds.push_back({.redo = [&]() -> void { order.push_back(2); },
+                        .undo = [&]() -> void { order.push_back(-2); },
+                        .description = "s2"});
 
         stack.push(UndoStack::macro(std::move(cmds), "combo"));
-        AURORA_TEST_CHECK(order.size() == 2 && order[0] == 1 && order[1] == 2);
+        AURORA_TEST_CHECK(order.size() == 2 && order.at(0) == 1 && order.at(1) == 2);
 
-        stack.undo(); // 逆序：-2 先于 -1
-        AURORA_TEST_CHECK(order.size() == 4 && order[2] == -2 && order[3] == -1);
+        stack.undo();  // 逆序：-2 先于 -1
+        AURORA_TEST_CHECK(order.size() == 4 && order.at(2) == -2 && order.at(3) == -1);
         AURORA_TEST_CHECK(stack.redo_description() == "combo");
     }
 
@@ -147,7 +146,7 @@ AURORA_TEST() {
         FileWatcher fw;
         fw.watch(path);
         AURORA_TEST_CHECK(fw.count() == 1);
-        AURORA_TEST_CHECK(fw.poll().empty()); // 无变化
+        AURORA_TEST_CHECK(fw.poll().empty());  // 无变化
 
         // mtime 分辨率保护：稍等再改写
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
@@ -155,8 +154,10 @@ AURORA_TEST() {
 
         auto changes = fw.poll();
         AURORA_TEST_CHECK(changes.size() == 1);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(changes[0].second == FileChange::Modified);
-        AURORA_TEST_CHECK(fw.poll().empty()); // 基线已更新
+        AURORA_TEST_CHECK(fw.poll().empty());  // 基线已更新
     }
 
     // ---- 6. Removed / Created 检测 + 回调 ----
@@ -210,14 +211,16 @@ AURORA_TEST() {
         Image b = make_image(10, 10, 100);
         // 改 5 个像素
         for (int i = 0; i < 5; ++i) {
-            b.pixels[static_cast<std::size_t>(i) * 4] = 200; // R 通道 +100
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            b.pixels[static_cast<std::size_t>(i) * 4] = 200;  // R 通道 +100
         }
         const auto strict = compare_snapshots(a, b, 0);
         AURORA_TEST_CHECK(strict.pixel_diff_count == 5);
         AURORA_TEST_CHECK(strict.max_color_delta == 100);
         AURORA_TEST_CHECK(std::abs(strict.diff_ratio - 0.05) < 1e-9);
         AURORA_TEST_CHECK(!strict.passed());
-        AURORA_TEST_CHECK(strict.passed(0.10)); // 10% 阈值内通过
+        AURORA_TEST_CHECK(strict.passed(0.10));  // 10% 阈值内通过
 
         // 容差 100：全部视为相同
         const auto tolerant = compare_snapshots(a, b, 100);
@@ -233,12 +236,20 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(!compare_snapshots(a, c).passed());
 
         Image b = make_image(10, 10, 0);
-        b.pixels[0] = 255; // 第一个像素差异
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        b.pixels[0] = 255;  // 第一个像素差异
         const auto diff = compare_snapshots(a, b);
         // 差异图：像素 0 红色
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(diff.diff_image.pixels[0] == 255);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(diff.diff_image.pixels[1] == 0);
         // 其余淡化
-        AURORA_TEST_CHECK(diff.diff_image.pixels[7] == 255); // alpha
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(diff.diff_image.pixels[7] == 255);  // alpha
     }
 }

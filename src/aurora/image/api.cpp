@@ -30,4 +30,4 @@ auto decode_async(const ImageSource &src, const DecodeOptions &opt) -> std::futu
     return ImageCodecRegistry::instance().decode_async(src, opt);
 }
 
-} // namespace aurora::image
+}  // namespace aurora::image

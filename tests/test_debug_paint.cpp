@@ -15,7 +15,6 @@
 
 #include "aurora/aurora.h"
 #include "aurora/test_helpers.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -55,7 +54,7 @@ class PickLeaf : public LeafWidget {
 
   protected:
     [[nodiscard]] auto on_layout(const Constraints & /*c*/, const BuildContext & /*ctx*/) -> Size override {
-        return Size{ .width = 40.0f, .height = 20.0f };
+        return Size{.width = 40.0F, .height = 20.0F};
     }
     auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 };
@@ -65,32 +64,32 @@ class PickLeaf : public LeafWidget {
 // 控件总数 = 4；relayout boundary = A、B 两个显式尺寸控件（leaf/root 为 WrapContent）。
 auto build_tree(const std::shared_ptr<Column> &root) -> void {
     const auto a = std::make_shared<Column>();
-    a->width(px(80.0f));
-    a->height(px(40.0f));
+    a->width(px(80.0F));
+    a->height(px(40.0F));
     a->modifier.set(Modifier{}.background(Color(200, 200, 200, 255)));
     const auto leaf = std::make_shared<PickLeaf>();
-    a->add(Node{ leaf });
+    a->add(Node{leaf});
 
     const auto b = std::make_shared<Column>();
-    b->width(px(60.0f));
-    b->height(px(30.0f));
+    b->width(px(60.0F));
+    b->height(px(30.0F));
     b->modifier.set(Modifier{}.background(Color(100, 200, 100, 255)));
 
-    root->add(Node{ a });
-    root->add(Node{ b });
+    root->add(Node{a});
+    root->add(Node{b});
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     BuildContext ctx{};
 
     // ---- 1. flags 语义 ----
     {
-        set_flags(DebugPaintFlags{}); // 复位
+        set_flags(DebugPaintFlags{});  // 复位
         AURORA_TEST_CHECK(!any_flag_enabled());
         AURORA_TEST_CHECK(!flags().layout_guides);
-        set_flags(DebugPaintFlags{ .layout_guides = true, .overdraw = true });
+        set_flags(DebugPaintFlags{.layout_guides = true, .overdraw = true});
 #ifdef AURORA_ENABLE_DEBUG
         // DEBUG：set_flags 生效，可切换各叠层开关。
         AURORA_TEST_CHECK(any_flag_enabled());
@@ -111,26 +110,26 @@ AURORA_TEST() {
         build_tree(root);
 
         // 先 layout（不 paint），保证下一步是「首帧」：所有控件走 render_into 实际重绘。
-        root->layout(Constraints{ .min = Size{ .width = 0.0f, .height = 0.0f },
-                                  .max = Size{ .width = 200.0f, .height = 200.0f } },
-                     ctx);
+        root->layout(
+            Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 200.0F, .height = 200.0F}},
+            ctx);
 
-        HeadlessSurface surf("", Size{ .width = 200.0f, .height = 200.0f });
+        HeadlessSurface surf("", Size{.width = 200.0F, .height = 200.0F});
         auto bf = surf.begin_frame(200, 200);
         AURORA_TEST_CHECK(bf.ok());
         auto &p = surf.painter();
 
         set_flags(DebugPaintFlags{
-            .layout_guides = true, .relayout_boundaries = true, .repaint_highlight = true, .overdraw = true });
+            .layout_guides = true, .relayout_boundaries = true, .repaint_highlight = true, .overdraw = true});
 
 #ifdef AURORA_ENABLE_DEBUG
-        bump_debug_frame(); // 模拟 present_root 的帧前移
+        bump_debug_frame();  // 模拟 present_root 的帧前移
         reset_overlay_stats();
-        root->paint(
-            p, Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = 200.0f, .height = 200.0f } }, ctx);
+        root->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 200.0F}},
+                    ctx);
         paint_debug_overlays(
-            p, *root,
-            Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = 200.0f, .height = 200.0f } }, ctx);
+            p, *root, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 200.0F}},
+            ctx);
         const DebugOverlayStats st = overlay_stats();
 
         // 总控件数 = 4（root + A + leaf + B）。
@@ -146,11 +145,11 @@ AURORA_TEST() {
         // Release：paint_debug_overlays 为零开销 no-op，统计全 0。
         bump_debug_frame();
         reset_overlay_stats();
-        root->paint(
-            p, Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = 200.0f, .height = 200.0f } }, ctx);
+        root->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 200.0F}},
+                    ctx);
         paint_debug_overlays(
-            p, *root,
-            Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = 200.0f, .height = 200.0f } }, ctx);
+            p, *root, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 200.0F}},
+            ctx);
         const DebugOverlayStats st = overlay_stats();
         AURORA_TEST_CHECK(st.layout_guides_drawn == 0);
         AURORA_TEST_CHECK(st.relayout_boundaries_drawn == 0);
@@ -164,11 +163,11 @@ AURORA_TEST() {
     {
         TestEnv env = init_headless(200, 200);
         build_tree(env.root_widget);
-        pump(env); // 布局（含挂载）；绘制/缓存不影响拾取（走 hit_test_chain）。
+        pump(env);  // 布局（含挂载）；绘制/缓存不影响拾取（走 hit_test_chain）。
 
         // 定位树中 type_name == "PickLeaf" 的控件（自定义叶控件）。
-        Widget *leaf_w = nullptr;
-        std::function<void(Node &)> find = [&](Node &n) -> void {
+        const Widget *leaf_w = nullptr;
+        std::function<void(const Node &)> find = [&](const Node &n) -> void {
             if (leaf_w) {
                 return;
             }
@@ -176,7 +175,7 @@ AURORA_TEST() {
                 leaf_w = &n.widget();
             }
             for (const Node &c : n.widget().child_nodes()) {
-                find(const_cast<Node &>(c));
+                find(c);
             }
         };
         find(env.root);
@@ -184,20 +183,19 @@ AURORA_TEST() {
 
         const auto box = absolute_bounds(env.root, *leaf_w);
         AURORA_TEST_REQUIRE(box.has_value());
-        const Point center{ .x = box->origin.x + (box->size.width / 2.0f),
-                            .y = box->origin.y + (box->size.height / 2.0f) };
+        const Point center{.x = box->origin.x + (box->size.width / 2.0F),
+                           .y = box->origin.y + (box->size.height / 2.0F)};
 
         const DebugPickResult res = widget_picker(
             *env.root_widget,
-            Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = 200.0f, .height = 200.0f } }, ctx,
-            center);
+            Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 200.0F}}, ctx, center);
 
 #ifdef AURORA_ENABLE_DEBUG
         AURORA_TEST_CHECK(res.hit);
         // 链 = [root Column, A Column, PickLeaf]（根→最深）。
         AURORA_TEST_CHECK(res.chain.size() >= 3);
         AURORA_TEST_CHECK(res.chain.front().type_name == std::string("Column"));  // 根
-        AURORA_TEST_CHECK(res.chain.back().type_name == std::string("PickLeaf")); // 最深
+        AURORA_TEST_CHECK(res.chain.back().type_name == std::string("PickLeaf"));  // 最深
         // 最深层控件盒应包含拾取点。
         AURORA_TEST_CHECK(res.chain.back().bounds.contains(center));
 #else

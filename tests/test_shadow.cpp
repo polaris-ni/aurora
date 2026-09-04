@@ -3,7 +3,6 @@
 
 #include "aurora/aurora.h"
 #include "aurora/render/offscreen.h"
-
 #include "test_harness.h"
 
 using aurora::Color;
@@ -24,18 +23,18 @@ static void test_shadow_hard() {
     p.begin(100, 100);
 
     // 先填白色背景
-    p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 100, .height = 100 } },
+    p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 100, .height = 100}},
                 Color(255, 255, 255, 255));
 
     // 硬边阴影（blur=0），偏移 (5,5)，黑色半透明
-    p.draw_shadow(Rect{ .origin = Point{ .x = 20, .y = 20 }, .size = Size{ .width = 40, .height = 40 } }, 5.0f, 5.0f,
-                  0.0f, Color(0, 0, 0, 128));
+    p.draw_shadow(Rect{.origin = Point{.x = 20, .y = 20}, .size = Size{.width = 40, .height = 40}}, 5.0F, 5.0F, 0.0F,
+                  Color(0, 0, 0, 128));
 
     // 阴影区域（偏移后）应有暗色
-    [[maybe_unused]] Color in_shadow = p.get_pixel(30, 30); // 在 shape 内但有阴影偏移覆盖
+    [[maybe_unused]] Color in_shadow = p.get_pixel(30, 30);  // 在 shape 内但有阴影偏移覆盖
     // 阴影在 shape 偏移 (25,25)-(65,65) 区域
-    const Color shadow_area = p.get_pixel(62, 62); // 在阴影区但不在原始 shape 内
-    AURORA_TEST_CHECK(shadow_area.m_r < 200);      // 被阴影染暗
+    const Color shadow_area = p.get_pixel(62, 62);  // 在阴影区但不在原始 shape 内
+    AURORA_TEST_CHECK(shadow_area.m_r < 200);  // 被阴影染暗
 
     // 远离阴影的区域应保持白色
     const Color far = p.get_pixel(90, 10);
@@ -47,12 +46,12 @@ static void test_shadow_hard() {
 static void test_shadow_blur() {
     Painter p;
     p.begin(100, 100);
-    p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 100, .height = 100 } },
+    p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 100, .height = 100}},
                 Color(255, 255, 255, 255));
 
     // 模糊阴影
-    p.draw_shadow(Rect{ .origin = Point{ .x = 30, .y = 30 }, .size = Size{ .width = 40, .height = 40 } }, 0.0f, 4.0f,
-                  6.0f, Color(0, 0, 0, 100));
+    p.draw_shadow(Rect{.origin = Point{.x = 30, .y = 30}, .size = Size{.width = 40, .height = 40}}, 0.0F, 4.0F, 6.0F,
+                  Color(0, 0, 0, 100));
 
     // 阴影正下方应较暗
     const Color below = p.get_pixel(50, 75);
@@ -64,24 +63,24 @@ static void test_shadow_blur() {
 
     // 模糊边缘应有中间值（渐变）
     // 阴影矩形底部在 y=74，blur=6 意味着距离边缘 6px 内衰减
-    const Color edge = p.get_pixel(50, 76); // 距边缘 2px，alpha_factor ≈ 0.67
-    AURORA_TEST_CHECK(edge.m_r < 255);      // 有些暗
-    AURORA_TEST_CHECK(edge.m_r > 150);      // 但不是很暗（衰减了）
+    const Color edge = p.get_pixel(50, 76);  // 距边缘 2px，alpha_factor ≈ 0.67
+    AURORA_TEST_CHECK(edge.m_r < 255);  // 有些暗
+    AURORA_TEST_CHECK(edge.m_r > 150);  // 但不是很暗（衰减了）
 }
 
 // ---------- Modifier.shadow() ----------
 
 static void test_modifier_shadow() {
-    const auto mod = Modifier{}.shadow(0.0f, 3.0f, 5.0f, Color(0, 0, 0, 80));
+    const auto mod = Modifier{}.shadow(0.0F, 3.0F, 5.0F, Color(0, 0, 0, 80));
     AURORA_TEST_CHECK(!mod.nodes().empty());
 
     bool found = false;
     for (const auto &n : mod.nodes()) {
         if (const auto *s = dynamic_cast<const ShadowNode *>(n.get())) {
             found = true;
-            AURORA_TEST_CHECK(s->offset_x() == 0.0f);
-            AURORA_TEST_CHECK(s->offset_y() == 3.0f);
-            AURORA_TEST_CHECK(s->blur() == 5.0f);
+            AURORA_TEST_CHECK(s->offset_x() == 0.0F);
+            AURORA_TEST_CHECK(s->offset_y() == 3.0F);
+            AURORA_TEST_CHECK(s->blur() == 5.0F);
             AURORA_TEST_CHECK(s->color().m_a == 80);
         }
     }
@@ -95,9 +94,9 @@ static void test_modifier_shadow_defaults() {
     for (const auto &n : mod.nodes()) {
         if (const auto *s = dynamic_cast<const ShadowNode *>(n.get())) {
             found = true;
-            AURORA_TEST_CHECK(s->offset_x() == 0.0f);
-            AURORA_TEST_CHECK(s->offset_y() == 2.0f);
-            AURORA_TEST_CHECK(s->blur() == 4.0f);
+            AURORA_TEST_CHECK(s->offset_x() == 0.0F);
+            AURORA_TEST_CHECK(s->offset_y() == 2.0F);
+            AURORA_TEST_CHECK(s->blur() == 4.0F);
             AURORA_TEST_CHECK(s->color().m_a == 64);
         }
     }
@@ -113,6 +112,8 @@ static void test_shadow_widget_render() {
     Node root(std::move(txt));
     Json snap = render_to_logical_snapshot(root, 200, 80);
     AURORA_TEST_CHECK(snap.contains("type"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["type"] == "Text");
 }
 

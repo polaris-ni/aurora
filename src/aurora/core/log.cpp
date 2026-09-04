@@ -41,25 +41,25 @@ auto Logger::instance() -> Logger & {
     return s;
 }
 
-auto Logger::set_level(LogLevel level) noexcept -> void { m_level = level; }
+auto Logger::set_level(LogLevel level) noexcept -> void { level_ = level; }
 
-auto Logger::level() const noexcept -> LogLevel { return m_level; }
+auto Logger::level() const noexcept -> LogLevel { return level_; }
 
 auto Logger::set_sink(LogSink sink) -> void {
     if (sink) {
-        m_sink = std::move(sink);
+        sink_ = std::move(sink);
     } else {
-        m_sink = default_sink();
+        sink_ = default_sink();
     }
 }
 
-auto Logger::set_enabled(bool enabled) noexcept -> void { m_enabled = enabled; }
+auto Logger::set_enabled(bool enabled) noexcept -> void { enabled_ = enabled; }
 
-auto Logger::is_enabled() const noexcept -> bool { return m_enabled; }
+auto Logger::is_enabled() const noexcept -> bool { return enabled_; }
 
 auto Logger::log(std::string_view file, int line_no, LogLevel level, std::string_view category,
                  std::string_view message) const -> void {
-    if (!m_enabled || level < m_level) {
+    if (!enabled_ || level < level_) {
         return;
     }
 
@@ -81,23 +81,23 @@ auto Logger::log(std::string_view file, int line_no, LogLevel level, std::string
     out += message;
     out += '\n';
 
-    if (m_sink) {
-        m_sink(out);
+    if (sink_) {
+        sink_(out);
     }
 }
 
 auto Logger::raw(std::string_view /*category*/, std::string_view message) const -> void {
     // 功能输出：始终打印（不受级别阈值 / m_enabled 影响），且不加任何前缀。
-    if (m_raw_sink) {
-        m_raw_sink(message);
+    if (raw_sink_) {
+        raw_sink_(message);
     }
 }
 
 auto Logger::set_raw_sink(LogSink sink) -> void {
     if (sink) {
-        m_raw_sink = std::move(sink);
+        raw_sink_ = std::move(sink);
     } else {
-        m_raw_sink = default_raw_sink();
+        raw_sink_ = default_raw_sink();
     }
 }
 

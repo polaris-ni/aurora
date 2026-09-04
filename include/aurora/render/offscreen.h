@@ -31,23 +31,23 @@ namespace aurora {
  * @return 成功返回 true，失败返回带信息的 Error。
  */
 [[nodiscard]] inline auto render_to_png(Node &root, int width, int height, const char *path) -> Result<bool> {
-    BuildContext ctx; // 根环境（树内 Provider 注入子树环境）
+    constexpr BuildContext ctx;  // 根环境（树内 Provider 注入子树环境）
 
     root->mount(ctx);
 
     Constraints c;
-    c.min = Size{ .width = 0.0f, .height = 0.0f };
-    c.max = Size{ .width = static_cast<float>(width), .height = static_cast<float>(height) };
+    c.min = Size{.width = 0.0F, .height = 0.0F};
+    c.max = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)};
     root->layout(c, ctx);
 
     Painter painter;
     painter.begin(width, height);
     root->paint(painter,
-                Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                      .size = Size{ .width = static_cast<float>(width), .height = static_cast<float>(height) } },
+                Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                     .size = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)}},
                 ctx);
-    root.set_bounds(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                          .size = Size{ .width = static_cast<float>(width), .height = static_cast<float>(height) } });
+    root.set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                         .size = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)}});
 
     return write_png(path, width, height, painter.data());
 }
@@ -69,18 +69,18 @@ namespace aurora {
     root->mount(ctx);
 
     Constraints c;
-    c.min = Size{ .width = 0.0f, .height = 0.0f };
-    c.max = Size{ .width = static_cast<float>(width), .height = static_cast<float>(height) };
+    c.min = Size{.width = 0.0F, .height = 0.0F};
+    c.max = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)};
     root->layout(c, ctx);
     // 无头快照不进入 paint，故在此显式落定根盒到 Node（几何唯一权威在 Node）。
-    root.set_bounds(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = root->size() });
+    root.set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = root->size()});
 
     std::function<Json(const Node &)> snap = [&](const Node &n) -> Json {
         Json j;
-        j["type"] = n.widget().type_name(); // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        j["type"] = n.widget().type_name();  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
         const auto [origin, size] = n.bounds();
         // NOLINTNEXTLINE(*-pro-bounds-avoid-unchecked-container-access)
-        j["box"] = Json{ { "x", origin.x }, { "y", origin.y }, { "w", size.width }, { "h", size.height } };
+        j["box"] = Json{{"x", origin.x}, {"y", origin.y}, {"w", size.width}, {"h", size.height}};
         Json children = Json::array();
         for (const Node &child : n.widget().child_nodes()) {
             children.push_back(snap(child));
@@ -92,4 +92,4 @@ namespace aurora {
     return snap(root);
 }
 
-} // namespace aurora
+}  // namespace aurora

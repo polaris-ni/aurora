@@ -3,7 +3,6 @@
 //       架构与位宽互斥性、位宽与指针宽度一致、aurora.h 入口可达性。
 
 #include "aurora/core/platform.h"
-
 #include "test_harness.h"
 
 namespace sec_platform_macros {
@@ -69,7 +68,6 @@ constexpr bool k_unix_aggregate =
 #endif
 
 void run() {
-
     // ---- 1. 平台宏恰好一个置 1（受支持平台上）----
     AURORA_TEST_CHECK_EQ(k_platform_count, 1);
 
@@ -82,7 +80,7 @@ void run() {
 
     // ---- 3. 架构已知且唯一（x86/x64/arm/riscv/wasm 至少其一；本测试环境必然命中 x64）----
     constexpr bool arch_known =
-#if defined(AURORA_ARCH_X64) || defined(AURORA_ARCH_X86) || defined(AURORA_ARCH_AARCH64) ||                            \
+#if defined(AURORA_ARCH_X64) || defined(AURORA_ARCH_X86) || defined(AURORA_ARCH_AARCH64) || \
     defined(AURORA_ARCH_ARM32) || defined(AURORA_ARCH_RISCV64) || defined(AURORA_ARCH_WASM)
         true;
 #else
@@ -109,6 +107,6 @@ void run() {
 
 // NOLINTEND(readability-identifier-naming)
 
-} // namespace sec_platform_macros
+}  // namespace sec_platform_macros
 
 AURORA_TEST() { sec_platform_macros::run(); }

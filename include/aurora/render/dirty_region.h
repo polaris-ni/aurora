@@ -23,20 +23,19 @@ class DirtyRegionTracker {
     /// 可经 `set_max_rects()` 调高（如列表滚动场景含大量离散脏矩形），以减少「超限→退化整帧」
     /// 的误触发；提高上限只会增加局部重绘精度（结果像素与整帧重绘逐位一致），不影响正确性。
     static constexpr std::size_t AURORA_MAX_RECTS = 16;
-    static inline std::size_t m_max_rects = AURORA_MAX_RECTS;
 
     /// @brief 取当前脏矩形列表上限。
-    [[nodiscard]] static auto max_rects() -> std::size_t { return m_max_rects; }
+    [[nodiscard]] static auto max_rects() -> std::size_t { return max_rects_; }
 
     /// @brief 设置脏矩形列表上限（运行期可调；默认 `AURORA_MAX_RECTS`）。
-    static auto set_max_rects(std::size_t n) -> void { m_max_rects = n; }
+    static auto set_max_rects(std::size_t n) -> void { max_rects_ = n; }
 
     /// @brief 标记一个脏矩形（与已有矩形重叠时合并为并集）。
     auto mark(const Rect &r) -> void {
-        if (m_full) {
-            return; // 已整帧脏，无需再记录
+        if (is_full_) {
+            return;  // 已整帧脏，无需再记录
         }
-        if (r.size.width <= 0.0f || r.size.height <= 0.0f) {
+        if (r.size.width <= 0.0F || r.size.height <= 0.0F) {
             return;
         }
 
@@ -45,53 +44,53 @@ class DirtyRegionTracker {
         bool changed = true;
         while (changed) {
             changed = false;
-            for (auto it = m_rects.begin(); it != m_rects.end();) {
+            for (auto it = rects_.begin(); it != rects_.end();) {
                 if (intersects(*it, merged)) {
                     merged = union_of(*it, merged);
-                    it = m_rects.erase(it);
+                    it = rects_.erase(it);
                     changed = true;
                 } else {
                     ++it;
                 }
             }
         }
-        m_rects.push_back(merged);
-        if (m_rects.size() > max_rects()) {
+        rects_.push_back(merged);
+        if (rects_.size() > max_rects()) {
             mark_all();
         }
     }
 
     /// @brief 标记整帧脏（等价于全帧重绘）。
     auto mark_all() -> void {
-        m_full = true;
-        m_rects.clear();
+        is_full_ = true;
+        rects_.clear();
     }
 
     /// @brief 是否无任何脏区（可跳帧）。
-    [[nodiscard]] auto is_empty() const -> bool { return !m_full && m_rects.empty(); }
+    [[nodiscard]] auto is_empty() const -> bool { return !is_full_ && rects_.empty(); }
 
     /// @brief 是否整帧脏。
-    [[nodiscard]] auto is_full() const -> bool { return m_full; }
+    [[nodiscard]] auto is_full() const -> bool { return is_full_; }
 
     /// @brief 当前脏矩形列表（整帧脏时为空列表——以 `is_full()` 判定）。
-    [[nodiscard]] auto rects() const -> const std::vector<Rect> & { return m_rects; }
+    [[nodiscard]] auto rects() const -> const std::vector<Rect> & { return rects_; }
 
     /// @brief 所有脏矩形的包围盒（空时返回零矩形）。
     [[nodiscard]] auto merged_bounds() const -> Rect {
-        if (m_rects.empty()) {
+        if (rects_.empty()) {
             return Rect{};
         }
-        Rect acc = m_rects[0]; // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
-        for (std::size_t i = 1; i < m_rects.size(); ++i) {
-            acc = union_of(acc, m_rects[i]); // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        Rect acc = rects_[0];  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        for (std::size_t i = 1; i < rects_.size(); ++i) {
+            acc = union_of(acc, rects_[i]);  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
         }
         return acc;
     }
 
     /// @brief 清空（渲染完成后调用）。
     auto clear() -> void {
-        m_full = false;
-        m_rects.clear();
+        is_full_ = false;
+        rects_.clear();
     }
 
   private:
@@ -105,11 +104,12 @@ class DirtyRegionTracker {
         const float y1 = std::min(a.origin.y, b.origin.y);
         const float x2 = std::max(a.origin.x + a.size.width, b.origin.x + b.size.width);
         const float y2 = std::max(a.origin.y + a.size.height, b.origin.y + b.size.height);
-        return Rect{ .origin = Point{ .x = x1, .y = y1 }, .size = Size{ .width = x2 - x1, .height = y2 - y1 } };
+        return Rect{.origin = Point{.x = x1, .y = y1}, .size = Size{.width = x2 - x1, .height = y2 - y1}};
     }
 
-    bool m_full = false;
-    std::vector<Rect> m_rects;
+    static inline std::size_t max_rects_ = AURORA_MAX_RECTS;
+    bool is_full_ = false;
+    std::vector<Rect> rects_;
 };
 
-} // namespace aurora
+}  // namespace aurora

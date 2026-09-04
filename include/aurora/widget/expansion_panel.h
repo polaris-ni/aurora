@@ -28,8 +28,8 @@ class ExpansionPanel : public SingleChild {
   public:
     ExpansionPanel() = default;
     ExpansionPanel(std::string header, Node content, bool initially_expanded = false)
-        : SingleChild(std::move(content)), m_header(std::move(header)) {
-        m_expanded.set(initially_expanded);
+        : SingleChild(std::move(content)), header_(std::move(header)) {
+        expanded_.set(initially_expanded);
     }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "ExpansionPanel"; }
@@ -37,50 +37,68 @@ class ExpansionPanel : public SingleChild {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "ExpansionPanel",
-            .properties = {
-                { .name = "header", .type = "string", .default_value = "\"\"", .required = true, .note = "标题文本", .json_type = "string" },
-                { .name = "expanded", .type = "bool", .default_value = "false", .required = false, .note = "是否展开", .json_type = "boolean" },
-                { .name = "header_height", .type = "float", .default_value = "36.0", .required = false, .note = "标题头高度(dp)", .json_type = "number", .enum_values = {}, .min_value = "0" },
-            },
-            .events = { "on_toggle" },
+            .properties =
+                {
+                    {.name = "header",
+                     .type = "string",
+                     .default_value = "\"\"",
+                     .required = true,
+                     .note = "标题文本",
+                     .json_type = "string"},
+                    {.name = "expanded",
+                     .type = "bool",
+                     .default_value = "false",
+                     .required = false,
+                     .note = "是否展开",
+                     .json_type = "boolean"},
+                    {.name = "header_height",
+                     .type = "float",
+                     .default_value = "36.0",
+                     .required = false,
+                     .note = "标题头高度(dp)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                },
+            .events = {"on_toggle"},
             .children_policy = "single",
-            .examples = { R"(au::ExpansionPanel("Details", au::Text("content"), false))" },
+            .examples = {R"(au::ExpansionPanel("Details", au::Text("content"), false))"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&m_expanded); }
+    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&expanded_); }
 
-    [[nodiscard]] auto expanded() -> State<bool> & { return m_expanded; }
-    [[nodiscard]] auto is_expanded() const -> bool { return m_expanded.get(); }
-    [[nodiscard]] auto header() const -> const std::string & { return m_header; }
+    [[nodiscard]] auto expanded() -> State<bool> & { return expanded_; }
+    [[nodiscard]] auto is_expanded() const -> bool { return expanded_.get(); }
+    [[nodiscard]] auto header() const -> const std::string & { return header_; }
 
     /// @brief 展开/收起（触发 on_toggle）。
     auto set_expanded(bool v) -> void {
-        if (v != m_expanded.get()) {
-            m_expanded.set(v);
+        if (v != expanded_.get()) {
+            expanded_.set(v);
             mark_needs_layout();
             mark_needs_paint();
-            if (m_on_toggle) {
-                m_on_toggle(v);
+            if (on_toggle_) {
+                on_toggle_(v);
             }
         }
     }
 
     /// @brief 切换状态。
-    auto toggle() -> void { set_expanded(!m_expanded.get()); }
+    auto toggle() -> void { set_expanded(!expanded_.get()); }
 
     /// @brief 设置切换回调（链式）。
     auto set_on_toggle(std::function<void(bool)> cb) -> ExpansionPanel & {
-        m_on_toggle = std::move(cb);
+        on_toggle_ = std::move(cb);
         return *this;
     }
 
     /// @brief 点击标题头切换展开。
     auto on_pointer_event(MouseEvent &e) -> void override {
-        if (e.action == MouseAction::Press && e.local_position.y < m_header_height) {
+        if (e.action == MouseAction::Press && e.local_position.y < header_height_) {
             toggle();
-            e.handled = true;
+            e.is_handled = true;
             return;
         }
         Widget::on_pointer_event(e);
@@ -90,77 +108,74 @@ class ExpansionPanel : public SingleChild {
 
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["header"] = m_header;
-        props["expanded"] = m_expanded.get();
-        props["header_height"] = m_header_height;
+        props["header"] = header_;
+        props["expanded"] = expanded_.get();
+        props["header_height"] = header_height_;
     }
 
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("header")) {
-            m_header = props["header"].get<std::string>();
+            header_ = props["header"].get<std::string>();
         }
         if (props.contains("expanded")) {
-            m_expanded.set(props["expanded"].get<bool>());
+            expanded_.set(props["expanded"].get<bool>());
         }
         if (props.contains("header_height")) {
-            m_header_height = props["header_height"].get<float>();
+            header_height_ = props["header_height"].get<float>();
         }
     }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        const float w = c.max.is_finite() ? c.max.width : 320.0f;
-        float h = m_header_height;
-        if (m_expanded.get() && m_child) {
+        const float w = c.max.is_finite() ? c.max.width : 320.0F;
+        float h = header_height_;
+        if (expanded_.get() && child_) {
             Constraints inner;
-            inner.min = Size{ .width = 0.0f, .height = 0.0f };
+            inner.min = Size{.width = 0.0F, .height = 0.0F};
             inner.max =
-                Size{ .width = w, .height = c.max.is_finite() ? std::max(0.0f, c.max.height - m_header_height) : 1e9f };
-            const Size cs = m_child.widget().layout(inner, ctx);
-            m_child.set_bounds(Rect{ .origin = Point{ .x = 0.0f, .y = m_header_height }, .size = cs });
+                Size{.width = w, .height = c.max.is_finite() ? std::max(0.0F, c.max.height - header_height_) : 1e9f};
+            const Size cs = child_.widget().layout(inner, ctx);
+            child_.set_bounds(Rect{.origin = Point{.x = 0.0F, .y = header_height_}, .size = cs});
             h += cs.height;
         }
-        return c.constrain(Size{ .width = w, .height = h });
+        return c.constrain(Size{.width = w, .height = h});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         Font f;
-        f.size_pt = 13.0f;
+        f.size_pt = 13.0F;
         // 标题头
-        const Rect head{ .origin = bounds.origin,
-                         .size = Size{ .width = bounds.size.width, .height = m_header_height } };
+        const Rect head{.origin = bounds.origin, .size = Size{.width = bounds.size.width, .height = header_height_}};
         p.fill_rect(head, Color(246, 246, 248, 255));
         p.draw_rect(head, Color(228, 228, 232, 255));
         // 展开箭头 + 标题
-        const Rect arrow_box{ .origin = Point{ .x = head.origin.x + 10.0f, .y = head.origin.y + 10.0f },
-                              .size = Size{ .width = 16.0f, .height = m_header_height - 20.0f } };
-        p.draw_text(arrow_box, m_expanded.get() ? "v" : ">", f, Color(100, 100, 105, 255));
-        const Rect title_box{ .origin = Point{ .x = head.origin.x + 30.0f, .y = head.origin.y + 10.0f },
-                              .size = Size{ .width = head.size.width - 40.0f, .height = m_header_height - 20.0f } };
-        p.draw_text(title_box, m_header, f, Color(30, 30, 30, 255));
+        const Rect arrow_box{.origin = Point{.x = head.origin.x + 10.0F, .y = head.origin.y + 10.0F},
+                             .size = Size{.width = 16.0F, .height = header_height_ - 20.0F}};
+        p.draw_text(arrow_box, expanded_.get() ? "v" : ">", f, Color(100, 100, 105, 255));
+        const Rect title_box{.origin = Point{.x = head.origin.x + 30.0F, .y = head.origin.y + 10.0F},
+                             .size = Size{.width = head.size.width - 40.0F, .height = header_height_ - 20.0F}};
+        p.draw_text(title_box, header_, f, Color(30, 30, 30, 255));
         // 内容
-        if (m_expanded.get() && m_child) {
-            const Rect cb = m_child.bounds();
-            const Rect global{ .origin =
-                                   Point{ .x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y },
-                               .size = cb.size };
-            m_child.widget().paint(p, global, ctx);
+        if (expanded_.get() && child_) {
+            const Rect cb = child_.bounds();
+            const Rect global{.origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
+                              .size = cb.size};
+            child_.widget().paint(p, global, ctx);
         }
     }
 
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * override {
-        if (local.y < m_header_height) {
-            return Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = bounds.size }.contains(local) ? this
-                                                                                                        : nullptr;
+        if (local.y < header_height_) {
+            return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local) ? this : nullptr;
         }
-        if (m_expanded.get() && m_child) {
-            const Rect cb = m_child.bounds();
+        if (expanded_.get() && child_) {
+            const Rect cb = child_.bounds();
             if (cb.contains(local)) {
-                const Rect global{ .origin =
-                                       Point{ .x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y },
-                                   .size = cb.size };
-                return m_child.widget().hit_test(local - cb.origin, global, ctx);
+                const Rect global{
+                    .origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
+                    .size = cb.size};
+                return child_.widget().hit_test(local - cb.origin, global, ctx);
             }
         }
         return nullptr;
@@ -168,23 +183,23 @@ class ExpansionPanel : public SingleChild {
 
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
-        if (local.y >= m_header_height && m_expanded.get() && m_child) {
-            const Rect cb = m_child.bounds();
+        if (local.y >= header_height_ && expanded_.get() && child_) {
+            const Rect cb = child_.bounds();
             if (cb.contains(local)) {
-                const Rect global{ .origin =
-                                       Point{ .x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y },
-                                   .size = cb.size };
-                return m_child.widget().hit_test_chain(local - cb.origin, global, ctx);
+                const Rect global{
+                    .origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
+                    .size = cb.size};
+                return child_.widget().hit_test_chain(local - cb.origin, global, ctx);
             }
         }
         return {};
     }
 
   private:
-    std::string m_header;
-    State<bool> m_expanded{ false };
-    float m_header_height = 36.0f;
-    std::function<void(bool)> m_on_toggle;
+    std::string header_;
+    State<bool> expanded_{false};
+    float header_height_ = 36.0F;
+    std::function<void(bool)> on_toggle_;
 };
 
-} // namespace aurora
+}  // namespace aurora

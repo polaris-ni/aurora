@@ -22,13 +22,13 @@ namespace aurora::tools {
 // --------------------------- completion / hover / diagnostics ------------------------------
 struct CompletionItem {
     std::string label;  // completion text
-    std::string kind;   // "Property" / "Class" / "Enum" / "EnumMember"
-    std::string detail; // type / default value
+    std::string kind;  // "Property" / "Class" / "Enum" / "EnumMember"
+    std::string detail;  // type / default value
     std::string documentation;
 };
 
 struct HoverInfo {
-    std::string content; // markdown-flavored plain text
+    std::string content;  // markdown-flavored plain text
 };
 
 struct Diagnostic {
@@ -42,7 +42,7 @@ struct Diagnostic {
 };
 
 struct TextEdit {
-    size_t line = 0; // insertion line (0-based)
+    size_t line = 0;  // insertion line (0-based)
     size_t col = 0;  // insertion column
     std::string new_text;
 };
@@ -77,7 +77,6 @@ struct CodeAction {
 }
 
 // Provide completions at (line,col). text is used to derive the trigger context.
-// NOLINTNEXTLINE(*-function-cognitive-complexity)
 [[nodiscard]] inline auto completions(const std::string &text, const Document &doc, const Schema &schema, size_t line,
                                       size_t col) -> std::vector<CompletionItem> {
     std::vector<CompletionItem> out;
@@ -240,7 +239,6 @@ struct CodeAction {
 }
 
 // Hover: (line,col) on an au::Type -> widget summary; on a .prop inside a block -> property description.
-// NOLINTNEXTLINE(*-function-cognitive-complexity)
 [[nodiscard]] inline auto hover(const Document &doc, const Schema &schema, size_t line, size_t col)
     -> std::optional<HoverInfo> {
     // Widget type reference.
@@ -286,7 +284,6 @@ struct CodeAction {
 }
 
 // Diagnostics: unknown type, unknown property, unknown enum value, missing required property.
-// NOLINTNEXTLINE(*-function-cognitive-complexity)
 [[nodiscard]] inline auto diagnostics(const Document &doc, const Schema &schema) -> std::vector<Diagnostic> {
     std::vector<Diagnostic> out;
 
@@ -308,7 +305,7 @@ struct CodeAction {
         const std::string ctype = Schema::strip_props(b.type);
         const auto *comp = schema.find_component(ctype);
         if (comp == nullptr) {
-            continue; // unknown widget: do not validate properties
+            continue;  // unknown widget: do not validate properties
         }
         // Unknown property.
         for (const auto &u : b.props) {
@@ -360,7 +357,6 @@ struct CodeAction {
 }
 
 // Enum value literal validation (needs the original text): au::Enum::Value or Enum::Value.
-// NOLINTNEXTLINE(*-function-cognitive-complexity)
 [[nodiscard]] inline auto validate_enum_values(const std::string &text, const Schema &schema)
     -> std::vector<Diagnostic> {
     std::vector<Diagnostic> out;
@@ -428,12 +424,11 @@ struct CodeAction {
 }
 
 // Code actions: insert .prop = <default> for blocks missing required properties.
-// NOLINTNEXTLINE(*-function-cognitive-complexity)
 [[nodiscard]] inline auto code_actions(const Document &doc, const Schema &schema) -> std::vector<CodeAction> {
     std::vector<CodeAction> out;
     for (const auto &b : doc.blocks) {
         if (!b.is_closed) {
-            continue; // only offer insertion for closed blocks (the insertion point is before '}')
+            continue;  // only offer insertion for closed blocks (the insertion point is before '}')
         }
         const std::string ctype = Schema::strip_props(b.type);
         const auto *comp = schema.find_component(ctype);
@@ -466,10 +461,10 @@ struct CodeAction {
         }
         CodeAction ca;
         ca.title = "Add missing required properties for " + ctype;
-        ca.edits.push_back(TextEdit{ .line = b.end_line, .col = b.end_col, .new_text = insert });
+        ca.edits.push_back(TextEdit{.line = b.end_line, .col = b.end_col, .new_text = insert});
         out.push_back(std::move(ca));
     }
     return out;
 }
 
-} // namespace aurora::tools
+}  // namespace aurora::tools

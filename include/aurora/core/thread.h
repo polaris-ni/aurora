@@ -17,50 +17,52 @@ namespace aurora {
  * @tparam Check 是否启用线程检查。设为 false 时**零开销**（不存储 owner 线程、不断言），
  *               用于性能敏感路径关闭检查（与 `AURORA_ASSERT` 的 debug-only 语义一致）。
  */
-template<typename T, bool Check = true> class MainThreadOnly {
+template <typename T, bool Check = true>
+class MainThreadOnly {
   public:
-    explicit MainThreadOnly(T value) : m_value(std::move(value)), m_owner(std::this_thread::get_id()) {}
+    explicit MainThreadOnly(T value) : value_(std::move(value)), owner_(std::this_thread::get_id()) {}
 
     [[nodiscard]] auto get() & -> T & {
         assert_owner();
-        return m_value;
+        return value_;
     }
     [[nodiscard]] auto get() const & -> const T & {
         assert_owner();
-        return m_value;
+        return value_;
     }
 
     /// @brief 仅在主线程可写。
     auto set(T value) -> void {
         assert_owner();
-        m_value = std::move(value);
+        value_ = std::move(value);
     }
 
   private:
     auto assert_owner() const -> void {
         if constexpr (Check) {
-            assert(std::this_thread::get_id() == m_owner &&
+            assert(std::this_thread::get_id() == owner_ &&
                    "MainThreadOnly: accessed from a thread other than the owning (main) thread");
         }
     }
 
-    T m_value;
-    std::thread::id m_owner;
+    T value_;
+    std::thread::id owner_;
 };
 
 /// @brief 零开销特化：Check=false 时不存储 owner、不断言。
-template<typename T> class MainThreadOnly<T, false> {
+template <typename T>
+class MainThreadOnly<T, false> {
   public:
-    explicit MainThreadOnly(T value) : m_value(std::move(value)) {}
-    [[nodiscard]] auto get() & -> T & { return m_value; }
-    [[nodiscard]] auto get() const & -> const T & { return m_value; }
-    auto set(T value) -> void { m_value = std::move(value); }
+    explicit MainThreadOnly(T value) : value_(std::move(value)) {}
+    [[nodiscard]] auto get() & -> T & { return value_; }
+    [[nodiscard]] auto get() const & -> const T & { return value_; }
+    auto set(T value) -> void { value_ = std::move(value); }
 
   private:
-    T m_value;
+    T value_;
 };
 
-} // namespace aurora
+}  // namespace aurora
 
 /// @brief 标注函数「必须在主线程调用」（ARCHITECTURE.md §3.1）。
 ///

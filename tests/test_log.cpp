@@ -5,7 +5,6 @@
 
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/log.h"
-
 #include "test_harness.h"
 
 AURORA_TEST() {
@@ -34,8 +33,8 @@ AURORA_TEST() {
     captured.clear();
     AURORA_LOG_ERROR("net", "connection lost");
     AURORA_TEST_CHECK(captured.find("[ERR]") != std::string::npos);
-    AURORA_TEST_CHECK(captured.find("[net@") != std::string::npos);         // 分类 + 线程 id
-    AURORA_TEST_CHECK(captured.find("test_log.cpp:") != std::string::npos); // file:line
+    AURORA_TEST_CHECK(captured.find("[net@") != std::string::npos);  // 分类 + 线程 id
+    AURORA_TEST_CHECK(captured.find("test_log.cpp:") != std::string::npos);  // file:line
     AURORA_TEST_CHECK(captured.find("] > connection lost") != std::string::npos);
     AURORA_TEST_CHECK(captured.back() == '\n');
 
@@ -81,7 +80,7 @@ AURORA_TEST() {
     AURORA_TEST_CHECK(captured.find("[WRN]") != std::string::npos);
     AURORA_TEST_CHECK(captured.find("] > retries=3 reason=timeout") != std::string::npos);
     captured.clear();
-    AURORA_LOG_INFO("var", "single"); // 单参数仍兼容
+    AURORA_LOG_INFO("var", "single");  // 单参数仍兼容
     AURORA_TEST_CHECK(captured.find("[INF]") != std::string::npos);
     AURORA_TEST_CHECK(captured.find("] > single") != std::string::npos);
 

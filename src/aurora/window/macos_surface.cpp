@@ -25,9 +25,9 @@ namespace aurora {
 
 struct MacOSSurface::Impl {
     NSWindow *window = nullptr;
-    NSView *view = nullptr; ///< 自定义 NSView 子类实例（覆盖 drawRect:）
+    NSView *view = nullptr;  ///< 自定义 NSView 子类实例（覆盖 drawRect:）
     bool should_close = false;
-    float scale = 1.0f;
+    float scale = 1.0F;
     Surface::EventHandler event_handler;
 
     /// @brief 创建 NSWindow + 自定义 NSView。
@@ -53,28 +53,28 @@ struct MacOSSurface::Impl {
 };
 
 MacOSSurface::MacOSSurface(int w, int h, const std::string &title)
-    : m_impl(std::make_unique<Impl>()), m_size{ static_cast<float>(w), static_cast<float>(h) } {
-    if (!m_impl->create_window(w, h, title)) {
+    : impl_(std::make_unique<Impl>()), size_{static_cast<float>(w), static_cast<float>(h)} {
+    if (!impl_->create_window(w, h, title)) {
         AURORA_LOG_WARN("macos_surface", "create_window failed");
     }
 }
 
 MacOSSurface::~MacOSSurface() {
-    if (m_impl) {
-        m_impl->destroy_window();
+    if (impl_) {
+        impl_->destroy_window();
     }
 }
 
 auto MacOSSurface::begin_frame(int w, int h) -> Result<bool> {
-    m_painter.begin(w, h);
-    m_size = Size{ static_cast<float>(w), static_cast<float>(h) };
+    painter_.begin(w, h);
+    size_ = Size{static_cast<float>(w), static_cast<float>(h)};
     // 浅色底色（与 Win32/X11 一致）
-    m_painter.fill_rect(Rect{ Point{ 0.0f, 0.0f }, Size{ static_cast<float>(w), static_cast<float>(h) } },
-                        Color{ 245, 245, 247, 255 });
+    painter_.fill_rect(Rect{Point{0.0F, 0.0F}, Size{static_cast<float>(w), static_cast<float>(h)}},
+                        Color{245, 245, 247, 255});
     return true;
 }
 
-auto MacOSSurface::painter() -> Painter & { return m_painter; }
+auto MacOSSurface::painter() -> Painter & { return painter_; }
 
 auto MacOSSurface::present() -> Result<bool> {
     // TODO(macOS): 实写上屏
@@ -88,10 +88,10 @@ auto MacOSSurface::present() -> Result<bool> {
     return true;
 }
 
-auto MacOSSurface::size() const -> Size { return m_size; }
+auto MacOSSurface::size() const -> Size { return size_; }
 
-auto MacOSSurface::should_close() const -> bool { return m_impl ? m_impl->should_close : true; }
+auto MacOSSurface::should_close() const -> bool { return impl_ ? impl_->should_close : true; }
 
-} // namespace aurora
+}  // namespace aurora
 
-#endif // AURORA_BACKEND_MACOS / AURORA_PLATFORM_MACOS
+#endif  // AURORA_BACKEND_MACOS / AURORA_PLATFORM_MACOS

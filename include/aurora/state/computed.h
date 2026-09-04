@@ -24,15 +24,15 @@ namespace aurora {
  * @note Side-effects: none
  * @note Rebuildable: no
  */
-template<typename T> class Computed : public SignalView<T>, public StateBase {
+template <typename T>
+class Computed : public SignalView<T>, public StateBase {
   public:
     explicit Computed(std::function<T()> fn)
-        : m_fn(std::move(fn)), m_value(m_fn()), m_effect(std::make_shared<Effect>([this]() -> void {
-              m_value = m_fn();
+        : fn_(std::move(fn)), value_(fn_()), effect_(std::make_shared<Effect>([this]() -> void {
+              value_ = fn_();
               notify();
           })) {
-
-        m_effect->run();
+        effect_->run();
     }
 
     [[nodiscard]] auto get() const -> const T & override {
@@ -41,16 +41,16 @@ template<typename T> class Computed : public SignalView<T>, public StateBase {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
             const_cast<Computed *>(this)->subscribe(*Effect::current());
         }
-        return m_value;
+        return value_;
     }
 
     [[nodiscard]] auto anchor() const -> AnchorPtr override { return StateBase::anchor(); }
 
     auto subscribe(Effect &e) -> void override {
         // 与 State 一致：去重 + 惰性摘除失效边 + 建立弱引用连接。
-        for (auto it = m_observers.begin(); it != m_observers.end();) {
+        for (auto it = observers_.begin(); it != observers_.end();) {
             if (!(*it)->effect.lock()) {
-                it = m_observers.erase(it); // 失效边，摘除
+                it = observers_.erase(it);  // 失效边，摘除
                 continue;
             }
             if ((*it)->effect_raw == &e) {
@@ -62,14 +62,14 @@ template<typename T> class Computed : public SignalView<T>, public StateBase {
         conn->effect = e.anchor();
         conn->effect_raw = &e;
         conn->state = this->anchor();
-        m_observers.push_back(conn);
+        observers_.push_back(conn);
         e.add_dep(*this);
     }
 
   private:
-    std::function<T()> m_fn;
-    T m_value;
-    std::shared_ptr<Effect> m_effect;
+    std::function<T()> fn_;
+    T value_;
+    std::shared_ptr<Effect> effect_;
 };
 
 /**
@@ -81,11 +81,11 @@ template<typename T> class Computed : public SignalView<T>, public StateBase {
  * @note Thread: main-thread only
  * @note Side-effects: none
  */
-template<typename F>
+template <typename F>
     requires std::invocable<F>
 [[nodiscard]] auto computed(F &&fn) -> Computed<std::remove_cvref_t<std::invoke_result_t<F>>> {
     using T = std::remove_cvref_t<std::invoke_result_t<F>>;
     return Computed<T>(std::function<T()>(std::forward<F>(fn)));
 }
 
-} // namespace aurora
+}  // namespace aurora

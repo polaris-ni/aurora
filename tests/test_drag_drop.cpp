@@ -1,9 +1,8 @@
-// test_drag_drop.cpp — 拖放协议测试（v0.10.0-beta）。
+// test_drag_drop.cpp — 拖放协议测试。
 #include <string>
 
 #include "aurora/aurora.h"
 #include "aurora/event/drag_drop.h"
-
 #include "test_harness.h"
 
 using aurora::DragData;
@@ -22,9 +21,11 @@ static void test_drag_data_text() {
 }
 
 static void test_drag_data_widget() {
-    const auto tree = Json{ { "type", "Button" }, { "props", { { "label", "OK" } } } };
+    const auto tree = Json{{"type", "Button"}, {"props", {{"label", "OK"}}}};
     DragData d = DragData::widget_tree(tree);
     AURORA_TEST_CHECK(d.mime_type == "aurora/widget");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(d.payload["type"] == "Button");
     AURORA_TEST_CHECK(!d.empty());
 }
@@ -41,11 +42,11 @@ static void test_drag_session() {
     DragSession session;
     AURORA_TEST_CHECK(!session.is_active());
 
-    session.begin(DragData::text("drag me"), Point{ .x = 10, .y = 20 });
+    session.begin(DragData::text("drag me"), Point{.x = 10, .y = 20});
     AURORA_TEST_CHECK(session.is_active());
     AURORA_TEST_CHECK(session.data().mime_type == "text/plain");
-    AURORA_TEST_CHECK(session.origin().x == 10.0f);
-    AURORA_TEST_CHECK(session.origin().y == 20.0f);
+    AURORA_TEST_CHECK(session.origin().x == 10.0F);
+    AURORA_TEST_CHECK(session.origin().y == 20.0F);
 
     session.end();
     AURORA_TEST_CHECK(!session.is_active());
@@ -75,10 +76,10 @@ static void test_drop_target() {
     AURORA_TEST_CHECK(entered);
 
     // 模拟放置
-    cb.on_drop(text_data, Point{ .x = 50, .y = 60 });
+    cb.on_drop(text_data, Point{.x = 50, .y = 60});
     AURORA_TEST_CHECK(dropped);
-    AURORA_TEST_CHECK(drop_pos.x == 50.0f);
-    AURORA_TEST_CHECK(drop_pos.y == 60.0f);
+    AURORA_TEST_CHECK(drop_pos.x == 50.0F);
+    AURORA_TEST_CHECK(drop_pos.y == 60.0F);
 
     // 非文本类型被拒绝
     const DragData widget_data = DragData::widget_tree(Json::object());

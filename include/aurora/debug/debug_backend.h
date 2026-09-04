@@ -23,8 +23,8 @@ namespace aurora::debug {
 
 /// @brief 截图源：软件帧缓冲 / 真实屏幕窗口。
 enum class CaptureSource : std::uint8_t {
-    Framebuffer,    ///< Surface 软件帧缓冲（RGBA，全后端通用、确定性）。
-    OnScreenWindow, ///< 真实屏幕窗口（含 OS 装饰，按后端能力尽力；Wayland/Headless 不支持）。
+    Framebuffer,  ///< Surface 软件帧缓冲（RGBA，全后端通用、确定性）。
+    OnScreenWindow,  ///< 真实屏幕窗口（含 OS 装饰，按后端能力尽力；Wayland/Headless 不支持）。
 };
 
 /// @brief 抓取截图。
@@ -53,4 +53,4 @@ auto set_output_directory(const std::string &dir) -> void;
 ///        Release（未开 DEBUG）返回 `{"available":false, "reason": ...}`。
 [[nodiscard]] auto surface_state(const Surface &s) -> Json;
 
-} // namespace aurora::debug
+}  // namespace aurora::debug

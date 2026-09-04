@@ -37,85 +37,89 @@ class ScrollProbe {
         return p;
     }
 
-    [[nodiscard]] auto valid() const -> bool { return m_node != nullptr; }
+    [[nodiscard]] auto valid() const -> bool { return node_ != nullptr; }
 
     /// @brief 当前滚动偏移（逻辑 dp）；未定位到控件时恒为 0。
     [[nodiscard]] auto offset() const -> float {
-        if (m_scroll != nullptr) {
-            return m_scroll->offset_y();
+        if (scroll_ != nullptr) {
+            return scroll_->offset_y();
         }
-        if (m_lazy != nullptr) {
-            return m_lazy->scroll_offset();
+        if (lazy_ != nullptr) {
+            return lazy_->scroll_offset();
         }
-        if (m_grid != nullptr) {
-            return m_grid->scroll_offset();
+        if (grid_ != nullptr) {
+            return grid_->scroll_offset();
         }
-        return 0.0f;
+        return 0.0F;
     }
 
     /// @brief 滚动容器**自身**的视口高（逻辑 dp）。
     /// @note 与窗口视口高不是一回事：`AppShell` 的顶栏 / 底栏会挤占，实测差出百余 dp。
     ///       判断「内容够不够滚」必须用这个数，用窗口高会得出错误结论。
-    [[nodiscard]] auto viewport_h() const -> float { return m_node != nullptr ? m_node->size().height : 0.0f; }
+    [[nodiscard]] auto viewport_h() const -> float { return node_ != nullptr ? node_->size().height : 0.0F; }
 
   private:
     [[nodiscard]] static auto search(Widget &w, ScrollProbe &out) -> bool {
         if (auto *s = dynamic_cast<Scroll *>(&w)) {
-            out.m_scroll = s;
-            out.m_node = &w;
+            out.scroll_ = s;
+            out.node_ = &w;
             return true;
         }
         if (auto *l = dynamic_cast<LazyList *>(&w)) {
-            out.m_lazy = l;
-            out.m_node = &w;
+            out.lazy_ = l;
+            out.node_ = &w;
             return true;
         }
         if (auto *g = dynamic_cast<GridView *>(&w)) {
-            out.m_grid = g;
-            out.m_node = &w;
+            out.grid_ = g;
+            out.node_ = &w;
             return true;
         }
         bool found = false;
         w.for_each_child([&found, &out](const Widget &child) -> void {
             if (found) {
-                return; // for_each_child 无早停，命中后余下子树直接掠过
+                return;  // for_each_child 无早停，命中后余下子树直接掠过
             }
-            found = search(const_cast<Widget &>(child), out); // NOLINT(cppcoreguidelines-pro-type-const-cast)
+            found = search(const_cast<Widget &>(child), out);  // NOLINT(cppcoreguidelines-pro-type-const-cast)
         });
         return found;
     }
 
-    Widget *m_node = nullptr; ///< 命中的控件本体（取自身尺寸用）
-    Scroll *m_scroll = nullptr;
-    LazyList *m_lazy = nullptr;
-    GridView *m_grid = nullptr;
+    Widget *node_ = nullptr;  ///< 命中的控件本体（取自身尺寸用）
+    Scroll *scroll_ = nullptr;
+    LazyList *lazy_ = nullptr;
+    GridView *grid_ = nullptr;
 };
 
 /// @brief 落定退出原因的可读名（报告用）。
 [[nodiscard]] auto settle_reason_name(ScrollBenchHarness::Result::SettleReason r) -> const char * {
     using R = ScrollBenchHarness::Result::SettleReason;
     switch (r) {
-    case R::Disabled: return "disabled";
-    case R::Idle: return "idle";
-    case R::TimeBudget: return "time";
-    case R::FrameCap: return "frame-cap";
+        case R::Disabled:
+            return "disabled";
+        case R::Idle:
+            return "idle";
+        case R::TimeBudget:
+            return "time";
+        case R::FrameCap:
+            return "frame-cap";
     }
     return "?";
 }
 
-} // namespace
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // ScrollBenchHarness::Result
 // ---------------------------------------------------------------------------
 
 auto ScrollBenchHarness::Result::geometry_stable() const -> bool {
-    return std::fabs(max_offset - max_offset_end) < 0.5f;
+    return std::fabs(max_offset - max_offset_end) < 0.5F;
 }
 
 auto ScrollBenchHarness::Result::content_screens() const -> float {
-    if (scroll_viewport_h <= 0.0f) {
-        return 0.0f;
+    if (scroll_viewport_h <= 0.0F) {
+        return 0.0F;
     }
     return (scroll_viewport_h + max_offset) / scroll_viewport_h;
 }
@@ -129,7 +133,7 @@ auto ScrollBenchHarness::Result::reversal_ratio() const -> double {
 
 auto ScrollBenchHarness::Result::trustworthy() const -> bool {
     return scrollable_found && settled && report.frame_count > 0 && moved_frames == report.frame_count &&
-           idle_frames == 0 && max_offset > 0.5f && geometry_stable() && reversal_ratio() <= kMaxReversalRatio;
+           idle_frames == 0 && max_offset > 0.5F && geometry_stable() && reversal_ratio() <= kMaxReversalRatio;
 }
 
 auto ScrollBenchHarness::Result::to_markdown() const -> std::string {
@@ -138,9 +142,9 @@ auto ScrollBenchHarness::Result::to_markdown() const -> std::string {
     out += "\n| 滚动自证 | 值 | 判定 |\n|------|----|----|\n";
     out += aurora::internal::string_format("| scrollable found | %s | %s |\n", scrollable_found ? "yes" : "no",
                                            scrollable_found ? "ok" : "**FAIL**");
-    out += aurora::internal::string_format("| moved frames | %zu / %zu | %s |\n", moved_frames, report.frame_count,
-                                           (report.frame_count > 0 && moved_frames == report.frame_count) ? "ok"
-                                                                                                          : "**FAIL**");
+    out += aurora::internal::string_format(
+        "| moved frames | %zu / %zu | %s |\n", moved_frames, report.frame_count,
+        (report.frame_count > 0 && moved_frames == report.frame_count) ? "ok" : "**FAIL**");
     out += aurora::internal::string_format("| idle (skipped) frames | %zu | %s |\n", idle_frames,
                                            idle_frames == 0 ? "ok" : "**FAIL**");
     out += aurora::internal::string_format("| reversals | %zu（%.1f%%） | %s |\n", reversals, reversal_ratio() * 100.0,
@@ -150,13 +154,13 @@ auto ScrollBenchHarness::Result::to_markdown() const -> std::string {
         report.frame_count > 0 ? scrolled_px / static_cast<double>(report.frame_count) : 0.0);
     out +=
         aurora::internal::string_format("| step calibration | %.2f dp/unit | %s |\n", static_cast<double>(dp_per_unit),
-                                        dp_per_unit > 0.0f ? "ok" : "**FAIL 未标定**");
+                                        dp_per_unit > 0.0F ? "ok" : "**FAIL 未标定**");
     out += aurora::internal::string_format("| scroll extent | %.1f dp | %s |\n", static_cast<double>(max_offset),
-                                           max_offset > 0.5f ? "ok" : "**FAIL 不可滚**");
+                                           max_offset > 0.5F ? "ok" : "**FAIL 不可滚**");
     out += aurora::internal::string_format("| scroll viewport | %.1f dp（窗口 %.0f dp） | 内容 %.2f 屏%s |\n",
                                            static_cast<double>(scroll_viewport_h), static_cast<double>(viewport.height),
                                            static_cast<double>(content_screens()),
-                                           content_screens() < 2.0f ? "（偏短）" : "");
+                                           content_screens() < 2.0F ? "（偏短）" : "");
     out += aurora::internal::string_format("| geometry stable | %.1f → %.1f dp | %s |\n",
                                            static_cast<double>(max_offset), static_cast<double>(max_offset_end),
                                            geometry_stable() ? "ok" : "**FAIL 采样期内容仍在变**");
@@ -205,19 +209,18 @@ auto ScrollBenchHarness::Result::to_csv_row() const -> std::string {
 
 auto ScrollBenchHarness::run(Node root, Size viewport) -> Result { return run(std::move(root), viewport, Config{}); }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Result {
     Result res;
     res.viewport = viewport;
-    if (!root || viewport.width <= 0.0f || viewport.height <= 0.0f) {
-        return res; // 非法输入：scrollable_found = false，调用方经 trustworthy() 识别
+    if (!root || viewport.width <= 0.0F || viewport.height <= 0.0F) {
+        return res;  // 非法输入：scrollable_found = false，调用方经 trustworthy() 识别
     }
 
-    const float scale = cfg.scale > 0.0f ? cfg.scale : 1.0f;
+    const float scale = cfg.scale > 0.0F ? cfg.scale : 1.0F;
     auto surface = std::make_unique<HeadlessSurface>(std::string{}, viewport);
     surface->painter().set_scale(scale);
     (void)surface->begin_frame(static_cast<int>(viewport.width), static_cast<int>(viewport.height));
-    Window win{ std::move(surface) };
+    Window win{std::move(surface)};
 
     // 首帧：驱动一次完整 layout，动态子树（如 AppShell 在 on_layout 内构建的卡片）在此建成，
     // 之后才谈得上「在树里找滚动容器」。
@@ -249,7 +252,7 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
         }
         res.settle_ms = settle_sw.elapsed_ms();
     } else {
-        res.settled = true; // 显式关闭落定阶段：不作告警
+        res.settled = true;  // 显式关闭落定阶段：不作告警
         res.settle_reason = Result::SettleReason::Disabled;
     }
 
@@ -258,9 +261,9 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
     res.scrollable_found = probe.valid();
     res.scroll_viewport_h = probe.viewport_h();
 
-    const Point center{ .x = viewport.width * 0.5f, .y = viewport.height * 0.5f };
-    int dir = 1; ///< +1 = 向下滚（内容上移）；触边由 auto_reverse 翻转
-    float velocity = cfg.delta_per_frame * (cfg.fling ? cfg.fling_boost : 1.0f);
+    const Point center{.x = viewport.width * 0.5F, .y = viewport.height * 0.5F};
+    int dir = 1;  ///< +1 = 向下滚（内容上移）；触边由 auto_reverse 翻转
+    float velocity = cfg.delta_per_frame * (cfg.fling ? cfg.fling_boost : 1.0F);
 
     // 滚轮约定（全库一致）：delta_y 正方向为「向上滚动」，故向下滚需取负号。
     const auto dispatch_scroll = [&root, &center, &dir](float amount) -> void {
@@ -276,15 +279,15 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
     // 就开测就是这个症状），`geometry_stable()` 据此把读数判为不可信。
     const auto measure_extent = [&probe, &dispatch_scroll, &dir]() -> float {
         if (!probe.valid()) {
-            return 0.0f;
+            return 0.0F;
         }
-        constexpr float kHugeDelta = 1.0e6f; // NOLINT(readability-identifier-naming)
+        constexpr float kHugeDelta = 1.0e6F;  // NOLINT(readability-identifier-naming)
         const int saved_dir = dir;
         dir = 1;
-        dispatch_scroll(kHugeDelta); // 拉到底
+        dispatch_scroll(kHugeDelta);  // 拉到底
         const float extent = probe.offset();
         dir = -1;
-        dispatch_scroll(kHugeDelta); // 拉回顶，恢复采样起点
+        dispatch_scroll(kHugeDelta);  // 拉回顶，恢复采样起点
         dir = saved_dir;
         return extent;
     };
@@ -298,29 +301,29 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
     // 其实在按不同速度滚」，两组读数没有可比性。
     // 从顶部下发一个单位增量读位移即可；若读数正好等于行程说明被 clamp 了（行程比一个
     // 单位还短），减半重试。
-    res.dp_per_unit = 0.0f;
-    if (probe.valid() && res.max_offset > 0.0f) {
-        float unit = 1.0f;
+    res.dp_per_unit = 0.0F;
+    if (probe.valid() && res.max_offset > 0.0F) {
+        float unit = 1.0F;
         for (int attempt = 0; attempt < 8; ++attempt) {
-            dispatch_scroll(unit); // dir 恒为 +1，起点为顶部
+            dispatch_scroll(unit);  // dir 恒为 +1，起点为顶部
             const float moved = probe.offset();
             dir = -1;
-            dispatch_scroll(1.0e6f); // 回顶
+            dispatch_scroll(1.0e6F);  // 回顶
             dir = 1;
-            if (moved > 0.0f && moved < res.max_offset - 0.01f) {
+            if (moved > 0.0F && moved < res.max_offset - 0.01F) {
                 res.dp_per_unit = moved / unit;
                 break;
             }
-            if (moved <= 0.0f) {
-                break; // 一个单位都推不动：控件不响应，交由 moved_frames 判伪
+            if (moved <= 0.0F) {
+                break;  // 一个单位都推不动：控件不响应，交由 moved_frames 判伪
             }
-            unit *= 0.5f;
+            unit *= 0.5F;
         }
     }
     // 标定失败（不可滚 / 不响应）时退化为 1:1，读数会由 trustworthy() 判伪，不掩盖问题。
-    const float dp_per_unit = res.dp_per_unit > 0.0f ? res.dp_per_unit : 1.0f;
+    const float dp_per_unit = res.dp_per_unit > 0.0F ? res.dp_per_unit : 1.0F;
 
-    PerfSession sess{ cfg.name, static_cast<std::size_t>(cfg.frames > 0 ? cfg.frames : 1) };
+    PerfSession sess{cfg.name, static_cast<std::size_t>(cfg.frames > 0 ? cfg.frames : 1)};
     sess.set_frame_budget_ms(cfg.frame_budget_ms);
 
     const int warmup = cfg.warmup_frames > 0 ? cfg.warmup_frames : 0;
@@ -360,7 +363,7 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
         if (cfg.fling) {
             velocity *= cfg.fling_decay;
             if (velocity < cfg.fling_cutoff) {
-                velocity = cfg.delta_per_frame * cfg.fling_boost; // 甩完一次，紧接下一次
+                velocity = cfg.delta_per_frame * cfg.fling_boost;  // 甩完一次，紧接下一次
             }
         }
     }
@@ -372,4 +375,4 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
     return res;
 }
 
-} // namespace aurora
+}  // namespace aurora

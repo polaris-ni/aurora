@@ -5,7 +5,6 @@
 #include <string>
 
 #include "aurora/core/version.h"
-
 #include "test_harness.h"
 
 AURORA_TEST() {
@@ -35,9 +34,11 @@ AURORA_TEST() {
     {
         const std::string full = AURORA_VERSION_STRING;
         AURORA_TEST_CHECK_MSG(full.size() >= 5, "version string non-trivial");
-        AURORA_TEST_CHECK_MSG(full.find_first_not_of("0123456789.") != std::string::npos ||
-                                  full.find("..") == std::string::npos,
-                              "no empty numeric component (no consecutive dots)");
+        AURORA_TEST_CHECK_MSG(
+            full.find_first_not_of("0123456789.") != std::string::npos || full.find("..") == std::string::npos,
+            "no empty numeric component (no consecutive dots)");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(full[0] >= '0' && full[0] <= '9');
     }
 

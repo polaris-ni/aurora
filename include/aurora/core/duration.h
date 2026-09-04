@@ -11,19 +11,20 @@ namespace aurora {
  * 编译期单位安全的时长值，避免 magic number 秒与单位歧义。
  */
 struct Duration {
-    double seconds = 0.0; ///< 以秒存储。
+    double seconds = 0.0;  ///< 以秒存储。
 
     constexpr Duration() noexcept = default;
     constexpr explicit Duration(double s) noexcept : seconds(s) {}
 
-    [[nodiscard]] static constexpr auto from_seconds(double s) noexcept -> Duration { return Duration{ s }; }
-    [[nodiscard]] static constexpr auto from_ms(double m) noexcept -> Duration { return Duration{ m / 1000.0 }; }
+    [[nodiscard]] static constexpr auto from_seconds(double s) noexcept -> Duration { return Duration{s}; }
+    [[nodiscard]] static constexpr auto from_ms(double m) noexcept -> Duration { return Duration{m / 1000.0}; }
 
     [[nodiscard]] constexpr auto to_chrono() const noexcept -> std::chrono::duration<double> {
         return std::chrono::duration<double>(seconds);
     }
 
     [[nodiscard]] constexpr auto operator==(const Duration &o) const noexcept -> bool { return seconds == o.seconds; }
+    // NOLINTNEXTLINE(*-redundant-parentheses)
     [[nodiscard]] constexpr auto operator!=(const Duration &o) const noexcept -> bool { return !(*this == o); }
 };
 
@@ -41,6 +42,6 @@ namespace literals {
 [[nodiscard]] constexpr auto operator""_ms(unsigned long long v) noexcept -> Duration {
     return Duration::from_ms(static_cast<double>(v));
 }
-} // namespace literals
+}  // namespace literals
 
-} // namespace aurora
+}  // namespace aurora

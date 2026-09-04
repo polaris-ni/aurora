@@ -198,7 +198,7 @@ namespace aurora {
         }
         i = slash + 1;
     }
-    return *cur; // 拷贝，避免悬垂引用
+    return *cur;  // 拷贝，避免悬垂引用
 }
 
 /// @brief 将 Widget 树递归转换为 TreeItem 树（供 TreeView 消费）。
@@ -255,7 +255,7 @@ namespace aurora {
             try {
                 indices.push_back(std::stoul(seg));
             } catch (...) {
-                return Node{}; // 无效路径段返回空 Node
+                return Node{};  // 无效路径段返回空 Node
             }
         }
         if (slash == std::string_view::npos) {
@@ -270,14 +270,14 @@ namespace aurora {
         std::size_t idx;
     };
     std::vector<Layer> layers;
-    layers.reserve(indices.size()); // 预分配避免重分配失效
+    layers.reserve(indices.size());  // 预分配避免重分配失效
     // 初始层：根的子节点
     {
         auto children = root.widget().child_nodes();
         if (indices[0] >= children.size()) {
             return Node{};
         }
-        layers.push_back(Layer{ .children = std::move(children), .idx = indices[0] });
+        layers.push_back(Layer{.children = std::move(children), .idx = indices[0]});
     }
     // 后续层
     for (std::size_t d = 1; d < indices.size(); ++d) {
@@ -286,7 +286,7 @@ namespace aurora {
         if (indices[d] >= children.size()) {
             return Node{};
         }
-        layers.push_back(Layer{ .children = std::move(children), .idx = indices[d] });
+        layers.push_back(Layer{.children = std::move(children), .idx = indices[d]});
     }
     return layers.back().children[layers.back().idx];
 }
@@ -319,4 +319,4 @@ inline void set_widget_prop(Widget &w, std::string_view key, const Json &value) 
     w.deserialize_props(props);
 }
 
-} // namespace aurora
+}  // namespace aurora

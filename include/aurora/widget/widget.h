@@ -12,8 +12,8 @@
 #include "aurora/core/assert.h"
 #include "aurora/core/strict_mode.h"
 #include "aurora/core/types.h"
+#include "aurora/debug/debug_paint.h"
 #include "aurora/debug/debug_trace.h"
-#include "aurora/environment/environment.h"
 #include "aurora/event/event.h"
 #include "aurora/modifier/modifier.h"
 #include "aurora/render/display_list.h"
@@ -31,14 +31,9 @@ namespace aurora {
 /// Repeater 嵌套 / 极深容器链）经 `Diagnostics` 降级截断，避免栈溢出 / 渲染雪崩。
 inline constexpr std::size_t AURORA_DEFAULT_MAX_WIDGET_DEPTH = 64;
 
-class Painter; // 前向声明（render 模块定义于 render/painter.h）
+class Painter;  // 前向声明（render 模块定义于 render/painter.h）
 
-class Widget; // 前向声明（HitNode 以 std::weak_ptr<Widget> 作为成员；Widget 在下方定义）
-
-// why_trace 热路径埋点：调试帧计数（定义见 debug_paint.cpp；此处仅前向声明，供内联 mark_needs_* 调用）。
-namespace debug {
-[[nodiscard]] auto current_debug_frame() -> std::uint64_t;
-} // namespace debug
+class Widget;  // 前向声明（HitNode 以 std::weak_ptr<Widget> 作为成员；Widget 在下方定义）
 
 /// @brief 命中链节点：携带命中控件及其相对根的全局 origin（用于事件坐标本地化）。
 /// 命中链递归下降时，子节点的 `Node::m_bounds.origin` 即其全局 origin，直接带入；
@@ -46,7 +41,7 @@ namespace debug {
 /// 写入本地坐标，控件无需再查询自身在树中的绝对位置。
 ///
 /// @note 生命周期安全：虚拟列表（LazyList）等会在滚动时回收并销毁子控件，若命中链
-/// （悬停链 `m_hover_chain`、指针捕获 `m_pointer_capture`）持有裸指针，回收后即为悬垂指针，
+/// （悬停链 `hover_chain_`、指针捕获 `pointer_capture_`）持有裸指针，回收后即为悬垂指针，
 /// 下一次 `update_hover` / 指针事件派发时解引用即触发 use-after-free（访问违规 0xC0000005）。
 ///
 /// 因此 `HitNode` 同时保存裸指针 `ptr` 与弱引用 `guard`：
@@ -58,10 +53,10 @@ namespace debug {
 /// 若仅用 `weak_ptr`，栈上构造的控件（测试与大量 demo 的常见写法）`weak_from_this()`
 /// 恒为空 → `lock()` 恒失败 → 全部指针事件被静默丢弃。故必须保留裸指针作为可达性来源。
 struct HitNode {
-    Widget *ptr = nullptr;       ///< 命中链上的控件（root→target 顺序）
-    std::weak_ptr<Widget> guard; ///< 生命周期守卫；仅当控件由 shared_ptr 持有时有效
-    bool guarded = false;        ///< guard 是否关联控制块（区分「空弱引用」与「已失效弱引用」）
-    Point origin{};              ///< 该控件相对根的全局 origin
+    Widget *ptr = nullptr;  ///< 命中链上的控件（root→target 顺序）
+    std::weak_ptr<Widget> guard;  ///< 生命周期守卫；仅当控件由 shared_ptr 持有时有效
+    bool guarded = false;  ///< guard 是否关联控制块（区分「空弱引用」与「已失效弱引用」）
+    Point origin{};  ///< 该控件相对根的全局 origin
 
     HitNode() = default;
 
@@ -83,9 +78,9 @@ struct HitNode {
     /// 若控件的最后一个强引用就在其中，指针当场悬垂。要调用控件方法请改用 `lock()`。
     [[nodiscard]] auto get() const -> Widget * {
         if (guarded) {
-            return guard.lock().get(); // shared_ptr 持有：回收后返回 nullptr
+            return guard.lock().get();  // shared_ptr 持有：回收后返回 nullptr
         }
-        return ptr; // 栈/成员对象：生命周期由持有者保证
+        return ptr;  // 栈/成员对象：生命周期由持有者保证
     }
 
     /// 取存活控件指针，并把强引用写入 `out_keepalive` 以延长其生命周期至调用方作用域结束。
@@ -98,10 +93,10 @@ struct HitNode {
     [[nodiscard]] auto lock(std::shared_ptr<Widget> &out_keepalive) const -> Widget * {
         if (guarded) {
             out_keepalive = guard.lock();
-            return out_keepalive.get(); // 回收后为 nullptr
+            return out_keepalive.get();  // 回收后为 nullptr
         }
         out_keepalive.reset();
-        return ptr; // 栈/成员对象：生命周期由持有者保证
+        return ptr;  // 栈/成员对象：生命周期由持有者保证
     }
 };
 
@@ -135,7 +130,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 命中链：返回根→最深命中的完整 widget 路径（`this` 起算，含自身与所有命中的祖先/后代）。
     /// 用于事件自底向上冒泡派发（specification/05-event-navigation.md §3）：派发器从链尾（最深）向链头（根）逐个调用，
-    /// 某节点写 `e.handled = true` 即停止。命中即止的 `hit_test` 保留供兼容/纯命中查询。
+    /// 某节点写 `e.is_handled_ = true` 即停止。命中即止的 `hit_test` 保留供兼容/纯命中查询。
     auto hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx) -> std::vector<HitNode>;
 
     /// @brief 挂载：注册响应式依赖并递归挂载子树（由 build 后一次性调用）。
@@ -148,38 +143,38 @@ class Widget : public std::enable_shared_from_this<Widget> {
     // ---- 通用属性 ----
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    Reactive<Modifier> modifier; ///< 修饰链
-    Reactive<bool> show{ true }; ///< 可见性（非结构性隐藏）
+    Reactive<Modifier> modifier;  ///< 修饰链
+    Reactive<bool> show{true};  ///< 可见性（非结构性隐藏）
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
     /// @brief 显式宽度意图（specification/01-core.md §2.2 / 需求 #20）：默认 `auto`（按内容）。
     /// 用 `au::px(120)` / `au::fill()` / `au::percent(0.5f)` 等强类型设置；
     /// **裸整数编译失败**（无 `Length(int)` 隐式转换）。返回 `Widget&` 以支持链式。
     virtual auto width(Length len) -> Widget & {
-        m_width = len;
+        width_ = len;
         mark_needs_layout();
         return *this;
     }
     /// @brief 显式高度意图（语义同 `width`）。
     virtual auto height(Length len) -> Widget & {
-        m_height = len;
+        height_ = len;
         mark_needs_layout();
         return *this;
     }
-    [[nodiscard]] auto width_spec() const -> const Length & { return m_width; }
-    [[nodiscard]] auto height_spec() const -> const Length & { return m_height; }
+    [[nodiscard]] auto width_spec() const -> const Length & { return width_; }
+    [[nodiscard]] auto height_spec() const -> const Length & { return height_; }
 
     /// @brief 溢出策略（参考 CSS overflow）：控制子内容超出本控件边界时的行为。
     /// Visible=溢出可见（默认）；Hidden/Clip/Scroll=裁剪到本控件盒子内。
     /// Hidden 与 Clip 当前行为相同（均裁剪视觉），Clip 保留 hit-test（预留语义）。
     /// Scroll 当前等同 Hidden（滚动预留）。
     virtual auto overflow_strategy(OverflowStrategy strategy) -> Widget & {
-        m_overflow = strategy;
+        overflow_ = strategy;
         mark_needs_layout();
         mark_needs_paint();
         return *this;
     }
-    [[nodiscard]] auto overflow_strategy() const -> OverflowStrategy { return m_overflow; }
+    [[nodiscard]] auto overflow_strategy() const -> OverflowStrategy { return overflow_; }
 
     // ---- 脏标记（specification/04-widget.md §2.4）----
     auto mark_needs_layout() -> void { mark_needs_layout_impl(false); }
@@ -189,10 +184,10 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @note 通常**无需手工调用**：`Widget::layout()` 会以「当前正在布局的控件」自动登记
     ///       （布局调用天然嵌套，见 widget.cpp 的 `t_layout_parent`），使父链由构造保证完整。
     ///       本接口保留给「不经父容器 `layout()` 入口就地重排子树」的特殊场景与历史调用点。
-    auto set_layout_parent(Widget *p) -> void { m_layout_parent = p; }
+    auto set_layout_parent(Widget *p) -> void { layout_parent_ = p; }
 
     /// @brief 布局父节点（未接入树时为 nullptr）。
-    [[nodiscard]] auto layout_parent() const -> Widget * { return m_layout_parent; }
+    [[nodiscard]] auto layout_parent() const -> Widget * { return layout_parent_; }
 
     /// @brief 本控件是否可被 Display List 缓存（恒等变换且绘制无副作用、内容不每帧变动）。
     ///        默认 true；绘制时产生副作用（如 Hero 几何注册）或内容每帧变化（转场淡变）的
@@ -217,22 +212,22 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @brief 重排边界：自身尺寸由约束决定、不依赖子节点（固定/撑满/百分比宽高）。
     /// 该属性用于布局缓存的语义标识；当前缓存失效策略统一向上传播至根以保证正确性。
     [[nodiscard]] auto is_relayout_boundary() const -> bool {
-        return m_is_relayout_boundary || m_width.kind != LengthKind::WrapContent ||
-               m_height.kind != LengthKind::WrapContent;
+        return is_relayout_boundary_ || width_.kind != LengthKind::WrapContent ||
+               height_.kind != LengthKind::WrapContent;
     }
     /// @brief 读取上次成功布局的输入约束（布局缓存键）；present_root 对脏 boundary 子树
     ///        局部重排时据此从正确的约束入口重排。
-    [[nodiscard]] auto cached_constraints() const -> const Constraints & { return m_cached_constraints; }
+    [[nodiscard]] auto cached_constraints() const -> const Constraints & { return cached_constraints_; }
     auto mark_needs_paint() -> void { mark_needs_paint_impl(false); }
 
 #ifdef AURORA_DISPLAY_LIST
     /// @brief 使本控件 Display List 失效并沿布局父链向上传播：子树绘制命令被并入祖先 DL，
     ///        故任一后代内容变化时祖先须重录。已在失效链上则短路避免重复递归。
     auto invalidate_display_list_up() -> void {
-        if (m_dl_valid) {
-            m_dl_valid = false;
-            if (m_layout_parent != nullptr) {
-                m_layout_parent->invalidate_display_list_up();
+        if (dl_valid_) {
+            dl_valid_ = false;
+            if (layout_parent_ != nullptr) {
+                layout_parent_->invalidate_display_list_up();
             }
             return;
         }
@@ -240,15 +235,15 @@ class Widget : public std::enable_shared_from_this<Widget> {
         // 但「内容每帧变化、永不缓存」的控件（can_cache_display_list()==false）m_dl_valid 恒为
         // false，其绘制被并入祖先 DL——若不持续向上失效祖先，祖先缓存会冻结该后代的首帧
         // （如自驱动出场/轮播动画控件永远停在 ent≈0，表现为空白/淡灰）。故对此类控件必须继续上溯。
-        if (!can_cache_display_list() && (m_layout_parent != nullptr)) {
-            m_layout_parent->invalidate_display_list_up();
+        if (!can_cache_display_list() && (layout_parent_ != nullptr)) {
+            layout_parent_->invalidate_display_list_up();
         }
     }
 #endif
     /// @brief 挂在**本控件自身**上的重绘请求回调；bool=true 表示含布局脏（需重排）。
     /// 供直接持有某控件、需单独观察其标脏的场景（单元测试、自定义驱动）使用，
     /// 不参与树级脏传播；渲染器不再逐控件接线此回调（见 `on_subtree_dirty`）。
-    std::function<void(bool)> on_dirty; // NOLINT(*-non-private-member-variables-in-classes)
+    std::function<void(bool)> on_dirty;  // NOLINT(*-non-private-member-variables-in-classes)
 
     /// @brief 子树脏汇聚点：由渲染器（`Window`/`Scene`）安装在**根控件**上，全树仅一处。
     /// 任一后代 `request_frame` 时沿布局父链上溯到根，在此回调一次，
@@ -278,10 +273,10 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @brief 悬停态变化通知（由 `EventDispatcher` 在无捕获 Move 的命中链 diff 时调用）。
     /// 默认仅记录 `m_hover`（不标脏：否则悬停穿过任意控件都会触发父容器整块重绘）；
     /// 需要 hover 视觉反馈的控件（Checkbox 等）覆写并追加 `mark_needs_paint()`。
-    virtual auto on_hover_change(bool entered) -> void { m_hover = entered; }
+    virtual auto on_hover_change(bool entered) -> void { hover_ = entered; }
 
     /// @brief 指针当前是否悬停在本控件上（命中链内即算，含被子控件覆盖的父容器）。
-    [[nodiscard]] auto hovered() const -> bool { return m_hover; }
+    [[nodiscard]] auto hovered() const -> bool { return hover_; }
 
     /// @brief 本控件是否作为点击目标消费指针事件（用于点击/长按互斥与冒泡停止）。
     /// 默认：修饰链含 Clickable 修饰即为点击目标；Button 等自带 on_click 的叶控件覆写返回 true。
@@ -290,59 +285,60 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @brief 指针事件入口（specification/05-event-navigation.md §3）：在命中目标上调用。
     /// 仅在「先按下、再抬起」且未达长按阈值、未拖拽构成一次完整点击时触发 activate / Clickable 回调；
     /// 悬停移动（Move）不触发点击，但有 `draggable`/`longPress` 修饰时驱动拖拽/长按计时。
-    /// `e.handled` 仅在本控件自身消费事件（含 Clickable/Draggable/LongPress/ContextMenu 任一手势）时置位，
+    /// `e.is_handled_` 仅在本控件自身消费事件（含 Clickable/Draggable/LongPress/ContextMenu 任一手势）时置位，
     /// 否则保持 false 交由派发器沿命中链向上冒泡给父级。
     virtual auto on_pointer_event(MouseEvent &e) -> void {
         const Modifier &mod = modifier.get();
         const bool consumes = wants_click() || mod.has_gesture() || mod.has_context_menu();
         switch (e.action) {
-        case MouseAction::Press:
-            // 右键按下：打开上下文菜单
-            if (e.button == MouseButton::Right && mod.has_context_menu()) {
-                mod.open_context_menu(e.position);
-                e.handled = true;
-                return;
-            }
-            m_pressed = true;
-            m_press_pos = e.position;
-            m_last_drag_pos = e.position;
-            m_click_pending = wants_click();
-            m_drag_moved = false;
-            if (mod.has_gesture()) {
-                m_needs_gesture_tick = true; // 开启手势计时，使 tick 递归驱动长按/拖拽阈值
-                mod.invoke_drag_start(e.pointer_id);
-                mod.press_long_press(std::chrono::steady_clock::now(), e.pointer_id);
-            }
-            e.handled = consumes;
-            break;
-        case MouseAction::Release:
-            if (m_pressed) {
-                const bool fire_click = wants_click() && m_click_pending && !mod.long_press_fired() && !m_drag_moved;
-                if (fire_click) {
-                    activate();
-                    mod.invoke_click();
+            case MouseAction::Press:
+                // 右键按下：打开上下文菜单
+                if (e.button == MouseButton::Right && mod.has_context_menu()) {
+                    mod.open_context_menu(e.position);
+                    e.is_handled = true;
+                    return;
                 }
+                pressed_ = true;
+                press_pos_ = e.position;
+                last_drag_pos_ = e.position;
+                click_pending_ = wants_click();
+                drag_moved_ = false;
                 if (mod.has_gesture()) {
-                    mod.invoke_drag_end(e.pointer_id);
-                    mod.cancel_long_press(e.pointer_id);
+                    needs_gesture_tick_ = true;  // 开启手势计时，使 tick 递归驱动长按/拖拽阈值
+                    mod.invoke_drag_start(e.pointer_id);
+                    mod.press_long_press(std::chrono::steady_clock::now(), e.pointer_id);
                 }
-                m_click_pending = false;
-            }
-            m_pressed = false;
-            e.handled = consumes;
-            break;
-        case MouseAction::Move:
-            if (m_pressed && mod.has_gesture()) {
-                const Point delta = e.position - m_last_drag_pos;
-                if (std::abs(delta.x) > 1.0f || std::abs(delta.y) > 1.0f) {
-                    m_drag_moved = true;
+                e.is_handled = consumes;
+                break;
+            case MouseAction::Release:
+                if (pressed_) {
+                    const bool fire_click = wants_click() && click_pending_ && !mod.long_press_fired() && !drag_moved_;
+                    if (fire_click) {
+                        activate();
+                        mod.invoke_click();
+                    }
+                    if (mod.has_gesture()) {
+                        mod.invoke_drag_end(e.pointer_id);
+                        mod.cancel_long_press(e.pointer_id);
+                    }
+                    click_pending_ = false;
                 }
-                mod.invoke_drag(delta, e.position, e.pointer_id);
-                m_last_drag_pos = e.position;
-                e.handled = true; // 拖拽进行中：消费移动，父级不再收到 Move
-            }
-            break; // 悬停/移动不直接触发点击
-        default: break;
+                pressed_ = false;
+                e.is_handled = consumes;
+                break;
+            case MouseAction::Move:
+                if (pressed_ && mod.has_gesture()) {
+                    const Point delta = e.position - last_drag_pos_;
+                    if (std::abs(delta.x) > 1.0F || std::abs(delta.y) > 1.0F) {
+                        drag_moved_ = true;
+                    }
+                    mod.invoke_drag(delta, e.position, e.pointer_id);
+                    last_drag_pos_ = e.position;
+                    e.is_handled = true;  // 拖拽进行中：消费移动，父级不再收到 Move
+                }
+                break;  // 悬停/移动不直接触发点击
+            default:
+                break;
         }
     }
 
@@ -355,46 +351,46 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 内部委派给受保护虚函数 `tick_gestures`；本 widget 与子树经此统一入口递归计时。
     /// 优化：若本 widget 及子树均无需手势计时（`m_needs_gesture_tick == false`），直接跳过。
     virtual auto tick(std::chrono::steady_clock::time_point now) -> void {
-        if (!m_needs_gesture_tick) {
+        if (!needs_gesture_tick_) {
             return;
         }
         tick_gestures(now);
     }
 
     /// @brief 键盘事件入口（焦点 widget 上调用）。默认标记为已消费。
-    virtual auto on_key_event(KeyEvent &e) -> void { e.handled = true; }
+    virtual auto on_key_event(KeyEvent &e) -> void { e.is_handled = true; }
 
     /// @brief 滚轮事件入口（命中目标上调用）。默认标记为已消费。
-    virtual auto on_scroll(ScrollEvent &e) -> void { e.handled = true; }
+    virtual auto on_scroll(ScrollEvent &e) -> void { e.is_handled = true; }
 
     /// @brief 文本输入入口（焦点 widget 上调用）。默认标记为已消费。
-    virtual auto on_text_input(TextInputEvent &e) -> void { e.handled = true; }
+    virtual auto on_text_input(TextInputEvent &e) -> void { e.is_handled = true; }
 
-    /// @brief 操作系统文件拖放落在本控件时触发；消费时置 `e.handled` 阻止继续。
+    /// @brief 操作系统文件拖放落在本控件时触发；消费时置 `e.is_handled_` 阻止继续。
     /// 默认不处理（交给命中目标自身）。
     virtual auto on_file_drop(FileDropEvent &e) -> void { (void)e; }
 
     /// @brief 焦点变更通知（获焦 focus=true / 失焦 focus=false）。
     /// 基类默认维护 `m_isFocused` 以便 `isFocused()` 正确；子类可覆写以更新聚焦态绘制。
-    virtual auto on_focus_change(bool focused) -> void { m_is_focused = focused; }
+    virtual auto on_focus_change(bool focused) -> void { is_focused_ = focused; }
 
     // ---- 焦点能力（specification/05-event-navigation.md §4）----
     /// @brief 是否可参与焦点序（默认 true）。交互控件保持 true；纯展示控件可设 false。
-    [[nodiscard]] auto focusable() const -> bool { return m_focusable; }
+    [[nodiscard]] auto focusable() const -> bool { return focusable_; }
     auto set_focusable(bool v) -> Widget & {
-        m_focusable = v;
+        focusable_ = v;
         return *this;
     }
 
     /// @brief Tab 序权重（默认 0，越小越靠前）；move_focus 按此排序。
-    [[nodiscard]] auto tab_index() const -> int { return m_tab_index; }
+    [[nodiscard]] auto tab_index() const -> int { return tab_index_; }
     auto set_tab_index(int i) -> Widget & {
-        m_tab_index = i;
+        tab_index_ = i;
         return *this;
     }
 
     /// @brief 当前是否持有焦点。
-    [[nodiscard]] auto is_focused() const -> bool { return m_is_focused; }
+    [[nodiscard]] auto is_focused() const -> bool { return is_focused_; }
 
     /// @brief 经派发期间当前焦点管理器主动请求焦点（无管理器时无效）。
     /// @note 定义见 `src/aurora/widget/widget.cpp`；读取 `current_focus_manager()`，无需持有指针。
@@ -414,20 +410,20 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 子类覆写时应先调用基类默认实现以保留通用属性。
     /// @note Rebuildable: yes, via from_json
     virtual auto serialize_props(Json &props) const -> void {
-        props["width"] = length_to_json(m_width);
-        props["height"] = length_to_json(m_height);
+        props["width"] = length_to_json(width_);
+        props["height"] = length_to_json(height_);
         props["show"] = show.get();
-        props["overflow"] = overflow_strategy_to_json(m_overflow);
+        props["overflow"] = overflow_strategy_to_json(overflow_);
     }
 
     /// @brief 从 props JSON 反序列化自有属性（to_json/from_json 闭环）。
     /// 子类覆写时应先调用基类默认实现以恢复通用属性。
     virtual auto deserialize_props(const Json &props) -> void {
         if (props.contains("width")) {
-            m_width = json_to_length(props["width"]);
+            width_ = json_to_length(props["width"]);
         }
         if (props.contains("height")) {
-            m_height = json_to_length(props["height"]);
+            height_ = json_to_length(props["height"]);
         }
         if (props.contains("show")) {
             show.set(props["show"].get<bool>());
@@ -444,8 +440,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
     [[nodiscard]] virtual auto validate_props() const -> Result<void> { return Result<void>{}; }
 
     /// @brief 反序列化时接纳子节点列表（Container 覆写；默认无子节点）。
-    virtual auto adopt_children(std::vector<Node> && /*kids*/) -> void {
-    } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
+    virtual auto adopt_children(std::vector<Node> && /*kids*/) -> void {}
 
     /// @brief 遍历直接子节点（结构快照用；默认无子节点）。
     virtual auto for_each_child(const std::function<void(const Widget &)> & /*fn*/) const -> void {}
@@ -457,11 +453,11 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///       `request_frame` 沿父链上溯断链、脏标记无法到达渲染根（历史 bug：grid_rows 滚动失效）。
     /// @warning 返回的引用在树重建（子节点增删）期间可能失效，仅限单帧内只读遍历。
     [[nodiscard]] virtual auto child_nodes() const -> const std::vector<Node> & {
-        static constexpr std::vector<Node> empty;
-        return empty;
+        static constexpr std::vector<Node> EMPTY;
+        return EMPTY;
     }
 
-    [[nodiscard]] auto size() const -> Size { return m_size; }
+    [[nodiscard]] auto size() const -> Size { return size_; }
 
   protected:
     /// @brief 子类实现：在给定约束下返回自身尺寸（可写入子节点 bounds）。
@@ -498,21 +494,21 @@ class Widget : public std::enable_shared_from_this<Widget> {
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    bool m_needs_gesture_tick = false; ///< 本 widget 修饰链是否含需每帧计时的手势（LongPress/Tooltip 等）
-    Size m_size;
-    bool m_needs_layout = false;
-    bool m_needs_paint = false;
+    bool needs_gesture_tick_ = false;  ///< 本 widget 修饰链是否含需每帧计时的手势（LongPress/Tooltip 等）
+    Size size_;
+    bool needs_layout_ = false;
+    bool needs_paint_ = false;
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
     // ---- why_trace 热路径埋点（AURORA_ENABLE_DEBUG）----
     // 私有 impl：公开 mark_needs_layout / mark_needs_paint 委托至此；传播点显式传 propagated=true，
     // 使 why_trace 能区分「业务/状态直接触发的根因」与「引擎沿父链自动冒泡的传播」。
     auto mark_needs_layout_impl([[maybe_unused]] bool propagated) -> void {
-        m_needs_layout = true;
+        needs_layout_ = true;
 #ifdef AURORA_LAYOUT_CACHE
-        m_layout_cache_valid = false;
-        if ((m_layout_parent != nullptr) && !is_relayout_boundary()) {
-            m_layout_parent->mark_needs_layout_impl(true);
+        layout_cache_valid_ = false;
+        if ((layout_parent_ != nullptr) && !is_relayout_boundary()) {
+            layout_parent_->mark_needs_layout_impl(true);
         }
 #endif
 #ifdef AURORA_DISPLAY_LIST
@@ -524,7 +520,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
 #endif
     }
     auto mark_needs_paint_impl([[maybe_unused]] bool propagated) -> void {
-        m_needs_paint = true;
+        needs_paint_ = true;
 #ifdef AURORA_DISPLAY_LIST
         invalidate_display_list_up();
 #endif
@@ -536,57 +532,57 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     // ---- 布局缓存（AURORA_LAYOUT_CACHE）----
-    bool m_layout_cache_valid = false;   ///< 当前 m_cached_size 是否对应 m_cached_constraints
-    Constraints m_cached_constraints{};  ///< 上一次成功布局时的输入约束（缓存键）
-    Size m_cached_size{};                ///< 上一次成功布局得到的尺寸
-    Widget *m_layout_parent = nullptr;   ///< 布局父节点（容器在布局入口设置）
-    bool m_is_relayout_boundary = false; ///< 显式重排边界声明（见 is_relayout_boundary）
-    bool m_mounted = false;       ///< 是否已挂载（mount 幂等保护，避免转场切换复用同一 widget 实例时重复订阅信号）
-    bool m_pressed = false;       ///< 指针是否在本控件上按下（用于识别一次完整点击）
-    bool m_hover = false;         ///< 指针是否悬停在本控件上（EventDispatcher 命中链 diff 维护）
-    bool m_click_pending = false; ///< 本次按下后待触发点击（松开且未达长按/拖拽阈值时触发）
-    bool m_drag_moved = false;    ///< 本次按下后是否发生超过阈值的移动（用于抑制点击）
-    Point m_press_pos{ .x = 0.0f, .y = 0.0f };     ///< 本次按下的绝对坐标（拖拽位移基准）
-    Point m_last_drag_pos{ .x = 0.0f, .y = 0.0f }; ///< 上次 Move 的绝对坐标（计算拖拽增量）
+    bool layout_cache_valid_ = false;  ///< 当前 m_cached_size 是否对应 m_cached_constraints
+    Constraints cached_constraints_{};  ///< 上一次成功布局时的输入约束（缓存键）
+    Size cached_size_{};  ///< 上一次成功布局得到的尺寸
+    Widget *layout_parent_ = nullptr;  ///< 布局父节点（容器在布局入口设置）
+    bool is_relayout_boundary_ = false;  ///< 显式重排边界声明（见 is_relayout_boundary）
+    bool mounted_ = false;  ///< 是否已挂载（mount 幂等保护，避免转场切换复用同一 widget 实例时重复订阅信号）
+    bool pressed_ = false;  ///< 指针是否在本控件上按下（用于识别一次完整点击）
+    bool hover_ = false;  ///< 指针是否悬停在本控件上（EventDispatcher 命中链 diff 维护）
+    bool click_pending_ = false;  ///< 本次按下后待触发点击（松开且未达长按/拖拽阈值时触发）
+    bool drag_moved_ = false;  ///< 本次按下后是否发生超过阈值的移动（用于抑制点击）
+    Point press_pos_{.x = 0.0F, .y = 0.0F};  ///< 本次按下的绝对坐标（拖拽位移基准）
+    Point last_drag_pos_{.x = 0.0F, .y = 0.0F};  ///< 上次 Move 的绝对坐标（计算拖拽增量）
 
-    Length m_width;                                          ///< 显式宽度意图（默认 WrapContent）
-    Length m_height;                                         ///< 显式高度意图（默认 WrapContent）
-    OverflowStrategy m_overflow = OverflowStrategy::Visible; ///< 溢出策略（默认 Visible）
+    Length width_;  ///< 显式宽度意图（默认 WrapContent）
+    Length height_;  ///< 显式高度意图（默认 WrapContent）
+    OverflowStrategy overflow_ = OverflowStrategy::Visible;  ///< 溢出策略（默认 Visible）
 
-    Rect m_focus_bounds; ///< 布局后的全局盒（供方向键焦点导航使用，由布局系统写入）
+    Rect focus_bounds_;  ///< 布局后的全局盒（供方向键焦点导航使用，由布局系统写入）
 
     /// @brief 最近一次 paint 接收的绝对（窗口逻辑 dp）盒；脏区标记据此标记精确几何，
     ///        使 `Window::present_root` 的脏区裁剪绘制（push_clip）命中正确区域，避免整帧重绘。
-    Rect m_paint_bounds{};
+    Rect paint_bounds_{};
 
 #ifdef AURORA_ENABLE_DEBUG
     /// @brief 调试叠层（repaint_highlight）用：本控件最近一次实际重绘（render_into 入口）所在的
     ///        调试帧序号。值为 `aurora::debug::current_debug_frame()`；与当前帧相等即代表本帧重绘。
-    std::uint64_t m_debug_paint_frame = 0;
+    std::uint64_t debug_paint_frame_ = 0;
 #endif
 
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
   public:
     /// @brief 设置布局后的全局盒（由父节点/布局系统写入，供方向键焦点导航）。
-    auto set_focus_bounds(Rect r) -> void { m_focus_bounds = r; }
+    auto set_focus_bounds(Rect r) -> void { focus_bounds_ = r; }
     /// @brief 读取布局后的全局盒。
-    [[nodiscard]] auto focus_bounds() const -> Rect { return m_focus_bounds; }
+    [[nodiscard]] auto focus_bounds() const -> Rect { return focus_bounds_; }
 
     /// @brief 读取最近一次 paint 的绝对（窗口逻辑 dp）盒（脏区标记用）。
-    [[nodiscard]] auto paint_bounds() const -> Rect { return m_paint_bounds; }
+    [[nodiscard]] auto paint_bounds() const -> Rect { return paint_bounds_; }
 
 #ifdef AURORA_ENABLE_DEBUG
     /// @brief 读取最近一次实际重绘所在的调试帧序号（repaint_highlight 用）。
-    ///        Release 构建不暴露此成员（见 `m_debug_paint_frame`）。
-    [[nodiscard]] auto debug_paint_frame() const -> std::uint64_t { return m_debug_paint_frame; }
+    ///        Release 构建不暴露此成员（见 `debug_paint_frame_`）。
+    [[nodiscard]] auto debug_paint_frame() const -> std::uint64_t { return debug_paint_frame_; }
 #endif
 
   protected:
     /// @brief 注册一个响应式信号：变化 → markNeedsLayout/Paint。
     auto track(SignalViewBase &sig, std::vector<std::unique_ptr<Effect>> &effects) -> void {
         auto e = std::make_unique<Effect>([this, &sig]() -> void {
-            sig.read(); // 在活跃 Effect 下登记依赖
+            sig.read();  // 在活跃 Effect 下登记依赖
             mark_needs_layout();
             mark_needs_paint();
         });
@@ -595,14 +591,14 @@ class Widget : public std::enable_shared_from_this<Widget> {
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    std::vector<std::unique_ptr<Effect>> m_effects;
-    bool m_focusable = true;   ///< 是否可参与焦点序（specification/05-event-navigation.md §4）
-    int m_tab_index = 0;       ///< Tab 序权重（越小越靠前）
-    bool m_is_focused = false; ///< 当前是否持有焦点
+    std::vector<std::unique_ptr<Effect>> effects_;
+    bool focusable_ = true;  ///< 是否可参与焦点序（specification/05-event-navigation.md §4）
+    int tab_index_ = 0;  ///< Tab 序权重（越小越靠前）
+    bool is_focused_ = false;  ///< 当前是否持有焦点
     // NOLINTEND(*-non-private-member-variables-in-classes)
     /// @brief 声明本控件为 relayout boundary（尺寸由约束决定、不依赖子节点）。
     ///        虚拟化列表/滚动容器等应在构造时调用，以截断布局脏向上冒泡、避免整树重排。
-    auto set_relayout_boundary(bool v) -> void { m_is_relayout_boundary = v; }
+    auto set_relayout_boundary(bool v) -> void { is_relayout_boundary_ = v; }
 
   private:
     /// @brief 绘制内容主体（背景 + on_paint + 边框），供直接绘制与离屏合成复用。
@@ -617,15 +613,15 @@ class Widget : public std::enable_shared_from_this<Widget> {
     auto render_into(Painter &dst, const Rect &local, const BuildContext &ctx) -> void;
 
     /// @brief 离屏缓存（`Modifier::cache_layer`）状态：缓存位图、尺寸与失效标志。
-    mutable std::unique_ptr<Painter> m_paint_cache;
-    mutable Size m_paint_cache_size{ .width = 0.0f, .height = 0.0f };
-    mutable bool m_paint_cache_valid = false;
+    mutable std::unique_ptr<Painter> paint_cache_;
+    mutable Size paint_cache_size_{.width = 0.0F, .height = 0.0F};
+    mutable bool paint_cache_valid_ = false;
 
 #ifdef AURORA_DISPLAY_LIST
     // ---- Display List 缓存（AURORA_DISPLAY_LIST）----
-    DisplayList m_display_list; ///< 本控件子树（含后代）的录制命令缓冲
-    bool m_dl_valid = false;    ///< 缓存是否有效（内容未变且 bounds 未变）
-    Rect m_last_paint_bounds{}; ///< 上次录制时的绘制全局矩形（bounds 变化须重录）
+    DisplayList display_list_;  ///< 本控件子树（含后代）的录制命令缓冲
+    bool dl_valid_ = false;  ///< 缓存是否有效（内容未变且 bounds 未变）
+    Rect last_paint_bounds_{};  ///< 上次录制时的绘制全局矩形（bounds 变化须重录）
 #endif
 
   protected:
@@ -640,7 +636,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// `invalidate_display_list_up` / `mark_needs_layout` 的上溯同量级，不引入新数量级。
     auto request_frame(bool layout = false) -> void {
         const auto *top = this;
-        for (Widget *p = m_layout_parent; p != nullptr; p = p->m_layout_parent) {
+        for (Widget *p = layout_parent_; p != nullptr; p = p->layout_parent_) {
             p->on_descendant_dirty(*this, layout);
             top = p;
         }
@@ -648,13 +644,14 @@ class Widget : public std::enable_shared_from_this<Widget> {
             top->on_subtree_dirty(*this, layout);
         }
         if (on_dirty) {
-            on_dirty(layout); // 直接挂在本控件上的观察回调（单测/自定义驱动）
+            on_dirty(layout);  // 直接挂在本控件上的观察回调（单测/自定义驱动）
         }
         // StrictMode 不变量：已接入树（有布局父）却上溯不到任何汇聚点 ⇒ 布局父链断裂，
         // 本次脏标记被静默丢弃（表现为自驱动动画冻结 / 白屏）。属编程错误，严格模式下硬失败。
-        if (strict_mode() == StrictMode::On && m_layout_parent != nullptr && !top->on_subtree_dirty && !on_dirty) {
-            AURORA_ASSERT(false, "脏标记未上达渲染根：布局父链断裂——某容器未经 Widget::layout() 入口"
-                                 "重排其子节点（或就地重排时未 set_layout_parent），后代标脏将被丢弃");
+        if (strict_mode() == StrictMode::On && layout_parent_ != nullptr && !top->on_subtree_dirty && !on_dirty) {
+            AURORA_ASSERT(false,
+                          "脏标记未上达渲染根：布局父链断裂——某容器未经 Widget::layout() 入口"
+                          "重排其子节点（或就地重排时未 set_layout_parent），后代标脏将被丢弃");
         }
     }
 };
@@ -666,17 +663,17 @@ class Widget : public std::enable_shared_from_this<Widget> {
  */
 class Container : public Widget {
   protected:
-    std::vector<Node> m_children; // NOLINT(*-non-private-member-variables-in-classes)
+    std::vector<Node> children_;  // NOLINT(*-non-private-member-variables-in-classes)
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         // child.bounds() 存的是“相对本容器内容区”的局部坐标；
         // 绘制前需叠加本容器内容区全局原点（bounds.origin），转为全局坐标。
 #ifdef AURORA_OCCLUSION_CULLING
-        const Rect clip = p.clip_bounds(); // 当前有效裁剪（视口/圆角容器等）逻辑 dp 全局坐标
+        const Rect clip = p.clip_bounds();  // 当前有效裁剪（视口/圆角容器等）逻辑 dp 全局坐标
 #endif
-        for (Node &child : m_children) {
+        for (Node &child : children_) {
             const Rect cb = child.bounds();
-            const auto global{ Rect{ .origin = bounds.origin + cb.origin, .size = cb.size } };
+            const auto global{Rect{.origin = bounds.origin + cb.origin, .size = cb.size}};
 #ifdef AURORA_OCCLUSION_CULLING
             // 遮挡剔除：子控件全局盒与裁剪区无交集则整棵子树跳过（保守外接矩形判定）。
             if (!global.intersects(clip)) {
@@ -691,12 +688,12 @@ class Container : public Widget {
         // 反向遍历：与 on_paint 的绘制顺序一致（后者绘制=视觉顶层），
         // 因此重叠子节点中「视觉在最上层」的控件优先命中，避免底层控件在重叠区
         // 抢走本应属于顶层控件的事件（即「顶层控件被底层控件遮挡」问题）。
-        for (auto &child : std::views::reverse(m_children)) {
+        for (auto &child : std::views::reverse(children_)) {
             const Rect cb = child.bounds();
             // local 处于本容器局部坐标系：子节点位置为 cb（相对本容器内容区）。
             if (cb.contains(local)) {
                 // 向下传递子节点“全局”盒（本容器全局原点 + 子相对原点），供更深层级本地化。
-                const auto global{ Rect{ .origin = bounds.origin + cb.origin, .size = cb.size } };
+                const auto global{Rect{.origin = bounds.origin + cb.origin, .size = cb.size}};
                 Widget *r = child.widget().hit_test(local - cb.origin, global, ctx);
                 if (r != nullptr) {
                     return r;
@@ -709,11 +706,11 @@ class Container : public Widget {
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
         // 同样反向遍历，使重叠时视觉顶层控件成为命中链最深（最后派发）目标。
-        for (auto &child : std::views::reverse(m_children)) {
+        for (auto &child : std::views::reverse(children_)) {
             const Rect cb = child.bounds();
             if (cb.contains(local)) {
                 // global.origin 即子节点全局 origin，随命中链带入，供派发器本地化坐标。
-                const auto global{ Rect{ .origin = bounds.origin + cb.origin, .size = cb.size } };
+                const auto global{Rect{.origin = bounds.origin + cb.origin, .size = cb.size}};
                 std::vector<HitNode> r = child.widget().hit_test_chain(local - cb.origin, global, ctx);
                 if (!r.empty()) {
                     return r;
@@ -724,14 +721,14 @@ class Container : public Widget {
     }
 
     auto on_mount(const BuildContext &ctx) -> void override {
-        for (Node &child : m_children) {
+        for (Node &child : children_) {
             child.widget().mount(ctx);
         }
     }
 
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
-        Widget::tick_gestures(now); // 本节点修饰链（LongPress 等）
-        for (Node &child : m_children) {
+        Widget::tick_gestures(now);  // 本节点修饰链（LongPress 等）
+        for (Node &child : children_) {
             child.widget().tick(now);
         }
     }
@@ -739,50 +736,50 @@ class Container : public Widget {
   public:
     /// @brief 公开 tick 入口（覆写基类 public virtual）：递归子树计时，保持对外可见。
     auto tick(std::chrono::steady_clock::time_point now) -> void override {
-        if (m_needs_gesture_tick) {
+        if (needs_gesture_tick_) {
             // 经虚函数 tick_gestures 分发：默认处理 LongPress/Tooltip；
             // 派生类（如 ToastHost 的过期、VideoPlayer 的播放时钟）可扩展自身每帧逻辑。
             tick_gestures(now);
         }
-        for (Node &child : m_children) {
+        for (Node &child : children_) {
             child.widget().tick(now);
         }
     }
     auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
-        for (const Node &child : m_children) {
+        for (const Node &child : children_) {
             fn(child.widget());
         }
     }
 
     auto adopt_children(std::vector<Node> &&kids) -> void override {
-        m_children = std::move(kids);
-    } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+        children_ = std::move(kids);
+    }  // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
 
-    [[nodiscard]] auto child_nodes() const -> const std::vector<Node> & override { return m_children; }
+    [[nodiscard]] auto child_nodes() const -> const std::vector<Node> & override { return children_; }
 
     /// @brief 默认收集子节点信号（遍历 `m_children`）。
     /// 容器子类若有自身信号，覆写时先 push 自身信号再调用 `Container::collect_signals(out)`。
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override;
 
     /// @brief 便捷辅助：从扁平初始化列表接管子节点（供 Column/Row 等便捷构造复用，避免重复代码）。
-    auto set_children(std::initializer_list<Node> kids) -> void { m_children.assign(kids.begin(), kids.end()); }
+    auto set_children(std::initializer_list<Node> kids) -> void { children_.assign(kids.begin(), kids.end()); }
 
     /// @brief 运行时追加子节点（aurora::ui 工厂层与动态增子复用）。尾插并标脏，下一帧重排。
     /// @note 子控件生命周期由父树 `shared_ptr` 持有，返回/持有的裸指针仅在父树存活期间有效。
     auto add(const Node &child) -> void {
-        m_children.push_back(child);
+        children_.push_back(child);
         mark_needs_layout();
     }
 
     /// @brief 运行时访问第 `i` 个子节点（可变，用于设置 `id` / 替换内容等）。越界抛 `std::out_of_range`。
-    [[nodiscard]] auto child(size_t i) -> Node & { return m_children.at(i); }
+    [[nodiscard]] auto child(size_t i) -> Node & { return children_.at(i); }
     /// @brief 子节点数量。
-    [[nodiscard]] auto child_count() const -> size_t { return m_children.size(); }
+    [[nodiscard]] auto child_count() const -> size_t { return children_.size(); }
 
     /// @brief 布局入口（AURORA_LAYOUT_CACHE）：先为所有子节点登记布局父节点，
     ///        再走基类布局（命中缓存时整体跳过子树，依赖父链保证安全）。
     auto layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        for (Node &child : m_children) {
+        for (Node &child : children_) {
             child.widget().set_layout_parent(this);
         }
         return Widget::layout(c, ctx);
@@ -800,7 +797,7 @@ class LeafWidget : public Widget {
         (void)ctx;
         // local 是相对本 widget 原点的局部坐标，需与“局部矩形”（原点 0）比较；
         // bounds 含绝对 origin，直接用 bounds.contains(local) 会使非原点控件永远命中失败。
-        return Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = bounds.size }.contains(local) ? this : nullptr;
+        return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local) ? this : nullptr;
     }
 
 #pragma GCC diagnostic push
@@ -813,8 +810,8 @@ class LeafWidget : public Widget {
         // bounds.origin 即本控件全局 origin，随命中链带入，供派发器本地化坐标。
         // weak_from_this() 返回的 weak_ptr 已被安全拷贝进 HitNode（非悬垂）；
         // 此处抑制 GCC 对该标准库惯用法的已知 -Wdangling-pointer 误报。
-        return Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = bounds.size }.contains(local)
-                   ? std::vector{ HitNode{ this, weak_from_this(), bounds.origin } }
+        return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local)
+                   ? std::vector{HitNode{this, weak_from_this(), bounds.origin}}
                    : std::vector<HitNode>{};
     }
 #pragma GCC diagnostic pop
@@ -828,69 +825,69 @@ class LeafWidget : public Widget {
 class SingleChild : public Widget {
   protected:
     SingleChild() = default;
-    explicit SingleChild(Node child) : m_child(std::move(child)) {}
+    explicit SingleChild(Node child) : child_(std::move(child)) {}
 
     /// @brief 运行时替换唯一子节点（aurora::ui 工厂层复用）。标脏，下一帧重排。
     auto set_child(Node child) -> void {
-        m_child = std::move(child);
-        m_child_view_valid = false;
+        child_ = std::move(child);
+        child_view_valid_ = false;
         mark_needs_layout();
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    Node m_child;
+    Node child_;
     /// @brief child_nodes() 视图缓存（const 方法返回引用需持久存储；set_child 时置失效）。
-    mutable std::vector<Node> m_child_view;
-    mutable bool m_child_view_valid = false;
+    mutable std::vector<Node> child_view_;
+    mutable bool child_view_valid_ = false;
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        m_child.widget().paint(p, bounds, ctx);
+        child_.widget().paint(p, bounds, ctx);
     }
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * override {
-        return m_child.widget().hit_test(local, bounds, ctx);
+        return child_.widget().hit_test(local, bounds, ctx);
     }
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
-        return m_child.widget().hit_test_chain(local, bounds, ctx);
+        return child_.widget().hit_test_chain(local, bounds, ctx);
     }
-    auto on_mount(const BuildContext &ctx) -> void override { m_child.widget().mount(ctx); }
+    auto on_mount(const BuildContext &ctx) -> void override { child_.widget().mount(ctx); }
 
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
-        Widget::tick_gestures(now); // 本节点修饰链
-        m_child.widget().tick(now);
+        Widget::tick_gestures(now);  // 本节点修饰链
+        child_.widget().tick(now);
     }
 
   public:
     /// @brief 公开 tick 入口（覆写基类 public virtual）：递归子控件计时，保持对外可见。
     auto tick(std::chrono::steady_clock::time_point now) -> void override {
-        if (m_needs_gesture_tick) {
+        if (needs_gesture_tick_) {
             // 经虚函数 tick_gestures 分发：默认处理 LongPress/Tooltip；
             // 派生类（如 ToastHost 的过期）可扩展自身每帧逻辑。
             tick_gestures(now);
         }
-        m_child.widget().tick(now);
+        child_.widget().tick(now);
     }
 
-    auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override { fn(m_child.widget()); }
+    auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override { fn(child_.widget()); }
 
     /// @brief 单子节点视图（惰性重建缓存：m_child 变化时经 set_child 置失效，避免每次拷贝）。
     [[nodiscard]] auto child_nodes() const -> const std::vector<Node> & override {
-        if (!m_child_view_valid) {
-            m_child_view.clear();
-            if (m_child) {
-                m_child_view.push_back(m_child);
+        if (!child_view_valid_) {
+            child_view_.clear();
+            if (child_) {
+                child_view_.push_back(child_);
             }
-            m_child_view_valid = true;
+            child_view_valid_ = true;
         }
-        return m_child_view;
+        return child_view_;
     }
 
     /// @brief 布局入口（AURORA_LAYOUT_CACHE）：为子节点登记布局父节点，再走基类布局。
     auto layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        m_child.widget().set_layout_parent(this);
+        child_.widget().set_layout_parent(this);
         return Widget::layout(c, ctx);
     }
 };
 
-} // namespace aurora
+}  // namespace aurora

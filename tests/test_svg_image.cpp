@@ -7,7 +7,6 @@
 #include <string>
 
 #include "aurora/core/image.h"
-
 #include "test_harness.h"
 
 using aurora::Image;
@@ -22,10 +21,12 @@ auto write_file(const std::string &path, const std::string &content) -> void {
 /// 读取像素 (x,y) 的 RGBA。
 auto px(const Image &img, int x, int y) -> std::array<std::uint8_t, 4> {
     const std::size_t off = ((static_cast<std::size_t>(y) * img.width) + x) * 4;
-    return { img.pixels[off], img.pixels[off + 1], img.pixels[off + 2], img.pixels[off + 3] };
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    return {img.pixels[off], img.pixels[off + 1], img.pixels[off + 2], img.pixels[off + 3]};
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     // 临时目录：ctest 把 CWD 设为 build/，相对路径 "build/..." 会失效；用系统临时目录保证两种跑法都可写。
@@ -45,9 +46,13 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(img.height == 20);
         // 中心红色
         auto center = px(img, 10, 10);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(center[0] == 255 && center[1] == 0 && center[2] == 0 && center[3] == 255);
         // 角落透明
         auto corner = px(img, 1, 1);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(corner[3] == 0);
     }
 
@@ -61,9 +66,13 @@ AURORA_TEST() {
         const Image &img = r.value();
         AURORA_TEST_CHECK(img.width == 30);
         auto center = px(img, 15, 15);
-        AURORA_TEST_CHECK(center[2] == 255); // 蓝
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(center[2] == 255);  // 蓝
         auto outside = px(img, 2, 2);
-        AURORA_TEST_CHECK(outside[3] == 0); // 圆外透明
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(outside[3] == 0);  // 圆外透明
     }
 
     // ---- 3. polygon（三角形）----
@@ -76,9 +85,13 @@ AURORA_TEST() {
         const Image &img = r.value();
         // 三角形内部（底部中心）
         auto inside = px(img, 10, 15);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(inside[1] == 255);
         // 三角形外（左上角）
         auto outside = px(img, 2, 2);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(outside[3] == 0);
     }
 
@@ -93,8 +106,12 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(r.ok());
         const Image &img = r.value();
         auto on_line = px(img, 10, 10);
-        AURORA_TEST_CHECK(on_line[3] == 255); // 线上不透明
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(on_line[3] == 255);  // 线上不透明
         auto off_line = px(img, 10, 2);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(off_line[3] == 0);
     }
 
@@ -108,7 +125,9 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(r.value().width == 100);
         AURORA_TEST_CHECK(r.value().height == 100);
         auto c = px(r.value(), 50, 50);
-        AURORA_TEST_CHECK(c[2] == 255); // 放大后仍纯色（无插值糊化）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(c[2] == 255);  // 放大后仍纯色（无插值糊化）
     }
 
     // ---- 6. 无扩展名但内容嗅探 <svg ----
@@ -132,7 +151,9 @@ AURORA_TEST() {
         auto r = Image::load(path);
         AURORA_TEST_CHECK(r.ok());
         auto c = px(r.value(), 5, 5);
-        AURORA_TEST_CHECK(c[0] == 128); // rect 仍绘制
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(c[0] == 128);  // rect 仍绘制
     }
 
     // ---- 8. 非 SVG 内容报错 ----
@@ -153,9 +174,9 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(r.ok());
         const Image &img = r.value();
         // 中心不透明
-        AURORA_TEST_CHECK(px(img, 10, 10)[3] == 255);
+        AURORA_TEST_CHECK(px(img, 10, 10).at(3) == 255);
         // 最角落被圆角裁掉（透明）
-        AURORA_TEST_CHECK(px(img, 0, 0)[3] == 0);
+        AURORA_TEST_CHECK(px(img, 0, 0).at(3) == 0);
     }
 
     // ---- 10. 后画覆盖先画（文档序）----
@@ -168,7 +189,9 @@ AURORA_TEST() {
         auto r = Image::load(path);
         AURORA_TEST_CHECK(r.ok());
         auto c = px(r.value(), 5, 5);
-        AURORA_TEST_CHECK(c[2] == 255 && c[0] == 0); // 蓝覆盖红
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(c[2] == 255 && c[0] == 0);  // 蓝覆盖红
     }
 
     // ---- 11. ellipse 光栅化（各向异性 rx/ry）----
@@ -182,13 +205,17 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(img.width == 20 && img.height == 20);
         // 中心在椭圆内 → 红色不透明
         auto center = px(img, 10, 10);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(center[0] == 255 && center[3] == 255);
         // 角落在椭圆外 → 透明
-        AURORA_TEST_CHECK(px(img, 0, 0)[3] == 0);
+        AURORA_TEST_CHECK(px(img, 0, 0).at(3) == 0);
         // 竖直方向超出 ry（y=0 距中心 10 > ry=4）→ 透明
-        AURORA_TEST_CHECK(px(img, 10, 0)[3] == 0);
+        AURORA_TEST_CHECK(px(img, 10, 0).at(3) == 0);
         // 水平方向在 rx 内、竖直在 ry 内（x=16 距中心 6 < rx=8）→ 不透明
         auto horiz = px(img, 16, 10);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(horiz[0] == 255 && horiz[3] == 255);
     }
 
@@ -205,7 +232,9 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(img.width == 30);
         AURORA_TEST_CHECK(img.height == 22);
         auto c = px(img, 15, 11);
-        AURORA_TEST_CHECK(c[1] == 128); // 回退后整图填充 green（CSS green = #008000 → G=128）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(c[1] == 128);  // 回退后整图填充 green（CSS green = #008000 → G=128）
     }
     {
         // viewBox 仅 2 个数（<4）：仍回退到 width/height
@@ -246,15 +275,15 @@ AURORA_TEST() {
         // 正确解析（x=5,y=5,w=h=10）：rect 覆盖 [5,15)×[5,15)，圆角半径 min(rx, w/2)=5。
         // (7,12)：新矩形内部（距左上角圆心 (10,10) 的 dx=3,dy=2，13<=25 圆内）→ 不透明。
         //         若 x 被 rx 污染为 10（旧缺陷），rect 覆盖 [10,20)，此点透明。
-        AURORA_TEST_CHECK(px(img, 7, 12)[3] == 255);
+        AURORA_TEST_CHECK(px(img, 7, 12).at(3) == 255);
         // (17,17)：新矩形外 → 透明；若 x 被污染为 10 则在旧矩形内 → 不透明。
-        AURORA_TEST_CHECK(px(img, 17, 17)[3] == 0);
+        AURORA_TEST_CHECK(px(img, 17, 17).at(3) == 0);
     }
 
     // ---- 15. 形状数量上限（防恶意文档 DoS）----
     {
         std::string doc = R"(<svg viewBox="0 0 4 4">)";
-        doc.reserve(std::size_t{ 4096 } * 64);
+        doc.reserve(std::size_t{4096} * 64);
         for (int i = 0; i < 5000; ++i) {
             doc += R"(<rect width="4" height="4" fill="red"/>)";
         }
@@ -262,6 +291,6 @@ AURORA_TEST() {
         const std::string path = dir + "/svg_too_many_shapes.svg";
         write_file(path, doc);
         auto r = Image::load(path);
-        AURORA_TEST_CHECK(!r.ok()); // >4096 形状直接拒绝解码
+        AURORA_TEST_CHECK(!r.ok());  // >4096 形状直接拒绝解码
     }
 }

@@ -21,9 +21,9 @@ namespace aurora {
  * @endcode
  */
 struct UndoCommand {
-    std::function<void()> redo; ///< 执行/重做动作
-    std::function<void()> undo; ///< 撤销动作
-    std::string description;    ///< 描述（供历史面板/调试）
+    std::function<void()> redo;  ///< 执行/重做动作
+    std::function<void()> undo;  ///< 撤销动作
+    std::string description;  ///< 描述（供历史面板/调试）
 };
 
 /**
@@ -43,16 +43,16 @@ class UndoStack {
     /// @brief 入栈并立即执行 redo；清空当前位置之后的重做历史。
     auto push(UndoCommand cmd) -> void {
         // 截断重做分支
-        m_commands.resize(m_index);
+        commands_.resize(index_);
         if (cmd.redo) {
             cmd.redo();
         }
-        m_commands.push_back(std::move(cmd));
-        ++m_index;
+        commands_.push_back(std::move(cmd));
+        ++index_;
         // 深度上限：丢弃最旧
-        while (m_commands.size() > m_limit) {
-            m_commands.erase(m_commands.begin());
-            --m_index;
+        while (commands_.size() > limit_) {
+            commands_.erase(commands_.begin());
+            --index_;
         }
     }
 
@@ -61,9 +61,9 @@ class UndoStack {
         if (!can_undo()) {
             return false;
         }
-        --m_index;
-        if (m_commands[m_index].undo) {
-            m_commands[m_index].undo();
+        --index_;
+        if (commands_[index_].undo) {
+            commands_[index_].undo();
         }
         return true;
     }
@@ -73,46 +73,46 @@ class UndoStack {
         if (!can_redo()) {
             return false;
         }
-        if (m_commands[m_index].redo) {
-            m_commands[m_index].redo();
+        if (commands_[index_].redo) {
+            commands_[index_].redo();
         }
-        ++m_index;
+        ++index_;
         return true;
     }
 
-    [[nodiscard]] auto can_undo() const -> bool { return m_index > 0; }
-    [[nodiscard]] auto can_redo() const -> bool { return m_index < m_commands.size(); }
+    [[nodiscard]] auto can_undo() const -> bool { return index_ > 0; }
+    [[nodiscard]] auto can_redo() const -> bool { return index_ < commands_.size(); }
 
     /// @brief 下一次 undo 撤销的命令描述（不可撤销时空串）。
     [[nodiscard]] auto undo_description() const -> std::string {
-        return can_undo() ? m_commands[m_index - 1].description : std::string{};
+        return can_undo() ? commands_[index_ - 1].description : std::string{};
     }
     /// @brief 下一次 redo 重做的命令描述（不可重做时空串）。
     [[nodiscard]] auto redo_description() const -> std::string {
-        return can_redo() ? m_commands[m_index].description : std::string{};
+        return can_redo() ? commands_[index_].description : std::string{};
     }
 
     /// @brief 历史命令总数（含可重做部分）。
-    [[nodiscard]] auto count() const -> std::size_t { return m_commands.size(); }
+    [[nodiscard]] auto count() const -> std::size_t { return commands_.size(); }
     /// @brief 当前位置（= 已执行命令数）。
-    [[nodiscard]] auto index() const -> std::size_t { return m_index; }
+    [[nodiscard]] auto index() const -> std::size_t { return index_; }
 
     /// @brief 设置深度上限（立即按新上限丢弃最旧）。
     auto set_limit(std::size_t limit) -> void {
-        m_limit = limit == 0 ? 1 : limit;
-        while (m_commands.size() > m_limit) {
-            m_commands.erase(m_commands.begin());
-            if (m_index > 0) {
-                --m_index;
+        limit_ = limit == 0 ? 1 : limit;
+        while (commands_.size() > limit_) {
+            commands_.erase(commands_.begin());
+            if (index_ > 0) {
+                --index_;
             }
         }
     }
-    [[nodiscard]] auto limit() const -> std::size_t { return m_limit; }
+    [[nodiscard]] auto limit() const -> std::size_t { return limit_; }
 
     /// @brief 清空全部历史。
     auto clear() -> void {
-        m_commands.clear();
-        m_index = 0;
+        commands_.clear();
+        index_ = 0;
     }
 
     /// @brief 把多个命令合并为单个宏命令（一次 undo/redo 整组执行）。
@@ -139,9 +139,9 @@ class UndoStack {
     }
 
   private:
-    std::vector<UndoCommand> m_commands;
-    std::size_t m_index = 0; ///< 当前位置：[0, index) 已执行，[index, size) 可重做
-    std::size_t m_limit = 100;
+    std::vector<UndoCommand> commands_;
+    std::size_t index_ = 0;  ///< 当前位置：[0, index) 已执行，[index, size) 可重做
+    std::size_t limit_ = 100;
 };
 
-} // namespace aurora
+}  // namespace aurora

@@ -5,7 +5,6 @@
 #include "aurora/aurora.h"
 #include "aurora/core/enums.h"
 #include "aurora/widget/props_io.h"
-
 #include "test_harness.h"
 
 using aurora::BoxFit;
@@ -72,7 +71,7 @@ static void test_text_decoration() {
     const TextDecoration back = json_to_text_decoration(j);
     AURORA_TEST_CHECK_MSG(back == combo, "TextDecoration round-trip combo");
 
-    AURORA_TEST_CHECK_MSG(text_decoration_to_json(TextDecoration::None)[0].get<std::string>() == "None",
+    AURORA_TEST_CHECK_MSG(text_decoration_to_json(TextDecoration::None).at(0).get<std::string>() == "None",
                           "TextDecoration None -> [None]");
     AURORA_TEST_CHECK_MSG(json_to_text_decoration(Json("Underline")) == TextDecoration::Underline,
                           "TextDecoration single string parse");

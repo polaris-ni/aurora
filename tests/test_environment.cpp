@@ -3,7 +3,6 @@
 #include <string>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -40,17 +39,17 @@ static void test_environment() {
 }
 
 static void test_media_query() {
-    const MediaQuery mq = MediaQuery::of(2.0f);
+    const MediaQuery mq = MediaQuery::of(2.0F);
     Environment env;
     env.set_local<MediaQuery>(mq);
     const auto *q = env.get<MediaQuery>();
-    AURORA_TEST_CHECK_MSG(q != nullptr && near_f(q->scale_factor, 2.0f), "Environment: MediaQuery round-trips");
-    AURORA_TEST_CHECK_MSG(q->size.width == 0.0f, "MediaQuery: default size zero");
+    AURORA_TEST_CHECK_MSG(q != nullptr && near_f(q->scale_factor, 2.0F), "Environment: MediaQuery round-trips");
+    AURORA_TEST_CHECK_MSG(q->size.width == 0.0F, "MediaQuery: default size zero");
 
     BuildContext ctx;
     ctx.env = &env;
     const auto *from_ctx = ctx.environment<MediaQuery>();
-    AURORA_TEST_CHECK_MSG(from_ctx != nullptr && near_f(from_ctx->scale_factor, 2.0f),
+    AURORA_TEST_CHECK_MSG(from_ctx != nullptr && near_f(from_ctx->scale_factor, 2.0F),
                           "BuildContext::environment<MediaQuery>");
 }
 

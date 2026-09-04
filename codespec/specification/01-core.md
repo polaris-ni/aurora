@@ -44,7 +44,7 @@
 ```cpp
 struct Length {
     LengthKind kind = LengthKind::WrapContent;
-    float      value = 0.0f;   // Fixed：像素；Fraction：比例（0~1）
+    float      value = 0.0F;   // Fixed：像素；Fraction：比例（0~1）
 };
 ```
 

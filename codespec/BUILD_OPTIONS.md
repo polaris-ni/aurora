@@ -34,6 +34,7 @@
 | `cmake/AuroraTests.cmake` | `AURORA_BUILD_TESTS` 注册式 runner（GLOB `tests/*.cpp` → 单一 `aurora_test_runner`，`AURORA_TEST()` 自注册） |
 | `cmake/AuroraInstrumentation.cmake` | `AURORA_ENABLE_COVERAGE` / `AURORA_ENABLE_ASAN` / `AURORA_ENABLE_PROFILING` / `AURORA_ENABLE_TRACING`（须在全部目标定义之后 include） |
 | `cmake/AuroraInstall.cmake` | 安装 + `find_package(Aurora)` 导出（须在后端开关之后 include） |
+| `cmake/AuroraLint.cmake` | `AURORA_ENABLE_CLANG_TIDY`（`lint` / `lint-fix` 聚合目标，经 `tools/check/run_clang_tidy.py` 并行 lint 非 third_party 翻译单元；须在全部目标定义之后 include） |
 
 ---
 
@@ -211,6 +212,7 @@ cmake --build build --target gen_debug_api_json     # 仅刷新 debug 段
 | `AURORA_ENABLE_SIMD` | `ON` | 光栅内核 SIMD 双实现（SSE2 基线 + AVX2 运行时分发） | 注入 `AURORA_ENABLE_SIMD`（仅库内部，不 PUBLIC 传播）；详见 §4.2 |
 | `AURORA_ENABLE_CCACHE` | `ON` | ccache 编译缓存（加速重复编译） | 设置 `CMAKE_C_COMPILER_LAUNCHER` 与 `CMAKE_CXX_COMPILER_LAUNCHER`；支持 winget 安装路径自动检测 |
 | `AURORA_ENABLE_LLD` | `ON` | 链接器选择（lld 加速静态链接） | GNU/Clang 下 `find_program(ld.lld)` + `check_linker_flag` 探测通过则全局注入 `-fuse-ld=lld -B<lld 目录>`；失败静默回退 GNU ld；**不注入 feature 宏** |
+| `AURORA_ENABLE_CLANG_TIDY` | `ON` | Clang-Tidy 门禁（`lint` / `lint-fix` 聚合目标） | 需 `clang-tidy` 与 python 在 PATH；未开启时自动打开 `CMAKE_EXPORT_COMPILE_COMMANDS`。经 `tools/check/run_clang_tidy.py` 并行 lint **非 third_party** 翻译单元并按 `(file, line, check)` 去重；详见 §4.5 |
 
 **约束**：
 
@@ -308,6 +310,28 @@ cmake -S . -B build -DAURORA_CCACHE_DIR=D:/ccache -DAURORA_CCACHE_MAXSIZE=5G    
 cmake -S . -B build -DAURORA_ENABLE_LLD=OFF                                     # 回退 GNU ld
 cmake -S . -B build -DAURORA_LLD_DIR="D:/Development/Environment/LLVM/bin"      # 显式指定
 ```
+
+### 4.5 `AURORA_ENABLE_CLANG_TIDY`
+
+| 项 | 值 |
+|:---|:---|
+| 默认值 | `ON`（找不到 `clang-tidy` 或 python 时自动降级：仅告警，不定义目标） |
+| 提供目标 | `lint`（存在 warning 及以上即退出码 1）、`lint-fix`（就地应用 fix-it，**不因告警失败**） |
+| 配置来源 | 仓库根 `.clang-tidy`（`Checks` / `CheckOptions` / `HeaderFilterRegex`） |
+| 扫描范围 | `compile_commands.json` 中全部**非 `third_party/`** 翻译单元 |
+| 去重 | 按 `(file, line, check)` 去重——头文件诊断会在每个包含它的 TU 中重复上报，原始条数不可直接用作门禁计数 |
+| 依赖 | `clang-tidy`（PATH）+ python（PATH）+ `CMAKE_EXPORT_COMPILE_COMMANDS`（未开启时本模块自动打开） |
+
+为何不用 `CMAKE_CXX_CLANG_TIDY` 随构建执行：该变量必须在目标定义**之前**设置才生效，与本项目「模块在最后 include」的编排冲突；且会让每次编译额外跑一遍 clang-tidy，日常开发构建被拖慢一个数量级。
+
+```powershell
+cmake --build build --target lint        # 全量 lint，有告警则失败
+cmake --build build --target lint-fix    # 就地应用 fix-it，随后必须人工审阅 diff
+python tools/check/run_clang_tidy.py --build-dir build --json-out findings.json  # 结构化清单
+python tools/check/run_clang_tidy.py --build-dir build --include 'src/'          # 只 lint 库代码
+```
+
+**NOLINT 纪律**：凡用 `NOLINT` / `NOLINTNEXTLINE` 抑制告警，须遵守 `CODING_STANDARDS.md` §5.2——写明具体检查名（禁止裸 `NOLINT` 的新增使用），并紧邻注释说明「为何不能按建议修复」。
 
 ---
 
@@ -475,6 +499,10 @@ cmake --build build
 -D AURORA_ENABLE_SIMD=ON|OFF             # 光栅 SIMD 双实现（默认 ON，内部宏）
 -D AURORA_ENABLE_CCACHE=ON|OFF           # ccache 编译缓存（默认 ON）
 -D AURORA_ENABLE_LLD=ON|OFF              # lld 链接器（默认 ON）
+-D AURORA_ENABLE_CLANG_TIDY=ON|OFF       # lint / lint-fix 目标（默认 ON）
+
+# 静态检查
+cmake --build build --target lint        # 全量 lint（非 third_party，去重后计数）
 
 # 安装 / 消费端
 cmake --install build --prefix <PREFIX>

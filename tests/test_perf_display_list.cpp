@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -27,20 +26,20 @@ namespace {
 
 struct LeafCounter : Widget {
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(Size{ .width = 20.0f, .height = 20.0f });
+        return c.constrain(Size{.width = 20.0F, .height = 20.0F});
     }
     auto on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) -> void override {
-        p.fill_rect(b, Color{ 80, 160, 240 });
+        p.fill_rect(b, Color{80, 160, 240});
     }
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
     auto type_name() const -> const char * override { return "LeafCounter"; }
 };
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
 #ifdef AURORA_DISPLAY_LIST
-    constexpr int n = 300; // 叶子控件数量
+    constexpr int n = 300;  // 叶子控件数量
     constexpr int frames = 60;
 
     std::vector<Node> kids;
@@ -52,11 +51,11 @@ AURORA_TEST() {
         refs.push_back(leaf);
         kids.emplace_back(leaf);
     }
-    Node root{ Column{ ColumnProps{ .children = std::move(kids) } } };
+    Node root{Column{ColumnProps{.children = std::move(kids)}}};
 
     auto surface = std::make_unique<HeadlessSurface>();
     (void)surface->begin_frame(400, 600);
-    Window win{ std::move(surface) };
+    Window win{std::move(surface)};
 
     // 预热 + 首帧（录制）。
     AURORA_TEST_CHECK(win.present_root(root).ok());
@@ -82,12 +81,13 @@ AURORA_TEST() {
     const auto t3 = std::chrono::steady_clock::now();
     const double dirty_ms = std::chrono::duration<double, std::milli>(t3 - t2).count();
 
-    AURORA_TEST_PRINTF("[perf] %d widgets x %d frames: static-replay=%.3f ms (%.4f ms/frame), "
-                       "full-rerecord=%.3f ms (%.4f ms/frame)\n",
-                       n, frames, static_ms, static_ms / frames, dirty_ms, dirty_ms / frames);
-    AURORA_TEST_CHECK_MSG((static_ms > 0.0 && dirty_ms > 0.0), "both scenarios executed");
+    AURORA_TEST_PRINTF(
+        "[perf] %d widgets x %d frames: static-replay=%.3f ms (%.4f ms/frame), "
+        "full-rerecord=%.3f ms (%.4f ms/frame)\n",
+        n, frames, static_ms, static_ms / frames, dirty_ms, dirty_ms / frames);
+    AURORA_TEST_CHECK_MSG(static_ms > 0.0 && dirty_ms > 0.0, "both scenarios executed");
     // 静态 replay 应显著快于全量重录（DL 收益）；宽松断言 1.1x 防偶然反转。
-    AURORA_TEST_CHECK_MSG((static_ms < dirty_ms * 1.5), "static replay at least comparable to full re-record");
+    AURORA_TEST_CHECK_MSG(static_ms < dirty_ms * 1.5, "static replay at least comparable to full re-record");
 #else
     AURORA_TEST_CHECK(true);
 #endif

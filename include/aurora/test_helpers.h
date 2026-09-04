@@ -23,18 +23,18 @@ namespace aurora::test {
 
 /// @brief 无头测试环境：持有根容器、`FocusManager` 与逻辑尺寸。
 struct TestEnv {
-    std::shared_ptr<Column> root_widget; ///< 根容器（Column），供工厂 `add` 用
-    Node root;                           ///< 根节点（同 root_widget）
-    FocusManager focus;                  ///< 焦点管理（tap/type_text 用）
-    int width = 0;                       ///< 逻辑宽（dp）
-    int height = 0;                      ///< 逻辑高（dp）
+    std::shared_ptr<Column> root_widget;  ///< 根容器（Column），供工厂 `add` 用
+    Node root;  ///< 根节点（同 root_widget）
+    FocusManager focus;  ///< 焦点管理（tap/type_text 用）
+    int width = 0;  ///< 逻辑宽（dp）
+    int height = 0;  ///< 逻辑高（dp）
 };
 
 /// @brief 创建无头测试环境（确定性、无需 GUI 后端）。
 inline auto init_headless(int width, int height) -> TestEnv {
     TestEnv env;
     env.root_widget = std::make_shared<Column>();
-    env.root = Node{ env.root_widget };
+    env.root = Node{env.root_widget};
     env.width = width;
     env.height = height;
     return env;
@@ -53,7 +53,7 @@ inline auto pump(TestEnv &env) -> void {
         if (found) {
             return;
         }
-        const Rect abs{ .origin = acc + n.bounds().origin, .size = n.bounds().size };
+        const Rect abs{.origin = acc + n.bounds().origin, .size = n.bounds().size};
         if (&n.widget() == &target) {
             found = abs;
             return;
@@ -62,7 +62,7 @@ inline auto pump(TestEnv &env) -> void {
             rec(c, acc + n.bounds().origin);
         }
     };
-    rec(root, Point{ .x = 0.0f, .y = 0.0f });
+    rec(root, Point{.x = 0.0F, .y = 0.0F});
     return found;
 }
 
@@ -72,7 +72,7 @@ inline auto tap(TestEnv &env, const Widget &target) -> void {
     if (!box) {
         return;
     }
-    const Point center{ .x = box->origin.x + (box->size.width / 2.0f), .y = box->origin.y + (box->size.height / 2.0f) };
+    const Point center{.x = box->origin.x + (box->size.width / 2.0F), .y = box->origin.y + (box->size.height / 2.0F)};
     MouseEvent down;
     down.position = center;
     down.action = MouseAction::Press;
@@ -88,7 +88,7 @@ inline auto tap(TestEnv &env, const Widget &target) -> void {
 /// @brief 将一段文本逐字符喂给已聚焦的 `target`（典型用于 `TextInput`）。
 inline auto type_text(TestEnv &env, Widget &target, std::string_view text) -> void {
     env.focus.set_focus(&target);
-    for (char c : text) {
+    for (const char c : text) {
         TextInputEvent e;
         e.text = std::string(1, c);
         EventDispatcher::dispatch(*env.root_widget, e, env.focus);
@@ -158,7 +158,7 @@ inline auto expect_count(const Node &root, std::string_view type, int expected) 
 }
 
 /// @brief 断言某节点绝对包围盒与期望一致（容差 `tol` dp）。
-inline auto expect_bounds(const Node &node, const Rect &expected, float tol = 1.0f) -> void {
+inline auto expect_bounds(const Node &node, const Rect &expected, float tol = 1.0F) -> void {
     const Rect b = node.bounds();
     const bool ok =
         std::abs(b.origin.x - expected.origin.x) <= tol && std::abs(b.origin.y - expected.origin.y) <= tol &&
@@ -168,7 +168,7 @@ inline auto expect_bounds(const Node &node, const Rect &expected, float tol = 1.
 
 /// @brief 断言某节点可见性。
 inline auto expect_visible(const Node &node, bool expected = true) -> void {
-    AURORA_TEST_CHECK_MSG((node.widget().show.get() == expected), "expected node visibility to match");
+    AURORA_TEST_CHECK_MSG(node.widget().show.get() == expected, "expected node visibility to match");
 }
 
-} // namespace aurora::test
+}  // namespace aurora::test

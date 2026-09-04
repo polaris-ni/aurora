@@ -76,9 +76,9 @@ class Navigator {
     /// @brief 将 URI 按 '/' 切分为名称序列，丢弃空段（如 "home//detail/" -> {"home","detail"}）。
     [[nodiscard]] static auto split_uri(const std::string &uri) -> std::vector<std::string>;
 
-    std::vector<Route> m_stack;
-    std::function<void()> m_on_changed;
-    std::size_t m_max_depth = AURORA_DEFAULT_MAX_NAV_DEPTH;
+    std::vector<Route> stack_;
+    std::function<void()> on_changed_;
+    std::size_t max_depth_ = AURORA_DEFAULT_MAX_NAV_DEPTH;
 };
 
-} // namespace aurora
+}  // namespace aurora

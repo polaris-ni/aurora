@@ -10,7 +10,7 @@
 #include <map>
 #include <string>
 
-#include "aurora/storage/backend.h"
+#include "aurora/storage/storage_backend.h"
 
 namespace aurora::storage {
 
@@ -25,7 +25,7 @@ class MemoryBackend : public StorageBackend {
     [[nodiscard]] auto transaction(const std::function<Result<void>(StorageBackend &)> &body) -> Result<void> override;
 
   private:
-    std::map<std::string, StorageRecord> m_store;
+    std::map<std::string, StorageRecord> store_;
 };
 
-} // namespace aurora::storage
+}  // namespace aurora::storage

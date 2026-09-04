@@ -18,16 +18,16 @@ auto Win32Surface::begin_frame(int width, int height) -> Result<bool> {
     // 新帧从零绘制：上一帧残留的增量脏区对本帧无效（低阶调用方 begin+present 手动拼装时
     // 若沿用旧脏区会漏上屏全量重绘的像素），清空后本帧默认全量 blit；
     // present_root 路径每帧都会在 present 前重新 set_present_dirty，不受影响。
-    m_present_dirty.clear();
-    const float scale = m_win->scale_factor(); // 当前窗口所在显示器 DPI（支持跨屏移动）
-    m_painter.set_scale(scale);
+    present_dirty_.clear();
+    const float scale = win_->scale_factor();  // 当前窗口所在显示器 DPI（支持跨屏移动）
+    painter_.set_scale(scale);
 
     // 始终以窗口真实客户区（物理像素）为准来分配缓冲与设定逻辑尺寸：
     // WM_SIZE 之后调用方的 size 可能滞后一帧（见 Window::begin_frame 同步时机），
     // 直接查询真实客户区可保证缓冲与屏幕 1:1 吻合，避免最大化/还原后出现黑色区域。
     int phys_w = width > 0 ? static_cast<int>(std::lround(static_cast<float>(width) * scale)) : 0;
     int phys_h = height > 0 ? static_cast<int>(std::lround(static_cast<float>(height) * scale)) : 0;
-    auto *const hwnd = static_cast<HWND>(m_win->hwnd());
+    auto *const hwnd = static_cast<HWND>(win_->hwnd());
     if (hwnd != nullptr) {
         RECT cr{};
         if (GetClientRect(hwnd, &cr) != 0) {
@@ -48,39 +48,39 @@ auto Win32Surface::begin_frame(int width, int height) -> Result<bool> {
         phys_h = 1;
     }
     // 软件帧缓冲按物理分辨率分配：几何绘制把 dp 坐标 × scale，1:1 贴窗口避免发虚。
-    if (phys_w != m_painter.width() || phys_h != m_painter.height()) {
+    if (phys_w != painter_.width() || phys_h != painter_.height()) {
         const int w = static_cast<int>(std::lround(static_cast<float>(phys_w) / scale));
         const int h = static_cast<int>(std::lround(static_cast<float>(phys_h) / scale));
-        m_painter.begin(w, h);
+        painter_.begin(w, h);
     }
     // 浅色背景：默认文字为黑色，需浅色底才可见（详见 glfw_surface.h 注释）。
-    m_painter.fill_rect(Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                              .size = Size{ .width = static_cast<float>(m_painter.width()),
-                                            .height = static_cast<float>(m_painter.height()) } },
-                        Color{ 245, 245, 247, 255 });
-    return Result<bool>{ true };
+    painter_.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                             .size = Size{.width = static_cast<float>(painter_.width()),
+                                          .height = static_cast<float>(painter_.height())}},
+                        Color{245, 245, 247, 255});
+    return Result<bool>{true};
 }
 
 auto Win32Surface::release_dib() -> void {
-    if (m_mem_dc != nullptr) {
-        if (m_dib_old != nullptr) {
-            SelectObject(m_mem_dc, m_dib_old);
-            m_dib_old = nullptr;
+    if (mem_dc_ != nullptr) {
+        if (dib_old_ != nullptr) {
+            SelectObject(mem_dc_, dib_old_);
+            dib_old_ = nullptr;
         }
-        DeleteDC(m_mem_dc);
-        m_mem_dc = nullptr;
+        DeleteDC(mem_dc_);
+        mem_dc_ = nullptr;
     }
-    if (m_dib != nullptr) {
-        DeleteObject(m_dib);
-        m_dib = nullptr;
+    if (dib_ != nullptr) {
+        DeleteObject(dib_);
+        dib_ = nullptr;
     }
-    m_dib_bits = nullptr;
-    m_dib_w = 0;
-    m_dib_h = 0;
+    dib_bits_ = nullptr;
+    dib_w_ = 0;
+    dib_h_ = 0;
 }
 
 auto Win32Surface::ensure_dib(int w, int h) -> bool {
-    if ((m_dib != nullptr) && m_dib_w == w && m_dib_h == h) {
+    if ((dib_ != nullptr) && dib_w_ == w && dib_h_ == h) {
         return true;
     }
     release_dib();
@@ -90,39 +90,39 @@ auto Win32Surface::ensure_dib(int w, int h) -> bool {
     BITMAPINFO bi{};
     bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bi.bmiHeader.biWidth = w;
-    bi.bmiHeader.biHeight = -h; // top-down，与 Painter 一致
+    bi.bmiHeader.biHeight = -h;  // top-down，与 Painter 一致
     bi.bmiHeader.biPlanes = 1;
     bi.bmiHeader.biBitCount = 32;
     bi.bmiHeader.biCompression = BI_RGB;
     void *bits = nullptr;
-    m_mem_dc = CreateCompatibleDC(nullptr);
-    m_dib = CreateDIBSection(m_mem_dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
-    if ((m_mem_dc == nullptr) || (m_dib == nullptr) || (bits == nullptr)) {
+    mem_dc_ = CreateCompatibleDC(nullptr);
+    dib_ = CreateDIBSection(mem_dc_, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if ((mem_dc_ == nullptr) || (dib_ == nullptr) || (bits == nullptr)) {
         release_dib();
         return false;
     }
-    m_dib_old = SelectObject(m_mem_dc, m_dib);
-    m_dib_bits = static_cast<std::uint32_t *>(bits);
-    m_dib_w = w;
-    m_dib_h = h;
+    dib_old_ = SelectObject(mem_dc_, dib_);
+    dib_bits_ = static_cast<std::uint32_t *>(bits);
+    dib_w_ = w;
+    dib_h_ = h;
     return true;
 }
 
-auto Win32Surface::present_full(HDC hdc, int w, int h) -> void {
+auto Win32Surface::present_full(HDC hdc, int w, int h) const -> void {
     // 全量：整幅 swizzle + 整窗 BitBlt（首帧/尺寸变化/布局帧/低阶调用方）。
     // 旧 SetDIBitsToDevice(RGBA 掩码) 全量 87ms → swizzle+BitBlt ~9ms（最大化卡顿主因）。
     // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
-    const auto *src = reinterpret_cast<const std::uint32_t *>(m_painter.data());
-    swizzle_rgba_to_bgra(src, m_dib_bits, static_cast<std::size_t>(w) * static_cast<std::size_t>(h));
-    BitBlt(hdc, 0, 0, w, h, m_mem_dc, 0, 0, SRCCOPY);
+    const auto *src = reinterpret_cast<const std::uint32_t *>(painter_.data());
+    swizzle_rgba_to_bgra(src, dib_bits_, static_cast<std::size_t>(w) * static_cast<std::size_t>(h));
+    BitBlt(hdc, 0, 0, w, h, mem_dc_, 0, 0, SRCCOPY);
 }
 
-auto Win32Surface::present_dirty(HDC hdc, int w, int h) -> void {
+auto Win32Surface::present_dirty(HDC hdc, int w, int h) const -> void {
     // 增量：逐脏矩形仅 swizzle + BitBlt 变化区（拖选帧）。脏矩形向外取整，
     // 覆盖裁剪绘制触及的全部像素（变化像素 ⊆ 同一组矩形构成的裁剪区）。
     // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
-    const auto *src = reinterpret_cast<const std::uint32_t *>(m_painter.data());
-    for (const Rect &r : m_present_dirty) {
+    const auto *src = reinterpret_cast<const std::uint32_t *>(painter_.data());
+    for (const Rect &r : present_dirty_) {
         const int x0 = std::max(0, static_cast<int>(std::floor(r.origin.x)));
         const int y0 = std::max(0, static_cast<int>(std::floor(r.origin.y)));
         const int x1 = std::min(w, static_cast<int>(std::ceil(r.right())));
@@ -134,20 +134,20 @@ auto Win32Surface::present_dirty(HDC hdc, int w, int h) -> void {
             const std::size_t off =
                 (static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + static_cast<std::size_t>(x0);
             // NOLINTNEXTLINE(*-pro-bounds-pointer-arithmetic)
-            swizzle_rgba_to_bgra(src + off, m_dib_bits + off, static_cast<std::size_t>(x1 - x0));
+            swizzle_rgba_to_bgra(src + off, dib_bits_ + off, static_cast<std::size_t>(x1 - x0));
         }
-        BitBlt(hdc, x0, y0, x1 - x0, y1 - y0, m_mem_dc, x0, y0, SRCCOPY);
+        BitBlt(hdc, x0, y0, x1 - x0, y1 - y0, mem_dc_, x0, y0, SRCCOPY);
     }
 }
 
 auto Win32Surface::present() -> Result<bool> {
-    auto *const hwnd = static_cast<HWND>(m_win->hwnd());
-    if ((hwnd != nullptr) && (m_painter.data() != nullptr)) {
-        const int w = m_painter.width();
-        const int h = m_painter.height();
+    auto *const hwnd = static_cast<HWND>(win_->hwnd());
+    if ((hwnd != nullptr) && (painter_.data() != nullptr)) {
+        const int w = painter_.width();
+        const int h = painter_.height();
         if (const HDC hdc = GetDC(hwnd); hdc != nullptr) {
             if (ensure_dib(w, h)) {
-                if (m_present_dirty.empty()) {
+                if (present_dirty_.empty()) {
                     present_full(hdc, w, h);
                 } else {
                     present_dirty(hdc, w, h);
@@ -157,8 +157,8 @@ auto Win32Surface::present() -> Result<bool> {
         }
     }
     // 脏区一次性消费：下一帧未重新设置则回到全量 blit（行为安全兜底）。
-    m_present_dirty.clear();
-    return Result<bool>{ true };
+    present_dirty_.clear();
+    return Result<bool>{true};
 }
 
 auto Win32Surface::capture_window(const std::string &path) -> Result<bool> {
@@ -166,11 +166,11 @@ auto Win32Surface::capture_window(const std::string &path) -> Result<bool> {
     return detail::capture_window_by_hwnd(static_cast<HWND>(native_handle()), path);
 #else
     (void)path;
-    return Result<bool>{ make_error(ErrorCode::GeneralNotSupported,
-                                    "capture_window: disabled (AURORA_ENABLE_DEBUG not enabled)") };
+    return Result<bool>{
+        make_error(ErrorCode::GeneralNotSupported, "capture_window: disabled (AURORA_ENABLE_DEBUG not enabled)")};
 #endif
 }
 
-} // namespace aurora
+}  // namespace aurora
 
-#endif // AURORA_BACKEND_WIN32
+#endif  // AURORA_BACKEND_WIN32

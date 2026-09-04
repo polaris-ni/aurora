@@ -17,8 +17,8 @@ namespace aurora {
 // Node 析构：子节点销毁时清空其缓存的布局父指针，避免向上失效传播解引用悬垂指针
 // （见 node.h 中 Node 类注释）。需完整 Widget，故定义于此而非头文件。
 Node::~Node() {
-    if (m_widget) {
-        m_widget->set_layout_parent(nullptr);
+    if (widget_) {
+        widget_->set_layout_parent(nullptr);
     }
 }
 
@@ -50,11 +50,11 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     // 与命中布局缓存的节点也持有正确父指针（其后代仍可能标脏并需要上溯）。链顶（根控件由
     // 渲染器直接 layout）时 t_layout_parent 为空，不覆写既有父指针。
     if (t_layout_parent != nullptr) {
-        m_layout_parent = t_layout_parent;
+        layout_parent_ = t_layout_parent;
     }
     struct LayoutParentScope {
-        Widget *saved;
-        explicit LayoutParentScope(Widget *self) : saved(t_layout_parent) { t_layout_parent = self; }
+        Widget* saved;
+        explicit LayoutParentScope(Widget* self) : saved(t_layout_parent) { t_layout_parent = self; }
         LayoutParentScope(const LayoutParentScope &) = delete;
         auto operator=(const LayoutParentScope &) -> LayoutParentScope & = delete;
         LayoutParentScope(LayoutParentScope &&) = delete;
@@ -63,8 +63,8 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     } parent_scope{ this };
 
     if (!show.get()) {
-        m_size = Size{ .width = 0.0f, .height = 0.0f };
-        return m_size;
+        size_ = Size{.width = 0.0F, .height = 0.0F};
+        return size_;
     }
 
 #ifdef AURORA_LAYOUT_CACHE
@@ -72,9 +72,9 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     // 直接复用缓存尺寸，完全跳过修饰链构建 + on_layout + 子树递归。
     // `can_cache_layout()` 为 false 的控件（on_layout 含时间/状态依赖副作用，如骨架→内容切换）
     // 永不命中缓存，保证其 on_layout 在每个布局 pass 被真正执行，杜绝“约束不变 ⇒ 内容冻结”类白屏。
-    if (m_layout_cache_valid && m_cached_constraints == c && can_cache_layout()) {
-        m_size = m_cached_size;
-        return m_size;
+    if (layout_cache_valid_ && cached_constraints_ == c && can_cache_layout()) {
+        size_ = cached_size_;
+        return size_;
     }
 #endif
     // 缓存未命中：本节点将真正重新测量（含修饰链构建 + on_layout + 子树递归）。
@@ -84,27 +84,27 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     // 显式尺寸意图（specification/01-core.md §2.2 / 需求 #20）：固定宽度/高度构成"显式盒"，把对应轴约束
     // 夹成 [v, v]，使子节点在固定盒内布局；其余意图（auto/fill）保持内容/弹性。
     Constraints cc = c;
-    if (m_width.kind == LengthKind::Fixed) {
-        cc.min.width = m_width.value;
-        cc.max.width = m_width.value;
-    } else if (m_width.kind == LengthKind::Fraction) {
+    if (width_.kind == LengthKind::Fixed) {
+        cc.min.width = width_.value;
+        cc.max.width = width_.value;
+    } else if (width_.kind == LengthKind::Fraction) {
         // 百分比：占父约束 max 的比例
-        const float w = c.max.width * m_width.value;
+        const float w = c.max.width * width_.value;
         cc.min.width = w;
         cc.max.width = w;
-    } else if (m_width.kind == LengthKind::Expand) {
+    } else if (width_.kind == LengthKind::Expand) {
         // 填充：撑满父约束
         cc.min.width = c.max.width;
         cc.max.width = c.max.width;
     }
-    if (m_height.kind == LengthKind::Fixed) {
-        cc.min.height = m_height.value;
-        cc.max.height = m_height.value;
-    } else if (m_height.kind == LengthKind::Fraction) {
-        const float h = c.max.height * m_height.value;
+    if (height_.kind == LengthKind::Fixed) {
+        cc.min.height = height_.value;
+        cc.max.height = height_.value;
+    } else if (height_.kind == LengthKind::Fraction) {
+        const float h = c.max.height * height_.value;
         cc.min.height = h;
         cc.max.height = h;
-    } else if (m_height.kind == LengthKind::Expand) {
+    } else if (height_.kind == LengthKind::Expand) {
         cc.min.height = c.max.height;
         cc.max.height = c.max.height;
     }
@@ -118,27 +118,27 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
         measure = [node, inner](const Constraints &child_c) -> Size { return node->layout(child_c, inner); };
     }
 
-    m_size = measure(cc);
+    size_ = measure(cc);
     // 显式盒最终尺寸严格等于设定值（内容溢出不撑大盒子，符合 CSS box 语义）。
-    if (m_width.kind == LengthKind::Fixed) {
-        m_size.width = m_width.value;
-    } else if (m_width.kind == LengthKind::Fraction) {
-        m_size.width = c.max.width * m_width.value;
-    } else if (m_width.kind == LengthKind::Expand) {
-        m_size.width = c.max.width;
+    if (width_.kind == LengthKind::Fixed) {
+        size_.width = width_.value;
+    } else if (width_.kind == LengthKind::Fraction) {
+        size_.width = c.max.width * width_.value;
+    } else if (width_.kind == LengthKind::Expand) {
+        size_.width = c.max.width;
     }
-    if (m_height.kind == LengthKind::Fixed) {
-        m_size.height = m_height.value;
-    } else if (m_height.kind == LengthKind::Fraction) {
-        m_size.height = c.max.height * m_height.value;
-    } else if (m_height.kind == LengthKind::Expand) {
-        m_size.height = c.max.height;
+    if (height_.kind == LengthKind::Fixed) {
+        size_.height = height_.value;
+    } else if (height_.kind == LengthKind::Fraction) {
+        size_.height = c.max.height * height_.value;
+    } else if (height_.kind == LengthKind::Expand) {
+        size_.height = c.max.height;
     }
     // 几何权威完全收敛到 Node::m_bounds：布局只确定自身尺寸，位置由父节点经
     // Node::set_bounds 写入（含真实 origin）。Widget 不再持有任何几何缓存。
 #ifdef AURORA_LAYOUT_CACHE
-    m_cached_constraints = c;
-    m_cached_size = m_size;
+    cached_constraints_ = c;
+    cached_size_ = size_;
     // 布局缓存决策：仅基于本控件自身的 can_cache_layout()。
     // 含时间/状态依赖副作用的控件（骨架→内容切换、入场动画等）覆写 can_cache_layout()=false，
     // 使其自身永不命中缓存——on_layout 在每个布局 pass 被真正执行，杜绝内容冻结/白屏。
@@ -148,12 +148,11 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     //
     // 对于「父控件缓存会跳过调用子控件 layout()」的场景（如 Scroll），由该父控件自行在
     // 其 can_cache_layout() 覆写中检查直接子控件（见 Scroll::can_cache_layout）。
-    m_layout_cache_valid = can_cache_layout();
+    layout_cache_valid_ = can_cache_layout();
 #endif
-    return m_size;
+    return size_;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &content_box, const BuildContext &ctx)
     -> void {
     const Modifier &mod = modifier.get();
@@ -200,7 +199,7 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
         switch (mn->paint_kind()) {
         case ModifierNode::PaintKind::Background: {
             const auto *bg = dynamic_cast<Background *>(mn.get());
-            if (bg->corner_radius() > 0.0f) {
+            if (bg->corner_radius() > 0.0F) {
                 p.push_clip_rounded(visual_box, bg->corner_radius());
                 p.fill_rect(visual_box, bg->color());
                 p.pop_clip();
@@ -215,21 +214,21 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
             const auto &stops = grad->stops();
             if (grad->type() == GradientBackground::Type::Linear) {
                 // 按角度计算 start/end（角度 0=左→右，90=上→下）
-                const float rad = grad->angle() * std::numbers::pi_v<float> / 180.0f;
-                const float cx = visual_box.origin.x + (visual_box.size.width * 0.5f);
-                const float cy = visual_box.origin.y + (visual_box.size.height * 0.5f);
-                const float half_diag = (visual_box.size.width + visual_box.size.height) * 0.5f;
+                const float rad = grad->angle() * std::numbers::pi_v<float> / 180.0F;
+                const float cx = visual_box.origin.x + (visual_box.size.width * 0.5F);
+                const float cy = visual_box.origin.y + (visual_box.size.height * 0.5F);
+                const float half_diag = (visual_box.size.width + visual_box.size.height) * 0.5F;
                 const float dx = std::cos(rad) * half_diag;
                 const float dy = std::sin(rad) * half_diag;
                 p.draw_linear_gradient(visual_box, Point{ .x = cx - dx, .y = cy - dy },
                                        Point{ .x = cx + dx, .y = cy + dy }, colors, stops);
             } else {
                 // 径向：center 为盒中心，radius 为半对角线
-                const float cx = visual_box.origin.x + (visual_box.size.width * 0.5f);
-                const float cy = visual_box.origin.y + (visual_box.size.height * 0.5f);
+                const float cx = visual_box.origin.x + (visual_box.size.width * 0.5F);
+                const float cy = visual_box.origin.y + (visual_box.size.height * 0.5F);
                 const float r = std::sqrt((visual_box.size.width * visual_box.size.width) +
                                           (visual_box.size.height * visual_box.size.height)) *
-                                0.5f;
+                                0.5F;
                 p.draw_radial_gradient(visual_box, Point{ .x = cx, .y = cy }, r, colors, stops);
             }
             break;
@@ -240,7 +239,7 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
 
     // 溢出策略裁剪：Hidden/Clip/Scroll 时把内容裁剪到本控件视觉盒子内（与 Clip 修饰语义一致）。
     // Clip 与 Hidden 当前行为相同（均裁剪视觉）；Scroll 预留，当前等同 Hidden。
-    const bool overflow_clip = m_overflow != OverflowStrategy::Visible;
+    const bool overflow_clip = overflow_ != OverflowStrategy::Visible;
     if (overflow_clip) {
         p.push_clip(visual_box);
     }
@@ -273,16 +272,14 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
                 }
                 const float w = x1 - x0;
                 const float h = y1 - y0;
-                p.fill_rect(Rect{ .origin = Point{ .x = x0, .y = y0 }, .size = Size{ .width = w, .height = 1.0f } },
-                            bc); // 上边
-                p.fill_rect(
-                    Rect{ .origin = Point{ .x = x0, .y = y1 - 1.0f }, .size = Size{ .width = w, .height = 1.0f } },
-                    bc); // 下边
-                p.fill_rect(Rect{ .origin = Point{ .x = x0, .y = y0 }, .size = Size{ .width = 1.0f, .height = h } },
-                            bc); // 左边
-                p.fill_rect(
-                    Rect{ .origin = Point{ .x = x1 - 1.0f, .y = y0 }, .size = Size{ .width = 1.0f, .height = h } },
-                    bc); // 右边
+                p.fill_rect(Rect{.origin = Point{.x = x0, .y = y0}, .size = Size{.width = w, .height = 1.0F}},
+                            bc);  // 上边
+                p.fill_rect(Rect{.origin = Point{.x = x0, .y = y1 - 1.0F}, .size = Size{.width = w, .height = 1.0F}},
+                            bc);  // 下边
+                p.fill_rect(Rect{.origin = Point{.x = x0, .y = y0}, .size = Size{.width = 1.0F, .height = h}},
+                            bc);  // 左边
+                p.fill_rect(Rect{.origin = Point{.x = x1 - 1.0F, .y = y0}, .size = Size{.width = 1.0F, .height = h}},
+                            bc);  // 右边
             }
             break;
         }
@@ -314,13 +311,13 @@ auto Widget::render_into(Painter &dst, const Rect &local, const BuildContext &ct
 #ifdef AURORA_ENABLE_DEBUG
     // 标记本控件本帧实际重绘（仅 render_into 入口，DL 缓存 replay / 缓存命中路径不进此处），
     // 供 repaint_highlight 判定「本帧是否重绘」。与 present_root 的调试帧计数器比较。
-    m_debug_paint_frame = debug::current_debug_frame();
+    debug_paint_frame_ = debug::current_debug_frame();
 #endif
     const Modifier &mod = modifier.get();
     const Modifier::TransformInfo tf = mod.transform(local.size);
 
     const double saved_alpha = dst.global_alpha();
-    if (tf.opacity < 1.0f) {
+    if (tf.opacity < 1.0F) {
         dst.set_alpha(saved_alpha * static_cast<double>(tf.opacity));
     }
 
@@ -337,8 +334,8 @@ auto Widget::render_into(Painter &dst, const Rect &local, const BuildContext &ct
         Painter sub;
         sub.set_scale(dst.scale());
         sub.begin(static_cast<int>(local.size.width), static_cast<int>(local.size.height));
-        paint_content(sub, Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = local.size },
-                      Rect{ .origin = t, .size = tf.content_size }, ctx);
+        paint_content(sub, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = local.size},
+                      Rect{.origin = t, .size = tf.content_size}, ctx);
 
         const Matrix2D abs = Matrix2D::from_translate(local.origin.x, local.origin.y).compose(mtx);
         dst.composite(sub, abs);
@@ -359,7 +356,7 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
     }
     AURORA_PROFILE_COUNT(paint_nodes, 1); // 本帧真正参与 paint 遍历的节点数（DL 命中的子树不计）
     detail::paint_timing().paint_nodes++; // [性能排查] 镜像到光栅计时累加器，供 glue 归因
-    m_paint_bounds = bounds;              // 记录绝对（窗口逻辑 dp）盒，供脏区裁剪绘制精确标记几何
+    paint_bounds_ = bounds;              // 记录绝对（窗口逻辑 dp）盒，供脏区裁剪绘制精确标记几何
 
     const Modifier &mod = modifier.get();
     const bool cache = std::ranges::any_of(mod.nodes(), [](const std::shared_ptr<ModifierNode> &n) -> bool {
@@ -367,18 +364,18 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
     });
 
     if (cache) {
-        if (m_paint_cache && m_paint_cache_valid && m_paint_cache_size.width == bounds.size.width &&
-            m_paint_cache_size.height == bounds.size.height) {
-            p.composite(*m_paint_cache, Matrix2D::from_translate(bounds.origin.x, bounds.origin.y));
+        if (paint_cache_ && paint_cache_valid_ && paint_cache_size_.width == bounds.size.width &&
+            paint_cache_size_.height == bounds.size.height) {
+            p.composite(*paint_cache_, Matrix2D::from_translate(bounds.origin.x, bounds.origin.y));
             return;
         }
-        m_paint_cache = std::make_unique<Painter>();
-        m_paint_cache->set_scale(p.scale());
-        m_paint_cache->begin(static_cast<int>(bounds.size.width), static_cast<int>(bounds.size.height));
-        render_into(*m_paint_cache, Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = bounds.size }, ctx);
-        m_paint_cache_size = bounds.size;
-        m_paint_cache_valid = true;
-        p.composite(*m_paint_cache, Matrix2D::from_translate(bounds.origin.x, bounds.origin.y));
+        paint_cache_ = std::make_unique<Painter>();
+        paint_cache_->set_scale(p.scale());
+        paint_cache_->begin(static_cast<int>(bounds.size.width), static_cast<int>(bounds.size.height));
+        render_into(*paint_cache_, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}, ctx);
+        paint_cache_size_ = bounds.size;
+        paint_cache_valid_ = true;
+        p.composite(*paint_cache_, Matrix2D::from_translate(bounds.origin.x, bounds.origin.y));
         return;
     }
 
@@ -396,26 +393,26 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
         // 逐像素尊重，故「在裁剪下回放缓存 DL」与「在裁剪下直绘」逐位一致，不会越界绘制。
         // 仅此一项即可消除「连续动画每帧产生脏区 → 根裁剪使全树 DL 缓存永久失效 → 每帧重录重放」
         // 的 11ms 级 glue 浪费（Google Play demo 稳态 banner/shimmer 动画持续标脏即此场景）。
-        if (m_dl_valid && bounds == m_last_paint_bounds) {
+        if (dl_valid_ && bounds == last_paint_bounds_) {
             const double saved_alpha = p.global_alpha();
             AURORA_PROFILE_COUNT(dl_replays, 1);
             detail::paint_timing().dl_replays++; // [性能排查] 镜像到光栅计时累加器，供 glue 归因
-            m_display_list.replay(p);            // 命中：整棵子树命令直接回放，跳过 paint 遍历
+            display_list_.replay(p);            // 命中：整棵子树命令直接回放，跳过 paint 遍历
             p.set_alpha(saved_alpha);
             return;
         }
         const double saved_alpha = p.global_alpha();
         AURORA_PROFILE_COUNT(dl_records, 1);
         detail::paint_timing().dl_records++;               // [性能排查] 镜像到光栅计时累加器，供 glue 归因
-        p.record(m_display_list);                          // 进入录制（清空并压栈）
+        p.record(display_list_);                          // 进入录制（清空并压栈）
         render_into(p, bounds, ctx);                       // 全部绘制录入 m_display_list（含子树）
         const bool was_dynamic = p.recording_is_dynamic(); // 在 stop() 前捕获
         p.stop();                                          // 退出录制（恢复 Direct）
         if (!was_dynamic) {
-            m_dl_valid = true;
-            m_last_paint_bounds = bounds;
+            dl_valid_ = true;
+            last_paint_bounds_ = bounds;
         }
-        m_display_list.replay(p); // 立即回放（Direct）上屏
+        display_list_.replay(p); // 立即回放（Direct）上屏
         p.set_alpha(saved_alpha);
         return;
     }
@@ -429,7 +426,7 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
     render_into(p, bounds, ctx);
 }
 
-auto Widget::invalidate_paint_cache() const -> void { m_paint_cache_valid = false; }
+auto Widget::invalidate_paint_cache() const -> void { paint_cache_valid_ = false; }
 
 auto Widget::hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * {
     if (!show.get()) {
@@ -440,7 +437,7 @@ auto Widget::hit_test(const Point &local, const Rect &bounds, const BuildContext
     // Transform 切片：命中区随内容盒平移/仿射变换（与绘制一致）。
     const Modifier::TransformInfo tf = mod.transform(bounds.size);
     const Point local_adj = adjust_for_transform(tf, local);
-    const Rect content_box{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = tf.content_size };
+    const Rect content_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = tf.content_size};
 
     for (const auto &mn : mod.nodes()) {
         if (mn->kind() == ModifierNode::Kind::Input) {
@@ -464,7 +461,7 @@ auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildC
     // Transform 切片：命中区随内容盒平移/仿射变换（与 hit_test / paint 一致）。
     const Modifier::TransformInfo tf = mod.transform(bounds.size);
     const Point local_adj = adjust_for_transform(tf, local);
-    const Rect content_box{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = tf.content_size };
+    const Rect content_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = tf.content_size};
 
     // 收集子树（后代）命中链（不含自身）。后代链中各节点 origin 已由递归下降填入（相对根）。
     std::vector<HitNode> descendants = on_hit_test_chain(local_adj, bounds, ctx);
@@ -504,24 +501,24 @@ auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildC
 }
 
 auto Widget::mount(const BuildContext &ctx) -> void {
-    if (m_mounted) {
+    if (mounted_) {
         return; // 幂等：已挂载则跳过，避免转场切换复用同一 widget 实例时重复订阅信号
     }
-    m_mounted = true;
+    mounted_ = true;
     std::vector<SignalViewBase *> sigs;
     collect_signals(sigs);
     sigs.push_back(&modifier);
     sigs.push_back(&show);
 
     for (SignalViewBase *s : sigs) {
-        track(*s, m_effects);
+        track(*s, effects_);
     }
 
     // 含需每帧计时的手势（LongPress/Draggable）或 Tooltip 延迟检测时，开启 tick 驱动，
     // 使 Widget::tick 不提前返回，从而正确推进 Tooltip 延迟计时。
     const Modifier &mod = modifier.get();
     if (mod.has_gesture() || mod.has_tooltip()) {
-        m_needs_gesture_tick = true;
+        needs_gesture_tick_ = true;
     }
 
     on_mount(ctx);
@@ -538,7 +535,7 @@ auto Widget::collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void {}
 auto Widget::describe() const -> WidgetDescriptor { return WidgetDescriptor{ .name = type_name() }; }
 
 auto Container::collect_signals(std::vector<SignalViewBase *> &out) -> void {
-    for (Node &child : m_children) {
+    for (Node &child : children_) {
         child.widget().collect_signals(out);
     }
 }

@@ -6,6 +6,7 @@
 
 #include "aurora/core/color.h"
 #include "aurora/core/types.h"
+#include "aurora/environment/environment.h"
 #include "aurora/i18n/localized_string.h"
 #include "aurora/i18n/string_table.h"
 #include "aurora/render/font_engine.h"
@@ -14,7 +15,6 @@
 #include "aurora/state/signal_view.h"
 #include "aurora/widget/text_span.h"
 #include "aurora/widget/widget.h"
-#include "aurora/environment/environment.h"
 
 namespace aurora {
 
@@ -25,13 +25,13 @@ struct RichWord {
     std::string text;
     Font font;
     Color color;
-    float width = 0.0f;
+    float width = 0.0F;
 };
 
 /// @brief 一行（含若干单词），已计算 y 偏移与行高。
 struct RichLine {
-    float y = 0.0f;
-    float height = 0.0f;
+    float y = 0.0F;
+    float height = 0.0F;
     std::vector<RichWord> words;
 };
 
@@ -55,7 +55,7 @@ inline auto split_words(const std::string &s) -> std::vector<std::string> {
     return out;
 }
 
-} // namespace detail
+}  // namespace detail
 
 /**
  * @brief 把片段序列按**单词贪心换行**，返回行集合（已计算每行的 y 与 height）。
@@ -67,7 +67,7 @@ inline auto layout_rich_text(const std::vector<TextSpan> &spans, float max_width
     -> std::vector<detail::RichLine> {
     std::vector<detail::RichLine> lines;
     detail::RichLine cur;
-    float cur_w = 0.0f;
+    float cur_w = 0.0F;
 
     auto space_w = [](const Font &f) -> float { return render::FontEngine::measure_width(" ", f); };
 
@@ -77,21 +77,20 @@ inline auto layout_rich_text(const std::vector<TextSpan> &spans, float max_width
         for (const auto &word : words) {
             const float w = render::FontEngine::measure_width(word, span.font);
             const bool need_space = !cur.words.empty();
-            const float gap = need_space ? space_w(span.font) : 0.0f;
+            const float gap = need_space ? space_w(span.font) : 0.0F;
             if (need_space && (cur_w + gap + w > max_width)) {
                 lines.push_back(std::move(cur));
                 cur = detail::RichLine{};
                 const float w2 = render::FontEngine::measure_width(word, span.font);
                 cur.words.push_back(
-                    detail::RichWord{ .text = word, .font = span.font, .color = span.color, .width = w2 });
+                    detail::RichWord{.text = word, .font = span.font, .color = span.color, .width = w2});
                 cur.height = render::FontEngine::measure_height(span.font);
                 cur_w = w2;
             } else {
                 if (need_space) {
                     cur_w += gap;
                 }
-                cur.words.push_back(
-                    detail::RichWord{ .text = word, .font = span.font, .color = span.color, .width = w });
+                cur.words.push_back(detail::RichWord{.text = word, .font = span.font, .color = span.color, .width = w});
                 cur.height = std::max(cur.height, render::FontEngine::measure_height(span.font));
                 cur_w += w;
             }
@@ -101,7 +100,7 @@ inline auto layout_rich_text(const std::vector<TextSpan> &spans, float max_width
         lines.push_back(std::move(cur));
     }
 
-    float y = 0.0f;
+    float y = 0.0F;
     for (auto &line : lines) {
         line.y = y;
         y += line.height;
@@ -113,10 +112,10 @@ inline auto layout_rich_text(const std::vector<TextSpan> &spans, float max_width
 inline auto measure_rich_text(const std::vector<TextSpan> &spans, float max_width, const Locale &loc = Locale{})
     -> Size {
     const std::vector<detail::RichLine> lines = layout_rich_text(spans, max_width, loc);
-    float w = 0.0f;
-    float h = 0.0f;
+    float w = 0.0F;
+    float h = 0.0F;
     for (const auto &line : lines) {
-        float lw = 0.0f;
+        float lw = 0.0F;
         for (std::size_t i = 0; i < line.words.size(); ++i) {
             lw += line.words[i].width;
             if (i + 1 < line.words.size()) {
@@ -126,7 +125,7 @@ inline auto measure_rich_text(const std::vector<TextSpan> &spans, float max_widt
         w = std::max(w, lw);
         h += line.height;
     }
-    return Size{ .width = w, .height = h };
+    return Size{.width = w, .height = h};
 }
 
 /**
@@ -140,9 +139,9 @@ inline auto measure_rich_text(const std::vector<TextSpan> &spans, float max_widt
 class RichText : public LeafWidget {
   public:
     RichText() = default;
-    explicit RichText(Reactive<std::vector<TextSpan>> spans) : m_spans(std::move(spans)) {}
+    explicit RichText(Reactive<std::vector<TextSpan>> spans) : spans_(std::move(spans)) {}
 
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&m_spans); }
+    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&spans_); }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "RichText"; }
 
@@ -150,15 +149,36 @@ class RichText : public LeafWidget {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "RichText",
-            .properties = {
-                { .name="text", .type="string", .default_value="\"\"", .required=false, .note="纯文本内容（序列化用）", .json_type="string" },
-                { .name="width", .type="Length", .default_value="auto", .required=false, .note="", .json_type="array" },
-                { .name="height", .type="Length", .default_value="auto", .required=false, .note="", .json_type="array" },
-                { .name="show", .type="bool", .default_value="true", .required=false, .note="", .json_type="boolean" },
-            },
+            .properties =
+                {
+                    {.name = "text",
+                     .type = "string",
+                     .default_value = "\"\"",
+                     .required = false,
+                     .note = "纯文本内容（序列化用）",
+                     .json_type = "string"},
+                    {.name = "width",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "height",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "show",
+                     .type = "bool",
+                     .default_value = "true",
+                     .required = false,
+                     .note = "",
+                     .json_type = "boolean"},
+                },
             .events = {},
             .children_policy = "none",
-            .examples = { "au::RichText(au::Reactive<std::vector<au::TextSpan>>{ ... })" },
+            .examples = {"au::RichText(au::Reactive<std::vector<au::TextSpan>>{ ... })"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
@@ -166,7 +186,7 @@ class RichText : public LeafWidget {
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         std::string all;
-        for (const auto &s : m_spans.get()) {
+        for (const auto &s : spans_.get()) {
             all += s.text.text;
         }
         props["text"] = all;
@@ -175,19 +195,18 @@ class RichText : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("text")) {
-            m_spans =
-                Reactive{ std::vector{ TextSpan{ .text = LocalizedString{ props["text"].get<std::string>() } } } };
+            spans_ = Reactive{std::vector{TextSpan{.text = LocalizedString{props["text"].get<std::string>()}}}};
         }
     }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         const Locale loc = (ctx.environment<Locale>() != nullptr) ? *ctx.environment<Locale>() : Locale{};
-        m_lines = layout_rich_text(m_spans.get(), c.max.width, loc);
-        float w = 0.0f;
-        float h = 0.0f;
-        for (const auto &line : m_lines) {
-            float lw = 0.0f;
+        lines_ = layout_rich_text(spans_.get(), c.max.width, loc);
+        float w = 0.0F;
+        float h = 0.0F;
+        for (const auto &line : lines_) {
+            float lw = 0.0F;
             for (std::size_t i = 0; i < line.words.size(); ++i) {
                 lw += line.words[i].width;
                 if (i + 1 < line.words.size()) {
@@ -197,22 +216,22 @@ class RichText : public LeafWidget {
             w = std::max(w, lw);
             h += line.height;
         }
-        return c.constrain(Size{ .width = w, .height = h });
+        return c.constrain(Size{.width = w, .height = h});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        if (m_lines.empty()) {
+        if (lines_.empty()) {
             const Locale loc = (ctx.environment<Locale>() != nullptr) ? *ctx.environment<Locale>() : Locale{};
-            m_lines = layout_rich_text(m_spans.get(), bounds.size.width, loc);
+            lines_ = layout_rich_text(spans_.get(), bounds.size.width, loc);
         }
         float y = bounds.origin.y;
-        for (const auto &line : m_lines) {
+        for (const auto &line : lines_) {
             float x = bounds.origin.x;
             for (const auto &wd : line.words) {
                 if (!wd.text.empty()) {
-                    p.draw_text(Rect{ .origin = Point{ .x = x, .y = y },
-                                      .size = Size{ .width = wd.width, .height = line.height } },
-                                wd.text, wd.font, wd.color);
+                    p.draw_text(
+                        Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = wd.width, .height = line.height}},
+                        wd.text, wd.font, wd.color);
                 }
                 x += wd.width + render::FontEngine::measure_width(" ", wd.font);
             }
@@ -221,8 +240,8 @@ class RichText : public LeafWidget {
     }
 
   private:
-    Reactive<std::vector<TextSpan>> m_spans;
-    std::vector<detail::RichLine> m_lines;
+    Reactive<std::vector<TextSpan>> spans_;
+    std::vector<detail::RichLine> lines_;
 };
 
-} // namespace aurora
+}  // namespace aurora

@@ -29,10 +29,14 @@ struct TokenValue {
     TokenValue(double d) : v(d) {}
 
     /// @brief 便捷判定：当前值是否为某种类型（用于解析与诊断）。
-    template<typename T> [[nodiscard]] auto is() const -> bool { return std::holds_alternative<T>(v); }
+    template <typename T>
+    [[nodiscard]] auto is() const -> bool {
+        return std::holds_alternative<T>(v);
+    }
 
     /// @brief 取具体值（类型匹配则返回，否则 std::nullopt）。
-    template<typename T> [[nodiscard]] auto as() const -> std::optional<T> {
+    template <typename T>
+    [[nodiscard]] auto as() const -> std::optional<T> {
         if (auto *p = std::get_if<T>(&v)) {
             return *p;
         }
@@ -83,7 +87,7 @@ struct Theme {
 
     /// @brief 查询命名令牌；不存在返回 std::nullopt。
     [[nodiscard]] auto token(std::string_view name) const -> std::optional<TokenValue> {
-        auto it = tokens.find(std::string(name));
+        const auto it = tokens.find(std::string(name));
         if (it == tokens.end()) {
             return std::nullopt;
         }
@@ -91,8 +95,9 @@ struct Theme {
     }
 
     /// @brief 查询命名令牌并强转为目标类型；类型不匹配或不存在时返回 fallback。
-    template<typename T> [[nodiscard]] auto token_or(std::string_view name, T fallback) const -> T {
-        auto it = tokens.find(std::string(name));
+    template <typename T>
+    [[nodiscard]] auto token_or(std::string_view name, T fallback) const -> T {
+        const auto it = tokens.find(std::string(name));
         if (it != tokens.end()) {
             if (auto *p = std::get_if<T>(&it->second.v)) {
                 return *p;
@@ -102,4 +107,4 @@ struct Theme {
     }
 };
 
-} // namespace aurora
+}  // namespace aurora

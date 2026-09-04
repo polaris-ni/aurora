@@ -32,28 +32,28 @@ namespace aurora {
  * @note Side-effects: none
  */
 struct PerfReport {
-    std::string name;            ///< 会话名（写入报告标题与 JSON/CSV）
-    std::size_t frame_count = 0; ///< 采样帧数（不含 warmup）
-    double total_ms = 0.0;       ///< 采样帧耗时总和
+    std::string name;  ///< 会话名（写入报告标题与 JSON/CSV）
+    std::size_t frame_count = 0;  ///< 采样帧数（不含 warmup）
+    double total_ms = 0.0;  ///< 采样帧耗时总和
 
     // ---- 帧时间分布（毫秒）----
-    double avg_frame_ms = 0.0; ///< 均值：仅作参考，不作验收依据
-    double p50_ms = 0.0;       ///< 中位数
-    double p95_ms = 0.0;       ///< 95 分位
-    double p99_ms = 0.0;       ///< 99 分位：**主验收指标**
-    double best_ms = 0.0;      ///< 最快帧
-    double worst_ms = 0.0;     ///< 最慢帧
-    double jitter_ms = 0.0;    ///< 标准差：**主验收指标**（手感平顺度）
+    double avg_frame_ms = 0.0;  ///< 均值：仅作参考，不作验收依据
+    double p50_ms = 0.0;  ///< 中位数
+    double p95_ms = 0.0;  ///< 95 分位
+    double p99_ms = 0.0;  ///< 99 分位：**主验收指标**
+    double best_ms = 0.0;  ///< 最快帧
+    double worst_ms = 0.0;  ///< 最慢帧
+    double jitter_ms = 0.0;  ///< 标准差：**主验收指标**（手感平顺度）
 
     // ---- 关键计次 ----
-    double frame_budget_ms = 16.67;     ///< 帧预算（默认 60fps）
-    std::size_t over_budget_frames = 0; ///< 超预算帧数
-    std::size_t long_task_count = 0;    ///< 长任务累计次数（Profiler 判定）
-    std::size_t full_redraw_frames = 0; ///< **主验收指标**：退化为整帧重绘的帧数
+    double frame_budget_ms = 16.67;  ///< 帧预算（默认 60fps）
+    std::size_t over_budget_frames = 0;  ///< 超预算帧数
+    std::size_t long_task_count = 0;  ///< 长任务累计次数（Profiler 判定）
+    std::size_t full_redraw_frames = 0;  ///< **主验收指标**：退化为整帧重绘的帧数
 
     // ---- 渲染计数 ----
-    RenderCounters counters_sum{}; ///< 会话内逐字段累加（`dirty_area_ratio` 为和，需自行除帧数）
-    RenderCounters counters_max{}; ///< 会话内逐字段峰值
+    RenderCounters counters_sum{};  ///< 会话内逐字段累加（`dirty_area_ratio` 为和，需自行除帧数）
+    RenderCounters counters_max{};  ///< 会话内逐字段峰值
 
     /// @brief 会话级 zone 聚合（按总耗时降序；`AURORA_ENABLE_PROFILING` 关闭时为空）。
     std::vector<ZoneAggregate> zones;
@@ -98,7 +98,7 @@ struct PerfReport {
 class PerfSession {
   public:
     /// @brief 默认预留帧数（避免采样期间扩容影响读数）。
-    static constexpr std::size_t AURORA_DEFAULT_RESERVE_FRAMES = 512; // NOLINT(readability-identifier-naming)
+    static constexpr std::size_t AURORA_DEFAULT_RESERVE_FRAMES = 512;  // NOLINT(readability-identifier-naming)
 
     /**
      * @brief 构造会话并预留容量。
@@ -150,16 +150,16 @@ class PerfSession {
     /// @brief 把一帧的 zone 聚合并入会话级聚合（按名字内容匹配）。
     auto merge_zones(const std::vector<ZoneAggregate> &frame_zones) -> void;
 
-    std::string m_name;
-    double m_frame_budget_ms = 16.67;
+    std::string name_;
+    double frame_budget_ms_ = 16.67;
 
-    std::vector<double> m_frame_ms;
-    std::vector<ZoneAggregate> m_zones;
+    std::vector<double> frame_ms_;
+    std::vector<ZoneAggregate> zones_;
 
-    RenderCounters m_sum{};
-    RenderCounters m_max{};
-    std::size_t m_long_tasks = 0;
-    std::size_t m_full_redraw_frames = 0;
+    RenderCounters sum_{};
+    RenderCounters max_{};
+    std::size_t long_tasks_ = 0;
+    std::size_t full_redraw_frames_ = 0;
 };
 
-} // namespace aurora
+}  // namespace aurora

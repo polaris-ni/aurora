@@ -13,7 +13,7 @@
 
 namespace {
 void test_compiled_in() { AURORA_TEST_CHECK_MSG(true, "win32_window compiled-in smoke"); }
-} // namespace
+}  // namespace
 
 AURORA_TEST() { test_compiled_in(); }
 #else

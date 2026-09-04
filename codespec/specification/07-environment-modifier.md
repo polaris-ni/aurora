@@ -98,7 +98,7 @@ auto root = au::MediaQueryProvider{
     au::LayoutBuilder{
         [](const au::BuildContext& ctx, const au::Constraints& c) -> au::Node {
             const au::MediaQuery* mq = au::media_query_of(ctx);
-            const bool wide = (mq != nullptr) && (c.max.width >= 600.0f);
+            const bool wide = (mq != nullptr) && (c.max.width >= 600.0F);
             return wide ? au::Node{ build_two_column(ctx) }
                         : au::Node{ build_one_column(ctx) };
         }},

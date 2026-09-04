@@ -25,7 +25,7 @@ namespace {
 
 struct SvgColor {
     std::uint8_t r = 0, g = 0, b = 0, a = 255;
-    bool none = true; ///< fill="none" 或缺省
+    bool none = true;  ///< fill="none" 或缺省
 };
 
 /// @brief 将十六进制字符转为 0-15 的整数（非法字符返回 0）。
@@ -78,7 +78,7 @@ auto apply_named_color(SvgColor &c, const std::string &s) -> void {
         c.b = 128;
         c.none = false;
     } else {
-        c.none = true; // 未知色名视为 none（降级）
+        c.none = true;  // 未知色名视为 none（降级）
     }
 }
 
@@ -128,7 +128,7 @@ auto apply_named_color(SvgColor &c, const std::string &s) -> void {
     return {};
 }
 
-[[nodiscard]] auto attr_f(const std::string &tag, const std::string &name, float fallback = 0.0f) -> float {
+[[nodiscard]] auto attr_f(const std::string &tag, const std::string &name, float fallback = 0.0F) -> float {
     const std::string v = attr_of(tag, name);
     if (v.empty()) {
         return fallback;
@@ -143,21 +143,21 @@ auto apply_named_color(SvgColor &c, const std::string &s) -> void {
 /// @brief 单个已解析形状（统一以点内测试光栅化）。
 struct Shape {
     enum class Kind : std::uint8_t { Rect, Circle, Ellipse, Line, Polygon } kind = Kind::Rect;
-    float x = 0; // rect
+    float x = 0;  // rect
     float y = 0;
     float w = 0;
     float h = 0;
     float rx = 0;
-    float cx = 0; // circle/ellipse
+    float cx = 0;  // circle/ellipse
     float cy = 0;
     float r = 0;
     float ry = 0;
-    float x1 = 0; // line
+    float x1 = 0;  // line
     float y1 = 0;
     float x2 = 0;
     float y2 = 0;
     float sw = 1;
-    std::vector<float> pts; // polygon 顶点（x,y 交替）
+    std::vector<float> pts;  // polygon 顶点（x,y 交替）
     SvgColor fill;
     SvgColor stroke;
 };
@@ -167,15 +167,15 @@ struct Shape {
     if (px < s.x || px > s.x + s.w || py < s.y || py > s.y + s.h) {
         return false;
     }
-    if (s.rx > 0.0f) {
+    if (s.rx > 0.0F) {
         // 圆角：四角区域做圆内测试
-        const float rx = std::min(s.rx, std::min(s.w, s.h) * 0.5f);
+        const float rx = std::min(s.rx, std::min(s.w, s.h) * 0.5F);
         const float lx = s.x + rx;
         const float rxx = s.x + s.w - rx;
         const float ty = s.y + rx;
         const float by = s.y + s.h - rx;
-        float dx = 0.0f;
-        float dy = 0.0f;
+        float dx = 0.0F;
+        float dy = 0.0F;
         if (px < lx) {
             dx = lx - px;
         } else if (px > rxx) {
@@ -200,12 +200,12 @@ struct Shape {
 
 /// @brief 点内测试：<ellipse>。
 [[nodiscard]] auto hit_ellipse(const Shape &s, float px, float py) -> bool {
-    if (s.r <= 0.0f || s.ry <= 0.0f) {
+    if (s.r <= 0.0F || s.ry <= 0.0F) {
         return false;
     }
     const float dx = (px - s.cx) / s.r;
     const float dy = (py - s.cy) / s.ry;
-    return ((dx * dx) + (dy * dy)) <= 1.0f;
+    return ((dx * dx) + (dy * dy)) <= 1.0F;
 }
 
 /// @brief 点内测试：<line>（距线段的距离 <= stroke-width/2）。
@@ -213,11 +213,11 @@ struct Shape {
     const float vx = s.x2 - s.x1;
     const float vy = s.y2 - s.y1;
     const float len2 = (vx * vx) + (vy * vy);
-    float t = len2 > 0.0f ? (((px - s.x1) * vx) + ((py - s.y1) * vy)) / len2 : 0.0f;
-    t = std::clamp(t, 0.0f, 1.0f);
+    float t = len2 > 0.0F ? (((px - s.x1) * vx) + ((py - s.y1) * vy)) / len2 : 0.0F;
+    t = std::clamp(t, 0.0F, 1.0F);
     const float dx = px - (s.x1 + (t * vx));
     const float dy = py - (s.y1 + (t * vy));
-    const float half = std::max(0.5f, s.sw * 0.5f);
+    const float half = std::max(0.5F, s.sw * 0.5F);
     return ((dx * dx) + (dy * dy)) <= (half * half);
 }
 
@@ -243,11 +243,16 @@ struct Shape {
 /// @brief 点内测试（SVG 用户坐标空间）。
 [[nodiscard]] auto hit(const Shape &s, float px, float py) -> bool {
     switch (s.kind) {
-    case Shape::Kind::Rect: return hit_rect(s, px, py);
-    case Shape::Kind::Circle: return hit_circle(s, px, py);
-    case Shape::Kind::Ellipse: return hit_ellipse(s, px, py);
-    case Shape::Kind::Line: return hit_line(s, px, py);
-    case Shape::Kind::Polygon: return hit_polygon(s, px, py);
+        case Shape::Kind::Rect:
+            return hit_rect(s, px, py);
+        case Shape::Kind::Circle:
+            return hit_circle(s, px, py);
+        case Shape::Kind::Ellipse:
+            return hit_ellipse(s, px, py);
+        case Shape::Kind::Line:
+            return hit_line(s, px, py);
+        case Shape::Kind::Polygon:
+            return hit_polygon(s, px, py);
     }
     return false;
 }
@@ -258,11 +263,11 @@ struct Shape {
         return std::nullopt;
     }
     // std::from_chars 不接受前导 '+'，这里与 std::stof 行为对齐（用 string_view 切片避免裸指针算术）。
-    const std::string_view sv{ num };
+    const std::string_view sv{num};
     const std::string_view body = sv.front() == '+' ? sv.substr(1) : sv;
     const char *const data = body.data();
     const char *const last = std::next(data, static_cast<std::ptrdiff_t>(body.size()));
-    float value = 0.0f;
+    float value = 0.0F;
     const auto res = std::from_chars(data, last, value);
     if (res.ec != std::errc() || res.ptr != last) {
         return std::nullopt;
@@ -322,12 +327,12 @@ struct Shape {
         s.y1 = attr_f(tag, "y1");
         s.x2 = attr_f(tag, "x2");
         s.y2 = attr_f(tag, "y2");
-        s.sw = attr_f(tag, "stroke-width", 1.0f);
+        s.sw = attr_f(tag, "stroke-width", 1.0F);
     } else if (tag.starts_with("<polygon") || tag.starts_with("<polyline")) {
         s.kind = Shape::Kind::Polygon;
         s.pts = parse_points(attr_of(tag, "points"));
     } else {
-        return std::nullopt; // 未知/不支持标签（含 <path>）：跳过降级
+        return std::nullopt;  // 未知/不支持标签（含 <path>）：跳过降级
     }
     s.fill = parse_color(attr_of(tag, "fill"));
     // SVG 缺省 fill=black（除 line 外）
@@ -348,13 +353,13 @@ struct Shape {
     Image img;
     img.width = out_w;
     img.height = out_h;
-    img.pixels.assign(static_cast<std::size_t>(out_w) * out_h * 4, 0); // 透明底
+    img.pixels.assign(static_cast<std::size_t>(out_w) * out_h * 4, 0);  // 透明底
     const float sx = vb_w / static_cast<float>(out_w);
     const float sy = vb_h / static_cast<float>(out_h);
     for (int py = 0; py < out_h; ++py) {
         for (int px = 0; px < out_w; ++px) {
-            const float ux = vb_x + ((static_cast<float>(px) + 0.5f) * sx);
-            const float uy = vb_y + ((static_cast<float>(py) + 0.5f) * sy);
+            const float ux = vb_x + ((static_cast<float>(px) + 0.5F) * sx);
+            const float uy = vb_y + ((static_cast<float>(py) + 0.5F) * sy);
             for (const Shape &s : shapes) {
                 const SvgColor &c = s.kind == Shape::Kind::Line ? s.stroke : s.fill;
                 if (c.none) {
@@ -373,7 +378,7 @@ struct Shape {
     return img;
 }
 
-} // namespace
+}  // namespace
 
 /// @brief 单文档形状数量上限：数万形状 × 8192² 逐像素命中测试构成 CPU/内存 DoS
 /// （SVG 文件属不可信输入），超限直接拒绝解码。
@@ -391,13 +396,13 @@ auto load_image_svg(const std::vector<std::uint8_t> &buf, int target_w, int targ
         doc.substr(svg_pos, svg_end == std::string::npos ? std::string::npos : svg_end - svg_pos + 1);
 
     // 固有尺寸：viewBox 优先，否则 width/height，缺省 64
-    float vb_x = 0.0f;
-    float vb_y = 0.0f;
-    float vb_w = 0.0f;
-    float vb_h = 0.0f;
+    float vb_x = 0.0F;
+    float vb_y = 0.0F;
+    float vb_w = 0.0F;
+    float vb_h = 0.0F;
     const std::string vb = attr_of(root, "viewBox");
     if (!vb.empty()) {
-        const auto nums = parse_points(vb); // 复用数字扫描
+        const auto nums = parse_points(vb);  // 复用数字扫描
         if (nums.size() >= 4) {
             vb_x = nums.at(0);
             vb_y = nums.at(1);
@@ -405,13 +410,13 @@ auto load_image_svg(const std::vector<std::uint8_t> &buf, int target_w, int targ
             vb_h = nums.at(3);
         }
     }
-    if (vb_w <= 0.0f || vb_h <= 0.0f) {
-        vb_w = attr_f(root, "width", 64.0f);
-        vb_h = attr_f(root, "height", 64.0f);
-        vb_x = 0.0f;
-        vb_y = 0.0f;
+    if (vb_w <= 0.0F || vb_h <= 0.0F) {
+        vb_w = attr_f(root, "width", 64.0F);
+        vb_h = attr_f(root, "height", 64.0F);
+        vb_x = 0.0F;
+        vb_y = 0.0F;
     }
-    if (vb_w <= 0.0f || vb_h <= 0.0f) {
+    if (vb_w <= 0.0F || vb_h <= 0.0F) {
         return make_error(ErrorCode::LayoutInvalidConstraints, "load_image_svg: invalid intrinsic size");
     }
 
@@ -449,4 +454,4 @@ auto load_image_svg(const std::vector<std::uint8_t> &buf, int target_w, int targ
     return rasterize(shapes, out_w, out_h, vb_x, vb_y, vb_w, vb_h);
 }
 
-} // namespace aurora::detail
+}  // namespace aurora::detail

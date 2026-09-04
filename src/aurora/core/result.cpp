@@ -43,10 +43,10 @@ auto Error::to_json() const -> std::string {
         out += ",\"fix_category\":" + jstr(fix_category);
     }
     if (!fix_params.empty()) {
-        out += ",\"fix_params\":" + fix_params; // fix_params 已是 JSON 字符串
+        out += ",\"fix_params\":" + fix_params;  // fix_params 已是 JSON 字符串
     }
     out += '}';
     return out;
 }
 
-} // namespace aurora
+}  // namespace aurora

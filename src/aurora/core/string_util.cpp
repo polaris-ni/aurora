@@ -26,9 +26,9 @@ auto string_format(const char *fmt, ...) -> std::string {
 
     std::string out;
     out.resize(static_cast<std::size_t>(needed));
-    std::vsnprintf(out.data(), static_cast<std::size_t>(needed) + 1u, fmt, args_copy);
+    std::vsnprintf(out.data(), static_cast<std::size_t>(needed) + 1U, fmt, args_copy);
     va_end(args_copy);
     return out;
 }
 
-} // namespace aurora::internal
+}  // namespace aurora::internal

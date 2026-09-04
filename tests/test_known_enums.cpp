@@ -11,11 +11,10 @@
 #include <string>
 #include <vector>
 
+#include "../tools/include/known_enums.h"
 #include "aurora/aurora.h"
 #include "aurora/core/platform.h"
 #include "aurora/widget/serialization.h"
-
-#include "../tools/include/known_enums.h"
 #include "test_harness.h"
 
 using aurora::list_all_schemas;
@@ -27,8 +26,8 @@ namespace {
 /// @note 这些名字与 tools/include/known_enums.h 中的取值逐字一致；枚举演进时两处必须同步修改，
 ///       否则本函数编译失败（正是我们想要的失败模式）。
 [[maybe_unused]] auto enum_anchors() -> int {
-    (void)&aurora::colors::AURORA_WHITE;       // ColorPalette
-    (void)&aurora::colors::AURORA_TRANSPARENT; // ColorPalette
+    (void)&aurora::colors::AURORA_WHITE;  // ColorPalette
+    (void)&aurora::colors::AURORA_TRANSPARENT;  // ColorPalette
     return static_cast<int>(aurora::Alignment::BottomRight) + static_cast<int>(aurora::BoxFit::ScaleDown) +
            static_cast<int>(aurora::CrossAxisAlignment::Stretch) +
            static_cast<int>(aurora::MainAxisAlignment::SpaceEvenly) + static_cast<int>(aurora::MainAxisSize::Max) +
@@ -44,10 +43,10 @@ namespace {
 
 /// @brief 属性类型是否属于「不需要枚举登记」的基础 / 容器类型。
 auto is_primitive_type(const std::string &t) -> bool {
-    static const std::vector<std::string> base = { "float",      "int",   "bool",   "string",
-                                                   "double",     "Color", "Length", "LocalizedString",
-                                                   "EdgeInsets", "Json",  "any",    "std::string" };
-    for (const auto &b : base) {
+    static const std::vector<std::string> BASE = {"float",      "int",   "bool",   "string",
+                                                  "double",     "Color", "Length", "LocalizedString",
+                                                  "EdgeInsets", "Json",  "any",    "std::string"};
+    for (const auto &b : BASE) {
         if (t == b) {
             return true;
         }
@@ -116,14 +115,22 @@ void test_registry_covers_prop_types() {
     std::vector<std::string> uncovered;
     std::size_t checked = 0;
     for (const auto &s : schemas) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         if (!s.contains("prop_descriptors") || !s["prop_descriptors"].is_array()) {
             continue;
         }
         const std::string wtype = s.value("type", std::string{});
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         for (const auto &p : s["prop_descriptors"]) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             if (!p.contains("type") || !p["type"].is_string()) {
                 continue;
             }
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             const std::string t = p["type"].get<std::string>();
             if (t.empty() || is_primitive_type(t)) {
                 continue;
@@ -142,7 +149,7 @@ void test_registry_covers_prop_types() {
                                                  (uncovered.empty() ? std::string{} : uncovered.front()));
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     (void)enum_anchors();

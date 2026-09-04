@@ -1,4 +1,4 @@
-// test_descriptor.cpp — 控件自描述 describe() 与组件发现 API 增强测试（v0.7.0）。
+// test_descriptor.cpp — 控件自描述 describe() 与组件发现 API 增强测试。
 
 #include <string>
 #include <vector>
@@ -9,7 +9,6 @@
 #include "aurora/widget/serialization.h"
 #include "aurora/widget/show.h"
 #include "aurora/widget/text.h"
-
 #include "test_harness.h"
 
 using aurora::Button;
@@ -37,6 +36,8 @@ static void test_describe_basic() {
     AURORA_TEST_CHECK(!bd.properties.empty());
     AURORA_TEST_CHECK(bd.children_policy == "none");
     AURORA_TEST_CHECK(!bd.events.empty());
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(bd.events[0] == "on_click");
     AURORA_TEST_CHECK(!bd.examples.empty());
 
@@ -113,20 +114,36 @@ static void test_descriptor_to_json() {
     Json j = descriptor_to_json(bd);
 
     AURORA_TEST_CHECK(j.contains("name"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(j["name"] == "Button");
     AURORA_TEST_CHECK(j.contains("namespace"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(j["namespace"] == "aurora");
     AURORA_TEST_CHECK(j.contains("properties"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(j["properties"].is_array());
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(!j["properties"].empty());
     AURORA_TEST_CHECK(j.contains("events"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(j["events"].is_array());
     AURORA_TEST_CHECK(j.contains("children_policy"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(j["children_policy"] == "none");
     AURORA_TEST_CHECK(j.contains("examples"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(j["examples"].is_array());
 
     // 检查单个属性结构
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     const Json first_prop = j["properties"][0];
     AURORA_TEST_CHECK(first_prop.contains("name"));
     AURORA_TEST_CHECK(first_prop.contains("type"));
@@ -141,25 +158,41 @@ static void test_component_schema_enhanced() {
 
     Json schema = component_schema("Button");
     AURORA_TEST_CHECK(schema.contains("prop_descriptors"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(schema["prop_descriptors"].is_array());
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(!schema["prop_descriptors"].empty());
     AURORA_TEST_CHECK(schema.contains("events"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(schema["events"].is_array());
     AURORA_TEST_CHECK(schema.contains("children_policy"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(schema["children_policy"] == "none");
     AURORA_TEST_CHECK(schema.contains("examples"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(schema["examples"].is_array());
 
     // 向后兼容：原有字段仍存在
     AURORA_TEST_CHECK(schema.contains("type"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(schema["type"] == "Button");
     AURORA_TEST_CHECK(schema.contains("props"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(schema["props"].is_array());
     AURORA_TEST_CHECK(schema.contains("default_props"));
     AURORA_TEST_CHECK(schema.contains("container"));
 
     // Column 的 children_policy 应为 multiple
     Json col_schema = component_schema("Column");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(col_schema["children_policy"] == "multiple");
 }
 
@@ -188,6 +221,8 @@ static void test_describe_component_api() {
     AURORA_TEST_CHECK(desc.contains("prop_descriptors"));
     AURORA_TEST_CHECK(desc.contains("events"));
     AURORA_TEST_CHECK(desc.contains("children_policy"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(desc["children_policy"] == "none");
 
     // 搜索
@@ -195,6 +230,8 @@ static void test_describe_component_api() {
     AURORA_TEST_CHECK(!results.empty());
     bool found_button = false;
     for (const auto &r : results) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         if (r["type"] == "Button") {
             found_button = true;
         }

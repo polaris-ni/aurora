@@ -16,9 +16,9 @@ namespace aurora {
  * @note Rebuildable: no
  */
 struct LayoutBox {
-    Rect rect{};                     ///< 相对父节点的坐标与尺寸
-    Constraints constraints{};       ///< 本节点收到的约束
-    std::vector<LayoutBox> children; ///< 子节点布局盒（顺序与 widget 子节点一致）
+    Rect rect{};  ///< 相对父节点的坐标与尺寸
+    Constraints constraints{};  ///< 本节点收到的约束
+    std::vector<LayoutBox> children;  ///< 子节点布局盒（顺序与 widget 子节点一致）
 };
 
-} // namespace aurora
+}  // namespace aurora

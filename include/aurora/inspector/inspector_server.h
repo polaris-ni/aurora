@@ -8,7 +8,7 @@
 namespace aurora {
 class Node;
 class Surface;
-} // namespace aurora
+}  // namespace aurora
 
 namespace aurora {
 
@@ -28,7 +28,7 @@ class InspectorServer {
 
     /// @brief Start HTTP server on the given port (default 6280). Returns true on success.
     /// The server runs in a background worker thread.
-    auto start(uint16_t port = 6280) const -> bool;
+    [[nodiscard]] auto start(uint16_t port = 6280) const -> bool;
 
     /// @brief Stop the server and join the worker thread.
     void stop() const;
@@ -51,7 +51,7 @@ class InspectorServer {
 
   private:
     struct Impl;
-    std::unique_ptr<Impl> m_impl;
+    std::unique_ptr<Impl> impl_;
 };
 
-} // namespace aurora
+}  // namespace aurora

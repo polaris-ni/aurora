@@ -4,7 +4,6 @@
 #include <vector>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -18,12 +17,12 @@ using aurora::Text;
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_inspect ===\n");
 
-    auto root = Node{ Column{ Node{ Button{ "Hi" } }, Node{ Text{ "x" } } } };
+    auto root = Node{Column{Node{Button{"Hi"}}, Node{Text{"x"}}}};
 
     BuildContext ctx;
     root.widget().mount(ctx);
-    root.widget().layout(
-        Constraints{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 200, .height = 200 } }, ctx);
+    root.widget().layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 200, .height = 200}},
+                         ctx);
 
     // 1) dump_tree 返回非空字符串。
     auto tree = dump_tree(root);
@@ -43,10 +42,16 @@ AURORA_TEST() {
     // 5) dump_tree_json 返回对象且含 "type" 键。
     auto j = dump_tree_json(root);
     AURORA_TEST_CHECK(j.is_object() && j.contains("type"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(j["type"].get<std::string>() == "Column");
 
     // 6) dump_tree_json 含 "children" 数组，且含两个子节点。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(j.contains("children") && j["children"].is_array());
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(j["children"].size() == 2);
 
     // 7) query 找到 Text 子节点。

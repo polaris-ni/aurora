@@ -8,7 +8,7 @@
 
 namespace aurora {
 
-class StringTable; // 前向声明：resolve 的定义在 string_table.h（避免循环包含）
+class StringTable;  // 前向声明：resolve 的定义在 string_table.h（避免循环包含）
 
 /**
  * @brief 可本地化字符串（i18n 运行时，specification/07-environment-modifier.md §6 国际化）。
@@ -23,10 +23,10 @@ class StringTable; // 前向声明：resolve 的定义在 string_table.h（避�
  * @note Rebuildable: yes, via from_json
  */
 struct LocalizedString {
-    std::string text;                  ///< 字面文本（非本地化值 / 本地化查表失败时的回退）
-    std::string key;                   ///< 本地化键（localize 为 true 时使用）
-    std::vector<LocalizedString> args; ///< 模板参数（可嵌套本地化）
-    bool localize = false;             ///< 是否走查表解析
+    std::string text;  ///< 字面文本（非本地化值 / 本地化查表失败时的回退）
+    std::string key;  ///< 本地化键（localize 为 true 时使用）
+    std::vector<LocalizedString> args;  ///< 模板参数（可嵌套本地化）
+    bool localize = false;  ///< 是否走查表解析
 
     LocalizedString() = default;
     LocalizedString(const char *t) : text(t) {}
@@ -51,4 +51,4 @@ struct LocalizedString {
     [[nodiscard]] auto resolve(const StringTable *table, const Locale &loc) const -> std::string;
 };
 
-} // namespace aurora
+}  // namespace aurora

@@ -11,7 +11,7 @@ namespace aurora {
 
 /// @brief 文件变化类型。
 enum class FileChange : std::uint8_t {
-    Modified, ///< 内容修改（mtime/大小变化）
+    Modified,  ///< 内容修改（mtime/大小变化）
     Created,  ///< 新出现
     Removed,  ///< 被删除
 };
@@ -30,7 +30,7 @@ class FileWatcher {
     using ChangeCallback = std::function<void(const std::string &path, FileChange change)>;
 
     FileWatcher() = default;
-    explicit FileWatcher(ChangeCallback on_change) : m_on_change(std::move(on_change)) {}
+    explicit FileWatcher(ChangeCallback on_change) : on_change_(std::move(on_change)) {}
 
     /// @brief 监视一个文件（立即记录当前状态为基线）。
     auto watch(const std::string &path) -> void {
@@ -41,22 +41,22 @@ class FileWatcher {
             e.mtime = std::filesystem::last_write_time(path, ec);
             e.size = std::filesystem::file_size(path, ec);
         }
-        m_entries[path] = e;
+        entries_[path] = e;
     }
 
     /// @brief 停止监视。
-    auto unwatch(const std::string &path) -> void { m_entries.erase(path); }
+    auto unwatch(const std::string &path) -> void { entries_.erase(path); }
 
     /// @brief 监视的文件数。
-    [[nodiscard]] auto count() const -> std::size_t { return m_entries.size(); }
+    [[nodiscard]] auto count() const -> std::size_t { return entries_.size(); }
 
     /// @brief 设置变化回调。
-    auto set_on_change(ChangeCallback cb) -> void { m_on_change = std::move(cb); }
+    auto set_on_change(ChangeCallback cb) -> void { on_change_ = std::move(cb); }
 
     /// @brief 轮询一次：检测全部监视项的变化，触发回调并返回变化列表。
     auto poll() -> std::vector<std::pair<std::string, FileChange>> {
         std::vector<std::pair<std::string, FileChange>> changes;
-        for (auto &kv : m_entries) {
+        for (auto &kv : entries_) {
             const std::string &path = kv.first;
             Entry &e = kv.second;
             std::error_code ec;
@@ -80,9 +80,9 @@ class FileWatcher {
                 }
             }
         }
-        if (m_on_change) {
+        if (on_change_) {
             for (const auto &[fst, snd] : changes) {
-                m_on_change(fst, snd);
+                on_change_(fst, snd);
             }
         }
         return changes;
@@ -95,8 +95,8 @@ class FileWatcher {
         std::uintmax_t size = 0;
     };
 
-    std::map<std::string, Entry> m_entries;
-    ChangeCallback m_on_change;
+    std::map<std::string, Entry> entries_;
+    ChangeCallback on_change_;
 };
 
-} // namespace aurora
+}  // namespace aurora

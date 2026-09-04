@@ -65,33 +65,48 @@ class Preferences {
   public:
     /// @brief 构造选项。
     struct Options {
-        bool auto_create_dir = false; ///< flush/reload 时若父目录不存在则自动创建。
-        Options() : auto_create_dir(true) {}
+        bool auto_create_dir{true};  ///< flush/reload 时若父目录不存在则自动创建（默认开启）。
+        Options() = default;
     };
 
     /// @brief 内存模式：不绑定任何文件，所有写入仅存于内存。
     Preferences() = default;
 
-    /// @brief 文件模式：显式指定配置存储的 JSON 文件路径，构造即加载（文件不存在则为空对象）。
+    /// @brief 文件模式（默认 Options）：显式指定配置存储的 JSON 文件路径，构造即加载（文件不存在则为空对象）。
     /// @param file 配置文件的完整路径；可位于任意位置（含子目录，目录会自动创建）。
-    /// @param opts 选项（如 `auto_create_dir`）。
-    explicit Preferences(std::filesystem::path file, Options opts = {}) : m_file(std::move(file)), m_opts(opts) {
+    explicit Preferences(std::filesystem::path file) : file_(std::move(file)), opts_(Options{}) {
         load_from_file();
     }
 
-    /// @brief 便捷构造：在指定路径创建文件模式实例。
-    [[nodiscard]] static auto at(std::filesystem::path file, Options opts = {}) -> Preferences {
-        return Preferences(std::move(file), opts);
+    /// @brief 文件模式：显式指定配置存储的 JSON 文件路径与选项，构造即加载（文件不存在则为空对象）。
+    /// @param file 配置文件的完整路径；可位于任意位置（含子目录，目录会自动创建）。
+    /// @param opts 选项（如 `auto_create_dir`）。
+    explicit Preferences(std::filesystem::path file, Options opts) : file_(std::move(file)), opts_(std::move(opts)) {
+        load_from_file();
     }
 
+    /// @brief 便捷构造：在指定路径创建文件模式实例（默认 Options）。
+    [[nodiscard]] static auto at(std::filesystem::path file) -> Preferences { return Preferences(std::move(file)); }
+    /// @brief 便捷构造：在指定路径创建文件模式实例。
+    [[nodiscard]] static auto at(std::filesystem::path file, Options opts) -> Preferences {
+        return Preferences(std::move(file), std::move(opts));
+    }
+
+    /// @brief 便捷构造：在平台默认配置目录（`default_config_dir()`）下以 `name`（自动补 `.json`）命名配置文件。
+    [[nodiscard]] static auto with_location(std::string name) -> Preferences {
+        return with_location(std::move(name), default_config_dir());
+    }
     /// @brief 便捷构造：在 `dir` 下以 `name`（自动补 `.json`）命名配置文件。
-    /// 默认 `dir` 取平台配置目录；目录不存在则自动创建。
-    [[nodiscard]] static auto with_location(std::string name, const std::filesystem::path &dir = default_config_dir(),
-                                            Options opts = {}) -> Preferences {
+    [[nodiscard]] static auto with_location(std::string name, const std::filesystem::path &dir) -> Preferences {
+        return with_location(std::move(name), dir, Options{});
+    }
+    /// @brief 便捷构造：在 `dir` 下以 `name`（自动补 `.json`）命名配置文件，并显式指定选项。
+    /// @param dir 配置目录；默认取平台配置目录。
+    [[nodiscard]] static auto with_location(std::string name, const std::filesystem::path &dir, Options opts) -> Preferences {
         if (!name.ends_with(".json")) {
             name += ".json";
         }
-        return Preferences(dir / name, opts);
+        return Preferences(dir / name, std::move(opts));
     }
 
     // ---------- 单例（按名注册表，线程安全懒构造） ----------
@@ -110,15 +125,15 @@ class Preferences {
     [[nodiscard]] static auto default_config_dir() -> std::filesystem::path;
 
     /// @brief 是否绑定了文件（持久化模式）。
-    [[nodiscard]] auto is_persistent() const -> bool { return !m_file.empty(); }
+    [[nodiscard]] auto is_persistent() const -> bool { return !file_.empty(); }
 
     /// @brief 当前配置文件路径（内存模式返回空路径）。
-    [[nodiscard]] auto file_path() const -> const std::filesystem::path & { return m_file; }
+    [[nodiscard]] auto file_path() const -> const std::filesystem::path & { return file_; }
 
     /// @brief 最近一次文件加载（`flush`/`reload` 不涉及）产生的错误；无错误则为 nullopt。
     [[nodiscard]] auto last_load_error() const -> std::optional<Error> {
-        std::unique_lock lock(m_mutex);
-        return m_load_error;
+        std::unique_lock lock(mutex_);
+        return load_error_;
     }
 
     // ---------- 分组（作用域子视图） ----------
@@ -129,59 +144,62 @@ class Preferences {
     /// 与扁平 key 共存于同一实例/文件；分组的 `remove`/`clear` 同样走墓碑可靠删除。
     class Group {
       public:
-        Group(Preferences *owner, std::string path) : m_owner(owner), m_path(std::move(path)) {}
+        Group(Preferences *owner, std::string path) : owner_(owner), path_(std::move(path)) {}
 
         /// @brief 读取分组内键值；缺失/类型不匹配回退 `fallback`。
-        template<typename T> [[nodiscard]] auto get(const std::string &key, T fallback) const -> T {
-            return m_owner->get_impl(m_path, key, std::move(fallback));
+        template <typename T>
+        [[nodiscard]] auto get(const std::string &key, T fallback) const -> T {
+            return owner_->get_impl(path_, key, std::move(fallback));
         }
 
         /// @brief 写入分组内键值（仅内存 + State，不自动落盘）。
-        template<typename T> auto set(const std::string &key, T value) -> void {
-            m_owner->set_impl(m_path, key, std::move(value));
+        template <typename T>
+        auto set(const std::string &key, T value) -> void {
+            owner_->set_impl(path_, key, std::move(value));
         }
 
         /// @brief 惰性创建分组内键的 `State<T>`，供控件订阅。
-        template<typename T> [[nodiscard]] auto watch(const std::string &key, T fallback) -> std::shared_ptr<State<T>> {
-            return m_owner->watch_impl(m_path, key, std::move(fallback));
+        template <typename T>
+        [[nodiscard]] auto watch(const std::string &key, T fallback) -> std::shared_ptr<State<T>> {
+            return owner_->watch_impl(path_, key, std::move(fallback));
         }
 
         /// @brief 分组内键的非拥有 `Binding<T>`（注入删除回调）。
-        template<typename T> [[nodiscard]] auto binding(const std::string &key, T fallback) -> Binding<T> {
-            return m_owner->binding_impl(m_path, key, std::move(fallback));
+        template <typename T>
+        [[nodiscard]] auto binding(const std::string &key, T fallback) -> Binding<T> {
+            return owner_->binding_impl(path_, key, std::move(fallback));
         }
 
         /// @brief 分组内是否含键（且非 null）。
-        [[nodiscard]] auto contains(const std::string &key) const -> bool {
-            return m_owner->contains_impl(m_path, key);
-        }
+        [[nodiscard]] auto contains(const std::string &key) const -> bool { return owner_->contains_impl(path_, key); }
 
         /// @brief 分组内所有直接子键名（不含分组前缀）。
-        [[nodiscard]] auto keys() const -> std::vector<std::string> { return m_owner->keys_impl(m_path); }
+        [[nodiscard]] auto keys() const -> std::vector<std::string> { return owner_->keys_impl(path_); }
 
         /// @brief 删除分组内键（墓碑可靠语义，需 flush 落盘）。
-        auto remove(const std::string &key) const -> void { m_owner->remove_impl(m_path, key); }
+        auto remove(const std::string &key) const -> void { owner_->remove_impl(path_, key); }
 
         /// @brief 清空本分组子树（对该子树已知键打墓碑，不影响其他分组与顶层键）。
-        auto clear() const -> void { m_owner->clear_impl(m_path); }
+        auto clear() const -> void { owner_->clear_impl(path_); }
 
         /// @brief 链式嵌套子分组。
         [[nodiscard]] auto group(const std::string &name) const -> Group {
-            return { m_owner, m_path.empty() ? name : m_path + "." + name };
+            return {owner_, path_.empty() ? name : path_ + "." + name};
         }
 
       private:
-        Preferences *m_owner;
-        std::string m_path; // 复合前缀，如 "ui" / "ui.editor"
+        Preferences *owner_;
+        std::string path_;  // 复合前缀，如 "ui" / "ui.editor"
     };
 
     /// @brief 获取命名分组的作用域子视图（见 `Group`）。
-    [[nodiscard]] auto group(const std::string &name) -> Group { return { this, name }; }
+    [[nodiscard]] auto group(const std::string &name) -> Group { return {this, name}; }
 
     // ---------- 读取（共享锁） ----------
 
     /// @brief 读取键值（根作用域）；类型不匹配或键缺失时回退 `fallback`。
-    template<typename T> [[nodiscard]] auto get(const std::string &key, T fallback) const -> T {
+    template <typename T>
+    [[nodiscard]] auto get(const std::string &key, T fallback) const -> T {
         return get_impl("", key, std::move(fallback));
     }
 
@@ -189,16 +207,21 @@ class Preferences {
 
     /// @brief 写入键值（根作用域）：更新内存 JSON 与对应 `State`（通知订阅者），**不**自动落盘。
     /// 落盘须调用 `flush()`。
-    template<typename T> auto set(const std::string &key, T value) -> void { set_impl("", key, std::move(value)); }
+    template <typename T>
+    auto set(const std::string &key, T value) -> void {
+        set_impl("", key, std::move(value));
+    }
 
     /// @brief 惰性创建并缓存该键的 `State<T>`，供控件订阅；初始值为当前存储值或 `fallback`。
-    template<typename T> [[nodiscard]] auto watch(const std::string &key, T fallback) -> std::shared_ptr<State<T>> {
+    template <typename T>
+    [[nodiscard]] auto watch(const std::string &key, T fallback) -> std::shared_ptr<State<T>> {
         return watch_impl("", key, std::move(fallback));
     }
 
     /// @brief 基于 `watch` 的 `State` 返回非拥有 `Binding<T>`：控件卸载时可调用 `binding.remove()`
     ///        删除对应持久化键（走墓碑可靠删除）；调用 `remove()` 后该 Binding 即失效。
-    template<typename T> [[nodiscard]] auto binding(const std::string &key, T fallback) -> Binding<T> {
+    template <typename T>
+    [[nodiscard]] auto binding(const std::string &key, T fallback) -> Binding<T> {
         return binding_impl("", key, std::move(fallback));
     }
 
@@ -236,7 +259,8 @@ class Preferences {
         virtual void push(const Json &j) = 0;
     };
 
-    template<typename T> struct StateHolder : IStateHolder {
+    template <typename T>
+    struct StateHolder : IStateHolder {
         std::shared_ptr<State<T>> state;
         T fallback;
         StateHolder(std::shared_ptr<State<T>> s, T fb) : state(std::move(s)), fallback(std::move(fb)) {}
@@ -256,13 +280,14 @@ class Preferences {
     auto load_from_file() -> void;
 
     // ----- 作用域化内部实现（scope 为空 = 根作用域；Group 以 m_path 为 scope 委托） -----
-    template<typename T>
+    template <typename T>
     [[nodiscard]] auto get_impl(const std::string &scope, const std::string &key, T fallback) const -> T;
-    template<typename T> auto set_impl(const std::string &scope, const std::string &key, T value) -> void;
-    template<typename T>
+    template <typename T>
+    auto set_impl(const std::string &scope, const std::string &key, T value) -> void;
+    template <typename T>
     [[nodiscard]] auto watch_impl(const std::string &scope, const std::string &key, T fallback)
         -> std::shared_ptr<State<T>>;
-    template<typename T>
+    template <typename T>
     [[nodiscard]] auto binding_impl(const std::string &scope, const std::string &key, T fallback) -> Binding<T>;
     [[nodiscard]] auto contains_impl(const std::string &scope, const std::string &key) const -> bool;
     [[nodiscard]] auto keys_impl(const std::string &scope) const -> std::vector<std::string>;
@@ -272,24 +297,24 @@ class Preferences {
     static auto registry() -> std::unordered_map<std::string, std::unique_ptr<Preferences>> &;
     static auto registry_mutex() -> std::mutex &;
 
-    std::filesystem::path m_file; // 空 = 内存模式
-    Options m_opts;
-    Json m_root = Json::object();                                            // 内存 JSON 存储
-    std::unordered_map<std::string, std::shared_ptr<IStateHolder>> m_states; // key -> State
-    std::optional<Error> m_load_error;
+    std::filesystem::path file_;  // 空 = 内存模式
+    Options opts_;  // 默认构造即 auto_create_dir=true（Options 为聚合类型，见 Options）
+    Json root_ = Json::object();  // 内存 JSON 存储
+    std::unordered_map<std::string, std::shared_ptr<IStateHolder>> states_;  // key -> State
+    std::optional<Error> load_error_;
     // 用 std::mutex 而非 std::shared_mutex：MinGW-w64 winpthreads 的 rwlock 在多线程
     // 并发写锁竞争下会间歇性返回非零，触发 libstdc++ `__shared_mutex_pthread::lock()`
     // 的 `__ret == 0` 断言（test_preferences 稳定复现）。本类临界区均为内存操作、
     // 读多写少但单次耗时纳秒级，独占锁无可观测性能差异。
-    mutable std::mutex m_mutex; // 保护上述可变状态
+    mutable std::mutex mutex_;  // 保护上述可变状态
 
     // ----- 多进程可靠删除所需元数据（受 m_mutex 保护） -----
     /// @brief 键 -> 本进程显式 set 的写入版本（时间戳，LWW 依据之一）。不合并磁盘版本。
-    std::unordered_map<std::string, double> m_versions;
+    std::unordered_map<std::string, double> versions_;
     /// @brief 已删除键的墓碑：键 -> 删除时间戳；随 flush 持久化并跨进程传播，保证删除可靠。
-    std::unordered_map<std::string, double> m_tombstones;
+    std::unordered_map<std::string, double> tombstones_;
     /// @brief 全局清空纪元（clear 时置为时间戳）；所有版本早于纪元的键在各进程被删除。
-    double m_cleared_at = 0.0;
+    double cleared_at_ = 0.0;
 
     /// @brief 当前时间戳（秒，double），用于版本/墓碑/清空纪元的 LWW 排序。
     [[nodiscard]] static auto now_ts() -> double {
@@ -303,11 +328,11 @@ class Preferences {
 
 // ----- Preferences 作用域化实现（模板，供头文件内联公共方法 / Group 委托） -----
 
-template<typename T>
+template <typename T>
 auto Preferences::get_impl(const std::string &scope, const std::string &key, T fallback) const -> T {
-    std::unique_lock lock(m_mutex);
+    std::unique_lock lock(mutex_);
     const std::string composite = scope.empty() ? key : scope + "." + key;
-    const Json j = resolve_get(m_root, composite);
+    const Json j = resolve_get(root_, composite);
     if (j.is_null()) {
         return fallback;
     }
@@ -318,17 +343,18 @@ auto Preferences::get_impl(const std::string &scope, const std::string &key, T f
     }
 }
 
-template<typename T> auto Preferences::set_impl(const std::string &scope, const std::string &key, T value) -> void {
+template <typename T>
+auto Preferences::set_impl(const std::string &scope, const std::string &key, T value) -> void {
     const std::string composite = scope.empty() ? key : scope + "." + key;
     Json snapshot;
     std::shared_ptr<IStateHolder> holder;
     {
-        std::unique_lock lock(m_mutex);
-        resolve_set(m_root, composite, Json(std::move(value)));
-        snapshot = resolve_get(m_root, composite);
-        m_versions[composite] = now_ts(); // 记录写入版本（LWW 依据）
-        m_tombstones.erase(composite);    // 重新创建会取消墓碑
-        if (const auto it = m_states.find(composite); it != m_states.end()) {
+        std::unique_lock lock(mutex_);
+        resolve_set(root_, composite, Json(std::move(value)));
+        snapshot = resolve_get(root_, composite);
+        versions_[composite] = now_ts();  // 记录写入版本（LWW 依据）
+        tombstones_.erase(composite);  // 重新创建会取消墓碑
+        if (const auto it = states_.find(composite); it != states_.end()) {
             holder = it->second;
         }
     }
@@ -338,32 +364,32 @@ template<typename T> auto Preferences::set_impl(const std::string &scope, const 
     }
 }
 
-template<typename T>
+template <typename T>
 auto Preferences::watch_impl(const std::string &scope, const std::string &key, T fallback)
     -> std::shared_ptr<State<T>> {
     const std::string composite = scope.empty() ? key : scope + "." + key;
-    std::unique_lock lock(m_mutex);
-    if (const auto it = m_states.find(composite); it != m_states.end()) {
+    std::unique_lock lock(mutex_);
+    if (const auto it = states_.find(composite); it != states_.end()) {
         if (auto *h = dynamic_cast<StateHolder<T> *>(it->second.get())) {
             return h->state;
         }
         // 类型不一致（同键不同 T）：重建。
     }
     T initial = fallback;
-    const Json j = resolve_get(m_root, composite);
+    const Json j = resolve_get(root_, composite);
     if (!j.is_null()) {
         try {
             initial = j.get<T>();
         } catch (const nlohmann::json::exception &) {
-            initial = fallback; // JSON 类型转换失败，回退到默认值
+            initial = fallback;  // JSON 类型转换失败，回退到默认值
         }
     }
     auto state = std::make_shared<State<T>>(initial);
-    m_states[composite] = std::make_shared<StateHolder<T>>(state, std::move(fallback));
+    states_[composite] = std::make_shared<StateHolder<T>>(state, std::move(fallback));
     return state;
 }
 
-template<typename T>
+template <typename T>
 auto Preferences::binding_impl(const std::string &scope, const std::string &key, T fallback) -> Binding<T> {
     auto *self = this;
     std::string s_scope = scope;
@@ -374,4 +400,4 @@ auto Preferences::binding_impl(const std::string &scope, const std::string &key,
                       });
 }
 
-} // namespace aurora::preferences
+}  // namespace aurora::preferences

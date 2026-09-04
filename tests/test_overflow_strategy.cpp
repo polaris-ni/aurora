@@ -10,7 +10,6 @@
 #include "aurora/widget/containers.h"
 #include "aurora/widget/props_io.h"
 #include "aurora/widget/text.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -30,14 +29,16 @@ using aurora::Rect;
 using aurora::Size;
 using aurora::Text;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables) 测试内部共享计数器，static 文件作用域
 static int g_failures = 0;
 
-#define AURORA_CHECK(cond, msg)                                                                                        \
-    do {                                                                                                               \
-        if (!(cond)) {                                                                                                 \
-            AURORA_LOG_ERROR("test", "  FAIL: ", msg);                                                                 \
-            ++g_failures;                                                                                              \
-        }                                                                                                              \
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage) 测试断言宏，无函数等价物
+#define AURORA_CHECK(cond, msg)                        \
+    do {                                               \
+        if (!(cond)) {                                 \
+            AURORA_LOG_ERROR("test", "  FAIL: ", msg); \
+            ++g_failures;                              \
+        }                                              \
     } while (0)
 
 // ---- 1. 枚举序列化 ----
@@ -97,6 +98,8 @@ static void test_props_roundtrip() {
     Json props;
     col.serialize_props(props);
     AURORA_CHECK(props.contains("overflow"), "props contains 'overflow'");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_CHECK(props["overflow"].get<std::string>() == "Hidden", "serialized = Hidden");
 
     // 反序列化到另一个 widget
@@ -117,26 +120,26 @@ static void test_clip_behavior() {
     // 4a. overflow=Visible：子内容溢出可见
     {
         auto txt = std::make_shared<Text>();
-        txt->content = LocalizedString{ "XXXXXXXXXXXXXXXXXXXX" };
-        txt->modifier.set(Modifier{}.size(200.0f, 100.0f).background(Color{ 255, 0, 0, 255 })); // 红色背景，超出容器
+        txt->content = LocalizedString{"XXXXXXXXXXXXXXXXXXXX"};
+        txt->modifier.set(Modifier{}.size(200.0F, 100.0F).background(Color{255, 0, 0, 255}));  // 红色背景，超出容器
 
-        Column col{ ColumnProps{ .children = { Node{ txt } } } };
+        Column col{ColumnProps{.children = {Node{txt}}}};
         col.modifier.set(Modifier{}
                              .size(static_cast<float>(w), static_cast<float>(h))
-                             .background(Color{ 0, 255, 0, 255 })); // 绿色背景
+                             .background(Color{0, 255, 0, 255}));  // 绿色背景
 
         BuildContext ctx;
         col.mount(ctx);
         Constraints cc;
-        cc.min = Size{ .width = 0.0f, .height = 0.0f };
-        cc.max = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) };
+        cc.min = Size{.width = 0.0F, .height = 0.0F};
+        cc.max = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
         col.layout(cc, ctx);
 
         Painter p;
         p.begin(w, h);
         col.paint(p,
-                  Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                        .size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) } },
+                  Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                       .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                   ctx);
 
         // 检查容器外（右下角）是否有红色像素（溢出可见）
@@ -150,27 +153,27 @@ static void test_clip_behavior() {
     // 4b. overflow=Hidden：子内容溢出被裁剪
     {
         auto txt = std::make_shared<Text>();
-        txt->content = LocalizedString{ "XXXXXXXXXXXXXXXXXXXX" };
-        txt->modifier.set(Modifier{}.size(200.0f, 100.0f).background(Color{ 255, 0, 0, 255 })); // 红色背景，超出容器
+        txt->content = LocalizedString{"XXXXXXXXXXXXXXXXXXXX"};
+        txt->modifier.set(Modifier{}.size(200.0F, 100.0F).background(Color{255, 0, 0, 255}));  // 红色背景，超出容器
 
-        Column col{ ColumnProps{ .children = { Node{ txt } } } };
+        Column col{ColumnProps{.children = {Node{txt}}}};
         col.modifier.set(Modifier{}
                              .size(static_cast<float>(w), static_cast<float>(h))
-                             .background(Color{ 0, 255, 0, 255 })); // 绿色背景
+                             .background(Color{0, 255, 0, 255}));  // 绿色背景
         col.overflow_strategy(OverflowStrategy::Hidden);
 
         BuildContext ctx;
         col.mount(ctx);
         Constraints cc;
-        cc.min = Size{ .width = 0.0f, .height = 0.0f };
-        cc.max = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) };
+        cc.min = Size{.width = 0.0F, .height = 0.0F};
+        cc.max = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
         col.layout(cc, ctx);
 
         Painter p;
         p.begin(w, h);
         col.paint(p,
-                  Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                        .size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) } },
+                  Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                       .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                   ctx);
 
         // 在 Hidden 模式下，容器外（如 (150, 80) 物理像素，超出 100x50 逻辑区域）
@@ -183,26 +186,26 @@ static void test_clip_behavior() {
     // 4c. overflow=Clip：同 Hidden（当前行为一致）
     {
         auto txt = std::make_shared<Text>();
-        txt->content = LocalizedString{ "XXXXXXXXXXXXXXXXXXXX" };
-        txt->modifier.set(Modifier{}.size(200.0f, 100.0f).background(Color{ 255, 0, 0, 255 }));
+        txt->content = LocalizedString{"XXXXXXXXXXXXXXXXXXXX"};
+        txt->modifier.set(Modifier{}.size(200.0F, 100.0F).background(Color{255, 0, 0, 255}));
 
-        Column col{ ColumnProps{ .children = { Node{ txt } } } };
+        Column col{ColumnProps{.children = {Node{txt}}}};
         col.modifier.set(
-            Modifier{}.size(static_cast<float>(w), static_cast<float>(h)).background(Color{ 0, 255, 0, 255 }));
+            Modifier{}.size(static_cast<float>(w), static_cast<float>(h)).background(Color{0, 255, 0, 255}));
         col.overflow_strategy(OverflowStrategy::Clip);
 
         BuildContext ctx;
         col.mount(ctx);
         Constraints cc;
-        cc.min = Size{ .width = 0.0f, .height = 0.0f };
-        cc.max = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) };
+        cc.min = Size{.width = 0.0F, .height = 0.0F};
+        cc.max = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
         col.layout(cc, ctx);
 
         Painter p;
         p.begin(w, h);
         col.paint(p,
-                  Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                        .size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) } },
+                  Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                       .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                   ctx);
         AURORA_TEST_PRINTF("  overflow=Clip: paint completed without crash\n");
     }
@@ -210,26 +213,26 @@ static void test_clip_behavior() {
     // 4d. overflow=Scroll：当前等同 Hidden
     {
         auto txt = std::make_shared<Text>();
-        txt->content = LocalizedString{ "XXXXXXXXXXXXXXXXXXXX" };
-        txt->modifier.set(Modifier{}.size(200.0f, 100.0f).background(Color{ 255, 0, 0, 255 }));
+        txt->content = LocalizedString{"XXXXXXXXXXXXXXXXXXXX"};
+        txt->modifier.set(Modifier{}.size(200.0F, 100.0F).background(Color{255, 0, 0, 255}));
 
-        Column col{ ColumnProps{ .children = { Node{ txt } } } };
+        Column col{ColumnProps{.children = {Node{txt}}}};
         col.modifier.set(
-            Modifier{}.size(static_cast<float>(w), static_cast<float>(h)).background(Color{ 0, 255, 0, 255 }));
+            Modifier{}.size(static_cast<float>(w), static_cast<float>(h)).background(Color{0, 255, 0, 255}));
         col.overflow_strategy(OverflowStrategy::Scroll);
 
         BuildContext ctx;
         col.mount(ctx);
         Constraints cc;
-        cc.min = Size{ .width = 0.0f, .height = 0.0f };
-        cc.max = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) };
+        cc.min = Size{.width = 0.0F, .height = 0.0F};
+        cc.max = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
         col.layout(cc, ctx);
 
         Painter p;
         p.begin(w, h);
         col.paint(p,
-                  Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                        .size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) } },
+                  Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                       .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                   ctx);
         AURORA_TEST_PRINTF("  overflow=Scroll: paint completed without crash\n");
     }

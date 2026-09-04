@@ -7,7 +7,6 @@
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/widget/text.h"
-
 #include "test_harness.h"
 
 using aurora::Application;
@@ -26,18 +25,18 @@ namespace {
 
 auto make_key_event(KeyCode key, ModifierKey mods = ModifierKey::None, KeyAction action = KeyAction::Down) -> KeyEvent {
     KeyEvent e;
-    e.key = static_cast<int>(key);
-    e.modifiers = mods;
-    e.action = action;
+    e.key_ = static_cast<int>(key);
+    e.modifiers_ = mods;
+    e.action_ = action;
     return e;
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     // ---- 1. KeyCombo 匹配 ----
     {
-        KeyCombo combo{ ModifierKey::Control, KeyCode::O };
+        KeyCombo combo{ModifierKey::Control, KeyCode::O};
 
         auto e1 = make_key_event(KeyCode::O, ModifierKey::Control);
         AURORA_TEST_CHECK(combo.matches(e1));
@@ -61,20 +60,20 @@ AURORA_TEST() {
 
     // ---- 2. KeyCombo 无修饰键（单键快捷键，如 F1）----
     {
-        KeyCombo combo{ KeyCode::F1 };
+        KeyCombo combo{KeyCode::F1};
         auto e = make_key_event(KeyCode::F1);
         AURORA_TEST_CHECK(combo.matches(e));
     }
 
     // ---- 3. KeyCombo to_string ----
     {
-        KeyCombo c1{ ModifierKey::Control, KeyCode::O };
+        KeyCombo c1{ModifierKey::Control, KeyCode::O};
         AURORA_TEST_CHECK(c1.to_string() == "Ctrl+O");
 
-        KeyCombo c2{ ModifierKey::Control | ModifierKey::Shift, KeyCode::S };
+        KeyCombo c2{ModifierKey::Control | ModifierKey::Shift, KeyCode::S};
         AURORA_TEST_CHECK(c2.to_string() == "Ctrl+Shift+S");
 
-        KeyCombo c3{ KeyCode::F5 };
+        KeyCombo c3{KeyCode::F5};
         AURORA_TEST_CHECK(c3.to_string() == "F5");
     }
 
@@ -82,7 +81,7 @@ AURORA_TEST() {
     {
         ShortcutRegistry reg;
         int fired = 0;
-        reg.add(KeyCombo{ ModifierKey::Control, KeyCode::S }, [&fired]() -> void { ++fired; });
+        reg.add(KeyCombo{ModifierKey::Control, KeyCode::S}, [&fired]() -> void { ++fired; });
         AURORA_TEST_CHECK(reg.count() == 1);
 
         auto e = make_key_event(KeyCode::S, ModifierKey::Control);
@@ -99,7 +98,7 @@ AURORA_TEST() {
     {
         ShortcutRegistry reg;
         int fired = 0;
-        const int id = reg.add(KeyCombo{ KeyCode::F2 }, [&fired]() -> void { ++fired; });
+        const int id = reg.add(KeyCombo{KeyCode::F2}, [&fired]() -> void { ++fired; });
         reg.remove(id);
         AURORA_TEST_CHECK(reg.count() == 0);
 
@@ -112,7 +111,7 @@ AURORA_TEST() {
     {
         ShortcutRegistry reg;
         int fired = 0;
-        const int id = reg.add(KeyCombo{ KeyCode::F3 }, [&fired]() -> void { ++fired; });
+        const int id = reg.add(KeyCombo{KeyCode::F3}, [&fired]() -> void { ++fired; });
 
         reg.set_enabled(id, false);
         auto e = make_key_event(KeyCode::F3);
@@ -128,7 +127,7 @@ AURORA_TEST() {
     {
         ShortcutRegistry reg;
         int fired = 0;
-        reg.add(KeyCombo{ ModifierKey::Control, KeyCode::C }, [&fired]() -> void { ++fired; }, ShortcutScope::Focus);
+        reg.add(KeyCombo{ModifierKey::Control, KeyCode::C}, [&fired]() -> void { ++fired; }, ShortcutScope::Focus);
 
         auto e = make_key_event(KeyCode::C, ModifierKey::Control);
         // 无焦点时不触发
@@ -144,23 +143,25 @@ AURORA_TEST() {
         ShortcutRegistry reg;
         int first = 0;
         int second = 0;
-        reg.add(KeyCombo{ KeyCode::F4 }, [&first]() -> void { ++first; });
-        reg.add(KeyCombo{ KeyCode::F4 }, [&second]() -> void { ++second; });
+        reg.add(KeyCombo{KeyCode::F4}, [&first]() -> void { ++first; });
+        reg.add(KeyCombo{KeyCode::F4}, [&second]() -> void { ++second; });
 
         auto e = make_key_event(KeyCode::F4);
         (void)reg.handle(e);
         AURORA_TEST_CHECK(first == 1);
-        AURORA_TEST_CHECK(second == 0); // 第一个匹配即消费
+        AURORA_TEST_CHECK(second == 0);  // 第一个匹配即消费
     }
 
     // ---- 9. bindings() 枚举与 clear ----
     {
         ShortcutRegistry reg;
-        reg.add(KeyCombo{ KeyCode::F5 }, []() -> void {}, ShortcutScope::Global, "refresh");
-        reg.add(KeyCombo{ KeyCode::F6 }, []() -> void {});
+        reg.add(KeyCombo{KeyCode::F5}, []() -> void {}, ShortcutScope::Global, "refresh");
+        reg.add(KeyCombo{KeyCode::F6}, []() -> void {});
 
         auto list = reg.bindings();
         AURORA_TEST_CHECK(list.size() == 2);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(list[0].description == "refresh");
 
         reg.clear();
@@ -170,12 +171,12 @@ AURORA_TEST() {
     // ---- 10. Application 集成：dispatch_key 快捷键优先 ----
     {
         auto text = Text();
-        text.content = aurora::LocalizedString{ "hi" };
-        Scene scene{ Node(std::move(text)) };
-        Application app{ std::move(scene), 320, 240 };
+        text.content = aurora::LocalizedString{"hi"};
+        Scene scene{Node(std::move(text))};
+        Application app{std::move(scene), 320, 240};
 
         int fired = 0;
-        app.shortcuts().add(KeyCombo{ ModifierKey::Control, KeyCode::K }, [&fired]() -> void { ++fired; });
+        app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::K}, [&fired]() -> void { ++fired; });
 
         auto e = make_key_event(KeyCode::K, ModifierKey::Control);
         const bool consumed = app.dispatch_key(e);

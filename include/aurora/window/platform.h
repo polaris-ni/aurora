@@ -7,10 +7,10 @@ namespace aurora {
 
 /// @brief 平台能力标志（显式查询，跳过 Surface 探测；specification/06-app-platform.md §5）。
 struct PlatformCapabilities {
-    bool multitouch = false;             ///< 支持多点触控（真实显示 Surface Win32/Glfw 为 true，Headless 为 false）。
-    bool high_frequency_pointer = false; ///< 高频率指针采样（Win32/Glfw 为 true）。
-    bool desktop = false;                ///< 桌面形态。
-    bool mobile = false;                 ///< 移动形态（Mobile/Tablet）。
+    bool multitouch = false;  ///< 支持多点触控（真实显示 Surface Win32/Glfw 为 true，Headless 为 false）。
+    bool high_frequency_pointer = false;  ///< 高频率指针采样（Win32/Glfw 为 true）。
+    bool desktop = false;  ///< 桌面形态。
+    bool mobile = false;  ///< 移动形态（Mobile/Tablet）。
 };
 
 /// @brief 平台与运行环境快照（显式查询，跳过 Surface 探测，specification/06-app-platform.md §5）。
@@ -76,4 +76,4 @@ struct Platform {
     return p;
 }
 
-} // namespace aurora
+}  // namespace aurora

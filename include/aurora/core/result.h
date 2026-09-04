@@ -23,20 +23,20 @@ namespace aurora {
  * @note Side-effects: none
  */
 struct Error {
-    std::string code;       ///< 冻结对外 slug（如 "nav-depth-exceeded"），只增不删
-    std::string message;    ///< 人类可读描述（由表模板 + params 渲染，或调用方覆盖）
-    std::string suggestion; ///< 可选：修复建议
-    std::string docs;       ///< 可选：文档链接/章节
-    std::string where;      ///< 可选：发生位置（file:line）
-    std::string hint;       ///< 修复提示（来自表，可被 make_error 覆盖）
+    std::string code;  ///< 冻结对外 slug（如 "nav-depth-exceeded"），只增不删
+    std::string message;  ///< 人类可读描述（由表模板 + params 渲染，或调用方覆盖）
+    std::string suggestion;  ///< 可选：修复建议
+    std::string docs;  ///< 可选：文档链接/章节
+    std::string where;  ///< 可选：发生位置（file:line）
+    std::string hint;  ///< 修复提示（来自表，可被 make_error 覆盖）
     // 编译期枚举码 + 表驱动元数据
-    ErrorCode code_enum{};                           ///< 编译期枚举码（默认 GeneralUnknown）
-    ErrorSeverity severity = ErrorSeverity::Error;   ///< 来自 errors.toml
-    ErrorCategory category = ErrorCategory::General; ///< 来自 errors.toml
-    bool auto_fixable = false;                       ///< 来自 errors.toml
-    bool retryable = false;                          ///< 来自 errors.toml
-    std::string fix_category;                        ///< 修复策略分类（如 "type_error"|"missing_prop"）
-    std::string fix_params;                          ///< 修复参数（JSON 字符串形式）
+    ErrorCode code_enum{};  ///< 编译期枚举码（默认 GeneralUnknown）
+    ErrorSeverity severity = ErrorSeverity::Error;  ///< 来自 errors.toml
+    ErrorCategory category = ErrorCategory::General;  ///< 来自 errors.toml
+    bool auto_fixable = false;  ///< 来自 errors.toml
+    bool retryable = false;  ///< 来自 errors.toml
+    std::string fix_category;  ///< 修复策略分类（如 "type_error"|"missing_prop"）
+    std::string fix_params;  ///< 修复参数（JSON 字符串形式）
 
     [[nodiscard]] auto to_json() const -> std::string;
 };
@@ -71,15 +71,14 @@ struct Error {
 /// @brief 构造错误：调用方自定义 message（覆盖表模板），其余元数据仍来自表。
 [[nodiscard]] inline auto make_error(ErrorCode code, const std::string &message, const ErrorParams &params = {},
                                      std::string hint = {}) -> Error {
-    (void)params; // 调用方已提供最终 message，模板省略
+    (void)params;  // 调用方已提供最终 message，模板省略
     return make_error_from_table(code, message, std::move(hint));
 }
 
 /// @brief 构造错误（向后兼容）：枚举 + message + suggestion/docs/where。
 ///         slug/severity/category/fix 元数据仍来自表。
-[[nodiscard]] inline auto make_error(ErrorCode code,
-                                     const std::string &message, // NOLINT(bugprone-easily-swappable-parameters)
-                                     std::string suggestion, std::string docs = {}, std::string where = {}) -> Error {
+[[nodiscard]] inline auto make_error(ErrorCode code, const std::string &message, std::string suggestion,
+                                     std::string docs = {}, std::string where = {}) -> Error {
     auto e = make_error_from_table(code, message, {});
     e.suggestion = std::move(suggestion);
     e.docs = std::move(docs);
@@ -93,19 +92,20 @@ struct Error {
  * @note Thread: thread-safe
  * @note Side-effects: none
  */
-template<typename T> class Result {
+template <typename T>
+class Result {
   public:
-    Result(T value) : m_data(std::move(value)) {} // NOLINT：成功值隐式构造
-    Result(Error err) : m_data(std::move(err)) {} // NOLINT：错误隐式构造
+    Result(T value) : data_(std::move(value)) {}  // NOLINT：成功值隐式构造
+    Result(Error err) : data_(std::move(err)) {}  // NOLINT：错误隐式构造
 
-    [[nodiscard]] auto ok() const -> bool { return std::holds_alternative<T>(m_data); }
+    [[nodiscard]] auto ok() const -> bool { return std::holds_alternative<T>(data_); }
 
     /// @brief 布尔语境：成功为 true（供 `if (result)` 使用）。
     explicit operator bool() const { return ok(); }
 
-    [[nodiscard]] auto value() const -> const T & { return std::get<T>(m_data); }
-    [[nodiscard]] auto value() -> T & { return std::get<T>(m_data); }
-    [[nodiscard]] auto error() const -> const Error & { return std::get<Error>(m_data); }
+    [[nodiscard]] auto value() const -> const T & { return std::get<T>(data_); }
+    [[nodiscard]] auto value() -> T & { return std::get<T>(data_); }
+    [[nodiscard]] auto error() const -> const Error & { return std::get<Error>(data_); }
 
     /// @brief 解包：成功返回值，失败抛 std::runtime_error（仅用于不可恢复场景）。
     [[nodiscard]] auto unwrap() const -> T {
@@ -116,7 +116,7 @@ template<typename T> class Result {
     }
 
   private:
-    std::variant<T, Error> m_data;
+    std::variant<T, Error> data_;
 };
 
 /**
@@ -127,18 +127,19 @@ template<typename T> class Result {
  * @note Thread: thread-safe
  * @note Side-effects: none
  */
-template<> class Result<void> {
+template <>
+class Result<void> {
   public:
-    Result() : m_ok(true) {}                     // 成功
-    Result(Error err) : m_err(std::move(err)) {} // 失败
+    Result() : ok_(true) {}  // 成功
+    Result(Error err) : err_(std::move(err)) {}  // 失败
 
-    [[nodiscard]] auto ok() const -> bool { return m_ok; }
-    explicit operator bool() const { return m_ok; }
-    [[nodiscard]] auto error() const -> const Error & { return m_err; }
+    [[nodiscard]] auto ok() const -> bool { return ok_; }
+    explicit operator bool() const { return ok_; }
+    [[nodiscard]] auto error() const -> const Error & { return err_; }
 
   private:
-    bool m_ok = false;
-    Error m_err;
+    bool ok_ = false;
+    Error err_;
 };
 
-} // namespace aurora
+}  // namespace aurora

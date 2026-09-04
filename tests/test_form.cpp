@@ -4,7 +4,6 @@
 
 #include "aurora/widget/form.h"
 #include "aurora/widget/text_input.h"
-
 #include "test_harness.h"
 
 using aurora::Form;
@@ -18,8 +17,8 @@ AURORA_TEST() {
     // ---- 1. required 验证器 ----
     {
         auto v = validators::required();
-        AURORA_TEST_CHECK(!v("").empty());     // 空值报错
-        AURORA_TEST_CHECK(v("hello").empty()); // 非空通过
+        AURORA_TEST_CHECK(!v("").empty());  // 空值报错
+        AURORA_TEST_CHECK(v("hello").empty());  // 非空通过
     }
 
     // ---- 2. min_length / max_length ----
@@ -39,7 +38,7 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(v("user@example.com").empty());
         AURORA_TEST_CHECK(!v("not-an-email").empty());
         AURORA_TEST_CHECK(!v("missing@domain").empty());
-        AURORA_TEST_CHECK(v("").empty()); // 空值不报错（交给 required）
+        AURORA_TEST_CHECK(v("").empty());  // 空值不报错（交给 required）
     }
 
     // ---- 4. matches 正则 ----
@@ -55,12 +54,12 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(v("50").empty());
         AURORA_TEST_CHECK(!v("0").empty());
         AURORA_TEST_CHECK(!v("101").empty());
-        AURORA_TEST_CHECK(!v("abc").empty()); // 不可解析报错
+        AURORA_TEST_CHECK(!v("abc").empty());  // 不可解析报错
     }
 
     // ---- 6. combine 组合（首个失败短路）----
     {
-        auto v = validators::combine({ validators::required("REQ"), validators::min_length(3, "SHORT") });
+        auto v = validators::combine({validators::required("REQ"), validators::min_length(3, "SHORT")});
         AURORA_TEST_CHECK(v("") == "REQ");
         AURORA_TEST_CHECK(v("ab") == "SHORT");
         AURORA_TEST_CHECK(v("abc").empty());
@@ -109,7 +108,7 @@ AURORA_TEST() {
 
         auto email_field = FormField(
             Node(TextInput()), [&email_value]() -> std::string { return email_value; },
-            validators::combine({ validators::required("email required"), validators::email() }));
+            validators::combine({validators::required("email required"), validators::email()}));
 
         int submitted = 0;
         std::vector<Node> fields;
@@ -142,7 +141,7 @@ AURORA_TEST() {
         form->validate_all();
         form->clear_errors();
         // 清除后字段无错误态（validate_all 之后又清除了）
-        AURORA_TEST_CHECK(form->submit() == false); // 提交时重新验证仍失败
+        AURORA_TEST_CHECK(form->submit() == false);  // 提交时重新验证仍失败
     }
 
     // ---- 10. Form validate_all 返回值 ----

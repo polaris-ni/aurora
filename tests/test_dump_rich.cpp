@@ -5,7 +5,6 @@
 #include "aurora/test_helpers.h"
 #include "aurora/ui/factories.h"
 #include "aurora/widget/widget.h"
-
 #include "test_harness.h"
 
 using aurora::Text;
@@ -36,7 +35,7 @@ static void test_rich_fields_and_id() {
 
 static void test_rich_tree_chars() {
     TestEnv env = init_headless(200, 100);
-    vbox(*env.root_widget); // 第一个子：空容器
+    vbox(*env.root_widget);  // 第一个子：空容器
     label(*env.root_widget, "A");
     button(*env.root_widget, "B");
     pump(env);

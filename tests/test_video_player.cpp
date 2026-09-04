@@ -12,7 +12,6 @@
 #include "aurora/media/image_sequence_source.h"
 #include "aurora/media/video_player.h"
 #include "aurora/render/offscreen.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -35,24 +34,32 @@ namespace aurora::tests::sec_video_player {
 namespace {
 
 auto solid_frame(int w, const int h, std::uint8_t r, std::uint8_t g, std::uint8_t b) -> Image {
-    std::vector<std::uint8_t> px(static_cast<size_t>(w) * static_cast<size_t>(h) * 4u, 0u);
-    for (size_t i = 0; i < px.size(); i += 4u) {
+    std::vector<std::uint8_t> px(static_cast<size_t>(w) * static_cast<size_t>(h) * 4U, 0U);
+    for (size_t i = 0; i < px.size(); i += 4U) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         px[i] = r;
-        px[i + 1u] = g;
-        px[i + 2u] = b;
-        px[i + 3u] = 255u;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        px[i + 1U] = g;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        px[i + 2U] = b;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        px[i + 3U] = 255U;
     }
-    return Image{ .width = w, .height = h, .pixels = std::move(px) };
+    return Image{.width = w, .height = h, .pixels = std::move(px)};
 }
 
 auto make_source() -> std::shared_ptr<ImageSequenceSource> {
     auto src = std::make_shared<ImageSequenceSource>();
     src->set_fps(2.0);
-    src->set_frames({ solid_frame(16, 9, 255, 0, 0), solid_frame(16, 9, 0, 255, 0), solid_frame(16, 9, 0, 0, 255) });
+    src->set_frames({solid_frame(16, 9, 255, 0, 0), solid_frame(16, 9, 0, 255, 0), solid_frame(16, 9, 0, 0, 255)});
     return src;
 }
 
-} // namespace
+}  // namespace
 
 namespace {
 // 测试辅助：暴露受保护的 on_pointer_event，便于模拟点击手势。
@@ -69,11 +76,11 @@ class TestPlayer : public VideoPlayer {
         on_pointer_event(re);
     }
 };
-} // namespace
+}  // namespace
 
 static void run() {
     BuildContext ctx;
-    Constraints c{ .min = Size{ .width = 0.0f, .height = 0.0f }, .max = Size{ .width = 320.0f, .height = 180.0f } };
+    Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 320.0F, .height = 180.0F}};
 
     // ---- 自然尺寸 / 布局 ----
     {
@@ -82,8 +89,8 @@ static void run() {
         player.width(px(320));
         player.height(px(180));
         const Size s = player.layout(c, ctx);
-        AURORA_TEST_CHECK(s.width == 320.0f);
-        AURORA_TEST_CHECK(s.height == 180.0f);
+        AURORA_TEST_CHECK(s.width == 320.0F);
+        AURORA_TEST_CHECK(s.height == 180.0F);
     }
 
     // ---- 离屏渲染：逻辑快照验证树结构（含控件叠层），PNG 验证 paint 不崩溃 ----
@@ -92,11 +99,17 @@ static void run() {
         player->set_source(make_source());
         player->width(px(320));
         player->height(px(180));
-        Node node{ std::move(player) };
+        Node node{std::move(player)};
 
         const Json snap = render_to_logical_snapshot(node, 320, 180);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(snap["type"] == "VideoPlayer");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(!snap["children"].empty());
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(snap["children"][0]["type"] == "VideoControls");
 
         const auto png = render_to_png(node, 320, 180, "test_video_player_out.png");
@@ -128,8 +141,8 @@ static void run() {
         player.height(px(180));
         player.layout(c, ctx);
         AURORA_TEST_CHECK(!player.is_playing());
-        player.tap(Point{ .x = 20.0f, .y = 20.0f }); // 视频画面区域（非底部控件）
-        AURORA_TEST_CHECK(player.is_playing());      // 默认 on_tap → toggle_play
+        player.tap(Point{.x = 20.0F, .y = 20.0F});  // 视频画面区域（非底部控件）
+        AURORA_TEST_CHECK(player.is_playing());  // 默认 on_tap → toggle_play
     }
 
     // ---- 扩展点④：自定义 on_tap 回调（覆盖默认行为） ----
@@ -141,9 +154,9 @@ static void run() {
         player.layout(c, ctx);
         bool tapped = false;
         player.set_on_tap([&tapped]() -> void { tapped = true; });
-        player.tap(Point{ .x = 20.0f, .y = 20.0f });
+        player.tap(Point{.x = 20.0F, .y = 20.0F});
         AURORA_TEST_CHECK(tapped);
-        AURORA_TEST_CHECK(!player.is_playing()); // 自定义回调未调用 toggle_play
+        AURORA_TEST_CHECK(!player.is_playing());  // 自定义回调未调用 toggle_play
     }
 
     // ---- 扩展点②：整体替换控件叠层 ----
@@ -151,14 +164,14 @@ static void run() {
         VideoPlayer player;
         player.set_source(make_source());
         auto custom = std::make_unique<Row>();
-        custom->adopt_children({ Node(std::make_unique<Button>("Custom")) });
+        custom->adopt_children({Node(std::make_unique<Button>("Custom"))});
         player.set_controls(std::move(custom));
         player.toggle_play();
-        AURORA_TEST_CHECK(player.is_playing()); // 控制器仍可用
+        AURORA_TEST_CHECK(player.is_playing());  // 控制器仍可用
         player.toggle_play();
     }
 }
-} // namespace aurora::tests::sec_video_player
+}  // namespace aurora::tests::sec_video_player
 
 namespace aurora::tests::sec_video_player_subclass {
 namespace au = aurora;
@@ -167,15 +180,15 @@ namespace {
 // #1: create_default_controls() 在挂载期生效（子类覆写真正可达，set_controls 仍优先）
 class MinimalPlayer : public VideoPlayer {
   public:
-    Button *marker = nullptr;
+    Button *marker_ = nullptr;
 
     [[nodiscard]] auto create_default_controls() -> std::unique_ptr<Widget> override {
         auto b = std::make_unique<Button>("X");
-        marker = b.get(); // NOLINT
+        marker_ = b.get();  // NOLINT
         return b;
     }
 };
-} // namespace
+}  // namespace
 
 namespace {
 // #2/#5: current_frame() 受保护访问器可访问；on_pointer_event/wants_click 为 public
@@ -189,22 +202,22 @@ class WatermarkPlayer : public VideoPlayer {
         VideoPlayer::on_paint(p, b, ctx);
     }
 };
-} // namespace
+}  // namespace
 
 static void run() {
     constexpr BuildContext ctx;
 
     MinimalPlayer mp;
     mp.mount(ctx);
-    AURORA_TEST_CHECK(mp.marker != nullptr);      // 默认控件被 adopt
-    AURORA_TEST_CHECK(!mp.child_nodes().empty()); // 挂在子树
+    AURORA_TEST_CHECK(mp.marker_ != nullptr);  // 默认控件被 adopt
+    AURORA_TEST_CHECK(!mp.child_nodes().empty());  // 挂在子树
 
     WatermarkPlayer wp;
     wp.mount(ctx);
-    AURORA_TEST_CHECK(wp.frame_w() == 0 && wp.frame_h() == 0); // 默认无帧，current_frame() 可访问
-    AURORA_TEST_CHECK(wp.wants_click() == true);               // #5: on_pointer_event/wants_click 为 public
+    AURORA_TEST_CHECK(wp.frame_w() == 0 && wp.frame_h() == 0);  // 默认无帧，current_frame() 可访问
+    AURORA_TEST_CHECK(wp.wants_click() == true);  // #5: on_pointer_event/wants_click 为 public
 }
-} // namespace aurora::tests::sec_video_player_subclass
+}  // namespace aurora::tests::sec_video_player_subclass
 
 AURORA_TEST() {
     aurora::tests::sec_video_player::run();

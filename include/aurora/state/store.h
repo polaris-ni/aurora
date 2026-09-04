@@ -30,14 +30,15 @@ struct Action {
     std::shared_ptr<void> payload;
 
     /// @brief 带载荷的动作（载荷按值移动进类型擦除容器）。
-    template<typename T>
+    template <typename T>
     Action(std::string t, T value) : type(std::move(t)), payload(std::make_shared<T>(std::move(value))) {}
 
     /// @brief 无载荷的动作（如 "increment"）。
     explicit Action(std::string t) : type(std::move(t)) {}
 
     /// @brief 取回载荷；类型不匹配或为空时返回 nullptr。
-    template<typename T> [[nodiscard]] auto payload_as() const -> const T * {
+    template <typename T>
+    [[nodiscard]] auto payload_as() const -> const T * {
         if (!payload) {
             return nullptr;
         }
@@ -50,7 +51,8 @@ struct Action {
  * 必须无副作用；同输入须产生同输出，便于测试与快照。
  * @tparam S 状态类型（须可拷贝/移动）。
  */
-template<typename S> using Reducer = std::function<S(const S &, const Action &)>;
+template <typename S>
+using Reducer = std::function<S(const S &, const Action &)>;
 
 /**
  * @brief 单向数据流 store（Redux 式）。
@@ -67,54 +69,56 @@ template<typename S> using Reducer = std::function<S(const S &, const Action &)>
  * @note Side-effects: none
  * @note Rebuildable: no
  */
-template<typename S> class Store {
+template <typename S>
+class Store {
   public:
     using StateType = S;
-    using Listener = std::function<void(const S &, const S &)>; ///< (newState, prevState)
+    using Listener = std::function<void(const S &, const S &)>;  ///< (newState, prevState)
 
     Store(S initial, Reducer<S> reducer)
-        : m_state(std::move(initial)), m_reducer(std::move(reducer)), m_signal(std::make_shared<State<S>>(m_state)) {}
+        : state_(std::move(initial)), reducer_(std::move(reducer)), signal_(std::make_shared<State<S>>(state_)) {}
 
     /// @brief 读取当前状态（const 引用，零拷贝）。
-    [[nodiscard]] auto get_state() const -> const S & { return m_state; }
+    [[nodiscard]] auto get_state() const -> const S & { return state_; }
 
     /// @brief 派发动作：计算新状态 → 通知订阅者 + 触发响应式刷新。
     auto dispatch(const Action &action) -> void {
-        S next = m_reducer(m_state, action);
-        S prev = std::move(m_state);
-        m_state = std::move(next);
-        m_signal->set(m_state); // 触发依赖本 store 的 Effect 定点刷新
-        for (Listener &l : m_listeners) {
+        S next = reducer_(state_, action);
+        S prev = std::move(state_);
+        state_ = std::move(next);
+        signal_->set(state_);  // 触发依赖本 store 的 Effect 定点刷新
+        for (Listener &l : listeners_) {
             if (l) {
-                l(m_state, prev);
+                l(state_, prev);
             }
         }
     }
 
     /// @brief 订阅状态变化；返回取消订阅的句柄（调用即移除监听）。
     [[nodiscard]] auto subscribe(Listener l) -> std::function<void()> {
-        m_listeners.push_back(std::move(l));
-        const std::size_t idx = m_listeners.size() - 1;
+        listeners_.push_back(std::move(l));
+        const std::size_t idx = listeners_.size() - 1;
         return [this, idx]() -> auto {
-            if (idx < m_listeners.size()) {
-                m_listeners[idx] = nullptr; // 惰性移除，避免迭代期重分配
+            if (idx < listeners_.size()) {
+                listeners_[idx] = nullptr;  // 惰性移除，避免迭代期重分配
             }
         };
     }
 
     /// @brief 暴露为响应式信号视图（供 widget 直接订阅，状态变化触发定点刷新）。
-    [[nodiscard]] auto as_signal() -> std::shared_ptr<State<S>> { return m_signal; }
+    [[nodiscard]] auto as_signal() -> std::shared_ptr<State<S>> { return signal_; }
 
   private:
-    S m_state;
-    Reducer<S> m_reducer;
-    std::shared_ptr<State<S>> m_signal;
-    std::vector<Listener> m_listeners;
+    S state_;
+    Reducer<S> reducer_;
+    std::shared_ptr<State<S>> signal_;
+    std::vector<Listener> listeners_;
 };
 
 /// @brief 便捷工厂：生成共享所有权的 Store。
-template<typename S> [[nodiscard]] auto make_store(S initial, Reducer<S> reducer) -> std::shared_ptr<Store<S>> {
+template <typename S>
+[[nodiscard]] auto make_store(S initial, Reducer<S> reducer) -> std::shared_ptr<Store<S>> {
     return std::make_shared<Store<S>>(std::move(initial), std::move(reducer));
 }
 
-} // namespace aurora
+}  // namespace aurora

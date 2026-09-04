@@ -29,7 +29,6 @@
 #include "aurora/widget/grid_view.h"
 #include "aurora/widget/lazy_list.h"
 #include "aurora/widget/scroll.h"
-
 #include "google_play_ui.h"
 
 using aurora::Chip;
@@ -64,10 +63,10 @@ namespace {
             chip->set_label("item " + std::to_string(r) + "-" + std::to_string(c));
             cells.emplace_back(chip);
         }
-        rows.emplace_back(std::make_shared<Row>(RowProps{ .children = std::move(cells) }));
+        rows.emplace_back(std::make_shared<Row>(RowProps{.children = std::move(cells)}));
     }
-    auto col = std::make_shared<Column>(ColumnProps{ .children = std::move(rows) });
-    return Node{ std::make_shared<Scroll>(ScrollProps{ .child = Node{ std::move(col) } }) };
+    auto col = std::make_shared<Column>(ColumnProps{.children = std::move(rows)});
+    return Node{std::make_shared<Scroll>(ScrollProps{.child = Node{std::move(col)}})};
 }
 
 /// @brief Real-world scenario: the content tree of `demo_google_play` (AppShell, without the
@@ -76,8 +75,8 @@ namespace {
 /// harness run.
 [[nodiscard]] auto build_google_play_tree(Reactive<bool> &dark) -> Node {
     auto &repo = gp::repository();
-    auto on_open = [](const std::string &) -> void {}; // benchmark does not navigate
-    return Node{ std::make_shared<gp::ui::AppShell>(&repo, on_open, &dark) };
+    auto on_open = [](const std::string &) -> void {};  // benchmark does not navigate
+    return Node{std::make_shared<gp::ui::AppShell>(&repo, on_open, &dark)};
 }
 
 /// @brief L5-C isolated scenario: LazyList self-driven scroll path (not via the outer Scroll buffer).
@@ -88,9 +87,9 @@ namespace {
     auto builder = [](int i) -> Node {
         const auto chip = std::make_shared<Chip>();
         chip->set_label("lazy item " + std::to_string(i));
-        return Node{ chip };
+        return Node{chip};
     };
-    return Node{ std::make_shared<LazyList>(items, builder, 48.0f) };
+    return Node{std::make_shared<LazyList>(items, builder, 48.0F)};
 }
 
 /// @brief L5-C scenario: GridView self-driven scroll path (root-level GridView, not via the outer
@@ -107,9 +106,9 @@ namespace {
     auto builder = [](int i) -> Node {
         const auto chip = std::make_shared<Chip>();
         chip->set_label("grid " + std::to_string(i));
-        return Node{ chip };
+        return Node{chip};
     };
-    return Node{ std::make_shared<GridView>(items, cols, builder, 96.0f) };
+    return Node{std::make_shared<GridView>(items, cols, builder, 96.0F)};
 }
 
 /// @brief Emit a scene report (rendering form selected by format).
@@ -132,7 +131,9 @@ auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &
 [[nodiscard]] auto arg_value(const std::vector<std::string_view> &args, int i, std::string_view fallback)
     -> std::string {
     const auto next = static_cast<std::size_t>(i) + 1U;
-    return (next < args.size()) ? std::string{ args[next] } : std::string{ fallback };
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+    // 的边界检查开销会影响计时
+    return (next < args.size()) ? std::string{args[next]} : std::string{fallback};
 }
 
 /// @brief Safely parse an integer argument (never throws; only the whole string being consumed is
@@ -204,6 +205,8 @@ auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &
         std::ranges::sort(sorted);
         const double lo = sorted.front();
         const double hi = sorted.back();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+        // 的边界检查开销会影响计时
         const double mid = sorted[sorted.size() / 2];
         note = "> best-of-" + std::to_string(n) + ": p99 across runs " + std::to_string(lo) + " / " +
                std::to_string(mid) + " / " + std::to_string(hi) +
@@ -211,16 +214,16 @@ auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &
                "> Note: same-process repetition has a systematic bias (later runs are slower due to heap "
                "fragmentation); for strict sampling, call it multiple times in separate processes.\n\n";
     }
-    return { std::move(best), std::move(note) };
+    return {std::move(best), std::move(note)};
 }
 
-} // namespace
+}  // namespace
 
-auto main(int argc, char **argv) -> int { // NOLINT(*-function-cognitive-complexity)
+auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-complexity,bugprone-exception-escape)
     std::vector<std::string_view> args;
     args.reserve(static_cast<std::size_t>(argc));
     for (int i = 0; i < argc; ++i) {
-        args.emplace_back(argv[i]); // NOLINT(*-pro-bounds-pointer-arithmetic)
+        args.emplace_back(argv[i]);  // NOLINT(*-pro-bounds-pointer-arithmetic)
     }
 
     std::string scene = "all";
@@ -229,7 +232,9 @@ auto main(int argc, char **argv) -> int { // NOLINT(*-function-cognitive-complex
     ScrollBenchHarness::Config cfg;
 
     for (int i = 1; i < argc; ++i) {
-        const std::string a{ args[static_cast<std::size_t>(i)] };
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+        // 的边界检查开销会影响计时
+        const std::string a{args[static_cast<std::size_t>(i)]};
         if (a == "--scene") {
             scene = arg_value(args, i, "all");
             ++i;
@@ -243,10 +248,10 @@ auto main(int argc, char **argv) -> int { // NOLINT(*-function-cognitive-complex
             cfg.warmup_frames = parse_int(arg_value(args, i, "30"), 30);
             ++i;
         } else if (a == "--delta") {
-            cfg.delta_per_frame = parse_float(arg_value(args, i, "12.0"), 12.0f);
+            cfg.delta_per_frame = parse_float(arg_value(args, i, "12.0"), 12.0F);
             ++i;
         } else if (a == "--scale") {
-            cfg.scale = parse_float(arg_value(args, i, "1.0"), 1.0f);
+            cfg.scale = parse_float(arg_value(args, i, "1.0"), 1.0F);
             ++i;
         } else if (a == "--repeat") {
             repeat = parse_int(arg_value(args, i, "1"), 1);
@@ -255,27 +260,28 @@ auto main(int argc, char **argv) -> int { // NOLINT(*-function-cognitive-complex
             cfg.fling = true;
         } else if (a == "--help" || a == "-h") {
             AURORA_LOG_RAW(
-                "bench", "usage: bench_scroll [--scene google_play|synthetic|lazy|grid|all] [--frames N] [--warmup N]\n"
-                         "                    [--delta DP] [--scale X] [--fling] [--repeat N]\n"
-                         "                    [--format md|json|csv]\n"
-                         "\n"
-                         "  --scene    google_play / synthetic / lazy / grid / all (default all)\n"
-                         "              lazy / grid are L5-C isolated scenes: use LazyList / GridView\n"
-                         "              directly as roots to measure their self-driven scroll paths\n"
-                         "              (not via the outer Scroll offscreen buffer)\n"
-                         "  --delta DP   scroll distance per frame, in logical dp (default 12 ~ 720 dp/s @60fps)\n"
-                         "  --repeat N   repeat N times in the same process, take the lowest p99 (conservative,\n"
-                         "              only over-reports)\n"
-                         "              for strict sampling, call it multiple times in separate processes:\n"
-                         "                 for i in 1 2 3; do bench_scroll --scene X --format csv; done\n"
-                         "              counter readings are deterministic, one shot suffices; only timings need\n"
-                         "              repetition.\n");
+                "bench",
+                "usage: bench_scroll [--scene google_play|synthetic|lazy|grid|all] [--frames N] [--warmup N]\n"
+                "                    [--delta DP] [--scale X] [--fling] [--repeat N]\n"
+                "                    [--format md|json|csv]\n"
+                "\n"
+                "  --scene    google_play / synthetic / lazy / grid / all (default all)\n"
+                "              lazy / grid are L5-C isolated scenes: use LazyList / GridView\n"
+                "              directly as roots to measure their self-driven scroll paths\n"
+                "              (not via the outer Scroll offscreen buffer)\n"
+                "  --delta DP   scroll distance per frame, in logical dp (default 12 ~ 720 dp/s @60fps)\n"
+                "  --repeat N   repeat N times in the same process, take the lowest p99 (conservative,\n"
+                "              only over-reports)\n"
+                "              for strict sampling, call it multiple times in separate processes:\n"
+                "                 for i in 1 2 3; do bench_scroll --scene X --format csv; done\n"
+                "              counter readings are deterministic, one shot suffices; only timings need\n"
+                "              repetition.\n");
             return 0;
         }
     }
 
-    constexpr Size viewport{ .width = 1100.0f,
-                             .height = 760.0f }; // agreed convention: matches the demo_google_play window
+    constexpr Size viewport{.width = 1100.0F,
+                            .height = 760.0F};  // agreed convention: matches the demo_google_play window
     bool csv_header_written = false;
 
     if (format == "md") {
@@ -283,8 +289,7 @@ auto main(int argc, char **argv) -> int { // NOLINT(*-function-cognitive-complex
                        std::to_string(static_cast<double>(cfg.scale)), "\n- frames: ", std::to_string(cfg.frames),
                        " (warmup ", std::to_string(cfg.warmup_frames), ")\n- mode: ", cfg.fling ? "fling" : "uniform",
                        ", delta/frame: ", std::to_string(static_cast<double>(cfg.delta_per_frame)), " dp",
-                       "\n- repeat: ", std::to_string(repeat), (repeat > 1 ? " (lowest p99 run)" : ""),
-                       "\n- profiling: ",
+                       "\n- repeat: ", std::to_string(repeat), repeat > 1 ? " (lowest p99 run)" : "", "\n- profiling: ",
                        profiling_enabled() ? "ON (counters valid)" : "OFF (counters always 0, time only)", "\n\n");
     }
 
@@ -325,7 +330,7 @@ auto main(int argc, char **argv) -> int { // NOLINT(*-function-cognitive-complex
 
     if (scene == "google_play" || scene == "all") {
         // dark must outlive the whole sampling: AppShell only holds a pointer.
-        Reactive<bool> dark{ false };
+        Reactive<bool> dark{false};
         ScrollBenchHarness::Config c = cfg;
         c.name = cfg.fling ? "google_play-fling" : "google_play-uniform";
         auto [r, note] = run_best_of([&dark]() -> Node { return build_google_play_tree(dark); }, viewport, c, repeat);
@@ -339,8 +344,9 @@ auto main(int argc, char **argv) -> int { // NOLINT(*-function-cognitive-complex
     if (any_untrustworthy) {
         // Non-zero exit code: the baseline collection script uses this to refuse writing untrusted
         // readings into the comparison table.
-        AURORA_LOG_ERROR("bench", "At least one scenario reading is unreliable (scroll container not found / idle "
-                                  "frame drops); non-zero exit code set");
+        AURORA_LOG_ERROR("bench",
+                         "At least one scenario reading is unreliable (scroll container not found / idle "
+                         "frame drops); non-zero exit code set");
         return 2;
     }
     return 0;

@@ -1,10 +1,11 @@
 #include "aurora/render/font_engine.h"
 
+#include <ft2build.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
-#include <ft2build.h>
 #include <list>
 #include <span>
 #include <string>
@@ -34,14 +35,14 @@ namespace {
     return a;
 }
 [[nodiscard]] auto aa_mode() -> TextAAMode & {
-    static TextAAMode m = TextAAMode::Supersample;
+    static auto m = TextAAMode::Supersample;
     return m;
 }
-class ShapeCache; // 前向声明：定义在下方，函数体随后置。
+class ShapeCache;  // 前向声明：定义在下方，函数体随后置。
 [[nodiscard]] auto shape_cache() -> ShapeCache &;
 
-constexpr float AURORA_LOGICAL_DPI = 96.0f;
-constexpr float AURORA_POINTS_PER_INCH = 72.0f;
+constexpr float AURORA_LOGICAL_DPI = 96.0F;
+constexpr float AURORA_POINTS_PER_INCH = 72.0F;
 
 // ---------- UTF-8 工具（utf8_cp_len 已收口到 aurora::utf8_cp_len，见 core/utf8.h） ----------
 auto utf8_decode(const std::string &s, std::size_t &i, unsigned &cp) -> int {
@@ -56,12 +57,18 @@ auto utf8_decode(const std::string &s, std::size_t &i, unsigned &cp) -> int {
     const auto byte = [&](std::size_t k) -> unsigned char { return static_cast<unsigned char>(s.at(i + k)); };
     unsigned u = 0;
     switch (len) {
-    case 1: u = c0; break;
-    case 2: u = ((c0 & 0x1FU) << 6U) | (byte(1) & 0x3FU); break;
-    case 3: u = ((c0 & 0x0FU) << 12U) | ((byte(1) & 0x3FU) << 6U) | (byte(2) & 0x3FU); break;
-    default:
-        u = ((c0 & 0x07U) << 18U) | ((byte(1) & 0x3FU) << 12U) | ((byte(2) & 0x3FU) << 6U) | (byte(3) & 0x3FU);
-        break;
+        case 1:
+            u = c0;
+            break;
+        case 2:
+            u = ((c0 & 0x1FU) << 6U) | (byte(1) & 0x3FU);
+            break;
+        case 3:
+            u = ((c0 & 0x0FU) << 12U) | ((byte(1) & 0x3FU) << 6U) | (byte(2) & 0x3FU);
+            break;
+        default:
+            u = ((c0 & 0x07U) << 18U) | ((byte(1) & 0x3FU) << 12U) | ((byte(2) & 0x3FU) << 6U) | (byte(3) & 0x3FU);
+            break;
     }
     cp = u;
     i += static_cast<std::size_t>(len);
@@ -115,18 +122,18 @@ auto find_glyph(const std::vector<FontFace *> &faces, unsigned cp, FontFace *&ff
 }
 
 [[nodiscard]] auto line_height_px(const std::vector<FontFace *> &faces, int px) -> float {
-    FT_Face face = faces.front()->face;
+    const FT_Face face = faces.front()->face;
     FT_Set_Pixel_Sizes(face, 0, px);
-    return static_cast<float>(face->size->metrics.height) / 64.0f;
+    return static_cast<float>(face->size->metrics.height) / 64.0F;
 }
 
 // 主 face 的基线上升（ascender，物理 px）：draw_text 的 r.origin.y 是行盒顶（GDI TA_TOP
 // 历史语义，全库调用方均按此传值），首行基线 = 顶 + ascender；回退 face 的字形统一按
 // 主 face 基线对齐，保证混排（拉丁+CJK）同行基线一致。
 [[nodiscard]] auto ascender_px(const std::vector<FontFace *> &faces, int px) -> float {
-    FT_Face face = faces.front()->face;
+    const FT_Face face = faces.front()->face;
     FT_Set_Pixel_Sizes(face, 0, px);
-    return static_cast<float>(face->size->metrics.ascender) / 64.0f;
+    return static_cast<float>(face->size->metrics.ascender) / 64.0F;
 }
 
 // key 布局（42 bit 有效）：
@@ -162,12 +169,12 @@ auto apply_italic(FT_Face face, bool italic) -> void {
 // ---------- HarfBuzz shaping ----------
 // 单字形 shaping 结果（px 尺寸，已换算为 float）：hb_shape 输出字形序号、placement 偏移与推进。
 struct ShapedGlyph {
-    FontFace *face; // 来源面（回退）
-    FT_UInt gi;     // 字形序号（= hb codepoint）
-    unsigned cp;    // 原始码点（用于空格字距判定）
-    float x_off;    // 字形水平放置偏移（px）
-    float y_off;    // 字形垂直放置偏移（px）
-    float x_adv;    // 水平推进（px，hb 已含 kerning / OT 特性与 hinting 取整）
+    FontFace *face;  // 来源面（回退）
+    FT_UInt gi;  // 字形序号（= hb codepoint）
+    unsigned cp;  // 原始码点（用于空格字距判定）
+    float x_off;  // 字形水平放置偏移（px）
+    float y_off;  // 字形垂直放置偏移（px）
+    float x_adv;  // 水平推进（px，hb 已含 kerning / OT 特性与 hinting 取整）
 };
 
 struct ShapedLine {
@@ -209,65 +216,66 @@ struct ShapeCacheKeyHash {
 // LRU + 双限（条目数 / 估算字节数）淘汰。单线程 UI 模型，无锁。
 class ShapeCache {
   public:
-    ShapeCache(std::size_t max_entries, std::size_t max_bytes) noexcept
-        : m_max_entries(max_entries), m_max_bytes(max_bytes) {}
+    // 注意：不标 noexcept——成员 map/stats 构造理论上可抛 bad_alloc，让其正常传播而非 terminate。
+    ShapeCache(std::size_t max_entries, std::size_t max_bytes) : max_entries_(max_entries), max_bytes_(max_bytes) {}
 
     [[nodiscard]] auto find(const ShapeCacheKey &k) -> const std::vector<ShapedGlyph> * {
-        const auto it = m_map.find(k);
-        if (it == m_map.end()) {
-            ++m_stats.misses;
+        const auto it = map_.find(k);
+        if (it == map_.end()) {
+            ++stats_.misses;
             return nullptr;
         }
-        m_lru.splice(m_lru.begin(), m_lru, it->second.second); // 提到 MRU
-        ++m_stats.hits;
+        lru_.splice(lru_.begin(), lru_, it->second.second);  // 提到 MRU
+        ++stats_.hits;
         return &it->second.first;
     }
 
     auto insert(ShapeCacheKey k, std::vector<ShapedGlyph> glyphs) -> void {
         const std::size_t bytes = glyph_bytes(glyphs);
         evict_to_fit(1, bytes);
-        const auto node = m_lru.insert(m_lru.begin(), std::move(k));
-        m_map.emplace(*node, std::make_pair(std::move(glyphs), node));
+        const auto node = lru_.insert(lru_.begin(), std::move(k));
+        map_.emplace(*node, std::make_pair(std::move(glyphs), node));
         sync_stats();
     }
 
     auto clear() -> void {
-        m_map.clear();
-        m_lru.clear();
-        m_stats = ShapeCacheStats{};
+        map_.clear();
+        lru_.clear();
+        stats_ = ShapeCacheStats{};
     }
 
-    [[nodiscard]] auto stats() const -> ShapeCacheStats { return m_stats; }
+    [[nodiscard]] auto stats() const -> ShapeCacheStats { return stats_; }
 
   private:
     static auto glyph_bytes(const std::vector<ShapedGlyph> &g) -> std::size_t {
-        return (g.size() * sizeof(ShapedGlyph)) + 32u; // 估算（含对齐）
+        return (g.size() * sizeof(ShapedGlyph)) + 32U;  // 估算（含对齐）
     }
     auto evict_to_fit(std::size_t extra, std::size_t extra_bytes) -> void {
-        while ((m_map.size() + extra > m_max_entries || m_stats.bytes + extra_bytes > m_max_bytes) && !m_lru.empty()) {
-            const auto &old = m_lru.back();
-            auto it = m_map.find(old);
-            if (it != m_map.end()) {
-                m_stats.bytes -= glyph_bytes(it->second.first);
-                m_map.erase(it);
+        while ((map_.size() + extra > max_entries_ || stats_.bytes + extra_bytes > max_bytes_) &&
+               !lru_.empty()) {
+            const auto &old = lru_.back();
+            auto it = map_.find(old);
+            if (it != map_.end()) {
+                stats_.bytes -= glyph_bytes(it->second.first);
+                map_.erase(it);
             }
-            m_lru.pop_back();
+            lru_.pop_back();
         }
         sync_stats();
     }
-    auto sync_stats() -> void { m_stats.entries = m_map.size(); }
-    std::list<ShapeCacheKey> m_lru; // MRU 在前
+    auto sync_stats() -> void { stats_.entries = map_.size(); }
+    std::list<ShapeCacheKey> lru_;  // MRU 在前
     std::unordered_map<ShapeCacheKey, std::pair<std::vector<ShapedGlyph>, std::list<ShapeCacheKey>::iterator>,
                        ShapeCacheKeyHash>
-        m_map;
-    std::size_t m_max_entries;
-    std::size_t m_max_bytes;
-    ShapeCacheStats m_stats;
+        map_;
+    std::size_t max_entries_;
+    std::size_t max_bytes_;
+    ShapeCacheStats stats_;
 };
 
 // 全局实例。容量：4096 条目 / 8 MiB 估算字节，双限 LRU。
 [[nodiscard]] auto shape_cache() -> ShapeCache & {
-    static ShapeCache c(4096u, static_cast<std::size_t>(8u * 1024u * 1024u));
+    static ShapeCache c(4096U, static_cast<std::size_t>(8U * 1024U * 1024U));
     return c;
 }
 
@@ -291,9 +299,9 @@ class ShapeCache {
     if (line.empty()) {
         return out;
     }
-    const ShapeCacheKey key{ .line = line, .px = px, .opts = opts, .faces_key = faces_key_of(faces) };
+    const ShapeCacheKey key{.line = line, .px = px, .opts = opts, .faces_key = faces_key_of(faces)};
     if (const auto *cached = shape_cache().find(key)) {
-        out.glyphs = *cached; // 命中：跳过 hb_shape。纯函数输出，与重算逐位一致（golden 零影响）。
+        out.glyphs = *cached;  // 命中：跳过 hb_shape。纯函数输出，与重算逐位一致（golden 零影响）。
         AURORA_PROFILE_COUNT(shape_cache_hits, 1);
         return out;
     }
@@ -329,7 +337,7 @@ class ShapeCache {
             FontFace *ff = nullptr;
             FT_UInt gi = 0;
             find_glyph(faces, cp, ff, gi);
-            cps.push_back({ .cp = cp, .face = ff, .byte_start = bs, .byte_end = i });
+            cps.push_back({.cp = cp, .face = ff, .byte_start = bs, .byte_end = i});
         }
     }
     // 2) 把连续同面码点切为 run，逐 run 调 hb_shape。
@@ -350,7 +358,7 @@ class ShapeCache {
         }
         const FT_Face face = rf->face;
         FT_Set_Pixel_Sizes(face, 0, px);
-        apply_italic(face, opts.italic); // 决定字形变换，使 shaping 与绘制变换一致（斜体剪切不改变 x 推进）
+        apply_italic(face, opts.italic);  // 决定字形变换，使 shaping 与绘制变换一致（斜体剪切不改变 x 推进）
         hb_font_t *hb_font = hb_ft_font_create(face, nullptr);
         // hb-ft 默认 FT_LOAD_NO_HINTING（advance 为设计空间线性值），而绘制侧 FT_Load_Glyph
         // 用 FT_LOAD_DEFAULT（hinted）。二者不一致会让度量与实绘像素错位（缩放屏下行尾差数 px）。
@@ -377,9 +385,9 @@ class ShapeCache {
             unsigned tmp = 0;
             utf8_decode(run_str, off, tmp);
             sg.cp = tmp;
-            sg.x_off = static_cast<float>(poss[j].x_offset) / 64.0f;
-            sg.y_off = static_cast<float>(poss[j].y_offset) / 64.0f;
-            sg.x_adv = static_cast<float>(poss[j].x_advance) / 64.0f;
+            sg.x_off = static_cast<float>(poss[j].x_offset) / 64.0F;
+            sg.y_off = static_cast<float>(poss[j].y_offset) / 64.0F;
+            sg.x_adv = static_cast<float>(poss[j].x_advance) / 64.0F;
             out.glyphs.push_back(sg);
         }
         // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
@@ -409,15 +417,15 @@ class ShapeCache {
 // （同 px、同 hb 推进、同 letter/word_spacing 语义）。spacing_scale 把 dp 间距换算到 px 空间。
 [[nodiscard]] auto line_prefix(const std::vector<ShapedGlyph> &glyphs, const TextLayoutOpts &opts, float spacing_scale,
                                std::size_t count) -> float {
-    float w = 0.0f;
+    float w = 0.0F;
     const std::size_t m = std::min(count, glyphs.size());
     for (std::size_t j = 0; j < m; ++j) {
         if (j > 0) {
-            w += opts.letter_spacing * spacing_scale; // 相邻字形间加字距，整串共 (n-1) 次
+            w += opts.letter_spacing * spacing_scale;  // 相邻字形间加字距，整串共 (n-1) 次
         }
         const auto &g = glyphs.at(j);
         w += g.x_adv;
-        if (g.cp == ' ' && opts.word_spacing != 0.0f) {
+        if (g.cp == ' ' && opts.word_spacing != 0.0F) {
             w += opts.word_spacing * spacing_scale;
         }
     }
@@ -440,7 +448,7 @@ class ShapeCache {
             const auto sl = shape_line(line, faces, px, opts);
             return line_prefix(sl.glyphs, opts, spacing_scale, local);
         }
-        acc += lcount + 1; // +1 计 '\n'
+        acc += lcount + 1;  // +1 计 '\n'
     }
     const auto sl = shape_line(lines.back(), faces, px, opts);
     return line_prefix(sl.glyphs, opts, spacing_scale, sl.glyphs.size());
@@ -450,7 +458,7 @@ class ShapeCache {
 [[nodiscard]] auto max_line_width_px(const std::string &text, const std::vector<FontFace *> &faces, int px,
                                      const TextLayoutOpts &opts, float spacing_scale) -> float {
     const auto lines = split_lines(text);
-    float max_w = 0.0f;
+    float max_w = 0.0F;
     for (const auto &line : lines) {
         const auto sl = shape_line(line, faces, px, opts);
         max_w = std::max(max_w, line_prefix(sl.glyphs, opts, spacing_scale, sl.glyphs.size()));
@@ -473,42 +481,42 @@ class ShapeCache {
                                         const TextLayoutOpts &opts, float spacing_scale, float divisor, bool inclusive)
     -> std::size_t {
     const std::size_t total = cp_count(text);
-    if (total == 0 || x <= 0.0f) {
+    if (total == 0 || x <= 0.0F) {
         return 0;
     }
     const auto lines = split_lines(text);
-    float w = 0.0f;
-    float prev_boundary = 0.0f;
-    std::size_t line_char_offset = 0; // 当前行首在全局文本中的字符下标（含前导 '\n'）
+    float w = 0.0F;
+    float prev_boundary = 0.0F;
+    std::size_t line_char_offset = 0;  // 当前行首在全局文本中的字符下标（含前导 '\n'）
     for (const auto &line_str : lines) {
         const auto sl = shape_line(line_str, faces, px, opts);
-        w = 0.0f; // 每行 pen 推进归零（与 draw_text_impl 每行重置 pen_x 一致）
+        w = 0.0F;  // 每行 pen 推进归零（与 draw_text_impl 每行重置 pen_x 一致）
         for (std::size_t j = 0; j < sl.glyphs.size(); ++j) {
             if (j > 0) {
                 w += opts.letter_spacing * spacing_scale;
             }
             const auto &g = sl.glyphs.at(j);
             w += g.x_adv;
-            if (g.cp == ' ' && opts.word_spacing != 0.0f) {
+            if (g.cp == ' ' && opts.word_spacing != 0.0F) {
                 w += opts.word_spacing * spacing_scale;
             }
-            const float boundary = w / divisor; // 与 caret_x/display_caret_x 返回值逐位一致
+            const float boundary = w / divisor;  // 与 caret_x/display_caret_x 返回值逐位一致
             if (inclusive) {
                 if (x <= boundary) {
                     return line_char_offset + j;
                 }
             } else {
-                const float mid = (prev_boundary + boundary) * 0.5f;
+                const float mid = (prev_boundary + boundary) * 0.5F;
                 if (x < mid) {
                     return line_char_offset + j;
                 }
                 prev_boundary = boundary;
             }
         }
-        line_char_offset += cp_count(line_str) + 1; // +1 计 '\n'
+        line_char_offset += cp_count(line_str) + 1;  // +1 计 '\n'
     }
     // 行尾右侧：caret 语义返回末 caret（total）；含头含尾返回末字符（消除行尾漏选）。
-    return inclusive ? total - 1u : total;
+    return inclusive ? total - 1U : total;
 }
 
 // ---------- 位图字体兜底（FT 不可用时） ----------
@@ -545,7 +553,7 @@ auto draw_text_bitmap_fallback(Painter &p, const Rect &r, const std::string &tex
             }
         }
         pen_x += static_cast<float>(BitmapFont::AURORA_CELL) * static_cast<float>(ps);
-        if (cp == ' ' && opts.word_spacing != 0.0f) {
+        if (cp == ' ' && opts.word_spacing != 0.0F) {
             pen_x += opts.word_spacing;
         }
         pen_x += opts.letter_spacing;
@@ -553,7 +561,6 @@ auto draw_text_bitmap_fallback(Painter &p, const Rect &r, const std::string &tex
 }
 
 // ---------- 真·FreeType 绘制 ----------
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Font &f, Color c, TextAAMode aa,
                     const TextLayoutOpts &opts) -> void {
     const auto &faces = resolve_faces(f.family);
@@ -564,7 +571,7 @@ auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Fo
     // 与度量（px_measure）保持一致的逻辑像素尺寸，再按设备缩放；保证绘制字形尺寸 == 布局度量尺寸。
     const int px = std::max(1, static_cast<int>(std::lround(static_cast<float>(px_measure(f)) * p.scale())));
     const GlyphAtlas::Mode mode =
-        (aa == TextAAMode::ClearType && c.m_a == 255) ? GlyphAtlas::Mode::Lcd : GlyphAtlas::Mode::Gray;
+        (aa == TextAAMode::ClearType && c.a == 255) ? GlyphAtlas::Mode::Lcd : GlyphAtlas::Mode::Gray;
     const float line_h = line_height_px(faces, px);
 
     // 与度量/绘制逐位同源：整段按行切分，逐行调用 shape_line（hb_shape）得到字形序列，
@@ -575,10 +582,10 @@ auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Fo
     // 将行首 snap 到整数物理像素：hinted 字形 advance 为整像素，从整数坐标开始绘制
     // 可避免高 DPI/非整数列宽造成的半像素模糊（如 125% DPI 下 GridView 列宽为半整数
     // 时，1、3 列清晰而 2、4 列发虚）。
-    float pen_y = std::floor(r.origin.y + ascender_px(faces, px) + 0.5f);
+    float pen_y = std::floor(r.origin.y + ascender_px(faces, px) + 0.5F);
     for (const auto &line_str : lines) {
         const auto sl = shape_line(line_str, faces, px, opts);
-        float pen_x = std::floor(r.origin.x + 0.5f); // 每行 pen 推进归零并 snap 到整数像素
+        float pen_x = std::floor(r.origin.x + 0.5F);  // 每行 pen 推进归零并 snap 到整数像素
         for (std::size_t j = 0; j < sl.glyphs.size(); ++j) {
             const auto &sg = sl.glyphs.at(j);
             const FT_Face face = sg.face->face;
@@ -593,7 +600,7 @@ auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Fo
                 // atlas 未命中才加载/光栅化字形槽；命中时 left/top/advance 已在 atlas 中，
                 // blit 只用 atlas 字段，跳过 FT_Load_Glyph 省下每字形 ~10µs（文本快路径关键）。
                 FT_Set_Pixel_Sizes(face, 0, px);
-                apply_italic(face, opts.italic); // 与首绘同字形变换，保证逐位一致
+                apply_italic(face, opts.italic);  // 与首绘同字形变换，保证逐位一致
                 FT_Load_Glyph(face, sg.gi, FT_LOAD_DEFAULT);
                 const FT_GlyphSlot slot = face->glyph;
                 FT_Render_Glyph(slot, mode == GlyphAtlas::Mode::Lcd ? FT_RENDER_MODE_LCD : FT_RENDER_MODE_NORMAL);
@@ -607,13 +614,13 @@ auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Fo
                     static_cast<int>(mode == GlyphAtlas::Mode::Lcd ? slot->bitmap.width / 3 : slot->bitmap.width);
                 ne.rows = static_cast<int>(slot->bitmap.rows);
                 ne.pitch = slot->bitmap.pitch;
-                ne.advance = static_cast<float>(slot->advance.x) / 64.0f;
+                ne.advance = static_cast<float>(slot->advance.x) / 64.0F;
                 // copy_w 为 FT 位图每行真实字节数（LCD 已含 3× 子像素宽度），与绘制循环的行步长一致。
                 const int copy_w = static_cast<int>(slot->bitmap.width);
                 ne.buf.resize(static_cast<std::size_t>(copy_w) * static_cast<std::size_t>(ne.rows));
-                const std::span<const std::uint8_t> src_span(slot->bitmap.buffer,
-                                                             static_cast<std::size_t>(slot->bitmap.pitch) *
-                                                                 static_cast<std::size_t>(ne.rows));
+                const std::span<const std::uint8_t> src_span(
+                    slot->bitmap.buffer,
+                    static_cast<std::size_t>(slot->bitmap.pitch) * static_cast<std::size_t>(ne.rows));
                 for (int y = 0; y < ne.rows; ++y) {
                     const std::size_t src_off =
                         static_cast<std::size_t>(y) * static_cast<std::size_t>(slot->bitmap.pitch);
@@ -636,16 +643,16 @@ auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Fo
                     const std::size_t off = static_cast<std::size_t>(y) * static_cast<std::size_t>(e->width);
                     // 批处理整行：裁剪只判一次，内联 gamma 混合，消除逐像素开销。
                     p.blend_subpixel_span(dx0, py, c, buf.subspan(off, static_cast<std::size_t>(e->width)).data(),
-                                          e->width, false, static_cast<float>(c.m_a) / 255.0f);
+                                          e->width, false, static_cast<float>(c.a) / 255.0F);
                 }
             } else {
                 const int cols = e->width;
                 const std::span<const std::uint8_t> buf(e->buf);
                 for (int y = 0; y < e->rows; ++y) {
                     const int py = dy0 + y;
-                    const std::size_t off = static_cast<std::size_t>(y) * static_cast<std::size_t>(cols) * 3u;
+                    const std::size_t off = static_cast<std::size_t>(y) * static_cast<std::size_t>(cols) * 3U;
                     // 批处理整行（LCD 三通道）：裁剪只判一次，内联 gamma 混合。
-                    p.blend_subpixel_span(dx0, py, c, buf.subspan(off, static_cast<std::size_t>(cols) * 3u).data(),
+                    p.blend_subpixel_span(dx0, py, c, buf.subspan(off, static_cast<std::size_t>(cols) * 3U).data(),
                                           cols, true);
                 }
             }
@@ -654,7 +661,7 @@ auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Fo
             // 叠加 letter/word_spacing（dp 间距须乘 scale 换算到物理像素），与 metric 同源。
             // letter_spacing 仅加在相邻字形之间（整串共 (n-1) 次），末字形后不加，与 line_prefix 一致。
             pen_x += sg.x_adv;
-            if (sg.cp == ' ' && opts.word_spacing != 0.0f) {
+            if (sg.cp == ' ' && opts.word_spacing != 0.0F) {
                 pen_x += opts.word_spacing * p.scale();
             }
             if (j + 1 < sl.glyphs.size()) {
@@ -662,11 +669,11 @@ auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Fo
             }
         }
         pen_y += line_h;
-        pen_y = std::floor(pen_y + 0.5f); // 下一行同样 snap 到整数像素
+        pen_y = std::floor(pen_y + 0.5F);  // 下一行同样 snap 到整数像素
     }
 }
 
-} // namespace
+}  // namespace
 
 // ============================ 公共 API ============================
 
@@ -674,8 +681,6 @@ auto FontEngine::instance() -> FontEngine & {
     static FontEngine s;
     return s;
 }
-
-FontEngine::~FontEngine() = default;
 
 auto FontEngine::shape_cache_stats() -> ShapeCacheStats { return shape_cache().stats(); }
 
@@ -711,7 +716,7 @@ auto FontEngine::measure_width(const std::string &text, const Font &f, const Tex
         return BitmapFont::measure_width(text, f.size_pt);
     }
     // 自然度量：96 DPI 逻辑像素尺寸，dp 间距不需换算（spacing_scale=1）。
-    return max_line_width_px(text, faces, px_measure(f), opts, 1.0f);
+    return max_line_width_px(text, faces, px_measure(f), opts, 1.0F);
 }
 
 auto FontEngine::display_width(const std::string &text, const Font &f, const TextLayoutOpts &opts, float scale)
@@ -720,7 +725,7 @@ auto FontEngine::display_width(const std::string &text, const Font &f, const Tex
     // 整像素，同一字形在两个像素尺寸下的 advance 不成 scale 比例，故不能用自然度量
     // 线性近似（行尾可差数 dp，行内累计误差造成选区/命中与实绘错位）。
     const auto &faces = resolve_faces(f.family);
-    if (faces.empty() || scale == 1.0f) {
+    if (faces.empty() || scale == 1.0F) {
         return measure_width(text, f, opts);
     }
     return max_line_width_px(text, faces, px_display(f, scale), opts, scale) / scale;
@@ -731,7 +736,7 @@ auto FontEngine::display_caret_x(const std::string &text, std::size_t char_index
     // 实显 caret：物理像素尺寸下的前缀推进折回 dp，与 draw_text_impl 的 pen_x 逐字符对齐；
     // scale=1 退化为 caret_x（两者同源，结果逐位相等）。
     const auto &faces = resolve_faces(f.family);
-    if (faces.empty() || scale == 1.0f) {
+    if (faces.empty() || scale == 1.0F) {
         return caret_x(text, char_index, f, opts);
     }
     return prefix_advance_px(text, char_index, faces, px_display(f, scale), opts, scale) / scale;
@@ -756,7 +761,7 @@ auto FontEngine::caret_x(const std::string &text, std::size_t char_index, const 
         return BitmapFont::measure_width(cp_substr(text, char_index), f.size_pt);
     }
     // 自然 caret：96 DPI 逻辑像素尺寸下的前缀推进（spacing_scale=1）。
-    return prefix_advance_px(text, char_index, faces, px_measure(f), opts, 1.0f);
+    return prefix_advance_px(text, char_index, faces, px_measure(f), opts, 1.0F);
 }
 
 auto FontEngine::hit_test_char(const std::string &text, float x, const Font &f) -> std::size_t {
@@ -766,16 +771,16 @@ auto FontEngine::hit_test_char(const std::string &text, float x, const Font &f) 
 auto FontEngine::hit_test_char(const std::string &text, float x, const Font &f, const TextLayoutOpts &opts)
     -> std::size_t {
     const std::size_t total = cp_count(text);
-    if (total == 0 || x <= 0.0f) {
+    if (total == 0 || x <= 0.0F) {
         return 0;
     }
     const auto &faces = resolve_faces(f.family);
     if (faces.empty()) {
         // BitmapFont 兜底：逐边界走 caret_x（位图字体恒定宽，成本低，无需单趟优化）。
-        float prev = 0.0f;
+        float prev = 0.0F;
         for (std::size_t i = 1; i <= total; ++i) {
             const float boundary = caret_x(text, i, f, opts);
-            const float mid = (prev + boundary) * 0.5f;
+            const float mid = (prev + boundary) * 0.5F;
             if (x < mid) {
                 return i - 1;
             }
@@ -784,7 +789,7 @@ auto FontEngine::hit_test_char(const std::string &text, float x, const Font &f, 
         return total;
     }
     // 单趟扫描：边界值与逐次 caret_x 逐位一致，避免 O(n²)（长行拖选卡顿主因）。
-    return hit_test_single_pass(text, x, faces, px_measure(f), opts, 1.0f, 1.0f, false);
+    return hit_test_single_pass(text, x, faces, px_measure(f), opts, 1.0F, 1.0F, false);
 }
 
 auto FontEngine::hit_test_char_inclusive(const std::string &text, float x, const Font &f) -> std::size_t {
@@ -794,7 +799,7 @@ auto FontEngine::hit_test_char_inclusive(const std::string &text, float x, const
 auto FontEngine::hit_test_char_inclusive(const std::string &text, float x, const Font &f, const TextLayoutOpts &opts)
     -> std::size_t {
     const std::size_t total = cp_count(text);
-    if (total == 0 || x <= 0.0f) {
+    if (total == 0 || x <= 0.0F) {
         return 0;
     }
     const auto &faces = resolve_faces(f.family);
@@ -807,15 +812,15 @@ auto FontEngine::hit_test_char_inclusive(const std::string &text, float x, const
         }
         // 含入语义：落在整行最右（超出末字符右缘）时，命中末字符本身（而非 caret 越界），
         // 使拖拽到行尾也能选中末字符（消除行尾漏选）。
-        return total - 1u;
+        return total - 1U;
     }
-    return hit_test_single_pass(text, x, faces, px_measure(f), opts, 1.0f, 1.0f, true);
+    return hit_test_single_pass(text, x, faces, px_measure(f), opts, 1.0F, 1.0F, true);
 }
 
 auto FontEngine::display_hit_test_char(const std::string &text, float x, const Font &f, const TextLayoutOpts &opts,
                                        float scale) -> std::size_t {
     const auto &faces = resolve_faces(f.family);
-    if (faces.empty() || scale == 1.0f) {
+    if (faces.empty() || scale == 1.0F) {
         return hit_test_char(text, x, f, opts);
     }
     // 实显命中（caret 语义）：单趟扫描，边界与逐次 display_caret_x 逐位一致，
@@ -826,7 +831,7 @@ auto FontEngine::display_hit_test_char(const std::string &text, float x, const F
 auto FontEngine::display_hit_test_char_inclusive(const std::string &text, float x, const Font &f,
                                                  const TextLayoutOpts &opts, float scale) -> std::size_t {
     const auto &faces = resolve_faces(f.family);
-    if (faces.empty() || scale == 1.0f) {
+    if (faces.empty() || scale == 1.0F) {
         return hit_test_char_inclusive(text, x, f, opts);
     }
     // 实显命中（含头含尾）：单趟扫描；行尾右侧命中末字符（消除行尾漏选）。
@@ -852,4 +857,4 @@ auto FontEngine::draw_text(Painter &p, const Rect &r, const std::string &text, c
     draw_text_impl(p, r, text, f, c, aa_mode, opts);
 }
 
-} // namespace aurora::render
+}  // namespace aurora::render

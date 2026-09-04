@@ -41,7 +41,6 @@
 #include "aurora/widget/switch.h"
 #include "aurora/widget/text.h"
 #include "aurora/widget/widget.h"
-
 #include "test_harness.h"
 
 using aurora::AnimationController;
@@ -107,6 +106,7 @@ using aurora::Orientation;
 namespace aurora::tests::sec_widget_defaults {
 
 // 覆写 collect_signals 递增计数器，用于验证 Container 默认实现遍历子节点。
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables) 测试内部共享计数器，static 文件作用域
 static int g_signal_calls = 0;
 
 namespace {
@@ -156,7 +156,7 @@ struct CountingChild : Widget {
         (void)ctx;
     }
 };
-} // namespace
+}  // namespace
 
 static void run() {
     // #4: Widget::describe() 默认实现返回 { .name = type_name() }
@@ -176,7 +176,7 @@ static void run() {
     row.collect_signals(out);
     AURORA_TEST_CHECK(g_signal_calls == 2);
 }
-} // namespace aurora::tests::sec_widget_defaults
+}  // namespace aurora::tests::sec_widget_defaults
 
 namespace aurora::tests::sec_widget_hooks {
 
@@ -185,79 +185,79 @@ namespace {
 /// 只覆盖滑块绘制阶段的 Slider 子类（轨道/填充沿用基类）。
 class DiamondSlider : public Slider {
   public:
-    int thumb_calls = 0;
+    int thumb_calls_ = 0;
 
   protected:
     auto paint_thumb(Painter &p, const Rect &bounds, const Rect &track, Color c) -> void override {
-        ++thumb_calls;
+        ++thumb_calls_;
         const float cx = track.origin.x + (value_fraction() * track.size.width);
-        const float cy = bounds.origin.y + (bounds.size.height * 0.5f);
+        const float cy = bounds.origin.y + (bounds.size.height * 0.5F);
         p.fill_rounded_rect(
-            Rect{ .origin = Point{ .x = cx - 6.0f, .y = cy - 6.0f }, .size = Size{ .width = 12.0f, .height = 12.0f } },
-            3.0f, c);
+            Rect{.origin = Point{.x = cx - 6.0F, .y = cy - 6.0F}, .size = Size{.width = 12.0F, .height = 12.0F}}, 3.0F,
+            c);
     }
 };
 
 /// 只覆盖背景绘制阶段的 Button 子类（文字/边框/状态色逻辑不变）。
 class GradientButton : public Button {
   public:
-    int bg_calls = 0;
+    int bg_calls_ = 0;
 
   protected:
     auto paint_background(Painter &p, const Rect &b, Color bg) -> void override {
-        ++bg_calls;
-        p.draw_linear_gradient(b, b.origin, Point{ .x = b.right(), .y = b.bottom() }, { bg, bg.shaded(0.7f) },
-                               { 0.0f, 1.0f });
+        ++bg_calls_;
+        p.draw_linear_gradient(b, b.origin, Point{.x = b.right(), .y = b.bottom()}, {bg, bg.shaded(0.7F)},
+                               {0.0F, 1.0F});
     }
 };
 
 /// 覆盖状态色解析钩子的 Button 子类。
 class FixedColorButton : public Button {
   protected:
-    [[nodiscard]] auto resolve_background() const -> Color override { return Color{ 1, 2, 3, 255 }; }
+    [[nodiscard]] auto resolve_background() const -> Color override { return Color{1, 2, 3, 255}; }
 };
 
 /// 只覆盖滑块的 Switch 子类。
 class SquareThumbSwitch : public Switch {
   public:
-    int thumb_calls = 0;
+    int thumb_calls_ = 0;
 
   protected:
     auto paint_thumb(Painter &p, const Rect &bounds, Color thumb, bool on) -> void override {
-        ++thumb_calls;
-        const float d = bounds.size.height - 4.0f;
-        const float x = on ? bounds.right() - d - 2.0f : bounds.origin.x + 2.0f;
-        p.fill_rect(
-            Rect{ .origin = Point{ .x = x, .y = bounds.origin.y + 2.0f }, .size = Size{ .width = d, .height = d } },
-            thumb);
+        ++thumb_calls_;
+        const float d = bounds.size.height - 4.0F;
+        const float x = on ? bounds.right() - d - 2.0F : bounds.origin.x + 2.0F;
+        p.fill_rect(Rect{.origin = Point{.x = x, .y = bounds.origin.y + 2.0F}, .size = Size{.width = d, .height = d}},
+                    thumb);
     }
 };
 
 /// 只覆盖填充的 ProgressIndicator 子类。
 class StripedProgress : public ProgressIndicator {
   public:
-    int fill_calls = 0;
+    int fill_calls_ = 0;
 
   protected:
     auto paint_fill(Painter &p, const Rect &bounds, Color c, float radius) -> void override {
-        ++fill_calls;
-        ProgressIndicator::paint_fill(p, bounds, c.shaded(1.1f), radius); // 复用基类 + 调色
+        ++fill_calls_;
+        ProgressIndicator::paint_fill(p, bounds, c.shaded(1.1F), radius);  // 复用基类 + 调色
     }
 };
 
-template<typename W> auto render_once(W &w, float width, float height) -> void {
+template <typename W>
+auto render_once(W &w, float width, float height) -> void {
     BuildContext ctx;
     w.mount(ctx);
     Constraints c;
-    c.min = Size{ .width = 0.0f, .height = 0.0f };
-    c.max = Size{ .width = width, .height = height };
+    c.min = Size{.width = 0.0F, .height = 0.0F};
+    c.max = Size{.width = width, .height = height};
     const Size sz = w.layout(c, ctx);
     Painter p;
     p.begin(static_cast<int>(width), static_cast<int>(height));
-    w.paint(p, Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = sz }, ctx);
+    w.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = sz}, ctx);
 }
 
-} // namespace
+}  // namespace
 
 static void run() {
     AURORA_TEST_PRINTF("=== test_widget_hooks ===\n");
@@ -267,27 +267,26 @@ static void run() {
         DiamondSlider s;
         s.set_range(0.0, 1.0);
         s.set_value(0.5);
-        render_once(s, 200.0f, 24.0f);
-        AURORA_TEST_CHECK_MSG(s.thumb_calls == 1, "DiamondSlider: subclass paint_thumb invoked by render path");
+        render_once(s, 200.0F, 24.0F);
+        AURORA_TEST_CHECK_MSG(s.thumb_calls_ == 1, "DiamondSlider: subclass paint_thumb invoked by render path");
     }
 
     // Button 子类：paint_background 被调用；resolve_background 可覆盖
     {
         GradientButton b;
         b.set_label("Go");
-        render_once(b, 200.0f, 60.0f);
-        AURORA_TEST_CHECK_MSG(b.bg_calls == 1, "GradientButton: subclass paint_background invoked by render path");
+        render_once(b, 200.0F, 60.0F);
+        AURORA_TEST_CHECK_MSG(b.bg_calls_ == 1, "GradientButton: subclass paint_background invoked by render path");
 
         FixedColorButton fb;
         fb.set_label("Hi");
-        fb.set_corner_radius(0.0f);
-        render_once(fb, 200.0f, 60.0f);
+        fb.set_corner_radius(0.0F);
+        render_once(fb, 200.0F, 60.0F);
         // resolve_background 覆盖后背景为定制色：取左上角内一像素验证
         Painter p;
         p.begin(60, 30);
         constexpr BuildContext ctx;
-        fb.paint(p, Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = 60.0f, .height = 30.0f } },
-                 ctx);
+        fb.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 60.0F, .height = 30.0F}}, ctx);
         const Color px = p.get_pixel(2, 2);
         AURORA_TEST_CHECK_MSG(px.m_r == 1 && px.m_g == 2 && px.m_b == 3,
                               "FixedColorButton: resolve_background override effective");
@@ -296,19 +295,19 @@ static void run() {
     // Switch 子类：paint_thumb 被调用
     {
         SquareThumbSwitch sw;
-        render_once(sw, 44.0f, 24.0f);
-        AURORA_TEST_CHECK_MSG(sw.thumb_calls == 1, "SquareThumbSwitch: subclass paint_thumb invoked by render path");
+        render_once(sw, 44.0F, 24.0F);
+        AURORA_TEST_CHECK_MSG(sw.thumb_calls_ == 1, "SquareThumbSwitch: subclass paint_thumb invoked by render path");
     }
 
     // ProgressIndicator 子类：paint_fill 被调用（值 > 0 才有填充）
     {
         StripedProgress pi;
         pi.set_value(0.6);
-        render_once(pi, 200.0f, 6.0f);
-        AURORA_TEST_CHECK_MSG(pi.fill_calls == 1, "StripedProgress: subclass paint_fill invoked by render path");
+        render_once(pi, 200.0F, 6.0F);
+        AURORA_TEST_CHECK_MSG(pi.fill_calls_ == 1, "StripedProgress: subclass paint_fill invoked by render path");
     }
 }
-} // namespace aurora::tests::sec_widget_hooks
+}  // namespace aurora::tests::sec_widget_hooks
 
 namespace aurora::tests::sec_components {
 
@@ -318,21 +317,21 @@ void render_tree(Widget &w, float ww, float hh) {
     constexpr BuildContext ctx;
     w.mount(ctx);
     Constraints cc;
-    cc.min = Size{ .width = 0.0f, .height = 0.0f };
-    cc.max = Size{ .width = ww, .height = hh };
+    cc.min = Size{.width = 0.0F, .height = 0.0F};
+    cc.max = Size{.width = ww, .height = hh};
     w.layout(cc, ctx);
     Painter p;
     p.begin(static_cast<int>(ww), static_cast<int>(hh));
-    w.paint(p, Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = ww, .height = hh } }, ctx);
+    w.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = ww, .height = hh}}, ctx);
 }
 
 // 模拟测量上下文 + trampoline：零堆分配，替代原 std::function 捕获 lambda。
 struct MeasureCtx : LayoutCtxBase {
-    float content_w;
-    float content_h;
+    float content_w_;
+    float content_h_;
 };
 
-auto mc_pool() -> std::vector<MeasureCtx> & { // NOLINT
+auto mc_pool() -> std::vector<MeasureCtx> & {  // NOLINT
     static std::vector<MeasureCtx> v;
     static bool init = (v.reserve(32), true);
     (void)init;
@@ -342,136 +341,170 @@ auto mc_pool() -> std::vector<MeasureCtx> & { // NOLINT
 // 模拟"测量"：尊重约束（填满有限主轴/交叉轴空间，content>0 时保留内容尺寸）。
 auto item(float w, const float content_w, const float content_h) -> FlexItem {
     auto &pool = mc_pool();
-    pool.push_back(MeasureCtx{ {}, content_w, content_h });
+    pool.push_back(MeasureCtx{{}, content_w, content_h});
     MeasureCtx *mc = &pool.back();
     return FlexItem::make<MeasureCtx>(w, mc, [](void *ctx, const Constraints &cc) -> Size {
         auto const *m = static_cast<MeasureCtx *>(ctx);
         constexpr float inf = Size::infinity().width;
-        const float mw =
-            (m->content_w > 0.0f) ? std::min(m->content_w, cc.max.width) : (cc.max.width != inf ? cc.max.width : 0.0f);
-        const float mh = (m->content_h > 0.0f) ? std::min(m->content_h, cc.max.height)
-                                               : (cc.max.height != inf ? cc.max.height : 0.0f);
-        return Size{ .width = mw, .height = mh };
+        const float mw = (m->content_w_ > 0.0F) ? std::min(m->content_w_, cc.max.width)
+                                                : (cc.max.width != inf ? cc.max.width : 0.0F);
+        const float mh = (m->content_h_ > 0.0F) ? std::min(m->content_h_, cc.max.height)
+                                                : (cc.max.height != inf ? cc.max.height : 0.0F);
+        return Size{.width = mw, .height = mh};
     });
 }
 
 // Column/Row 对齐属性落地 + 核心 flex 语义变更（MainAxisSize::Max 撑满父级、对齐产生可见自由空间）。
 void test_column_row_alignment() {
     Constraints c;
-    c.max = Size{ .width = 100.0f, .height = 200.0f };
+    c.max = Size{.width = 100.0F, .height = 200.0F};
 
-    Flex f_min{ .direction = FlexDirection::Column,
-                .main_axis = MainAxisAlignment::Start,
-                .cross_axis = CrossAxisAlignment::Start };
+    Flex f_min{.direction = FlexDirection::Column,
+               .main_axis = MainAxisAlignment::Start,
+               .cross_axis = CrossAxisAlignment::Start};
     f_min.main_axis_size = MainAxisSize::Min;
-    auto r_min = FlexLayouter::layout(f_min, c, { item(0, 10, 20), item(0, 10, 20) });
-    AURORA_TEST_CHECK_MSG(near_f(r_min.size.height, 40.0f), "Min: content height = 40");
-    AURORA_TEST_CHECK_MSG(near_f(r_min.children[0].origin.y, 0.0f), "Min/Start child0 y=0");
-    AURORA_TEST_CHECK_MSG(near_f(r_min.children[1].origin.y, 20.0f), "Min/Start child1 y=20");
+    auto r_min = FlexLayouter::layout(f_min, c, {item(0, 10, 20), item(0, 10, 20)});
+    AURORA_TEST_CHECK_MSG(near_f(r_min.size.height, 40.0F), "Min: content height = 40");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(near_f(r_min.children[0].origin.y, 0.0F), "Min/Start child0 y=0");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(near_f(r_min.children[1].origin.y, 20.0F), "Min/Start child1 y=20");
 
-    Flex f_max{ .direction = FlexDirection::Column,
-                .main_axis = MainAxisAlignment::Center,
-                .cross_axis = CrossAxisAlignment::Start };
+    Flex f_max{.direction = FlexDirection::Column,
+               .main_axis = MainAxisAlignment::Center,
+               .cross_axis = CrossAxisAlignment::Start};
     f_max.main_axis_size = MainAxisSize::Max;
-    auto r_max = FlexLayouter::layout(f_max, c, { item(0, 10, 20), item(0, 10, 20) });
-    AURORA_TEST_CHECK_MSG(near_f(r_max.size.height, 200.0f), "Max: fills parent height = 200");
-    AURORA_TEST_CHECK_MSG(near_f(r_max.children[0].origin.y, 80.0f), "Max/Center child0 y=80");
-    AURORA_TEST_CHECK_MSG(near_f(r_max.children[1].origin.y, 100.0f), "Max/Center child1 y=100");
+    auto r_max = FlexLayouter::layout(f_max, c, {item(0, 10, 20), item(0, 10, 20)});
+    AURORA_TEST_CHECK_MSG(near_f(r_max.size.height, 200.0F), "Max: fills parent height = 200");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(near_f(r_max.children[0].origin.y, 80.0F), "Max/Center child0 y=80");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(near_f(r_max.children[1].origin.y, 100.0F), "Max/Center child1 y=100");
 
-    Flex f_end{ .direction = FlexDirection::Column,
-                .main_axis = MainAxisAlignment::End,
-                .cross_axis = CrossAxisAlignment::Start };
+    Flex f_end{.direction = FlexDirection::Column,
+               .main_axis = MainAxisAlignment::End,
+               .cross_axis = CrossAxisAlignment::Start};
     f_end.main_axis_size = MainAxisSize::Max;
-    auto r_end = FlexLayouter::layout(f_end, c, { item(0, 10, 20), item(0, 10, 20) });
-    AURORA_TEST_CHECK_MSG(near_f(r_end.children[0].origin.y, 160.0f), "Max/End child0 y=160");
-    AURORA_TEST_CHECK_MSG(near_f(r_end.children[1].origin.y, 180.0f), "Max/End child1 y=180");
+    auto r_end = FlexLayouter::layout(f_end, c, {item(0, 10, 20), item(0, 10, 20)});
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(near_f(r_end.children[0].origin.y, 160.0F), "Max/End child0 y=160");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(near_f(r_end.children[1].origin.y, 180.0F), "Max/End child1 y=180");
 
     Constraints c_inf;
-    c_inf.max = Size{ .width = Size::infinity().width, .height = Size::infinity().height };
-    auto r_inf = FlexLayouter::layout(f_max, c_inf, { item(0, 10, 20), item(0, 10, 20) });
-    AURORA_TEST_CHECK_MSG(near_f(r_inf.size.height, 40.0f), "Max + infinite constraint: still content size = 40");
+    c_inf.max = Size{.width = Size::infinity().width, .height = Size::infinity().height};
+    auto r_inf = FlexLayouter::layout(f_max, c_inf, {item(0, 10, 20), item(0, 10, 20)});
+    AURORA_TEST_CHECK_MSG(near_f(r_inf.size.height, 40.0F), "Max + infinite constraint: still content size = 40");
 
     // Widget 层：Column/Row 经 set_main_axis_size 透传 flex.main_axis_size，撑满父级。
-    Column col{ Node{ Text{ "a" } }, Node{ Text{ "b" } } };
+    Column col{Node{Text{"a"}}, Node{Text{"b"}}};
     col.set_main_axis_size(MainAxisSize::Max);
     BuildContext ctx;
     col.mount(ctx);
     Constraints cc;
-    cc.min = Size{ .width = 0.0f, .height = 0.0f };
-    cc.max = Size{ .width = 100.0f, .height = 200.0f };
+    cc.min = Size{.width = 0.0F, .height = 0.0F};
+    cc.max = Size{.width = 100.0F, .height = 200.0F};
     const Size s = col.layout(cc, ctx);
-    AURORA_TEST_CHECK_MSG(near_f(s.height, 200.0f), "Column(Max) fills parent height = 200");
+    AURORA_TEST_CHECK_MSG(near_f(s.height, 200.0F), "Column(Max) fills parent height = 200");
 
-    Row row{ Node{ Text{ "a" } }, Node{ Text{ "b" } } };
+    Row row{Node{Text{"a"}}, Node{Text{"b"}}};
     row.set_main_axis_size(MainAxisSize::Max);
     BuildContext rctx;
     row.mount(rctx);
     Constraints rc;
-    rc.min = Size{ .width = 0.0f, .height = 0.0f };
-    rc.max = Size{ .width = 200.0f, .height = 50.0f };
+    rc.min = Size{.width = 0.0F, .height = 0.0F};
+    rc.max = Size{.width = 200.0F, .height = 50.0F};
     const Size rs = row.layout(rc, rctx);
-    AURORA_TEST_CHECK_MSG(near_f(rs.width, 200.0f), "Row(Max) fills parent width = 200");
+    AURORA_TEST_CHECK_MSG(near_f(rs.width, 200.0F), "Row(Max) fills parent width = 200");
 
     // 链式 setter + 序列化往返（属性键 main_axis_alignment / cross_axis_alignment / main_axis_size / gap）。
-    Column col2{ Node{ Text{ "a" } } };
+    Column col2{Node{Text{"a"}}};
     col2.set_main_axis_alignment(MainAxisAlignment::Center)
         .set_cross_axis_alignment(CrossAxisAlignment::Stretch)
         .set_main_axis_size(MainAxisSize::Max)
-        .set_gap(8.0f);
+        .set_gap(8.0F);
     Json j;
     col2.serialize_props(j);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["main_axis_alignment"].get<std::string>() == "Center",
                           "serialize main_axis_alignment=Center");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["cross_axis_alignment"].get<std::string>() == "Stretch",
                           "serialize cross_axis_alignment=Stretch");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["main_axis_size"].get<std::string>() == "Max", "serialize main_axis_size=Max");
-    AURORA_TEST_CHECK_MSG(near_f(j["gap"].get<float>(), 8.0f), "serialize gap=8");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(near_f(j["gap"].get<float>(), 8.0F), "serialize gap=8");
 
-    Column q{ Node{ Text{ "b" } } };
+    Column q{Node{Text{"b"}}};
     q.deserialize_props(j);
     Json k;
     q.serialize_props(k);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(k["main_axis_alignment"].get<std::string>() == "Center", "rt main_axis_alignment");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(k["cross_axis_alignment"].get<std::string>() == "Stretch", "rt cross_axis_alignment");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(k["main_axis_size"].get<std::string>() == "Max", "rt main_axis_size");
-    AURORA_TEST_CHECK_MSG(near_f(k["gap"].get<float>(), 8.0f), "rt gap");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(near_f(k["gap"].get<float>(), 8.0F), "rt gap");
 
-    Row row2{ Node{ Text{ "a" } } };
+    Row row2{Node{Text{"a"}}};
     row2.set_main_axis_alignment(MainAxisAlignment::End)
         .set_cross_axis_alignment(CrossAxisAlignment::Center)
         .set_main_axis_size(MainAxisSize::Min);
     Json rj;
     row2.serialize_props(rj);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(rj["main_axis_alignment"].get<std::string>() == "End",
                           "Row serialize main_axis_alignment=End");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(rj["cross_axis_alignment"].get<std::string>() == "Center",
                           "Row serialize cross_axis_alignment=Center");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(rj["main_axis_size"].get<std::string>() == "Min", "Row serialize main_axis_size=Min");
 }
 
-} // namespace
+}  // namespace
 
 static void run() {
     // ---------- 1. 基础控件：渲染不崩溃 ----------
     {
-        auto col = Column{ ColumnProps{ .children = {
-                                            Node{ Divider{} },
-                                            Node{ Divider{ DividerProps{ .orientation = Orientation::Vertical } } },
-                                            Node{ Checkbox{ Reactive{ false } } },
-                                            Node{ Switch{ Reactive{ true } } },
-                                            Node{ Slider{ Reactive{ 0.5 } } },
-                                            Node{ ProgressIndicator{ Reactive{ 0.3 } } },
-                                        } } };
-        render_tree(col, 320.0f, 480.0f);
+        auto col = Column{ColumnProps{.children = {
+                                          Node{Divider{}},
+                                          Node{Divider{DividerProps{.orientation = Orientation::Vertical}}},
+                                          Node{Checkbox{Reactive{false}}},
+                                          Node{Switch{Reactive{true}}},
+                                          Node{Slider{Reactive{0.5}}},
+                                          Node{ProgressIndicator{Reactive{0.3}}},
+                                      }}};
+        render_tree(col, 320.0F, 480.0F);
         AURORA_TEST_CHECK_MSG(true, "base widgets render without crash");
     }
 
     // ---------- 2. Checkbox 点击切换 ----------
     {
-        Checkbox cb{ Reactive{ false } };
-        render_tree(cb, 40.0f, 40.0f);
-        auto bb = Rect{ .origin = Point{}, .size = cb.size() };
-        const Point c{ .x = bb.origin.x + (bb.size.width / 2.0f), .y = bb.origin.y + (bb.size.height / 2.0f) };
+        Checkbox cb{Reactive{false}};
+        render_tree(cb, 40.0F, 40.0F);
+        auto bb = Rect{.origin = Point{}, .size = cb.size()};
+        const Point c{.x = bb.origin.x + (bb.size.width / 2.0F), .y = bb.origin.y + (bb.size.height / 2.0F)};
         MouseEvent e;
         e.position = c;
         e.action = MouseAction::Press;
@@ -483,16 +516,16 @@ static void run() {
 
     // ---------- 3. Slider 拖拽设置值 ----------
     {
-        Slider sl{ Reactive{ 0.5 } };
-        render_tree(sl, 200.0f, 24.0f);
-        auto bb = Rect{ .origin = Point{}, .size = sl.size() };
-        const float left = bb.origin.x + 4.0f;
-        const float mid = bb.origin.x + (bb.size.width / 2.0f);
+        Slider sl{Reactive{0.5}};
+        render_tree(sl, 200.0F, 24.0F);
+        auto bb = Rect{.origin = Point{}, .size = sl.size()};
+        const float left = bb.origin.x + 4.0F;
+        const float mid = bb.origin.x + (bb.size.width / 2.0F);
         MouseEvent e;
-        e.position = Point{ .x = mid, .y = bb.origin.y + (bb.size.height / 2.0f) };
+        e.position = Point{.x = mid, .y = bb.origin.y + (bb.size.height / 2.0F)};
         e.action = MouseAction::Press;
         EventDispatcher::dispatch(sl, e);
-        e.position = Point{ .x = left, .y = bb.origin.y + (bb.size.height / 2.0f) };
+        e.position = Point{.x = left, .y = bb.origin.y + (bb.size.height / 2.0F)};
         e.action = MouseAction::Move;
         EventDispatcher::dispatch(sl, e);
         e.action = MouseAction::Release;
@@ -502,48 +535,48 @@ static void run() {
 
     // ---------- 5. Align / Offset / 圆角裁剪 渲染不崩溃 ----------
     {
-        Text aligned{ "Aligned" };
+        Text aligned{"Aligned"};
         aligned.modifier.set(
-            Modifier{}.align(Alignment::BottomRight).background(colors::AURORA_BLUE, 8.0f).clip_rounded(8.0f));
-        Text offset{ "Offset" };
-        offset.modifier.set(Modifier{}.offset(20.0f, 10.0f).background(colors::AURORA_GREEN));
-        auto stacked = Stack{ std::vector{ Node{ std::move(aligned) }, Node{ std::move(offset) } } };
-        render_tree(stacked, 200.0f, 200.0f);
+            Modifier{}.align(Alignment::BottomRight).background(colors::AURORA_BLUE, 8.0F).clip_rounded(8.0F));
+        Text offset{"Offset"};
+        offset.modifier.set(Modifier{}.offset(20.0F, 10.0F).background(colors::AURORA_GREEN));
+        auto stacked = Stack{std::vector{Node{std::move(aligned)}, Node{std::move(offset)}}};
+        render_tree(stacked, 200.0F, 200.0F);
         AURORA_TEST_CHECK_MSG(true, "Align/Offset/rounded-clip render");
     }
 
     // ---------- 6. 手势：拖拽回调 ----------
     {
         bool dragged = false;
-        Point last_delta{ .x = 0.0f, .y = 0.0f };
-        Text drag{ "Drag me" };
+        Point last_delta{.x = 0.0F, .y = 0.0F};
+        Text drag{"Drag me"};
         drag.modifier.set(Modifier{}.draggable([&](Point d, Point) -> void {
             dragged = true;
             last_delta = d;
         }));
-        render_tree(drag, 120.0f, 40.0f);
-        auto bb = Rect{ .origin = Point{}, .size = drag.size() };
-        const Point c{ .x = bb.origin.x + (bb.size.width / 2.0f), .y = bb.origin.y + (bb.size.height / 2.0f) };
+        render_tree(drag, 120.0F, 40.0F);
+        auto bb = Rect{.origin = Point{}, .size = drag.size()};
+        const Point c{.x = bb.origin.x + (bb.size.width / 2.0F), .y = bb.origin.y + (bb.size.height / 2.0F)};
         MouseEvent e;
         e.position = c;
         e.action = MouseAction::Press;
         EventDispatcher::dispatch(drag, e);
-        e.position = Point{ .x = c.x + 20.0f, .y = c.y };
+        e.position = Point{.x = c.x + 20.0F, .y = c.y};
         e.action = MouseAction::Move;
         EventDispatcher::dispatch(drag, e);
         e.action = MouseAction::Release;
         EventDispatcher::dispatch(drag, e);
-        AURORA_TEST_CHECK_MSG(dragged && std::abs(last_delta.x - 20.0f) < 0.001f, "Drag reports delta");
+        AURORA_TEST_CHECK_MSG(dragged && std::abs(last_delta.x - 20.0F) < 0.001F, "Drag reports delta");
     }
 
     // ---------- 7. 手势：长按计时 ----------
     {
         bool fired = false;
-        Text lp{ "Long press" };
-        lp.modifier.set(Modifier{}.long_press([&]() -> void { fired = true; }, 50.0f));
-        render_tree(lp, 120.0f, 40.0f);
-        auto bb = Rect{ .origin = Point{}, .size = lp.size() };
-        const Point c{ .x = bb.origin.x + (bb.size.width / 2.0f), .y = bb.origin.y + (bb.size.height / 2.0f) };
+        Text lp{"Long press"};
+        lp.modifier.set(Modifier{}.long_press([&]() -> void { fired = true; }, 50.0F));
+        render_tree(lp, 120.0F, 40.0F);
+        auto bb = Rect{.origin = Point{}, .size = lp.size()};
+        const Point c{.x = bb.origin.x + (bb.size.width / 2.0F), .y = bb.origin.y + (bb.size.height / 2.0F)};
         MouseEvent e;
         e.position = c;
         e.action = MouseAction::Press;
@@ -557,22 +590,32 @@ static void run() {
     {
         auto make_tree = []() -> Node {
             auto const col = std::make_shared<Column>(
-                ColumnProps{ .children = {
-                                 Node{ Row{ RowProps{ .children = { Node{ Text{ "A" } }, Node{ Text{ "B" } } } } } },
-                                 Node{ Text{ "C" } },
-                             } });
+                ColumnProps{.children = {
+                                Node{Row{RowProps{.children = {Node{Text{"A"}}, Node{Text{"B"}}}}}},
+                                Node{Text{"C"}},
+                            }});
             col->modifier = Modifier{}.fill_max_size();
-            return Node{ col };
+            return Node{col};
         };
         Node t1 = make_tree();
         const Json snap = render_to_logical_snapshot(t1, 200, 200);
-        AURORA_TEST_CHECK_MSG(std::string{ snap["type"].get<std::string>() } == "Column", "snapshot root type Column");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK_MSG(std::string{snap["type"].get<std::string>()} == "Column", "snapshot root type Column");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(snap["children"].size() == 2, "snapshot root has 2 children");
-        AURORA_TEST_CHECK_MSG(std::string{ snap["children"][0]["type"].get<std::string>() } == "Row",
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK_MSG(std::string{snap["children"][0]["type"].get<std::string>()} == "Row",
                               "snapshot first child Row");
-        AURORA_TEST_CHECK_MSG(std::abs(snap["box"]["w"].get<float>() - 200.0f) < 0.001f,
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK_MSG(std::abs(snap["box"]["w"].get<float>() - 200.0F) < 0.001F,
                               "snapshot root width = viewport");
-        AURORA_TEST_CHECK_MSG(std::abs(snap["box"]["h"].get<float>() - 200.0f) < 0.001f,
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK_MSG(std::abs(snap["box"]["h"].get<float>() - 200.0F) < 0.001F,
                               "snapshot root height = viewport");
 
         // 确定性：两次快照字节一致
@@ -585,16 +628,18 @@ static void run() {
             constexpr BuildContext ctx;
             w.mount(ctx);
             Constraints c;
-            c.min = Size{ .width = 0.0f, .height = 0.0f };
-            c.max = Size{ .width = static_cast<float>(ww), .height = static_cast<float>(hh) };
+            c.min = Size{.width = 0.0F, .height = 0.0F};
+            c.max = Size{.width = static_cast<float>(ww), .height = static_cast<float>(hh)};
             w.layout(c, ctx);
             Painter p;
             p.begin(ww, hh);
             w.paint(p,
-                    Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                          .size = Size{ .width = static_cast<float>(ww), .height = static_cast<float>(hh) } },
+                    Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                         .size = Size{.width = static_cast<float>(ww), .height = static_cast<float>(hh)}},
                     ctx);
             const std::uint8_t *d = p.data();
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic, modernize-return-braced-init-list)
+            // 测试助手：缓冲区间算术；范围构造保留圆括号（braced-init 会变 initializer_list）
             return std::vector(d, d + (static_cast<std::size_t>(ww) * hh * 4));
         };
         Node t3 = make_tree();
@@ -605,15 +650,15 @@ static void run() {
 
     test_column_row_alignment();
 }
-} // namespace aurora::tests::sec_components
+}  // namespace aurora::tests::sec_components
 
 namespace aurora::tests::sec_hit_zorder {
 
 namespace {
 auto layout_root(Widget &root, const float w, const float h) -> void {
     Constraints c;
-    c.min = Size{ .width = 0, .height = 0 };
-    c.max = Size{ .width = w, .height = h };
+    c.min = Size{.width = 0, .height = 0};
+    c.max = Size{.width = w, .height = h};
     constexpr BuildContext ctx;
     root.layout(c, ctx);
 }
@@ -621,54 +666,52 @@ auto paint_root(Widget &root, const float w, const float h) -> void {
     Painter p;
     p.begin(static_cast<int>(w), static_cast<int>(h));
     constexpr BuildContext ctx;
-    root.paint(p, Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = w, .height = h } }, ctx);
+    root.paint(p, Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = w, .height = h}}, ctx);
 }
 auto hit_text(Widget &root, float x, const float y) -> std::string {
-    Widget *h = EventDispatcher::hit_test(root, Point{ .x = x, .y = y });
+    Widget *h = EventDispatcher::hit_test(root, Point{.x = x, .y = y});
     auto const *t = dynamic_cast<Text *>(h);
     return (t != nullptr) ? t->display_text() : std::string{};
 }
-} // namespace
+}  // namespace
 
 static void run() {
     // (1) Stack：默认14pt文本 在底（先），Text控件 在顶（后，视觉上层）。
     //     重叠区 (0,0)→(74,27) 内 hit_test 必须命中顶层 Text控件，而非底层 默认14pt文本。
     {
         const auto bottom =
-            std::make_shared<Text>(TextProps{ .content = LocalizedString{ "默认14pt文本" }, .soft_wrap = true });
-        const auto top =
-            std::make_shared<Text>(TextProps{ .content = LocalizedString{ "Text控件" }, .soft_wrap = true });
-        Stack st{ std::vector{ Node{ bottom }, Node{ top } } };
+            std::make_shared<Text>(TextProps{.content = LocalizedString{"默认14pt文本"}, .soft_wrap = true});
+        const auto top = std::make_shared<Text>(TextProps{.content = LocalizedString{"Text控件"}, .soft_wrap = true});
+        Stack st{std::vector{Node{bottom}, Node{top}}};
         layout_root(st, 520, 800);
         paint_root(st, 520, 800);
-        const std::string hit = hit_text(st, 37.0f, 13.0f); // 重叠区中心
+        const std::string hit = hit_text(st, 37.0F, 13.0F);  // 重叠区中心
         AURORA_TEST_CHECK(hit == "Text控件");
     }
     // (2) 反向 Stack：Text控件 在底，默认14pt文本 在顶 → 重叠区应命中 默认14pt文本（验证“顶层恒优先”）。
     {
         const auto bottom =
-            std::make_shared<Text>(TextProps{ .content = LocalizedString{ "Text控件" }, .soft_wrap = true });
+            std::make_shared<Text>(TextProps{.content = LocalizedString{"Text控件"}, .soft_wrap = true});
         const auto top =
-            std::make_shared<Text>(TextProps{ .content = LocalizedString{ "默认14pt文本" }, .soft_wrap = true });
-        Stack st{ std::vector{ Node{ bottom }, Node{ top } } };
+            std::make_shared<Text>(TextProps{.content = LocalizedString{"默认14pt文本"}, .soft_wrap = true});
+        Stack st{std::vector{Node{bottom}, Node{top}}};
         layout_root(st, 520, 800);
         paint_root(st, 520, 800);
-        const std::string hit = hit_text(st, 37.0f, 13.0f);
+        const std::string hit = hit_text(st, 37.0F, 13.0F);
         AURORA_TEST_CHECK(hit == "默认14pt文本");
     }
     // (3) 不重叠的 Row 行为不变：各自命中自身。
     {
-        const auto a =
-            std::make_shared<Text>(TextProps{ .content = LocalizedString{ "默认14pt文本" }, .soft_wrap = true });
-        const auto b = std::make_shared<Text>(TextProps{ .content = LocalizedString{ "Text控件" }, .soft_wrap = true });
-        Row row{ RowProps{ .children = { Node{ a }, Node{ b } } } };
+        const auto a = std::make_shared<Text>(TextProps{.content = LocalizedString{"默认14pt文本"}, .soft_wrap = true});
+        const auto b = std::make_shared<Text>(TextProps{.content = LocalizedString{"Text控件"}, .soft_wrap = true});
+        Row row{RowProps{.children = {Node{a}, Node{b}}}};
         layout_root(row, 520, 800);
         paint_root(row, 520, 800);
-        AURORA_TEST_CHECK(hit_text(row, 30.0f, 13.0f) == "默认14pt文本");
-        AURORA_TEST_CHECK(hit_text(row, 160.0f, 13.0f) == "Text控件");
+        AURORA_TEST_CHECK(hit_text(row, 30.0F, 13.0F) == "默认14pt文本");
+        AURORA_TEST_CHECK(hit_text(row, 160.0F, 13.0F) == "Text控件");
     }
 }
-} // namespace aurora::tests::sec_hit_zorder
+}  // namespace aurora::tests::sec_hit_zorder
 
 namespace aurora::tests::sec_lifetime_uaf {
 
@@ -677,49 +720,49 @@ namespace {
 /// @brief 可聚焦叶控件：记录获焦/失焦次数，用于焦点悬垂断言。
 class FocusLeaf : public LeafWidget {
   public:
-    int gained = 0;
-    int lost = 0;
+    int gained_ = 0;
+    int lost_ = 0;
     /// @brief activate() 计数出口：指向调用方栈变量，故本控件析构后仍可安全读取，
     ///        用于断言「已回收的焦点控件不再被虚调用」而无需解引用已释放对象。
-    int *activate_sink = nullptr;
+    int *activate_sink_ = nullptr;
     void on_focus_change(bool focused) override {
         if (focused) {
-            ++gained;
+            ++gained_;
         } else {
-            ++lost;
+            ++lost_;
         }
     }
     void activate() override {
-        if (activate_sink != nullptr) {
-            ++*activate_sink;
+        if (activate_sink_ != nullptr) {
+            ++*activate_sink_;
         }
     }
     void collect_signals(std::vector<SignalViewBase *> & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "FocusLeaf"; }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
-        return WidgetDescriptor{ .name = "FocusLeaf", .children_policy = "none" };
+        return WidgetDescriptor{.name = "FocusLeaf", .children_policy = "none"};
     }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(Size{ .width = 40.0f, .height = 20.0f });
+        return c.constrain(Size{.width = 40.0F, .height = 20.0F});
     }
     void on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) override {}
 };
 
 /// @brief 整屏纯色页（NavigatorHost 转场用）。
 struct SolidPage : Widget {
-    Color bg;
-    explicit SolidPage(Color c) : bg(c) {}
+    Color bg_;
+    explicit SolidPage(Color c) : bg_(c) {}
     [[nodiscard]] auto type_name() const -> const char * override { return "SolidPage"; }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
-        return WidgetDescriptor{ .name = "SolidPage", .children_policy = "none" };
+        return WidgetDescriptor{.name = "SolidPage", .children_policy = "none"};
     }
     void collect_signals(std::vector<SignalViewBase *> & /*out*/) override {}
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(c.max); }
-    void on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) override { p.fill_rect(bounds, bg); }
+    void on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) override { p.fill_rect(bounds, bg_); }
 };
 
 /// @brief 在 root 上跑一次完整的 Press+Release（触发 Button::activate → on_click）。
@@ -741,16 +784,16 @@ auto click_at(Widget &root, const Point &p, FocusManager *fm) -> void {
 auto realize(Widget &root, Painter &p, BuildContext const &ctx, const int w, const int h) -> void {
     root.mount(ctx);
     Constraints cc;
-    cc.min = Size{ .width = 0.0f, .height = 0.0f };
-    cc.max = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) };
+    cc.min = Size{.width = 0.0F, .height = 0.0F};
+    cc.max = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
     root.layout(cc, ctx);
     root.paint(p,
-               Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                     .size = Size{ .width = static_cast<float>(w), .height = static_cast<float>(h) } },
+               Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                    .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                ctx);
 }
 
-} // namespace
+}  // namespace
 
 static void run() {
     AURORA_TEST_PRINTF("=== test_lifetime_uaf ===\n");
@@ -770,15 +813,17 @@ static void run() {
             ++clicks;
             // 清空子树：丢掉树内对 btn 的强引用（模拟 push_replacement 重建页面）。
             col->adopt_children(std::vector<Node>{});
-            holder.reset(); // 丢掉最后一个外部强引用 → 若无 keepalive，btn 此刻即释放
+            holder.reset();  // 丢掉最后一个外部强引用 → 若无 keepalive，btn 此刻即释放
         });
-        col->add(Node{ btn });
-        btn.reset(); // 之后 btn 只由 col 子树 + holder 持有
+        col->add(Node{btn});
+        btn.reset();  // 之后 btn 只由 col 子树 + holder 持有
 
         BuildContext ctx;
         realize(*col, painter, ctx, 200, 200);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const Rect bb = col->child_nodes()[0].bounds();
-        const Point center{ .x = bb.origin.x + (bb.size.width * 0.5f), .y = bb.origin.y + (bb.size.height * 0.5f) };
+        const Point center{.x = bb.origin.x + (bb.size.width * 0.5F), .y = bb.origin.y + (bb.size.height * 0.5F)};
 
         click_at(*col, center, nullptr);
         AURORA_TEST_CHECK_MSG(clicks == 1, "suicidal on_click fired and dispatch did not crash (keepalive effective)");
@@ -794,23 +839,23 @@ static void run() {
         Column dummy_root;
         int activations = 0;
         auto leaf = std::make_shared<FocusLeaf>();
-        leaf->activate_sink = &activations;
+        leaf->activate_sink_ = &activations;
         fm.set_focus(leaf.get());
         AURORA_TEST_CHECK_MSG(fm.focused() == leaf.get(), "shared_ptr widget can gain focus normally");
         AURORA_TEST_CHECK_MSG(fm.has_focus(leaf.get()), "has_focus is true for live widget");
-        AURORA_TEST_CHECK_EQ(leaf->gained, 1);
+        AURORA_TEST_CHECK_EQ(leaf->gained_, 1);
 
         // 前置证明：控件存活时 Enter 确实走到 focused->activate() 这条虚调用路径，
         // 否则下方「回收后不再触发」会变成永远成立的假阴性。
         KeyEvent live_enter;
-        live_enter.action = KeyAction::Down;
-        live_enter.key = static_cast<int>(KeyCode::Enter);
+        live_enter.action_ = KeyAction::Down;
+        live_enter.key_ = static_cast<int>(KeyCode::Enter);
         AURORA_TEST_CHECK_MSG(EventDispatcher::dispatch(dummy_root, live_enter, fm),
                               "live focused widget activated by Enter");
         AURORA_TEST_CHECK_EQ(activations, 1);
 
         Widget *raw = leaf.get();
-        leaf.reset(); // 焦点控件被回收，FocusManager 仍留有记录
+        leaf.reset();  // 焦点控件被回收，FocusManager 仍留有记录
 
         AURORA_TEST_CHECK_MSG(fm.focused() == nullptr, "reclaimed focused widget returns nullptr via live_focused()");
         AURORA_TEST_CHECK_MSG(!fm.has_focus(raw), "has_focus is false for reclaimed widget (must not dereference)");
@@ -818,26 +863,26 @@ static void run() {
         // Enter / Space 是唯一直达虚函数 activate() 的按键路径：修复前这里会对
         // 已释放内存读 vtable。回收后必须安全返回 false 且不再计数。
         KeyEvent dead_enter;
-        dead_enter.action = KeyAction::Down;
-        dead_enter.key = static_cast<int>(KeyCode::Enter);
+        dead_enter.action_ = KeyAction::Down;
+        dead_enter.key_ = static_cast<int>(KeyCode::Enter);
         AURORA_TEST_CHECK_MSG(!EventDispatcher::dispatch(dummy_root, dead_enter, fm),
                               "reclaimed focus: Enter no longer virtual-calls activate()");
         KeyEvent dead_space;
-        dead_space.action = KeyAction::Down;
-        dead_space.key = static_cast<int>(KeyCode::Space);
+        dead_space.action_ = KeyAction::Down;
+        dead_space.key_ = static_cast<int>(KeyCode::Space);
         AURORA_TEST_CHECK_MSG(!EventDispatcher::dispatch(dummy_root, dead_space, fm),
                               "reclaimed focus: Space no longer virtual-calls activate()");
-        AURORA_TEST_CHECK_EQ(activations, 1); // 仍是存活期的那一次
+        AURORA_TEST_CHECK_EQ(activations, 1);  // 仍是存活期的那一次
 
         // 按键 / 文本派发遇到已回收焦点：安全返回 false，绝不虚调用。
         KeyEvent ke;
-        ke.action = KeyAction::Down;
-        ke.key = static_cast<int>(KeyCode::Backspace);
+        ke.action_ = KeyAction::Down;
+        ke.key_ = static_cast<int>(KeyCode::Backspace);
         AURORA_TEST_CHECK_MSG(!EventDispatcher::dispatch(dummy_root, ke, fm),
                               "key dispatch safely returns false when focus reclaimed");
 
         TextInputEvent te;
-        te.text = "x";
+        te.text_ = "x";
         AURORA_TEST_CHECK_MSG(!EventDispatcher::dispatch(dummy_root, te, fm),
                               "text dispatch safely returns false when focus reclaimed");
 
@@ -854,22 +899,24 @@ static void run() {
     // 防「只用 weak_ptr」的过度修复：栈控件恒 lock 失败会让全部事件被静默丢弃。
     {
         FocusManager fm;
-        FocusLeaf stack_leaf; // 栈对象，未被 shared_ptr 持有
+        FocusLeaf stack_leaf;  // 栈对象，未被 shared_ptr 持有
         fm.set_focus(&stack_leaf);
         AURORA_TEST_CHECK_MSG(fm.focused() == &stack_leaf, "stack widget (empty weak ref) still returned as focus");
         AURORA_TEST_CHECK_MSG(fm.has_focus(&stack_leaf), "stack widget has_focus is true");
-        AURORA_TEST_CHECK_EQ(stack_leaf.gained, 1);
+        AURORA_TEST_CHECK_EQ(stack_leaf.gained_, 1);
 
         // 栈上 Button 的点击派发不得因 guard 为空而被丢弃。
         Column col;
         auto btn = std::make_shared<Button>("stack tree");
         int clicks = 0;
         btn->set_on_click([&clicks]() -> void { ++clicks; });
-        col.add(Node{ btn });
+        col.add(Node{btn});
         BuildContext ctx;
         realize(col, painter, ctx, 200, 200);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const Rect bb = col.child_nodes()[0].bounds();
-        const Point center{ .x = bb.origin.x + (bb.size.width * 0.5f), .y = bb.origin.y + (bb.size.height * 0.5f) };
+        const Point center{.x = bb.origin.x + (bb.size.width * 0.5F), .y = bb.origin.y + (bb.size.height * 0.5F)};
         click_at(col, center, &fm);
         AURORA_TEST_CHECK_MSG(clicks == 1,
                               "stack root + shared child click still dispatched normally (not swallowed by lock)");
@@ -886,14 +933,14 @@ static void run() {
         fade.duration_seconds = 0.4;
 
         {
-            NavigatorHost host{ anim };
+            NavigatorHost host{anim};
             BuildContext ctx;
             host.mount(ctx);
-            host.push(Route{ Node{ SolidPage{ Color::red() } }, "a", fade });
-            host.push(Route{ Node{ SolidPage{ Color::blue() } }, "b", fade }); // 触发 begin_transition
+            host.push(Route{Node{SolidPage{Color::red()}}, "a", fade});
+            host.push(Route{Node{SolidPage{Color::blue()}}, "b", fade});  // 触发 begin_transition
             anim.tick(0.1);
             AURORA_TEST_CHECK_MSG(anim.has_active(), "transition in progress: Animator has active controller");
-        } // host 析构 → ~NavigatorHost 调 anim.remove(m_ctrl)
+        }  // host 析构 → ~NavigatorHost 调 anim.remove(m_ctrl)
 
         // 若未注销，下面这两次 tick 会写已释放内存（ASan 下 heap-use-after-free）。
         anim.tick(0.1);
@@ -905,9 +952,9 @@ static void run() {
     // ---- 5) Animator::remove 语义：重复注销幂等、未登记者无操作 ----
     {
         Animator anim;
-        AnimationController c{ 1.0 };
-        State target{ 0.0 };
-        anim.bind(c, Tween{ 0.0, 1.0 }, target);
+        AnimationController c{1.0};
+        State target{0.0};
+        anim.bind(c, Tween{0.0, 1.0}, target);
         c.forward(0.0);
         anim.tick(0.5);
         AURORA_TEST_CHECK_MSG(target.get() > 0.0, "tick writes target State after bind");
@@ -917,13 +964,13 @@ static void run() {
         anim.tick(0.5);
         AURORA_TEST_CHECK_MSG(target.get() == frozen, "tick no longer writes target State after remove");
 
-        anim.remove(c);                   // 重复注销幂等
-        AnimationController never{ 1.0 }; // 从未登记
+        anim.remove(c);  // 重复注销幂等
+        AnimationController never{1.0};  // 从未登记
         anim.remove(never);
         AURORA_TEST_CHECK_MSG(!anim.has_active(), "repeated/invalid remove is safe");
     }
 }
-} // namespace aurora::tests::sec_lifetime_uaf
+}  // namespace aurora::tests::sec_lifetime_uaf
 
 AURORA_TEST() {
     aurora::tests::sec_widget_defaults::run();

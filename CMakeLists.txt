@@ -245,6 +245,9 @@ include(AuroraInstrumentation)
 # ---- 安装 + find_package(Aurora) 导出（须在后端开关之后，导出宏取最终取值）----
 include(AuroraInstall)
 
+# ---- Clang-Tidy 门禁（按需 lint / lint-fix 聚合目标；须在全部目标定义之后 include）----
+include(AuroraLint)
+
 # ---- MinGW 可执行文件自包含运行期链接 ----
 # 默认 MinGW 构建的 exe 动态依赖 libgcc_s_seh-1.dll / libwinpthread-1.dll / libstdc++-6.dll。
 # 当启动环境 PATH 中混入版本不兼容的同名 DLL 时，exe 在加载期报

@@ -19,28 +19,30 @@
 #include "google_play_data.h"
 #include "google_play_ui.h"
 
+// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// try/catch 包装
 auto main() -> int {
     auto &repo = gp::repository();
     aurora::Animator anim;
-    au::Reactive dark{ false };
+    au::Reactive dark{false};
 
     auto host = std::make_shared<aurora::NavigatorHost>(anim);
     auto on_open = [&repo, host, &dark](const std::string &id) -> void {
         gp::ui::push_detail_route(host, &repo, id, [host]() -> void { (void)host->pop(); }, &dark);
     };
 
-    host->push(au::Route{ au::Node{ std::make_shared<gp::ui::AppShell>(&repo, on_open, &dark) }, "home", {} });
+    host->push(au::Route{au::Node{std::make_shared<gp::ui::AppShell>(&repo, on_open, &dark)}, "home", {}});
 
     // 帧率可视化：用框架内置 PerfOverlay 作为独立 HUD 叠加层（分层 HUD），
     // 经 Application::set_overlay 注入；它独立于 widget 树以 ~2Hz 重绘自身、不再触发整树重绘。
     // FrameStats 已由 Application::run 每帧自动 record(dt)，PerfOverlay 直接消费。
-    aurora::Scene scene{ au::Node{ host } };
+    aurora::Scene scene{au::Node{host}};
     aurora::WindowOptions opts;
-    opts.max_fps = 0; // 解除帧率上限：内部帧循环以显示器/GPU 允许的最高速率运行，滚动与动画更跟手
-    opts.size = au::Size{ .width = 1100.0f, .height = 760.0f };
+    opts.max_fps = 0;  // 解除帧率上限：内部帧循环以显示器/GPU 允许的最高速率运行，滚动与动画更跟手
+    opts.size = au::Size{.width = 1100.0F, .height = 760.0F};
     opts.title = "Google Play";
     auto win_res = create_native_window(opts);
-    aurora::Application app{ std::move(scene), win_res ? std::move(win_res.value()) : nullptr, opts };
+    aurora::Application app{std::move(scene), win_res ? std::move(win_res.value()) : nullptr, opts};
     app.set_overlay(std::make_shared<au::PerfOverlay>());
     auto last_fps_print = std::chrono::steady_clock::now();
     app.set_on_frame([&anim, &last_fps_print]() -> void {
@@ -71,18 +73,18 @@ auto main() -> int {
             au::debug::set_flags(dbg_flags);
             AURORA_LOG_RAW("demo", "debug overlay ", name, ": ", field ? "ON" : "OFF", "\n");
         };
-        app.shortcuts().add(au::KeyCombo{ au::KeyCode::F1 },
+        app.shortcuts().add(au::KeyCombo{au::KeyCode::F1},
                             [&]() -> void { toggle_flag(dbg_flags.layout_guides, "layout_guides"); });
-        app.shortcuts().add(au::KeyCombo{ au::KeyCode::F2 },
+        app.shortcuts().add(au::KeyCombo{au::KeyCode::F2},
                             [&]() -> void { toggle_flag(dbg_flags.relayout_boundaries, "relayout_boundaries"); });
-        app.shortcuts().add(au::KeyCombo{ au::KeyCode::F3 },
+        app.shortcuts().add(au::KeyCombo{au::KeyCode::F3},
                             [&]() -> void { toggle_flag(dbg_flags.layer_borders, "layer_borders"); });
-        app.shortcuts().add(au::KeyCombo{ au::KeyCode::F4 },
+        app.shortcuts().add(au::KeyCombo{au::KeyCode::F4},
                             [&]() -> void { toggle_flag(dbg_flags.repaint_highlight, "repaint_highlight"); });
-        app.shortcuts().add(au::KeyCombo{ au::KeyCode::F5 },
+        app.shortcuts().add(au::KeyCombo{au::KeyCode::F5},
                             [&]() -> void { toggle_flag(dbg_flags.overdraw, "overdraw"); });
         // 截图：软件帧缓冲（确定性）/ 真实屏幕窗口（含 OS 装饰，按后端能力）。
-        app.shortcuts().add(au::KeyCombo{ au::ModifierKey::Control, au::KeyCode::S }, [&app]() -> void {
+        app.shortcuts().add(au::KeyCombo{au::ModifierKey::Control, au::KeyCode::S}, [&app]() -> void {
             if (!app.window()) {
                 return;
             }
@@ -91,9 +93,10 @@ auto main() -> int {
                 r ? std::string("OK -> aurora_debug/google_play_framebuffer.png") : std::string(r.error().message);
             AURORA_LOG_RAW("demo", "capture(framebuffer): ", msg, "\n");
         });
+        // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange) 位掩码枚举按位组合，结果为合法组合值而非单枚举量
         constexpr auto ctrl_shift = static_cast<au::ModifierKey>(static_cast<unsigned>(au::ModifierKey::Control) |
                                                                  static_cast<unsigned>(au::ModifierKey::Shift));
-        app.shortcuts().add(au::KeyCombo{ ctrl_shift, au::KeyCode::S }, [&app]() -> void {
+        app.shortcuts().add(au::KeyCombo{ctrl_shift, au::KeyCode::S}, [&app]() -> void {
             if (!app.window()) {
                 return;
             }
@@ -103,7 +106,7 @@ auto main() -> int {
             AURORA_LOG_RAW("demo", "capture(window): ", msg, "\n");
         });
         // 运行时信息：一次性打印全部门面 JSON 到 stdout（人工触发，不刷屏）。
-        app.shortcuts().add(au::KeyCombo{ au::ModifierKey::Control, au::KeyCode::P }, [&app]() -> void {
+        app.shortcuts().add(au::KeyCombo{au::ModifierKey::Control, au::KeyCode::P}, [&app]() -> void {
             AURORA_LOG_RAW("demo", "=== runtime info (Phase 4) ===\n");
             if (app.window()) {
                 AURORA_LOG_RAW("demo", "surface_state:\n", au::debug::surface_state(app.window()->surface()).dump(2),
@@ -115,8 +118,9 @@ auto main() -> int {
             AURORA_LOG_RAW("demo", "why_trace:\n", au::debug::why_trace().dump(2), "\n");
             AURORA_LOG_RAW("demo", "diagnostics:\n", au::debug::diagnostics().dump(2), "\n");
         });
-        AURORA_LOG_RAW("demo", "DEBUG shortcuts: F1-F5 overlays | Ctrl+S framebuffer | Ctrl+Shift+S window | "
-                               "Ctrl+P runtime info\n");
+        AURORA_LOG_RAW("demo",
+                       "DEBUG shortcuts: F1-F5 overlays | Ctrl+S framebuffer | Ctrl+Shift+S window | "
+                       "Ctrl+P runtime info\n");
     }
 #endif
 

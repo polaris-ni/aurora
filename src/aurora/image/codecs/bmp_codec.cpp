@@ -13,6 +13,8 @@ class BmpCodec : public ImageCodec {
     [[nodiscard]] auto can_decode() const -> bool override { return true; }
 
     [[nodiscard]] auto sniff(std::span<const std::uint8_t> h) const -> bool override {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         return h.size() >= 2 && h[0] == 'B' && h[1] == 'M';
     }
 
@@ -22,9 +24,8 @@ class BmpCodec : public ImageCodec {
     }
 };
 
-} // namespace
+}  // namespace
 
-// NOLINTNEXTLINE(misc-use-internal-linkage): 工厂函数供 registry.cpp 跨 TU 调用，需外部链接
 auto create_bmp_codec() -> std::shared_ptr<ImageCodec> { return std::make_shared<BmpCodec>(); }
 
-} // namespace aurora::image
+}  // namespace aurora::image

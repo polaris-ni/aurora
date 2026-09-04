@@ -241,7 +241,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 ### 8.3 Scroll 离屏内容缓冲（滑窗）
 
-`Scroll` 把内容录进与滚动偏移无关的**内容坐标滑窗缓冲** `m_content`（`unique_ptr<Painter>`），尺寸 = 视口高 × (1 + 2 × `overscan`)，仅覆盖可见区上下各 `overscan` 视口高的带而非整页；`m_buffer_origin_y` 标记该带在内容坐标系中的锚点。`ScrollProps::overscan`（默认 `1.0f`，共 3 屏厚）控制缓冲带厚度。
+`Scroll` 把内容录进与滚动偏移无关的**内容坐标滑窗缓冲** `m_content`（`unique_ptr<Painter>`），尺寸 = 视口高 × (1 + 2 × `overscan`)，仅覆盖可见区上下各 `overscan` 视口高的带而非整页；`m_buffer_origin_y` 标记该带在内容坐标系中的锚点。`ScrollProps::overscan`（默认 `1.0F`，共 3 屏厚）控制缓冲带厚度。
 
 - 滚动帧满足「内容仍有效且为纯滚动且未触发重锚点」时，直接 `p.composite(*m_content, translate(0, m_buffer_origin_y - m_offset_y))` 一次 blit，不重新栅格。
 - 视口逼近缓冲带两端时把 `m_buffer_origin_y` 重锚并**重录当前缓冲带**。

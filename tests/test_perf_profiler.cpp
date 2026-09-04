@@ -10,7 +10,6 @@
 #include <string>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::FrameScope;
@@ -71,20 +70,32 @@ auto test_nesting_depth() -> void {
 
     p.begin_zone("outer");
     p.begin_zone("inner");
-    p.end_zone(); // inner 先闭合
-    p.end_zone(); // outer 后闭合
+    p.end_zone();  // inner 先闭合
+    p.end_zone();  // outer 后闭合
 
     p.end_frame();
 
     const auto &zones = p.frame_zones();
     AURORA_TEST_CHECK_MSG(zones.size() == 2, "Test2: recorded 2 zones");
     if (zones.size() == 2) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(std::string(zones[0].name) == "inner", "Test2: first entry is the first-closed inner");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(zones[0].depth == 1, "Test2: inner depth == 1");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(std::string(zones[1].name) == "outer", "Test2: second entry is the last-closed outer");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(zones[1].depth == 0, "Test2: outer depth == 0");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(zones[1].duration_ms >= zones[0].duration_ms,
                               "Test2: outer duration >= inner (containment)");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(zones[0].start_ms >= 0.0, "Test2: start_ms non-negative relative to frame start");
     }
 }
@@ -99,7 +110,7 @@ auto test_aggregate() -> void {
         p.end_zone();
     }
     p.begin_zone("layout");
-    busy_wait_ms(2.0); // 让 layout 明显比 paint 慢，验证聚合列表按总耗时降序
+    busy_wait_ms(2.0);  // 让 layout 明显比 paint 慢，验证聚合列表按总耗时降序
     p.end_zone();
 
     p.end_frame();
@@ -114,6 +125,8 @@ auto test_aggregate() -> void {
     const auto all = p.aggregates();
     AURORA_TEST_CHECK_MSG(all.size() == 2, "Test3: aggregates() returns 2 distinct names");
     if (!all.empty()) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(std::string(all[0].name) == "layout",
                               "Test3: aggregates() sorted by total time desc (layout first)");
     }
@@ -136,6 +149,8 @@ auto test_long_tasks() -> void {
     AURORA_TEST_CHECK_MSG(p.long_tasks().size() == 1,
                           "Test4: current-frame long-task count == 1 (only slow exceeds threshold)");
     if (p.long_tasks().size() == 1) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(std::string(p.long_tasks()[0].name) == "slow", "Test4: long task attributed to slow");
     }
     AURORA_TEST_CHECK_MSG(p.total_long_task_count() == 1, "Test4: cross-frame accumulation == 1");
@@ -170,7 +185,7 @@ auto test_capacity_drop() -> void {
     AURORA_TEST_CHECK_MSG(p.frame_zones().size() == 4, "Test5: sample count truncated to 4 by capacity");
     AURORA_TEST_CHECK_MSG(p.dropped_zones() == 6, "Test5: dropped_zones() == 6");
 
-    p.set_zone_capacity(Profiler::AURORA_DEFAULT_ZONE_CAPACITY); // 复位，避免污染后续用例
+    p.set_zone_capacity(Profiler::AURORA_DEFAULT_ZONE_CAPACITY);  // 复位，避免污染后续用例
 }
 
 // ---- Test 6: 配对错误检测 ----
@@ -187,7 +202,7 @@ auto test_unbalanced() -> void {
     p.reset();
     p.begin_frame();
     p.begin_zone("leaked");
-    p.end_frame(); // 未 end_zone
+    p.end_frame();  // 未 end_zone
     AURORA_TEST_CHECK_MSG(p.unbalanced_zones() == 1, "Test6b: unclosed zone at frame end counted as unbalanced");
 
     // (c) 强制复位后不跨帧传播
@@ -228,7 +243,7 @@ auto test_scoped_timer() -> void {
     Profiler &p = fresh();
     p.begin_frame();
     {
-        const ScopedTimer t{ "scoped" };
+        const ScopedTimer t{"scoped"};
         busy_wait_ms(1.0);
     }
     p.end_frame();
@@ -242,7 +257,7 @@ auto test_scoped_timer() -> void {
 auto test_frame_scope() -> void {
     Profiler &p = fresh();
     RenderCounters &c = RenderCounters::current();
-    c.draw_calls = 12345; // 故意留下上一帧的脏值
+    c.draw_calls = 12345;  // 故意留下上一帧的脏值
 
     const std::uint64_t before = p.frame_index();
     {
@@ -300,7 +315,7 @@ auto test_report_text() -> void {
     AURORA_TEST_CHECK_MSG(txt.back() != '\n', "Test11: report_text has no trailing newline (caller appends)");
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_perf_profiler ===\n");

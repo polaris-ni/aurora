@@ -30,7 +30,7 @@ enum class ImageFormat : std::uint8_t {
 
 /// @brief 解码后像素内存布局（当前 Aurora 渲染管线仅消费 RGBA8；其余为预留/未来）。
 enum class PixelFormat : std::uint8_t {
-    RGBA8 = 0, ///< 渲染管线实际消费格式，解码统一归一到此
+    RGBA8 = 0,  ///< 渲染管线实际消费格式，解码统一归一到此
     BGRA8,
     RGB8,
     ARGB8,
@@ -74,33 +74,33 @@ struct ImageSource {
 
 /// @brief 解码选项。
 struct DecodeOptions {
-    PixelFormat desired_format = PixelFormat::RGBA8; ///< 目标像素格式（当前仅 RGBA8 受支持）
-    Size max_size{};                ///< 限宽限高（任意一维为 0 表示不限制）；解码后等比缩放到不超过该尺寸
-    bool preserve_aspect = true;    ///< max_size 生效时是否保持纵横比（true=等比缩放到 fit）
-    bool premultiply_alpha = false; ///< 是否预乘 alpha（默认不预乘，与渲染管线既有约定一致）
+    PixelFormat desired_format = PixelFormat::RGBA8;  ///< 目标像素格式（当前仅 RGBA8 受支持）
+    Size max_size{};  ///< 限宽限高（任意一维为 0 表示不限制）；解码后等比缩放到不超过该尺寸
+    bool preserve_aspect = true;  ///< max_size 生效时是否保持纵横比（true=等比缩放到 fit）
+    bool premultiply_alpha = false;  ///< 是否预乘 alpha（默认不预乘，与渲染管线既有约定一致）
 };
 
 /// @brief 编码选项。
 struct EncodeOptions {
-    ImageFormat format = ImageFormat::PNG; ///< 目标容器格式
-    int quality = 90;                      ///< 有损格式质量 0–100（JPEG/WebP 有损）
-    int compression_level = 6;             ///< 无损压缩级别 0–9（PNG zlib 级别）
-    bool lossless = true;                  ///< WebP：true=无损 / false=有损(quality 生效)
-    bool preserve_alpha = true;            ///< 目标格式不支持 alpha 时是否保留（否则填不透明）
+    ImageFormat format = ImageFormat::PNG;  ///< 目标容器格式
+    int quality = 90;  ///< 有损格式质量 0–100（JPEG/WebP 有损）
+    int compression_level = 6;  ///< 无损压缩级别 0–9（PNG zlib 级别）
+    bool lossless = true;  ///< WebP：true=无损 / false=有损(quality 生效)
+    bool preserve_alpha = true;  ///< 目标格式不支持 alpha 时是否保留（否则填不透明）
 };
 
 /// @brief 动画单帧。
 struct ImageFrame {
-    std::shared_ptr<Image> image;            ///< 该帧完整画布（已合成，可直接绘制）
-    std::chrono::milliseconds duration{ 0 }; ///< 该帧持续时间
-    int blend = 0;                           ///< 合成方式（0=SRC 覆盖, 1=OVER 叠加）
-    int dispose = 0;                         ///< 帧后处理（0=无, 1=清为透明背景, 2=恢复上一帧）
+    std::shared_ptr<Image> image;  ///< 该帧完整画布（已合成，可直接绘制）
+    std::chrono::milliseconds duration{0};  ///< 该帧持续时间
+    int blend = 0;  ///< 合成方式（0=SRC 覆盖, 1=OVER 叠加）
+    int dispose = 0;  ///< 帧后处理（0=无, 1=清为透明背景, 2=恢复上一帧）
 };
 
 /// @brief 动图（GIF / 动图 WebP / APNG 的多帧序列）。
 struct AnimatedImage {
     std::vector<ImageFrame> frames;
-    int loop_count = 0; ///< 0 表示无限循环
+    int loop_count = 0;  ///< 0 表示无限循环
     int width = 0;
     int height = 0;
 };
@@ -146,10 +146,10 @@ class ImageCodec {
         AnimatedImage anim;
         anim.width = img.value().width;
         anim.height = img.value().height;
-        anim.frames.emplace_back(ImageFrame{ .image = std::make_shared<Image>(std::move(img.value())),
-                                             .duration = std::chrono::milliseconds(0),
-                                             .blend = 0,
-                                             .dispose = 0 });
+        anim.frames.emplace_back(ImageFrame{.image = std::make_shared<Image>(std::move(img.value())),
+                                            .duration = std::chrono::milliseconds(0),
+                                            .blend = 0,
+                                            .dispose = 0});
         return anim;
     }
 
@@ -203,7 +203,7 @@ class ImageCodecRegistry {
   private:
     ImageCodecRegistry();
     struct Impl;
-    std::shared_ptr<Impl> m_impl;
+    std::shared_ptr<Impl> impl_;
 };
 
 /// @name 高层便捷自由函数（等价调用注册表单例）
@@ -219,4 +219,4 @@ class ImageCodecRegistry {
 [[nodiscard]] auto decode_async(const ImageSource &src, const DecodeOptions &opt = {}) -> std::future<Result<Image>>;
 /// @}
 
-} // namespace aurora::image
+}  // namespace aurora::image

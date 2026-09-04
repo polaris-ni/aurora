@@ -37,12 +37,12 @@ inline auto registry_effects() -> std::vector<EffectRegEntry> & {
 }
 
 inline auto register_state(StateBase &s, const AnchorPtr &a) -> void {
-    registry_states().push_back({ .raw = &s, .anchor = a });
+    registry_states().push_back({.raw = &s, .anchor = a});
 }
 inline auto register_effect(Effect &e, const AnchorPtr &a) -> void {
-    registry_effects().push_back({ .raw = &e, .anchor = a });
+    registry_effects().push_back({.raw = &e, .anchor = a});
 }
 
-} // namespace detail
+}  // namespace detail
 
-} // namespace aurora
+}  // namespace aurora

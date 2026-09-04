@@ -72,7 +72,7 @@ auto push_face(const std::string &family, const std::shared_ptr<FontFace> &ff) -
 }
 
 auto register_system_fallbacks() -> void;
-} // namespace
+}  // namespace
 
 auto init_font_discovery() -> void {
     if (g_initialized) {
@@ -85,7 +85,7 @@ auto init_font_discovery() -> void {
     // 内嵌 Noto Sans（OFL）作为全平台确定性默认字体（latin）。
     const auto noto_data = noto_sans_ttf();
     std::vector<std::uint8_t> noto(noto_data.begin(), noto_data.end());
-    auto nf = make_face_from_memory(std::move(noto));
+    const auto nf = make_face_from_memory(std::move(noto));
     if (nf) {
         // 同一 FT_Face 挂到多个逻辑名构成默认链。
         g_registry[""].push_back(nf);
@@ -205,13 +205,13 @@ auto register_system_fallbacks() -> void {
     struct SysFont {
         const char *file;
     };
-    constexpr std::array<const char *, 2> roots = { "C:\\Windows\\Fonts", nullptr };
+    constexpr std::array<const char *, 2> roots = {"C:\\Windows\\Fonts", nullptr};
     constexpr std::array candidates = {
-        SysFont{ "segoeui.ttf" },                            // 拉丁回退
-        SysFont{ "arial.ttf" },   SysFont{ "msyh.ttc" },     // 中日韩（微软雅黑）
-        SysFont{ "msyh.ttf" },    SysFont{ "simsun.ttc" },   // 中文（宋体）
-        SysFont{ "simsun.ttf" },  SysFont{ "MSGOTHIC.TTC" }, // 日文
-        SysFont{ "malgun.ttf" },                             // 韩文（微软雅黑韩文）
+        SysFont{"segoeui.ttf"},  // 拉丁回退
+        SysFont{"arial.ttf"},   SysFont{"msyh.ttc"},  // 中日韩（微软雅黑）
+        SysFont{"msyh.ttf"},    SysFont{"simsun.ttc"},  // 中文（宋体）
+        SysFont{"simsun.ttf"},  SysFont{"MSGOTHIC.TTC"},  // 日文
+        SysFont{"malgun.ttf"},  // 韩文（微软雅黑韩文）
     };
     for (const char *root : roots) {
         if (root == nullptr) {
@@ -231,15 +231,15 @@ auto register_system_fallbacks() -> void {
     // 不依赖 fontconfig：直接探测候选文件，保持零三方依赖与确定性。
     const std::array<const char *, 11> candidates = {
         // 拉丁回退
-        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",                 // Fedora
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",                   // Debian/Ubuntu
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",                               // Arch
-        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf", // Fedora
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",   // Debian/Ubuntu
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",  // Fedora
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  // Debian/Ubuntu
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",  // Arch
+        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",  // Fedora
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  // Debian/Ubuntu
         // 中日韩（Noto CJK / 文泉驿）
-        "/usr/share/fonts/google-noto-sans-cjk-fonts/NotoSansCJK-Regular.ttc", // Fedora
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",              // Debian/Ubuntu
-        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",                   // Arch
+        "/usr/share/fonts/google-noto-sans-cjk-fonts/NotoSansCJK-Regular.ttc",  // Fedora
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  // Debian/Ubuntu
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",  // Arch
         "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
     };
@@ -254,6 +254,6 @@ auto register_system_fallbacks() -> void {
 #endif
 }
 
-} // namespace
+}  // namespace
 
-} // namespace aurora::render
+}  // namespace aurora::render

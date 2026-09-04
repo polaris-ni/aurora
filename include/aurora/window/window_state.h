@@ -19,16 +19,19 @@ namespace aurora {
  */
 enum class WindowState : std::uint8_t {
     Visible,  ///< 前台激活且可见
-    Occluded, ///< 可见但失焦（被其他窗口遮挡 / 非激活窗口）
-    Hidden,   ///< 最小化或不可见
+    Occluded,  ///< 可见但失焦（被其他窗口遮挡 / 非激活窗口）
+    Hidden,  ///< 最小化或不可见
 };
 
 /// @brief 人类可读名（调试/序列化用）。
 [[nodiscard]] inline auto to_string(WindowState s) -> std::string {
     switch (s) {
-    case WindowState::Visible: return "Visible";
-    case WindowState::Occluded: return "Occluded";
-    case WindowState::Hidden: return "Hidden";
+        case WindowState::Visible:
+            return "Visible";
+        case WindowState::Occluded:
+            return "Occluded";
+        case WindowState::Hidden:
+            return "Hidden";
     }
     return "Visible";
 }
@@ -41,19 +44,23 @@ enum class WindowState : std::uint8_t {
  * `SIZE_MAXIMIZED`、WPF 的 `WindowState.Maximized` 均将其作为独立窗口状态。
  */
 enum class WindowMode : std::uint8_t {
-    Normal,     ///< 普通窗口
+    Normal,  ///< 普通窗口
     Maximized,  ///< 最大化
     Minimized,  ///< 最小化（同时使 WindowState=Hidden）
-    FullScreen, ///< 全屏
+    FullScreen,  ///< 全屏
 };
 
 /// @brief 人类可读名（调试/序列化用）。
 [[nodiscard]] inline auto to_string(WindowMode m) -> std::string {
     switch (m) {
-    case WindowMode::Normal: return "Normal";
-    case WindowMode::Maximized: return "Maximized";
-    case WindowMode::Minimized: return "Minimized";
-    case WindowMode::FullScreen: return "FullScreen";
+        case WindowMode::Normal:
+            return "Normal";
+        case WindowMode::Maximized:
+            return "Maximized";
+        case WindowMode::Minimized:
+            return "Minimized";
+        case WindowMode::FullScreen:
+            return "FullScreen";
     }
     return "Normal";
 }
@@ -83,4 +90,4 @@ enum class WindowMode : std::uint8_t {
     return WindowMode::Normal;
 }
 
-} // namespace aurora
+}  // namespace aurora

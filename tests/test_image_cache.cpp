@@ -2,7 +2,6 @@
 #include <cstdio>
 
 #include "aurora/render/image_cache.h"
-
 #include "test_harness.h"
 
 using aurora::Image;
@@ -19,7 +18,7 @@ auto make_image(int w, int h) -> Image {
     return img;
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     // ---- 1. put/contains/count ----
@@ -27,7 +26,7 @@ AURORA_TEST() {
         ImageCache cache;
         AURORA_TEST_CHECK(cache.count() == 0);
 
-        cache.put("a.png", make_image(10, 10)); // 400B
+        cache.put("a.png", make_image(10, 10));  // 400B
         AURORA_TEST_CHECK(cache.contains("a.png"));
         AURORA_TEST_CHECK(cache.count() == 1);
         AURORA_TEST_CHECK(cache.current_bytes() == 400);
@@ -56,8 +55,8 @@ AURORA_TEST() {
     // ---- 4. 覆盖同 key 不重复计数 ----
     {
         ImageCache cache;
-        cache.put("c.png", make_image(10, 10)); // 400B
-        cache.put("c.png", make_image(20, 20)); // 1600B 覆盖
+        cache.put("c.png", make_image(10, 10));  // 400B
+        cache.put("c.png", make_image(20, 20));  // 1600B 覆盖
         AURORA_TEST_CHECK(cache.count() == 1);
         AURORA_TEST_CHECK(cache.current_bytes() == 1600);
     }
@@ -65,13 +64,13 @@ AURORA_TEST() {
     // ---- 5. LRU 淘汰：超限时最久未用先出 ----
     {
         ImageCache cache;
-        cache.set_max_bytes(1000);           // 上限 1000B
-        cache.put("x1", make_image(10, 10)); // 400B
-        cache.put("x2", make_image(10, 10)); // 400B（共 800）
+        cache.set_max_bytes(1000);  // 上限 1000B
+        cache.put("x1", make_image(10, 10));  // 400B
+        cache.put("x2", make_image(10, 10));  // 400B（共 800）
         // 访问 x1 提升为最近使用
         (void)cache.get("x1");
         // 放入 x3 超限：淘汰最久未用的 x2
-        cache.put("x3", make_image(10, 10)); // 400B（共 1200 > 1000）
+        cache.put("x3", make_image(10, 10));  // 400B（共 1200 > 1000）
         AURORA_TEST_CHECK(cache.contains("x1"));
         AURORA_TEST_CHECK(!cache.contains("x2"));
         AURORA_TEST_CHECK(cache.contains("x3"));
@@ -82,7 +81,7 @@ AURORA_TEST() {
     {
         ImageCache cache;
         cache.set_max_bytes(100);
-        cache.put("big", make_image(50, 50)); // 10000B > 100
+        cache.put("big", make_image(50, 50));  // 10000B > 100
         AURORA_TEST_CHECK(!cache.contains("big"));
         AURORA_TEST_CHECK(cache.current_bytes() == 0);
     }
@@ -94,9 +93,9 @@ AURORA_TEST() {
         cache.put("y2", make_image(10, 10));
         AURORA_TEST_CHECK(cache.count() == 2);
 
-        cache.set_max_bytes(500); // 只容得下 1 张
+        cache.set_max_bytes(500);  // 只容得下 1 张
         AURORA_TEST_CHECK(cache.count() == 1);
-        AURORA_TEST_CHECK(!cache.contains("y1")); // 最久未用先出
+        AURORA_TEST_CHECK(!cache.contains("y1"));  // 最久未用先出
         AURORA_TEST_CHECK(cache.contains("y2"));
     }
 

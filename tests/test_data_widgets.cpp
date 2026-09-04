@@ -5,7 +5,6 @@
 #include <memory>
 
 #include "aurora/widget/data_widgets.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -24,20 +23,21 @@ using aurora::TreeView;
 
 namespace {
 
-template<typename W> auto layout_widget(std::shared_ptr<W> &w) -> void {
+template <typename W>
+auto layout_widget(std::shared_ptr<W> &w) -> void {
     BuildContext ctx;
     w->mount(ctx);
     Constraints c;
-    c.min = Size{ .width = 0.0f, .height = 0.0f };
-    c.max = Size{ .width = 400.0f, .height = 600.0f };
+    c.min = Size{.width = 0.0F, .height = 0.0F};
+    c.max = Size{.width = 400.0F, .height = 600.0F};
     w->layout(c, ctx);
 }
 
 auto make_table() -> std::shared_ptr<DataTable> {
     std::vector<DataColumn> cols;
-    cols.push_back(DataColumn{ .label = "Name", .width = 120.0f, .sortable = true });
-    cols.push_back(DataColumn{ .label = "Age", .width = 60.0f, .sortable = false });
-    std::vector<std::vector<std::string>> rows = { { "Alice", "30" }, { "Bob", "25" }, { "Carol", "35" } };
+    cols.push_back(DataColumn{.label = "Name", .width = 120.0F, .sortable = true});
+    cols.push_back(DataColumn{.label = "Age", .width = 60.0F, .sortable = false});
+    std::vector<std::vector<std::string>> rows = {{"Alice", "30"}, {"Bob", "25"}, {"Carol", "35"}};
     return std::make_shared<DataTable>(std::move(cols), std::move(rows));
 }
 
@@ -47,17 +47,17 @@ auto make_tree() -> std::shared_ptr<TreeView> {
     root.expanded = true;
     TreeItem sub;
     sub.label = "widgets";
-    sub.children.push_back(TreeItem{ .label = "button.h" });
-    sub.children.push_back(TreeItem{ .label = "text.h" });
+    sub.children.push_back(TreeItem{.label = "button.h"});
+    sub.children.push_back(TreeItem{.label = "text.h"});
     root.children.push_back(sub);
-    root.children.push_back(TreeItem{ .label = "main.cpp" });
+    root.children.push_back(TreeItem{.label = "main.cpp"});
     std::vector<TreeItem> roots;
     roots.push_back(std::move(root));
-    roots.push_back(TreeItem{ .label = "README" });
+    roots.push_back(TreeItem{.label = "README"});
     return std::make_shared<TreeView>(std::move(roots));
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     // ==================== DataTable ====================
@@ -83,10 +83,10 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(dt->selected_row_index() == 1);
         AURORA_TEST_CHECK(selected == 1);
 
-        dt->select_row(99); // 越界忽略
+        dt->select_row(99);  // 越界忽略
         AURORA_TEST_CHECK(dt->selected_row_index() == 1);
 
-        dt->select_row(-1); // 取消选中
+        dt->select_row(-1);  // 取消选中
         AURORA_TEST_CHECK(dt->selected_row_index() == -1);
     }
 
@@ -100,11 +100,11 @@ AURORA_TEST() {
             sort_ord = o;
         });
 
-        dt->sort_by(0); // Asc
+        dt->sort_by(0);  // Asc
         AURORA_TEST_CHECK(sort_col == 0 && sort_ord == SortOrder::Ascending);
-        dt->sort_by(0); // Desc
+        dt->sort_by(0);  // Desc
         AURORA_TEST_CHECK(sort_ord == SortOrder::Descending);
-        dt->sort_by(0); // Asc
+        dt->sort_by(0);  // Asc
         AURORA_TEST_CHECK(sort_ord == SortOrder::Ascending);
 
         // Age 列不可排序
@@ -118,9 +118,9 @@ AURORA_TEST() {
     {
         auto dt = make_table();
         dt->select_row(2);
-        dt->set_rows({ { "OnlyOne", "1" } });
+        dt->set_rows({{"OnlyOne", "1"}});
         AURORA_TEST_CHECK(dt->row_count() == 1);
-        AURORA_TEST_CHECK(dt->selected_row_index() == -1); // 越界重置
+        AURORA_TEST_CHECK(dt->selected_row_index() == -1);  // 越界重置
     }
 
     // ---- 5. 点击交互：表头排序 + 行选中（表头高 32，行高 28）----
@@ -131,14 +131,14 @@ AURORA_TEST() {
         // 点第一列表头（可排序）
         MouseEvent e1;
         e1.action = MouseAction::Press;
-        e1.local_position = Point{ .x = 50.0f, .y = 16.0f };
+        e1.local_position = Point{.x = 50.0F, .y = 16.0F};
         dt->on_pointer_event(e1);
         AURORA_TEST_CHECK(dt->sort_column() == 0);
 
         // 点第二行数据
         MouseEvent e2;
         e2.action = MouseAction::Press;
-        e2.local_position = Point{ .x = 50.0f, .y = 32.0f + 28.0f + 14.0f };
+        e2.local_position = Point{.x = 50.0F, .y = 32.0F + 28.0F + 14.0F};
         dt->on_pointer_event(e2);
         AURORA_TEST_CHECK(dt->selected_row_index() == 1);
     }
@@ -163,7 +163,7 @@ AURORA_TEST() {
         bool toggled_state = false;
         tv->set_on_toggle([&](int, bool open) -> void { toggled_state = open; });
 
-        tv->toggle(1); // 展开 widgets
+        tv->toggle(1);  // 展开 widgets
         AURORA_TEST_CHECK(toggled_state);
         AURORA_TEST_CHECK(tv->visible_count() == 6);
         AURORA_TEST_CHECK(tv->visible_label(2) == "button.h");
@@ -196,12 +196,12 @@ AURORA_TEST() {
 
     // ---- 9. 单选模式 ----
     {
-        auto lv = std::make_shared<ListView>(std::vector<std::string>{ "A", "B", "C" });
+        auto lv = std::make_shared<ListView>(std::vector<std::string>{"A", "B", "C"});
         AURORA_TEST_CHECK(lv->item_count() == 3);
 
         lv->select(1);
         AURORA_TEST_CHECK(lv->is_selected(1));
-        lv->select(2); // 单选替换
+        lv->select(2);  // 单选替换
         AURORA_TEST_CHECK(!lv->is_selected(1));
         AURORA_TEST_CHECK(lv->is_selected(2));
         AURORA_TEST_CHECK(lv->selection().size() == 1);
@@ -209,13 +209,13 @@ AURORA_TEST() {
 
     // ---- 10. 多选切换 ----
     {
-        auto lv = std::make_shared<ListView>(std::vector<std::string>{ "A", "B", "C" }, true);
+        auto lv = std::make_shared<ListView>(std::vector<std::string>{"A", "B", "C"}, true);
         lv->select(0);
         lv->select(2);
         AURORA_TEST_CHECK(lv->selection().size() == 2);
         AURORA_TEST_CHECK(lv->is_selected(0) && lv->is_selected(2));
 
-        lv->select(0); // 再点取消
+        lv->select(0);  // 再点取消
         AURORA_TEST_CHECK(!lv->is_selected(0));
         AURORA_TEST_CHECK(lv->selection().size() == 1);
 
@@ -225,17 +225,19 @@ AURORA_TEST() {
 
     // ---- 11. 删除行修正选中 ----
     {
-        auto lv = std::make_shared<ListView>(std::vector<std::string>{ "A", "B", "C", "D" }, true);
+        auto lv = std::make_shared<ListView>(std::vector<std::string>{"A", "B", "C", "D"}, true);
         lv->select(1);
         lv->select(3);
         int removed = -1;
         lv->set_on_remove([&removed](int r) -> void { removed = r; });
 
-        lv->remove(1); // 删除 B：选中 {1,3} → {2}（D 前移）
+        lv->remove(1);  // 删除 B：选中 {1,3} → {2}（D 前移）
         AURORA_TEST_CHECK(removed == 1);
         AURORA_TEST_CHECK(lv->item_count() == 3);
         AURORA_TEST_CHECK(lv->item(1) == "C");
         AURORA_TEST_CHECK(lv->selection().size() == 1);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(lv->selection()[0] == 2);
 
         lv->append("E");
@@ -244,12 +246,12 @@ AURORA_TEST() {
 
     // ---- 12. 点击选中 + 渲染 + 序列化 ----
     {
-        auto lv = std::make_shared<ListView>(std::vector<std::string>{ "X", "Y" });
+        auto lv = std::make_shared<ListView>(std::vector<std::string>{"X", "Y"});
         layout_widget(lv);
 
         MouseEvent e;
         e.action = MouseAction::Press;
-        e.local_position = Point{ .x = 20.0f, .y = 26.0f + 13.0f }; // 第二行
+        e.local_position = Point{.x = 20.0F, .y = 26.0F + 13.0F};  // 第二行
         lv->on_pointer_event(e);
         AURORA_TEST_CHECK(lv->is_selected(1));
 
@@ -260,18 +262,17 @@ AURORA_TEST() {
         auto tv = make_tree();
         layout_widget(dt);
         layout_widget(tv);
-        dt->paint(p, Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = Size{ .width = 180.0f, .height = 120.0f } },
+        dt->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 180.0F, .height = 120.0F}}, ctx);
+        tv->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 130.0F}, .size = Size{.width = 200.0F, .height = 110.0F}},
                   ctx);
-        tv->paint(p,
-                  Rect{ .origin = Point{ .x = 0.0f, .y = 130.0f }, .size = Size{ .width = 200.0f, .height = 110.0f } },
-                  ctx);
-        lv->paint(p,
-                  Rect{ .origin = Point{ .x = 0.0f, .y = 250.0f }, .size = Size{ .width = 200.0f, .height = 52.0f } },
+        lv->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 250.0F}, .size = Size{.width = 200.0F, .height = 52.0F}},
                   ctx);
         AURORA_TEST_CHECK(p.width() == 400);
 
         aurora::Json props;
         lv->serialize_props(props);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["items"].size() == 2);
 
         auto lv2 = std::make_shared<ListView>();

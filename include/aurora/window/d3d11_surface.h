@@ -5,6 +5,7 @@
 #ifdef AURORA_BACKEND_D3D11
 
 #include <d3d11.h>
+
 #include <memory>
 #include <string>
 
@@ -36,52 +37,52 @@ class D3D11Surface : public Surface {
     auto operator=(D3D11Surface &&) -> D3D11Surface & = delete;
 
     [[nodiscard]] auto begin_frame(int width, int height) -> Result<bool> override;
-    [[nodiscard]] auto painter() -> Painter & override { return m_painter; }
+    [[nodiscard]] auto painter() -> Painter & override { return painter_; }
     [[nodiscard]] auto present() -> Result<bool> override;
-    [[nodiscard]] auto size() const -> Size override { return m_win->size(); }
-    [[nodiscard]] auto scale_factor() const -> float override { return m_win->scale_factor(); }
-    [[nodiscard]] auto should_close() const -> bool override { return m_win->should_close(); }
+    [[nodiscard]] auto size() const -> Size override { return win_->size(); }
+    [[nodiscard]] auto scale_factor() const -> float override { return win_->scale_factor(); }
+    [[nodiscard]] auto should_close() const -> bool override { return win_->should_close(); }
 
     auto poll_platform_events() -> void override;
-    auto set_event_handler(const EventHandler &h) -> void override { m_win->set_event_handler(h); }
+    auto set_event_handler(const EventHandler &h) -> void override { win_->set_event_handler(h); }
     auto set_window_state_handler(WindowStateHandler h) -> void override {
-        m_win->set_window_state_handler(std::move(h));
+        win_->set_window_state_handler(std::move(h));
     }
-    auto set_window_mode_handler(WindowModeHandler h) -> void override { m_win->set_window_mode_handler(std::move(h)); }
+    auto set_window_mode_handler(WindowModeHandler h) -> void override { win_->set_window_mode_handler(std::move(h)); }
     auto set_present_request(PresentRequest h) -> void override {
-        m_present_request = h; // 本地留存：device-lost 恢复后触发全量重渲染
-        m_win->set_present_request(std::move(h));
+        present_request_ = h;  // 本地留存：device-lost 恢复后触发全量重渲染
+        win_->set_present_request(std::move(h));
     }
     /// @brief 阻塞等待消息或超时（转发共享宿主）。
-    auto wait_events(double timeout_ms) -> void override { m_win->wait_events(timeout_ms); }
+    auto wait_events(double timeout_ms) -> void override { win_->wait_events(timeout_ms); }
     /// @brief 跨线程唤醒主循环（转发共享宿主；PostMessage 线程安全）。
-    auto request_wake() -> void override { m_win->request_wake(); }
+    auto request_wake() -> void override { win_->request_wake(); }
     /// @brief vsync 开启且设备可用时，`Present(1,0)` 阻塞到 vblank 自带帧节拍；
     /// 帧调度据此在活跃帧跳过 CPU 端 sleep 节流，避免双重限速。
-    [[nodiscard]] auto paces_frames() const -> bool override { return m_ok && m_vsync; }
+    [[nodiscard]] auto paces_frames() const -> bool override { return ok_ && vsync_; }
     /// @brief 启用/关闭垂直同步（默认开；关闭后 `Present(0,0)` 不等 vblank，交还 CPU 节流）。
-    auto set_vsync(bool on) -> void { m_vsync = on; }
-    [[nodiscard]] auto vsync() const -> bool { return m_vsync; }
+    auto set_vsync(bool on) -> void { vsync_ = on; }
+    [[nodiscard]] auto vsync() const -> bool { return vsync_; }
     /// @brief 运行时更新窗口标题（转发给共享宿主）。
-    auto set_title(const std::string &title) -> void override { m_win->set_title(title); }
+    auto set_title(const std::string &title) -> void override { win_->set_title(title); }
 
     /// @brief 接收本帧脏矩形（设备坐标）；present 时仅增量上传这些区域，空向量 = 全量上传。
-    auto set_present_dirty(const std::vector<Rect> &device_rects) -> void override { m_dirty = device_rects; }
+    auto set_present_dirty(const std::vector<Rect> &device_rects) -> void override { dirty_ = device_rects; }
 
-    [[nodiscard]] auto data() const -> const std::uint8_t * override { return m_painter.data(); }
+    [[nodiscard]] auto data() const -> const std::uint8_t * override { return painter_.data(); }
     /// @brief 帧缓冲物理像素尺寸：D3D11 painter 按 DPI 物理分辨率（m_dev_w/m_dev_h = 逻辑×scale）分配，
     /// 故返回 painter 缓冲像素尺寸，而非逻辑 `size()`（缩放比≠1 时避免 PNG 宽高与像素数据错位）。
     [[nodiscard]] auto framebuffer_size() const -> Size override {
-        return Size{ .width = static_cast<float>(m_painter.width()), .height = static_cast<float>(m_painter.height()) };
+        return Size{.width = static_cast<float>(painter_.width()), .height = static_cast<float>(painter_.height())};
     }
-    [[nodiscard]] auto frame_count() const -> int override { return m_frame; }
+    [[nodiscard]] auto frame_count() const -> int override { return frame_; }
     /// @brief 设备是否可用（无适配器时为 false，测试应跳过）。
-    [[nodiscard]] auto is_available() const -> bool { return m_ok; }
+    [[nodiscard]] auto is_available() const -> bool { return ok_; }
     /// @brief 测试 seam：模拟 device-lost（置不可用 + 重建标志），
     /// 下次 `poll_platform_events` 走恢复路径（重建设备 + 全量重渲染）。
     auto simulate_device_lost() -> void {
-        m_ok = false;
-        m_need_reinit = true;
+        ok_ = false;
+        need_reinit_ = true;
     }
 
   private:
@@ -95,32 +96,32 @@ class D3D11Surface : public Surface {
     /// 中执行（present_root 外，避开重入护栏）。
     auto try_recover_device() -> void;
 
-    std::unique_ptr<Win32Window> m_win; ///< 共享窗口宿主
-    Painter m_painter;                  ///< CPU 帧缓冲（RGBA8，绘制目标）
+    std::unique_ptr<Win32Window> win_;  ///< 共享窗口宿主
+    Painter painter_;  ///< CPU 帧缓冲（RGBA8，绘制目标）
 
-    ID3D11Device *m_device = nullptr;
-    ID3D11DeviceContext *m_ctx = nullptr;
+    ID3D11Device *device_ = nullptr;
+    ID3D11DeviceContext *ctx_ = nullptr;
     // 由 D3D11CreateDeviceAndSwapChain 创建，返回的是 IDXGISwapChain（非 1 版本）接口；
     // 本类只用到其 GetBuffer/Present 等 IDXGISwapChain 方法，故按该类型持有，避免向下转换。
-    IDXGISwapChain *m_swap = nullptr;
-    ID3D11Texture2D *m_rt = nullptr;
-    ID3D11RenderTargetView *m_rtv = nullptr;
-    ID3D11Texture2D *m_src = nullptr; ///< 源纹理（CPU 上传目标，与 painter 同尺寸）
-    ID3D11ShaderResourceView *m_src_srv = nullptr;
-    ID3D11VertexShader *m_vs = nullptr;
-    ID3D11PixelShader *m_ps = nullptr;
-    ID3D11SamplerState *m_samp = nullptr;
-    ID3D11InputLayout *m_layout = nullptr;
-    ID3D11BlendState *m_bs = nullptr;
+    IDXGISwapChain *swap_ = nullptr;
+    ID3D11Texture2D *rt_ = nullptr;
+    ID3D11RenderTargetView *rtv_ = nullptr;
+    ID3D11Texture2D *src_ = nullptr;  ///< 源纹理（CPU 上传目标，与 painter 同尺寸）
+    ID3D11ShaderResourceView *src_srv_ = nullptr;
+    ID3D11VertexShader *vs_ = nullptr;
+    ID3D11PixelShader *ps_ = nullptr;
+    ID3D11SamplerState *samp_ = nullptr;
+    ID3D11InputLayout *layout_ = nullptr;
+    ID3D11BlendState *bs_ = nullptr;
 
-    std::vector<Rect> m_dirty; ///< 本帧脏矩形（设备坐标），present 时消费。
-    int m_dev_w = 0, m_dev_h = 0;
-    int m_frame = 0;
-    bool m_ok = false;          ///< 设备初始化是否成功（失败则 present 直接报错，便于测试跳过）。
-    bool m_vsync = true;        ///< 垂直同步（Present 第一参数 1/0）。
-    bool m_need_reinit = false; ///< device-lost 后置位；下次 poll 时重建。
+    std::vector<Rect> dirty_;  ///< 本帧脏矩形（设备坐标），present 时消费。
+    int dev_w_ = 0, dev_h_ = 0;
+    int frame_ = 0;
+    bool ok_ = false;  ///< 设备初始化是否成功（失败则 present 直接报错，便于测试跳过）。
+    bool vsync_ = true;  ///< 垂直同步（Present 第一参数 1/0）。
+    bool need_reinit_ = false;  ///< device-lost 后置位；下次 poll 时重建。
 };
 
-} // namespace aurora
+}  // namespace aurora
 
-#endif // AURORA_BACKEND_D3D11
+#endif  // AURORA_BACKEND_D3D11

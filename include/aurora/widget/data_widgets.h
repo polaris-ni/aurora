@@ -15,9 +15,9 @@ namespace aurora {
 
 /// @brief 表格列描述。
 struct DataColumn {
-    std::string label;     ///< 表头文本
-    float width = 100.0f;  ///< 列宽(dp)
-    bool sortable = false; ///< 是否可点击表头排序
+    std::string label;  ///< 表头文本
+    float width = 100.0F;  ///< 列宽(dp)
+    bool sortable = false;  ///< 是否可点击表头排序
 };
 
 /// @brief 排序方向。
@@ -37,7 +37,7 @@ class DataTable : public Widget {
   public:
     DataTable() = default;
     DataTable(std::vector<DataColumn> columns, std::vector<std::vector<std::string>> rows)
-        : m_columns(std::move(columns)), m_rows(std::move(rows)) {}
+        : columns_(std::move(columns)), rows_(std::move(rows)) {}
 
     [[nodiscard]] auto type_name() const -> const char * override { return "DataTable"; }
 
@@ -45,28 +45,28 @@ class DataTable : public Widget {
 
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&m_selected_row); }
+    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_row_); }
 
-    [[nodiscard]] auto column_count() const -> std::size_t { return m_columns.size(); }
-    [[nodiscard]] auto row_count() const -> std::size_t { return m_rows.size(); }
-    [[nodiscard]] auto selected_row() -> State<int> & { return m_selected_row; }
-    [[nodiscard]] auto selected_row_index() const -> int { return m_selected_row.get(); }
-    [[nodiscard]] auto sort_column() const -> int { return m_sort_column; }
-    [[nodiscard]] auto sort_order() const -> SortOrder { return m_sort_order; }
+    [[nodiscard]] auto column_count() const -> std::size_t { return columns_.size(); }
+    [[nodiscard]] auto row_count() const -> std::size_t { return rows_.size(); }
+    [[nodiscard]] auto selected_row() -> State<int> & { return selected_row_; }
+    [[nodiscard]] auto selected_row_index() const -> int { return selected_row_.get(); }
+    [[nodiscard]] auto sort_column() const -> int { return sort_column_; }
+    [[nodiscard]] auto sort_order() const -> SortOrder { return sort_order_; }
 
     /// @brief 单元格文本（越界返回空串）。
     [[nodiscard]] auto cell(std::size_t row, std::size_t col) const -> std::string {
-        if (row >= m_rows.size() || col >= m_rows[row].size()) {
+        if (row >= rows_.size() || col >= rows_[row].size()) {
             return {};
         }
-        return m_rows[row][col];
+        return rows_[row][col];
     }
 
     /// @brief 替换行数据（排序回填/数据刷新）。
     auto set_rows(std::vector<std::vector<std::string>> rows) -> void {
-        m_rows = std::move(rows);
-        if (std::cmp_greater_equal(m_selected_row.get(), m_rows.size())) {
-            m_selected_row.set(-1);
+        rows_ = std::move(rows);
+        if (std::cmp_greater_equal(selected_row_.get(), rows_.size())) {
+            selected_row_.set(-1);
         }
         mark_needs_layout();
         mark_needs_paint();
@@ -74,41 +74,41 @@ class DataTable : public Widget {
 
     /// @brief 选中行（-1 取消选中；越界忽略）。
     auto select_row(int row) -> void {
-        if (row >= -1 && std::cmp_less(row, m_rows.size()) && row != m_selected_row.get()) {
-            m_selected_row.set(row);
+        if (row >= -1 && std::cmp_less(row, rows_.size()) && row != selected_row_.get()) {
+            selected_row_.set(row);
             mark_needs_paint();
-            if (m_on_select) {
-                m_on_select(row);
+            if (on_select_) {
+                on_select_(row);
             }
         }
     }
 
     /// @brief 点击表头排序：同列循环 Asc→Desc→Asc；换列重置 Asc。
     auto sort_by(int col) -> void {
-        if (col < 0 || std::cmp_greater_equal(col, m_columns.size())) {
+        if (col < 0 || std::cmp_greater_equal(col, columns_.size())) {
             return;
         }
-        if (!m_columns[static_cast<std::size_t>(col)].sortable) {
+        if (!columns_[static_cast<std::size_t>(col)].sortable) {
             return;
         }
-        if (m_sort_column == col) {
-            m_sort_order = m_sort_order == SortOrder::Ascending ? SortOrder::Descending : SortOrder::Ascending;
+        if (sort_column_ == col) {
+            sort_order_ = sort_order_ == SortOrder::Ascending ? SortOrder::Descending : SortOrder::Ascending;
         } else {
-            m_sort_column = col;
-            m_sort_order = SortOrder::Ascending;
+            sort_column_ = col;
+            sort_order_ = SortOrder::Ascending;
         }
         mark_needs_paint();
-        if (m_on_sort) {
-            m_on_sort(col, m_sort_order);
+        if (on_sort_) {
+            on_sort_(col, sort_order_);
         }
     }
 
     auto set_on_sort(std::function<void(int, SortOrder)> cb) -> DataTable & {
-        m_on_sort = std::move(cb);
+        on_sort_ = std::move(cb);
         return *this;
     }
     auto set_on_select(std::function<void(int)> cb) -> DataTable & {
-        m_on_select = std::move(cb);
+        on_select_ = std::move(cb);
         return *this;
     }
 
@@ -124,20 +124,20 @@ class DataTable : public Widget {
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override;
 
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext & /*ctx*/) -> Widget * override {
-        return Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = bounds.size }.contains(local) ? this : nullptr;
+        return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local) ? this : nullptr;
     }
 
   private:
-    static constexpr float m_aurora_header_height = 32.0f;
-    static constexpr float m_aurora_row_height = 28.0f;
+    static constexpr float AURORA_HEADER_HEIGHT = 32.0F;
+    static constexpr float AURORA_ROW_HEIGHT = 28.0F;
 
-    std::vector<DataColumn> m_columns;
-    std::vector<std::vector<std::string>> m_rows;
-    State<int> m_selected_row{ -1 };
-    int m_sort_column = -1;
-    SortOrder m_sort_order = SortOrder::None;
-    std::function<void(int, SortOrder)> m_on_sort;
-    std::function<void(int)> m_on_select;
+    std::vector<DataColumn> columns_;
+    std::vector<std::vector<std::string>> rows_;
+    State<int> selected_row_{-1};
+    int sort_column_ = -1;
+    SortOrder sort_order_ = SortOrder::None;
+    std::function<void(int, SortOrder)> on_sort_;
+    std::function<void(int)> on_select_;
 };
 
 /// @brief 树节点（递归结构）。
@@ -162,7 +162,7 @@ struct TreeItem {
 class TreeView : public Widget {
   public:
     TreeView() = default;
-    explicit TreeView(std::vector<TreeItem> roots) : m_roots(std::move(roots)) {}
+    explicit TreeView(std::vector<TreeItem> roots) : roots_(std::move(roots)) {}
 
     [[nodiscard]] auto type_name() const -> const char * override { return "TreeView"; }
 
@@ -170,16 +170,16 @@ class TreeView : public Widget {
 
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&m_selected); }
+    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_); }
 
-    [[nodiscard]] auto roots() -> std::vector<TreeItem> & { return m_roots; }
-    [[nodiscard]] auto selected() -> State<int> & { return m_selected; }
-    [[nodiscard]] auto selected_row() const -> int { return m_selected.get(); }
+    [[nodiscard]] auto roots() -> std::vector<TreeItem> & { return roots_; }
+    [[nodiscard]] auto selected() -> State<int> & { return selected_; }
+    [[nodiscard]] auto selected_row() const -> int { return selected_.get(); }
 
     /// @brief 可见行数（展开序）。
     [[nodiscard]] auto visible_count() const -> std::size_t {
         std::size_t n = 0;
-        for (const auto &r : m_roots) {
+        for (const auto &r : roots_) {
             count_visible(r, n);
         }
         return n;
@@ -193,11 +193,11 @@ class TreeView : public Widget {
 
     /// @brief 选中可见行（触发 on_select）。
     auto select(int row) -> void {
-        if (row >= -1 && std::cmp_less(row, visible_count()) && row != m_selected.get()) {
-            m_selected.set(row);
+        if (row >= -1 && std::cmp_less(row, visible_count()) && row != selected_.get()) {
+            selected_.set(row);
             mark_needs_paint();
-            if (m_on_select) {
-                m_on_select(row);
+            if (on_select_) {
+                on_select_(row);
             }
         }
     }
@@ -211,17 +211,17 @@ class TreeView : public Widget {
         item->expanded = !item->expanded;
         mark_needs_layout();
         mark_needs_paint();
-        if (m_on_toggle) {
-            m_on_toggle(row, item->expanded);
+        if (on_toggle_) {
+            on_toggle_(row, item->expanded);
         }
     }
 
     auto set_on_select(std::function<void(int)> cb) -> TreeView & {
-        m_on_select = std::move(cb);
+        on_select_ = std::move(cb);
         return *this;
     }
     auto set_on_toggle(std::function<void(int, bool)> cb) -> TreeView & {
-        m_on_toggle = std::move(cb);
+        on_toggle_ = std::move(cb);
         return *this;
     }
 
@@ -232,7 +232,7 @@ class TreeView : public Widget {
     /// @brief 可见行的缩进深度。
     [[nodiscard]] auto visible_depth(int row) const -> int {
         int idx = row;
-        for (const auto &r : m_roots) {
+        for (const auto &r : roots_) {
             const int d = depth_of(r, idx, 0);
             if (d >= 0) {
                 return d;
@@ -249,13 +249,13 @@ class TreeView : public Widget {
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override;
 
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext & /*ctx*/) -> Widget * override {
-        return Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = bounds.size }.contains(local) ? this : nullptr;
+        return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local) ? this : nullptr;
     }
 
   private:
-    static constexpr float m_aurora_row_height = 26.0f;
-    static constexpr float m_aurora_indent = 18.0f;
-    static constexpr float m_aurora_arrow_zone = 20.0f;
+    static constexpr float AURORA_ROW_HEIGHT = 26.0F;
+    static constexpr float AURORA_INDENT = 18.0F;
+    static constexpr float AURORA_ARROW_ZONE = 20.0F;
 
     static auto count_visible(const TreeItem &item, std::size_t &n) -> void {
         ++n;
@@ -288,7 +288,7 @@ class TreeView : public Widget {
             return nullptr;
         }
         int idx = row;
-        for (const auto &r : m_roots) {
+        for (const auto &r : roots_) {
             const TreeItem *found = find_visible(r, idx);
             if (found != nullptr) {
                 return found;
@@ -298,7 +298,7 @@ class TreeView : public Widget {
     }
 
     [[nodiscard]] auto visible_item_mut(int row) const -> TreeItem * {
-        return const_cast<TreeItem *>(visible_item(row)); // NOLINT：内部可变访问
+        return const_cast<TreeItem *>(visible_item(row));  // NOLINT：内部可变访问
     }
 
     /// @brief 可见序中第 idx 个节点的深度（找到返回深度并把 idx 置 -1，未找到返回 -1）。
@@ -319,10 +319,10 @@ class TreeView : public Widget {
         return -1;
     }
 
-    std::vector<TreeItem> m_roots;
-    State<int> m_selected{ -1 };
-    std::function<void(int)> m_on_select;
-    std::function<void(int, bool)> m_on_toggle;
+    std::vector<TreeItem> roots_;
+    State<int> selected_{-1};
+    std::function<void(int)> on_select_;
+    std::function<void(int, bool)> on_toggle_;
 };
 
 /**
@@ -339,7 +339,7 @@ class ListView : public Widget {
   public:
     ListView() = default;
     explicit ListView(std::vector<std::string> items, bool multi_select = false)
-        : m_items(std::move(items)), m_multi(multi_select) {}
+        : items_(std::move(items)), multi_(multi_select) {}
 
     [[nodiscard]] auto type_name() const -> const char * override { return "ListView"; }
 
@@ -349,78 +349,78 @@ class ListView : public Widget {
 
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
 
-    [[nodiscard]] auto item_count() const -> std::size_t { return m_items.size(); }
+    [[nodiscard]] auto item_count() const -> std::size_t { return items_.size(); }
     [[nodiscard]] auto item(std::size_t i) const -> std::string {
-        return i < m_items.size() ? m_items[i] : std::string{};
+        return i < items_.size() ? items_[i] : std::string{};
     }
 
     /// @brief 选中行集合（升序）。
-    [[nodiscard]] auto selection() const -> const std::vector<int> & { return m_selection; }
+    [[nodiscard]] auto selection() const -> const std::vector<int> & { return selection_; }
     [[nodiscard]] auto is_selected(int row) const -> bool {
-        return std::ranges::find(m_selection, row) != m_selection.end();
+        return std::ranges::find(selection_, row) != selection_.end();
     }
 
     /// @brief 选中行：单选替换、多选切换。
     auto select(int row) -> void {
-        if (row < 0 || std::cmp_greater_equal(row, m_items.size())) {
+        if (row < 0 || std::cmp_greater_equal(row, items_.size())) {
             return;
         }
-        if (m_multi) {
-            const auto it = std::ranges::find(m_selection, row);
-            if (it != m_selection.end()) {
-                m_selection.erase(it);
+        if (multi_) {
+            const auto it = std::ranges::find(selection_, row);
+            if (it != selection_.end()) {
+                selection_.erase(it);
             } else {
-                m_selection.push_back(row);
-                std::ranges::sort(m_selection);
+                selection_.push_back(row);
+                std::ranges::sort(selection_);
             }
         } else {
-            m_selection.assign(1, row);
+            selection_.assign(1, row);
         }
         mark_needs_paint();
-        if (m_on_select) {
-            m_on_select(row);
+        if (on_select_) {
+            on_select_(row);
         }
     }
 
     auto clear_selection() -> void {
-        m_selection.clear();
+        selection_.clear();
         mark_needs_paint();
     }
 
     /// @brief 删除行（选中集合随之修正；触发 on_remove）。
     auto remove(int row) -> void {
-        if (row < 0 || std::cmp_greater_equal(row, m_items.size())) {
+        if (row < 0 || std::cmp_greater_equal(row, items_.size())) {
             return;
         }
-        m_items.erase(m_items.begin() + row);
+        items_.erase(items_.begin() + row);
         // 修正选中：删除项移除，之后的行号前移
         std::vector<int> fixed;
-        for (int s : m_selection) {
+        for (int s : selection_) {
             if (s == row) {
                 continue;
             }
             fixed.push_back(s > row ? s - 1 : s);
         }
-        m_selection = std::move(fixed);
+        selection_ = std::move(fixed);
         mark_needs_layout();
         mark_needs_paint();
-        if (m_on_remove) {
-            m_on_remove(row);
+        if (on_remove_) {
+            on_remove_(row);
         }
     }
 
     /// @brief 追加行。
     auto append(std::string item) -> void {
-        m_items.push_back(std::move(item));
+        items_.push_back(std::move(item));
         mark_needs_layout();
     }
 
     auto set_on_select(std::function<void(int)> cb) -> ListView & {
-        m_on_select = std::move(cb);
+        on_select_ = std::move(cb);
         return *this;
     }
     auto set_on_remove(std::function<void(int)> cb) -> ListView & {
-        m_on_remove = std::move(cb);
+        on_remove_ = std::move(cb);
         return *this;
     }
 
@@ -438,17 +438,17 @@ class ListView : public Widget {
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override;
 
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext & /*ctx*/) -> Widget * override {
-        return Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f }, .size = bounds.size }.contains(local) ? this : nullptr;
+        return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local) ? this : nullptr;
     }
 
   private:
-    static constexpr float m_aurora_row_height = 26.0f;
+    static constexpr float AURORA_ROW_HEIGHT = 26.0F;
 
-    std::vector<std::string> m_items;
-    bool m_multi = false;
-    std::vector<int> m_selection;
-    std::function<void(int)> m_on_select;
-    std::function<void(int)> m_on_remove;
+    std::vector<std::string> items_;
+    bool multi_ = false;
+    std::vector<int> selection_;
+    std::function<void(int)> on_select_;
+    std::function<void(int)> on_remove_;
 };
 
-} // namespace aurora
+}  // namespace aurora

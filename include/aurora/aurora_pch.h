@@ -43,4 +43,4 @@
 // ---- vendored 三方（稳定不变更；json.hpp 为最大单头解析成本） ----
 #include <nlohmann/json.hpp>
 
-#endif // __cplusplus
+#endif  // __cplusplus

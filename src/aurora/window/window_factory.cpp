@@ -13,14 +13,14 @@
 // DPI 感知常量（兼容较旧 Windows SDK，避免版本宏依赖）。
 // 注：原定义位于 win32_window.h；pimpl 重构后该头不再包含 <windows.h>，
 // 故把兼容性垫片移至此文件（本文件使用这些常量且已间接包含 <windows.h>）。
-#ifndef PROCESS_PER_MONITOR_DPI_AWARE // NOLINT(*-identifier-naming)
-#define PROCESS_PER_MONITOR_DPI_AWARE 2
+#ifndef PROCESS_PER_MONITOR_DPI_AWARE  // NOLINT(*-identifier-naming)
+#define PROCESS_PER_MONITOR_DPI_AWARE 2  // NOLINT(cppcoreguidelines-macro-usage) 平台 DPI 版本宏，无 constexpr 等价物
 #endif
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((DPI_AWARENESS_CONTEXT)(-3))
 #endif
 #ifndef SPI_GETCLIENTAREAANIMATION
-#define SPI_GETCLIENTAREAANIMATION 0x1042 ///< 系统「客户端区动画」开关（旧 SDK 可能缺定义）。
+#define SPI_GETCLIENTAREAANIMATION 0x1042  ///< 系统「客户端区动画」开关（旧 SDK 可能缺定义）。
 #endif
 #endif
 
@@ -116,7 +116,7 @@ auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> 
 auto create_window(const D3D11Options &opts) -> Result<std::unique_ptr<Window>> {
     auto surf = std::make_unique<D3D11Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
                                                opts.title, opts.style);
-    surf->set_vsync(opts.vsync); // vsync 可选（false 交还 CPU 端帧预算节流）
+    surf->set_vsync(opts.vsync);  // vsync 可选（false 交还 CPU 端帧预算节流）
     return make_window(std::move(surf), opts);
 }
 #endif
@@ -129,7 +129,7 @@ auto create_window(const GlfwOptions &opts) -> Result<std::unique_ptr<Window>> {
     cfg.gl_major = opts.gl_major;
     cfg.gl_minor = opts.gl_minor;
     cfg.resizable = opts.resizable;
-    auto surf = std::make_unique<GlfwSurface>(cfg); // 失败抛 std::runtime_error
+    auto surf = std::make_unique<GlfwSurface>(cfg);  // 失败抛 std::runtime_error
     return make_window(std::move(surf), opts);
 }
 #endif
@@ -189,36 +189,36 @@ auto create_native_window(const WindowOptions &opts) -> Result<std::unique_ptr<W
     // 失败（或 X11 会话）再试 X11（Wayland 会话下经 XWayland），最后 Headless 兜底。
 #ifdef AURORA_BACKEND_WAYLAND
     if (std::getenv("WAYLAND_DISPLAY") != nullptr) {
-        if (auto r = create_window(WaylandOptions{ opts })) {
+        if (auto r = create_window(WaylandOptions{opts})) {
             return r;
         }
         AURORA_LOG_WARN("window", "create_native_window: Wayland compositor unavailable; trying next backend.");
     }
 #endif
 #ifdef AURORA_BACKEND_X11
-    if (auto r = create_window(X11Options{ opts })) {
+    if (auto r = create_window(X11Options{opts})) {
         return r;
     }
 #endif
 #ifdef AURORA_BACKEND_HEADLESS
     // 真实显示不可用（无 DISPLAY/WAYLAND_DISPLAY 的 CI/SSH 环境）：降级内存帧缓冲，demo/工具仍可跑通。
     AURORA_LOG_WARN("window", "create_native_window: no display available; falling back to HeadlessSurface.");
-    return create_window(HeadlessOptions{ opts });
+    return create_window(HeadlessOptions{opts});
 #else
     return make_error(
         ErrorCode::PlatformUnavailable, "create_native_window: display unavailable and no Headless fallback.",
         "Run inside an X11/Wayland session or rebuild with -DAURORA_BACKEND_HEADLESS=ON.", "aurora/window/window.h");
 #endif
 #elif defined(AURORA_BACKEND_MACOS)
-    return create_window(MacOSOptions{ opts });
+    return create_window(MacOSOptions{opts});
 #elif defined(AURORA_BACKEND_WASM)
-    return create_window(WasmOptions{ opts });
+    return create_window(WasmOptions{opts});
 #elif defined(AURORA_BACKEND_WIN32)
-    return create_window(Win32Options{ opts });
+    return create_window(Win32Options{opts});
 #elif defined(AURORA_BACKEND_GLFW)
-    return create_window(GlfwOptions{ opts });
+    return create_window(GlfwOptions{opts});
 #elif defined(AURORA_BACKEND_HEADLESS)
-    return create_window(HeadlessOptions{ opts });
+    return create_window(HeadlessOptions{opts});
 #else
     (void)opts;
     return make_error(ErrorCode::PlatformUnavailable, "create_native_window: no built-in Surface backend compiled in.",
@@ -284,4 +284,4 @@ auto enable_dpi_awareness() -> void {
 #endif
 }
 
-} // namespace aurora
+}  // namespace aurora

@@ -31,18 +31,18 @@ namespace aurora {
         std::string type;
         std::string text;
     };
-    static const std::array<Entry, 8> k_map = { {
-        { .keyword = "button", .type = "Button", .text = "Button" },
-        { .keyword = "text", .type = "Text", .text = "Text" },
-        { .keyword = "label", .type = "Text", .text = "Text" },
-        { .keyword = "column", .type = "Column", .text = "" },
-        { .keyword = "row", .type = "Row", .text = "" },
-        { .keyword = "checkbox", .type = "Checkbox", .text = "" },
-        { .keyword = "switch", .type = "Switch", .text = "" },
-        { .keyword = "slider", .type = "Slider", .text = "" },
-    } };
+    static const std::array<Entry, 8> MAP = {{
+        {.keyword = "button", .type = "Button", .text = "Button"},
+        {.keyword = "text", .type = "Text", .text = "Text"},
+        {.keyword = "label", .type = "Text", .text = "Text"},
+        {.keyword = "column", .type = "Column", .text = ""},
+        {.keyword = "row", .type = "Row", .text = ""},
+        {.keyword = "checkbox", .type = "Checkbox", .text = ""},
+        {.keyword = "switch", .type = "Switch", .text = ""},
+        {.keyword = "slider", .type = "Slider", .text = ""},
+    }};
 
-    for (const auto &m : k_map) {
+    for (const auto &m : MAP) {
         if (description.find(m.keyword) != std::string::npos) {
             Json node;
             node["type"] = m.type;
@@ -81,4 +81,4 @@ namespace aurora {
     return w.ok();
 }
 
-} // namespace aurora
+}  // namespace aurora

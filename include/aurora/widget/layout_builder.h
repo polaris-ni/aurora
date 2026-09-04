@@ -29,7 +29,7 @@ class LayoutBuilder : public Widget {
     using BuilderFn = std::function<Node(const BuildContext &, const Constraints &)>;
 
     // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
-    Reactive<BuilderFn> builder; ///< 约束变化时重建子节点（可热替换）。
+    Reactive<BuilderFn> builder;  ///< 约束变化时重建子节点（可热替换）。
 
     LayoutBuilder() = default;
 
@@ -42,14 +42,16 @@ class LayoutBuilder : public Widget {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "LayoutBuilder",
-            .properties = {
-                { .name="width", .type="Length", .default_value="auto", .required=false },
-                { .name="height", .type="Length", .default_value="auto", .required=false },
-                { .name="show", .type="bool", .default_value="true", .required=false },
-            },
+            .properties =
+                {
+                    {.name = "width", .type = "Length", .default_value = "auto", .required = false},
+                    {.name = "height", .type = "Length", .default_value = "auto", .required = false},
+                    {.name = "show", .type = "bool", .default_value = "true", .required = false},
+                },
             .events = {},
             .children_policy = "single",
-            .examples = { "au::LayoutBuilder([](const BuildContext& ctx, const Constraints& c){ return Node{ au::Text(\"responsive\") }; })" },
+            .examples = {"au::LayoutBuilder([](const BuildContext& ctx, const Constraints& c){ return Node{ "
+                         "au::Text(\"responsive\") }; })"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
@@ -57,16 +59,16 @@ class LayoutBuilder : public Widget {
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&builder); }
 
     [[nodiscard]] auto child_nodes() const -> const std::vector<Node> & override {
-        m_child_view.clear();
-        if (m_child) {
-            m_child_view.push_back(m_child);
+        child_view_.clear();
+        if (child_) {
+            child_view_.push_back(child_);
         }
-        return m_child_view;
+        return child_view_;
     }
 
     auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
-        if (m_child) {
-            fn(m_child.widget());
+        if (child_) {
+            fn(child_.widget());
         }
     }
 
@@ -74,72 +76,72 @@ class LayoutBuilder : public Widget {
     auto on_mount(const BuildContext &ctx) -> void override {
         Widget::on_mount(ctx);
         // builder 闭包替换 → 标记脏并请求重建（清除旧子节点引用）。
-        m_builder_effect = std::make_shared<Effect>([this] { // NOLINT(*-use-trailing-return-type)
-            m_dirty = true;
+        builder_effect_ = std::make_shared<Effect>([this] {  // NOLINT(*-use-trailing-return-type)
+            dirty_ = true;
             mark_needs_layout();
             mark_needs_paint();
         });
-        builder.subscribe(*m_builder_effect);
+        builder.subscribe(*builder_effect_);
     }
 
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         const BuilderFn &fn = builder.get();
-        const bool constraints_changed = (m_last.min.width != c.min.width) || (m_last.min.height != c.min.height) ||
-                                         (m_last.max.width != c.max.width) || (m_last.max.height != c.max.height);
-        if (!m_child || m_dirty || constraints_changed) {
+        const bool constraints_changed = (last_.min.width != c.min.width) || (last_.min.height != c.min.height) ||
+                                         (last_.max.width != c.max.width) || (last_.max.height != c.max.height);
+        if (!child_ || dirty_ || constraints_changed) {
             if (fn) {
-                m_child = fn(ctx, c);
+                child_ = fn(ctx, c);
             } else {
-                m_child = Node{};
+                child_ = Node{};
             }
-            m_last = c;
-            m_dirty = false;
-            if (m_child) {
-                m_child.widget().mount(ctx);
+            last_ = c;
+            dirty_ = false;
+            if (child_) {
+                child_.widget().mount(ctx);
             }
         }
-        if (!m_child) {
-            return Size{ .width = 0.0f, .height = 0.0f };
+        if (!child_) {
+            return Size{.width = 0.0F, .height = 0.0F};
         }
-        m_child.widget().set_layout_parent(this);
-        return m_child.widget().layout(c, ctx);
+        child_.widget().set_layout_parent(this);
+        return child_.widget().layout(c, ctx);
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        if (m_child) {
-            m_child.widget().paint(p, bounds, ctx);
+        if (child_) {
+            child_.widget().paint(p, bounds, ctx);
         }
     }
 
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * override {
-        if (!m_child) {
+        if (!child_) {
             return nullptr;
         }
-        return m_child.widget().hit_test(local, bounds, ctx);
+        return child_.widget().hit_test(local, bounds, ctx);
     }
 
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
-        if (!m_child) {
+        if (!child_) {
             return {};
         }
-        return m_child.widget().hit_test_chain(local, bounds, ctx);
+        return child_.widget().hit_test_chain(local, bounds, ctx);
     }
 
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Widget::tick_gestures(now);
-        if (m_child) {
-            m_child.widget().tick(now);
+        if (child_) {
+            child_.widget().tick(now);
         }
     }
 
   private:
-    Node m_child;
+    Node child_;
     /// @brief child_nodes() 视图缓存（const 方法返回引用需持久存储）。
-    mutable std::vector<Node> m_child_view;
-    Constraints m_last{};
-    bool m_dirty = true; ///< 首次构建 / 闭包替换后置位。
-    std::shared_ptr<Effect> m_builder_effect;
+    mutable std::vector<Node> child_view_;
+    Constraints last_{};
+    bool dirty_ = true;  ///< 首次构建 / 闭包替换后置位。
+    std::shared_ptr<Effect> builder_effect_;
 };
 
-} // namespace aurora
+}  // namespace aurora

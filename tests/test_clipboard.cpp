@@ -9,7 +9,6 @@
 #endif
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::Clipboard;
@@ -43,7 +42,7 @@ AURORA_TEST() {
         // 4) 空文本写入不崩溃（提前返回路径），且不清除已有内容。
         Clipboard::set_text("");
         AURORA_TEST_CHECK(true);
-        AURORA_TEST_CHECK(Clipboard::get_text() == "second-value"); // 空串早退，保留上次内容
+        AURORA_TEST_CHECK(Clipboard::get_text() == "second-value");  // 空串早退，保留上次内容
 
         // 5) 含 Unicode 文本往返（UTF-8 ↔ UTF-16）。
         Clipboard::set_text("héllo-世界");
@@ -58,17 +57,17 @@ AURORA_TEST() {
         img.width = 2;
         img.height = 2;
         img.pixels = {
-            255, 0,   0,   255, // 红
-            0,   255, 0,   255, // 绿
-            0,   0,   255, 255, // 蓝
-            255, 255, 255, 255, // 白
+            255, 0,   0,   255,  // 红
+            0,   255, 0,   255,  // 绿
+            0,   0,   255, 255,  // 蓝
+            255, 255, 255, 255,  // 白
         };
         Clipboard::set_image(img);
         const Image out = Clipboard::get_image();
         AURORA_TEST_CHECK(out.width == 2);
         AURORA_TEST_CHECK(out.height == 2);
-        AURORA_TEST_CHECK(out.pixels.size() == 16u);
-        AURORA_TEST_CHECK(out.pixels == img.pixels); // RGBA 往返一致
+        AURORA_TEST_CHECK(out.pixels.size() == 16U);
+        AURORA_TEST_CHECK(out.pixels == img.pixels);  // RGBA 往返一致
     }
 #else
     // 非 Windows：no-op，仅验证不崩溃且读取为空（文本 + 图像）。
@@ -81,7 +80,7 @@ AURORA_TEST() {
         Image img;
         img.width = 2;
         img.height = 2;
-        img.pixels = { 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255 };
+        img.pixels = {0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255};
         Clipboard::set_image(img);
         const Image out = Clipboard::get_image();
         AURORA_TEST_CHECK(out.width == 0);

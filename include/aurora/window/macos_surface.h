@@ -26,11 +26,11 @@ class MacOSSurface : public Surface {
 
   private:
     struct Impl;
-    std::unique_ptr<Impl> m_impl;
-    Painter m_painter;
-    Size m_size;
+    std::unique_ptr<Impl> impl_;
+    Painter painter_;
+    Size size_;
 };
 
-} // namespace aurora
+}  // namespace aurora
 
-#endif // AURORA_BACKEND_MACOS / AURORA_PLATFORM_MACOS
+#endif  // AURORA_BACKEND_MACOS / AURORA_PLATFORM_MACOS

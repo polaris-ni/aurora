@@ -1,7 +1,8 @@
 #pragma once
 
-#include <cstdint>
 #include <ft2build.h>
+
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -12,8 +13,8 @@ namespace aurora::render {
 /// @brief 一个已加载的字体面（来自内存字节或系统字体文件）。
 struct FontFace {
     FT_Face face = nullptr;
-    int id = 0;                                     ///< 图集缓存键所用的稳定序号
-    std::shared_ptr<std::vector<std::uint8_t>> mem; ///< 内存字体字节（须保持存活至 face 释放）
+    int id = 0;  ///< 图集缓存键所用的稳定序号
+    std::shared_ptr<std::vector<std::uint8_t>> mem;  ///< 内存字体字节（须保持存活至 face 释放）
 };
 
 /// @brief 字体发现：注册内嵌默认字体与平台系统回退，并提供 family→候选 FT_Face 的解析。
@@ -38,4 +39,4 @@ auto set_default_font_file(const std::string &path) -> void;
 /// @brief 内部：向默认链追加候选 FT_Face（平台字体发现使用）。
 auto add_default_face(const std::shared_ptr<FontFace> &ff) -> void;
 
-} // namespace aurora::render
+}  // namespace aurora::render

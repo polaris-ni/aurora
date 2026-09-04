@@ -2,6 +2,7 @@
 
 #include <unordered_map>
 
+#include "aurora/environment/build_context.h"
 #include "aurora/event/event.h"
 #include "aurora/event/focus.h"
 #include "aurora/widget/widget.h"
@@ -33,12 +34,12 @@ class EventDispatcher {
     /// @param p    待命中的坐标（根节点局部坐标系）。
     /// @return 最深可命中的 widget 指针；命中链为空（点到空白）时返回 nullptr。
     static auto hit_test(Widget &root, const Point &p) -> Widget * {
-        return root.hit_test(p, Rect{ .origin = Point{}, .size = root.size() }, BuildContext{});
+        return root.hit_test(p, Rect{.origin = Point{}, .size = root.size()}, BuildContext{});
     }
 
-    /// @brief 同步派发指针事件到命中目标；返回是否命中（handled 由 widget 写入 e）。
+    /// @brief 同步派发指针事件到命中目标；返回是否命中（is_handled_ 由 widget 写入 e）。
     /// @param root 派发起点（根 widget）；命中测试与命中链均局限于该子树。
-    /// @param e    待派发的鼠标事件；沿命中链冒泡期间任一控件可写 `e.handled = true` 终止冒泡。
+    /// @param e    待派发的鼠标事件；沿命中链冒泡期间任一控件可写 `e.is_handled_ = true` 终止冒泡。
     /// @param fm 派发期间的当前焦点管理器（可选）；`request_focus()` 读取之，默认 nullptr 时焦点请求静默 no-op。
     /// @note 该静态入口委托进程内「持久」EventDispatcher 单例，因此同样保留跨事件指针捕获
     ///       （与 Application::m_mouse 行为一致）。这意味着即使调用方直接走静态 `dispatch`
@@ -52,14 +53,14 @@ class EventDispatcher {
     ///       也持续派发给同一目标，直到 Release 解除捕获。修复「拖选时光标移出窗口/重叠区后
     ///       释放事件丢失、选择卡住」以及「相邻控件重叠导致拖选被抢」的问题。
     /// @param root 派发起点（根 widget）；命中测试与指针捕获均局限于该子树。
-    /// @param e    待派发的鼠标事件；冒泡期间任一控件可写 `e.handled = true` 终止冒泡。
+    /// @param e    待派发的鼠标事件；冒泡期间任一控件可写 `e.is_handled_ = true` 终止冒泡。
     /// @param fm   派发期间的当前焦点管理器（可选）；Press 时据此转移/清除焦点，nullptr 则跳过焦点处理。
-    /// @return 是否命中到任意控件（是否「消费」由 `e.handled` 表达）。
+    /// @return 是否命中到任意控件（是否「消费」由 `e.is_handled_` 表达）。
     auto dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *fm = nullptr) -> bool;
 
     /// @brief 同步派发键盘事件；Tab/Shift+Tab 触发焦点移动，否则派发到焦点 widget。
     /// @param root 派发起点（根 widget）；键盘派发不经命中链，该形参未使用（仅为统一重载签名而保留）。
-    /// @param e    待派发的键盘事件；命中快捷键或控件消费时写 `e.handled = true`。
+    /// @param e    待派发的键盘事件；命中快捷键或控件消费时写 `e.is_handled_ = true`。
     /// @param fm 焦点管理器（提供焦点 widget 与 Tab 序导航）；无则丢弃键盘事件。
     /// @return 事件是否被处理（焦点移动或焦点 widget 消费）。
     static auto dispatch(Widget &root, KeyEvent &e, FocusManager &fm) -> bool;
@@ -70,17 +71,17 @@ class EventDispatcher {
     /// @return 是否命中到可滚动目标。
     static auto dispatch(Widget &root, ScrollEvent &e) -> bool;
 
-    /// @brief 同步派发文件拖放事件到命中目标；返回是否命中（handled 由 widget 写入 e）。
+    /// @brief 同步派发文件拖放事件到命中目标；返回是否命中（is_handled_ 由 widget 写入 e）。
     /// @param root 派发起点（根 widget）；在其子树内按落点坐标做命中测试。
     /// @param e    待派发的文件拖放事件（不冒泡，仅交给命中目标）。
-    /// @return 事件是否被目标控件消费（取 `e.handled`）。
+    /// @return 事件是否被目标控件消费（取 `e.is_handled_`）。
     static auto dispatch(Widget &root, FileDropEvent &e) -> bool;
 
     /// @brief 同步派发文本输入事件到焦点 widget；无焦点则返回 false。
     /// @param root 派发起点（根 widget）；文本输入只路由到焦点控件，不经命中链。
     /// @param e    待派发的文本输入事件（不冒泡）。
     /// @param fm   焦点管理器；其当前焦点 widget 为唯一接收者，无焦点则直接返回 false。
-    /// @return 事件是否被焦点控件消费（取 `e.handled`）。
+    /// @return 事件是否被焦点控件消费（取 `e.is_handled_`）。
     static auto dispatch(Widget &root, TextInputEvent &e, FocusManager &fm) -> bool;
 
   private:
@@ -94,12 +95,12 @@ class EventDispatcher {
     /// @brief 按指针 ID 缓存的命中链（指针捕获表）。Press 命中后写入，Release 清除；
     ///       活跃期 Move/Release 复用该链（即使光标移出根/窗口外或落入重叠兄弟控件），
     ///       保证拖选/拖拽连续。以实例形式存在（由 Application 持有一个），非全局静态。
-    std::unordered_map<int, std::vector<HitNode>> m_pointer_capture;
+    std::unordered_map<int, std::vector<HitNode>> pointer_capture_;
 
     /// @brief 上次无捕获 Move 的悬停命中链。
     ///        HitNode.widget 为 `std::weak_ptr<Widget>`：虚拟列表（LazyList）等滚动回收子控件时，
     ///        悬停链中对应的弱引用失效，`update_hover` 经 `lock()` 检测后安全跳过，绝不解引用悬垂指针。
-    std::vector<HitNode> m_hover_chain;
+    std::vector<HitNode> hover_chain_;
 };
 
 /// @brief 多点触控派发器（按指针 ID 做命中链捕获）。
@@ -118,14 +119,14 @@ class TouchDispatcher {
     ///        每个触点同时：① 把完整 `TouchEvent` 交给命中链（原始流，`touch()` 修饰器 / `PinchRecognizer` 消费）；
     ///        ② 合成对应 `MouseEvent`（携带 `pointer_id`）驱动 `Draggable`/`LongPress`/`Clickable`。
     /// @param root 派发起点（根 widget）；按其子树做命中测试并建立指针捕获。
-    /// @param e    待派发的多点触控事件（`TouchEvent::points` 逐点处理，手势流冒泡可写 `handled`）。
+    /// @param e    待派发的多点触控事件（`TouchEvent::points` 逐点处理，手势流冒泡可写 `is_handled_`）。
     /// @param fm   派发期间的当前焦点管理器（可选）；触点首次按下时据此转移焦点，nullptr 则跳过。
-    /// @return 是否有任意触点命中（handled 由各 widget 写入 e）。
+    /// @return 是否有任意触点命中（is_handled_ 由各 widget 写入 e）。
     auto dispatch(Widget &root, TouchEvent &e, FocusManager *fm = nullptr) -> bool;
 
   private:
     /// @brief 按指针 ID 缓存的命中链（指针捕获表）。某指针 `id` 由活跃→非活跃（抬起）时清除对应链，避免悬空引用。
-    std::unordered_map<int, std::vector<HitNode>> m_pointer_capture;
+    std::unordered_map<int, std::vector<HitNode>> pointer_capture_;
 };
 
-} // namespace aurora
+}  // namespace aurora

@@ -23,12 +23,12 @@ struct LayoutCtxBase {
  * 布局器只负责按 Flutter 语义分配主轴空间并算位置，不做任何 widget 专属逻辑。
  */
 struct FlexItem {
-    float flex = 0.0f; ///< 主轴权重；0 = 不扩展（仅占内容尺寸）
+    float flex = 0.0F;  ///< 主轴权重；0 = 不扩展（仅占内容尺寸）
 
     /// @brief 测量函数指针（零堆分配）：通过 void* 上下文捕获外部状态，避免 std::function 堆分配。
     using MeasureFn = auto (*)(void *ctx, const Constraints &) -> Size;
-    MeasureFn measure = nullptr; ///< 测量函数指针
-    void *measure_ctx = nullptr; ///< 测量函数上下文
+    MeasureFn measure = nullptr;  ///< 测量函数指针
+    void *measure_ctx = nullptr;  ///< 测量函数上下文
 
     /// @brief 调用测量函数。
     [[nodiscard]] auto do_measure(const Constraints &c) const -> Size { return measure(measure_ctx, c); }
@@ -39,8 +39,9 @@ struct FlexItem {
     /// @param w       flex 权重
     /// @param ctx     上下文指针（由容器存放在 vector 中，生命周期 ≥ 布局调用）
     /// @param fn      trampoline 函数指针：解包 ctx → 调用实际 widget::layout
-    template<typename Ctx> static auto make(float w, Ctx *ctx, MeasureFn fn) -> FlexItem {
-        return FlexItem{ w, fn, ctx };
+    template <typename Ctx>
+    static auto make(float w, Ctx *ctx, MeasureFn fn) -> FlexItem {
+        return FlexItem{w, fn, ctx};
     }
 };
 
@@ -48,8 +49,8 @@ struct FlexItem {
  * @brief 一次 flex 布局的结果：各子项相对容器原点的 Rect + 容器自身尺寸。
  */
 struct FlexLayout {
-    std::vector<Rect> children; ///< 与输入 items 顺序一致
-    Size size{};                ///< 容器自身尺寸（已夹入父约束）
+    std::vector<Rect> children;  ///< 与输入 items 顺序一致
+    Size size{};  ///< 容器自身尺寸（已夹入父约束）
 };
 
 /**
@@ -72,4 +73,4 @@ class FlexLayouter {
     static auto layout(const Flex &config, const Constraints &parent, const std::vector<FlexItem> &items) -> FlexLayout;
 };
 
-} // namespace aurora
+}  // namespace aurora

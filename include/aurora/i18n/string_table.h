@@ -35,20 +35,20 @@ class StringTable {
   public:
     /// @brief 为某区域设置 key → 模板。
     auto add(const Locale &loc, const std::string &key, const std::string &tmpl) -> void {
-        m_data[loc.tag()][key] = tmpl;
+        data_[loc.tag()][key] = tmpl;
     }
 
     /// @brief 设置默认区域（查表缺省回退）。
-    auto set_default_locale(const Locale &loc) -> void { m_default = loc; }
+    auto set_default_locale(const Locale &loc) -> void { default_ = loc; }
 
     /// @brief 查找某 Locale 下 key 的模板；缺失则回退默认 Locale；再缺失返回 nullopt。
     [[nodiscard]] auto lookup(const std::string &key, const Locale &loc) const -> std::optional<std::string> {
-        if (const auto lit = m_data.find(loc.tag()); lit != m_data.end()) {
+        if (const auto lit = data_.find(loc.tag()); lit != data_.end()) {
             if (const auto kit = lit->second.find(key); kit != lit->second.end()) {
                 return kit->second;
             }
         }
-        if (const auto dit = m_data.find(m_default.tag()); dit != m_data.end()) {
+        if (const auto dit = data_.find(default_.tag()); dit != data_.end()) {
             if (const auto kit = dit->second.find(key); kit != dit->second.end()) {
                 return kit->second;
             }
@@ -63,7 +63,7 @@ class StringTable {
         }
         auto r = lookup(ls.key, loc);
         if (!r) {
-            return ls.text; // 查表失败回退字面量
+            return ls.text;  // 查表失败回退字面量
         }
         std::vector<std::string> as;
         as.reserve(ls.args.size());
@@ -90,7 +90,6 @@ class StringTable {
     }
 
     /// @brief 格式化模板：替换 `{i}` 占位与 `{n, plural, one=… other=…}` 复数块。
-    // NOLINTNEXTLINE(*-function-cognitive-complexity)
     [[nodiscard]] static auto format(const std::string &tmpl, const std::vector<std::string> &args) -> std::string {
         std::string out;
         out.reserve(tmpl.size());
@@ -113,7 +112,7 @@ class StringTable {
                     } catch (...) {
                         idx = 0;
                     }
-                    const std::string rest = inner.substr(ppos + 9); // 跳过 ", plural,"
+                    const std::string rest = inner.substr(ppos + 9);  // 跳过 ", plural,"
                     const std::size_t oi = rest.find("one=");
                     const std::size_t oti = rest.find("other=");
                     if (oi != std::string::npos && oti != std::string::npos && oti > oi) {
@@ -170,8 +169,8 @@ class StringTable {
         }
     }
 
-    std::map<std::string, std::map<std::string, std::string>> m_data; ///< localeTag → key → 模板
-    Locale m_default;                                                 ///< 默认区域（回退）
+    std::map<std::string, std::map<std::string, std::string>> data_;  ///< localeTag → key → 模板
+    Locale default_;  ///< 默认区域（回退）
 };
 
 /// @brief 进程级默认字符串表（供 widget 渲染时就地查表）。
@@ -187,4 +186,4 @@ inline auto LocalizedString::resolve(const StringTable *table, const Locale &loc
     return table->resolve(*this, loc);
 }
 
-} // namespace aurora
+}  // namespace aurora

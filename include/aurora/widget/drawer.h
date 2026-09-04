@@ -31,9 +31,9 @@ enum class DrawerSide : std::uint8_t { Left, Right };
 class Drawer : public Widget {
   public:
     Drawer() = default;
-    Drawer(Node content, Node panel, DrawerSide side = DrawerSide::Left, float panel_width = 240.0f)
-        : m_content(std::move(content)), m_panel(std::move(panel)), m_side(side),
-          m_panel_width(panel_width > 0.0f ? panel_width : 240.0f) {}
+    Drawer(Node content, Node panel, DrawerSide side = DrawerSide::Left, float panel_width = 240.0F)
+        : content_(std::move(content)), panel_(std::move(panel)), side_(side),
+          panel_width_(panel_width > 0.0F ? panel_width : 240.0F) {}
 
     [[nodiscard]] auto type_name() const -> const char * override { return "Drawer"; }
 
@@ -41,47 +41,47 @@ class Drawer : public Widget {
 
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&m_open); }
+    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&open_); }
 
-    [[nodiscard]] auto is_open() const -> bool { return m_open.get(); }
-    [[nodiscard]] auto open_state() -> State<bool> & { return m_open; }
-    [[nodiscard]] auto is_permanent() const -> bool { return m_permanent; }
-    [[nodiscard]] auto panel_width() const -> float { return m_panel_width; }
+    [[nodiscard]] auto is_open() const -> bool { return open_.get(); }
+    [[nodiscard]] auto open_state() -> State<bool> & { return open_; }
+    [[nodiscard]] auto is_permanent() const -> bool { return permanent_; }
+    [[nodiscard]] auto panel_width() const -> float { return panel_width_; }
 
     auto set_open(bool v) -> void {
-        if (m_permanent) {
-            return; // 永久模式无开合
+        if (permanent_) {
+            return;  // 永久模式无开合
         }
-        if (v != m_open.get()) {
-            m_open.set(v);
+        if (v != open_.get()) {
+            open_.set(v);
             mark_needs_layout();
             mark_needs_paint();
-            if (m_on_toggle) {
-                m_on_toggle(v);
+            if (on_toggle_) {
+                on_toggle_(v);
             }
         }
     }
-    auto toggle() -> void { set_open(!m_open.get()); }
+    auto toggle() -> void { set_open(!open_.get()); }
 
     /// @brief 永久模式（链式）：面板始终可见、无遮罩、内容让位。
     auto set_permanent(bool v) -> Drawer & {
-        m_permanent = v;
+        permanent_ = v;
         mark_needs_layout();
         return *this;
     }
 
     auto set_on_toggle(std::function<void(bool)> cb) -> Drawer & {
-        m_on_toggle = std::move(cb);
+        on_toggle_ = std::move(cb);
         return *this;
     }
 
     /// @brief 模态打开时点击遮罩（面板外）关闭。
     auto on_pointer_event(MouseEvent &e) -> void override {
-        if (!m_permanent && m_open.get() && e.action == MouseAction::Press) {
+        if (!permanent_ && open_.get() && e.action == MouseAction::Press) {
             const Rect panel = panel_rect();
             if (!panel.contains(e.local_position)) {
                 set_open(false);
-                e.handled = true;
+                e.is_handled = true;
                 return;
             }
         }
@@ -89,60 +89,60 @@ class Drawer : public Widget {
     }
 
     [[nodiscard]] auto wants_click() const -> bool override {
-        return !m_permanent && m_open.get(); // 打开时拦截遮罩点击
+        return !permanent_ && open_.get();  // 打开时拦截遮罩点击
     }
 
     /// @brief 面板矩形（本控件局部坐标）。
     [[nodiscard]] auto panel_rect() const -> Rect {
-        const float w = std::min(m_panel_width, m_size.width);
-        return m_side == DrawerSide::Left ? Rect{ .origin = Point{ .x = 0.0f, .y = 0.0f },
-                                                  .size = Size{ .width = w, .height = m_size.height } }
-                                          : Rect{ .origin = Point{ .x = m_size.width - w, .y = 0.0f },
-                                                  .size = Size{ .width = w, .height = m_size.height } };
+        const float w = std::min(panel_width_, size_.width);
+        return side_ == DrawerSide::Left
+                   ? Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = w, .height = size_.height}}
+                   : Rect{.origin = Point{.x = size_.width - w, .y = 0.0F},
+                          .size = Size{.width = w, .height = size_.height}};
     }
 
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["open"] = m_open.get();
-        props["side"] = m_side == DrawerSide::Left ? "left" : "right";
-        props["panel_width"] = m_panel_width;
-        props["permanent"] = m_permanent;
+        props["open"] = open_.get();
+        props["side"] = side_ == DrawerSide::Left ? "left" : "right";
+        props["panel_width"] = panel_width_;
+        props["permanent"] = permanent_;
     }
 
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("open")) {
-            m_open.set(props["open"].get<bool>());
+            open_.set(props["open"].get<bool>());
         }
         if (props.contains("side")) {
-            m_side = props["side"].get<std::string>() == "right" ? DrawerSide::Right : DrawerSide::Left;
+            side_ = props["side"].get<std::string>() == "right" ? DrawerSide::Right : DrawerSide::Left;
         }
         if (props.contains("panel_width")) {
-            m_panel_width = props["panel_width"].get<float>();
+            panel_width_ = props["panel_width"].get<float>();
         }
         if (props.contains("permanent")) {
-            m_permanent = props["permanent"].get<bool>();
+            permanent_ = props["permanent"].get<bool>();
         }
     }
 
     auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
-        if (m_content) {
-            fn(m_content.widget());
+        if (content_) {
+            fn(content_.widget());
         }
-        if (m_panel) {
-            fn(m_panel.widget());
+        if (panel_) {
+            fn(panel_.widget());
         }
     }
 
     [[nodiscard]] auto child_nodes() const -> const std::vector<Node> & override {
-        m_child_view.clear();
-        if (m_content) {
-            m_child_view.push_back(m_content);
+        child_view_.clear();
+        if (content_) {
+            child_view_.push_back(content_);
         }
-        if (m_panel) {
-            m_child_view.push_back(m_panel);
+        if (panel_) {
+            child_view_.push_back(panel_);
         }
-        return m_child_view;
+        return child_view_;
     }
 
   protected:
@@ -153,34 +153,34 @@ class Drawer : public Widget {
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * override;
 
     auto on_mount(const BuildContext &ctx) -> void override {
-        if (m_content) {
-            m_content.widget().mount(ctx);
+        if (content_) {
+            content_.widget().mount(ctx);
         }
-        if (m_panel) {
-            m_panel.widget().mount(ctx);
+        if (panel_) {
+            panel_.widget().mount(ctx);
         }
     }
 
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Widget::tick_gestures(now);
-        if (m_content) {
-            m_content.widget().tick(now);
+        if (content_) {
+            content_.widget().tick(now);
         }
-        if (m_panel) {
-            m_panel.widget().tick(now);
+        if (panel_) {
+            panel_.widget().tick(now);
         }
     }
 
   private:
-    Node m_content;
-    Node m_panel;
+    Node content_;
+    Node panel_;
     /// @brief child_nodes() 视图缓存（const 方法返回引用需持久存储）。
-    mutable std::vector<Node> m_child_view;
-    DrawerSide m_side = DrawerSide::Left;
-    float m_panel_width = 240.0f;
-    bool m_permanent = false;
-    State<bool> m_open{ false };
-    std::function<void(bool)> m_on_toggle;
+    mutable std::vector<Node> child_view_;
+    DrawerSide side_ = DrawerSide::Left;
+    float panel_width_ = 240.0F;
+    bool permanent_ = false;
+    State<bool> open_{false};
+    std::function<void(bool)> on_toggle_;
 };
 
 /**
@@ -195,7 +195,7 @@ class ProgressDialog : public Widget {
   public:
     ProgressDialog() = default;
     explicit ProgressDialog(std::string message, bool cancellable = true)
-        : m_message(std::move(message)), m_cancellable(cancellable) {}
+        : message_(std::move(message)), cancellable_(cancellable) {}
 
     [[nodiscard]] auto type_name() const -> const char * override { return "ProgressDialog"; }
 
@@ -203,69 +203,69 @@ class ProgressDialog : public Widget {
 
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&m_progress); }
+    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&progress_); }
 
     auto show() -> void {
-        m_open = true;
+        open_ = true;
         mark_needs_paint();
     }
     auto close() -> void {
-        m_open = false;
+        open_ = false;
         mark_needs_paint();
     }
-    [[nodiscard]] auto is_open() const -> bool { return m_open; }
+    [[nodiscard]] auto is_open() const -> bool { return open_; }
 
     /// @brief 更新进度（0..1；-1 = 不确定态）。
     auto set_progress(float v) -> void {
-        m_progress.set(v < 0.0f ? -1.0f : std::clamp(v, 0.0f, 1.0f));
+        progress_.set(v < 0.0F ? -1.0F : std::clamp(v, 0.0F, 1.0F));
         mark_needs_paint();
     }
-    [[nodiscard]] auto progress() const -> float { return m_progress.get(); }
+    [[nodiscard]] auto progress() const -> float { return progress_.get(); }
 
     auto set_message(std::string msg) -> void {
-        m_message = std::move(msg);
+        message_ = std::move(msg);
         mark_needs_paint();
     }
-    [[nodiscard]] auto message() const -> const std::string & { return m_message; }
+    [[nodiscard]] auto message() const -> const std::string & { return message_; }
 
     /// @brief 触发取消（可取消时回调 + 关闭）。
     auto cancel() -> void {
-        if (!m_cancellable) {
+        if (!cancellable_) {
             return;
         }
         close();
-        if (m_on_cancel) {
-            m_on_cancel();
+        if (on_cancel_) {
+            on_cancel_();
         }
     }
 
     auto set_on_cancel(std::function<void()> cb) -> ProgressDialog & {
-        m_on_cancel = std::move(cb);
+        on_cancel_ = std::move(cb);
         return *this;
     }
 
     /// @brief 打开时点击取消按钮区域触发取消。
     auto on_pointer_event(MouseEvent &e) -> void override {
-        if (m_open && m_cancellable && e.action == MouseAction::Press) {
-            if (m_cancel_rect.contains(e.local_position)) {
+        if (open_ && cancellable_ && e.action == MouseAction::Press) {
+            if (cancel_rect_.contains(e.local_position)) {
                 cancel();
-                e.handled = true;
+                e.is_handled = true;
                 return;
             }
-            e.handled = true; // 模态：吞掉其他点击
+            e.is_handled = true;  // 模态：吞掉其他点击
             return;
         }
         Widget::on_pointer_event(e);
     }
 
-    [[nodiscard]] auto wants_click() const -> bool override { return m_open; }
+    [[nodiscard]] auto wants_click() const -> bool override { return open_; }
 
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["message"] = m_message;
-        props["progress"] = m_progress.get();
-        props["open"] = m_open;
-        props["cancellable"] = m_cancellable;
+        props["message"] = message_;
+        props["progress"] = progress_.get();
+        props["open"] = open_;
+        props["cancellable"] = cancellable_;
     }
 
   protected:
@@ -276,13 +276,13 @@ class ProgressDialog : public Widget {
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext & /*ctx*/) -> Widget * override;
 
   private:
-    std::string m_message;
-    bool m_cancellable = true;
-    bool m_open = false;
-    State<float> m_progress{ -1.0f };
-    Rect m_box_rect;
-    Rect m_cancel_rect;
-    std::function<void()> m_on_cancel;
+    std::string message_;
+    bool cancellable_ = true;
+    bool open_ = false;
+    State<float> progress_{-1.0F};
+    Rect box_rect_;
+    Rect cancel_rect_;
+    std::function<void()> on_cancel_;
 };
 
 /**
@@ -299,9 +299,9 @@ class PageView : public Container {
   public:
     PageView() = default;
     explicit PageView(std::vector<Node> pages, int initial = 0) {
-        m_children = std::move(pages);
-        const int max_idx = static_cast<int>(m_children.size()) - 1;
-        m_current.set(std::clamp(initial, 0, std::max(0, max_idx)));
+        children_ = std::move(pages);
+        const int max_idx = static_cast<int>(children_.size()) - 1;
+        current_.set(std::clamp(initial, 0, std::max(0, max_idx)));
     }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "PageView"; }
@@ -310,58 +310,59 @@ class PageView : public Container {
 
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&m_current); }
+    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&current_); }
 
-    [[nodiscard]] auto page_count() const -> std::size_t { return m_children.size(); }
-    [[nodiscard]] auto current() -> State<int> & { return m_current; }
-    [[nodiscard]] auto current_page() const -> int { return m_current.get(); }
+    [[nodiscard]] auto page_count() const -> std::size_t { return children_.size(); }
+    [[nodiscard]] auto current() -> State<int> & { return current_; }
+    [[nodiscard]] auto current_page() const -> int { return current_.get(); }
 
     auto go_to(int index) -> void {
-        if (index >= 0 && std::cmp_less(index, m_children.size()) && index != m_current.get()) {
-            m_current.set(index);
+        if (index >= 0 && std::cmp_less(index, children_.size()) && index != current_.get()) {
+            current_.set(index);
             mark_needs_layout();
             mark_needs_paint();
-            if (m_on_page_change) {
-                m_on_page_change(index);
+            if (on_page_change_) {
+                on_page_change_(index);
             }
         }
     }
-    auto next() -> void { go_to(m_current.get() + 1); }
-    auto prev() -> void { go_to(m_current.get() - 1); }
+    auto next() -> void { go_to(current_.get() + 1); }
+    auto prev() -> void { go_to(current_.get() - 1); }
 
     auto set_show_indicator(bool v) -> PageView & {
-        m_show_indicator = v;
+        show_indicator_ = v;
         return *this;
     }
 
     auto set_on_page_change(std::function<void(int)> cb) -> PageView & {
-        m_on_page_change = std::move(cb);
+        on_page_change_ = std::move(cb);
         return *this;
     }
 
     /// @brief 水平拖拽翻页：Press 记录起点，Release 时超过 1/4 宽度切页。
     auto on_pointer_event(MouseEvent &e) -> void override {
         switch (e.action) {
-        case MouseAction::Press:
-            m_drag_start_x = e.local_position.x;
-            m_drag_active = true;
-            e.handled = true;
-            return;
-        case MouseAction::Release:
-            if (m_drag_active) {
-                const float dx = e.local_position.x - m_drag_start_x;
-                const float threshold = m_size.width * 0.25f;
-                if (dx <= -threshold) {
-                    next(); // 左滑下一页
-                } else if (dx >= threshold) {
-                    prev(); // 右滑上一页
-                }
-                m_drag_active = false;
-                e.handled = true;
+            case MouseAction::Press:
+                drag_start_x_ = e.local_position.x;
+                drag_active_ = true;
+                e.is_handled = true;
                 return;
-            }
-            break;
-        default: break;
+            case MouseAction::Release:
+                if (drag_active_) {
+                    const float dx = e.local_position.x - drag_start_x_;
+                    const float threshold = size_.width * 0.25F;
+                    if (dx <= -threshold) {
+                        next();  // 左滑下一页
+                    } else if (dx >= threshold) {
+                        prev();  // 右滑上一页
+                    }
+                    drag_active_ = false;
+                    e.is_handled = true;
+                    return;
+                }
+                break;
+            default:
+                break;
         }
         Widget::on_pointer_event(e);
     }
@@ -370,17 +371,17 @@ class PageView : public Container {
 
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["current"] = m_current.get();
-        props["show_indicator"] = m_show_indicator;
+        props["current"] = current_.get();
+        props["show_indicator"] = show_indicator_;
     }
 
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("current")) {
-            m_current.set(props["current"].get<int>());
+            current_.set(props["current"].get<int>());
         }
         if (props.contains("show_indicator")) {
-            m_show_indicator = props["show_indicator"].get<bool>();
+            show_indicator_ = props["show_indicator"].get<bool>();
         }
     }
 
@@ -392,11 +393,11 @@ class PageView : public Container {
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * override;
 
   private:
-    State<int> m_current{ 0 };
-    bool m_show_indicator = true;
-    bool m_drag_active = false;
-    float m_drag_start_x = 0.0f;
-    std::function<void(int)> m_on_page_change;
+    State<int> current_{0};
+    bool show_indicator_ = true;
+    bool drag_active_ = false;
+    float drag_start_x_ = 0.0F;
+    std::function<void(int)> on_page_change_;
 };
 
-} // namespace aurora
+}  // namespace aurora

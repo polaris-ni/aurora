@@ -7,12 +7,12 @@
 #include "aurora/core/platform.h"
 #ifdef AURORA_PLATFORM_WINDOWS
 #ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0601
+#define AURORA_WI_N32_WINNT 0x0601  // NOLINT(cppcoreguidelines-macro-usage) Vista+ 版本宏
 #endif
 #ifndef _WIN32_IE
-#define WIN32_IE 0x0600 // NOLINT(cppcoreguidelines-macro-usage, readability-identifier-naming): Windows SDK 版本宏
+#define WIN32_IE 0x0600  // NOLINT(cppcoreguidelines-macro-usage, readability-identifier-naming): Windows SDK 版本宏
 #endif
-#define WIN32_LEAN_AND_MEAN // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名
+#define WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -38,7 +38,7 @@ struct SystemTray::Impl {
     bool visible = false;
     UINT taskbar_created = 0;
 
-    static constexpr UINT m_aurora_callback_mag = WM_APP + 1;
+    static constexpr UINT AURORA_M_AURORA_CALLBACK_MAG = WM_APP + 1;
 
     auto create_window() -> bool;
     void destroy_window();
@@ -204,7 +204,7 @@ auto SystemTray::Impl::add_icon() -> bool {
     nid.hWnd = hwnd;
     nid.uID = 1;
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
-    nid.uCallbackMessage = m_aurora_callback_mag;
+    nid.uCallbackMessage = AURORA_M_AURORA_CALLBACK_MAG;
     nid.hIcon = (hicon != nullptr) ? hicon : LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
     nid.uVersion = NOTIFYICON_VERSION_4;
     update_tip();
@@ -251,7 +251,7 @@ void SystemTray::Impl::update_icon(const std::string &path) {
     }
     if (!path.empty()) {
         hicon = static_cast<HICON>(LoadImageW(nullptr, aurora::internal::utf8_to_wstr(path).c_str(), IMAGE_ICON, 0, 0,
-                                              LR_LOADFROMFILE | LR_DEFAULTSIZE));
+                                               LR_LOADFROMFILE | LR_DEFAULTSIZE));
     }
     if (visible) {
         nid.hIcon = (hicon != nullptr) ? hicon : LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
@@ -283,7 +283,7 @@ void SystemTray::Impl::show_balloon_impl(const std::string &title, const std::st
     nid.szInfo[im] = L'\0';
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_INFO;
     nid.dwInfoFlags = NIIF_INFO;
-    nid.uTimeout = 0; // 0 → 系统默认超时
+    nid.uTimeout = 0;  // 0 → 系统默认超时
     if (visible) {
         Shell_NotifyIconW(NIM_MODIFY, &nid);
     } else {
@@ -294,22 +294,27 @@ void SystemTray::Impl::show_balloon_impl(const std::string &title, const std::st
 // NOLINTNEXTLINE(modernize-use-trailing-return-type): CALLBACK 调用约定下尾返回类型会改变签名语义
 LRESULT CALLBACK SystemTray::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     auto *impl = reinterpret_cast<SystemTray::Impl *>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-    if (msg == SystemTray::Impl::m_aurora_callback_mag) {
+    if (msg == SystemTray::Impl::AURORA_M_AURORA_CALLBACK_MAG) {
         if (impl != nullptr) {
             switch (lp) {
-            case WM_LBUTTONUP:
-            case NIN_SELECT:
-            case NIN_BALLOONUSERCLICK:
-            case NIN_KEYSELECT: impl->owner->fire_activate(); break;
-            case WM_RBUTTONUP:
-            case WM_CONTEXTMENU: impl->show_context_menu(); break;
-            default: break;
+                case WM_LBUTTONUP:
+                case NIN_SELECT:
+                case NIN_BALLOONUSERCLICK:
+                case NIN_KEYSELECT:
+                    impl->owner->fire_activate();
+                    break;
+                case WM_RBUTTONUP:
+                case WM_CONTEXTMENU:
+                    impl->show_context_menu();
+                    break;
+                default:
+                    break;
             }
         }
         return 0;
     }
     if ((impl != nullptr) && (impl->taskbar_created != 0u) && msg == impl->taskbar_created) {
-        impl->add_icon(); // 资源管理器重启后重新添加图标
+        impl->add_icon();  // 资源管理器重启后重新添加图标
         return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
@@ -379,8 +384,9 @@ void SystemTray::Impl::show_context_menu() const {
 
     // 必要：让菜单在失去焦点后正确关闭
     SetForegroundWindow(hwnd);
-    const UINT cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
-    PostMessageW(hwnd, WM_NULL, 0, 0); // 修复已知 TrackPopupMenu 焦点问题
+    const UINT cmd =
+        TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+    PostMessageW(hwnd, WM_NULL, 0, 0);  // 修复已知 TrackPopupMenu 焦点问题
 
     DestroyMenu(menu);
 
@@ -393,9 +399,9 @@ void SystemTray::Impl::show_context_menu() const {
     }
 }
 
-#endif // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-pointer-arithmetic,
-       // cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-pro-type-union-access,
-       // performance-no-int-to-ptr)
-       // AURORA_PLATFORM_WINDOWS
+#endif  // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-pointer-arithmetic,
+        // cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-pro-type-union-access,
+        // performance-no-int-to-ptr)
+        // AURORA_PLATFORM_WINDOWS
 
-} // namespace aurora
+}  // namespace aurora

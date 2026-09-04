@@ -16,23 +16,23 @@ namespace aurora {
 /// @brief Button 属性（聚合）。未显式设置的 optional 颜色按状态自动派生（hover/pressed
 /// 由背景色调暗得到，禁用态用统一灰化），与 Checkbox 「缺省跟随主题」语义一致。
 struct ButtonProps {
-    Reactive<LocalizedString> label;       ///< 按钮文字
-    Reactive<Color> color = Color::blue(); ///< 背景色
-    Color on_color = Color::white();       ///< 文字色
-    Font font = Font{};                    ///< 字体
-    float corner_radius = 6.0f;            ///< 圆角半径（dp），>0 时背景与圆角裁剪
+    Reactive<LocalizedString> label;  ///< 按钮文字
+    Reactive<Color> color = Color::blue();  ///< 背景色
+    Color on_color = Color::white();  ///< 文字色
+    Font font = Font{};  ///< 字体
+    float corner_radius = 6.0F;  ///< 圆角半径（dp），>0 时背景与圆角裁剪
     EdgeInsets padding =
-        EdgeInsets{ .left = 12.0f, .top = 6.0f, .right = 12.0f, .bottom = 6.0f }; ///< 文字与背景之间的内边距
-    bool enabled = true; ///< 是否可点击（禁用态降级绘制并忽略点击）
+        EdgeInsets{.left = 12.0F, .top = 6.0F, .right = 12.0F, .bottom = 6.0F};  ///< 文字与背景之间的内边距
+    bool enabled = true;  ///< 是否可点击（禁用态降级绘制并忽略点击）
     // ---- 状态/样式扩展（对标 Flutter ButtonStyle / Qt QPushButton）----
-    std::optional<Color> hover_color;         ///< 悬停背景色；缺省 = 背景色 ×0.92 调暗
-    std::optional<Color> pressed_color;       ///< 按下背景色；缺省 = 背景色 ×0.80 调暗
-    std::optional<Color> border_color;        ///< 边框色；缺省 = 无边框（填充按钮）；搭配 border_width 可做描边按钮
-    float border_width = 0.0f;                ///< 边框线宽（dp）；0 = 不描边
-    std::optional<Color> disabled_color;      ///< 禁用态背景色；缺省 = {200,200,200}
-    std::optional<Color> disabled_text_color; ///< 禁用态文字色；缺省 = {130,130,130}
-    float min_width = 0.0f;                   ///< 最小宽度（dp）；文字+内边距不足时擑到此宽
-    float min_height = 0.0f;                  ///< 最小高度（dp）
+    std::optional<Color> hover_color;  ///< 悬停背景色；缺省 = 背景色 ×0.92 调暗
+    std::optional<Color> pressed_color;  ///< 按下背景色；缺省 = 背景色 ×0.80 调暗
+    std::optional<Color> border_color;  ///< 边框色；缺省 = 无边框（填充按钮）；搭配 border_width 可做描边按钮
+    float border_width = 0.0F;  ///< 边框线宽（dp）；0 = 不描边
+    std::optional<Color> disabled_color;  ///< 禁用态背景色；缺省 = {200,200,200}
+    std::optional<Color> disabled_text_color;  ///< 禁用态文字色；缺省 = {130,130,130}
+    float min_width = 0.0F;  ///< 最小宽度（dp）；文字+内边距不足时擑到此宽
+    float min_height = 0.0F;  ///< 最小高度（dp）
 };
 
 /**
@@ -56,7 +56,7 @@ class Button : public LeafWidget, public ButtonProps {
     explicit Button(const char *label) { this->label = label; }
 
     // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
-    std::function<void()> on_click; ///< 点击回调（同步派发，见 specification/05-event-navigation.md §3）
+    std::function<void()> on_click;  ///< 点击回调（同步派发，见 specification/05-event-navigation.md §3）
 
     /// @brief 运行时可查询的默认属性值（属性默认值的单一事实来源，需求 #5；经实例 `btn.defaults()` 调用亦可）。
     [[nodiscard]] static auto defaults() -> ButtonProps { return ButtonProps{}; }
@@ -117,7 +117,7 @@ class Button : public LeafWidget, public ButtonProps {
     }
 
     /// @brief 设置边框（链式）；width<=0 不描边。搭配透明背景可做 Outlined 风格。
-    auto set_border(Color c, float width = 1.5f) -> Button & {
+    auto set_border(Color c, float width = 1.5F) -> Button & {
         border_color = c;
         border_width = width;
         return *this;
@@ -148,29 +148,136 @@ class Button : public LeafWidget, public ButtonProps {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "Button",
-            .properties = {
-                { .name="label", .type="LocalizedString", .default_value="\"\"", .required=true, .note="按钮文字", .json_type="string" },
-                { .name="color", .type="Color", .default_value="Color::blue()", .required=false, .note="背景色", .json_type="array" },
-                { .name="on_color", .type="Color", .default_value="Color::white()", .required=false, .note="文字色", .json_type="array" },
-                { .name="font_size", .type="float", .default_value="14.0", .required=false, .note="字号(pt)", .json_type="number", .enum_values={}, .min_value="0" },
-                { .name="corner_radius", .type="float", .default_value="6.0", .required=false, .note="圆角半径(dp)", .json_type="number", .enum_values={}, .min_value="0" },
-                { .name="padding", .type="EdgeInsets", .default_value="{12,6,12,6}", .required=false, .note="内边距", .json_type="object" },
-                { .name="enabled", .type="bool", .default_value="true", .required=false, .note="是否可点击", .json_type="boolean" },
-                { .name="hover_color", .type="Color", .default_value="auto", .required=false, .note="悬停背景色（缺省由背景色调暗）", .json_type="array" },
-                { .name="pressed_color", .type="Color", .default_value="auto", .required=false, .note="按下背景色（缺省由背景色调暗）", .json_type="array" },
-                { .name="border_color", .type="Color", .default_value="none", .required=false, .note="边框色（缺省不描边）", .json_type="array", .enum_values={}, .min_value="", .max_value="", .pattern="", .constraint="", .requires_props={"border_width"} },
-                { .name="border_width", .type="float", .default_value="0.0", .required=false, .note="边框线宽(dp)；0=不描边", .json_type="number", .enum_values={}, .min_value="0" },
-                { .name="disabled_color", .type="Color", .default_value="{200,200,200}", .required=false, .note="禁用态背景色", .json_type="array" },
-                { .name="disabled_text_color", .type="Color", .default_value="{130,130,130}", .required=false, .note="禁用态文字色", .json_type="array" },
-                { .name="min_width", .type="float", .default_value="0.0", .required=false, .note="最小宽度(dp)", .json_type="number", .enum_values={}, .min_value="0" },
-                { .name="min_height", .type="float", .default_value="0.0", .required=false, .note="最小高度(dp)", .json_type="number", .enum_values={}, .min_value="0" },
-                { .name="width", .type="Length", .default_value="auto", .required=false, .note="", .json_type="array" },
-                { .name="height", .type="Length", .default_value="auto", .required=false, .note="", .json_type="array" },
-                { .name="show", .type="bool", .default_value="true", .required=false, .note="", .json_type="boolean" },
-            },
-            .events = { "on_click" },
+            .properties =
+                {
+                    {.name = "label",
+                     .type = "LocalizedString",
+                     .default_value = "\"\"",
+                     .required = true,
+                     .note = "按钮文字",
+                     .json_type = "string"},
+                    {.name = "color",
+                     .type = "Color",
+                     .default_value = "Color::blue()",
+                     .required = false,
+                     .note = "背景色",
+                     .json_type = "array"},
+                    {.name = "on_color",
+                     .type = "Color",
+                     .default_value = "Color::white()",
+                     .required = false,
+                     .note = "文字色",
+                     .json_type = "array"},
+                    {.name = "font_size",
+                     .type = "float",
+                     .default_value = "14.0",
+                     .required = false,
+                     .note = "字号(pt)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "corner_radius",
+                     .type = "float",
+                     .default_value = "6.0",
+                     .required = false,
+                     .note = "圆角半径(dp)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "padding",
+                     .type = "EdgeInsets",
+                     .default_value = "{12,6,12,6}",
+                     .required = false,
+                     .note = "内边距",
+                     .json_type = "object"},
+                    {.name = "enabled",
+                     .type = "bool",
+                     .default_value = "true",
+                     .required = false,
+                     .note = "是否可点击",
+                     .json_type = "boolean"},
+                    {.name = "hover_color",
+                     .type = "Color",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "悬停背景色（缺省由背景色调暗）",
+                     .json_type = "array"},
+                    {.name = "pressed_color",
+                     .type = "Color",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "按下背景色（缺省由背景色调暗）",
+                     .json_type = "array"},
+                    {.name = "border_color",
+                     .type = "Color",
+                     .default_value = "none",
+                     .required = false,
+                     .note = "边框色（缺省不描边）",
+                     .json_type = "array",
+                     .enum_values = {},
+                     .min_value = "",
+                     .max_value = "",
+                     .pattern = "",
+                     .constraint = "",
+                     .requires_props = {"border_width"}},
+                    {.name = "border_width",
+                     .type = "float",
+                     .default_value = "0.0",
+                     .required = false,
+                     .note = "边框线宽(dp)；0=不描边",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "disabled_color",
+                     .type = "Color",
+                     .default_value = "{200,200,200}",
+                     .required = false,
+                     .note = "禁用态背景色",
+                     .json_type = "array"},
+                    {.name = "disabled_text_color",
+                     .type = "Color",
+                     .default_value = "{130,130,130}",
+                     .required = false,
+                     .note = "禁用态文字色",
+                     .json_type = "array"},
+                    {.name = "min_width",
+                     .type = "float",
+                     .default_value = "0.0",
+                     .required = false,
+                     .note = "最小宽度(dp)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "min_height",
+                     .type = "float",
+                     .default_value = "0.0",
+                     .required = false,
+                     .note = "最小高度(dp)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "width",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "height",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "show",
+                     .type = "bool",
+                     .default_value = "true",
+                     .required = false,
+                     .note = "",
+                     .json_type = "boolean"},
+                },
+            .events = {"on_click"},
             .children_policy = "none",
-            .examples = { "au::Button(au::ButtonProps{ .label = \"OK\" })" },
+            .examples = {"au::Button(au::ButtonProps{ .label = \"OK\" })"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
@@ -194,7 +301,7 @@ class Button : public LeafWidget, public ButtonProps {
         if (border_color.has_value()) {
             props["border_color"] = color_to_json(*border_color);
         }
-        if (border_width > 0.0f) {
+        if (border_width > 0.0F) {
             props["border_width"] = border_width;
         }
         if (disabled_color.has_value()) {
@@ -203,10 +310,10 @@ class Button : public LeafWidget, public ButtonProps {
         if (disabled_text_color.has_value()) {
             props["disabled_text_color"] = color_to_json(*disabled_text_color);
         }
-        if (min_width > 0.0f) {
+        if (min_width > 0.0F) {
             props["min_width"] = min_width;
         }
-        if (min_height > 0.0f) {
+        if (min_height > 0.0F) {
             props["min_height"] = min_height;
         }
     }
@@ -214,7 +321,7 @@ class Button : public LeafWidget, public ButtonProps {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("label")) {
-            label.set(LocalizedString{ props["label"].get<std::string>() });
+            label.set(LocalizedString{props["label"].get<std::string>()});
         }
         if (props.contains("color")) {
             color.set(json_to_color(props["color"]));
@@ -280,7 +387,7 @@ class Button : public LeafWidget, public ButtonProps {
     /// @brief 按下/松开时重绘以呈现 pressed 态（基类维护 m_pressed 与点击识别）。
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (!enabled) {
-            e.handled = true; // 禁用态吞掉点击（不冒泡触发父级点击）
+            e.is_handled = true;  // 禁用态吞掉点击（不冒泡触发父级点击）
             return;
         }
         Widget::on_pointer_event(e);
@@ -292,14 +399,14 @@ class Button : public LeafWidget, public ButtonProps {
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         Font f = font;
-        if (f.size_pt <= 0.0f) {
-            f.size_pt = 14.0f;
+        if (f.size_pt <= 0.0F) {
+            f.size_pt = 14.0F;
         }
-        m_cached_text_width = render::FontEngine::measure_width(label.get().text, f);
-        m_cached_text_height = render::FontEngine::measure_height(f);
-        const float w = std::max(m_cached_text_width + padding.left + padding.right, min_width);
-        const float h = std::max(m_cached_text_height + padding.top + padding.bottom, min_height);
-        return c.constrain(Size{ .width = w, .height = h });
+        cached_text_width_ = render::FontEngine::measure_width(label.get().text, f);
+        cached_text_height_ = render::FontEngine::measure_height(f);
+        const float w = std::max(cached_text_width_ + padding.left + padding.right, min_width);
+        const float h = std::max(cached_text_height_ + padding.top + padding.bottom, min_height);
+        return c.constrain(Size{.width = w, .height = h});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override;
@@ -309,21 +416,21 @@ class Button : public LeafWidget, public ButtonProps {
     /// @brief 解析当前状态（enabled/pressed/hover）下的背景色。
     [[nodiscard]] virtual auto resolve_background() const -> Color {
         if (!enabled) {
-            return disabled_color.value_or(Color{ 200, 200, 200, 255 });
+            return disabled_color.value_or(Color{200, 200, 200, 255});
         }
         const Color bg = color.get();
-        if (m_pressed) {
-            return pressed_color.value_or(bg.shaded(0.80f));
+        if (pressed_) {
+            return pressed_color.value_or(bg.shaded(0.80F));
         }
         if (hovered()) {
-            return hover_color.value_or(bg.shaded(0.92f));
+            return hover_color.value_or(bg.shaded(0.92F));
         }
         return bg;
     }
 
     /// @brief 解析当前状态下的文字色。
     [[nodiscard]] virtual auto resolve_text_color() const -> Color {
-        return enabled ? on_color : disabled_text_color.value_or(Color{ 130, 130, 130, 255 });
+        return enabled ? on_color : disabled_text_color.value_or(Color{130, 130, 130, 255});
     }
 
     /// @brief 绘制背景（圆角填充）。
@@ -335,9 +442,9 @@ class Button : public LeafWidget, public ButtonProps {
 
     // 缓存供 on_layout / paint_label 使用；受 protected 扩展点约束，有意非 private。
     // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
-    float m_cached_text_width = 0.0f; ///< on_layout 缓存的文字宽度（dp）
+    float cached_text_width_ = 0.0F;  ///< on_layout 缓存的文字宽度（dp）
     // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
-    float m_cached_text_height = 0.0f; ///< on_layout 缓存的文字高度（dp）
+    float cached_text_height_ = 0.0F;  ///< on_layout 缓存的文字高度（dp）
 };
 
-} // namespace aurora
+}  // namespace aurora

@@ -27,7 +27,6 @@ inline auto trim(const std::string &s) -> std::string {
 }
 
 // Parse a "key = value" line; value may be "str" / true|false / an integer.
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): the key/val order is semantically fixed, not interchangeable
 inline auto parse_kv(const std::string &line, std::string &key, std::string &val) -> bool {
     const auto eq = line.find('=');
     if (eq == std::string::npos) {

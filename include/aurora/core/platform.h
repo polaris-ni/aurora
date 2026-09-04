@@ -66,7 +66,7 @@
 #endif
 
 /// 聚合宏：unix-like 家族（macOS/Linux/Android/BSD）或任意 `__unix__` 命中时置 1；Windows 为假。
-#if defined(AURORA_PLATFORM_MACOS) || defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_ANDROID) ||            \
+#if defined(AURORA_PLATFORM_MACOS) || defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_ANDROID) || \
     defined(AURORA_PLATFORM_BSD)
 #define AURORA_PLATFORM_UNIX 1
 #elif defined(__unix__) || defined(__unix)

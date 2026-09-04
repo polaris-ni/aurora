@@ -4,10 +4,9 @@
 #include <string>
 #include <vector>
 
+#include "au_lint_core.h"
 #include "aurora/aurora.h"
 #include "aurora/widget/serialization.h"
-
-#include "au_lint_core.h"
 #include "test_harness.h"
 
 using aurora::Json;
@@ -38,18 +37,32 @@ AURORA_TEST() {
 
     // ---- 合法树：不应有 error 级发现 ----
     Json ok;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     ok["type"] = "Column";
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     ok["props"] = Json::object();
     Json child;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     child["type"] = "Text";
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     child["props"]["content"] = "hi";
-    ok["children"] = Json::array({ child });
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    ok["children"] = Json::array({child});
     const auto r_ok = lint_ui_tree(ok);
     AURORA_TEST_CHECK_MSG(!has_error(r_ok), "valid tree should have no error-level findings");
 
     // ---- 未知类型：warning unknown-type（不计 error）----
     Json unk;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     unk["type"] = "BogusWidget";
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     unk["props"] = Json::object();
     const auto r_unk = lint_ui_tree(unk);
     AURORA_TEST_CHECK_MSG(count_code(r_unk, "unknown-type") == 1, "unknown type yields unknown-type warning");
@@ -57,6 +70,8 @@ AURORA_TEST() {
 
     // ---- 缺少 type：error node-no-type ----
     Json notype;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     notype["props"] = Json::object();
     const auto r_notype = lint_ui_tree(notype);
     AURORA_TEST_CHECK_MSG(count_code(r_notype, "node-no-type") == 1, "missing type yields node-no-type error");
@@ -64,7 +79,11 @@ AURORA_TEST() {
 
     // ---- children 非数组：error children-not-array ----
     Json badch;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     badch["type"] = "Column";
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     badch["children"] = "oops";
     const auto r_badch = lint_ui_tree(badch);
     AURORA_TEST_CHECK_MSG(count_code(r_badch, "children-not-array") == 1,
@@ -72,15 +91,25 @@ AURORA_TEST() {
 
     // ---- 未知属性：warning unknown-prop ----
     Json badprop;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     badprop["type"] = "Text";
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     badprop["props"]["__nope__"] = 1;
     const auto r_badprop = lint_ui_tree(badprop);
     AURORA_TEST_CHECK_MSG(count_code(r_badprop, "unknown-prop") >= 1, "unknown prop yields unknown-prop warning");
 
     // ---- 空容器：info empty-container ----
     Json empty;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     empty["type"] = "Column";
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     empty["props"] = Json::object();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     empty["children"] = Json::array();
     const auto r_empty = lint_ui_tree(empty);
     AURORA_TEST_CHECK_MSG(count_code(r_empty, "empty-container") == 1, "empty children yields empty-container info");

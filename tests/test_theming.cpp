@@ -8,7 +8,6 @@
 #include <string>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -45,11 +44,11 @@ static void test_theme() {
 }
 
 static void test_theme_scope() {
-    Node root = ThemeScope{ Theme::dark(), Column{ Node{ Text{ "x" } } } };
+    Node root = ThemeScope{Theme::dark(), Column{Node{Text{"x"}}}};
     AURORA_TEST_CHECK_MSG(std::string(root.widget().type_name()) == "ThemeScope", "ThemeScope: type_name");
 
     // Provider<Theme> 基类注入值可读
-    ThemeScope scope{ Theme::dark(), Text{ "x" } };
+    ThemeScope scope{Theme::dark(), Text{"x"}};
     const auto *tp = dynamic_cast<const ThemeProvider *>(&scope);
     AURORA_TEST_CHECK_MSG(tp != nullptr, "ThemeScope: is a ThemeProvider");
     AURORA_TEST_CHECK_MSG(tp->value().background == Theme::dark().background, "ThemeScope: injected value");
@@ -59,8 +58,8 @@ static void test_theme_scope() {
     AURORA_TEST_CHECK_MSG(resolved.background == Theme::dark().background, "resolve_theme: root resolves to dark");
 
     // 嵌套覆盖：内层 ThemeScope 生效
-    Node txt = Text{ "x" };
-    Node inner = ThemeScope{ Theme::light(), ThemeScope{ Theme::dark(), txt } };
+    Node txt = Text{"x"};
+    Node inner = ThemeScope{Theme::light(), ThemeScope{Theme::dark(), txt}};
     Theme inner_resolved = resolve_theme(inner, txt.widget());
     AURORA_TEST_CHECK_MSG(inner_resolved.background == Theme::dark().background,
                           "resolve_theme: nearest ancestor wins");
@@ -83,38 +82,36 @@ namespace {
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class ThemeProbe : public LeafWidget {
   public:
-    Theme seen = Theme::light();
+    Theme seen_ = Theme::light();
     void collect_signals(std::vector<SignalViewBase *> & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "ThemeProbe"; }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
-        return WidgetDescriptor{ .name = "ThemeProbe", .children_policy = "none" };
+        return WidgetDescriptor{.name = "ThemeProbe", .children_policy = "none"};
     }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         const auto *t = ctx.environment<Theme>();
-        seen = (t != nullptr) ? *t : Theme::light();
-        return c.constrain(Size{ .width = 10.0f, .height = 10.0f });
+        seen_ = (t != nullptr) ? *t : Theme::light();
+        return c.constrain(Size{.width = 10.0F, .height = 10.0F});
     }
     void on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) override {}
 };
-} // namespace
+}  // namespace
 
 // 主题运行时换肤：ThemeScope 包裹 State<Theme>，状态变更触发重建（从 components_test 归并）。
 static void test_theme_scope_state() {
     const auto theme_state = std::make_shared<State<Theme>>(Theme::light());
-    auto scope = ThemeScope{ theme_state, Node{ ThemeProbe{} } };
+    auto scope = ThemeScope{theme_state, Node{ThemeProbe{}}};
     const BuildContext ctx;
     scope.mount(ctx);
-    scope.layout(Constraints{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 100, .height = 100 } },
-                 ctx);
+    scope.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 100, .height = 100}}, ctx);
     AURORA_TEST_CHECK_MSG(true, "ThemeScope with State<Theme> builds");
 
     theme_state->set(Theme::dark());
     const BuildContext ctx2;
     scope.mount(ctx2);
-    scope.layout(Constraints{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 100, .height = 100 } },
-                 ctx2);
+    scope.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 100, .height = 100}}, ctx2);
     AURORA_TEST_CHECK_MSG(true, "ThemeScope rebuilds after State change");
 }
 

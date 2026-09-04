@@ -7,7 +7,6 @@
 
 #include "aurora/app/hot_reload.h"
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::HotReload;

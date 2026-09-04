@@ -35,4 +35,4 @@ class Clipboard {
     [[nodiscard]] static auto get_image() -> Image;
 };
 
-} // namespace aurora
+}  // namespace aurora

@@ -4,7 +4,7 @@
 
 namespace aurora {
 
-class Effect; // 前向声明，避免与 effect.hpp 循环依赖
+class Effect;  // 前向声明，避免与 effect.hpp 循环依赖
 
 /// @brief 响应式图的「锚点」：每个 State / Effect 实例持有一个共享锚点，
 /// 观察边 Connection 以 weak_ptr 引用它，从而在任一侧析构后都能安全探测对方
@@ -16,8 +16,8 @@ using AnchorPtr = std::shared_ptr<ReactiveAnchor>;
 /// 双方均以 weak_ptr 引用彼此的锚点，任一侧析构后对应 weak_ptr 失效，
 /// State::notify() 在遍历时跳过并惰性摘除失效边，杜绝悬垂解引用。
 struct Connection {
-    std::weak_ptr<ReactiveAnchor> effect; ///< 观察者 Effect 的锚点（弱引用，用于失效探测）
-    Effect *effect_raw = nullptr;         ///< 仅用于 StateGraph 显示；仅当 effect 锁定成功（Effect 存活）时才读取
+    std::weak_ptr<ReactiveAnchor> effect;  ///< 观察者 Effect 的锚点（弱引用，用于失效探测）
+    Effect *effect_raw = nullptr;  ///< 仅用于 StateGraph 显示；仅当 effect 锁定成功（Effect 存活）时才读取
     std::weak_ptr<ReactiveAnchor> state;  ///< 被观察 State 的锚点（弱引用）
 };
 using ConnectionPtr = std::shared_ptr<Connection>;
@@ -29,7 +29,7 @@ using ConnectionPtr = std::shared_ptr<Connection>;
  * @note Side-effects: none
  * @note Rebuildable: no
  */
-class SignalViewBase { // NOLINT(cppcoreguidelines-special-member-functions)
+class SignalViewBase {  // NOLINT(cppcoreguidelines-special-member-functions)
   public:
     // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
     virtual ~SignalViewBase() = default;
@@ -54,11 +54,12 @@ class SignalViewBase { // NOLINT(cppcoreguidelines-special-member-functions)
  * @note Side-effects: none
  * @note Rebuildable: no
  */
-template<typename T> class SignalView : public SignalViewBase {
+template <typename T>
+class SignalView : public SignalViewBase {
   public:
     [[nodiscard]] virtual auto get() const -> const T & = 0;
 
     auto read() -> void override { (void)get(); }
 };
 
-} // namespace aurora
+}  // namespace aurora

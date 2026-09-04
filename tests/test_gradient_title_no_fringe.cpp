@@ -12,7 +12,6 @@
 
 #include "aurora/aurora.h"
 #include "aurora/render/text_aa_mode.h"
-
 #include "test_harness.h"
 
 namespace ar = aurora::render;
@@ -28,11 +27,10 @@ auto paint_gradient_bg(Painter &p, int w, int h) -> void {
     const float bw = static_cast<float>(w) / bands;
     for (int i = 0; i < bands; ++i) {
         const float t = static_cast<float>(i) / (bands - 1);
-        const Color c{ static_cast<std::uint8_t>(37 + ((236 - 37) * t)),
-                       static_cast<std::uint8_t>(99 + ((72 - 99) * t)),
-                       static_cast<std::uint8_t>(235 + ((153 - 235) * t)) };
-        p.fill_rect(Rect{ .origin = Point{ .x = static_cast<float>(i) * bw, .y = 0 },
-                          .size = Size{ .width = bw + 1.0f, .height = static_cast<float>(h) } },
+        const Color c{static_cast<std::uint8_t>(37 + ((236 - 37) * t)), static_cast<std::uint8_t>(99 + ((72 - 99) * t)),
+                      static_cast<std::uint8_t>(235 + ((153 - 235) * t))};
+        p.fill_rect(Rect{.origin = Point{.x = static_cast<float>(i) * bw, .y = 0},
+                         .size = Size{.width = bw + 1.0F, .height = static_cast<float>(h)}},
                     c);
     }
 }
@@ -41,38 +39,51 @@ auto render_one(ar::TextAAMode mode, int w, int h) -> std::vector<std::uint8_t> 
     Painter p;
     p.begin(w, h);
     paint_gradient_bg(p, w, h);
-    p.draw_text(Rect{ .origin = Point{ .x = 20.0f, .y = (static_cast<float>(h) / 2) - 20.0f },
-                      .size = Size{ .width = static_cast<float>(w - 40), .height = 40.0f } },
-                std::string{ "Animation" }, Font{ .size_pt = 34.0f }, Color{ 255, 255, 255 }, mode,
-                ar::TextLayoutOpts{});
+    p.draw_text(Rect{.origin = Point{.x = 20.0F, .y = (static_cast<float>(h) / 2) - 20.0F},
+                     .size = Size{.width = static_cast<float>(w - 40), .height = 40.0F}},
+                std::string{"Animation"}, Font{.size_pt = 34.0F}, Color{255, 255, 255}, mode, ar::TextLayoutOpts{});
     const std::uint8_t *buf = p.data();
-    return std::vector(buf, buf + (static_cast<std::size_t>(w) * h * 4u));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic, modernize-return-braced-init-list)
+    // 测试助手：缓冲区间算术；范围构造保留圆括号（braced-init 会变 initializer_list）
+    return std::vector(buf, buf + (static_cast<std::size_t>(w) * h * 4U));
 }
 
 AURORA_TEST() {
-    constexpr int W = 600;
-    constexpr int H = 80;
-    const auto ct = render_one(ar::TextAAMode::ClearType, W, H);
-    const auto ss = render_one(ar::TextAAMode::Supersample, W, H);
+    constexpr int w = 600;
+    constexpr int h = 80;
+    const auto ct = render_one(ar::TextAAMode::ClearType, w, h);
+    const auto ss = render_one(ar::TextAAMode::Supersample, w, h);
 
     // 逐像素对比两种 AA 路径在同一位置的颜色差。
-    long n_diff_total = 0;    // 颜色不同的像素数（任一通道差 >= 8）
-    long n_fringe = 0;        // 通道不平衡像素（R-B 或 R-G 或 G-B 差 >= 32）
-    double sum_ch_diff = 0.0; // 像素三个通道差的最大值的累计
+    long n_diff_total = 0;  // 颜色不同的像素数（任一通道差 >= 8）
+    long n_fringe = 0;  // 通道不平衡像素（R-B 或 R-G 或 G-B 差 >= 32）
+    double sum_ch_diff = 0.0;  // 像素三个通道差的最大值的累计
     double sum_ch_diff_fringe = 0.0;
-    constexpr std::size_t n_px = static_cast<std::size_t>(W) * H;
+    constexpr std::size_t n_px = static_cast<std::size_t>(w) * h;
     for (std::size_t i = 0; i < n_px; ++i) {
-        const std::size_t off = i * 4u;
+        const std::size_t off = i * 4U;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const int cr = ct[off];
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const int cg = ct[off + 1];
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const int cb = ct[off + 2];
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const int sr = ss[off];
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const int sg = ss[off + 1];
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const int sb = ss[off + 2];
         const int dr = std::abs(cr - sr);
         const int dg = std::abs(cg - sg);
         const int db = std::abs(cb - sb);
-        const int mch = std::max({ dr, dg, db });
+        const int mch = std::max({dr, dg, db});
         if (mch >= 8) {
             ++n_diff_total;
             sum_ch_diff += mch;
@@ -91,15 +102,15 @@ AURORA_TEST() {
         const int gb_imbal = std::abs(ct_gb - ss_gb);
         if (rb_imbal >= 24 || rg_imbal >= 24 || gb_imbal >= 24) {
             ++n_fringe;
-            sum_ch_diff_fringe += std::max({ rb_imbal, rg_imbal, gb_imbal });
+            sum_ch_diff_fringe += std::max({rb_imbal, rg_imbal, gb_imbal});
         }
     }
     AURORA_LOG_INFO("test", "====== AA mode comparison on multi-color gradient (white text) ======");
     AURORA_LOG_INFO("test", "total_px=", n_px);
     AURORA_LOG_INFO("test", "[mch>=8 ] differing pixels  : ", n_diff_total, " (ClearType vs Supersample, same coord)");
-    AURORA_LOG_INFO("test", "[avg ] avg max-ch-diff     : ", (n_diff_total > 0 ? sum_ch_diff / n_diff_total : 0.0));
+    AURORA_LOG_INFO("test", "[avg ] avg max-ch-diff     : ", n_diff_total > 0 ? sum_ch_diff / n_diff_total : 0.0);
     AURORA_LOG_INFO("test", "[frng] channel-imbalance px: ", n_fringe, " (R-B/R-G/G-B diff >= 24 between modes)");
-    AURORA_LOG_INFO("test", "[frng] avg imbalance       : ", (n_fringe > 0 ? sum_ch_diff_fringe / n_fringe : 0.0));
+    AURORA_LOG_INFO("test", "[frng] avg imbalance       : ", n_fringe > 0 ? sum_ch_diff_fringe / n_fringe : 0.0);
 
     // 演示型测试：仅输出指标，不 fail。这是 ClearType 红/蓝羽化在多变背景上的"留证"——
     // 对比 Supersample 时 n_fringe 必然 > 0。`examples/demos/common.h:GradientTitle` 已经显式

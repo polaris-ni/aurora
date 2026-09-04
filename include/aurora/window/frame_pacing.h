@@ -27,4 +27,4 @@ namespace aurora {
                                         double frame_budget_ms, double elapsed_ms, bool backend_paced = false)
     -> double;
 
-} // namespace aurora
+}  // namespace aurora

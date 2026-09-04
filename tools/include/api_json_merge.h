@@ -19,9 +19,8 @@
 #pragma once
 
 #include <fstream>
-#include <string>
-
 #include <nlohmann/json.hpp>
+#include <string>
 
 namespace aurora::tools {
 
@@ -46,7 +45,7 @@ inline auto merge_api_json_section(const std::string &path, const std::string &s
         report(path + " is not an object; aborting to avoid truncation");
         return false;
     }
-    doc[section] = value; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    doc[section] = value;  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     {
         std::ofstream out(path, std::ios::binary);
         if (!out) {
@@ -58,4 +57,4 @@ inline auto merge_api_json_section(const std::string &path, const std::string &s
     return true;
 }
 
-} // namespace aurora::tools
+}  // namespace aurora::tools

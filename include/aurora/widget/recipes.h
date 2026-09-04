@@ -34,48 +34,48 @@ struct FormRow {
 };
 
 /// @brief 纵向表单：每行 = `Row(标签, 字段)`，整体包在带内边距的 Column 中。
-inline auto form_layout(std::vector<FormRow> rows, float label_width = 120.0f) -> Node {
+inline auto form_layout(std::vector<FormRow> rows, float label_width = 120.0F) -> Node {
     std::vector<Node> kids;
     kids.reserve(rows.size());
     for (auto &r : rows) {
         std::vector<Node> row_children;
-        Text label{ r.label };
+        Text label{r.label};
         label.width(px(label_width));
         row_children.emplace_back(std::move(label));
         row_children.push_back(std::move(r.field));
-        Row row{ RowProps{ .children = std::move(row_children) } };
-        row.modifier = Modifier{}.padding(4.0f);
+        Row row{RowProps{.children = std::move(row_children)}};
+        row.modifier = Modifier{}.padding(4.0F);
         kids.emplace_back(std::move(row));
     }
-    Column col{ ColumnProps{ .children = std::move(kids) } };
+    Column col{ColumnProps{.children = std::move(kids)}};
     return col;
 }
 
 /// @brief 工具栏：横向动作条（带浅色背景与内边距，填满宽度）。
 inline auto toolbar(std::vector<Node> actions) -> Node {
-    Row row{ RowProps{ .children = std::move(actions) } };
-    row.modifier = Modifier{}.fill_max_width().background(Color{ 245, 245, 247, 255 }).padding(4.0f);
+    Row row{RowProps{.children = std::move(actions)}};
+    row.modifier = Modifier{}.fill_max_width().background(Color{245, 245, 247, 255}).padding(4.0F);
     return row;
 }
 
 /// @brief 侧边栏：纵向导航条（固定宽度 + 浅色背景）。
-inline auto sidebar(std::vector<Node> items, float width = 200.0f) -> Node {
-    Column col{ ColumnProps{ .children = std::move(items) } };
-    col.modifier = Modifier{}.width(width).background(Color{ 245, 245, 247, 255 }).padding(4.0f);
+inline auto sidebar(std::vector<Node> items, float width = 200.0F) -> Node {
+    Column col{ColumnProps{.children = std::move(items)}};
+    col.modifier = Modifier{}.width(width).background(Color{245, 245, 247, 255}).padding(4.0F);
     return col;
 }
 
 /// @brief 菜单栏：顶部横向菜单条（外观类似工具栏，语义为应用主菜单）。
 inline auto menu_bar(std::vector<Node> items) -> Node {
-    Row row{ RowProps{ .children = std::move(items) } };
-    row.modifier = Modifier{}.fill_max_width().background(Color{ 235, 235, 240, 255 }).padding(2.0f);
+    Row row{RowProps{.children = std::move(items)}};
+    row.modifier = Modifier{}.fill_max_width().background(Color{235, 235, 240, 255}).padding(2.0F);
     return row;
 }
 
 /// @brief 列表视图：可滚动的纵向列表（Scroll 包裹 Column）。
 inline auto list_view(std::vector<Node> items) -> Node {
-    Column col{ ColumnProps{ .children = std::move(items) } };
-    Scroll scroll{ ScrollProps{ .child = std::move(col), .step = 16.0f } };
+    Column col{ColumnProps{.children = std::move(items)}};
+    Scroll scroll{ScrollProps{.child = std::move(col), .step = 16.0F}};
     return scroll;
 }
 
@@ -85,54 +85,54 @@ namespace detail {
 class TabBody : public Widget {
   public:
     TabBody(std::shared_ptr<State<int>> selected, std::vector<Node> pages)
-        : m_selected(std::move(selected)), m_pages(std::move(pages)) {}
+        : selected_(std::move(selected)), pages_(std::move(pages)) {}
 
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
-        if (m_selected) {
-            out.push_back(m_selected.get());
+        if (selected_) {
+            out.push_back(selected_.get());
         }
     }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "TabBody"; }
 
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
-        return WidgetDescriptor{ .name = "TabBody", .children_policy = "multiple" };
+        return WidgetDescriptor{.name = "TabBody", .children_policy = "multiple"};
     }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         const int i = current();
-        if (i >= 0 && std::cmp_less(i, m_pages.size())) {
-            m_pages[i].widget().set_layout_parent(this);
-            return m_pages[i].widget().layout(c, ctx);
+        if (i >= 0 && std::cmp_less(i, pages_.size())) {
+            pages_[i].widget().set_layout_parent(this);
+            return pages_[i].widget().layout(c, ctx);
         }
-        return c.constrain(Size{ .width = 0.0f, .height = 0.0f });
+        return c.constrain(Size{.width = 0.0F, .height = 0.0F});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         const int i = current();
-        if (i >= 0 && std::cmp_less(i, m_pages.size())) {
-            m_pages[i].widget().paint(p, bounds, ctx);
+        if (i >= 0 && std::cmp_less(i, pages_.size())) {
+            pages_[i].widget().paint(p, bounds, ctx);
         }
     }
 
   private:
     [[nodiscard]] auto current() const -> int {
-        if (!m_selected || m_pages.empty()) {
+        if (!selected_ || pages_.empty()) {
             return 0;
         }
-        const int s = m_selected->get();
-        if (s < 0 || std::cmp_greater_equal(s, m_pages.size())) {
+        const int s = selected_->get();
+        if (s < 0 || std::cmp_greater_equal(s, pages_.size())) {
             return 0;
         }
         return s;
     }
 
-    std::shared_ptr<State<int>> m_selected;
-    std::vector<Node> m_pages;
+    std::shared_ptr<State<int>> selected_;
+    std::vector<Node> pages_;
 };
 
-} // namespace detail
+}  // namespace detail
 
 /// @brief 单个标签页。
 struct TabPage {
@@ -148,7 +148,7 @@ inline auto tab_view(std::vector<TabPage> pages) -> Node {
     tab_buttons.reserve(pages.size());
     for (std::size_t i = 0; i < pages.size(); ++i) {
         const int idx = static_cast<int>(i);
-        Button btn{ pages[i].title };
+        Button btn{pages[i].title};
         btn.on_click = [selected, idx]() -> void { selected->set(idx); };
         tab_buttons.emplace_back(std::move(btn));
     }
@@ -157,12 +157,12 @@ inline auto tab_view(std::vector<TabPage> pages) -> Node {
     for (auto &pg : pages) {
         bodies.push_back(std::move(pg.content));
     }
-    Node body = detail::TabBody{ selected, std::move(bodies) };
+    Node body = detail::TabBody{selected, std::move(bodies)};
 
     std::vector<Node> col_children;
-    col_children.emplace_back(Row{ RowProps{ .children = std::move(tab_buttons) } });
+    col_children.emplace_back(Row{RowProps{.children = std::move(tab_buttons)}});
     col_children.push_back(std::move(body));
-    return Column{ ColumnProps{ .children = std::move(col_children) } };
+    return Column{ColumnProps{.children = std::move(col_children)}};
 }
 
-} // namespace aurora
+}  // namespace aurora

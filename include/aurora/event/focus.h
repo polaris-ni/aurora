@@ -63,7 +63,7 @@ class FocusManager {
 
   private:
     /// @brief 收集根树下所有可聚焦且可见的 widget，按 (tabIndex, 遍历序) 排序。
-    static auto collect_focusable(Widget &root) -> std::vector<Widget *>;
+    static auto collect_focusable(const Widget &root) -> std::vector<Widget *>;
 
     static auto collect_focusable_impl(const Widget &w, std::vector<Widget *> &out) -> void;
 
@@ -74,11 +74,11 @@ class FocusManager {
     /// 与 `HitNode` 同构：构造时探测是否由 `shared_ptr` 持有，栈/成员控件回退为裸指针。
     [[nodiscard]] auto live_focused() const -> Widget *;
 
-    Widget *m_root = nullptr;
-    Widget *m_focused = nullptr;
-    std::weak_ptr<Widget> m_focused_guard; ///< 生命周期守卫；仅当焦点控件由 shared_ptr 持有时有效
-    bool m_focused_guarded = false;        ///< guard 是否关联控制块（区分「空弱引用」与「已失效弱引用」）
-    std::function<void(Widget *, Widget *)> m_on_change;
+    Widget *root_ = nullptr;
+    Widget *focused_ = nullptr;
+    std::weak_ptr<Widget> focused_guard_;  ///< 生命周期守卫；仅当焦点控件由 shared_ptr 持有时有效
+    bool focused_guarded_ = false;  ///< guard 是否关联控制块（区分「空弱引用」与「已失效弱引用」）
+    std::function<void(Widget *, Widget *)> on_change_;
 };
 
 /// @brief 派发期间当前焦点管理器（单线程；由 `EventDispatcher` 在派发时设置，退出时复原）。
@@ -88,4 +88,4 @@ class FocusManager {
 /// @brief 设置/复原派发期间的当前焦点管理器（由 `EventDispatcher` 配对调用；嵌套派发须自行保存旧值）。
 auto set_current_focus_manager(FocusManager *fm) noexcept -> void;
 
-} // namespace aurora
+}  // namespace aurora

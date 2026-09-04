@@ -6,7 +6,6 @@
 #include "aurora/aurora.h"
 #include "aurora/core/platform.h"
 #include "aurora/window/window.h"
-
 #include "test_harness.h"
 
 namespace au = aurora;
@@ -15,14 +14,14 @@ AURORA_TEST() {
     // Headless 专属重载：png_path 应被识别并在 present 时写出 PNG。
     {
         au::HeadlessOptions opts;
-        opts.size = au::Size{ .width = 120.0f, .height = 80.0f };
+        opts.size = au::Size{.width = 120.0F, .height = 80.0F};
         opts.title = "headless_opts";
         opts.png_path = "build/window_opts_headless.png";
         auto res = au::create_window(opts);
         AURORA_TEST_CHECK(static_cast<bool>(res));
         if (res) {
             auto win = std::move(res.value());
-            au::Node page = au::Text{ au::TextProps{ .content = au::LocalizedString{ "x" } } };
+            au::Node page = au::Text{au::TextProps{.content = au::LocalizedString{"x"}}};
             auto r = win->present_root(page);
             AURORA_TEST_CHECK(static_cast<bool>(r));
             AURORA_TEST_CHECK(win->surface().frame_count() == 1);
@@ -34,7 +33,7 @@ AURORA_TEST() {
 #ifdef AURORA_PLATFORM_WINDOWS
     {
         au::Win32Options opts;
-        opts.size = au::Size{ .width = 320.0f, .height = 200.0f };
+        opts.size = au::Size{.width = 320.0F, .height = 200.0F};
         opts.title = "win32_opts";
         auto res = au::create_window(opts);
         if (res) {
@@ -47,7 +46,7 @@ AURORA_TEST() {
 #ifdef AURORA_BACKEND_GLFW
     {
         au::GlfwOptions opts;
-        opts.size = au::Size{ .width = 320.0f, .height = 200.0f };
+        opts.size = au::Size{.width = 320.0F, .height = 200.0F};
         opts.title = "glfw_opts";
         opts.gl_major = 4;
         opts.resizable = false;
@@ -61,28 +60,28 @@ AURORA_TEST() {
     // 标题下发（Window → Surface）：用 RecordingSurface 验证 set_title 转发到后端（跨平台、无需真实窗口）。
     {
         struct RecordingSurface : au::Surface {
-            bool called = false;
-            std::string got;
+            bool called_ = false;
+            std::string got_;
             [[nodiscard]] auto begin_frame(int /*w*/, int /*h*/) -> au::Result<bool> override {
-                return au::Result{ true };
+                return au::Result{true};
             }
             [[nodiscard]] auto painter() -> au::Painter & override {
                 static au::Painter p;
                 return p;
             }
-            [[nodiscard]] auto present() -> au::Result<bool> override { return au::Result{ true }; }
-            [[nodiscard]] auto size() const -> au::Size override { return au::Size{ .width = 1.0f, .height = 1.0f }; }
+            [[nodiscard]] auto present() -> au::Result<bool> override { return au::Result{true}; }
+            [[nodiscard]] auto size() const -> au::Size override { return au::Size{.width = 1.0F, .height = 1.0F}; }
             auto set_title(const std::string &t) -> void override {
-                called = true;
-                got = t;
+                called_ = true;
+                got_ = t;
             }
         };
         auto rec = std::make_unique<RecordingSurface>();
         auto *raw = rec.get();
         auto w = au::Window(std::move(rec));
         w.set_title("hello-title");
-        AURORA_TEST_CHECK(raw->called);
-        AURORA_TEST_CHECK(raw->got == "hello-title");
+        AURORA_TEST_CHECK(raw->called_);
+        AURORA_TEST_CHECK(raw->got_ == "hello-title");
         AURORA_TEST_CHECK(w.title() == "hello-title");
     }
 }

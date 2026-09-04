@@ -16,9 +16,9 @@ namespace aurora::debug {
 
 namespace {
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
-DebugPaintFlags g_flags;         ///< 全局叠层开关（DEBUG 下由 set_flags 写入）。
-DebugOverlayStats g_stats;       ///< 叠层绘制统计（测试断言用）。
-std::uint64_t g_debug_frame = 0; ///< 调试帧计数（repaint_highlight 时序）。
+DebugPaintFlags g_flags;  ///< 全局叠层开关（DEBUG 下由 set_flags 写入）。
+DebugOverlayStats g_stats;  ///< 叠层绘制统计（测试断言用）。
+std::uint64_t g_debug_frame = 0;  ///< 调试帧计数（repaint_highlight 时序）。
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 /// @brief 控件修饰链是否含离屏缓存层（对应 `Modifier::cache_layer()`）。
@@ -36,14 +36,14 @@ auto traverse(const Widget &w, const std::function<void(const Widget &)> &fn) ->
 
 /// @brief repaint_highlight 循环调色板（rainbow）：每帧推进色相。
 [[nodiscard]] auto rainbow(std::uint64_t frame) -> Color {
-    static constexpr std::array aurora_rainbow = {
+    static constexpr std::array AURORA_RAINBOW = {
         Color(255, 60, 60, 120),  Color(255, 160, 40, 120), Color(255, 230, 40, 120), Color(60, 220, 80, 120),
         Color(40, 200, 220, 120), Color(80, 120, 255, 120), Color(170, 90, 230, 120),
     };
-    constexpr std::size_t n = aurora_rainbow.size();
-    return aurora_rainbow.at(frame % n);
+    constexpr std::size_t n = AURORA_RAINBOW.size();
+    return AURORA_RAINBOW.at(frame % n);
 }
-} // namespace
+}  // namespace
 
 auto set_flags(const DebugPaintFlags &f) -> void {
 #ifdef AURORA_ENABLE_DEBUG
@@ -68,41 +68,40 @@ auto overlay_stats() -> DebugOverlayStats { return g_stats; }
 
 auto reset_overlay_stats() -> void { g_stats = DebugOverlayStats{}; }
 
-// NOLINTNEXTLINE(*-function-cognitive-complexity)
 auto paint_debug_overlays(Painter &p, const Widget &root, const Rect &root_bounds, const BuildContext &ctx) -> void {
 #ifdef AURORA_ENABLE_DEBUG
     (void)root_bounds;
-    (void)ctx; // 叠层绘制不直接消费 ctx（仅 paint 内部使用）；保留形参以维持与 picker 对称签名。
+    (void)ctx;  // 叠层绘制不直接消费 ctx（仅 paint 内部使用）；保留形参以维持与 picker 对称签名。
     reset_overlay_stats();
     const DebugPaintFlags f = g_flags;
     const std::uint64_t frame = g_debug_frame;
 
     const bool need_per_widget = f.layout_guides || f.relayout_boundaries || f.layer_borders || f.repaint_highlight;
     if (!need_per_widget && !f.overdraw) {
-        return; // 无任何需要遍历的叠层
+        return;  // 无任何需要遍历的叠层
     }
 
     // per-widget 叠层：直接读各控件 paint_bounds / is_relayout_boundary / 修饰链 / 本帧重绘标记。
     if (need_per_widget) {
         traverse(root, [&](const Widget &w) -> void {
             const Rect box = w.paint_bounds();
-            if (box.size.width <= 0.0f || box.size.height <= 0.0f) {
-                return; // 未布局 / 无尺寸控件跳过
+            if (box.size.width <= 0.0F || box.size.height <= 0.0F) {
+                return;  // 未布局 / 无尺寸控件跳过
             }
             if (f.layout_guides) {
-                p.draw_rect(box, Color(0, 200, 255, 220)); // 青色 render box 边框
+                p.draw_rect(box, Color(0, 200, 255, 220));  // 青色 render box 边框
                 ++g_stats.layout_guides_drawn;
             }
             if (f.relayout_boundaries && w.is_relayout_boundary()) {
-                p.draw_rect(box, Color(255, 0, 200, 235)); // 品红边界框（与 layout_guides 区分）
+                p.draw_rect(box, Color(255, 0, 200, 235));  // 品红边界框（与 layout_guides 区分）
                 ++g_stats.relayout_boundaries_drawn;
             }
             if (f.layer_borders && has_cache_layer(w)) {
-                p.draw_rect(box, Color(255, 150, 0, 235)); // 橙色离屏缓存层边框
+                p.draw_rect(box, Color(255, 150, 0, 235));  // 橙色离屏缓存层边框
                 ++g_stats.layer_borders_drawn;
             }
             if (f.repaint_highlight && w.debug_paint_frame() == frame) {
-                p.fill_rect(box, rainbow(frame)); // 本帧重绘控件循环色填充（rainbow）
+                p.fill_rect(box, rainbow(frame));  // 本帧重绘控件循环色填充（rainbow）
                 ++g_stats.repaint_highlight_drawn;
             }
         });
@@ -114,13 +113,13 @@ auto paint_debug_overlays(Painter &p, const Widget &root, const Rect &root_bound
     if (f.overdraw) {
         traverse(root, [&](const Widget &w) -> void {
             if (&w == &root) {
-                return; // 根背景不计入 overdraw
+                return;  // 根背景不计入 overdraw
             }
             const Rect box = w.paint_bounds();
-            if (box.size.width <= 0.0f || box.size.height <= 0.0f) {
+            if (box.size.width <= 0.0F || box.size.height <= 0.0F) {
                 return;
             }
-            p.fill_rect(box, Color(255, 80, 0, 60)); // 暖色半透明，重叠累积
+            p.fill_rect(box, Color(255, 80, 0, 60));  // 暖色半透明，重叠累积
             ++g_stats.overdraw_regions_drawn;
         });
     }
@@ -140,13 +139,13 @@ auto widget_picker(Widget &root, const Rect &root_bounds, const BuildContext &ct
     const std::vector<HitNode> chain = root.hit_test_chain(screen, root_bounds, ctx);
     res.hit = !chain.empty();
     for (const HitNode &hn : chain) {
-        Widget *w = hn.ptr; // 同步命中、主线程内，生命周期安全
+        const Widget *w = hn.ptr;  // 同步命中、主线程内，生命周期安全
         if (w == nullptr) {
             continue;
         }
         DebugPickNode node;
         node.type_name = w->type_name();
-        node.bounds = Rect{ .origin = hn.origin, .size = w->size() };
+        node.bounds = Rect{.origin = hn.origin, .size = w->size()};
         res.chain.push_back(std::move(node));
     }
     return res;
@@ -159,4 +158,4 @@ auto widget_picker(Widget &root, const Rect &root_bounds, const BuildContext &ct
 #endif
 }
 
-} // namespace aurora::debug
+}  // namespace aurora::debug

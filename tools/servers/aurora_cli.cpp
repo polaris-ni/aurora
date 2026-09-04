@@ -24,13 +24,12 @@
 #include <string>
 #include <vector>
 
+#include "api_schema.h"
 #include "aurora/app/validate.h"
 #include "aurora/aurora.h"
 #include "aurora/render/offscreen.h"
 #include "aurora/widget/codegen.h"
 #include "aurora/widget/yaml.h"
-
-#include "api_schema.h"
 #include "code_style.h"
 #include "json_file.h"
 
@@ -44,7 +43,8 @@ namespace {
 
 auto print_usage() -> void {
     AURORA_LOG_RAW(
-        "cli", "Aurora CLI v" AURORA_VERSION_STRING " -- AI-first GUI toolchain\n\n"
+        "cli", "Aurora CLI v" AURORA_VERSION_STRING
+               " -- AI-first GUI toolchain\n\n"
                "Usage: aurora_cli <command> [options]\n\n"
                "Commands:\n"
                "  components                                     list all registered component types\n"
@@ -74,7 +74,7 @@ struct CliOptions {
 };
 
 // NOLINTBEGIN(*-pro-bounds-pointer-arithmetic)
-[[nodiscard]] auto parse_options(int argc, char *argv[], int start) -> CliOptions { // NOLINT(*-avoid-c-arrays)
+[[nodiscard]] auto parse_options(int argc, char *argv[], int start) -> CliOptions {
     CliOptions opts;
     for (int i = start; i < argc; ++i) {
         std::string arg = argv[i];
@@ -86,7 +86,7 @@ struct CliOptions {
             opts.output = argv[++i];
         } else if (arg == "--style" && i + 1 < argc) {
             opts.style = argv[++i];
-        } else if (opts.file.empty() && arg[0] != '-') {
+        } else if (opts.file.empty() && arg.at(0) != '-') {
             opts.file = arg;
         }
     }
@@ -135,7 +135,7 @@ auto cmd_validate(const std::string &path) -> int {
 
     auto widget = au::serialization::from_json(tree);
     if (!widget) {
-        const auto err = au::Json{ { "ok", false }, { "error", widget.error().to_json() } };
+        const auto err = au::Json{{"ok", false}, {"error", widget.error().to_json()}};
         AURORA_LOG_RAW("cli", err.dump(2), "\n");
         return 1;
     }
@@ -143,12 +143,12 @@ auto cmd_validate(const std::string &path) -> int {
     au::Node root(std::move(widget.value()));
     auto ok = validate(root);
     if (!ok) {
-        auto err = au::Json{ { "ok", false }, { "error", ok.error().to_json() } };
+        auto err = au::Json{{"ok", false}, {"error", ok.error().to_json()}};
         AURORA_LOG_RAW("cli", err.dump(2), "\n");
         return 1;
     }
 
-    AURORA_LOG_RAW("cli", au::Json{ { "ok", true } }.dump(2), "\n");
+    AURORA_LOG_RAW("cli", au::Json{{"ok", true}}.dump(2), "\n");
     return 0;
 }
 
@@ -200,8 +200,7 @@ auto cmd_render(const CliOptions &opts) -> int {
     }
 
     AURORA_LOG_RAW(
-        "cli",
-        au::Json{ { "ok", true }, { "path", opts.output }, { "width", opts.width }, { "height", opts.height } }.dump(2),
+        "cli", au::Json{{"ok", true}, {"path", opts.output}, {"width", opts.width}, {"height", opts.height}}.dump(2),
         "\n");
     return 0;
 }
@@ -225,7 +224,7 @@ auto cmd_preview(const CliOptions &opts) -> int {
 
     au::Node root(std::move(widget.value()));
     au::WindowOptions win_opts;
-    win_opts.size = au::Size{ .width = static_cast<float>(opts.width), .height = static_cast<float>(opts.height) };
+    win_opts.size = au::Size{.width = static_cast<float>(opts.width), .height = static_cast<float>(opts.height)};
     win_opts.title = "Aurora Preview";
     // No real display backend (CI/SSH etc.): when falling back to Headless, render only one frame then exit,
     // avoiding a windowless idle frame loop.
@@ -241,9 +240,7 @@ auto cmd_preview(const CliOptions &opts) -> int {
 
     au::App().window(std::move(win.value())).view(std::move(root)).run();
     AURORA_LOG_RAW(
-        "cli",
-        au::Json{ { "ok", true }, { "preview", opts.file }, { "width", opts.width }, { "height", opts.height } }.dump(
-            2),
+        "cli", au::Json{{"ok", true}, {"preview", opts.file}, {"width", opts.width}, {"height", opts.height}}.dump(2),
         "\n");
     return 0;
 }
@@ -288,11 +285,12 @@ auto cmd_schema() -> int {
     return 0;
 }
 
-} // namespace
+}  // namespace
 
 // ---------- main ----------
 
-auto main(int argc, char *argv[]) -> int {
+auto main(int argc, char *argv[]) -> int {  // NOLINT(bugprone-exception-escape) 入口函数允许库异常逃逸到
+                                            // main（terminate 即失败路径），CLI 不包装 try/catch
     au::serialization::register_core_widgets();
 
     // NOLINTBEGIN(*-pro-bounds-pointer-arithmetic)

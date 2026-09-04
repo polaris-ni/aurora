@@ -31,7 +31,7 @@ class InspectorPanel : public Container {
     InspectorPanel() = default;
 
     /// @brief 构造：接受目标树获取函数 + 可选初始比例。
-    explicit InspectorPanel(std::function<Node()> root_getter, float tree_ratio = 0.35f);
+    explicit InspectorPanel(std::function<Node()> root_getter, float tree_ratio = 0.35F);
 
     [[nodiscard]] auto type_name() const -> const char * override { return "InspectorPanel"; }
 
@@ -45,20 +45,20 @@ class InspectorPanel : public Container {
     auto refresh() -> void;
 
     /// @brief 选中 Widget 的回调（可选，外部联动用）。
-    std::function<void(Widget *)> on_select_widget; // NOLINT(*-non-private-member-variables-in-classes)
+    std::function<void(Widget *)> on_select_widget;  // NOLINT(*-non-private-member-variables-in-classes)
 
     /// @brief 当前选中的 Widget 指针（nullptr 表示未选中）。
-    [[nodiscard]] auto selected_widget() const -> Widget * { return m_selected_widget; }
+    [[nodiscard]] auto selected_widget() const -> Widget * { return selected_widget_; }
 
     /// @brief Export the current widget tree as C++ source code.
     auto export_code() const -> std::string;
 
     /// @brief Callback invoked when the "Export Code" button is clicked.
-    std::function<void(const std::string &code)> on_export_code; // NOLINT(*-non-private-member-variables-in-classes)
+    std::function<void(const std::string &code)> on_export_code;  // NOLINT(*-non-private-member-variables-in-classes)
 
     /// @brief 当前属性面板内容（属性名值对列表，供自定义渲染/测试读取）。
     [[nodiscard]] auto current_props() const -> const std::vector<std::pair<std::string, std::string>> & {
-        return m_prop_rows;
+        return prop_rows_;
     }
 
     auto serialize_props(Json &props) const -> void override;
@@ -74,10 +74,10 @@ class InspectorPanel : public Container {
     auto on_mount(const BuildContext &ctx) -> void override;
 
   private:
-    static constexpr float m_aurora_row_height = 24.0f;
-    static constexpr float m_aurora_header_height = 28.0f;
-    static constexpr float m_aurora_handle_size = 5.0f;
-    static constexpr float m_aurora_prop_indent = 8.0f;
+    static constexpr float AURORA_ROW_HEIGHT = 24.0F;
+    static constexpr float AURORA_HEADER_HEIGHT = 28.0F;
+    static constexpr float AURORA_HANDLE_SIZE = 5.0F;
+    static constexpr float AURORA_PROP_INDENT = 8.0F;
 
     /// @brief 重建 TreeView items 与 widget 映射表。
     auto rebuild_tree() -> void;
@@ -114,17 +114,17 @@ class InspectorPanel : public Container {
     /// @brief 根据可见行号查找对应 Widget 指针。
     [[nodiscard]] auto widget_for_row(int row) const -> Widget *;
 
-    std::function<Node()> m_root_getter;                          ///< 目标树获取函数
-    Node m_target_root;                                           ///< 缓存的目标树根节点
-    std::vector<TreeItem> m_tree_items;                           ///< TreeView 数据
-    std::vector<Widget *> m_widget_map;                           ///< 可见行号 → Widget 指针映射
-    float m_ratio = 0.35f;                                        ///< 左侧树占比
-    bool m_dragging = false;                                      ///< 分隔条拖拽中
-    Widget *m_selected_widget = nullptr;                          ///< 当前选中 Widget
-    std::vector<std::pair<std::string, std::string>> m_prop_rows; ///< 属性名值对
-    Size m_total_size{ .width = 0.0f, .height = 0.0f };           ///< 上次布局总尺寸
-    bool m_needs_rebuild = true;                                  ///< 是否需要重建树
-    Rect m_export_btn_rect;                                       ///< Export Code 按钮命中区域
+    std::function<Node()> root_getter_;  ///< 目标树获取函数
+    Node target_root_;  ///< 缓存的目标树根节点
+    std::vector<TreeItem> tree_items_;  ///< TreeView 数据
+    std::vector<Widget *> widget_map_;  ///< 可见行号 → Widget 指针映射
+    float ratio_ = 0.35F;  ///< 左侧树占比
+    bool dragging_ = false;  ///< 分隔条拖拽中
+    Widget *selected_widget_ = nullptr;  ///< 当前选中 Widget
+    std::vector<std::pair<std::string, std::string>> prop_rows_;  ///< 属性名值对
+    Size total_size_{.width = 0.0F, .height = 0.0F};  ///< 上次布局总尺寸
+    bool needs_rebuild_ = true;  ///< 是否需要重建树
+    Rect export_btn_rect_;  ///< Export Code 按钮命中区域
 };
 
-} // namespace aurora
+}  // namespace aurora

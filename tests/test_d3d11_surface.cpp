@@ -20,7 +20,7 @@ void test_smoke() {
     AURORA_TEST_CHECK_MSG(true, "d3d11_surface compiled-in smoke");
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() { test_smoke(); }
 #else

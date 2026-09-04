@@ -40,6 +40,7 @@ namespace {
         return sorted.back();
     }
     const double frac = pos - static_cast<double>(lo);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     return (sorted[lo] * (1.0 - frac)) + (sorted[hi] * frac);
 }
 
@@ -165,14 +166,14 @@ auto PerfReport::to_csv_row() const -> std::string {
 // PerfSession
 // ---------------------------------------------------------------------------
 
-PerfSession::PerfSession(std::string name, std::size_t reserve_frames) : m_name(std::move(name)) {
-    m_frame_ms.reserve(reserve_frames == 0 ? AURORA_DEFAULT_RESERVE_FRAMES : reserve_frames);
+PerfSession::PerfSession(std::string name, std::size_t reserve_frames) : name_(std::move(name)) {
+    frame_ms_.reserve(reserve_frames == 0 ? AURORA_DEFAULT_RESERVE_FRAMES : reserve_frames);
 }
 
 auto PerfSession::begin(std::size_t reserve_frames) -> void {
     clear();
     if (reserve_frames > 0) {
-        m_frame_ms.reserve(reserve_frames);
+        frame_ms_.reserve(reserve_frames);
     }
 }
 
@@ -182,27 +183,27 @@ auto PerfSession::record_frame(double frame_ms) -> void {
 }
 
 auto PerfSession::record_frame(double frame_ms, const RenderCounters &counters) -> void {
-    m_frame_ms.push_back(frame_ms);
+    frame_ms_.push_back(frame_ms);
 
-    m_sum.add(counters);
-    m_max.merge_max(counters);
+    sum_.add(counters);
+    max_.merge_max(counters);
     if (counters.full_redraw) {
-        ++m_full_redraw_frames;
+        ++full_redraw_frames_;
     }
 
     if constexpr (profiling_enabled()) {
         const Profiler &prof = Profiler::instance();
-        m_long_tasks += prof.long_tasks().size();
+        long_tasks_ += prof.long_tasks().size();
         merge_zones(prof.aggregates());
     }
 }
 
 auto PerfSession::merge_zones(const std::vector<ZoneAggregate> &frame_zones) -> void {
     for (const ZoneAggregate &z : frame_zones) {
-        auto it = std::ranges::find_if(m_zones,
+        auto it = std::ranges::find_if(zones_,
                                        [&](const ZoneAggregate &a) -> bool { return same_zone_name(a.name, z.name); });
-        if (it == m_zones.end()) {
-            m_zones.push_back(z);
+        if (it == zones_.end()) {
+            zones_.push_back(z);
         } else {
             it->call_count += z.call_count;
             it->total_ms += z.total_ms;
@@ -211,50 +212,50 @@ auto PerfSession::merge_zones(const std::vector<ZoneAggregate> &frame_zones) -> 
     }
 }
 
-auto PerfSession::frame_count() const -> std::size_t { return m_frame_ms.size(); }
+auto PerfSession::frame_count() const -> std::size_t { return frame_ms_.size(); }
 
-auto PerfSession::frame_times_ms() const -> const std::vector<double> & { return m_frame_ms; }
+auto PerfSession::frame_times_ms() const -> const std::vector<double> & { return frame_ms_; }
 
-auto PerfSession::set_frame_budget_ms(double ms) -> void { m_frame_budget_ms = ms; }
+auto PerfSession::set_frame_budget_ms(double ms) -> void { frame_budget_ms_ = ms; }
 
-auto PerfSession::frame_budget_ms() const -> double { return m_frame_budget_ms; }
+auto PerfSession::frame_budget_ms() const -> double { return frame_budget_ms_; }
 
-auto PerfSession::name() const -> const std::string & { return m_name; }
+auto PerfSession::name() const -> const std::string & { return name_; }
 
 auto PerfSession::report() const -> PerfReport {
     PerfReport r{};
-    r.name = m_name;
-    r.frame_count = m_frame_ms.size();
-    r.frame_budget_ms = m_frame_budget_ms;
-    r.counters_sum = m_sum;
-    r.counters_max = m_max;
-    r.long_task_count = m_long_tasks;
-    r.full_redraw_frames = m_full_redraw_frames;
-    r.zones = m_zones;
+    r.name = name_;
+    r.frame_count = frame_ms_.size();
+    r.frame_budget_ms = frame_budget_ms_;
+    r.counters_sum = sum_;
+    r.counters_max = max_;
+    r.long_task_count = long_tasks_;
+    r.full_redraw_frames = full_redraw_frames_;
+    r.zones = zones_;
     std::ranges::sort(r.zones,
                       [](const ZoneAggregate &a, const ZoneAggregate &b) -> bool { return a.total_ms > b.total_ms; });
 
-    if (m_frame_ms.empty()) {
+    if (frame_ms_.empty()) {
         return r;
     }
 
     double sum = 0.0;
     double sum_sq = 0.0;
-    for (const double ms : m_frame_ms) {
+    for (const double ms : frame_ms_) {
         sum += ms;
         sum_sq += ms * ms;
-        if (ms > m_frame_budget_ms) {
+        if (ms > frame_budget_ms_) {
             ++r.over_budget_frames;
         }
     }
-    const auto n = static_cast<double>(m_frame_ms.size());
+    const auto n = static_cast<double>(frame_ms_.size());
     r.total_ms = sum;
     r.avg_frame_ms = sum / n;
 
     const double var = (sum_sq / n) - (r.avg_frame_ms * r.avg_frame_ms);
     r.jitter_ms = var > 0.0 ? std::sqrt(var) : 0.0;
 
-    std::vector<double> sorted = m_frame_ms;
+    std::vector<double> sorted = frame_ms_;
     std::ranges::sort(sorted);
     r.best_ms = sorted.front();
     r.worst_ms = sorted.back();
@@ -265,12 +266,12 @@ auto PerfSession::report() const -> PerfReport {
 }
 
 auto PerfSession::clear() -> void {
-    m_frame_ms.clear();
-    m_zones.clear();
-    m_sum = RenderCounters{};
-    m_max = RenderCounters{};
-    m_long_tasks = 0;
-    m_full_redraw_frames = 0;
+    frame_ms_.clear();
+    zones_.clear();
+    sum_ = RenderCounters{};
+    max_ = RenderCounters{};
+    long_tasks_ = 0;
+    full_redraw_frames_ = 0;
 }
 
 } // namespace aurora

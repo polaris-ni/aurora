@@ -39,8 +39,8 @@ class GlfwSurface : public Surface {
   public:
     /// @brief 后端配置。逻辑尺寸为 aurora 坐标系下的像素（不含 DPI 缩放）。
     struct Config {
-        Size size{ .width = 800.0f, .height = 600.0f }; ///< 逻辑尺寸（= GLFW 内容尺寸）
-        std::string title{ "Aurora" };
+        Size size{.width = 800.0F, .height = 600.0F};  ///< 逻辑尺寸（= GLFW 内容尺寸）
+        std::string title{"Aurora"};
         int gl_major = 3;
         int gl_minor = 3;
         bool resizable = true;
@@ -66,7 +66,7 @@ class GlfwSurface : public Surface {
     [[nodiscard]] auto present() -> Result<bool> override;
     [[nodiscard]] auto size() const -> Size override;
     /// @brief begin_frame 铺的浅色底色（与 begin_frame 内 fill_rect 同色）：供脏区裁剪重绘重铺底色。
-    [[nodiscard]] auto clear_color() const -> Color override { return Color{ 245, 245, 247, 255 }; }
+    [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
     [[nodiscard]] auto scale_factor() const -> float override;
     [[nodiscard]] auto should_close() const -> bool override;
 
@@ -85,7 +85,7 @@ class GlfwSurface : public Surface {
 
   private:
     struct Impl;
-    std::unique_ptr<Impl> m_pimpl;
+    std::unique_ptr<Impl> pimpl_;
 };
 
-} // namespace aurora
+}  // namespace aurora

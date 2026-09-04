@@ -26,4 +26,4 @@ inline auto parse_code_style(const std::string &style_str) -> CodeStyle {
     return style;
 }
 
-} // namespace aurora::tools
+}  // namespace aurora::tools

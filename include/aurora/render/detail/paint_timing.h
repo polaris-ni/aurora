@@ -10,16 +10,16 @@ namespace aurora::detail {
 // 与其余（other）。仅供 DEBUG 排查，不用于生产。
 struct PaintTiming {
     double fill = 0, text = 0, shadow = 0, gradient = 0, image = 0, blur = 0;
-    double border = 0, line = 0; // draw_rounded_border / draw_line
+    double border = 0, line = 0;  // draw_rounded_border / draw_line
     double composite = 0, clear = 0, shift = 0, region = 0;
-    double scene = 0, glue = 0, other = 0; // glue = scene 内非栅格的「树遍历/DL 回放/调度」胶水耗时
-    std::uint64_t paint_nodes = 0;         // 本帧真正参与 paint 遍历的节点数（DL 命中不计）
-    std::uint64_t dl_replays = 0;          // 本帧 DisplayList 命中回放次数
-    std::uint64_t dl_records = 0;          // 本帧 DisplayList 录制次数（含未命中缓存的首录）
-    std::uint64_t scroll_r_whole = 0;      // 累积：Scroll 整块重录帧数（缓冲无效/布局标脏）
-    std::uint64_t scroll_r_band = 0;       // 累积：Scroll 局部（脏带）重录帧数（动画后代标脏）
-    std::uint64_t scroll_r_reanchor = 0;   // 累积：Scroll 增量重锚帧数（长内容滚动）
-    std::uint64_t scroll_r_blit = 0;       // 累积：Scroll 仅平移合成帧数（理想稳态应≈绘制帧数）
+    double scene = 0, glue = 0, other = 0;  // glue = scene 内非栅格的「树遍历/DL 回放/调度」胶水耗时
+    std::uint64_t paint_nodes = 0;  // 本帧真正参与 paint 遍历的节点数（DL 命中不计）
+    std::uint64_t dl_replays = 0;  // 本帧 DisplayList 命中回放次数
+    std::uint64_t dl_records = 0;  // 本帧 DisplayList 录制次数（含未命中缓存的首录）
+    std::uint64_t scroll_r_whole = 0;  // 累积：Scroll 整块重录帧数（缓冲无效/布局标脏）
+    std::uint64_t scroll_r_band = 0;  // 累积：Scroll 局部（脏带）重录帧数（动画后代标脏）
+    std::uint64_t scroll_r_reanchor = 0;  // 累积：Scroll 增量重锚帧数（长内容滚动）
+    std::uint64_t scroll_r_blit = 0;  // 累积：Scroll 仅平移合成帧数（理想稳态应≈绘制帧数）
 };
 
 // RAII 计时器：构造记录起点，析构把耗时累加到 *cat。active=false 时不计时（用于避免嵌套 record 重复累加）。
@@ -66,4 +66,4 @@ auto paint_timing_last() -> const PaintTiming &;
 // 但仍清零当前帧（idle 帧不进 paint 域，累加器本就为空，清零下帧从零计）。
 auto commit_paint_frame(bool drew) -> void;
 
-} // namespace aurora::detail
+}  // namespace aurora::detail

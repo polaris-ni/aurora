@@ -17,9 +17,9 @@ namespace aurora {
  * @note Rebuildable: no
  */
 struct ValidationError {
-    std::string path;       ///< JSON 路径，如 "$.children[0].props.text"
-    std::string message;    ///< 错误描述，如 "missing required prop"
-    std::string suggestion; ///< 修复建议，如 "add text: \"Hello\""
+    std::string path;  ///< JSON 路径，如 "$.children[0].props.text"
+    std::string message;  ///< 错误描述，如 "missing required prop"
+    std::string suggestion;  ///< 修复建议，如 "add text: \"Hello\""
 
     [[nodiscard]] auto to_json() const -> Json {
         Json j;
@@ -55,4 +55,4 @@ struct ValidationError {
  */
 [[nodiscard]] auto validate_ui_tree_json(const Json &tree) -> Json;
 
-} // namespace aurora
+}  // namespace aurora

@@ -49,6 +49,7 @@ AURORA_TEST() {
         Json props = Json::object();
         chip.serialize_props(props);
         AURORA_TEST_CHECK(props.contains("label"));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["label"].get<std::string>() == "Hello");
 
         Chip chip2;
@@ -107,6 +108,7 @@ AURORA_TEST() {
         Json props = Json::object();
         badge.serialize_props(props);
         AURORA_TEST_CHECK(props.contains("count"));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["count"].get<int>() == 7);
 
         Badge badge2;
@@ -118,25 +120,31 @@ AURORA_TEST() {
     {
         Chip chip;
         chip.set_label("Style")
-            .set_background(Color{ 10, 20, 30, 255 })
-            .set_text_color(Color{ 1, 2, 3, 255 })
-            .set_delete_color(Color{ 4, 5, 6, 255 })
-            .set_font_size(15.0f)
-            .set_corner_radius(9.0f);
+            .set_background(Color{10, 20, 30, 255})
+            .set_text_color(Color{1, 2, 3, 255})
+            .set_delete_color(Color{4, 5, 6, 255})
+            .set_font_size(15.0F)
+            .set_corner_radius(9.0F);
         Json props = Json::object();
         chip.serialize_props(props);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["background"][0].get<int>() == 10);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["text_color"][2].get<int>() == 3);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["delete_color"][0].get<int>() == 4);
-        AURORA_TEST_CHECK(props["font_size"].get<float>() == 15.0f);
-        AURORA_TEST_CHECK(props["corner_radius"].get<float>() == 9.0f);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(props["font_size"].get<float>() == 15.0F);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(props["corner_radius"].get<float>() == 9.0F);
 
         Chip chip2;
         chip2.deserialize_props(props);
         AURORA_TEST_CHECK(chip2.background() == Color(10, 20, 30, 255));
         Json k = Json::object();
         chip2.serialize_props(k);
-        AURORA_TEST_CHECK(k["corner_radius"].get<float>() == 9.0f);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(k["corner_radius"].get<float>() == 9.0F);
     }
 
     // --- Badge 徽章色/文字色往返 ---
@@ -145,13 +153,16 @@ AURORA_TEST() {
         badge.set_count(3).set_badge_color(Color{ 11, 22, 33, 255 }).set_text_color(Color{ 44, 55, 66, 255 });
         Json props = Json::object();
         badge.serialize_props(props);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["badge_color"][0].get<int>() == 11);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["text_color"][1].get<int>() == 55);
 
         Badge badge2;
         badge2.deserialize_props(props);
         Json k = Json::object();
         badge2.serialize_props(k);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(k["badge_color"][2].get<int>() == 33);
     }
 }

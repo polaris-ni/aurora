@@ -35,7 +35,7 @@ enum class ErrorSeverity : std::uint8_t {
     Fatal = 3,
 };
 
-enum class ErrorCode : std::uint16_t { // NOLINT(*-enum-size)
+enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     GeneralUnknown = 0,
     GeneralInvalidArgument = 1,
     GeneralNotSupported = 2,
@@ -91,14 +91,14 @@ enum class ErrorCode : std::uint16_t { // NOLINT(*-enum-size)
 
 struct ErrorMeta {
     ErrorCode code;
-    std::string_view ident;         // C++ identifier, e.g. "NavDepthExceeded" (debug use)
-    std::string_view slug;          // frozen external code, e.g. "nav-depth-exceeded"
+    std::string_view ident;  // C++ identifier, e.g. "NavDepthExceeded" (debug use)
+    std::string_view slug;  // frozen external code, e.g. "nav-depth-exceeded"
     ErrorCategory category;
     ErrorSeverity severity;
     bool auto_fixable;
     std::string_view fix_category;
     bool retryable;
-    std::string_view message_tpl;   // contains {placeholder}
+    std::string_view message_tpl;  // contains {placeholder}
     std::string_view hint;
 };
 
@@ -522,7 +522,8 @@ inline constexpr std::array<ErrorMeta, 51> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Requested render backend is unavailable",
-            .hint = "Check the backend compile switch (AURORA_BACKEND_D3D11) or fall back to software rendering (RendererPreference::Auto/Software)",
+            .hint = "Check the backend compile switch (AURORA_BACKEND_D3D11) or fall back to software rendering "
+                    "(RendererPreference::Auto/Software)",
         },
         {
             .code = ErrorCode::PrefsNotPersistent,
@@ -582,7 +583,8 @@ inline constexpr std::array<ErrorMeta, 51> AURORA_ERROR_TABLE = {
             .fix_category = "layout_conflict",
             .retryable = false,
             .message_tpl = "Widget tree depth exceeded the limit (default 64)",
-            .hint = "Usually caused by infinitely recursive Repeater / self-referencing Provider; check rebuild conditions or set_max_depth()",
+            .hint = "Usually caused by infinitely recursive Repeater / self-referencing Provider; check rebuild "
+                    "conditions or set_max_depth()",
         },
         {
             .code = ErrorCode::RenderDegraded,
@@ -606,7 +608,8 @@ inline constexpr std::array<ErrorMeta, 51> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Requested font unavailable, fell back to built-in Bitmap font",
-            .hint = "On non-Windows platforms the GDI font fallback chain may differ; ensure the font is registered or use the built-in font",
+            .hint = "On non-Windows platforms the GDI font fallback chain may differ; ensure the font is registered or "
+                    "use the built-in font",
         },
         {
             .code = ErrorCode::SurfaceLost,
@@ -618,7 +621,8 @@ inline constexpr std::array<ErrorMeta, 51> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Surface lost (e.g. window destroyed/device reset)",
-            .hint = "Need to rebuild the Surface to continue rendering; in most cases the framework auto-recovers on next present",
+            .hint = "Need to rebuild the Surface to continue rendering; in most cases the framework auto-recovers on "
+                    "next present",
         },
         {
             .code = ErrorCode::NotRestorable,
@@ -630,7 +634,8 @@ inline constexpr std::array<ErrorMeta, 51> AURORA_ERROR_TABLE = {
             .fix_category = "unknown",
             .retryable = false,
             .message_tpl = "Widget not restorable (skipped during serialization/deserialization)",
-            .hint = "Widgets relying on runtime callbacks such as Repeater / Canvas cannot be restored from JSON; use a named factory or State injection",
+            .hint = "Widgets relying on runtime callbacks such as Repeater / Canvas cannot be restored from JSON; use "
+                    "a named factory or State injection",
         },
         {
             .code = ErrorCode::JsonParseError,
@@ -654,7 +659,8 @@ inline constexpr std::array<ErrorMeta, 51> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Storage backend unavailable (directory not writable or media open failed)",
-            .hint = "Check storage path permissions; when a cross-process lock is held, wait or close the occupying process",
+            .hint = "Check storage path permissions; when a cross-process lock is held, wait or close the occupying "
+                    "process",
         },
         {
             .code = ErrorCode::StorageRecordNotFound,
@@ -702,7 +708,8 @@ inline constexpr std::array<ErrorMeta, 51> AURORA_ERROR_TABLE = {
             .fix_category = "type_error",
             .retryable = false,
             .message_tpl = "Serialized wire format mismatch",
-            .hint = "Record stored as binary but type T only supports JSON (or vice versa); use get_value or fix T's serialization concept",
+            .hint = "Record stored as binary but type T only supports JSON (or vice versa); use get_value or fix T's "
+                    "serialization concept",
         },
         {
             .code = ErrorCode::StorageIoError,
@@ -716,14 +723,12 @@ inline constexpr std::array<ErrorMeta, 51> AURORA_ERROR_TABLE = {
             .message_tpl = "Storage underlying I/O failed",
             .hint = "Check disk space/permissions; rename failure may be a cross-volume move, use a same-volume path",
         },
-  },
+    },
 };
 
 constexpr auto error_count() -> std::size_t { return std::size(AURORA_ERROR_TABLE); }
 
-constexpr auto slug(ErrorCode c) -> std::string_view {
-    return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).slug;
-}
+constexpr auto slug(ErrorCode c) -> std::string_view { return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).slug; }
 constexpr auto category(ErrorCode c) -> ErrorCategory {
     return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).category;
 }
@@ -736,9 +741,7 @@ constexpr auto is_auto_fixable(ErrorCode c) -> bool {
 constexpr auto fix_category_of(ErrorCode c) -> std::string_view {
     return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).fix_category;
 }
-constexpr auto retryable(ErrorCode c) -> bool {
-    return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).retryable;
-}
+constexpr auto retryable(ErrorCode c) -> bool { return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).retryable; }
 constexpr auto hint_of(ErrorCode c) -> std::string_view {
     return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).hint;
 }
@@ -749,27 +752,42 @@ constexpr auto to_string(ErrorCode c) -> std::string_view {
 
 constexpr auto to_string(ErrorCategory c) -> std::string_view {
     switch (c) {
-        case ErrorCategory::General: return "general";
-        case ErrorCategory::Layout: return "layout";
-        case ErrorCategory::Widget: return "widget";
-        case ErrorCategory::Render: return "render";
-        case ErrorCategory::Io: return "io";
-        case ErrorCategory::Validation: return "validation";
-        case ErrorCategory::Navigation: return "navigation";
-        case ErrorCategory::Platform: return "platform";
-        case ErrorCategory::Runtime: return "runtime";
-        case ErrorCategory::Generation: return "generation";
-        case ErrorCategory::Diagnostic: return "diagnostic";
+        case ErrorCategory::General:
+            return "general";
+        case ErrorCategory::Layout:
+            return "layout";
+        case ErrorCategory::Widget:
+            return "widget";
+        case ErrorCategory::Render:
+            return "render";
+        case ErrorCategory::Io:
+            return "io";
+        case ErrorCategory::Validation:
+            return "validation";
+        case ErrorCategory::Navigation:
+            return "navigation";
+        case ErrorCategory::Platform:
+            return "platform";
+        case ErrorCategory::Runtime:
+            return "runtime";
+        case ErrorCategory::Generation:
+            return "generation";
+        case ErrorCategory::Diagnostic:
+            return "diagnostic";
     }
     return "unknown";
 }
 
 constexpr auto to_string(ErrorSeverity s) -> std::string_view {
     switch (s) {
-        case ErrorSeverity::Info: return "info";
-        case ErrorSeverity::Warning: return "warning";
-        case ErrorSeverity::Error: return "error";
-        case ErrorSeverity::Fatal: return "fatal";
+        case ErrorSeverity::Info:
+            return "info";
+        case ErrorSeverity::Warning:
+            return "warning";
+        case ErrorSeverity::Error:
+            return "error";
+        case ErrorSeverity::Fatal:
+            return "fatal";
     }
     return "error";
 }
@@ -795,4 +813,4 @@ inline auto format_message(std::string_view tpl, const ErrorParams& params) -> s
     return out;
 }
 
-} // namespace aurora
+}  // namespace aurora

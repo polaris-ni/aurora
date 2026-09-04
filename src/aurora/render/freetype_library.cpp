@@ -6,8 +6,8 @@
 namespace aurora::render {
 
 namespace {
-FT_Library g_lib = nullptr; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-} // namespace
+FT_Library g_lib = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+}  // namespace
 
 auto ft_library() -> FT_Library {
     if (g_lib == nullptr) {
@@ -29,4 +29,4 @@ auto ft_shutdown() -> void {
     }
 }
 
-} // namespace aurora::render
+}  // namespace aurora::render

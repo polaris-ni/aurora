@@ -88,8 +88,10 @@ AURORA_TEST() {
         Json props = Json::object();
         st.serialize_props(props);
         AURORA_TEST_CHECK(props.contains("current"));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["current"].get<int>() == 2);
         AURORA_TEST_CHECK(props.contains("step_count"));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["step_count"].get<int>() == 3);
 
         Stepper st2({ { .label = "X" }, { .label = "Y" }, { .label = "Z" } });

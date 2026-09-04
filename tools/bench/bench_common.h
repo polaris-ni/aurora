@@ -48,4 +48,4 @@ inline auto bench_row(const char *name, double ms) -> void {
     AURORA_LOG_RAW("bench", "| ", name, " | ", ffmt(3, ms), " ms |\n");
 }
 
-} // namespace aurora::bench
+}  // namespace aurora::bench

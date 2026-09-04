@@ -8,7 +8,6 @@
 #include "aurora/aurora.h"
 #include "aurora/todo.h"
 #include "aurora/widget/placeholder.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -22,7 +21,7 @@ using aurora::TODO;
 
 static void test_todo() {
     // au::TODO 可转换为任意回调签名，调用时仅记录警告而不崩溃
-    Diagnostics::take(); // 清空已有诊断
+    Diagnostics::take();  // 清空已有诊断
     const std::function<void()> fn = TODO("wire save logic");
     fn();
     AURORA_TEST_CHECK_MSG(Diagnostics::count() >= 1, "au::TODO: invocation records a warning, no crash");
@@ -34,11 +33,11 @@ static void test_todo() {
 }
 
 static void test_placeholder_widget() {
-    Placeholder ph{ "missing feature" };
+    Placeholder ph{"missing feature"};
     AURORA_TEST_CHECK_MSG(std::string(ph.type_name()) == "Placeholder", "Placeholder widget: type_name");
     const BuildContext ctx;
-    const Size s = ph.layout(
-        Constraints{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 200, .height = 200 } }, ctx);
+    const Size s =
+        ph.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 200, .height = 200}}, ctx);
     AURORA_TEST_CHECK_MSG(s.width > 0 && s.height > 0, "Placeholder widget: layout non-zero");
 
     const Placeholder empty;
@@ -53,16 +52,28 @@ static void test_placeholder_colors() {
         .set_text_color(Color::blue());
     Json j;
     p.serialize_props(j);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["message"].get<std::string>() == "x", "ph message");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["background_color"][0].get<int>() == 255, "ph bg red");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["border_color"][1].get<int>() == Color::green().m_g, "ph border green");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["text_color"][2].get<int>() == 255, "ph text blue");
 
     Placeholder q;
     q.deserialize_props(j);
     Json k;
     q.serialize_props(k);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(k["background_color"][0].get<int>() == 255, "ph rt bg");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(k["border_color"][1].get<int>() == Color::green().m_g, "ph rt border");
 }
 

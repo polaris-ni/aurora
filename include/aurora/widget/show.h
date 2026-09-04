@@ -23,10 +23,10 @@ namespace aurora {
 class Show : public SingleChild {
   public:
     Show() = default;
-    explicit Show(bool condition, Node child) : SingleChild(std::move(child)), m_condition(condition) {}
+    explicit Show(bool condition, Node child) : SingleChild(std::move(child)), condition_(condition) {}
 
     explicit Show(std::shared_ptr<State<bool>> condition, Node child)
-        : SingleChild(std::move(child)), m_state(std::move(condition)), m_condition(m_state ? m_state->get() : false) {}
+        : SingleChild(std::move(child)), state_(std::move(condition)), condition_(state_ ? state_->get() : false) {}
 
     [[nodiscard]] auto type_name() const -> const char * override { return "Show"; }
 
@@ -34,33 +34,34 @@ class Show : public SingleChild {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "Show",
-            .properties = {
-                { .name = "visible", .type = "bool", .default_value = "true", .required = false, .note = "是否可见" },
-                { .name = "width", .type = "Length", .default_value = "auto", .required = false },
-                { .name = "height", .type = "Length", .default_value = "auto", .required = false },
-                { .name = "show", .type = "bool", .default_value = "true", .required = false },
-            },
+            .properties =
+                {
+                    {.name = "visible", .type = "bool", .default_value = "true", .required = false, .note = "是否可见"},
+                    {.name = "width", .type = "Length", .default_value = "auto", .required = false},
+                    {.name = "height", .type = "Length", .default_value = "auto", .required = false},
+                    {.name = "show", .type = "bool", .default_value = "true", .required = false},
+                },
             .events = {},
             .children_policy = "single",
-            .examples = { "au::Show(true, au::Text(\"visible\"))" },
+            .examples = {"au::Show(true, au::Text(\"visible\"))"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 当前是否可见（条件为真时显示子节点）。
-    [[nodiscard]] auto is_visible() const -> bool { return m_state ? m_state->get() : m_condition; }
+    [[nodiscard]] auto is_visible() const -> bool { return state_ ? state_->get() : condition_; }
 
     // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     auto adopt_children(std::vector<Node> &&kids) -> void override {
-        auto local_kids = std::move(kids); // 整 vector 移入本地，后续按需取首项
+        auto local_kids = std::move(kids);  // 整 vector 移入本地，后续按需取首项
         if (!local_kids.empty()) {
-            m_child = std::move(local_kids.front());
+            child_ = std::move(local_kids.front());
         }
     }
 
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
-        if (m_state) {
-            out.push_back(m_state.get());
+        if (state_) {
+            out.push_back(state_.get());
         }
     }
 
@@ -72,21 +73,21 @@ class Show : public SingleChild {
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         if (const bool vis = is_visible(); !vis) {
-            return c.constrain(Size{ .width = 0.0f, .height = 0.0f });
+            return c.constrain(Size{.width = 0.0F, .height = 0.0F});
         }
-        const Size s = m_child.widget().layout(c, ctx);
+        const Size s = child_.widget().layout(c, ctx);
         return c.constrain(s);
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         if (is_visible()) {
-            m_child.widget().paint(p, bounds, ctx);
+            child_.widget().paint(p, bounds, ctx);
         }
     }
 
   private:
-    std::shared_ptr<State<bool>> m_state;
-    bool m_condition = true;
+    std::shared_ptr<State<bool>> state_;
+    bool condition_ = true;
 };
 
-} // namespace aurora
+}  // namespace aurora

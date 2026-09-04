@@ -17,12 +17,11 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <nlohmann/json.hpp>
 #include <sstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
-
-#include <nlohmann/json.hpp>
 
 #include "api_json_merge.h"
 #include "toml_lines.h"
@@ -53,7 +52,7 @@ constexpr std::array<const char *, 11> AURORA_CATEGORIES = {
     "general",    "layout",   "widget",  "render",     "io",         "validation",
     "navigation", "platform", "runtime", "generation", "diagnostic",
 };
-constexpr std::array<const char *, 4> AURORA_SEVERITIES = { "info", "warning", "error", "fatal" };
+constexpr std::array<const char *, 4> AURORA_SEVERITIES = {"info", "warning", "error", "fatal"};
 
 // trim / parse_kv / unquote are provided by toml_lines.h (shared with gen_debug_api).
 
@@ -62,12 +61,23 @@ auto cpp_escape(const std::string &s) -> std::string {
     out.reserve(s.size() + 8);
     for (char c : s) {
         switch (c) {
-        case '\\': out += "\\\\"; break;
-        case '"': out += "\\\""; break;
-        case '\n': out += "\\n"; break;
-        case '\t': out += "\\t"; break;
-        case '\r': out += "\\r"; break;
-        default: out += c;
+            case '\\':
+                out += "\\\\";
+                break;
+            case '"':
+                out += "\\\"";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            default:
+                out += c;
         }
     }
     return out;
@@ -107,7 +117,6 @@ auto apply_field(ErrorEntry &e, const std::string &k, const std::string &v) -> v
     }
 }
 
-// NOLINTNEXTLINE(*-function-cognitive-complexity)
 auto parse_toml(const std::string &path, std::vector<ErrorEntry> &out) -> bool {
     std::ifstream in(path);
     if (!in) {
@@ -126,7 +135,7 @@ auto parse_toml(const std::string &path, std::vector<ErrorEntry> &out) -> bool {
             cur = &out.back();
             continue;
         }
-        if (!t.empty() && t.at(0) == '[') { // top-level table, ignored
+        if (!t.empty() && t.at(0) == '[') {  // top-level table, ignored
             cur = nullptr;
             continue;
         }
@@ -335,33 +344,32 @@ auto gen_api_json(const std::vector<ErrorEntry> &e) -> nlohmann::json {
     for (size_t i = 0; i < e.size(); ++i) {
         const auto &x = e.at(i);
         arr.push_back({
-            { "index", i },
-            { "enum", x.enum_name },
-            { "slug", x.slug },
-            { "category", x.category },
-            { "severity", x.severity },
-            { "auto_fixable", x.auto_fixable },
-            { "fix_category", x.fix_category },
-            { "retryable", x.retryable },
-            { "message", x.message },
-            { "hint", x.hint },
+            {"index", i},
+            {"enum", x.enum_name},
+            {"slug", x.slug},
+            {"category", x.category},
+            {"severity", x.severity},
+            {"auto_fixable", x.auto_fixable},
+            {"fix_category", x.fix_category},
+            {"retryable", x.retryable},
+            {"message", x.message},
+            {"hint", x.hint},
         });
     }
     return arr;
 }
 
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): the path/content order is semantically fixed, not
 // interchangeable
 void write_file(const std::string &path, const std::string &content) {
     std::ofstream out(path, std::ios::binary);
     out << content;
 }
 
-} // namespace
+}  // namespace
 
 // This tool intentionally uses exceptions (e.g. try/catch around json parsing in main, std::string allocation,
 // ofstream failures), so main should not be forced to noexcept; hence exception-escape is suppressed.
-auto main(int argc, char **argv) -> int { // NOLINT(bugprone-exception-escape)
+auto main(int argc, char **argv) -> int {  // NOLINT(bugprone-exception-escape)
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-bounds-constant-array-index)
     std::string toml = (argc > 1) ? argv[1] : "codespec/errors.toml";
     std::string genh = (argc > 2) ? argv[2] : "include/aurora/core/error_codes.gen.h";

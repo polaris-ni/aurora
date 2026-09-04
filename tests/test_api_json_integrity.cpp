@@ -27,7 +27,6 @@
 
 #include "aurora/aurora.h"
 #include "aurora/widget/serialization.h"
-
 #include "known_enums.h"
 #include "test_harness.h"
 
@@ -70,14 +69,16 @@ static auto load_json(const fs::path &p) -> Json {
 // ---- 校验 1：顶层段齐全 ----
 static auto check_sections(const Json &api) -> void {
     // gen_api_tools 产出 8 段 + gen_error_codes 产出 error_codes 段 = 9 段。
-    const char *required[] = { "library", "language",     "include",        "alias",      "widgets",
-                               "enums",   "layout_rules", "state_patterns", "error_codes" };
+    const char *required[] = {"library", "language",     "include",        "alias",      "widgets",
+                              "enums",   "layout_rules", "state_patterns", "error_codes"};
     for (const char *key : required) {
         const bool present = api.contains(key);
         AURORA_TEST_CHECK_MSG(present, std::string("aurora_api.json contains top-level section: ") + key);
         if (!present) {
             continue;
         }
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const Json &v = api[key];
         // 标量段非空字符串；容器段非空。
         if (v.is_string()) {
@@ -91,35 +92,47 @@ static auto check_sections(const Json &api) -> void {
 // ---- 校验 2：标量段取值（与 tools/gen/gen_api.cpp 常量保持一致）----
 static auto check_scalars(const Json &api) -> void {
     struct Pair {
-        const char *key;
-        const char *expect;
+        const char *key_;
+        const char *expect_;
     };
     constexpr Pair pairs[] = {
-        { .key = "library", .expect = "aurora" },
-        { .key = "language", .expect = "c++20" },
-        { .key = "include", .expect = "aurora/aurora.h" },
-        { .key = "alias", .expect = "au" },
+        {.key_ = "library", .expect_ = "aurora"},
+        {.key_ = "language", .expect_ = "c++20"},
+        {.key_ = "include", .expect_ = "aurora/aurora.h"},
+        {.key_ = "alias", .expect_ = "au"},
     };
     for (const auto &p : pairs) {
-        if (!api.contains(p.key) || !api[p.key].is_string()) {
-            AURORA_TEST_CHECK_MSG(false, std::string("scalar section readable: ") + p.key);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        if (!api.contains(p.key_) || !api[p.key_].is_string()) {
+            AURORA_TEST_CHECK_MSG(false, std::string("scalar section readable: ") + p.key_);
             continue;
         }
-        const auto got = api[p.key].get<std::string>();
-        AURORA_TEST_CHECK_MSG(got == p.expect, std::string("scalar section value ") + p.key + " == " + p.expect);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        const auto got = api[p.key_].get<std::string>();
+        AURORA_TEST_CHECK_MSG(got == p.expect_, std::string("scalar section value ") + p.key_ + " == " + p.expect_);
     }
 }
 
 // ---- 校验 3：widget 集合无漂移（核心）----
 static auto check_widget_drift(const Json &api) -> void {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     if (!api.contains("widgets") || !api["widgets"].is_array()) {
         AURORA_TEST_CHECK_MSG(false, "widgets section exists and is an array");
         return;
     }
 
     std::set<std::string> in_json;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     for (const auto &w : api["widgets"]) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         if (w.contains("type") && w["type"].is_string()) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             in_json.insert(w["type"].get<std::string>());
         }
     }
@@ -132,8 +145,8 @@ static auto check_widget_drift(const Json &api) -> void {
     AURORA_TEST_CHECK_MSG(!in_registry.empty(), "WidgetRegistry registers at least one widget type");
 
     // 差集报告：便于一眼看出该补生成还是该改代码。
-    std::vector<std::string> missing_in_json; // registry 有、JSON 无 -> 新增 widget 后忘了重生成
-    std::vector<std::string> stale_in_json;   // JSON 有、registry 无 -> 删除 widget 后忘了重生成
+    std::vector<std::string> missing_in_json;  // registry 有、JSON 无 -> 新增 widget 后忘了重生成
+    std::vector<std::string> stale_in_json;  // JSON 有、registry 无 -> 删除 widget 后忘了重生成
     std::ranges::set_difference(in_registry, in_json, std::back_inserter(missing_in_json));
     std::ranges::set_difference(in_json, in_registry, std::back_inserter(stale_in_json));
 
@@ -153,6 +166,8 @@ static auto check_widget_drift(const Json &api) -> void {
 // gen_api.cpp 的 enums 段由 known_enums() 生成；若后者被改而忘了重生成 aurora_api.json，
 // 或反之，此处立刻变红。比对类型名集合与每个类型的取值集合（双向）。
 static auto check_enums_drift(const Json &api) -> void {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     if (!api.contains("enums") || !api["enums"].is_array()) {
         AURORA_TEST_CHECK_MSG(false, "enums section exists and is an array");
         return;
@@ -163,14 +178,22 @@ static auto check_enums_drift(const Json &api) -> void {
 
     // 实际集合：api["enums"] = [ {name, values:[...]}, ... ]
     std::map<std::string, std::set<std::string>> actual;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     for (const auto &e : api["enums"]) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         if (e.contains("name") && e["name"].is_string() && e.contains("values") && e["values"].is_array()) {
             std::set<std::string> vals;
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             for (const auto &v : e["values"]) {
                 if (v.is_string()) {
                     vals.insert(v.get<std::string>());
                 }
             }
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             actual[e["name"].get<std::string>()] = std::move(vals);
         }
     }
@@ -226,8 +249,9 @@ static auto check_enums_drift(const Json &api) -> void {
         }
         value_drift += static_cast<int>(missing_vals.size() + stale_vals.size());
     }
-    AURORA_TEST_CHECK_MSG(value_drift == 0, "enum values match known_enums() bidirectionally (if mismatch run: cmake "
-                                            "--build build --target aurora_api_json)");
+    AURORA_TEST_CHECK_MSG(value_drift == 0,
+                          "enum values match known_enums() bidirectionally (if mismatch run: cmake "
+                          "--build build --target aurora_api_json)");
 }
 
 AURORA_TEST() {

@@ -24,7 +24,7 @@ namespace aurora {
 class ToolBar : public Container {
   public:
     ToolBar() = default;
-    explicit ToolBar(std::vector<Node> children) { m_children = std::move(children); }
+    explicit ToolBar(std::vector<Node> children) { children_ = std::move(children); }
     ToolBar(std::initializer_list<Node> kids) { set_children(kids); }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "ToolBar"; }
@@ -32,15 +32,37 @@ class ToolBar : public Container {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "ToolBar",
-            .properties = {
-                { .name = "bar_height", .type = "float", .default_value = "40.0", .required = false, .note = "工具栏高度(dp)", .json_type = "number", .enum_values = {}, .min_value = "0" },
-                { .name = "gap", .type = "float", .default_value = "4.0", .required = false, .note = "子项间距(dp)", .json_type = "number", .enum_values = {}, .min_value = "0" },
-                { .name = "padding", .type = "float", .default_value = "6.0", .required = false, .note = "左右内边距(dp)", .json_type = "number", .enum_values = {}, .min_value = "0" },
-            },
+            .properties =
+                {
+                    {.name = "bar_height",
+                     .type = "float",
+                     .default_value = "40.0",
+                     .required = false,
+                     .note = "工具栏高度(dp)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "gap",
+                     .type = "float",
+                     .default_value = "4.0",
+                     .required = false,
+                     .note = "子项间距(dp)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "padding",
+                     .type = "float",
+                     .default_value = "6.0",
+                     .required = false,
+                     .note = "左右内边距(dp)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                },
             .events = {},
             .children_policy = "multiple",
             .allowed_child_types = {},
-            .examples = { "au::ToolBar{ btn1, btn2, au::Divider{} }" },
+            .examples = {"au::ToolBar{ btn1, btn2, au::Divider{} }"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
@@ -49,67 +71,67 @@ class ToolBar : public Container {
 
     /// @brief 设置栏高（链式）。
     auto set_bar_height(float h) -> ToolBar & {
-        m_bar_height = h > 0.0f ? h : 40.0f;
+        bar_height_ = h > 0.0F ? h : 40.0F;
         return *this;
     }
-    [[nodiscard]] auto bar_height() const -> float { return m_bar_height; }
+    [[nodiscard]] auto bar_height() const -> float { return bar_height_; }
 
     /// @brief 设置子项间距（链式）。
     auto set_gap(float g) -> ToolBar & {
-        m_gap = g < 0.0f ? 0.0f : g;
+        gap_ = g < 0.0F ? 0.0F : g;
         return *this;
     }
 
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["bar_height"] = m_bar_height;
-        props["gap"] = m_gap;
-        props["padding"] = m_padding;
+        props["bar_height"] = bar_height_;
+        props["gap"] = gap_;
+        props["padding"] = padding_;
     }
 
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("bar_height")) {
-            m_bar_height = props["bar_height"].get<float>();
+            bar_height_ = props["bar_height"].get<float>();
         }
         if (props.contains("gap")) {
-            m_gap = props["gap"].get<float>();
+            gap_ = props["gap"].get<float>();
         }
         if (props.contains("padding")) {
-            m_padding = props["padding"].get<float>();
+            padding_ = props["padding"].get<float>();
         }
     }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        const float w = c.max.is_finite() ? c.max.width : 640.0f;
-        float x = m_padding;
-        for (Node &child : m_children) {
+        const float w = c.max.is_finite() ? c.max.width : 640.0F;
+        float x = padding_;
+        for (Node &child : children_) {
             Constraints inner;
-            inner.min = Size{ .width = 0.0f, .height = 0.0f };
+            inner.min = Size{.width = 0.0F, .height = 0.0F};
             // 子项按内容宽度测量（无界宽避免 Text 等控件填满整栏）
-            inner.max = Size{ .width = std::numeric_limits<float>::infinity(), .height = m_bar_height - 8.0f };
+            inner.max = Size{.width = std::numeric_limits<float>::infinity(), .height = bar_height_ - 8.0F};
             const Size s = child.widget().layout(inner, ctx);
-            const float y = (m_bar_height - s.height) * 0.5f; // 垂直居中
-            child.set_bounds(Rect{ .origin = Point{ .x = x, .y = y }, .size = s });
-            x += s.width + m_gap;
+            const float y = (bar_height_ - s.height) * 0.5F;  // 垂直居中
+            child.set_bounds(Rect{.origin = Point{.x = x, .y = y}, .size = s});
+            x += s.width + gap_;
         }
-        return c.constrain(Size{ .width = w, .height = m_bar_height });
+        return c.constrain(Size{.width = w, .height = bar_height_});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         // 背景 + 底部分隔线
-        p.fill_rect(bounds, Color{ 250, 250, 252, 255 });
-        p.fill_rect(Rect{ .origin = Point{ .x = bounds.origin.x, .y = bounds.origin.y + bounds.size.height - 1.0f },
-                          .size = Size{ .width = bounds.size.width, .height = 1.0f } },
-                    Color{ 225, 225, 229, 255 });
+        p.fill_rect(bounds, Color{250, 250, 252, 255});
+        p.fill_rect(Rect{.origin = Point{.x = bounds.origin.x, .y = bounds.origin.y + bounds.size.height - 1.0F},
+                         .size = Size{.width = bounds.size.width, .height = 1.0F}},
+                    Color{225, 225, 229, 255});
         Container::on_paint(p, bounds, ctx);
     }
 
   private:
-    float m_bar_height = 40.0f;
-    float m_gap = 4.0f;
-    float m_padding = 6.0f;
+    float bar_height_ = 40.0F;
+    float gap_ = 4.0F;
+    float padding_ = 6.0F;
 };
 
 /**
@@ -123,7 +145,7 @@ class ToolBar : public Container {
 class StatusBar : public Container {
   public:
     StatusBar() = default;
-    explicit StatusBar(std::vector<Node> children) { m_children = std::move(children); }
+    explicit StatusBar(std::vector<Node> children) { children_ = std::move(children); }
     StatusBar(std::initializer_list<Node> kids) { set_children(kids); }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "StatusBar"; }
@@ -131,14 +153,29 @@ class StatusBar : public Container {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "StatusBar",
-            .properties = {
-                { .name = "bar_height", .type = "float", .default_value = "24.0", .required = false, .note = "状态栏高度(dp)", .json_type = "number", .enum_values = {}, .min_value = "0" },
-                { .name = "gap", .type = "float", .default_value = "12.0", .required = false, .note = "区域间距(dp)", .json_type = "number", .enum_values = {}, .min_value = "0" },
-            },
+            .properties =
+                {
+                    {.name = "bar_height",
+                     .type = "float",
+                     .default_value = "24.0",
+                     .required = false,
+                     .note = "状态栏高度(dp)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                    {.name = "gap",
+                     .type = "float",
+                     .default_value = "12.0",
+                     .required = false,
+                     .note = "区域间距(dp)",
+                     .json_type = "number",
+                     .enum_values = {},
+                     .min_value = "0"},
+                },
             .events = {},
             .children_policy = "multiple",
             .allowed_child_types = {},
-            .examples = { R"(au::StatusBar{ au::Text("Ready"), au::Text("Ln 1, Col 1") })" },
+            .examples = {R"(au::StatusBar{ au::Text("Ready"), au::Text("Ln 1, Col 1") })"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
@@ -147,64 +184,63 @@ class StatusBar : public Container {
 
     /// @brief 设置栏高（链式）。
     auto set_bar_height(float h) -> StatusBar & {
-        m_bar_height = h > 0.0f ? h : 24.0f;
+        bar_height_ = h > 0.0F ? h : 24.0F;
         return *this;
     }
-    [[nodiscard]] auto bar_height() const -> float { return m_bar_height; }
+    [[nodiscard]] auto bar_height() const -> float { return bar_height_; }
 
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["bar_height"] = m_bar_height;
-        props["gap"] = m_gap;
+        props["bar_height"] = bar_height_;
+        props["gap"] = gap_;
     }
 
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("bar_height")) {
-            m_bar_height = props["bar_height"].get<float>();
+            bar_height_ = props["bar_height"].get<float>();
         }
         if (props.contains("gap")) {
-            m_gap = props["gap"].get<float>();
+            gap_ = props["gap"].get<float>();
         }
     }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        const float w = c.max.is_finite() ? c.max.width : 640.0f;
+        const float w = c.max.is_finite() ? c.max.width : 640.0F;
         Constraints inner;
-        inner.min = Size{ .width = 0.0f, .height = 0.0f };
+        inner.min = Size{.width = 0.0F, .height = 0.0F};
         // 子项按内容宽度测量（无界宽避免 Text 等控件填满整栏）
-        inner.max = Size{ .width = std::numeric_limits<float>::infinity(), .height = m_bar_height - 4.0f };
+        inner.max = Size{.width = std::numeric_limits<float>::infinity(), .height = bar_height_ - 4.0F};
 
-        float x = m_padding;
-        for (std::size_t i = 0; i < m_children.size(); ++i) {
-            Node &child = m_children[i];
+        float x = padding_;
+        for (std::size_t i = 0; i < children_.size(); ++i) {
+            Node &child = children_[i];
             const Size s = child.widget().layout(inner, ctx);
-            const float y = (m_bar_height - s.height) * 0.5f;
-            if (i + 1 == m_children.size() && m_children.size() > 1) {
+            const float y = (bar_height_ - s.height) * 0.5F;
+            if (i + 1 == children_.size() && children_.size() > 1) {
                 // 尾项右对齐
-                child.set_bounds(
-                    Rect{ .origin = Point{ .x = std::max(x, w - m_padding - s.width), .y = y }, .size = s });
+                child.set_bounds(Rect{.origin = Point{.x = std::max(x, w - padding_ - s.width), .y = y}, .size = s});
             } else {
-                child.set_bounds(Rect{ .origin = Point{ .x = x, .y = y }, .size = s });
-                x += s.width + m_gap;
+                child.set_bounds(Rect{.origin = Point{.x = x, .y = y}, .size = s});
+                x += s.width + gap_;
             }
         }
-        return c.constrain(Size{ .width = w, .height = m_bar_height });
+        return c.constrain(Size{.width = w, .height = bar_height_});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         // 背景 + 顶部分隔线
-        p.fill_rect(bounds, Color{ 248, 248, 250, 255 });
-        p.fill_rect(Rect{ .origin = bounds.origin, .size = Size{ .width = bounds.size.width, .height = 1.0f } },
-                    Color{ 225, 225, 229, 255 });
+        p.fill_rect(bounds, Color{248, 248, 250, 255});
+        p.fill_rect(Rect{.origin = bounds.origin, .size = Size{.width = bounds.size.width, .height = 1.0F}},
+                    Color{225, 225, 229, 255});
         Container::on_paint(p, bounds, ctx);
     }
 
   private:
-    float m_bar_height = 24.0f;
-    float m_gap = 12.0f;
-    float m_padding = 8.0f;
+    float bar_height_ = 24.0F;
+    float gap_ = 12.0F;
+    float padding_ = 8.0F;
 };
 
-} // namespace aurora
+}  // namespace aurora

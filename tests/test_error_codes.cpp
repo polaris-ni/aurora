@@ -9,7 +9,6 @@
 
 #include "aurora/aurora.h"
 #include "aurora/core/diagnostics.h"
-
 #include "test_harness.h"
 
 using aurora::Diagnostics;
@@ -60,7 +59,7 @@ static void test_table_metadata() {
 }
 
 static void test_make_error_table_driven() {
-    auto e = make_error(ErrorCode::LayoutDepthExceeded, { { "max", "10" } });
+    auto e = make_error(ErrorCode::LayoutDepthExceeded, {{"max", "10"}});
     AURORA_TEST_CHECK_MSG(e.code == "layout-depth-exceeded", "make_error: code is slug");
     AURORA_TEST_CHECK_MSG(e.code_enum == ErrorCode::LayoutDepthExceeded, "make_error: code_enum");
     AURORA_TEST_CHECK_MSG(e.message == "Layout tree depth exceeded the limit (default 10)",
@@ -75,7 +74,7 @@ static void test_make_error_table_driven() {
     AURORA_TEST_CHECK_MSG(e2.message == "自定义" && e2.code == "general-unknown", "make_error: custom message");
 
     // hint 可被覆盖
-    auto e3 = make_error(ErrorCode::NavDepthExceeded, "m", { { "max", "5" } }, "覆盖提示");
+    auto e3 = make_error(ErrorCode::NavDepthExceeded, "m", {{"max", "5"}}, "覆盖提示");
     AURORA_TEST_CHECK_MSG(e3.hint == "覆盖提示", "make_error: hint overridable");
 }
 

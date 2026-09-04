@@ -4,7 +4,6 @@
 #include <string>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::BoxFit;
@@ -41,18 +40,22 @@ static void test_length_roundtrip() {
     const Json f = length_to_json(Length::expand());
     AURORA_TEST_CHECK_MSG(f == "fill" && json_to_length(f).kind == LengthKind::Expand, "props_io: expand roundtrip");
 
-    constexpr Length fixed = Length::fixed(12.5f);
+    constexpr Length fixed = Length::fixed(12.5F);
     Json fj = length_to_json(fixed);
-    AURORA_TEST_CHECK_MSG(fj.is_array() && fj[0] == "px" && near_f(fj[1].get<float>(), 12.5f),
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(fj.is_array() && fj[0] == "px" && near_f(fj[1].get<float>(), 12.5F),
                           "props_io: fixed -> [px,12.5]");
     const Length back = json_to_length(fj);
-    AURORA_TEST_CHECK_MSG(back.kind == LengthKind::Fixed && near_f(back.value, 12.5f), "props_io: fixed roundtrip");
+    AURORA_TEST_CHECK_MSG(back.kind == LengthKind::Fixed && near_f(back.value, 12.5F), "props_io: fixed roundtrip");
 
-    constexpr Length ratio = Length::ratio(0.5f);
+    constexpr Length ratio = Length::ratio(0.5F);
     Json rj = length_to_json(ratio);
-    AURORA_TEST_CHECK_MSG(rj.is_array() && rj[0] == "percent" && near_f(rj[1].get<float>(), 0.5f),
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(rj.is_array() && rj[0] == "percent" && near_f(rj[1].get<float>(), 0.5F),
                           "props_io: ratio -> [percent,0.5]");
-    AURORA_TEST_CHECK_MSG(json_to_length(rj).kind == LengthKind::Fraction && near_f(json_to_length(rj).value, 0.5f),
+    AURORA_TEST_CHECK_MSG(json_to_length(rj).kind == LengthKind::Fraction && near_f(json_to_length(rj).value, 0.5F),
                           "props_io: ratio roundtrip");
 
     // 未知格式回退 wrap
@@ -60,8 +63,10 @@ static void test_length_roundtrip() {
 }
 
 static void test_color_roundtrip() {
-    constexpr Color c{ 1, 2, 3, 4 };
+    constexpr Color c{1, 2, 3, 4};
     Json j = color_to_json(c);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j.is_array() && j[0] == 1 && j[1] == 2 && j[2] == 3 && j[3] == 4,
                           "props_io: color -> [1,2,3,4]");
     const Color back = json_to_color(j);
@@ -73,16 +78,20 @@ static void test_color_roundtrip() {
 }
 
 static void test_edge_insets_roundtrip() {
-    constexpr EdgeInsets e{ .left = 1.0f, .top = 2.0f, .right = 3.0f, .bottom = 4.0f };
+    constexpr EdgeInsets e{.left = 1.0F, .top = 2.0F, .right = 3.0F, .bottom = 4.0F};
     Json j = edge_insets_to_json(e);
-    AURORA_TEST_CHECK_MSG(near_f(j["left"].get<float>(), 1.0f) && near_f(j["top"].get<float>(), 2.0f) &&
-                              near_f(j["right"].get<float>(), 3.0f) && near_f(j["bottom"].get<float>(), 4.0f),
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    AURORA_TEST_CHECK_MSG(near_f(j["left"].get<float>(), 1.0F) && near_f(j["top"].get<float>(), 2.0F) &&
+                              // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                              // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+                              near_f(j["right"].get<float>(), 3.0F) && near_f(j["bottom"].get<float>(), 4.0F),
                           "props_io: edge_insets -> object");
     auto [left, top, right, bottom] = json_to_edge_insets(j);
-    AURORA_TEST_CHECK_MSG(near_f(left, 1.0f) && near_f(top, 2.0f) && near_f(right, 3.0f) && near_f(bottom, 4.0f),
+    AURORA_TEST_CHECK_MSG(near_f(left, 1.0F) && near_f(top, 2.0F) && near_f(right, 3.0F) && near_f(bottom, 4.0F),
                           "props_io: edge_insets roundtrip");
     // 缺字段回退 0
-    AURORA_TEST_CHECK_MSG(json_to_edge_insets(Json::object()).left == 0.0f, "props_io: empty edge_insets -> 0");
+    AURORA_TEST_CHECK_MSG(json_to_edge_insets(Json::object()).left == 0.0F, "props_io: empty edge_insets -> 0");
 }
 
 static void test_enum_roundtrip() {
@@ -91,9 +100,9 @@ static void test_enum_roundtrip() {
                           "props_io: TextAlign roundtrip");
     AURORA_TEST_CHECK_MSG(json_to_text_align(Json("Nope")) == TextAlign::Left, "props_io: bad TextAlign -> Left");
     // TextOverflow
-    AURORA_TEST_CHECK_MSG(json_to_text_overflow(text_overflow_to_json(TextOverflow::Ellipsis)) ==
-                              TextOverflow::Ellipsis,
-                          "props_io: TextOverflow roundtrip");
+    AURORA_TEST_CHECK_MSG(
+        json_to_text_overflow(text_overflow_to_json(TextOverflow::Ellipsis)) == TextOverflow::Ellipsis,
+        "props_io: TextOverflow roundtrip");
     // FontWeight（数值字符串）
     AURORA_TEST_CHECK_MSG(json_to_font_weight(font_weight_to_json(FontWeight::Bold)) == FontWeight::Bold,
                           "props_io: FontWeight roundtrip");
@@ -123,9 +132,9 @@ static void test_text_decoration_roundtrip() {
     const Json j = text_decoration_to_json(dec);
     AURORA_TEST_CHECK_MSG(j.is_array() && j.size() == 2, "props_io: TextDecoration -> 2-item array");
     const TextDecoration back = json_to_text_decoration(j);
-    AURORA_TEST_CHECK_MSG(decoration_has(back, TextDecoration::Underline) &&
-                              decoration_has(back, TextDecoration::LineThrough),
-                          "props_io: TextDecoration roundtrip");
+    AURORA_TEST_CHECK_MSG(
+        decoration_has(back, TextDecoration::Underline) && decoration_has(back, TextDecoration::LineThrough),
+        "props_io: TextDecoration roundtrip");
     AURORA_TEST_CHECK_MSG(json_to_text_decoration(Json("None")) == TextDecoration::None, "props_io: 'None' -> None");
 }
 

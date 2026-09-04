@@ -4,7 +4,6 @@
 #include <vector>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 namespace file_dialog = aurora::file_dialog;
@@ -15,18 +14,24 @@ static void test_file_dialog() {
     file_dialog::interactive = false;
 
     // 预设打开结果：正常返回 2 个路径。
-    file_dialog::headless_open_result = { "C:/test/a.txt", "C:/test/b.png" };
+    file_dialog::headless_open_result = {"C:/test/a.txt", "C:/test/b.png"};
     auto r1 = file_dialog::open_file();
     AURORA_TEST_CHECK(r1.ok());
     AURORA_TEST_CHECK(r1.value().size() == 2);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(r1.value()[0] == "C:/test/a.txt");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(r1.value()[1] == "C:/test/b.png");
 
     // 带 filters 的 Options 不影响 headless 预设返回。
-    file_dialog::Options opts{ .title = "Open", .filters = { { .name = "图像", .extensions = { "*.png", "*.jpg" } } } };
+    file_dialog::Options opts{.title = "Open", .filters = {{.name = "图像", .extensions = {"*.png", "*.jpg"}}}};
     auto r1b = file_dialog::open_file(opts);
     AURORA_TEST_CHECK(r1b.ok() && r1b.value().size() == 2);
     AURORA_TEST_CHECK(opts.filters.size() == 1);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(opts.filters[0].extensions.size() == 2);
 
     // 取消：清空预设 → 空列表（无选择）。
@@ -43,7 +48,7 @@ static void test_file_dialog() {
 
     // 保存文件带 Options：预设优先。
     file_dialog::headless_save_result = "C:/output/out2.txt";
-    auto r3b = file_dialog::save_file(file_dialog::Options{ .title = "Save" });
+    auto r3b = file_dialog::save_file(file_dialog::Options{.title = "Save"});
     AURORA_TEST_CHECK(r3b.ok() && r3b.value() == "C:/output/out2.txt");
 
     // 保存取消：清空预设 → 空字符串。
@@ -53,7 +58,7 @@ static void test_file_dialog() {
     AURORA_TEST_CHECK(r4.value().empty());
 
     // 选择文件夹：headless 始终返回空字符串。
-    file_dialog::headless_open_result = { "C:/x" };
+    file_dialog::headless_open_result = {"C:/x"};
     auto r5 = file_dialog::open_folder();
     AURORA_TEST_CHECK(r5.ok());
     AURORA_TEST_CHECK(r5.value().empty());

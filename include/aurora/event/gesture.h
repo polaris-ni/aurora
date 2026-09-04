@@ -29,59 +29,59 @@ class PinchRecognizer {
             reset();
             return;
         }
-        auto pa = e.point_by_id(m_id_a);
-        auto pb = e.point_by_id(m_id_b);
-        if (!pa || !pb || !pa->active || !pb->active) {
-            m_id_a = m_id_b = -1; // 锁定对失效，重新取前两个活跃点
+        auto pa = e.point_by_id(id_a_);
+        auto pb = e.point_by_id(id_b_);
+        if (!pa || !pb || !pa->is_active || !pb->is_active) {
+            id_a_ = id_b_ = -1;  // 锁定对失效，重新取前两个活跃点
             for (const auto &p : e.points) {
-                if (!p.active) {
+                if (!p.is_active) {
                     continue;
                 }
-                if (m_id_a < 0) {
-                    m_id_a = p.id;
-                } else if (m_id_b < 0) {
-                    m_id_b = p.id;
+                if (id_a_ < 0) {
+                    id_a_ = p.id;
+                } else if (id_b_ < 0) {
+                    id_b_ = p.id;
                 }
             }
-            pa = e.point_by_id(m_id_a);
-            pb = e.point_by_id(m_id_b);
+            pa = e.point_by_id(id_a_);
+            pb = e.point_by_id(id_b_);
         }
         const float dist = (pa && pb)
                                ? std::sqrt(((pa->position.x - pb->position.x) * (pa->position.x - pb->position.x)) +
                                            ((pa->position.y - pb->position.y) * (pa->position.y - pb->position.y)))
                                : e.pinch_distance();
-        if (!m_active) {
-            m_initial_distance = dist;
-            m_active = true;
+        if (!active_) {
+            initial_distance_ = dist;
+            active_ = true;
         }
-        m_current_distance = dist;
+        current_distance_ = dist;
     }
 
     /// @brief 当前缩放比例（相对初始双指距离）。未激活时返回 1.0。
     [[nodiscard]] auto scale() const -> float {
-        if (!m_active || m_initial_distance < 0.001f) {
-            return 1.0f;
+        if (!active_ || initial_distance_ < 0.001F) {
+            return 1.0F;
         }
-        return m_current_distance / m_initial_distance;
+        return current_distance_ / initial_distance_;
     }
 
     /// @brief 是否正在识别中（双指活跃）。
-    [[nodiscard]] auto is_active() const -> bool { return m_active; }
+    [[nodiscard]] auto is_active() const -> bool { return active_; }
 
     /// @brief 重置状态。
     auto reset() -> void {
-        m_active = false;
-        m_initial_distance = 0.0f;
-        m_current_distance = 0.0f;
-        m_id_a = m_id_b = -1;
+        active_ = false;
+        initial_distance_ = 0.0F;
+        current_distance_ = 0.0F;
+        id_a_ = id_b_ = -1;
     }
 
   private:
-    bool m_active = false;
-    float m_initial_distance = 0.0f;
-    float m_current_distance = 0.0f;
-    int m_id_a = -1; ///< 锁定的第一指 pointer id
-    int m_id_b = -1; ///< 锁定的第二指 pointer id
+    bool active_ = false;
+    float initial_distance_ = 0.0F;
+    float current_distance_ = 0.0F;
+    int id_a_ = -1;  ///< 锁定的第一指 pointer id
+    int id_b_ = -1;  ///< 锁定的第二指 pointer id
 };
 
 /**
@@ -96,65 +96,65 @@ class RotationRecognizer {
             reset();
             return;
         }
-        auto pa = e.point_by_id(m_id_a);
-        auto pb = e.point_by_id(m_id_b);
-        if (!pa || !pb || !pa->active || !pb->active) {
-            m_id_a = m_id_b = -1; // 锁定对失效，重新取前两个活跃点
+        auto pa = e.point_by_id(id_a_);
+        auto pb = e.point_by_id(id_b_);
+        if (!pa || !pb || !pa->is_active || !pb->is_active) {
+            id_a_ = id_b_ = -1;  // 锁定对失效，重新取前两个活跃点
             for (const auto &p : e.points) {
-                if (!p.active) {
+                if (!p.is_active) {
                     continue;
                 }
-                if (m_id_a < 0) {
-                    m_id_a = p.id;
-                } else if (m_id_b < 0) {
-                    m_id_b = p.id;
+                if (id_a_ < 0) {
+                    id_a_ = p.id;
+                } else if (id_b_ < 0) {
+                    id_b_ = p.id;
                 }
             }
-            pa = e.point_by_id(m_id_a);
-            pb = e.point_by_id(m_id_b);
+            pa = e.point_by_id(id_a_);
+            pb = e.point_by_id(id_b_);
         }
         const float angle =
             (pa && pb) ? std::atan2(pb->position.y - pa->position.y, pb->position.x - pa->position.x) : e.pinch_angle();
-        if (!m_active) {
-            m_initial_angle = angle;
-            m_active = true;
+        if (!active_) {
+            initial_angle_ = angle;
+            active_ = true;
         }
-        m_current_angle = angle;
+        current_angle_ = angle;
     }
 
     /// @brief 旋转增量（度，相对初始角度）。未激活时返回 0。
     [[nodiscard]] auto angle_delta() const -> float {
-        if (!m_active) {
-            return 0.0f;
+        if (!active_) {
+            return 0.0F;
         }
-        float delta = m_current_angle - m_initial_angle;
+        float delta = current_angle_ - initial_angle_;
         // 归一化到 [-180, 180]
         while (delta > std::numbers::pi_v<float>) {
-            delta -= 2.0f * std::numbers::pi_v<float>;
+            delta -= 2.0F * std::numbers::pi_v<float>;
         }
         while (delta < -std::numbers::pi_v<float>) {
-            delta += 2.0f * std::numbers::pi_v<float>;
+            delta += 2.0F * std::numbers::pi_v<float>;
         }
-        return delta * 180.0f / std::numbers::pi_v<float>;
+        return delta * 180.0F / std::numbers::pi_v<float>;
     }
 
     /// @brief 是否正在识别中。
-    [[nodiscard]] auto is_active() const -> bool { return m_active; }
+    [[nodiscard]] auto is_active() const -> bool { return active_; }
 
     /// @brief 重置状态。
     auto reset() -> void {
-        m_active = false;
-        m_initial_angle = 0.0f;
-        m_current_angle = 0.0f;
-        m_id_a = m_id_b = -1;
+        active_ = false;
+        initial_angle_ = 0.0F;
+        current_angle_ = 0.0F;
+        id_a_ = id_b_ = -1;
     }
 
   private:
-    bool m_active = false;
-    float m_initial_angle = 0.0f;
-    float m_current_angle = 0.0f;
-    int m_id_a = -1; ///< 锁定的第一指 pointer id
-    int m_id_b = -1; ///< 锁定的第二指 pointer id
+    bool active_ = false;
+    float initial_angle_ = 0.0F;
+    float current_angle_ = 0.0F;
+    int id_a_ = -1;  ///< 锁定的第一指 pointer id
+    int id_b_ = -1;  ///< 锁定的第二指 pointer id
 };
 
-} // namespace aurora
+}  // namespace aurora

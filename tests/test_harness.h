@@ -41,12 +41,14 @@ namespace aurora::testing {
 namespace detail {
 
 /// 检测类型是否可 operator<< 输出（失败详情打印实际值；不可打印类型只输出表达式原文）。
-template<typename T, typename = void> struct IsStreamable : std::false_type {}; // NOLINT
-template<typename T>
+template <typename T, typename = void>
+struct IsStreamable : std::false_type {};  // NOLINT
+template <typename T>
 struct IsStreamable<T, std::void_t<decltype(std::declval<std::ostream &>() << std::declval<const T &>())>>
     : std::true_type {};
 
-template<typename T> [[nodiscard]] auto debug_value(const T &v) -> std::string {
+template <typename T>
+[[nodiscard]] auto debug_value(const T &v) -> std::string {
     if constexpr (IsStreamable<T>::value) {
         std::ostringstream oss;
         oss << v;
@@ -56,7 +58,7 @@ template<typename T> [[nodiscard]] auto debug_value(const T &v) -> std::string {
     }
 }
 
-} // namespace detail
+}  // namespace detail
 
 /// 致命断言（AURORA_TEST_REQUIRE*）失败时抛出，由 runner 捕获并终止当前用例。
 /// 派生自 std::exception 以符合「抛出类型应为 std::exception 派生」的通用约定；runner 先按
@@ -80,12 +82,12 @@ class Registry {
 
     auto add(std::string_view name, void (*fn)()) -> void {
         assert_unique(name);
-        m_tests.push_back({ .name = name, .fn = fn, .skip_reason = {} });
+        m_tests.push_back({.name = name, .fn = fn, .skip_reason = {}});
     }
 
     auto add_skip(std::string_view name, std::string_view reason) -> void {
         assert_unique(name);
-        m_tests.push_back({ .name = name, .fn = nullptr, .skip_reason = reason });
+        m_tests.push_back({.name = name, .fn = nullptr, .skip_reason = reason});
     }
 
     /// 按名称排序后的稳定视图（首次调用时排序；输出顺序与链接顺序无关）。
@@ -159,7 +161,8 @@ inline auto record_fail(const char *file, int line, std::string_view what) -> vo
                            aurora::detail::log_concat("[FAIL] ", ctx.name, " ", file, ":", line, ": ", what));
 }
 
-template<typename A, typename B> [[nodiscard]] auto values_detail(const A &a, const B &b) -> std::string {
+template <typename A, typename B>
+[[nodiscard]] auto values_detail(const A &a, const B &b) -> std::string {
     if constexpr (IsStreamable<A>::value && IsStreamable<B>::value) {
         return aurora::detail::log_concat(" [actual: ", debug_value(a), " vs ", debug_value(b), "]");
     } else {
@@ -167,7 +170,7 @@ template<typename A, typename B> [[nodiscard]] auto values_detail(const A &a, co
     }
 }
 
-} // namespace detail
+}  // namespace detail
 
 /// 布尔断言核心：失败记录到当前用例上下文（非致命，继续执行后续断言）。
 inline auto check_bool(bool ok, const char *file, int line, std::string_view what) -> void {
@@ -186,7 +189,7 @@ inline auto check_bool(bool ok, const char *file, int line, std::string_view wha
     throw CheckAbort{};
 }
 
-template<typename A, typename B>
+template <typename A, typename B>
 auto check_eq(const A &a, const B &b, const char *file, int line, std::string_view what) -> void {
     if (a == b) {
         if (g_verbose) {
@@ -197,9 +200,9 @@ auto check_eq(const A &a, const B &b, const char *file, int line, std::string_vi
     detail::record_fail(file, line, aurora::detail::log_concat(what, detail::values_detail(a, b)));
 }
 
-template<typename A, typename B, typename Eps>
+template <typename A, typename B, typename Eps>
 auto check_near(const A &a, const B &b, const Eps &eps, const char *file, int line, std::string_view what) -> void {
-    if (a - b <= eps && b - a <= eps) { // 对称差 <= eps（免 <cmath> 依赖，等价 |a-b| <= eps）
+    if (a - b <= eps && b - a <= eps) {  // 对称差 <= eps（免 <cmath> 依赖，等价 |a-b| <= eps）
         if (g_verbose) {
             AURORA_LOG_INFO("test", "[PASS] ", current().name, ": ", what);
         }
@@ -217,7 +220,7 @@ auto check_near(const A &a, const B &b, const Eps &eps, const char *file, int li
 inline auto near_f(float a, float b, float eps = 1e-3f) -> bool { return a - b <= eps && b - a <= eps; }
 inline auto near_d(double a, double b, double eps = 1e-9) -> bool { return a - b <= eps && b - a <= eps; }
 
-} // namespace aurora::testing
+}  // namespace aurora::testing
 
 using aurora::testing::near_d;
 using aurora::testing::near_f;
@@ -243,14 +246,14 @@ using aurora::testing::near_f;
 #define AURORA_TEST_NO_C2Y
 #endif
 
-#define AURORA_TEST_IMPL(name, ctr)                                                                                    \
-    static void AURORA_TEST_CAT(au_test_body_, ctr)();                                                                 \
-    namespace {                                                                                                        \
-    /* NOLINTNEXTLINE */                                                                                               \
-    static const ::aurora::testing::Registrar AURORA_TEST_CAT(au_test_reg_,                                            \
-                                                              ctr){ name, &AURORA_TEST_CAT(au_test_body_, ctr) };      \
-    }                                                                                                                  \
-    /* NOLINTNEXTLINE */                                                                                               \
+#define AURORA_TEST_IMPL(name, ctr)                                               \
+    static void AURORA_TEST_CAT(au_test_body_, ctr)();                            \
+    namespace {                                                                   \
+    /* NOLINTNEXTLINE */                                                          \
+    static const ::aurora::testing::Registrar AURORA_TEST_CAT(au_test_reg_, ctr){ \
+        name, &AURORA_TEST_CAT(au_test_body_, ctr)};                              \
+    }                                                                             \
+    /* NOLINTNEXTLINE */                                                          \
     static void AURORA_TEST_CAT(au_test_body_, ctr)()
 
 #define AURORA_TEST_COUNTER __COUNTER__
@@ -262,12 +265,12 @@ using aurora::testing::near_f;
 
 /// 注册一条 skip 桩：对应 feature 宏未编译进本构建时空通过（放在 #else 分支）。
 /// skip_reason 传宏标识符（如 AURORA_BACKEND_GLFW），沿用旧 TEST_SKIP 的字符串化语义（# 取字面量）。
-#define AURORA_TEST_SKIP(skip_reason)                                                                                  \
-    AURORA_TEST_NO_C2Y                                                                                                 \
-    namespace {                                                                                                        \
-    /* NOLINTNEXTLINE */                                                                                               \
-    static const ::aurora::testing::SkipRegistrar AURORA_TEST_CAT(au_test_skip_, __COUNTER__){ AURORA_TEST_NAME,       \
-                                                                                               #skip_reason };         \
+#define AURORA_TEST_SKIP(skip_reason)                                                                           \
+    AURORA_TEST_NO_C2Y                                                                                          \
+    namespace {                                                                                                 \
+    /* NOLINTNEXTLINE */                                                                                        \
+    static const ::aurora::testing::SkipRegistrar AURORA_TEST_CAT(au_test_skip_, __COUNTER__){AURORA_TEST_NAME, \
+                                                                                              #skip_reason};    \
     }
 
 // 非致命断言（CHECK 族）：失败记录后继续执行。
@@ -281,25 +284,25 @@ using aurora::testing::near_f;
 #define AURORA_TEST_CHECK_GE(a, b) ::aurora::testing::check_bool(((a) >= (b)), __FILE__, __LINE__, #a " >= " #b)
 #define AURORA_TEST_CHECK_TRUE(a) ::aurora::testing::check_bool(!!(a), __FILE__, __LINE__, #a)
 #define AURORA_TEST_CHECK_FALSE(a) ::aurora::testing::check_bool(!(a), __FILE__, __LINE__, "!" #a)
-#define AURORA_TEST_CHECK_NEAR(a, b, eps)                                                                              \
+#define AURORA_TEST_CHECK_NEAR(a, b, eps) \
     ::aurora::testing::check_near((a), (b), (eps), __FILE__, __LINE__, #a " ~ " #b " (eps " #eps ")")
 
 // 致命断言（REQUIRE 族）：失败即终止当前用例（抛 CheckAbort，runner 捕获）。
-#define AURORA_TEST_REQUIRE(cond)                                                                                      \
-    do {                                                                                                               \
-        if (!(cond)) {                                                                                                 \
-            ::aurora::testing::check_fatal(__FILE__, __LINE__, #cond);                                                 \
-        }                                                                                                              \
+#define AURORA_TEST_REQUIRE(cond)                                      \
+    do {                                                               \
+        if (!(cond)) {                                                 \
+            ::aurora::testing::check_fatal(__FILE__, __LINE__, #cond); \
+        }                                                              \
     } while (0)
-#define AURORA_TEST_REQUIRE_MSG(cond, msg)                                                                             \
-    do {                                                                                                               \
-        if (!(cond)) {                                                                                                 \
-            ::aurora::testing::check_fatal(__FILE__, __LINE__, (msg));                                                 \
-        }                                                                                                              \
+#define AURORA_TEST_REQUIRE_MSG(cond, msg)                             \
+    do {                                                               \
+        if (!(cond)) {                                                 \
+            ::aurora::testing::check_fatal(__FILE__, __LINE__, (msg)); \
+        }                                                              \
     } while (0)
-#define AURORA_TEST_REQUIRE_EQ(a, b)                                                                                   \
-    do {                                                                                                               \
-        if (!((a) == (b))) {                                                                                           \
-            ::aurora::testing::check_fatal(__FILE__, __LINE__, #a " == " #b);                                          \
-        }                                                                                                              \
+#define AURORA_TEST_REQUIRE_EQ(a, b)                                          \
+    do {                                                                      \
+        if (!((a) == (b))) {                                                  \
+            ::aurora::testing::check_fatal(__FILE__, __LINE__, #a " == " #b); \
+        }                                                                     \
     } while (0)

@@ -44,4 +44,4 @@ class LayoutEngine {
     }
 };
 
-} // namespace aurora
+}  // namespace aurora

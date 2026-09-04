@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "aurora/window/window.h"
-
 #include "test_harness.h"
 
 #ifdef AURORA_BACKEND_WIN32
@@ -25,12 +24,12 @@ AURORA_TEST() {
 #else
     au::enable_dpi_awareness();
     au::WindowOptions base;
-    base.size = au::Size{ .width = 320.0f, .height = 240.0f };
+    base.size = au::Size{.width = 320.0F, .height = 240.0F};
     base.title = "test_renderer_preference";
 
     // ---- 1. Software：强制软件 GDI ----
     {
-        au::Win32Options opts{ base };
+        au::Win32Options opts{base};
         opts.renderer = au::RendererPreference::Software;
         auto res = au::create_window(opts);
         AURORA_TEST_CHECK(static_cast<bool>(res));
@@ -41,8 +40,8 @@ AURORA_TEST() {
 
     // ---- 2. Auto：默认值即 Auto；必须成功（GPU 可用走 D3D11，否则回退 GDI）----
     {
-        au::Win32Options opts{ base };
-        AURORA_TEST_CHECK(opts.renderer == au::RendererPreference::Auto); // 默认值契约
+        au::Win32Options opts{base};
+        AURORA_TEST_CHECK(opts.renderer == au::RendererPreference::Auto);  // 默认值契约
         auto res = au::create_window(opts);
         AURORA_TEST_CHECK(static_cast<bool>(res));
         if (res) {
@@ -53,14 +52,14 @@ AURORA_TEST() {
             const bool is_gdi = dynamic_cast<au::Win32Surface *>(&s) != nullptr;
             AURORA_TEST_CHECK(is_gpu || is_gdi);
 #else
-            AURORA_TEST_CHECK(dynamic_cast<au::Win32Surface *>(&s) != nullptr); // 未编译：静默走软件
+            AURORA_TEST_CHECK(dynamic_cast<au::Win32Surface *>(&s) != nullptr);  // 未编译：静默走软件
 #endif
         }
     }
 
     // ---- 3. GpuD3D11：强制 GPU ----
     {
-        au::Win32Options opts{ base };
+        au::Win32Options opts{base};
         opts.renderer = au::RendererPreference::GpuD3D11;
         auto res = au::create_window(opts);
 #ifdef AURORA_BACKEND_D3D11
@@ -78,5 +77,5 @@ AURORA_TEST() {
         }
 #endif
     }
-#endif // AURORA_BACKEND_WIN32
+#endif  // AURORA_BACKEND_WIN32
 }

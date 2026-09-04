@@ -1,10 +1,9 @@
-// test_gradient.cpp — 渐变绘制与 Modifier.gradient() 测试（v0.9.0-alpha1）。
+// test_gradient.cpp — 渐变绘制与 Modifier.gradient() 测试。
 #include <cmath>
 #include <vector>
 
 #include "aurora/aurora.h"
 #include "aurora/render/offscreen.h"
-
 #include "test_harness.h"
 
 using aurora::Color;
@@ -25,10 +24,10 @@ static void test_linear_gradient_basic() {
     p.begin(100, 100);
 
     // 从左(红)到右(蓝)的线性渐变
-    const std::vector colors = { Color(255, 0, 0, 255), Color(0, 0, 255, 255) };
-    const std::vector stops = { 0.0f, 1.0f };
-    p.draw_linear_gradient(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 100, .height = 100 } },
-                           Point{ .x = 0, .y = 50 }, Point{ .x = 100, .y = 50 }, colors, stops);
+    const std::vector colors = {Color(255, 0, 0, 255), Color(0, 0, 255, 255)};
+    const std::vector stops = {0.0F, 1.0F};
+    p.draw_linear_gradient(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 100, .height = 100}},
+                           Point{.x = 0, .y = 50}, Point{.x = 100, .y = 50}, colors, stops);
 
     // 左侧像素应偏红
     const Color left = p.get_pixel(5, 50);
@@ -51,10 +50,10 @@ static void test_linear_gradient_vertical() {
     p.begin(50, 100);
 
     // 从上(白)到下(黑)
-    const std::vector colors = { Color(255, 255, 255, 255), Color(0, 0, 0, 255) };
-    const std::vector stops = { 0.0f, 1.0f };
-    p.draw_linear_gradient(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 50, .height = 100 } },
-                           Point{ .x = 25, .y = 0 }, Point{ .x = 25, .y = 100 }, colors, stops);
+    const std::vector colors = {Color(255, 255, 255, 255), Color(0, 0, 0, 255)};
+    const std::vector stops = {0.0F, 1.0F};
+    p.draw_linear_gradient(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 50, .height = 100}},
+                           Point{.x = 25, .y = 0}, Point{.x = 25, .y = 100}, colors, stops);
 
     // 顶部应亮
     const Color top = p.get_pixel(25, 5);
@@ -70,10 +69,10 @@ static void test_linear_gradient_multi_stop() {
     p.begin(90, 10);
 
     // 红→绿→蓝 三色标
-    const std::vector colors = { Color(255, 0, 0, 255), Color(0, 255, 0, 255), Color(0, 0, 255, 255) };
-    const std::vector stops = { 0.0f, 0.5f, 1.0f };
-    p.draw_linear_gradient(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 90, .height = 10 } },
-                           Point{ .x = 0, .y = 5 }, Point{ .x = 90, .y = 5 }, colors, stops);
+    const std::vector colors = {Color(255, 0, 0, 255), Color(0, 255, 0, 255), Color(0, 0, 255, 255)};
+    const std::vector stops = {0.0F, 0.5F, 1.0F};
+    p.draw_linear_gradient(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 90, .height = 10}},
+                           Point{.x = 0, .y = 5}, Point{.x = 90, .y = 5}, colors, stops);
 
     // 中间应偏绿
     const Color mid = p.get_pixel(45, 5);
@@ -89,10 +88,10 @@ static void test_radial_gradient_basic() {
     p.begin(100, 100);
 
     // 中心白→边缘黑
-    const std::vector colors = { Color(255, 255, 255, 255), Color(0, 0, 0, 255) };
-    const std::vector stops = { 0.0f, 1.0f };
-    p.draw_radial_gradient(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 100, .height = 100 } },
-                           Point{ .x = 50, .y = 50 }, 50.0f, colors, stops);
+    const std::vector colors = {Color(255, 255, 255, 255), Color(0, 0, 0, 255)};
+    const std::vector stops = {0.0F, 1.0F};
+    p.draw_radial_gradient(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 100, .height = 100}},
+                           Point{.x = 50, .y = 50}, 50.0F, colors, stops);
 
     // 中心应亮
     const Color center = p.get_pixel(50, 50);
@@ -106,7 +105,7 @@ static void test_radial_gradient_basic() {
 // ---------- Modifier.gradient_linear ----------
 
 static void test_modifier_gradient_linear() {
-    const auto mod = Modifier{}.gradient_linear(Color(255, 0, 0, 255), Color(0, 0, 255, 255), 0.0f);
+    const auto mod = Modifier{}.gradient_linear(Color(255, 0, 0, 255), Color(0, 0, 255, 255), 0.0F);
     AURORA_TEST_CHECK(!mod.nodes().empty());
 
     // 验证节点类型
@@ -117,7 +116,7 @@ static void test_modifier_gradient_linear() {
             AURORA_TEST_CHECK(g->type() == GradientBackground::Type::Linear);
             AURORA_TEST_CHECK(g->colors().size() == 2);
             AURORA_TEST_CHECK(g->stops().size() == 2);
-            AURORA_TEST_CHECK(g->angle() == 0.0f);
+            AURORA_TEST_CHECK(g->angle() == 0.0F);
         }
     }
     AURORA_TEST_CHECK(found);
@@ -148,7 +147,11 @@ static void test_gradient_widget_render() {
     Node root(std::move(txt));
     Json snap = render_to_logical_snapshot(root, 200, 50);
     AURORA_TEST_CHECK(snap.contains("type"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["type"] == "Text");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["box"]["w"].get<float>() > 0);
 }
 
@@ -159,24 +162,24 @@ static void test_gradient_degenerate() {
     p.begin(10, 10);
 
     // 空色标不崩溃
-    p.draw_linear_gradient(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 10, .height = 10 } },
-                           Point{ .x = 0, .y = 0 }, Point{ .x = 10, .y = 10 }, {}, {});
-    AURORA_TEST_CHECK(true); // 不崩溃即通过
+    p.draw_linear_gradient(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 10, .height = 10}},
+                           Point{.x = 0, .y = 0}, Point{.x = 10, .y = 10}, {}, {});
+    AURORA_TEST_CHECK(true);  // 不崩溃即通过
 
     // 单色标
-    const std::vector single = { Color(128, 128, 128, 255) };
-    const std::vector stops = { 0.0f };
-    p.draw_linear_gradient(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 10, .height = 10 } },
-                           Point{ .x = 0, .y = 0 }, Point{ .x = 10, .y = 10 }, single, stops);
+    const std::vector single = {Color(128, 128, 128, 255)};
+    const std::vector stops = {0.0F};
+    p.draw_linear_gradient(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 10, .height = 10}},
+                           Point{.x = 0, .y = 0}, Point{.x = 10, .y = 10}, single, stops);
     const Color c = p.get_pixel(5, 5);
     AURORA_TEST_CHECK(c.m_r == 128);
 
     // 零方向向量（start == end）
-    const std::vector two = { Color(255, 0, 0, 255), Color(0, 0, 255, 255) };
-    const std::vector two_stops = { 0.0f, 1.0f };
-    p.draw_linear_gradient(Rect{ .origin = Point{ .x = 0, .y = 0 }, .size = Size{ .width = 10, .height = 10 } },
-                           Point{ .x = 5, .y = 5 }, Point{ .x = 5, .y = 5 }, two, two_stops);
-    AURORA_TEST_CHECK(true); // 不崩溃即通过
+    const std::vector two = {Color(255, 0, 0, 255), Color(0, 0, 255, 255)};
+    const std::vector two_stops = {0.0F, 1.0F};
+    p.draw_linear_gradient(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 10, .height = 10}},
+                           Point{.x = 5, .y = 5}, Point{.x = 5, .y = 5}, two, two_stops);
+    AURORA_TEST_CHECK(true);  // 不崩溃即通过
 }
 
 AURORA_TEST() {

@@ -6,7 +6,6 @@
 #include "aurora/aurora.h"
 #include "aurora/widget/lazy_row.h"
 #include "aurora/window/window.h"
-
 #include "test_harness.h"
 
 namespace au = aurora;
@@ -17,13 +16,13 @@ AURORA_TEST() {
         auto lr = std::make_shared<au::LazyRow>(
             10,
             [](int) -> au::Node {
-                return au::Node{ std::make_shared<au::Canvas>(96.0f, 96.0f,
-                                                              [](au::Painter &, const au::Rect &) -> void {}) };
+                return au::Node{
+                    std::make_shared<au::Canvas>(96.0F, 96.0F, [](au::Painter&, const au::Rect&) -> void {})};
             },
-            96.0f);
+            96.0F);
         lr->set_item_count(20);
-        lr->set_item_extent(120.0f);
-        lr->set_cache_extent(300.0f);
+        lr->set_item_extent(120.0F);
+        lr->set_cache_extent(300.0F);
     }
 
     // on_item_click：在 extent=96、offset=0 时，local x=100 命中 index 1。
@@ -31,16 +30,16 @@ AURORA_TEST() {
         auto lr = std::make_shared<au::LazyRow>(
             10,
             [](int) -> au::Node {
-                return au::Node{ std::make_shared<au::Canvas>(96.0f, 96.0f,
-                                                              [](au::Painter &, const au::Rect &) -> void {}) };
+                return au::Node{
+                    std::make_shared<au::Canvas>(96.0F, 96.0F, [](au::Painter&, const au::Rect&) -> void {})};
             },
-            96.0f);
+            96.0F);
         int clicked = -1;
         lr->set_on_item_click([&clicked](int i) -> void { clicked = i; });
-        au::Node node{ lr };
+        au::Node node{lr};
         // 先渲染以获得布局与 widget bounds，再派发点击。
         au::HeadlessOptions opts;
-        opts.size = au::Size{ .width = 400.0f, .height = 120.0f };
+        opts.size = au::Size{.width = 400.0F, .height = 120.0F};
         opts.png_path = "build/test_lazy_row_click.png";
         auto res = au::create_window(opts);
         AURORA_TEST_CHECK(static_cast<bool>(res));
@@ -49,11 +48,11 @@ AURORA_TEST() {
             auto r = win->present_root(node);
             AURORA_TEST_CHECK(static_cast<bool>(r));
             au::MouseEvent down;
-            down.local_position = au::Point{ .x = 100.0f, .y = 10.0f };
+            down.local_position = au::Point{.x = 100.0F, .y = 10.0F};
             down.action = au::MouseAction::Press;
             lr->on_pointer_event(down);
             au::MouseEvent up;
-            up.local_position = au::Point{ .x = 100.0f, .y = 10.0f };
+            up.local_position = au::Point{.x = 100.0F, .y = 10.0F};
             up.action = au::MouseAction::Release;
             lr->on_pointer_event(up);
             AURORA_TEST_CHECK(clicked == 1);
@@ -66,24 +65,24 @@ AURORA_TEST() {
             30,
             [](int i) -> au::Node {
                 const auto c =
-                    std::make_shared<au::Canvas>(96.0f, 96.0f, [i](au::Painter &p, const au::Rect &b) -> void {
-                        p.fill_rect(b, au::Color{ static_cast<uint8_t>(i * 8 % 256), 0x80, 0xC0, 0xFF });
+                    std::make_shared<au::Canvas>(96.0F, 96.0F, [i](au::Painter& p, const au::Rect& b) -> void {
+                        p.fill_rect(b, au::Color{static_cast<uint8_t>(i * 8 % 256), 0x80, 0xC0, 0xFF});
                     });
-                return au::Node{ c };
+                return au::Node{c};
             },
-            96.0f);
+            96.0F);
         auto wrap = std::make_shared<au::Row>();
-        wrap->add(au::Node{ lr });
-        wrap->modifier = au::Modifier{}.clip_rounded(24.0f).background(au::Color{ 0xFF, 0xFF, 0xFF, 0xFF });
+        wrap->add(au::Node{lr});
+        wrap->modifier = au::Modifier{}.clip_rounded(24.0F).background(au::Color{0xFF, 0xFF, 0xFF, 0xFF});
 
         au::HeadlessOptions opts;
-        opts.size = au::Size{ .width = 420.0f, .height = 140.0f };
+        opts.size = au::Size{.width = 420.0F, .height = 140.0F};
         opts.png_path = "build/test_lazy_row.png";
         auto res = au::create_window(opts);
         AURORA_TEST_CHECK(static_cast<bool>(res));
         if (res) {
             auto win = std::move(res.value());
-            au::Node root_node{ wrap };
+            au::Node root_node{wrap};
             auto r = win->present_root(root_node);
             AURORA_TEST_CHECK(static_cast<bool>(r));
             AURORA_TEST_CHECK(win->surface().frame_count() == 1);

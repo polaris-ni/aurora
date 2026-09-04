@@ -316,8 +316,8 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 | `ui::stack(parent, align = Alignment::TopLeft)` | `Stack` |
 | `ui::grid(parent, GridProps = {})` | `Grid` |
 | `ui::scroll(parent, ScrollProps = {})` | `Scroll` |
-| `ui::lazy_list(parent, count, builder, item_extent = 48.0f)` | `LazyList` |
-| `ui::lazy_row(parent, count, builder, item_extent = 96.0f)` / `ui::lazy_row(parent, LazyRowProps)` | `LazyRow`（双重载） |
+| `ui::lazy_list(parent, count, builder, item_extent = 48.0F)` | `LazyList` |
+| `ui::lazy_row(parent, count, builder, item_extent = 96.0F)` / `ui::lazy_row(parent, LazyRowProps)` | `LazyRow`（双重载） |
 | `ui::bottom_nav_bar(parent, BottomNavBarProps)` | `BottomNavBar` |
 
 ---

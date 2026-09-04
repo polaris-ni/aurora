@@ -2,9 +2,10 @@
 // ── API 覆盖映射 ─────────────────────────────
 // render/font_discovery.h(FontDiscovery 内置默认字体/内存注册/缺字回退链)。
 
+#include <ft2build.h>
+
 #include <algorithm>
 #include <cmath>
-#include <ft2build.h>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -50,18 +51,18 @@ auto has_glyph(unsigned cp) -> bool {
     return std::ranges::any_of(faces,
                                [cp](FontFace const *ff) -> bool { return FT_Get_Char_Index(ff->face, cp) != 0; });
 }
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     (void)FontEngine::instance();
-    constexpr Color bg{ 10, 20, 30, 255 };
-    constexpr Color fg{ 240, 240, 240, 255 };
+    constexpr Color bg{10, 20, 30, 255};
+    constexpr Color fg{240, 240, 240, 255};
 
     // 1) 内置默认字体：Latin 文本可度量且 > 0
     {
-        const Font f{ .size_pt = 16.0f };
+        const Font f{.size_pt = 16.0F};
         const float w = FontEngine::measure_width("Hello, Aurora", f);
-        AURORA_TEST_CHECK(w > 0.0f);
+        AURORA_TEST_CHECK(w > 0.0F);
         AURORA_LOG_INFO("test", "[1] default font measures Latin (w=", w, ") OK");
     }
 
@@ -70,9 +71,9 @@ AURORA_TEST() {
         const auto data = noto_sans_ttf();
         std::vector bytes(data.begin(), data.end());
         FontEngine::register_font_from_memory("MyEmbedded", bytes);
-        const Font f{ .family = "MyEmbedded", .size_pt = 16.0f };
+        const Font f{.family = "MyEmbedded", .size_pt = 16.0F};
         const float w = FontEngine::measure_width("Embedded", f);
-        AURORA_TEST_CHECK(w > 0.0f);
+        AURORA_TEST_CHECK(w > 0.0F);
         AURORA_LOG_INFO("test", "[2] register_font_from_memory OK (w=", w, ")");
     }
 
@@ -81,11 +82,11 @@ AURORA_TEST() {
         Painter p;
         p.begin(240, 48);
         p.fill_rect(
-            Rect{ .origin = Point{ .x = 0, .y = 0 },
-                  .size = Size{ .width = static_cast<float>(p.width()), .height = static_cast<float>(p.height()) } },
+            Rect{.origin = Point{.x = 0, .y = 0},
+                 .size = Size{.width = static_cast<float>(p.width()), .height = static_cast<float>(p.height())}},
             bg);
-        p.draw_text(Rect{ .origin = Point{ .x = 4, .y = 8 }, .size = Size{ .width = 232, .height = 32 } }, "Hello",
-                    Font{ .size_pt = 20.0f }, fg);
+        p.draw_text(Rect{.origin = Point{.x = 4, .y = 8}, .size = Size{.width = 232, .height = 32}}, "Hello",
+                    Font{.size_pt = 20.0F}, fg);
         const int cnt = count_non_bg(p, bg);
         AURORA_TEST_CHECK(cnt > 0);
         AURORA_LOG_INFO("test", "[3] Latin draws pixels (non-bg=", cnt, ") OK");
@@ -97,7 +98,7 @@ AURORA_TEST() {
         bool any = false;
         for (const char *q = cjk.c_str(); (*q) != 0;) {
             auto c0 = static_cast<unsigned char>(*q);
-            int len = 1; // NOLINT
+            int len = 1;  // NOLINT
             unsigned u = 0;
             if (c0 < 0x80) {
                 len = 1;
@@ -113,11 +114,15 @@ AURORA_TEST() {
                 u = (c0 & 0x07U);
             }
             for (int k = 1; k < len; ++k) {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+                // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
                 u = (u << 6U) | (static_cast<unsigned char>(q[k]) & 0x3FU);
             }
             if (has_glyph(u)) {
                 any = true;
             }
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
             q += len;
         }
         if (!any) {
@@ -125,12 +130,12 @@ AURORA_TEST() {
         } else {
             Painter p;
             p.begin(240, 48);
-            p.fill_rect(Rect{ .origin = Point{ .x = 0, .y = 0 },
-                              .size = Size{ .width = static_cast<float>(p.width()),
-                                            .height = static_cast<float>(p.height()) } },
-                        bg);
-            p.draw_text(Rect{ .origin = Point{ .x = 4, .y = 8 }, .size = Size{ .width = 232, .height = 32 } }, cjk,
-                        Font{ .size_pt = 20.0f }, fg);
+            p.fill_rect(
+                Rect{.origin = Point{.x = 0, .y = 0},
+                     .size = Size{.width = static_cast<float>(p.width()), .height = static_cast<float>(p.height())}},
+                bg);
+            p.draw_text(Rect{.origin = Point{.x = 4, .y = 8}, .size = Size{.width = 232, .height = 32}}, cjk,
+                        Font{.size_pt = 20.0F}, fg);
             const int cnt = count_non_bg(p, bg);
             AURORA_TEST_CHECK(cnt > 0);
             AURORA_LOG_INFO("test", "[4] CJK draws pixels (non-bg=", cnt, ") OK");

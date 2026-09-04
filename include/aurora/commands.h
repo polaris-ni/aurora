@@ -17,4 +17,4 @@ inline auto run_raw(const std::function<void()> &fn) -> void {
     }
 }
 
-} // namespace aurora::commands
+}  // namespace aurora::commands

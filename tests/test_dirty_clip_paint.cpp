@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::Chip;
@@ -26,7 +25,7 @@ namespace {
 auto make_window(int w, int h) -> Window {
     auto surface = std::make_unique<HeadlessSurface>();
     (void)surface->begin_frame(w, h);
-    return Window{ std::move(surface) };
+    return Window{std::move(surface)};
 }
 
 auto copy_pixels(const std::uint8_t *src, size_t n) -> std::vector<std::uint8_t> {
@@ -40,7 +39,7 @@ auto copy_pixels(const std::uint8_t *src, size_t n) -> std::vector<std::uint8_t>
 auto count_diff(const std::vector<std::uint8_t> &a, const std::vector<std::uint8_t> &b) -> size_t {
     size_t d = 0;
     for (size_t i = 0; i < a.size() && i < b.size(); ++i) {
-        if (a[i] != b[i]) {
+        if (a.at(i) != b.at(i)) {
             ++d;
         }
     }
@@ -51,26 +50,26 @@ auto count_diff(const std::vector<std::uint8_t> &a, const std::vector<std::uint8
 auto scenario_root_dirty() -> void {
     const auto chip = std::make_shared<Chip>();
     chip->set_label("hi");
-    chip->set_background(Color{ 0, 0, 255 });
-    Node root{ chip };
+    chip->set_background(Color{0, 0, 255});
+    Node root{chip};
 
     Window win = make_window(256, 192);
-    AURORA_TEST_CHECK(win.present_root(root).ok()); // 帧 1：首帧全绘
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 1：首帧全绘
     auto const &hs = dynamic_cast<HeadlessSurface &>(win.surface());
     AURORA_TEST_CHECK(hs.data() != nullptr);
-    constexpr size_t n = static_cast<size_t>(256) * static_cast<size_t>(192) * 4u;
+    constexpr size_t n = static_cast<size_t>(256) * static_cast<size_t>(192) * 4U;
     const auto before = copy_pixels(hs.data(), n);
 
-    chip->set_background(Color{ 255, 0, 0 });       // paint-only 脏（根 → 全窗几何）
-    AURORA_TEST_CHECK(win.present_root(root).ok()); // 帧 2：脏区裁剪绘制
+    chip->set_background(Color{255, 0, 0});  // paint-only 脏（根 → 全窗几何）
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 2：脏区裁剪绘制
     const auto dirty = copy_pixels(hs.data(), n);
 
     win.force_full_redraw();
-    AURORA_TEST_CHECK(win.present_root(root).ok()); // 帧 3：整帧重绘基准
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 3：整帧重绘基准
     const auto full = copy_pixels(hs.data(), n);
 
     AURORA_TEST_CHECK(count_diff(dirty, full) == 0);  // 脏区重绘 == 整帧重绘（逐位）
-    AURORA_TEST_CHECK(count_diff(dirty, before) > 0); // 颜色变更确实生效
+    AURORA_TEST_CHECK(count_diff(dirty, before) > 0);  // 颜色变更确实生效
 }
 
 // 场景 2：嵌套小控件变脏（脏区 < 全窗）——真正锻炼部分裁剪路径：
@@ -81,27 +80,27 @@ auto scenario_nested_partial_dirty() -> void {
     const auto text = std::make_shared<Text>("stable reference line");
     const auto chip = std::make_shared<Chip>();
     chip->set_label("dirty");
-    chip->set_background(Color{ 0, 0, 255 });
-    Node root{ std::make_shared<Column>(ColumnProps{ .children = { Node{ text }, Node{ chip } } }) };
+    chip->set_background(Color{0, 0, 255});
+    Node root{std::make_shared<Column>(ColumnProps{.children = {Node{text}, Node{chip}}})};
 
     Window win = make_window(w, h);
-    AURORA_TEST_CHECK(win.present_root(root).ok()); // 帧 1：首帧全绘
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 1：首帧全绘
     auto const &hs = dynamic_cast<HeadlessSurface &>(win.surface());
-    constexpr size_t n = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
+    constexpr size_t n = static_cast<size_t>(w) * static_cast<size_t>(h) * 4U;
     const auto before = copy_pixels(hs.data(), n);
 
     // 脏源必须是「小于全窗」的子控件几何（部分裁剪路径，而非退化为全窗裁剪）。
     const Rect cb = chip->paint_bounds();
-    AURORA_TEST_CHECK(cb.size.width > 0.0f && cb.size.height > 0.0f);
-    AURORA_TEST_CHECK(cb.size.width < static_cast<float>(w) - 1.0f);
-    AURORA_TEST_CHECK(cb.size.height < static_cast<float>(h) - 1.0f);
+    AURORA_TEST_CHECK(cb.size.width > 0.0F && cb.size.height > 0.0F);
+    AURORA_TEST_CHECK(cb.size.width < static_cast<float>(w) - 1.0F);
+    AURORA_TEST_CHECK(cb.size.height < static_cast<float>(h) - 1.0F);
 
-    chip->set_background(Color{ 255, 0, 0 });       // 仅 Chip 变脏
-    AURORA_TEST_CHECK(win.present_root(root).ok()); // 帧 2：部分脏区裁剪绘制
+    chip->set_background(Color{255, 0, 0});  // 仅 Chip 变脏
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 2：部分脏区裁剪绘制
     const auto dirty = copy_pixels(hs.data(), n);
 
     win.force_full_redraw();
-    AURORA_TEST_CHECK(win.present_root(root).ok()); // 帧 3：整帧重绘基准
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 3：整帧重绘基准
     const auto full = copy_pixels(hs.data(), n);
 
     // 核心不变量：部分脏区重绘与整帧重绘逐位一致（不漏绘、无残留、无双重混合）。
@@ -116,23 +115,25 @@ auto scenario_nested_partial_dirty() -> void {
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             if (x >= x0 && x < x1 && y >= y0 && y < y1) {
-                continue; // 脏区（含容差）内跳过
+                continue;  // 脏区（含容差）内跳过
             }
-            const size_t i = ((static_cast<size_t>(y) * static_cast<size_t>(w)) + static_cast<size_t>(x)) * 4u;
+            const size_t i = ((static_cast<size_t>(y) * static_cast<size_t>(w)) + static_cast<size_t>(x)) * 4U;
             for (size_t k = 0; k < 4; ++k) {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                 if (dirty[i + k] != before[i + k]) {
                     ++outside_diff;
                 }
             }
         }
     }
-    AURORA_TEST_CHECK(outside_diff == 0); // 脏区外零改写（文本行等上帧内容原样保留）
+    AURORA_TEST_CHECK(outside_diff == 0);  // 脏区外零改写（文本行等上帧内容原样保留）
 
     // 脏区内确实重绘出了新颜色。
     AURORA_TEST_CHECK(count_diff(dirty, before) > 0);
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     scenario_root_dirty();

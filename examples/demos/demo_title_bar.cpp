@@ -10,45 +10,47 @@
 //    标题栏完全由本控件接管（KDE 上则与系统装饰并存，仅作演示）。
 // 运行：cmake --build build --target demo_title_bar && ./build/demo_title_bar
 #include "aurora/widget/title_bar.h"
-
 #include "demo_common.h"
 
+// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// try/catch 包装
 auto main() -> int {
     au::enable_dpi_awareness();
     au::init_console();
 
-    constexpr float w = 720.0f;
-    constexpr float h = 480.0f;
+    constexpr float w = 720.0F;
+    constexpr float h = 480.0F;
 
     // 配置声明式标题栏（经 WindowChrome 驱动窗口；headless 无 chrome 时交互安全跳过）。
     au::TitleBar titlebar;
     titlebar.set_title("Aurora TitleBar Demo")
         .set_subtitle("Borderless + WindowChrome")
-        .add_action({ .label = "Settings", .on_click = []() -> void { AURORA_LOG_INFO("demo", "settings clicked"); } })
-        .add_snap_action(
-            { .label = "Left half screen (custom)", .on_click = []() -> void { AURORA_LOG_INFO("demo", "custom snap action"); } });
+        .add_action({.label = "Settings", .on_click = []() -> void { AURORA_LOG_INFO("demo", "settings clicked"); }})
+        .add_snap_action({.label = "Left half screen (custom)",
+                          .on_click = []() -> void { AURORA_LOG_INFO("demo", "custom snap action"); }});
 
     au::Node root = au::Column{
-        au::Node{ std::move(titlebar) },
+        au::Node{std::move(titlebar)},
         gap(12),
-        GradientTitle{ "TitleBar" },
-        au::Text{ "Window actions dispatched via WindowChrome; hover maximize button to try Snap popup" },
+        GradientTitle{"TitleBar"},
+        au::Text{"Window actions dispatched via WindowChrome; hover maximize button to try Snap popup"},
     };
 
     au::FocusManager fm;
     fm.set_root(&root.widget());
 
     au::WindowOptions wopts;
-    wopts.size = au::Size{ .width = w, .height = h };
+    wopts.size = au::Size{.width = w, .height = h};
     wopts.title = "TitleBar · Aurora Demo";
     wopts.style.decoration = au::DecorationPolicy::Borderless;
 
     auto win_res = au::create_native_window(wopts);
     if (!win_res) {
-        AURORA_LOG_ERROR("demo", "[demo_title_bar] window creation failed: ", win_res.error().message, ", falling back to headless render");
+        AURORA_LOG_ERROR("demo", "[demo_title_bar] window creation failed: ", win_res.error().message,
+                         ", falling back to headless render");
         std::error_code ec;
         std::filesystem::create_directories("build", ec);
-        au::Scene scene{ root };
+        au::Scene scene{root};
         auto r = scene.render_to_png("build/demo_title_bar.png", static_cast<int>(w), static_cast<int>(h));
         if (r) {
             AURORA_LOG_INFO("demo", "[demo_title_bar] rendered build/demo_title_bar.png");

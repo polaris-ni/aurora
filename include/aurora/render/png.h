@@ -15,15 +15,15 @@ namespace detail {
 /// @brief 将原始像素数据打包为 zlib stored-block IDAT 负载。
 [[nodiscard]] inline auto build_idat(const std::uint8_t *raw, std::size_t raw_len) -> std::vector<std::uint8_t> {
     std::vector<std::uint8_t> idat;
-    idat.push_back(0x78); // CMF (deflate, 32K window)
-    idat.push_back(0x01); // FLG (valid FCHECK, no dict)
+    idat.push_back(0x78);  // CMF (deflate, 32K window)
+    idat.push_back(0x01);  // FLG (valid FCHECK, no dict)
 
     std::size_t off = 0;
     while (off < raw_len) {
         constexpr std::size_t max_stored = 65535;
         const bool last = (off + max_stored >= raw_len);
         const std::size_t chunk = last ? (raw_len - off) : max_stored;
-        idat.push_back(static_cast<std::uint8_t>(last ? 0x01U : 0x00U)); // BFINAL | BTYPE=00
+        idat.push_back(static_cast<std::uint8_t>(last ? 0x01U : 0x00U));  // BFINAL | BTYPE=00
         const auto len32 = static_cast<std::uint32_t>(chunk);
         const std::uint32_t nlen32 = ~len32;
         idat.push_back(static_cast<std::uint8_t>(len32 & 0xFFU));
@@ -31,8 +31,8 @@ namespace detail {
         idat.push_back(static_cast<std::uint8_t>(nlen32 & 0xFFU));
         idat.push_back(static_cast<std::uint8_t>((nlen32 >> 8U) & 0xFFU));
         for (std::size_t i = 0; i < chunk; ++i) {
-            idat.push_back(raw[off + i]); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic,
-                                          // cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            idat.push_back(raw[off + i]);  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic,
+                                           // cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         }
         off += chunk;
     }
@@ -49,12 +49,12 @@ namespace detail {
     }
 
     // ---- CRC32 ----
-    static constexpr auto crc_table = []() -> std::array<std::uint32_t, 256> {
+    static constexpr auto CRC_TABLE = []() -> std::array<std::uint32_t, 256> {
         std::array<std::uint32_t, 256> t{};
         for (std::uint32_t n = 0; n < 256; ++n) {
             std::uint32_t c = n;
             for (int k = 0; k < 8; ++k) {
-                c = (c & 1u) ? (0xedb88320U ^ (c >> 1U)) : (c >> 1U);
+                c = (c & 1U) ? (0xedb88320U ^ (c >> 1U)) : (c >> 1U);
             }
             // NOLINTNEXTLINE(*-pro-bounds-constant-array-index, *-pro-bounds-avoid-unchecked-container-access)
             t[n] = c;
@@ -65,7 +65,7 @@ namespace detail {
         std::uint32_t c = 0xFFFFFFFFU;
         for (std::size_t i = 0; i < len; ++i) {
             // NOLINTNEXTLINE
-            c = crc_table[(c ^ static_cast<std::uint32_t>(buf[i])) & 0xFFU] ^ (c >> 8U);
+            c = CRC_TABLE[(c ^ static_cast<std::uint32_t>(buf[i])) & 0xFFU] ^ (c >> 8U);
         }
         return c ^ 0xFFFFFFFFU;
     };
@@ -73,7 +73,7 @@ namespace detail {
         std::uint32_t a = 1;
         std::uint32_t b = 0;
         for (std::size_t i = 0; i < len; ++i) {
-            a = (a + buf[i]) % 65521U; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            a = (a + buf[i]) % 65521U;  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
             b = (b + a) % 65521U;
         }
         return (b << 16U) | a;
@@ -87,21 +87,24 @@ namespace detail {
         out.push_back(static_cast<std::uint8_t>(v & 0xFFU));
     };
     auto put_chunk = [&](const char *type, const std::uint8_t *data, std::size_t len) -> void {
+        if (type == nullptr || data == nullptr) {
+            return;
+        }
         put_u32(static_cast<std::uint32_t>(len));
         const std::size_t start = out.size();
-        out.push_back(static_cast<std::uint8_t>(type[0])); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        out.push_back(static_cast<std::uint8_t>(type[1])); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        out.push_back(static_cast<std::uint8_t>(type[2])); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        out.push_back(static_cast<std::uint8_t>(type[3])); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        out.push_back(static_cast<std::uint8_t>(type[0]));  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        out.push_back(static_cast<std::uint8_t>(type[1]));  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        out.push_back(static_cast<std::uint8_t>(type[2]));  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        out.push_back(static_cast<std::uint8_t>(type[3]));  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         for (std::size_t i = 0; i < len; ++i) {
-            out.push_back(data[i]); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            out.push_back(data[i]);  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         }
-        const std::uint32_t crc = crc32(&out[start], len + 4); // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        const std::uint32_t crc = crc32(&out[start], len + 4);  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
         put_u32(crc);
     };
 
     // 签名
-    const std::array<std::uint8_t, 8> sig = { 137, 80, 78, 71, 13, 10, 26, 10 };
+    const std::array<std::uint8_t, 8> sig = {137, 80, 78, 71, 13, 10, 26, 10};
     out.insert(out.end(), sig.begin(), sig.end());
 
     // IHDR
@@ -126,16 +129,16 @@ namespace detail {
     put_chunk("IHDR", ihdr.data(), ihdr.size());
 
     // IDAT：zlib 头 + 单个 stored block（无压缩）+ adler32
-    const std::size_t stride = (static_cast<std::size_t>(width) * 4U) + 1U; // 1 filter byte + RGBA
+    const std::size_t stride = (static_cast<std::size_t>(width) * 4U) + 1U;  // 1 filter byte + RGBA
     const std::size_t raw_len = stride * static_cast<std::size_t>(height);
     std::vector<std::uint8_t> raw;
     raw.reserve(raw_len);
     for (int y = 0; y < height; ++y) {
-        raw.push_back(0); // filter: none
+        raw.push_back(0);  // filter: none
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         const std::uint8_t *row = rgba + (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) * 4U);
         for (int x = 0; x < width * 4; ++x) {
-            raw.push_back(row[x]); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            raw.push_back(row[x]);  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         }
     }
 
@@ -154,7 +157,7 @@ namespace detail {
     return out;
 }
 
-} // namespace detail
+}  // namespace detail
 
 /// @brief 将 RGBA8 像素编码并写入 PNG 文件（内置最小化编码器，零三方依赖）。
 /// @return 成功返回空值；失败返回带信息的 Error。
@@ -172,7 +175,7 @@ namespace detail {
     if (!f.good()) {
         return make_error(ErrorCode::IOFileNotFound, "writePNG: write incomplete");
     }
-    return Result{ true };
+    return Result{true};
 }
 
-} // namespace aurora
+}  // namespace aurora

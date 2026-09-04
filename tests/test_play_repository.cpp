@@ -4,7 +4,6 @@
 #include <cstdint>
 
 #include "aurora/aurora.h"
-
 #include "google_play_data.h"
 #include "test_harness.h"
 
@@ -12,7 +11,7 @@ namespace au = aurora;
 
 static auto count_all(const gp::PlayRepository &repo) -> int {
     int n = 0;
-    const std::string cats[] = { "apps", "games", "movies", "books" };
+    const std::string cats[] = {"apps", "games", "movies", "books"};
     for (const auto &c : cats) {
         n += static_cast<int>(repo.list_by_category(c).size());
     }

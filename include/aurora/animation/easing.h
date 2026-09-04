@@ -24,7 +24,7 @@ enum class CurveKind : std::uint8_t {
     EaseOutCubic,
     EaseInOutCubic,
     BounceOut,
-    Custom, ///< 由 std::function 定义
+    Custom,  ///< 由 std::function 定义
 };
 
 /**
@@ -40,39 +40,53 @@ enum class CurveKind : std::uint8_t {
 class Curve {
   public:
     Curve() = default;
-    explicit Curve(CurveKind k) : m_kind(k) {}
-    explicit Curve(std::function<double(double)> fn) : m_kind(CurveKind::Custom), m_fn(std::move(fn)) {}
+    explicit Curve(CurveKind k) : kind_(k) {}
+    explicit Curve(std::function<double(double)> fn) : kind_(CurveKind::Custom), fn_(std::move(fn)) {}
 
     /// @brief 计算 t 对应的缓动进度（输入/输出均夹入 [0,1]）。
     [[nodiscard]] auto transform(double t) const -> double {
         t = std::clamp(t, 0.0, 1.0);
-        if (m_kind == CurveKind::Custom && m_fn) {
-            return std::clamp(m_fn(t), 0.0, 1.0);
+        if (kind_ == CurveKind::Custom && fn_) {
+            return std::clamp(fn_(t), 0.0, 1.0);
         }
         return std::clamp(eval(t), 0.0, 1.0);
     }
 
-    [[nodiscard]] auto kind() const -> CurveKind { return m_kind; }
+    [[nodiscard]] auto kind() const -> CurveKind { return kind_; }
 
   private:
     [[nodiscard]] auto eval(double t) const -> double {
-        switch (m_kind) {
-        case CurveKind::Linear: return t;
-        case CurveKind::EaseIn: return t * t * t;
-        case CurveKind::EaseOut: return 1.0 - std::pow(1.0 - t, 3.0);
-        case CurveKind::EaseInOut: return t < 0.5 ? 4.0 * t * t * t : 1.0 - (std::pow((-2.0 * t) + 2.0, 3.0) / 2.0);
-        case CurveKind::EaseInSine: return 1.0 - std::cos(t * std::numbers::pi / 2.0);
-        case CurveKind::EaseOutSine: return std::sin(t * std::numbers::pi / 2.0);
-        case CurveKind::EaseInOutSine: return -(std::cos(std::numbers::pi * t) - 1.0) / 2.0;
-        case CurveKind::EaseInQuad: return t * t;
-        case CurveKind::EaseOutQuad: return t * (2.0 - t);
-        case CurveKind::EaseInOutQuad: return t < 0.5 ? 2.0 * t * t : 1.0 - (std::pow((-2.0 * t) + 2.0, 2.0) / 2.0);
-        case CurveKind::EaseInCubic: return t * t * t;
-        case CurveKind::EaseOutCubic: return 1.0 - std::pow(1.0 - t, 3.0);
-        case CurveKind::EaseInOutCubic:
-            return t < 0.5 ? 4.0 * t * t * t : 1.0 - (std::pow((-2.0 * t) + 2.0, 3.0) / 2.0);
-        case CurveKind::BounceOut: return bounce_out(t);
-        case CurveKind::Custom: return t;
+        switch (kind_) {
+            case CurveKind::Linear:
+                return t;
+            case CurveKind::EaseIn:
+                return t * t * t;
+            case CurveKind::EaseOut:
+                return 1.0 - std::pow(1.0 - t, 3.0);
+            case CurveKind::EaseInOut:
+                return t < 0.5 ? 4.0 * t * t * t : 1.0 - (std::pow((-2.0 * t) + 2.0, 3.0) / 2.0);
+            case CurveKind::EaseInSine:
+                return 1.0 - std::cos(t * std::numbers::pi / 2.0);
+            case CurveKind::EaseOutSine:
+                return std::sin(t * std::numbers::pi / 2.0);
+            case CurveKind::EaseInOutSine:
+                return -(std::cos(std::numbers::pi * t) - 1.0) / 2.0;
+            case CurveKind::EaseInQuad:
+                return t * t;
+            case CurveKind::EaseOutQuad:
+                return t * (2.0 - t);
+            case CurveKind::EaseInOutQuad:
+                return t < 0.5 ? 2.0 * t * t : 1.0 - (std::pow((-2.0 * t) + 2.0, 2.0) / 2.0);
+            case CurveKind::EaseInCubic:
+                return t * t * t;
+            case CurveKind::EaseOutCubic:
+                return 1.0 - std::pow(1.0 - t, 3.0);
+            case CurveKind::EaseInOutCubic:
+                return t < 0.5 ? 4.0 * t * t * t : 1.0 - (std::pow((-2.0 * t) + 2.0, 3.0) / 2.0);
+            case CurveKind::BounceOut:
+                return bounce_out(t);
+            case CurveKind::Custom:
+                return t;
         }
         return t;
     }
@@ -95,26 +109,26 @@ class Curve {
         return (n1 * t * t) + 0.984375;
     }
 
-    CurveKind m_kind = CurveKind::Linear;
-    std::function<double(double)> m_fn;
+    CurveKind kind_ = CurveKind::Linear;
+    std::function<double(double)> fn_;
 };
 
 /// @brief 常用曲线集合（命名工厂，对应 specification/05-event-navigation.md §6.1）。
 struct Curves {
-    static auto linear() -> Curve { return Curve{ CurveKind::Linear }; }
-    static auto ease_in() -> Curve { return Curve{ CurveKind::EaseIn }; }
-    static auto ease_out() -> Curve { return Curve{ CurveKind::EaseOut }; }
-    static auto ease_in_out() -> Curve { return Curve{ CurveKind::EaseInOut }; }
-    static auto ease_in_sine() -> Curve { return Curve{ CurveKind::EaseInSine }; }
-    static auto ease_out_sine() -> Curve { return Curve{ CurveKind::EaseOutSine }; }
-    static auto ease_in_out_sine() -> Curve { return Curve{ CurveKind::EaseInOutSine }; }
-    static auto ease_in_quad() -> Curve { return Curve{ CurveKind::EaseInQuad }; }
-    static auto ease_out_quad() -> Curve { return Curve{ CurveKind::EaseOutQuad }; }
-    static auto ease_in_out_quad() -> Curve { return Curve{ CurveKind::EaseInOutQuad }; }
-    static auto ease_in_cubic() -> Curve { return Curve{ CurveKind::EaseInCubic }; }
-    static auto ease_out_cubic() -> Curve { return Curve{ CurveKind::EaseOutCubic }; }
-    static auto ease_in_out_cubic() -> Curve { return Curve{ CurveKind::EaseInOutCubic }; }
-    static auto bounce_out() -> Curve { return Curve{ CurveKind::BounceOut }; }
+    static auto linear() -> Curve { return Curve{CurveKind::Linear}; }
+    static auto ease_in() -> Curve { return Curve{CurveKind::EaseIn}; }
+    static auto ease_out() -> Curve { return Curve{CurveKind::EaseOut}; }
+    static auto ease_in_out() -> Curve { return Curve{CurveKind::EaseInOut}; }
+    static auto ease_in_sine() -> Curve { return Curve{CurveKind::EaseInSine}; }
+    static auto ease_out_sine() -> Curve { return Curve{CurveKind::EaseOutSine}; }
+    static auto ease_in_out_sine() -> Curve { return Curve{CurveKind::EaseInOutSine}; }
+    static auto ease_in_quad() -> Curve { return Curve{CurveKind::EaseInQuad}; }
+    static auto ease_out_quad() -> Curve { return Curve{CurveKind::EaseOutQuad}; }
+    static auto ease_in_out_quad() -> Curve { return Curve{CurveKind::EaseInOutQuad}; }
+    static auto ease_in_cubic() -> Curve { return Curve{CurveKind::EaseInCubic}; }
+    static auto ease_out_cubic() -> Curve { return Curve{CurveKind::EaseOutCubic}; }
+    static auto ease_in_out_cubic() -> Curve { return Curve{CurveKind::EaseInOutCubic}; }
+    static auto bounce_out() -> Curve { return Curve{CurveKind::BounceOut}; }
 };
 
-} // namespace aurora
+}  // namespace aurora

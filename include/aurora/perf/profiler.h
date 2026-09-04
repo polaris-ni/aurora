@@ -30,18 +30,18 @@ namespace aurora {
  * 生命周期须覆盖整个进程。禁止传入临时 `std::string` 的 `c_str()`。
  */
 struct ZoneSample {
-    const char *name = nullptr; ///< 静态字符串，不拥有所有权
-    double start_ms = 0.0;      ///< 相对本帧起点的偏移（毫秒）
-    double duration_ms = 0.0;   ///< 作用域耗时（毫秒）
-    std::uint16_t depth = 0;    ///< 嵌套深度（0 = 顶层），用于火焰图与 trace 缩进
+    const char *name = nullptr;  ///< 静态字符串，不拥有所有权
+    double start_ms = 0.0;  ///< 相对本帧起点的偏移（毫秒）
+    double duration_ms = 0.0;  ///< 作用域耗时（毫秒）
+    std::uint16_t depth = 0;  ///< 嵌套深度（0 = 顶层），用于火焰图与 trace 缩进
 };
 
 /// @brief 同名 zone 在一帧内的聚合结果。
 struct ZoneAggregate {
-    const char *name = nullptr;   ///< 静态字符串，不拥有所有权
-    std::uint32_t call_count = 0; ///< 调用次数
-    double total_ms = 0.0;        ///< 总耗时
-    double max_ms = 0.0;          ///< 单次最大耗时
+    const char *name = nullptr;  ///< 静态字符串，不拥有所有权
+    std::uint32_t call_count = 0;  ///< 调用次数
+    double total_ms = 0.0;  ///< 总耗时
+    double max_ms = 0.0;  ///< 单次最大耗时
 };
 
 /**
@@ -56,13 +56,13 @@ struct ZoneAggregate {
 class Profiler {
   public:
     /// @brief 默认单帧 zone 样本容量（超出即丢弃并计入 `dropped_zones()`）。
-    static constexpr std::size_t AURORA_DEFAULT_ZONE_CAPACITY = 512; // NOLINT(readability-identifier-naming)
+    static constexpr std::size_t AURORA_DEFAULT_ZONE_CAPACITY = 512;  // NOLINT(readability-identifier-naming)
 
     /// @brief 最大嵌套深度（超出即丢弃并计入 `dropped_zones()`）。
-    static constexpr std::size_t AURORA_MAX_ZONE_DEPTH = 64; // NOLINT(readability-identifier-naming)
+    static constexpr std::size_t AURORA_MAX_ZONE_DEPTH = 64;  // NOLINT(readability-identifier-naming)
 
     /// @brief 默认长任务阈值（毫秒）= 60fps 帧预算的一半。
-    static constexpr double AURORA_DEFAULT_LONG_TASK_THRESHOLD_MS = 8.333333; // NOLINT(readability-identifier-naming)
+    static constexpr double AURORA_DEFAULT_LONG_TASK_THRESHOLD_MS = 8.333333;  // NOLINT(readability-identifier-naming)
 
     /// @brief 取得全局唯一实例。
     [[nodiscard]] static auto instance() -> Profiler &;
@@ -159,26 +159,26 @@ class Profiler {
 
     struct OpenZone {
         const char *name = nullptr;
-        double start_ms = 0.0; ///< 相对帧起点
+        double start_ms = 0.0;  ///< 相对帧起点
         Stopwatch watch;
     };
 
-    bool m_enabled = true;
-    double m_long_task_threshold_ms = AURORA_DEFAULT_LONG_TASK_THRESHOLD_MS;
-    std::size_t m_capacity = AURORA_DEFAULT_ZONE_CAPACITY;
+    bool enabled_ = true;
+    double long_task_threshold_ms_ = AURORA_DEFAULT_LONG_TASK_THRESHOLD_MS;
+    std::size_t capacity_ = AURORA_DEFAULT_ZONE_CAPACITY;
 
-    double m_frame_start_ms = 0.0;
-    std::uint64_t m_frame_index = 0;
+    double frame_start_ms_ = 0.0;
+    std::uint64_t frame_index_ = 0;
 
-    std::vector<ZoneSample> m_zones;           ///< 当帧已闭合样本（容量预留，帧内不再分配）
-    std::vector<ZoneSample> m_long_tasks;      ///< 当帧长任务
-    OpenZone m_stack[AURORA_MAX_ZONE_DEPTH]{}; // NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays) ///<
-                                               // 未闭合 zone 栈（固定容量，零分配）
-    std::size_t m_depth = 0;
+    std::vector<ZoneSample> zones_;  ///< 当帧已闭合样本（容量预留，帧内不再分配）
+    std::vector<ZoneSample> long_tasks_;  ///< 当帧长任务
+    OpenZone stack_[AURORA_MAX_ZONE_DEPTH]{};
+    // 未闭合 zone 栈（固定容量，零分配）
+    std::size_t depth_ = 0;
 
-    std::uint64_t m_dropped = 0;
-    std::uint64_t m_unbalanced = 0;
-    std::uint64_t m_total_long_tasks = 0;
+    std::uint64_t dropped_ = 0;
+    std::uint64_t unbalanced_ = 0;
+    std::uint64_t total_long_tasks_ = 0;
 };
 
 /**
@@ -192,7 +192,13 @@ class ScopedTimer {
     /// @param name 静态字符串字面量；生命周期须覆盖整个进程。
     explicit ScopedTimer(const char *name) { Profiler::instance().begin_zone(name); }
 
-    ~ScopedTimer() { Profiler::instance().end_zone(); }
+    ~ScopedTimer() {
+        try {
+            Profiler::instance().end_zone();
+        } catch (...) { // NOLINT(*-empty-catch)
+            // 析构不得抛出：性能采集失败绝不拖垮应用
+        }
+    }
 
     ScopedTimer(const ScopedTimer &) = delete;
     auto operator=(const ScopedTimer &) -> ScopedTimer & = delete;
@@ -211,7 +217,7 @@ namespace detail {
  */
 auto on_frame_scope_end() -> void;
 
-} // namespace detail
+}  // namespace detail
 
 /**
  * @brief RAII 帧作用域：构造开帧（并清零当帧渲染计数器），析构闭帧。
@@ -233,8 +239,12 @@ class FrameScope {
 
     /// @note 先喂 trace 再闭帧：`end_frame()` 会推进帧序号，颠倒顺序将导致事件挂到下一帧。
     ~FrameScope() {
-        detail::on_frame_scope_end();
-        Profiler::instance().end_frame();
+        try {
+            detail::on_frame_scope_end();
+            Profiler::instance().end_frame();
+        } catch (...) { // NOLINT(*-empty-catch)
+            // 析构不得抛出：性能采集失败绝不拖垮应用
+        }
     }
 
     FrameScope(const FrameScope &) = delete;
@@ -243,7 +253,7 @@ class FrameScope {
     auto operator=(FrameScope &&) -> FrameScope & = delete;
 };
 
-} // namespace aurora
+}  // namespace aurora
 
 // ---------------------------------------------------------------------------
 // 作用域埋点宏
@@ -252,19 +262,19 @@ class FrameScope {
 // 也不实例化 `ScopedTimer`。
 // ---------------------------------------------------------------------------
 #define AURORA_PROF_CAT_IMPL(a, b) a##b
-#define AURORA_PROF_CAT(a, b) AURORA_PROF_CAT_IMPL(a, b) // NOLINT(cppcoreguidelines-macro-usage)
+#define AURORA_PROF_CAT(a, b) AURORA_PROF_CAT_IMPL(a, b)  // NOLINT(cppcoreguidelines-macro-usage)
 
 #ifdef AURORA_ENABLE_PROFILING
 /// @brief 为当前作用域计时；`name` 必须是静态字符串字面量。
-#define AURORA_PROFILE_SCOPE(name)                                                                                     \
+#define AURORA_PROFILE_SCOPE(name) \
     ::aurora::ScopedTimer AURORA_PROF_CAT(_au_zone_, __LINE__) { name }
 /// @brief 为当前函数计时（zone 名取 `__func__`）。
 #define AURORA_PROFILE_FUNCTION() AURORA_PROFILE_SCOPE(__func__)
 /// @brief 在当前作用域开启一帧（开帧清零计数器，离开作用域闭帧）。
-#define AURORA_PROFILE_FRAME()                                                                                         \
+#define AURORA_PROFILE_FRAME() \
     ::aurora::FrameScope AURORA_PROF_CAT(_au_frame_, __LINE__) {}
 #else
-#define AURORA_PROFILE_SCOPE(name) ((void)0) // NOLINT(cppcoreguidelines-macro-usage)
+#define AURORA_PROFILE_SCOPE(name) ((void)0)  // NOLINT(cppcoreguidelines-macro-usage)
 #define AURORA_PROFILE_FUNCTION() ((void)0)  // NOLINT(cppcoreguidelines-macro-usage)
-#define AURORA_PROFILE_FRAME() ((void)0)     // NOLINT(cppcoreguidelines-macro-usage)
+#define AURORA_PROFILE_FRAME() ((void)0)  // NOLINT(cppcoreguidelines-macro-usage)
 #endif

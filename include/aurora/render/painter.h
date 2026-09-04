@@ -15,11 +15,11 @@
 namespace aurora {
 
 namespace render {
-struct TextLayoutOpts;                // 前向声明（完整定义见 font_engine.h），避免 painter.h ↔ font_engine.h 循环包含
-enum class TextAAMode : std::uint8_t; // 前向声明（完整定义见 text_aa_mode.h）
-} // namespace render
+struct TextLayoutOpts;  // 前向声明（完整定义见 font_engine.h），避免 painter.h ↔ font_engine.h 循环包含
+enum class TextAAMode : std::uint8_t;  // 前向声明（完整定义见 text_aa_mode.h）
+}  // namespace render
 
-class DisplayList; // 前向声明（完整定义见 display_list.h）；录制/回放接口
+class DisplayList;  // 前向声明（完整定义见 display_list.h）；录制/回放接口
 
 /**
  * @brief 软件栅格绘制器：在 RGBA8 像素缓冲上绘制矩形/文本/图像。
@@ -35,9 +35,9 @@ class Painter {
     /// @brief device pixel ratio（物理像素 / 逻辑 dp，通常 = dpi / 96）。
     ///        几何绘制把 dp 坐标乘以它映射到物理帧缓冲像素；像素级写入（含文本光栅）不加 scale。
     ///        scale == 1.0（96 DPI）时行为与旧版一致。
-    [[nodiscard]] auto scale() const -> float { return m_scale; }
+    [[nodiscard]] auto scale() const -> float { return scale_; }
     /// @brief 设置 device pixel ratio（须在 `begin` 分配帧缓冲前调用）。
-    auto set_scale(float s) -> void { m_scale = s > 0.0f ? s : 1.0f; }
+    auto set_scale(float s) -> void { scale_ = s > 0.0F ? s : 1.0F; }
 
     /// @brief 分配画布。`width`/`height` 为**逻辑 dp** 尺寸；内部按 `scale()` 放大为物理像素缓冲。
     auto begin(int width, int height) -> void;
@@ -53,7 +53,7 @@ class Painter {
     auto set_alpha(double a) -> void;
 
     /// @brief 取得当前全局透明度。
-    [[nodiscard]] auto global_alpha() const -> double { return m_global_alpha; }
+    [[nodiscard]] auto global_alpha() const -> double { return global_alpha_; }
 
     /// @brief 填充矩形（源覆盖混合，考虑 alpha）。
     auto fill_rect(const Rect &r, Color c) -> void;
@@ -104,7 +104,7 @@ class Painter {
     ///        `src` 为长度 N（Gray）或 3N（LCD 三通道 RGB 子像素）的覆盖度缓冲；某像素三通道
     ///        全为 0 时自动跳过。`src_alpha` 为源色 alpha 归一因子（Gray 路径须传入 c.a/255）。
     ///        圆角裁剪或录制态自动回退到逐像素 blend_subpixel。
-    auto blend_subpixel_span(int x0, int y, Color c, const std::uint8_t *src, int n, bool lcd, float src_alpha = 1.0f)
+    auto blend_subpixel_span(int x0, int y, Color c, const std::uint8_t *src, int n, bool lcd, float src_alpha = 1.0F)
         -> void;
 
     /// @brief 把带 alpha 的源色按源覆盖混合到矩形；等价于 fill_rect（保留以清晰表达混合语义）。
@@ -137,7 +137,7 @@ class Painter {
     /// 像素行在缓冲中连续存储，故垂直平移退化为**单次 `std::memmove`**，
     /// 成本 O(缓冲字节) 但常数极小。滚动容器重锚点（reanchor）时用它搬移仍可复用的
     /// 像素、只重绘让出的条带，替代整块 `composite` 的逐像素矩阵求逆
-    /// （3 屏离屏缓冲实测 ~30ms → ~1ms，是 60fps 滚动预算的关键）。
+    /// （3 屏离屏缓冲实测 ~30ms → ~1ms，是 60Fps 滚动预算的关键）。
     ///
     /// 移出缓冲的像素直接丢弃；让出的条带重置为 `begin` 后的零基底（语义同 `clear_rect`），
     /// 调用方须负责重绘该条带。`|dy|` 超过缓冲高度时整块清零。
@@ -148,11 +148,11 @@ class Painter {
     /// @brief 把 `region` 内已绘制像素与 `tint` 按 `mode` 混合（就地覆盖）。
     /// 用于 `Modifier::blend_mode`；应在内容绘制完成后调用。`strength`（0..1）控制强度，
     /// 0 不改变、1 完全按模式混合。`BlendMode` 定义见 `aurora/render/blend.h`。
-    auto blend_region(const Rect &region, BlendMode mode, Color tint, float strength = 1.0f) -> void;
+    auto blend_region(const Rect &region, BlendMode mode, Color tint, float strength = 1.0F) -> void;
 
     /// @brief 把 `region` 内像素 RGB 乘以渐变遮罩因子（0..1），形成淡出 / 聚焦。
     /// 用于 `Modifier::shader_mask`；`strength`（0..1）控制强度，0 不改变、1 完全遮罩。
-    auto mask_region(const Rect &region, ShaderMaskKind kind, float strength = 1.0f) -> void;
+    auto mask_region(const Rect &region, ShaderMaskKind kind, float strength = 1.0F) -> void;
 
     /**
      * @brief 把已渲染的离屏子树（源缓冲）按仿射矩阵合成回本缓冲。
@@ -196,28 +196,28 @@ class Painter {
     /// @brief 退出当前录制层级；栈空时回到 Direct（上屏）模式。
     auto stop() -> void;
     /// @brief 是否处于录制模式（录制栈非空）。
-    [[nodiscard]] auto is_recording() const -> bool { return !m_recording_stack.empty(); }
+    [[nodiscard]] auto is_recording() const -> bool { return !recording_stack_.empty(); }
 
     /// @brief Window 脏区裁剪绘制（partial clip）期间抑制 Display List 录制/回放：
     ///        partial clip 下子树 paint 只画 clip 内子节点，若此时录制 DL 会丢失 clip 外子节点命令，
     ///        后续 full 帧 replay 该 DL 时会永久丢失 clip 外子节点（与整帧重绘逐位不一致）。
-    auto set_skip_dl_record(bool skip) -> void { m_skip_dl_record = skip; }
-    [[nodiscard]] auto skip_dl_record() const -> bool { return m_skip_dl_record; }
+    auto set_skip_dl_record(bool skip) -> void { skip_dl_record_ = skip; }
+    [[nodiscard]] auto skip_dl_record() const -> bool { return skip_dl_record_; }
 
     /// @brief 标记当前及所有外层录制层级为「含动态内容」：录制这些层级的祖先控件不应
     ///        缓存其 Display List（内容每帧变化或绘制含副作用）。由不可缓存控件在录制模式下调用。
     auto mark_recording_dynamic() -> void;
     /// @brief 当前录制层级是否含有动态内容（用于决定本控件 DL 是否可安全缓存）。
     [[nodiscard]] auto recording_is_dynamic() const -> bool {
-        return !m_rec_dynamic.empty() && (m_rec_dynamic.back() != 0);
+        return !rec_dynamic_.empty() && (rec_dynamic_.back() != 0);
     }
 
   private:
     struct ClipRegion {
         Rect rect;
         bool rounded = false;
-        float radius = 0.0f;
-        bool anti_alias = true; ///< 圆角是否抗锯齿（SDF 覆盖度）
+        float radius = 0.0F;
+        bool anti_alias = true;  ///< 圆角是否抗锯齿（SDF 覆盖度）
 
         /// @brief 计算点 (x,y) 处裁剪覆盖度（0=完全裁剪，1=完全保留；圆角边界 0..1 抗锯齿）。
         [[nodiscard]] auto coverage(float x, float y) const -> float;
@@ -241,22 +241,22 @@ class Painter {
     /// @brief fill_rect 的「慢路径」：圆角裁剪（SDF 覆盖度）/ 全局透明度 <1 时逐像素处理。
     auto fill_rect_slow_path(int x0, int y0, int x1, int y1, Color c) -> void;
 
-    int m_width = 0;
-    int m_height = 0;
-    float m_scale = 1.0f; ///< device pixel ratio（dp → 物理像素）
-    std::vector<std::uint8_t> m_pixels;
-    std::vector<ClipRegion> m_clip_stack; ///< 裁剪栈（矩形 + 圆角，滚动/圆角容器用）
-    bool m_has_rounded_clip = false;      ///< 裁剪栈中是否存在圆角裁剪（blend_pixel 快速路径判定）
-    double m_global_alpha = 1.0;          ///< 全局绘制透明度（set_alpha 设置）
-    bool m_skip_dl_record =
-        false; ///< Window 脏区裁剪绘制期间设为 true，抑制 DL 录制/回放（partial clip 下录制会丢失 clip 外子节点）
+    int width_ = 0;
+    int height_ = 0;
+    float scale_ = 1.0F;  ///< device pixel ratio（dp → 物理像素）
+    std::vector<std::uint8_t> pixels_;
+    std::vector<ClipRegion> clip_stack_;  ///< 裁剪栈（矩形 + 圆角，滚动/圆角容器用）
+    bool has_rounded_clip_ = false;  ///< 裁剪栈中是否存在圆角裁剪（blend_pixel 快速路径判定）
+    double global_alpha_ = 1.0;  ///< 全局绘制透明度（set_alpha 设置）
+    bool skip_dl_record_ =
+        false;  ///< Window 脏区裁剪绘制期间设为 true，抑制 DL 录制/回放（partial clip 下录制会丢失 clip 外子节点）
 
     // ---- Display List 录制栈（AURORA_DISPLAY_LIST）----
     /// @brief 把一条文本绘制命令录入当前录制目标（变长字符串入池）。
     auto record_text_cmd(const Rect &r, const std::string &s, const Font &f, Color c, render::TextAAMode aa,
                          const render::TextLayoutOpts &opts) -> void;
-    std::vector<DisplayList *> m_recording_stack; ///< 录制目标栈；非空即录制模式
-    std::vector<char> m_rec_dynamic;              ///< 与录制栈平行的「含动态内容」标记（mark_recording_dynamic 置全部）
+    std::vector<DisplayList *> recording_stack_;  ///< 录制目标栈；非空即录制模式
+    std::vector<char> rec_dynamic_;  ///< 与录制栈平行的「含动态内容」标记（mark_recording_dynamic 置全部）
 };
 
 /// @brief [性能排查] 返回各光栅原语耗时累加器（毫秒）的 JSON 串；读取后清零。
@@ -272,4 +272,4 @@ auto paint_timing_scene_last() -> double;
 /// divisor=1，即该帧真实耗时；用于每秒打印代表性绘制帧分解，避免 idle 帧零值污染与整秒/FPS 折算误差。
 auto paint_primitive_timing_last_json() -> std::string;
 
-} // namespace aurora
+}  // namespace aurora

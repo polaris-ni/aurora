@@ -2,13 +2,12 @@
 // 活跃帧按帧预算节流、空闲帧睡到定时任务到期或无限等待、后端自带节拍/不限帧率不叠加 sleep。
 // 纯逻辑、无平台依赖。
 #include "aurora/window/frame_pacing.h"
-
 #include "test_harness.h"
 
 namespace au = aurora;
 
 AURORA_TEST() {
-    constexpr double budget = 16.67; // 60fps 帧预算
+    constexpr double budget = 16.67;  // 60fps 帧预算
 
     // ---- 1. 完全空闲（无脏/无动画/无定时任务）→ 无限等待（-1，纯事件驱动）----
     AURORA_TEST_CHECK(au::compute_wait_timeout(false, false, -1.0, budget, 2.0) < 0.0);

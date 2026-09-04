@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::BuildContext;
@@ -28,32 +27,51 @@ AURORA_TEST() {
     // 构建测试树：Column → [Button, Text, Row → [Text, TextInput]]
     TextInput ti;
     ti.set_value("hello");
-    auto root = Node{ Column{ ColumnProps{ .children = {
-        Node{ Button{ "OK" } },
-        Node{ Text{ "label" } },
-        Node{ Row{ RowProps{ .children = {
-            Node{ Text{ "inner" } },
-            Node{ std::move(ti) },
-        } } } },
-    } } } };
+    auto root = Node{Column{ColumnProps{.children = {
+                                            Node{Button{"OK"}},
+                                            Node{Text{"label"}},
+                                            Node{Row{RowProps{.children =
+                                                                  {
+                                                                      Node{Text{"inner"}},
+                                                                      Node{std::move(ti)},
+                                                                  }}}},
+                                        }}}};
 
     BuildContext ctx;
     root.widget().mount(ctx);
-    root.widget().layout(
-        Constraints{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 400, .height = 400 } }, ctx);
+    root.widget().layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 400, .height = 400}},
+                         ctx);
 
     // ---- 1) widget_tree_to_items 转换正确性 ----
     {
         auto items = widget_tree_to_items(root);
-        AURORA_TEST_CHECK_EQ(items.size(), 1u); // 一个根节点
+        AURORA_TEST_CHECK_EQ(items.size(), 1U);  // 一个根节点
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(items[0].label == "Column");
-        AURORA_TEST_CHECK(items[0].expanded);               // 根默认展开
-        AURORA_TEST_CHECK_EQ(items[0].children.size(), 3u); // Button, Text, Row
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(items[0].expanded);  // 根默认展开
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK_EQ(items[0].children.size(), 3U);  // Button, Text, Row
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(items[0].children[0].label == "Button");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(items[0].children[1].label == "Text");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(items[0].children[2].label == "Row");
-        AURORA_TEST_CHECK_EQ(items[0].children[2].children.size(), 2u); // Text, TextInput
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK_EQ(items[0].children[2].children.size(), 2U);  // Text, TextInput
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(items[0].children[2].children[0].label == "Text");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(items[0].children[2].children[1].label == "TextInput");
     }
 
@@ -62,14 +80,26 @@ AURORA_TEST() {
         auto j = dump_tree_json_full(root);
         AURORA_TEST_CHECK(j.is_object());
         AURORA_TEST_CHECK(j.contains("type"));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(j["type"].get<std::string>() == "Column");
         AURORA_TEST_CHECK(j.contains("props"));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(j["props"].is_object());
         AURORA_TEST_CHECK(j.contains("children"));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(j["children"].is_array());
-        AURORA_TEST_CHECK_EQ(j["children"].size(), 3u);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK_EQ(j["children"].size(), 3U);
         // 子节点也含 props
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(j["children"][0].contains("props"));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(j["children"][0]["type"].get<std::string>() == "Button");
     }
 
@@ -108,10 +138,16 @@ AURORA_TEST() {
         auto props = get_widget_props(root.widget());
         AURORA_TEST_CHECK(props.is_object());
         AURORA_TEST_CHECK(props.contains("descriptor"));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["descriptor"]["name"].get<std::string>() == "Column");
         AURORA_TEST_CHECK(props.contains("values"));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["values"].is_object());
         // Column 有 gap 属性
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["values"].contains("gap"));
     }
 
@@ -123,22 +159,22 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(col != nullptr);
         float old_gap = col->gap;
 
-        set_widget_prop(root.widget(), "gap", Json(16.0f));
-        AURORA_TEST_CHECK_NEAR(col->gap, 16.0f, 0.01f);
+        set_widget_prop(root.widget(), "gap", Json(16.0F));
+        AURORA_TEST_CHECK_NEAR(col->gap, 16.0F, 0.01F);
 
         // 恢复
         set_widget_prop(root.widget(), "gap", Json(old_gap));
-        AURORA_TEST_CHECK_NEAR(col->gap, old_gap, 0.01f);
+        AURORA_TEST_CHECK_NEAR(col->gap, old_gap, 0.01F);
     }
 
     // ---- 6) InspectorPanel 创建和基本操作 ----
     {
-        InspectorPanel panel{ [&]() -> Node {
-            return Node{ Column{ ColumnProps{ .children = {
-                                                  Node{ Text{ "A" } },
-                                                  Node{ Button{ "B" } },
-                                              } } } };
-        } };
+        InspectorPanel panel{[&]() -> Node {
+            return Node{Column{ColumnProps{.children = {
+                                               Node{Text{"A"}},
+                                               Node{Button{"B"}},
+                                           }}}};
+        }};
 
         AURORA_TEST_CHECK(std::string(panel.type_name()) == "InspectorPanel");
         AURORA_TEST_CHECK(panel.selected_widget() == nullptr);
@@ -158,18 +194,26 @@ AURORA_TEST() {
 
     // ---- 7) widget_tree_to_items 空树 ----
     {
-        auto empty_leaf = Node{ Text{ "solo" } };
+        auto empty_leaf = Node{Text{"solo"}};
         auto items = widget_tree_to_items(empty_leaf);
-        AURORA_TEST_CHECK_EQ(items.size(), 1u);
+        AURORA_TEST_CHECK_EQ(items.size(), 1U);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(items[0].label == "Text");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(items[0].children.empty());
     }
 
     // ---- 8) dump_tree_json_full 叶节点无 children 数组为空 ----
     {
-        auto leaf = Node{ Button{ "x" } };
+        auto leaf = Node{Button{"x"}};
         auto j = dump_tree_json_full(leaf);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(j["children"].is_array());
-        AURORA_TEST_CHECK_EQ(j["children"].size(), 0u);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK_EQ(j["children"].size(), 0U);
     }
 }

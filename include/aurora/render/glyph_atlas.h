@@ -24,12 +24,12 @@ class GlyphAtlas {
     struct Entry {
         Mode mode = Mode::Gray;
         int left = 0;  ///< bitmap_left：字形相对起笔点的左偏移（px）
-        int top = 0;   ///< bitmap_top：基线到字形顶部的偏移（px，向上为正）
-        int width = 0; ///< 逻辑列数；LCD 下 RGB 缓冲宽为 3 * width
+        int top = 0;  ///< bitmap_top：基线到字形顶部的偏移（px，向上为正）
+        int width = 0;  ///< 逻辑列数；LCD 下 RGB 缓冲宽为 3 * width
         int rows = 0;
-        int pitch = 0;                 ///< 源缓冲每行字节（诊断用，缓存副本按 width 紧密排列）
-        float advance = 0.0f;          ///< 字形前进量（px）
-        std::vector<std::uint8_t> buf; ///< Gray: width*rows 的 A8；Lcd: 3*width*rows 的 RGB
+        int pitch = 0;  ///< 源缓冲每行字节（诊断用，缓存副本按 width 紧密排列）
+        float advance = 0.0F;  ///< 字形前进量（px）
+        std::vector<std::uint8_t> buf;  ///< Gray: width*rows 的 A8；Lcd: 3*width*rows 的 RGB
     };
 
     /// @brief 查缓存；命中则更新 LRU 并返回条目指针，未命中返回 nullptr。
@@ -50,4 +50,4 @@ class GlyphAtlas {
     mutable std::unordered_map<std::uint64_t, std::list<std::uint64_t>::iterator> lru_map_;
 };
 
-} // namespace aurora::render
+}  // namespace aurora::render

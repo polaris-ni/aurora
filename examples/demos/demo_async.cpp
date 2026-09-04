@@ -17,6 +17,8 @@ static auto demo_coro() -> au::CoroTask<void> {
     co_return;
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// try/catch 包装
 auto main() -> int {
     // 共享状态：Text 经 Reactive 订阅，后台回调写回时自动触发刷新（否则只拍静态快照）。
     auto status = std::make_shared<au::State<au::LocalizedString>>("running…");
@@ -40,11 +42,11 @@ auto main() -> int {
     au::launch(demo_coro());
 
     au::Node root = au::Column{
-        GradientTitle{ "Async" },
+        GradientTitle{"Async"},
         gap(12),
-        au::Text{ au::LocalizedString{ "Background task via au::async().with_timeout().then() callback" } },
-        au::Text{ au::LocalizedString{ "Coroutine: co_await au::co_async(...) continuation on main thread" } },
-        au::Text{ au::TextProps{ .content = au::Reactive{ status } } },
+        au::Text{au::LocalizedString{"Background task via au::async().with_timeout().then() callback"}},
+        au::Text{au::LocalizedString{"Coroutine: co_await au::co_async(...) continuation on main thread"}},
+        au::Text{au::TextProps{.content = au::Reactive{status}}},
     };
-    return run_demo(Card{ std::move(root) }, "Async · Aurora Demo", 520.0f, 360.0f);
+    return run_demo(Card{std::move(root)}, "Async · Aurora Demo", 520.0F, 360.0F);
 }

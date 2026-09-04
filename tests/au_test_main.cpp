@@ -21,33 +21,33 @@ namespace ut = aurora::testing;
 
 /// CLI 解析结果。
 struct CliOptions {
-    std::string run_name;
-    std::string filter;
-    bool list_only = false;
-    int pass_start = 0; ///< `--` 之后的首个参数下标（默认无透传时 = argc）
+    std::string run_name_;
+    std::string filter_;
+    bool list_only_ = false;
+    int pass_start_ = 0;  ///< `--` 之后的首个参数下标（默认无透传时 = argc）
 };
 
 /// 解析命令行选项；`--verbose` 就地置位框架全局。返回 false 表示遇到未知选项（调用方退出码 2）。
 /// 用 std::span 承载 argv 并以 subspan + range-for 遍历，避免裸指针算术与 operator[] 下标访问。
 auto parse_cli(std::span<char *> args, CliOptions &opt) -> bool {
     const int argc = static_cast<int>(args.size());
-    opt.pass_start = argc;
+    opt.pass_start_ = argc;
     if (args.empty()) {
         return true;
     }
     int i = 1;
-    for (char const *p : args.subspan(1)) { // 跳过 argv[0]，range-for 免下标/指针算术
+    for (char const *p : args.subspan(1)) {  // 跳过 argv[0]，range-for 免下标/指针算术
         const std::string arg(p);
         if (arg == "--") {
-            opt.pass_start = i + 1;
+            opt.pass_start_ = i + 1;
             break;
         }
         if (arg.starts_with("--run=")) {
-            opt.run_name = arg.substr(6);
+            opt.run_name_ = arg.substr(6);
         } else if (arg.starts_with("--filter=")) {
-            opt.filter = arg.substr(9);
+            opt.filter_ = arg.substr(9);
         } else if (arg == "--list") {
-            opt.list_only = true;
+            opt.list_only_ = true;
         } else if (arg == "--verbose") {
             ut::g_verbose = true;
         } else {
@@ -67,9 +67,9 @@ auto parse_cli(std::span<char *> args, CliOptions &opt) -> bool {
 auto set_pass_args(std::span<char *> args, int pass_start) -> void {
     static std::vector<const char *> s_pass;
     s_pass.clear();
-    s_pass.push_back(args.empty() ? "aurora_test_runner" : *args.begin()); // argv[0] 经 *begin() 取，免下标
+    s_pass.push_back(args.empty() ? "aurora_test_runner" : *args.begin());  // argv[0] 经 *begin() 取，免下标
     if (static_cast<size_t>(pass_start) <= args.size()) {
-        for (char const *p : args.subspan(static_cast<size_t>(pass_start))) { // `--` 之后的透传参数
+        for (char const *p : args.subspan(static_cast<size_t>(pass_start))) {  // `--` 之后的透传参数
             s_pass.push_back(p);
         }
     }
@@ -81,10 +81,10 @@ auto set_pass_args(std::span<char *> args, int pass_start) -> void {
 auto select_tests(const std::vector<ut::TestCase> &tests, const CliOptions &opt) -> std::vector<const ut::TestCase *> {
     std::vector<const ut::TestCase *> selected;
     for (const auto &t : tests) {
-        if (!opt.run_name.empty() && t.name != opt.run_name) {
+        if (!opt.run_name_.empty() && t.name != opt.run_name_) {
             continue;
         }
-        if (!opt.filter.empty() && t.name.find(opt.filter) == std::string_view::npos) {
+        if (!opt.filter_.empty() && t.name.find(opt.filter_) == std::string_view::npos) {
             continue;
         }
         selected.push_back(&t);
@@ -95,7 +95,7 @@ auto select_tests(const std::vector<ut::TestCase> &tests, const CliOptions &opt)
 /// 重置上下文并执行用例主体，隔离异常：致命断言抛出的 CheckAbort 属预期控制流（失败已记录），
 /// 其余未捕获异常统一折算为一次失败记录，避免单条用例崩溃拖垮整个 runner 进程。
 auto invoke_test(const ut::TestCase &t) -> void {
-    ut::current() = ut::TestContext{ .name = t.name, .failures = 0 };
+    ut::current() = ut::TestContext{.name = t.name, .failures = 0};
     try {
         t.fn();
     }
@@ -113,7 +113,7 @@ auto invoke_test(const ut::TestCase &t) -> void {
 
 /// 运行单条用例（skip 桩直接计 skipped；否则执行并按失败数计 passed / failed）。
 auto run_one(const ut::TestCase &t, int &passed, int &failed, int &skipped) -> void {
-    if (t.fn == nullptr) { // skip 桩（平台/后端未编译进本构建）
+    if (t.fn == nullptr) {  // skip 桩（平台/后端未编译进本构建）
         AURORA_TEST_PRINTF("[SKIP] %.*s: %.*s not compiled into this build\n", static_cast<int>(t.name.size()),
                            t.name.data(), static_cast<int>(t.skip_reason.size()), t.skip_reason.data());
         ++skipped;
@@ -138,10 +138,10 @@ auto parse_and_run(int argc, char **argv) -> int {
     if (!parse_cli(args, opt)) {
         return 2;
     }
-    set_pass_args(args, opt.pass_start);
+    set_pass_args(args, opt.pass_start_);
 
     const auto &tests = ut::Registry::instance().sorted();
-    if (opt.list_only) {
+    if (opt.list_only_) {
         for (const auto &t : tests) {
             AURORA_LOG_RAW("test", t.name, "\n");
         }
@@ -149,8 +149,8 @@ auto parse_and_run(int argc, char **argv) -> int {
     }
 
     const auto selected = select_tests(tests, opt);
-    if (!opt.run_name.empty() && selected.empty()) {
-        AURORA_LOG_ERROR("test", "test not found: ", opt.run_name);
+    if (!opt.run_name_.empty() && selected.empty()) {
+        AURORA_LOG_ERROR("test", "test not found: ", opt.run_name_);
         return 2;
     }
 
@@ -165,7 +165,7 @@ auto parse_and_run(int argc, char **argv) -> int {
     return failed > 0 ? 1 : 0;
 }
 
-} // namespace
+}  // namespace
 
 // 测试入口 main 允许把用例体内抛出的异常传播出去终止进程，无需在此吞掉异常
 // NOLINTNEXTLINE(bugprone-exception-escape)

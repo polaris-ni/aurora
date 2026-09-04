@@ -37,10 +37,14 @@ namespace aurora {
 /// @brief 调试用：把尺寸意图渲染为可读字符串（结构快照/日志）。
 [[nodiscard]] inline auto to_string(Length len) -> std::string {
     switch (len.kind) {
-    case LengthKind::WrapContent: return "auto";
-    case LengthKind::Expand: return "fill";
-    case LengthKind::Fixed: return "px(" + std::to_string(len.value) + ")";
-    case LengthKind::Fraction: return "percent(" + std::to_string(len.value) + ")";
+        case LengthKind::WrapContent:
+            return "auto";
+        case LengthKind::Expand:
+            return "fill";
+        case LengthKind::Fixed:
+            return "px(" + std::to_string(len.value) + ")";
+        case LengthKind::Fraction:
+            return "percent(" + std::to_string(len.value) + ")";
     }
     return "auto";
 }
@@ -66,6 +70,6 @@ namespace literals {
 [[nodiscard]] constexpr auto operator""_px(unsigned long long v) noexcept -> Length {
     return px(static_cast<float>(v));
 }
-} // namespace literals
+}  // namespace literals
 
-} // namespace aurora
+}  // namespace aurora

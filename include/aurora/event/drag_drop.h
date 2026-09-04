@@ -14,17 +14,17 @@ namespace aurora {
  * 携带 MIME 类型标识与 JSON 载荷，支持文本/控件/自定义数据拖放。
  */
 struct DragData {
-    std::string mime_type; ///< "text/plain", "aurora/widget", 自定义
-    Json payload;          ///< 拖放数据（JSON 格式）
+    std::string mime_type;  ///< "text/plain", "aurora/widget", 自定义
+    Json payload;  ///< 拖放数据（JSON 格式）
 
     /// @brief 构造文本拖放。
     [[nodiscard]] static auto text(const std::string &s) -> DragData {
-        return DragData{ .mime_type = "text/plain", .payload = Json(s) };
+        return DragData{.mime_type = "text/plain", .payload = Json(s)};
     }
 
     /// @brief 构造控件树拖放（序列化 JSON）。
     [[nodiscard]] static auto widget_tree(Json tree_json) -> DragData {
-        return DragData{ .mime_type = "aurora/widget", .payload = std::move(tree_json) };
+        return DragData{.mime_type = "aurora/widget", .payload = std::move(tree_json)};
     }
 
     /// @brief 是否为空（无数据）。
@@ -40,30 +40,30 @@ class DragSession {
   public:
     /// @brief 开始拖放会话。
     auto begin(DragData data, Point origin) -> void {
-        m_data = std::move(data);
-        m_origin = origin;
-        m_active = true;
+        data_ = std::move(data);
+        origin_ = origin;
+        active_ = true;
     }
 
     /// @brief 结束拖放会话。
     auto end() -> void {
-        m_data = DragData{};
-        m_active = false;
+        data_ = DragData{};
+        active_ = false;
     }
 
     /// @brief 是否正在拖放中。
-    [[nodiscard]] auto is_active() const -> bool { return m_active; }
+    [[nodiscard]] auto is_active() const -> bool { return active_; }
 
     /// @brief 当前拖放数据。
-    [[nodiscard]] auto data() const -> const DragData & { return m_data; }
+    [[nodiscard]] auto data() const -> const DragData & { return data_; }
 
     /// @brief 拖放起点。
-    [[nodiscard]] auto origin() const -> Point { return m_origin; }
+    [[nodiscard]] auto origin() const -> Point { return origin_; }
 
   private:
-    DragData m_data;
-    Point m_origin{ .x = 0.0f, .y = 0.0f };
-    bool m_active = false;
+    DragData data_;
+    Point origin_{.x = 0.0F, .y = 0.0F};
+    bool active_ = false;
 };
 
 /**
@@ -76,8 +76,8 @@ class DragSession {
  */
 struct DropTargetCallbacks {
     std::function<bool(const DragData &)> on_drag_enter;  ///< 是否接受
-    std::function<void()> on_drag_leave;                  ///< 离开
-    std::function<void(const DragData &, Point)> on_drop; ///< 放置（local_pos 为相对坐标）
+    std::function<void()> on_drag_leave;  ///< 离开
+    std::function<void(const DragData &, Point)> on_drop;  ///< 放置（local_pos 为相对坐标）
 };
 
-} // namespace aurora
+}  // namespace aurora

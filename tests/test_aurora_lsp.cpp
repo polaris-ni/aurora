@@ -24,21 +24,17 @@ auto make_schema() -> Schema {
     button.children_policy = "one";
     button.props = {
         PropSchema{
-            .name = "label", .type = "std::string", .default_value = "\"\"", .required = false, .note = "按钮文字" },
+            .name = "label", .type = "std::string", .default_value = "\"\"", .required = false, .note = "按钮文字"},
+        PropSchema{.name = "on_click", .type = "Callback", .default_value = "", .required = false, .note = "点击回调"},
         PropSchema{
-            .name = "on_click", .type = "Callback", .default_value = "", .required = false, .note = "点击回调" },
-        PropSchema{ .name = "align",
-                    .type = "Alignment",
-                    .default_value = "\"Center\"",
-                    .required = false,
-                    .note = "对齐方式" },
-        PropSchema{ .name = "enabled", .type = "bool", .default_value = "true", .required = true, .note = "是否可用" },
+            .name = "align", .type = "Alignment", .default_value = "\"Center\"", .required = false, .note = "对齐方式"},
+        PropSchema{.name = "enabled", .type = "bool", .default_value = "true", .required = true, .note = "是否可用"},
     };
     s.components.push_back(std::move(button));
 
     EnumSchema align;
     align.name = "Alignment";
-    align.values = { "Leading", "Center", "Trailing" };
+    align.values = {"Leading", "Center", "Trailing"};
     s.enums.push_back(std::move(align));
     return s;
 }
@@ -47,26 +43,26 @@ auto make_schema() -> Schema {
 auto find_pos(const std::string &text, const std::string &sub) -> std::pair<size_t, size_t> {
     const auto p = text.find(sub);
     if (p == std::string::npos) {
-        return { 0, 0 };
+        return {0, 0};
     }
     size_t line = 0;
     size_t col = 0;
     for (size_t i = 0; i < p; ++i) {
-        if (text[i] == '\n') {
+        if (text.at(i) == '\n') {
             ++line;
             col = 0;
         } else {
             ++col;
         }
     }
-    return { line, col };
+    return {line, col};
 }
 
 void test_type_completion() {
     const Schema schema = make_schema();
-    const std::string doc = "au::"; // 正在输入类型名
+    const std::string doc = "au::";  // 正在输入类型名
     const Document d = analyze(doc);
-    const auto items = completions(doc, d, schema, 0, 4); // 光标在 au:: 之后
+    const auto items = completions(doc, d, schema, 0, 4);  // 光标在 au:: 之后
     bool has_button = false;
     for (const auto &it : items) {
         if (it.label == "Button" && it.kind == "Class") {
@@ -78,9 +74,9 @@ void test_type_completion() {
 
 void test_prop_completion() {
     const Schema schema = make_schema();
-    const std::string doc = "au::ButtonProps{ .lab }"; // 未闭合，光标在 lab 后
+    const std::string doc = "au::ButtonProps{ .lab }";  // 未闭合，光标在 lab 后
     auto [l, c] = find_pos(doc, "lab");
-    c += 3; // 越过 "lab"
+    c += 3;  // 越过 "lab"
     const Document d = analyze(doc);
     const auto items = completions(doc, d, schema, l, c);
     bool has_label = false;
@@ -110,7 +106,7 @@ void test_hover() {
     // 悬停在 au::Button 类型上。
     const std::string doc1 = "au::Button x;";
     auto [l1, c1] = find_pos(doc1, "Button");
-    c1 += 2; // 落在 Button 内部
+    c1 += 2;  // 落在 Button 内部
     const Document d1 = analyze(doc1);
     const auto h1 = hover(d1, schema, l1, c1);
     AURORA_TEST_REQUIRE(h1.has_value());
@@ -119,7 +115,7 @@ void test_hover() {
     // 悬停在 .label 属性上。
     const std::string doc2 = "au::ButtonProps{ .label = \"x\" }";
     auto [l2, c2] = find_pos(doc2, ".label");
-    c2 += 2; // 落在 label 内部
+    c2 += 2;  // 落在 label 内部
     const Document d2 = analyze(doc2);
     const auto h2 = hover(d2, schema, l2, c2);
     AURORA_TEST_REQUIRE(h2.has_value());
@@ -183,16 +179,26 @@ void test_code_action() {
     const Document d = analyze(doc);
     const auto actions = code_actions(d, schema);
     AURORA_TEST_CHECK(actions.size() == 1);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(actions[0].title.find("Button") != std::string::npos);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(actions[0].edits.size() == 1);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(actions[0].edits[0].new_text.find("enabled") != std::string::npos);
     // 插入点应在 '}' 处。
     auto [l, c] = find_pos(doc, "}");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(actions[0].edits[0].line == l);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(actions[0].edits[0].col == c);
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     test_type_completion();

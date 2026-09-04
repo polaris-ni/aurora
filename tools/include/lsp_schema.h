@@ -11,13 +11,13 @@
 #include <string>
 #include <vector>
 
-namespace aurora::tools { // tool namespace, avoids clashing with the main aurora namespace
+namespace aurora::tools {  // tool namespace, avoids clashing with the main aurora namespace
 
 // ----------------------------- schema model -----------------------------------
 struct PropSchema {
     std::string name;
     std::string type;
-    std::string default_value; // stringified default value (may be empty)
+    std::string default_value;  // stringified default value (may be empty)
     bool required = false;
     std::string note;
 };
@@ -28,7 +28,7 @@ struct EnumSchema {
 };
 
 struct ComponentSchema {
-    std::string type; // widget type name (without the Props suffix)
+    std::string type;  // widget type name (without the Props suffix)
     std::string category;
     std::string children_policy;
     std::vector<PropSchema> props;
@@ -71,4 +71,4 @@ struct Schema {
     [[nodiscard]] auto is_known_enum(const std::string &t) const -> bool { return find_enum(t) != nullptr; }
 };
 
-} // namespace aurora::tools
+}  // namespace aurora::tools

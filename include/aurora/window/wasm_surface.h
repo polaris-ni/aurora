@@ -13,12 +13,12 @@
 
 #if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)
 
-#include <cstring>
 #include <emscripten.h>
+#include <emscripten/html5.h>
+
+#include <cstring>
 #include <memory>
 #include <string>
-
-#include <emscripten/html5.h>
 
 #include "aurora/window/surface.h"
 
@@ -26,38 +26,40 @@ namespace aurora {
 
 class WasmSurface : public Surface {
   public:
-    WasmSurface(int w, int h, const char *canvas_id = "#canvas") : m_canvas_id(canvas_id), m_w(w), m_h(h) {
+    WasmSurface(int w, int h, const char *canvas_id = "#canvas") : canvas_id_(canvas_id), w_(w), h_(h) {
         // 注册 Emscripten 事件回调（鼠标/键盘/触摸/resize）
-        emscripten_set_mousedown_callback(m_canvas_id.c_str(), this, true, &on_mouse);
-        emscripten_set_mouseup_callback(m_canvas_id.c_str(), this, true, &on_mouse);
-        emscripten_set_mousemove_callback(m_canvas_id.c_str(), this, true, &on_mouse);
+        emscripten_set_mousedown_callback(canvas_id_.c_str(), this, true, &on_mouse);
+        emscripten_set_mouseup_callback(canvas_id_.c_str(), this, true, &on_mouse);
+        emscripten_set_mousemove_callback(canvas_id_.c_str(), this, true, &on_mouse);
         emscripten_set_keydown_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, this, true, &on_key);
         emscripten_set_keyup_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, this, true, &on_key);
         emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, this, true, &on_resize);
     }
 
     ~WasmSurface() override {
-        emscripten_set_mousedown_callback(m_canvas_id.c_str(), nullptr, true, nullptr);
-        emscripten_set_mouseup_callback(m_canvas_id.c_str(), nullptr, true, nullptr);
-        emscripten_set_mousemove_callback(m_canvas_id.c_str(), nullptr, true, nullptr);
+        emscripten_set_mousedown_callback(canvas_id_.c_str(), nullptr, true, nullptr);
+        emscripten_set_mouseup_callback(canvas_id_.c_str(), nullptr, true, nullptr);
+        emscripten_set_mousemove_callback(canvas_id_.c_str(), nullptr, true, nullptr);
         emscripten_set_keydown_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, true, nullptr);
         emscripten_set_keyup_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, true, nullptr);
         emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, true, nullptr);
     }
 
     [[nodiscard]] auto begin_frame(int w, int h) -> Result<bool> override {
-        m_painter.begin(w, h);
-        m_w = w;
-        m_h = h;
+        painter_.begin(w, h);
+        w_ = w;
+        h_ = h;
         return true;
     }
-    [[nodiscard]] auto painter() -> Painter & override { return m_painter; }
+    [[nodiscard]] auto painter() -> Painter & override { return painter_; }
 
     [[nodiscard]] auto present() -> Result<bool> override {
-        const int w = m_painter.width();
-        const int h = m_painter.height();
-        if (w <= 0 || h <= 0) return true;
-        const std::uint8_t *src = m_painter.data();
+        const int w = painter_.width();
+        const int h = painter_.height();
+        if (w <= 0 || h <= 0) {
+            return true;
+        }
+        const std::uint8_t *src = painter_.data();
         // 通过 EM_ASM 将 WASM 线性内存中的 RGBA 帧缓冲拷贝到 Canvas 2D：
         // 1. 获取 canvas 元素与 2D 上下文
         // 2. 创建 ImageData(w, h)
@@ -67,9 +69,13 @@ class WasmSurface : public Surface {
         EM_ASM(
             {
                 const canvas = document.getElementById(UTF8ToString($3));
-                if (!canvas) return;
+                if (!canvas) {
+                    return;
+                }
                 const ctx = canvas.getContext('2d');
-                if (!ctx) return;
+                if (!ctx) {
+                    return;
+                }
                 // 确保 canvas 尺寸匹配帧缓冲
                 if (canvas.width != $1 || canvas.height != $2) {
                     canvas.width = $1;
@@ -82,20 +88,18 @@ class WasmSurface : public Surface {
                 }
                 ctx.putImageData(img, 0, 0);
             },
-            src, w, h, m_canvas_id.c_str());
-        ++m_frame;
+            src, w, h, canvas_id_.c_str());
+        ++frame_;
         return true;
     }
 
-    [[nodiscard]] auto size() const -> Size override {
-        return Size{ static_cast<float>(m_w), static_cast<float>(m_h) };
-    }
-    [[nodiscard]] auto should_close() const -> bool override { return m_should_close; }
-    [[nodiscard]] auto data() const -> const std::uint8_t * override { return m_painter.data(); }
-    [[nodiscard]] auto frame_count() const -> int override { return m_frame; }
-    [[nodiscard]] auto clear_color() const -> Color override { return Color{ 245, 245, 247, 255 }; }
+    [[nodiscard]] auto size() const -> Size override { return Size{static_cast<float>(w_), static_cast<float>(h_)}; }
+    [[nodiscard]] auto should_close() const -> bool override { return should_close_; }
+    [[nodiscard]] auto data() const -> const std::uint8_t * override { return painter_.data(); }
+    [[nodiscard]] auto frame_count() const -> int override { return frame_; }
+    [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
 
-    auto set_event_handler(const EventHandler &h) -> void override { m_event_handler = h; }
+    auto set_event_handler(const EventHandler &h) -> void override { event_handler_ = h; }
     auto set_title(const std::string &title) -> void override {
         EM_ASM({ document.title = UTF8ToString($0); }, title.c_str());
     }
@@ -104,39 +108,51 @@ class WasmSurface : public Surface {
     auto wait_events(double /*timeout_ms*/) -> void override {}
 
   private:
-    std::string m_canvas_id;
-    Painter m_painter;
-    int m_w = 0;
-    int m_h = 0;
-    int m_frame = 0;
-    bool m_should_close = false;
-    EventHandler m_event_handler;
+    std::string canvas_id_;
+    Painter painter_;
+    int w_ = 0;
+    int h_ = 0;
+    int frame_ = 0;
+    bool should_close_ = false;
+    EventHandler event_handler_;
 
     // ---- Emscripten 事件回调 ----
     static EM_BOOL on_mouse(int type, const EmscriptenMouseEvent *e, void *user_data) {
         auto *self = static_cast<WasmSurface *>(user_data);
-        if (!self->m_event_handler) return EM_FALSE;
+        if (!self->event_handler_) {
+            return EM_FALSE;
+        }
         MouseEvent ev;
-        ev.position = Point{ static_cast<float>(e->target_x), static_cast<float>(e->target_y) };
+        ev.position = Point{static_cast<float>(e->target_x), static_cast<float>(e->target_y)};
         ev.button = (e->button == 2) ? MouseButton::Right : (e->button == 1) ? MouseButton::Middle : MouseButton::Left;
         ev.action = (type == EMSCRIPTEN_EVENT_MOUSEDOWN) ? MouseAction::Press
                     : (type == EMSCRIPTEN_EVENT_MOUSEUP) ? MouseAction::Release
                                                          : MouseAction::Move;
-        self->m_event_handler(ev);
+        self->event_handler_(ev);
         return EM_TRUE;
     }
 
     static EM_BOOL on_key(int type, const EmscriptenKeyboardEvent *e, void *user_data) {
         auto *self = static_cast<WasmSurface *>(user_data);
-        if (!self->m_event_handler) return EM_FALSE;
+        if (!self->event_handler_) {
+            return EM_FALSE;
+        }
         KeyEvent ev;
         ev.key = static_cast<int>(e->keyCode);
         ev.action = (type == EMSCRIPTEN_EVENT_KEYDOWN) ? KeyAction::Down : KeyAction::Up;
-        if (e->shiftKey) ev.modifiers = ev.modifiers | ModifierKey::Shift;
-        if (e->ctrlKey) ev.modifiers = ev.modifiers | ModifierKey::Control;
-        if (e->altKey) ev.modifiers = ev.modifiers | ModifierKey::Alt;
-        if (e->metaKey) ev.modifiers = ev.modifiers | ModifierKey::Meta;
-        self->m_event_handler(ev);
+        if (e->shiftKey) {
+            ev.modifiers = ev.modifiers | ModifierKey::Shift;
+        }
+        if (e->ctrlKey) {
+            ev.modifiers = ev.modifiers | ModifierKey::Control;
+        }
+        if (e->altKey) {
+            ev.modifiers = ev.modifiers | ModifierKey::Alt;
+        }
+        if (e->metaKey) {
+            ev.modifiers = ev.modifiers | ModifierKey::Meta;
+        }
+        self->event_handler_(ev);
         return EM_TRUE;
     }
 
@@ -144,15 +160,15 @@ class WasmSurface : public Surface {
         auto *self = static_cast<WasmSurface *>(user_data);
         // 查询 canvas 当前 CSS 尺寸并更新
         double css_w = 0, css_h = 0;
-        emscripten_get_element_css_size(self->m_canvas_id.c_str(), &css_w, &css_h);
+        emscripten_get_element_css_size(self->canvas_id_.c_str(), &css_w, &css_h);
         if (css_w > 0 && css_h > 0) {
-            self->m_w = static_cast<int>(css_w);
-            self->m_h = static_cast<int>(css_h);
+            self->w_ = static_cast<int>(css_w);
+            self->h_ = static_cast<int>(css_h);
         }
         return EM_TRUE;
     }
 };
 
-} // namespace aurora
+}  // namespace aurora
 
-#endif // AURORA_BACKEND_WASM / AURORA_PLATFORM_WASM
+#endif  // AURORA_BACKEND_WASM / AURORA_PLATFORM_WASM

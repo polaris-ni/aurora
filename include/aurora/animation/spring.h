@@ -10,9 +10,9 @@ namespace aurora {
  * 阻尼谐振子：m·x'' + c·x' + k·x = 0（相对目标位移）。
  */
 struct SpringDescription {
-    double stiffness = 170.0; ///< 刚度 k（越大回弹越快）
-    double damping = 26.0;    ///< 阻尼 c（越大越稳）
-    double mass = 1.0;        ///< 质量 m
+    double stiffness = 170.0;  ///< 刚度 k（越大回弹越快）
+    double damping = 26.0;  ///< 阻尼 c（越大越稳）
+    double mass = 1.0;  ///< 质量 m
 
     [[nodiscard]] auto natural_frequency() const -> double { return std::sqrt(stiffness / mass); }
     [[nodiscard]] auto damping_ratio() const -> double { return damping / (2.0 * std::sqrt(stiffness * mass)); }
@@ -31,14 +31,14 @@ struct SpringDescription {
 class SpringSimulation {
   public:
     SpringSimulation(const SpringDescription &spring, double start, double end, double velocity = 0.0)
-        : m_spring(spring), m_start(start), m_end(end), m_velocity(velocity) {}
+        : spring_(spring), start_(start), end_(end), velocity_(velocity) {}
 
     /// @brief 时刻 t（秒）的位置。
     [[nodiscard]] auto value(double t) const -> double {
-        const double y0 = m_start - m_end;
-        const double w0 = m_spring.natural_frequency();
-        const double zeta = m_spring.damping_ratio();
-        return m_end + displacement(y0, m_velocity, w0, zeta, t);
+        const double y0 = start_ - end_;
+        const double w0 = spring_.natural_frequency();
+        const double zeta = spring_.damping_ratio();
+        return end_ + displacement(y0, velocity_, w0, zeta, t);
     }
 
     /// @brief 时刻 t（秒）的速度（数值微分，供 settled 判定）。
@@ -49,10 +49,10 @@ class SpringSimulation {
 
     /// @brief 是否已在容差内静止（位置与速度均接近目标）。
     [[nodiscard]] auto is_settled(double t, double tolerance = 0.01) const -> bool {
-        return std::abs(value(t) - m_end) < tolerance && std::abs(velocity(t)) < tolerance;
+        return std::abs(value(t) - end_) < tolerance && std::abs(velocity(t)) < tolerance;
     }
 
-    [[nodiscard]] auto target() const -> double { return m_end; }
+    [[nodiscard]] auto target() const -> double { return end_; }
 
   private:
     /// @brief 相对目标的位移 y(t)，y(0)=y0, y'(0)=v0。
@@ -82,10 +82,10 @@ class SpringSimulation {
         return (a * std::exp(r1 * t)) + (b * std::exp(r2 * t));
     }
 
-    SpringDescription m_spring;
-    double m_start = 0.0;
-    double m_end = 0.0;
-    double m_velocity = 0.0;
+    SpringDescription spring_;
+    double start_ = 0.0;
+    double end_ = 0.0;
+    double velocity_ = 0.0;
 };
 
-} // namespace aurora
+}  // namespace aurora

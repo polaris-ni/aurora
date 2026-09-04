@@ -22,10 +22,9 @@
 // ============================================================================
 #include <fstream>
 #include <iostream>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
-
-#include <nlohmann/json.hpp>
 
 #include "api_json_merge.h"
 #include "toml_lines.h"
@@ -52,7 +51,6 @@ struct DebugEntry {
 
 // trim / parse_kv / unquote are provided by toml_lines.h (shared with gen_error_codes).
 
-// NOLINTNEXTLINE(*-function-cognitive-complexity)
 auto parse_toml(const std::string &path, std::vector<DebugEntry> &out) -> bool {
     std::ifstream in(path);
     if (!in) {
@@ -63,7 +61,7 @@ auto parse_toml(const std::string &path, std::vector<DebugEntry> &out) -> bool {
     DebugEntry *cur = nullptr;
     while (std::getline(in, line)) {
         const std::string t = trim(line);
-        if (t.empty() || t[0] == '#') {
+        if (t.empty() || t.at(0) == '#') {
             continue;
         }
         if (t == "[[function]]") {
@@ -71,7 +69,7 @@ auto parse_toml(const std::string &path, std::vector<DebugEntry> &out) -> bool {
             cur = &out.back();
             continue;
         }
-        if (!t.empty() && t[0] == '[') { // top-level table, ignored
+        if (!t.empty() && t.at(0) == '[') {  // top-level table, ignored
             cur = nullptr;
             continue;
         }
@@ -112,12 +110,24 @@ auto gen_debug_json(const std::vector<DebugEntry> &entries) -> nlohmann::json {
     nlohmann::json arr = nlohmann::json::array();
     for (const auto &x : entries) {
         nlohmann::json o = nlohmann::json::object();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         o["name"] = x.name;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         o["since"] = x.since;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         o["gated"] = x.gated;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         o["signature"] = x.signature;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         o["summary"] = x.summary;
         if (!x.header.empty()) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             o["header"] = x.header;
         }
         arr.push_back(o);
@@ -125,10 +135,12 @@ auto gen_debug_json(const std::vector<DebugEntry> &entries) -> nlohmann::json {
     return arr;
 }
 
-} // namespace
+}  // namespace
 
 // NOLINTNEXTLINE(bugprone-exception-escape) — main errors are printed via err() then return; static analysis is
 // conservative about upstream parse_toml / merge_api_json_section
+// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// try/catch 包装
 auto main(int argc, char **argv) -> int {
     // NOLINTBEGIN(*-pro-bounds-pointer-arithmetic)
     const std::string toml = (argc > 1) ? argv[1] : "codespec/debug_api.toml";

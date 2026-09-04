@@ -10,28 +10,28 @@ namespace aurora {
 namespace {
 
 /// @brief `FrameStats` 部分的 CSV 列名（计数器列由 `RenderCounters::csv_header()` 追加）。
-constexpr const char *k_frame_csv_header = // NOLINT(readability-identifier-naming)
+constexpr auto AURORA_FRAME_CSV_HEADER =
     "fps,avg_ms,p99_ms,jitter_ms,dropped,hitch,idle,layout_ms,paint_ms,present_ms,total_frames,profiling";
 
-} // namespace
+}  // namespace
 
 auto PerfLog::enable(int interval_frames) -> void {
-    s_enabled = true;
-    s_interval = interval_frames;
-    s_counter = 0;
+    s_enabled_ = true;
+    s_interval_ = interval_frames;
+    s_counter_ = 0;
 }
 
-auto PerfLog::disable() -> void { s_enabled = false; }
+auto PerfLog::disable() -> void { s_enabled_ = false; }
 
-auto PerfLog::enabled() -> bool { return s_enabled; }
+auto PerfLog::enabled() -> bool { return s_enabled_; }
 
 auto PerfLog::on_frame_end() -> void {
-    if (!s_enabled) {
+    if (!s_enabled_) {
         return;
     }
-    ++s_counter;
-    if (s_counter >= s_interval) {
-        s_counter = 0;
+    ++s_counter_;
+    if (s_counter_ >= s_interval_) {
+        s_counter_ = 0;
         log_summary();
     }
 }
@@ -66,7 +66,7 @@ auto PerfLog::snapshot_json() -> std::string {
 }
 
 auto PerfLog::csv_header() -> std::string {
-    return std::string(k_frame_csv_header) + "," + std::string(RenderCounters::csv_header());
+    return std::string(AURORA_FRAME_CSV_HEADER) + "," + std::string(RenderCounters::csv_header());
 }
 
 auto PerfLog::snapshot_csv() -> std::string {
@@ -82,4 +82,4 @@ auto PerfLog::dump_json() -> void { AURORA_LOG_RAW("perf", snapshot_json(), "\n"
 
 auto PerfLog::dump_csv() -> void { AURORA_LOG_RAW("perf", snapshot_csv(), "\n"); }
 
-} // namespace aurora
+}  // namespace aurora

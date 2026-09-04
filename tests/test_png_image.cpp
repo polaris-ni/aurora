@@ -10,7 +10,6 @@
 #include "aurora/aurora.h"
 #include "aurora/core/image.h"
 #include "aurora/render/png.h"
-
 #include "test_harness.h"
 
 using aurora::Image;
@@ -21,8 +20,12 @@ static void test_png_round_trip() {
     constexpr int h = 4;
     std::vector<uint8_t> px(static_cast<size_t>(w) * h * 4, 0);
     for (int i = 0; i < w * h; ++i) {
-        px[(static_cast<size_t>(i) * 4) + 0] = 255; // 红
-        px[(static_cast<size_t>(i) * 4) + 3] = 255; // 不透明
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        px[(static_cast<size_t>(i) * 4) + 0] = 255;  // 红
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        px[(static_cast<size_t>(i) * 4) + 3] = 255;  // 不透明
     }
     auto wr = write_png("png_test.png", w, h, px.data());
     AURORA_TEST_CHECK_MSG(wr.ok(), "write_png: encodes 4x4 RGBA");
@@ -31,6 +34,8 @@ static void test_png_round_trip() {
     AURORA_TEST_CHECK_MSG(lr.ok(), "Image::load: decodes written PNG");
     const Image &img = lr.value();
     AURORA_TEST_CHECK_MSG(img.width == w && img.height == h, "Image::load: dimensions preserved");
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(img.pixels[0] == 255 && img.pixels[3] == 255, "Image::load: pixel values preserved");
 }
 

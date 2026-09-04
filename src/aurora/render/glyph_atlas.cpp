@@ -45,4 +45,4 @@ auto GlyphAtlas::touch(std::uint64_t key) const -> void {
     it->second = lru_.begin();
 }
 
-} // namespace aurora::render
+}  // namespace aurora::render

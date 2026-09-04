@@ -17,18 +17,19 @@
 #include <string>
 #include <vector>
 
+#include "api_schema.h"
 #include "aurora/aurora.h"
 #include "aurora/inspector/inspector_api.h"
 #include "aurora/render/offscreen.h"
 #include "aurora/widget/codegen.h"
 #include "aurora/widget/yaml.h"
-
-#include "api_schema.h"
 #include "code_style.h"
 
 // ---------- Known enums (single source of truth: tools/include/known_enums.h) ----------
 
 namespace {
+
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
 // ---------- MCP protocol I/O ----------
 
@@ -43,7 +44,7 @@ namespace {
             line.pop_back();
         }
         if (line.empty()) {
-            break; // empty line ends the header
+            break;  // empty line ends the header
         }
         if (line.starts_with("Content-Length:")) {
             // Wire-protocol headers come from the peer and may be malformed ("Content-Length: abc").
@@ -51,7 +52,7 @@ namespace {
             try {
                 content_length = std::stoi(line.substr(15));
             } catch (const std::exception &) {
-                return au::Json{}; // treat as protocol error, behave like EOF
+                return au::Json{};  // treat as protocol error, behave like EOF
             }
         }
     }
@@ -62,7 +63,7 @@ namespace {
     // resize would terminate the server via bad_alloc / length_error. Legitimate MCP messages are far below 64MiB.
     constexpr int max_message_bytes = 64 * 1024 * 1024;
     if (content_length > max_message_bytes) {
-        return au::Json{}; // treat as protocol error, behave like EOF
+        return au::Json{};  // treat as protocol error, behave like EOF
     }
 
     // read body
@@ -84,12 +85,12 @@ auto write_message(const au::Json &msg) -> void {
 
 /// Build a JSON-RPC 2.0 success response.
 [[nodiscard]] auto rpc_result(const au::Json &id, const au::Json &result) -> au::Json {
-    return au::Json{ { "jsonrpc", "2.0" }, { "id", id }, { "result", result } };
+    return au::Json{{"jsonrpc", "2.0"}, {"id", id}, {"result", result}};
 }
 
 /// Build a JSON-RPC 2.0 error response.
 [[nodiscard]] auto rpc_error(const au::Json &id, int code, const std::string &message) -> au::Json {
-    return au::Json{ { "jsonrpc", "2.0" }, { "id", id }, { "error", { { "code", code }, { "message", message } } } };
+    return au::Json{{"jsonrpc", "2.0"}, {"id", id}, {"error", {{"code", code}, {"message", message}}}};
 }
 
 /// @brief Determine whether a persisted output path is confined within the server's working directory.
@@ -104,7 +105,7 @@ auto write_message(const au::Json &msg) -> void {
     }
     const std::filesystem::path p(path);
     if (p.is_absolute() || p.has_root_name()) {
-        return false; // reject absolute paths, drive letters and UNC prefixes
+        return false;  // reject absolute paths, drive letters and UNC prefixes
     }
     return std::ranges::all_of(p, [](const auto &part) -> auto { return part != ".."; });
 }
@@ -166,7 +167,7 @@ auto write_message(const au::Json &msg) -> void {
         au::Json t = au::Json::object();
         t["name"] = "describe_component";
         t["description"] = "Return the full schema of a single component (props/events/children policy/examples)";
-        t["inputSchema"] = schema_obj(std::move(props), req_arr({ "name" }));
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"name"}));
         tools.push_back(std::move(t));
     }
     // search_components
@@ -176,7 +177,7 @@ auto write_message(const au::Json &msg) -> void {
         au::Json t = au::Json::object();
         t["name"] = "search_components";
         t["description"] = "Fuzzy-search registered components by name substring";
-        t["inputSchema"] = schema_obj(std::move(props), req_arr({ "query" }));
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"query"}));
         tools.push_back(std::move(t));
     }
     // validate_tree
@@ -186,7 +187,7 @@ auto write_message(const au::Json &msg) -> void {
         au::Json t = au::Json::object();
         t["name"] = "validate_tree";
         t["description"] = "Validate the legality of a UI-tree JSON (type/depth/empty children)";
-        t["inputSchema"] = schema_obj(std::move(props), req_arr({ "tree" }));
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"tree"}));
         tools.push_back(std::move(t));
     }
     // validate_ui (specification/08-tooling.md §7.1: schema static validation, structured errors with path/suggestions)
@@ -198,7 +199,7 @@ auto write_message(const au::Json &msg) -> void {
         t["description"] =
             "Statically validate the UI tree against aurora_api.json schema: unknown type / missing required "
             "prop / type mismatch / children policy; errors include JSON path and fix suggestions (for AI auto-fix)";
-        t["inputSchema"] = schema_obj(std::move(props), req_arr({ "tree" }));
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"tree"}));
         tools.push_back(std::move(t));
     }
     // render_snapshot
@@ -211,7 +212,7 @@ auto write_message(const au::Json &msg) -> void {
         t["name"] = "render_snapshot";
         t["description"] =
             "Run offscreen layout on the UI-tree JSON and return a logical snapshot (type + box + children)";
-        t["inputSchema"] = schema_obj(std::move(props), req_arr({ "tree" }));
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"tree"}));
         tools.push_back(std::move(t));
     }
     // render_png
@@ -220,12 +221,13 @@ auto write_message(const au::Json &msg) -> void {
         props["tree"] = obj_prop("UI-tree JSON");
         props["width"] = int_prop("Canvas width (default 800)");
         props["height"] = int_prop("Canvas height (default 600)");
-        props["path"] = str_prop("Output PNG path; must be a relative path inside the working directory without '..' "
-                                 "(default aurora_render.png)");
+        props["path"] = str_prop(
+            "Output PNG path; must be a relative path inside the working directory without '..' "
+            "(default aurora_render.png)");
         au::Json t = au::Json::object();
         t["name"] = "render_png";
         t["description"] = "Run offscreen rendering on the UI-tree JSON and output a PNG file";
-        t["inputSchema"] = schema_obj(std::move(props), req_arr({ "tree" }));
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"tree"}));
         tools.push_back(std::move(t));
     }
     // to_code
@@ -236,7 +238,7 @@ auto write_message(const au::Json &msg) -> void {
         au::Json t = au::Json::object();
         t["name"] = "to_code";
         t["description"] = "Convert a UI-tree JSON into compilable C++ code";
-        t["inputSchema"] = schema_obj(std::move(props), req_arr({ "tree" }));
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"tree"}));
         tools.push_back(std::move(t));
     }
     // to_yaml
@@ -246,7 +248,7 @@ auto write_message(const au::Json &msg) -> void {
         au::Json t = au::Json::object();
         t["name"] = "to_yaml";
         t["description"] = "Convert a UI-tree JSON into a YAML-formatted string";
-        t["inputSchema"] = schema_obj(std::move(props), req_arr({ "tree" }));
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"tree"}));
         tools.push_back(std::move(t));
     }
     // get_schema
@@ -276,7 +278,6 @@ auto write_message(const au::Json &msg) -> void {
 [[nodiscard]] auto json_content(const au::Json &j) -> au::Json { return text_content(j.dump(2)); }
 
 /// Execute the named tool and return the MCP tools/call result.
-// NOLINTNEXTLINE(*-function-cognitive-complexity)
 [[nodiscard]] auto execute_tool(const std::string &name, const au::Json &args) -> au::Json {
     if (name == "list_components") {
         // Use the Inspector facade to fetch all component schemas and extract type names
@@ -287,37 +288,37 @@ auto write_message(const au::Json &msg) -> void {
                 arr.push_back(s["type"]);
             }
         }
-        return au::Json{ { "content", json_content(arr) } };
+        return au::Json{{"content", json_content(arr)}};
     }
 
     if (name == "describe_component") {
         if (!args.contains("name") || !args["name"].is_string()) {
-            return au::Json{ { "content", text_content("Error: missing 'name' parameter") }, { "isError", true } };
+            return au::Json{{"content", text_content("Error: missing 'name' parameter")}, {"isError", true}};
         }
         au::Json schema = aurora::Inspector::component_schema(args["name"].get<std::string>());
-        return au::Json{ { "content", json_content(schema) } };
+        return au::Json{{"content", json_content(schema)}};
     }
 
     if (name == "search_components") {
         if (!args.contains("query") || !args["query"].is_string()) {
-            return au::Json{ { "content", text_content("Error: missing 'query' parameter") }, { "isError", true } };
+            return au::Json{{"content", text_content("Error: missing 'query' parameter")}, {"isError", true}};
         }
         auto results = aurora::search_components(args["query"].get<std::string>());
         au::Json arr = au::Json::array();
         for (const auto &r : results) {
             arr.push_back(r);
         }
-        return au::Json{ { "content", json_content(arr) } };
+        return au::Json{{"content", json_content(arr)}};
     }
 
     if (name == "validate_ui") {
         // specification/08-tooling.md §7.1: schema static validation (no widget construction, pure JSON against
         // aurora_api schema).
         if (!args.contains("tree") || !args["tree"].is_object()) {
-            return au::Json{ { "content", text_content("Error: missing 'tree' parameter") }, { "isError", true } };
+            return au::Json{{"content", text_content("Error: missing 'tree' parameter")}, {"isError", true}};
         }
         const au::Json report = aurora::validate_ui_tree_json(args["tree"]);
-        au::Json out{ { "content", json_content(report) } };
+        au::Json out{{"content", json_content(report)}};
         if (!report["valid"].get<bool>()) {
             out["isError"] = true;
         }
@@ -326,12 +327,12 @@ auto write_message(const au::Json &msg) -> void {
 
     if (name == "validate_tree") {
         if (!args.contains("tree") || !args["tree"].is_object()) {
-            return au::Json{ { "content", text_content("Error: missing 'tree' parameter") }, { "isError", true } };
+            return au::Json{{"content", text_content("Error: missing 'tree' parameter")}, {"isError", true}};
         }
         auto widget = aurora::serialization::from_json(args["tree"]);
         if (!widget) {
-            auto err = au::Json{ { "ok", false }, { "error", widget.error().to_json() } };
-            return au::Json{ { "content", json_content(err) }, { "isError", true } };
+            auto err = au::Json{{"ok", false}, {"error", widget.error().to_json()}};
+            return au::Json{{"content", json_content(err)}, {"isError", true}};
         }
         aurora::Node root(std::move(widget.value()));
         auto diags = aurora::Inspector::validate(root);
@@ -343,77 +344,77 @@ auto write_message(const au::Json &msg) -> void {
                 diag_arr.push_back(au::Json::parse(d.to_json_line(), nullptr, false));
             }
             err["diagnostics"] = diag_arr;
-            return au::Json{ { "content", json_content(err) }, { "isError", true } };
+            return au::Json{{"content", json_content(err)}, {"isError", true}};
         }
-        return au::Json{ { "content", json_content(au::Json{ { "ok", true } }) } };
+        return au::Json{{"content", json_content(au::Json{{"ok", true}})}};
     }
 
     if (name == "render_snapshot") {
         if (!args.contains("tree") || !args["tree"].is_object()) {
-            return au::Json{ { "content", text_content("Error: missing 'tree' parameter") }, { "isError", true } };
+            return au::Json{{"content", text_content("Error: missing 'tree' parameter")}, {"isError", true}};
         }
         int w = args.value("width", 800);
         int h = args.value("height", 600);
         auto widget = aurora::serialization::from_json(args["tree"]);
         if (!widget) {
-            return au::Json{ { "content", text_content("Error: " + widget.error().message) }, { "isError", true } };
+            return au::Json{{"content", text_content("Error: " + widget.error().message)}, {"isError", true}};
         }
         aurora::Node root(std::move(widget.value()));
         au::Json snapshot = render_to_logical_snapshot(root, w, h);
-        return au::Json{ { "content", json_content(snapshot) } };
+        return au::Json{{"content", json_content(snapshot)}};
     }
 
     if (name == "render_png") {
         if (!args.contains("tree") || !args["tree"].is_object()) {
-            return au::Json{ { "content", text_content("Error: missing 'tree' parameter") }, { "isError", true } };
+            return au::Json{{"content", text_content("Error: missing 'tree' parameter")}, {"isError", true}};
         }
         int w = args.value("width", 800);
         int h = args.value("height", 600);
         std::string path = args.value("path", std::string("aurora_render.png"));
         if (!is_confined_output_path(path)) {
-            return au::Json{ { "content",
-                               text_content(
-                                   "Error: 'path' must be a relative path inside the working directory (no '..')") },
-                             { "isError", true } };
+            return au::Json{
+                {"content",
+                 text_content("Error: 'path' must be a relative path inside the working directory (no '..')")},
+                {"isError", true}};
         }
         auto widget = aurora::serialization::from_json(args["tree"]);
         if (!widget) {
-            return au::Json{ { "content", text_content("Error: " + widget.error().message) }, { "isError", true } };
+            return au::Json{{"content", text_content("Error: " + widget.error().message)}, {"isError", true}};
         }
         aurora::Node root(std::move(widget.value()));
         auto ok = render_to_png(root, w, h, path.c_str());
         if (!ok) {
-            return au::Json{ { "content", text_content("Error: " + ok.error().message) }, { "isError", true } };
+            return au::Json{{"content", text_content("Error: " + ok.error().message)}, {"isError", true}};
         }
-        return au::Json{ { "content", json_content(au::Json{ { "path", path }, { "width", w }, { "height", h } }) } };
+        return au::Json{{"content", json_content(au::Json{{"path", path}, {"width", w}, {"height", h}})}};
     }
 
     if (name == "to_code") {
         if (!args.contains("tree") || !args["tree"].is_object()) {
-            return au::Json{ { "content", text_content("Error: missing 'tree' parameter") }, { "isError", true } };
+            return au::Json{{"content", text_content("Error: missing 'tree' parameter")}, {"isError", true}};
         }
         std::string style_str = args.value("style", std::string("fluent"));
         auto style = aurora::tools::parse_code_style(style_str);
 
         std::string code = to_code(args["tree"], style);
-        return au::Json{ { "content", text_content(code) } };
+        return au::Json{{"content", text_content(code)}};
     }
 
     if (name == "to_yaml") {
         if (!args.contains("tree") || !args["tree"].is_object()) {
-            return au::Json{ { "content", text_content("Error: missing 'tree' parameter") }, { "isError", true } };
+            return au::Json{{"content", text_content("Error: missing 'tree' parameter")}, {"isError", true}};
         }
         std::string yaml = aurora::serialization::to_yaml(args["tree"]);
-        return au::Json{ { "content", text_content(yaml) } };
+        return au::Json{{"content", text_content(yaml)}};
     }
 
     if (name == "get_schema") {
         au::Json api = aurora::tools::build_api_skeleton();
-        return au::Json{ { "content", json_content(api) } };
+        return au::Json{{"content", json_content(api)}};
     }
 
     // unknown tool
-    return au::Json{ { "content", text_content("Error: unknown tool '" + name + "'") }, { "isError", true } };
+    return au::Json{{"content", text_content("Error: unknown tool '" + name + "'")}, {"isError", true}};
 }
 
 // ---------- JSON-RPC dispatch ----------
@@ -425,20 +426,20 @@ auto write_message(const au::Json &msg) -> void {
 
     if (method == "initialize") {
         const auto result = au::Json{
-            { "protocolVersion", "2024-11-05" },
-            { "capabilities", { { "tools", au::Json::object() } } },
-            { "serverInfo", { { "name", "aurora-mcp" }, { "version", AURORA_VERSION_STRING } } },
+            {"protocolVersion", "2024-11-05"},
+            {"capabilities", {{"tools", au::Json::object()}}},
+            {"serverInfo", {{"name", "aurora-mcp"}, {"version", AURORA_VERSION_STRING}}},
         };
         return rpc_result(id, result);
     }
 
     if (method == "notifications/initialized") {
         // notification, no response needed (JSON-RPC notifications have no id, so do not send a response)
-        return au::Json{}; // empty means no response
+        return au::Json{};  // empty means no response
     }
 
     if (method == "tools/list") {
-        return rpc_result(id, au::Json{ { "tools", tool_definitions() } });
+        return rpc_result(id, au::Json{{"tools", tool_definitions()}});
     }
 
     if (method == "tools/call") {
@@ -458,18 +459,20 @@ auto write_message(const au::Json &msg) -> void {
     return rpc_error(id, -32601, "Method not found: " + method);
 }
 
-} // namespace
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+
+}  // namespace
 
 // ---------- main ----------
 
-auto main() -> int { // NOLINT(*-exception-escape)
+auto main() -> int {  // NOLINT(*-exception-escape)
     aurora::serialization::register_core_widgets();
 
     // MCP stdio main loop
     while (true) {
         au::Json msg = read_message();
         if (msg.is_null() || msg.is_discarded()) {
-            break; // EOF or parse failure
+            break;  // EOF or parse failure
         }
 
         au::Json response = handle_request(msg);

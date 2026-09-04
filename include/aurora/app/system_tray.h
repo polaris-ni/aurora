@@ -54,7 +54,7 @@ class SystemTray {
     std::string tray_title_;
     std::string tray_balloon_msg_;
     std::function<void()> on_activate_cb_;
-    std::vector<MenuItem> context_menu_items_; ///< 右键上下文菜单数据模型
+    std::vector<MenuItem> context_menu_items_;  ///< 右键上下文菜单数据模型
 
     /// @brief 供嵌套 `Impl` 在图标激活时回调（嵌套类可访问私有成员）。
     void fire_activate() const {
@@ -64,4 +64,4 @@ class SystemTray {
     }
 };
 
-} // namespace aurora
+}  // namespace aurora

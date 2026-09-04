@@ -19,20 +19,18 @@ AURORA_TEST() { AURORA_TEST_PRINTF("skip: AURORA_INSPECTOR_SERVER_ENABLED not de
 #else
 
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <sstream>
 #include <string>
-
-#include <nlohmann/json.hpp>
 
 #ifdef AURORA_PLATFORM_WINDOWS
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
-#include <unistd.h>
-
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <unistd.h>
 using SOCKET = int;
 constexpr SOCKET INVALID_SOCKET = -1;
 struct WSADATA {
@@ -45,7 +43,6 @@ inline int closesocket(SOCKET s) { return ::close(s); }
 #endif
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 namespace {
@@ -53,7 +50,9 @@ namespace {
 /// 最小 loopback HTTP 客户端：发送原始请求文本，读全响应。
 auto http_raw(uint16_t port, const std::string &raw) -> std::string {
     WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return {};
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        return {};
+    }
     SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == INVALID_SOCKET) {
         WSACleanup();
@@ -72,8 +71,9 @@ auto http_raw(uint16_t port, const std::string &raw) -> std::string {
     std::string resp;
     char buf[4096];
     int n;
-    while ((n = recv(sock, buf, sizeof(buf), 0)) > 0)
+    while ((n = recv(sock, buf, sizeof(buf), 0)) > 0) {
         resp.append(buf, static_cast<std::size_t>(n));
+    }
     closesocket(sock);
     WSACleanup();
     return resp;
@@ -93,9 +93,13 @@ auto http_request(uint16_t port, const std::string &method, const std::string &p
 auto status_of(const std::string &resp) -> int {
     // "HTTP/1.1 400 Bad Request" → 400
     const auto sp1 = resp.find(' ');
-    if (sp1 == std::string::npos) return 0;
+    if (sp1 == std::string::npos) {
+        return 0;
+    }
     const auto sp2 = resp.find(' ', sp1 + 1);
-    if (sp2 == std::string::npos) return 0;
+    if (sp2 == std::string::npos) {
+        return 0;
+    }
     try {
         return std::stoi(resp.substr(sp1 + 1, sp2 - sp1 - 1));
     } catch (...) {
@@ -108,14 +112,14 @@ auto body_of(const std::string &resp) -> std::string {
     return (hend == std::string::npos) ? std::string{} : resp.substr(hend + 4);
 }
 
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     // 构造含 Text 子控件的树：PUT font_weight 路径经 text.cpp apply_props → json_to_font_weight。
     auto root_widget = std::make_shared<aurora::Column>();
     auto text_child = std::make_shared<aurora::Text>("hello");
-    root_widget->add(aurora::Node{ text_child });
-    aurora::Node root{ root_widget };
+    root_widget->add(aurora::Node{text_child});
+    aurora::Node root{root_widget};
 
     std::function<aurora::Node()> getter = [&]() -> aurora::Node { return root; };
     aurora::InspectorServer server(getter);
@@ -157,7 +161,7 @@ AURORA_TEST() {
     {
         const std::string body = R"({"node":{"type":"Button","props":{"label":"OK"},"children":[]},"style":99})";
         auto r = http_request(port, "POST", "/api/to_code", body);
-        AURORA_TEST_CHECK_EQ(status_of(r), 200); // 越界 style 回退 Fluent，保持向后兼容
+        AURORA_TEST_CHECK_EQ(status_of(r), 200);  // 越界 style 回退 Fluent，保持向后兼容
     }
     {
         // node 为字符串等非对象类型也不得崩溃（to_code 内部按 Json 处理）
@@ -169,7 +173,7 @@ AURORA_TEST() {
     {
         auto r = http_request(port, "PUT", "/api/widget/0/font_weight", R"("bold")");
         const int st = status_of(r);
-        AURORA_TEST_CHECK(st == 200 || st == 400); // 回退 Normal(200) 或显式拒绝(400)，绝不允许连接中断/无响应
+        AURORA_TEST_CHECK(st == 200 || st == 400);  // 回退 Normal(200) 或显式拒绝(400)，绝不允许连接中断/无响应
     }
 
     // ---- 4. 存活探针：上述畸形请求之后服务必须仍然正常响应 ----
@@ -189,7 +193,7 @@ AURORA_TEST() {
     }
     {
         auto r = http_request(port, "GET", "/api/widget/0?x=1", "");
-        AURORA_TEST_CHECK_EQ(status_of(r), 200); // query 不得混入树路径
+        AURORA_TEST_CHECK_EQ(status_of(r), 200);  // query 不得混入树路径
     }
 
     // ---- 6. Content-Length 大小写混排仍可解析（header_value 大小写不敏感）----
@@ -214,4 +218,4 @@ AURORA_TEST() {
     server.stop();
 }
 
-#endif // AURORA_INSPECTOR_SERVER_ENABLED
+#endif  // AURORA_INSPECTOR_SERVER_ENABLED

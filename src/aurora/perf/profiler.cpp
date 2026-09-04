@@ -13,14 +13,16 @@ namespace detail {
 auto on_frame_scope_end() -> void {
 #ifdef AURORA_ENABLE_TRACING
     TraceWriter &tw = TraceWriter::instance();
-    if (!tw.capturing()) return;
+    if (!tw.capturing()) {
+        return;
+    }
     const Profiler &prof = Profiler::instance();
     tw.capture_frame(prof);
     tw.capture_counters(prof.frame_index(), Stopwatch::now_ms(), RenderCounters::current());
 #endif
 }
 
-} // namespace detail
+}  // namespace detail
 
 namespace {
 
@@ -38,11 +40,11 @@ namespace {
 /// @brief 当帧长任务列表的预留容量（超出仅计数不存样本）。
 constexpr std::size_t AURORA_LONG_TASK_CAPACITY = 64;
 
-} // namespace
+}  // namespace
 
-Profiler::Profiler() : m_frame_start_ms(Stopwatch::now_ms()) {
-    m_zones.reserve(m_capacity);
-    m_long_tasks.reserve(AURORA_LONG_TASK_CAPACITY);
+Profiler::Profiler() : frame_start_ms_(Stopwatch::now_ms()) {
+    zones_.reserve(capacity_);
+    long_tasks_.reserve(AURORA_LONG_TASK_CAPACITY);
 }
 
 auto Profiler::instance() -> Profiler & {
@@ -55,77 +57,76 @@ auto Profiler::instance() -> Profiler & {
 // ---------------------------------------------------------------------------
 
 auto Profiler::begin_frame() -> void {
-    if (m_depth != 0) {
+    if (depth_ != 0) {
         // 上一帧存在未闭合 zone：计入配对错误并强制复位，避免错误跨帧传播。
-        m_unbalanced += static_cast<std::uint64_t>(m_depth);
-        m_depth = 0;
+        unbalanced_ += static_cast<std::uint64_t>(depth_);
+        depth_ = 0;
     }
-    m_zones.clear();
-    m_long_tasks.clear();
-    m_frame_start_ms = Stopwatch::now_ms();
+    zones_.clear();
+    long_tasks_.clear();
+    frame_start_ms_ = Stopwatch::now_ms();
 }
 
 auto Profiler::end_frame() -> void {
-    if (m_depth != 0) {
-        m_unbalanced += static_cast<std::uint64_t>(m_depth);
-        m_depth = 0;
+    if (depth_ != 0) {
+        unbalanced_ += static_cast<std::uint64_t>(depth_);
+        depth_ = 0;
     }
-    ++m_frame_index;
+    ++frame_index_;
 }
 
-auto Profiler::frame_index() const -> std::uint64_t { return m_frame_index; }
+auto Profiler::frame_index() const -> std::uint64_t { return frame_index_; }
 
-auto Profiler::frame_start_ms() const -> double { return m_frame_start_ms; }
+auto Profiler::frame_start_ms() const -> double { return frame_start_ms_; }
 
 // ---------------------------------------------------------------------------
 // 作用域协议（热路径：无堆分配、无字符串操作）
 // ---------------------------------------------------------------------------
 
 auto Profiler::begin_zone(const char *name) -> void {
-    if (!m_enabled) {
+    if (!enabled_) {
         return;
     }
-    const std::size_t idx = m_depth++;
+    const std::size_t idx = depth_++;
     if (idx >= AURORA_MAX_ZONE_DEPTH) {
-        ++m_dropped; // 嵌套过深：丢弃样本，但仍维持深度以保证 end_zone 配对
+        ++dropped_;  // 嵌套过深：丢弃样本，但仍维持深度以保证 end_zone 配对
         return;
     }
-    OpenZone &z = m_stack[idx]; // NOLINT(*-pro-bounds-constant-array-index)
+    OpenZone &z = stack_[idx];  // NOLINT(*-pro-bounds-constant-array-index)
     z.name = name;
-    z.start_ms = Stopwatch::now_ms() - m_frame_start_ms;
+    z.start_ms = Stopwatch::now_ms() - frame_start_ms_;
     z.watch.reset();
 }
 
 auto Profiler::end_zone() -> void {
-    if (!m_enabled) {
+    if (!enabled_) {
         return;
     }
-    if (m_depth == 0) {
-        ++m_unbalanced; // end 多于 begin
+    if (depth_ == 0) {
+        ++unbalanced_;  // end 多于 begin
         return;
     }
-    const std::size_t idx = --m_depth;
+    const std::size_t idx = --depth_;
     if (idx >= AURORA_MAX_ZONE_DEPTH) {
-        return; // 进入时已记 dropped
+        return;  // 进入时已记 dropped
     }
 
-    const OpenZone &z = m_stack[idx]; // NOLINT(*-pro-bounds-constant-array-index)
+    const OpenZone &z = stack_[idx];  // NOLINT(*-pro-bounds-constant-array-index)
     const double duration_ms = z.watch.elapsed_ms();
     const ZoneSample sample{
-        .name = z.name, .start_ms = z.start_ms, .duration_ms = duration_ms, .depth = static_cast<std::uint16_t>(idx)
-    };
+        .name = z.name, .start_ms = z.start_ms, .duration_ms = duration_ms, .depth = static_cast<std::uint16_t>(idx)};
 
-    if (duration_ms >= m_long_task_threshold_ms) {
-        ++m_total_long_tasks;
-        if (m_long_tasks.size() < m_long_tasks.capacity()) {
-            m_long_tasks.push_back(sample);
+    if (duration_ms >= long_task_threshold_ms_) {
+        ++total_long_tasks_;
+        if (long_tasks_.size() < long_tasks_.capacity()) {
+            long_tasks_.push_back(sample);
         }
     }
 
-    if (m_zones.size() < m_capacity) {
-        m_zones.push_back(sample);
+    if (zones_.size() < capacity_) {
+        zones_.push_back(sample);
     } else {
-        ++m_dropped;
+        ++dropped_;
     }
 }
 
@@ -133,12 +134,12 @@ auto Profiler::end_zone() -> void {
 // 查询
 // ---------------------------------------------------------------------------
 
-auto Profiler::frame_zones() const -> const std::vector<ZoneSample> & { return m_zones; }
+auto Profiler::frame_zones() const -> const std::vector<ZoneSample> & { return zones_; }
 
 auto Profiler::aggregate(const char *name) const -> ZoneAggregate {
     ZoneAggregate agg{};
     agg.name = name;
-    for (const auto &z : m_zones) {
+    for (const auto &z : zones_) {
         if (!same_zone_name(z.name, name)) {
             continue;
         }
@@ -151,13 +152,13 @@ auto Profiler::aggregate(const char *name) const -> ZoneAggregate {
 
 auto Profiler::aggregates() const -> std::vector<ZoneAggregate> {
     std::vector<ZoneAggregate> out;
-    out.reserve(m_zones.size());
-    for (const auto &z : m_zones) {
+    out.reserve(zones_.size());
+    for (const auto &z : zones_) {
         auto it =
             std::ranges::find_if(out, [&](const ZoneAggregate &a) -> bool { return same_zone_name(a.name, z.name); });
         if (it == out.end()) {
             out.push_back(
-                ZoneAggregate{ .name = z.name, .call_count = 1, .total_ms = z.duration_ms, .max_ms = z.duration_ms });
+                ZoneAggregate{.name = z.name, .call_count = 1, .total_ms = z.duration_ms, .max_ms = z.duration_ms});
         } else {
             ++it->call_count;
             it->total_ms += z.duration_ms;
@@ -173,47 +174,47 @@ auto Profiler::aggregates() const -> std::vector<ZoneAggregate> {
 // 长任务
 // ---------------------------------------------------------------------------
 
-auto Profiler::set_long_task_threshold_ms(double ms) -> void { m_long_task_threshold_ms = ms; }
+auto Profiler::set_long_task_threshold_ms(double ms) -> void { long_task_threshold_ms_ = ms; }
 
-auto Profiler::long_task_threshold_ms() const -> double { return m_long_task_threshold_ms; }
+auto Profiler::long_task_threshold_ms() const -> double { return long_task_threshold_ms_; }
 
-auto Profiler::long_tasks() const -> const std::vector<ZoneSample> & { return m_long_tasks; }
+auto Profiler::long_tasks() const -> const std::vector<ZoneSample> & { return long_tasks_; }
 
-auto Profiler::total_long_task_count() const -> std::uint64_t { return m_total_long_tasks; }
+auto Profiler::total_long_task_count() const -> std::uint64_t { return total_long_tasks_; }
 
 // ---------------------------------------------------------------------------
 // 容量与诊断
 // ---------------------------------------------------------------------------
 
 auto Profiler::set_zone_capacity(std::size_t capacity) -> void {
-    m_capacity = capacity == 0 ? 1 : capacity;
-    m_zones.clear();
-    m_zones.reserve(m_capacity);
+    capacity_ = capacity == 0 ? 1 : capacity;
+    zones_.clear();
+    zones_.reserve(capacity_);
 }
 
-auto Profiler::zone_capacity() const -> std::size_t { return m_capacity; }
+auto Profiler::zone_capacity() const -> std::size_t { return capacity_; }
 
-auto Profiler::dropped_zones() const -> std::uint64_t { return m_dropped; }
+auto Profiler::dropped_zones() const -> std::uint64_t { return dropped_; }
 
-auto Profiler::unbalanced_zones() const -> std::uint64_t { return m_unbalanced; }
+auto Profiler::unbalanced_zones() const -> std::uint64_t { return unbalanced_; }
 
 // ---------------------------------------------------------------------------
 // 开关与清理
 // ---------------------------------------------------------------------------
 
-auto Profiler::set_enabled(bool on) -> void { m_enabled = on; }
+auto Profiler::set_enabled(bool on) -> void { enabled_ = on; }
 
-auto Profiler::is_enabled() const -> bool { return m_enabled; }
+auto Profiler::is_enabled() const -> bool { return enabled_; }
 
 auto Profiler::reset() -> void {
-    m_zones.clear();
-    m_long_tasks.clear();
-    m_depth = 0;
-    m_frame_index = 0;
-    m_dropped = 0;
-    m_unbalanced = 0;
-    m_total_long_tasks = 0;
-    m_frame_start_ms = Stopwatch::now_ms();
+    zones_.clear();
+    long_tasks_.clear();
+    depth_ = 0;
+    frame_index_ = 0;
+    dropped_ = 0;
+    unbalanced_ = 0;
+    total_long_tasks_ = 0;
+    frame_start_ms_ = Stopwatch::now_ms();
 }
 
 auto Profiler::report_text() const -> std::string {
@@ -227,4 +228,4 @@ auto Profiler::report_text() const -> std::string {
     return out;
 }
 
-} // namespace aurora
+}  // namespace aurora

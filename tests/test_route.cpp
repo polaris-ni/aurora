@@ -4,7 +4,6 @@
 #include <string>
 
 #include "aurora/aurora.h"
-
 #include "test_harness.h"
 
 using aurora::Node;
@@ -20,7 +19,7 @@ static void test_route_empty() {
 }
 
 static void test_route_construct() {
-    Route r{ Node{ Spacer{} }, "home" };
+    Route r{Node{Spacer{}}, "home"};
     AURORA_TEST_CHECK_MSG(!r.empty(), "Route: with root not empty");
     AURORA_TEST_CHECK_MSG(r.name() == "home", "Route: name preserved");
     AURORA_TEST_CHECK_MSG(static_cast<bool>(r.root()), "Route: root() is valid node");
@@ -37,7 +36,7 @@ static void test_route_copy_and_transition() {
     tr.animated = true;
     tr.kind = TransitionKind::Slide;
     tr.duration_seconds = 0.5;
-    const Route r{ Node{ Spacer{} }, "page", tr };
+    const Route r{Node{Spacer{}}, "page", tr};
 
     AURORA_TEST_CHECK_MSG(r.transition().animated, "Route: custom transition animated");
     AURORA_TEST_CHECK_MSG(r.transition().kind == TransitionKind::Slide, "Route: custom transition Slide");

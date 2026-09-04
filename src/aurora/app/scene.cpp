@@ -6,7 +6,7 @@ namespace aurora {
 
 auto Scene::serialize() const -> std::string {
     std::string out;
-    serialize_widget(m_root.widget(), out);
+    serialize_widget(root_.widget(), out);
     return out;
 }
 

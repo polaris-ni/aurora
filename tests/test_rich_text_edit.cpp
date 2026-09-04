@@ -2,7 +2,6 @@
 
 #include "aurora/state/undo_stack.h"
 #include "aurora/widget/rich_text_edit.h"
-
 #include "test_harness.h"
 
 using aurora::Color;
@@ -16,7 +15,6 @@ using aurora::TextSpan;
 using aurora::UndoStack;
 
 AURORA_TEST() {
-
     // ---- 基本构造 + 空文档 ----
     {
         RichTextEdit ed;
@@ -32,7 +30,7 @@ AURORA_TEST() {
         std::vector<TextSpan> spans;
         TextSpan s1;
         s1.text.text = "Hello";
-        s1.font.size_pt = 18.0f;
+        s1.font.size_pt = 18.0F;
         s1.color = Color::blue();
         spans.push_back(s1);
         TextSpan s2;
@@ -50,11 +48,13 @@ AURORA_TEST() {
         std::vector<TextSpan> spans;
         TextSpan s;
         s.text.text = "ABC";
-        s.font.size_pt = 14.0f;
+        s.font.size_pt = 14.0F;
         spans.push_back(s);
         ed.load_spans(spans);
         const auto out = ed.to_spans();
         AURORA_TEST_CHECK(out.size() == 1);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(out[0].text.text == "ABC");
     }
 
@@ -90,15 +90,15 @@ AURORA_TEST() {
         // 将光标移到末尾，以便插入 "C" 后得到 "ABC"
         // 通过模拟 End 键
         KeyEvent ke;
-        ke.action = KeyAction::Down;
-        ke.key = static_cast<int>(KeyCode::End);
-        ke.modifiers = {};
+        ke.action_ = KeyAction::Down;
+        ke.key_ = static_cast<int>(KeyCode::End);
+        ke.modifiers_ = {};
         ed.on_key_event(ke);
-        AURORA_TEST_CHECK(ed.caret() == 2); // 确认光标在末尾
+        AURORA_TEST_CHECK(ed.caret() == 2);  // 确认光标在末尾
 
         // 模拟键盘输入 "C" — 通过 on_text_input 模拟
         TextInputEvent tie;
-        tie.text = "C";
+        tie.text_ = "C";
         ed.on_text_input(tie);
         AURORA_TEST_CHECK(ed.plain_text() == "ABC");
         AURORA_TEST_CHECK(stack.can_undo());
@@ -131,6 +131,8 @@ AURORA_TEST() {
         Json props;
         ed.serialize_props(props);
         AURORA_TEST_CHECK(props.contains("text"));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["text"].get<std::string>() == "Test");
 
         RichTextEdit ed2;

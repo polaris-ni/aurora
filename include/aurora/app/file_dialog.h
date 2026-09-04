@@ -50,19 +50,25 @@ inline bool interactive = true;
 #else
 [[nodiscard]] inline auto open_file(const Options &opts = {}) -> Result<std::vector<std::string>> {
     (void)opts;
-    if (!headless_open_result.empty()) return headless_open_result;
+    if (!headless_open_result.empty()) {
+        return headless_open_result;
+    }
     return std::vector<std::string>{};
 }
 [[nodiscard]] inline auto save_file(const Options &opts = {}) -> Result<std::string> {
     (void)opts;
-    if (!headless_save_result.empty()) return headless_save_result;
+    if (!headless_save_result.empty()) {
+        return headless_save_result;
+    }
     return std::string{};
 }
 [[nodiscard]] inline auto open_folder(const Options &opts = {}) -> Result<std::string> {
     (void)opts;
-    if (!headless_folder_result.empty()) return headless_folder_result;
+    if (!headless_folder_result.empty()) {
+        return headless_folder_result;
+    }
     return std::string{};
 }
 #endif
 
-} // namespace aurora::file_dialog
+}  // namespace aurora::file_dialog

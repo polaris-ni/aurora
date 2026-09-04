@@ -47,9 +47,9 @@ namespace aurora::render {
  * 保持完全一致（度量、光标、命中、像素一一对应），避免布局与绘制错位。
  */
 struct TextLayoutOpts {
-    float letter_spacing = 0.0f; ///< 字形间额外间距（逻辑 dp），加在每对相邻字形之间
-    float word_spacing = 0.0f;   ///< 词间额外间距（逻辑 dp），加在每个空格之后
-    bool italic = false;         ///< 是否斜体（FreeType 经 FT_Set_Transform 施加 shear 变换实现）
+    float letter_spacing = 0.0F;  ///< 字形间额外间距（逻辑 dp），加在每对相邻字形之间
+    float word_spacing = 0.0F;  ///< 词间额外间距（逻辑 dp），加在每个空格之后
+    bool italic = false;  ///< 是否斜体（FreeType 经 FT_Set_Transform 施加 shear 变换实现）
 
     auto operator==(const TextLayoutOpts &o) const -> bool {
         return letter_spacing == o.letter_spacing && word_spacing == o.word_spacing && italic == o.italic;
@@ -62,10 +62,10 @@ struct TextLayoutOpts {
  * 缓存是真实优化（非 `AURORA_ENABLE_PROFILING` 门控），故统计始终可用。`命中率 = hits / (hits + misses)`。
  */
 struct ShapeCacheStats {
-    std::uint64_t hits = 0;   ///< 命中次数（跳过 hb_shape）
-    std::uint64_t misses = 0; ///< 未命中次数（触发 hb_shape）
+    std::uint64_t hits = 0;  ///< 命中次数（跳过 hb_shape）
+    std::uint64_t misses = 0;  ///< 未命中次数（触发 hb_shape）
     std::size_t entries = 0;  ///< 当前缓存条目数
-    std::size_t bytes = 0;    ///< 当前估算占用字节数
+    std::size_t bytes = 0;  ///< 当前估算占用字节数
 };
 
 class FontEngine {
@@ -181,7 +181,7 @@ class FontEngine {
 
   private:
     FontEngine() = default;
-    ~FontEngine();
+    ~FontEngine() = default;
 };
 
-} // namespace aurora::render
+}  // namespace aurora::render

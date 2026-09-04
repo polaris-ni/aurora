@@ -24,29 +24,29 @@ namespace aurora {
 class Placeholder : public Widget {
   public:
     Placeholder() = default;
-    explicit Placeholder(std::string msg) : m_message(std::move(msg)) {}
+    explicit Placeholder(std::string msg) : message_(std::move(msg)) {}
 
     /// @brief 设置说明文字（链式）。
     auto set_message(std::string msg) -> Placeholder & {
-        m_message = std::move(msg);
+        message_ = std::move(msg);
         return *this;
     }
 
     /// @brief 设置背景色（链式）。
     auto set_background_color(Color c) -> Placeholder & {
-        m_background = c;
+        background_ = c;
         return *this;
     }
 
     /// @brief 设置边框（警示）色（链式）。
     auto set_border_color(Color c) -> Placeholder & {
-        m_border = c;
+        border_ = c;
         return *this;
     }
 
     /// @brief 设置文字色（链式）。
     auto set_text_color(Color c) -> Placeholder & {
-        m_text = c;
+        text_ = c;
         return *this;
     }
 
@@ -56,18 +56,54 @@ class Placeholder : public Widget {
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "Placeholder",
-            .properties = {
-                { .name = "message", .type = "string", .default_value = "\"\"", .required = false, .note = "Placeholder text", .json_type = "string" },
-                { .name = "background_color", .type = "Color", .default_value = "{242,242,242,255}", .required = false, .note = "Background color", .json_type = "array" },
-                { .name = "border_color", .type = "Color", .default_value = "{192,57,43,255}", .required = false, .note = "Border color", .json_type = "array" },
-                { .name = "text_color", .type = "Color", .default_value = "{85,85,85,255}", .required = false, .note = "文字色", .json_type = "array" },
-                { .name = "width", .type = "Length", .default_value = "auto", .required = false, .note = "", .json_type = "array" },
-                { .name = "height", .type = "Length", .default_value = "auto", .required = false, .note = "", .json_type = "array" },
-                { .name = "show", .type = "bool", .default_value = "true", .required = false, .note = "", .json_type = "boolean" },
-            },
+            .properties =
+                {
+                    {.name = "message",
+                     .type = "string",
+                     .default_value = "\"\"",
+                     .required = false,
+                     .note = "Placeholder text",
+                     .json_type = "string"},
+                    {.name = "background_color",
+                     .type = "Color",
+                     .default_value = "{242,242,242,255}",
+                     .required = false,
+                     .note = "Background color",
+                     .json_type = "array"},
+                    {.name = "border_color",
+                     .type = "Color",
+                     .default_value = "{192,57,43,255}",
+                     .required = false,
+                     .note = "Border color",
+                     .json_type = "array"},
+                    {.name = "text_color",
+                     .type = "Color",
+                     .default_value = "{85,85,85,255}",
+                     .required = false,
+                     .note = "文字色",
+                     .json_type = "array"},
+                    {.name = "width",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "height",
+                     .type = "Length",
+                     .default_value = "auto",
+                     .required = false,
+                     .note = "",
+                     .json_type = "array"},
+                    {.name = "show",
+                     .type = "bool",
+                     .default_value = "true",
+                     .required = false,
+                     .note = "",
+                     .json_type = "boolean"},
+                },
             .events = {},
             .children_policy = "none",
-            .examples = { "au::Placeholder(\"something went wrong\")" },
+            .examples = {"au::Placeholder(\"something went wrong\")"},
         };
     }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
@@ -76,50 +112,50 @@ class Placeholder : public Widget {
 
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["message"] = m_message;
-        props["background_color"] = color_to_json(m_background);
-        props["border_color"] = color_to_json(m_border);
-        props["text_color"] = color_to_json(m_text);
+        props["message"] = message_;
+        props["background_color"] = color_to_json(background_);
+        props["border_color"] = color_to_json(border_);
+        props["text_color"] = color_to_json(text_);
     }
 
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("message")) {
-            m_message = props["message"].get<std::string>();
+            message_ = props["message"].get<std::string>();
         }
         if (props.contains("background_color")) {
-            m_background = json_to_color(props["background_color"]);
+            background_ = json_to_color(props["background_color"]);
         }
         if (props.contains("border_color")) {
-            m_border = json_to_color(props["border_color"]);
+            border_ = json_to_color(props["border_color"]);
         }
         if (props.contains("text_color")) {
-            m_text = json_to_color(props["text_color"]);
+            text_ = json_to_color(props["text_color"]);
         }
     }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        const Font f{ .size_pt = 14.0f };
-        const std::string s = m_message.empty() ? "(placeholder)" : m_message;
-        const float w = render::FontEngine::measure_width(s, f) + 16.0f;
-        const float h = render::FontEngine::measure_height(f) + 12.0f;
-        return c.constrain(Size{ .width = w, .height = h });
+        const Font f{.size_pt = 14.0F};
+        const std::string s = message_.empty() ? "(placeholder)" : message_;
+        const float w = render::FontEngine::measure_width(s, f) + 16.0F;
+        const float h = render::FontEngine::measure_height(f) + 12.0F;
+        return c.constrain(Size{.width = w, .height = h});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
-        p.fill_rect(bounds, m_background);
-        p.draw_rect(bounds, m_border);
-        const Rect inner{ .origin = Point{ .x = bounds.origin.x + 6.0f, .y = bounds.origin.y + 6.0f },
-                          .size = Size{ .width = bounds.size.width - 12.0f, .height = bounds.size.height - 12.0f } };
-        p.draw_text(inner, m_message.empty() ? "(placeholder)" : m_message, Font{ .size_pt = 14.0f }, m_text);
+        p.fill_rect(bounds, background_);
+        p.draw_rect(bounds, border_);
+        const Rect inner{.origin = Point{.x = bounds.origin.x + 6.0F, .y = bounds.origin.y + 6.0F},
+                         .size = Size{.width = bounds.size.width - 12.0F, .height = bounds.size.height - 12.0F}};
+        p.draw_text(inner, message_.empty() ? "(placeholder)" : message_, Font{.size_pt = 14.0F}, text_);
     }
 
   private:
-    std::string m_message;
-    Color m_background = Color{ 0xF2u, 0xF2u, 0xF2u, 0xFFu }; // 浅灰底
-    Color m_border = Color{ 0xC0u, 0x39u, 0x2Bu, 0xFFu };     // 警示红
-    Color m_text = Color{ 0x55u, 0x55u, 0x55u, 0xFFu };       // 深灰字
+    std::string message_;
+    Color background_ = Color{0xF2U, 0xF2U, 0xF2U, 0xFFU};  // 浅灰底
+    Color border_ = Color{0xC0U, 0x39U, 0x2BU, 0xFFU};  // 警示红
+    Color text_ = Color{0x55U, 0x55U, 0x55U, 0xFFU};  // 深灰字
 };
 
-} // namespace aurora
+}  // namespace aurora

@@ -6,7 +6,6 @@
 #include "aurora/core/color.h"
 #include "aurora/core/enums.h"
 #include "aurora/core/types.h"
-
 #include "nlohmann/json.hpp"
 
 namespace aurora {
@@ -17,20 +16,22 @@ using Json = nlohmann::json;
 /// @brief 强类型尺寸意图 → JSON：["px",v] / ["percent",v] / "fill" / "auto"。
 [[nodiscard]] inline auto length_to_json(const Length &len) -> Json {
     switch (len.kind) {
-    case LengthKind::WrapContent: return "auto";
-    case LengthKind::Expand: return "fill";
-    case LengthKind::Fixed: {
-        Json a = Json::array();
-        a.push_back("px");
-        a.push_back(len.value);
-        return a;
-    }
-    case LengthKind::Fraction: {
-        Json a = Json::array();
-        a.push_back("percent");
-        a.push_back(len.value);
-        return a;
-    }
+        case LengthKind::WrapContent:
+            return "auto";
+        case LengthKind::Expand:
+            return "fill";
+        case LengthKind::Fixed: {
+            Json a = Json::array();
+            a.push_back("px");
+            a.push_back(len.value);
+            return a;
+        }
+        case LengthKind::Fraction: {
+            Json a = Json::array();
+            a.push_back("percent");
+            a.push_back(len.value);
+            return a;
+        }
     }
     return "auto";
 }
@@ -63,18 +64,18 @@ using Json = nlohmann::json;
 /// @brief 颜色 → JSON：[r,g,b,a]（0-255）。
 [[nodiscard]] inline auto color_to_json(const Color &c) -> Json {
     Json a = Json::array();
-    a.push_back(c.m_r);
-    a.push_back(c.m_g);
-    a.push_back(c.m_b);
-    a.push_back(c.m_a);
+    a.push_back(c.r);
+    a.push_back(c.g);
+    a.push_back(c.b);
+    a.push_back(c.a);
     return a;
 }
 
 /// @brief JSON → 颜色（解析 colorToJson 的输出；格式不符回退黑色）。
 [[nodiscard]] inline auto json_to_color(const Json &j) -> Color {
     if (j.is_array() && j.size() >= 4) {
-        return Color{ static_cast<std::uint8_t>(j[0].get<int>()), static_cast<std::uint8_t>(j[1].get<int>()),
-                      static_cast<std::uint8_t>(j[2].get<int>()), static_cast<std::uint8_t>(j[3].get<int>()) };
+        return Color{static_cast<std::uint8_t>(j[0].get<int>()), static_cast<std::uint8_t>(j[1].get<int>()),
+                     static_cast<std::uint8_t>(j[2].get<int>()), static_cast<std::uint8_t>(j[3].get<int>())};
     }
     return Color::black();
 }
@@ -114,12 +115,18 @@ using Json = nlohmann::json;
 /// @brief TextAlign -> JSON 字符串。
 [[nodiscard]] inline auto text_align_to_json(TextAlign v) -> Json {
     switch (v) {
-    case TextAlign::Left: return "Left";
-    case TextAlign::Right: return "Right";
-    case TextAlign::Center: return "Center";
-    case TextAlign::Start: return "Start";
-    case TextAlign::End: return "End";
-    case TextAlign::Justify: return "Justify";
+        case TextAlign::Left:
+            return "Left";
+        case TextAlign::Right:
+            return "Right";
+        case TextAlign::Center:
+            return "Center";
+        case TextAlign::Start:
+            return "Start";
+        case TextAlign::End:
+            return "End";
+        case TextAlign::Justify:
+            return "Justify";
     }
     return "Left";
 }
@@ -153,9 +160,12 @@ using Json = nlohmann::json;
 /// @brief TextOverflow -> JSON 字符串。
 [[nodiscard]] inline auto text_overflow_to_json(TextOverflow v) -> Json {
     switch (v) {
-    case TextOverflow::Clip: return "Clip";
-    case TextOverflow::Ellipsis: return "Ellipsis";
-    case TextOverflow::Fade: return "Fade";
+        case TextOverflow::Clip:
+            return "Clip";
+        case TextOverflow::Ellipsis:
+            return "Ellipsis";
+        case TextOverflow::Fade:
+            return "Fade";
     }
     return "Clip";
 }
@@ -195,16 +205,26 @@ using Json = nlohmann::json;
         w = j.get<int>();
     }
     switch (w) {
-    case 100: return FontWeight::Thin;
-    case 200: return FontWeight::ExtraLight;
-    case 300: return FontWeight::Light;
-    case 400: return FontWeight::Normal;
-    case 500: return FontWeight::Medium;
-    case 600: return FontWeight::SemiBold;
-    case 700: return FontWeight::Bold;
-    case 800: return FontWeight::ExtraBold;
-    case 900: return FontWeight::Black;
-    default: return FontWeight::Normal;
+        case 100:
+            return FontWeight::Thin;
+        case 200:
+            return FontWeight::ExtraLight;
+        case 300:
+            return FontWeight::Light;
+        case 400:
+            return FontWeight::Normal;
+        case 500:
+            return FontWeight::Medium;
+        case 600:
+            return FontWeight::SemiBold;
+        case 700:
+            return FontWeight::Bold;
+        case 800:
+            return FontWeight::ExtraBold;
+        case 900:
+            return FontWeight::Black;
+        default:
+            return FontWeight::Normal;
     }
 }
 
@@ -282,12 +302,18 @@ using Json = nlohmann::json;
 /// @brief MainAxisAlignment -> JSON 字符串。
 [[nodiscard]] inline auto main_axis_alignment_to_json(MainAxisAlignment v) -> Json {
     switch (v) {
-    case MainAxisAlignment::Start: return "Start";
-    case MainAxisAlignment::Center: return "Center";
-    case MainAxisAlignment::End: return "End";
-    case MainAxisAlignment::SpaceBetween: return "SpaceBetween";
-    case MainAxisAlignment::SpaceAround: return "SpaceAround";
-    case MainAxisAlignment::SpaceEvenly: return "SpaceEvenly";
+        case MainAxisAlignment::Start:
+            return "Start";
+        case MainAxisAlignment::Center:
+            return "Center";
+        case MainAxisAlignment::End:
+            return "End";
+        case MainAxisAlignment::SpaceBetween:
+            return "SpaceBetween";
+        case MainAxisAlignment::SpaceAround:
+            return "SpaceAround";
+        case MainAxisAlignment::SpaceEvenly:
+            return "SpaceEvenly";
     }
     return "Start";
 }
@@ -318,10 +344,14 @@ using Json = nlohmann::json;
 /// @brief CrossAxisAlignment -> JSON 字符串。
 [[nodiscard]] inline auto cross_axis_alignment_to_json(CrossAxisAlignment v) -> Json {
     switch (v) {
-    case CrossAxisAlignment::Start: return "Start";
-    case CrossAxisAlignment::Center: return "Center";
-    case CrossAxisAlignment::End: return "End";
-    case CrossAxisAlignment::Stretch: return "Stretch";
+        case CrossAxisAlignment::Start:
+            return "Start";
+        case CrossAxisAlignment::Center:
+            return "Center";
+        case CrossAxisAlignment::End:
+            return "End";
+        case CrossAxisAlignment::Stretch:
+            return "Stretch";
     }
     return "Start";
 }
@@ -346,9 +376,12 @@ using Json = nlohmann::json;
 /// @brief StackFit -> JSON 字符串。
 [[nodiscard]] inline auto stack_fit_to_json(StackFit v) -> Json {
     switch (v) {
-    case StackFit::Loose: return "Loose";
-    case StackFit::Expand: return "Expand";
-    case StackFit::Passthrough: return "Passthrough";
+        case StackFit::Loose:
+            return "Loose";
+        case StackFit::Expand:
+            return "Expand";
+        case StackFit::Passthrough:
+            return "Passthrough";
     }
     return "Loose";
 }
@@ -373,13 +406,20 @@ using Json = nlohmann::json;
 /// @brief BoxFit -> JSON 字符串。
 [[nodiscard]] inline auto box_fit_to_json(BoxFit v) -> Json {
     switch (v) {
-    case BoxFit::Fill: return "Fill";
-    case BoxFit::Contain: return "Contain";
-    case BoxFit::Cover: return "Cover";
-    case BoxFit::FitWidth: return "FitWidth";
-    case BoxFit::FitHeight: return "FitHeight";
-    case BoxFit::None: return "None";
-    case BoxFit::ScaleDown: return "ScaleDown";
+        case BoxFit::Fill:
+            return "Fill";
+        case BoxFit::Contain:
+            return "Contain";
+        case BoxFit::Cover:
+            return "Cover";
+        case BoxFit::FitWidth:
+            return "FitWidth";
+        case BoxFit::FitHeight:
+            return "FitHeight";
+        case BoxFit::None:
+            return "None";
+        case BoxFit::ScaleDown:
+            return "ScaleDown";
     }
     return "Fill";
 }
@@ -416,10 +456,14 @@ using Json = nlohmann::json;
 /// @brief OverflowStrategy -> JSON 字符串。
 [[nodiscard]] inline auto overflow_strategy_to_json(OverflowStrategy v) -> Json {
     switch (v) {
-    case OverflowStrategy::Visible: return "Visible";
-    case OverflowStrategy::Hidden: return "Hidden";
-    case OverflowStrategy::Clip: return "Clip";
-    case OverflowStrategy::Scroll: return "Scroll";
+        case OverflowStrategy::Visible:
+            return "Visible";
+        case OverflowStrategy::Hidden:
+            return "Hidden";
+        case OverflowStrategy::Clip:
+            return "Clip";
+        case OverflowStrategy::Scroll:
+            return "Scroll";
     }
     return "Visible";
 }
@@ -444,7 +488,7 @@ using Json = nlohmann::json;
     return OverflowStrategy::Visible;
 }
 
-} // namespace aurora
+}  // namespace aurora
 
 // ---- validate_prop<T>：属性值约束验证（specification/04-widget.md §2.2） ----
 // validate_prop 模板特化定义在 descriptor.h（需要 PropDescriptor 完整定义，
