@@ -29,7 +29,7 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
         lines_ = std::move(lines);
         line_cp_start_ = std::move(cp_start);
         // 写回成员：即使未经过 on_layout（如独立文本/测试场景），后续命中测试
-        // （on_pointer_event 依赖 m_line_h 定位可视行）也能拿到有效行高，避免早退。
+        // （on_pointer_event 依赖 line_h_ 定位可视行）也能拿到有效行高，避免早退。
         line_h_ = line_h;
     }
 
@@ -131,8 +131,8 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
     // 的变换溢出绘制不受影响。
     // 选区高亮（含头含尾模型）：逐可视行绘制选区片段，确保多行/折行选区的高亮
     // 严格贴合字符几何，且端点字符（行首/行尾）始终被计入选区。
-    // 无选区（m_sel_end == k_no_sel）时 has_selection() 为 false，不绘制任何高亮，
-    // 避免旧模型下「m_sel_start != m_sel_end」在无选区时被误判为有选区而画出垃圾高亮。
+    // 无选区（sel_end_ == k_no_sel）时 has_selection() 为 false，不绘制任何高亮，
+    // 避免旧模型下「sel_start_ != sel_end_」在无选区时被误判为有选区而画出垃圾高亮。
     // push_clip(bounds) 作为兜底，确保任何几何取整/变换下高亮都不越出本控件盒子、
     // 也不会渗入下方相邻控件造成「邻行被选中」的假象。
     if (has_selection()) {

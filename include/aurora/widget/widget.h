@@ -36,7 +36,7 @@ class Painter;  // 前向声明（render 模块定义于 render/painter.h）
 class Widget;  // 前向声明（HitNode 以 std::weak_ptr<Widget> 作为成员；Widget 在下方定义）
 
 /// @brief 命中链节点：携带命中控件及其相对根的全局 origin（用于事件坐标本地化）。
-/// 命中链递归下降时，子节点的 `Node::m_bounds.origin` 即其全局 origin，直接带入；
+/// 命中链递归下降时，子节点的 `Node::bounds_.origin` 即其全局 origin，直接带入；
 /// 派发器（EventDispatcher）在冒泡到某控件前，以 `e.local_position = e.position - origin`
 /// 写入本地坐标，控件无需再查询自身在树中的绝对位置。
 ///
@@ -87,7 +87,7 @@ struct HitNode {
     ///
     /// 派发回调（`on_pointer_event` → 用户 `on_click`）可能销毁控件自身所在的子树
     /// （典型：点击按钮触发 `NavigatorHost::push_replacement`，重建时丢掉该按钮的最后一个
-    /// 强引用），而回调返回后 `Widget::on_pointer_event` 仍要写 `m_pressed` 等成员。
+    /// 强引用），而回调返回后 `Widget::on_pointer_event` 仍要写 `pressed_` 等成员。
     /// 因此凡要解引用命中链节点，都必须在整个调用期间持住强引用。
     /// @param out_keepalive 出参：控件由 `shared_ptr` 持有时写入强引用；栈/成员对象时置空。
     [[nodiscard]] auto lock(std::shared_ptr<Widget> &out_keepalive) const -> Widget * {
@@ -232,7 +232,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
             return;
         }
         // 已失效：可缓存控件此前已向上传播过祖先失效，可短路跳过。
-        // 但「内容每帧变化、永不缓存」的控件（can_cache_display_list()==false）m_dl_valid 恒为
+        // 但「内容每帧变化、永不缓存」的控件（can_cache_display_list()==false）dl_valid_ 恒为
         // false，其绘制被并入祖先 DL——若不持续向上失效祖先，祖先缓存会冻结该后代的首帧
         // （如自驱动出场/轮播动画控件永远停在 ent≈0，表现为空白/淡灰）。故对此类控件必须继续上溯。
         if (!can_cache_display_list() && (layout_parent_ != nullptr)) {
@@ -271,7 +271,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     virtual auto activate() -> void {}
 
     /// @brief 悬停态变化通知（由 `EventDispatcher` 在无捕获 Move 的命中链 diff 时调用）。
-    /// 默认仅记录 `m_hover`（不标脏：否则悬停穿过任意控件都会触发父容器整块重绘）；
+    /// 默认仅记录 `hover_`（不标脏：否则悬停穿过任意控件都会触发父容器整块重绘）；
     /// 需要 hover 视觉反馈的控件（Checkbox 等）覆写并追加 `mark_needs_paint()`。
     virtual auto on_hover_change(bool entered) -> void { hover_ = entered; }
 
@@ -349,7 +349,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 由 `Application::tick` 周期性调用的公开入口：驱动手势计时（长按阈值检测）。
     /// 内部委派给受保护虚函数 `tick_gestures`；本 widget 与子树经此统一入口递归计时。
-    /// 优化：若本 widget 及子树均无需手势计时（`m_needs_gesture_tick == false`），直接跳过。
+    /// 优化：若本 widget 及子树均无需手势计时（`needs_gesture_tick_ == false`），直接跳过。
     virtual auto tick(std::chrono::steady_clock::time_point now) -> void {
         if (!needs_gesture_tick_) {
             return;
@@ -371,7 +371,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     virtual auto on_file_drop(FileDropEvent &e) -> void { (void)e; }
 
     /// @brief 焦点变更通知（获焦 focus=true / 失焦 focus=false）。
-    /// 基类默认维护 `m_isFocused` 以便 `isFocused()` 正确；子类可覆写以更新聚焦态绘制。
+    /// 基类默认维护 `is_focused_` 以便 `is_focused()` 正确；子类可覆写以更新聚焦态绘制。
     virtual auto on_focus_change(bool focused) -> void { is_focused_ = focused; }
 
     // ---- 焦点能力（specification/05-event-navigation.md §4）----
@@ -449,7 +449,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @brief 返回直接子节点**视图**（引用，零拷贝；introspection/深度守卫用）。默认空。
     /// Container/Repeater/SingleChild 覆写以暴露真实子节点。
     /// @note 以引用返回（而非副本）：若按值返回 `std::vector<Node>`，临时副本析构会触发
-    ///       `Node::~Node` 清空子控件的 `m_layout_parent`（树所有权语义），使遍历后
+    ///       `Node::~Node` 清空子控件的 `layout_parent_`（树所有权语义），使遍历后
     ///       `request_frame` 沿父链上溯断链、脏标记无法到达渲染根（历史 bug：grid_rows 滚动失效）。
     /// @warning 返回的引用在树重建（子节点增删）期间可能失效，仅限单帧内只读遍历。
     [[nodiscard]] virtual auto child_nodes() const -> const std::vector<Node> & {
@@ -532,7 +532,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     // ---- 布局缓存（AURORA_LAYOUT_CACHE）----
-    bool layout_cache_valid_ = false;  ///< 当前 m_cached_size 是否对应 m_cached_constraints
+    bool layout_cache_valid_ = false;  ///< 当前 cached_size_ 是否对应 cached_constraints_
     Constraints cached_constraints_{};  ///< 上一次成功布局时的输入约束（缓存键）
     Size cached_size_{};  ///< 上一次成功布局得到的尺寸
     Widget *layout_parent_ = nullptr;  ///< 布局父节点（容器在布局入口设置）
@@ -629,7 +629,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 子类在「仅内容平移、无需重栅整树」的场景（如滚动容器平移合成）用它替代
     /// `mark_needs_paint`，以避免 `invalidate_display_list_up` 击穿祖先缓存导致整树重录。
     ///
-    /// 传播路径（**结构式**，不依赖任何接线快照）：沿 `m_layout_parent` 链上溯，
+    /// 传播路径（**结构式**，不依赖任何接线快照）：沿 `layout_parent_` 链上溯，
     ///   ① 在每个祖先上调用 `on_descendant_dirty`（离屏缓冲宿主据此置内容脏）；
     ///   ② 到达链顶（根控件）后调用其 `on_subtree_dirty`，把脏交给渲染器。
     /// 复杂度 O(depth)（层深上限 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`），与既有
@@ -757,7 +757,7 @@ class Container : public Widget {
 
     [[nodiscard]] auto child_nodes() const -> const std::vector<Node> & override { return children_; }
 
-    /// @brief 默认收集子节点信号（遍历 `m_children`）。
+    /// @brief 默认收集子节点信号（遍历 `children_`）。
     /// 容器子类若有自身信号，覆写时先 push 自身信号再调用 `Container::collect_signals(out)`。
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override;
 
@@ -871,7 +871,7 @@ class SingleChild : public Widget {
 
     auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override { fn(child_.widget()); }
 
-    /// @brief 单子节点视图（惰性重建缓存：m_child 变化时经 set_child 置失效，避免每次拷贝）。
+    /// @brief 单子节点视图（惰性重建缓存：child_ 变化时经 set_child 置失效，避免每次拷贝）。
     [[nodiscard]] auto child_nodes() const -> const std::vector<Node> & override {
         if (!child_view_valid_) {
             child_view_.clear();

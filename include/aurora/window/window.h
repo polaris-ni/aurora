@@ -321,7 +321,7 @@ class Window {
     /// @brief 渲染并 present 整个 widget 树（供 `Application::run` 每帧调用）。
     /// 等价于 begin_frame → paint(root) → present；headless 下即输出 PNG。
     /// 每帧以 `MediaQuery::from_surface(*surface)`
-    /// 注入根 `BuildContext`（存入地址恒定的 `m_root_env`，避免子树 Provider 持悬空父指针），
+    /// 注入根 `BuildContext`（存入地址恒定的 `root_env_`，避免子树 Provider 持悬空父指针），
     /// 整棵树含根 widget 自身无需手动包 `MediaQueryProvider` 即可读取设备上下文；
     /// 手动 `MediaQueryProvider` 仍按「最近祖先优先」覆盖此默认值。
     ///
@@ -628,9 +628,9 @@ class Window {
         }
         // 布局决策：首帧、布局脏或尺寸变化时必须重排；否则复用上帧 Node 几何仅重绘。
         plan.do_layout = first_frame_ || layout_dirty_ || size_changed || !dirty_boundaries_.empty();
-        // 捕获整树重排决策快照：m_layout_dirty / m_first_frame 在下方即刻清 0，布局块须用本快照
+        // 捕获整树重排决策快照：layout_dirty_ / first_frame_ 在下方即刻清 0，布局块须用本快照
         // 判定「整树重排」还是「仅脏 boundary 子树局部重排」；否则首帧/根脏帧会误走局部分支
-        // （m_layout_dirty 已被清 0）→ 整树不重排（Root.on_layout 调用次数归零，边界尺寸未初始化）。
+        // （layout_dirty_ 已被清 0）→ 整树不重排（Root.on_layout 调用次数归零，边界尺寸未初始化）。
         plan.whole_tree_relayout = layout_dirty_ || first_frame_ || size_changed;
         // 捕获脏矩形（逻辑→设备坐标）供增量上屏；布局/尺寸变化整帧重绘则全量上传。
         if (!plan.do_layout) {
@@ -646,7 +646,7 @@ class Window {
                 plan.clip_logical = dirty_.merged_bounds();
             }
         }
-        // 脏区规模计数：必须在下方 m_dirty.clear() 之前快照。
+        // 脏区规模计数：必须在下方 dirty_.clear() 之前快照。
         // dirty_area_ratio 取「合并包围盒 / 视口」——它才是实际被裁剪重绘的面积，
         // 逐矩形面积和会因重叠而失真（且可能 > 1）。
         AURORA_PROFILE_SET(dirty_rect_count, static_cast<std::uint32_t>(dirty_.rects().size()));
@@ -688,7 +688,7 @@ class Window {
         // 注入窗口级生命周期快照：子树可 ctx.env->get<WindowState>() / ctx.env->get<WindowMode>() 读取。
         root_env_.set<WindowState>(window_state_);
         root_env_.set<WindowMode>(window_mode_);
-        // 注入窗口 chrome 服务（与状态快照同源，同一 Surface；此处 m_surface 已解引用必非空）：
+        // 注入窗口 chrome 服务（与状态快照同源，同一 Surface；此处 surface_ 已解引用必非空）：
         // 子树控件经 ctx.env->get<WindowChrome>() 驱动移动/缩放/最小化/最大化/全屏/关闭。
         root_env_.set<WindowChrome>(WindowChrome{&*surface_});
         BuildContext ctx;

@@ -1,7 +1,7 @@
 #pragma once
 
 // D3D11 后端：仅当 AURORA_BACKEND_D3D11 定义（CMake 选项，默认 OFF）时编译，
-// 避免默认零三方依赖构建引入 d3d11/dxgi/d3dcompiler 链接。
+// 避免默认零三方依赖构建引入 d3d11/dxgi/d3d compiler 链接。
 #ifdef AURORA_BACKEND_D3D11
 
 #include <d3d11.h>
@@ -70,7 +70,7 @@ class D3D11Surface : public Surface {
     auto set_present_dirty(const std::vector<Rect> &device_rects) -> void override { dirty_ = device_rects; }
 
     [[nodiscard]] auto data() const -> const std::uint8_t * override { return painter_.data(); }
-    /// @brief 帧缓冲物理像素尺寸：D3D11 painter 按 DPI 物理分辨率（m_dev_w/m_dev_h = 逻辑×scale）分配，
+    /// @brief 帧缓冲物理像素尺寸：D3D11 painter 按 DPI 物理分辨率（dev_w_/dev_h_ = 逻辑×scale）分配，
     /// 故返回 painter 缓冲像素尺寸，而非逻辑 `size()`（缩放比≠1 时避免 PNG 宽高与像素数据错位）。
     [[nodiscard]] auto framebuffer_size() const -> Size override {
         return Size{.width = static_cast<float>(painter_.width()), .height = static_cast<float>(painter_.height())};

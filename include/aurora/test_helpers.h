@@ -15,9 +15,9 @@
 #include "aurora/widget/text_input.h"
 #include "aurora/widget/widget.h"
 
-// 本头 expect_* 辅助使用 tests/test_harness.h 的 AURORA_TEST_CHECK* 断言宏。
-// test_harness.h 自带 #pragma once，且其所在目录 tests/ 已加入测试目标包含路径，故用裸名包含。
-#include "test_harness.h"
+// 本头 expect_* 辅助使用 tests/aurora_test_harness.h 的 AURORA_TEST_CHECK* 断言宏。
+// aurora_test_harness.h 自带 #pragma once，且其所在目录 tests/ 已加入测试目标包含路径，故用裸名包含。
+#include "aurora_test_harness.h"
 
 namespace aurora::test {
 

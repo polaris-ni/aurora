@@ -134,7 +134,7 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     } else if (height_.kind == LengthKind::Expand) {
         size_.height = c.max.height;
     }
-    // 几何权威完全收敛到 Node::m_bounds：布局只确定自身尺寸，位置由父节点经
+    // 几何权威完全收敛到 Node::bounds_：布局只确定自身尺寸，位置由父节点经
     // Node::set_bounds 写入（含真实 origin）。Widget 不再持有任何几何缓存。
 #ifdef AURORA_LAYOUT_CACHE
     cached_constraints_ = c;
@@ -405,7 +405,7 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
         AURORA_PROFILE_COUNT(dl_records, 1);
         detail::paint_timing().dl_records++;               // [性能排查] 镜像到光栅计时累加器，供 glue 归因
         p.record(display_list_);                          // 进入录制（清空并压栈）
-        render_into(p, bounds, ctx);                       // 全部绘制录入 m_display_list（含子树）
+        render_into(p, bounds, ctx);                       // 全部绘制录入 display_list_（含子树）
         const bool was_dynamic = p.recording_is_dynamic(); // 在 stop() 前捕获
         p.stop();                                          // 退出录制（恢复 Direct）
         if (!was_dynamic) {

@@ -219,7 +219,7 @@ class ProgressIndicator : public LeafWidget {
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    Binding<double> binding_;  // 声明须在 m_value 之前（同 checkbox.h 的初始化顺序修复）
+    Binding<double> binding_;  // 声明须在 value_ 之前（同 checkbox.h 的初始化顺序修复）
     Reactive<double> value_;
     std::optional<Color> color_;  ///< 填充色；空 = 跟随主题 primary
     Color track_color_ = Color{220, 220, 220, 255};  ///< 轨道底色

@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // The lint logic of aurora_lint is extracted from the anonymous namespace in aurora_lint.cpp and
 // exposed as an inline free function, shared by the aurora_lint main program and
-// tests/test_au_lint.cpp, avoiding two duplicate and drifting copies of "tool implementation /
+// tests/unit/utest_au_lint.cpp, avoiding two duplicate and drifting copies of "tool implementation /
 // test". The behavior is verbatim equivalent to the original anonymous-namespace implementation.
 //
 // Consumers must ensure components are registered first (tests call

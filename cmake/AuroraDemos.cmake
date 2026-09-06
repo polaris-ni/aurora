@@ -45,14 +45,3 @@ endif ()
 if (AURORA_BUILD_DEMOS AND TARGET demo_google_play AND TARGET aurora_inspector_server)
     target_link_libraries(demo_google_play PRIVATE aurora_inspector_server)
 endif ()
-
-# Google Play 数据层测试（tests/ 下的 google_play_data / google_play_ui / test_play_repository）
-# 需要包含 examples/app/google_play 下的头文件（google_play_data.h、google_play_ui.h）。这些测试目标由更先
-# include 的 AuroraTests 定义，此处按 TARGET 存在性注入 demo 私有 include 路径，使数据层测试可编译
-# demo 组件；不门控于 AURORA_BUILD_DEMOS（demo 头文件始终存在，测试编译仍需该路径），
-# AURORA_BUILD_TESTS=OFF 时目标不存在 → 跳过，零耦合污染主 tests 模块。
-foreach (_gp google_play_data google_play_ui test_play_repository)
-    if (TARGET ${_gp})
-        target_include_directories(${_gp} PRIVATE "${CMAKE_SOURCE_DIR}/examples/app/google_play")
-    endif ()
-endforeach ()

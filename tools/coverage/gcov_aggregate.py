@@ -31,9 +31,9 @@ def parse_intermediate(text, src_root, counts):
     """Parse gcov intermediate format (JSON stream or legacy file:/lcount: sections) into counts[path][line]=sum."""
 
     def add(p, line, cnt):
-        p = os.path.normpath(p)
+        p = os.path.normpath(p).replace("\\", "/")
         if p and not os.path.isabs(p):
-            p = os.path.normpath(os.path.join(src_root, p))
+            p = os.path.normpath(os.path.join(src_root, p)).replace("\\", "/")
         d = counts.setdefault(p, {})
         d[line] = d.get(line, 0) + cnt
 
@@ -61,8 +61,10 @@ def parse_intermediate(text, src_root, counts):
 
 
 def in_scope(p, src_root):
-    return p.startswith(src_root) and (
-            p.startswith(src_root + "src/aurora/") or p.startswith(src_root + "include/aurora/")
+    p = p.replace("\\", "/")
+    root = src_root.replace("\\", "/")
+    return p.startswith(root) and (
+            p.startswith(root + "src/aurora/") or p.startswith(root + "include/aurora/")
     )
 
 
@@ -77,7 +79,7 @@ def main():
     args = ap.parse_args()
 
     here = os.path.dirname(os.path.abspath(__file__))
-    src_root = os.path.normpath(args.src_root or os.path.dirname(os.path.dirname(here))).rstrip("/") + "/"
+    src_root = os.path.normpath(args.src_root or os.path.dirname(os.path.dirname(here))).replace("\\", "/").rstrip("/") + "/"
 
     files = []
     for p in args.input:

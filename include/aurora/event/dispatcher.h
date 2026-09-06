@@ -42,7 +42,7 @@ class EventDispatcher {
     /// @param e    待派发的鼠标事件；沿命中链冒泡期间任一控件可写 `e.is_handled_ = true` 终止冒泡。
     /// @param fm 派发期间的当前焦点管理器（可选）；`request_focus()` 读取之，默认 nullptr 时焦点请求静默 no-op。
     /// @note 该静态入口委托进程内「持久」EventDispatcher 单例，因此同样保留跨事件指针捕获
-    ///       （与 Application::m_mouse 行为一致）。这意味着即使调用方直接走静态 `dispatch`
+    ///       （与 Application::mouse_ 行为一致）。这意味着即使调用方直接走静态 `dispatch`
     ///       （如 `run_demo` 调用 `EventDispatcher::dispatch`），按下后的拖选/拖拽在光标越过
     ///       目标边界或移出窗口时仍持续派发给按下时命中的目标，不会丢失选择。指针捕获表本身
     ///       仍以「实例成员」形式存于该持久单例（非全局静态），避免控件按值/栈管理时缓存悬空 Widget*。

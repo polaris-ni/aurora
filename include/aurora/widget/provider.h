@@ -110,7 +110,7 @@ class Provider : public SingleChild {
     }
 
   private:
-    /// @brief 按当前 `m_value` 重建子环境（共享父环境与 State 变化时均生效）。
+    /// @brief 按当前 `value_` 重建子环境（共享父环境与 State 变化时均生效）。
     auto rebuild_env(const BuildContext &ctx) -> void {
         if (ctx.env != nullptr) {
             child_env_ = ctx.env->with(value_.get());  // 父环境存活于树内，指针安全

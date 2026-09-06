@@ -1,6 +1,6 @@
 {
   "source": "Local time-class gates -- affected by machine load / compiler / background processes; not in CI, only for local trend comparison.",
-  "note": "Time-class gates are not in CTest; counter-class G-5~G-8 are locked into CTest by tests/test_scroll_regression.cpp (PROFILING=ON).",
+  "note": "Time-class gates are not in CTest; counter-class G-5~G-8 are locked into CTest by tests/unit/utest_scroll.cpp (scroll_regression section) (PROFILING=ON).",
   "scene": "google_play",
   "repeat": 3,
   "gates": [

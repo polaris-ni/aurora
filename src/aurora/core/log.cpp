@@ -87,7 +87,7 @@ auto Logger::log(std::string_view file, int line_no, LogLevel level, std::string
 }
 
 auto Logger::raw(std::string_view /*category*/, std::string_view message) const -> void {
-    // 功能输出：始终打印（不受级别阈值 / m_enabled 影响），且不加任何前缀。
+    // 功能输出：始终打印（不受级别阈值 / enabled_ 影响），且不加任何前缀。
     if (raw_sink_) {
         raw_sink_(message);
     }

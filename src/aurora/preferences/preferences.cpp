@@ -353,7 +353,7 @@ auto Preferences::load_from_file() -> void {
 }
 
 auto Preferences::reconcile(const Json &on_disk, const std::unordered_map<std::string, double> &disk_versions) -> void {
-    // 把嵌套 m_root / on_disk 拍平为复合点号键平面视图，统一在复合键空间做 LWW/墓碑/清空纪元。
+    // 把嵌套 root_ / on_disk 拍平为复合点号键平面视图，统一在复合键空间做 LWW/墓碑/清空纪元。
     const auto mem = flatten(root_);
     const auto disk = flatten(on_disk);
 
@@ -413,7 +413,7 @@ auto Preferences::reconcile(const Json &on_disk, const std::unordered_map<std::s
         // 否则既无内存值也无磁盘值（仅墓碑/版本占位）→ 不创建值。
     }
 
-    // 由合并后的复合键平面表重建嵌套 m_root。
+    // 由合并后的复合键平面表重建嵌套 root_。
     root_ = Json::object();
     for (const auto &kv : merged) {
         resolve_set(root_, kv.first, kv.second);

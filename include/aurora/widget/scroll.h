@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "aurora/core/transform.h"
+#include "aurora/environment/build_context.h"
 #include "aurora/event/event.h"
 #include "aurora/perf/counters.h"
 #include "aurora/render/detail/paint_timing.h"
@@ -29,7 +30,7 @@ struct ScrollProps {
  *
  * 性能模型（滚动流畅、跟手、不卡顿的关键，滑动窗口缓冲）：
  * - 内容在宽松约束下测量自然尺寸；容器自身取父约束给出的视口尺寸。
- * - 离屏缓冲 `m_content` 是**滑动窗口**而非整页：尺寸 = 视口宽 × 视口高 ×(1 + 2×overscan)，
+ * - 离屏缓冲 `content_` 是**滑动窗口**而非整页：尺寸 = 视口宽 × 视口高 ×(1 + 2×overscan)，
  *   与内容总量解耦（缓冲内存随内容 ×10 不增长）。缓冲以「稳定的内容坐标」录制
  *   （偏移不烘焙进子控件 bounds，子控件的 Display List 缓存不被偏移击穿）。
  * - 滚动只改变下方 `composite` 的平移量，纯滚动帧整页仅一次 blit（平移合成），**不重新栅格化**。
@@ -98,11 +99,11 @@ class Scroll : public Container, public ScrollProps {
     }
 
     /// @brief Scroll 自行管理离屏内容缓冲，禁用框架对 Scroll 自身的 DL 缓存，
-    /// 避免缓存录制依赖会变化的 `m_content` 缓冲。
+    /// 避免缓存录制依赖会变化的 `content_` 缓冲。
     [[nodiscard]] auto can_cache_display_list() const -> bool override { return false; }
 
     /// @brief Scroll 的布局结果可缓存，**仅当其直接内容子控件也可缓存时**。
-    ///        原因：Scroll::on_layout 直接调用 `m_children[0].widget().layout()`；
+    ///        原因：Scroll::on_layout 直接调用 `children_[0].widget().layout()`；
     ///        若子控件覆写了 can_cache_layout()=false（on_layout 含时间/状态依赖副作用，
     ///        如骨架→真实内容切换），Scroll 缓存自身布局会跳过 on_layout → 不调用子控件 layout()
     ///        → 子控件的延期逻辑永不触发 → 内容冻结/白屏（Path B 类 bug）。
@@ -139,7 +140,7 @@ class Scroll : public Container, public ScrollProps {
             // 仅绘制变化（动画后代）：合并其绘制区域（缓冲局部坐标）为脏带，下一帧只重录该带，
             // 避免把整块 3 屏离屏缓冲每帧全量重录（动画标脏拖垮帧率的症结）。
             // origin.paint_bounds() 处于内容坐标系；本 Scroll 以内容坐标固定录制缓冲
-            // （m_children[0].paint 传入 bounds.origin=(0,-m_buffer_origin_y)），故 paint_bounds
+            // （children_[0].paint 传入 bounds.origin=(0,-buffer_origin_y_)），故 paint_bounds
             // 即缓冲局部坐标（x∈[0,content_w], y∈[0,buffer_h]），可直接夹到缓冲窗口使用，无需屏幕坐标换算。
             const Rect &ob = origin.paint_bounds();
             if (has_dirty_band_) {
@@ -163,7 +164,7 @@ class Scroll : public Container, public ScrollProps {
     auto on_scroll(ScrollEvent &e) -> void override {
         const float max_off = std::max(0.0F, content_h_ - viewport_h_);
         // 与全库滚动约定一致（见 lazy_list/grid_view/lazy_row）：delta_y 正方向为「向上滚动」，
-        // 此时 m_offset_y 应减小；故用减号。m_offset_y 增大表示内容上移露出下方内容。
+        // 此时 offset_y_ 应减小；故用减号。offset_y_ 增大表示内容上移露出下方内容。
         const float target = std::max(0.0F, std::min(max_off, offset_y_ - (e.delta_y * step)));
         e.is_handled = true;
         if (target != offset_y_) {
@@ -234,7 +235,7 @@ class Scroll : public Container, public ScrollProps {
                                                       static_cast<std::uint64_t>(content_->height()) * 4U);
 
         // 滑动窗口逻辑高（与 ensure_content_buffer 一致）：视口高 ×(1 + 2×overscan)，
-        // 与内容总量解耦。必须用逻辑 dp（m_viewport_h 系列），不得取 m_content->height()
+        // 与内容总量解耦。必须用逻辑 dp（viewport_h_ 系列），不得取 content_->height()
         // （那是设备像素，scale≠1 时会把物理高误当逻辑高算入 max_origin/reanchor/clear/裁剪）。
         const float buffer_h = viewport_h_ * (1.0F + (2.0F * overscan));
         const float overscan_h = viewport_h_ * overscan;
@@ -248,10 +249,10 @@ class Scroll : public Container, public ScrollProps {
         //      滚动量（≈12dp），暴露条带极小 → 单帧成本稳定且低。若只在临近缓冲边缘才重锚点，delta 会
         //      累积到 ~0.75 屏，条带重绘反而更贵（最坏帧 37ms 的根源）。短内容（max_origin==0）缓冲
         //      已覆盖全部可滚内容，永不重锚点，走 pure_scroll_blit 只做平移合成（最廉价）。
-        //  m_content_valid 是增量路径的前提：缓冲刚重建/内容尺寸变化时里面没有可复用像素，
+        //  content_valid_ 是增量路径的前提：缓冲刚重建/内容尺寸变化时里面没有可复用像素，
         //  此时若走增量只绘条带会漏画其余部分，必须回落整块重录。
         // 重录策略（按优先级）：
-        //  ① 整块重录：缓冲无效（首建/尺寸变化/刚 resize）或后代布局标脏（m_content_dirty）。
+        //  ① 整块重录：缓冲无效（首建/尺寸变化/刚 resize）或后代布局标脏（content_dirty_）。
         //  ② 局部重录：后代仅绘制标脏（动画）——只重录合并脏带，其余缓冲像素经下方 blit 复用，
         //     避免整块 3 屏离屏缓冲每帧全量重录（动画后代标脏拖垮帧率的症结，见 on_descendant_dirty）。
         //  ③ 增量重锚：长内容滚动（reanchor，见下方注释）。
@@ -292,7 +293,7 @@ class Scroll : public Container, public ScrollProps {
         }
         // 渲染前清脏（时序与 present_root 一致）：下方重录会调用内容子树的 paint，自驱动动画
         // （骨架微光、banner 入场/轮播）在其 on_paint 内 mark_needs_paint 以驱动下一帧，该标记经
-        // on_descendant_dirty 置回 m_content_dirty / 合并脏带。若在重录之后才清零（旧逻辑），本次录制
+        // on_descendant_dirty 置回 content_dirty_ / 合并脏带。若在重录之后才清零（旧逻辑），本次录制
         // 期间产生的新脏会被一并擦掉 → 下一帧判定「内容未变」仅平移合成 → 子树 on_paint 永不再执行 →
         // 自驱动动画冻结在首帧（白屏）。
         content_dirty_ = false;
@@ -301,13 +302,13 @@ class Scroll : public Container, public ScrollProps {
         if (need_redraw) {
             if (whole_redraw) {
                 // 整块重录（首建 / 内容尺寸变化 / 子控件布局标脏）：锚点重对齐到视口，全窗口重录。
-                // 锚点必须重新对齐到当前视口：缓冲失效时旧 origin 可能与 m_offset_y 相距甚远
+                // 锚点必须重新对齐到当前视口：缓冲失效时旧 origin 可能与 offset_y_ 相距甚远
                 // （如已滚到中段后内容尺寸变化触发重建），沿用旧 origin 会把视口落到缓冲窗口
                 // 之外而整片空白。重算后视口必然落在 [origin, origin+buffer_h] 内。
                 buffer_origin_y_ = std::clamp(offset_y_ - overscan_h, 0.0F, max_origin);
                 // 先清零（子控件常以半透明内容自绘，若不先清，新帧半透明像素会与上帧残留 source-over
-                // 叠加，阴影/黑边逐帧累积致黑）；再按 -m_buffer_origin_y 偏移把子控件绘制进缓冲，
-                // 仅缓冲窗口 [m_buffer_origin_y, +buffer_h] 内的内容被录制。
+                // 叠加，阴影/黑边逐帧累积致黑）；再按 -buffer_origin_y_ 偏移把子控件绘制进缓冲，
+                // 仅缓冲窗口 [buffer_origin_y_, +buffer_h] 内的内容被录制。
                 content_->clear_rect(
                     Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = content_w_, .height = buffer_h}});
                 content_->push_clip(
@@ -328,7 +329,7 @@ class Scroll : public Container, public ScrollProps {
                                                  .size = Size{.width = content_w_, .height = content_h_}},
                                             ctx);
                 content_->pop_clip();
-                // m_content_valid 保持 true（仅更新带内像素，带外像素仍有效）
+                // content_valid_ 保持 true（仅更新带内像素，带外像素仍有效）
             } else {
                 // 增量条带重录：缓冲里已栅格化的像素按新旧锚点差**原地按行 memmove**
                 // 搬移（Painter::shift_pixels），只重绘新进入窗口的条带。
@@ -363,7 +364,7 @@ class Scroll : public Container, public ScrollProps {
                 content_valid_ = true;
             }
         }
-        // 注意：m_content_dirty 已在 need_redraw 判定后、重录之前清零（见上方注释），
+        // 注意：content_dirty_ 已在 need_redraw 判定后、重录之前清零（见上方注释），
         // 此处不得再清——否则会擦掉内容子树在本次录制期间产生的新脏，冻结自驱动动画。
 
         // 仅一次平移合成：把有界缓冲按滚动偏移贴到视口（与旧整页缓冲的可见像素逐位一致）。

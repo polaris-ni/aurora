@@ -22,7 +22,7 @@
     repetition reads slower due to heap fragmentation (explained in bench_scroll.cpp), and a single
     in-process sample over-reports. This script launches N independent processes for bench_scroll and
     takes the lowest p99 as the representative (best-of) to avoid false failures.
-  - Counter-class gates G-5~G-8 are locked into CTest by tests/test_scroll_regression.cpp
+  - Counter-class gates G-5~G-8 are locked into CTest by tests/unit/utest_scroll.cpp (scroll_regression section)
     (build-prof, PROFILING=ON); this script does not re-check them.
   - G-9~G-11 frame budgets (layout/paint/present max_ms) are only recorded with a PROFILING=ON build,
     and the known paint baseline 13.08ms exceeds the 10ms budget (some are not met). Hence G-9~G-11

@@ -10,7 +10,6 @@
 #include <string_view>
 
 #include "aurora/image/image_codec.h"
-
 #include "codecs/codecs_internal.h"
 
 namespace aurora::image {
@@ -21,34 +20,37 @@ namespace aurora::image {
 
 auto format_name(ImageFormat f) -> std::string_view {
     switch (f) {
-    case ImageFormat::PNG: return "png";
-    case ImageFormat::JPEG: return "jpeg";
-    case ImageFormat::GIF: return "gif";
-    case ImageFormat::BMP: return "bmp";
-    case ImageFormat::WebP: return "webp";
-    case ImageFormat::SVG: return "svg";
-    case ImageFormat::Unknown: return "unknown";
+        case ImageFormat::PNG:
+            return "png";
+        case ImageFormat::JPEG:
+            return "jpeg";
+        case ImageFormat::GIF:
+            return "gif";
+        case ImageFormat::BMP:
+            return "bmp";
+        case ImageFormat::WebP:
+            return "webp";
+        case ImageFormat::SVG:
+            return "svg";
+        case ImageFormat::Unknown:
+            return "unknown";
     }
     return "unknown";
 }
 
 auto detect_format(std::span<const std::uint8_t> header) -> ImageFormat {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     if (header.size() >= 8 && header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47 &&
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         header[4] == 0x0D && header[5] == 0x0A && header[6] == 0x1A && header[7] == 0x0A) {
         return ImageFormat::PNG;
     }
     if (header.size() >= 3) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         if (header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF) {
             return ImageFormat::JPEG;
         }
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         if (header[0] == 'G' && header[1] == 'I' && header[2] == 'F') {
             return ImageFormat::GIF;
         }
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         if (header[0] == '#') {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): 字节流转字符串视图属预期类型双关
             const std::string_view head(reinterpret_cast<const char *>(header.data()),
@@ -59,11 +61,9 @@ auto detect_format(std::span<const std::uint8_t> header) -> ImageFormat {
             }
         }
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     if (header.size() >= 2 && header[0] == 'B' && header[1] == 'M') {
         return ImageFormat::BMP;
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     if (header.size() >= 4 && header[0] == 'R' && header[1] == 'I' && header[2] == 'F' && header[3] == 'F') {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): 字节流转字符串视图属预期类型双关
         const std::string_view head(reinterpret_cast<const char *>(header.data()),
@@ -72,6 +72,7 @@ auto detect_format(std::span<const std::uint8_t> header) -> ImageFormat {
             return ImageFormat::WebP;
         }
     }
+    // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     return ImageFormat::Unknown;
 }
 
@@ -111,7 +112,7 @@ auto read_file_bytes(const std::filesystem::path &p) -> Result<std::vector<std::
     if (!f.is_open()) {
         return make_error(ErrorCode::IOFileNotFound, std::string("image decode: cannot open ") + p.string());
     }
-    std::vector<std::uint8_t> buf((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    std::vector<std::uint8_t> buf{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
     if (buf.empty()) {
         return make_error(ErrorCode::IOFileNotFound, std::string("image decode: empty file ") + p.string());
     }
@@ -156,14 +157,15 @@ auto decode_animated_bytes(const std::vector<std::shared_ptr<ImageCodec>> &codec
     AnimatedImage anim;
     anim.width = img.value().width;
     anim.height = img.value().height;
-    anim.frames.emplace_back(ImageFrame{ .image = std::make_shared<Image>(std::move(img.value())),
-                                         .duration = std::chrono::milliseconds(0),
-                                         .blend = 0,
-                                         .dispose = 0 });
+    anim.frames.emplace_back(ImageFrame{.image = std::make_shared<Image>(std::move(img.value())),
+                                        .duration = std::chrono::milliseconds(0),
+                                        .blend = 0,
+                                        .dispose = 0});
     return anim;
-} // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks) 误报：std::shared_ptr/std::optional 移动后控制块由 RAII 管理，_Rep 无泄漏
+}  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks) 误报：std::shared_ptr/std::optional 移动后控制块由 RAII 管理，_Rep
+   // 无泄漏
 
-} // namespace
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // 注册表实现（PIMPL）
@@ -248,14 +250,14 @@ auto ImageCodecRegistry::decode_animated(const ImageSource &src, const DecodeOpt
 
 auto ImageCodecRegistry::encode(const Image &img, const EncodeOptions &opt) const -> Result<std::vector<std::uint8_t>> {
     const ImageFormat fmt = opt.format;
-    for (const auto& c : impl_->codecs) {
+    for (const auto &c : impl_->codecs) {
         if (c->can_encode() && c->format() == fmt) {
             return c->encode(img, opt);
         }
     }
     // 未指定格式时，回退到任意可用编码器（默认 PNG）
     if (fmt == ImageFormat::Unknown) {
-        for (const auto& c : impl_->codecs) {
+        for (const auto &c : impl_->codecs) {
             if (c->can_encode()) {
                 return c->encode(img, opt);
             }
@@ -286,7 +288,7 @@ auto ImageCodecRegistry::save(const Image &img, const std::filesystem::path &p, 
     if (!f.good()) {
         return make_error(ErrorCode::IOFileNotFound, "image save: write incomplete");
     }
-    return Result<bool>{ true };
+    return Result<bool>{true};
 }
 
 auto ImageCodecRegistry::decode_async(const ImageSource &src, const DecodeOptions &opt) const
@@ -309,10 +311,10 @@ auto ImageCodecRegistry::decode_async(const ImageSource &src, const DecodeOption
 auto ImageCodecRegistry::registered() const -> std::vector<std::string> {
     std::vector<std::string> names;
     names.reserve(impl_->codecs.size());
-    for (const auto& c : impl_->codecs) {
+    for (const auto &c : impl_->codecs) {
         names.emplace_back(c->name());
     }
     return names;
 }
 
-} // namespace aurora::image
+}  // namespace aurora::image

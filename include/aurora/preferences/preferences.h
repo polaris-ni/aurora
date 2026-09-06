@@ -55,7 +55,7 @@ namespace aurora::preferences {
 
 // ----- 嵌套 JSON 路径助手（复合点号键） -----
 // 供头文件模板方法（`*_impl`）与 `preferences.cpp` 的 `reconcile` 共用：
-// 分组键以点号路径（如 `"ui.theme"`）在嵌套 `m_root` 中寻址；顶层键（无点号）语义不变。
+// 分组键以点号路径（如 `"ui.theme"`）在嵌套 `root_` 中寻址；顶层键（无点号）语义不变。
 auto resolve_get(const Json &root, const std::string &composite) -> Json;
 auto resolve_set(Json &root, const std::string &composite, Json value) -> void;
 auto resolve_erase(Json &root, const std::string &composite) -> void;
@@ -279,7 +279,7 @@ class Preferences {
 
     auto load_from_file() -> void;
 
-    // ----- 作用域化内部实现（scope 为空 = 根作用域；Group 以 m_path 为 scope 委托） -----
+    // ----- 作用域化内部实现（scope 为空 = 根作用域；Group 以 path_ 为 scope 委托） -----
     template <typename T>
     [[nodiscard]] auto get_impl(const std::string &scope, const std::string &key, T fallback) const -> T;
     template <typename T>
@@ -308,7 +308,7 @@ class Preferences {
     // 读多写少但单次耗时纳秒级，独占锁无可观测性能差异。
     mutable std::mutex mutex_;  // 保护上述可变状态
 
-    // ----- 多进程可靠删除所需元数据（受 m_mutex 保护） -----
+    // ----- 多进程可靠删除所需元数据（受 mutex_ 保护） -----
     /// @brief 键 -> 本进程显式 set 的写入版本（时间戳，LWW 依据之一）。不合并磁盘版本。
     std::unordered_map<std::string, double> versions_;
     /// @brief 已删除键的墓碑：键 -> 删除时间戳；随 flush 持久化并跨进程传播，保证删除可靠。
@@ -321,7 +321,7 @@ class Preferences {
         return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
     }
 
-    /// @brief 依据当前 m_versions/m_tombstones/m_cleared_at 与磁盘数据重算 m_root
+    /// @brief 依据当前 versions_/tombstones_/cleared_at_ 与磁盘数据重算 root_
     ///         （合并远端新增键、应用墓碑与清空纪元、按版本 LWW 取舍），保证多进程一致。
     auto reconcile(const Json &on_disk, const std::unordered_map<std::string, double> &disk_versions) -> void;
 };

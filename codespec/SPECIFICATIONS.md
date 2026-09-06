@@ -250,3 +250,48 @@ Button& setCaption(std::string s) { return text(std::move(s)); }
 ```
 
 **这才是 AI-First 的真正含义：不是为 AI 加功能，而是让 AI 成为 API 设计的第一用户和持续测试者。**
+
+---
+
+## 12 版本与稳定性门禁
+
+> 本 § 定义 Aurora 从 alpha 走向稳定发行的阶段判据与 CI 门禁清单。CHANGELOG 纪律条目为暂缓项，留占位待用户启动 CHANGELOG 补账时填实（见 §10）。
+
+### 12.1 阶段判据
+
+| 阶段 | 判据 | 允许变更 |
+|:---|:---|:---|
+| **alpha** | 公共 API 未冻结；门禁脚手架（lint / ctest / 守护脚本）仍在建设 | 任意破坏性改动（仅本阶段允许） |
+| **beta** | API 冻结（`aurora_api.json` 为 SSOT，由 `check_api_schema_sync` 守护）+ 全部门禁全绿 + 文档同步守护（`check_codespec_xref` / `check_code_doc_sync`）生效 | 仅 MINOR / PATCH 增量，严禁 breaking |
+| **1.0** | beta 基础上叠加 CHANGELOG 纪律与 breaking 变更正式流程（见 §12.3） | 进入 SemVer 主版本维护 |
+
+**当前状态**：截至本 § 落地，项目处于 **alpha → beta 收敛期**——API 冻结 SSOT 与门禁脚本已就位（见 M1.2 / M1.4），待 CHANGELOG 补账完成后正式进入 beta。
+
+### 12.2 API 冻结单一真相源（SSOT）
+
+- 冻结基准 = `aurora_api.json`（由 `gen_api_tools` 生成器从代码自动生成，见 #12）。
+- 任何公共 widget / 类型 / 属性键的新增或删除，必须先更新代码并重新生成该 JSON，再由 CTest `check_api_schema_sync` 校验「代码 ↔ JSON」零漂移。
+- 冻结后，新增属性键不得改变既有键的语义；删除 / 重命名键视为 breaking（见 §12.3）。
+
+### 12.3 breaking 变更流程（占位）
+
+> 本小节为占位，待用户启动 CHANGELOG 补账工作时填实具体迁移路径。
+
+- 流程骨架：SemVer 判定 breaking → 在 `CHANGELOG.json` 记录 `breakingChanges` + 提供 `migrations` 迁移脚本 → 仅可进 MAJOR（见 `CODING_STANDARDS.md` §7 的向后兼容原则）。
+- 迁移路径模板、自动化巡检项在此预留，不在本文首版展开。
+
+### 12.4 门禁清单（CI 必须全绿）
+
+每次 API 或核心设计变更后，以下门禁须全部通过：
+
+| 门禁 | 命令 / 用例 | 守护 |
+|:---|:---|:---|
+| 全量构建 | `cmake --build build` 0 error | — |
+| 完整测试 | `ctest` 全绿（含 `aurora_test_runner` 单元 / 集成） | — |
+| lint 双 Pass | `--target lint` 0 告警（clang-format + clang-tidy） | clang-tidy / clang-format |
+| API 漂移 | `ctest -R check_api_schema_sync` | `check_api_schema_sync` |
+| codespec 交叉引用 | `ctest -R check_codespec_xref` | `check_codespec_xref` |
+| 代码-文档同步 | `ctest -R check_code_doc_sync` | `check_code_doc_sync` |
+| 黄金文件 | `ctest -R golden`（确定性渲染基准） | golden 基准图 |
+
+「一次通过」终极检验（§11）由 `ai_compat_test` / `itest_ai_compat` 离线近似承担，不依赖在线 LLM。

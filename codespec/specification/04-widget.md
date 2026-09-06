@@ -203,7 +203,7 @@ au::Text("Welcome").font_size(24).bold();
 
 `GridView` / `LazyList` / `LazyRow` 是虚拟化容器，仅实例化可见窗口加 `cache_extent` 缓冲内的子项，复杂度 O(可见单元数)。三者的 `on_paint` 内均含 `push_clip(bounds)` / `pop_clip()` 配对，被圆角裁剪容器包裹时不越界。
 
-`Scroll` 把内容录进**滑窗**离屏缓冲 `m_content`（尺寸 = 视口高 ×(1 + 2 × `overscan`)，`m_buffer_origin_y` 为缓冲锚点），滚动帧只做一次 blit。
+`Scroll` 把内容录进**滑窗**离屏缓冲 `content_`（尺寸 = 视口高 ×(1 + 2 × `overscan`)，`buffer_origin_y_` 为缓冲锚点），滚动帧只做一次 blit。
 
 ### 3.4 列表与虚拟化
 
@@ -342,7 +342,7 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 - 组件继承层级 ≤ 2 层（叶控件继承 `Widget`；多子容器继承 `Container`，单子容器继承 `SingleChild`）。
 - 用组合替代继承；横切能力由 `Modifier` 正交组合表达（见 [`07-environment-modifier.md`](07-environment-modifier.md)）。
 - 整棵 UI 树保存在一个 `Node` 中，`Node` 持有 `std::shared_ptr<Widget>`：拷贝即共享、移动即转移，整棵树可被复制 / 移动，析构由 `shared_ptr` 自动管理。
-- **几何权威在 `Node`**：`Node` 持有 `Rect m_bounds`（原点 + 尺寸），是布局与命中测试的**唯一几何来源**。布局阶段由父节点经 `child.set_bounds(box)` 写入，`Window::present_root` 把窗口矩形写入根 `Node`。`Widget` **不持有任何几何缓存**。
+- **几何权威在 `Node`**：`Node` 持有 `Rect bounds_`（原点 + 尺寸），是布局与命中测试的**唯一几何来源**。布局阶段由父节点经 `child.set_bounds(box)` 写入，`Window::present_root` 把窗口矩形写入根 `Node`。`Widget` **不持有任何几何缓存**。
 - 深层嵌套容易导致 AI 迷失，应把深树拆成命名子函数。
 
 **输入坐标本地化**：由 `EventDispatcher` 在命中链冒泡时完成。命中链 `hit_test_chain` 返回 `std::vector<HitNode>`（`origin` 即该控件相对根的全局 origin），派发器对每个控件写入 `MouseEvent::local_position = position - origin`，控件在 `on_pointer_event` 中直接消费本地坐标。
@@ -352,7 +352,7 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 - `get()`：仅返回存活指针，**不带生命周期保证**，只可用于「不解引用」的用途（如比较是否同一控件）；
 - `lock(out_keepalive)`：返回存活指针**并把强引用写入出参**，把控件生命周期延长至调用方作用域结束。
 
-凡要**解引用**命中链节点（调用 `on_pointer_event` / `focusable()` 等）都必须用 `lock()`：派发回调（用户 `on_click`）可能销毁控件自身所在子树（如点击按钮触发 `push_replacement` 重建页面），而回调返回后基类 `Widget::on_pointer_event` 仍要写 `m_pressed` 等成员，用裸指针即 use-after-free。
+凡要**解引用**命中链节点（调用 `on_pointer_event` / `focusable()` 等）都必须用 `lock()`：派发回调（用户 `on_click`）可能销毁控件自身所在子树（如点击按钮触发 `push_replacement` 重建页面），而回调返回后基类 `Widget::on_pointer_event` 仍要写 `pressed_` 等成员，用裸指针即 use-after-free。
 
 **验收标准：** 控件继承深度 ≤ 2；`Widget` 上不存在任何几何字段；命中链的解引用路径全部经 `lock()` 持有强引用。
 

@@ -208,7 +208,7 @@ FilesystemBackend::FilesystemBackend(FilesystemOptions opts) : opts_(std::move(o
     if (opts_.auto_create_dir) {
         std::filesystem::create_directories(root_, ec);
         if (ec) {
-            return;  // m_open 保持 false
+            return;  // open_ 保持 false
         }
     } else if (!std::filesystem::is_directory(root_, ec)) {
         return;

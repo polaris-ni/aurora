@@ -93,7 +93,7 @@ aurora_add_tool(aurora_cli tools/servers/aurora_cli.cpp)
 aurora_add_tool(aurora_lsp tools/servers/aurora_lsp.cpp)
 
 # 注：原 tools/ai_compat_test（AI 兼容性批量验证可执行）已移除 —— 其 fixture 管线
-# （from_json → validate_ui → to_code）由 tests/test_ai_compat.cpp 完整覆盖，且后者
+# （from_json → validate_ui → to_code）由 tests/unit/utest_ai_compat.cpp 完整覆盖，且后者
 # 改为目录遍历后是前者的超集（另含纯内存用例）。保留两份属重复实现。
 
 # 渲染基准：HeadlessSurface + Painter 多矩阵计时（非 CTest 断言，仅性能基线）。

@@ -27,7 +27,7 @@ class Skeleton : public LeafWidget {
     Skeleton() = default;
     explicit Skeleton(Size sz) : size_(sz) {
         // 骨架屏持续动画：每帧需 tick 推进相位，须开启 gesture-tick 驱动
-        // （Widget::tick 在 !m_needs_gesture_tick 时直接返回，否则 tick_gestures 永不运行）。
+        // （Widget::tick 在 !needs_gesture_tick_ 时直接返回，否则 tick_gestures 永不运行）。
         needs_gesture_tick_ = true;
     }
 

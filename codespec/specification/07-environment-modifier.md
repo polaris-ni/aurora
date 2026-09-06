@@ -82,9 +82,9 @@ au::Text("Hi").color(ctx.environment<au::Theme>() ? ctx.environment<au::Theme>()
 
 ### 3.2 自动注入
 
-`Window::present_root` 每帧自动以 `MediaQuery::from_surface(*surface)` 在**根 `BuildContext`** 注入 `MediaQuery`（存入稳定的 `Window::m_root_env`，地址恒定，避免子树 Provider 持悬空父指针）。
+`Window::present_root` 每帧自动以 `MediaQuery::from_surface(*surface)` 在**根 `BuildContext`** 注入 `MediaQuery`（存入稳定的 `Window::root_env_`，地址恒定，避免子树 Provider 持悬空父指针）。
 
-因此**无需手动包裹 `MediaQueryProvider`**，整棵树（含根 widget 自身）即可经 `media_query_of(ctx)` / `MediaQuery::of(ctx)` 读取设备上下文。`m_root_env` 每帧重建以反映窗口 resize。`Application::run` 经同一 `present_root` 自动受益。手动 `MediaQueryProvider` 仍按「最近祖先优先」覆盖此默认值。
+因此**无需手动包裹 `MediaQueryProvider`**，整棵树（含根 widget 自身）即可经 `media_query_of(ctx)` / `MediaQuery::of(ctx)` 读取设备上下文。`root_env_` 每帧重建以反映窗口 resize。`Application::run` 经同一 `present_root` 自动受益。手动 `MediaQueryProvider` 仍按「最近祖先优先」覆盖此默认值。
 
 ### 3.3 LayoutBuilder
 
@@ -258,7 +258,7 @@ save_btn.modifier = au::Modifier{}
 
 **作用范围**：Paint 切片（背景、边框、阴影、裁剪、后效）统一作用于控件完整视觉盒子 `visual_box`；子节点 `on_paint` 与内容后效则限定在 `content_box`（已扣除 Padding / Align 等布局内边距）。内容后弹栈并绘制边框。
 
-> 两种历史错误形态：把背景先于裁剪当作直角矩形填色；把 Paint 修饰限制在 `content_box` 导致 padding 区域露白。回归用例 `tests/test_clip_rounded_background.cpp` 覆盖这两种情况。
+> 两种历史错误形态：把背景先于裁剪当作直角矩形填色；把 Paint 修饰限制在 `content_box` 导致 padding 区域露白。回归用例 `tests/unit/utest_clip_rounded_background.cpp` 覆盖这两种情况。
 
 ### 7.5 与固有属性的关系
 

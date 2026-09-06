@@ -76,7 +76,7 @@ class Switch : public LeafWidget {
     }
 
     /// @brief 设置关闭态轨道描边（链式；width<=0 不描边）。对标 Material 3 关闭态轮廓。
-    auto set_border(Color c, float width = 1.5f) -> Switch & {
+    auto set_border(Color c, float width = 1.5F) -> Switch & {
         border_color_ = c;
         border_width_ = width;
         mark_needs_paint();
@@ -328,7 +328,7 @@ class Switch : public LeafWidget {
 
     /// @brief 绘制圆角轨道（关闭态可选描边）。
     virtual auto paint_track(Painter &p, const Rect &bounds, Color track, bool on) -> void {
-        const float radius = bounds.size.height * 0.5f;
+        const float radius = bounds.size.height * 0.5F;
         p.fill_rounded_rect(bounds, radius, track);
         if (!on && border_width_ > 0.0F && border_color_.has_value()) {
             const Color bc = enabled_ ? *border_color_ : border_color_->with_alpha(128);
@@ -342,11 +342,11 @@ class Switch : public LeafWidget {
         const float knob_x = on ? (bounds.right() - d - thumb_inset_) : (bounds.origin.x + thumb_inset_);
         const Rect knob{.origin = Point{.x = knob_x, .y = bounds.origin.y + thumb_inset_},
                         .size = Size{.width = d, .height = d}};
-        p.fill_rounded_rect(knob, d * 0.5f, thumb);
+        p.fill_rounded_rect(knob, d * 0.5F, thumb);
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    Binding<bool> binding_;  // 声明须在 m_value 之前（同 checkbox.h 的初始化顺序修复）
+    Binding<bool> binding_;  // 声明须在 value_ 之前（同 checkbox.h 的初始化顺序修复）
     Reactive<bool> value_;
     std::function<void(bool)> on_changed_;
     std::optional<Color> active_color_;  ///< 开启态轨道色；空 = 跟随主题 primary

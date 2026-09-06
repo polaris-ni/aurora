@@ -51,7 +51,16 @@ if (AURORA_ENABLE_COVERAGE)
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         _aurora_instrument_all_targets(-fprofile-instr-generate -fcoverage-mapping -O0 -g)
     else ()
-        _aurora_instrument_all_targets(--coverage -O0 -g)
+        # MinGW 的 COFF 目标文件默认段数上限在 -O0 --coverage 组合下会被大 TU
+        # （实测 src/aurora/widget/serialization.cpp）击穿，汇编器报
+        # "can't write ... bytes to section .text: file too big"。
+        # -Wa,-mbig-obj 把上限放宽到 2^32 段；仅覆盖率构建的 -O0 组合需要，
+        # 默认/Release 构建（-O3，或 Clang 分支）不注入。
+        if (MINGW)
+            _aurora_instrument_all_targets(--coverage -O0 -g -Wa,-mbig-obj)
+        else ()
+            _aurora_instrument_all_targets(--coverage -O0 -g)
+        endif ()
     endif ()
 
     # 覆盖率终端摘要：Linux/macOS 走 gcov + tools/coverage/coverage_report.sh；

@@ -129,10 +129,10 @@ class Surface {
     /// @brief 窗口几何态上报句柄（Normal/Maximized/Minimized/FullScreen，见 `WindowMode`）。
     using WindowModeHandler = std::function<void(WindowMode)>;
 
-    /// @brief 注册窗口可见性状态上报句柄（默认存入 `m_window_state_handler`；
+    /// @brief 注册窗口可见性状态上报句柄（默认存入 `window_state_handler_`；
     /// 真实后端可覆盖以叠加本地状态记录）。
     virtual auto set_window_state_handler(WindowStateHandler h) -> void { window_state_handler_ = std::move(h); }
-    /// @brief 注册窗口几何态上报句柄（默认存入 `m_window_mode_handler`；
+    /// @brief 注册窗口几何态上报句柄（默认存入 `window_mode_handler_`；
     /// 真实后端可覆盖以叠加本地状态记录）。
     virtual auto set_window_mode_handler(WindowModeHandler h) -> void { window_mode_handler_ = std::move(h); }
 
@@ -312,7 +312,7 @@ class HeadlessSurface : public Surface {
 
   private:
     Painter painter_;
-    // 声明顺序须与构造函数初始化列表一致（m_png_path 先于 m_size），否则触发 -Wreorder。
+    // 声明顺序须与构造函数初始化列表一致（png_path_ 先于 size_），否则触发 -Wreorder。
     std::string png_path_;
     Size size_{.width = 0.0F, .height = 0.0F};
     int frame_ = 0;

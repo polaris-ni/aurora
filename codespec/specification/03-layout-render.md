@@ -432,7 +432,7 @@ au::Column{}
 >
 > **自驱动动画与缓存**：在 `on_paint` 内自行 `mark_needs_paint()` 推进动画的控件，必须覆写 `can_cache_display_list()` 返回 `false`，否则开启显示列表缓存后动画会被冻结。
 
-**不变量**：`Painter::fill_rect` 必须乘 `m_global_alpha`；`set_alpha(double)` 须在 `on_paint` 结束前复位为 `1.0`。
+**不变量**：`Painter::fill_rect` 必须乘 `global_alpha_`；`set_alpha(double)` 须在 `on_paint` 结束前复位为 `1.0`。
 
 ### 8.2 FontEngine
 
@@ -471,7 +471,7 @@ au::Column{}
 | `set_event_handler(EventHandler)` | 后端只「采集原生事件并翻译为 `aurora::Event` 上抛」；事件派发集中到 `Application` 经 `EventDispatcher` + `FocusManager` |
 | `scale_factor()` | 默认 `1.0`；`Win32Surface` / `D3D11Surface` 返回 `dpi/96`，启用 Per-Monitor DPI 感知，按物理像素创建窗口与帧缓冲，事件坐标除以 scale 还原为 dp |
 | `set_present_dirty(const std::vector<Rect>&)` | `Window::present_root` 在清脏前把本帧脏矩形（逻辑→设备坐标）交给后端；支持增量上屏的后端仅更新变化区，空向量表示全量上传 |
-| `set_title(const std::string&)` | 虚方法，默认空实现；`Win32Window` 经 `SetWindowTextA` + `utf8_to_acp` 生效，`Headless` / `Glfw` 忽略。`Window::set_title` 写 `m_title` 后同步下发 |
+| `set_title(const std::string&)` | 虚方法，默认空实现；`Win32Window` 经 `SetWindowTextA` + `utf8_to_acp` 生效，`Headless` / `Glfw` 忽略。`Window::set_title` 写 `title_` 后同步下发 |
 
 ### 8.4 离屏渲染与快照
 
@@ -584,8 +584,8 @@ Level 3  像素快照（PNG）—— 人类视觉回归测试用
 au::Node btn_node{ au::Button(au::ButtonProps{ .label = "Test" }) };
 btn_node->width(au::px(100)).height(au::px(40));
 const au::Json snap = au::render_to_logical_snapshot(btn_node, 100, 40);
-TCHECK(std::string{ snap["type"].get<std::string>() } == "Button");
-TCHECK(std::abs(snap["box"]["w"].get<float>() - 100.0F) < 0.001f);
+AURORA_TEST_CHECK(std::string{ snap["type"].get<std::string>() } == "Button");
+AURORA_TEST_CHECK(std::abs(snap["box"]["w"].get<float>() - 100.0F) < 0.001f);
 ```
 
 **关键约束：** 快照格式是**平台无关的逻辑描述**（JSON 树 + 盒模型），不是像素位图。AI 的调试闭环只需要 Level 1 + Level 2，完全无头运行。

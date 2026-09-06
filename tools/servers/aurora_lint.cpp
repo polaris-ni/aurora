@@ -33,7 +33,7 @@
 namespace {
 
 // File-reading primitives are provided by tools/include/json_file.h (au::tools::read_text_file).
-// Core lint logic lives in tools/include/au_lint_core.h (lint_ui_tree, also reused by tests/test_au_lint.cpp).
+// Core lint logic lives in tools/include/au_lint_core.h (lint_ui_tree, also reused by tests/unit/utest_au_lint.cpp).
 
 void print_text(const std::vector<au::tools::LintFinding> &findings) {
     if (findings.empty()) {

@@ -284,8 +284,8 @@ Win32Window::Impl::Impl(int w, int h, const std::string &title, const WindowStyl
 
 Win32Window::Impl::~Impl() {
     // 先断开全部上层回调再销毁窗口：DestroyWindow 会**同步**派发 WM_ACTIVATE/WM_KILLFOCUS/
-    // WM_MOUSELEAVE 等消息，而此刻 Window 的其他成员（m_dirty 等，按声明逆序已先于
-    // m_surface 析构）与上层 Application 状态可能已亡——回调链（事件派发 → hover 清除 →
+    // WM_MOUSELEAVE 等消息，而此刻 Window 的其他成员（dirty_ 等，按声明逆序已先于
+    // surface_ 析构）与上层 Application 状态可能已亡——回调链（事件派发 → hover 清除 →
     // mark_needs_paint → wire_dirty 捕获的 Window*）会触发 use-after-free
     // （关闭窗口时 0xC0000005，-O0/coverage 构建下稳定复现）。
     handler = nullptr;
@@ -458,7 +458,7 @@ auto Win32Window::Impl::handle_size(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESU
 // ---- 绘制分族（WM_PAINT）----
 auto Win32Window::Impl::handle_paint(HWND hwnd_in) -> LRESULT {
     // 最大化/缩放时 OS 要求重绘：立即把已就绪的帧缓冲呈现到窗口，填平空档，避免黑屏与旧内容残留。
-    // 未被覆盖的扩展区域由浅色背景刷擦除（非纯黑）。m_present_request 即 Window 的同步重渲染
+    // 未被覆盖的扩展区域由浅色背景刷擦除（非纯黑）。present_request_ 即 Window 的同步重渲染
     // （present_root 内含 present），已把缓冲上屏；此处仅触发一次。
     PAINTSTRUCT ps{};
     BeginPaint(hwnd_in, &ps);
@@ -638,7 +638,7 @@ auto WINAPI Win32Window::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
     }
 }
 
-// ===== Win32Window 公共 API：全部委托给 m_pimpl =====
+// ===== Win32Window 公共 API：全部委托给 pimpl_ =====
 Win32Window::Win32Window(int w, int h, const std::string &title, const WindowStyleOptions &style)
     : pimpl_(std::make_unique<Impl>(w, h, title, style)) {}
 

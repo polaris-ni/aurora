@@ -32,7 +32,7 @@
 
 namespace {
 // X11 的 None 宏与 aurora::ModifierKey::None 冲突：先取值再解除宏定义。
-constexpr long k_x_none = None;
+constexpr long AURORA_X_NONE = None;
 }  // namespace
 #undef None
 

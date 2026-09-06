@@ -7,7 +7,7 @@
 #include "aurora/core/platform.h"
 #ifdef AURORA_PLATFORM_WINDOWS
 #ifndef _WIN32_WINNT
-#define AURORA_WI_N32_WINNT 0x0601  // NOLINT(cppcoreguidelines-macro-usage) Vista+：IFileOpenDialog / IFileSaveDialog
+#define _WI_N32_WINNT 0x0601  // NOLINT(cppcoreguidelines-macro-usage) Vista+：IFileOpenDialog / IFileSaveDialog
 #endif
 #ifndef _WIN32_IE
 #define WIN32_IE 0x0600  // NOLINT(cppcoreguidelines-macro-usage, readability-identifier-naming): Windows SDK 版本宏

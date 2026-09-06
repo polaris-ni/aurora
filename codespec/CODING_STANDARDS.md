@@ -35,16 +35,16 @@
 - **示例即文档**：每个 widget 提供最小可编译示例，集中在 `examples/demos/`（`demo_<组件>.cpp`，1:1）与 [`GUIDELINE.md`](GUIDELINE.md)。
 - **API 描述可机读**：`gen_api_tools` 输出 `aurora_api.json`，含类型 / 属性键 / 枚举，供 LSP 与文档生成器消费。
 - **零平台魔法**：示例不依赖特定平台 GUI 事件循环；`HeadlessSurface` 可离线渲染 PNG，便于测试与 AI 复现。
-- **源—示例—测试 1:1 映射**：每个公共源文件（widget / 子系统头）原则上对应一个 `demo_*.cpp`（`examples/demos/`）与一个 `test_*.cpp`（`tests/`）。允许少量「复杂场景」demo / test（跨控件集成、端到端流程）作为例外，但须明确标注其跨源性质。所有 demo 收敛到 `examples/demos/`（CMake 仅 GLOB 该目录，新增组件 demo 放到此处即自动纳入构建，无需改 CMake）。
-- **文件夹区分**：demo 与 test 以目录区分——示例在 `examples/`，测试在 `tests/`；二者不混放。
-- **test 文件前缀**：测试文件统一以 `test` 为前缀（`test_xxx.cpp`），与示例的 `demo` 前缀风格一致。聚合多个不相关控件的「catch-all」测试文件视为反模式，应拆为各 `test_<控件>.cpp`。
+- **源—示例—测试 1:1 映射**：每个公共源文件（widget / 子系统头）原则上对应一个 `demo_*.cpp`（`examples/demos/`）与一个 `utest_*.cpp`（`tests/unit/`）。允许少量「复杂场景」demo / test（跨控件集成、端到端流程）作为例外，但须明确标注其跨源性质（跨控件集成用例放 `tests/integration/`，以 `itest_` 前缀命名）。所有 demo 收敛到 `examples/demos/`（CMake 仅 GLOB 该目录，新增组件 demo 放到此处即自动纳入构建，无需改 CMake）。
+- **文件夹区分**：demo 与 test 以目录区分——示例在 `examples/`，测试在 `tests/`（单元 `tests/unit/`、集成 `tests/integration/`）；二者不混放。
+- **test 文件前缀**：测试文件统一以 `utest`（单元）/ `itest`（集成）为前缀（`utest_xxx.cpp` / `itest_xxx.cpp`），与示例的 `demo` 前缀风格一致；每个测试 TU 的用例包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`）内。聚合多个不相关控件的「catch-all」测试文件视为反模式，应拆为各 `utest_<控件>.cpp`。
 
 ### 3.1 注册式测试 runner
 
-`tests/*.cpp` 全部链入**单一可执行** `aurora_test_runner`（由 `cmake/AuroraTests.cmake` 配置），`main()` 由 `tests/au_test_main.cpp` 唯一提供，**测试文件禁止自定义 `main()`**。
+`tests/unit/*.cpp` 与 `tests/integration/*.cpp` 全部链入**单一可执行** `aurora_test_runner`（由 `cmake/AuroraTests.cmake` 配置），`main()` 由 `tests/aurora_test_main.cpp` 唯一提供，**测试文件禁止自定义 `main()`**；公共 fixture（header-only，裸名包含）放 `tests/common/`。
 
 - 用例经 `AURORA_TEST()` 宏静态自注册（用例名 = 文件名 stem，由 CMake 按源文件注入 `AURORA_TEST_NAME`；同文件多片段用 `AURORA_TEST_NAMED("名")`）。
-- 断言一律走 `test_harness.h` 的 `AURORA_TEST_CHECK*`（非致命，记录后继续）/ `AURORA_TEST_REQUIRE*`（致命，抛 `CheckAbort` 终止本用例）家族，失败计数汇入框架上下文，由 runner 统一决定退出码；**不得自造 `g_test_failures` / `return 0/1` 式退出码**。
+- 断言一律走 `tests/aurora_test_harness.h` 的 `AURORA_TEST_CHECK*`（非致命，记录后继续）/ `AURORA_TEST_REQUIRE*`（致命，抛 `CheckAbort` 终止本用例）家族，失败计数汇入框架上下文，由 runner 统一决定退出码；**不得自造 `g_test_failures` / `return 0/1` 式退出码**。
 - 后端 / 平台专属用例在 feature 宏未开启的 `#else` 分支以 `AURORA_TEST_SKIP(宏名)` 注册空通过桩。
 - 新增文件漏写注册宏不会报链接错误，由 CTest 的 `registry_integrity` 守护（比对 `runner --list` 与配置期 GLOB 清单）兜底。CTest 粒度不变：每条 = `--run=<stem>`（进程隔离）。
 - **命名可见性**：测试 TU **禁止 using-directive**（`using namespace aurora;` / `using namespace au;` 等），与 clang-tidy 的 `google-build-using-namespace` 检查保持一致。需要裸名时按优先级用：using 声明（`using aurora::Color;`、`using aurora::preferences::Preferences;`）、命名空间别名（`namespace ar = aurora::render;`）、或显式限定（`au::Rect`）。用户字面量按实际用到的后缀逐个声明（`using aurora::literals::operator""_dp;`、`using std::chrono_literals::operator""ms;`）。
@@ -57,14 +57,14 @@
 
 - 逐源文件阈值 **90%**；低于阈值的文件须在其宿主测试文件头部以「覆盖率说明」注明现状与归类（补测缺口 / 平台门控豁免 / 数据头噪声），不得静默留白。
 - 平台门控后端（Win32 / macOS / WASM / D3D11 等）在非对应平台天然 0 覆盖；纯数据 / 生成头（如 `render/bitmap_font.h`、`core/error_codes.gen.h`）的 constexpr 初始化无运行时计数。二者均按豁免处理。
-- 公共 API ↔ 测试函数的映射经审计落在各 `test_*.cpp` 文件头部注释块中；内部命名空间（`aurora::internal` / `detail`）不属于对外承诺面，不入映射。
+- 公共 API ↔ 测试函数的映射经审计落在各 `utest_*.cpp` 文件头部注释块中；内部命名空间（`aurora::internal` / `detail`）不属于对外承诺面，不入映射。
 
 ---
 
 ## 4 元数据与可观测
 
 - **错误可机读**：`Error::to_json()` 输出结构化错误（`code` / `message` / `suggestion` / `docs` / `where`），供 AI 解析。
-- **快照可比对**：`HeadlessSurface` 输出确定性 PNG，CI 用 golden test 比对（见 `tests/test_offscreen.cpp` 的 golden 基准段）。
+- **快照可比对**：`HeadlessSurface` 输出确定性 PNG，CI 用 golden test 比对（见 `tests/unit/utest_offscreen.cpp` 的 golden 基准段）。
 - **降级而非中止**：非法输入 / 缺失类型产出 `Diagnostics` 并降级到安全默认；`from_json` 含不可重建控件（如 `Repeater` / `Canvas`）时返回预期错误而非崩溃。
 - **可观测**：`Logger` 双通道（诊断 `AURORA_LOG_*` / 功能 `AURORA_LOG_RAW`）输出，`Diagnostics` 汇总「做了什么降级」。
 - **增量编译友好**：头文件尽量只放声明，实现下沉 `src/aurora/*.cpp`；非模板纯逻辑类实现移 `.cpp`，减少 TU 重编。
@@ -129,7 +129,7 @@
 
 ### 6.2 默认参数
 
-高频构造提供默认参数 / 便捷工厂，降低记忆负担。所有 `XxxProps` 结构体字段均须有合理默认值。编译期验证（`static_assert`）集中在 `tests/test_default_construct.h`，运行时验证在 `tests/test_default_construct.cpp`。
+高频构造提供默认参数 / 便捷工厂，降低记忆负担。所有 `XxxProps` 结构体字段均须有合理默认值。编译期验证（`static_assert`）集中在 `tests/test_default_construct.h`，运行时验证在 `tests/unit/utest_default_construct.cpp`。
 
 **同步流程（强制执行）**：
 
@@ -137,7 +137,7 @@
 - 新增 `XxxProps` 聚合类型时，**必须**确保所有字段都有合理默认值。
 - 新增公共构造函数时，**必须**评估是否可为高频参数提供默认值。
 - `tests/test_default_construct.h` 中的 `static_assert` 列表**必须**随新增控件同步更新。
-- 新增控件时，**必须**在 `tests/test_default_construct.cpp` 中 `#include "test_default_construct.h"` 以确保编译期校验生效。
+- 新增控件时，**必须**在 `tests/unit/utest_default_construct.cpp` 中 `#include "test_default_construct.h"` 以确保编译期校验生效。
 
 ### 6.3 元编程边界
 
@@ -188,11 +188,11 @@
 
 ### 6.8 SIMD 双实现同步修改（硬规则）
 
-凡引入「标量黄金 + SIMD 快路径」双实现的渲染函数（当前 `gradient_*_scanline_*` / `gradient_*_fill`，位于 `aurora::detail`），两条路径必须保持**逐位一致**，且修改任一实现时**必须同步另一份并跑 `test_simd_parity` 全量比对**。
+凡引入「标量黄金 + SIMD 快路径」双实现的渲染函数（当前 `gradient_*_scanline_*` / `gradient_*_fill`，位于 `aurora::detail`），两条路径必须保持**逐位一致**，且修改任一实现时**必须同步另一份并跑 `utest_simd_parity` 全量比对**。
 
 - **动机**：① 双实现随时间演化漂移会产生「SIMD 开启 / 关闭给出不同像素」的静默正确性 bug；② parity 测试覆盖不到的边界输入（alpha = 0 / 255、非 8 倍数宽、负坐标、裁剪边界）是漂移高发区。
 - **约束**：SIMD 路径须沿用标量浮点运算序列（同序、`-ffp-contract=off` 禁 FMA），整型截断统一用 `cvtt`（`_mm_cvttps_epi32` / `_mm256_cvttps_epi32`），sRGB 转换沿用同一 LUT；禁止为「提速」引入标量未做的近似或重排。
-- **验收**：每次改动后 `test_simd_parity` 必须 0 failure（一票否决）；若某函数无法在保持逐位一致前提下向量化，停下来单独提出，不擅自放宽。
+- **验收**：每次改动后 `utest_simd_parity` 必须 0 failure（一票否决）；若某函数无法在保持逐位一致前提下向量化，停下来单独提出，不擅自放宽。
 - **开关**：`AURORA_ENABLE_SIMD` 默认 ON，OFF 时仅编译标量路径；双实现均属 `aurora::detail` 内部，不计入 `aurora_api.json`。
 
 ### 6.9 错误可机读与局部修复建议

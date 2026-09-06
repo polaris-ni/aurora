@@ -16,22 +16,22 @@ constexpr auto AURORA_FRAME_CSV_HEADER =
 }  // namespace
 
 auto PerfLog::enable(int interval_frames) -> void {
-    s_enabled_ = true;
-    s_interval_ = interval_frames;
-    s_counter_ = 0;
+    enabled_ = true;
+    interval_ = interval_frames;
+    counter_ = 0;
 }
 
-auto PerfLog::disable() -> void { s_enabled_ = false; }
+auto PerfLog::disable() -> void { enabled_ = false; }
 
-auto PerfLog::enabled() -> bool { return s_enabled_; }
+auto PerfLog::enabled() -> bool { return enabled_; }
 
 auto PerfLog::on_frame_end() -> void {
-    if (!s_enabled_) {
+    if (!enabled_) {
         return;
     }
-    ++s_counter_;
-    if (s_counter_ >= s_interval_) {
-        s_counter_ = 0;
+    ++counter_;
+    if (counter_ >= interval_) {
+        counter_ = 0;
         log_summary();
     }
 }

@@ -10,22 +10,21 @@ namespace aurora {
 
 auto Diagnostic::to_json_line() const -> std::string {
     Json j = Json::object();
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     j["severity"] = std::string(to_string(severity));
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     j["category"] = std::string(to_string(category));
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     j["message"] = message;
     if (!where.empty()) {
-        j["where"] = where;  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        j["where"] = where;
     }
     if (!code.empty()) {
-        j["code"] = code;  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        j["code"] = code;
     }
     if (fix && fix->has_auto_fix()) {
-        j["fix_code"] = fix->code;  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        j["fix_desc"] = fix->description;  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        j["fix_code"] = fix->code;
+        j["fix_desc"] = fix->description;
     }
+    // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     return j.dump();
 }
 

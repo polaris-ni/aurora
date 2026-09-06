@@ -7,8 +7,8 @@
 namespace aurora {
 
 auto RenderCounters::current() -> RenderCounters & {
-    static RenderCounters s_current{};
-    return s_current;
+    static RenderCounters render_counters{};
+    return render_counters;
 }
 
 auto RenderCounters::reset() -> void { *this = RenderCounters{}; }

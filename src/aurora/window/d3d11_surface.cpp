@@ -333,7 +333,7 @@ auto D3D11Surface::begin_frame(int width, int height) -> Result<bool> {
 
 auto D3D11Surface::upload_region(int x, int y, int w, int h) const -> bool {
     if (src_ == nullptr) {
-        AURORA_LOG_ERROR("d3d11", "upload_region: m_src is null");
+        AURORA_LOG_ERROR("d3d11", "upload_region: src_ is null");
         return false;
     }
     x = std::clamp(x, 0, dev_w_);
@@ -398,7 +398,7 @@ auto D3D11Surface::present() -> Result<bool> {
     dirty_.clear();
 
     // 清屏后绘制全屏三角形（GPU 缩放采样源纹理）。
-    // 先清 RTV，再上传纹理（避免 GPU 还在读 m_src 时写入导致 stall）。
+    // 先清 RTV，再上传纹理（避免 GPU 还在读 src_ 时写入导致 stall）。
     ctx_->OMSetRenderTargets(1, &rtv_, nullptr);
     // 设置视口（D3D11 默认 viewport 宽高为 0，不设则光栅化全部裁剪 → 白屏）。
     D3D11_VIEWPORT vp{};

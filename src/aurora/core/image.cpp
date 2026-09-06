@@ -76,10 +76,10 @@ auto load_bmp(const std::vector<std::uint8_t> &b) -> Result<Image> {
         for (int x = 0; x < w; ++x) {
             const std::size_t s = src_row + (static_cast<std::size_t>(x) * 3U);
             const std::size_t d = dst_row + (static_cast<std::size_t>(x) * 4U);
-            img.pixels[d + 0] = b[s + 2];  // R  NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            img.pixels[d + 1] = b[s + 1];  // G  NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            img.pixels[d + 2] = b[s + 0];  // B  NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            img.pixels[d + 3] = 255;  // A  NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            img.pixels[d + 0] = b[s + 2];  // R  NOLINT
+            img.pixels[d + 1] = b[s + 1];  // G  NOLINT
+            img.pixels[d + 2] = b[s + 0];  // B  NOLINT
+            img.pixels[d + 3] = 255;  // A  NOLINT
         }
     }
     return img;

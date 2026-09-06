@@ -24,7 +24,7 @@ auto deliver_chain(std::vector<HitNode> &chain, MouseEvent &e) -> void {
     for (auto &it : std::views::reverse(chain)) {
         // 控件可能已被虚拟列表回收（命中链持有生命周期守卫）：失效则安全跳过。
         // keepalive 必须活到 on_pointer_event 返回之后：用户 on_click 回调可能重建
-        // 页面并丢掉该控件的最后一个强引用，而返回后控件还要写自己的 m_pressed 等成员。
+        // 页面并丢掉该控件的最后一个强引用，而返回后控件还要写自己的 pressed_ 等成员。
         std::shared_ptr<Widget> keepalive;
         Widget *sp = it.lock(keepalive);
         if (sp == nullptr) {

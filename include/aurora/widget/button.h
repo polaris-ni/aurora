@@ -384,7 +384,7 @@ class Button : public LeafWidget, public ButtonProps {
         }
     }
 
-    /// @brief 按下/松开时重绘以呈现 pressed 态（基类维护 m_pressed 与点击识别）。
+    /// @brief 按下/松开时重绘以呈现 pressed 态（基类维护 pressed_ 与点击识别）。
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (!enabled) {
             e.is_handled = true;  // 禁用态吞掉点击（不冒泡触发父级点击）

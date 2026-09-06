@@ -186,7 +186,7 @@ class Popup : public SingleChild {
         if (!open_ || !child_) {
             return nullptr;
         }
-        // local 是相对本 Popup 布局盒的坐标；弹出内容在全局 m_anchor 处。
+        // local 是相对本 Popup 布局盒的坐标；弹出内容在全局 anchor_ 处。
         // 将 local 换算为全局坐标后再映射到内容局部坐标。
         const Point global{.x = bounds.origin.x + local.x, .y = bounds.origin.y + local.y};
         const Rect content_box{.origin = anchor_, .size = content_size_};

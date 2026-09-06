@@ -29,7 +29,7 @@ namespace aurora {
  *
  * pimpl 封装：公共头不再包含 <GL/gl.h> / <GLFW/glfw3.h>，所有 GLFW/OpenGL 细节（窗口、
  * 纹理、键码映射、回调转发等）移入 src/aurora/window/glfw_surface.cpp 的 Impl，
- * 仅暴露 `std::unique_ptr<Impl> m_pimpl`；跨平台消费者无需拉入 GLFW/GL 头。
+ * 仅暴露 `std::unique_ptr<Impl> pimpl_`；跨平台消费者无需拉入 GLFW/GL 头。
  *
  * 编译需链接 glfw3 与系统 OpenGL；无 GLFW 环境不纳入默认构建（见 CMake
  * `AURORA_BACKEND_GLFW`，由 `AURORA_BACKEND_GLFW` 开关控制，默认 OFF）。GLFW 初始化失败

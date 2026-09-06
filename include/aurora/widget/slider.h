@@ -379,7 +379,7 @@ class Slider : public LeafWidget {
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    Binding<double> binding_;  // 声明须在 m_value 之前（同 checkbox.h 的初始化顺序修复）
+    Binding<double> binding_;  // 声明须在 value_ 之前（同 checkbox.h 的初始化顺序修复）
     Reactive<double> value_;
     std::function<void(double)> on_changed_;
     double min_ = 0.0;

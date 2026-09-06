@@ -21,7 +21,7 @@ class Widget;  // 前向声明：Node 以 shared_ptr<Widget> 持有；析构在 
  */
 class Node {
   public:
-    Node() = default;  ///< 默认构造为空节点（m_widget == nullptr）
+    Node() = default;  ///< 默认构造为空节点（widget_ == nullptr）
 
     /// @brief 从任意 Widget 派生构造，接管所有权（拷贝即共享，整棵树可被复制/移动）。
     /// 用户无需写 new/make_unique；rvalue 经移动接管，lvalue 经拷贝接管（转移 shared_ptr 所有权）。

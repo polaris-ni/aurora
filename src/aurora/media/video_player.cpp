@@ -20,7 +20,6 @@ auto VideoPlayer::set_show_controls(bool show) -> void {
     show_controls_ = show;
     if (!children_.empty()) {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         children_[0].widget().show.set(show);
     }
 }

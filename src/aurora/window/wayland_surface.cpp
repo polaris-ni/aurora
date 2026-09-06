@@ -34,10 +34,10 @@ auto from_xkb_keysym(xkb_keysym_t ks) -> KeyCode { return detail::keysym_to_keyc
 }  // namespace
 
 /// @brief WaylandSurface 的全部平台状态（pimpl）：公共头零 Wayland 依赖。
-/// 嵌套类型可访问外围类 protected 成员（notify_window_state/m_present_request），
+/// 嵌套类型可访问外围类 protected 成员（notify_window_state/present_request_），
 /// C 回调经 static thunk 转发到本结构的成员函数。
 struct WaylandSurface::Impl {
-    WaylandSurface *self = nullptr;  ///< 反向指针：listener 内上抛 notify_*/m_present_request。
+    WaylandSurface *self = nullptr;  ///< 反向指针：listener 内上抛 notify_*/present_request_。
     // 核心 globals（registry 绑定）。
     wl_display *dpy = nullptr;
     wl_registry *registry = nullptr;
@@ -193,7 +193,7 @@ struct WaylandSurface::Impl {
     auto on_keymap(std::int32_t fd, std::uint32_t sz) -> void;
     auto on_modifiers(std::uint32_t depressed, std::uint32_t latched, std::uint32_t locked, std::uint32_t group)
         -> void;
-    /// 请求立即重绘（嵌套类可访基类 protected 的 m_present_request；供匿名空间自由函数复用）。
+    /// 请求立即重绘（嵌套类可访基类 protected 的 present_request_；供匿名空间自由函数复用）。
     auto request_repaint() -> void {
         if (self != nullptr && self->present_request_) {
             self->present_request_();

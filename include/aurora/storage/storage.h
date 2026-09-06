@@ -168,7 +168,7 @@ class Storage {
 
     std::unique_ptr<StorageBackend> backend_;
 
-    /// 事务内抑制逐操作通知，提交后统一发 Batch。经 m_listener_mutex 保护：异步 API
+    /// 事务内抑制逐操作通知，提交后统一发 Batch。经 listener_mutex_ 保护：异步 API
     /// 的回调可能在 worker 线程发射变更，与主线程事务并发访问此标志（atomic 会使
     /// Storage 失去移动性、破坏 Result<Storage>，故用锁）。
     bool notify_suppressed_{false};

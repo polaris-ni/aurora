@@ -1045,7 +1045,7 @@
   "language": "c++20",
   "layout_rules": {
     "color": {
-      "description": "Color 类型：[r, g, b, a]，各分量 0-255",
+      "description": "Color type: [r, g, b, a], each component 0-255",
       "example": [
         255,
         128,
@@ -1054,7 +1054,7 @@
       ]
     },
     "edge_insets": {
-      "description": "EdgeInsets 对象：{left, top, right, bottom}，单位 dp"
+      "description": "EdgeInsets object: {left, top, right, bottom}, unit dp"
     },
     "flex": {
       "cross_axis_alignment": [
@@ -1063,7 +1063,7 @@
         "End",
         "Stretch"
       ],
-      "description": "Flex 布局（Column/Row）：子项沿主轴排列，交叉轴对齐",
+      "description": "Flex layout (Column/Row): children are laid out along the main axis, aligned on the cross axis",
       "gap_constraint": "gap >= 0",
       "main_axis_alignment": [
         "Start",
@@ -1080,15 +1080,15 @@
     },
     "grid": {
       "column_constraint": "columns >= 1",
-      "description": "Grid 布局：固定列数的二维网格",
+      "description": "Grid layout: a two-dimensional grid with a fixed column count",
       "required_props": [
         "columns"
       ]
     },
     "length": {
-      "auto": "WrapContent，由内容决定尺寸",
-      "description": "Length 类型：auto | fill | [px, v] | [percent, v]",
-      "fill": "Expand，吸收剩余空间",
+      "auto": "WrapContent, sized by its content",
+      "description": "Length type: auto | fill | [px, v] | [percent, v]",
+      "fill": "Expand, absorb the remaining space",
       "percent_example": [
         "percent",
         50
@@ -1099,7 +1099,7 @@
       ]
     },
     "stack": {
-      "description": "Stack 布局：子项层叠，后绘制的在上层",
+      "description": "Stack layout: children are layered, later-drawn ones on top",
       "fit": [
         "Loose",
         "Expand",
@@ -1120,7 +1120,7 @@
         "SegmentedControl",
         "TabBar"
       ],
-      "description": "简单值状态：控件持有单一可变值，通过 on_changed 回调通知",
+      "description": "Simple value state: the widget holds a single mutable value and notifies via the on_changed callback",
       "json_example": "{\"type\": \"TextInput\", \"props\": {\"value\": \"hello\"}, \"events\": {\"on_changed\": \"handler_name\"}}",
       "name": "simple_value"
     },
@@ -1131,7 +1131,7 @@
         "SegmentedControl",
         "TabBar"
       ],
-      "description": "选择索引状态：从选项列表中选择一项，通过 selected_index 和 on_change 管理",
+      "description": "Selection index state: one item is selected from an options list, managed via selected_index and on_change",
       "json_example": "{\"type\": \"Dropdown\", \"props\": {\"options\": [\"A\",\"B\",\"C\"], \"selected_index\": 1}, \"events\": {\"on_change\": \"handler\"}}",
       "name": "selection_index"
     },
@@ -1141,7 +1141,7 @@
         "Switch",
         "ExpansionPanel"
       ],
-      "description": "开关状态：布尔值切换，通过 checked/value 和 on_changed/on_toggled 管理",
+      "description": "Toggle state: a boolean toggle, managed via checked/value and on_changed/on_toggled",
       "json_example": "{\"type\": \"Checkbox\", \"props\": {\"checked\": false}, \"events\": {\"on_changed\": \"handler\"}}",
       "name": "toggle_state"
     }
@@ -1158,9 +1158,7 @@
           255
         ],
         "count": 0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
         "text_color": [
@@ -1169,9 +1167,7 @@
           255,
           255
         ],
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -1276,15 +1272,11 @@
       "container": false,
       "default_props": {
         "bar_height": 64.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "selected_index": 0,
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -1348,9 +1340,7 @@
         "corner_radius": 6.0,
         "enabled": true,
         "font_size": 14.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "label": "",
         "on_color": [
           255,
@@ -1366,9 +1356,7 @@
           "top": 6.0
         },
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -1676,15 +1664,11 @@
         "checked": false,
         "corner_radius": -1.0,
         "enabled": true,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
         "size": 20.0,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -1875,9 +1859,7 @@
           255
         ],
         "font_size": 13.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "label": "",
         "overflow": "Visible",
         "show": true,
@@ -1887,9 +1869,7 @@
           0,
           255
         ],
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -2056,14 +2036,10 @@
           0,
           255
         ],
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -2108,16 +2084,12 @@
       "default_props": {
         "cross_axis_alignment": "Start",
         "gap": 0.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "main_axis_alignment": "Start",
         "main_axis_size": "Min",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -2275,17 +2247,13 @@
       "container": false,
       "default_props": {
         "columns": [],
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "row_count": 0,
         "selected_row": -1,
         "show": true,
         "sort_column": -1,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -2377,15 +2345,11 @@
       "container": false,
       "default_props": {
         "day": 1,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "month": 1,
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ],
+        "width": "auto",
         "year": 2026
       },
       "dynamic_children": false,
@@ -2476,17 +2440,13 @@
           255
         ],
         "end_indent": 0.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "indent": 0.0,
         "orientation": "horizontal",
         "overflow": "Visible",
         "show": true,
         "thickness": 1.0,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -2631,18 +2591,14 @@
       "children_policy": "multiple",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "open": false,
         "overflow": "Visible",
         "panel_width": 240.0,
         "permanent": false,
         "show": true,
         "side": "left",
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -2759,9 +2715,7 @@
         "corner_radius": 4.0,
         "enabled": true,
         "font_size": 13.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "item_height": 26.0,
         "options": [],
         "overflow": "Visible",
@@ -2773,9 +2727,7 @@
           30,
           255
         ],
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -3001,14 +2953,10 @@
         "expanded": false,
         "header": "",
         "header_height": 36.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -3084,14 +3032,10 @@
       ],
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -3136,14 +3080,10 @@
       "container": false,
       "default_props": {
         "error_text": "",
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -3188,14 +3128,10 @@
       "default_props": {
         "columns": 1,
         "gap": 4.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -3291,15 +3227,11 @@
       "children_policy": "single",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
         "tag": "",
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -3337,16 +3269,12 @@
       "children_policy": "none",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "image_height": 0,
         "image_width": 0,
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -3453,16 +3381,12 @@
       "default_props": {
         "cache_extent": 200.0,
         "count": 0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "item_extent": 48.0,
         "overflow": "Visible",
         "scroll_offset": 0.0,
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -3558,16 +3482,12 @@
       "container": false,
       "default_props": {
         "cache_extent": 0.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "item_count": 0,
         "item_extent": 96.0,
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -3634,16 +3554,12 @@
       "children_policy": "none",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "items": [],
         "multi_select": false,
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -3701,14 +3617,10 @@
       "children_policy": "single",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -3762,14 +3674,10 @@
       "children_policy": "single",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -3824,15 +3732,11 @@
       "container": false,
       "default_props": {
         "bar_height": 28.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "menu_titles": [],
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -3889,14 +3793,10 @@
       "children_policy": "multiple",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -3922,15 +3822,11 @@
       "container": false,
       "default_props": {
         "current": 0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
         "show_indicator": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -3992,14 +3888,10 @@
       "children_policy": "single",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -4064,9 +3956,7 @@
           43,
           255
         ],
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "message": "",
         "overflow": "Visible",
         "show": true,
@@ -4076,9 +3966,7 @@
           85,
           255
         ],
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -4093,7 +3981,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "message",
-          "note": "说明文字",
+          "note": "Placeholder text",
           "required": false,
           "type": "string"
         },
@@ -4101,7 +3989,7 @@
           "default": "{242,242,242,255}",
           "json_type": "array",
           "name": "background_color",
-          "note": "背景色",
+          "note": "Background color",
           "required": false,
           "type": "Color"
         },
@@ -4109,7 +3997,7 @@
           "default": "{192,57,43,255}",
           "json_type": "array",
           "name": "border_color",
-          "note": "边框色",
+          "note": "Border color",
           "required": false,
           "type": "Color"
         },
@@ -4156,12 +4044,12 @@
       "props_schema": {
         "background_color": {
           "default": "{242,242,242,255}",
-          "description": "背景色",
+          "description": "Background color",
           "type": "array"
         },
         "border_color": {
           "default": "{192,57,43,255}",
-          "description": "边框色",
+          "description": "Border color",
           "type": "array"
         },
         "height": {
@@ -4170,7 +4058,7 @@
         },
         "message": {
           "default": "\"\"",
-          "description": "说明文字",
+          "description": "Placeholder text",
           "type": "string"
         },
         "show": {
@@ -4197,15 +4085,11 @@
         "anchor_x": 0.0,
         "anchor_y": 0.0,
         "dismiss_on_outside_click": true,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "open": false,
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -4291,17 +4175,13 @@
       "container": false,
       "default_props": {
         "cancellable": true,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "message": "",
         "open": false,
         "overflow": "Visible",
         "progress": -1.0,
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -4321,7 +4201,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "message",
-          "note": "消息文本",
+          "note": "Message text",
           "required": false,
           "type": "string"
         },
@@ -4331,7 +4211,7 @@
           "maximum": "1",
           "minimum": "-1",
           "name": "progress",
-          "note": "进度(0..1，-1=不确定)",
+          "note": "Progress (0..1, -1=indeterminate)",
           "required": false,
           "type": "float"
         },
@@ -4339,7 +4219,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "open",
-          "note": "是否显示",
+          "note": "Whether to show",
           "required": false,
           "type": "bool"
         },
@@ -4370,17 +4250,17 @@
         },
         "message": {
           "default": "\"\"",
-          "description": "消息文本",
+          "description": "Message text",
           "type": "string"
         },
         "open": {
           "default": "false",
-          "description": "是否显示",
+          "description": "Whether to show",
           "type": "boolean"
         },
         "progress": {
           "default": "-1",
-          "description": "进度(0..1，-1=不确定)",
+          "description": "Progress (0..1, -1=indeterminate)",
           "maximum": "1",
           "minimum": "-1",
           "type": "number"
@@ -4394,9 +4274,7 @@
       "container": false,
       "default_props": {
         "corner_radius": -1.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
         "thickness": 6.0,
@@ -4407,9 +4285,7 @@
           255
         ],
         "value": 0.0,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -4572,9 +4448,7 @@
         "dot_size": 16.0,
         "enabled": true,
         "font_size": 13.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "horizontal": false,
         "options": [],
         "overflow": "Visible",
@@ -4587,9 +4461,7 @@
           30,
           255
         ],
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -4784,15 +4656,11 @@
       "children_policy": "none",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
         "text": "",
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -4866,15 +4734,11 @@
       "children_policy": "none",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
         "text": "",
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -4952,16 +4816,12 @@
       "default_props": {
         "cross_axis_alignment": "Start",
         "gap": 0.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "main_axis_alignment": "Start",
         "main_axis_size": "Min",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -5118,15 +4978,11 @@
       "children_policy": "single",
       "container": true,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
         "step": 16.0,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -5201,9 +5057,7 @@
         "corner_radius": 6.0,
         "enabled": true,
         "font_size": 14.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "segments": [],
         "selected": 0,
@@ -5220,9 +5074,7 @@
           0,
           255
         ],
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -5402,15 +5254,11 @@
       "children_policy": "single",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
         "visible": false,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -5477,9 +5325,7 @@
       "container": false,
       "default_props": {
         "enabled": true,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "inactive_color": [
           210,
           210,
@@ -5493,9 +5339,7 @@
         "thumb_size": -1.0,
         "track_height": 6.0,
         "value": 0.0,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -5704,14 +5548,10 @@
       "container": false,
       "default_props": {
         "expand": true,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -5807,9 +5647,7 @@
         "decimals": 0,
         "enabled": true,
         "font_size": 13.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "max": 100.0,
         "min": 0.0,
         "overflow": "Visible",
@@ -5824,9 +5662,7 @@
           255
         ],
         "value": 0.0,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -6066,18 +5902,14 @@
       "container": false,
       "default_props": {
         "handle_size": 6.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "min_first": 50.0,
         "min_second": 50.0,
         "orientation": "horizontal",
         "overflow": "Visible",
         "ratio": 0.5,
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -6168,14 +6000,10 @@
       "default_props": {
         "alignment": 0,
         "fit": 2,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -6255,14 +6083,10 @@
       "default_props": {
         "bar_height": 24.0,
         "gap": 12.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -6322,15 +6146,11 @@
       "container": false,
       "default_props": {
         "current": 0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
         "step_count": 0,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -6431,9 +6251,7 @@
       "default_props": {
         "checked": false,
         "enabled": true,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "inactive_color": [
           180,
           180,
@@ -6451,9 +6269,7 @@
         "thumb_inset": 2.0,
         "track_height": 24.0,
         "track_width": 44.0,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -6670,9 +6486,7 @@
           255
         ],
         "font_size": 13.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "indicator_thickness": 2.0,
         "overflow": "Visible",
         "selected_index": 0,
@@ -6692,9 +6506,7 @@
           96,
           255
         ],
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -6889,9 +6701,7 @@
         "font_size": 14.0,
         "font_style": "Normal",
         "font_weight": "400",
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "letter_spacing": 0.0,
         "line_height": 1.0,
         "max_lines": 0,
@@ -6899,9 +6709,7 @@
         "show": true,
         "soft_wrap": true,
         "text_align": "Left",
-        "width": [
-          "auto"
-        ],
+        "width": "auto",
         "word_spacing": 0.0
       },
       "dynamic_children": false,
@@ -7274,9 +7082,7 @@
           255
         ],
         "font_size": 14.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "padding": {
           "bottom": 12.0,
@@ -7305,9 +7111,7 @@
           255
         ],
         "value": "",
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -7627,14 +7431,10 @@
       "children_policy": "single",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -7688,16 +7488,12 @@
       "children_policy": "none",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "hour": 0,
         "minute": 0,
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -7766,14 +7562,10 @@
       "children_policy": "",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -7829,9 +7621,7 @@
         "snap_action_count": 0,
         "subtitle": "",
         "title": "",
-        "width": [
-          "auto"
-        ],
+        "width": "auto",
         "window_controls": true
       },
       "dynamic_children": false,
@@ -7915,15 +7705,11 @@
       "children_policy": "single",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "position": "bottom",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -7964,15 +7750,11 @@
       "default_props": {
         "bar_height": 40.0,
         "gap": 4.0,
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "padding": 6.0,
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -8047,16 +7829,12 @@
       "children_policy": "none",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "selected_row": -1,
         "show": true,
         "visible_count": 0,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [
@@ -8101,14 +7879,10 @@
       "children_policy": "single",
       "container": false,
       "default_props": {
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [],
@@ -8169,15 +7943,11 @@
       "container": false,
       "default_props": {
         "fit": "Contain",
-        "height": [
-          "auto"
-        ],
+        "height": "auto",
         "overflow": "Visible",
         "show": true,
         "show_controls": true,
-        "width": [
-          "auto"
-        ]
+        "width": "auto"
       },
       "dynamic_children": false,
       "events": [

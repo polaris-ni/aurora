@@ -24,7 +24,7 @@ struct LazyRowProps {
  * @brief 横向虚拟列表（镜像 `LazyList`，主轴改为水平）。
  *
  * 仅构建可见窗口（含 `cache_extent` 缓冲）内的子项，复杂度为 O(可见单元数)。
- * 横向滚轮（或拖拽）调整 `m_offset`；`on_paint` 内 `push_clip` 防止父级圆角裁剪
+ * 横向滚轮（或拖拽）调整 `offset_`；`on_paint` 内 `push_clip` 防止父级圆角裁剪
  * 下的慢路径越界。命中测试返回自身（作为横向滚动叶），其内部子项点击通过
  * `on_item_click` 回调（按按下位置计算索引）上报，避免虚拟化子项不可作为稳定控件。
  *

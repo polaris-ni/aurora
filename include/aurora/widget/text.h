@@ -211,18 +211,18 @@ class Text : public LeafWidget, public TextProps {
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override;
 
   private:
-    /// @brief 无选区哨兵：m_sel_end 取此值时表示当前没有选区。
+    /// @brief 无选区哨兵：sel_end_ 取此值时表示当前没有选区。
     static constexpr size_t NO_SEL = static_cast<size_t>(-1);
 
     size_t sel_start_ = 0;  ///< 选区起点（含入的码点下标：该字符被选中）
-    size_t sel_end_ = NO_SEL;  ///< 选区终点（含入的码点下标；= AURORA_NO_SEL 表示无选区）
+    size_t sel_end_ = NO_SEL;  ///< 选区终点（含入的码点下标；= NO_SEL 表示无选区）
     size_t caret_ = 0;  ///< 光标（caret 位置，0..码点数；用于键盘导航）
     bool selecting_ = false;  ///< 是否正在拖选
     std::string display_text_;  ///< 最近一次绘制所用显示文本（命中测试/选区使用）
     std::string cached_resolved_text_;  ///< 缓存的 resolved_text 结果（避免每帧重复解析）
     bool resolved_dirty_ = true;  ///< resolved 缓存是否需重新计算
     std::vector<std::string> lines_;  ///< 最近一次布局所得折行结果（绘制复用）
-    std::vector<size_t> line_cp_start_;  ///< 每个可视行首字符在 m_display_text 中的码点下标
+    std::vector<size_t> line_cp_start_;  ///< 每个可视行首字符在 display_text_ 中的码点下标
     float line_h_ = 0.0F;  ///< 行高（含 line_height 倍数）
     float layout_w_ = 0.0F;  ///< 最近一次布局所得控件宽度（命中测试按对齐偏移需要）
     float paint_scale_ = 1.0F;  ///< 最近一次绘制的帧缓冲像素比（dp→物理；实显 caret 校正用）
@@ -255,7 +255,7 @@ class Text : public LeafWidget, public TextProps {
     /// @brief 可视行 li 是否按两端对齐绘制（Justify 且多行且非末行，与 on_paint 判定一致）。
     [[nodiscard]] auto is_justified_line(size_t li) const -> bool;
     /// @brief 行内 caret x（相对行左缘）：Justify 行按均分布局取词位（行尾 = 行右缘 avail），
-    ///        其余行走 FontEngine::display_caret_x（按 m_paint_scale 推导物理 DPI 的前缀
+    ///        其余行走 FontEngine::display_caret_x（按 paint_scale_ 推导物理 DPI 的前缀
     ///        extent，逐字符与实绘字形对齐；scale=1 退化为 caret_x）；选区高亮与绘制像素一一对应。
     [[nodiscard]] auto line_caret_x(size_t li, size_t cp_in_line, const Font &f, const render::TextLayoutOpts &opts,
                                     float avail) const -> float;

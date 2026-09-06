@@ -719,10 +719,10 @@ au::Node n = au::Scroll{ au::Column{ au::Text("A"), au::Text("B") } };
 
 ## 24 测试原语（`aurora::test`）
 
-`aurora::test`（头 `include/aurora/test_helpers.h`，**不进 `aurora.h`**）薄封装 `HeadlessSurface` + `TCHECK*` + `EventDispatcher`，用于编写**确定性、可文本验证**的测试。**使用前提：测试编译单元须先 `#include "tests/test_harness.h"`**（提供 `TCHECK*` 断言宏）。
+`aurora::test`（头 `include/aurora/test_helpers.h`，**不进 `aurora.h`**）薄封装 `HeadlessSurface` + `AURORA_TEST_CHECK*` + `EventDispatcher`，用于编写**确定性、可文本验证**的测试。**使用前提：测试编译单元须先 `#include "aurora_test_harness.h"`**（提供 `AURORA_TEST_CHECK*` 断言宏；`tests/` 已加入测试目标包含路径，故用裸名包含）。
 
 ```cpp
-#include "tests/test_harness.h"
+#include "aurora_test_harness.h"
 #include "aurora/aurora.h"
 #include "aurora/test_helpers.h"
 #include "aurora/ui/factories.h"

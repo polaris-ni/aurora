@@ -2,7 +2,7 @@
 # AuroraCheckTestRegistry.cmake — 完整性守护脚本（registry_integrity 用）
 # ------------------------------------------------------------
 # 比对 runner --list 输出与配置期生成的预期清单。
-# 新世界风险：新增 tests/*.cpp 忘写 AURORA_TEST() 时不会有任何链接错误，
+# 新世界风险：新增 tests/unit/*.cpp 或 tests/integration/*.cpp 忘写 AURORA_TEST() 时不会有任何链接错误，
 # 用例静默不运行 —— 本脚本让这种漂移在 ctest 阶段立刻失败。
 # ============================================================
 
@@ -21,5 +21,5 @@ string(STRIP "${_actual}" _actual)
 
 if (NOT _actual STREQUAL _expect)
     message(FATAL_ERROR
-            "test registry mismatch: runner --list vs tests/*.cpp\n--- expected ---\n${_expect}\n--- actual ---\n${_actual}")
+            "test registry mismatch: runner --list vs tests/unit|integration/*.cpp\n--- expected ---\n${_expect}\n--- actual ---\n${_actual}")
 endif ()

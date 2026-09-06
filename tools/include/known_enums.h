@@ -18,7 +18,7 @@
 //    discriminating enum `CurveKind`. `ColorPalette` is a set of named constants under
 //    `au::colors::` (color.h), not an enum.
 // 2. Values must match the real members in `include/aurora/**` verbatim; keep this in sync when
-//    adding or renaming enums. `tests/test_known_enums.cpp` guards both "value existence" and
+//    adding or renaming enums. `tests/unit/utest_known_enums.cpp` guards both "value existence" and
 //    "property type coverage".
 // ============================================================================
 #pragma once

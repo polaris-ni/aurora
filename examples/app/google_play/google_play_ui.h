@@ -614,7 +614,7 @@ class BannerCarousel : public au::LeafWidget {
 
     auto collect_signals(std::vector<au::SignalViewBase *> & /*out*/) -> void override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "BannerCarousel"; }
-    // banner 每帧整体平移（m_offset）+ 入场淡入，内容本身（渐变/图标/文本）在滑动期间不变：
+    // banner 每帧整体平移（offset_）+ 入场淡入，内容本身（渐变/图标/文本）在滑动期间不变：
     // 故不复用 Display List 缓存（缓存会冻结平移与 alpha 首帧），改为把卡片一次性渲染进离屏层、
     // 每帧仅平移合成（见 on_paint），把每帧成本从「重录重放整棵子树」压到一次 composite。
     [[nodiscard]] auto can_cache_display_list() const -> bool override { return false; }
@@ -702,10 +702,10 @@ class BannerCarousel : public au::LeafWidget {
         }
         p.set_alpha(static_cast<double>(ent));
 
-        // 离屏层缓存：横幅卡片（渐变+图标+文本）内容在滑动/轮播期间每帧不变，仅整体平移（m_offset）
+        // 离屏层缓存：横幅卡片（渐变+图标+文本）内容在滑动/轮播期间每帧不变，仅整体平移（offset_）
         // 与入场淡入（alpha）。若每帧直绘，这些命令被并入祖先 Display List，随祖先每帧重录
         // （见 Widget::invalidate_display_list_up 对不可缓存后代的上溯失效）产生 ~8ms 级 glue；
-        // 改为一次性渲染到离屏层、每帧仅按 m_offset 平移合成，把每帧成本压到一次 composite + 几个圆点。
+        // 改为一次性渲染到离屏层、每帧仅按 offset_ 平移合成，把每帧成本压到一次 composite + 几个圆点。
         card_h_ = b.size.height - 24.0F;
         if (n > 0 && banner_w_ > 0.0F) {
             const float lw = static_cast<float>(n) * step_;
@@ -726,8 +726,8 @@ class BannerCarousel : public au::LeafWidget {
         p.push_clip(b);
         p.set_alpha(static_cast<double>(ent));
         if (layer_) {
-            // 整条卡片带一次性渲染进离屏层（offset=0，层局部坐标卡片 i 位于 x=i*m_step），每帧按当前
-            // m_offset 平移合成到 banner 视口；裁剪保证仅可见窗口参与合成。
+            // 整条卡片带一次性渲染进离屏层（offset=0，层局部坐标卡片 i 位于 x=i*step_），每帧按当前
+            // offset_ 平移合成到 banner 视口；裁剪保证仅可见窗口参与合成。
             p.composite(*layer_, au::Matrix2D::from_translate(b.origin.x + left_ + offset_, b.origin.y));
         } else {
             draw_banner_direct(p, th, n, b);  // 兜底：首帧 layout 前尺寸未就绪时直绘（与旧逻辑一致）
@@ -773,14 +773,14 @@ class BannerCarousel : public au::LeafWidget {
                     a.developer, au::Font{.size_pt = 13.0F}, th.banner_text.with_alpha(230));
     }
 
-    // 一次性把全部卡片渲染进离屏层（offset=0，层局部坐标：卡片 i 位于 x=i*m_step，y=0）。
+    // 一次性把全部卡片渲染进离屏层（offset=0，层局部坐标：卡片 i 位于 x=i*step_，y=0）。
     auto render_banner_layer(au::Painter &lp, const GPTheme &th, int n) const -> void {
         for (int i = 0; i < n; ++i) {
             draw_card(lp, th, i, static_cast<float>(i) * step_, 0.0F);
         }
     }
 
-    // 兜底：首帧 layout 前尺寸未就绪时直绘（与旧逻辑一致，按当前 m_offset 摆放）。
+    // 兜底：首帧 layout 前尺寸未就绪时直绘（与旧逻辑一致，按当前 offset_ 摆放）。
     auto draw_banner_direct(au::Painter &p, const GPTheme &th, int n, const au::Rect &b) const -> void {
         for (int i = 0; i < n; ++i) {
             const float x = b.origin.x + left_ + (static_cast<float>(i) * step_) + offset_;
@@ -1097,7 +1097,7 @@ class BodyView : public au::Container {
     // 首屏骨架期间 on_paint 内 mark_needs_paint 自驱动，且随 tab/subcat 重建子节点：内容每帧
     // 变化，禁止 Display List 缓存，否则骨架微光冻结、子节点切换不重绘。
     [[nodiscard]] auto can_cache_display_list() const -> bool override { return false; }
-    // 首屏骨架→真实内容的切换发生在 on_layout 内、且依赖时间（m_skeleton_until）：
+    // 首屏骨架→真实内容的切换发生在 on_layout 内、且依赖时间（skeleton_until_）：
     // 若允许布局缓存，约束不变时会跳过 on_layout，使切换永不触发（白屏 / Path B）。
     // 故禁用布局缓存，保证每个布局 pass 都重跑 on_layout 以拾取状态变化（与 can_cache_display_list
     // 对称：绘制每帧变动→禁 DL 缓存，布局非纯函数→禁布局缓存）。
@@ -1355,7 +1355,7 @@ class AppShell : public au::Container {
         if (body_view_) {
             body_view_->set_viewport_width(w);
         }
-        // selected_index 由 AppShell 经 m_tab 驱动，但 GpBottomNav 未对它做响应式订阅；
+        // selected_index 由 AppShell 经 tab_ 驱动，但 GpBottomNav 未对它做响应式订阅；
         // 直接赋值不会使其显示列表失效，导致命中链/DL 复用旧帧（选中药丸不动 = 视觉「无反应」）。
         // 故在值真正变化时标脏，使导航栏重绘、选中药丸随 tab 移动。
         if (nav_ptr_) {

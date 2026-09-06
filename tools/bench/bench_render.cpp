@@ -270,7 +270,7 @@ auto main() -> int {
     // producing p99 / jitter / full_redraw_frames and RenderCounters baselines. Time-based gates are
     // affected by environment jitter and excluded from CTest; local trend comparison is in
     // tools/check/check_perf_gates.ps1. Counter-based gates are locked into CTest by
-    // tests/test_scroll_regression.cpp (build-prof).
+    // tests/unit/utest_scroll.cpp (scroll_regression section) (build-prof).
     {
         aurora::ScrollBenchHarness::Config cfg;
         cfg.name = "bench_render-scroll";

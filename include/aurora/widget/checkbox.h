@@ -341,7 +341,7 @@ class Checkbox : public LeafWidget {
     }
 
   private:
-    Binding<bool> binding_;  // 声明须在 m_value 之前：Binding 构造器用 binding_.get() 初始化 m_value，
+    Binding<bool> binding_;  // 声明须在 value_ 之前：Binding 构造器用 binding_.get() 初始化 value_，
                              // 成员按声明顺序初始化，故 binding_ 须先就位，否则 binding_.get() 空指针解引用。
     Reactive<bool> value_;
     std::function<void(bool)> on_changed_;

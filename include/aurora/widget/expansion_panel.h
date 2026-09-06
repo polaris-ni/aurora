@@ -134,7 +134,7 @@ class ExpansionPanel : public SingleChild {
             Constraints inner;
             inner.min = Size{.width = 0.0F, .height = 0.0F};
             inner.max =
-                Size{.width = w, .height = c.max.is_finite() ? std::max(0.0F, c.max.height - header_height_) : 1e9f};
+                Size{.width = w, .height = c.max.is_finite() ? std::max(0.0F, c.max.height - header_height_) : 1e9F};
             const Size cs = child_.widget().layout(inner, ctx);
             child_.set_bounds(Rect{.origin = Point{.x = 0.0F, .y = header_height_}, .size = cs});
             h += cs.height;

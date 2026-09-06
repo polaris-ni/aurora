@@ -158,10 +158,10 @@ class Painter {
      * @brief 把已渲染的离屏子树（源缓冲）按仿射矩阵合成回本缓冲。
      *
      * 用于修饰节点的旋转 / 缩放 / 任意仿射变换：子树先渲染到离屏 Painter，
-     * 再经 `matrix` 映射到本缓冲（矩阵为逻辑 dp 空间，内部乘 `m_scale` 到物理像素）。
+     * 再经 `matrix` 映射到本缓冲（矩阵为逻辑 dp 空间，内部乘 `scale_` 到物理像素）。
      * 合成尊重本缓冲的裁剪栈与 `global_alpha`（透明度由此统一生效）。
      *
-     * @param src   源 Painter（已 begin，逻辑尺寸 = 其 begin 尺寸，物理 = *m_scale）。
+     * @param src   源 Painter（已 begin，逻辑尺寸 = 其 begin 尺寸，物理 = *scale_）。
      * @param matrix 逻辑 dp 空间仿射矩阵（含平移/旋转/缩放，建议绕内容中心构造）。
      */
     auto composite(const Painter &src, const Matrix2D &matrix) -> void;

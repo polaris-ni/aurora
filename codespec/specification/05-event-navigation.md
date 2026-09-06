@@ -45,7 +45,7 @@ struct Event {
 
 枚举：`MouseButton{Left, Right, Middle}`、`MouseAction`（`event.h:20`）、`KeyAction{Down, Up}`、`ModifierKey`（`event.h:30）、`KeyCode`（`keycode.h:12`）。
 
-**滚动方向约定**：`ScrollEvent::delta_y` 正方向为「向上滚动」（应露出上方内容、offset 减小）。所有滚动控件统一用 `m_offset - e.delta_y * step`；误用 `+` 会导致方向相反。
+**滚动方向约定**：`ScrollEvent::delta_y` 正方向为「向上滚动」（应露出上方内容、offset 减小）。所有滚动控件统一用 `offset_ - e.delta_y * step`；误用 `+` 会导致方向相反。
 
 ### 2.3 坐标契约
 
@@ -95,7 +95,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 ### 4.1 FocusManager
 
-`FocusManager`（`event/focus.h:32`）持 `m_root` 与 `m_focused`，接口：`set_root(Widget*)`、`set_focus(Widget*, FocusDirection)`、`move_focus(FocusDirection)`、`focused()`。
+`FocusManager`（`event/focus.h:32`）持 `root_` 与 `focused_`，接口：`set_root(Widget*)`、`set_focus(Widget*, FocusDirection)`、`move_focus(FocusDirection)`、`focused()`。
 
 `FocusDirection`（`focus.h:17`）取值 `Forward` `Backward` `Up` `Down` `Left` `Right`。
 
@@ -103,7 +103,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 ### 4.2 组件焦点接口
 
-`Widget` 提供：`focusable()`、`set_focusable(bool)`、`tab_index()`、`set_tab_index(int)`、`is_focused()`、`request_focus()`、`on_focus_change(bool)`（虚钩子，基类维护 `m_is_focused`）。
+`Widget` 提供：`focusable()`、`set_focusable(bool)`、`tab_index()`、`set_tab_index(int)`、`is_focused()`、`request_focus()`、`on_focus_change(bool)`（虚钩子，基类维护 `is_focused_`）。
 
 **焦点管理器「随派发可得」**：`EventDispatcher::dispatch(Widget&, MouseEvent&, FocusManager*)` 在派发期经线程局部暴露「当前焦点管理器」（`current_focus_manager()`），`request_focus()` 读之，无需在每控件上递归注入。无焦点管理器（`nullptr`）时 `request_focus` 静默 no-op。
 
@@ -129,8 +129,8 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 | 识别器 | 说明 |
 |:---|:---|
-| `PinchRecognizer` | 双指捏合缩放；锁定两个 pointer id，跟踪 `m_initial_distance` / `m_current_distance` |
-| `RotationRecognizer` | 双指旋转；锁定两个 pointer id，跟踪 `m_initial_angle` / `m_current_angle` |
+| `PinchRecognizer` | 双指捏合缩放；锁定两个 pointer id，跟踪 `initial_distance_` / `current_distance_` |
+| `RotationRecognizer` | 双指旋转；锁定两个 pointer id，跟踪 `initial_angle_` / `current_angle_` |
 
 `Modifier` 层提供 `.draggable(...)` 与 `.long_press(...)` 两个手势修饰节点（单指），由 `Draggable` / `LongPress` 驱动（见 [`07-environment-modifier.md`](07-environment-modifier.md)）。
 
@@ -139,7 +139,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 | 类型 | 说明 | 位置 |
 |:---|:---|:---|
 | `DragData` | 拖拽载荷，含 `mime_type`（`"text/plain"`、`"aurora/widget"` 或自定义） | `drag_drop.h:16` |
-| `DragSession` | 一次拖拽会话，跟踪 `m_origin` 与 `m_active` | `drag_drop.h:39` |
+| `DragSession` | 一次拖拽会话，跟踪 `origin_` 与 `active_` | `drag_drop.h:39` |
 | `DropTargetCallbacks` | 放置目标回调集 | `drag_drop.h:77` |
 
 ---

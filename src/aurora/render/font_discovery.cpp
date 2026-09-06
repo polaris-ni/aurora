@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <ranges>
 #include <unordered_map>
 
 #include "aurora/core/log.h"

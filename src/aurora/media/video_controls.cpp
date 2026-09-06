@@ -69,7 +69,7 @@ auto VideoControls::build_children() -> void {
             Node(std::move(vol))};
     adopt_children({Node(std::make_unique<Row>(std::move(row)))});
 
-    // 子控件已归容器所有，从成员 m_children 中反查指针，避免保存局部 unique_ptr 的地址。
+    // 子控件已归容器所有，从成员 children_ 中反查指针，避免保存局部 unique_ptr 的地址。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-static-cast-downcast): 子控件类型由本函数构造顺序保证
     // NOLINTNEXTLINE 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     auto &row_widget = static_cast<Row &>(children_[0].widget());

@@ -15,7 +15,7 @@
 //
 // pimpl 封装：公共头不再包含 <windows.h> / <windowsx.h>，所有 Win32/GDI 细节（HWND/HINSTANCE/
 // 消息分发 / 键码映射 / UTF-8 转换等）移入 src/aurora/window/win32_window.cpp 的 Impl，
-// 仅暴露 `std::unique_ptr<Impl> m_pimpl`；跨平台消费者（如 D3D11Surface、Headless 测试）
+// 仅暴露 `std::unique_ptr<Impl> pimpl_`；跨平台消费者（如 D3D11Surface、Headless 测试）
 // 无需拉入重型平台头。原生句柄以 `void*` 暴露（避免公共头引入 <windows.h>），
 // 调用方如需真实 `HWND` 显式 `static_cast` 即可。整文件被 #ifdef AURORA_BACKEND_WIN32 包裹。
 #ifdef AURORA_BACKEND_WIN32
@@ -26,7 +26,7 @@ namespace aurora {
 ///
 /// 不含「像素如何上屏」：present 由 Win32Surface(GDI SetDIBitsToDevice) /
 /// D3D11Surface(纹理上传) 各自实现，宿主仅在 WM_SIZE/WM_PAINT 时调用
-/// `m_present_request` 触发 Window 的同步重渲染（消除最大化白闪）。
+/// `present_request_` 触发 Window 的同步重渲染（消除最大化白闪）。
 class Win32Window {
   public:
     using EventHandler = std::function<void(Event &)>;

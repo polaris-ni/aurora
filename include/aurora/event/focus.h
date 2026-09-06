@@ -69,7 +69,7 @@ class FocusManager {
 
     /// @brief 焦点控件的存活判定：由 shared_ptr 持有且已被回收时返回 nullptr。
     ///
-    /// 焦点控件常在自身被重建/回收后仍留在 `m_focused` 里（如输入框所在页面被
+    /// 焦点控件常在自身被重建/回收后仍留在 `focused_` 里（如输入框所在页面被
     /// `push_replacement` 换掉），此后任何按键都会对已释放内存做虚调用。
     /// 与 `HitNode` 同构：构造时探测是否由 `shared_ptr` 持有，栈/成员控件回退为裸指针。
     [[nodiscard]] auto live_focused() const -> Widget *;

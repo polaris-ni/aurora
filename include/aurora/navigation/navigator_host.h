@@ -37,10 +37,10 @@ class NavigatorHost : public Widget {
 
     /// @brief 从 `Animator` 摘除本host注册的控制器与绑定。
     ///
-    /// `begin_transition` 会把成员 `m_ctrl` / `m_progress` 注册进 `m_anim`（通常是
+    /// `begin_transition` 会把成员 `ctrl_` / `progress_` 注册进 `anim_`（通常是
     /// `Application` 的长生命周期 Animator）。本 host 是 shared_ptr 持有的 widget，
     /// 可能因 `present_root` 换根或父子树重建而先于 Animator 销毁；若不摘除，
-    /// 下一帧 `Animator::tick` 就会 tick 已释放的 `m_ctrl` 并写入已释放的 `m_progress`。
+    /// 下一帧 `Animator::tick` 就会 tick 已释放的 `ctrl_` 并写入已释放的 `progress_`。
     ~NavigatorHost() override {
         if (bound_) {
             anim_.remove(ctrl_);
@@ -157,7 +157,7 @@ class NavigatorHost : public Widget {
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         if (display_) {
             // 登记布局父节点：缓存失效沿布局父链向上传播依赖此链完整。
-            // 此前遗漏 → Provider/AppShell 的 m_layout_parent 为 null → 后代 mark_needs_layout
+            // 此前遗漏 → Provider/AppShell 的 layout_parent_ 为 null → 后代 mark_needs_layout
             // 的失效传播到不了 NavigatorHost，其布局缓存永不失效 → 第二次整树重排命中缓存
             // 直接 return，AppShell/BodyView 等动态子控件永不重建（骨架→真实内容切换、banner
             // 出场等依赖重排的逻辑全部失效，表现为内容空白/淡灰）。

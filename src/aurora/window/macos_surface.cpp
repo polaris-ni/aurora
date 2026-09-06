@@ -8,7 +8,7 @@
 // - 事件翻译：NSView 的 mouseDown/Up/Moved/keyDown/Up/flagsChanged/scrollWheel 翻译为 aurora Event。
 // - 帧循环：CVDisplayLink 或 dispatch_source_t 定时器驱动；macOS 14+ 推荐 CADisplayLink。
 // - DPI：NSWindow backingScaleFactor（Retina 2x/3x）→ scale_factor()。
-// - 关闭语义：windowShouldClose: → m_should_close = true。
+// - 关闭语义：windowShouldClose: → should_close_ = true。
 //
 // 本文件为骨架，全部方法在 macOS 环境实写后替换 stub。
 
@@ -78,7 +78,7 @@ auto MacOSSurface::painter() -> Painter & { return painter_; }
 
 auto MacOSSurface::present() -> Result<bool> {
     // TODO(macOS): 实写上屏
-    // 1. 从 m_painter.data() 获取 RGBA 帧缓冲
+    // 1. 从 painter_.data() 获取 RGBA 帧缓冲
     // 2. CGDataProviderCreateWithCFData 或 CGDataProviderCreate 包装
     // 3. CGImageCreate(w, h, 8, 32, stride, colorspace, kCGImageAlphaPremultipliedLast, provider, ...)
     // 4. 在 NSView drawRect: 中 [ctx drawImage:cgImage inRect:viewBounds]

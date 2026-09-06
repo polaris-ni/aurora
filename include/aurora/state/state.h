@@ -96,7 +96,7 @@ class State : public SignalView<T>, public StateBase, public std::enable_shared_
 
     auto subscribe(Effect &e) -> void override {
         // 去重 + 惰性摘除失效边：Effect::run() 每帧重跑会重新登记依赖，若不过滤
-        // 同一 Effect 会在 m_observers 中无限累加（动画场景必现）。同时清理已析构
+        // 同一 Effect 会在 observers_ 中无限累加（动画场景必现）。同时清理已析构
         // Effect 残留的失效连接。
         for (auto it = observers_.begin(); it != observers_.end();) {
             if (!(*it)->effect.lock()) {

@@ -45,7 +45,7 @@ class TransitionLayer : public Widget {
         return WidgetDescriptor{.name = "TransitionLayer", .children_policy = "multiple"};
     }
 
-    // 不自行订阅 m_progress：由宿主（NavigatorHost）统一订阅，避免重复绑定同一信号。
+    // 不自行订阅 progress_：由宿主（NavigatorHost）统一订阅，避免重复绑定同一信号。
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
 
     auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {

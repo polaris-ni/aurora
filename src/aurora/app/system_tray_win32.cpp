@@ -7,7 +7,7 @@
 #include "aurora/core/platform.h"
 #ifdef AURORA_PLATFORM_WINDOWS
 #ifndef _WIN32_WINNT
-#define AURORA_WI_N32_WINNT 0x0601  // NOLINT(cppcoreguidelines-macro-usage) Vista+ 版本宏
+#define _WI_N32_WINNT 0x0601  // NOLINT(cppcoreguidelines-macro-usage) Vista+ 版本宏
 #endif
 #ifndef _WIN32_IE
 #define WIN32_IE 0x0600  // NOLINT(cppcoreguidelines-macro-usage, readability-identifier-naming): Windows SDK 版本宏
@@ -38,7 +38,7 @@ struct SystemTray::Impl {
     bool visible = false;
     UINT taskbar_created = 0;
 
-    static constexpr UINT AURORA_M_AURORA_CALLBACK_MAG = WM_APP + 1;
+    static constexpr UINT AURORA_CALLBACK_MAG = WM_APP + 1;
 
     auto create_window() -> bool;
     void destroy_window();
@@ -204,7 +204,7 @@ auto SystemTray::Impl::add_icon() -> bool {
     nid.hWnd = hwnd;
     nid.uID = 1;
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
-    nid.uCallbackMessage = AURORA_M_AURORA_CALLBACK_MAG;
+    nid.uCallbackMessage = AURORA_CALLBACK_MAG;
     nid.hIcon = (hicon != nullptr) ? hicon : LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
     nid.uVersion = NOTIFYICON_VERSION_4;
     update_tip();
@@ -294,7 +294,7 @@ void SystemTray::Impl::show_balloon_impl(const std::string &title, const std::st
 // NOLINTNEXTLINE(modernize-use-trailing-return-type): CALLBACK 调用约定下尾返回类型会改变签名语义
 LRESULT CALLBACK SystemTray::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     auto *impl = reinterpret_cast<SystemTray::Impl *>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-    if (msg == SystemTray::Impl::AURORA_M_AURORA_CALLBACK_MAG) {
+    if (msg == SystemTray::Impl::AURORA_CALLBACK_MAG) {
         if (impl != nullptr) {
             switch (lp) {
                 case WM_LBUTTONUP:

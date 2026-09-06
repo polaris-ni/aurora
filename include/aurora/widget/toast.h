@@ -37,7 +37,7 @@ class ToastHost : public SingleChild {
     ToastHost() = default;
     explicit ToastHost(Node content) : SingleChild(std::move(content)) {
         // Toast 过期由每帧 tick 驱动（见 tick_gestures），须开启 gesture-tick 驱动，
-        // 否则 Widget::tick 在 !m_needs_gesture_tick 时直接返回，过期逻辑永不运行。
+        // 否则 Widget::tick 在 !needs_gesture_tick_ 时直接返回，过期逻辑永不运行。
         needs_gesture_tick_ = true;
     }
 

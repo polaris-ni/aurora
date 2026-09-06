@@ -8,6 +8,7 @@
 //
 // 设计：逐像素点内测试（图标尺寸下开销可忽略），零三方依赖，与 stb_image 同风格。
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <iterator>

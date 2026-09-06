@@ -53,16 +53,16 @@ struct DrawCmd {
     ShaderMaskKind mask_kind = ShaderMaskKind::LinearFade;
     render::TextAAMode aa_mode = render::TextAAMode::Supersample;
     double alpha = 1.0;  ///< SetAlpha 目标不透明度
-    int str_idx = -1;  ///< 文本字符串在 m_str_pool 的索引
-    int col_idx = -1;  ///< 渐变颜色数组在 m_color_pool 的索引
-    int flt_idx = -1;  ///< 渐变停靠数组在 m_float_pool 的索引
+    int str_idx = -1;  ///< 文本字符串在 str_pool_ 的索引
+    int col_idx = -1;  ///< 渐变颜色数组在 color_pool_ 的索引
+    int flt_idx = -1;  ///< 渐变停靠数组在 float_pool_ 的索引
     // 文本排版标量（拆出存储以避免直接持有 TextLayoutOpts，减少头耦合）
     float text_ls = 0, text_ws = 0;
     bool text_italic = false;
-    int font_idx = -1;  ///< 文本字体在 m_font_pool 的索引
-    int image_idx = -1;  ///< 图像在 m_image_pool 的索引
+    int font_idx = -1;  ///< 文本字体在 font_pool_ 的索引
+    int image_idx = -1;  ///< 图像在 image_pool_ 的索引
     // Composite（离屏合成）专用
-    int matrix_idx = -1;  ///< 离屏缓冲变换矩阵在 m_matrix_pool 的索引
+    int matrix_idx = -1;  ///< 离屏缓冲变换矩阵在 matrix_pool_ 的索引
     float composite_scale = 1.0F;  ///< 离屏缓冲的设备像素缩放（源 Painter 的 scale）
 };
 

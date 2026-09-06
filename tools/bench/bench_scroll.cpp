@@ -5,7 +5,7 @@
 // Notes:
 // - This program is a "benchmark/diagnostic" tool, not a unit test; it is not wired into CTest
 //   (timings are affected by environment jitter). But the counter readings are deterministic under
-//   Headless; the regression assertions are owned by tests/test_scroll_bench.cpp.
+//   Headless; the regression assertions are owned by tests/unit/utest_scroll_bench.cpp.
 // - Counters only have values in a build with `AURORA_ENABLE_PROFILING=ON`; timings should be
 //   collected in Release + PROFILING=OFF (see codespec/BUILD_OPTIONS.md).
 // - Output goes to stdout via AURORA_LOG_RAW (project hard rule #8: program product output uses the

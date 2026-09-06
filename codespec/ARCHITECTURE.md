@@ -49,7 +49,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 ### 3.2 几何权威
 
-命中链的根矩形取自根 `Node` 的 `m_bounds`（由 `Window::present_root` 写入窗口矩形）；子树几何由容器在布局时经 `child.set_bounds(box)` 写入各 `Node`。`Widget` **不持有任何几何缓存**。
+命中链的根矩形取自根 `Node` 的 `bounds_`（由 `Window::present_root` 写入窗口矩形）；子树几何由容器在布局时经 `child.set_bounds(box)` 写入各 `Node`。`Widget` **不持有任何几何缓存**。
 
 输入坐标本地化在 `EventDispatcher`：命中链 `hit_test_chain` 返回 `std::vector<HitNode>`，派发器在冒泡每个控件前写入 `MouseEvent::local_position = position - origin`，控件在 `on_pointer_event` 中直接消费本地坐标。
 
@@ -62,7 +62,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 > 只用 `weak_ptr` 会让栈上控件恒 `lock` 失败而静默吞掉全部事件；只用裸指针则是 use-after-free。两者都不可取。
 
-**同步回调期间必须持住强引用**：事件派发是同步的，用户回调可以在回调内销毁触发它的控件；而回调返回后框架仍要继续访问该控件（`Widget::on_pointer_event` 写 `m_pressed` 等）。因此凡要解引用跨帧缓存的控件引用，都须在**整个调用期间**持有强引用（`HitNode::lock(keepalive)`），而非仅做一次「取指针 + 判空」。
+**同步回调期间必须持住强引用**：事件派发是同步的，用户回调可以在回调内销毁触发它的控件；而回调返回后框架仍要继续访问该控件（`Widget::on_pointer_event` 写 `pressed_` 等）。因此凡要解引用跨帧缓存的控件引用，都须在**整个调用期间**持有强引用（`HitNode::lock(keepalive)`），而非仅做一次「取指针 + 判空」。
 
 **观察者图生命周期安全**：信号源与 `Effect` 经 `Connection`（`weak_ptr` 锚点）连接，`notify()` 惰性摘除失效边，任一侧先析构均不解引用悬垂对象。
 
@@ -182,7 +182,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 - 状态变更**不**触发整树重建，只通知订阅它的 widget 子树（fine-grained）。
 - **布局与渲染按脏分类按需执行**（脏区追踪，默认开启），决策矩阵见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §3.2。仅绘制脏的帧跳过 `begin_frame` 保留上帧缓冲、对脏区并界先 `clear_rect` 零基底、再以 `Surface::clear_color()` 重铺脏区底色、然后 `push_clip` 裁剪重绘，使脏区重绘与整帧**逐位一致**。若不重铺底色，脏区内无不透明背景的控件（裸 `Text`、无背景 `LazyList` 子项）归零后只画字形会露出黑底。
 - **脏区裁剪期间禁用 Display List 子树缓存**（`Painter::set_skip_dl_record`，部分脏路径设置、退出即清）：partial clip 下 `paint` 只遍历命中裁剪区的子节点，若此时录制 DL 会**丢失裁剪区外子节点的命令**，后续整帧回放该 DL 时这些子节点永久消失。故裁剪帧强制直绘，下帧整帧再重录完整 DL。
-- **子节点视图接口 `child_nodes()` 返回 `const std::vector<Node>&`（引用，非副本）**：`Container` 直接返回 `m_children` 成员，单子容器与惰性容器以 `mutable` 成员缓存惰性重建。若按值返回 `std::vector<Node>`，临时副本析构会触发 `Node::~Node` 清空子控件的 `m_layout_parent`，遍历后子控件 `request_frame` 沿父链上溯断链、脏标记无法到达渲染根。调用方仅限**单帧内只读遍历**（`dump_tree` / `validate` / `hit_test` / inspector），树重建期间引用可能失效。
+- **子节点视图接口 `child_nodes()` 返回 `const std::vector<Node>&`（引用，非副本）**：`Container` 直接返回 `children_` 成员，单子容器与惰性容器以 `mutable` 成员缓存惰性重建。若按值返回 `std::vector<Node>`，临时副本析构会触发 `Node::~Node` 清空子控件的 `layout_parent_`，遍历后子控件 `request_frame` 沿父链上溯断链、脏标记无法到达渲染根。调用方仅限**单帧内只读遍历**（`dump_tree` / `validate` / `hit_test` / inspector），树重建期间引用可能失效。
 - **三端一致**：脏追踪是 `Surface` 无关的核心层改动，全部后端共用同一 `present_root`；仅各后端在上屏方式（`BitBlt` / `XPutImage` / `wl_shm` / 纹理上传 / `putImageData`）与系统重绘处理上有差异。
 
 ### 5.2 事件驱动帧循环
@@ -216,10 +216,10 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 - **命中测试链**：`Widget::hit_test_chain` 返回「根 → 最深」的节点路径。
 - **冒泡**：`EventDispatcher::dispatch(MouseEvent&)` 自最深向根调用 `on_pointer_event`；某节点写 `e.handled = true` 即停止向上传递。
 - **纯展示控件**（如 `Text`）不置位 `wants_click()`，以便事件冒泡给父级 `Clickable`；可点击控件（如 `Button`）覆写 `wants_click()` 为「有 `on_click`」。
-- **指针点击语义**：`Press` 置 `pressed`；`Release` 且 `pressed` 触发一次；点击与长按互斥（`m_click_pending` 在 Press 置位，Release 时若未触发长按且未拖拽才触发 click）。
+- **指针点击语义**：`Press` 置 `pressed`；`Release` 且 `pressed` 触发一次；点击与长按互斥（`click_pending_` 在 Press 置位，Release 时若未触发长按且未拖拽才触发 click）。
 - **焦点**：`FocusManager`（root + focused）按 `tab_index()` 排序移动（`move_focus(FocusDirection)` 循环取前 / 后）；`Widget::request_focus()` 读取派发期线程局部「当前焦点管理器」（`current_focus_manager()`），控件自身不持有 `FocusManager*`。
 - **多点触控并发（按指针分发）**：`TouchDispatcher`（实例级，由 `Application` 持有）对 `TouchEvent` 按 pointer id 做命中缓存与独立路由——某 pointer id 首按做命中测试并缓存链，活跃期复用缓存链，抬起即清缓存。因此 `draggable` / `long_press` / `pinch` / `rotate` 各自绑定具体指针，支持单指持发 + 多指并发。每次 `TouchEvent` 同时 (1) 向缓存链广播完整 `TouchEvent`（原始流，供 `TouchListener` 修饰回调）、(2) 合成带 `pointer_id` 的 `MouseEvent` 驱动既有点击 / 拖拽手势。
-- **悬停态基础设施**：`EventDispatcher` 在无捕获 Move 时把新命中链与上次悬停链 diff，对离开 / 进入控件回调 `Widget::on_hover_change(bool)`（默认仅记录 `m_hover` 不标脏；需要视觉反馈的控件覆写并追加 `mark_needs_paint`）；`Widget::hovered()` 供 `on_paint` 读取。Win32 宿主经 `TrackMouseEvent(TME_LEAVE)` 在光标离窗时合成远离 Move 清除悬停，否则高亮残留。
+- **悬停态基础设施**：`EventDispatcher` 在无捕获 Move 时把新命中链与上次悬停链 diff，对离开 / 进入控件回调 `Widget::on_hover_change(bool)`（默认仅记录 `hover_` 不标脏；需要视觉反馈的控件覆写并追加 `mark_needs_paint`）；`Widget::hovered()` 供 `on_paint` 读取。Win32 宿主经 `TrackMouseEvent(TME_LEAVE)` 在光标离窗时合成远离 Move 清除悬停，否则高亮残留。
 
 ---
 
@@ -241,10 +241,10 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 ### 8.3 Scroll 离屏内容缓冲（滑窗）
 
-`Scroll` 把内容录进与滚动偏移无关的**内容坐标滑窗缓冲** `m_content`（`unique_ptr<Painter>`），尺寸 = 视口高 × (1 + 2 × `overscan`)，仅覆盖可见区上下各 `overscan` 视口高的带而非整页；`m_buffer_origin_y` 标记该带在内容坐标系中的锚点。`ScrollProps::overscan`（默认 `1.0F`，共 3 屏厚）控制缓冲带厚度。
+`Scroll` 把内容录进与滚动偏移无关的**内容坐标滑窗缓冲** `content_`（`unique_ptr<Painter>`），尺寸 = 视口高 × (1 + 2 × `overscan`)，仅覆盖可见区上下各 `overscan` 视口高的带而非整页；`buffer_origin_y_` 标记该带在内容坐标系中的锚点。`ScrollProps::overscan`（默认 `1.0F`，共 3 屏厚）控制缓冲带厚度。
 
-- 滚动帧满足「内容仍有效且为纯滚动且未触发重锚点」时，直接 `p.composite(*m_content, translate(0, m_buffer_origin_y - m_offset_y))` 一次 blit，不重新栅格。
-- 视口逼近缓冲带两端时把 `m_buffer_origin_y` 重锚并**重录当前缓冲带**。
+- 滚动帧满足「内容仍有效且为纯滚动且未触发重锚点」时，直接 `p.composite(*content_, translate(0, buffer_origin_y_ - offset_y_))` 一次 blit，不重新栅格。
+- 视口逼近缓冲带两端时把 `buffer_origin_y_` 重锚并**重录当前缓冲带**。
 - 非滚动帧（子动画 / 内容变化）按脏区**重录当前缓冲带**。
 
 重锚点几何与 composite 几何均用**逻辑 dp**，避免单位 bug 导致缓冲错位。该设计使缓冲字节数 = 视口像素 × 4 × (1 + 2 × `overscan`)，**与内容总量无关**。
@@ -315,8 +315,8 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 ### 10.5 硬约束
 
-- **快速路径逐位一致**：所有快速路径必须与慢路径 golden 零差异，修改后须跑 `test_offscreen` 全量回归。
-- **SIMD 双实现确定性**：SIMD 路径必须与标量黄金路径逐位一致（`-ffp-contract=off`、同浮点运算序列、整型 `cvtt` 截断）；CI 由 `test_simd_parity` 逐位比对，一票否决。
+- **快速路径逐位一致**：所有快速路径必须与慢路径 golden 零差异，修改后须跑 `utest_offscreen` 全量回归。
+- **SIMD 双实现确定性**：SIMD 路径必须与标量黄金路径逐位一致（`-ffp-contract=off`、同浮点运算序列、整型 `cvtt` 截断）；CI 由 `utest_simd_parity` 逐位比对，一票否决。
 
 ### 10.6 调试能力的设计依据
 
@@ -432,15 +432,15 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 
 ### 14.2 分层
 
-**单元测试（`tests/test_*.cpp`）**：每个公共源文件对应一个 `test_*.cpp`（与 `examples/demos/demo_*.cpp` 同构：1 源文件 ↔ 1 测试 ↔ 1 demo）。经 `cmake/AuroraTests.cmake` 收集（`file(GLOB CONFIGURE_DEPENDS)`），**全部用例链入单一可执行 `aurora_test_runner`**：用例用 `AURORA_TEST()` 宏静态自注册（用例名 = 文件名 stem），`main()` 由 `tests/au_test_main.cpp` 唯一提供。CTest 逐条以 `aurora_test_runner --run=<stem>` 注册（进程隔离），并由 `registry_integrity` 守护漏注册。
+**单元测试（`tests/unit/utest_*.cpp`）**：每个公共源文件对应一个 `utest_*.cpp`（与 `examples/demos/demo_*.cpp` 同构：1 源文件 ↔ 1 测试 ↔ 1 demo）；跨控件 / 端到端集成用例放 `tests/integration/itest_*.cpp`。经 `cmake/AuroraTests.cmake` 收集（`file(GLOB CONFIGURE_DEPENDS)`），**全部用例链入单一可执行 `aurora_test_runner`**：用例用 `AURORA_TEST()` 宏静态自注册（用例名 = 文件名 stem），`main()` 由 `tests/aurora_test_main.cpp` 唯一提供。CTest 逐条以 `aurora_test_runner --run=<stem>` 注册（进程隔离），并由 `registry_integrity` 守护漏注册。
 
-**Golden 测试（渲染像素级）**：以 `test_offscreen` 为主，把 widget 树渲染到 `HeadlessSurface` 内存缓冲，与 golden 基准图逐像素比对。依赖相对路径，须从**仓库根**运行（`ctest` 已为其把 CWD 设为仓库根），可用 `AURORA_GOLDEN_DIR` 覆盖解析基准。
+**Golden 测试（渲染像素级）**：以 `utest_offscreen` 为主，把 widget 树渲染到 `HeadlessSurface` 内存缓冲，与 golden 基准图逐像素比对。依赖相对路径，须从**仓库根**运行（`ctest` 已为其把 CWD 设为仓库根），可用 `AURORA_GOLDEN_DIR` 覆盖解析基准。
 
 **性能基准**：见 §10 与 [`specification/06-app-platform.md`](specification/06-app-platform.md) §10。
 
 ### 14.3 组织约定
 
-- **命名**：测试文件以 `test` 为**前缀**（`test_*.cpp`，非 `_test` 后缀），与源文件同名主体。
+- **命名**：测试文件以 `utest`（单元，`tests/unit/`）/ `itest`（集成，`tests/integration/`）为**前缀**（非 `_test` 后缀），与源文件同名主体；每个测试 TU 包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`）内。
 - **运行**：`ctest -R <名>` 逐条拉起 `aurora_test_runner --run=<stem>`；从仓库根运行以保证相对路径解析；本地复跑以最高并行度执行（`ctest -j` 配满核心）。共享资源竞争用例（剪贴板、计时）以 `RUN_SERIAL` 单独隔离错峰，而非把整套退回串行。
 - **新增约束**：新增公共 API / widget / 核心逻辑须配套单测并接入 CTest。
 

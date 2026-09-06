@@ -406,11 +406,11 @@ class TextInput : public LeafWidget {
         const float lx = e.local_position.x - padding_.left;  // 文本左内边距
         if (e.action == MouseAction::Press) {
             // 含头含尾：选区端点用 hit_test_char_inclusive（点击字符任意位置均计入该字符），
-            // m_caret 仍用 hit_test_char（caret 模型）作为编辑光标位置。
+            // caret_ 仍用 hit_test_char（caret 模型）作为编辑光标位置。
             const size_t ch = render::FontEngine::hit_test_char_inclusive(v, lx, f);
             caret_ = render::FontEngine::hit_test_char(v, lx, f);
             sel_start_ = ch;  // 锚点（含入字符）
-            sel_end_ = AURORA_NO_SEL;  // 尚未形成选区，待拖拽
+            sel_end_ = NO_SEL;  // 尚未形成选区，待拖拽
             selecting_ = true;
             request_focus();
             mark_needs_paint();
@@ -442,7 +442,7 @@ class TextInput : public LeafWidget {
                 sel_start_ = 0;
                 sel_end_ = n - 1;  // 含尾：最后一个字符下标
             } else {
-                sel_end_ = AURORA_NO_SEL;
+                sel_end_ = NO_SEL;
             }
             caret_ = n;
             mark_needs_paint();
@@ -477,7 +477,7 @@ class TextInput : public LeafWidget {
             }
             std::string clip = Clipboard::get_text();
             if (!clip.empty()) {
-                if (sel_end_ != AURORA_NO_SEL) {
+                if (sel_end_ != NO_SEL) {
                     delete_selection();
                 }
                 if (max_length_ > 0) {
@@ -496,7 +496,7 @@ class TextInput : public LeafWidget {
                 value_ = pv;
                 caret_ += cp_count(clip);
                 sel_start_ = caret_;
-                sel_end_ = AURORA_NO_SEL;
+                sel_end_ = NO_SEL;
                 notify_changed();
                 mark_needs_paint();
             }
@@ -521,14 +521,14 @@ class TextInput : public LeafWidget {
         if (dir != 0) {
             if (shift) {
                 // 含头含尾：以当前 caret 作为含入锚点，按方向扩展选区。
-                if (sel_end_ == AURORA_NO_SEL) {
+                if (sel_end_ == NO_SEL) {
                     sel_start_ = caret_;
                     sel_end_ = caret_;  // 先建立 1-char 选区锚点
                 }
                 const auto nc = static_cast<long long>(caret_) + dir;
                 caret_ = static_cast<size_t>(std::clamp(nc, 0LL, static_cast<long long>(n)));
                 if (dir > 0) {
-                    sel_end_ = (caret_ == 0) ? AURORA_NO_SEL : caret_ - 1;  // 含尾最后字符 = caret-1
+                    sel_end_ = (caret_ == 0) ? NO_SEL : caret_ - 1;  // 含尾最后字符 = caret-1
                 } else {
                     sel_end_ = caret_;  // 含尾 = 新 caret 处的字符
                 }
@@ -536,7 +536,7 @@ class TextInput : public LeafWidget {
                 const auto nc = static_cast<long long>(caret_) + dir;
                 caret_ = static_cast<size_t>(std::clamp(nc, 0LL, static_cast<long long>(n)));
                 sel_start_ = caret_;
-                sel_end_ = AURORA_NO_SEL;  // 无选区
+                sel_end_ = NO_SEL;  // 无选区
             }
             mark_needs_paint();
             e.is_handled = true;
@@ -548,7 +548,7 @@ class TextInput : public LeafWidget {
                 e.is_handled = true;
                 return;
             }
-            if (sel_end_ != AURORA_NO_SEL) {
+            if (sel_end_ != NO_SEL) {
                 delete_selection();
             } else {
                 delete_before_caret();
@@ -567,7 +567,7 @@ class TextInput : public LeafWidget {
             e.is_handled = true;  // 只读态吞掉输入不落字
             return;
         }
-        if (sel_end_ != AURORA_NO_SEL) {
+        if (sel_end_ != NO_SEL) {
             delete_selection();  // 选区替换
         }
         std::string ins = e.text;
@@ -590,7 +590,7 @@ class TextInput : public LeafWidget {
         value_ = v;
         caret_ += cp_count(ins);
         sel_start_ = caret_;
-        sel_end_ = AURORA_NO_SEL;
+        sel_end_ = NO_SEL;
         notify_changed();
         mark_needs_paint();
         e.is_handled = true;
@@ -599,8 +599,8 @@ class TextInput : public LeafWidget {
     /// @brief 当前文本值（只读，供测试 / 外部读取）。
     [[nodiscard]] auto value() const -> std::string { return value_.get(); }
 
-    /// @brief 是否有活动选区（无选区时 m_sel_end == AURORA_NO_SEL）。
-    [[nodiscard]] auto has_selection() const -> bool { return sel_end_ != AURORA_NO_SEL; }
+    /// @brief 是否有活动选区（无选区时 sel_end_ == NO_SEL）。
+    [[nodiscard]] auto has_selection() const -> bool { return sel_end_ != NO_SEL; }
 
     /// @brief 当前选中的文本（含头含尾：返回 [min, max] 区间内的全部字符）。无选区返回空。
     [[nodiscard]] auto selected_text() const -> std::string {
@@ -649,7 +649,7 @@ class TextInput : public LeafWidget {
             bounds.origin.y + padding_.top + ((bounds.size.height - padding_.top - padding_.bottom - th) * 0.5F);
 
         // 选区高亮（含头含尾模型）：无选区不画；端点字符（含行尾/行首）始终计入。
-        if (!empty && sel_end_ != AURORA_NO_SEL) {
+        if (!empty && sel_end_ != NO_SEL) {
             const size_t a = std::min(sel_start_, sel_end_);
             const size_t b = std::max(sel_start_, sel_end_);
             const float x0 = tx + render::FontEngine::caret_x(shown, a, f);
@@ -746,12 +746,12 @@ class TextInput : public LeafWidget {
     std::function<void(const std::string &)> on_submit_;  ///< Enter 提交触发
 
     // 文字选区状态（含头含尾模型，与 Text 一致：sel_start_/sel_end_ 为「被选中字符的码点下标」；
-    // 无选区时 sel_end_ == AURORA_NO_SEL。m_caret 为编辑光标位置（caret 下标，介于字符之间）。UTF-8 安全）
+    // 无选区时 sel_end_ == NO_SEL。caret_ 为编辑光标位置（caret 下标，介于字符之间）。UTF-8 安全）
     size_t sel_start_ = 0;
-    size_t sel_end_ = AURORA_NO_SEL;
+    size_t sel_end_ = NO_SEL;
     size_t caret_ = 0;
     bool selecting_ = false;
-    static constexpr size_t AURORA_NO_SEL = static_cast<size_t>(-1);
+    static constexpr size_t NO_SEL = static_cast<size_t>(-1);
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
     // UTF-8 码点原语已收口到 aurora::utf8_cp_*（见 core/utf8.h，dup-1）；此处委托，避免重复实现。
@@ -782,7 +782,7 @@ class TextInput : public LeafWidget {
         value_ = v;
         caret_ = a;
         sel_start_ = a;
-        sel_end_ = AURORA_NO_SEL;  // 删除后无选区
+        sel_end_ = NO_SEL;  // 删除后无选区
     }
     auto delete_before_caret() -> void {
         if (caret_ == 0) {
@@ -805,7 +805,7 @@ class TextInput : public LeafWidget {
         value_ = v;
         --caret_;
         sel_start_ = caret_;
-        sel_end_ = AURORA_NO_SEL;  // 退格后无选区
+        sel_end_ = NO_SEL;  // 退格后无选区
     }
 };
 

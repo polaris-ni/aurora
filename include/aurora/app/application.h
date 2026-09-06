@@ -197,7 +197,7 @@ class Application {
                 }
                 // 帧调度决策：本帧末尾计算下次唤醒等待，交由 Window::run 执行。
                 // 决策在 present_root 之后取脏——渲染期间产生的新脏（如动画 State 写回）
-                // 已在 m_dirty 中，查完脏再睡，同线程不丢帧；跨线程经 request_wake 唤醒。
+                // 已在 dirty_ 中，查完脏再睡，同线程不丢帧；跨线程经 request_wake 唤醒。
                 if (opts_.power_saving) {
                     const double elapsed_ms =
                         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - now).count();

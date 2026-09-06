@@ -243,7 +243,7 @@ auto Storage::async_list() const -> Task<std::vector<std::string>> {
 auto Storage::transaction(std::function<Result<void>(Storage &)> body) -> Result<void> {
     // 抑制逐操作通知。RAII 守卫保证 body 抛异常时标志必然复位——否则此后所有
     // put/remove 的变更通知会被永久静默（此前直接置位/复位即存在此缺陷）。
-    // 标志读写均经 m_listener_mutex：异步回调可能在 worker 线程并发发射变更。
+    // 标志读写均经 listener_mutex_：异步回调可能在 worker 线程并发发射变更。
     struct NotifySuppressGuard {
         Storage *s;
         explicit NotifySuppressGuard(Storage *storage) : s(storage) {

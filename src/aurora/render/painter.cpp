@@ -281,8 +281,8 @@ auto Painter::fill_rect_fast_path(int &x0, int &y0, int &x1, int &y1, Color c) -
     } else {
         // 半透明：内联 source-over（与 set_pixel 同一浮点公式，位级一致），
         // 省去逐像素的越界/裁剪/全局透明度开销。
-        // 注意：必须乘以全局透明度 m_global_alpha（转场淡入淡出依赖），
-        // 与 set_pixel 的 c.a *= m_global_alpha 语义一致。
+        // 注意：必须乘以全局透明度 global_alpha_（转场淡入淡出依赖），
+        // 与 set_pixel 的 c.a *= global_alpha_ 语义一致。
         const float a = (static_cast<float>(c.a) * static_cast<float>(global_alpha_)) / 255.0f;
         const float inv = 1.0f - a;
         for (int y = y0; y < y1; ++y) {
@@ -332,7 +332,7 @@ auto Painter::fill_rect_slow_path(int x0, int y0, int x1, int y1, Color c) -> vo
             rounded_clips.push_back({.cr = &cr, .threshold = cr.anti_alias ? -0.5f : 0.0f});
         }
     }
-    // 慢路径逐像素 source-over 仍须乘以全局透明度 m_global_alpha（与 set_pixel 一致），
+    // 慢路径逐像素 source-over 仍须乘以全局透明度 global_alpha_（与 set_pixel 一致），
     // 否则 set_alpha(<1) 淡入淡出对矩形填充无效（转场/全局淡变）。
     const float fa = (static_cast<float>(c.a) * static_cast<float>(global_alpha_)) / 255.0f;
     const float finv = 1.0f - fa;
@@ -585,11 +585,11 @@ auto Painter::shift_pixels(float dy) -> void {
     const std::size_t gap_bytes = static_cast<std::size_t>(abs_shift) * row_bytes;
     AURORA_PROFILE_COUNT(pixels_filled, static_cast<std::uint64_t>(width_) * static_cast<std::uint64_t>(height_));
     if (shift > 0) {
-        // 内容下移：行 [0, keep_rows) → [abs_shift, m_height)，顶部 abs_shift 行让出。
+        // 内容下移：行 [0, keep_rows) → [abs_shift, height_)，顶部 abs_shift 行让出。
         std::memmove(base + gap_bytes, base, keep_bytes);
         std::memset(base, 0, gap_bytes);
     } else {
-        // 内容上移：行 [abs_shift, m_height) → [0, keep_rows)，底部 abs_shift 行让出。
+        // 内容上移：行 [abs_shift, height_) → [0, keep_rows)，底部 abs_shift 行让出。
         std::memmove(base, base + gap_bytes, keep_bytes);
         std::memset(base + keep_bytes, 0, gap_bytes);
     }
@@ -764,7 +764,7 @@ auto Painter::push_clip(const Rect &r) -> void {
                                 .size = Size{.width = std::max(0.0f, right - x), .height = std::max(0.0f, bottom - y)}},
                    .rounded = false,
                    .radius = 0.0f});
-    // push_clip 只压矩形，m_has_rounded_clip 不变
+    // push_clip 只压矩形，has_rounded_clip_ 不变
 }
 
 auto Painter::push_clip_rounded(const Rect &r, float radius, bool anti_alias) -> void {
@@ -815,7 +815,7 @@ auto Painter::clip_bounds() const -> Rect {
         return Rect{.origin = Point{.x = 0.0f, .y = 0.0f},
                     .size = Size{.width = static_cast<float>(width_), .height = static_cast<float>(height_)}};
     }
-    // m_clip_stack.back().rect 已是各层矩形裁剪的交集（物理像素，pushClip 时与上一层取交），
+    // clip_stack_.back().rect 已是各层矩形裁剪的交集（物理像素，pushClip 时与上一层取交），
     // 圆角裁剪退化为其外接矩形（保守，保证不误剔除）。转回逻辑 dp 以匹配控件全局坐标。
     const Rect &pr = clip_stack_.back().rect;
     const float inv = scale_ > 0.0f ? 1.0f / scale_ : 1.0f;
@@ -960,7 +960,7 @@ auto Painter::set_pixel(int x, int y, Color c) -> void {
         c.a = static_cast<std::uint8_t>(std::max(0.0, std::min(255.0, static_cast<double>(c.a) * cov)));
     }
     // 边界检查：圆角/SDF 裁剪路径下 coverage 不直接限制整数坐标范围（如 clip 落在窗口
-    // 角落或调用方传入负坐标），务必防止 m_pixels 越界写导致访问违规（0xC0000005）。
+    // 角落或调用方传入负坐标），务必防止 pixels_ 越界写导致访问违规（0xC0000005）。
     if (x < 0 || y < 0 || x >= width_ || y >= height_) {
         return;
     }
