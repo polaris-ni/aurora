@@ -32,7 +32,10 @@ def repo_root_of(path):
 
 
 def run(exe, *args, cwd):
-    return subprocess.run([exe, *args], cwd=cwd, capture_output=True, text=True)
+    # encoding="utf-8": generators emit UTF-8; without it Windows decodes with the system
+    # locale (GBK) and the reader thread crashes with UnicodeDecodeError (stdout becomes None).
+    return subprocess.run([exe, *args], cwd=cwd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
 
 
 def main() -> int:

@@ -101,7 +101,11 @@ def main() -> int:
         return 2
 
     # `-` => pure code view: no merge of existing error_codes / debug sections, JSON to stdout.
-    proc = subprocess.run([gen_api, "-"], cwd=repo, capture_output=True, text=True)
+    # encoding="utf-8": gen_api emits UTF-8 JSON; on Windows text=True would otherwise decode
+    # with the system locale (GBK) and crash with UnicodeDecodeError inside the reader thread.
+    proc = subprocess.run(
+        [gen_api, "-"], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
     if proc.returncode != 0:
         print(f"[FAIL] gen_api_tools exited {proc.returncode}")
         if proc.stderr:
