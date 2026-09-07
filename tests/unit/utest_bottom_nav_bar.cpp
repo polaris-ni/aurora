@@ -15,8 +15,6 @@
 
 namespace aurora::test_cases::utest_bottom_nav_bar {
 
-
-
 static auto make_nav() -> std::shared_ptr<au::BottomNavBar> {
     std::vector<au::BottomNavItem> items;
     for (int i = 0; i < 4; ++i) {
@@ -107,6 +105,5 @@ AURORA_TEST() {
         }
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_bottom_nav_bar

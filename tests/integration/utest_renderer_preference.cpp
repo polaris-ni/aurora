@@ -22,7 +22,6 @@
 
 namespace au = aurora;
 
-
 namespace aurora::test_cases::utest_renderer_preference {
 
 AURORA_TEST() {
@@ -86,6 +85,5 @@ AURORA_TEST() {
     }
 #endif  // AURORA_BACKEND_WIN32
 }
-
 
 }  // namespace aurora::test_cases::utest_renderer_preference

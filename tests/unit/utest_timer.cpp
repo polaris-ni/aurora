@@ -33,13 +33,12 @@ AURORA_TEST() {
     // ---- 3. 带 builder 的 Timer：构建子 UI 一次，tick 仍为初值 ----
     {
         int built = 0;
-        Timer t(16ms,
-                [&built](const SignalView<int> &tick) -> Node {
-                    ++built;
-                    (void)tick.get();
-                    return Node{};
-                });
-        AURORA_TEST_CHECK_EQ(built, 1);        // builder 在构造时被调用一次
+        Timer t(16ms, [&built](const SignalView<int> &tick) -> Node {
+            ++built;
+            (void)tick.get();
+            return Node{};
+        });
+        AURORA_TEST_CHECK_EQ(built, 1);  // builder 在构造时被调用一次
         AURORA_TEST_CHECK_EQ(t.ticks().get(), 0);
     }
 

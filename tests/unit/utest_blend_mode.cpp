@@ -17,8 +17,6 @@
 
 namespace aurora::test_cases::utest_blend_mode {
 
-
-
 namespace {
 
 class SolidBox : public LeafWidget {

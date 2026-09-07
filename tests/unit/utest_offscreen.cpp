@@ -21,7 +21,6 @@
 
 namespace aurora::test_cases::utest_offscreen {
 
-
 namespace aurora::tests::sec_golden {
 namespace {
 

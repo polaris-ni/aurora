@@ -5,26 +5,23 @@
 
 #include <cstdio>
 #include <memory>
-#include <string>
-
 #include <nlohmann/json.hpp>
+#include <string>
 
 #include "aurora/aurora.h"
 #include "aurora/core/log.h"
 #include "aurora/widget/serialization.h"
 #include "aurora/widget/slider.h"
-
 #include "aurora_test_harness.h"
 
 namespace aurora::test_cases::utest_slider {
-
 
 namespace serialization = aurora::serialization;
 
 static auto make_press(float x, const float y) -> MouseEvent {
     MouseEvent e;
     e.action = MouseAction::Press;
-    e.position = Point{ .x = x, .y = y };
+    e.position = Point{.x = x, .y = y};
     return e;
 }
 static void fire(Widget &w, MouseEvent e) {
@@ -32,7 +29,8 @@ static void fire(Widget &w, MouseEvent e) {
     w.on_pointer_event(e);
 }
 
-template<typename W> static auto roundtrip(const Json &props, const std::string &type) -> std::shared_ptr<W> {
+template <typename W>
+static auto roundtrip(const Json &props, const std::string &type) -> std::shared_ptr<W> {
     auto back = serialization::from_json(props);
     AURORA_TEST_CHECK_MSG(back.ok(), type + ": from_json succeeded");
     if (!back.ok()) {
@@ -48,18 +46,22 @@ static void test_props() {
     sl.set_active_color(Color::red()).set_inactive_color(Color::blue()).set_range(-1.0, 1.0);
     Json j;
     sl.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["active_color"][0].get<int>() == 255, "slider active=red");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["inactive_color"][2].get<int>() == 255, "slider inactive=blue");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["min"].get<double>(), -1.0), "slider min=-1");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["max"].get<double>(), 1.0), "slider max=1");
 }
 
 static void test_interaction() {
-    Slider sl{ Reactive{ 0.5 } };
+    Slider sl{Reactive{0.5}};
     AURORA_TEST_CHECK_MSG(near_d(sl.value(), 0.5), "Slider: initial 0.5");
     sl.set_value(0.8);
     AURORA_TEST_CHECK_MSG(near_d(sl.value(), 0.8), "Slider: set_value 0.8");
@@ -70,15 +72,15 @@ static void test_interaction() {
     sl.set_value(-5.0);
     AURORA_TEST_CHECK_MSG(near_d(sl.value(), 0.0), "Slider: clamps to min");
 
-    Slider sl2{ Reactive{ 0.0 } };
+    Slider sl2{Reactive{0.0}};
     constexpr BuildContext ctx;
-    sl2.layout(Constraints{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 200, .height = 200 } }, ctx);
+    sl2.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 200, .height = 200}}, ctx);
 
     fire(sl2, make_press(100.0F, 12.0F));
     AURORA_TEST_CHECK_MSG(near_d(sl2.value(), 0.5, 1e-2), "Slider: press at midpoint sets ~0.5");
 
-    State st{ 0.3 };
-    Slider sl3{ Binding{ st } };
+    State st{0.3};
+    Slider sl3{Binding{st}};
     sl3.set_value(0.9);
     AURORA_TEST_CHECK_MSG(near_d(st.get(), 0.9), "Slider: Binding write-through");
 }
@@ -91,7 +93,8 @@ static void test_roundtrip() {
     w->set_range(0.0, 10.0);
     w->set_value(3.5);
     Json j = serialization::to_json(*w);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["props"].contains("value") && j["props"]["value"].get<double>() == 3.5,
                           "Slider serialization value");
     const auto back = roundtrip<Slider>(j, "Slider");
@@ -108,9 +111,9 @@ static void test_modern_props() {
     AURORA_TEST_CHECK_MSG(near_d(sl.value(), 10.0), "Slider: step snapping still clamps to max");
 
     // 禁用态：忽略拖拽
-    Slider sl2{ Reactive{ 0.2 } };
+    Slider sl2{Reactive{0.2}};
     constexpr BuildContext ctx;
-    sl2.layout(Constraints{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 200, .height = 200 } }, ctx);
+    sl2.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 200, .height = 200}}, ctx);
     sl2.set_enabled(false);
     fire(sl2, make_press(100.0F, 12.0F));
     AURORA_TEST_CHECK_MSG(near_d(sl2.value(), 0.2), "Slider: disabled ignores click, value unchanged");
@@ -125,15 +128,20 @@ static void test_modern_props() {
     sl4.set_thumb_color(Color::red()).set_track_height(8.0F).set_thumb_size(20.0F).set_step(0.5).set_enabled(false);
     Json j;
     sl4.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["thumb_color"][0].get<int>() == 255, "Slider: thumb_color serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["track_height"].get<double>(), 8.0), "Slider: track_height serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["thumb_size"].get<double>(), 20.0), "Slider: thumb_size serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["step"].get<double>(), 0.5), "Slider: step serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["enabled"].get<bool>() == false, "Slider: enabled serialization");
 
     Slider sl5;

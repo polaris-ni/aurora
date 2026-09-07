@@ -353,7 +353,6 @@ void run() {
 
 namespace sec_window_style {
 
-
 void run() {
     // ---- 1. WindowStyleOptions 默认值 ----
     {
@@ -513,6 +512,5 @@ AURORA_TEST() {
     sec_window_style::run();
     sec_window_state::run();
 }
-
 
 }  // namespace aurora::test_cases::utest_window

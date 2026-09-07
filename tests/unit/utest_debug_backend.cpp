@@ -24,9 +24,7 @@ namespace sec_debug_capture {
 namespace {
 
 // 取本测试专用的临时输出目录（避免污染仓库/默认 aurora_debug）。
-auto temp_out_dir() -> std::string {
-    return (std::filesystem::temp_directory_path() / "aurora_debug_test").string();
-}
+auto temp_out_dir() -> std::string { return (std::filesystem::temp_directory_path() / "aurora_debug_test").string(); }
 
 void cleanup_temp() {
     std::error_code ec;

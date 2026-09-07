@@ -18,8 +18,6 @@
 
 namespace aurora::test_cases::utest_skeleton {
 
-
-
 namespace {
 
 struct RenderResult {

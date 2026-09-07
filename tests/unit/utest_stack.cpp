@@ -14,8 +14,6 @@
 
 namespace aurora::test_cases::utest_stack {
 
-
-
 static void test_stack() {
     Stack st{std::vector{Node{Text{"a"}}, Node{Text{"b"}}}, Alignment::Center};
     constexpr BuildContext ctx;
@@ -36,6 +34,5 @@ AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_stack ===\n");
     test_stack();
 }
-
 
 }  // namespace aurora::test_cases::utest_stack

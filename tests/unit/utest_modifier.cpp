@@ -26,8 +26,6 @@
 
 namespace aurora::test_cases::utest_modifier {
 
-
-
 AURORA_TEST() {
     int failures = 0;
 

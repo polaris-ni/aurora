@@ -16,8 +16,6 @@
 
 namespace aurora::test_cases::utest_perf_frame_stats {
 
-
-
 // ---- Test 1: 基本 record + fps/avg ----
 static void test_basic_record_fps() {
     auto &fs = FrameStats::instance();
@@ -186,6 +184,5 @@ AURORA_TEST() {
     test_reset();
     test_frame_at();
 }
-
 
 }  // namespace aurora::test_cases::utest_perf_frame_stats

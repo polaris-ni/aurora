@@ -20,8 +20,6 @@
 
 namespace aurora::test_cases::utest_reactive_lifecycle {
 
-
-
 // T1：State 活得比 Effect 久。Effect 作用域结束后，State.set 不得崩溃，
 //     也不得再运行已释放的 Effect（连接应在 notify 时被惰性摘除）。
 static void test_state_outlives_effect() {
@@ -131,6 +129,5 @@ AURORA_TEST() {
     test_computed_lifecycle();
     test_reactive_behavior_regression();
 }
-
 
 }  // namespace aurora::test_cases::utest_reactive_lifecycle

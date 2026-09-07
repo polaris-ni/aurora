@@ -13,7 +13,7 @@
 namespace aurora::test_cases::utest_png {
 
 namespace {
-constexpr std::array<std::uint8_t, 8> kSignature = {137, 80, 78, 71, 13, 10, 26, 10};
+constexpr std::array<std::uint8_t, 8> AURORA_K_SIGNATURE = {137, 80, 78, 71, 13, 10, 26, 10};
 
 /// 在字节流中查找子序列（判断是否含 IHDR/IDAT/IEND 块类型）。
 auto contains(const std::vector<std::uint8_t> &hay, const char *needle) -> bool {
@@ -46,8 +46,8 @@ AURORA_TEST() {
         const auto &bytes = r.value();
         AURORA_TEST_CHECK(bytes.size() > 8);
         bool sig_ok = true;
-        for (std::size_t i = 0; i < kSignature.size(); ++i) {
-            sig_ok = sig_ok && (bytes[i] == kSignature[i]);
+        for (std::size_t i = 0; i < AURORA_K_SIGNATURE.size(); ++i) {
+            sig_ok = sig_ok && (bytes[i] == AURORA_K_SIGNATURE[i]);
         }
         AURORA_TEST_CHECK(sig_ok);
         AURORA_TEST_CHECK(contains(bytes, "IHDR"));
@@ -87,7 +87,7 @@ AURORA_TEST() {
             f.read(reinterpret_cast<char *>(head.data()), 8);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
             bool sig_ok = true;
             for (std::size_t i = 0; i < head.size(); ++i) {
-                sig_ok = sig_ok && (head[i] == kSignature[i]);
+                sig_ok = sig_ok && (head[i] == AURORA_K_SIGNATURE[i]);
             }
             AURORA_TEST_CHECK(sig_ok);
             std::error_code ec;

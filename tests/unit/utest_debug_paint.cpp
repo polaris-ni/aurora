@@ -24,24 +24,21 @@
 
 namespace aurora::test_cases::utest_debug_paint {
 
-using au::debug::DebugPaintFlags;
-using au::debug::set_flags;
 using au::debug::any_flag_enabled;
-using au::debug::flags;
 using au::debug::bump_debug_frame;
-using au::debug::reset_overlay_stats;
-using au::debug::paint_debug_overlays;
-using au::debug::overlay_stats;
 using au::debug::DebugOverlayStats;
-using au::debug::widget_picker;
+using au::debug::DebugPaintFlags;
 using au::debug::DebugPickResult;
-using au::test::TestEnv;
+using au::debug::flags;
+using au::debug::overlay_stats;
+using au::debug::paint_debug_overlays;
+using au::debug::reset_overlay_stats;
+using au::debug::set_flags;
+using au::debug::widget_picker;
+using au::test::absolute_bounds;
 using au::test::init_headless;
 using au::test::pump;
-using au::test::absolute_bounds;
-
-
-
+using au::test::TestEnv;
 
 namespace {
 
@@ -202,6 +199,5 @@ AURORA_TEST() {
 #endif
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_debug_paint

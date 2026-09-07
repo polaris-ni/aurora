@@ -10,7 +10,6 @@
 // TextSpan(TextSpan，经 sec_rich_text? 见 test_rich_text.cpp——TextSpan 归属 rich_text 单元)。
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -26,7 +25,6 @@
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/event.h"
 #include "aurora/event/focus.h"
-#include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
@@ -75,20 +73,19 @@ using au::TextDecoration;
 using au::TextOverflow;
 using au::TextProps;
 using au::Widget;
-namespace sec_text_ptr_capture {
 
 namespace {
 auto layout_root(Widget &root, const float w, const float h) -> void {
     Constraints c;
     c.min = Size{.width = 0, .height = 0};
     c.max = Size{.width = w, .height = h};
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     root.layout(c, ctx);
 }
 auto paint_root(Widget &root, const float w, const float h) -> void {
     Painter p;
     p.begin(static_cast<int>(w), static_cast<int>(h));
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     root.paint(p, Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = w, .height = h}}, ctx);
 }
 // 扫描各 Text（按显示文本）的可命中盒（哨兵初始化，避免默认 Rect 误判）。
@@ -115,7 +112,7 @@ auto scan_texts(Widget &root) -> std::map<std::string, Rect> {
 }
 }  // namespace
 
-void run() {
+static void run() {
     int fails = 0;
     auto ck = [&](bool c, const char *m) -> void {
         if (!c) {
@@ -300,10 +297,7 @@ void run() {
     AURORA_TEST_PRINTF(fails == 0 ? "text_ptr_capture: ALL PASS\n" : "text_ptr_capture: %d FAIL\n", fails);
     AURORA_TEST_CHECK_EQ(fails, 0);
 }
-}  // namespace sec_text_ptr_capture
 
-AURORA_TEST() {
-    sec_text_ptr_capture::run();
-}
+AURORA_TEST() { aurora::test_cases::utest_text_ptr_capture::run(); }
 
 }  // namespace aurora::test_cases::utest_text_ptr_capture

@@ -23,8 +23,6 @@
 
 namespace aurora::test_cases::utest_perf_counters {
 
-
-
 using Json = nlohmann::json;
 
 namespace {
@@ -274,6 +272,5 @@ AURORA_TEST() {
 
     RenderCounters::current().reset();
 }
-
 
 }  // namespace aurora::test_cases::utest_perf_counters

@@ -13,8 +13,6 @@
 
 namespace aurora::test_cases::utest_generate_ui {
 
-
-
 AURORA_TEST() {
     // 空描述 → Error
     {

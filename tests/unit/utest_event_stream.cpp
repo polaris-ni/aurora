@@ -16,7 +16,7 @@ AURORA_TEST() {
     {
         EventStream<int> stream;
         int got = 0;
-        const auto sub = stream.subscribe([&got](const int &v) { got = v; });
+        const auto sub = stream.subscribe([&got](const int& v) -> void { got = v; });
         stream.emit(42);
         AURORA_TEST_CHECK(got == 42);
     }
@@ -32,8 +32,8 @@ AURORA_TEST() {
     {
         EventStream<int> stream;
         std::vector<int> order;
-        const auto a = stream.subscribe([&order](const int &v) { order.push_back(v * 10); });
-        const auto b = stream.subscribe([&order](const int &v) { order.push_back(v * 100); });
+        const auto a = stream.subscribe([&order](const int& v) -> void { order.push_back(v * 10); });
+        const auto b = stream.subscribe([&order](const int& v) -> void { order.push_back(v * 100); });
         stream.emit(1);
         AURORA_TEST_CHECK_EQ(order.size(), 2U);
         AURORA_TEST_CHECK(order[0] == 10);
@@ -44,7 +44,7 @@ AURORA_TEST() {
     {
         EventStream<int> stream;
         int sum = 0;
-        const auto sub = stream.subscribe([&sum](const int &v) { sum += v; });
+        const auto sub = stream.subscribe([&sum](const int& v) -> void { sum += v; });
         stream.emit(1);
         stream.emit(2);
         stream.emit(3);
@@ -56,7 +56,7 @@ AURORA_TEST() {
         EventStream<int> stream;
         int hits = 0;
         {
-            const auto sub = stream.subscribe([&hits](const int &) { ++hits; });
+            const auto sub = stream.subscribe([&hits](const int&) -> void { ++hits; });
             stream.emit(1);
             AURORA_TEST_CHECK(hits == 1);
         }
@@ -68,7 +68,7 @@ AURORA_TEST() {
     {
         EventStream<int> stream;
         int hits = 0;
-        auto sub = stream.subscribe([&hits](const int &) { ++hits; });
+        auto sub = stream.subscribe([&hits](const int&) -> void { ++hits; });
         stream.emit(1);
         AURORA_TEST_CHECK(hits == 1);
 
@@ -82,7 +82,7 @@ AURORA_TEST() {
     // ---- 7. 活跃订阅句柄为真 ----
     {
         EventStream<int> stream;
-        const auto sub = stream.subscribe([](const int &) {});
+        const auto sub = stream.subscribe([](const int&) -> void {});
         AURORA_TEST_CHECK(static_cast<bool>(sub));
     }
 
@@ -91,7 +91,7 @@ AURORA_TEST() {
         EventStream<int> stream;
         int hits = 0;
         {
-            auto a = stream.subscribe([&hits](const int &) { ++hits; });
+            auto a = stream.subscribe([&hits](const int&) -> void { ++hits; });
             {
                 auto b = std::move(a);
                 AURORA_TEST_CHECK(static_cast<bool>(b));
@@ -110,8 +110,8 @@ AURORA_TEST() {
         EventStream<int> stream;
         int x = 0;
         int y = 0;
-        auto a = stream.subscribe([&x](const int &) { ++x; });
-        auto b = stream.subscribe([&y](const int &) { ++y; });
+        auto a = stream.subscribe([&x](const int&) -> void { ++x; });
+        auto b = stream.subscribe([&y](const int&) -> void { ++y; });
         a = std::move(b);  // a 原订阅被退订，接管 b 的
         stream.emit(1);
         AURORA_TEST_CHECK(x == 0);
@@ -122,7 +122,7 @@ AURORA_TEST() {
     {
         EventStream<std::string> stream;
         std::string got;
-        const auto sub = stream.subscribe([&got](const std::string &s) { got = s; });
+        const auto sub = stream.subscribe([&got](const std::string& s) -> void { got = s; });
         stream.emit(std::string("payload"));
         AURORA_TEST_CHECK(got == "payload");
     }

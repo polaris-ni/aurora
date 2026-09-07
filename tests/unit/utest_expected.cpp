@@ -47,12 +47,12 @@ AURORA_TEST() {
     // ---- 5. 拷贝构造：值态与错误态各自保留 ----
     {
         const expected<int, std::string> a{5};
-        const expected<int, std::string> b = a;
+        const expected<int, std::string>& b = a;
         AURORA_TEST_CHECK(b.has_value());
         AURORA_TEST_CHECK(b.value() == 5);
 
         const expected<int, std::string> c{unexpected<std::string>{"e"}};
-        const expected<int, std::string> d = c;
+        const expected<int, std::string>& d = c;
         AURORA_TEST_CHECK(!d.has_value());
         AURORA_TEST_CHECK(d.error() == "e");
     }

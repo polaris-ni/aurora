@@ -11,8 +11,6 @@
 
 namespace aurora::test_cases::utest_frame_pacing {
 
-
-
 AURORA_TEST() {
     constexpr double budget = 16.67;  // 60fps 帧预算
 
@@ -45,6 +43,5 @@ AURORA_TEST() {
     // ---- 8. 活跃帧优先于定时任务：预算节流生效（不睡到远处的定时任务）----
     AURORA_TEST_CHECK_NEAR(au::compute_wait_timeout(true, false, 500.0, budget, 4.0), budget - 4.0, 1e-4);
 }
-
 
 }  // namespace aurora::test_cases::utest_frame_pacing

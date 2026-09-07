@@ -21,7 +21,6 @@ using au::Text;
 
 // ---------- Tab 循环焦点 ----------
 
-
 namespace aurora::test_cases::utest_keyboard_nav {
 
 static void test_tab_cycle() {
@@ -175,6 +174,5 @@ AURORA_TEST() {
     test_activate();
     test_no_candidates();
 }
-
 
 }  // namespace aurora::test_cases::utest_keyboard_nav

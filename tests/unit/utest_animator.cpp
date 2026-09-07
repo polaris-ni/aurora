@@ -20,8 +20,6 @@
 
 namespace aurora::test_cases::utest_animator {
 
-
-
 namespace sec_anim {
 
 void run() {
@@ -370,6 +368,5 @@ AURORA_TEST() {
     sec_animate::run();
     sec_animated_value::run();
 }
-
 
 }  // namespace aurora::test_cases::utest_animator

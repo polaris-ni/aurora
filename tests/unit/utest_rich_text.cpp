@@ -14,7 +14,6 @@
 
 namespace aurora::test_cases::utest_rich_text {
 
-
 namespace render = aurora::render;
 
 static void test_rich_text() {
@@ -55,6 +54,5 @@ AURORA_TEST() {
     test_rich_text();
     test_rich_text_widget();
 }
-
 
 }  // namespace aurora::test_cases::utest_rich_text

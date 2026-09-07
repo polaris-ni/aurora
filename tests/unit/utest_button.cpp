@@ -12,8 +12,6 @@
 
 namespace aurora::test_cases::utest_button {
 
-
-
 static void test_chained_setters() {
     Button b;
     b.set_label("OK")

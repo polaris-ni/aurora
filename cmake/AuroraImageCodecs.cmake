@@ -9,20 +9,21 @@
 # 三个开关默认 OFF，以保证仓库默认构建（MinGW Makefiles）零错误零警告。
 # 启用任一开关时，对应 third_party 源码被编译为 OBJECT 库并链接进 aurora；
 # 各 codec .cpp（src/aurora/image/codecs/*_codec.cpp）内部以
-# `#ifdef AURORA_BUILD_IMAGE_*` 包裹，OFF 时该 TU 为空，不会引入悬空引用。
+# `#ifdef AURORA_ENABLE_IMAGE_*` 包裹，OFF 时该 TU 为空，不会引入悬空引用。
 # ---------------------------------------------------------------------------
 
-option(AURORA_BUILD_IMAGE_JPEG "Build JPEG codec via libjpeg-turbo" OFF)
-option(AURORA_BUILD_IMAGE_WEBP "Build WebP codec via libwebp" OFF)
-option(AURORA_BUILD_IMAGE_PNG "Build PNG/GIF codec via wuffs" OFF)
+option(AURORA_ENABLE_IMAGE_JPEG "Build JPEG codec via libjpeg-turbo" OFF)
+option(AURORA_ENABLE_IMAGE_WEBP "Build WebP codec via libwebp" OFF)
+option(AURORA_ENABLE_IMAGE_PNG "Build PNG/GIF codec via wuffs" OFF)
 
 # ---------------------------------------------------------------------------
 # JPEG (libjpeg-turbo)
 # 注意：libjpeg-turbo 的 CMakeLists.txt 显式禁止 add_subdirectory，故从源码
 # 直接编译为 OBJECT 库，并生成 jconfig.h。
 # ---------------------------------------------------------------------------
-if (AURORA_BUILD_IMAGE_JPEG)
-    add_compile_definitions(AURORA_BUILD_IMAGE_JPEG)
+if (AURORA_ENABLE_IMAGE_JPEG)
+    # PRIVATE 注入且不导出：编解码能力属库内部，消费者与安装后口径一致（无该宏）。
+    aurora_define_feature(AURORA_ENABLE_IMAGE_JPEG SCOPE PRIVATE)
 
     set(_JPEG_SRC ${CMAKE_SOURCE_DIR}/third_party/libjpeg-turbo)
     # jpeg_turbo_codec.cpp 以 <jpeglib.h> 引用 libjpeg-turbo 头，需要把其 src 目录
@@ -116,8 +117,9 @@ endif ()
 # ---------------------------------------------------------------------------
 # WebP (libwebp)
 # ---------------------------------------------------------------------------
-if (AURORA_BUILD_IMAGE_WEBP)
-    add_compile_definitions(AURORA_BUILD_IMAGE_WEBP)
+if (AURORA_ENABLE_IMAGE_WEBP)
+    # PRIVATE 注入且不导出：编解码能力属库内部，消费者与安装后口径一致（无该宏）。
+    aurora_define_feature(AURORA_ENABLE_IMAGE_WEBP SCOPE PRIVATE)
     set(_WEBP_SRC ${CMAKE_SOURCE_DIR}/third_party/libwebp)
     file(GLOB_RECURSE _WEBP_C ${_WEBP_SRC}/src/*.c)
     # libwebp's enc layer references the SharpYUV RGB->YUV helpers unconditionally
@@ -151,8 +153,9 @@ endif ()
 # ---------------------------------------------------------------------------
 # PNG / GIF (wuffs) —— 单文件 C 库，最易接入
 # ---------------------------------------------------------------------------
-if (AURORA_BUILD_IMAGE_PNG)
-    add_compile_definitions(AURORA_BUILD_IMAGE_PNG)
+if (AURORA_ENABLE_IMAGE_PNG)
+    # PRIVATE 注入且不导出：编解码能力属库内部，消费者与安装后口径一致（无该宏）。
+    aurora_define_feature(AURORA_ENABLE_IMAGE_PNG SCOPE PRIVATE)
     set(_WUFFS_C ${CMAKE_SOURCE_DIR}/third_party/wuffs/release/c/wuffs-v0.3.c)
     add_library(aurora_wuffs OBJECT ${_WUFFS_C})
     set_source_files_properties(${_WUFFS_C} PROPERTIES LANGUAGE C)

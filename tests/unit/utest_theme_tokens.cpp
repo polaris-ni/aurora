@@ -30,7 +30,6 @@ using au::ThemeScope;
 using au::TokenOr;
 using au::Widget;
 
-
 namespace aurora::test_cases::utest_theme_tokens {
 
 AURORA_TEST() {
@@ -158,6 +157,5 @@ AURORA_TEST() {
         AURORA_TEST_CHECK_FALSE(def.is_token());
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_theme_tokens

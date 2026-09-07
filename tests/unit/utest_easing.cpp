@@ -10,17 +10,14 @@
 #include "aurora/animation/easing.h"
 #include "aurora/aurora.h"
 #include "aurora/core/log.h"
-
 #include "aurora_test_harness.h"
 
 namespace aurora::test_cases::utest_easing {
 
-
-
 static void test_named_curves() {
-    const auto cases = { Curves::linear(),        Curves::ease_in(),        Curves::ease_out(),
-                         Curves::ease_in_out(),   Curves::ease_in_sine(),   Curves::ease_out_sine(),
-                         Curves::ease_in_cubic(), Curves::ease_out_cubic(), Curves::bounce_out() };
+    const auto cases = {Curves::linear(),        Curves::ease_in(),        Curves::ease_out(),
+                        Curves::ease_in_out(),   Curves::ease_in_sine(),   Curves::ease_out_sine(),
+                        Curves::ease_in_cubic(), Curves::ease_out_cubic(), Curves::bounce_out()};
     for (const auto &c : cases) {
         AURORA_TEST_CHECK_MSG(near_d(c.transform(0.0), 0.0), "curve: transform(0)==0");
         AURORA_TEST_CHECK_MSG(near_d(c.transform(1.0), 1.0), "curve: transform(1)==1");
@@ -47,6 +44,5 @@ AURORA_TEST() {
     test_named_curves();
     test_custom_curve();
 }
-
 
 }  // namespace aurora::test_cases::utest_easing

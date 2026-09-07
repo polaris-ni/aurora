@@ -22,8 +22,6 @@
 
 namespace aurora::test_cases::utest_perf_log {
 
-
-
 namespace {
 
 void reset() { PerfLog::disable(); }
@@ -87,6 +85,5 @@ AURORA_TEST() {
     test_csv_header();
     test_snapshots_contain_metrics();
 }
-
 
 }  // namespace aurora::test_cases::utest_perf_log

@@ -14,8 +14,6 @@
 
 namespace aurora::test_cases::utest_enums {
 
-
-
 static void test_text_align() {
     AURORA_TEST_CHECK_MSG(text_align_to_json(TextAlign::Center).get<std::string>() == "Center",
                           "TextAlign->json Center");

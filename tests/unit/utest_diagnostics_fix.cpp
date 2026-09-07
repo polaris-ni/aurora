@@ -15,8 +15,6 @@
 
 namespace aurora::test_cases::utest_diagnostics_fix {
 
-
-
 AURORA_TEST() {
     Diagnostics::take();  // 清空累计
 
@@ -65,6 +63,5 @@ AURORA_TEST() {
     }
     AURORA_TEST_CHECK_MSG(still_visible, "recent buffer retains fix after take() (explain/review semantics)");
 }
-
 
 }  // namespace aurora::test_cases::utest_diagnostics_fix

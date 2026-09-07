@@ -58,6 +58,7 @@ inline int closesocket(SOCKET s) { return ::close(s); }
 #include "aurora/debug/debug_backend.h"
 #include "aurora/debug/debug_paint.h"
 #include "aurora/debug/debug_runtime.h"
+#include "aurora/environment/build_context.h"
 #include "aurora/inspector/inspector_api.h"
 #include "aurora/state/async.h"
 #include "aurora/widget/codegen.h"
@@ -289,10 +290,9 @@ static auto query_param(const std::string &path, std::string_view key) -> std::s
 static auto send_all(SOCKET client, const std::string &data) -> bool {
     const char *p = data.data();
     std::size_t left = data.size();
-    // NOLINTNEXTLINE(readability-identifier-naming): kChunk 为局部常量，命名依既有约定
-    constexpr std::size_t kChunk = 1u << 20;  // 每次 ≤1MiB，避免 int 截断
+    constexpr std::size_t chunk_size = 1U << 20U;  // 每次 ≤1MiB，避免 int 截断
     while (left > 0) {
-        const int n = send(client, p, static_cast<int>(std::min(left, kChunk)), 0);
+        const int n = send(client, p, static_cast<int>(std::min(left, chunk_size)), 0);
         if (n <= 0) {
             return false;
         }
@@ -348,7 +348,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         }
         const std::string src = query_param(path, "source");
         const auto capture_src =
-            (src == "win") ? aurora::debug::CaptureSource::OnScreenWindow : aurora::debug::CaptureSource::Framebuffer;
+            src == "win" ? aurora::debug::CaptureSource::OnScreenWindow : aurora::debug::CaptureSource::Framebuffer;
         try {
             auto png = marshal_get<std::vector<std::uint8_t>>([&]() -> std::vector<std::uint8_t> {
                 // 临时文件名须不可预测（固定名可被本地进程抢先创建/替换——符号链接攻击面），
@@ -376,8 +376,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             if (png.empty()) {
                 return error_response(500, "snapshot produced empty PNG");
             }
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): 像素缓冲 uint8_t* → char*
-            // 构造字符串是有意转换
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
             std::string body_bytes(reinterpret_cast<const char *>(png.data()), png.size());
             return make_response(200, "OK", "image/png", body_bytes);
         } catch (const std::exception &e) {
@@ -480,12 +479,12 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
                     .origin = aurora::Point{.x = 0.0F, .y = 0.0F},
                     .size = aurora::Size{.width = root->size().width, .height = root->size().height}};
                 if (surface_getter) {
-                    if (Surface *s = surface_getter()) {
+                    if (const Surface *s = surface_getter()) {
                         const auto sz = s->size();
                         root_bounds = aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = 0.0F}, .size = sz};
                     }
                 }
-                aurora::BuildContext ctx;
+                constexpr aurora::BuildContext ctx;
                 return aurora::debug::widget_picker(root.widget(), root_bounds, ctx, aurora::Point{.x = x, .y = y});
             });
             nlohmann::json j;

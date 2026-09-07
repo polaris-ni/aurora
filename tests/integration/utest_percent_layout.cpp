@@ -11,7 +11,7 @@
 
 namespace aurora::test_cases::utest_percent_layout {
 
-
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
 // ---------- 百分比宽度 ----------
 
@@ -22,8 +22,6 @@ static void test_percent_width() {
 
     Node root(std::move(txt));
     Json snap = render_to_logical_snapshot(root, 800, 600);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["box"]["w"].get<float>() == 400.0F);
 }
 
@@ -34,8 +32,6 @@ static void test_percent_height() {
 
     Node root(std::move(txt));
     Json snap = render_to_logical_snapshot(root, 800, 600);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["box"]["h"].get<float>() == 150.0F);
 }
 
@@ -47,11 +43,7 @@ static void test_percent_both() {
 
     Node root(std::move(txt));
     Json snap = render_to_logical_snapshot(root, 800, 600);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["box"]["w"].get<float>() == 400.0F);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["box"]["h"].get<float>() == 300.0F);
 }
 
@@ -64,11 +56,7 @@ static void test_percent_full() {
 
     Node root(std::move(txt));
     Json snap = render_to_logical_snapshot(root, 640, 480);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["box"]["w"].get<float>() == 640.0F);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["box"]["h"].get<float>() == 480.0F);
 }
 
@@ -80,8 +68,6 @@ static void test_expand_width() {
 
     Node root(std::move(txt));
     Json snap = render_to_logical_snapshot(root, 800, 600);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["box"]["w"].get<float>() == 800.0F);
 }
 
@@ -98,12 +84,8 @@ static void test_nested_percent() {
     Node root(std::move(col));
     Json snap = render_to_logical_snapshot(root, 800, 600);
     // Column 应为 800px 宽
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["box"]["w"].get<float>() == 800.0F);
     // 内部 Text 应为 400px（50% of 800）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["children"][0]["box"]["w"].get<float>() == 400.0F);
 }
 
@@ -115,10 +97,10 @@ static void test_small_percent() {
 
     Node root(std::move(txt));
     Json snap = render_to_logical_snapshot(root, 800, 600);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(snap["box"]["w"].get<float>() == 80.0F);
 }
+
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
 AURORA_TEST() {
     test_percent_width();

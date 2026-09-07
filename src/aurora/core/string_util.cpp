@@ -11,9 +11,9 @@ auto string_format(const char *fmt, ...) -> std::string {
     if (fmt == nullptr) {
         return {};
     }
-    va_list args = nullptr;
+    va_list args = {nullptr};
     va_start(args, fmt);
-    va_list args_copy = nullptr;
+    va_list args_copy = {nullptr};
     va_copy(args_copy, args);
 
     const int needed = std::vsnprintf(nullptr, 0, fmt, args);

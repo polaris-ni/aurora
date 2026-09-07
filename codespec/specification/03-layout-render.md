@@ -520,7 +520,7 @@ au::Column{}
 
 ### 9.1 图像
 
-`image/image_codec.h` 提供图像编解码，能力由编译期开关 `AURORA_BUILD_IMAGE_JPEG` / `AURORA_BUILD_IMAGE_WEBP` / `AURORA_BUILD_IMAGE_PNG` 控制（见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md)）。
+`image/image_codec.h` 提供图像编解码，能力由编译期开关 `AURORA_ENABLE_IMAGE_JPEG` / `AURORA_ENABLE_IMAGE_WEBP` / `AURORA_ENABLE_IMAGE_PNG` 控制（见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md)）。
 
 `Painter::draw_image(const Image&, const Rect&)` 采用双线性采样，在 **premultiplied-alpha 空间插值**，避免半透明边缘暗边与光晕。
 

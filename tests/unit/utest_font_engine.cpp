@@ -21,9 +21,6 @@ namespace aurora::test_cases::utest_font_engine {
 using au::render::FontEngine;
 using au::render::TextAAMode;
 
-
-
-
 namespace {
 auto approx(float a, float b, const float eps = 1e-3F) -> bool { return std::fabs(a - b) < eps; }
 

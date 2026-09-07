@@ -31,9 +31,6 @@ using au::render::FontFace;
 using au::render::noto_sans_ttf;
 using au::render::resolve_faces;
 
-
-
-
 namespace {
 // 统计画布上「非背景色」像素数（证明确有字形被绘出，非空/非 tofu）。
 auto count_non_bg(const Painter &p, Color bg) -> int {
@@ -146,6 +143,5 @@ AURORA_TEST() {
         }
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_font_fallback

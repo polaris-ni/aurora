@@ -11,8 +11,6 @@
 
 namespace aurora::test_cases::utest_router {
 
-
-
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_router ===\n");
 
@@ -57,6 +55,5 @@ AURORA_TEST() {
     Node empty_root = r.build_root("other");
     AURORA_TEST_CHECK(!static_cast<bool>(empty_root));
 }
-
 
 }  // namespace aurora::test_cases::utest_router

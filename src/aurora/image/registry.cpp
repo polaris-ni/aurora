@@ -183,13 +183,13 @@ ImageCodecRegistry::ImageCodecRegistry() : impl_(std::make_shared<Impl>()) {
     register_codec(create_png_write_codec());
 
     // 外部编解码器（按构建开关条件接入）
-#ifdef AURORA_BUILD_IMAGE_JPEG
+#ifdef AURORA_ENABLE_IMAGE_JPEG
     register_codec(create_jpeg_turbo_codec());
 #endif
-#ifdef AURORA_BUILD_IMAGE_WEBP
+#ifdef AURORA_ENABLE_IMAGE_WEBP
     register_codec(create_webp_codec());
 #endif
-#ifdef AURORA_BUILD_IMAGE_PNG
+#ifdef AURORA_ENABLE_IMAGE_PNG
     register_codec(create_png_wuffs_codec());
     register_codec(create_gif_wuffs_codec());
 #endif

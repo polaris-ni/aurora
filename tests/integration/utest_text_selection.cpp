@@ -10,16 +10,12 @@
 // TextSpan(TextSpan，经 sec_rich_text? 见 test_rich_text.cpp——TextSpan 归属 rich_text 单元)。
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <iostream>
-#include <map>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "aurora/aurora.h"
 #include "aurora/core/platform.h"
@@ -75,9 +71,8 @@ using au::TextDecoration;
 using au::TextOverflow;
 using au::TextProps;
 using au::Widget;
-namespace sec_text_selection {
 
-void run() {
+static void run() {
     // 选区高亮为半透明蓝色矩形；ClearType 会在字形边缘产生红/蓝彩色羽化，
     // 干扰「按 b-r>30 检测蓝色」的判定。改用与背景无关的超采样抗锯齿，使检测只反映选区高亮。
     render::FontEngine::set_text_aa_mode(render::TextAAMode::Supersample);
@@ -1021,10 +1016,7 @@ void run() {
 
     AURORA_LOG_INFO("test", "ALL TEXT SELECTION TESTS PASSED");
 }
-}  // namespace sec_text_selection
 
-AURORA_TEST() {
-    sec_text_selection::run();
-}
+AURORA_TEST() { aurora::test_cases::utest_text_selection::run(); }
 
 }  // namespace aurora::test_cases::utest_text_selection

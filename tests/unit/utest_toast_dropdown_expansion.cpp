@@ -18,8 +18,6 @@
 
 namespace aurora::test_cases::utest_toast_dropdown_expansion {
 
-
-
 namespace {
 
 auto make_text(const char *s) -> Node {

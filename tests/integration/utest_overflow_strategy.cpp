@@ -19,8 +19,6 @@
 
 namespace aurora::test_cases::utest_overflow_strategy {
 
-
-
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables) 测试内部共享计数器，static 文件作用域
 static int g_failures = 0;
 

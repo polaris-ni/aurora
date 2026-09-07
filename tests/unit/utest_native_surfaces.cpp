@@ -16,7 +16,6 @@
 
 namespace aurora::test_cases::utest_native_surfaces {
 
-
 namespace {
 
 void test_header_available() {
@@ -27,6 +26,5 @@ void test_header_available() {
 }  // namespace
 
 AURORA_TEST() { test_header_available(); }
-
 
 }  // namespace aurora::test_cases::utest_native_surfaces

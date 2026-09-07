@@ -9,19 +9,18 @@
 // / std::stoi，类型不符即抛异常且 worker 线程未捕获 → std::terminate 整个应用。
 // 本测试以畸形输入逐一轰击各端点，断言：返回 4xx/5xx JSON 响应、进程存活。
 //
-// 当 AURORA_INSPECTOR_SERVER_ENABLED 未定义（AURORA_BUILD_INSPECTOR_SERVER=OFF）时自跳过。
+// 当 AURORA_BUILD_INSPECTOR_SERVER 未定义（AURORA_BUILD_INSPECTOR_SERVER=OFF）时自跳过。
 
 #include "aurora/core/platform.h"
 #include "aurora/inspector/inspector_server.h"
 
-#ifndef AURORA_INSPECTOR_SERVER_ENABLED
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
 
 #include "aurora_test_harness.h"
 
-
 namespace aurora::test_cases::utest_inspector_robustness {
 
-AURORA_TEST() { AURORA_TEST_PRINTF("skip: AURORA_INSPECTOR_SERVER_ENABLED not defined (server not built)"); }
+AURORA_TEST() { AURORA_TEST_PRINTF("skip: AURORA_BUILD_INSPECTOR_SERVER not defined (server not built)"); }
 
 #else
 
@@ -51,6 +50,8 @@ inline int closesocket(SOCKET s) { return ::close(s); }
 
 #include "aurora/aurora.h"
 #include "aurora_test_harness.h"
+
+namespace aurora::test_cases::utest_inspector_robustness {
 
 namespace {
 
@@ -225,7 +226,6 @@ AURORA_TEST() {
     server.stop();
 }
 
-#endif  // AURORA_INSPECTOR_SERVER_ENABLED
-
+#endif  // AURORA_BUILD_INSPECTOR_SERVER
 
 }  // namespace aurora::test_cases::utest_inspector_robustness

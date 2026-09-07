@@ -18,8 +18,6 @@
 
 namespace aurora::test_cases::utest_clipboard {
 
-
-
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_clipboard ===\n");
 
@@ -94,6 +92,5 @@ AURORA_TEST() {
     }
 #endif
 }
-
 
 }  // namespace aurora::test_cases::utest_clipboard

@@ -16,7 +16,6 @@
 #include "aurora/core/image.h"
 #include "aurora_test_harness.h"
 
-
 namespace aurora::test_cases::utest_image_bmp {
 
 namespace detail = aurora::detail;
@@ -45,7 +44,7 @@ auto put16(std::vector<std::uint8_t> &b, std::size_t off, std::uint16_t v) -> vo
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     b[off + 0] = static_cast<std::uint8_t>(v & 0xFFU);
-    b.at(off + 1) = static_cast<std::uint8_t>((v >> 8U) & 0xFFU);
+    b.at(off + 1) = static_cast<std::uint8_t>((v >> 8U) & 0xFFU); // NOLINT(*-signed-bitwise)
 }
 
 /// @brief 构造一个 BITMAPINFOHEADER 形态的 BMP 头（54 字节），可自由指定各字段。

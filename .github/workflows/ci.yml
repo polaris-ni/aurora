@@ -1,3 +1,26 @@
+# ---------------------------------------------------------------------------
+# Aurora CI
+#
+# 覆盖策略（宏 = 编译结果，矩阵按「每个 feature 分支至少被一个 job 编译一次」设计）：
+#   1. core        — 三平台（linux/gcc、windows/msvc、macos/clang）+ windows/mingw，
+#                    Release（DEBUG/PROFILING 走 AUTO=OFF 分支）+ Debug（AUTO=ON 分支）；
+#                    linux 额外构建 demos 聚合目标（EXCLUDE_FROM_ALL，默认构建不含）。
+#   2. backends    — 非 HEADLESS 后端各自至少编译一次：X11/Wayland/GLFW（linux）、
+#                    D3D11/GLFW（win32）、macOS/GLFW（darwin）；ctest 下无显示环境，
+#                    create_native_window 回退 HeadlessSurface，编译与注册逻辑仍被覆盖。
+#   3. toggles     — feature 宏极性收口（ubuntu/gcc）：优化三开关全关（退化路径）、
+#                    SIMD 关（标量黄金路径）、图像编解码 + Inspector Server 开、
+#                    PROFILING/TRACING/DEBUG 强制开（Release 下 FORCE=ON 分支）、DEBUG 强制关。
+#   4. asan        — AURORA_ENABLE_ASAN=ON（AddressSanitizer + UBSan）跑全量 ctest。
+#   5. coverage    — AURORA_ENABLE_COVERAGE=ON 的 `coverage` 聚合目标（内含 ctest + gcov 摘要）。
+#   6. wasm        — emcmake + AURORA_BACKEND_WASM=ON，仅构建库目标（Emscripten 下不链测试）。
+#   7. install     — cmake --install + 工作流内联最小消费端端到端验证
+#                    （find_package(Aurora) + 静态链接 + feature 宏导出一致性）。
+#   8. lint        — clang-tidy 双 Pass（DEBUG ON / OFF 各一份编译数据库，全量 0 finding）。
+#
+# 选项语义以 codespec/BUILD_OPTIONS.md 为唯一权威来源。
+# ---------------------------------------------------------------------------
+
 name: CI
 
 on:
@@ -5,31 +28,110 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-test:
-    name: ${{ matrix.os }} (${{ matrix.compiler }})
+
+  # ---------------------------------------------------------------------------
+  # 1. 核心矩阵：默认配置 + 构建类型极性（AUTO 三态的两个分支）
+  # ---------------------------------------------------------------------------
+  core:
+    name: core (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            compiler: gcc
+          - name: linux-gcc-release
+            os: ubuntu-latest
+            build-type: Release
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
-          - os: windows-latest
-            compiler: msvc
+            build-demos: true
+          - name: linux-gcc-debug
+            os: ubuntu-latest
+            build-type: Debug
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+          - name: windows-msvc
+            os: windows-latest
+            build-type: Release
             cmake-flags: "" # 默认 Visual Studio 生成器（多配置）
-          - os: macos-latest
-            compiler: clang
+          - name: windows-mingw
+            os: windows-latest
+            build-type: Release
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+            mingw: true
+          - name: macos-clang
+            os: macos-latest
+            build-type: Release
             cmake-flags: -G Ninja
 
     steps:
       - uses: actions/checkout@v4
+
+      # windows-latest 自带 MSYS2 mingw-w64 工具链；choco mingw 路径作后备
+      - name: Setup MinGW toolchain
+        if: matrix.mingw
+        shell: bash
+        run: |
+          for d in /c/msys64/mingw64/bin "/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin"; do
+            if [ -x "$d/gcc.exe" ]; then echo "$d" >> "$GITHUB_PATH"; break; fi
+          done
+          gcc --version
+
+      - name: Setup ccache
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: core-${{ matrix.name }}
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} ${{ matrix.cmake-flags }}
+
+      - name: Build (library + tools + tests)
+        run: cmake --build build --config ${{ matrix.build-type }}
+
+      # demos 不进默认构建（EXCLUDE_FROM_ALL），单独拉起聚合目标确保持续可编译
+      - name: Build demos
+        if: matrix.build-demos
+        run: cmake --build build --config ${{ matrix.build-type }} --target demos
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -C ${{ matrix.build-type }}
+
+  # ---------------------------------------------------------------------------
+  # 2. 后端矩阵：AURORA_BACKEND_* 各非默认后端至少编译一次
+  # ---------------------------------------------------------------------------
+  backends:
+    name: backends (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x11-wayland-glfw
+            os: ubuntu-latest
+            apt-deps: libx11-dev libwayland-dev wayland-protocols libxkbcommon-dev
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON
+          - name: windows-d3d11-glfw
+            os: windows-latest
+            cmake-flags: -DAURORA_BACKEND_D3D11=ON -DAURORA_BACKEND_GLFW=ON
+          - name: macos-appkit-glfw
+            os: macos-latest
+            cmake-flags: -G Ninja -DAURORA_BACKEND_MACOS=ON -DAURORA_BACKEND_GLFW=ON
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install desktop backend dev dependencies
+        if: matrix.apt-deps
+        run: sudo apt-get update -y && sudo apt-get install -y ${{ matrix.apt-deps }}
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake-flags }}
@@ -40,18 +142,169 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
 
+  # ---------------------------------------------------------------------------
+  # 3. feature 宏极性矩阵（ubuntu/gcc，Release）：
+  #    Release 下 DEBUG/PROFILING 走 AUTO=OFF，须显式收口两个极端分支
+  # ---------------------------------------------------------------------------
+  toggles:
+    name: toggles (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 架构级优化三开关全关：layout 缓存 / 遮挡剔除 / Display List 退化路径
+          - name: optimizations-off
+            cmake-flags: -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_OCCLUSION_CULLING=OFF -DAURORA_ENABLE_DISPLAY_LIST=OFF
+          # SIMD 关：仅编译标量黄金路径（utest_simd_parity 比对基准）
+          - name: simd-off
+            cmake-flags: -DAURORA_ENABLE_SIMD=OFF
+          # 图像编解码（libjpeg-turbo / libwebp / wuffs）+ Inspector HTTP 服务器
+          - name: codecs-inspector-on
+            cmake-flags: -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON
+          # 插桩强制开（TRACING 隐含 PROFILING）：AURORA_PROFILE_* 宏活跃分支 + DEBUG=ON
+          - name: profiling-tracing-debug-on
+            cmake-flags: -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON -DAURORA_ENABLE_DEBUG=ON
+          # DEBUG 强制关：调试 API 调用点必须可编译、运行返回 disabled
+          - name: debug-off
+            cmake-flags: -DAURORA_ENABLE_DEBUG=OFF
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake-flags }}
+
+      - name: Build (library + tools + tests)
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -C Release
+
+  # ---------------------------------------------------------------------------
+  # 4. AddressSanitizer + UndefinedBehaviorSanitizer（全量 ctest）
+  # ---------------------------------------------------------------------------
+  asan:
+    name: asan (ubuntu-gcc)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_ASAN=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -C Release
+
+  # ---------------------------------------------------------------------------
+  # 5. 行覆盖率：coverage 聚合目标自带 ctest + gcov 终端摘要
+  # ---------------------------------------------------------------------------
+  coverage:
+    name: coverage (ubuntu-gcc)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_COVERAGE=ON
+
+      - name: Build + ctest + gcov summary (coverage target)
+        run: cmake --build build --target coverage
+
+      - name: Upload coverage report (CSV + HTML)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            build/coverage.csv
+            build/coverage.html
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # 6. WebAssembly：Emscripten 工具链 + WASM 后端（仅库目标）
+  # ---------------------------------------------------------------------------
+  wasm:
+    name: wasm (emscripten)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+
+      - name: Configure (emcmake)
+        run: emcmake cmake -S . -B build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=OFF -DAURORA_BUILD_DEMOS=OFF
+
+      - name: Build (library)
+        run: cmake --build build-wasm --target aurora
+
+  # ---------------------------------------------------------------------------
+  # 7. 安装 + find_package 消费端端到端验证
+  # ---------------------------------------------------------------------------
+  install-consumer:
+    name: install + find_package (ubuntu-gcc)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure + Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Install
+        run: cmake --install build --config Release --prefix "${{ github.workspace }}/install-prefix"
+
+      # 端到端冒烟：find_package(Aurora) + 静态链接 + 伞头可编译（GUIDELINE §1 最小配方）
+      - name: Consumer smoke (find_package + static link)
+        shell: bash
+        run: |
+          mkdir -p consumer
+          cat > consumer/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.20)
+          project(consumer_smoke CXX)
+          set(CMAKE_CXX_STANDARD 20)
+          find_package(Aurora REQUIRED)
+          add_executable(consumer main.cpp)
+          target_link_libraries(consumer PRIVATE Aurora::aurora)
+          EOF
+          cat > consumer/main.cpp <<'EOF'
+          #include "aurora/aurora.h"
+          namespace au = aurora;
+          int main() {
+              au::Node root = au::Text("Hello, Aurora!").font_size(20);
+              au::Scene scene{ std::move(root) };
+              scene.render_to_png("hello.png", 200, 60);
+          }
+          EOF
+          cmake -S consumer -B consumer/build -G Ninja -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-prefix"
+          cmake --build consumer/build
+          ./consumer/build/consumer
+          test -f hello.png
+
   # ----------------------------------------------------------------------------
-  # P5 门禁：clang-tidy 全量 lint（非 third_party 翻译单元，去重后 0 finding 才通过）
+  # 8. 静态检查门禁：clang-tidy 全量 lint（非 third_party 翻译单元，去重后 0 finding 才通过）
   # 版本钉死 clang-tidy-22，与本地 proved 组合（gcc 编译数据库 + clang-tidy 22.1.2 → 0 findings）
   # 保持一致，避免不同 clang 版本漂移导致门禁误报。仅跑 ubuntu-latest，因为
   # windows/msvc 与 macos 矩阵默认无 clang-tidy，且 lint 与平台无关（纯静态分析）。
   # 依赖 AuroraLint.cmake 提供的 `lint` 目标（需 configure 时 clang-tidy 在 PATH 上）。
   # 双 Pass：分别强制 -DAURORA_ENABLE_DEBUG=OFF / =ON，各自独立编译数据库，
-  # 以覆盖 #if（debug-ON，真实 Phase4/5 逻辑）与 #else（debug-OFF）两分支——
+  # 以覆盖 #if（debug-ON）与 #else（debug-OFF）两分支——
   # AURORA_ENABLE_DEBUG=AUTO 是 generator expression，单配置只分析一分支，门禁天然盲一半。
   # ----------------------------------------------------------------------------
   lint:
-    name: clang-tidy (P5 gate, dual-pass)
+    name: clang-tidy (dual-pass)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -60,6 +313,7 @@ jobs:
       - name: Install clang-tidy-22
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
           echo "deb http://apt.llvm.org/ubuntu/ llvm-toolchain-ubuntu-$(lsb_release -cs) 22" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
           sudo apt-get install -y clang-tidy-22

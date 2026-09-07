@@ -18,11 +18,8 @@
 
 namespace aurora::test_cases::utest_descriptor {
 
-using au::serialization::register_core_widgets;
 using au::serialization::component_schema;
-
-
-
+using au::serialization::register_core_widgets;
 
 // ---------- describe() 基本正确性 ----------
 

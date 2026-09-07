@@ -12,8 +12,6 @@
 
 namespace aurora::test_cases::utest_validate {
 
-
-
 namespace {
 // 确定性、但未注册到 WidgetRegistry 的控件，用于触发「未知类型」分支。
 class UnregisteredBox : public Widget {
@@ -79,6 +77,5 @@ AURORA_TEST() {
     test_validate_null_child();
     test_validate_depth_limit();
 }
-
 
 }  // namespace aurora::test_cases::utest_validate

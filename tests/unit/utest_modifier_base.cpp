@@ -87,7 +87,7 @@ AURORA_TEST() {
     // ---- 6. 拷贝后 kind 保持（修饰链按值组合） ----
     {
         const ProbeNode src{ModifierNode::Kind::Input};
-        const ProbeNode copy = src;
+        const ProbeNode &copy = src;
         AURORA_TEST_CHECK(copy.kind() == ModifierNode::Kind::Input);
     }
 }

@@ -15,7 +15,6 @@
 
 namespace aurora::test_cases::utest_commands {
 
-
 namespace commands = aurora::commands;
 
 AURORA_TEST() {

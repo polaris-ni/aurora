@@ -18,8 +18,6 @@
 
 namespace aurora::test_cases::itest_nav_win {
 
-
-
 static auto make_page(const std::string &label) -> Node {
     Text t{TextProps{.content = label}};
     t.modifier.set(Modifier{}.background(Color::blue()));
@@ -158,6 +156,5 @@ AURORA_TEST() {
 
     AURORA_LOG_INFO("test", "nav_win_test: ALL PASS");
 }
-
 
 }  // namespace aurora::test_cases::itest_nav_win

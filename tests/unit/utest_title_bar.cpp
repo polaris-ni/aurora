@@ -17,8 +17,6 @@
 
 namespace aurora::test_cases::utest_title_bar {
 
-
-
 namespace {
 
 auto approx(float a, float b, const float eps = 0.5F) -> bool { return std::fabs(a - b) <= eps; }

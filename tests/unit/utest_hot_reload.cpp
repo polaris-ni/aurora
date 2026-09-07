@@ -16,8 +16,6 @@
 
 namespace aurora::test_cases::utest_hot_reload {
 
-
-
 AURORA_TEST() {
     std::string content = R"({"type":"Button","props":{"text":"Hi"}})";
     HotReload hr("dummy.json");
@@ -55,6 +53,5 @@ AURORA_TEST() {
     hr.set_state_key("id");
     AURORA_TEST_CHECK(static_cast<bool>(hr.root()));
 }
-
 
 }  // namespace aurora::test_cases::utest_hot_reload

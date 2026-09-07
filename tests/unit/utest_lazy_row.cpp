@@ -15,8 +15,6 @@
 
 namespace aurora::test_cases::utest_lazy_row {
 
-
-
 AURORA_TEST() {
     // 构造与属性。
     {
@@ -96,6 +94,5 @@ AURORA_TEST() {
         }
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_lazy_row

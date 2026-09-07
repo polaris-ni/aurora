@@ -15,7 +15,6 @@
 
 namespace aurora::test_cases::utest_inspector_api {
 
-
 namespace serialization = aurora::serialization;
 
 AURORA_TEST() {

@@ -17,8 +17,6 @@
 
 namespace aurora::test_cases::utest_strict_mode {
 
-
-
 namespace {
 
 // 验证 Application 上下文的 set/get 往返。
@@ -91,6 +89,5 @@ AURORA_TEST() {
     test_app_builder_strict_mode();
     test_strict_failure_is_fatal();
 }
-
 
 }  // namespace aurora::test_cases::utest_strict_mode

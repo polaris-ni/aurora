@@ -10,7 +10,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -108,8 +107,8 @@ static auto run_parent(const std::filesystem::path &exe, const std::filesystem::
     STARTUPINFOA si{};
     si.cb = sizeof(si);
     for (int i = 0; i < k; ++i) {
-        const std::string cmd = "\"" + exe.string() + "\" --run=utest_preferences_multiproc -- --writer " + std::to_string(i) +
-                                " \"" + file.string() + "\"";
+        const std::string cmd = "\"" + exe.string() + "\" --run=utest_preferences_multiproc -- --writer " +
+                                std::to_string(i) + " \"" + file.string() + "\"";
         std::vector buf(cmd.begin(), cmd.end());
         buf.push_back('\0');
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
@@ -127,8 +126,8 @@ static auto run_parent(const std::filesystem::path &exe, const std::filesystem::
             const std::string a1 = "--writer";
             const std::string a2 = std::to_string(i);
             const std::string a3 = file.string();
-            ::execl(exe.c_str(), "test_preferences_multiproc", "--run=utest_preferences_multiproc", "--", a1.c_str(), a2.c_str(),
-                    a3.c_str(), static_cast<char *>(nullptr));
+            ::execl(exe.c_str(), "test_preferences_multiproc", "--run=utest_preferences_multiproc", "--", a1.c_str(),
+                    a2.c_str(), a3.c_str(), static_cast<char *>(nullptr));
             ::_exit(127);
         }
         children[i].pid = pid;

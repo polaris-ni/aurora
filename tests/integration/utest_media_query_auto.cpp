@@ -14,7 +14,6 @@
 
 namespace aurora::test_cases::utest_media_query_auto {
 
-
 static auto size_eq(const au::Size &a, const au::Size &b, const float e = 1e-3F) -> bool {
     return near_f(a.width, b.width, e) && near_f(a.height, b.height, e);
 }
@@ -91,6 +90,5 @@ AURORA_TEST() {
     test_auto_injection_root();
     test_manual_provider_overrides();
 }
-
 
 }  // namespace aurora::test_cases::utest_media_query_auto

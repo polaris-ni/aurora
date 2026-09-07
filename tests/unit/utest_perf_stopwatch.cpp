@@ -20,8 +20,6 @@
 
 namespace aurora::test_cases::utest_perf_stopwatch {
 
-
-
 namespace {
 
 /// @brief 忙等至少 `target_ms` 毫秒（不用 sleep：调度粒度会让「至少」变成「大概」）。
@@ -142,6 +140,5 @@ AURORA_TEST() {
     test_now_ms_shared_epoch();
     test_instances_independent();
 }
-
 
 }  // namespace aurora::test_cases::utest_perf_stopwatch

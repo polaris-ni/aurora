@@ -61,12 +61,10 @@ AURORA_TEST() {
         const auto t = Matrix2D::from_translate(10.0F, 0.0F);
         const auto r = Matrix2D::from_rotate(90.0F);
         const auto tr = t.compose(r);  // 先旋转再平移
-        AURORA_TEST_CHECK(near_point(tr.apply_to_point(Point{.x = 1.0F, .y = 0.0F}),
-                                     Point{.x = 10.0F, .y = 1.0F}));
+        AURORA_TEST_CHECK(near_point(tr.apply_to_point(Point{.x = 1.0F, .y = 0.0F}), Point{.x = 10.0F, .y = 1.0F}));
 
         const auto rt = r.compose(t);  // 先平移再旋转
-        AURORA_TEST_CHECK(near_point(rt.apply_to_point(Point{.x = 1.0F, .y = 0.0F}),
-                                     Point{.x = 0.0F, .y = 11.0F}));
+        AURORA_TEST_CHECK(near_point(rt.apply_to_point(Point{.x = 1.0F, .y = 0.0F}), Point{.x = 0.0F, .y = 11.0F}));
     }
 
     // ---- 7. 求逆：M 与其逆复合回到单位矩阵 ----
@@ -105,17 +103,14 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(near_point(p, Point{.x = 0.0F, .y = 10.0F}));
 
         // 中心点自身不动
-        AURORA_TEST_CHECK(near_point(m.apply_to_point(Point{.x = 10.0F, .y = 10.0F}),
-                                     Point{.x = 10.0F, .y = 10.0F}));
+        AURORA_TEST_CHECK(near_point(m.apply_to_point(Point{.x = 10.0F, .y = 10.0F}), Point{.x = 10.0F, .y = 10.0F}));
     }
 
     // ---- 11. 绕任意点缩放：中心不动，其余按比例远离 ----
     {
         const auto m = Matrix2D::from_scale_about(2.0F, 2.0F, Point{.x = 10.0F, .y = 10.0F});
-        AURORA_TEST_CHECK(near_point(m.apply_to_point(Point{.x = 10.0F, .y = 10.0F}),
-                                     Point{.x = 10.0F, .y = 10.0F}));
-        AURORA_TEST_CHECK(near_point(m.apply_to_point(Point{.x = 20.0F, .y = 10.0F}),
-                                     Point{.x = 30.0F, .y = 10.0F}));
+        AURORA_TEST_CHECK(near_point(m.apply_to_point(Point{.x = 10.0F, .y = 10.0F}), Point{.x = 10.0F, .y = 10.0F}));
+        AURORA_TEST_CHECK(near_point(m.apply_to_point(Point{.x = 20.0F, .y = 10.0F}), Point{.x = 30.0F, .y = 10.0F}));
     }
 
     // ---- 12. is_identity 对微小旋转判定为非单位 ----

@@ -14,7 +14,6 @@
 using au::Font;
 using au::render::FontEngine;
 
-
 namespace aurora::test_cases::utest_font_shape_cache {
 
 AURORA_TEST() {
@@ -62,6 +61,5 @@ AURORA_TEST() {
     AURORA_TEST_CHECK_MSG(cleared.hits == 0 && cleared.misses == 0 && cleared.entries == 0,
                           "Test8: shape_cache_clear resets stats and entries");
 }
-
 
 }  // namespace aurora::test_cases::utest_font_shape_cache

@@ -4,7 +4,7 @@
 #include "aurora/image/image_codec.h"
 
 // WebP 动图解码依赖 WebPDemux（libwebp 自带）。
-#ifdef AURORA_BUILD_IMAGE_WEBP
+#ifdef AURORA_ENABLE_IMAGE_WEBP
 
 // libwebp 为 C 库，须 C 链接；webp/*.h 内部已自带 extern "C" 保护，
 // 此处外层包裹为防御性冗余，确保任何包含路径下符号链接正确。
@@ -122,4 +122,4 @@ auto create_webp_codec() -> std::shared_ptr<ImageCodec> { return std::make_share
 
 }  // namespace aurora::image
 
-#endif  // AURORA_BUILD_IMAGE_WEBP
+#endif  // AURORA_ENABLE_IMAGE_WEBP

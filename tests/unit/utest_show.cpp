@@ -13,8 +13,6 @@
 
 namespace aurora::test_cases::utest_show {
 
-
-
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_show ===\n");
 

@@ -10,12 +10,9 @@
 #include "aurora/aurora.h"
 #include "aurora/core/log.h"
 #include "aurora/core/result.h"
-
 #include "aurora_test_harness.h"
 
 namespace aurora::test_cases::utest_result {
-
-
 
 static void test_ok() {
     Result r(42);
@@ -44,7 +41,7 @@ static void test_error() {
 
 static void test_make_error_overloads() {
     // (enum, params)：message 由表模板渲染，元数据来自表
-    auto e1 = make_error(ErrorCode::LayoutDepthExceeded, { { "max", "10" } });
+    auto e1 = make_error(ErrorCode::LayoutDepthExceeded, {{"max", "10"}});
     AURORA_TEST_CHECK_MSG(e1.code == "layout-depth-exceeded", "make_error(enum,params): slug");
     AURORA_TEST_CHECK_MSG(e1.message == "Layout tree depth exceeded the limit (default 10)",
                           "make_error(enum,params): templated message");
@@ -55,7 +52,7 @@ static void test_make_error_overloads() {
     AURORA_TEST_CHECK_MSG(e2.code == "general-unknown" && e2.message == "custom", "make_error(enum,message)");
 
     // (enum, message, params, hint)：hint 覆盖表默认
-    auto e3 = make_error(ErrorCode::NavDepthExceeded, "custom msg", { { "max", "5" } }, "my hint");
+    auto e3 = make_error(ErrorCode::NavDepthExceeded, "custom msg", {{"max", "5"}}, "my hint");
     AURORA_TEST_CHECK_MSG(e3.hint == "my hint" && e3.message == "custom msg", "make_error(enum,message,params,hint)");
 
     // (enum, message, suggestion, docs, where)：向后兼容，元数据仍来自表
@@ -70,6 +67,5 @@ AURORA_TEST() {
     test_error();
     test_make_error_overloads();
 }
-
 
 }  // namespace aurora::test_cases::utest_result

@@ -6,12 +6,9 @@
 #include "aurora/widget/chip.h"
 #include "aurora/widget/text.h"
 #include "aurora/widget/widget.h"
-
 #include "aurora_test_harness.h"
 
 namespace aurora::test_cases::utest_chip {
-
-
 
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_chip ===\n");
@@ -51,7 +48,8 @@ AURORA_TEST() {
         Json props = Json::object();
         chip.serialize_props(props);
         AURORA_TEST_CHECK(props.contains("label"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["label"].get<std::string>() == "Hello");
 
         Chip chip2;
@@ -67,7 +65,7 @@ AURORA_TEST() {
         chip.set_on_delete([&]() -> void { deleted = true; });
         // 验证 set_on_delete 返回引用
         chip.set_on_delete([&]() -> void { deleted = true; });
-        AURORA_TEST_CHECK(!deleted); // 未触发（需要点击）
+        AURORA_TEST_CHECK(!deleted);  // 未触发（需要点击）
     }
 
     // --- Badge 构造 ---
@@ -110,7 +108,8 @@ AURORA_TEST() {
         Json props = Json::object();
         badge.serialize_props(props);
         AURORA_TEST_CHECK(props.contains("count"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["count"].get<int>() == 7);
 
         Badge badge2;
@@ -129,15 +128,20 @@ AURORA_TEST() {
             .set_corner_radius(9.0F);
         Json props = Json::object();
         chip.serialize_props(props);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["background"][0].get<int>() == 10);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["text_color"][2].get<int>() == 3);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["delete_color"][0].get<int>() == 4);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["font_size"].get<float>() == 15.0F);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["corner_radius"].get<float>() == 9.0F);
 
         Chip chip2;
@@ -145,26 +149,30 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(chip2.background() == Color(10, 20, 30, 255));
         Json k = Json::object();
         chip2.serialize_props(k);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(k["corner_radius"].get<float>() == 9.0F);
     }
 
     // --- Badge 徽章色/文字色往返 ---
     {
         Badge badge;
-        badge.set_count(3).set_badge_color(Color{ 11, 22, 33, 255 }).set_text_color(Color{ 44, 55, 66, 255 });
+        badge.set_count(3).set_badge_color(Color{11, 22, 33, 255}).set_text_color(Color{44, 55, 66, 255});
         Json props = Json::object();
         badge.serialize_props(props);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["badge_color"][0].get<int>() == 11);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["text_color"][1].get<int>() == 55);
 
         Badge badge2;
         badge2.deserialize_props(props);
         Json k = Json::object();
         badge2.serialize_props(k);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(k["badge_color"][2].get<int>() == 33);
     }
 }

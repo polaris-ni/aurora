@@ -29,7 +29,7 @@ AURORA_TEST() {
         Font f;
         f.size_pt = 20.0F;
         f.weight = 700;
-        const TextSpan s{LocalizedString{std::string("Hi")}, f, Color::red()};
+        const TextSpan s{.text = LocalizedString{std::string("Hi")}, .font = f, .color = Color::red()};
         AURORA_TEST_CHECK_EQ(std::string(s.text.c_str()), std::string("Hi"));
         AURORA_TEST_CHECK_NEAR(s.font.size_pt, 20.0F, 1e-6F);
         AURORA_TEST_CHECK_EQ(s.font.weight, 700);

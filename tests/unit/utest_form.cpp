@@ -13,7 +13,6 @@
 
 namespace aurora::test_cases::utest_form {
 
-
 namespace validators = aurora::validators;
 
 AURORA_TEST() {
@@ -161,6 +160,5 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(!form->validate_all());
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_form

@@ -13,8 +13,6 @@
 
 namespace aurora::test_cases::utest_pickers {
 
-
-
 namespace {
 
 template <typename W>

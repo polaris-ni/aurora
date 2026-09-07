@@ -2,8 +2,7 @@
 # AuroraDemos.cmake — 示例 demo 目标（examples/demos/ 下每组件一个可运行窗口；examples/app/ 下为应用级演示，如 google_play）
 # ------------------------------------------------------------
 # 从主 CMakeLists.txt 抽出的独立模块，避免主文件被 60+ 可执行目标的样板污染。
-# 依赖（均在主文件更早就绪）：aurora 主库、aurora_setup_consumer_target（AuroraUtils）、
-# aurora_inspector_server（AuroraTools，仅 AURORA_BUILD_INSPECTOR_SERVER=ON 时定义）。
+# 依赖（均在主文件更早就绪）：aurora 主库、aurora_setup_consumer_target（AuroraUtils）、aurora_inspector_server。
 # ⚠️ 本模块须在主文件 include(AuroraTools) 之后 include：demo_google_play 的 InspectorServer
 # 远程检视接线需要 aurora_inspector_server 目标已存在（见下方 hook）。
 # ============================================================
@@ -40,7 +39,7 @@ endif ()
 
 # demo_google_play 接入 InspectorServer 远程检视：主文件已保证本模块在 include(AuroraTools) 之后引入，
 # 此时 aurora_inspector_server 目标（AURORA_BUILD_INSPECTOR_SERVER=ON 时定义，跨平台）已存在。
-# 其 PUBLIC 导出的 AURORA_INSPECTOR_SERVER_ENABLED 宏随链接注入 demo，启用 demo 内 HTTP 远程检视代码；
+# 其 PUBLIC 导出的 AURORA_BUILD_INSPECTOR_SERVER 宏随链接注入 demo，启用 demo 内 HTTP 远程检视代码；
 # Release / 未开选项时该目标不存在 → 跳过，demo 内 InspectorServer 分支整编译剔除，零链接依赖。
 if (AURORA_BUILD_DEMOS AND TARGET demo_google_play AND TARGET aurora_inspector_server)
     target_link_libraries(demo_google_play PRIVATE aurora_inspector_server)

@@ -170,7 +170,11 @@ def main() -> int:
                 # keyed by (file, line, check): a header diagnostic is re-emitted in
                 # every including TU, so later occurrences just refresh the message.
                 findings[(np_, line_no, check)] = (sev, msg)
-                rel = os.path.relpath(np_).replace("\\", "/")
+                try:
+                    rel = os.path.relpath(np_).replace("\\", "/")
+                except ValueError:
+                    # 诊断路径在另一盘符（如系统头在 C:，仓库在 D:），无法求相对路径
+                    rel = np_
                 by_area[rel.split("/")[0] if "/" in rel else rel] += 1
             if i % 25 == 0 or i == len(tus):
                 print(f"  ... {i}/{len(tus)}  ({time.time() - t0:.0f}s)", flush=True)

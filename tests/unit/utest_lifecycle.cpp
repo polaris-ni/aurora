@@ -16,8 +16,6 @@
 
 namespace aurora::test_cases::utest_lifecycle {
 
-
-
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_lifecycle ===\n");
 
@@ -76,6 +74,5 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(mount_calls == 1);
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_lifecycle

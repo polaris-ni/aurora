@@ -20,8 +20,6 @@
 
 namespace aurora::test_cases::utest_painter {
 
-
-
 namespace aurora::tests::sec_painter_aa {
 
 // 读取像素亮度（黑/白场景下 r==g==b）。

@@ -16,8 +16,6 @@
 
 namespace aurora::test_cases::utest_shortcuts {
 
-
-
 namespace {
 
 auto make_key_event(KeyCode key, ModifierKey mods = ModifierKey::None, KeyAction action = KeyAction::Down) -> KeyEvent {

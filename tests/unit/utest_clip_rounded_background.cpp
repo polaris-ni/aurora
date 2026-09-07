@@ -15,8 +15,6 @@
 
 namespace aurora::test_cases::utest_clip_rounded_background {
 
-
-
 static auto region_has_bg(const Painter &p, int x0, int y0, int x1, int y1, const Color &bg) -> bool {
     const int w = p.width();
     for (int y = y0; y < y1; ++y) {
@@ -27,9 +25,11 @@ static auto region_has_bg(const Painter &p, int x0, int y0, int x1, int y1, cons
             // 容忍抗锯齿羽化：背景色 ±36 内视为背景泄漏到圆角区。
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
             // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
-            if (std::abs(c[0] - static_cast<int>(bg.r)) < 36 && std::abs(c[1] - static_cast<int>(bg.g)) < 36 &&  // NOLINT
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-                // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
+            if (std::abs(c[0] - static_cast<int>(bg.r)) < 36 &&
+                std::abs(c[1] - static_cast<int>(bg.g)) <
+                    36 &&  // NOLINT
+                           // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+                           // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
                 std::abs(c[2] - static_cast<int>(bg.b)) < 36) {  // NOLINT
                 return true;
             }
@@ -156,6 +156,5 @@ AURORA_TEST() {
     test_rounded_background_no_padding();
     test_padded_rounded_background();
 }
-
 
 }  // namespace aurora::test_cases::utest_clip_rounded_background

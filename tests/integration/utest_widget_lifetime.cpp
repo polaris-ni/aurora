@@ -105,8 +105,6 @@ using au::LeafWidget;
 using au::LocalizedString;
 using au::Orientation;
 
-namespace aurora::tests::sec_lifetime_uaf {
-
 namespace {
 
 /// @brief 可聚焦叶控件：记录获焦/失焦次数，用于焦点悬垂断言。
@@ -116,7 +114,7 @@ class FocusLeaf : public LeafWidget {
     int lost = 0;
     /// @brief activate() 计数出口：指向调用方栈变量，故本控件析构后仍可安全读取，
     ///        用于断言「已回收的焦点控件不再被虚调用」而无需解引用已释放对象。
-    int* activate_sink = nullptr;
+    int *activate_sink = nullptr;
     void on_focus_change(bool focused) override {
         if (focused) {
             ++gained;
@@ -154,7 +152,7 @@ struct SolidPage : Widget {
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(c.max); }
-    void on_paint(Painter& p, const Rect& bounds, const BuildContext& /*ctx*/) override { p.fill_rect(bounds, bg); }
+    void on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) override { p.fill_rect(bounds, bg); }
 };
 
 /// @brief 在 root 上跑一次完整的 Press+Release（触发 Button::activate → on_click）。
@@ -362,10 +360,7 @@ static void run() {
         AURORA_TEST_CHECK_MSG(!anim.has_active(), "repeated/invalid remove is safe");
     }
 }
-}  // namespace aurora::tests::sec_lifetime_uaf
 
-AURORA_TEST() {
-    aurora::tests::sec_lifetime_uaf::run();
-}
+AURORA_TEST() { aurora::test_cases::utest_widget_lifetime::run(); }
 
 }  // namespace aurora::test_cases::utest_widget_lifetime

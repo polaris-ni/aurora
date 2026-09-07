@@ -19,8 +19,6 @@
 
 namespace aurora::test_cases::utest_modifier_transform {
 
-
-
 namespace {
 
 // 实心色块控件：在内容盒内填充纯色，用于确定性像素 / 命中验证。
@@ -35,8 +33,8 @@ class SolidBox : public LeafWidget {
     }
 
   protected:
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override { return c.constrain(sz); }
-    void on_paint(Painter& p, const Rect& b, const BuildContext& /*ctx*/) override { p.fill_rect(b, color); }
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(sz); }
+    void on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) override { p.fill_rect(b, color); }
 };
 
 struct RenderResult {

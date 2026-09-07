@@ -13,8 +13,6 @@
 
 namespace aurora::test_cases::utest_menu_bar {
 
-
-
 namespace {
 
 auto make_menus(int *open_count, int *save_count) -> std::vector<Menu> {

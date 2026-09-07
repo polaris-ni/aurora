@@ -145,6 +145,8 @@ target_link_libraries(aurora PUBLIC freetype harfbuzz)
 # ---- 图片编解码器外部库（libjpeg-turbo / libwebp / wuffs）----
 # ⚠️ 必须在 add_library(aurora ...) 之后 include：本模块内部以 target_link_libraries(aurora ...)
 # 把各 codec 的 OBJECT 库链入 aurora，若 aurora 目标尚未创建会报 "not built by this project"。
+# feature 宏单一入口（aurora_define_feature）须先于首个调用点加载。
+include(AuroraFeatures)
 include(AuroraImageCodecs)
 
 # 三方库 harfbuzz 从源码编译（src/harfbuzz.cc 合并源），其 hb-algs.hh:1146 的 memcmp 边界分析

@@ -105,8 +105,6 @@ using au::LeafWidget;
 using au::LocalizedString;
 using au::Orientation;
 
-namespace aurora::tests::sec_components {
-
 namespace {
 
 void render_tree(Widget &w, float ww, float hh) {
@@ -126,6 +124,8 @@ struct MeasureCtx : LayoutCtxBase {
     float content_w;
     float content_h;
 };
+
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
 auto mc_pool() -> std::vector<MeasureCtx> & {  // NOLINT
     static std::vector<MeasureCtx> v;
@@ -161,11 +161,7 @@ void test_column_row_alignment() {
     f_min.main_axis_size = MainAxisSize::Min;
     auto r_min = FlexLayouter::layout(f_min, c, {item(0, 10, 20), item(0, 10, 20)});
     AURORA_TEST_CHECK_MSG(near_f(r_min.size.height, 40.0F), "Min: content height = 40");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_f(r_min.children[0].origin.y, 0.0F), "Min/Start child0 y=0");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_f(r_min.children[1].origin.y, 20.0F), "Min/Start child1 y=20");
 
     Flex f_max{.direction = FlexDirection::Column,
@@ -174,11 +170,7 @@ void test_column_row_alignment() {
     f_max.main_axis_size = MainAxisSize::Max;
     auto r_max = FlexLayouter::layout(f_max, c, {item(0, 10, 20), item(0, 10, 20)});
     AURORA_TEST_CHECK_MSG(near_f(r_max.size.height, 200.0F), "Max: fills parent height = 200");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_f(r_max.children[0].origin.y, 80.0F), "Max/Center child0 y=80");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_f(r_max.children[1].origin.y, 100.0F), "Max/Center child1 y=100");
 
     Flex f_end{.direction = FlexDirection::Column,
@@ -186,11 +178,7 @@ void test_column_row_alignment() {
                .cross_axis = CrossAxisAlignment::Start};
     f_end.main_axis_size = MainAxisSize::Max;
     auto r_end = FlexLayouter::layout(f_end, c, {item(0, 10, 20), item(0, 10, 20)});
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_f(r_end.children[0].origin.y, 160.0F), "Max/End child0 y=160");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_f(r_end.children[1].origin.y, 180.0F), "Max/End child1 y=180");
 
     Constraints c_inf;
@@ -227,36 +215,20 @@ void test_column_row_alignment() {
         .set_gap(8.0F);
     Json j;
     col2.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["main_axis_alignment"].get<std::string>() == "Center",
                           "serialize main_axis_alignment=Center");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["cross_axis_alignment"].get<std::string>() == "Stretch",
                           "serialize cross_axis_alignment=Stretch");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["main_axis_size"].get<std::string>() == "Max", "serialize main_axis_size=Max");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_f(j["gap"].get<float>(), 8.0F), "serialize gap=8");
 
     Column q{Node{Text{"b"}}};
     q.deserialize_props(j);
     Json k;
     q.serialize_props(k);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(k["main_axis_alignment"].get<std::string>() == "Center", "rt main_axis_alignment");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(k["cross_axis_alignment"].get<std::string>() == "Stretch", "rt cross_axis_alignment");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(k["main_axis_size"].get<std::string>() == "Max", "rt main_axis_size");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_f(k["gap"].get<float>(), 8.0F), "rt gap");
 
     Row row2{Node{Text{"a"}}};
@@ -265,16 +237,10 @@ void test_column_row_alignment() {
         .set_main_axis_size(MainAxisSize::Min);
     Json rj;
     row2.serialize_props(rj);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(rj["main_axis_alignment"].get<std::string>() == "End",
                           "Row serialize main_axis_alignment=End");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(rj["cross_axis_alignment"].get<std::string>() == "Center",
                           "Row serialize cross_axis_alignment=Center");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(rj["main_axis_size"].get<std::string>() == "Min", "Row serialize main_axis_size=Min");
 }
 
@@ -395,22 +361,12 @@ static void run() {
         };
         Node t1 = make_tree();
         const Json snap = render_to_logical_snapshot(t1, 200, 200);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(std::string{snap["type"].get<std::string>()} == "Column", "snapshot root type Column");
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(snap["children"].size() == 2, "snapshot root has 2 children");
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(std::string{snap["children"][0]["type"].get<std::string>()} == "Row",
                               "snapshot first child Row");
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(std::abs(snap["box"]["w"].get<float>() - 200.0F) < 0.001F,
                               "snapshot root width = viewport");
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK_MSG(std::abs(snap["box"]["h"].get<float>() - 200.0F) < 0.001F,
                               "snapshot root height = viewport");
 
@@ -446,10 +402,9 @@ static void run() {
 
     test_column_row_alignment();
 }
-}  // namespace aurora::tests::sec_components
 
-AURORA_TEST() {
-    aurora::tests::sec_components::run();
-}
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+
+AURORA_TEST() { aurora::test_cases::utest_widget_components::run(); }
 
 }  // namespace aurora::test_cases::utest_widget_components

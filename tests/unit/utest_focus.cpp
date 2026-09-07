@@ -15,12 +15,9 @@
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text_input.h"
 #include "aurora/widget/widget.h"
-
 #include "aurora_test_harness.h"
 
 namespace aurora::test_cases::utest_focus {
-
-
 
 namespace {
 /// @brief 焦点变更追踪控件（验证 FocusManager 的获焦/失焦通知）。
@@ -38,7 +35,7 @@ class FocusSpy : public aurora::LeafWidget {
     void collect_signals(std::vector<aurora::SignalViewBase *> & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "FocusSpy"; }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
-        return WidgetDescriptor{ .name = "FocusSpy", .children_policy = "none" };
+        return WidgetDescriptor{.name = "FocusSpy", .children_policy = "none"};
     }
 
   protected:
@@ -47,17 +44,17 @@ class FocusSpy : public aurora::LeafWidget {
     }
     void on_paint(aurora::Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) override {}
 };
-} // namespace
+}  // namespace
 
 AURORA_TEST() {
     // 构造一颗含多个可聚焦叶控件的树；容器本身不参与焦点序。
-    auto ti_a = std::make_shared<TextInput>(aurora::TextInputProps{ .value = "", .placeholder = "A" });
-    auto ti_b = std::make_shared<TextInput>(aurora::TextInputProps{ .value = "", .placeholder = "B" });
+    auto ti_a = std::make_shared<TextInput>(aurora::TextInputProps{.value = "", .placeholder = "A"});
+    auto ti_b = std::make_shared<TextInput>(aurora::TextInputProps{.value = "", .placeholder = "B"});
     auto btn = std::make_shared<Button>();
     auto spy = std::make_shared<FocusSpy>();
 
-    Column col{ ColumnProps{ .children = { Node{ ti_a }, Node{ ti_b }, Node{ btn }, Node{ spy } } } };
-    col.set_focusable(false); // 容器不抢占焦点
+    Column col{ColumnProps{.children = {Node{ti_a}, Node{ti_b}, Node{btn}, Node{spy}}}};
+    col.set_focusable(false);  // 容器不抢占焦点
 
     BuildContext ctx;
     col.mount(ctx);
@@ -89,7 +86,7 @@ AURORA_TEST() {
     fm.move_focus(FocusDirection::Forward);
     AURORA_TEST_CHECK(fm.focused() == spy.get());
     fm.move_focus(FocusDirection::Forward);
-    AURORA_TEST_CHECK(fm.focused() == ti_a.get()); // 循环回起点
+    AURORA_TEST_CHECK(fm.focused() == ti_a.get());  // 循环回起点
 
     // 4) 焦点变更通知：spy 在序列中获焦一次、失焦一次。
     AURORA_TEST_CHECK(spy->gained == 1);
@@ -112,11 +109,12 @@ AURORA_TEST() {
     KeyEvent back;
     back.action = KeyAction::Down;
     back.key = static_cast<int>(KeyCode::Backspace);
-    AURORA_TEST_CHECK(aurora::EventDispatcher::dispatch(col, back, fm)); // 派发到 tiB
+    AURORA_TEST_CHECK(aurora::EventDispatcher::dispatch(col, back, fm));  // 派发到 tiB
     AURORA_TEST_CHECK(ti_b->value() == "x");
 
     // 7) 点击 TextInput 经 request_focus 获焦。
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     const Rect ab = col.child_nodes()[0].bounds();
     const Point ac{.x = ab.origin.x + (ab.size.width / 2.0F), .y = ab.origin.y + (ab.size.height / 2.0F)};
     MouseEvent click;
@@ -130,7 +128,7 @@ AURORA_TEST() {
     KeyEvent tab;
     tab.action = KeyAction::Down;
     tab.key = static_cast<int>(KeyCode::Tab);
-    AURORA_TEST_CHECK(aurora::EventDispatcher::dispatch(col, tab, fm)); // 焦点前进到 tiB
+    AURORA_TEST_CHECK(aurora::EventDispatcher::dispatch(col, tab, fm));  // 焦点前进到 tiB
     AURORA_TEST_CHECK(fm.focused() == ti_b.get());
 
     // 9) Shift+Tab 后退（带修饰键位）。
@@ -142,7 +140,7 @@ AURORA_TEST() {
     // 10) 不可见控件不参与焦点序：隐藏 tiA 后移动应跳过它。
     ti_a->show = false;
     fm.set_focus(ti_b.get());
-    fm.move_focus(FocusDirection::Forward); // tiB -> btn -> spy -> tiB（跳过隐藏的 tiA）
+    fm.move_focus(FocusDirection::Forward);  // tiB -> btn -> spy -> tiB（跳过隐藏的 tiA）
     AURORA_TEST_CHECK(fm.focused() != ti_a.get());
 
     AURORA_LOG_INFO("test", "focus_test: OK");

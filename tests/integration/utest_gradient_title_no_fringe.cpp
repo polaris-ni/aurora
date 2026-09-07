@@ -21,10 +21,9 @@
 
 namespace aurora::test_cases::utest_gradient_title_no_fringe {
 
-
 namespace ar = aurora::render;
 
-auto paint_gradient_bg(Painter &p, int w, int h) -> void {
+static auto paint_gradient_bg(Painter &p, int w, int h) -> void {
     constexpr int bands = 24;
     const float bw = static_cast<float>(w) / bands;
     for (int i = 0; i < bands; ++i) {
@@ -37,7 +36,7 @@ auto paint_gradient_bg(Painter &p, int w, int h) -> void {
     }
 }
 
-auto render_one(ar::TextAAMode mode, int w, int h) -> std::vector<std::uint8_t> {
+static auto render_one(ar::TextAAMode mode, int w, int h) -> std::vector<std::uint8_t> {
     Painter p;
     p.begin(w, h);
     paint_gradient_bg(p, w, h);
@@ -64,23 +63,13 @@ AURORA_TEST() {
     constexpr std::size_t n_px = static_cast<std::size_t>(w) * h;
     for (std::size_t i = 0; i < n_px; ++i) {
         const std::size_t off = i * 4U;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         const int cr = ct[off];
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const int cg = ct[off + 1];
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const int cb = ct[off + 2];
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const int sr = ss[off];
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const int sg = ss[off + 1];
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         const int sb = ss[off + 2];
         const int dr = std::abs(cr - sr);
         const int dg = std::abs(cg - sg);

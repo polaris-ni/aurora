@@ -24,8 +24,7 @@ AURORA_TEST() {
     // ---- 2. 聚合初始化：按声明序 rect / constraints / children ----
     {
         const Rect r{.origin = Point{.x = 10.0F, .y = 20.0F}, .size = Size{.width = 100.0F, .height = 50.0F}};
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F},
-                            .max = Size{.width = 200.0F, .height = 200.0F}};
+        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 200.0F, .height = 200.0F}};
         const LayoutBox box{.rect = r, .constraints = c, .children = {}};
         AURORA_TEST_CHECK_EQ(box.rect.right(), 110.0F);
         AURORA_TEST_CHECK_EQ(box.rect.bottom(), 70.0F);
@@ -55,10 +54,10 @@ AURORA_TEST() {
 
     // ---- 4. 命中判定复用 Rect::contains（子盒坐标相对父盒） ----
     {
-        LayoutBox box{.rect = Rect{.origin = Point{.x = 5.0F, .y = 5.0F},
-                                   .size = Size{.width = 10.0F, .height = 10.0F}},
-                      .constraints = Constraints{},
-                      .children = {}};
+        LayoutBox box{
+            .rect = Rect{.origin = Point{.x = 5.0F, .y = 5.0F}, .size = Size{.width = 10.0F, .height = 10.0F}},
+            .constraints = Constraints{},
+            .children = {}};
         AURORA_TEST_CHECK(box.rect.contains(Point{.x = 10.0F, .y = 10.0F}));
         AURORA_TEST_CHECK_FALSE(box.rect.contains(Point{.x = 1.0F, .y = 1.0F}));
     }

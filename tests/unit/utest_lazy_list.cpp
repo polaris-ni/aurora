@@ -15,8 +15,6 @@
 
 namespace aurora::test_cases::utest_lazy_list {
 
-
-
 namespace {
 
 auto make_builder() -> LazyList::ItemBuilder {

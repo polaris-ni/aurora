@@ -15,8 +15,6 @@
 
 namespace aurora::test_cases::utest_data_widgets {
 
-
-
 namespace {
 
 template <typename W>

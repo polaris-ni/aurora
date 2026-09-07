@@ -13,8 +13,6 @@
 
 namespace aurora::test_cases::utest_inspect {
 
-
-
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_inspect ===\n");
 

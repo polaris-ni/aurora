@@ -22,8 +22,6 @@
 
 namespace aurora::test_cases::utest_context_menu_tooltip {
 
-
-
 AURORA_TEST() {
     // ---- 1. MenuItem 基本构造 ----
     {

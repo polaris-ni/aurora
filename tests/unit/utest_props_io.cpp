@@ -13,8 +13,6 @@
 
 namespace aurora::test_cases::utest_props_io {
 
-
-
 static void test_length_roundtrip() {
     // wrap / expand / fixed / ratio
     const Json w = length_to_json(Length::wrap());
@@ -52,8 +50,7 @@ static void test_color_roundtrip() {
     AURORA_TEST_CHECK_MSG(j.is_array() && j[0] == 1 && j[1] == 2 && j[2] == 3 && j[3] == 4,
                           "props_io: color -> [1,2,3,4]");
     const Color back = json_to_color(j);
-    AURORA_TEST_CHECK_MSG(back.r == 1 && back.g == 2 && back.b == 3 && back.a == 4,
-                          "props_io: color roundtrip");
+    AURORA_TEST_CHECK_MSG(back.r == 1 && back.g == 2 && back.b == 3 && back.a == 4, "props_io: color roundtrip");
     // 格式不符回退默认色（RGB 归零；alpha 沿用 Color 默认值）。
     const Color def = json_to_color(Json("nope"));
     AURORA_TEST_CHECK_MSG(def.r == 0 && def.g == 0 && def.b == 0, "props_io: bad color -> rgb zero");
@@ -122,21 +119,20 @@ static void test_text_decoration_roundtrip() {
     AURORA_TEST_CHECK_MSG(json_to_text_decoration(Json("Underline")) == TextDecoration::Underline,
                           "props_io: single-string Underline");
     AURORA_TEST_CHECK_MSG(json_to_text_decoration(Json("Bogus")) == TextDecoration::None,
-                           "props_io: unknown decoration -> None");
+                          "props_io: unknown decoration -> None");
 }
 
 // 遍历所有枚举取值，覆盖各 to_json/from_json switch 分支（原测试仅各取一值）。
 static void test_enum_exhaustive() {
-    for (auto v : {TextAlign::Left, TextAlign::Right, TextAlign::Center, TextAlign::Start, TextAlign::End,
-                   TextAlign::Justify}) {
+    for (auto v :
+         {TextAlign::Left, TextAlign::Right, TextAlign::Center, TextAlign::Start, TextAlign::End, TextAlign::Justify}) {
         AURORA_TEST_CHECK_MSG(json_to_text_align(text_align_to_json(v)) == v, "props_io: TextAlign all");
     }
     for (auto v : {TextOverflow::Clip, TextOverflow::Ellipsis, TextOverflow::Fade}) {
         AURORA_TEST_CHECK_MSG(json_to_text_overflow(text_overflow_to_json(v)) == v, "props_io: TextOverflow all");
     }
-    for (auto v : {FontWeight::Thin, FontWeight::ExtraLight, FontWeight::Light, FontWeight::Normal,
-                   FontWeight::Medium, FontWeight::SemiBold, FontWeight::Bold, FontWeight::ExtraBold,
-                   FontWeight::Black}) {
+    for (auto v : {FontWeight::Thin, FontWeight::ExtraLight, FontWeight::Light, FontWeight::Normal, FontWeight::Medium,
+                   FontWeight::SemiBold, FontWeight::Bold, FontWeight::ExtraBold, FontWeight::Black}) {
         AURORA_TEST_CHECK_MSG(json_to_font_weight(font_weight_to_json(v)) == v, "props_io: FontWeight all");
     }
     // 非法数值串（如 "bold"）此前裸 stoi 会抛异常致崩溃；现回退 Normal
@@ -153,8 +149,7 @@ static void test_enum_exhaustive() {
         AURORA_TEST_CHECK_MSG(json_to_main_axis_size(main_axis_size_to_json(v)) == v, "props_io: MainAxisSize all");
     }
     for (auto v : {MainAxisAlignment::Start, MainAxisAlignment::Center, MainAxisAlignment::End,
-                   MainAxisAlignment::SpaceBetween, MainAxisAlignment::SpaceAround,
-                   MainAxisAlignment::SpaceEvenly}) {
+                   MainAxisAlignment::SpaceBetween, MainAxisAlignment::SpaceAround, MainAxisAlignment::SpaceEvenly}) {
         AURORA_TEST_CHECK_MSG(json_to_main_axis_alignment(main_axis_alignment_to_json(v)) == v,
                               "props_io: MainAxisAlignment all");
     }
@@ -166,12 +161,12 @@ static void test_enum_exhaustive() {
     for (auto v : {StackFit::Loose, StackFit::Expand, StackFit::Passthrough}) {
         AURORA_TEST_CHECK_MSG(json_to_stack_fit(stack_fit_to_json(v)) == v, "props_io: StackFit all");
     }
-    for (auto v : {BoxFit::Fill, BoxFit::Contain, BoxFit::Cover, BoxFit::FitWidth, BoxFit::FitHeight,
-                   BoxFit::None, BoxFit::ScaleDown}) {
+    for (auto v : {BoxFit::Fill, BoxFit::Contain, BoxFit::Cover, BoxFit::FitWidth, BoxFit::FitHeight, BoxFit::None,
+                   BoxFit::ScaleDown}) {
         AURORA_TEST_CHECK_MSG(json_to_box_fit(box_fit_to_json(v)) == v, "props_io: BoxFit all");
     }
-    for (auto v : {OverflowStrategy::Visible, OverflowStrategy::Hidden, OverflowStrategy::Clip,
-                   OverflowStrategy::Scroll}) {
+    for (auto v :
+         {OverflowStrategy::Visible, OverflowStrategy::Hidden, OverflowStrategy::Clip, OverflowStrategy::Scroll}) {
         AURORA_TEST_CHECK_MSG(json_to_overflow_strategy(overflow_strategy_to_json(v)) == v,
                               "props_io: OverflowStrategy all");
     }

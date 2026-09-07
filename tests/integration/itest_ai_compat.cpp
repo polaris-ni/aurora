@@ -21,9 +21,9 @@
 namespace aurora::test_cases::itest_ai_compat {
 
 using au::serialization::from_json;
-using au::serialization::to_json;
-using au::serialization::to_code;
 using au::serialization::register_core_widgets;
+using au::serialization::to_code;
+using au::serialization::to_json;
 
 namespace fs = std::filesystem;
 
@@ -82,7 +82,7 @@ AURORA_TEST() {
         const std::string name = p.filename().string();
 
         Json j = load_fixture(p);
-        AURORA_TEST_CHECK_MSG(!j.is_null(), ("fixture " + name + ": loaded").c_str());
+        AURORA_TEST_CHECK_MSG(!j.is_null(), "fixture " + name + ": loaded");
         if (j.is_null()) {
             continue;
         }
@@ -91,27 +91,25 @@ AURORA_TEST() {
         auto errors = validate_ui_tree(j);
 
         if (name.starts_with("valid_")) {
-            AURORA_TEST_CHECK_MSG(result.ok(), ("valid fixture " + name + ": from_json ok").c_str());
-            AURORA_TEST_CHECK_MSG(errors.empty(), ("valid fixture " + name + ": validate ok").c_str());
+            AURORA_TEST_CHECK_MSG(result.ok(), "valid fixture " + name + ": from_json ok");
+            AURORA_TEST_CHECK_MSG(errors.empty(), "valid fixture " + name + ": validate ok");
             if (result.ok()) {
                 // 全链路：from_json → to_json → to_code（端到端代码生成）。
                 Json j2 = to_json(*result.value());
                 std::string code = to_code(j2);
-                AURORA_TEST_CHECK_MSG(!code.empty(),
-                                     ("valid fixture " + name + ": to_code non-empty").c_str());
+                AURORA_TEST_CHECK_MSG(!code.empty(), "valid fixture " + name + ": to_code non-empty");
                 // 生成代码应提及根控件类型（to_code 输出 au::<Type>(...) 形式）。
                 const std::string root_type = j.value("type", std::string{});
                 if (!root_type.empty()) {
-                    AURORA_TEST_CHECK_MSG(
-                        code.find(root_type) != std::string::npos,
-                        ("valid fixture " + name + ": code mentions type " + root_type).c_str());
+                    AURORA_TEST_CHECK_MSG(code.find(root_type) != std::string::npos,
+                                          "valid fixture " + name + ": code mentions type " + root_type);
                 }
             }
             ++valid_count;
         } else if (name.starts_with("error_")) {
             // 错误 fixture：必须在管线某处被拒绝（from_json 失败 或 validate 报 error）。
             const bool rejected = (!result.ok()) || !errors.empty();
-            AURORA_TEST_CHECK_MSG(rejected, ("error fixture " + name + ": rejected by pipeline").c_str());
+            AURORA_TEST_CHECK_MSG(rejected, "error fixture " + name + ": rejected by pipeline");
             ++error_count;
         }
         // 其它命名（manifest/README）忽略

@@ -12,8 +12,6 @@
 
 namespace aurora::test_cases::utest_rich_text_edit {
 
-
-
 AURORA_TEST() {
     // ---- 基本构造 + 空文档 ----
     {

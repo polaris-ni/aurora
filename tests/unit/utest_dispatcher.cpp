@@ -27,8 +27,6 @@
 
 namespace aurora::test_cases::utest_dispatcher {
 
-
-
 namespace sec_event {
 
 static void run() {

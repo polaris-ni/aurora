@@ -15,25 +15,25 @@
 
 namespace aurora::test_cases::utest_perf_display_list {
 
-
-
 namespace {
 
 struct LeafCounter : Widget {
+    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto type_name() const -> const char * override { return "LeafCounter"; }
+
+  protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = 20.0F, .height = 20.0F});
     }
     auto on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) -> void override {
         p.fill_rect(b, Color{80, 160, 240});
     }
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
-    auto type_name() const -> const char * override { return "LeafCounter"; }
 };
 
 }  // namespace
 
 AURORA_TEST() {
-#ifdef AURORA_DISPLAY_LIST
+#ifdef AURORA_ENABLE_DISPLAY_LIST
     constexpr int n = 300;  // 叶子控件数量
     constexpr int frames = 60;
 
@@ -87,6 +87,5 @@ AURORA_TEST() {
     AURORA_TEST_CHECK(true);
 #endif
 }
-
 
 }  // namespace aurora::test_cases::utest_perf_display_list

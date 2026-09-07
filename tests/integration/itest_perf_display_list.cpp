@@ -29,14 +29,14 @@ class FillLeaf : public LeafWidget {
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(Size{.width = kSize, .height = kSize});
+        return c.constrain(Size{.width = AURORA_K_SIZE, .height = AURORA_K_SIZE});
     }
     auto on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) -> void override {
         p.fill_rect(b, Color{120, 160, 200, 255});
     }
 
   private:
-    static constexpr float kSize = 8.0F;
+    static constexpr float AURORA_K_SIZE = 8.0F;
 };
 
 // 构造一棵含 n 个 FillLeaf 的 Column（每次都新建，避免 DL 缓存跨渲染携带）。
@@ -71,27 +71,27 @@ static auto record_cmd_count(Node root, float w, float h) -> std::size_t {
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== itest_perf_display_list ===\n");
 
-    constexpr float kW = 200.0F;
-    constexpr float kH = 200.0F;
-    constexpr int kN = 10;
+    constexpr float k_w = 200.0F;
+    constexpr float k_h = 200.0F;
+    constexpr int k_n = 10;
 
     // 1) 录制确实产出命令（不为空）。
-    const std::size_t c1 = record_cmd_count(build_tree(kN), kW, kH);
+    const std::size_t c1 = record_cmd_count(build_tree(k_n), k_w, k_h);
     AURORA_TEST_CHECK_MSG(c1 > 0, "DL cmd_count > 0 (recording captured draw commands)");
 
     // 2) 相同树两次独立录制 → 命令数可复现（计数类指标必须确定，不能逐次漂移）。
-    const std::size_t c2 = record_cmd_count(build_tree(kN), kW, kH);
+    const std::size_t c2 = record_cmd_count(build_tree(k_n), k_w, k_h);
     AURORA_TEST_CHECK_MSG(c1 == c2, "DL cmd_count deterministic for identical tree (c1 == c2)");
 
     // 3) 内容量翻倍 → 命令数严格增长（计数正比于可见内容，而非恒定开销）。
-    const std::size_t c_big = record_cmd_count(build_tree(kN * 2), kW, kH);
+    const std::size_t c_big = record_cmd_count(build_tree(k_n * 2), k_w, k_h);
     AURORA_TEST_CHECK_MSG(c_big > c1, "DL cmd_count grows with content (2x leaves -> more commands)");
 
     // 4) 次线性上界：内容×2 不应使命令数爆炸（容器开销恒定，命令数≈线性）。
     AURORA_TEST_CHECK_MSG(c_big <= c1 * 3, "DL cmd_count scales sublinearly (no command explosion)");
 
-    AURORA_TEST_PRINTF("  cmd_count: N=%d -> %zu, N=%d -> %zu (determinism pair %zu/%zu)\n",
-                       kN, c1, kN * 2, c_big, c1, c2);
+    AURORA_TEST_PRINTF("  cmd_count: N=%d -> %zu, N=%d -> %zu (determinism pair %zu/%zu)\n", k_n, c1, k_n * 2, c_big,
+                       c1, c2);
 }
 
 }  // namespace aurora::test_cases::itest_perf_display_list

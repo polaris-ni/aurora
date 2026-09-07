@@ -12,13 +12,11 @@
 
 namespace aurora::test_cases::utest_provider {
 
-
-
 namespace {
 // 探针：在布局阶段读取注入的环境值（验证 Provider 向下传播）。
 class EnvProbe : public LeafWidget {
   public:
-    const Theme* seen = nullptr;
+    const Theme *seen = nullptr;
     void collect_signals(std::vector<SignalViewBase *> & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "EnvProbe"; }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
@@ -59,6 +57,5 @@ AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_provider ===\n");
     test_provider();
 }
-
 
 }  // namespace aurora::test_cases::utest_provider

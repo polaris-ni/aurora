@@ -11,7 +11,8 @@
 option(AURORA_ENABLE_SIMD "Enable SIMD raster kernel dual-implementation (scalar reference + SSE2/AVX2 fast path)" ON)
 
 if(AURORA_ENABLE_SIMD)
-    target_compile_definitions(aurora PUBLIC AURORA_ENABLE_SIMD)
+    # PUBLIC 注入但**不导出**（EXPORT）：SIMD 为库内部实现细节，安装后消费者无需感知。
+    aurora_define_feature(AURORA_ENABLE_SIMD)
     # -ffp-contract=off：禁止 a*b+c 融合为 FMA，保证 SIMD 浮点序列与标量逐位一致。
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
         target_compile_options(aurora PRIVATE -ffp-contract=off)

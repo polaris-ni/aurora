@@ -900,6 +900,20 @@ python tools/check/check_gen_api_merge.py build         # 回归：损坏现有�
 
 生成器为 merge-only：读现有 `aurora_api.json` 的全部其它段（`widgets` / `enums` / `error_codes` / …），仅覆盖 `debug` 段写回；现有文件损坏时直接报错退出、绝不写空对象。`gen_error_codes` / `gen_api_tools` 亦已加固同样的防护并保留 `debug` 段。
 
+### 27.7 运行时 feature 宏查询
+
+编译期 feature 宏（后端 / 优化 / SIMD / 插桩 / 编解码）的取值已单点收口为运行时查询，**应用代码零 `#ifdef`**（需求 #14）：
+
+```cpp
+au::debug::FeatureFlags flags = au::debug::feature_flags();
+if (flags.backend_glfw) { /* GLFW 后端已编译进库 */ }
+
+au::Json j = au::debug::feature_flags_json();
+// {"AURORA_BACKEND_HEADLESS": true, "AURORA_ENABLE_SIMD": true, ...}  键 = 完整宏名
+```
+
+全配置可用（不受 `AURORA_ENABLE_DEBUG` 门控）；结果反映链接进来的 aurora 静态库的编译期取值。禁止再散写 `#ifdef AURORA_*` 探测能力——宏镜像只在 `src/aurora/debug/feature_flags.cpp` 单点维护。
+
 ---
 
 ## 28 自绘标题栏配方（TitleBar）

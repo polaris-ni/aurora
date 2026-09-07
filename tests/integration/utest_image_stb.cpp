@@ -16,7 +16,6 @@ using au::Image;
 using au::Node;
 using au::Text;
 
-
 namespace aurora::test_cases::utest_image_stb {
 
 AURORA_TEST() {
@@ -83,6 +82,5 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(!bad.ok());
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_image_stb

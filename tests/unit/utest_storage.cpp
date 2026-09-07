@@ -31,9 +31,6 @@ using au::storage::storage_type_name;
 using au::storage::StorageBytes;
 using au::storage::StorageChange;
 
-
-
-
 using std::chrono_literals::operator""ms;
 
 // ---------------------------------------------------------------------------
@@ -90,7 +87,7 @@ struct OtherState {
 struct BlobState {
     std::vector<std::byte> data;
 };
-[[maybe_unused]] auto to_storage_bytes(const BlobState& b) -> StorageBytes { return b.data; }
+[[maybe_unused]] auto to_storage_bytes(const BlobState &b) -> StorageBytes { return b.data; }
 [[maybe_unused]] auto from_storage_bytes(BlobState &out, const StorageBytes &b) -> Result<void> {
     out.data = b;
     return Result<void>{};

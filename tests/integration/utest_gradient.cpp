@@ -23,7 +23,6 @@ using au::Text;
 
 // ---------- Painter 线性渐变 ----------
 
-
 namespace aurora::test_cases::utest_gradient {
 
 static void test_linear_gradient_basic() {

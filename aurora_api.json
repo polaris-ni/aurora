@@ -160,6 +160,22 @@
       "signature": "check_render_purity() -> void",
       "since": "1.0.0-alpha.1",
       "summary": "Render-purity check: assert we are in a paint context and catch the anti-pattern of reading the global clock during rendering"
+    },
+    {
+      "gated": "none",
+      "header": "aurora/debug/feature_flags.h",
+      "name": "feature_flags",
+      "signature": "feature_flags() -> FeatureFlags",
+      "since": "1.0.0-alpha.1",
+      "summary": "Compile-time feature-macro switches of the linked aurora library as a typed struct (always available, not gated by AURORA_ENABLE_DEBUG)"
+    },
+    {
+      "gated": "none",
+      "header": "aurora/debug/feature_flags.h",
+      "name": "feature_flags_json",
+      "signature": "feature_flags_json() -> Json",
+      "since": "1.0.0-alpha.1",
+      "summary": "feature_flags().to_json(): JSON object keyed by full macro names (e.g. AURORA_BACKEND_HEADLESS) with boolean values"
     }
   ],
   "enums": [

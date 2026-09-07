@@ -47,14 +47,14 @@ AURORA_TEST() {
         AURORA_TEST_CHECK_EQ(BitmapFont::pixel_size(12.0F), 1);
         AURORA_TEST_CHECK_EQ(BitmapFont::pixel_size(24.0F), 2);
         AURORA_TEST_CHECK_EQ(BitmapFont::pixel_size(36.0F), 3);
-        AURORA_TEST_CHECK_EQ(BitmapFont::pixel_size(0.0F), 1);   // 下限保护
-        AURORA_TEST_CHECK_EQ(BitmapFont::pixel_size(6.0F), 1);    // round(0.5)=1
+        AURORA_TEST_CHECK_EQ(BitmapFont::pixel_size(0.0F), 1);  // 下限保护
+        AURORA_TEST_CHECK_EQ(BitmapFont::pixel_size(6.0F), 1);  // round(0.5)=1
     }
 
     // ---- 6. measure_width / measure_height ----
     {
         AURORA_TEST_CHECK_NEAR(BitmapFont::measure_width("ABC", 12.0F), 24.0F, 1e-3F);  // 3 * 8 * 1
-        AURORA_TEST_CHECK_NEAR(BitmapFont::measure_width("AB", 24.0F), 32.0F, 1e-3F);   // 2 * 8 * 2
+        AURORA_TEST_CHECK_NEAR(BitmapFont::measure_width("AB", 24.0F), 32.0F, 1e-3F);  // 2 * 8 * 2
         AURORA_TEST_CHECK_NEAR(BitmapFont::measure_width("", 12.0F), 0.0F, 1e-3F);
         AURORA_TEST_CHECK_NEAR(BitmapFont::measure_height(12.0F), 8.0F, 1e-3F);
         AURORA_TEST_CHECK_NEAR(BitmapFont::measure_height(24.0F), 16.0F, 1e-3F);

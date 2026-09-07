@@ -20,8 +20,6 @@
 
 namespace aurora::test_cases::utest_perf_frame_loop {
 
-
-
 namespace {
 
 // 最小自定义 Surface（不依赖任何内置后端），用于 headless 帧循环测试。
@@ -31,7 +29,7 @@ struct MinSurface : Surface {
         m_size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
         return Result{true};
     }
-    auto painter() -> Painter& override { return m_painter; }
+    auto painter() -> Painter & override { return m_painter; }
     auto present() -> Result<bool> override {
         ++m_frames;
         return Result{true};
@@ -258,6 +256,5 @@ AURORA_TEST() {
     test_stats_isolation();
     test_overlay_hud();
 }
-
 
 }  // namespace aurora::test_cases::utest_perf_frame_loop

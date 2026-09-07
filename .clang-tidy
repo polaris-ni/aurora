@@ -16,6 +16,10 @@
 #   纯风格/主观阈值检查，无安全 auto-fix。残留告警全部落在测试代码（复杂 setup、
 #   嵌套三元构造断言数据），对库实现无信号价值；逐点抑制噪声过大，故配置层排除，
 #   库代码复杂度由 Code Review 把关。
+# - bugprone-exception-escape：main 隐式 noexcept。测试入口（AURORA_TEST 注册的
+#   runner）与 demo 入口刻意让异常向上传播到测试框架/运行环境以报告失败，逐点
+#   try/catch 或 NOLINT 噪声过大；库实现内部异常路径由 Result/Error 体系与
+#   Code Review 把关。
 # 注：hicpp-* 未在 Checks 中启用，故不需要对应的 -hicpp-* 排除项。
 Checks: '
   -*,
@@ -25,6 +29,7 @@ Checks: '
   readability-*,
   cppcoreguidelines-*,
   clang-analyzer-*,
+  -readability-trailing-comma,
   -readability-identifier-length,
   -readability-magic-numbers,
   -cppcoreguidelines-avoid-magic-numbers,
@@ -37,11 +42,11 @@ Checks: '
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
   -readability-function-cognitive-complexity,
   -readability-avoid-nested-conditional-operator,
-  -readability-trailing-comma,
+  -bugprone-exception-escape,
   -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
 '
 WarningsAsErrors: ''
-HeaderFilterRegex: '(include|src)/aurora/.*'
+HeaderFilterRegex: '(include/aurora|src/aurora|/tests/|/tools/|/examples/)'
 FormatStyle: file
 ExtraArgs: [ '-std=c++20' ]
 CheckOptions:
@@ -124,8 +129,3 @@ CheckOptions:
     value: UPPER_CASE
   - key: readability-identifier-naming.MacroDefinitionPrefix
     value: 'AURORA_'
-
-  - key: readability-identifier-naming.TypeAliasCase
-    value: snake_case
-  - key: readability-identifier-naming.TypedefCase
-    value: snake_case

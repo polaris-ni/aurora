@@ -16,8 +16,6 @@
 
 namespace aurora::test_cases::utest_drawer_progress_page {
 
-
-
 namespace {
 
 auto make_text(const char *s) -> Node {

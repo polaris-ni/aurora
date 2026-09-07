@@ -5,19 +5,16 @@
 
 #include <cstdio>
 #include <memory>
-#include <string>
-
 #include <nlohmann/json.hpp>
+#include <string>
 
 #include "aurora/aurora.h"
 #include "aurora/core/log.h"
 #include "aurora/widget/serialization.h"
 #include "aurora/widget/switch.h"
-
 #include "aurora_test_harness.h"
 
 namespace aurora::test_cases::utest_switch {
-
 
 namespace serialization = aurora::serialization;
 
@@ -26,13 +23,13 @@ using Json = nlohmann::json;
 static auto make_press(float x, const float y) -> MouseEvent {
     MouseEvent e;
     e.action = MouseAction::Press;
-    e.position = Point{ .x = x, .y = y };
+    e.position = Point{.x = x, .y = y};
     return e;
 }
 static auto make_release(float x, const float y) -> MouseEvent {
     MouseEvent e;
     e.action = MouseAction::Release;
-    e.position = Point{ .x = x, .y = y };
+    e.position = Point{.x = x, .y = y};
     return e;
 }
 static void fire(Widget &w, MouseEvent e) {
@@ -40,7 +37,8 @@ static void fire(Widget &w, MouseEvent e) {
     w.on_pointer_event(e);
 }
 
-template<typename W> static auto roundtrip(const Json &props, const std::string &type) -> std::shared_ptr<W> {
+template <typename W>
+static auto roundtrip(const Json &props, const std::string &type) -> std::shared_ptr<W> {
     auto back = serialization::from_json(props);
     AURORA_TEST_CHECK_MSG(back.ok(), type + ": from_json succeeded");
     if (!back.ok()) {
@@ -56,40 +54,44 @@ static void test_props() {
     s.set_active_color(Color::red()).set_inactive_color(Color::blue()).set_thumb_color(Color::green());
     Json j;
     s.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["active_color"][0].get<int>() == 255, "switch active=red");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["inactive_color"][2].get<int>() == 255, "switch inactive=blue");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["thumb_color"][1].get<int>() == Color::green().g, "switch thumb=green");
 
     Switch t;
     t.deserialize_props(j);
     Json k;
     t.serialize_props(k);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(k["inactive_color"][2].get<int>() == 255, "switch rt inactive");
 }
 
 static void test_interaction() {
-    Switch sw{ Reactive{ false } };
+    Switch sw{Reactive{false}};
     AURORA_TEST_CHECK_MSG(sw.value() == false, "Switch: initial false");
     sw.set_value(true);
     AURORA_TEST_CHECK_MSG(sw.value() == true, "Switch: set_value true");
 
-    Switch sw2{ Reactive{ false } };
+    Switch sw2{Reactive{false}};
     fire(sw2, make_press(20, 12));
     fire(sw2, make_release(20, 12));
     AURORA_TEST_CHECK_MSG(sw2.value() == true, "Switch: press+release toggles");
 
     bool changed = false;
-    Switch sw3{ Reactive{ true }, [&](bool v) -> void { changed = v; } };
+    Switch sw3{Reactive{true}, [&](bool v) -> void { changed = v; }};
     fire(sw3, make_press(20, 12));
     fire(sw3, make_release(20, 12));
     AURORA_TEST_CHECK_MSG(changed == false, "Switch: onChanged fired with false");
 
-    State s{ true };
-    Switch sw4{ Binding{ s } };
+    State s{true};
+    Switch sw4{Binding{s}};
     sw4.set_value(false);
     AURORA_TEST_CHECK_MSG(s.get() == false, "Switch: Binding write-through");
 }
@@ -101,7 +103,8 @@ static void test_roundtrip() {
     const auto w = std::make_shared<Switch>();
     w->set_value(true);
     Json j = serialization::to_json(*w);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["props"].contains("checked") && j["props"]["checked"].get<bool>() == true,
                           "Switch serialization checked");
     const auto back = roundtrip<Switch>(j, "Switch");
@@ -110,7 +113,7 @@ static void test_roundtrip() {
 
 static void test_modern_props() {
     // 禁用态：点击不切换
-    Switch sw{ Reactive{ false } };
+    Switch sw{Reactive{false}};
     sw.set_enabled(false);
     fire(sw, make_press(20, 12));
     fire(sw, make_release(20, 12));
@@ -131,23 +134,29 @@ static void test_modern_props() {
     s1.set_track_size(52.0F, 30.0F).set_thumb_inset(3.0F).set_border(Color::red(), 2.0F).set_enabled(false);
     Json j;
     s1.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["track_width"].get<double>(), 52.0), "Switch: track_width serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["track_height"].get<double>(), 30.0), "Switch: track_height serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(j["thumb_inset"].get<double>(), 3.0), "Switch: thumb_inset serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["border_color"][0].get<int>() == 255 && near_d(j["border_width"].get<double>(), 2.0),
                           "Switch: border serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(j["enabled"].get<bool>() == false, "Switch: enabled serialization");
 
     Switch s2;
     s2.deserialize_props(j);
     Json k;
     s2.serialize_props(k);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_MSG(near_d(k["track_width"].get<double>(), 52.0), "Switch: track_width roundtrip");
     AURORA_TEST_CHECK_MSG(s2.enabled() == false, "Switch: enabled roundtrip");
 
@@ -155,8 +164,8 @@ static void test_modern_props() {
     const BuildContext ctx;
     Switch s3;
     s3.set_track_size(60.0F, 32.0F);
-    const Size sz = s3.layout(
-        Constraints{ .min = Size{ .width = 0, .height = 0 }, .max = Size{ .width = 500, .height = 500 } }, ctx);
+    const Size sz =
+        s3.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 500, .height = 500}}, ctx);
     AURORA_TEST_CHECK_MSG(near_d(sz.width, 60.0) && near_d(sz.height, 32.0), "Switch: layout follows track_size");
 }
 

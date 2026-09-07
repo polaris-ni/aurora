@@ -184,3 +184,19 @@ gated = "AURORA_ENABLE_DEBUG"
 signature = "check_render_purity() -> void"
 summary = "Render-purity check: assert we are in a paint context and catch the anti-pattern of reading the global clock during rendering"
 header = "aurora/core/debug.h"
+
+[[function]]
+name = "feature_flags"
+since = "1.0.0-alpha.1"
+gated = "none"
+signature = "feature_flags() -> FeatureFlags"
+summary = "Compile-time feature-macro switches of the linked aurora library as a typed struct (always available, not gated by AURORA_ENABLE_DEBUG)"
+header = "aurora/debug/feature_flags.h"
+
+[[function]]
+name = "feature_flags_json"
+since = "1.0.0-alpha.1"
+gated = "none"
+signature = "feature_flags_json() -> Json"
+summary = "feature_flags().to_json(): JSON object keyed by full macro names (e.g. AURORA_BACKEND_HEADLESS) with boolean values"
+header = "aurora/debug/feature_flags.h"

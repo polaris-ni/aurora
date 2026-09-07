@@ -11,8 +11,6 @@
 
 namespace aurora::test_cases::utest_image_cache {
 
-
-
 namespace {
 
 /// 构造指定像素尺寸的纯色测试图（bytes = w*h*4）。
@@ -127,6 +125,5 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(&c1 == &c2);
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_image_cache

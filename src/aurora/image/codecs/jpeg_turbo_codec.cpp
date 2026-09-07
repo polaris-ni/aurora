@@ -5,7 +5,7 @@
 #include "aurora/image/image_codec.h"
 
 // libjpeg-turbo 提供 jpeg_mem_src / jpeg_mem_dest（内存源/目标管理器）。
-#ifdef AURORA_BUILD_IMAGE_JPEG
+#ifdef AURORA_ENABLE_IMAGE_JPEG
 
 // libjpeg-turbo 为 C 库，须 C 链接；jpeglib.h 内部已自带 extern "C" 保护，
 // 此处外层包裹为防御性冗余，确保任何包含路径下符号链接正确。
@@ -130,4 +130,4 @@ auto create_jpeg_turbo_codec() -> std::shared_ptr<ImageCodec> { return std::make
 
 }  // namespace aurora::image
 
-#endif  // AURORA_BUILD_IMAGE_JPEG
+#endif  // AURORA_ENABLE_IMAGE_JPEG

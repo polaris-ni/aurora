@@ -14,8 +14,6 @@
 
 namespace aurora::test_cases::utest_async {
 
-
-
 using std::chrono_literals::operator""ms;
 
 namespace {
@@ -115,6 +113,5 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(got.ok() && got.value() == 7);
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_async

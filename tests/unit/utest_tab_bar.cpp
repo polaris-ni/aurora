@@ -13,8 +13,6 @@
 
 namespace aurora::test_cases::utest_tab_bar {
 
-
-
 namespace {
 
 auto make_text(const char *s) -> Node {

@@ -38,8 +38,7 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(p.kind() == ModifierNode::Kind::Layout);
         AURORA_TEST_CHECK(p.padding() == 8.0F);
 
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F},
-                            .max = Size{.width = 100.0F, .height = 200.0F}};
+        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 200.0F}};
         // 子节点吃掉收缩后的可用空间（84 x 184），父节点再加回 16
         const Size s = p.layout(c, [](const Constraints &inner) -> Size { return inner.max; });
         AURORA_TEST_CHECK(s.width == 100.0F);
@@ -58,8 +57,7 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(p.insets().horizontal() == 4.0F);
         AURORA_TEST_CHECK(p.insets().vertical() == 6.0F);
 
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F},
-                            .max = Size{.width = 50.0F, .height = 60.0F}};
+        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 50.0F, .height = 60.0F}};
         float seen_w = 0.0F;
         float seen_h = 0.0F;
         const Size s = p.layout(c, [&](const Constraints &inner) -> Size {
@@ -86,8 +84,7 @@ AURORA_TEST() {
         const FlexWeight f{2.0F};
         AURORA_TEST_CHECK(f.flex_weight() == 2.0F);
 
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F},
-                            .max = Size{.width = 300.0F, .height = 100.0F}};
+        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 300.0F, .height = 100.0F}};
         const Size s = f.layout(c, measure_fixed(Size{.width = 42.0F, .height = 24.0F}));
         AURORA_TEST_CHECK(s.width == 42.0F);  // 不改变子节点尺寸
         AURORA_TEST_CHECK(s.height == 24.0F);
@@ -98,8 +95,7 @@ AURORA_TEST() {
         SizeModifier m;
         m.set_width(50.0F);
         m.set_height(30.0F);
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F},
-                            .max = Size{.width = 100.0F, .height = 100.0F}};
+        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 100.0F}};
         const Size s = m.layout(c, measure_tight());
         AURORA_TEST_CHECK(s.width == 50.0F);
         AURORA_TEST_CHECK(s.height == 30.0F);
@@ -111,8 +107,7 @@ AURORA_TEST() {
         m.set_width(50.0F);  // 应被 fill 覆盖
         m.set_fill_w(true);
         m.set_fill_h(true);
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F},
-                            .max = Size{.width = 320.0F, .height = 240.0F}};
+        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 320.0F, .height = 240.0F}};
         const Size s = m.layout(c, measure_tight());
         AURORA_TEST_CHECK(s.width == 320.0F);
         AURORA_TEST_CHECK(s.height == 240.0F);
@@ -121,8 +116,7 @@ AURORA_TEST() {
     // ---- 8. SizeModifier 未设置时沿用子节点尺寸 ----
     {
         const SizeModifier m;
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F},
-                            .max = Size{.width = 100.0F, .height = 100.0F}};
+        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 100.0F}};
         const Size s = m.layout(c, measure_fixed(Size{.width = 7.0F, .height = 9.0F}));
         AURORA_TEST_CHECK(s.width == 7.0F);
         AURORA_TEST_CHECK(s.height == 9.0F);

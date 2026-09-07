@@ -12,8 +12,6 @@
 
 namespace aurora::test_cases::utest_thread_pool {
 
-
-
 AURORA_TEST() {
     // 1) 并发提交：所有任务都执行完毕。
     {
@@ -80,6 +78,5 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(counter.load() == 50);
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_thread_pool

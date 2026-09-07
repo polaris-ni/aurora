@@ -15,8 +15,6 @@
 
 namespace aurora::test_cases::utest_layout_query {
 
-
-
 static void test_layout_query() {
     auto root = Node{Column{Node{Text{"a"}}, Node{Text{"b"}}}};
     BuildContext ctx;

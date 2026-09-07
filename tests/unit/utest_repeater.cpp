@@ -15,7 +15,6 @@
 
 namespace aurora::test_cases::utest_repeater {
 
-
 namespace serialization = aurora::serialization;
 
 static void test_repeater() {

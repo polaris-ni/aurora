@@ -14,9 +14,7 @@
 
 namespace aurora::test_cases::utest_log {
 
-
 AURORA_TEST() {
-
     // 捕获 sink 输出，便于断言（测试用，单线程）。
     std::string captured;
     Logger::instance().set_sink([&](std::string_view line) -> void { captured += line; });
@@ -97,6 +95,5 @@ AURORA_TEST() {
 
     AURORA_LOG_INFO("test", "log_test: OK");
 }
-
 
 }  // namespace aurora::test_cases::utest_log

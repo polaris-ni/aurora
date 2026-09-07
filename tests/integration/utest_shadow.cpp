@@ -22,7 +22,6 @@ using au::Text;
 
 // ---------- Painter 硬边阴影 ----------
 
-
 namespace aurora::test_cases::utest_shadow {
 
 static void test_shadow_hard() {

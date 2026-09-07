@@ -33,7 +33,6 @@
 #include "aurora/widget/widget.h"
 #include "aurora_test_harness.h"
 
-
 namespace aurora::test_cases::utest_text {
 
 namespace render = aurora::render;

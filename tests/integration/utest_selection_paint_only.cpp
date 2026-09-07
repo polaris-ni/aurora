@@ -19,8 +19,6 @@
 
 namespace aurora::test_cases::utest_selection_paint_only {
 
-
-
 namespace {
 
 class SpyWidget : public au::LeafWidget {
@@ -93,6 +91,5 @@ AURORA_TEST() {
     // （frame_count==2 已确认本帧重新上屏；layout_calls==1 确认未重排；此为 DL 优化下的预期行为）。
     AURORA_TEST_CHECK(spy->paint_calls == 1);
 }
-
 
 }  // namespace aurora::test_cases::utest_selection_paint_only

@@ -4,12 +4,9 @@
 ///
 
 #include "aurora/widget/segmented_control.h"
-
 #include "aurora_test_harness.h"
 
 namespace aurora::test_cases::utest_segmented_control {
-
-
 
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_segmented_control ===\n");
@@ -24,28 +21,29 @@ AURORA_TEST() {
 
     // --- 带 segments 构造 ---
     {
-        SegmentedControl sc({ "Day", "Week", "Month" }, 1);
+        SegmentedControl sc({"Day", "Week", "Month"}, 1);
         AURORA_TEST_CHECK(sc.segments().size() == 3);
         AURORA_TEST_CHECK(sc.selected() == 1);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(sc.segments()[0] == "Day");
     }
 
     // --- set_selected ---
     {
-        SegmentedControl sc({ "A", "B", "C" });
+        SegmentedControl sc({"A", "B", "C"});
         sc.set_selected(2);
         AURORA_TEST_CHECK(sc.selected() == 2);
     }
 
     // --- on_change 回调 ---
     {
-        SegmentedControl sc({ "X", "Y" });
+        SegmentedControl sc({"X", "Y"});
         int changed_to = -1;
         sc.set_on_change([&](int v) -> void { changed_to = v; });
         // 模拟通过 set_selected 不会触发回调（回调只在点击时触发）
         // 直接验证 setter
-        AURORA_TEST_CHECK(changed_to == -1); // 未触发
+        AURORA_TEST_CHECK(changed_to == -1);  // 未触发
     }
 
     // --- describe_static ---
@@ -64,11 +62,12 @@ AURORA_TEST() {
 
     // --- 序列化往返 ---
     {
-        SegmentedControl sc({ "A", "B", "C" }, 2);
+        SegmentedControl sc({"A", "B", "C"}, 2);
         Json props = Json::object();
         sc.serialize_props(props);
         AURORA_TEST_CHECK(props.contains("selected"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(props["selected"].get<int>() == 2);
 
         SegmentedControl sc2;
@@ -78,12 +77,13 @@ AURORA_TEST() {
 
     // --- 现代化属性：主题回退 / 禁用态 / 样式往返 ---
     {
-        SegmentedControl sc({ "A", "B" }, 0);
+        SegmentedControl sc({"A", "B"}, 0);
         Json j0;
         sc.serialize_props(j0);
-        AURORA_TEST_CHECK(!j0.contains("active_color")); // 未设置不序列化（跟随主题 primary）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(j0["segments"].size() == 2);   // segments 现已序列化（支持完整重建）
+        AURORA_TEST_CHECK(!j0.contains("active_color"));  // 未设置不序列化（跟随主题 primary）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        AURORA_TEST_CHECK(j0["segments"].size() == 2);  // segments 现已序列化（支持完整重建）
 
         sc.set_active_color(Color::red())
             .set_text_color(Color{1, 2, 3, 255})
@@ -94,13 +94,17 @@ AURORA_TEST() {
             .set_enabled(false);
         Json j;
         sc.serialize_props(j);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(j["active_color"][0].get<int>() == 255);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(j["font_size"].get<double>() == 16.0);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(j["corner_radius"].get<double>() == 8.0);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         AURORA_TEST_CHECK(j["enabled"].get<bool>() == false);
 
         SegmentedControl sc2;

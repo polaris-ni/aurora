@@ -25,13 +25,11 @@
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
 #include "aurora/widget/widget.h"
+#include "aurora_test_harness.h"
 #include "google_play_data.h"
 #include "google_play_ui.h"
-#include "aurora_test_harness.h"
 
 namespace aurora::test_cases::utest_navigator {
-
-
 
 namespace aurora::tests::sec_deeplink {
 
@@ -104,7 +102,7 @@ struct SolidPage : Widget {
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(c.max); }
-    void on_paint(Painter& p, const Rect& bounds, const BuildContext& /*ctx*/) override { p.fill_rect(bounds, bg); }
+    void on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) override { p.fill_rect(bounds, bg); }
 };
 }  // namespace
 

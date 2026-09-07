@@ -3,7 +3,6 @@
 /// 测试说明: utest_blur 单元测试
 
 // 验证模糊修饰：Painter::blur_region 像素级模糊 + Modifier::blur/backdrop_filter 集成。
-#include <cstdio>
 #include <memory>
 
 #include "aurora/modifier/modifier.h"
@@ -23,10 +22,11 @@ using au::Rect;
 using au::Size;
 using au::Text;
 
-
 namespace aurora::test_cases::utest_blur {
 
 AURORA_TEST() {
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+
     // ---- 1. BlurNode 构造与降级 ----
     {
         BlurNode b1{4.0F};
@@ -44,11 +44,7 @@ AURORA_TEST() {
     {
         auto mod = Modifier{}.blur(3.0F).backdrop_filter(6.0F);
         AURORA_TEST_CHECK(mod.nodes().size() == 2);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const auto *n0 = dynamic_cast<const BlurNode *>(mod.nodes()[0].get());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const auto *n1 = dynamic_cast<const BlurNode *>(mod.nodes()[1].get());
         AURORA_TEST_CHECK(n0 != nullptr && !n0->is_backdrop());
         AURORA_TEST_CHECK(n1 != nullptr && n1->is_backdrop());
@@ -159,6 +155,8 @@ AURORA_TEST() {
         t->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 100.0F}}, ctx);
         AURORA_TEST_CHECK(p.width() == 200);
     }
+
+    // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 }
 
 }  // namespace aurora::test_cases::utest_blur

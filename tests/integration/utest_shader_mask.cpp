@@ -29,7 +29,6 @@ using au::Stack;
 using au::Widget;
 using au::WidgetDescriptor;
 
-
 namespace aurora::test_cases::utest_shader_mask {
 
 namespace {

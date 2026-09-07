@@ -18,7 +18,6 @@ using au::ui::button;
 using au::ui::label;
 using au::ui::vbox;
 
-
 namespace aurora::test_cases::utest_dump_rich {
 
 static void test_rich_fields_and_id() {
@@ -59,6 +58,5 @@ AURORA_TEST() {
     test_rich_fields_and_id();
     test_rich_tree_chars();
 }
-
 
 }  // namespace aurora::test_cases::utest_dump_rich

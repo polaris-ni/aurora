@@ -20,8 +20,6 @@
 
 namespace aurora::test_cases::utest_subscription {
 
-
-
 // 1) Subscription 包裹 Store::subscribe：离开作用域自动取消，监听器不再触发。
 static void test_subscription_store_raii() {
     int calls = 0;
@@ -113,6 +111,5 @@ AURORA_TEST() {
     test_bind_reactive_and_computed();
     test_subscription_move_and_release();
 }
-
 
 }  // namespace aurora::test_cases::utest_subscription

@@ -4,8 +4,9 @@
 #include "demo_common.h"
 
 // 协程示例：在后台线程池计算，续体回到主线程（无事件循环时由 worker 直接 resume）。
-static auto demo_coro() -> au::CoroTask<void> {
-    au::Result<int> r = co_await au::co_async([]() -> int {
+static auto std::coroutine_traits<au::CoroTask<void>>::promise_type::demo_coro() -> au::CoroTask<void> {
+    au::Result<int> r = co_await aurora::CoAwaitable<(
+        lambda at D :\Projects\CLionProjects\aurora\examples\demos\demo_async.cpp : 8 : 47)>::au::co_async([]() -> int {
         // 模拟后台计算
         return 21 * 2;
     });
@@ -14,7 +15,7 @@ static auto demo_coro() -> au::CoroTask<void> {
     } else {
         AURORA_LOG_ERROR("coro", "error: ", r.error().message);
     }
-    co_return;
+    std::coroutine_traits<au::CoroTask<void>>::promise_type::co_return;
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做

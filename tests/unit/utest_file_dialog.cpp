@@ -13,7 +13,6 @@
 
 namespace aurora::test_cases::utest_file_dialog {
 
-
 namespace file_dialog = aurora::file_dialog;
 
 static void test_file_dialog() {

@@ -17,22 +17,22 @@ namespace {
 /// 最小可观察视图：仅实现 get()/subscribe()，用于验证 SignalViewBase 提供的默认 read()/anchor() 契约。
 class IntView final : public SignalView<int> {
   public:
-    explicit IntView(int v) : m_value(v) {}
+    explicit IntView(int v) : m_value_(v) {}
 
     [[nodiscard]] auto get() const -> const int & override {
-        ++m_get_calls;
-        return m_value;
+        ++m_get_calls_;
+        return m_value_;
     }
 
-    auto subscribe(Effect &) -> void override { ++m_subscribe_calls; }
+    auto subscribe(Effect& /*e*/) -> void override { ++m_subscribe_calls_; }
 
-    [[nodiscard]] auto get_calls() const -> int { return m_get_calls; }
-    [[nodiscard]] auto subscribe_calls() const -> int { return m_subscribe_calls; }
+    [[nodiscard]] auto get_calls() const -> int { return m_get_calls_; }
+    [[nodiscard]] auto subscribe_calls() const -> int { return m_subscribe_calls_; }
 
   private:
-    int m_value;
-    mutable int m_get_calls = 0;   // get() 为 const，读取计数用 mutable
-    int m_subscribe_calls = 0;
+    int m_value_;
+    mutable int m_get_calls_ = 0;  // get() 为 const，读取计数用 mutable
+    int m_subscribe_calls_ = 0;
 };
 
 }  // namespace

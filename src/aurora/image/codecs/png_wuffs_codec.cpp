@@ -6,7 +6,7 @@
 #include "aurora/image/image_codec.h"
 
 // wuffs 提供 PNG 解码（stb_image 之外的备选健壮实现）。
-#ifdef AURORA_BUILD_IMAGE_PNG
+#ifdef AURORA_ENABLE_IMAGE_PNG
 
 // 以头文件库方式包含 wuffs 单文件 C 库（仅声明；WUFFS_IMPLEMENTATION 由
 // cmake 中 aurora_wuffs OBJECT 库定义，链接进 aurora 提供实现）。
@@ -99,4 +99,4 @@ auto create_png_wuffs_codec() -> std::shared_ptr<ImageCodec> { return std::make_
 
 }  // namespace aurora::image
 
-#endif  // AURORA_BUILD_IMAGE_PNG
+#endif  // AURORA_ENABLE_IMAGE_PNG

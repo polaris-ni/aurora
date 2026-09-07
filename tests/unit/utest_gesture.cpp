@@ -26,8 +26,6 @@
 
 namespace aurora::test_cases::utest_gesture {
 
-
-
 namespace aurora::tests::sec_gesture {
 
 namespace {
@@ -210,8 +208,8 @@ static void test_touch_event_basic() {
 
 static void test_touch_inactive() {
     TouchEvent e;
-    e.points.push_back(
-        TouchPoint{.id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
+    e.points.push_back(TouchPoint{
+        .id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
     e.points.push_back(TouchPoint{.id = 1,
                                   .position = Point{.x = 100, .y = 0},
                                   .prev_position = Point{.x = 100, .y = 0},
@@ -230,8 +228,8 @@ static void test_pinch_recognizer() {
 
     // 初始双指距离 100
     TouchEvent e1;
-    e1.points.push_back(
-        TouchPoint{.id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
+    e1.points.push_back(TouchPoint{
+        .id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
     e1.points.push_back(TouchPoint{
         .id = 1, .position = Point{.x = 100, .y = 0}, .prev_position = Point{.x = 100, .y = 0}, .is_active = true});
     pinch.on_touch(e1);
@@ -240,8 +238,8 @@ static void test_pinch_recognizer() {
 
     // 双指张开到 200 → scale = 2.0
     TouchEvent e2;
-    e2.points.push_back(
-        TouchPoint{.id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
+    e2.points.push_back(TouchPoint{
+        .id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
     e2.points.push_back(TouchPoint{
         .id = 1, .position = Point{.x = 200, .y = 0}, .prev_position = Point{.x = 100, .y = 0}, .is_active = true});
     pinch.on_touch(e2);
@@ -249,8 +247,8 @@ static void test_pinch_recognizer() {
 
     // 双指捏合到 50 → scale = 0.5
     TouchEvent e3;
-    e3.points.push_back(
-        TouchPoint{.id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
+    e3.points.push_back(TouchPoint{
+        .id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
     e3.points.push_back(TouchPoint{
         .id = 1, .position = Point{.x = 50, .y = 0}, .prev_position = Point{.x = 200, .y = 0}, .is_active = true});
     pinch.on_touch(e3);
@@ -258,8 +256,8 @@ static void test_pinch_recognizer() {
 
     // 抬起一指 → 不活跃
     TouchEvent e4;
-    e4.points.push_back(
-        TouchPoint{.id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
+    e4.points.push_back(TouchPoint{
+        .id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
     pinch.on_touch(e4);
     AURORA_TEST_CHECK(!pinch.is_active());
     AURORA_TEST_CHECK(pinch.scale() == 1.0F);
@@ -274,8 +272,8 @@ static void test_rotation_recognizer() {
 
     // 初始角度：水平（0 弧度）
     TouchEvent e1;
-    e1.points.push_back(
-        TouchPoint{.id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
+    e1.points.push_back(TouchPoint{
+        .id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
     e1.points.push_back(TouchPoint{
         .id = 1, .position = Point{.x = 100, .y = 0}, .prev_position = Point{.x = 100, .y = 0}, .is_active = true});
     rot.on_touch(e1);
@@ -284,8 +282,8 @@ static void test_rotation_recognizer() {
 
     // 旋转 90 度（第二指移到正上方）
     TouchEvent e2;
-    e2.points.push_back(
-        TouchPoint{.id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
+    e2.points.push_back(TouchPoint{
+        .id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
     e2.points.push_back(TouchPoint{
         .id = 1, .position = Point{.x = 0, .y = -100}, .prev_position = Point{.x = 100, .y = 0}, .is_active = true});
     rot.on_touch(e2);
@@ -298,8 +296,8 @@ static void test_rotation_recognizer() {
 static void test_reset() {
     PinchRecognizer pinch;
     TouchEvent e;
-    e.points.push_back(
-        TouchPoint{.id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
+    e.points.push_back(TouchPoint{
+        .id = 0, .position = Point{.x = 0, .y = 0}, .prev_position = Point{.x = 0, .y = 0}, .is_active = true});
     e.points.push_back(TouchPoint{
         .id = 1, .position = Point{.x = 100, .y = 0}, .prev_position = Point{.x = 100, .y = 0}, .is_active = true});
     pinch.on_touch(e);
@@ -560,6 +558,5 @@ AURORA_TEST() {
     aurora::tests::sec_multitouch::run();
     aurora::tests::sec_pointer_concurrency::run();
 }
-
 
 }  // namespace aurora::test_cases::utest_gesture

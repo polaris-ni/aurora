@@ -13,7 +13,6 @@
 
 namespace aurora::test_cases::utest_text_input {
 
-
 namespace render = aurora::render;
 
 static void test_chained_setters() {

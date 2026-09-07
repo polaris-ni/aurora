@@ -15,8 +15,6 @@
 
 namespace aurora::test_cases::utest_recipes {
 
-
-
 static void render_tree(Widget &w, const float ww, const float hh) {
     constexpr BuildContext ctx;
     w.mount(ctx);
@@ -83,6 +81,5 @@ AURORA_TEST() {
     test_recipes();
     test_recipes_render();
 }
-
 
 }  // namespace aurora::test_cases::utest_recipes

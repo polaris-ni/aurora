@@ -16,7 +16,6 @@
 
 namespace aurora::test_cases::utest_checkbox {
 
-
 namespace serialization = aurora::serialization;
 
 using Json = nlohmann::json;

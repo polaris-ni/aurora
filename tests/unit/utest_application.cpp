@@ -32,7 +32,6 @@
 
 namespace aurora::test_cases::utest_application {
 
-
 namespace aurora::tests::sec_app {
 
 static auto make_deep(int n) -> Node {
@@ -367,6 +366,5 @@ AURORA_TEST() {
     aurora::tests::sec_present_skip::run();
     aurora::tests::sec_platform::run();
 }
-
 
 }  // namespace aurora::test_cases::utest_application

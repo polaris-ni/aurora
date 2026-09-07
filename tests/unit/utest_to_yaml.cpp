@@ -209,8 +209,6 @@ static void run() {
 }
 }  // namespace aurora::tests::sec_to_yaml
 
-AURORA_TEST() {
-    aurora::tests::sec_to_yaml::run();
-}
+AURORA_TEST() { aurora::tests::sec_to_yaml::run(); }
 
 }  // namespace aurora::test_cases::utest_to_yaml

@@ -26,9 +26,6 @@ namespace aurora::test_cases::utest_known_enums {
 
 using au::serialization::register_core_widgets;
 
-
-
-
 namespace {
 
 /// @brief 编译期锚点：引用登记表每个键对应的真实枚举成员。

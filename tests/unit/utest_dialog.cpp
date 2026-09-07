@@ -14,8 +14,6 @@
 
 namespace aurora::test_cases::utest_dialog {
 
-
-
 // ---------- Dialog 基础 ----------
 
 static void test_dialog_basic() {

@@ -23,8 +23,6 @@
 
 namespace aurora::test_cases::utest_partial_repaint_bg {
 
-
-
 namespace {
 
 // 模拟真实窗口后端：begin_frame 铺浅色底色，并跨帧保留 Painter 缓冲（部分脏帧不重分配）。

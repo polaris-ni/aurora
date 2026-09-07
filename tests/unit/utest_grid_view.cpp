@@ -19,8 +19,6 @@
 
 namespace aurora::test_cases::utest_grid_view {
 
-
-
 namespace sec_grid_view {
 
 namespace {

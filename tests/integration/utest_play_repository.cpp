@@ -9,12 +9,10 @@
 #include <cstdint>
 
 #include "aurora/aurora.h"
-#include "google_play_data.h"
 #include "aurora_test_harness.h"
+#include "google_play_data.h"
 
 namespace aurora::test_cases::utest_play_repository {
-
-
 
 static auto count_all(const gp::PlayRepository &repo) -> int {
     int n = 0;
@@ -108,6 +106,5 @@ AURORA_TEST() {
     AURORA_TEST_CHECK(hooked.size() == 1);
     AURORA_TEST_CHECK(hooked.front().id == "hooked");
 }
-
 
 }  // namespace aurora::test_cases::utest_play_repository

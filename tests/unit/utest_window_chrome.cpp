@@ -6,15 +6,15 @@
 #include <memory>
 
 #include "aurora/aurora.h"
-#include "aurora/window/window_chrome.h"
 #include "aurora/window/surface.h"
+#include "aurora/window/window_chrome.h"
 #include "aurora_test_harness.h"
 
 namespace aurora::test_cases::utest_window_chrome {
 
 AURORA_TEST() {
     // 空 surface：valid() 为 false，所有动作 no-op 不崩溃
-    au::WindowChrome empty{nullptr};
+    const au::WindowChrome empty{nullptr};
     AURORA_TEST_CHECK_FALSE(empty.valid());
     empty.begin_move();
     empty.begin_resize(au::WindowResizeEdge::Right);
@@ -28,8 +28,8 @@ AURORA_TEST() {
     AURORA_TEST_CHECK(empty.content_inset().bottom == 0.0F);
 
     // 真实 HeadlessSurface：valid() 为 true，动作转发到 surface（Headless 实现为 no-op）
-    auto surf = std::make_unique<au::HeadlessSurface>();
-    au::WindowChrome chrome{surf.get()};
+    const auto surf = std::make_unique<au::HeadlessSurface>();
+    const au::WindowChrome chrome{surf.get()};
     AURORA_TEST_CHECK(chrome.valid());
     AURORA_TEST_CHECK(chrome.content_inset().left == 0.0F);
     AURORA_TEST_CHECK(chrome.content_inset().top == 0.0F);

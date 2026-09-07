@@ -14,8 +14,6 @@
 
 namespace aurora::test_cases::utest_popup {
 
-
-
 namespace {
 
 auto make_text(const char *s) -> Node {

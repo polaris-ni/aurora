@@ -13,7 +13,7 @@
 #include "aurora/debug/debug_runtime.h"
 #include "aurora/navigation/navigator_host.h"
 #include "aurora/navigation/route.h"
-#ifdef AURORA_INSPECTOR_SERVER_ENABLED
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
 #include "aurora/inspector/inspector_server.h"
 #endif
 #include "google_play_data.h"
@@ -124,7 +124,7 @@ auto main() -> int {
     }
 #endif
 
-#ifdef AURORA_INSPECTOR_SERVER_ENABLED
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
     std::shared_ptr<au::InspectorServer> inspector;
     {
         // 远程检视：把 live 根树与运行时 Surface 注入 InspectorServer，启动 localhost HTTP。
@@ -144,7 +144,7 @@ auto main() -> int {
 
     app.run();
 
-#ifdef AURORA_INSPECTOR_SERVER_ENABLED
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
     if (inspector) {
         inspector->stop();
     }

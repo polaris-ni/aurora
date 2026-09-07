@@ -15,21 +15,17 @@ namespace aurora::test_cases::utest_aurora_lsp {
 
 using au::tools::Diagnostic;
 
-
-using au::tools::Schema;
-using au::tools::Document;
-using au::tools::ComponentSchema;
-using au::tools::PropSchema;
-using au::tools::EnumSchema;
 using au::tools::analyze;
-using au::tools::completions;
-using au::tools::hover;
-using au::tools::diagnostics;
-using au::tools::validate_enum_values;
 using au::tools::code_actions;
-
-
-
+using au::tools::completions;
+using au::tools::ComponentSchema;
+using au::tools::diagnostics;
+using au::tools::Document;
+using au::tools::EnumSchema;
+using au::tools::hover;
+using au::tools::PropSchema;
+using au::tools::Schema;
+using au::tools::validate_enum_values;
 
 namespace {
 
@@ -195,24 +191,18 @@ void test_code_action() {
     const std::string doc = "au::ButtonProps{ .label = \"x\" }";
     const Document d = analyze(doc);
     const auto actions = code_actions(d, schema);
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     AURORA_TEST_CHECK(actions.size() == 1);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+
     AURORA_TEST_CHECK(actions[0].title.find("Button") != std::string::npos);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(actions[0].edits.size() == 1);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(actions[0].edits[0].new_text.find("enabled") != std::string::npos);
     // 插入点应在 '}' 处。
     auto [l, c] = find_pos(doc, "}");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(actions[0].edits[0].line == l);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(actions[0].edits[0].col == c);
+
+    // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 }
 
 }  // namespace

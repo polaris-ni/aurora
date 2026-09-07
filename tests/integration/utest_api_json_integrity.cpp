@@ -32,16 +32,13 @@
 
 #include "aurora/aurora.h"
 #include "aurora/widget/serialization.h"
-#include "known_enums.h"
 #include "aurora_test_harness.h"
+#include "known_enums.h"
 
 namespace aurora::test_cases::utest_api_json_integrity {
 
 using au::serialization::register_core_widgets;
 using au::serialization::WidgetRegistry;
-
-
-
 
 namespace fs = std::filesystem;
 
@@ -86,8 +83,7 @@ static auto check_sections(const Json &api) -> void {
         if (!present) {
             continue;
         }
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE
         const Json &v = api[key];
         // 标量段非空字符串；容器段非空。
         if (v.is_string()) {
@@ -101,8 +97,8 @@ static auto check_sections(const Json &api) -> void {
 // ---- 校验 2：标量段取值（与 tools/gen/gen_api.cpp 常量保持一致）----
 static auto check_scalars(const Json &api) -> void {
     struct Pair {
-        const char* key;
-        const char* expect;
+        const char *key;
+        const char *expect;
     };
     constexpr Pair pairs[] = {
         {.key = "library", .expect = "aurora"},
@@ -111,14 +107,12 @@ static auto check_scalars(const Json &api) -> void {
         {.key = "alias", .expect = "au"},
     };
     for (const auto &p : pairs) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE
         if (!api.contains(p.key) || !api[p.key].is_string()) {
             AURORA_TEST_CHECK_MSG(false, std::string("scalar section readable: ") + p.key);
             continue;
         }
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE
         const auto got = api[p.key].get<std::string>();
         AURORA_TEST_CHECK_MSG(got == p.expect, std::string("scalar section value ") + p.key + " == " + p.expect);
     }
@@ -126,22 +120,18 @@ static auto check_scalars(const Json &api) -> void {
 
 // ---- 校验 3：widget 集合无漂移（核心）----
 static auto check_widget_drift(const Json &api) -> void {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE
     if (!api.contains("widgets") || !api["widgets"].is_array()) {
         AURORA_TEST_CHECK_MSG(false, "widgets section exists and is an array");
         return;
     }
 
     std::set<std::string> in_json;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE
     for (const auto &w : api["widgets"]) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE
         if (w.contains("type") && w["type"].is_string()) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE
             in_json.insert(w["type"].get<std::string>());
         }
     }
@@ -175,8 +165,7 @@ static auto check_widget_drift(const Json &api) -> void {
 // gen_api.cpp 的 enums 段由 known_enums() 生成；若后者被改而忘了重生成 aurora_api.json，
 // 或反之，此处立刻变红。比对类型名集合与每个类型的取值集合（双向）。
 static auto check_enums_drift(const Json &api) -> void {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE
     if (!api.contains("enums") || !api["enums"].is_array()) {
         AURORA_TEST_CHECK_MSG(false, "enums section exists and is an array");
         return;
@@ -187,22 +176,18 @@ static auto check_enums_drift(const Json &api) -> void {
 
     // 实际集合：api["enums"] = [ {name, values:[...]}, ... ]
     std::map<std::string, std::set<std::string>> actual;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE
     for (const auto &e : api["enums"]) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE
         if (e.contains("name") && e["name"].is_string() && e.contains("values") && e["values"].is_array()) {
             std::set<std::string> vals;
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE
             for (const auto &v : e["values"]) {
                 if (v.is_string()) {
                     vals.insert(v.get<std::string>());
                 }
             }
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE
             actual[e["name"].get<std::string>()] = std::move(vals);
         }
     }

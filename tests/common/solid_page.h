@@ -26,9 +26,7 @@ struct SolidPage : Widget {
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(c.max);
-    }
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(c.max); }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
         p.fill_rect(bounds, bg);

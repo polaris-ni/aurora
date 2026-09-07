@@ -17,8 +17,6 @@
 
 namespace aurora::test_cases::utest_theming {
 
-
-
 static void test_theme() {
     Theme light = Theme::light();
     Theme dark = Theme::dark();
@@ -113,6 +111,5 @@ AURORA_TEST() {
     test_theme_scope();
     test_theme_scope_state();
 }
-
 
 }  // namespace aurora::test_cases::utest_theming

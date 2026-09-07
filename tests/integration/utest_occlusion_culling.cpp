@@ -15,8 +15,6 @@
 
 namespace aurora::test_cases::utest_occlusion_culling {
 
-
-
 namespace {
 
 // 计数控件：每次 on_paint 自增，用于观测是否被遮挡剔除跳过。
@@ -62,7 +60,7 @@ class ClippedColumn : public Column {
 }  // namespace
 
 AURORA_TEST() {
-#ifdef AURORA_OCCLUSION_CULLING
+#ifdef AURORA_ENABLE_OCCLUSION_CULLING
     // 1) 普通容器 + 显式裁剪：4 个 50 高的计数控件堆叠成 200 高内容；
     //    父容器 bounds 高 100 → 仅前 2 个可见，p2/p3 应被剔除。
     const auto p0 = std::make_shared<PaintCounter>();
@@ -93,9 +91,8 @@ AURORA_TEST() {
     AURORA_TEST_CHECK_MSG(s3->paint_calls > 0,
                           "Scroll: far off-viewport child is also painted (full-page offscreen buffer)");
 #else
-    AURORA_TEST_CHECK(true);  // 未启用 AURORA_OCCLUSION_CULLING：跳过剔除断言
+    AURORA_TEST_CHECK(true);  // 未启用 AURORA_ENABLE_OCCLUSION_CULLING：跳过剔除断言
 #endif
 }
-
 
 }  // namespace aurora::test_cases::utest_occlusion_culling

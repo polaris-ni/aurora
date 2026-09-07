@@ -20,7 +20,6 @@
 
 namespace aurora::test_cases::utest_d3d11_surface {
 
-
 namespace {
 
 void test_smoke() {

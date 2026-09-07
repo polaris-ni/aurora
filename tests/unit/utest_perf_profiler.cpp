@@ -19,8 +19,6 @@
 
 namespace aurora::test_cases::utest_perf_profiler {
 
-
-
 namespace {
 
 /// @brief 忙等至少 `target_ms` 毫秒（sleep 的调度粒度撑不起「至少」的语义）。

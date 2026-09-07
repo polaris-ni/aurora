@@ -18,8 +18,6 @@
 
 namespace aurora::test_cases::utest_keycode {
 
-
-
 namespace {
 
 void test_key_name_all_values() {
@@ -54,6 +52,5 @@ AURORA_TEST() {
     test_key_name_all_values();
     test_key_name_samples();
 }
-
 
 }  // namespace aurora::test_cases::utest_keycode

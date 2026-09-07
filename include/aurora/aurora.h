@@ -58,6 +58,7 @@
 #include "aurora/debug/debug_paint.h"
 #include "aurora/debug/debug_runtime.h"
 #include "aurora/debug/debug_trace.h"
+#include "aurora/debug/feature_flags.h"
 #include "aurora/environment/build_context.h"
 #include "aurora/environment/environment.h"
 #include "aurora/environment/media_query.h"

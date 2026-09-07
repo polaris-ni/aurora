@@ -27,7 +27,6 @@ using au::Stack;
 using au::Widget;
 using au::WidgetDescriptor;
 
-
 namespace aurora::test_cases::utest_cache_layer {
 
 namespace {
@@ -37,15 +36,18 @@ class CountingBox : public LeafWidget {
     Size sz{.width = 100.0F, .height = 20.0F};
     Color color{255, 0, 0, 255};
     static int m_paint_count;
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override { return c.constrain(sz); }
-    void on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) override {
-        ++m_paint_count;
-        p.fill_rect(b, color);
-    }
+
     void collect_signals(std::vector<SignalViewBase *> & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "CountingBox"; }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
         return WidgetDescriptor{.name = "CountingBox", .children_policy = "none"};
+    }
+
+  protected:
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(sz); }
+    void on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) override {
+        ++m_paint_count;
+        p.fill_rect(b, color);
     }
 };
 int CountingBox::m_paint_count = 0;
@@ -61,7 +63,7 @@ struct RenderResult {
 
 auto render_in_root(std::shared_ptr<Widget> w, const int ww, const int hh) -> RenderResult {
     auto const root = std::make_shared<Stack>(std::vector{Node{std::move(w)}});
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     root->mount(ctx);
     Constraints c;
     c.min = Size{.width = 0.0F, .height = 0.0F};

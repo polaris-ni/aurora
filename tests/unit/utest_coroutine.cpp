@@ -30,18 +30,19 @@ void wait_until(std::atomic<bool> const &flag, std::chrono::milliseconds timeout
 }  // namespace
 
 // 协程：后台计算后把结果写入共享存储。
-static auto coro_ok(std::shared_ptr<Result<int>> out, std::shared_ptr<std::atomic<bool>> done) -> CoroTask<void> {  // NOLINT
+static auto coro_ok(std::shared_ptr<Result<int>> out, std::shared_ptr<std::atomic<bool>> done)
+        -> CoroTask<void> {  // NOLINT
 
     const Result<int> r = co_await co_async([]() -> int { return 21 * 2; });  // NOLINT
 
     *out = r;
     done->store(true);
     co_return;  // NOLINT
-
 }
 
 // 协程：fn 返回错误（或抛异常）→ await 求得错误 Result。
-static auto coro_err(std::shared_ptr<Result<int>> out, std::shared_ptr<std::atomic<bool>> done) -> CoroTask<void> {  // NOLINT
+static auto coro_err(std::shared_ptr<Result<int>> out, std::shared_ptr<std::atomic<bool>> done)
+        -> CoroTask<void> {  // NOLINT
 
     const Result<int> r =
         co_await co_async([]() -> Result<int> { return make_error(ErrorCode::GeneralUnknown, "nope"); });  // NOLINT
@@ -49,18 +50,17 @@ static auto coro_err(std::shared_ptr<Result<int>> out, std::shared_ptr<std::atom
     *out = r;
     done->store(true);
     co_return;  // NOLINT
-
 }
 
 // 协程：抛异常 fn → 捕获为 async-exception。
-static auto coro_throw(std::shared_ptr<Result<int>> out, std::shared_ptr<std::atomic<bool>> done) -> CoroTask<void> {  // NOLINT
+static auto coro_throw(std::shared_ptr<Result<int>> out, std::shared_ptr<std::atomic<bool>> done)
+        -> CoroTask<void> {  // NOLINT
 
     const Result<int> r = co_await co_async([]() -> int { throw std::runtime_error("x"); });  // NOLINT
 
     *out = r;
     done->store(true);
     co_return;  // NOLINT
-
 }
 
 AURORA_TEST() {
@@ -103,7 +103,6 @@ AURORA_TEST() {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) 捕获为 shared_ptr
         // 按值拷贝，协程生命周期内引用计数保活，无悬垂
         auto seq = [acc, done]() -> CoroTask<void> {  // NOLINT
-
             Result<int> a = co_await co_async([]() -> int { return 10; });  // NOLINT
 
             if (a) {

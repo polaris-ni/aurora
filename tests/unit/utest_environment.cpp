@@ -12,8 +12,6 @@
 
 namespace aurora::test_cases::utest_environment {
 
-
-
 static void test_environment() {
     Environment root;
     root.set_local<Theme>(Theme::dark());
@@ -62,6 +60,5 @@ AURORA_TEST() {
     test_environment();
     test_media_query();
 }
-
 
 }  // namespace aurora::test_cases::utest_environment

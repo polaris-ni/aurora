@@ -23,8 +23,6 @@
 
 namespace aurora::test_cases::utest_thread {
 
-
-
 namespace {
 
 struct ThreadProbe {
@@ -79,6 +77,5 @@ AURORA_TEST() {
     test_nocheck_specialization();
     test_owner_is_this_thread();
 }
-
 
 }  // namespace aurora::test_cases::utest_thread

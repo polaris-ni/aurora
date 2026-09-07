@@ -34,9 +34,6 @@ using au::ui::slider;
 using au::ui::stack;
 using au::ui::vbox;
 
-
-
-
 static void test_label_auto_add_and_text() {
     Column root;
     const size_t before = root.child_nodes().size();
@@ -128,6 +125,5 @@ AURORA_TEST() {
     test_container_factories();
     test_node_id();
 }
-
 
 }  // namespace aurora::test_cases::utest_ui_factories

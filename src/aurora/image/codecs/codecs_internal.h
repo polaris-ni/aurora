@@ -13,13 +13,13 @@ auto create_bmp_codec() -> std::shared_ptr<ImageCodec>;  // 内置未压缩 24 �
 auto create_svg_codec() -> std::shared_ptr<ImageCodec>;  // 内置 SVG 子集光栅化
 auto create_png_write_codec() -> std::shared_ptr<ImageCodec>;  // 内置 PNG 编码（write_png）
 
-#ifdef AURORA_BUILD_IMAGE_JPEG
+#ifdef AURORA_ENABLE_IMAGE_JPEG
 auto create_jpeg_turbo_codec() -> std::shared_ptr<ImageCodec>;  // libjpeg-turbo 解码+编码
 #endif
-#ifdef AURORA_BUILD_IMAGE_WEBP
+#ifdef AURORA_ENABLE_IMAGE_WEBP
 auto create_webp_codec() -> std::shared_ptr<ImageCodec>;  // libwebp 解码+编码+动图
 #endif
-#ifdef AURORA_BUILD_IMAGE_PNG
+#ifdef AURORA_ENABLE_IMAGE_PNG
 auto create_png_wuffs_codec() -> std::shared_ptr<ImageCodec>;  // wuffs PNG 解码
 auto create_gif_wuffs_codec() -> std::shared_ptr<ImageCodec>;  // wuffs GIF 动图解码
 #endif

@@ -20,9 +20,9 @@ using au::LongPress;
 using au::MenuItem;
 using au::ModifierNode;
 using au::Point;
+using au::TooltipNode;
 using au::TouchEvent;
 using au::TouchListener;
-using au::TooltipNode;
 
 using Clock = std::chrono::steady_clock;
 
@@ -60,8 +60,7 @@ AURORA_TEST() {
                               seen_delta = delta;
                               seq.push_back(2);
                           },
-                          [&]() -> void { seq.push_back(1); },
-                          [&]() -> void { seq.push_back(3); }};
+                          [&]() -> void { seq.push_back(1); }, [&]() -> void { seq.push_back(3); }};
         d.fire_start();
         d.fire_drag(Point{.x = 3.0F, .y = 4.0F}, Point{.x = 10.0F, .y = 20.0F});
         d.fire_end();

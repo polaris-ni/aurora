@@ -17,8 +17,6 @@
 
 namespace aurora::test_cases::utest_dirty_region {
 
-
-
 namespace {
 
 /// 创建已定尺寸的 Headless 窗口（HeadlessSurface 尺寸由首次 begin_frame 确立）。

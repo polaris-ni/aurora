@@ -5,13 +5,10 @@
 
 // 验证所有控件类型可默认构造。
 
+#include "aurora_test_harness.h"
 #include "test_default_construct.h"
 
-#include "aurora_test_harness.h"
-
 namespace aurora::test_cases::utest_default_construct {
-
-
 
 // 运行时验证：实际构造每个控件
 AURORA_TEST() {
@@ -255,6 +252,5 @@ AURORA_TEST() {
         AURORA_TEST_CHECK_MSG(true, "Spacer default constructible");
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_default_construct

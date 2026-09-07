@@ -25,7 +25,6 @@ using au::Size;
 using au::Widget;
 using au::Window;
 
-
 namespace aurora::test_cases::utest_layout_cache {
 
 namespace {
@@ -102,6 +101,5 @@ AURORA_TEST() {
         AURORA_TEST_CHECK_EQ(boundary->layout_calls, 2);
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_layout_cache

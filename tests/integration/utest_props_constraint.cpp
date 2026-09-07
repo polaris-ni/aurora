@@ -16,7 +16,6 @@
 #include "aurora/widget/serialization.h"
 #include "aurora_test_harness.h"
 
-
 namespace aurora::test_cases::utest_props_constraint {
 
 namespace serialization = aurora::serialization;
@@ -149,6 +148,5 @@ AURORA_TEST() {
         AURORA_TEST_CHECK_NEAR(fr.value, 0.5F, 1e-3F);
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_props_constraint

@@ -14,8 +14,6 @@
 
 namespace aurora::test_cases::utest_inspector_panel {
 
-
-
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_inspector_panel ===\n");
 

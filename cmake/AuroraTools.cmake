@@ -143,7 +143,9 @@ if (AURORA_BUILD_INSPECTOR_SERVER)
         target_link_libraries(aurora_inspector_server PUBLIC aurora Threads::Threads)
     endif ()
     target_include_directories(aurora_inspector_server PUBLIC include)
-    target_compile_definitions(aurora_inspector_server PUBLIC AURORA_INSPECTOR_SERVER_ENABLED)
+    # feature 宏经单一入口注入：开关名 = 宏名（与 AURORA_BACKEND_* 同惯例），
+    # 仅 inspector server 目标可见、随链接传播给 demo / 测试。
+    aurora_define_feature(AURORA_BUILD_INSPECTOR_SERVER TARGET aurora_inspector_server)
     set_target_properties(aurora_inspector_server PROPERTIES CXX_STANDARD 20)
     aurora_log("Inspector HTTP server enabled (aurora_inspector_server static lib)")
 endif ()

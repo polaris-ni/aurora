@@ -22,8 +22,6 @@
 
 namespace aurora::test_cases::utest_relayout_boundary {
 
-
-
 namespace {
 
 // 计数 on_layout 调用次数的祖先控件：撑满父约束（自身即 boundary），持有单个子节点。
@@ -36,6 +34,13 @@ class CountingWidget : public Widget {
 
     [[nodiscard]] auto type_name() const -> const char * override { return "CountingWidget"; }
 
+    auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
+        if (child) {
+            fn(child.widget());
+        }
+    }
+
+  protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         ++layout_calls;
         Constraints cc = c;
@@ -51,12 +56,6 @@ class CountingWidget : public Widget {
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         if (child) {
             child.widget().paint(p, bounds, ctx);
-        }
-    }
-
-    auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
-        if (child) {
-            fn(child.widget());
         }
     }
 };
@@ -101,6 +100,5 @@ auto scenario_boundary_truncates_layout_bubble() -> void {
 }  // namespace
 
 AURORA_TEST() { scenario_boundary_truncates_layout_bubble(); }
-
 
 }  // namespace aurora::test_cases::utest_relayout_boundary

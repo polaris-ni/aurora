@@ -94,10 +94,10 @@ static void test_geometry() {
         constexpr au::Rect r{.origin = au::Point{.x = 0, .y = 0}, .size = au::Size{.width = 10, .height = 20}};
         AURORA_TEST_CHECK_MSG(near_f(r.right(), 10.0F), "Rect: right()");
         AURORA_TEST_CHECK_MSG(near_f(r.bottom(), 20.0F), "Rect: bottom()");
-        AURORA_TEST_CHECK_MSG(r.contains((au::Point{.x = 5, .y = 5})), "Rect: contains inside");
-        AURORA_TEST_CHECK_MSG(r.contains((au::Point{.x = 0, .y = 0})), "Rect: contains origin (inclusive)");
-        AURORA_TEST_CHECK_MSG(!r.contains((au::Point{.x = 11, .y = 5})), "Rect: contains outside x");
-        AURORA_TEST_CHECK_MSG(!r.contains((au::Point{.x = 5, .y = 21})), "Rect: contains outside y");
+        AURORA_TEST_CHECK_MSG(r.contains(au::Point{.x = 5, .y = 5}), "Rect: contains inside");
+        AURORA_TEST_CHECK_MSG(r.contains(au::Point{.x = 0, .y = 0}), "Rect: contains origin (inclusive)");
+        AURORA_TEST_CHECK_MSG(!r.contains(au::Point{.x = 11, .y = 5}), "Rect: contains outside x");
+        AURORA_TEST_CHECK_MSG(!r.contains(au::Point{.x = 5, .y = 21}), "Rect: contains outside y");
     }
     {
         constexpr au::EdgeInsets ins{.left = 1, .top = 2, .right = 3, .bottom = 4};
@@ -431,6 +431,5 @@ AURORA_TEST() {
     test_string_format();
     test_math_saturate();
 }
-
 
 }  // namespace aurora::test_cases::utest_core

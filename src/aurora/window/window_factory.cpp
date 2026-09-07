@@ -14,7 +14,8 @@
 // 注：原定义位于 win32_window.h；pimpl 重构后该头不再包含 <windows.h>，
 // 故把兼容性垫片移至此文件（本文件使用这些常量且已间接包含 <windows.h>）。
 #ifndef PROCESS_PER_MONITOR_DPI_AWARE  // NOLINT(*-identifier-naming)
-#define PROCESS_PER_MONITOR_DPI_AWARE 2  // NOLINT(cppcoreguidelines-macro-usage) 平台 DPI 版本宏，无 constexpr 等价物
+#define AURORA_PROCESS_PER_MONITOR_DPI_AWARE \
+    2  // NOLINT(cppcoreguidelines-macro-usage) 平台 DPI 版本宏，无 constexpr 等价物
 #endif
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((DPI_AWARENESS_CONTEXT)(-3))
@@ -274,7 +275,7 @@ auto enable_dpi_awareness() -> void {
     using SetDpiFn = HRESULT(WINAPI *)(int);
     if (const auto f = reinterpret_cast<SetDpiFn>(
             reinterpret_cast<void *>(GetProcAddress(GetModuleHandleA("shcore.dll"), "SetProcessDpiAwareness")))) {
-        (void)f(PROCESS_PER_MONITOR_DPI_AWARE);
+        (void)f(AURORA_PROCESS_PER_MONITOR_DPI_AWARE);
         return;
     }
     // NOLINTEND(*-pro-type-reinterpret-cast, *-casting-through-void)

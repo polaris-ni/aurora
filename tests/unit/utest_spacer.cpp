@@ -11,8 +11,6 @@
 
 namespace aurora::test_cases::utest_spacer {
 
-
-
 static void test_spacer() {
     Spacer sp;
     constexpr BuildContext ctx;
@@ -34,6 +32,5 @@ AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_spacer ===\n");
     test_spacer();
 }
-
 
 }  // namespace aurora::test_cases::utest_spacer

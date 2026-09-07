@@ -19,8 +19,6 @@
 
 namespace aurora::test_cases::utest_png_image {
 
-
-
 static void test_png_round_trip() {
     constexpr int w = 4;
     constexpr int h = 4;

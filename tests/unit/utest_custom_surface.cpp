@@ -18,8 +18,6 @@
 
 namespace aurora::test_cases::utest_custom_surface {
 
-
-
 namespace {
 // 自定义 Surface：内存 Painter 缓冲 + 帧计数 + 日志，演示「不依赖任何内置 Surface 子类」即可接入框架。
 class CustomSurface : public au::Surface {
@@ -95,6 +93,5 @@ AURORA_TEST() {
     // 自定义 Surface 注入路径（.surface() / Application(Scene,unique_ptr<Surface>)）在「仅自定义
     // Surface」构建（关闭全部内置后端）下仍可用。此处仅静态验证宏可用。
 }
-
 
 }  // namespace aurora::test_cases::utest_custom_surface

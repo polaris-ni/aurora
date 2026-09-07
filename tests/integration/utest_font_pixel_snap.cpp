@@ -19,7 +19,6 @@ using au::Point;
 using au::Rect;
 using au::Size;
 
-
 namespace aurora::test_cases::utest_font_pixel_snap {
 
 namespace ar = aurora::render;
@@ -70,6 +69,5 @@ AURORA_TEST() {
     // 同时验证最左墨迹落在整数物理像素上（snap 到最近整数）。
     AURORA_TEST_CHECK(std::floor(static_cast<float>(left1) + 0.5F) == static_cast<float>(left1));
 }
-
 
 }  // namespace aurora::test_cases::utest_font_pixel_snap

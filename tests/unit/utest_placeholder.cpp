@@ -30,8 +30,6 @@ using au::test::pump;
 using au::test::tap;
 using au::test::TestEnv;
 
-
-
 static void test_todo() {
     // au::TODO 可转换为任意回调签名，调用时仅记录警告而不崩溃
     Diagnostics::take();  // 清空已有诊断

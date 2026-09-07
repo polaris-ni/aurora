@@ -10,8 +10,6 @@
 
 namespace aurora::test_cases::utest_canvas {
 
-
-
 static void test_canvas() {
     Canvas cv{200, 100, [](Painter &p, const Rect &) -> void { p.blend_pixel(0, 0, Color{255, 0, 0, 255}); }};
     AURORA_TEST_CHECK_MSG(cv.size().width >= 0.0F && cv.size().height >= 0.0F, "Canvas: size ok");
@@ -29,14 +27,12 @@ static void test_canvas() {
     p.begin(64, 48);
     p.blend_pixel(10, 10, Color{1, 2, 3, 255});
     const Color px = p.get_pixel(10, 10);
-    AURORA_TEST_CHECK_MSG(px.r == 1 && px.g == 2 && px.b == 3 && px.a == 255,
-                          "Canvas: set/get pixel roundtrip");
+    AURORA_TEST_CHECK_MSG(px.r == 1 && px.g == 2 && px.b == 3 && px.a == 255, "Canvas: set/get pixel roundtrip");
 }
 
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_canvas ===\n");
     test_canvas();
 }
-
 
 }  // namespace aurora::test_cases::utest_canvas

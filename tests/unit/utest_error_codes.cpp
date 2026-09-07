@@ -18,8 +18,6 @@
 
 namespace aurora::test_cases::utest_error_codes {
 
-
-
 static void test_enum_contiguous() {
     // ErrorCode 必须为 0 起连续索引，g_error_table 才能按下标查表。
     auto prev = ErrorCode::GeneralUnknown;
@@ -99,6 +97,5 @@ AURORA_TEST() {
     test_make_error_table_driven();
     test_diagnostic_explain_table_driven();
 }
-
 
 }  // namespace aurora::test_cases::utest_error_codes

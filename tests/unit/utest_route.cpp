@@ -13,8 +13,6 @@
 
 namespace aurora::test_cases::utest_route {
 
-
-
 static void test_route_empty() {
     const Route r;
     AURORA_TEST_CHECK_MSG(r.empty(), "Route: default ctor is empty");
@@ -57,6 +55,5 @@ AURORA_TEST() {
     test_route_construct();
     test_route_copy_and_transition();
 }
-
 
 }  // namespace aurora::test_cases::utest_route

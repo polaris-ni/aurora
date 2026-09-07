@@ -14,7 +14,6 @@
 
 namespace aurora::test_cases::utest_version {
 
-
 AURORA_TEST() {
     // ---- 1. 数字分量与 NUMERIC 拼串一致 ----
     {

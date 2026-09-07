@@ -11,8 +11,6 @@
 
 namespace aurora::test_cases::utest_alignment {
 
-
-
 static void test_align_origin() {
     constexpr Size container{.width = 100.0F, .height = 100.0F};
     constexpr Size child{.width = 20.0F, .height = 20.0F};
@@ -58,6 +56,5 @@ AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_alignment ===\n");
     test_align_origin();
 }
-
 
 }  // namespace aurora::test_cases::utest_alignment

@@ -15,7 +15,6 @@
 
 namespace aurora::test_cases::utest_timers {
 
-
 using std::chrono_literals::operator""s;
 using au::Scheduler;
 using au::TimerHandle;
@@ -147,6 +146,5 @@ AURORA_TEST() {
     test_timer_reactive_and_on_tick();
     test_timer_degrade_without_scheduler();
 }
-
 
 }  // namespace aurora::test_cases::utest_timers

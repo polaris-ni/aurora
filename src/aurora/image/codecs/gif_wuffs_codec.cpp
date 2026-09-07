@@ -7,7 +7,7 @@
 #include "aurora/image/image_codec.h"
 
 // wuffs 提供 GIF 动图解码（stb_image 仅返回首帧，wuffs 返回逐帧动画）。
-#ifdef AURORA_BUILD_IMAGE_PNG
+#ifdef AURORA_ENABLE_IMAGE_PNG
 
 #include "aurora/core/image.h"
 #include "wuffs/release/c/wuffs-v0.3.c"
@@ -142,4 +142,4 @@ auto create_gif_wuffs_codec() -> std::shared_ptr<ImageCodec> { return std::make_
 
 }  // namespace aurora::image
 
-#endif  // AURORA_BUILD_IMAGE_PNG
+#endif  // AURORA_ENABLE_IMAGE_PNG

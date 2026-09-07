@@ -18,8 +18,6 @@
 
 namespace aurora::test_cases::utest_display_list {
 
-
-
 namespace {
 
 // 计数控件：on_paint 自增并填充纯色，用于观测 DL 是否跳过子树遍历。
@@ -66,7 +64,7 @@ auto pixel_diff(const std::vector<std::uint8_t> &a, const std::vector<std::uint8
 }  // namespace
 
 AURORA_TEST() {
-#ifdef AURORA_DISPLAY_LIST
+#ifdef AURORA_ENABLE_DISPLAY_LIST
     constexpr int w = 100;
     constexpr int h = 100;
     constexpr size_t n = static_cast<size_t>(w) * static_cast<size_t>(h) * 4U;
@@ -130,7 +128,7 @@ AURORA_TEST() {
         AURORA_TEST_CHECK_MSG(pixel_diff(f1, f2) == 0, "cache_layer replay composites offscreen buffer correctly");
     }
 #else
-    AURORA_TEST_CHECK(true);  // 未启用 AURORA_DISPLAY_LIST：跳过断言
+    AURORA_TEST_CHECK(true);  // 未启用 AURORA_ENABLE_DISPLAY_LIST：跳过断言
 #endif
 }
 

@@ -13,8 +13,7 @@ namespace aurora::test_cases::utest_layout_engine {
 
 AURORA_TEST() {
     constexpr BuildContext ctx;
-    constexpr Constraints c{.min = Size{.width = 0.0F, .height = 0.0F},
-                            .max = Size{.width = 200.0F, .height = 200.0F}};
+    constexpr Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 200.0F, .height = 200.0F}};
 
     // ---- 1. layout()：两阶段布局把尺寸写回各 widget，受约束夹取 ----
     {
@@ -47,8 +46,7 @@ AURORA_TEST() {
     // ---- 4. 叶子节点：无子盒，build_box 返回空的 children ----
     {
         Node leaf = Divider{};
-        leaf.set_bounds(Rect{.origin = Point{.x = 4.0F, .y = 4.0F},
-                              .size = Size{.width = 16.0F, .height = 16.0F}});
+        leaf.set_bounds(Rect{.origin = Point{.x = 4.0F, .y = 4.0F}, .size = Size{.width = 16.0F, .height = 16.0F}});
         const LayoutBox box = LayoutEngine::build_box(leaf);
         AURORA_TEST_CHECK(box.children.empty());
         AURORA_TEST_CHECK_EQ(box.rect.origin.x, 4.0F);

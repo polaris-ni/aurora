@@ -31,8 +31,6 @@
 
 namespace aurora::test_cases::utest_perf_overlay_refresh {
 
-
-
 // 抓取整帧像素缓冲的副本
 static auto capture_surface(const au::Surface &s, std::vector<std::uint8_t> &out) -> void {
     const int w = static_cast<int>(s.size().width);

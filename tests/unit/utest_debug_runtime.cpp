@@ -28,17 +28,14 @@
 
 namespace aurora::test_cases::utest_debug_runtime {
 
-using au::debug::widget_tree;
-using au::debug::perf_snapshot;
-using au::debug::frame_phase_timeline;
 using au::debug::diagnostics;
+using au::debug::frame_phase_timeline;
+using au::debug::perf_snapshot;
 using au::debug::why_trace;
-using au::test::TestEnv;
+using au::debug::widget_tree;
 using au::test::init_headless;
 using au::test::pump;
-
-
-
+using au::test::TestEnv;
 
 AURORA_TEST() {
     // ---- 1. widget_tree ----

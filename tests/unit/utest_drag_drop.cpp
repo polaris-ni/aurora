@@ -12,8 +12,6 @@
 
 namespace aurora::test_cases::utest_drag_drop {
 
-
-
 // ---------- DragData ----------
 
 static void test_drag_data_text() {

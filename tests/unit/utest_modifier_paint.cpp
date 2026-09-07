@@ -22,9 +22,9 @@ using au::Color;
 using au::GradientBackground;
 using au::ModifierNode;
 using au::OpacityNode;
-using au::ShadowNode;
 using au::ShaderMaskKind;
 using au::ShaderMaskNode;
+using au::ShadowNode;
 
 }  // namespace
 

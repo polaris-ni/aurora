@@ -199,7 +199,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///        布局非纯函数 → 禁布局缓存。
     ///
     ///        若 `on_layout` 含时间 / 状态依赖的副作用（首屏骨架→真实内容切换、入场动画、
-    ///        随外部状态重建子节点等“延期布局”），须覆盖为 false。否则布局缓存（AURORA_LAYOUT_CACHE）
+    ///        随外部状态重建子节点等“延期布局”），须覆盖为 false。否则布局缓存（AURORA_ENABLE_LAYOUT_CACHE）
     ///        在约束不变时直接复用缓存尺寸、完全跳过 `on_layout`，使延期逻辑永不触发——
     ///        表现为白屏 / 内容冻结（即 Path B 类 bug）。`mark_needs_layout()` 只能沿“显式标脏”
     ///        路径失效缓存；凡是靠时钟或帧驱动在 `on_paint`/`tick` 中触发重建的控件，必须以此开关
@@ -220,7 +220,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     [[nodiscard]] auto cached_constraints() const -> const Constraints & { return cached_constraints_; }
     auto mark_needs_paint() -> void { mark_needs_paint_impl(false); }
 
-#ifdef AURORA_DISPLAY_LIST
+#ifdef AURORA_ENABLE_DISPLAY_LIST
     /// @brief 使本控件 Display List 失效并沿布局父链向上传播：子树绘制命令被并入祖先 DL，
     ///        故任一后代内容变化时祖先须重录。已在失效链上则短路避免重复递归。
     auto invalidate_display_list_up() -> void {
@@ -505,13 +505,13 @@ class Widget : public std::enable_shared_from_this<Widget> {
     // 使 why_trace 能区分「业务/状态直接触发的根因」与「引擎沿父链自动冒泡的传播」。
     auto mark_needs_layout_impl([[maybe_unused]] bool propagated) -> void {
         needs_layout_ = true;
-#ifdef AURORA_LAYOUT_CACHE
+#ifdef AURORA_ENABLE_LAYOUT_CACHE
         layout_cache_valid_ = false;
         if ((layout_parent_ != nullptr) && !is_relayout_boundary()) {
             layout_parent_->mark_needs_layout_impl(true);
         }
 #endif
-#ifdef AURORA_DISPLAY_LIST
+#ifdef AURORA_ENABLE_DISPLAY_LIST
         invalidate_display_list_up();
 #endif
         request_frame(true);
@@ -521,7 +521,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     }
     auto mark_needs_paint_impl([[maybe_unused]] bool propagated) -> void {
         needs_paint_ = true;
-#ifdef AURORA_DISPLAY_LIST
+#ifdef AURORA_ENABLE_DISPLAY_LIST
         invalidate_display_list_up();
 #endif
         request_frame(false);
@@ -531,7 +531,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    // ---- 布局缓存（AURORA_LAYOUT_CACHE）----
+    // ---- 布局缓存（AURORA_ENABLE_LAYOUT_CACHE）----
     bool layout_cache_valid_ = false;  ///< 当前 cached_size_ 是否对应 cached_constraints_
     Constraints cached_constraints_{};  ///< 上一次成功布局时的输入约束（缓存键）
     Size cached_size_{};  ///< 上一次成功布局得到的尺寸
@@ -617,8 +617,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
     mutable Size paint_cache_size_{.width = 0.0F, .height = 0.0F};
     mutable bool paint_cache_valid_ = false;
 
-#ifdef AURORA_DISPLAY_LIST
-    // ---- Display List 缓存（AURORA_DISPLAY_LIST）----
+#ifdef AURORA_ENABLE_DISPLAY_LIST
+    // ---- Display List 缓存（AURORA_ENABLE_DISPLAY_LIST）----
     DisplayList display_list_;  ///< 本控件子树（含后代）的录制命令缓冲
     bool dl_valid_ = false;  ///< 缓存是否有效（内容未变且 bounds 未变）
     Rect last_paint_bounds_{};  ///< 上次录制时的绘制全局矩形（bounds 变化须重录）
@@ -668,13 +668,13 @@ class Container : public Widget {
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         // child.bounds() 存的是“相对本容器内容区”的局部坐标；
         // 绘制前需叠加本容器内容区全局原点（bounds.origin），转为全局坐标。
-#ifdef AURORA_OCCLUSION_CULLING
+#ifdef AURORA_ENABLE_OCCLUSION_CULLING
         const Rect clip = p.clip_bounds();  // 当前有效裁剪（视口/圆角容器等）逻辑 dp 全局坐标
 #endif
         for (Node &child : children_) {
             const Rect cb = child.bounds();
             const auto global{Rect{.origin = bounds.origin + cb.origin, .size = cb.size}};
-#ifdef AURORA_OCCLUSION_CULLING
+#ifdef AURORA_ENABLE_OCCLUSION_CULLING
             // 遮挡剔除：子控件全局盒与裁剪区无交集则整棵子树跳过（保守外接矩形判定）。
             if (!global.intersects(clip)) {
                 continue;
@@ -776,7 +776,7 @@ class Container : public Widget {
     /// @brief 子节点数量。
     [[nodiscard]] auto child_count() const -> size_t { return children_.size(); }
 
-    /// @brief 布局入口（AURORA_LAYOUT_CACHE）：先为所有子节点登记布局父节点，
+    /// @brief 布局入口（AURORA_ENABLE_LAYOUT_CACHE）：先为所有子节点登记布局父节点，
     ///        再走基类布局（命中缓存时整体跳过子树，依赖父链保证安全）。
     auto layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         for (Node &child : children_) {
@@ -883,7 +883,7 @@ class SingleChild : public Widget {
         return child_view_;
     }
 
-    /// @brief 布局入口（AURORA_LAYOUT_CACHE）：为子节点登记布局父节点，再走基类布局。
+    /// @brief 布局入口（AURORA_ENABLE_LAYOUT_CACHE）：为子节点登记布局父节点，再走基类布局。
     auto layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         child_.widget().set_layout_parent(this);
         return Widget::layout(c, ctx);

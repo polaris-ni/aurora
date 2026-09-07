@@ -15,8 +15,6 @@
 
 namespace aurora::test_cases::utest_layout_builder {
 
-
-
 namespace {
 class FixedBox : public Widget {
   public:
@@ -83,6 +81,5 @@ AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_layout_builder ===\n");
     test_layout_builder_rebuild_on_constraint_change();
 }
-
 
 }  // namespace aurora::test_cases::utest_layout_builder

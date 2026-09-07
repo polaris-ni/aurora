@@ -10,8 +10,8 @@
 
 namespace aurora::test_cases::utest_debug_trace {
 
-using debug::detail::record_dirty;
 using debug::DirtyKind;
+using debug::detail::record_dirty;
 
 // 枚举底层类型与非负可表示性属编译期契约。
 static_assert(std::is_enum_v<DirtyKind>);

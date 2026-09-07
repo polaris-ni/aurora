@@ -12,7 +12,6 @@
 
 namespace aurora::test_cases::utest_display {
 
-
 namespace app = aurora::app;
 
 AURORA_TEST() {
@@ -55,6 +54,5 @@ AURORA_TEST() {
         }
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_display

@@ -15,8 +15,6 @@
 
 namespace aurora::test_cases::utest_video_source {
 
-
-
 using std::chrono_literals::operator""s;
 using std::chrono_literals::operator""us;
 

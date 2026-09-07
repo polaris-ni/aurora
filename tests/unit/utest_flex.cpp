@@ -40,7 +40,6 @@ using au::Point;
 using au::Rect;
 using au::Size;
 
-
 namespace aurora::test_cases::utest_flex {
 
 namespace aurora::tests::sec_flex {

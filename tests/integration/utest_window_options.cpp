@@ -14,7 +14,6 @@
 
 namespace au = aurora;
 
-
 namespace aurora::test_cases::utest_window_options {
 
 AURORA_TEST() {
@@ -92,6 +91,5 @@ AURORA_TEST() {
         AURORA_TEST_CHECK(w.title() == "hello-title");
     }
 }
-
 
 }  // namespace aurora::test_cases::utest_window_options

@@ -86,28 +86,28 @@ class Registry {
 
     auto add(const std::string_view name, void (*fn)()) -> void {
         assert_unique(name);
-        m_tests.push_back({.name = name, .fn = fn, .skip_reason = {}});
+        tests_.push_back({.name = name, .fn = fn, .skip_reason = {}});
     }
 
     auto add_skip(const std::string_view name, const std::string_view reason) -> void {
         assert_unique(name);
-        m_tests.push_back({.name = name, .fn = nullptr, .skip_reason = reason});
+        tests_.push_back({.name = name, .fn = nullptr, .skip_reason = reason});
     }
 
     /// 按名称排序后的稳定视图（首次调用时排序；输出顺序与链接顺序无关）。
     [[nodiscard]] auto sorted() -> const std::vector<TestCase> & {
-        if (!m_sorted) {
-            std::ranges::sort(m_tests, [](const TestCase &a, const TestCase &b) -> bool { return a.name < b.name; });
-            m_sorted = true;
+        if (!sorted_) {
+            std::ranges::sort(tests_, [](const TestCase &a, const TestCase &b) -> bool { return a.name < b.name; });
+            sorted_ = true;
         }
-        return m_tests;
+        return tests_;
     }
 
   private:
     Registry() = default;
 
     auto assert_unique(std::string_view name) const -> void {
-        for (const auto &t : m_tests) {
+        for (const auto &t : tests_) {
             if (t.name == name) {
                 AURORA_LOG_FATAL("test", "duplicate test name: ", name);
                 std::abort();
@@ -115,8 +115,8 @@ class Registry {
         }
     }
 
-    std::vector<TestCase> m_tests;
-    bool m_sorted = false;
+    std::vector<TestCase> tests_;
+    bool sorted_ = false;
 };
 
 /// 注册桩：静态对象的构造期副作用完成自注册（无需各文件手写 main / 调用清单）。

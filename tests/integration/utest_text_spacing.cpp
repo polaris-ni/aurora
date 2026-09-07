@@ -9,14 +9,11 @@
 // TextAaMode(TextAAMode，经 AA 各段行使)、BitmapFont(BitmapFont 内置字体回退)、
 // TextSpan(TextSpan，经 sec_rich_text? 见 test_rich_text.cpp——TextSpan 归属 rich_text 单元)。
 
-#include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
-#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -75,7 +72,7 @@ using au::TextDecoration;
 using au::TextOverflow;
 using au::TextProps;
 using au::Widget;
-namespace sec_text_spacing {
+
 namespace ar = aurora::render;
 static auto cp_count(const std::string &s) -> std::size_t {
     std::size_t n = 0;
@@ -189,7 +186,7 @@ static void test_italic_renders_different() {
     ar::FontEngine::set_text_aa_mode(ar::TextAAMode::ClearType);
 }
 
-void run() {
+static void run() {
     AURORA_TEST_PRINTF("=== text_spacing_test ===\n");
     test_letter_spacing_additive();
     test_word_spacing_additive();
@@ -201,10 +198,7 @@ void run() {
     test_draw_with_opts_no_crash();
     test_italic_renders_different();
 }
-}  // namespace sec_text_spacing
 
-AURORA_TEST() {
-    sec_text_spacing::run();
-}
+AURORA_TEST() { aurora::test_cases::utest_text_spacing::run(); }
 
 }  // namespace aurora::test_cases::utest_text_spacing

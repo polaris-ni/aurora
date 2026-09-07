@@ -17,8 +17,6 @@ namespace aurora::test_cases::utest_aurora_test_api {
 
 using au::test::init_headless;
 
-
-using au::test::TestEnv;
 using au::test::expect_bounds;
 using au::test::expect_count;
 using au::test::expect_text;
@@ -26,13 +24,11 @@ using au::test::expect_tree_contains;
 using au::test::expect_visible;
 using au::test::pump;
 using au::test::tap;
+using au::test::TestEnv;
 using au::test::type_text;
 using au::ui::button;
 using au::ui::input;
 using au::ui::label;
-
-
-
 
 static void test_expect_text_count_tree() {
     TestEnv env = init_headless(300, 200);

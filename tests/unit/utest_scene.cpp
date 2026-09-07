@@ -13,8 +13,6 @@
 
 namespace aurora::test_cases::utest_scene {
 
-
-
 AURORA_TEST() {
     AURORA_TEST_PRINTF("=== test_scene ===\n");
 
@@ -64,6 +62,5 @@ AURORA_TEST() {
     std::remove("scene_single.tmp.png");
     std::remove("scene_nested.tmp.png");
 }
-
 
 }  // namespace aurora::test_cases::utest_scene

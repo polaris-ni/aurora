@@ -407,5 +407,4 @@ AURORA_TEST() {
     aurora::tests::sec_count_display_col::run();
 }
 
-
 }  // namespace aurora::test_cases::utest_win32_surface

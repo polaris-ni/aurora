@@ -67,7 +67,7 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
         return size_;
     }
 
-#ifdef AURORA_LAYOUT_CACHE
+#ifdef AURORA_ENABLE_LAYOUT_CACHE
     // 缓存命中：约束未变、缓存有效、且本控件允许布局缓存（上层已保证“缓存有效 ⇒ 无脏后代”）。
     // 直接复用缓存尺寸，完全跳过修饰链构建 + on_layout + 子树递归。
     // `can_cache_layout()` 为 false 的控件（on_layout 含时间/状态依赖副作用，如骨架→内容切换）
@@ -136,7 +136,7 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     }
     // 几何权威完全收敛到 Node::bounds_：布局只确定自身尺寸，位置由父节点经
     // Node::set_bounds 写入（含真实 origin）。Widget 不再持有任何几何缓存。
-#ifdef AURORA_LAYOUT_CACHE
+#ifdef AURORA_ENABLE_LAYOUT_CACHE
     cached_constraints_ = c;
     cached_size_ = size_;
     // 布局缓存决策：仅基于本控件自身的 can_cache_layout()。
@@ -379,7 +379,7 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
         return;
     }
 
-#ifdef AURORA_DISPLAY_LIST
+#ifdef AURORA_ENABLE_DISPLAY_LIST
     // Display List 快路径：仅恒等变换（无非离屏合成）参与录制/回放；
     // 旋转/缩放（非恒等 Transform）走 render_into 的离屏合成，保持原样不录制。
     // 含绘制副作用 / 每帧变动内容的控件（Hero / 转场层 / 导航宿主）不可缓存。

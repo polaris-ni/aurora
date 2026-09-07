@@ -15,7 +15,6 @@
 
 using au::Image;
 
-
 namespace aurora::test_cases::utest_svg_image {
 
 namespace {

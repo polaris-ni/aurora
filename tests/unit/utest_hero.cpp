@@ -25,8 +25,6 @@
 
 namespace aurora::test_cases::utest_hero {
 
-
-
 /// @brief 固定尺寸纯色块：用于断言 Hero 几何（位置/尺寸）与交叉淡变。
 namespace {
 struct FixedBox : Widget {
@@ -40,8 +38,8 @@ struct FixedBox : Widget {
     void collect_signals(std::vector<SignalViewBase *> & /*out*/) override {}
 
   protected:
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override { return c.constrain(sz); }
-    void on_paint(Painter& p, const Rect& bounds, const BuildContext& /*ctx*/) override { p.fill_rect(bounds, bg); }
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(sz); }
+    void on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) override { p.fill_rect(bounds, bg); }
 };
 
 /// @brief 把子节点放在相对自身原点的固定偏移处（布局定位，不改 paint 绝对包围盒语义）。
@@ -126,6 +124,5 @@ AURORA_TEST() {
 
     AURORA_LOG_INFO("test", "hero_test: ALL PASS");
 }
-
 
 }  // namespace aurora::test_cases::utest_hero

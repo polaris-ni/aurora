@@ -12,7 +12,6 @@
 
 namespace aurora::test_cases::utest_platform {
 
-
 namespace sec_platform_macros {
 // 本命名空间的宏名（PLATFORM_COUNT_n）与常量名参与预处理条件配对：命名重命名只会改写
 // 「当前平台生效分支」中的 #define，#ifdef 引用处不会被同步改写，计数会恒为 0。故整体抑制。
@@ -118,6 +117,5 @@ void run() {
 }  // namespace sec_platform_macros
 
 AURORA_TEST() { sec_platform_macros::run(); }
-
 
 }  // namespace aurora::test_cases::utest_platform

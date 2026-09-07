@@ -24,8 +24,8 @@ struct RenderResult {
 
     // 归一：const 成员函数 + 非 const 形参；按 (y*w + x)*4 + ch 索引 RGBA。
     [[nodiscard]] auto at(int x, int y, int ch) const -> std::uint8_t {
-        const std::size_t off = (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) +
-                                 static_cast<std::size_t>(x)) * 4U;
+        const std::size_t off =
+            (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * 4U;
         return pixels.at(off + static_cast<std::size_t>(ch));
     }
 };
@@ -43,7 +43,7 @@ struct RenderResult {
     p.begin(ww, hh);
     root->paint(p,
                 Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                      .size = Size{.width = static_cast<float>(ww), .height = static_cast<float>(hh)}},
+                     .size = Size{.width = static_cast<float>(ww), .height = static_cast<float>(hh)}},
                 ctx);
     const std::uint8_t *d = p.data();
     RenderResult r;

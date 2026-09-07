@@ -77,8 +77,8 @@ AURORA_TEST() {
 
         StyleProps sp;
         sp.background = TokenOr<Color>{std::string("bg")};  // 令牌命中
-        sp.foreground = TokenOr<Color>{Color::white()};     // 具体值
-        sp.corner_radius = TokenOr<double>{4.0};            // 具体值
+        sp.foreground = TokenOr<Color>{Color::white()};  // 具体值
+        sp.corner_radius = TokenOr<double>{4.0};  // 具体值
         sp.padding = TokenOr<double>{std::string("absent")};  // 令牌缺失 → fallback 0
 
         const ResolvedStyle r = sp.resolve(theme);

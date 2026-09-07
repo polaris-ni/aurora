@@ -13,15 +13,13 @@ namespace aurora::test_cases::utest_time {
 AURORA_TEST() {
     // ---- 1. 返回毫秒级系统时间戳（与 system_clock 同量纲） ----
     {
-        const auto before =
-            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                           std::chrono::system_clock::now().time_since_epoch())
-                                           .count());
+        const auto before = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+                .count());
         const auto ts = current_timestamp();
-        const auto after =
-            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                           std::chrono::system_clock::now().time_since_epoch())
-                                           .count());
+        const auto after = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+                .count());
 
         AURORA_TEST_CHECK_GE(ts, before);
         AURORA_TEST_CHECK_LE(ts, after);

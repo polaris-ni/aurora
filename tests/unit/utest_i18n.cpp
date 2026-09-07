@@ -17,7 +17,6 @@ using au::Locale;
 using au::LocalizedString;
 using au::StringTable;
 
-
 namespace aurora::test_cases::utest_i18n {
 
 static void test_string_table() {
@@ -93,6 +92,5 @@ AURORA_TEST() {
     test_localized_string();
     test_i18n_runtime();
 }
-
 
 }  // namespace aurora::test_cases::utest_i18n

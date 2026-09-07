@@ -18,7 +18,6 @@
 
 namespace aurora::test_cases::utest_state {
 
-
 using std::reduce;
 
 // ---- State 读写 / 订阅(Effect 依赖追踪) ----
@@ -58,7 +57,7 @@ static void test_computed() {
     AURORA_TEST_CHECK_MSG(c.get() == 30, "Computed: recomputes on second dependency");
 
     // au::computed 工厂：T 由 lambda 返回类型推导，行为与显式 Computed<T> 一致
-    const auto cf = computed([&] -> int { return a.get() * 2; });
+    const auto cf = computed([&]() -> int { return a.get() * 2; });
     AURORA_TEST_CHECK_MSG(cf.get() == 20, "computed factory: initial derived value");
     a.set(5);
     AURORA_TEST_CHECK_MSG(cf.get() == 10, "computed factory: recomputes when dependency changes");
@@ -194,6 +193,5 @@ AURORA_TEST() {
     test_store();
     test_async();
 }
-
 
 }  // namespace aurora::test_cases::utest_state

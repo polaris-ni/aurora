@@ -13,8 +13,6 @@
 
 namespace aurora::test_cases::utest_grid {
 
-
-
 namespace {
 // 确定性固定尺寸控件（不依赖字体/渲染），用于布局断言。
 class FixedBox : public Widget {

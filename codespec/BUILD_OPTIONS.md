@@ -11,9 +11,9 @@
 
 | 前缀 | 类别 | 语义 | 是否向库注入 feature 宏 |
 |:---|:---|:---|:---|
-| `AURORA_BUILD_*` | 构建产物开关 | 是否**构建**某个额外交付物（demos / tests / Inspector 服务器 / 图像编解码） | 否（例外：`AURORA_BUILD_IMAGE_*` 注入非 PUBLIC 的编译宏，见 §2.1） |
+| `AURORA_BUILD_*` | 构建产物开关 | 是否**构建**某个额外交付物（demos / tests / Inspector 服务器） | 否（例外：`AURORA_BUILD_INSPECTOR_SERVER`（§2.4）的开关名同时作为编译宏注入——与后端组「开关名 = 宏名」同惯例） |
 | `AURORA_BACKEND_*` | 内置后端开关 | 每个 `Surface` 后端一个开关；**开关名 = PUBLIC feature 宏名** | 是（`#ifdef` 剪裁 + PUBLIC 传播给消费者） |
-| `AURORA_ENABLE_*` | 插桩 / 分析 / 能力开关 | 是否注入编译 / 链接期分析工具（覆盖率 / 内存检测 / 调试 / 性能插桩）或开启构建加速 / 内部能力（lld / ccache / SIMD / DEBUG） | 多数否；`PROFILING` / `TRACING` 注入 PUBLIC 宏，`SIMD` / `DEBUG` 注入内部宏，`LLD` / `CCACHE` 不注入宏 |
+| `AURORA_ENABLE_*` | 插桩 / 分析 / 能力开关 | 是否注入编译 / 链接期分析工具（覆盖率 / 内存检测 / 调试 / 性能插桩）或开启构建加速 / 内部能力（lld / ccache / SIMD / DEBUG） | 多数否；`PROFILING` / `TRACING` 与架构级优化三开关注入 PUBLIC 宏，`SIMD` / `DEBUG` / `IMAGE_*` 注入内部宏，`LLD` / `CCACHE` 不注入宏 |
 
 > `Win32/GDI` 后端仅在 `_WIN32` 下编译，无需额外开关，已由 `AURORA_BACKEND_WIN32` 的内置默认值覆盖。
 
@@ -23,10 +23,11 @@
 
 | 模块 | 职责 |
 |:---|:---|
+| `cmake/AuroraFeatures.cmake` | **feature 宏单一入口** `aurora_define_feature(<宏> [SCOPE] [TARGET] [RAW] [EXPORT])`：定义注入 + `AURORA_FEATURE_DEFINES` 导出登记二合一；全部 feature 宏调用点（后端 / 优化 / SIMD / PROFILING / TRACING / DEBUG / 编解码）经它声明。运行时查询入口 `aurora::debug::feature_flags()`（`include/aurora/debug/feature_flags.h`） |
 | `cmake/AuroraThirdParty.cmake` | FreeType / HarfBuzz 源码构建 |
 | `cmake/AuroraUtils.cmake` | 消费者目标统一配置辅助（`aurora_setup_consumer_target`，demo / 测试 / 工具复用链接 / PCH / C++20 / 告警） |
-| `cmake/AuroraBackends.cmake` | 全部 `AURORA_BACKEND_*` 后端剪裁开关 + 架构级优化宏（`AURORA_LAYOUT_CACHE` 等） |
-| `cmake/AuroraImageCodecs.cmake` | `AURORA_BUILD_IMAGE_JPEG` / `AURORA_BUILD_IMAGE_WEBP` / `AURORA_BUILD_IMAGE_PNG`（编译期能力开关） |
+| `cmake/AuroraBackends.cmake` | 全部 `AURORA_BACKEND_*` 后端剪裁开关 + 架构级优化宏（`AURORA_ENABLE_LAYOUT_CACHE` 等） |
+| `cmake/AuroraImageCodecs.cmake` | `AURORA_ENABLE_IMAGE_JPEG` / `AURORA_ENABLE_IMAGE_WEBP` / `AURORA_ENABLE_IMAGE_PNG`（编译期能力开关） |
 | `cmake/AuroraSimd.cmake` | `AURORA_ENABLE_SIMD`（光栅内核 SIMD 双实现，内部宏，不 PUBLIC 传播） |
 | `cmake/AuroraCcache.cmake` | `AURORA_ENABLE_CCACHE`（ccache 编译缓存启动器） |
 | `cmake/AuroraTools.cmake` | 工具 / 基准可执行（`aurora_add_tool()` 统一样板）+ `AURORA_BUILD_INSPECTOR_SERVER` |
@@ -47,15 +48,9 @@
 | `AURORA_BUILD_DEMOS` | `ON` | **定义**（非默认构建）`examples/demos/` 下每组件一个的可运行窗口 demo 目标；均 `EXCLUDE_FROM_ALL`，按需构建 | 各 `demo_<组件>` 可执行文件 + 聚合目标 `demos` |
 | `AURORA_BUILD_TESTS` | `ON` | 编译 `tests/` 下全部用例并接入 CTest：`AURORA_TEST()` 注册、单一 runner 一次链接，逐条 `--run=<stem>` 隔离 | `aurora_test_runner` 可执行 + `enable_testing()` + `registry_integrity` 守护 |
 | `AURORA_BUILD_INSPECTOR_SERVER` | `OFF` | 编译 Inspector 远程 HTTP 服务器（跨平台：Windows 链 `ws2_32` / POSIX 链 `pthread`） | `aurora_inspector_server` 静态库 |
-| `AURORA_BUILD_IMAGE_JPEG` | `OFF` | 启用 JPEG 图像解码支持（关闭时需由消费者自行提供解码后的像素） | 仅改变编译期可用编解码能力，无独立目标 |
-| `AURORA_BUILD_IMAGE_WEBP` | `OFF` | 启用 WebP 图像解码支持 | 同上 |
-| `AURORA_BUILD_IMAGE_PNG` | `OFF` | 启用 PNG 图像**解码**支持（与 `HeadlessSurface` **输出** PNG 相互独立） | 同上 |
+### 2.1 图像编解码开关（已迁出）
 
-### 2.1 图像编解码开关
-
-`AURORA_BUILD_IMAGE_JPEG` / `WEBP` / `PNG` 默认均 `OFF`，由 `cmake/AuroraImageCodecs.cmake` 定义并在 `CMakeLists.txt` 中 `include(AuroraImageCodecs)`，是真实生效的构建开关；关闭任一选项则该格式的解码路径不参与编译。
-
-三者虽归入 `AURORA_BUILD_*` 组，但会注入**非 PUBLIC** 的 `AURORA_BUILD_IMAGE_*` 编译宏（codec 编译单元以 `#ifdef` 剪裁），属「编译期能力开关」而非「交付物开关」的例外——该宏不向消费者传播，关闭时仅损失解码能力、不改变像素输出。
+图像编解码开关原名 `AURORA_BUILD_IMAGE_*`，实为「编译期能力开关」而非「交付物开关」，已归入 `AURORA_ENABLE_*` 命名组并连同选项名一并改名为 `AURORA_ENABLE_IMAGE_*`——详见 §4.6。
 
 ### 2.2 demo 构建方式
 
@@ -74,6 +69,7 @@ demo 不进默认构建（`EXCLUDE_FROM_ALL`）：日常 `cmake --build build` �
 | 类型 | `option()` |
 | 默认值 | `OFF` |
 | 说明 | 编译 Inspector 远程 HTTP 服务器（`InspectorServer`），暴露 REST 端点供外部工具远程访问运行时控件树 |
+| 传播宏 | `AURORA_BUILD_INSPECTOR_SERVER`（开关名 = 宏名，与 `AURORA_BACKEND_*` 同惯例；`aurora_inspector_server` 目标 PUBLIC，随链接注入 demo / 测试，经 `aurora_define_feature` 注入） |
 | 平台限制 | 跨平台（Windows: `ws2_32` / POSIX: `pthread`） |
 | 产物 | `aurora_inspector_server` 静态库（`src/aurora/inspector/inspector_server.cpp`） |
 | 头文件 | `include/aurora/inspector/inspector_server.h` |
@@ -137,18 +133,18 @@ cmake --build build -j $(nproc)
 
 ### 3.3 架构级渲染 / 布局优化开关
 
-三项互不依赖的架构级优化。三者均**开关名 = PUBLIC feature 宏名**，宏以 `target_compile_definitions(aurora PUBLIC …)` 传播；库代码用 `#ifdef AURORA_XXX` 做代码剪裁。关闭任一开关即回退到原始实现路径（等价无优化），可独立退化。
+三项互不依赖的架构级优化。三者归入 `AURORA_ENABLE_*` 命名组（组内特例：PUBLIC 注入**并随安装导出**，因消费者须与库同宏取值编译 `aurora.h`——ODR / 剪裁一致性）；开关名 = 宏名，库代码用 `#ifdef` 剪裁。关闭任一开关即回退到原始实现路径（等价无优化），可独立退化。
 
 | 选项 | 默认值 | 含义 | 传播宏 | 退化行为 |
 |:---|:---|:---|:---|:---|
-| `AURORA_LAYOUT_CACHE` | `ON` | 布局约束缓存：约束不变且非 layout dirty 时跳过子树 layout 递归 | `AURORA_LAYOUT_CACHE` | 每次 `layout()` 都重新计算整棵子树 |
-| `AURORA_OCCLUSION_CULLING` | `ON` | 遮挡剔除：跳过不与 Painter 裁剪区相交的子控件绘制 | `AURORA_OCCLUSION_CULLING` | 始终遍历并绘制全部子控件 |
-| `AURORA_DISPLAY_LIST` | `ON` | Display List 录制 / 回放：子树未脏时直接 replay 命令，跳过 paint 遍历 | `AURORA_DISPLAY_LIST` | 每次 `paint()` 都重新遍历整棵子树 |
+| `AURORA_ENABLE_LAYOUT_CACHE` | `ON` | 布局约束缓存：约束不变且非 layout dirty 时跳过子树 layout 递归 | `AURORA_ENABLE_LAYOUT_CACHE` | 每次 `layout()` 都重新计算整棵子树 |
+| `AURORA_ENABLE_OCCLUSION_CULLING` | `ON` | 遮挡剔除：跳过不与 Painter 裁剪区相交的子控件绘制 | `AURORA_ENABLE_OCCLUSION_CULLING` | 始终遍历并绘制全部子控件 |
+| `AURORA_ENABLE_DISPLAY_LIST` | `ON` | Display List 录制 / 回放：子树未脏时直接 replay 命令，跳过 paint 遍历 | `AURORA_ENABLE_DISPLAY_LIST` | 每次 `paint()` 都重新遍历整棵子树 |
 
 三者默认全开；排查回归时可单独关闭定位：
 
 ```powershell
-cmake -S . -B build -DAURORA_LAYOUT_CACHE=OFF -DAURORA_DISPLAY_LIST=OFF
+cmake -S . -B build -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_DISPLAY_LIST=OFF
 ```
 
 ### 3.4 Display List 集成约束（正确性不变量）
@@ -213,6 +209,9 @@ cmake --build build --target gen_debug_api_json     # 仅刷新 debug 段
 | `AURORA_ENABLE_CCACHE` | `ON` | ccache 编译缓存（加速重复编译） | 设置 `CMAKE_C_COMPILER_LAUNCHER` 与 `CMAKE_CXX_COMPILER_LAUNCHER`；支持 winget 安装路径自动检测 |
 | `AURORA_ENABLE_LLD` | `ON` | 链接器选择（lld 加速静态链接） | GNU/Clang 下 `find_program(ld.lld)` + `check_linker_flag` 探测通过则全局注入 `-fuse-ld=lld -B<lld 目录>`；失败静默回退 GNU ld；**不注入 feature 宏** |
 | `AURORA_ENABLE_CLANG_TIDY` | `ON` | Clang-Tidy 门禁（`lint` / `lint-fix` 聚合目标） | 需 `clang-tidy` 与 python 在 PATH；未开启时自动打开 `CMAKE_EXPORT_COMPILE_COMMANDS`。经 `tools/check/run_clang_tidy.py` 并行 lint **非 third_party** 翻译单元并按 `(file, line, check)` 去重；详见 §4.5 |
+| `AURORA_ENABLE_IMAGE_JPEG` | `OFF` | JPEG 图像解码能力（libjpeg-turbo 源码构建） | 注入 `AURORA_ENABLE_IMAGE_JPEG`（仅库内部，不 PUBLIC 传播）；详见 §4.6 |
+| `AURORA_ENABLE_IMAGE_WEBP` | `OFF` | WebP 图像解码能力（libwebp 源码构建） | 注入 `AURORA_ENABLE_IMAGE_WEBP`（同上） |
+| `AURORA_ENABLE_IMAGE_PNG` | `OFF` | PNG/GIF 图像解码能力（wuffs 源码构建） | 注入 `AURORA_ENABLE_IMAGE_PNG`（同上） |
 
 **约束**：
 
@@ -333,6 +332,17 @@ python tools/check/run_clang_tidy.py --build-dir build --include 'src/'         
 
 **NOLINT 纪律**：凡用 `NOLINT` / `NOLINTNEXTLINE` 抑制告警，须遵守 `CODING_STANDARDS.md` §5.2——写明具体检查名（禁止裸 `NOLINT` 的新增使用），并紧邻注释说明「为何不能按建议修复」。
 
+### 4.6 `AURORA_ENABLE_IMAGE_*`（图像编解码能力）
+
+| 项 | 值 |
+|:---|:---|
+| 默认值 | 均 `OFF` |
+| feature 宏 | 注入同名 `AURORA_ENABLE_IMAGE_*`，**仅库内部使用，不 PUBLIC 传播、不导出给消费者** |
+| 编译期行为 | `ON` 时对应 third_party 源码（libjpeg-turbo / libwebp / wuffs）编为 OBJECT 库链入 aurora，codec 编译单元以 `#ifdef` 剪裁参与编译；`OFF` 时该格式解码路径不参与编译，消费者需自行提供解码后像素 |
+| 运行时影响 | 关闭仅损失解码能力、不改变像素输出；能力查询走 `aurora::debug::feature_flags()`（§11.2 调试门面） |
+
+> 历史注记：三者原名 `AURORA_BUILD_IMAGE_*`（`AURORA_BUILD_*` 组的「编译期能力开关」例外）；归入 `AURORA_ENABLE_*` 组后连同选项名一并改名，消除「组名与语义不符」的例外。见 §2.1。
+
 ---
 
 ## 5 强制缓存变量（三方库源码构建内部）
@@ -443,7 +453,7 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 
 ### 9.3 feature 宏导出约定
 
-安装期将编译期生效的 `AURORA_BACKEND_*` / `AURORA_LAYOUT_CACHE` / `AURORA_OCCLUSION_CULLING` / `AURORA_DISPLAY_LIST` 与全局 `NOMINMAX` 收集进 `AURORA_EXPORTED_DEFINES`，由 `Aurora::aurora` 的 `INTERFACE` 编译定义导出，使消费者以与库**完全一致**的宏集编译 `aurora.h`（避免 ODR / 剪裁不一致）。新增 feature 宏时须同步本段与 `CMakeLists.txt` 的收集列表。
+安装期将编译期生效的 `AURORA_BACKEND_*` / `AURORA_ENABLE_LAYOUT_CACHE` / `AURORA_ENABLE_OCCLUSION_CULLING` / `AURORA_ENABLE_DISPLAY_LIST` 与全局 `NOMINMAX` 收集进 `AURORA_EXPORTED_DEFINES`，由 `Aurora::aurora` 的 `INTERFACE` 编译定义导出，使消费者以与库**完全一致**的宏集编译 `aurora.h`（避免 ODR / 剪裁不一致）。新增 feature 宏时须同步本段与 `CMakeLists.txt` 的收集列表。
 
 `AURORA_ENABLE_PROFILING` / `AURORA_ENABLE_TRACING` 亦为 PUBLIC feature 宏，但导出策略特殊：
 
@@ -453,13 +463,13 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 
 ### 9.4 最小验证示例
 
-`examples/consumer_find_package/`（独立工程，**不归属主构建**）是一个最小消费端：Headless 渲染一段文本到 PNG，可用来验证 `find_package` + 静态链接（含 FreeType / HarfBuzz）在目标工具链上工作。
+最小消费端验证由 CI 的 `install-consumer` job 承担：`cmake --install` 后，在工作流内联生成一个仅含 `CMakeLists.txt`（`find_package(Aurora REQUIRED)` + 链接 `Aurora::aurora`）与 `main.cpp`（[`GUIDELINE.md`](GUIDELINE.md) §1 最小配方：`Scene::render_to_png` 出 PNG）的临时工程，端到端验证 `find_package` + 静态链接（含 FreeType / HarfBuzz 传递依赖）在目标工具链上工作。配方：
 
 ```powershell
-cd examples/consumer_find_package
-cmake -S . -B build -DAurora_DIR="<PREFIX>/lib/cmake/Aurora"
+cd consumer
+cmake -S . -B build -DCMAKE_PREFIX_PATH="<PREFIX>"
 cmake --build build
-./build/consumer.exe          # 输出 consumer_out.png
+./build/consumer.exe          # 输出 hello.png
 ```
 
 > 消费端生成器须与安装库的生成器 / 工具链一致。
@@ -473,7 +483,6 @@ cmake --build build
 -D AURORA_BUILD_DEMOS=ON|OFF                  # demos（默认 ON）
 -D AURORA_BUILD_TESTS=ON|OFF                  # CTest（默认 ON）
 -D AURORA_BUILD_INSPECTOR_SERVER=ON|OFF       # Inspector HTTP 服务器（默认 OFF）
--D AURORA_BUILD_IMAGE_{JPEG,WEBP,PNG}=ON|OFF  # 图像解码（默认均 OFF）
 
 # 后端开关（= feature 宏，PUBLIC 传播）
 -D AURORA_BACKEND_HEADLESS=ON|OFF   # 无头 PNG（默认 ON）
@@ -486,9 +495,9 @@ cmake --build build
 -D AURORA_BACKEND_WASM=ON|OFF       # WebAssembly（默认 OFF）
 
 # 架构级优化（= feature 宏，PUBLIC 传播，默认均 ON）
--D AURORA_LAYOUT_CACHE=ON|OFF
--D AURORA_OCCLUSION_CULLING=ON|OFF
--D AURORA_DISPLAY_LIST=ON|OFF
+-D AURORA_ENABLE_LAYOUT_CACHE=ON|OFF
+-D AURORA_ENABLE_OCCLUSION_CULLING=ON|OFF
+-D AURORA_ENABLE_DISPLAY_LIST=ON|OFF
 
 # 插桩（COVERAGE 与 ASAN 互斥）
 -D AURORA_ENABLE_COVERAGE=ON|OFF         # gcov / llvm-cov（默认 OFF）
@@ -497,6 +506,7 @@ cmake --build build
 -D AURORA_ENABLE_TRACING=ON|OFF          # Chrome Trace（默认 OFF，隐含 PROFILING=ON）
 -D AURORA_ENABLE_DEBUG=AUTO|ON|OFF       # 真实后端 DEBUG 能力（默认 AUTO，内部宏）
 -D AURORA_ENABLE_SIMD=ON|OFF             # 光栅 SIMD 双实现（默认 ON，内部宏）
+-D AURORA_ENABLE_IMAGE_{JPEG,WEBP,PNG}=ON|OFF  # 图像解码能力（默认均 OFF，内部宏）
 -D AURORA_ENABLE_CCACHE=ON|OFF           # ccache 编译缓存（默认 ON）
 -D AURORA_ENABLE_LLD=ON|OFF              # lld 链接器（默认 ON）
 -D AURORA_ENABLE_CLANG_TIDY=ON|OFF       # lint / lint-fix 目标（默认 ON）

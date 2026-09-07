@@ -15,9 +15,6 @@ namespace aurora::test_cases::utest_glyph_atlas {
 
 using au::render::GlyphAtlas;
 
-
-
-
 AURORA_TEST() {
     GlyphAtlas atlas;
 

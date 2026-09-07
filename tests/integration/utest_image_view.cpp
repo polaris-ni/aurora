@@ -19,7 +19,6 @@
 
 namespace aurora::test_cases::utest_image_view {
 
-
 namespace serialization = aurora::serialization;
 
 // 在多个候选相对路径中尝试加载 golden PNG（兼容 ctest build 目录与仓库根 CWD）。
@@ -85,18 +84,12 @@ static void test_image_view() {
     // source 序列化：props 含 source / image_width / image_height。
     ImageView iv_src{ImageViewProps{.bitmap = img, .source = std::string("logo.png")}};
     auto js = serialization::to_json(iv_src);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     AURORA_TEST_CHECK(js.contains("type") && js["type"].get<std::string>() == "Image");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(js["props"].contains("source") && js["props"]["source"].get<std::string>() == "logo.png");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(js["props"]["image_width"].get<int>() == 32);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(js["props"]["image_height"].get<int>() == 24);
+    // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
     // 真实 PNG 加载（走 stb）：解码成功且尺寸、像素长度正确。
     AURORA_TEST_CHECK(try_load_golden());

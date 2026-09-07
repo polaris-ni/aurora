@@ -13,8 +13,6 @@
 
 namespace aurora::test_cases::utest_validate_ui {
 
-
-
 AURORA_TEST() {
     // ---- 1. 合法树验证通过 ----
     {

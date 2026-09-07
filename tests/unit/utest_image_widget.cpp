@@ -47,8 +47,7 @@ AURORA_TEST() {
     // ---- 4. 布局解析：有位图按自然尺寸；空位图回退 100×100，均受约束夹取 ----
     {
         const BuildContext ctx;
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F},
-                            .max = Size{.width = 200.0F, .height = 200.0F}};
+        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 200.0F, .height = 200.0F}};
 
         Image img;
         img.width = 50;

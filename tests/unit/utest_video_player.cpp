@@ -17,8 +17,6 @@
 
 namespace aurora::test_cases::utest_video_player {
 
-
-
 namespace aurora::tests::sec_video_player {
 
 namespace {
@@ -169,7 +167,7 @@ namespace {
 // #1: create_default_controls() 在挂载期生效（子类覆写真正可达，set_controls 仍优先）
 class MinimalPlayer : public VideoPlayer {
   public:
-    Button* marker = nullptr;
+    Button *marker = nullptr;
 
     [[nodiscard]] auto create_default_controls() -> std::unique_ptr<Widget> override {
         auto b = std::make_unique<Button>("X");

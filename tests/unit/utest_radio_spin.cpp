@@ -11,8 +11,6 @@
 
 namespace aurora::test_cases::utest_radio_spin {
 
-
-
 AURORA_TEST() {
     // ==================== RadioGroup ====================
 

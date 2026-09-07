@@ -21,8 +21,6 @@
 
 namespace aurora::test_cases::utest_menu {
 
-
-
 namespace {
 
 void test_default_fields() {
@@ -41,8 +39,8 @@ void test_default_fields() {
 
 void test_explicit_ctor() {
     bool clicked = false;
-    const MenuItem item{"打开", [&clicked] -> void { clicked = true; }};
-    AURORA_TEST_CHECK_MSG(item.label == "打开", "label forwarded");
+    const MenuItem item{"Open", [&clicked]() -> void { clicked = true; }};
+    AURORA_TEST_CHECK_MSG(item.label == "Open", "label forwarded");
     AURORA_TEST_CHECK(item.enabled);
     item.on_click();
     AURORA_TEST_CHECK(clicked);
@@ -50,7 +48,7 @@ void test_explicit_ctor() {
 
 void test_on_click_invoked() {
     int count = 0;
-    const MenuItem item{"计数", [&count] -> void { ++count; }};
+    const MenuItem item{"Count", [&count]() -> void { ++count; }};
     item.on_click();
     item.on_click();
     AURORA_TEST_CHECK_EQ(count, 2);
@@ -65,21 +63,19 @@ void test_separator_item() {
 }
 
 void test_submenu() {
-    MenuItem sub{"子项"};
-    MenuItem parent{"父项"};
+    MenuItem sub{"Sub"};
+    MenuItem parent{"Parent"};
     parent.children.push_back(sub);
     parent.children.push_back(MenuItem::separator_item());
     AURORA_TEST_CHECK(parent.is_submenu());
     AURORA_TEST_CHECK_EQ(parent.children.size(), static_cast<size_t>(2));
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK_FALSE(parent.children[0].is_submenu());
 
-    MenuItem nested{"嵌套"};
-    nested.children.emplace_back("更深");
+    MenuItem nested{"Nest"};
+    nested.children.emplace_back("Deeper");
     parent.children.push_back(nested);
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     AURORA_TEST_CHECK(parent.children[2].is_submenu());
 }
 
@@ -98,7 +94,7 @@ void test_state_flags() {
 }
 
 void test_shortcut_and_icon() {
-    MenuItem item{"另存为", {}};
+    MenuItem item{"Save as", {}};
     item.shortcut_text = "Shift+Ctrl+S";
     AURORA_TEST_CHECK_MSG(item.shortcut_text == "Shift+Ctrl+S", "shortcut text kept");
     item.icon.clear();
