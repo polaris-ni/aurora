@@ -1,12 +1,12 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/event/gesture.h
 /// 测试说明: gesture 单元测试
 ///
 
-// 目标源单元：event/gesture.h
+// 目标源单元：Gesture
 
 // ── API 覆盖映射 ─────────────────────────────
-// event/event.h(MouseEvent/KeyEvent/TouchEvent 等事件载荷，经派发与手势用例行使)。
+// Event(MouseEvent/KeyEvent/TouchEvent 等事件载荷，经派发与手势用例行使)。
 
 #include <chrono>
 #include <cmath>

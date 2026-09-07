@@ -1,7 +1,11 @@
+/// 测试类型: unit
+/// 目标单元: include/aurora/i18n/locale.h
+/// 测试说明: utest_i18n 单元测试
+
 // i18n_test.cpp — 覆盖 i18n（StringTable 增删查/格式化/复数、LocalizedString 解析）。
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 // ── API 覆盖映射 ─────────────────────────────
-// i18n/locale.h(Locale{language,region,tag()})、i18n/string_table.h(StringTable)、i18n/localized_string.h(LocalizedString)。
+// Locale(Locale{language,region,tag()})、StringTable(StringTable)、LocalizedString(LocalizedString)。
 
 #include <string>
 

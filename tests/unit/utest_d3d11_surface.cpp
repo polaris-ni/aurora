@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/window/d3d11_surface.h
 /// 测试说明: d3d11_surface 单元测试
 ///
 
-// 目标源单元：window/d3d11_surface.h（平台后端，仅 AURORA_BACKEND_D3D11 编译）。
+// 目标源单元：D3d11Surface（平台后端，仅 AURORA_BACKEND_D3D11 编译）。
 //
 // API 覆盖映射：D3D11Surface 帧生命周期/native_handle 由 test_d3d11_present.cpp 端到端行使
 //

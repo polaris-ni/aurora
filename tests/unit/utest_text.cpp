@@ -1,9 +1,13 @@
-// 目标源单元：widget/text.h + src/aurora/widget/text.cpp
+/// 测试类型: unit
+/// 目标单元: include/aurora/widget/text.h
+/// 测试说明: utest_text 单元测试
+///
+// 目标源单元（历史映射，保留供审计）: Text + Text
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 
 // ── API 覆盖映射 ─────────────────────────────
-// render/text_aa_mode.h(TextAAMode，经 AA 各段行使)、render/bitmap_font.h(BitmapFont 内置字体回退)、
-// widget/text_span.h(TextSpan，经 sec_rich_text? 见 test_rich_text.cpp——TextSpan 归属 rich_text 单元)。
+// TextAaMode(TextAAMode，经 AA 各段行使)、BitmapFont(BitmapFont 内置字体回退)、
+// TextSpan(TextSpan，经 sec_rich_text? 见 test_rich_text.cpp——TextSpan 归属 rich_text 单元)。
 
 #include <algorithm>
 #include <array>

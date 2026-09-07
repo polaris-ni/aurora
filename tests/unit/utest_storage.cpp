@@ -1,13 +1,13 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/storage/storage.h
 /// 测试说明: storage 单元测试
 ///
 
 // 存储抽象层契约测试（Memory + Filesystem 后端、类型化、二进制、
 // 异步、变更通知、事务回滚）。接入 CTest（tests/*.cpp 经 GLOB 自动收集）。
 // ── API 覆盖映射 ─────────────────────────────
-// storage/storage_backend.h(StorageBackend 抽象契约)、storage/fs_backend.h(FilesystemBackend)、
-// storage/memory_backend.h(MemoryBackend)、storage/serializable.h(概念与钩子)、storage/storage_types.h(值模型)。
+// StorageBackend(StorageBackend 抽象契约)、FsBackend(FilesystemBackend)、
+// MemoryBackend(MemoryBackend)、Serializable(概念与钩子)、StorageTypes(值模型)。
 
 #include <atomic>
 #include <chrono>

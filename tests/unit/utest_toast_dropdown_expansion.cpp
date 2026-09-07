@@ -5,7 +5,7 @@
 
 // 验证三控件：ToastHost（队列/过期/位置）、Dropdown（开合/选择）、ExpansionPanel（折叠）。
 // ── API 覆盖映射 ─────────────────────────────
-// widget/dropdown.h(Dropdown)、widget/toast.h(ToastHost 队列)。
+// Dropdown(Dropdown)、Toast(ToastHost 队列)。
 
 #include <chrono>
 #include <memory>

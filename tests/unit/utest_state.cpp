@@ -1,13 +1,13 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/state/state.h
 /// 测试说明: state 单元测试
 ///
 
 // state_test.cpp — 覆盖响应式状态系统（原缺口模块）。
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 // ── API 覆盖映射 ─────────────────────────────
-// state/store.h(Store 读写/订阅)、state/signal_view.h(SignalView 只读视图)；
-// state/state_graph.h、state/state_registry.h → 经状态系统与序列化链路间接行使（无独立直测函数，见
+// Store(Store 读写/订阅)、SignalView(SignalView 只读视图)；
+// StateGraph、StateRegistry → 经状态系统与序列化链路间接行使（无独立直测函数，见
 // test_serialization）。
 
 #include <chrono>

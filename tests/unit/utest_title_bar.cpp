@@ -5,7 +5,7 @@
 
 // 标题栏单测：TitleBarStyle 默认值/预设、title_bar_geometry 真值表
 // （三布局尺寸规则、隐藏收缩、resizable 自动隐藏、窄窗退化、maximized 无关性）。
-// 纯函数测试，无后端依赖。期望值以 src/aurora/window/title_bar_geometry.cpp
+// 纯函数测试，无后端依赖。期望值以 TitleBarGeometry
 // 顶部注释块（唯一权威来源）推导；如与实现冲突以实现为准并回填本文件。
 #include <memory>
 

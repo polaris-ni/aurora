@@ -1,10 +1,14 @@
+/// 测试类型: unit
+/// 目标单元: include/aurora/core/math.h
+/// 测试说明: utest_core 单元测试
+
 // core_test.cpp — 覆盖 core 基础类型与工具的单测（原缺口模块）。
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 // ── API 覆盖映射 ─────────────────────────────
-// core/types.h / math.h / dimension.h / duration.h / time.h / color.h / debug.h(check_render_purity)
+// Types / math.h / dimension.h / duration.h / time.h / color.h / debug.h(check_render_purity)
 //   / diagnostics.h(基础上报) / immutable.h / utf8.h → 本文件既有用例直接行使；
-// core/literals.h → UDL 声明头（_dp/_px 等行为由 dimension UDL 用例行使）；
-// core/assert.h → AURORA_ASSERT 宏：Debug 断言、Release 编译剥离，行为断言豁免（同类路径见 test_strict_mode）。
+// Literals → UDL 声明头（_dp/_px 等行为由 dimension UDL 用例行使）；
+// Assert → AURORA_ASSERT 宏：Debug 断言、Release 编译剥离，行为断言豁免（同类路径见 test_strict_mode）。
 
 #include <cmath>
 #include <cstdint>

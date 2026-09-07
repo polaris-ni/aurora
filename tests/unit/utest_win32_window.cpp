@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/window/win32_window.h
 /// 测试说明: win32_window 单元测试
 ///
 
-// 目标源单元：window/win32_window.h（Win32/GDI 窗口壳，仅 AURORA_BACKEND_WIN32 编译）。
+// 目标源单元：Win32Window（Win32/GDI 窗口壳，仅 AURORA_BACKEND_WIN32 编译）。
 //
 // API 覆盖映射：create_window(Win32Options)/wnd_proc→EventDispatcher 全链路
 //   → tests/test_win32_surface.cpp 的 sec_test_win32_button_click / sec_test_count_display_col 段；

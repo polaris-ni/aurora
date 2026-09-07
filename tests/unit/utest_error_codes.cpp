@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/core/error_codes.h
 /// 测试说明: error_codes 单元测试
 ///
 
@@ -7,7 +7,7 @@
 // 枚举连续性、slug 冻结契约、表驱动元数据、make_error 表驱动、Diagnostic 表驱动解释。
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 // ── API 覆盖映射 ─────────────────────────────
-// core/error_codes.h（含 error_codes.gen.h 生成枚举/表驱动元数据）。
+// ErrorCodes（含 error_codes.gen.h 生成枚举/表驱动元数据）。
 
 #include <string>
 #include <unordered_set>

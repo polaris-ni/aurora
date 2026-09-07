@@ -1,11 +1,11 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/core/font.h
+/// 目标单元: include/aurora/render/font_discovery.h
 /// 测试说明: font_fallback 单元测试
 ///
 
 // 字体发现 / 回退链单元测试：验证内置默认字体、内存注册、缺字回退与 CJK 非 tofu。
 // ── API 覆盖映射 ─────────────────────────────
-// render/font_discovery.h(FontDiscovery 内置默认字体/内存注册/缺字回退链)。
+// FontDiscovery(FontDiscovery 内置默认字体/内存注册/缺字回退链)。
 
 #include <ft2build.h>
 

@@ -1,12 +1,12 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/state/subscription.h
 /// 测试说明: subscription 单元测试
 ///
 
 // 覆盖 T1：RAII Subscription + bind(SignalView&) / bind(Store&) 生命周期。
 // ── API 覆盖映射 ─────────────────────────────
-// state/computed.h(Computed 派生)、state/reactive.h(State/Effect 内核)、state/binding.h(bind 双向绑定)、
-// core/event_stream.h(EventStream 订阅流) → 本文件既有用例行使。
+// Computed(Computed 派生)、Reactive(State/Effect 内核)、Binding(bind 双向绑定)、
+// EventStream(EventStream 订阅流) → 本文件既有用例行使。
 
 #include <string>
 

@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/window/macos_surface.h
 /// 测试说明: macos_surface 单元测试
 ///
 
-// 目标源单元：window/macos_surface.h（平台后端，仅 AURORA_BACKEND_MACOS 编译）。
+// 目标源单元：MacosSurface（平台后端，仅 AURORA_BACKEND_MACOS 编译）。
 //
 // API 覆盖映射：MacOSSurface(AppKit/CoreGraphics 骨架) 构造与帧生命周期
 //

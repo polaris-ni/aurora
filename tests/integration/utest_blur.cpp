@@ -1,0 +1,164 @@
+/// 测试类型: unit
+/// 目标单元: include/aurora/modifier/modifier.h
+/// 测试说明: utest_blur 单元测试
+
+// 验证模糊修饰：Painter::blur_region 像素级模糊 + Modifier::blur/backdrop_filter 集成。
+#include <cstdio>
+#include <memory>
+
+#include "aurora/modifier/modifier.h"
+#include "aurora/render/painter.h"
+#include "aurora/widget/text.h"
+#include "aurora_test_harness.h"
+
+using au::BlurNode;
+using au::BuildContext;
+using au::Color;
+using au::Constraints;
+using au::LocalizedString;
+using au::Modifier;
+using au::Painter;
+using au::Point;
+using au::Rect;
+using au::Size;
+using au::Text;
+
+
+namespace aurora::test_cases::utest_blur {
+
+AURORA_TEST() {
+    // ---- 1. BlurNode 构造与降级 ----
+    {
+        BlurNode b1{4.0F};
+        AURORA_TEST_CHECK(b1.radius() == 4.0F);
+        AURORA_TEST_CHECK(!b1.is_backdrop());
+
+        BlurNode b2{8.0F, true};
+        AURORA_TEST_CHECK(b2.is_backdrop());
+
+        BlurNode b3{-5.0F};
+        AURORA_TEST_CHECK(b3.radius() == 0.0F);  // 负值降级
+    }
+
+    // ---- 2. Modifier 工厂 ----
+    {
+        auto mod = Modifier{}.blur(3.0F).backdrop_filter(6.0F);
+        AURORA_TEST_CHECK(mod.nodes().size() == 2);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        const auto *n0 = dynamic_cast<const BlurNode *>(mod.nodes()[0].get());
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        const auto *n1 = dynamic_cast<const BlurNode *>(mod.nodes()[1].get());
+        AURORA_TEST_CHECK(n0 != nullptr && !n0->is_backdrop());
+        AURORA_TEST_CHECK(n1 != nullptr && n1->is_backdrop());
+    }
+
+    // ---- 3. blur_region 像素级验证：锐利边界被平滑 ----
+    {
+        Painter p;
+        p.begin(100, 100);
+        // 左半黑右半白（x=50 处硬边界）
+        p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 50.0F, .height = 100.0F}},
+                    Color(0, 0, 0, 255));
+        p.fill_rect(Rect{.origin = Point{.x = 50.0F, .y = 0.0F}, .size = Size{.width = 50.0F, .height = 100.0F}},
+                    Color(255, 255, 255, 255));
+
+        // 模糊前：边界两侧对比强烈
+        const auto before_l = p.get_pixel(48, 50);
+        const auto before_r = p.get_pixel(52, 50);
+        AURORA_TEST_CHECK(before_l.r == 0);
+        AURORA_TEST_CHECK(before_r.r == 255);
+
+        p.blur_region(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 100.0F, .height = 100.0F}},
+                      5.0F);
+
+        // 模糊后：边界处出现中间灰度
+        const auto after_edge = p.get_pixel(50, 50);
+        AURORA_TEST_CHECK(after_edge.r > 30 && after_edge.r < 225);
+        // 远离边界处基本不变
+        const auto after_far_l = p.get_pixel(5, 50);
+        const auto after_far_r = p.get_pixel(95, 50);
+        AURORA_TEST_CHECK(after_far_l.r < 30);
+        AURORA_TEST_CHECK(after_far_r.r > 225);
+    }
+
+    // ---- 4. blur_region 仅影响指定区域 ----
+    {
+        Painter p;
+        p.begin(100, 100);
+        p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 50.0F, .height = 100.0F}},
+                    Color(0, 0, 0, 255));
+        p.fill_rect(Rect{.origin = Point{.x = 50.0F, .y = 0.0F}, .size = Size{.width = 50.0F, .height = 100.0F}},
+                    Color(255, 255, 255, 255));
+
+        // 只模糊上半 30 行
+        p.blur_region(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 100.0F, .height = 30.0F}},
+                      5.0F);
+
+        // 上半边界模糊
+        AURORA_TEST_CHECK(p.get_pixel(50, 15).r > 30 && p.get_pixel(50, 15).r < 225);
+        // 下半边界仍锐利
+        AURORA_TEST_CHECK(p.get_pixel(48, 80).r == 0);
+        AURORA_TEST_CHECK(p.get_pixel(52, 80).r == 255);
+    }
+
+    // ---- 5. 非法参数无操作 ----
+    {
+        Painter p;
+        p.begin(50, 50);
+        p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 50.0F, .height = 50.0F}},
+                    Color(100, 100, 100, 255));
+
+        p.blur_region(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 50.0F, .height = 50.0F}},
+                      0.0F);  // 零半径
+        p.blur_region(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 50.0F, .height = 50.0F}},
+                      -3.0F);  // 负半径
+        p.blur_region(Rect{.origin = Point{.x = 200.0F, .y = 200.0F}, .size = Size{.width = 10.0F, .height = 10.0F}},
+                      5.0F);  // 区域出界
+        AURORA_TEST_CHECK(p.get_pixel(25, 25).r == 100);  // 全部无操作
+    }
+
+    // ---- 6. Widget 集成：带 blur 修饰的控件绘制不崩溃 ----
+    {
+        auto t = std::make_shared<Text>();
+        t->content = LocalizedString{"blurred text"};
+        t->modifier.set(Modifier{}.background(Color(255, 0, 0, 255)).blur(2.0F));
+
+        BuildContext ctx;
+        t->mount(ctx);
+        Constraints c;
+        c.min = Size{.width = 0.0F, .height = 0.0F};
+        c.max = Size{.width = 200.0F, .height = 100.0F};
+        t->layout(c, ctx);
+
+        Painter p;
+        p.begin(200, 100);
+        t->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 100.0F}}, ctx);
+        AURORA_TEST_CHECK(p.width() == 200);
+    }
+
+    // ---- 7. Widget 集成：backdrop_filter 毛玻璃不崩溃 ----
+    {
+        auto t = std::make_shared<Text>();
+        t->content = LocalizedString{"frosted"};
+        t->modifier.set(Modifier{}.backdrop_filter(4.0F).background(Color(255, 255, 255, 120)));
+
+        BuildContext ctx;
+        t->mount(ctx);
+        Constraints c;
+        c.min = Size{.width = 0.0F, .height = 0.0F};
+        c.max = Size{.width = 200.0F, .height = 100.0F};
+        t->layout(c, ctx);
+
+        Painter p;
+        p.begin(200, 100);
+        // 背景先画点内容供模糊
+        p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 100.0F, .height = 100.0F}},
+                    Color(0, 0, 255, 255));
+        t->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 100.0F}}, ctx);
+        AURORA_TEST_CHECK(p.width() == 200);
+    }
+}
+
+}  // namespace aurora::test_cases::utest_blur

@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/render/painter.h
+/// 目标单元: include/aurora/window/wayland_surface.h
 /// 测试说明: wayland_surface 单元测试
 ///
 

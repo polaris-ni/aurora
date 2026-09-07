@@ -1,8 +1,12 @@
-// 目标源单元：widget/serialization.h + widget/codegen.h + widget/yaml.h + src/aurora/widget/serialization.cpp
+/// 测试类型: unit
+/// 目标单元: include/aurora/widget/yaml.h
+/// 测试说明: utest_to_yaml 单元测试
+///
+// 目标源单元（历史映射，保留供审计）: Serialization + Codegen + Yaml + Serialization
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 
 // ── API 覆盖映射 ─────────────────────────────
-// widget/codegen.h(to_code 三风格代码生成)、widget/yaml.h(to_yaml 发射器)。
+// Codegen(to_code 三风格代码生成)、Yaml(to_yaml 发射器)。
 
 #include <string>
 

@@ -1,3 +1,7 @@
+/// 测试类型: unit
+/// 目标单元: include/aurora/core/font.h
+/// 测试说明: utest_font_shape_cache 单元测试
+
 // 文本 shaping 缓存：正确性 / 命中率 / 确定性。
 //
 // 缓存只记忆纯函数 shape_line(line, faces, px, opts) 的结果，不改变任何输出像素，

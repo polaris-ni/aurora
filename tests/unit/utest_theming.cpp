@@ -1,13 +1,13 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/theming/theme.h
 /// 测试说明: theming 单元测试
 ///
 
 // theming_test.cpp — 覆盖主题系统（Theme / ThemeScope / Provider<Theme> / inherit_theme / resolve_theme）。
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 // ── API 覆盖映射 ─────────────────────────────
-// theming/theme_query.h(theme_query 解析链)、theming/theme_scope.h(ThemeScope 注入)、
-// environment/build_context.h(BuildContext 依赖查找)。
+// ThemeQuery(theme_query 解析链)、ThemeScope(ThemeScope 注入)、
+// BuildContext(BuildContext 依赖查找)。
 
 #include <cmath>
 #include <string>

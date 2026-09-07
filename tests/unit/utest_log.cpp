@@ -1,10 +1,10 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/core/diagnostics.h
+/// 目标单元: include/aurora/core/log.h
 /// 测试说明: log 单元测试
 ///
 
 // ── API 覆盖映射 ─────────────────────────────
-// core/log.h（Logger 级别/通道/sink 捕获）。
+// Log（Logger 级别/通道/sink 捕获）。
 
 #include <string>
 

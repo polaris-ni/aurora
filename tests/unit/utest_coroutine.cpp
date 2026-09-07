@@ -1,3 +1,8 @@
+/// 测试类型: unit
+/// 目标单元: include/aurora/state/coroutine.h
+/// 测试说明: utest_coroutine 单元测试（Coroutine 路径）
+///
+
 // 覆盖 au::co_async / CoroTask / launch：取值、错误路径、超时（无 poster 直接 resume）。
 
 #include <atomic>

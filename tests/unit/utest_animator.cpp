@@ -3,7 +3,7 @@
 /// 测试说明: animator 单元测试
 ///
 
-// 目标源单元：animation/animator.h + src/aurora/animation/animator.cpp
+// 目标源单元：Animator + Animator
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 
 #include <iostream>

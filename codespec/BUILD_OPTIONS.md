@@ -154,7 +154,7 @@ cmake -S . -B build -DAURORA_LAYOUT_CACHE=OFF -DAURORA_DISPLAY_LIST=OFF
 ### 3.4 Display List 集成约束（正确性不变量）
 
 - **绘制副作用 / 每帧变动内容的控件必须退出 DL 缓存**：`Widget::can_cache_display_list()` 默认 `true`；绘制阶段产生副作用（如 `Hero` 向 `HeroRegistry` 上报几何）或内容每帧变化（如 `TransitionLayer` / `NavigatorHost` 按 `progress` 合成淡变）的控件**必须**覆盖为 `false`，否则缓存回放会跳过必要的每帧 `on_paint`，导致注册丢失 / 转场冻结。命中不可缓存控件时，其祖先录制会被标记 `mark_recording_dynamic()`。
-- **外部裁剪不参与控件 DL**：`present_root` 的脏区裁剪 `push_clip` 不录入控件 DL；故 `Widget::paint` 在 `Painter::has_clip()` 为真时直接重录但**不缓存**，避免无裁剪帧回放越界绘制（见 `tests/unit/utest_dirty_clip_paint.cpp`）。
+- **外部裁剪不参与控件 DL**：`present_root` 的脏区裁剪 `push_clip` 不录入控件 DL；故 `Widget::paint` 在 `Painter::has_clip()` 为真时直接重录但**不缓存**，避免无裁剪帧回放越界绘制（见 `tests/integration/utest_dirty_clip_paint.cpp`）。
 - **布局变更同步失效 DL**：`Widget::mark_needs_layout()` 一并调用 `invalidate_display_list_up()`，保证重排后的几何 / 内容不被旧 `bounds` 录制的 DL 回放。
 - **`layout_parent_` 悬垂安全**：`Node` 析构时将其持有的子控件 `layout_parent_` 置空，使树重建（父容器销毁而子控件经共享所有权存活）时 `mark_needs_layout()` / `invalidate_display_list_up()` 不会解引用已释放的父指针。
 

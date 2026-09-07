@@ -1,12 +1,12 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/state/computed.h
 /// 测试说明: reactive_lifecycle 单元测试
 ///
 
 // 覆盖响应式内核（State ↔ Effect）观察者图的
 // 生命周期安全。验证「任一侧先析构」都不会再解引用失效对象（此前为双向裸指针悬垂隐患）。
 // ── API 覆盖映射 ─────────────────────────────
-// state/effect.h(Effect 析构安全/重跑)。
+// Effect(Effect 析构安全/重跑)。
 
 #include <memory>
 

@@ -3,7 +3,7 @@
 /// 测试说明: thread 单元测试
 ///
 
-// 目标源单元：core/thread.h（MainThreadOnly 主线程守卫 + AURORA_MAIN_THREAD 标注宏）。
+// 目标源单元：Thread（MainThreadOnly 主线程守卫 + AURORA_MAIN_THREAD 标注宏）。
 //
 // API 覆盖映射：
 //   MainThreadOnly<T>(value)          -> test_construct_and_get

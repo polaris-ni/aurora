@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/debug/debug_backend.h
 /// 测试说明: debug_backend 单元测试
 ///
 
-// 目标源单元：debug/debug_backend.h + src/aurora/debug/debug_backend.cpp
+// 目标源单元：DebugBackend + DebugBackend
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 
 #include <filesystem>

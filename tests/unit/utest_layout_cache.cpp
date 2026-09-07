@@ -1,3 +1,7 @@
+/// 测试类型: unit
+/// 目标单元: include/aurora/widget/node.h
+/// 测试说明: utest_layout_cache 单元测试
+
 // 验证布局约束缓存：
 //   1) 稳态帧（无变更）命中缓存，整棵子树跳过 on_layout；
 //   2) 单点脏（叶子 mark_needs_layout）仅重排脏链，兄弟子树缓存命中被跳过；

@@ -3,7 +3,7 @@
 /// 测试说明: version 单元测试
 ///
 
-// core/version.h 版本常量一致性。
+// Version 版本常量一致性。
 // 覆盖：AURORA_VERSION_STRING 与数字分量/后缀宏的自洽（semver 形态）、
 //       头文件自包含（不经 aurora.h 直接包含）、CMake 注入与头内回退同源。
 

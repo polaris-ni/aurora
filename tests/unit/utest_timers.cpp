@@ -1,11 +1,11 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/app/scheduler.h
 /// 测试说明: timers 单元测试
 ///
 
 // 定时任务模块 1:1 测试：Scheduler 单元 + Timer 控件响应式与卸载取消。
 // ── API 覆盖映射 ─────────────────────────────
-// app/scheduler.h（Scheduler 定时任务调度）。
+// Scheduler（Scheduler 定时任务调度）。
 
 #include <chrono>
 #include <memory>

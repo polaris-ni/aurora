@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/event/keycode.h
+/// 目标单元: include/aurora/widget/rich_text_edit.h
 /// 测试说明: rich_text_edit 单元测试
 ///
 

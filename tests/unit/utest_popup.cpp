@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/widget/button.h
+/// 目标单元: include/aurora/widget/popup.h
 /// 测试说明: popup 单元测试
 ///
 

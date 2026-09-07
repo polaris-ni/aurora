@@ -1,10 +1,14 @@
-// 目标源单元：widget/widget.h + src/aurora/widget/widget.cpp
+/// 测试类型: unit
+/// 目标单元: include/aurora/widget/widget.h
+/// 测试说明: utest_widget 单元测试
+///
+// 目标源单元（历史映射，保留供审计）: Widget + Widget
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 
 // ── API 覆盖映射 ─────────────────────────────
-// widget/containers.h(Column/Row/Stack 等，经 popup/splitter/tab_bar 等容器用例与本文件行使)、
-// widget/expansion_panel.h、widget/image_widget.h、widget/timer.h(Timer 控件，经本文件 hooks/components 段及
-// test_timers 行使)、 navigation/navigator_host.h(NavigatorHost 宿主操作)、navigation/transition_layer.h(转场图层)。
+// Containers(Column/Row/Stack 等，经 popup/splitter/tab_bar 等容器用例与本文件行使)、
+// ExpansionPanel、ImageWidget、Timer(Timer 控件，经本文件 hooks/components 段及
+// test_timers 行使)、 NavigatorHost(NavigatorHost 宿主操作)、TransitionLayer(转场图层)。
 
 #include <chrono>
 #include <cmath>

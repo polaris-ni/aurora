@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/environment/build_context.h
+/// 目标单元: include/aurora/widget/pickers.h
 /// 测试说明: pickers 单元测试
 ///
 

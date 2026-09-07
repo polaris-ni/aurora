@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/app/application.h
+/// 目标单元: include/aurora/app/shortcuts.h
 /// 测试说明: shortcuts 单元测试
 ///
 

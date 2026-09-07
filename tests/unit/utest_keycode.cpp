@@ -3,7 +3,7 @@
 /// 测试说明: keycode 单元测试
 ///
 
-// 目标源单元：event/keycode.h（KeyCode 枚举 + key_name 可读名称映射）。
+// 目标源单元：Keycode（KeyCode 枚举 + key_name 可读名称映射）。
 //
 // API 覆盖映射：
 //   KeyCode 枚举值域          -> test_enum_values

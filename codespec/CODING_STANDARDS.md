@@ -35,9 +35,9 @@
 - **示例即文档**：每个 widget 提供最小可编译示例，集中在 `examples/demos/`（`demo_<组件>.cpp`，1:1）与 [`GUIDELINE.md`](GUIDELINE.md)。
 - **API 描述可机读**：`gen_api_tools` 输出 `aurora_api.json`，含类型 / 属性键 / 枚举，供 LSP 与文档生成器消费。
 - **零平台魔法**：示例不依赖特定平台 GUI 事件循环；`HeadlessSurface` 可离线渲染 PNG，便于测试与 AI 复现。
-- **源—示例—测试 1:1 映射**：每个公共源文件（widget / 子系统头）原则上对应一个 `demo_*.cpp`（`examples/demos/`）与一个 `utest_*.cpp`（`tests/unit/`）。允许少量「复杂场景」demo / test（跨控件集成、端到端流程）作为例外，但须明确标注其跨源性质（跨控件集成用例放 `tests/integration/`，以 `itest_` 前缀命名）。所有 demo 收敛到 `examples/demos/`（CMake 仅 GLOB 该目录，新增组件 demo 放到此处即自动纳入构建，无需改 CMake）。
+- **源—示例—测试 1:1 映射**：每个公共源文件（widget / 子系统头）原则上对应一个 `demo_*.cpp`（`examples/demos/`）与一个 `utest_*.cpp`（`tests/unit/`）。允许少量「复杂场景」demo / test（跨控件集成、端到端流程）作为例外，但须明确标注其跨源性质（跨控件集成用例放 `tests/integration/`，以 `itest_` 前缀命名）。所有 demo 收敛到 `examples/demos/`（CMake 仅 GLOB 该目录，新增组件 demo 放到此处即自动纳入构建，无需改 CMake）。测试头部「目标单元」与单元头之间的严格 1:1 声明约束由 §3.2 `TEST-R3` 界定。
 - **文件夹区分**：demo 与 test 以目录区分——示例在 `examples/`，测试在 `tests/`（单元 `tests/unit/`、集成 `tests/integration/`）；二者不混放。
-- **test 文件前缀**：测试文件统一以 `utest`（单元）/ `itest`（集成）为前缀（`utest_xxx.cpp` / `itest_xxx.cpp`），与示例的 `demo` 前缀风格一致；每个测试 TU 的用例包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`）内。聚合多个不相关控件的「catch-all」测试文件视为反模式，应拆为各 `utest_<控件>.cpp`。
+- **test 文件前缀**：测试文件统一以 `utest`（单元）/ `itest`（集成）为前缀（`utest_xxx.cpp` / `itest_xxx.cpp`），与示例的 `demo` 前缀风格一致；每个测试 TU 的用例包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`）内。聚合多个不相关控件的「catch-all」测试文件视为反模式，应拆为各 `utest_<控件>.cpp`（正式编号见 §3.2 `TEST-R6`）。
 
 ### 3.1 注册式测试 runner
 
@@ -51,7 +51,26 @@
   using 声明 / 别名须放在**使用点之前**的作用域内（分段式测试文件里，各 `namespace sec_xxx { ... }` 段各自引入自己用到的名字），不要图省事放到文件顶部。
   **禁止**为 using-directive 追加 `NOLINT(google-build-using-namespace)` 之类的抑制：改用声明即可根治，抑制只会掩盖真实告警，且在检查不触发的位置（如函数体内的 using）会形成无效的 NOLINT 噪声。
 
-### 3.2 覆盖率工作流
+### 3.2 单元测试目标单元约定
+
+每个 `utest_*.cpp` 头部须有三行块（`/// 测试类型:` / `/// 目标单元:` / `/// 测试说明:`），`目标单元` 指向**具体模块头**，且满足 **1:1**：一个测试文件只声明一个目标单元，一个单元头至多被一个 `tests/unit/` 测试声明。
+
+规则编号统一为 **`TEST-R1`–`TEST-R6`**（与守门脚本 `tools/check/check_code_doc_sync.py`、测试审计脚本同口径）：
+
+| 编号 | 规则 | 内容 | 守门 |
+| --- | --- | --- | --- |
+| `TEST-R1` | 头部三行块完整 | 必含 `/// 测试类型` / `/// 目标单元` / `/// 测试说明`；历史 `// 目标源单元：` 约定不计入标准块、视为违规须归一 | 是 |
+| `TEST-R2` | 目标路径有效 | `目标单元`（含头部注释里的路径引用）所声明的路径必须真实存在，防注释路径烂掉 | 是 |
+| `TEST-R3` | 一一对应 1:1 | 一测试文件只声明一个目标单元、一单元头至多被一个 `tests/unit/` 测试声明；无法拆到独立单元者（同时覆盖多个互不相关单元、或属跨模块流程验证）归 `tests/integration/`——两目录由同一 target GLOB、`AURORA_TEST()` 注册名取文件 stem，迁移不改构建与运行行为 | 否（评审 + 审计） |
+| `TEST-R4` | 禁止指向聚合头 | 目标单元不得为 `aurora.h` / `aurora_fwd.h` / `aurora_pch.h`；也不得在头部注释以「域/文件名.h」或「src/aurora/域/文件名.cpp」路径形式再声明其他单元——注释路径引用同样计入；注释提及被测类型时写类型名（如 `TextSpan`）不写头路径 | 是 |
+| `TEST-R5` | 公共头覆盖 | 每个公共单元头须被某测试显式声明为目标单元，或在该测试中直接 `#include`、其符号在 `tests/` 全树被引用 | 是 |
+| `TEST-R6` | 禁止 catch-all（跨域） | 单个测试跨 ≥3 个模块域视为 catch-all；因被测主模块自身依赖面广（如测 `Widget` 必带 layout/render/event/navigation）的跨域**不视为违规、不强行拆分**，基线 **20**、只看增量，完整清单由审计脚本 `TEST-R6` 项输出、不在本文档硬编码以免随重构漂移 | 否（趋势指标） |
+
+其中 `TEST-R1` / `TEST-R2` / `TEST-R4` / `TEST-R5` 由 `tools/check/check_code_doc_sync.py` 在 CTest 的 `code_doc_sync` 用例守门（只做确定性判定、存量豁免走白名单、只拦增量）；`TEST-R3` 靠评审与审计，`TEST-R6` 只作趋势指标，均不纳入守门。
+
+> 命名消歧：文档交叉引用门禁 `tools/check/check_codespec_xref.py` 另有一套 `R1`–`R5`（链接可达 / 章节号格式 / 反引号路径 / 特性表落点），与本文 `TEST-RN` 无关，勿混用。
+
+### 3.3 覆盖率工作流
 
 行覆盖率以 GCC `--coverage` 构建（CMake 开关 `AURORA_ENABLE_COVERAGE=ON`）并跑完 CTest 后，用 `tools/coverage/coverage_report.sh`（Linux / macOS）或 `tools/coverage/coverage_report.ps1`（Windows）聚合为终端摘要 + `<build_dir>/coverage.csv`，此为唯一口径。
 
@@ -129,7 +148,7 @@
 
 ### 6.2 默认参数
 
-高频构造提供默认参数 / 便捷工厂，降低记忆负担。所有 `XxxProps` 结构体字段均须有合理默认值。编译期验证（`static_assert`）集中在 `tests/test_default_construct.h`，运行时验证在 `tests/unit/utest_default_construct.cpp`。
+高频构造提供默认参数 / 便捷工厂，降低记忆负担。所有 `XxxProps` 结构体字段均须有合理默认值。编译期验证（`static_assert`）集中在 `tests/test_default_construct.h`，运行时验证在 `tests/integration/utest_default_construct.cpp`。
 
 **同步流程（强制执行）**：
 
@@ -137,7 +156,7 @@
 - 新增 `XxxProps` 聚合类型时，**必须**确保所有字段都有合理默认值。
 - 新增公共构造函数时，**必须**评估是否可为高频参数提供默认值。
 - `tests/test_default_construct.h` 中的 `static_assert` 列表**必须**随新增控件同步更新。
-- 新增控件时，**必须**在 `tests/unit/utest_default_construct.cpp` 中 `#include "test_default_construct.h"` 以确保编译期校验生效。
+- 新增控件时，**必须**在 `tests/integration/utest_default_construct.cpp` 中 `#include "test_default_construct.h"` 以确保编译期校验生效。
 
 ### 6.3 元编程边界
 

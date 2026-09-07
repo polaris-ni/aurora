@@ -1,3 +1,7 @@
+/// 测试类型: unit
+/// 目标单元: include/aurora/theming/theme_query.h
+/// 测试说明: utest_theme_tokens 单元测试
+
 // T2 — 主题令牌（Design Tokens） + StyleProps 解析测试
 //
 // 覆盖：
@@ -7,7 +11,7 @@
 //   - StyleProps::resolve：具体值直接返回、令牌名解析、令牌缺失/类型不匹配回退
 
 // ── API 覆盖映射 ─────────────────────────────
-// theming/style_props.h(StyleProps 解析)、theming/theme.h(Theme.set_token/token_or)。
+// StyleProps(StyleProps 解析)、Theme(Theme.set_token/token_or)。
 
 #include <memory>
 

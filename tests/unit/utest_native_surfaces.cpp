@@ -3,7 +3,7 @@
 /// 测试说明: native_surfaces 单元测试
 ///
 
-// 目标源单元：window/native_surfaces.h（按后端宏聚合原生句柄类型的条件别名头）。
+// 目标源单元：NativeSurfaces（按后端宏聚合原生句柄类型的条件别名头）。
 //
 // API 覆盖映射：NativeWindowHandle/NativeDisplayHandle 等别名的存在性与
 //   默认构造语义；真实句柄取值经各后端 surface 测试行使（native_handle() 返回路径）。

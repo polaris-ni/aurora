@@ -87,7 +87,9 @@ namespace detail {
         out.push_back(static_cast<std::uint8_t>(v & 0xFFU));
     };
     auto put_chunk = [&](const char *type, const std::uint8_t *data, std::size_t len) -> void {
-        if (type == nullptr || data == nullptr) {
+        // 仅 `type` 为空才非法；零长度块（如 IEND）合法，其 data 允许为 nullptr——
+        // 下方按 len 逐字节复制，len==0 时不解引用 data，故空指针安全。
+        if (type == nullptr) {
             return;
         }
         put_u32(static_cast<std::uint32_t>(len));

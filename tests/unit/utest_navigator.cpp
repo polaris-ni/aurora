@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/animation/animator.h
+/// 目标单元: include/aurora/navigation/navigator.h
 /// 测试说明: navigator 单元测试
 ///
 
-// 目标源单元：navigation/navigator.h + src/aurora/navigation/navigator.cpp
+// 目标源单元：Navigator + Navigator
 
 #include <array>
 #include <chrono>

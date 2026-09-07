@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/debug/debug_runtime.h
 /// 测试说明: debug_runtime 单元测试
 ///
 
@@ -17,8 +17,8 @@
 // #ifdef AURORA_ENABLE_DEBUG 分支，与库体编译分支对齐。
 
 // ── API 覆盖映射 ─────────────────────────────
-// debug/debug_trace.h(aurora::debug::detail::record_dirty 为内部命名空间，非对外承诺 API；
-//   DirtyKind 经 debug_runtime 的 why_trace 输出间接行使)、perf/perf_log.h(经 perf_snapshot 快照路径行使)。
+// DebugTrace(aurora::debug::detail::record_dirty 为内部命名空间，非对外承诺 API；
+//   DirtyKind 经 debug_runtime 的 why_trace 输出间接行使)、PerfLog(经 perf_snapshot 快照路径行使)。
 
 #include <memory>
 

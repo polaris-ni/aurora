@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/event/drag_drop.h
 /// 测试说明: drag_drop 单元测试
 ///
 

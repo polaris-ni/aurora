@@ -2,6 +2,7 @@
 
 #include <functional>
 
+#include "aurora/core/assert.h"
 #include "aurora/state/state.h"
 
 namespace aurora {

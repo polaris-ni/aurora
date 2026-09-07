@@ -1,10 +1,10 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/media/video_source.h
 /// 测试说明: video_source 单元测试
 ///
 
 // ── API 覆盖映射 ─────────────────────────────
-// media/image_sequence_source.h(ImageSequenceSource 帧序列源)。
+// ImageSequenceSource(ImageSequenceSource 帧序列源)。
 
 #include <chrono>
 #include <vector>

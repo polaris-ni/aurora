@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/window/glfw_surface.h
 /// 测试说明: glfw_surface 单元测试
 ///
 
-// 目标源单元：window/glfw_surface.h（平台后端，仅 AURORA_BACKEND_GLFW 编译）。
+// 目标源单元：GlfwSurface（平台后端，仅 AURORA_BACKEND_GLFW 编译）。
 //
 // API 覆盖映射：GlfwSurface 构造/is_available/帧生命周期（GLFW 窗口）——本机构建未开启 GLFW 后端
 //

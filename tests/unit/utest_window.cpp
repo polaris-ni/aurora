@@ -1,13 +1,13 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/app/application.h
+/// 目标单元: include/aurora/window/window.h
 /// 测试说明: window 单元测试
 ///
 
-// 目标源单元：window/window.h + src/aurora/window/window.cpp
+// 目标源单元：Window + Window
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 
 // ── API 覆盖映射 ─────────────────────────────
-// window/window_state.h(WindowState/WindowMode 正交枚举与映射，sec_window_state 段)。
+// WindowState(WindowState/WindowMode 正交枚举与映射，sec_window_state 段)。
 
 #include <cstdio>
 #include <memory>

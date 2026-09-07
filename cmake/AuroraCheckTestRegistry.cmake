@@ -19,7 +19,16 @@ string(REPLACE "\r" "" _actual "${_actual}")
 string(STRIP "${_expect}" _expect)
 string(STRIP "${_actual}" _actual)
 
-if (NOT _actual STREQUAL _expect)
+# 归一化顺序：runner --list 按用例名排序输出，而配置期清单按 file(GLOB) 的目录顺序生成
+# （tests/integration 排在 tests/unit 之前）。用例在两目录间迁移时，两侧顺序必然不同，
+# 但注册集合本身并未漂移。本守护只关心「集合相等」——是否有源文件漏写 AURORA_TEST()、
+# 或注册了不存在的用例 —— 故两侧各自排序后再比较，避免纯顺序差异造成误报。
+string(REPLACE "\n" ";" _expect_list "${_expect}")
+string(REPLACE "\n" ";" _actual_list "${_actual}")
+list(SORT _expect_list)
+list(SORT _actual_list)
+
+if (NOT _actual_list STREQUAL _expect_list)
     message(FATAL_ERROR
             "test registry mismatch: runner --list vs tests/unit|integration/*.cpp\n--- expected ---\n${_expect}\n--- actual ---\n${_actual}")
 endif ()

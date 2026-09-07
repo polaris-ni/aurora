@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/preferences/preferences.h
 /// 测试说明: preferences 单元测试（单进程段；多进程并发段见 utest_preferences_multiproc）
 ///
 
-// 目标源单元：preferences/preferences.h + src/aurora/preferences/preferences.cpp
+// 目标源单元：Preferences + Preferences
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 
 #include <chrono>

@@ -1,13 +1,13 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/event/dispatcher.h
+/// 目标单元: include/aurora/modifier/modifier.h
 /// 测试说明: modifier 单元测试
 ///
 
 // 无头验证新增修饰节点：Size/Fill、Border、Clip。
 // 检查：size 强制子节点尺寸、fill_max_width 填充父宽、边框/裁剪绘制不崩溃且裁剪栈平衡。
 // ── API 覆盖映射 ─────────────────────────────
-// modifier/modifier_base.h(ModifierNode 基类契约)、modifier/modifier_layout.h(Size/Fill 布局修饰)、
-// modifier/modifier_paint.h(Paint 家族：blur/shadow/shader_mask/cache_layer/gradient/tint——
+// ModifierBase(ModifierNode 基类契约)、ModifierLayout(Size/Fill 布局修饰)、
+// ModifierPaint(Paint 家族：blur/shadow/shader_mask/cache_layer/gradient/tint——
 //   行为细节另见 test_blur/test_shadow/test_shader_mask/test_cache_layer/test_gradient/test_blend_mode)。
 
 #include <cstdio>

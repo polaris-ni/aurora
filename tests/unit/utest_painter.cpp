@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/render/painter.h
 /// 测试说明: painter 单元测试
 ///
 
-// 目标源单元：render/painter.h + src/aurora/render/painter.cpp
+// 目标源单元：Painter + Painter
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 
 #include <cmath>

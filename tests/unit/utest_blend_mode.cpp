@@ -1,12 +1,12 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/render/blend.h
 /// 测试说明: blend_mode 单元测试
 ///
 
 // Modifier::blend_mode 验证：内容绘制完成后与 tint 按模式逐通道混合。
 // 无头 layout + paint，像素断言，不依赖 GUI 后端。
 // ── API 覆盖映射 ─────────────────────────────
-// render/blend.h(BlendMode/ShaderMaskKind 枚举语义；像素混合一致性另见 test_simd_parity)。
+// Blend(BlendMode/ShaderMaskKind 枚举语义；像素混合一致性另见 test_simd_parity)。
 
 #include <cstdint>
 #include <memory>

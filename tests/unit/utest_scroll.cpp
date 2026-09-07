@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/widget/scroll.h
 /// 测试说明: scroll 单元测试
 ///
 
-// 目标源单元：widget/scroll.h + src/aurora/widget/scroll 相关渲染路径
+// 目标源单元：Scroll + src/aurora/widget/scroll 相关渲染路径
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 
 #include <atomic>

@@ -1,12 +1,12 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/core/font.h
+/// 目标单元: include/aurora/render/font_engine.h
 /// 测试说明: font_engine 单元测试
 ///
 
 // FontEngine 单元测试：验证真实字体度量、选中原语（caret_x / hit_test_char）
 // 的语义，以及无 TTF 回退路径下依然可用。
 // ── API 覆盖映射 ─────────────────────────────
-// core/font.h(Font/FontStyle/FontWeight 数据模型，经 FontEngine 用例行使)。
+// Font(Font/FontStyle/FontWeight 数据模型，经 FontEngine 用例行使)。
 
 #include <cmath>
 #include <iostream>

@@ -1,6 +1,6 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/core/color.h
-/// 测试说明: hero 单元测试
+/// 目标单元: include/aurora/navigation/hero.h
+/// 测试说明: hero 共享元素转场单元测试
 ///
 
 // Hero 共享元素转场单测（specification/05-event-navigation.md §7.4）。

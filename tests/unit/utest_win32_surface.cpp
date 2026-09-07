@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/core/platform.h
+/// 目标单元: include/aurora/window/win32_surface.h
 /// 测试说明: win32_surface 单元测试
 ///
 
-// 目标源单元：window/win32_surface.h + window/win32_window.h（Win32/GDI 后端，仅 AURORA_PLATFORM_WINDOWS 编译运行）
+// 目标源单元：Win32Surface + Win32Window（Win32/GDI 后端，仅 AURORA_PLATFORM_WINDOWS 编译运行）
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 
 #include <memory>

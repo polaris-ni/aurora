@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/window/wasm_surface.h
 /// 测试说明: wasm_surface 单元测试
 ///
 
-// 目标源单元：window/wasm_surface.h（平台后端，仅 AURORA_BACKEND_WASM 编译）。
+// 目标源单元：WasmSurface（平台后端，仅 AURORA_BACKEND_WASM 编译）。
 //
 // API 覆盖映射：WasmSurface(Emscripten Canvas2D + rAF) 构造与帧生命周期
 //

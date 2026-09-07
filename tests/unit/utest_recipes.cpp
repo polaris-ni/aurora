@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/widget/recipes.h
 /// 测试说明: recipes 单元测试
 ///
 

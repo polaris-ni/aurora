@@ -6,7 +6,7 @@
 // 验证三控件：Drawer（开合/遮罩关闭/永久模式）、ProgressDialog（进度/取消）、
 // PageView（翻页/滑动手势/指示器）。
 // ── API 覆盖映射 ─────────────────────────────
-// widget/drawer.h(Drawer/ProgressDialog/PageView 三控件)。
+// Drawer(Drawer/ProgressDialog/PageView 三控件)。
 
 #include <memory>
 

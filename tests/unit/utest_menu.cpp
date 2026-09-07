@@ -3,7 +3,7 @@
 /// 测试说明: menu 单元测试
 ///
 
-// MERGED TEST 目标源单元：app/menu.h（MenuItem 声明式菜单数据模型）。
+// MERGED TEST 目标源单元：Menu（MenuItem 声明式菜单数据模型）。
 //
 // API 覆盖映射：
 //   MenuItem()                        -> test_default_fields

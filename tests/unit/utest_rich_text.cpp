@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/widget/rich_text.h
 /// 测试说明: rich_text 单元测试
 ///
 

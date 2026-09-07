@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/core/enums.h
 /// 测试说明: enums 单元测试
 ///
 
-// enums_test.cpp — 覆盖 core/enums.h 共享枚举的 JSON 互转、位运算与 FontWeight 数值。
+// enums_test.cpp — 覆盖 Enums 共享枚举的 JSON 互转、位运算与 FontWeight 数值。
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 #include <string>
 

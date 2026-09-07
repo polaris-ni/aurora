@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/perf/perf_log.h
 /// 测试说明: perf_log 单元测试
 ///
 
-// 目标源单元：perf/perf_log.h（PerfLog 周期摘要 + JSON/CSV 快照）。
+// 目标源单元：PerfLog（PerfLog 周期摘要 + JSON/CSV 快照）。
 //
 // API 覆盖映射：
 //   PerfLog::enable/disable/enabled   -> test_enable_disable

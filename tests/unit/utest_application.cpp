@@ -3,11 +3,11 @@
 /// 测试说明: application 单元测试
 ///
 
-// 目标源单元：app/application.h + src/aurora/app/application.cpp
+// 目标源单元：Application + Application
 // 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
 
 // ── API 覆盖映射 ─────────────────────────────
-// window/platform.h(platform()/App() 能力探测，sec_test_platform 段)。
+// Platform(platform()/App() 能力探测，sec_test_platform 段)。
 
 #include <iostream>
 #include <memory>

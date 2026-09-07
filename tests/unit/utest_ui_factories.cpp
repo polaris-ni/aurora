@@ -1,11 +1,11 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/ui/factories.h
 /// 测试说明: ui_factories 单元测试
 ///
 
 // 覆盖 aurora::ui 声明式工厂层：自动加父、强类型返回、文本透传、Node.id。
 // ── API 覆盖映射 ─────────────────────────────
-// ui/factories.h(声明式工厂层：自动加父/强类型返回)。
+// Factories(声明式工厂层：自动加父/强类型返回)。
 
 #include <string>
 

@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/widget/inspector_panel.h
 /// 测试说明: inspector_panel 单元测试
 ///
 

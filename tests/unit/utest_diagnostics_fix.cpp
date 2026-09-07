@@ -1,11 +1,11 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/aurora.h
+/// 目标单元: include/aurora/core/diagnostics.h
 /// 测试说明: diagnostics_fix 单元测试
 ///
 
 // Diagnostics::FixSuggestion 验证：上报携带修复建议的诊断，collect_fixes/apply_fix 正确工作。
 // ── API 覆盖映射 ─────────────────────────────
-// core/diagnostics.h（Diagnostics::FixSuggestion / collect_fixes / apply_fix）。
+// Diagnostics（Diagnostics::FixSuggestion / collect_fixes / apply_fix）。
 
 #include <iostream>
 #include <vector>
