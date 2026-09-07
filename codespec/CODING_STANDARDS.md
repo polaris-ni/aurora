@@ -436,6 +436,8 @@ btn3.on_click = fn;
 
 **验收标准：** AI 在只见过组件名与属性名的情况下，能凭直觉拼出正确 API；`ai_compat_test` 不出现因「同义异名」导致的生成失败。
 
+**自动化守护**：`tools/check/check_naming_conventions.py`（CTest 用例 `check_naming_conventions`）以 `aurora_api.json`（API SSOT）为数据源校验：控件/枚举类型 PascalCase、属性键 snake_case、事件名 snake_case 且 `on_` 前缀、`aurora::debug` 自由函数 snake_case；枚举值 PascalCase，`colors` 命名空间的 `AURORA_*` 常量（`core/color.h` 的 `constexpr Color`）按「常量前缀」惯例豁免。
+
 ### 11.3 #3 正交可组合的最小核心 API
 
 **核心目标：** AI 少幻觉。

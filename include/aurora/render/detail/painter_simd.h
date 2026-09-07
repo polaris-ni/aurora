@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "aurora/core/platform.h"
 #include "aurora/render/detail/gamma_lut.h"
 
 namespace aurora::detail {
@@ -18,7 +19,9 @@ enum class SimdLevel : std::uint8_t { Scalar, SSE2, AVX2 };
 
 // x86 架构判定：SSE2/AVX2 内置函数与 target 属性仅 x86 可用；非 x86（ARM/NEON，本轮暂缓）
 // 回落 Scalar，分发只走标量黄金路径。定义 AURORA_SIMD_X86 供 .inl / 测试统一判定。
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+// 架构判定一律走 core/platform.h 的规范化宏（AURORA_ARCH_*），不直接书写原生架构宏
+// （见 06-app-platform.md §12.1 与 tools/check/check_platform_macros.py 守护）。
+#if defined(AURORA_ARCH_X64) || defined(AURORA_ARCH_X86)
 #define AURORA_SIMD_X86 1  // NOLINT(*-macro-usage)
 #endif
 

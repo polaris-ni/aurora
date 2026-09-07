@@ -1,0 +1,421 @@
+{
+  "_about": "Aurora logical-snapshot golden baseline (requirement #15). Do not hand-edit; regenerate with AURORA_UPDATE_GOLDEN=1 via aurora_test_runner --run=utest_golden_snapshots.",
+  "scenarios": {
+    "column_fixed": {
+      "box": {
+        "h": 60.0,
+        "w": 100.0,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "children": [
+        {
+          "box": {
+            "h": 20.0,
+            "w": 100.0,
+            "x": 0.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        },
+        {
+          "box": {
+            "h": 20.0,
+            "w": 100.0,
+            "x": 0.0,
+            "y": 20.0
+          },
+          "children": [],
+          "type": "Text"
+        },
+        {
+          "box": {
+            "h": 20.0,
+            "w": 100.0,
+            "x": 0.0,
+            "y": 40.0
+          },
+          "children": [],
+          "type": "Text"
+        }
+      ],
+      "type": "Column"
+    },
+    "column_gap": {
+      "box": {
+        "h": 80.0,
+        "w": 100.0,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "children": [
+        {
+          "box": {
+            "h": 20.0,
+            "w": 100.0,
+            "x": 0.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        },
+        {
+          "box": {
+            "h": 20.0,
+            "w": 100.0,
+            "x": 0.0,
+            "y": 30.0
+          },
+          "children": [],
+          "type": "Text"
+        },
+        {
+          "box": {
+            "h": 20.0,
+            "w": 100.0,
+            "x": 0.0,
+            "y": 60.0
+          },
+          "children": [],
+          "type": "Text"
+        }
+      ],
+      "type": "Column"
+    },
+    "flex_expand": {
+      "box": {
+        "h": 240.0,
+        "w": 100.0,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "children": [
+        {
+          "box": {
+            "h": 20.0,
+            "w": 100.0,
+            "x": 0.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        },
+        {
+          "box": {
+            "h": 220.0,
+            "w": 100.0,
+            "x": 0.0,
+            "y": 20.0
+          },
+          "children": [],
+          "type": "Text"
+        }
+      ],
+      "type": "Column"
+    },
+    "grid_2x2": {
+      "box": {
+        "h": 88.0,
+        "w": 128.0,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "children": [
+        {
+          "box": {
+            "h": 40.0,
+            "w": 60.0,
+            "x": 0.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        },
+        {
+          "box": {
+            "h": 40.0,
+            "w": 60.0,
+            "x": 68.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        },
+        {
+          "box": {
+            "h": 40.0,
+            "w": 60.0,
+            "x": 0.0,
+            "y": 48.0
+          },
+          "children": [],
+          "type": "Text"
+        },
+        {
+          "box": {
+            "h": 40.0,
+            "w": 60.0,
+            "x": 68.0,
+            "y": 48.0
+          },
+          "children": [],
+          "type": "Text"
+        }
+      ],
+      "type": "Grid"
+    },
+    "nested_column_row": {
+      "box": {
+        "h": 40.0,
+        "w": 100.0,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "children": [
+        {
+          "box": {
+            "h": 20.0,
+            "w": 100.0,
+            "x": 0.0,
+            "y": 0.0
+          },
+          "children": [
+            {
+              "box": {
+                "h": 20.0,
+                "w": 50.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              "children": [],
+              "type": "Text"
+            },
+            {
+              "box": {
+                "h": 20.0,
+                "w": 50.0,
+                "x": 50.0,
+                "y": 0.0
+              },
+              "children": [],
+              "type": "Text"
+            }
+          ],
+          "type": "Row"
+        },
+        {
+          "box": {
+            "h": 20.0,
+            "w": 100.0,
+            "x": 0.0,
+            "y": 20.0
+          },
+          "children": [],
+          "type": "Text"
+        }
+      ],
+      "type": "Column"
+    },
+    "padding_inset": {
+      "box": {
+        "h": 90.0,
+        "w": 140.0,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "children": [
+        {
+          "box": {
+            "h": 50.0,
+            "w": 100.0,
+            "x": 0.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        }
+      ],
+      "type": "Column"
+    },
+    "row_fixed": {
+      "box": {
+        "h": 30.0,
+        "w": 120.0,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "children": [
+        {
+          "box": {
+            "h": 30.0,
+            "w": 40.0,
+            "x": 0.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        },
+        {
+          "box": {
+            "h": 30.0,
+            "w": 40.0,
+            "x": 40.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        },
+        {
+          "box": {
+            "h": 30.0,
+            "w": 40.0,
+            "x": 80.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        }
+      ],
+      "type": "Row"
+    },
+    "row_flex_fill": {
+      "box": {
+        "h": 30.0,
+        "w": 320.0,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "children": [
+        {
+          "box": {
+            "h": 30.0,
+            "w": 80.0,
+            "x": 0.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        },
+        {
+          "box": {
+            "h": 30.0,
+            "w": 80.0,
+            "x": 80.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        },
+        {
+          "box": {
+            "h": 30.0,
+            "w": 160.0,
+            "x": 160.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        }
+      ],
+      "type": "Row"
+    },
+    "scroll_tall_content": {
+      "box": {
+        "h": 240.0,
+        "w": 320.0,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "children": [
+        {
+          "box": {
+            "h": 0.0,
+            "w": 0.0,
+            "x": 0.0,
+            "y": 0.0
+          },
+          "children": [
+            {
+              "box": {
+                "h": 100.0,
+                "w": 100.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              "children": [],
+              "type": "Text"
+            },
+            {
+              "box": {
+                "h": 100.0,
+                "w": 100.0,
+                "x": 0.0,
+                "y": 100.0
+              },
+              "children": [],
+              "type": "Text"
+            },
+            {
+              "box": {
+                "h": 100.0,
+                "w": 100.0,
+                "x": 0.0,
+                "y": 200.0
+              },
+              "children": [],
+              "type": "Text"
+            }
+          ],
+          "type": "Column"
+        }
+      ],
+      "type": "Scroll"
+    },
+    "stack_overlay": {
+      "box": {
+        "h": 60.0,
+        "w": 80.0,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "children": [
+        {
+          "box": {
+            "h": 60.0,
+            "w": 80.0,
+            "x": 0.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        },
+        {
+          "box": {
+            "h": 40.0,
+            "w": 60.0,
+            "x": 0.0,
+            "y": 0.0
+          },
+          "children": [],
+          "type": "Text"
+        }
+      ],
+      "type": "Stack"
+    },
+    "text_fixed": {
+      "box": {
+        "h": 40.0,
+        "w": 120.0,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "children": [],
+      "type": "Text"
+    }
+  },
+  "viewport": {
+    "h": 240,
+    "w": 320
+  }
+}

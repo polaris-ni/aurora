@@ -6,7 +6,8 @@
 #include "aurora/core/log.h"
 
 #include "aurora_test_harness.h"
-// 无可用适配器（如 CI/无头）时跳过，不计入失败。
+
+// 平台专属头仅在宏开启时可用；无可用适配器（如 CI/无头）时跳过，不计入失败。
 #ifdef AURORA_BACKEND_D3D11
 
 #include <memory>
@@ -15,9 +16,11 @@
 #include "aurora/render/painter.h"
 #include "aurora/window/d3d11_surface.h"
 
+#endif  // AURORA_BACKEND_D3D11
+
 namespace aurora::test_cases::utest_d3d11_present {
 
-
+#ifdef AURORA_BACKEND_D3D11
 
 AURORA_TEST() {
     auto surf = std::make_unique<au::D3D11Surface>(320, 240, "d3d11 present test", au::WindowStyleOptions{});

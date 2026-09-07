@@ -290,6 +290,9 @@ Button& setCaption(std::string s) { return text(std::move(s)); }
 | 完整测试 | `ctest` 全绿（含 `aurora_test_runner` 单元 / 集成） | — |
 | lint 双 Pass | `--target lint` 0 告警（clang-format + clang-tidy） | clang-tidy / clang-format |
 | API 漂移 | `ctest -R check_api_schema_sync` | `check_api_schema_sync` |
+| 命名一致性 | `ctest -R check_naming_conventions`（#2：类型 PascalCase、属性/事件/函数 snake_case、事件 `on_` 前缀） | `check_naming_conventions` |
+| 零原生平台宏 | `ctest -R check_platform_macros`（#14：预处理分支禁原生平台/架构宏，规范化宏密度仅报告） | `check_platform_macros` |
+| API token 预算 | `ctest -R check_api_budget`（#24：`aurora_api.json` 估算 token 数 ≤ 预算） | `check_api_budget` |
 | codespec 交叉引用 | `ctest -R check_codespec_xref` | `check_codespec_xref` |
 | 代码-文档同步 | `ctest -R check_code_doc_sync` | `check_code_doc_sync` |
 | 黄金文件 | `ctest -R golden`（确定性渲染基准） | golden 基准图 |

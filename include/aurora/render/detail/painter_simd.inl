@@ -742,7 +742,7 @@ inline AURORA_AVX2_TARGET AURORA_NOINLINE auto blur_region_avx2(std::uint8_t *pi
 // g_simd_level 定义在 painter_simd.h（inline 变量），此处仅实现探测/赋值。
 
 inline auto detect_simd_level() noexcept -> SimdLevel {
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#if defined(AURORA_ARCH_X64) || defined(AURORA_ARCH_X86)
 #if defined(__GNUC__) || defined(__clang__)
     if (__builtin_cpu_supports("avx2")) {
         return SimdLevel::AVX2;

@@ -378,7 +378,7 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | 变量 | 取值 | 作用 |
 |:---|:---|:---|
 | `AURORA_GOLDEN_DIR` | 目录路径 | golden 真值目录；缺省为 `tests/golden` |
-| `AURORA_UPDATE_GOLDEN` | 非空（如 `1`） | 把当前渲染覆盖为新的 golden（首次生成 / 主动更新真值） |
+| `AURORA_UPDATE_GOLDEN` | 非空（如 `1`） | 把当前渲染覆盖为新的 golden（首次生成 / 主动更新真值）；像素 golden 与 `utest_golden_snapshots` 的逻辑快照基准（`tests/golden/logical_snapshots.json`）共用此变量 |
 | `AURORA_GOLDEN_MAX_DIFF` | 整数 | 像素最大允许色差阈值 |
 | `AURORA_GOLDEN_MAX_PIXELS` | 整数 | 允许不一致像素数上限 |
 

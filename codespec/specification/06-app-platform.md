@@ -472,6 +472,8 @@ if (au::platform().is_mobile()) { /* 移动端适配 */ }
 
 **库内部无法回避的编译期剪裁**：平台 / 架构 / 位宽分支一律使用 `core/platform.h` 的规范化目标宏（`AURORA_PLATFORM_*` / `AURORA_ARCH_*` / `AURORA_BIT_*`），**禁止直接书写 `_WIN32` / `__linux__` 等原生宏**。例外：该头自身、`third_party/`、CMake 脚本、`_WIN32_WINNT` 等 SDK 版本旋钮。
 
+**自动化守护**：`tools/check/check_platform_macros.py`（CTest 用例 `check_platform_macros`）扫描 `include/` 与 `src/` 全部预处理条件（含续行），命中原生平台/架构/位宽宏即红灯；`core/platform.h` 自身按例外豁免，`_WIN32_WINNT` / `_WIN32_IE` 等 SDK 旋钮不在禁用集合。规范化宏（`AURORA_PLATFORM_*` / `AURORA_ARCH_*` / `AURORA_BIT_*` / `AURORA_BACKEND_*`）的分支密度仅打印报告、不设门槛，供平台抽象层演进时追踪趋势。编译器特性宏（`__GNUC__` / `__clang__` / `_MSC_VER`）不属平台/架构/位宽宏，不在禁止之列。
+
 **版本常量**（`core/version.h`）：`AURORA_VERSION_MAJOR` / `MINOR` / `PATCH`（数字分量，CMake `project(VERSION)` 注入）、`AURORA_VERSION_SUFFIX_STR` + `AURORA_HAS_VERSION_SUFFIX`（semver 预发布后缀，来自 CMake 缓存变量 `AURORA_VERSION_SUFFIX`）、合成宏 `AURORA_VERSION_STRING`（完整 semver 串）。**库发布版本的单一事实来源是根 `CHANGELOG.json` 的 `currentVersion`**。
 
 **Web / WASM 平台适配：**
@@ -495,4 +497,4 @@ if (au::platform().is_mobile()) { /* 移动端适配 */ }
 - 配套**跨平台布局测试套件**与**黄金文件验证**，确保同布局在各平台结果一致。
 - AI 生成的代码无需为不同平台微调。
 
-**验收标准：** 同一棵树在各后端下产出相同的逻辑快照（Level 1 / Level 2）；黄金文件比对零差异。
+**验收标准：** 同一棵树在各后端下产出相同的逻辑快照（Level 1 / Level 2）；黄金文件比对零差异。逻辑快照黄金文件由 `utest_golden_snapshots` 承担（11 个固定尺寸布局场景对 `tests/golden/logical_snapshots.json` 逐字段比对，见 [`03-layout-render.md`](03-layout-render.md) §10.1）；像素级 golden 由 `utest_image_view` / `utest_offscreen` 对 `tests/golden/*.png` 比对。

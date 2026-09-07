@@ -76,7 +76,8 @@ if (AURORA_BUILD_TESTS)
     # 或检视用 PNG 写到 build/ 下）。仅对实际存在的用例名生效（容错：迁移期间旧/新名会变动）。
     foreach (_t utest_offscreen itest_ai_compat itest_nav_win utest_custom_surface utest_window
             utest_bottom_nav_bar utest_grid_view utest_lazy_row utest_api_json_integrity
-            utest_image_view utest_inspector_server utest_video_player utest_png_image)
+            utest_image_view utest_inspector_server utest_video_player utest_png_image
+            utest_window_options)
         list(FIND _all_stems ${_t} _idx)
         if (_idx GREATER -1)
             set_tests_properties(${_t} PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -106,9 +107,9 @@ if (AURORA_BUILD_TESTS)
     file(WRITE "${_expect_file}" "${_expect_list}")
     add_test(NAME registry_integrity
             COMMAND ${CMAKE_COMMAND}
-                    -DRUNNER=$<TARGET_FILE:aurora_test_runner>
-                    -DEXPECT=${_expect_file}
-                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/AuroraCheckTestRegistry.cmake")
+            -DRUNNER=$<TARGET_FILE:aurora_test_runner>
+            -DEXPECT=${_expect_file}
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/AuroraCheckTestRegistry.cmake")
 
     # ---- 静态校验 / 门禁脚本（tools/check/*.py）注册为 CTest 用例 ----
     # 跨平台 Python 解释器探测；找不到则不注册（不阻断 C++ 测试）。
@@ -139,6 +140,19 @@ if (AURORA_BUILD_TESTS)
         # 版本一致性门禁（CHANGELOG.currentVersion 必须等于库版本；描述性口径不符仅告警）。
         add_test(NAME check_version_consistency
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_version_consistency.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 公共 API 命名一致性门禁（#2）：类型 PascalCase、属性/事件/函数 snake_case、事件 on_ 前缀。
+        add_test(NAME check_naming_conventions
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_naming_conventions.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 零原生平台宏门禁（#14）：include/ src/ 预处理分支禁止 _WIN32/__linux__/__x86_64__ 等
+        # 原生宏（platform.h 自身与 _WIN32_WINNT 等 SDK 旋钮豁免）；规范化宏密度仅报告。
+        add_test(NAME check_platform_macros
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_platform_macros.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 公共 API 体量/token 预算门禁（#24）：aurora_api.json 估算 token 数不得超预算上限。
+        add_test(NAME check_api_budget
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_api_budget.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     endif ()
 endif ()
