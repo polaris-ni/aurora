@@ -10,7 +10,6 @@
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
-#include <X11/keysym.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <unistd.h>
@@ -45,11 +44,11 @@ auto mask_shift(unsigned long mask, int fallback) -> int {
     if (mask == 0UL) {
         return fallback;
     }
-    int s = 0;
+    unsigned int s = 0;
     while (((mask >> s) & 1UL) == 0UL) {
         ++s;
     }
-    return s;
+    return static_cast<int>(s);
 }
 
 /// @brief 解析 X 资源 `Xft.dpi` 得像素密度（dpi/96）；无声明/异常值回退 1.0。
@@ -63,11 +62,11 @@ auto detect_scale(Display *dpy) -> float {
     if (p == nullptr) {
         return 1.0F;
     }
-    const double dpi = std::atof(p + 8);
+    const double dpi = std::strtod(p + 8, nullptr);  // NOLINT(*-pro-bounds-pointer-arithmetic)
     if (dpi <= 0.0) {
         return 1.0F;
     }
-    return std::clamp(static_cast<float>(dpi / 96.0), 0.5f, 4.0F);
+    return std::clamp(static_cast<float>(dpi / 96.0), 0.5F, 4.0F);
 }
 
 /// @brief keysym → 平台无关 KeyCode（X11 后端入口；映射逻辑见 detail::keysym_to_keycode）。
@@ -75,7 +74,7 @@ auto from_keysym(KeySym ks) -> KeyCode { return detail::keysym_to_keycode(static
 
 /// @brief XKeyEvent.state → 修饰键位组合（Mod1=Alt、Mod4=Super/Meta，X 惯例）。
 auto mods_from_state(unsigned int state) -> ModifierKey {
-    ModifierKey m = ModifierKey::None;
+    auto m = ModifierKey::None;
     if ((state & ShiftMask) != 0U) {
         m = m | ModifierKey::Shift;
     }
@@ -124,14 +123,14 @@ struct X11Surface::Impl {
 
     Painter painter;
     std::vector<Rect> present_dirty;  ///< 本帧增量上屏脏区（设备坐标；空=全量）。
-    Size size{0.0F, 0.0F};  ///< 逻辑 dp（布局用）。
+    Size size{.width = 0.0F, .height = 0.0F};  ///< 逻辑 dp（布局用）。
     float scale = 1.0F;
     bool close_requested = false;
     bool active = true;
     bool minimized = false;
     WindowState state = WindowState::Visible;
     WindowMode mode = WindowMode::Normal;
-    Surface::EventHandler handler;
+    EventHandler handler;
 
     auto apply_title(const std::string &title) -> void;
     auto ensure_image(int w, int h) -> bool;
@@ -143,7 +142,8 @@ auto X11Surface::Impl::apply_title(const std::string &title) -> void {
     Impl &d = *this;
     XStoreName(d.dpy, d.win, title.c_str());
     XChangeProperty(d.dpy, d.win, d.net_wm_name, d.utf8_string, 8, PropModeReplace,
-                    reinterpret_cast<const unsigned char *>(title.c_str()), static_cast<int>(title.size()));
+                    reinterpret_cast<const unsigned char *>(title.c_str()),  // NOLINT(*-pro-type-reinterpret-cast)
+                    static_cast<int>(title.size()));
 }
 
 /// @brief 确保 XImage 与像素缓冲同尺寸（不同则重建）；失败返回 false。
@@ -161,8 +161,8 @@ auto X11Surface::Impl::ensure_image(int w, int h) -> bool {
     d.xbuf.assign(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0U);
     const int screen = DefaultScreen(d.dpy);
     d.ximage = XCreateImage(d.dpy, DefaultVisual(d.dpy, screen), static_cast<unsigned int>(DefaultDepth(d.dpy, screen)),
-                            ZPixmap, 0, reinterpret_cast<char *>(d.xbuf.data()), static_cast<unsigned int>(w),
-                            static_cast<unsigned int>(h), 32, w * 4);
+                            ZPixmap, 0, reinterpret_cast<char *>(d.xbuf.data()),  // NOLINT(*-pro-type-reinterpret-cast)
+                            static_cast<unsigned int>(w), static_cast<unsigned int>(h), 32, w * 4);
     if (d.ximage == nullptr) {
         return false;
     }
@@ -173,13 +173,15 @@ auto X11Surface::Impl::ensure_image(int w, int h) -> bool {
 
 /// @brief RGBA（Painter 序）→ X 原生像素序逐段 swizzle（按 Visual 掩码位移；
 /// 常见 BGRX 情形与 Win32 的 RGBA→BGRA 等价，-O3 自动向量化）。
-auto swizzle_rows(const std::uint32_t *src, std::uint32_t *dst, std::size_t count, int rs, int gs, int bs) -> void {
+static auto swizzle_rows(const std::uint32_t *src, std::uint32_t *dst, std::size_t count, int rs, int gs, int bs)
+    -> void {
     for (std::size_t i = 0; i < count; ++i) {
+        // NOLINTNEXTLINE(*-pro-bounds-pointer-arithmetic)
         const std::uint32_t px = src[i];  // 小端内存 R,G,B,A → px = A<<24|B<<16|G<<8|R
-        const std::uint32_t r = px & 0xFFu;
-        const std::uint32_t g = (px >> 8) & 0xFFu;
-        const std::uint32_t b = (px >> 16) & 0xFFu;
-        dst[i] = (r << rs) | (g << gs) | (b << bs);
+        const std::uint32_t r = px & 0xFFU;
+        const std::uint32_t g = (px >> 8U) & 0xFFU;
+        const std::uint32_t b = (px >> 16U) & 0xFFU;
+        dst[i] = (r << rs) | (g << gs) | (b << bs);  // NOLINT(*-signed-bitwise, *-pro-bounds-pointer-arithmetic)
     }
 }
 
@@ -195,9 +197,11 @@ auto X11Surface::Impl::query_mode() -> WindowMode {
     if (XGetWindowProperty(d.dpy, d.win, d.net_wm_state, 0, 64, 0, XA_ATOM, &actual, &fmt, &n, &after, &data) ==
             Success &&
         data != nullptr) {
+        // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
         const Atom *atoms = reinterpret_cast<Atom *>(data);
         bool maxv = false;
         bool maxh = false;
+        // NOLINTBEGIN(*-pro-bounds-pointer-arithmetic)
         for (unsigned long i = 0; i < n; ++i) {
             if (atoms[i] == d.st_hidden) {
                 m = WindowMode::Minimized;
@@ -209,6 +213,7 @@ auto X11Surface::Impl::query_mode() -> WindowMode {
                 maxh = true;
             }
         }
+        // NOLINTEND(*-pro-bounds-pointer-arithmetic)
         if (m == WindowMode::Normal && maxv && maxh) {
             m = WindowMode::Maximized;
         }
@@ -273,7 +278,7 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
     if (style.always_on_top) {
         Atom above = XInternAtom(d.dpy, "_NET_WM_STATE_ABOVE", 0);
         XChangeProperty(d.dpy, d.win, d.net_wm_state, XA_ATOM, 32, PropModeAppend,
-                        reinterpret_cast<unsigned char *>(&above), 1);
+                        reinterpret_cast<unsigned char *>(&above), 1);  // NOLINT(*-pro-type-reinterpret-cast)
     }
     if (style.frameless) {
         struct MotifHints {
@@ -283,24 +288,29 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
             long input_mode;
             unsigned long status;
         };
-        MotifHints hints{2UL /*MWM_HINTS_DECORATIONS*/, 0UL, 0UL /*无装饰*/, 0L, 0UL};
-        Atom motif = XInternAtom(d.dpy, "_MOTIF_WM_HINTS", 0);
-        XChangeProperty(d.dpy, d.win, motif, motif, 32, PropModeReplace, reinterpret_cast<unsigned char *>(&hints), 5);
+        MotifHints hints{.flags = 2UL /*MWM_HINTS_DECORATIONS*/,
+                         .functions = 0UL,
+                         .decorations = 0UL /*无装饰*/,
+                         .input_mode = 0L,
+                         .status = 0UL};
+        const Atom motif = XInternAtom(d.dpy, "_MOTIF_WM_HINTS", 0);
+        XChangeProperty(d.dpy, d.win, motif, motif, 32, PropModeReplace,
+                        reinterpret_cast<unsigned char *>(&hints), 5);  // NOLINT(*-pro-type-reinterpret-cast)
     }
     // 尺寸限制（XSizeHints）：不可调大小 → min=max=创建尺寸。
     if (XSizeHints *sh = XAllocSizeHints()) {
         if (!style.resizable) {
-            sh->flags = PMinSize | PMaxSize;
+            sh->flags = PMinSize | PMaxSize;  // NOLINT(*-signed-bitwise)
             sh->min_width = sh->max_width = pw;
             sh->min_height = sh->max_height = ph;
         } else {
             if (style.min_size.width > 0.0F || style.min_size.height > 0.0F) {
-                sh->flags |= PMinSize;
+                sh->flags |= PMinSize;  // NOLINT(*-signed-bitwise)
                 sh->min_width = static_cast<int>(std::lround(style.min_size.width * d.scale));
                 sh->min_height = static_cast<int>(std::lround(style.min_size.height * d.scale));
             }
             if (style.max_size.width > 0.0F || style.max_size.height > 0.0F) {
-                sh->flags |= PMaxSize;
+                sh->flags |= PMaxSize;  // NOLINT(*-signed-bitwise)
                 sh->max_width = static_cast<int>(std::lround(style.max_size.width * d.scale));
                 sh->max_height = static_cast<int>(std::lround(style.max_size.height * d.scale));
             }
@@ -329,7 +339,7 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
     d.gc = XCreateGC(d.dpy, d.win, 0, nullptr);
     XMapWindow(d.dpy, d.win);
     XFlush(d.dpy);
-    d.size = Size{static_cast<float>(w), static_cast<float>(h)};
+    d.size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // NOLINT(*-narrowing-conversions)
 }
 
 X11Surface::~X11Surface() {
@@ -405,9 +415,12 @@ auto X11Surface::begin_frame(int width, int height) -> Result<bool> {
         d.painter.begin(lw, lh);
     }
     // 浅色背景：默认文字为黑色，需浅色底才可见（与 Win32/GLFW 后端一致）。
-    d.painter.fill_rect(
-        Rect{Point{0.0F, 0.0F}, Size{static_cast<float>(d.painter.width()), static_cast<float>(d.painter.height())}},
-        Color{245, 245, 247, 255});
+    // NOLINTBEGIN(*-narrowing-conversions)
+    d.painter.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                             .size = Size{.width = static_cast<float>(d.painter.width()),
+                                          .height = static_cast<float>(d.painter.height())}},
+                        Color{245, 245, 247, 255});
+    // NOLINTEND(*-narrowing-conversions)
     return Result<bool>{true};
 }
 
@@ -429,7 +442,7 @@ auto X11Surface::capture_window(const std::string &path) -> Result<bool> {
         return Result<bool>{make_error(ErrorCode::GeneralNotSupported, "capture_window: X11 surface not available")};
     }
     XWindowAttributes wa{};
-    if (!XGetWindowAttributes(d.dpy, d.win, &wa)) {
+    if (XGetWindowAttributes(d.dpy, d.win, &wa) == 0) {
         return Result<bool>{make_error(ErrorCode::GeneralNotSupported, "capture_window: XGetWindowAttributes failed")};
     }
     const int w = wa.width;
@@ -444,26 +457,30 @@ auto X11Surface::capture_window(const std::string &path) -> Result<bool> {
     }
     // X 原生像素 → RGBA：按 Visual 掩码提取（XGetPixel 已处理字节序与掩码，慢但正确）。
     std::vector<std::uint8_t> rgba(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4);
-    const unsigned long rm = ximg->red_mask, gm = ximg->green_mask, bm = ximg->blue_mask;
+    const unsigned long rm = ximg->red_mask;
+    const unsigned long gm = ximg->green_mask;
+    const unsigned long bm = ximg->blue_mask;
     auto shift = [](unsigned long mask, int fb) -> int {
         if (mask == 0UL) {
             return fb;
         }
-        int s = 0;
+        unsigned int s = 0;
         while (((mask >> s) & 1UL) == 0UL) {
             ++s;
         }
-        return s;
+        return static_cast<int>(s);
     };
-    const int rs = shift(rm, 16), gs = shift(gm, 8), bs = shift(bm, 0);
+    const int rs = shift(rm, 16);
+    const int gs = shift(gm, 8);
+    const int bs = shift(bm, 0);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             const unsigned long pix = XGetPixel(ximg, x, y);
-            const std::uint8_t r = static_cast<std::uint8_t>((pix & rm) >> rs);
-            const std::uint8_t g = static_cast<std::uint8_t>((pix & gm) >> gs);
-            const std::uint8_t b = static_cast<std::uint8_t>((pix & bm) >> bs);
+            const auto r = static_cast<std::uint8_t>((pix & rm) >> rs);
+            const auto g = static_cast<std::uint8_t>((pix & gm) >> gs);
+            const auto b = static_cast<std::uint8_t>((pix & bm) >> bs);
             const std::size_t o =
-                (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * 4;
+                ((static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + static_cast<std::size_t>(x)) * 4;
             rgba[o] = r;
             rgba[o + 1] = g;
             rgba[o + 2] = b;
@@ -488,6 +505,7 @@ auto X11Surface::present() -> Result<bool> {
         const int w = d.painter.width();
         const int h = d.painter.height();
         if (d.ensure_image(w, h)) {
+            // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
             const auto *src = reinterpret_cast<const std::uint32_t *>(d.painter.data());
             if (d.present_dirty.empty()) {
                 // 全量：整幅 swizzle + 整窗 XPutImage（首帧/尺寸变化/布局帧）。
@@ -507,9 +525,9 @@ auto X11Surface::present() -> Result<bool> {
                     }
                     for (int y = y0; y < y1; ++y) {
                         const std::size_t off =
-                            static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x0);
+                            (static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + static_cast<std::size_t>(x0);
                         swizzle_rows(src + off, d.xbuf.data() + off, static_cast<std::size_t>(x1 - x0), d.rshift,
-                                     d.gshift, d.bshift);
+                                     d.gshift, d.bshift);  // NOLINT(*-pro-bounds-pointer-arithmetic)
                     }
                     XPutImage(d.dpy, d.win, d.gc, d.ximage, x0, y0, x0, y0, static_cast<unsigned int>(x1 - x0),
                               static_cast<unsigned int>(y1 - y0));
@@ -544,7 +562,7 @@ auto X11Surface::set_title(const std::string &title) -> void {
 }
 
 auto X11Surface::native_handle() const -> void * {
-    return reinterpret_cast<void *>(static_cast<std::uintptr_t>(impl_->win));
+    return reinterpret_cast<void *>(impl_->win);  // NOLINT(*-pro-type-reinterpret-cast, performance-no-int-to-ptr)
 }
 
 auto X11Surface::poll_platform_events() -> void {
@@ -567,26 +585,29 @@ auto X11Surface::poll_platform_events() -> void {
         MouseEvent e;
         e.action = action;
         e.button = button;
-        e.position = Point{px / d.scale, py / d.scale};
+        e.position = Point{.x = px / d.scale, .y = py / d.scale};
         d.handler(e);
     };
     XEvent ev;
     while (XPending(d.dpy) > 0) {
         XNextEvent(d.dpy, &ev);
-        if (XFilterEvent(&ev, static_cast<::Window>(k_x_none)) != 0) {
+        if (XFilterEvent(&ev, AURORA_X_NONE) != 0) {
             continue;  // 输入法预编辑消费（如拼音候选期间的按键）
         }
+        // NOLINTBEGIN(*-pro-type-union-access)
         switch (ev.type) {
             case ButtonPress:
             case ButtonRelease: {
                 const bool press = (ev.type == ButtonPress);
                 const unsigned int btn = ev.xbutton.button;
-                if (btn >= 4 && btn <= 7) {
+                if (btn >= 4U && btn <= 7U) {
                     // X 惯例：滚轮为按键 4/5（垂直）与 6/7（水平），仅 Press 有意义。
                     if (press && d.handler) {
                         ScrollEvent se;
-                        se.position = Point{static_cast<float>(ev.xbutton.x) / d.scale,
-                                            static_cast<float>(ev.xbutton.y) / d.scale};
+                        // NOLINTBEGIN(*-narrowing-conversions)
+                        se.position = Point{.x = static_cast<float>(ev.xbutton.x) / d.scale,
+                                            .y = static_cast<float>(ev.xbutton.y) / d.scale};
+                        // NOLINTEND(*-narrowing-conversions)
                         if (btn == 4) {
                             se.delta_y = 1.0F;  // 上滚为正（见 event.h）
                         } else if (btn == 5) {
@@ -640,7 +661,7 @@ auto X11Surface::poll_platform_events() -> void {
                     Status st = 0;
                     len = Xutf8LookupString(d.ic, &ev.xkey, buf, static_cast<int>(sizeof(buf)) - 1, &ks, &st);
                     if (st == XBufferOverflow && len > 0) {
-                        heap_buf.resize(static_cast<std::size_t>(len) + 1u);
+                        heap_buf.resize(static_cast<std::size_t>(len) + 1U);
                         len = Xutf8LookupString(d.ic, &ev.xkey, heap_buf.data(), len, &ks, &st);
                         text = heap_buf.data();
                     }
@@ -660,7 +681,7 @@ auto X11Surface::poll_platform_events() -> void {
                 }
                 // 可打印文本 → TextInputEvent；控制字符（回车/退格/Esc…）交给 KeyEvent。
                 if (d.handler && len > 0 &&
-                    !(len == 1 && (static_cast<unsigned char>(text[0]) < 0x20 || text[0] == 0x7F))) {
+                    (len != 1 || (static_cast<unsigned char>(text[0]) >= 0x20 && text[0] != 0x7F))) {
                     TextInputEvent te;
                     te.text.assign(text, static_cast<std::size_t>(len));
                     d.handler(te);
@@ -681,7 +702,10 @@ auto X11Surface::poll_platform_events() -> void {
                 const int pw = ev.xconfigure.width;
                 const int ph = ev.xconfigure.height;
                 if (pw > 0 && ph > 0) {
-                    const Size want{static_cast<float>(pw) / d.scale, static_cast<float>(ph) / d.scale};
+                    // NOLINTBEGIN(*-narrowing-conversions)
+                    const Size want{.width = static_cast<float>(pw) / d.scale,
+                                    .height = static_cast<float>(ph) / d.scale};
+                    // NOLINTEND(*-narrowing-conversions)
                     if (want.width != d.size.width || want.height != d.size.height) {
                         d.size = want;
                         // 几何变化当下同步重渲染（对齐 Win32 WM_SIZE）：缩放拖拽期间无黑边/残留。
@@ -737,11 +761,12 @@ auto X11Surface::poll_platform_events() -> void {
             default:
                 break;
         }
+        // NOLINTEND(*-pro-type-union-access)
     }
 }
 
 auto X11Surface::wait_events(double timeout_ms) -> void {
-    Impl &d = *impl_;
+    const Impl &d = *impl_;
     if (d.dpy == nullptr || timeout_ms == 0.0 || d.close_requested) {
         return;
     }
@@ -750,8 +775,9 @@ auto X11Surface::wait_events(double timeout_ms) -> void {
     }
     // 无限等待按 1000ms 分段兜底（对齐 Win32/默认实现）：唤醒渠道丢失也最迟 1s 自然醒。
     const double capped = (timeout_ms < 0.0 || timeout_ms > 1000.0) ? 1000.0 : timeout_ms;
-    struct pollfd fds[2];
+    pollfd fds[2];
     nfds_t n = 0;
+    // NOLINTBEGIN(*-pro-bounds-constant-array-index)
     fds[n].fd = ConnectionNumber(d.dpy);
     fds[n].events = POLLIN;
     fds[n].revents = 0;
@@ -763,18 +789,19 @@ auto X11Surface::wait_events(double timeout_ms) -> void {
         ++n;
     }
     const int rc = ::poll(fds, n, static_cast<int>(std::ceil(capped)));
-    if (rc > 0 && n == 2 && (fds[1].revents & POLLIN) != 0) {
+    if (rc > 0 && n == 2 && (fds[1].revents & POLLIN) != 0) {  // NOLINT(*-signed-bitwise)
         char drain[64];
-        while (::read(d.wake_fd[0], drain, sizeof(drain)) > 0) {
+        while (read(d.wake_fd[0], drain, sizeof(drain)) > 0) {
             // 排干唤醒字节（非阻塞读到 EAGAIN 为止），避免下次 wait 立即空醒。
         }
     }
+    // NOLINTEND(*-pro-bounds-constant-array-index)
 }
 
 auto X11Surface::request_wake() -> void {
-    Impl &d = *impl_;
+    const Impl &d = *impl_;
     if (d.wake_fd[1] >= 0) {
-        const char b = 1;
+        constexpr char b = 1;
         [[maybe_unused]] const ssize_t rc = ::write(d.wake_fd[1], &b, 1);  // 满管道丢弃亦可：已有待读字节必醒
     }
 }

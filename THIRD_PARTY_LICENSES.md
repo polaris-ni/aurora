@@ -154,7 +154,9 @@ PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 - **来源**：vendored 于 `third_party/glfw/`
 - **用途**：`GlfwSurface` 后端的窗口创建 / OpenGL 上下文 / 原生输入事件（鼠标、键盘、滚轮、文本、resize）
 - **集成方式**：仅 `AURORA_BACKEND_GLFW=ON` 时经 `add_subdirectory(third_party/glfw EXCLUDE_FROM_ALL)` 源码构建
-  并以 `target_link_libraries(aurora PUBLIC glfw opengl32)` 静态链接（关 examples/tests/docs/install；
+  并以平台区分的 OpenGL 链接静态链入（`WIN32`：`target_link_libraries(aurora PUBLIC glfw opengl32)`；
+  其他平台：`find_package(OpenGL REQUIRED)` + `target_link_libraries(aurora PUBLIC glfw OpenGL::GL)`），
+  关 examples/tests/docs/install；
   默认 OFF，关闭时链接产物完全不含 GLFW）
 - **许可**：zlib/libpng 许可（宽松，兼容静态链接分发），全文见 `third_party/glfw/LICENSE.md`
 - **许可全文**

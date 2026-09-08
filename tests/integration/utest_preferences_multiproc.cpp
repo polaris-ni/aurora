@@ -120,7 +120,7 @@ static auto run_parent(const std::filesystem::path &exe, const std::filesystem::
         }
     }
 #else
-    for (int i = 0; i < K; ++i) {
+    for (int i = 0; i < k; ++i) {
         const pid_t pid = ::fork();
         if (pid == 0) {
             const std::string a1 = "--writer";
@@ -155,7 +155,7 @@ static auto run_parent(const std::filesystem::path &exe, const std::filesystem::
         }
 #else
         running = false;
-        for (int i = 0; i < K; ++i) {
+        for (int i = 0; i < k; ++i) {
             int status = 0;
             if (::waitpid(children[i].pid, &status, WNOHANG) == 0) {
                 running = true;  // 仍运行
@@ -187,7 +187,7 @@ static auto run_parent(const std::filesystem::path &exe, const std::filesystem::
         CloseHandle(children[i].pi.hProcess);
     }
 #else
-    for (int i = 0; i < K; ++i) {
+    for (int i = 0; i < k; ++i) {
         int status = 0;
         ::waitpid(children[i].pid, &status, 0);
         codes[i] = WEXITSTATUS(status);

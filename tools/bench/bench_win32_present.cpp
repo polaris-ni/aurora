@@ -18,6 +18,8 @@
 #include "aurora/window/d3d11_surface.h"
 #endif
 
+#ifdef AURORA_BACKEND_WIN32
+
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -49,6 +51,7 @@ using aurora::bench::AURORA_BENCH_DISCLAIMER;
 using aurora::bench::bench_row;
 using aurora::bench::ffmt;
 using aurora::bench::time_ms;
+#endif
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {

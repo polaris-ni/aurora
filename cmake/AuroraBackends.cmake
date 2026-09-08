@@ -70,7 +70,15 @@ if (AURORA_BACKEND_GLFW)
     endif ()
     aurora_define_feature(AURORA_BACKEND_GLFW EXPORT)
     # glfw 目标自带 PUBLIC include/ 路径，随链接传递给消费者，无需手动加头目录。
-    target_link_libraries(aurora PUBLIC glfw opengl32)
+    # OpenGL 库名按平台区分：Windows 用系统 opengl32.lib；类 Unix（X11/Wayland）用 CMake
+    # 标准导入目标 OpenGL::GL（即 libGL.so）。原代码无条件写死 opengl32，会在非 Windows 平台
+    # 链接失败（cannot find -lopengl32）。
+    if (WIN32)
+        target_link_libraries(aurora PUBLIC glfw opengl32)
+    else ()
+        find_package(OpenGL REQUIRED)
+        target_link_libraries(aurora PUBLIC glfw OpenGL::GL)
+    endif ()
     aurora_log("GLFW backend enabled (source build under third_party/glfw)")
 endif ()
 

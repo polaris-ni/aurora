@@ -16,11 +16,12 @@ namespace aurora {
  * 复用现有软件 `Painter` 作中间帧缓冲（栅格化），每帧把像素上传到一张 GL 纹理，
  * 再用 OpenGL 1.1 立即模式绘制全屏纹理四边形呈现。采用立即模式而非 GLSL 着色器，
  * 是因为 Windows 的 `<GL/gl.h>` 仅声明 OpenGL 1.1，GLSL 函数需额外加载器（GLAD 等）；
- * 立即模式仅需系统 `opengl32`，零额外依赖，跨工具链（MSVC/MinGW）可直接编译。
+ * 立即模式仅需系统 OpenGL 库（Windows `opengl32` / 类 Unix `libGL`），零额外依赖，
+ * 跨工具链（MSVC/MinGW/GCC）可直接编译。
  * 这把「Surface 可插拔」理念落地成一个真实后端：widget 层依旧只认识
  * `Surface`/`Painter`，不感知 GLFW/GL。
  *
- * 已落地：
+ * Support：
  *  - 渲染：OpenGL 1.1 立即模式纹理四边形（无需着色器/VAO/GL 加载器），见 `Impl::ensure_gl_objects`/`upload_and_draw`。
  *  - 事件：鼠标/键盘（含 GLFW 键码 → `KeyCode` 映射）、滚轮、文本输入、窗口 resize
  *    均翻译为 aurora `Event`，经 `set_event_handler` 暴露（ARCHITECTURE.md §3.1）。
