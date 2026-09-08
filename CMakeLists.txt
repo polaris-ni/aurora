@@ -75,8 +75,6 @@ include(AuroraThirdParty)
 
 # NOMINMAX：抑制 <windows.h> 的 min/max 宏，保证 std::min/std::max 在 Windows 上可用
 # （preferences.cpp 等直接 include <windows.h> 并使用 std::max；第三方库同样需要，故保持全局定义）。
-# 告警标志改为 aurora 目标级（见下方 add_library(aurora ...) 之后），不再全局注入，
-# 故三方源码 include 顺序不再敏感。
 add_compile_definitions(NOMINMAX)
 
 # ---- 链接器：优先 LLVM lld（构建提速） ----
@@ -111,7 +109,7 @@ file(GLOB_RECURSE AURORA_SOURCES CONFIGURE_DEPENDS
 
 # inspector_server.cpp 编入独立静态库 aurora_inspector_server（仅 AURORA_BUILD_INSPECTOR_SERVER=ON 时构建），
 # 不编入核心 aurora 库，避免未开启开关时引入 Winsock2 依赖（见 cmake/AuroraTools.cmake）。
-list(FILTER AURORA_SOURCES EXCLUDE REGEX "inspector_server\\.cpp$")
+list(FILTER AURORA_SOURCES EXCLUDE REGEX "inspector_server\.cpp$")
 
 add_library(aurora STATIC ${AURORA_SOURCES})
 # 版本常量注入：project(VERSION) + AURORA_VERSION_SUFFIX → version.h 的
@@ -149,12 +147,6 @@ target_link_libraries(aurora PUBLIC freetype harfbuzz)
 include(AuroraFeatures)
 include(AuroraImageCodecs)
 
-# 三方库 harfbuzz 从源码编译（src/harfbuzz.cc 合并源），其 hb-algs.hh:1146 的 memcmp 边界分析
-# 在 -O2/-O3 内联展开时误报 -Wstringop-overread（"exceeds source size"）。该告警对三方代码
-# 无意义，故整体对 harfbuzz target 关闭（不限于某 TU）；aurora 自有代码仍保留 -Wstringop-overread。
-# 注：告警来自 harfbuzz 自身编译单元，与本项目是否 include 其头无关，故置于 target 级而非源文件级。
-target_compile_options(harfbuzz PRIVATE "-Wno-stringop-overread")
-
 # ---- Precompiled header (规格 §3.5 增量编译) ----
 # 库自身 PCH：只聚合「稳定且不常变更」的重型头（标准库 + nlohmann/json），不纳入高频
 # 变更的 aurora 自有头以保证库开发时的命中率（见 aurora_pch.h 收录原则）；PRIVATE 仅
@@ -171,8 +163,6 @@ endif ()
 # ---- Debug 构建优化级别：aurora 库 + 第三方库用 -O3 取代默认 -O0（hybrid debug） ----
 # 默认 CMake Debug 为 -g -O0，渲染热点（库内光栅内核 + 第三方文本光栅 freetype）在 -O0 下
 # 比 Release(-O3) 慢数倍，导致 demo/测试在 Debug 下卡顿且难以排查真实性能问题。
-# 实测 demo_google_play（真实 Win32 后端）帧率拆分：paint 占 ~85% 帧时间，其中文本光栅
-# （freetype，第三方子项目，Debug 下默认 -O0 编成 libfreetyped.a）是主要热点。
 # 仅给 aurora 库加 -O3 只能把 Debug 从 ~15 抬到 ~30（paint 仍被 -O0 的 freetype 拖死），
 # 故对 aurora 库 + freetype/harfbuzz 等第三方库一并施加 -O3（保留 -g 调试信息）：
 # 实测把 demo_google_play 的 Debug 帧率从 ~15 抬到接近 Release 的 ~50 FPS（与 build/ 对齐）。
@@ -249,28 +239,3 @@ include(AuroraInstall)
 
 # ---- Clang-Tidy 门禁（按需 lint / lint-fix 聚合目标；须在全部目标定义之后 include）----
 include(AuroraLint)
-
-# ---- MinGW 可执行文件自包含运行期链接 ----
-# 默认 MinGW 构建的 exe 动态依赖 libgcc_s_seh-1.dll / libwinpthread-1.dll / libstdc++-6.dll。
-# 当启动环境 PATH 中混入版本不兼容的同名 DLL 时，exe 在加载期报
-# 0xC0000139(STATUS_ENTRYPOINT_NOT_FOUND) 而崩溃。
-# 静态链接这三个运行期库，使 exe 完全自包含、彻底摆脱 PATH DLL 版本错配；
-# 仅对 MinGW 下的可执行目标生效，不影响静态库(aurora)与 Linux/macOS 构建。
-# 注意：BUILDSYSTEM_TARGETS 的 DIRECTORY 属性在 configure 期即可用（GLOBAL 属性要到
-# generate 期才填充），故此处用 DIRECTORY 遍历当前目录定义的所有目标。
-if (MINGW)
-    get_property(_aurora_all_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
-    foreach (_t ${_aurora_all_targets})
-        get_target_property(_t_type ${_t} TYPE)
-        if (_t_type STREQUAL "EXECUTABLE")
-            target_link_options(${_t} PRIVATE -static-libgcc -static-libstdc++)
-            # 静态 libwinpthread.a 依赖 GCC 内置符号 __intrinsic_setjmpex，lld 无法
-            # 解析该符号，故仅在使用 GNU ld 时静态链接 pthread；lld 下回退为动态链接。
-            if (NOT AURORA_LINKER_LLD_WORKS)
-                target_link_options(${_t} PRIVATE -Wl,-Bstatic -lpthread -Wl,-Bdynamic)
-            else ()
-                target_link_options(${_t} PRIVATE -lpthread)
-            endif ()
-        endif ()
-    endforeach ()
-endif ()
