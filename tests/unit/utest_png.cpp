@@ -1,99 +1,137 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/render/png.h
-/// 测试说明: 内置最小 PNG 编码器（内存编码签名/块结构、尺寸非法报错、build_idat 成帧、write_png 落盘）单元测试
+/// 测试说明: 覆盖内置 PNG 编码器的参数校验、签名与 IHDR 大端宽高写入、IEND 收尾、同输入编码确定性、
+/// 写文件成功路径与不可写路径的错误返回，以及 编码→解码 往返的像素保真
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
+#include <string>
 #include <vector>
 
+#include "aurora/core/image.h"
+#include "aurora/core/result.h"
 #include "aurora/render/png.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_png {
 
 namespace {
-constexpr std::array<std::uint8_t, 8> AURORA_K_SIGNATURE = {137, 80, 78, 71, 13, 10, 26, 10};
-
-/// 在字节流中查找子序列（判断是否含 IHDR/IDAT/IEND 块类型）。
-auto contains(const std::vector<std::uint8_t> &hay, const char *needle) -> bool {
-    const std::vector<std::uint8_t> n(needle, needle + std::string(needle).size());
-    if (hay.size() < n.size()) {
-        return false;
+[[nodiscard]] auto solid_rgba(int w, int h, std::uint8_t r, std::uint8_t g, std::uint8_t b) -> std::vector<std::uint8_t> {
+    std::vector<std::uint8_t> px(static_cast<std::size_t>(w) * h * 4, 0);
+    for (std::size_t i = 0; i < static_cast<std::size_t>(w) * static_cast<std::size_t>(h); ++i) {
+        px[(i * 4U) + 0U] = r;
+        px[(i * 4U) + 1U] = g;
+        px[(i * 4U) + 2U] = b;
+        px[(i * 4U) + 3U] = 255;
     }
-    for (std::size_t i = 0; i + n.size() <= hay.size(); ++i) {
-        bool hit = true;
-        for (std::size_t j = 0; j < n.size(); ++j) {
-            if (hay[i + j] != n[j]) {
-                hit = false;
-                break;
-            }
-        }
-        if (hit) {
-            return true;
-        }
-    }
-    return false;
+    return px;
 }
 }  // namespace
 
-AURORA_TEST() {
-    // ---- 1. 合法尺寸：编码成功，含 PNG 签名与三类块 ----
-    {
-        std::vector<std::uint8_t> rgba(2U * 2U * 4U, 0xFFU);  // 2×2 全不透明白
-        const auto r = detail::write_png_to_memory(rgba.data(), 2, 2);
-        AURORA_TEST_CHECK(r.ok());
-        const auto &bytes = r.value();
-        AURORA_TEST_CHECK(bytes.size() > 8);
-        bool sig_ok = true;
-        for (std::size_t i = 0; i < AURORA_K_SIGNATURE.size(); ++i) {
-            sig_ok = sig_ok && (bytes[i] == AURORA_K_SIGNATURE[i]);
-        }
-        AURORA_TEST_CHECK(sig_ok);
-        AURORA_TEST_CHECK(contains(bytes, "IHDR"));
-        AURORA_TEST_CHECK(contains(bytes, "IDAT"));
-        AURORA_TEST_CHECK(contains(bytes, "IEND"));
-    }
+AURORA_TEST_CASE(encode_rejects_invalid_dimensions) {
+    const auto pixels = solid_rgba(2, 2, 1, 2, 3);
+    AURORA_TEST_CHECK_FALSE(detail::write_png_to_memory(pixels.data(), 0, 2).ok());
+    AURORA_TEST_CHECK_FALSE(detail::write_png_to_memory(pixels.data(), 2, -1).ok());
+    AURORA_TEST_CHECK_FALSE(detail::write_png_to_memory(nullptr, 2, 2).ok());
+}
 
-    // ---- 2. 非法尺寸 / 空指针：返回错误，不崩溃 ----
-    {
-        std::vector<std::uint8_t> rgba(4, 0);
-        AURORA_TEST_CHECK_FALSE(detail::write_png_to_memory(nullptr, 1, 1).ok());
-        AURORA_TEST_CHECK_FALSE(detail::write_png_to_memory(rgba.data(), 0, 1).ok());
-        AURORA_TEST_CHECK_FALSE(detail::write_png_to_memory(rgba.data(), 1, -2).ok());
-    }
+AURORA_TEST_CASE(encoded_stream_starts_with_png_signature) {
+    constexpr std::array<std::uint8_t, 8> expected_signature = {137, 80, 78, 71, 13, 10, 26, 10};
+    const auto pixels = solid_rgba(1, 1, 255, 0, 0);
+    const auto encoded = detail::write_png_to_memory(pixels.data(), 1, 1);
 
-    // ---- 3. build_idat：zlib stored-block 成帧（首两字节为 CMF/FLG，含空负载的 2 字节头） ----
-    {
-        std::vector<std::uint8_t> raw(16, 0xAB);
-        const auto idat = detail::build_idat(raw.data(), raw.size());
-        AURORA_TEST_CHECK(idat.size() >= 3);
-        AURORA_TEST_CHECK_EQ(idat[0], std::uint8_t{0x78});
-        AURORA_TEST_CHECK_EQ(idat[1], std::uint8_t{0x01});
-
-        const auto empty = detail::build_idat(raw.data(), 0);
-        AURORA_TEST_CHECK_EQ(empty.size(), std::size_t{2});  // 仅 zlib 头，无 stored block
+    AURORA_TEST_REQUIRE_TRUE(encoded.ok());
+    AURORA_TEST_REQUIRE_GE(encoded.value().size(), expected_signature.size());
+    for (std::size_t i = 0; i < expected_signature.size(); ++i) {
+        AURORA_TEST_CHECK_EQ(static_cast<int>(encoded.value().at(i)),
+                             static_cast<int>(expected_signature.at(i)));
     }
+}
 
-    // ---- 4. write_png 落盘：文件存在且以 PNG 签名开头（用完即删） ----
-    {
-        std::vector<std::uint8_t> rgba(1U * 1U * 4U, 0x10U);
-        const auto path = std::filesystem::temp_directory_path() / "aurora_utest_png.tmp";
-        const auto r = write_png(path.string().c_str(), 1, 1, rgba.data());
-        AURORA_TEST_CHECK(r.ok());
-        if (r.ok()) {
-            std::ifstream f(path, std::ios::binary);
-            std::vector<std::uint8_t> head(8, 0);
-            f.read(reinterpret_cast<char *>(head.data()), 8);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-            bool sig_ok = true;
-            for (std::size_t i = 0; i < head.size(); ++i) {
-                sig_ok = sig_ok && (head[i] == AURORA_K_SIGNATURE[i]);
-            }
-            AURORA_TEST_CHECK(sig_ok);
-            std::error_code ec;
-            std::filesystem::remove(path, ec);  // 清理本测试自建的临时文件
-        }
-    }
+AURORA_TEST_CASE(ihdr_carries_big_endian_dimensions) {
+    // IHDR: [0..3] 长度 13 / [4..7] "IHDR" / [8..11] 宽 / [12..15] 高 / [16] 位深 8 / [17] 颜色类型 6(RGBA)
+    const auto pixels = solid_rgba(3, 5, 0, 0, 0);
+    const auto encoded = detail::write_png_to_memory(pixels.data(), 3, 5);
+    AURORA_TEST_REQUIRE_TRUE(encoded.ok());
+
+    const auto &bytes = encoded.value();
+    AURORA_TEST_REQUIRE_GE(bytes.size(), 26U);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[12]), 'I');
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[13]), 'H');
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[14]), 'D');
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[15]), 'R');
+
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[16]), 0);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[17]), 0);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[18]), 0);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[19]), 3);  // width = 3
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[20]), 0);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[21]), 0);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[22]), 0);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[23]), 5);  // height = 5
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[24]), 8);  // bit depth
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[25]), 6);  // color type RGBA
+}
+
+AURORA_TEST_CASE(encoded_stream_ends_with_iend) {
+    const auto pixels = solid_rgba(2, 2, 9, 9, 9);
+    const auto encoded = detail::write_png_to_memory(pixels.data(), 2, 2);
+    AURORA_TEST_REQUIRE_TRUE(encoded.ok());
+
+    const auto &bytes = encoded.value();
+    AURORA_TEST_REQUIRE_GE(bytes.size(), 12U);
+    const std::size_t tail = bytes.size() - 12;  // 长度(4) + "IEND"(4) + CRC(4)
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[tail + 4]), 'I');
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[tail + 5]), 'E');
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[tail + 6]), 'N');
+    AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[tail + 7]), 'D');
+}
+
+AURORA_TEST_CASE(encoding_is_deterministic) {
+    // 同输入必得同输出：golden 比对的前提（无时间戳、无随机 ID）。
+    const auto pixels = solid_rgba(4, 3, 12, 34, 56);
+    const auto first = detail::write_png_to_memory(pixels.data(), 4, 3);
+    const auto second = detail::write_png_to_memory(pixels.data(), 4, 3);
+    AURORA_TEST_REQUIRE_TRUE(first.ok());
+    AURORA_TEST_REQUIRE_TRUE(second.ok());
+    AURORA_TEST_CHECK_EQ(first.value(), second.value());
+}
+
+AURORA_TEST_CASE(write_png_persists_exact_bytes) {
+    const auto pixels = solid_rgba(4, 4, 200, 100, 50);
+    const auto encoded = detail::write_png_to_memory(pixels.data(), 4, 4);
+    AURORA_TEST_REQUIRE_TRUE(encoded.ok());
+
+    const std::filesystem::path out = std::filesystem::path(testing::isolation::temp_dir()) / "solid.png";
+    const auto written = write_png(out.string().c_str(), 4, 4, pixels.data());
+    AURORA_TEST_REQUIRE_TRUE(written.ok());
+
+    AURORA_TEST_CHECK_TRUE(std::filesystem::exists(out));
+    AURORA_TEST_CHECK_EQ(std::filesystem::file_size(out), encoded.value().size());
+}
+
+AURORA_TEST_CASE(write_png_fails_on_unwritable_path) {
+    // 目标目录不存在 → 结构化错误，不抛异常、不崩。
+    const auto pixels = solid_rgba(2, 2, 1, 1, 1);
+    const std::filesystem::path out =
+        std::filesystem::path(testing::isolation::temp_dir()) / "no-such-dir" / "x.png";
+    const auto written = write_png(out.string().c_str(), 2, 2, pixels.data());
+    AURORA_TEST_CHECK_FALSE(written.ok());
+}
+
+AURORA_TEST_CASE(encode_decode_roundtrip_preserves_pixels) {
+    // 编码器输出须能被通用解码器读回（stored-block deflate + adler32 校验）。
+    const auto pixels = solid_rgba(6, 4, 10, 20, 30);
+    const std::filesystem::path out = std::filesystem::path(testing::isolation::temp_dir()) / "roundtrip.png";
+    AURORA_TEST_REQUIRE_TRUE(write_png(out.string().c_str(), 6, 4, pixels.data()).ok());
+
+    const auto decoded = Image::load(out.string());
+    AURORA_TEST_REQUIRE_TRUE(decoded.ok());
+    AURORA_TEST_CHECK_EQ(decoded.value().width, 6);
+    AURORA_TEST_CHECK_EQ(decoded.value().height, 4);
+    AURORA_TEST_REQUIRE_EQ(decoded.value().pixels.size(), pixels.size());
+    AURORA_TEST_CHECK_EQ(decoded.value().pixels, pixels);
 }
 
 }  // namespace aurora::test_cases::utest_png

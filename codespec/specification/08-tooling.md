@@ -1,6 +1,6 @@
 # 序列化、检查器与工具链（serialization / inspector / tooling / log）
 
-> 覆盖 `widget/serialization.h`、`widget/codegen.h`、`widget/yaml.h`、`widget/inspect.h`、`inspector/`、`core/log.h`、`debug/`、根级 `test_helpers.h` 与 `tools/`。
+> 覆盖 `widget/serialization.h`、`widget/codegen.h`、`widget/yaml.h`、`widget/inspect.h`、`inspector/`、`core/log.h`、`debug/`、仓库私有 `tests/support/test_helpers.h` 与 `tools/`。
 > 本文件是 UI 树线格式、差分补丁、代码生成、运行时检查、MCP / CLI / LSP 工具链与日志通道的**唯一权威**。
 > `WidgetDescriptor` / `PropDescriptor` 结构见 [`04-widget.md`](04-widget.md) §2.1；`Result` 与 `Error` 见 [`01-core.md`](01-core.md) §3。
 
@@ -343,7 +343,8 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 
 ## 8 测试原语（`aurora::test`）
 
-`include/aurora/test_helpers.h`（**不进 `aurora.h`**，需显式包含）：
+`tests/support/test_helpers.h`（**仓库私有设施**：位于 `tests/` 下，不进 `include/`、不进 `aurora.h`、
+不进 `aurora_api.json`，不受公共 API 兼容承诺约束），使用方须显式包含：
 
 | 原语 | 说明 |
 |:---|:---|
@@ -351,7 +352,24 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 | `pump(env)` | 确定性 mount + layout（内部即 `render_to_logical_snapshot`） |
 | `tap(env, widget)` | 合成 `MouseEvent` Press + Release |
 | `type_text(env, widget, text)` | 合成 `TextInputEvent` |
-| `expect_text` / `expect_tree_contains` / `expect_bounds` / `expect_visible` / `expect_count` | 断言辅助（内部统一 `AURORA_TEST_CHECK*` 宏族，依赖 `tests/aurora_test_harness.h`） |
+| `expect_text` / `expect_tree_contains` / `expect_bounds` / `expect_visible` / `expect_count` | 断言辅助（内部统一 `AURORA_TEST_CHECK*` 宏族，依赖 `tests/framework/aurora_test.h`） |
+
+### 8.1 框架设施（`tests/framework/`）
+
+| 设施 | 说明 |
+|:---|:---|
+| `AURORA_TEST_CASE(<Case>)` | 静态注册用例；全名 `<文件 stem>.<Case>`，套件名由 `__FILE__` 推导、不可自定义 |
+| `AURORA_TEST_CHECK_*` / `AURORA_TEST_REQUIRE_*` | 非致命 / 致命两族断言，谓词清单与语义见 [`CODING_STANDARDS.md`](../CODING_STANDARDS.md) §3.1 |
+| `AURORA_TEST_F(<Fixture>, <Case>)` | fixture 用例：`SetUp` → 用例体 → `TearDown`（用例抛异常同样清理），每用例重建实例 |
+| `AURORA_TEST_P` + `AURORA_INSTANTIATE_TEST_SUITE_P[_GEN]` | 值参数化：fixture 派生自 `TestWithParam<V>`，体内 `param()` 取值；取值表 `values_of(...)` / `values_in(container)`，`_GEN` 变体带名字生成器 |
+| `AURORA_TYPED_TEST_SUITE` + `AURORA_TYPED_TEST` | 类型参数化：对 `TypeList<...>` 逐类型展开成独立用例 |
+| `AURORA_TEST_CHECK_THAT(value, matcher)` | 匹配器断言；工厂与组合器在 `aurora::testing::matchers::`（`eq` / `str_eq` / `contains` / `each` / `size_is` / `all_of` / `any_of` / `negated` …） |
+| `AURORA_TEST_SKIP(原因)` | 运行时跳过（后端 / 平台未编译时注册 skip 桩，计入 Skipped 不算失败） |
+| `AURORA_TEST_TRACE(说明)` | 作用域追踪栈，随作用域自动出栈；本作用域内失败自动附带 |
+| `aurora::testing::ValuePrinter<T>` | 值打印定制点：测试侧显式特化即接管该类型在失败信息里的渲染 |
+| `AURORA_TEST_CHECK_DEATH(stmt, expectation)` | 死亡测试：spawn 子进程重跑同一用例，只有该站点执行语句；`expectation` 为子串或匹配器（校验子进程 stderr），空串=只要求致死 |
+| `aurora::testing::write_report` | 结果报告：`.xml` → JUnit XML，其余 JSON；超时路径同样落盘已完成部分（`tests/framework/reporter.h`） |
+| `aurora_test_runner` | 唯一 `main`（`tests/framework/test_main.cpp`），测试 TU 禁止自定义 `main()`；起手执行 `TestRegistry::finalize()` 统一展开参数化用例，故 `--list` / `--run` 即展开后全集；`--report` / `--shuffle` / `--repeat` / `--timeout`（看门狗，退出码 3）见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §7.1 |
 
 ---
 

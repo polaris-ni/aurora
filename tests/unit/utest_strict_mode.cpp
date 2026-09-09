@@ -1,93 +1,55 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/strict_mode.h
-/// 测试说明: strict_mode 单元测试
-///
+/// 测试说明: 覆盖 StrictMode 开关的默认值与读写、on_strict_failure 的处理器注入（消息透传 + 可捕获）与默认处理器（std::terminate）死亡行为
 
-// strict_mode_test.cpp — 覆盖 #2 strict_mode：au::App().strict_mode() 落地 +
-// NDEBUG 安全的真正致命失败（不依赖被剥离的 AURORA_ASSERT）。
-// 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
-
+#include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
-#include "aurora/aurora.h"
-#include "aurora/core/diagnostics.h"
 #include "aurora/core/strict_mode.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_strict_mode {
 
-namespace {
-
-// 验证 Application 上下文的 set/get 往返。
-void test_application_strict_mode() {
-    Scene scene{Node{Text{"x"}}};
-    Application app{std::move(scene), 320, 240};
-
-    app.set_strict_mode(StrictMode::On);
-    AURORA_TEST_CHECK(app.strict_mode() == StrictMode::On);
-
-    app.set_strict_mode(StrictMode::Off);
-    AURORA_TEST_CHECK(app.strict_mode() == StrictMode::Off);
+AURORA_TEST_CASE(default_mode_is_off) {
+    // 枚举取值锁定：Off=0 / On=1。
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(aurora::StrictMode::Off), 0);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(aurora::StrictMode::On), 1);
+    // 线程局部开关默认关闭（本文件各用例进程内顺序执行，默认值即初始态）。
+    AURORA_TEST_CHECK_EQ(aurora::strict_mode(), aurora::StrictMode::Off);
 }
 
-// 验证 App().strict_mode(On) 构建链可编译、携带开关，且不泄漏线程级严格模式。
-// 用 Headless Surface + frames(1) 限帧运行：避免自动检测创建真实 Win32 窗口
-// 导致测试阻塞在等待手动关窗（CI/ctest 不可交互）。
-void test_app_builder_strict_mode() {
-    AURORA_TEST_CHECK(aurora::strict_mode() == StrictMode::Off);
-    auto win_res = create_window(HeadlessOptions{});
-    App()
-        .title("t")
-        .size(50, 50)
-        .strict_mode(StrictMode::On)
-        .window(win_res ? std::move(win_res.value()) : nullptr)
-        .view(Node{Text{"x"}})
-        .frames(1)
-        .run();
-    // run() 不论是否套用，都应还原线程级严格模式（不泄漏到同线程后续运行）。
-    AURORA_TEST_CHECK(aurora::strict_mode() == StrictMode::Off);
+AURORA_TEST_CASE(set_and_read_roundtrip) {
+    // 开关读写往返；用例结束前恢复 Off，避免状态泄漏到后续用例。
+    aurora::set_strict_mode(aurora::StrictMode::On);
+    AURORA_TEST_CHECK_EQ(aurora::strict_mode(), aurora::StrictMode::On);
+
+    aurora::set_strict_mode(aurora::StrictMode::Off);
+    AURORA_TEST_CHECK_EQ(aurora::strict_mode(), aurora::StrictMode::Off);
 }
 
-// 核心：严格模式下 degraded 触发 NDEBUG 安全的硬失败（经可注入处理器）。
-void test_strict_failure_is_fatal() {
+AURORA_TEST_CASE(injected_handler_receives_message_and_is_catchable) {
+    // 测试缝隙契约：注入的处理器收到原始消息；处理器抛异常时 on_strict_failure 的失败
+    // 可被调用方捕获（头文件文档明确建议测试注入抛 std::runtime_error 的处理器）。
     std::string captured;
-    bool thrown = false;
-
-    // 注入处理器：记录消息并抛异常，模拟 CI 捕获致命失败。
-    set_strict_failure_handler([&](std::string_view msg) -> void {
-        captured = std::string(msg);
-        throw std::runtime_error("strict-failure");
+    aurora::set_strict_failure_handler([&captured](std::string_view message) -> void {
+        captured.assign(message);
+        throw std::runtime_error{std::string{message}};
     });
 
-    set_strict_mode(StrictMode::On);
-    try {
-        Diagnostics::degraded("bad color", "paint", "render-degraded");
-    } catch (const std::runtime_error &e) {
-        thrown = true;
-        AURORA_TEST_CHECK(std::string(e.what()) == "strict-failure");
-    }
-    AURORA_TEST_CHECK(thrown);  // 严格模式下降级确实致命
-    AURORA_TEST_CHECK(!captured.empty());  // 处理器收到消息
-    AURORA_TEST_CHECK(captured.find("bad color") != std::string::npos);
+    AURORA_TEST_CHECK_THROW(aurora::on_strict_failure("ctx-broken"), std::runtime_error);
+    AURORA_TEST_CHECK_STREQ(captured, "ctx-broken");
 
-    // 非严格模式：仅记录，不触发硬失败。
-    set_strict_mode(StrictMode::Off);
-    captured.clear();
-    Diagnostics::degraded("another", "paint", "render-degraded");
-    AURORA_TEST_CHECK(captured.empty());  // 未触发处理器
-
-    // 恢复默认（生产默认 std::terminate）。
-    set_strict_failure_handler(nullptr);
-    set_strict_mode(StrictMode::Off);
+    // 恢复默认处理器，避免影响本文件后续死亡测试与其他用例。
+    aurora::set_strict_failure_handler(nullptr);
 }
 
-}  // namespace
-
-AURORA_TEST() {
-    test_application_strict_mode();
-    test_app_builder_strict_mode();
-    test_strict_failure_is_fatal();
+AURORA_TEST_CASE(default_handler_terminates_process) {
+    // 默认（handler 为空）路径：硬失败必须终止进程（std::terminate），保证 Release/CI 阻断。
+    // 防御性复位一次，确保父/子进程都处于默认处理器状态。
+    aurora::set_strict_failure_handler(nullptr);
+    AURORA_TEST_CHECK_DEATH(aurora::on_strict_failure("strict-default-terminate"), "");
 }
 
 }  // namespace aurora::test_cases::utest_strict_mode

@@ -1,370 +1,169 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/app/application.h
-/// 测试说明: application 单元测试
-///
+/// 测试说明: 覆盖 Application 无头构造的默认状态（无 Window、严格模式、窗口可见性/几何态
+/// 响应式初值）、子系统句柄（scene/focus/scheduler/shortcuts）、快捷键优先派发（消费/落空/禁用）、
+/// 空场景同步派发安全性与 App 流式构建器链式配置（不进入真实帧循环）
 
-// 目标源单元：Application + Application
-// 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
-
-// ── API 覆盖映射 ─────────────────────────────
-// Platform(platform()/App() 能力探测，sec_test_platform 段)。
-
-#include <iostream>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "aurora/app/application.h"
-#include "aurora/app/scene.h"
-#include "aurora/app/validate.h"
-#include "aurora/aurora.h"
-#include "aurora/core/image.h"
-#include "aurora/core/types.h"
-#include "aurora/render/painter.h"
-#include "aurora/widget/button.h"
-#include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
-#include "aurora/widget/widget.h"
-#include "aurora/window/frame_pacing.h"
-#include "aurora/window/platform.h"
-#include "aurora/window/surface.h"
-#include "aurora/window/window.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_application {
 
-namespace aurora::tests::sec_app {
-
-static auto make_deep(int n) -> Node {
-    if (n <= 0) {
-        return Node{Text{"leaf"}};
-    }
-    return Node{Column{make_deep(n - 1)}};
-}
-
-static void test_application() {
-    bool clicked = false;
-    Button btn{"OK"};
-    btn.on_click = [&]() -> void { clicked = true; };
-    Node root = std::move(btn);
-    Scene scene{root};
-    Application app{std::move(scene), 200, 100};
-
-    app.tick();  // 不崩溃
-    AURORA_TEST_CHECK_MSG(true, "Application: tick no crash");
-
-    // 先渲染一次完成 mount→layout→paint，使控件 bounds 落定，方可命中测试。
-    auto pr = app.render_to_png("app_test_out.png");
-    AURORA_TEST_CHECK_MSG(pr.ok(), "Application: render_to_png ok (pre-click layout)");
-
-    // 取按钮中心：click = Press→Release，仅 Move 不应触发（命中链派发）。
-    [[maybe_unused]] auto &btn_w = dynamic_cast<Button &>(app.scene().root());
-    const Rect bb = app.scene().root_node().bounds();
-    const Point center{.x = bb.origin.x + (bb.size.width / 2.0F), .y = bb.origin.y + (bb.size.height / 2.0F)};
-
-    app.dispatch_pointer(center.x, center.y, MouseAction::Press);
-    app.dispatch_pointer(center.x, center.y, MouseAction::Move);
-    app.dispatch_pointer(center.x, center.y, MouseAction::Release);
-    AURORA_TEST_CHECK_MSG(clicked, "Application: click (Press+Release) triggers Button on_click");
-
-    // 键盘 / 文本事件
-    KeyEvent k;
-    k.key = static_cast<int>(KeyCode::Tab);
-    bool kr = app.dispatch_key(k);
-    (void)kr;
-    AURORA_TEST_CHECK_MSG(true, "Application: dispatch_key no crash");
-    TextInputEvent t;
-    t.text = "a";
-    bool tr = app.dispatch_text(t);
-    (void)tr;
-    AURORA_TEST_CHECK_MSG(true, "Application: dispatch_text no crash");
-
-    // 渲染到 PNG 并回读校验
-    auto r = app.render_to_png("app_test_out.png");
-    AURORA_TEST_CHECK_MSG(r.ok(), "Application: render_to_png ok");
-    auto lr = Image::load("app_test_out.png");
-    AURORA_TEST_CHECK_MSG(lr.ok() && lr.value().width == 200 && lr.value().height == 100,
-                          "Application: rendered PNG decodes with right size");
-}
-
-static void test_validate() {
-    Node good = Column{Node{Text{"A"}}, Node{Button{"B"}}};
-    auto vr = validate(good);
-    AURORA_TEST_CHECK_MSG(vr.ok(), "validate: valid tree passes");
-
-    auto deep = make_deep(70);
-    auto dr = validate(deep);
-    AURORA_TEST_CHECK_MSG(!dr.ok(), "validate: deep tree fails depth check");
-}
-
-static void run() {
-    AURORA_TEST_PRINTF("=== app_test ===\n");
-    test_application();
-    test_validate();
-}
-}  // namespace aurora::tests::sec_app
-
-namespace aurora::tests::sec_idle_loop {
-
-static void run() {
-    // ---- 1. 静态场景跑 N 帧：首帧渲染，其余全部 idle 跳过 ----
-    {
-        FrameStats::instance().reset();
-        Scene scene{Text("static ui")};
-        auto surface = std::make_unique<HeadlessSurface>();
-        (void)surface->begin_frame(320, 240);
-        WindowOptions opts;
-        opts.size = Size{.width = 320.0F, .height = 240.0F};
-        opts.max_frames = 30;
-        Application app{std::move(scene), std::move(surface), opts};
-        AURORA_TEST_CHECK(app.window() != nullptr);
-        app.run();  // Headless wait_events 为 no-op：有限循环快速跑完，不引入等待
-        const auto &s = FrameStats::instance();
-        // 30 帧中仅首帧真实渲染，其余 29 帧应为 idle 跳过
-        AURORA_TEST_CHECK_GE(s.idle_frame_count(), 29U);
-        AURORA_TEST_CHECK_EQ(app.window()->surface().frame_count(), 1);
-    }
-
-    // ---- 2. has_pending_dirty：首帧前有、渲染后无、标脏后有 ----
-    {
-        auto surface = std::make_unique<HeadlessSurface>();
-        (void)surface->begin_frame(320, 240);
-        Window win{std::move(surface)};
-        AURORA_TEST_CHECK_TRUE(win.has_pending_dirty());  // 首帧未绘：视为有脏
-        Node root = Text("hello");
-        AURORA_TEST_CHECK(win.present_root(root).ok());
-        AURORA_TEST_CHECK_FALSE(win.has_pending_dirty());  // 渲染完成：稳态无脏
-        win.mark_dirty(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 10.0F, .height = 10.0F}});
-        AURORA_TEST_CHECK_TRUE(win.has_pending_dirty());  // 手动标脏：下一帧需渲染
-        // 脏追踪关闭：视为永远有脏（每帧全绘，仅受帧预算节流）
-        win.enable_dirty_tracking(false);
-        AURORA_TEST_CHECK_TRUE(win.has_pending_dirty());
-    }
-
-    // ---- 3. 静态稳态的调度决策：无脏/无动画/无定时任务 → 无限等待 ----
-    {
-        auto surface = std::make_unique<HeadlessSurface>();
-        (void)surface->begin_frame(320, 240);
-        Window win{std::move(surface)};
-        Node root = Text("idle");
-        AURORA_TEST_CHECK(win.present_root(root).ok());
-        Animator anim;
-        Scheduler sched;
-        const double wait =
-            compute_wait_timeout(win.has_pending_dirty(), anim.has_active(), sched.next_deadline_ms(), 16.67, 1.0);
-        AURORA_TEST_CHECK(wait < 0.0);  // 无限等待：真实后端将阻塞睡眠，CPU 趋近 0
-        // Animator/Scheduler 空闲信息
-        AURORA_TEST_CHECK_FALSE(anim.has_active());
-        AURORA_TEST_CHECK(sched.next_deadline_ms() < 0.0);
-        auto h = sched.set_timeout(std::chrono::milliseconds(500), []() -> void {});
-        AURORA_TEST_CHECK_NEAR(static_cast<float>(sched.next_deadline_ms()), 500.0F, 1.0F);
-        h.cancel();
-        AURORA_TEST_CHECK(sched.next_deadline_ms() < 0.0);  // 取消后不再唤醒
-    }
-
-    // ---- 4. FrameStats 唤醒/睡眠观测 ----
-    {
-        FrameStats::instance().reset();
-        AURORA_TEST_CHECK_EQ(FrameStats::instance().wakeup_count(), 0U);
-        AURORA_TEST_CHECK_NEAR(static_cast<float>(FrameStats::instance().sleep_ratio()), 0.0F, 1e-6F);
-        FrameStats::instance().record_wait(10.0);
-        FrameStats::instance().record_wait(10.0);
-        AURORA_TEST_CHECK_EQ(FrameStats::instance().wakeup_count(), 2U);
-        AURORA_TEST_CHECK(FrameStats::instance().sleep_ratio() >= 0.0);
-        AURORA_TEST_CHECK(FrameStats::instance().sleep_ratio() <= 1.0);
-        FrameStats::instance().reset();  // 不污染后续测试
-    }
-}
-}  // namespace aurora::tests::sec_idle_loop
-
-namespace aurora::tests::sec_present_skip {
-
 namespace {
 
-/// @brief 统计 layout/paint 调用次数的间谍控件，用于断言「仅 paint 脏时跳过整树重排」。
-class SpyWidget : public LeafWidget {
-  public:
-    int layout_calls = 0;
-    int paint_calls = 0;
-
-    [[nodiscard]] auto type_name() const -> const char * override { return "SpyWidget"; }
-    [[nodiscard]] static auto describe_static() -> WidgetDescriptor { return WidgetDescriptor{.name = "SpyWidget"}; }
-    [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
-
-  protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        ++layout_calls;
-        return c.constrain(Size{.width = 100.0F, .height = 30.0F});
-    }
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
-        ++paint_calls;
-        p.fill_rect(bounds, Color{200, 200, 200, 255});
-    }
-};
-
-/// @brief 创建已定尺寸的 Headless 窗口，并返回窗口与底层 surface 裸指针（供 resize 测试）。
-auto make_sized_window(int w, const int h, HeadlessSurface *&out_raw) -> Window {
-    auto surface = std::make_unique<HeadlessSurface>();
-    (void)surface->begin_frame(w, h);
-    out_raw = surface.get();  // NOLINT
-    return Window{std::move(surface)};
+auto make_scene() -> Scene {
+    return Scene{Node{std::make_shared<Text>("hi")}};
 }
 
 }  // namespace
 
-static void run() {
-    // ---- 1. idle 跳帧：无脏/无尺寸变化/同根 → 整帧跳过（frame_count 不变）----
-    {
-        HeadlessSurface *raw = nullptr;
-        auto win = make_sized_window(512, 512, raw);
-        auto spy = std::make_shared<SpyWidget>();
-        Node root = std::static_pointer_cast<Widget>(spy);  // 间谍控件直接作为根
-        auto r1 = win.present_root(root);
-        AURORA_TEST_CHECK(r1.ok());
-        AURORA_TEST_CHECK(raw->frame_count() == 1);
-        // 第二帧 idle：无任何变更 → 应被整帧跳过（不调用 present）
-        auto r2 = win.present_root(root);
-        AURORA_TEST_CHECK(r2.ok());
-        AURORA_TEST_CHECK(raw->frame_count() == 1);
-    }
+AURORA_TEST_CASE(headless_application_defaults) {
+    Application app{make_scene(), 320, 240};
 
-    // ---- 2. 脏变更触发重绘：mark_needs_paint 应使下一帧 present ----
-    {
-        HeadlessSurface *raw = nullptr;
-        auto win = make_sized_window(512, 512, raw);
-        auto spy = std::make_shared<SpyWidget>();
-        Node root = std::static_pointer_cast<Widget>(spy);
-        auto r1 = win.present_root(root);
-        AURORA_TEST_CHECK(r1.ok());
-        AURORA_TEST_CHECK(raw->frame_count() == 1);
-        spy->mark_needs_paint();  // 模拟外观变更（如选中态）
-        auto r2 = win.present_root(root);
-        AURORA_TEST_CHECK(r2.ok());
-        AURORA_TEST_CHECK(raw->frame_count() == 2);
-    }
+    // 无头构造：不持有后端 Window。
+    AURORA_TEST_CHECK_NULL(app.window());
+    // 严格模式默认 Off；窗口可见性/几何态响应式初值为 Visible / Normal。
+    AURORA_TEST_CHECK_EQ(app.strict_mode(), StrictMode::Off);
+    AURORA_TEST_CHECK_EQ(app.window_state().get(), WindowState::Visible);
+    AURORA_TEST_CHECK_EQ(app.window_mode().get(), WindowMode::Normal);
 
-    // ---- 3. layout/paint 分离：仅 paint 脏时跳过整树重排（layout 计数不变）----
-    {
-        HeadlessSurface *raw = nullptr;  // NOLINT
-        auto win = make_sized_window(512, 512, raw);
-        auto spy = std::make_shared<SpyWidget>();
-        Node root = std::static_pointer_cast<Widget>(spy);
-        auto r1 = win.present_root(root);
-        AURORA_TEST_CHECK(r1.ok());
-        AURORA_TEST_CHECK(spy->layout_calls == 1);
-        AURORA_TEST_CHECK(spy->paint_calls == 1);
-        spy->mark_needs_paint();  // 仅外观变更：不应触发重排
-        auto r2 = win.present_root(root);
-        AURORA_TEST_CHECK(r2.ok());
-        AURORA_TEST_CHECK(spy->layout_calls == 1);  // 重排被跳过
-        AURORA_TEST_CHECK(spy->paint_calls == 2);  // 仅重绘
-    }
+    // 命令式窗口状态回调可注册（无 Window 时不会触发）。
+    bool state_cb_called = false;
+    bool mode_cb_called = false;
+    app.set_on_window_state([&state_cb_called](WindowState) { state_cb_called = true; });
+    app.set_on_window_mode([&mode_cb_called](WindowMode) { mode_cb_called = true; });
+    AURORA_TEST_CHECK_FALSE(state_cb_called);
+    AURORA_TEST_CHECK_FALSE(mode_cb_called);
 
-    // ---- 4. mark_needs_layout 应触发整树重排（对照，确保分离是单向的）----
-    {
-        HeadlessSurface *raw = nullptr;  // NOLINT
-        auto win = make_sized_window(512, 512, raw);
-        auto spy = std::make_shared<SpyWidget>();
-        Node root = std::static_pointer_cast<Widget>(spy);
-        auto r1 = win.present_root(root);
-        AURORA_TEST_CHECK(r1.ok());
-        AURORA_TEST_CHECK(spy->layout_calls == 1);
-        AURORA_TEST_CHECK(spy->paint_calls == 1);
-        spy->mark_needs_layout();  // 布局变更：应重排
-        auto r2 = win.present_root(root);
-        AURORA_TEST_CHECK(r2.ok());
-        AURORA_TEST_CHECK(spy->layout_calls == 2);  // 重排发生
-        AURORA_TEST_CHECK(spy->paint_calls == 2);
-    }
-
-    // ---- 5. resize 强制全绘：尺寸变化 → 下一帧必须重绘 ----
-    {
-        HeadlessSurface *raw = nullptr;
-        auto win = make_sized_window(512, 512, raw);
-        auto spy = std::make_shared<SpyWidget>();
-        Node root = std::static_pointer_cast<Widget>(spy);
-        auto r1 = win.present_root(root);
-        AURORA_TEST_CHECK(r1.ok());
-        AURORA_TEST_CHECK(raw->frame_count() == 1);
-        (void)raw->begin_frame(400, 300);  // 模拟窗口缩放/最大化
-        auto r2 = win.present_root(root);
-        AURORA_TEST_CHECK(r2.ok());
-        AURORA_TEST_CHECK(raw->frame_count() == 2);
-    }
-
-    // ---- 6. 系统重绘请求（最小化还原后的 WM_PAINT）：idle 跳帧时仍须重新上屏 ----
-    // 回归：窗口表面被 OS 置无效后，脏追踪判定「无脏/尺寸未变」直接 return，
-    // present 不被调用 → 还原后停留在类背景刷底色（白屏）。修复后：重绘请求驱动的
-    // 跳帧分支全量 blit 重新上屏（frame_count 增加），但不重绘（paint_calls 不变）。
-    {
-        HeadlessSurface *raw = nullptr;
-        auto win = make_sized_window(512, 512, raw);
-        auto spy = std::make_shared<SpyWidget>();
-        Node root = std::static_pointer_cast<Widget>(spy);
-        auto r1 = win.present_root(root);
-        AURORA_TEST_CHECK(r1.ok());
-        AURORA_TEST_CHECK(raw->frame_count() == 1);
-        AURORA_TEST_CHECK(spy->paint_calls == 1);
-        // 无任何脏变更，模拟 OS 要求重绘（如最小化还原）：必须重新 present 兜底
-        raw->simulate_present_request();
-        AURORA_TEST_CHECK(raw->frame_count() == 2);  // 重新上屏（修前：仍为 1，白屏）
-        AURORA_TEST_CHECK(spy->paint_calls == 1);  // 帧缓冲仍有效，不重绘
-        // 普通 idle 帧（非系统请求）仍正常跳帧，不因本修复退化为每帧上屏
-        auto r2 = win.present_root(root);
-        AURORA_TEST_CHECK(r2.ok());
-        AURORA_TEST_CHECK(raw->frame_count() == 2);
-    }
+    // set_on_frame / set_overlay 仅注册/转发，无头路径不触发。
+    app.set_on_frame([] {});
+    app.set_overlay(nullptr);
+    AURORA_TEST_CHECK_NULL(app.window());
 }
-}  // namespace aurora::tests::sec_present_skip
 
-namespace aurora::tests::sec_platform {
+AURORA_TEST_CASE(application_exposes_subsystem_handles) {
+    Application app{make_scene(), 100, 80};
 
-static void run() {
-    const Platform p = platform();
-
-    // 种类应与 auto_detect 一致。
-    AURORA_TEST_CHECK(p.surface == auto_detect_surface());
-
-    // 桌面平台：is_desktop 为真，device 为 Desktop。
-    AURORA_TEST_CHECK(p.is_desktop());
-    AURORA_TEST_CHECK(!p.is_mobile());
-    AURORA_TEST_CHECK(p.device == DeviceKind::Desktop);
-
-    // 能力标志与种类一致：真实显示 Surface 支持多点触控与高频率指针。
-    const PlatformCapabilities c = p.capabilities();
-    AURORA_TEST_CHECK(c.desktop);
-    AURORA_TEST_CHECK(!c.mobile);
-    if (p.surface == SurfaceKind::Win32 || p.surface == SurfaceKind::Glfw
-#ifdef AURORA_BACKEND_X11
-        || p.surface == SurfaceKind::X11
-#endif
-#ifdef AURORA_BACKEND_WAYLAND
-        || p.surface == SurfaceKind::Wayland
-#endif
-#ifdef AURORA_BACKEND_MACOS
-        || p.surface == SurfaceKind::MacOS
-#endif
-    ) {
-        AURORA_TEST_CHECK(c.multitouch);
-        AURORA_TEST_CHECK(c.high_frequency_pointer);
-    } else {
-        // Headless / 其他种类：无触摸能力。
-        AURORA_TEST_CHECK(!c.multitouch);
-        AURORA_TEST_CHECK(!c.high_frequency_pointer);
-    }
-
-    // App() 流式构建器可链式构造且不崩溃（不实际开窗口）。
-    auto &&builder = App().title("Platform Test").size(320, 240);
-    (void)builder;
-
-    AURORA_LOG_INFO("test", "platform_test: ALL PASS (surface=", static_cast<int>(p.surface), ")");
+    // 场景根为构造时注入的 widget。
+    AURORA_TEST_CHECK_EQ(std::string{app.scene().root().type_name()}, "Text");
+    // 空场景下焦点管理器无焦点。
+    AURORA_TEST_CHECK_NULL(app.focus().focused());
+    // 快捷键注册表初始为空。
+    AURORA_TEST_CHECK_EQ(app.shortcuts().count(), 0U);
+    // 子系统句柄可取引用且稳定。
+    AURORA_TEST_CHECK_EQ(&app.scheduler(), &app.scheduler());
+    AURORA_TEST_CHECK_EQ(&app.shortcuts(), &app.shortcuts());
 }
-}  // namespace aurora::tests::sec_platform
 
-AURORA_TEST() {
-    aurora::tests::sec_app::run();
-    aurora::tests::sec_idle_loop::run();
-    aurora::tests::sec_present_skip::run();
-    aurora::tests::sec_platform::run();
+AURORA_TEST_CASE(strict_mode_roundtrip) {
+    Application app{make_scene(), 100, 80};
+    AURORA_TEST_CHECK_EQ(app.strict_mode(), StrictMode::Off);
+
+    app.set_strict_mode(StrictMode::On);
+    AURORA_TEST_CHECK_EQ(app.strict_mode(), StrictMode::On);
+
+    app.set_strict_mode(StrictMode::Off);
+    AURORA_TEST_CHECK_EQ(app.strict_mode(), StrictMode::Off);
+}
+
+AURORA_TEST_CASE(dispatch_key_consumed_by_registered_shortcut) {
+    Application app{make_scene(), 320, 240};
+    int fired = 0;
+    app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::O}, [&fired] { ++fired; });
+
+    KeyEvent e;
+    e.key = static_cast<int>(KeyCode::O);
+    e.action = KeyAction::Down;
+    e.modifiers = ModifierKey::Control;
+    AURORA_TEST_CHECK_TRUE(app.dispatch_key(e));
+    AURORA_TEST_CHECK_EQ(fired, 1);
+}
+
+AURORA_TEST_CASE(dispatch_key_falls_through_when_unmatched) {
+    Application app{make_scene(), 320, 240};
+    int fired = 0;
+    app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::O}, [&fired] { ++fired; });
+
+    // 无修饰键的同键不匹配 → 快捷键不消费；空场景无人处理 → 返回 false。
+    KeyEvent plain;
+    plain.key = static_cast<int>(KeyCode::O);
+    plain.action = KeyAction::Down;
+    plain.modifiers = ModifierKey::None;
+    AURORA_TEST_CHECK_FALSE(app.dispatch_key(plain));
+    AURORA_TEST_CHECK_EQ(fired, 0);
+
+    // 匹配组合但为抬起事件 → 不触发快捷键。
+    KeyEvent up;
+    up.key = static_cast<int>(KeyCode::O);
+    up.action = KeyAction::Up;
+    up.modifiers = ModifierKey::Control;
+    AURORA_TEST_CHECK_FALSE(app.dispatch_key(up));
+    AURORA_TEST_CHECK_EQ(fired, 0);
+
+    // 注册表外的键同样落空。
+    KeyEvent other;
+    other.key = static_cast<int>(KeyCode::S);
+    other.action = KeyAction::Down;
+    other.modifiers = ModifierKey::Control;
+    AURORA_TEST_CHECK_FALSE(app.dispatch_key(other));
+    AURORA_TEST_CHECK_EQ(fired, 0);
+}
+
+AURORA_TEST_CASE(disabled_shortcut_not_consumed) {
+    Application app{make_scene(), 320, 240};
+    int fired = 0;
+    const int id = app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::S}, [&fired] { ++fired; });
+
+    app.shortcuts().set_enabled(id, false);
+    KeyEvent e;
+    e.key = static_cast<int>(KeyCode::S);
+    e.action = KeyAction::Down;
+    e.modifiers = ModifierKey::Control;
+    AURORA_TEST_CHECK_FALSE(app.dispatch_key(e));
+    AURORA_TEST_CHECK_EQ(fired, 0);
+
+    // 重新启用后恢复消费。
+    app.shortcuts().set_enabled(id, true);
+    AURORA_TEST_CHECK_TRUE(app.dispatch_key(e));
+    AURORA_TEST_CHECK_EQ(fired, 1);
+}
+
+AURORA_TEST_CASE(plain_scene_dispatches_are_safe_noops) {
+    Application app{make_scene(), 320, 240};
+
+    // 空场景（纯 Text 叶根）上的同步派发不命中任何控件，应安全无害。
+    AURORA_TEST_CHECK_NO_THROW(app.dispatch_click(5.0F, 5.0F));
+    AURORA_TEST_CHECK_NO_THROW(app.dispatch_pointer(6.0F, 6.0F, MouseAction::Move));
+    AURORA_TEST_CHECK_NO_THROW(app.tick());
+    const std::vector<std::string> dropped_paths{"C:/tmp/a.txt"};
+    AURORA_TEST_CHECK_NO_THROW(app.dispatch_file_drop(dropped_paths, 1.0F, 2.0F));
+
+    // 文本输入无人处理 → 返回 false。
+    TextInputEvent text;
+    text.text = "x";
+    AURORA_TEST_CHECK_FALSE(app.dispatch_text(text));
+}
+
+AURORA_TEST_CASE(app_builder_chains_fluently) {
+    // 流式构建器：各 setter 返回同一实例引用（可链式）。
+    // 注：命名空间里自由函数 App() 会隐藏类名 App，类型语境用 auto 绕开。
+    auto builder = aurora::App::make();
+    auto &chained =
+        builder.title("utest").size(320, 240).frames(1).on_frame([] {}).strict_mode(StrictMode::Off);
+    AURORA_TEST_CHECK_EQ(&chained, &builder);
+
+    // 文档形态的自由函数工厂 `au::App()` 可用。
+    auto factory = aurora::App();
+    AURORA_TEST_CHECK_NO_THROW(factory.title("factory"));
+
+    // 显式 Node 构造与 view() 替换（仅配置，不进入帧循环）；elaborated 类型名绕开函数隐藏。
+    class aurora::App with_view{Node{std::make_shared<Text>("root")}};
+    AURORA_TEST_CHECK_NO_THROW(with_view.view(Node{std::make_shared<Text>("replaced")}));
 }
 
 }  // namespace aurora::test_cases::utest_application

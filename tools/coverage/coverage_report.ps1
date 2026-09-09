@@ -84,8 +84,14 @@ $incRoot = Join-Path $SrcRoot 'include'
 $testDir = Join-Path $SrcRoot 'tests'
 $testFiles = @{}
 if (Test-Path $testDir) {
-    foreach ($t in (Get-ChildItem -Path $testDir -Filter test_*.cpp -ErrorAction SilentlyContinue)) {
-        $testFiles[$t.BaseName] = $true
+    # 测试文件命名纪律（CODING_STANDARDS.md §3）：unit 一律 utest_、integration 一律 itest_。
+    foreach ($sub in 'unit', 'integration') {
+        $dir = Join-Path $testDir $sub
+        if (Test-Path $dir) {
+            foreach ($t in (Get-ChildItem -Path $dir -Filter *.cpp -ErrorAction SilentlyContinue)) {
+                $testFiles[$t.BaseName] = $true
+            }
+        }
     }
 }
 $total = 0; $covered = 0; $uncovered = @()
@@ -93,15 +99,19 @@ if (Test-Path $incRoot) {
     foreach ($h in (Get-ChildItem -Recurse -Path $incRoot -Filter *.h -ErrorAction SilentlyContinue)) {
         $total++
         $base = $h.BaseName
-        if ($testFiles['test_' + $base]) { $covered++ } else { $uncovered += ($h.FullName.Replace($SrcRoot, '').TrimStart('\', '/')) }
+        if ($testFiles['utest_' + $base] -or $testFiles['itest_' + $base]) {
+            $covered++
+        } else {
+            $uncovered += ($h.FullName.Replace($SrcRoot, '').TrimStart('\', '/'))
+        }
     }
 }
 $pct = if ($total -eq 0) { 100.0 } else { [math]::Round(100.0 * $covered / $total, 1) }
 Write-Host ''
-Write-Host '=== public header -> test_*.cpp mapping ==='
+Write-Host '=== public header -> utest_/itest_ mapping ==='
 Write-Host ('COVERED: ' + $covered + '/' + $total + ' (' + $pct + '%)')
 if ($uncovered.Count -gt 0) {
-    Write-Host 'Headers WITHOUT a test_*.cpp:'
+    Write-Host 'Headers WITHOUT a utest_/itest_ file:'
     $uncovered | Sort-Object | ForEach-Object { Write-Host ('  ' + $_) }
 }
 

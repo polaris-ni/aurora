@@ -26,7 +26,34 @@
 #include <cstdio>
 #endif
 
+#if defined(AURORA_ENABLE_DEBUG) && defined(AURORA_ENABLE_TEST_HOOKS)
+#define AURORA_CLIPBOARD_TEST_BACKEND 1
+#include <mutex>
+#include <utility>
+#endif
+
 namespace aurora {
+
+#if defined(AURORA_CLIPBOARD_TEST_BACKEND)
+namespace {
+/// @brief 测试注入点（test-only）：进程内 memory 后端，安装后 set/get 全部改走内存。
+///
+/// 供测试框架在并行（CTest 进程隔离 + 用例边界复位）下隔离系统剪贴板；
+/// 进程全局单例 + 互斥保护。未安装（active 为假）时一切走平台实现，零行为差异。
+struct TestBackend {
+    std::mutex mutex;  ///< 保护以下三个成员（死亡测试子进程与主进程各自持有独立实例）
+    std::string text;  ///< memory 后端的文本载荷（UTF-8）
+    Image image;  ///< memory 后端的图像载荷（RGBA8）
+    bool active = false;  ///< 后端是否已安装
+};
+
+/// @brief 进程唯一后端实例（函数内 static，规避静态初始化顺序问题）。
+[[nodiscard]] auto test_backend() -> TestBackend & {
+    static TestBackend backend;
+    return backend;
+}
+} // namespace
+#endif
 
 #if (defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)) || defined(AURORA_PLATFORM_MACOS)
 namespace {
@@ -59,6 +86,16 @@ auto read_from_command(const std::string &cmd) -> std::string {
 #endif
 
 auto Clipboard::set_text(const std::string &text) -> void {
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    {
+        auto &backend = test_backend();
+        const std::scoped_lock lock{backend.mutex};
+        if (backend.active) {
+            backend.text = text;
+            return;
+        }
+    }
+#endif
 #ifdef AURORA_PLATFORM_WINDOWS
     if (text.empty()) {
         return;
@@ -101,6 +138,15 @@ auto Clipboard::set_text(const std::string &text) -> void {
 }
 
 auto Clipboard::get_text() -> std::string {
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    {
+        auto &backend = test_backend();
+        const std::scoped_lock lock{backend.mutex};
+        if (backend.active) {
+            return backend.text;
+        }
+    }
+#endif
 #ifdef AURORA_PLATFORM_WINDOWS
     if (OpenClipboard(nullptr) == 0) {
         AURORA_LOG_WARN("clipboard", "OpenClipboard failed (get_text)");
@@ -203,6 +249,15 @@ auto Clipboard::set_image(const Image &img) -> void {
 auto Clipboard::get_image() -> Image {
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast): Win32
     // HGLOBAL 字节搬运不可避免
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    {
+        auto &backend = test_backend();
+        const std::scoped_lock lock{backend.mutex};
+        if (backend.active) {
+            return backend.image;
+        }
+    }
+#endif
 #ifdef AURORA_PLATFORM_WINDOWS
     Image out;
     if (OpenClipboard(nullptr) == 0) {
@@ -292,5 +347,47 @@ auto Clipboard::get_image() -> Image {
     return Image{};
 #endif
 } // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
+
+// ---- 测试注入点（test-only）------------------------------------------------
+// 双宏（AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS）齐备时操作进程内 memory
+// 后端；任一关闭时返回 false / no-op（消费端调用始终可编译，平台行为不变）。
+
+auto Clipboard::install_test_backend() -> bool {
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    auto &backend = test_backend();
+    const std::scoped_lock lock{backend.mutex};
+    backend.text.clear();
+    backend.image = Image{};
+    backend.active = true;
+    return true;
+#else
+    return false;
+#endif
+}
+
+auto Clipboard::reset_test_backend() -> void {
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    auto &backend = test_backend();
+    const std::scoped_lock lock{backend.mutex};
+    backend.text.clear();
+    backend.image = Image{};
+#endif
+}
+
+auto Clipboard::remove_test_backend() -> bool {
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    auto &backend = test_backend();
+    const std::scoped_lock lock{backend.mutex};
+    const bool was_active = backend.active;
+    backend.active = false;
+    backend.text.clear();
+    backend.image = Image{};
+    return was_active;
+#else
+    return false;
+#endif
+}
+
+#undef AURORA_CLIPBOARD_TEST_BACKEND
 
 } // namespace aurora

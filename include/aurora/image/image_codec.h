@@ -42,7 +42,8 @@ enum class PixelFormat : std::uint8_t {
 [[nodiscard]] auto format_name(ImageFormat f) -> std::string_view;
 
 /// @brief 按魔数嗅探格式（只读前若干字节，不依赖扩展名）。
-/// @note SVG 为文本格式，检测 `<svg` 子串；无法判定返回 Unknown。
+/// @note SVG 为文本格式、**无魔数**，故嗅探恒返回 Unknown，须经扩展名（见 `format_from_path`）判定；
+/// 无法判定返回 Unknown。
 [[nodiscard]] auto detect_format(std::span<const std::uint8_t> header) -> ImageFormat;
 
 /// @brief 按文件扩展名推测格式（非权威，仅作兜底/提示，优先级低于嗅探）。

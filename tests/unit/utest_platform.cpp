@@ -1,121 +1,114 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/platform.h
-/// 测试说明: platform 单元测试
-///
-
-// Platform 目标平台/架构/位宽宏探测 1:1 测试。
-// 覆盖：平台互斥性（恰好一个具体平台宏置 1）、UNIX 聚合一致性、
-//       架构与位宽互斥性、位宽与指针宽度一致、aurora.h 入口可达性。
+/// 测试说明: 覆盖平台/架构/位宽三类探测宏的「恰好一个」互斥性、位宽与指针宽度一致性、UNIX 聚合宏与 Windows 的互斥契约
 
 #include "aurora/core/platform.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_platform {
 
-namespace sec_platform_macros {
-// 本命名空间的宏名（PLATFORM_COUNT_n）与常量名参与预处理条件配对：命名重命名只会改写
-// 「当前平台生效分支」中的 #define，#ifdef 引用处不会被同步改写，计数会恒为 0。故整体抑制。
-// NOLINTBEGIN(readability-identifier-naming)
-
-// 预处理器侧计数（恰好一个语义只能在预处理期验证，运行期转发为常量）。
+AURORA_TEST_CASE(exactly_one_platform_family_macro_defined) {
+    // 契约：受支持平台上 6 个具体平台宏恰好命中一个（聚合宏 AURORA_PLATFORM_UNIX 不计入）。
+    int defined_count = 0;
 #ifdef AURORA_PLATFORM_WINDOWS
-#define PLATFORM_COUNT_1
+    ++defined_count;
 #endif
 #ifdef AURORA_PLATFORM_MACOS
-#define PLATFORM_COUNT_2
+    ++defined_count;
 #endif
 #ifdef AURORA_PLATFORM_WASM
-#define PLATFORM_COUNT_3
+    ++defined_count;
 #endif
 #ifdef AURORA_PLATFORM_ANDROID
-#define PLATFORM_COUNT_4
+    ++defined_count;
 #endif
 #ifdef AURORA_PLATFORM_LINUX
-#define PLATFORM_COUNT_5
+    ++defined_count;
 #endif
 #ifdef AURORA_PLATFORM_BSD
-#define PLATFORM_COUNT_6
+    ++defined_count;
 #endif
-
-constexpr int k_platform_count =
-#ifdef PLATFORM_COUNT_1
-    1 +
-#endif
-#ifdef PLATFORM_COUNT_2
-    1 +
-#endif
-#ifdef PLATFORM_COUNT_3
-    1 +
-#endif
-#ifdef PLATFORM_COUNT_4
-    1 +
-#endif
-#ifdef PLATFORM_COUNT_5
-    1 +
-#endif
-#ifdef PLATFORM_COUNT_6
-    1 +
-#endif
-    0;
-
-constexpr int k_bit_count =
-#if defined(AURORA_BIT_64) && !defined(AURORA_BIT_32)
-    1;
-#elif defined(AURORA_BIT_32) && !defined(AURORA_BIT_64)
-    1;
-#else
-    0;
-#endif
-
-constexpr bool k_unix_aggregate =
-#ifdef AURORA_PLATFORM_UNIX
-    true;
-#else
-    false;
-#endif
-
-void run() {
-    // ---- 1. 平台宏恰好一个置 1（受支持平台上）----
-    AURORA_TEST_CHECK_EQ(k_platform_count, 1);
-
-    // ---- 2. UNIX 聚合与平台家族一致 ----
-#ifdef AURORA_PLATFORM_WINDOWS
-    AURORA_TEST_CHECK_FALSE(k_unix_aggregate);
-#else
-    AURORA_TEST_CHECK_TRUE(k_unix_aggregate);
-#endif
-
-    // ---- 3. 架构已知且唯一（x86/x64/arm/riscv/wasm 至少其一；本测试环境必然命中 x64）----
-    constexpr bool arch_known =
-#if defined(AURORA_ARCH_X64) || defined(AURORA_ARCH_X86) || defined(AURORA_ARCH_AARCH64) || \
-    defined(AURORA_ARCH_ARM32) || defined(AURORA_ARCH_RISCV64) || defined(AURORA_ARCH_WASM)
-        true;
-#else
-        false;
-#endif
-    AURORA_TEST_CHECK_TRUE(arch_known);
-
-    // ---- 4. 位宽恰好一个且与指针宽度一致 ----
-    AURORA_TEST_CHECK_EQ(k_bit_count, 1);
-    constexpr bool ptr64 = (sizeof(void *) == 8);
-#ifdef AURORA_BIT_64
-    AURORA_TEST_CHECK_TRUE(ptr64);
-#else
-    AURORA_TEST_CHECK_FALSE(ptr64);
-#endif
-
-    // ---- 5. 架构 → 位宽 推导自洽 ----
-#if defined(AURORA_ARCH_X64) || defined(AURORA_ARCH_AARCH64) || defined(AURORA_ARCH_RISCV64)
-    AURORA_TEST_CHECK_TRUE(ptr64);
-#elif defined(AURORA_ARCH_X86) || defined(AURORA_ARCH_ARM32)
-    AURORA_TEST_CHECK_FALSE(ptr64);
-#endif
+    AURORA_TEST_CHECK_EQ(defined_count, 1);
 }
 
-// NOLINTEND(readability-identifier-naming)
+AURORA_TEST_CASE(exactly_one_arch_macro_defined) {
+    // 契约：已知架构上 AURORA_ARCH_* 恰好命中一个。
+    int defined_count = 0;
+#ifdef AURORA_ARCH_X64
+    ++defined_count;
+#endif
+#ifdef AURORA_ARCH_X86
+    ++defined_count;
+#endif
+#ifdef AURORA_ARCH_AARCH64
+    ++defined_count;
+#endif
+#ifdef AURORA_ARCH_ARM32
+    ++defined_count;
+#endif
+#ifdef AURORA_ARCH_RISCV64
+    ++defined_count;
+#endif
+#ifdef AURORA_ARCH_WASM
+    ++defined_count;
+#endif
+    AURORA_TEST_CHECK_EQ(defined_count, 1);
+}
 
-}  // namespace sec_platform_macros
+AURORA_TEST_CASE(bit_width_matches_pointer_size_and_arch) {
+    // 契约：AURORA_BIT_64 / AURORA_BIT_32 恰好一个置 1，且与指针宽度、64/32 位架构族一致。
+#if defined(AURORA_BIT_64)
+    AURORA_TEST_CHECK_EQ(sizeof(void*), 8U);
+#elif defined(AURORA_BIT_32)
+    AURORA_TEST_CHECK_EQ(sizeof(void*), 4U);
+#else
+    AURORA_TEST_FAIL("AURORA_BIT_64 / AURORA_BIT_32 必须恰好定义一个");
+#endif
 
-AURORA_TEST() { sec_platform_macros::run(); }
+#if defined(AURORA_ARCH_X64) || defined(AURORA_ARCH_AARCH64) || defined(AURORA_ARCH_RISCV64)
+    const bool arch_is_64 = true;
+#elif defined(AURORA_ARCH_X86) || defined(AURORA_ARCH_ARM32)
+    const bool arch_is_64 = false;
+#else
+    const bool arch_is_64 = (sizeof(void*) == 8U);  // WASM 等未知架构：按指针宽度对齐
+#endif
+
+#if defined(AURORA_BIT_64)
+    const bool bit_is_64 = true;
+#else
+    const bool bit_is_64 = false;
+#endif
+    AURORA_TEST_CHECK_EQ(arch_is_64, bit_is_64);
+}
+
+AURORA_TEST_CASE(unix_aggregate_follows_platform_family) {
+    // 契约：unix-like 家族（macOS/Linux/Android/BSD）任一命中 ⇒ AURORA_PLATFORM_UNIX 必须为真。
+#if defined(AURORA_PLATFORM_MACOS) || defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_ANDROID) || \
+    defined(AURORA_PLATFORM_BSD)
+    const bool family_hit = true;
+#else
+    const bool family_hit = false;
+#endif
+#if defined(AURORA_PLATFORM_UNIX)
+    const bool unix_defined = true;
+#else
+    const bool unix_defined = false;
+#endif
+    AURORA_TEST_CHECK(!family_hit || unix_defined);
+}
+
+AURORA_TEST_CASE(windows_platform_excludes_unix_aggregate) {
+#if defined(AURORA_PLATFORM_WINDOWS)
+    // Windows 目标：平台宏取值 1U，且 UNIX 聚合宏必须保持未定义。
+    static_assert(AURORA_PLATFORM_WINDOWS == 1U);
+# if defined(AURORA_PLATFORM_UNIX)
+    AURORA_TEST_FAIL("Windows 平台不应定义 AURORA_PLATFORM_UNIX");
+# else
+    AURORA_TEST_CHECK(true);
+# endif
+#else
+    AURORA_TEST_SKIP("Windows 专属互斥契约，仅 Windows 目标可验");
+#endif
+}
 
 }  // namespace aurora::test_cases::utest_platform

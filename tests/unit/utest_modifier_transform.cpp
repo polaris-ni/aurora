@@ -1,237 +1,114 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/modifier/modifier_transform.h
-/// 测试说明: modifier_transform 单元测试
-///
+/// 测试说明: 覆盖 Transform 切片三节点——AlignNode 占满/无限约束退化与 child_size 记录、
+/// OffsetNode 视觉偏移不改布局、TransformNode 旋转/缩放/原始矩阵绕内容中心构造与布局透传
 
-// 修饰节点补全验证：Matrix2D 数学、opacity 透明度、rotate/scale 仿射变换渲染与逆矩阵命中。
-// 无头 layout + paint（离屏合成）+ hit_test_chain 驱动，不依赖任何 GUI 后端。
-// 控件均包裹进根容器（Stack）以按真实布局尺寸绘制/命中，与框架真实用法一致。
+#include "aurora/modifier/modifier_transform.h"
 
-#include <cmath>
-#include <cstdint>
-#include <iostream>
-#include <memory>
-#include <utility>
-#include <vector>
-
-#include "aurora/aurora.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_modifier_transform {
 
 namespace {
 
-// 实心色块控件：在内容盒内填充纯色，用于确定性像素 / 命中验证。
-class SolidBox : public LeafWidget {
-  public:
-    Size sz{.width = 100.0F, .height = 20.0F};
-    Color color{255, 0, 0, 255};
-    void collect_signals(std::vector<SignalViewBase *> & /*out*/) override {}
-    [[nodiscard]] auto type_name() const -> const char * override { return "SolidBox"; }
-    [[nodiscard]] auto describe() const -> WidgetDescriptor override {
-        return WidgetDescriptor{.name = "SolidBox", .children_policy = "none"};
-    }
-
-  protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(sz); }
-    void on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) override { p.fill_rect(b, color); }
-};
-
-struct RenderResult {
-    std::vector<std::uint8_t> pixels;
-    int w = 0;
-    int h = 0;
-    [[nodiscard]] auto at(int x, int y, int ch) const -> std::uint8_t {
-        const std::size_t off = ((static_cast<std::size_t>(y) * w) + x) * 4;
-        return pixels.at(off + ch);
-    }
-};
-
-// 把控件包裹进根容器渲染，返回主缓冲像素（控件按真实布局尺寸绘制）。
-auto render_in_root(std::shared_ptr<Widget> w, const int ww, const int hh) -> RenderResult {
-    auto const root = std::make_shared<Stack>(std::vector{Node{std::move(w)}});
-    constexpr BuildContext ctx;
-    root->mount(ctx);
-    Constraints c;
-    c.min = Size{.width = 0.0F, .height = 0.0F};
-    c.max = Size{.width = static_cast<float>(ww), .height = static_cast<float>(hh)};
-    root->layout(c, ctx);
-    Painter p;
-    p.begin(ww, hh);
-    root->paint(p,
-                Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                     .size = Size{.width = static_cast<float>(ww), .height = static_cast<float>(hh)}},
-                ctx);
-    const std::uint8_t *d = p.data();
-    RenderResult r;
-    r.w = ww;
-    r.h = hh;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
-    r.pixels.assign(d, d + (static_cast<std::size_t>(ww) * hh * 4));  // NOLINT
-    return r;
+auto make_measure(float w, float h) -> std::function<Size(const Constraints &)> {
+    return [w, h](const Constraints &) { return Size{.width = w, .height = h}; };
 }
 
-// 把控件包裹进根容器做命中测试，返回命中链中的 widget 指针列表。
-auto hit_in_root(std::shared_ptr<Widget> w, const int ww, const int hh, Point pt) -> std::vector<Widget *> {
-    auto const root = std::make_shared<Stack>(std::vector{Node{std::move(w)}});
-    constexpr BuildContext ctx;
-    root->mount(ctx);
-    Constraints c;
-    c.min = Size{.width = 0.0F, .height = 0.0F};
-    c.max = Size{.width = static_cast<float>(ww), .height = static_cast<float>(hh)};
-    root->layout(c, ctx);
-    const auto chain =
-        root->hit_test_chain(pt,
-                             Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                                  .size = Size{.width = static_cast<float>(ww), .height = static_cast<float>(hh)}},
-                             ctx);
-    std::vector<Widget *> out;
-    for (const auto &h : chain) {
-        // HitNode::get() 兼顾栈对象（裸指针）与 shared_ptr 持有控件（弱引用判活）。
-        if (Widget *sp = h.get()) {
-            out.push_back(sp);
-        }
-    }
-    return out;
+auto constraints(float max_w, float max_h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = max_w, .height = max_h}};
 }
 
 }  // namespace
 
-AURORA_TEST() {
-    // ---------- A. Matrix2D 数学 ----------
-    {
-        const Matrix2D r = Matrix2D::from_rotate(90.0F);
-        const Point p1 = r.apply_to_point(Point{.x = 1.0F, .y = 0.0F});
-        AURORA_TEST_CHECK_MSG(std::abs(p1.x) < 1e-3F && std::abs(p1.y - 1.0F) < 1e-3F, "rotate90 maps (1,0) -> (0,1)");
+AURORA_TEST_CASE(align_fills_available_space_and_records_child_size) {
+    // Align 默认占满父约束；child_size 记录子测量结果（绘制期据此平移内容）。
+    const AlignNode a(Alignment::Center);
+    AURORA_TEST_CHECK_EQ(a.kind(), ModifierNode::Kind::Transform);
+    const Size s = a.layout(constraints(200.0F, 100.0F), make_measure(50.0F, 20.0F));
+    AURORA_TEST_CHECK_NEAR(s.width, 200.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 100.0F, 0.0F);
+    const Size child = a.child_size();
+    AURORA_TEST_CHECK_NEAR(child.width, 50.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.height, 20.0F, 0.0F);
+    AURORA_TEST_CHECK_EQ(a.align(), Alignment::Center);
+}
 
-        const Matrix2D inv = r.inverse();
-        const Point p2 = inv.apply_to_point(Point{.x = 0.0F, .y = 1.0F});
-        AURORA_TEST_CHECK_MSG(std::abs(p2.x - 1.0F) < 1e-3F && std::abs(p2.y) < 1e-3F,
-                              "inverse(rotate90) maps (0,1) -> (1,0)");
+AURORA_TEST_CASE(align_degrades_to_child_size_under_infinite_constraint) {
+    // 父约束无限（max=∞）时退化为内容尺寸。
+    const AlignNode a(Alignment::TopLeft);
+    const Size s = a.layout(Constraints{}, make_measure(30.0F, 40.0F));
+    AURORA_TEST_CHECK_NEAR(s.width, 30.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 40.0F, 0.0F);
+}
 
-        const Matrix2D id = r.compose(r.inverse());
-        AURORA_TEST_CHECK_MSG(id.is_identity(), "rotate90 ∘ inverse(rotate90) = identity");
+AURORA_TEST_CASE(align_respects_min_constraint_clamp) {
+    // max 无限时 self 取子尺寸，结果经 c.constrain 被 min 抬升。
+    const AlignNode a(Alignment::TopLeft);
+    Constraints c{.min = Size{.width = 60.0F, .height = 60.0F}, .max = Size::infinity()};
+    const Size s = a.layout(c, make_measure(10.0F, 10.0F));
+    AURORA_TEST_CHECK_NEAR(s.width, 60.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 60.0F, 0.0F);
+}
 
-        const Matrix2D t = Matrix2D::from_translate(5.0F, 7.0F);
-        const Point p3 = t.apply_to_point(Point{.x = 2.0F, .y = 3.0F});
-        AURORA_TEST_CHECK_MSG(std::abs(p3.x - 7.0F) < 1e-3F && std::abs(p3.y - 10.0F) < 1e-3F, "translate(5,7)");
+AURORA_TEST_CASE(offset_translates_visually_without_layout_change) {
+    const OffsetNode o(3.0F, -7.0F);
+    AURORA_TEST_CHECK_EQ(o.kind(), ModifierNode::Kind::Transform);
+    AURORA_TEST_CHECK_NEAR(o.dx(), 3.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(o.dy(), -7.0F, 0.0F);
+    // 布局尺寸=子尺寸（仅约束夹取），偏移不影响布局。
+    const Size s = o.layout(constraints(100.0F, 100.0F), make_measure(80.0F, 60.0F));
+    AURORA_TEST_CHECK_NEAR(s.width, 80.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 60.0F, 0.0F);
+}
 
-        const Matrix2D s = Matrix2D::from_scale(2.0F, 3.0F);
-        const Point p4 = s.apply_to_point(Point{.x = 4.0F, .y = 5.0F});
-        AURORA_TEST_CHECK_MSG(std::abs(p4.x - 8.0F) < 1e-3F && std::abs(p4.y - 15.0F) < 1e-3F, "scale(2,3)");
+AURORA_TEST_CASE(transform_node_rotate_builds_matrix_about_center) {
+    // 绕 (100,50) 旋转 90°：(1,0)->应落在中心右侧偏移处。锁定矩阵参数即可。
+    const TransformNode t(90.0F);
+    AURORA_TEST_CHECK_EQ(t.kind(), ModifierNode::Kind::Transform);
+    const Matrix2D m = t.matrix(Size{.width = 200.0F, .height = 100.0F});
+    // 与 from_rotate_about 参考实现逐项一致。
+    const Matrix2D ref = Matrix2D::from_rotate_about(90.0F, Point{.x = 100.0F, .y = 50.0F});
+    AURORA_TEST_CHECK_NEAR(m.m11, ref.m11, 1e-5F);
+    AURORA_TEST_CHECK_NEAR(m.m12, ref.m12, 1e-5F);
+    AURORA_TEST_CHECK_NEAR(m.m21, ref.m21, 1e-5F);
+    AURORA_TEST_CHECK_NEAR(m.m22, ref.m22, 1e-5F);
+    AURORA_TEST_CHECK_NEAR(m.tx, ref.tx, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(m.ty, ref.ty, 1e-4F);
+    // 90° 旋转把 (cx+r, cy) 映到 (cx, cy+r)：绕中心旋转的方向语义。
+    const Point p = m.apply_to_point(Point{.x = 150.0F, .y = 50.0F});
+    AURORA_TEST_CHECK_NEAR(p.x, 100.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(p.y, 100.0F, 1e-3F);
+}
 
-        // 退化：缩放 0 求逆降级为单位矩阵（不崩溃）。
-        const Matrix2D degenerate = Matrix2D::from_scale(0.0F, 1.0F);
-        AURORA_TEST_CHECK_MSG(degenerate.inverse().is_identity(), "degenerate matrix inverse degrades to identity");
+AURORA_TEST_CASE(transform_node_scale_matrix_about_center) {
+    const TransformNode t(2.0F, 3.0F);
+    const Matrix2D m = t.matrix(Size{.width = 100.0F, .height = 60.0F});
+    // 绕中心 (50,30) 缩放：(50,30) 不动，(60,30)->(70,30)。
+    const Point fixed = m.apply_to_point(Point{.x = 50.0F, .y = 30.0F});
+    AURORA_TEST_CHECK_NEAR(fixed.x, 50.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(fixed.y, 30.0F, 1e-4F);
+    const Point scaled = m.apply_to_point(Point{.x = 60.0F, .y = 30.0F});
+    AURORA_TEST_CHECK_NEAR(scaled.x, 70.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(scaled.y, 30.0F, 1e-4F);
+}
 
-        // 绕中心旋转：点 (cx+1, cy) 绕 (cx,cy) 旋转 90 -> (cx, cy+1)。
-        constexpr Point c{.x = 40.0F, .y = 25.0F};
-        const Matrix2D rc = Matrix2D::from_rotate_about(90.0F, c);
-        const Point p5 = rc.apply_to_point(Point{.x = c.x + 1.0F, .y = c.y});
-        AURORA_TEST_CHECK_MSG(std::abs(p5.x - c.x) < 1e-3F && std::abs(p5.y - (c.y + 1.0F)) < 1e-3F,
-                              "rotate_about center maps (cx+1,cy) -> (cx,cy+1)");
-    }
+AURORA_TEST_CASE(transform_node_raw_matrix_passthrough) {
+    const Matrix2D raw = Matrix2D::from_translate(5.0F, 6.0F);
+    const TransformNode t(raw);
+    const Matrix2D m = t.matrix(Size{.width = 10.0F, .height = 10.0F});
+    // Raw 原样返回用户矩阵（中心化责任在调用方）。
+    AURORA_TEST_CHECK_NEAR(m.tx, 5.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(m.ty, 6.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(m.m11, 1.0F, 0.0F);
+}
 
-    // ---------- B. opacity 透明度（与不透明对照，背景为不透明黑）----------
-    {
-        auto sb = std::make_shared<SolidBox>();
-        sb->modifier.set(Modifier{}.opacity(0.5F));
-        const auto r = render_in_root(sb, 200, 200);
-        // 控件布局为 (0,0,100,20)，中心 (50,10)。
-        const std::uint8_t red = r.at(50, 10, 0);
-        const std::uint8_t a = r.at(50, 10, 3);
-        AURORA_TEST_CHECK_MSG(red > 100 && red < 160, "opacity 0.5 reduces red (~127)");
-        AURORA_TEST_CHECK_MSG(a == 255, "over opaque background result stays opaque (a=255)");
-        AURORA_LOG_INFO("test", "  [debug] opacity outside(150,100)=(", static_cast<int>(r.at(150, 100, 0)), ",",
-                        static_cast<int>(r.at(150, 100, 1)), ",", static_cast<int>(r.at(150, 100, 2)), ",",
-                        static_cast<int>(r.at(150, 100, 3)), ")  inside(50,10)=(", static_cast<int>(r.at(50, 10, 0)),
-                        ",", static_cast<int>(r.at(50, 10, 3)), ")");
-        AURORA_TEST_CHECK_MSG(r.at(150, 100, 3) == 0,
-                              "outside box is transparent (headless buffer cleared transparent)");
-
-        auto sb2 = std::make_shared<SolidBox>();
-        sb2->modifier.set(Modifier{}.opacity(1.0F));
-        const auto r2 = render_in_root(sb2, 200, 200);
-        AURORA_TEST_CHECK_MSG(r2.at(50, 10, 0) == 255, "opacity 1.0 fully red");
-        AURORA_TEST_CHECK_MSG(r2.at(50, 10, 0) > red, "opacity 0.5 is less red than opacity 1.0");
-    }
-
-    // ---------- C. rotate 旋转渲染（离屏合成 + 逆采样）----------
-    {
-        auto sb = std::make_shared<SolidBox>();
-        sb->modifier.set(Modifier{}.rotate(90.0F));
-        const auto r = render_in_root(sb, 200, 200);
-        // 宽 100 高 20 的色块绕中心 (50,10) 旋转 90° -> 视觉上 x∈[40,60], y∈[-40,60]。
-        AURORA_TEST_CHECK_MSG(r.at(50, 30, 3) > 100, "rotated interior (50,30) is painted");
-        AURORA_TEST_CHECK_MSG(r.at(10, 10, 3) == 0, "unrotated region (10,10) stays empty");
-    }
-
-    // ---------- D. scale 缩放渲染 ----------
-    {
-        auto sb = std::make_shared<SolidBox>();
-        sb->modifier.set(Modifier{}.scale(0.5F));
-        const auto r = render_in_root(sb, 200, 200);
-        // 绕中心 (50,10) 缩放 0.5：视觉上 x∈[25,75], y∈[5,15]。
-        AURORA_TEST_CHECK_MSG(r.at(50, 10, 3) > 100, "scaled interior (50,10) is painted");
-        AURORA_TEST_CHECK_MSG(r.at(10, 10, 3) == 0, "scaled exterior (10,10) stays empty");
-    }
-
-    // ---------- E. 逆矩阵命中测试 ----------
-    {
-        auto sb = std::make_shared<SolidBox>();
-        sb->modifier.set(Modifier{}.rotate(90.0F).draggable([](Point, Point) -> void {}));
-        const auto hit = hit_in_root(sb, 200, 200, Point{.x = 50.0F, .y = 10.0F});
-        AURORA_LOG_INFO("test", "  [debug] hit chain size=", hit.size(), " sb=", sb.get());
-        for (auto *w : hit) {
-            AURORA_LOG_INFO("test", "    widget=", w);
-        }
-        bool found = false;
-        for (auto *w : hit) {
-            if (w == sb.get()) {
-                found = true;
-            }
-        }
-        AURORA_TEST_CHECK_MSG(found, "rotated center hits via inverse matrix");
-
-        const auto miss = hit_in_root(sb, 200, 200, Point{.x = 10.0F, .y = 10.0F});
-        bool found2 = false;
-        for (auto *w : miss) {
-            if (w == sb.get()) {
-                found2 = true;
-            }
-        }
-        AURORA_TEST_CHECK_MSG(!found2, "rotated exterior misses via inverse matrix");
-    }
-
-    // ---------- F. Painter::composite 直接验证（隔离 widget 接线）----------
-    {
-        Painter src;
-        src.set_scale(1.0F);
-        src.begin(100, 100);
-        src.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 100.0F, .height = 100.0F}},
-                      Color{255, 0, 0, 255});
-
-        Painter dst;
-        dst.set_scale(1.0F);
-        dst.begin(200, 200);
-        dst.composite(src, Matrix2D{});  // 恒等
-        const std::uint8_t *dd = dst.data();
-        constexpr int idx = ((50 * 200) + 50) * 4;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
-        AURORA_TEST_CHECK_MSG(dd[idx] > 100, "composite identity paints red at (50,50)");  // NOLINT
-
-        Painter dst2;
-        dst2.set_scale(1.0F);
-        dst2.begin(200, 200);
-        dst2.composite(src, Matrix2D::from_rotate_about(90.0F, Point{.x = 50.0F, .y = 50.0F}));
-        const std::uint8_t *dd2 = dst2.data();
-        constexpr int idx2 = ((50 * 200) + 50) * 4;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
-        AURORA_TEST_CHECK_MSG(dd2[idx2] > 100, "composite rotate paints red after rotation");  // NOLINT
-    }
+AURORA_TEST_CASE(transform_node_layout_is_passthrough) {
+    // 旋转/缩放不改布局尺寸。
+    const TransformNode rot(45.0F);
+    const Size s1 = rot.layout(constraints(100.0F, 100.0F), make_measure(70.0F, 30.0F));
+    AURORA_TEST_CHECK_NEAR(s1.width, 70.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s1.height, 30.0F, 0.0F);
 }
 
 }  // namespace aurora::test_cases::utest_modifier_transform

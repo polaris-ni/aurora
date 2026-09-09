@@ -258,8 +258,14 @@ auto Storage::transaction(std::function<Result<void>(Storage &)> body) -> Result
         auto operator=(const NotifySuppressGuard &) -> NotifySuppressGuard & = delete;
         NotifySuppressGuard(NotifySuppressGuard &&) = delete;
         auto operator=(NotifySuppressGuard &&) -> NotifySuppressGuard & = delete;
-    } guard(this);
-    auto r = backend_->transaction([this, &body](StorageBackend &) -> Result<void> { return body(*this); });
+    };
+    // 守卫放进内层作用域：批量通知必须在抑制标志复位**之后**发出——若在守卫存活期间
+    // emit_change，事务的 Batch 事件会被自己的抑制标志静默丢弃（订阅者永远收不到）。
+    Result<void> r{};
+    {
+        NotifySuppressGuard guard(this);
+        r = backend_->transaction([this, &body](StorageBackend &) -> Result<void> { return body(*this); });
+    }
     if (r) {
         emit_change({.op = StorageChange::Operation::Batch, .id = ""});
     }

@@ -11,7 +11,7 @@
 - **构造即校验**：可失败构造（如 `ImageView::load`、`serialization::from_json`）提供 `make_*()` 工厂，构造时即校验，非法输入立即返回 `Result` 而非延迟崩溃。
 - **携带修复建议**：`Error` 必须包含 `suggestion` 字段（人类 / AI 可读的「怎么改」）；`docs` 指向相关文档锚点。
 - **部分生成容错**：AI 生成的局部代码片段（单文件 / 单函数）应能独立编译；不要把必须的前置声明 / 类型散落在不可见的上文。`Error` 的 `suggestion` 直接给出缺失件。
-- **调试可定位**：`Error::where` 精确到 `文件:行`；`AURORA_ASSERT` 在 debug 触发并附上下文。
+- **调试可定位**：`Error::where` 精确到 `文件:行`；`AURORA_CHECK` 常开（所有构建下失败即 abort，用于继续执行必 UB 的硬不变量）；`AURORA_ASSERT` debug-only（NDEBUG 下裁切，用于参数契约与热路径校验）。
 
 错误的设计模型、分类与生成管线见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §12；错误码全量清单见 [`ERROR_CATALOG.md`](ERROR_CATALOG.md)。
 
@@ -37,16 +37,74 @@
 - **零平台魔法**：示例不依赖特定平台 GUI 事件循环；`HeadlessSurface` 可离线渲染 PNG，便于测试与 AI 复现。
 - **源—示例—测试 1:1 映射**：每个公共源文件（widget / 子系统头）原则上对应一个 `demo_*.cpp`（`examples/demos/`）与一个 `utest_*.cpp`（`tests/unit/`）。允许少量「复杂场景」demo / test（跨控件集成、端到端流程）作为例外，但须明确标注其跨源性质（跨控件集成用例放 `tests/integration/`，以 `itest_` 前缀命名）。所有 demo 收敛到 `examples/demos/`（CMake 仅 GLOB 该目录，新增组件 demo 放到此处即自动纳入构建，无需改 CMake）。测试头部「目标单元」与单元头之间的严格 1:1 声明约束由 §3.2 `TEST-R3` 界定。
 - **文件夹区分**：demo 与 test 以目录区分——示例在 `examples/`，测试在 `tests/`（单元 `tests/unit/`、集成 `tests/integration/`）；二者不混放。
-- **test 文件前缀**：测试文件统一以 `utest`（单元）/ `itest`（集成）为前缀（`utest_xxx.cpp` / `itest_xxx.cpp`），与示例的 `demo` 前缀风格一致；每个测试 TU 的用例包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`）内。聚合多个不相关控件的「catch-all」测试文件视为反模式，应拆为各 `utest_<控件>.cpp`（正式编号见 §3.2 `TEST-R6`）。
+- **test 文件前缀**：测试文件统一以 `utest`（单元）/ `itest`（集成）为前缀（`utest_xxx.cpp` / `itest_xxx.cpp`），与示例的 `demo` 前缀风格一致；每个测试 TU 的用例包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`）内。聚合多个不相关控件的「catch-all」测试文件视为反模式，应拆为各 `utest_<控件>.cpp`（正式编号见 §3.2 `TEST-R10`）。
 
 ### 3.1 注册式测试 runner
 
-`tests/unit/*.cpp` 与 `tests/integration/*.cpp` 全部链入**单一可执行** `aurora_test_runner`（由 `cmake/AuroraTests.cmake` 配置），`main()` 由 `tests/aurora_test_main.cpp` 唯一提供，**测试文件禁止自定义 `main()`**；公共 fixture（header-only，裸名包含）放 `tests/common/`。
+`tests/framework/*.cpp`（框架）+ `tests/unit/*.cpp` 与 `tests/integration/*.cpp`（用例）全部链入**单一可执行** `aurora_test_runner`
+（由 `cmake/AuroraTests.cmake` 配置），`main()` 由 `tests/framework/test_main.cpp` 唯一提供，**测试文件禁止自定义 `main()`**；
+框架入口头 `tests/framework/aurora_test.h` 为仓库私有设施（不进 `include/`、不进 `aurora_api.json`）。
 
-- 用例经 `AURORA_TEST()` 宏静态自注册（用例名 = 文件名 stem，由 CMake 按源文件注入 `AURORA_TEST_NAME`；同文件多片段用 `AURORA_TEST_NAMED("名")`）。
-- 断言一律走 `tests/aurora_test_harness.h` 的 `AURORA_TEST_CHECK*`（非致命，记录后继续）/ `AURORA_TEST_REQUIRE*`（致命，抛 `CheckAbort` 终止本用例）家族，失败计数汇入框架上下文，由 runner 统一决定退出码；**不得自造 `g_test_failures` / `return 0/1` 式退出码**。
-- 后端 / 平台专属用例在 feature 宏未开启的 `#else` 分支以 `AURORA_TEST_SKIP(宏名)` 注册空通过桩。
-- 新增文件漏写注册宏不会报链接错误，由 CTest 的 `registry_integrity` 守护（比对 `runner --list` 与配置期 GLOB 清单）兜底。CTest 粒度不变：每条 = `--run=<stem>`（进程隔离）。
+- 用例经 `AURORA_TEST_CASE(<Case>)` 宏静态自注册，全名 `<文件 stem>.<Case>`。**套件名由 `__FILE__` 推导、恒等于测试文件 stem、不可自定义**
+  （保证 CTest 的 `--run=<stem>` 能筛中该文件下全部用例；自定义套件会导致用例被静默跳过，见 §3.2 `TEST-R8`）。同一文件可注册多个用例。
+- 注册在静态初始化期完成，故注册路径**不得做任何动态分配**：套件名与用例名为指向字面量的 `std::string_view`，
+  注册表以侵入式链表串接（见 `tests/framework/test_types.h`）。新增设施若破坏该约束，会触发 `bugprone-throwing-static-initialization`。
+- 断言一律走 `tests/framework/aurora_test.h` 的 `AURORA_TEST_CHECK*`（非致命，记录后继续）/ `AURORA_TEST_REQUIRE*`
+  （致命，抛 `aurora::testing::CaseAbort` 终止本用例）家族，失败计数汇入框架上下文，由 runner 统一决定退出码；
+  **不得自造 `g_test_failures` / `return 0/1` 式退出码**。每个谓词两族齐备，形态为 `CHECK_<谓词>` / `REQUIRE_<谓词>`：
+
+  | 谓词 | 覆盖 |
+  |:---|:---|
+  | （裸宏） | 布尔表达式；`_MSG(expr, 说明)` 供无法用谓词表达的复杂判定 |
+  | `TRUE` / `FALSE` | 布尔值，失败时打印 `Actual` / `Expected` |
+  | `EQ` / `NE` / `LT` / `LE` / `GT` / `GE` | 关系比较；两侧各只求值一次；容器 / `std::optional` 等可直接用 `EQ` |
+  | `NEAR(a, b, eps)` | 浮点近似（对称差 `|a-b| <= eps`），失败时打印差值与容差 |
+  | `STREQ` / `STRNE` / `STRCASEEQ` / `STRCASENE` | **按内容**比较字符串（C 数组、`const char*`、`std::string`、`std::string_view` 可混用），避免指针相等误判 |
+  | `THROW(stmt, 异常类型)` / `NO_THROW(stmt)` / `ANY_THROW(stmt)` | 异常判定 |
+  | `NULL` / `NOT_NULL` | 指针空判定 |
+  | `FAIL(说明)` / `FAIL_FATAL(说明)` | 无条件记账 |
+
+- 失败信息必须带上**实际值**：框架按类型渲染（bool / 字符 / 整数 / 浮点 / 枚举 / 字符串 / 指针 / `optional` 形 /
+  pair-tuple / 容器 / 字节序列），无可用渲染路径时输出 `<unprintable 类型名>` 与表达式原文。枚举值名走工具链单一来源
+  `tools/include/known_enums.h`（稀疏枚举退回底层数值，避免张冠李戴）。需要更友好输出时，测试侧显式特化
+  `aurora::testing::ValuePrinter<T>` 即接管该类型，**不要**在断言里手写 `<<` 拼接。
+- 嵌套上下文用 `AURORA_TEST_TRACE(说明)`（RAII，随作用域自动出栈），本作用域内的失败自动附带追踪栈，
+  替代「为定位一处失败而临时加打印」。
+
+  **组织设施**（与 GoogleTest 能力对齐，名字按本仓库命名规范调整）：
+
+  | 写法 | 用途 | 约定 |
+  |:---|:---|:---|
+  | `AURORA_TEST_F(<Fixture>, <Case>)` | 有生命周期状态的用例 | fixture 派生自 `aurora::testing::Fixture`，覆写 protected 的 `SetUp` / `TearDown`；用例体是生成类的成员函数，可直接访问 fixture 的 protected 成员；**每个用例重建实例**，状态不跨用例泄漏 |
+  | `AURORA_TEST_P(<Fixture>, <Case>)` + `AURORA_INSTANTIATE_TEST_SUITE_P(<prefix>, <Fixture>, values_of(...))` | 值参数化 | fixture 派生自 `TestWithParam<V>`，体内 `param()` 取值；`_GEN` 变体带名字生成器；取值表用 `values_of(...)` / `values_in(container)`，**不写裸花括号**（生成器为每个取值提供报告用取值名）；`INSTANTIATE` 须写在同文件的 `TEST_P` 之后 |
+  | `AURORA_TYPED_TEST_SUITE(<Fixture>, <Types...>)` + `AURORA_TYPED_TEST(<Fixture>, <Case>)` | 类型参数化 | `<Fixture>` 是「以单个类型为模板参数、派生自 `Fixture`」的类模板；体内以 `TestType` 引用当前类型，**访问 fixture 成员须写 `this->member_`**（依赖基不做普通查找） |
+  | `AURORA_TEST_CHECK_THAT(value, matcher)` | 匹配器断言 | 工厂在 `aurora::testing::matchers::`（`eq` / `ne` / `lt` / `le` / `gt` / `ge` / `str_eq` / `str_ne` / `str_case_eq` / `contains` / `has_substr` / `starts_with` / `ends_with` / `size_is` / `is_empty` / `each` / `all_of` / `any_of` / `negated`），可嵌套；别名 `namespace m = aurora::testing::matchers;` 引入，不用 using-directive |
+
+  - 参数化用例名形如 `<文件 stem>.<prefix>/<Fixture>_<Case>/<取值名或序号>`（类型参数化为 `<文件 stem>.<Case>/<类型短名>`）；
+    **套件名仍是文件 stem**，CTest 的 `--run=<stem>` 与 `TEST-R8` 不受影响。
+  - fixture 类名一律 **PascalCase**（`readability-identifier-naming.ClassCase`）；`SetUp` / `TearDown` 与共享状态放 `protected:`
+    区，该区用 `// NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes)` … `NOLINTEND` 成对豁免
+    （保护成员被派生用例使用是刻意设计，与库侧同类豁免同口径）。
+  - 参数化用例的**数量与名字**由取值表决定，无法在静态初始化期注册（需动态分配）。框架因此把展开推迟到 runner 起手的
+    `TestRegistry::finalize()`（钩子只在静态期挂链，不分配）；`--list` / `--run` / `--filter` 看到的即展开后的全集，
+    写守护脚本或读注册表时**必须先 finalize**。
+- **实参里的逗号**：断言宏（`CHECK` / `REQUIRE` 两族全部谓词）与 `AURORA_INSTANTIATE_TEST_SUITE_P` 均为
+  **变参宏**（尾参 `...`），实参含裸逗号——如 `AURORA_TEST_CHECK_EQ(std::vector<int>{1, 2}, other)` 的
+  花括号初始化列表——不会被预处理器切裂成多余宏参数，可直接内联。风格上仍建议较长或复用的实参先提为
+  命名变量，保持断言行一眼可读。
+- 后端 / 平台专属用例在 feature 宏未开启的 `#else` 分支以 `AURORA_TEST_SKIP(原因)` 注册 skip 桩（计入 Skipped，不算失败、不伪造通过）。
+- 会让进程异常终止的路径用 `AURORA_TEST_CHECK_DEATH(statement, expectation)`：框架 spawn 子进程**重跑同一用例**，
+  只有该站点真正执行 statement（其余站点在子进程里被跳过）。`expectation` 给子串或 `matchers::` 匹配器时校验子进程
+  stderr，传 `""` 表示只要求致死（宏为变参，`expectation` 含裸逗号同样安全）。约束：**死亡断言必须在用例内**（要靠用例身份重跑子进程）；语句里的副作用会因重跑
+  发生一次，故只放无前置依赖的语句；嵌套死亡测试在子进程中被禁用。
+- 诊断开关（见 `BUILD_OPTIONS.md` §7.1）：`--report=<path>` 出 JUnit XML / JSON；`--shuffle[=<seed>]` 暴露顺序依赖；
+  `--repeat=<n>` 暴露状态泄漏；`--timeout=<ms>` 由看门狗兜住死循环——超时前已完成的用例仍写进报告。
+  排查偶发失败时优先 `--shuffle` + `--repeat`，而不是给用例加打印。
+- 新增文件漏写注册宏不会报链接错误；参数化用例漏写 `INSTANTIATE` 会静默不运行——两者都由 CTest 的 `registry_integrity`
+  守护（`tools/check/check_test_registry.py` 做**用例级**比对：`runner --list` 输出 vs 测试源中的用例宏，见 §3.2 `TEST-R6`）。
+  CTest 粒度：每条 = `--run=<stem>`（文件级进程隔离）。
+- 退出码协议：`0` 全通过（Skipped 不计失败）、`1` 有失败、`2` CLI 错误 / 筛选为空 / 报告写不出、
+  `3` 超时（看门狗触发，部分结果仍落报告）。CI 须把 `3` 与 `1` 分开归类——文件级粒度下超时会让该文件剩余用例不执行。
 - **命名可见性**：测试 TU **禁止 using-directive**（`using namespace aurora;` / `using namespace au;` 等），与 clang-tidy 的 `google-build-using-namespace` 检查保持一致。需要裸名时按优先级用：using 声明（`using aurora::Color;`、`using aurora::preferences::Preferences;`）、命名空间别名（`namespace ar = aurora::render;`）、或显式限定（`au::Rect`）。用户字面量按实际用到的后缀逐个声明（`using aurora::literals::operator""_dp;`、`using std::chrono_literals::operator""ms;`）。
   using 声明 / 别名须放在**使用点之前**的作用域内（分段式测试文件里，各 `namespace sec_xxx { ... }` 段各自引入自己用到的名字），不要图省事放到文件顶部。
   **禁止**为 using-directive 追加 `NOLINT(google-build-using-namespace)` 之类的抑制：改用声明即可根治，抑制只会掩盖真实告警，且在检查不触发的位置（如函数体内的 using）会形成无效的 NOLINT 噪声。
@@ -55,18 +113,22 @@
 
 每个 `utest_*.cpp` 头部须有三行块（`/// 测试类型:` / `/// 目标单元:` / `/// 测试说明:`），`目标单元` 指向**具体模块头**，且满足 **1:1**：一个测试文件只声明一个目标单元，一个单元头至多被一个 `tests/unit/` 测试声明。
 
-规则编号统一为 **`TEST-R1`–`TEST-R6`**（与守门脚本 `tools/check/check_code_doc_sync.py`、测试审计脚本同口径）：
+规则编号统一为 **`TEST-R1`–`TEST-R10`**（与守门脚本 `tools/check/check_code_doc_sync.py`、`tools/check/check_test_registry.py`、测试审计脚本同口径）：
 
 | 编号 | 规则 | 内容 | 守门 |
 | --- | --- | --- | --- |
 | `TEST-R1` | 头部三行块完整 | 必含 `/// 测试类型` / `/// 目标单元` / `/// 测试说明`；历史 `// 目标源单元：` 约定不计入标准块、视为违规须归一 | 是 |
 | `TEST-R2` | 目标路径有效 | `目标单元`（含头部注释里的路径引用）所声明的路径必须真实存在，防注释路径烂掉 | 是 |
-| `TEST-R3` | 一一对应 1:1 | 一测试文件只声明一个目标单元、一单元头至多被一个 `tests/unit/` 测试声明；无法拆到独立单元者（同时覆盖多个互不相关单元、或属跨模块流程验证）归 `tests/integration/`——两目录由同一 target GLOB、`AURORA_TEST()` 注册名取文件 stem，迁移不改构建与运行行为 | 否（评审 + 审计） |
+| `TEST-R3` | 一一对应 1:1 | 一测试文件只声明一个目标单元、一单元头至多被一个 `tests/unit/` 测试声明；无法拆到独立单元者（同时覆盖多个互不相关单元、或属跨模块流程验证）归 `tests/integration/`——两目录由同一 target GLOB、注册名取文件 stem，迁移不改构建与运行行为 | 否（评审 + 审计） |
 | `TEST-R4` | 禁止指向聚合头 | 目标单元不得为 `aurora.h` / `aurora_fwd.h` / `aurora_pch.h`；也不得在头部注释以「域/文件名.h」或「src/aurora/域/文件名.cpp」路径形式再声明其他单元——注释路径引用同样计入；注释提及被测类型时写类型名（如 `TextSpan`）不写头路径 | 是 |
-| `TEST-R5` | 公共头覆盖 | 每个公共单元头须被某测试显式声明为目标单元，或在该测试中直接 `#include`、其符号在 `tests/` 全树被引用 | 是 |
-| `TEST-R6` | 禁止 catch-all（跨域） | 单个测试跨 ≥3 个模块域视为 catch-all；因被测主模块自身依赖面广（如测 `Widget` 必带 layout/render/event/navigation）的跨域**不视为违规、不强行拆分**，基线 **20**、只看增量，完整清单由审计脚本 `TEST-R6` 项输出、不在本文档硬编码以免随重构漂移 | 否（趋势指标） |
+| `TEST-R5` | 公共头覆盖 | 每个公共单元头须被某测试显式声明为目标单元，或在该测试中直接 `#include`、其符号在 `tests/` 全树被引用 | 是（测试体系重写期间降级为仅报告，收束时恢复硬门禁） |
+| `TEST-R6` | 注册完整性 | `runner --list` 输出的**用例级**集合必须与测试源中注册的用例集合一致；含「`TEST_P` 漏 `INSTANTIATE` → 用例静默不运行」检测 | 是（CTest `registry_integrity`，由 `tools/check/check_test_registry.py` 承担） |
+| `TEST-R7` | 并行安全 | 测试体系禁止新增 `RUN_SERIAL`（CMake 编排与测试源一并扫描）；并行模型为 CTest 进程隔离 + 框架用例边界资源虚拟化，申请串行须登记脚本内 `TEST_R7_WHITELIST` 并注明根因 | 是 |
+| `TEST-R8` | 命名纪律 | 目录定类型 + 前缀强制——`tests/unit/` 一律 `utest_`、`tests/integration/` 一律 `itest_`，测试 TU 不得放在两目录之外；**Suite 强制等于文件 stem、不可自定义**（`__FILE__` 推导，自定义套件宏禁止） | 是 |
+| `TEST-R9` | 禁止 using-directive | 测试代码禁止 `using namespace`（函数体内亦然）；using 声明 / 命名空间别名须置于使用点之前的作用域内 | 是（脚本 + clang-tidy `google-build-using-namespace`） |
+| `TEST-R10` | 禁止 catch-all（跨域） | 单个测试跨 ≥3 个模块域视为 catch-all；因被测主模块自身依赖面广（如测 `Widget` 必带 layout/render/event/navigation）的跨域**不视为违规、不强行拆分**，基线 **20**、只看增量，趋势由守门脚本输出、不在本文档硬编码以免随重构漂移 | 否（趋势指标） |
 
-其中 `TEST-R1` / `TEST-R2` / `TEST-R4` / `TEST-R5` 由 `tools/check/check_code_doc_sync.py` 在 CTest 的 `code_doc_sync` 用例守门（只做确定性判定、存量豁免走白名单、只拦增量）；`TEST-R3` 靠评审与审计，`TEST-R6` 只作趋势指标，均不纳入守门。
+其中 `TEST-R1` / `TEST-R2` / `TEST-R4` / `TEST-R5` / `TEST-R7` / `TEST-R8` / `TEST-R9` 由 `tools/check/check_code_doc_sync.py` 在 CTest 的 `code_doc_sync` 用例守门（只做确定性判定、存量豁免走白名单、只拦增量）；`TEST-R6` 由 `tools/check/check_test_registry.py` 在 CTest 的 `registry_integrity` 用例守门；`TEST-R3` 靠评审与审计，`TEST-R10` 只作趋势指标，均不纳入守门。
 
 > 命名消歧：文档交叉引用门禁 `tools/check/check_codespec_xref.py` 另有一套 `R1`–`R5`（链接可达 / 章节号格式 / 反引号路径 / 特性表落点），与本文 `TEST-RN` 无关，勿混用。
 
@@ -87,7 +149,7 @@
 - **降级而非中止**：非法输入 / 缺失类型产出 `Diagnostics` 并降级到安全默认；`from_json` 含不可重建控件（如 `Repeater` / `Canvas`）时返回预期错误而非崩溃。
 - **可观测**：`Logger` 双通道（诊断 `AURORA_LOG_*` / 功能 `AURORA_LOG_RAW`）输出，`Diagnostics` 汇总「做了什么降级」。
 - **增量编译友好**：头文件尽量只放声明，实现下沉 `src/aurora/*.cpp`；非模板纯逻辑类实现移 `.cpp`，减少 TU 重编。
-- **错误定位**：错误信息精确到 `文件:行`（`Error::where`）；`AURORA_ASSERT` 附上下文。
+- **错误定位**：错误信息精确到 `文件:行`（`Error::where`）；`AURORA_CHECK` / `AURORA_ASSERT` 输出 FATAL 上下文后 abort（前者常开，后者仅 debug）。
 
 ### 4.1 统一日志与输出纪律
 
@@ -148,15 +210,14 @@
 
 ### 6.2 默认参数
 
-高频构造提供默认参数 / 便捷工厂，降低记忆负担。所有 `XxxProps` 结构体字段均须有合理默认值。编译期验证（`static_assert`）集中在 `tests/test_default_construct.h`，运行时验证在 `tests/integration/utest_default_construct.cpp`。
+高频构造提供默认参数 / 便捷工厂，降低记忆负担。所有 `XxxProps` 结构体字段均须有合理默认值。运行时默认构造与挂载冒烟验证在 `tests/integration/itest_default_construct.cpp`（全部公共控件逐个默认构造并布局一帧）。
 
 **同步流程（强制执行）**：
 
 - 新增控件类时，**必须**提供默认构造器（`Xxx() = default` 或自定义默认构造）。
 - 新增 `XxxProps` 聚合类型时，**必须**确保所有字段都有合理默认值。
 - 新增公共构造函数时，**必须**评估是否可为高频参数提供默认值。
-- `tests/test_default_construct.h` 中的 `static_assert` 列表**必须**随新增控件同步更新。
-- 新增控件时，**必须**在 `tests/integration/utest_default_construct.cpp` 中 `#include "test_default_construct.h"` 以确保编译期校验生效。
+- 新增控件时，**必须**在 `tests/integration/itest_default_construct.cpp` 的默认构造冒烟用例中登记该控件（默认构造 + 挂入容器布局一帧），确保运行时构造不变量持续被验证。
 
 ### 6.3 元编程边界
 

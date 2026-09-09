@@ -1,161 +1,163 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/slider.h
-/// 测试说明: slider 单元测试
-///
+/// 测试说明: 覆盖 Slider——默认值域、set_value 钳制与 step 吸附、on_changed 回调、
+/// Press/Move 合成拖拽按局部 x 映射值、禁用态忽略指针、Binding 写穿、自描述不变量、序列化往返
 
-#include <cstdio>
-#include <memory>
-#include <nlohmann/json.hpp>
 #include <string>
+#include <vector>
 
-#include "aurora/aurora.h"
-#include "aurora/core/log.h"
-#include "aurora/widget/serialization.h"
+#include "aurora/event/event.h"
+#include "aurora/layout/layout_engine.h"
+#include "aurora/state/state.h"
 #include "aurora/widget/slider.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_slider {
 
-namespace serialization = aurora::serialization;
+namespace {
 
-static auto make_press(float x, const float y) -> MouseEvent {
-    MouseEvent e;
-    e.action = MouseAction::Press;
-    e.position = Point{.x = x, .y = y};
-    return e;
-}
-static void fire(Widget &w, MouseEvent e) {
-    e.local_position = e.position;
-    w.on_pointer_event(e);
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
-template <typename W>
-static auto roundtrip(const Json &props, const std::string &type) -> std::shared_ptr<W> {
-    auto back = serialization::from_json(props);
-    AURORA_TEST_CHECK_MSG(back.ok(), type + ": from_json succeeded");
-    if (!back.ok()) {
-        return nullptr;
-    }
-    auto w = std::static_pointer_cast<W>(back.value());
-    AURORA_TEST_CHECK_MSG(w->type_name() == type, type + ": type_name matches");
-    return w;
+}  // namespace
+
+AURORA_TEST_CASE(slider_defaults_and_type_name) {
+    const Slider s;
+    AURORA_TEST_CHECK_EQ(std::string{s.type_name()}, "Slider");
+    AURORA_TEST_CHECK_NEAR(s.value(), 0.0, 1e-4);
+    AURORA_TEST_CHECK_NEAR(s.step(), 0.0, 1e-4);
+    AURORA_TEST_CHECK_TRUE(s.enabled());
 }
 
-static void test_props() {
-    Slider sl;
-    sl.set_active_color(Color::red()).set_inactive_color(Color::blue()).set_range(-1.0, 1.0);
-    Json j;
-    sl.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["active_color"][0].get<int>() == 255, "slider active=red");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["inactive_color"][2].get<int>() == 255, "slider inactive=blue");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_d(j["min"].get<double>(), -1.0), "slider min=-1");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_d(j["max"].get<double>(), 1.0), "slider max=1");
+AURORA_TEST_CASE(slider_set_value_clamps_to_range) {
+    Slider s;
+    s.set_range(0.0, 10.0);
+    s.set_value(99.0);
+    AURORA_TEST_CHECK_NEAR(s.value(), 10.0, 1e-4);  // 上越界钳到 max
+    s.set_value(-5.0);
+    AURORA_TEST_CHECK_NEAR(s.value(), 0.0, 1e-4);  // 下越界钳到 min
+    s.set_value(4.25);
+    AURORA_TEST_CHECK_NEAR(s.value(), 4.25, 1e-4);
 }
 
-static void test_interaction() {
-    Slider sl{Reactive{0.5}};
-    AURORA_TEST_CHECK_MSG(near_d(sl.value(), 0.5), "Slider: initial 0.5");
-    sl.set_value(0.8);
-    AURORA_TEST_CHECK_MSG(near_d(sl.value(), 0.8), "Slider: set_value 0.8");
-    sl.set_range(0.0, 10.0);
-    AURORA_TEST_CHECK_MSG(near_d(sl.value(), 0.8), "Slider: value unchanged after set_range");
-    sl.set_value(20.0);
-    AURORA_TEST_CHECK_MSG(near_d(sl.value(), 10.0), "Slider: clamps to max");
-    sl.set_value(-5.0);
-    AURORA_TEST_CHECK_MSG(near_d(sl.value(), 0.0), "Slider: clamps to min");
+AURORA_TEST_CASE(slider_step_snaps_to_grid) {
+    Slider s;
+    s.set_range(0.0, 10.0);
+    s.set_step(2.0);
+    AURORA_TEST_CHECK_NEAR(s.step(), 2.0, 1e-4);
 
-    Slider sl2{Reactive{0.0}};
-    constexpr BuildContext ctx;
-    sl2.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 200, .height = 200}}, ctx);
+    s.set_value(3.3);  // round(3.3/2)=2 → 4.0
+    AURORA_TEST_CHECK_NEAR(s.value(), 4.0, 1e-4);
 
-    fire(sl2, make_press(100.0F, 12.0F));
-    AURORA_TEST_CHECK_MSG(near_d(sl2.value(), 0.5, 1e-2), "Slider: press at midpoint sets ~0.5");
+    s.set_value(0.9);  // round(0.9/2)=0 → 0.0
+    AURORA_TEST_CHECK_NEAR(s.value(), 0.0, 1e-4);
 
-    State st{0.3};
-    Slider sl3{Binding{st}};
-    sl3.set_value(0.9);
-    AURORA_TEST_CHECK_MSG(near_d(st.get(), 0.9), "Slider: Binding write-through");
+    // step 归零恢复连续无级。
+    s.set_step(0.0);
+    s.set_value(3.3);
+    AURORA_TEST_CHECK_NEAR(s.value(), 3.3, 1e-4);
 }
 
-static void test_roundtrip() {
-    const auto schema = describe_component("Slider");
-    AURORA_TEST_CHECK_MSG(!schema.empty(), "describe_component(Slider) non-empty");
+AURORA_TEST_CASE(slider_on_changed_receives_clamped_value) {
+    std::vector<double> seen;
+    Slider s;
+    s.set_range(0.0, 1.0);
+    s.set_on_changed([&seen](double v) { seen.push_back(v); });
 
-    const auto w = std::make_shared<Slider>();
-    w->set_range(0.0, 10.0);
-    w->set_value(3.5);
-    Json j = serialization::to_json(*w);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["props"].contains("value") && j["props"]["value"].get<double>() == 3.5,
-                          "Slider serialization value");
-    const auto back = roundtrip<Slider>(j, "Slider");
-    AURORA_TEST_CHECK_MSG(back && back->value() == 3.5, "Slider roundtrip preserves value");
+    s.set_value(0.5);
+    s.set_value(7.0);  // 钳到 1.0 后再上报
+    AURORA_TEST_REQUIRE_EQ(seen.size(), 2U);
+    AURORA_TEST_CHECK_NEAR(seen[0], 0.5, 1e-4);
+    AURORA_TEST_CHECK_NEAR(seen[1], 1.0, 1e-4);
 }
 
-static void test_modern_props() {
-    // 步进吸附（对标 Qt singleStep / Flutter divisions）
-    Slider sl;
-    sl.set_range(0.0, 10.0).set_step(2.0);
-    sl.set_value(3.4);
-    AURORA_TEST_CHECK_MSG(near_d(sl.value(), 4.0), "Slider: step=2 snaps to 4");
-    sl.set_value(9.9);
-    AURORA_TEST_CHECK_MSG(near_d(sl.value(), 10.0), "Slider: step snapping still clamps to max");
+AURORA_TEST_CASE(slider_drag_maps_local_x_to_value) {
+    std::vector<double> seen;
+    Slider s;
+    s.set_on_changed([&seen](double v) { seen.push_back(v); });
+    LayoutEngine::layout(s, bounded(200.0F, 24.0F));  // 宽 200 → 轨道 192（左右各缩 4）
 
-    // 禁用态：忽略拖拽
-    Slider sl2{Reactive{0.2}};
-    constexpr BuildContext ctx;
-    sl2.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 200, .height = 200}}, ctx);
-    sl2.set_enabled(false);
-    fire(sl2, make_press(100.0F, 12.0F));
-    AURORA_TEST_CHECK_MSG(near_d(sl2.value(), 0.2), "Slider: disabled ignores click, value unchanged");
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    press.local_position = Point{.x = 100.0F, .y = 12.0F};  // (100-4)/192 = 0.5
+    s.on_pointer_event(press);
+    AURORA_TEST_CHECK_TRUE(press.is_handled);
+    AURORA_TEST_CHECK_NEAR(s.value(), 0.5, 1e-4);
 
-    // 新属性序列化往返；active_color 未设置不输出（跟随主题）
-    const Slider sl3;
-    Json j0;
-    sl3.serialize_props(j0);
-    AURORA_TEST_CHECK_MSG(!j0.contains("active_color"), "Slider: unset active_color not serialized (follows theme)");
+    MouseEvent move;
+    move.action = MouseAction::Move;
+    move.local_position = Point{.x = 148.0F, .y = 12.0F};  // (148-4)/192 = 0.75
+    s.on_pointer_event(move);
+    AURORA_TEST_CHECK_NEAR(s.value(), 0.75, 1e-4);
 
-    Slider sl4;
-    sl4.set_thumb_color(Color::red()).set_track_height(8.0F).set_thumb_size(20.0F).set_step(0.5).set_enabled(false);
-    Json j;
-    sl4.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["thumb_color"][0].get<int>() == 255, "Slider: thumb_color serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_d(j["track_height"].get<double>(), 8.0), "Slider: track_height serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_d(j["thumb_size"].get<double>(), 20.0), "Slider: thumb_size serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_d(j["step"].get<double>(), 0.5), "Slider: step serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["enabled"].get<bool>() == false, "Slider: enabled serialization");
-
-    Slider sl5;
-    sl5.deserialize_props(j);
-    AURORA_TEST_CHECK_MSG(near_d(sl5.step(), 0.5), "Slider: step roundtrip");
-    AURORA_TEST_CHECK_MSG(sl5.enabled() == false, "Slider: enabled roundtrip");
+    MouseEvent release;
+    release.action = MouseAction::Release;
+    s.on_pointer_event(release);
+    AURORA_TEST_CHECK_NEAR(s.value(), 0.75, 1e-4);  // 松手不改值
+    AURORA_TEST_REQUIRE_EQ(seen.size(), 2U);
 }
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== test_slider ===\n");
-    test_props();
-    test_interaction();
-    test_roundtrip();
-    test_modern_props();
+AURORA_TEST_CASE(slider_disabled_ignores_pointer_events) {
+    int calls = 0;
+    Slider s;
+    s.set_range(0.0, 1.0);
+    s.set_on_changed([&calls](double) { ++calls; });
+    LayoutEngine::layout(s, bounded(200.0F, 24.0F));
+    s.set_enabled(false);
+    AURORA_TEST_CHECK_FALSE(s.enabled());
+
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    press.local_position = Point{.x = 100.0F, .y = 12.0F};
+    s.on_pointer_event(press);
+    AURORA_TEST_CHECK_TRUE(press.is_handled);
+    AURORA_TEST_CHECK_NEAR(s.value(), 0.0, 1e-4);
+    AURORA_TEST_CHECK_EQ(calls, 0);
+}
+
+AURORA_TEST_CASE(slider_binding_writes_through_to_upstream) {
+    State<double> up{0.0};
+    Slider s{Binding<double>(up)};
+    s.set_value(0.7);
+    AURORA_TEST_CHECK_NEAR(up.get(), 0.7, 1e-4);  // 控件 → 上游
+
+    up.set(0.2);
+    AURORA_TEST_CHECK_NEAR(s.value(), 0.2, 1e-4);  // 上游 → 控件（读取穿透）
+
+    // 信号收集：内部 value_ + 绑定目标。
+    std::vector<SignalViewBase *> out;
+    s.collect_signals(out);
+    AURORA_TEST_REQUIRE_EQ(out.size(), 2U);
+}
+
+AURORA_TEST_CASE(slider_describe_reports_invariants) {
+    const auto d = Slider::describe_static();
+    AURORA_TEST_CHECK_EQ(std::string{d.name}, "Slider");
+    AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
+    AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
+    AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_changed");
+    AURORA_TEST_REQUIRE_EQ(d.invariants.size(), 3U);
+    AURORA_TEST_CHECK_EQ(std::string{d.invariants[0]}, "min <= max");
+}
+
+AURORA_TEST_CASE(slider_serialize_deserialize_roundtrip) {
+    Slider src;
+    src.set_range(0.0, 100.0);
+    src.set_value(42.0);
+    src.set_enabled(false);
+
+    Json props;
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_NEAR(props["value"].get<double>(), 42.0, 1e-4);
+    AURORA_TEST_CHECK_EQ(props["enabled"].get<bool>(), false);
+
+    Slider dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_NEAR(dst.value(), 42.0, 1e-4);
+    AURORA_TEST_CHECK_FALSE(dst.enabled());
+    LayoutEngine::layout(dst, bounded(300.0F, 24.0F));
+    AURORA_TEST_CHECK_NEAR(dst.size().width, 300.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_slider

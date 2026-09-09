@@ -28,10 +28,11 @@ template <typename T>
 class Computed : public SignalView<T>, public StateBase {
   public:
     explicit Computed(std::function<T()> fn)
-        : fn_(std::move(fn)), value_(fn_()), effect_(std::make_shared<Effect>([this]() -> void {
+        : fn_(std::move(fn)), effect_(std::make_shared<Effect>([this]() -> void {
               value_ = fn_();
               notify();
           })) {
+        // 构造即求值且仅求值一次：value_ 默认构造后由首次 run 填充（副作用 fn 不会被触发两次）。
         effect_->run();
     }
 

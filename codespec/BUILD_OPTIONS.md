@@ -13,7 +13,7 @@
 |:---|:---|:---|:---|
 | `AURORA_BUILD_*` | 构建产物开关 | 是否**构建**某个额外交付物（demos / tests / Inspector 服务器） | 否（例外：`AURORA_BUILD_INSPECTOR_SERVER`（§2.4）的开关名同时作为编译宏注入——与后端组「开关名 = 宏名」同惯例） |
 | `AURORA_BACKEND_*` | 内置后端开关 | 每个 `Surface` 后端一个开关；**开关名 = PUBLIC feature 宏名** | 是（`#ifdef` 剪裁 + PUBLIC 传播给消费者） |
-| `AURORA_ENABLE_*` | 插桩 / 分析 / 能力开关 | 是否注入编译 / 链接期分析工具（覆盖率 / 内存检测 / 调试 / 性能插桩）或开启构建加速 / 内部能力（lld / ccache / SIMD / DEBUG） | 多数否；`PROFILING` / `TRACING` 与架构级优化三开关注入 PUBLIC 宏，`SIMD` / `DEBUG` / `IMAGE_*` 注入内部宏，`LLD` / `CCACHE` 不注入宏 |
+| `AURORA_ENABLE_*` | 插桩 / 分析 / 能力开关 | 是否注入编译 / 链接期分析工具（覆盖率 / 内存检测 / 调试 / 性能插桩）或开启构建加速 / 内部能力（lld / ccache / SIMD / DEBUG / 测试注入点） | 多数否；`PROFILING` / `TRACING` 与架构级优化三开关及 `DEBUG` / `TEST_HOOKS` 注入 PUBLIC 宏，`SIMD` / `IMAGE_*` 注入内部宏，`LLD` / `CCACHE` 不注入宏 |
 
 > `Win32/GDI` 后端仅在 `_WIN32` 下编译，无需额外开关，已由 `AURORA_BACKEND_WIN32` 的内置默认值覆盖。
 
@@ -33,7 +33,7 @@
 | `cmake/AuroraTools.cmake` | 工具 / 基准可执行（`aurora_add_tool()` 统一样板）+ `AURORA_BUILD_INSPECTOR_SERVER` |
 | `cmake/AuroraDemos.cmake` | 示例 demo 定义块（须在 `AuroraTools` 与 `AuroraTests` 之后 include，因其依赖 `aurora_inspector_server` 目标） |
 | `cmake/AuroraTests.cmake` | `AURORA_BUILD_TESTS` 注册式 runner（GLOB `tests/unit/*.cpp` 与 `tests/integration/*.cpp` → 单一 `aurora_test_runner`，`AURORA_TEST()` 自注册） |
-| `cmake/AuroraInstrumentation.cmake` | `AURORA_ENABLE_COVERAGE` / `AURORA_ENABLE_ASAN` / `AURORA_ENABLE_PROFILING` / `AURORA_ENABLE_TRACING`（须在全部目标定义之后 include） |
+| `cmake/AuroraInstrumentation.cmake` | `AURORA_ENABLE_COVERAGE` / `AURORA_ENABLE_ASAN` / `AURORA_ENABLE_PROFILING` / `AURORA_ENABLE_TRACING` / `AURORA_ENABLE_DEBUG` / `AURORA_ENABLE_TEST_HOOKS`（须在全部目标定义之后 include） |
 | `cmake/AuroraInstall.cmake` | 安装 + `find_package(Aurora)` 导出（须在后端开关之后 include） |
 | `cmake/AuroraLint.cmake` | `AURORA_ENABLE_CLANG_TIDY`（`lint` / `lint-fix` 聚合目标，经 `tools/check/run_clang_tidy.py` 并行 lint 非 third_party 翻译单元；须在全部目标定义之后 include） |
 
@@ -47,6 +47,7 @@
 |:---|:---|:---|:---|
 | `AURORA_BUILD_DEMOS` | `ON` | **定义**（非默认构建）`examples/demos/` 下每组件一个的可运行窗口 demo 目标；均 `EXCLUDE_FROM_ALL`，按需构建 | 各 `demo_<组件>` 可执行文件 + 聚合目标 `demos` |
 | `AURORA_BUILD_TESTS` | `ON` | 编译 `tests/` 下全部用例并接入 CTest：`AURORA_TEST()` 注册、单一 runner 一次链接，逐条 `--run=<stem>` 隔离 | `aurora_test_runner` 可执行 + `enable_testing()` + `registry_integrity` 守护 |
+| `AURORA_TEST_SHARDS` | `1` | 测试 runner 分片数（非开关、为正整数缓存变量）：`1` 与单 runner 完全等价；`N>1` 按 Suite（文件 stem）MD5 稳定散列把用例源拆为 N 个 runner（各含唯一 main），CTest 用例名带分片号（`<stem>_s<k>`），`registry_integrity` 对各 runner `--list` 取并集比对 | N 个 `aurora_test_runner_s<k>` 可执行；是否默认开启待收束期链接耗时数据 |
 | `AURORA_BUILD_INSPECTOR_SERVER` | `OFF` | 编译 Inspector 远程 HTTP 服务器（跨平台：Windows 链 `ws2_32` / POSIX 链 `pthread`） | `aurora_inspector_server` 静态库 |
 ### 2.1 图像编解码开关（已迁出）
 
@@ -150,7 +151,7 @@ cmake -S . -B build -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_DISPLAY_LIS
 ### 3.4 Display List 集成约束（正确性不变量）
 
 - **绘制副作用 / 每帧变动内容的控件必须退出 DL 缓存**：`Widget::can_cache_display_list()` 默认 `true`；绘制阶段产生副作用（如 `Hero` 向 `HeroRegistry` 上报几何）或内容每帧变化（如 `TransitionLayer` / `NavigatorHost` 按 `progress` 合成淡变）的控件**必须**覆盖为 `false`，否则缓存回放会跳过必要的每帧 `on_paint`，导致注册丢失 / 转场冻结。命中不可缓存控件时，其祖先录制会被标记 `mark_recording_dynamic()`。
-- **外部裁剪不参与控件 DL**：`present_root` 的脏区裁剪 `push_clip` 不录入控件 DL；故 `Widget::paint` 在 `Painter::has_clip()` 为真时直接重录但**不缓存**，避免无裁剪帧回放越界绘制（见 `tests/integration/utest_dirty_clip_paint.cpp`）。
+- **外部裁剪不参与控件 DL**：`present_root` 的脏区裁剪 `push_clip` 不录入控件 DL；故 `Widget::paint` 在 `Painter::has_clip()` 为真时直接重录但**不缓存**，避免无裁剪帧回放越界绘制（见 `tests/integration/itest_dirty_clip_paint.cpp`）。
 - **布局变更同步失效 DL**：`Widget::mark_needs_layout()` 一并调用 `invalidate_display_list_up()`，保证重排后的几何 / 内容不被旧 `bounds` 录制的 DL 回放。
 - **`layout_parent_` 悬垂安全**：`Node` 析构时将其持有的子控件 `layout_parent_` 置空，使树重建（父容器销毁而子控件经共享所有权存活）时 `mark_needs_layout()` / `invalidate_display_list_up()` 不会解引用已释放的父指针。
 
@@ -200,11 +201,12 @@ cmake --build build --target gen_debug_api_json     # 仅刷新 debug 段
 
 | 选项 | 默认值 | 含义 | 注入内容 |
 |:---|:---|:---|:---|
-| `AURORA_ENABLE_COVERAGE` | `OFF` | 行覆盖率（终端摘要，不生成 HTML；按编译器分流） | GCC：`--coverage -O0 -g`（gcov）；Clang：`-fprofile-instr-generate -fcoverage-mapping -O0 -g`（LLVM 原生 source-based）。均清除默认 `-O3/-Os/-DNDEBUG`、关闭 PCH，提供 `coverage` custom target |
+| `AURORA_ENABLE_COVERAGE` | `OFF` | 行覆盖率（终端摘要，不生成 HTML；按编译器分流） | GCC：`--coverage -O0 -g`（gcov，MinGW 追加 `-Wa,-mbig-obj`，并对 `painter.cpp` 单独提升 `-O1`，见下方约束）；Clang：`-fprofile-instr-generate -fcoverage-mapping -O0 -g`（LLVM 原生 source-based）。均清除默认 `-O3/-Os/-DNDEBUG`、关闭 PCH，提供 `coverage` custom target |
 | `AURORA_ENABLE_ASAN` | `OFF` | AddressSanitizer + UndefinedBehaviorSanitizer | 对所有目标注入 `-fsanitize=address,undefined -fno-omit-frame-pointer -g -O0`；仅 GNU/Clang 生效 |
 | `AURORA_ENABLE_PROFILING` | `AUTO` | 渲染性能插桩（作用域计时 + 渲染计数器） | 三态，见 §4.1 |
 | `AURORA_ENABLE_TRACING` | `OFF` | Chrome Trace Event 时间线落盘 | 注入 `AURORA_ENABLE_TRACING`（PUBLIC 传播 + 安装导出），**并强制**打开 `AURORA_ENABLE_PROFILING` |
-| `AURORA_ENABLE_DEBUG` | `AUTO` | 真实后端 DEBUG 能力（截图、控件树、性能快照、可视化调试叠层、控件拾取） | 三态；**仅库内部、不 PUBLIC 传播、不导出消费者**。调试 API 在头文件始终声明、`.cpp` 体按宏裁切，消费端调用始终可编译、关闭时返回 disabled |
+| `AURORA_ENABLE_DEBUG` | `AUTO` | 真实后端 DEBUG 能力（截图、控件树、性能快照、可视化调试叠层、控件拾取） | 三态；注入 `AURORA_ENABLE_DEBUG`（**PUBLIC 传播**，经 `aurora_define_feature` 注册）。PUBLIC 的原因：Widget 类在宏下新增数据成员会改变类 ABI 布局，消费者（demo / tests / 宿主应用）必须与库同值，否则构造与成员偏移错位（ODR / 访问冲突）。调试 API 与测试注入 API 均在头文件始终声明、`.cpp` 体按宏裁切，消费端调用始终可编译、关闭时返回 disabled |
+| `AURORA_ENABLE_TEST_HOOKS` | `ON` | 库侧测试注入点（进程内 memory 剪贴板后端等，供仓库私有测试设施并行隔离） | 注入 `AURORA_ENABLE_TEST_HOOKS`（**PUBLIC 传播**，经 `aurora_define_feature` 注册）。注入 API 声明常驻，实现体按 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` **双宏**裁切，任一关闭（含 Release 下 DEBUG AUTO 自动关闭）返回 `false` / no-op，平台行为不变；钩子本身无副作用，真正的行为开关是 `AURORA_ENABLE_DEBUG` |
 | `AURORA_ENABLE_SIMD` | `ON` | 光栅内核 SIMD 双实现（SSE2 基线 + AVX2 运行时分发） | 注入 `AURORA_ENABLE_SIMD`（仅库内部，不 PUBLIC 传播）；详见 §4.2 |
 | `AURORA_ENABLE_CCACHE` | `ON` | ccache 编译缓存（加速重复编译） | 设置 `CMAKE_C_COMPILER_LAUNCHER` 与 `CMAKE_CXX_COMPILER_LAUNCHER`；支持 winget 安装路径自动检测 |
 | `AURORA_ENABLE_LLD` | `ON` | 链接器选择（lld 加速静态链接） | GNU/Clang 下 `find_program(ld.lld)` + `check_linker_flag` 探测通过则全局注入 `-fuse-ld=lld -B<lld 目录>`；失败静默回退 GNU ld；**不注入 feature 宏** |
@@ -217,6 +219,7 @@ cmake --build build --target gen_debug_api_json     # 仅刷新 debug 段
 
 - `AURORA_ENABLE_COVERAGE` 与 `AURORA_ENABLE_ASAN` **互斥**：同时 `ON` 触发 `FATAL_ERROR`（都改写代码生成）。
 - **Clang 下禁止注入 `--coverage`**：clang 的 gcov 兼容运行时（`llvm_gcda_*`）在 Windows 进程退出刷写 `.gcda` 时稳定崩溃（关闭窗口 / 测试退出即 `0xC0000005`）。现已按 `CMAKE_CXX_COMPILER_ID` 自动分流，同一开关对两套工具链透明。
+- **MinGW GCC 两项特例**：(1) `-O0 --coverage` 组合会击穿 COFF 目标文件默认段数上限（大 TU 汇编报 "file too big"），故追加 `-Wa,-mbig-obj`；(2) `-O0 --coverage` 下对带 `target("sse4.1")/target("avx2")` 属性的函数（`painter_simd.inl` SIMD 栅格内核）生成崩溃代码（box blur AVX2 路径运行时 `0xC0000005`，`-O3` 与标量路径均正常），故对 `painter.cpp`（该内核唯一 TU）以源文件级 `-O1` 覆盖，gcov 行映射完整、SIMD 实现行不豁免出统计。
 - 覆盖率需覆盖测试目标（大量 widget 是 header-only，仅在测试编译单元中被编译，否则覆盖率严重偏低）。
 - 插桩构建（`-O0` 全量插桩）退出前写 profile 较慢：关闭窗口后进程可能需数秒至十余秒才退出，属正常现象。
 
@@ -388,11 +391,43 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | 变量 | 取值 | 作用 |
 |:---|:---|:---|
 | `AURORA_GOLDEN_DIR` | 目录路径 | golden 真值目录；缺省为 `tests/golden` |
-| `AURORA_UPDATE_GOLDEN` | 非空（如 `1`） | 把当前渲染覆盖为新的 golden（首次生成 / 主动更新真值）；像素 golden 与 `utest_golden_snapshots` 的逻辑快照基准（`tests/golden/logical_snapshots.json`）共用此变量 |
+| `AURORA_UPDATE_GOLDEN` | 非空（如 `1`） | 把当前渲染覆盖为新的 golden（首次生成 / 主动更新真值）；像素 golden 与 `utest_offscreen` 的逻辑快照基准（`tests/golden/logical_snapshots.json`）共用此变量 |
 | `AURORA_GOLDEN_MAX_DIFF` | 整数 | 像素最大允许色差阈值 |
 | `AURORA_GOLDEN_MAX_PIXELS` | 整数 | 允许不一致像素数上限 |
 
 > CTest 默认 CWD = `build/`，故依赖相对路径的 golden 测试须从仓库根直接运行可执行文件（仓库 `cmake/AuroraTests.cmake` 已为依赖相对路径的测试显式设置 `WORKING_DIRECTORY` 为仓库根，故 `ctest` 下直接可跑）。
+
+---
+
+## 7.1 `aurora_test_runner` CLI
+
+测试框架的命令行接口（实现于 `tests/framework/test_main.cpp`）。CTest 用例默认以 `--run=<stem>` 单文件粒度调用。
+
+| 参数 | 作用 |
+|:---|:---|
+| `--run=<suite>` | 只执行指定套件的用例（套件名恒等于测试文件 stem） |
+| `--filter=<substr>` | 按用例全名 `Suite.Case` 的子串过滤 |
+| `--list` | 列出已注册用例后退出；每行 `Suite.Case` |
+| `--format=<fmt>` | 仅对 `--list` 生效：`cases`（默认）或 `suites`（每行一个套件名，供 `registry_integrity` 比对） |
+| `--verbose` | 额外输出用例诊断笔记 |
+| `--report=<path>` | 结果报告落盘：扩展名 `.xml` → JUnit XML，其余 → JSON；超时同样写入（已完成的部分结果） |
+| `--shuffle[=<seed>]` | 打乱用例顺序（暴露顺序依赖）；带种子可复现 |
+| `--repeat=<n>` | 把选中集合跑 n 轮（暴露状态泄漏；报告里用例名带 `#轮次`） |
+| `--timeout=<ms>` | 本轮总时限。看门狗到点先写报告、再以退出码 `3` 结束（协作式：进程内无法强杀死循环线程，进程级强杀由 CTest 的 `TIMEOUT` 属性承担） |
+| `--selftest` | 执行框架内建自检（synthetic 用例，不消费注册表） |
+| `-h` / `--help` | 显示帮助 |
+
+框架内部参数（由死亡测试自行拼装，人工不必使用）：`--death-child=<站点键>` 让本进程以死亡测试子进程身份重跑同一用例；
+`--death-capture=<file>` 指定子进程把 stderr 接管到哪个采集文件（子进程自行 `freopen`，命令行里因此不需要任何 shell 重定向）。
+
+退出码协议：
+
+| 码 | 含义 |
+|:---|:---|
+| `0` | 全部通过（Skipped 不计失败） |
+| `1` | 至少一个用例失败 |
+| `2` | CLI 参数错误、筛选结果为空（含「文件漏写注册宏」）、或报告无法写入 |
+| `3` | 超时（看门狗触发；已完成的用例结果仍写入 `--report`） |
 
 ---
 
@@ -482,6 +517,7 @@ cmake --build build
 # 产物开关
 -D AURORA_BUILD_DEMOS=ON|OFF                  # demos（默认 ON）
 -D AURORA_BUILD_TESTS=ON|OFF                  # CTest（默认 ON）
+-D AURORA_TEST_SHARDS=<N>                     # 测试 runner 分片数（默认 1 = 单 runner）
 -D AURORA_BUILD_INSPECTOR_SERVER=ON|OFF       # Inspector HTTP 服务器（默认 OFF）
 
 # 后端开关（= feature 宏，PUBLIC 传播）
@@ -504,7 +540,8 @@ cmake --build build
 -D AURORA_ENABLE_ASAN=ON|OFF             # ASan/UBSan（默认 OFF）
 -D AURORA_ENABLE_PROFILING=AUTO|ON|OFF   # 渲染插桩（默认 AUTO）
 -D AURORA_ENABLE_TRACING=ON|OFF          # Chrome Trace（默认 OFF，隐含 PROFILING=ON）
--D AURORA_ENABLE_DEBUG=AUTO|ON|OFF       # 真实后端 DEBUG 能力（默认 AUTO，内部宏）
+-D AURORA_ENABLE_DEBUG=AUTO|ON|OFF       # 真实后端 DEBUG 能力（默认 AUTO，PUBLIC 宏）
+-D AURORA_ENABLE_TEST_HOOKS=ON|OFF       # 库侧测试注入点（默认 ON，PUBLIC 宏；双宏裁切，见 §4）
 -D AURORA_ENABLE_SIMD=ON|OFF             # 光栅 SIMD 双实现（默认 ON，内部宏）
 -D AURORA_ENABLE_IMAGE_{JPEG,WEBP,PNG}=ON|OFF  # 图像解码能力（默认均 OFF，内部宏）
 -D AURORA_ENABLE_CCACHE=ON|OFF           # ccache 编译缓存（默认 ON）

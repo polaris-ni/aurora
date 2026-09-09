@@ -170,16 +170,16 @@ count.set(42);     // 触发 Effect 重跑：observed = 42（定点刷新，无�
 > **注意**：仅在构造时读取 `state->get()` **不会**建立响应式依赖。必须通过 `Effect` 或使用接受 `State<T>` 的 widget（Show / Repeater）才能实现定点刷新。
 
 ```cpp
-// 方式 3：用 bind + Subscription 订阅任意信号（析构自动取消，无监听器泄漏）
+// 方式 3：用 connect + Subscription 订阅任意信号（析构自动取消，无监听器泄漏）
 au::State<int> count{ 0 };
 int seen = 0;
 {
-    au::Subscription sub = au::bind(count, [&](int v){ seen = v; });  // 立即 seen = 0
-    count.set(7);                                                     // → seen = 7
-}                                                                     // sub 离开作用域 → 自动取消订阅
+    au::Subscription sub = au::connect(count, [&](int v){ seen = v; });  // 立即 seen = 0
+    count.set(7);                                                        // → seen = 7
+}                                                                        // sub 离开作用域 → 自动取消订阅
 ```
 
-`aurora::bind` 必须显式限定命名空间，否则 ADL 可能解析成 `std::bind`。
+**为何不是 `bind`**：`State` 基类链上的 `std::enable_shared_from_this` 使 `std` 进入实参的 ADL 关联命名空间集，无限定 `bind(state, fn)` 会被变参转发的 `std::bind` 吸走——编译通过但回调永不执行。故本 API 定名 `connect`（原 `bind` 已于 1.0.0-alpha.1 改名），与 `std` 名字无重叠。
 
 ---
 
@@ -719,26 +719,31 @@ au::Node n = au::Scroll{ au::Column{ au::Text("A"), au::Text("B") } };
 
 ## 24 测试原语（`aurora::test`）
 
-`aurora::test`（头 `include/aurora/test_helpers.h`，**不进 `aurora.h`**）薄封装 `HeadlessSurface` + `AURORA_TEST_CHECK*` + `EventDispatcher`，用于编写**确定性、可文本验证**的测试。**使用前提：测试编译单元须先 `#include "aurora_test_harness.h"`**（提供 `AURORA_TEST_CHECK*` 断言宏；`tests/` 已加入测试目标包含路径，故用裸名包含）。
+`aurora::test` 薄封装（头 `tests/support/test_helpers.h`，**仓库私有设施**：不进 `include/`、不进 `aurora.h`、不构成公共 API 兼容承诺）提供 `HeadlessSurface` 驱动的无头测试环境与 `expect_*` 断言家族，用于编写**确定性、可文本验证**的测试。断言宏 `AURORA_TEST_CHECK*` 由框架唯一入口 `tests/framework/aurora_test.h` 提供（注册式 runner 用法见 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §3.1）；`tests/` 已在测试目标包含路径上，两个头均按裸名包含。
 
 ```cpp
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"   // 断言宏 + 用例注册（测试 TU 唯一框架入口）
+#include "support/test_helpers.h"    // aurora::test 无头环境与 expect_* 家族
 #include "aurora/aurora.h"
-#include "aurora/test_helpers.h"
 #include "aurora/ui/factories.h"
-using namespace aurora;
-using namespace aurora::ui;
-using namespace aurora::test;
 
-auto env = init_headless(320, 240);                  // 无头环境（确定性，无需 GUI 后端）
-auto *b  = button(*env.root_widget, "Go", {}, [&]{ clicked = true; });
-pump(env);                                           // 推进一帧：mount + layout
-expect_text(env.root, "Go");                         // 断言树中存在含该文本的控件
-expect_tree_contains(env.root, "Button");
-expect_count(env.root, "Text", 0);
-expect_visible(env.root);
-tap(env, *b);                                        // 在控件中心合成 press + release → 触发 on_click
-type_text(env, *input_widget, "abc");                // 逐字符喂入已聚焦输入控件
+namespace aurora::test_cases::utest_demo {
+
+AURORA_TEST_CASE(button_click_smoke) {
+    bool clicked = false;
+    auto env = test::init_headless(320, 240);            // 无头环境（确定性，无需 GUI 后端）
+    auto *b  = button(*env.root_widget, "Go", {}, [&]{ clicked = true; });
+    test::pump(env);                                     // 推进一帧：mount + layout
+    test::expect_text(env.root, "Go");                   // 断言树中存在含该文本的控件
+    test::expect_tree_contains(env.root, "Button");
+    test::expect_count(env.root, "Text", 0);
+    test::expect_visible(env.root);
+    test::tap(env, *b);                                  // 在控件中心合成 press + release → 触发 on_click
+    AURORA_TEST_CHECK_TRUE(clicked);
+    // type_text(env, <已聚焦的 TextInput>, "abc");       // 逐字符喂入已聚焦输入控件
+}
+
+}  // namespace aurora::test_cases::utest_demo
 ```
 
 富格式文本化：`dump_tree_rich(node)`（`include/aurora/widget/inspect.h`）输出 `#id` / `bounds` / `visible` / `text` / `style` / `listeners` 及 `├─ └─` 树形符，供 AI 断言 / diff / 定位。给节点命名：`node.set_id("my-id")`。

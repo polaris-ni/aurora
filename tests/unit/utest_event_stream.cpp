@@ -1,139 +1,120 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/event_stream.h
-/// 测试说明: 值类型事件流 EventStream（订阅/发射/RAII 退订/句柄移动）单元测试
+/// 测试说明: EventStream 的订阅与发射、多订阅者按订阅顺序收到、Subscription RAII 退订、reset
+/// 幂等、移动语义所有权转移与自退订、未知 id 退订 no-op、空流发射安全与多流独立
 
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "aurora/core/event_stream.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_event_stream {
 
-AURORA_TEST() {
-    // ---- 1. 订阅后 emit 能收到值 ----
-    {
-        EventStream<int> stream;
-        int got = 0;
-        const auto sub = stream.subscribe([&got](const int& v) -> void { got = v; });
-        stream.emit(42);
-        AURORA_TEST_CHECK(got == 42);
-    }
+namespace m = aurora::testing::matchers;
 
-    // ---- 2. 未订阅时 emit 为空操作 ----
-    {
-        EventStream<int> stream;
-        stream.emit(1);  // 不得崩溃
-        AURORA_TEST_CHECK(true);
-    }
+AURORA_TEST_CASE(subscribe_and_emit_delivers_value) {
+    aurora::EventStream<int> stream;
+    int received = 0;
+    const auto sub = stream.subscribe([&received](const int& v) -> void { received = v; });
+    AURORA_TEST_CHECK(static_cast<bool>(sub));
+    stream.emit(5);
+    AURORA_TEST_CHECK_EQ(received, 5);
+}
 
-    // ---- 3. 多订阅者按 id 升序收到同一事件 ----
+AURORA_TEST_CASE(emit_reaches_all_subscribers_in_subscription_order) {
+    aurora::EventStream<int> stream;
+    std::vector<int> order;
+    const auto first = stream.subscribe([&order](const int& v) -> void { order.push_back(100 + v); });
+    const auto second = stream.subscribe([&order](const int& v) -> void { order.push_back(200 + v); });
+    AURORA_TEST_CHECK(static_cast<bool>(first));
+    AURORA_TEST_CHECK(static_cast<bool>(second));
+
+    stream.emit(1);
+    AURORA_TEST_REQUIRE_THAT(order, m::size_is(2));
+    // 内部为按 id 升序的 std::map：先订阅者先收到。
+    AURORA_TEST_CHECK_EQ(order[0], 101);
+    AURORA_TEST_CHECK_EQ(order[1], 201);
+}
+
+AURORA_TEST_CASE(subscription_destructor_unsubscribes) {
+    aurora::EventStream<int> stream;
+    int calls = 0;
     {
-        EventStream<int> stream;
-        std::vector<int> order;
-        const auto a = stream.subscribe([&order](const int& v) -> void { order.push_back(v * 10); });
-        const auto b = stream.subscribe([&order](const int& v) -> void { order.push_back(v * 100); });
+        auto sub = stream.subscribe([&calls](const int&) -> void { ++calls; });
         stream.emit(1);
-        AURORA_TEST_CHECK_EQ(order.size(), 2U);
-        AURORA_TEST_CHECK(order[0] == 10);
-        AURORA_TEST_CHECK(order[1] == 100);
+        AURORA_TEST_CHECK_EQ(calls, 1);
     }
+    // 句柄析构已自动退订：后续发射不再回调。
+    stream.emit(2);
+    AURORA_TEST_CHECK_EQ(calls, 1);
+}
 
-    // ---- 4. 多次 emit 累计 ----
-    {
-        EventStream<int> stream;
-        int sum = 0;
-        const auto sub = stream.subscribe([&sum](const int& v) -> void { sum += v; });
-        stream.emit(1);
-        stream.emit(2);
-        stream.emit(3);
-        AURORA_TEST_CHECK(sum == 6);
-    }
+AURORA_TEST_CASE(reset_unsubscribes_and_double_reset_safe) {
+    aurora::EventStream<int> stream;
+    int calls = 0;
+    auto sub = stream.subscribe([&calls](const int&) -> void { ++calls; });
+    AURORA_TEST_CHECK(static_cast<bool>(sub));
+    sub.reset();
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(sub));
+    stream.emit(1);
+    AURORA_TEST_CHECK_EQ(calls, 0);
 
-    // ---- 5. Subscription 析构自动退订 ----
-    {
-        EventStream<int> stream;
-        int hits = 0;
-        {
-            const auto sub = stream.subscribe([&hits](const int&) -> void { ++hits; });
-            stream.emit(1);
-            AURORA_TEST_CHECK(hits == 1);
-        }
-        stream.emit(2);
-        AURORA_TEST_CHECK(hits == 1);  // 退订后不再收到
-    }
+    sub.reset();  // 已退订句柄重复 reset 为 no-op
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(sub));
+}
 
-    // ---- 6. 显式 reset 退订，且可重复调用（幂等） ----
-    {
-        EventStream<int> stream;
-        int hits = 0;
-        auto sub = stream.subscribe([&hits](const int&) -> void { ++hits; });
-        stream.emit(1);
-        AURORA_TEST_CHECK(hits == 1);
+AURORA_TEST_CASE(subscription_move_semantics_transfer_ownership) {
+    aurora::EventStream<int> stream;
+    int calls = 0;
+    auto moved_from = stream.subscribe([&calls](const int&) -> void { ++calls; });
+    auto moved_to = std::move(moved_from);
+    // 移动后源句柄失效：其析构不会再退订。
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(moved_from));
+    AURORA_TEST_CHECK(static_cast<bool>(moved_to));
+    stream.emit(1);
+    AURORA_TEST_CHECK_EQ(calls, 1);
 
-        sub.reset();
-        AURORA_TEST_CHECK(!static_cast<bool>(sub));
-        sub.reset();  // 幂等
-        stream.emit(2);
-        AURORA_TEST_CHECK(hits == 1);
-    }
+    // 移动赋值：目标句柄先释放自己的原订阅，再接管新订阅。
+    auto other = stream.subscribe([&calls](const int&) -> void { calls += 10; });
+    other = std::move(moved_to);
+    stream.emit(2);
+    AURORA_TEST_CHECK_EQ(calls, 2);  // +10 的订阅已随赋值释放，仅原订阅收到
 
-    // ---- 7. 活跃订阅句柄为真 ----
-    {
-        EventStream<int> stream;
-        const auto sub = stream.subscribe([](const int&) -> void {});
-        AURORA_TEST_CHECK(static_cast<bool>(sub));
-    }
+    other.reset();
+    stream.emit(3);
+    AURORA_TEST_CHECK_EQ(calls, 2);  // 全部退订后不再回调
+}
 
-    // ---- 8. 移动构造：新句柄接管，原句柄失效（不重复退订） ----
-    {
-        EventStream<int> stream;
-        int hits = 0;
-        {
-            auto a = stream.subscribe([&hits](const int&) -> void { ++hits; });
-            {
-                auto b = std::move(a);
-                AURORA_TEST_CHECK(static_cast<bool>(b));
-                AURORA_TEST_CHECK(!static_cast<bool>(a));  // 已转移
-                stream.emit(1);
-                AURORA_TEST_CHECK(hits == 1);
-            }
-            // b 析构退订；a 已无宿主，析构不应二次退订
-            stream.emit(2);
-            AURORA_TEST_CHECK(hits == 1);
-        }
-    }
+AURORA_TEST_CASE(unsubscribe_unknown_id_is_noop) {
+    aurora::EventStream<int> stream;
+    // 公开退订入口对未知 id 安全。
+    AURORA_TEST_CHECK_NO_THROW(stream.unsubscribe(9999));
 
-    // ---- 9. 移动赋值：先退订自身再接管 ----
-    {
-        EventStream<int> stream;
-        int x = 0;
-        int y = 0;
-        auto a = stream.subscribe([&x](const int&) -> void { ++x; });
-        auto b = stream.subscribe([&y](const int&) -> void { ++y; });
-        a = std::move(b);  // a 原订阅被退订，接管 b 的
-        stream.emit(1);
-        AURORA_TEST_CHECK(x == 0);
-        AURORA_TEST_CHECK(y == 1);
-    }
+    int calls = 0;
+    auto sub = stream.subscribe([&calls](const int&) -> void { ++calls; });
+    AURORA_TEST_CHECK(static_cast<bool>(sub));
+    stream.emit(1);
+    AURORA_TEST_CHECK_EQ(calls, 1);
+}
 
-    // ---- 10. 非平凡负载（字符串）按引用传递 ----
-    {
-        EventStream<std::string> stream;
-        std::string got;
-        const auto sub = stream.subscribe([&got](const std::string& s) -> void { got = s; });
-        stream.emit(std::string("payload"));
-        AURORA_TEST_CHECK(got == "payload");
-    }
+AURORA_TEST_CASE(independent_streams_and_empty_emit) {
+    aurora::EventStream<std::string> a;
+    aurora::EventStream<std::string> b;
+    std::vector<std::string> seen;
+    const auto sub_a = a.subscribe([&seen](const std::string& v) -> void { seen.push_back("a:" + v); });
+    const auto sub_b = b.subscribe([&seen](const std::string& v) -> void { seen.push_back("b:" + v); });
+    AURORA_TEST_CHECK(static_cast<bool>(sub_a));
+    AURORA_TEST_CHECK(static_cast<bool>(sub_b));
 
-    // ---- 11. 默认构造的 Subscription 为空句柄 ----
-    {
-        EventStream<int>::Subscription empty{};
-        AURORA_TEST_CHECK(!static_cast<bool>(empty));
-        empty.reset();  // 空句柄 reset 安全
-        AURORA_TEST_CHECK(true);
-    }
+    a.emit("x");
+    AURORA_TEST_REQUIRE_EQ(seen.size(), std::size_t{1});
+    AURORA_TEST_CHECK_THAT(seen[0], m::str_eq("a:x"));  // 流之间互不串扰
+
+    // 无订阅者时发射是安全 no-op。
+    aurora::EventStream<int> empty;
+    AURORA_TEST_CHECK_NO_THROW(empty.emit(1));
 }
 
 }  // namespace aurora::test_cases::utest_event_stream

@@ -4,7 +4,7 @@
 # ----------------------------------------------------------------------------
 # 低误报、确定性可判定的代码-文档一致性门禁，接入 CTest（check_code_doc_sync）。
 #
-# 规则（测试头部，编号 TEST-R1–TEST-R6，定义见 codespec/CODING_STANDARDS.md §3.2）：
+# 规则（测试头部，编号 TEST-R1–TEST-R10，定义见 codespec/CODING_STANDARDS.md §3.2）：
 #   DOC1    代码注释中的 `架构 §N` 引用 → codespec/ARCHITECTURE.md 必须存在该章节；
 #   DOC2    代码注释中的 `规格 §N` 引用 → 需求 #N 必须存在于 SPECIFICATIONS.md 特性表（#1–#24）；
 #   TEST-R1 测试头部必须含标准三行块：/// 测试类型 / /// 目标单元 / /// 测试说明
@@ -12,10 +12,17 @@
 #   TEST-R2 测试头部「目标单元 / 目标源单元」声明路径必须真实存在（防注释路径烂掉）；
 #   TEST-R4 测试目标单元不得指向聚合入口头（aurora.h / aurora_fwd.h / aurora_pch.h）；
 #   TEST-R5 每个公共单元头应被某测试显式声明为目标单元，或在该测试中直接 #include
-#           （header-only 工具类型豁免），否则记为覆盖缺口。
-#   （TEST-R3 一一对应 / TEST-R6 跨域 catch-all 不纳入本门禁：靠评审与审计，见 §3.2。）
+#           （header-only 工具类型豁免），否则记为覆盖缺口；
+#   TEST-R7 并行安全：测试体系禁止新增 RUN_SERIAL（CMake 编排与测试源一并扫描），
+#           申请串行须列入 TEST_R7_WHITELIST 并注明根因（并行模型 = 进程隔离 + 资源虚拟化）；
+#   TEST-R8 命名纪律：目录定类型 + 前缀强制——tests/unit/ 一律 utest_、tests/integration/
+#           一律 itest_；测试 TU 不得放在两目录之外；禁止自定义套件宏（AURORA_TEST_NAMED 等，
+#           Suite 恒等于文件 stem，见 §3.1）；
+#   TEST-R9 测试 TU 禁止 using-directive（与 clang-tidy google-build-using-namespace 同口径）。
+#   （TEST-R3 一一对应 / TEST-R10 跨域 catch-all 趋势不纳入硬门禁：靠评审与审计，见 §3.2；
+#     TEST-R6 注册完整性由 tools/check/check_test_registry.py 的 registry_integrity 用例守门。）
 #
-# 设计原则：只做确定性判定。TEST-R1/TEST-R4/TEST-R5 当前为存量红线——基线即现状问题数，
+# 设计原则：只做确定性判定。TEST-R1/TEST-R2/TEST-R4/TEST-R5 当前为存量红线——基线即现状问题数，
 # 整改归零后转绿；新增违规立即转红（防回退）。白名单仅用于文档引用类存量豁免。
 #
 # Usage:
@@ -26,14 +33,23 @@ import re
 import sys
 
 # ---- 白名单：文档引用类存量豁免，逐项注明原因 ------------------------------
-# 测试头部写「(待补)」表示作者明确标注 TODO，非路径漂移；列为存量豁免，不拦增量。
-WHITELIST = {
-    ("TEST-R2", "tests/unit/utest_aurora_lsp.cpp", "(待补)"): "头部目标单元标注为待补（TODO），非路径漂移",
-    ("TEST-R2", "tests/unit/utest_default_construct.cpp", "(待补)"): "头部目标单元标注为待补（TODO），非路径漂移",
-    # 目标单元恰为公共头 include/aurora/todo.h（其公共类名即 TODO）；PLACEHOLDER_RE 对
-    # 子串 "todo" 的大小写不敏感匹配会误判为作者占位标记，实为真实存在的目标头，非占位。
-    ("TEST-R2", "tests/unit/utest_todo.cpp", "include/aurora/todo.h"): "目标单元为真实公共头 todo.h（类名 TODO），PLACEHOLDER_RE 子串误命中，非占位",
-}
+# 键为 (规则, 仓库相对路径, 详情子串)。当前为空：原 3 条 TEST-R2 豁免指向
+# utest_aurora_lsp / utest_default_construct / utest_todo，这些文件已在「破旧」阶段
+# 删除，豁免成为无匹配目标的孤儿，随守门重写一并清理。
+WHITELIST = {}
+
+# ---- TEST-R7 串行白名单：申请串行的测试条目，逐项注明根因 -------------------
+# 键为仓库相对路径（相对 CMake 编排文件则写 "cmake/<文件>#<测试名>"）。
+# 并行模型 = CTest 进程隔离 + 框架用例边界资源虚拟化（见 CODING_STANDARDS.md §3.1），
+# 新增 RUN_SERIAL 属于违规；确因外部资源无法虚拟化而需要串行的，先在此登记根因。
+TEST_R7_WHITELIST = {}
+
+# TEST-R10 趋势基线：跨 ≥3 模块域的测试文件（catch-all 反模式）允许存量上限。
+CATCH_ALL_BASELINE = 20
+
+# TEST-R5 全局硬门禁（收束阶段已恢复）：每个公共单元头必须被某测试覆盖
+# （声明为目标单元 / 直接 #include / 符号被 tests/ 引用，header-only 工具类型豁免）。
+TEST_R5_ENFORCED = True
 
 ARCH_REF_RE = re.compile(r"架构\s*§\s*([\d.]+)")
 SPEC_REF_RE = re.compile(r"规格\s*§\s*([\d.]+)")
@@ -207,7 +223,7 @@ def parse_test_header(repo, rel):
             dom, fname, ext = m.group(1), m.group(2), m.group(3)
             if dom not in MODULE_DOMAINS or dom == "detail":
                 continue
-            if fname in ("aurora", "aurora_fwd", "aurora_pch", "test_helpers"):
+            if fname in ("aurora", "aurora_fwd", "aurora_pch"):
                 continue
             if fname.endswith("_test") or fname.startswith("test_"):
                 continue
@@ -246,7 +262,7 @@ def collect_public_unit_headers(repo):
                 continue
             rp = os.path.relpath(os.path.join(cur, name), repo).replace("\\", "/")
             if "/detail/" in rp or name.endswith(".gen.h") or rp in AGG_HEADERS \
-               or name == "test_helpers.h" or rp in HEADER_ONLY_EXEMPT:
+               or rp in HEADER_ONLY_EXEMPT:
                 continue
             headers.append(rp)
     return sorted(headers)
@@ -325,6 +341,120 @@ def check_public_header_coverage(repo, problems):
             problems.append(("R5", h, 1, "公共单元头无测试覆盖（未声明为目标、未被直接 include、符号零引用）"))
 
 
+def _strip_line_and_block_comments(text):
+    """Comment stripper for TEST-R7/R8/R9 source scans (commented-out code must not count)."""
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+    return re.sub(r"//[^\n]*", " ", text)
+
+
+def _iter_tests_tree(repo, extensions=(".cpp", ".h")):
+    """Yield repo-relative paths of all sources under tests/ (framework included)."""
+    root = os.path.join(repo, "tests")
+    for current, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in ("build", ".git")]
+        for name in sorted(files):
+            if name.endswith(extensions):
+                yield os.path.relpath(os.path.join(current, name), repo).replace("\\", "/")
+
+
+def check_parallel_safety(repo, problems):
+    """TEST-R7: no RUN_SERIAL anywhere in the test system.
+
+    Scans both the CMake orchestration (where the old runner injected it) and test
+    sources; hits not whitelisted in TEST_R7_WHITELIST are violations. The parallel
+    model is CTest process isolation + framework case-boundary resource virtualization
+    (isolation.h), so serial execution is never the answer for flakiness.
+    """
+    cmake_files = ["cmake/AuroraTests.cmake", "tests/CMakeLists.txt"]
+    for rel in cmake_files:
+        if rel in TEST_R7_WHITELIST:
+            continue
+        path = os.path.join(repo, rel)
+        if not os.path.isfile(path):
+            continue
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            text = re.sub(r"#[^\n]*", " ", handle.read())  # CMake 注释以 # 开头
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if "RUN_SERIAL" in line:
+                problems.append(("TEST-R7", rel, lineno, "测试体系禁止 RUN_SERIAL（并行=进程隔离+资源虚拟化）；"
+                                                         "确需串行先登记 TEST_R7_WHITELIST 并注明根因"))
+    for rel in _iter_tests_tree(repo, (".cpp",)):
+        with open(os.path.join(repo, rel), encoding="utf-8", errors="replace") as handle:
+            text = _strip_line_and_block_comments(handle.read())
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if "RUN_SERIAL" in line and rel not in TEST_R7_WHITELIST:
+                problems.append(("TEST-R7", rel, lineno, "测试源中出现 RUN_SERIAL（应由资源虚拟化消除，而非串行）"))
+
+
+def check_test_naming(repo, problems):
+    """TEST-R8: directory defines type + mandatory prefix; no stray test TU; no custom suite macro.
+
+    Suite == file stem is enforced by the framework (derived from __FILE__), so the
+    static check targets the ways that contract used to be (or could be) broken:
+    wrongly named/prefaced files, test TUs outside tests/unit|integration, and
+    custom-suite macros that would bypass the stem binding.
+    """
+    forbidden_macros = re.compile(r"\bAURORA_TEST_NAMED\b|\bAURORA_TEST_SUITE\b")
+    for kind, prefix in (("unit", "utest_"), ("integration", "itest_")):
+        base = os.path.join(repo, "tests", kind)
+        if not os.path.isdir(base):
+            continue
+        for name in sorted(os.listdir(base)):
+            if not name.endswith(".cpp"):
+                continue
+            rel = os.path.join("tests", kind, name).replace("\\", "/")
+            if not name.startswith(prefix):
+                problems.append(("TEST-R8", rel, 1, f"tests/{kind}/ 测试文件须以 {prefix} 前缀命名"))
+            with open(os.path.join(repo, rel), encoding="utf-8", errors="replace") as handle:
+                code = _strip_line_and_block_comments(handle.read())
+            for lineno, line in enumerate(code.splitlines(), start=1):
+                if forbidden_macros.search(line):
+                    problems.append(("TEST-R8", rel, lineno, "自定义套件宏被禁止：Suite 恒等于文件 stem（__FILE__ 推导）"))
+    # 测试 TU 只能在 tests/unit 与 tests/integration（框架/支撑目录豁免）。
+    for rel in _iter_tests_tree(repo, (".cpp",)):
+        parts = rel.split("/")
+        if len(parts) == 2 and parts[0] == "tests":  # tests/<file>.cpp —— 游离在类型目录之外
+            problems.append(("TEST-R8", rel, 1, "测试 TU 须位于 tests/unit/ 或 tests/integration/（目录定类型）"))
+
+
+def check_using_directive(repo, problems):
+    """TEST-R9: no using-directive in test TUs (clang-tidy google-build-using-namespace 同口径).
+
+    `using namespace` inside functions is still a using-directive and is equally
+    forbidden; using declarations and namespace aliases are the sanctioned forms.
+    """
+    for rel in _iter_tests_tree(repo, (".cpp", ".h")):
+        with open(os.path.join(repo, rel), encoding="utf-8", errors="replace") as handle:
+            code = _strip_line_and_block_comments(handle.read())
+        for lineno, line in enumerate(code.splitlines(), start=1):
+            if re.search(r"\busing\s+namespace\b", line):
+                problems.append(("TEST-R9", rel, lineno, "测试代码禁止 using-directive；用 using 声明 / 命名空间别名 / 显式限定"))
+
+
+def report_catch_all_trend(repo):
+    """TEST-R10 (trend, report-only): test files spanning >=3 module domains."""
+    counts = {}
+    for kind in ("unit", "integration"):
+        base = os.path.join(repo, "tests", kind)
+        if not os.path.isdir(base):
+            continue
+        for name in sorted(os.listdir(base)):
+            if not name.endswith(".cpp"):
+                continue
+            rel = os.path.join("tests", kind, name).replace("\\", "/")
+            info = parse_test_header(repo, rel)
+            domains = {h.split("/")[1] for h in (info["declared"] | info["incl_headers"])}
+            if len(domains) >= 3:
+                counts[rel] = len(domains)
+    if len(counts) > CATCH_ALL_BASELINE:
+        print(f"[WARN] TEST-R10 趋势：跨 ≥3 模块域的测试文件 {len(counts)} 个，超出基线 {CATCH_ALL_BASELINE}"
+              f"（catch-all 反模式抬头）：")
+        for rel, domain_count in sorted(counts.items()):
+            print(f"  {rel}: {domain_count} 域")
+    else:
+        print(f"[INFO] TEST-R10 趋势：跨 ≥3 模块域测试文件 {len(counts)}/{CATCH_ALL_BASELINE}（基线内）。")
+
+
 def main() -> int:
     repo = sys.argv[1] if len(sys.argv) > 1 else repo_root_of(__file__)
     if not os.path.isdir(os.path.join(repo, "codespec")):
@@ -335,13 +465,25 @@ def main() -> int:
     check_doc_refs(repo, problems)
     check_test_headers(repo, problems)
     check_public_header_coverage(repo, problems)
+    check_parallel_safety(repo, problems)
+    check_test_naming(repo, problems)
+    check_using_directive(repo, problems)
+    report_catch_all_trend(repo)
 
     remaining = []
+    r5_reported = []
     for rule, rel, lineno, detail in problems:
         rel = rel.replace("\\", "/")
         if (rule, rel, detail) in WHITELIST:
             continue
+        if rule == "R5" and not TEST_R5_ENFORCED:
+            r5_reported.append((rule, rel, lineno, detail))
+            continue
         remaining.append((rule, rel, lineno, detail))
+
+    if r5_reported:
+        print(f"[WARN] TEST-R5 降级中（测试体系重写期间）：{len(r5_reported)} 个公共头暂无测试覆盖，"
+              f"仅报告、不判失败。")
 
     if not remaining:
         print("[OK] code-doc sync clean: 0 problems.")

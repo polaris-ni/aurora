@@ -1,131 +1,112 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/layout_query.h
-/// 测试说明: layout_query 单元测试
-///
+/// 测试说明: 覆盖 layout_of / describe_layout——已布局根节点查询、子节点 bounds 快照查询、
+/// 输出 JSON 键与类型完整性、未布局节点的零值降级
 
-// 布局查询（describe_layout / layout_of）1:1 测试：
-// 顶层尺寸 / 子节点坐标 / 嵌套结构 (dump_tree_json) / get_state 路径查询 / 未挂载降级。
-#include <cmath>
 #include <memory>
-#include <string>
-#include <vector>
+#include <utility>
 
-#include "aurora/aurora.h"
-#include "aurora_test_harness.h"
+#include "aurora/environment/build_context.h"
+#include "aurora/widget/containers.h"
+#include "aurora/widget/layout_query.h"
+#include "aurora/widget/text.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_layout_query {
 
-static void test_layout_query() {
-    auto root = Node{Column{Node{Text{"a"}}, Node{Text{"b"}}}};
-    BuildContext ctx;
-    root.widget().mount(ctx);
-    const Size sz = root.widget().layout(
-        Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 320, .height = 240}}, ctx);
-    root.set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = sz});
+namespace {
 
-    auto desc = describe_layout(root);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(desc.contains("width") && desc["width"].get<float>() > 0.0F);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(desc.contains("height") && desc["height"].get<float>() > 0.0F);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(desc.contains("type") && desc["type"].get<std::string>() == "Column");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(desc.contains("x") && desc["x"].get<float>() == 0.0F);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(desc.contains("y") && desc["y"].get<float>() == 0.0F);
-
-    auto snap = layout_of(root);
-    AURORA_TEST_CHECK(snap.size.width > 0.0F);
-    AURORA_TEST_CHECK(snap.size.height > 0.0F);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(near_f(snap.size.width, desc["width"].get<float>()));
-
-    // 子节点查询：Column 含 2 个 Text。
-    auto kids = root.widget().child_nodes();
-    AURORA_TEST_CHECK(kids.size() == 2);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(std::string(kids[0].widget().type_name()) == "Text");
-
-    // 为子节点设置坐标后查询。
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    kids[0].set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 50.0F, .height = 20.0F}});
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    kids[1].set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 20.0F}, .size = Size{.width = 50.0F, .height = 20.0F}});
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    auto d0 = describe_layout(kids[0]);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(near_f(d0["x"].get<float>(), 0.0F));
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(near_f(d0["y"].get<float>(), 0.0F));
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(near_f(d0["width"].get<float>(), 50.0F));
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    auto d1 = describe_layout(kids[1]);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(near_f(d1["y"].get<float>(), 20.0F));
-
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    auto s1 = layout_of(kids[1]);
-    AURORA_TEST_CHECK(near_f(s1.origin.y, 20.0F));
-
-    // 深层嵌套 Column > Row > Text：结构查询。
-    auto deep = Node{Column{Node{Row{Node{Text{"x"}}}}}};
-    BuildContext dctx;
-    deep.widget().mount(dctx);
-    const Size dsz = deep.widget().layout(
-        Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 200, .height = 200}}, dctx);
-    deep.set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = dsz});
-    auto deep_desc = describe_layout(deep);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(std::string(deep_desc["type"].get<std::string>()) == "Column");
-
-    auto deep_json = dump_tree_json(deep);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(deep_json["children"].size() == 1);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(std::string(deep_json["children"][0]["type"].get<std::string>()) == "Row");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(std::string(deep_json["children"][0]["children"][0]["type"].get<std::string>()) == "Text");
-
-    // get_state 沿路径查询嵌套 type。
-    auto st = get_state("children/0/children/0/type", deep);
-    AURORA_TEST_CHECK(st.is_string() && st.get<std::string>() == "Text");
-
-    // 未挂载 / 无 bounds 的节点查询不崩溃，width 为 0。
-    Node fresh{Text{"z"}};
-    auto fd = describe_layout(fresh);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(fd["width"].get<float>() == 0.0F);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(std::string(fd["type"].get<std::string>()) == "Text");
+[[nodiscard]] auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== test_layout_query ===\n");
-    test_layout_query();
+/// @brief 构造并布局一棵 Column → [Text("a"), Text("b")] 测试树，返回根 Node 与布局尺寸。
+[[nodiscard]] auto make_laid_out_column(float w, float h, BuildContext &ctx) -> std::pair<Node, Size> {
+    auto col = std::make_shared<Column>();
+    col->add(Node{Text{"a"}});
+    col->add(Node{Text{"b"}});
+    Node root{std::move(col)};
+    root.widget().mount(ctx);
+    const Size sz = root.widget().layout(bounded(w, h), ctx);
+    root.set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = sz});
+    return {std::move(root), sz};
+}
+
+}  // namespace
+
+AURORA_TEST_CASE(layout_query_describe_layout_reports_laid_out_root) {
+    BuildContext ctx;
+    auto [root, sz] = make_laid_out_column(320.0F, 240.0F, ctx);
+
+    const Json desc = describe_layout(root);
+    AURORA_TEST_CHECK_EQ(desc["type"], "Column");
+    AURORA_TEST_CHECK_NEAR(desc["x"].get<float>(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(desc["y"].get<float>(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_TRUE(desc["width"].get<float>() > 0.0F);
+    AURORA_TEST_CHECK_TRUE(desc["height"].get<float>() > 0.0F);
+
+    // layout_of 与 describe_layout 读同一份 bounds，两者一致且等于布局返回尺寸。
+    const Rect snap = layout_of(root);
+    AURORA_TEST_CHECK_NEAR(snap.size.width, sz.width, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(snap.size.height, sz.height, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(snap.size.width, desc["width"].get<float>(), 1e-4F);
+}
+
+AURORA_TEST_CASE(layout_query_child_bounds_snapshot_query) {
+    BuildContext ctx;
+    auto root = make_laid_out_column(320.0F, 240.0F, ctx).first;
+
+    // 拷贝子 Node（共享 widget、快照 bounds）后写入确定性坐标，再查询。
+    auto kids = root.widget().child_nodes();
+    AURORA_TEST_REQUIRE_EQ(kids.size(), 2U);
+    kids[0].set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 50.0F, .height = 20.0F}});
+    kids[1].set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 20.0F}, .size = Size{.width = 50.0F, .height = 20.0F}});
+
+    const Json d0 = describe_layout(kids[0]);
+    AURORA_TEST_CHECK_EQ(d0["type"], "Text");
+    AURORA_TEST_CHECK_NEAR(d0["x"].get<float>(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(d0["width"].get<float>(), 50.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(d0["height"].get<float>(), 20.0F, 1e-4F);
+
+    const Json d1 = describe_layout(kids[1]);
+    AURORA_TEST_CHECK_NEAR(d1["y"].get<float>(), 20.0F, 1e-4F);
+
+    const Rect s1 = layout_of(kids[1]);
+    AURORA_TEST_CHECK_NEAR(s1.origin.y, 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(s1.size.width, 50.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(layout_query_unmounted_node_degrades_to_zero_rect) {
+    Node fresh{Text{"z"}};  // 未挂载 / 未布局
+
+    const Json fd = describe_layout(fresh);
+    AURORA_TEST_CHECK_EQ(fd["type"], "Text");
+    AURORA_TEST_CHECK_NEAR(fd["width"].get<float>(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(fd["height"].get<float>(), 0.0F, 1e-4F);
+
+    const Rect fr = layout_of(fresh);
+    AURORA_TEST_CHECK_NEAR(fr.origin.x, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(fr.origin.y, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(fr.size.width, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(fr.size.height, 0.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(layout_query_describe_layout_json_schema_complete) {
+    BuildContext ctx;
+    auto root = make_laid_out_column(200.0F, 200.0F, ctx).first;
+
+    const Json desc = describe_layout(root);
+    AURORA_TEST_CHECK_TRUE(desc.is_object());
+    AURORA_TEST_CHECK_TRUE(desc.contains("type"));
+    AURORA_TEST_CHECK_TRUE(desc.contains("x"));
+    AURORA_TEST_CHECK_TRUE(desc.contains("y"));
+    AURORA_TEST_CHECK_TRUE(desc.contains("width"));
+    AURORA_TEST_CHECK_TRUE(desc.contains("height"));
+    AURORA_TEST_CHECK_TRUE(desc["type"].is_string());
+    AURORA_TEST_CHECK_TRUE(desc["x"].is_number());
+    AURORA_TEST_CHECK_TRUE(desc["y"].is_number());
+    AURORA_TEST_CHECK_TRUE(desc["width"].is_number());
+    AURORA_TEST_CHECK_TRUE(desc["height"].is_number());
 }
 
 }  // namespace aurora::test_cases::utest_layout_query

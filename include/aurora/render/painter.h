@@ -46,7 +46,7 @@ class Painter {
     [[nodiscard]] auto height() const -> int;
     [[nodiscard]] auto data() const -> const std::uint8_t *;
 
-    /// @brief 只读读取帧缓冲像素（ClearType 路径用于取得目标背景色）；越界返回 Color{}。
+    /// @brief 只读读取帧缓冲像素（ClearType 路径用于取得目标背景色）；越界返回透明色 `Color{0,0,0,0}`。
     [[nodiscard]] auto get_pixel(int x, int y) const -> Color;
 
     /// @brief 设置全局绘制透明度（0..1），乘入后续所有绘制的源 alpha（转场淡入淡出用）。

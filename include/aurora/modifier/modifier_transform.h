@@ -4,6 +4,7 @@
 /// @brief 几何变换修饰节点（Transform 切片）：AlignNode / OffsetNode / TransformNode。
 /// 本文件为 modifier.h 的子切片；消费者通常直接 #include "aurora/modifier/modifier.h"。
 
+#include "aurora/core/transform.h"
 #include "aurora/modifier/modifier_base.h"
 #include "aurora/widget/alignment.h"
 

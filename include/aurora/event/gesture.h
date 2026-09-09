@@ -122,20 +122,20 @@ class RotationRecognizer {
         current_angle_ = angle;
     }
 
-    /// @brief 旋转增量（度，相对初始角度）。未激活时返回 0。
+    /// @brief 旋转增量（弧度，归一化到 [-π, π]，相对初始角度）。未激活时返回 0。
     [[nodiscard]] auto angle_delta() const -> float {
         if (!active_) {
             return 0.0F;
         }
         float delta = current_angle_ - initial_angle_;
-        // 归一化到 [-180, 180]
+        // 归一化到 [-π, π]
         while (delta > std::numbers::pi_v<float>) {
             delta -= 2.0F * std::numbers::pi_v<float>;
         }
         while (delta < -std::numbers::pi_v<float>) {
             delta += 2.0F * std::numbers::pi_v<float>;
         }
-        return delta * 180.0F / std::numbers::pi_v<float>;
+        return delta;
     }
 
     /// @brief 是否正在识别中。

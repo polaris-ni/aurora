@@ -30,8 +30,15 @@ enum class AnimationStatus : std::uint8_t {
  */
 class AnimationController {
   public:
+    /// @brief 构造：duration（秒，非正值夹取为 1e-6）与初始进度 value。
+    /// 初值构造即推断状态：value ≥ 1.0 报 Completed；其余（含 (0,1) 中间值）报 Dismissed
+    /// （中间值时进度冻结在初值、状态语义为「未开始」，后续由 forward/reverse 推进）。
     explicit AnimationController(double duration_seconds, double value = 0.0)
-        : duration_(std::max(duration_seconds, 1e-6)), value_(value) {}
+        : duration_(std::max(duration_seconds, 1e-6)), value_(value) {
+        if (value_ >= 1.0) {
+            status_ = AnimationStatus::Completed;
+        }
+    }
 
     [[nodiscard]] auto value() const -> double { return value_; }
     [[nodiscard]] auto status() const -> AnimationStatus { return status_; }

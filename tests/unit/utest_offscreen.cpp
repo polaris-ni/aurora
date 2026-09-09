@@ -1,230 +1,323 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/render/offscreen.h
-/// 测试说明: offscreen 单元测试
-///
+/// 测试说明: 覆盖无头渲染两条产线——render_to_png 写出可解码 PNG、render_to_logical_snapshot 的
+/// 平台无关盒模型树结构与确定性；并回归两类 golden 基准：像素基准（golden_basic_column.png，
+/// 受 AURORA_GOLDEN_DIR / MAX_DIFF / MAX_PIXELS / UPDATE_GOLDEN 控制）与
+/// 逻辑快照基准（logical_snapshots.json，11 场景逐值比对）
 
-// 目标源单元：Offscreen
-// 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
-
-#include <algorithm>
-#include <cstdint>
 #include <cstdlib>
+#include <charconv>
+#include <filesystem>
 #include <fstream>
-#include <iostream>
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "aurora/aurora.h"
-#include "aurora/core/image.h"
 #include "aurora/render/offscreen.h"
-#include "aurora_test_harness.h"
+#include "aurora/render/snapshot_diff.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_offscreen {
 
-namespace aurora::tests::sec_golden {
 namespace {
 
-// ---- 文件工具 ----
-[[maybe_unused]] auto read_file(const std::string &path, std::vector<std::uint8_t> &out) -> bool {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) {
-        return false;
-    }
-    f.seekg(0, std::ios::end);
-    const std::streamoff sz = f.tellg();
-    if (sz < 0) {
-        return false;
-    }
-    out.resize(static_cast<std::size_t>(sz));
-    f.seekg(0, std::ios::beg);
-    if (sz > 0) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) std::istream::read 需要 char*；uint8_t 与 char
-        // 布局兼容，互转安全
-        f.read(reinterpret_cast<char *>(out.data()), sz);  // NOLINT
-    }
-    return true;
+// ---- 场景构建（固定尺寸文本盒：盒模型完全由 px() 决定，与字体度量无关）----
+
+auto box(float w, float h) -> Node {
+    auto t = std::make_shared<Text>(".");
+    t->width(px(w));
+    t->height(px(h));
+    return Node{t};
 }
 
-auto copy_file(const std::string &src, const std::string &dst) -> bool {
-    std::ifstream in(src, std::ios::binary);
-    std::ofstream out(dst, std::ios::binary);
-    if (!in || !out) {
-        return false;
-    }
-    out << in.rdbuf();
-    return true;
+auto fill_box(float w) -> Node {
+    auto t = std::make_shared<Text>(".");
+    t->width(px(w));
+    t->height(fill());
+    return Node{t};
 }
 
-// ---- 无头渲染：把控件树布局+绘制为内存 RGBA8 缓冲（确定性软件栅格）----
-auto render_to_rgba(Widget &root, const int w, const int h) -> std::vector<std::uint8_t> {
-    constexpr BuildContext ctx;
-    root.mount(ctx);
-
-    Constraints c;
-    c.min = Size{.width = 0.0F, .height = 0.0F};
-    c.max = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
-    root.layout(c, ctx);
-
-    Painter painter;
-    painter.begin(w, h);
-    root.paint(painter,
-               Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                    .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
-               ctx);
-
-    const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U;
-    const std::uint8_t *d = painter.data();
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic, modernize-return-braced-init-list)
-    // 测试助手：缓冲区间算术；范围构造保留圆括号（braced-init 会变 initializer_list）
-    return std::vector(d, d + n);  // NOLINT
+auto hfill_box(float h) -> Node {
+    auto t = std::make_shared<Text>(".");
+    t->width(fill());
+    t->height(px(h));
+    return Node{t};
 }
 
-// ---- 像素级 diff 统计 ----
-struct DiffStat {
-    long mismatched = 0;  ///< 超过容差的像素数
-    int max_channel_diff = 0;  ///< 单通道最大绝对差
-    int first_x = -1;
-    int first_y = -1;  ///< 首个差异像素坐标
-    double mean_abs_err = 0.0;  ///< 平均绝对差（逐像素最大通道差均值）
+struct Scenario {
+    const char *name;
+    std::function<Node()> build;
 };
 
-auto pixel_diff(const std::vector<std::uint8_t> &a, const std::vector<std::uint8_t> &b, const int w, const int h,
-                int tol) -> DiffStat {
-    DiffStat s;
-    const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
-    long err_sum = 0;
-    for (std::size_t i = 0; i < n; ++i) {
-        const std::uint8_t *pa = &a.at(i * 4U);
-        const std::uint8_t *pb = &b.at(i * 4U);
-        int m = 0;
-        for (int k = 0; k < 4; ++k) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-            // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
-            const int d = std::abs(static_cast<int>(pa[k]) - static_cast<int>(pb[k]));  // NOLINT
-            m = std::max(d, m);
-        }
-        err_sum += m;
-        s.max_channel_diff = std::max(m, s.max_channel_diff);
-        if (m > tol) {
-            ++s.mismatched;
-            if (s.first_x < 0) {
-                s.first_x = static_cast<int>(i % static_cast<std::size_t>(w));
-                s.first_y = static_cast<int>(i / static_cast<std::size_t>(w));
-            }
-        }
+auto scenarios() -> std::vector<Scenario> {
+    return {
+        {.name = "text_fixed", .build = []() -> Node { return box(120.0F, 40.0F); }},
+        {.name = "column_fixed",
+         .build = []() -> Node {
+             auto col = std::make_shared<Column>();
+             col->add(box(100.0F, 20.0F));
+             col->add(box(100.0F, 20.0F));
+             col->add(box(100.0F, 20.0F));
+             return Node{col};
+         }},
+        {.name = "row_fixed",
+         .build = []() -> Node {
+             auto row = std::make_shared<Row>();
+             row->add(box(40.0F, 30.0F));
+             row->add(box(40.0F, 30.0F));
+             row->add(box(40.0F, 30.0F));
+             return Node{row};
+         }},
+        {.name = "column_gap",
+         .build = []() -> Node {
+             auto col = std::make_shared<Column>();
+             col->set_gap(10.0F);
+             col->add(box(100.0F, 20.0F));
+             col->add(box(100.0F, 20.0F));
+             col->add(box(100.0F, 20.0F));
+             return Node{col};
+         }},
+        {.name = "row_flex_fill",
+         .build = []() -> Node {
+             auto row = std::make_shared<Row>();
+             row->add(box(80.0F, 30.0F));
+             row->add(box(80.0F, 30.0F));
+             row->add(hfill_box(30.0F));
+             return Node{row};
+         }},
+        {.name = "stack_overlay",
+         .build = []() -> Node {
+             auto st = std::make_shared<Stack>();
+             st->add(box(80.0F, 60.0F));
+             st->add(box(60.0F, 40.0F));
+             return Node{st};
+         }},
+        {.name = "grid_2x2",
+         .build = []() -> Node {
+             GridProps props;
+             props.columns = 2;
+             props.gap = 8.0F;
+             props.children = {box(60.0F, 40.0F), box(60.0F, 40.0F), box(60.0F, 40.0F), box(60.0F, 40.0F)};
+             return Node{std::make_shared<Grid>(std::move(props))};
+         }},
+        {.name = "nested_column_row",
+         .build = []() -> Node {
+             auto col = std::make_shared<Column>();
+             auto row = std::make_shared<Row>();
+             row->add(box(50.0F, 20.0F));
+             row->add(box(50.0F, 20.0F));
+             col->add(Node{row});
+             col->add(box(100.0F, 20.0F));
+             return Node{col};
+         }},
+        {.name = "flex_expand",
+         .build = []() -> Node {
+             auto col = std::make_shared<Column>();
+             col->add(box(100.0F, 20.0F));
+             col->add(fill_box(100.0F));
+             return Node{col};
+         }},
+        {.name = "scroll_tall_content",
+         .build = []() -> Node {
+             auto inner = std::make_shared<Column>();
+             inner->add(box(100.0F, 100.0F));
+             inner->add(box(100.0F, 100.0F));
+             inner->add(box(100.0F, 100.0F));
+             auto scroll = std::make_shared<Scroll>();
+             scroll->add(Node{inner});
+             return Node{scroll};
+         }},
+        {.name = "padding_inset",
+         .build = []() -> Node {
+             auto col = std::make_shared<Column>();
+             col->modifier.set(Modifier{}.padding(20.0F));
+             col->add(box(100.0F, 50.0F));
+             return Node{col};
+         }},
+    };
+}
+
+/// @brief 定位 golden 目录：优先环境变量，其次仓库根相对路径。
+auto golden_dir() -> std::filesystem::path {
+    const char *override_dir = std::getenv("AURORA_GOLDEN_DIR");
+    if (override_dir != nullptr && override_dir[0] != '\0') {
+        return std::filesystem::path(override_dir);
     }
-    s.mean_abs_err = static_cast<double>(err_sum) / static_cast<double>(n);
-    return s;
+    if (!testing::isolation::repo_root().empty()) {
+        return std::filesystem::path(testing::isolation::repo_root()) / "tests" / "golden";
+    }
+    return {"tests/golden"};
+}
+
+/// @brief 读取环境变量；空/未设置返回空视图（避免下标访问裸指针）。
+[[nodiscard]] auto env_value(const char *name) -> std::string_view {
+    const char *raw = std::getenv(name);
+    if (raw == nullptr) {
+        return {};
+    }
+    return {raw};
+}
+
+[[nodiscard]] auto env_flag(const char *name) -> bool { return !env_value(name).empty(); }
+
+[[nodiscard]] auto env_int(const char *name, int fallback) -> int {
+    const std::string_view raw = env_value(name);
+    if (raw.empty()) {
+        return fallback;
+    }
+    int parsed = fallback;
+    const char *last = raw.data() + raw.size();
+    // from_chars 不抛异常、不依赖 errno，转换失败时保留 fallback。
+    const auto [end, ec] = std::from_chars(raw.data(), last, parsed);
+    return (ec == std::errc{} && end == last) ? parsed : fallback;
 }
 
 }  // namespace
 
-/**
- * @brief 像素级 golden 回归测试（specification/03-layout-render.md §10.1）：确定性地把固定控件树渲染为 RGBA8，
- * 与已提交的真值 `tests/golden/` 下的 PNG 做**像素级 diff**（逐像素、逐通道），而非
- * 逐字节比对，从而稳健对抗抗锯齿/子像素字体差异带来的字节抖动。
- *
- * 行为：
- * - `AURORA_UPDATE_GOLDEN=1`：把当前渲染覆盖为新的 golden（首次生成/主动更新真值）。
- * - `AURORA_GOLDEN_MAX_DIFF=<n>`（默认 0）：单像素允许的最大通道差容差。
- * - `AURORA_GOLDEN_MAX_PIXELS=<n>`（默认 0）：允许多少个差异像素（>容差）仍判通过。
- * - 默认模式：差异像素数超过阈值即失败，并打印差异报告（差异数/最大通道差/首差异坐标）。
- *
- * 工作目录应为仓库根（CMake 已设 `WORKING_DIRECTORY` 为源码根），
- * 以便 `tests/golden/` 相对路径正确解析。
- */
-static auto run() -> int {
-    constexpr int w = 240;
-    constexpr int h = 120;
-
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable : 4996)  // getenv 在 MSVC/clang-cl 下被标为"不安全"，但它是标准可移植接口
-#endif
-    const char *golden_dir = std::getenv("AURORA_GOLDEN_DIR");
-    const std::string dir = (golden_dir != nullptr) ? std::string(golden_dir) : std::string("tests/golden");
-    const std::string out_path = dir + "/_render_out.png";
-    const std::string golden_path = dir + "/golden_basic_column.png";
-
-    Node root = Column{
+AURORA_TEST_CASE(render_to_png_writes_decodable_output) {
+    Node root{Column{
         Text{LocalizedString{"Hello, Aurora"}},
         Text{LocalizedString{"Pixel golden test"}},
-    };
+    }};
 
-    // ---- 更新模式：用与校验完全一致的 RGBA8 缓冲写出 PNG 真值（避免 PNG 编解码往返引入的微小 alpha 抖动）----
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    // 测试助手：缓冲区长度已知且由断言约束，指针算术等价于 span 索引
-    if (const char *update = std::getenv("AURORA_UPDATE_GOLDEN"); (update != nullptr) && update[0] != '\0') {  // NOLINT
-        const std::vector<std::uint8_t> buf = render_to_rgba(root.widget(), w, h);
-        if (!write_png(out_path.c_str(), w, h, buf.data())) {
-            AURORA_LOG_ERROR("test", "[golden] write_png failed: ", out_path);
-            return 2;
-        }
-        if (!copy_file(out_path, golden_path)) {
-            AURORA_LOG_ERROR("test", "[golden] failed to update golden: ", golden_path);
-            return 3;
-        }
-        AURORA_LOG_INFO("test", "[golden] golden updated: ", golden_path);
-        return 0;
-    }
+    const std::filesystem::path out = std::filesystem::path(testing::isolation::temp_dir()) / "offscreen.png";
+    const auto written = render_to_png(root, 240, 120, out.string().c_str());
+    AURORA_TEST_REQUIRE_TRUE(written.ok());
 
-    // ---- 渲染当前帧为 RGBA8 ----
-    const std::vector<std::uint8_t> buf = render_to_rgba(root.widget(), w, h);
-
-    // ---- 解码真值 PNG ----
-    auto gres = Image::load(golden_path);
-    if (!gres) {
-        AURORA_LOG_ERROR("test", "[golden] golden missing or undecodable: ", golden_path,
-                         "  reason: ", gres.error().message, "  (run with AURORA_UPDATE_GOLDEN=1 to generate it)");
-        return 3;
-    }
-    const Image &golden = gres.value();
-
-    if (golden.width != w || golden.height != h) {
-        AURORA_LOG_ERROR("test", "[golden] dimension mismatch: golden ", golden.width, "x", golden.height,
-                         " vs render ", w, "x", h);
-        return 1;
-    }
-
-    // ---- 容差（默认严格：逐字节一致）----
-    int tol = 0;
-    if (const char *t = std::getenv("AURORA_GOLDEN_MAX_DIFF")) {
-        tol = static_cast<int>(std::strtol(t, nullptr, 10));
-    }
-    long long max_pixels = 0;
-    if (const char *mp = std::getenv("AURORA_GOLDEN_MAX_PIXELS")) {
-        max_pixels = std::strtoll(mp, nullptr, 10);
-    }
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
-
-    const DiffStat s = pixel_diff(buf, golden.pixels, w, h, tol);
-
-    if (s.mismatched > max_pixels) {
-        AURORA_LOG_ERROR("test", "[golden] MISMATCH: ", s.mismatched, "/", static_cast<long>(w) * h,
-                         " pixels differ (max channel delta=", s.max_channel_diff, ", mean abs err=", s.mean_abs_err,
-                         ")");
-        if (s.first_x >= 0) {
-            AURORA_LOG_ERROR("test", ", first diff at (", s.first_x, ",", s.first_y, ")");
-        }
-        AURORA_LOG_ERROR("test", "\n  tolerance: max_channel_diff=", tol, " max_pixels=", max_pixels,
-                         "\n  current render written to: ", out_path, " (for visual diff)");
-        // 落盘当前渲染，便于人工目检 / 与 golden 做图像 diff。
-        (void)write_png(out_path.c_str(), w, h, buf.data());
-        return 1;
-    }
-
-    AURORA_LOG_INFO("test", "[golden] OK: ", s.mismatched, " mismatched pixels (of ", static_cast<long>(w) * h,
-                    "), max channel delta=", s.max_channel_diff, ", mean abs err=", s.mean_abs_err);
-    return 0;
+    const auto decoded = Image::load(out.string());
+    AURORA_TEST_REQUIRE_TRUE(decoded.ok());
+    AURORA_TEST_CHECK_EQ(decoded.value().width, 240);
+    AURORA_TEST_CHECK_EQ(decoded.value().height, 120);
+    AURORA_TEST_CHECK_EQ(decoded.value().pixels.size(), 240U * 120U * 4U);
 }
-}  // namespace aurora::tests::sec_golden
 
-AURORA_TEST() {
-    // sec_golden::run() 以返回码表达 golden 比对结论（0=一致，非0=缺真值/维度不符/像素超差），
-    // 必须显式判定，否则迁移后失败码会被丢弃、用例恒过。
-    AURORA_TEST_CHECK_EQ(aurora::tests::sec_golden::run(), 0);
+AURORA_TEST_CASE(render_to_logical_snapshot_describes_tree) {
+    Node root{Column{
+        Text{LocalizedString{"a"}},
+        Text{LocalizedString{"b"}},
+    }};
+    const Json snapshot = render_to_logical_snapshot(root, 100, 60);
+
+    AURORA_TEST_CHECK_EQ(snapshot["type"].get<std::string>(), std::string{"Column"});
+    AURORA_TEST_REQUIRE_TRUE(snapshot.contains("box"));
+    AURORA_TEST_CHECK_TRUE(snapshot["box"].contains("x"));
+    AURORA_TEST_CHECK_TRUE(snapshot["box"].contains("y"));
+    AURORA_TEST_CHECK_TRUE(snapshot["box"].contains("w"));
+    AURORA_TEST_CHECK_TRUE(snapshot["box"].contains("h"));
+    AURORA_TEST_CHECK_EQ(snapshot["children"].size(), 2U);
+    AURORA_TEST_CHECK_EQ(snapshot["children"][0]["type"].get<std::string>(), std::string{"Text"});
+}
+
+AURORA_TEST_CASE(logical_snapshot_is_deterministic) {
+    // 布局是纯函数（mount → layout）：同输入必得同输出，是 golden 比对成立的前提。
+    Node first{Column{Text{LocalizedString{"x"}}}};
+    Node second{Column{Text{LocalizedString{"x"}}}};
+    AURORA_TEST_CHECK_EQ(render_to_logical_snapshot(first, 100, 60).dump(),
+                         render_to_logical_snapshot(second, 100, 60).dump());
+}
+
+AURORA_TEST_CASE(logical_snapshot_children_stay_within_parent) {
+    Node root{Column{
+        Text{LocalizedString{"a"}},
+        Text{LocalizedString{"b"}},
+    }};
+    const Json snapshot = render_to_logical_snapshot(root, 100, 60);
+
+    const float parent_w = snapshot["box"]["w"].get<float>();
+    const float parent_h = snapshot["box"]["h"].get<float>();
+    for (const Json &child : snapshot["children"]) {
+        AURORA_TEST_TRACE(std::string{"child "} + child["type"].get<std::string>());
+        AURORA_TEST_CHECK_LE(child["box"]["w"].get<float>(), parent_w + 0.001F);
+        AURORA_TEST_CHECK_LE(child["box"]["h"].get<float>(), parent_h + 0.001F);
+    }
+}
+
+AURORA_TEST_CASE(logical_snapshots_match_golden_baseline) {
+    constexpr int view_w = 320;
+    constexpr int view_h = 240;
+    const std::filesystem::path path = golden_dir() / "logical_snapshots.json";
+    const bool regen = env_flag("AURORA_UPDATE_GOLDEN");
+
+    Json baseline = Json::object();
+    if (!regen) {
+        std::ifstream in(path);
+        AURORA_TEST_REQUIRE_MSG(in.good(), "golden baseline logical_snapshots.json must exist "
+                                           "(run with AURORA_UPDATE_GOLDEN=1 to create)");
+        in >> baseline;
+        AURORA_TEST_REQUIRE_TRUE(baseline.contains("scenarios"));
+    }
+
+    Json out = Json::object();
+    for (const Scenario &sc : scenarios()) {
+        AURORA_TEST_TRACE(std::string{"scenario "} + sc.name);
+        Node root = sc.build();
+        Json snap = render_to_logical_snapshot(root, view_w, view_h);
+        out[sc.name] = snap;
+
+        if (regen) {
+            continue;
+        }
+        AURORA_TEST_REQUIRE_TRUE(baseline["scenarios"].contains(sc.name));
+        AURORA_TEST_CHECK_MSG(baseline["scenarios"][sc.name] == snap,
+                              std::string{"logical snapshot drift: "} + sc.name);
+    }
+
+    if (regen) {
+        Json doc = Json::object();
+        doc["_about"] =
+            "Aurora logical-snapshot golden baseline (requirement #15). Do not hand-edit; regenerate with "
+            "AURORA_UPDATE_GOLDEN=1 via aurora_test_runner --run=utest_offscreen.";
+        doc["viewport"] = Json{{"w", view_w}, {"h", view_h}};
+        doc["scenarios"] = out;
+        std::error_code ec;
+        std::filesystem::create_directories(path.parent_path(), ec);
+        std::ofstream f(path);
+        f << doc.dump(2) << "\n";
+        AURORA_TEST_CHECK_TRUE(f.good());
+    }
+}
+
+AURORA_TEST_CASE(pixel_snapshot_matches_golden_baseline) {
+    constexpr int w = 240;
+    constexpr int h = 120;
+    const std::filesystem::path dir = golden_dir();
+    const std::filesystem::path golden_path = dir / "golden_basic_column.png";
+    const std::filesystem::path current_path =
+        std::filesystem::path(testing::isolation::temp_dir()) / "current_render.png";
+
+    Node root{Column{
+        Text{LocalizedString{"Hello, Aurora"}},
+        Text{LocalizedString{"Pixel golden test"}},
+    }};
+    AURORA_TEST_REQUIRE_TRUE(render_to_png(root, w, h, current_path.string().c_str()).ok());
+
+    const auto current = Image::load(current_path.string());
+    AURORA_TEST_REQUIRE_TRUE(current.ok());
+
+    if (env_flag("AURORA_UPDATE_GOLDEN")) {
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        std::filesystem::copy_file(current_path, golden_path, std::filesystem::copy_options::overwrite_existing, ec);
+        AURORA_TEST_CHECK_FALSE(static_cast<bool>(ec));
+        return;
+    }
+
+    const auto golden = Image::load(golden_path.string());
+    AURORA_TEST_REQUIRE_MSG(golden.ok(), "golden_basic_column.png missing or undecodable "
+                                         "(run with AURORA_UPDATE_GOLDEN=1 to regenerate)");
+    AURORA_TEST_REQUIRE_EQ(golden.value().width, w);
+    AURORA_TEST_REQUIRE_EQ(golden.value().height, h);
+
+    // 默认严格：逐像素零容差；容差仅用于吸收抗锯齿/字体 hinting 的跨平台抖动。
+    const int tolerance = env_int("AURORA_GOLDEN_MAX_DIFF", 0);
+    const int max_pixels = env_int("AURORA_GOLDEN_MAX_PIXELS", 0);
+
+    const SnapshotDiff diff = compare_snapshots(golden.value(), current.value(), tolerance);
+    const bool within_budget = diff.pixel_diff_count <= static_cast<std::size_t>(max_pixels);
+    AURORA_TEST_CHECK_MSG(within_budget, "pixel drift vs golden: " + std::to_string(diff.pixel_diff_count) +
+                                             " px, max delta " + std::to_string(diff.max_color_delta));
 }
 
 }  // namespace aurora::test_cases::utest_offscreen

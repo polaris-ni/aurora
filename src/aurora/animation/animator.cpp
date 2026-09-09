@@ -6,7 +6,7 @@ namespace aurora {
 
 auto AnimationController::forward(double from) -> void {
     if (from >= 0.0) {
-        value_ = from;
+        value_ = std::clamp(from, 0.0, 1.0);  // 起点夹取到合法进度区间（-1 为哨兵=从当前值继续）
     }
     status_ = (value_ >= 1.0) ? AnimationStatus::Completed : AnimationStatus::Forward;
 }
@@ -21,7 +21,8 @@ auto AnimationController::reset(double v) -> void {
 }
 
 auto AnimationController::stop() -> void {
-    status_ = (value_ >= 1.0) ? AnimationStatus::Completed : AnimationStatus::Dismissed;
+    // 「静止于最近端点」：进度冻结在当前位置，状态报最近端点（≥0.5 视为更接近终点）。
+    status_ = (value_ >= 0.5) ? AnimationStatus::Completed : AnimationStatus::Dismissed;
 }
 
 auto AnimationController::tick(double dt_seconds) -> void {

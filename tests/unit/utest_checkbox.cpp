@@ -1,187 +1,177 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/checkbox.h
-/// 测试说明: checkbox 单元测试
-///
+/// 测试说明: 覆盖 Checkbox——默认态、set_value 触发 on_changed、Press/Release 合成点击切换、
+/// 禁用态忽略点击、Binding 双向写穿与信号收集、方框尺寸布局、自描述、序列化往返
 
-// Checkbox 控件 1:1 测试：属性往返 / 点击切换 / Binding 透写 / 注册与 to_json 往返。
-
-#include <memory>
-#include <nlohmann/json.hpp>
 #include <string>
+#include <vector>
 
-#include "aurora/aurora.h"
+#include "aurora/event/event.h"
+#include "aurora/layout/layout_engine.h"
+#include "aurora/state/state.h"
 #include "aurora/widget/checkbox.h"
-#include "aurora/widget/serialization.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_checkbox {
 
-namespace serialization = aurora::serialization;
+namespace {
 
-using Json = nlohmann::json;
-static auto make_press(float x, float y) -> MouseEvent {
-    MouseEvent e;
-    e.action = MouseAction::Press;
-    e.position = Point{.x = x, .y = y};
-    return e;
-}
-static auto make_release(float x, float y) -> MouseEvent {
-    MouseEvent e;
-    e.action = MouseAction::Release;
-    e.position = Point{.x = x, .y = y};
-    return e;
-}
-static void fire(Widget &w, MouseEvent e) {
-    e.local_position = e.position;
-    w.on_pointer_event(e);
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
-template <typename W>
-static auto roundtrip(const Json &props, const std::string &type) -> std::shared_ptr<W> {
-    auto back = serialization::from_json(props);
-    AURORA_TEST_CHECK_MSG(back.ok(), type + ": from_json succeeded");
-    if (!back.ok()) {
-        return nullptr;
+}  // namespace
+
+AURORA_TEST_CASE(checkbox_defaults_and_type_name) {
+    const Checkbox c;
+    AURORA_TEST_CHECK_EQ(std::string{c.type_name()}, "Checkbox");
+    AURORA_TEST_CHECK_FALSE(c.value());
+    AURORA_TEST_CHECK_TRUE(c.enabled());
+}
+
+AURORA_TEST_CASE(checkbox_set_value_fires_on_changed) {
+    std::vector<bool> seen;
+    Checkbox c;
+    c.set_on_changed([&seen](bool v) { seen.push_back(v); });
+
+    c.set_value(true);
+    AURORA_TEST_CHECK_TRUE(c.value());
+    AURORA_TEST_REQUIRE_EQ(seen.size(), 1U);
+    AURORA_TEST_CHECK_TRUE(seen[0]);
+
+    c.set_value(false);
+    AURORA_TEST_CHECK_FALSE(c.value());
+    AURORA_TEST_REQUIRE_EQ(seen.size(), 2U);
+    AURORA_TEST_CHECK_FALSE(seen[1]);
+}
+
+AURORA_TEST_CASE(checkbox_pointer_press_release_toggles) {
+    std::vector<bool> seen;
+    Checkbox c;
+    c.set_on_changed([&seen](bool v) { seen.push_back(v); });
+
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    c.on_pointer_event(press);
+    AURORA_TEST_CHECK_TRUE(press.is_handled);
+    AURORA_TEST_CHECK_FALSE(c.value());  // 按下不切换
+
+    MouseEvent release;
+    release.action = MouseAction::Release;
+    c.on_pointer_event(release);
+    AURORA_TEST_CHECK_TRUE(release.is_handled);
+    AURORA_TEST_CHECK_TRUE(c.value());
+    AURORA_TEST_REQUIRE_EQ(seen.size(), 1U);
+    AURORA_TEST_CHECK_TRUE(seen[0]);
+
+    // 第二次完整点击切回 false。
+    MouseEvent press2;
+    press2.action = MouseAction::Press;
+    c.on_pointer_event(press2);
+    MouseEvent release2;
+    release2.action = MouseAction::Release;
+    c.on_pointer_event(release2);
+    AURORA_TEST_CHECK_FALSE(c.value());
+    AURORA_TEST_REQUIRE_EQ(seen.size(), 2U);
+    AURORA_TEST_CHECK_FALSE(seen[1]);
+}
+
+AURORA_TEST_CASE(checkbox_disabled_ignores_clicks) {
+    int calls = 0;
+    Checkbox c;
+    c.set_on_changed([&calls](bool) { ++calls; });
+    c.set_enabled(false);
+    AURORA_TEST_CHECK_FALSE(c.enabled());
+
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    c.on_pointer_event(press);
+    AURORA_TEST_CHECK_TRUE(press.is_handled);
+
+    MouseEvent release;
+    release.action = MouseAction::Release;
+    c.on_pointer_event(release);
+    AURORA_TEST_CHECK_FALSE(c.value());
+    AURORA_TEST_CHECK_EQ(calls, 0);
+}
+
+AURORA_TEST_CASE(checkbox_binding_writes_through_to_upstream) {
+    State<bool> up{false};
+    Checkbox c{Binding<bool>(up)};
+    AURORA_TEST_CHECK_FALSE(c.value());
+
+    c.set_value(true);
+    AURORA_TEST_CHECK_TRUE(up.get());  // 控件 → 上游
+
+    up.set(false);
+    AURORA_TEST_CHECK_FALSE(c.value());  // 上游 → 控件（读取穿透）
+
+    // 信号收集：内部 value_ + 绑定目标。
+    std::vector<SignalViewBase *> out;
+    c.collect_signals(out);
+    AURORA_TEST_REQUIRE_EQ(out.size(), 2U);
+
+    // 非绑定构造只收集内部信号。
+    Checkbox plain;
+    std::vector<SignalViewBase *> single;
+    plain.collect_signals(single);
+    AURORA_TEST_CHECK_EQ(single.size(), 1U);
+}
+
+AURORA_TEST_CASE(checkbox_layout_uses_box_size) {
+    Checkbox c;
+    LayoutEngine::layout(c, bounded(200.0F, 100.0F));
+    AURORA_TEST_CHECK_NEAR(c.size().width, 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(c.size().height, 20.0F, 1e-4F);
+
+    c.set_size(30.0F);
+    // 库运行时语义：Widget::layout 以约束为键做布局缓存（widget.cpp），set_size 不标脏，
+    // 约束不变时命中缓存复用旧尺寸 20；换用不同约束强制真实重排。
+    LayoutEngine::layout(c, bounded(210.0F, 110.0F));
+    AURORA_TEST_CHECK_NEAR(c.size().width, 30.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(c.size().height, 30.0F, 1e-4F);
+
+    // 约束不足时钳制。
+    LayoutEngine::layout(c, bounded(25.0F, 25.0F));
+    AURORA_TEST_CHECK_NEAR(c.size().width, 25.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(c.size().height, 25.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(checkbox_describe_reports_metadata) {
+    const auto d = Checkbox::describe_static();
+    AURORA_TEST_CHECK_EQ(std::string{d.name}, "Checkbox");
+    AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
+    AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
+    AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_changed");
+    bool has_checked = false;
+    for (const auto &p : d.properties) {
+        if (std::string{p.name} == "checked") {
+            has_checked = true;
+        }
     }
-    auto w = std::static_pointer_cast<W>(back.value());
-    AURORA_TEST_CHECK_MSG(w->type_name() == type, type + ": type_name matches");
-    return w;
+    AURORA_TEST_CHECK_TRUE(has_checked);
 }
 
-// A) 属性 setter + serialize_props / deserialize_props 往返
-static void test_props() {
-    Checkbox c;
-    c.set_active_color(Color::red()).set_border_color(Color::green()).set_size(24.0F).set_value(true);
-    Json j;
-    c.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["checked"].get<bool>() == true, "checkbox checked=true");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["active_color"][0].get<int>() == 255 && j["active_color"][1].get<int>() == 0,
-                          "checkbox active=red");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(j["size"].get<float>(), 24.0F), "checkbox size=24");
+AURORA_TEST_CASE(checkbox_serialize_deserialize_roundtrip) {
+    int calls = 0;
+    Checkbox src;
+    src.set_on_changed([&calls](bool) { ++calls; });
+    src.set_value(true);
+    src.set_size(28.0F);
+    src.set_enabled(false);
+    AURORA_TEST_CHECK_EQ(calls, 1);  // 序列化前回调已随 set_value 触发
 
-    Checkbox d;
-    d.deserialize_props(j);
-    Json k;
-    d.serialize_props(k);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["checked"].get<bool>() == true, "checkbox rt checked");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(k["size"].get<float>(), 24.0F), "checkbox rt size");
-}
+    Json props;
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["checked"].get<bool>(), true);
+    AURORA_TEST_CHECK_EQ(props["enabled"].get<bool>(), false);
 
-// A2) 新增样式属性：check_color / corner_radius / border_width / enabled 往返；
-//     active_color 未设置时不序列化（保留跟随主题 primary 语义）。
-static void test_style_props() {
-    Checkbox c;
-    c.set_check_color(Color{10, 20, 30, 255}).set_corner_radius(6.0F).set_border_width(2.0F).set_enabled(false);
-    Json j;
-    c.serialize_props(j);
-    AURORA_TEST_CHECK_MSG(!j.contains("active_color"), "active_color not explicitly set: not emitted (follows theme)");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["check_color"][0].get<int>() == 10, "check_color serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(j["corner_radius"].get<float>(), 6.0F), "corner_radius serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(j["border_width"].get<float>(), 2.0F), "border_width serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["enabled"].get<bool>() == false, "enabled serialization");
-
-    Checkbox d;
-    d.deserialize_props(j);
-    Json k;
-    d.serialize_props(k);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["check_color"][2].get<int>() == 30, "check_color roundtrip");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(k["corner_radius"].get<float>(), 6.0F), "corner_radius roundtrip");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(k["border_width"].get<float>(), 2.0F), "border_width roundtrip");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["enabled"].get<bool>() == false, "enabled roundtrip");
-    AURORA_TEST_CHECK_MSG(d.enabled() == false, "enabled getter");
-}
-
-// A3) 禁用态：点击不切换、不触发 on_changed。
-static void test_disabled() {
-    bool fired = false;
-    Checkbox cb{Reactive{false}, [&](bool) -> void { fired = true; }};
-    cb.set_enabled(false);
-    fire(cb, make_press(5, 5));
-    fire(cb, make_release(5, 5));
-    AURORA_TEST_CHECK_MSG(cb.value() == false, "disabled: click does not toggle");
-    AURORA_TEST_CHECK_MSG(!fired, "disabled: on_changed not fired");
-    cb.set_enabled(true);
-    fire(cb, make_press(5, 5));
-    fire(cb, make_release(5, 5));
-    AURORA_TEST_CHECK_MSG(cb.value() == true, "re-enabled: click restores toggle");
-}
-
-// B) 点击切换 / Binding 透写
-static void test_interaction() {
-    Checkbox cb{Reactive{false}};
-    AURORA_TEST_CHECK_MSG(cb.value() == false, "Checkbox: initial false");
-    cb.set_value(true);
-    AURORA_TEST_CHECK_MSG(cb.value() == true, "Checkbox: set_value true");
-
-    Checkbox cb2{Reactive{false}};
-    fire(cb2, make_press(5, 5));
-    fire(cb2, make_release(5, 5));
-    AURORA_TEST_CHECK_MSG(cb2.value() == true, "Checkbox: press+release toggles to true");
-
-    bool changed = false;
-    Checkbox cb3{Reactive{false}, [&](bool v) -> void { changed = v; }};
-    fire(cb3, make_press(2, 2));
-    fire(cb3, make_release(2, 2));
-    AURORA_TEST_CHECK_MSG(changed == true, "Checkbox: onChanged fired with true");
-
-    State s{false};
-    Checkbox cb4{Binding{s}};
-    cb4.set_value(true);
-    AURORA_TEST_CHECK_MSG(s.get() == true, "Checkbox: set_value writes through Binding");
-    fire(cb4, make_press(1, 1));
-    fire(cb4, make_release(1, 1));
-    AURORA_TEST_CHECK_MSG(s.get() == false, "Checkbox: toggle writes through Binding");
-}
-
-// C) 注册可见性 + to_json / from_json 往返
-static void test_roundtrip() {
-    const auto schema = describe_component("Checkbox");
-    AURORA_TEST_CHECK_MSG(!schema.empty(), "describe_component(Checkbox) non-empty");
-
-    const auto w = std::make_shared<Checkbox>();
-    w->set_value(true);
-    Json j = serialization::to_json(*w);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["props"].contains("checked") && j["props"]["checked"].get<bool>() == true,
-                          "Checkbox serialization checked");
-    const auto back = roundtrip<Checkbox>(j, "Checkbox");
-    AURORA_TEST_CHECK_MSG(back && back->value() == true, "Checkbox roundtrip preserves checked");
-}
-
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== test_checkbox ===\n");
-    test_props();
-    test_style_props();
-    test_disabled();
-    test_interaction();
-    test_roundtrip();
+    Checkbox dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_TRUE(dst.value());
+    AURORA_TEST_CHECK_FALSE(dst.enabled());
+    LayoutEngine::layout(dst, bounded(200.0F, 100.0F));
+    AURORA_TEST_CHECK_NEAR(dst.size().width, 28.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_checkbox

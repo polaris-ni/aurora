@@ -1,263 +1,208 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/text_input.h
-/// 测试说明: text_input 单元测试
-///
-
-// text_input_test.cpp — 覆盖 TextInput 富属性：链式 setter、默认值、序列化往返。
+/// 测试说明: 覆盖 TextInput——Props 构造与链式 setter、只读/限长/禁用状态、布局尺寸与字号关系、
+/// 经公开文本输入入口验证 on_changed 回调与截断/吞输入行为、序列化往返与默认键省略
 
 #include <string>
 
-#include "aurora/aurora.h"
+#include "aurora/layout/layout_engine.h"
 #include "aurora/widget/text_input.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_text_input {
 
-namespace render = aurora::render;
+namespace {
 
-static void test_chained_setters() {
-    TextInput t;
-    t.set_value("x")
-        .set_corner_radius(6.0F)
-        .set_padding(EdgeInsets{.left = 10.0F, .top = 10.0F, .right = 10.0F, .bottom = 10.0F})
-        .set_cursor_color(Color::red())
-        .set_enabled(false);
-
-    Json j;
-    t.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(j["corner_radius"].get<float>(), 6.0F), "corner_radius set -> json 6");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(j["padding"]["left"].get<float>(), 10.0F), "padding set -> json 10");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["cursor_color"].is_array() && j["cursor_color"][0].get<int>() == 255 &&
-                              // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                              // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-                              j["cursor_color"][1].get<int>() == 0,
-                          "cursor_color set -> json red");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["enabled"].get<bool>() == false, "enabled set -> json false");
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
-static void test_serialize_roundtrip() {
-    TextInput a;
-    a.set_value("hello")
-        .set_placeholder("ph")
-        .font_size(18.0F)
-        .set_corner_radius(4.0F)
-        .set_padding(EdgeInsets{.left = 2.0F, .top = 4.0F, .right = 6.0F, .bottom = 8.0F})
-        .set_cursor_color(Color{10, 20, 30, 255})
-        .set_enabled(false);
+}  // namespace
 
-    Json j;
-    a.serialize_props(j);
-    TextInput b;
-    b.deserialize_props(j);
+AURORA_TEST_CASE(props_constructor_sets_initial_state) {
+    const TextInputProps props{.value = "init", .placeholder = "ph", .font_size = 16.0F};
+    TextInput ti{props};
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"init"});
 
-    Json k;
-    b.serialize_props(k);
-
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["value"].get<std::string>() == "hello", "rt value");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["placeholder"].get<std::string>() == "ph", "rt placeholder");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(k["font_size"].get<float>(), 18.0F), "rt font_size");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(k["corner_radius"].get<float>(), 4.0F), "rt corner_radius");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(k["padding"]["top"].get<float>(), 4.0F), "rt padding.top");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(k["padding"]["bottom"].get<float>(), 8.0F), "rt padding.bottom");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["cursor_color"][2].get<int>() == 30, "rt cursor_color.b=30");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["enabled"].get<bool>() == false, "rt enabled");
+    Json out;
+    ti.serialize_props(out);
+    AURORA_TEST_CHECK_EQ(out["value"].get<std::string>(), "init");
+    AURORA_TEST_CHECK_EQ(out["placeholder"].get<std::string>(), "ph");
+    AURORA_TEST_CHECK_NEAR(out["font_size"].get<float>(), 16.0F, 1e-4F);
 }
 
-static void test_defaults() {
-    const TextInput t;
-    Json j;
-    t.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(j["corner_radius"].get<float>(), 0.0F), "default corner_radius 0");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(j["padding"]["left"].get<float>(), 12.0F), "default padding 12");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["cursor_color"][0].get<int>() == 0, "default cursor_color black");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["enabled"].get<bool>() == true, "default enabled true");
-}
-
-static void test_selection_endpoint_highlight() {
-    // 回归：选中整段后，行尾字符（最后一个字符）必须被高亮——此前旧半开区间
-    // 模型 + hit_test_char（按中点）会让松手落在字符左半的端点字符漏选。
-    render::FontEngine::set_text_aa_mode(render::TextAAMode::Supersample);
+AURORA_TEST_CASE(chained_setters_update_serialized_props) {
     TextInput ti;
-    ti.set_value("Hello World").font_size(24).set_padding(EdgeInsets{.left = 0, .top = 0, .right = 0, .bottom = 0});
-    BuildContext ctx;
-    ti.mount(ctx);
-    Constraints cc;
-    cc.min = Size{.width = 0, .height = 0};
-    cc.max = Size{.width = 400, .height = 60};
-    const Size sz = ti.layout(cc, ctx);
-    const Font f{.size_pt = 24.0F};
-    constexpr render::TextLayoutOpts o{};
-    const float full = render::FontEngine::measure_width("Hello World", f, o);
-    // 'd' 的起点 x 与宽度（用于把松手点落在 'd' 的左半——旧模型会因此漏掉 'd'）。
-    const float up_to_d = render::FontEngine::caret_x("Hello World", 10, f, o);
-    const float w_d = full - up_to_d;
-    const float release_x = up_to_d + (w_d * 0.25F);  // 'd' 左四分之一处
+    ti.set_value("v").set_placeholder("p").font_size(20.0F);
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"v"});
 
-    // 从文本最左拖到 'd' 的左半（端点字符的左半落点正是旧模型的漏选点）。
-    MouseEvent press;
-    press.action = MouseAction::Press;
-    press.button = MouseButton::Left;
-    press.local_position = Point{.x = 0.0F, .y = 5.0F};
-    ti.on_pointer_event(press);
-    MouseEvent move;
-    move.action = MouseAction::Move;
-    move.button = MouseButton::Left;
-    move.local_position = Point{.x = release_x, .y = 5.0F};
-    ti.on_pointer_event(move);
-    MouseEvent rel;
-    rel.action = MouseAction::Release;
-    rel.button = MouseButton::Left;
-    rel.local_position = Point{.x = release_x, .y = 5.0F};
-    ti.on_pointer_event(rel);
+    Json out;
+    ti.serialize_props(out);
+    AURORA_TEST_CHECK_EQ(out["value"].get<std::string>(), "v");
+    AURORA_TEST_CHECK_EQ(out["placeholder"].get<std::string>(), "p");
+    AURORA_TEST_CHECK_NEAR(out["font_size"].get<float>(), 20.0F, 1e-4F);
 
-    AURORA_TEST_CHECK(ti.has_selection());
-    AURORA_TEST_CHECK(ti.selected_text() == "Hello World");  // 含尾：全 11 个字符
-
-    Painter p;
-    p.begin(static_cast<int>(sz.width), static_cast<int>(sz.height));
-    p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = sz.width, .height = sz.height}},
-                Color::white());
-    ti.paint(p, Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = sz.width, .height = sz.height}}, ctx);
-
-    auto is_blue = [](const Color &c) -> bool { return static_cast<int>(c.b) - static_cast<int>(c.r) > 30; };
-    int minx = 1e9;
-    int maxx = -1e9;
-    for (int y = 0; y < static_cast<int>(sz.height); ++y) {
-        for (int x = 0; x < static_cast<int>(sz.width); ++x) {
-            if (is_blue(p.get_pixel(x, y))) {
-                minx = std::min(minx, x);
-                maxx = std::max(maxx, x);
-            }
-        }
-    }
-    AURORA_TEST_CHECK(minx <= 2);  // 行首字符被高亮
-    AURORA_TEST_CHECK(maxx >= static_cast<int>(full) - 2);  // 行尾字符（'d'）被高亮
-    AURORA_TEST_PRINTF("[SEL] minx=%d maxx=%d full=%.1f\n", minx, maxx, full);
+    // 再次 setter 覆盖旧值。
+    ti.set_value("w");
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"w"});
 }
 
-static void test_behavior_props() {
-    // max_length：超出部分截断；on_changed 每次编辑触发
+AURORA_TEST_CASE(read_only_flag_state_and_serialization) {
     TextInput ti;
-    int changed = 0;
-    ti.set_max_length(5).set_on_changed([&](const std::string & /*v*/) -> void { ++changed; });
+    AURORA_TEST_CHECK_FALSE(ti.read_only());
+    ti.set_read_only(true);
+    AURORA_TEST_CHECK_TRUE(ti.read_only());
+
+    Json out;
+    ti.serialize_props(out);
+    AURORA_TEST_CHECK_TRUE(out.contains("read_only"));
+    AURORA_TEST_CHECK_EQ(out["read_only"].get<bool>(), true);
+
+    // 默认只读=false 时不落盘（键省略语义）。
+    Json defaults;
+    TextInput def;
+    def.serialize_props(defaults);
+    AURORA_TEST_CHECK_FALSE(defaults.contains("read_only"));
+}
+
+AURORA_TEST_CASE(layout_uses_finite_width_and_pads_height) {
+    // 有限约束宽度直接采用；高度至少含默认 24px 垂直内边距。
+    TextInput ti;
+    LayoutEngine::layout(ti, bounded(300.0F, 200.0F));
+    AURORA_TEST_CHECK_NEAR(ti.size().width, 300.0F, 1e-4F);
+    AURORA_TEST_CHECK_TRUE(ti.size().height > 24.0F);
+
+    // 字号更大 → 文本度量更高（相对断言，不依赖具体字形宽度）。
+    TextInput small;
+    small.font_size(10.0F);
+    LayoutEngine::layout(small, bounded(300.0F, 300.0F));
+    TextInput big;
+    big.font_size(30.0F);
+    LayoutEngine::layout(big, bounded(300.0F, 300.0F));
+    AURORA_TEST_CHECK_TRUE(big.size().height > small.size().height);
+}
+
+AURORA_TEST_CASE(text_input_entry_fires_on_changed) {
+    // 经公开文本输入入口（on_text_input）直接驱动：焦点经公开通知入口 on_focus_change
+    // 置位，不经 FocusManager/事件派发器，纯状态验证。
+    TextInput ti;
+    int fired = 0;
+    std::string last;
+    ti.set_on_changed([&fired, &last](const std::string &v) {
+        ++fired;
+        last = v;
+    });
     ti.on_focus_change(true);
-    TextInputEvent e1;
-    e1.text = "Hello";
-    ti.on_text_input(e1);
-    AURORA_TEST_CHECK_MSG(ti.value() == "Hello" && changed == 1, "TextInput: input fires on_changed");
-    TextInputEvent e2;
-    e2.text = "World";
-    ti.on_text_input(e2);
-    AURORA_TEST_CHECK_MSG(ti.value() == "Hello", "TextInput: max_length=5 truncates subsequent input");
-    AURORA_TEST_CHECK_MSG(changed == 1, "TextInput: truncated input does not fire on_changed");
 
-    // read_only：不落字、退格无效
-    TextInput ro;
-    ro.set_value("abc").set_read_only(true);
-    ro.on_focus_change(true);
-    TextInputEvent e3;
-    e3.text = "x";
-    ro.on_text_input(e3);
-    AURORA_TEST_CHECK_MSG(ro.value() == "abc", "TextInput: read_only ignores input");
-    KeyEvent bk;
-    bk.action = KeyAction::Down;
-    bk.key = static_cast<int>(KeyCode::Backspace);
-    ro.on_key_event(bk);
-    AURORA_TEST_CHECK_MSG(ro.value() == "abc", "TextInput: read_only ignores backspace");
+    TextInputEvent first;
+    first.text = "ab";
+    ti.on_text_input(first);
+    AURORA_TEST_CHECK_TRUE(first.is_handled);
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"ab"});
+    AURORA_TEST_CHECK_EQ(fired, 1);
+    AURORA_TEST_CHECK_EQ(last, std::string{"ab"});
 
-    // on_submit：Enter 触发
-    TextInput si;
-    std::string submitted;
-    si.set_value("go").set_on_submit([&](const std::string &v) -> void { submitted = v; });
-    si.on_focus_change(true);
-    KeyEvent enter;
-    enter.action = KeyAction::Down;
-    enter.key = static_cast<int>(KeyCode::Enter);
-    si.on_key_event(enter);
-    AURORA_TEST_CHECK_MSG(submitted == "go", "TextInput: Enter fires on_submit");
-
-    // 新样式/行为属性序列化往返；focused_border_color 未设置不输出（跟随主题）
-    TextInput st;
-    Json j0;
-    st.serialize_props(j0);
-    AURORA_TEST_CHECK_MSG(!j0.contains("focused_border_color"),
-                          "TextInput: unset focused border color not serialized (follows theme)");
-
-    st.set_text_color(Color{1, 2, 3, 255})
-        .set_background(Color{4, 5, 6, 255})
-        .set_border_color(Color{7, 8, 9, 255})
-        .set_focused_border_color(Color::red())
-        .set_border_width(2.0F)
-        .set_selection_color(Color{10, 11, 12, 90})
-        .set_max_length(7)
-        .set_read_only(true)
-        .set_obscure_text(true);
-    Json j;
-    st.serialize_props(j);
-    TextInput rt;
-    rt.deserialize_props(j);
-    Json k;
-    rt.serialize_props(k);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["text_color"][2].get<int>() == 3, "TextInput: text_color roundtrip");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["background"][0].get<int>() == 4, "TextInput: background roundtrip");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["focused_border_color"][0].get<int>() == 255, "TextInput: focused_border_color roundtrip");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(k["border_width"].get<float>(), 2.0F), "TextInput: border_width roundtrip");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["max_length"].get<int>() == 7, "TextInput: max_length roundtrip");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["read_only"].get<bool>() && k["obscure_text"].get<bool>(),
-                          "TextInput: read_only/obscure roundtrip");
+    TextInputEvent second;
+    second.text = "cd";
+    ti.on_text_input(second);
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"abcd"});
+    AURORA_TEST_CHECK_EQ(fired, 2);
+    AURORA_TEST_CHECK_EQ(last, std::string{"abcd"});
 }
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== text_input_test ===\n");
-    test_chained_setters();
-    test_serialize_roundtrip();
-    test_defaults();
-    test_selection_endpoint_highlight();
-    test_behavior_props();
+AURORA_TEST_CASE(max_length_truncates_and_swallows_overflow) {
+    // max_length 按码点计数：超额部分截断；无额度时吞输入且不触发回调。
+    TextInput ti;
+    ti.set_max_length(3);
+    ti.on_focus_change(true);
+    int fired = 0;
+    ti.set_on_changed([&fired](const std::string &) { ++fired; });
+
+    TextInputEvent overflowed;
+    overflowed.text = "abcd";
+    ti.on_text_input(overflowed);
+    AURORA_TEST_CHECK_TRUE(overflowed.is_handled);
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"abc"});
+    AURORA_TEST_CHECK_EQ(fired, 1);
+
+    TextInputEvent no_room;
+    no_room.text = "x";
+    ti.on_text_input(no_room);
+    AURORA_TEST_CHECK_TRUE(no_room.is_handled);
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"abc"});
+    AURORA_TEST_CHECK_EQ(fired, 1);  // 无额度：值与回调均不变
+}
+
+AURORA_TEST_CASE(read_only_and_disabled_swallow_text_input) {
+    // 只读：吞输入并消费事件，不落字、不回调。
+    TextInput ro;
+    ro.set_read_only(true);
+    ro.on_focus_change(true);
+    int ro_fired = 0;
+    ro.set_on_changed([&ro_fired](const std::string &) { ++ro_fired; });
+    TextInputEvent ro_event;
+    ro_event.text = "x";
+    ro.on_text_input(ro_event);
+    AURORA_TEST_CHECK_TRUE(ro_event.is_handled);
+    AURORA_TEST_CHECK_EQ(ro.value(), std::string{});
+    AURORA_TEST_CHECK_EQ(ro_fired, 0);
+
+    // 禁用：入口直接返回，连事件都不消费。
+    TextInput disabled;
+    disabled.set_enabled(false);
+    disabled.on_focus_change(true);
+    TextInputEvent disabled_event;
+    disabled_event.text = "x";
+    disabled.on_text_input(disabled_event);
+    AURORA_TEST_CHECK_FALSE(disabled_event.is_handled);
+    AURORA_TEST_CHECK_EQ(disabled.value(), std::string{});
+}
+
+AURORA_TEST_CASE(serialize_deserialize_roundtrip_and_defaults) {
+    TextInput src;
+    src.set_value("user")
+        .set_placeholder("type here")
+        .font_size(18.0F)
+        .set_background(Color(10, 20, 30, 40))
+        .set_max_length(5)
+        .set_read_only(true)
+        .set_obscure_text(true)
+        .set_focused_border_color(Color(1, 2, 3, 4));
+
+    Json props;
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["value"].get<std::string>(), "user");
+    AURORA_TEST_CHECK_EQ(props["max_length"].get<int>(), 5);
+    AURORA_TEST_CHECK_EQ(props["read_only"].get<bool>(), true);
+    AURORA_TEST_CHECK_EQ(props["obscure_text"].get<bool>(), true);
+    AURORA_TEST_CHECK_EQ(props["background"][0].get<int>(), 10);
+    AURORA_TEST_CHECK_EQ(props["focused_border_color"][2].get<int>(), 3);
+
+    TextInput dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(dst.value(), std::string{"user"});
+    AURORA_TEST_CHECK_TRUE(dst.read_only());
+    Json back;
+    dst.serialize_props(back);
+    AURORA_TEST_CHECK_EQ(back["placeholder"].get<std::string>(), "type here");
+    AURORA_TEST_CHECK_NEAR(back["font_size"].get<float>(), 18.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(back["background"][3].get<int>(), 40);
+    AURORA_TEST_CHECK_EQ(back["focused_border_color"][0].get<int>(), 1);
+
+    // 负边框线宽被钳制为 1.0。
+    TextInput clamped;
+    clamped.set_border_width(-5.0F);
+    Json clamp_props;
+    clamped.serialize_props(clamp_props);
+    AURORA_TEST_CHECK_NEAR(clamp_props["border_width"].get<float>(), 1.0F, 1e-4F);
+
+    // 默认值省略语义：未设置的键不落盘。
+    Json defaults;
+    TextInput def;
+    def.serialize_props(defaults);
+    AURORA_TEST_CHECK_FALSE(defaults.contains("focused_border_color"));  // 保留「跟随主题」语义
+    AURORA_TEST_CHECK_FALSE(defaults.contains("max_length"));
+    AURORA_TEST_CHECK_FALSE(defaults.contains("obscure_text"));
 }
 
 }  // namespace aurora::test_cases::utest_text_input

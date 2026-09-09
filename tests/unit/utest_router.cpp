@@ -1,59 +1,124 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/navigation/router.h
-/// 测试说明: router 单元测试
-///
+/// 测试说明: 覆盖 Router 命名路由的登记/查询、按名构建（每次调用工厂产出全新树）、
+/// 未知路由的 nullopt/空 Node 降级与同名重登记覆盖
 
-// 路由表 1:1 测试：登记/查找/构建/未登记降级。
+#include <memory>
 #include <string>
+#include <utility>
 
-#include "aurora/aurora.h"
-#include "aurora_test_harness.h"
+#include "aurora/navigation/route.h"
+#include "aurora/navigation/router.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_router {
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== test_router ===\n");
+namespace {
 
-    Router r;
+/// 纯色填充探针叶控件（测试仅需一个真实 widget 实例作路由根）。
+class SolidBox final : public LeafWidget {
+  public:
+    SolidBox() = default;
 
-    // 1) 未登记名称 has 为 false。
-    AURORA_TEST_CHECK(!r.has("home"));
+    [[nodiscard]] auto type_name() const -> const char * override { return "SolidBox"; }
 
-    // 2) 登记 home 路由。
-    r.register_route("home", []() -> Route { return Route{Node{Text{"home"}}}; });
-    AURORA_TEST_CHECK(r.has("home"));
+  protected:
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+        return c.constrain(c.max);
+    }
 
-    // 3) 登记第二个路由（settings）。
-    r.register_route("settings", []() -> Route { return Route{Node{Column{Node{Text{"s"}}}}}; });
-    AURORA_TEST_CHECK(r.has("settings"));
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+};
 
-    // 4) 未登记名称仍为 false。
-    AURORA_TEST_CHECK(!r.has("other"));
+}  // namespace
 
-    // 5) build 已登记路由返回有值 optional。
-    auto opt = r.build("home");
-    AURORA_TEST_CHECK(opt.has_value());
+AURORA_TEST_CASE(router_register_and_has) {
+    Router router;
+    AURORA_TEST_CHECK_FALSE(router.has("home"));
 
-    // 6) 构建出的路由非空（有根节点）。
-    AURORA_TEST_CHECK(opt && !opt->empty());
+    router.register_route("home", []() -> Route { return Route{Node{SolidBox{}}, "home"}; });
+    AURORA_TEST_CHECK_TRUE(router.has("home"));
+    AURORA_TEST_CHECK_FALSE(router.has("detail"));
+}
 
-    // 7) 构建出的路由根节点类型为 Text。
-    // 前置 CHECK 已记录失败，此处仅取值比对（has_value 断言在上方，失败时用例已判负）。
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    AURORA_TEST_CHECK(std::string(opt->root().widget().type_name()) == "Text");
+AURORA_TEST_CASE(router_build_unknown_returns_nullopt) {
+    const Router router;
+    const auto route = router.build("ghost");
+    AURORA_TEST_CHECK_FALSE(route.has_value());
+}
 
-    // 8) build 未登记路由返回 nullopt。
-    auto none = r.build("other");
-    AURORA_TEST_CHECK(!none.has_value());
+AURORA_TEST_CASE(router_build_invokes_factory) {
+    Router router;
+    int built = 0;
+    router.register_route("home", [&built]() -> Route {
+        ++built;
+        return Route{Node{SolidBox{}}, "home"};
+    });
 
-    // 9) build_root 已登记路由返回非空 Node（根类型 Text）。
-    Node home_root = r.build_root("home");
-    AURORA_TEST_CHECK(static_cast<bool>(home_root));
-    AURORA_TEST_CHECK(std::string(home_root.widget().type_name()) == "Text");
+    const auto first = router.build("home");
+    AURORA_TEST_REQUIRE_TRUE(first.has_value());
+    const auto second = router.build("home");
+    AURORA_TEST_REQUIRE_TRUE(second.has_value());
+    AURORA_TEST_CHECK_EQ(built, 2);
+}
 
-    // 10) build_root 未登记返回空 Node（bool 转换为 false）。
-    Node empty_root = r.build_root("other");
-    AURORA_TEST_CHECK(!static_cast<bool>(empty_root));
+AURORA_TEST_CASE(router_build_returns_fresh_tree_each_time) {
+    Router router;
+    router.register_route("home", []() -> Route { return Route{Node{SolidBox{}}, "home"}; });
+
+    const auto a = router.build("home");
+    const auto b = router.build("home");
+    AURORA_TEST_REQUIRE_TRUE(a.has_value());
+    AURORA_TEST_REQUIRE_TRUE(b.has_value());
+    // 工厂模式：每次导航获得全新 widget 树，不在栈间共享可变实例。
+    AURORA_TEST_CHECK_NE(&a->root().widget(), &b->root().widget());
+}
+
+AURORA_TEST_CASE(router_build_root_registered_and_unknown) {
+    Router router;
+    router.register_route("home", []() -> Route { return Route{Node{SolidBox{}}, "home"}; });
+
+    const Node root = router.build_root("home");
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(root));
+    AURORA_TEST_CHECK_STREQ(root.widget().type_name(), "SolidBox");
+
+    const Node missing = router.build_root("ghost");
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(missing));
+}
+
+AURORA_TEST_CASE(router_reregister_overrides_builder) {
+    Router router;
+    int first_builder = 0;
+    int second_builder = 0;
+    router.register_route("home", [&first_builder]() -> Route {
+        ++first_builder;
+        return Route{Node{SolidBox{}}, "first"};
+    });
+    router.register_route("home", [&second_builder]() -> Route {
+        ++second_builder;
+        return Route{Node{SolidBox{}}, "second"};
+    });
+
+    const auto route = router.build("home");
+    AURORA_TEST_REQUIRE_TRUE(route.has_value());
+    AURORA_TEST_CHECK_EQ(route->name(), std::string{"second"});
+    AURORA_TEST_CHECK_EQ(first_builder, 0);
+    AURORA_TEST_CHECK_EQ(second_builder, 1);
+}
+
+AURORA_TEST_CASE(router_build_preserves_route_payload) {
+    Router router;
+    router.register_route("detail", []() -> Route {
+        return Route{Node{SolidBox{}}, "detail",
+                     RouteTransition{.animated = true, .kind = TransitionKind::Slide, .duration_seconds = 0.4}};
+    });
+
+    const auto route = router.build("detail");
+    AURORA_TEST_REQUIRE_TRUE(route.has_value());
+    AURORA_TEST_CHECK_EQ(route->name(), std::string{"detail"});
+    AURORA_TEST_CHECK_TRUE(route->transition().animated);
+    AURORA_TEST_CHECK_TRUE(route->transition().kind == TransitionKind::Slide);
+    AURORA_TEST_CHECK_NEAR(route->transition().duration_seconds, 0.4, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_router

@@ -1,111 +1,126 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/divider.h
-/// 测试说明: divider 单元测试
-///
+/// 测试说明: 覆盖 Divider——默认属性、水平/垂直方向的布局尺寸（填满主轴、厚度作交叉轴）、
+/// 厚度与紧约束钳制、缩进链式 setter、序列化往返与 describe 元数据
 
-#include <cstdio>
-#include <memory>
-#include <nlohmann/json.hpp>
 #include <string>
 
-#include "aurora/aurora.h"
-#include "aurora/core/log.h"
 #include "aurora/widget/divider.h"
-#include "aurora/widget/serialization.h"
-#include "aurora_test_harness.h"
+#include "aurora/layout/layout_engine.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_divider {
 
-namespace serialization = aurora::serialization;
+namespace {
 
-template <typename W>
-static auto roundtrip(const Json &props, const std::string &type) -> std::shared_ptr<W> {
-    auto back = serialization::from_json(props);
-    AURORA_TEST_CHECK_MSG(back.ok(), type + ": from_json succeeded");
-    if (!back.ok()) {
-        return nullptr;
-    }
-    auto w = std::static_pointer_cast<W>(back.value());
-    AURORA_TEST_CHECK_MSG(w->type_name() == type, type + ": type_name matches");
-    return w;
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
-static void test_props() {
+}  // namespace
+
+AURORA_TEST_CASE(default_state_and_type_name) {
+    const Divider d;
+    AURORA_TEST_CHECK_EQ(std::string{d.type_name()}, "Divider");
+
+    Json props;
+    d.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["orientation"].get<std::string>(), "horizontal");
+    AURORA_TEST_CHECK_NEAR(props["thickness"].get<float>(), 1.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(props["color"][0].get<int>(), 200);
+    AURORA_TEST_CHECK_EQ(props["color"][3].get<int>(), 255);
+    AURORA_TEST_CHECK_NEAR(props["indent"].get<float>(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(props["end_indent"].get<float>(), 0.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(horizontal_fills_width_uses_thickness_height) {
     Divider d;
-    d.orientation = Orientation::Vertical;
-    d.set_indent(4.0F).set_end_indent(6.0F);
-    d.color = Color::red();
-    d.thickness = 2.0F;
-    Json j;
-    d.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["orientation"].get<std::string>() == "vertical", "divider vertical");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(j["indent"].get<float>(), 4.0F), "divider indent=4");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(j["end_indent"].get<float>(), 6.0F), "divider end_indent=6");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["color"][0].get<int>() == 255, "divider color=red");
-
-    Divider e;
-    e.deserialize_props(j);
-    Json k;
-    e.serialize_props(k);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["orientation"].get<std::string>() == "vertical", "divider rt vertical");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(k["end_indent"].get<float>(), 6.0F), "divider rt end_indent");
+    LayoutEngine::layout(d, bounded(300.0F, 80.0F));
+    AURORA_TEST_CHECK_NEAR(d.size().width, 300.0F, 1e-4F);  // 横向填满父宽
+    AURORA_TEST_CHECK_NEAR(d.size().height, 1.0F, 1e-4F);   // 高度 = 厚度
 }
 
-static void test_layout() {
-    Divider d{};
-    AURORA_TEST_CHECK_MSG(d.orientation == Orientation::Horizontal, "Divider: default horizontal");
-    AURORA_TEST_CHECK_MSG(near_f(d.thickness, 1.0F), "Divider: default thickness 1");
-    Divider dv{DividerProps{.orientation = Orientation::Vertical, .thickness = 2.0F}};
-    AURORA_TEST_CHECK_MSG(dv.orientation == Orientation::Vertical, "Divider: config vertical");
-    AURORA_TEST_CHECK_MSG(near_f(dv.thickness, 2.0F), "Divider: config thickness 2");
-
-    constexpr BuildContext ctx;
-    d.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 100, .height = 100}}, ctx);
-    AURORA_TEST_CHECK_MSG(near_f(d.size().height, 1.0F), "Divider: horizontal height = thickness");
-    AURORA_TEST_CHECK_MSG(near_f(d.size().width, 100.0F), "Divider: horizontal fills width");
-
-    dv.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 100, .height = 100}}, ctx);
-    AURORA_TEST_CHECK_MSG(near_f(dv.size().width, 2.0F), "Divider: vertical width = thickness");
-    AURORA_TEST_CHECK_MSG(near_f(dv.size().height, 100.0F), "Divider: vertical fills height");
+AURORA_TEST_CASE(vertical_fills_height_uses_thickness_width) {
+    Divider d{DividerProps{.orientation = Orientation::Vertical}};
+    LayoutEngine::layout(d, bounded(300.0F, 80.0F));
+    AURORA_TEST_CHECK_NEAR(d.size().width, 1.0F, 1e-4F);    // 宽度 = 厚度
+    AURORA_TEST_CHECK_NEAR(d.size().height, 80.0F, 1e-4F);  // 纵向填满父高
 }
 
-static void test_roundtrip() {
-    const auto schema = describe_component("Divider");
-    AURORA_TEST_CHECK_MSG(!schema.empty(), "describe_component(Divider) non-empty");
+AURORA_TEST_CASE(thickness_drives_cross_axis_size) {
+    Divider h{DividerProps{.thickness = 4.0F}};
+    LayoutEngine::layout(h, bounded(300.0F, 80.0F));
+    AURORA_TEST_CHECK_NEAR(h.size().height, 4.0F, 1e-4F);
 
-    const auto w = std::make_shared<Divider>();
-    w->orientation = Orientation::Vertical;
-    w->thickness = 2.0F;
-    Json j = serialization::to_json(*w);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    const Json &p = j["props"];
-    AURORA_TEST_CHECK_MSG(p.contains("orientation"), "Divider serialization orientation");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(p.contains("thickness") && p["thickness"].get<float>() == 2.0F,
-                          "Divider serialization thickness");
-    const auto back = roundtrip<Divider>(j, "Divider");
-    AURORA_TEST_CHECK_MSG(back && back->thickness == 2.0F, "Divider roundtrip preserves thickness");
+    Divider v{DividerProps{.orientation = Orientation::Vertical, .thickness = 3.0F}};
+    LayoutEngine::layout(v, bounded(300.0F, 80.0F));
+    AURORA_TEST_CHECK_NEAR(v.size().width, 3.0F, 1e-4F);
 }
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== test_divider ===\n");
-    test_props();
-    test_layout();
-    test_roundtrip();
+AURORA_TEST_CASE(layout_clamps_into_tight_constraints) {
+    Divider d{DividerProps{.thickness = 6.0F}};
+    LayoutEngine::layout(d, bounded(20.0F, 2.0F));
+    AURORA_TEST_CHECK_NEAR(d.size().width, 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(d.size().height, 2.0F, 1e-4F);  // 请求厚度 6 被钳到 max 2
+}
+
+AURORA_TEST_CASE(indent_setters_chain_and_serialize) {
+    Divider d;
+    d.set_indent(8.0F).set_end_indent(4.0F);  // 链式
+
+    Json props;
+    d.serialize_props(props);
+    AURORA_TEST_CHECK_NEAR(props["indent"].get<float>(), 8.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(props["end_indent"].get<float>(), 4.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
+    Divider src{DividerProps{.orientation = Orientation::Vertical,
+                             .thickness = 2.5F,
+                             .color = Color(10, 20, 30, 40),
+                             .indent = 6.0F,
+                             .end_indent = 3.0F}};
+    Json props;
+    src.serialize_props(props);
+
+    Divider dst;
+    dst.deserialize_props(props);
+    Json out;
+    dst.serialize_props(out);
+    AURORA_TEST_CHECK_EQ(out["orientation"].get<std::string>(), "vertical");
+    AURORA_TEST_CHECK_NEAR(out["thickness"].get<float>(), 2.5F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(out["color"][1].get<int>(), 20);
+    AURORA_TEST_CHECK_EQ(out["color"][3].get<int>(), 40);
+    AURORA_TEST_CHECK_NEAR(out["indent"].get<float>(), 6.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(out["end_indent"].get<float>(), 3.0F, 1e-4F);
+
+    // 方向随 JSON 翻转：布局尺寸按垂直语义重算。
+    LayoutEngine::layout(dst, bounded(300.0F, 80.0F));
+    AURORA_TEST_CHECK_NEAR(dst.size().width, 2.5F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(dst.size().height, 80.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(describe_reports_metadata) {
+    const auto d = Divider::describe_static();
+    AURORA_TEST_CHECK_EQ(std::string{d.name}, "Divider");
+    AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
+    bool has_orientation = false;
+    bool has_thickness = false;
+    bool has_indent = false;
+    for (const auto &p : d.properties) {
+        if (std::string{p.name} == "orientation") {
+            has_orientation = true;
+        }
+        if (std::string{p.name} == "thickness") {
+            has_thickness = true;
+        }
+        if (std::string{p.name} == "indent") {
+            has_indent = true;
+        }
+    }
+    AURORA_TEST_CHECK_TRUE(has_orientation);
+    AURORA_TEST_CHECK_TRUE(has_thickness);
+    AURORA_TEST_CHECK_TRUE(has_indent);
 }
 
 }  // namespace aurora::test_cases::utest_divider

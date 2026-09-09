@@ -71,6 +71,10 @@ class Show : public SingleChild {
     }
 
   protected:
+    /// 可见性由 State<bool> 驱动，on_layout 输出随状态翻转而变（约束不变但结果可能变），
+    /// 必须退出布局缓存（见 Widget::can_cache_layout 文档的 Path B 说明）。
+    [[nodiscard]] auto can_cache_layout() const -> bool override { return false; }
+
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         if (const bool vis = is_visible(); !vis) {
             return c.constrain(Size{.width = 0.0F, .height = 0.0F});

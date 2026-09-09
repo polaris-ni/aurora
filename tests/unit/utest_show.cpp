@@ -1,91 +1,106 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/show.h
-/// 测试说明: show 单元测试
-///
+/// 测试说明: 覆盖 Show 条件显示——bool 构造的可见/隐藏布局、State<bool> 响应式驱动、
+/// 信号收集、可见性序列化、adopt_children 取首项、自描述
 
-// Show 控件 1:1 测试：可见性绑定、State 驱动、布局与序列化。
 #include <memory>
-#include <string>
-#include <vector>
 
-#include "aurora/aurora.h"
-#include "aurora_test_harness.h"
+#include "aurora/state/state.h"
+#include "aurora/widget/show.h"
+#include "aurora/widget/text.h"
+#include "aurora/layout/layout_engine.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_show {
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== test_show ===\n");
+namespace {
 
-    constexpr BuildContext ctx;
-    constexpr Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 200.0F, .height = 200.0F}};
+auto box(float w, float h) -> Node {
+    auto t = std::make_shared<Text>(".");
+    t->width(aurora::Length::fixed(w));
+    t->height(aurora::Length::fixed(h));
+    return Node{t};
+}
 
-    // 1) 构造为 true 时可见。
-    Show show_true{true, Node{Text{"hi"}}};
-    AURORA_TEST_CHECK(show_true.is_visible());
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
 
-    // 2) 构造为 false 时不可见。
-    Show show_false{false, Node{Text{"hi"}}};
-    AURORA_TEST_CHECK(!show_false.is_visible());
+}  // namespace
 
-    // 3) 由 State<bool>（true）驱动可见。
-    const auto vis = std::make_shared<State<bool>>(true);
-    Show show_state{vis, Node{Text{"x"}}};
-    AURORA_TEST_CHECK(show_state.is_visible());
+AURORA_TEST_CASE(show_visible_passes_child_size_through) {
+    Show s(true, box(80.0F, 30.0F));
+    AURORA_TEST_CHECK_EQ(std::string{s.type_name()}, "Show");
+    AURORA_TEST_CHECK_TRUE(s.is_visible());
 
-    // 4) State 置 false → 不可见。
-    vis->set(false);
-    AURORA_TEST_CHECK(!show_state.is_visible());
+    LayoutEngine::layout(s, bounded(200.0F, 100.0F));
+    const Size out = s.size();
+    AURORA_TEST_CHECK_NEAR(out.width, 80.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(out.height, 30.0F, 1e-4F);
+}
 
-    // 5) State 切回 true → 重新可见。
-    vis->set(true);
-    AURORA_TEST_CHECK(show_state.is_visible());
+AURORA_TEST_CASE(show_hidden_collapses_to_zero) {
+    Show s(false, box(80.0F, 30.0F));
+    AURORA_TEST_CHECK_FALSE(s.is_visible());
 
-    // 6) type_name 为 "Show"。
-    AURORA_TEST_CHECK(std::string(show_true.type_name()) == "Show");
+    LayoutEngine::layout(s, bounded(200.0F, 100.0F));
+    const Size out = s.size();
+    AURORA_TEST_CHECK_NEAR(out.width, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(out.height, 0.0F, 1e-4F);
+}
 
-    // 7) 隐藏时 layout 返回 0x0（不占空间）。
-    show_false.mount(ctx);
-    const Size hidden = show_false.layout(c, ctx);
-    AURORA_TEST_CHECK(hidden.width == 0.0F && hidden.height == 0.0F);
+AURORA_TEST_CASE(show_state_driven_visibility) {
+    auto state = std::make_shared<State<bool>>(false);
+    Show s(state, box(80.0F, 30.0F));
+    AURORA_TEST_CHECK_FALSE(s.is_visible());
+    LayoutEngine::layout(s, bounded(200.0F, 100.0F));
+    AURORA_TEST_CHECK_NEAR(s.size().width, 0.0F, 1e-4F);
 
-    // 8) 可见时 layout 受父约束（尺寸落在约束范围内）。
-    show_true.mount(ctx);
-    const Size visible = show_true.layout(c, ctx);
-    AURORA_TEST_CHECK(visible.width >= 0.0F && visible.width <= 200.0F);
-    AURORA_TEST_CHECK(visible.height >= 0.0F && visible.height <= 200.0F);
+    // 状态翻转 → 可见（重新布局后尺寸透传）。
+    state->set(true);
+    AURORA_TEST_CHECK_TRUE(s.is_visible());
+    LayoutEngine::layout(s, bounded(200.F, 100.0F));
+    AURORA_TEST_CHECK_NEAR(s.size().width, 80.0F, 1e-4F);
+}
 
-    // 9) 用 State 构造时 collect_signals 含该信号。
-    std::vector<SignalViewBase *> sigs;
-    show_state.collect_signals(sigs);
-    AURORA_TEST_CHECK(sigs.size() == 1);
+AURORA_TEST_CASE(show_collects_state_signal) {
+    auto state = std::make_shared<State<bool>>(true);
+    Show s(state, box(1.0F, 1.0F));
+    std::vector<aurora::SignalViewBase *> out;
+    s.collect_signals(out);
+    AURORA_TEST_REQUIRE_EQ(out.size(), 1U);
+    AURORA_TEST_CHECK_EQ(out[0], state.get());
 
-    // 10) serialize_props 写入 "visible" 键。
-    Json props = Json::object();
-    show_true.serialize_props(props);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(props.contains("visible") && props["visible"].get<bool>() == true);
+    // bool 构造无信号。
+    Show plain(true, box(1.0F, 1.0F));
+    std::vector<aurora::SignalViewBase *> empty;
+    plain.collect_signals(empty);
+    AURORA_TEST_CHECK_EQ(empty.size(), 0U);
+}
 
-    // 11) adopt_children 接管新子节点（序列化后 children 反映新子节点）。
-    Show show_adopt{false, Node{Text{"old"}}};
-    show_adopt.adopt_children(std::vector{Node{Text{"new"}}});
-    auto aj = dump_tree_json(Node{std::move(show_adopt)});
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(aj.contains("children") && aj["children"].is_array());
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(aj["children"].size() == 1);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(aj["children"][0]["type"].get<std::string>() == "Text");
+AURORA_TEST_CASE(show_serializes_visibility) {
+    Show on(true, box(1.0F, 1.0F));
+    Json props;
+    on.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["visible"].get<bool>(), true);
 
-    // 12) 嵌套：外层隐藏不影响内层结构（内层 Show 仍存在；可见性由各自 State 决定）。
-    const auto inner_vis = std::make_shared<State<bool>>(true);
-    Show outer{false, Node{Show{inner_vis, Node{Text{"inner"}}}}};
-    AURORA_TEST_CHECK(!outer.is_visible());
-    const auto sjt = get_state("children/0/type", Node{std::move(outer)});
-    AURORA_TEST_CHECK(sjt.is_string() && sjt.get<std::string>() == "Show");
+    Show off(false, box(1.0F, 1.0F));
+    off.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["visible"].get<bool>(), false);
+}
+
+AURORA_TEST_CASE(show_adopt_children_takes_first) {
+    Show s(true, box(1.0F, 1.0F));
+    s.adopt_children(std::vector<Node>{box(50.0F, 10.0F), box(60.0F, 20.0F)});
+    // 仅保留首项（single 策略）。
+    LayoutEngine::layout(s, bounded(200.0F, 100.0F));
+    AURORA_TEST_CHECK_NEAR(s.size().width, 50.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(show_describe_reports_metadata) {
+    const auto d = Show::describe_static();
+    AURORA_TEST_CHECK_EQ(std::string{d.name}, "Show");
+    AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "single");
 }
 
 }  // namespace aurora::test_cases::utest_show

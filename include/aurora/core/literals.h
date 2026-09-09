@@ -7,7 +7,7 @@
 // 字面量实际声明于各自领域头文件内、归属于 `aurora::literals` 命名空间：
 //   - core/dimension.h  ：`_dp` / `_px`  （长度）
 //   - core/color.h      ：`_rgb` / `_rgba`（颜色，#RRGGBB / #RRGGBBAA）
-//   - core/duration.h   ：`_ms` / `_s`   （时长）
+//   - core/duration.h   ：`_ms`             （时长）
 //
 // 约定（与编码标准一致）：禁止在头文件中全局 `using namespace au::literals`；
 // 仅在使用方的翻译单元（.cpp）内按需 `using namespace au::literals;`。

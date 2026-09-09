@@ -46,7 +46,7 @@ class BuildContext {
 template <typename T>
 [[nodiscard]] auto env_of(const BuildContext &ctx) -> const T & {
     const T *p = ctx.environment<T>();
-    AURORA_ASSERT(p != nullptr, "env_of: requested type not found in Environment");
+    AURORA_CHECK(p != nullptr, "env_of: requested type not found in Environment");  // 解引用 nullptr = UB，常开拦截
     return *p;
 }
 

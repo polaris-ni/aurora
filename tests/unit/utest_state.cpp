@@ -1,197 +1,142 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/state.h
-/// 测试说明: state 单元测试
-///
+/// 测试说明: State<T> 构造与值语义、get 作用域内登记依赖与去重、const 读取、dispose/析构观察边安全、shared() 与移动-only 值类型
 
-// state_test.cpp — 覆盖响应式状态系统（原缺口模块）。
-// 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
-// ── API 覆盖映射 ─────────────────────────────
-// Store(Store 读写/订阅)、SignalView(SignalView 只读视图)；
-// StateGraph、StateRegistry → 经状态系统与序列化链路间接行使（无独立直测函数，见
-// test_serialization）。
+#include <memory>
+#include <string>
+#include <utility>
 
-#include <chrono>
-#include <thread>
-
-#include "aurora/aurora.h"
-#include "aurora_test_harness.h"
+#include "aurora/state/state.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_state {
 
-using std::reduce;
+AURORA_TEST_CASE(state_default_and_value_construction) {
+    // 默认构造：值取 T{}；显式值构造：get() 返回初值。
+    State<int> s{};
+    State<int> t{3};
+    AURORA_TEST_CHECK_EQ(s.get(), 0);
+    AURORA_TEST_CHECK_EQ(t.get(), 3);
 
-// ---- State 读写 / 订阅(Effect 依赖追踪) ----
-static void test_state() {
-    State s{0};
-    AURORA_TEST_CHECK_MSG(s.get() == 0, "State: initial value");
-    int observed = -1;
-    Effect e([&]() -> void { observed = s.get(); });
-    e.run();  // 首次运行登记 s 为依赖
-    AURORA_TEST_CHECK_MSG(observed == 0, "State: Effect reads initial value");
-    s.set(5);  // 触发依赖 Effect 重跑
-    AURORA_TEST_CHECK_MSG(observed == 5, "State: set notifies dependent Effect");
-    AURORA_TEST_CHECK_MSG(!e.is_disposed(), "Effect: not disposed");
-    e.dispose();
-    AURORA_TEST_CHECK_MSG(e.is_disposed(), "Effect: disposed after dispose()");
+    // 每个实例持有独立且非空的生命周期锚点。
+    AURORA_TEST_CHECK(s.anchor() != nullptr);
+    AURORA_TEST_CHECK(t.anchor() != nullptr);
+    AURORA_TEST_CHECK(s.anchor() != t.anchor());
 
-    // Effect run 幂等：多次 run 每次都执行 fn
+    // get() 返回内部存储的引用：set 后旧引用观察到新值。
+    State<std::string> str{std::string{"a"}};
+    const std::string& alias = str.get();
+    str.set(std::string{"b"});
+    AURORA_TEST_CHECK_EQ(alias, std::string{"b"});
+}
+
+AURORA_TEST_CASE(state_set_notifies_subscribed_effect) {
+    // subscribe() 手动建立观察边；set() 通知观察者重跑（定点刷新）。
+    State<int> s{0};
     int runs = 0;
-    Effect e2([&]() -> void {
+    Effect e{[&] { ++runs; }};
+    s.subscribe(e);
+    e.run();  // 首跑（回调不读 s）
+    AURORA_TEST_CHECK_EQ(runs, 1);
+    s.set(1);
+    AURORA_TEST_CHECK_EQ(runs, 2);
+    AURORA_TEST_CHECK_EQ(s.get(), 1);
+}
+
+AURORA_TEST_CASE(state_get_outside_effect_scope_does_not_subscribe) {
+    // 作用域外 get() 只取值，不登记依赖：未订阅的 Effect 不因 set 重跑。
+    State<int> s{0};
+    int runs = 0;
+    Effect e{[&] { ++runs; }};
+    e.run();  // 回调不读 s
+    (void)s.get();
+    s.set(1);
+    AURORA_TEST_CHECK_EQ(runs, 1);
+    AURORA_TEST_CHECK_EQ(s.get(), 1);
+}
+
+AURORA_TEST_CASE(state_get_in_effect_scope_registers_and_dedups) {
+    // 作用域内 get() 自动登记依赖；同一 Effect 重复登记被去重（动画每帧重跑不累积观察边）。
+    State<int> s{0};
+    int runs = 0;
+    Effect e{[&] {
         ++runs;
         (void)s.get();
-    });
-    e2.run();
-    e2.run();
-    AURORA_TEST_CHECK_MSG(runs == 2, "Effect: explicit run() executes fn each time");
+    }};
+    e.run();
+    e.run();  // 二次登记同一 Effect
+    AURORA_TEST_CHECK_EQ(runs, 2);
+    s.set(1);
+    AURORA_TEST_CHECK_EQ(runs, 3);  // 一次 set 恰好触发一次重跑（若边重复会是 4）
+    AURORA_TEST_CHECK_EQ(s.get(), 1);
 }
 
-// ---- Computed 依赖追踪 / 重算 ----
-static void test_computed() {
-    State a{1};
-    State b{2};
-    const Computed<int> c([&]() -> int { return a.get() + b.get(); });
-    AURORA_TEST_CHECK_MSG(c.get() == 3, "Computed: initial derived value");
-    a.set(10);
-    AURORA_TEST_CHECK_MSG(c.get() == 12, "Computed: recomputes when dependency changes");
-    b.set(20);
-    AURORA_TEST_CHECK_MSG(c.get() == 30, "Computed: recomputes on second dependency");
-
-    // au::computed 工厂：T 由 lambda 返回类型推导，行为与显式 Computed<T> 一致
-    const auto cf = computed([&]() -> int { return a.get() * 2; });
-    AURORA_TEST_CHECK_MSG(cf.get() == 20, "computed factory: initial derived value");
-    a.set(5);
-    AURORA_TEST_CHECK_MSG(cf.get() == 10, "computed factory: recomputes when dependency changes");
+AURORA_TEST_CASE(state_const_get_still_registers_dependency) {
+    // 经 const State& 读取同样登记依赖（get() const 内部去 const 订阅，接口约束使然）。
+    auto owned = std::make_shared<State<int>>(5);
+    const State<int>& view = *owned;
+    int runs = 0;
+    Effect e{[&] {
+        ++runs;
+        (void)view.get();
+    }};
+    e.run();
+    AURORA_TEST_CHECK_EQ(runs, 1);
+    owned->set(6);
+    AURORA_TEST_CHECK_EQ(runs, 2);
+    AURORA_TEST_CHECK_EQ(view.get(), 6);
 }
 
-// ---- Binding ----
-static void test_binding() {
-    State s{5};
-    Binding bd{s};
-    AURORA_TEST_CHECK_MSG(bd.bound(), "Binding: bound() true after construction");
-    AURORA_TEST_CHECK_MSG(bd.get() == 5, "Binding: get() forwards to State");
-    bd.set(9);
-    AURORA_TEST_CHECK_MSG(s.get() == 9, "Binding: set() writes through to State");
-    AURORA_TEST_CHECK_MSG(bd.target() == &s, "Binding: target() returns upstream State");
-
-    const Binding<int> unbound;
-    AURORA_TEST_CHECK_MSG(!unbound.bound(), "Binding: default not bound");
-    AURORA_TEST_CHECK_MSG(unbound.target() == nullptr, "Binding: default target null");
+AURORA_TEST_CASE(state_disposed_and_destroyed_effects_are_skipped_safely) {
+    // 已 dispose 的 Effect 被跳过；已析构 Effect 的失效边在 notify 时惰性摘除，不悬垂。
+    State<int> s{0};
+    int runs_a = 0;
+    int runs_b = 0;
+    Effect disposed_e{[&] {
+        ++runs_a;
+        (void)s.get();
+    }};
+    disposed_e.run();
+    AURORA_TEST_CHECK_EQ(runs_a, 1);
+    disposed_e.dispose();
+    {
+        Effect transient{[&] {
+            ++runs_b;
+            (void)s.get();
+        }};
+        transient.run();
+        AURORA_TEST_CHECK_EQ(runs_b, 1);
+    }  // transient 析构 → 锚点释放
+    s.set(1);
+    AURORA_TEST_CHECK_EQ(runs_a, 1);  // dispose 后不再重跑
+    AURORA_TEST_CHECK_EQ(runs_b, 1);  // 析构边被安全摘除
+    AURORA_TEST_CHECK_EQ(s.get(), 1);
+    disposed_e.run();  // dispose 后 run() 为空操作
+    AURORA_TEST_CHECK_EQ(runs_a, 1);
 }
 
-// ---- Reactive ----
-static void test_reactive() {
-    Reactive r{3};
-    AURORA_TEST_CHECK_MSG(r.get() == 3, "Reactive: value ctor");
-    const Reactive r2 = 7;  // 隐式转换
-    AURORA_TEST_CHECK_MSG(r2.get() == 7, "Reactive: implicit value ctor");
-    r.set(4);
-    AURORA_TEST_CHECK_MSG(r.get() == 4, "Reactive: set()");
-    AURORA_TEST_CHECK_MSG(r.state().get() == 4, "Reactive: state() exposes underlying State");
-
-    const auto shared = std::make_shared<State<int>>(100);
-    const Reactive r3{shared};
-    AURORA_TEST_CHECK_MSG(r3.get() == 100, "Reactive: from shared State");
-    shared->set(200);
-    AURORA_TEST_CHECK_MSG(r3.get() == 200, "Reactive: shares upstream State value");
+AURORA_TEST_CASE(state_shared_returns_managed_self) {
+    // shared() 返回管理同一对象的 shared_ptr（状态提升给子组件的惯用路径）。
+    auto s = std::make_shared<State<int>>(5);
+    auto same = s->shared();
+    AURORA_TEST_CHECK(same.get() == s.get());
+    AURORA_TEST_CHECK_GE(same.use_count(), 2);
+    same->set(9);
+    AURORA_TEST_CHECK_EQ(s->get(), 9);
+    s->set(10);
+    AURORA_TEST_CHECK_EQ(same->get(), 10);
 }
 
-// ---- SignalView 基类接口 ----
-static void test_signal_view() {
-    const State<std::string> s{"hi"};
-    const SignalView<std::string> &sv = s;
-    AURORA_TEST_CHECK_MSG(sv.get() == "hi", "SignalView: get() via base ref");
-}
+AURORA_TEST_CASE(state_move_only_value_type_supported) {
+    // 移动-only 值类型可用：默认构造为 nullptr，set 以移动写入。
+    State<std::unique_ptr<int>> empty{};
+    AURORA_TEST_CHECK(empty.get() == nullptr);
 
-// ---- Store / Action / Reducer ----
-struct Counter {
-    int count = 0;
-};
-
-static void test_store() {
-    const Reducer<Counter> reduce = [](const Counter &s, const Action &a) -> Counter {
-        Counter n = s;
-        if (a.type == "inc") {
-            ++n.count;
-        } else if (a.type == "set") {
-            if (const int *p = a.payload_as<int>()) {
-                n.count = *p;
-            }
-        }
-        return n;
-    };
-
-    const auto store = make_store(Counter{}, reduce);
-    AURORA_TEST_CHECK_MSG(store->get_state().count == 0, "Store: initial state");
-
-    store->dispatch(Action{"inc"});
-    AURORA_TEST_CHECK_MSG(store->get_state().count == 1, "Store: dispatch inc");
-
-    const Action set_a{"set", 42};
-    store->dispatch(set_a);
-    AURORA_TEST_CHECK_MSG(store->get_state().count == 42, "Store: dispatch set with payload");
-    const int *p = set_a.payload_as<int>();
-    AURORA_TEST_CHECK_MSG(p != nullptr && *p == 42, "Action: payload_as<int> recovers value");
-    // 注：payload_as<T>() 仅做空指针检查，不做类型校验（按值类型擦除存储）。
-    // 调用方须保证类型匹配；不匹配时行为是未定义，这里只断言合法用法与空载荷。
-
-    const Action no_payload{"inc"};
-    AURORA_TEST_CHECK_MSG(no_payload.payload_as<int>() == nullptr, "Action: no payload returns null");
-
-    int calls = 0;
-    const auto unsub = store->subscribe([&](const Counter &, const Counter &) -> void { ++calls; });
-    store->dispatch(Action{"inc"});
-    AURORA_TEST_CHECK_MSG(calls == 1, "Store: listener called on dispatch");
-    unsub();
-    store->dispatch(Action{"inc"});
-    AURORA_TEST_CHECK_MSG(calls == 1, "Store: listener removed after unsubscribe");
-
-    const auto sig = store->as_signal();
-    AURORA_TEST_CHECK_MSG(sig->get().count == 44, "Store: as_signal reflects current state");
-    store->dispatch(Action{"inc"});
-    AURORA_TEST_CHECK_MSG(sig->get().count == 45, "Store: as_signal updates on dispatch");
-}
-
-// ---- async ----
-static void test_async() {
-    bool done = false;
-    int val = 0;
-    au::async([]() -> int { return 21 * 2; }).then([&](const Result<int> &r) -> void {
-        done = r.ok();
-        if (r.ok()) {
-            val = r.value();
-        }
-    });
-    // 默认无事件循环：回调在后台线程直接执行，等待其完成。
-    for (int i = 0; i < 100 && !done; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
-    AURORA_TEST_CHECK_MSG(done, "async: then callback fired (success)");
-    AURORA_TEST_CHECK_MSG(val == 42, "async: success value propagated");
-
-    bool done2 = false;
-    bool failed = false;
-    au::async([]() -> Result<int> {
-        return make_error(ErrorCode::GeneralUnknown, "nope");
-    }).then([&](const Result<int> &r) -> void {
-        done2 = true;
-        failed = !r.ok();
-    });
-    for (int i = 0; i < 100 && !done2; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
-    AURORA_TEST_CHECK_MSG(done2, "async: then callback fired (error path)");
-    AURORA_TEST_CHECK_MSG(failed, "async: error propagated as !ok");
-}
-
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== state_test ===\n");
-    test_state();
-    test_computed();
-    test_binding();
-    test_reactive();
-    test_signal_view();
-    test_store();
-    test_async();
+    State<std::unique_ptr<int>> s{std::unique_ptr<int>{}};
+    AURORA_TEST_CHECK(s.get() == nullptr);
+    s.set(std::make_unique<int>(7));
+    AURORA_TEST_CHECK(s.get() != nullptr);
+    AURORA_TEST_CHECK_EQ(*s.get(), 7);
 }
 
 }  // namespace aurora::test_cases::utest_state

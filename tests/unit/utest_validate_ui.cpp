@@ -1,316 +1,161 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/app/validate_ui.h
-/// 测试说明: validate_ui 单元测试
-///
+/// 测试说明: 覆盖 UI 树 JSON Schema 校验——合法树放行与 JSON 报告形态、非对象/缺 type 拒绝、
+/// 未知类型、缺失必填属性（Button.label / Text.content）、属性类型不匹配（Text.content）、
+/// children_policy none/single 违规、嵌套超限、ValidationError::to_json 结构
 
-// 验证 UI Schema 验证器：validate_ui_tree / validate_ui_tree_json。
-// 检查：合法树通过、未知类型、缺 type、children 策略违规、类型不匹配、递归子节点错误路径。
-
-#include <cstdio>
+#include <string>
+#include <vector>
 
 #include "aurora/app/validate_ui.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_validate_ui {
 
-AURORA_TEST() {
-    // ---- 1. 合法树验证通过 ----
-    {
-        Json tree;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["type"] = "Text";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["props"] = Json::object();
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["props"]["content"] = "Hello";
+namespace {
 
-        const auto errors = validate_ui_tree(tree);
-        AURORA_TEST_CHECK(errors.empty());
-    }
-
-    // ---- 2. 未知 widget 类型 ----
-    {
-        Json tree;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["type"] = "NotAWidget";
-
-        const auto errors = validate_ui_tree(tree);
-        AURORA_TEST_CHECK(!errors.empty());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(errors[0].path == "$.type");
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(errors[0].message.find("unknown widget type") != std::string::npos);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(!errors[0].suggestion.empty());  // 建议里包含已知类型列表
-    }
-
-    // ---- 3. 缺失 type 字段 ----
-    {
-        Json tree = Json::object();
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["props"] = Json::object();
-
-        const auto errors = validate_ui_tree(tree);
-        AURORA_TEST_CHECK(!errors.empty());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(errors[0].message.find("type") != std::string::npos);
-    }
-
-    // ---- 4. 非对象节点 ----
-    {
-        Json tree = "just a string";
-        const auto errors = validate_ui_tree(tree);
-        AURORA_TEST_CHECK(!errors.empty());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(errors[0].message.find("object") != std::string::npos);
-    }
-
-    // ---- 5. 合法容器树（Column + 子节点）----
-    {
-        Json child1;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        child1["type"] = "Text";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        child1["props"]["content"] = "A";
-
-        Json child2;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        child2["type"] = "Button";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        child2["props"]["label"] = "Click";
-
-        Json tree;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["type"] = "Column";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["children"] = Json::array({child1, child2});
-
-        const auto errors = validate_ui_tree(tree);
-        for (const auto &e : errors) {
-            AURORA_TEST_PRINTF("  unexpected error: %s: %s\n", e.path.c_str(), e.message.c_str());
+/// 在错误清单中按 JSON 路径查找（未命中返回 nullptr）。
+auto find_error(const std::vector<ValidationError> &errs, const std::string &path) -> const ValidationError * {
+    for (const auto &e : errs) {
+        if (e.path == path) {
+            return &e;
         }
-        AURORA_TEST_CHECK(errors.empty());
     }
+    return nullptr;
+}
 
-    // ---- 6. 递归子节点错误定位 ----
-    {
-        Json bad_child;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        bad_child["type"] = "BogusWidget";
+/// 可 from_json 的最小 Text 节点（schema 必填 prop 为 content，见 aurora_api.json Text 条目）。
+auto text_node(const char *content) -> Json {
+    Json j;
+    j["type"] = "Text";
+    j["props"]["content"] = content;
+    return j;
+}
 
-        Json tree;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["type"] = "Column";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["children"] = Json::array({bad_child});
-
-        const auto errors = validate_ui_tree(tree);
-        AURORA_TEST_CHECK(!errors.empty());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(errors[0].path == "$.children[0].type");
+/// 逐层嵌套 levels 层的 Column JSON 树。
+auto deep_tree(int levels) -> Json {
+    Json root;
+    root["type"] = "Column";
+    Json *cur = &root;
+    for (int i = 0; i < levels; ++i) {
+        Json child;
+        child["type"] = "Column";
+        (*cur)["children"] = Json::array({child});
+        cur = &(*cur)["children"][0];
     }
+    return root;
+}
 
-    // ---- 7. children 必须是数组 ----
-    {
-        Json tree;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["type"] = "Column";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["children"] = "not an array";
+}  // namespace
 
-        const auto errors = validate_ui_tree(tree);
-        AURORA_TEST_CHECK(!errors.empty());
-        bool found = false;
-        for (const auto &e : errors) {
-            if (e.message.find("array") != std::string::npos) {
-                found = true;
-            }
-        }
-        AURORA_TEST_CHECK(found);
-    }
+AURORA_TEST_CASE(valid_tree_passes_and_report_json_true) {
+    Json tree;
+    tree["type"] = "Column";
+    tree["children"] = Json::array({text_node("hi")});
 
-    // ---- 8. props 必须是对象 ----
-    {
-        Json tree;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["type"] = "Text";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["props"] = Json::array();
+    const auto errs = validate_ui_tree(tree);
+    AURORA_TEST_CHECK_TRUE(errs.empty());
 
-        const auto errors = validate_ui_tree(tree);
-        AURORA_TEST_CHECK(!errors.empty());
-        bool found = false;
-        for (const auto &e : errors) {
-            if (e.message.find("object") != std::string::npos) {
-                found = true;
-            }
-        }
-        AURORA_TEST_CHECK(found);
-    }
+    // 便捷报告：valid=true + 空错误数组。
+    const auto report = validate_ui_tree_json(tree);
+    AURORA_TEST_CHECK_EQ(report["valid"].get<bool>(), true);
+    AURORA_TEST_CHECK_TRUE(report["errors"].empty());
+}
 
-    // ---- 9. JSON 报告格式 ----
-    {
-        Json tree;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["type"] = "Text";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["props"]["content"] = "OK";
+AURORA_TEST_CASE(non_object_or_missing_type_rejected) {
+    // 节点不是对象（空数组）。
+    const auto as_array = validate_ui_tree(Json::array());
+    AURORA_TEST_REQUIRE_EQ(as_array.size(), 1U);
+    AURORA_TEST_CHECK_STREQ(as_array[0].path, "$");
+    AURORA_TEST_CHECK_TRUE(as_array[0].message.find("must be a JSON object") != std::string::npos);
 
-        const Json report = validate_ui_tree_json(tree);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(report["valid"].get<bool>());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(report["errors"].is_array());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(report["errors"].empty());
+    // 对象但缺 "type" 字段。
+    const auto no_type = validate_ui_tree(Json::object());
+    AURORA_TEST_REQUIRE_EQ(no_type.size(), 1U);
+    AURORA_TEST_CHECK_STREQ(no_type[0].path, "$");
+    AURORA_TEST_CHECK_TRUE(no_type[0].message.find("type") != std::string::npos);
+}
 
-        Json bad;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        bad["type"] = "Nothing";
-        const Json report2 = validate_ui_tree_json(bad);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(!report2["valid"].get<bool>());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(!report2["errors"].empty());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(report2["errors"][0].contains("path"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(report2["errors"][0].contains("message"));
-    }
+AURORA_TEST_CASE(unknown_widget_type_reported) {
+    Json tree;
+    tree["type"] = "NoSuchWidgetXyz";
 
-    // ---- 10. 嵌套多层树 ----
-    {
-        Json text;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        text["type"] = "Text";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        text["props"]["content"] = "deep";
+    const auto errs = validate_ui_tree(tree);
+    AURORA_TEST_REQUIRE_EQ(errs.size(), 1U);
+    AURORA_TEST_CHECK_STREQ(errs[0].path, "$.type");
+    AURORA_TEST_CHECK_TRUE(errs[0].message.find("unknown widget type") != std::string::npos);
+    // 建议携带已知类型列表。
+    AURORA_TEST_CHECK_TRUE(errs[0].suggestion.rfind("use one of:", 0) == 0);
+}
 
-        Json row;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        row["type"] = "Row";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        row["children"] = Json::array({text});
+AURORA_TEST_CASE(missing_required_prop_reported) {
+    Json tree;
+    tree["type"] = "Button";
+    tree["props"] = Json::object();
 
-        Json col;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        col["type"] = "Column";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        col["children"] = Json::array({row});
+    const auto errs = validate_ui_tree(tree);
+    const auto *e = find_error(errs, "$.props.label");
+    AURORA_TEST_REQUIRE_NOT_NULL(e);
+    AURORA_TEST_CHECK_TRUE(e->message.find("missing required prop") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(e->message.find("label") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(e->suggestion.find("label") != std::string::npos);
+}
 
-        const auto errors = validate_ui_tree(col);
-        AURORA_TEST_CHECK(errors.empty());
+AURORA_TEST_CASE(prop_type_mismatch_reported) {
+    Json tree = text_node("x");
+    tree["props"]["content"] = 123;  // 声明为字符串（LocalizedString），给了数字
 
-        // 三层深处的错误
-        Json bad;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        bad["type"] = "Zzz";
-        Json row2;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        row2["type"] = "Row";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        row2["children"] = Json::array({bad});
-        Json col2;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        col2["type"] = "Column";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        col2["children"] = Json::array({row2});
+    const auto errs = validate_ui_tree(tree);
+    const auto *e = find_error(errs, "$.props.content");
+    AURORA_TEST_REQUIRE_NOT_NULL(e);
+    AURORA_TEST_CHECK_TRUE(e->message.find("type mismatch") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(e->message.find("number") != std::string::npos);
+}
 
-        const auto errors2 = validate_ui_tree(col2);
-        AURORA_TEST_CHECK(!errors2.empty());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(errors2[0].path == "$.children[0].children[0].type");
-    }
+AURORA_TEST_CASE(children_policy_violations_reported) {
+    // children_policy=none：Text 不接受子节点。
+    Json leaf = text_node("x");
+    Json text_with_children = text_node("parent");
+    text_with_children["children"] = Json::array({leaf});
+    const auto none_errs = validate_ui_tree(text_with_children);
+    AURORA_TEST_REQUIRE_EQ(none_errs.size(), 1U);
+    AURORA_TEST_CHECK_STREQ(none_errs[0].path, "$.children");
+    AURORA_TEST_CHECK_TRUE(none_errs[0].message.find("does not accept children") != std::string::npos);
 
-    // ---- 11. 缺失必填属性（Text 需要 content）----
-    {
-        Json tree;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["type"] = "Text";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["props"] = Json::object();  // 没有 content
+    // children_policy=single：PerfOverlay 最多 1 个子节点。
+    Json overlay;
+    overlay["type"] = "PerfOverlay";
+    overlay["children"] = Json::array({text_node("a"), text_node("b")});
+    const auto single_errs = validate_ui_tree(overlay);
+    AURORA_TEST_REQUIRE_EQ(single_errs.size(), 1U);
+    AURORA_TEST_CHECK_STREQ(single_errs[0].path, "$.children");
+    AURORA_TEST_CHECK_TRUE(single_errs[0].message.find("accepts at most 1") != std::string::npos);
+}
 
-        const auto errors = validate_ui_tree(tree);
-        AURORA_TEST_CHECK(!errors.empty());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(errors[0].path == "$.props.content");
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(errors[0].message.find("required") != std::string::npos);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(errors[0].suggestion.find("content") != std::string::npos);
-    }
+AURORA_TEST_CASE(deep_nesting_reported) {
+    const auto tree = deep_tree(70);  // 超过默认上限 64
 
-    // ---- 12. 属性类型不匹配（content 应为 string）----
-    {
-        Json tree;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["type"] = "Text";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        tree["props"]["content"] = 12345;  // 应为字符串
+    const auto errs = validate_ui_tree(tree);
+    AURORA_TEST_REQUIRE_FALSE(errs.empty());
+    AURORA_TEST_CHECK_TRUE(errs[0].message.find("nesting depth exceeded") != std::string::npos);
+    // 路径指向深层 children 链。
+    AURORA_TEST_CHECK_TRUE(errs[0].path.rfind("$.children", 0) == 0);
+}
 
-        const auto errors = validate_ui_tree(tree);
-        AURORA_TEST_CHECK(!errors.empty());
-        bool found = false;
-        for (const auto &e : errors) {
-            if (e.message.find("type mismatch") != std::string::npos) {
-                found = true;
-            }
-        }
-        AURORA_TEST_CHECK(found);
-    }
+AURORA_TEST_CASE(validation_error_json_shape) {
+    ValidationError e;
+    e.path = "$.props.text";
+    e.message = "boom";
+    e.suggestion = "";
+    auto j = e.to_json();
+    AURORA_TEST_CHECK_STREQ(j["path"].get<std::string>(), "$.props.text");
+    AURORA_TEST_CHECK_STREQ(j["message"].get<std::string>(), "boom");
+    // 空建议不落盘。
+    AURORA_TEST_CHECK_FALSE(j.contains("suggestion"));
+
+    e.suggestion = "fix it";
+    j = e.to_json();
+    AURORA_TEST_CHECK_STREQ(j["suggestion"].get<std::string>(), "fix it");
 }
 
 }  // namespace aurora::test_cases::utest_validate_ui

@@ -592,7 +592,7 @@ AURORA_TEST_CHECK(std::abs(snap["box"]["w"].get<float>() - 100.0F) < 0.001f);
 
 **验收标准：** 同一棵树在 Headless 与真实后端下产出相同的 Level 1 / Level 2 快照；`render_to_logical_snapshot` 返回的盒模型与布局协议（§2–§4）心算结果一致。
 
-**系统化 golden 套件：** `utest_golden_snapshots` 以 `render_to_logical_snapshot` 为基础建立跨布局的 Level 1+2 黄金文件比对：11 个固定尺寸场景（Column/Row/Stack/Grid/Scroll/嵌套容器、gap、padding、横/纵向 fill 分配）逐场景与 `tests/golden/logical_snapshots.json` 基准深度比对，盒模型逐字段漂移即红灯。场景全部使用 `px()` / `fill()` 等显式尺寸意图、不依赖字体度量，保证跨平台逐值一致。基准有意更新时设 `AURORA_UPDATE_GOLDEN=1` 重跑用例重写基准（见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) golden 环境变量）。
+**系统化 golden 套件：** `utest_offscreen` 以 `render_to_logical_snapshot` 为基础建立跨布局的 Level 1+2 黄金文件比对：11 个固定尺寸场景（Column/Row/Stack/Grid/Scroll/嵌套容器、gap、padding、横/纵向 fill 分配）逐场景与 `tests/golden/logical_snapshots.json` 基准深度比对，盒模型逐字段漂移即红灯。场景全部使用 `px()` / `fill()` 等显式尺寸意图、不依赖字体度量，保证跨平台逐值一致。基准有意更新时设 `AURORA_UPDATE_GOLDEN=1` 重跑用例重写基准（见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) golden 环境变量）。
 
 ### 10.2 #20 布局系统的代数一致性
 

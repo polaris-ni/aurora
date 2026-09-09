@@ -26,8 +26,11 @@ namespace aurora::preferences {
  * - 指定了文件位置 → 构造时加载该文件到内存；`set` 只更新内存与响应式 `State`，
  *   **不**自动写穿文件；落盘由 `flush()` **主动刷新**完成（业界主流的显式提交模型，
  *   对标 `SharedPreferences.edit().commit()` / `Settings.Save()`）。
- * - 内部复用现有响应式原语 `State<T>` / `Binding<T>`，已有 `Switch` / `TextInput` /
- *   `Slider` 等控件可直接绑定并自动落盘。**不新增任何 UI widget 类型**。
+ * - 内部复用现有响应式原语 `State<T>` / `Binding<T>`：`watch`/`binding` 是**存储 → State
+ *   的单向投递视图**——存储写入（`set`）自动推送到已订阅的 `State`/`Binding`，控件可经
+ *   `binding.get()` 读取；但 `binding.set()` 只更新下游 `State`（控件侧可见），**不写回
+ *   存储**，写回须调用 `set`。`binding.remove()` 触发注入的删除回调（墓碑语义）。
+ *   **不新增任何 UI widget 类型**。
  *
  * 并发安全（本次新增）：
  * - **线程安全**：实例内部以 `std::shared_mutex` 保护内存 JSON 与 State 注册表，

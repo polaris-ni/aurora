@@ -842,20 +842,28 @@ class SingleChild : public Widget {
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        child_.widget().paint(p, bounds, ctx);
+        if (child_) {
+            child_.widget().paint(p, bounds, ctx);
+        }
     }
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * override {
-        return child_.widget().hit_test(local, bounds, ctx);
+        return child_ ? child_.widget().hit_test(local, bounds, ctx) : nullptr;
     }
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
-        return child_.widget().hit_test_chain(local, bounds, ctx);
+        return child_ ? child_.widget().hit_test_chain(local, bounds, ctx) : std::vector<HitNode>{};
     }
-    auto on_mount(const BuildContext &ctx) -> void override { child_.widget().mount(ctx); }
+    auto on_mount(const BuildContext &ctx) -> void override {
+        if (child_) {
+            child_.widget().mount(ctx);
+        }
+    }
 
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Widget::tick_gestures(now);  // 本节点修饰链
-        child_.widget().tick(now);
+        if (child_) {
+            child_.widget().tick(now);
+        }
     }
 
   public:
@@ -866,10 +874,16 @@ class SingleChild : public Widget {
             // 派生类（如 ToastHost 的过期）可扩展自身每帧逻辑。
             tick_gestures(now);
         }
-        child_.widget().tick(now);
+        if (child_) {
+            child_.widget().tick(now);
+        }
     }
 
-    auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override { fn(child_.widget()); }
+    auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
+        if (child_) {
+            fn(child_.widget());
+        }
+    }
 
     /// @brief 单子节点视图（惰性重建缓存：child_ 变化时经 set_child 置失效，避免每次拷贝）。
     [[nodiscard]] auto child_nodes() const -> const std::vector<Node> & override {
@@ -884,8 +898,11 @@ class SingleChild : public Widget {
     }
 
     /// @brief 布局入口（AURORA_ENABLE_LAYOUT_CACHE）：为子节点登记布局父节点，再走基类布局。
+    /// 空子节点（默认构造的 SingleChild）为合法状态：跳过登记，基类 on_layout 由派生类自守。
     auto layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        child_.widget().set_layout_parent(this);
+        if (child_) {
+            child_.widget().set_layout_parent(this);
+        }
         return Widget::layout(c, ctx);
     }
 };

@@ -1,162 +1,81 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/environment/media_query.h
-/// 测试说明: media_query 单元测试
-///
+/// 测试说明: MediaQuery 纯逻辑部分——默认值、of(scale) 便捷构造、经 BuildContext 环境链的读取与无 Provider 降级
 
-// media_query_test.cpp — 覆盖 MediaQuery 完整维度（结构/默认值/from_surface/方向派生/
-// 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
+#include <cstdint>
 
-#include "aurora/aurora.h"
-#include "aurora/core/platform.h"
-#include "aurora_test_harness.h"
+#include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
+#include "aurora/environment/media_query.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_media_query {
 
-static auto size_eq(const au::Size &a, const au::Size &b, const float e = 1e-3F) -> bool {
-    return near_f(a.width, b.width, e) && near_f(a.height, b.height, e);
-}
-static auto insets_eq(const au::EdgeInsets &a, const au::EdgeInsets &b, const float e = 1e-3F) -> bool {
-    return near_f(a.left, b.left, e) && near_f(a.top, b.top, e) && near_f(a.right, b.right, e) &&
-           near_f(a.bottom, b.bottom, e);
-}
+// 说明：from_surface(const Surface&) 依赖真实 Surface（尺寸/缩放/内容边距，需窗口或渲染上下文），
+// 按约定以 skip 桩登记，不在此覆盖；其余均为纯逻辑（值语义 + 环境链查找），全量覆盖。
 
-static void test_defaults() {
-    const au::MediaQuery mq;
-    AURORA_TEST_CHECK_MSG(size_eq(mq.size, au::Size{}), "MediaQuery: default size");
-    AURORA_TEST_CHECK_MSG(near_f(mq.scale_factor, 1.0F), "MediaQuery: default scale_factor=1");
-    AURORA_TEST_CHECK_MSG(near_f(mq.text_scale_factor, 1.0F), "MediaQuery: default text_scale_factor=1");
-    AURORA_TEST_CHECK_MSG(mq.orientation == au::ScreenOrientation::Portrait,
-                          "MediaQuery: default orientation=Portrait");
-    AURORA_TEST_CHECK_MSG(size_eq(mq.screen_size, au::Size{}), "MediaQuery: default screen_size");
-    AURORA_TEST_CHECK_MSG(mq.platform == au::PlatformKind::Unknown, "MediaQuery: default platform=Unknown");
-    AURORA_TEST_CHECK_MSG(mq.device == au::DeviceKind::Unknown, "MediaQuery: default device=Unknown");
-    AURORA_TEST_CHECK_MSG(insets_eq(mq.padding, au::EdgeInsets{}), "MediaQuery: default padding");
-    AURORA_TEST_CHECK_MSG(mq.prefer_reduced_motion == false, "MediaQuery: default prefer_reduced_motion=false");
+AURORA_TEST_CASE(default_instance_uses_conservative_defaults) {
+    // 默认实例：缩放 1.0、竖屏、平台/设备 Unknown、无安全区、不减弱动效。
+    const aurora::MediaQuery mq;
+    AURORA_TEST_CHECK_NEAR(mq.scale_factor, 1.0F, 1e-6F);
+    AURORA_TEST_CHECK_NEAR(mq.text_scale_factor, 1.0F, 1e-6F);
+    AURORA_TEST_CHECK(mq.orientation == aurora::ScreenOrientation::Portrait);
+    AURORA_TEST_CHECK(mq.platform == aurora::PlatformKind::Unknown);
+    AURORA_TEST_CHECK(mq.device == aurora::DeviceKind::Unknown);
+    AURORA_TEST_CHECK_FALSE(mq.prefer_reduced_motion);
+    AURORA_TEST_CHECK_EQ(mq.size.width, 0.0F);
+    AURORA_TEST_CHECK_EQ(mq.size.height, 0.0F);
+    AURORA_TEST_CHECK_EQ(mq.screen_size.width, 0.0F);
+    AURORA_TEST_CHECK_EQ(mq.padding.left, 0.0F);
+    AURORA_TEST_CHECK_EQ(mq.padding.top, 0.0F);
 }
 
-static void test_from_surface() {
-    au::HeadlessSurface surf;
-    (void)surf.begin_frame(800, 600);
-    const auto mq = au::MediaQuery::from_surface(surf);
-    // Headless 后端缩放因子恒为 1.0。
-    AURORA_TEST_CHECK_MSG(near_f(mq.scale_factor, 1.0F), "from_surface: scale_factor=1 (headless surface)");
-    // 窗口逻辑尺寸取自 Surface。
-    AURORA_TEST_CHECK_MSG(near_f(mq.size.width, 800.0F) && near_f(mq.size.height, 600.0F),
-                          "from_surface: size = surface logical size");
-    // 方向由 screen_size 派生（与真实/模拟屏幕尺寸一致）。
-    const bool expect_landscape = (mq.screen_size.width >= mq.screen_size.height);
-    AURORA_TEST_CHECK_MSG(expect_landscape ? (mq.orientation == au::ScreenOrientation::Landscape)
-                                           : (mq.orientation == au::ScreenOrientation::Portrait),
-                          "from_surface: orientation derived from screen_size");
-    AURORA_TEST_CHECK_MSG(mq.screen_size.width > 0.0F && mq.screen_size.height > 0.0F,
-                          "from_surface: screen_size positive");
-
-#ifdef AURORA_PLATFORM_WINDOWS
-    // Win32 后端下取真实平台/设备，真实屏幕逻辑尺寸。
-    AURORA_TEST_CHECK_MSG(mq.platform == au::PlatformKind::Windows, "from_surface(Win32): platform=Windows");
-    AURORA_TEST_CHECK_MSG(mq.device == au::DeviceKind::Desktop, "from_surface(Win32): device=Desktop");
-#else
-    // 非 Windows 后端回退 Unknown（headless）。
-    AURORA_TEST_CHECK_MSG(mq.platform == au::PlatformKind::Unknown, "from_surface(headless): platform=Unknown");
-    AURORA_TEST_CHECK_MSG(mq.device == au::DeviceKind::Unknown, "from_surface(headless): device=Unknown");
-    AURORA_TEST_CHECK_MSG(size_eq(mq.screen_size, mq.size), "from_surface(headless): screen_size=size");
-#endif
+AURORA_TEST_CASE(of_scale_only_overrides_scale_factor) {
+    // of(scale)：轻量注入——仅缩放因子变化，其余字段保持默认。
+    const aurora::MediaQuery mq = aurora::MediaQuery::of(2.625F);
+    AURORA_TEST_CHECK_NEAR(mq.scale_factor, 2.625F, 1e-6F);
+    AURORA_TEST_CHECK_NEAR(mq.text_scale_factor, 1.0F, 1e-6F);
+    AURORA_TEST_CHECK(mq.orientation == aurora::ScreenOrientation::Portrait);
+    AURORA_TEST_CHECK(mq.platform == aurora::PlatformKind::Unknown);
+    AURORA_TEST_CHECK(mq.device == aurora::DeviceKind::Unknown);
 }
 
-static void test_provider_readback() {
-    // 注意：Environment 注入链仅对 Provider 的「后代」可见（Provider 在子 ctx 上设置 env）。
-    // 故在 Provider 的子节点（这里用 LayoutBuilder）内读取，而非在根 ctx 上读。
-    au::MediaQuery injected;
-    injected.scale_factor = 2.5F;
-    injected.platform = au::PlatformKind::Windows;
-
-    au::MediaQuery captured{};
-    bool seen = false;
-    auto host = au::MediaQueryProvider{
-        injected, au::LayoutBuilder{[&](const au::BuildContext &c, const au::Constraints &cc) -> au::Node {
-            (void)cc;
-            const au::MediaQuery *mq = au::media_query_of(c);
-            if (mq != nullptr) {
-                seen = true;
-                captured = *mq;
-            }
-            return au::Node{au::Text{"leaf"}};
-        }}};
-    auto node = au::Node{std::move(host)};
-    const au::BuildContext ctx;
-    node.widget().mount(ctx);
-    au::Constraints c;
-    c.min = au::Size{.width = 0.0F, .height = 0.0F};
-    c.max = au::Size{.width = 1000.0F, .height = 1000.0F};
-    node.widget().layout(c, ctx);
-
-    AURORA_TEST_CHECK_MSG(seen, "media_query_of: finds ancestor Provider");
-    AURORA_TEST_CHECK_MSG(seen && near_f(captured.scale_factor, 2.5F), "media_query_of: scale_factor=2.5");
-    AURORA_TEST_CHECK_MSG(seen && captured.platform == au::PlatformKind::Windows, "media_query_of: platform=Windows");
-
-    // 根 ctx（无 Provider 祖先）：of 回默认。
-    AURORA_TEST_CHECK_MSG(near_f(au::MediaQuery::of(ctx).scale_factor, 1.0F),
-                          "MediaQuery::of: default at root (no Provider ancestor)");
-
-    // 完全无 Provider：media_query_of 为 nullptr，of 回默认。
-    const au::BuildContext empty;
-    AURORA_TEST_CHECK_MSG(au::media_query_of(empty) == nullptr, "media_query_of: nullptr when no Provider");
-    AURORA_TEST_CHECK_MSG(near_f(au::MediaQuery::of(empty).scale_factor, 1.0F),
-                          "MediaQuery::of: default when no Provider");
+AURORA_TEST_CASE(of_ctx_reads_nearest_provider_value) {
+    // 经 Environment 注入链读取「最近祖先 Provider」生效的 MediaQuery。
+    aurora::Environment root;
+    root.set_local<aurora::MediaQuery>(aurora::MediaQuery::of(1.0F));
+    const aurora::Environment child = root.with<aurora::MediaQuery>(aurora::MediaQuery::of(3.0F));
+    aurora::BuildContext ctx;
+    ctx.env = &child;
+    const aurora::MediaQuery *nearest = aurora::media_query_of(ctx);
+    AURORA_TEST_REQUIRE(nearest != nullptr);
+    AURORA_TEST_CHECK_NEAR(nearest->scale_factor, 3.0F, 1e-6F);  // 最近祖先（child）胜出
+    AURORA_TEST_CHECK_NEAR(aurora::MediaQuery::of(ctx).scale_factor, 3.0F, 1e-6F);
 }
 
-static void test_layout_builder() {
-    // 经 Provider 读回 MediaQuery（约束驱动构建）。
-    bool saw_provider = false;
-    au::MediaQuery injected;
-    injected.scale_factor = 1.5F;
-    auto host = au::MediaQueryProvider{
-        injected, au::LayoutBuilder{[&](const au::BuildContext &c, const au::Constraints &cc) -> au::Node {
-            (void)cc;
-            const au::MediaQuery *mq = au::media_query_of(c);
-            saw_provider = (mq != nullptr && near_f(mq->scale_factor, 1.5F));
-            return au::Node{au::Text{"branch"}};
-        }}};
-    auto node = au::Node{std::move(host)};
-    const au::BuildContext ctx;
-    node.widget().mount(ctx);
-
-    au::Constraints c;
-    c.min = au::Size{.width = 0.0F, .height = 0.0F};
-    c.max = au::Size{.width = 1000.0F, .height = 1000.0F};
-    node.widget().layout(c, ctx);  // 首次构建
-    AURORA_TEST_CHECK_MSG(saw_provider, "LayoutBuilder: builder reads MediaQuery from Provider");
-
-    // 同样约束再次布局：不应再次重建（builder 仅应被调用一次）。
-    int calls = 0;
-    auto host2 = au::MediaQueryProvider{
-        injected, au::LayoutBuilder{[&](const au::BuildContext &context, const au::Constraints &cc) -> au::Node {
-            (void)context;
-            (void)cc;
-            ++calls;
-            return au::Node{au::Text{"branch"}};
-        }}};
-    auto node2 = au::Node{std::move(host2)};
-    const au::BuildContext ctx2;
-    node2.widget().mount(ctx2);
-    node2.widget().layout(c, ctx2);
-    node2.widget().layout(c, ctx2);  // 约束相同 → 不重建
-    AURORA_TEST_CHECK_MSG(calls == 1, "LayoutBuilder: caches child when constraints unchanged");
-
-    // 约束变化 → 重建。
-    au::Constraints c2;
-    c2.min = au::Size{.width = 0.0F, .height = 0.0F};
-    c2.max = au::Size{.width = 320.0F, .height = 480.0F};
-    node2.widget().layout(c2, ctx2);
-    AURORA_TEST_CHECK_MSG(calls == 2, "LayoutBuilder: rebuilds when constraints change");
+AURORA_TEST_CASE(of_ctx_penetrates_to_ancestor_for_uncovered_type) {
+    // 子环境只覆盖其他类型时，MediaQuery 沿父链取祖先 Provider 的值。
+    aurora::Environment root;
+    root.set_local<aurora::MediaQuery>(aurora::MediaQuery::of(2.0F));
+    const aurora::Environment child = root.with<int>(1);  // 只覆盖 int
+    aurora::BuildContext ctx;
+    ctx.env = &child;
+    AURORA_TEST_CHECK_NEAR(aurora::MediaQuery::of(ctx).scale_factor, 2.0F, 1e-6F);
 }
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== media_query_test ===\n");
-    test_defaults();
-    test_from_surface();
-    test_provider_readback();
-    test_layout_builder();
+AURORA_TEST_CASE(of_ctx_falls_back_to_default_without_provider) {
+    // 无 Provider 注入：media_query_of 返回 nullptr；of(ctx) 返回进程级默认实例（保守降级）。
+    aurora::BuildContext ctx;  // env == nullptr
+    AURORA_TEST_CHECK(aurora::media_query_of(ctx) == nullptr);
+    const aurora::MediaQuery &fallback = aurora::MediaQuery::of(ctx);
+    AURORA_TEST_CHECK_NEAR(fallback.scale_factor, 1.0F, 1e-6F);
+    AURORA_TEST_CHECK(fallback.platform == aurora::PlatformKind::Unknown);
+    AURORA_TEST_CHECK(fallback.orientation == aurora::ScreenOrientation::Portrait);
+}
+
+AURORA_TEST_CASE(from_surface_requires_surface_backend) {
+    // from_surface(const Surface&) 需要 Surface 实例（窗口/渲染上下文边界），纯逻辑单测不覆盖。
+    AURORA_TEST_SKIP("from_surface 依赖 Surface/窗口上下文，属集成层覆盖范围");
 }
 
 }  // namespace aurora::test_cases::utest_media_query

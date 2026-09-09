@@ -1,180 +1,174 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/switch.h
-/// 测试说明: switch 单元测试
-///
+/// 测试说明: 覆盖 Switch——默认态、set_value 触发 on_changed、Press/Release 合成点击翻转、
+/// 禁用态忽略点击、Binding 双向写穿、轨道尺寸布局（含非法值回退默认）、自描述、序列化往返
 
-#include <cstdio>
-#include <memory>
-#include <nlohmann/json.hpp>
 #include <string>
+#include <vector>
 
-#include "aurora/aurora.h"
-#include "aurora/core/log.h"
-#include "aurora/widget/serialization.h"
+#include "aurora/event/event.h"
+#include "aurora/layout/layout_engine.h"
+#include "aurora/state/state.h"
 #include "aurora/widget/switch.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_switch {
 
-namespace serialization = aurora::serialization;
+namespace {
 
-using Json = nlohmann::json;
-
-static auto make_press(float x, const float y) -> MouseEvent {
-    MouseEvent e;
-    e.action = MouseAction::Press;
-    e.position = Point{.x = x, .y = y};
-    return e;
-}
-static auto make_release(float x, const float y) -> MouseEvent {
-    MouseEvent e;
-    e.action = MouseAction::Release;
-    e.position = Point{.x = x, .y = y};
-    return e;
-}
-static void fire(Widget &w, MouseEvent e) {
-    e.local_position = e.position;
-    w.on_pointer_event(e);
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
-template <typename W>
-static auto roundtrip(const Json &props, const std::string &type) -> std::shared_ptr<W> {
-    auto back = serialization::from_json(props);
-    AURORA_TEST_CHECK_MSG(back.ok(), type + ": from_json succeeded");
-    if (!back.ok()) {
-        return nullptr;
-    }
-    auto w = std::static_pointer_cast<W>(back.value());
-    AURORA_TEST_CHECK_MSG(w->type_name() == type, type + ": type_name matches");
-    return w;
+}  // namespace
+
+AURORA_TEST_CASE(switch_defaults_and_type_name) {
+    const Switch s;
+    AURORA_TEST_CHECK_EQ(std::string{s.type_name()}, "Switch");
+    AURORA_TEST_CHECK_FALSE(s.value());
+    AURORA_TEST_CHECK_TRUE(s.enabled());
 }
 
-static void test_props() {
+AURORA_TEST_CASE(switch_set_value_fires_on_changed) {
+    std::vector<bool> seen;
     Switch s;
-    s.set_active_color(Color::red()).set_inactive_color(Color::blue()).set_thumb_color(Color::green());
-    Json j;
-    s.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["active_color"][0].get<int>() == 255, "switch active=red");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["inactive_color"][2].get<int>() == 255, "switch inactive=blue");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["thumb_color"][1].get<int>() == Color::green().g, "switch thumb=green");
+    s.set_on_changed([&seen](bool v) { seen.push_back(v); });
 
-    Switch t;
-    t.deserialize_props(j);
-    Json k;
-    t.serialize_props(k);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(k["inactive_color"][2].get<int>() == 255, "switch rt inactive");
+    s.set_value(true);
+    AURORA_TEST_CHECK_TRUE(s.value());
+    AURORA_TEST_REQUIRE_EQ(seen.size(), 1U);
+    AURORA_TEST_CHECK_TRUE(seen[0]);
+
+    s.set_value(false);
+    AURORA_TEST_CHECK_FALSE(s.value());
+    AURORA_TEST_REQUIRE_EQ(seen.size(), 2U);
+    AURORA_TEST_CHECK_FALSE(seen[1]);
 }
 
-static void test_interaction() {
-    Switch sw{Reactive{false}};
-    AURORA_TEST_CHECK_MSG(sw.value() == false, "Switch: initial false");
-    sw.set_value(true);
-    AURORA_TEST_CHECK_MSG(sw.value() == true, "Switch: set_value true");
+AURORA_TEST_CASE(switch_pointer_press_release_toggles) {
+    std::vector<bool> seen;
+    Switch s;
+    s.set_on_changed([&seen](bool v) { seen.push_back(v); });
 
-    Switch sw2{Reactive{false}};
-    fire(sw2, make_press(20, 12));
-    fire(sw2, make_release(20, 12));
-    AURORA_TEST_CHECK_MSG(sw2.value() == true, "Switch: press+release toggles");
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    s.on_pointer_event(press);
+    AURORA_TEST_CHECK_TRUE(press.is_handled);
+    AURORA_TEST_CHECK_FALSE(s.value());  // 按下不翻转
 
-    bool changed = false;
-    Switch sw3{Reactive{true}, [&](bool v) -> void { changed = v; }};
-    fire(sw3, make_press(20, 12));
-    fire(sw3, make_release(20, 12));
-    AURORA_TEST_CHECK_MSG(changed == false, "Switch: onChanged fired with false");
+    MouseEvent release;
+    release.action = MouseAction::Release;
+    s.on_pointer_event(release);
+    AURORA_TEST_CHECK_TRUE(release.is_handled);
+    AURORA_TEST_CHECK_TRUE(s.value());
+    AURORA_TEST_REQUIRE_EQ(seen.size(), 1U);
+    AURORA_TEST_CHECK_TRUE(seen[0]);
 
-    State s{true};
-    Switch sw4{Binding{s}};
-    sw4.set_value(false);
-    AURORA_TEST_CHECK_MSG(s.get() == false, "Switch: Binding write-through");
+    // 再翻转一次回 off。
+    MouseEvent press2;
+    press2.action = MouseAction::Press;
+    s.on_pointer_event(press2);
+    MouseEvent release2;
+    release2.action = MouseAction::Release;
+    s.on_pointer_event(release2);
+    AURORA_TEST_CHECK_FALSE(s.value());
+    AURORA_TEST_REQUIRE_EQ(seen.size(), 2U);
+    AURORA_TEST_CHECK_FALSE(seen[1]);
 }
 
-static void test_roundtrip() {
-    const auto schema = describe_component("Switch");
-    AURORA_TEST_CHECK_MSG(!schema.empty(), "describe_component(Switch) non-empty");
+AURORA_TEST_CASE(switch_disabled_ignores_clicks) {
+    int calls = 0;
+    Switch s;
+    s.set_on_changed([&calls](bool) { ++calls; });
+    s.set_enabled(false);
+    AURORA_TEST_CHECK_FALSE(s.enabled());
 
-    const auto w = std::make_shared<Switch>();
-    w->set_value(true);
-    Json j = serialization::to_json(*w);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["props"].contains("checked") && j["props"]["checked"].get<bool>() == true,
-                          "Switch serialization checked");
-    const auto back = roundtrip<Switch>(j, "Switch");
-    AURORA_TEST_CHECK_MSG(back && back->value() == true, "Switch roundtrip preserves checked");
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    s.on_pointer_event(press);
+    AURORA_TEST_CHECK_TRUE(press.is_handled);
+
+    MouseEvent release;
+    release.action = MouseAction::Release;
+    s.on_pointer_event(release);
+    AURORA_TEST_CHECK_FALSE(s.value());
+    AURORA_TEST_CHECK_EQ(calls, 0);
 }
 
-static void test_modern_props() {
-    // 禁用态：点击不切换
-    Switch sw{Reactive{false}};
-    sw.set_enabled(false);
-    fire(sw, make_press(20, 12));
-    fire(sw, make_release(20, 12));
-    AURORA_TEST_CHECK_MSG(sw.value() == false, "Switch: disabled ignores click");
-    sw.set_enabled(true);
-    fire(sw, make_press(20, 12));
-    fire(sw, make_release(20, 12));
-    AURORA_TEST_CHECK_MSG(sw.value() == true, "Switch: re-enabled restores toggle");
+AURORA_TEST_CASE(switch_binding_writes_through_to_upstream) {
+    State<bool> up{true};
+    Switch s{Binding<bool>(up)};
+    AURORA_TEST_CHECK_TRUE(s.value());
 
-    // active_color 未设置不序列化（跟随主题 primary）
-    const Switch s0;
-    Json j0;
-    s0.serialize_props(j0);
-    AURORA_TEST_CHECK_MSG(!j0.contains("active_color"), "Switch: unset active_color not serialized (follows theme)");
+    s.set_value(false);
+    AURORA_TEST_CHECK_FALSE(up.get());  // 控件 → 上游
 
-    // 新属性往返：轨道尺寸/滑块边距/描边/禁用
-    Switch s1;
-    s1.set_track_size(52.0F, 30.0F).set_thumb_inset(3.0F).set_border(Color::red(), 2.0F).set_enabled(false);
-    Json j;
-    s1.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_d(j["track_width"].get<double>(), 52.0), "Switch: track_width serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_d(j["track_height"].get<double>(), 30.0), "Switch: track_height serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_d(j["thumb_inset"].get<double>(), 3.0), "Switch: thumb_inset serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["border_color"][0].get<int>() == 255 && near_d(j["border_width"].get<double>(), 2.0),
-                          "Switch: border serialization");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["enabled"].get<bool>() == false, "Switch: enabled serialization");
+    up.set(true);
+    AURORA_TEST_CHECK_TRUE(s.value());  // 上游 → 控件（读取穿透）
 
-    Switch s2;
-    s2.deserialize_props(j);
-    Json k;
-    s2.serialize_props(k);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_d(k["track_width"].get<double>(), 52.0), "Switch: track_width roundtrip");
-    AURORA_TEST_CHECK_MSG(s2.enabled() == false, "Switch: enabled roundtrip");
-
-    // 布局尺寸随 track_size 变化
-    const BuildContext ctx;
-    Switch s3;
-    s3.set_track_size(60.0F, 32.0F);
-    const Size sz =
-        s3.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 500, .height = 500}}, ctx);
-    AURORA_TEST_CHECK_MSG(near_d(sz.width, 60.0) && near_d(sz.height, 32.0), "Switch: layout follows track_size");
+    // 信号收集：内部 value_ + 绑定目标。
+    std::vector<SignalViewBase *> out;
+    s.collect_signals(out);
+    AURORA_TEST_REQUIRE_EQ(out.size(), 2U);
 }
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== test_switch ===\n");
-    test_props();
-    test_interaction();
-    test_roundtrip();
-    test_modern_props();
+AURORA_TEST_CASE(switch_layout_uses_track_size) {
+    Switch s;
+    LayoutEngine::layout(s, bounded(200.0F, 100.0F));
+    AURORA_TEST_CHECK_NEAR(s.size().width, 44.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(s.size().height, 24.0F, 1e-4F);
+
+    s.set_track_size(60.0F, 30.0F);
+    LayoutEngine::layout(s, bounded(200.0F, 100.0F));
+    AURORA_TEST_CHECK_NEAR(s.size().width, 60.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(s.size().height, 30.0F, 1e-4F);
+
+    // 非法（<=0）尺寸回退默认轨道尺寸。
+    s.set_track_size(0.0F, 0.0F);
+    LayoutEngine::layout(s, bounded(200.0F, 100.0F));
+    AURORA_TEST_CHECK_NEAR(s.size().width, 44.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(s.size().height, 24.0F, 1e-4F);
+
+    // 约束不足时钳制。
+    s.set_track_size(60.0F, 30.0F);
+    LayoutEngine::layout(s, bounded(50.0F, 20.0F));
+    AURORA_TEST_CHECK_NEAR(s.size().width, 50.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(s.size().height, 20.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(switch_describe_reports_metadata) {
+    const auto d = Switch::describe_static();
+    AURORA_TEST_CHECK_EQ(std::string{d.name}, "Switch");
+    AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
+    AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
+    AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_changed");
+    bool has_checked = false;
+    for (const auto &p : d.properties) {
+        if (std::string{p.name} == "checked") {
+            has_checked = true;
+        }
+    }
+    AURORA_TEST_CHECK_TRUE(has_checked);
+}
+
+AURORA_TEST_CASE(switch_serialize_deserialize_roundtrip) {
+    Switch src;
+    src.set_value(true);
+    src.set_track_size(56.0F, 28.0F);
+    src.set_enabled(false);
+
+    Json props;
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["checked"].get<bool>(), true);
+    AURORA_TEST_CHECK_EQ(props["enabled"].get<bool>(), false);
+
+    Switch dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_TRUE(dst.value());
+    AURORA_TEST_CHECK_FALSE(dst.enabled());
+    LayoutEngine::layout(dst, bounded(200.0F, 100.0F));
+    AURORA_TEST_CHECK_NEAR(dst.size().width, 56.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(dst.size().height, 28.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_switch

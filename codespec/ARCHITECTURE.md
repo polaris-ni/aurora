@@ -432,7 +432,7 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 
 ### 14.2 分层
 
-**单元测试（`tests/unit/utest_*.cpp`）**：每个公共源文件对应一个 `utest_*.cpp`（与 `examples/demos/demo_*.cpp` 同构：1 源文件 ↔ 1 测试 ↔ 1 demo）；跨控件 / 端到端集成用例放 `tests/integration/itest_*.cpp`。经 `cmake/AuroraTests.cmake` 收集（`file(GLOB CONFIGURE_DEPENDS)`），**全部用例链入单一可执行 `aurora_test_runner`**：用例用 `AURORA_TEST()` 宏静态自注册（用例名 = 文件名 stem），`main()` 由 `tests/aurora_test_main.cpp` 唯一提供。CTest 逐条以 `aurora_test_runner --run=<stem>` 注册（进程隔离），并由 `registry_integrity` 守护漏注册。
+**单元测试（`tests/unit/utest_*.cpp`）**：每个公共源文件对应一个 `utest_*.cpp`（与 `examples/demos/demo_*.cpp` 同构：1 源文件 ↔ 1 测试 ↔ 1 demo）；跨控件 / 端到端集成用例放 `tests/integration/itest_*.cpp`。经 `cmake/AuroraTests.cmake` 收集（`file(GLOB CONFIGURE_DEPENDS)`），**全部用例链入单一可执行 `aurora_test_runner`**：用例用 `AURORA_TEST_CASE(<Case>)` 宏静态自注册（全名 = `<文件 stem>.<Case>`），`main()` 由 `tests/framework/test_main.cpp` 唯一提供。CTest 逐条以 `aurora_test_runner --run=<stem>` 注册（进程隔离），并由 `registry_integrity` 按用例级清单守护漏注册。
 
 **Golden 测试（渲染像素级）**：以 `utest_offscreen` 为主，把 widget 树渲染到 `HeadlessSurface` 内存缓冲，与 golden 基准图逐像素比对。依赖相对路径，须从**仓库根**运行（`ctest` 已为其把 CWD 设为仓库根），可用 `AURORA_GOLDEN_DIR` 覆盖解析基准。
 
@@ -441,7 +441,7 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 ### 14.3 组织约定
 
 - **命名**：测试文件以 `utest`（单元，`tests/unit/`）/ `itest`（集成，`tests/integration/`）为**前缀**（非 `_test` 后缀），与源文件同名主体；每个测试 TU 包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`）内。
-- **运行**：`ctest -R <名>` 逐条拉起 `aurora_test_runner --run=<stem>`；从仓库根运行以保证相对路径解析；本地复跑以最高并行度执行（`ctest -j` 配满核心）。共享资源竞争用例（剪贴板、计时）以 `RUN_SERIAL` 单独隔离错峰，而非把整套退回串行。
+- **运行**：`ctest -R <名>` 逐条拉起 `aurora_test_runner --run=<stem>`；从仓库根运行以保证相对路径解析；本地复跑以最高并行度执行（`ctest -j` 配满核心）。并行模型为「CTest 进程隔离 + 框架用例边界资源虚拟化」（tmpdir / cwd / 单例 / 剪贴板注入，见 `tests/framework/isolation.h`），不使用 `RUN_SERIAL` 串行白名单。
 - **新增约束**：新增公共 API / widget / 核心逻辑须配套单测并接入 CTest。
 
 ### 14.4 CI 执行层

@@ -111,16 +111,16 @@ class expected {
     [[nodiscard]] auto has_value() const noexcept -> bool { return has_value_; }
 
     [[nodiscard]] auto value() const & -> const T & {
-        AURORA_ASSERT(has_value_, "expected::value() called on error state");
+        AURORA_CHECK(has_value_, "expected::value() called on error state");  // 错误态继续取值 = UB，常开拦截
         return value_;
     }
     [[nodiscard]] T &value() & {
-        AURORA_ASSERT(has_value_, "expected::value() called on error state");
+        AURORA_CHECK(has_value_, "expected::value() called on error state");  // 错误态继续取值 = UB，常开拦截
         return value_;
     }
 
     [[nodiscard]] auto error() const & -> const E & {
-        AURORA_ASSERT(!has_value_, "expected::error() called on value state");
+        AURORA_CHECK(!has_value_, "expected::error() called on value state");  // 值态继续取错误 = UB，常开拦截
         return error_;
     }
 

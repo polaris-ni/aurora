@@ -19,7 +19,7 @@ namespace aurora {
  * 离开作用域自动取消，避免重复触发与内存泄漏（#9 调试闭环的基石）。
  *
  * @code
- *   auto sub = au::bind(counter, [](int v){ label->set_text(std::to_string(v)); });
+ *   auto sub = au::connect(counter, [](int v){ label->set_text(std::to_string(v)); });
  *   // sub 离开作用域 → 自动取消订阅
  * @endcode
  *
@@ -83,16 +83,20 @@ class Subscription {
  *
  * @code
  *   au::State<int> count{0};
- *   auto sub = au::bind(count, [](int v){ label->set_text(std::to_string(v)); });
+ *   auto sub = au::connect(count, [](int v){ label->set_text(std::to_string(v)); });
  *   count.set(1); // → label 文本更新为 "1"
  * @endcode
  *
  * @note Thread: main-thread only
  * @note Rebuildable: no
+ * @note 命名警示：本函数原名 `bind`，因 `State` 基类链上的
+ *       `std::enable_shared_from_this` 使 `std` 进入实参的 ADL 关联命名空间集，
+ *       无限定调用会被变参转发的 `std::bind` 吸走（编译通过但回调永不执行），
+ *       故改名 `connect` 以根除歧义（详见 CHANGELOG 1.0.0-alpha.1）。
  */
 template <typename T, typename F>
     requires std::invocable<F, const T &>
-auto bind(SignalView<T> &src, F &&fn) -> Subscription {
+auto connect(SignalView<T> &src, F &&fn) -> Subscription {
     auto eff = std::make_shared<Effect>([&src, f = std::forward<F>(fn)]() -> auto { f(src.get()); });
     eff->run();  // 首次应用当前值并登记依赖
     // 取消句柄持有 eff 使其存活至 dispose；dispose 会从 src 观察者列表摘除本 Effect。
@@ -105,6 +109,9 @@ auto bind(SignalView<T> &src, F &&fn) -> Subscription {
  * 每当 `store.dispatch(action)` 产生新状态即调用 `fn(新状态)`。底层复用
  * `Store::subscribe` 的惰性取消句柄，析构自动取消。
  *
+ * 与 `connect(SignalView&, F)` 不同：**不**立即应用当前状态，仅对后续 dispatch 回调
+ * （如需首帧同步，请在 connect 后手动调用一次 `fn(store.state())`）。
+ *
  * @tparam S 状态类型。
  * @tparam F 可调用 `(const S&) -> void`。
  *
@@ -113,7 +120,7 @@ auto bind(SignalView<T> &src, F &&fn) -> Subscription {
  */
 template <typename S, typename F>
     requires std::invocable<F, const S &>
-auto bind(Store<S> &store, F &&fn) -> Subscription {
+auto connect(Store<S> &store, F &&fn) -> Subscription {
     auto cancel = store.subscribe([f = std::forward<F>(fn)](const S &next, const S &) -> auto { f(next); });
     return Subscription(std::move(cancel));
 }

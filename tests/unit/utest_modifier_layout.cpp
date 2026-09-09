@@ -1,126 +1,156 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/modifier/modifier_layout.h
-/// 测试说明: 布局修饰节点（Padding / PaddingEdges / FlexWeight / SizeModifier）单元测试
-
-#include <functional>
+/// 测试说明: 覆盖 Layout 切片四节点——Padding 收缩约束并加回尺寸、PaddingEdges 非对称内边距与
+/// 负值降级、FlexWeight 透明透传与权重上报、SizeModifier 固定/填充尺寸的夹取与回填
 
 #include "aurora/modifier/modifier_layout.h"
-#include "aurora_test_harness.h"
+
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_modifier_layout {
 
 namespace {
 
-using au::Constraints;
-using au::EdgeInsets;
-using au::FlexWeight;
-using au::ModifierNode;
-using au::Padding;
-using au::PaddingEdges;
-using au::Size;
-using au::SizeModifier;
+/// 记录收到的约束并返回固定尺寸的子测量回调。
+struct FixedChild {
+    float w = 0.0F;
+    float h = 0.0F;
+    std::optional<Constraints> seen;
 
-/// 子节点按紧约束（min）测量，便于观察父节点对约束的改写。
-auto measure_tight() -> std::function<Size(const Constraints &)> {
-    return [](const Constraints &inner) -> Size { return inner.min; };
-}
+    auto make_fn() -> std::function<Size(const Constraints &)> {
+        return [this](const Constraints &c) {
+            seen = c;
+            return Size{.width = w, .height = h};
+        };
+    }
+};
 
-auto measure_fixed(const Size &s) -> std::function<Size(const Constraints &)> {
-    return [s](const Constraints & /*inner*/) -> Size { return s; };
+auto inner_constraints(float min_w, float min_h, float max_w, float max_h) -> Constraints {
+    return Constraints{.min = Size{.width = min_w, .height = min_h}, .max = Size{.width = max_w, .height = max_h}};
 }
 
 }  // namespace
 
-AURORA_TEST() {
-    // ---- 1. Padding 收缩约束并加回内边距 ----
-    {
-        const Padding p{8.0F};
-        AURORA_TEST_CHECK(p.kind() == ModifierNode::Kind::Layout);
-        AURORA_TEST_CHECK(p.padding() == 8.0F);
+AURORA_TEST_CASE(padding_clamps_negative_to_zero) {
+    // 负内边距降级为 0（Diagnostics::degraded 记录后钳制）。
+    const Padding p(-5.0F);
+    AURORA_TEST_CHECK_NEAR(p.padding(), 0.0F, 0.0F);
+    const Padding ok(8.0F);
+    AURORA_TEST_CHECK_NEAR(ok.padding(), 8.0F, 0.0F);
+}
 
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 200.0F}};
-        // 子节点吃掉收缩后的可用空间（84 x 184），父节点再加回 16
-        const Size s = p.layout(c, [](const Constraints &inner) -> Size { return inner.max; });
-        AURORA_TEST_CHECK(s.width == 100.0F);
-        AURORA_TEST_CHECK(s.height == 200.0F);
-    }
+AURORA_TEST_CASE(padding_shrinks_constraints_and_adds_back) {
+    // 子约束四周各收缩 pad；测量结果加回 2*pad。
+    const Padding p(10.0F);
+    FixedChild child{.w = 50.0F, .h = 30.0F};
+    const Size s = p.layout(inner_constraints(100.0F, 80.0F, 200.0F, 160.0F), child.make_fn());
 
-    // ---- 2. Padding 负值降级为 0 ----
-    {
-        const Padding p{-4.0F};
-        AURORA_TEST_CHECK(p.padding() == 0.0F);
-    }
+    AURORA_TEST_REQUIRE(child.seen.has_value());
+    AURORA_TEST_CHECK_NEAR(child.seen->min.width, 80.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen->min.height, 60.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen->max.width, 180.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen->max.height, 140.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.width, 70.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 50.0F, 0.0F);
+}
 
-    // ---- 3. PaddingEdges 按轴独立收缩 ----
-    {
-        const PaddingEdges p{EdgeInsets{.left = 1.0F, .top = 2.0F, .right = 3.0F, .bottom = 4.0F}};
-        AURORA_TEST_CHECK(p.insets().horizontal() == 4.0F);
-        AURORA_TEST_CHECK(p.insets().vertical() == 6.0F);
+AURORA_TEST_CASE(padding_floor_at_zero_when_constraint_smaller) {
+    // 约束小于 2*pad 时子约束钳到 0（不出现负约束）。
+    const Padding p(10.0F);
+    FixedChild child{.w = 5.0F, .h = 5.0F};
+    const Size s = p.layout(inner_constraints(0.0F, 0.0F, 10.0F, 8.0F), child.make_fn());
+    AURORA_TEST_REQUIRE(child.seen.has_value());
+    AURORA_TEST_CHECK_NEAR(child.seen->max.width, 0.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen->max.height, 0.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.width, 25.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 25.0F, 0.0F);
+}
 
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 50.0F, .height = 60.0F}};
-        float seen_w = 0.0F;
-        float seen_h = 0.0F;
-        const Size s = p.layout(c, [&](const Constraints &inner) -> Size {
-            seen_w = inner.max.width;
-            seen_h = inner.max.height;
-            return inner.max;
-        });
-        AURORA_TEST_CHECK(seen_w == 46.0F);  // 50 - (1+3)
-        AURORA_TEST_CHECK(seen_h == 54.0F);  // 60 - (2+4)
-        AURORA_TEST_CHECK(s.width == 50.0F);
-        AURORA_TEST_CHECK(s.height == 60.0F);
-    }
+AURORA_TEST_CASE(padding_edges_clamps_negative_components) {
+    EdgeInsets ins{.left = -1.0F, .top = 2.0F, .right = 3.0F, .bottom = -4.0F};
+    const PaddingEdges pe(ins);
+    const EdgeInsets got = pe.insets();
+    AURORA_TEST_CHECK_NEAR(got.left, 0.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(got.top, 2.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(got.right, 3.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(got.bottom, 0.0F, 0.0F);
+}
 
-    // ---- 4. PaddingEdges 任一负值降级为 0 ----
-    {
-        const PaddingEdges p{EdgeInsets{.left = 5.0F, .top = -1.0F, .right = 2.0F, .bottom = 0.0F}};
-        AURORA_TEST_CHECK(p.insets().top == 0.0F);
-        AURORA_TEST_CHECK(p.insets().left == 5.0F);
-        AURORA_TEST_CHECK(p.insets().vertical() == 0.0F);
-    }
+AURORA_TEST_CASE(padding_edges_asymmetric_layout) {
+    // left+right=3、top+bottom=7：子约束水平收缩 3、垂直收缩 7，结果加回对应轴。
+    const PaddingEdges pe(EdgeInsets{.left = 1.0F, .top = 2.0F, .right = 2.0F, .bottom = 5.0F});
+    FixedChild child{.w = 40.0F, .h = 30.0F};
+    const Size s = pe.layout(inner_constraints(50.0F, 50.0F, 100.0F, 100.0F), child.make_fn());
+    AURORA_TEST_REQUIRE(child.seen.has_value());
+    AURORA_TEST_CHECK_NEAR(child.seen->max.width, 97.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen->max.height, 93.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.width, 43.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 37.0F, 0.0F);
+}
 
-    // ---- 5. FlexWeight 透传尺寸但暴露权重 ----
-    {
-        const FlexWeight f{2.0F};
-        AURORA_TEST_CHECK(f.flex_weight() == 2.0F);
+AURORA_TEST_CASE(flex_weight_reports_weight_and_passthrough) {
+    const FlexWeight fw(2.5F);
+    AURORA_TEST_CHECK_NEAR(fw.flex_weight(), 2.5F, 0.0F);
+    AURORA_TEST_CHECK_EQ(fw.kind(), ModifierNode::Kind::Layout);
+    // 自身不改尺寸：约束透传、结果透传。
+    FixedChild child{.w = 60.0F, .h = 20.0F};
+    const Size s = fw.layout(inner_constraints(0.0F, 0.0F, 100.0F, 100.0F), child.make_fn());
+    AURORA_TEST_REQUIRE(child.seen.has_value());
+    AURORA_TEST_CHECK_NEAR(child.seen->max.width, 100.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.width, 60.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 20.0F, 0.0F);
+}
 
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 300.0F, .height = 100.0F}};
-        const Size s = f.layout(c, measure_fixed(Size{.width = 42.0F, .height = 24.0F}));
-        AURORA_TEST_CHECK(s.width == 42.0F);  // 不改变子节点尺寸
-        AURORA_TEST_CHECK(s.height == 24.0F);
-    }
+AURORA_TEST_CASE(size_modifier_fixed_width_and_height) {
+    SizeModifier sm;
+    sm.set_width(80.0F);
+    sm.set_height(30.0F);
+    FixedChild child{.w = 10.0F, .h = 10.0F};
+    const Size s = sm.layout(inner_constraints(0.0F, 0.0F, 200.0F, 200.0F), child.make_fn());
+    // 子约束被夹成 [v, v]；结果回填固定值（不受子测量影响）。
+    AURORA_TEST_REQUIRE(child.seen.has_value());
+    AURORA_TEST_CHECK_NEAR(child.seen->min.width, 80.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen->max.width, 80.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen->min.height, 30.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen->max.height, 30.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.width, 80.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 30.0F, 0.0F);
+}
 
-    // ---- 6. SizeModifier 固定宽高 ----
-    {
-        SizeModifier m;
-        m.set_width(50.0F);
-        m.set_height(30.0F);
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 100.0F}};
-        const Size s = m.layout(c, measure_tight());
-        AURORA_TEST_CHECK(s.width == 50.0F);
-        AURORA_TEST_CHECK(s.height == 30.0F);
-    }
+AURORA_TEST_CASE(size_modifier_fill_uses_parent_max) {
+    SizeModifier sm;
+    sm.set_fill_w(true);
+    sm.set_fill_h(true);
+    FixedChild child{.w = 10.0F, .h = 10.0F};
+    const Size s = sm.layout(inner_constraints(0.0F, 0.0F, 150.0F, 90.0F), child.make_fn());
+    AURORA_TEST_REQUIRE(child.seen.has_value());
+    AURORA_TEST_CHECK_NEAR(child.seen->min.width, 150.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen->min.height, 90.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.width, 150.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 90.0F, 0.0F);
+}
 
-    // ---- 7. SizeModifier fill 取约束上限，优先于固定尺寸 ----
-    {
-        SizeModifier m;
-        m.set_width(50.0F);  // 应被 fill 覆盖
-        m.set_fill_w(true);
-        m.set_fill_h(true);
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 320.0F, .height = 240.0F}};
-        const Size s = m.layout(c, measure_tight());
-        AURORA_TEST_CHECK(s.width == 320.0F);
-        AURORA_TEST_CHECK(s.height == 240.0F);
-    }
+AURORA_TEST_CASE(size_modifier_unconstrained_axes_passthrough) {
+    // 未设置的轴（-1）沿用父约束与子测量结果。
+    SizeModifier sm;
+    sm.set_width(70.0F);
+    FixedChild child{.w = 25.0F, .h = 35.0F};
+    const Size s = sm.layout(inner_constraints(0.0F, 0.0F, 120.0F, 120.0F), child.make_fn());
+    AURORA_TEST_REQUIRE(child.seen.has_value());
+    AURORA_TEST_CHECK_NEAR(child.seen->max.height, 120.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.width, 70.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 35.0F, 0.0F);
+}
 
-    // ---- 8. SizeModifier 未设置时沿用子节点尺寸 ----
-    {
-        const SizeModifier m;
-        const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 100.0F}};
-        const Size s = m.layout(c, measure_fixed(Size{.width = 7.0F, .height = 9.0F}));
-        AURORA_TEST_CHECK(s.width == 7.0F);
-        AURORA_TEST_CHECK(s.height == 9.0F);
-    }
+AURORA_TEST_CASE(size_modifier_fill_takes_precedence_over_fixed) {
+    // 同轴同时设置 fill 与固定值：fill 优先。
+    SizeModifier sm;
+    sm.set_width(50.0F);
+    sm.set_fill_w(true);
+    FixedChild child{.w = 10.0F, .h = 10.0F};
+    const Size s = sm.layout(inner_constraints(0.0F, 0.0F, 90.0F, 90.0F), child.make_fn());
+    AURORA_TEST_CHECK_NEAR(s.width, 90.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 10.0F, 0.0F);
 }
 
 }  // namespace aurora::test_cases::utest_modifier_layout

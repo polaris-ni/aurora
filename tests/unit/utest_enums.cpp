@@ -1,95 +1,87 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/enums.h
-/// 测试说明: enums 单元测试
-///
+/// 测试说明: 覆盖各枚举的枚举量取值/数量（穷尽性守卫）、底层宽度，以及 TextDecoration 位掩码运算族
 
-// enums_test.cpp — 覆盖 Enums 共享枚举的 JSON 互转、位运算与 FontWeight 数值。
-// 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
-#include <string>
+#include <cstdint>
+#include <type_traits>
 
-#include "aurora/aurora.h"
 #include "aurora/core/enums.h"
-#include "aurora/widget/props_io.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_enums {
 
-static void test_text_align() {
-    AURORA_TEST_CHECK_MSG(text_align_to_json(TextAlign::Center).get<std::string>() == "Center",
-                          "TextAlign->json Center");
-    AURORA_TEST_CHECK_MSG(json_to_text_align(Json("End")) == TextAlign::End, "json->TextAlign End");
-    AURORA_TEST_CHECK_MSG(json_to_text_align(Json("Bogus")) == TextAlign::Left,
-                          "json->TextAlign unknown falls back Left");
-    AURORA_TEST_CHECK_MSG(json_to_text_align(text_align_to_json(TextAlign::Justify)) == TextAlign::Justify,
-                          "TextAlign round-trip Justify");
+AURORA_TEST_CASE(font_weight_values_follow_css_convention) {
+    // 契约：枚举值即 CSS 字重数值 100..900。
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint16_t>(aurora::FontWeight::Thin), 100);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint16_t>(aurora::FontWeight::ExtraLight), 200);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint16_t>(aurora::FontWeight::Light), 300);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint16_t>(aurora::FontWeight::Normal), 400);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint16_t>(aurora::FontWeight::Medium), 500);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint16_t>(aurora::FontWeight::SemiBold), 600);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint16_t>(aurora::FontWeight::Bold), 700);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint16_t>(aurora::FontWeight::ExtraBold), 800);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint16_t>(aurora::FontWeight::Black), 900);
+    static_assert(std::is_same_v<std::underlying_type_t<aurora::FontWeight>, std::uint16_t>);
 }
 
-static void test_text_overflow_and_font() {
-    AURORA_TEST_CHECK_MSG(text_overflow_to_json(TextOverflow::Ellipsis).get<std::string>() == "Ellipsis",
-                          "TextOverflow->json Ellipsis");
-    AURORA_TEST_CHECK_MSG(json_to_text_overflow(Json("Fade")) == TextOverflow::Fade, "json->TextOverflow Fade");
-    AURORA_TEST_CHECK_MSG(json_to_text_overflow(Json("Nope")) == TextOverflow::Clip,
-                          "json->TextOverflow unknown falls back Clip");
+AURORA_TEST_CASE(text_presentation_enum_layout_is_stable) {
+    // 0 基枚举的「数量守卫」：末枚举量数值 +1 即枚举量个数；
+    // 中间插入新枚举量会使具体取值断言失败，尾部追加会使数量断言失败。
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::TextAlign::Left), 0);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::TextAlign::Justify), 5);  // 共 6 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::TextOverflow::Fade), 2);  // 共 3 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::FontStyle::Italic), 1);   // 共 2 个
 
-    AURORA_TEST_CHECK_MSG(font_style_to_json(FontStyle::Italic).get<std::string>() == "Italic",
-                          "FontStyle->json Italic");
-    AURORA_TEST_CHECK_MSG(json_to_font_style(Json("Italic")) == FontStyle::Italic, "json->FontStyle Italic");
-    AURORA_TEST_CHECK_MSG(json_to_font_style(Json("Nope")) == FontStyle::Normal,
-                          "json->FontStyle unknown falls back Normal");
+    static_assert(std::is_same_v<std::underlying_type_t<aurora::TextAlign>, std::uint8_t>);
+    static_assert(std::is_same_v<std::underlying_type_t<aurora::TextOverflow>, std::uint8_t>);
+    static_assert(std::is_same_v<std::underlying_type_t<aurora::FontStyle>, std::uint8_t>);
+    AURORA_TEST_CHECK(true);
 }
 
-static void test_font_weight() {
-    AURORA_TEST_CHECK_MSG(font_weight_to_json(FontWeight::Bold).get<std::string>() == "700",
-                          "FontWeight->json Bold=700");
-    AURORA_TEST_CHECK_MSG(json_to_font_weight(Json("700")) == FontWeight::Bold, "json->FontWeight 700=Bold");
-    AURORA_TEST_CHECK_MSG(json_to_font_weight(Json(400)) == FontWeight::Normal, "json->FontWeight number 400=Normal");
-    AURORA_TEST_CHECK_MSG(json_to_font_weight(Json("999")) == FontWeight::Normal,
-                          "json->FontWeight unknown number falls back Normal");
-    AURORA_TEST_CHECK_MSG(json_to_font_weight(font_weight_to_json(FontWeight::Black)) == FontWeight::Black,
-                          "FontWeight round-trip Black");
+AURORA_TEST_CASE(layout_enum_layout_is_stable) {
+    // 布局族枚举：末枚举量数值锁定（数量 = 值 + 1）。
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::MainAxisSize::Max), 1);                     // 共 2 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::MainAxisAlignment::SpaceEvenly), 5);        // 共 6 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::CrossAxisAlignment::Stretch), 3);           // 共 4 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::StackFit::Passthrough), 2);                 // 共 3 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::OverflowStrategy::Scroll), 3);              // 共 4 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::BoxFit::ScaleDown), 6);                     // 共 7 个
+    static_assert(std::is_same_v<std::underlying_type_t<aurora::BoxFit>, std::uint8_t>);
+    AURORA_TEST_CHECK(true);
 }
 
-static void test_text_decoration() {
-    constexpr TextDecoration combo = TextDecoration::Underline | TextDecoration::LineThrough;
-    AURORA_TEST_CHECK_MSG(decoration_has(combo, TextDecoration::Underline), "TextDecoration has Underline");
-    AURORA_TEST_CHECK_MSG(decoration_has(combo, TextDecoration::LineThrough), "TextDecoration has LineThrough");
-    AURORA_TEST_CHECK_MSG(!decoration_has(combo, TextDecoration::Overline), "TextDecoration not has Overline");
+AURORA_TEST_CASE(text_decoration_bitwise_combine_and_test) {
+    using aurora::decoration_has;
+    using aurora::TextDecoration;
 
-    const Json j = text_decoration_to_json(combo);
-    AURORA_TEST_CHECK_MSG(j.is_array() && j.size() == 2, "TextDecoration->json array of 2");
-    const TextDecoration back = json_to_text_decoration(j);
-    AURORA_TEST_CHECK_MSG(back == combo, "TextDecoration round-trip combo");
+    constexpr auto combined = TextDecoration::Underline | TextDecoration::LineThrough;
+    AURORA_TEST_CHECK(decoration_has(combined, TextDecoration::Underline));
+    AURORA_TEST_CHECK(decoration_has(combined, TextDecoration::LineThrough));
+    AURORA_TEST_CHECK_FALSE(decoration_has(combined, TextDecoration::Overline));
 
-    AURORA_TEST_CHECK_MSG(text_decoration_to_json(TextDecoration::None).at(0).get<std::string>() == "None",
-                          "TextDecoration None -> [None]");
-    AURORA_TEST_CHECK_MSG(json_to_text_decoration(Json("Underline")) == TextDecoration::Underline,
-                          "TextDecoration single string parse");
-    AURORA_TEST_CHECK_MSG(json_to_text_decoration(Json("Bogus")) == TextDecoration::None,
-                          "TextDecoration unknown string -> None");
+    // 按位与提取交集：与单个位相与得到该位或 None。
+    AURORA_TEST_CHECK_EQ(combined & TextDecoration::Underline, TextDecoration::Underline);
+    AURORA_TEST_CHECK_EQ(combined & TextDecoration::Overline, TextDecoration::None);
+
+    // |= 累积组合。
+    auto flags = TextDecoration::None;
+    flags |= TextDecoration::Overline;
+    flags |= TextDecoration::Underline;
+    AURORA_TEST_CHECK(decoration_has(flags, TextDecoration::Overline));
+    AURORA_TEST_CHECK(decoration_has(flags, TextDecoration::Underline));
+    AURORA_TEST_CHECK_FALSE(decoration_has(flags, TextDecoration::LineThrough));
 }
 
-static void test_layout_enums() {
-    AURORA_TEST_CHECK_MSG(main_axis_size_to_json(MainAxisSize::Max).get<std::string>() == "Max",
-                          "MainAxisSize->json Max");
-    AURORA_TEST_CHECK_MSG(json_to_main_axis_size(Json("Max")) == MainAxisSize::Max, "json->MainAxisSize Max");
-    AURORA_TEST_CHECK_MSG(json_to_main_axis_size(Json("Nope")) == MainAxisSize::Min, "json->MainAxisSize unknown Min");
+AURORA_TEST_CASE(text_decoration_none_has_no_bits) {
+    using aurora::decoration_has;
+    using aurora::TextDecoration;
 
-    AURORA_TEST_CHECK_MSG(stack_fit_to_json(StackFit::Expand).get<std::string>() == "Expand", "StackFit->json Expand");
-    AURORA_TEST_CHECK_MSG(json_to_stack_fit(Json("Passthrough")) == StackFit::Passthrough,
-                          "json->StackFit Passthrough");
-
-    AURORA_TEST_CHECK_MSG(box_fit_to_json(BoxFit::Cover).get<std::string>() == "Cover", "BoxFit->json Cover");
-    AURORA_TEST_CHECK_MSG(json_to_box_fit(Json("Contain")) == BoxFit::Contain, "json->BoxFit Contain");
-    AURORA_TEST_CHECK_MSG(json_to_box_fit(Json("Nope")) == BoxFit::Fill, "json->BoxFit unknown falls back Fill");
-}
-
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== enums_test ===\n");
-    test_text_align();
-    test_text_overflow_and_font();
-    test_font_weight();
-    test_text_decoration();
-    test_layout_enums();
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(TextDecoration::None), 0);
+    AURORA_TEST_CHECK_FALSE(decoration_has(TextDecoration::None, TextDecoration::Underline));
+    AURORA_TEST_CHECK_FALSE(decoration_has(TextDecoration::None, TextDecoration::Overline));
+    AURORA_TEST_CHECK_FALSE(decoration_has(TextDecoration::None, TextDecoration::LineThrough));
+    // None | None 仍为 None。
+    AURORA_TEST_CHECK_EQ(TextDecoration::None | TextDecoration::None, TextDecoration::None);
 }
 
 }  // namespace aurora::test_cases::utest_enums

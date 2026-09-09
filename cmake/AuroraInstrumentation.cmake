@@ -61,12 +61,24 @@ if (AURORA_ENABLE_COVERAGE)
         else ()
             _aurora_instrument_all_targets(--coverage -O0 -g)
         endif ()
+        # MinGW GCC 已知代码生成缺陷：-O0 --coverage 下对带 target("sse4.1")/target("avx2")
+        # 属性的函数（painter_simd.inl 的 SIMD 栅格内核，仅编入 painter.cpp 一个 TU）生成
+        # 崩溃代码——box blur AVX2 路径在 itest_blur 稳定 0xC0000005，-O3（默认构建）与
+        # 标量路径均正常。对齐由编译器在 -O1+ 自行修复，故仅对 painter.cpp 提升到 -O1：
+        # 源文件级 COMPILE_OPTIONS 追加在命令行尾部覆盖目标的 -O0，gcov 行映射仍完整，
+        # SIMD 实现行不会被豁免出覆盖率统计。
+        if (MINGW)
+            set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/render/painter.cpp"
+                    PROPERTIES COMPILE_OPTIONS "-O1")
+        endif ()
     endif ()
 
     # 覆盖率终端摘要：Linux/macOS 走 gcov + tools/coverage/coverage_report.sh；
     # Windows 走 tools/coverage/coverage_report.ps1；Clang 走 LLVM 原生
     # source-based（llvm-profdata merge + llvm-cov report，tools/coverage/coverage_report_llvm.ps1）。
     # 用法：cmake -S . -B build -DAURORA_ENABLE_COVERAGE=ON ... && cmake --build build --target coverage
+    # coverage target 必须先构建被测对象（runner + 静态校验所需的生成器/JSON 聚合），
+    # 否则全新构建目录下 ctest 全部 Not Run（runner 不存在）、registry/校验类用例假红。
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         # LLVM_PROFILE_FILE 用 %p（pid）模板：ctest 并行多进程各写独立 .profraw，不互相覆盖。
         get_filename_component(_aurora_llvm_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
@@ -99,6 +111,7 @@ if (AURORA_ENABLE_COVERAGE)
                     COMMENT "Running ctest then aggregating gcov line coverage via coverage_report.sh (terminal summary, no HTML)")
         endif ()
     endif ()
+    add_dependencies(coverage aurora_test_runner aurora_api_json gen_error_codes gen_debug_api)
 endif ()
 
 # ---- 内存错误检测（AddressSanitizer + UndefinedBehaviorSanitizer） ----
@@ -198,3 +211,18 @@ endif ()
 
 # 注：AURORA_ENABLE_DEBUG 现已作为 aurora 的 PUBLIC 编译定义导出，所有链接 aurora 的消费者
 # （test / demo / 宿主应用）都会自动获得与库完全一致的宏取值，故无需再为测试目标单独注入。
+
+# ---- AURORA_ENABLE_TEST_HOOKS：测试注入点（test-only） ------------------------------------
+# 仓库私有测试设施（进程内 memory 剪贴板后端等）经公共类暴露的最小注入面。设计对齐 DEBUG API：
+# 注入 API 在头文件始终声明（消费端调用始终可编译），实现体按
+# `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，任一关闭返回 false / no-op。
+# 默认 ON：钩子本身无副作用，真正的行为开关是 AURORA_ENABLE_DEBUG（Release 下 AUTO 自动关闭
+# → 注入点自动失效 → 依赖注入的测试运行时 AURORA_TEST_SKIP，不产生竞态也不产生编译错误）。
+# PUBLIC 导出同理 DEBUG：消费者（tests / demo）须与库同值，避免不同 TU 对注入点判定不一致。
+option(AURORA_ENABLE_TEST_HOOKS
+        "Expose library test-injection points (in-memory clipboard backend etc.); inert unless AURORA_ENABLE_DEBUG is also enabled"
+        ON)
+if (AURORA_ENABLE_TEST_HOOKS)
+    aurora_define_feature(AURORA_ENABLE_TEST_HOOKS)
+endif ()
+aurora_log("Test hooks (AURORA_ENABLE_TEST_HOOKS): ${AURORA_ENABLE_TEST_HOOKS} (active only when AURORA_ENABLE_DEBUG is on)")

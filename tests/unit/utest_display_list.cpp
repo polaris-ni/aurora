@@ -1,135 +1,119 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/render/display_list.h
-/// 测试说明: display_list 单元测试
-///
+/// 测试说明: 覆盖 DisplayList 的命令与数据池：空态判定、各池 add_* 的索引递增与独立编号、push_cmd 记账、
+/// clear 全池复位，以及 replay 到 Painter 的像素等价性与空列表回放的无副作用
 
-// 验证 Display List 录制/回放：
-//   ① replay 像素保真（首帧「录制+回放」与强制重绘帧「仅回放」逐位一致）；
-//   ② 命中回放时整棵子树 paint 遍历被跳过（on_paint 不再调用）；
-//   ③ 内容变脏（mark_needs_paint）触发祖先 DL 失效并重录，像素与全绘一致；
-//   ④ 离屏合成（cache_layer）的 Composite 命令录制/回放正确。
-
-#include <cstring>
-#include <memory>
+#include <cstdint>
+#include <string>
 #include <vector>
 
-#include "aurora/aurora.h"
-#include "aurora_test_harness.h"
+#include "aurora/core/color.h"
+#include "aurora/core/font.h"
+#include "aurora/core/image.h"
+#include "aurora/core/types.h"
+#include "aurora/render/display_list.h"
+#include "aurora/render/painter.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_display_list {
 
 namespace {
-
-// 计数控件：on_paint 自增并填充纯色，用于观测 DL 是否跳过子树遍历。
-struct PaintCounter : Widget {
-    int paint_calls = 0;
-    Color fill = Color{200, 30, 30};
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
-    auto type_name() const -> const char * override { return "PaintCounter"; }
-
-  protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(Size{.width = 40.0F, .height = 40.0F});
-    }
-    auto on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) -> void override {
-        ++paint_calls;
-        p.fill_rect(b, fill);
-    }
-};
-
-auto make_window(int w, const int h) -> Window {
-    auto surface = std::make_unique<HeadlessSurface>();
-    (void)surface->begin_frame(w, h);
-    return Window{std::move(surface)};
+[[nodiscard]] auto rect_at(float x, float y, float w, float h) -> Rect {
+    return Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = w, .height = h}};
 }
-
-auto copy_pixels(const std::uint8_t *src, const size_t n) -> std::vector<std::uint8_t> {
-    std::vector<std::uint8_t> out(n);
-    if (src != nullptr) {
-        std::memcpy(out.data(), src, n);
-    }
-    return out;
-}
-
-auto pixel_diff(const std::vector<std::uint8_t> &a, const std::vector<std::uint8_t> &b) -> size_t {
-    size_t d = 0;
-    for (size_t i = 0; i < a.size() && i < b.size(); ++i) {
-        if (a.at(i) != b.at(i)) {
-            ++d;
-        }
-    }
-    return d;
-}
-
 }  // namespace
 
-AURORA_TEST() {
-#ifdef AURORA_ENABLE_DISPLAY_LIST
-    constexpr int w = 100;
-    constexpr int h = 100;
-    constexpr size_t n = static_cast<size_t>(w) * static_cast<size_t>(h) * 4U;
+AURORA_TEST_CASE(fresh_list_is_empty) {
+    const DisplayList list;
+    AURORA_TEST_CHECK_TRUE(list.empty());
+    AURORA_TEST_CHECK_EQ(list.cmd_count(), 0U);
+}
 
-    // 场景 1：replay 保真 + 跳过子树遍历。
-    {
-        auto c = std::make_shared<PaintCounter>();
-        Node root{Column{Node{c}}};
-        Window win = make_window(w, h);
-        AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧1：录制 + 回放
-        auto &hs = dynamic_cast<HeadlessSurface &>(win.surface());
-        AURORA_TEST_CHECK(hs.data() != nullptr);
-        auto f1 = copy_pixels(hs.data(), n);
-        AURORA_TEST_CHECK_MSG(c->paint_calls == 1, "frame1 records subtree (on_paint once)");
+AURORA_TEST_CASE(pools_assign_independent_increasing_indices) {
+    // 每类池各自从 0 编号：DrawCmd 用不同字段分别引用，索引互不干扰。
+    DisplayList list;
+    AURORA_TEST_CHECK_EQ(list.add_string("first"), 0);
+    AURORA_TEST_CHECK_EQ(list.add_string("second"), 1);
+    AURORA_TEST_CHECK_EQ(list.add_colors({Color::red(), Color::blue()}), 0);
+    AURORA_TEST_CHECK_EQ(list.add_floats({0.0F, 1.0F}), 0);
+    AURORA_TEST_CHECK_EQ(list.add_font(Font{}), 0);
+    AURORA_TEST_CHECK_EQ(list.add_image(Image{}), 0);
+    AURORA_TEST_CHECK_EQ(list.add_matrix(Matrix2D{}), 0);
+}
 
-        win.force_full_redraw();  // 强制重绘（布局脏 + 脏区全窗），但 DL 仍有效
-        AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧2：仅回放（命中 DL）
-        auto f2 = copy_pixels(hs.data(), n);
-        AURORA_TEST_CHECK_MSG(c->paint_calls == 1,
-                              "frame2 DL-hit skips subtree paint traversal (on_paint not re-called)");
-        AURORA_TEST_CHECK_MSG(pixel_diff(f1, f2) == 0, "replay pixels identical to record+replay");
-    }
+AURORA_TEST_CASE(push_cmd_tracks_count_and_breaks_emptiness) {
+    DisplayList list;
+    DrawCmd cmd;
+    cmd.kind = CmdKind::FillRect;
+    cmd.bounds = rect_at(0.0F, 0.0F, 8.0F, 8.0F);
+    cmd.color = Color::red();
+    list.push_cmd(cmd);
 
-    // 场景 2：内容变脏触发祖先 DL 失效并重录。
-    {
-        auto c = std::make_shared<PaintCounter>();
-        Node root{Column{Node{c}}};
-        Window win = make_window(w, h);
-        AURORA_TEST_CHECK(win.present_root(root).ok());
-        auto &hs = dynamic_cast<HeadlessSurface &>(win.surface());
-        auto before = copy_pixels(hs.data(), n);
-        AURORA_TEST_CHECK_MSG(c->paint_calls == 1, "before-change records once");
+    AURORA_TEST_CHECK_FALSE(list.empty());
+    AURORA_TEST_CHECK_EQ(list.cmd_count(), 1U);
 
-        c->mark_needs_paint();  // 内容脏：须沿布局父链失效祖先 DL 并重录
-        AURORA_TEST_CHECK(win.present_root(root).ok());
-        auto after = copy_pixels(hs.data(), n);
-        AURORA_TEST_CHECK_MSG(c->paint_calls == 2, "dirty triggers re-record (on_paint called again)");
-        AURORA_TEST_CHECK_MSG(pixel_diff(before, after) == 0, "same content re-record is pixel-consistent");
+    list.push_cmd(cmd);
+    AURORA_TEST_CHECK_EQ(list.cmd_count(), 2U);
+}
 
-        win.force_full_redraw();
-        AURORA_TEST_CHECK(win.present_root(root).ok());
-        auto ffull = copy_pixels(hs.data(), n);
-        AURORA_TEST_CHECK_MSG(pixel_diff(after, ffull) == 0, "re-record matches full redraw");
-    }
+AURORA_TEST_CASE(clear_resets_commands) {
+    DisplayList list;
+    list.add_string("text");
+    list.push_cmd(DrawCmd{});
+    list.clear();
 
-    // 场景 3：离屏合成（cache_layer）Composite 命令录制/回放。
-    {
-        auto c = std::make_shared<PaintCounter>();
-        c->modifier = Modifier{}.cache_layer();  // 走离屏像素缓存 + composite
-        Node root{Column{Node{c}}};
-        Window win = make_window(w, h);
-        AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧1：录制（含 Composite）+ 回放
-        auto &hs = dynamic_cast<HeadlessSurface &>(win.surface());
-        auto f1 = copy_pixels(hs.data(), n);
-        AURORA_TEST_CHECK_MSG(c->paint_calls == 1, "cache_layer frame1 records once");
+    AURORA_TEST_CHECK_TRUE(list.empty());
+    AURORA_TEST_CHECK_EQ(list.cmd_count(), 0U);
+    // 清空后池重新从 0 编号（旧索引不可复用）。
+    AURORA_TEST_CHECK_EQ(list.add_string("fresh"), 0);
+}
 
-        win.force_full_redraw();
-        AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧2：仅回放（命中 DL，Composite 命令重贴离屏缓冲）
-        auto f2 = copy_pixels(hs.data(), n);
-        AURORA_TEST_CHECK_MSG(c->paint_calls == 1, "cache_layer frame2 DL-hit skips subtree");
-        AURORA_TEST_CHECK_MSG(pixel_diff(f1, f2) == 0, "cache_layer replay composites offscreen buffer correctly");
-    }
-#else
-    AURORA_TEST_CHECK(true);  // 未启用 AURORA_ENABLE_DISPLAY_LIST：跳过断言
-#endif
+AURORA_TEST_CASE(replay_fill_rect_writes_pixels) {
+    // 录制一条 FillRect 并回放：结果与直接调用 Painter 等价。
+    DrawCmd cmd;
+    cmd.kind = CmdKind::FillRect;
+    cmd.bounds = rect_at(0.0F, 0.0F, 4.0F, 4.0F);
+    cmd.color = Color::red();
+
+    DisplayList list;
+    list.push_cmd(cmd);
+
+    Painter painter;
+    painter.begin(4, 4);
+    list.replay(painter);
+
+    AURORA_TEST_CHECK_EQ(static_cast<int>(painter.get_pixel(0, 0).r), 255);  // R
+    AURORA_TEST_CHECK_EQ(static_cast<int>(painter.get_pixel(0, 0).g), 0);    // G
+    AURORA_TEST_CHECK_EQ(static_cast<int>(painter.get_pixel(0, 0).b), 0);    // B
+}
+
+AURORA_TEST_CASE(replay_preserves_command_order) {
+    // 后录制的命令覆盖先录制的（画家用直接覆盖语义合成）。
+    DisplayList list;
+    DrawCmd red;
+    red.kind = CmdKind::FillRect;
+    red.bounds = rect_at(0.0F, 0.0F, 4.0F, 4.0F);
+    red.color = Color::red();
+
+    DrawCmd blue = red;
+    blue.color = Color::blue();
+
+    list.push_cmd(red);
+    list.push_cmd(blue);
+
+    Painter painter;
+    painter.begin(4, 4);
+    list.replay(painter);
+
+    AURORA_TEST_CHECK_EQ(static_cast<int>(painter.get_pixel(0, 0).r), 0);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(painter.get_pixel(0, 0).b), 255);
+}
+
+AURORA_TEST_CASE(replay_empty_list_is_noop) {
+    const DisplayList list;
+    Painter painter;
+    painter.begin(2, 2);
+    AURORA_TEST_CHECK_NO_THROW(list.replay(painter));
 }
 
 }  // namespace aurora::test_cases::utest_display_list

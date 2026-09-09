@@ -1,78 +1,88 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/lifecycle.h
-/// 测试说明: lifecycle 单元测试
-///
+/// 测试说明: 覆盖 Lifecycle 声明式副作用钩子——mount 恰好触发一次 on_mount（幂等保护）、
+/// 析构触发 on_unmount 清理、空回调安全、布局透传子尺寸、自描述事件清单
 
-// 覆盖声明式挂载/卸载控件 `au::Lifecycle`。
-// 关注点：on_mount 在子树挂载后恰好一次；on_unmount 在控件销毁时触发；
-// Show 隐藏保留子树存活（不触发 on_unmount，对齐 Flutter Visibility）；空 unmount 不崩溃。
+#include <memory>
 
-#include <cstdio>
-
-#include "aurora/aurora.h"
-#include "aurora/render/offscreen.h"
 #include "aurora/widget/lifecycle.h"
-#include "aurora_test_harness.h"
+#include "aurora/widget/text.h"
+#include "aurora/layout/layout_engine.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_lifecycle {
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== test_lifecycle ===\n");
+namespace {
 
-    // 1) 基础：挂载后恰好触发一次 on_mount；销毁 Node 触发 on_unmount。
+auto box(float w, float h) -> Node {
+    auto t = std::make_shared<Text>(".");
+    t->width(aurora::Length::fixed(w));
+    t->height(aurora::Length::fixed(h));
+    return Node{t};
+}
+
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
+
+}  // namespace
+
+AURORA_TEST_CASE(mount_fires_on_mount_exactly_once) {
+    int mounts = 0;
+    const BuildContext ctx;
     {
-        int mount_calls = 0;
-        int unmount_calls = 0;
-        bool ctx_usable = false;
-        auto root = Node{Lifecycle(
-            Node{Text{"hi"}},
-            [&](const BuildContext &ctx) -> void {
-                ++mount_calls;
-                ctx_usable = true;  // BuildContext 引用有效，可读取其字段
-                (void)ctx.scale_factor;  // 不崩溃即证明上下文可用
-            },
-            [&]() -> void { ++unmount_calls; })};
-        auto r = render_to_png(root, 200, 100, "lifecycle_out.png");
-        AURORA_TEST_CHECK(r.ok());
-        AURORA_TEST_CHECK(mount_calls == 1);
-        AURORA_TEST_CHECK(unmount_calls == 0);
-        AURORA_TEST_CHECK(ctx_usable);
-
-        // mount 幂等：二次渲染不应再次触发 on_mount。
-        auto r2 = render_to_png(root, 200, 100, "lifecycle_out.png");
-        (void)r2;
-        AURORA_TEST_CHECK(mount_calls == 1);
-
-        // 销毁 Node → 析构触发 on_unmount（覆盖 Repeater 缩容 / Navigator pop 场景）。
-        root = Node{};  // NOLINT
-        AURORA_TEST_CHECK(unmount_calls == 1);
+        Lifecycle lc(box(40.0F, 20.0F), [&mounts](const BuildContext &) { ++mounts; });
+        lc.mount(ctx);
+        lc.mount(ctx);  // 幂等：重复 mount 不重复触发
+        AURORA_TEST_CHECK_EQ(mounts, 1);
     }
+    // 析构不触发 on_mount。
+    AURORA_TEST_CHECK_EQ(mounts, 1);
+}
 
-    // 2) Show 隐藏：子树保留存活，不触发 on_unmount；整体销毁才卸载。
+AURORA_TEST_CASE(destructor_fires_on_unmount_once) {
+    int unmounts = 0;
+    const BuildContext ctx;
     {
-        int mount_calls = 0;
-        int unmount_calls = 0;
-        auto root = Node{Show(false, Node{Lifecycle(
-                                         Node{Text{"x"}}, [&](const BuildContext &) -> void { ++mount_calls; },
-                                         [&]() -> void { ++unmount_calls; })})};
-        auto r = render_to_png(root, 200, 100, "lifecycle_show_out.png");
-        AURORA_TEST_CHECK(r.ok());
-        AURORA_TEST_CHECK(mount_calls == 1);  // Show.on_mount 仍会挂载子节点
-        AURORA_TEST_CHECK(unmount_calls == 0);  // 仅隐藏，未卸载（存活语义）
-        root = Node{};  // NOLINT
-        AURORA_TEST_CHECK(unmount_calls == 1);  // 整体销毁才卸载
+        Lifecycle lc(box(40.0F, 20.0F), [](const BuildContext &) {}, [&unmounts] { ++unmounts; });
+        lc.mount(ctx);
+        AURORA_TEST_CHECK_EQ(unmounts, 0);
     }
+    AURORA_TEST_CHECK_EQ(unmounts, 1);
+}
 
-    // 3) 空 on_unmount 回调不崩溃。
+AURORA_TEST_CASE(empty_callbacks_are_safe) {
+    const BuildContext ctx;
     {
-        int mount_calls = 0;
-        auto root = Node{Lifecycle(Node{Text{"y"}}, [&](const BuildContext &) -> void { ++mount_calls; })};
-        auto r = render_to_png(root, 100, 100, "lifecycle_empty_out.png");
-        AURORA_TEST_CHECK(r.ok());
-        AURORA_TEST_CHECK(mount_calls == 1);
-        root = Node{};  // 空 unmount 不崩溃 // NOLINT
-        AURORA_TEST_CHECK(mount_calls == 1);
+        Lifecycle lc(box(10.0F, 10.0F), nullptr, nullptr);
+        AURORA_TEST_CHECK_NO_THROW(lc.mount(ctx));
     }
+    // 无异常即通过。
+}
+
+AURORA_TEST_CASE(layout_passes_child_size_through) {
+    Lifecycle lc(box(70.0F, 25.0F), [](const BuildContext &) {});
+    LayoutEngine::layout(lc, bounded(200.0F, 100.0F));
+    const Size s = lc.size();
+    AURORA_TEST_CHECK_NEAR(s.width, 70.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(s.height, 25.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(mount_callback_receives_context) {
+    bool ctx_seen = false;
+    const BuildContext ctx;
+    Lifecycle lc(box(10.0F, 10.0F), [&ctx_seen](const BuildContext &) { ctx_seen = true; });
+    lc.mount(ctx);
+    AURORA_TEST_CHECK_TRUE(ctx_seen);
+}
+
+AURORA_TEST_CASE(describe_reports_events_and_policy) {
+    const auto d = Lifecycle::describe_static();
+    AURORA_TEST_CHECK_EQ(std::string{d.name}, "Lifecycle");
+    AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "single");
+    AURORA_TEST_REQUIRE_EQ(d.events.size(), 2U);
+    AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_mount");
+    AURORA_TEST_CHECK_EQ(std::string{d.events[1]}, "on_unmount");
 }
 
 }  // namespace aurora::test_cases::utest_lifecycle

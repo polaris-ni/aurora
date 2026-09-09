@@ -1,199 +1,137 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/debug/debug_runtime.h
-/// 测试说明: debug_runtime 单元测试
-///
+/// 测试说明: 覆盖运行时信息导出门面五项能力——widget_tree（委托 Inspector::tree_json_full 的
+/// 等价性与结构）、perf_snapshot / frame_phase_timeline（关键键与 limit 语义）、diagnostics、
+/// why_trace 快照形状，以及关闭态（未开 AURORA_ENABLE_DEBUG）统一返回
+/// {"available":false,"reason":...} 的 disabled 语义。测试 TU 不写宏门控：
+/// 以 feature_flags().debug 运行时探测，探测失败即 SKIP/分支。
 
-// 运行时信息导出验证。
-//
-// 覆盖：
-//  1) widget_tree 返回 Widget 树 JSON（DEBUG 含 "type"；Release available=false）。
-//  2) perf_snapshot 聚合 FrameStats + PerfLog（DEBUG 含 fps/avg_frame_ms/perf_log 等）。
-//  3) frame_phase_timeline 复用 FrameStats 相位环形缓冲（DEBUG 含 avg_*_ms/flamegraph/recent_frame_ms）。
-//  4) diagnostics 薄封装 Diagnostics（DEBUG 含 count/diagnostics 数组）。
-//  5) why_trace 热路径埋点（DEBUG 下 mark_needs_layout/paint 触发记录，区分根因 propagated=false
-//     与父链传播 propagated=true；Release available=false，热路径未记录）。
-//
-// 宏一致约定：测试 TU 与 aurora 库同配置获得 AURORA_ENABLE_DEBUG；success-path 断言用
-// #ifdef AURORA_ENABLE_DEBUG 分支，与库体编译分支对齐。
+#include <string>
 
-// ── API 覆盖映射 ─────────────────────────────
-// DebugTrace(aurora::debug::detail::record_dirty 为内部命名空间，非对外承诺 API；
-//   DirtyKind 经 debug_runtime 的 why_trace 输出间接行使)、PerfLog(经 perf_snapshot 快照路径行使)。
-
-#include <memory>
-
-#include "aurora/aurora.h"
-#include "aurora/test_helpers.h"
-#include "aurora_test_harness.h"
+#include "aurora/debug/debug_runtime.h"
+#include "aurora/debug/feature_flags.h"  // 运行时探测 AURORA_ENABLE_DEBUG 的归一化镜像
+#include "aurora/inspector/inspector_api.h"
+#include "aurora/widget/containers.h"
+#include "aurora/widget/text.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_debug_runtime {
 
-using au::debug::diagnostics;
-using au::debug::frame_phase_timeline;
-using au::debug::perf_snapshot;
-using au::debug::why_trace;
-using au::debug::widget_tree;
-using au::test::init_headless;
-using au::test::pump;
-using au::test::TestEnv;
+using aurora::debug::diagnostics;
+using aurora::debug::feature_flags;
+using aurora::debug::frame_phase_timeline;
+using aurora::debug::perf_snapshot;
+using aurora::debug::widget_tree;
+using aurora::debug::why_trace;
 
-AURORA_TEST() {
-    // ---- 1. widget_tree ----
-    {
-        TestEnv env = init_headless(200, 200);
-        auto a = std::make_shared<Column>();
-        a->width(px(80.0F));
-        a->height(px(40.0F));
-        a->modifier.set(Modifier{}.background(Color(200, 200, 200, 255)));
-        env.root_widget->add(Node{a});
-        pump(env);
+/// @brief 构造确定性测试树：Column 根 + 单个 Text 子节点（无需布局即可序列化）。
+[[nodiscard]] auto make_tree() -> Node {
+    auto col = std::make_shared<Column>();
+    col->add(Node{std::make_shared<Text>("hi")});
+    return Node{col};
+}
 
-        Json tree = widget_tree(env.root);
-#ifdef AURORA_ENABLE_DEBUG
-        AURORA_TEST_CHECK(tree.contains("type"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(tree["type"].is_string());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(tree["type"] == "Column");
-#else
-        AURORA_TEST_CHECK(tree.contains("available"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 调试关闭分支：Json operator[]
-        // 用于读取键，非下标索引，at() 语义不符
-        AURORA_TEST_CHECK(!tree["available"].get<bool>());
-#endif
+/// @brief 运行时探测 AURORA_ENABLE_DEBUG 是否生效（feature_flags 为始终可用的编译期快照）。
+[[nodiscard]] auto probe_debug_enabled() -> bool { return feature_flags().debug; }
+
+AURORA_TEST_CASE(facade_functions_return_unavailable_when_debug_off) {
+    if (probe_debug_enabled()) {
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 已启用：关闭态 disabled 语义不适用");
     }
-
-    // ---- 2. perf_snapshot ----
-    {
-        Json ps = perf_snapshot();
-#ifdef AURORA_ENABLE_DEBUG
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(ps.contains("fps") && ps["fps"].is_number());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(ps.contains("avg_frame_ms") && ps["avg_frame_ms"].is_number());
-        AURORA_TEST_CHECK(ps.contains("worst_frame_ms"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(ps.contains("dropped_frames") && ps["dropped_frames"].is_number());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(ps.contains("hitches") && ps["hitches"].is_number());
-        AURORA_TEST_CHECK(ps.contains("perf_log"));
-#else
-        AURORA_TEST_CHECK(ps.contains("available"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 调试关闭分支：Json operator[]
-        // 用于读取键，非下标索引，at() 语义不符
-        AURORA_TEST_CHECK(!ps["available"].get<bool>());
-#endif
+    // Release 契约：五项能力统一返回 {"available":false,"reason":...}，零调试代码可观测。
+    const Json tree = widget_tree(make_tree());
+    AURORA_TEST_CHECK_EQ(tree["available"], false);
+    AURORA_TEST_CHECK_TRUE(tree.contains("reason"));
+    const Json snapshots[4] = {perf_snapshot(), frame_phase_timeline(), why_trace(), diagnostics()};
+    for (const Json &j : snapshots) {
+        AURORA_TEST_CHECK_EQ(j["available"], false);
+        AURORA_TEST_CHECK_TRUE(j.contains("reason"));
     }
+}
 
-    // ---- 3. frame_phase_timeline ----
-    {
-        Json tl = frame_phase_timeline();
-#ifdef AURORA_ENABLE_DEBUG
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(tl.contains("avg_layout_ms") && tl["avg_layout_ms"].is_number());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(tl.contains("avg_paint_ms") && tl["avg_paint_ms"].is_number());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(tl.contains("avg_present_ms") && tl["avg_present_ms"].is_number());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(tl.contains("fps") && tl["fps"].is_number());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(tl.contains("flamegraph") && tl["flamegraph"].is_string());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(tl.contains("recent_frame_ms") && tl["recent_frame_ms"].is_array());
-#else
-        AURORA_TEST_CHECK(tl.contains("available"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 调试关闭分支：Json operator[]
-        // 用于读取键，非下标索引，at() 语义不符
-        AURORA_TEST_CHECK(!tl["available"].get<bool>());
-#endif
+AURORA_TEST_CASE(widget_tree_delegates_to_inspector_full_json) {
+    if (!probe_debug_enabled()) {
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：widget_tree 按宏裁切返回 unavailable");
     }
+    // 门面收编原则：widget_tree 是 Inspector::tree_json_full 的薄封装，输出必须等价。
+    Node root = make_tree();
+    const Json via_facade = widget_tree(root);
+    const Json via_inspector = Inspector::tree_json_full(root);
+    AURORA_TEST_CHECK_EQ(via_facade.dump(), via_inspector.dump());
+}
 
-    // ---- 4. diagnostics ----
-    {
-        Json dg = diagnostics();
-#ifdef AURORA_ENABLE_DEBUG
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(dg.contains("count") && dg["count"].is_number());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(dg.contains("diagnostics") && dg["diagnostics"].is_array());
-#else
-        AURORA_TEST_CHECK(dg.contains("available"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 调试关闭分支：Json operator[]
-        // 用于读取键，非下标索引，at() 语义不符
-        AURORA_TEST_CHECK(!dg["available"].get<bool>());
-#endif
+AURORA_TEST_CASE(widget_tree_json_structure) {
+    if (!probe_debug_enabled()) {
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：widget_tree 按宏裁切返回 unavailable");
     }
+    const Json j = widget_tree(make_tree());
+    AURORA_TEST_CHECK_EQ(j["type"], "Column");
+    AURORA_TEST_CHECK_TRUE(j["props"].is_object());
+    AURORA_TEST_CHECK_EQ(j["children"].size(), 1U);
+    AURORA_TEST_CHECK_EQ(j["children"][0]["type"], "Text");
+    AURORA_TEST_CHECK_EQ(j["children"][0]["props"]["content"], "hi");
+}
 
-    // ---- 5. why_trace（热路径埋点 + propagated 区分）----
-    {
-        TestEnv env = init_headless(200, 200);
-        auto child = std::make_shared<Column>();  // 非 relayout boundary（WrapContent）
-        env.root_widget->add(Node{child});
-        // 显式建立父链（pump 的布局入口也会登记，此处覆盖确保确定性）：
-        // child → root；root 自身无 parent，传播到 root 记 propagated=true 后截断。
-        child->set_layout_parent(env.root_widget.get());
-        pump(env);
-
-        // 对 child 触发：child 自身为根因（propagated=false），并沿父链传播至 root
-        // （root 无 parent，记录 propagated=true 后截断）。
-        child->mark_needs_layout();
-        child->mark_needs_paint();
-
-        Json wt = why_trace();
-#ifdef AURORA_ENABLE_DEBUG
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(wt.contains("entries") && wt["entries"].is_array());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(wt.contains("total_recorded") && wt["total_recorded"].is_number());
-        bool saw_root_cause = false;  // layout + propagated==false
-        bool saw_propagated = false;  // layout + propagated==true（父链冒泡）
-        bool saw_paint = false;  // kind==paint
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        for (const Json &e : wt["entries"]) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-            if (e["kind"] == "layout" && e["propagated"] == false) {
-                saw_root_cause = true;
-            }
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-            if (e["kind"] == "layout" && e["propagated"] == true) {
-                saw_propagated = true;
-            }
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-            if (e["kind"] == "paint") {
-                saw_paint = true;
-            }
-        }
-        AURORA_TEST_CHECK(saw_root_cause);
-        AURORA_TEST_CHECK(saw_propagated);
-        AURORA_TEST_CHECK(saw_paint);
-#else
-        AURORA_TEST_CHECK(wt.contains("available"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 调试关闭分支：Json operator[]
-        // 用于读取键，非下标索引，at() 语义不符
-        AURORA_TEST_CHECK(!wt["available"].get<bool>());
-#endif
+AURORA_TEST_CASE(perf_snapshot_exposes_frame_stats_keys) {
+    if (!probe_debug_enabled()) {
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：perf_snapshot 按宏裁切返回 unavailable");
     }
+    const Json j = perf_snapshot();
+    // 关键读数键齐全（聚合 FrameStats + PerfLog::snapshot_json）。
+    AURORA_TEST_CHECK_TRUE(j.contains("fps"));
+    AURORA_TEST_CHECK_TRUE(j.contains("avg_frame_ms"));
+    AURORA_TEST_CHECK_TRUE(j.contains("worst_frame_ms"));
+    AURORA_TEST_CHECK_TRUE(j.contains("total_frames"));
+    AURORA_TEST_CHECK_TRUE(j.contains("frame_budget_ms"));
+    AURORA_TEST_CHECK_TRUE(j.contains("perf_log"));
+    AURORA_TEST_CHECK_TRUE(j["fps"].is_number());
+    AURORA_TEST_CHECK_TRUE(j["total_frames"].is_number());
+}
+
+AURORA_TEST_CASE(frame_phase_timeline_respects_limit) {
+    if (!probe_debug_enabled()) {
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：timeline 按宏裁切返回 unavailable");
+    }
+    const Json j = frame_phase_timeline(4);
+    AURORA_TEST_CHECK_TRUE(j.contains("avg_layout_ms"));
+    AURORA_TEST_CHECK_TRUE(j.contains("avg_paint_ms"));
+    AURORA_TEST_CHECK_TRUE(j.contains("avg_present_ms"));
+    // recent_frame_ms 为最近帧时间窗口（本用例未跑帧，空数组也须 ≤ limit）。
+    AURORA_TEST_CHECK_TRUE(j["recent_frame_ms"].is_array());
+    AURORA_TEST_CHECK_LE(j["recent_frame_ms"].size(), 4U);
+    // ASCII flamegraph 为非空字符串。
+    AURORA_TEST_CHECK_TRUE(j["flamegraph"].is_string());
+    AURORA_TEST_CHECK_GT(j["flamegraph"].get<std::string>().size(), 0U);
+}
+
+AURORA_TEST_CASE(diagnostics_snapshot_shape) {
+    if (!probe_debug_enabled()) {
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：diagnostics 按宏裁切返回 unavailable");
+    }
+    const Json j = diagnostics();
+    AURORA_TEST_CHECK_TRUE(j["count"].is_number());
+    AURORA_TEST_CHECK_TRUE(j["diagnostics"].is_array());
+    AURORA_TEST_CHECK_EQ(j["diagnostics"].size(), j["count"]);
+}
+
+AURORA_TEST_CASE(why_trace_snapshot_shape) {
+    if (!probe_debug_enabled()) {
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：why_trace 按宏裁切返回 unavailable");
+    }
+    const Json j = why_trace();
+    AURORA_TEST_CHECK_TRUE(j.contains("count"));
+    AURORA_TEST_CHECK_TRUE(j.contains("total_recorded"));
+    AURORA_TEST_CHECK_TRUE(j["entries"].is_array());
+}
+
+AURORA_TEST_CASE(facade_functions_never_throw_with_live_tree) {
+    // 双构建通用：开启态传真实树全链路安全；关闭态走 disabled 早退路径同样安全。
+    Node root = make_tree();
+    AURORA_TEST_CHECK_NO_THROW((void)widget_tree(root));
+    AURORA_TEST_CHECK_NO_THROW((void)perf_snapshot());
+    AURORA_TEST_CHECK_NO_THROW((void)frame_phase_timeline(8));
+    AURORA_TEST_CHECK_NO_THROW((void)why_trace(8));
+    AURORA_TEST_CHECK_NO_THROW((void)diagnostics());
 }
 
 }  // namespace aurora::test_cases::utest_debug_runtime

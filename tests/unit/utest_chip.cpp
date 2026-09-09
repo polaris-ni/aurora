@@ -1,180 +1,215 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/chip.h
-/// 测试说明: chip 单元测试
-///
+/// 测试说明: 覆盖 Chip——标签/头像/颜色/字号链式 setter 与序列化、删除回调的命中区域语义
+/// （右半区左键按下触发、其余忽略）、布局尺寸由文本度量构成；附带同头 Badge 的计数、
+/// 尺寸加成、序列化与 describe
 
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "aurora/render/font_engine.h"
 #include "aurora/widget/chip.h"
 #include "aurora/widget/text.h"
-#include "aurora/widget/widget.h"
-#include "aurora_test_harness.h"
+#include "aurora/layout/layout_engine.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_chip {
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== test_chip ===\n");
+namespace {
 
-    // --- Chip 构造 / 空状态 ---
-    {
-        Chip chip;
-        AURORA_TEST_CHECK(chip.type_name() == std::string("Chip"));
-        AURORA_TEST_CHECK(chip.label().empty());
-    }
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
 
-    // --- Chip 带 label ---
-    {
-        Chip chip;
-        chip.set_label("Tag");
-        AURORA_TEST_CHECK(chip.label() == "Tag");
-    }
+auto press_at(float x, float y) -> MouseEvent {
+    MouseEvent e;
+    e.action = MouseAction::Press;
+    e.button = MouseButton::Left;
+    e.local_position = Point{.x = x, .y = y};
+    return e;
+}
 
-    // --- Chip describe_static ---
-    {
-        auto desc = Chip::describe_static();
-        AURORA_TEST_CHECK(desc.name == "Chip");
-        AURORA_TEST_CHECK(!desc.properties.empty());
-        bool has_label = false;
-        for (const auto &p : desc.properties) {
-            if (p.name == "label") {
-                has_label = true;
-            }
+}  // namespace
+
+AURORA_TEST_CASE(default_and_labeled_construction) {
+    const Chip empty;
+    AURORA_TEST_CHECK_EQ(std::string{empty.type_name()}, "Chip");
+    AURORA_TEST_CHECK_EQ(empty.label(), "");
+    AURORA_TEST_CHECK_EQ(empty.avatar(), "");
+
+    const Chip tagged("Tag");
+    AURORA_TEST_CHECK_EQ(tagged.label(), "Tag");
+    Json props;
+    tagged.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["label"].get<std::string>(), "Tag");
+    AURORA_TEST_CHECK_FALSE(props.contains("avatar"));  // 空头像不落盘
+    AURORA_TEST_CHECK_EQ(props["background"][0].get<int>(), 230);
+    AURORA_TEST_CHECK_NEAR(props["font_size"].get<float>(), 13.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(chain_setters_update_serialized_props) {
+    Chip c("base");
+    c.set_label("renamed")
+        .set_avatar("★")
+        .set_background(Color(1, 2, 3, 4))
+        .set_text_color(Color(5, 6, 7, 8))
+        .set_delete_color(Color(9, 10, 11, 12))
+        .set_font_size(15.0F)
+        .set_corner_radius(6.0F);
+
+    Json props;
+    c.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["label"].get<std::string>(), "renamed");
+    AURORA_TEST_CHECK_EQ(props["avatar"].get<std::string>(), "★");
+    AURORA_TEST_CHECK_EQ(props["background"][3].get<int>(), 4);
+    AURORA_TEST_CHECK_EQ(props["text_color"][0].get<int>(), 5);
+    AURORA_TEST_CHECK_EQ(props["delete_color"][1].get<int>(), 10);
+    AURORA_TEST_CHECK_NEAR(props["font_size"].get<float>(), 15.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(props["corner_radius"].get<float>(), 6.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(font_size_non_positive_degrades_to_13) {
+    Chip c;
+    c.set_font_size(0.0F);  // 非正字号回落默认 13pt
+
+    Json props;
+    c.serialize_props(props);
+    AURORA_TEST_CHECK_NEAR(props["font_size"].get<float>(), 13.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(layout_sizes_from_text_metrics) {
+    const Font f{.size_pt = 13.0F};  // 与 Chip 默认字号一致
+
+    Chip plain("hi");
+    LayoutEngine::layout(plain, bounded(1000.0F, 200.0F));
+    const float expect_w = 20.0F + render::FontEngine::measure_width("hi", f);  // 10px 左右内边距
+    AURORA_TEST_CHECK_NEAR(plain.size().width, expect_w, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(plain.size().height, render::FontEngine::measure_height(f) + 8.0F, 1e-4F);
+
+    Chip with_avatar("hi");
+    with_avatar.set_avatar("A");
+    LayoutEngine::layout(with_avatar, bounded(1000.0F, 200.0F));
+    AURORA_TEST_CHECK_NEAR(with_avatar.size().width,
+                           expect_w + render::FontEngine::measure_width("A", f) + 4.0F, 1e-4F);
+
+    Chip deletable("hi");
+    deletable.set_on_delete([] {});
+    LayoutEngine::layout(deletable, bounded(1000.0F, 200.0F));
+    AURORA_TEST_CHECK_NEAR(deletable.size().width, expect_w + render::FontEngine::measure_width(" ×", f), 1e-4F);
+}
+
+AURORA_TEST_CASE(delete_callback_fires_on_right_region_press) {
+    Chip c("Tag");
+    int fired = 0;
+    c.set_on_delete([&fired] { ++fired; });
+    LayoutEngine::layout(c, bounded(1000.0F, 200.0F));
+
+    // 简化命中模型：右半区（x > 0.7 * 宽）左键按下即删除。
+    MouseEvent hit = press_at(c.size().width * 0.85F, c.size().height * 0.5F);
+    c.on_pointer_event(hit);
+    AURORA_TEST_CHECK_EQ(fired, 1);
+    AURORA_TEST_CHECK_TRUE(hit.is_handled);
+
+    MouseEvent miss = press_at(c.size().width * 0.2F, c.size().height * 0.5F);
+    c.on_pointer_event(miss);
+    AURORA_TEST_CHECK_EQ(fired, 1);  // 左半区不触发
+    AURORA_TEST_CHECK_FALSE(miss.is_handled);
+}
+
+AURORA_TEST_CASE(non_press_or_non_left_clicks_ignored) {
+    Chip c("Tag");
+    int fired = 0;
+    c.set_on_delete([&fired] { ++fired; });
+    LayoutEngine::layout(c, bounded(1000.0F, 200.0F));
+
+    MouseEvent move = press_at(c.size().width * 0.9F, c.size().height * 0.5F);
+    move.action = MouseAction::Move;
+    c.on_pointer_event(move);
+    AURORA_TEST_CHECK_EQ(fired, 0);  // 非按下不触发
+
+    MouseEvent right = press_at(c.size().width * 0.9F, c.size().height * 0.5F);
+    right.button = MouseButton::Right;
+    c.on_pointer_event(right);
+    AURORA_TEST_CHECK_EQ(fired, 0);  // 非左键不触发
+}
+
+AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
+    Chip src("seed");
+    src.set_avatar("A")
+        .set_background(Color(1, 2, 3, 4))
+        .set_text_color(Color(5, 6, 7, 8))
+        .set_delete_color(Color(9, 10, 11, 12))
+        .set_font_size(14.0F)
+        .set_corner_radius(3.0F);
+
+    Json props;
+    src.serialize_props(props);
+
+    Chip dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(dst.label(), "seed");
+    AURORA_TEST_CHECK_EQ(dst.avatar(), "A");
+
+    Json out;
+    dst.serialize_props(out);
+    AURORA_TEST_CHECK_EQ(out["background"][2].get<int>(), 3);
+    AURORA_TEST_CHECK_EQ(out["text_color"][1].get<int>(), 6);
+    AURORA_TEST_CHECK_EQ(out["delete_color"][3].get<int>(), 12);
+    AURORA_TEST_CHECK_NEAR(out["font_size"].get<float>(), 14.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(out["corner_radius"].get<float>(), 3.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(describe_reports_metadata) {
+    const auto d = Chip::describe_static();
+    AURORA_TEST_CHECK_EQ(std::string{d.name}, "Chip");
+    AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
+    bool has_on_delete = false;
+    for (const auto &e : d.events) {
+        if (std::string{e} == "on_delete") {
+            has_on_delete = true;
         }
-        AURORA_TEST_CHECK(has_label);
     }
+    AURORA_TEST_CHECK_TRUE(has_on_delete);
+}
 
-    // --- Chip 序列化往返 ---
-    {
-        Chip chip;
-        chip.set_label("Hello");
-        Json props = Json::object();
-        chip.serialize_props(props);
-        AURORA_TEST_CHECK(props.contains("label"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["label"].get<std::string>() == "Hello");
+AURORA_TEST_CASE(badge_layout_adds_half_height_when_counted) {
+    auto child_of = [] {
+        auto t = std::make_shared<Text>(".");
+        t->width(aurora::Length::fixed(40.0F));
+        t->height(aurora::Length::fixed(20.0F));
+        return Node{t};
+    };
 
-        Chip chip2;
-        chip2.deserialize_props(props);
-        AURORA_TEST_CHECK(chip2.label() == "Hello");
-    }
+    Badge counted(5, child_of());
+    LayoutEngine::layout(counted, bounded(300.0F, 200.0F));
+    AURORA_TEST_CHECK_NEAR(counted.size().width, 40.0F, 1e-4F);   // max(子宽, 徽章宽 20)
+    AURORA_TEST_CHECK_NEAR(counted.size().height, 29.0F, 1e-4F);  // 子高 20 + 徽章半高 9
 
-    // --- Chip on_delete 回调 ---
-    {
-        Chip chip;
-        chip.set_label("Removable");
-        bool deleted = false;
-        chip.set_on_delete([&]() -> void { deleted = true; });
-        // 验证 set_on_delete 返回引用
-        chip.set_on_delete([&]() -> void { deleted = true; });
-        AURORA_TEST_CHECK(!deleted);  // 未触发（需要点击）
-    }
+    Badge zero(0, child_of());
+    LayoutEngine::layout(zero, bounded(300.0F, 200.0F));
+    AURORA_TEST_CHECK_NEAR(zero.size().height, 20.0F, 1e-4F);  // count=0 无高度加成
+}
 
-    // --- Badge 构造 ---
-    {
-        Badge badge;
-        AURORA_TEST_CHECK(badge.type_name() == std::string("Badge"));
-        AURORA_TEST_CHECK(badge.count() == 0);
-    }
+AURORA_TEST_CASE(badge_setters_serialize_and_describe) {
+    Badge b(3);
+    b.set_count(7).set_badge_color(Color(1, 2, 3, 4)).set_text_color(Color(5, 6, 7, 8));
+    AURORA_TEST_CHECK_EQ(b.count(), 7);
+    AURORA_TEST_CHECK_EQ(std::string{b.type_name()}, "Badge");
 
-    // --- Badge count ---
-    {
-        Badge badge;
-        badge.set_count(42);
-        AURORA_TEST_CHECK(badge.count() == 42);
-    }
+    Json props;
+    b.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["count"].get<int>(), 7);
+    AURORA_TEST_CHECK_EQ(props["badge_color"][0].get<int>(), 1);
+    AURORA_TEST_CHECK_EQ(props["text_color"][1].get<int>(), 6);
 
-    // --- Badge with child ---
-    {
-        Badge badge(5, Node(std::make_shared<Text>("Hi")));
-        AURORA_TEST_CHECK(badge.count() == 5);
-    }
+    Badge dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(dst.count(), 7);
 
-    // --- Badge describe_static ---
-    {
-        auto desc = Badge::describe_static();
-        AURORA_TEST_CHECK(desc.name == "Badge");
-        bool has_count = false;
-        for (const auto &p : desc.properties) {
-            if (p.name == "count") {
-                has_count = true;
-            }
-        }
-        AURORA_TEST_CHECK(has_count);
-    }
-
-    // --- Badge 序列化往返 ---
-    {
-        Badge badge;
-        badge.set_count(7);
-        Json props = Json::object();
-        badge.serialize_props(props);
-        AURORA_TEST_CHECK(props.contains("count"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["count"].get<int>() == 7);
-
-        Badge badge2;
-        badge2.deserialize_props(props);
-        AURORA_TEST_CHECK(badge2.count() == 7);
-    }
-
-    // --- Chip 现代化属性：胶囊圆角/文本色/字号往返 ---
-    {
-        Chip chip;
-        chip.set_label("Style")
-            .set_background(Color{10, 20, 30, 255})
-            .set_text_color(Color{1, 2, 3, 255})
-            .set_delete_color(Color{4, 5, 6, 255})
-            .set_font_size(15.0F)
-            .set_corner_radius(9.0F);
-        Json props = Json::object();
-        chip.serialize_props(props);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["background"][0].get<int>() == 10);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["text_color"][2].get<int>() == 3);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["delete_color"][0].get<int>() == 4);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["font_size"].get<float>() == 15.0F);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["corner_radius"].get<float>() == 9.0F);
-
-        Chip chip2;
-        chip2.deserialize_props(props);
-        AURORA_TEST_CHECK(chip2.background() == Color(10, 20, 30, 255));
-        Json k = Json::object();
-        chip2.serialize_props(k);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(k["corner_radius"].get<float>() == 9.0F);
-    }
-
-    // --- Badge 徽章色/文字色往返 ---
-    {
-        Badge badge;
-        badge.set_count(3).set_badge_color(Color{11, 22, 33, 255}).set_text_color(Color{44, 55, 66, 255});
-        Json props = Json::object();
-        badge.serialize_props(props);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["badge_color"][0].get<int>() == 11);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["text_color"][1].get<int>() == 55);
-
-        Badge badge2;
-        badge2.deserialize_props(props);
-        Json k = Json::object();
-        badge2.serialize_props(k);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(k["badge_color"][2].get<int>() == 33);
-    }
+    const auto d = Badge::describe_static();
+    AURORA_TEST_CHECK_EQ(std::string{d.name}, "Badge");
+    AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "single");
 }
 
 }  // namespace aurora::test_cases::utest_chip

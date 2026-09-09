@@ -1,114 +1,121 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/grid.h
-/// 测试说明: grid 单元测试
-///
+/// 测试说明: 覆盖 Grid 网格布局——行优先落位与列宽/行高聚合、间距计入总尺寸、
+/// 有界宽度均分单元格、set_columns/set_gap 钳制、属性序列化往返、自描述
 
-// Grid 布局控件 1:1 测试：列数/间距/有界均分/序列化往返。
-// 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
-#include <string>
-#include <vector>
+#include <memory>
 
-#include "aurora/aurora.h"
-#include "aurora_test_harness.h"
+#include "aurora/widget/grid.h"
+#include "aurora/widget/text.h"
+#include "aurora/layout/layout_engine.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_grid {
 
 namespace {
-// 确定性固定尺寸控件（不依赖字体/渲染），用于布局断言。
-class FixedBox : public Widget {
-  public:
-    float w = 50.0F, h = 50.0F;
-    FixedBox() = default;
-    FixedBox(float w, float h) : w(w), h(h) {}
-    void collect_signals(std::vector<SignalViewBase *> & /*out*/) override {}
-    [[nodiscard]] auto type_name() const -> const char * override { return "FixedBox"; }
-    [[nodiscard]] auto describe() const -> WidgetDescriptor override {
-        return WidgetDescriptor{.name = "FixedBox", .children_policy = "none"};
-    }
 
-  protected:
-    void on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) override {}
+auto box(float w, float h) -> Node {
+    auto t = std::make_shared<Text>(".");
+    t->width(aurora::Length::fixed(w));
+    t->height(aurora::Length::fixed(h));
+    return Node{t};
+}
 
-    auto on_layout(const Constraints & /*c*/, const BuildContext & /*ctx*/) -> Size override {
-        return Size{.width = w, .height = h};
-    }
-};
+auto box_expand_w(float h) -> Node {
+    auto t = std::make_shared<Text>(".");
+    t->width(aurora::Length::expand());
+    t->height(aurora::Length::fixed(h));
+    return Node{t};
+}
+
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
+
 }  // namespace
 
-static void test_grid_columns() {
-    Grid g = {};
-    AURORA_TEST_CHECK_MSG(g.columns == 1, "Grid: default columns == 1");
-    AURORA_TEST_CHECK_MSG(near_f(g.gap, 4.0F), "Grid: default gap == 4");
+AURORA_TEST_CASE(grid_places_row_major_with_per_column_width) {
+    // 2 列、gap=10：A(50x20) B(30x10) / C(20x30)。
+    // 列宽 [50,30]、行高 [20,30]；总尺寸 90x60。
+    Grid grid{GridProps{.children = {box(50.0F, 20.0F), box(30.0F, 10.0F), box(20.0F, 30.0F)}, .columns = 2, .gap = 10.0F}};
+    AURORA_TEST_CHECK_EQ(std::string{grid.type_name()}, "Grid");
 
-    g.set_columns(0);
-    AURORA_TEST_CHECK_MSG(g.columns == 1, "Grid: set_columns(0) clamps to 1");
-    g.set_columns(3);
-    AURORA_TEST_CHECK_MSG(g.columns == 3, "Grid: set_columns(3) applied");
-    g.set_gap(8.0F);
-    AURORA_TEST_CHECK_MSG(near_f(g.gap, 8.0F), "Grid: set_gap applied");
+    LayoutEngine::layout(grid, bounded(500.0F, 500.0F));
+    const Size s = grid.size();
+    AURORA_TEST_CHECK_NEAR(s.width, 90.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(s.height, 60.0F, 1e-4F);
 
-    // 便捷构造：负值列数回退 1
-    const Grid g2({FixedBox{}, FixedBox{}}, -2);
-    AURORA_TEST_CHECK_MSG(g2.columns == 1, "Grid: negative columns ctor clamps to 1");
+    const auto &kids = grid.child_nodes();
+    AURORA_TEST_REQUIRE_EQ(kids.size(), 3U);
+    // idx0 (r0,c0)：(0,0)；idx1 (r0,c1)：x=50+10=60；idx2 (r1,c0)：y=20+10=30。
+    AURORA_TEST_CHECK_NEAR(kids[0].bounds().origin.x, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(kids[0].bounds().origin.y, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(kids[1].bounds().origin.x, 60.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(kids[1].bounds().origin.y, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(kids[2].bounds().origin.x, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(kids[2].bounds().origin.y, 30.0F, 1e-4F);
 }
 
-static void test_grid_layout_bounded() {
-    // 4 个 50x50 子项，2 列，间距 8，父约束有界宽 200。
-    Grid g({FixedBox{}, FixedBox{}, FixedBox{}, FixedBox{}}, 2, 8.0F);
-    constexpr BuildContext ctx;
-    g.mount(ctx);
-    constexpr Constraints c{.min = Size{.width = 0, .height = 0},
-                            .max = Size{.width = 200.0F, .height = Size::infinity().height}};
-    const Size s = g.layout(c, ctx);
-    // cell_w = (200 - 8) / 2 = 96；子项自然宽 50 → col_w=[50,50]；
-    // total_w = 50 + 50 + 8 = 108；两行 total_h = 50 + 50 + 8 = 108。
-    AURORA_TEST_CHECK_MSG(near_f(s.width, 108.0F), "Grid: bounded total width == 108");
-    AURORA_TEST_CHECK_MSG(near_f(s.height, 108.0F), "Grid: bounded total height == 108");
-
-    const auto kids = g.child_nodes();
-    AURORA_TEST_CHECK_MSG(kids.size() == 4, "Grid: four children retained");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(kids[0].bounds().origin.x, 0.0F) && near_f(kids[0].bounds().origin.y, 0.0F),
-                          "Grid: child0 at (0,0)");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(kids[1].bounds().origin.x, 58.0F) && near_f(kids[1].bounds().origin.y, 0.0F),
-                          "Grid: child1 at (58,0)");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(kids[2].bounds().origin.x, 0.0F) && near_f(kids[2].bounds().origin.y, 58.0F),
-                          "Grid: child2 at (0,58)");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(kids[3].bounds().origin.x, 58.0F) && near_f(kids[3].bounds().origin.y, 58.0F),
-                          "Grid: child3 at (58,58)");
+AURORA_TEST_CASE(grid_bounded_width_equalizes_cell_measurement) {
+    // 有界宽 200、2 列、gap=10 → 单元格测量宽 (200-10)/2=95：
+    // Expand 子项被撑到 95，总宽 95+95+10=200。
+    Grid grid{GridProps{.children = {box_expand_w(20.0F), box_expand_w(30.0F)}, .columns = 2, .gap = 10.0F}};
+    LayoutEngine::layout(grid, bounded(200.0F, 500.0F));
+    const Size s = grid.size();
+    AURORA_TEST_CHECK_NEAR(s.width, 200.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(grid.child_nodes()[0].bounds().size.width, 95.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(grid.child_nodes()[1].bounds().size.width, 95.0F, 1e-4F);
 }
 
-static void test_grid_serialize_roundtrip() {
-    Grid g;
-    g.columns = 3;
-    g.gap = 10.0F;
+AURORA_TEST_CASE(grid_handles_uneven_last_row) {
+    // 3 项 2 列：第二行只有 1 项，不崩溃且行高取该行实际子项。
+    Grid grid{GridProps{.children = {box(50.0F, 20.0F), box(50.0F, 20.0F), box(50.0F, 40.0F)},
+                        .columns = 2,
+                        .gap = 4.0F}};
+    LayoutEngine::layout(grid, bounded(500.0F, 500.0F));
+    const Size s = grid.size();
+    AURORA_TEST_CHECK_NEAR(s.width, 104.0F, 1e-4F);  // 50+50+4
+    AURORA_TEST_CHECK_NEAR(s.height, 64.0F, 1e-4F);  // 20+40+4
+    AURORA_TEST_CHECK_NEAR(grid.child_nodes()[2].bounds().origin.y, 24.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(set_columns_clamps_non_positive) {
+    Grid grid;
+    grid.set_columns(0);
+    AURORA_TEST_CHECK_EQ(grid.columns, 1);
+    grid.set_columns(-3);
+    AURORA_TEST_CHECK_EQ(grid.columns, 1);
+    grid.set_columns(4);
+    AURORA_TEST_CHECK_EQ(grid.columns, 4);
+    grid.set_gap(-1.0F);
+    AURORA_TEST_CHECK_NEAR(grid.gap, -1.0F, 0.0F);  // gap 不钳制（校验走 validate 语义/描述不变量）
+}
+
+AURORA_TEST_CASE(props_serialize_deserialize_roundtrip) {
+    Grid src{GridProps{.columns = 3, .gap = 8.0F}};
     Json props;
-    g.serialize_props(props);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(props["columns"].get<int>() == 3, "Grid: serialize_props writes columns");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(props["gap"].get<float>(), 10.0F), "Grid: serialize_props writes gap");
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["columns"].get<int>(), 3);
+    AURORA_TEST_CHECK_NEAR(props["gap"].get<float>(), 8.0F, 1e-6F);
 
-    Grid g2;
-    g2.deserialize_props(props);
-    AURORA_TEST_CHECK_MSG(g2.columns == 3, "Grid: deserialize_props restores columns");
-    AURORA_TEST_CHECK_MSG(near_f(g2.gap, 10.0F), "Grid: deserialize_props restores gap");
+    Grid dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(dst.columns, 3);
+    AURORA_TEST_CHECK_NEAR(dst.gap, 8.0F, 1e-6F);
+
+    // 反序列化钳制：columns<=0 回落 1。
+    props["columns"] = 0;
+    Grid clamp;
+    clamp.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(clamp.columns, 1);
 }
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== test_grid ===\n");
-    test_grid_columns();
-    test_grid_layout_bounded();
-    test_grid_serialize_roundtrip();
+AURORA_TEST_CASE(describe_reports_invariants) {
+    const auto d = Grid::describe_static();
+    AURORA_TEST_CHECK_EQ(std::string{d.name}, "Grid");
+    AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "multiple");
+    AURORA_TEST_REQUIRE_EQ(d.invariants.size(), 2U);
+    AURORA_TEST_CHECK_EQ(std::string{d.invariants[0]}, "columns >= 1");
 }
 
 }  // namespace aurora::test_cases::utest_grid

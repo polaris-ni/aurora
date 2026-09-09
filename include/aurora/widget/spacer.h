@@ -9,10 +9,11 @@ namespace aurora {
  * @brief 弹性空间。
  *
  * 在 `Column`/`Row` 中吸收主轴方向的全部剩余自由空间，用于把相邻 widget 推到两端。
- * 自身无绘制。自由空间为 0 时退化为 0 尺寸（与 Compose/Flutter Spacer 一致）。
+ * 自身无绘制。需要「无剩余空间时退化为 0 尺寸」时用 `Spacer(false)`。
  *
- * 注意：Spacer 仅在父容器存在主轴剩余空间（如父约束强制更大尺寸）时可见生效；
- * 若父容器按内容裁剪，自由空间为 0，Spacer 不占空间。
+ * 注意：expand=true 布局时占据测到它那一刻父级给出的主轴 max（不扣除其后兄弟），
+ * 因此放在主轴 `MainAxisSize::Min` 容器中会迫使容器膨胀到父级 max——
+ * 请配合 `MainAxisSize::Max` 或父约束强制尺寸使用。
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
  */

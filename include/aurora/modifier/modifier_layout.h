@@ -4,6 +4,7 @@
 /// @brief 布局修饰节点（Layout 切片）：Padding / PaddingEdges / FlexWeight / SizeModifier。
 /// 本文件为 modifier.h 的子切片；消费者通常直接 #include "aurora/modifier/modifier.h"。
 
+#include "aurora/core/diagnostics.h"
 #include "aurora/modifier/modifier_base.h"
 
 namespace aurora {

@@ -1,427 +1,270 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/preferences/preferences.h
-/// 测试说明: preferences 单元测试（单进程段；多进程并发段见 utest_preferences_multiproc）
-///
-
-// 目标源单元：Preferences + Preferences
-// 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
+/// 测试说明: Preferences 内存/文件双模式、显式 flush/reload、点号路径助手、墓碑删除与清空纪元、分组作用域、watch/binding 响应式、单例与并发冒烟
 
 #include <chrono>
-#include <cstdio>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <thread>
 #include <vector>
 
-#include "aurora/aurora.h"
-#include "aurora/core/log.h"
-#include "aurora/core/platform.h"
 #include "aurora/preferences/preferences.h"
-#include "aurora_test_harness.h"
-
-namespace aurora::tests::sec_preferences {
-using preferences::Preferences;
-
-static auto run(int argc, char **argv) -> int {
-    (void)argc;
-    (void)argv;
-    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "aurora_prefs_test";
-    std::error_code ec;
-    std::filesystem::remove_all(dir, ec);
-    std::filesystem::create_directories(dir, ec);
-
-    // 1. 内存模式：未指定文件位置 → 仅内存，flush 失败
-    {
-        Preferences mem;
-        AURORA_TEST_CHECK(!mem.is_persistent());
-        mem.set("theme", std::string("dark"));
-        AURORA_TEST_CHECK(mem.get("theme", std::string("light")) == "dark");
-        AURORA_TEST_CHECK(!mem.flush().ok());
-        AURORA_TEST_CHECK(!mem.reload().ok());
-    }
-
-    // 2. 文件模式：显式指定存储位置，初始为空；set 不自动写文件
-    const auto file = dir / "config.json";
-    {
-        Preferences p(file);
-        AURORA_TEST_CHECK(p.is_persistent());
-        AURORA_TEST_CHECK(p.file_path() == file);
-        AURORA_TEST_CHECK(!p.contains("volume"));
-        p.set("volume", 7);
-        p.set("enabled", true);
-        p.set("name", std::string("aurora"));
-        AURORA_TEST_CHECK(!std::filesystem::exists(file));  // set 仅更新内存
-        AURORA_TEST_CHECK(p.flush().ok());  // 主动刷新到文件
-        AURORA_TEST_CHECK(std::filesystem::exists(file));
-    }
-
-    // 3. 重新加载：新实例从文件恢复内容；缺失键回退默认值
-    {
-        Preferences p(file);
-        AURORA_TEST_CHECK(p.get("volume", 0) == 7);
-        AURORA_TEST_CHECK(p.get("enabled", false) == true);
-        AURORA_TEST_CHECK(p.get("name", std::string("")) == "aurora");
-        AURORA_TEST_CHECK(p.get("missing", 42) == 42);
-    }
-
-    // 4. 不同位置 → 不同文件，互不干扰
-    {
-        const auto file2 = dir / "sub" / "other.json";
-        Preferences p(file2);
-        p.set("x", 1);
-        AURORA_TEST_CHECK(!std::filesystem::exists(file2));
-        AURORA_TEST_CHECK(p.flush().ok());
-        AURORA_TEST_CHECK(std::filesystem::exists(file2));
-
-        Preferences p1(file);
-        AURORA_TEST_CHECK(p1.get("x", -1) == -1);  // 不受影响
-    }
-
-    // 5. watch 返回的 State 随 set 更新，并在重新加载后反映文件值
-    {
-        Preferences p(dir / "watch.json");
-        auto s = p.watch("counter", 0);
-        AURORA_TEST_CHECK(s->get() == 0);
-        p.set("counter", 5);
-        AURORA_TEST_CHECK(s->get() == 5);
-        AURORA_TEST_CHECK(p.flush().ok());
-
-        Preferences p2(dir / "watch.json");
-        auto s2 = p2.watch("counter", 0);
-        AURORA_TEST_CHECK(s2->get() == 5);
-    }
-
-    // 6. binding 双向：写回内部 State（响应式），持久化需经 prefs.set + flush
-    {
-        Preferences p(dir / "bind.json");
-        auto b = p.binding("flag", false);
-        AURORA_TEST_CHECK(b.get() == false);
-        b.set(true);
-        AURORA_TEST_CHECK(b.get() == true);  // 响应式 State 已更新
-        AURORA_TEST_CHECK(p.get("flag", false) == false);  // 尚未经 prefs.set，内存 JSON 未变
-        p.set("flag", true);  // 经 set 写穿内存 JSON
-        AURORA_TEST_CHECK(p.get("flag", false) == true);
-    }
-
-    // 7. reload：内存修改后从文件恢复旧值
-    {
-        Preferences p(file);
-        p.set("volume", 100);  // 仅内存
-        AURORA_TEST_CHECK(p.get("volume", 0) == 100);
-        AURORA_TEST_CHECK(p.reload().ok());
-        AURORA_TEST_CHECK(p.get("volume", 0) == 7);  // 文件里仍是 7
-    }
-
-    // 8. 容器 / 对象值往返
-    {
-        Preferences p(dir / "obj.json");
-        p.set("tags", std::vector<std::string>{"a", "b"});
-        AURORA_TEST_CHECK(p.flush().ok());
-        Preferences p2(dir / "obj.json");
-        auto tags = p2.get<std::vector<std::string>>("tags", {});
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(tags.size() == 2 && tags[0] == "a" && tags[1] == "b");
-    }
-
-    // 9. with_location 自动创建目录
-    {
-        const auto loc = dir / "appdata";
-        Preferences p = Preferences::with_location("myapp", loc);
-        AURORA_TEST_CHECK(p.is_persistent());
-        p.set("k", 1);
-        AURORA_TEST_CHECK(p.flush().ok());
-        AURORA_TEST_CHECK(std::filesystem::exists(loc / "myapp.json"));
-    }
-
-    // 10. 类型不匹配 → 回退默认值
-    {
-        Preferences p(file);
-        AURORA_TEST_CHECK(p.get("volume", std::string("fb")) == "fb");  // volume 是 int 7
-    }
-
-    // 11. default_config_dir 返回有效目录
-    {
-        AURORA_TEST_CHECK(!Preferences::default_config_dir().empty());
-    }
-
-    // 12. 单例：同名返回同一实例；不同名返回不同实例
-    {
-        auto &a = Preferences::instance("singleton_test", dir);
-        auto &b = Preferences::instance("singleton_test", dir);
-        AURORA_TEST_CHECK(&a == &b);  // 全局唯一
-        auto &c = Preferences::instance("singleton_other", dir);
-        AURORA_TEST_CHECK(&a != &c);
-        a.set("singleton_key", 123);
-        AURORA_TEST_CHECK(b.get("singleton_key", 0) == 123);  // 经单例共享
-    }
-
-    // 13. 多线程读写安全：并发 set 不同键，flush 后全部落盘、无数据竞争
-    {
-        auto &p = Preferences::instance("concurrent_test", dir);
-        constexpr int n = 8;
-        std::vector<std::thread> ts;
-        ts.reserve(n);
-        for (int i = 0; i < n; ++i) {
-            ts.emplace_back([&p, i]() -> void { p.set("k" + std::to_string(i), i); });
-        }
-        for (auto &t : ts) {
-            t.join();
-        }
-        AURORA_TEST_CHECK(p.flush().ok());
-        // 重新加载验证全部键均无丢失
-        Preferences p2(dir / "concurrent_test.json");
-        for (int i = 0; i < n; ++i) {
-            AURORA_TEST_CHECK(p2.get("k" + std::to_string(i), -1) == i);
-        }
-    }
-
-    // 14. 进程安全：连续两次 flush 不互锁（文件锁正确释放）
-    {
-        auto &p = Preferences::instance("lock_test", dir);
-        p.set("x", 1);
-        AURORA_TEST_CHECK(p.flush().ok());
-        p.set("x", 2);
-        AURORA_TEST_CHECK(p.flush().ok());
-    }
-
-    // 15. 可靠删除语义（单进程下的墓碑/版本基础）：删除可持久化、删除后重建可恢复。
-    {
-        auto &p = Preferences::instance("delete_test", dir);
-        p.set("gone", 1);
-        p.set("alive", 2);
-        AURORA_TEST_CHECK(p.flush().ok());
-
-        p.remove("gone");
-        AURORA_TEST_CHECK(p.get("gone", -1) == -1);  // 内存立即不可见
-        AURORA_TEST_CHECK(p.flush().ok());
-
-        Preferences p2(dir / "delete_test.json");
-        AURORA_TEST_CHECK(p2.reload().ok());
-        AURORA_TEST_CHECK(p2.get("gone", -1) == -1);  // 落盘后删除持久化
-        AURORA_TEST_CHECK(p2.get("alive", -1) == 2);  // 其他键不受影响
-
-        // 删除后重建：set 应取消墓碑并恢复可见
-        p2.set("gone", 99);
-        AURORA_TEST_CHECK(p2.flush().ok());
-        Preferences p3(dir / "delete_test.json");
-        AURORA_TEST_CHECK(p3.reload().ok());
-        AURORA_TEST_CHECK(p3.get("gone", -1) == 99);  // 重建成功
-    }
-
-    // 16. Binding 删除路径：binding.remove() 经注入的删除回调删除持久化键（可靠语义）。
-    {
-        auto &p = Preferences::instance("binding_del_test", dir);
-        p.set("temp_key", 7);
-        AURORA_TEST_CHECK(p.flush().ok());
-
-        auto b = p.binding<int>("temp_key", 0);
-        AURORA_TEST_CHECK(b.bound());
-        AURORA_TEST_CHECK(b.removable());  // Preferences::binding 注入了删除回调
-        AURORA_TEST_CHECK(b.get() == 7);  // 绑定可见当前值
-
-        b.remove();  // 经回调删除对应键（内存即不可见）
-        AURORA_TEST_CHECK(p.get("temp_key", -1) == -1);
-
-        // 纯 State 绑定（无 Preferences 注入）remove() 为空操作且不崩溃。
-        State bare{42};
-        Binding bare_b(bare);
-        AURORA_TEST_CHECK(!bare_b.removable());
-        bare_b.remove();  // 安全空操作
-        AURORA_TEST_CHECK(bare.get() == 42);
-
-        // 落盘后，删除在另一实例上仍可见（墓碑跨进程可靠删除）。
-        AURORA_TEST_CHECK(p.flush().ok());
-        Preferences p2(dir / "binding_del_test.json");
-        AURORA_TEST_CHECK(p2.reload().ok());
-        AURORA_TEST_CHECK(p2.get("temp_key", -1) == -1);
-    }
-
-    std::filesystem::remove_all(dir, ec);
-    return 0;  // 进程内段：断言结果已由 AURORA_TEST_CHECK 记录，返回码仅供上层 rc 聚合，避免 int run 无返回值 UB
-}
-}  // namespace aurora::tests::sec_preferences
-
-namespace aurora::tests::sec_preferences_group {
-using preferences::Preferences;
-
-static auto run(int argc, char **argv) -> int {
-    (void)argc;
-    (void)argv;
-    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "aurora_prefs_group_test";
-    std::error_code ec;
-    std::filesystem::remove_all(dir, ec);
-    std::filesystem::create_directories(dir, ec);
-
-    // 1. 分组内 set/get/contains/keys；根作用域不含分组键
-    {
-        Preferences p(dir / "g1.json");
-        auto ui = p.group("ui");
-        ui.set("theme", std::string("dark"));
-        ui.set("font_size", 14);
-        AURORA_TEST_CHECK(ui.get("theme", std::string("light")) == "dark");
-        AURORA_TEST_CHECK(ui.get("font_size", 0) == 14);
-        AURORA_TEST_CHECK(ui.contains("theme"));
-        AURORA_TEST_CHECK(!ui.contains("missing"));
-        auto ks = ui.keys();
-        AURORA_TEST_CHECK(ks.size() == 2);
-        // 根作用域看不到分组内的键（分组键带前缀）；但根含分组容器名 "ui"
-        AURORA_TEST_CHECK(!p.contains("theme"));
-        auto root_keys = p.keys();
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(root_keys.size() == 1 && root_keys[0] == "ui");
-    }
-
-    // 2. 链式嵌套分组
-    {
-        Preferences p(dir / "g2.json");
-        p.group("ui").group("editor").set("font", std::string("Mono"));
-        p.group("ui").group("editor").set("size", 12);
-        AURORA_TEST_CHECK(p.group("ui").group("editor").get("font", std::string("")) == "Mono");
-        AURORA_TEST_CHECK(p.group("ui").group("editor").get("size", 0) == 12);
-        // 中间分组可见子分组名
-        auto ui_keys = p.group("ui").keys();
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(ui_keys.size() == 1 && ui_keys[0] == "editor");
-        auto ed_keys = p.group("ui").group("editor").keys();
-        AURORA_TEST_CHECK(ed_keys.size() == 2);
-    }
-
-    // 3. watch 作用域隔离：分组 State 与根、其他分组相互独立
-    {
-        Preferences p(dir / "g3.json");
-        auto s_root = p.watch("theme", std::string("light"));
-        auto s_ui = p.group("ui").watch("theme", std::string("light"));
-        p.set("theme", std::string("dark"));
-        AURORA_TEST_CHECK(s_root->get() == "dark");
-        AURORA_TEST_CHECK(s_ui->get() == "light");  // 分组独立
-        p.group("ui").set("theme", std::string("blue"));
-        AURORA_TEST_CHECK(s_ui->get() == "blue");
-        AURORA_TEST_CHECK(s_root->get() == "dark");  // 根不受影响
-    }
-
-    // 4. 分组 remove 墓碑语义（跨进程可靠删除 + 删除后重建）
-    {
-        auto &p = Preferences::instance("group_del_test", dir);
-        p.group("ui").set("a", 1);
-        p.group("ui").set("b", 2);
-        p.group("ui").set("c", 3);
-        AURORA_TEST_CHECK(p.flush().ok());
-
-        p.group("ui").remove("b");
-        AURORA_TEST_CHECK(p.group("ui").get("b", -1) == -1);
-        AURORA_TEST_CHECK(p.flush().ok());
-
-        Preferences p2(dir / "group_del_test.json");
-        AURORA_TEST_CHECK(p2.reload().ok());
-        AURORA_TEST_CHECK(p2.group("ui").get("b", -1) == -1);  // 墓碑跨进程删除
-        AURORA_TEST_CHECK(p2.group("ui").get("a", -1) == 1);
-        AURORA_TEST_CHECK(p2.group("ui").get("c", -1) == 3);
-
-        // 删除后重建：set 取消墓碑
-        p2.group("ui").set("b", 99);
-        AURORA_TEST_CHECK(p2.flush().ok());
-        Preferences p3(dir / "group_del_test.json");
-        AURORA_TEST_CHECK(p3.reload().ok());
-        AURORA_TEST_CHECK(p3.group("ui").get("b", -1) == 99);
-    }
-
-    // 5. 分组 clear 仅清子树（不影响其他分组与顶层键）
-    {
-        auto &p = Preferences::instance("group_clear_test", dir);
-        p.set("top", 1);
-        p.group("ui").set("a", 2);
-        p.group("ui").set("b", 3);
-        p.group("net").set("x", 9);
-        AURORA_TEST_CHECK(p.flush().ok());
-
-        p.group("ui").clear();
-        AURORA_TEST_CHECK(p.group("ui").get("a", -1) == -1);
-        AURORA_TEST_CHECK(p.group("ui").get("b", -1) == -1);
-        AURORA_TEST_CHECK(p.get("top", -1) == 1);
-        AURORA_TEST_CHECK(p.group("net").get("x", -1) == 9);
-        AURORA_TEST_CHECK(p.flush().ok());
-
-        Preferences p2(dir / "group_clear_test.json");
-        AURORA_TEST_CHECK(p2.reload().ok());
-        AURORA_TEST_CHECK(p2.group("ui").get("a", -1) == -1);
-        AURORA_TEST_CHECK(p2.group("ui").get("b", -1) == -1);
-        AURORA_TEST_CHECK(p2.get("top", -1) == 1);
-        AURORA_TEST_CHECK(p2.group("net").get("x", -1) == 9);
-    }
-
-    // 6. 分组与扁平键共存；flush 后以嵌套 JSON 持久化、重新加载可恢复
-    {
-        Preferences p(dir / "mixed.json");
-        p.set("flat_key", std::string("v"));
-        p.group("ui").set("theme", std::string("dark"));
-        p.group("ui").group("editor").set("font", std::string("Mono"));
-        AURORA_TEST_CHECK(p.flush().ok());
-
-        Preferences p2(dir / "mixed.json");
-        AURORA_TEST_CHECK(p2.get("flat_key", std::string("")) == "v");
-        AURORA_TEST_CHECK(p2.group("ui").get("theme", std::string("")) == "dark");
-        AURORA_TEST_CHECK(p2.group("ui").group("editor").get("font", std::string("")) == "Mono");
-    }
-
-    // 7. 旧扁平文件格式兼容：加载旧格式后仍能正常工作并新增分组
-    {
-        const auto flat_file = dir / "legacy_flat.json";
-        {
-            std::ofstream o(flat_file, std::ios::binary | std::ios::trunc);
-            o << R"({"theme":"dark","volume":7})";
-        }
-        Preferences p(flat_file);
-        AURORA_TEST_CHECK(p.get("theme", std::string("")) == "dark");
-        AURORA_TEST_CHECK(p.get("volume", 0) == 7);
-        // 在旧扁平文件上新增分组 → 应合并为嵌套结构
-        p.group("ui").set("lang", std::string("zh"));
-        AURORA_TEST_CHECK(p.flush().ok());
-        Preferences p2(flat_file);
-        AURORA_TEST_CHECK(p2.get("theme", std::string("")) == "dark");
-        AURORA_TEST_CHECK(p2.group("ui").get("lang", std::string("")) == "zh");
-    }
-
-    // 8. 分组 binding 删除路径（可靠墓碑跨进程删除）
-    {
-        auto &p = Preferences::instance("group_bind_test", dir);
-        p.group("ui").set("temp", 7);
-        AURORA_TEST_CHECK(p.flush().ok());
-
-        auto b = p.group("ui").binding<int>("temp", 0);
-        AURORA_TEST_CHECK(b.bound());
-        AURORA_TEST_CHECK(b.removable());
-        AURORA_TEST_CHECK(b.get() == 7);
-
-        b.remove();  // 经回调删除对应分组键
-        AURORA_TEST_CHECK(p.group("ui").get("temp", -1) == -1);
-        AURORA_TEST_CHECK(p.flush().ok());
-
-        Preferences p2(dir / "group_bind_test.json");
-        AURORA_TEST_CHECK(p2.reload().ok());
-        AURORA_TEST_CHECK(p2.group("ui").get("temp", -1) == -1);
-    }
-
-    std::filesystem::remove_all(dir, ec);
-    return 0;  // 进程内段：断言结果已由 AURORA_TEST_CHECK 记录，返回码仅供上层 rc 聚合，避免 int run 无返回值 UB
-}
-}  // namespace aurora::tests::sec_preferences_group
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_preferences {
 
-AURORA_TEST() {
-    const int argc = aurora::testing::pass_argc();
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast) 测试入口：pass_argv() 返回 const char**，此处只读索引
-    // argv[1] 不修改，去除 const 仅为满足签名
-    auto *const argv = const_cast<char **>(aurora::testing::pass_argv());  // NOLINT
-    int rc = 0;
-    rc += aurora::tests::sec_preferences::run(argc, argv);
-    rc += aurora::tests::sec_preferences_group::run(argc, argv);
-    AURORA_TEST_CHECK(rc == 0);
+namespace prefs = aurora::preferences;
+namespace m = aurora::testing::matchers;  // 匹配器工厂别名
+
+/// @brief 本用例的临时目录：框架每用例接管 TMP/TEMP/TMPDIR，temp_directory_path() 已是
+/// 用例唯一目录，再挂固定子目录并先行清场，保证幂等与跨用例/跨进程并行安全。
+[[nodiscard]] auto make_case_dir(std::string_view tag) -> std::filesystem::path {
+    return std::filesystem::temp_directory_path() / "aurora_utest_prefs" / std::filesystem::path{tag};
+}
+
+AURORA_TEST_CASE(memory_mode_basic_get_set) {
+    // 内存模式：未绑定文件；缺失键/类型不匹配回退 fallback；flush/reload 返回结构化错误。
+    prefs::Preferences p;
+    AURORA_TEST_CHECK(!p.is_persistent());
+    AURORA_TEST_CHECK(p.file_path().empty());
+
+    AURORA_TEST_CHECK_EQ(p.get<int>("missing", 5), 5);
+    p.set("count", 42);
+    AURORA_TEST_CHECK_EQ(p.get<int>("count", 0), 42);
+    AURORA_TEST_CHECK(p.contains("count"));
+    p.set("flag", std::string("on"));
+    AURORA_TEST_CHECK_EQ(p.get<std::string>("flag", ""), std::string("on"));
+    AURORA_TEST_CHECK_EQ(p.get<int>("flag", -1), -1);  // string 存储读 int → 回退
+    const std::vector<int> nums{1, 2, 3};
+    p.set("nums", nums);
+    AURORA_TEST_CHECK(p.get<std::vector<int>>("nums", {}) == nums);
+    AURORA_TEST_CHECK_THAT(p.keys(), m::contains(std::string{"count"}));
+
+    AURORA_TEST_CHECK(!p.flush().ok());  // 内存模式不支持落盘
+    AURORA_TEST_CHECK(!p.reload().ok());  // 内存模式不支持重载
+    AURORA_TEST_CHECK(!p.last_load_error().has_value());
+}
+
+AURORA_TEST_CASE(path_helpers_flatten_nested_keys) {
+    // 公共点号路径助手：嵌套寻址写读删 + flatten 拍平（分组持久化的底层语义）。
+    aurora::Json root = aurora::Json::object();
+    prefs::resolve_set(root, "ui.theme", aurora::Json{"dark"});
+    prefs::resolve_set(root, "ui.editor.font", 14);
+    AURORA_TEST_CHECK_EQ(prefs::resolve_get(root, "ui.theme"), aurora::Json{"dark"});
+    AURORA_TEST_CHECK_EQ(prefs::resolve_get(root, "ui.editor.font").get<int>(), 14);
+    AURORA_TEST_CHECK(prefs::resolve_get(root, "ui.missing").is_null());
+    AURORA_TEST_CHECK(prefs::resolve_get(root, "a.b.c").is_null());  // 路径中断返回 null
+    prefs::resolve_erase(root, "ui.theme");
+    AURORA_TEST_CHECK(prefs::resolve_get(root, "ui.theme").is_null());
+    AURORA_TEST_CHECK(!prefs::resolve_get(root, "ui.editor.font").is_null());  // 兄弟键不受影响
+
+    const auto flat = prefs::flatten(root);
+    AURORA_TEST_CHECK_THAT(flat, m::size_is(1));
+    AURORA_TEST_CHECK(flat.contains("ui.editor.font"));
+}
+
+AURORA_TEST_CASE(file_mode_flush_and_reload_roundtrip) {
+    // 文件模式：set 不写穿、flush 显式落盘、构造即加载、reload 丢弃本地未落盘修改以磁盘为准。
+    const auto dir = make_case_dir("flush_reload");
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir);
+
+    // with_location 自动补 .json；auto_create_dir 默认开启 → 深层目录在 flush 时自动创建。
+    prefs::Preferences writer = prefs::Preferences::with_location("cfg", dir / "nested" / "deep");
+    AURORA_TEST_CHECK(writer.is_persistent());
+    AURORA_TEST_CHECK_EQ(writer.file_path().filename(), std::filesystem::path{"cfg.json"});
+    writer.set("theme", std::string("dark"));
+    writer.set("volume", 0.5);
+    AURORA_TEST_CHECK(!std::filesystem::exists(writer.file_path()));  // set 只写内存
+    AURORA_TEST_REQUIRE(writer.flush().ok());  // 显式提交落盘
+    AURORA_TEST_CHECK(std::filesystem::exists(writer.file_path()));
+
+    prefs::Preferences reader{writer.file_path()};  // 另一实例构造即加载
+    AURORA_TEST_CHECK_EQ(reader.get<std::string>("theme", "light"), std::string("dark"));
+    AURORA_TEST_CHECK_NEAR(reader.get<double>("volume", 0.0), 0.5, 1e-9);
+    AURORA_TEST_CHECK(!reader.last_load_error().has_value());
+
+    // reload 契约：丢弃本地未落盘修改，完全以磁盘为准。
+    writer.set("theme", std::string("pending-local"));  // 未 flush
+    reader.set("theme", std::string("from-reader"));
+    AURORA_TEST_REQUIRE(reader.flush().ok());
+    AURORA_TEST_REQUIRE(writer.reload().ok());
+    AURORA_TEST_CHECK_EQ(writer.get<std::string>("theme", ""), std::string("from-reader"));
+    std::filesystem::remove_all(dir, ec);
+}
+
+AURORA_TEST_CASE(corrupt_file_yields_error_and_empty_store) {
+    // 错误路径：损坏 JSON → 构造期记入 last_load_error、存储为空；flush 以内存内容自愈覆盖。
+    const auto dir = make_case_dir("corrupt");
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir);
+    const auto file = dir / "broken.json";
+    {
+        std::ofstream out{file, std::ios::binary};
+        out << "{not-valid-json";
+    }
+    prefs::Preferences p{file};
+    AURORA_TEST_REQUIRE(p.last_load_error().has_value());  // 构造即加载失败可见
+    AURORA_TEST_CHECK(p.keys().empty());
+    AURORA_TEST_CHECK_EQ(p.get<int>("any", -1), -1);
+    AURORA_TEST_REQUIRE(p.flush().ok());  // 以空内存覆盖损坏文件
+    prefs::Preferences fresh{file};
+    AURORA_TEST_CHECK(!fresh.last_load_error().has_value());
+    std::filesystem::remove_all(dir, ec);
+}
+
+AURORA_TEST_CASE(remove_and_clear_tombstone_semantics) {
+    // remove 写墓碑并随 flush 持久化（阻止新实例复活）；clear 置全局清空纪元，纪元后新键存活。
+    const auto dir = make_case_dir("tombstone");
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir);
+    const auto file = dir / "prefs.json";
+
+    prefs::Preferences p{file};
+    p.set("gone", 1);
+    p.set("kept", 2);
+    AURORA_TEST_REQUIRE(p.flush().ok());
+    p.remove("gone");
+    AURORA_TEST_CHECK(!p.contains("gone"));
+    AURORA_TEST_REQUIRE(p.flush().ok());  // 墓碑随 flush 持久化
+    {
+        prefs::Preferences fresh{file};
+        AURORA_TEST_CHECK(!fresh.contains("gone"));  // 墓碑阻止复活
+        AURORA_TEST_CHECK(fresh.contains("kept"));
+    }
+    p.set("gone", 42);  // 重新创建同键：取消墓碑
+    AURORA_TEST_CHECK(p.contains("gone"));
+    AURORA_TEST_REQUIRE(p.flush().ok());
+    {
+        prefs::Preferences fresh{file};
+        AURORA_TEST_CHECK_EQ(fresh.get<int>("gone", -1), 42);
+    }
+
+    // clear：全局清空纪元；清空后新写入的键不受纪元影响。
+    prefs::Preferences q{dir / "clear.json"};
+    q.set("a", 1);
+    q.set("b", 2);
+    q.clear();
+    AURORA_TEST_CHECK(q.keys().empty());
+    AURORA_TEST_CHECK(!q.contains("a"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));  // 保证新写入时间戳严格晚于清空纪元
+    q.set("post", 3);
+    AURORA_TEST_REQUIRE(q.flush().ok());
+    {
+        prefs::Preferences fresh{dir / "clear.json"};
+        const auto keys = fresh.keys();
+        AURORA_TEST_CHECK_THAT(keys, m::contains(std::string{"post"}));  // 纪元后新键存活
+        AURORA_TEST_CHECK_THAT(keys, m::negated(m::contains(std::string{"a"})));  // 旧键被清空纪元清除
+        AURORA_TEST_CHECK_THAT(keys, m::negated(m::contains(std::string{"b"})));
+        AURORA_TEST_CHECK_EQ(fresh.get<int>("post", -1), 3);
+    }
+    std::filesystem::remove_all(dir, ec);
+}
+
+AURORA_TEST_CASE(group_scope_nested_and_isolation) {
+    // 分组作用域：读写/删除限定在前缀内，以嵌套 JSON 表达；分组 clear 不影响顶层键。
+    prefs::Preferences p;  // 内存模式足以覆盖分组作用域逻辑
+    p.set("top", 1);
+    p.group("ui").set("theme", std::string("dark"));
+    p.group("ui").set("font", 14);
+    p.group("ui").group("editor").set("autosave", true);
+
+    AURORA_TEST_CHECK_EQ(p.group("ui").get<std::string>("theme", "light"), std::string("dark"));
+    AURORA_TEST_CHECK_EQ(p.group("ui").get<int>("font", 0), 14);
+    AURORA_TEST_CHECK_EQ(p.get<std::string>("ui.theme", ""), std::string("dark"));  // 与复合键互通
+    AURORA_TEST_CHECK(p.contains("ui.theme"));
+    AURORA_TEST_CHECK(!p.contains("theme"));  // 裸键对外层不可见
+    AURORA_TEST_CHECK(p.group("ui").group("editor").contains("autosave"));
+    AURORA_TEST_CHECK(p.group("ui").contains("editor"));
+
+    const auto ui_keys = p.group("ui").keys();  // 分组内直接子键不含前缀
+    AURORA_TEST_CHECK_THAT(ui_keys, m::contains(std::string{"theme"}));
+    AURORA_TEST_CHECK_THAT(ui_keys, m::contains(std::string{"font"}));
+    AURORA_TEST_CHECK_THAT(ui_keys, m::contains(std::string{"editor"}));
+
+    p.group("ui").remove("theme");
+    AURORA_TEST_CHECK(!p.group("ui").contains("theme"));
+    AURORA_TEST_CHECK(p.group("ui").contains("font"));  // 其余键不受影响
+    p.group("ui").clear();
+    AURORA_TEST_CHECK(!p.group("ui").contains("font"));
+    AURORA_TEST_CHECK(!p.group("ui").group("editor").contains("autosave"));
+    AURORA_TEST_CHECK_EQ(p.get<int>("top", -1), 1);  // 顶层键不受分组 clear 影响
+}
+
+AURORA_TEST_CASE(watch_state_receives_updates) {
+    // watch：惰性创建 State<T>，set 推送订阅者；初始值取既有存储；同键同类型复用同一 State。
+    prefs::Preferences p;
+    auto state = p.watch<int>("counter", 0);
+    AURORA_TEST_REQUIRE(state != nullptr);
+    AURORA_TEST_CHECK_EQ(state->get(), 0);  // 初始为 fallback
+    p.set("counter", 5);  // 写入推送已订阅的 State
+    AURORA_TEST_CHECK_EQ(state->get(), 5);
+
+    p.set("volume", 7);
+    auto existing = p.watch<int>("volume", 0);
+    AURORA_TEST_CHECK_EQ(existing->get(), 7);  // 初始值来自存储而非 fallback
+
+    AURORA_TEST_CHECK(p.watch<int>("counter", 0) == state);  // 缓存复用
+}
+
+AURORA_TEST_CASE(binding_remove_deletes_key) {
+    // binding 实际语义（以运行时行为为准）：Binding 是 watch State 的单向下游视图——
+    // binding.set 只更新 State（控件侧可见），不写回存储；存储写回仍走 p.set。
+    // remove() 触发注入的删除回调（墓碑语义），删除存储键。
+    prefs::Preferences p;
+    auto binding = p.binding<std::string>("session", std::string(""));
+    AURORA_TEST_CHECK(binding.bound());
+    AURORA_TEST_CHECK(binding.removable());  // 已注入删除回调
+    binding.set(std::string("token"));
+    AURORA_TEST_CHECK_EQ(binding.get(), std::string("token"));  // State 侧可见
+    AURORA_TEST_CHECK(!p.contains("session"));  // 不写回存储
+    p.set("session", std::string("token"));  // 存储写回走 set_impl
+    AURORA_TEST_CHECK_EQ(p.get<std::string>("session", ""), std::string("token"));
+    binding.remove();
+    AURORA_TEST_CHECK(!p.contains("session"));
+    // 契约：remove 后 Binding 失效（上游 State 随注册表清除），不再 get/set。
+}
+
+AURORA_TEST_CASE(singleton_same_name_returns_same_instance) {
+    // 单例冒烟：同名（唯一 name + 用例级临时目录，避免跨用例干扰）返回同一实例；只读不改全局状态。
+    const auto dir = make_case_dir("singleton");
+    std::error_code ec;
+    std::filesystem::create_directories(dir);
+    const std::string name = "utest_singleton_cfg";
+    auto &first = prefs::Preferences::instance(name, dir);
+    auto &second = prefs::Preferences::instance(name, dir);
+    AURORA_TEST_CHECK(&first == &second);
+    AURORA_TEST_CHECK(first.is_persistent());
+    AURORA_TEST_CHECK_EQ(first.file_path().filename(), std::filesystem::path{"utest_singleton_cfg.json"});
+    std::filesystem::remove_all(dir, ec);  // 实例仍留在注册表，但无打开句柄，可安全清理
+}
+
+AURORA_TEST_CASE(concurrent_read_write_smoke) {
+    // 并发冒烟：每线程独占写自己的键（最终值必为该线程最后一次写入），只验证无崩溃与串行化正确。
+    prefs::Preferences p;
+    constexpr int kThreads = 4;
+    constexpr int kIters = 50;
+    std::vector<std::thread> workers;
+    for (int t = 0; t < kThreads; ++t) {
+        workers.emplace_back([&p, t] {
+            for (int i = 1; i <= kIters; ++i) {
+                p.set("w" + std::to_string(t), i * 10 + t);
+            }
+        });
+    }
+    for (auto &worker : workers) {
+        worker.join();
+    }
+    for (int t = 0; t < kThreads; ++t) {
+        AURORA_TEST_CHECK_EQ(p.get<int>("w" + std::to_string(t), -1), kIters * 10 + t);
+    }
+    AURORA_TEST_CHECK_THAT(p.keys(), m::size_is(static_cast<std::size_t>(kThreads)));
 }
 
 }  // namespace aurora::test_cases::utest_preferences

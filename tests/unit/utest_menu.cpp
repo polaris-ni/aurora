@@ -1,116 +1,166 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/app/menu.h
-/// 测试说明: menu 单元测试
-///
+/// 测试说明: 覆盖 MenuItem 声明式数据模型——默认字段值、带动作构造与回调触发、
+/// 分隔符工厂、子菜单判定与条目树构建/递归遍历、checkable/enabled/shortcut_text 等状态字段、
+/// 值语义复制保留回调
 
-// MERGED TEST 目标源单元：Menu（MenuItem 声明式菜单数据模型）。
-//
-// API 覆盖映射：
-//   MenuItem()                        -> test_default_fields
-//   MenuItem(text, action) / label    -> test_explicit_ctor
-//   MenuItem::on_click 调用           -> test_on_click_invoked
-//   MenuItem::separator_item()        -> test_separator_item
-//   MenuItem::is_submenu()/children   -> test_submenu
-//   checkable/checked/enabled 字段    -> test_state_flags
-//   shortcut_text/icon_                -> test_shortcut_and_icon
-
+#include <functional>
 #include <string>
+#include <vector>
 
 #include "aurora/app/menu.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_menu {
 
-namespace {
-
-void test_default_fields() {
+AURORA_TEST_CASE(default_item_fields) {
     const MenuItem item;
-    AURORA_TEST_CHECK(item.label.empty());
-    AURORA_TEST_CHECK(!item.on_click);
-    AURORA_TEST_CHECK(item.children.empty());
+
+    AURORA_TEST_CHECK_TRUE(item.label.empty());
+    AURORA_TEST_CHECK_FALSE(item.on_click != nullptr);
+    AURORA_TEST_CHECK_TRUE(item.children.empty());
     AURORA_TEST_CHECK_FALSE(item.separator);
     AURORA_TEST_CHECK_FALSE(item.checkable);
     AURORA_TEST_CHECK_FALSE(item.checked);
-    AURORA_TEST_CHECK(item.enabled);
-    AURORA_TEST_CHECK(item.shortcut_text.empty());
-    AURORA_TEST_CHECK(item.icon.empty());
+    AURORA_TEST_CHECK_TRUE(item.enabled);
+    AURORA_TEST_CHECK_TRUE(item.shortcut_text.empty());
+    AURORA_TEST_CHECK_TRUE(item.icon.empty());
     AURORA_TEST_CHECK_FALSE(item.is_submenu());
 }
 
-void test_explicit_ctor() {
-    bool clicked = false;
-    const MenuItem item{"Open", [&clicked]() -> void { clicked = true; }};
-    AURORA_TEST_CHECK_MSG(item.label == "Open", "label forwarded");
-    AURORA_TEST_CHECK(item.enabled);
+AURORA_TEST_CASE(labeled_item_invokes_action) {
+    int fired = 0;
+    MenuItem item("Open", [&fired] { ++fired; });
+
+    AURORA_TEST_CHECK_EQ(item.label, std::string{"Open"});
+    AURORA_TEST_CHECK_TRUE(item.enabled);
     item.on_click();
-    AURORA_TEST_CHECK(clicked);
+    AURORA_TEST_CHECK_EQ(fired, 1);
+
+    // 不带动作构造：回调为空。
+    MenuItem plain("About");
+    AURORA_TEST_CHECK_EQ(plain.label, std::string{"About"});
+    AURORA_TEST_CHECK_FALSE(plain.on_click != nullptr);
 }
 
-void test_on_click_invoked() {
-    int count = 0;
-    const MenuItem item{"Count", [&count]() -> void { ++count; }};
-    item.on_click();
-    item.on_click();
-    AURORA_TEST_CHECK_EQ(count, 2);
-}
+AURORA_TEST_CASE(separator_item_factory) {
+    const MenuItem sep = MenuItem::separator_item();
 
-void test_separator_item() {
-    const auto sep = MenuItem::separator_item();
-    AURORA_TEST_CHECK(sep.separator);
-    AURORA_TEST_CHECK(sep.label.empty());
-    AURORA_TEST_CHECK(!sep.on_click);
+    AURORA_TEST_CHECK_TRUE(sep.separator);
+    AURORA_TEST_CHECK_TRUE(sep.label.empty());
     AURORA_TEST_CHECK_FALSE(sep.is_submenu());
+    AURORA_TEST_CHECK_FALSE(sep.on_click != nullptr);
 }
 
-void test_submenu() {
-    MenuItem sub{"Sub"};
-    MenuItem parent{"Parent"};
-    parent.children.push_back(sub);
-    parent.children.push_back(MenuItem::separator_item());
-    AURORA_TEST_CHECK(parent.is_submenu());
-    AURORA_TEST_CHECK_EQ(parent.children.size(), static_cast<size_t>(2));
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    AURORA_TEST_CHECK_FALSE(parent.children[0].is_submenu());
+AURORA_TEST_CASE(submenu_detection_and_child_order) {
+    MenuItem file("File");
+    file.children.emplace_back("New");
+    file.children.emplace_back("Open");
 
-    MenuItem nested{"Nest"};
-    nested.children.emplace_back("Deeper");
-    parent.children.push_back(nested);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    AURORA_TEST_CHECK(parent.children[2].is_submenu());
+    // 有 children 即判为子菜单；条目按插入顺序保存。
+    AURORA_TEST_CHECK_TRUE(file.is_submenu());
+    AURORA_TEST_CHECK_EQ(file.children.size(), 2U);
+    AURORA_TEST_CHECK_EQ(file.children[0].label, std::string{"New"});
+    AURORA_TEST_CHECK_EQ(file.children[1].label, std::string{"Open"});
+
+    // 子项自身不是子菜单。
+    AURORA_TEST_CHECK_FALSE(file.children[0].is_submenu());
+
+    // 无 children 的普通项不是子菜单。
+    MenuItem plain("About");
+    AURORA_TEST_CHECK_FALSE(plain.is_submenu());
 }
 
-void test_state_flags() {
-    MenuItem item{"勾选项"};
-    item.checkable = true;
-    item.checked = true;
+AURORA_TEST_CASE(nested_menu_tree_traversal) {
+    // 声明式构建两级菜单树：File{New, sep, Exit}、Edit{Undo, sep, Redo}、Help{About}。
+    MenuItem file("File");
+    file.children.emplace_back("New");
+    file.children.push_back(MenuItem::separator_item());
+    file.children.emplace_back("Exit");
+
+    MenuItem edit("Edit");
+    edit.children.emplace_back("Undo");
+    edit.children.push_back(MenuItem::separator_item());
+    edit.children.emplace_back("Redo");
+
+    MenuItem help("Help");
+    help.children.emplace_back("About");
+
+    // 三级子菜单：Window{File 副本} 验证任意深度嵌套。
+    MenuItem window("Window");
+    window.children.push_back(file);
+
+    // 递归统计：叶子数 / 分隔符数。
+    const std::function<int(const MenuItem &)> count_all = [&](const MenuItem &item) -> int {
+        int n = 1;
+        for (const auto &c : item.children) {
+            n += count_all(c);
+        }
+        return n;
+    };
+    const std::function<int(const MenuItem &)> count_separators = [&](const MenuItem &item) -> int {
+        int n = item.separator ? 1 : 0;
+        for (const auto &c : item.children) {
+            n += count_separators(c);
+        }
+        return n;
+    };
+
+    AURORA_TEST_CHECK_EQ(count_all(file), 4);   // File + New + sep + Exit
+    AURORA_TEST_CHECK_EQ(count_all(edit), 4);   // Edit + Undo + sep + Redo
+    AURORA_TEST_CHECK_EQ(count_all(window), 5); // Window + File 子树
+    AURORA_TEST_CHECK_EQ(count_separators(window), 1);
+    AURORA_TEST_CHECK_EQ(count_all(help), 2);   // Help + About
+}
+
+AURORA_TEST_CASE(checkable_state_fields_roundtrip) {
+    MenuItem toggle("Show Grid");
+    AURORA_TEST_CHECK_FALSE(toggle.checkable);
+    AURORA_TEST_CHECK_FALSE(toggle.checked);
+
+    // 数据模型字段可直接赋值（渲染层消费勾选语义）。
+    toggle.checkable = true;
+    toggle.checked = true;
+    toggle.shortcut_text = "Ctrl+G";
+    toggle.icon = "grid";
+
+    AURORA_TEST_CHECK_TRUE(toggle.checkable);
+    AURORA_TEST_CHECK_TRUE(toggle.checked);
+    AURORA_TEST_CHECK_EQ(toggle.shortcut_text, std::string{"Ctrl+G"});
+    AURORA_TEST_CHECK_EQ(toggle.icon, std::string{"grid"});
+}
+
+AURORA_TEST_CASE(disabled_item_is_explicit_state) {
+    int fired = 0;
+    MenuItem item("Delete", [&fired] { ++fired; });
     item.enabled = false;
-    item.shortcut_text = "Ctrl+O";
-    item.icon = "open";
-    AURORA_TEST_CHECK(item.checkable && item.checked && !item.enabled);
-    AURORA_TEST_CHECK(item.shortcut_text == "Ctrl+O");
-    AURORA_TEST_CHECK(item.icon == "open");
-    // disabled 不影响数据模型语义（灰显是渲染层关注点）
-    AURORA_TEST_CHECK(!item.on_click);
+    item.shortcut_text = "Del";
+
+    // enabled=false 为显式数据标记（灰显语义由渲染层实现）；
+    // 数据模型本身不改写回调，仍可被宿主按 enabled 门控调用。
+    AURORA_TEST_CHECK_FALSE(item.enabled);
+    AURORA_TEST_CHECK_EQ(item.shortcut_text, std::string{"Del"});
+
+    // 宿主侧门控语义：enabled=false 时不调用回调。
+    if (item.enabled && item.on_click) {
+        item.on_click();
+    }
+    AURORA_TEST_CHECK_EQ(fired, 0);
 }
 
-void test_shortcut_and_icon() {
-    MenuItem item{"Save as", {}};
-    item.shortcut_text = "Shift+Ctrl+S";
-    AURORA_TEST_CHECK_MSG(item.shortcut_text == "Shift+Ctrl+S", "shortcut text kept");
-    item.icon.clear();
-    AURORA_TEST_CHECK(item.icon.empty());
-}
+AURORA_TEST_CASE(children_copy_preserves_callbacks) {
+    // 值语义：把带回调的条目复制进另一菜单的 children，回调随副本生效。
+    int fired = 0;
+    MenuItem item("Copy", [&fired] { ++fired; });
 
-}  // namespace
+    MenuItem menu("Edit");
+    menu.children.push_back(item);
 
-AURORA_TEST() {
-    test_default_fields();
-    test_explicit_ctor();
-    test_on_click_invoked();
-    test_separator_item();
-    test_submenu();
-    test_state_flags();
-    test_shortcut_and_icon();
+    item.label = "Changed";
+    AURORA_TEST_CHECK_EQ(menu.children[0].label, std::string{"Copy"});  // 深拷贝互不影响
+    AURORA_TEST_CHECK_TRUE(menu.children[0].on_click != nullptr);
+    menu.children[0].on_click();
+    AURORA_TEST_CHECK_EQ(fired, 1);
 }
 
 }  // namespace aurora::test_cases::utest_menu

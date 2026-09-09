@@ -66,13 +66,13 @@ class Inspector {
 
     // ── 交互模拟（新增）──
 
-    /// @brief 模拟点击 Widget（需要事件系统支持，当前返回 GeneralNotSupported）。
+    /// @brief 模拟点击 Widget：向该控件派发 PointerPress/Release 事件（以控件 bounds 中心为指针位置）。
     static auto simulate_click(Widget &w) -> Result<void>;
 
-    /// @brief 模拟滚动（需要事件系统支持，当前返回 GeneralNotSupported）。
+    /// @brief 模拟滚动：向该控件派发滚轮事件（位移 dx/dy）。
     static auto simulate_scroll(Widget &w, float dx, float dy) -> Result<void>;
 
-    /// @brief 模拟文本输入（需要事件系统支持，当前返回 GeneralNotSupported）。
+    /// @brief 模拟文本输入：向该控件派发文本输入事件。
     static auto simulate_text_input(Widget &w, std::string_view text) -> Result<void>;
 
     // ── 组件发现 ──

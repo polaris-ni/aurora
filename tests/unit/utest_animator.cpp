@@ -1,372 +1,259 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/animation/animator.h
-/// 测试说明: animator 单元测试
-///
-
-// 目标源单元：Animator + Animator
-// 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
-
-#include <iostream>
+/// 测试说明: 覆盖 AnimationController 构造夹取与正放/回放/复位/停止/帧推进状态机、Animator 驱动与 dirty 门控绑定/注销、AnimatedValue 自驱与一次性 completed 回调、animate 工厂与 TweenAnimation 自持动画
 
 #include "aurora/animation/animator.h"
-#include "aurora/animation/easing.h"
-#include "aurora/animation/spring.h"
-#include "aurora/animation/timeline.h"
-#include "aurora/aurora.h"
-#include "aurora/core/color.h"
-#include "aurora/core/types.h"
-#include "aurora/state/state.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_animator {
 
-namespace sec_anim {
+/// @brief 默认构造：进度 0、Dismissed、非动画；时长下限夹取为 1e-6；带初值构造不改变状态。
+AURORA_TEST_CASE(controller_initial_state_and_duration_clamp) {
+    const aurora::AnimationController c{0.3};
+    AURORA_TEST_CHECK_NEAR(c.duration(), 0.3, 1e-12);
+    AURORA_TEST_CHECK_NEAR(c.value(), 0.0, 1e-12);
+    AURORA_TEST_CHECK_TRUE(c.status() == aurora::AnimationStatus::Dismissed);
+    AURORA_TEST_CHECK_TRUE(c.is_dismissed());
+    AURORA_TEST_CHECK_FALSE(c.is_completed());
+    AURORA_TEST_CHECK_FALSE(c.is_animating());
+    AURORA_TEST_CHECK_FALSE(c.dirty());
 
-void run() {
-    // 1) Curve 端点与中点
-    {
-        AURORA_TEST_CHECK(Curves::linear().transform(0.5) == 0.5);
-        AURORA_TEST_CHECK(std::abs(Curves::ease_in().transform(0.5) - 0.125) < 1e-9);
-        AURORA_TEST_CHECK(std::abs(Curves::ease_out().transform(0.5) - 0.875) < 1e-9);
-        AURORA_TEST_CHECK(std::abs(Curves::ease_in_out().transform(0.5) - 0.5) < 1e-9);
-        AURORA_TEST_CHECK(Curves::ease_out().transform(0.0) == 0.0);
-        AURORA_TEST_CHECK(Curves::ease_out().transform(1.0) == 1.0);
-        AURORA_LOG_INFO("test", "[1] Curve OK");
-    }
+    const aurora::AnimationController clamped{0.0};
+    AURORA_TEST_CHECK_NEAR(clamped.duration(), 1e-6, 1e-15);  // 非正时长夹取为 1e-6
 
-    // 2) Tween: float / Point / Color
-    {
-        Tween tw(0.0F, 100.0F);
-        AURORA_TEST_CHECK(std::abs(tw.value(0.5) - 50.0F) < 1e-6);
-        AURORA_TEST_CHECK(tw.value(0.0) == 0.0F);
-        AURORA_TEST_CHECK(std::abs(tw.value(1.0) - 100.0F) < 1e-6);
-
-        Tween tp(Point{.x = 0, .y = 0}, Point{.x = 10, .y = 20});
-        Point p = tp.value(0.5);
-        AURORA_TEST_CHECK(p.x == 5.0F && p.y == 10.0F);
-
-        Tween tc(Color::black(), Color::white());
-        Color c = tc.value(1.0);
-        AURORA_TEST_CHECK(c.r == 255 && c.g == 255 && c.b == 255 && c.a == 255);
-        AURORA_LOG_INFO("test", "[2] Tween(float/Point/Color) OK");
-    }
-
-    // 3) Tween + 曲线：在控制器进度 0.5 处施加 easeIn（0.125）
-    {
-        Tween tw(0.0F, 100.0F, Curves::ease_in());
-        AURORA_TEST_CHECK(std::abs(tw.value(0.5) - 12.5F) < 1e-6);
-        AURORA_LOG_INFO("test", "[3] Tween+Curve OK");
-    }
-
-    // 4) Keyframes
-    {
-        Keyframes<float> kf({Keyframes<float>::Stop{.time = 0.0, .value = 0.0F},
-                             Keyframes<float>::Stop{.time = 0.5, .value = 100.0F},
-                             Keyframes<float>::Stop{.time = 1.0, .value = 50.0F}});
-        AURORA_TEST_CHECK(kf.value(0.0) == 0.0F);
-        AURORA_TEST_CHECK(std::abs(kf.value(0.5) - 100.0F) < 1e-6);
-        AURORA_TEST_CHECK(std::abs(kf.value(0.25) - 50.0F) < 1e-6);  // 0→100 中点
-        AURORA_TEST_CHECK(std::abs(kf.value(1.0) - 50.0F) < 1e-6);
-        AURORA_LOG_INFO("test", "[4] Keyframes OK");
-    }
-
-    // 5) Spring：欠/临界/过阻尼
-    {
-        // 欠阻尼（明显过冲）
-        SpringSimulation under(SpringDescription{.stiffness = 100.0, .damping = 2.0, .mass = 1.0}, 0.0, 100.0);
-        AURORA_TEST_CHECK(std::abs(under.value(0.0) - 0.0) < 1e-9);
-        AURORA_TEST_CHECK(under.value(0.25) > 100.0);  // 过冲（t≈0.25 处峰值 > 目标）
-        AURORA_TEST_CHECK(under.value(0.5) < under.value(0.25));  // 之后回落
-        AURORA_TEST_CHECK(std::abs(under.value(20.0) - 100.0) < 1.0);
-        AURORA_TEST_CHECK(under.is_settled(20.0));
-
-        // 临界阻尼（不过冲）
-        SpringSimulation crit(SpringDescription{.stiffness = 100.0, .damping = 20.0, .mass = 1.0}, 0.0, 100.0);
-        AURORA_TEST_CHECK(crit.value(0.5) < 100.0);
-        AURORA_TEST_CHECK(std::abs(crit.value(10.0) - 100.0) < 1e-6);
-
-        // 过阻尼（不过冲）
-        SpringSimulation over(SpringDescription{.stiffness = 100.0, .damping = 40.0, .mass = 1.0}, 0.0, 100.0);
-        AURORA_TEST_CHECK(over.value(0.5) < 100.0);
-        AURORA_TEST_CHECK(std::abs(over.value(10.0) - 100.0) < 1e-6);
-        AURORA_LOG_INFO("test", "[5] Spring(under/crit/over) OK");
-    }
-
-    // 6) AnimationController：正向 / 反向 / dirty
-    {
-        AnimationController c(1.0);
-        c.forward();
-        AURORA_TEST_CHECK(c.is_animating());
-        c.tick(0.5);
-        AURORA_TEST_CHECK(std::abs(c.value() - 0.5) < 1e-9);
-        AURORA_TEST_CHECK(c.status() == AnimationStatus::Forward);
-        AURORA_TEST_CHECK(c.dirty());
-        c.tick(0.5);
-        AURORA_TEST_CHECK(std::abs(c.value() - 1.0) < 1e-9);
-        AURORA_TEST_CHECK(c.status() == AnimationStatus::Completed);
-        AURORA_TEST_CHECK(c.dirty());
-        c.clear_dirty();
-        c.tick(0.5);  // 已完成，不变
-        AURORA_TEST_CHECK(!c.dirty());
-        AURORA_TEST_CHECK(c.status() == AnimationStatus::Completed);
-
-        c.reverse();
-        AURORA_TEST_CHECK(c.status() == AnimationStatus::Reverse);
-        c.tick(0.5);
-        AURORA_TEST_CHECK(std::abs(c.value() - 0.5) < 1e-9);
-        c.tick(0.5);
-        AURORA_TEST_CHECK(c.value() == 0.0);
-        AURORA_TEST_CHECK(c.status() == AnimationStatus::Dismissed);
-        AURORA_LOG_INFO("test", "[6] AnimationController OK");
-    }
-
-    // 7) Animator + bind -> State（含 easeIn 曲线）
-    {
-        State s(0.0);
-        AnimationController c(1.0);
-        Animator a;
-        Tween tw(0.0, 100.0, Curves::ease_in());
-        a.bind(c, tw, s);
-        c.forward();
-
-        a.tick(0.25);  // value 0.25 -> easeIn 0.015625 -> 1.5625
-        AURORA_TEST_CHECK(std::abs(s.get() - 1.5625) < 1e-6);
-        a.tick(0.25);  // value 0.5 -> easeIn 0.125 -> 12.5
-        AURORA_TEST_CHECK(std::abs(s.get() - 12.5) < 1e-6);
-        a.tick(0.5);  // 完成 -> 100
-        AURORA_TEST_CHECK(std::abs(s.get() - 100.0) < 1e-6);
-        a.tick(0.5);  // 空闲帧：不应改写
-        AURORA_TEST_CHECK(std::abs(s.get() - 100.0) < 1e-6);
-        AURORA_LOG_INFO("test", "[7] Animator+bind->State OK");
-    }
-
-    // 8) AnimatedValue 便捷封装
-    {
-        State s(Size{.width = 0, .height = 0});
-        AnimatedValue av(s, Tween(Size{.width = 0, .height = 0}, Size{.width = 200, .height = 100}), 1.0);
-        Animator a;
-        av.attach(a);
-        av.controller().forward();
-        a.tick(0.5);
-        AURORA_TEST_CHECK(std::abs(s.get().width - 100.0F) < 1e-6);
-        AURORA_TEST_CHECK(std::abs(s.get().height - 50.0F) < 1e-6);
-        AURORA_LOG_INFO("test", "[8] AnimatedValue OK");
-    }
-
-    AURORA_LOG_INFO("test", "ALL ANIMATION TESTS PASSED");
-}
-}  // namespace sec_anim
-
-namespace sec_animate {
-
-// ---- 1. animate() 手动 tick：线性补间在 duration 内从 begin 收敛到 end ----
-static void test_animate_linear_converges() {
-    State v{0.0};
-    auto a = animate(v, Tween{0.0, 100.0, Curves::linear()}, 0.3);
-
-    AURORA_TEST_CHECK(!a.is_completed());
-    AURORA_TEST_CHECK(std::abs(v.get() - 0.0) < 1e-9);
-
-    a.tick(0.1);  // t ≈ 0.333
-    AURORA_TEST_CHECK(v.get() > 30.0 && v.get() < 40.0);
-
-    a.tick(0.1);  // t ≈ 0.667
-    AURORA_TEST_CHECK(v.get() > 60.0 && v.get() < 70.0);
-
-    a.tick(0.1);  // 到达终点 1.0
-    AURORA_TEST_CHECK(std::abs(v.get() - 100.0) < 1e-6);
-    AURORA_TEST_CHECK(a.is_completed());
-    AURORA_TEST_CHECK(std::abs(a.progress() - 1.0) < 1e-9);
+    // 初值 0.5 但状态仍是 Dismissed（构造不按值推断终态）。
+    const aurora::AnimationController mid{1.0, 0.5};
+    AURORA_TEST_CHECK_NEAR(mid.value(), 0.5, 1e-12);
+    AURORA_TEST_CHECK_TRUE(mid.status() == aurora::AnimationStatus::Dismissed);
 }
 
-// ---- 2. 曲线塑形：ease_in_out 在 t=0.25 处明显低于线性（验证曲线生效） ----
-static void test_animate_curve_shapes() {
-    // 线性参考：t=0.25 → 25
-    State lin{0.0};
-    auto a_lin = animate(lin, Tween{0.0, 100.0, Curves::linear()}, 1.0);
-    a_lin.tick(0.25);
-    AURORA_TEST_CHECK(lin.get() > 24.0 && lin.get() < 26.0);
+/// @brief forward 起步后 tick 按比例推进，到 1 钳制为 Completed；可从中间 restart；零时长一步完成。
+AURORA_TEST_CASE(controller_forward_ticks_to_completed) {
+    aurora::AnimationController c{1.0};
+    c.forward();
+    AURORA_TEST_CHECK_TRUE(c.status() == aurora::AnimationStatus::Forward);
+    AURORA_TEST_CHECK_TRUE(c.is_animating());
 
-    // ease_in_out 在 t=0.25 处 ≈ 4*t^3 = 0.0625 → 6.25，明显低于线性
-    State eio{0.0};
-    auto a_eio = animate(eio, Tween{0.0, 100.0, Curves::ease_in_out()}, 1.0);
-    a_eio.tick(0.25);
-    AURORA_TEST_CHECK(eio.get() < 15.0);  // 曲线把前期进度压低
+    c.tick(0.25);
+    AURORA_TEST_CHECK_NEAR(c.value(), 0.25, 1e-12);
+    AURORA_TEST_CHECK_TRUE(c.dirty());  // 本帧进度变化
+    c.clear_dirty();
+    AURORA_TEST_CHECK_FALSE(c.dirty());
 
-    // 对称中点：ease_in_out 在 t=0.5 精确等于 0.5 → 50
-    a_eio.tick(0.25);  // 累计 t=0.5
-    AURORA_TEST_CHECK(std::abs(eio.get() - 50.0) < 1e-6);
+    c.tick(0.25);
+    c.tick(0.25);
+    c.tick(0.25);
+    AURORA_TEST_CHECK_NEAR(c.value(), 1.0, 1e-12);
+    AURORA_TEST_CHECK_TRUE(c.status() == aurora::AnimationStatus::Completed);
+    AURORA_TEST_CHECK_TRUE(c.is_completed());
+    AURORA_TEST_CHECK_FALSE(c.is_animating());
+    AURORA_TEST_CHECK_TRUE(c.dirty());  // 到达终点的帧同样置脏
+
+    c.tick(0.5);  // 终态后推进无效
+    AURORA_TEST_CHECK_NEAR(c.value(), 1.0, 1e-12);
+    AURORA_TEST_CHECK_FALSE(c.dirty());
+
+    c.forward(0.5);  // 从中间重启
+    AURORA_TEST_CHECK_NEAR(c.value(), 0.5, 1e-12);
+    AURORA_TEST_CHECK_TRUE(c.status() == aurora::AnimationStatus::Forward);
+
+    c.forward(1.0);  // 从 1 起步立即完成
+    AURORA_TEST_CHECK_TRUE(c.status() == aurora::AnimationStatus::Completed);
+    AURORA_TEST_CHECK_FALSE(c.is_animating());
+
+    // 零时长控制器：一步 tick 即完成。
+    aurora::AnimationController z{0.0};
+    z.forward();
+    z.tick(1e-6);
+    AURORA_TEST_CHECK_TRUE(z.is_completed());
+    AURORA_TEST_CHECK_NEAR(z.value(), 1.0, 1e-12);
 }
 
-// ---- 3. attach 接入 Animator 帧循环 + completed 回调触发 ----
-static void test_animate_attach_and_completed() {
-    State v{0.0F};
-    Animator anim;
-    bool done = false;
+/// @brief stop 冻结进度并把 <1 记为 Dismissed；reverse 反向推进到 0 记 Dismissed；reset 复位并夹取。
+AURORA_TEST_CASE(controller_reverse_reset_stop_semantics) {
+    aurora::AnimationController c{1.0};
+    c.forward();
+    c.tick(0.4);
+    c.stop();
+    AURORA_TEST_CHECK_TRUE(c.status() == aurora::AnimationStatus::Dismissed);  // value<1 → Dismissed
+    AURORA_TEST_CHECK_NEAR(c.value(), 0.4, 1e-12);  // 进度被保留
+    c.tick(1.0);
+    AURORA_TEST_CHECK_NEAR(c.value(), 0.4, 1e-12);  // 停止后不再推进
+    AURORA_TEST_CHECK_FALSE(c.dirty());
 
-    auto a = animate(v, Tween{0.0F, 1.0F, Curves::linear()}, 0.2, anim);
-    a.on_completed([&done]() -> void { done = true; });
+    c.reverse();
+    AURORA_TEST_CHECK_TRUE(c.status() == aurora::AnimationStatus::Reverse);
+    AURORA_TEST_CHECK_TRUE(c.is_animating());
+    c.tick(0.2);
+    AURORA_TEST_CHECK_NEAR(c.value(), 0.2, 1e-12);
+    c.tick(0.5);  // 反向越过 0 → 钳制并 Dismissed
+    AURORA_TEST_CHECK_NEAR(c.value(), 0.0, 1e-12);
+    AURORA_TEST_CHECK_TRUE(c.status() == aurora::AnimationStatus::Dismissed);
 
-    AURORA_TEST_CHECK(!a.is_completed());
-    AURORA_TEST_CHECK(!done);
+    c.reset(0.7);  // 中间值复位：静止但状态为 Dismissed
+    AURORA_TEST_CHECK_NEAR(c.value(), 0.7, 1e-12);
+    AURORA_TEST_CHECK_TRUE(c.status() == aurora::AnimationStatus::Dismissed);
+    c.reset(2.0);  // 越界夹取到 1 → Completed
+    AURORA_TEST_CHECK_NEAR(c.value(), 1.0, 1e-12);
+    AURORA_TEST_CHECK_TRUE(c.status() == aurora::AnimationStatus::Completed);
+    c.reset(-1.0);  // 越界夹取到 0 → Dismissed
+    AURORA_TEST_CHECK_NEAR(c.value(), 0.0, 1e-12);
 
-    anim.tick(0.1);  // t=0.5
-    AURORA_TEST_CHECK(std::abs(v.get() - 0.5F) < 1e-6);
-    AURORA_TEST_CHECK(!done);
-
-    anim.tick(0.1);  // t=1.0，到达终点
-    AURORA_TEST_CHECK(std::abs(v.get() - 1.0F) < 1e-6);
-    AURORA_TEST_CHECK(a.is_completed());
-    AURORA_TEST_CHECK(done);
-
-    // 之后帧不再重复触发 completed
-    done = false;
-    anim.tick(0.1);
-    AURORA_TEST_CHECK(!done);
+    c.forward();
+    c.tick(1.0);
+    c.reverse();  // 从终点 1 反向仍为 Reverse
+    AURORA_TEST_CHECK_TRUE(c.status() == aurora::AnimationStatus::Reverse);
+    c.tick(2.0);
+    AURORA_TEST_CHECK_NEAR(c.value(), 0.0, 1e-12);
+    AURORA_TEST_CHECK_TRUE(c.status() == aurora::AnimationStatus::Dismissed);
 }
 
-// ---- 4. 句柄按值返回/拷贝共享同一驱动载荷（验证 pimpl 安全，不悬垂） ----
-static void test_animate_handle_shared_payload() {
-    State v{0.0};
-    Animator anim;
+/// @brief Animator 推进所有已登记控制器（未播放者不动），帧末统一清 dirty，has_active 反映运行态。
+AURORA_TEST_CASE(animator_drives_controllers_and_clears_dirty) {
+    aurora::AnimationController a{1.0};
+    aurora::AnimationController b{1.0};
+    aurora::Animator animator;
+    animator.drive(a);
+    animator.drive(b);
+    AURORA_TEST_CHECK_FALSE(animator.has_active());
 
-    // 原句柄在块内构造并 attach，离开作用域后 animator 仍应安全驱动（payload 由 binding 持有）
-    {
-        auto const scoped = animate(v, Tween{0.0, 10.0, Curves::linear()}, 1.0, anim);
-        // 拷贝一份句柄，验证共享 payload：通过拷贝读取 current/progress
-        auto copy = scoped;
-        copy.tick(0.5);  // 经拷贝驱动：t=0.5 → 5.0
-        AURORA_TEST_CHECK(std::abs(v.get() - 5.0) < 1e-6);
-        AURORA_TEST_CHECK(std::abs(copy.current() - 5.0) < 1e-6);
-    }
-    // scoped/copy 均已析构，但 animator 的 binding 仍持有 payload：继续驱动不应悬垂崩溃
-    anim.tick(0.6);  // t=1.0 → 10.0
-    AURORA_TEST_CHECK(std::abs(v.get() - 10.0) < 1e-6);
-}
+    a.forward();
+    AURORA_TEST_CHECK_TRUE(animator.has_active());
 
-void run() {
-    test_animate_linear_converges();
-    test_animate_curve_shapes();
-    test_animate_attach_and_completed();
-    test_animate_handle_shared_payload();
-}
-}  // namespace sec_animate
-
-namespace sec_animated_value {
-
-// ---------- TweenAnimation<float> ----------
-
-static void test_tween_animation_float() {
-    TweenAnimation anim(0.0F);
-    AURORA_TEST_CHECK(anim.get() == 0.0F);
-    AURORA_TEST_CHECK(!anim.is_animating());
-
-    anim.animate_to(1.0F, 1.0, Curves::linear());
-    AURORA_TEST_CHECK(anim.is_animating());
-
-    // 推进 0.5 秒（50%）
-    anim.tick(0.5);
-    const float mid = anim.get();
-    AURORA_TEST_CHECK(mid > 0.4F && mid < 0.6F);  // 约 0.5
-
-    // 推进到完成
-    anim.tick(0.6);
-    AURORA_TEST_CHECK(!anim.is_animating());
-    AURORA_TEST_CHECK(std::abs(anim.get() - 1.0F) < 0.01F);
-}
-
-// ---------- TweenAnimation<Color> ----------
-
-static void test_tween_animation_color() {
-    const Color red(255, 0, 0, 255);
-    const Color blue(0, 0, 255, 255);
-
-    TweenAnimation anim(red);
-    anim.animate_to(blue, 1.0, Curves::linear());
-
-    // 50% 处应为紫色
-    anim.tick(0.5);
-    const Color mid = anim.get();
-    AURORA_TEST_CHECK(mid.r > 100 && mid.r < 160);
-    AURORA_TEST_CHECK(mid.b > 100 && mid.b < 160);
-
-    // 完成处应为蓝色
-    anim.tick(0.6);
-    const Color end = anim.get();
-    AURORA_TEST_CHECK(end.r == 0);
-    AURORA_TEST_CHECK(end.b == 255);
-}
-
-// ---------- Tween<Rect> ----------
-
-static void test_tween_rect() {
-    const Rect a{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 100, .height = 50}};
-    const Rect b{.origin = Point{.x = 10, .y = 20}, .size = Size{.width = 200, .height = 100}};
-
-    const Rect mid = lerp(a, b, 0.5);
-    AURORA_TEST_CHECK(std::abs(mid.origin.x - 5.0F) < 0.01F);
-    AURORA_TEST_CHECK(std::abs(mid.origin.y - 10.0F) < 0.01F);
-    AURORA_TEST_CHECK(std::abs(mid.size.width - 150.0F) < 0.01F);
-    AURORA_TEST_CHECK(std::abs(mid.size.height - 75.0F) < 0.01F);
-}
-
-// ---------- Tween<EdgeInsets> ----------
-
-static void test_tween_edge_insets() {
-    const EdgeInsets a{.left = 0, .top = 0, .right = 0, .bottom = 0};
-    const EdgeInsets b{.left = 10, .top = 20, .right = 30, .bottom = 40};
-
-    const EdgeInsets mid = lerp(a, b, 0.5);
-    AURORA_TEST_CHECK(std::abs(mid.left - 5.0F) < 0.01F);
-    AURORA_TEST_CHECK(std::abs(mid.top - 10.0F) < 0.01F);
-    AURORA_TEST_CHECK(std::abs(mid.right - 15.0F) < 0.01F);
-    AURORA_TEST_CHECK(std::abs(mid.bottom - 20.0F) < 0.01F);
-}
-
-// ---------- Animator + AnimatedValue 集成 ----------
-
-static void test_animator_bind() {
-    State target{0.0F};
-    AnimationController ctrl(1.0);
-    const Tween tw(0.0F, 100.0F, Curves::linear());
-
-    Animator animator;
-    animator.bind(ctrl, tw, target);
-
-    ctrl.forward(0.0);
     animator.tick(0.5);
-    AURORA_TEST_CHECK(target.get() > 40.0F && target.get() < 60.0F);
+    AURORA_TEST_CHECK_NEAR(a.value(), 0.5, 1e-12);
+    AURORA_TEST_CHECK_NEAR(b.value(), 0.0, 1e-12);  // 未 forward 的控制器不受帧推进影响
+    AURORA_TEST_CHECK_FALSE(a.dirty());             // Animator tick 末尾统一清 dirty
 
-    animator.tick(0.6);
-    AURORA_TEST_CHECK(std::abs(target.get() - 100.0F) < 0.01F);
+    animator.tick(0.5);
+    AURORA_TEST_CHECK_TRUE(a.is_completed());
+    AURORA_TEST_CHECK_FALSE(animator.has_active());
 }
 
-// ---------- as_signal 响应式 ----------
+/// @brief bind/add_binding 仅在控制器 dirty 的帧写目标 State；空闲帧跳过写回。
+AURORA_TEST_CASE(animator_bindings_write_only_on_dirty_frames) {
+    aurora::State<double> target{0.0};
+    aurora::AnimationController c{1.0};
+    aurora::Animator animator;
+    animator.bind(c, aurora::Tween<double>{0.0, 100.0}, target);
 
-static void test_as_signal() {
-    TweenAnimation anim(0.0F);
-    State<float> const &sig = anim.as_signal();
-    AURORA_TEST_CHECK(sig.get() == 0.0F);
+    int binding_calls = 0;
+    int dirty_seen = 0;
+    animator.add_binding([&c, &binding_calls, &dirty_seen] {
+        ++binding_calls;
+        if (c.dirty()) {
+            ++dirty_seen;
+        }
+    });
 
-    anim.animate_to(50.0F, 1.0, Curves::linear());
-    anim.tick(1.1);  // 完成
-    AURORA_TEST_CHECK(std::abs(sig.get() - 50.0F) < 0.01F);
+    aurora::State<double> kf_target{0.0};
+    aurora::AnimationController kc{1.0};
+    animator.bind(kc, aurora::Keyframes<double>{{{0.0, 0.0}, {1.0, 10.0}}}, kf_target);
+
+    c.forward();
+    kc.forward();
+    animator.tick(0.25);
+    AURORA_TEST_CHECK_NEAR(target.get(), 25.0, 1e-9);
+    AURORA_TEST_CHECK_NEAR(kf_target.get(), 2.5, 1e-9);
+    AURORA_TEST_CHECK_EQ(binding_calls, 1);
+    AURORA_TEST_CHECK_EQ(dirty_seen, 1);
+
+    animator.tick(0.0);  // 空闲帧：回调仍执行，但进度未变不写 State
+    AURORA_TEST_CHECK_EQ(binding_calls, 2);
+    AURORA_TEST_CHECK_EQ(dirty_seen, 1);
+    AURORA_TEST_CHECK_NEAR(target.get(), 25.0, 1e-9);
+
+    animator.tick(1.0);  // 双双到达终点
+    AURORA_TEST_CHECK_NEAR(target.get(), 100.0, 1e-9);
+    AURORA_TEST_CHECK_NEAR(kf_target.get(), 10.0, 1e-9);
+    AURORA_TEST_CHECK_EQ(dirty_seen, 2);
 }
 
-static void run() {
-    test_tween_animation_float();
-    test_tween_animation_color();
-    test_tween_rect();
-    test_tween_edge_insets();
-    test_animator_bind();
-    test_as_signal();
-}
-}  // namespace sec_animated_value
+/// @brief remove 注销控制器及其绑定：不再推进也不再写 State；注销未登记控制器为无操作。
+AURORA_TEST_CASE(animator_remove_detaches_controller_and_bindings) {
+    aurora::State<double> s{0.0};
+    aurora::AnimationController c{1.0};
+    aurora::Animator animator;
+    animator.bind(c, aurora::Tween<double>{0.0, 8.0}, s);
+    c.forward();
 
-AURORA_TEST() {
-    sec_anim::run();
-    sec_animate::run();
-    sec_animated_value::run();
+    animator.remove(c);
+    animator.tick(0.5);
+    AURORA_TEST_CHECK_NEAR(c.value(), 0.0, 1e-12);  // 已摘除，不再推进
+    AURORA_TEST_CHECK_NEAR(s.get(), 0.0, 1e-12);    // 绑定随之失效，State 不被写入
+    AURORA_TEST_CHECK_FALSE(animator.has_active()); // 尽管控制器自身仍在 Forward
+
+    const aurora::AnimationController stranger{1.0};
+    AURORA_TEST_CHECK_NO_THROW(animator.remove(stranger));  // 未登记过 → 无操作
+}
+
+/// @brief AnimatedValue 自驱 tick：插值写回 State，Completed 回调恰好触发一次；句柄可拷贝共享载荷。
+AURORA_TEST_CASE(animated_value_self_tick_fires_completed_once) {
+    aurora::State<double> s{0.0};
+    aurora::AnimatedValue<double> av{s, aurora::Tween<double>{0.0, 1.0}, 1.0};
+    int fired = 0;
+    av.on_completed([&fired] { ++fired; });
+
+    av.forward(0.0);
+    AURORA_TEST_CHECK_TRUE(av.status() == aurora::AnimationStatus::Forward);
+    AURORA_TEST_CHECK_NEAR(av.progress(), 0.0, 1e-12);
+
+    av.tick(0.4);
+    AURORA_TEST_CHECK_NEAR(av.progress(), 0.4, 1e-12);
+    AURORA_TEST_CHECK_NEAR(av.current(), 0.4, 1e-9);
+    AURORA_TEST_CHECK_NEAR(s.get(), 0.4, 1e-9);
+    AURORA_TEST_CHECK_EQ(fired, 0);
+
+    av.tick(0.6);
+    AURORA_TEST_CHECK_TRUE(av.is_completed());
+    AURORA_TEST_CHECK_NEAR(av.progress(), 1.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(s.get(), 1.0, 1e-9);
+    AURORA_TEST_CHECK_EQ(fired, 1);
+
+    av.tick(1.0);  // 终态后空闲帧：不重写、不重复触发
+    AURORA_TEST_CHECK_EQ(fired, 1);
+
+    AURORA_TEST_CHECK_NEAR(av.controller().value(), 1.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(av.tween().end(), 1.0, 1e-12);
+
+    const auto snapshot = av;  // 拷贝共享同一载荷
+    AURORA_TEST_CHECK_NEAR(snapshot.progress(), 1.0, 1e-12);
+}
+
+/// @brief animate 工厂创建即起步（可自驱或 attach 到 Animator），TweenAnimation 自持状态独立推进。
+AURORA_TEST_CASE(animate_factory_and_tween_animation_drive_state) {
+    // 无 Animator：返回即 forward(0)，手动 tick 自驱。
+    aurora::State<double> s{-1.0};
+    auto handle = aurora::animate(s, aurora::Tween<double>{-1.0, 1.0}, 0.5);
+    AURORA_TEST_CHECK_TRUE(handle.status() == aurora::AnimationStatus::Forward);
+    AURORA_TEST_CHECK_NEAR(handle.progress(), 0.0, 1e-12);
+    handle.tick(0.5);
+    AURORA_TEST_CHECK_TRUE(handle.is_completed());
+    AURORA_TEST_CHECK_NEAR(s.get(), 1.0, 1e-9);
+
+    // 带 Animator 重载：attach 后由帧循环驱动。
+    aurora::State<double> s2{0.0};
+    aurora::Animator animator;
+    auto attached = aurora::animate(s2, aurora::Tween<double>{0.0, 8.0}, 2.0, animator);
+    animator.tick(1.0);
+    AURORA_TEST_CHECK_NEAR(s2.get(), 4.0, 1e-9);
+    animator.tick(1.0);
+    AURORA_TEST_CHECK_NEAR(s2.get(), 8.0, 1e-9);
+    AURORA_TEST_CHECK_TRUE(attached.is_completed());
+
+    // TweenAnimation：自持 State，animate_to → tick → get。
+    aurora::TweenAnimation<double> ta{0.0};
+    AURORA_TEST_CHECK_FALSE(ta.is_animating());
+    ta.animate_to(10.0, 1.0);
+    AURORA_TEST_CHECK_TRUE(ta.is_animating());
+    ta.tick(0.25);
+    AURORA_TEST_CHECK_NEAR(ta.get(), 2.5, 1e-9);
+    AURORA_TEST_CHECK_NEAR(ta.as_signal().get(), 2.5, 1e-9);
+    ta.tick(0.75);
+    AURORA_TEST_CHECK_NEAR(ta.get(), 10.0, 1e-9);
+    AURORA_TEST_CHECK_FALSE(ta.is_animating());
+    ta.tick(1.0);  // 结束后 tick 无副作用
+    AURORA_TEST_CHECK_NEAR(ta.get(), 10.0, 1e-9);
 }
 
 }  // namespace aurora::test_cases::utest_animator

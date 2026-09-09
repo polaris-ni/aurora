@@ -1,150 +1,199 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/storage/storage_backend.h
-/// 测试说明: StorageBackend 抽象默认实现（contains / clear / transaction / flush / close）契约单元测试
+/// 测试说明: StorageBackend 抽象契约——派生类最小四虚函数实现、基类默认 contains/clear/flush/close 行为与
+///           错误码归一（NotFound→false、其它错误透传）、默认 transaction 顺序执行与结果透传（无回滚的已知限制）、
+///           不可拷贝不可移动的句柄语义
 
 #include <map>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
+#include "aurora/storage/memory_backend.h"
 #include "aurora/storage/storage_backend.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_storage_backend {
 
-namespace st = aurora::storage;
+namespace aus = aurora::storage;
+namespace m = aurora::testing::matchers;
 
-namespace {
-
-/// 最小内存后端：只实现四个纯虚方法，其余沿用基类默认实现（本测试的被测对象）。
-class MockBackend final : public st::StorageBackend {
+/// @brief 测试用最小后端：只实现四个纯虚函数，其余全部走基类默认实现，用于验证默认契约。
+class ProbeBackend final : public aus::StorageBackend {
   public:
-    [[nodiscard]] auto put_record(const std::string &id, const st::StorageRecord &rec) -> au::Result<void> override {
-        records_[id] = rec;
-        return au::Result<void>{};
-    }
+    std::map<std::string, aus::StorageRecord> store;
+    bool broken = false;  // 模拟持久层故障（非 NotFound 的 IO 错误）
 
-    [[nodiscard]] auto get_record(const std::string &id) -> au::Result<st::StorageRecord> override {
-        const auto it = records_.find(id);
-        if (it == records_.end()) {
-            return au::Result<st::StorageRecord>{au::make_error(au::ErrorCode::StorageRecordNotFound, "missing")};
+    auto put_record(const std::string& id, const aus::StorageRecord& rec) -> Result<void> override {
+        if (broken) {
+            return Result<void>{make_error(ErrorCode::StorageIoError, "probe broken")};
         }
-        return au::Result<st::StorageRecord>{it->second};
+        store[id] = rec;
+        return Result<void>{};
     }
 
-    [[nodiscard]] auto remove(const std::string &id) -> au::Result<void> override {
-        records_.erase(id);  // 幂等
-        return au::Result<void>{};
+    auto get_record(const std::string& id) -> Result<aus::StorageRecord> override {
+        if (broken) {
+            return Result<aus::StorageRecord>{make_error(ErrorCode::StorageIoError, "probe broken")};
+        }
+        const auto it = store.find(id);
+        if (it == store.end()) {
+            return Result<aus::StorageRecord>{make_error(ErrorCode::StorageRecordNotFound, "probe missing: " + id)};
+        }
+        return Result<aus::StorageRecord>{it->second};
     }
 
-    [[nodiscard]] auto list() -> au::Result<std::vector<std::string>> override {
+    auto remove(const std::string& id) -> Result<void> override {
+        if (broken) {
+            return Result<void>{make_error(ErrorCode::StorageIoError, "probe broken")};
+        }
+        store.erase(id);
+        return Result<void>{};
+    }
+
+    auto list() -> Result<std::vector<std::string>> override {
+        if (broken) {
+            return Result<std::vector<std::string>>{make_error(ErrorCode::StorageIoError, "probe broken")};
+        }
         std::vector<std::string> ids;
-        ids.reserve(records_.size());
-        for (const auto &[id, rec] : records_) {
-            (void)rec;
-            ids.push_back(id);
+        ids.reserve(store.size());
+        for (const auto& kv : store) {
+            ids.push_back(kv.first);
         }
-        return au::Result<std::vector<std::string>>{std::move(ids)};
+        return Result<std::vector<std::string>>{std::move(ids)};
     }
-
-  private:
-    std::map<std::string, st::StorageRecord> records_;
 };
 
-auto make_record(const std::string &id) -> st::StorageRecord {
-    st::StorageRecord rec;
+/// @brief 构造一条 JSON 载荷的记录信封。
+[[nodiscard]] auto make_json_record(std::string id, aus::Json payload) -> aus::StorageRecord {
+    aus::StorageRecord rec;
     rec.id = id;
-    rec.payload = st::Json{{"v", id}};
+    rec.type = "__raw__";
+    rec.version = 1;
+    rec.encoding = aus::StorageEncoding::Json;
+    rec.payload = std::move(payload);
     return rec;
 }
 
-}  // namespace
+// 抽象接口句柄语义：禁止拷贝与移动（对标 Surface 的句柄纪律）。
+static_assert(!std::is_copy_constructible_v<aus::StorageBackend>);
+static_assert(!std::is_copy_assignable_v<aus::StorageBackend>);
+static_assert(!std::is_move_constructible_v<aus::StorageBackend>);
+static_assert(!std::is_move_assignable_v<aus::StorageBackend>);
 
-AURORA_TEST() {
-    // ---- 1. put → get 往返 ----
-    {
-        MockBackend b;
-        AURORA_TEST_CHECK(static_cast<bool>(b.put_record("a", make_record("a"))));
-        const auto got = b.get_record("a");
-        AURORA_TEST_CHECK(static_cast<bool>(got));
-        AURORA_TEST_CHECK(got.value().id == "a");
-        AURORA_TEST_CHECK(std::get<st::Json>(got.value().payload)["v"] == "a");
-    }
+AURORA_TEST_CASE(derived_backend_minimal_contract_roundtrip) {
+    // 派生类只需实现四虚函数即可获得完整后端：put/get/remove/list 往返一致。
+    ProbeBackend be;
+    aus::StorageBackend& base = be;
 
-    // ---- 2. 默认 contains：命中最 true，未命中 false（NotFound 不算错误） ----
-    {
-        MockBackend b;
-        (void)b.put_record("a", make_record("a"));
-        const auto hit = b.contains("a");
-        AURORA_TEST_CHECK(static_cast<bool>(hit));
-        AURORA_TEST_CHECK(hit.value());
+    auto rec = make_json_record("k", aus::Json{{"v", 7}});
+    AURORA_TEST_REQUIRE(base.put_record("k", rec));
 
-        const auto miss = b.contains("nope");
-        AURORA_TEST_CHECK(static_cast<bool>(miss));  // 查询本身成功
-        AURORA_TEST_CHECK(!miss.value());
-        AURORA_TEST_CHECK(miss.value() == false);
-    }
+    const auto got = base.get_record("k");
+    AURORA_TEST_REQUIRE(got.ok());
+    AURORA_TEST_CHECK_EQ(got.value().id, std::string("k"));
+    AURORA_TEST_CHECK_EQ(std::get<aus::Json>(got.value().payload), aus::Json{{"v", 7}});
 
-    // ---- 3. remove 幂等：删除不存在的 id 仍成功 ----
-    {
-        MockBackend b;
-        AURORA_TEST_CHECK(static_cast<bool>(b.remove("ghost")));
-        AURORA_TEST_CHECK(static_cast<bool>(b.remove("ghost")));
-    }
+    const auto ids = base.list();
+    AURORA_TEST_REQUIRE(ids.ok());
+    AURORA_TEST_CHECK_THAT(ids.value(), m::size_is(1));
 
-    // ---- 4. 默认 transaction：顺序执行 body，成功则透传 ----
-    {
-        MockBackend b;
-        int steps = 0;
-        const auto r = b.transaction([&](st::StorageBackend &tx) -> au::Result<void> {
-            ++steps;
-            (void)tx.put_record("x", make_record("x"));
-            ++steps;
-            return au::Result<void>{};
-        });
-        AURORA_TEST_CHECK(static_cast<bool>(r));
-        AURORA_TEST_CHECK(steps == 2);
-        AURORA_TEST_CHECK(static_cast<bool>(b.get_record("x")));
-    }
+    AURORA_TEST_REQUIRE(base.remove("k"));
+    AURORA_TEST_CHECK_EQ(base.get_record("k").error().code_enum, ErrorCode::StorageRecordNotFound);
+}
 
-    // ---- 5. 默认 transaction：body 失败则整体失败（尽力而为，无自动回滚） ----
-    {
-        MockBackend b;
-        const auto r = b.transaction([&](st::StorageBackend &tx) -> au::Result<void> {
-            (void)tx.put_record("y", make_record("y"));  // 这一步会留下
-            return au::Result<void>{au::make_error(au::ErrorCode::StorageRecordNotFound, "boom")};
-        });
-        AURORA_TEST_CHECK(!static_cast<bool>(r));
-        AURORA_TEST_CHECK(r.error().code_enum == au::ErrorCode::StorageRecordNotFound);
-        AURORA_TEST_CHECK(static_cast<bool>(b.get_record("y")));  // 已知限制：不自动撤销
-    }
+AURORA_TEST_CASE(default_contains_maps_notfound_to_false) {
+    // 默认 contains 契约：存在 → true；缺失（NotFound）归一为 false 且不视为错误。
+    ProbeBackend be;
+    aus::StorageBackend& base = be;
+    AURORA_TEST_REQUIRE(be.put_record("hit", make_json_record("hit", aus::Json{{"v", 1}})));
 
-    // ---- 6. 默认 clear：经 transaction + list + remove 清空 ----
-    {
-        MockBackend b;
-        (void)b.put_record("a", make_record("a"));
-        (void)b.put_record("b", make_record("b"));
-        AURORA_TEST_CHECK(b.list().value().size() == 2);
+    const auto hit = base.contains("hit");
+    AURORA_TEST_REQUIRE(hit.ok());
+    AURORA_TEST_CHECK(hit.value());
 
-        AURORA_TEST_CHECK(static_cast<bool>(b.clear()));
-        AURORA_TEST_CHECK(b.list().value().empty());
-        AURORA_TEST_CHECK(!static_cast<bool>(b.get_record("a")));
-    }
+    const auto miss = base.contains("miss");
+    AURORA_TEST_REQUIRE(miss.ok());
+    AURORA_TEST_CHECK(!miss.value());
+}
 
-    // ---- 7. 默认 flush / close 为 no-op 且成功 ----
-    {
-        MockBackend b;
-        AURORA_TEST_CHECK(static_cast<bool>(b.flush()));
-        AURORA_TEST_CHECK(static_cast<bool>(b.close()));
-    }
+AURORA_TEST_CASE(default_contains_propagates_other_errors) {
+    // 默认 contains 契约：非 NotFound 的底层错误原样透传（不吞错）。
+    ProbeBackend be;
+    be.broken = true;
+    aus::StorageBackend& base = be;
 
-    // ---- 8. 基类指针可多态驱动默认实现 ----
-    {
-        MockBackend impl;
-        st::StorageBackend &base = impl;
-        (void)base.put_record("p", make_record("p"));
-        AURORA_TEST_CHECK(base.contains("p").value());
-        AURORA_TEST_CHECK(static_cast<bool>(base.clear()));
-        AURORA_TEST_CHECK(base.list().value().empty());
+    const auto r = base.contains("any");
+    AURORA_TEST_CHECK(!r.ok());
+    AURORA_TEST_CHECK_EQ(r.error().code_enum, ErrorCode::StorageIoError);
+}
+
+AURORA_TEST_CASE(default_clear_removes_all_records) {
+    // 默认 clear（transaction 内逐条 remove）：清空 Probe 与 Memory 两个具体后端。
+    ProbeBackend probe;
+    AURORA_TEST_REQUIRE(probe.put_record("a", make_json_record("a", aus::Json{{"v", 1}})));
+    AURORA_TEST_REQUIRE(probe.put_record("b", make_json_record("b", aus::Json{{"v", 2}})));
+    aus::StorageBackend& probe_base = probe;
+    AURORA_TEST_REQUIRE(probe_base.clear());
+    AURORA_TEST_CHECK(probe.store.empty());
+
+    aus::MemoryBackend memory;  // Memory 未覆写 clear，同样走默认实现
+    AURORA_TEST_REQUIRE(memory.put_record("m", make_json_record("m", aus::Json{{"v", 3}})));
+    aus::StorageBackend& memory_base = memory;
+    AURORA_TEST_REQUIRE(memory_base.clear());
+    const auto ids = memory_base.list();
+    AURORA_TEST_REQUIRE(ids.ok());
+    AURORA_TEST_CHECK_THAT(ids.value(), m::is_empty());
+}
+
+AURORA_TEST_CASE(default_flush_and_close_are_noop_success) {
+    // 未覆写 flush/close 的后端获得 no-op 默认实现，恒成功。
+    ProbeBackend be;
+    aus::StorageBackend& base = be;
+    AURORA_TEST_CHECK(base.flush().ok());
+    AURORA_TEST_CHECK(base.close().ok());
+}
+
+AURORA_TEST_CASE(default_transaction_executes_body_and_propagates) {
+    // 默认 transaction：顺序执行 body 并透传结果；成功时体内写入提交生效。
+    ProbeBackend be;
+    aus::StorageBackend& base = be;
+
+    const auto ok = base.transaction([](aus::StorageBackend& b) -> Result<void> {
+        auto r = b.put_record("txn", make_json_record("txn", aus::Json{{"v", 1}}));
+        if (!r) {
+            return r;
+        }
+        // body 收到的即本后端：体内写入立即可见。
+        return b.get_record("txn").ok() ? Result<void>{} : Result<void>{make_error(ErrorCode::GeneralUnknown, "?")};
+    });
+    AURORA_TEST_REQUIRE(ok.ok());
+    AURORA_TEST_REQUIRE(be.store.contains("txn"));
+
+    // 失败透传；默认实现无回滚——体内已完成写入保留（接口注明的已知限制）。
+    const auto failed = base.transaction([](aus::StorageBackend& b) -> Result<void> {
+        (void)b.put_record("kept", make_json_record("kept", aus::Json{{"v", 2}}));
+        return Result<void>{make_error(ErrorCode::GeneralUnknown, "abort")};
+    });
+    AURORA_TEST_CHECK(!failed.ok());
+    AURORA_TEST_CHECK_EQ(failed.error().code_enum, ErrorCode::GeneralUnknown);
+    AURORA_TEST_CHECK(be.store.contains("kept"));  // 无原子回滚（文档化限制）
+}
+
+AURORA_TEST_CASE(derived_backend_polymorphic_through_base) {
+    // 基类指针统一驱动不同具体后端（对标 Surface 多态使用方式）。
+    ProbeBackend probe;
+    aus::MemoryBackend memory;
+    std::vector<aus::StorageBackend*> backends{&probe, &memory};
+
+    for (aus::StorageBackend* be : backends) {
+        AURORA_TEST_REQUIRE(be->put_record("poly", make_json_record("poly", aus::Json{{"v", 9}})));
+        const auto got = be->get_record("poly");
+        AURORA_TEST_REQUIRE(got.ok());
+        AURORA_TEST_CHECK_EQ(std::get<aus::Json>(got.value().payload), aus::Json{{"v", 9}});
+        AURORA_TEST_REQUIRE(be->remove("poly"));
+        AURORA_TEST_CHECK_EQ(be->get_record("poly").error().code_enum, ErrorCode::StorageRecordNotFound);
     }
 }
 

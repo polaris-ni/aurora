@@ -1,36 +1,39 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/window/d3d11_surface.h
-/// 测试说明: d3d11_surface 单元测试
-///
-
-// 目标源单元：D3d11Surface（平台后端，仅 AURORA_BACKEND_D3D11 编译）。
-//
-// API 覆盖映射：D3D11Surface 帧生命周期/native_handle 由 test_d3d11_present.cpp 端到端行使
-//
-// 覆盖率豁免说明：本机为 Linux，无法编译/运行该后端；真实窗口创建、
-// 帧生命周期与原生句柄语义只能在对应平台上验证。Linux 下本文件自跳过空通过，
-// 覆盖率按平台豁免处理（与 test_win32_surface / test_d3d11_present 同口径）。
-
-#include "aurora_test_harness.h"
+/// 测试说明: D3D11 后端类型契约（宏门控、继承 Surface、不可拷贝/构造签名）；
+/// 构造与帧管线会创建真实 Win32 窗口与 D3D11 设备，单元测试不触碰 OS 资源
 
 #ifdef AURORA_BACKEND_D3D11
-// 平台专属头仅在宏开启时可用
-#include "aurora/aurora.h"
+#include <type_traits>
+
 #include "aurora/window/d3d11_surface.h"
+#endif
+
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_d3d11_surface {
 
-namespace {
-
-void test_smoke() {
-    // 平台上最小冒烟：构造语义由各平台实现保证，此处仅验证类型完整性可编译。
-    AURORA_TEST_CHECK_MSG(true, "d3d11_surface compiled-in smoke");
+AURORA_TEST_CASE(d3d11_surface_type_contract) {
+#if defined(AURORA_BACKEND_D3D11)
+    static_assert(std::is_base_of_v<aurora::Surface, aurora::D3D11Surface>);
+    static_assert(!std::is_abstract_v<aurora::D3D11Surface>);
+    static_assert(!std::is_copy_constructible_v<aurora::D3D11Surface>);
+    static_assert(!std::is_move_constructible_v<aurora::D3D11Surface>);
+    static_assert(!std::is_default_constructible_v<aurora::D3D11Surface>);
+    AURORA_TEST_CHECK_TRUE(std::is_base_of_v<aurora::Surface, aurora::D3D11Surface>);
+#else
+    AURORA_TEST_SKIP("AURORA_BACKEND_D3D11 未开启（默认 OFF），头文件整体被宏剔除");
+#endif
 }
 
-}  // namespace
-
-AURORA_TEST() { test_smoke(); }
-}  // namespace aurora::test_cases::utest_d3d11_surface
+AURORA_TEST_CASE(d3d11_surface_os_dependent_paths_skipped) {
+#if defined(AURORA_BACKEND_D3D11)
+    // 构造函数会创建真实 HWND + D3D11Device/SwapChain；vsync/增量上屏/device-lost
+    // 恢复均依赖真实设备与消息泵，属集成层覆盖范围，单元测试不触碰 OS 资源。
+    AURORA_TEST_SKIP("D3D11Surface 构造会创建真实 Win32 窗口与 D3D11 设备/交换链，单测不触碰 OS 资源");
 #else
-AURORA_TEST_SKIP(AURORA_BACKEND_D3D11)
+    AURORA_TEST_SKIP("AURORA_BACKEND_D3D11 未开启（默认 OFF），头文件整体被宏剔除");
 #endif
+}
+
+}  // namespace aurora::test_cases::utest_d3d11_surface

@@ -1,132 +1,156 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/button.h
-/// 测试说明: button 单元测试
-///
+/// 测试说明: 覆盖 Button——默认属性、label 与 on_click 回调（activate 与 Press/Release 合成点击）、
+/// 禁用态不触发回调、min_size 布局与约束钳制、自描述元数据、属性序列化往返
 
-// button_test.cpp — 覆盖 Button 富属性：链式 setter、字段读写、序列化往返。
 #include <string>
 
-#include "aurora/aurora.h"
+#include "aurora/event/event.h"
+#include "aurora/layout/layout_engine.h"
 #include "aurora/widget/button.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_button {
 
-static void test_chained_setters() {
-    Button b;
-    b.set_label("OK")
-        .set_corner_radius(8.0F)
-        .set_padding(EdgeInsets{.left = 2.0F, .top = 3.0F, .right = 4.0F, .bottom = 5.0F})
-        .set_enabled(false);
+namespace {
 
-    AURORA_TEST_CHECK_MSG(near_f(b.corner_radius, 8.0F), "corner_radius set");
-    AURORA_TEST_CHECK_MSG(near_f(b.padding.left, 2.0F), "padding.left set");
-    AURORA_TEST_CHECK_MSG(near_f(b.padding.top, 3.0F), "padding.top set");
-    AURORA_TEST_CHECK_MSG(near_f(b.padding.right, 4.0F), "padding.right set");
-    AURORA_TEST_CHECK_MSG(near_f(b.padding.bottom, 5.0F), "padding.bottom set");
-    AURORA_TEST_CHECK_MSG(b.enabled == false, "enabled set");
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
-static void test_serialize_roundtrip() {
-    Button a;
-    a.set_label("Hi")
-        .set_corner_radius(10.0F)
-        .set_padding(EdgeInsets{.left = 1.0F, .top = 2.0F, .right = 3.0F, .bottom = 4.0F})
-        .set_enabled(false);
+}  // namespace
 
-    Json j;
-    a.serialize_props(j);
-
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(j["corner_radius"].get<float>(), 10.0F), "json corner_radius=10");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["enabled"].get<bool>() == false, "json enabled=false");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["padding"].is_object(), "json padding is object");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(j["padding"]["left"].get<float>(), 1.0F), "json padding.left=1");
-
-    Button b;
-    b.deserialize_props(j);
-
-    AURORA_TEST_CHECK_MSG(near_f(b.corner_radius, 10.0F), "rt corner_radius");
-    AURORA_TEST_CHECK_MSG(b.enabled == false, "rt enabled");
-    AURORA_TEST_CHECK_MSG(near_f(b.padding.left, 1.0F), "rt padding.left");
-    AURORA_TEST_CHECK_MSG(near_f(b.padding.bottom, 4.0F), "rt padding.bottom");
-    AURORA_TEST_CHECK_MSG(b.label.get().text == "Hi", "rt label");
+AURORA_TEST_CASE(button_defaults_and_type_name) {
+    const Button b;
+    AURORA_TEST_CHECK_EQ(std::string{b.type_name()}, "Button");
+    const ButtonProps d = Button::defaults();
+    AURORA_TEST_CHECK_TRUE(d.enabled);
+    AURORA_TEST_CHECK_NEAR(d.corner_radius, 6.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(d.min_width, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(d.min_height, 0.0F, 1e-4F);
+    // 默认背景色为 blue，文字色为 white。
+    AURORA_TEST_CHECK_TRUE(d.color.get() == Color::blue());
+    AURORA_TEST_CHECK_TRUE(d.on_color == Color::white());
 }
 
-static void test_defaults() {
-    const Button b = {};
-    AURORA_TEST_CHECK_MSG(near_f(b.corner_radius, 6.0F), "default corner_radius 6 (modernized)");
-    AURORA_TEST_CHECK_MSG(near_f(b.padding.left, 12.0F), "default padding.left 12");
-    AURORA_TEST_CHECK_MSG(near_f(b.padding.top, 6.0F), "default padding.top 6");
-    AURORA_TEST_CHECK_MSG(b.enabled == true, "default enabled true");
-    AURORA_TEST_CHECK_MSG(!b.hover_color.has_value(), "default hover_color auto");
-    AURORA_TEST_CHECK_MSG(!b.pressed_color.has_value(), "default pressed_color auto");
-    AURORA_TEST_CHECK_MSG(!b.border_color.has_value() && near_f(b.border_width, 0.0F), "default no border");
-    AURORA_TEST_CHECK_MSG(near_f(b.min_width, 0.0F) && near_f(b.min_height, 0.0F), "default min size 0");
+AURORA_TEST_CASE(button_label_and_activate_fires_on_click) {
+    int clicks = 0;
+    Button b("OK");
+    AURORA_TEST_CHECK_EQ(b.label.get().text, "OK");
+    b.set_label("确认");
+    AURORA_TEST_CHECK_EQ(b.label.get().text, "确认");
 
-    // Button::defaults()：运行时可查询默认值（规格 #5；静态与经实例调用等价）
-    const auto d = Button::defaults();
-    AURORA_TEST_CHECK_MSG(near_f(d.corner_radius, 6.0F), "defaults(): corner_radius 6");
-    AURORA_TEST_CHECK_MSG(near_f(d.padding.left, 12.0F) && near_f(d.padding.top, 6.0F), "defaults(): padding 12/6");
-    AURORA_TEST_CHECK_MSG(d.enabled == true, "defaults(): enabled true");
-    AURORA_TEST_CHECK_MSG(near_f(b.defaults().corner_radius, 6.0F), "defaults() callable via instance");
+    b.set_on_click([&clicks] { ++clicks; });
+    AURORA_TEST_CHECK_TRUE(b.wants_click());
+    b.activate();
+    b.activate();
+    AURORA_TEST_CHECK_EQ(clicks, 2);
 }
 
-static void test_style_props() {
-    Button a;
-    a.set_hover_color(Color{10, 20, 30, 255})
-        .set_pressed_color(Color{40, 50, 60, 255})
-        .set_border(Color::red(), 2.0F)
-        .set_disabled_colors(Color{1, 2, 3, 255}, Color{4, 5, 6, 255})
-        .set_min_size(120.0F, 40.0F);
+AURORA_TEST_CASE(button_disabled_activate_does_not_fire) {
+    int clicks = 0;
+    Button b("OK");
+    b.set_on_click([&clicks] { ++clicks; });
+    b.set_enabled(false);
+    AURORA_TEST_CHECK_FALSE(b.wants_click());
+    b.activate();
+    AURORA_TEST_CHECK_EQ(clicks, 0);
 
-    Json j;
-    a.serialize_props(j);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["hover_color"][2].get<int>() == 30, "json hover_color.b=30");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["pressed_color"][0].get<int>() == 40, "json pressed_color.r=40");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(j["border_color"][0].get<int>() == 255, "json border_color=red");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(j["border_width"].get<float>(), 2.0F), "json border_width=2");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK_MSG(near_f(j["min_width"].get<float>(), 120.0F), "json min_width=120");
-
-    Button b;
-    b.deserialize_props(j);
-    AURORA_TEST_CHECK_MSG(b.hover_color.has_value() && b.hover_color->b == 30, "rt hover_color");
-    AURORA_TEST_CHECK_MSG(b.pressed_color.has_value() && b.pressed_color->r == 40, "rt pressed_color");
-    AURORA_TEST_CHECK_MSG(b.border_color.has_value() && near_f(b.border_width, 2.0F), "rt border");
-    AURORA_TEST_CHECK_MSG(b.disabled_color.has_value() && b.disabled_color->g == 2, "rt disabled_color");
-    AURORA_TEST_CHECK_MSG(near_f(b.min_height, 40.0F), "rt min_height");
-
-    // 未显式设置的 optional 颜色不应序列化（保留自动派生语义）
-    const Button c;
-    Json k;
-    c.serialize_props(k);
-    AURORA_TEST_CHECK_MSG(!k.contains("hover_color") && !k.contains("pressed_color") && !k.contains("border_color"),
-                          "unset optional colors not serialized");
+    // 重新启用后恢复可点击。
+    b.set_enabled(true);
+    b.activate();
+    AURORA_TEST_CHECK_EQ(clicks, 1);
 }
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== button_test ===\n");
-    test_chained_setters();
-    test_serialize_roundtrip();
-    test_defaults();
-    test_style_props();
+AURORA_TEST_CASE(button_disabled_swallows_pointer_events) {
+    int clicks = 0;
+    Button b("OK");
+    b.set_on_click([&clicks] { ++clicks; });
+    b.set_enabled(false);
+
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    b.on_pointer_event(press);
+    AURORA_TEST_CHECK_TRUE(press.is_handled);
+
+    MouseEvent release;
+    release.action = MouseAction::Release;
+    b.on_pointer_event(release);
+    AURORA_TEST_CHECK_TRUE(release.is_handled);
+    AURORA_TEST_CHECK_EQ(clicks, 0);
+}
+
+AURORA_TEST_CASE(button_pointer_press_release_fires_click_once) {
+    int clicks = 0;
+    Button b("OK");
+    b.set_on_click([&clicks] { ++clicks; });
+
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    b.on_pointer_event(press);
+    AURORA_TEST_CHECK_TRUE(press.is_handled);
+    AURORA_TEST_CHECK_EQ(clicks, 0);  // 按下不立即触发
+
+    MouseEvent release;
+    release.action = MouseAction::Release;
+    b.on_pointer_event(release);
+    AURORA_TEST_CHECK_EQ(clicks, 1);  // 完整按下-抬起触发一次
+}
+
+AURORA_TEST_CASE(button_layout_honors_min_size_and_clamps) {
+    // 空标签 + 零内边距：自然尺寸为 0，被 min_size 撑到 (120, 48)。
+    Button b("");
+    b.set_padding(EdgeInsets{.left = 0.0F, .top = 0.0F, .right = 0.0F, .bottom = 0.0F});
+    b.set_min_size(120.0F, 48.0F);
+    LayoutEngine::layout(b, bounded(300.0F, 80.0F));
+    AURORA_TEST_CHECK_NEAR(b.size().width, 120.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(b.size().height, 48.0F, 1e-4F);
+
+    // 约束不足时钳制到 max。
+    LayoutEngine::layout(b, bounded(50.0F, 20.0F));
+    AURORA_TEST_CHECK_NEAR(b.size().width, 50.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(b.size().height, 20.0F, 1e-4F);
+
+    // 默认内边距下任意标签宽度至少含左右 padding（12+12）。
+    Button c("OK");
+    LayoutEngine::layout(c, bounded(300.0F, 80.0F));
+    AURORA_TEST_CHECK_GE(c.size().width, 24.0F);
+    AURORA_TEST_CHECK_GE(c.size().height, 12.0F);
+}
+
+AURORA_TEST_CASE(button_describe_reports_metadata) {
+    const auto d = Button::describe_static();
+    AURORA_TEST_CHECK_EQ(std::string{d.name}, "Button");
+    AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
+    AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
+    AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_click");
+    bool has_label = false;
+    for (const auto &p : d.properties) {
+        if (std::string{p.name} == "label") {
+            has_label = true;
+        }
+    }
+    AURORA_TEST_CHECK_TRUE(has_label);
+}
+
+AURORA_TEST_CASE(button_serialize_deserialize_roundtrip) {
+    Button src("确认");
+    src.set_enabled(false);
+    src.set_corner_radius(10.0F);
+    src.set_min_size(80.0F, 36.0F);
+
+    Json props;
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["label"].get<std::string>(), "确认");
+    AURORA_TEST_CHECK_EQ(props["enabled"].get<bool>(), false);
+
+    Button dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(dst.label.get().text, "确认");
+    AURORA_TEST_CHECK_FALSE(dst.enabled);
+    AURORA_TEST_CHECK_NEAR(dst.corner_radius, 10.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(dst.min_width, 80.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(dst.min_height, 36.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_button

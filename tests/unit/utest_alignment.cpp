@@ -1,60 +1,82 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/alignment.h
-/// 测试说明: alignment 单元测试
-///
+/// 测试说明: 覆盖九宫格 Alignment 的 align_origin 全枚举映射（容器 100x50、子项 40x20 →
+/// cx=30/cy=15）与子项等于容器时的退化（全部归零）
 
-// Alignment 九宫格对齐原点计算 1:1 测试。
-// 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
+#include "aurora/widget/alignment.h"
 
-#include "aurora/aurora.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_alignment {
 
-static void test_align_origin() {
-    constexpr Size container{.width = 100.0F, .height = 100.0F};
-    constexpr Size child{.width = 20.0F, .height = 20.0F};
+namespace {
 
-    AURORA_TEST_CHECK_MSG(near_f(align_origin(Alignment::TopLeft, child, container).x, 0.0F) &&
-                              near_f(align_origin(Alignment::TopLeft, child, container).y, 0.0F),
-                          "Alignment: TopLeft -> (0,0)");
+constexpr Size kContainer{.width = 100.0F, .height = 50.0F};
+constexpr Size kChild{.width = 40.0F, .height = 20.0F};
 
-    AURORA_TEST_CHECK_MSG(near_f(align_origin(Alignment::TopCenter, child, container).x, 40.0F) &&
-                              near_f(align_origin(Alignment::TopCenter, child, container).y, 0.0F),
-                          "Alignment: TopCenter -> (40,0)");
+}  // namespace
 
-    AURORA_TEST_CHECK_MSG(near_f(align_origin(Alignment::TopRight, child, container).x, 80.0F) &&
-                              near_f(align_origin(Alignment::TopRight, child, container).y, 0.0F),
-                          "Alignment: TopRight -> (80,0)");
+AURORA_TEST_CASE(align_origin_maps_all_nine_positions) {
+    const auto o = [](Alignment a) { return align_origin(a, kChild, kContainer); };
 
-    AURORA_TEST_CHECK_MSG(near_f(align_origin(Alignment::CenterLeft, child, container).x, 0.0F) &&
-                              near_f(align_origin(Alignment::CenterLeft, child, container).y, 40.0F),
-                          "Alignment: CenterLeft -> (0,40)");
+    const Point tl = o(Alignment::TopLeft);
+    AURORA_TEST_CHECK_NEAR(tl.x, 0.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(tl.y, 0.0F, 0.0F);
 
-    AURORA_TEST_CHECK_MSG(near_f(align_origin(Alignment::Center, child, container).x, 40.0F) &&
-                              near_f(align_origin(Alignment::Center, child, container).y, 40.0F),
-                          "Alignment: Center -> (40,40)");
+    const Point tc = o(Alignment::TopCenter);
+    AURORA_TEST_CHECK_NEAR(tc.x, 30.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(tc.y, 0.0F, 0.0F);
 
-    AURORA_TEST_CHECK_MSG(near_f(align_origin(Alignment::CenterRight, child, container).x, 80.0F) &&
-                              near_f(align_origin(Alignment::CenterRight, child, container).y, 40.0F),
-                          "Alignment: CenterRight -> (80,40)");
+    const Point tr = o(Alignment::TopRight);
+    AURORA_TEST_CHECK_NEAR(tr.x, 60.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(tr.y, 0.0F, 0.0F);
 
-    AURORA_TEST_CHECK_MSG(near_f(align_origin(Alignment::BottomLeft, child, container).x, 0.0F) &&
-                              near_f(align_origin(Alignment::BottomLeft, child, container).y, 80.0F),
-                          "Alignment: BottomLeft -> (0,80)");
+    const Point cl = o(Alignment::CenterLeft);
+    AURORA_TEST_CHECK_NEAR(cl.x, 0.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(cl.y, 15.0F, 0.0F);
 
-    AURORA_TEST_CHECK_MSG(near_f(align_origin(Alignment::BottomCenter, child, container).x, 40.0F) &&
-                              near_f(align_origin(Alignment::BottomCenter, child, container).y, 80.0F),
-                          "Alignment: BottomCenter -> (40,80)");
+    const Point c = o(Alignment::Center);
+    AURORA_TEST_CHECK_NEAR(c.x, 30.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(c.y, 15.0F, 0.0F);
 
-    AURORA_TEST_CHECK_MSG(near_f(align_origin(Alignment::BottomRight, child, container).x, 80.0F) &&
-                              near_f(align_origin(Alignment::BottomRight, child, container).y, 80.0F),
-                          "Alignment: BottomRight -> (80,80)");
+    const Point cr = o(Alignment::CenterRight);
+    AURORA_TEST_CHECK_NEAR(cr.x, 60.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(cr.y, 15.0F, 0.0F);
+
+    const Point bl = o(Alignment::BottomLeft);
+    AURORA_TEST_CHECK_NEAR(bl.x, 0.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(bl.y, 30.0F, 0.0F);
+
+    const Point bc = o(Alignment::BottomCenter);
+    AURORA_TEST_CHECK_NEAR(bc.x, 30.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(bc.y, 30.0F, 0.0F);
+
+    const Point br = o(Alignment::BottomRight);
+    AURORA_TEST_CHECK_NEAR(br.x, 60.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(br.y, 30.0F, 0.0F);
 }
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== test_alignment ===\n");
-    test_align_origin();
+AURORA_TEST_CASE(align_origin_degenerates_to_zero_when_child_fills_container) {
+    // 子项与容器同尺寸：任何对齐都落在原点（无自由空间）。
+    const Size same{.width = 100.0F, .height = 50.0F};
+    for (const Alignment a :
+         {Alignment::TopLeft, Alignment::TopCenter, Alignment::TopRight, Alignment::CenterLeft, Alignment::Center,
+          Alignment::CenterRight, Alignment::BottomLeft, Alignment::BottomCenter, Alignment::BottomRight}) {
+        const Point p = align_origin(a, same, kContainer);
+        AURORA_TEST_CHECK_NEAR(p.x, 0.0F, 0.0F);
+        AURORA_TEST_CHECK_NEAR(p.y, 0.0F, 0.0F);
+    }
+}
+
+AURORA_TEST_CASE(align_origin_handles_oversized_child) {
+    // 子项大于容器：负偏移（居中时向左/上溢出），符合公式语义。
+    const Size big{.width = 140.0F, .height = 90.0F};
+    const Point c = align_origin(Alignment::Center, big, kContainer);
+    AURORA_TEST_CHECK_NEAR(c.x, -20.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(c.y, -20.0F, 0.0F);
+    const Point br = align_origin(Alignment::BottomRight, big, kContainer);
+    AURORA_TEST_CHECK_NEAR(br.x, -40.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(br.y, -40.0F, 0.0F);
 }
 
 }  // namespace aurora::test_cases::utest_alignment

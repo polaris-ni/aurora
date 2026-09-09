@@ -93,8 +93,20 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} ${{ matrix.cmake-flags }}
 
+      - name: Build (library + tools + tests, timed for link-cost observability)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: time cmake --build build --config ${{ matrix.build-type }}
+
+      # windows-latest 默认 pwsh，无 bash time；分步保持矩阵统一构建命令
       - name: Build (library + tools + tests)
+        if: runner.os == 'Windows'
         run: cmake --build build --config ${{ matrix.build-type }}
+
+      # 收束期可观测性：ccache 命中率纳入 CI 输出（hendrikmuhs/ccache-action 已注入 PATH）
+      - name: ccache stats
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        run: ccache --show-stats --verbose || ccache --show-stats
 
       # demos 不进默认构建（EXCLUDE_FROM_ALL），单独拉起聚合目标确保持续可编译
       - name: Build demos

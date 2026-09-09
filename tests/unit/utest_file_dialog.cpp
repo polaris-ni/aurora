@@ -1,85 +1,116 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/app/file_dialog.h
-/// 测试说明: file_dialog 单元测试
-///
+/// 测试说明: 覆盖 Filter/Options 配置结构体默认值与聚合构造、headless 注入钩子
+/// （open/save/folder 预设返回）与 interactive=false 取消语义、钩子优先级；
+/// 真实系统对话框路径不测（原生 API），全部走钩子/非交互纯逻辑
 
-// FileDialog 1:1 测试：headless 预设打开/保存/文件夹、
-// 取消返回空、Options.filters、多格式无状态断言。
 #include <string>
 #include <vector>
 
-#include "aurora/aurora.h"
-#include "aurora_test_harness.h"
+#include "aurora/app/file_dialog.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_file_dialog {
 
-namespace file_dialog = aurora::file_dialog;
+namespace {
 
-static void test_file_dialog() {
-    // 自动化/headless 环境：关闭真实系统对话框，hook 为空时直接返回空（等价取消），
-    // 避免 CTest 在 Windows 上卡在 GUI 等待（见 AGENTS.md：避免引入 GUI 交互测试）。
-    file_dialog::interactive = false;
+/// RAII 恢复 headless 钩子与交互开关，避免污染同进程内后续用例。
+struct HookGuard {
+    HookGuard() = default;
+    HookGuard(const HookGuard &) = delete;
+    auto operator=(const HookGuard &) -> HookGuard & = delete;
+    ~HookGuard() {
+        aurora::file_dialog::headless_open_result.clear();
+        aurora::file_dialog::headless_save_result.clear();
+        aurora::file_dialog::headless_folder_result.clear();
+        aurora::file_dialog::interactive = true;
+    }
+};
 
-    // 预设打开结果：正常返回 2 个路径。
-    file_dialog::headless_open_result = {"C:/test/a.txt", "C:/test/b.png"};
-    auto r1 = file_dialog::open_file();
-    AURORA_TEST_CHECK(r1.ok());
-    AURORA_TEST_CHECK(r1.value().size() == 2);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(r1.value()[0] == "C:/test/a.txt");
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(r1.value()[1] == "C:/test/b.png");
+}  // namespace
 
-    // 带 filters 的 Options 不影响 headless 预设返回。
-    file_dialog::Options opts{.title = "Open", .filters = {{.name = "图像", .extensions = {"*.png", "*.jpg"}}}};
-    auto r1b = file_dialog::open_file(opts);
-    AURORA_TEST_CHECK(r1b.ok() && r1b.value().size() == 2);
-    AURORA_TEST_CHECK(opts.filters.size() == 1);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    AURORA_TEST_CHECK(opts.filters[0].extensions.size() == 2);
+AURORA_TEST_CASE(filter_and_options_struct_defaults) {
+    // Filter：名称 + 扩展名列表的聚合结构。
+    const aurora::file_dialog::Filter f{"Images", {"*.png", "*.jpg"}};
+    AURORA_TEST_CHECK_STREQ(f.name, "Images");
+    AURORA_TEST_CHECK_EQ(f.extensions.size(), 2U);
+    AURORA_TEST_CHECK_STREQ(f.extensions[0], "*.png");
+    AURORA_TEST_CHECK_STREQ(f.extensions[1], "*.jpg");
 
-    // 取消：清空预设 → 空列表（无选择）。
-    file_dialog::headless_open_result.clear();
-    auto r2 = file_dialog::open_file();
-    AURORA_TEST_CHECK(r2.ok());
-    AURORA_TEST_CHECK(r2.value().empty());
+    // Options：全空默认值。
+    const aurora::file_dialog::Options def;
+    AURORA_TEST_CHECK_TRUE(def.title.empty());
+    AURORA_TEST_CHECK_TRUE(def.initial_dir.empty());
+    AURORA_TEST_CHECK_TRUE(def.filters.empty());
 
-    // 保存文件：预设路径正常返回。
-    file_dialog::headless_save_result = "C:/output/out.txt";
-    auto r3 = file_dialog::save_file();
-    AURORA_TEST_CHECK(r3.ok());
-    AURORA_TEST_CHECK(r3.value() == "C:/output/out.txt");
-
-    // 保存文件带 Options：预设优先。
-    file_dialog::headless_save_result = "C:/output/out2.txt";
-    auto r3b = file_dialog::save_file(file_dialog::Options{.title = "Save"});
-    AURORA_TEST_CHECK(r3b.ok() && r3b.value() == "C:/output/out2.txt");
-
-    // 保存取消：清空预设 → 空字符串。
-    file_dialog::headless_save_result.clear();
-    auto r4 = file_dialog::save_file();
-    AURORA_TEST_CHECK(r4.ok());
-    AURORA_TEST_CHECK(r4.value().empty());
-
-    // 选择文件夹：headless 始终返回空字符串。
-    file_dialog::headless_open_result = {"C:/x"};
-    auto r5 = file_dialog::open_folder();
-    AURORA_TEST_CHECK(r5.ok());
-    AURORA_TEST_CHECK(r5.value().empty());
-
-    // 多次清空后安全：打开/保存均返回空。
-    file_dialog::headless_open_result.clear();
-    file_dialog::headless_save_result.clear();
-    AURORA_TEST_CHECK(file_dialog::open_file().value().empty());
-    AURORA_TEST_CHECK(file_dialog::save_file().value().empty());
+    // Options 聚合构造携带过滤器。
+    const aurora::file_dialog::Options opts{.title = "打开文件", .initial_dir = "C:/", .filters = {f}};
+    AURORA_TEST_CHECK_STREQ(opts.title, "打开文件");
+    AURORA_TEST_CHECK_STREQ(opts.initial_dir, "C:/");
+    AURORA_TEST_REQUIRE_EQ(opts.filters.size(), 1U);
+    AURORA_TEST_CHECK_STREQ(opts.filters[0].name, "Images");
 }
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== test_file_dialog ===\n");
-    test_file_dialog();
+AURORA_TEST_CASE(open_file_returns_headless_preset) {
+    HookGuard guard;
+    aurora::file_dialog::headless_open_result = {"a.png", "b.jpg"};
+
+    // 钩子非空 → 直接返回预设（opts 仅作配置载体，不触发真实对话框）。
+    const aurora::file_dialog::Options opts{.title = "Open", .filters = {{"Images", {"*.png"}}}};
+    const auto r = aurora::file_dialog::open_file(opts);
+    AURORA_TEST_REQUIRE_TRUE(r.ok());
+    AURORA_TEST_CHECK_EQ(r.value().size(), 2U);
+    AURORA_TEST_CHECK_STREQ(r.value()[0], "a.png");
+    AURORA_TEST_CHECK_STREQ(r.value()[1], "b.jpg");
+}
+
+AURORA_TEST_CASE(save_and_folder_headless_presets) {
+    HookGuard guard;
+
+    aurora::file_dialog::headless_save_result = "out.txt";
+    const auto saved = aurora::file_dialog::save_file();
+    AURORA_TEST_REQUIRE_TRUE(saved.ok());
+    AURORA_TEST_CHECK_STREQ(saved.value(), "out.txt");
+
+    aurora::file_dialog::headless_folder_result = "C:/work";
+    const auto folder = aurora::file_dialog::open_folder();
+    AURORA_TEST_REQUIRE_TRUE(folder.ok());
+    AURORA_TEST_CHECK_STREQ(folder.value(), "C:/work");
+}
+
+AURORA_TEST_CASE(non_interactive_behaves_as_cancel) {
+    HookGuard guard;
+    aurora::file_dialog::interactive = false;
+
+    // 钩子为空 + 非交互 → 等价取消（空结果，不抛错、不弹窗）。
+    const auto opened = aurora::file_dialog::open_file();
+    AURORA_TEST_REQUIRE_TRUE(opened.ok());
+    AURORA_TEST_CHECK_TRUE(opened.value().empty());
+
+    const auto saved = aurora::file_dialog::save_file();
+    AURORA_TEST_REQUIRE_TRUE(saved.ok());
+    AURORA_TEST_CHECK_TRUE(saved.value().empty());
+
+    const auto folder = aurora::file_dialog::open_folder();
+    AURORA_TEST_REQUIRE_TRUE(folder.ok());
+    AURORA_TEST_CHECK_TRUE(folder.value().empty());
+}
+
+AURORA_TEST_CASE(headless_hook_takes_priority_over_interactive) {
+    HookGuard guard;
+    aurora::file_dialog::interactive = false;
+
+    // 钩子优先于 interactive 开关：预设值照常返回。
+    aurora::file_dialog::headless_open_result = {"preset.bin"};
+    const auto opened = aurora::file_dialog::open_file();
+    AURORA_TEST_REQUIRE_TRUE(opened.ok());
+    AURORA_TEST_CHECK_EQ(opened.value().size(), 1U);
+    AURORA_TEST_CHECK_STREQ(opened.value()[0], "preset.bin");
+
+    aurora::file_dialog::headless_save_result = "hooked.log";
+    const auto saved = aurora::file_dialog::save_file();
+    AURORA_TEST_REQUIRE_TRUE(saved.ok());
+    AURORA_TEST_CHECK_STREQ(saved.value(), "hooked.log");
 }
 
 }  // namespace aurora::test_cases::utest_file_dialog

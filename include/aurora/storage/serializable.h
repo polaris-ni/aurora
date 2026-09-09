@@ -12,14 +12,21 @@
 #include <concepts>
 #include <string>
 
+#include "aurora/core/result.h"  // Result 返回类型（勿依赖调用方传递包含）
 #include "aurora/storage/storage_types.h"
 
 namespace aurora::storage {
 
-/// @brief 默认版本号（可经 ADL 在用户命名空间覆盖；或特化本项目命名空间下的
-///        `storage_version<T>()`）。门面 put<T>/get<T> 据此触发迁移钩子。
+/// @brief 定制点 ADL 约定：三个定制点均以 `const T*` 指针作**首/实参**触发 ADL——
+///        零参模板（`storage_version<T>()`）依赖「显式模板实参参与 ADL」这条 GCC/MSVC
+///        均未实现的标准冷门规则，会静默回退默认实现。指针实参 + 用户命名空间内的
+///        非模板同名函数是全编译器一致的可靠姿势。
+///        覆写示例（置于 T 所在命名空间）：
+///        `inline auto storage_version(const MyType*) -> std::uint32_t { return 2; }`
+
+/// @brief 默认版本号（经 `const T*` 实参 ADL 可在用户命名空间覆盖）。门面 put<T>/get<T> 据此触发迁移钩子。
 template <typename T>
-constexpr auto storage_version() -> std::uint32_t {
+constexpr auto storage_version(const T* /*tag*/) -> std::uint32_t {
     return 1;
 }
 
@@ -29,18 +36,18 @@ constexpr auto storage_version() -> std::uint32_t {
 /// （≤15 字符，如 "ws"）——走 SSO 零堆分配，且跨版本/重构稳定（typeid mangled 名在移动
 /// 命名空间后会变，反会破坏持久化类型检查）。
 template <typename T>
-auto storage_type_name() -> const std::string & {
+auto storage_type_name(const T* /*tag*/) -> const std::string & {
     static const std::string NAME = typeid(T).name();  // 线程安全静态初始化，跨 TU 唯一
     return NAME;
 }
 
 /// @brief 默认迁移钩子：不迁移（原样返回）。旧版本记录反序列化前会经此钩子升级。
 template <typename T>
-auto migrate_storage(std::uint32_t /*old_version*/, Json j) -> Result<Json> {
+auto migrate_storage(std::uint32_t /*old_version*/, const T* /*tag*/, Json j) -> Result<Json> {
     return Result{std::move(j)};
 }
 template <typename T>
-auto migrate_storage(std::uint32_t /*old_version*/, StorageBytes b) -> Result<StorageBytes> {
+auto migrate_storage(std::uint32_t /*old_version*/, const T* /*tag*/, StorageBytes b) -> Result<StorageBytes> {
     return Result<StorageBytes>{std::move(b)};
 }
 

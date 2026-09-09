@@ -66,8 +66,8 @@ class Storage {
     [[nodiscard]] auto put(const std::string &id, const T &obj) -> Result<void> {
         StorageRecord rec;
         rec.id = id;
-        rec.type = storage_type_name<T>();
-        rec.version = storage_version<T>();
+        rec.type = storage_type_name(static_cast<const T *>(nullptr));
+        rec.version = storage_version(static_cast<const T *>(nullptr));
         rec.mtime = std::chrono::system_clock::now();
         if constexpr (StorageBinarySerializable<T>) {
             rec.encoding = StorageEncoding::Binary;
@@ -85,15 +85,16 @@ class Storage {
         if (!rec) {
             return Result<T>{rec.error()};
         }
-        if (rec.value().type != storage_type_name<T>() && rec.value().type != "__raw__") {
+        if (rec.value().type != storage_type_name(static_cast<const T *>(nullptr)) && rec.value().type != "__raw__") {
             return Result<T>{make_error(ErrorCode::StorageTypeMismatch, "Typed read type mismatch")};
         }
         T out{};
         if (rec.value().encoding == StorageEncoding::Binary) {
             if constexpr (StorageBinarySerializable<T>) {
                 auto bytes = std::get<StorageBytes>(rec.value().payload);
-                if (rec.value().version < storage_version<T>()) {
-                    auto migrated = migrate_storage<T>(rec.value().version, std::move(bytes));
+                if (rec.value().version < storage_version(static_cast<const T *>(nullptr))) {
+                    auto migrated =
+                        migrate_storage(rec.value().version, static_cast<const T *>(nullptr), std::move(bytes));
                     if (!migrated) {
                         return Result<T>{migrated.error()};
                     }
@@ -110,8 +111,9 @@ class Storage {
         } else {
             if constexpr (StorageSerializable<T>) {
                 auto j = std::get<Json>(rec.value().payload);
-                if (rec.value().version < storage_version<T>()) {
-                    auto migrated = migrate_storage<T>(rec.value().version, std::move(j));
+                if (rec.value().version < storage_version(static_cast<const T *>(nullptr))) {
+                    auto migrated =
+                        migrate_storage(rec.value().version, static_cast<const T *>(nullptr), std::move(j));
                     if (!migrated) {
                         return Result<T>{migrated.error()};
                     }
@@ -133,8 +135,8 @@ class Storage {
     [[nodiscard]] auto async_put(const std::string &id, const T &obj) -> aurora::Task<void> {
         StorageRecord rec;
         rec.id = id;
-        rec.type = storage_type_name<T>();
-        rec.version = storage_version<T>();
+        rec.type = storage_type_name(static_cast<const T *>(nullptr));
+        rec.version = storage_version(static_cast<const T *>(nullptr));
         rec.mtime = std::chrono::system_clock::now();
         if constexpr (StorageBinarySerializable<T>) {
             rec.encoding = StorageEncoding::Binary;

@@ -308,6 +308,12 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 `Clipboard`（`app/clipboard.h`）在 Win32 经 `SetClipboardData` 实现，默认 no-op。文本复制经 `Clipboard::set_text`。
 
+**测试注入点（test-only）**：`install_test_backend` / `reset_test_backend` / `remove_test_backend` 三个静态函数构成仓库私有测试设施（`tests/`）用于并行隔离的最小注入面——安装后 `set_text` / `get_text` / `set_image` / `get_image` 全部改走进程内 memory 后端，不触碰系统剪贴板。
+
+- 声明常驻（消费端调用始终可编译）；实现体按 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，任一关闭（含 Release 下 DEBUG AUTO 自动关闭）时返回 `false` / no-op，平台行为不变。
+- `install_test_backend()` 清空并激活后端、返回是否生效；`reset_test_backend()` 仅清内容；`remove_test_backend()` 卸载并恢复平台实现、返回是否确有后端被卸载。
+- 编译开关语义见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §4（`AURORA_ENABLE_TEST_HOOKS`）。
+
 ### 8.3 系统托盘
 
 `SystemTray`（`app/system_tray.h`）在 Win32 经 `Shell_NotifyIcon` + 隐藏消息窗口实现，支持图标、气泡与激活回调 `on_activate`；非 Win32 为 no-op（仅记录 `last_balloon_message`）。
@@ -363,7 +369,13 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 | `put(id, const StorageBytes&)` / `get_bytes(id)` | 二进制载荷（`:43`–`:44`） |
 | `get_value(id)` | 返回原始 variant `StorageValue`（Json 或 bytes，`:45`） |
 | `put_record(id, const StorageRecord&)` / `get_record(id)` | 信封级记录读写（`:48`–`:49`） |
-| `put<T>(id, const T&)` / `get<T>(id)` | 类型化便捷层（`StorageStorable<T>` 约束，`:64`–`:125`）：自动信封化类型名 / 版本 / 编码（JSON 或二进制，按 `StorageBinarySerializable<T>` 分派）；`get<T>` 返回 `Result<T>`，类型不匹配报 `storage-type-mismatch`、编码不支持报 `storage-encoding-mismatch`；存储版本低于 `storage_version<T>()` 时自动经 `migrate_storage<T>` 升版迁移 |
+| `put<T>(id, const T&)` / `get<T>(id)` | 类型化便捷层（`StorageStorable<T>` 约束，`:64`–`:125`）：自动信封化类型名 / 版本 / 编码（JSON 或二进制，按 `StorageBinarySerializable<T>` 分派）；`get<T>` 返回 `Result<T>`，类型不匹配报 `storage-type-mismatch`、编码不支持报 `storage-encoding-mismatch`；存储版本低于 `storage_version(const T*)` 时自动经 `migrate_storage(old_version, const T*, payload)` 升版迁移 |
+
+三个定制点（`serializable.h`）均以 `const T*` 指针实参触发 ADL，用户在 T 所在命名空间定义非模板同名函数即可覆盖（零参模板调用依赖「显式模板实参参与 ADL」，GCC/MSVC 未实现，故不用）：
+
+- `storage_version(const T*) -> std::uint32_t`：默认恒 1。
+- `storage_type_name(const T*) -> const std::string&`：默认 typeid 短名（static 缓存零分配）。
+- `migrate_storage(std::uint32_t old_version, const T*, Json|StorageBytes) -> Result<Json|StorageBytes>`：默认恒等返回。
 
 **异步 API**（返回 `aurora::Task<...>`，见 [`02-state.md`](02-state.md) §5）
 
@@ -498,4 +510,4 @@ if (au::platform().is_mobile()) { /* 移动端适配 */ }
 - 配套**跨平台布局测试套件**与**黄金文件验证**，确保同布局在各平台结果一致。
 - AI 生成的代码无需为不同平台微调。
 
-**验收标准：** 同一棵树在各后端下产出相同的逻辑快照（Level 1 / Level 2）；黄金文件比对零差异。逻辑快照黄金文件由 `utest_golden_snapshots` 承担（11 个固定尺寸布局场景对 `tests/golden/logical_snapshots.json` 逐字段比对，见 [`03-layout-render.md`](03-layout-render.md) §10.1）；像素级 golden 由 `utest_image_view` / `utest_offscreen` 对 `tests/golden/*.png` 比对。
+**验收标准：** 同一棵树在各后端下产出相同的逻辑快照（Level 1 / Level 2）；黄金文件比对零差异。逻辑快照黄金文件由 `utest_offscreen` 承担（11 个固定尺寸布局场景对 `tests/golden/logical_snapshots.json` 逐字段比对，见 [`03-layout-render.md`](03-layout-render.md) §10.1）；像素级 golden 由 `itest_image_view` / `utest_offscreen` 对 `tests/golden/*.png` 比对。

@@ -32,17 +32,18 @@ class Binding {
     /// @brief 绑定到上游 State，并可注入一个删除回调（用于删除持久化键）。
     Binding(State<T> &upstream, std::function<void()> remover) : target_(&upstream), remover_(std::move(remover)) {}
 
-    [[nodiscard]] auto get() const -> const T & {
-        AURORA_ASSERT(target_ != nullptr, "Binding accessed before bound to a State");
+    [[nodiscard]] auto get() const -> T {
+        AURORA_CHECK(target_ != nullptr, "Binding accessed before bound to a State");  // 空解引用 = UB，常开拦截
         return target_->get();
     }
 
     auto set(T v) -> void {
-        AURORA_ASSERT(target_ != nullptr, "Binding accessed before bound to a State");
+        AURORA_CHECK(target_ != nullptr, "Binding accessed before bound to a State");  // 空解引用 = UB，常开拦截
         target_->set(std::move(v));
     }
 
-    /// @brief 删除绑定键（若有注入的删除回调）。无回调时为安全空操作。
+    /// @brief 删除绑定键（触发注入的删除回调，删除上游对应持久化键）。无回调时为安全空操作。
+    /// @note 非幂等：每次调用都会执行 remover_（幂等性由后端删除语义保证，如 Preferences 墓碑删除）。
     /// 调用后本 Binding 即失效（上游 State 可能被销毁），不应再 `get`/`set`。
     auto remove() const -> void {
         if (remover_) {

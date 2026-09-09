@@ -28,12 +28,12 @@ inline auto lerp(const Size &a, const Size &b, double t) -> Size {
 }
 
 inline auto lerp(const Color &a, const Color &b, double t) -> Color {
-    return Color{
-        static_cast<uint8_t>(std::lround(lerp(a.r, b.r, t))),
-        static_cast<uint8_t>(std::lround(lerp(a.g, b.g, t))),
-        static_cast<uint8_t>(std::lround(lerp(a.b, b.b, t))),
-        static_cast<uint8_t>(std::lround(lerp(a.a, b.a, t))),
+    // 通道先提升 double 再插值：若直接调通用模板 lerp<uint8_t>，浮点结果会在模板内
+    // 先截断回 uint8_t（127.5 → 127），外层 lround 的四舍五入就永远轮不到。
+    auto mix = [t](uint8_t x, uint8_t y) {
+        return static_cast<uint8_t>(std::lround(static_cast<double>(x) + (static_cast<double>(y) - x) * t));
     };
+    return Color{mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b), mix(a.a, b.a)};
 }
 
 inline auto lerp(const EdgeInsets &a, const EdgeInsets &b, double t) -> EdgeInsets {
@@ -98,7 +98,9 @@ class Keyframes {
 
     Keyframes() = default;
     explicit Keyframes(std::vector<Stop> stops) : stops_(std::move(stops)) {
-        std::sort(stops_.begin(), stops_.end(), [](const Stop &a, const Stop &b) -> auto { return a.time < b.time; });
+        // 稳定排序：同时刻停靠点保持插入次序（取值确定、不受排序抖动影响）。
+        std::stable_sort(stops_.begin(), stops_.end(),
+                         [](const Stop &a, const Stop &b) -> auto { return a.time < b.time; });
     }
 
     /// @brief 计算时刻 t 处的值（线性插值相邻停靠点）。

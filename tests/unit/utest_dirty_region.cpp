@@ -1,186 +1,132 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/render/dirty_region.h
-/// 测试说明: dirty_region 单元测试
-///
+/// 测试说明: 覆盖 DirtyRegionTracker 的空/整帧状态机、零面积矩形忽略、重叠合并为并集、相邻不合并、
+/// 超限退化为整帧、上限可调与 clear 复位；全程经 fixture 保存/还原静态上限（避免跨用例污染）
 
-// 验证脏区域渲染：DirtyRegionTracker 合并逻辑 + Window 跳帧集成。
+#include <cstddef>
 
-#include <memory>
-
+#include "aurora/core/types.h"
 #include "aurora/render/dirty_region.h"
-#include "aurora/state/state.h"
-#include "aurora/widget/containers.h"
-#include "aurora/widget/text.h"
-#include "aurora/window/surface.h"
-#include "aurora/window/window.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_dirty_region {
 
 namespace {
-
-/// 创建已定尺寸的 Headless 窗口（HeadlessSurface 尺寸由首次 begin_frame 确立）。
-auto make_window(int w, const int h) -> Window {
-    auto surface = std::make_unique<HeadlessSurface>();
-    (void)surface->begin_frame(w, h);
-    return Window{std::move(surface)};
+[[nodiscard]] auto rect_at(float x, float y, float w, float h) -> Rect {
+    return Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = w, .height = h}};
 }
-
 }  // namespace
 
-AURORA_TEST() {
-    // ---- 1. Tracker 基本状态 ----
-    {
-        DirtyRegionTracker t;
-        AURORA_TEST_CHECK(t.is_empty());
-        AURORA_TEST_CHECK(!t.is_full());
+/// @brief 静态上限 `max_rects_` 是进程级共享状态，用例必须自净。
+class MaxRectsGuard : public ::aurora::testing::Fixture {
+  protected:
+    auto SetUp() -> void override { saved_ = DirtyRegionTracker::max_rects(); }
+    auto TearDown() -> void override { DirtyRegionTracker::set_max_rects(saved_); }
 
-        t.mark(Rect{.origin = Point{.x = 10.0F, .y = 10.0F}, .size = Size{.width = 50.0F, .height = 50.0F}});
-        AURORA_TEST_CHECK(!t.is_empty());
-        AURORA_TEST_CHECK(t.rects().size() == 1);
+  private:
+    std::size_t saved_ = DirtyRegionTracker::AURORA_MAX_RECTS;
+};
 
-        t.clear();
-        AURORA_TEST_CHECK(t.is_empty());
+AURORA_TEST_F(MaxRectsGuard, starts_empty) {
+    DirtyRegionTracker tracker;
+    AURORA_TEST_CHECK_TRUE(tracker.is_empty());
+    AURORA_TEST_CHECK_FALSE(tracker.is_full());
+    AURORA_TEST_CHECK_EQ(tracker.rects().size(), 0U);
+}
+
+AURORA_TEST_F(MaxRectsGuard, mark_records_rect_and_bounds) {
+    DirtyRegionTracker tracker;
+    tracker.mark(rect_at(10.0F, 20.0F, 30.0F, 40.0F));
+
+    AURORA_TEST_CHECK_FALSE(tracker.is_empty());
+    AURORA_TEST_CHECK_FALSE(tracker.is_full());
+    AURORA_TEST_REQUIRE_EQ(tracker.rects().size(), 1U);
+
+    const Rect bounds = tracker.merged_bounds();
+    AURORA_TEST_CHECK_NEAR(bounds.origin.x, 10.0, 1e-6);
+    AURORA_TEST_CHECK_NEAR(bounds.origin.y, 20.0, 1e-6);
+    AURORA_TEST_CHECK_NEAR(bounds.size.width, 30.0, 1e-6);
+    AURORA_TEST_CHECK_NEAR(bounds.size.height, 40.0, 1e-6);
+}
+
+AURORA_TEST_F(MaxRectsGuard, mark_ignores_non_positive_area) {
+    DirtyRegionTracker tracker;
+    tracker.mark(rect_at(0.0F, 0.0F, 0.0F, 10.0F));   // 零宽
+    tracker.mark(rect_at(0.0F, 0.0F, 10.0F, -5.0F));  // 负高
+    AURORA_TEST_CHECK_TRUE(tracker.is_empty());
+}
+
+AURORA_TEST_F(MaxRectsGuard, overlapping_rects_merge_into_union) {
+    DirtyRegionTracker tracker;
+    tracker.mark(rect_at(0.0F, 0.0F, 10.0F, 10.0F));
+    tracker.mark(rect_at(5.0F, 5.0F, 10.0F, 10.0F));
+
+    AURORA_TEST_REQUIRE_EQ(tracker.rects().size(), 1U);
+    const Rect bounds = tracker.merged_bounds();
+    AURORA_TEST_CHECK_NEAR(bounds.origin.x, 0.0, 1e-6);
+    AURORA_TEST_CHECK_NEAR(bounds.origin.y, 0.0, 1e-6);
+    AURORA_TEST_CHECK_NEAR(bounds.size.width, 15.0, 1e-6);
+    AURORA_TEST_CHECK_NEAR(bounds.size.height, 15.0, 1e-6);
+}
+
+AURORA_TEST_F(MaxRectsGuard, disjoint_rects_stay_separate) {
+    // 仅边相接不算重叠（严格小于判定），故不合并 —— 与常见脏区实现一致。
+    DirtyRegionTracker tracker;
+    tracker.mark(rect_at(0.0F, 0.0F, 10.0F, 10.0F));
+    tracker.mark(rect_at(10.0F, 0.0F, 10.0F, 10.0F));
+    AURORA_TEST_CHECK_EQ(tracker.rects().size(), 2U);
+}
+
+AURORA_TEST_F(MaxRectsGuard, mark_all_enters_full_frame) {
+    DirtyRegionTracker tracker;
+    tracker.mark(rect_at(0.0F, 0.0F, 4.0F, 4.0F));
+    tracker.mark_all();
+
+    AURORA_TEST_CHECK_TRUE(tracker.is_full());
+    AURORA_TEST_CHECK_FALSE(tracker.is_empty());
+    AURORA_TEST_CHECK_EQ(tracker.rects().size(), 0U);
+}
+
+AURORA_TEST_F(MaxRectsGuard, mark_after_full_is_noop) {
+    // 已整帧脏时再 mark 不再记账，避免无意义的合并开销。
+    DirtyRegionTracker tracker;
+    tracker.mark_all();
+    tracker.mark(rect_at(0.0F, 0.0F, 4.0F, 4.0F));
+    AURORA_TEST_CHECK_TRUE(tracker.is_full());
+    AURORA_TEST_CHECK_EQ(tracker.rects().size(), 0U);
+}
+
+AURORA_TEST_F(MaxRectsGuard, exceeding_limit_degrades_to_full_frame) {
+    DirtyRegionTracker tracker;
+    DirtyRegionTracker::set_max_rects(4);
+    for (int i = 0; i < 5; ++i) {
+        tracker.mark(rect_at(static_cast<float>(i) * 100.0F, 0.0F, 10.0F, 10.0F));
     }
+    AURORA_TEST_CHECK_TRUE(tracker.is_full());
+}
 
-    // ---- 2. 零尺寸矩形忽略 ----
-    {
-        DirtyRegionTracker t;
-        t.mark(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 0.0F, .height = 100.0F}});
-        t.mark(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 100.0F, .height = -5.0F}});
-        AURORA_TEST_CHECK(t.is_empty());
+AURORA_TEST_F(MaxRectsGuard, raising_limit_avoids_degradation) {
+    // 提高上限只增加局部重绘精度，不改变正确性（结果像素与整帧重绘一致）。
+    DirtyRegionTracker tracker;
+    DirtyRegionTracker::set_max_rects(64);
+    for (int i = 0; i < 5; ++i) {
+        tracker.mark(rect_at(static_cast<float>(i) * 100.0F, 0.0F, 10.0F, 10.0F));
     }
+    AURORA_TEST_CHECK_FALSE(tracker.is_full());
+    AURORA_TEST_CHECK_EQ(tracker.rects().size(), 5U);
+}
 
-    // ---- 3. 重叠矩形合并为并集 ----
-    {
-        DirtyRegionTracker t;
-        t.mark(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 50.0F, .height = 50.0F}});
-        t.mark(Rect{.origin = Point{.x = 25.0F, .y = 25.0F},
-                    .size = Size{.width = 50.0F, .height = 50.0F}});  // 与前者重叠
-        AURORA_TEST_CHECK(t.rects().size() == 1);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        const Rect m = t.rects()[0];
-        AURORA_TEST_CHECK(m.origin.x == 0.0F && m.origin.y == 0.0F);
-        AURORA_TEST_CHECK(m.size.width == 75.0F && m.size.height == 75.0F);
-    }
+AURORA_TEST_F(MaxRectsGuard, clear_resets_state) {
+    DirtyRegionTracker tracker;
+    tracker.mark_all();
+    tracker.clear();
+    AURORA_TEST_CHECK_TRUE(tracker.is_empty());
+    AURORA_TEST_CHECK_FALSE(tracker.is_full());
 
-    // ---- 4. 不相交矩形独立保留 ----
-    {
-        DirtyRegionTracker t;
-        t.mark(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 10.0F, .height = 10.0F}});
-        t.mark(Rect{.origin = Point{.x = 100.0F, .y = 100.0F}, .size = Size{.width = 10.0F, .height = 10.0F}});
-        AURORA_TEST_CHECK(t.rects().size() == 2);
-
-        // merged_bounds 是两者包围盒
-        const Rect mb = t.merged_bounds();
-        AURORA_TEST_CHECK(mb.origin.x == 0.0F);
-        AURORA_TEST_CHECK(mb.size.width == 110.0F);
-    }
-
-    // ---- 5. 连锁合并（第三个矩形桥接前两个）----
-    {
-        DirtyRegionTracker t;
-        t.mark(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 10.0F, .height = 10.0F}});
-        t.mark(Rect{.origin = Point{.x = 20.0F, .y = 0.0F}, .size = Size{.width = 10.0F, .height = 10.0F}});
-        AURORA_TEST_CHECK(t.rects().size() == 2);
-        // 桥接两者
-        t.mark(Rect{.origin = Point{.x = 5.0F, .y = 0.0F}, .size = Size{.width = 20.0F, .height = 10.0F}});
-        AURORA_TEST_CHECK(t.rects().size() == 1);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(t.rects()[0].size.width == 30.0F);
-    }
-
-    // ---- 6. mark_all 与超限退化 ----
-    {
-        DirtyRegionTracker t;
-        t.mark_all();
-        AURORA_TEST_CHECK(t.is_full());
-        AURORA_TEST_CHECK(!t.is_empty());
-        // 整帧脏后 mark 无操作
-        t.mark(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 10.0F, .height = 10.0F}});
-        AURORA_TEST_CHECK(t.rects().empty());
-
-        // 超过 AURORA_MAX_RECTS 个离散矩形退化为整帧脏
-        DirtyRegionTracker t2;
-        for (int i = 0; i < 20; ++i) {
-            t2.mark(Rect{.origin = Point{.x = static_cast<float>(i) * 100.0F, .y = 0.0F},
-                         .size = Size{.width = 10.0F, .height = 10.0F}});
-        }
-        AURORA_TEST_CHECK(t2.is_full());
-    }
-
-    // ---- 7. Window 集成：默认开启（idle 跳帧）----
-    {
-        Window win = make_window(320, 240);
-        AURORA_TEST_CHECK(win.dirty_tracking_enabled());
-
-        auto text = Text();
-        text.content = LocalizedString{"hello"};
-        Node root{std::move(text)};
-        root.widget().mount(aurora::BuildContext{});
-
-        // 首帧全绘；静态树第二帧跳帧（idle 零开销，仍返回 ok）
-        auto r1 = win.present_root(root);
-        AURORA_TEST_CHECK(r1.ok());
-        auto r2 = win.present_root(root);
-        AURORA_TEST_CHECK(r2.ok());
-    }
-
-    // ---- 8. Window 集成：启用后静态树第二帧跳帧 ----
-    {
-        Window win = make_window(320, 240);
-        win.enable_dirty_tracking(true);
-        AURORA_TEST_CHECK(win.dirty_tracking_enabled());
-
-        auto text = Text();
-        text.content = LocalizedString{"static"};
-        Node root{std::move(text)};
-        root.widget().mount(aurora::BuildContext{});
-
-        // 首帧全绘
-        auto r1 = win.present_root(root);
-        AURORA_TEST_CHECK(r1.ok());
-        // 静态树：第二帧跳帧（跳帧路径返回 true 且不 begin_frame）
-        AURORA_TEST_CHECK(win.dirty_tracker().is_empty());
-        auto r2 = win.present_root(root);
-        AURORA_TEST_CHECK(r2.ok());
-    }
-
-    // ---- 9. Window 集成：State 变更触发重绘 ----
-    {
-        Window win = make_window(320, 240);
-        win.enable_dirty_tracking(true);
-
-        auto text = std::make_shared<Text>();
-        text->content = LocalizedString{"dynamic"};
-        Node root{std::shared_ptr<aurora::Widget>(text)};
-        root.widget().mount(aurora::BuildContext{});
-
-        auto r1 = win.present_root(root);  // 首帧全绘 + 接线 on_dirty
-        AURORA_TEST_CHECK(r1.ok());
-        AURORA_TEST_CHECK(win.dirty_tracker().is_empty());
-
-        // 控件标脏 → tracker 变脏 → 下一帧重绘
-        text->mark_needs_paint();
-        AURORA_TEST_CHECK(!win.dirty_tracker().is_empty());
-        auto r2 = win.present_root(root);
-        AURORA_TEST_CHECK(r2.ok());
-        AURORA_TEST_CHECK(win.dirty_tracker().is_empty());  // 渲染后清空
-    }
-
-    // ---- 10. mark_dirty / force_full_redraw seam ----
-    {
-        Window win = make_window(320, 240);
-        win.enable_dirty_tracking(true);
-
-        win.mark_dirty(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 10.0F, .height = 10.0F}});
-        AURORA_TEST_CHECK(!win.dirty_tracker().is_empty());
-
-        win.force_full_redraw();
-        AURORA_TEST_CHECK(win.dirty_tracker().is_full());
-    }
+    tracker.mark(rect_at(0.0F, 0.0F, 8.0F, 8.0F));
+    tracker.clear();
+    AURORA_TEST_CHECK_TRUE(tracker.is_empty());
+    AURORA_TEST_CHECK_EQ(tracker.rects().size(), 0U);
 }
 
 }  // namespace aurora::test_cases::utest_dirty_region

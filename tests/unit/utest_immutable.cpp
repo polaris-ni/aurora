@@ -1,89 +1,74 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/immutable.h
-/// 测试说明: 状态作用域权限包装 Immutable（只读）与 Mutable（读写）的透传语义与 scope 标签单元测试
+/// 测试说明: 覆盖 Immutable 只读穿透与 scope 标签、Mutable 读写穿透，以及「写入路径在类型层面被删除」的编译期契约
 
 #include <string>
+#include <type_traits>
+#include <utility>
 
 #include "aurora/core/immutable.h"
-#include "aurora/state/state.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_immutable {
 
-AURORA_TEST() {
-    // ---- 1. Immutable 透传读取底层 State 的当前值 ----
-    {
-        State<int> src{42};
-        const Immutable<int> ro{src};
-        AURORA_TEST_CHECK(ro.get() == 42);
-    }
+namespace {
 
-    // ---- 2. Immutable 观察到源状态的后续变化（持有引用，非快照） ----
-    {
-        State<int> src{1};
-        const Immutable<int> ro{src};
-        src.set(2);
-        AURORA_TEST_CHECK(ro.get() == 2);
-        src.set(3);
-        AURORA_TEST_CHECK(ro.get() == 3);
-    }
+/// @brief 写入口探测：类型是否有可调用的 set(int)（concept 体内为依赖表达式，缺失成员判 false）。
+template <typename W>
+concept writable_via_set = requires(W& w, int v) { w.set(v); };
 
-    // ---- 3. Immutable 的 scope 标签可标注读来源 ----
-    {
-        State<int> src{0};
-        const Immutable<int> ro{src, "detail-pane"};
-        AURORA_TEST_CHECK(ro.scope() == "detail-pane");
-    }
+}  // namespace
 
-    // ---- 4. Immutable 默认 scope 为空串 ----
-    {
-        State<int> src{0};
-        const Immutable<int> ro{src};
-        AURORA_TEST_CHECK(ro.scope().empty());
-    }
+AURORA_TEST_CASE(immutable_reads_through_to_underlying_state) {
+    aurora::State<int> src{5};
+    const aurora::Immutable<int> ro{src};
+    AURORA_TEST_CHECK_EQ(ro.get(), 5);
 
-    // ---- 5. Mutable 可写，写入落到源 State ----
-    {
-        State<int> src{0};
-        Mutable<int> rw{src};
-        rw.set(7);
-        AURORA_TEST_CHECK(rw.get() == 7);
-        AURORA_TEST_CHECK(src.get() == 7);
-    }
+    // 读路径实时穿透：底层 State 更新后无需重建包装即可观察到新值。
+    src.set(9);
+    AURORA_TEST_CHECK_EQ(ro.get(), 9);
+}
 
-    // ---- 6. Mutable 的写入可被同源的 Immutable 观察到 ----
-    {
-        State<int> src{0};
-        Mutable<int> rw{src, "editor"};
-        const Immutable<int> ro{src, "preview"};
-        rw.set(99);
-        AURORA_TEST_CHECK(ro.get() == 99);
-        AURORA_TEST_CHECK(rw.scope() == "editor");
-        AURORA_TEST_CHECK(ro.scope() == "preview");
-    }
+AURORA_TEST_CASE(immutable_scope_label_default_empty) {
+    aurora::State<int> src{1};
+    const aurora::Immutable<int> ro{src};
+    AURORA_TEST_CHECK(ro.scope().empty());
+}
 
-    // ---- 7. 同一 State 可挂多个权限包装，互不干扰 ----
-    {
-        State<std::string> src{"a"};
-        Mutable<std::string> w1{src, "w1"};
-        const Immutable<std::string> r1{src, "r1"};
-        const Immutable<std::string> r2{src, "r2"};
+AURORA_TEST_CASE(immutable_scope_label_preserved) {
+    aurora::State<std::string> src{"hello"};
+    const aurora::Immutable<std::string> ro{src, "reader-scope"};
+    AURORA_TEST_CHECK_STREQ(ro.scope(), "reader-scope");
+    AURORA_TEST_CHECK_STREQ(ro.get(), "hello");
+}
 
-        w1.set("b");
-        AURORA_TEST_CHECK(r1.get() == "b");
-        AURORA_TEST_CHECK(r2.get() == "b");
-        AURORA_TEST_CHECK(r1.scope() != r2.scope());
-    }
+AURORA_TEST_CASE(mutable_writes_through_to_underlying_state) {
+    aurora::State<int> src{1};
+    aurora::Mutable<int> mu{src, "editor-scope"};  // set 为非 const 成员，包装本体须可变
 
-    // ---- 8. 包装非平凡类型（字符串）时的读取正确性 ----
-    {
-        State<std::string> src{};
-        Mutable<std::string> rw{src};
-        rw.set("hello");
-        AURORA_TEST_CHECK(rw.get() == "hello");
-        rw.set("world");
-        AURORA_TEST_CHECK(rw.get() == "world");
-    }
+    // 写路径穿透：Mutable::set 直接更新底层 State。
+    mu.set(3);
+    AURORA_TEST_CHECK_EQ(src.get(), 3);
+    AURORA_TEST_CHECK_EQ(mu.get(), 3);
+    AURORA_TEST_CHECK_STREQ(mu.scope(), "editor-scope");
+}
+
+AURORA_TEST_CASE(mutable_scope_label_default_empty) {
+    aurora::State<int> src{0};
+    const aurora::Mutable<int> mu{src};
+    AURORA_TEST_CHECK(mu.scope().empty());
+}
+
+AURORA_TEST_CASE(write_path_shape_is_compile_time_enforced) {
+    // 类型层面契约：Immutable 不暴露任何写入口（set 不存在）；
+    // Mutable 暴露 set(T)。用 concept 探测在编译期锁定该形状
+    // （concept 体内表达式依赖模板参数 T，对具体类型的不存在成员判 false 而非硬错误）。
+    static_assert(!writable_via_set<aurora::Immutable<int>>, "Immutable 不得暴露写路径");
+    static_assert(writable_via_set<aurora::Mutable<int>>, "Mutable 必须暴露写路径");
+    // 读路径两侧都返回 const 引用（get 对 const 对象可用）。
+    static_assert(std::is_same_v<decltype(std::declval<const aurora::Immutable<int>&>().get()), const int&>);
+    static_assert(std::is_same_v<decltype(std::declval<const aurora::Mutable<int>&>().get()), const int&>);
+    AURORA_TEST_CHECK(true);
 }
 
 }  // namespace aurora::test_cases::utest_immutable

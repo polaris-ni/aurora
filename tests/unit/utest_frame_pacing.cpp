@@ -1,47 +1,68 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/window/frame_pacing.h
-/// 测试说明: frame_pacing 单元测试
-///
+/// 测试说明: compute_wait_timeout 帧调度纯逻辑全量分支——活跃帧预算节流/钳零/不限帧率、
+/// 后端自带节拍跳过 CPU 节流、空闲帧睡到定时任务/无限等待、纯函数一致性
 
-// 验证帧调度决策纯函数 compute_wait_timeout：
-// 活跃帧按帧预算节流、空闲帧睡到定时任务到期或无限等待、后端自带节拍/不限帧率不叠加 sleep。
-// 纯逻辑、无平台依赖。
 #include "aurora/window/frame_pacing.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_frame_pacing {
 
-AURORA_TEST() {
-    constexpr double budget = 16.67;  // 60fps 帧预算
+AURORA_TEST_CASE(active_frame_throttles_to_remaining_budget) {
+    // 有脏区：睡到下一帧起点 = 帧预算 - 已耗时。
+    const double dirty = compute_wait_timeout(true, false, -1.0, 100.0, 25.0);
+    AURORA_TEST_CHECK_NEAR(dirty, 75.0, 1e-4F);
+    // 动画与脏区走同一条活跃帧路径。
+    const double anim = compute_wait_timeout(false, true, -1.0, 16.0, 4.0);
+    AURORA_TEST_CHECK_NEAR(anim, 12.0, 1e-4F);
+    // 活跃帧忽略定时任务到期时间（活跃帧的节流优先于定时唤醒）。
+    const double ignores_deadline = compute_wait_timeout(true, false, 30.0, 100.0, 10.0);
+    AURORA_TEST_CHECK_NEAR(ignores_deadline, 90.0, 1e-4F);
+}
 
-    // ---- 1. 完全空闲（无脏/无动画/无定时任务）→ 无限等待（-1，纯事件驱动）----
-    AURORA_TEST_CHECK(au::compute_wait_timeout(false, false, -1.0, budget, 2.0) < 0.0);
+AURORA_TEST_CASE(active_frame_clamps_elapsed_over_budget) {
+    // 已耗时超过预算：剩余为负，钳到 0（立即进入下一帧，不睡负值）。
+    const double r = compute_wait_timeout(true, false, -1.0, 100.0, 250.0);
+    AURORA_TEST_CHECK_NEAR(r, 0.0, 1e-4F);
+    AURORA_TEST_CHECK_GE(r, 0.0);
+}
 
-    // ---- 2. 空闲但有定时任务 → 睡到最近到期时刻 ----
-    AURORA_TEST_CHECK_NEAR(au::compute_wait_timeout(false, false, 250.0, budget, 2.0), 250.0, 1e-4);
-    // 已到期（0）→ 立即进入下一帧
-    AURORA_TEST_CHECK_NEAR(au::compute_wait_timeout(false, false, 0.0, budget, 2.0), 0.0, 1e-4);
+AURORA_TEST_CASE(active_frame_unlimited_budget_returns_zero) {
+    // 契约：帧预算 <= 0 表示不限帧率（max_fps=0），活跃帧立即进入下一帧。
+    AURORA_TEST_CHECK_NEAR(compute_wait_timeout(true, false, -1.0, 0.0, 10.0), 0.0, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(compute_wait_timeout(false, true, 42.0, -5.0, 0.0), 0.0, 1e-4F);
+}
 
-    // ---- 3. 有脏区（活跃帧）→ 剩余预算内节流 ----
-    AURORA_TEST_CHECK_NEAR(au::compute_wait_timeout(true, false, -1.0, budget, 4.0), budget - 4.0, 1e-4);
-    // 有动画同理
-    AURORA_TEST_CHECK_NEAR(au::compute_wait_timeout(false, true, -1.0, budget, 4.0), budget - 4.0, 1e-4);
+AURORA_TEST_CASE(active_frame_backend_paced_returns_zero) {
+    // 契约：后端自带帧节拍（如 D3D11 vsync）时 CPU 端跳过 sleep，避免双重限速。
+    const double paced = compute_wait_timeout(true, true, 999.0, 100.0, 0.0, true);
+    AURORA_TEST_CHECK_NEAR(paced, 0.0, 1e-4F);
+    // 对照：同一输入但 backend_paced=false 仍走预算节流。
+    const double unpaced = compute_wait_timeout(true, true, 999.0, 100.0, 0.0, false);
+    AURORA_TEST_CHECK_NEAR(unpaced, 100.0, 1e-4F);
+}
 
-    // ---- 4. 活跃帧预算已超支 → 0（不等待，但不为负）----
-    AURORA_TEST_CHECK_NEAR(au::compute_wait_timeout(true, false, -1.0, budget, 20.0), 0.0, 1e-4);
+AURORA_TEST_CASE(idle_frame_without_deadline_waits_forever) {
+    // 空闲帧（无脏区/动画）且无定时任务（deadline < 0）：无限等待，idle 零 CPU。
+    AURORA_TEST_CHECK_NEAR(compute_wait_timeout(false, false, -1.0, 100.0, 0.0), -1.0, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(compute_wait_timeout(false, false, -1000.0, 16.0, 5.0), -1.0, 1e-4F);
+}
 
-    // ---- 5. 活跃帧 + 不限帧率（budget<=0，max_fps=0 旧行为）→ 0 ----
-    AURORA_TEST_CHECK_NEAR(au::compute_wait_timeout(true, false, -1.0, 0.0, 4.0), 0.0, 1e-4);
+AURORA_TEST_CASE(idle_frame_sleeps_until_deadline) {
+    // 空闲帧有定时任务：睡到最近到期时刻（正 deadline 原样透传）。
+    AURORA_TEST_CHECK_NEAR(compute_wait_timeout(false, false, 250.0, 16.0, 0.0), 250.0, 1e-4F);
+    // 到期时刻已到（0）：不等待。
+    const double due = compute_wait_timeout(false, false, 0.0, 16.0, 0.0);
+    AURORA_TEST_CHECK_NEAR(due, 0.0, 1e-4F);
+    AURORA_TEST_CHECK_GE(due, 0.0);
+}
 
-    // ---- 6. 活跃帧 + 后端自带节拍（D3D11 vsync）→ 0（避免双重限速）----
-    AURORA_TEST_CHECK_NEAR(au::compute_wait_timeout(true, false, -1.0, budget, 4.0, true), 0.0, 1e-4);
-
-    // ---- 7. 空闲帧不受后端节拍影响：仍无限等待/睡到定时任务 ----
-    AURORA_TEST_CHECK(au::compute_wait_timeout(false, false, -1.0, budget, 4.0, true) < 0.0);
-    AURORA_TEST_CHECK_NEAR(au::compute_wait_timeout(false, false, 100.0, budget, 4.0, true), 100.0, 1e-4);
-
-    // ---- 8. 活跃帧优先于定时任务：预算节流生效（不睡到远处的定时任务）----
-    AURORA_TEST_CHECK_NEAR(au::compute_wait_timeout(true, false, 500.0, budget, 4.0), budget - 4.0, 1e-4);
+AURORA_TEST_CASE(frame_pacing_is_pure_and_consistent) {
+    // 纯函数（无状态、无副作用）：同输入必得同输出。
+    const double first = compute_wait_timeout(true, false, 12.0, 50.0, 20.0);
+    const double second = compute_wait_timeout(true, false, 12.0, 50.0, 20.0);
+    AURORA_TEST_CHECK_NEAR(first, 30.0, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(first, second, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_frame_pacing

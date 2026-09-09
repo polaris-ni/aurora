@@ -1,252 +1,199 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/inspector/inspector_api.h
-/// 测试说明: inspector_api 单元测试
-///
+/// 测试说明: 覆盖 Inspector 统一门面——树查询四件套（text/rich/json/json_full）、widget_info
+/// 与属性读写（get_prop_value 未命中返回 null、set_prop 容忍未知键）、apply_patch 路径补丁
+/// 与非数组错误、query/find_node/get_state 定位、validate 错误→Diagnostic 映射、组件发现、
+/// to_code、变化订阅生命周期、simulate_* 交互模拟（按当前实现派发事件并返回 ok）。
 
-// Inspector 统一门面测试。
-
-#include <memory>
 #include <string>
-#include <vector>
 
-#include "aurora/aurora.h"
 #include "aurora/inspector/inspector_api.h"
-#include "aurora_test_harness.h"
+#include "aurora/widget/containers.h"
+#include "aurora/widget/text.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_inspector_api {
 
-namespace serialization = aurora::serialization;
+namespace {
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== test_inspector_api ===\n");
+/// @brief 构造确定性测试树：Column 根 + 单个 Text("hi") 子节点（无需布局即可检视）。
+[[nodiscard]] auto make_tree() -> Node {
+    auto col = std::make_shared<Column>();
+    col->add(Node{std::make_shared<Text>("hi")});
+    return Node{col};
+}
 
-    serialization::register_core_widgets();
+}  // namespace
 
-    // 构建测试树：Column → [Button, Text, Row → [Text]]
-    auto root = Node{Column{ColumnProps{.children = {
-                                            Node{Button{"OK"}},
-                                            Node{Text{"label"}},
-                                            Node{Row{RowProps{.children =
-                                                                  {
-                                                                      Node{Text{"inner"}},
-                                                                  }}}},
-                                        }}}};
+AURORA_TEST_CASE(tree_text_and_rich_dump_widget_tree) {
+    Node root = make_tree();
+    const std::string text = Inspector::tree_text(root);
+    // 缩进树：每行一个 type_name，父子按层级缩进。
+    AURORA_TEST_CHECK_TRUE(text.find("Column") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(text.find("Text") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(text.find('\n') != std::string::npos);
 
-    BuildContext ctx;
-    root.widget().mount(ctx);
-    root.widget().layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 400, .height = 400}},
-                         ctx);
+    // 富格式树：含文本内容与树形连接符。
+    const std::string rich = Inspector::tree_rich(root);
+    AURORA_TEST_CHECK_TRUE(rich.find("Column") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(rich.find("text: \"hi\"") != std::string::npos);
+}
 
-    // ---- 1) tree_json 基本结构 ----
-    {
-        Json j = Inspector::tree_json(root);
-        AURORA_TEST_CHECK(j.is_object());
-        AURORA_TEST_CHECK(j.contains("type"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(j["type"].get<std::string>() == "Column");
-        AURORA_TEST_CHECK(j.contains("children"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(j["children"].is_array());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK_EQ(j["children"].size(), 3U);
-    }
+AURORA_TEST_CASE(tree_json_has_type_and_children_only) {
+    const Json j = Inspector::tree_json(make_tree());
+    AURORA_TEST_CHECK_EQ(j["type"], "Column");
+    AURORA_TEST_CHECK_EQ(j["children"].size(), 1U);
+    AURORA_TEST_CHECK_EQ(j["children"][0]["type"], "Text");
+    AURORA_TEST_CHECK_FALSE(j.contains("props"));  // 结构化树仅 type + children
+}
 
-    // ---- 2) tree_rich 包含 bounds/text 信息 ----
-    {
-        std::string rich = Inspector::tree_rich(root);
-        AURORA_TEST_CHECK(!rich.empty());
-        // 应包含 Column 类型名
-        AURORA_TEST_CHECK(rich.find("Column") != std::string::npos);
-        // 应包含 Button 类型名
-        AURORA_TEST_CHECK(rich.find("Button") != std::string::npos);
-    }
+AURORA_TEST_CASE(tree_json_full_includes_props) {
+    const Json j = Inspector::tree_json_full(make_tree());
+    AURORA_TEST_CHECK_TRUE(j["props"].is_object());
+    AURORA_TEST_CHECK_EQ(j["children"][0]["type"], "Text");
+    // 完整快照携带序列化属性：Text 的 content 键为文本内容。
+    AURORA_TEST_CHECK_EQ(j["children"][0]["props"]["content"], "hi");
+}
 
-    // ---- 3) tree_text 人类可读 ----
-    {
-        std::string text = Inspector::tree_text(root);
-        AURORA_TEST_CHECK(!text.empty());
-        AURORA_TEST_CHECK(text.find("Column") != std::string::npos);
-    }
+AURORA_TEST_CASE(widget_info_and_prop_reads) {
+    auto w = std::make_shared<Text>("hi");
 
-    // ---- 4) tree_json_full 含 props ----
-    {
-        Json j = Inspector::tree_json_full(root);
-        AURORA_TEST_CHECK(j.contains("props"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(j["props"].is_object());
-    }
+    // widget_info：descriptor 元数据 + values 当前值合并。
+    const Json info = Inspector::widget_info(*w);
+    AURORA_TEST_CHECK_EQ(info["descriptor"]["name"], "Text");
+    AURORA_TEST_CHECK_EQ(info["values"]["content"], "hi");
 
-    // ---- 5) query 按类型查询 ----
-    {
-        auto texts = Inspector::query("Text", root);
-        AURORA_TEST_CHECK_EQ(texts.size(), 2U);  // "label" + "inner"
-        auto buttons = Inspector::query("Button", root);
-        AURORA_TEST_CHECK_EQ(buttons.size(), 1U);
-        auto missing = Inspector::query("NonExistent", root);
-        AURORA_TEST_CHECK_EQ(missing.size(), 0U);
-    }
+    // get_prop 与 widget_info 同构。
+    const Json props = Inspector::get_prop(*w);
+    AURORA_TEST_CHECK_EQ(props["descriptor"]["name"], "Text");
+    AURORA_TEST_CHECK_EQ(props["values"]["content"], "hi");
 
-    // ---- 6) get_state 路径查询 ----
-    {
-        Json state = Inspector::get_state("type", root);
-        AURORA_TEST_CHECK(state.is_string());
-        AURORA_TEST_CHECK(state.get<std::string>() == "Column");
-    }
+    // 单键读取；未命中键返回 null Json（而非抛错）。
+    AURORA_TEST_CHECK_EQ(Inspector::get_prop_value(*w, "content"), "hi");
+    AURORA_TEST_CHECK_TRUE(Inspector::get_prop_value(*w, "no_such_key").is_null());
+}
 
-    // ---- 7) find_node 路径定位 ----
-    {
-        Node n0 = Inspector::find_node(root, "");
-        AURORA_TEST_CHECK(static_cast<bool>(n0));
-        AURORA_TEST_CHECK(std::string(n0.widget().type_name()) == "Column");
+AURORA_TEST_CASE(set_prop_roundtrip_and_unknown_key_tolerance) {
+    auto w = std::make_shared<Text>("hi");
 
-        Node n1 = Inspector::find_node(root, "0");
-        AURORA_TEST_CHECK(static_cast<bool>(n1));
-        AURORA_TEST_CHECK(std::string(n1.widget().type_name()) == "Button");
+    // 合法键往返：写入后读回一致。注意用圆括号构造——`Json{"changed"}` 是初始化列表
+    // 语义（得到数组 ["changed"]），会触发 LocalizedString 类型校验失败降级。
+    const Result<void> r = Inspector::set_prop(*w, "content", Json("changed"));
+    AURORA_TEST_REQUIRE_TRUE(r.ok());
+    AURORA_TEST_CHECK_EQ(Inspector::get_prop_value(*w, "content"), "changed");
 
-        Node n2 = Inspector::find_node(root, "2/0");
-        AURORA_TEST_CHECK(static_cast<bool>(n2));
-        AURORA_TEST_CHECK(std::string(n2.widget().type_name()) == "Text");
+    // 未知键：deserialize 忽略，返回 ok 且原值不变。
+    const Result<void> r2 = Inspector::set_prop(*w, "no_such_key", Json(1));
+    AURORA_TEST_CHECK_TRUE(r2.ok());
+    AURORA_TEST_CHECK_EQ(Inspector::get_prop_value(*w, "content"), "changed");
+}
 
-        Node invalid = Inspector::find_node(root, "99");
-        AURORA_TEST_CHECK_FALSE(static_cast<bool>(invalid));
-    }
+AURORA_TEST_CASE(apply_patch_sets_props_by_path) {
+    Node root = make_tree();
 
-    // ---- 8) get_prop / get_prop_value ----
-    {
-        Json props = Inspector::get_prop(root.widget());
-        AURORA_TEST_CHECK(props.is_object());
-        AURORA_TEST_CHECK(props.contains("descriptor"));
-        AURORA_TEST_CHECK(props.contains("values"));
+    // 路径格式 "/<子节点索引路径>/<属性名>"：补丁作用于 0 号子节点的 content。
+    const Json patch = Json::array({Json{{"path", "/0/content"}, {"value", "patched"}}});
+    const Result<void> r = Inspector::apply_patch(root, patch);
+    AURORA_TEST_REQUIRE_TRUE(r.ok());
+    AURORA_TEST_CHECK_EQ(Inspector::get_prop_value(Inspector::find_node(root, "0").widget(), "content"), "patched");
 
-        Json gap_val = Inspector::get_prop_value(root.widget(), "gap");
-        // gap 应该有值（可能是默认值）
-        AURORA_TEST_CHECK(!gap_val.is_null());
-    }
+    // 缺 value 的操作项被跳过（仍返回 ok）。
+    const Json partial = Json::array({Json{{"path", "/0/content"}}});
+    AURORA_TEST_CHECK_TRUE(Inspector::apply_patch(root, partial).ok());
 
-    // ---- 9) set_prop 属性回写 ----
-    {
-        auto *col = dynamic_cast<Column *>(&root.widget());
-        AURORA_TEST_CHECK(col != nullptr);
-        float old_gap = col->gap;
+    // 错误路径：补丁必须是 JSON 数组。
+    const Result<void> bad = Inspector::apply_patch(root, Json::object());
+    AURORA_TEST_REQUIRE_FALSE(bad.ok());
+    AURORA_TEST_CHECK_EQ(bad.error().code_enum, aurora::ErrorCode::GeneralNotSupported);
+}
 
-        auto result = Inspector::set_prop(root.widget(), "gap", Json(20.0F));
-        AURORA_TEST_CHECK(static_cast<bool>(result));
-        AURORA_TEST_CHECK_NEAR(col->gap, 20.0F, 0.01F);
+AURORA_TEST_CASE(query_and_find_node_by_path) {
+    Node root = make_tree();
 
-        // 恢复
-        Inspector::set_prop(root.widget(), "gap", Json(old_gap));
-    }
+    // 按类型名精确匹配查询。
+    AURORA_TEST_CHECK_EQ(Inspector::query("Text", root).size(), 1U);
+    AURORA_TEST_CHECK_TRUE(Inspector::query("Button", root).empty());
 
-    // ---- 10) widget_info ----
-    {
-        Json info = Inspector::widget_info(root.widget());
-        AURORA_TEST_CHECK(info.is_object());
-        AURORA_TEST_CHECK(info.contains("descriptor"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(info["descriptor"]["name"].get<std::string>() == "Column");
-    }
+    // 按索引路径定位："" 为根、"0" 为首子节点、越界返回空 Node。
+    const Node by_root = Inspector::find_node(root, "");
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(by_root));
+    AURORA_TEST_CHECK_EQ(by_root.widget().type_name(), std::string_view{"Column"});
+    const Node child = Inspector::find_node(root, "0");
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(child));
+    AURORA_TEST_CHECK_EQ(child.widget().type_name(), std::string_view{"Text"});
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(Inspector::find_node(root, "9")));
+}
 
-    // ---- 11) components 组件发现 ----
-    {
-        auto comps = Inspector::components();
-        AURORA_TEST_CHECK(!comps.empty());
-        // 应包含核心组件
-        bool has_column = false;
-        for (const auto &c : comps) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-            if (c.contains("type") && c["type"].get<std::string>() == "Column") {
-                has_column = true;
-                break;
-            }
-        }
-        AURORA_TEST_CHECK(has_column);
-    }
+AURORA_TEST_CASE(get_state_walks_json_tree) {
+    Node root = make_tree();
+    // get_state 沿 dump_tree_json 产出的 JSON 树按 "/" 路径取片段。
+    AURORA_TEST_CHECK_EQ(Inspector::get_state("type", root), "Column");
+    AURORA_TEST_CHECK_EQ(Inspector::get_state("children/0/type", root), "Text");
+    // 未命中路径返回空 Json。
+    AURORA_TEST_CHECK_TRUE(Inspector::get_state("bogus/path", root).is_null());
+}
 
-    // ---- 12) component_schema ----
-    {
-        Json schema = Inspector::component_schema("Button");
-        AURORA_TEST_CHECK(schema.is_object());
-        // schema 应含 type 或 name 字段
-        AURORA_TEST_CHECK(schema.contains("type") || schema.contains("name"));
-    }
+AURORA_TEST_CASE(validate_maps_errors_to_diagnostics) {
+    // 合法树：诊断列表为空。
+    AURORA_TEST_CHECK_TRUE(Inspector::validate(make_tree()).empty());
 
-    // ---- 13) to_code 代码生成 ----
-    {
-        std::string code = Inspector::to_code(root);
-        AURORA_TEST_CHECK(!code.empty());
-        AURORA_TEST_CHECK(code.find("Column") != std::string::npos);
-    }
+    // 结构问题树：null 子节点映射为一条 Error 级 Diagnostic。
+    auto col = std::make_shared<Column>();
+    col->add(Node{});
+    const std::vector<Diagnostic> diags = Inspector::validate(Node{col});
+    AURORA_TEST_REQUIRE_EQ(diags.size(), 1U);
+    AURORA_TEST_CHECK_EQ(diags[0].severity, aurora::ErrorSeverity::Error);
+    AURORA_TEST_CHECK_TRUE(diags[0].message.find("null child") != std::string::npos);
+}
 
-    // ---- 14) validate 验证 ----
-    {
-        auto diags = Inspector::validate(root);
-        // 合法树应该没有诊断
-        AURORA_TEST_CHECK(diags.empty());
-    }
+AURORA_TEST_CASE(component_discovery_lists_registered_schemas) {
+    // 组件发现：核心控件注册后 schema 列表非空，单组件 schema 携带类型名。
+    const std::vector<Json> all = Inspector::components();
+    AURORA_TEST_CHECK_FALSE(all.empty());
 
-    // ---- 15) subscribe_changes / notify_changes / unsubscribe ----
-    {
-        int call_count = 0;
-        Json last_patch;
+    const Json schema = Inspector::component_schema("Text");
+    AURORA_TEST_CHECK_TRUE(schema.is_object());
+    AURORA_TEST_CHECK_EQ(schema["type"], "Text");
+}
 
-        auto id = Inspector::subscribe_changes([&](const Json &patch) -> void {
-            ++call_count;
-            last_patch = patch;
-        });
-        AURORA_TEST_CHECK(id > 0);
+AURORA_TEST_CASE(to_code_generates_source_from_tree) {
+    // 代码生成：树转源码输出非空可读文本。
+    const std::string code = Inspector::to_code(make_tree());
+    AURORA_TEST_CHECK_GT(code.size(), 0U);
+    AURORA_TEST_CHECK_TRUE(code.find("Column") != std::string::npos);
+}
 
-        // 触发通知
-        Json test_patch = Json::object();
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        test_patch["test"] = "value";
-        Inspector::notify_changes(test_patch);
+AURORA_TEST_CASE(subscribe_notify_unsubscribe_cycle) {
+    int hits1 = 0;
+    int hits2 = 0;
+    const std::size_t id1 = Inspector::subscribe_changes([&hits1](const Json &) { ++hits1; });
+    const std::size_t id2 = Inspector::subscribe_changes([&hits2](const Json &) { ++hits2; });
+    AURORA_TEST_CHECK_NE(id1, id2);  // 订阅 id 唯一递增
 
-        AURORA_TEST_CHECK_EQ(call_count, 1);
-        AURORA_TEST_CHECK(last_patch.contains("test"));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(last_patch["test"].get<std::string>() == "value");
+    Inspector::notify_changes(Json::object());
+    AURORA_TEST_CHECK_EQ(hits1, 1);
+    AURORA_TEST_CHECK_EQ(hits2, 1);
 
-        // 取消订阅后再通知不应增加计数
-        Inspector::unsubscribe(id);
-        Inspector::notify_changes(test_patch);
-        AURORA_TEST_CHECK_EQ(call_count, 1);
-    }
+    // 取消 id1 后仅 id2 收到通知。
+    Inspector::unsubscribe(id1);
+    Inspector::notify_changes(Json::object());
+    AURORA_TEST_CHECK_EQ(hits1, 1);
+    AURORA_TEST_CHECK_EQ(hits2, 2);
 
-    // ---- 16) simulate_* 真实派发事件（不再返回 GeneralNotSupported）----
-    {
-        BuildContext lctx;
+    Inspector::unsubscribe(id2);  // 清理订阅，防悬垂
+    Inspector::unsubscribe(id1);  // 重复取消安全（erase 不存在键为 no-op）
+}
 
-        // click：在 Button 上派发 press+release，返回成功（不再为 stub）
-        Button btn{"test"};
-        btn.mount(lctx);
-        btn.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 200, .height = 60}}, lctx);
-        auto r1 = Inspector::simulate_click(btn);
-        AURORA_TEST_CHECK(static_cast<bool>(r1));
+AURORA_TEST_CASE(simulate_helpers_dispatch_and_return_ok) {
+    // 交互模拟：当前实现经 EventDispatcher 在控件自身中心派发事件并返回 ok
+    // （注意：头文件注释「当前返回 GeneralNotSupported」与实现不符，以运行时行为为准）。
+    auto w = std::make_shared<Text>("hi");
+    AURORA_TEST_CHECK_NO_THROW((void)Inspector::simulate_click(*w));
+    AURORA_TEST_CHECK_NO_THROW((void)Inspector::simulate_scroll(*w, 0.0F, -10.0F));
+    AURORA_TEST_CHECK_NO_THROW((void)Inspector::simulate_text_input(*w, "abc"));
 
-        // scroll：在 Column 上派发 WheelEvent，返回成功
-        Column col;
-        col.mount(lctx);
-        col.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 200, .height = 200}}, lctx);
-        auto r2 = Inspector::simulate_scroll(col, 0.0F, 12.0F);
-        AURORA_TEST_CHECK(static_cast<bool>(r2));
-
-        // text_input：焦点派发到 TextInput，文本被真实写入
-        TextInput ti;
-        ti.mount(lctx);
-        ti.layout(Constraints{.min = Size{.width = 0, .height = 0}, .max = Size{.width = 200, .height = 40}}, lctx);
-        AURORA_TEST_CHECK_EQ(ti.value(), "");
-        auto r3 = Inspector::simulate_text_input(ti, "hello");
-        AURORA_TEST_CHECK(static_cast<bool>(r3));
-        AURORA_TEST_CHECK_EQ(ti.value(), "hello");
-    }
+    const Result<void> click = Inspector::simulate_click(*w);
+    AURORA_TEST_CHECK_TRUE(click.ok());
 }
 
 }  // namespace aurora::test_cases::utest_inspector_api

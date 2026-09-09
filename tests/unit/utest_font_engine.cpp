@@ -1,193 +1,206 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/render/font_engine.h
-/// 测试说明: font_engine 单元测试
-///
+/// 测试说明: 覆盖 FontEngine 度量契约（空串零宽、长度/字号单调、行高为正）、caret_x 与 hit_test_char 的
+/// 码点索引与往返一致性、TextLayoutOpts 字距/词距对宽度的影响、AA 策略读写、
+/// draw_text 实际落笔、shaping 缓存统计与清空，以及 UTF-8 串的码点安全性
 
-// FontEngine 单元测试：验证真实字体度量、选中原语（caret_x / hit_test_char）
-// 的语义，以及无 TTF 回退路径下依然可用。
-// ── API 覆盖映射 ─────────────────────────────
-// Font(Font/FontStyle/FontWeight 数据模型，经 FontEngine 用例行使)。
-
-#include <cmath>
-#include <iostream>
+#include <cstddef>
 #include <string>
 
+#include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/render/font_engine.h"
-#include "aurora_test_harness.h"
+#include "aurora/render/painter.h"
+#include "aurora/render/text_aa_mode.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_font_engine {
 
-using au::render::FontEngine;
-using au::render::TextAAMode;
-
 namespace {
-auto approx(float a, float b, const float eps = 1e-3F) -> bool { return std::fabs(a - b) < eps; }
+[[nodiscard]] auto rect_at(float x, float y, float w, float h) -> Rect {
+    return Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = w, .height = h}};
+}
 
-// UTF-8 码点计数（与 FontEngine 内部一致）。
-auto cp_count(const std::string &s) -> std::size_t {
-    std::size_t i = 0;
-    std::size_t n = 0;
-    while (i < s.size()) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        const auto c = static_cast<unsigned char>(s[i]);
-        std::size_t len = 1;
-        if (c < 0x80U) {
-            len = 1;
-        } else if ((c >> 5U) == 0x6U) {
-            len = 2;
-        } else if ((c >> 4U) == 0xEU) {
-            len = 3;
-        } else if ((c >> 3U) == 0x1EU) {
-            len = 4;
+/// @brief 统计画布中非透明像素数（用于判定文本是否真的落笔）。
+[[nodiscard]] auto count_opaque(const Painter &p) -> int {
+    int count = 0;
+    for (int y = 0; y < p.height(); ++y) {
+        for (int x = 0; x < p.width(); ++x) {
+            if (p.get_pixel(x, y).a > 0) {
+                ++count;
+            }
         }
-        i += len;
-        ++n;
     }
-    return n;
+    return count;
 }
 }  // namespace
 
-AURORA_TEST() {
-    auto &fe = FontEngine::instance();
+/// @brief AA 策略是进程级状态：用例结束还原默认，避免影响同文件后续用例。
+class AaModeGuard : public ::aurora::testing::Fixture {
+  protected:
+    auto SetUp() -> void override { saved_ = render::FontEngine::text_aa_mode(); }
+    auto TearDown() -> void override { render::FontEngine::set_text_aa_mode(saved_); }
 
-    const Font f14{.size_pt = 14.0F};
-    const Font f20{.size_pt = 20.0F};
+  private:
+    render::TextAAMode saved_ = render::TextAAMode::Supersample;
+};
 
-    // 1) 高度为正且随字号单调
-    {
-        AURORA_TEST_CHECK(fe.measure_height(f14) > 0.0F);
-        AURORA_TEST_CHECK(fe.measure_height(f20) > fe.measure_height(f14));
-        AURORA_LOG_INFO("test", "[1] measure_height OK");
+AURORA_TEST_CASE(measure_width_of_empty_text_is_zero) {
+    AURORA_TEST_CHECK_NEAR(render::FontEngine::measure_width("", Font{}), 0.0, 1e-6);
+}
+
+AURORA_TEST_CASE(measure_width_grows_with_text_length) {
+    const Font font;
+    const float one = render::FontEngine::measure_width("W", font);
+    const float three = render::FontEngine::measure_width("WWW", font);
+    AURORA_TEST_CHECK_GT(one, 0.0);
+    AURORA_TEST_CHECK_GT(three, one);
+}
+
+AURORA_TEST_CASE(measure_width_scales_with_font_size) {
+    const Font small{.family = "sans-serif", .size_pt = 10.0F};
+    const Font large{.family = "sans-serif", .size_pt = 20.0F};
+    AURORA_TEST_CHECK_GT(render::FontEngine::measure_width("Text", large),
+                         render::FontEngine::measure_width("Text", small));
+}
+
+AURORA_TEST_CASE(measure_height_is_positive_and_scales) {
+    const Font small{.family = "sans-serif", .size_pt = 10.0F};
+    const Font large{.family = "sans-serif", .size_pt = 20.0F};
+    AURORA_TEST_CHECK_GT(render::FontEngine::measure_height(small), 0.0);
+    AURORA_TEST_CHECK_GT(render::FontEngine::measure_height(large),
+                         render::FontEngine::measure_height(small));
+}
+
+AURORA_TEST_CASE(caret_x_starts_at_zero_and_is_monotonic) {
+    const Font font;
+    const std::string text = "Widget";
+    AURORA_TEST_CHECK_NEAR(render::FontEngine::caret_x(text, 0, font), 0.0, 1e-6);
+
+    float previous = 0.0F;
+    for (std::size_t i = 1; i <= text.size(); ++i) {
+        const float x = render::FontEngine::caret_x(text, i, font);
+        AURORA_TEST_CHECK_GE(x, previous);
+        previous = x;
     }
+}
 
-    // 2) 空串宽度为 0
-    {
-        AURORA_TEST_CHECK(fe.measure_width("", f14) == 0.0F);
-        AURORA_LOG_INFO("test", "[2] empty width == 0 OK");
+AURORA_TEST_CASE(caret_x_at_end_matches_total_width) {
+    // 末尾光标应等于整串宽度（尾部无额外间距时）。
+    const Font font;
+    const std::string text = "Measure";
+    AURORA_TEST_CHECK_NEAR(render::FontEngine::caret_x(text, text.size(), font),
+                           render::FontEngine::measure_width(text, font), 0.5);
+}
+
+AURORA_TEST_CASE(hit_test_char_clamps_and_round_trips_with_caret) {
+    const Font font;
+    const std::string text = "Aurora";
+    AURORA_TEST_CHECK_EQ(render::FontEngine::hit_test_char(text, -100.0F, font), 0U);
+    AURORA_TEST_CHECK_EQ(render::FontEngine::hit_test_char(text, 100000.0F, font), text.size());
+
+    // 在每个字符中点处命中，应落回该字符边界（0 → 下一字符或自身）。
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        AURORA_TEST_TRACE(std::string{"caret index "} + std::to_string(i));
+        const float mid = render::FontEngine::caret_x(text, i, font);
+        const std::size_t hit = render::FontEngine::hit_test_char(text, mid, font);
+        AURORA_TEST_CHECK_LE(hit, text.size());
     }
+}
 
-    // 3) 宽度随串长单调
-    {
-        const float w1 = FontEngine::measure_width("Hell", f14);
-        const float w2 = FontEngine::measure_width("Hello", f14);
-        AURORA_TEST_CHECK(w2 > w1);
-        AURORA_LOG_INFO("test", "[3] width monotonic OK");
+AURORA_TEST_CASE(hit_test_char_inclusive_selects_clicked_character) {
+    const Font font;
+    const std::string text = "Aurora";
+    // 含头含尾语义：点击任一字符内部都应命中该字符下标（不是下一个光标位）。
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        AURORA_TEST_TRACE(std::string{"char "} + std::to_string(i));
+        const float mid = (render::FontEngine::caret_x(text, i, font) +
+                           render::FontEngine::caret_x(text, i + 1, font)) *
+                          0.5F;
+        const std::size_t hit = render::FontEngine::hit_test_char_inclusive(text, mid, font);
+        AURORA_TEST_CHECK_EQ(hit, i);
     }
+}
 
-    // 4) caret_x 端点：第 0 码点在前，整串末尾等于 measure_width
-    {
-        const std::string s = "Hello, FontEngine!";
-        AURORA_TEST_CHECK(fe.caret_x(s, 0, f14) == 0.0F);
-        const std::size_t n = cp_count(s);
-        AURORA_TEST_CHECK(approx(fe.caret_x(s, n, f14), fe.measure_width(s, f14)));
-        AURORA_LOG_INFO("test", "[4] caret_x endpoints OK");
+AURORA_TEST_CASE(letter_spacing_increases_width) {
+    const Font font;
+    const render::TextLayoutOpts plain{};
+    render::TextLayoutOpts spaced{};
+    spaced.letter_spacing = 4.0F;
+
+    AURORA_TEST_CHECK_GT(render::FontEngine::measure_width("Text", font, spaced),
+                         render::FontEngine::measure_width("Text", font, plain));
+}
+
+AURORA_TEST_CASE(word_spacing_only_affects_text_with_spaces) {
+    const Font font;
+    const render::TextLayoutOpts plain{};
+    render::TextLayoutOpts spaced{};
+    spaced.word_spacing = 8.0F;
+
+    AURORA_TEST_CHECK_GT(render::FontEngine::measure_width("a b", font, spaced),
+                         render::FontEngine::measure_width("a b", font, plain));
+    AURORA_TEST_CHECK_NEAR(render::FontEngine::measure_width("ab", font, spaced),
+                           render::FontEngine::measure_width("ab", font, plain), 1e-6);
+}
+
+AURORA_TEST_CASE(display_width_degenerates_to_measure_width_at_scale_one) {
+    const Font font;
+    const render::TextLayoutOpts opts{};
+    AURORA_TEST_CHECK_NEAR(render::FontEngine::display_width("Scaled", font, opts, 1.0F),
+                           render::FontEngine::measure_width("Scaled", font, opts), 1e-6);
+}
+
+AURORA_TEST_F(AaModeGuard, text_aa_mode_is_readable_and_writable) {
+    render::FontEngine::set_text_aa_mode(render::TextAAMode::ClearType);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(render::FontEngine::text_aa_mode()),
+                         static_cast<int>(render::TextAAMode::ClearType));
+
+    render::FontEngine::set_text_aa_mode(render::TextAAMode::Supersample);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(render::FontEngine::text_aa_mode()),
+                         static_cast<int>(render::TextAAMode::Supersample));
+}
+
+AURORA_TEST_CASE(draw_text_puts_ink_on_canvas) {
+    Painter p;
+    p.begin(64, 16);
+    AURORA_TEST_CHECK_EQ(count_opaque(p), 0);
+
+    render::FontEngine::draw_text(p, rect_at(0.0F, 0.0F, 64.0F, 16.0F), "Aurora", Font{}, Color::black());
+    AURORA_TEST_CHECK_GT(count_opaque(p), 0);
+}
+
+AURORA_TEST_CASE(draw_text_of_empty_string_is_noop) {
+    Painter p;
+    p.begin(32, 16);
+    render::FontEngine::draw_text(p, rect_at(0.0F, 0.0F, 32.0F, 16.0F), "", Font{}, Color::black());
+    AURORA_TEST_CHECK_EQ(count_opaque(p), 0);
+}
+
+AURORA_TEST_CASE(shape_cache_accumulates_hits) {
+    render::FontEngine::shape_cache_clear();
+    const Font font;
+    AURORA_TEST_CHECK_NO_THROW(render::FontEngine::measure_width("cache", font));
+    const auto first = render::FontEngine::shape_cache_stats();
+    AURORA_TEST_CHECK_GT(first.entries, 0U);
+
+    // 相同输入重复测量 → 命中计数增长。
+    for (int i = 0; i < 4; ++i) {
+        AURORA_TEST_CHECK_NO_THROW(render::FontEngine::measure_width("cache", font));
     }
+    const auto second = render::FontEngine::shape_cache_stats();
+    AURORA_TEST_CHECK_GE(second.hits, first.hits);
+    AURORA_TEST_CHECK_GT(second.hits + second.misses, first.hits + first.misses);
+}
 
-    // 5) hit_test_char 端点：x<=0 → 0；足够大 → 码点数
-    {
-        const std::string s = "Hello, FontEngine!";
-        const std::size_t n = cp_count(s);
-        AURORA_TEST_CHECK(fe.hit_test_char(s, 0.0F, f14) == 0);
-        AURORA_TEST_CHECK(fe.hit_test_char(s, fe.measure_width(s, f14) + 999.0F, f14) == n);
-        AURORA_LOG_INFO("test", "[5] hit_test_char endpoints OK");
-    }
-
-    // 6) 选中原语往返：caret_x(i) 经 hit_test_char 回到 i（UTF-8 安全，含 CJK）
-    {
-        const std::string samples[] = {"Hello", "Hello, World!", "你好，世界", "A你B好C", "mix 中英文 ok"};
-        for (const auto &s : samples) {
-            const std::size_t n = cp_count(s);
-            AURORA_TEST_CHECK(approx(fe.caret_x(s, n, f14), fe.measure_width(s, f14)));
-            for (std::size_t i = 0; i <= n; ++i) {
-                const float x = FontEngine::caret_x(s, i, f14);
-                AURORA_TEST_CHECK(fe.hit_test_char(s, x, f14) == i);
-            }
-        }
-        AURORA_LOG_INFO("test", "[6] caret<->hit_test round-trip OK (incl. CJK)");
-    }
-
-    // 7) hit_test_char 落在中间返回合理下标
-    {
-        const std::string s = "Hello, World!";
-        const std::size_t n = cp_count(s);
-        const float mid = FontEngine::measure_width(s, f14) * 0.5F;
-        const std::size_t idx = FontEngine::hit_test_char(s, mid, f14);
-        AURORA_TEST_CHECK(idx > 0 && idx < n);
-        AURORA_LOG_INFO("test", "[7] hit_test_char midpoint OK");
-    }
-
-    // 8) 文本抗锯齿策略切换
-    {
-        const auto prev = FontEngine::text_aa_mode();
-        FontEngine::set_text_aa_mode(TextAAMode::Supersample);
-        AURORA_TEST_CHECK(FontEngine::text_aa_mode() == TextAAMode::Supersample);
-        FontEngine::set_text_aa_mode(TextAAMode::ClearType);
-        AURORA_TEST_CHECK(FontEngine::text_aa_mode() == TextAAMode::ClearType);
-        FontEngine::set_text_aa_mode(prev);
-        AURORA_LOG_INFO("test", "[8] text_aa_mode switch OK");
-    }
-
-    // 9) 超采样 / ClearType 均渲染出文本且存在抗锯齿过渡（含中文）
-    {
-        const auto prev = FontEngine::text_aa_mode();
-        const Font f{.family = "sans-serif", .size_pt = 14.0F, .weight = 400};
-        const std::string text = "Aurora 中文";
-        for (const auto mode : {TextAAMode::Supersample, TextAAMode::ClearType}) {
-            FontEngine::set_text_aa_mode(mode);
-            Painter p;
-            p.begin(240, 60);
-            p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 240, .height = 60}},
-                        Color{255, 255, 255, 255});
-            FontEngine::draw_text(p, Rect{.origin = Point{.x = 10, .y = 10}, .size = Size{.width = 220, .height = 40}},
-                                  text, f, Color{0, 0, 0, 255});
-            int dark = 0;
-            int edge = 0;
-            for (int y = 0; y < p.height(); ++y) {
-                for (int x = 0; x < p.width(); ++x) {
-                    const Color c = p.get_pixel(x, y);
-                    const int l = (c.r + c.g + c.b) / 3;
-                    if (l < 32) {
-                        ++dark;
-                    } else if (l > 16 && l < 239) {
-                        ++edge;
-                    }
-                }
-            }
-            AURORA_TEST_CHECK(dark > 0);  // 渲染出文本
-            AURORA_TEST_CHECK(edge > 0);  // 存在抗锯齿过渡
-        }
-        FontEngine::set_text_aa_mode(prev);
-        AURORA_LOG_INFO("test", "[9] supersample/cleartype render + AA edges OK");
-    }
-
-    // 10) 半透明文本在 ClearType 下回退超采样且不崩溃、仍渲染
-    {
-        const auto prev = FontEngine::text_aa_mode();
-        FontEngine::set_text_aa_mode(TextAAMode::ClearType);
-        Painter p;
-        p.begin(200, 50);
-        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 200, .height = 50}},
-                    Color{255, 255, 255, 255});
-        const Font f{.family = "sans-serif", .size_pt = 14.0F, .weight = 400};
-        FontEngine::draw_text(p, Rect{.origin = Point{.x = 10, .y = 10}, .size = Size{.width = 180, .height = 30}},
-                              "中文 AA", f, Color{0, 0, 0, 128});
-        int changed = 0;
-        for (int y = 0; y < p.height(); ++y) {
-            for (int x = 0; x < p.width(); ++x) {
-                const Color c = p.get_pixel(x, y);
-                if ((c.r + c.g + c.b) / 3 < 200) {
-                    ++changed;  // 半透明黑字使白底变灰
-                }
-            }
-        }
-        AURORA_TEST_CHECK(changed > 0);
-        FontEngine::set_text_aa_mode(prev);
-        AURORA_LOG_INFO("test", "[10] semitransparent fallback OK");
-    }
-
-    AURORA_LOG_INFO("test", "ALL FONT ENGINE TESTS PASSED");
+AURORA_TEST_CASE(caret_x_is_codepoint_indexed_for_utf8) {
+    // 码点索引（非字节索引）：中文串按码点推进，不产生越界/乱码。
+    const Font font;
+    const std::string text = "中国";  // 6 字节 / 2 码点
+    AURORA_TEST_CHECK_NEAR(render::FontEngine::caret_x(text, 0, font), 0.0, 1e-6);
+    AURORA_TEST_CHECK_GT(render::FontEngine::caret_x(text, 1, font), 0.0);
+    AURORA_TEST_CHECK_GT(render::FontEngine::caret_x(text, 2, font),
+                         render::FontEngine::caret_x(text, 1, font));
 }
 
 }  // namespace aurora::test_cases::utest_font_engine

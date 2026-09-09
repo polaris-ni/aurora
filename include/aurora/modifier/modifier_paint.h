@@ -7,7 +7,9 @@
 
 #include <algorithm>
 
+#include "aurora/core/color.h"
 #include "aurora/modifier/modifier_base.h"
+#include "aurora/render/blend.h"
 
 namespace aurora {
 

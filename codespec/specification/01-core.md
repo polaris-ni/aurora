@@ -20,7 +20,7 @@
 | 平台与能力查询 | `platform.h`、`enums.h`、`accessibility.h` |
 | 其他 | `immutable.h`、`image.h`、`font.h`、`literals.h`、`version.h` |
 
-根级头文件：`aurora.h`（唯一入口）、`aurora_fwd.h`（仅前向声明，供只需指针/引用的编译单元降低包含成本）、`aurora_pch.h`、`commands.h`、`test_helpers.h`、`todo.h`。
+根级头文件：`aurora.h`（唯一入口）、`aurora_fwd.h`（仅前向声明，供只需指针/引用的编译单元降低包含成本）、`aurora_pch.h`、`commands.h`、`todo.h`。（原根级 `test_helpers.h` 已迁至 `tests/support/test_helpers.h`，定位为仓库私有测试设施，退出公共 API 与 `aurora_api.json`。）
 
 ---
 

@@ -1,40 +1,37 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/window/wasm_surface.h
-/// 测试说明: wasm_surface 单元测试
-///
+/// 测试说明: WASM 后端类型契约 skip 桩——头整体被
+/// AURORA_PLATFORM_WASM && AURORA_BACKEND_WASM 门控（含 <emscripten.h>），非 Emscripten 工具链无法编译
 
-// 目标源单元：WasmSurface（平台后端，仅 AURORA_BACKEND_WASM 编译）。
-//
-// API 覆盖映射：WasmSurface(Emscripten Canvas2D + rAF) 构造与帧生命周期
-//
-// 覆盖率豁免说明：本机为 Linux，无法编译/运行该后端；真实窗口创建、
-// 帧生命周期与原生句柄语义只能在对应平台上验证。Linux 下本文件自跳过空通过，
-// 覆盖率按平台豁免处理（与 test_win32_surface / test_d3d11_present 同口径）。
+#if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)
+#include <type_traits>
 
-#include "aurora_test_harness.h"
-
-#ifdef AURORA_BACKEND_WASM
-// 平台专属头仅在宏开启时可用
-#include "aurora/aurora.h"
 #include "aurora/window/wasm_surface.h"
 #endif
 
+#include "framework/aurora_test.h"
+
 namespace aurora::test_cases::utest_wasm_surface {
 
-#ifdef AURORA_BACKEND_WASM
-
-namespace {
-
-void test_smoke() {
-    // 平台上最小冒烟：构造语义由各平台实现保证，此处仅验证类型完整性可编译。
-    AURORA_TEST_CHECK_MSG(true, "wasm_surface compiled-in smoke");
+AURORA_TEST_CASE(wasm_surface_type_contract) {
+#if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)
+    static_assert(std::is_base_of_v<aurora::Surface, aurora::WasmSurface>);
+    static_assert(!std::is_copy_constructible_v<aurora::WasmSurface>);
+    static_assert(!std::is_move_constructible_v<aurora::WasmSurface>);
+    AURORA_TEST_CHECK_TRUE(std::is_base_of_v<aurora::Surface, aurora::WasmSurface>);
+#else
+    AURORA_TEST_SKIP("WASM 后端仅在 AURORA_PLATFORM_WASM && AURORA_BACKEND_WASM（Emscripten 工具链）下编译");
+#endif
 }
 
-}  // namespace
-
-AURORA_TEST() { test_smoke(); }
+AURORA_TEST_CASE(wasm_surface_os_dependent_paths_skipped) {
+#if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)
+    // 构造即在浏览器环境注册 Emscripten 事件回调，present 走 EM_ASM 上屏 Canvas，
+    // 离开浏览器 rAF/宿主环境无从验证，属集成层覆盖范围。
+    AURORA_TEST_SKIP("WasmSurface 依赖浏览器宿主（Canvas/rAF/Emscripten 回调），单测不触碰宿主环境");
 #else
-AURORA_TEST_SKIP(AURORA_BACKEND_WASM)
+    AURORA_TEST_SKIP("WASM 后端仅在 AURORA_PLATFORM_WASM && AURORA_BACKEND_WASM（Emscripten 工具链）下编译");
 #endif
+}
 
 }  // namespace aurora::test_cases::utest_wasm_surface

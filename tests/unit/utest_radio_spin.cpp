@@ -1,318 +1,240 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/radio_spin.h
-/// 测试说明: radio_spin 单元测试
-///
+/// 测试说明: 覆盖 RadioGroup——选项列表与初始索引钳制、select 边界（同值/越界不触发）、
+/// 纵向点击选行、行列布局、序列化往返；以及 SpinBox——构造钳制、set_value/increment/decrement、
+/// display_text 与上下方向键、序列化往返
 
-// 验证 RadioGroup / SpinBox：互斥选择、点击命中、数值钳制/步进、序列化。
-#include <memory>
+#include <string>
+#include <vector>
 
+#include "aurora/event/event.h"
+#include "aurora/event/keycode.h"
+#include "aurora/layout/layout_engine.h"
 #include "aurora/widget/radio_spin.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_radio_spin {
 
-AURORA_TEST() {
-    // ==================== RadioGroup ====================
+namespace {
 
-    // ---- 1. 构造与选中 ----
-    {
-        auto rg = std::make_shared<RadioGroup>(std::vector<std::string>{"Yes", "No", "Maybe"}, 1);
-        AURORA_TEST_CHECK(rg->option_count() == 3);
-        AURORA_TEST_CHECK(rg->selected_index() == 1);
-    }
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
 
-    // ---- 2. select 与回调、越界忽略 ----
-    {
-        auto rg = std::make_shared<RadioGroup>(std::vector<std::string>{"A", "B"});
-        int changed = -1;
-        rg->set_on_change([&changed](int i) -> void { changed = i; });
+}  // namespace
 
-        rg->select(1);
-        AURORA_TEST_CHECK(rg->selected_index() == 1);
-        AURORA_TEST_CHECK(changed == 1);
+// ---- RadioGroup ----
 
-        changed = -1;
-        rg->select(1);  // 相同不回调
-        rg->select(99);  // 越界忽略
-        AURORA_TEST_CHECK(changed == -1);
-        AURORA_TEST_CHECK(rg->selected_index() == 1);
-    }
+AURORA_TEST_CASE(radiogroup_defaults_and_type_name) {
+    const RadioGroup rg({"A", "B", "C"});
+    AURORA_TEST_CHECK_EQ(std::string{rg.type_name()}, "RadioGroup");
+    AURORA_TEST_CHECK_EQ(rg.option_count(), 3U);
+    AURORA_TEST_CHECK_EQ(rg.selected_index(), 0);  // 默认选中首项
+    AURORA_TEST_CHECK_TRUE(rg.enabled());
+}
 
-    // ---- 3. 垂直排列点击命中（行高 28）----
-    {
-        auto rg = std::make_shared<RadioGroup>(std::vector<std::string>{"R0", "R1", "R2"});
-        BuildContext ctx;
-        rg->mount(ctx);
-        Constraints c;
-        c.min = Size{.width = 0.0F, .height = 0.0F};
-        c.max = Size{.width = 320.0F, .height = 240.0F};
-        rg->layout(c, ctx);
+AURORA_TEST_CASE(radiogroup_select_and_callback_boundaries) {
+    std::vector<int> seen;
+    RadioGroup rg({"A", "B", "C"});
+    rg.set_on_change([&seen](int i) { seen.push_back(i); });
 
-        MouseEvent e;
-        e.action = MouseAction::Press;
-        e.local_position = Point{.x = 10.0F, .y = (28.0F * 2) + 14.0F};  // 第三行中心
-        rg->on_pointer_event(e);
-        AURORA_TEST_CHECK(e.is_handled);
-        AURORA_TEST_CHECK(rg->selected_index() == 2);
-    }
+    rg.select(2);
+    AURORA_TEST_CHECK_EQ(rg.selected_index(), 2);
+    AURORA_TEST_REQUIRE_EQ(seen.size(), 1U);
+    AURORA_TEST_CHECK_EQ(seen[0], 2);
 
-    // ---- 4. 水平排列布局与命中 ----
-    {
-        auto rg = std::make_shared<RadioGroup>(std::vector<std::string>{"L", "R"}, 0, true);
-        BuildContext ctx;
-        rg->mount(ctx);
-        Constraints c;
-        c.min = Size{.width = 0.0F, .height = 0.0F};
-        c.max = Size{.width = 320.0F, .height = 240.0F};
-        const Size s = rg->layout(c, ctx);
-        AURORA_TEST_CHECK(s.height == 28.0F);  // 单行
+    rg.select(2);  // 同值重复选择：不触发回调
+    AURORA_TEST_CHECK_EQ(seen.size(), 1U);
 
-        // 点击第二项（第一项宽 = 文本宽 + 36）
-        MouseEvent e;
-        e.action = MouseAction::Press;
-        e.local_position = Point{.x = s.width - 10.0F, .y = 14.0F};
-        rg->on_pointer_event(e);
-        AURORA_TEST_CHECK(rg->selected_index() == 1);
-    }
+    rg.select(-1);  // 负索引：忽略
+    rg.select(99);  // 越界：忽略
+    AURORA_TEST_CHECK_EQ(rg.selected_index(), 2);
+    AURORA_TEST_CHECK_EQ(seen.size(), 1U);
+}
 
-    // ---- 5. RadioGroup 序列化往返 ----
-    {
-        auto rg = std::make_shared<RadioGroup>(std::vector<std::string>{"X", "Y"}, 1, true);
-        aurora::Json props;
-        rg->serialize_props(props);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["options"].size() == 2);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["selected_index"].get<int>() == 1);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["horizontal"].get<bool>());
+AURORA_TEST_CASE(radiogroup_initial_index_clamped) {
+    RadioGroup high({"A", "B"}, 5);
+    AURORA_TEST_CHECK_EQ(high.selected_index(), 1);  // 钳到最后一项
+    RadioGroup low({"A", "B"}, -3);
+    AURORA_TEST_CHECK_EQ(low.selected_index(), 0);  // 钳到首项
 
-        auto rg2 = std::make_shared<RadioGroup>();
-        rg2->deserialize_props(props);
-        AURORA_TEST_CHECK(rg2->option_count() == 2);
-        AURORA_TEST_CHECK(rg2->selected_index() == 1);
-    }
+    RadioGroup empty(std::vector<std::string>{});
+    AURORA_TEST_CHECK_EQ(empty.option_count(), 0U);
+    AURORA_TEST_CHECK_EQ(empty.selected_index(), 0);
+    empty.select(0);  // 空选项组：选择被忽略
+    AURORA_TEST_CHECK_EQ(empty.selected_index(), 0);
+}
 
-    // ==================== SpinBox ====================
+AURORA_TEST_CASE(radiogroup_pointer_press_selects_row) {
+    std::vector<int> seen;
+    RadioGroup rg({"A", "B", "C"});
+    rg.set_on_change([&seen](int i) { seen.push_back(i); });
 
-    // ---- 6. 构造与钳制 ----
-    {
-        auto sb = std::make_shared<SpinBox>(50.0, 0.0, 100.0, 5.0);
-        AURORA_TEST_CHECK(sb->value_of() == 50.0);
-        AURORA_TEST_CHECK(sb->min_value() == 0.0);
-        AURORA_TEST_CHECK(sb->max_value() == 100.0);
-        AURORA_TEST_CHECK(sb->step() == 5.0);
+    // 纵向行高 28：local y=35 落在第 2 行。
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    press.local_position = Point{.x = 30.0F, .y = 35.0F};
+    rg.on_pointer_event(press);
+    AURORA_TEST_CHECK_TRUE(press.is_handled);
+    AURORA_TEST_CHECK_EQ(rg.selected_index(), 1);
+    AURORA_TEST_REQUIRE_EQ(seen.size(), 1U);
+    AURORA_TEST_CHECK_EQ(seen[0], 1);
 
-        // 初值越界钳制
-        auto sb2 = std::make_shared<SpinBox>(999.0, 0.0, 10.0);
-        AURORA_TEST_CHECK(sb2->value_of() == 10.0);
+    // 落在选项区之外（y=100 → 第 4 行，越界）：不切换。
+    MouseEvent miss;
+    miss.action = MouseAction::Press;
+    miss.local_position = Point{.x = 30.0F, .y = 100.0F};
+    rg.on_pointer_event(miss);
+    AURORA_TEST_CHECK_EQ(rg.selected_index(), 1);
+    AURORA_TEST_CHECK_EQ(seen.size(), 1U);
 
-        // max < min 修正
-        auto sb3 = std::make_shared<SpinBox>(5.0, 10.0, 3.0);
-        AURORA_TEST_CHECK(sb3->max_value() == 10.0);
+    // 禁用态：吞掉事件但不切换。
+    rg.set_enabled(false);
+    MouseEvent off;
+    off.action = MouseAction::Press;
+    off.local_position = Point{.x = 30.0F, .y = 0.0F};
+    rg.on_pointer_event(off);
+    AURORA_TEST_CHECK_TRUE(off.is_handled);
+    AURORA_TEST_CHECK_EQ(rg.selected_index(), 1);
+    AURORA_TEST_CHECK_EQ(seen.size(), 1U);
+}
 
-        // 非正步长降级为 1
-        auto sb4 = std::make_shared<SpinBox>(0.0, 0.0, 10.0, -2.0);
-        AURORA_TEST_CHECK(sb4->step() == 1.0);
-    }
+AURORA_TEST_CASE(radiogroup_layout_rows_and_columns) {
+    RadioGroup vertical({"A", "B", "C"});
+    LayoutEngine::layout(vertical, bounded(500.0F, 300.0F));
+    AURORA_TEST_CHECK_NEAR(vertical.size().height, 84.0F, 1e-4F);  // 3 × 28 行高
+    AURORA_TEST_CHECK_GT(vertical.size().width, 0.0F);
 
-    // ---- 7. increment/decrement 与边界 ----
-    {
-        auto sb = std::make_shared<SpinBox>(95.0, 0.0, 100.0, 10.0);
-        double last = -1.0;
-        sb->set_on_change([&last](double v) -> void { last = v; });
+    RadioGroup horizontal({"A", "B", "C"}, 0, true);
+    LayoutEngine::layout(horizontal, bounded(500.0F, 300.0F));
+    AURORA_TEST_CHECK_NEAR(horizontal.size().height, 28.0F, 1e-4F);
+    AURORA_TEST_CHECK_GT(horizontal.size().width, 0.0F);
+}
 
-        sb->increment();  // 95+10=105 → 钳到 100
-        AURORA_TEST_CHECK(sb->value_of() == 100.0);
-        AURORA_TEST_CHECK(last == 100.0);
+AURORA_TEST_CASE(radiogroup_describe_and_roundtrip) {
+    const auto d = RadioGroup::describe_static();
+    AURORA_TEST_CHECK_EQ(std::string{d.name}, "RadioGroup");
+    AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
+    AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
+    AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");
 
-        sb->increment();  // 已到顶不变、不回调
-        last = -1.0;
-        sb->increment();
-        AURORA_TEST_CHECK(last == -1.0);
+    RadioGroup src({"A", "B"}, 1);
+    Json props;
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["selected_index"].get<int>(), 1);
+    AURORA_TEST_REQUIRE_EQ(props["options"].size(), 2U);
 
-        sb->decrement();
-        AURORA_TEST_CHECK(sb->value_of() == 90.0);
-    }
+    RadioGroup dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(dst.option_count(), 2U);
+    AURORA_TEST_CHECK_EQ(dst.selected_index(), 1);
+}
 
-    // ---- 8. display_text 前后缀与小数 ----
-    {
-        auto sb = std::make_shared<SpinBox>(42.0, 0.0, 100.0);
-        AURORA_TEST_CHECK(sb->display_text() == "42");
+// ---- SpinBox ----
 
-        sb->set_prefix("$").set_suffix(" USD").set_decimals(2);
-        AURORA_TEST_CHECK(sb->display_text() == "$42.00 USD");
-    }
+AURORA_TEST_CASE(spinbox_ctor_clamps_range_and_step) {
+    const SpinBox sb(50.0, 0.0, 100.0, 5.0);
+    AURORA_TEST_CHECK_EQ(std::string{sb.type_name()}, "SpinBox");
+    AURORA_TEST_CHECK_NEAR(sb.value_of(), 50.0, 1e-4);
+    AURORA_TEST_CHECK_NEAR(sb.min_value(), 0.0, 1e-4);
+    AURORA_TEST_CHECK_NEAR(sb.max_value(), 100.0, 1e-4);
+    AURORA_TEST_CHECK_NEAR(sb.step(), 5.0, 1e-4);
 
-    // ---- 9. 点击箭头区调节 ----
-    {
-        auto sb = std::make_shared<SpinBox>(5.0, 0.0, 10.0, 1.0);
-        BuildContext ctx;
-        sb->mount(ctx);
-        Constraints c;
-        c.min = Size{.width = 0.0F, .height = 0.0F};
-        c.max = Size{.width = 320.0F, .height = 240.0F};
-        const Size s = sb->layout(c, ctx);
+    // 初始值钳到值域。
+    const SpinBox over(150.0, 0.0, 100.0);
+    AURORA_TEST_CHECK_NEAR(over.value_of(), 100.0, 1e-4);
 
-        // 点右上（上箭头 = increment）
-        MouseEvent up;
-        up.action = MouseAction::Press;
-        up.local_position = Point{.x = s.width - 5.0F, .y = 5.0F};
-        sb->on_pointer_event(up);
-        AURORA_TEST_CHECK(up.is_handled);
-        AURORA_TEST_CHECK(sb->value_of() == 6.0);
+    // max < min：max 退化为 min；step <= 0：退化为 1。
+    const SpinBox swapped(0.0, 10.0, 5.0);
+    AURORA_TEST_CHECK_NEAR(swapped.max_value(), 10.0, 1e-4);
+    const SpinBox zero_step(0.0, 0.0, 10.0, 0.0);
+    AURORA_TEST_CHECK_NEAR(zero_step.step(), 1.0, 1e-4);
+}
 
-        // 点右下（下箭头 = decrement）
-        MouseEvent dn;
-        dn.action = MouseAction::Press;
-        dn.local_position = Point{.x = s.width - 5.0F, .y = s.height - 5.0F};
-        sb->on_pointer_event(dn);
-        AURORA_TEST_CHECK(sb->value_of() == 5.0);
+AURORA_TEST_CASE(spinbox_set_value_increment_decrement) {
+    std::vector<double> seen;
+    SpinBox sb(50.0, 0.0, 100.0, 5.0);
+    sb.set_on_change([&seen](double v) { seen.push_back(v); });
 
-        // 点文本区不调节
-        MouseEvent mid;
-        mid.action = MouseAction::Press;
-        mid.local_position = Point{.x = 10.0F, .y = 15.0F};
-        sb->on_pointer_event(mid);
-        AURORA_TEST_CHECK(sb->value_of() == 5.0);
-    }
+    sb.increment();
+    AURORA_TEST_CHECK_NEAR(sb.value_of(), 55.0, 1e-4);
+    sb.decrement();
+    AURORA_TEST_CHECK_NEAR(sb.value_of(), 50.0, 1e-4);
 
-    // ---- 10. SpinBox 序列化往返 ----
-    {
-        auto sb = std::make_shared<SpinBox>(7.5, 0.0, 20.0, 0.5);
-        sb->set_prefix(">").set_decimals(1);
-        aurora::Json props;
-        sb->serialize_props(props);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["value"].get<double>() == 7.5);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["step"].get<double>() == 0.5);
+    sb.set_value(200.0);  // 钳到 max
+    AURORA_TEST_CHECK_NEAR(sb.value_of(), 100.0, 1e-4);
+    sb.set_value(-1.0);  // 钳到 min
+    AURORA_TEST_CHECK_NEAR(sb.value_of(), 0.0, 1e-4);
 
-        auto sb2 = std::make_shared<SpinBox>();
-        sb2->deserialize_props(props);
-        AURORA_TEST_CHECK(sb2->value_of() == 7.5);
-        AURORA_TEST_CHECK(sb2->display_text() == ">7.5");
-    }
+    // 同值重复设置：不触发回调。
+    sb.set_value(0.0);
+    AURORA_TEST_REQUIRE_EQ(seen.size(), 4U);
+    AURORA_TEST_CHECK_NEAR(seen[0], 55.0, 1e-4);
+    AURORA_TEST_CHECK_NEAR(seen[1], 50.0, 1e-4);
+    AURORA_TEST_CHECK_NEAR(seen[2], 100.0, 1e-4);
+    AURORA_TEST_CHECK_NEAR(seen[3], 0.0, 1e-4);
 
-    // ---- 11. 无头渲染不崩溃 ----
-    {
-        auto rg = std::make_shared<RadioGroup>(std::vector<std::string>{"A", "B"});
-        auto sb = std::make_shared<SpinBox>(1.0, 0.0, 9.0);
-        BuildContext ctx;
-        rg->mount(ctx);
-        sb->mount(ctx);
-        Constraints c;
-        c.min = Size{.width = 0.0F, .height = 0.0F};
-        c.max = Size{.width = 320.0F, .height = 240.0F};
-        rg->layout(c, ctx);
-        sb->layout(c, ctx);
+    // 已在 max 时 increment 不再变化、不再回调。
+    sb.set_value(100.0);
+    sb.increment();
+    AURORA_TEST_CHECK_NEAR(sb.value_of(), 100.0, 1e-4);
+    AURORA_TEST_CHECK_EQ(seen.size(), 5U);
+}
 
-        aurora::Painter p;
-        p.begin(320, 240);
-        rg->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 150.0F, .height = 60.0F}}, ctx);
-        sb->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 100.0F}, .size = Size{.width = 120.0F, .height = 30.0F}},
-                  ctx);
-        AURORA_TEST_CHECK(p.width() == 320);
-    }
+AURORA_TEST_CASE(spinbox_display_text_and_arrow_keys) {
+    SpinBox sb(50.0, 0.0, 100.0, 5.0);
+    sb.set_prefix("$");
+    sb.set_suffix(" px");
+    sb.set_decimals(1);
+    AURORA_TEST_CHECK_EQ(sb.display_text(), "$50.0 px");
 
-    // ---- 12. 现代化属性：禁用态 / 主题回退 / 新属性往返 ----
-    {
-        // RadioGroup 禁用：点击不切换
-        auto rg = std::make_shared<RadioGroup>(std::vector<std::string>{"A", "B"}, 0);
-        rg->set_enabled(false);
-        MouseEvent e;
-        e.action = MouseAction::Press;
-        e.local_position = Point{.x = 10.0F, .y = 28.0F + 14.0F};  // 第二行
-        rg->on_pointer_event(e);
-        AURORA_TEST_CHECK(rg->selected_index() == 0);
-        AURORA_TEST_CHECK(!rg->enabled());
+    KeyEvent up;
+    up.key = static_cast<int>(KeyCode::ArrowUp);
+    up.action = KeyAction::Down;
+    sb.on_key_event(up);
+    AURORA_TEST_CHECK_TRUE(up.is_handled);
+    AURORA_TEST_CHECK_NEAR(sb.value_of(), 55.0, 1e-4);
+    AURORA_TEST_CHECK_EQ(sb.display_text(), "$55.0 px");
 
-        // active_color 未设置不序列化（跟随主题）；新属性往返
-        aurora::Json j0;
-        rg->serialize_props(j0);
-        AURORA_TEST_CHECK(!j0.contains("active_color"));
+    KeyEvent down;
+    down.key = static_cast<int>(KeyCode::ArrowDown);
+    down.action = KeyAction::Down;
+    sb.on_key_event(down);
+    AURORA_TEST_CHECK_NEAR(sb.value_of(), 50.0, 1e-4);
 
-        rg->set_active_color(aurora::Color::red())
-            .set_text_color(aurora::Color{1, 2, 3, 255})
-            .set_dot_size(20.0F)
-            .set_row_height(32.0F)
-            .set_font_size(15.0F);
-        aurora::Json j;
-        rg->serialize_props(j);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(j["active_color"][0].get<int>() == 255);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(j["dot_size"].get<double>() == 20.0);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(j["row_height"].get<double>() == 32.0);
+    // 禁用态：方向键不调节。
+    sb.set_enabled(false);
+    KeyEvent blocked;
+    blocked.key = static_cast<int>(KeyCode::ArrowUp);
+    blocked.action = KeyAction::Down;
+    sb.on_key_event(blocked);
+    AURORA_TEST_CHECK_NEAR(sb.value_of(), 50.0, 1e-4);
+}
 
-        auto rg2 = std::make_shared<RadioGroup>();
-        rg2->deserialize_props(j);
-        aurora::Json k;
-        rg2->serialize_props(k);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(k["font_size"].get<double>() == 15.0);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(k["enabled"].get<bool>() == false);
-    }
+AURORA_TEST_CASE(spinbox_describe_and_roundtrip) {
+    const auto d = SpinBox::describe_static();
+    AURORA_TEST_CHECK_EQ(std::string{d.name}, "SpinBox");
+    AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
+    AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
+    AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");
 
-    // ---- 13. SpinBox 现代化：箭头键调节 / 禁用 / 样式属性往返 ----
-    {
-        auto sb = std::make_shared<SpinBox>(5.0, 0.0, 10.0, 1.0);
-        aurora::KeyEvent up;
-        up.action = aurora::KeyAction::Down;
-        up.key = static_cast<int>(aurora::KeyCode::ArrowUp);
-        sb->on_key_event(up);
-        AURORA_TEST_CHECK(sb->value_of() == 6.0);
-        aurora::KeyEvent dn;
-        dn.action = aurora::KeyAction::Down;
-        dn.key = static_cast<int>(aurora::KeyCode::ArrowDown);
-        sb->on_key_event(dn);
-        AURORA_TEST_CHECK(sb->value_of() == 5.0);
+    SpinBox src(50.0, 0.0, 100.0, 5.0);
+    src.set_prefix("$");
+    src.set_suffix(" px");
+    src.set_decimals(1);
 
-        // 禁用：箭头键/点击均无效
-        sb->set_enabled(false);
-        sb->on_key_event(up);
-        AURORA_TEST_CHECK(sb->value_of() == 5.0);
+    Json props;
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_NEAR(props["value"].get<double>(), 50.0, 1e-4);
+    AURORA_TEST_CHECK_EQ(props["decimals"].get<int>(), 1);
 
-        // 样式属性往返
-        sb->set_background(aurora::Color{9, 9, 9, 255})
-            .set_border_color(aurora::Color{8, 8, 8, 255})
-            .set_text_color(aurora::Color{7, 7, 7, 255})
-            .set_arrow_color(aurora::Color{6, 6, 6, 255})
-            .set_corner_radius(2.0F)
-            .set_font_size(11.0F);
-        aurora::Json j;
-        sb->serialize_props(j);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(j["background"][0].get<int>() == 9);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(j["corner_radius"].get<double>() == 2.0);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(j["enabled"].get<bool>() == false);
-
-        auto sb2 = std::make_shared<SpinBox>();
-        sb2->deserialize_props(j);
-        AURORA_TEST_CHECK(!sb2->enabled());
-        aurora::Json k;
-        sb2->serialize_props(k);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(k["font_size"].get<double>() == 11.0);
-    }
+    SpinBox dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_NEAR(dst.value_of(), 50.0, 1e-4);
+    AURORA_TEST_CHECK_NEAR(dst.min_value(), 0.0, 1e-4);
+    AURORA_TEST_CHECK_NEAR(dst.max_value(), 100.0, 1e-4);
+    AURORA_TEST_CHECK_NEAR(dst.step(), 5.0, 1e-4);
+    AURORA_TEST_CHECK_EQ(dst.display_text(), "$50.0 px");
 }
 
 }  // namespace aurora::test_cases::utest_radio_spin

@@ -1,77 +1,113 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/debug/feature_flags.h
-/// 测试说明: 运行时 feature 宏开关查询（结构体字段与编译期宏镜像一致、JSON 键完整且为布尔）单元测试
+/// 测试说明: 覆盖 feature 宏运行时查询门面——值初始化默认全 false、结构体快照与 JSON
+/// 导出逐键一致、JSON 键 = 完整宏名且数量收敛（守护 to_json 完整性）、便捷封装等价、
+/// 编译期常量快照跨调用稳定。feature_flags 始终可用（gated = none），无需能力探测。
 
 #include <string>
+#include <vector>
 
 #include "aurora/debug/feature_flags.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_feature_flags {
 
-AURORA_TEST() {
-    // 编译期参照：测试 TU 与 aurora 库共享 PUBLIC feature 宏（同一宏注入面），
-    // 用 #ifdef 镜像逐字段比对，防止 feature_flags.cpp 的单点收口与真实注入漂移。
-    // （局部 constexpr：命名规则对 namespace 级全局常量要求 AURORA_ 前缀，放函数内更轻。）
-#ifdef AURORA_BACKEND_HEADLESS
-    constexpr bool headless_on = true;
-#else
-    constexpr bool headless_on = false;
-#endif
-#ifdef AURORA_ENABLE_SIMD
-    constexpr bool simd_on = true;
-#else
-    constexpr bool simd_on = false;
-#endif
-#ifdef AURORA_ENABLE_LAYOUT_CACHE
-    constexpr bool layout_cache_on = true;
-#else
-    constexpr bool layout_cache_on = false;
-#endif
+using aurora::debug::FeatureFlags;
+using aurora::debug::feature_flags;
+using aurora::debug::feature_flags_json;
 
-    // ---- 1. 编译期镜像一致性（抽样：后端 / 内部能力 / 架构优化三类各一） ----
-    {
-        const auto flags = aurora::debug::feature_flags();
-        AURORA_TEST_CHECK_EQ(flags.backend_headless, headless_on);
-        AURORA_TEST_CHECK_EQ(flags.simd, simd_on);
-        AURORA_TEST_CHECK_EQ(flags.layout_cache, layout_cache_on);
+namespace {
+
+/// 宏名 ↔ 结构体字段的对照表（键 = 完整宏名，值 = FeatureFlags 成员地址）。
+struct FlagKeyPair {
+    const char *key;
+    bool FeatureFlags::*field;
+};
+
+/// 全部 18 个归一化镜像字段（与 BUILD_OPTIONS.md 三层命名分组一一对应）。
+[[nodiscard]] auto flag_key_table() -> const std::vector<FlagKeyPair> & {
+    static const std::vector<FlagKeyPair> table = {
+        {"AURORA_BACKEND_HEADLESS", &FeatureFlags::backend_headless},
+        {"AURORA_BACKEND_WIN32", &FeatureFlags::backend_win32},
+        {"AURORA_BACKEND_D3D11", &FeatureFlags::backend_d3d11},
+        {"AURORA_BACKEND_GLFW", &FeatureFlags::backend_glfw},
+        {"AURORA_BACKEND_X11", &FeatureFlags::backend_x11},
+        {"AURORA_BACKEND_WAYLAND", &FeatureFlags::backend_wayland},
+        {"AURORA_BACKEND_MACOS", &FeatureFlags::backend_macos},
+        {"AURORA_BACKEND_WASM", &FeatureFlags::backend_wasm},
+        {"AURORA_ENABLE_LAYOUT_CACHE", &FeatureFlags::layout_cache},
+        {"AURORA_ENABLE_OCCLUSION_CULLING", &FeatureFlags::occlusion_culling},
+        {"AURORA_ENABLE_DISPLAY_LIST", &FeatureFlags::display_list},
+        {"AURORA_ENABLE_SIMD", &FeatureFlags::simd},
+        {"AURORA_ENABLE_PROFILING", &FeatureFlags::profiling},
+        {"AURORA_ENABLE_TRACING", &FeatureFlags::tracing},
+        {"AURORA_ENABLE_DEBUG", &FeatureFlags::debug},
+        {"AURORA_ENABLE_IMAGE_JPEG", &FeatureFlags::image_jpeg},
+        {"AURORA_ENABLE_IMAGE_WEBP", &FeatureFlags::image_webp},
+        {"AURORA_ENABLE_IMAGE_PNG", &FeatureFlags::image_png},
+    };
+    return table;
+}
+
+}  // namespace
+
+AURORA_TEST_CASE(value_initialized_flags_are_all_false) {
+    // 契约：FeatureFlags 值初始化默认全 false（真实取值由 feature_flags() 按宏填充）。
+    constexpr FeatureFlags defaults{};
+    AURORA_TEST_CHECK_FALSE(defaults.backend_headless);
+    AURORA_TEST_CHECK_FALSE(defaults.backend_win32);
+    AURORA_TEST_CHECK_FALSE(defaults.backend_d3d11);
+    AURORA_TEST_CHECK_FALSE(defaults.backend_glfw);
+    AURORA_TEST_CHECK_FALSE(defaults.backend_x11);
+    AURORA_TEST_CHECK_FALSE(defaults.backend_wayland);
+    AURORA_TEST_CHECK_FALSE(defaults.backend_macos);
+    AURORA_TEST_CHECK_FALSE(defaults.backend_wasm);
+    AURORA_TEST_CHECK_FALSE(defaults.layout_cache);
+    AURORA_TEST_CHECK_FALSE(defaults.occlusion_culling);
+    AURORA_TEST_CHECK_FALSE(defaults.display_list);
+    AURORA_TEST_CHECK_FALSE(defaults.simd);
+    AURORA_TEST_CHECK_FALSE(defaults.profiling);
+    AURORA_TEST_CHECK_FALSE(defaults.tracing);
+    AURORA_TEST_CHECK_FALSE(defaults.debug);
+    AURORA_TEST_CHECK_FALSE(defaults.image_jpeg);
+    AURORA_TEST_CHECK_FALSE(defaults.image_webp);
+    AURORA_TEST_CHECK_FALSE(defaults.image_png);
+}
+
+AURORA_TEST_CASE(snapshot_matches_json_per_macro_key) {
+    // JSON 键 = 完整宏名，值必须与结构体字段逐一相等（自描述契约：Inspector/CLI 直读）。
+    const FeatureFlags f = feature_flags();
+    const Json j = f.to_json();
+    AURORA_TEST_CHECK_TRUE(j.is_object());
+    for (const FlagKeyPair &pair : flag_key_table()) {
+        AURORA_TEST_CHECK_MSG(j.contains(pair.key), std::string("to_json 缺少宏键: ") + pair.key);
+        AURORA_TEST_CHECK_EQ(j[pair.key], f.*(pair.field));
     }
+}
 
-    // ---- 2. 默认开启的不变量：Headless 后端恒可用（构造期必开，BUILD_OPTIONS §3） ----
-    {
-        const auto flags = aurora::debug::feature_flags();
-        AURORA_TEST_CHECK(flags.backend_headless);
+AURORA_TEST_CASE(json_contains_exactly_the_documented_macro_keys) {
+    // 数量收敛守护：结构体新增字段而 to_json 漏写时，此处红灯（镜像三处同步纪律）。
+    const Json j = feature_flags().to_json();
+    AURORA_TEST_CHECK_EQ(j.size(), flag_key_table().size());
+    // 全部值必须是布尔（工具直读依赖）。
+    for (auto it = j.begin(); it != j.end(); ++it) {
+        AURORA_TEST_CHECK_MSG(it.value().is_boolean(), "宏键 " + it.key() + " 的 JSON 值应为 boolean");
     }
+}
 
-    // ---- 3. JSON 导出：键 = 完整宏名，值 = 布尔，且与结构体逐字段一致 ----
-    {
-        const auto json = aurora::debug::feature_flags_json();
-        AURORA_TEST_CHECK(json.is_object());
+AURORA_TEST_CASE(convenience_json_matches_to_json) {
+    // feature_flags_json() 是 feature_flags().to_json() 的便捷封装，二者必须等价。
+    const Json via_convenience = feature_flags_json();
+    const Json via_direct = feature_flags().to_json();
+    AURORA_TEST_CHECK_EQ(via_convenience.dump(), via_direct.dump());
+}
 
-        const auto flags = aurora::debug::feature_flags();
-        const char* keys[] = {
-            "AURORA_BACKEND_HEADLESS",    "AURORA_BACKEND_WIN32",
-            "AURORA_BACKEND_D3D11",       "AURORA_BACKEND_GLFW",
-            "AURORA_BACKEND_X11",         "AURORA_BACKEND_WAYLAND",
-            "AURORA_BACKEND_MACOS",       "AURORA_BACKEND_WASM",
-            "AURORA_ENABLE_LAYOUT_CACHE", "AURORA_ENABLE_OCCLUSION_CULLING",
-            "AURORA_ENABLE_DISPLAY_LIST", "AURORA_ENABLE_SIMD",
-            "AURORA_ENABLE_PROFILING",    "AURORA_ENABLE_TRACING",
-            "AURORA_ENABLE_DEBUG",        "AURORA_ENABLE_IMAGE_JPEG",
-            "AURORA_ENABLE_IMAGE_WEBP",   "AURORA_ENABLE_IMAGE_PNG",
-        };
-        for (const char* k : keys) {
-            AURORA_TEST_CHECK(json.contains(k));
-            AURORA_TEST_CHECK(json[k].is_boolean());
-        }
-        AURORA_TEST_CHECK_EQ(json["AURORA_BACKEND_HEADLESS"].get<bool>(), flags.backend_headless);
-        AURORA_TEST_CHECK_EQ(json["AURORA_ENABLE_DEBUG"].get<bool>(), flags.debug);
-        AURORA_TEST_CHECK_EQ(json["AURORA_ENABLE_IMAGE_JPEG"].get<bool>(), flags.image_jpeg);
-    }
-
-    // ---- 4. to_json 与便捷封装等价 ----
-    {
-        AURORA_TEST_CHECK(aurora::debug::feature_flags().to_json() == aurora::debug::feature_flags_json());
+AURORA_TEST_CASE(snapshot_is_stable_across_calls) {
+    // 结果为编译期常量快照：与运行环境无关，重复调用取值恒定。
+    const FeatureFlags first = feature_flags();
+    const FeatureFlags second = feature_flags();
+    for (const FlagKeyPair &pair : flag_key_table()) {
+        AURORA_TEST_CHECK_EQ(second.*(pair.field), first.*(pair.field));
     }
 }
 

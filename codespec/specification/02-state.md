@@ -78,12 +78,12 @@ count.set(1);   // → watch 重跑
 
 `Subscription`（`subscription.h:30`）是 RAII 订阅句柄：包装 `State` / `Reactive` / `Computed` / `Store` 订阅返回的取消句柄，析构自动取消，杜绝监听器泄漏。AI 生成代码无需手动保存或调用取消句柄——把返回值留在作用域即可。
 
-### 3.2 bind
+### 3.2 connect
 
-`bind` 有两个重载，首值行为**不同**：
+`connect` 有两个重载，首值行为**不同**：
 
-- `bind(src, fn)`（信号重载）：每次变化调用 `fn(最新值)`，**首次立即应用当前值**（内部 `Effect` 构造后显式 `run()`，`subscription.h:96-97`）。`src` 可为 `State<T>` / `Reactive<T>` / `Computed<T>`（均继承 `SignalView<T>`）。
-- `bind(store, fn)`（`Store<S>` 重载，`subscription.h:114-119`）：仅转接 `Store::subscribe`，**不应用初始值**——只有下一次 `dispatch` 产生新状态才调用 `fn`。需要同步初值时自行取 `store.get_state()`（或改用 `bind(*store.as_signal(), fn)` 走信号重载）。
+- `connect(src, fn)`（信号重载）：每次变化调用 `fn(最新值)`，**首次立即应用当前值**（内部 `Effect` 构造后显式 `run()`）。`src` 可为 `State<T>` / `Reactive<T>` / `Computed<T>`（均继承 `SignalView<T>`）。
+- `connect(store, fn)`（`Store<S>` 重载）：仅转接 `Store::subscribe`，**不应用初始值**——只有下一次 `dispatch` 产生新状态才调用 `fn`。需要同步初值时自行取 `store.get_state()`（或改用 `connect(*store.as_signal(), fn)` 走信号重载）。
 
 两者均返回 `Subscription`。
 
@@ -91,18 +91,23 @@ count.set(1);   // → watch 重跑
 au::State<int> count{0};
 int seen = 0;
 {
-    au::Subscription sub = au::bind(count, [&](int v){ seen = v; });  // 立即 seen = 0
-    count.set(5);                                                     // → seen = 5
-}                                                                     // sub 析构 → 自动取消
+    au::Subscription sub = au::connect(count, [&](int v){ seen = v; });  // 立即 seen = 0
+    count.set(5);                                                        // → seen = 5
+}                                                                        // sub 析构 → 自动取消
 ```
 
-**`aurora::bind` 必须显式限定命名空间**，否则 ADL 可能解析成 `std::bind`。
+**命名契约（v1.0.0-alpha.1）**：本函数原名 `bind`，已改名 `connect`——`State` 基类链上的 `std::enable_shared_from_this` 使 `std` 进入实参的 ADL 关联命名空间集，无限定 `bind(state, fn)` 会被变参转发的 `std::bind` 吸走（编译通过但回调永不执行的静默错误）。`connect` 与任何 `std` 名字无重叠，从根上排除该歧义；`Animator::bind` 为成员函数，不经 ADL，保持原名。
 
 ### 3.3 观察图的失效安全
 
 响应式内核以 `Connection`（`signal_view.h:18`）维护「信号源 ↔ Effect」观察图：双方均以 `weak_ptr` 引用彼此的锚点 `ReactiveAnchor`（`signal_view.h:12`）。
 
 `State::notify()` 在遍历时探测并**惰性摘除失效边**，因此任一侧先析构都不会再解引用失效对象。`Subscription` / `Effect` / `Computed` 与控件 `track` 内部的 `Effect` 销毁后，信号源继续 `set()` 是安全的——不会重跑已死的观察者，也不会崩溃。
+
+两项确定性行为约定（v1 实现，契约如下）：
+
+- **观察边叠加式（不剪枝）**：`Effect` 每轮 `run()` 清空的是自身 `deps_` 记录，信号源侧的观察边不随之撤销——某轮不再读取的信号，其后 `set()` 仍会触发重跑（重跑幂等，值正确，仅存在冗余触发）。边只在 `Effect` 析构/dispose 时经失效探测摘除。
+- **`set()` 无等值短路**：写入与旧值相等的值同样全量通知依赖者重跑；如需抑制请自行比较后再写。
 
 ---
 

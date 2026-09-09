@@ -159,7 +159,7 @@ Aurora 的「真值来源」仍是声明式 `Node` 树 + `XxxProps` 聚合属性
 
 - **声明式 + 不可变树**：Aurora 组件树与 React / Flutter 一致，状态变更触发局部重渲染；不要用命令式方式事后改树，应通过 `State<T>` 驱动。
 - **响应式以 `State<T>` / `Signal` 为中心**：替代 React 的 `useState` 与 Flutter 的 `setState` / `ChangeNotifier`，粒度更细（细粒度信号避免整树重绘）。
-- **订阅清理用 `aurora::Subscription`（RAII）**：把信号 / `Store` 订阅包成对象，作用域结束自动取消，等价于 React `useEffect(…, [])` 的 cleanup 返回；`bind(src, fn)` 直接返回该句柄，避免手动保存 / 调用取消句柄导致监听器泄漏。
+- **订阅清理用 `aurora::Subscription`（RAII）**：把信号 / `Store` 订阅包成对象，作用域结束自动取消，等价于 React `useEffect(…, [])` 的 cleanup 返回；`connect(src, fn)`（原 `bind`，1.0.0-alpha.1 改名以避开 `std::bind` 的 ADL 劫持）直接返回该句柄，避免手动保存 / 调用取消句柄导致监听器泄漏。
 - **环境注入走 `Environment`**：主题 / locale / 媒体查询通过 `ctx.environment<T>()` 读取，等价于 React Context 与 Flutter `InheritedWidget`。设备度量（`MediaQuery`）由 `Window::present_root` **自动注入根 `BuildContext`**（每帧按 `from_surface` 重建），故无需手动包裹 `MediaQueryProvider` 即可经 `media_query_of(ctx)` / `MediaQuery::of(ctx)` 读取；如需覆盖特定子树，仍可在该子树根显式包 `MediaQueryProvider`（最近祖先优先）。结合 `LayoutBuilder(builder)` 按布局约束动态构建子树，等价于 Flutter 的 `MediaQuery` + `LayoutBuilder` 响应式写法。
 - **平台无关渲染**：`Painter` 是纯软件栅格，无 GPU 依赖；`HeadlessSurface` 可直接出 PNG，便于测试与无头渲染。
 - **降级而非中止**：非法输入 / 部分代码缺失产出 `Diagnostics` 并降级到安全默认，而非抛异常崩溃（与 React Error Boundary 哲学一致）。

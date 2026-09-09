@@ -1,125 +1,181 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/coroutine.h
-/// 测试说明: utest_coroutine 单元测试（Coroutine 路径）
-///
+/// 测试说明: CoroTask<T>/CoroTask<void> 的完成与结果语义、co_await co_async 的值/异常/Result 错误透传、同步协程立即完成，以及续体经主线程投递器恢复（全部经 promise/future 有界等待，断言只在用例线程执行）
 
-// 覆盖 au::co_async / CoroTask / launch：取值、错误路径、超时（无 poster 直接 resume）。
-
-#include <atomic>
 #include <chrono>
-#include <memory>
+#include <functional>
+#include <future>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
 #include <thread>
+#include <utility>
+#include <vector>
 
-#include "aurora/aurora.h"
-#include "aurora_test_harness.h"
+#include "aurora/state/coroutine.h"
+#include "framework/aurora_test.h"
 
-using au::co_async;
-using au::CoroTask;
-using au::ErrorCode;
-using au::Result;
+namespace aurora::test_cases::utest_coroutine {
 
-using std::chrono_literals::operator""ms;
+namespace m = aurora::testing::matchers;
 
 namespace {
-void wait_until(std::atomic<bool> const &flag, std::chrono::milliseconds timeout) {
-    const auto end = std::chrono::steady_clock::now() + timeout;
-    while (!flag.load() && std::chrono::steady_clock::now() < end) {
-        std::this_thread::sleep_for(5ms);
+
+/// @brief 有界轮询：每 1ms 轮询一次 pred，超时返回最后一次判定（禁止无界阻塞）。
+template <typename Pred>
+auto wait_until(Pred&& pred, std::chrono::milliseconds budget = std::chrono::milliseconds{2000}) -> bool {
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (pred()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
     }
+    return pred();
 }
+
+/// @brief 用例退出（含 REQUIRE 中止）时把主线程投递器恢复为默认直调，避免污染同进程后续用例。
+struct MainPosterGuard {
+    ~MainPosterGuard() { aurora::Task<int>::set_main_poster(nullptr); }
+};
+
 }  // namespace
 
-// 协程：后台计算后把结果写入共享存储。
-static auto coro_ok(std::shared_ptr<Result<int>> out, std::shared_ptr<std::atomic<bool>> done)
-        -> CoroTask<void> {  // NOLINT
+AURORA_TEST_CASE(co_async_delivers_value_to_await) {
+    std::promise<Result<int>> box;
+    auto coro = [&box]() -> CoroTask<int> {
+        Result<int> r = co_await co_async([] { return 40 + 2; });
+        box.set_value(r);
+        co_return r.value();
+    };
+    const auto task = launch(coro());
 
-    const Result<int> r = co_await co_async([]() -> int { return 21 * 2; });  // NOLINT
+    auto fut = box.get_future();
+    AURORA_TEST_REQUIRE_EQ(fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
+    const Result<int> r = fut.get();
+    AURORA_TEST_CHECK_TRUE(r.ok());
+    AURORA_TEST_CHECK_EQ(r.value(), 42);
 
-    *out = r;
-    done->store(true);
-    co_return;  // NOLINT
+    // co_await 之后协程 co_return 收尾：轮询等待帧销毁置位 done。
+    AURORA_TEST_CHECK(wait_until([&task] { return task.is_done(); }));
+    AURORA_TEST_CHECK_EQ(task.result().value(), 42);
 }
 
-// 协程：fn 返回错误（或抛异常）→ await 求得错误 Result。
-static auto coro_err(std::shared_ptr<Result<int>> out, std::shared_ptr<std::atomic<bool>> done)
-        -> CoroTask<void> {  // NOLINT
+AURORA_TEST_CASE(co_async_captures_fn_exception_as_error) {
+    // fn 抛异常：invoke_safe 转为 runtime-async-exception 错误，co_await 表达式不抛。
+    std::promise<Error> box;
+    auto coro = [&box]() -> CoroTask<int> {
+        Result<int> r = co_await co_async([]() -> int { throw std::runtime_error{"inner boom"}; });
+        if (!r.ok()) {
+            box.set_value(r.error());
+        }
+        co_return 0;
+    };
+    const auto task = launch(coro());
 
-    const Result<int> r =
-        co_await co_async([]() -> Result<int> { return make_error(ErrorCode::GeneralUnknown, "nope"); });  // NOLINT
-
-    *out = r;
-    done->store(true);
-    co_return;  // NOLINT
+    auto fut = box.get_future();
+    AURORA_TEST_REQUIRE_EQ(fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
+    const Error e = fut.get();
+    AURORA_TEST_CHECK(e.code_enum == ErrorCode::RuntimeAsyncException);
+    AURORA_TEST_CHECK_STREQ(e.code, "runtime-async-exception");
+    AURORA_TEST_CHECK_THAT(e.message, m::has_substr("async task threw"));
+    AURORA_TEST_CHECK_THAT(e.message, m::has_substr("inner boom"));
+    AURORA_TEST_CHECK(wait_until([&task] { return task.is_done(); }));
 }
 
-// 协程：抛异常 fn → 捕获为 async-exception。
-static auto coro_throw(std::shared_ptr<Result<int>> out, std::shared_ptr<std::atomic<bool>> done)
-        -> CoroTask<void> {  // NOLINT
+AURORA_TEST_CASE(co_async_preserves_result_error_from_fn) {
+    // fn 返回错误 Result：原样透传，不经异常包装。
+    std::promise<Error> box;
+    auto coro = [&box]() -> CoroTask<int> {
+        Result<int> r = co_await co_async([] {
+            return Result<int>{make_error(ErrorCode::GeneralInvalidArgument, std::string{"passthrough boom"})};
+        });
+        if (!r.ok()) {
+            box.set_value(r.error());
+        }
+        co_return 0;
+    };
+    const auto task = launch(coro());
 
-    const Result<int> r = co_await co_async([]() -> int { throw std::runtime_error("x"); });  // NOLINT
-
-    *out = r;
-    done->store(true);
-    co_return;  // NOLINT
+    auto fut = box.get_future();
+    AURORA_TEST_REQUIRE_EQ(fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
+    const Error e = fut.get();
+    AURORA_TEST_CHECK(e.code_enum == ErrorCode::GeneralInvalidArgument);
+    AURORA_TEST_CHECK_STREQ(e.message, "passthrough boom");
+    AURORA_TEST_CHECK(wait_until([&task] { return task.is_done(); }));
 }
 
-AURORA_TEST() {
-    // 1) 成功取值：co_await 求得后台计算结果。
-    {
-        const auto out = std::make_shared<Result<int>>(0);
-        const auto done = std::make_shared<std::atomic<bool>>(false);
-        launch(coro_ok(out, done));
-        wait_until(*done, 1000ms);
-        AURORA_TEST_CHECK(done->load());
-        AURORA_TEST_CHECK(out->ok() && out->value() == 42);
-    }
+AURORA_TEST_CASE(coroutine_void_success_and_exception_paths) {
+    // 成功：co_return 无值，error() 为空。
+    const auto ok_task = launch([]() -> CoroTask<void> { co_return; }());
+    AURORA_TEST_CHECK_TRUE(ok_task.is_done());
+    AURORA_TEST_CHECK_FALSE(ok_task.error().has_value());
 
-    // 2) 错误路径：co_await 求得错误 Result。
-    {
-        const auto out = std::make_shared<Result<int>>(0);
-        const auto done = std::make_shared<std::atomic<bool>>(false);
-        launch(coro_err(out, done));
-        wait_until(*done, 1000ms);
-        AURORA_TEST_CHECK(done->load());
-        AURORA_TEST_CHECK(!out->ok());
-        AURORA_TEST_CHECK(out->error().code == "general-unknown");
-    }
-
-    // 3) 异常路径：fn 抛异常 → async-exception。
-    {
-        const auto out = std::make_shared<Result<int>>(0);
-        const auto done = std::make_shared<std::atomic<bool>>(false);
-        launch(coro_throw(out, done));
-        wait_until(*done, 1000ms);
-        AURORA_TEST_CHECK(done->load());
-        AURORA_TEST_CHECK(!out->ok());
-        AURORA_TEST_CHECK(out->error().code == "runtime-async-exception");
-    }
-
-    // 4) 顺序执行：两个 co_await 先后完成。
-    {
-        auto acc = std::make_shared<std::atomic<int>>(0);
-        auto done = std::make_shared<std::atomic<bool>>(false);
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) 捕获为 shared_ptr
-        // 按值拷贝，协程生命周期内引用计数保活，无悬垂
-        auto seq = [acc, done]() -> CoroTask<void> {  // NOLINT
-            Result<int> a = co_await co_async([]() -> int { return 10; });  // NOLINT
-
-            if (a) {
-                acc->fetch_add(a.value(), std::memory_order_relaxed);
-            }
-            Result<int> b = co_await co_async([]() -> int { return 5; });  // NOLINT
-
-            if (b) {
-                acc->fetch_add(b.value(), std::memory_order_relaxed);
-            }
-            done->store(true);
-            co_return;  // NOLINT
-
-        };
-        launch(seq());
-        wait_until(*done, 1000ms);
-        AURORA_TEST_CHECK(done->load());
-        AURORA_TEST_CHECK(acc->load() == 15);
-    }
+    // 异常：unhandled_exception 捕获并转为 runtime-coroutine-exception 错误。
+    //（经参数把 throw 变为条件路径，确保 lambda 含 co_return 而成为真正的协程。）
+    const auto throw_fn = [](bool boom) -> CoroTask<void> {
+        if (boom) {
+            throw std::runtime_error{"void boom"};
+        }
+        co_return;
+    };
+    const auto bad_task = launch(throw_fn(true));
+    AURORA_TEST_CHECK_TRUE(bad_task.is_done());
+    const std::optional<Error> err = bad_task.error();
+    AURORA_TEST_REQUIRE_TRUE(err.has_value());
+    AURORA_TEST_CHECK(err->code_enum == ErrorCode::RuntimeCoroutineException);
+    AURORA_TEST_CHECK_STREQ(err->code, "runtime-coroutine-exception");
+    AURORA_TEST_CHECK_THAT(err->message, m::has_substr("coroutine threw"));
+    AURORA_TEST_CHECK_THAT(err->message, m::has_substr("void boom"));
 }
+
+AURORA_TEST_CASE(synchronous_coroutine_completes_with_result) {
+    // 无挂起点：协程在调用表达式内同步跑完（final_suspend 即毁帧并置位 done）。
+    const auto task = launch([]() -> CoroTask<int> { co_return 42; }());
+    AURORA_TEST_CHECK_TRUE(task.is_done());
+    const Result<int> r = task.result();
+    AURORA_TEST_CHECK_TRUE(r.ok());
+    AURORA_TEST_CHECK_EQ(r.value(), 42);
+}
+
+AURORA_TEST_CASE(continuation_resumes_through_main_poster) {
+    // 投递器把 resume 排队，由用例线程排空：验证续体经主线程投递器恢复。
+    std::mutex queue_mutex;
+    std::vector<std::function<void()>> queued;
+    Task<int>::set_main_poster([&](std::function<void()> fn) {
+        std::scoped_lock lock(queue_mutex);
+        queued.push_back(std::move(fn));
+    });
+    MainPosterGuard guard;
+
+    std::promise<int> box;
+    auto coro = [&box]() -> CoroTask<int> {
+        Result<int> r = co_await co_async([] { return 7; });
+        box.set_value(r.ok() ? r.value() : -1);
+        co_return 0;
+    };
+    const auto task = launch(coro());
+
+    // worker 完成 fn 后把 resume 排进队列：轮询等待（有界）。
+    AURORA_TEST_REQUIRE(wait_until([&] {
+        std::scoped_lock lock(queue_mutex);
+        return !queued.empty();
+    }));
+
+    // 用例线程排空 → 续体在「主线程」恢复。
+    std::vector<std::function<void()>> batch;
+    {
+        std::scoped_lock lock(queue_mutex);
+        batch.swap(queued);
+    }
+    for (std::function<void()>& fn : batch) {
+        fn();
+    }
+
+    auto fut = box.get_future();
+    AURORA_TEST_REQUIRE_EQ(fut.wait_for(std::chrono::seconds{2}), std::future_status::ready);
+    AURORA_TEST_CHECK_EQ(fut.get(), 7);
+    AURORA_TEST_CHECK(wait_until([&task] { return task.is_done(); }));
+}
+
+}  // namespace aurora::test_cases::utest_coroutine

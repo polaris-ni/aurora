@@ -1,86 +1,87 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/duration.h
-/// 测试说明: 时长强类型 Duration（秒存储 / 工厂 / chrono 互转 / 相等语义）与毫秒字面量单元测试
+/// 测试说明: 覆盖 Duration 构造与显式性、from_seconds/from_ms 换算、to_chrono、相等比较与 _ms 字面量
 
 #include <chrono>
+#include <type_traits>
 
 #include "aurora/core/duration.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_duration {
 
-static_assert(Duration::from_ms(1000.0).seconds == 1.0);
-static_assert(Duration::from_seconds(2.0).seconds == 2.0);
+namespace au = aurora;
 
-AURORA_TEST() {
-    // ---- 1. 默认构造为零时长 ----
-    {
-        const Duration d{};
-        AURORA_TEST_CHECK(d.seconds == 0.0);
-    }
+/// @brief 默认构造为零时长。
+AURORA_TEST_CASE(default_ctor_is_zero) {
+    constexpr aurora::Duration d{};
+    static_assert(d.seconds == 0.0);
+    AURORA_TEST_CHECK_EQ(d.seconds, 0.0);
+}
 
-    // ---- 2. 显式双精度构造与 from_seconds 等价 ----
-    {
-        const Duration a{1.5};
-        const auto b = Duration::from_seconds(1.5);
-        AURORA_TEST_CHECK(a.seconds == 1.5);
-        AURORA_TEST_CHECK(a == b);
-    }
+/// @brief 单参构造为 explicit（秒），禁止 double 隐式收窄成时长。
+AURORA_TEST_CASE(explicit_ctor_takes_seconds) {
+    constexpr aurora::Duration d{1.5};
+    static_assert(d.seconds == 1.5);
+    static_assert(std::is_constructible_v<aurora::Duration, double>);
+    static_assert(!std::is_convertible_v<double, aurora::Duration>);  // explicit 的编译期契约
+    static_assert(!std::is_convertible_v<int, aurora::Duration>);
+    AURORA_TEST_CHECK_EQ(d.seconds, 1.5);
+}
 
-    // ---- 3. from_ms 做毫秒→秒换算 ----
-    {
-        const auto d = Duration::from_ms(250.0);
-        AURORA_TEST_CHECK(d.seconds == 0.25);
+/// @brief from_seconds 原样保存；from_ms 除以 1000（250ms == 0.25s 精确可表示）。
+AURORA_TEST_CASE(from_seconds_and_from_ms_conversions) {
+    constexpr auto s = aurora::Duration::from_seconds(1.5);
+    static_assert(s.seconds == 1.5);
+    constexpr auto ms = aurora::Duration::from_ms(250.0);
+    static_assert(ms.seconds == 0.25);  // 250/1000.0 在二进制浮点下精确
+    AURORA_TEST_CHECK_EQ(s.seconds, 1.5);
+    AURORA_TEST_CHECK_EQ(ms.seconds, 0.25);
+    AURORA_TEST_CHECK_NEAR(aurora::Duration::from_ms(100.0).seconds, 0.1, 1e-12);  // 0.1 非精确二进制数
+    AURORA_TEST_CHECK_EQ(aurora::Duration::from_ms(1500.0).seconds, 1.5);
+    AURORA_TEST_CHECK_EQ(aurora::Duration::from_ms(0.0).seconds, 0.0);
+}
 
-        const auto e = Duration::from_ms(1000.0);
-        AURORA_TEST_CHECK(e == Duration::from_seconds(1.0));
-    }
+/// @brief to_chrono 返回 std::chrono::duration<double>，秒数保持一致。
+AURORA_TEST_CASE(to_chrono_preserves_seconds) {
+    static_assert(std::is_same_v<decltype(aurora::Duration{}.to_chrono()), std::chrono::duration<double>>);
+    constexpr auto d = aurora::Duration::from_seconds(2.5);
+    static_assert(d.to_chrono().count() == 2.5);
+    AURORA_TEST_CHECK_NEAR(d.to_chrono().count(), 2.5, 1e-12);
+    AURORA_TEST_CHECK_NEAR(aurora::Duration::from_ms(250.0).to_chrono().count(), 0.25, 1e-12);
+}
 
-    // ---- 4. 负时长可表达（用于反向/回退动画） ----
-    {
-        const auto d = Duration::from_seconds(-0.5);
-        AURORA_TEST_CHECK(d.seconds == -0.5);
-        AURORA_TEST_CHECK(d != Duration::from_seconds(0.5));
-    }
+/// @brief 相等比较按秒值逐位判断（== / != 互为否定）。
+AURORA_TEST_CASE(equality_compares_seconds) {
+    constexpr auto a = aurora::Duration::from_seconds(1.0);
+    constexpr auto b = aurora::Duration{1.0};
+    constexpr auto c = aurora::Duration::from_ms(1001.0);
+    static_assert(a == b);
+    static_assert(a != c);
+    AURORA_TEST_CHECK(a == b);
+    AURORA_TEST_CHECK(a != c);
+    AURORA_TEST_CHECK_FALSE(a == c);
+    AURORA_TEST_CHECK_FALSE(a != b);
+}
 
-    // ---- 5. to_chrono 与 std::chrono 互操作 ----
-    {
-        const auto d = Duration::from_seconds(2.0);
-        const auto c = d.to_chrono();
-        AURORA_TEST_CHECK(c == std::chrono::duration<double>(2.0));
-        AURORA_TEST_CHECK(std::chrono::duration_cast<std::chrono::milliseconds>(c).count() == 2000);
-    }
+/// @brief _ms 字面量映射为秒（250_ms == 0.25s），constexpr 可用于编译期断言。
+AURORA_TEST_CASE(ms_literal_maps_to_seconds) {
+    using aurora::literals::operator""_ms;  // using-declaration：仅引入具名字面量（库约定：TU 内显式引入）
 
-    // ---- 6. 相等/不等语义（按秒值比较） ----
-    {
-        AURORA_TEST_CHECK(Duration::from_seconds(1.0) == Duration::from_ms(1000.0));
-        AURORA_TEST_CHECK(Duration::from_seconds(1.0) != Duration::from_seconds(1.001));
-    }
+    static_assert(250_ms == aurora::Duration{0.25});
+    AURORA_TEST_CHECK((250_ms) == aurora::Duration::from_ms(250.0));
+    AURORA_TEST_CHECK_EQ((0_ms).seconds, 0.0);
+    AURORA_TEST_CHECK_NEAR((12.5_ms).seconds, aurora::Duration::from_ms(12.5).seconds, 1e-12);  // long double 重载
+}
 
-    // ---- 7. 拷贝后仍相等（值语义） ----
-    {
-        const auto a = Duration::from_seconds(3.0);
-        const Duration b = a;
-        AURORA_TEST_CHECK(a == b);
-        AURORA_TEST_CHECK(b.seconds == 3.0);
-    }
-
-    // ---- 8. 毫秒字面量与 from_ms 等价 ----
-    {
-        using namespace aurora::literals;  // NOLINT(build/namespaces_literals) —— 测试点即字面量
-        const auto d = 250_ms;
-        AURORA_TEST_CHECK(d.seconds == 0.25);
-
-        const auto e = 1500_ms;
-        AURORA_TEST_CHECK(e == Duration::from_seconds(1.5));
-    }
-
-    // ---- 9. constexpr 场景：编译期可求值的时长换算 ----
-    {
-        constexpr auto half = Duration::from_ms(500.0);
-        static_assert(half.seconds == 0.5);
-        AURORA_TEST_CHECK(half.seconds == 0.5);
-    }
+/// @brief 边界：负时长与大值原样保存（当前契约对取值范围无前置条件校验）。
+AURORA_TEST_CASE(negative_and_large_values_are_preserved) {
+    constexpr auto neg = aurora::Duration{-1.5};
+    static_assert(neg.seconds == -1.5);
+    AURORA_TEST_CHECK_EQ(aurora::Duration::from_seconds(-0.25).seconds, -0.25);
+    AURORA_TEST_CHECK_NEAR(aurora::Duration::from_ms(-250.0).seconds, -0.25, 1e-12);
+    AURORA_TEST_CHECK_EQ(aurora::Duration::from_seconds(1.0e9).seconds, 1.0e9);
+    AURORA_TEST_CHECK(neg != aurora::Duration{1.5});
 }
 
 }  // namespace aurora::test_cases::utest_duration

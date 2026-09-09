@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "aurora/state/signal_view.h"
+#include "aurora/state/state_registry.h"
 
 namespace aurora {
 
@@ -35,7 +36,11 @@ class Effect {
     /// @brief 当前正在执行的 Effect（线程局部，保证多线程安全）。
     [[nodiscard]] static auto current() -> Effect * { return current_; }
 
-    explicit Effect(std::function<void()> fn) : fn_(std::move(fn)) {}
+    explicit Effect(std::function<void()> fn) : fn_(std::move(fn)) {
+        // 构造即登记（与 StateBase 一致）：使 StateGraph 能枚举 effect 节点与 depends 边。
+        // 注册表 append-only（v1 不注销），析构后条目由弱引用锚点标记失效。
+        detail::register_effect(*this, anchor_);
+    }
 
     /// @brief 执行 fn；执行前清空旧依赖，执行中读取的信号重新登记依赖。
     auto run() -> void {
@@ -45,10 +50,15 @@ class Effect {
         deps_.clear();
         Effect *prev = current_;
         current_ = this;
+        // RAII 守卫：fn 抛出时也必须恢复 current_，否则全局指针悬垂于本 Effect——
+        // 析构后任何 State/Computed::get() 都会向死对象订阅、set() 时解引用已析构对象（UB）。
+        struct CurrentGuard {
+            Effect *prev;
+            ~CurrentGuard() { current_ = prev; }
+        } guard{prev};
         if (fn_) {
             fn_();
         }
-        current_ = prev;
     }
 
     /// @brief 由 SignalView::get() 调用，登记依赖（含锚点以支持失效探测）。

@@ -38,9 +38,9 @@ inline auto check_render_purity() -> void {
 #ifdef AURORA_ENABLE_DEBUG
     // 挂接点：必须在渲染 / 绘制上下文中调用（g_paint_depth > 0）。
     // 捕获脱离 render 循环、在绘制上下文之外直接调 paint / check_render_purity 的反模式。
-    AURORA_ASSERT(g_paint_depth > 0,
-                  "check_render_purity: 在 Widget::paint() 绘制上下文之外被调用——"
-                  "视图不应脱离渲染遍历直接 paint（会读到过期布局 / 状态）");
+    AURORA_CHECK(g_paint_depth > 0,
+                 "check_render_purity: 在 Widget::paint() 绘制上下文之外被调用——"
+                 "视图不应脱离渲染遍历直接 paint（会读到过期布局 / 状态）");
 #endif
 }
 

@@ -1,197 +1,201 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/lazy_list.h
-/// 测试说明: lazy_list 单元测试
-///
+/// 测试说明: 覆盖 LazyList——默认不变量、count/行高参数钳制与降级、按需构建仅可见窗口条目（实例复用）、
+/// cache_extent 窗口、滚动偏移钳制与 scroll_to_item、滚轮步进、滚出窗口回收重建、序列化与自描述
 
-// 验证 LazyList 虚拟滚动：可见范围计算、实例回收、滚动、滚轮事件、命中。
-
-#include <cstdio>
+#include <map>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
+#include "aurora/layout/layout_engine.h"
 #include "aurora/widget/lazy_list.h"
-#include "aurora/widget/text.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_lazy_list {
 
 namespace {
 
-auto make_builder() -> LazyList::ItemBuilder {
-    return [](int i) -> Node {
-        auto t = Text();
-        t.content = LocalizedString{"item " + std::to_string(i)};
-        return Node{std::move(t)};
-    };
+/// 固定尺寸哑控件：布局返回构造时给定的自然尺寸（经约束钳制），绘制无副作用。
+class FixedBox final : public Widget {
+  public:
+    FixedBox(float w, float h) : w_(w), h_(h) {}
+
+    [[nodiscard]] auto type_name() const -> const char * override { return "FixedBox"; }
+
+  protected:
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+        return c.constrain(Size{.width = w_, .height = h_});
+    }
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+
+  private:
+    float w_;
+    float h_;
+};
+
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
-auto layout_list(std::shared_ptr<LazyList> const& list, const float w, float h) -> void {
-    constexpr BuildContext ctx;
-    list->mount(ctx);
-    Constraints c;
-    c.min = Size{.width = 0.0F, .height = 0.0F};
-    c.max = Size{.width = w, .height = h};
-    list->layout(c, ctx);
-}
+/// 条目构建观测器：记录构建序号并保留各条目实例（虚拟化实例被回收后仍可读其几何）。
+struct BuildRecorder {
+    std::map<int, std::shared_ptr<FixedBox>> items;
+    std::vector<int> built_order;
+
+    auto builder() -> LazyList::ItemBuilder {
+        return [this](int index) -> Node {
+            built_order.push_back(index);
+            auto box = std::make_shared<FixedBox>(300.0F, 48.0F);
+            items.emplace(index, std::move(box));
+            return Node{items.at(index)};
+        };
+    }
+};
 
 }  // namespace
 
-AURORA_TEST() {
-    // ---- 1. 基本构造 ----
-    {
-        auto list = std::make_shared<LazyList>(10000, make_builder(), 48.0F);
-        AURORA_TEST_CHECK(list->count() == 10000);
-        AURORA_TEST_CHECK(list->content_height() == 480000.0F);
-        AURORA_TEST_CHECK(list->scroll_offset() == 0.0F);
+AURORA_TEST_CASE(default_lazy_list_invariants) {
+    LazyList list;
+    AURORA_TEST_CHECK_EQ(std::string{list.type_name()}, "LazyList");
+    AURORA_TEST_CHECK_EQ(list.count(), 0);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(list.content_height(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(list.max_scroll_offset(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(list.visible_range().first, 0);
+    AURORA_TEST_CHECK_EQ(list.visible_range().second, 0);
+    AURORA_TEST_CHECK_EQ(list.live_item_count(), 0U);
+}
+
+AURORA_TEST_CASE(ctor_clamps_count_and_degrades_extent) {
+    LazyList negative{-5, {}, 48.0F};
+    AURORA_TEST_CHECK_EQ(negative.count(), 0);
+    AURORA_TEST_CHECK_NEAR(negative.content_height(), 0.0F, 1e-4F);
+
+    // 非正行高降级为默认 48（经 Diagnostics::degraded 上报）。
+    LazyList degraded{5, {}, -1.0F};
+    AURORA_TEST_CHECK_NEAR(degraded.content_height(), 240.0F, 1e-4F);
+
+    LazyList normal{100, {}, 48.0F};
+    AURORA_TEST_CHECK_NEAR(normal.content_height(), 4800.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(layout_builds_only_visible_window) {
+    BuildRecorder rec;
+    LazyList list{100, rec.builder(), 48.0F};  // 默认 cache_extent = 200
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    AURORA_TEST_CHECK_NEAR(list.size().width, 300.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(list.size().height, 400.0F, 1e-4F);
+    const auto [first, last] = list.visible_range();
+    AURORA_TEST_CHECK_EQ(first, 0);
+    AURORA_TEST_CHECK_EQ(last, 13);  // ceil((400 + 200) / 48)
+    AURORA_TEST_CHECK_EQ(list.live_item_count(), 13U);
+    AURORA_TEST_CHECK_EQ(rec.built_order.size(), 13U);  // 只构建窗口内条目，而非 count=100
+
+    // 约束不变的重复布局不重建任何条目（实例复用）。
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    AURORA_TEST_CHECK_EQ(rec.built_order.size(), 13U);
+    AURORA_TEST_CHECK_EQ(list.live_item_count(), 13U);
+}
+
+AURORA_TEST_CASE(cache_extent_zero_builds_exact_window) {
+    BuildRecorder rec;
+    LazyList list{100, rec.builder(), 48.0F};
+    list.set_cache_extent(0.0F);
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    AURORA_TEST_CHECK_EQ(list.visible_range().first, 0);
+    AURORA_TEST_CHECK_EQ(list.visible_range().second, 9);  // ceil(400 / 48)
+    AURORA_TEST_CHECK_EQ(list.live_item_count(), 9U);
+    // 存活条目被条目约束（min == max = 视口宽 × 行高）强制整形。
+    AURORA_TEST_CHECK_NEAR(rec.items.at(0)->size().width, 300.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rec.items.at(0)->size().height, 48.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rec.items.at(8)->size().height, 48.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(scroll_offset_setter_clamps_to_content) {
+    LazyList list{100, {}, 48.0F};
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    AURORA_TEST_CHECK_NEAR(list.max_scroll_offset(), 4400.0F, 1e-4F);  // 4800 - 400
+    list.set_scroll_offset(-10.0F);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 0.0F, 1e-4F);
+    list.set_scroll_offset(99999.0F);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 4400.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(scroll_to_item_aligns_index_top) {
+    LazyList list{100, {}, 48.0F};
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    list.scroll_to_item(50);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 2400.0F, 1e-4F);  // 50 * 48
+    // 越界索引钳到 [0, count-1]，偏移再钳到内容范围：99*48=4752 → 4400。
+    list.scroll_to_item(1000);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 4400.0F, 1e-4F);
+    list.scroll_to_item(-3);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 0.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(wheel_scroll_steps_offset) {
+    LazyList list{100, {}, 48.0F};
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    list.set_scroll_offset(200.0F);
+    // delta_y 正方向为向上滚动：offset 减小一个滚轮步进 40。
+    ScrollEvent e;
+    e.delta_y = 1.0F;
+    list.on_scroll(e);
+    AURORA_TEST_CHECK_TRUE(e.is_handled);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 160.0F, 1e-4F);
+    ScrollEvent down;
+    down.delta_y = -1.0F;
+    list.on_scroll(down);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 200.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(scrolling_recycles_and_rebuilds_window) {
+    BuildRecorder rec;
+    LazyList list{100, rec.builder(), 48.0F};
+    list.set_cache_extent(0.0F);
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    AURORA_TEST_CHECK_EQ(rec.built_order.size(), 9U);  // 窗口 0..8
+
+    list.set_scroll_offset(960.0F);
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    AURORA_TEST_CHECK_EQ(list.live_item_count(), 9U);   // 新窗口 20..28
+    AURORA_TEST_CHECK_EQ(rec.built_order.size(), 18U);  // 旧窗口全部回收、新窗口全部新建
+
+    // 绘制后条目落位于内容坐标 - 滚动偏移处。
+    Painter p;
+    p.begin(300, 400);
+    list.paint(p,
+               Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 300.0F, .height = 400.0F}},
+               BuildContext{});
+    AURORA_TEST_CHECK_NEAR(rec.items.at(20)->paint_bounds().origin.y, 0.0F, 1e-4F);    // 20*48 - 960
+    AURORA_TEST_CHECK_NEAR(rec.items.at(24)->paint_bounds().origin.y, 192.0F, 1e-4F);  // 24*48 - 960
+    AURORA_TEST_CHECK_NEAR(rec.items.at(24)->paint_bounds().size.height, 48.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(serialize_props_and_describe_metadata) {
+    LazyList src{7, {}, 24.0F};
+    src.set_cache_extent(0.0F);
+    src.set_scroll_offset(96.0F);
+    Json props;
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["count"].get<int>(), 7);
+    AURORA_TEST_CHECK_NEAR(props["item_extent"].get<float>(), 24.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(props["scroll_offset"].get<float>(), 96.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(props["cache_extent"].get<float>(), 0.0F, 1e-4F);
+
+    const auto d = LazyList::describe_static();
+    AURORA_TEST_CHECK_EQ(std::string{d.name}, "LazyList");
+    AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
+    bool count_required = false;
+    for (const auto &p : d.properties) {
+        if (p.name == "count") {
+            count_required = p.required;
+        }
     }
-
-    // ---- 2. 仅实例化可见窗口（关键虚拟化断言）----
-    {
-        auto list = std::make_shared<LazyList>(10000, make_builder(), 48.0F);
-        layout_list(list, 320.0F, 480.0F);  // 视口 480dp = 10 行可见
-
-        // 存活实例 = 可见 10 行 + 缓冲 200dp/48 ≈ 5 行 ≈ 15，远小于 10000
-        AURORA_TEST_CHECK(list->live_item_count() > 0);
-        AURORA_TEST_CHECK(list->live_item_count() < 30);
-        AURORA_TEST_PRINTF("  live items: %zu / 10000\n", list->live_item_count());
-    }
-
-    // ---- 3. 可见范围计算 ----
-    {
-        auto list = std::make_shared<LazyList>(1000, make_builder(), 50.0F);
-        list->set_cache_extent(0.0F);  // 无缓冲便于精确断言
-        layout_list(list, 320.0F, 500.0F);  // 恰好 10 行
-
-        auto [first, last] = list->visible_range();
-        AURORA_TEST_CHECK(first == 0);
-        AURORA_TEST_CHECK(last == 10);
-    }
-
-    // ---- 4. 滚动后窗口移动 + 旧实例回收 ----
-    {
-        auto list = std::make_shared<LazyList>(1000, make_builder(), 50.0F);
-        list->set_cache_extent(0.0F);
-        layout_list(list, 320.0F, 500.0F);
-
-        // 滚动到 item 100（offset = 5000）
-        list->scroll_to_item(100);
-        AURORA_TEST_CHECK(list->scroll_offset() == 5000.0F);
-
-        BuildContext ctx;
-        Constraints c;
-        c.min = Size{.width = 0.0F, .height = 0.0F};
-        c.max = Size{.width = 320.0F, .height = 500.0F};
-        list->layout(c, ctx);
-
-        auto [first, last] = list->visible_range();
-        AURORA_TEST_CHECK(first == 100);
-        AURORA_TEST_CHECK(last == 110);
-        AURORA_TEST_CHECK(list->live_item_count() == 10);  // 旧实例已回收
-    }
-
-    // ---- 5. 滚动钳制 ----
-    {
-        auto list = std::make_shared<LazyList>(100, make_builder(), 50.0F);
-        layout_list(list, 320.0F, 500.0F);  // 内容 5000，视口 500，最大偏移 4500
-
-        AURORA_TEST_CHECK(list->max_scroll_offset() == 4500.0F);
-
-        list->set_scroll_offset(-100.0F);
-        AURORA_TEST_CHECK(list->scroll_offset() == 0.0F);
-
-        list->set_scroll_offset(99999.0F);
-        AURORA_TEST_CHECK(list->scroll_offset() == 4500.0F);
-    }
-
-    // ---- 6. 内容不足时不可滚动 ----
-    {
-        auto list = std::make_shared<LazyList>(3, make_builder(), 50.0F);
-        layout_list(list, 320.0F, 500.0F);  // 内容 150 < 视口 500
-
-        AURORA_TEST_CHECK(list->max_scroll_offset() == 0.0F);
-        list->set_scroll_offset(100.0F);
-        AURORA_TEST_CHECK(list->scroll_offset() == 0.0F);
-        AURORA_TEST_CHECK(list->live_item_count() == 3);
-    }
-
-    // ---- 7. 滚轮事件 ----
-    {
-        auto list = std::make_shared<LazyList>(1000, make_builder(), 50.0F);
-        layout_list(list, 320.0F, 500.0F);
-
-        ScrollEvent e;
-        e.delta_y = -2.0F;  // 向下滚动（delta 负 = 内容上移）
-        list->on_scroll(e);
-        AURORA_TEST_CHECK(e.is_handled);
-        AURORA_TEST_CHECK(list->scroll_offset() == 80.0F);  // 2 * 40dp
-    }
-
-    // ---- 8. count=0 空列表 ----
-    {
-        auto list = std::make_shared<LazyList>(0, make_builder(), 50.0F);
-        layout_list(list, 320.0F, 500.0F);
-        AURORA_TEST_CHECK(list->live_item_count() == 0);
-        auto [first, last] = list->visible_range();
-        AURORA_TEST_CHECK(first == 0);
-        AURORA_TEST_CHECK(last == 0);
-    }
-
-    // ---- 9. 负 count / 非正 item_extent 降级 ----
-    {
-        auto list = std::make_shared<LazyList>(-5, make_builder(), -10.0F);
-        AURORA_TEST_CHECK(list->count() == 0);
-        // item_extent 降级为 48
-        layout_list(list, 320.0F, 480.0F);
-        AURORA_TEST_CHECK(list->live_item_count() == 0);
-    }
-
-    // ---- 10. 无头渲染不崩溃 ----
-    {
-        auto list = std::make_shared<LazyList>(500, make_builder(), 48.0F);
-        layout_list(list, 320.0F, 240.0F);
-
-        aurora::Painter p;
-        p.begin(320, 240);
-        BuildContext ctx;
-        list->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 320.0F, .height = 240.0F}},
-                    ctx);
-        AURORA_TEST_CHECK(p.width() == 320);
-    }
-
-    // ---- 11. 序列化 ----
-    {
-        auto list = std::make_shared<LazyList>(200, make_builder(), 32.0F);
-        layout_list(list, 320.0F, 480.0F);
-        list->set_scroll_offset(64.0F);
-
-        aurora::Json props;
-        list->serialize_props(props);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["count"].get<int>() == 200);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["item_extent"].get<float>() == 32.0F);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(props["scroll_offset"].get<float>() == 64.0F);
-    }
-
-    // ---- 12. 命中测试返回自身（确保滚轮事件派发到列表而非子项） ----
-    {
-        auto list = std::make_shared<LazyList>(1000, make_builder(), 50.0F);
-        layout_list(list, 320.0F, 500.0F);  // 视口 500dp，可见 item 0..9/10
-
-        constexpr Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 320.0F, .height = 500.0F}};
-        BuildContext ctx;
-        // 落在子项 item 2（y≈100~150）区域内：滚轮命中必须解析为列表自身，
-        // 否则 ScrollEvent 派发到叶控件后为空操作，列表无法滚动。
-        Widget* hit_item = list->hit_test(Point{.x = 100.0F, .y = 120.0F}, bounds, ctx);
-        AURORA_TEST_CHECK(hit_item == list.get());
-        // 视口外不应命中
-        Widget* hit_out = list->hit_test(Point{.x = 100.0F, .y = 600.0F}, bounds, ctx);
-        AURORA_TEST_CHECK(hit_out == nullptr);
-    }
+    AURORA_TEST_CHECK_TRUE(count_required);
+    AURORA_TEST_CHECK_FALSE(d.invariants.empty());
 }
 
 }  // namespace aurora::test_cases::utest_lazy_list

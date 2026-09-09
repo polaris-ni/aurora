@@ -1,101 +1,113 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/error_codes.h
-/// 测试说明: error_codes 单元测试
-///
+/// 测试说明: 生成表 AURORA_ERROR_TABLE 的索引不变量与冻结 slug 契约、slug/ident 唯一性、to_string
+/// 全枚举映射、查表辅助函数一致性、format_message 渲染及边界、查表函数 constexpr 可用性（连带覆盖 error_codes.gen.h
+/// 可观测行为）
 
-// 覆盖 errors.toml 单一声明源生成的错误体系：
-// 枚举连续性、slug 冻结契约、表驱动元数据、make_error 表驱动、Diagnostic 表驱动解释。
-// 用例经 AURORA_TEST() 注册，main 与汇总由 runner（aurora_test_main.cpp）统一提供。
-// ── API 覆盖映射 ─────────────────────────────
-// ErrorCodes（含 error_codes.gen.h 生成枚举/表驱动元数据）。
-
+#include <cstddef>
+#include <set>
 #include <string>
-#include <unordered_set>
+#include <string_view>
 
-#include "aurora/aurora.h"
-#include "aurora/core/diagnostics.h"
-#include "aurora_test_harness.h"
+#include "aurora/core/error_codes.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_error_codes {
 
-static void test_enum_contiguous() {
-    // ErrorCode 必须为 0 起连续索引，g_error_table 才能按下标查表。
-    auto prev = ErrorCode::GeneralUnknown;
-    std::size_t count = 0;
-    for (std::size_t i = 0; i < error_count(); ++i) {
-        auto cur = static_cast<ErrorCode>(i);
-        AURORA_TEST_CHECK_MSG(static_cast<std::size_t>(cur) == i, "ErrorCode contiguous indices");
-        (void)prev;
-        prev = cur;
-        ++count;
-    }
-    AURORA_TEST_CHECK_MSG(count == error_count(), "error_count matches iteration");
-}
-
-static void test_slug_frozen_and_unique() {
-    std::unordered_set<std::string> seen;
-    for (std::size_t i = 0; i < error_count(); ++i) {
-        const auto c = static_cast<ErrorCode>(i);
-        auto s = std::string(slug(c));
-        AURORA_TEST_CHECK_MSG(!s.empty(), "slug non-empty");
-        AURORA_TEST_CHECK_MSG(!seen.contains(s), "slug unique");
-        seen.insert(s);
-        // to_string 返回 C++ 标识符（调试用），不应等于 slug
-        AURORA_TEST_CHECK_MSG(std::string(to_string(c)) != s, "to_string(enum) != slug");
+AURORA_TEST_CASE(table_index_matches_enum_value) {
+    AURORA_TEST_REQUIRE_GE(aurora::error_count(), std::size_t{1});
+    AURORA_TEST_CHECK_EQ(aurora::error_count(), AURORA_ERROR_TABLE.size());
+    for (std::size_t i = 0; i < AURORA_ERROR_TABLE.size(); ++i) {
+        // 查表函数以 static_cast<size_t>(code) 索引：枚举值与表下标错位会整体读错元数据。
+        AURORA_TEST_CHECK(AURORA_ERROR_TABLE.at(i).code == static_cast<ErrorCode>(i));
     }
 }
 
-static void test_table_metadata() {
-    AURORA_TEST_CHECK_MSG(category(ErrorCode::LayoutDepthExceeded) == ErrorCategory::Layout, "category from table");
-    AURORA_TEST_CHECK_MSG(severity(ErrorCode::LayoutDepthExceeded) == ErrorSeverity::Warning, "severity from table");
-    AURORA_TEST_CHECK_MSG(is_auto_fixable(ErrorCode::LayoutDepthExceeded), "auto_fixable from table");
-    AURORA_TEST_CHECK_MSG(!is_auto_fixable(ErrorCode::NavDepthExceeded), "auto_fixable(false) from table");
-    AURORA_TEST_CHECK_MSG(std::string(fix_category_of(ErrorCode::LayoutDepthExceeded)) == "layout_conflict",
-                          "fix_category from table");
-    AURORA_TEST_CHECK_MSG(retryable(ErrorCode::RuntimeAsyncTimeout), "retryable from table");
-    AURORA_TEST_CHECK_MSG(std::string(to_string(ErrorCode::NavDepthExceeded)) == "NavDepthExceeded",
-                          "to_string returns identifier");
-    AURORA_TEST_CHECK_MSG(std::string(slug(ErrorCode::NavDepthExceeded)) == "nav-depth-exceeded",
-                          "slug is frozen external code");
+AURORA_TEST_CASE(frozen_slugs_are_stable_contracts) {
+    // slug 是对外冻结标识（改名也不变），C++ 标识符（ident）仅调试用。
+    AURORA_TEST_CHECK_STREQ(aurora::slug(ErrorCode::GeneralUnknown), "general-unknown");
+    AURORA_TEST_CHECK_STREQ(aurora::slug(ErrorCode::NavDepthExceeded), "nav-depth-exceeded");
+    AURORA_TEST_CHECK_STREQ(aurora::slug(ErrorCode::StorageIoError), "storage-io-error");
+    // slug 与 ident 解耦的典型：ident 为 RuntimeAsyncTimeout，slug 为 async-timeout。
+    AURORA_TEST_CHECK_STREQ(aurora::slug(ErrorCode::RuntimeAsyncTimeout), "async-timeout");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorCode::RuntimeAsyncTimeout), "RuntimeAsyncTimeout");
 }
 
-static void test_make_error_table_driven() {
-    auto e = make_error(ErrorCode::LayoutDepthExceeded, {{"max", "10"}});
-    AURORA_TEST_CHECK_MSG(e.code == "layout-depth-exceeded", "make_error: code is slug");
-    AURORA_TEST_CHECK_MSG(e.code_enum == ErrorCode::LayoutDepthExceeded, "make_error: code_enum");
-    AURORA_TEST_CHECK_MSG(e.message == "Layout tree depth exceeded the limit (default 10)",
-                          "make_error: template-rendered message");
-    AURORA_TEST_CHECK_MSG(e.severity == ErrorSeverity::Warning, "make_error: injected severity");
-    AURORA_TEST_CHECK_MSG(e.category == ErrorCategory::Layout, "make_error: injected category");
-    AURORA_TEST_CHECK_MSG(e.auto_fixable, "make_error: injected auto_fixable");
-    AURORA_TEST_CHECK_MSG(!e.hint.empty(), "make_error: injected default hint");
-
-    // 自定义 message 覆盖模板
-    auto e2 = make_error(ErrorCode::GeneralUnknown, "自定义");
-    AURORA_TEST_CHECK_MSG(e2.message == "自定义" && e2.code == "general-unknown", "make_error: custom message");
-
-    // hint 可被覆盖
-    auto e3 = make_error(ErrorCode::NavDepthExceeded, "m", {{"max", "5"}}, "覆盖提示");
-    AURORA_TEST_CHECK_MSG(e3.hint == "覆盖提示", "make_error: hint overridable");
+AURORA_TEST_CASE(table_entries_have_unique_nonempty_keys) {
+    std::set<std::string_view> slugs;
+    for (const auto& entry : AURORA_ERROR_TABLE) {
+        AURORA_TEST_CHECK_FALSE(entry.slug.empty());
+        AURORA_TEST_CHECK_FALSE(entry.ident.empty());
+        AURORA_TEST_CHECK_FALSE(entry.message_tpl.empty());
+        AURORA_TEST_CHECK_FALSE(entry.hint.empty());
+        AURORA_TEST_CHECK_FALSE(entry.fix_category.empty());
+        slugs.insert(entry.slug);
+    }
+    // slug 重复即破坏对外唯一契约。
+    AURORA_TEST_CHECK_EQ(slugs.size(), AURORA_ERROR_TABLE.size());
 }
 
-static void test_diagnostic_explain_table_driven() {
-    // 诊断码即 slug，解释文本来自 ErrorMeta.hint（单一声明源）
-    const std::string hint = Diagnostics::explain_diagnostic("widget-depth-exceeded");
-    AURORA_TEST_CHECK_MSG(!hint.empty() && hint.find("Repeater") != std::string::npos, "explain(slug) from table");
-    const std::string hint2 = Diagnostics::explain_diagnostic(ErrorCode::FontMissing);
-    AURORA_TEST_CHECK_MSG(!hint2.empty() && hint2.find("font") != std::string::npos, "explain(enum) from table");
-    // 未知码返回兜底
-    AURORA_TEST_CHECK_MSG(!Diagnostics::explain_diagnostic("no-such-code").empty(), "explain unknown code fallback");
+AURORA_TEST_CASE(category_and_severity_to_string_complete) {
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorCategory::General), "general");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorCategory::Layout), "layout");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorCategory::Widget), "widget");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorCategory::Render), "render");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorCategory::Io), "io");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorCategory::Validation), "validation");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorCategory::Navigation), "navigation");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorCategory::Platform), "platform");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorCategory::Runtime), "runtime");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorCategory::Generation), "generation");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorCategory::Diagnostic), "diagnostic");
+
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorSeverity::Info), "info");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorSeverity::Warning), "warning");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorSeverity::Error), "error");
+    AURORA_TEST_CHECK_STREQ(aurora::to_string(ErrorSeverity::Fatal), "fatal");
 }
 
-AURORA_TEST() {
-    AURORA_TEST_PRINTF("=== error_codes ===\n");
-    test_enum_contiguous();
-    test_slug_frozen_and_unique();
-    test_table_metadata();
-    test_make_error_table_driven();
-    test_diagnostic_explain_table_driven();
+AURORA_TEST_CASE(lookup_helpers_match_table_entry) {
+    constexpr auto code = ErrorCode::LayoutNullChild;
+    const auto& meta = AURORA_ERROR_TABLE.at(static_cast<std::size_t>(code));
+    AURORA_TEST_CHECK(aurora::slug(code) == meta.slug);
+    AURORA_TEST_CHECK(aurora::category(code) == meta.category && meta.category == ErrorCategory::Layout);
+    AURORA_TEST_CHECK(aurora::severity(code) == meta.severity && meta.severity == ErrorSeverity::Warning);
+    AURORA_TEST_CHECK_EQ(aurora::is_auto_fixable(code), meta.auto_fixable);
+    AURORA_TEST_CHECK_STREQ(aurora::fix_category_of(code), meta.fix_category);
+    AURORA_TEST_CHECK_EQ(aurora::retryable(code), meta.retryable);
+    AURORA_TEST_CHECK_STREQ(aurora::hint_of(code), meta.hint);
+    // 抽查另一条 retryable 记录。
+    AURORA_TEST_CHECK_EQ(aurora::retryable(ErrorCode::RuntimeCoroutineException), true);
+}
+
+AURORA_TEST_CASE(format_message_renders_known_placeholders) {
+    AURORA_TEST_CHECK_STREQ(aurora::format_message("depth limit {max} reached", ErrorParams{{"max", "8"}}),
+                            "depth limit 8 reached");
+    AURORA_TEST_CHECK_STREQ(aurora::format_message("no params here", {}), "no params here");
+    AURORA_TEST_CHECK_STREQ(aurora::format_message("", {}), "");
+    // 未知 key 不渲染，保留占位符原样。
+    AURORA_TEST_CHECK_STREQ(aurora::format_message("missing {nope} key", {}), "missing {nope} key");
+}
+
+AURORA_TEST_CASE(format_message_handles_edge_cases) {
+    // 未闭合的 '{'：找不到 '}' 时按原字符输出。
+    AURORA_TEST_CHECK_STREQ(aurora::format_message("open {brace", {}), "open {brace");
+    // 多占位符与相邻占位符。
+    AURORA_TEST_CHECK_STREQ(aurora::format_message("{a}-{b}", ErrorParams{{"a", "1"}, {"b", "2"}}), "1-2");
+    AURORA_TEST_CHECK_STREQ(aurora::format_message("{a}{b}", ErrorParams{{"a", "1"}, {"b", "2"}}), "12");
+    // 空 key：查不到参数，原样保留。
+    AURORA_TEST_CHECK_STREQ(aurora::format_message("{}", {}), "{}");
+}
+
+AURORA_TEST_CASE(lookup_functions_are_compile_time_usable) {
+    // 查表函数 constexpr：冻结契约可在编译期断言。
+    static_assert(aurora::error_count() == AURORA_ERROR_TABLE.size());
+    static_assert(aurora::slug(ErrorCode::GeneralUnknown) == "general-unknown");
+    static_assert(aurora::severity(ErrorCode::NavDepthExceeded) == ErrorSeverity::Error);
+    static_assert(aurora::category(ErrorCode::LayoutNullChild) == ErrorCategory::Layout);
+    static_assert(aurora::retryable(ErrorCode::RuntimeAsyncTimeout));
+    static_assert(!aurora::is_auto_fixable(ErrorCode::SurfaceLost));
+    AURORA_TEST_CHECK(true);
 }
 
 }  // namespace aurora::test_cases::utest_error_codes

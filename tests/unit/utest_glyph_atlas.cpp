@@ -1,104 +1,113 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/render/glyph_atlas.h
-/// 测试说明: glyph_atlas 单元测试
-///
+/// 测试说明: 覆盖 GlyphAtlas 的未命中返回空指针、插入后字段保真（含 Gray/Lcd 两种缓冲语义）、
+/// 同键覆盖、clear 全清，以及容量上限触发的 LRU 淘汰与访问提升对淘汰顺序的影响
 
-// GlyphAtlas 单元测试：验证 LRU 命中/淘汰、模式隔离与覆盖度数据保真。
+#include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <vector>
 
 #include "aurora/render/glyph_atlas.h"
-#include "aurora_test_harness.h"
+#include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_glyph_atlas {
 
-using au::render::GlyphAtlas;
+namespace {
+[[nodiscard]] auto make_entry(render::GlyphAtlas::Mode mode, int width, int rows) -> render::GlyphAtlas::Entry {
+    render::GlyphAtlas::Entry entry;
+    entry.mode = mode;
+    entry.left = 1;
+    entry.top = 7;
+    entry.width = width;
+    entry.rows = rows;
+    entry.pitch = width;
+    entry.advance = 5.5F;
+    const std::size_t factor = (mode == render::GlyphAtlas::Mode::Lcd) ? 3U : 1U;
+    entry.buf.assign(static_cast<std::size_t>(width) * rows * factor, 0xAB);
+    return entry;
+}
+}  // namespace
 
-AURORA_TEST() {
-    GlyphAtlas atlas;
+AURORA_TEST_CASE(miss_returns_nullptr) {
+    render::GlyphAtlas atlas;
+    AURORA_TEST_CHECK_NULL(atlas.find(0x0123'4567'89AB'CDEFULL));
+}
 
-    // 1) 插入后命中且覆盖度数据保真
-    {
-        GlyphAtlas::Entry e;
-        e.mode = GlyphAtlas::Mode::Gray;
-        e.left = -1;
-        e.top = 8;
-        e.width = 4;
-        e.rows = 2;
-        e.advance = 5.0F;
-        e.buf = {0, 128, 255, 64, 16, 32, 96, 200};
-        atlas.insert(1, std::move(e));
-        const GlyphAtlas::Entry *got = atlas.find(1);
-        AURORA_TEST_CHECK(got != nullptr);
-        AURORA_TEST_CHECK(got->width == 4 && got->rows == 2);
-        AURORA_TEST_CHECK(got->left == -1 && got->top == 8);
-        AURORA_TEST_CHECK(got->advance == 5.0F);
-        AURORA_TEST_CHECK(got->buf.size() == 8U);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(got->buf[2] == 255);
-        AURORA_LOG_INFO("test", "[1] insert/find/roundtrip OK");
+AURORA_TEST_CASE(insert_then_find_preserves_gray_entry) {
+    render::GlyphAtlas atlas;
+    atlas.insert(42, make_entry(render::GlyphAtlas::Mode::Gray, 4, 6));
+
+    const auto *found = atlas.find(42);
+    AURORA_TEST_REQUIRE_NOT_NULL(found);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(found->mode), static_cast<int>(render::GlyphAtlas::Mode::Gray));
+    AURORA_TEST_CHECK_EQ(found->left, 1);
+    AURORA_TEST_CHECK_EQ(found->top, 7);
+    AURORA_TEST_CHECK_EQ(found->width, 4);
+    AURORA_TEST_CHECK_EQ(found->rows, 6);
+    AURORA_TEST_CHECK_NEAR(found->advance, 5.5, 1e-6);
+    AURORA_TEST_CHECK_EQ(found->buf.size(), 4U * 6U);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(found->buf.front()), 0xAB);
+}
+
+AURORA_TEST_CASE(insert_then_find_preserves_lcd_entry) {
+    // LCD 子像素缓冲每行 3 字节/列：Buf 长度 = 3 * width * rows。
+    render::GlyphAtlas atlas;
+    atlas.insert(7, make_entry(render::GlyphAtlas::Mode::Lcd, 3, 5));
+
+    const auto *found = atlas.find(7);
+    AURORA_TEST_REQUIRE_NOT_NULL(found);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(found->mode), static_cast<int>(render::GlyphAtlas::Mode::Lcd));
+    AURORA_TEST_CHECK_EQ(found->buf.size(), 3U * 3U * 5U);
+}
+
+AURORA_TEST_CASE(insert_overwrites_same_key) {
+    render::GlyphAtlas atlas;
+    atlas.insert(1, make_entry(render::GlyphAtlas::Mode::Gray, 2, 2));
+    atlas.insert(1, make_entry(render::GlyphAtlas::Mode::Gray, 8, 8));
+
+    const auto *found = atlas.find(1);
+    AURORA_TEST_REQUIRE_NOT_NULL(found);
+    AURORA_TEST_CHECK_EQ(found->width, 8);
+    AURORA_TEST_CHECK_EQ(found->rows, 8);
+}
+
+AURORA_TEST_CASE(clear_drops_all_entries) {
+    render::GlyphAtlas atlas;
+    atlas.insert(1, make_entry(render::GlyphAtlas::Mode::Gray, 2, 2));
+    atlas.insert(2, make_entry(render::GlyphAtlas::Mode::Gray, 2, 2));
+    atlas.clear();
+
+    AURORA_TEST_CHECK_NULL(atlas.find(1));
+    AURORA_TEST_CHECK_NULL(atlas.find(2));
+}
+
+AURORA_TEST_CASE(exceeding_capacity_evicts_least_recently_used) {
+    render::GlyphAtlas atlas;
+    const std::uint64_t capacity = render::GlyphAtlas::AURORA_MAX_ENTRIES;
+    for (std::uint64_t key = 0; key < capacity; ++key) {
+        atlas.insert(key, make_entry(render::GlyphAtlas::Mode::Gray, 1, 1));
+    }
+    // 注意：`find` 本身会 LRU 提升，故「填满」阶段只能访问最新键（已在队首），
+    // 否则断言会顺带改变淘汰顺序，把 key 0 救下。
+    AURORA_TEST_CHECK_NOT_NULL(atlas.find(capacity - 1));  // 恰好填满：尚无淘汰
+
+    atlas.insert(capacity, make_entry(render::GlyphAtlas::Mode::Gray, 1, 1));
+    AURORA_TEST_CHECK_NULL(atlas.find(0));  // 最久未用者被淘汰
+    AURORA_TEST_CHECK_NOT_NULL(atlas.find(capacity));
+}
+
+AURORA_TEST_CASE(find_promotes_entry_and_shifts_eviction_order) {
+    render::GlyphAtlas atlas;
+    const std::uint64_t capacity = render::GlyphAtlas::AURORA_MAX_ENTRIES;
+    for (std::uint64_t key = 0; key < capacity; ++key) {
+        atlas.insert(key, make_entry(render::GlyphAtlas::Mode::Gray, 1, 1));
     }
 
-    // 2) 同 base key 的 Gray / Lcd 互不覆盖
-    {
-        GlyphAtlas::Entry g;
-        g.mode = GlyphAtlas::Mode::Gray;
-        g.width = 2;
-        g.rows = 1;
-        g.buf = {10, 20};
-        atlas.insert(100, std::move(g));
-        GlyphAtlas::Entry l;
-        l.mode = GlyphAtlas::Mode::Lcd;
-        l.width = 2;
-        l.rows = 1;
-        l.buf = {30, 40, 50, 60, 70, 80};
-        atlas.insert(101, std::move(l));
-        const GlyphAtlas::Entry *gg = atlas.find(100);
-        const GlyphAtlas::Entry *ll = atlas.find(101);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(gg != nullptr && gg->mode == GlyphAtlas::Mode::Gray && gg->buf[1] == 20);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        AURORA_TEST_CHECK(ll != nullptr && ll->mode == GlyphAtlas::Mode::Lcd && ll->buf[5] == 80);
-        AURORA_LOG_INFO("test", "[2] gray/lcd separation OK");
-    }
+    AURORA_TEST_CHECK_NOT_NULL(atlas.find(0));  // 提升 key 0 → key 1 成为最久未用
+    atlas.insert(capacity, make_entry(render::GlyphAtlas::Mode::Gray, 1, 1));
 
-    // 3) 超出容量后最久未用被淘汰
-    {
-        GlyphAtlas small;
-        constexpr std::size_t n = GlyphAtlas::AURORA_MAX_ENTRIES + 200;
-        for (std::size_t i = 0; i < n; ++i) {
-            GlyphAtlas::Entry e;
-            e.width = 1;
-            e.rows = 1;
-            e.buf = {static_cast<std::uint8_t>(i & 0xFFU)};
-            small.insert(i, std::move(e));
-        }
-        // 最早插入的 key=0 应已被淘汰
-        AURORA_TEST_CHECK(small.find(0) == nullptr);
-        // 最近插入的仍存在
-        AURORA_TEST_CHECK(small.find(n - 1) != nullptr);
-        // 容量受控（条目数不超过 kMaxEntries 太多）
-        std::size_t live = 0;
-        for (std::size_t i = 0; i < n; ++i) {
-            if (small.find(i) != nullptr) {
-                ++live;
-            }
-        }
-        AURORA_TEST_CHECK(live <= GlyphAtlas::AURORA_MAX_ENTRIES);
-        AURORA_LOG_INFO("test", "[3] LRU eviction OK (live=", live, ")");
-    }
-
-    // 4) clear 清空全部
-    {
-        atlas.clear();
-        AURORA_TEST_CHECK(atlas.find(1) == nullptr);
-        AURORA_TEST_CHECK(atlas.find(100) == nullptr);
-        AURORA_LOG_INFO("test", "[4] clear OK");
-    }
+    AURORA_TEST_CHECK_NOT_NULL(atlas.find(0));
+    AURORA_TEST_CHECK_NULL(atlas.find(1));
 }
 
 }  // namespace aurora::test_cases::utest_glyph_atlas

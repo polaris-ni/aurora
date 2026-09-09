@@ -1,500 +1,271 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/inspector/inspector_server.h
-/// 测试说明: inspector_server 单元测试
-///
+/// 测试说明: 覆盖 InspectorServer 生命周期与 HTTP 基本路径——初始停机态、start(0) 随机端口
+/// 启停、重复 start 失败、stop 幂等、析构收编 worker、/api/tree 与 /api/components 的
+/// 请求-响应、404/405/400/403 错误请求、/api/debug/state 的 surface getter 装配错误路径。
+/// 端口一律用 0（系统分配临时端口，无冲突）；无文件句柄副作用。客户端为本 TU 内最小
+/// 回环 socket 实现，随用例关闭清理。
 
-// InspectorServer 基础测试
-//
-// 当 AURORA_BUILD_INSPECTOR_SERVER 未定义时（即 CMake 选项 AURORA_BUILD_INSPECTOR_SERVER=OFF），
-// 仅验证头文件可包含，测试直接通过。
-// 定义时执行完整的构造/启动/停止生命周期测试。
-
-#include <cstdio>
+#include <cstdint>
 #include <functional>
+#include <memory>
+#include <string>
 
 #include "aurora/core/platform.h"
 #include "aurora/inspector/inspector_server.h"
-#include "aurora_test_harness.h"
+#include "aurora/window/surface.h"  // set_surface_getter 的 Surface 完整类型
+#include "aurora/widget/containers.h"
+#include "aurora/widget/text.h"
+#include "framework/aurora_test.h"
 
-namespace aurora::test_cases::utest_inspector_server {
-
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
-
-AURORA_TEST() {
-    std::fprintf(stderr, "=== test_inspector_server (header-only, server not built) ===\n");
-    std::fprintf(stderr, "  PASS: header included successfully\n");
-    std::fprintf(stderr, "=== all tests passed ===\n");
-}
-
-#else
-
-#include <nlohmann/json.hpp>
-#include <string>
-
-#ifdef AURORA_PLATFORM_WINDOWS
+#if defined(AURORA_PLATFORM_WINDOWS)
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
-#include <cerrno>
-using SOCKET = int;
-constexpr SOCKET INVALID_SOCKET = -1;
-struct WSADATA {
-    int dummy = 0;
-};
-inline int WSAStartup(uint16_t, void *) { return 0; }
-inline void WSACleanup() {}
-#define MAKEWORD(a, b) (0)
-inline int closesocket(SOCKET s) { return ::close(s); }
 #endif
 
-#include "aurora/aurora.h"
-#include "aurora/widget/widget.h"
-#include "aurora/window/surface.h"
-#include "aurora/window/window.h"
-
-static auto make_dummy_root() -> aurora::Node { return aurora::Node{}; }
-
-// ---- 测试辅助：最小 HTTP 客户端（loopback）----
-// 直接连 127.0.0.1:port 发请求、读全响应；校验 Host 回环、拒 Origin（与服务器一致）。
-static auto http_send(uint16_t port, const std::string &method, const std::string &path, const std::string &body)
-    -> std::string {
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        return {};
-    }
-    const SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock == INVALID_SOCKET) {  // NOLINT(*-use-integer-sign-comparison)
-        WSACleanup();
-        return {};
-    }
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
-    if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
-        closesocket(sock);
-        WSACleanup();
-        return {};
-    }
-    std::ostringstream req;
-    req << method << " " << path << " HTTP/1.1\r\n"
-        << "Host: 127.0.0.1\r\n";
-    if (!body.empty()) {
-        req << "Content-Type: application/json\r\n";
-        req << "Content-Length: " << body.size() << "\r\n";
-    }
-    req << "Connection: close\r\n\r\n" << body;
-    const std::string req_str = req.str();
-    send(sock, req_str.data(), static_cast<int>(req_str.size()), 0);
-    std::string resp;
-    char buf[4096];
-    int n = 0;
-    while ((n = recv(sock, buf, sizeof(buf), 0)) > 0) {
-        resp.append(buf, static_cast<std::size_t>(n));
-    }
-    closesocket(sock);
-    WSACleanup();
-    return resp;
-}
+namespace aurora::test_cases::utest_inspector_server {
 
 namespace {
-struct HttpParsed {
-    int status = 0;
-    std::string content_type;
-    std::string body;
-};
-}  // namespace
 
-static auto http_parse(const std::string &resp) -> HttpParsed {
-    HttpParsed r;
-    const auto sp = resp.find(' ');
-    if (sp == std::string::npos) {
-        return r;
-    }
-    const auto sp2 = resp.find(' ', sp + 1);
-    if (sp2 == std::string::npos) {
-        return r;
-    }
-    r.status = std::stoi(resp.substr(sp + 1, sp2 - sp - 1));
-    const auto hend = resp.find("\r\n\r\n");
-    if (hend == std::string::npos) {
-        return r;
-    }
-    const std::string head = resp.substr(0, hend);
-    const auto ct = head.find("Content-Type:");
-    if (ct != std::string::npos) {
-        auto cs = ct + 13;
-        while (cs < head.size() && (head[cs] == ' ' || head[cs] == '\t')) {
-            ++cs;
-        }
-        auto ce = head.find("\r\n", cs);
-        r.content_type = head.substr(cs, ce - cs);
-    }
-    int clen = 0;
-    const auto cl = head.find("Content-Length:");
-    if (cl != std::string::npos) {
-        auto cs = cl + 15;
-        while (cs < head.size() && head[cs] == ' ') {
-            ++cs;
-        }
-        auto ce = head.find("\r\n", cs);
-        clen = std::stoi(head.substr(cs, ce - cs));
-    }
-    r.body = resp.substr(hend + 4, static_cast<std::size_t>(clen));
-    return r;
+/// @brief 共享测试树：Column 根 + Text 子节点（静态存储期，供 worker 线程 root_getter 读取）。
+auto shared_tree() -> std::shared_ptr<Column> & {
+    static std::shared_ptr<Column> tree = [] {
+        auto col = std::make_shared<Column>();
+        col->add(Node{std::make_shared<Text>("hello")});
+        return col;
+    }();
+    return tree;
 }
 
-AURORA_TEST() {
-    std::fprintf(stderr, "=== test_inspector_server (full) ===\n");
+/// @brief root_getter：每次请求返回共享树的 Node 副本。
+auto tree_getter() -> Node { return Node{shared_tree()}; }
 
-    // Test 1: 构造后初始状态
-    {
-        std::function<aurora::Node()> getter = make_dummy_root;
-        aurora::InspectorServer server(getter);
-        AURORA_TEST_CHECK_MSG(!server.is_running(), "server should not be running after construction");
-        AURORA_TEST_CHECK_MSG(server.port() == 0, "port should be 0 when not started");
-        AURORA_LOG_INFO("[PASS] construction and initial state");
+#if defined(AURORA_PLATFORM_WINDOWS)
+/// @brief Winsock 会话（引用计数式启停，随作用域清理）。
+struct WinsockSession {
+    WinsockSession() {
+        WSADATA data{};
+        started_ = WSAStartup(MAKEWORD(2, 2), &data) == 0;
     }
-
-    // Test 2: stop() 在未 start() 时调用应安全（幂等）
-    {
-        std::function<aurora::Node()> getter = make_dummy_root;
-        aurora::InspectorServer server(getter);
-        server.stop();
-        AURORA_TEST_CHECK_MSG(!server.is_running(), "server should not be running after stop()");
-        AURORA_LOG_INFO("[PASS] stop() without start() is safe");
-    }
-
-    // Test 3: 析构函数在未 start() 时安全
-    {
-        std::function<aurora::Node()> getter = make_dummy_root;
-        {
-            aurora::InspectorServer server(getter);
-        }
-        AURORA_LOG_INFO("[PASS] destruction without start() is safe");
-    }
-
-    // Test 4: start/stop 基本流程（port=0 让系统分配端口）
-    {
-        aurora::Node root = make_dummy_root();
-        std::function<aurora::Node()> getter = [&]() -> aurora::Node { return root; };
-        aurora::InspectorServer server(getter);
-
-        const bool started = server.start(0);
-        if (started) {
-            AURORA_TEST_CHECK_MSG(server.is_running(), "server should be running after start()");
-            AURORA_TEST_CHECK_MSG(server.port() != 0, "port should be non-zero after start()");
-            server.stop();
-            AURORA_TEST_CHECK_MSG(!server.is_running(), "server should not be running after stop()");
-            AURORA_TEST_CHECK_MSG(server.port() == 0, "port should be 0 after stop()");
-            AURORA_LOG_INFO("[PASS] start/stop lifecycle (port=0)");
-        } else {
-            std::fprintf(stderr, "  SKIP: start() returned false\n");
+    ~WinsockSession() {
+        if (started_) {
+            WSACleanup();
         }
     }
-
-    // Test 5: 重复 start() 应返回 false
-    {
-        std::function<aurora::Node()> getter = make_dummy_root;
-        aurora::InspectorServer server(getter);
-        const bool started = server.start(0);
-        if (started) {
-            const bool second = server.start(0);
-            AURORA_TEST_CHECK_MSG(!second, "second start() should return false");
-            server.stop();
-            AURORA_LOG_INFO("[PASS] double start() returns false");
-        } else {
-            std::fprintf(stderr, "  SKIP: start() returned false\n");
-        }
-    }
-
-    // Test 6: 调试端点（state/snapshot/perf/timeline/diagnostics/why/tree/pick/flags）
-    {
-        // 构造一棵含可拾取子控件的树，经 Window + present_root 完成真正 paint
-        // （paint_bounds 有效，pick 才能命中；render_to_logical_snapshot 只 layout 不 paint）。
-        Window window{std::make_unique<HeadlessSurface>("", Size{.width = 400.0F, .height = 300.0F})};
-        auto root_widget = std::make_shared<Column>();
-        Node root{root_widget};
-        // 用 Button 作可拾取子控件：set_on_click 后置位 on_click，wants_click()==true，
-        // 才会进入命中链（裸 Container/Column 仅背景、不想要点击，不会命中）。
-        auto child = std::make_shared<Button>();
-        child->set_label("PickMe");
-        child->set_on_click([]() -> void {});
-        child->width(px(80.0F));
-        child->height(px(40.0F));
-        root_widget->add(Node{child});
-        const auto pr = window.present_root(root);
-        AURORA_TEST_CHECK_MSG(static_cast<bool>(pr), "present_root should succeed");
-
-        std::function<Node()> getter = [&]() -> Node { return root; };
-        InspectorServer server(getter);
-        server.set_surface_getter([&]() -> Surface * { return &window.surface(); });
-
-        const bool started = server.start(0);
-        if (!started) {
-            std::fprintf(stderr, "  SKIP: start() returned false (Test 6)\n");
-        } else {
-            const uint16_t p = server.port();
-            AURORA_TEST_CHECK_MSG(p != 0, "port should be non-zero after start()");
-
-            // GET /api/debug/state — Surface 运行时状态（DEBUG 真实、Release available=false，均 200 JSON）
-            {
-                auto r = http_parse(http_send(p, "GET", "/api/debug/state", ""));
-                AURORA_TEST_CHECK_MSG(r.status == 200, "state: status 200");
-                AURORA_TEST_CHECK_MSG(r.content_type == "application/json", "state: application/json");
-                bool ok = false;
-                try {
-                    nlohmann::json j = nlohmann::json::parse(r.body);
-                    ok = j.is_object();
-                } catch (...) {  // NOLINT(*-empty-catch)
-                }
-                AURORA_TEST_CHECK_MSG(ok, "state: body parses as JSON object");
-                AURORA_LOG_INFO("[PASS] /api/debug/state");
-            }
-            // GET /api/debug/perf
-            {
-                auto r = http_parse(http_send(p, "GET", "/api/debug/perf", ""));
-                AURORA_TEST_CHECK_MSG(r.status == 200 && r.content_type == "application/json", "perf: 200 JSON");
-                AURORA_LOG_INFO("[PASS] /api/debug/perf");
-            }
-            // GET /api/debug/timeline
-            {
-                auto r = http_parse(http_send(p, "GET", "/api/debug/timeline", ""));
-                AURORA_TEST_CHECK_MSG(r.status == 200 && r.content_type == "application/json", "timeline: 200 JSON");
-                AURORA_LOG_INFO("[PASS] /api/debug/timeline");
-            }
-            // GET /api/debug/diagnostics
-            {
-                auto r = http_parse(http_send(p, "GET", "/api/debug/diagnostics", ""));
-                AURORA_TEST_CHECK_MSG(r.status == 200 && r.content_type == "application/json", "diagnostics: 200 JSON");
-                AURORA_LOG_INFO("[PASS] /api/debug/diagnostics");
-            }
-            // GET /api/debug/why
-            {
-                auto r = http_parse(http_send(p, "GET", "/api/debug/why", ""));
-                AURORA_TEST_CHECK_MSG(r.status == 200 && r.content_type == "application/json", "why: 200 JSON");
-                AURORA_LOG_INFO("[PASS] /api/debug/why");
-            }
-            // GET /api/debug/tree — 收编 widget_tree
-            {
-                auto r = http_parse(http_send(p, "GET", "/api/debug/tree", ""));
-                AURORA_TEST_CHECK_MSG(r.status == 200 && r.content_type == "application/json", "tree: 200 JSON");
-                AURORA_LOG_INFO("[PASS] /api/debug/tree");
-            }
-            // POST /api/debug/flags — 运行时设置叠层开关（两端点均返回 status=ok）
-            {
-                auto r = http_parse(http_send(p, "POST", "/api/debug/flags", "{\"layout_guides\":true}"));
-                AURORA_TEST_CHECK_MSG(r.status == 200 && r.content_type == "application/json", "flags: 200 JSON");
-                bool ok = false;
-                std::string st;
-                try {
-                    nlohmann::json j = nlohmann::json::parse(r.body);
-                    ok = j.is_object();
-                    if (j.contains("status")) {
-                        st = j["status"].get<std::string>();
-                    }
-                } catch (...) {  // NOLINT(*-empty-catch)
-                }
-                AURORA_TEST_CHECK_MSG(ok && st == "ok", "flags: status == ok");
-                AURORA_LOG_INFO("[PASS] /api/debug/flags");
-            }
-
-            // snapshot / pick 仅在 DEBUG 下有真实行为（Release 下 capture / widget_picker 为 no-op）。
-#ifdef AURORA_ENABLE_DEBUG
-            // GET /api/debug/snapshot — 截图 PNG（image/png，非空）
-            {
-                auto r = http_parse(http_send(p, "GET", "/api/debug/snapshot", ""));
-                AURORA_TEST_CHECK_MSG(r.status == 200, "snapshot: status 200 (DEBUG)");
-                AURORA_TEST_CHECK_MSG(r.content_type == "image/png", "snapshot: image/png");
-                AURORA_TEST_CHECK_MSG(!r.body.empty(), "snapshot: non-empty PNG body");
-                AURORA_LOG_INFO("[PASS] /api/debug/snapshot");
-            }
-            // GET /api/debug/pick — 控件拾取（命中 child 中心，chain 含 child 类型名）
-            {
-                const Rect b = child->paint_bounds();
-                const float cx = b.origin.x + (b.size.width * 0.5F);
-                const float cy = b.origin.y + (b.size.height * 0.5F);
-                std::ostringstream q;
-                q << "/api/debug/pick?x=" << cx << "&y=" << cy;
-                auto r = http_parse(http_send(p, "GET", q.str(), ""));
-                AURORA_TEST_CHECK_MSG(r.status == 200 && r.content_type == "application/json", "pick: 200 JSON");
-                bool ok = false;
-                bool hit = false;
-                bool saw_child = false;
-                try {
-                    nlohmann::json j = nlohmann::json::parse(r.body);
-                    ok = j.is_object();
-                    hit = j.value("hit", false);
-                    if (j.contains("chain") && j["chain"].is_array()) {
-                        for (const auto &n : j["chain"]) {
-                            if (n.contains("type_name") && n["type_name"].get<std::string>() == child->type_name()) {
-                                saw_child = true;
-                            }
-                        }
-                    }
-                } catch (...) {  // NOLINT(*-empty-catch)
-                }
-                AURORA_TEST_CHECK_MSG(ok && hit, "pick: hit at child center (DEBUG)");
-                AURORA_TEST_CHECK_MSG(saw_child, "pick: chain includes the child control");
-                AURORA_LOG_INFO("[PASS] /api/debug/pick");
-            }
-#else
-            std::fprintf(stderr, "  SKIP: snapshot/pick assertions (Release: capture/picker no-op)\n");
+    bool started_ = false;
+};
 #endif
 
-            server.stop();
-            AURORA_TEST_CHECK_MSG(!server.is_running(), "server should be stopped after Test 6");
+/// @brief 发送全部字节；失败返回 false（对端断开/出错）。
+auto send_all(int sock, const std::string &data) -> bool {
+    std::size_t left = data.size();
+    const char *p = data.data();
+    while (left > 0) {
+#if defined(AURORA_PLATFORM_WINDOWS)
+        const int n = ::send(sock, p, static_cast<int>(left), 0);
+#else
+        const auto n = static_cast<int>(::send(sock, p, left, 0));
+#endif
+        if (n <= 0) {
+            return false;
         }
+        p += n;
+        left -= static_cast<std::size_t>(n);
     }
-
-    // Test 7: 基础 REST 端点（tree/widget/{path}/PUT widget/{path}/{prop}/components/yaml/to_code）
-    // 补齐此前未覆盖的 6 个端点，端到端断言 JSON 响应且 PUT 改写后 GET 可见、to_code 多 style 生效。
-    {
-        Window window{std::make_unique<HeadlessSurface>("", Size{.width = 400.0F, .height = 300.0F})};
-        auto root_widget = std::make_shared<Column>();
-        auto child = std::make_shared<Button>();
-        child->set_label("Hello");
-        child->width(px(80.0F));
-        child->height(px(40.0F));
-        root_widget->add(Node{child});
-        Node root{root_widget};
-        const auto pr = window.present_root(root);
-        AURORA_TEST_CHECK_MSG(static_cast<bool>(pr), "present_root should succeed (Test 7)");
-
-        std::function<Node()> getter = [&]() -> Node { return root; };
-        InspectorServer server(getter);
-        const bool started = server.start(0);
-        if (!started) {
-            std::fprintf(stderr, "  SKIP: start() returned false (Test 7)\n");
-        } else {
-            const uint16_t p = server.port();
-            AURORA_TEST_CHECK_MSG(p != 0, "port should be non-zero after start() (Test 7)");
-
-            // GET /api/tree — 完整 widget 树 JSON（body 为原始树，含 type/props/children，无 status 包裹）
-            {
-                auto r = http_parse(http_send(p, "GET", "/api/tree", ""));
-                AURORA_TEST_CHECK_MSG(r.status == 200 && r.content_type == "application/json", "tree: 200 JSON");
-                bool ok = false;
-                try {
-                    nlohmann::json j = nlohmann::json::parse(r.body);
-                    ok = j.is_object() && j.contains("type") && j.contains("children") &&
-                         j["type"].get<std::string>() == "Column" && j["children"].size() == 1;
-                } catch (...) {  // NOLINT(*-empty-catch)
-                }
-                AURORA_TEST_CHECK_MSG(ok, "tree: body parses as JSON tree (Column root + 1 child)");
-                AURORA_LOG_INFO("[PASS] /api/tree");
-            }
-
-            // GET /api/widget/{path} — 单 widget 属性（路径 0 为第一个子节点 Button）
-            const std::string wpath = "/api/widget/0";
-            {
-                auto r = http_parse(http_send(p, "GET", wpath, ""));
-                AURORA_TEST_CHECK_MSG(r.status == 200 && r.content_type == "application/json", "widget: 200 JSON");
-                bool ok = false;
-                try {
-                    nlohmann::json j = nlohmann::json::parse(r.body);
-                    // get_widget_props 返回 { "descriptor": {type,...}, "values": {...} }
-                    ok = j.contains("values") && j["values"].is_object();
-                } catch (...) {  // NOLINT(*-empty-catch)
-                }
-                AURORA_TEST_CHECK_MSG(ok, "widget: body has values object");
-                AURORA_LOG_INFO("[PASS] /api/widget/{path}");
-            }
-
-            // PUT /api/widget/{path}/{prop} — 改写属性后 GET 可见
-            {
-                const std::string put_path = "/api/widget/0/label";
-                auto r = http_parse(http_send(p, "PUT", put_path, "\"Changed\""));
-                AURORA_TEST_CHECK_MSG(r.status == 200 && r.content_type == "application/json", "widget PUT: 200 JSON");
-                auto g = http_parse(http_send(p, "GET", wpath, ""));
-                bool saw = false;
-                try {
-                    nlohmann::json j = nlohmann::json::parse(g.body);
-                    // get_widget_props 返回 { "descriptor": ..., "values": { ... } }
-                    if (j.contains("values") && j["values"].contains("label")) {
-                        saw = j["values"]["label"].get<std::string>() == "Changed";
-                    }
-                } catch (...) {  // NOLINT(*-empty-catch)
-                }
-                AURORA_TEST_CHECK_MSG(saw, "widget PUT: GET reflects changed label");
-                AURORA_LOG_INFO("[PASS] /api/widget/{path}/{prop}");
-            }
-
-            // GET /api/components — 组件 schema 列表
-            {
-                auto r = http_parse(http_send(p, "GET", "/api/components", ""));
-                AURORA_TEST_CHECK_MSG(r.status == 200 && r.content_type == "application/json", "components: 200 JSON");
-                bool ok = false;
-                try {
-                    nlohmann::json j = nlohmann::json::parse(r.body);
-                    ok = j.is_array();
-                } catch (...) {  // NOLINT(*-empty-catch)
-                }
-                AURORA_TEST_CHECK_MSG(ok, "components: body parses as JSON array");
-                AURORA_LOG_INFO("[PASS] /api/components");
-            }
-
-            // GET /api/yaml — 树 YAML 字符串
-            {
-                auto r = http_parse(http_send(p, "GET", "/api/yaml", ""));
-                AURORA_TEST_CHECK_MSG(r.status == 200, "yaml: status 200");
-                AURORA_TEST_CHECK_MSG(r.content_type == "text/yaml", "yaml: text/yaml content-type");
-                AURORA_TEST_CHECK_MSG(!r.body.empty(), "yaml: non-empty body");
-                AURORA_LOG_INFO("[PASS] /api/yaml");
-            }
-
-            // POST /api/to_code — 多 style 生成不同代码（无 style 默认 Fluent）
-            {
-                const std::string body =
-                    R"({"node":{"type":"Column","props":{},"children":[{"type":"Button","props":{"label":"OK"},"children":[]}]}})";
-                auto fluent = http_parse(http_send(p, "POST", "/api/to_code", body));
-                AURORA_TEST_CHECK_MSG(fluent.status == 200 && fluent.content_type == "application/json",
-                                      "to_code: 200 JSON");
-                std::string fluent_code;
-                bool ok = false;
-                try {
-                    nlohmann::json j = nlohmann::json::parse(fluent.body);
-                    ok = j.contains("code") && j["code"].is_string();
-                    fluent_code = j.value("code", std::string());
-                } catch (...) {  // NOLINT(*-empty-catch)
-                }
-                AURORA_TEST_CHECK_MSG(ok, "to_code: body has code string");
-
-                // style=1 (StepByStep) 与 style=2 (DesignatedInit) 应与 Fluent 不同
-                auto sb = http_parse(
-                    http_send(p, "POST", "/api/to_code", body.substr(0, body.size() - 1) + R"(,"style":1})"));
-                auto di = http_parse(
-                    http_send(p, "POST", "/api/to_code", body.substr(0, body.size() - 1) + R"(,"style":2})"));
-                std::string sb_code;
-                std::string di_code;
-                try {
-                    nlohmann::json js = nlohmann::json::parse(sb.body);
-                    nlohmann::json jd = nlohmann::json::parse(di.body);
-                    sb_code = js.value("code", std::string());
-                    di_code = jd.value("code", std::string());
-                } catch (...) {  // NOLINT(*-empty-catch)
-                }
-                AURORA_TEST_CHECK_MSG(!sb_code.empty() && sb_code != fluent_code,
-                                      "to_code: style=1 (StepByStep) differs from Fluent");
-                AURORA_TEST_CHECK_MSG(!di_code.empty() && di_code != fluent_code,
-                                      "to_code: style=2 (DesignatedInit) differs from Fluent");
-                AURORA_TEST_CHECK_MSG(sb_code != di_code, "to_code: style=1 and style=2 produce different code");
-                AURORA_LOG_INFO("[PASS] /api/to_code (multi-style)");
-            }
-
-            server.stop();
-            AURORA_TEST_CHECK_MSG(!server.is_running(), "server should be stopped after Test 7");
-        }
-    }
-
-    std::fprintf(stderr, "=== all tests passed ===\n");
+    return true;
 }
 
-#endif  // AURORA_BUILD_INSPECTOR_SERVER
+/// @brief 对 127.0.0.1:port 发送原始 HTTP 请求并回收完整响应（服务端 Connection: close，
+/// 读到对端关闭即完整）。
+[[nodiscard]] auto http_roundtrip(std::uint16_t port, const std::string &request) -> std::string {
+#if defined(AURORA_PLATFORM_WINDOWS)
+    const WinsockSession wsa;
+#endif
+#if defined(AURORA_PLATFORM_WINDOWS)
+    const auto sock = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    AURORA_TEST_REQUIRE_NE(sock, INVALID_SOCKET);
+#else
+    const int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+    AURORA_TEST_REQUIRE_GE(sock, 0);
+#endif
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons(port);
+    AURORA_TEST_REQUIRE_EQ(::connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)), 0);
+    AURORA_TEST_REQUIRE_TRUE(send_all(sock, request));
+
+    std::string response;
+    char buf[4096];
+    for (;;) {
+#if defined(AURORA_PLATFORM_WINDOWS)
+        const int n = ::recv(sock, buf, sizeof(buf), 0);
+#else
+        const auto n = static_cast<int>(::recv(sock, buf, sizeof(buf), 0));
+#endif
+        if (n <= 0) {
+            break;
+        }
+        response.append(buf, static_cast<std::size_t>(n));
+        if (response.size() > (1U << 20U)) {
+            break;  // 安全上限，防异常服务端无限输出
+        }
+    }
+#if defined(AURORA_PLATFORM_WINDOWS)
+    ::closesocket(sock);
+#else
+    ::close(sock);
+#endif
+    AURORA_TEST_REQUIRE_FALSE(response.empty());
+    return response;
+}
+
+/// @brief 带 Host 头的 GET 便捷封装。
+[[nodiscard]] auto http_get(std::uint16_t port, const std::string &target) -> std::string {
+    return http_roundtrip(port, "GET " + target + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+}
+
+}  // namespace
+
+AURORA_TEST_CASE(initial_state_is_stopped) {
+    InspectorServer server(tree_getter);
+    AURORA_TEST_CHECK_EQ(server.is_running(), false);
+    AURORA_TEST_CHECK_EQ(server.port(), 0);
+}
+
+AURORA_TEST_CASE(start_and_stop_lifecycle) {
+    InspectorServer server(tree_getter);
+    // 端口传 0：由系统分配临时端口，规避并行用例间的端口冲突。
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    AURORA_TEST_CHECK_EQ(server.is_running(), true);
+    AURORA_TEST_CHECK_NE(server.port(), 0);
+
+    server.stop();
+    AURORA_TEST_CHECK_EQ(server.is_running(), false);
+    AURORA_TEST_CHECK_EQ(server.port(), 0);
+}
+
+AURORA_TEST_CASE(start_twice_while_running_fails) {
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    // 已运行时再次 start 必须拒绝（而不是悄悄重启或泄漏 socket）。
+    AURORA_TEST_CHECK_EQ(server.start(0), false);
+    AURORA_TEST_CHECK_EQ(server.is_running(), true);
+    server.stop();
+}
+
+AURORA_TEST_CASE(stop_is_idempotent_and_restartable) {
+    InspectorServer server(tree_getter);
+    AURORA_TEST_CHECK_NO_THROW(server.stop());  // 未启动时 stop 直接返回
+
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    AURORA_TEST_CHECK_NO_THROW(server.stop());
+    AURORA_TEST_CHECK_NO_THROW(server.stop());  // 重复 stop 安全（幂等）
+
+    // 停止后可重新启动（socket 已关闭、worker 已回收）。
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    AURORA_TEST_CHECK_EQ(server.is_running(), true);
+    server.stop();
+}
+
+AURORA_TEST_CASE(destructor_joins_worker_and_releases_state) {
+    {
+        InspectorServer scoped(tree_getter);
+        AURORA_TEST_REQUIRE_TRUE(scoped.start(0));
+        AURORA_TEST_CHECK_EQ(scoped.is_running(), true);
+    }  // 析构须内部 stop：join worker、关 socket、还原 Winsock 引用
+
+    // 析构后可立即再次起服（无悬挂线程/句柄阻塞）。
+    InspectorServer next(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(next.start(0));
+    AURORA_TEST_CHECK_EQ(next.is_running(), true);
+    next.stop();
+}
+
+AURORA_TEST_CASE(tree_endpoint_serves_widget_tree_json) {
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    const std::string resp = http_get(server.port(), "/api/tree");
+    AURORA_TEST_CHECK_TRUE(resp.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("application/json") != std::string::npos);
+    // 完整树含根与子控件类型。
+    AURORA_TEST_CHECK_TRUE(resp.find("Column") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("Text") != std::string::npos);
+    server.stop();
+}
+
+AURORA_TEST_CASE(components_endpoint_returns_json_array) {
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    const std::string resp = http_get(server.port(), "/api/components");
+    AURORA_TEST_CHECK_TRUE(resp.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("application/json") != std::string::npos);
+    // schema 列表体以 JSON 数组开头（核心控件注册后非空）。
+    AURORA_TEST_CHECK_TRUE(resp.find("\r\n\r\n[") != std::string::npos);
+    server.stop();
+}
+
+AURORA_TEST_CASE(unknown_endpoint_returns_404) {
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    const std::string resp = http_get(server.port(), "/api/no_such_endpoint");
+    AURORA_TEST_CHECK_TRUE(resp.find("404") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("error") != std::string::npos);
+    server.stop();
+}
+
+AURORA_TEST_CASE(wrong_method_returns_405) {
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    const std::string resp =
+        http_roundtrip(server.port(), "POST /api/tree HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n");
+    AURORA_TEST_CHECK_TRUE(resp.find("405") != std::string::npos);
+    server.stop();
+}
+
+AURORA_TEST_CASE(bad_pick_params_return_400) {
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    // pick 需要数值 x/y：非数值参数必须回 400 而非 500/崩溃。
+    const std::string resp = http_get(server.port(), "/api/debug/pick?x=abc&y=0");
+    AURORA_TEST_CHECK_TRUE(resp.find("400") != std::string::npos);
+    server.stop();
+}
+
+AURORA_TEST_CASE(missing_host_header_returns_403) {
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    // DNS rebinding 防护：缺失/非回环 Host 一律拒绝。
+    const std::string resp = http_roundtrip(server.port(), "GET /api/tree HTTP/1.1\r\n\r\n");
+    AURORA_TEST_CHECK_TRUE(resp.find("403") != std::string::npos);
+    server.stop();
+}
+
+AURORA_TEST_CASE(debug_state_requires_surface_getter) {
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    // 未装配 getter：明确 400。
+    const std::string without = http_get(server.port(), "/api/debug/state");
+    AURORA_TEST_CHECK_TRUE(without.find("400") != std::string::npos);
+
+    // getter 装配后返回 null Surface：路由层区分回 500。
+    server.set_surface_getter([]() -> Surface * { return nullptr; });
+    const std::string with_null = http_get(server.port(), "/api/debug/state");
+    AURORA_TEST_CHECK_TRUE(with_null.find("500") != std::string::npos);
+    server.stop();
+}
 
 }  // namespace aurora::test_cases::utest_inspector_server
