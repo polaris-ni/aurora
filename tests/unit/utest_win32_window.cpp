@@ -14,7 +14,7 @@
 namespace aurora::test_cases::utest_win32_window {
 
 AURORA_TEST_CASE(win32_window_type_contract) {
-#if defined(AURORA_BACKEND_WIN32)
+#ifdef AURORA_BACKEND_WIN32
     // 契约：Win32Window 是独立窗口宿主（不含像素上屏），并非 Surface 派生类；
     // 与 Win32Surface(GDI)/D3D11Surface(GPU) 组合而非继承。
     static_assert(!std::is_base_of_v<aurora::Surface, aurora::Win32Window>);
@@ -29,7 +29,7 @@ AURORA_TEST_CASE(win32_window_type_contract) {
 }
 
 AURORA_TEST_CASE(win32_window_creation_skipped) {
-#if defined(AURORA_BACKEND_WIN32)
+#ifdef AURORA_BACKEND_WIN32
     // 构造函数立即注册窗口类并 CreateWindowW 创建真实 HWND；wait_events/poll_platform_events
     // 依赖消息队列，事件翻译/DPI 属集成层覆盖范围，单元测试不触碰 OS 资源。
     AURORA_TEST_SKIP("Win32Window 构造会注册窗口类并创建真实 HWND，单测不触碰 OS 资源");

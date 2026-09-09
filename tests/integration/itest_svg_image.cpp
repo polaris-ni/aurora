@@ -21,7 +21,7 @@ namespace {
 using aurora::Image;
 
 /// @brief 在当前用例唯一临时目录写入文本文件并返回路径字符串（用例结束由框架清理）。
-auto write_file(const std::string &name, const std::string &content) -> std::string {
+auto write_file(const std::string& name, const std::string& content) -> std::string {
     const std::filesystem::path dir = aurora::testing::isolation::temp_dir();
     std::filesystem::create_directories(dir);
     const std::filesystem::path file = dir / name;
@@ -31,7 +31,7 @@ auto write_file(const std::string &name, const std::string &content) -> std::str
 }
 
 /// @brief 读取像素 (x,y) 的 RGBA。
-auto px(const Image &img, int x, int y) -> std::array<std::uint8_t, 4> {
+auto px(const Image& img, int x, int y) -> std::array<std::uint8_t, 4> {
     const std::size_t off = ((static_cast<std::size_t>(y) * img.width) + x) * 4;
     return {img.pixels[off], img.pixels[off + 1], img.pixels[off + 2], img.pixels[off + 3]};
 }
@@ -39,12 +39,12 @@ auto px(const Image &img, int x, int y) -> std::array<std::uint8_t, 4> {
 }  // namespace
 
 AURORA_TEST_CASE(svg_rect_with_viewbox_rasterizes_fill) {
-    const std::string path =
-        write_file("svg_rect.svg", R"(<svg viewBox="0 0 20 20"><rect x="5" y="5" width="10" height="10" fill="#ff0000"/></svg>)");
+    const std::string path = write_file(
+        "svg_rect.svg", R"(<svg viewBox="0 0 20 20"><rect x="5" y="5" width="10" height="10" fill="#ff0000"/></svg>)");
 
     const auto r = aurora::Image::load(path);
     AURORA_TEST_REQUIRE_TRUE(r.ok());
-    const Image &img = r.value();
+    const Image& img = r.value();
     // viewBox 决定固有尺寸。
     AURORA_TEST_CHECK_EQ(img.width, 20);
     AURORA_TEST_CHECK_EQ(img.height, 20);
@@ -55,12 +55,12 @@ AURORA_TEST_CASE(svg_rect_with_viewbox_rasterizes_fill) {
 }
 
 AURORA_TEST_CASE(svg_circle_named_color) {
-    const std::string path =
-        write_file("svg_circle.svg", R"(<svg width="30" height="30"><circle cx="15" cy="15" r="10" fill="blue"/></svg>)");
+    const std::string path = write_file(
+        "svg_circle.svg", R"(<svg width="30" height="30"><circle cx="15" cy="15" r="10" fill="blue"/></svg>)");
 
     const auto r = aurora::Image::load(path);
     AURORA_TEST_REQUIRE_TRUE(r.ok());
-    const Image &img = r.value();
+    const Image& img = r.value();
     AURORA_TEST_CHECK_EQ(img.width, 30);
     // 圆心蓝、圆外透明。
     AURORA_TEST_CHECK_EQ(px(img, 15, 15)[2], 255);
@@ -73,19 +73,20 @@ AURORA_TEST_CASE(svg_polygon_triangle) {
 
     const auto r = aurora::Image::load(path);
     AURORA_TEST_REQUIRE_TRUE(r.ok());
-    const Image &img = r.value();
+    const Image& img = r.value();
     // 三角形内部（底部中心）绿、左上角外透明。
     AURORA_TEST_CHECK_EQ(px(img, 10, 15)[1], 255);
     AURORA_TEST_CHECK_EQ(px(img, 2, 2)[3], 0);
 }
 
 AURORA_TEST_CASE(svg_line_with_stroke) {
-    const std::string path = write_file("svg_line.svg",
-                                        R"(<svg viewBox="0 0 20 20"><line x1="0" y1="10" x2="20" y2="10" stroke="black" stroke-width="4"/></svg>)");
+    const std::string path = write_file(
+        "svg_line.svg",
+        R"(<svg viewBox="0 0 20 20"><line x1="0" y1="10" x2="20" y2="10" stroke="black" stroke-width="4"/></svg>)");
 
     const auto r = aurora::Image::load(path);
     AURORA_TEST_REQUIRE_TRUE(r.ok());
-    const Image &img = r.value();
+    const Image& img = r.value();
     // 线上不透明、线外透明。
     AURORA_TEST_CHECK_EQ(px(img, 10, 10)[3], 255);
     AURORA_TEST_CHECK_EQ(px(img, 10, 2)[3], 0);
@@ -93,8 +94,8 @@ AURORA_TEST_CASE(svg_line_with_stroke) {
 
 AURORA_TEST_CASE(load_svg_scales_to_target_size) {
     // 矢量放大：目标尺寸生效且纯色区域不被插值糊化。
-    const std::string path =
-        write_file("svg_scale.svg", R"(<svg viewBox="0 0 10 10"><rect x="0" y="0" width="10" height="10" fill="#00f"/></svg>)");
+    const std::string path = write_file(
+        "svg_scale.svg", R"(<svg viewBox="0 0 10 10"><rect x="0" y="0" width="10" height="10" fill="#00f"/></svg>)");
 
     const auto r = aurora::Image::load_svg(path, 100, 100);
     AURORA_TEST_REQUIRE_TRUE(r.ok());
@@ -105,8 +106,9 @@ AURORA_TEST_CASE(load_svg_scales_to_target_size) {
 
 AURORA_TEST_CASE(svg_content_sniffing_without_extension) {
     // 无扩展名但内容嗅探 "<svg" 命中：仍按 SVG 解码。
-    const std::string path = write_file("svg_sniff.dat",
-                                        R"(<?xml version="1.0"?><svg viewBox="0 0 8 8"><rect width="8" height="8" fill="red"/></svg>)");
+    const std::string path =
+        write_file("svg_sniff.dat",
+                   R"(<?xml version="1.0"?><svg viewBox="0 0 8 8"><rect width="8" height="8" fill="red"/></svg>)");
 
     const auto r = aurora::Image::load(path);
     AURORA_TEST_REQUIRE_TRUE(r.ok());
@@ -138,7 +140,7 @@ AURORA_TEST_CASE(svg_rounded_rect_rx_clips_corner) {
 
     const auto r = aurora::Image::load(path);
     AURORA_TEST_REQUIRE_TRUE(r.ok());
-    const Image &img = r.value();
+    const Image& img = r.value();
     // 中心不透明，最角落被圆角裁掉（透明）。
     AURORA_TEST_CHECK_EQ(px(img, 10, 10)[3], 255);
     AURORA_TEST_CHECK_EQ(px(img, 0, 0)[3], 0);
@@ -157,13 +159,12 @@ AURORA_TEST_CASE(svg_document_order_later_paints_over) {
 }
 
 AURORA_TEST_CASE(svg_ellipse_anisotropic_radii) {
-    const std::string path =
-        write_file("svg_ellipse.svg",
-                   R"(<svg viewBox="0 0 20 20"><ellipse cx="10" cy="10" rx="8" ry="4" fill="#ff0000"/></svg>)");
+    const std::string path = write_file(
+        "svg_ellipse.svg", R"(<svg viewBox="0 0 20 20"><ellipse cx="10" cy="10" rx="8" ry="4" fill="#ff0000"/></svg>)");
 
     const auto r = aurora::Image::load(path);
     AURORA_TEST_REQUIRE_TRUE(r.ok());
-    const Image &img = r.value();
+    const Image& img = r.value();
     AURORA_TEST_CHECK(img.width == 20 && img.height == 20);
     // 中心在椭圆内 → 红色不透明。
     const auto center = px(img, 10, 10);
@@ -185,7 +186,7 @@ AURORA_TEST_CASE(svg_invalid_viewbox_falls_back_to_size) {
             R"(<svg viewBox="not-a-number" width="30" height="22"><rect width="30" height="22" fill="green"/></svg>)");
         const auto r = aurora::Image::load(path);
         AURORA_TEST_REQUIRE_TRUE(r.ok());
-        const Image &img = r.value();
+        const Image& img = r.value();
         AURORA_TEST_CHECK_EQ(img.width, 30);
         AURORA_TEST_CHECK_EQ(img.height, 22);
         // 回退后整图填充 green（CSS green = #008000 → G=128）。
@@ -194,7 +195,8 @@ AURORA_TEST_CASE(svg_invalid_viewbox_falls_back_to_size) {
     {
         // viewBox 仅 2 个数（<4）：仍回退到 width/height。
         const std::string path =
-            write_file("svg_vb_2.svg", R"(<svg viewBox="0 0" width="12" height="14"><rect width="12" height="14" fill="blue"/></svg>)");
+            write_file("svg_vb_2.svg",
+                       R"(<svg viewBox="0 0" width="12" height="14"><rect width="12" height="14" fill="blue"/></svg>)");
         const auto r = aurora::Image::load(path);
         AURORA_TEST_REQUIRE_TRUE(r.ok());
         AURORA_TEST_CHECK_EQ(r.value().width, 12);
@@ -220,7 +222,7 @@ AURORA_TEST_CASE(svg_attr_boundary_rx_does_not_pollute_xy) {
 
     const auto r = aurora::Image::load(path);
     AURORA_TEST_REQUIRE_TRUE(r.ok());
-    const Image &img = r.value();
+    const Image& img = r.value();
     // 正确解析（x=5,y=5,w=h=10）：rect 覆盖 [5,15)×[5,15)，圆角半径 min(rx, w/2)=5。
     // (7,12)：矩形内部 → 不透明；若 x 被污染为 10（旧缺陷），rect 覆盖 [10,20)，此点透明。
     AURORA_TEST_CHECK_EQ(px(img, 7, 12)[3], 255);

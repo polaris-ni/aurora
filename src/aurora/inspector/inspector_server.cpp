@@ -18,7 +18,7 @@
 // Windows: Winsock2（须在 windows.h 之前）
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#ifdef _MSC_VER
+#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
 #pragma comment(lib, "ws2_32.lib")
 #endif
 #else
@@ -64,7 +64,7 @@ inline int closesocket(SOCKET s) { return ::close(s); }
 #include "aurora/widget/codegen.h"
 #include "aurora/widget/yaml.h"
 
-#ifdef _MSC_VER
+#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
 #pragma comment(lib, "ws2_32.lib")
 #endif
 
@@ -368,7 +368,16 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
                     std::filesystem::remove(tmp, rm_ec);  // 打开失败也清理，不留垃圾文件
                     throw std::runtime_error("cannot open captured PNG");
                 }
-                std::vector<std::uint8_t> bytes(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>{});
+                // 读取段兜异常：POSIX 下 basic_filebuf::underflow 遇 I/O 失败（EISDIR/EIO/EACCES）
+                // 会无条件抛 ios_base::failure，届时若不清理会漏掉刚生成的 PNG 临时文件。
+                std::vector<std::uint8_t> bytes;
+                try {
+                    bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>{});
+                } catch (const std::ios_base::failure &e) {
+                    std::error_code rm_ec;
+                    std::filesystem::remove(tmp, rm_ec);  // 读取失败也清理，不留垃圾文件
+                    throw std::runtime_error(std::string("cannot read captured PNG: ") + e.what());
+                }
                 std::error_code ec;
                 std::filesystem::remove(tmp, ec);
                 return bytes;

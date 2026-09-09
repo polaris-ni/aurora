@@ -9,10 +9,8 @@
 
 #include <string>
 
-#include "aurora/app/perf_overlay.h"  // FrameStats：PerfLog 的帧统计数据源（始终可用）
-#include "aurora/perf/counters.h"
+#include "aurora/app/perf_overlay.h"  // FrameStats锛歅erfLog 鐨勫抚缁熻鏁版嵁婧愶紙濮嬬粓鍙敤锛?#10;#include "aurora/perf/counters.h"
 #include "aurora/perf/perf_log.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_perf_log {

@@ -47,7 +47,7 @@ AURORA_TEST_CASE(glfw_surface_type_contract) {
 }
 
 AURORA_TEST_CASE(glfw_surface_window_creation_skipped) {
-#if defined(AURORA_BACKEND_GLFW)
+#ifdef AURORA_BACKEND_GLFW
     // GlfwSurface 构造会 glfwInit + 创建真实窗口与 GL 上下文（无显示环境时抛
     // std::runtime_error）；帧管线/present 依赖真实窗口，属集成层覆盖范围。
     AURORA_TEST_SKIP("GlfwSurface 构造会创建真实窗口与 OpenGL 上下文，单测不触碰 OS 资源");

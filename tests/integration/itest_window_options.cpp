@@ -97,31 +97,31 @@ AURORA_TEST_CASE(set_title_forwards_to_custom_surface) {
         bool called = false;
         std::string got;
         auto begin_frame(int /*w*/, int /*h*/) -> au::Result<bool> override { return au::Result<bool>{true}; }
-        auto painter() -> au::Painter & override {
+        auto painter() -> au::Painter& override {
             static au::Painter p;
             return p;
         }
         auto present() -> au::Result<bool> override { return au::Result<bool>{true}; }
-        auto size() const -> au::Size override { return au::Size{.width = 1.0F, .height = 1.0F}; }
-        auto should_close() const -> bool override { return false; }
+        [[nodiscard]] auto size() const -> au::Size override { return au::Size{.width = 1.0F, .height = 1.0F}; }
+        [[nodiscard]] auto should_close() const -> bool override { return false; }
         auto poll_platform_events() -> void override {}
-        auto set_title(const std::string &t) -> void override {
+        auto set_title(const std::string& t) -> void override {
             called = true;
             got = t;
         }
-        auto content_inset() const -> au::EdgeInsets override { return au::EdgeInsets{}; }
+        [[nodiscard]] auto content_inset() const -> au::EdgeInsets override { return au::EdgeInsets{}; }
         auto close() -> void override {}
         auto minimize() -> void override {}
         auto toggle_maximize() -> void override {}
         auto set_fullscreen(bool /*on*/) -> void override {}
         auto begin_window_move() -> void override {}
         auto begin_window_resize(au::WindowResizeEdge /*edge*/) -> void override {}
-        auto set_title_bar_style(const au::TitleBarStyle & /*style*/) -> void override {}
-        auto set_title_bar_icon(const std::shared_ptr<au::Image> & /*icon*/) -> void override {}
+        auto set_title_bar_style(const au::TitleBarStyle& /*style*/) -> void override {}
+        auto set_title_bar_icon(const std::shared_ptr<au::Image>& /*icon*/) -> void override {}
     };
 
     auto rec = std::make_unique<RecordingSurface>();
-    RecordingSurface *raw = rec.get();
+    RecordingSurface* raw = rec.get();
     au::Window w{std::move(rec)};
     w.set_title("hello-title");
     AURORA_TEST_CHECK(raw->called);

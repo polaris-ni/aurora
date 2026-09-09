@@ -21,8 +21,8 @@ using aurora::debug::diagnostics;
 using aurora::debug::feature_flags;
 using aurora::debug::frame_phase_timeline;
 using aurora::debug::perf_snapshot;
-using aurora::debug::widget_tree;
 using aurora::debug::why_trace;
+using aurora::debug::widget_tree;
 
 /// @brief 构造确定性测试树：Column 根 + 单个 Text 子节点（无需布局即可序列化）。
 [[nodiscard]] auto make_tree() -> Node {
@@ -43,7 +43,7 @@ AURORA_TEST_CASE(facade_functions_return_unavailable_when_debug_off) {
     AURORA_TEST_CHECK_EQ(tree["available"], false);
     AURORA_TEST_CHECK_TRUE(tree.contains("reason"));
     const Json snapshots[4] = {perf_snapshot(), frame_phase_timeline(), why_trace(), diagnostics()};
-    for (const Json &j : snapshots) {
+    for (const Json& j : snapshots) {
         AURORA_TEST_CHECK_EQ(j["available"], false);
         AURORA_TEST_CHECK_TRUE(j.contains("reason"));
     }

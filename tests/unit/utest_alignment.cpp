@@ -4,20 +4,19 @@
 /// cx=30/cy=15）与子项等于容器时的退化（全部归零）
 
 #include "aurora/widget/alignment.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_alignment {
 
 namespace {
 
-constexpr Size kContainer{.width = 100.0F, .height = 50.0F};
-constexpr Size kChild{.width = 40.0F, .height = 20.0F};
+constexpr Size AURORA_CONTAINER{.width = 100.0F, .height = 50.0F};
+constexpr Size AURORA_CHILD{.width = 40.0F, .height = 20.0F};
 
 }  // namespace
 
 AURORA_TEST_CASE(align_origin_maps_all_nine_positions) {
-    const auto o = [](Alignment a) { return align_origin(a, kChild, kContainer); };
+    const auto o = [](Alignment a) -> Point { return align_origin(a, AURORA_CHILD, AURORA_CONTAINER); };
 
     const Point tl = o(Alignment::TopLeft);
     AURORA_TEST_CHECK_NEAR(tl.x, 0.0F, 0.0F);
@@ -62,7 +61,7 @@ AURORA_TEST_CASE(align_origin_degenerates_to_zero_when_child_fills_container) {
     for (const Alignment a :
          {Alignment::TopLeft, Alignment::TopCenter, Alignment::TopRight, Alignment::CenterLeft, Alignment::Center,
           Alignment::CenterRight, Alignment::BottomLeft, Alignment::BottomCenter, Alignment::BottomRight}) {
-        const Point p = align_origin(a, same, kContainer);
+        const Point p = align_origin(a, same, AURORA_CONTAINER);
         AURORA_TEST_CHECK_NEAR(p.x, 0.0F, 0.0F);
         AURORA_TEST_CHECK_NEAR(p.y, 0.0F, 0.0F);
     }
@@ -71,10 +70,10 @@ AURORA_TEST_CASE(align_origin_degenerates_to_zero_when_child_fills_container) {
 AURORA_TEST_CASE(align_origin_handles_oversized_child) {
     // 子项大于容器：负偏移（居中时向左/上溢出），符合公式语义。
     const Size big{.width = 140.0F, .height = 90.0F};
-    const Point c = align_origin(Alignment::Center, big, kContainer);
+    const Point c = align_origin(Alignment::Center, big, AURORA_CONTAINER);
     AURORA_TEST_CHECK_NEAR(c.x, -20.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(c.y, -20.0F, 0.0F);
-    const Point br = align_origin(Alignment::BottomRight, big, kContainer);
+    const Point br = align_origin(Alignment::BottomRight, big, AURORA_CONTAINER);
     AURORA_TEST_CHECK_NEAR(br.x, -40.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(br.y, -40.0F, 0.0F);
 }

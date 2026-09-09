@@ -23,7 +23,7 @@ namespace aurora::test_cases::itest_media_query_auto {
 namespace {
 
 /// Headless 窗口选项：固定 800x600，PNG 输出到当前用例唯一临时目录。
-auto headless_opts(const std::string &name) -> aurora::HeadlessOptions {
+auto headless_opts(const std::string& name) -> aurora::HeadlessOptions {
     aurora::HeadlessOptions opts;
     opts.size = aurora::Size{.width = 800.0F, .height = 600.0F};
     opts.title = name;
@@ -32,7 +32,7 @@ auto headless_opts(const std::string &name) -> aurora::HeadlessOptions {
 }
 
 /// 创建 Headless 窗口（失败为致命断言）。
-auto make_window(const aurora::HeadlessOptions &opts) -> std::unique_ptr<aurora::Window> {
+auto make_window(const aurora::HeadlessOptions& opts) -> std::unique_ptr<aurora::Window> {
     auto created = aurora::create_window(opts);
     AURORA_TEST_REQUIRE_MSG(created.ok(), "create_window(HeadlessOptions) failed");
     return std::move(created.value());
@@ -46,8 +46,8 @@ AURORA_TEST_CASE(root_widget_reads_auto_injected_media_query) {
 
     bool seen = false;
     aurora::MediaQuery cap{};
-    auto host = aurora::LayoutBuilder{[&](const aurora::BuildContext &c, const aurora::Constraints &) -> aurora::Node {
-        if (const aurora::MediaQuery *mq = aurora::media_query_of(c)) {
+    auto host = aurora::LayoutBuilder{[&](const aurora::BuildContext& c, const aurora::Constraints&) -> aurora::Node {
+        if (const aurora::MediaQuery* mq = aurora::media_query_of(c)) {
             seen = true;
             cap = *mq;
         }
@@ -79,14 +79,13 @@ AURORA_TEST_CASE(manual_provider_overrides_auto_injection) {
     bool seen = false;
     aurora::MediaQuery cap{};
     auto host = aurora::MediaQueryProvider{
-        custom, aurora::LayoutBuilder{
-                    [&](const aurora::BuildContext &c, const aurora::Constraints &) -> aurora::Node {
-                        if (const aurora::MediaQuery *mq = aurora::media_query_of(c)) {
-                            seen = true;
-                            cap = *mq;
-                        }
-                        return aurora::Node{aurora::Text{"over"}};
-                    }}};
+        custom, aurora::LayoutBuilder{[&](const aurora::BuildContext& c, const aurora::Constraints&) -> aurora::Node {
+            if (const aurora::MediaQuery* mq = aurora::media_query_of(c)) {
+                seen = true;
+                cap = *mq;
+            }
+            return aurora::Node{aurora::Text{"over"}};
+        }}};
     aurora::Node node{std::move(host)};
     (void)win->present_root(node);
 

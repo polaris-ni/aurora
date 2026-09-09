@@ -30,12 +30,9 @@ namespace prefs = aurora::preferences;
 
 namespace {
 
-constexpr const char *kSuiteName = "itest_preferences_multiproc";
-constexpr const char *kChildCase = "child_entry";
-
 // writer 进程 flush 时瞬时持有目标文件可返回 ERROR_ACCESS_DENIED（存储实现既有的
 // 偶发竞态，短暂的重命名共享冲突属可重试瞬态）：有限次退避重试，避免放大竞态窗口。
-auto flush_retry(prefs::Preferences &p, const int attempts = 60) -> bool {
+auto flush_retry(prefs::Preferences& p, const int attempts = 60) -> bool {
     for (int i = 0; i < attempts; ++i) {
         if (p.flush().ok()) {
             return true;
@@ -70,7 +67,9 @@ struct ChildProcess {
     pid_t pid = -1;
 #endif
 
-    auto wait() -> int {
+    // 等待只读取句柄/退码并释放 OS 资源，不改任何成员：可为 const。
+    // 三处调用点均以 AURORA_TEST_CHECK_EQ(c.wait(), 0) 消费退出码，故按建议标注 [[nodiscard]]。
+    [[nodiscard]] auto wait() const -> int {
 #ifdef AURORA_PLATFORM_WINDOWS
         WaitForSingleObject(pi.hProcess, INFINITE);
         DWORD code = 0;
@@ -100,14 +99,16 @@ struct ChildProcess {
 
 /// @brief 注入环境变量后拉起子进程：同一 runner，仅跑 child_entry 用例。
 /// 环境在 CreateProcess/fork 时刻快照，两次派发间改 env 互不影响。
-auto spawn_child(const std::string &mode, const std::string &id, const std::filesystem::path &file) -> ChildProcess {
+auto spawn_child(const std::string& mode, const std::string& id, const std::filesystem::path& file) -> ChildProcess {
+    // 子进程派发参数：仅本函数使用，就近声明为函数局部常量。
+    constexpr const char* suite_name = "itest_preferences_multiproc";
+    constexpr const char* child_case = "child_entry";
 #ifdef AURORA_PLATFORM_WINDOWS
     SetEnvironmentVariableA("AURORA_ITEST_MP_MODE", mode.c_str());
     SetEnvironmentVariableA("AURORA_ITEST_MP_ID", id.c_str());
     SetEnvironmentVariableA("AURORA_ITEST_MP_FILE", file.string().c_str());
 
-    const std::string cmd =
-        "\"" + self_exe().string() + "\" --run=" + kSuiteName + " --filter=" + kChildCase;
+    const std::string cmd = "\"" + self_exe().string() + "\" --run=" + suite_name + " --filter=" + child_case;
     std::vector<char> buf(cmd.begin(), cmd.end());
     buf.push_back('\0');
     STARTUPINFOA si{};
@@ -123,11 +124,11 @@ auto spawn_child(const std::string &mode, const std::string &id, const std::file
     ::setenv("AURORA_ITEST_MP_FILE", file.string().c_str(), 1);
 
     const std::string exe = self_exe().string();
-    const std::string run_arg = std::string{"--run="} + kSuiteName;
-    const std::string filter_arg = std::string{"--filter="} + kChildCase;
+    const std::string run_arg = std::string{"--run="} + suite_name;
+    const std::string filter_arg = std::string{"--filter="} + child_case;
     const pid_t pid = ::fork();
     if (pid == 0) {
-        ::execl(exe.c_str(), "aurora_test_runner", run_arg.c_str(), filter_arg.c_str(), static_cast<char *>(nullptr));
+        ::execl(exe.c_str(), "aurora_test_runner", run_arg.c_str(), filter_arg.c_str(), static_cast<char*>(nullptr));
         ::_exit(127);
     }
     ChildProcess child;
@@ -138,14 +139,15 @@ auto spawn_child(const std::string &mode, const std::string &id, const std::file
 
 // ---------- 子进程侧实现 ----------
 
-auto run_writer_child(const std::filesystem::path &file) -> int {
-    const char *id_s = std::getenv("AURORA_ITEST_MP_ID");
+auto run_writer_child(const std::filesystem::path& file) -> int {
+    const char* id_s = std::getenv("AURORA_ITEST_MP_ID");
     AURORA_TEST_REQUIRE_MSG(id_s != nullptr, "writer child requires AURORA_ITEST_MP_ID");
-    const int id = std::atoi(id_s);
+    // strtol 可显式指定十进制并区分解析错误；id 由父进程注入，恒为小整数。
+    const int id = static_cast<int>(std::strtol(id_s, nullptr, 10));
 
-    auto &p = prefs::Preferences::instance_at("itest_mp", file);
-    constexpr int kKeys = 50;
-    for (int j = 0; j < kKeys; ++j) {
+    auto& p = prefs::Preferences::instance_at("itest_mp", file);
+    constexpr int key_count = 50;
+    for (int j = 0; j < key_count; ++j) {
         p.set("w" + std::to_string(id) + "_k" + std::to_string(j), (id * 1000) + j);
         if (j % 4 == 0 && !flush_retry(p)) {
             return 1;
@@ -155,18 +157,18 @@ auto run_writer_child(const std::filesystem::path &file) -> int {
     return flush_retry(p) ? 0 : 1;
 }
 
-auto run_delete_child(const std::filesystem::path &file) -> int {
-    auto &p = prefs::Preferences::instance_at("itest_mp", file);
+auto run_delete_child(const std::filesystem::path& file) -> int {
+    auto& p = prefs::Preferences::instance_at("itest_mp", file);
     // 构造即加载；验证确实看到了父进程写入的 victim（否则测试前提不成立）。
     AURORA_TEST_CHECK_EQ(p.get("victim", -1), 999);
     p.remove("victim");  // 打墓碑
     return flush_retry(p) ? 0 : 1;
 }
 
-auto run_clear_child(const std::filesystem::path &file) -> int {
-    auto &p = prefs::Preferences::instance_at("itest_mp", file);
+auto run_clear_child(const std::filesystem::path& file) -> int {
+    auto& p = prefs::Preferences::instance_at("itest_mp", file);
     (void)p.reload();  // 看到父进程写入的 c*
-    p.clear();         // 全局清空纪元
+    p.clear();  // 全局清空纪元
     if (!flush_retry(p)) {
         return 1;
     }
@@ -179,8 +181,8 @@ auto run_clear_child(const std::filesystem::path &file) -> int {
 // ---------- 子进程派发入口（父进程以 --filter=child_entry 拉起本用例） ----------
 
 AURORA_TEST_CASE(child_entry) {
-    const char *mode = std::getenv("AURORA_ITEST_MP_MODE");
-    const char *file_s = std::getenv("AURORA_ITEST_MP_FILE");
+    const char* mode = std::getenv("AURORA_ITEST_MP_MODE");
+    const char* file_s = std::getenv("AURORA_ITEST_MP_FILE");
     if (mode == nullptr || file_s == nullptr) {
         AURORA_TEST_SKIP("父进程编排用例的子进程入口：直接运行（无注入环境）时无意义");
     }
@@ -202,14 +204,13 @@ AURORA_TEST_CASE(child_entry) {
 
 AURORA_TEST_CASE(concurrent_writers_final_consistency) {
     // 每用例唯一临时目录：文件随用例结束由框架清理。
-    const std::filesystem::path file =
-        std::filesystem::path{aurora::testing::isolation::temp_dir()} / "mp.json";
+    const std::filesystem::path file = std::filesystem::path{aurora::testing::isolation::temp_dir()} / "mp.json";
 
     // 拉起 2 个 writer 子进程。
-    constexpr int kWriters = 2;
+    constexpr int writer_count = 2;
     std::vector<ChildProcess> children;
-    children.reserve(kWriters);
-    for (int i = 0; i < kWriters; ++i) {
+    children.reserve(writer_count);
+    for (int i = 0; i < writer_count; ++i) {
         children.push_back(spawn_child("writer", std::to_string(i), file));
     }
 
@@ -219,10 +220,11 @@ AURORA_TEST_CASE(concurrent_writers_final_consistency) {
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
         prefs::Preferences probe(file);
         const auto r = probe.reload();
-        AURORA_TEST_CHECK_MSG(!(!r.ok() && r.error().code == "prefs-parse-failed"),
+        // De Morgan 等价改写：可解析（ok）或错误非解析失败均放行；短路顺序不变（ok 时不取 error）。
+        AURORA_TEST_CHECK_MSG(r.ok() || r.error().code != "prefs-parse-failed",
                               "multiproc concurrent writes must not cause half-written corruption");
         running = false;
-        for (const auto &c : children) {
+        for (const auto& c : children) {
             if (c.still_active()) {
                 running = true;
             }
@@ -230,24 +232,23 @@ AURORA_TEST_CASE(concurrent_writers_final_consistency) {
     }
 
     // 确保全部结束并取退出码。
-    for (auto &c : children) {
+    for (auto& c : children) {
         AURORA_TEST_CHECK_EQ(c.wait(), 0);
     }
 
     // 最终一致性：两个 writer 写入的键全部存在（验证进程锁防止互相覆盖丢数据）。
     prefs::Preferences p(file);
     AURORA_TEST_REQUIRE(p.reload().ok());
-    constexpr int kKeys = 50;
-    for (int id = 0; id < kWriters; ++id) {
-        for (int j = 0; j < kKeys; ++j) {
+    constexpr int key_count = 50;
+    for (int id = 0; id < writer_count; ++id) {
+        for (int j = 0; j < key_count; ++j) {
             AURORA_TEST_CHECK_EQ(p.get("w" + std::to_string(id) + "_k" + std::to_string(j), -1), (id * 1000) + j);
         }
     }
 }
 
 AURORA_TEST_CASE(delete_and_clear_epoch_propagation) {
-    const std::filesystem::path file =
-        std::filesystem::path{aurora::testing::isolation::temp_dir()} / "del.json";
+    const std::filesystem::path file = std::filesystem::path{aurora::testing::isolation::temp_dir()} / "del.json";
 
     // ---------- 阶段 1：删除传播 ----------
     {

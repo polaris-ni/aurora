@@ -10,7 +10,6 @@
 #include "aurora/core/diagnostics.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/serialization.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::itest_props_constraint {
@@ -34,8 +33,8 @@ AURORA_TEST_CASE(validate_prop_scalar_specializations) {
         const PropDescriptor d{.name = "color", .json_type = "array"};
         AURORA_TEST_CHECK(au::validate_prop<Color>(Json::array({10, 20, 30, 255}), d).ok());
         AURORA_TEST_CHECK(!au::validate_prop<Color>(Json::array({300, 0, 0, 255}), d).ok());  // 分量越界
-        AURORA_TEST_CHECK(!au::validate_prop<Color>(Json(42), d).ok());                       // 非数组
-        AURORA_TEST_CHECK(!au::validate_prop<Color>(Json::array({1, 2, 3}), d).ok());         // 长度不足
+        AURORA_TEST_CHECK(!au::validate_prop<Color>(Json(42), d).ok());  // 非数组
+        AURORA_TEST_CHECK(!au::validate_prop<Color>(Json::array({1, 2, 3}), d).ok());  // 长度不足
     }
     // float：min/max 约束。
     {

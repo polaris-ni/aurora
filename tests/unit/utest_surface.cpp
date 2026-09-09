@@ -22,7 +22,7 @@ class MinimalSurface final : public Surface {
         size_ = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)};
         return Result<bool>{true};
     }
-    [[nodiscard]] auto painter() -> Painter & override { return painter_; }
+    [[nodiscard]] auto painter() -> Painter& override { return painter_; }
     [[nodiscard]] auto present() -> Result<bool> override { return Result<bool>{true}; }
     [[nodiscard]] auto size() const -> Size override { return size_; }
 
@@ -136,8 +136,7 @@ AURORA_TEST_CASE(headless_surface_frame_lifecycle) {
     // 契约：Headless 覆盖 wait_events 为 no-op，不得阻塞（基类默认实现会睡 >=1000ms）。
     const auto t0 = std::chrono::steady_clock::now();
     surface.wait_events(-1.0);
-    const double elapsed_ms =
-        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    const double elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     AURORA_TEST_CHECK_LT(elapsed_ms, 900.0);
 #else
     AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
@@ -146,8 +145,7 @@ AURORA_TEST_CASE(headless_surface_frame_lifecycle) {
 
 AURORA_TEST_CASE(headless_surface_png_present_writes_file) {
 #ifdef AURORA_BACKEND_HEADLESS
-    const auto path =
-        std::filesystem::path(testing::isolation::temp_dir()) / "utest_surface_headless.png";
+    const auto path = std::filesystem::path(testing::isolation::temp_dir()) / "utest_surface_headless.png";
     std::error_code ec;
     std::filesystem::remove(path, ec);
 
@@ -168,7 +166,7 @@ AURORA_TEST_CASE(headless_surface_state_seams_dispatch_handlers) {
 
     WindowState last_state = WindowState::Visible;
     int state_calls = 0;
-    surface.set_window_state_handler([&](WindowState s) {
+    surface.set_window_state_handler([&](WindowState s) -> void {
         last_state = s;
         ++state_calls;
     });
@@ -178,7 +176,7 @@ AURORA_TEST_CASE(headless_surface_state_seams_dispatch_handlers) {
 
     WindowMode last_mode = WindowMode::Normal;
     int mode_calls = 0;
-    surface.set_window_mode_handler([&](WindowMode m) {
+    surface.set_window_mode_handler([&](WindowMode m) -> void {
         last_mode = m;
         ++mode_calls;
     });
@@ -187,7 +185,7 @@ AURORA_TEST_CASE(headless_surface_state_seams_dispatch_handlers) {
     AURORA_TEST_CHECK(last_mode == WindowMode::Maximized);
 
     int present_calls = 0;
-    surface.set_present_request([&] { ++present_calls; });
+    surface.set_present_request([&]() -> void { ++present_calls; });
     surface.simulate_present_request();
     AURORA_TEST_CHECK_EQ(present_calls, 1);
 

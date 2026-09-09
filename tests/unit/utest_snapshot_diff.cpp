@@ -44,7 +44,7 @@ AURORA_TEST_CASE(size_mismatch_short_circuits) {
 
 AURORA_TEST_CASE(identical_images_have_no_diff) {
     const Image baseline = make_image(4, 4, 10, 20, 30);
-    const Image &current = baseline;
+    const Image& current = baseline;
 
     const SnapshotDiff diff = compare_snapshots(baseline, current);
     AURORA_TEST_CHECK_FALSE(diff.size_mismatch);
@@ -74,7 +74,7 @@ AURORA_TEST_CASE(single_pixel_diff_counted_and_located) {
 AURORA_TEST_CASE(max_color_delta_is_largest_single_channel) {
     Image baseline = make_image(2, 2, 0, 0, 0);
     Image current = baseline;
-    current.pixels[0] = 30;   // R 差 30
+    current.pixels[0] = 30;  // R 差 30
     current.pixels[4] = 200;  // 第二像素 R 差 200
 
     const SnapshotDiff diff = compare_snapshots(baseline, current);
@@ -109,9 +109,9 @@ AURORA_TEST_CASE(passed_threshold_uses_ratio) {
     current.pixels[0] = 255;  // 1/16 差异
 
     const SnapshotDiff diff = compare_snapshots(baseline, current);
-    AURORA_TEST_CHECK_FALSE(diff.passed(0.0));       // 严格模式：任一差异即失败
-    AURORA_TEST_CHECK_FALSE(diff.passed(0.05));      // 1/16 = 0.0625 > 0.05
-    AURORA_TEST_CHECK_TRUE(diff.passed(0.0625));     // 恰好等于阈值 → 通过（<= 语义）
+    AURORA_TEST_CHECK_FALSE(diff.passed(0.0));  // 严格模式：任一差异即失败
+    AURORA_TEST_CHECK_FALSE(diff.passed(0.05));  // 1/16 = 0.0625 > 0.05
+    AURORA_TEST_CHECK_TRUE(diff.passed(0.0625));  // 恰好等于阈值 → 通过（<= 语义）
     AURORA_TEST_CHECK_TRUE(diff.passed(0.5));
 }
 

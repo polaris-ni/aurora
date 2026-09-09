@@ -12,7 +12,6 @@
 #include "aurora/core/diagnostics.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/text.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::itest_prop_validation {
@@ -149,15 +148,15 @@ AURORA_TEST_CASE(text_deserialize_reports_degraded_diagnostics) {
     Text t;
     Json bad_props = Json::object();
     bad_props["font_size"] = "not-a-number";  // 类型错误
-    bad_props["color"] = "not-a-color";       // 类型错误
-    bad_props["soft_wrap"] = 42;              // 类型错误
+    bad_props["color"] = "not-a-color";  // 类型错误
+    bad_props["soft_wrap"] = 42;  // 类型错误
 
     t.deserialize_props(bad_props);
 
     const auto diags = Diagnostics::take();
     AURORA_TEST_CHECK_MSG(diags.size() >= static_cast<std::size_t>(3), "3 bad props must yield >= 3 diagnostics");
     bool found_font_size = false;
-    for (const auto &d : diags) {
+    for (const auto& d : diags) {
         if (d.message.find("font_size") != std::string::npos) {
             found_font_size = true;
         }

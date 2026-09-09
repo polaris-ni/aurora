@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/event/event.h
-/// 测试说明: 各事件结构默认值与 is_handled 标志、ModifierKey 位组合算子、同类型拷贝与多态析构、TouchEvent 活跃触点统计/按 id 查找/双指几何
+/// 测试说明: 各事件结构默认值与 is_handled 标志、ModifierKey 位组合算子、同类型拷贝与多态析构、TouchEvent
+/// 活跃触点统计/按 id 查找/双指几何
 
 #include <cstdint>
 #include <memory>
@@ -121,9 +122,13 @@ AURORA_TEST_CASE(touch_active_count_and_point_lookup) {
 
     const auto hit = e.point_by_id(2);
     AURORA_TEST_REQUIRE(hit.has_value());
-    AURORA_TEST_CHECK_EQ(hit->id, 2);
-    AURORA_TEST_CHECK_FALSE(hit->is_active);
-    AURORA_TEST_CHECK_NEAR(hit->position.x, 5.0F, 1e-6F);
+    // value() 替代 operator->：tidy 无法识别宏内 has_value 断言，value() 空时抛出、失败信息更清晰。
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_EQ(hit.value().id, 2);
+    AURORA_TEST_CHECK_FALSE(hit.value().is_active);
+    AURORA_TEST_CHECK_NEAR(hit.value().position.x, 5.0F, 1e-6F);
+    // NOLINTEND(bugprone-unchecked-optional-access)
 
     AURORA_TEST_CHECK_FALSE(e.point_by_id(99).has_value());
 }
@@ -132,8 +137,8 @@ AURORA_TEST_CASE(touch_pinch_distance_and_angle) {
     TouchEvent e;
     e.points.push_back(TouchPoint{.id = 1, .position = Point{.x = 0.0F, .y = 0.0F}});
     e.points.push_back(TouchPoint{.id = 2, .position = Point{.x = 3.0F, .y = 4.0F}});
-    AURORA_TEST_CHECK_NEAR(e.pinch_distance(), 5.0F, 1e-4F);      // 3-4-5 直角三角形
-    AURORA_TEST_CHECK_NEAR(e.pinch_angle(), 0.9272952F, 1e-4F);   // atan2(4, 3)
+    AURORA_TEST_CHECK_NEAR(e.pinch_distance(), 5.0F, 1e-4F);  // 3-4-5 直角三角形
+    AURORA_TEST_CHECK_NEAR(e.pinch_angle(), 0.9272952F, 1e-4F);  // atan2(4, 3)
 
     // 仅剩 1 个活跃触点：几何查询按约定返回 0
     e.points[1].is_active = false;
@@ -145,13 +150,13 @@ AURORA_TEST_CASE(touch_pinch_distance_and_angle) {
 AURORA_TEST_CASE(base_reference_shares_handled_flag) {
     // 派发器经由 Event& 写 is_handled 停止冒泡：基类引用与派生对象共享同一标志
     KeyEvent key;
-    Event &base = key;
+    Event& base = key;
     AURORA_TEST_CHECK_FALSE(base.is_handled);
     base.is_handled = true;
     AURORA_TEST_CHECK_TRUE(key.is_handled);
 
     MouseEvent mouse;
-    Event &mouse_base = mouse;
+    Event& mouse_base = mouse;
     mouse_base.is_handled = true;
     AURORA_TEST_CHECK_TRUE(mouse.is_handled);
 }

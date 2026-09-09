@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/event/drag_drop.h
-/// 测试说明: DragData 的 text/widget_tree 工厂与 empty 语义、DragSession 会话状态机（begin/end/重复 end/重启替换数据与起点）、DropTargetCallbacks 回调契约（enter 返回接受与否、leave、drop 携带数据与局部坐标）
+/// 测试说明: DragData 的 text/widget_tree 工厂与 empty 语义、DragSession 会话状态机（begin/end/重复
+/// end/重启替换数据与起点）、DropTargetCallbacks 回调契约（enter 返回接受与否、leave、drop 携带数据与局部坐标）
 
 #include <string>
 
@@ -74,12 +75,12 @@ AURORA_TEST_CASE(drop_target_callbacks_fire_with_contract_arguments) {
     std::string dropped_mime;
     Point dropped_at{};
 
-    callbacks.on_drag_enter = [&enter_calls](const DragData &data) -> bool {
+    callbacks.on_drag_enter = [&enter_calls](const DragData& data) -> bool {
         ++enter_calls;
         return data.mime_type == "text/plain";  // 只接受文本
     };
-    callbacks.on_drag_leave = [&leave_calls]() { ++leave_calls; };
-    callbacks.on_drop = [&](const DragData &data, Point local_pos) {
+    callbacks.on_drag_leave = [&leave_calls]() -> void { ++leave_calls; };
+    callbacks.on_drop = [&](const DragData& data, Point local_pos) -> void {
         ++drop_calls;
         dropped_mime = data.mime_type;
         dropped_at = local_pos;

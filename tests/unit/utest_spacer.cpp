@@ -5,10 +5,10 @@
 
 #include <memory>
 
+#include "aurora/layout/layout_engine.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/spacer.h"
 #include "aurora/widget/text.h"
-#include "aurora/layout/layout_engine.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_spacer {
@@ -54,7 +54,7 @@ AURORA_TEST_CASE(spacer_in_row_pushes_sibling_to_far_end) {
     LayoutEngine::layout(row, bounded(300.0F, 100.0F));
     AURORA_TEST_CHECK_NEAR(row.size().width, 300.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(row.child_nodes()[0].bounds().origin.x, 0.0F, 1e-4F);
-    const Rect &sp = row.child_nodes()[1].bounds();
+    const Rect& sp = row.child_nodes()[1].bounds();
     AURORA_TEST_CHECK_NEAR(sp.origin.x, 100.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(sp.size.width, 200.0F, 1e-4F);
 }
@@ -81,7 +81,7 @@ AURORA_TEST_CASE(spacer_describe_and_serialize_roundtrip) {
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "Spacer");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool has_expand = false;
-    for (const auto &p : d.properties) {
+    for (const auto& p : d.properties) {
         if (std::string{p.name} == "expand") {
             has_expand = true;
         }

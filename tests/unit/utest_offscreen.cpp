@@ -5,8 +5,9 @@
 /// 受 AURORA_GOLDEN_DIR / MAX_DIFF / MAX_PIXELS / UPDATE_GOLDEN 控制）与
 /// 逻辑快照基准（logical_snapshots.json，11 场景逐值比对）
 
-#include <cstdlib>
+#include <algorithm>
 #include <charconv>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -47,7 +48,7 @@ auto hfill_box(float h) -> Node {
 }
 
 struct Scenario {
-    const char *name;
+    const char* name;
     std::function<Node()> build;
 };
 
@@ -141,9 +142,9 @@ auto scenarios() -> std::vector<Scenario> {
 
 /// @brief 定位 golden 目录：优先环境变量，其次仓库根相对路径。
 auto golden_dir() -> std::filesystem::path {
-    const char *override_dir = std::getenv("AURORA_GOLDEN_DIR");
-    if (override_dir != nullptr && override_dir[0] != '\0') {
-        return std::filesystem::path(override_dir);
+    const char* override_dir = std::getenv("AURORA_GOLDEN_DIR");
+    if (override_dir != nullptr && *override_dir != '\0') {
+        return {override_dir};
     }
     if (!testing::isolation::repo_root().empty()) {
         return std::filesystem::path(testing::isolation::repo_root()) / "tests" / "golden";
@@ -152,24 +153,29 @@ auto golden_dir() -> std::filesystem::path {
 }
 
 /// @brief 读取环境变量；空/未设置返回空视图（避免下标访问裸指针）。
-[[nodiscard]] auto env_value(const char *name) -> std::string_view {
-    const char *raw = std::getenv(name);
+[[nodiscard]] auto env_value(const char* name) -> std::string_view {
+    const char* raw = std::getenv(name);
     if (raw == nullptr) {
         return {};
     }
     return {raw};
 }
 
-[[nodiscard]] auto env_flag(const char *name) -> bool { return !env_value(name).empty(); }
+[[nodiscard]] auto env_flag(const char* name) -> bool { return !env_value(name).empty(); }
 
-[[nodiscard]] auto env_int(const char *name, int fallback) -> int {
+[[nodiscard]] auto env_int(const char* name, int fallback) -> int {
     const std::string_view raw = env_value(name);
     if (raw.empty()) {
         return fallback;
     }
     int parsed = fallback;
-    const char *last = raw.data() + raw.size();
+    // from_chars 需要 [begin, end) 指针区间，末指针只能由 data() + size() 求得，属必要指针算术。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    const char* last = raw.data() + raw.size();
     // from_chars 不抛异常、不依赖 errno，转换失败时保留 fallback。
+    // raw 为 std::string_view，data() 不保证 null 结尾，但已用 size() 推出的 end 界定读取区间，
+    // from_chars 仅访问 [begin, end)，不存在越界。
+    // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
     const auto [end, ec] = std::from_chars(raw.data(), last, parsed);
     return (ec == std::errc{} && end == last) ? parsed : fallback;
 }
@@ -227,7 +233,7 @@ AURORA_TEST_CASE(logical_snapshot_children_stay_within_parent) {
 
     const float parent_w = snapshot["box"]["w"].get<float>();
     const float parent_h = snapshot["box"]["h"].get<float>();
-    for (const Json &child : snapshot["children"]) {
+    for (const Json& child : snapshot["children"]) {
         AURORA_TEST_TRACE(std::string{"child "} + child["type"].get<std::string>());
         AURORA_TEST_CHECK_LE(child["box"]["w"].get<float>(), parent_w + 0.001F);
         AURORA_TEST_CHECK_LE(child["box"]["h"].get<float>(), parent_h + 0.001F);
@@ -243,14 +249,15 @@ AURORA_TEST_CASE(logical_snapshots_match_golden_baseline) {
     Json baseline = Json::object();
     if (!regen) {
         std::ifstream in(path);
-        AURORA_TEST_REQUIRE_MSG(in.good(), "golden baseline logical_snapshots.json must exist "
-                                           "(run with AURORA_UPDATE_GOLDEN=1 to create)");
+        AURORA_TEST_REQUIRE_MSG(in.good(),
+                                "golden baseline logical_snapshots.json must exist "
+                                "(run with AURORA_UPDATE_GOLDEN=1 to create)");
         in >> baseline;
         AURORA_TEST_REQUIRE_TRUE(baseline.contains("scenarios"));
     }
 
     Json out = Json::object();
-    for (const Scenario &sc : scenarios()) {
+    for (const Scenario& sc : scenarios()) {
         AURORA_TEST_TRACE(std::string{"scenario "} + sc.name);
         Node root = sc.build();
         Json snap = render_to_logical_snapshot(root, view_w, view_h);
@@ -305,8 +312,9 @@ AURORA_TEST_CASE(pixel_snapshot_matches_golden_baseline) {
     }
 
     const auto golden = Image::load(golden_path.string());
-    AURORA_TEST_REQUIRE_MSG(golden.ok(), "golden_basic_column.png missing or undecodable "
-                                         "(run with AURORA_UPDATE_GOLDEN=1 to regenerate)");
+    AURORA_TEST_REQUIRE_MSG(golden.ok(),
+                            "golden_basic_column.png missing or undecodable "
+                            "(run with AURORA_UPDATE_GOLDEN=1 to regenerate)");
     AURORA_TEST_REQUIRE_EQ(golden.value().width, w);
     AURORA_TEST_REQUIRE_EQ(golden.value().height, h);
 
@@ -315,7 +323,9 @@ AURORA_TEST_CASE(pixel_snapshot_matches_golden_baseline) {
     const int max_pixels = env_int("AURORA_GOLDEN_MAX_PIXELS", 0);
 
     const SnapshotDiff diff = compare_snapshots(golden.value(), current.value(), tolerance);
-    const bool within_budget = diff.pixel_diff_count <= static_cast<std::size_t>(max_pixels);
+    // 两侧已显式同型比较；tidy 对含显式 cast 的操作数仍误报混比（C++20 无 ssize 转换惯用法）。
+    // NOLINTNEXTLINE(modernize-use-integer-sign-comparison)
+    const bool within_budget = diff.pixel_diff_count <= static_cast<std::size_t>(std::max(0, max_pixels));
     AURORA_TEST_CHECK_MSG(within_budget, "pixel drift vs golden: " + std::to_string(diff.pixel_diff_count) +
                                              " px, max delta " + std::to_string(diff.max_color_delta));
 }

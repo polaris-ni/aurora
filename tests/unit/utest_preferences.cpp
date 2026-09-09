@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/preferences/preferences.h
-/// 测试说明: Preferences 内存/文件双模式、显式 flush/reload、点号路径助手、墓碑删除与清空纪元、分组作用域、watch/binding 响应式、单例与并发冒烟
+/// 测试说明: Preferences 内存/文件双模式、显式
+/// flush/reload、点号路径助手、墓碑删除与清空纪元、分组作用域、watch/binding 响应式、单例与并发冒烟
 
 #include <chrono>
 #include <filesystem>
@@ -237,8 +238,8 @@ AURORA_TEST_CASE(singleton_same_name_returns_same_instance) {
     std::error_code ec;
     std::filesystem::create_directories(dir);
     const std::string name = "utest_singleton_cfg";
-    auto &first = prefs::Preferences::instance(name, dir);
-    auto &second = prefs::Preferences::instance(name, dir);
+    auto& first = prefs::Preferences::instance(name, dir);
+    auto& second = prefs::Preferences::instance(name, dir);
     AURORA_TEST_CHECK(&first == &second);
     AURORA_TEST_CHECK(first.is_persistent());
     AURORA_TEST_CHECK_EQ(first.file_path().filename(), std::filesystem::path{"utest_singleton_cfg.json"});
@@ -248,23 +249,24 @@ AURORA_TEST_CASE(singleton_same_name_returns_same_instance) {
 AURORA_TEST_CASE(concurrent_read_write_smoke) {
     // 并发冒烟：每线程独占写自己的键（最终值必为该线程最后一次写入），只验证无崩溃与串行化正确。
     prefs::Preferences p;
-    constexpr int kThreads = 4;
-    constexpr int kIters = 50;
+    constexpr int thread_count = 4;
+    constexpr int iter_count = 50;
     std::vector<std::thread> workers;
-    for (int t = 0; t < kThreads; ++t) {
-        workers.emplace_back([&p, t] {
-            for (int i = 1; i <= kIters; ++i) {
-                p.set("w" + std::to_string(t), i * 10 + t);
+    workers.reserve(thread_count);
+    for (int t = 0; t < thread_count; ++t) {
+        workers.emplace_back([&p, t]() -> void {
+            for (int i = 1; i <= iter_count; ++i) {
+                p.set("w" + std::to_string(t), (i * 10) + t);
             }
         });
     }
-    for (auto &worker : workers) {
+    for (auto& worker : workers) {
         worker.join();
     }
-    for (int t = 0; t < kThreads; ++t) {
-        AURORA_TEST_CHECK_EQ(p.get<int>("w" + std::to_string(t), -1), kIters * 10 + t);
+    for (int t = 0; t < thread_count; ++t) {
+        AURORA_TEST_CHECK_EQ(p.get<int>("w" + std::to_string(t), -1), (iter_count * 10) + t);
     }
-    AURORA_TEST_CHECK_THAT(p.keys(), m::size_is(static_cast<std::size_t>(kThreads)));
+    AURORA_TEST_CHECK_THAT(p.keys(), m::size_is(static_cast<std::size_t>(thread_count)));
 }
 
 }  // namespace aurora::test_cases::utest_preferences

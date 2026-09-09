@@ -12,7 +12,6 @@
 
 #include "aurora/core/error_codes.h"
 #include "aurora/perf/trace_writer.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_trace_writer {
@@ -21,21 +20,19 @@ namespace {
 
 /// @brief 把 TraceWriter 单例恢复到默认配置：停止录制、恢复默认容量并清空数据。
 auto reset_trace_writer_to_defaults() -> void {
-    TraceWriter &tw = TraceWriter::instance();
+    TraceWriter& tw = TraceWriter::instance();
     tw.end_capture();
     tw.set_capacity(TraceWriter::AURORA_DEFAULT_CAPACITY, TraceWriter::AURORA_DEFAULT_COUNTER_CAPACITY);
 }
 
 /// @brief 用例专属临时文件路径（框架的 per-case 临时目录，用例结束自动清理）。
-auto temp_trace_path(const char *name) -> std::string {
-    return aurora::testing::isolation::temp_dir() + "/" + name;
-}
+auto temp_trace_path(const char* name) -> std::string { return aurora::testing::isolation::temp_dir() + "/" + name; }
 
 }  // namespace
 
 AURORA_TEST_CASE(capture_gate_requires_recording) {
     reset_trace_writer_to_defaults();
-    TraceWriter &tw = TraceWriter::instance();
+    TraceWriter& tw = TraceWriter::instance();
 
     // 未录制时采集接口是 no-op。
     AURORA_TEST_CHECK_FALSE(tw.capturing());
@@ -55,7 +52,7 @@ AURORA_TEST_CASE(capture_gate_requires_recording) {
 
 AURORA_TEST_CASE(complete_and_instant_events_are_recorded) {
     reset_trace_writer_to_defaults();
-    TraceWriter &tw = TraceWriter::instance();
+    TraceWriter& tw = TraceWriter::instance();
 
     tw.begin_capture();
     tw.add_complete_event("op", 1.0, 2.5, 3, 7);
@@ -63,7 +60,7 @@ AURORA_TEST_CASE(complete_and_instant_events_are_recorded) {
     tw.end_capture();
 
     AURORA_TEST_CHECK_EQ(tw.event_count(), std::size_t{2});
-    const std::vector<TraceEvent> &events = tw.events();
+    const std::vector<TraceEvent>& events = tw.events();
     AURORA_TEST_CHECK_STREQ(events[0].name, "op");
     AURORA_TEST_CHECK_EQ(events[0].phase, TracePhase::Complete);
     AURORA_TEST_CHECK_NEAR(events[0].dur_ms, 2.5, 1e-9);
@@ -77,7 +74,7 @@ AURORA_TEST_CASE(complete_and_instant_events_are_recorded) {
 
 AURORA_TEST_CASE(to_json_produces_trace_event_array) {
     reset_trace_writer_to_defaults();
-    TraceWriter &tw = TraceWriter::instance();
+    TraceWriter& tw = TraceWriter::instance();
 
     // 空录制也输出合法数组 + 进程/线程元数据事件。
     const std::string empty_json = tw.to_json();
@@ -102,8 +99,8 @@ AURORA_TEST_CASE(to_json_produces_trace_event_array) {
 
 AURORA_TEST_CASE(capture_frame_copies_profiler_zones_and_counters) {
     reset_trace_writer_to_defaults();
-    TraceWriter &tw = TraceWriter::instance();
-    Profiler &prof = Profiler::instance();
+    TraceWriter& tw = TraceWriter::instance();
+    Profiler& prof = Profiler::instance();
     prof.reset();
     RenderCounters::current().reset();
 
@@ -142,7 +139,7 @@ AURORA_TEST_CASE(capture_frame_copies_profiler_zones_and_counters) {
 
 AURORA_TEST_CASE(capacity_overflow_drops_events_with_counter) {
     reset_trace_writer_to_defaults();
-    TraceWriter &tw = TraceWriter::instance();
+    TraceWriter& tw = TraceWriter::instance();
 
     // 事件与计数器容量各 1：超出的部分丢弃并累加 dropped_events。
     tw.set_capacity(1, 1);
@@ -161,7 +158,7 @@ AURORA_TEST_CASE(capacity_overflow_drops_events_with_counter) {
 
 AURORA_TEST_CASE(clear_resets_data_but_keeps_recording_state) {
     reset_trace_writer_to_defaults();
-    TraceWriter &tw = TraceWriter::instance();
+    TraceWriter& tw = TraceWriter::instance();
 
     // clear：清空已录数据与丢弃计数，保留容量配置与录制状态。
     tw.set_capacity(1, 1);
@@ -179,7 +176,7 @@ AURORA_TEST_CASE(clear_resets_data_but_keeps_recording_state) {
 
 AURORA_TEST_CASE(write_json_writes_readable_file) {
     reset_trace_writer_to_defaults();
-    TraceWriter &tw = TraceWriter::instance();
+    TraceWriter& tw = TraceWriter::instance();
 
     tw.begin_capture();
     tw.add_complete_event("filed", 1.0, 2.0, 0, 1);
@@ -201,7 +198,7 @@ AURORA_TEST_CASE(write_json_writes_readable_file) {
 
 AURORA_TEST_CASE(write_json_rejects_empty_path) {
     reset_trace_writer_to_defaults();
-    const TraceWriter &tw = TraceWriter::instance();
+    const TraceWriter& tw = TraceWriter::instance();
 
     // 空路径：结构化错误（IOFileNotFound），不抛异常。
     const Result<bool> refused = tw.write_json("");
@@ -216,7 +213,7 @@ AURORA_TEST_CASE(frame_scope_auto_feed_matches_tracing_flag) {
     reset_trace_writer_to_defaults();
     Profiler::instance().reset();
     RenderCounters::current().reset();
-    TraceWriter &tw = TraceWriter::instance();
+    TraceWriter& tw = TraceWriter::instance();
 
     tw.begin_capture();
     const std::size_t before_samples = tw.counter_sample_count();

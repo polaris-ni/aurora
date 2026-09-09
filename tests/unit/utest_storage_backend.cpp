@@ -68,7 +68,7 @@ class ProbeBackend final : public aus::StorageBackend {
 /// @brief 构造一条 JSON 载荷的记录信封。
 [[nodiscard]] auto make_json_record(std::string id, aus::Json payload) -> aus::StorageRecord {
     aus::StorageRecord rec;
-    rec.id = id;
+    rec.id = std::move(id);
     rec.type = "__raw__";
     rec.version = 1;
     rec.encoding = aus::StorageEncoding::Json;

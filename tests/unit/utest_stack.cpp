@@ -7,9 +7,9 @@
 #include <memory>
 #include <type_traits>
 
+#include "aurora/layout/layout_engine.h"
 #include "aurora/widget/stack.h"
 #include "aurora/widget/text.h"
-#include "aurora/layout/layout_engine.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_stack {
@@ -40,7 +40,7 @@ AURORA_TEST_CASE(stack_stacks_children_at_origin_takes_max_bbox) {
     Stack st{box(100.0F, 20.0F), box(60.0F, 40.0F)};
     AURORA_TEST_CHECK_EQ(std::string{st.type_name()}, "Stack");
 
-    const Size s = [&] {
+    const Size s = [&]() -> Size {
         LayoutEngine::layout(st, bounded(300.0F, 300.0F));
         return st.size();
     }();

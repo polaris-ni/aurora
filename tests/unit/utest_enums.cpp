@@ -30,7 +30,7 @@ AURORA_TEST_CASE(text_presentation_enum_layout_is_stable) {
     AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::TextAlign::Left), 0);
     AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::TextAlign::Justify), 5);  // 共 6 个
     AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::TextOverflow::Fade), 2);  // 共 3 个
-    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::FontStyle::Italic), 1);   // 共 2 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::FontStyle::Italic), 1);  // 共 2 个
 
     static_assert(std::is_same_v<std::underlying_type_t<aurora::TextAlign>, std::uint8_t>);
     static_assert(std::is_same_v<std::underlying_type_t<aurora::TextOverflow>, std::uint8_t>);
@@ -40,12 +40,12 @@ AURORA_TEST_CASE(text_presentation_enum_layout_is_stable) {
 
 AURORA_TEST_CASE(layout_enum_layout_is_stable) {
     // 布局族枚举：末枚举量数值锁定（数量 = 值 + 1）。
-    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::MainAxisSize::Max), 1);                     // 共 2 个
-    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::MainAxisAlignment::SpaceEvenly), 5);        // 共 6 个
-    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::CrossAxisAlignment::Stretch), 3);           // 共 4 个
-    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::StackFit::Passthrough), 2);                 // 共 3 个
-    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::OverflowStrategy::Scroll), 3);              // 共 4 个
-    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::BoxFit::ScaleDown), 6);                     // 共 7 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::MainAxisSize::Max), 1);  // 共 2 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::MainAxisAlignment::SpaceEvenly), 5);  // 共 6 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::CrossAxisAlignment::Stretch), 3);  // 共 4 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::StackFit::Passthrough), 2);  // 共 3 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::OverflowStrategy::Scroll), 3);  // 共 4 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::BoxFit::ScaleDown), 6);  // 共 7 个
     static_assert(std::is_same_v<std::underlying_type_t<aurora::BoxFit>, std::uint8_t>);
     AURORA_TEST_CHECK(true);
 }

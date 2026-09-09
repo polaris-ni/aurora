@@ -13,7 +13,6 @@
 #include "aurora/render/offscreen.h"
 #include "aurora/widget/canvas.h"
 #include "aurora/widget/skeleton.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::itest_default_construct {
@@ -22,9 +21,7 @@ namespace {
 
 // 语义冒烟：把已挂好子件的根 Column 布局一帧，返回逻辑快照根类型。
 // 注意 render_to_logical_snapshot 需要 Node& 非 const 引用（内部 mount+layout 会写节点 bounds）。
-auto layout_frame(au::Node &root) -> au::Json {
-    return au::render_to_logical_snapshot(root, 320, 240);
-}
+auto layout_frame(au::Node& root) -> au::Json { return au::render_to_logical_snapshot(root, 320, 240); }
 
 }  // namespace
 
@@ -121,7 +118,7 @@ AURORA_TEST_CASE(registry_rebuilds_every_registered_type) {
     // 已知类型但不可从静态 JSON 重建（持运行时回调/未注册 T），工厂给出友好错误而非崩溃。
     const std::vector<std::string> not_rebuildable = {"Canvas", "Repeater", "Provider"};
 
-    for (const auto &type : types) {
+    for (const auto& type : types) {
         const bool expect_error = std::ranges::find(not_rebuildable, type) != not_rebuildable.end();
         const auto made = au::serialization::WidgetRegistry::instance().make(type, au::Json::object());
         if (expect_error) {

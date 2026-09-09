@@ -1,9 +1,9 @@
 #include "isolation.h"
 
-#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <string>
 
 #include "aurora/app/clipboard.h"
@@ -12,8 +12,6 @@
 #ifdef _WIN32
 // 只需要进程与环境变量 API（同 test_death.cpp 的取舍，不自定义 WIN32_LEAN_AND_MEAN）。
 #include <windows.h>
-#else
-#include <unistd.h>
 #endif
 
 namespace aurora::testing::isolation {
@@ -80,36 +78,61 @@ auto set_env(const char* name, const std::string& value) -> void {
 
 /// @brief 读取环境变量（未设置返回空串）。
 [[nodiscard]] auto get_env(const char* name) -> std::string {
-#ifdef _WIN32
-    char* value = nullptr;
+#ifdef _MSC_VER
+    char* raw = nullptr;
     std::size_t length = 0;
-    (void)_dupenv_s(&value, &length, name);  // 返回 malloc 副本，用后须 free
-    const std::string result = value == nullptr ? std::string{} : std::string{value};
-    std::free(value);
-    return result;
+    (void)_dupenv_s(&raw, &length, name);  // 返回 malloc 副本：包进 unique_ptr（free 作 deleter）RAII 释放
+    // deleter 类型显式写为 void(*)(void*)：&std::free 存在 nullptr_t 删除重载，须靠目标类型消歧。
+    const std::unique_ptr<char, void (*)(void*)> value{raw, std::free};
+    return value ? std::string{value.get()} : std::string{};
 #else
+    // MinGW 等 CRT 不提供 _dupenv_s（MSVC 专有），getenv 在本框架的进程隔离模型下同样安全。
     const char* value = std::getenv(name);
     return value == nullptr ? std::string{} : std::string{value};
 #endif
 }
 
+/// @brief 校验（必要时创建）一个可用基目录；不可用返回空路径。
+[[nodiscard]] auto ensure_base_dir(const fs::path &candidate) -> fs::path {
+    if (candidate.empty()) {
+        return {};
+    }
+    std::error_code ec;
+    (void)fs::create_directories(candidate, ec);
+    // 基目录也可能是被上一用例删除的 TMP（外部注入态），故重建后再判一次。
+    if (ec || !fs::is_directory(candidate, ec)) {
+        return {};
+    }
+    return candidate;
+}
+
 /// @brief 创建本轮唯一临时目录（时间戳 + 序号 + create_directory 原生排他，重试上限兜底）。
 [[nodiscard]] auto make_unique_temp_dir() -> std::string {
+    // 基目录按优先级回退：系统临时目录 → POSIX /tmp → 工作目录下的隐藏目录。
+    // 必须回退到一个**可用目录**而非返回空串：空串等于放弃接管 TMPDIR/TMP/TEMP，
+    // 用例里抛异常的 temp_directory_path() 会直接失败，temp_dir() 拼出的路径也会退化成根路径
+    // （如 WSL 继承了 Windows 的 TMP/TEMP，libstdc++ 的 temp_directory_path 直接报 ENOENT）。
     std::error_code base_ec;
-    const auto base = fs::temp_directory_path(base_ec);
-    // 基目录兜底：temp_directory_path 可能读到已被上一用例删除的 TMP（外部注入态），
-    // 此时重建基目录本身（幂等、低廉），失败则放弃本用例的 tmpdir 隔离。
-    if (!base_ec && !base.empty()) {
-        (void)fs::create_directories(base, base_ec);
+    auto base = ensure_base_dir(fs::temp_directory_path(base_ec));
+#ifndef _WIN32
+    if (base.empty()) {
+        base = ensure_base_dir(fs::path{"/tmp"});
     }
-    if (base_ec || base.empty()) {
+#endif
+    if (base.empty()) {
+        std::error_code cwd_ec;
+        const auto cwd = fs::current_path(cwd_ec);
+        if (!cwd_ec) {
+            base = ensure_base_dir(cwd / ".aurora_test_tmp");
+        }
+    }
+    if (base.empty()) {
         return {};
     }
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     auto& state = case_state();
     for (int attempt = 0; attempt < 64; ++attempt) {
-        const fs::path candidate =
-            base / ("aurora_test_" + std::to_string(stamp) + "_" + std::to_string(state.seq));
+        const fs::path candidate = base / ("aurora_test_" + std::to_string(stamp) + "_" + std::to_string(state.seq));
         ++state.seq;
         std::error_code ec;
         if (fs::create_directory(candidate, ec) && !ec) {
@@ -179,8 +202,9 @@ auto end_case() -> void {
 auto temp_dir() -> const std::string& { return case_state().temp_dir; }
 
 auto repo_root() -> const std::string& {
-    static const std::string root = locate_repo_root();
-    return root;
+    // 函数内静态常量按 StaticConstantCase 要求 UPPER_CASE 命名（已是最近作用域，无需再外移）。
+    static const std::string REPO_ROOT = locate_repo_root();
+    return REPO_ROOT;
 }
 
 }  // namespace aurora::testing::isolation

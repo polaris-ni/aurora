@@ -10,7 +10,6 @@
 
 #include "au_lint_core.h"
 #include "aurora/aurora.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::itest_au_lint {
@@ -21,9 +20,9 @@ using au::tools::LintFinding;
 
 namespace {
 
-auto count_code(const std::vector<LintFinding> &findings, std::string_view code) -> int {
+auto count_code(const std::vector<LintFinding>& findings, std::string_view code) -> int {
     int n = 0;
-    for (const auto &x : findings) {
+    for (const auto& x : findings) {
         if (x.code == code) {
             ++n;
         }
@@ -31,9 +30,9 @@ auto count_code(const std::vector<LintFinding> &findings, std::string_view code)
     return n;
 }
 
-auto has_error(const std::vector<LintFinding> &findings) -> bool {
+auto has_error(const std::vector<LintFinding>& findings) -> bool {
     return std::ranges::any_of(findings,
-                               [](const LintFinding &x) -> bool { return x.severity == au::ErrorSeverity::Error; });
+                               [](const LintFinding& x) -> bool { return x.severity == au::ErrorSeverity::Error; });
 }
 
 }  // namespace
@@ -102,8 +101,7 @@ AURORA_TEST_CASE(lint_empty_container_is_info) {
     empty["children"] = au::Json::array();
 
     const auto findings = lint_ui_tree(empty);
-    AURORA_TEST_CHECK_MSG(count_code(findings, "empty-container") == 1,
-                          "empty children yields empty-container info");
+    AURORA_TEST_CHECK_MSG(count_code(findings, "empty-container") == 1, "empty children yields empty-container info");
     AURORA_TEST_CHECK_MSG(!has_error(findings), "empty-container is info level, not an error");
 }
 

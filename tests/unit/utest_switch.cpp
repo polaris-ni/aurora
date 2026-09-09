@@ -32,7 +32,7 @@ AURORA_TEST_CASE(switch_defaults_and_type_name) {
 AURORA_TEST_CASE(switch_set_value_fires_on_changed) {
     std::vector<bool> seen;
     Switch s;
-    s.set_on_changed([&seen](bool v) { seen.push_back(v); });
+    s.set_on_changed([&seen](bool v) -> void { seen.push_back(v); });
 
     s.set_value(true);
     AURORA_TEST_CHECK_TRUE(s.value());
@@ -48,7 +48,7 @@ AURORA_TEST_CASE(switch_set_value_fires_on_changed) {
 AURORA_TEST_CASE(switch_pointer_press_release_toggles) {
     std::vector<bool> seen;
     Switch s;
-    s.set_on_changed([&seen](bool v) { seen.push_back(v); });
+    s.set_on_changed([&seen](bool v) -> void { seen.push_back(v); });
 
     MouseEvent press;
     press.action = MouseAction::Press;
@@ -79,7 +79,7 @@ AURORA_TEST_CASE(switch_pointer_press_release_toggles) {
 AURORA_TEST_CASE(switch_disabled_ignores_clicks) {
     int calls = 0;
     Switch s;
-    s.set_on_changed([&calls](bool) { ++calls; });
+    s.set_on_changed([&calls](bool) -> void { ++calls; });
     s.set_enabled(false);
     AURORA_TEST_CHECK_FALSE(s.enabled());
 
@@ -107,7 +107,7 @@ AURORA_TEST_CASE(switch_binding_writes_through_to_upstream) {
     AURORA_TEST_CHECK_TRUE(s.value());  // 上游 → 控件（读取穿透）
 
     // 信号收集：内部 value_ + 绑定目标。
-    std::vector<SignalViewBase *> out;
+    std::vector<SignalViewBase*> out;
     s.collect_signals(out);
     AURORA_TEST_REQUIRE_EQ(out.size(), 2U);
 }
@@ -143,7 +143,7 @@ AURORA_TEST_CASE(switch_describe_reports_metadata) {
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_changed");
     bool has_checked = false;
-    for (const auto &p : d.properties) {
+    for (const auto& p : d.properties) {
         if (std::string{p.name} == "checked") {
             has_checked = true;
         }

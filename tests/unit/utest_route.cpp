@@ -18,14 +18,12 @@ class SolidBox final : public LeafWidget {
   public:
     SolidBox() = default;
 
-    [[nodiscard]] auto type_name() const -> const char * override { return "SolidBox"; }
+    [[nodiscard]] auto type_name() const -> const char* override { return "SolidBox"; }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(c.max);
-    }
+    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override { return c.constrain(c.max); }
 
-    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
 };
 
 }  // namespace
@@ -55,10 +53,8 @@ AURORA_TEST_CASE(route_transition_defaults) {
 }
 
 AURORA_TEST_CASE(route_custom_transition_stored) {
-    const RouteTransition tr{.animated = true,
-                             .kind = TransitionKind::Slide,
-                             .curve = Curves::linear(),
-                             .duration_seconds = 0.5};
+    const RouteTransition tr{
+        .animated = true, .kind = TransitionKind::Slide, .curve = Curves::linear(), .duration_seconds = 0.5};
     const Route r{Node{SolidBox{}}, "detail", tr};
 
     AURORA_TEST_CHECK_TRUE(r.transition().animated);
@@ -68,7 +64,7 @@ AURORA_TEST_CASE(route_custom_transition_stored) {
 
 AURORA_TEST_CASE(route_copy_shares_root_widget) {
     const Route src{Node{SolidBox{}}, "src"};
-    const Route copy{src};  // Node 内部为 shared_ptr：拷贝共享同一棵 widget 树。
+    const Route& copy{src};  // Node 内部为 shared_ptr：拷贝共享同一棵 widget 树。
 
     AURORA_TEST_CHECK_FALSE(copy.empty());
     AURORA_TEST_CHECK_EQ(&copy.root().widget(), &src.root().widget());
@@ -80,6 +76,8 @@ AURORA_TEST_CASE(route_move_transfers_root) {
     const Route dst{std::move(src)};
 
     // 移动后源路由的 shared_ptr 已被转移：源变空、目标持有根。
+    // 本用例目的即是检视 moved-from 状态（empty() 只读 shared_ptr 判空），非误用，刻意在使用后不断言其他字段。
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     AURORA_TEST_CHECK_TRUE(src.empty());
     AURORA_TEST_CHECK_FALSE(dst.empty());
     AURORA_TEST_CHECK_EQ(dst.name(), std::string{"src"});
@@ -89,7 +87,7 @@ AURORA_TEST_CASE(route_root_mutable_access) {
     Route r{Node{SolidBox{}}, "home"};
     r.root().set_id("page-root");
 
-    const Route &view = r;
+    const Route& view = r;
     AURORA_TEST_CHECK_EQ(view.root().id(), std::string_view{"page-root"});
 }
 

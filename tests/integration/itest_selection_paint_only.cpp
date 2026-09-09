@@ -23,8 +23,8 @@ using au::FocusManager;
 #ifdef AURORA_BACKEND_HEADLESS
 using au::HeadlessSurface;  // 仅 AURORA_BACKEND_HEADLESS 下编译；宏关闭时本文件走 SKIP 桩
 #endif
-using au::MouseButton;
 using au::MouseAction;
+using au::MouseButton;
 using au::MouseEvent;
 using au::Node;
 using au::Painter;
@@ -40,14 +40,14 @@ class SpyWidget : public au::LeafWidget {
     int layout_calls = 0;
     int paint_calls = 0;
 
-    [[nodiscard]] auto type_name() const -> const char * override { return "SpyWidget"; }
+    [[nodiscard]] auto type_name() const -> const char* override { return "SpyWidget"; }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
         ++layout_calls;
         return c.constrain(Size{.width = 100.0F, .height = 30.0F});
     }
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+    auto on_paint(Painter& p, const Rect& bounds, const BuildContext& /*ctx*/) -> void override {
         ++paint_calls;
         p.fill_rect(bounds, Color{200, 200, 200, 255});
     }
@@ -63,7 +63,7 @@ AURORA_TEST_CASE(drag_selection_paint_only_skips_relayout) {
 
     auto surface = std::make_unique<HeadlessSurface>();
     (void)surface->begin_frame(w, h);  // 先确立尺寸（present_root 首帧读取 size 布局整树）
-    auto *raw = surface.get();
+    auto* raw = surface.get();
     Window win{std::move(surface)};
 
     const auto text = std::make_shared<Text>("hello world this is a selection test for drag");

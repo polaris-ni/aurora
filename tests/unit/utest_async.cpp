@@ -1,6 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/async.h
-/// 测试说明: Task<T> 的 then 值投递、Result 透传与异常捕获、cancel 丢弃结果、with_timeout 超时投递与提前完成不误报、结果就绪后注册回调的补投，以及主线程投递器路由（全部经 promise/future 有界等待，断言只在用例线程执行）
+/// 测试说明: Task<T> 的 then 值投递、Result 透传与异常捕获、cancel 丢弃结果、with_timeout
+/// 超时投递与提前完成不误报、结果就绪后注册回调的补投，以及主线程投递器路由（全部经 promise/future
+/// 有界等待，断言只在用例线程执行）
 
 #include <atomic>
 #include <chrono>
@@ -23,6 +25,9 @@ namespace {
 
 /// @brief 有界轮询：每 1ms 轮询一次 pred，超时返回最后一次判定（禁止无界阻塞）。
 template <typename Pred>
+// pred 在轮询循环内可能被多次调用，不能按「一次性转发」用 std::forward（对带状态可调用体
+// 转成右值引用会误移动，破坏后续再次调用），刻意始终以左值形式反复调用，故抑制该告警。
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 auto wait_until(Pred&& pred, std::chrono::milliseconds budget = std::chrono::milliseconds{2000}) -> bool {
     const auto deadline = std::chrono::steady_clock::now() + budget;
     while (std::chrono::steady_clock::now() < deadline) {
@@ -36,6 +41,11 @@ auto wait_until(Pred&& pred, std::chrono::milliseconds budget = std::chrono::mil
 
 /// @brief 用例退出（含 REQUIRE 中止）时把主线程投递器恢复为默认直调，避免污染同进程后续用例。
 struct MainPosterGuard {
+    MainPosterGuard() = default;
+    MainPosterGuard(const MainPosterGuard&) = delete;
+    auto operator=(const MainPosterGuard&) -> MainPosterGuard& = delete;
+    MainPosterGuard(MainPosterGuard&&) = delete;
+    auto operator=(MainPosterGuard&&) -> MainPosterGuard& = delete;
     ~MainPosterGuard() { aurora::Task<int>::set_main_poster(nullptr); }
 };
 
@@ -43,8 +53,8 @@ struct MainPosterGuard {
 
 AURORA_TEST_CASE(async_delivers_value_to_then) {
     std::promise<Result<int>> box;
-    auto task = async([] { return 40 + 2; });
-    task.then([&box](const Result<int>& r) { box.set_value(r); });
+    auto task = async([]() -> int { return 40 + 2; });
+    task.then([&box](const Result<int>& r) -> void { box.set_value(r); });
 
     auto fut = box.get_future();
     AURORA_TEST_REQUIRE_EQ(fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
@@ -57,12 +67,11 @@ AURORA_TEST_CASE(async_accepts_result_returning_fn) {
     // fn 返回 Result<T>：成功值与错误均原样透传（任务值类型萃取为 T，而非 Result<T>）。
     std::promise<Result<int>> ok_box;
     std::promise<Result<int>> err_box;
-    auto ok_task = async([] { return Result<int>{7}; });
-    auto err_task = async([] {
-        return Result<int>{make_error(ErrorCode::GeneralInvalidArgument, std::string{"bad"})};
-    });
-    ok_task.then([&ok_box](const Result<int>& r) { ok_box.set_value(r); });
-    err_task.then([&err_box](const Result<int>& r) { err_box.set_value(r); });
+    auto ok_task = async([]() -> Result<int> { return Result<int>{7}; });
+    auto err_task = async(
+        []() -> Result<int> { return Result<int>{make_error(ErrorCode::GeneralInvalidArgument, std::string{"bad"})}; });
+    ok_task.then([&ok_box](const Result<int>& r) -> void { ok_box.set_value(r); });
+    err_task.then([&err_box](const Result<int>& r) -> void { err_box.set_value(r); });
 
     auto ok_fut = ok_box.get_future();
     AURORA_TEST_REQUIRE_EQ(ok_fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
@@ -82,7 +91,7 @@ AURORA_TEST_CASE(async_captures_fn_exception_as_error) {
     // fn 抛异常：invoke_safe 捕获并转为 runtime-async-exception 错误，不逃出 worker 线程。
     std::promise<Error> box;
     auto task = async([]() -> int { throw std::runtime_error{"boom"}; });
-    task.then([&box](const Result<int>& r) {
+    task.then([&box](const Result<int>& r) -> void {
         if (!r.ok()) {
             box.set_value(r.error());
         }
@@ -104,7 +113,7 @@ AURORA_TEST_CASE(async_cancel_drops_result_and_silences_callback) {
     auto entered_fut = entered.get_future();
     auto finished_fut = finished.get_future();
 
-    auto task = async([&] {
+    auto task = async([&]() -> int {
         entered.set_value();
         release.get_future().wait();
         finished.set_value();
@@ -118,7 +127,7 @@ AURORA_TEST_CASE(async_cancel_drops_result_and_silences_callback) {
 
     // 取消后注册回调：补投条件含「未取消」，回调永不触发。
     std::atomic<bool> called{false};
-    task.then([&called](const Result<int>&) { called.store(true, std::memory_order_release); });
+    task.then([&called](const Result<int>&) -> void { called.store(true, std::memory_order_release); });
 
     release.set_value();
     AURORA_TEST_REQUIRE_EQ(finished_fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
@@ -129,7 +138,7 @@ AURORA_TEST_CASE(async_with_timeout_delivers_timeout_error) {
     std::promise<void> fn_done;
     auto fn_done_fut = fn_done.get_future();
 
-    auto task = async([&] {
+    auto task = async([&]() -> int {
         std::this_thread::sleep_for(std::chrono::milliseconds{250});
         fn_done.set_value();
         return 1;
@@ -137,7 +146,7 @@ AURORA_TEST_CASE(async_with_timeout_delivers_timeout_error) {
     task.with_timeout(std::chrono::milliseconds{100});
 
     std::promise<Error> err_box;
-    task.then([&err_box](const Result<int>& r) {
+    task.then([&err_box](const Result<int>& r) -> void {
         if (!r.ok()) {
             err_box.set_value(r.error());
         }
@@ -159,7 +168,7 @@ AURORA_TEST_CASE(async_completed_before_timeout_delivers_value) {
     std::promise<void> release;
     auto entered_fut = entered.get_future();
 
-    auto task = async([&] {
+    auto task = async([&]() -> int {
         entered.set_value();
         release.get_future().wait();
         return 1;
@@ -170,7 +179,7 @@ AURORA_TEST_CASE(async_completed_before_timeout_delivers_value) {
     task.with_timeout(std::chrono::milliseconds{100});
 
     std::promise<Result<int>> box;
-    task.then([&box](const Result<int>& r) { box.set_value(r); });
+    task.then([&box](const Result<int>& r) -> void { box.set_value(r); });
     release.set_value();
 
     auto fut = box.get_future();
@@ -187,7 +196,7 @@ AURORA_TEST_CASE(then_delivery_routes_through_main_poster) {
     // 投递器把回调排队，由用例线程统一排空：验证投递走主线程投递器且恰一次。
     std::mutex queue_mutex;
     std::vector<std::function<void()>> queued;
-    Task<int>::set_main_poster([&](std::function<void()> fn) {
+    Task<int>::set_main_poster([&](std::function<void()> fn) -> void {
         std::scoped_lock lock(queue_mutex);
         queued.push_back(std::move(fn));
     });
@@ -199,7 +208,7 @@ AURORA_TEST_CASE(then_delivery_routes_through_main_poster) {
     auto entered_fut = entered.get_future();
     auto finished_fut = finished.get_future();
 
-    auto task = async([&] {
+    auto task = async([&]() -> int {
         entered.set_value();
         release.get_future().wait();
         finished.set_value();
@@ -209,7 +218,7 @@ AURORA_TEST_CASE(then_delivery_routes_through_main_poster) {
 
     std::atomic<bool> called{false};
     int got = -1;
-    task.then([&](const Result<int>& r) {
+    task.then([&](const Result<int>& r) -> void {
         called.store(true, std::memory_order_release);
         got = r.ok() ? r.value() : -1;
     });
@@ -218,7 +227,7 @@ AURORA_TEST_CASE(then_delivery_routes_through_main_poster) {
     AURORA_TEST_REQUIRE_EQ(finished_fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
 
     // worker 完成 fn 之后才把投递排进队列：轮询等待（有界）。
-    AURORA_TEST_REQUIRE(wait_until([&] {
+    AURORA_TEST_REQUIRE(wait_until([&]() -> bool {
         std::scoped_lock lock(queue_mutex);
         return !queued.empty();
     }));

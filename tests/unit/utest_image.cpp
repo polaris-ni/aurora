@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/image.h
-/// 测试说明: 覆盖 Image 默认不变量、缺文件错误路径、内置 24 位 BMP 解码往返（BGR→RGBA8、自底向上、行对齐）与畸形输入拒绝、SVG 错误路径
+/// 测试说明: 覆盖 Image 默认不变量、缺文件错误路径、内置 24 位 BMP
+/// 解码往返（BGR→RGBA8、自底向上、行对齐）与畸形输入拒绝、SVG 错误路径
 
 #include <cstdint>
 #include <filesystem>
@@ -19,25 +20,78 @@ namespace {
 /// 像素自底向上：文件第 0 行 = 图像第 1 行（蓝、白），文件第 1 行 = 图像第 0 行（红、绿）。
 [[nodiscard]] auto make_2x2_bmp() -> std::vector<std::uint8_t> {
     return {
-        'B', 'M',                            // 魔数
-        70U, 0U, 0U, 0U,                     // 文件大小 = 54 + 2*8
-        0U, 0U, 0U, 0U,                      // 保留字段
-        54U, 0U, 0U, 0U,                     // 像素数据偏移
-        40U, 0U, 0U, 0U,                     // BITMAPINFOHEADER 大小
-        2U, 0U, 0U, 0U,                      // 宽 = 2
-        2U, 0U, 0U, 0U,                      // 高 = 2（正数 = 自底向上）
-        1U, 0U,                              // 平面数
-        24U, 0U,                             // 位深 = 24
-        0U, 0U, 0U, 0U,                      // 压缩 = BI_RGB（未压缩）
-        16U, 0U, 0U, 0U,                     // 像素数据大小
-        0U, 0U, 0U, 0U,                      // 水平分辨率
-        0U, 0U, 0U, 0U,                      // 垂直分辨率
-        0U, 0U, 0U, 0U,                      // 调色板颜色数
-        0U, 0U, 0U, 0U,                      // 重要颜色数
+        'B',
+        'M',  // 魔数
+        70U,
+        0U,
+        0U,
+        0U,  // 文件大小 = 54 + 2*8
+        0U,
+        0U,
+        0U,
+        0U,  // 保留字段
+        54U,
+        0U,
+        0U,
+        0U,  // 像素数据偏移
+        40U,
+        0U,
+        0U,
+        0U,  // BITMAPINFOHEADER 大小
+        2U,
+        0U,
+        0U,
+        0U,  // 宽 = 2
+        2U,
+        0U,
+        0U,
+        0U,  // 高 = 2（正数 = 自底向上）
+        1U,
+        0U,  // 平面数
+        24U,
+        0U,  // 位深 = 24
+        0U,
+        0U,
+        0U,
+        0U,  // 压缩 = BI_RGB（未压缩）
+        16U,
+        0U,
+        0U,
+        0U,  // 像素数据大小
+        0U,
+        0U,
+        0U,
+        0U,  // 水平分辨率
+        0U,
+        0U,
+        0U,
+        0U,  // 垂直分辨率
+        0U,
+        0U,
+        0U,
+        0U,  // 调色板颜色数
+        0U,
+        0U,
+        0U,
+        0U,  // 重要颜色数
         // 文件第 0 行（图像第 1 行）：蓝 (B,G,R)=(255,0,0)、白 (255,255,255)、对齐填充 2 字节
-        255U, 0U, 0U, 255U, 255U, 255U, 0U, 0U,
+        255U,
+        0U,
+        0U,
+        255U,
+        255U,
+        255U,
+        0U,
+        0U,
         // 文件第 1 行（图像第 0 行）：红 (0,0,255)、绿 (0,255,0)、对齐填充 2 字节
-        0U, 0U, 255U, 0U, 255U, 0U, 0U, 0U,
+        0U,
+        0U,
+        255U,
+        0U,
+        255U,
+        0U,
+        0U,
+        0U,
     };
 }
 
@@ -86,15 +140,15 @@ AURORA_TEST_CASE(load_bmp_roundtrip_decodes_rgba8) {
     AURORA_TEST_CHECK_EQ(image.pixels.size(), 16U);  // 2*2*4
 
     // BGR → RGBA8 且行序自底向上：(0,0)=红、(1,0)=绿、(0,1)=蓝、(1,1)=白，A 恒 255。
-    AURORA_TEST_CHECK_EQ(image.pixels[0], 255U);   // (0,0) R
-    AURORA_TEST_CHECK_EQ(image.pixels[1], 0U);     // (0,0) G
-    AURORA_TEST_CHECK_EQ(image.pixels[2], 0U);     // (0,0) B
-    AURORA_TEST_CHECK_EQ(image.pixels[3], 255U);   // (0,0) A
-    AURORA_TEST_CHECK_EQ(image.pixels[4], 0U);     // (1,0) R
-    AURORA_TEST_CHECK_EQ(image.pixels[5], 255U);   // (1,0) G
-    AURORA_TEST_CHECK_EQ(image.pixels[6], 0U);     // (1,0) B
-    AURORA_TEST_CHECK_EQ(image.pixels[8], 0U);     // (0,1) R
-    AURORA_TEST_CHECK_EQ(image.pixels[9], 0U);     // (0,1) G
+    AURORA_TEST_CHECK_EQ(image.pixels[0], 255U);  // (0,0) R
+    AURORA_TEST_CHECK_EQ(image.pixels[1], 0U);  // (0,0) G
+    AURORA_TEST_CHECK_EQ(image.pixels[2], 0U);  // (0,0) B
+    AURORA_TEST_CHECK_EQ(image.pixels[3], 255U);  // (0,0) A
+    AURORA_TEST_CHECK_EQ(image.pixels[4], 0U);  // (1,0) R
+    AURORA_TEST_CHECK_EQ(image.pixels[5], 255U);  // (1,0) G
+    AURORA_TEST_CHECK_EQ(image.pixels[6], 0U);  // (1,0) B
+    AURORA_TEST_CHECK_EQ(image.pixels[8], 0U);  // (0,1) R
+    AURORA_TEST_CHECK_EQ(image.pixels[9], 0U);  // (0,1) G
     AURORA_TEST_CHECK_EQ(image.pixels[10], 255U);  // (0,1) B
     AURORA_TEST_CHECK_EQ(image.pixels[12], 255U);  // (1,1) R
     AURORA_TEST_CHECK_EQ(image.pixels[13], 255U);  // (1,1) G

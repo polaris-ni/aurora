@@ -83,8 +83,8 @@ AURORA_TEST_CASE(replay_fill_rect_writes_pixels) {
     list.replay(painter);
 
     AURORA_TEST_CHECK_EQ(static_cast<int>(painter.get_pixel(0, 0).r), 255);  // R
-    AURORA_TEST_CHECK_EQ(static_cast<int>(painter.get_pixel(0, 0).g), 0);    // G
-    AURORA_TEST_CHECK_EQ(static_cast<int>(painter.get_pixel(0, 0).b), 0);    // B
+    AURORA_TEST_CHECK_EQ(static_cast<int>(painter.get_pixel(0, 0).g), 0);  // G
+    AURORA_TEST_CHECK_EQ(static_cast<int>(painter.get_pixel(0, 0).b), 0);  // B
 }
 
 AURORA_TEST_CASE(replay_preserves_command_order) {

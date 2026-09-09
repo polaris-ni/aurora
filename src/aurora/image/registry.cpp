@@ -108,11 +108,25 @@ auto format_from_path(std::filesystem::path const &p) -> ImageFormat {
 namespace {
 
 auto read_file_bytes(const std::filesystem::path &p) -> Result<std::vector<std::uint8_t>> {
+    // 目录必须先拦：POSIX 下 open(O_RDONLY) 对目录会**成功**，读取时才报 EISDIR，而 libstdc++
+    // 的 basic_filebuf::underflow 对此无条件抛出 ios_base::failure（不检查流的异常掩码）。
+    // 若不提前拦掉，「把目录当图片加载」这类非法输入会让异常逃出 Image::load。
+    // （Windows 上 ifstream 打开目录直接失败，故该差异只在 Linux/WSL 上暴露。）
+    std::error_code dir_ec;
+    if (std::filesystem::is_directory(p, dir_ec)) {
+        return make_error(ErrorCode::IOFileNotFound, std::string("image decode: not a regular file ") + p.string());
+    }
     std::ifstream f(p, std::ios::binary);
     if (!f.is_open()) {
         return make_error(ErrorCode::IOFileNotFound, std::string("image decode: cannot open ") + p.string());
     }
-    std::vector<std::uint8_t> buf{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+    std::vector<std::uint8_t> buf;
+    try {
+        buf.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    } catch (const std::ios_base::failure &) {
+        // 读到一半的 I/O 失败（EISDIR / EIO / EACCES 等）同样降级为 Result 错误，不外抛。
+        return make_error(ErrorCode::IOFileNotFound, std::string("image decode: cannot read ") + p.string());
+    }
     if (buf.empty()) {
         return make_error(ErrorCode::IOFileNotFound, std::string("image decode: empty file ") + p.string());
     }

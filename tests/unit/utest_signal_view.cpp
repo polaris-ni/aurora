@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/signal_view.h
-/// 测试说明: SignalViewBase/SignalView 的 get/read/subscribe 虚契约与默认空锚点、库类型（State）满足契约、Connection 弱引用锚点失效语义
+/// 测试说明: SignalViewBase/SignalView 的 get/read/subscribe 虚契约与默认空锚点、库类型（State）满足契约、Connection
+/// 弱引用锚点失效语义
 
 #include <memory>
 
@@ -54,7 +55,7 @@ AURORA_TEST_CASE(signal_view_subscribe_dispatches_through_base) {
     // subscribe 经 SignalViewBase 虚派发到具体实现。
     CountingView v{3};
     SignalViewBase& base = v;
-    Effect e{[] {}};
+    Effect e{[]() -> void {}};
     AURORA_TEST_CHECK(v.last_subscriber() == nullptr);
     base.subscribe(e);
     AURORA_TEST_CHECK(v.last_subscriber() == &e);
@@ -69,7 +70,7 @@ AURORA_TEST_CASE(signal_view_contract_held_by_state) {
 
     SignalViewBase& base = s;
     int runs = 0;
-    Effect e{[&] {
+    Effect e{[&]() -> void {
         ++runs;
         base.read();
     }};

@@ -131,7 +131,7 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 
 - `fit` 与 `orientation` **无法按键名消歧**（`fit` 在 `Stack` 上是 `StackFit`、在 `VideoPlayer` 上是 `BoxFit`；`orientation` 在 `Divider` 上是 `Orientation`、在 `Splitter` 上是 `SplitterOrientation`，取值集还完全同名）。登记表刻意不收录二者，它们仍输出字符串字面量；要正确还原须把 `prop_descriptors[].type` 透传进 `emit_prop_value` 按声明类型分派。
 - `Image` / `FlexWeight` / `Flex` / `Json` 这 4 类**暂无专用分派分支**：其序列化形态若未命中任何基础分支，`emit_prop_value` 产出 `/* unknown */`，`emit_props` 随即**静默跳过该属性**——既不报错也不告警，生成的代码中该属性直接缺失。
-- 登记表按「键名」而非「类型」工作，故新增枚举属性时必须同步登记真实键名，否则该属性静默退化为字符串（`tests/unit/utest_serialization.cpp` 的真实键名用例守护此点）。
+- 登记表按「键名」而非「类型」工作，故新增枚举属性时必须同步登记真实键名，否则该属性静默退化为字符串（`tests/integration/itest_to_code.cpp` 的 `codegen_enum_keys_emit_enum_expressions` / `codegen_ambiguous_enum_keys_stay_as_strings` 两例守护此点）。
 
 多子扁平容器（`Column` / `Row` / `Stack` / `Grid` / `Scroll` / `Card`）走免 `Props` 包裹的罗列形式。
 

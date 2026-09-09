@@ -11,18 +11,17 @@
 #include <string>
 #include <vector>
 
-#include "google_play_data.h"
-
 #include "framework/aurora_test.h"
+#include "google_play_data.h"
 
 namespace aurora::test_cases::itest_play_repository {
 
 namespace {
 
-auto count_all(const gp::PlayRepository &repo) -> int {
-    static constexpr std::array<const char *, 4> kCategories = {"apps", "games", "movies", "books"};
+auto count_all(const gp::PlayRepository& repo) -> int {
+    constexpr std::array<const char*, 4> categories = {"apps", "games", "movies", "books"};
     int n = 0;
-    for (const auto *c : kCategories) {
+    for (const auto* c : categories) {
         n += static_cast<int>(repo.list_by_category(c).size());
     }
     return n;
@@ -45,7 +44,7 @@ AURORA_TEST_CASE(default_catalog_scale_and_category_filters) {
     AURORA_TEST_CHECK(!apps.empty());
     AURORA_TEST_CHECK_EQ(apps.size(), static_cast<std::size_t>(48));
     bool all_apps = true;
-    for (const auto &a : apps) {
+    for (const auto& a : apps) {
         if (a.category != "apps") {
             all_apps = false;
         }
@@ -60,7 +59,7 @@ AURORA_TEST_CASE(default_catalog_scale_and_category_filters) {
     const auto sub_filtered = repo.list_by_subcategory("games", subs.front());
     AURORA_TEST_CHECK(!sub_filtered.empty());
     bool ok_sub = true;
-    for (const auto &g : sub_filtered) {
+    for (const auto& g : sub_filtered) {
         if (g.subcategory != subs.front()) {
             ok_sub = false;
         }
@@ -103,7 +102,7 @@ AURORA_TEST_CASE(detail_reviews_and_screenshots_contract) {
     // 截图：默认 4 张，均为非空 RGBA 图像（像素数 = w*h*4）。
     const auto shots = repo.screenshots_for(id);
     AURORA_TEST_CHECK_EQ(shots.size(), static_cast<std::size_t>(4));
-    for (const auto &s : shots) {
+    for (const auto& s : shots) {
         AURORA_TEST_CHECK(s.width > 0 && s.height > 0);
         AURORA_TEST_CHECK_EQ(s.pixels.size(),
                              static_cast<std::size_t>(s.width) * static_cast<std::size_t>(s.height) * 4U);
@@ -115,7 +114,7 @@ AURORA_TEST_CASE(data_hook_replaces_catalog_source) {
 
     // 可替换 DataHook：返回一个被 hook 截断的目录，验证数据源可替换（不联网）。
     bool called = false;
-    repo.set_data_hook([&called](const gp::DataRequest &) -> gp::CatalogPtr {
+    repo.set_data_hook([&called](const gp::DataRequest&) -> gp::CatalogPtr {
         called = true;
         auto v = std::make_shared<std::vector<gp::AppItem>>();
         gp::AppItem a;

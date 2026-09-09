@@ -137,18 +137,17 @@ auto parse_cli(const std::span<char* const> args, CliOptions& options) -> bool {
     return true;
 }
 
-auto print_list(const CliOptions& options) -> int {
+auto print_list(const CliOptions& options) -> void {
     const auto& registry = TestRegistry::instance();
     if (options.list_format == "suites") {
         for (const auto& suite : registry.suites()) {
             std::printf("%s\n", suite.c_str());
         }
-        return static_cast<int>(ExitCode::AllPassed);
+        return;  // 仅打印，列出用例恒成功（退出码 0 由调用方给出）
     }
     for (const auto* test_case : registry.cases()) {
         std::printf("%s\n", test_case->full_name().c_str());
     }
-    return static_cast<int>(ExitCode::AllPassed);
 }
 
 /// @brief 已完成结果的共享槽：主线程逐条追加，watchdog 只读快照。
@@ -256,7 +255,7 @@ auto run_selected(const std::vector<const TestCase*>& selected, const CliOptions
     auto order = selected;
     if (options.shuffle && order.size() > 1) {
         std::mt19937_64 engine{options.shuffle_seed};
-        std::shuffle(order.begin(), order.end(), engine);
+        std::ranges::shuffle(order, engine);
     }
 
     ResultSink sink;
@@ -329,6 +328,11 @@ auto main(int argc, char** argv) -> int {
             // 由子进程自己接管 stderr：命令行里就不需要任何 shell 重定向（cmd 的引号/路径规则最易出错）。
             if (std::freopen(options.death_capture.c_str(), "w", stderr) == nullptr) {
                 std::fprintf(stderr, "[test] cannot capture stderr into %s\n", options.death_capture.c_str());
+            } else {
+                // glibc 下把 stderr freopen 到普通文件会使其转为全缓冲，随后 AURORA_CHECK
+                // 的 abort() 不刷缓冲 → 采集文件为空、死亡测试断言失败（MSVC/Windows 的 stderr
+                // 本就无缓冲，故该问题只在 glibc/Linux 上出现）。显式置回无缓冲。
+                (void)std::setvbuf(stderr, nullptr, _IONBF, 0);
             }
         }
     }
@@ -339,7 +343,8 @@ auto main(int argc, char** argv) -> int {
     // 所有静态初始化均先于 main，故此处一次展开即得全集（finalize 幂等）。
     TestRegistry::instance().finalize();
     if (options.list) {
-        return print_list(options);
+        print_list(options);
+        return static_cast<int>(ExitCode::AllPassed);
     }
 
     const auto& registry = TestRegistry::instance();

@@ -19,29 +19,27 @@ class FixedBox final : public Widget {
   public:
     FixedBox(float w, float h) : w_(w), h_(h) {}
 
-    [[nodiscard]] auto type_name() const -> const char * override { return "FixedBox"; }
+    [[nodiscard]] auto type_name() const -> const char* override { return "FixedBox"; }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
         return c.constrain(Size{.width = w_, .height = h_});
     }
-    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
 
   private:
     float w_;
     float h_;
 };
 
-auto box(float w, float h) -> Node {
-    return Node{std::make_shared<FixedBox>(w, h)};
-}
+auto box(float w, float h) -> Node { return Node{std::make_shared<FixedBox>(w, h)}; }
 
 auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
-const PropDescriptor *find_prop(const WidgetDescriptor &d, const char *name) {
-    for (const auto &p : d.properties) {
+auto find_prop(const WidgetDescriptor& d, const char* name) -> const PropDescriptor* {
+    for (const auto& p : d.properties) {
         if (p.name == name) {
             return &p;
         }
@@ -63,7 +61,7 @@ AURORA_TEST_CASE(default_scroll_invariants) {
     const auto d = Scroll::describe_static();
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "Scroll");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "single");
-    const PropDescriptor *step = find_prop(d, "step");
+    const PropDescriptor* step = find_prop(d, "step");
     AURORA_TEST_REQUIRE_NOT_NULL(step);
     AURORA_TEST_CHECK_EQ(std::string{step->type}, "float");
     AURORA_TEST_CHECK_EQ(std::string{step->default_value}, "16.0");

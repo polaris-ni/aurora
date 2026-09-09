@@ -20,13 +20,13 @@ using aurora::debug::feature_flags;
 using aurora::debug::why_trace;
 
 /// @brief 运行时探测 AURORA_ENABLE_DEBUG 是否生效（feature_flags 为始终可用的编译期快照）。
-[[nodiscard]] auto probe_debug_enabled() -> bool { return feature_flags().debug; }
+[[nodiscard]] static auto probe_debug_enabled() -> bool { return feature_flags().debug; }
 
 AURORA_TEST_CASE(dirty_kind_enumerates_layout_and_paint) {
     // 契约：脏标记恰有两种——重排 / 重绘（underlying 为 uint8_t）。
-    static_assert(std::is_enum_v<aurora::debug::DirtyKind>, "DirtyKind 必须是 enum class");
-    const auto layout = static_cast<std::uint8_t>(aurora::debug::DirtyKind::Layout);
-    const auto paint = static_cast<std::uint8_t>(aurora::debug::DirtyKind::Paint);
+    static_assert(std::is_enum_v<aurora::debug::DirtyKind>, "DirtyKind must be enum class");
+    constexpr auto layout = static_cast<std::uint8_t>(aurora::debug::DirtyKind::Layout);
+    constexpr auto paint = static_cast<std::uint8_t>(aurora::debug::DirtyKind::Paint);
     AURORA_TEST_CHECK_NE(layout, paint);
 }
 
@@ -43,8 +43,7 @@ AURORA_TEST_CASE(why_trace_reports_unavailable_when_debug_off) {
 
 AURORA_TEST_CASE(record_dirty_never_throws_in_any_build) {
     // 注入点语义：头文件始终声明，任何构建下调用皆安全（关闭态为 no-op）。
-    AURORA_TEST_CHECK_NO_THROW(aurora::debug::detail::record_dirty(
-        aurora::debug::DirtyKind::Layout, "Text", 1, false));
+    AURORA_TEST_CHECK_NO_THROW(aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Layout, "Text", 1, false));
 }
 
 AURORA_TEST_CASE(record_and_query_roundtrip) {
@@ -54,6 +53,9 @@ AURORA_TEST_CASE(record_and_query_roundtrip) {
     const Json before = why_trace();
     const auto base_count = before["count"].get<std::size_t>();
     const auto base_total = before["total_recorded"].get<std::uint64_t>();
+    // 同进程内前一个用例（record_dirty_never_throws_in_any_build）已记过条目，
+    // 故 entries 条数只能作相对断言——写死 3 会随用例执行顺序而假失败。
+    const auto base_entries = before["entries"].size();
 
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Layout, "Text", 101, false);
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Paint, "Button", 102, true);
@@ -64,8 +66,8 @@ AURORA_TEST_CASE(record_and_query_roundtrip) {
     AURORA_TEST_CHECK_EQ(after["total_recorded"], base_total + 3);
 
     // entries 最新在前：最后记录的 Column 排首位；字段逐项核对。
-    const Json &entries = after["entries"];
-    AURORA_TEST_REQUIRE_EQ(entries.size(), 3U);
+    const Json& entries = after["entries"];
+    AURORA_TEST_REQUIRE_EQ(entries.size(), base_entries + 3U);
     AURORA_TEST_CHECK_EQ(entries[0]["kind"], "layout");
     AURORA_TEST_CHECK_EQ(entries[0]["type"], "Column");
     AURORA_TEST_CHECK_EQ(entries[0]["frame"], 103);
@@ -94,7 +96,7 @@ AURORA_TEST_CASE(why_trace_limit_keeps_newest_first) {
     // limit=2：只取最近 2 条，仍最新在前。
     const Json limited = why_trace(2);
     AURORA_TEST_CHECK_EQ(limited["count"], base_count + 3);  // count 不受 limit 影响
-    const Json &entries = limited["entries"];
+    const Json& entries = limited["entries"];
     AURORA_TEST_REQUIRE_EQ(entries.size(), 2U);
     AURORA_TEST_CHECK_EQ(entries[0]["type"], "C");
     AURORA_TEST_CHECK_EQ(entries[0]["frame"], 203);

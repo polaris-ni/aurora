@@ -51,7 +51,7 @@ AURORA_TEST_F(MaxRectsGuard, mark_records_rect_and_bounds) {
 
 AURORA_TEST_F(MaxRectsGuard, mark_ignores_non_positive_area) {
     DirtyRegionTracker tracker;
-    tracker.mark(rect_at(0.0F, 0.0F, 0.0F, 10.0F));   // 零宽
+    tracker.mark(rect_at(0.0F, 0.0F, 0.0F, 10.0F));  // 零宽
     tracker.mark(rect_at(0.0F, 0.0F, 10.0F, -5.0F));  // 负高
     AURORA_TEST_CHECK_TRUE(tracker.is_empty());
 }

@@ -1,8 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/image_widget.h
 /// 测试说明: 覆盖 ImageView——默认不变量与自描述、无图占位自然尺寸、位图自然尺寸与约束钳制、
-/// Fixed 宽高意图严格等值覆盖（显式盒语义，不受 max 约束钳制）、无图占位描边框/有图栅格化（内存位图，软件 Painter 像素断言）、
-/// source 序列化往返与非字符串防御、from_file 失败回退占位
+/// Fixed 宽高意图严格等值覆盖（显式盒语义，不受 max 约束钳制）、无图占位描边框/有图栅格化（内存位图，软件 Painter
+/// 像素断言）、 source 序列化往返与非字符串防御、from_file 失败回退占位
 
 #include <cstddef>
 #include <cstdint>
@@ -46,7 +46,7 @@ AURORA_TEST_CASE(default_image_view_invariants) {
     bool has_source = false;
     bool has_image_width = false;
     bool has_image_height = false;
-    for (const auto &p : d.properties) {
+    for (const auto& p : d.properties) {
         if (p.name == "source") {
             has_source = true;
         }
@@ -138,8 +138,8 @@ AURORA_TEST_CASE(paint_empty_bitmap_draws_placeholder_rect) {
 AURORA_TEST_CASE(paint_decoded_bitmap_rasterizes_pixels) {
     auto img = make_image(2, 2);
     for (std::size_t i = 0; i < img.pixels.size(); i += 4U) {
-        img.pixels[i] = 255U;        // R
-        img.pixels[i + 3U] = 255U;   // A
+        img.pixels[i] = 255U;  // R
+        img.pixels[i + 3U] = 255U;  // A
     }
     ImageView iv{std::move(img)};
     Painter p;
@@ -163,6 +163,8 @@ AURORA_TEST_CASE(source_serialization_roundtrip) {
     ImageView dst;
     dst.deserialize_props(props);
     AURORA_TEST_REQUIRE_TRUE(dst.source.has_value());
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     AURORA_TEST_CHECK_EQ(dst.source.value(), "logo.png");
 
     // 未设置 source 时不落盘该键。

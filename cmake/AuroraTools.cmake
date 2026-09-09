@@ -31,6 +31,12 @@ target_include_directories(gen_error_codes PRIVATE
         # toml_lines.h / api_json_merge.h 为「零 aurora 依赖」共享头，供本生成器复用。
         ${CMAKE_SOURCE_DIR}/tools/include)
 set_target_properties(gen_error_codes PROPERTIES CXX_STANDARD 20)
+# 静态链接 GCC runtime，与所有 aurora 工具一致（见 AuroraUtils.cmake）。
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND WIN32)
+    target_link_options(gen_error_codes PRIVATE
+            -static-libgcc -static-libstdc++
+            -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
+endif ()
 
 # 从 errors.toml 重新生成头/目录/API（仅在 errors.toml 变更时触发）。
 add_custom_command(
@@ -73,6 +79,12 @@ target_include_directories(gen_debug_api PRIVATE
         ${CMAKE_SOURCE_DIR}/third_party
         ${CMAKE_SOURCE_DIR}/tools/include)
 set_target_properties(gen_debug_api PROPERTIES CXX_STANDARD 20)
+# 静态链接 GCC runtime，与所有 aurora 工具一致（见 AuroraUtils.cmake）。
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND WIN32)
+    target_link_options(gen_debug_api PRIVATE
+            -static-libgcc -static-libstdc++
+            -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
+endif ()
 add_custom_target(gen_debug_api_json
         COMMAND gen_debug_api "${CMAKE_SOURCE_DIR}/codespec/debug_api.toml" "${CMAKE_SOURCE_DIR}/aurora_api.json"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"

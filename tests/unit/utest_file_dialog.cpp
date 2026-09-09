@@ -17,8 +17,10 @@ namespace {
 /// RAII 恢复 headless 钩子与交互开关，避免污染同进程内后续用例。
 struct HookGuard {
     HookGuard() = default;
-    HookGuard(const HookGuard &) = delete;
-    auto operator=(const HookGuard &) -> HookGuard & = delete;
+    HookGuard(const HookGuard&) = delete;
+    auto operator=(const HookGuard&) -> HookGuard& = delete;
+    HookGuard(HookGuard&&) = delete;
+    auto operator=(HookGuard&&) -> HookGuard& = delete;
     ~HookGuard() {
         aurora::file_dialog::headless_open_result.clear();
         aurora::file_dialog::headless_save_result.clear();
@@ -31,7 +33,7 @@ struct HookGuard {
 
 AURORA_TEST_CASE(filter_and_options_struct_defaults) {
     // Filter：名称 + 扩展名列表的聚合结构。
-    const aurora::file_dialog::Filter f{"Images", {"*.png", "*.jpg"}};
+    const aurora::file_dialog::Filter f{.name = "Images", .extensions = {"*.png", "*.jpg"}};
     AURORA_TEST_CHECK_STREQ(f.name, "Images");
     AURORA_TEST_CHECK_EQ(f.extensions.size(), 2U);
     AURORA_TEST_CHECK_STREQ(f.extensions[0], "*.png");
@@ -56,7 +58,7 @@ AURORA_TEST_CASE(open_file_returns_headless_preset) {
     aurora::file_dialog::headless_open_result = {"a.png", "b.jpg"};
 
     // 钩子非空 → 直接返回预设（opts 仅作配置载体，不触发真实对话框）。
-    const aurora::file_dialog::Options opts{.title = "Open", .filters = {{"Images", {"*.png"}}}};
+    const aurora::file_dialog::Options opts{.title = "Open", .filters = {{.name = "Images", .extensions = {"*.png"}}}};
     const auto r = aurora::file_dialog::open_file(opts);
     AURORA_TEST_REQUIRE_TRUE(r.ok());
     AURORA_TEST_CHECK_EQ(r.value().size(), 2U);

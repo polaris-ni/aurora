@@ -3,50 +3,51 @@
 #include <cctype>
 #include <tuple>
 
+#include "aurora/app/perf_overlay.h"
 #include "aurora/core/diagnostics.h"
+#include "aurora/core/platform.h"
 #include "aurora/media/video_controls.h"
 #include "aurora/media/video_player.h"
-#include "aurora/widget/checkbox.h"
-#include "aurora/widget/divider.h"
-#include "aurora/widget/grid.h"
-#include "aurora/widget/placeholder.h"
-#include "aurora/widget/progress.h"
-#include "aurora/widget/provider.h"
-#include "aurora/widget/rich_text.h"
-#include "aurora/widget/rich_text_edit.h"
-#include "aurora/widget/scroll.h"
-#include "aurora/widget/slider.h"
-#include "aurora/widget/switch.h"
-#include "aurora/widget/text_input.h"
-#include "aurora/widget/timer.h"
-#include "aurora/widget/yaml.h"
-#include "aurora/app/perf_overlay.h"
 #include "aurora/navigation/hero.h"
 #include "aurora/widget/bottom_nav_bar.h"
+#include "aurora/widget/checkbox.h"
 #include "aurora/widget/chip.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/data_widgets.h"
+#include "aurora/widget/divider.h"
 #include "aurora/widget/drawer.h"
 #include "aurora/widget/dropdown.h"
 #include "aurora/widget/expansion_panel.h"
 #include "aurora/widget/form.h"
+#include "aurora/widget/grid.h"
 #include "aurora/widget/image_widget.h"
 #include "aurora/widget/lazy_list.h"
 #include "aurora/widget/lazy_row.h"
 #include "aurora/widget/menu_bar.h"
 #include "aurora/widget/pickers.h"
+#include "aurora/widget/placeholder.h"
 #include "aurora/widget/popup.h"
+#include "aurora/widget/progress.h"
+#include "aurora/widget/provider.h"
 #include "aurora/widget/radio_spin.h"
+#include "aurora/widget/rich_text.h"
+#include "aurora/widget/rich_text_edit.h"
+#include "aurora/widget/scroll.h"
 #include "aurora/widget/segmented_control.h"
 #include "aurora/widget/show.h"
+#include "aurora/widget/slider.h"
 #include "aurora/widget/spacer.h"
 #include "aurora/widget/splitter.h"
 #include "aurora/widget/stack.h"
 #include "aurora/widget/stepper.h"
+#include "aurora/widget/switch.h"
 #include "aurora/widget/tab_bar.h"
+#include "aurora/widget/text_input.h"
+#include "aurora/widget/timer.h"
 #include "aurora/widget/title_bar.h"
 #include "aurora/widget/toast.h"
 #include "aurora/widget/toolbar.h"
+#include "aurora/widget/yaml.h"
 
 namespace aurora {
 namespace serialization {
@@ -83,17 +84,17 @@ auto WidgetRegistry::list_types() const -> std::vector<std::string> {
 
 auto to_json(const Widget &w) -> Json {
     Json j = Json::object();
-    
+
     j["type"] = w.type_name();
 
     Json props = Json::object();
     w.serialize_props(props);
-        j["props"] = props;
+    j["props"] = props;
 
     Json children = Json::array();
     w.for_each_child([&](const Widget &c) -> void { children.push_back(to_json(c)); });
     if (!children.empty()) {
-                j["children"] = children;
+        j["children"] = children;
     }
     return j;
 }
@@ -102,12 +103,13 @@ namespace {
 
 /// @brief 注册「默认构造 + 反序列化属性」的控件工厂（库控件最常见形态）。
 /// 构造参数打包为 tuple 按值捕获，调用时经 std::apply 展开给 std::make_shared（C++20 兼容）。
-template<class T, class... CtorArgs> auto reg_default(const char *name, CtorArgs... ctor_args) -> void {
+template <class T, class... CtorArgs>
+auto reg_default(const char *name, CtorArgs... ctor_args) -> void {
     auto captured = std::make_tuple(std::move(ctor_args)...);
     WidgetRegistry::instance().register_factory(
         name, [captured = std::move(captured)](const Json &props) -> Result<std::shared_ptr<Widget>> {
             auto w = std::apply(
-                []<class... Args>(Args &&...a) -> std::shared_ptr<T> { // NOLINT
+                []<class... Args>(Args &&...a) -> std::shared_ptr<T> {  // NOLINT
                     return std::make_shared<T>(std::forward<Args>(a)...);
                 },
                 captured);
@@ -117,13 +119,15 @@ template<class T, class... CtorArgs> auto reg_default(const char *name, CtorArgs
 }
 
 /// @brief 注册「默认构造、无属性反序列化」的控件工厂（Provider 系、运行时态控件等）。
-template<class T, class... CtorArgs> auto reg_no_props(const char *name, CtorArgs... ctor_args) -> void {
+template <class T, class... CtorArgs>
+auto reg_no_props(const char *name, CtorArgs... ctor_args) -> void {
     auto captured = std::make_tuple(std::move(ctor_args)...);
     WidgetRegistry::instance().register_factory(
-        // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
+        // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+        // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
         name, [captured = std::move(captured)](const Json & /*props*/) -> Result<std::shared_ptr<Widget>> {
             auto w = std::apply(
-                []<class... Args>(Args &&...a) -> std::shared_ptr<T> { // NOLINT
+                []<class... Args>(Args &&...a) -> std::shared_ptr<T> {  // NOLINT
                     return std::make_shared<T>(std::forward<Args>(a)...);
                 },
                 captured);
@@ -136,7 +140,8 @@ template<class T, class... CtorArgs> auto reg_no_props(const char *name, CtorArg
 /// `reg_default` 把构造参数在**注册时**求值一次并按值捕获，这对标量/空容器无碍，但若某个
 /// 参数本身是 `shared_ptr` 持有的控件（如 `Show` 的占位子节点），所有反序列化出来的实例
 /// 会共用同一个子控件对象。此重载改为每次调用工厂时执行 `make`，恢复「一实例一子树」。
-template<class Make> auto reg_fresh(const char *name, Make make) -> void {
+template <class Make>
+auto reg_fresh(const char *name, Make make) -> void {
     WidgetRegistry::instance().register_factory(
         name, [make = std::move(make)](const Json &props) -> Result<std::shared_ptr<Widget>> {
             auto w = make();
@@ -153,7 +158,7 @@ auto reg_error(const char *name, ErrorCode code, std::string msg) -> void {
         });
 }
 
-} // namespace
+}  // namespace
 
 auto register_core_widgets() -> void {
     // ---- 默认构造 + 属性反序列化（绝大多数库控件）----
@@ -170,7 +175,7 @@ auto register_core_widgets() -> void {
     reg_default<Spacer>("Spacer");
     // 占位子节点须每次新建：若在注册时构造一次，所有 Show 实例会共用同一个 Spacer。
     reg_fresh("Show", []() -> std::shared_ptr<Show> {
-        return std::make_shared<Show>(false, Node{ std::make_shared<Spacer>(false) });
+        return std::make_shared<Show>(false, Node{std::make_shared<Spacer>(false)});
     });
     // 降级视觉占位控件（需求 #18）：可安全从静态 JSON 重建，便于在错误/缺失处渲染占位盒。
     reg_default<Placeholder>("Placeholder");
@@ -252,10 +257,11 @@ auto from_json_impl(const Json &j, std::size_t depth) -> Result<std::shared_ptr<
         return make_error(ErrorCode::WidgetDepthExceeded, "serialization: widget tree nesting depth exceeds limit (" +
                                                               std::to_string(AURORA_DEFAULT_MAX_WIDGET_DEPTH) + "）");
     }
-        if (!j.is_object() || !j.contains("type") || !j["type"].is_string()) {
-        return make_error(ErrorCode::IOParseFailed, "serialization: node JSON must be an object with a string 'type' field");
+    if (!j.is_object() || !j.contains("type") || !j["type"].is_string()) {
+        return make_error(ErrorCode::IOParseFailed,
+                          "serialization: node JSON must be an object with a string 'type' field");
     }
-        const std::string type = j["type"].get<std::string>();
+    const std::string type = j["type"].get<std::string>();
     const Json props = j.value("props", Json::object());
 
     auto wres = WidgetRegistry::instance().make(type, props);
@@ -264,9 +270,9 @@ auto from_json_impl(const Json &j, std::size_t depth) -> Result<std::shared_ptr<
     }
     std::shared_ptr<Widget> w = std::move(wres.value());
 
-        if (j.contains("children") && j["children"].is_array()) {
+    if (j.contains("children") && j["children"].is_array()) {
         std::vector<Node> kids;
-                for (const auto &cj : j["children"]) {
+        for (const auto &cj : j["children"]) {
             auto cres = from_json_impl(cj, depth + 1);
             if (!cres) {
                 return cres;
@@ -278,7 +284,7 @@ auto from_json_impl(const Json &j, std::size_t depth) -> Result<std::shared_ptr<
     return w;
 }
 
-} // namespace
+}  // namespace
 
 auto from_json(const Json &j) -> Result<std::shared_ptr<Widget>> {
     register_core_widgets();
@@ -291,12 +297,12 @@ namespace {
 auto diff_objects(const Json &a, const Json &b, const std::string &path, std::vector<JsonPatchOp> &out) -> void {
     for (auto it = b.begin(); it != b.end(); ++it) {
         if (!a.contains(it.key())) {
-            out.push_back(JsonPatchOp{ .op = "add", .path = path + "/" + it.key(), .value = it.value() });
+            out.push_back(JsonPatchOp{.op = "add", .path = path + "/" + it.key(), .value = it.value()});
         }
     }
     for (auto it = a.begin(); it != a.end(); ++it) {
         if (!b.contains(it.key())) {
-            out.push_back(JsonPatchOp{ .op = "remove", .path = path + "/" + it.key(), .value = Json() });
+            out.push_back(JsonPatchOp{.op = "remove", .path = path + "/" + it.key(), .value = Json()});
         }
     }
     for (auto it = b.begin(); it != b.end(); ++it) {
@@ -312,16 +318,16 @@ auto diff_arrays(const Json &a, const Json &b, const std::string &path, std::vec
     for (std::size_t i = 0; i < n; ++i) {
         const std::string ip = path + "/" + std::to_string(i);
         if (i >= a.size()) {
-            out.push_back(JsonPatchOp{ .op = "add", .path = ip, .value = b.at(i) });
+            out.push_back(JsonPatchOp{.op = "add", .path = ip, .value = b.at(i)});
         } else if (i >= b.size()) {
-            out.push_back(JsonPatchOp{ .op = "remove", .path = ip, .value = Json() });
+            out.push_back(JsonPatchOp{.op = "remove", .path = ip, .value = Json()});
         } else {
             diff_into(a.at(i), b.at(i), ip, out);
         }
     }
 }
 
-} // namespace
+}  // namespace
 
 auto diff_into(const Json &a, const Json &b, const std::string &path, std::vector<JsonPatchOp> &out) -> void {
     if (a == b) {
@@ -332,7 +338,7 @@ auto diff_into(const Json &a, const Json &b, const std::string &path, std::vecto
     } else if (a.is_array() && b.is_array()) {
         diff_arrays(a, b, path, out);
     } else {
-        out.push_back(JsonPatchOp{ .op = "replace", .path = path, .value = b });
+        out.push_back(JsonPatchOp{.op = "replace", .path = path, .value = b});
     }
 }
 
@@ -347,13 +353,13 @@ auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void {
         const nlohmann::json::json_pointer ptr(op.path);
         // nlohmann 3.11 起 json_pointer 的 string 转换已弃用（contains/erase/operator[] 内部使用），
         // 局部抑制该告警；行为保持幂等（路径不存在时 contains 返回 false，不会抛异常）。
-#ifdef _MSC_VER
+#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
 #pragma warning(push)
 #pragma warning(disable : 4996)
-#elif defined(__clang__)
+#elif defined(AURORA_COMPILER_CLANG)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#elif defined(__GNUC__)
+#elif defined(AURORA_COMPILER_GCC)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
@@ -362,13 +368,13 @@ auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void {
                 target.erase(ptr);
             }
         } else {
-                        target[ptr] = op.value; // replace / add
+            target[ptr] = op.value;  // replace / add
         }
-#ifdef _MSC_VER
+#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
 #pragma warning(pop)
-#elif defined(__clang__)
+#elif defined(AURORA_COMPILER_CLANG)
 #pragma clang diagnostic pop
-#elif defined(__GNUC__)
+#elif defined(AURORA_COMPILER_GCC)
 #pragma GCC diagnostic pop
 #endif
     }
@@ -378,22 +384,22 @@ namespace {
 auto is_container_type(const std::string &t) -> bool {
     return t == "Column" || t == "Row" || t == "Stack" || t == "Grid" || t == "Scroll";
 }
-} // namespace
+}  // namespace
 
 auto component_schema(const std::string &name) -> Json {
     Json w = Json::object();
-        w["type"] = name;
-        w["container"] = is_container_type(name);
-        w["is_container"] = is_container_type(name);
-        w["is_layout"] = is_container_type(name); // 多子布局容器即 layout 型
-        w["is_clickable"] = name == "Button";
-        w["dynamic_children"] = (name == "Repeater" || name == "Canvas");
-        w["thread"] = "main";
+    w["type"] = name;
+    w["container"] = is_container_type(name);
+    w["is_container"] = is_container_type(name);
+    w["is_layout"] = is_container_type(name);  // 多子布局容器即 layout 型
+    w["is_clickable"] = name == "Button";
+    w["dynamic_children"] = (name == "Repeater" || name == "Canvas");
+    w["thread"] = "main";
     Json props = Json::object();
     auto inst = WidgetRegistry::instance().make(name, Json::object());
     if (inst) {
         inst.value()->serialize_props(props);
-                w["default_props"] = props; // serialize_props 已写入含默认值的属性对象
+        w["default_props"] = props;  // serialize_props 已写入含默认值的属性对象
 
         // 附录 B 自描述元数据
         const WidgetDescriptor desc = inst.value()->describe();
@@ -401,18 +407,18 @@ auto component_schema(const std::string &name) -> Json {
         for (const auto &pd : desc.properties) {
             prop_desc.push_back(descriptor_to_json(pd));
         }
-                w["prop_descriptors"] = prop_desc;
+        w["prop_descriptors"] = prop_desc;
         Json events = Json::array();
         for (const auto &e : desc.events) {
             events.push_back(e);
         }
-                w["events"] = events;
-                w["children_policy"] = desc.children_policy;
+        w["events"] = events;
+        w["children_policy"] = desc.children_policy;
         Json examples = Json::array();
         for (const auto &ex : desc.examples) {
             examples.push_back(ex);
         }
-                w["examples"] = examples;
+        w["examples"] = examples;
 
         // ---- Schema 扩展：props_schema / children_types / constraints ----
         Json props_schema = Json::object();
@@ -420,38 +426,38 @@ auto component_schema(const std::string &name) -> Json {
         for (const auto &pd : desc.properties) {
             Json ps = Json::object();
             if (!pd.json_type.empty()) {
-                                ps["type"] = pd.json_type;
+                ps["type"] = pd.json_type;
             }
             if (!pd.enum_values.empty()) {
                 Json ev = Json::array();
                 for (const auto &v : pd.enum_values) {
                     ev.push_back(v);
                 }
-                                ps["enum"] = ev;
+                ps["enum"] = ev;
             }
             if (!pd.min_value.empty()) {
-                                ps["minimum"] = pd.min_value;
+                ps["minimum"] = pd.min_value;
             }
             if (!pd.max_value.empty()) {
-                                ps["maximum"] = pd.max_value;
+                ps["maximum"] = pd.max_value;
             }
             if (!pd.default_value.empty()) {
-                                ps["default"] = pd.default_value;
+                ps["default"] = pd.default_value;
             }
             if (!pd.note.empty()) {
-                                ps["description"] = pd.note;
+                ps["description"] = pd.note;
             }
             if (!pd.constraint.empty()) {
-                                ps["constraint"] = pd.constraint;
+                ps["constraint"] = pd.constraint;
                 constraints.push_back(pd.constraint);
             }
             if (!ps.empty()) {
-                                props_schema[pd.name] = ps;
+                props_schema[pd.name] = ps;
             }
         }
-                w["props_schema"] = props_schema;
+        w["props_schema"] = props_schema;
         if (!constraints.empty()) {
-                        w["constraints"] = constraints;
+            w["constraints"] = constraints;
         }
 
         Json children_types = Json::array();
@@ -459,7 +465,7 @@ auto component_schema(const std::string &name) -> Json {
             children_types.push_back(ct);
         }
         if (!children_types.empty()) {
-                        w["children_types"] = children_types;
+            w["children_types"] = children_types;
         }
 
         Json invariants = Json::array();
@@ -467,33 +473,33 @@ auto component_schema(const std::string &name) -> Json {
             invariants.push_back(inv);
         }
         if (!invariants.empty()) {
-                        w["invariants"] = invariants;
+            w["invariants"] = invariants;
         }
     } else {
-                w["default_props"] = Json::object();
-                w["prop_descriptors"] = Json::array();
-                w["events"] = Json::array();
-                w["children_policy"] = "none";
-                w["examples"] = Json::array();
+        w["default_props"] = Json::object();
+        w["prop_descriptors"] = Json::array();
+        w["events"] = Json::array();
+        w["children_policy"] = "none";
+        w["examples"] = Json::array();
     }
     Json prop_keys = Json::array();
     for (auto it = props.begin(); it != props.end(); ++it) {
         prop_keys.push_back(it.key());
     }
-        w["props"] = prop_keys;
+    w["props"] = prop_keys;
     return w;
 }
 
-} // namespace serialization
+}  // namespace serialization
 
 namespace serialization {
 
 auto to_yaml(const Widget &w) -> std::string {
     const Json j = to_json(w);
-    return to_yaml(j); // calls yaml.h's inline to_yaml(const Json&, int=0)
+    return to_yaml(j);  // calls yaml.h's inline to_yaml(const Json&, int=0)
 }
 
-} // namespace serialization
+}  // namespace serialization
 
 auto list_all_components() -> std::vector<std::string> {
     serialization::register_core_widgets();
@@ -534,4 +540,4 @@ auto list_all_schemas() -> std::vector<Json> {
 
 // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
-} // namespace aurora
+}  // namespace aurora

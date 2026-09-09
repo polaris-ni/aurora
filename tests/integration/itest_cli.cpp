@@ -9,14 +9,17 @@
 #include <filesystem>
 #include <string>
 
+#ifndef _WIN32
+#include <sys/wait.h>  // POSIX: WIFEXITED / WEXITSTATUS（归一化 system() 的 waitpid 原始状态）
+#endif
+
 #include "aurora/app/validate.h"
 #include "aurora/aurora.h"
 #include "aurora/core/platform.h"
 #include "aurora/render/offscreen.h"
 #include "aurora/widget/codegen.h"
-#include "paths.h"
-
 #include "framework/aurora_test.h"
+#include "paths.h"
 
 namespace aurora::test_cases::itest_cli {
 
@@ -30,7 +33,7 @@ namespace {
 // ---------- 端到端辅助：探测构建产物并拉起子进程 ----------
 
 auto probe_cli_exe() -> std::string {
-    for (const char *name : {"aurora_cli.exe", "aurora_cli"}) {
+    for (const char* name : {"aurora_cli.exe", "aurora_cli"}) {
         const std::string p = au::testing::paths::under_repo(std::string{"build/"} + name);
         std::error_code ec;
         if (std::filesystem::is_regular_file(p, ec)) {
@@ -41,16 +44,25 @@ auto probe_cli_exe() -> std::string {
 }
 
 // 固定冒烟命令拉起自构建二进制，输出重定向到 null 设备（输入非不可信）。
-auto run_cli(const std::string &exe, const char *args) -> int {
+auto run_cli(const std::string& exe, const char* args) -> int {
 #ifdef AURORA_PLATFORM_WINDOWS
-    const char *null_dev = ">nul 2>&1";
+    constexpr auto null_dev = ">nul 2>&1";
 #else
-    const char *null_dev = ">/dev/null 2>&1";
+    const char* null_dev = ">/dev/null 2>&1";
 #endif
     const std::string cmd = "\"" + exe + "\" " + args + " " + null_dev;
     // 测试用意拉起自构建二进制，命令固定且不含外部输入。
     // NOLINTNEXTLINE(bugprone-command-processor)
-    return std::system(cmd.c_str());
+    const int status = std::system(cmd.c_str());
+    // 此处用编译器内建宏 `_WIN32` 而非项目宏：文件顶部的 <sys/wait.h> 守卫位于 platform.h
+    // 之前，只能用内建宏；两处判据保持同一个，避免依赖 platform.h 的展开时点。
+#ifdef _WIN32
+    return status;  // Windows（MSVC/MinGW）的 system() 直接返回子进程退出码。
+#else
+    // POSIX 的 system() 返回 waitpid 原始状态（退出码左移 8 位），须归一化后才能与退出码比较；
+    // 否则 `exit 2` 会变成 512，断言 `== 2` 在 Linux 恒假（而 `== 0` / `!= 0` 两平台都成立，故不易察觉）。
+    return WIFEXITED(status) ? WEXITSTATUS(status) : status;
+#endif
 }
 
 }  // namespace
@@ -64,7 +76,7 @@ AURORA_TEST_CASE(cli_components_lists_registered_widgets) {
 
     // 验证 JSON 输出格式（CLI components 子命令按 JSON 数组打印类型名）。
     au::Json arr = au::Json::array();
-    for (const auto &t : types) {
+    for (const auto& t : types) {
         arr.push_back(t);
     }
     const std::string output = arr.dump(2);
@@ -88,7 +100,7 @@ AURORA_TEST_CASE(cli_search_finds_button_by_substring) {
     AURORA_TEST_CHECK(!results.empty());
 
     au::Json arr = au::Json::array();
-    for (const auto &r : results) {
+    for (const auto& r : results) {
         arr.push_back(r);
     }
     const std::string output = arr.dump();
@@ -176,7 +188,7 @@ AURORA_TEST_CASE(cli_schema_lists_all_components_with_descriptors) {
     api["library"] = "aurora";
     api["language"] = "c++20";
     au::Json widgets = au::Json::array();
-    for (const auto &s : schemas) {
+    for (const auto& s : schemas) {
         AURORA_TEST_CHECK(s.contains("type"));
         AURORA_TEST_CHECK(s.contains("prop_descriptors"));
         widgets.push_back(s);

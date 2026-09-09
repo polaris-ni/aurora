@@ -22,13 +22,13 @@ class FixedBox final : public Widget {
   public:
     FixedBox(float w, float h) : w_(w), h_(h) {}
 
-    [[nodiscard]] auto type_name() const -> const char * override { return "FixedBox"; }
+    [[nodiscard]] auto type_name() const -> const char* override { return "FixedBox"; }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
         return c.constrain(Size{.width = w_, .height = h_});
     }
-    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
 
   private:
     float w_;
@@ -160,16 +160,15 @@ AURORA_TEST_CASE(scrolling_recycles_and_rebuilds_window) {
 
     list.set_scroll_offset(960.0F);
     LayoutEngine::layout(list, bounded(300.0F, 400.0F));
-    AURORA_TEST_CHECK_EQ(list.live_item_count(), 9U);   // 新窗口 20..28
+    AURORA_TEST_CHECK_EQ(list.live_item_count(), 9U);  // 新窗口 20..28
     AURORA_TEST_CHECK_EQ(rec.built_order.size(), 18U);  // 旧窗口全部回收、新窗口全部新建
 
     // 绘制后条目落位于内容坐标 - 滚动偏移处。
     Painter p;
     p.begin(300, 400);
-    list.paint(p,
-               Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 300.0F, .height = 400.0F}},
+    list.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 300.0F, .height = 400.0F}},
                BuildContext{});
-    AURORA_TEST_CHECK_NEAR(rec.items.at(20)->paint_bounds().origin.y, 0.0F, 1e-4F);    // 20*48 - 960
+    AURORA_TEST_CHECK_NEAR(rec.items.at(20)->paint_bounds().origin.y, 0.0F, 1e-4F);  // 20*48 - 960
     AURORA_TEST_CHECK_NEAR(rec.items.at(24)->paint_bounds().origin.y, 192.0F, 1e-4F);  // 24*48 - 960
     AURORA_TEST_CHECK_NEAR(rec.items.at(24)->paint_bounds().size.height, 48.0F, 1e-4F);
 }
@@ -189,7 +188,7 @@ AURORA_TEST_CASE(serialize_props_and_describe_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "LazyList");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool count_required = false;
-    for (const auto &p : d.properties) {
+    for (const auto& p : d.properties) {
         if (p.name == "count") {
             count_required = p.required;
         }

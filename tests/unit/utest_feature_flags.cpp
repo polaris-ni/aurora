@@ -12,41 +12,41 @@
 
 namespace aurora::test_cases::utest_feature_flags {
 
-using aurora::debug::FeatureFlags;
 using aurora::debug::feature_flags;
 using aurora::debug::feature_flags_json;
+using aurora::debug::FeatureFlags;
 
 namespace {
 
 /// 宏名 ↔ 结构体字段的对照表（键 = 完整宏名，值 = FeatureFlags 成员地址）。
 struct FlagKeyPair {
-    const char *key;
-    bool FeatureFlags::*field;
+    const char* key;
+    bool FeatureFlags::* field;
 };
 
 /// 全部 18 个归一化镜像字段（与 BUILD_OPTIONS.md 三层命名分组一一对应）。
-[[nodiscard]] auto flag_key_table() -> const std::vector<FlagKeyPair> & {
-    static const std::vector<FlagKeyPair> table = {
-        {"AURORA_BACKEND_HEADLESS", &FeatureFlags::backend_headless},
-        {"AURORA_BACKEND_WIN32", &FeatureFlags::backend_win32},
-        {"AURORA_BACKEND_D3D11", &FeatureFlags::backend_d3d11},
-        {"AURORA_BACKEND_GLFW", &FeatureFlags::backend_glfw},
-        {"AURORA_BACKEND_X11", &FeatureFlags::backend_x11},
-        {"AURORA_BACKEND_WAYLAND", &FeatureFlags::backend_wayland},
-        {"AURORA_BACKEND_MACOS", &FeatureFlags::backend_macos},
-        {"AURORA_BACKEND_WASM", &FeatureFlags::backend_wasm},
-        {"AURORA_ENABLE_LAYOUT_CACHE", &FeatureFlags::layout_cache},
-        {"AURORA_ENABLE_OCCLUSION_CULLING", &FeatureFlags::occlusion_culling},
-        {"AURORA_ENABLE_DISPLAY_LIST", &FeatureFlags::display_list},
-        {"AURORA_ENABLE_SIMD", &FeatureFlags::simd},
-        {"AURORA_ENABLE_PROFILING", &FeatureFlags::profiling},
-        {"AURORA_ENABLE_TRACING", &FeatureFlags::tracing},
-        {"AURORA_ENABLE_DEBUG", &FeatureFlags::debug},
-        {"AURORA_ENABLE_IMAGE_JPEG", &FeatureFlags::image_jpeg},
-        {"AURORA_ENABLE_IMAGE_WEBP", &FeatureFlags::image_webp},
-        {"AURORA_ENABLE_IMAGE_PNG", &FeatureFlags::image_png},
+[[nodiscard]] auto flag_key_table() -> const std::vector<FlagKeyPair>& {
+    static const std::vector<FlagKeyPair> AURORA_FLAG_KEY_TABLE = {
+        {.key = "AURORA_BACKEND_HEADLESS", .field = &FeatureFlags::backend_headless},
+        {.key = "AURORA_BACKEND_WIN32", .field = &FeatureFlags::backend_win32},
+        {.key = "AURORA_BACKEND_D3D11", .field = &FeatureFlags::backend_d3d11},
+        {.key = "AURORA_BACKEND_GLFW", .field = &FeatureFlags::backend_glfw},
+        {.key = "AURORA_BACKEND_X11", .field = &FeatureFlags::backend_x11},
+        {.key = "AURORA_BACKEND_WAYLAND", .field = &FeatureFlags::backend_wayland},
+        {.key = "AURORA_BACKEND_MACOS", .field = &FeatureFlags::backend_macos},
+        {.key = "AURORA_BACKEND_WASM", .field = &FeatureFlags::backend_wasm},
+        {.key = "AURORA_ENABLE_LAYOUT_CACHE", .field = &FeatureFlags::layout_cache},
+        {.key = "AURORA_ENABLE_OCCLUSION_CULLING", .field = &FeatureFlags::occlusion_culling},
+        {.key = "AURORA_ENABLE_DISPLAY_LIST", .field = &FeatureFlags::display_list},
+        {.key = "AURORA_ENABLE_SIMD", .field = &FeatureFlags::simd},
+        {.key = "AURORA_ENABLE_PROFILING", .field = &FeatureFlags::profiling},
+        {.key = "AURORA_ENABLE_TRACING", .field = &FeatureFlags::tracing},
+        {.key = "AURORA_ENABLE_DEBUG", .field = &FeatureFlags::debug},
+        {.key = "AURORA_ENABLE_IMAGE_JPEG", .field = &FeatureFlags::image_jpeg},
+        {.key = "AURORA_ENABLE_IMAGE_WEBP", .field = &FeatureFlags::image_webp},
+        {.key = "AURORA_ENABLE_IMAGE_PNG", .field = &FeatureFlags::image_png},
     };
-    return table;
+    return AURORA_FLAG_KEY_TABLE;
 }
 
 }  // namespace
@@ -79,7 +79,7 @@ AURORA_TEST_CASE(snapshot_matches_json_per_macro_key) {
     const FeatureFlags f = feature_flags();
     const Json j = f.to_json();
     AURORA_TEST_CHECK_TRUE(j.is_object());
-    for (const FlagKeyPair &pair : flag_key_table()) {
+    for (const FlagKeyPair& pair : flag_key_table()) {
         AURORA_TEST_CHECK_MSG(j.contains(pair.key), std::string("to_json 缺少宏键: ") + pair.key);
         AURORA_TEST_CHECK_EQ(j[pair.key], f.*(pair.field));
     }
@@ -106,7 +106,7 @@ AURORA_TEST_CASE(snapshot_is_stable_across_calls) {
     // 结果为编译期常量快照：与运行环境无关，重复调用取值恒定。
     const FeatureFlags first = feature_flags();
     const FeatureFlags second = feature_flags();
-    for (const FlagKeyPair &pair : flag_key_table()) {
+    for (const FlagKeyPair& pair : flag_key_table()) {
         AURORA_TEST_CHECK_EQ(second.*(pair.field), first.*(pair.field));
     }
 }

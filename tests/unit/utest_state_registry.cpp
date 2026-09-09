@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/state_registry.h
-/// 测试说明: 注册表条目结构、register_state/register_effect 的追加语义与锚点身份回传、State 构造自注册，以及析构后陈旧条目的过期探测与不查重追加
+/// 测试说明: 注册表条目结构、register_state/register_effect 的追加语义与锚点身份回传、State
+/// 构造自注册，以及析构后陈旧条目的过期探测与不查重追加
 
 #include <cstddef>
 #include <memory>
@@ -35,7 +36,7 @@ AURORA_TEST_CASE(register_effect_appends_entry_with_raw_and_anchor) {
     auto& registry = detail::registry_effects();
     const auto before = registry.size();
 
-    Effect eff{[] {}};
+    Effect eff{[]() -> void {}};
     const auto anchor = std::make_shared<aurora::ReactiveAnchor>();
     detail::register_effect(eff, anchor);
 

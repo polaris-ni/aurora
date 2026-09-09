@@ -85,12 +85,6 @@ auto message_message(bool satisfied, std::string_view expression, std::string_vi
     return std::string{expression} + ": " + std::string{message};
 }
 
-auto string_view_of(const char* text) -> std::string_view {
-    return text == nullptr ? std::string_view{} : std::string_view{text};
-}
-
-auto string_view_of(std::string_view text) -> std::string_view { return text; }
-
 auto strings_equal(std::string_view lhs, std::string_view rhs, bool case_sensitive) -> bool {
     if (case_sensitive) {
         return lhs == rhs;

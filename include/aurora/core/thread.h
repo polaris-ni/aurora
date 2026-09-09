@@ -69,7 +69,7 @@ class MainThreadOnly<T, false> {
 /// clang 用 `annotate` 属性（可被静态分析 / 文档工具读取）；GCC 不支持 `annotate`
 /// 属性（会触发 `-Wattributes`），故 GCC 与其它编译器均为 no-op；运行期契约仍由
 /// `MainThreadOnly` 守卫。
-#ifdef __clang__
+#ifdef AURORA_COMPILER_CLANG
 #define AURORA_MAIN_THREAD [[clang::annotate("au::main_thread")]]
 #else
 #define AURORA_MAIN_THREAD /* no-op: main-thread contract enforced at runtime via MainThreadOnly */

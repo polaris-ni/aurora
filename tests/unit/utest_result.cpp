@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/result.h
-/// 测试说明: Result<T>/Result<void> 的构造与不变量、值取回与 unwrap、错误路径，以及 make_error 三重载的表驱动元数据/模板渲染与 Error::to_json 形态
+/// 测试说明: Result<T>/Result<void> 的构造与不变量、值取回与 unwrap、错误路径，以及 make_error
+/// 三重载的表驱动元数据/模板渲染与 Error::to_json 形态
 
 #include <stdexcept>
 #include <string>
@@ -89,7 +90,8 @@ AURORA_TEST_CASE(make_error_renders_template_and_fills_table_metadata) {
 
 AURORA_TEST_CASE(make_error_hint_override_and_custom_message) {
     // hint 覆盖：非空 hint 优先于表内默认 hint。
-    const auto overridden = make_error(ErrorCode::WidgetInvalidProp, ErrorParams{{"prop", "color"}}, std::string{"custom hint"});
+    const auto overridden =
+        make_error(ErrorCode::WidgetInvalidProp, ErrorParams{{"prop", "color"}}, std::string{"custom hint"});
     AURORA_TEST_CHECK_STREQ(overridden.message, "Invalid property value: 'color'");
     AURORA_TEST_CHECK_STREQ(overridden.hint, "custom hint");
 

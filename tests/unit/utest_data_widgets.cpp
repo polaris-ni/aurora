@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/data_widgets.h
-/// 测试说明: 覆盖 DataTable/TreeView/ListView 的构造与单元格访问、选中与排序回调、越界防御、指针命中、布局尺寸、序列化与自描述，含离屏绘制冒烟
+/// 测试说明: 覆盖 DataTable/TreeView/ListView
+/// 的构造与单元格访问、选中与排序回调、越界防御、指针命中、布局尺寸、序列化与自描述，含离屏绘制冒烟
 
 #include <string>
 #include <type_traits>
@@ -86,7 +87,7 @@ AURORA_TEST_CASE(data_table_select_row_bounds_and_callback) {
     DataTable dt = make_table();
     int last = -100;
     int calls = 0;
-    dt.set_on_select([&last, &calls](int r) {
+    dt.set_on_select([&last, &calls](int r) -> void {
         last = r;
         ++calls;
     });
@@ -113,7 +114,7 @@ AURORA_TEST_CASE(data_table_sort_cycle_skips_unsortable) {
     int last_col = -100;
     SortOrder last_order = SortOrder::None;
     int calls = 0;
-    dt.set_on_sort([&last_col, &last_order, &calls](int c, SortOrder o) {
+    dt.set_on_sort([&last_col, &last_order, &calls](int c, SortOrder o) -> void {
         last_col = c;
         last_order = o;
         ++calls;
@@ -185,7 +186,7 @@ AURORA_TEST_CASE(data_table_pointer_header_sort_and_row_select) {
 AURORA_TEST_CASE(data_table_layout_size_matches_content) {
     DataTable dt = make_table();
     LayoutEngine::layout(dt, bounded(400.0F, 600.0F));
-    AURORA_TEST_CHECK_NEAR(dt.size().width, 180.0F, 1e-3F);   // 列宽之和 120 + 60
+    AURORA_TEST_CHECK_NEAR(dt.size().width, 180.0F, 1e-3F);  // 列宽之和 120 + 60
     AURORA_TEST_CHECK_NEAR(dt.size().height, 116.0F, 1e-3F);  // 表头 32 + 3 行 × 28
 
     DataTable empty;
@@ -195,7 +196,7 @@ AURORA_TEST_CASE(data_table_layout_size_matches_content) {
 
 AURORA_TEST_CASE(data_table_signal_view_write_through) {
     DataTable dt = make_table();
-    std::vector<SignalViewBase *> sigs;
+    std::vector<SignalViewBase*> sigs;
     dt.collect_signals(sigs);
     AURORA_TEST_REQUIRE_EQ(sigs.size(), 1U);  // selected_row 信号入收集集
 
@@ -255,7 +256,7 @@ AURORA_TEST_CASE(tree_view_toggle_expand_collapse_leaf_noop) {
     TreeView tv = make_tree();
     int last_row = -100;
     bool last_open = false;
-    tv.set_on_toggle([&last_row, &last_open](int r, bool open) {
+    tv.set_on_toggle([&last_row, &last_open](int r, bool open) -> void {
         last_row = r;
         last_open = open;
     });
@@ -284,7 +285,7 @@ AURORA_TEST_CASE(tree_view_select_bounds_and_callback) {
     TreeView tv = make_tree();
     int last = -100;
     int calls = 0;
-    tv.set_on_select([&last, &calls](int r) {
+    tv.set_on_select([&last, &calls](int r) -> void {
         last = r;
         ++calls;
     });
@@ -376,7 +377,7 @@ AURORA_TEST_CASE(list_view_remove_fixes_selection_and_append) {
     lv.select(1);
     lv.select(3);
     int removed = -100;
-    lv.set_on_remove([&removed](int r) { removed = r; });
+    lv.set_on_remove([&removed](int r) -> void { removed = r; });
 
     lv.remove(1);  // 删除 B：选中 {1,3} → {2}（D 前移）
     AURORA_TEST_CHECK_EQ(removed, 1);
@@ -397,8 +398,8 @@ AURORA_TEST_CASE(list_view_remove_fixes_selection_and_append) {
 AURORA_TEST_CASE(list_view_pointer_row_select) {
     ListView lv{std::vector<std::string>{"X", "Y"}};
     LayoutEngine::layout(lv, bounded(400.0F, 600.0F));
-    AURORA_TEST_CHECK_NEAR(lv.size().width, 400.0F, 1e-3F);   // 宽取约束上限
-    AURORA_TEST_CHECK_NEAR(lv.size().height, 52.0F, 1e-3F);   // 2 行 × 26
+    AURORA_TEST_CHECK_NEAR(lv.size().width, 400.0F, 1e-3F);  // 宽取约束上限
+    AURORA_TEST_CHECK_NEAR(lv.size().height, 52.0F, 1e-3F);  // 2 行 × 26
 
     MouseEvent row;
     row.action = MouseAction::Press;
@@ -447,7 +448,7 @@ AURORA_TEST_CASE(list_view_describe_and_signals) {
     AURORA_TEST_CHECK_TRUE(d.properties[0].required);
 
     ListView lv;
-    std::vector<SignalViewBase *> sigs;
+    std::vector<SignalViewBase*> sigs;
     lv.collect_signals(sigs);
     AURORA_TEST_CHECK_THAT(sigs, aurora::testing::matchers::is_empty());  // 无内部信号
 }

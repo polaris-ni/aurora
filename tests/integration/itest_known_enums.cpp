@@ -14,9 +14,8 @@
 #include "aurora/core/enums.h"
 #include "aurora/event/keycode.h"
 #include "aurora/widget/alignment.h"
-#include "known_enums.h"
-
 #include "framework/aurora_test.h"
+#include "known_enums.h"
 
 namespace aurora::test_cases::itest_known_enums {
 
@@ -28,8 +27,8 @@ namespace {
 /// @note 这些名字与 tools/include/known_enums.h 中的取值逐字一致；枚举演进时两处必须同步修改，
 ///       否则本函数编译失败（正是我们想要的失败模式）。
 [[maybe_unused]] auto enum_anchors() -> int {
-    (void)&aurora::colors::AURORA_WHITE;         // ColorPalette
-    (void)&aurora::colors::AURORA_TRANSPARENT;   // ColorPalette
+    (void)&aurora::colors::AURORA_WHITE;  // ColorPalette
+    (void)&aurora::colors::AURORA_TRANSPARENT;  // ColorPalette
     return static_cast<int>(aurora::Alignment::BottomRight) + static_cast<int>(au::BoxFit::ScaleDown) +
            static_cast<int>(au::CrossAxisAlignment::Stretch) + static_cast<int>(au::MainAxisAlignment::SpaceEvenly) +
            static_cast<int>(au::MainAxisSize::Max) + static_cast<int>(au::StackFit::Passthrough) +
@@ -44,12 +43,11 @@ namespace {
 }
 
 /// @brief 属性类型是否属于「不需要枚举登记」的基础 / 容器类型。
-auto is_primitive_type(const std::string &t) -> bool {
-    static const std::vector<std::string> base = {"float",     "int",      "bool",
-                                                  "string",    "double",   "Color",
-                                                  "Length",    "LocalizedString", "EdgeInsets",
-                                                  "Json",      "any",      "std::string"};
-    for (const auto &b : base) {
+auto is_primitive_type(const std::string& t) -> bool {
+    static const std::vector<std::string> BASE = {"float",      "int",   "bool",   "string",
+                                                  "double",     "Color", "Length", "LocalizedString",
+                                                  "EdgeInsets", "Json",  "any",    "std::string"};
+    for (const auto& b : BASE) {
         if (t == b) {
             return true;
         }
@@ -58,8 +56,8 @@ auto is_primitive_type(const std::string &t) -> bool {
     return t.starts_with("vector") || t.find("std::") != std::string::npos;
 }
 
-auto has_value(const std::vector<std::string> &vals, const std::string &needle) -> bool {
-    return std::ranges::any_of(vals, [&needle](const std::string &v) -> bool { return v == needle; });
+auto has_value(const std::vector<std::string>& vals, const std::string& needle) -> bool {
+    return std::ranges::any_of(vals, [&needle](const std::string& v) -> bool { return v == needle; });
 }
 
 }  // namespace
@@ -72,10 +70,10 @@ AURORA_TEST_CASE(known_enum_members_compile_anchors) {
 AURORA_TEST_CASE(known_enums_registry_shape_is_valid) {
     const auto reg = aurora::tools::known_enums();
     AURORA_TEST_REQUIRE(reg.size() >= 19);
-    for (const auto &[name, vals] : reg) {
+    for (const auto& [name, vals] : reg) {
         AURORA_TEST_CHECK_MSG(!name.empty(), "enum registry key must not be empty");
         AURORA_TEST_CHECK_MSG(!vals.empty(), "enum registry value list must not be empty");
-        for (const auto &v : vals) {
+        for (const auto& v : vals) {
             AURORA_TEST_CHECK_MSG(!v.empty(), "enum registry member name must not be empty");
         }
     }
@@ -118,12 +116,12 @@ AURORA_TEST_CASE(known_enums_cover_all_enum_typed_props) {
 
     std::vector<std::string> uncovered;
     std::size_t checked = 0;
-    for (const auto &s : schemas) {
+    for (const auto& s : schemas) {
         if (!s.contains("prop_descriptors") || !s["prop_descriptors"].is_array()) {
             continue;
         }
         const std::string wtype = s.value("type", std::string{});
-        for (const auto &p : s["prop_descriptors"]) {
+        for (const auto& p : s["prop_descriptors"]) {
             if (!p.contains("type") || !p["type"].is_string()) {
                 continue;
             }
@@ -133,15 +131,19 @@ AURORA_TEST_CASE(known_enums_cover_all_enum_typed_props) {
             }
             ++checked;
             if (!reg.contains(t)) {
-                uncovered.push_back(wtype + "." + t);
+                std::string item;
+                item.reserve(wtype.size() + t.size() + 1U);
+                item += wtype;
+                item += '.';
+                item += t;
+                uncovered.push_back(std::move(item));
             }
         }
     }
     // 覆盖率断言仅在确实存在枚举型属性时生效，避免空注册表蒙混过关。
     AURORA_TEST_CHECK_MSG(checked > 0, "expected enum-typed props to be present in schemas");
-    AURORA_TEST_CHECK_MSG(uncovered.empty(),
-                          "prop type missing from known_enums registry: " +
-                              (uncovered.empty() ? std::string{} : uncovered.front()));
+    AURORA_TEST_CHECK_MSG(uncovered.empty(), "prop type missing from known_enums registry: " +
+                                                 (uncovered.empty() ? std::string{} : uncovered.front()));
 }
 
 }  // namespace aurora::test_cases::itest_known_enums

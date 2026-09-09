@@ -4,14 +4,13 @@
 /// （radius/blur/border）、strength/alpha 的 [0,1] 夹取、渐变类型与色标回读、layout 透传
 
 #include "aurora/modifier/modifier.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_modifier_paint {
 
 namespace {
 
-auto passthrough(const Constraints &c) -> Size { return c.constrain(Size{.width = 42.0F, .height = 24.0F}); }
+auto passthrough(const Constraints& c) -> Size { return c.constrain(Size{.width = 42.0F, .height = 24.0F}); }
 
 auto constraints(float max_w = 100.0F, float max_h = 100.0F) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = max_w, .height = max_h}};
@@ -31,8 +30,8 @@ AURORA_TEST_CASE(background_keeps_color_radius_and_clamps_negative_radius) {
 }
 
 AURORA_TEST_CASE(gradient_linear_stores_colors_stops_angle) {
-    const GradientBackground g(std::vector{Color(255, 0, 0, 255), Color(0, 0, 255, 255)},
-                               std::vector{0.0F, 1.0F}, 45.0F);
+    const GradientBackground g(std::vector{Color(255, 0, 0, 255), Color(0, 0, 255, 255)}, std::vector{0.0F, 1.0F},
+                               45.0F);
     AURORA_TEST_CHECK_EQ(g.paint_kind(), ModifierNode::PaintKind::GradientBackground);
     AURORA_TEST_CHECK_EQ(g.type(), GradientBackground::Type::Linear);
     AURORA_TEST_REQUIRE_EQ(g.colors().size(), 2U);
@@ -43,8 +42,7 @@ AURORA_TEST_CASE(gradient_linear_stores_colors_stops_angle) {
 }
 
 AURORA_TEST_CASE(gradient_radial_default_angle_zero) {
-    const GradientBackground g(std::vector{Color(0, 0, 0, 255), Color(255, 255, 255, 255)},
-                               std::vector{0.0F, 1.0F});
+    const GradientBackground g(std::vector{Color(0, 0, 0, 255), Color(255, 255, 255, 255)}, std::vector{0.0F, 1.0F});
     AURORA_TEST_CHECK_EQ(g.type(), GradientBackground::Type::Radial);
     AURORA_TEST_CHECK_NEAR(g.angle(), 0.0F, 0.0F);
 }

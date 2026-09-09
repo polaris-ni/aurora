@@ -32,7 +32,7 @@ class ProbeCodec : public image::ImageCodec {
     }
 
     [[nodiscard]] auto decode(std::span<const std::uint8_t> data,
-                              [[maybe_unused]] const image::DecodeOptions &opt) const -> Result<Image> override {
+                              [[maybe_unused]] const image::DecodeOptions& opt) const -> Result<Image> override {
         // 真实编解码器在 decode 内也会校验魔数：注册表的兜底轮会尝试「未嗅探命中」的编解码器，
         // 若此处不校验，任何字节流都会被本 codec 吞下（测试需还原该契约）。
         if (!sniff(data)) {
@@ -45,8 +45,7 @@ class ProbeCodec : public image::ImageCodec {
         return img;
     }
 
-    [[nodiscard]] auto encode([[maybe_unused]] const Image &img,
-                              [[maybe_unused]] const image::EncodeOptions &opt) const
+    [[nodiscard]] auto encode([[maybe_unused]] const Image& img, [[maybe_unused]] const image::EncodeOptions& opt) const
         -> Result<std::vector<std::uint8_t>> override {
         return std::vector<std::uint8_t>{'A', 'U', 'R', 'P'};
     }
@@ -102,7 +101,8 @@ AURORA_TEST_CASE(detect_webp_by_riff_container) {
 
 AURORA_TEST_CASE(format_from_path_uses_extension) {
     AURORA_TEST_CHECK_EQ(static_cast<int>(image::format_from_path("a.png")), static_cast<int>(image::ImageFormat::PNG));
-    AURORA_TEST_CHECK_EQ(static_cast<int>(image::format_from_path("a.jpg")), static_cast<int>(image::ImageFormat::JPEG));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(image::format_from_path("a.jpg")),
+                         static_cast<int>(image::ImageFormat::JPEG));
     AURORA_TEST_CHECK_EQ(static_cast<int>(image::format_from_path("a.svg")), static_cast<int>(image::ImageFormat::SVG));
     AURORA_TEST_CHECK_EQ(static_cast<int>(image::format_from_path("a.unknown-ext")),
                          static_cast<int>(image::ImageFormat::Unknown));
@@ -173,8 +173,7 @@ AURORA_TEST_CASE(decode_async_resolves_to_same_result) {
     const auto encoded = image::ImageCodecRegistry::instance().encode(src, image::EncodeOptions{});
     AURORA_TEST_REQUIRE_TRUE(encoded.ok());
 
-    auto future = image::ImageCodecRegistry::instance().decode_async(
-        image::ImageSource::from_memory(encoded.value()));
+    auto future = image::ImageCodecRegistry::instance().decode_async(image::ImageSource::from_memory(encoded.value()));
     const auto decoded = future.get();
     AURORA_TEST_REQUIRE_TRUE(decoded.ok());
     AURORA_TEST_CHECK_EQ(decoded.value().width, 3);

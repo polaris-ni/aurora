@@ -32,7 +32,7 @@ AURORA_TEST_CASE(checkbox_defaults_and_type_name) {
 AURORA_TEST_CASE(checkbox_set_value_fires_on_changed) {
     std::vector<bool> seen;
     Checkbox c;
-    c.set_on_changed([&seen](bool v) { seen.push_back(v); });
+    c.set_on_changed([&seen](bool v) -> void { seen.push_back(v); });
 
     c.set_value(true);
     AURORA_TEST_CHECK_TRUE(c.value());
@@ -48,7 +48,7 @@ AURORA_TEST_CASE(checkbox_set_value_fires_on_changed) {
 AURORA_TEST_CASE(checkbox_pointer_press_release_toggles) {
     std::vector<bool> seen;
     Checkbox c;
-    c.set_on_changed([&seen](bool v) { seen.push_back(v); });
+    c.set_on_changed([&seen](bool v) -> void { seen.push_back(v); });
 
     MouseEvent press;
     press.action = MouseAction::Press;
@@ -79,7 +79,7 @@ AURORA_TEST_CASE(checkbox_pointer_press_release_toggles) {
 AURORA_TEST_CASE(checkbox_disabled_ignores_clicks) {
     int calls = 0;
     Checkbox c;
-    c.set_on_changed([&calls](bool) { ++calls; });
+    c.set_on_changed([&calls](bool) -> void { ++calls; });
     c.set_enabled(false);
     AURORA_TEST_CHECK_FALSE(c.enabled());
 
@@ -107,13 +107,13 @@ AURORA_TEST_CASE(checkbox_binding_writes_through_to_upstream) {
     AURORA_TEST_CHECK_FALSE(c.value());  // 上游 → 控件（读取穿透）
 
     // 信号收集：内部 value_ + 绑定目标。
-    std::vector<SignalViewBase *> out;
+    std::vector<SignalViewBase*> out;
     c.collect_signals(out);
     AURORA_TEST_REQUIRE_EQ(out.size(), 2U);
 
     // 非绑定构造只收集内部信号。
     Checkbox plain;
-    std::vector<SignalViewBase *> single;
+    std::vector<SignalViewBase*> single;
     plain.collect_signals(single);
     AURORA_TEST_CHECK_EQ(single.size(), 1U);
 }
@@ -144,7 +144,7 @@ AURORA_TEST_CASE(checkbox_describe_reports_metadata) {
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_changed");
     bool has_checked = false;
-    for (const auto &p : d.properties) {
+    for (const auto& p : d.properties) {
         if (std::string{p.name} == "checked") {
             has_checked = true;
         }
@@ -155,7 +155,7 @@ AURORA_TEST_CASE(checkbox_describe_reports_metadata) {
 AURORA_TEST_CASE(checkbox_serialize_deserialize_roundtrip) {
     int calls = 0;
     Checkbox src;
-    src.set_on_changed([&calls](bool) { ++calls; });
+    src.set_on_changed([&calls](bool) -> void { ++calls; });
     src.set_value(true);
     src.set_size(28.0F);
     src.set_enabled(false);

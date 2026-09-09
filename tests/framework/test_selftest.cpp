@@ -246,9 +246,10 @@ auto selftest_organization() -> bool {
 
     // 生命周期：SetUp -> 用例体 -> TearDown，次序可观测。
     lifecycle_counters() = {};
-    probe(+[]() -> void { detail::run_case_instance<LifecycleCase>(); });
-    ok = expect(lifecycle_counters().setups == 1 && lifecycle_counters().bodies == 1 &&
-                    lifecycle_counters().teardowns == 1 && lifecycle_counters().teardown_seen_in_body == 1,
+    const auto lifecycle = probe(+[]() -> void { detail::run_case_instance<LifecycleCase>(); });
+    ok = expect(lifecycle.status == TestStatus::Passed && lifecycle_counters().setups == 1 &&
+                    lifecycle_counters().bodies == 1 && lifecycle_counters().teardowns == 1 &&
+                    lifecycle_counters().teardown_seen_in_body == 1,
                 "fixture lifecycle runs SetUp -> body -> TearDown") &&
          ok;
 
@@ -268,8 +269,8 @@ auto selftest_organization() -> bool {
 
     // 展开器：每个取值一条独立用例名；套件名沿用 TEST_P 所在文件。
     // ⚠️ registrar 必须是静态存储期：注册表持有其节点地址，函数局部对象析构即悬垂。
-    static detail::ParamFamilyRegistrar family_registrar{probe_suite(),      "ParamFixture", "area", "<selftest>", 1,
-                                                         &param_probe_run_at};
+    [[maybe_unused]] static detail::ParamFamilyRegistrar family_registrar{
+        probe_suite(), "ParamFixture", "area", "<selftest>", 1, &param_probe_run_at};
     const auto before = probe_case_names(probe_suite()).size();
     detail::register_instantiation<ParamFixture>("edges", "ParamFixture", probe_param_values(),
                                                  detail::DefaultParamName{});
@@ -543,7 +544,7 @@ auto selftest_exception_assertions() -> bool {
     ok = expect_fails_with(AURORA_TEST_PROBE(AURORA_TEST_CHECK_NO_THROW(throw std::runtime_error{"oops"})),
                            "expected no exception", "CHECK_NO_THROW fail reports the thrown exception") &&
          ok;
-    ok = expect_passes(AURORA_TEST_PROBE(AURORA_TEST_CHECK_ANY_THROW(throw 7)),
+    ok = expect_passes(AURORA_TEST_PROBE(AURORA_TEST_CHECK_ANY_THROW(throw 7)),  // NOLINT(*-std-exception-baseclass)
                        "CHECK_ANY_THROW accepts non-standard throws") &&
          ok;
     ok = expect_fails_with(AURORA_TEST_PROBE(AURORA_TEST_CHECK_ANY_THROW(static_cast<void>(0))), "did not throw",

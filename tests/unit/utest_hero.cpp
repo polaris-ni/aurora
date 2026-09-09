@@ -21,16 +21,14 @@ namespace {
 /// 纯色填充探针叶控件：记录 paint 次数并整块填充指定颜色。
 class SolidBox final : public LeafWidget {
   public:
-    SolidBox(Color fill, int *paint_count = nullptr) : fill_(fill), paint_count_(paint_count) {}
+    SolidBox(Color fill, int* paint_count = nullptr) : fill_(fill), paint_count_(paint_count) {}
 
-    [[nodiscard]] auto type_name() const -> const char * override { return "SolidBox"; }
+    [[nodiscard]] auto type_name() const -> const char* override { return "SolidBox"; }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(c.max);
-    }
+    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override { return c.constrain(c.max); }
 
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+    auto on_paint(Painter& p, const Rect& bounds, const BuildContext& /*ctx*/) -> void override {
         if (paint_count_ != nullptr) {
             ++*paint_count_;
         }
@@ -39,12 +37,12 @@ class SolidBox final : public LeafWidget {
 
   private:
     Color fill_;
-    int *paint_count_;
+    int* paint_count_;
 };
 
 /// 就地构造注入 HeroRegistry 的绘制环境（Hero 经 ctx.environment 读取）。
 /// env 须存活于调用方作用域，故以出参形态装配而非按值返回 BuildContext。
-auto make_registry_context(Environment &env, const std::shared_ptr<HeroRegistry> &reg) -> BuildContext {
+auto make_registry_context(Environment& env, const std::shared_ptr<HeroRegistry>& reg) -> BuildContext {
     env.set_local<std::shared_ptr<HeroRegistry>>(reg);
     BuildContext ctx;
     ctx.env = &env;
@@ -108,7 +106,7 @@ AURORA_TEST_CASE(hero_cache_policy_and_signals) {
     AURORA_TEST_CHECK_STREQ(hero.type_name(), "Hero");
     AURORA_TEST_CHECK_FALSE(hero.can_cache_display_list());  // 绘制有副作用（几何注册）
 
-    std::vector<SignalViewBase *> sigs;
+    std::vector<SignalViewBase*> sigs;
     hero.collect_signals(sigs);
     AURORA_TEST_CHECK_EQ(sigs.size(), 0U);
 }
@@ -141,7 +139,7 @@ AURORA_TEST_CASE(hero_paint_captures_source_geometry) {
 
     AURORA_TEST_REQUIRE_EQ(reg->source.size(), 1U);
     AURORA_TEST_REQUIRE_TRUE(reg->source.contains("logo"));
-    const HeroEntry &entry = reg->source["logo"];
+    const HeroEntry& entry = reg->source["logo"];
     AURORA_TEST_CHECK_NEAR(entry.bounds.origin.x, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(entry.bounds.origin.y, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(entry.bounds.size.width, 60.0F, 1e-4F);
@@ -184,7 +182,7 @@ AURORA_TEST_CASE(hero_paint_skips_child_while_morphing) {
     p.begin(60, 30);
     hero.paint(p, paint_rect(60.0F, 30.0F), ctx);
 
-    AURORA_TEST_CHECK_EQ(paints, 0);            // 跳过自绘，避免双重影像
+    AURORA_TEST_CHECK_EQ(paints, 0);  // 跳过自绘，避免双重影像
     AURORA_TEST_CHECK_TRUE(reg->source.contains("logo"));  // 捕获仍先于跳绘完成
 }
 

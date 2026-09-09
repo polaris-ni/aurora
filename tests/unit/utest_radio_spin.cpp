@@ -36,7 +36,7 @@ AURORA_TEST_CASE(radiogroup_defaults_and_type_name) {
 AURORA_TEST_CASE(radiogroup_select_and_callback_boundaries) {
     std::vector<int> seen;
     RadioGroup rg({"A", "B", "C"});
-    rg.set_on_change([&seen](int i) { seen.push_back(i); });
+    rg.set_on_change([&seen](int i) -> void { seen.push_back(i); });
 
     rg.select(2);
     AURORA_TEST_CHECK_EQ(rg.selected_index(), 2);
@@ -68,7 +68,7 @@ AURORA_TEST_CASE(radiogroup_initial_index_clamped) {
 AURORA_TEST_CASE(radiogroup_pointer_press_selects_row) {
     std::vector<int> seen;
     RadioGroup rg({"A", "B", "C"});
-    rg.set_on_change([&seen](int i) { seen.push_back(i); });
+    rg.set_on_change([&seen](int i) -> void { seen.push_back(i); });
 
     // 纵向行高 28：local y=35 落在第 2 行。
     MouseEvent press;
@@ -154,7 +154,7 @@ AURORA_TEST_CASE(spinbox_ctor_clamps_range_and_step) {
 AURORA_TEST_CASE(spinbox_set_value_increment_decrement) {
     std::vector<double> seen;
     SpinBox sb(50.0, 0.0, 100.0, 5.0);
-    sb.set_on_change([&seen](double v) { seen.push_back(v); });
+    sb.set_on_change([&seen](double v) -> void { seen.push_back(v); });
 
     sb.increment();
     AURORA_TEST_CHECK_NEAR(sb.value_of(), 55.0, 1e-4);

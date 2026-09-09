@@ -13,7 +13,7 @@ namespace aurora::test_cases::utest_display {
 namespace {
 
 /// 点是否落在矩形内（半开区间，与显示器的物理像素区域语义一致）。
-auto rect_contains(const Rect &r, const Point &p) -> bool {
+auto rect_contains(const Rect& r, const Point& p) -> bool {
     return p.x >= r.origin.x && p.x < r.origin.x + r.size.width && p.y >= r.origin.y &&
            p.y < r.origin.y + r.size.height;
 }
@@ -51,7 +51,7 @@ AURORA_TEST_CASE(list_displays_returns_at_least_one_display) {
     const auto displays = aurora::app::list_displays();
 
     AURORA_TEST_CHECK_GE(displays.size(), 1U);
-    for (const auto &d : displays) {
+    for (const auto& d : displays) {
         AURORA_TEST_CHECK_GT(d.scale_factor, 0.0F);
         AURORA_TEST_CHECK_GT(d.bounds.size.width, 0.0F);
         AURORA_TEST_CHECK_GT(d.bounds.size.height, 0.0F);
@@ -62,7 +62,7 @@ AURORA_TEST_CASE(list_displays_marks_exactly_one_primary) {
     const auto displays = aurora::app::list_displays();
 
     std::size_t primary_count = 0;
-    for (const auto &d : displays) {
+    for (const auto& d : displays) {
         if (d.is_primary) {
             ++primary_count;
         }
@@ -82,7 +82,7 @@ AURORA_TEST_CASE(primary_display_appears_in_listing) {
     // 退化为结构不变量：清单中恰有一个 primary 条目。
     if (primary.id >= 0) {
         bool found = false;
-        for (const auto &d : displays) {
+        for (const auto& d : displays) {
             if (d.id == primary.id && d.is_primary && d.name == primary.name) {
                 found = true;
             }
@@ -90,7 +90,7 @@ AURORA_TEST_CASE(primary_display_appears_in_listing) {
         AURORA_TEST_CHECK_TRUE(found);
     } else {
         std::size_t primary_count = 0;
-        for (const auto &d : displays) {
+        for (const auto& d : displays) {
             if (d.is_primary) {
                 ++primary_count;
             }
@@ -101,8 +101,8 @@ AURORA_TEST_CASE(primary_display_appears_in_listing) {
 
 AURORA_TEST_CASE(display_containing_covers_primary_center) {
     const Display primary = aurora::app::primary_display();
-    const Point center{.x = primary.bounds.origin.x + primary.bounds.size.width / 2.0F,
-                       .y = primary.bounds.origin.y + primary.bounds.size.height / 2.0F};
+    const Point center{.x = primary.bounds.origin.x + (primary.bounds.size.width / 2.0F),
+                       .y = primary.bounds.origin.y + (primary.bounds.size.height / 2.0F)};
 
     const Display hit = aurora::app::display_containing(center);
     AURORA_TEST_CHECK_TRUE(rect_contains(hit.bounds, center));

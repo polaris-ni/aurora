@@ -88,7 +88,7 @@ AURORA_TEST_CASE(text_input_entry_fires_on_changed) {
     TextInput ti;
     int fired = 0;
     std::string last;
-    ti.set_on_changed([&fired, &last](const std::string &v) {
+    ti.set_on_changed([&fired, &last](const std::string& v) -> void {
         ++fired;
         last = v;
     });
@@ -116,7 +116,7 @@ AURORA_TEST_CASE(max_length_truncates_and_swallows_overflow) {
     ti.set_max_length(3);
     ti.on_focus_change(true);
     int fired = 0;
-    ti.set_on_changed([&fired](const std::string &) { ++fired; });
+    ti.set_on_changed([&fired](const std::string&) -> void { ++fired; });
 
     TextInputEvent overflowed;
     overflowed.text = "abcd";
@@ -139,7 +139,7 @@ AURORA_TEST_CASE(read_only_and_disabled_swallow_text_input) {
     ro.set_read_only(true);
     ro.on_focus_change(true);
     int ro_fired = 0;
-    ro.set_on_changed([&ro_fired](const std::string &) { ++ro_fired; });
+    ro.set_on_changed([&ro_fired](const std::string&) -> void { ++ro_fired; });
     TextInputEvent ro_event;
     ro_event.text = "x";
     ro.on_text_input(ro_event);

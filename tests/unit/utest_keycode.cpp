@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/event/keycode.h
-/// 测试说明: key_name 对字母/数字/导航/修饰/标点/功能键的全覆盖、未知与越界键码回退 Unknown、KeyCode 分组连续性与相对次序
+/// 测试说明: key_name 对字母/数字/导航/修饰/标点/功能键的全覆盖、未知与越界键码回退 Unknown、KeyCode
+/// 分组连续性与相对次序
 
 #include <type_traits>
 
@@ -59,6 +60,8 @@ AURORA_TEST_CASE(key_name_covers_punctuation_and_function_keys) {
 AURORA_TEST_CASE(key_name_falls_back_to_unknown) {
     AURORA_TEST_CHECK_STREQ(key_name(KeyCode::Unknown), "Unknown");
     // 越界值不在 switch 枚举列表内：走函数尾部的兜底返回
+    // 越界取值正是本用例被测目标（验证 key_name 兜底返回 Unknown），不可改为合法枚举值。
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     const auto bogus = static_cast<KeyCode>(999);
     AURORA_TEST_CHECK_STREQ(key_name(bogus), "Unknown");
 }

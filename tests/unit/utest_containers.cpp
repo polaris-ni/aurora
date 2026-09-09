@@ -7,9 +7,9 @@
 #include <memory>
 #include <string>
 
+#include "aurora/layout/layout_engine.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
-#include "aurora/layout/layout_engine.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_containers {
@@ -159,7 +159,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "Column");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "multiple");
     bool has_gap = false;
-    for (const auto &p : d.properties) {
+    for (const auto& p : d.properties) {
         if (std::string{p.name} == "gap") {
             has_gap = true;
         }

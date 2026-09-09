@@ -18,17 +18,17 @@ AURORA_TEST_CASE(run_raw_with_null_function_is_safe) {
 
 AURORA_TEST_CASE(run_raw_executes_callback) {
     int calls = 0;
-    aurora::commands::run_raw([&calls] { ++calls; });
+    aurora::commands::run_raw([&calls]() -> void { ++calls; });
     AURORA_TEST_CHECK_EQ(calls, 1);
     // 重复调用按次执行。
-    aurora::commands::run_raw([&calls] { calls += 2; });
+    aurora::commands::run_raw([&calls]() -> void { calls += 2; });
     AURORA_TEST_CHECK_EQ(calls, 3);
 }
 
 AURORA_TEST_CASE(run_raw_is_inline_escape_hatch) {
     // 逃生舱语义：函数体内可执行任意命令式操作（如修改外部状态）。
     int value = 10;
-    aurora::commands::run_raw([&value] { value = 42; });
+    aurora::commands::run_raw([&value]() -> void { value = 42; });
     AURORA_TEST_CHECK_EQ(value, 42);
 }
 

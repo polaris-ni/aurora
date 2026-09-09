@@ -66,8 +66,7 @@ class CoroTask {
                 shared->result =
                     make_error(ErrorCode::RuntimeCoroutineException, std::string("coroutine threw: ") + e.what());
             } catch (...) {
-                shared->result =
-                    make_error(ErrorCode::RuntimeCoroutineException, "coroutine threw unknown exception");
+                shared->result = make_error(ErrorCode::RuntimeCoroutineException, "coroutine threw unknown exception");
             }
         }
         ~promise_type() { shared->done.store(true, std::memory_order_release); }
@@ -96,9 +95,9 @@ class CoroTask<void> {
         std::shared_ptr<detail::CoroShared<void>> shared = std::make_shared<detail::CoroShared<void>>();
 
         [[nodiscard]] auto get_return_object() const -> CoroTask { return CoroTask{shared}; }
-        static auto initial_suspend() -> std::suspend_never { return {}; }
-        static auto final_suspend() noexcept -> std::suspend_never { return {}; }
-        static auto return_void() -> void {}
+        auto initial_suspend() -> std::suspend_never { return {}; }
+        auto final_suspend() noexcept -> std::suspend_never { return {}; }
+        auto return_void() -> void {}
         auto unhandled_exception() const -> void {
             try {
                 throw;
@@ -135,7 +134,7 @@ struct CoAwaitable {
 
     explicit CoAwaitable(F f) : f_(std::move(f)) {}
 
-    [[nodiscard]] static auto await_ready() -> bool { return false; }  // 始终挂起，交线程池执行
+    [[nodiscard]] auto await_ready() const -> bool { return false; }  // 始终挂起，交线程池执行
 
     auto await_suspend(std::coroutine_handle<> handle) -> void {
         // 把 fn 投入线程池；完成后经主线程投递器恢复续体（无 poster 时由 worker 直接 resume）。

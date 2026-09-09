@@ -8,9 +8,8 @@
 #include "aurora/aurora.h"
 #include "aurora/ui/factories.h"
 #include "aurora/widget/inspect.h"
-#include "test_helpers.h"
-
 #include "framework/aurora_test.h"
+#include "test_helpers.h"
 
 namespace aurora::test_cases::itest_dump_rich {
 
@@ -24,7 +23,7 @@ using au::ui::vbox;
 
 AURORA_TEST_CASE(dump_rich_shows_id_text_visible_and_bounds) {
     TestEnv env = init_headless(200, 100);
-    const Text *t = label(*env.root_widget, "Hi");
+    const Text* t = label(*env.root_widget, "Hi");
     (void)t;
     AURORA_TEST_CHECK_MSG(env.root_widget->child_count() >= 1, "root has one child");
     env.root_widget->child(0).set_id("title");
@@ -36,8 +35,7 @@ AURORA_TEST_CASE(dump_rich_shows_id_text_visible_and_bounds) {
     AURORA_TEST_CHECK_MSG(s.find("#title") != std::string::npos, "rich dump contains #id");
     AURORA_TEST_CHECK_MSG(s.find("text: \"Hi\"") != std::string::npos, "rich dump contains text");
     AURORA_TEST_CHECK_MSG(s.find("visible: true") != std::string::npos, "rich dump contains visible");
-    AURORA_TEST_CHECK_MSG(s.find("listeners: []") != std::string::npos,
-                          "rich dump shows empty listeners for Text");
+    AURORA_TEST_CHECK_MSG(s.find("listeners: []") != std::string::npos, "rich dump shows empty listeners for Text");
     AURORA_TEST_CHECK_MSG(s.find("bounds: [") != std::string::npos, "rich dump contains bounds");
 }
 

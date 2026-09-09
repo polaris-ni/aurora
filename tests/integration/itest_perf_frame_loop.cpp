@@ -16,10 +16,10 @@
 #include "aurora/app/application.h"
 #include "aurora/app/perf_overlay.h"
 #include "aurora/core/log.h"
-#include "aurora/window/surface.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
+#include "aurora/window/surface.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::itest_perf_frame_loop {
@@ -34,7 +34,7 @@ class MinSurface final : public Surface {
         size_ = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
         return Result<bool>{true};
     }
-    auto painter() -> Painter & override { return painter_; }
+    auto painter() -> Painter& override { return painter_; }
     auto present() -> Result<bool> override {
         ++frames_;
         return Result<bool>{true};
@@ -61,7 +61,7 @@ auto build_scene() -> Node {
 
 // 使用 Application + 自定义 Surface 运行 N 帧。
 // on_frame 回调可用来强制每帧重绘（绕过脏区 idle 跳过）。
-void run_app(int frames, Node view, const std::function<void(Application &)> &on_frame = {}) {
+void run_app(int frames, Node view, const std::function<void(Application&)>& on_frame = {}) {
     WindowOptions opts;
     opts.title = "perf_bench";
     opts.size = Size{.width = 800.0F, .height = 600.0F};
@@ -78,11 +78,11 @@ void run_app(int frames, Node view, const std::function<void(Application &)> &on
 }  // namespace
 
 AURORA_TEST_CASE(basic_frame_loop_collects_frame_stats) {
-    auto &fs = FrameStats::instance();
+    auto& fs = FrameStats::instance();
     fs.reset();
 
     // force_full_redraw() 强制每帧都实际渲染（绕过脏区 idle 跳过）。
-    run_app(100, build_scene(), [](Application &app) -> void {
+    run_app(100, build_scene(), [](Application& app) -> void {
         if (app.window() != nullptr) {
             app.window()->force_full_redraw();
         }
@@ -106,7 +106,7 @@ AURORA_TEST_CASE(basic_frame_loop_collects_frame_stats) {
 }
 
 AURORA_TEST_CASE(animated_scene_frame_time_within_budget) {
-    auto &fs = FrameStats::instance();
+    auto& fs = FrameStats::instance();
     fs.reset();
 
     // 含动画场景：on_frame 回调每帧 tick TweenAnimation（结束后重启），
@@ -114,7 +114,7 @@ AURORA_TEST_CASE(animated_scene_frame_time_within_budget) {
     TweenAnimation anim{0.0F};
     anim.animate_to(1.0F, 0.5);  // 0.5 秒过渡
 
-    run_app(100, build_scene(), [&](Application &app) -> void {
+    run_app(100, build_scene(), [&](Application& app) -> void {
         // 模拟每帧 tick（约 16ms）；动画结束后重新启动以持续驱动。
         anim.tick(0.016);
         if (!anim.is_animating()) {
@@ -139,10 +139,10 @@ AURORA_TEST_CASE(animated_scene_frame_time_within_budget) {
 }
 
 AURORA_TEST_CASE(phase_timings_nonnegative_and_bounded) {
-    auto &fs = FrameStats::instance();
+    auto& fs = FrameStats::instance();
     fs.reset();
 
-    run_app(100, build_scene(), [](Application &app) -> void {
+    run_app(100, build_scene(), [](Application& app) -> void {
         if (app.window() != nullptr) {
             app.window()->force_full_redraw();
         }
@@ -171,9 +171,9 @@ AURORA_TEST_CASE(phase_timings_nonnegative_and_bounded) {
 
 AURORA_TEST_CASE(frame_stats_reset_isolation) {
     // 先运行一轮积累数据。
-    auto &fs = FrameStats::instance();
+    auto& fs = FrameStats::instance();
     fs.reset();
-    run_app(10, build_scene(), [](Application &app) -> void {
+    run_app(10, build_scene(), [](Application& app) -> void {
         if (app.window() != nullptr) {
             app.window()->force_full_redraw();
         }
@@ -202,9 +202,9 @@ AURORA_TEST_CASE(frame_stats_reset_isolation) {
 
 AURORA_TEST_CASE(hud_overlay_composite_path) {
     // 首轮：无叠加层基线，确认仍能正常渲染。
-    auto &fs = FrameStats::instance();
+    auto& fs = FrameStats::instance();
     fs.reset();
-    run_app(60, build_scene(), [](Application &app) -> void {
+    run_app(60, build_scene(), [](Application& app) -> void {
         if (app.window() != nullptr) {
             app.window()->force_full_redraw();
         }
@@ -214,7 +214,7 @@ AURORA_TEST_CASE(hud_overlay_composite_path) {
     // 次轮：注入 HUD 叠加层（PerfOverlay），验证 present_root 的 composite 路径不崩溃且帧统计正常。
     fs.reset();
     bool installed = false;
-    run_app(60, build_scene(), [&](Application &app) -> void {
+    run_app(60, build_scene(), [&](Application& app) -> void {
         if (app.window() != nullptr) {
             app.window()->force_full_redraw();
             if (!installed) {

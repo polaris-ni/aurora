@@ -22,13 +22,13 @@ class FixedBox final : public Widget {
   public:
     FixedBox(float w, float h) : w_(w), h_(h) {}
 
-    [[nodiscard]] auto type_name() const -> const char * override { return "FixedBox"; }
+    [[nodiscard]] auto type_name() const -> const char* override { return "FixedBox"; }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
         return c.constrain(Size{.width = w_, .height = h_});
     }
-    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
 
   private:
     float w_;
@@ -160,7 +160,7 @@ AURORA_TEST_CASE(scroll_shifts_window_and_clamps) {
     p.begin(300, 96);
     row.paint(p, viewport(300.0F, 96.0F), BuildContext{});
     AURORA_TEST_CHECK_NEAR(rec.items.at(1)->paint_bounds().origin.x, 0.0F, 1e-4F);  // 1*96 - 96
-    AURORA_TEST_CHECK_EQ(rec.built_order.size(), 4U);                               // 窗口 1..4
+    AURORA_TEST_CHECK_EQ(rec.built_order.size(), 4U);  // 窗口 1..4
 
     // 超大增量被钳到 max_off = 10*96 - 300 = 660。
     ScrollEvent big;
@@ -175,7 +175,7 @@ AURORA_TEST_CASE(scroll_shifts_window_and_clamps) {
 AURORA_TEST_CASE(click_reports_pressed_index) {
     LazyRow row{5, {}, 96.0F};
     int clicked = -1;
-    row.set_on_item_click([&clicked](int index) { clicked = index; });
+    row.set_on_item_click([&clicked](int index) -> void { clicked = index; });
     LayoutEngine::layout(row, bounded(300.0F, 96.0F));
 
     MouseEvent press;
@@ -195,7 +195,7 @@ AURORA_TEST_CASE(click_reports_pressed_index) {
 AURORA_TEST_CASE(drag_suppresses_click) {
     LazyRow row{5, {}, 96.0F};
     int clicked = -1;
-    row.set_on_item_click([&clicked](int index) { clicked = index; });
+    row.set_on_item_click([&clicked](int index) -> void { clicked = index; });
     LayoutEngine::layout(row, bounded(300.0F, 96.0F));
 
     MouseEvent press;
@@ -222,7 +222,7 @@ AURORA_TEST_CASE(drag_suppresses_click) {
 AURORA_TEST_CASE(press_beyond_items_is_ignored) {
     LazyRow row{5, {}, 96.0F};
     int clicked = -1;
-    row.set_on_item_click([&clicked](int index) { clicked = index; });
+    row.set_on_item_click([&clicked](int index) -> void { clicked = index; });
     LayoutEngine::layout(row, bounded(300.0F, 96.0F));
 
     // 按压点超出条目范围（5*96=480）：索引解析为 -1，抬起不触发回调也不消费事件。

@@ -20,14 +20,12 @@ class SolidBox final : public LeafWidget {
   public:
     SolidBox() = default;
 
-    [[nodiscard]] auto type_name() const -> const char * override { return "SolidBox"; }
+    [[nodiscard]] auto type_name() const -> const char* override { return "SolidBox"; }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(c.max);
-    }
+    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override { return c.constrain(c.max); }
 
-    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
 };
 
 }  // namespace
@@ -71,7 +69,9 @@ AURORA_TEST_CASE(router_build_returns_fresh_tree_each_time) {
     AURORA_TEST_REQUIRE_TRUE(a.has_value());
     AURORA_TEST_REQUIRE_TRUE(b.has_value());
     // 工厂模式：每次导航获得全新 widget 树，不在栈间共享可变实例。
-    AURORA_TEST_CHECK_NE(&a->root().widget(), &b->root().widget());
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_NE(&a.value().root().widget(), &b.value().root().widget());
 }
 
 AURORA_TEST_CASE(router_build_root_registered_and_unknown) {
@@ -101,7 +101,9 @@ AURORA_TEST_CASE(router_reregister_overrides_builder) {
 
     const auto route = router.build("home");
     AURORA_TEST_REQUIRE_TRUE(route.has_value());
-    AURORA_TEST_CHECK_EQ(route->name(), std::string{"second"});
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_EQ(route.value().name(), std::string{"second"});
     AURORA_TEST_CHECK_EQ(first_builder, 0);
     AURORA_TEST_CHECK_EQ(second_builder, 1);
 }
@@ -115,10 +117,13 @@ AURORA_TEST_CASE(router_build_preserves_route_payload) {
 
     const auto route = router.build("detail");
     AURORA_TEST_REQUIRE_TRUE(route.has_value());
-    AURORA_TEST_CHECK_EQ(route->name(), std::string{"detail"});
-    AURORA_TEST_CHECK_TRUE(route->transition().animated);
-    AURORA_TEST_CHECK_TRUE(route->transition().kind == TransitionKind::Slide);
-    AURORA_TEST_CHECK_NEAR(route->transition().duration_seconds, 0.4, 1e-4F);
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_EQ(route.value().name(), std::string{"detail"});
+    AURORA_TEST_CHECK_TRUE(route.value().transition().animated);
+    AURORA_TEST_CHECK_TRUE(route.value().transition().kind == TransitionKind::Slide);
+    AURORA_TEST_CHECK_NEAR(route.value().transition().duration_seconds, 0.4, 1e-4F);
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 }  // namespace aurora::test_cases::utest_router

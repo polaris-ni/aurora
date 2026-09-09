@@ -23,13 +23,13 @@ class FixedBox final : public Widget {
   public:
     FixedBox(float w, float h) : w_(w), h_(h) {}
 
-    [[nodiscard]] auto type_name() const -> const char * override { return "FixedBox"; }
+    [[nodiscard]] auto type_name() const -> const char* override { return "FixedBox"; }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
         return c.constrain(Size{.width = w_, .height = h_});
     }
-    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
 
   private:
     float w_;
@@ -122,8 +122,8 @@ AURORA_TEST_CASE(virtualization_builds_visible_rows_only) {
     LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
     AURORA_TEST_CHECK_EQ(grid.visible_row_range().first, 0);
     AURORA_TEST_CHECK_EQ(grid.visible_row_range().second, 4);  // ceil(300 / 96)
-    AURORA_TEST_CHECK_EQ(grid.live_item_count(), 12U);         // 行 0..3 × 3 列
-    AURORA_TEST_CHECK_EQ(rec.built_order.size(), 12U);         // 只构建可见行，而非 count=30
+    AURORA_TEST_CHECK_EQ(grid.live_item_count(), 12U);  // 行 0..3 × 3 列
+    AURORA_TEST_CHECK_EQ(rec.built_order.size(), 12U);  // 只构建可见行，而非 count=30
 
     // 约束不变的重复布局不重建任何单元格。
     LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
@@ -138,7 +138,7 @@ AURORA_TEST_CASE(partial_last_row_builds_only_existing_cells) {
     LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
     AURORA_TEST_CHECK_EQ(grid.row_count(), 3);
     AURORA_TEST_CHECK_EQ(grid.visible_row_range().second, 3);  // 钳到 row_count
-    AURORA_TEST_CHECK_EQ(grid.live_item_count(), 7U);          // 末行只有第 6 号一格
+    AURORA_TEST_CHECK_EQ(grid.live_item_count(), 7U);  // 末行只有第 6 号一格
     AURORA_TEST_CHECK_EQ(rec.built_order.size(), 7U);
 }
 
@@ -187,8 +187,7 @@ AURORA_TEST_CASE(cell_positions_follow_grid) {
 
     Painter p;
     p.begin(300, 300);
-    grid.paint(p,
-               Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 300.0F, .height = 300.0F}},
+    grid.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 300.0F, .height = 300.0F}},
                BuildContext{});
     // 索引 → (行, 列)：0 → (0,0)，2 → (0,2)，5 → (1,2)；列宽 100，格高 96。
     AURORA_TEST_CHECK_NEAR(rec.items.at(0)->paint_bounds().origin.x, 0.0F, 1e-4F);
@@ -215,7 +214,7 @@ AURORA_TEST_CASE(serialize_and_describe) {
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool columns_required = false;
     bool columns_min_one = false;
-    for (const auto &p : d.properties) {
+    for (const auto& p : d.properties) {
         if (p.name == "columns") {
             columns_required = p.required;
             columns_min_one = (p.min_value == "1");

@@ -5,10 +5,10 @@
 
 #include <memory>
 
+#include "aurora/layout/layout_engine.h"
 #include "aurora/state/state.h"
 #include "aurora/widget/show.h"
 #include "aurora/widget/text.h"
-#include "aurora/layout/layout_engine.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_show {
@@ -66,14 +66,14 @@ AURORA_TEST_CASE(show_state_driven_visibility) {
 AURORA_TEST_CASE(show_collects_state_signal) {
     auto state = std::make_shared<State<bool>>(true);
     Show s(state, box(1.0F, 1.0F));
-    std::vector<aurora::SignalViewBase *> out;
+    std::vector<aurora::SignalViewBase*> out;
     s.collect_signals(out);
     AURORA_TEST_REQUIRE_EQ(out.size(), 1U);
     AURORA_TEST_CHECK_EQ(out[0], state.get());
 
     // bool 构造无信号。
     Show plain(true, box(1.0F, 1.0F));
-    std::vector<aurora::SignalViewBase *> empty;
+    std::vector<aurora::SignalViewBase*> empty;
     plain.collect_signals(empty);
     AURORA_TEST_CHECK_EQ(empty.size(), 0U);
 }

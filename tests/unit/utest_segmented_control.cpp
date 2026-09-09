@@ -40,7 +40,7 @@ AURORA_TEST_CASE(segmented_set_selected) {
 AURORA_TEST_CASE(segmented_press_selects_segment_and_fires_callback) {
     std::vector<int> seen;
     SegmentedControl sc({"Day", "Week", "Month"}, 1);
-    sc.set_on_change([&seen](int i) { seen.push_back(i); });
+    sc.set_on_change([&seen](int i) -> void { seen.push_back(i); });
 
     // 命中首段（local x=0 落在第 1 段内）。
     MouseEvent press;
@@ -66,7 +66,7 @@ AURORA_TEST_CASE(segmented_press_selects_segment_and_fires_callback) {
 AURORA_TEST_CASE(segmented_right_button_ignored) {
     int calls = 0;
     SegmentedControl sc({"A", "B"}, 1);
-    sc.set_on_change([&calls](int) { ++calls; });
+    sc.set_on_change([&calls](int) -> void { ++calls; });
 
     MouseEvent right;
     right.action = MouseAction::Press;
@@ -81,7 +81,7 @@ AURORA_TEST_CASE(segmented_right_button_ignored) {
 AURORA_TEST_CASE(segmented_press_beyond_segments_no_change) {
     int calls = 0;
     SegmentedControl sc({"A", "B", "C"});
-    sc.set_on_change([&calls](int) { ++calls; });
+    sc.set_on_change([&calls](int) -> void { ++calls; });
 
     MouseEvent far;
     far.action = MouseAction::Press;
@@ -96,7 +96,7 @@ AURORA_TEST_CASE(segmented_press_beyond_segments_no_change) {
 AURORA_TEST_CASE(segmented_disabled_ignores_clicks) {
     int calls = 0;
     SegmentedControl sc({"A", "B"}, 1);
-    sc.set_on_change([&calls](int) { ++calls; });
+    sc.set_on_change([&calls](int) -> void { ++calls; });
     sc.set_enabled(false);
     AURORA_TEST_CHECK_FALSE(sc.enabled());
 
@@ -113,7 +113,7 @@ AURORA_TEST_CASE(segmented_disabled_ignores_clicks) {
 AURORA_TEST_CASE(segmented_layout_sizes_positive) {
     SegmentedControl sc({"Day", "Week", "Month"});
     LayoutEngine::layout(sc, bounded(500.0F, 100.0F));
-    AURORA_TEST_CHECK_GT(sc.size().width, 0.0F);   // 各段宽 = 文本 + 24
+    AURORA_TEST_CHECK_GT(sc.size().width, 0.0F);  // 各段宽 = 文本 + 24
     AURORA_TEST_CHECK_GT(sc.size().height, 0.0F);  // 文本高 + 12
     AURORA_TEST_CHECK_LE(sc.size().width, 500.0F);
     AURORA_TEST_CHECK_LE(sc.size().height, 100.0F);
@@ -126,7 +126,7 @@ AURORA_TEST_CASE(segmented_describe_and_roundtrip) {
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");
     bool has_selected = false;
-    for (const auto &p : d.properties) {
+    for (const auto& p : d.properties) {
         if (std::string{p.name} == "selected") {
             has_selected = true;
         }

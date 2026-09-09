@@ -15,9 +15,8 @@
 #include "aurora/core/platform.h"
 #include "aurora/render/offscreen.h"
 #include "aurora/widget/codegen.h"
-#include "paths.h"
-
 #include "framework/aurora_test.h"
+#include "paths.h"
 
 namespace aurora::test_cases::itest_mcp {
 
@@ -31,7 +30,7 @@ namespace {
 // MCP 端到端：stdin 给 EOF 即退出（固定冒烟命令拉起自构建二进制，输出重定向 null 设备）。
 auto run_mcp_smoke() -> int {
     std::string exe;
-    for (const char *name : {"aurora_mcp.exe", "aurora_mcp"}) {
+    for (const char* name : {"aurora_mcp.exe", "aurora_mcp"}) {
         const std::string p = au::testing::paths::under_repo(std::string{"build/"} + name);
         std::error_code ec;
         if (std::filesystem::is_regular_file(p, ec)) {
@@ -43,9 +42,9 @@ auto run_mcp_smoke() -> int {
         return -1;  // 未构建
     }
 #ifdef AURORA_PLATFORM_WINDOWS
-    const char *null_dev = "<nul >nul 2>&1";
+    const char* null_dev = "<nul >nul 2>&1";
 #else
-    const char *null_dev = "</dev/null >/dev/null 2>&1";
+    const char* null_dev = "</dev/null >/dev/null 2>&1";
 #endif
     const std::string cmd = "\"" + exe + "\" " + null_dev;
     // 测试用意拉起自构建二进制，命令固定且不含外部输入。
@@ -66,7 +65,7 @@ AURORA_TEST_CASE(mcp_list_components_covers_core_widgets) {
     bool has_button = false;
     bool has_text = false;
     bool has_column = false;
-    for (const auto &t : types) {
+    for (const auto& t : types) {
         if (t == "Button") {
             has_button = true;
         }
@@ -103,7 +102,7 @@ AURORA_TEST_CASE(mcp_search_components_finds_by_substring) {
     const auto results = au::search_components("but");
     AURORA_TEST_CHECK(!results.empty());
     bool found = false;
-    for (const auto &r : results) {
+    for (const auto& r : results) {
         if (r.value("type", std::string{}) == "Button") {
             found = true;
         }
@@ -186,7 +185,7 @@ AURORA_TEST_CASE(mcp_get_schema_matches_component_count) {
     AURORA_TEST_CHECK(schemas.size() == au::list_all_components().size());
 
     // 每个 schema 含 type 和 prop_descriptors。
-    for (const auto &s : schemas) {
+    for (const auto& s : schemas) {
         AURORA_TEST_CHECK(s.contains("type"));
         AURORA_TEST_CHECK(s.contains("prop_descriptors"));
     }

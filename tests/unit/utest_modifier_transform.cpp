@@ -4,15 +4,14 @@
 /// OffsetNode 视觉偏移不改布局、TransformNode 旋转/缩放/原始矩阵绕内容中心构造与布局透传
 
 #include "aurora/modifier/modifier_transform.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_modifier_transform {
 
 namespace {
 
-auto make_measure(float w, float h) -> std::function<Size(const Constraints &)> {
-    return [w, h](const Constraints &) { return Size{.width = w, .height = h}; };
+auto make_measure(float w, float h) -> std::function<Size(const Constraints&)> {
+    return [w, h](const Constraints&) -> Size { return Size{.width = w, .height = h}; };
 }
 
 auto constraints(float max_w, float max_h) -> Constraints {

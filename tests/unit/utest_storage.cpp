@@ -28,6 +28,7 @@ namespace m = aurora::testing::matchers;
 // 测试用可存储类型（置于独立子命名空间，避免 ADL 互相误中定制点）。
 // ============================================================================
 
+namespace {
 /// @brief JSON 线格式的玩家状态。
 struct PlayerState {
     std::string name;
@@ -66,8 +67,6 @@ inline auto from_storage_bytes(Blob& b, const aus::StorageBytes& bytes) -> Resul
     return Result<void>{};
 }
 
-namespace v2_doc {
-
 /// @brief 带版本迁移的文档类型（当前版本 2：level 为 v2 新增字段）。
 struct MigratingDoc {
     std::string name;
@@ -88,18 +87,15 @@ inline auto from_storage_json(MigratingDoc& d, const aus::Json& j) -> Result<voi
 }
 
 /// @brief 用户命名空间覆盖版本号：带 tag 指针实参（ADL 定制点约定），使 MigratingDoc 当前版本为 2。
-inline auto storage_version(const MigratingDoc*) -> std::uint32_t { return 2; }
+inline auto storage_version(const MigratingDoc* /*doc*/) -> std::uint32_t { return 2; }
 
 /// @brief 迁移钩子：v1 记录缺 level 字段，迁移时补默认值 1。
-inline auto migrate_storage(std::uint32_t old_version, const MigratingDoc*, aus::Json j) -> Result<aus::Json> {
+inline auto migrate_storage(std::uint32_t old_version, const MigratingDoc* /*doc*/, aus::Json j) -> Result<aus::Json> {
     if (old_version < 2 && !j.contains("level")) {
         j["level"] = 1;
     }
     return Result<aus::Json>{std::move(j)};
 }
-
-}  // namespace v2_doc
-using MigratingDoc = v2_doc::MigratingDoc;
 
 /// @brief 用例临时目录（fs 门面用例专用）。
 [[nodiscard]] auto make_case_dir(std::string_view tag) -> std::filesystem::path {
@@ -110,6 +106,8 @@ using MigratingDoc = v2_doc::MigratingDoc;
 [[nodiscard]] auto make_mem_storage() -> aus::Storage {
     return aus::Storage::create(std::make_unique<aus::MemoryBackend>());
 }
+
+}  // namespace
 
 AURORA_TEST_CASE(create_with_backend_json_roundtrip) {
     // 注入内存后端：原始 JSON 通道 put/get 往返，信封自动封装为 __raw__ / version 1 / Json 编码。
@@ -312,14 +310,14 @@ AURORA_TEST_CASE(change_events_put_remove_clear_and_batch) {
     // 变更通知：逐操作事件 Put/Remove/Clear；事务内逐操作被抑制，成功后统一发一条 Batch。
     auto s = make_mem_storage();
     std::vector<aus::StorageChange> events;
-    const auto sub = s.on_change([&events](const aus::StorageChange& ch) { events.push_back(ch); });
+    const auto sub = s.on_change([&events](const aus::StorageChange& ch) -> void { events.push_back(ch); });
     AURORA_TEST_REQUIRE(sub.active());
 
     AURORA_TEST_REQUIRE(s.put("a", aus::Json{{"v", 1}}));
     AURORA_TEST_REQUIRE(s.put("b", aus::Json{{"v", 2}}));
     AURORA_TEST_REQUIRE(s.remove("a"));
 
-    const auto failed = s.transaction([](aus::Storage& inner) -> Result<void> {
+    const auto failed = s.transaction([](const aus::Storage& inner) -> Result<void> {
         (void)inner.put("t1", aus::Json{{"v", 9}});
         (void)inner.remove("b");
         return Result<void>{make_error(ErrorCode::GeneralUnknown, "abort")};
@@ -335,9 +333,8 @@ AURORA_TEST_CASE(change_events_put_remove_clear_and_batch) {
     AURORA_TEST_REQUIRE(t1_gone.ok());
     AURORA_TEST_CHECK(!t1_gone.value());
 
-    const auto committed = s.transaction([](aus::Storage& inner) -> Result<void> {
-        return inner.put("c", aus::Json{{"v", 3}});
-    });
+    const auto committed =
+        s.transaction([](const aus::Storage& inner) -> Result<void> { return inner.put("c", aus::Json{{"v", 3}}); });
     AURORA_TEST_REQUIRE(committed.ok());
 
     AURORA_TEST_REQUIRE(s.clear());
@@ -358,7 +355,7 @@ AURORA_TEST_CASE(on_change_unsubscribe_stops_delivery) {
     // RAII 订阅：reset() 后不再投递，active() 反映订阅状态。
     auto s = make_mem_storage();
     int calls = 0;
-    auto sub = s.on_change([&calls](const aus::StorageChange&) { ++calls; });
+    auto sub = s.on_change([&calls](const aus::StorageChange&) -> void { ++calls; });
     AURORA_TEST_REQUIRE(sub.active());
 
     AURORA_TEST_REQUIRE(s.put("u1", aus::Json{{"v", 1}}));
@@ -377,13 +374,13 @@ AURORA_TEST_CASE(async_roundtrip_put_get_value_remove_list) {
 
     std::promise<Result<void>> put_p;
     auto put_f = put_p.get_future();
-    s.async_put("cfg", aus::Json{{"n", 7}}).then([&put_p](const Result<void>& r) { put_p.set_value(r); });
+    s.async_put("cfg", aus::Json{{"n", 7}}).then([&put_p](const Result<void>& r) -> void { put_p.set_value(r); });
     AURORA_TEST_REQUIRE_EQ(put_f.wait_for(std::chrono::seconds{10}), std::future_status::ready);
     AURORA_TEST_CHECK(put_f.get().ok());
 
     std::promise<Result<aus::Json>> get_p;
     auto get_f = get_p.get_future();
-    s.async_get("cfg").then([&get_p](const Result<aus::Json>& r) { get_p.set_value(r); });
+    s.async_get("cfg").then([&get_p](const Result<aus::Json>& r) -> void { get_p.set_value(r); });
     AURORA_TEST_REQUIRE_EQ(get_f.wait_for(std::chrono::seconds{10}), std::future_status::ready);
     const auto got = get_f.get();
     AURORA_TEST_REQUIRE(got.ok());
@@ -391,7 +388,7 @@ AURORA_TEST_CASE(async_roundtrip_put_get_value_remove_list) {
 
     std::promise<bool> val_p;
     auto val_f = val_p.get_future();
-    s.async_get_value("cfg").then([&val_p](const Result<aus::StorageValue>& r) {
+    s.async_get_value("cfg").then([&val_p](const Result<aus::StorageValue>& r) -> void {
         val_p.set_value(r.ok() && std::holds_alternative<aus::Json>(r.value()));
     });
     AURORA_TEST_REQUIRE_EQ(val_f.wait_for(std::chrono::seconds{10}), std::future_status::ready);
@@ -400,7 +397,7 @@ AURORA_TEST_CASE(async_roundtrip_put_get_value_remove_list) {
     AURORA_TEST_REQUIRE(s.put("lone", aus::Json{{"v", 1}}));  // 供 async_list 核对
     std::promise<Result<std::vector<std::string>>> list_p;
     auto list_f = list_p.get_future();
-    s.async_list().then([&list_p](const Result<std::vector<std::string>>& r) { list_p.set_value(r); });
+    s.async_list().then([&list_p](const Result<std::vector<std::string>>& r) -> void { list_p.set_value(r); });
     AURORA_TEST_REQUIRE_EQ(list_f.wait_for(std::chrono::seconds{10}), std::future_status::ready);
     const auto ids = list_f.get();
     AURORA_TEST_REQUIRE(ids.ok());
@@ -409,7 +406,7 @@ AURORA_TEST_CASE(async_roundtrip_put_get_value_remove_list) {
 
     std::promise<Result<void>> rm_p;
     auto rm_f = rm_p.get_future();
-    s.async_remove("cfg").then([&rm_p](const Result<void>& r) { rm_p.set_value(r); });
+    s.async_remove("cfg").then([&rm_p](const Result<void>& r) -> void { rm_p.set_value(r); });
     AURORA_TEST_REQUIRE_EQ(rm_f.wait_for(std::chrono::seconds{10}), std::future_status::ready);
     AURORA_TEST_CHECK(rm_f.get().ok());
     const auto gone = s.contains("cfg");
@@ -438,6 +435,41 @@ AURORA_TEST_CASE(fs_create_persists_across_instances_and_reports_open_failure) {
         aus::Storage::create(aus::FilesystemOptions{.root = dir / "no" / "such", .auto_create_dir = false});
     AURORA_TEST_CHECK(!refused.ok());
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::StorageBackendUnavailable);
+
+    std::filesystem::remove_all(dir, ec);
+}
+
+AURORA_TEST_CASE(fs_binary_sidecar_is_directory_reports_io_error) {
+    // 守护点：POSIX 下 ifstream 打开目录会成功、读取时才报 EISDIR，而 libstdc++ 的
+    // basic_filebuf::underflow 对此无条件抛 ios_base::failure（不看流的异常掩码）。
+    // 后端必须把这类读失败降级为 Result 错误，绝不能让异常逃出 get_record()。
+    // （Windows 上 ifstream 打不开目录，本用例恒绿；只有 Linux/WSL 才真正暴露该缺陷。）
+    const auto dir = make_case_dir("fs_sidecar_dir");
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+
+    auto opened = aus::Storage::create(aus::FilesystemOptions{.root = dir, .auto_create_dir = true});
+    AURORA_TEST_REQUIRE(opened.ok());
+    auto& s = opened.value();
+    AURORA_TEST_REQUIRE(s.put("blob", aus::StorageBytes{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}}));
+
+    // 定位刚落盘的 .bin sidecar（文件名是 id 的 base64url，不便反推，故按扩展名找）。
+    std::filesystem::path sidecar;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (entry.path().extension() == ".bin") {
+            sidecar = entry.path();
+            break;
+        }
+    }
+    AURORA_TEST_REQUIRE(!sidecar.empty());  // 找不到说明二进制落盘布局变了，用例需同步
+
+    // 换成同名目录：模拟 sidecar 被损坏或被同名目录占用。
+    std::filesystem::remove(sidecar, ec);
+    AURORA_TEST_REQUIRE(std::filesystem::create_directory(sidecar, ec));
+
+    const auto got = s.get_bytes("blob");
+    AURORA_TEST_CHECK(!got.ok());
+    AURORA_TEST_CHECK_EQ(got.error().code_enum, ErrorCode::StorageIoError);
 
     std::filesystem::remove_all(dir, ec);
 }

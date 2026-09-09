@@ -19,8 +19,8 @@
 
 namespace aurora::test_cases::utest_debug_backend {
 
-using aurora::debug::CaptureSource;
 using aurora::debug::capture;
+using aurora::debug::CaptureSource;
 using aurora::debug::feature_flags;
 using aurora::debug::output_directory;
 using aurora::debug::resolve_output_path;
@@ -32,14 +32,14 @@ namespace {
 /// @brief 最小 Surface 桩：仅满足门面读取的虚接口，帧缓冲为固定 4×4 RGBA。
 class StubSurface final : public Surface {
   public:
-    StubSurface() { pixels_.assign(4U * 4U * 4U, 128U); }
+    StubSurface() { pixels_.assign(static_cast<std::size_t>(4U * 4U * 4U), 128U); }
 
     [[nodiscard]] auto begin_frame(int width, int height) -> Result<bool> override {
         width_ = width;
         height_ = height;
         return Result<bool>{true};
     }
-    [[nodiscard]] auto painter() -> Painter & override { return painter_; }
+    [[nodiscard]] auto painter() -> Painter& override { return painter_; }
     [[nodiscard]] auto present() -> Result<bool> override { return Result<bool>{true}; }
     [[nodiscard]] auto size() const -> Size override {
         return Size{.width = static_cast<float>(width_), .height = static_cast<float>(height_)};
@@ -48,7 +48,7 @@ class StubSurface final : public Surface {
     [[nodiscard]] auto should_close() const -> bool override { return true; }
     [[nodiscard]] auto clear_color() const -> Color override { return Color{64, 128, 192, 255}; }
     [[nodiscard]] auto frame_count() const -> int override { return 7; }
-    [[nodiscard]] auto data() const -> const std::uint8_t * override { return pixels_.data(); }
+    [[nodiscard]] auto data() const -> const std::uint8_t* override { return pixels_.data(); }
 
   private:
     Painter painter_;
@@ -58,12 +58,12 @@ class StubSurface final : public Surface {
 };
 
 /// @brief 用例专属临时 PNG 路径（系统临时目录下固定名；各套件独立进程不会互撞）。
-[[nodiscard]] auto temp_png_path(const std::string &name) -> std::string {
+[[nodiscard]] auto temp_png_path(const std::string& name) -> std::string {
     return (std::filesystem::temp_directory_path() / name).string();
 }
 
 /// @brief 清理临时文件（忽略不存在/权限错误）。
-auto remove_quiet(const std::string &path) -> void {
+auto remove_quiet(const std::string& path) -> void {
     std::error_code ec;
     std::filesystem::remove(path, ec);
 }

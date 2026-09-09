@@ -166,8 +166,8 @@ AURORA_TEST_CASE(to_code_generates_source_from_tree) {
 AURORA_TEST_CASE(subscribe_notify_unsubscribe_cycle) {
     int hits1 = 0;
     int hits2 = 0;
-    const std::size_t id1 = Inspector::subscribe_changes([&hits1](const Json &) { ++hits1; });
-    const std::size_t id2 = Inspector::subscribe_changes([&hits2](const Json &) { ++hits2; });
+    const std::size_t id1 = Inspector::subscribe_changes([&hits1](const Json&) -> void { ++hits1; });
+    const std::size_t id2 = Inspector::subscribe_changes([&hits2](const Json&) -> void { ++hits2; });
     AURORA_TEST_CHECK_NE(id1, id2);  // 订阅 id 唯一递增
 
     Inspector::notify_changes(Json::object());

@@ -3,6 +3,7 @@
 /// 测试说明: 诊断收集器的累计/取清/计数、slug→表驱动元数据映射、无码退化与降级 Error 严重级、strict_mode 关闭下的
 /// degraded 记录、explain 兜底、修复建议收集与应用、注册表与 auto_fix_all、to_json_line 形态、recent 环形缓冲
 
+#include <array>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -46,8 +47,8 @@ class QuietLogger {
 /// （悬垂写栈地址可能被新用例复用）。全文件修复回调一律命中文件级静态槽位计数器，
 /// 各用例只对自己槽位做增量断言。
 static auto fix_hits(std::size_t slot) -> std::size_t& {
-    static std::size_t hits[3]{};
-    return hits[slot];
+    static std::array<std::size_t, 3> hits{};
+    return hits.at(slot);
 }
 
 AURORA_TEST_CASE(report_accumulates_take_clears_and_counts) {

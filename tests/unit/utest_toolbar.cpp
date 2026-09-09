@@ -21,11 +21,10 @@ namespace aurora::test_cases::utest_toolbar {
 namespace {
 
 /// 挂载并按给定上限布局，返回测得尺寸（无头环境：BuildContext + 约束）。
-auto laid_out(Widget &w, float max_w, float max_h) -> Size {
+auto laid_out(Widget& w, float max_w, float max_h) -> Size {
     BuildContext ctx;
     w.mount(ctx);
-    const Constraints c{
-        .min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = max_w, .height = max_h}};
+    const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = max_w, .height = max_h}};
     return w.layout(c, ctx);
 }
 
@@ -90,8 +89,8 @@ AURORA_TEST_CASE(toolbar_defaults_and_chained_setters) {
 
 AURORA_TEST_CASE(toolbar_layout_orders_and_centers_children) {
     std::vector<Node> kids;
-    kids.push_back(Node{Button{"A"}});
-    kids.push_back(Node{Button{"B"}});
+    kids.emplace_back(Button{"A"});
+    kids.emplace_back(Button{"B"});
     ToolBar tb{std::move(kids)};
 
     const Size s = laid_out(tb, 640.0F, 480.0F);
@@ -99,7 +98,7 @@ AURORA_TEST_CASE(toolbar_layout_orders_and_centers_children) {
     AURORA_TEST_CHECK_NEAR(s.height, 40.0F, 1e-3F);
     AURORA_TEST_CHECK_NEAR(s.height, tb.bar_height(), 1e-3F);
 
-    const auto &nodes = tb.child_nodes();
+    const auto& nodes = tb.child_nodes();
     AURORA_TEST_REQUIRE_EQ(nodes.size(), 2U);
     const Rect b0 = nodes[0].bounds();
     const Rect b1 = nodes[1].bounds();
@@ -115,17 +114,17 @@ AURORA_TEST_CASE(toolbar_layout_orders_and_centers_children) {
 
 AURORA_TEST_CASE(toolbar_gap_zero_joins_children) {
     std::vector<Node> kids;
-    kids.push_back(Node{Button{"A"}});
-    kids.push_back(Node{Button{"B"}});
+    kids.emplace_back(Button{"A"});
+    kids.emplace_back(Button{"B"});
     ToolBar tb{std::move(kids)};
     tb.set_gap(0.0F);
 
     laid_out(tb, 640.0F, 480.0F);
-    const auto &nodes = tb.child_nodes();
+    const auto& nodes = tb.child_nodes();
     AURORA_TEST_REQUIRE_EQ(nodes.size(), 2U);
     // gap=0 时第二项紧贴第一项（仅隔 padding 起点）。
-    AURORA_TEST_CHECK_NEAR(nodes[1].bounds().origin.x,
-                           nodes[0].bounds().origin.x + nodes[0].bounds().size.width, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(nodes[1].bounds().origin.x, nodes[0].bounds().origin.x + nodes[0].bounds().size.width,
+                           1e-3F);
 }
 
 AURORA_TEST_CASE(toolbar_constructors_and_empty_bar) {
@@ -142,8 +141,8 @@ AURORA_TEST_CASE(toolbar_constructors_and_empty_bar) {
 
     // StatusBar 同构：vector 构造 + 尾项语义由布局用例覆盖。
     std::vector<Node> texts;
-    texts.push_back(Node{Text{"Ready"}});
-    texts.push_back(Node{Text{"Ln 1"}});
+    texts.emplace_back(Text{"Ready"});
+    texts.emplace_back(Text{"Ln 1"});
     StatusBar sb{std::move(texts)};
     AURORA_TEST_CHECK_EQ(sb.child_nodes().size(), 2U);
 }
@@ -178,16 +177,16 @@ AURORA_TEST_CASE(toolbar_json_roundtrip) {
 
 AURORA_TEST_CASE(statusbar_layout_tail_right_aligned) {
     std::vector<Node> kids;
-    kids.push_back(Node{Text{"Ready"}});
-    kids.push_back(Node{Text{"UTF-8"}});
-    kids.push_back(Node{Text{"Ln 1, Col 1"}});
+    kids.emplace_back(Text{"Ready"});
+    kids.emplace_back(Text{"UTF-8"});
+    kids.emplace_back(Text{"Ln 1, Col 1"});
     StatusBar sb{std::move(kids)};
 
     const Size s = laid_out(sb, 640.0F, 480.0F);
     AURORA_TEST_CHECK_NEAR(s.width, 640.0F, 1e-3F);
     AURORA_TEST_CHECK_NEAR(s.height, 24.0F, 1e-3F);
 
-    const auto &nodes = sb.child_nodes();
+    const auto& nodes = sb.child_nodes();
     AURORA_TEST_REQUIRE_EQ(nodes.size(), 3U);
     const Rect b0 = nodes[0].bounds();
     const Rect b1 = nodes[1].bounds();
@@ -206,11 +205,11 @@ AURORA_TEST_CASE(statusbar_layout_tail_right_aligned) {
 
 AURORA_TEST_CASE(statusbar_single_child_left_aligned) {
     std::vector<Node> kids;
-    kids.push_back(Node{Text{"Only"}});
+    kids.emplace_back(Text{"Only"});
     StatusBar sb{std::move(kids)};
 
     laid_out(sb, 640.0F, 480.0F);
-    const auto &nodes = sb.child_nodes();
+    const auto& nodes = sb.child_nodes();
     AURORA_TEST_REQUIRE_EQ(nodes.size(), 1U);
     // 单子项不右对齐：从 padding 起左排。
     AURORA_TEST_CHECK_NEAR(nodes[0].bounds().origin.x, 8.0F, 1e-3F);
@@ -219,12 +218,12 @@ AURORA_TEST_CASE(statusbar_single_child_left_aligned) {
 
 AURORA_TEST_CASE(toolbar_statusbar_paint_smoke) {
     std::vector<Node> tkids;
-    tkids.push_back(Node{Button{"Run"}});
+    tkids.emplace_back(Button{"Run"});
     ToolBar tb{std::move(tkids)};
 
     std::vector<Node> skids;
-    skids.push_back(Node{Text{"OK"}});
-    skids.push_back(Node{Text{"v1.0"}});
+    skids.emplace_back(Text{"OK"});
+    skids.emplace_back(Text{"v1.0"});
     StatusBar sb{std::move(skids)};
 
     laid_out(tb, 320.0F, 240.0F);

@@ -21,7 +21,8 @@ namespace aurora::test_cases::itest_overflow_strategy {
 
 AURORA_TEST_CASE(overflow_strategy_json_roundtrip_and_fallback) {
     // to_json：每个枚举值输出同名标准字符串。
-    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Visible).get<std::string>(), std::string{"Visible"});
+    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Visible).get<std::string>(),
+                         std::string{"Visible"});
     AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Hidden).get<std::string>(), std::string{"Hidden"});
     AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Clip).get<std::string>(), std::string{"Clip"});
     AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Scroll).get<std::string>(), std::string{"Scroll"});
@@ -83,8 +84,7 @@ auto paint_overflow_scenario(OverflowStrategy strategy) -> Size {
 
     const BuildContext ctx;
     col.mount(ctx);
-    const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F},
-                         .max = Size{.width = 100.0F, .height = 50.0F}};
+    const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 50.0F}};
     col.layout(cc, ctx);
 
     Painter p;

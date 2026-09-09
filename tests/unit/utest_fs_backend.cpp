@@ -41,7 +41,7 @@ namespace m = aurora::testing::matchers;
 /// @brief 构造一条 JSON 载荷的记录信封。
 [[nodiscard]] auto make_json_record(std::string id, aus::Json payload) -> aus::StorageRecord {
     aus::StorageRecord rec;
-    rec.id = id;
+    rec.id = std::move(id);
     rec.type = "__raw__";
     rec.version = 1;
     rec.encoding = aus::StorageEncoding::Json;
@@ -53,7 +53,7 @@ namespace m = aurora::testing::matchers;
 /// @brief 构造一条二进制载荷的记录信封。
 [[nodiscard]] auto make_binary_record(std::string id, aus::StorageBytes payload) -> aus::StorageRecord {
     aus::StorageRecord rec;
-    rec.id = id;
+    rec.id = std::move(id);
     rec.type = "__raw__";
     rec.version = 1;
     rec.encoding = aus::StorageEncoding::Binary;
@@ -211,7 +211,7 @@ AURORA_TEST_CASE(remove_record_and_sidecar_is_idempotent) {
     AURORA_TEST_CHECK_EQ(be.get_record("gblob").error().code_enum, ErrorCode::StorageRecordNotFound);
     AURORA_TEST_CHECK(files_with_suffix(dir, ".bin").empty());  // sidecar 随记录删除
 
-    AURORA_TEST_REQUIRE(be.remove("gone"));       // 重复删除幂等
+    AURORA_TEST_REQUIRE(be.remove("gone"));  // 重复删除幂等
     AURORA_TEST_REQUIRE(be.remove("never-was"));  // 从未存在的键幂等
 
     const auto ids = be.list();
@@ -298,8 +298,7 @@ AURORA_TEST_CASE(missing_binary_sidecar_reports_corrupt) {
 AURORA_TEST_CASE(cross_process_lock_option_opens) {
     // cross_process_lock=true：advisory 锁获取成功、后端打开、锁文件落在 root 下。
     const auto dir = fresh_dir("lock");
-    aus::FilesystemBackend be{
-        aus::FilesystemOptions{.root = dir, .auto_create_dir = true, .cross_process_lock = true}};
+    aus::FilesystemBackend be{aus::FilesystemOptions{.root = dir, .auto_create_dir = true, .cross_process_lock = true}};
     AURORA_TEST_REQUIRE(be.is_open());
     AURORA_TEST_CHECK(std::filesystem::exists(dir / "aurora_storage.lock"));
     std::error_code ec;

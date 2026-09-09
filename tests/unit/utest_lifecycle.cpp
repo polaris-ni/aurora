@@ -5,9 +5,9 @@
 
 #include <memory>
 
+#include "aurora/layout/layout_engine.h"
 #include "aurora/widget/lifecycle.h"
 #include "aurora/widget/text.h"
-#include "aurora/layout/layout_engine.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_lifecycle {
@@ -31,7 +31,7 @@ AURORA_TEST_CASE(mount_fires_on_mount_exactly_once) {
     int mounts = 0;
     const BuildContext ctx;
     {
-        Lifecycle lc(box(40.0F, 20.0F), [&mounts](const BuildContext &) { ++mounts; });
+        Lifecycle lc(box(40.0F, 20.0F), [&mounts](const BuildContext&) -> void { ++mounts; });
         lc.mount(ctx);
         lc.mount(ctx);  // 幂等：重复 mount 不重复触发
         AURORA_TEST_CHECK_EQ(mounts, 1);
@@ -44,7 +44,7 @@ AURORA_TEST_CASE(destructor_fires_on_unmount_once) {
     int unmounts = 0;
     const BuildContext ctx;
     {
-        Lifecycle lc(box(40.0F, 20.0F), [](const BuildContext &) {}, [&unmounts] { ++unmounts; });
+        Lifecycle lc(box(40.0F, 20.0F), [](const BuildContext&) -> void {}, [&unmounts]() -> void { ++unmounts; });
         lc.mount(ctx);
         AURORA_TEST_CHECK_EQ(unmounts, 0);
     }
@@ -61,7 +61,7 @@ AURORA_TEST_CASE(empty_callbacks_are_safe) {
 }
 
 AURORA_TEST_CASE(layout_passes_child_size_through) {
-    Lifecycle lc(box(70.0F, 25.0F), [](const BuildContext &) {});
+    Lifecycle lc(box(70.0F, 25.0F), [](const BuildContext&) -> void {});
     LayoutEngine::layout(lc, bounded(200.0F, 100.0F));
     const Size s = lc.size();
     AURORA_TEST_CHECK_NEAR(s.width, 70.0F, 1e-4F);
@@ -71,7 +71,7 @@ AURORA_TEST_CASE(layout_passes_child_size_through) {
 AURORA_TEST_CASE(mount_callback_receives_context) {
     bool ctx_seen = false;
     const BuildContext ctx;
-    Lifecycle lc(box(10.0F, 10.0F), [&ctx_seen](const BuildContext &) { ctx_seen = true; });
+    Lifecycle lc(box(10.0F, 10.0F), [&ctx_seen](const BuildContext&) -> void { ctx_seen = true; });
     lc.mount(ctx);
     AURORA_TEST_CHECK_TRUE(ctx_seen);
 }

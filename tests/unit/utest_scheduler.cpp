@@ -28,7 +28,7 @@ AURORA_TEST_CASE(default_timer_handle_is_inactive) {
 AURORA_TEST_CASE(timeout_fires_once_after_due) {
     Scheduler sched;
     int fired = 0;
-    const TimerHandle handle = sched.set_timeout(milliseconds{100}, [&fired] { ++fired; });
+    const TimerHandle handle = sched.set_timeout(milliseconds{100}, [&fired]() -> void { ++fired; });
     AURORA_TEST_CHECK_TRUE(handle.active());
 
     // 未到期不触发。
@@ -49,7 +49,7 @@ AURORA_TEST_CASE(timeout_fires_once_after_due) {
 AURORA_TEST_CASE(cancel_prevents_timeout_firing) {
     Scheduler sched;
     int fired = 0;
-    const TimerHandle handle = sched.set_timeout(milliseconds{50}, [&fired] { ++fired; });
+    const TimerHandle handle = sched.set_timeout(milliseconds{50}, [&fired]() -> void { ++fired; });
 
     handle.cancel();
     AURORA_TEST_CHECK_FALSE(handle.active());
@@ -61,7 +61,7 @@ AURORA_TEST_CASE(cancel_prevents_timeout_firing) {
 AURORA_TEST_CASE(interval_fires_repeatedly_until_cancel) {
     Scheduler sched;
     int fired = 0;
-    const TimerHandle handle = sched.set_interval(milliseconds{50}, [&fired] { ++fired; });
+    const TimerHandle handle = sched.set_interval(milliseconds{50}, [&fired]() -> void { ++fired; });
 
     // 4 次 40ms（累计 160ms）：50/100/150 三个截止点各触发一次。
     for (int i = 0; i < 4; ++i) {
@@ -82,8 +82,8 @@ AURORA_TEST_CASE(all_due_tasks_fire_in_single_tick) {
     Scheduler sched;
     int fired_a = 0;
     int fired_b = 0;
-    (void)sched.set_timeout(milliseconds{100}, [&fired_a] { ++fired_a; });
-    (void)sched.set_timeout(milliseconds{50}, [&fired_b] { ++fired_b; });
+    (void)sched.set_timeout(milliseconds{100}, [&fired_a]() -> void { ++fired_a; });
+    (void)sched.set_timeout(milliseconds{50}, [&fired_b]() -> void { ++fired_b; });
 
     // 一大步跨过两个截止点：同帧内到期任务全部触发，且各自只触发一次。
     sched.tick(0.20);
@@ -95,8 +95,8 @@ AURORA_TEST_CASE(all_due_tasks_fire_in_single_tick) {
 AURORA_TEST_CASE(clear_cancels_all_pending_tasks) {
     Scheduler sched;
     int fired = 0;
-    const TimerHandle timeout = sched.set_timeout(milliseconds{50}, [&fired] { ++fired; });
-    const TimerHandle interval = sched.set_interval(milliseconds{50}, [&fired] { ++fired; });
+    const TimerHandle timeout = sched.set_timeout(milliseconds{50}, [&fired]() -> void { ++fired; });
+    const TimerHandle interval = sched.set_interval(milliseconds{50}, [&fired]() -> void { ++fired; });
 
     sched.clear();
     AURORA_TEST_CHECK_FALSE(timeout.active());
@@ -113,7 +113,7 @@ AURORA_TEST_CASE(next_deadline_ms_tracks_soonest_task) {
     // 无任务：-1。
     AURORA_TEST_CHECK_NEAR(sched.next_deadline_ms(), -1.0, 1e-4);
 
-    const TimerHandle far_task = sched.set_timeout(milliseconds{100}, [] {});
+    const TimerHandle far_task = sched.set_timeout(milliseconds{100}, []() -> void {});
     AURORA_TEST_CHECK_NEAR(sched.next_deadline_ms(), 100.0, 1e-4);
 
     // 推进 50ms 后剩余 50ms。
@@ -121,7 +121,7 @@ AURORA_TEST_CASE(next_deadline_ms_tracks_soonest_task) {
     AURORA_TEST_CHECK_NEAR(sched.next_deadline_ms(), 50.0, 1e-4);
 
     // 更近的任务成为最近截止。
-    const TimerHandle near_task = sched.set_timeout(milliseconds{10}, [] {});
+    const TimerHandle near_task = sched.set_timeout(milliseconds{10}, []() -> void {});
     AURORA_TEST_CHECK_NEAR(sched.next_deadline_ms(), 10.0, 1e-4);
 
     // 取消更近任务后回到 50ms；已取消条目不参与计算。
@@ -135,7 +135,7 @@ AURORA_TEST_CASE(next_deadline_ms_tracks_soonest_task) {
 AURORA_TEST_CASE(next_deadline_ms_negative_without_pending_tasks) {
     Scheduler sched;
     int fired = 0;
-    (void)sched.set_timeout(milliseconds{50}, [&fired] { ++fired; });
+    (void)sched.set_timeout(milliseconds{50}, [&fired]() -> void { ++fired; });
 
     sched.tick(0.10);  // 已触发并剪除
     AURORA_TEST_CHECK_EQ(fired, 1);
@@ -148,9 +148,9 @@ AURORA_TEST_CASE(callback_may_register_new_tasks_during_fire) {
     int interval_fired = 0;
     int inner_fired = 0;
 
-    (void)sched.set_interval(milliseconds{100}, [&] {
+    (void)sched.set_interval(milliseconds{100}, [&]() -> void {
         ++interval_fired;
-        (void)sched.set_timeout(milliseconds{10}, [&inner_fired] { ++inner_fired; });
+        (void)sched.set_timeout(milliseconds{10}, [&inner_fired]() -> void { ++inner_fired; });
     });
 
     // tick1（150ms）：周期触发第 1 次，登记 inner#1（截止 160ms）。
@@ -172,14 +172,14 @@ AURORA_TEST_CASE(callback_may_register_new_tasks_during_fire) {
 AURORA_TEST_CASE(thread_local_current_instance_roundtrip) {
     // 用例前后复位，避免污染同进程内其它用例。
     Scheduler::set_current(nullptr);
-    AURORA_TEST_CHECK_EQ(Scheduler::current(), static_cast<Scheduler *>(nullptr));
+    AURORA_TEST_CHECK_EQ(Scheduler::current(), static_cast<Scheduler*>(nullptr));
 
     Scheduler sched;
     Scheduler::set_current(&sched);
     AURORA_TEST_CHECK_EQ(Scheduler::current(), &sched);
 
     Scheduler::set_current(nullptr);
-    AURORA_TEST_CHECK_EQ(Scheduler::current(), static_cast<Scheduler *>(nullptr));
+    AURORA_TEST_CHECK_EQ(Scheduler::current(), static_cast<Scheduler*>(nullptr));
 }
 
 }  // namespace aurora::test_cases::utest_scheduler

@@ -63,7 +63,7 @@ AURORA_TEST_CASE(slider_on_changed_receives_clamped_value) {
     std::vector<double> seen;
     Slider s;
     s.set_range(0.0, 1.0);
-    s.set_on_changed([&seen](double v) { seen.push_back(v); });
+    s.set_on_changed([&seen](double v) -> void { seen.push_back(v); });
 
     s.set_value(0.5);
     s.set_value(7.0);  // 钳到 1.0 后再上报
@@ -75,7 +75,7 @@ AURORA_TEST_CASE(slider_on_changed_receives_clamped_value) {
 AURORA_TEST_CASE(slider_drag_maps_local_x_to_value) {
     std::vector<double> seen;
     Slider s;
-    s.set_on_changed([&seen](double v) { seen.push_back(v); });
+    s.set_on_changed([&seen](double v) -> void { seen.push_back(v); });
     LayoutEngine::layout(s, bounded(200.0F, 24.0F));  // 宽 200 → 轨道 192（左右各缩 4）
 
     MouseEvent press;
@@ -102,7 +102,7 @@ AURORA_TEST_CASE(slider_disabled_ignores_pointer_events) {
     int calls = 0;
     Slider s;
     s.set_range(0.0, 1.0);
-    s.set_on_changed([&calls](double) { ++calls; });
+    s.set_on_changed([&calls](double) -> void { ++calls; });
     LayoutEngine::layout(s, bounded(200.0F, 24.0F));
     s.set_enabled(false);
     AURORA_TEST_CHECK_FALSE(s.enabled());
@@ -126,7 +126,7 @@ AURORA_TEST_CASE(slider_binding_writes_through_to_upstream) {
     AURORA_TEST_CHECK_NEAR(s.value(), 0.2, 1e-4);  // 上游 → 控件（读取穿透）
 
     // 信号收集：内部 value_ + 绑定目标。
-    std::vector<SignalViewBase *> out;
+    std::vector<SignalViewBase*> out;
     s.collect_signals(out);
     AURORA_TEST_REQUIRE_EQ(out.size(), 2U);
 }

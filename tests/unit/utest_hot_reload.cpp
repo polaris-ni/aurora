@@ -15,7 +15,7 @@ namespace aurora::test_cases::utest_hot_reload {
 namespace {
 
 /// 可 from_json 重建的最小 Text 树。
-auto text_tree(const char *text_value) -> Json {
+auto text_tree(const char* text_value) -> Json {
     Json j;
     j["type"] = "Text";
     j["props"]["text"] = text_value;
@@ -23,7 +23,7 @@ auto text_tree(const char *text_value) -> Json {
 }
 
 /// 可 from_json 重建的最小 Button 树。
-auto button_tree(const char *label) -> Json {
+auto button_tree(const char* label) -> Json {
     Json j;
     j["type"] = "Button";
     j["props"]["label"] = label;
@@ -35,7 +35,7 @@ auto button_tree(const char *label) -> Json {
 AURORA_TEST_CASE(first_sync_builds_and_caches_root) {
     Json current = text_tree("v1");
     HotReload hr("ui.json");
-    hr.set_loader([&current] { return current; });
+    hr.set_loader([&current]() -> Json { return current; });
 
     // 首次同步前无根。
     AURORA_TEST_CHECK_TRUE(hr.root() == nullptr);
@@ -50,7 +50,7 @@ AURORA_TEST_CASE(first_sync_builds_and_caches_root) {
 AURORA_TEST_CASE(unchanged_json_returns_nullptr) {
     Json current = text_tree("v1");
     HotReload hr("ui.json");
-    hr.set_loader([&current] { return current; });
+    hr.set_loader([&current]() -> Json { return current; });
 
     auto first = hr.try_sync();
     AURORA_TEST_REQUIRE_TRUE(first != nullptr);
@@ -64,7 +64,7 @@ AURORA_TEST_CASE(unchanged_json_returns_nullptr) {
 AURORA_TEST_CASE(changed_json_rebuilds_new_tree) {
     Json current = text_tree("v1");
     HotReload hr("ui.json");
-    hr.set_loader([&current] { return current; });
+    hr.set_loader([&current]() -> Json { return current; });
 
     auto first = hr.try_sync();
     AURORA_TEST_REQUIRE_TRUE(first != nullptr);
@@ -92,7 +92,7 @@ AURORA_TEST_CASE(loader_throw_returns_nullptr) {
 AURORA_TEST_CASE(empty_json_returns_nullptr_and_keeps_root) {
     Json current = Json{};  // null → empty
     HotReload hr("ui.json");
-    hr.set_loader([&current] { return current; });
+    hr.set_loader([&current]() -> Json { return current; });
 
     // 空 JSON：直接视为无变化。
     AURORA_TEST_CHECK_TRUE(hr.try_sync() == nullptr);
@@ -110,7 +110,7 @@ AURORA_TEST_CASE(empty_json_returns_nullptr_and_keeps_root) {
 AURORA_TEST_CASE(invalid_structure_returns_nullptr_and_keeps_root) {
     Json current = text_tree("v1");
     HotReload hr("ui.json");
-    hr.set_loader([&current] { return current; });
+    hr.set_loader([&current]() -> Json { return current; });
 
     auto first = hr.try_sync();
     AURORA_TEST_REQUIRE_TRUE(first != nullptr);
@@ -134,7 +134,7 @@ AURORA_TEST_CASE(set_state_key_and_deferred_loader_injection) {
     hr.set_state_key("id");
 
     Json current = text_tree("v1");
-    hr.set_loader([&current] { return current; });
+    hr.set_loader([&current]() -> Json { return current; });
 
     auto root = hr.try_sync();
     AURORA_TEST_REQUIRE_TRUE(root != nullptr);

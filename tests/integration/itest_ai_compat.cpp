@@ -15,9 +15,8 @@
 #include "aurora/aurora.h"
 #include "aurora/widget/codegen.h"
 #include "aurora/widget/serialization.h"
-#include "paths.h"
-
 #include "framework/aurora_test.h"
+#include "paths.h"
 
 namespace aurora::test_cases::itest_ai_compat {
 
@@ -31,15 +30,13 @@ using au::serialization::to_json;
 namespace {
 
 // ---- fixture 目录：框架已把 cwd 切到仓库根，此处再经 under_repo 兜底绝对路径 ----
-auto fixture_dir() -> fs::path {
-    return au::testing::paths::under_repo("tests/fixtures/ai_compat");
-}
+auto fixture_dir() -> fs::path { return au::testing::paths::under_repo("tests/fixtures/ai_compat"); }
 
 // ---- 按文件名前缀收集 fixture（目录遍历驱动，无硬编码名单；新增 fixture 免改测试）----
-auto collect_fixtures(const fs::path &dir, std::string_view prefix) -> std::vector<fs::path> {
+auto collect_fixtures(const fs::path& dir, std::string_view prefix) -> std::vector<fs::path> {
     std::vector<fs::path> found;
     std::error_code ec;
-    for (const auto &ent : fs::directory_iterator(dir, ec)) {
+    for (const auto& ent : fs::directory_iterator(dir, ec)) {
         if (!ent.is_regular_file() || ent.path().extension() != ".json") {
             continue;
         }
@@ -52,7 +49,7 @@ auto collect_fixtures(const fs::path &dir, std::string_view prefix) -> std::vect
 }
 
 // ---- 加载 JSON fixture 文件；读失败 / 解析失败返回 null ----
-auto load_fixture(const fs::path &path) -> au::Json {
+auto load_fixture(const fs::path& path) -> au::Json {
     const std::ifstream in(path, std::ios::binary);
     if (!in) {
         return au::Json{};
@@ -76,7 +73,7 @@ AURORA_TEST_CASE(valid_fixtures_pass_full_pipeline) {
     const auto valid_files = collect_fixtures(dir, "valid_");
     AURORA_TEST_REQUIRE_MSG(!valid_files.empty(), "at least one valid_*.json fixture must exist");
 
-    for (const auto &p : valid_files) {
+    for (const auto& p : valid_files) {
         const std::string label = "valid fixture " + p.filename().string();
         const au::Json j = load_fixture(p);
         AURORA_TEST_REQUIRE_MSG(!j.is_null(), label + ": loaded");
@@ -95,7 +92,7 @@ AURORA_TEST_CASE(error_fixtures_rejected_by_pipeline) {
     const auto error_files = collect_fixtures(dir, "error_");
     AURORA_TEST_REQUIRE_MSG(!error_files.empty(), "at least one error_*.json fixture must exist");
 
-    for (const auto &p : error_files) {
+    for (const auto& p : error_files) {
         const std::string label = "error fixture " + p.filename().string();
         const au::Json j = load_fixture(p);
         AURORA_TEST_REQUIRE_MSG(!j.is_null(), label + ": loaded");

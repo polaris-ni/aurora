@@ -26,15 +26,17 @@ namespace aurora::test_cases::itest_perf_overlay_refresh {
 namespace {
 
 // 抓取整帧像素缓冲的副本（RGBA）。
-void capture_surface(const Surface &s, std::vector<std::uint8_t> &out) {
+void capture_surface(const Surface& s, std::vector<std::uint8_t>& out) {
     const int w = static_cast<int>(s.size().width);
     const int h = static_cast<int>(s.size().height);
-    const std::uint8_t *buf = s.data();
+    const std::uint8_t* buf = s.data();
+    // 整帧 RGBA 缓冲拷贝：Surface::data() 返回裸指针，buf+len 首尾区间是必要写法（长度已按 w*h*4 核算）。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     out.assign(buf, buf + (static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4));
 }
 
 // 两帧像素差异字节数（RGBA）。
-auto pixel_diff(const std::vector<std::uint8_t> &a, const std::vector<std::uint8_t> &b) -> long {
+auto pixel_diff(const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>& b) -> long {
     long d = 0;
     const std::size_t n = a.size() < b.size() ? a.size() : b.size();
     for (std::size_t i = 0; i < n; ++i) {
@@ -46,7 +48,7 @@ auto pixel_diff(const std::vector<std::uint8_t> &a, const std::vector<std::uint8
 }
 
 // 整帧亮像素数（叠加层文本为浅色，应存在）。
-auto bright_count(const std::vector<std::uint8_t> &buf) -> long {
+auto bright_count(const std::vector<std::uint8_t>& buf) -> long {
     long c = 0;
     for (std::size_t i = 0; i + 3 < buf.size(); i += 4) {
         if (buf.at(i) + buf.at(i + 1) + buf.at(i + 2) > 300) {
@@ -60,7 +62,7 @@ auto bright_count(const std::vector<std::uint8_t> &buf) -> long {
 // 关键：直接调 present_root（非 app.run）时 FrameStats 不会被自动 record，必须手动喂入
 // 变化的 dt —— 否则 window_size 恒 0、叠加层永驻「采样中」、两帧像素完全一致（diff=0）。
 // mean_dt 可在两阶段间取不同均值，使滑动窗口统计确定性地移位（不依赖墙钟节奏）。
-void drive_frames(Window &win, Node &root, int from, int to, double mean_dt) {
+void drive_frames(Window& win, Node& root, int from, int to, double mean_dt) {
     for (int i = from; i < to; ++i) {
         win.force_full_redraw();
         (void)win.present_root(root);
@@ -95,9 +97,9 @@ AURORA_TEST_CASE(overlay_refreshes_live_not_frozen) {
     auto ov = std::make_shared<PerfOverlay>();
     app.set_overlay(ov);
 
-    Window *win = app.window();
+    Window* win = app.window();
     AURORA_TEST_REQUIRE_NOT_NULL(win);
-    Node &root = app.scene().root_node();
+    Node& root = app.scene().root_node();
 
     // 预热 ~0.72s：驱动帧循环使 FrameStats 累积真实样本（window_size ≫ 2），
     // 叠加层脱离「采样中」。force_full_redraw 模拟「活跃应用」：避免静态场景触发

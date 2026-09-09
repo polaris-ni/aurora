@@ -59,17 +59,17 @@ AURORA_TEST_CASE(inspector_panel_type_contract_and_describe) {
 
 AURORA_TEST_CASE(inspector_panel_ratio_clamped_and_serialized) {
     // 构造期把 tree_ratio 钳制到 [0.1, 0.9]（不变量 ratio ∈ [0,1]），并经 serialize_props 暴露。
-    const InspectorPanel low{[] { return Node{}; }, 0.05F};
+    const InspectorPanel low{[]() -> Node { return Node{}; }, 0.05F};
     Json pj;
     low.serialize_props(pj);
     AURORA_TEST_CHECK_NEAR(pj["ratio"].get<float>(), 0.1F, 1e-4F);
 
-    const InspectorPanel high{[] { return Node{}; }, 2.0F};
+    const InspectorPanel high{[]() -> Node { return Node{}; }, 2.0F};
     Json pj2;
     high.serialize_props(pj2);
     AURORA_TEST_CHECK_NEAR(pj2["ratio"].get<float>(), 0.9F, 1e-4F);
 
-    const InspectorPanel mid{[] { return Node{}; }};
+    const InspectorPanel mid{[]() -> Node { return Node{}; }};
     Json pj3;
     mid.serialize_props(pj3);
     AURORA_TEST_CHECK_NEAR(pj3["ratio"].get<float>(), 0.35F, 1e-4F);
@@ -87,15 +87,15 @@ AURORA_TEST_CASE(inspector_panel_tree_click_selects_widget_and_updates_props) {
     auto btn = std::make_shared<Button>("OK");
     auto input = std::make_shared<TextInput>();
     input->set_value("hello");
-    InspectorPanel panel{[&] { return make_sample_tree(btn, input); }};
+    InspectorPanel panel{[&]() -> Node { return make_sample_tree(btn, input); }};
 
     BuildContext ctx;
     const Size sz = panel.layout(bounded(400.0F, 300.0F), ctx);
     AURORA_TEST_CHECK_NEAR(sz.width, 400.0F, 1e-3F);
 
     int select_hits = 0;
-    Widget *last_selected = nullptr;
-    panel.on_select_widget = [&](Widget *w) {
+    Widget* last_selected = nullptr;
+    panel.on_select_widget = [&](Widget* w) -> void {
         ++select_hits;
         last_selected = w;
     };
@@ -112,10 +112,10 @@ AURORA_TEST_CASE(inspector_panel_tree_click_selects_widget_and_updates_props) {
     AURORA_TEST_CHECK_EQ(select_hits, 1);
 
     // 属性面板随选中更新：含 Button 的 label 属性行（值即按钮文字）。
-    const auto &rows = panel.current_props();
+    const auto& rows = panel.current_props();
     AURORA_TEST_CHECK_FALSE(rows.empty());
     bool has_label_ok = false;
-    for (const auto &kv : rows) {
+    for (const auto& kv : rows) {
         if (kv.first == "label" && kv.second == "OK") {
             has_label_ok = true;
         }
@@ -133,7 +133,7 @@ AURORA_TEST_CASE(inspector_panel_tree_click_selects_widget_and_updates_props) {
 }
 
 AURORA_TEST_CASE(inspector_panel_divider_drag_updates_ratio) {
-    InspectorPanel panel{[] { return Node{}; }};
+    InspectorPanel panel{[]() -> Node { return Node{}; }};
     BuildContext ctx;
     (void)panel.layout(bounded(400.0F, 300.0F), ctx);
 
@@ -163,7 +163,7 @@ AURORA_TEST_CASE(inspector_panel_divider_drag_updates_ratio) {
 }
 
 AURORA_TEST_CASE(inspector_panel_export_code_button_invokes_callback) {
-    InspectorPanel panel{[] { return Node{Column{Node{Text{"solo"}}}}; }};
+    InspectorPanel panel{[]() -> Node { return Node{Column{Node{Text{"solo"}}}}; }};
 
     // 直接导出：非空且含根类型名。
     const std::string direct = panel.export_code();
@@ -171,7 +171,7 @@ AURORA_TEST_CASE(inspector_panel_export_code_button_invokes_callback) {
 
     int export_hits = 0;
     std::string exported;
-    panel.on_export_code = [&](const std::string &code) {
+    panel.on_export_code = [&](const std::string& code) -> void {
         ++export_hits;
         exported = code;
     };
@@ -194,7 +194,7 @@ AURORA_TEST_CASE(inspector_panel_export_code_button_invokes_callback) {
 }
 
 AURORA_TEST_CASE(inspector_panel_set_root_retargets_selection) {
-    InspectorPanel panel{[] { return Node{Column{Node{Text{"first"}}}}; }};
+    InspectorPanel panel{[]() -> Node { return Node{Column{Node{Text{"first"}}}}; }};
     BuildContext ctx;
     (void)panel.layout(bounded(400.0F, 300.0F), ctx);
 
@@ -281,7 +281,7 @@ AURORA_TEST_CASE(inspector_panel_get_and_set_widget_props) {
     AURORA_TEST_CHECK_NEAR(props["values"]["gap"].get<float>(), 8.0F, 1e-4F);
 
     // 单属性回写 → 读回一致；再恢复原值。
-    auto &col_ref = dynamic_cast<Column &>(root.widget());
+    auto& col_ref = dynamic_cast<Column&>(root.widget());
     set_widget_prop(root.widget(), "gap", Json(16.0F));
     AURORA_TEST_CHECK_NEAR(col_ref.gap, 16.0F, 1e-4F);
     set_widget_prop(root.widget(), "gap", Json(8.0F));

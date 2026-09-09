@@ -23,7 +23,7 @@ namespace aurora::test_cases::itest_nav_win {
 namespace {
 
 /// 构造一个带纯色背景的页面（Text + background 修饰），作为路由根。
-auto make_page(const std::string &label) -> Node {
+auto make_page(const std::string& label) -> Node {
     Text t{label};
     t.modifier.set(Modifier{}.background(Color::blue()));
     return Node{std::move(t)};
@@ -119,7 +119,9 @@ AURORA_TEST_CASE(router_registry_build_and_missing) {
 
     const auto r = router.build("detail");
     AURORA_TEST_REQUIRE_TRUE(r.has_value());
-    AURORA_TEST_CHECK_EQ(r->name(), std::string{"detail"});
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_EQ(r.value().name(), std::string{"detail"});
     AURORA_TEST_CHECK_FALSE(router.build("missing").has_value());
 
     const Node root = router.build_root("home");
@@ -132,7 +134,7 @@ AURORA_TEST_CASE(router_registry_build_and_missing) {
 AURORA_TEST_CASE(navigator_stack_ops_and_callback_counts) {
     Navigator nav{Route{make_page("Root"), "root"}};
     int changes = 0;
-    nav.set_on_route_changed([&changes]() { ++changes; });
+    nav.set_on_route_changed([&changes]() -> void { ++changes; });
 
     AURORA_TEST_CHECK_EQ(nav.depth(), 1U);
     AURORA_TEST_CHECK_FALSE(nav.can_pop());

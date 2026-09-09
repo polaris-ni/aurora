@@ -71,8 +71,8 @@ AURORA_TEST_CASE(storage_record_aggregate_fields_preserved) {
     AURORA_TEST_CHECK_EQ(rec.type, std::string("note"));
     AURORA_TEST_CHECK_EQ(rec.version, 3U);
     AURORA_TEST_CHECK(rec.encoding == aus::StorageEncoding::Binary);
-    AURORA_TEST_CHECK_EQ(
-        std::chrono::duration_cast<std::chrono::milliseconds>(rec.mtime.time_since_epoch()).count(), 123456LL);
+    AURORA_TEST_CHECK_EQ(std::chrono::duration_cast<std::chrono::milliseconds>(rec.mtime.time_since_epoch()).count(),
+                         123456LL);
     AURORA_TEST_CHECK(std::holds_alternative<aus::StorageBytes>(rec.payload));
     AURORA_TEST_CHECK_EQ(std::get<aus::StorageBytes>(rec.payload).size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(rec.blob_ref, std::string("rec1.bin"));
@@ -94,7 +94,7 @@ AURORA_TEST_CASE(storage_bytes_value_semantics) {
     const aus::StorageBytes bytes{std::byte{0x00}, std::byte{0xFF}};
     AURORA_TEST_CHECK_EQ(bytes.size(), std::size_t{2});
 
-    const aus::StorageBytes copy = bytes;  // 值语义拷贝
+    const aus::StorageBytes& copy = bytes;  // 值语义拷贝
     AURORA_TEST_CHECK(copy == bytes);
 
     const aus::StorageBytes empty;
@@ -106,7 +106,7 @@ AURORA_TEST_CASE(storage_change_callback_receives_event) {
     aus::StorageChange sent{.op = aus::StorageChange::Operation::Remove, .id = "k1"};
     aus::StorageChange received{.op = aus::StorageChange::Operation::Put, .id = ""};
 
-    const aus::StorageChangeCallback cb = [&received](const aus::StorageChange& ch) { received = ch; };
+    const aus::StorageChangeCallback cb = [&received](const aus::StorageChange& ch) -> void { received = ch; };
     cb(sent);
 
     AURORA_TEST_CHECK(received.op == aus::StorageChange::Operation::Remove);

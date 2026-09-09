@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/state.h
-/// 测试说明: State<T> 构造与值语义、get 作用域内登记依赖与去重、const 读取、dispose/析构观察边安全、shared() 与移动-only 值类型
+/// 测试说明: State<T> 构造与值语义、get 作用域内登记依赖与去重、const 读取、dispose/析构观察边安全、shared()
+/// 与移动-only 值类型
 
 #include <memory>
 #include <string>
@@ -34,7 +35,7 @@ AURORA_TEST_CASE(state_set_notifies_subscribed_effect) {
     // subscribe() 手动建立观察边；set() 通知观察者重跑（定点刷新）。
     State<int> s{0};
     int runs = 0;
-    Effect e{[&] { ++runs; }};
+    Effect e{[&]() -> void { ++runs; }};
     s.subscribe(e);
     e.run();  // 首跑（回调不读 s）
     AURORA_TEST_CHECK_EQ(runs, 1);
@@ -47,7 +48,7 @@ AURORA_TEST_CASE(state_get_outside_effect_scope_does_not_subscribe) {
     // 作用域外 get() 只取值，不登记依赖：未订阅的 Effect 不因 set 重跑。
     State<int> s{0};
     int runs = 0;
-    Effect e{[&] { ++runs; }};
+    Effect e{[&]() -> void { ++runs; }};
     e.run();  // 回调不读 s
     (void)s.get();
     s.set(1);
@@ -59,7 +60,7 @@ AURORA_TEST_CASE(state_get_in_effect_scope_registers_and_dedups) {
     // 作用域内 get() 自动登记依赖；同一 Effect 重复登记被去重（动画每帧重跑不累积观察边）。
     State<int> s{0};
     int runs = 0;
-    Effect e{[&] {
+    Effect e{[&]() -> void {
         ++runs;
         (void)s.get();
     }};
@@ -76,7 +77,7 @@ AURORA_TEST_CASE(state_const_get_still_registers_dependency) {
     auto owned = std::make_shared<State<int>>(5);
     const State<int>& view = *owned;
     int runs = 0;
-    Effect e{[&] {
+    Effect e{[&]() -> void {
         ++runs;
         (void)view.get();
     }};
@@ -92,7 +93,7 @@ AURORA_TEST_CASE(state_disposed_and_destroyed_effects_are_skipped_safely) {
     State<int> s{0};
     int runs_a = 0;
     int runs_b = 0;
-    Effect disposed_e{[&] {
+    Effect disposed_e{[&]() -> void {
         ++runs_a;
         (void)s.get();
     }};
@@ -100,7 +101,7 @@ AURORA_TEST_CASE(state_disposed_and_destroyed_effects_are_skipped_safely) {
     AURORA_TEST_CHECK_EQ(runs_a, 1);
     disposed_e.dispose();
     {
-        Effect transient{[&] {
+        Effect transient{[&]() -> void {
             ++runs_b;
             (void)s.get();
         }};

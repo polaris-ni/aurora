@@ -70,7 +70,9 @@ AURORA_TEST_CASE(subscription_move_semantics_transfer_ownership) {
     int calls = 0;
     auto moved_from = stream.subscribe([&calls](const int&) -> void { ++calls; });
     auto moved_to = std::move(moved_from);
-    // 移动后源句柄失效：其析构不会再退订。
+    // 本用例的断言目标就是「移动后源句柄失效」：对 moved-from 做只读的 bool 转换是刻意检查，
+    // 非误用；改写将破坏被测语义（Subscription 移动后置空属实现契约）。
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     AURORA_TEST_CHECK_FALSE(static_cast<bool>(moved_from));
     AURORA_TEST_CHECK(static_cast<bool>(moved_to));
     stream.emit(1);

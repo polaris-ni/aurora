@@ -47,16 +47,16 @@ auto make_source() -> std::shared_ptr<ImageSequenceSource> {
 /// 暴露受保护扩展点的测试子类。
 class PlayerHook final : public VideoPlayer {
   public:
-    using VideoPlayer::VideoPlayer;
     using VideoPlayer::on_double_tap;
     using VideoPlayer::on_playback_tick;
     using VideoPlayer::on_tap;
+    using VideoPlayer::VideoPlayer;
 
     int taps = 0;
     int double_taps = 0;
     int ticks = 0;
 
-    [[nodiscard]] auto frame() const -> const Image & { return current_frame(); }
+    [[nodiscard]] auto frame() const -> const Image& { return current_frame(); }
 
     auto on_tap() -> void override {
         ++taps;
@@ -202,7 +202,7 @@ AURORA_TEST_CASE(show_controls_toggles_and_custom_controls) {
 
     // 整体替换控件叠层。
     auto custom = std::make_unique<aurora::Text>("ctrl");
-    auto *custom_ptr = custom.get();
+    auto* custom_ptr = custom.get();
     p.set_controls(std::move(custom));
     AURORA_TEST_REQUIRE_EQ(p.child_nodes().size(), 1U);
     AURORA_TEST_CHECK_EQ(&p.child_nodes()[0].widget(), custom_ptr);
@@ -244,7 +244,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "VideoPlayer");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "single");
     bool has_fit = false;
-    for (const auto &prop : d.properties) {
+    for (const auto& prop : d.properties) {
         if (std::string{prop.name} == "fit") {
             has_fit = true;
         }
@@ -259,7 +259,7 @@ AURORA_TEST_CASE(tap_and_double_tap_extension_points) {
 
     // 有回调走回调。
     int fired = 0;
-    p.set_on_tap([&fired] { ++fired; });
+    p.set_on_tap([&fired]() -> void { ++fired; });
     p.on_tap();
     AURORA_TEST_CHECK_EQ(fired, 1);
     AURORA_TEST_CHECK_FALSE(p.is_playing());  // 回调替代默认 toggle
@@ -277,14 +277,14 @@ AURORA_TEST_CASE(tap_and_double_tap_extension_points) {
     r.on_double_tap();
     AURORA_TEST_CHECK_EQ(r.fit(), BoxFit::Contain);
     int dbl_fired = 0;
-    r.set_on_double_tap([&dbl_fired] { ++dbl_fired; });
+    r.set_on_double_tap([&dbl_fired]() -> void { ++dbl_fired; });
     r.on_double_tap();
     AURORA_TEST_CHECK_EQ(dbl_fired, 1);
 }
 
 AURORA_TEST_CASE(collect_signals_reports_player_states) {
     VideoPlayer p(make_source());
-    std::vector<aurora::SignalViewBase *> out;
+    std::vector<aurora::SignalViewBase*> out;
     p.collect_signals(out);
     // 无子控件时恰为 4 个播放器状态信号。
     AURORA_TEST_CHECK_EQ(out.size(), 4U);

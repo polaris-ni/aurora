@@ -6,6 +6,7 @@
 /// 覆盖说明: 计时断言 = 中位数(3 次) × 100ms 宽阈值（headless 典型值 ≪10ms，余量 ≥1 个数量级）。
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -16,9 +17,9 @@
 #include "aurora/app/application.h"
 #include "aurora/app/perf_overlay.h"
 #include "aurora/core/log.h"
-#include "aurora/window/surface.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
+#include "aurora/window/surface.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::itest_perf_scalability {
@@ -33,7 +34,7 @@ class MinSurface final : public Surface {
         size_ = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
         return Result<bool>{true};
     }
-    auto painter() -> Painter & override { return painter_; }
+    auto painter() -> Painter& override { return painter_; }
     auto present() -> Result<bool> override {
         ++frames_;
         return Result<bool>{true};
@@ -97,7 +98,7 @@ auto run_benchmark(int widget_count, int frames) -> StatsSnapshot {
     });
     app.run();
 
-    const FrameStats &fs = FrameStats::instance();
+    const FrameStats& fs = FrameStats::instance();
     return StatsSnapshot{
         .avg_frame_ms = fs.avg_frame_ms(),
         .avg_layout_ms = fs.avg_layout_ms(),
@@ -109,18 +110,17 @@ auto run_benchmark(int widget_count, int frames) -> StatsSnapshot {
     };
 }
 
-constexpr int k_sizes[] = {50, 100, 200, 500};
-constexpr int k_matrix_frames = 100;
-
 }  // namespace
 
 AURORA_TEST_CASE(benchmark_matrix_completes_all_sizes) {
-    StatsSnapshot snapshots[std::size(k_sizes)]{};
+    constexpr std::array k_sizes{50, 100, 200, 500};
+    constexpr int k_matrix_frames = 100;
+    std::array<StatsSnapshot, k_sizes.size()> snapshots{};
 
-    for (std::size_t i = 0; i < std::size(k_sizes); ++i) {
-        const int n = k_sizes[i];
-        snapshots[i] = run_benchmark(n, k_matrix_frames);
-        const StatsSnapshot &s = snapshots[i];
+    for (std::size_t i = 0; i < k_sizes.size(); ++i) {
+        const int n = k_sizes.at(i);
+        snapshots.at(i) = run_benchmark(n, k_matrix_frames);
+        const StatsSnapshot& s = snapshots.at(i);
 
         AURORA_TEST_PRINTF("N=%-3d  avg=%.1fms layout=%.1fms paint=%.1fms fps=%.0f worst=%.1fms p99=%.1fms\n", n,
                            s.avg_frame_ms, s.avg_layout_ms, s.avg_paint_ms, s.fps, s.worst_frame_ms, s.p99);
@@ -131,9 +131,9 @@ AURORA_TEST_CASE(benchmark_matrix_completes_all_sizes) {
 
     // 增长趋势观测：更大规模不应比小规模慢一个数量级以上（仅打印，供架构级优化参考，
     // 不作时序敏感断言）。
-    for (std::size_t i = 1; i < std::size(k_sizes); ++i) {
-        const double ratio = snapshots[i].avg_frame_ms / (snapshots[i - 1].avg_frame_ms + 0.001);
-        AURORA_TEST_PRINTF("  growth N=%d->N=%d: %.1fx\n", k_sizes[i - 1], k_sizes[i], ratio);
+    for (std::size_t i = 1; i < k_sizes.size(); ++i) {
+        const double ratio = snapshots.at(i).avg_frame_ms / (snapshots.at(i - 1).avg_frame_ms + 0.001);
+        AURORA_TEST_PRINTF("  growth N=%d->N=%d: %.1fx\n", k_sizes.at(i - 1), k_sizes.at(i), ratio);
     }
 }
 
@@ -141,11 +141,11 @@ AURORA_TEST_CASE(largest_scene_frame_time_median_within_budget) {
     // 最大规模（N=500）独立采样 3 次，取中位数——单次运行遇弱机噪声毛刺仍稳定。
     constexpr int k_n = 500;
     constexpr int k_frames = 60;
-    double samples[3] = {0.0, 0.0, 0.0};
-    for (double &ms : samples) {
+    std::array<double, 3> samples{0.0, 0.0, 0.0};
+    for (double& ms : samples) {
         ms = run_benchmark(k_n, k_frames).avg_frame_ms;
     }
-    std::sort(samples, samples + 3);
+    std::ranges::sort(samples);
     const double median = samples[1];
     AURORA_TEST_PRINTF("  N=%d avg_frame_ms samples: %.1f / %.1f / %.1f -> median %.1fms\n", k_n, samples[0],
                        samples[1], samples[2], median);

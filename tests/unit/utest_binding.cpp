@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/binding.h
-/// 测试说明: Binding<T> 的构造与不变量（bound/target/removable）、对上游 State 的读写与观察者通知、可选删除回调的每次触发，以及未绑定访问的常开死亡路径
+/// 测试说明: Binding<T> 的构造与不变量（bound/target/removable）、对上游 State
+/// 的读写与观察者通知、可选删除回调的每次触发，以及未绑定访问的常开死亡路径
 
 #include "aurora/state/binding.h"
 #include "framework/aurora_test.h"
@@ -37,7 +38,7 @@ AURORA_TEST_CASE(binding_set_notifies_state_observers) {
     State<int> s{0};
     int runs = 0;
     int last = -1;
-    Effect eff{[&] {
+    Effect eff{[&]() -> void {
         last = s.get();
         ++runs;
     }};
@@ -62,7 +63,7 @@ AURORA_TEST_CASE(remove_invokes_injected_remover_each_call) {
     // 语义对应 Preferences::binding 的持久化键删除（多进程墓碑由存储层完成）。
     State<int> s{1};
     int removed = 0;
-    Binding<int> b{s, [&] { ++removed; }};
+    Binding<int> b{s, [&]() -> void { ++removed; }};
     AURORA_TEST_CHECK_TRUE(b.bound());
     AURORA_TEST_CHECK_TRUE(b.removable());
     AURORA_TEST_CHECK_EQ(b.get(), 1);  // 删除回调的存在不影响读写

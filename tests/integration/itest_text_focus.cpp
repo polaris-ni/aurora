@@ -23,8 +23,8 @@ using au::ColumnProps;
 using au::Constraints;
 using au::EventDispatcher;
 using au::FocusManager;
-using au::MouseButton;
 using au::MouseAction;
+using au::MouseButton;
 using au::MouseEvent;
 using au::Node;
 using au::Painter;
@@ -33,14 +33,12 @@ using au::Rect;
 using au::Size;
 using au::Text;
 
-constexpr float kW = 640.0F;
-constexpr float kH = 480.0F;
+constexpr float AURORA_TEST_TEXT_FOCUS_W = 640.0F;
+constexpr float AURORA_TEST_TEXT_FOCUS_H = 480.0F;
 
 /// 选区高亮为半透明蓝色矩形；ClearType 字形边缘的红/蓝彩色羽化会干扰蓝色检测，
 /// 统一改用与背景无关的超采样抗锯齿，使「失焦后高亮应消失」的判定只反映选区本身。
-void use_supersample_aa() {
-    render::FontEngine::set_text_aa_mode(render::TextAAMode::Supersample);
-}
+void use_supersample_aa() { render::FontEngine::set_text_aa_mode(render::TextAAMode::Supersample); }
 
 /// 一套已挂载/布局/绘制过的 Text+Button 舞台：填充 display_text_ 并备好焦点管理与派发。
 struct Stage {
@@ -57,17 +55,23 @@ struct Stage {
         col = std::make_shared<Column>(ColumnProps{.children = {Node{txt}, Node{btn}}});
         col->set_focusable(false);  // 容器不抢占焦点，焦点应落在叶控件上
         col->mount(ctx);
-        const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = kW, .height = kH}};
+        const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F},
+                             .max = Size{.width = AURORA_TEST_TEXT_FOCUS_W, .height = AURORA_TEST_TEXT_FOCUS_H}};
         col->layout(cc, ctx);
-        p.begin(static_cast<int>(kW), static_cast<int>(kH));
+        p.begin(static_cast<int>(AURORA_TEST_TEXT_FOCUS_W), static_cast<int>(AURORA_TEST_TEXT_FOCUS_H));
         repaint_on_white();
         fm.set_root(col.get());
     }
 
     /// 白底重绘整棵子树。
     void repaint_on_white() {
-        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = kW, .height = kH}}, Color::white());
-        col->paint(p, Rect{.origin = Point{}, .size = Size{.width = kW, .height = kH}}, ctx);
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0},
+                         .size = Size{.width = AURORA_TEST_TEXT_FOCUS_W, .height = AURORA_TEST_TEXT_FOCUS_H}},
+                    Color::white());
+        col->paint(p,
+                   Rect{.origin = Point{},
+                        .size = Size{.width = AURORA_TEST_TEXT_FOCUS_W, .height = AURORA_TEST_TEXT_FOCUS_H}},
+                   ctx);
     }
 
     void press(float x, float y) { dispatch(MouseAction::Press, x, y); }
@@ -91,12 +95,12 @@ struct Stage {
         release(tb.origin.x + 2.0F, yc);
     }
 
-    [[nodiscard]] Rect text_bounds() const { return col->child_nodes().at(0).bounds(); }
-    [[nodiscard]] Rect button_bounds() const { return col->child_nodes().at(1).bounds(); }
+    [[nodiscard]] auto text_bounds() const -> Rect { return col->child_nodes().at(0).bounds(); }
+    [[nodiscard]] auto button_bounds() const -> Rect { return col->child_nodes().at(1).bounds(); }
 };
 
 /// 统计 [r] 盒内「蓝色染色」像素数（b - r > 30，即选区高亮）。
-auto count_blue_in(const Painter &p, const Rect &r) -> int {
+auto count_blue_in(const Painter& p, const Rect& r) -> int {
     int x0 = std::max(static_cast<int>(std::floor(r.origin.x)), 0);
     int y0 = std::max(static_cast<int>(std::floor(r.origin.y)), 0);
     const int x1 = std::min(static_cast<int>(std::ceil(r.origin.x + r.size.width)), p.width());

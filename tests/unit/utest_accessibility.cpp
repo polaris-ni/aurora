@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/accessibility.h
-/// 测试说明: 覆盖角色推断映射、默认动作集、动作位掩码判定、无障碍树的递归构建与节点计数（以最小控件桩驱动，不依赖渲染后端）
+/// 测试说明: 覆盖角色推断映射、默认动作集、位掩码判定与无障碍树构建计数（以最小控件桩驱动）
 
 #include <cstdint>
 #include <string_view>
@@ -112,6 +112,8 @@ AURORA_TEST_CASE(default_actions_per_role) {
     AURORA_TEST_CHECK_EQ(default_actions(AccessibilityRole::Generic), AccessibilityAction::Focus);
 
     // 兜底契约：表外新增角色默认无动作（不再静默继承 Focus）。
+    // 越界取值正是本用例被测目标（验证 default_actions 对未知角色的兜底），不可改为合法枚举值。
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     constexpr auto future_role = static_cast<AccessibilityRole>(200);
     AURORA_TEST_CHECK_EQ(default_actions(future_role), AccessibilityAction::None);
 }

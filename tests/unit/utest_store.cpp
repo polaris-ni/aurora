@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/store.h
-/// 测试说明: Action 的类型擦除载荷存取、Store 经 reducer 的单向数据流（状态更新/新值旧值通知/订阅与退订/as_signal 信号视图）与 make_store 共享所有权
+/// 测试说明: Action 的类型擦除载荷存取、Store 经 reducer 的单向数据流（状态更新/新值旧值通知/订阅与退订/as_signal
+/// 信号视图）与 make_store 共享所有权
 
 #include <cstddef>
 #include <memory>
@@ -53,8 +54,9 @@ AURORA_TEST_CASE(store_dispatch_runs_reducer_and_updates_state) {
 AURORA_TEST_CASE(store_listener_receives_new_and_prev_state) {
     // Listener 签名为 (newState, prevState)：两次派发的序对逐一核对。
     std::vector<std::pair<int, int>> observed;
-    auto store = make_store<int>(0, [](const int& s, const Action&) { return s + 1; });
-    store->subscribe([&observed](const int& next, const int& prev) { observed.push_back({next, prev}); });
+    auto store = make_store<int>(0, [](const int& s, const Action&) -> int { return s + 1; });
+    const auto unsubscribe = store->subscribe([&observed](const int& next, const int& prev) -> void { observed.emplace_back(next, prev); });
+    AURORA_TEST_CHECK_TRUE(unsubscribe);  // 订阅返回有效退订句柄
 
     store->dispatch(Action{"increment"});
     store->dispatch(Action{"increment"});
@@ -69,9 +71,10 @@ AURORA_TEST_CASE(store_listener_receives_new_and_prev_state) {
 AURORA_TEST_CASE(store_unsubscribe_stops_listener) {
     int first_calls = 0;
     int second_calls = 0;
-    auto store = make_store<int>(0, [](const int& s, const Action&) { return s + 1; });
-    auto unsubscribe_first = store->subscribe([&first_calls](const int&, const int&) { ++first_calls; });
-    store->subscribe([&second_calls](const int&, const int&) { ++second_calls; });
+    auto store = make_store<int>(0, [](const int& s, const Action&) -> int { return s + 1; });
+    auto unsubscribe_first = store->subscribe([&first_calls](const int&, const int&) -> void { ++first_calls; });
+    const auto unsubscribe_second = store->subscribe([&second_calls](const int&, const int&) -> void { ++second_calls; });
+    AURORA_TEST_CHECK_TRUE(unsubscribe_second);  // 第二条监听同样拿到有效句柄
 
     store->dispatch(Action{"increment"});
     AURORA_TEST_CHECK_EQ(first_calls, 1);
@@ -90,10 +93,11 @@ AURORA_TEST_CASE(store_unsubscribe_stops_listener) {
 }
 
 AURORA_TEST_CASE(store_as_signal_reflects_dispatched_state) {
-    auto store = make_store<std::string>(std::string{"init"}, [](const std::string&, const Action& action) {
-        const std::string* next = action.payload_as<std::string>();
-        return next != nullptr ? *next : std::string{};
-    });
+    auto store =
+        make_store<std::string>(std::string{"init"}, [](const std::string&, const Action& action) -> std::string {
+            const auto* next = action.payload_as<std::string>();
+            return next != nullptr ? *next : std::string{};
+        });
     const std::shared_ptr<State<std::string>> signal = store->as_signal();
     AURORA_TEST_CHECK_STREQ(signal->get(), "init");
 
@@ -107,12 +111,13 @@ AURORA_TEST_CASE(store_as_signal_reflects_dispatched_state) {
 }
 
 AURORA_TEST_CASE(make_store_shares_ownership_and_reduces_from_initial) {
-    auto store = make_store<int>(3, [](const int& s, const Action&) { return s * 2; });
+    auto store = make_store<int>(3, [](const int& s, const Action&) -> int { return s * 2; });
     AURORA_TEST_CHECK_EQ(store->get_state(), 3);
 
     // 首次派发：reducer 收到初始状态，通知携带 prev = 初始值。
     int prev_seen = -1;
-    store->subscribe([&prev_seen](const int&, const int& prev) { prev_seen = prev; });
+    const auto unsubscribe = store->subscribe([&prev_seen](const int&, const int& prev) -> void { prev_seen = prev; });
+    AURORA_TEST_CHECK_TRUE(unsubscribe);  // 订阅返回有效退订句柄
     store->dispatch(Action{"double"});
     AURORA_TEST_CHECK_EQ(store->get_state(), 6);
     AURORA_TEST_CHECK_EQ(prev_seen, 3);

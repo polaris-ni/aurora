@@ -5,8 +5,8 @@
 
 #include <string>
 
-#include "aurora/widget/divider.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/widget/divider.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_divider {
@@ -37,13 +37,13 @@ AURORA_TEST_CASE(horizontal_fills_width_uses_thickness_height) {
     Divider d;
     LayoutEngine::layout(d, bounded(300.0F, 80.0F));
     AURORA_TEST_CHECK_NEAR(d.size().width, 300.0F, 1e-4F);  // 横向填满父宽
-    AURORA_TEST_CHECK_NEAR(d.size().height, 1.0F, 1e-4F);   // 高度 = 厚度
+    AURORA_TEST_CHECK_NEAR(d.size().height, 1.0F, 1e-4F);  // 高度 = 厚度
 }
 
 AURORA_TEST_CASE(vertical_fills_height_uses_thickness_width) {
     Divider d{DividerProps{.orientation = Orientation::Vertical}};
     LayoutEngine::layout(d, bounded(300.0F, 80.0F));
-    AURORA_TEST_CHECK_NEAR(d.size().width, 1.0F, 1e-4F);    // 宽度 = 厚度
+    AURORA_TEST_CHECK_NEAR(d.size().width, 1.0F, 1e-4F);  // 宽度 = 厚度
     AURORA_TEST_CHECK_NEAR(d.size().height, 80.0F, 1e-4F);  // 纵向填满父高
 }
 
@@ -107,7 +107,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     bool has_orientation = false;
     bool has_thickness = false;
     bool has_indent = false;
-    for (const auto &p : d.properties) {
+    for (const auto& p : d.properties) {
         if (std::string{p.name} == "orientation") {
             has_orientation = true;
         }

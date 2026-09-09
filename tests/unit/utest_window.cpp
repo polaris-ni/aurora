@@ -19,6 +19,8 @@ namespace {
 /// @brief 记录型 Surface 桩：纯内存实现，记录 Window 转发的调用与参数。
 class RecordingSurface final : public Surface {
   public:
+    // 测试替身的记录成员需被测试体直接读写，刻意 public，不改私有。
+    // NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes)
     Size size_val{.width = 320.0F, .height = 240.0F};
     EdgeInsets inset_val{};
     std::string last_title;
@@ -35,30 +37,31 @@ class RecordingSurface final : public Surface {
     int begin_h = 0;
     int present_count = 0;
     int pump_count = 0;
+    // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
 
     auto begin_frame(int width, int height) -> Result<bool> override {
         begin_w = width;
         begin_h = height;
         return Result<bool>{true};
     }
-    auto painter() -> Painter & override { return painter_; }
+    auto painter() -> Painter& override { return painter_; }
     auto present() -> Result<bool> override {
         ++present_count;
         return Result<bool>{true};
     }
-    auto size() const -> Size override { return size_val; }
-    auto should_close() const -> bool override { return close_requested; }
+    [[nodiscard]] auto size() const -> Size override { return size_val; }
+    [[nodiscard]] auto should_close() const -> bool override { return close_requested; }
     auto poll_platform_events() -> void override { ++pump_count; }
-    auto set_title(const std::string &title) -> void override { last_title = title; }
-    auto content_inset() const -> EdgeInsets override { return inset_val; }
+    auto set_title(const std::string& title) -> void override { last_title = title; }
+    [[nodiscard]] auto content_inset() const -> EdgeInsets override { return inset_val; }
     auto close() -> void override { close_called = true; }
     auto minimize() -> void override { minimize_called = true; }
     auto toggle_maximize() -> void override { toggle_maximize_called = true; }
     auto set_fullscreen(bool on) -> void override { fullscreen_last = on ? 1 : 0; }
     auto begin_window_move() -> void override { begin_move_called = true; }
     auto begin_window_resize(WindowResizeEdge edge) -> void override { resize_last = edge; }
-    auto set_title_bar_style(const TitleBarStyle &style) -> void override { style_last = style; }
-    auto set_title_bar_icon(const std::shared_ptr<Image> &icon) -> void override { icon_last = icon; }
+    auto set_title_bar_style(const TitleBarStyle& style) -> void override { style_last = style; }
+    auto set_title_bar_icon(const std::shared_ptr<Image>& icon) -> void override { icon_last = icon; }
 
   private:
     Painter painter_;
@@ -94,7 +97,7 @@ AURORA_TEST_CASE(window_options_defaults) {
 
 AURORA_TEST_CASE(window_title_defaults_and_forwards_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface &surf = *stub;
+    RecordingSurface& surf = *stub;
     Window w{std::move(stub)};
     AURORA_TEST_CHECK_EQ(w.title(), std::string{"Aurora"});
     w.set_title("Hello");
@@ -105,7 +108,7 @@ AURORA_TEST_CASE(window_title_defaults_and_forwards_to_surface) {
 
 AURORA_TEST_CASE(window_size_and_content_inset_delegate_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface &surf = *stub;
+    RecordingSurface& surf = *stub;
     Window w{std::move(stub)};
     const Size sz = w.size();
     AURORA_TEST_CHECK_NEAR(sz.width, 320.0F, 1e-4F);
@@ -124,7 +127,7 @@ AURORA_TEST_CASE(window_size_and_content_inset_delegate_to_surface) {
 
 AURORA_TEST_CASE(window_frame_lifecycle_delegates_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface &surf = *stub;
+    RecordingSurface& surf = *stub;
     Window w{std::move(stub)};
     // begin_frame 以窗口逻辑尺寸（取整）启动后端帧。
     const auto bf = w.begin_frame();
@@ -141,7 +144,7 @@ AURORA_TEST_CASE(window_frame_lifecycle_delegates_to_surface) {
 
 AURORA_TEST_CASE(window_control_actions_forward_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface &surf = *stub;
+    RecordingSurface& surf = *stub;
     Window w{std::move(stub)};
     w.minimize();
     w.toggle_maximize();
@@ -166,15 +169,18 @@ AURORA_TEST_CASE(window_control_actions_forward_to_surface) {
 
 AURORA_TEST_CASE(window_title_bar_style_and_icon_forward_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface &surf = *stub;
+    RecordingSurface& surf = *stub;
     Window w{std::move(stub)};
     TitleBarStyle style;
     style.height = 42.0F;
     style.button_layout = TitleBarButtonLayout::Windows;
     w.set_title_bar_style(style);
     AURORA_TEST_REQUIRE_TRUE(surf.style_last.has_value());
-    AURORA_TEST_CHECK_NEAR(surf.style_last->height, 42.0F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(surf.style_last->button_layout, TitleBarButtonLayout::Windows);
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_NEAR(surf.style_last.value().height, 42.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(surf.style_last.value().button_layout, TitleBarButtonLayout::Windows);
+    // NOLINTEND(bugprone-unchecked-optional-access)
     // 图标槽：空指针也走透传路径（清除图标语义）。
     w.set_title_bar_icon(nullptr);
     AURORA_TEST_CHECK_TRUE(surf.icon_last == nullptr);
@@ -217,7 +223,7 @@ AURORA_TEST_CASE(window_overlay_slot_roundtrip) {
 
 AURORA_TEST_CASE(window_run_executes_on_frame_exactly_max_frames_times) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface &surf = *stub;
+    RecordingSurface& surf = *stub;
     Window w{std::move(stub)};
     int frames = 0;
     // max_frames>0 有限循环：每帧 pump 事件 + 调 on_frame，到量即止（无头确定性驱动）。

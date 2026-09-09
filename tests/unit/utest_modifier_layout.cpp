@@ -4,7 +4,6 @@
 /// 负值降级、FlexWeight 透明透传与权重上报、SizeModifier 固定/填充尺寸的夹取与回填
 
 #include "aurora/modifier/modifier_layout.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_modifier_layout {
@@ -17,8 +16,8 @@ struct FixedChild {
     float h = 0.0F;
     std::optional<Constraints> seen;
 
-    auto make_fn() -> std::function<Size(const Constraints &)> {
-        return [this](const Constraints &c) {
+    auto make_fn() -> std::function<Size(const Constraints&)> {
+        return [this](const Constraints& c) -> Size {
             seen = c;
             return Size{.width = w, .height = h};
         };
@@ -46,10 +45,13 @@ AURORA_TEST_CASE(padding_shrinks_constraints_and_adds_back) {
     const Size s = p.layout(inner_constraints(100.0F, 80.0F, 200.0F, 160.0F), child.make_fn());
 
     AURORA_TEST_REQUIRE(child.seen.has_value());
-    AURORA_TEST_CHECK_NEAR(child.seen->min.width, 80.0F, 0.0F);
-    AURORA_TEST_CHECK_NEAR(child.seen->min.height, 60.0F, 0.0F);
-    AURORA_TEST_CHECK_NEAR(child.seen->max.width, 180.0F, 0.0F);
-    AURORA_TEST_CHECK_NEAR(child.seen->max.height, 140.0F, 0.0F);
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_NEAR(child.seen.value().min.width, 80.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen.value().min.height, 60.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen.value().max.width, 180.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen.value().max.height, 140.0F, 0.0F);
+    // NOLINTEND(bugprone-unchecked-optional-access)
     AURORA_TEST_CHECK_NEAR(s.width, 70.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(s.height, 50.0F, 0.0F);
 }
@@ -60,8 +62,11 @@ AURORA_TEST_CASE(padding_floor_at_zero_when_constraint_smaller) {
     FixedChild child{.w = 5.0F, .h = 5.0F};
     const Size s = p.layout(inner_constraints(0.0F, 0.0F, 10.0F, 8.0F), child.make_fn());
     AURORA_TEST_REQUIRE(child.seen.has_value());
-    AURORA_TEST_CHECK_NEAR(child.seen->max.width, 0.0F, 0.0F);
-    AURORA_TEST_CHECK_NEAR(child.seen->max.height, 0.0F, 0.0F);
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_NEAR(child.seen.value().max.width, 0.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen.value().max.height, 0.0F, 0.0F);
+    // NOLINTEND(bugprone-unchecked-optional-access)
     AURORA_TEST_CHECK_NEAR(s.width, 25.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(s.height, 25.0F, 0.0F);
 }
@@ -82,8 +87,11 @@ AURORA_TEST_CASE(padding_edges_asymmetric_layout) {
     FixedChild child{.w = 40.0F, .h = 30.0F};
     const Size s = pe.layout(inner_constraints(50.0F, 50.0F, 100.0F, 100.0F), child.make_fn());
     AURORA_TEST_REQUIRE(child.seen.has_value());
-    AURORA_TEST_CHECK_NEAR(child.seen->max.width, 97.0F, 0.0F);
-    AURORA_TEST_CHECK_NEAR(child.seen->max.height, 93.0F, 0.0F);
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_NEAR(child.seen.value().max.width, 97.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen.value().max.height, 93.0F, 0.0F);
+    // NOLINTEND(bugprone-unchecked-optional-access)
     AURORA_TEST_CHECK_NEAR(s.width, 43.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(s.height, 37.0F, 0.0F);
 }
@@ -96,7 +104,9 @@ AURORA_TEST_CASE(flex_weight_reports_weight_and_passthrough) {
     FixedChild child{.w = 60.0F, .h = 20.0F};
     const Size s = fw.layout(inner_constraints(0.0F, 0.0F, 100.0F, 100.0F), child.make_fn());
     AURORA_TEST_REQUIRE(child.seen.has_value());
-    AURORA_TEST_CHECK_NEAR(child.seen->max.width, 100.0F, 0.0F);
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_NEAR(child.seen.value().max.width, 100.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(s.width, 60.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(s.height, 20.0F, 0.0F);
 }
@@ -109,10 +119,13 @@ AURORA_TEST_CASE(size_modifier_fixed_width_and_height) {
     const Size s = sm.layout(inner_constraints(0.0F, 0.0F, 200.0F, 200.0F), child.make_fn());
     // 子约束被夹成 [v, v]；结果回填固定值（不受子测量影响）。
     AURORA_TEST_REQUIRE(child.seen.has_value());
-    AURORA_TEST_CHECK_NEAR(child.seen->min.width, 80.0F, 0.0F);
-    AURORA_TEST_CHECK_NEAR(child.seen->max.width, 80.0F, 0.0F);
-    AURORA_TEST_CHECK_NEAR(child.seen->min.height, 30.0F, 0.0F);
-    AURORA_TEST_CHECK_NEAR(child.seen->max.height, 30.0F, 0.0F);
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_NEAR(child.seen.value().min.width, 80.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen.value().max.width, 80.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen.value().min.height, 30.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen.value().max.height, 30.0F, 0.0F);
+    // NOLINTEND(bugprone-unchecked-optional-access)
     AURORA_TEST_CHECK_NEAR(s.width, 80.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(s.height, 30.0F, 0.0F);
 }
@@ -124,8 +137,11 @@ AURORA_TEST_CASE(size_modifier_fill_uses_parent_max) {
     FixedChild child{.w = 10.0F, .h = 10.0F};
     const Size s = sm.layout(inner_constraints(0.0F, 0.0F, 150.0F, 90.0F), child.make_fn());
     AURORA_TEST_REQUIRE(child.seen.has_value());
-    AURORA_TEST_CHECK_NEAR(child.seen->min.width, 150.0F, 0.0F);
-    AURORA_TEST_CHECK_NEAR(child.seen->min.height, 90.0F, 0.0F);
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_NEAR(child.seen.value().min.width, 150.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(child.seen.value().min.height, 90.0F, 0.0F);
+    // NOLINTEND(bugprone-unchecked-optional-access)
     AURORA_TEST_CHECK_NEAR(s.width, 150.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(s.height, 90.0F, 0.0F);
 }
@@ -137,7 +153,9 @@ AURORA_TEST_CASE(size_modifier_unconstrained_axes_passthrough) {
     FixedChild child{.w = 25.0F, .h = 35.0F};
     const Size s = sm.layout(inner_constraints(0.0F, 0.0F, 120.0F, 120.0F), child.make_fn());
     AURORA_TEST_REQUIRE(child.seen.has_value());
-    AURORA_TEST_CHECK_NEAR(child.seen->max.height, 120.0F, 0.0F);
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_NEAR(child.seen.value().max.height, 120.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(s.width, 70.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(s.height, 35.0F, 0.0F);
 }

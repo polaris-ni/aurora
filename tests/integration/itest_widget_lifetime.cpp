@@ -39,7 +39,7 @@ class FocusLeaf final : public LeafWidget {
     int lost = 0;
     /// activate() 计数出口：指向调用方栈变量，故本控件析构后仍可安全读取，
     /// 用于断言「已回收的焦点控件不再被虚调用」而无需解引用已释放对象。
-    int *activate_sink = nullptr;
+    int* activate_sink = nullptr;
 
     auto on_focus_change(bool focused) -> void override {
         if (focused) {
@@ -53,17 +53,17 @@ class FocusLeaf final : public LeafWidget {
             ++*activate_sink;
         }
     }
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
-    [[nodiscard]] auto type_name() const -> const char * override { return "FocusLeaf"; }
+    auto collect_signals(std::vector<SignalViewBase*>& /*out*/) -> void override {}
+    [[nodiscard]] auto type_name() const -> const char* override { return "FocusLeaf"; }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
         return WidgetDescriptor{.name = "FocusLeaf", .children_policy = "none"};
     }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
         return c.constrain(Size{.width = 40.0F, .height = 20.0F});
     }
-    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
 };
 
 /// 整屏纯色页（NavigatorHost 转场用）。
@@ -71,21 +71,21 @@ class SolidPage final : public Widget {
   public:
     Color bg;
     explicit SolidPage(Color c) : bg(c) {}
-    [[nodiscard]] auto type_name() const -> const char * override { return "SolidPage"; }
+    [[nodiscard]] auto type_name() const -> const char* override { return "SolidPage"; }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
         return WidgetDescriptor{.name = "SolidPage", .children_policy = "none"};
     }
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(std::vector<SignalViewBase*>& /*out*/) -> void override {}
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(c.max); }
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override { return c.constrain(c.max); }
+    auto on_paint(Painter& p, const Rect& bounds, const BuildContext& /*ctx*/) -> void override {
         p.fill_rect(bounds, bg);
     }
 };
 
 /// 在 root 上跑一次完整的 Press+Release（触发 Button::activate → on_click）。
-auto click_at(Widget &root, const Point &p, FocusManager *fm) -> void {
+auto click_at(Widget& root, const Point& p, FocusManager* fm) -> void {
     MouseEvent press;
     press.position = p;
     press.action = MouseAction::Press;
@@ -100,7 +100,7 @@ auto click_at(Widget &root, const Point &p, FocusManager *fm) -> void {
 }
 
 /// 布局 + 绘制一遍，让命中链的 bounds 生效（ctx 生命周期覆盖整次派发）。
-auto realize(Widget &root, Painter &p, int w, int h) -> void {
+auto realize(Widget& root, Painter& p, int w, int h) -> void {
     const BuildContext ctx;
     root.mount(ctx);
     const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F},
@@ -121,7 +121,7 @@ AURORA_TEST_CASE(suicidal_click_clears_subtree_safely) {
     auto btn = std::make_shared<Button>("kill me");
     std::shared_ptr<Button> holder = btn;  // btn 在树外的唯一额外强引用
     int clicks = 0;
-    btn->set_on_click([&col, &holder, &clicks]() {
+    btn->set_on_click([&col, &holder, &clicks]() -> void {
         ++clicks;
         // 清空子树：丢掉树内对 btn 的强引用（模拟 push_replacement 重建页面）。
         col->adopt_children(std::vector<Node>{});
@@ -162,7 +162,7 @@ AURORA_TEST_CASE(reclaimed_focus_widget_is_detected_not_dereferenced) {
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(dummy_root, live_enter, fm));
     AURORA_TEST_CHECK_EQ(activations, 1);
 
-    const Widget *raw = leaf.get();
+    const Widget* raw = leaf.get();
     leaf.reset();  // 焦点控件被回收，FocusManager 仍留有记录
 
     AURORA_TEST_CHECK_NULL(fm.focused());
@@ -210,7 +210,7 @@ AURORA_TEST_CASE(stack_widget_fallback_still_dispatches) {
     Column col;
     auto btn = std::make_shared<Button>("stack tree");
     int clicks = 0;
-    btn->set_on_click([&clicks]() { ++clicks; });
+    btn->set_on_click([&clicks]() -> void { ++clicks; });
     col.add(Node{btn});
 
     Painter painter;

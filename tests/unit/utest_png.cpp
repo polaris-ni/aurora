@@ -17,7 +17,8 @@
 namespace aurora::test_cases::utest_png {
 
 namespace {
-[[nodiscard]] auto solid_rgba(int w, int h, std::uint8_t r, std::uint8_t g, std::uint8_t b) -> std::vector<std::uint8_t> {
+[[nodiscard]] auto solid_rgba(int w, int h, std::uint8_t r, std::uint8_t g, std::uint8_t b)
+    -> std::vector<std::uint8_t> {
     std::vector<std::uint8_t> px(static_cast<std::size_t>(w) * h * 4, 0);
     for (std::size_t i = 0; i < static_cast<std::size_t>(w) * static_cast<std::size_t>(h); ++i) {
         px[(i * 4U) + 0U] = r;
@@ -44,8 +45,7 @@ AURORA_TEST_CASE(encoded_stream_starts_with_png_signature) {
     AURORA_TEST_REQUIRE_TRUE(encoded.ok());
     AURORA_TEST_REQUIRE_GE(encoded.value().size(), expected_signature.size());
     for (std::size_t i = 0; i < expected_signature.size(); ++i) {
-        AURORA_TEST_CHECK_EQ(static_cast<int>(encoded.value().at(i)),
-                             static_cast<int>(expected_signature.at(i)));
+        AURORA_TEST_CHECK_EQ(static_cast<int>(encoded.value().at(i)), static_cast<int>(expected_signature.at(i)));
     }
 }
 
@@ -55,7 +55,7 @@ AURORA_TEST_CASE(ihdr_carries_big_endian_dimensions) {
     const auto encoded = detail::write_png_to_memory(pixels.data(), 3, 5);
     AURORA_TEST_REQUIRE_TRUE(encoded.ok());
 
-    const auto &bytes = encoded.value();
+    const auto& bytes = encoded.value();
     AURORA_TEST_REQUIRE_GE(bytes.size(), 26U);
     AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[12]), 'I');
     AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[13]), 'H');
@@ -79,7 +79,7 @@ AURORA_TEST_CASE(encoded_stream_ends_with_iend) {
     const auto encoded = detail::write_png_to_memory(pixels.data(), 2, 2);
     AURORA_TEST_REQUIRE_TRUE(encoded.ok());
 
-    const auto &bytes = encoded.value();
+    const auto& bytes = encoded.value();
     AURORA_TEST_REQUIRE_GE(bytes.size(), 12U);
     const std::size_t tail = bytes.size() - 12;  // 长度(4) + "IEND"(4) + CRC(4)
     AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[tail + 4]), 'I');
@@ -114,8 +114,7 @@ AURORA_TEST_CASE(write_png_persists_exact_bytes) {
 AURORA_TEST_CASE(write_png_fails_on_unwritable_path) {
     // 目标目录不存在 → 结构化错误，不抛异常、不崩。
     const auto pixels = solid_rgba(2, 2, 1, 1, 1);
-    const std::filesystem::path out =
-        std::filesystem::path(testing::isolation::temp_dir()) / "no-such-dir" / "x.png";
+    const std::filesystem::path out = std::filesystem::path(testing::isolation::temp_dir()) / "no-such-dir" / "x.png";
     const auto written = write_png(out.string().c_str(), 2, 2, pixels.data());
     AURORA_TEST_CHECK_FALSE(written.ok());
 }

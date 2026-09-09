@@ -56,7 +56,7 @@ AURORA_TEST_CASE(presets_keep_all_show_flags_enabled) {
     const TitleBarStyle dark = TitleBarStyle::adwaita_dark();
     const TitleBarStyle light = TitleBarStyle::adwaita_light();
     const TitleBarStyle windows = TitleBarStyle::windows_dark();
-    for (const TitleBarStyle *s : {&dark, &light, &windows}) {
+    for (const TitleBarStyle* s : {&dark, &light, &windows}) {
         AURORA_TEST_CHECK_TRUE(s->show_minimize);
         AURORA_TEST_CHECK_TRUE(s->show_maximize);
         AURORA_TEST_CHECK_TRUE(s->show_close);
@@ -77,9 +77,7 @@ AURORA_TEST_CASE(button_layout_enum_distinguishes_three_languages) {
 AURORA_TEST_CASE(designated_initialization_overrides_selected_fields_only) {
     // 纯数据聚合：指定初始化只覆写列出字段，其余保持默认（可直接 TitleBarStyle{...} 定制）；
     // 指定初始化器须按成员声明顺序排列（height → button_layout → center_title）。
-    const TitleBarStyle ordered{.height = 48.0F,
-                                .button_layout = TitleBarButtonLayout::Mac,
-                                .center_title = true};
+    const TitleBarStyle ordered{.height = 48.0F, .button_layout = TitleBarButtonLayout::Mac, .center_title = true};
     AURORA_TEST_CHECK_NEAR(ordered.height, 48.0F, 1e-4F);
     AURORA_TEST_CHECK_TRUE(ordered.center_title);
     AURORA_TEST_CHECK_EQ(ordered.button_layout, TitleBarButtonLayout::Mac);

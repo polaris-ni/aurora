@@ -28,8 +28,7 @@ auto column_of_two() -> Node {
 }
 
 auto fixed_constraints(float max_w = 300.0F, float max_h = 100.0F) -> Constraints {
-    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F},
-                       .max = Size{.width = max_w, .height = max_h}};
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = max_w, .height = max_h}};
 }
 
 }  // namespace
@@ -39,10 +38,10 @@ AURORA_TEST_CASE(layout_places_children_bounds_via_parent) {
     Node root = column_of_two();
     LayoutEngine::layout(root.widget(), fixed_constraints());
 
-    const auto &kids = root.widget().child_nodes();
+    const auto& kids = root.widget().child_nodes();
     AURORA_TEST_REQUIRE_EQ(kids.size(), 2U);
-    const Rect &first = kids[0].bounds();
-    const Rect &second = kids[1].bounds();
+    const Rect& first = kids[0].bounds();
+    const Rect& second = kids[1].bounds();
     AURORA_TEST_CHECK_NEAR(first.origin.x, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(first.origin.y, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(first.size.width, 100.0F, 1e-4F);

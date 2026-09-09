@@ -69,7 +69,7 @@ AURORA_TEST_CASE(reactive_subscription_delegates_to_underlying_state) {
     // subscribe() 委托底层 State：手动订阅的 Effect 在 set 时重跑。
     Reactive<int> r{0};
     int runs = 0;
-    Effect manual{[&] { ++runs; }};
+    Effect manual{[&]() -> void { ++runs; }};
     r.subscribe(manual);
     manual.run();  // 首跑（回调不读 r）
     AURORA_TEST_CHECK_EQ(runs, 1);
@@ -77,7 +77,7 @@ AURORA_TEST_CASE(reactive_subscription_delegates_to_underlying_state) {
     AURORA_TEST_CHECK_EQ(runs, 2);
 
     // get() 在 Effect 作用域内读取同样经底层 State 自动登记依赖。
-    Effect tracked{[&] {
+    Effect tracked{[&]() -> void {
         ++runs;
         (void)r.get();
     }};
@@ -97,7 +97,7 @@ AURORA_TEST_CASE(reactive_view_semantics_null_anchor_and_read_dispatch) {
 
     // 经基类 read() 虚派发到 get()：在 Effect 作用域内读取即登记依赖。
     int runs = 0;
-    Effect e{[&] {
+    Effect e{[&]() -> void {
         ++runs;
         base.read();
     }};

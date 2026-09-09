@@ -102,11 +102,10 @@ AURORA_TEST_CASE(image_view_golden_png_file_decodes_into_widget) {
     const std::string path = aurora::testing::paths::under_repo("tests/golden/golden_basic_column.png");
     const auto gr = aurora::Image::load(path);
     AURORA_TEST_REQUIRE_MSG(gr.ok(), "golden_basic_column.png missing or undecodable");
-    const aurora::Image &g = gr.value();
+    const aurora::Image& g = gr.value();
     AURORA_TEST_CHECK_TRUE(g.width > 0);
     AURORA_TEST_CHECK_TRUE(g.height > 0);
-    AURORA_TEST_CHECK_EQ(g.pixels.size(),
-                         static_cast<std::size_t>(g.width) * static_cast<std::size_t>(g.height) * 4U);
+    AURORA_TEST_CHECK_EQ(g.pixels.size(), static_cast<std::size_t>(g.width) * static_cast<std::size_t>(g.height) * 4U);
 
     aurora::ImageView ivg{g};
     AURORA_TEST_CHECK_EQ(ivg.bitmap.width, g.width);

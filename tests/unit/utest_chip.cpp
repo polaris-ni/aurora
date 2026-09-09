@@ -8,10 +8,10 @@
 #include <string>
 #include <vector>
 
+#include "aurora/layout/layout_engine.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/widget/chip.h"
 #include "aurora/widget/text.h"
-#include "aurora/layout/layout_engine.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_chip {
@@ -90,11 +90,11 @@ AURORA_TEST_CASE(layout_sizes_from_text_metrics) {
     Chip with_avatar("hi");
     with_avatar.set_avatar("A");
     LayoutEngine::layout(with_avatar, bounded(1000.0F, 200.0F));
-    AURORA_TEST_CHECK_NEAR(with_avatar.size().width,
-                           expect_w + render::FontEngine::measure_width("A", f) + 4.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(with_avatar.size().width, expect_w + render::FontEngine::measure_width("A", f) + 4.0F,
+                           1e-4F);
 
     Chip deletable("hi");
-    deletable.set_on_delete([] {});
+    deletable.set_on_delete([]() -> void {});
     LayoutEngine::layout(deletable, bounded(1000.0F, 200.0F));
     AURORA_TEST_CHECK_NEAR(deletable.size().width, expect_w + render::FontEngine::measure_width(" ×", f), 1e-4F);
 }
@@ -102,7 +102,7 @@ AURORA_TEST_CASE(layout_sizes_from_text_metrics) {
 AURORA_TEST_CASE(delete_callback_fires_on_right_region_press) {
     Chip c("Tag");
     int fired = 0;
-    c.set_on_delete([&fired] { ++fired; });
+    c.set_on_delete([&fired]() -> void { ++fired; });
     LayoutEngine::layout(c, bounded(1000.0F, 200.0F));
 
     // 简化命中模型：右半区（x > 0.7 * 宽）左键按下即删除。
@@ -120,7 +120,7 @@ AURORA_TEST_CASE(delete_callback_fires_on_right_region_press) {
 AURORA_TEST_CASE(non_press_or_non_left_clicks_ignored) {
     Chip c("Tag");
     int fired = 0;
-    c.set_on_delete([&fired] { ++fired; });
+    c.set_on_delete([&fired]() -> void { ++fired; });
     LayoutEngine::layout(c, bounded(1000.0F, 200.0F));
 
     MouseEvent move = press_at(c.size().width * 0.9F, c.size().height * 0.5F);
@@ -165,7 +165,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "Chip");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool has_on_delete = false;
-    for (const auto &e : d.events) {
+    for (const auto& e : d.events) {
         if (std::string{e} == "on_delete") {
             has_on_delete = true;
         }
@@ -174,7 +174,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
 }
 
 AURORA_TEST_CASE(badge_layout_adds_half_height_when_counted) {
-    auto child_of = [] {
+    auto child_of = []() -> Node {
         auto t = std::make_shared<Text>(".");
         t->width(aurora::Length::fixed(40.0F));
         t->height(aurora::Length::fixed(20.0F));
@@ -183,7 +183,7 @@ AURORA_TEST_CASE(badge_layout_adds_half_height_when_counted) {
 
     Badge counted(5, child_of());
     LayoutEngine::layout(counted, bounded(300.0F, 200.0F));
-    AURORA_TEST_CHECK_NEAR(counted.size().width, 40.0F, 1e-4F);   // max(子宽, 徽章宽 20)
+    AURORA_TEST_CHECK_NEAR(counted.size().width, 40.0F, 1e-4F);  // max(子宽, 徽章宽 20)
     AURORA_TEST_CHECK_NEAR(counted.size().height, 29.0F, 1e-4F);  // 子高 20 + 徽章半高 9
 
     Badge zero(0, child_of());

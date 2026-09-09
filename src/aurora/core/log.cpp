@@ -13,9 +13,9 @@
 
 namespace aurora {
 
-// GCC/libstdc++ 对 std::call_once 内部 mutex 机身会产生 -Warray-bounds 误报
+// GCC/clang（libstdc++/libc++）对 std::call_once 内部 mutex 机身会产生 -Warray-bounds 误报
 // （已知编译器缺陷，非真实越界）；此处局部抑制，避免阻断 -Werror 构建。
-#ifdef __GNUC__
+#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
 #endif
@@ -31,7 +31,7 @@ auto init_console() noexcept -> void {
 #endif
 }
 
-#ifdef __GNUC__
+#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG)
 #pragma GCC diagnostic pop
 #endif
 

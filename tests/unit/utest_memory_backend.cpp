@@ -20,7 +20,7 @@ namespace m = aurora::testing::matchers;
 /// @brief 构造一条 JSON 载荷的记录信封。
 [[nodiscard]] auto make_json_record(std::string id, aus::Json payload) -> aus::StorageRecord {
     aus::StorageRecord rec;
-    rec.id = id;
+    rec.id = std::move(id);
     rec.type = "__raw__";
     rec.version = 1;
     rec.encoding = aus::StorageEncoding::Json;
@@ -78,8 +78,8 @@ AURORA_TEST_CASE(remove_is_idempotent) {
     const auto got = be.get_record("gone");
     AURORA_TEST_CHECK_EQ(got.error().code_enum, ErrorCode::StorageRecordNotFound);
 
-    AURORA_TEST_REQUIRE(be.remove("gone"));      // 重复删除仍成功
-    AURORA_TEST_REQUIRE(be.remove("never-was")); // 从未存在的键亦成功
+    AURORA_TEST_REQUIRE(be.remove("gone"));  // 重复删除仍成功
+    AURORA_TEST_REQUIRE(be.remove("never-was"));  // 从未存在的键亦成功
 }
 
 AURORA_TEST_CASE(list_returns_all_ids) {

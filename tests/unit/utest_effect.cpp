@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/effect.h
-/// 测试说明: Effect 构造不执行、current 作用域嵌套与恢复、依赖重跑与观察边叠加语义、dispose 停跑、非拷贝/移动与锚点、析构后源可继续写
+/// 测试说明: Effect 构造不执行、current 作用域嵌套与恢复、依赖重跑与观察边叠加语义、dispose
+/// 停跑、非拷贝/移动与锚点、析构后源可继续写
 
 #include <functional>
 #include <type_traits>
@@ -14,7 +15,7 @@ namespace aurora::test_cases::utest_effect {
 AURORA_TEST_CASE(effect_constructor_defers_first_run) {
     // 构造函数不执行 fn（区别于 Computed）；须显式 run() 首跑。
     int runs = 0;
-    Effect e{[&] { ++runs; }};
+    Effect e{[&]() -> void { ++runs; }};
     AURORA_TEST_CHECK_EQ(runs, 0);
     e.run();
     AURORA_TEST_CHECK_EQ(runs, 1);
@@ -29,9 +30,9 @@ AURORA_TEST_CASE(effect_current_tracks_active_scope_with_nested_restore) {
     AURORA_TEST_CHECK(Effect::current() == nullptr);
     Effect* seen_outer = nullptr;
     Effect* seen_inner = nullptr;
-    Effect outer{[&] {
+    Effect outer{[&]() -> void {
         seen_outer = Effect::current();
-        Effect inner{[&] { seen_inner = Effect::current(); }};
+        Effect inner{[&]() -> void { seen_inner = Effect::current(); }};
         inner.run();
     }};
     outer.run();
@@ -46,7 +47,7 @@ AURORA_TEST_CASE(effect_reruns_only_for_signals_read_in_scope) {
     State<bool> flag{false};
     State<int> x{10};
     int runs = 0;
-    Effect e{[&] {
+    Effect e{[&]() -> void {
         ++runs;
         (void)(flag.get() ? x.get() : 0);
     }};
@@ -64,7 +65,7 @@ AURORA_TEST_CASE(effect_previous_reads_keep_triggering_reruns) {
     State<int> a{0};
     State<int> b{0};
     int runs = 0;
-    Effect e{[&] {
+    Effect e{[&]() -> void {
         ++runs;
         (void)(a.get() + (runs > 1 ? b.get() : 0));
     }};
@@ -82,7 +83,7 @@ AURORA_TEST_CASE(effect_dispose_stops_execution) {
     // dispose() 后：is_disposed 置位、State set 不再触发重跑、run() 为空操作。
     State<int> s{0};
     int runs = 0;
-    Effect e{[&] {
+    Effect e{[&]() -> void {
         ++runs;
         (void)s.get();
     }};
@@ -105,8 +106,8 @@ AURORA_TEST_CASE(effect_non_copyable_non_movable_with_per_instance_anchor) {
     static_assert(!std::is_copy_assignable_v<Effect>);
     static_assert(!std::is_move_constructible_v<Effect>);
     static_assert(!std::is_move_assignable_v<Effect>);
-    Effect e{[] {}};
-    Effect f{[] {}};
+    Effect e{[]() -> void {}};
+    Effect f{[]() -> void {}};
     AURORA_TEST_CHECK(e.anchor() != nullptr);
     AURORA_TEST_CHECK(f.anchor() != nullptr);
     AURORA_TEST_CHECK(e.anchor() != f.anchor());
@@ -116,7 +117,7 @@ AURORA_TEST_CASE(effect_destroyed_observer_keeps_state_settable) {
     // Effect 析构后（锚点释放），State 继续 set 安全：失效边由 notify 惰性摘除，绝不悬垂。
     State<int> s{0};
     {
-        Effect e{[&] { (void)s.get(); }};
+        Effect e{[&]() -> void { (void)s.get(); }};
         e.run();
     }
     AURORA_TEST_CHECK_NO_THROW(s.set(1));

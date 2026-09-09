@@ -4,10 +4,9 @@
 /// LongPress 阈值计时与幂等触发、TouchListener 原始流、TooltipNode 延迟显示、
 /// ContextMenuNode 开合与位置记录
 
-#include "aurora/modifier/modifier_input.h"
-
 #include <chrono>
 
+#include "aurora/modifier/modifier_input.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_modifier_input {
@@ -22,7 +21,7 @@ auto t_ms(int ms) -> std::chrono::steady_clock::time_point {
 
 AURORA_TEST_CASE(clickable_fires_callback) {
     int hits = 0;
-    const Clickable c([&hits] { ++hits; });
+    const Clickable c([&hits]() -> void { ++hits; });
     AURORA_TEST_CHECK_EQ(c.kind(), ModifierNode::Kind::Input);
     AURORA_TEST_CHECK_EQ(hits, 0);
     c.on_tap();
@@ -36,7 +35,7 @@ AURORA_TEST_CASE(clickable_empty_callback_safe) {
 }
 
 AURORA_TEST_CASE(draggable_binds_pointer_and_filters_mismatched) {
-    const Draggable d([](Point, Point) {}, [] {}, [] {});
+    const Draggable d([](Point, Point) -> void {}, []() -> void {}, []() -> void {});
     // 未绑定视为任意指针。
     AURORA_TEST_CHECK_TRUE(d.matches(std::optional<int>(3)));
     d.bind(std::optional<int>(1));
@@ -53,14 +52,18 @@ AURORA_TEST_CASE(draggable_binds_pointer_and_filters_mismatched) {
 }
 
 AURORA_TEST_CASE(draggable_fires_start_drag_end_sequence) {
-    int starts = 0, drags = 0, ends = 0;
-    Point last_delta, last_pos;
-    Draggable d([&](Point delta, Point pos) {
-                    ++drags;
-                    last_delta = delta;
-                    last_pos = pos;
-                },
-                [&] { ++starts; }, [&] { ++ends; });
+    int starts = 0;
+    int drags = 0;
+    int ends = 0;
+    Point last_delta;
+    Point last_pos;
+    Draggable d(
+        [&](Point delta, Point pos) -> void {
+            ++drags;
+            last_delta = delta;
+            last_pos = pos;
+        },
+        [&]() -> void { ++starts; }, [&]() -> void { ++ends; });
     d.fire_start();
     d.fire_drag(Point{.x = 5.0F, .y = 3.0F}, Point{.x = 15.0F, .y = 13.0F});
     d.fire_end();
@@ -73,7 +76,7 @@ AURORA_TEST_CASE(draggable_fires_start_drag_end_sequence) {
 
 AURORA_TEST_CASE(long_press_fires_after_threshold_once) {
     int fires = 0;
-    LongPress lp([&fires] { ++fires; }, 500.0F);
+    LongPress lp([&fires]() -> void { ++fires; }, 500.0F);
     AURORA_TEST_CHECK_FALSE(lp.long_press_fired());
     // 未按下时 tick 不触发。
     lp.tick(t_ms(10'000));
@@ -93,7 +96,7 @@ AURORA_TEST_CASE(long_press_fires_after_threshold_once) {
 
 AURORA_TEST_CASE(long_press_cancel_prevents_firing) {
     int fires = 0;
-    LongPress lp([&fires] { ++fires; }, 100.0F);
+    LongPress lp([&fires]() -> void { ++fires; }, 100.0F);
     lp.press_at(t_ms(1'000));
     lp.cancel();
     lp.tick(t_ms(9'999));
@@ -105,7 +108,7 @@ AURORA_TEST_CASE(long_press_cancel_prevents_firing) {
 }
 
 AURORA_TEST_CASE(long_press_pointer_binding) {
-    LongPress lp([] {}, 100.0F);
+    LongPress lp([]() -> void {}, 100.0F);
     lp.bind(std::optional<int>(1));
     AURORA_TEST_CHECK_TRUE(lp.matches(std::optional<int>(1)));
     AURORA_TEST_CHECK_FALSE(lp.matches(std::optional<int>(2)));
@@ -116,7 +119,7 @@ AURORA_TEST_CASE(long_press_pointer_binding) {
 AURORA_TEST_CASE(touch_listener_delivers_raw_event) {
     int events = 0;
     int active = -1;
-    const TouchListener tl([&](const TouchEvent &e) {
+    const TouchListener tl([&](const TouchEvent& e) -> void {
         ++events;
         active = e.active_count();
     });
@@ -168,7 +171,7 @@ AURORA_TEST_CASE(context_menu_open_close_and_position) {
     std::vector<MenuItem> items;
     MenuItem entry;
     entry.label = "Copy";
-    entry.on_click = [&clicks] { ++clicks; };
+    entry.on_click = [&clicks]() -> void { ++clicks; };
     items.push_back(entry);
     MenuItem sep;
     sep.separator = true;
@@ -193,9 +196,10 @@ AURORA_TEST_CASE(context_menu_open_close_and_position) {
 
 AURORA_TEST_CASE(input_nodes_do_not_change_layout) {
     // 输入节点不改测量：约束透传、结果透传。
-    const Clickable c([] {});
+    const Clickable c([]() -> void {});
     const Constraints cons{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 80.0F, .height = 40.0F}};
-    const Size s = c.layout(cons, [](const Constraints &cc) { return cc.constrain(Size{.width = 30.0F, .height = 20.0F}); });
+    const Size s = c.layout(
+        cons, [](const Constraints& cc) -> Size { return cc.constrain(Size{.width = 30.0F, .height = 20.0F}); });
     AURORA_TEST_CHECK_NEAR(s.width, 30.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(s.height, 20.0F, 0.0F);
 }

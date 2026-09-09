@@ -351,11 +351,25 @@ auto FilesystemBackend::get_record(const std::string &id) -> Result<StorageRecor
         if (!std::filesystem::exists(bin_path, ec)) {
             return Result<StorageRecord>{make_error(ErrorCode::StorageRecordCorrupt, "Binary sidecar missing: " + id)};
         }
+        // 与 image::read_file_bytes 同理：POSIX 下打开目录会成功、读取时才报 EISDIR，而
+        // libstdc++ 的 basic_filebuf::underflow 对此无条件抛 ios_base::failure（不看流异常
+        // 掩码）。目录先拦，读取段再兜异常，保证本函数以 Result 报错而非把异常抛给调用方。
+        // （Windows 上 ifstream 打开目录直接失败，故该差异只在 Linux/WSL 暴露。）
+        std::error_code dir_ec;
+        if (std::filesystem::is_directory(bin_path, dir_ec)) {
+            return Result<StorageRecord>{
+                make_error(ErrorCode::StorageIoError, "Binary sidecar is not a regular file: " + id)};
+        }
         std::ifstream bf(bin_path, std::ios::binary);
         if (!bf) {
             return Result<StorageRecord>{make_error(ErrorCode::StorageIoError, "Failed to open binary sidecar: " + id)};
         }
-        const std::string content(std::istreambuf_iterator<char>(bf), std::istreambuf_iterator<char>{});
+        std::string content;
+        try {
+            content.assign(std::istreambuf_iterator<char>(bf), std::istreambuf_iterator<char>{});
+        } catch (const std::ios_base::failure &) {
+            return Result<StorageRecord>{make_error(ErrorCode::StorageIoError, "Failed to read binary sidecar: " + id)};
+        }
         std::vector<std::byte> bytes(content.size());
         for (std::size_t i = 0; i < content.size(); ++i) {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)

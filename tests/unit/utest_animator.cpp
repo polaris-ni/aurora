@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/animation/animator.h
-/// 测试说明: 覆盖 AnimationController 构造夹取与正放/回放/复位/停止/帧推进状态机、Animator 驱动与 dirty 门控绑定/注销、AnimatedValue 自驱与一次性 completed 回调、animate 工厂与 TweenAnimation 自持动画
+/// 测试说明: 覆盖 AnimationController 构造夹取与正放/回放/复位/停止/帧推进状态机、Animator 驱动与 dirty
+/// 门控绑定/注销、AnimatedValue 自驱与一次性 completed 回调、animate 工厂与 TweenAnimation 自持动画
 
 #include "aurora/animation/animator.h"
 #include "framework/aurora_test.h"
@@ -123,7 +124,7 @@ AURORA_TEST_CASE(animator_drives_controllers_and_clears_dirty) {
     animator.tick(0.5);
     AURORA_TEST_CHECK_NEAR(a.value(), 0.5, 1e-12);
     AURORA_TEST_CHECK_NEAR(b.value(), 0.0, 1e-12);  // 未 forward 的控制器不受帧推进影响
-    AURORA_TEST_CHECK_FALSE(a.dirty());             // Animator tick 末尾统一清 dirty
+    AURORA_TEST_CHECK_FALSE(a.dirty());  // Animator tick 末尾统一清 dirty
 
     animator.tick(0.5);
     AURORA_TEST_CHECK_TRUE(a.is_completed());
@@ -139,7 +140,7 @@ AURORA_TEST_CASE(animator_bindings_write_only_on_dirty_frames) {
 
     int binding_calls = 0;
     int dirty_seen = 0;
-    animator.add_binding([&c, &binding_calls, &dirty_seen] {
+    animator.add_binding([&c, &binding_calls, &dirty_seen]() -> void {
         ++binding_calls;
         if (c.dirty()) {
             ++dirty_seen;
@@ -148,7 +149,8 @@ AURORA_TEST_CASE(animator_bindings_write_only_on_dirty_frames) {
 
     aurora::State<double> kf_target{0.0};
     aurora::AnimationController kc{1.0};
-    animator.bind(kc, aurora::Keyframes<double>{{{0.0, 0.0}, {1.0, 10.0}}}, kf_target);
+    animator.bind(kc, aurora::Keyframes<double>{{{.time = 0.0, .value = 0.0}, {.time = 1.0, .value = 10.0}}},
+                  kf_target);
 
     c.forward();
     kc.forward();
@@ -180,8 +182,8 @@ AURORA_TEST_CASE(animator_remove_detaches_controller_and_bindings) {
     animator.remove(c);
     animator.tick(0.5);
     AURORA_TEST_CHECK_NEAR(c.value(), 0.0, 1e-12);  // 已摘除，不再推进
-    AURORA_TEST_CHECK_NEAR(s.get(), 0.0, 1e-12);    // 绑定随之失效，State 不被写入
-    AURORA_TEST_CHECK_FALSE(animator.has_active()); // 尽管控制器自身仍在 Forward
+    AURORA_TEST_CHECK_NEAR(s.get(), 0.0, 1e-12);  // 绑定随之失效，State 不被写入
+    AURORA_TEST_CHECK_FALSE(animator.has_active());  // 尽管控制器自身仍在 Forward
 
     const aurora::AnimationController stranger{1.0};
     AURORA_TEST_CHECK_NO_THROW(animator.remove(stranger));  // 未登记过 → 无操作
@@ -192,7 +194,7 @@ AURORA_TEST_CASE(animated_value_self_tick_fires_completed_once) {
     aurora::State<double> s{0.0};
     aurora::AnimatedValue<double> av{s, aurora::Tween<double>{0.0, 1.0}, 1.0};
     int fired = 0;
-    av.on_completed([&fired] { ++fired; });
+    av.on_completed([&fired]() -> void { ++fired; });
 
     av.forward(0.0);
     AURORA_TEST_CHECK_TRUE(av.status() == aurora::AnimationStatus::Forward);

@@ -22,7 +22,7 @@ namespace {
 }
 
 /// @brief 统计画布中非透明像素数（用于判定文本是否真的落笔）。
-[[nodiscard]] auto count_opaque(const Painter &p) -> int {
+[[nodiscard]] auto count_opaque(const Painter& p) -> int {
     int count = 0;
     for (int y = 0; y < p.height(); ++y) {
         for (int x = 0; x < p.width(); ++x) {
@@ -68,8 +68,7 @@ AURORA_TEST_CASE(measure_height_is_positive_and_scales) {
     const Font small{.family = "sans-serif", .size_pt = 10.0F};
     const Font large{.family = "sans-serif", .size_pt = 20.0F};
     AURORA_TEST_CHECK_GT(render::FontEngine::measure_height(small), 0.0);
-    AURORA_TEST_CHECK_GT(render::FontEngine::measure_height(large),
-                         render::FontEngine::measure_height(small));
+    AURORA_TEST_CHECK_GT(render::FontEngine::measure_height(large), render::FontEngine::measure_height(small));
 }
 
 AURORA_TEST_CASE(caret_x_starts_at_zero_and_is_monotonic) {
@@ -114,9 +113,8 @@ AURORA_TEST_CASE(hit_test_char_inclusive_selects_clicked_character) {
     // 含头含尾语义：点击任一字符内部都应命中该字符下标（不是下一个光标位）。
     for (std::size_t i = 0; i < text.size(); ++i) {
         AURORA_TEST_TRACE(std::string{"char "} + std::to_string(i));
-        const float mid = (render::FontEngine::caret_x(text, i, font) +
-                           render::FontEngine::caret_x(text, i + 1, font)) *
-                          0.5F;
+        const float mid =
+            (render::FontEngine::caret_x(text, i, font) + render::FontEngine::caret_x(text, i + 1, font)) * 0.5F;
         const std::size_t hit = render::FontEngine::hit_test_char_inclusive(text, mid, font);
         AURORA_TEST_CHECK_EQ(hit, i);
     }
@@ -180,13 +178,16 @@ AURORA_TEST_CASE(draw_text_of_empty_string_is_noop) {
 AURORA_TEST_CASE(shape_cache_accumulates_hits) {
     render::FontEngine::shape_cache_clear();
     const Font font;
-    AURORA_TEST_CHECK_NO_THROW(render::FontEngine::measure_width("cache", font));
+    float cached_width = 0.0F;
+    AURORA_TEST_CHECK_NO_THROW(cached_width = render::FontEngine::measure_width("cache", font));
+    AURORA_TEST_CHECK_GT(cached_width, 0.0F);  // 非空串必有正宽度
     const auto first = render::FontEngine::shape_cache_stats();
     AURORA_TEST_CHECK_GT(first.entries, 0U);
 
-    // 相同输入重复测量 → 命中计数增长。
+    // 相同输入重复测量 → 命中计数增长；逐次校验宽度稳定为正。
     for (int i = 0; i < 4; ++i) {
-        AURORA_TEST_CHECK_NO_THROW(render::FontEngine::measure_width("cache", font));
+        const float w = render::FontEngine::measure_width("cache", font);
+        AURORA_TEST_CHECK_GT(w, 0.0F);
     }
     const auto second = render::FontEngine::shape_cache_stats();
     AURORA_TEST_CHECK_GE(second.hits, first.hits);
@@ -199,8 +200,7 @@ AURORA_TEST_CASE(caret_x_is_codepoint_indexed_for_utf8) {
     const std::string text = "中国";  // 6 字节 / 2 码点
     AURORA_TEST_CHECK_NEAR(render::FontEngine::caret_x(text, 0, font), 0.0, 1e-6);
     AURORA_TEST_CHECK_GT(render::FontEngine::caret_x(text, 1, font), 0.0);
-    AURORA_TEST_CHECK_GT(render::FontEngine::caret_x(text, 2, font),
-                         render::FontEngine::caret_x(text, 1, font));
+    AURORA_TEST_CHECK_GT(render::FontEngine::caret_x(text, 2, font), render::FontEngine::caret_x(text, 1, font));
 }
 
 }  // namespace aurora::test_cases::utest_font_engine

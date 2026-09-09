@@ -115,7 +115,7 @@ auto write_xml(std::ostream& out, const std::vector<CaseResult>& results, const 
                 const auto location = failure.file + ':' + std::to_string(failure.line);
                 out << "      <failure message=\"" << xml_escape(flatten(failure.message))
                     << R"(" type="assertion" file=")" << xml_escape(failure.file) << "\" line=\"" << failure.line
-                    << '">' << xml_escape(location + ": " + failure.message) << "</failure>\n";
+                    << "\">" << xml_escape(location + ": " + failure.message) << "</failure>\n";
             }
             out << "    </testcase>\n";
         }

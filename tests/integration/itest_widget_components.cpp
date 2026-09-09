@@ -35,7 +35,7 @@ namespace aurora::test_cases::itest_widget_components {
 namespace {
 
 /// 挂载 + 布局 + 绘制一遍（控件独立渲染的最小驱动）。
-auto render_tree(Widget &w, float ww, float hh) -> void {
+auto render_tree(Widget& w, float ww, float hh) -> void {
     const BuildContext ctx;
     w.mount(ctx);
     const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = ww, .height = hh}};
@@ -46,7 +46,7 @@ auto render_tree(Widget &w, float ww, float hh) -> void {
 }
 
 /// 在控件中心合成「按下+抬起」（独立渲染坐标系：bounds 原点为 0,0）。
-auto click_center(Widget &w) -> void {
+auto click_center(Widget& w) -> void {
     const Rect bb{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = w.size()};
     const Point center{.x = bb.origin.x + (bb.size.width / 2.0F), .y = bb.origin.y + (bb.size.height / 2.0F)};
     MouseEvent press;
@@ -104,8 +104,7 @@ AURORA_TEST_CASE(slider_drag_sets_low_value) {
 
 AURORA_TEST_CASE(stack_align_offset_rounded_clip_render) {
     Text aligned{"Aligned"};
-    aligned.modifier.set(
-        Modifier{}.align(Alignment::BottomRight).background(Color::blue(), 8.0F).clip_rounded(8.0F));
+    aligned.modifier.set(Modifier{}.align(Alignment::BottomRight).background(Color::blue(), 8.0F).clip_rounded(8.0F));
     Text offset{"Offset"};
     offset.modifier.set(Modifier{}.offset(20.0F, 10.0F).background(Color::green()));
 
@@ -119,7 +118,10 @@ AURORA_TEST_CASE(drag_gesture_reports_delta) {
     bool dragged = false;
     Point last_delta{.x = 0.0F, .y = 0.0F};
     Text drag{"Drag me"};
-    drag.modifier.set(Modifier{}.draggable([&dragged, &last_delta](Point d, Point) { dragged = true; last_delta = d; }));
+    drag.modifier.set(Modifier{}.draggable([&dragged, &last_delta](Point d, Point) -> void {
+        dragged = true;
+        last_delta = d;
+    }));
     render_tree(drag, 120.0F, 40.0F);
 
     const Rect bb{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = drag.size()};
@@ -141,7 +143,7 @@ AURORA_TEST_CASE(drag_gesture_reports_delta) {
 AURORA_TEST_CASE(long_press_fires_after_threshold) {
     bool fired = false;
     Text lp{"Long press"};
-    lp.modifier.set(Modifier{}.long_press([&fired]() { fired = true; }, 50.0F));
+    lp.modifier.set(Modifier{}.long_press([&fired]() -> void { fired = true; }, 50.0F));
     render_tree(lp, 120.0F, 40.0F);
 
     const Rect bb{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = lp.size()};
@@ -157,9 +159,8 @@ AURORA_TEST_CASE(long_press_fires_after_threshold) {
 
 AURORA_TEST_CASE(logical_snapshot_and_pixels_are_deterministic) {
     auto make_tree = []() -> Node {
-        auto col = std::make_shared<Column>(
-            ColumnProps{.children = {Node{Row{RowProps{.children = {Node{Text{"A"}}, Node{Text{"B"}}}}}},
-                                     Node{Text{"C"}}}});
+        auto col = std::make_shared<Column>(ColumnProps{
+            .children = {Node{Row{RowProps{.children = {Node{Text{"A"}}, Node{Text{"B"}}}}}}, Node{Text{"C"}}}});
         col->modifier = Modifier{}.fill_max_size();
         return Node{std::move(col)};
     };
@@ -178,7 +179,7 @@ AURORA_TEST_CASE(logical_snapshot_and_pixels_are_deterministic) {
     AURORA_TEST_CHECK_EQ(snap.dump(), snap2.dump());
 
     // 像素确定性：同树两次栅格化结果一致。
-    auto render_pixels = [](Widget &w, int ww, int hh) -> std::vector<std::uint8_t> {
+    auto render_pixels = [](Widget& w, int ww, int hh) -> std::vector<std::uint8_t> {
         const BuildContext ctx;
         w.mount(ctx);
         const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F},
@@ -190,7 +191,10 @@ AURORA_TEST_CASE(logical_snapshot_and_pixels_are_deterministic) {
                 Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
                      .size = Size{.width = static_cast<float>(ww), .height = static_cast<float>(hh)}},
                 ctx);
-        const std::uint8_t *d = p.data();
+        const std::uint8_t* d = p.data();
+        // 像素缓冲首尾指针运算系 Painter::data() 裸指针接口的必要写法；且不改为花括号返回：
+        // {d, d+n} 双迭代器初始化与 initializer_list 重载并存有解析陷阱，显式构造意图更清晰。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic,modernize-return-braced-init-list)
         return std::vector(d, d + (static_cast<std::size_t>(ww) * hh * 4));
     };
     Node t3 = make_tree();

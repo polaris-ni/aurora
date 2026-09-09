@@ -8,7 +8,6 @@
 #include <cstdint>
 
 #include "aurora/perf/stopwatch.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_stopwatch {
@@ -16,7 +15,7 @@ namespace aurora::test_cases::utest_stopwatch {
 namespace {
 
 /// @brief 忙等直到秒表读数超过 min_ms，返回当时的读数（制造确定耗时，不依赖 sleep 精度）。
-auto busy_wait_ms(Stopwatch &sw, double min_ms) -> double {
+auto busy_wait_ms(Stopwatch& sw, double min_ms) -> double {
     double ms = 0.0;
     while (ms < min_ms) {
         ms = sw.elapsed_ms();
@@ -44,7 +43,7 @@ AURORA_TEST_CASE(elapsed_readings_are_monotonic) {
     AURORA_TEST_CHECK_GE(ms_second, ms_first);
     // us 后读，读数（按换算）不得小于先读的 ms 值换算结果（减一个浮点容差防舍入）。
     const double us_later = sw.elapsed_us();
-    AURORA_TEST_CHECK_GE(us_later, ms_second * 1000.0 - 1e-6);
+    AURORA_TEST_CHECK_GE(us_later, (ms_second * 1000.0) - 1e-6);
     // ns 整数读数与 ms 同源，同样单调非负。
     AURORA_TEST_CHECK_GE(sw.elapsed_ns(), 0);
 }
@@ -85,7 +84,7 @@ AURORA_TEST_CASE(elapsed_ns_is_nonnegative_and_grows_with_us) {
     const double us = sw.elapsed_us();
     const std::int64_t ns = sw.elapsed_ns();
     AURORA_TEST_CHECK_GE(ns, 0);
-    AURORA_TEST_CHECK_GE(static_cast<double>(ns), us * 1000.0 - 1000.0);
+    AURORA_TEST_CHECK_GE(static_cast<double>(ns), (us * 1000.0) - 1000.0);
 }
 
 AURORA_TEST_CASE(now_ms_monotonic_and_nonnegative) {

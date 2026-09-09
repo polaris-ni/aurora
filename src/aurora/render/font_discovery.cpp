@@ -230,7 +230,10 @@ auto register_system_fallbacks() -> void {
 #elif defined(AURORA_PLATFORM_LINUX)
     // 常见发行版字体路径（Fedora / Debian•Ubuntu / Arch）；拉丁回退 + CJK 回退（确保 CJK 非 tofu）。
     // 不依赖 fontconfig：直接探测候选文件，保持零三方依赖与确定性。
-    const std::array<const char *, 11> candidates = {
+    // 数组大小必须与初始化项个数严格一致：多出的元素会被值初始化为 nullptr，
+    // 而 make_face_from_file 的 const std::string& 形参会隐式构造 std::string(nullptr)
+    // —— libstdc++ 对此无条件抛 "construction from null"，会让 init_font_discovery() 直接失败。
+    constexpr std::array<const char *, 10> candidates = {
         // 拉丁回退
         "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",  // Fedora
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  // Debian/Ubuntu
@@ -245,6 +248,9 @@ auto register_system_fallbacks() -> void {
         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
     };
     for (const char *path : candidates) {
+        if (path == nullptr) {
+            continue;
+        }
         auto ff = make_face_from_file(path);
         if (ff) {
             add_default_face(ff);

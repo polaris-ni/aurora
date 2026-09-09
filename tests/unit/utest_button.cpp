@@ -40,7 +40,7 @@ AURORA_TEST_CASE(button_label_and_activate_fires_on_click) {
     b.set_label("确认");
     AURORA_TEST_CHECK_EQ(b.label.get().text, "确认");
 
-    b.set_on_click([&clicks] { ++clicks; });
+    b.set_on_click([&clicks]() -> void { ++clicks; });
     AURORA_TEST_CHECK_TRUE(b.wants_click());
     b.activate();
     b.activate();
@@ -50,7 +50,7 @@ AURORA_TEST_CASE(button_label_and_activate_fires_on_click) {
 AURORA_TEST_CASE(button_disabled_activate_does_not_fire) {
     int clicks = 0;
     Button b("OK");
-    b.set_on_click([&clicks] { ++clicks; });
+    b.set_on_click([&clicks]() -> void { ++clicks; });
     b.set_enabled(false);
     AURORA_TEST_CHECK_FALSE(b.wants_click());
     b.activate();
@@ -65,7 +65,7 @@ AURORA_TEST_CASE(button_disabled_activate_does_not_fire) {
 AURORA_TEST_CASE(button_disabled_swallows_pointer_events) {
     int clicks = 0;
     Button b("OK");
-    b.set_on_click([&clicks] { ++clicks; });
+    b.set_on_click([&clicks]() -> void { ++clicks; });
     b.set_enabled(false);
 
     MouseEvent press;
@@ -83,7 +83,7 @@ AURORA_TEST_CASE(button_disabled_swallows_pointer_events) {
 AURORA_TEST_CASE(button_pointer_press_release_fires_click_once) {
     int clicks = 0;
     Button b("OK");
-    b.set_on_click([&clicks] { ++clicks; });
+    b.set_on_click([&clicks]() -> void { ++clicks; });
 
     MouseEvent press;
     press.action = MouseAction::Press;
@@ -125,7 +125,7 @@ AURORA_TEST_CASE(button_describe_reports_metadata) {
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_click");
     bool has_label = false;
-    for (const auto &p : d.properties) {
+    for (const auto& p : d.properties) {
         if (std::string{p.name} == "label") {
             has_label = true;
         }

@@ -22,7 +22,7 @@ namespace ar = aurora::render;
 
 namespace {
 
-auto paint_gradient_bg(Painter &p, int w, int h) -> void {
+auto paint_gradient_bg(Painter& p, int w, int h) -> void {
     constexpr int bands = 24;
     const float bw = static_cast<float>(w) / bands;
     for (int i = 0; i < bands; ++i) {
@@ -42,7 +42,7 @@ auto render_one(ar::TextAAMode mode, int w, int h) -> std::vector<std::uint8_t> 
     p.draw_text(Rect{.origin = Point{.x = 20.0F, .y = (static_cast<float>(h) / 2) - 20.0F},
                      .size = Size{.width = static_cast<float>(w - 40), .height = 40.0F}},
                 std::string{"Animation"}, Font{.size_pt = 34.0F}, Color{255, 255, 255}, mode, ar::TextLayoutOpts{});
-    const std::uint8_t *buf = p.data();
+    const std::uint8_t* buf = p.data();
     // 测试助手：缓冲区间算术构造；范围构造保留圆括号（braced-init 会变 initializer_list）
     return std::vector(buf, buf + (static_cast<std::size_t>(w) * h * 4U));  // NOLINT
 }
@@ -71,10 +71,10 @@ AURORA_TEST_CASE(clear_type_vs_supersample_metrics_on_gradient) {
     constexpr std::size_t n_px = static_cast<std::size_t>(w) * h;
     for (std::size_t i = 0; i < n_px; ++i) {
         const std::size_t off = i * 4U;
-        const int cr = ct[off];      // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        const int cr = ct[off];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         const int cg = ct[off + 1];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         const int cb = ct[off + 2];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        const int sr = ss[off];      // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        const int sr = ss[off];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         const int sg = ss[off + 1];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         const int sb = ss[off + 2];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         const int dr = std::abs(cr - sr);

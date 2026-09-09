@@ -5,9 +5,9 @@
 
 #include <memory>
 
+#include "aurora/layout/layout_engine.h"
 #include "aurora/widget/grid.h"
 #include "aurora/widget/text.h"
-#include "aurora/layout/layout_engine.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_grid {
@@ -37,7 +37,8 @@ auto bounded(float w, float h) -> Constraints {
 AURORA_TEST_CASE(grid_places_row_major_with_per_column_width) {
     // 2 列、gap=10：A(50x20) B(30x10) / C(20x30)。
     // 列宽 [50,30]、行高 [20,30]；总尺寸 90x60。
-    Grid grid{GridProps{.children = {box(50.0F, 20.0F), box(30.0F, 10.0F), box(20.0F, 30.0F)}, .columns = 2, .gap = 10.0F}};
+    Grid grid{
+        GridProps{.children = {box(50.0F, 20.0F), box(30.0F, 10.0F), box(20.0F, 30.0F)}, .columns = 2, .gap = 10.0F}};
     AURORA_TEST_CHECK_EQ(std::string{grid.type_name()}, "Grid");
 
     LayoutEngine::layout(grid, bounded(500.0F, 500.0F));
@@ -45,7 +46,7 @@ AURORA_TEST_CASE(grid_places_row_major_with_per_column_width) {
     AURORA_TEST_CHECK_NEAR(s.width, 90.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(s.height, 60.0F, 1e-4F);
 
-    const auto &kids = grid.child_nodes();
+    const auto& kids = grid.child_nodes();
     AURORA_TEST_REQUIRE_EQ(kids.size(), 3U);
     // idx0 (r0,c0)：(0,0)；idx1 (r0,c1)：x=50+10=60；idx2 (r1,c0)：y=20+10=30。
     AURORA_TEST_CHECK_NEAR(kids[0].bounds().origin.x, 0.0F, 1e-4F);
@@ -69,9 +70,8 @@ AURORA_TEST_CASE(grid_bounded_width_equalizes_cell_measurement) {
 
 AURORA_TEST_CASE(grid_handles_uneven_last_row) {
     // 3 项 2 列：第二行只有 1 项，不崩溃且行高取该行实际子项。
-    Grid grid{GridProps{.children = {box(50.0F, 20.0F), box(50.0F, 20.0F), box(50.0F, 40.0F)},
-                        .columns = 2,
-                        .gap = 4.0F}};
+    Grid grid{
+        GridProps{.children = {box(50.0F, 20.0F), box(50.0F, 20.0F), box(50.0F, 40.0F)}, .columns = 2, .gap = 4.0F}};
     LayoutEngine::layout(grid, bounded(500.0F, 500.0F));
     const Size s = grid.size();
     AURORA_TEST_CHECK_NEAR(s.width, 104.0F, 1e-4F);  // 50+50+4

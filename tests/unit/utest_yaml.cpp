@@ -33,10 +33,10 @@ AURORA_TEST_CASE(yaml_scalar_emission) {
 }
 
 AURORA_TEST_CASE(yaml_float_special_values) {
-    using lim = std::numeric_limits<double>;
-    AURORA_TEST_CHECK_EQ(serialization::to_yaml(Json(lim::quiet_NaN())), ".nan");
-    AURORA_TEST_CHECK_EQ(serialization::to_yaml(Json(lim::infinity())), ".inf");
-    AURORA_TEST_CHECK_EQ(serialization::to_yaml(Json(-lim::infinity())), "-.inf");
+    using Lim = std::numeric_limits<double>;
+    AURORA_TEST_CHECK_EQ(serialization::to_yaml(Json(Lim::quiet_NaN())), ".nan");
+    AURORA_TEST_CHECK_EQ(serialization::to_yaml(Json(Lim::infinity())), ".inf");
+    AURORA_TEST_CHECK_EQ(serialization::to_yaml(Json(-Lim::infinity())), "-.inf");
 }
 
 AURORA_TEST_CASE(yaml_string_quoting_rules) {

@@ -8,9 +8,7 @@
 
 namespace aurora::test_cases::utest_freetype_library {
 
-AURORA_TEST_CASE(lazy_initialization_yields_usable_handle) {
-    AURORA_TEST_CHECK_NOT_NULL(render::ft_library());
-}
+AURORA_TEST_CASE(lazy_initialization_yields_usable_handle) { AURORA_TEST_CHECK_NOT_NULL(render::ft_library()); }
 
 AURORA_TEST_CASE(repeated_access_returns_same_handle) {
     // 单线程 UI 下的进程级单例：重复访问不得重复初始化（否则字形缓存与 face 句柄全部失效）。

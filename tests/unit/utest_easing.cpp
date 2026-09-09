@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/animation/easing.h
-/// 测试说明: 覆盖 Curve 默认/命名/自定义构造、transform 的输入输出夹取、命名曲线端点与闭式公式、in_out 对称性与单调性、BounceOut 落点及无函数自定义曲线的线性回退
+/// 测试说明: 覆盖 Curve 默认/命名/自定义构造、transform 的输入输出夹取、命名曲线端点与闭式公式、in_out
+/// 对称性与单调性、BounceOut 落点及无函数自定义曲线的线性回退
 
 #include <utility>
 #include <vector>
@@ -26,12 +27,12 @@ AURORA_TEST_CASE(default_curve_is_linear) {
 AURORA_TEST_CASE(transform_clamps_input_and_output) {
     const aurora::Curve linear;
     AURORA_TEST_CHECK_NEAR(linear.transform(-0.5), 0.0, 1e-12);  // 输入下界夹取
-    AURORA_TEST_CHECK_NEAR(linear.transform(1.7), 1.0, 1e-12);   // 输入上界夹取
+    AURORA_TEST_CHECK_NEAR(linear.transform(1.7), 1.0, 1e-12);  // 输入上界夹取
 
     // 自定义曲线输出越界同样被夹取。
-    const aurora::Curve overshoot{[](double) { return 2.0; }};
+    const aurora::Curve overshoot{[](double) -> double { return 2.0; }};
     AURORA_TEST_CHECK_NEAR(overshoot.transform(0.5), 1.0, 1e-12);
-    const aurora::Curve negative{[](double) { return -1.0; }};
+    const aurora::Curve negative{[](double) -> double { return -1.0; }};
     AURORA_TEST_CHECK_NEAR(negative.transform(0.5), 0.0, 1e-12);
 
     // 全输入域采样：输出始终落在 [0,1]。
@@ -138,7 +139,7 @@ AURORA_TEST_CASE(bounce_out_hits_known_bounce_valleys) {
 
 /// @brief 自定义曲线按函数求值且 kind 为 Custom；指定 Custom 却无函数时回退线性。
 AURORA_TEST_CASE(custom_curve_applies_function_with_linear_fallback) {
-    const aurora::Curve stepped{[](double t) { return t < 0.5 ? 0.0 : 1.0; }};
+    const aurora::Curve stepped{[](double t) -> double { return t < 0.5 ? 0.0 : 1.0; }};
     AURORA_TEST_CHECK_TRUE(stepped.kind() == aurora::CurveKind::Custom);
     AURORA_TEST_CHECK_NEAR(stepped.transform(0.25), 0.0, 1e-12);
     AURORA_TEST_CHECK_NEAR(stepped.transform(0.75), 1.0, 1e-12);

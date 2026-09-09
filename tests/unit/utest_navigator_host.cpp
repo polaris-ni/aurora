@@ -24,14 +24,12 @@ class SolidBox final : public LeafWidget {
   public:
     explicit SolidBox(Color fill = Color{255, 0, 0}) : fill_(fill) {}
 
-    [[nodiscard]] auto type_name() const -> const char * override { return "SolidBox"; }
+    [[nodiscard]] auto type_name() const -> const char* override { return "SolidBox"; }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(c.max);
-    }
+    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override { return c.constrain(c.max); }
 
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+    auto on_paint(Painter& p, const Rect& bounds, const BuildContext& /*ctx*/) -> void override {
         p.fill_rect(bounds, fill_);
     }
 
@@ -39,9 +37,7 @@ class SolidBox final : public LeafWidget {
     Color fill_;
 };
 
-auto solid_page(Color fill) -> Node {
-    return Node{std::make_shared<SolidBox>(fill)};
-}
+auto solid_page(Color fill) -> Node { return Node{std::make_shared<SolidBox>(fill)}; }
 
 auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
@@ -56,9 +52,9 @@ auto animated_transition() -> RouteTransition {
 }
 
 /// 收集 host 当前展示子树的类型名序列。
-auto display_types(const NavigatorHost &host) -> std::vector<std::string> {
+auto display_types(const NavigatorHost& host) -> std::vector<std::string> {
     std::vector<std::string> names;
-    host.for_each_child([&names](const Widget &w) { names.emplace_back(w.type_name()); });
+    host.for_each_child([&names](const Widget& w) -> void { names.emplace_back(w.type_name()); });
     return names;
 }
 
@@ -106,10 +102,10 @@ AURORA_TEST_CASE(host_animated_push_transition_lifecycle) {
 
     // 一帧推进跨过时长：进度到 1，动画器转闲置。
     anim.tick(0.4);
-    std::vector<SignalViewBase *> sigs;
+    std::vector<SignalViewBase*> sigs;
     host.collect_signals(sigs);
     AURORA_TEST_REQUIRE_EQ(sigs.size(), 1U);
-    const auto *progress = dynamic_cast<const State<double> *>(sigs[0]);
+    const auto* progress = dynamic_cast<const State<double>*>(sigs[0]);
     AURORA_TEST_REQUIRE_NOT_NULL(progress);
     AURORA_TEST_CHECK_NEAR(progress->get(), 1.0, 1e-4F);
     AURORA_TEST_CHECK_FALSE(anim.has_active());
@@ -201,7 +197,7 @@ AURORA_TEST_CASE(host_open_uri_replaces_stack_without_transition) {
     host.mount(ctx);
     host.push(Route{solid_page(Color{0, 0, 255}), "detail"});
 
-    const std::function<Route(const std::string &)> build = [](const std::string &name) -> Route {
+    const std::function<Route(const std::string&)> build = [](const std::string& name) -> Route {
         return Route{solid_page(Color{0, 160, 0}), name};
     };
     host.open_uri("alpha/beta", build);
@@ -228,10 +224,10 @@ AURORA_TEST_CASE(host_self_description_and_signals) {
     AURORA_TEST_CHECK_EQ(desc.name, std::string{"NavigatorHost"});
     AURORA_TEST_CHECK_EQ(desc.children_policy, std::string{"single"});
 
-    std::vector<SignalViewBase *> sigs;
+    std::vector<SignalViewBase*> sigs;
     host.collect_signals(sigs);
     AURORA_TEST_REQUIRE_EQ(sigs.size(), 1U);
-    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const State<double> *>(sigs[0]));  // progress 信号
+    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const State<double>*>(sigs[0]));  // progress 信号
 
     // Hero 注册表内部持有且实例稳定。
     AURORA_TEST_CHECK_NOT_NULL(host.hero_registry().get());
@@ -245,10 +241,10 @@ AURORA_TEST_CASE(host_hit_test_delegates_to_current_page) {
     host.push(Route{Node{page}, "home"});
 
     BuildContext ctx;
-    Widget *hit = host.hit_test(Point{.x = 50.0F, .y = 25.0F}, full_rect(100.0F, 50.0F), ctx);
+    Widget* hit = host.hit_test(Point{.x = 50.0F, .y = 25.0F}, full_rect(100.0F, 50.0F), ctx);
     AURORA_TEST_CHECK_EQ(hit, page.get());
 
-    const Widget *miss = host.hit_test(Point{.x = 150.0F, .y = 25.0F}, full_rect(100.0F, 50.0F), ctx);
+    const Widget* miss = host.hit_test(Point{.x = 150.0F, .y = 25.0F}, full_rect(100.0F, 50.0F), ctx);
     AURORA_TEST_CHECK_NULL(miss);
 }
 

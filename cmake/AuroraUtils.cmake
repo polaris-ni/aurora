@@ -33,4 +33,15 @@ function(aurora_setup_consumer_target _tgt)
     if (ARGN)
         target_include_directories(${_tgt} PRIVATE ${ARGN})
     endif ()
+
+    # 静态链接 GCC runtime（libgcc / libstdc++）与 winpthread，使开发工具自包含、双击即跑。
+    # MinGW 默认动态链接 libgcc_s_seh-1.dll / libstdc++-6.dll / libwinpthread-1.dll，这些 DLL
+    # 不在 exe 同目录、也不在普通终端（双击 / 裸 cmd / PowerShell）的 PATH 上，导致运行时报
+    # 「无法定位程序输入点 _gthr_win32_self」。
+    # 仅 GNU/Clang + Windows 生效；MSVC 与其他平台忽略。
+    if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND WIN32)
+        target_link_options(${_tgt} PRIVATE
+                -static-libgcc -static-libstdc++
+                -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
+    endif ()
 endfunction()

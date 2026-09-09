@@ -1,5 +1,6 @@
 #include "aurora/core/image.h"
 
+#include <filesystem>
 #include <fstream>
 
 #include "aurora/image/image_codec.h"
@@ -94,11 +95,22 @@ auto Image::load(std::string_view path) -> Result<Image> {
 
 auto Image::load_svg(std::string_view path, int target_w, int target_h) -> Result<Image> {
     const std::string p(path);
+    // 与 image::read_file_bytes 同理：目录必须先拦，否则 Linux 下读取时报 EISDIR，
+    // libstdc++ 的 basic_filebuf::underflow 会无条件抛出异常。
+    std::error_code dir_ec;
+    if (std::filesystem::is_directory(p, dir_ec)) {
+        return make_error(ErrorCode::IOFileNotFound, std::string("Image::load_svg: not a regular file: ") + p);
+    }
     std::ifstream f(p, std::ios::binary);
     if (!f) {
         return make_error(ErrorCode::IOFileNotFound, std::string("Image::load_svg: cannot open file: ") + p);
     }
-    const std::vector<std::uint8_t> buf(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>{});
+    std::vector<std::uint8_t> buf;
+    try {
+        buf.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>{});
+    } catch (const std::ios_base::failure &) {
+        return make_error(ErrorCode::IOFileNotFound, std::string("Image::load_svg: cannot read file: ") + p);
+    }
     if (buf.empty()) {
         return make_error(ErrorCode::IOFileNotFound, std::string("Image::load_svg: empty file: ") + p);
     }

@@ -21,16 +21,15 @@ namespace aurora::test_cases::utest_pickers {
 namespace {
 
 /// 挂载并按给定上限布局，返回测得尺寸（无头环境：BuildContext + 约束）。
-auto laid_out(Widget &w, float max_w, float max_h) -> Size {
+auto laid_out(Widget& w, float max_w, float max_h) -> Size {
     BuildContext ctx;
     w.mount(ctx);
-    const Constraints c{
-        .min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = max_w, .height = max_h}};
+    const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = max_w, .height = max_h}};
     return w.layout(c, ctx);
 }
 
 /// 合成一次按下事件并派发给控件。
-auto press(Widget &w, float x, float y) -> MouseEvent {
+auto press(Widget& w, float x, float y) -> MouseEvent {
     MouseEvent e;
     e.action = MouseAction::Press;
     e.local_position = Point{.x = x, .y = y};
@@ -88,7 +87,7 @@ AURORA_TEST_CASE(pickers_type_contract) {
     AURORA_TEST_CHECK_TRUE(tp.wants_click());
     AURORA_TEST_CHECK_TRUE(cp.wants_click());
 
-    std::vector<SignalViewBase *> out;
+    std::vector<SignalViewBase*> out;
     dp.collect_signals(out);
     tp.collect_signals(out);
     cp.collect_signals(out);
@@ -97,39 +96,42 @@ AURORA_TEST_CASE(pickers_type_contract) {
 
 AURORA_TEST_CASE(date_picker_constructor_and_select) {
     // 合法初始值：选中与视图同步。
-    DatePicker dp{Date{2026, 7, 25}};
-    AURORA_TEST_CHECK_EQ(dp.selected_date(), (Date{2026, 7, 25}));
+    DatePicker dp{Date{.year = 2026, .month = 7, .day = 25}};
+    AURORA_TEST_CHECK_EQ(dp.selected_date(), Date{2026, 7, 25});
     AURORA_TEST_CHECK_EQ(dp.view_year(), 2026);
     AURORA_TEST_CHECK_EQ(dp.view_month(), 7);
 
     // 非法初始值：回退默认 {2026-01-01}。
-    DatePicker bad{Date{2026, 2, 30}};
-    AURORA_TEST_CHECK_EQ(bad.selected_date(), (Date{2026, 1, 1}));
+    DatePicker bad{Date{.year = 2026, .month = 2, .day = 30}};
+    AURORA_TEST_CHECK_EQ(bad.selected_date(), Date{2026, 1, 1});
     AURORA_TEST_CHECK_EQ(bad.view_year(), 2026);
     AURORA_TEST_CHECK_EQ(bad.view_month(), 1);
 
     // 选中合法日期：回调触发、视图跟随。
     int calls = 0;
     Date last{};
-    dp.set_on_change([&calls, &last](Date d) { ++calls; last = d; });
-    dp.select(Date{2026, 8, 1});
+    dp.set_on_change([&calls, &last](Date d) -> void {
+        ++calls;
+        last = d;
+    });
+    dp.select(Date{.year = 2026, .month = 8, .day = 1});
     AURORA_TEST_CHECK_EQ(calls, 1);
-    AURORA_TEST_CHECK_EQ(last, (Date{2026, 8, 1}));
-    AURORA_TEST_CHECK_EQ(dp.selected_date(), (Date{2026, 8, 1}));
+    AURORA_TEST_CHECK_EQ(last, Date{2026, 8, 1});
+    AURORA_TEST_CHECK_EQ(dp.selected_date(), Date{2026, 8, 1});
     AURORA_TEST_CHECK_EQ(dp.view_month(), 8);
 
     // 同值重复选中：不回调。
-    dp.select(Date{2026, 8, 1});
+    dp.select(Date{.year = 2026, .month = 8, .day = 1});
     AURORA_TEST_CHECK_EQ(calls, 1);
 
     // 非法日期：忽略。
-    dp.select(Date{2026, 2, 30});
+    dp.select(Date{.year = 2026, .month = 2, .day = 30});
     AURORA_TEST_CHECK_EQ(calls, 1);
-    AURORA_TEST_CHECK_EQ(dp.selected_date(), (Date{2026, 8, 1}));
+    AURORA_TEST_CHECK_EQ(dp.selected_date(), Date{2026, 8, 1});
 }
 
 AURORA_TEST_CASE(date_picker_month_navigation_wraps_year) {
-    DatePicker dp{Date{2026, 12, 15}};
+    DatePicker dp{Date{.year = 2026, .month = 12, .day = 15}};
     dp.next_month();
     AURORA_TEST_CHECK_EQ(dp.view_year(), 2027);
     AURORA_TEST_CHECK_EQ(dp.view_month(), 1);
@@ -138,23 +140,23 @@ AURORA_TEST_CASE(date_picker_month_navigation_wraps_year) {
     AURORA_TEST_CHECK_EQ(dp.view_month(), 12);
 
     // 1 月前翻回卷到上一年 12 月。
-    DatePicker jan{Date{2026, 1, 15}};
+    DatePicker jan{Date{.year = 2026, .month = 1, .day = 15}};
     jan.prev_month();
     AURORA_TEST_CHECK_EQ(jan.view_year(), 2025);
     AURORA_TEST_CHECK_EQ(jan.view_month(), 12);
 
     // 翻月只动视图：不改选中、不触发 on_change。
     int calls = 0;
-    jan.set_on_change([&calls](Date) { ++calls; });
+    jan.set_on_change([&calls](Date) -> void { ++calls; });
     jan.next_month();
     jan.next_month();
     AURORA_TEST_CHECK_EQ(calls, 0);
-    AURORA_TEST_CHECK_EQ(jan.selected_date(), (Date{2026, 1, 15}));
+    AURORA_TEST_CHECK_EQ(jan.selected_date(), Date{2026, 1, 15});
 }
 
 AURORA_TEST_CASE(date_picker_grid_day_mapping) {
     // 2026-07-01 是周三（first_wd=3，周日为第 0 列）。
-    DatePicker dp{Date{2026, 7, 25}};
+    DatePicker dp{Date{.year = 2026, .month = 7, .day = 25}};
     AURORA_TEST_CHECK_EQ(dp.grid_day(0, 3), 1);  // 第一行周三 = 1 号
     AURORA_TEST_CHECK_EQ(dp.grid_day(0, 2), 0);  // 周二为空格
     AURORA_TEST_CHECK_EQ(dp.grid_day(0, 0), 0);
@@ -162,7 +164,7 @@ AURORA_TEST_CASE(date_picker_grid_day_mapping) {
     AURORA_TEST_CHECK_EQ(dp.grid_day(5, 6), 0);  // 超出 31 天的尾格为空
 
     // 闰年 2024-02：1 号是周四，共 29 天。
-    DatePicker feb{Date{2024, 2, 29}};
+    DatePicker feb{Date{.year = 2024, .month = 2, .day = 29}};
     AURORA_TEST_CHECK_EQ(feb.grid_day(0, 4), 1);
     AURORA_TEST_CHECK_EQ(feb.grid_day(0, 3), 0);
     AURORA_TEST_CHECK_EQ(feb.grid_day(4, 4), 29);
@@ -170,7 +172,7 @@ AURORA_TEST_CASE(date_picker_grid_day_mapping) {
 }
 
 AURORA_TEST_CASE(date_picker_layout_and_describe) {
-    DatePicker dp{Date{2026, 7, 25}};
+    DatePicker dp{Date{.year = 2026, .month = 7, .day = 25}};
     const Size s = laid_out(dp, 400.0F, 400.0F);
     // 月历期望尺寸 224 x (32 头部 + 6*28 网格)。
     AURORA_TEST_CHECK_NEAR(s.width, 224.0F, 1e-3F);
@@ -189,7 +191,7 @@ AURORA_TEST_CASE(date_picker_layout_and_describe) {
 }
 
 AURORA_TEST_CASE(date_picker_pointer_navigation_and_pick) {
-    DatePicker dp{Date{2026, 7, 25}};
+    DatePicker dp{Date{.year = 2026, .month = 7, .day = 25}};
     laid_out(dp, 400.0F, 400.0F);  // 224 x 200
 
     // 头部左箭头（x<28, y<32）：上一月。
@@ -204,21 +206,21 @@ AURORA_TEST_CASE(date_picker_pointer_navigation_and_pick) {
 
     // 网格点击 (col=3,row=0) → 1 号（2026-07-01 周三）。
     int calls = 0;
-    dp.set_on_change([&calls](Date) { ++calls; });
+    dp.set_on_change([&calls](Date) -> void { ++calls; });
     e = press(dp, 100.0F, 40.0F);
     AURORA_TEST_CHECK_TRUE(e.is_handled);
     AURORA_TEST_CHECK_EQ(calls, 1);
-    AURORA_TEST_CHECK_EQ(dp.selected_date(), (Date{2026, 7, 1}));
+    AURORA_TEST_CHECK_EQ(dp.selected_date(), Date{2026, 7, 1});
 
     // 空格点击（7 月首格前三列）：不选中、不回调，但事件已消费。
     e = press(dp, 20.0F, 40.0F);
     AURORA_TEST_CHECK_TRUE(e.is_handled);
     AURORA_TEST_CHECK_EQ(calls, 1);
-    AURORA_TEST_CHECK_EQ(dp.selected_date(), (Date{2026, 7, 1}));
+    AURORA_TEST_CHECK_EQ(dp.selected_date(), Date{2026, 7, 1});
 }
 
 AURORA_TEST_CASE(date_picker_json_roundtrip_and_invalid_guard) {
-    DatePicker src{Date{2025, 3, 9}};
+    DatePicker src{Date{.year = 2025, .month = 3, .day = 9}};
     Json props;
     src.serialize_props(props);
     AURORA_TEST_CHECK_EQ(props["year"].get<int>(), 2025);
@@ -227,7 +229,7 @@ AURORA_TEST_CASE(date_picker_json_roundtrip_and_invalid_guard) {
 
     DatePicker dst;
     dst.deserialize_props(props);
-    AURORA_TEST_CHECK_EQ(dst.selected_date(), (Date{2025, 3, 9}));
+    AURORA_TEST_CHECK_EQ(dst.selected_date(), Date{2025, 3, 9});
     AURORA_TEST_CHECK_EQ(dst.view_year(), 2025);
     AURORA_TEST_CHECK_EQ(dst.view_month(), 3);
 
@@ -235,53 +237,56 @@ AURORA_TEST_CASE(date_picker_json_roundtrip_and_invalid_guard) {
     props["month"] = 13;
     DatePicker guard;
     guard.deserialize_props(props);
-    AURORA_TEST_CHECK_EQ(guard.selected_date(), (Date{2026, 1, 1}));
+    AURORA_TEST_CHECK_EQ(guard.selected_date(), Date{2026, 1, 1});
 }
 
 AURORA_TEST_CASE(time_picker_adjust_wraps) {
-    TimePicker tp{TimeOfDay{23, 58}};
-    AURORA_TEST_CHECK_EQ(tp.selected_time(), (TimeOfDay{23, 58}));
+    TimePicker tp{TimeOfDay{.hour = 23, .minute = 58}};
+    AURORA_TEST_CHECK_EQ(tp.selected_time(), TimeOfDay{23, 58});
 
     tp.add_minutes(3);  // 23:58 + 3min = 00:01（跨天回卷）
-    AURORA_TEST_CHECK_EQ(tp.selected_time(), (TimeOfDay{0, 1}));
+    AURORA_TEST_CHECK_EQ(tp.selected_time(), TimeOfDay{0, 1});
 
     tp.add_hours(-1);  // 00:01 - 1h = 23:01
-    AURORA_TEST_CHECK_EQ(tp.selected_time(), (TimeOfDay{23, 1}));
+    AURORA_TEST_CHECK_EQ(tp.selected_time(), TimeOfDay{23, 1});
 
     tp.add_minutes(-2);  // 23:01 - 2min = 22:59
-    AURORA_TEST_CHECK_EQ(tp.selected_time(), (TimeOfDay{22, 59}));
+    AURORA_TEST_CHECK_EQ(tp.selected_time(), TimeOfDay{22, 59});
 
     tp.add_hours(2);  // 22:59 + 2h = 00:59
-    AURORA_TEST_CHECK_EQ(tp.selected_time(), (TimeOfDay{0, 59}));
+    AURORA_TEST_CHECK_EQ(tp.selected_time(), TimeOfDay{0, 59});
 
     // 默认构造 00:00，负小时回卷到 23。
     TimePicker fresh;
-    AURORA_TEST_CHECK_EQ(fresh.selected_time(), (TimeOfDay{0, 0}));
+    AURORA_TEST_CHECK_EQ(fresh.selected_time(), TimeOfDay{0, 0});
     fresh.add_hours(-1);
-    AURORA_TEST_CHECK_EQ(fresh.selected_time(), (TimeOfDay{23, 0}));
+    AURORA_TEST_CHECK_EQ(fresh.selected_time(), TimeOfDay{23, 0});
 }
 
 AURORA_TEST_CASE(time_picker_select_validates_and_notifies) {
-    TimePicker bad{TimeOfDay{24, 0}};  // 非法初始 → 默认 {0,0}
-    AURORA_TEST_CHECK_EQ(bad.selected_time(), (TimeOfDay{0, 0}));
+    TimePicker bad{TimeOfDay{.hour = 24, .minute = 0}};  // 非法初始 → 默认 {0,0}
+    AURORA_TEST_CHECK_EQ(bad.selected_time(), TimeOfDay{0, 0});
 
-    TimePicker tp{TimeOfDay{8, 15}};
+    TimePicker tp{TimeOfDay{.hour = 8, .minute = 15}};
     int calls = 0;
     TimeOfDay last{};
-    tp.set_on_change([&calls, &last](TimeOfDay t) { ++calls; last = t; });
+    tp.set_on_change([&calls, &last](TimeOfDay t) -> void {
+        ++calls;
+        last = t;
+    });
 
-    tp.select(TimeOfDay{9, 45});
+    tp.select(TimeOfDay{.hour = 9, .minute = 45});
     AURORA_TEST_CHECK_EQ(calls, 1);
-    AURORA_TEST_CHECK_EQ(last, (TimeOfDay{9, 45}));
-    AURORA_TEST_CHECK_EQ(tp.selected_time(), (TimeOfDay{9, 45}));
+    AURORA_TEST_CHECK_EQ(last, TimeOfDay{9, 45});
+    AURORA_TEST_CHECK_EQ(tp.selected_time(), TimeOfDay{9, 45});
 
-    tp.select(TimeOfDay{25, 0});  // 非法忽略
-    tp.select(TimeOfDay{9, 45});  // 同值忽略
+    tp.select(TimeOfDay{.hour = 25, .minute = 0});  // 非法忽略
+    tp.select(TimeOfDay{.hour = 9, .minute = 45});  // 同值忽略
     AURORA_TEST_CHECK_EQ(calls, 1);
 }
 
 AURORA_TEST_CASE(time_picker_pointer_quadrants) {
-    TimePicker tp{TimeOfDay{10, 30}};
+    TimePicker tp{TimeOfDay{.hour = 10, .minute = 30}};
     const Size s = laid_out(tp, 400.0F, 400.0F);  // 期望 120 x 72
     AURORA_TEST_CHECK_NEAR(s.width, 120.0F, 1e-3F);
     AURORA_TEST_CHECK_NEAR(s.height, 72.0F, 1e-3F);
@@ -316,7 +321,7 @@ AURORA_TEST_CASE(time_picker_describe_and_json_roundtrip) {
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");
 
-    TimePicker src{TimeOfDay{8, 15}};
+    TimePicker src{TimeOfDay{.hour = 8, .minute = 15}};
     Json props;
     src.serialize_props(props);
     AURORA_TEST_CHECK_EQ(props["hour"].get<int>(), 8);
@@ -324,7 +329,7 @@ AURORA_TEST_CASE(time_picker_describe_and_json_roundtrip) {
 
     TimePicker dst;
     dst.deserialize_props(props);
-    AURORA_TEST_CHECK_EQ(dst.selected_time(), (TimeOfDay{8, 15}));
+    AURORA_TEST_CHECK_EQ(dst.selected_time(), TimeOfDay{8, 15});
 }
 
 AURORA_TEST_CASE(color_picker_palette_and_select) {
@@ -335,10 +340,13 @@ AURORA_TEST_CASE(color_picker_palette_and_select) {
 
     int calls = 0;
     Color last{};
-    cp.set_on_change([&calls, &last](Color c) { ++calls; last = c; });
+    cp.set_on_change([&calls, &last](Color c) -> void {
+        ++calls;
+        last = c;
+    });
     cp.select(Color(220, 53, 69, 255));
     AURORA_TEST_CHECK_EQ(calls, 1);
-    AURORA_TEST_CHECK_EQ(last, (Color(220, 53, 69, 255)));
+    AURORA_TEST_CHECK_EQ(last, Color(220, 53, 69, 255));
     AURORA_TEST_CHECK(cp.selected_color() == (Color(220, 53, 69, 255)));
 
     // 同色重复选中不回调。
@@ -401,7 +409,7 @@ AURORA_TEST_CASE(color_picker_describe_and_json_roundtrip) {
 }
 
 AURORA_TEST_CASE(pickers_headless_paint_smoke) {
-    DatePicker dp{Date{2026, 7, 25}};
+    DatePicker dp{Date{.year = 2026, .month = 7, .day = 25}};
     ColorPicker cp{Color(0, 122, 255, 255)};
     laid_out(dp, 400.0F, 400.0F);
     laid_out(cp, 400.0F, 400.0F);

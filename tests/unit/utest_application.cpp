@@ -16,9 +16,7 @@ namespace aurora::test_cases::utest_application {
 
 namespace {
 
-auto make_scene() -> Scene {
-    return Scene{Node{std::make_shared<Text>("hi")}};
-}
+auto make_scene() -> Scene { return Scene{Node{std::make_shared<Text>("hi")}}; }
 
 }  // namespace
 
@@ -35,13 +33,13 @@ AURORA_TEST_CASE(headless_application_defaults) {
     // 命令式窗口状态回调可注册（无 Window 时不会触发）。
     bool state_cb_called = false;
     bool mode_cb_called = false;
-    app.set_on_window_state([&state_cb_called](WindowState) { state_cb_called = true; });
-    app.set_on_window_mode([&mode_cb_called](WindowMode) { mode_cb_called = true; });
+    app.set_on_window_state([&state_cb_called](WindowState) -> void { state_cb_called = true; });
+    app.set_on_window_mode([&mode_cb_called](WindowMode) -> void { mode_cb_called = true; });
     AURORA_TEST_CHECK_FALSE(state_cb_called);
     AURORA_TEST_CHECK_FALSE(mode_cb_called);
 
     // set_on_frame / set_overlay 仅注册/转发，无头路径不触发。
-    app.set_on_frame([] {});
+    app.set_on_frame([]() -> void {});
     app.set_overlay(nullptr);
     AURORA_TEST_CHECK_NULL(app.window());
 }
@@ -74,7 +72,7 @@ AURORA_TEST_CASE(strict_mode_roundtrip) {
 AURORA_TEST_CASE(dispatch_key_consumed_by_registered_shortcut) {
     Application app{make_scene(), 320, 240};
     int fired = 0;
-    app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::O}, [&fired] { ++fired; });
+    app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::O}, [&fired]() -> void { ++fired; });
 
     KeyEvent e;
     e.key = static_cast<int>(KeyCode::O);
@@ -87,7 +85,7 @@ AURORA_TEST_CASE(dispatch_key_consumed_by_registered_shortcut) {
 AURORA_TEST_CASE(dispatch_key_falls_through_when_unmatched) {
     Application app{make_scene(), 320, 240};
     int fired = 0;
-    app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::O}, [&fired] { ++fired; });
+    app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::O}, [&fired]() -> void { ++fired; });
 
     // 无修饰键的同键不匹配 → 快捷键不消费；空场景无人处理 → 返回 false。
     KeyEvent plain;
@@ -117,7 +115,7 @@ AURORA_TEST_CASE(dispatch_key_falls_through_when_unmatched) {
 AURORA_TEST_CASE(disabled_shortcut_not_consumed) {
     Application app{make_scene(), 320, 240};
     int fired = 0;
-    const int id = app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::S}, [&fired] { ++fired; });
+    const int id = app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::S}, [&fired]() -> void { ++fired; });
 
     app.shortcuts().set_enabled(id, false);
     KeyEvent e;
@@ -153,8 +151,8 @@ AURORA_TEST_CASE(app_builder_chains_fluently) {
     // 流式构建器：各 setter 返回同一实例引用（可链式）。
     // 注：命名空间里自由函数 App() 会隐藏类名 App，类型语境用 auto 绕开。
     auto builder = aurora::App::make();
-    auto &chained =
-        builder.title("utest").size(320, 240).frames(1).on_frame([] {}).strict_mode(StrictMode::Off);
+    auto& chained =
+        builder.title("utest").size(320, 240).frames(1).on_frame([]() -> void {}).strict_mode(StrictMode::Off);
     AURORA_TEST_CHECK_EQ(&chained, &builder);
 
     // 文档形态的自由函数工厂 `au::App()` 可用。

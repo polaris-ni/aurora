@@ -9,7 +9,6 @@
 #include <string_view>
 
 #include "aurora/perf/counters.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_counters {
@@ -39,7 +38,7 @@ AURORA_TEST_CASE(default_constructed_counters_are_zero) {
 
 AURORA_TEST_CASE(current_is_process_wide_singleton) {
     // current() 返回进程级单例：多次取址一致，写入读回生效。
-    auto &c = RenderCounters::current();
+    auto& c = RenderCounters::current();
     AURORA_TEST_CHECK_EQ(&RenderCounters::current(), &c);
 
     c.reset();

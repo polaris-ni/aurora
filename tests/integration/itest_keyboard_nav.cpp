@@ -23,8 +23,7 @@ AURORA_TEST_CASE(tab_cycle_forward_and_backward) {
     Button btn2{"B"};
     btn2.set_focusable(true);
     btn2.set_tab_index(1);
-    btn2.set_focus_bounds(
-        Rect{.origin = Point{.x = 0.0F, .y = 50.0F}, .size = Size{.width = 100.0F, .height = 40.0F}});
+    btn2.set_focus_bounds(Rect{.origin = Point{.x = 0.0F, .y = 50.0F}, .size = Size{.width = 100.0F, .height = 40.0F}});
 
     // 容器不参与焦点序（Widget 默认 focusable=true，须显式关闭）。
     Column col{Node{std::move(btn1)}, Node{std::move(btn2)}};
@@ -56,12 +55,11 @@ AURORA_TEST_CASE(tab_cycle_forward_and_backward) {
 
 AURORA_TEST_CASE(directional_nav_moves_by_geometry_horizontally) {
     // 3x1 水平排列：A(0,0) B(110,0) C(220,0)。
-    auto make_btn = [](const char *label, int tab, float x) -> Node {
+    auto make_btn = [](const char* label, int tab, float x) -> Node {
         Button b{label};
         b.set_focusable(true);
         b.set_tab_index(tab);
-        b.set_focus_bounds(
-            Rect{.origin = Point{.x = x, .y = 0.0F}, .size = Size{.width = 100.0F, .height = 40.0F}});
+        b.set_focus_bounds(Rect{.origin = Point{.x = x, .y = 0.0F}, .size = Size{.width = 100.0F, .height = 40.0F}});
         return Node{std::move(b)};
     };
 
@@ -121,7 +119,7 @@ AURORA_TEST_CASE(activate_triggers_on_click) {
     bool clicked = false;
     Button btn{"Click"};
     btn.set_focusable(true);
-    btn.set_on_click([&clicked]() { clicked = true; });
+    btn.set_on_click([&clicked]() -> void { clicked = true; });
 
     // activate() 应触发 on_click（Enter/Space 激活路径的直达入口）。
     btn.activate();

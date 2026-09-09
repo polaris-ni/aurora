@@ -9,7 +9,7 @@
 #include "aurora/core/platform.h"
 
 #ifdef AURORA_PLATFORM_WINDOWS
-#define WIN32_LEAN_AND_MEAN // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名
+#define WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -27,14 +27,13 @@
 #endif
 
 #if defined(AURORA_ENABLE_DEBUG) && defined(AURORA_ENABLE_TEST_HOOKS)
-#define AURORA_CLIPBOARD_TEST_BACKEND 1
+#define AURORA_CLIPBOARD_TEST_BACKEND 1  // NOLINT(*-macro-usage)
 #include <mutex>
-#include <utility>
 #endif
 
 namespace aurora {
 
-#if defined(AURORA_CLIPBOARD_TEST_BACKEND)
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
 namespace {
 /// @brief 测试注入点（test-only）：进程内 memory 后端，安装后 set/get 全部改走内存。
 ///
@@ -52,7 +51,7 @@ struct TestBackend {
     static TestBackend backend;
     return backend;
 }
-} // namespace
+}  // namespace
 #endif
 
 #if (defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)) || defined(AURORA_PLATFORM_MACOS)
@@ -60,8 +59,11 @@ namespace {
 /// @brief 执行命令并向其 stdin 写入数据（用于 xclip/pbcopy 写入剪贴板）。
 /// @return 命令是否成功执行。
 auto pipe_to_command(const std::string &cmd, const std::string &data) -> bool {
-    FILE *pipe = popen(cmd.c_str(), "w");
-    if (!pipe) return false;
+    // Linux/macOS 无标准剪贴板 API，必须借 xclip/xsel/pbcopy 外壳；命令为硬编码常量、无外部输入拼接，无命令注入风险。
+    FILE *pipe = popen(cmd.c_str(), "w");  // NOLINT(bugprone-command-processor)
+    if (pipe == nullptr) {
+        return false;
+    }
     if (!data.empty()) {
         std::fwrite(data.data(), 1, data.size(), pipe);
     }
@@ -72,8 +74,11 @@ auto pipe_to_command(const std::string &cmd, const std::string &data) -> bool {
 /// @brief 执行命令并读取其 stdout（用于 xsel/pbpaste 读取剪贴板）。
 /// @return 命令输出内容（UTF-8）。
 auto read_from_command(const std::string &cmd) -> std::string {
-    FILE *pipe = popen(cmd.c_str(), "r");
-    if (!pipe) return {};
+    // 读取 pbpaste/xsel -o/xclip -o 输出为硬编码，无外部输入拼接，无命令注入风险
+    FILE *pipe = popen(cmd.c_str(), "r");  // NOLINT(bugprone-command-processor)
+    if (pipe == nullptr) {
+        return {};
+    }
     std::string result;
     std::array<char, 4096> buf{};
     while (auto *s = std::fgets(buf.data(), static_cast<int>(buf.size()), pipe)) {
@@ -82,7 +87,7 @@ auto read_from_command(const std::string &cmd) -> std::string {
     const int ret = pclose(pipe);
     return (ret == 0) ? result : std::string{};
 }
-} // namespace
+}  // namespace
 #endif
 
 auto Clipboard::set_text(const std::string &text) -> void {
@@ -119,7 +124,9 @@ auto Clipboard::set_text(const std::string &text) -> void {
     }
     CloseClipboard();
 #elif defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
-    if (text.empty()) return;
+    if (text.empty()) {
+        return;
+    }
     // xclip 需 -selection clipboard（默认 primary 为中键粘贴）；回退 xsel --clipboard
     if (!pipe_to_command("xclip -selection clipboard 2>/dev/null", text)) {
         if (!pipe_to_command("xsel --clipboard --input", text)) {
@@ -127,7 +134,9 @@ auto Clipboard::set_text(const std::string &text) -> void {
         }
     }
 #elif defined(AURORA_PLATFORM_MACOS)
-    if (text.empty()) return;
+    if (text.empty()) {
+        return;
+    }
     if (!pipe_to_command("pbcopy", text)) {
         AURORA_LOG_WARN("clipboard", "set_text: pbcopy failed");
     }
@@ -183,9 +192,20 @@ auto Clipboard::get_text() -> std::string {
 auto Clipboard::set_image(const Image &img) -> void {
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast): Win32
     // HGLOBAL 字节搬运不可避免
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    {
+        auto &backend = test_backend();
+        const std::scoped_lock lock{backend.mutex};
+        if (backend.active) {
+            backend.image = img;
+            return;
+        }
+    }
+#endif
+
 #ifdef AURORA_PLATFORM_WINDOWS
     if (img.width <= 0 || img.height <= 0 || img.pixels.empty()) {
-        return; // 空图像早退（不清除已有内容）
+        return;  // 空图像早退（不清除已有内容）
     }
     // 剪贴板载荷上限 + 64 位尺寸算术：stride*h 用 32 位在 w/h ≥ 2^15 量级时回绕，
     // 分配出过小的堆块，后续逐像素拷贝即越界写。同时校验像素缓冲与维度一致，
@@ -194,7 +214,7 @@ auto Clipboard::set_image(const Image &img) -> void {
     if (img.width > k_max_clipboard_dim || img.height > k_max_clipboard_dim ||
         img.pixels.size() != static_cast<std::size_t>(img.width) * static_cast<std::size_t>(img.height) * 4U) {
         AURORA_LOG_WARN("clipboard", "set_image: image too large or pixel buffer size mismatch");
-        return; // 早退，不清除已有内容
+        return;  // 早退，不清除已有内容
     }
     if (OpenClipboard(nullptr) == 0) {
         AURORA_LOG_WARN("clipboard", "OpenClipboard failed (set_image)");
@@ -220,16 +240,16 @@ auto Clipboard::set_image(const Image &img) -> void {
     std::memset(bi, 0, sizeof(BITMAPINFOHEADER));
     bi->biSize = sizeof(BITMAPINFOHEADER);
     bi->biWidth = w;
-    bi->biHeight = -h; // 负值 = 自顶向下（origin 左上），避免翻转
+    bi->biHeight = -h;  // 负值 = 自顶向下（origin 左上），避免翻转
     bi->biPlanes = 1;
     bi->biBitCount = 32;
     bi->biCompression = BI_RGB;
-    bi->biSizeImage = static_cast<DWORD>(stride64 * static_cast<std::uint64_t>(h)); // 上限内必 < 2^31，不回绕
+    bi->biSizeImage = static_cast<DWORD>(stride64 * static_cast<std::uint64_t>(h));  // 上限内必 < 2^31，不回绕
     std::uint8_t *dst = p + sizeof(BITMAPINFOHEADER);
     const std::uint8_t *src = img.pixels.data();
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            const std::uint8_t* px = src + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + x) * 4U);
+            const std::uint8_t *px = src + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + x) * 4U);
             // RGBA8 → BGRA（CF_DIB 32bpp BI_RGB 期望 BGRX/BGRA）。
             *dst++ = px[2];
             *dst++ = px[1];
@@ -244,7 +264,7 @@ auto Clipboard::set_image(const Image &img) -> void {
     (void)img;
     AURORA_LOG_DEBUG("clipboard", "set_image no-op on this platform");
 #endif
-} // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
+}  // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 
 auto Clipboard::get_image() -> Image {
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast): Win32
@@ -291,7 +311,7 @@ auto Clipboard::get_image() -> Image {
     const int w = bi->biWidth;
     int hgt = bi->biHeight;
     const bool top_down = (hgt < 0);
-    hgt = (hgt == INT_MIN) ? 0 : std::abs(hgt); // std::abs(INT_MIN) 为 UB
+    hgt = (hgt == INT_MIN) ? 0 : std::abs(hgt);  // std::abs(INT_MIN) 为 UB
     const int bpp = bi->biBitCount;
     if (w <= 0 || hgt <= 0 || (bpp != 24 && bpp != 32)) {
         GlobalUnlock(hg);
@@ -319,16 +339,16 @@ auto Clipboard::get_image() -> Image {
         const int sy = top_down ? y : (hgt - 1 - y);
         const std::uint8_t *row = src + (static_cast<std::size_t>(sy) * src_stride);
         for (int x = 0; x < w; ++x) {
-            std::uint8_t* px =
+            std::uint8_t *px =
                 out.pixels.data() + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + x) * 4U);
             if (bpp == 32) {
-                const std::uint8_t* s = row + (static_cast<std::size_t>(x) * 4U);
+                const std::uint8_t *s = row + (static_cast<std::size_t>(x) * 4U);
                 px[0] = s[2];
                 px[1] = s[1];
                 px[2] = s[0];
-                px[3] = s[3]; // BGRA → RGBA
+                px[3] = s[3];  // BGRA → RGBA
             } else if (bpp == 24) {
-                const std::uint8_t* s = row + (static_cast<std::size_t>(x) * 3U);
+                const std::uint8_t *s = row + (static_cast<std::size_t>(x) * 3U);
                 px[0] = s[2];
                 px[1] = s[1];
                 px[2] = s[0];
@@ -346,7 +366,7 @@ auto Clipboard::get_image() -> Image {
     AURORA_LOG_DEBUG("clipboard", "get_image no-op on this platform");
     return Image{};
 #endif
-} // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
+}  // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 
 // ---- 测试注入点（test-only）------------------------------------------------
 // 双宏（AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS）齐备时操作进程内 memory
@@ -390,4 +410,4 @@ auto Clipboard::remove_test_backend() -> bool {
 
 #undef AURORA_CLIPBOARD_TEST_BACKEND
 
-} // namespace aurora
+}  // namespace aurora

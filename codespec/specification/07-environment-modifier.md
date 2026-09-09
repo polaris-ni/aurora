@@ -258,7 +258,7 @@ save_btn.modifier = au::Modifier{}
 
 **作用范围**：Paint 切片（背景、边框、阴影、裁剪、后效）统一作用于控件完整视觉盒子 `visual_box`；子节点 `on_paint` 与内容后效则限定在 `content_box`（已扣除 Padding / Align 等布局内边距）。内容后弹栈并绘制边框。
 
-> 两种历史错误形态：把背景先于裁剪当作直角矩形填色；把 Paint 修饰限制在 `content_box` 导致 padding 区域露白。回归用例 `tests/unit/utest_clip_rounded_background.cpp` 覆盖这两种情况。
+> 两种历史错误形态：把背景先于裁剪当作直角矩形填色；把 Paint 修饰限制在 `content_box` 导致 padding 区域露白。圆角裁剪与背景修饰项的语义由 `tests/unit/utest_modifier_paint.cpp` 覆盖（含 `clip_rounded` 与背景半径 / 颜色）。
 
 ### 7.5 与固有属性的关系
 

@@ -30,7 +30,7 @@ AURORA_TEST_CASE(default_item_fields) {
 
 AURORA_TEST_CASE(labeled_item_invokes_action) {
     int fired = 0;
-    MenuItem item("Open", [&fired] { ++fired; });
+    MenuItem item("Open", [&fired]() -> void { ++fired; });
 
     AURORA_TEST_CHECK_EQ(item.label, std::string{"Open"});
     AURORA_TEST_CHECK_TRUE(item.enabled);
@@ -91,26 +91,26 @@ AURORA_TEST_CASE(nested_menu_tree_traversal) {
     window.children.push_back(file);
 
     // 递归统计：叶子数 / 分隔符数。
-    const std::function<int(const MenuItem &)> count_all = [&](const MenuItem &item) -> int {
+    const std::function<int(const MenuItem&)> count_all = [&](const MenuItem& item) -> int {
         int n = 1;
-        for (const auto &c : item.children) {
+        for (const auto& c : item.children) {
             n += count_all(c);
         }
         return n;
     };
-    const std::function<int(const MenuItem &)> count_separators = [&](const MenuItem &item) -> int {
+    const std::function<int(const MenuItem&)> count_separators = [&](const MenuItem& item) -> int {
         int n = item.separator ? 1 : 0;
-        for (const auto &c : item.children) {
+        for (const auto& c : item.children) {
             n += count_separators(c);
         }
         return n;
     };
 
-    AURORA_TEST_CHECK_EQ(count_all(file), 4);   // File + New + sep + Exit
-    AURORA_TEST_CHECK_EQ(count_all(edit), 4);   // Edit + Undo + sep + Redo
-    AURORA_TEST_CHECK_EQ(count_all(window), 5); // Window + File 子树
+    AURORA_TEST_CHECK_EQ(count_all(file), 4);  // File + New + sep + Exit
+    AURORA_TEST_CHECK_EQ(count_all(edit), 4);  // Edit + Undo + sep + Redo
+    AURORA_TEST_CHECK_EQ(count_all(window), 5);  // Window + File 子树
     AURORA_TEST_CHECK_EQ(count_separators(window), 1);
-    AURORA_TEST_CHECK_EQ(count_all(help), 2);   // Help + About
+    AURORA_TEST_CHECK_EQ(count_all(help), 2);  // Help + About
 }
 
 AURORA_TEST_CASE(checkable_state_fields_roundtrip) {
@@ -132,7 +132,7 @@ AURORA_TEST_CASE(checkable_state_fields_roundtrip) {
 
 AURORA_TEST_CASE(disabled_item_is_explicit_state) {
     int fired = 0;
-    MenuItem item("Delete", [&fired] { ++fired; });
+    MenuItem item("Delete", [&fired]() -> void { ++fired; });
     item.enabled = false;
     item.shortcut_text = "Del";
 
@@ -151,7 +151,7 @@ AURORA_TEST_CASE(disabled_item_is_explicit_state) {
 AURORA_TEST_CASE(children_copy_preserves_callbacks) {
     // 值语义：把带回调的条目复制进另一菜单的 children，回调随副本生效。
     int fired = 0;
-    MenuItem item("Copy", [&fired] { ++fired; });
+    MenuItem item("Copy", [&fired]() -> void { ++fired; });
 
     MenuItem menu("Edit");
     menu.children.push_back(item);

@@ -1,11 +1,13 @@
 // 单一翻译单元：包含 stb_image 实现（STB_IMAGE_IMPLEMENTATION 必须仅定义一次）。
 // 提供 PNG/JPG/GIF/BMP(经 stb)/TGA/HDR 等格式的零依赖解码。
 
+#include "aurora/core/platform.h"
+
 #define STB_IMAGE_IMPLEMENTATION // NOLINT(*-identifier-naming)
 #define STB_IMAGE_STATIC         // NOLINT(*-identifier-naming)
-// stb_image 是单头库，定义大量 static 函数，项目仅用到其中少数；GCC 会对其余
+// stb_image 是单头库，定义大量 static 函数，项目仅用到其中少数；GCC/clang 会对其余
 // 未调用函数报 -Wunused-function（第三方代码，非本仓库问题），此处局部抑制。
-#ifdef __GNUC__
+#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -14,7 +16,7 @@
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 #include "stb_image.h"
-#ifdef __GNUC__
+#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG)
 #pragma GCC diagnostic pop
 #endif
 

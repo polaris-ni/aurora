@@ -20,13 +20,13 @@ class PaintCounter : public au::LeafWidget {
   public:
     int paint_calls = 0;
 
-    [[nodiscard]] auto type_name() const -> const char * override { return "PaintCounter"; }
+    [[nodiscard]] auto type_name() const -> const char* override { return "PaintCounter"; }
 
   protected:
-    auto on_layout(const au::Constraints & /*c*/, const au::BuildContext & /*ctx*/) -> au::Size override {
+    auto on_layout(const au::Constraints& /*c*/, const au::BuildContext& /*ctx*/) -> au::Size override {
         return au::Size{.width = 50.0F, .height = 50.0F};
     }
-    auto on_paint(au::Painter & /*p*/, const au::Rect & /*bounds*/, const au::BuildContext & /*ctx*/) -> void override {
+    auto on_paint(au::Painter& /*p*/, const au::Rect& /*bounds*/, const au::BuildContext& /*ctx*/) -> void override {
         ++paint_calls;
     }
 };
@@ -48,10 +48,10 @@ class ClippedColumn : public au::Column {
   public:
     using Column::Column;
 
-    [[nodiscard]] auto type_name() const -> const char * override { return "ClippedColumn"; }
+    [[nodiscard]] auto type_name() const -> const char* override { return "ClippedColumn"; }
 
   protected:
-    auto on_paint(au::Painter &p, const au::Rect &b, const au::BuildContext &ctx) -> void override {
+    auto on_paint(au::Painter& p, const au::Rect& b, const au::BuildContext& ctx) -> void override {
         p.push_clip(b);
         au::Column::on_paint(p, b, ctx);
         p.pop_clip();
@@ -91,9 +91,8 @@ AURORA_TEST_CASE(scroll_offscreen_buffer_paints_offscreen_children) {
     const auto s1 = std::make_shared<PaintCounter>();
     const auto s2 = std::make_shared<PaintCounter>();
     const auto s3 = std::make_shared<PaintCounter>();
-    au::Node root_scroll{
-        au::Scroll{au::ScrollProps{.child = au::Node{au::Column{au::Node{s0}, au::Node{s1}, au::Node{s2},
-                                                                au::Node{s3}}}}}};
+    au::Node root_scroll{au::Scroll{
+        au::ScrollProps{.child = au::Node{au::Column{au::Node{s0}, au::Node{s1}, au::Node{s2}, au::Node{s3}}}}}};
     au::Window win_scroll = make_window(100, 100);
     AURORA_TEST_CHECK(win_scroll.present_root(root_scroll).ok());
     AURORA_TEST_CHECK_MSG(s0->paint_calls > 0, "Scroll: in-view child is painted");

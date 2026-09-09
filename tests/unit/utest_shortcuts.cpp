@@ -54,17 +54,17 @@ AURORA_TEST_CASE(key_combo_to_string_orders_modifiers) {
     AURORA_TEST_CHECK_EQ((KeyCombo{ModifierKey::Alt | ModifierKey::Meta, KeyCode::X}.to_string()),
                          std::string{"Alt+Meta+X"});
     // 无修饰键：仅键名。
-    AURORA_TEST_CHECK_EQ((KeyCombo{KeyCode::A}.to_string()), std::string{"A"});
+    AURORA_TEST_CHECK_EQ(KeyCombo{KeyCode::A}.to_string(), std::string{"A"});
     AURORA_TEST_CHECK_EQ((KeyCombo{ModifierKey::None, KeyCode::F5}.to_string()), std::string{"F5"});
-    AURORA_TEST_CHECK_EQ((KeyCombo{KeyCode::D1}.to_string()), std::string{"1"});
+    AURORA_TEST_CHECK_EQ(KeyCombo{KeyCode::D1}.to_string(), std::string{"1"});
 }
 
 AURORA_TEST_CASE(registry_add_assigns_ids_and_enumerates) {
     ShortcutRegistry reg;
     AURORA_TEST_CHECK_EQ(reg.count(), 0U);
 
-    const int id1 = reg.add(KeyCombo{ModifierKey::Control, KeyCode::O}, [] {}, ShortcutScope::Global, "打开");
-    const int id2 = reg.add(KeyCombo{ModifierKey::Control, KeyCode::S}, [] {});
+    const int id1 = reg.add(KeyCombo{ModifierKey::Control, KeyCode::O}, []() -> void {}, ShortcutScope::Global, "打开");
+    const int id2 = reg.add(KeyCombo{ModifierKey::Control, KeyCode::S}, []() -> void {});
     // ID 自 1 起单调递增。
     AURORA_TEST_CHECK_EQ(id1, 1);
     AURORA_TEST_CHECK_EQ(id2, 2);
@@ -87,7 +87,7 @@ AURORA_TEST_CASE(registry_add_assigns_ids_and_enumerates) {
 AURORA_TEST_CASE(handle_runs_action_and_consumes_event) {
     ShortcutRegistry reg;
     int fired = 0;
-    reg.add(KeyCombo{ModifierKey::Control, KeyCode::O}, [&fired] { ++fired; });
+    reg.add(KeyCombo{ModifierKey::Control, KeyCode::O}, [&fired]() -> void { ++fired; });
 
     // 命中：执行动作并消费事件。
     AURORA_TEST_CHECK_TRUE(reg.handle(key_event(KeyCode::O, ModifierKey::Control)));
@@ -102,7 +102,7 @@ AURORA_TEST_CASE(handle_runs_action_and_consumes_event) {
 AURORA_TEST_CASE(disabled_binding_is_skipped) {
     ShortcutRegistry reg;
     int fired = 0;
-    const int id = reg.add(KeyCombo{ModifierKey::Control, KeyCode::P}, [&fired] { ++fired; });
+    const int id = reg.add(KeyCombo{ModifierKey::Control, KeyCode::P}, [&fired]() -> void { ++fired; });
 
     reg.set_enabled(id, false);
     AURORA_TEST_CHECK_FALSE(reg.handle(key_event(KeyCode::P, ModifierKey::Control)));
@@ -117,7 +117,7 @@ AURORA_TEST_CASE(disabled_binding_is_skipped) {
 AURORA_TEST_CASE(remove_unbinds_and_unknown_id_is_noop) {
     ShortcutRegistry reg;
     int fired = 0;
-    const int id = reg.add(KeyCombo{ModifierKey::Control, KeyCode::N}, [&fired] { ++fired; });
+    const int id = reg.add(KeyCombo{ModifierKey::Control, KeyCode::N}, [&fired]() -> void { ++fired; });
 
     // 未知 ID 解绑为 no-op。
     reg.remove(999);
@@ -132,7 +132,7 @@ AURORA_TEST_CASE(remove_unbinds_and_unknown_id_is_noop) {
 AURORA_TEST_CASE(focus_scope_requires_focused_widget) {
     ShortcutRegistry reg;
     int fired = 0;
-    reg.add(KeyCombo{ModifierKey::None, KeyCode::F1}, [&fired] { ++fired; }, ShortcutScope::Focus);
+    reg.add(KeyCombo{ModifierKey::None, KeyCode::F1}, [&fired]() -> void { ++fired; }, ShortcutScope::Focus);
 
     // Focus 作用域：无焦点控件时不触发。
     AURORA_TEST_CHECK_FALSE(reg.handle(key_event(KeyCode::F1), false));
@@ -143,7 +143,8 @@ AURORA_TEST_CASE(focus_scope_requires_focused_widget) {
 
     // Global 作用域与焦点标记无关。
     int global_fired = 0;
-    reg.add(KeyCombo{ModifierKey::None, KeyCode::F2}, [&global_fired] { ++global_fired; }, ShortcutScope::Global);
+    reg.add(
+        KeyCombo{ModifierKey::None, KeyCode::F2}, [&global_fired]() -> void { ++global_fired; }, ShortcutScope::Global);
     AURORA_TEST_CHECK_TRUE(reg.handle(key_event(KeyCode::F2), false));
     AURORA_TEST_CHECK_EQ(global_fired, 1);
 }
@@ -153,8 +154,8 @@ AURORA_TEST_CASE(first_matching_binding_wins_on_conflict) {
     ShortcutRegistry reg;
     int fired_a = 0;
     int fired_b = 0;
-    reg.add(KeyCombo{ModifierKey::Control, KeyCode::K}, [&fired_a] { ++fired_a; });
-    reg.add(KeyCombo{ModifierKey::Control, KeyCode::K}, [&fired_b] { ++fired_b; });
+    reg.add(KeyCombo{ModifierKey::Control, KeyCode::K}, [&fired_a]() -> void { ++fired_a; });
+    reg.add(KeyCombo{ModifierKey::Control, KeyCode::K}, [&fired_b]() -> void { ++fired_b; });
 
     AURORA_TEST_CHECK_TRUE(reg.handle(key_event(KeyCode::K, ModifierKey::Control)));
     AURORA_TEST_CHECK_EQ(fired_a, 1);

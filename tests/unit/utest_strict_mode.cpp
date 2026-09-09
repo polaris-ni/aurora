@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/strict_mode.h
-/// 测试说明: 覆盖 StrictMode 开关的默认值与读写、on_strict_failure 的处理器注入（消息透传 + 可捕获）与默认处理器（std::terminate）死亡行为
+/// 测试说明: 覆盖 StrictMode 开关的默认值与读写、on_strict_failure 的处理器注入（消息透传 +
+/// 可捕获）与默认处理器（std::terminate）死亡行为
 
 #include <cstdint>
 #include <stdexcept>

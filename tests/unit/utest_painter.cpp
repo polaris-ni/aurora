@@ -19,7 +19,7 @@ namespace {
 }
 
 /// @brief 统计画布中「红色像素」（R 通道显著高于 G/B）的数量。
-[[nodiscard]] auto count_reddish(const Painter &p) -> int {
+[[nodiscard]] auto count_reddish(const Painter& p) -> int {
     int count = 0;
     for (int y = 0; y < p.height(); ++y) {
         for (int x = 0; x < p.width(); ++x) {
@@ -147,8 +147,8 @@ AURORA_TEST_CASE(rounded_fill_cuts_corners) {
     p.begin(8, 8);
     p.fill_rounded_rect(rect_at(0.0F, 0.0F, 8.0F, 8.0F), 4.0F, Color::red());
 
-    AURORA_TEST_CHECK_EQ(p.get_pixel(4, 4), Color::red());       // 中心填满
-    AURORA_TEST_CHECK_LT(p.get_pixel(0, 0).a, 255);              // 圆角外未填满
+    AURORA_TEST_CHECK_EQ(p.get_pixel(4, 4), Color::red());  // 中心填满
+    AURORA_TEST_CHECK_LT(p.get_pixel(0, 0).a, 255);  // 圆角外未填满
 }
 
 AURORA_TEST_CASE(blend_pixel_writes_single_pixel) {
@@ -175,8 +175,8 @@ AURORA_TEST_CASE(draw_image_scales_to_destination) {
 AURORA_TEST_CASE(linear_gradient_interpolates_along_axis) {
     Painter p;
     p.begin(8, 1);
-    p.draw_linear_gradient(rect_at(0.0F, 0.0F, 8.0F, 1.0F), Point{.x = 0.0F, .y = 0.0F},
-                           Point{.x = 8.0F, .y = 0.0F}, {Color::black(), Color::white()}, {0.0F, 1.0F});
+    p.draw_linear_gradient(rect_at(0.0F, 0.0F, 8.0F, 1.0F), Point{.x = 0.0F, .y = 0.0F}, Point{.x = 8.0F, .y = 0.0F},
+                           {Color::black(), Color::white()}, {0.0F, 1.0F});
 
     // 沿轴单调变亮：起点暗于终点。
     AURORA_TEST_CHECK_LT(p.get_pixel(0, 0).r, p.get_pixel(7, 0).r);
@@ -196,7 +196,7 @@ AURORA_TEST_CASE(shift_pixels_moves_content_down) {
     p.shift_pixels(1.0F);
 
     AURORA_TEST_CHECK_EQ(p.get_pixel(2, 1), Color::red());  // 内容下移一行
-    AURORA_TEST_CHECK_EQ(p.get_pixel(2, 0).a, 0);           // 让出的条带归零
+    AURORA_TEST_CHECK_EQ(p.get_pixel(2, 0).a, 0);  // 让出的条带归零
 }
 
 AURORA_TEST_CASE(to_image_exports_canvas) {
@@ -214,10 +214,10 @@ AURORA_TEST_CASE(get_pixel_out_of_range_returns_transparent) {
     Painter p;
     p.begin(4, 4);
     // 越界一律返回透明色（a=0），而非不透明黑：调用方可据此区分「未绘制」与「绘制为黑」。
-    AURORA_TEST_CHECK_EQ(p.get_pixel(-1, 0), (Color{0, 0, 0, 0}));
-    AURORA_TEST_CHECK_EQ(p.get_pixel(0, -1), (Color{0, 0, 0, 0}));
-    AURORA_TEST_CHECK_EQ(p.get_pixel(4, 0), (Color{0, 0, 0, 0}));
-    AURORA_TEST_CHECK_EQ(p.get_pixel(0, 4), (Color{0, 0, 0, 0}));
+    AURORA_TEST_CHECK_EQ(p.get_pixel(-1, 0), Color{0, 0, 0, 0});
+    AURORA_TEST_CHECK_EQ(p.get_pixel(0, -1), Color{0, 0, 0, 0});
+    AURORA_TEST_CHECK_EQ(p.get_pixel(4, 0), Color{0, 0, 0, 0});
+    AURORA_TEST_CHECK_EQ(p.get_pixel(0, 4), Color{0, 0, 0, 0});
 }
 
 }  // namespace aurora::test_cases::utest_painter

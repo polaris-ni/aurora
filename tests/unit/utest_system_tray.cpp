@@ -52,21 +52,21 @@ AURORA_TEST_CASE(menu_item_separator_and_submenu_predicates) {
 AURORA_TEST_CASE(menu_item_click_callback_counted) {
     // 栈局部计数器：回调被手动触发时按次递增（不涉及真实托盘）。
     int clicks = 0;
-    aurora::MenuItem item{"quit", [&clicks] { ++clicks; }};
+    aurora::MenuItem item{"quit", [&clicks]() -> void { ++clicks; }};
     item.on_click();
     item.on_click();
     AURORA_TEST_CHECK_EQ(clicks, 2);
 
     // 子菜单项回调独立计数。
     int sub_clicks = 0;
-    aurora::MenuItem parent{"File", [&sub_clicks] { ++sub_clicks; }};
+    aurora::MenuItem parent{"File", [&sub_clicks]() -> void { ++sub_clicks; }};
     parent.on_click();
     AURORA_TEST_CHECK_EQ(sub_clicks, 1);
     AURORA_TEST_CHECK_EQ(clicks, 2);
 }
 
 AURORA_TEST_CASE(tray_context_menu_roundtrip) {
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
     AURORA_TEST_SKIP("Windows 实现下 SystemTray 构造即注册真实托盘图标（Shell_NotifyIcon），单元测试不触达真实托盘");
 #else
     SystemTray tray("utest-tray");
@@ -78,7 +78,7 @@ AURORA_TEST_CASE(tray_context_menu_roundtrip) {
     items.emplace_back("Quit");
     tray.set_context_menu(items);
 
-    const auto &stored = tray.context_menu_items();
+    const auto& stored = tray.context_menu_items();
     AURORA_TEST_REQUIRE_EQ(stored.size(), 3U);
     AURORA_TEST_CHECK_STREQ(stored[0].label, "Open");
     AURORA_TEST_CHECK_FALSE(stored[0].separator);
@@ -90,7 +90,7 @@ AURORA_TEST_CASE(tray_context_menu_roundtrip) {
 }
 
 AURORA_TEST_CASE(tray_balloon_message_recorded) {
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
     AURORA_TEST_SKIP("Windows 实现下 SystemTray 构造即注册真实托盘图标（Shell_NotifyIcon），单元测试不触达真实托盘");
 #else
     SystemTray tray("utest-tray");
@@ -107,7 +107,7 @@ AURORA_TEST_CASE(tray_balloon_message_recorded) {
 }
 
 AURORA_TEST_CASE(tray_move_preserves_state) {
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
     AURORA_TEST_SKIP("Windows 实现下 SystemTray 构造即注册真实托盘图标（Shell_NotifyIcon），单元测试不触达真实托盘");
 #else
     SystemTray tray("utest-tray");

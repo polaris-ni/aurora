@@ -15,6 +15,8 @@ namespace {
 /// @brief 记录型 Surface 桩：只记录 chrome 转发调用，不触任何平台 API。
 class RecordingSurface final : public Surface {
   public:
+    // 测试替身的记录成员需被测试体直接读写，刻意 public。
+    // NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes)
     bool begin_move_called = false;
     bool close_called = false;
     bool minimize_called = false;
@@ -22,12 +24,13 @@ class RecordingSurface final : public Surface {
     int fullscreen_last = -1;  // -1 未调用 / 1 set_fullscreen(true) / 0 set_fullscreen(false)
     std::optional<WindowResizeEdge> resize_last;
     EdgeInsets inset_val{};
+    // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
 
     auto begin_frame(int /*width*/, int /*height*/) -> Result<bool> override { return Result<bool>{true}; }
-    auto painter() -> Painter & override { return painter_; }
+    auto painter() -> Painter& override { return painter_; }
     auto present() -> Result<bool> override { return Result<bool>{true}; }
-    auto size() const -> Size override { return Size{}; }
-    auto content_inset() const -> EdgeInsets override { return inset_val; }
+    [[nodiscard]] auto size() const -> Size override { return Size{}; }
+    [[nodiscard]] auto content_inset() const -> EdgeInsets override { return inset_val; }
     auto close() -> void override { close_called = true; }
     auto minimize() -> void override { minimize_called = true; }
     auto toggle_maximize() -> void override { toggle_maximize_called = true; }

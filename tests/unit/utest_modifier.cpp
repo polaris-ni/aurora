@@ -4,10 +4,9 @@
 /// transform() 的 TransformInfo 汇总（平移/内容盒收缩/透明度累乘/矩阵组合）、
 /// 点击/拖拽/长按/Tooltip/上下文菜单的派发流水线与探测谓词
 
-#include "aurora/modifier/modifier.h"
-
 #include <chrono>
 
+#include "aurora/modifier/modifier.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_modifier {
@@ -23,7 +22,7 @@ auto size_of(float w, float h) -> Size { return Size{.width = w, .height = h}; }
 }  // namespace
 
 AURORA_TEST_CASE(chain_appends_nodes_in_factory_order) {
-    const Modifier m = Modifier{}.padding(8.0F).background(Color(0, 0, 0, 255)).clickable([] {});
+    const Modifier m = Modifier{}.padding(8.0F).background(Color(0, 0, 0, 255)).clickable([]() -> void {});
     AURORA_TEST_REQUIRE_EQ(m.nodes().size(), 3U);
     AURORA_TEST_CHECK_EQ(m.nodes()[0]->kind(), ModifierNode::Kind::Layout);
     AURORA_TEST_CHECK_EQ(m.nodes()[1]->kind(), ModifierNode::Kind::Paint);
@@ -43,7 +42,7 @@ AURORA_TEST_CASE(factory_returns_new_modifier_chain_reusable) {
 AURORA_TEST_CASE(factory_padding_degrades_negative_to_zero) {
     const Modifier m = Modifier{}.padding(-3.0F);
     AURORA_TEST_REQUIRE_EQ(m.nodes().size(), 1U);
-    const auto *p = dynamic_cast<const Padding *>(m.nodes()[0].get());
+    const auto* p = dynamic_cast<const Padding*>(m.nodes()[0].get());
     AURORA_TEST_REQUIRE_NOT_NULL(p);
     AURORA_TEST_CHECK_NEAR(p->padding(), 0.0F, 0.0F);
 }
@@ -74,8 +73,9 @@ AURORA_TEST_CASE(transform_info_padding_shifts_and_shrinks_content) {
 }
 
 AURORA_TEST_CASE(transform_info_padding_edges_asymmetric_shift) {
-    const auto info =
-        Modifier{}.padding(EdgeInsets{.left = 3.0F, .top = 5.0F, .right = 7.0F, .bottom = 1.0F}).transform(size_of(50.0F, 40.0F));
+    const auto info = Modifier{}
+                          .padding(EdgeInsets{.left = 3.0F, .top = 5.0F, .right = 7.0F, .bottom = 1.0F})
+                          .transform(size_of(50.0F, 40.0F));
     AURORA_TEST_CHECK_NEAR(info.translation.x, 3.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(info.translation.y, 5.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(info.content_size.width, 40.0F, 0.0F);
@@ -93,7 +93,7 @@ AURORA_TEST_CASE(transform_info_align_translates_to_child_origin) {
     Modifier m = Modifier{}.align(Alignment::Center);
     const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 80.0F}};
     AURORA_TEST_REQUIRE_EQ(m.nodes().size(), 1U);
-    (void)m.nodes()[0]->layout(c, [](const Constraints &) { return size_of(50.0F, 20.0F); });
+    (void)m.nodes()[0]->layout(c, [](const Constraints&) -> Size { return size_of(50.0F, 20.0F); });
 
     const auto info = m.transform(size_of(100.0F, 80.0F));
     // Center：((100-50)/2, (80-20)/2) = (25, 30)；content_size 收缩为子尺寸。
@@ -122,10 +122,10 @@ AURORA_TEST_CASE(transform_info_rotate_matrix_fixes_content_center) {
 
 AURORA_TEST_CASE(detect_predicates_reflect_chain_content) {
     AURORA_TEST_CHECK_FALSE(Modifier{}.has_clickable());
-    AURORA_TEST_CHECK_TRUE(Modifier{}.clickable([] {}).has_clickable());
+    AURORA_TEST_CHECK_TRUE(Modifier{}.clickable([]() -> void {}).has_clickable());
     AURORA_TEST_CHECK_FALSE(Modifier{}.has_gesture());
-    AURORA_TEST_CHECK_TRUE(Modifier{}.draggable([](Point, Point) {}).has_gesture());
-    AURORA_TEST_CHECK_TRUE(Modifier{}.long_press([] {}).has_gesture());
+    AURORA_TEST_CHECK_TRUE(Modifier{}.draggable([](Point, Point) -> void {}).has_gesture());
+    AURORA_TEST_CHECK_TRUE(Modifier{}.long_press([]() -> void {}).has_gesture());
     AURORA_TEST_CHECK_FALSE(Modifier{}.has_tooltip());
     AURORA_TEST_CHECK_TRUE(Modifier{}.tooltip("t").has_tooltip());
     AURORA_TEST_CHECK_FALSE(Modifier{}.has_context_menu());
@@ -134,14 +134,18 @@ AURORA_TEST_CASE(detect_predicates_reflect_chain_content) {
 
 AURORA_TEST_CASE(invoke_click_fires_all_clickables) {
     int hits = 0;
-    const Modifier m = Modifier{}.clickable([&hits] { ++hits; }).padding(2.0F).clickable([&hits] { hits += 10; });
+    const Modifier m =
+        Modifier{}.clickable([&hits]() -> void { ++hits; }).padding(2.0F).clickable([&hits]() -> void { hits += 10; });
     m.invoke_click();
     AURORA_TEST_CHECK_EQ(hits, 11);
 }
 
 AURORA_TEST_CASE(drag_pipeline_binds_fires_and_releases) {
-    int starts = 0, drags = 0, ends = 0;
-    const Modifier m = Modifier{}.draggable([&](Point, Point) { ++drags; }, [&] { ++starts; }, [&] { ++ends; });
+    int starts = 0;
+    int drags = 0;
+    int ends = 0;
+    const Modifier m = Modifier{}.draggable([&](Point, Point) -> void { ++drags; }, [&]() -> void { ++starts; },
+                                            [&]() -> void { ++ends; });
 
     // 绑定指针 1；指针 2 的移动/抬起不响应。
     m.invoke_drag_start(std::optional<int>(1));
@@ -161,7 +165,7 @@ AURORA_TEST_CASE(drag_pipeline_binds_fires_and_releases) {
 
 AURORA_TEST_CASE(long_press_pipeline_fires_and_mutex_reports) {
     int fires = 0;
-    const Modifier m = Modifier{}.long_press([&fires] { ++fires; }, 200.0F);
+    const Modifier m = Modifier{}.long_press([&fires]() -> void { ++fires; }, 200.0F);
     AURORA_TEST_CHECK_FALSE(m.long_press_fired());
     m.press_long_press(t_ms(1'000), std::optional<int>(1));
     m.tick_long_press(t_ms(1'100));
@@ -175,7 +179,7 @@ AURORA_TEST_CASE(long_press_pipeline_fires_and_mutex_reports) {
 
 AURORA_TEST_CASE(long_press_cancel_prevents_fire) {
     int fires = 0;
-    const Modifier m = Modifier{}.long_press([&fires] { ++fires; }, 100.0F);
+    const Modifier m = Modifier{}.long_press([&fires]() -> void { ++fires; }, 100.0F);
     m.press_long_press(t_ms(1'000), std::nullopt);
     m.cancel_long_press(std::nullopt);
     m.tick_long_press(t_ms(9'999));
@@ -210,7 +214,7 @@ AURORA_TEST_CASE(context_menu_pipeline_open_items_and_position) {
 
 AURORA_TEST_CASE(on_pointer_event_reaches_touch_listener) {
     int seen = 0;
-    const Modifier m = Modifier{}.touch([&seen](const TouchEvent &) { ++seen; });
+    const Modifier m = Modifier{}.touch([&seen](const TouchEvent&) -> void { ++seen; });
     TouchEvent e;
     m.on_pointer_event(e);
     m.on_pointer_event(e);

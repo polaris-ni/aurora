@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
-#include "aurora/widget/stepper.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/widget/stepper.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_stepper {
@@ -20,7 +20,7 @@ auto bounded(float w, float h) -> Constraints {
 }
 
 auto three_steps() -> std::vector<StepperStep> {
-    return {StepperStep{"Alpha"}, StepperStep{"Beta"}, StepperStep{"Gamma"}};
+    return {StepperStep{.label = "Alpha"}, StepperStep{.label = "Beta"}, StepperStep{.label = "Gamma"}};
 }
 
 auto press_at(float x, float y) -> MouseEvent {
@@ -69,26 +69,28 @@ AURORA_TEST_CASE(next_and_prev_navigate_linearly) {
 AURORA_TEST_CASE(last_step_next_fires_complete) {
     Stepper s{three_steps(), 0};
     int completes = 0;
-    s.set_on_complete([&completes] { ++completes; });
+    s.set_on_complete([&completes]() -> void { ++completes; });
 
     AURORA_TEST_CHECK_TRUE(s.next());
     AURORA_TEST_CHECK_TRUE(s.next());
-    AURORA_TEST_CHECK_EQ(completes, 0);   // 中途不触发
-    AURORA_TEST_CHECK_FALSE(s.next());    // 末步再点 → 触发 complete 且返回 false
+    AURORA_TEST_CHECK_EQ(completes, 0);  // 中途不触发
+    AURORA_TEST_CHECK_FALSE(s.next());  // 末步再点 → 触发 complete 且返回 false
     AURORA_TEST_CHECK_EQ(completes, 1);
-    AURORA_TEST_CHECK_EQ(s.current(), 2); // 仍停在末步
+    AURORA_TEST_CHECK_EQ(s.current(), 2);  // 仍停在末步
 }
 
 AURORA_TEST_CASE(validate_gate_blocks_advance) {
     std::vector<StepperStep> steps;
-    steps.push_back(StepperStep{"locked", [] { return false; }});
-    steps.push_back(StepperStep{"open"});
+    steps.push_back(StepperStep{.label = "locked", .validate = []() -> bool { return false; }});
+    steps.push_back(StepperStep{.label = "open"});
 
     Stepper s{steps, 0};
     AURORA_TEST_CHECK_FALSE(s.next());  // validate 失败：拦截推进
     AURORA_TEST_CHECK_EQ(s.current(), 0);
 
-    Stepper pass{std::vector<StepperStep>{StepperStep{"ok", [] { return true; }}, StepperStep{"next"}}, 0};
+    Stepper pass{std::vector<StepperStep>{StepperStep{.label = "ok", .validate = []() -> bool { return true; }},
+                                          StepperStep{.label = "next"}},
+                 0};
     AURORA_TEST_CHECK_TRUE(pass.next());
     AURORA_TEST_CHECK_EQ(pass.current(), 1);
 }
@@ -107,11 +109,11 @@ AURORA_TEST_CASE(out_of_range_current_is_inert) {
 AURORA_TEST_CASE(pointer_regions_trigger_cancel_and_next) {
     Stepper s{three_steps(), 0};
     int cancels = 0;
-    s.set_on_cancel([&cancels] { ++cancels; });
+    s.set_on_cancel([&cancels]() -> void { ++cancels; });
     LayoutEngine::layout(s, bounded(400.0F, 600.0F));
     // 自然高度 = 步数 * 40 + 内容 120 + 按钮 44。
     AURORA_TEST_CHECK_NEAR(s.size().width, 400.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(s.size().height, 3.0F * 40.0F + 120.0F + 44.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(s.size().height, (3.0F * 40.0F) + 120.0F + 44.0F, 1e-4F);
     const float btn_y = s.size().height - 44.0F + 10.0F;  // 按钮区中段（> height - 44）
 
     MouseEvent cancel = press_at(50.0F, btn_y);  // 左下角 Cancel 区（x < 100）
@@ -150,7 +152,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool has_complete = false;
     bool has_cancel = false;
-    for (const auto &e : d.events) {
+    for (const auto& e : d.events) {
         if (std::string{e} == "on_complete") {
             has_complete = true;
         }
@@ -162,7 +164,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_TRUE(has_cancel);
 
     bool has_step_count = false;
-    for (const auto &p : d.properties) {
+    for (const auto& p : d.properties) {
         if (std::string{p.name} == "step_count") {
             has_step_count = true;
         }

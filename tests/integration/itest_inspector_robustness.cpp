@@ -32,9 +32,9 @@ inline auto closesocket(SOCKET s) -> int { return ::close(s); }
 
 #include "aurora/aurora.h"
 #include "aurora/inspector/inspector_server.h"
-#include "aurora/window/surface.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
+#include "aurora/window/surface.h"
 #endif
 
 namespace aurora::test_cases::itest_inspector_robustness {
@@ -43,8 +43,8 @@ namespace aurora::test_cases::itest_inspector_robustness {
 namespace {
 
 /// @brief 共享测试树：Column 根 + Text 子节点（静态存储期，供 worker 线程 root_getter 读取）。
-auto shared_tree() -> std::shared_ptr<Column> & {
-    static std::shared_ptr<Column> tree = [] {
+auto shared_tree() -> std::shared_ptr<Column>& {
+    static std::shared_ptr<Column> tree = []() -> std::shared_ptr<aurora::Column> {
         auto col = std::make_shared<Column>();
         col->add(Node{std::make_shared<Text>("hello")});
         return col;
@@ -54,30 +54,36 @@ auto shared_tree() -> std::shared_ptr<Column> & {
 
 auto tree_getter() -> Node { return Node{shared_tree()}; }
 
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
 /// @brief Winsock 会话（引用计数式启停，随作用域清理）。
 struct WinsockSession {
     WinsockSession() {
         WSADATA data{};
-        started_ = WSAStartup(MAKEWORD(2, 2), &data) == 0;
+        started = WSAStartup(MAKEWORD(2, 2), &data) == 0;
     }
     ~WinsockSession() {
-        if (started_) {
+        if (started) {
             WSACleanup();
         }
     }
-    bool started_ = false;
+    WinsockSession(const WinsockSession&) = delete;
+    auto operator=(const WinsockSession&) -> WinsockSession& = delete;
+    WinsockSession(WinsockSession&&) = delete;
+    auto operator=(WinsockSession&&) -> WinsockSession& = delete;
+    bool started = false;
 };
 #endif
 
 /// @brief 对 127.0.0.1:port 发送原始请求文本并回收完整响应（服务端 Connection: close）。
-auto http_raw(std::uint16_t port, const std::string &raw) -> std::string {
-#if defined(AURORA_PLATFORM_WINDOWS)
+auto http_raw(std::uint16_t port, const std::string& raw) -> std::string {
+#ifdef AURORA_PLATFORM_WINDOWS
     const WinsockSession wsa;
 #endif
     const SOCKET sock =
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
         ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    // Winsock 惯用法：INVALID_SOCKET 为宏常量（各工具链经 cast 定义），tidy 穿透 cast 误报混比。
+    // NOLINTNEXTLINE(modernize-use-integer-sign-comparison)
     if (sock == INVALID_SOCKET) {
         return {};
     }
@@ -91,7 +97,9 @@ auto http_raw(std::uint16_t port, const std::string &raw) -> std::string {
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = htons(port);
-    if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
+    // Winsock connect() 形参类型是 sockaddr*，sockaddr_in 强转为通用 socket 地址属必要写法。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
         closesocket(sock);
         return {};
     }
@@ -114,7 +122,7 @@ auto http_raw(std::uint16_t port, const std::string &raw) -> std::string {
 }
 
 /// @brief 标准 HTTP 请求便捷封装。
-auto http_request(std::uint16_t port, const std::string &method, const std::string &path, const std::string &body)
+auto http_request(std::uint16_t port, const std::string& method, const std::string& path, const std::string& body)
     -> std::string {
     std::ostringstream req;
     req << method << " " << path << " HTTP/1.1\r\nHost: 127.0.0.1\r\n";
@@ -126,7 +134,7 @@ auto http_request(std::uint16_t port, const std::string &method, const std::stri
 }
 
 /// @brief "HTTP/1.1 400 Bad Request" → 400；解析失败返回 0（视为连接中断，必失败）。
-auto status_of(const std::string &resp) -> int {
+auto status_of(const std::string& resp) -> int {
     const auto sp1 = resp.find(' ');
     if (sp1 == std::string::npos) {
         return 0;
@@ -142,7 +150,7 @@ auto status_of(const std::string &resp) -> int {
     }
 }
 
-auto body_of(const std::string &resp) -> std::string {
+auto body_of(const std::string& resp) -> std::string {
     const auto hend = resp.find("\r\n\r\n");
     return (hend == std::string::npos) ? std::string{} : resp.substr(hend + 4);
 }
@@ -150,8 +158,7 @@ auto body_of(const std::string &resp) -> std::string {
 /// @brief 每用例一台随机端口服务器；start 失败（无回环 socket 环境）则整例跳过。
 class ScopedServer {
   public:
-    ScopedServer() {
-        started_ = server_.start(0);
+    ScopedServer() : started_(server_.start(0)) {
         if (!started_) {
             AURORA_TEST_SKIP("InspectorServer start() failed (environment without loopback sockets?)");
         }
@@ -161,8 +168,10 @@ class ScopedServer {
             server_.stop();
         }
     }
-    ScopedServer(const ScopedServer &) = delete;
-    auto operator=(const ScopedServer &) -> ScopedServer & = delete;
+    ScopedServer(const ScopedServer&) = delete;
+    auto operator=(const ScopedServer&) -> ScopedServer& = delete;
+    ScopedServer(ScopedServer&&) = delete;
+    auto operator=(ScopedServer&&) -> ScopedServer& = delete;
 
     [[nodiscard]] auto port() const -> std::uint16_t { return server_.port(); }
 
@@ -176,7 +185,7 @@ class ScopedServer {
 #endif  // AURORA_BUILD_INSPECTOR_SERVER（辅助设施段；用例恒注册，体内降级 SKIP）
 
 AURORA_TEST_CASE(debug_flags_type_mismatch_returns_400) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER)
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
 #else
     const ScopedServer server;
@@ -206,7 +215,7 @@ AURORA_TEST_CASE(debug_flags_type_mismatch_returns_400) {
 }
 
 AURORA_TEST_CASE(to_code_style_type_mismatch_and_out_of_range_fallback) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER)
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
 #else
     const ScopedServer server;
@@ -234,7 +243,7 @@ AURORA_TEST_CASE(to_code_style_type_mismatch_and_out_of_range_fallback) {
 }
 
 AURORA_TEST_CASE(widget_put_invalid_font_weight_does_not_terminate) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER)
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
 #else
     const ScopedServer server;
@@ -248,7 +257,7 @@ AURORA_TEST_CASE(widget_put_invalid_font_weight_does_not_terminate) {
 }
 
 AURORA_TEST_CASE(query_string_and_mixed_case_content_length) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER)
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
 #else
     const ScopedServer server;
@@ -281,7 +290,7 @@ AURORA_TEST_CASE(query_string_and_mixed_case_content_length) {
 }
 
 AURORA_TEST_CASE(body_length_trap_and_liveness_probe) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER)
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
 #else
     const ScopedServer server;

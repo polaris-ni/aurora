@@ -14,7 +14,7 @@
 namespace aurora::test_cases::utest_d3d11_surface {
 
 AURORA_TEST_CASE(d3d11_surface_type_contract) {
-#if defined(AURORA_BACKEND_D3D11)
+#ifdef AURORA_BACKEND_D3D11
     static_assert(std::is_base_of_v<aurora::Surface, aurora::D3D11Surface>);
     static_assert(!std::is_abstract_v<aurora::D3D11Surface>);
     static_assert(!std::is_copy_constructible_v<aurora::D3D11Surface>);
@@ -27,7 +27,7 @@ AURORA_TEST_CASE(d3d11_surface_type_contract) {
 }
 
 AURORA_TEST_CASE(d3d11_surface_os_dependent_paths_skipped) {
-#if defined(AURORA_BACKEND_D3D11)
+#ifdef AURORA_BACKEND_D3D11
     // 构造函数会创建真实 HWND + D3D11Device/SwapChain；vsync/增量上屏/device-lost
     // 恢复均依赖真实设备与消息泵，属集成层覆盖范围，单元测试不触碰 OS 资源。
     AURORA_TEST_SKIP("D3D11Surface 构造会创建真实 Win32 窗口与 D3D11 设备/交换链，单测不触碰 OS 资源");

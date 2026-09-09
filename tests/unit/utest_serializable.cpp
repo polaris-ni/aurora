@@ -85,7 +85,7 @@ namespace versioned {
 struct Tag {};
 
 /// @brief 用户命名空间覆盖：带 `const Tag*` tag 实参（ADL 定制点约定）。
-inline auto storage_version(const Tag*) -> std::uint32_t { return 7; }
+inline auto storage_version(const Tag* /*tag*/) -> std::uint32_t { return 7; }
 
 }  // namespace versioned
 
@@ -96,14 +96,12 @@ struct Plain {
 
 /// @brief 可序列化但不可默认构造的类型（不满足 StorageStorable）。
 struct NoDefaultCtor {
-    explicit NoDefaultCtor(int) {}
+    explicit NoDefaultCtor(int /*v*/) {}
 
     std::string title;
 };
 
-inline auto to_storage_json(const NoDefaultCtor& n) -> aus::Json {
-    return aus::Json{{"title", n.title}};
-}
+inline auto to_storage_json(const NoDefaultCtor& n) -> aus::Json { return aus::Json{{"title", n.title}}; }
 
 inline auto from_storage_json(NoDefaultCtor& n, const aus::Json& j) -> Result<void> {
     n.title = j.value("title", "");
@@ -141,7 +139,6 @@ auto utest_dispatch_storage_version() -> std::uint32_t {
 }  // namespace aurora::storage
 
 namespace aurora::test_cases::utest_serializable {
-
 
 AURORA_TEST_CASE(storage_version_defaults_to_one) {
     // 未覆盖时所有类型默认版本号 1（编译期常量，同时以运行期断言复核）。

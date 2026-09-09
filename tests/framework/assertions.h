@@ -147,11 +147,25 @@ template <typename A, typename B, typename E>
 
 // ---- 字符串比较：按内容比较（指针比较是常见误用，故单列一族）----
 
-/// @brief 取 C 字符串视图：空指针视作空串，避免构造 `string_view(nullptr)` 的未定义行为。
-[[nodiscard]] auto string_view_of(const char* text) -> std::string_view;
-
-/// @brief 取 `std::string` / `std::string_view` 视图（两者均可隐式转换到本重载）。
-[[nodiscard]] auto string_view_of(std::string_view text) -> std::string_view;
+/// @brief 取字符串视图：C 字符串空指针视作空串，避免构造 `string_view(nullptr)` 的未定义行为；
+///        `std::string` / `std::string_view` / 字符字面量经视图构造器统一转换。
+/// @note 引用本身永不为空，但**被引用对象**可以是指针且其值为 nullptr —— 故指针分支的空值
+///       检查不可省：删掉后 `string_view(nullptr)` 会走 `strlen(nullptr)`（实测段错误）。
+///       数组分支则相反：退化后取的是数组首地址，恒非空，比较既恒假又会触发告警。
+template <typename T>
+[[nodiscard]] auto string_view_of(const T& text) -> std::string_view {
+    // 字符数组（字面量 "abc"、char 缓冲区）必须先分流：数组退化为指针后地址恒非空，
+    // 再与 nullptr 比较会让 GCC 报 -Wnonnull-compare（该诊断依赖优化期推断，故仅
+    // -O1 及以上出现）。数组天然非空，直接走视图构造即可 —— 与指针分支的非空路径
+    // 同为 C 串语义（截断到首个 '\0'），行为不变。
+    if constexpr (std::is_array_v<std::remove_reference_t<T>>) {
+        return std::string_view{text};
+    } else if constexpr (std::is_same_v<std::decay_t<T>, const char*> || std::is_same_v<std::decay_t<T>, char*>) {
+        return text == nullptr ? std::string_view{} : std::string_view{text};
+    } else {
+        return std::string_view{text};
+    }
+}
 
 [[nodiscard]] auto strings_equal(std::string_view lhs, std::string_view rhs, bool case_sensitive) -> bool;
 

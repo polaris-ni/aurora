@@ -6,9 +6,9 @@
 #include <string>
 #include <vector>
 
+#include "aurora/layout/layout_engine.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/widget/text.h"
-#include "aurora/layout/layout_engine.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_text {
@@ -20,7 +20,7 @@ auto bounded(float w, float h) -> Constraints {
 }
 
 /// 多词长句：在 80~100px 约束宽度下必然折成多行。
-constexpr const char *kLongWords = "aaa bbb ccc ddd eee fff ggg hhh iii jjj";
+constexpr const char* AURORA_LONG_WORDS = "aaa bbb ccc ddd eee fff ggg hhh iii jjj";
 
 }  // namespace
 
@@ -32,7 +32,7 @@ AURORA_TEST_CASE(default_text_state_and_type_name) {
     t.serialize_props(props);
     AURORA_TEST_CHECK_EQ(props["content"].get<std::string>(), "");
     AURORA_TEST_CHECK_NEAR(props["font_size"].get<float>(), 14.0F, 1e-4F);  // 默认 14pt
-    AURORA_TEST_CHECK_EQ(props["max_lines"].get<int>(), 0);                 // 0 = 不限
+    AURORA_TEST_CHECK_EQ(props["max_lines"].get<int>(), 0);  // 0 = 不限
     AURORA_TEST_CHECK_EQ(props["soft_wrap"].get<bool>(), true);
     AURORA_TEST_CHECK_NEAR(props["line_height"].get<float>(), 1.0F, 1e-4F);
     // 默认文字色 = 黑 {0,0,0,255}。
@@ -68,7 +68,7 @@ AURORA_TEST_CASE(font_size_degrade_and_validate_props) {
     zero.font_size(0.0F);
     Text neg;
     neg.font_size(-2.5F);
-    for (const Text *t : {&zero, &neg}) {
+    for (const Text* t : {&zero, &neg}) {
         Json props;
         t->serialize_props(props);
         AURORA_TEST_CHECK_NEAR(props["font_size"].get<float>(), 14.0F, 1e-4F);
@@ -98,12 +98,12 @@ AURORA_TEST_CASE(layout_width_tracks_text_metrics) {
 }
 
 AURORA_TEST_CASE(soft_wrap_fills_width_on_overflow) {
-    Text wrap(kLongWords);
+    Text wrap(AURORA_LONG_WORDS);
     LayoutEngine::layout(wrap, bounded(100.0F, 5000.0F));
     // 固有宽度超限且 soft_wrap=true → 填满约束宽度。
     AURORA_TEST_CHECK_NEAR(wrap.size().width, 100.0F, 1e-4F);
 
-    Text nowrap(kLongWords);
+    Text nowrap(AURORA_LONG_WORDS);
     nowrap.set_soft_wrap(false);
     LayoutEngine::layout(nowrap, bounded(100.0F, 5000.0F));
     // 不折行 → 单行高度明显低于折行结果。
@@ -111,10 +111,10 @@ AURORA_TEST_CASE(soft_wrap_fills_width_on_overflow) {
 }
 
 AURORA_TEST_CASE(max_lines_limits_wrapped_height) {
-    Text all(kLongWords);
+    Text all(AURORA_LONG_WORDS);
     LayoutEngine::layout(all, bounded(80.0F, 5000.0F));
 
-    Text one(kLongWords);
+    Text one(AURORA_LONG_WORDS);
     one.set_max_lines(1);
     LayoutEngine::layout(one, bounded(80.0F, 5000.0F));
 
@@ -129,11 +129,11 @@ AURORA_TEST_CASE(line_height_multiplier_scales_height) {
     LayoutEngine::layout(tall, bounded(500.0F, 2000.0F));
     // h = 行数 * 行高 * 倍数 + 2 → 2 倍行高时 tall = 2*base - 2（精确成立）。
     AURORA_TEST_CHECK_TRUE(tall.size().height > base.size().height);
-    AURORA_TEST_CHECK_NEAR(tall.size().height, 2.0F * base.size().height - 2.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(tall.size().height, (2.0F * base.size().height) - 2.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(layout_clamps_into_tight_constraints) {
-    Text t(kLongWords);
+    Text t(AURORA_LONG_WORDS);
     LayoutEngine::layout(t, bounded(30.0F, 20.0F));
     AURORA_TEST_CHECK_NEAR(t.size().width, 30.0F, 1e-4F);  // 宽度钳到约束
     AURORA_TEST_CHECK_TRUE(t.size().height > 0.0F);
@@ -181,7 +181,7 @@ AURORA_TEST_CASE(describe_metadata_signals_and_resolved_text) {
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "Text");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool has_content = false;
-    for (const auto &p : d.properties) {
+    for (const auto& p : d.properties) {
         if (std::string{p.name} == "content") {
             has_content = true;
         }
@@ -190,7 +190,7 @@ AURORA_TEST_CASE(describe_metadata_signals_and_resolved_text) {
 
     // 自有信号：仅 content 一个。
     Text t("hi");
-    std::vector<aurora::SignalViewBase *> signals;
+    std::vector<aurora::SignalViewBase*> signals;
     t.collect_signals(signals);
     AURORA_TEST_CHECK_EQ(signals.size(), 1U);
 

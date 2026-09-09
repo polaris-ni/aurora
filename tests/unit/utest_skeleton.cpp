@@ -6,8 +6,8 @@
 #include <chrono>
 #include <string>
 
-#include "aurora/widget/skeleton.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/widget/skeleton.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_skeleton {
@@ -38,8 +38,8 @@ AURORA_TEST_CASE(default_state_and_type_name) {
 AURORA_TEST_CASE(zero_width_fills_constraint) {
     Skeleton s;
     LayoutEngine::layout(s, bounded(300.0F, 80.0F));
-    AURORA_TEST_CHECK_NEAR(s.size().width, 300.0F, 1e-4F);   // 宽 0 → 占满约束
-    AURORA_TEST_CHECK_NEAR(s.size().height, 16.0F, 1e-4F);   // 默认高 16
+    AURORA_TEST_CHECK_NEAR(s.size().width, 300.0F, 1e-4F);  // 宽 0 → 占满约束
+    AURORA_TEST_CHECK_NEAR(s.size().height, 16.0F, 1e-4F);  // 默认高 16
 }
 
 AURORA_TEST_CASE(explicit_size_used_when_positive) {
@@ -133,7 +133,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool has_duration = false;
     bool has_highlight = false;
-    for (const auto &p : d.properties) {
+    for (const auto& p : d.properties) {
         if (std::string{p.name} == "duration") {
             has_duration = true;
         }

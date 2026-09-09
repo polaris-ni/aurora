@@ -12,8 +12,8 @@
 #include <string>
 #include <utility>
 
-#include "aurora/aurora.h"
 #include "aurora/app/clipboard.h"
+#include "aurora/aurora.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::itest_text_selection {
@@ -30,11 +30,11 @@ using au::Constraints;
 using au::EventDispatcher;
 using au::FocusManager;
 using au::Font;
-using au::KeyCode;
 using au::KeyAction;
+using au::KeyCode;
 using au::ModifierKey;
-using au::MouseButton;
 using au::MouseAction;
+using au::MouseButton;
 using au::MouseEvent;
 using au::Node;
 using au::Painter;
@@ -49,10 +49,10 @@ auto use_supersample_aa() -> void { render::FontEngine::set_text_aa_mode(render:
 auto use_cleartype_aa() -> void { render::FontEngine::set_text_aa_mode(render::TextAAMode::ClearType); }
 
 /// 蓝色染色 = 选区高亮（高亮为半透明蓝色矩形）。
-auto is_blue(const Color &c) -> bool { return static_cast<int>(c.b) - static_cast<int>(c.r) > 30; }
+auto is_blue(const Color& c) -> bool { return static_cast<int>(c.b) - static_cast<int>(c.r) > 30; }
 
 /// 统计 [r] 盒内蓝色染色像素数。
-auto count_blue(const Painter &p, const Rect &r) -> int {
+auto count_blue(const Painter& p, const Rect& r) -> int {
     const int x0 = std::max(static_cast<int>(r.origin.x), 0);
     const int y0 = std::max(static_cast<int>(r.origin.y), 0);
     const int x1 = std::min(static_cast<int>(r.origin.x + r.size.width), p.width());
@@ -69,7 +69,7 @@ auto count_blue(const Painter &p, const Rect &r) -> int {
 }
 
 /// 近黑墨迹像素数（字形本体，阈值 40）。
-auto count_ink(const Painter &p) -> int {
+auto count_ink(const Painter& p) -> int {
     int n = 0;
     for (int y = 0; y < p.height(); ++y) {
         for (int x = 0; x < p.width(); ++x) {
@@ -83,7 +83,7 @@ auto count_ink(const Painter &p) -> int {
 }
 
 /// [y0,y1) 物理行带内最深墨迹的 x（-1 = 无墨迹）。
-auto max_ink_x(const Painter &p, int y0, int y1) -> int {
+auto max_ink_x(const Painter& p, int y0, int y1) -> int {
     int ink_max = -1;
     for (int y = std::max(y0, 0); y < std::min(y1, p.height()); ++y) {
         for (int x = 0; x < p.width(); ++x) {
@@ -97,12 +97,12 @@ auto max_ink_x(const Painter &p, int y0, int y1) -> int {
 }
 
 /// 全画布逐点命中扫描：定位 display_text 含 needle 的 Text 的可命中盒。
-auto find_text_box(Widget &root, int canvas_w, int canvas_h, const std::string &needle) -> Rect {
+auto find_text_box(Widget& root, int canvas_w, int canvas_h, const std::string& needle) -> Rect {
     Rect r{.origin = Point{.x = 1e9F, .y = 1e9F}, .size = Size{.width = -1e9F, .height = -1e9F}};
     for (int y = 0; y < canvas_h; ++y) {
         for (int x = 0; x < canvas_w; ++x) {
-            Widget *h = EventDispatcher::hit_test(root, Point{.x = static_cast<float>(x), .y = static_cast<float>(y)});
-            const auto *t = dynamic_cast<Text *>(h);
+            Widget* h = EventDispatcher::hit_test(root, Point{.x = static_cast<float>(x), .y = static_cast<float>(y)});
+            const auto* t = dynamic_cast<Text*>(h);
             if (t != nullptr && t->display_text().find(needle) != std::string::npos) {
                 r.origin.x = std::min(r.origin.x, static_cast<float>(x));
                 r.origin.y = std::min(r.origin.y, static_cast<float>(y));
@@ -118,12 +118,12 @@ auto find_text_box(Widget &root, int canvas_w, int canvas_h, const std::string &
 using Sink = std::function<void(MouseAction, float, float)>;
 
 /// 含头含尾采样点：字符 idx 的右半 / 左半 x（据 caret_x 边界）。
-auto right_half(const std::string &s, std::size_t idx, const Font &f, const render::TextLayoutOpts &o) -> float {
+auto right_half(const std::string& s, std::size_t idx, const Font& f, const render::TextLayoutOpts& o) -> float {
     const float l = render::FontEngine::caret_x(s, idx, f, o);
     const float r = render::FontEngine::caret_x(s, idx + 1, f, o);
     return l + (0.75F * (r - l));
 }
-auto left_half(const std::string &s, std::size_t idx, const Font &f, const render::TextLayoutOpts &o) -> float {
+auto left_half(const std::string& s, std::size_t idx, const Font& f, const render::TextLayoutOpts& o) -> float {
     const float l = render::FontEngine::caret_x(s, idx, f, o);
     const float r = render::FontEngine::caret_x(s, idx + 1, f, o);
     return l + (0.25F * (r - l));
@@ -146,8 +146,7 @@ AURORA_TEST_CASE(no_highlight_without_selection) {
     txt.paint(p, Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 400, .height = 60}}, ctx);
 
     AURORA_TEST_CHECK_FALSE(txt.has_selection());
-    AURORA_TEST_CHECK_EQ(count_blue(p, Rect{.origin = Point{.x = 0, .y = 0},
-                                            .size = Size{.width = 400, .height = 60}}),
+    AURORA_TEST_CHECK_EQ(count_blue(p, Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 400, .height = 60}}),
                          0);
 }
 
@@ -269,10 +268,9 @@ AURORA_TEST_CASE(neighbor_rows_unselected_and_uncolored_under_cleartype) {
     BuildContext lctx;
     col.layout(bounded(520.0F, 520.0F), lctx);
 
-    auto paint_all = [&](Painter &p) -> void {
+    auto paint_all = [&](Painter& p) -> void {
         p.begin(520, 520);
-        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 520, .height = 520}},
-                    Color::white());
+        p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 520, .height = 520}}, Color::white());
         col.paint(p, Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 520, .height = 520}}, lctx);
     };
     Painter warm;
@@ -344,7 +342,7 @@ AURORA_TEST_CASE(endpoint_chars_inclusive_on_drag_select) {
     mv.local_position = Point{.x = right_half(s, 4, f, o), .y = 5.0F};
     txt.on_pointer_event(mv);
     AURORA_TEST_CHECK_MSG(txt.has_selection(), "selection established");
-    AURORA_TEST_CHECK_EQ(txt.selection().first, std::size_t{0});   // 首字符 'H' 被选中
+    AURORA_TEST_CHECK_EQ(txt.selection().first, std::size_t{0});  // 首字符 'H' 被选中
     AURORA_TEST_CHECK_EQ(txt.selection().second, std::size_t{5});  // 含 idx0..4 共 5 码点
 
     // 按下首字符左半，拖到末字符 'd'(idx10) 左半：末字符必须被选中。
@@ -377,8 +375,8 @@ AURORA_TEST_CASE(multi_line_endpoints_inclusive) {
     txt.layout(bounded(w_hello + 2.0F, 100.0F), ctx);
     // line0="Hello"(cp0-4)，line1="World"(cp6-10)。选 line0 的 'l'(idx3) 到 line1 的 'r'(idx8)。
     // 在字符内部（右半/左半）点击，端点含入无歧义。
-    const float x0 = right_half("Hello", 3, f, o);        // line0 内 idx3 右半
-    const float x1 = left_half("World", 8 - 6, f, o);     // line1 内 idx8 的相对位置(=2) 左半
+    const float x0 = right_half("Hello", 3, f, o);  // line0 内 idx3 右半
+    const float x1 = left_half("World", 8 - 6, f, o);  // line1 内 idx8 的相对位置(=2) 左半
     MouseEvent press;
     press.action = MouseAction::Press;
     press.button = MouseButton::Left;
@@ -431,7 +429,7 @@ AURORA_TEST_CASE(single_line_full_selection_highlights_line_endpoints) {
                 Color::white());
     txt.paint(p, Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = sz.width, .height = sz.height}}, ctx);
 
-    const int minx_blue = [&] {
+    const int minx_blue = [&]() -> int {
         int mn = 1 << 30;
         for (int y = 0; y < static_cast<int>(sz.height); ++y) {
             for (int x = 0; x < static_cast<int>(sz.width); ++x) {
@@ -442,7 +440,7 @@ AURORA_TEST_CASE(single_line_full_selection_highlights_line_endpoints) {
         }
         return mn;
     }();
-    const int maxx_blue = [&] {
+    const int maxx_blue = [&]() -> int {
         int mx = -1;
         for (int y = 0; y < static_cast<int>(sz.height); ++y) {
             for (int x = 0; x < static_cast<int>(sz.width); ++x) {
@@ -588,7 +586,7 @@ AURORA_TEST_CASE(justify_line_highlight_reaches_right_edge_and_gap_hits_space) {
     mv2.local_position = Point{.x = gap_mid, .y = 2.0F};
     txt.on_pointer_event(mv2);
     AURORA_TEST_CHECK_MSG(txt.has_selection(), "gap press establishes selection");
-    AURORA_TEST_CHECK_EQ(txt.selection().first, std::size_t{2});   // 命中的是空格（"aa bb" 的 cp2）
+    AURORA_TEST_CHECK_EQ(txt.selection().first, std::size_t{2});  // 命中的是空格（"aa bb" 的 cp2）
     AURORA_TEST_CHECK_EQ(txt.selection().second, std::size_t{3});
 }
 
@@ -652,15 +650,14 @@ AURORA_TEST_CASE(scaled_display_last_line_tail_fully_highlighted) {
     const Size sz = txt.layout(bounded(full * 0.52F, 300.0F), ctx);  // 折成两行：末行≈半段长度
     AURORA_TEST_REQUIRE_MSG(sz.height > 1.5F * line_h, "wrapped into two lines");
     const auto n_lines =
-        static_cast<std::size_t>(((sz.height - 2.0F) / line_h) + 0.5F);  // 行数为小正数，四舍五入口径沿用旧断言
+        static_cast<std::size_t>(std::lround((sz.height - 2.0F) / line_h));  // 行数为小正数，四舍五入口径沿用旧断言
 
-    auto paint_once = [&](Painter &p) -> void {
+    auto paint_once = [&](Painter& p) -> void {
         p.set_scale(k_scale);
         p.begin(static_cast<int>(sz.width), static_cast<int>(sz.height));
         p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = sz.width, .height = sz.height}},
                     Color::white());
-        txt.paint(p, Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = sz.width, .height = sz.height}},
-                  ctx);
+        txt.paint(p, Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = sz.width, .height = sz.height}}, ctx);
     };
     // 末行像素带（物理坐标）：[(n-1)*line_h, n*line_h) * scale。
     const int y0 = static_cast<int>(static_cast<float>(n_lines - 1) * line_h * k_scale);

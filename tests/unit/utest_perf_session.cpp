@@ -10,7 +10,6 @@
 #include <string>
 
 #include "aurora/perf/perf_session.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_perf_session {
@@ -18,7 +17,7 @@ namespace aurora::test_cases::utest_perf_session {
 namespace {
 
 /// @brief 统计字符出现次数（CSV 列数 = 逗号数 + 1）。
-auto count_of(const std::string &text, char ch) -> std::size_t {
+auto count_of(const std::string& text, char ch) -> std::size_t {
     return static_cast<std::size_t>(std::count(text.begin(), text.end(), ch));
 }
 
@@ -63,7 +62,7 @@ AURORA_TEST_CASE(record_and_report_frame_statistics) {
     AURORA_TEST_CHECK_NEAR(r.frame_budget_ms, 16.67, 1e-9);
 
     // 逐帧耗时按记录顺序保留。
-    const std::vector<double> &times = sess.frame_times_ms();
+    const std::vector<double>& times = sess.frame_times_ms();
     AURORA_TEST_REQUIRE_THAT(times, ::aurora::testing::matchers::size_is(3));
     AURORA_TEST_CHECK_NEAR(times[0], 10.0, 1e-9);
     AURORA_TEST_CHECK_NEAR(times[1], 20.0, 1e-9);
@@ -178,7 +177,7 @@ AURORA_TEST_CASE(record_frame_reads_global_counter_singleton) {
 
 AURORA_TEST_CASE(zone_merge_matches_profiling_flag) {
     // zone 是否并入会话统计与编译期插桩开关一致（运行时探测，不写 #if 门控）。
-    Profiler &prof = Profiler::instance();
+    Profiler& prof = Profiler::instance();
     prof.reset();
     prof.set_enabled(true);
 

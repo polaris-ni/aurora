@@ -38,6 +38,8 @@ enum class AccessibilityAction : std::uint16_t {  // NOLINT(*-enum-size)
 };
 
 [[nodiscard]] inline auto operator|(AccessibilityAction a, AccessibilityAction b) -> AccessibilityAction {
+    // 位标志组合结果天然可落在枚举器名单之外（如 Focus|Select = 5），掩码语义刻意构造，非越界错误。
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     return static_cast<AccessibilityAction>(static_cast<std::uint16_t>(a) | static_cast<std::uint16_t>(b));
 }
 

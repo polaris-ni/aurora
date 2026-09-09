@@ -1,7 +1,6 @@
 #include "aurora/preferences/preferences.h"
 
 #include <algorithm>
-#include <chrono>
 #include <fstream>
 #include <mutex>
 #include <set>
@@ -255,7 +254,7 @@ auto flatten(const Json &root) -> std::unordered_map<std::string, Json> {
 }
 
 auto Preferences::default_config_dir() -> std::filesystem::path {
-#ifdef _MSC_VER
+#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
 #pragma warning(push)
 #pragma warning(disable : 4996)  // getenv 在 MSVC/clang-cl 下被标为"不安全"，但它是标准可移植接口
 #endif
@@ -271,7 +270,7 @@ auto Preferences::default_config_dir() -> std::filesystem::path {
         return std::filesystem::path(home) / ".config";
     }
 #endif
-#ifdef _MSC_VER
+#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
 #pragma warning(pop)
 #endif
     return std::filesystem::current_path();
@@ -304,10 +303,9 @@ auto Preferences::instance_at(const std::string &name, std::filesystem::path fil
     if (it != reg.end() && it->second) {
         return *it->second;
     }
-    auto p = std::make_unique<Preferences>(std::move(file));
-    auto &ref = *p;
-    reg[name] = std::move(p);
-    return ref;
+    auto &slot = reg[name];
+    slot = std::make_unique<Preferences>(std::move(file));
+    return *slot;
 }
 
 auto Preferences::load_from_file() -> void {
