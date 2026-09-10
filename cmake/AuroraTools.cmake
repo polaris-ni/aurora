@@ -47,20 +47,42 @@ endif ()
 # gen_error_codes 零 aurora 依赖（纯标准 C++ + third_party 头），子配置成本仅一次 configure。
 if (EMSCRIPTEN)
     set(AURORA_NATIVE_TOOLS_DIR "${CMAKE_BINARY_DIR}/_native_tools")
-    if (WIN32)
+    # 注意用 HOST 判定：Emscripten 交叉下 WIN32 恒假（系统名 Emscripten），
+    # 而原生子项目跑在宿主上——exe 后缀与编译器探测都必须跟随宿主平台。
+    if (CMAKE_HOST_WIN32)
         set(_gen_tool_suffix ".exe")
     else ()
         set(_gen_tool_suffix "")
     endif ()
     set(_gen_error_codes_exe "${AURORA_NATIVE_TOOLS_DIR}/gen_error_codes${_gen_tool_suffix}")
+    # Windows 宿主：内层自动探测会选中 PATH 上的 LLVM clang++（无 MSVC 环境时链接缺
+    # winpthread.lib 直接挂），显式优先 MinGW gcc/g++——与仓库 ninja preset 同口径。
+    set(_native_tools_compilers "")
+    if (CMAKE_HOST_WIN32)
+        # NO_CMAKE_FIND_ROOT_PATH：Emscripten 工具链把 PROGRAM 搜索根限定在 emsdk 内，
+        # 常规 find_program 搜不到 PATH 上的 MinGW（静默失败回退 clang++）。
+        find_program(AURORA_NATIVE_GCC NAMES gcc NO_CMAKE_FIND_ROOT_PATH)
+        find_program(AURORA_NATIVE_GXX NAMES g++ NO_CMAKE_FIND_ROOT_PATH)
+        if (AURORA_NATIVE_GCC AND AURORA_NATIVE_GXX)
+            set(_native_tools_compilers
+                    -DCMAKE_C_COMPILER=${AURORA_NATIVE_GCC}
+                    -DCMAKE_CXX_COMPILER=${AURORA_NATIVE_GXX})
+        endif ()
+    endif ()
     execute_process(
             COMMAND ${CMAKE_COMMAND} -E env CC= CXX=
                     ${CMAKE_COMMAND}
                     -S "${CMAKE_SOURCE_DIR}"
                     -B "${AURORA_NATIVE_TOOLS_DIR}"
-                    -G "${CMAKE_GENERATOR}"
+                    # ⚠️ 参数值内不得嵌字面引号：CMake 仅剥离「整体包裹」的引号，
+                    # `-DVAR="v"` 会把引号原样写进子进程 cache（曾致导出文件名拼成
+                    # `freetype-config-"release".cmake` 非法路径）。生成器名含空格，
+                    # 变量作独立 argv token 传入，由子 cmake 原生解析。
+                    -G
+                    ${CMAKE_GENERATOR}
                     -DCMAKE_TOOLCHAIN_FILE=
-                    -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+                    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                    ${_native_tools_compilers}
             RESULT_VARIABLE _native_tools_cfg
             OUTPUT_QUIET ERROR_VARIABLE _native_tools_err)
     if (NOT _native_tools_cfg EQUAL 0)

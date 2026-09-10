@@ -123,7 +123,8 @@ class WasmSurface : public Surface {
             return EM_FALSE;
         }
         MouseEvent ev;
-        ev.position = Point{static_cast<float>(e->target_x), static_cast<float>(e->target_y)};
+        // EmscriptenMouseEvent 字段为驼峰（html5.h 现行 ABI；snake_case 旧拼写已随 SDK 移除）。
+        ev.position = Point{static_cast<float>(e->targetX), static_cast<float>(e->targetY)};
         ev.button = (e->button == 2) ? MouseButton::Right : (e->button == 1) ? MouseButton::Middle : MouseButton::Left;
         ev.action = (type == EMSCRIPTEN_EVENT_MOUSEDOWN) ? MouseAction::Press
                     : (type == EMSCRIPTEN_EVENT_MOUSEUP) ? MouseAction::Release

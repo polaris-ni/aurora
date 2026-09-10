@@ -29,6 +29,28 @@
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++"
       }
+    },
+    {
+      "name": "wasm",
+      "displayName": "Emscripten / WebAssembly (build-wasm)",
+      "description": "Equivalent to CI's `emcmake cmake` invocation: Emscripten toolchain via %EMSDK% (set by `emsdk activate --permanent`), WASM backend on, tests/demos off.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-wasm",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+        "AURORA_BACKEND_WASM": "ON",
+        "AURORA_BUILD_TESTS": "ON",
+        "AURORA_BUILD_DEMOS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "wasm",
+      "displayName": "wasm library (aurora)",
+      "configurePreset": "wasm",
+      "targets": ["aurora"]
     }
   ]
 }

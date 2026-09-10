@@ -95,7 +95,7 @@ cmake -S . -B build -DAURORA_BUILD_INSPECTOR_SERVER=ON
 | `AURORA_BACKEND_X11` | `OFF` | X11 / Linux 桌面后端（`X11Surface`，pimpl 完整实现） | `AURORA_BACKEND_X11` | `${X11_LIBRARIES}`（`find_package(X11)`） |
 | `AURORA_BACKEND_WAYLAND` | `OFF` | 原生 Wayland / Linux 桌面后端（`WaylandSurface`，pimpl 完整实现） | `AURORA_BACKEND_WAYLAND` | `${WAYLAND_CLIENT_LIBRARIES}` `${XKBCOMMON_LIBRARIES}`（`pkg-config`） |
 | `AURORA_BACKEND_MACOS` | `OFF` | macOS 后端（`MacOSSurface`，顶层 `enable_language(OBJCXX)` 先于目标定义，非 Apple 开启 FATAL） | `AURORA_BACKEND_MACOS` | `Cocoa` `AppKit`（框架） |
-| `AURORA_BACKEND_WASM` | `OFF` | WebAssembly 后端（`WasmSurface`，须 `emcmake cmake`，非 Emscripten 开启 FATAL） | `AURORA_BACKEND_WASM` | Emscripten 工具链 |
+| `AURORA_BACKEND_WASM` | `OFF` | WebAssembly 后端（`WasmSurface`，需 Emscripten 工具链：`cmake --preset wasm`（经 `$EMSDK` 注入 toolchain，等价 `emcmake cmake`）；非 Emscripten 开启 FATAL。构建期生成器改经 `_native_tools` 原生子项目产出，见 `AuroraTools.cmake`） | `AURORA_BACKEND_WASM` | Emscripten 工具链 |
 
 ### 3.1 GLFW 源码构建
 
