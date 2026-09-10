@@ -39,25 +39,50 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND WIN32)
 endif ()
 
 # 从 errors.toml 重新生成头/目录/API（仅在 errors.toml 变更时触发）。
-# Emscripten 工具链下 $<TARGET_FILE> 展开为 gen_error_codes.js（+ .wasm）：.js 无执行位、
-# 非本地二进制，直接作为 COMMAND 会 Permission denied（exit 126）。构建期执行须走 node
-# 解释（emsdk 自身也是 node 驱动），故按工具链切换命令前缀。
+# Emscripten 工具链下宿主生成器必须以**原生**编译：.js 产物既无执行位（直接执行 exit 126），
+# 且 Emscripten 3.x 已移除 NODEFS——程序内 ifstream/ofstream 落在 MEMFS 内存盘，读写不到
+# 仓库真实文件（「cannot open input file」）。「node + .js」只解决执行、解决不了文件系统契约，
+# 故此处按工具链切换：Emscripten 时在父 configure 期完成原生子配置（清 CMAKE_TOOLCHAIN_FILE
+# 与 CC/CXX 环境以摆脱 emcc），构建期由 ALL 目标先行产出原生 exe 再触发生成命令。
+# gen_error_codes 零 aurora 依赖（纯标准 C++ + third_party 头），子配置成本仅一次 configure。
 if (EMSCRIPTEN)
-    find_program(AURORA_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
-    set(_gen_error_codes_cmd "${AURORA_NODE_EXECUTABLE}" $<TARGET_FILE:gen_error_codes>)
+    set(AURORA_NATIVE_TOOLS_DIR "${CMAKE_BINARY_DIR}/_native_tools")
+    if (WIN32)
+        set(_gen_tool_suffix ".exe")
+    else ()
+        set(_gen_tool_suffix "")
+    endif ()
+    set(_gen_error_codes_exe "${AURORA_NATIVE_TOOLS_DIR}/gen_error_codes${_gen_tool_suffix}")
+    execute_process(
+            COMMAND ${CMAKE_COMMAND} -E env CC= CXX=
+                    ${CMAKE_COMMAND}
+                    -S "${CMAKE_SOURCE_DIR}"
+                    -B "${AURORA_NATIVE_TOOLS_DIR}"
+                    -G "${CMAKE_GENERATOR}"
+                    -DCMAKE_TOOLCHAIN_FILE=
+                    -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+            RESULT_VARIABLE _native_tools_cfg
+            OUTPUT_QUIET ERROR_VARIABLE _native_tools_err)
+    if (NOT _native_tools_cfg EQUAL 0)
+        aurora_error("native generator subproject configure failed (required to run build-time tools under Emscripten): ${_native_tools_err}")
+    endif ()
+    add_custom_target(native_gen_tools ALL
+            COMMAND ${CMAKE_COMMAND} --build "${AURORA_NATIVE_TOOLS_DIR}" --target gen_error_codes
+            BYPRODUCTS "${_gen_error_codes_exe}"
+            COMMENT "Building native gen_error_codes (host tool under Emscripten)")
 else ()
-    set(_gen_error_codes_cmd $<TARGET_FILE:gen_error_codes>)
+    set(_gen_error_codes_exe $<TARGET_FILE:gen_error_codes>)
 endif ()
 add_custom_command(
         OUTPUT ${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h
         ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md
         ${CMAKE_SOURCE_DIR}/aurora_api.json
-        COMMAND ${_gen_error_codes_cmd}
+        COMMAND "${_gen_error_codes_exe}"
         "${CMAKE_SOURCE_DIR}/codespec/errors.toml"
         "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h"
         "${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md"
         "${CMAKE_SOURCE_DIR}/aurora_api.json"
-        DEPENDS $<TARGET_FILE:gen_error_codes> ${CMAKE_SOURCE_DIR}/codespec/errors.toml
+        DEPENDS "${_gen_error_codes_exe}" ${CMAKE_SOURCE_DIR}/codespec/errors.toml
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Regenerating error_codes.gen.h / ERROR_CATALOG.md / aurora_api.json from errors.toml"
         VERBATIM)
@@ -65,6 +90,10 @@ add_custom_target(generate_error_codes DEPENDS
         ${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h
         ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md
         ${CMAKE_SOURCE_DIR}/aurora_api.json)
+if (EMSCRIPTEN)
+    # 生成命令依赖原生 exe：先于 custom command 构建子项目产物。
+    add_dependencies(generate_error_codes native_gen_tools)
+endif ()
 add_dependencies(aurora generate_error_codes)
 
 # 工具：反射 aurora 公共 API 生成 aurora_api.json。
