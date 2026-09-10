@@ -130,6 +130,11 @@ jobs:
         run: cmake --build build --config ${{ matrix.build-type }} --target demos
 
       - name: Test
+        env:
+          # Windows (windows-msvc / windows-msvc-debug, default Visual Studio generator) uses a
+          # cp1252 console codepage that cannot encode CJK; several tools/check/*.py scripts print
+          # Chinese. PEP 540 UTF-8 mode forces UTF-8 stdio so they don't raise UnicodeEncodeError.
+          PYTHONUTF8: 1
         run: ctest --test-dir build --output-on-failure -C ${{ matrix.build-type }}
 
   # ---------------------------------------------------------------------------
@@ -168,6 +173,8 @@ jobs:
         run: cmake --build build --config Release
 
       - name: Test
+        env:
+          PYTHONUTF8: 1
         run: ctest --test-dir build --output-on-failure -C Release
 
   # ---------------------------------------------------------------------------

@@ -32,6 +32,17 @@ import os
 import re
 import sys
 
+# Windows (e.g. the GitHub Actions windows-msvc runner) defaults the console codepage to
+# cp1252, which cannot encode CJK characters. The report prints Chinese lines (e.g. the
+# TEST-R10 trend), so force UTF-8 stdio here to avoid UnicodeEncodeError on print.
+# Wrapped in try/except: a non-reconfigurable stream (redirected file, None) is left alone.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, ValueError, OSError):
+    pass
+
 # ---- 白名单：文档引用类存量豁免，逐项注明原因 ------------------------------
 # 键为 (规则, 仓库相对路径, 详情子串)。当前为空：原 3 条 TEST-R2 豁免指向
 # utest_aurora_lsp / utest_default_construct / utest_todo，这些文件已在「破旧」阶段

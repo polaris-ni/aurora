@@ -38,6 +38,23 @@ def run(exe, *args, cwd):
                           encoding="utf-8", errors="replace")
 
 
+def resolve_exe(build_dir, name):
+    """Resolve a built tool executable under *build_dir*, accounting for multi-config
+    generators (Visual Studio / Xcode) that place outputs under build_dir/<CONFIG>/
+    (e.g. build/Release/gen_error_codes.exe). Falls back to the single-config layout
+    where the executable sits directly under build_dir (build/gen_error_codes)."""
+    suffix = ".exe" if os.name == "nt" else ""
+    base = name + suffix
+    candidates = [os.path.join(build_dir, base)]
+    if os.name == "nt":
+        for cfg in ("Release", "Debug", "RelWithDebInfo", "MinSizeRel"):
+            candidates.append(os.path.join(build_dir, cfg, base))
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return candidates[0]
+
+
 def main() -> int:
     repo = sys.argv[2] if len(sys.argv) > 2 else repo_root_of(__file__)
     build = sys.argv[1] if len(sys.argv) > 1 else "build"
@@ -45,9 +62,8 @@ def main() -> int:
 
     # Cross-platform executable name: build artifacts carry a .exe suffix on Windows, but not on
     # other platforms (Linux/macOS/gcov).
-    _suffix = ".exe" if os.name == "nt" else ""
-    gen_err = os.path.join(build_abs, "gen_error_codes" + _suffix)
-    gen_dbg = os.path.join(build_abs, "gen_debug_api" + _suffix)
+    gen_err = resolve_exe(build_abs, "gen_error_codes")
+    gen_dbg = resolve_exe(build_abs, "gen_debug_api")
     errors_toml = os.path.join(repo, "codespec", "errors.toml")
     debug_toml = os.path.join(repo, "codespec", "debug_api.toml")
 

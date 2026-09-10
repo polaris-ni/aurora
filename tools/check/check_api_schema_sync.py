@@ -84,15 +84,32 @@ def enum_names(api):
     return out
 
 
+def resolve_exe(build_dir, name):
+    """Resolve a built tool executable under *build_dir*, accounting for multi-config
+    generators (Visual Studio / Xcode) that place outputs under build_dir/<CONFIG>/
+    (e.g. build/Release/gen_api_tools.exe). Falls back to the single-config layout
+    where the executable sits directly under build_dir (build/gen_api_tools)."""
+    suffix = ".exe" if os.name == "nt" else ""
+    base = name + suffix
+    candidates = [os.path.join(build_dir, base)]
+    if os.name == "nt":
+        for cfg in ("Release", "Debug", "RelWithDebInfo", "MinSizeRel"):
+            candidates.append(os.path.join(build_dir, cfg, base))
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return candidates[0]
+
+
 def main() -> int:
     repo = sys.argv[2] if len(sys.argv) > 2 else repo_root_of(__file__)
     build = sys.argv[1] if len(sys.argv) > 1 else "build"
     build_abs = build if os.path.isabs(build) else os.path.join(repo, build)
 
     # Cross-platform executable name: build artifacts carry a .exe suffix on Windows, but not on
-    # other platforms (Linux/macOS).
-    suffix = ".exe" if os.name == "nt" else ""
-    gen_api = os.path.join(build_abs, "gen_api_tools" + suffix)
+    # other platforms (Linux/macOS). resolve_exe also handles multi-config generators
+    # (Visual Studio / Xcode) that place the executable under build_dir/<CONFIG>/.
+    gen_api = resolve_exe(build_abs, "gen_api_tools")
 
     if not os.path.isfile(gen_api):
         print(f"[FAIL] gen_api_tools not found: {gen_api}")

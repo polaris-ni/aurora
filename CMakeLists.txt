@@ -1,5 +1,5 @@
 # ============================================================
-# Aurora — AI-first modern C++ GUI library (v1.0.0-alpha.1)
+# Aurora — AI-first modern C++ GUI library
 # ------------------------------------------------------------
 # 本文件只做「工程声明 + 核心库目标 + 模块编排」；具体逻辑按职责拆分在 cmake/ 下：
 #   cmake/AuroraThirdParty.cmake      — FreeType/HarfBuzz 源码构建

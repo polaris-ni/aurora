@@ -24,6 +24,17 @@ import os
 import re
 import sys
 
+# Windows (e.g. the GitHub Actions windows-msvc runner) defaults the console codepage to
+# cp1252, which cannot encode CJK characters. This script prints Chinese in its diagnostic
+# output, so force UTF-8 stdio to avoid UnicodeEncodeError on print. Wrapped in try/except
+# for non-reconfigurable streams (redirected file, None).
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, ValueError, OSError):
+    pass
+
 # ---- 白名单：存量豁免，逐项注明原因；新规则只拦增量 -------------------------
 WHITELIST = {
     # (rule, file_rel, detail) -> reason
