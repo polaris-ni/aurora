@@ -24,8 +24,8 @@
 - **顺序容错**：多参数构造优先用 `XxxProps{...}` 具名聚合（如 `ColumnProps{ .children = ... }`），避免位置参数顺序错误。
 - **强类型几何**：`Length` / `Color` / `Size` / `Point` 为强类型；禁止 `Length(int)` 隐式转换（裸整数编译失败）。已采纳用户字面量 `au::literals`（`100_dp`、`16_ms`、`0xRRGGBB_rgb`），`px(100)` 与 `100_dp` 互补；**禁止头文件全局 `using`**，字面量只在 TU 内按需引入（示例代码用 `using namespace au::literals;`，测试代码按 §3.1 用 using 声明 / 命名空间别名引入，不得用 using-directive）。
 - **所有权清晰**：资源所有权用 `unique_ptr` / `shared_ptr` 明确；跨边界传递用 `std::move`；`Binding<T>` 为非拥有引用（上游生命周期须更长）。
-- **成员变量命名**：`struct` 成员与类 `public` 成员用**裸名**（无前缀、无后缀，如 `Color::r`、`DragData::mime_type`）；类的 `protected` / `private` 非静态成员统一**尾部下划线**后缀（如 `children_`、`value_`、`on_close_`）；**全仓禁止 `m_` 前缀**。`static` 常量按本条「常量命名」走 `UPPER_CASE`（如 `NO_SEL`）；`static` 可变成员、`static` `protected`/`private` 成员规则与普通成员一致（尾部下划线）。此约束与 `.clang-tidy` 的 `MemberCase` / `ProtectedMemberSuffix` / `PrivateMemberSuffix` / `ClassStatic*MemberSuffix` / `StaticConstantCase` 一致。
-- **常量命名**：命名空间 / 文件级与类内 `static constexpr` 常量统一 `AURORA_` 前缀 + `UPPER_CASE` 全大写下划线（如 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`），与 `.clang-tidy` 的 `ConstantPrefix` / `GlobalConstantPrefix` 约束一致；禁止 `k` 前缀 CamelCase。
+- **成员变量命名**：`struct` 成员与类 `public` 成员用**裸名**（无前缀、无后缀，如 `Color::r`、`DragData::mime_type`）；类的 `protected` / `private` 非静态成员统一**尾部下划线**后缀（如 `children_`、`value_`、`on_close_`）；**全仓禁止 `m_` 前缀**。`static` 常量按本条「常量命名」走 `UPPER_CASE`（如 `NO_SEL`）；`static` 可变成员、`static` `protected`/`private` 成员规则与普通成员一致（尾部下划线）。
+- **常量命名**：命名空间 / 文件级与类内 `static constexpr` 常量统一 `AURORA_` 前缀 + `UPPER_CASE` 全大写下划线（如 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`）；禁止 `k` 前缀 CamelCase。
 - **生命周期回调强类型**：`au::Lifecycle` 的 `on_mount` / `on_unmount`、窗口级 `WindowState` / `WindowMode` 的 `set_on_*` 回调均为具名 `std::function` 强类型（`MountCb = std::function<void(const BuildContext&)>`、`UnmountCb = std::function<void()>`，`WindowStateHandler` / `WindowModeHandler` 同理）；枚举取值穷尽且按「可见性 / 几何态」正交划分（`WindowState` 不并入 `Maximized`），AI 无需猜测「是否还有隐藏状态」。回调均可空（无副作用时不传），且不走异常捕获（与主线程事件回调一致）。
 
 ---
@@ -105,7 +105,7 @@
   CTest 粒度：每条 = `--run=<stem>`（文件级进程隔离）。
 - 退出码协议：`0` 全通过（Skipped 不计失败）、`1` 有失败、`2` CLI 错误 / 筛选为空 / 报告写不出、
   `3` 超时（看门狗触发，部分结果仍落报告）。CI 须把 `3` 与 `1` 分开归类——文件级粒度下超时会让该文件剩余用例不执行。
-- **命名可见性**：测试 TU **禁止 using-directive**（`using namespace aurora;` / `using namespace au;` 等），与 clang-tidy 的 `google-build-using-namespace` 检查保持一致。需要裸名时按优先级用：using 声明（`using aurora::Color;`、`using aurora::preferences::Preferences;`）、命名空间别名（`namespace ar = aurora::render;`）、或显式限定（`au::Rect`）。用户字面量按实际用到的后缀逐个声明（`using aurora::literals::operator""_dp;`、`using std::chrono_literals::operator""ms;`）。
+- **命名可见性**：测试 TU **禁止 using-directive**（`using namespace aurora;` / `using namespace au;` 等）。需要裸名时按优先级用：using 声明（`using aurora::Color;`、`using aurora::preferences::Preferences;`）、命名空间别名（`namespace ar = aurora::render;`）、或显式限定（`au::Rect`）。用户字面量按实际用到的后缀逐个声明（`using aurora::literals::operator""_dp;`、`using std::chrono_literals::operator""ms;`）。
   using 声明 / 别名须放在**使用点之前**的作用域内（分段式测试文件里，各 `namespace sec_xxx { ... }` 段各自引入自己用到的名字），不要图省事放到文件顶部。
   **禁止**为 using-directive 追加 `NOLINT(google-build-using-namespace)` 之类的抑制：改用声明即可根治，抑制只会掩盖真实告警，且在检查不触发的位置（如函数体内的 using）会形成无效的 NOLINT 噪声。
 
@@ -125,7 +125,7 @@
 | `TEST-R6` | 注册完整性 | `runner --list` 输出的**用例级**集合必须与测试源中注册的用例集合一致；含「`TEST_P` 漏 `INSTANTIATE` → 用例静默不运行」检测 | 是（CTest `registry_integrity`，由 `tools/check/check_test_registry.py` 承担） |
 | `TEST-R7` | 并行安全 | 测试体系禁止新增 `RUN_SERIAL`（CMake 编排与测试源一并扫描）；并行模型为 CTest 进程隔离 + 框架用例边界资源虚拟化，申请串行须登记脚本内 `TEST_R7_WHITELIST` 并注明根因 | 是 |
 | `TEST-R8` | 命名纪律 | 目录定类型 + 前缀强制——`tests/unit/` 一律 `utest_`、`tests/integration/` 一律 `itest_`，测试 TU 不得放在两目录之外；**Suite 强制等于文件 stem、不可自定义**（`__FILE__` 推导，自定义套件宏禁止） | 是 |
-| `TEST-R9` | 禁止 using-directive | 测试代码禁止 `using namespace`（函数体内亦然）；using 声明 / 命名空间别名须置于使用点之前的作用域内 | 是（脚本 + clang-tidy `google-build-using-namespace`） |
+| `TEST-R9` | 禁止 using-directive | 测试代码禁止 `using namespace`（函数体内亦然）；using 声明 / 命名空间别名须置于使用点之前的作用域内 | 是（脚本） |
 | `TEST-R10` | 禁止 catch-all（跨域） | 单个测试跨 ≥3 个模块域视为 catch-all；因被测主模块自身依赖面广（如测 `Widget` 必带 layout/render/event/navigation）的跨域**不视为违规、不强行拆分**，基线 **20**、只看增量，趋势由守门脚本输出、不在本文档硬编码以免随重构漂移 | 否（趋势指标） |
 
 其中 `TEST-R1` / `TEST-R2` / `TEST-R4` / `TEST-R5` / `TEST-R7` / `TEST-R8` / `TEST-R9` 由 `tools/check/check_code_doc_sync.py` 在 CTest 的 `code_doc_sync` 用例守门（只做确定性判定、存量豁免走白名单、只拦增量）；`TEST-R6` 由 `tools/check/check_test_registry.py` 在 CTest 的 `registry_integrity` 用例守门；`TEST-R3` 靠评审与审计，`TEST-R10` 只作趋势指标，均不纳入守门。

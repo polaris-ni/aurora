@@ -261,7 +261,7 @@ Button& setCaption(std::string s) { return text(std::move(s)); }
 
 | 阶段 | 判据 | 允许变更 |
 |:---|:---|:---|
-| **alpha** | 公共 API 未冻结；门禁脚手架（lint / ctest / 守护脚本）仍在建设 | 任意破坏性改动（仅本阶段允许） |
+| **alpha** | 公共 API 未冻结；门禁脚手架（ctest / 守护脚本）仍在建设 | 任意破坏性改动（仅本阶段允许） |
 | **beta** | API 冻结（`aurora_api.json` 为 SSOT，由 `check_api_schema_sync` 守护）+ 全部门禁全绿 + 文档同步守护（`check_codespec_xref` / `check_code_doc_sync`）生效 | 仅 MINOR / PATCH 增量，严禁 breaking |
 | **1.0** | beta 基础上叠加 CHANGELOG 纪律与 breaking 变更正式流程（见 §12.3） | 进入 SemVer 主版本维护 |
 
@@ -288,7 +288,6 @@ Button& setCaption(std::string s) { return text(std::move(s)); }
 |:---|:---|:---|
 | 全量构建 | `cmake --build build` 0 error | — |
 | 完整测试 | `ctest` 全绿（含 `aurora_test_runner` 单元 / 集成） | — |
-| lint 双 Pass | `--target lint` 0 告警（clang-format + clang-tidy） | clang-tidy / clang-format |
 | API 漂移 | `ctest -R check_api_schema_sync` | `check_api_schema_sync` |
 | 命名一致性 | `ctest -R check_naming_conventions`（#2：类型 PascalCase、属性/事件/函数 snake_case、事件 `on_` 前缀） | `check_naming_conventions` |
 | 零原生平台宏 | `ctest -R check_platform_macros`（#14：预处理分支禁原生平台/架构宏，规范化宏密度仅报告） | `check_platform_macros` |

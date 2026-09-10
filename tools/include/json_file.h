@@ -2,7 +2,7 @@
 // json_file.h — file-reading primitives (JSON / raw text)
 // ----------------------------------------------------------------------------
 // Zero aurora dependencies (standard library + nlohmann/json only). Reused by
-// aurora_cli / aurora_lint to avoid two duplicate implementations of
+// aurora_cli to avoid two duplicate implementations of
 // "ifstream + rdbuf reading into string/Json".
 //
 // Note: on read failure an empty value is returned (Json{} / ""), and nothing is logged here —

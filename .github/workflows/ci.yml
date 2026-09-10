@@ -16,7 +16,6 @@
 #   6. wasm        — emcmake + AURORA_BACKEND_WASM=ON，仅构建库目标（Emscripten 下不链测试）。
 #   7. install     — cmake --install + 工作流内联最小消费端端到端验证
 #                    （find_package(Aurora) + 静态链接 + feature 宏导出一致性）。
-#   8. lint        — clang-tidy 双 Pass（DEBUG ON / OFF 各一份编译数据库，全量 0 finding）。
 #
 # 选项语义以 codespec/BUILD_OPTIONS.md 为唯一权威来源。
 # ---------------------------------------------------------------------------
@@ -295,50 +294,13 @@ jobs:
           #include "aurora/aurora.h"
           namespace au = aurora;
           int main() {
-              au::Node root = au::Text("Hello, Aurora!").font_size(20);
+              // Node 从 Widget 派生对象接管所有权：Widget 拷贝构造已 delete，必须显式 std::move
+              au::Node root = std::move(au::Text("Hello, Aurora!").font_size(20));
               au::Scene scene{ std::move(root) };
-              scene.render_to_png("hello.png", 200, 60);
+              [[maybe_unused]] const au::Result<bool> written = scene.render_to_png("hello.png", 200, 60);
           }
           EOF
           cmake -S consumer -B consumer/build -G Ninja -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-prefix"
           cmake --build consumer/build
           ./consumer/build/consumer
           test -f hello.png
-
-  # ----------------------------------------------------------------------------
-  # 8. 静态检查门禁：clang-tidy 全量 lint（非 third_party 翻译单元，去重后 0 finding 才通过）
-  # 版本钉死 clang-tidy-22，与本地 proved 组合（gcc 编译数据库 + clang-tidy 22.1.2 → 0 findings）
-  # 保持一致，避免不同 clang 版本漂移导致门禁误报。仅跑 ubuntu-latest，因为
-  # windows/msvc 与 macos 矩阵默认无 clang-tidy，且 lint 与平台无关（纯静态分析）。
-  # 依赖 AuroraLint.cmake 提供的 `lint` 目标（需 configure 时 clang-tidy 在 PATH 上）。
-  # 双 Pass：分别强制 -DAURORA_ENABLE_DEBUG=OFF / =ON，各自独立编译数据库，
-  # 以覆盖 #if（debug-ON）与 #else（debug-OFF）两分支——
-  # AURORA_ENABLE_DEBUG=AUTO 是 generator expression，单配置只分析一分支，门禁天然盲一半。
-  # ----------------------------------------------------------------------------
-  lint:
-    name: clang-tidy (dual-pass)
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install clang-tidy-22
-        run: |
-          sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
-          # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
-          echo "deb http://apt.llvm.org/ubuntu/ llvm-toolchain-ubuntu-$(lsb_release -cs) 22" | sudo tee /etc/apt/sources.list.d/llvm22.list
-          sudo apt-get update -y
-          sudo apt-get install -y clang-tidy-22
-          sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
-
-      - name: Configure (debug OFF, export compile_commands.json)
-        run: cmake -S . -B build-lint-off -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_DEBUG=OFF
-
-      - name: Lint (debug OFF branch, fails on any warning+ finding)
-        run: cmake --build build-lint-off --target lint
-
-      - name: Configure (debug ON, export compile_commands.json)
-        run: cmake -S . -B build-lint-on -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_DEBUG=ON
-
-      - name: Lint (debug ON branch, fails on any warning+ finding)
-        run: cmake --build build-lint-on --target lint

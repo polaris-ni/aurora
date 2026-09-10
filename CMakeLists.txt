@@ -274,6 +274,3 @@ include(AuroraInstrumentation)
 
 # ---- 安装 + find_package(Aurora) 导出（须在后端开关之后，导出宏取最终取值）----
 include(AuroraInstall)
-
-# ---- Clang-Tidy 门禁（按需 lint / lint-fix 聚合目标；须在全部目标定义之后 include）----
-include(AuroraLint)

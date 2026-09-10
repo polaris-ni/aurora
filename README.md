@@ -28,12 +28,13 @@
 
 ```cpp
 #include "aurora/aurora.h"
-using namespace aurora;
+namespace au = aurora;
 
 int main() {
-    Node root = au::Text("Hello, Aurora!").font_size(20);
-    Scene scene{ std::move(root) };
-    scene.render_to_png("hello.png", 200, 60);
+    // Node 从 Widget 派生对象接管所有权：Widget 拷贝构造已 delete，必须显式 std::move
+    au::Node root = std::move(au::Text("Hello, Aurora!").font_size(20));
+    au::Scene scene{ std::move(root) };
+    [[maybe_unused]] const au::Result<bool> written = scene.render_to_png("hello.png", 200, 60);
 }
 ```
 
@@ -41,12 +42,12 @@ int main() {
 
 ```cpp
 #include "aurora/aurora.h"
-using namespace aurora;
+namespace au = aurora;
 
 int main() {
-    Node root = Node{ au::Column(au::ColumnProps{.children = {
-        Node{ au::Text("Hello, Aurora!").font_size(24) },
-        Node{ au::Button(au::ButtonProps{.label = "Click me"}) },
+    au::Node root = au::Node{ au::Column(au::ColumnProps{.children = {
+        au::Node{ std::move(au::Text("Hello, Aurora!").font_size(24)) },
+        au::Node{ au::Button(au::ButtonProps{.label = "Click me"}) },
     }})};
 
     au::WindowOptions base{ .title = "Hello Aurora" }; // .title 为基类成员，指定初始化器不能指名基类
@@ -55,8 +56,8 @@ int main() {
     auto win_res = au::create_window(opts);
     if (!win_res)
         return 1;
-    Scene scene{ std::move(root) };
-    Application app{ std::move(scene), std::move(win_res.value()) };
+    au::Scene scene{ std::move(root) };
+    au::Application app{ std::move(scene), std::move(win_res.value()) };
     app.run(); // 事件驱动帧循环：静态界面空闲 CPU 趋近 0
 }
 ```
