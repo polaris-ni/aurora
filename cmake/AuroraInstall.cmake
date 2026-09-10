@@ -30,6 +30,23 @@ if (AURORA_ENABLE_TRACING)
     list(APPEND AURORA_EXPORTED_DEFINES AURORA_ENABLE_TRACING)
 endif ()
 
+# AURORA_ENABLE_DEBUG 与上述埋点宏性质不同：它在 Widget 下新增数据成员（m_debug_paint_frame），
+# **改变类内存布局**，消费端必须与安装产物取同一取值，否则构造与成员偏移错位 → ODR 违规。
+# 故导出面必须与**安装产物的实际取值**一致，而非无条件导出（无条件导出会让 Release 产物反向失配）：
+#   强制 ON                          → 导出（对应「Release 下强制开调试能力」的安装产物）
+#   强制 OFF                         → 不导出
+#   AUTO + 单配置 Debug/RelWithDebInfo → 导出（安装产物即 Debug 布局）
+#   AUTO + 其余（含 Release、空构建类型）→ 不导出（安装产物按发布态语义，宏为关）
+#   AUTO + 多配置生成器（MSVC/Xcode）→ 不导出：安装产物由 `--config` 在安装时选定，
+#       configure 期无法求值；此类产物须以「库 ABI 与消费端一致」为前提单独约定，
+#       当前 CI 的安装消费端验证走单配置 Ninja，不受影响。
+string(TOUPPER "${AURORA_ENABLE_DEBUG}" _aurora_install_debug_mode)
+if (AURORA_DEBUG_FORCED_ON OR (_aurora_install_debug_mode STREQUAL "AUTO"
+        AND NOT CMAKE_CONFIGURATION_TYPES
+        AND (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")))
+    list(APPEND AURORA_EXPORTED_DEFINES AURORA_ENABLE_DEBUG)
+endif ()
+
 # 2) 安装 aurora 静态库与公共头（aurora.h 传递包含 third_party/nlohmann/json.hpp）。
 install(TARGETS aurora ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(DIRECTORY include/aurora DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

@@ -46,15 +46,19 @@ jobs:
         if: matrix.archive == 'zip'
         shell: pwsh
         run: |
+          $arch = "${{ runner.arch }}".ToLower()
           Compress-Archive -Path "staging/*" -DestinationPath `
-            "aurora-${{ github.ref_name }}-windows-x64.zip"
+            "aurora-${{ github.ref_name }}-windows-$arch.zip"
 
       - name: Archive (tar.gz, Linux/macOS)
         if: matrix.archive == 'tar.gz'
         shell: bash
         run: |
           OSNAME="$(echo '${{ matrix.os }}' | cut -d- -f1)"
-          tar -czf "aurora-${{ github.ref_name }}-${OSNAME}-x64.tar.gz" -C staging .
+          # 架构按 runner.arch 实际取值命名：macos-latest 现为 arm64（M1），
+          # 硬编码 x64 会把 arm64 产物错标为 x64。
+          ARCH="$(echo '${{ runner.arch }}' | tr '[:upper:]' '[:lower:]')"
+          tar -czf "aurora-${{ github.ref_name }}-${OSNAME}-${ARCH}.tar.gz" -C staging .
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

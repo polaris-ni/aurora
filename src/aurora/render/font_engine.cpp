@@ -13,8 +13,6 @@
 #include <unordered_map>
 #include <vector>
 #include FT_FREETYPE_H
-// 第三方 harfbuzz 头在 -Wall 下触发 -Wstringop-overread 误报（hb-algs.hh:1146 的 memcmp 边界
-// 分析误判），对三方头无意义；已在 CMakeLists 对 harfbuzz target 整体关闭（-Wno-stringop-overread）。
 #include <hb-ft.h>
 #include <hb.h>
 

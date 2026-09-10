@@ -2,8 +2,9 @@
 # Aurora CI
 #
 # 覆盖策略（宏 = 编译结果，矩阵按「每个 feature 分支至少被一个 job 编译一次」设计）：
-#   1. core        — 三平台（linux/gcc、windows/msvc、macos/clang）+ windows/mingw，
-#                    Release（DEBUG/PROFILING 走 AUTO=OFF 分支）+ Debug（AUTO=ON 分支）；
+#   1. core        — 四编译器（linux/gcc、linux/clang、windows/msvc、windows/mingw、macos/clang），
+#                    Release（DEBUG/PROFILING 走 AUTO=OFF 分支）+ Debug（AUTO=ON 分支，
+#                    linux/gcc 与 windows/msvc 各一份）；
 #                    linux 额外构建 demos 聚合目标（EXCLUDE_FROM_ALL，默认构建不含）。
 #   2. backends    — 非 HEADLESS 后端各自至少编译一次：X11/Wayland/GLFW（linux）、
 #                    D3D11/GLFW（win32）、macOS/GLFW（darwin）；ctest 下无显示环境，
@@ -56,9 +57,21 @@ jobs:
             os: ubuntu-latest
             build-type: Debug
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+          # linux 原生 clang：弥补 gcc 单编译器盲区（模板实例化 / 两阶段名字查找 / ODR 诊断更严格）
+          - name: linux-clang-release
+            os: ubuntu-latest
+            build-type: Release
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+            apt-pkgs: clang
           - name: windows-msvc
             os: windows-latest
             build-type: Release
+            cmake-flags: "" # 默认 Visual Studio 生成器（多配置）
+          # MSVC 的 AUTO=ON 分支：Debug 下 DEBUG/PROFILING 宏生效，类布局与 Release 不同，
+          # 须独立构建并跑全量 ctest（此前 MSVC 仅覆盖 Release）
+          - name: windows-msvc-debug
+            os: windows-latest
+            build-type: Debug
             cmake-flags: "" # 默认 Visual Studio 生成器（多配置）
           - name: windows-mingw
             os: windows-latest
@@ -82,6 +95,10 @@ jobs:
             if [ -x "$d/gcc.exe" ]; then echo "$d" >> "$GITHUB_PATH"; break; fi
           done
           gcc --version
+
+      - name: Install compiler (apt)
+        if: matrix.apt-pkgs
+        run: sudo apt-get update -y && sudo apt-get install -y ${{ matrix.apt-pkgs }}
 
       - name: Setup ccache
         if: runner.os == 'Linux' || runner.os == 'macOS'
@@ -263,15 +280,27 @@ jobs:
   # 7. 安装 + find_package 消费端端到端验证
   # ---------------------------------------------------------------------------
   install-consumer:
-    name: install + find_package (ubuntu-gcc)
+    name: install + find_package (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 默认配置：安装产物按发布态语义（AURORA_ENABLE_DEBUG=AUTO → 关）
+          - name: default
+            configure-flags: ""
+          # 非默认宏一致性守护：Release 下强制 DEBUG=ON。该宏在 Widget 下新增数据成员、
+          # **改变类内存布局**，消费端必须仅凭 find_package 导入的宏达成与库一致的 ABI；
+          # 一旦安装导出面漏掉它即 ODR 违规 → 实测表现为渲染时段错误（SIGSEGV）。
+          - name: debug-forced-on
+            configure-flags: -DAURORA_ENABLE_DEBUG=ON
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure + Build
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release ${{ matrix.configure-flags }}
           cmake --build build --config Release
 
       - name: Install

@@ -450,7 +450,7 @@ CI 配置位于 `.github/workflows/`：
 
 | 工作流 | 作用 |
 |:---|:---|
-| `ci.yml` | 宏矩阵全量覆盖，每推送 / PR 触发，`concurrency` 取消旧运行以提速。共 7 组 job：**core**（linux/gcc + windows/msvc + windows/mingw + macos/clang，Release 与 Debug 各编一次覆盖 `AUTO` 三态的两个分支；linux 额外构建 `demos` 聚合目标）；**backends**（X11/Wayland/GLFW、D3D11/GLFW、macOS/GLFW 各编译一次）；**toggles**（优化三开关全关 / SIMD 关 / 图像编解码+Inspector 开 / PROFILING+TRACING+DEBUG 强制开 / DEBUG 强制关，均 ubuntu/gcc）；**asan**（ASan+UBSan 全量 ctest）；**coverage**（`coverage` 聚合目标：ctest + gcov 摘要，CSV/HTML 入 artifact）；**wasm**（emcmake + `AURORA_BACKEND_WASM=ON` 仅构建库目标）；**install-consumer**（`cmake --install` + `find_package(Aurora)` 最小消费端冒烟，GUIDELINE §1 配方） |
+| `ci.yml` | 宏矩阵全量覆盖，每推送 / PR 触发，`concurrency` 取消旧运行以提速。共 7 组 job：**core**（linux/gcc + linux/clang + windows/msvc + windows/mingw + macos/clang，Release 与 Debug 各编一次覆盖 `AUTO` 三态的两个分支，Debug 覆盖 linux/gcc 与 windows/msvc；linux 额外构建 `demos` 聚合目标）；**backends**（X11/Wayland/GLFW、D3D11/GLFW、macOS/GLFW 各编译一次）；**toggles**（优化三开关全关 / SIMD 关 / 图像编解码+Inspector 开 / PROFILING+TRACING+DEBUG 强制开 / DEBUG 强制关，均 ubuntu/gcc）；**asan**（ASan+UBSan 全量 ctest）；**coverage**（`coverage` 聚合目标：ctest + gcov 摘要，CSV/HTML 入 artifact）；**wasm**（emcmake + `AURORA_BACKEND_WASM=ON` 仅构建库目标）；**install-consumer**（`cmake --install` + `find_package(Aurora)` 最小消费端冒烟，GUIDELINE §1 配方；默认配置与 Release 下强制 `AURORA_ENABLE_DEBUG=ON` 的「非默认宏一致性」各一组） |
 | `release.yml` | 发布流程（构建产物 / 版本标签） |
 
 矩阵按「每个 feature 宏分支至少被一个 job 编译一次」设计；选项语义见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md)。CI 只负责「拉起构建 + 跑 CTest」，不承载测试设计。

@@ -7,8 +7,10 @@
 #
 # 登记语义（与归一化前行为一致，AuroraInstall 依赖）：
 #   - AURORA_FEATURE_DEFINES 仅含随安装导出的宏（后端 + 架构优化，EXPORT 显式声明）；
-#     SIMD / DEBUG / 编解码等内部宏不进——安装后消费者以无该宏的口径编译 aurora.h，
-#     强行导出反而制造 ODR / 剪裁不一致。
+#     SIMD / 编解码等纯内部宏不进——安装后消费者以无该宏的口径编译 aurora.h，
+#     强行导出反而制造剪裁不一致。
+#   - AURORA_ENABLE_DEBUG 例外：它改变类内存布局（Widget 新增数据成员），故由
+#     AuroraInstall.cmake 按**安装产物的实际取值**条件导出（见该模块），不在此登记。
 #
 # 选项语义以 codespec/BUILD_OPTIONS.md 为唯一权威来源；运行时查询入口为
 # aurora::debug::feature_flags()（include/aurora/debug/feature_flags.h）。

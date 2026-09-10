@@ -196,6 +196,7 @@ set(AURORA_ENABLE_DEBUG "AUTO" CACHE STRING
 set_property(CACHE AURORA_ENABLE_DEBUG PROPERTY STRINGS AUTO ON OFF)
 
 string(TOUPPER "${AURORA_ENABLE_DEBUG}" _aurora_debug_mode)
+set(AURORA_DEBUG_FORCED_ON OFF)   # 供 AuroraInstall.cmake 决定是否随安装导出该宏
 if (_aurora_debug_mode STREQUAL "AUTO")
     set(_aurora_debug_genex "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:AURORA_ENABLE_DEBUG>")
     aurora_define_feature(AURORA_ENABLE_DEBUG RAW "${_aurora_debug_genex}")
@@ -203,6 +204,7 @@ if (_aurora_debug_mode STREQUAL "AUTO")
 elseif (AURORA_ENABLE_DEBUG)
     set(_aurora_debug_genex "AURORA_ENABLE_DEBUG")
     aurora_define_feature(AURORA_ENABLE_DEBUG)
+    set(AURORA_DEBUG_FORCED_ON ON)
     aurora_log("Backend debug: ON (forced for all configurations)")
 else ()
     set(_aurora_debug_genex "")
