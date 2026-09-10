@@ -8,7 +8,7 @@
 #include <string>
 
 #include "aurora/app/perf_overlay.h"
-#include "aurora/core/assert.h"
+#include "aurora/core/aurora_assert.h"
 #include "aurora/core/result.h"
 #include "aurora/core/strict_mode.h"
 #include "aurora/core/thread.h"
@@ -719,7 +719,8 @@ class Window {
             // StrictMode 影子校验：合法 boundary 的尺寸只由约束决定，滚动（约束不变）
             // 不应改变其尺寸；若变化说明它实际依赖子节点，误判为 boundary。
             const Size after = w.size();
-            const bool size_unchanged =
+            // NDEBUG 下 AURORA_ASSERT 整体裁切，本行变量不再被读取——标注避免 -Wunused-variable。
+            [[maybe_unused]] const bool size_unchanged =
                 std::fabs(before.width - after.width) < 1e-3F && std::fabs(before.height - after.height) < 1e-3F;
             AURORA_ASSERT(
                 size_unchanged,

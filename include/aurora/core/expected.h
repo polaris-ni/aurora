@@ -4,7 +4,7 @@
 #include <type_traits>
 #include <utility>
 
-#include "aurora/core/assert.h"
+#include "aurora_assert.h"
 
 namespace aurora {
 

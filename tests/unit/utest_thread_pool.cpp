@@ -22,6 +22,7 @@ AURORA_TEST_CASE(default_worker_count_at_least_two) {
 }
 
 AURORA_TEST_CASE(constructor_scales_workers_and_rejects_zero) {
+    AURORA_TEST_REQUIRE_THREADS();
     const aurora::ThreadPool pool{3};
     AURORA_TEST_CHECK_EQ(pool.worker_count(), std::size_t{3});
 
@@ -31,6 +32,7 @@ AURORA_TEST_CASE(constructor_scales_workers_and_rejects_zero) {
 }
 
 AURORA_TEST_CASE(submit_returns_value_via_future) {
+    AURORA_TEST_REQUIRE_THREADS();
     aurora::ThreadPool pool{2};
     auto fut = pool.submit([]() -> int { return 21 * 2; });
     AURORA_TEST_CHECK_EQ(fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
@@ -38,6 +40,7 @@ AURORA_TEST_CASE(submit_returns_value_via_future) {
 }
 
 AURORA_TEST_CASE(submit_propagates_exceptions_through_future) {
+    AURORA_TEST_REQUIRE_THREADS();
     aurora::ThreadPool pool{2};
     auto fut = pool.submit([]() -> int { throw std::runtime_error{"task failed"}; });
     AURORA_TEST_CHECK_EQ(fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
@@ -52,6 +55,7 @@ AURORA_TEST_CASE(submit_propagates_exceptions_through_future) {
 }
 
 AURORA_TEST_CASE(void_submit_and_execute_complete_deterministically) {
+    AURORA_TEST_REQUIRE_THREADS();
     aurora::ThreadPool pool{2};
 
     // submit 的 void 形态：future 就绪即任务已完成。
@@ -68,6 +72,7 @@ AURORA_TEST_CASE(void_submit_and_execute_complete_deterministically) {
 }
 
 AURORA_TEST_CASE(execute_swallows_exceptions_fire_and_forget) {
+    AURORA_TEST_REQUIRE_THREADS();
     // 契约：execute 任务的异常在 worker 内吞掉，绝不跨出 worker 线程。
     aurora::ThreadPool pool{1};  // 单 worker 保证 FIFO 顺序
     std::promise<int> survived;
@@ -79,6 +84,7 @@ AURORA_TEST_CASE(execute_swallows_exceptions_fire_and_forget) {
 }
 
 AURORA_TEST_CASE(pending_count_reflects_queued_work) {
+    AURORA_TEST_REQUIRE_THREADS();
     aurora::ThreadPool pool{1};
     std::promise<void> release;
     const auto gate = release.get_future().share();  // 多个任务共享等待同一闸门
@@ -103,6 +109,7 @@ AURORA_TEST_CASE(pending_count_reflects_queued_work) {
 }
 
 AURORA_TEST_CASE(default_pool_is_process_wide_singleton) {
+    AURORA_TEST_REQUIRE_THREADS();
     // Meyers 单例：跨调用同址。
     AURORA_TEST_CHECK(&aurora::ThreadPool::default_pool() == &aurora::ThreadPool::default_pool());
     auto fut = aurora::ThreadPool::default_pool().submit([]() -> int { return 40 + 2; });

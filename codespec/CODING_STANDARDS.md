@@ -93,6 +93,11 @@
   花括号初始化列表——不会被预处理器切裂成多余宏参数，可直接内联。风格上仍建议较长或复用的实参先提为
   命名变量，保持断言行一眼可读。
 - 后端 / 平台专属用例在 feature 宏未开启的 `#else` 分支以 `AURORA_TEST_SKIP(原因)` 注册 skip 桩（计入 Skipped，不算失败、不伪造通过）。
+- **平台能力守卫**：用例依赖的平台能力缺失时，在用例体首行写 `AURORA_TEST_REQUIRE_THREADS()` /
+  `AURORA_TEST_REQUIRE_SUBPROCESS()`（能力具备时展开为 `static_cast<void>(0)`，缺失时即 `AURORA_TEST_SKIP`）。
+  目前唯一触发场景是 Emscripten：未开 `-pthread` 时无 `std::thread`（`-pthread` 会让产物要求
+  SharedArrayBuffer + COOP/COEP，属产品级取舍），且运行时没有 fork/exec。**判据以编译期能力宏为准**
+  （`__EMSCRIPTEN_PTHREADS__` / `__EMSCRIPTEN__`），不用「运行时 try 一下」的方式探测。
 - 会让进程异常终止的路径用 `AURORA_TEST_CHECK_DEATH(statement, expectation)`：框架 spawn 子进程**重跑同一用例**，
   只有该站点真正执行 statement（其余站点在子进程里被跳过）。`expectation` 给子串或 `matchers::` 匹配器时校验子进程
   stderr，传 `""` 表示只要求致死（宏为变参，`expectation` 含裸逗号同样安全）。约束：**死亡断言必须在用例内**（要靠用例身份重跑子进程）；语句里的副作用会因重跑

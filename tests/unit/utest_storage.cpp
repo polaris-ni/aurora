@@ -368,6 +368,7 @@ AURORA_TEST_CASE(on_change_unsubscribe_stops_delivery) {
 }
 
 AURORA_TEST_CASE(async_roundtrip_put_get_value_remove_list) {
+    AURORA_TEST_REQUIRE_THREADS();
     // 异步通道：async_put/async_get/async_get_value/async_remove/async_list 经线程池执行，
     // 回调（无主线程投递器时在 worker 直接调用）以 promise/future 同步等待。
     auto s = make_mem_storage();

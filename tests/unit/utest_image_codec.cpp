@@ -169,6 +169,7 @@ AURORA_TEST_CASE(static_image_degrades_to_single_frame_animation) {
 }
 
 AURORA_TEST_CASE(decode_async_resolves_to_same_result) {
+    AURORA_TEST_REQUIRE_THREADS();
     const Image src = make_image(3, 3, 0x20);
     const auto encoded = image::ImageCodecRegistry::instance().encode(src, image::EncodeOptions{});
     AURORA_TEST_REQUIRE_TRUE(encoded.ok());

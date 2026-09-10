@@ -141,6 +141,14 @@ auto check_death(const char* file, int line, std::string_view statement, const E
 /// 传空串表示不校验输出。
 /// 子分支以 [[noreturn]] 的 death_child_survived() 收尾，控制流不会落入后续语句，故不写 else
 /// （readability-else-after-return）。
+///
+/// ⚠️ Emscripten（wasm）下整条断言退化为 AURORA_TEST_SKIP：死亡测试依赖「重跑自身子进程」，
+///    而 wasm 运行时没有 fork/exec（spawn_death_child 的 fork 直接失败），子进程无从派发，
+///    硬跑只会恒定报 SiteMissed。跨编译下如实跳过，交由原生 job 守护。
+#if defined(__EMSCRIPTEN__)
+#define AURORA_TEST_CHECK_DEATH(statement, ...) \
+    AURORA_TEST_SKIP("死亡测试需 fork/exec 重跑自身进程，Emscripten 下不可用")
+#else
 #define AURORA_TEST_CHECK_DEATH(statement, ...)                                                  \
     do {                                                                                         \
         if (::aurora::testing::detail::death_child_should_run(__FILE__, __LINE__)) {             \
@@ -150,3 +158,4 @@ auto check_death(const char* file, int line, std::string_view statement, const E
         }                                                                                        \
         ::aurora::testing::detail::check_death(__FILE__, __LINE__, #statement, (__VA_ARGS__));   \
     } while (false)
+#endif

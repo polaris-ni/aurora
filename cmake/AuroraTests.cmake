@@ -44,15 +44,22 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_arch_module_map
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_arch_module_map.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-        # 生成器 aurora_api.json 合并不截断回归（直接调用真实构建产物）。
-        add_test(NAME check_gen_api_merge
-                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_gen_api_merge.py" "${CMAKE_BINARY_DIR}"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-        # aurora_api.json 与代码真实 API 的漂移守护（复用 gen_api_tools 提取，零三方漂移）。
-        # 同 check_gen_api_merge 前提：须先构建 gen_api_tools，故 CI 必须排在 build 之后。
-        add_test(NAME check_api_schema_sync
-                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_api_schema_sync.py" "${CMAKE_BINARY_DIR}"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 生成物依赖型门禁：须先构建生成器才能跑（CI 必须排在 build 之后）。
+        # ⚠️ Emscripten 交叉构建下不注册：二者要调用**宿主可执行**的生成器，而 wasm 产物的
+        #    gen_api_tools 是 .js（须 node 解释），gen_debug_api 同样不是原生 exe。让它们原生
+        #    化意味着在 wasm job 里再整编一遍 aurora 库（gen_api_tools 链接 aurora），成本与
+        #    linux/msvc 等原生 job 完全重复。故交叉构建下交由原生 job 守护，此处不注册。
+        if (NOT EMSCRIPTEN)
+            # 生成器 aurora_api.json 合并不截断回归（直接调用真实构建产物）。
+            add_test(NAME check_gen_api_merge
+                    COMMAND ${PYTHON3_EXE} "${_check_dir}/check_gen_api_merge.py" "${CMAKE_BINARY_DIR}"
+                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+            # aurora_api.json 与代码真实 API 的漂移守护（复用 gen_api_tools 提取，零三方漂移）。
+            # 同 check_gen_api_merge 前提：须先构建 gen_api_tools，故 CI 必须排在 build 之后。
+            add_test(NAME check_api_schema_sync
+                    COMMAND ${PYTHON3_EXE} "${_check_dir}/check_api_schema_sync.py" "${CMAKE_BINARY_DIR}"
+                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        endif ()
         # codespec 文档内部一致性守护（断链 / 失效锚点 / 章节号 / 反引号路径 / 特性表落点）。
         add_test(NAME check_codespec_xref
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_codespec_xref.py"
@@ -122,6 +129,26 @@ if (AURORA_BUILD_TESTS)
                 target_compile_options(${tgt} PRIVATE /fp:precise)
             endif ()
         endif ()
+        if (EMSCRIPTEN)
+            # NODERAWFS：Emscripten 默认 MEMFS，golden 基准 / 存储 / 临时文件等用例的
+            # ifstream/ofstream 全落在内存盘，读不到仓库里的真实文件（表现为「文件不存在」
+            # 而非断言失败）。NODERAWFS 让 node 直接透传宿主文件系统，与原生跑法语义一致。
+            # 仅测试 runner 需要：库与其它 wasm 产物保持默认（浏览器中无宿主 FS 可透传）。
+            #
+            # ALLOW_MEMORY_GROWTH：NODERAWFS 产物的堆**默认不可增长**（实测：带
+            #   -sNODERAWFS=1 -O3 -fexceptions 时分配 200MB 即 Aborted(OOM)，而不带
+            #   NODERAWFS 的同源程序可增长）。测试 runner 需要它——itest_play_repository
+            #   的程序化合成 catalog（192 项 × 图标/截图/横幅位图）远超初始堆。
+            #
+            # --post-js wasm_noderawfs_cwd.js：NODERAWFS 在 Windows 宿主下 FS.cwd() 返回
+            #   `D:\...`（盘符 + 反斜杠），musl getcwd 判 ENOENT → fs::current_path() /
+            #   fs::absolute(相对路径) 全线失效（详见该文件头部注释）。Linux/macOS 宿主本
+            #   就是 POSIX 形态，shim 为恒等变换。
+            target_link_options(${tgt} PRIVATE
+                    -sNODERAWFS=1
+                    -sALLOW_MEMORY_GROWTH=1
+                    "--post-js=${CMAKE_SOURCE_DIR}/tests/support/wasm_noderawfs_cwd.js")
+        endif ()
     endfunction()
 
     set(_runner_targets "")
@@ -174,6 +201,11 @@ if (AURORA_BUILD_TESTS)
     # 分片时脚本对各 runner --list 取并集后比对（脚本 --runner 可重复传入）。
     if (PYTHON3_EXE)
         set(_registry_cmd COMMAND ${PYTHON3_EXE} "${CMAKE_SOURCE_DIR}/tools/check/check_test_registry.py")
+        # 交叉构建（Emscripten）下 runner 是 .js，不能直接 exec：把 CTest 同款模拟器
+        # （Emscripten.cmake 设为 node）显式交给脚本前置到命令行。
+        if (EMSCRIPTEN AND CMAKE_CROSSCOMPILING_EMULATOR)
+            list(APPEND _registry_cmd --launcher "${CMAKE_CROSSCOMPILING_EMULATOR}")
+        endif ()
         foreach (_tgt ${_runner_targets})
             list(APPEND _registry_cmd --runner "$<TARGET_FILE:${_tgt}>")
         endforeach ()

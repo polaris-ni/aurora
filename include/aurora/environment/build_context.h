@@ -1,6 +1,6 @@
 #pragma once
 
-#include "aurora/core/assert.h"
+#include "aurora/core/aurora_assert.h"
 #include "aurora/core/types.h"
 #include "aurora/environment/environment.h"
 

@@ -53,6 +53,18 @@ if (MSVC)
     add_compile_options(/utf-8)
 endif ()
 
+# Emscripten：显式启用 C++ 异常。
+# Emscripten 默认「编译期开异常、运行期禁捕获」——JS 胶水里的 __Unwind_RaiseException
+# 直接是 `abort()`，实测任何 throw 都以 `Aborted(undefined)` 结束进程（测试框架
+# AURORA_TEST_SKIP 抛 CaseSkipped、Result::unwrap 抛 runtime_error 等一律中招）。
+# 必须编译 + 链接同参：链接期决定 JS 胶水是否带上 EH 运行时与 invoke_* 包装。
+# 用 Emscripten 的 JS 版 EH（-fexceptions）而非 -fwasm-exceptions：后者改 wasm EH ABI，
+# 与本仓以 -fno-exceptions 编译的 harfbuzz 目标混链会冲突；JS 版允许混链。
+if (EMSCRIPTEN)
+    string(APPEND CMAKE_CXX_FLAGS " -fexceptions")
+    aurora_log("Emscripten: C++ exceptions enabled (-fexceptions; runtime abort-on-throw otherwise)")
+endif ()
+
 # 导出 compile_commands.json 供 clangd / IDE 索引（不影响构建结果）。
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 

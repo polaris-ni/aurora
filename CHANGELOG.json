@@ -52,7 +52,9 @@
         "animation/animator.h：AnimationController 状态语义收紧——stop() 按最近端点报状态（value ≥ 0.5 → Completed，否则 Dismissed，进度冻结在当前位置）；带初值构造时 value ≥ 1.0 报 Completed（原先一律 Dismissed）；forward(from) 的 from ≥ 0 时夹取到 [0,1]（原先可越界）。",
         "event/gesture.h：RotationRecognizer::angle_delta() 返回单位由角度（度）统一为弧度（[-π, π]），与 TouchEvent::pinch_angle() 一致；按度消费的调用方需自行换算（× 180/π）。",
         "state/subscription.h：自由函数 bind(SignalView&, F) / bind(Store&, F) 改名 connect——State 基类链上的 std::enable_shared_from_this 使 std 进入实参的 ADL 关联命名空间集，无限定 bind(state, fn) 会被变参转发的 std::bind 吸走（编译通过但回调永不执行的静默错误，GCC 16 部分排序实测复现）；connect 与任何 std 名字无重叠，从根上排除歧义。迁移路径：将 aurora::bind( / au::bind( 全局替换为 aurora::connect( / au::connect(；Animator::bind 为成员函数不经 ADL，保持原名。",
-        "include/aurora/test_helpers.h 退出公共 API：该头（EventDispatcher 模拟、离屏渲染助手等测试专用设施，从未进入 GUIDELINE 配方）随测试体系重写移出安装面，落位仓库私有 tests/support/test_helpers.h 并停止随 cmake --install 导出。"
+
+        "include/aurora/test_helpers.h 退出公共 API：该头（EventDispatcher 模拟、离屏渲染助手等测试专用设施，从未进入 GUIDELINE 配方）随测试体系重写移出安装面，落位仓库私有 tests/support/test_helpers.h 并停止随 cmake --install 导出。",
+        "core/assert.h 重命名为 core/aurora_assert.h：头文件名与 C 标准库 <assert.h> 同名——core/types.h 的 #include \"assert.h\" 依赖「引号包含先搜同目录」这一脆弱解析，且同名头随安装面导出后会污染消费者的 include 搜索空间。宏名 AURORA_CHECK / AURORA_ASSERT 与签名均不变，仅头文件路径改名。"
       ],
       "added": [
         "tests/：自研注册式测试框架 + 251 个测试用例（单一 aurora_test_runner，CTest 逐用例进程隔离）；examples/demos 每公共源文件一个演示"
@@ -72,9 +74,10 @@
         "storage/storage.h：Storage::transaction 的 Batch 变更通知移至抑制守卫析构之后发出——原在守卫存活期间 emit_change 被自身的 notify_suppressed_ 标志静默丢弃，订阅者永远收不到批量变更事件。"
       ],
       "migrations": [
-        "断言语义分级：若既有代码依赖 AURORA_ASSERT 在 Release 下也拦截失败路径（如防御 UB 的硬不变量），请改用 AURORA_CHECK（#include \"aurora/core/assert.h\"，签名一致）；仅 debug 校验的场景无需改动，且 Release 下不再有断言开销。",
+        "断言语义分级：若既有代码依赖 AURORA_ASSERT 在 Release 下也拦截失败路径（如防御 UB 的硬不变量），请改用 AURORA_CHECK（#include \"aurora/core/aurora_assert.h\"，签名一致）；仅 debug 校验的场景无需改动，且 Release 下不再有断言开销。",
         "bind → connect：把对 aurora::bind(src, fn) / au::bind(src, fn) 的调用（src 为 State/Reactive/Computed/Store）全局替换为 connect；不替换虽可编译（命中 std::bind）但回调永不执行，务必迁移。",
-        "test_helpers.h 出公共 API：删除 #include \"aurora/test_helpers.h\" 即可；能力对照——离屏像素断言改用 HeadlessSurface（render_to_png），事件/焦点注入改用 event/ 公共接口或自带测试桩。"
+        "test_helpers.h 出公共 API：删除 #include \"aurora/test_helpers.h\" 即可；能力对照——离屏像素断言改用 HeadlessSurface（render_to_png），事件/焦点注入改用 event/ 公共接口或自带测试桩。",
+        "assert.h → aurora_assert.h：全局替换 #include \"aurora/core/assert.h\" 与 #include <aurora/core/assert.h> 为对应的 aurora_assert.h 形式（同目录相对包含 #include \"assert.h\" 亦改为 #include \"aurora_assert.h\"）；宏名与调用点无需改动。"
       ],
       "notes": [
         "版本定位与已知限制延续 1.0.0-alpha.1 条目 notes；本条目起 MSVC 与 GCC/Clang 同为受支持工具链，ctest 全量验收在两者上执行。"

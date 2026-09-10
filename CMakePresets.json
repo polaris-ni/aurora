@@ -33,7 +33,7 @@
     {
       "name": "wasm",
       "displayName": "Emscripten / WebAssembly (build-wasm)",
-      "description": "Equivalent to CI's `emcmake cmake` invocation: Emscripten toolchain via %EMSDK% (set by `emsdk activate --permanent`), WASM backend on, tests/demos off.",
+      "description": "Equivalent to CI's `emcmake cmake` invocation: Emscripten toolchain via %EMSDK% (set by `emsdk activate --permanent`), WASM backend on, tests on (run them with `ctest --test-dir build-wasm`), demos on-demand.",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-wasm",
       "cacheVariables": {

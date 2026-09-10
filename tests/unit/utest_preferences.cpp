@@ -247,6 +247,7 @@ AURORA_TEST_CASE(singleton_same_name_returns_same_instance) {
 }
 
 AURORA_TEST_CASE(concurrent_read_write_smoke) {
+    AURORA_TEST_REQUIRE_THREADS();
     // 并发冒烟：每线程独占写自己的键（最终值必为该线程最后一次写入），只验证无崩溃与串行化正确。
     prefs::Preferences p;
     constexpr int thread_count = 4;

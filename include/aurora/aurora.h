@@ -34,7 +34,7 @@
 #include "aurora/app/validate_ui.h"
 #include "aurora/commands.h"
 #include "aurora/core/accessibility.h"
-#include "aurora/core/assert.h"
+#include "aurora/core/aurora_assert.h"
 #include "aurora/core/color.h"
 #include "aurora/core/debug.h"
 #include "aurora/core/diagnostics.h"

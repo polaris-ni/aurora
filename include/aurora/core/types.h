@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <limits>
 
+#include "aurora_assert.h"
+
 namespace aurora {
 
 /// @brief 二维点（逻辑像素）。

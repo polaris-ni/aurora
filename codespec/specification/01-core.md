@@ -12,7 +12,7 @@
 | 几何与尺寸意图 | `types.h`、`dimension.h`、`transform.h`、`math.h` |
 | 颜色 | `color.h` |
 | 错误与结果 | `result.h`、`error_codes.h`、`error_codes.gen.h`、`expected.h` |
-| 诊断与降级 | `diagnostics.h`、`strict_mode.h`、`assert.h` |
+| 诊断与降级 | `diagnostics.h`、`strict_mode.h`、`aurora_assert.h` |
 | 日志 | `log.h`、`debug.h` |
 | 异步底座 | `thread_pool.h`、`thread.h` |
 | 时间与周期 | `time.h`、`duration.h`、`event_stream.h`、`file_watcher.h` |

@@ -50,6 +50,7 @@ struct MainPosterGuard {
 }  // namespace
 
 AURORA_TEST_CASE(co_async_delivers_value_to_await) {
+    AURORA_TEST_REQUIRE_THREADS();
     std::promise<Result<int>> box;
     // 闭包为用例局部变量，协程在返回帧销毁前经 wait_until 确认完成，闭包存活期覆盖协程生命周期。
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines)
@@ -72,6 +73,7 @@ AURORA_TEST_CASE(co_async_delivers_value_to_await) {
 }
 
 AURORA_TEST_CASE(co_async_captures_fn_exception_as_error) {
+    AURORA_TEST_REQUIRE_THREADS();
     // fn 抛异常：invoke_safe 转为 runtime-async-exception 错误，co_await 表达式不抛。
     std::promise<Error> box;
     // 闭包为用例局部变量，协程在返回帧销毁前经 wait_until 确认完成，闭包存活期覆盖协程生命周期。
@@ -96,6 +98,7 @@ AURORA_TEST_CASE(co_async_captures_fn_exception_as_error) {
 }
 
 AURORA_TEST_CASE(co_async_preserves_result_error_from_fn) {
+    AURORA_TEST_REQUIRE_THREADS();
     // fn 返回错误 Result：原样透传，不经异常包装。
     std::promise<Error> box;
     // 闭包为用例局部变量，协程在返回帧销毁前经 wait_until 确认完成，闭包存活期覆盖协程生命周期。
@@ -156,6 +159,7 @@ AURORA_TEST_CASE(synchronous_coroutine_completes_with_result) {
 }
 
 AURORA_TEST_CASE(continuation_resumes_through_main_poster) {
+    AURORA_TEST_REQUIRE_THREADS();
     // 投递器把 resume 排队，由用例线程排空：验证续体经主线程投递器恢复。
     std::mutex queue_mutex;
     std::vector<std::function<void()>> queued;

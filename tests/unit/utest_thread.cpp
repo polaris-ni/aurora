@@ -53,6 +53,7 @@ AURORA_TEST_CASE(zero_overhead_specialization_behaves_identically) {
 }
 
 AURORA_TEST_CASE(owner_is_constructing_thread) {
+    AURORA_TEST_REQUIRE_THREADS();
     // owner 取构造线程：在工作线程内构造并访问该实例（get/set 全程同线程，不触发断言中止）。
     std::promise<int> done;
     auto fut = done.get_future();

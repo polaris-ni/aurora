@@ -445,6 +445,44 @@ class TraceScope {
 /// @brief 无条件跳过本用例。用于后端 / 平台 feature 宏未开启的 `#else` 分支。
 #define AURORA_TEST_SKIP(reason) ::aurora::testing::detail::skip_case((reason))
 
+// ---- 平台能力守卫（能力缺失时跳过，而非伪装失败）----
+//
+// 判定集中在编译期，语义边界明确：跳过的是**平台能力**，不是被测逻辑。
+// 与 `#if 特性宏` 的 `#else` 分支 skip 桩同一契约——计入 Skipped，不算失败、不伪造通过。
+//
+// 线程：Emscripten 未开 `-pthread` 时 `std::thread` 构造直接抛 "Not supported"；
+//   开 pthread 会让产物要求 SharedArrayBuffer（浏览器侧需 COOP/COEP），属产品级取舍，
+//   不由测试决定，故此处如实跳过。`__EMSCRIPTEN_PTHREADS__` 仅由 `-pthread` 定义（实测）。
+// 子进程：Emscripten 运行时没有 fork/exec（`CreateProcess` 同理），跨进程语义用例
+//   （多进程偏好一致性等）无法在 wasm 内等价构造。
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+#define AURORA_TEST_HAS_THREADS 0
+#else
+#define AURORA_TEST_HAS_THREADS 1
+#endif
+
+#if defined(__EMSCRIPTEN__)
+#define AURORA_TEST_HAS_SUBPROCESS 0
+#else
+#define AURORA_TEST_HAS_SUBPROCESS 1
+#endif
+
+/// @brief 用例依赖 std::thread / 线程池：无线程能力时跳过本用例。
+#if AURORA_TEST_HAS_THREADS
+#define AURORA_TEST_REQUIRE_THREADS() static_cast<void>(0)
+#else
+#define AURORA_TEST_REQUIRE_THREADS() \
+    AURORA_TEST_SKIP("std::thread 需 Emscripten 的 -pthread，本 wasm 构建未开启")
+#endif
+
+/// @brief 用例依赖派发子进程（fork/exec 或 CreateProcess）：无子进程能力时跳过本用例。
+#if AURORA_TEST_HAS_SUBPROCESS
+#define AURORA_TEST_REQUIRE_SUBPROCESS() static_cast<void>(0)
+#else
+#define AURORA_TEST_REQUIRE_SUBPROCESS() \
+    AURORA_TEST_SKIP("跨进程用例需 fork/exec 派发子进程，Emscripten 运行时不可用")
+#endif
+
 /// @brief 作用域追踪：本作用域内的所有失败都附带这条上下文（对标 SCOPED_TRACE）。
 #define AURORA_TEST_TRACE(message) \
     AURORA_TEST_NO_C2Y_ const ::aurora::testing::detail::TraceScope AURORA_TEST_UNIQUE_(trace_scope_) { (message) }

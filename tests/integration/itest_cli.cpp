@@ -204,6 +204,7 @@ AURORA_TEST_CASE(cli_schema_lists_all_components_with_descriptors) {
 // ---------- CLI 端到端测试（运行 aurora_cli 可执行文件） ----------
 
 AURORA_TEST_CASE(cli_e2e_binary_smoke) {
+    AURORA_TEST_REQUIRE_SUBPROCESS();
     const std::string exe = probe_cli_exe();
     if (exe.empty()) {
         AURORA_TEST_SKIP("aurora_cli 未构建");

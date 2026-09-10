@@ -8,7 +8,7 @@
 #include <cmath>
 #include <cstdint>
 
-#include "aurora/core/assert.h"
+#include "aurora/core/aurora_assert.h"
 
 namespace aurora::detail {
 

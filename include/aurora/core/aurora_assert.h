@@ -32,5 +32,5 @@
 #ifndef NDEBUG
 #define AURORA_ASSERT(cond, msg) AURORA_CHECK(cond, msg)
 #else
-#define AURORA_ASSERT(cond, msg) ((void)(cond))
+#define AURORA_ASSERT(cond, msg) ((void)0)
 #endif

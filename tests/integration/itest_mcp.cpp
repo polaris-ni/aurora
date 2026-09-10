@@ -194,6 +194,7 @@ AURORA_TEST_CASE(mcp_get_schema_matches_component_count) {
 // ---------- MCP 协议端到端测试（运行 aurora_mcp 可执行文件） ----------
 
 AURORA_TEST_CASE(mcp_protocol_e2e_binary_smoke) {
+    AURORA_TEST_REQUIRE_SUBPROCESS();
     const int ret = run_mcp_smoke();
     if (ret == -1) {
         AURORA_TEST_SKIP("aurora_mcp 未构建");

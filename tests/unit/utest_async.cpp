@@ -52,6 +52,7 @@ struct MainPosterGuard {
 }  // namespace
 
 AURORA_TEST_CASE(async_delivers_value_to_then) {
+    AURORA_TEST_REQUIRE_THREADS();
     std::promise<Result<int>> box;
     auto task = async([]() -> int { return 40 + 2; });
     task.then([&box](const Result<int>& r) -> void { box.set_value(r); });
@@ -64,6 +65,7 @@ AURORA_TEST_CASE(async_delivers_value_to_then) {
 }
 
 AURORA_TEST_CASE(async_accepts_result_returning_fn) {
+    AURORA_TEST_REQUIRE_THREADS();
     // fn 返回 Result<T>：成功值与错误均原样透传（任务值类型萃取为 T，而非 Result<T>）。
     std::promise<Result<int>> ok_box;
     std::promise<Result<int>> err_box;
@@ -88,6 +90,7 @@ AURORA_TEST_CASE(async_accepts_result_returning_fn) {
 }
 
 AURORA_TEST_CASE(async_captures_fn_exception_as_error) {
+    AURORA_TEST_REQUIRE_THREADS();
     // fn 抛异常：invoke_safe 捕获并转为 runtime-async-exception 错误，不逃出 worker 线程。
     std::promise<Error> box;
     auto task = async([]() -> int { throw std::runtime_error{"boom"}; });
@@ -107,6 +110,7 @@ AURORA_TEST_CASE(async_captures_fn_exception_as_error) {
 }
 
 AURORA_TEST_CASE(async_cancel_drops_result_and_silences_callback) {
+    AURORA_TEST_REQUIRE_THREADS();
     std::promise<void> entered;
     std::promise<void> release;
     std::promise<void> finished;
@@ -135,6 +139,7 @@ AURORA_TEST_CASE(async_cancel_drops_result_and_silences_callback) {
 }
 
 AURORA_TEST_CASE(async_with_timeout_delivers_timeout_error) {
+    AURORA_TEST_REQUIRE_THREADS();
     std::promise<void> fn_done;
     auto fn_done_fut = fn_done.get_future();
 
@@ -164,6 +169,7 @@ AURORA_TEST_CASE(async_with_timeout_delivers_timeout_error) {
 }
 
 AURORA_TEST_CASE(async_completed_before_timeout_delivers_value) {
+    AURORA_TEST_REQUIRE_THREADS();
     std::promise<void> entered;
     std::promise<void> release;
     auto entered_fut = entered.get_future();
@@ -193,6 +199,7 @@ AURORA_TEST_CASE(async_completed_before_timeout_delivers_value) {
 }
 
 AURORA_TEST_CASE(then_delivery_routes_through_main_poster) {
+    AURORA_TEST_REQUIRE_THREADS();
     // 投递器把回调排队，由用例线程统一排空：验证投递走主线程投递器且恰一次。
     std::mutex queue_mutex;
     std::vector<std::function<void()>> queued;

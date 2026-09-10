@@ -14,7 +14,8 @@
 #                    PROFILING/TRACING/DEBUG 强制开（Release 下 FORCE=ON 分支）、DEBUG 强制关。
 #   4. asan        — AURORA_ENABLE_ASAN=ON（AddressSanitizer + UBSan）跑全量 ctest。
 #   5. coverage    — AURORA_ENABLE_COVERAGE=ON 的 `coverage` 聚合目标（内含 ctest + gcov 摘要）。
-#   6. wasm        — emcmake + AURORA_BACKEND_WASM=ON，仅构建库目标（Emscripten 下不链测试）。
+#   6. wasm        — emcmake + AURORA_BACKEND_WASM=ON，构建库与测试 runner 并跑 ctest
+#                    （Emscripten 无线程/子进程的能力用例以 SKIP 计入，见 tests/framework/assertions.h）。
 #   7. install     — cmake --install + 工作流内联最小消费端端到端验证
 #                    （find_package(Aurora) + 静态链接 + feature 宏导出一致性）。
 #
@@ -263,12 +264,12 @@ jobs:
           if-no-files-found: ignore
 
   # ---------------------------------------------------------------------------
-  # 6. WebAssembly：Emscripten 工具链 + WASM 后端（仅库目标）
+  # 6. WebAssembly：Emscripten 工具链 + WASM 后端（库 + 测试 runner + ctest）
   # ---------------------------------------------------------------------------
   wasm:
     name: wasm (emscripten)
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -278,10 +279,14 @@ jobs:
           version: latest
 
       - name: Configure (emcmake)
-        run: emcmake cmake -S . -B build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=OFF -DAURORA_BUILD_DEMOS=OFF
+        run: emcmake cmake -S . -B build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF
 
-      - name: Build (library)
-        run: cmake --build build-wasm --target aurora
+      - name: Build (library + tests)
+        run: cmake --build build-wasm
+
+      # ctest 经 CMAKE_CROSSCOMPILING_EMULATOR（Emscripten.cmake 设为 node）驱动 .js runner。
+      - name: Test (ctest)
+        run: ctest --test-dir build-wasm --output-on-failure -j"$(nproc)"
 
   # ---------------------------------------------------------------------------
   # 7. 安装 + find_package 消费端端到端验证

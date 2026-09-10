@@ -1,9 +1,9 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/core/assert.h
+/// 目标单元: include/aurora/core/aurora_assert.h
 /// 测试说明: 覆盖两级断言契约——AURORA_CHECK 常开（通过路径不中断、失败死亡测试、无花括号 if/else
 /// 安全组合）、AURORA_ASSERT debug-only（Debug 下求值一次与死亡行为、NDEBUG 下整体裁切条件不求值）
 
-#include "aurora/core/assert.h"
+#include "aurora/core/aurora_assert.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_assert {

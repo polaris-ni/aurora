@@ -35,6 +35,25 @@ struct CaseState {
     return state;
 }
 
+#if defined(__EMSCRIPTEN__)
+/// @brief 去掉 Windows 宿主的盘符前缀（`D:/x/y` → `/x/y`）。
+///
+/// Emscripten 的 argv[0] 是宿主给出的 .js 路径（Windows 带盘符，如
+/// `D:/repo/build-wasm/aurora_test_runner.js`）。在 wasm 的 POSIX 命名空间里
+/// `D:/x` **不是**绝对路径（不以 `/` 开头），`fs::absolute()` 会退化成
+/// `current_path() / "D:/x"`，拼出宿主目录下多一层假路径，向上找仓库根必然失败。
+/// 去盘符后才是 POSIX 视角的绝对路径，`fs::absolute` 原样返回，向上遍历得以命中。
+/// Node 解析 `/x/y` 时按当前盘符展开，故去掉盘符不会改变实际指向的文件。
+/// 非 Windows 宿主（Linux CI）的 argv[0] 本就无盘符，原样返回。
+[[nodiscard]] auto strip_windows_drive(std::string path) -> std::string {
+    if (path.size() >= 3 && ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+        path[1] == ':' && (path[2] == '/' || path[2] == '\\')) {
+        return "/" + path.substr(3);
+    }
+    return path;
+}
+#endif
+
 /// @brief 目录是否形如仓库根（codespec/ 与 CMakeLists.txt 同在，均为仓库根独有标志）。
 [[nodiscard]] auto looks_like_repo_root(const fs::path& dir) -> bool {
     std::error_code ec;
@@ -47,7 +66,13 @@ struct CaseState {
 /// 足以覆盖任意构建目录布局；安装到仓库外的 runner 定位失败，返回空串（cwd 不动）。
 [[nodiscard]] auto locate_repo_root() -> std::string {
     std::error_code ec;
+#if defined(__EMSCRIPTEN__)
+    // Emscripten：argv[0] 是宿主给出的 .js 路径（Windows 带盘符），须去盘符才能被
+    // fs::absolute 认作绝对路径（否则会拼上 cwd 多出一层假路径，见 strip_windows_drive）。
+    fs::path dir = fs::absolute(strip_windows_drive(detail::executable_path()), ec).parent_path();
+#else
     fs::path dir = fs::absolute(detail::executable_path(), ec).parent_path();
+#endif
     if (ec || dir.empty()) {
         dir = fs::current_path(ec);
         if (ec) {
@@ -151,7 +176,8 @@ auto setup() -> void {
     }
     std::error_code ec;
     const auto current = fs::current_path(ec);
-    if (ec || current.string() == root) {
+    // current_path() 失败（ec 置位）时不早退：仍要尝试切到仓库根。
+    if (!ec && current.string() == root) {
         return;
     }
     fs::current_path(root, ec);  // 切换失败保持原 cwd（用例内可用 paths::under_repo 兜底）

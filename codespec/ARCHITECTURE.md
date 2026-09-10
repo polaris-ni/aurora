@@ -399,7 +399,7 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 ### 12.5 传播策略
 
 - **可恢复失败**：沿调用链返回 `Result<T>`，调用方用 `if (result)` / `result.ok()` 检查；所有返回 `Result` 的接口标注 `[[nodiscard]]`，避免吞错。
-- **不可恢复错误**（断言边界）：使用 `assert` / 前置条件检查，见 `include/aurora/core/assert.h` 与 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §1。
+- **不可恢复错误**（断言边界）：使用 `assert` / 前置条件检查，见 `include/aurora/core/aurora_assert.h` 与 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §1。
 
 ---
 

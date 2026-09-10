@@ -222,6 +222,7 @@ AURORA_TEST_CASE(child_entry) {
 }
 
 AURORA_TEST_CASE(concurrent_writers_final_consistency) {
+    AURORA_TEST_REQUIRE_SUBPROCESS();
     // 每用例唯一临时目录：文件随用例结束由框架清理。
     const std::filesystem::path file = std::filesystem::path{aurora::testing::isolation::temp_dir()} / "mp.json";
 
@@ -267,6 +268,7 @@ AURORA_TEST_CASE(concurrent_writers_final_consistency) {
 }
 
 AURORA_TEST_CASE(delete_and_clear_epoch_propagation) {
+    AURORA_TEST_REQUIRE_SUBPROCESS();
     const std::filesystem::path file = std::filesystem::path{aurora::testing::isolation::temp_dir()} / "del.json";
 
     // ---------- 阶段 1：删除传播 ----------

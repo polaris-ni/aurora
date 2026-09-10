@@ -63,7 +63,9 @@ AURORA_TEST_CASE(fields_carry_scale_and_layout_size) {
 AURORA_TEST_CASE(env_of_missing_type_aborts_process) {
     // 失败路径（死亡测试）：env_of<T> 缺值按契约硬失败——AURORA_CHECK 常开，
     // 所有构建配置（含 Release）下都 abort，杜绝解引用 nullptr 的 UB。
-    constexpr aurora::BuildContext ctx;  // env 未注入
+    // Emscripten 下 AURORA_TEST_CHECK_DEATH 整体退化为 SKIP，ctx 不再被读取——标注避免
+    // -Wunused-variable（仅交叉构建触发；原生构建沿用死亡测试路径）。
+    [[maybe_unused]] constexpr aurora::BuildContext ctx;  // env 未注入
     // env_of<T> 缺值按契约 abort：此处仅执行语句触发死亡，引用返回值不可能被使用，故显式丢弃。
     AURORA_TEST_CHECK_DEATH((void)aurora::env_of<int>(ctx), "env_of");
 }

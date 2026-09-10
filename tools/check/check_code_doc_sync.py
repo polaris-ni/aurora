@@ -84,7 +84,7 @@ MODULE_DOMAINS = {
 AGG_HEADERS = {"include/aurora/aurora.h", "include/aurora/aurora_fwd.h",
                "include/aurora/aurora_pch.h"}
 HEADER_ONLY_EXEMPT = {
-    "include/aurora/core/assert.h", "include/aurora/core/color.h",
+    "include/aurora/core/aurora_assert.h", "include/aurora/core/color.h",
     "include/aurora/core/math.h", "include/aurora/core/types.h",
     "include/aurora/core/literals.h", "include/aurora/core/utf8.h",
 }

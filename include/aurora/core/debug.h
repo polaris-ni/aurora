@@ -1,6 +1,6 @@
 #pragma once
 
-#include <aurora/core/assert.h>
+#include "aurora_assert.h"
 
 namespace aurora::debug {
 

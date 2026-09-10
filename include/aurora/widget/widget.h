@@ -5,11 +5,9 @@
 #include <functional>
 #include <memory>
 #include <ranges>
-#include <string>
-#include <string_view>
 #include <vector>
 
-#include "aurora/core/assert.h"
+#include "aurora/core/aurora_assert.h"
 #include "aurora/core/strict_mode.h"
 #include "aurora/core/types.h"
 #include "aurora/debug/debug_paint.h"
@@ -567,7 +565,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
   public:
     /// @brief 设置布局后的全局盒（由父节点/布局系统写入，供方向键焦点导航）。
-    auto set_focus_bounds(Rect r) -> void { focus_bounds_ = r; }
+    auto set_focus_bounds(const Rect &r) -> void { focus_bounds_ = r; }
     /// @brief 读取布局后的全局盒。
     [[nodiscard]] auto focus_bounds() const -> Rect { return focus_bounds_; }
 

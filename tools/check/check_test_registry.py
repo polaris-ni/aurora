@@ -21,6 +21,8 @@
 # Usage (single runner):
 #   python3 tools/check/check_test_registry.py --runner <runner.exe> \
 #       --tests-dir tests/unit --tests-dir tests/integration
+# Cross-compiled builds (Emscripten) emit a .js runner; prepend its interpreter:
+#   python3 tools/check/check_test_registry.py --launcher node --runner <runner.js> ...
 # Sharded builds pass --runner repeatedly; the case lists are unioned before compare.
 # ============================================================================
 import argparse
@@ -59,12 +61,19 @@ def scan_source(path, stem):
     return expected
 
 
-def list_actual_cases(runner):
-    """Run `runner --list --format=cases`; return the list of `Suite.Case` names."""
-    proc = subprocess.run([runner, "--list", "--format=cases"], capture_output=True)
+def list_actual_cases(launcher, runner):
+    """Run `runner --list --format=cases`; return the list of `Suite.Case` names.
+
+    `launcher` is prepended to the command line: cross-compiled builds (Emscripten)
+    emit a `.js` runner that cannot be exec'd directly and needs node in front of it.
+    The build passes the same emulator CTest uses (`CMAKE_CROSSCOMPILING_EMULATOR`);
+    native builds pass nothing.
+    """
+    cmd = list(launcher) + [runner, "--list", "--format=cases"]
+    proc = subprocess.run(cmd, capture_output=True)
     if proc.returncode != 0:
         sys.stderr.write(proc.stderr.decode("utf-8", errors="replace"))
-        raise SystemExit(f"[FAIL] {runner} --list exited with {proc.returncode}")
+        raise SystemExit(f"[FAIL] {' '.join(cmd)} exited with {proc.returncode}")
     return [line.strip().rstrip("\r") for line in proc.stdout.decode("utf-8", errors="replace").splitlines()
             if line.strip()]
 
@@ -73,13 +82,21 @@ def main():
     parser = argparse.ArgumentParser(description="TEST-R6 case-level registry integrity gate")
     parser.add_argument("--runner", action="append", required=True,
                         help="path to an aurora_test_runner binary (repeatable for sharded builds)")
+    parser.add_argument("--launcher", action="append", default=[],
+                        help="interpreter to prepend to the runner command (repeatable; e.g. node for "
+                             "a cross-compiled .js runner). A single value may itself be a "
+                             "semicolon-separated list, matching CMake's list semantics.")
     parser.add_argument("--tests-dir", action="append", required=True,
                         help="test source directory (repeatable); *.cpp children are scanned")
     args = parser.parse_args()
 
+    launcher = []
+    for value in args.launcher:
+        launcher.extend(part for part in value.split(";") if part)
+
     actual = []
     for runner in args.runner:
-        actual.extend(list_actual_cases(runner))
+        actual.extend(list_actual_cases(launcher, runner))
     actual_set = set(actual)
     actual_suites = {name.split(".", 1)[0] for name in actual if "." in name}
 
