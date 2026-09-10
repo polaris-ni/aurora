@@ -1,4 +1,5 @@
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include "aurora/core/log.h"
@@ -130,7 +131,19 @@ auto create_window(const GlfwOptions &opts) -> Result<std::unique_ptr<Window>> {
     cfg.gl_major = opts.gl_major;
     cfg.gl_minor = opts.gl_minor;
     cfg.resizable = opts.resizable;
-    auto surf = std::make_unique<GlfwSurface>(cfg);  // 失败抛 std::runtime_error
+    // 无显示环境 / GL 上下文不可用（无头 CI、Basic Render 仅 GL 1.1 等）：构造抛
+    // std::runtime_error，转为 PlatformUnavailable 错误，对齐 X11/Wayland 工厂的 Result 契约，
+    // 异常不跨公共 API 边界。
+    std::unique_ptr<GlfwSurface> surf;
+    try {
+        surf = std::make_unique<GlfwSurface>(cfg);
+    } catch (const std::runtime_error &e) {
+        return make_error(ErrorCode::PlatformUnavailable,
+                          std::string("create_window(Glfw): ") + e.what() + " (no display or OpenGL context?).",
+                          "Run inside a desktop session with an OpenGL-capable display, or fall back to "
+                          "create_window(HeadlessOptions).",
+                          "aurora/window/window.h");
+    }
     return make_window(std::move(surf), opts);
 }
 #endif
