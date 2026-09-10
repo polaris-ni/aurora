@@ -426,14 +426,16 @@ auto X11Surface::begin_frame(int width, int height) -> Result<bool> {
 
 auto X11Surface::painter() -> Painter & { return impl_->painter; }
 
-#ifdef AURORA_ENABLE_DEBUG
+// 头文件无条件声明 data() override（虚表槽位恒存在），故定义也必须无条件编译；
+// Release 下回落 nullptr（save_snapshot 返回 disabled），与 Win32Surface 同构。
 auto X11Surface::data() const -> const std::uint8_t * {
+#ifdef AURORA_ENABLE_DEBUG
     if (impl_ && impl_->painter.data() != nullptr) {
         return impl_->painter.data();
     }
+#endif
     return nullptr;
 }
-#endif
 
 auto X11Surface::capture_window(const std::string &path) -> Result<bool> {
 #ifdef AURORA_ENABLE_DEBUG
