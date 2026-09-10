@@ -25,7 +25,7 @@
 #include <type_traits>
 
 #include "assertions.h"
-#include "test_types.h"
+#include "aurora/core/platform.h"
 
 namespace aurora::testing::detail {
 
@@ -145,7 +145,7 @@ auto check_death(const char* file, int line, std::string_view statement, const E
 /// ⚠️ Emscripten（wasm）下整条断言退化为 AURORA_TEST_SKIP：死亡测试依赖「重跑自身子进程」，
 ///    而 wasm 运行时没有 fork/exec（spawn_death_child 的 fork 直接失败），子进程无从派发，
 ///    硬跑只会恒定报 SiteMissed。跨编译下如实跳过，交由原生 job 守护。
-#if defined(__EMSCRIPTEN__)
+#if defined(AURORA_PLATFORM_WASM)
 #define AURORA_TEST_CHECK_DEATH(statement, ...) \
     AURORA_TEST_SKIP("死亡测试需 fork/exec 重跑自身进程，Emscripten 下不可用")
 #else

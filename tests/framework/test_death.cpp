@@ -6,9 +6,11 @@
 #include <string_view>
 #include <vector>
 
+#include "aurora/core/platform.h"
 #include "death_test.h"
+#include "test_types.h"
 
-#ifdef _WIN32
+#if defined(AURORA_PLATFORM_WINDOWS)
 // 只需要进程与句柄 API。刻意不再定义 WIN32_LEAN_AND_MEAN：自定义宏受本仓库
 // 「宏名须 AURORA_ 前缀」的命名门禁约束，而该宏由 SDK 头自行约定。
 #include <windows.h>
@@ -78,7 +80,7 @@ struct DeathState {
 /// 「程序名 + 参数」整体当成一个命令名，报「不是内部或外部命令」。
 /// stderr 采集由子进程自己 freopen 完成，因此也不需要 shell 的重定向能力。
 [[nodiscard]] auto spawn_and_wait(const std::string& program, const std::vector<std::string>& args) -> int {
-#ifdef _WIN32
+#if defined(AURORA_PLATFORM_WINDOWS)
     std::string line = '"' + program + '"';
     for (const auto& argument : args) {
         line += " \"" + argument + '"';

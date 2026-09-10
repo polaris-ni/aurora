@@ -1,5 +1,5 @@
 #pragma once
-#include "aurora/core/platform.h"
+#include "aurora/core/platform.h"  // NOLINT
 
 // WASM/Canvas Surface（ARCHITECTURE.md §8.4）：仅在 defined(AURORA_PLATFORM_WASM) 时提供。
 // 渲染到 HTML5 Canvas 的 ImageData。其他平台降级为 HeadlessSurface。
@@ -16,11 +16,19 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 
-#include <cstring>
-#include <memory>
 #include <string>
 
 #include "aurora/window/surface.h"
+
+// EM_ASM 的 JS 片段以 `$0`/`$1` 作参数占位符（Emscripten 宏契约，见 em_asm.h）。
+// `-Wpedantic` 下 clang 在词法阶段即把这些 token 判为「标识符含 $」扩展并报
+// -Wdollar-in-identifier-extension；片段经 `#code` 字符串化、不参与 C++ 求值，属误报。
+// 该守卫必须位于首个 `$` token 之前（诊断按文件位置生效），且与文件末尾的 pop
+// 同处一个平台守卫内——否则条件为假时 pop 会与未展开的 push 失配。
+#ifdef AURORA_COMPILER_CLANG
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
+#endif
 
 namespace aurora {
 
@@ -171,5 +179,9 @@ class WasmSurface : public Surface {
 };
 
 }  // namespace aurora
+
+#ifdef AURORA_COMPILER_CLANG
+#pragma clang diagnostic pop
+#endif
 
 #endif  // AURORA_BACKEND_WASM / AURORA_PLATFORM_WASM

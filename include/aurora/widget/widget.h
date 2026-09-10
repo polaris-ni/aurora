@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "aurora/core/aurora_assert.h"
+#include "aurora/core/platform.h"  // NOLINT
 #include "aurora/core/strict_mode.h"
 #include "aurora/core/types.h"
 #include "aurora/debug/debug_paint.h"
@@ -453,7 +454,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     [[nodiscard]] virtual auto child_nodes() const -> const std::vector<Node> & {
         // 不用 static constexpr：MSVC STL 的 constexpr 容器仅 _ITERATOR_DEBUG_LEVEL==0 可用，
         // Debug（IDL=2）下报 C2131；static const（magic static）语义等价且跨编译器安全。
-        static const std::vector<Node> EMPTY;
+        static const std::vector<Node> EMPTY;  // NOLINT
         return EMPTY;
     }
 
@@ -800,8 +801,11 @@ class LeafWidget : public Widget {
         return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local) ? this : nullptr;
     }
 
+// clang 无 "-Wdangling-pointer" 告警组（实测报 -Wunknown-warning-option），故压制只在 GCC 下展开。
+#if defined(AURORA_COMPILER_GCC)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdangling-pointer"
+#endif
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
         (void)ctx;
@@ -814,7 +818,9 @@ class LeafWidget : public Widget {
                    ? std::vector{HitNode{this, weak_from_this(), bounds.origin}}
                    : std::vector<HitNode>{};
     }
+#if defined(AURORA_COMPILER_GCC)
 #pragma GCC diagnostic pop
+#endif
 };
 
 /**

@@ -4,11 +4,12 @@
 #include <typeinfo>
 
 #include "assertions.h"
+#include "aurora/core/platform.h"
 #include "test_types.h"
 
 // 反修饰仅服务于诊断文本。`<cxxabi.h>` 只在 GNU 系标准库里；clang-tidy 以自身 target 解析
 // GCC 标准库时可能取不到该头，故探测存在后再包含，缺失时退回 typeid 的原始名字。
-#if __has_include(<cxxabi.h>) && (defined(__GNUC__) || defined(__clang__))
+#if __has_include(<cxxabi.h>) && (defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG))
 #include <cxxabi.h>
 #define AURORA_TEST_HAVE_CXXABI 1  // NOLINT(*-macro-usage)
 #endif
@@ -17,7 +18,7 @@ namespace aurora::testing {
 
 auto current_context_slot() -> TestContext*& {
     // 函数内 thread_local：既规避静态初始化顺序问题，也让「无活动用例」的状态可判定。
-    static thread_local TestContext* slot = nullptr;
+    thread_local TestContext* slot = nullptr;
     return slot;
 }
 

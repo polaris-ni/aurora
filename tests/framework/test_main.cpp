@@ -1,7 +1,11 @@
 // 测试框架入口：main 由框架唯一提供，测试文件禁止自定义 main()。
-#if defined(_MSC_VER)
+#include "aurora/core/platform.h"  // NOLINT
+
+// MSVC CRT 家族（MSVC 与 clang-cl 共用同一套 CRT，故同一分支）。
+#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
 #include <crtdbg.h>  // _set_abort_behavior / _CrtSetReportMode（关闭 Debug CRT abort 弹窗）
 #endif
+
 #include <algorithm>
 #include <charconv>
 #include <condition_variable>
@@ -305,9 +309,9 @@ auto run_selected(const std::vector<const TestCase*>& selected, const CliOptions
 }  // namespace
 
 auto main(int argc, char** argv) -> int {
-#if defined(_MSC_VER)
+#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
     // MSVC Debug CRT 的 abort() 默认弹「abort() has been called」模态对话框
-    //（_CALL_REPORTFAULT + _CRT_ASSERT 窗口模式）。死亡测试子进程以 abort() 为致死路径，
+    // （_CALL_REPORTFAULT + _CRT_ASSERT 窗口模式）。死亡测试子进程以 abort() 为致死路径，
     // 弹窗会挂住无人值守的 ctest / CLion 运行；统一降级为调试器输出（父进程与 death-child
     // 子进程经此处重跑 main 均生效）。abort 的退出码（3）与「已致死」判据不受影响。
     _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG);
@@ -342,7 +346,7 @@ auto main(int argc, char** argv) -> int {
         // 死亡测试的 stderr 期望依赖该诊断文本，故子进程统一自装 terminate handler：
         // 解出当前异常的 what() 打到 stderr（stderr 已被 freopen 到采集文件或为无缓冲
         // 管道），再以 abort() 保证非 0 退出码（判据「已致死」不变）。
-        std::set_terminate([]() {
+        std::set_terminate([] {
             if (const auto current = std::current_exception()) {
                 try {
                     std::rethrow_exception(current);

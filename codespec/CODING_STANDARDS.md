@@ -97,7 +97,12 @@
   `AURORA_TEST_REQUIRE_SUBPROCESS()`（能力具备时展开为 `static_cast<void>(0)`，缺失时即 `AURORA_TEST_SKIP`）。
   目前唯一触发场景是 Emscripten：未开 `-pthread` 时无 `std::thread`（`-pthread` 会让产物要求
   SharedArrayBuffer + COOP/COEP，属产品级取舍），且运行时没有 fork/exec。**判据以编译期能力宏为准**
-  （`__EMSCRIPTEN_PTHREADS__` / `__EMSCRIPTEN__`），不用「运行时 try 一下」的方式探测。
+  （`core/platform.h` 的 `AURORA_CAP_THREADS` 与 `AURORA_PLATFORM_WASM`），不用「运行时 try 一下」的方式探测。
+- **用例不得依赖进程隔离兜住全局副作用**：CTest 虽按文件分进程，但单进程顺序跑（`aurora_test_runner`
+  全量 / `--shuffle`）是同等受支持的跑法。凡操作进程级单例或全局状态，用例结束前须走该子系统的
+  **完整关闭/重置路径**——例：关闭字体走 `shutdown_font_discovery()`（先逐个释放 FT_Face 再销毁
+  FT_Library），而非裸 `ft_shutdown()`；后者留下野 FT_Face，崩点随执行顺序漂移到任意用例。不要在
+  用例注释里写「各用例进程隔离，故不影响其他测试文件」这类免责假设。
 - 会让进程异常终止的路径用 `AURORA_TEST_CHECK_DEATH(statement, expectation)`：框架 spawn 子进程**重跑同一用例**，
   只有该站点真正执行 statement（其余站点在子进程里被跳过）。`expectation` 给子串或 `matchers::` 匹配器时校验子进程
   stderr，传 `""` 表示只要求致死（宏为变参，`expectation` 含裸逗号同样安全）。约束：**死亡断言必须在用例内**（要靠用例身份重跑子进程）；语句里的副作用会因重跑

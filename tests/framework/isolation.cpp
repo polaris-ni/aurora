@@ -7,9 +7,10 @@
 #include <string>
 
 #include "aurora/app/clipboard.h"
+#include "aurora/core/platform.h"
 #include "death_test.h"
 
-#ifdef _WIN32
+#if defined(AURORA_PLATFORM_WINDOWS)
 // 只需要进程与环境变量 API（同 test_death.cpp 的取舍，不自定义 WIN32_LEAN_AND_MEAN）。
 #include <windows.h>
 #endif
@@ -35,7 +36,7 @@ struct CaseState {
     return state;
 }
 
-#if defined(__EMSCRIPTEN__)
+#if defined(AURORA_PLATFORM_WASM)
 /// @brief 去掉 Windows 宿主的盘符前缀（`D:/x/y` → `/x/y`）。
 ///
 /// Emscripten 的 argv[0] 是宿主给出的 .js 路径（Windows 带盘符，如
@@ -66,7 +67,7 @@ struct CaseState {
 /// 足以覆盖任意构建目录布局；安装到仓库外的 runner 定位失败，返回空串（cwd 不动）。
 [[nodiscard]] auto locate_repo_root() -> std::string {
     std::error_code ec;
-#if defined(__EMSCRIPTEN__)
+#if defined(AURORA_PLATFORM_WASM)
     // Emscripten：argv[0] 是宿主给出的 .js 路径（Windows 带盘符），须去盘符才能被
     // fs::absolute 认作绝对路径（否则会拼上 cwd 多出一层假路径，见 strip_windows_drive）。
     fs::path dir = fs::absolute(strip_windows_drive(detail::executable_path()), ec).parent_path();
@@ -94,7 +95,7 @@ struct CaseState {
 
 /// @brief 跨进程安全的进程内环境变量写入（TMPDIR/TMP/TEMP 三处同步接管）。
 auto set_env(const char* name, const std::string& value) -> void {
-#ifdef _WIN32
+#if defined(AURORA_PLATFORM_WINDOWS)
     (void)_putenv_s(name, value.c_str());
 #else
     (void)setenv(name, value.c_str(), 1);
@@ -103,7 +104,8 @@ auto set_env(const char* name, const std::string& value) -> void {
 
 /// @brief 读取环境变量（未设置返回空串）。
 [[nodiscard]] auto get_env(const char* name) -> std::string {
-#ifdef _MSC_VER
+// MSVC CRT 家族：MSVC 与 clang-cl 共用同一套 CRT（均提供 _dupenv_s），故两者取同一分支。
+#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
     char* raw = nullptr;
     std::size_t length = 0;
     (void)_dupenv_s(&raw, &length, name);  // 返回 malloc 副本：包进 unique_ptr（free 作 deleter）RAII 释放
@@ -139,7 +141,7 @@ auto set_env(const char* name, const std::string& value) -> void {
     // （如 WSL 继承了 Windows 的 TMP/TEMP，libstdc++ 的 temp_directory_path 直接报 ENOENT）。
     std::error_code base_ec;
     auto base = ensure_base_dir(fs::temp_directory_path(base_ec));
-#ifndef _WIN32
+#if !defined(AURORA_PLATFORM_WINDOWS)
     if (base.empty()) {
         base = ensure_base_dir(fs::path{"/tmp"});
     }

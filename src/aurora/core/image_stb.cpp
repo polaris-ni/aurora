@@ -3,8 +3,8 @@
 
 #include "aurora/core/platform.h"
 
-#define STB_IMAGE_IMPLEMENTATION // NOLINT(*-identifier-naming)
-#define STB_IMAGE_STATIC         // NOLINT(*-identifier-naming)
+#define STB_IMAGE_IMPLEMENTATION  // NOLINT(*-identifier-naming)
+#define STB_IMAGE_STATIC  // NOLINT(*-identifier-naming)
 // stb_image 是单头库，定义大量 static 函数，项目仅用到其中少数；GCC/clang 会对其余
 // 未调用函数报 -Wunused-function（第三方代码，非本仓库问题），此处局部抑制。
 #if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG)
@@ -12,6 +12,10 @@
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
+// -Wstringop-overflow / -Wmaybe-uninitialized 是 GCC 专有告警组：clang 不识别（实测 clang 22.1
+// 报 -Wunknown-warning-option），故这两条只在 GCC 下展开；push/pop 仍由上下两个 GCC||CLANG 块配对。
+#ifdef AURORA_COMPILER_GCC
 #pragma GCC diagnostic ignored "-Wstringop-overflow"
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
@@ -20,7 +24,6 @@
 #pragma GCC diagnostic pop
 #endif
 
-#include <cstring>
 #include <string>
 #include <vector>
 
@@ -34,11 +37,11 @@ auto load_image_stb(const std::vector<std::uint8_t> &buf, std::string_view path)
     int h = 0;
     int channels = 0;
     stbi_uc *data =
-        stbi_load_from_memory(buf.data(), static_cast<int>(buf.size()), &w, &h, &channels, 4); // 强制 4 通道 RGBA8
+        stbi_load_from_memory(buf.data(), static_cast<int>(buf.size()), &w, &h, &channels, 4);  // 强制 4 通道 RGBA8
     if (data == nullptr) {
-        return make_error(ErrorCode::IOImageDecodeFailed,
-                          std::string("Image::load: stb decode failed (unsupported format or corrupted file): ") +
-                              std::string(path));
+        return make_error(
+            ErrorCode::IOImageDecodeFailed,
+            std::string("Image::load: stb decode failed (unsupported format or corrupted file): ") + std::string(path));
     }
     if (w <= 0 || h <= 0) {
         stbi_image_free(data);
@@ -55,4 +58,4 @@ auto load_image_stb(const std::vector<std::uint8_t> &buf, std::string_view path)
     return img;
 }
 
-} // namespace aurora::detail
+}  // namespace aurora::detail

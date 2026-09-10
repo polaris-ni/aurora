@@ -3,10 +3,10 @@
 # check_platform_macros.py - zero-raw-platform-macro gate (requirement #14)
 # ----------------------------------------------------------------------------
 # Spec: codespec/specification/06-app-platform.md §12.1
-#   "平台 / 架构 / 位宽分支一律使用 core/platform.h 的规范化目标宏
-#    (AURORA_PLATFORM_* / AURORA_ARCH_* / AURORA_BIT_*)，禁止直接书写
-#    _WIN32 / __linux__ 等原生宏。例外：该头自身、third_party/、CMake 脚本、
-#    _WIN32_WINNT 等 SDK 版本旋钮。"
+#   "平台 / 架构 / 位宽 / 编译器 / 能力分支一律使用 core/platform.h 的规范化目标宏
+#    (AURORA_PLATFORM_* / AURORA_ARCH_* / AURORA_BIT_* / AURORA_COMPILER_* /
+#    AURORA_CAP_*)，禁止直接书写 _WIN32 / __linux__ 等原生宏。例外：该头自身、
+#    third_party/、CMake 脚本、_WIN32_WINNT 等 SDK 版本旋钮。"
 #
 # Check points:
 #   1) [blocking] No raw platform/arch/bit-width macro may appear in a
@@ -17,8 +17,8 @@
 #      Compiler-feature macros (__GNUC__ / __clang__ / _MSC_VER) are NOT
 #      platform/arch/bit-width macros and stay allowed.
 #   2) [report only] Density of canonical AURORA_PLATFORM_*/AURORA_ARCH_*/
-#      AURORA_BIT_*/AURORA_BACKEND_* conditional branches is printed for
-#      trend tracking; it never fails the gate.
+#      AURORA_BIT_*/AURORA_BACKEND_*/AURORA_CAP_* conditional branches is
+#      printed for trend tracking; it never fails the gate.
 #
 # Exit code: 1 when a banned raw macro is found; otherwise 0.
 #
@@ -44,7 +44,7 @@ BANNED_MACROS = {
     "__SIZEOF_POINTER__",
 }
 
-CANONICAL_PREFIXES = ("AURORA_PLATFORM_", "AURORA_ARCH_", "AURORA_BIT_", "AURORA_BACKEND_")
+CANONICAL_PREFIXES = ("AURORA_PLATFORM_", "AURORA_ARCH_", "AURORA_BIT_", "AURORA_BACKEND_", "AURORA_CAP_")
 
 # Files exempt from the banned-macro rule (the canonical-macro definition
 # site must itself inspect raw macros to define them).

@@ -24,6 +24,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "aurora/core/platform.h"
 #include "value_print.h"
 
 namespace aurora::testing {
@@ -158,7 +159,7 @@ template <typename T>
     // 再与 nullptr 比较会让 GCC 报 -Wnonnull-compare（该诊断依赖优化期推断，故仅
     // -O1 及以上出现）。数组天然非空，直接走视图构造即可 —— 与指针分支的非空路径
     // 同为 C 串语义（截断到首个 '\0'），行为不变。
-    if constexpr (std::is_array_v<std::remove_reference_t<T>>) {
+    if constexpr (std::is_array_v<std::remove_reference_t<T>>) {  // NOLINT(*-branch-clone)
         return std::string_view{text};
     } else if constexpr (std::is_same_v<std::decay_t<T>, const char*> || std::is_same_v<std::decay_t<T>, char*>) {
         return text == nullptr ? std::string_view{} : std::string_view{text};
@@ -265,7 +266,7 @@ class TraceScope {
 
 /// clang 把 `__COUNTER__` 归为 C2y 扩展并逐点告警（GCC / MSVC 不报），就地把该告警关掉；
 /// 非 clang 编译器下展开为空。
-#ifdef __clang__
+#if defined(AURORA_COMPILER_CLANG)
 #define AURORA_TEST_NO_C2Y_ _Pragma("clang diagnostic ignored \"-Wc2y-extensions\"")
 #else
 #define AURORA_TEST_NO_C2Y_  // NOLINT(*-identifier-naming)
@@ -452,16 +453,17 @@ class TraceScope {
 //
 // 线程：Emscripten 未开 `-pthread` 时 `std::thread` 构造直接抛 "Not supported"；
 //   开 pthread 会让产物要求 SharedArrayBuffer（浏览器侧需 COOP/COEP），属产品级取舍，
-//   不由测试决定，故此处如实跳过。`__EMSCRIPTEN_PTHREADS__` 仅由 `-pthread` 定义（实测）。
+//   不由测试决定，故此处如实跳过。判据取自 `core/platform.h` 的能力宏 `AURORA_CAP_THREADS`
+//   （`__EMSCRIPTEN_PTHREADS__` 仅由 `-pthread` 定义，实测）。
 // 子进程：Emscripten 运行时没有 fork/exec（`CreateProcess` 同理），跨进程语义用例
 //   （多进程偏好一致性等）无法在 wasm 内等价构造。
-#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
-#define AURORA_TEST_HAS_THREADS 0
-#else
+#if AURORA_CAP_THREADS
 #define AURORA_TEST_HAS_THREADS 1
+#else
+#define AURORA_TEST_HAS_THREADS 0
 #endif
 
-#if defined(__EMSCRIPTEN__)
+#if defined(AURORA_PLATFORM_WASM)
 #define AURORA_TEST_HAS_SUBPROCESS 0
 #else
 #define AURORA_TEST_HAS_SUBPROCESS 1
@@ -471,16 +473,14 @@ class TraceScope {
 #if AURORA_TEST_HAS_THREADS
 #define AURORA_TEST_REQUIRE_THREADS() static_cast<void>(0)
 #else
-#define AURORA_TEST_REQUIRE_THREADS() \
-    AURORA_TEST_SKIP("std::thread 需 Emscripten 的 -pthread，本 wasm 构建未开启")
+#define AURORA_TEST_REQUIRE_THREADS() AURORA_TEST_SKIP("std::thread 需 Emscripten 的 -pthread，本 wasm 构建未开启")
 #endif
 
 /// @brief 用例依赖派发子进程（fork/exec 或 CreateProcess）：无子进程能力时跳过本用例。
 #if AURORA_TEST_HAS_SUBPROCESS
 #define AURORA_TEST_REQUIRE_SUBPROCESS() static_cast<void>(0)
 #else
-#define AURORA_TEST_REQUIRE_SUBPROCESS() \
-    AURORA_TEST_SKIP("跨进程用例需 fork/exec 派发子进程，Emscripten 运行时不可用")
+#define AURORA_TEST_REQUIRE_SUBPROCESS() AURORA_TEST_SKIP("跨进程用例需 fork/exec 派发子进程，Emscripten 运行时不可用")
 #endif
 
 /// @brief 作用域追踪：本作用域内的所有失败都附带这条上下文（对标 SCOPED_TRACE）。

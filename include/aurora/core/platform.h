@@ -9,7 +9,7 @@
  * （例外：`third_party/` 三方源码、CMake 脚本、以及 `_WIN32_WINNT`/`_WIN32_IE` 这类
  * Windows SDK 版本旋钮——它们不是平台探测，而是 SDK 头的开关）。
  *
- * 四类目标宏（均为「编译器内建宏探测」，不经 CMake 注入，任何 TU 直接可用）：
+ * 五类目标宏（均为「编译器内建宏探测」，不经 CMake 注入，任何 TU 直接可用）：
  *  - `AURORA_PLATFORM_*` 平台家族：受支持的平台上**恰好一个**具体平台宏置 1，其余保持未定义；
  *    另有聚合宏 `AURORA_PLATFORM_UNIX`（unix-like 家族命中即置 1，可与具体平台宏同时为真）。
  *  - `AURORA_ARCH_*`     CPU 架构：已知架构上**恰好一个**置 1。
@@ -19,6 +19,8 @@
  *    `AURORA_COMPILER_MSVC` **恰好一个**置 1；派生精化宏 `AURORA_COMPILER_APPLE_CLANG` /
  *    `AURORA_COMPILER_CLANG_CL` / `AURORA_COMPILER_MINGW` / `AURORA_COMPILER_EMSCRIPTEN`
  *    可与对应 base 同时为真，用于细分工具链（Clang 家族可细分出 Apple / CL / Emscripten）。
+ *  - `AURORA_CAP_*`      编译期能力：**恒定义**且取值为 0/1，回答「本 TU 可用什么能力」而非
+ *    「目标是什么平台」；现仅 `AURORA_CAP_THREADS`（Emscripten 未开 `-pthread` 时为 0，其余目标为 1）。
  *
  * 原生宏 → Aurora 宏 映射表（判定顺序即下述先后，前缀命中优先）：
  *  | 原生宏                                        | Aurora 宏                    |
@@ -43,6 +45,7 @@
  *  | `_MSC_VER`（非 clang）                          | `AURORA_COMPILER_MSVC`       |
  *  | `__GNUC__`（非 clang）                          | `AURORA_COMPILER_GCC`        |
  *  | `__GNUC__ && (__MINGW32__||__MINGW64__)`       | `AURORA_COMPILER_MINGW`      |
+ *  | `__EMSCRIPTEN__` 且无 `__EMSCRIPTEN_PTHREADS__` | `AURORA_CAP_THREADS` = 0     |
  *
  * 判定顺序要点：
  *  - WASM 必须先于 Linux 判定（Emscripten 工具链基于 musl，会预定义 `__linux__`/`__unix__`）；
@@ -140,6 +143,18 @@
 #if defined(__MINGW32__) || defined(__MINGW64__)
 #define AURORA_COMPILER_MINGW 1
 #endif
+#endif
+
+// ─────────────────────────── AURORA_CAP_*：编译期能力 ───────────────────────────
+// 与平台家族的区别：能力宏**恒定义**且取值 0/1，回答「本 TU 能用什么」，而非「目标是什么平台」。
+//   AURORA_CAP_THREADS —— Emscripten 未开 `-pthread` 时 `std::thread` 构造直接抛 "Not supported"
+//   （`__EMSCRIPTEN_PTHREADS__` 仅由 `-pthread` 定义，实测），该组合取 0；其余目标一律取 1。
+//   判据是**编译期能力**而非运行期试探：开 `-pthread` 会让 wasm 产物要求 SharedArrayBuffer + COOP/COEP，
+//   属产品级取舍，由构建方决定后在此如实反映。
+#if defined(AURORA_PLATFORM_WASM) && !defined(__EMSCRIPTEN_PTHREADS__)
+#define AURORA_CAP_THREADS 0
+#else
+#define AURORA_CAP_THREADS 1
 #endif
 
 // NOLINTEND(*-macro-usage)

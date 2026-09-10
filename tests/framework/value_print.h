@@ -12,7 +12,8 @@
 // 稀疏枚举（如 `FontWeight{100..900}`）因此走数值分支，不会误报。
 //
 // 定制点：`aurora::testing::ValuePrinter<T>` 可被测试 TU 显式特化，为自有类型给出
-// 更友好的输出（框架本身不依赖任何 aurora 头，保持与库解耦）。
+// 更友好的输出（框架正文不依赖任何 aurora 头；唯一例外是零成本纯宏头
+// `aurora/core/platform.h`——平台判定 SSOT，零 `#include`、零运行时成本，用以取代裸平台宏）。
 // ============================================================
 
 #include <cstddef>
@@ -32,6 +33,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/core/platform.h"
 #include "known_enums.h"
 
 namespace aurora::testing {
@@ -127,7 +129,7 @@ template <typename A, typename B>
 }
 
 template <typename T>
-[[nodiscard]] inline auto via_stream(const T& value) -> std::string {
+[[nodiscard]] auto via_stream(const T& value) -> std::string {
     std::ostringstream out;
     out << value;
     return out.str();
@@ -135,7 +137,7 @@ template <typename T>
 
 template <typename T>
     requires std::is_floating_point_v<T>
-[[nodiscard]] inline auto float_text(T value) -> std::string {
+[[nodiscard]] auto float_text(T value) -> std::string {
     std::ostringstream out;
     out.precision(std::numeric_limits<T>::max_digits10);
     out << value;
@@ -143,8 +145,8 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] inline auto type_name_str() -> std::string {
-#if defined(__GNUC__) || defined(__clang__)
+[[nodiscard]] auto type_name_str() -> std::string {
+#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG)
     // GCC/Clang：`... [with T = aurora::Alignment; ...]` / `... [T = aurora::Alignment]`
     return clean_type_name(__PRETTY_FUNCTION__);
 #else
@@ -154,7 +156,7 @@ template <typename T>
 }
 
 template <typename E>
-[[nodiscard]] inline auto enum_text(E value) -> std::string {
+[[nodiscard]] auto enum_text(E value) -> std::string {
     static_assert(std::is_enum_v<E>, "enum_text 仅用于枚举类型");
     const auto numeric = static_cast<long long>(static_cast<std::underlying_type_t<E>>(value));
     const std::string qualified = type_name_str<E>();
@@ -170,7 +172,7 @@ template <typename E>
 }
 
 template <typename C>
-[[nodiscard]] inline auto byte_dump(const C& bytes) -> std::string {
+[[nodiscard]] auto byte_dump(const C& bytes) -> std::string {
     constexpr std::size_t max_bytes = 32;
     std::ostringstream out;
     out << "<" << std::distance(std::begin(bytes), std::end(bytes)) << " bytes:";
@@ -188,7 +190,7 @@ template <typename C>
 }
 
 template <typename T>
-[[nodiscard]] inline auto generic_print(const T& value) -> std::string {
+[[nodiscard]] auto generic_print(const T& value) -> std::string {
     using Plain = std::remove_cv_t<T>;
 
     if constexpr (std::is_same_v<Plain, bool>) {
@@ -303,9 +305,8 @@ inline auto detail::clean_type_name(std::string_view raw) -> std::string {
     // MSVC: `anonymous namespace'）——从类型名中移除，使测试 TU 内部链接类型的失败诊断
     // 与具名类型格式一致。
     auto strip = [](std::string text) -> std::string {
-        for (const std::string_view noise :
-             {"enum ", "class ", "struct ", "unsigned ", "{anonymous}::", "(anonymous namespace)::",
-              "`anonymous namespace'::"}) {
+        for (const std::string_view noise : {"enum ", "class ", "struct ", "unsigned ",
+                                             "{anonymous}::", "(anonymous namespace)::", "`anonymous namespace'::"}) {
             std::string::size_type pos = 0;
             while ((pos = text.find(noise, pos)) != std::string::npos) {
                 text.erase(pos, noise.size());

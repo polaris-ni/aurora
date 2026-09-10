@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/platform.h
 /// 测试说明: 覆盖平台/架构/位宽/编译器四类探测宏的「恰好一个」互斥性、位宽与指针宽度一致性、UNIX 聚合宏与 Windows
-/// 的互斥契约、编译器 base 宏与精化宏的蕴含关系
+/// 的互斥契约、编译器 base 宏与精化宏的蕴含关系，以及能力宏 AURORA_CAP_* 的取值域与平台蕴含关系
 
 #include "aurora/core/platform.h"
 #include "framework/aurora_test.h"
@@ -156,6 +156,20 @@ AURORA_TEST_CASE(compiler_macros_match_native_builtins) {
     static_assert(__GNUC__, "AURORA_COMPILER_GCC 必须对应 __GNUC__");
 #endif
     AURORA_TEST_CHECK(true);
+}
+
+AURORA_TEST_CASE(capability_threads_absent_only_on_wasm) {
+    // 契约：AURORA_CAP_THREADS 恒定义、取值域为 {0,1}；且取 0 只允许发生在 WASM 目标——
+    // Emscripten 未开 `-pthread` 时 std::thread 构造即抛 "Not supported"（反向不成立：
+    // wasm 开 `-pthread` 后该宏同样取 1，故契约只约束「无能力 ⇒ WASM」这一方向）。
+    static_assert(AURORA_CAP_THREADS == 0 || AURORA_CAP_THREADS == 1, "AURORA_CAP_THREADS 必须为 0 或 1");
+    constexpr bool threads_absent = (AURORA_CAP_THREADS == 0);
+#ifdef AURORA_PLATFORM_WASM
+    constexpr bool on_wasm = true;
+#else
+    constexpr bool on_wasm = false;
+#endif
+    AURORA_TEST_CHECK(!threads_absent || on_wasm);
 }
 
 }  // namespace aurora::test_cases::utest_platform

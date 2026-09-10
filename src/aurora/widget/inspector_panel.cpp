@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "aurora/core/log.h"
+#include "aurora/core/platform.h"  // NOLINT
 #include "aurora/widget/codegen.h"
 #include "aurora/widget/inspect.h"
 
@@ -234,8 +235,7 @@ auto InspectorPanel::on_paint(Painter &p, const Rect &bounds, const BuildContext
         constexpr float btn_h = AURORA_HEADER_HEIGHT - 6.0F;
         const float btn_x = bounds.origin.x + props_x + props_w - btn_w - 4.0F;
         const float btn_y = bounds.origin.y + 3.0F;
-        export_btn_rect_ =
-            Rect{.origin = Point{.x = btn_x, .y = btn_y}, .size = Size{.width = btn_w, .height = btn_h}};
+        export_btn_rect_ = Rect{.origin = Point{.x = btn_x, .y = btn_y}, .size = Size{.width = btn_w, .height = btn_h}};
         p.fill_rect(export_btn_rect_, Color{0, 122, 255});
         p.draw_text(export_btn_rect_, "Export Code", Font{.size_pt = 9.0F}, Color{255, 255, 255});
     }
@@ -281,8 +281,11 @@ auto InspectorPanel::on_hit_test(const Point &local, const Rect &bounds, const B
     return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local) ? this : nullptr;
 }
 
+// clang 无 "-Wdangling-pointer" 告警组（实测报 -Wunknown-warning-option），故压制只在 GCC 下展开。
+#if defined(AURORA_COMPILER_GCC)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdangling-pointer"
+#endif
 auto InspectorPanel::on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
     -> std::vector<HitNode> {
     (void)ctx;
@@ -292,7 +295,9 @@ auto InspectorPanel::on_hit_test_chain(const Point &local, const Rect &bounds, c
                ? std::vector{HitNode{this, weak_from_this(), bounds.origin}}
                : std::vector<HitNode>{};
 }
+#if defined(AURORA_COMPILER_GCC)
 #pragma GCC diagnostic pop
+#endif
 
 // ---------------------------------------------------------------------------
 // 挂载
