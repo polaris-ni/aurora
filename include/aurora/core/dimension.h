@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "types.h"  // NOLINT
+
 namespace aurora {
 
 /**
