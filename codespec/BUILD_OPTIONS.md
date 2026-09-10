@@ -118,6 +118,7 @@ cmake -S . -B build -DAURORA_BACKEND_GLFW=ON
 | X11 | `dnf install libX11-devel` | `apt install libx11-dev` |
 | Wayland | `dnf install wayland-devel wayland-protocols-devel libxkbcommon-devel` | `apt install libwayland-dev wayland-protocols libxkbcommon-dev` |
 | GLFW（X11 扩展） | `dnf install libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel libXext-devel` | `apt install libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev` |
+| GLFW（OpenGL 链接） | `dnf install mesa-libGL-devel` | `apt install libgl1-mesa-dev` |
 
 构建示例（同时开启，最常见的 Linux 桌面配置）：
 

@@ -54,8 +54,10 @@ class Subscription {
 
     /// @brief 立即取消订阅（幂等；重复调用安全）。
     auto reset() -> void {
-        if (cancel_) {
-            auto fn = std::move(cancel_);
+        // 移动后 moved-from 的 std::function 为空并非标准保证（libc++ 可保留可调用对象），
+        // 须显式 exchange 置空，否则 active()/幂等语义在 AppleClang 平台出现双取消偏差。
+        auto fn = std::exchange(cancel_, nullptr);
+        if (fn) {
             fn();
         }
     }

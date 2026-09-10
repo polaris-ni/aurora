@@ -24,6 +24,10 @@
 #include <unistd.h>
 #endif
 
+#ifdef AURORA_PLATFORM_MACOS
+#include <mach-o/dyld.h>  // _NSGetExecutablePath：macOS 无 /proc/self/exe
+#endif
+
 namespace aurora::test_cases::itest_preferences_multiproc {
 
 namespace prefs = aurora::preferences;
@@ -49,6 +53,20 @@ auto self_exe() -> std::filesystem::path {
     // 测试助手：缓冲区长度已知，指针算术等价于 span 索引。
     return std::string{buf, buf + n};  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
 #else
+#ifdef AURORA_PLATFORM_MACOS
+    // macOS 无 /proc/self/exe：_NSGetExecutablePath 取原始路径后 canonical 成稳定绝对路径，
+    // 否则 execl("") 直接 127（command not found）。
+    char buf[4096];
+    uint32_t size = sizeof(buf);
+    if (::_NSGetExecutablePath(buf, &size) == 0) {
+        std::error_code ec;
+        auto abs = std::filesystem::canonical(buf, ec);
+        if (!ec) {
+            return abs;
+        }
+    }
+    return {};
+#else
     char buf[4096];
     const ssize_t n = ::readlink("/proc/self/exe", buf, sizeof(buf) - 1);
     if (n > 0) {
@@ -56,6 +74,7 @@ auto self_exe() -> std::filesystem::path {
         return std::string{buf, buf + n};  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     }
     return {};
+#endif
 #endif
 }
 
