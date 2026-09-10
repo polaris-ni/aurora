@@ -24,6 +24,7 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -53,7 +54,7 @@ auto load_image_stb(const std::vector<std::uint8_t> &buf, std::string_view path)
     img.width = w;
     img.height = h;
     img.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U);
-    std::memcpy(img.pixels.data(), data, img.pixels.size());
+    std::copy_n(data, img.pixels.size(), img.pixels.data());
     stbi_image_free(data);
     return img;
 }

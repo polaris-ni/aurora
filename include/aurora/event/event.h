@@ -127,7 +127,9 @@ struct TouchEvent : Event {
 
     /// @brief 双指距离（仅 active_count>=2 时有意义）。
     [[nodiscard]] auto pinch_distance() const -> float {
-        if (active_count() < 2) {
+        // 同时判 points.size()<2：既保证下标访问不越界，又让 GCC 的 -Warray-bounds 能据此
+        // 证明 points[1] 合法（active_count>=2 已蕴含 size>=2，二者语义等价，故不改变返回值）。
+        if (points.size() < 2 || active_count() < 2) {
             return 0.0F;
         }
         const auto &[x1, y1] = points[0].position;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
@@ -139,7 +141,8 @@ struct TouchEvent : Event {
 
     /// @brief 双指角度（弧度，仅 active_count>=2 时有意义）。
     [[nodiscard]] auto pinch_angle() const -> float {
-        if (active_count() < 2) {
+        // 同 pinch_distance：先判 points.size()<2 以向 -Warray-bounds 证明下标合法。
+        if (points.size() < 2 || active_count() < 2) {
             return 0.0F;
         }
         const auto &[x1, y1] = points[0].position;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)

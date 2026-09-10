@@ -15,7 +15,7 @@ namespace aurora::test_cases::utest_font_discovery {
 
 AURORA_TEST_CASE(init_registers_default_faces) {
     render::init_font_discovery();
-    const auto& faces = render::resolve_faces("");
+    const auto faces = render::resolve_faces("");
     AURORA_TEST_REQUIRE_FALSE(faces.empty());
     AURORA_TEST_CHECK_NOT_NULL(faces.front()->face);
 }
@@ -23,7 +23,7 @@ AURORA_TEST_CASE(init_registers_default_faces) {
 AURORA_TEST_CASE(unknown_family_falls_back_to_default_chain) {
     // 未注册 family 不得返回空表：缺字回退依赖默认链兜底。
     render::init_font_discovery();
-    const auto& faces = render::resolve_faces("no-such-family-xyz");
+    const auto faces = render::resolve_faces("no-such-family-xyz");
     AURORA_TEST_REQUIRE_FALSE(faces.empty());
     AURORA_TEST_CHECK_NOT_NULL(faces.front()->face);
 }
@@ -39,7 +39,7 @@ AURORA_TEST_CASE(register_font_memory_makes_family_resolvable) {
     const auto data = render::noto_sans_ttf();
     render::register_font_memory("utest-custom-family", std::vector<std::uint8_t>{data.begin(), data.end()});
 
-    const auto& faces = render::resolve_faces("utest-custom-family");
+    const auto faces = render::resolve_faces("utest-custom-family");
     AURORA_TEST_REQUIRE_FALSE(faces.empty());
     AURORA_TEST_CHECK_NOT_NULL(faces.front()->face);
     // 内存字节须由 FontFace 持有（否则 face 释放后字形数据悬空）。
@@ -61,7 +61,7 @@ AURORA_TEST_CASE(reinit_after_shutdown_restores_discovery) {
     render::shutdown_font_discovery();
     render::init_font_discovery();
 
-    const auto& faces = render::resolve_faces("");
+    const auto faces = render::resolve_faces("");
     AURORA_TEST_REQUIRE_FALSE(faces.empty());
     AURORA_TEST_CHECK_NOT_NULL(faces.front()->face);
 }
