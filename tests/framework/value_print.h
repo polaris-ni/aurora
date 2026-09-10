@@ -299,11 +299,13 @@ inline auto detail::quote(std::string_view text) -> std::string {
 }
 
 inline auto detail::clean_type_name(std::string_view raw) -> std::string {
-    // 匿名命名空间标记（GCC 16: {anonymous}；旧 GCC/Clang: (anonymous namespace)）——从类型名中移除，
-    // 使测试 TU 内部链接类型的失败诊断与具名类型格式一致。
+    // 匿名命名空间标记（GCC 16: {anonymous}；旧 GCC/Clang: (anonymous namespace)；
+    // MSVC: `anonymous namespace'）——从类型名中移除，使测试 TU 内部链接类型的失败诊断
+    // 与具名类型格式一致。
     auto strip = [](std::string text) -> std::string {
         for (const std::string_view noise :
-             {"enum ", "class ", "struct ", "unsigned ", "{anonymous}::", "(anonymous namespace)::"}) {
+             {"enum ", "class ", "struct ", "unsigned ", "{anonymous}::", "(anonymous namespace)::",
+              "`anonymous namespace'::"}) {
             std::string::size_type pos = 0;
             while ((pos = text.find(noise, pos)) != std::string::npos) {
                 text.erase(pos, noise.size());

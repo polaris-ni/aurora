@@ -1,10 +1,14 @@
 // 测试框架入口：main 由框架唯一提供，测试文件禁止自定义 main()。
+#if defined(_MSC_VER)
+#include <crtdbg.h>  // _set_abort_behavior / _CrtSetReportMode（关闭 Debug CRT abort 弹窗）
+#endif
 #include <algorithm>
 #include <charconv>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <mutex>
 #include <random>
 #include <span>
@@ -301,6 +305,15 @@ auto run_selected(const std::vector<const TestCase*>& selected, const CliOptions
 }  // namespace
 
 auto main(int argc, char** argv) -> int {
+#if defined(_MSC_VER)
+    // MSVC Debug CRT 的 abort() 默认弹「abort() has been called」模态对话框
+    //（_CALL_REPORTFAULT + _CRT_ASSERT 窗口模式）。死亡测试子进程以 abort() 为致死路径，
+    // 弹窗会挂住无人值守的 ctest / CLion 运行；统一降级为调试器输出（父进程与 death-child
+    // 子进程经此处重跑 main 均生效）。abort 的退出码（3）与「已致死」判据不受影响。
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG);
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
+    _set_abort_behavior(0, _CALL_REPORTFAULT);
+#endif
     const std::span<char* const> args{argv, static_cast<std::size_t>(argc)};
     if (argc > 0) {
         aurora::testing::detail::set_executable_path(*argv);  // argc > 0 已判，指针解引用而非下标
@@ -324,6 +337,26 @@ auto main(int argc, char** argv) -> int {
             return static_cast<int>(ExitCode::UsageOrNoMatch);
         }
         aurora::testing::detail::enter_death_child(key);
+        // MSVC 的默认 terminate 处理走 fail-fast（0xC0000409），不打印任何诊断；
+        // GCC 的 libstdc++ 会打印 "terminate called after throwing an instance of ..."。
+        // 死亡测试的 stderr 期望依赖该诊断文本，故子进程统一自装 terminate handler：
+        // 解出当前异常的 what() 打到 stderr（stderr 已被 freopen 到采集文件或为无缓冲
+        // 管道），再以 abort() 保证非 0 退出码（判据「已致死」不变）。
+        std::set_terminate([]() {
+            if (const auto current = std::current_exception()) {
+                try {
+                    std::rethrow_exception(current);
+                } catch (const std::exception& error) {
+                    std::fprintf(stderr, "terminate called after throwing an exception: %s\n", error.what());
+                } catch (...) {
+                    std::fprintf(stderr, "terminate called after throwing a non-standard exception\n");
+                }
+            } else {
+                std::fprintf(stderr, "terminate called without an active exception\n");
+            }
+            std::fflush(stderr);
+            std::abort();
+        });
         if (!options.death_capture.empty()) {
             // 由子进程自己接管 stderr：命令行里就不需要任何 shell 重定向（cmd 的引号/路径规则最易出错）。
             if (std::freopen(options.death_capture.c_str(), "w", stderr) == nullptr) {

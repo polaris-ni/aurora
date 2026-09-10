@@ -6,12 +6,15 @@
 namespace aurora {
 
 namespace {
-constexpr std::string AURORA_EMPTY_STR;
-constexpr std::vector<Color> AURORA_EMPTY_COLORS;
-constexpr std::vector<float> AURORA_EMPTY_FLOATS;
-constexpr Font AURORA_DEFAULT_FONT{};
-constexpr Image AURORA_DEFAULT_IMAGE{};
-constexpr Matrix2D AURORA_IDENTITY_MATRIX;
+// 哨兵对象不用 constexpr：MSVC STL 的 constexpr string/vector 仅 _ITERATOR_DEBUG_LEVEL==0
+// 可用（Debug IDL=2 下构造/析构非法，C2131）；库类型 Font/Image 含 STL 成员同理。
+// namespace-scope const（内部链接）语义等价，静态初始化阶段一次性构造，热路径零差异。
+const std::string AURORA_EMPTY_STR;
+const std::vector<Color> AURORA_EMPTY_COLORS;
+const std::vector<float> AURORA_EMPTY_FLOATS;
+const Font AURORA_DEFAULT_FONT{};
+const Image AURORA_DEFAULT_IMAGE{};
+const Matrix2D AURORA_IDENTITY_MATRIX;
 }  // namespace
 
 auto DisplayList::replay(Painter &p) const -> void {

@@ -453,7 +453,9 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///       `request_frame` 沿父链上溯断链、脏标记无法到达渲染根（历史 bug：grid_rows 滚动失效）。
     /// @warning 返回的引用在树重建（子节点增删）期间可能失效，仅限单帧内只读遍历。
     [[nodiscard]] virtual auto child_nodes() const -> const std::vector<Node> & {
-        static constexpr std::vector<Node> EMPTY;
+        // 不用 static constexpr：MSVC STL 的 constexpr 容器仅 _ITERATOR_DEBUG_LEVEL==0 可用，
+        // Debug（IDL=2）下报 C2131；static const（magic static）语义等价且跨编译器安全。
+        static const std::vector<Node> EMPTY;
         return EMPTY;
     }
 

@@ -22,6 +22,9 @@
 // x86 才存在 SSE2/AVX2 内置函数头；非 x86（ARM/NEON，本轮暂缓）不引用，回落标量。
 #ifdef AURORA_SIMD_X86
 #include <immintrin.h>
+#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
+#include <intrin.h>  // MSVC：__cpuidex / _xgetbv（detect_simd_level 的 AVX2 探测）
+#endif
 #endif
 
 namespace aurora::detail {
@@ -377,7 +380,10 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_radial_scanline_sse2(st
 
 #endif  // AURORA_SIMD_X86 (SSE2 implementations)
 
-#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG)
+// AVX2 实现：MSVC 下 AURORA_AVX2_TARGET 为空宏（x64 基线已含 SSE2，_mm256_* intrinsics
+// 无需 /arch:AVX2 即可编译，运行时经 g_simd_level 分发保证只在 AVX2 机器上执行）。
+#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG) || defined(AURORA_COMPILER_MSVC) \
+    || defined(AURORA_COMPILER_CLANG_CL)
 #if defined(AURORA_SIMD_X86)
 AURORA_AVX2_TARGET AURORA_NOINLINE inline auto blend_srgb_over_region_avx2(std::uint8_t *px, std::uint8_t sr,
                                                                            std::uint8_t sg, std::uint8_t sb, float ar,
@@ -678,7 +684,8 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blur_region_sse2(std::uint8_t *p
 }
 #endif  // AURORA_SIMD_X86 (SSE2 blur)
 
-#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG)
+#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG) || defined(AURORA_COMPILER_MSVC) \
+    || defined(AURORA_COMPILER_CLANG_CL)
 #if defined(AURORA_SIMD_X86)
 inline AURORA_AVX2_TARGET auto blur_load4_avx2(const std::uint8_t *p) -> __m256i {
     // 低 128 位装 4 通道，高 128 位置零（单线模式，仅用低 4 路）。
@@ -748,6 +755,21 @@ inline auto detect_simd_level() noexcept -> SimdLevel {
 #if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG)
     if (__builtin_cpu_supports("avx2")) {
         return SimdLevel::AVX2;
+    }
+#elif defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
+    // MSVC：CPUID leaf 7 EBX bit5 = AVX2 指令集；另需 OSXSAVE（leaf 1 ECX bit27）+
+    // XCR0 低两位（XMM/YMM 由 OS 保存）齐备才可安全使用 _mm256_*。
+    int regs[4] = {};
+    __cpuid(regs, 0);
+    if (regs[0] >= 7) {
+        __cpuidex(regs, 7, 0);
+        const bool has_avx2 = (regs[1] & (1 << 5)) != 0;
+        int leaf1[4] = {};
+        __cpuid(leaf1, 1);
+        const bool osxsave = (leaf1[2] & (1 << 27)) != 0;
+        if (has_avx2 && osxsave && (_xgetbv(_XCR_XFEATURE_ENABLED_MASK) & 0x6ULL) == 0x6ULL) {
+            return SimdLevel::AVX2;
+        }
     }
 #endif
     return SimdLevel::SSE2;  // x86-64 恒有 SSE2

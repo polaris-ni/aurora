@@ -438,6 +438,7 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `CMAKE_BUILD_TYPE` | `Release`（若未设） | 常规构建默认 Release；覆盖率 / ASan 开关会自行清除其中的 `-O3` / `-Os` / `-DNDEBUG` |
 | `CMAKE_CXX_STANDARD` | `20` | 强制 C++20（`CMAKE_CXX_STANDARD_REQUIRED ON`，`CMAKE_CXX_EXTENSIONS OFF`） |
 | 生成器 | — | 推荐 `Ninja`（空转 / 增量调度远快于 Make）；Make 仍支持。GLFW / D3D11 后端链接依赖对应工具链的 `lib-*` 目录 |
+| 编译器 | — | GCC / Clang / MSVC（Visual Studio 2022 x64，经 vcvars / VsDevShell 提供 `cl`）均为受支持工具链。MSVC 注记：源码为 UTF-8，构建系统自动加 `/utf-8`；项目统一告警 `-Wall -Wextra -Wpedantic` 仅注入 GCC/Clang 目标（MSVC 保持默认 `/W3`）；`-ffp-contract=off` 的 MSVC 等价为 `/fp:precise` |
 
 ---
 

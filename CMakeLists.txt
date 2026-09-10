@@ -3,7 +3,7 @@
 # ------------------------------------------------------------
 # 本文件只做「工程声明 + 核心库目标 + 模块编排」；具体逻辑按职责拆分在 cmake/ 下：
 #   cmake/AuroraThirdParty.cmake      — FreeType/HarfBuzz 源码构建
-#   cmake/AuroraBackends.cmake        — 后端剪裁开关（Headless/Win32/D3D11/GLFW/X11/Wayland/macOS/WASM）+ P3 优化宏
+#   cmake/AuroraBackends.cmake        — 后端剪裁开关（Headless/Win32/D3D11/GLFW/X11/Wayland/macOS/WASM）
 #   cmake/AuroraTools.cmake           — 工具/基准可执行（gen_api/MCP/CLI/LSP/bench_* 等）
 #   cmake/AuroraTests.cmake           — CTest 注册式 runner（GLOB tests/unit + tests/integration 链入单一 aurora_test_runner，AURORA_TEST() 自注册）
 #   cmake/AuroraDemos.cmake           — 示例 demo 目标（examples/demos/ 下每组件一个可运行窗口；须在 AuroraTools 之后 include）
@@ -22,8 +22,10 @@ project(aurora
 # 预发布后缀（semver pre-release）。project(VERSION) 仅接受纯数字，故 alpha 标识
 # 单独存放：完整版本串 = ${PROJECT_VERSION}-${AURORA_VERSION_SUFFIX}（如 1.0.0-alpha.1），
 # 由 include/aurora/core/version.h 经 AURORA_VERSION_STRING 暴露给程序。
-set(AURORA_VERSION_SUFFIX "alpha.1" CACHE STRING
-        "Pre-release suffix appended after PROJECT_VERSION (empty for stable releases)")
+# 带 FORCE：版本号以仓库声明为单一事实来源，既有 build 目录重新 configure 即同步升级；
+# 如需临时覆盖可改仓库源（发布 stable 时置空串）。
+set(AURORA_VERSION_SUFFIX "alpha.2" CACHE STRING
+        "Pre-release suffix appended after PROJECT_VERSION (empty for stable releases)" FORCE)
 
 # ============================================================
 # 统一配置期日志前缀：BUILD AURORA:
@@ -45,6 +47,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# MSVC：源码为 UTF-8（含中文注释），必须以 /utf-8 解析，否则在 CJK 代码页（936）下
+# 多字节序列被误读导致 C4819/C1020 等伪错误。GCC/Clang 默认按 UTF-8 解析，无需处理。
+if (MSVC)
+    add_compile_options(/utf-8)
+endif ()
+
 # 导出 compile_commands.json 供 clangd / IDE 索引（不影响构建结果）。
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -55,6 +63,17 @@ endif ()
 
 if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
+endif ()
+
+# MSVC Debug hybrid 前置：下方 Debug 优化块会给 aurora / freetype / harfbuzz 抬 /O2，
+# 而 CMake Debug 默认标志含 /RTC1（运行时检查），与 /O2 不兼容（D8016 硬错误）。
+# CMAKE_CXX_FLAGS_DEBUG 须在 add_subdirectory（AuroraThirdParty，子目录取变量快照）之前
+# 全局移除 /RTC1，子目录 target 才能拿到干净标志；/Od 被 /O2 重写仅产生 D9025 警告，可容忍。
+# 覆盖率/ASan 模式下 Debug 块本就不抬优化（本块执行与否不冲突），ASan 与 /RTC1 本也不兼容。
+if (CMAKE_BUILD_TYPE STREQUAL "Debug" AND MSVC)
+    string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    # freetype 等为 C 语言目标，读 CMAKE_C_FLAGS_DEBUG，须一并清理。
+    string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 endif ()
 
 # 生成器建议：Makefiles 默认非并行，推荐 Ninja 以最大化编译吞吐（见 CMakePresets.json）。
@@ -85,15 +104,23 @@ add_compile_definitions(NOMINMAX)
 option(AURORA_ENABLE_LLD "Link with LLVM lld if available (much faster than GNU ld)" ON)
 if (AURORA_ENABLE_LLD AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set(AURORA_LLD_DIR "" CACHE PATH "ld.lld 所在目录提示（未在 PATH 时使用）")
-    find_program(AURORA_LLD_EXECUTABLE NAMES ld.lld HINTS ${AURORA_LLD_DIR})
+    # HINTS 须整体引用：目录含空格（如 C:/Program Files/LLVM/bin）时未引用会被拆成多个坏 hint。
+    find_program(AURORA_LLD_EXECUTABLE NAMES ld.lld HINTS "${AURORA_LLD_DIR}")
     if (AURORA_LLD_EXECUTABLE)
         get_filename_component(_aurora_lld_dir "${AURORA_LLD_EXECUTABLE}" DIRECTORY)
+        # -B flag 内嵌引号处理：链接命令行走 rsp 文件时 CMake 对 flag 段不做引用，
+        # "-B<含空格目录>" 会在空格处截断成坏 flag + 伪输入文件；路径无空格时不加引号
+        # （部分驱动会把引号字符混入路径导致探测目录失效）。
+        set(_aurora_b_flag "-B${_aurora_lld_dir}")
+        if (_aurora_lld_dir MATCHES " ")
+            set(_aurora_b_flag "-B\"${_aurora_lld_dir}\"")
+        endif ()
         include(CheckLinkerFlag)
-        set(CMAKE_REQUIRED_LINK_OPTIONS "-B${_aurora_lld_dir}")
+        set(CMAKE_REQUIRED_LINK_OPTIONS "${_aurora_b_flag}")
         check_linker_flag(CXX "-fuse-ld=lld" AURORA_LINKER_LLD_WORKS)
         unset(CMAKE_REQUIRED_LINK_OPTIONS)
         if (AURORA_LINKER_LLD_WORKS)
-            add_link_options(-fuse-ld=lld "-B${_aurora_lld_dir}")
+            add_link_options(-fuse-ld=lld "${_aurora_b_flag}")
             aurora_log("Linker: lld (${AURORA_LLD_EXECUTABLE})")
         else ()
             aurora_log("Linker: GNU ld (lld found but link check failed)")
@@ -136,7 +163,10 @@ target_compile_features(aurora PUBLIC cxx_std_20)
 # Warnings（mirrors CODING_STANDARDS.md §10）——aurora 自身目标级，不污染三方库与消费者目标。
 # -Wno-missing-field-initializers：本库大量采用聚合 Props 的部分初始化（如 ButtonProps{...} 仅给
 # 部分字段赋值），其余字段本就会被值初始化为零，该告警纯属噪音，故关闭。
-target_compile_options(aurora PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
+# MSVC 不识别 GCC 风格 -W*（D8021 硬错误），保持其默认 /W3 即可。
+if (NOT MSVC)
+    target_compile_options(aurora PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
+endif ()
 # FreeType：PUBLIC 链接使任意消费者（demo/测试/工具）静态链入，无需自行配置。
 target_link_libraries(aurora PUBLIC freetype harfbuzz)
 
@@ -173,13 +203,21 @@ endif ()
 # 覆盖率/ASan 模式会强制 -O0（见 AuroraInstrumentation 的 _aurora_instrument_all_targets 注入），
 # 那里以 target_compile_options 追加的 -O0 在命令行末尾生效，覆盖本处的 -O3，无冲突。
 if (CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT AURORA_ENABLE_COVERAGE AND NOT AURORA_ENABLE_ASAN)
-    target_compile_options(aurora PRIVATE -O3)
+    if (MSVC)
+        target_compile_options(aurora PRIVATE /O2)
+    else ()
+        target_compile_options(aurora PRIVATE -O3)
+    endif ()
     # 第三方库（freetype/harfbuzz）在 Debug 下默认 -O0 编成无优化版本（libfreetyped.a 等），
     # 其文本/shaping 光栅位于 paint 热路径，必须一并抬到 -O3 才能真正释放 Debug 帧率。
     # 这些 target 由 AuroraThirdParty.cmake 经 add_subdirectory 引入，此处直接作用于其逻辑 target。
     foreach (_tp freetype harfbuzz)
         if (TARGET ${_tp})
-            target_compile_options(${_tp} PRIVATE -O3)
+            if (MSVC)
+                target_compile_options(${_tp} PRIVATE /O2)
+            else ()
+                target_compile_options(${_tp} PRIVATE -O3)
+            endif ()
             # freetype/harfbuzz 在 CMAKE_BUILD_TYPE=Debug 下不会自动获得 NDEBUG，
             # 其内部 FT_ASSERT / 调试检查会在文本/shaping 光栅热路径上每帧执行，
             # 即便 -O3 也仍生效，导致 Debug 帧率被拖到 Release 的一半。

@@ -26,8 +26,11 @@ function(aurora_setup_consumer_target _tgt)
     # 项目统一告警（mirrors CODING_STANDARDS.md §10）。
     # -Wno-missing-field-initializers：本库大量采用聚合 Props 的部分初始化，其余字段值初始化为零，
     # 该告警纯属噪音，故关闭。
-    target_compile_options(${_tgt} PRIVATE
-            -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
+    # MSVC 不识别 GCC 风格 -W*（D8021 硬错误），保持其默认 /W3 即可。
+    if (NOT MSVC)
+        target_compile_options(${_tgt} PRIVATE
+                -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
+    endif ()
 
     # 可选额外 PRIVATE include 目录（如 examples/demos、tests/）。
     if (ARGN)

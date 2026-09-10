@@ -110,7 +110,12 @@ if (AURORA_ENABLE_IMAGE_JPEG)
             ${_JPEG_SRC}/src
             ${CMAKE_BINARY_DIR}/gen/jpeg)
     # 抑制第三方源码告警（不参与项目 -Wall/-Wextra/-Wpedantic）
-    target_compile_options(aurora_jpeg PRIVATE -w -Wno-implicit-function-declaration)
+    # MSVC 不识别 GCC 的 -Wno-*（D8021/D9002），仅用 /w 全局静默。
+    if (MSVC)
+        target_compile_options(aurora_jpeg PRIVATE /w)
+    else ()
+        target_compile_options(aurora_jpeg PRIVATE -w -Wno-implicit-function-declaration)
+    endif ()
     target_link_libraries(aurora PRIVATE aurora_jpeg)
 endif ()
 
@@ -160,7 +165,12 @@ if (AURORA_ENABLE_IMAGE_PNG)
     add_library(aurora_wuffs OBJECT ${_WUFFS_C})
     set_source_files_properties(${_WUFFS_C} PROPERTIES LANGUAGE C)
     target_compile_definitions(aurora_wuffs PRIVATE WUFFS_IMPLEMENTATION)
-    target_compile_options(aurora_wuffs PRIVATE -std=c99 -w)
+    # -std=c99 为 GCC/Clang 专属；MSVC 对 C 目标用默认标准即可。
+    if (MSVC)
+        target_compile_options(aurora_wuffs PRIVATE /w)
+    else ()
+        target_compile_options(aurora_wuffs PRIVATE -std=c99 -w)
+    endif ()
     target_include_directories(aurora_wuffs PRIVATE ${CMAKE_SOURCE_DIR}/third_party/wuffs/release/c)
     target_include_directories(aurora PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
     target_link_libraries(aurora PRIVATE aurora_wuffs)

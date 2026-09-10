@@ -1,6 +1,6 @@
 {
   "schema": "aurora-changelog/1.0",
-  "currentVersion": "1.0.0-alpha.1",
+  "currentVersion": "1.0.0-alpha.2",
   "policy": "semver",
   "freeze": "minor-versions-are-additive",
   "rules": [
@@ -35,14 +35,35 @@
         "app/：Application 帧调度器（Scheduler）、剪贴板（文本/图像）、文件对话框、系统托盘、快捷键、热重载、性能叠层",
         "inspector/ 与工具链：本地回环 HTTP 检视服务（REST + debug 端点，DNS rebinding 防护）、aurora-lsp 语言服务器、aurora-mcp MCP Server、aurora_cli 组件发现/校验/渲染/代码生成",
         "theming/i18n/media/accessibility：主题系统（Theme/StyleProps/ThemeScope）、字符串表与复数规则、视频播放与控制、无障碍树推断",
-        "构建：CMake 静态库 + find_package(Aurora) 安装导出；全量开关见 codespec/BUILD_OPTIONS.md",
+        "构建：CMake 静态库 + find_package(Aurora) 安装导出；全量开关见 codespec/BUILD_OPTIONS.md"
+      ],
+      "notes": [
+        "alpha 版定位：早期预览开发版，API 形态已完整但**尚不构成稳定性承诺**；1.0.0 正式版前仍可能有破坏性调整（将遵循 semver 并在 CHANGELOG 记录迁移路径）。反馈渠道见 README。",
+        "已知限制：MacOSSurface / WasmSurface 为骨架实现；media/ 与 perf/ 模块为 experimental 成熟度；Glfw/X11/Wayland/D3D11 后端默认关闭需 CMake 开启；Windows 为首要测试平台，Linux/macOS 覆盖有限。"
+      ]
+    },
+    {
+      "version": "1.0.0-alpha.2",
+      "date": "2026-09-10",
+      "type": "pre-release",
+      "summary": "开发迭代版：测试体系整体重写为自研注册式框架并全量迁移用例（251 用例 ctest 全绿）；MSVC (Visual Studio 2022, x64) 成为受支持工具链（Release/Debug 双配置）；一批库语义缺陷修复（Effect/Computed 求值、storage 定制点 ADL、事务批量通知、颜色插值舍入、SingleChild 空子节点守卫）。",
+      "breakingChanges": [
+        "core/assert.h：AURORA_ASSERT 语义由「所有构建配置下失败即 abort」改为 debug-only（NDEBUG/Release 下整体裁切、条件不求值，对标 C 标准 assert / Chromium DCHECK）；需常开硬失败的硬不变量改用新增的 AURORA_CHECK（所有构建下 FATAL 日志 + abort，对标 Chromium CHECK）。",
+        "animation/animator.h：AnimationController 状态语义收紧——stop() 按最近端点报状态（value ≥ 0.5 → Completed，否则 Dismissed，进度冻结在当前位置）；带初值构造时 value ≥ 1.0 报 Completed（原先一律 Dismissed）；forward(from) 的 from ≥ 0 时夹取到 [0,1]（原先可越界）。",
+        "event/gesture.h：RotationRecognizer::angle_delta() 返回单位由角度（度）统一为弧度（[-π, π]），与 TouchEvent::pinch_angle() 一致；按度消费的调用方需自行换算（× 180/π）。",
+        "state/subscription.h：自由函数 bind(SignalView&, F) / bind(Store&, F) 改名 connect——State 基类链上的 std::enable_shared_from_this 使 std 进入实参的 ADL 关联命名空间集，无限定 bind(state, fn) 会被变参转发的 std::bind 吸走（编译通过但回调永不执行的静默错误，GCC 16 部分排序实测复现）；connect 与任何 std 名字无重叠，从根上排除歧义。迁移路径：将 aurora::bind( / au::bind( 全局替换为 aurora::connect( / au::connect(；Animator::bind 为成员函数不经 ADL，保持原名。",
+        "include/aurora/test_helpers.h 退出公共 API：该头（EventDispatcher 模拟、离屏渲染助手等测试专用设施，从未进入 GUIDELINE 配方）随测试体系重写移出安装面，落位仓库私有 tests/support/test_helpers.h 并停止随 cmake --install 导出。"
+      ],
+      "added": [
         "tests/：自研注册式测试框架 + 251 个测试用例（单一 aurora_test_runner，CTest 逐用例进程隔离）；examples/demos 每公共源文件一个演示"
       ],
       "changed": [
         "tests/：测试体系整体重写为自研注册式框架——AURORA_TEST_CASE 声明式注册 + 单一 aurora_test_runner（--run/--filter/--shuffle/--repeat/--timeout/--report/--list/--selftest）、CHECK/REQUIRE 断言族与 *_THAT 匹配器、值/类型参数化、死亡测试、超时看门狗、JUnit/JSON 报告、AURORA_TEST_SHARDS 分片骨架；测试文件双前缀纪律（unit 一律 utest_、integration 一律 itest_），registry_integrity 守门防漏注册",
+        "构建：MSVC (Visual Studio 2022, x64, Ninja) 成为受支持的工具链——全局 /utf-8（UTF-8 源码在 CJK 代码页下的 C4819/C1020 伪错误）、警告与优化标志按编译器分支（MSVC 保持默认 /W3、Debug 抬 /O2 前全局移除 /RTC1——CMake Debug 默认运行时检查与 /O2 不兼容 D8016，且 CMAKE_C/CXX_FLAGS_DEBUG 须在 add_subdirectory 之前清理才对子目录三方库生效；GCC/Clang 维持 -Wall -Wextra -Wpedantic / -O3）、图片编解码第三方源码告警标志分支化；painter_simd AVX2 实现放开至 MSVC（intrinsics 无需 /arch:AVX2，运行时经 g_simd_level 分发）并补 MSVC CPUID/OSXSAVE/XCR0 探测（原先 detect_simd_level 在 MSVC 下恒回落 SSE2）；MSVC STL 的 constexpr 容器仅 _ITERATOR_DEBUG_LEVEL==0 可用——static constexpr std::vector（widget.h child_nodes 哨兵）与 namespace-scope constexpr STL/库类型哨兵（display_list.cpp）改为 const（magic static / 静态初始化），语义等价；测试框架同步适配——类型名清洗增加 MSVC `anonymous namespace' 标记、死亡测试子进程自装 terminate handler（MSVC 默认 fail-fast 不打印异常诊断，stderr 期望将采集为空）、runner 启动即关闭 MSVC Debug CRT 的 abort 报告弹窗（_set_abort_behavior/_CrtSetReportMode——死亡测试以 abort() 为致死路径，Debug 默认「abort() has been called」模态对话框会挂住无人值守运行）。Release 与 Debug 配置下 ctest 均 251/251 全绿，GCC/Clang 构建行为不变。",
         "构建：AURORA_ENABLE_COVERAGE=ON 下 MinGW GCC 对 painter.cpp（SIMD 栅格内核唯一 TU）以 -O1 编译——规避 GCC 在 -O0 --coverage 组合下对 target(\"sse4.1\")/target(\"avx2\") 属性函数的代码生成崩溃（box blur AVX2 路径 0xC0000005）；覆盖率行映射不受影响"
       ],
       "fixed": [
+        "构建/CMake：lld 探测对含空格路径失效——find_program HINTS 未加引号会把 AURORA_LLD_DIR 在空格处拆成多个坏 hint；链接命令行走 rsp 时 CMake 对 flag 段不做引用，\"-B<含空格目录>\" 截断成坏 flag + 伪输入文件致链接报错。现 HINTS 整体引用、路径含空格时 -B flag 内嵌引号（无空格路径不加，避免引号混入探测目录）。",
         "animation/timeline.h：lerp(Color, Color, t) 逐通道插值由截断修正为四舍五入（lround 半值远离零）——原实现先调通用 lerp<uint8_t>，浮点结果在模板内被提前截断回通道类型（127.5 → 127），外层舍入从未生效；现通道先提升 double 再插值。",
         "widget/containers.h：SingleChild 的 layout/on_paint/on_hit_test/on_hit_test_chain/on_mount/tick/tick_gestures/for_each_child 共 8 处 child_.widget() 调用补空子节点守卫——默认构造的 SingleChild（如 PerfOverlay()）布局即向空指针偏移处写入而段错误；空子节点是类契约允许的合法状态。",
         "state/effect.h：Effect::run() 抛出异常时全局 current_ 悬垂（RAII CurrentGuard 保证恢复），杜绝析构后向死对象订阅/解引用的 UB；Effect 改为构造即登记 StateGraph 注册表（原先 effect 节点与 depends 边无法被枚举）。",
@@ -56,8 +77,7 @@
         "test_helpers.h 出公共 API：删除 #include \"aurora/test_helpers.h\" 即可；能力对照——离屏像素断言改用 HeadlessSurface（render_to_png），事件/焦点注入改用 event/ 公共接口或自带测试桩。"
       ],
       "notes": [
-        "alpha 版定位：早期预览开发版，API 形态已完整但**尚不构成稳定性承诺**；1.0.0 正式版前仍可能有破坏性调整（将遵循 semver 并在 CHANGELOG 记录迁移路径）。反馈渠道见 README。",
-        "已知限制：MacOSSurface / WasmSurface 为骨架实现；media/ 与 perf/ 模块为 experimental 成熟度；Glfw/X11/Wayland/D3D11 后端默认关闭需 CMake 开启；Windows 为首要测试平台，Linux/macOS 覆盖有限。"
+        "版本定位与已知限制延续 1.0.0-alpha.1 条目 notes；本条目起 MSVC 与 GCC/Clang 同为受支持工具链，ctest 全量验收在两者上执行。"
       ]
     }
   ]
