@@ -36,7 +36,7 @@ class Padding : public ModifierNode {
 /// @brief 非对称内边距修饰：支持 left/top/right/bottom 独立设置（对应 Flutter EdgeInsets）。
 class PaddingEdges : public ModifierNode {
   public:
-    explicit PaddingEdges(EdgeInsets insets) : insets_(insets) {
+    explicit PaddingEdges(const EdgeInsets &insets) : insets_(insets) {
         // 负值降级为 0
         if (insets_.left < 0.0F || insets_.top < 0.0F || insets_.right < 0.0F || insets_.bottom < 0.0F) {
             Diagnostics::degraded("layout", "PaddingEdges 负值已降级为 0");

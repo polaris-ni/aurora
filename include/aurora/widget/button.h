@@ -92,7 +92,7 @@ class Button : public LeafWidget, public ButtonProps {
     }
 
     /// @brief 设置内边距（链式）。
-    auto set_padding(EdgeInsets e) -> Button & {
+    auto set_padding(const EdgeInsets &e) -> Button & {
         padding = e;
         return *this;
     }

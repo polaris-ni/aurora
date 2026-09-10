@@ -10,7 +10,7 @@
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/enums.h"
 #include "aurora/core/font.h"
-#include "aurora/environment/environment.h"
+#include "aurora/environment/build_context.h"
 #include "aurora/i18n/localized_string.h"
 #include "aurora/i18n/string_table.h"
 #include "aurora/state/reactive.h"

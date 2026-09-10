@@ -6,7 +6,7 @@
 #include <unordered_set>
 
 #include "aurora/core/types.h"
-#include "aurora/environment/environment.h"
+#include "aurora/environment/build_context.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {

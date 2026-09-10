@@ -6,7 +6,7 @@
 
 #include "aurora/core/color.h"
 #include "aurora/core/types.h"
-#include "aurora/environment/environment.h"
+#include "aurora/environment/build_context.h"
 #include "aurora/i18n/localized_string.h"
 #include "aurora/i18n/string_table.h"
 #include "aurora/render/font_engine.h"

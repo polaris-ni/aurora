@@ -2,8 +2,6 @@
 
 #include <string>
 
-#include "aurora/core/types.h"  // Length / LengthKind（本头只提供工厂与字面量，不重复定义类型）
-
 namespace aurora {
 
 /**

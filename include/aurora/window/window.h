@@ -15,7 +15,7 @@
 #include "aurora/core/transform.h"
 #include "aurora/core/types.h"
 #include "aurora/debug/debug_paint.h"
-#include "aurora/environment/environment.h"
+#include "aurora/environment/build_context.h"
 #include "aurora/environment/media_query.h"
 #include "aurora/perf/profiler.h"
 #include "aurora/render/detail/paint_timing.h"

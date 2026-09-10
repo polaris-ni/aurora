@@ -4,8 +4,6 @@
 #include <cstdint>
 #include <limits>
 
-#include "aurora/core/assert.h"
-
 namespace aurora {
 
 /// @brief 二维点（逻辑像素）。
@@ -110,7 +108,7 @@ struct Length {
     float value = 0.0F;  ///< Fixed: 像素；Fraction: 比例(0~1)
 
     constexpr Length() noexcept = default;
-    constexpr Length(LengthKind k, float v = 0.0F) noexcept : kind(k), value(v) {}
+    constexpr Length(LengthKind k, float v = 0.0F) noexcept : kind(k), value(v) {}  // NOLINT
 
     [[nodiscard]] static constexpr auto wrap() noexcept -> Length { return Length{LengthKind::WrapContent}; }
     [[nodiscard]] static constexpr auto expand() noexcept -> Length { return Length{LengthKind::Expand}; }
@@ -119,7 +117,7 @@ struct Length {
         return Length{LengthKind::Fixed, px};
     }
     [[nodiscard]] static constexpr auto ratio(float f) noexcept -> Length {
-        AURORA_ASSERT((f >= 0.0F && f <= 1.0F), "Length::ratio requires a fraction in [0, 1]");
+        AURORA_ASSERT(f >= 0.0F && f <= 1.0F, "Length::ratio requires a fraction in [0, 1]");
         return Length{LengthKind::Fraction, f};
     }
 };

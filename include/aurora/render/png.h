@@ -89,7 +89,7 @@ namespace detail {
     auto put_chunk = [&](const char *type, const std::uint8_t *data, std::size_t len) -> void {
         // 仅 `type` 为空才非法；零长度块（如 IEND）合法，其 data 允许为 nullptr——
         // 下方按 len 逐字节复制，len==0 时不解引用 data，故空指针安全。
-        if (type == nullptr) {
+        if (type == nullptr || (data == nullptr && len != 0)) {
             return;
         }
         put_u32(static_cast<std::uint32_t>(len));
@@ -98,9 +98,12 @@ namespace detail {
         out.push_back(static_cast<std::uint8_t>(type[1]));  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         out.push_back(static_cast<std::uint8_t>(type[2]));  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         out.push_back(static_cast<std::uint8_t>(type[3]));  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        for (std::size_t i = 0; i < len; ++i) {
-            out.push_back(data[i]);  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        if (data != nullptr && len != 0) {
+            for (std::size_t i = 0; i < len; ++i) {
+                out.push_back(data[i]);  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            }
         }
+
         const std::uint32_t crc = crc32(&out[start], len + 4);  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
         put_u32(crc);
     };

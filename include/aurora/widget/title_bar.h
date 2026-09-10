@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "aurora/core/image.h"
-#include "aurora/environment/environment.h"
+#include "aurora/environment/build_context.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"

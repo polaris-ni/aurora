@@ -77,14 +77,12 @@ class Preferences {
 
     /// @brief 文件模式（默认 Options）：显式指定配置存储的 JSON 文件路径，构造即加载（文件不存在则为空对象）。
     /// @param file 配置文件的完整路径；可位于任意位置（含子目录，目录会自动创建）。
-    explicit Preferences(std::filesystem::path file) : file_(std::move(file)), opts_(Options{}) {
-        load_from_file();
-    }
+    explicit Preferences(std::filesystem::path file) : file_(std::move(file)), opts_(Options{}) { load_from_file(); }
 
     /// @brief 文件模式：显式指定配置存储的 JSON 文件路径与选项，构造即加载（文件不存在则为空对象）。
     /// @param file 配置文件的完整路径；可位于任意位置（含子目录，目录会自动创建）。
     /// @param opts 选项（如 `auto_create_dir`）。
-    explicit Preferences(std::filesystem::path file, Options opts) : file_(std::move(file)), opts_(std::move(opts)) {
+    explicit Preferences(std::filesystem::path file, Options opts) : file_(std::move(file)), opts_(opts) {
         load_from_file();
     }
 
@@ -92,7 +90,7 @@ class Preferences {
     [[nodiscard]] static auto at(std::filesystem::path file) -> Preferences { return Preferences(std::move(file)); }
     /// @brief 便捷构造：在指定路径创建文件模式实例。
     [[nodiscard]] static auto at(std::filesystem::path file, Options opts) -> Preferences {
-        return Preferences(std::move(file), std::move(opts));
+        return Preferences(std::move(file), opts);
     }
 
     /// @brief 便捷构造：在平台默认配置目录（`default_config_dir()`）下以 `name`（自动补 `.json`）命名配置文件。
@@ -104,12 +102,15 @@ class Preferences {
         return with_location(std::move(name), dir, Options{});
     }
     /// @brief 便捷构造：在 `dir` 下以 `name`（自动补 `.json`）命名配置文件，并显式指定选项。
+    /// @param name 配置文件名称
     /// @param dir 配置目录；默认取平台配置目录。
-    [[nodiscard]] static auto with_location(std::string name, const std::filesystem::path &dir, Options opts) -> Preferences {
+    /// @param opts 构造选项
+    [[nodiscard]] static auto with_location(std::string name, const std::filesystem::path &dir, Options opts)
+        -> Preferences {
         if (!name.ends_with(".json")) {
             name += ".json";
         }
-        return Preferences(dir / name, std::move(opts));
+        return Preferences(dir / name, opts);
     }
 
     // ---------- 单例（按名注册表，线程安全懒构造） ----------

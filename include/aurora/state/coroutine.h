@@ -49,14 +49,16 @@ struct CoroShared<void> {
 template <typename T>
 class CoroTask {
   public:
-    // NOLINTNEXTLINE
+    // NOLINTNEXTLINE(*-special-member-functions)
     struct promise_type {
         std::shared_ptr<detail::CoroShared<T>> shared = std::make_shared<detail::CoroShared<T>>();
 
         auto get_return_object() -> CoroTask { return CoroTask{shared}; }
-        // NOLINTNEXTLINE
+        // 协程协议钩子由标准固定为「在 promise 对象上调用」，非本库设计自由度；
+        // 同体内 return_value/unhandled_exception 必须访问 shared，故三件套统一保持实例方法。
+        // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
         auto initial_suspend() -> std::suspend_never { return {}; }  // 立即开始执行
-        // NOLINTNEXTLINE
+        // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
         auto final_suspend() noexcept -> std::suspend_never { return {}; }  // 结束即销毁帧
         auto return_value(T v) -> void { shared->result = Result<T>{std::move(v)}; }
         auto unhandled_exception() -> void {
@@ -95,8 +97,12 @@ class CoroTask<void> {
         std::shared_ptr<detail::CoroShared<void>> shared = std::make_shared<detail::CoroShared<void>>();
 
         [[nodiscard]] auto get_return_object() const -> CoroTask { return CoroTask{shared}; }
+        // 协程协议钩子：调用形态由标准固定，与 CoroTask<T> 主模板保持一致，勿改 static。
+        // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
         auto initial_suspend() -> std::suspend_never { return {}; }
+        // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
         auto final_suspend() noexcept -> std::suspend_never { return {}; }
+        // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
         auto return_void() -> void {}
         auto unhandled_exception() const -> void {
             try {
@@ -134,6 +140,8 @@ struct CoAwaitable {
 
     explicit CoAwaitable(F f) : f_(std::move(f)) {}
 
+    // awaiter 三件套：await_suspend/await_resume 必须访问 this，await_ready 保持实例形态以统一调用方式。
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     [[nodiscard]] auto await_ready() const -> bool { return false; }  // 始终挂起，交线程池执行
 
     auto await_suspend(std::coroutine_handle<> handle) -> void {

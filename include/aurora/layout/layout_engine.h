@@ -1,7 +1,7 @@
 #pragma once
 
 #include "aurora/core/types.h"
-#include "aurora/environment/environment.h"
+#include "aurora/environment/build_context.h"
 #include "aurora/layout/layout_box.h"
 #include "aurora/widget/widget.h"
 

@@ -131,7 +131,7 @@ template <>
 class Result<void> {
   public:
     Result() : ok_(true) {}  // 成功
-    Result(Error err) : err_(std::move(err)) {}  // 失败
+    Result(Error err) : err_(std::move(err)) {}  // NOLINT：错误隐式构造
 
     [[nodiscard]] auto ok() const -> bool { return ok_; }
     explicit operator bool() const { return ok_; }

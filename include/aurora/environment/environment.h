@@ -62,16 +62,4 @@ class Environment {
     const Environment *parent_ = nullptr;
 };
 
-// detail_env_get 的定义：需 Environment 完整类型（见上方 class Environment），故置于命名空间内。
-// BuildContext::environment() 在 build_context.h 中内联、转发至此函数，从而 build_context.h
-// 无需 Environment 完整即可解析（规避「在 environment.h 之前包含本头」的 incomplete-type 问题）。
-template <typename T>
-[[nodiscard]] auto detail_env_get(const Environment *env) -> const T * {
-    return env != nullptr ? env->get<T>() : nullptr;
-}
-
 }  // namespace aurora
-
-// BuildContext 使用 Environment 指针；build_context.h 仅前向声明 Environment 并通过 detail_env_get
-// 转发，故此处包含不构成循环依赖。
-#include "aurora/environment/build_context.h"
