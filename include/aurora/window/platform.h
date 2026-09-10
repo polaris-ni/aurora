@@ -64,7 +64,7 @@ struct Platform {
     p.kind = PlatformKind::Windows;
     p.device = DeviceKind::Desktop;
 #elif defined(AURORA_PLATFORM_MACOS)
-    p.kind = PlatformKind::macOS;
+    p.kind = PlatformKind::MacOs;
     p.device = DeviceKind::Desktop;
 #elif defined(AURORA_PLATFORM_LINUX)
     p.kind = PlatformKind::Linux;

@@ -39,11 +39,20 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND WIN32)
 endif ()
 
 # 从 errors.toml 重新生成头/目录/API（仅在 errors.toml 变更时触发）。
+# Emscripten 工具链下 $<TARGET_FILE> 展开为 gen_error_codes.js（+ .wasm）：.js 无执行位、
+# 非本地二进制，直接作为 COMMAND 会 Permission denied（exit 126）。构建期执行须走 node
+# 解释（emsdk 自身也是 node 驱动），故按工具链切换命令前缀。
+if (EMSCRIPTEN)
+    find_program(AURORA_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
+    set(_gen_error_codes_cmd "${AURORA_NODE_EXECUTABLE}" $<TARGET_FILE:gen_error_codes>)
+else ()
+    set(_gen_error_codes_cmd $<TARGET_FILE:gen_error_codes>)
+endif ()
 add_custom_command(
         OUTPUT ${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h
         ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md
         ${CMAKE_SOURCE_DIR}/aurora_api.json
-        COMMAND $<TARGET_FILE:gen_error_codes>
+        COMMAND ${_gen_error_codes_cmd}
         "${CMAKE_SOURCE_DIR}/codespec/errors.toml"
         "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h"
         "${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md"

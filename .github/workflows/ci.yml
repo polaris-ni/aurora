@@ -150,7 +150,7 @@ jobs:
         include:
           - name: linux-x11-wayland-glfw
             os: ubuntu-latest
-            apt-deps: libx11-dev libwayland-dev wayland-protocols libxkbcommon-dev
+            apt-deps: libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libwayland-dev wayland-protocols libxkbcommon-dev
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON
           - name: windows-d3d11-glfw
             os: windows-latest

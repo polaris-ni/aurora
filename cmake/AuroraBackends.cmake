@@ -151,7 +151,8 @@ if (AURORA_BACKEND_MACOS)
         aurora_error("AURORA_BACKEND_MACOS is only supported on Apple platforms;"
                 " cannot enable on the current platform. Disable with -DAURORA_BACKEND_MACOS=OFF.")
     endif ()
-    enable_language(OBJCXX)
+    # OBJCXX 语言已在顶层 CMakeLists（add_library(aurora) 之前）统一启用：语言规则须在
+    # 目标定义前就绪，否则 Ninja generate 阶段取不到 CMAKE_OBJCXX_* 规则。此处仅平台守卫。
     aurora_define_feature(AURORA_BACKEND_MACOS EXPORT)
     target_link_libraries(aurora PUBLIC "-framework Cocoa" "-framework AppKit")
     # macos_surface.cpp 为 Objective-C++（Cocoa），需显式指定语言；文件存在才设置，避免 glob 缺失告警。

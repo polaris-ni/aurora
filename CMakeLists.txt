@@ -86,6 +86,14 @@ endif ()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# macOS 后端语言前置：macos_surface.cpp 被标记为 OBJCXX（见 cmake/AuroraBackends.cmake），
+# OBJCXX 语言规则必须在 aurora 目标定义（下方 add_library）之前启用；否则 Ninja 生成器
+# 在 generate 阶段取不到 CMAKE_OBJCXX_COMPILE_OBJECT / ARCHIVE_* 规则（macOS CI 实测报错）。
+# enable_language 只在此处单一调用；AuroraBackends 仅保留平台守卫。
+if (APPLE AND AURORA_BACKEND_MACOS)
+    enable_language(OBJCXX)
+endif ()
+
 # ---- ccache 编译缓存（加速重复编译）----
 include(AuroraCcache)
 

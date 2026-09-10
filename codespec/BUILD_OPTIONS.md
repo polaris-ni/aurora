@@ -94,7 +94,7 @@ cmake -S . -B build -DAURORA_BUILD_INSPECTOR_SERVER=ON
 | `AURORA_BACKEND_GLFW` | `OFF` | GLFW + OpenGL（上下文 3.3 兼容剖面，绘制 1.1 立即模式） | `AURORA_BACKEND_GLFW` | `glfw` 目标（源码静态库）+ `opengl32`(Windows)/`OpenGL::GL`(其他平台) |
 | `AURORA_BACKEND_X11` | `OFF` | X11 / Linux 桌面后端（`X11Surface`，pimpl 完整实现） | `AURORA_BACKEND_X11` | `${X11_LIBRARIES}`（`find_package(X11)`） |
 | `AURORA_BACKEND_WAYLAND` | `OFF` | 原生 Wayland / Linux 桌面后端（`WaylandSurface`，pimpl 完整实现） | `AURORA_BACKEND_WAYLAND` | `${WAYLAND_CLIENT_LIBRARIES}` `${XKBCOMMON_LIBRARIES}`（`pkg-config`） |
-| `AURORA_BACKEND_MACOS` | `OFF` | macOS 后端（`MacOSSurface`，`enable_language(OBJCXX)`，非 Apple 开启 FATAL） | `AURORA_BACKEND_MACOS` | `Cocoa` `AppKit`（框架） |
+| `AURORA_BACKEND_MACOS` | `OFF` | macOS 后端（`MacOSSurface`，顶层 `enable_language(OBJCXX)` 先于目标定义，非 Apple 开启 FATAL） | `AURORA_BACKEND_MACOS` | `Cocoa` `AppKit`（框架） |
 | `AURORA_BACKEND_WASM` | `OFF` | WebAssembly 后端（`WasmSurface`，须 `emcmake cmake`，非 Emscripten 开启 FATAL） | `AURORA_BACKEND_WASM` | Emscripten 工具链 |
 
 ### 3.1 GLFW 源码构建
@@ -117,6 +117,7 @@ cmake -S . -B build -DAURORA_BACKEND_GLFW=ON
 |:---|:---|:---|
 | X11 | `dnf install libX11-devel` | `apt install libx11-dev` |
 | Wayland | `dnf install wayland-devel wayland-protocols-devel libxkbcommon-devel` | `apt install libwayland-dev wayland-protocols libxkbcommon-dev` |
+| GLFW（X11 扩展） | `dnf install libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel libXext-devel` | `apt install libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev` |
 
 构建示例（同时开启，最常见的 Linux 桌面配置）：
 

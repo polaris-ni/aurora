@@ -2,10 +2,16 @@
 
 #ifdef AURORA_BACKEND_GLFW
 
+#include "aurora/core/platform.h"
+
+#ifdef AURORA_PLATFORM_WINDOWS
+// Windows SDK 的 <GL/gl.h> 非自洽：函数声明使用的 WINGDIAPI/APIENTRY 由 windef.h 先行
+// 定义，缺 windows.h 时新版 SDK（10.0.26100）在 MSVC 下整片解析失败。
+#include <windows.h>
+#endif
+
 #include <GL/gl.h>
 #include <GLFW/glfw3.h>
-
-#include "aurora/core/platform.h"
 
 #ifdef AURORA_PLATFORM_WINDOWS
 #define GLFW_EXPOSE_NATIVE_WIN32  // NOLINT(*-identifier-naming)
