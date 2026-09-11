@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <optional>
+#include <string>
 
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/core/types.h"
 #include "aurora/i18n/localized_string.h"
+#include "aurora/i18n/string_table.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/state/reactive.h"
 #include "aurora/widget/widget.h"
@@ -143,6 +145,12 @@ class Button : public LeafWidget, public ButtonProps {
     }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "Button"; }
+
+    /// @brief 无障碍名称：取按钮文字（经 i18n 表解析后的最终显示串）。
+    /// @note Side-effects: reads i18n table
+    [[nodiscard]] auto accessibility_label() const -> std::string override {
+        return label.get().resolve(&default_string_table(), Locale{});
+    }
 
     /// @brief 运行时自描述（规格附录 B）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {

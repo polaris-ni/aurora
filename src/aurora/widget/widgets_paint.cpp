@@ -15,7 +15,7 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
     }
     const std::string &s = cached_resolved_text_;
     display_text_ = s;  // 缓存显示文本供命中测试/选区
-    const Font f = effective_font(font);
+    const Font f = effective_font(font, ctx);
     const render::TextLayoutOpts opts{
         .letter_spacing = letter_spacing, .word_spacing = word_spacing, .italic = (font_style == FontStyle::Italic)};
     const render::TextAAMode aa = text_aa_mode.has_value() ? *text_aa_mode : render::FontEngine::text_aa_mode();

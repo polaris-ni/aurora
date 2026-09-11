@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "aurora/core/accessibility.h"
+
 namespace aurora {
 
 auto AnimationController::forward(double from) -> void {
@@ -28,6 +30,20 @@ auto AnimationController::stop() -> void {
 auto AnimationController::tick(double dt_seconds) -> void {
     dirty_ = false;
     if (!is_animating()) {
+        return;
+    }
+    // 减弱动态效果（`AccessibilitySettings::reduce_motion`）：不再按时间渐变，直接落在本次播放的
+    // 目标端点（正向→1 / 反向→0）并置终态。状态机与「动画自然走完」完全一致，只是不产生中间帧，
+    // 故绑定端（State 写入 / 排版）无需任何特判。
+    if (current_accessibility_settings().reduce_motion) {
+        if (status_ == AnimationStatus::Forward) {
+            value_ = 1.0;
+            status_ = AnimationStatus::Completed;
+        } else {
+            value_ = 0.0;
+            status_ = AnimationStatus::Dismissed;
+        }
+        dirty_ = true;
         return;
     }
     const double dir = (status_ == AnimationStatus::Forward) ? 1.0 : -1.0;

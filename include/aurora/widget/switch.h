@@ -2,8 +2,10 @@
 
 #include <functional>
 #include <optional>
+#include <string>
 #include <vector>
 
+#include "aurora/core/accessibility.h"
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/binding.h"
@@ -102,6 +104,7 @@ class Switch : public LeafWidget {
             on_changed_(v);
         }
         mark_needs_paint();
+        notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
     }
 
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
@@ -112,6 +115,10 @@ class Switch : public LeafWidget {
     }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "Switch"; }
+
+    /// @brief 无障碍值：开关态的字面布尔串（`true` / `false`）。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_value() const -> std::string override { return value() ? "true" : "false"; }
 
     /// @brief 运行时自描述（规格附录 B）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {

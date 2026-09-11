@@ -2,8 +2,9 @@
 /// 目标单元: include/aurora/widget/rich_text_edit.h
 /// 测试说明: 覆盖 RichTextEdit——初始不变量、load_spans/to_spans 往返与相邻同样式合并、
 /// 当前输入样式链式 setter 与 toggle、序列化纯文本往返（字符取当前样式）、
-/// 布局高度按行计数与自描述元数据
+/// 布局高度按行计数与自描述元数据、IME 组合输入（preedit 显示 / 上屏落字 / 失焦取消）
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -164,6 +165,51 @@ AURORA_TEST_CASE(describe_reports_metadata_and_events) {
         }
     }
     AURORA_TEST_CHECK_TRUE(has_text_input_event);
+}
+
+AURORA_TEST_CASE(composition_preedit_then_commit) {
+    // preedit 不进文档（不上屏 → 不参与撤销栈/序列化），上屏时才落字。
+    RichTextEdit edit;
+    edit.on_focus_change(true);
+
+    TextCompositionEvent typing;
+    typing.preedit = "nihao";
+    typing.cursor_index = 5;
+    edit.on_text_composition(typing);
+    AURORA_TEST_CHECK_TRUE(typing.is_handled);
+    AURORA_TEST_CHECK_TRUE(edit.is_composing());
+    AURORA_TEST_CHECK_EQ(edit.preedit(), std::string{"nihao"});
+    AURORA_TEST_CHECK_EQ(edit.composition_cursor(), static_cast<std::size_t>(5));
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{""});  // 未上屏
+    AURORA_TEST_CHECK_EQ(edit.accessibility_value(), std::string{"nihao"});
+
+    TextCompositionEvent commit;
+    commit.committed = "你好";
+    edit.on_text_composition(commit);
+    AURORA_TEST_CHECK_FALSE(edit.is_composing());
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"你好"});
+
+    // 序列化只反映已上屏文本，不含 preedit
+    TextCompositionEvent pending;
+    pending.preedit = "zai";
+    edit.on_text_composition(pending);
+    Json out;
+    edit.serialize_props(out);
+    AURORA_TEST_CHECK_EQ(out["text"].get<std::string>(), "你好");
+}
+
+AURORA_TEST_CASE(blur_cancels_pending_composition) {
+    RichTextEdit edit;
+    edit.on_focus_change(true);
+    TextCompositionEvent composing;
+    composing.preedit = "zhong";
+    edit.on_text_composition(composing);
+    AURORA_TEST_CHECK_TRUE(edit.is_composing());
+
+    edit.on_focus_change(false);
+    AURORA_TEST_CHECK_FALSE(edit.is_composing());
+    AURORA_TEST_CHECK_EQ(edit.preedit(), std::string{""});
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{""});  // 取消不落字
 }
 
 }  // namespace aurora::test_cases::utest_rich_text_edit

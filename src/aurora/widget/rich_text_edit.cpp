@@ -2,6 +2,7 @@
 
 #include "aurora/app/clipboard.h"
 #include "aurora/core/diagnostics.h"
+#include "aurora/core/utf8.h"
 #include "aurora/event/keycode.h"
 #include "aurora/render/font_engine.h"
 
@@ -37,7 +38,7 @@ auto RichTextEdit::describe_static() -> WidgetDescriptor {
                  .note = "",
                  .json_type = "boolean"},
             },
-        .events = {"on_text_input"},
+        .events = {"on_text_input", "on_text_composition"},
         .children_policy = "none",
         .examples = {"au::RichTextEdit()"},
     };
@@ -60,10 +61,19 @@ auto RichTextEdit::on_paint(Painter &p, const Rect &bounds, const BuildContext &
     if (has_selection()) {
         paint_selection_highlight(p, bounds);
     }
+    // `idx` = 当前行首在 doc_ 中的下标（'\n' 独占一个下标，故行末推进为 line_end + 1），
+    // 与 `paint_cursor` 的计数口径一致；组合串据此插在 caret_ 对应的显示位置。
+    std::size_t idx = 0;
     float y = bounds.origin.y;
     for (const auto &line : lines_) {
         float x = bounds.origin.x;
-        for (const auto &sc : line.chars) {
+        const std::size_t line_end = idx + line.chars.size();
+        for (std::size_t i = 0; i < line.chars.size(); ++i) {
+            if (is_composing() && idx + i == caret_) {
+                x += paint_preedit(p, x, y);
+            }
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            const auto &sc = line.chars[i];
             if (sc.ch != '\n') {
                 const float cw = render::FontEngine::measure_width(std::string(1, sc.ch), sc.font);
                 p.draw_text(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = cw, .height = line_height_}},
@@ -76,9 +86,16 @@ auto RichTextEdit::on_paint(Painter &p, const Rect &bounds, const BuildContext &
                 x += cw;
             }
         }
+        // 行尾（'\n' 位 / 文末）也要能承载组合串
+        if (is_composing() && caret_ == line_end) {
+            x += paint_preedit(p, x, y);
+        }
+        (void)x;  // 行末游标推进后不再使用（组合串已绘制完）
         y += line_height_;
+        idx = line_end + 1;
     }
-    if (is_focused()) {
+    // 组合时光标画在 preedit 内的候选插入点（`paint_preedit` 负责），避免与文档光标重叠。
+    if (is_focused() && !is_composing()) {
         paint_cursor(p, bounds);
     }
 }
@@ -440,6 +457,47 @@ auto RichTextEdit::paint_selection_highlight(Painter &p, const Rect &bounds) con
     }
     (void)a;
     (void)b;  // selection range used above
+}
+
+auto RichTextEdit::paint_preedit(Painter &p, float x, float y) const -> float {
+    constexpr Color preedit_underline{30, 110, 220, 255};
+    constexpr Color preedit_selection{255, 200, 80, 140};
+    const float w = render::FontEngine::measure_width(preedit_, cur_font_);
+    const std::size_t pn = utf8_cp_count(preedit_);
+
+    // ① preedit 内选区（输入法高亮「待转换片段」）
+    if (preedit_sel_end_ != kNoPreeditSelection) {
+        const auto a = std::min(preedit_sel_start_, preedit_sel_end_);
+        const auto b = std::min(std::max(preedit_sel_start_, preedit_sel_end_) + 1U, pn);
+        const float sx0 = x + render::FontEngine::measure_width(utf8_cp_slice(preedit_, 0, a), cur_font_);
+        const float sx1 = x + render::FontEngine::measure_width(utf8_cp_slice(preedit_, 0, b), cur_font_);
+        if (sx1 > sx0) {
+            p.fill_rect(
+                Rect{.origin = Point{.x = sx0, .y = y}, .size = Size{.width = sx1 - sx0, .height = line_height_}},
+                preedit_selection);
+        }
+    }
+
+    // ② preedit 文本 + 组合下划线（区别于正式文本）
+    p.draw_text(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = w, .height = line_height_}}, preedit_,
+                cur_font_, cur_color_);
+    p.fill_rect(Rect{.origin = Point{.x = x, .y = y + line_height_ - 2.0F}, .size = Size{.width = w, .height = 2.0F}},
+                preedit_underline);
+
+    // ③ 候选插入点光标（仅聚焦时；组合期间它取代文档光标）
+    if (is_focused()) {
+        const float cx = x + render::FontEngine::measure_width(utf8_cp_slice(preedit_, 0, preedit_cursor_), cur_font_);
+        p.fill_rect(Rect{.origin = Point{.x = cx, .y = y}, .size = Size{.width = 2.0F, .height = line_height_}},
+                    Color::black());
+    }
+    return w;
+}
+
+auto RichTextEdit::cancel_composition() -> void {
+    preedit_.clear();
+    preedit_cursor_ = 0;
+    preedit_sel_start_ = 0;
+    preedit_sel_end_ = kNoPreeditSelection;
 }
 
 auto RichTextEdit::paint_cursor(Painter &p, const Rect &bounds) const -> void {

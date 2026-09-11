@@ -1,9 +1,12 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/environment/environment.h
-/// 测试说明: Environment 链式父子作用域（with / set_local / set）的类型化读写与最近祖先优先语义
+/// 测试说明: Environment 链式父子作用域（with / set_local / set）的类型化读写、最近祖先优先语义，
+///           以及经 Environment 注入结构化设置（AccessibilitySettings）后的向下可见性
 
 #include <string>
 
+#include "aurora/core/accessibility.h"
+#include "aurora/environment/build_context.h"
 #include "aurora/environment/environment.h"
 #include "framework/aurora_test.h"
 
@@ -82,6 +85,25 @@ AURORA_TEST_CASE(type_identity_keys_are_distinct) {
     AURORA_TEST_REQUIRE(cfg != nullptr);
     AURORA_TEST_CHECK_EQ(cfg->padding, 8);
     AURORA_TEST_CHECK_EQ(*env.get<int>(), 5);
+}
+
+AURORA_TEST_CASE(injected_accessibility_settings_visible_down_the_chain) {
+    // 结构化设置（AccessibilitySettings）经 Environment 注入：子树可见、最近祖先优先。
+    // 库侧解析入口为 resolved_accessibility_settings(ctx)，注入缺失时回落进程级默认（另例覆盖）。
+    aurora::Environment root;
+    root.set_local(aurora::AccessibilitySettings{.font_scale = 1.25F});
+    const aurora::Environment leaf =
+        root.with(aurora::AccessibilitySettings{.reduce_motion = true, .font_scale = 2.0F});
+
+    aurora::BuildContext at_root;
+    at_root.env = &root;
+    aurora::BuildContext at_leaf;
+    at_leaf.env = &leaf;
+
+    AURORA_TEST_CHECK_NEAR(aurora::resolved_accessibility_settings(at_root).resolved_font_scale(), 1.25F, 1e-6F);
+    const auto nearest = aurora::resolved_accessibility_settings(at_leaf);
+    AURORA_TEST_CHECK(nearest.reduce_motion);
+    AURORA_TEST_CHECK_NEAR(nearest.resolved_font_scale(), 2.0F, 1e-6F);
 }
 
 }  // namespace aurora::test_cases::utest_environment

@@ -35,6 +35,7 @@ class TestBox final : public LeafWidget {
     int activations = 0;
     int scroll_count = 0;
     int text_count = 0;
+    int composition_count = 0;
     int drop_count = 0;
     Point last_local{};
     std::optional<int> last_pointer_id;
@@ -94,6 +95,11 @@ class TestBox final : public LeafWidget {
         Widget::on_text_input(e);  // 默认消费
     }
 
+    auto on_text_composition(TextCompositionEvent& e) -> void override {
+        ++composition_count;
+        Widget::on_text_composition(e);  // 默认消费
+    }
+
     auto on_file_drop(FileDropEvent& e) -> void override {
         ++drop_count;
         if (consume_drop) {
@@ -109,6 +115,7 @@ class TestRow final : public Container {
     int pointer_events = 0;
     int scroll_count = 0;
     int text_count = 0;
+    int composition_count = 0;
     Point last_local{};
 
     using Widget::on_pointer_event;
@@ -147,6 +154,11 @@ class TestRow final : public Container {
     auto on_text_input(TextInputEvent& e) -> void override {
         ++text_count;
         Widget::on_text_input(e);
+    }
+
+    auto on_text_composition(TextCompositionEvent& e) -> void override {
+        ++composition_count;
+        Widget::on_text_composition(e);
     }
 };
 
@@ -396,6 +408,22 @@ AURORA_TEST_CASE(scroll_text_input_and_file_drop_route_to_target) {
     no_focus.text = "y";
     AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, no_focus, fm));
     AURORA_TEST_CHECK_EQ(tree.box1->text_count, 1);
+
+    // IME 组合事件：与 TextInputEvent 同构路由——只给焦点控件、不冒泡；无焦点 → false
+    fm.set_focus(tree.box1.get());
+    TextCompositionEvent composition;
+    composition.preedit = "nihao";
+    composition.cursor_index = 5;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, composition, fm));
+    AURORA_TEST_CHECK_EQ(tree.box1->composition_count, 1);
+    AURORA_TEST_CHECK_EQ(tree.row->composition_count, 0);  // 不冒泡
+    AURORA_TEST_CHECK_TRUE(composition.is_handled);
+
+    fm.clear();
+    TextCompositionEvent no_focus_composition;
+    no_focus_composition.preedit = "ni";
+    AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, no_focus_composition, fm));
+    AURORA_TEST_CHECK_EQ(tree.box1->composition_count, 1);
 
     // 文件拖放：命中即调用 on_file_drop；返回值 = 是否被消费
     FileDropEvent drop;

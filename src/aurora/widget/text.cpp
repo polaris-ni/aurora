@@ -1,6 +1,7 @@
 #include "aurora/widget/text.h"
 
 #include "aurora/app/clipboard.h"
+#include "aurora/core/accessibility.h"
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/utf8.h"
 #include "aurora/event/keycode.h"
@@ -275,7 +276,7 @@ auto Text::validate_props() const -> Result<void> {
 }
 
 auto Text::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
-    const Font f = effective_font(font);
+    const Font f = effective_font(font, ctx);
     // resolved_text 缓存：on_layout 在 content 变化时必被调用，此处计算并缓存
     cached_resolved_text_ = resolved_text(ctx);
     resolved_dirty_ = false;
@@ -585,6 +586,18 @@ auto Text::effective_font(const Font &base) -> Font {
     if (f.size_pt <= 0.0F) {
         f.size_pt = 14.0F;
     }
+    // 无障碍字号缩放（`AccessibilitySettings::font_scale`）：默认 1.0 ⇒ 行为与接入前逐位一致。
+    f.size_pt *= current_accessibility_settings().resolved_font_scale();
+    return f;
+}
+
+auto Text::effective_font(const Font &base, const BuildContext &ctx) -> Font {
+    Font f = base;
+    if (f.size_pt <= 0.0F) {
+        f.size_pt = 14.0F;
+    }
+    // 带上下文版：先认 `Environment` 注入值，缺失再回落到进程级默认（见 core/accessibility.h）。
+    f.size_pt *= resolved_accessibility_settings(ctx).resolved_font_scale();
     return f;
 }
 

@@ -5,6 +5,7 @@
 #include <string>
 
 #include "aurora/app/clipboard.h"
+#include "aurora/core/accessibility.h"
 #include "aurora/core/types.h"
 #include "aurora/core/utf8.h"
 #include "aurora/event/event.h"
@@ -53,6 +54,7 @@ class TextInput : public LeafWidget {
     /// @brief 设置初始值（链式）。
     auto set_value(const std::string &v) -> TextInput & {
         value_ = v;
+        notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
         return *this;
     }
     /// @brief 设置占位提示（链式）。
@@ -155,6 +157,14 @@ class TextInput : public LeafWidget {
 
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&value_); }
     [[nodiscard]] auto type_name() const -> const char * override { return "TextInput"; }
+
+    /// @brief 无障碍名称：无宿主覆写时以占位提示充当（编辑框的屏幕阅读器惯例）。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto accessibility_label() const -> std::string override { return placeholder_; }
+
+    /// @brief 无障碍值：取当前编辑内容（`value()`）。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_value() const -> std::string override { return composed_text(value_.get()); }
 
     /// @brief 运行时自描述（规格附录 B）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
@@ -559,6 +569,14 @@ class TextInput : public LeafWidget {
         }
     }
 
+    /// @brief 焦点变更：失焦即取消未上屏的组合（平台 IME 惯例，避免 preedit 残留在失焦控件里）。
+    auto on_focus_change(bool focused) -> void override {
+        Widget::on_focus_change(focused);
+        if (!focused) {
+            cancel_composition();
+        }
+    }
+
     auto on_text_input(TextInputEvent &e) -> void override {
         if (!enabled_ || !is_focused()) {
             return;
@@ -567,34 +585,49 @@ class TextInput : public LeafWidget {
             e.is_handled = true;  // 只读态吞掉输入不落字
             return;
         }
-        if (sel_end_ != NO_SEL) {
-            delete_selection();  // 选区替换
-        }
-        std::string ins = e.text;
-        if (max_length_ > 0) {
-            const size_t room = max_length_ > cp_count(value_.get()) ? max_length_ - cp_count(value_.get()) : 0;
-            ins = cp_slice(ins, 0, room);  // 限长：仅插入剩余额度内的码点
-            if (ins.empty()) {
-                e.is_handled = true;
-                return;
-            }
-        }
-        std::string v = value_.get();
-        size_t i = 0;
-        size_t cp = 0;
-        while (i < v.size() && cp < caret_) {
-            i += cp_len(static_cast<unsigned char>(v[i]));
-            ++cp;
-        }
-        v.insert(i, ins);
-        value_ = v;
-        caret_ += cp_count(ins);
-        sel_start_ = caret_;
-        sel_end_ = NO_SEL;
-        notify_changed();
-        mark_needs_paint();
+        insert_at_caret(e.text);
         e.is_handled = true;
     }
+
+    /// @brief IME 组合输入（CJK 攻坚 A1）：先落 `committed` 上屏，再更新 preedit 显示态。
+    ///
+    /// 组合期间 `value()` **不含** preedit（数据模型保持干净、golden 可复现），preedit 仅在
+    /// 绘制/测量期插入到光标处（见 `composed_text()`）。`preedit` 为空即组合结束或取消。
+    ///
+    /// 典型序列（拼音输入法）：`preedit="nihao"` → `preedit="你好",cursor=2` →
+    /// `preedit="",committed="你好"`（落字）。
+    auto on_text_composition(TextCompositionEvent &e) -> void override {
+        // 与 `on_text_input` 完全同构：禁用/未聚焦 → 不消费；只读 → 消费但不落地。
+        if (!enabled_ || !is_focused()) {
+            return;
+        }
+        e.is_handled = true;
+        if (read_only_) {
+            return;  // 只读：不落字也不显示 preedit
+        }
+        if (!e.committed.empty()) {
+            insert_at_caret(e.committed);
+        }
+        preedit_ = e.preedit;
+        const size_t pn = cp_count(preedit_);
+        preedit_cursor_ = std::min(e.cursor_index, pn);
+        preedit_sel_start_ = std::min(e.sel_start, pn);
+        preedit_sel_end_ = e.has_preedit_selection() ? std::min(e.sel_end, pn) : NO_SEL;
+        if (preedit_sel_end_ != NO_SEL && preedit_sel_end_ < preedit_sel_start_) {
+            preedit_sel_end_ = preedit_sel_start_;  // 端点倒置时退化为单点选区
+        }
+        mark_needs_paint();
+        notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
+    }
+
+    /// @brief 当前预编辑串（组合中的未上屏文本）；无组合时为空串。
+    [[nodiscard]] auto preedit() const -> std::string { return preedit_; }
+
+    /// @brief 是否处于组合态（preedit 非空）。
+    [[nodiscard]] auto is_composing() const -> bool { return !preedit_.empty(); }
+
+    /// @brief 组合光标在 preedit 内的码点下标（候选插入点）。
+    [[nodiscard]] auto composition_cursor() const -> std::size_t { return preedit_cursor_; }
 
     /// @brief 当前文本值（只读，供测试 / 外部读取）。
     [[nodiscard]] auto value() const -> std::string { return value_.get(); }
@@ -618,7 +651,7 @@ class TextInput : public LeafWidget {
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         const float fs = font_size_ > 0.0F ? font_size_ : 14.0F;
         const Font f{.size_pt = fs};
-        const std::string shown = value_.get().empty() ? placeholder_ : display_value();
+        const std::string shown = composed_text(value_.get().empty() ? placeholder_ : display_value());
         const float tw = render::FontEngine::measure_width(shown, f) + padding_.left + padding_.right;
         const float h = render::FontEngine::measure_height(f) + padding_.top + padding_.bottom;
         const float w = (c.max.width != Size::infinity().width) ? c.max.width : tw;
@@ -632,8 +665,8 @@ class TextInput : public LeafWidget {
 
         paint_frame(p, bounds, ctx);
 
-        const bool empty = value_.get().empty();
-        const std::string shown = empty ? placeholder_ : display_value();
+        const bool empty = value_.get().empty() && !is_composing();
+        const std::string shown = composed_text(empty ? placeholder_ : display_value());
         const Color text_col = [&] {  // NOLINT
             if (disabled) {
                 return Color{150, 150, 152, 255};
@@ -649,24 +682,32 @@ class TextInput : public LeafWidget {
             bounds.origin.y + padding_.top + ((bounds.size.height - padding_.top - padding_.bottom - th) * 0.5F);
 
         // 选区高亮（含头含尾模型）：无选区不画；端点字符（含行尾/行首）始终计入。
+        // 组合期间 `shown` 含 preedit，故下标须经 `composed_index` 映射，否则高亮整体错位。
         if (!empty && sel_end_ != NO_SEL) {
-            const size_t a = std::min(sel_start_, sel_end_);
-            const size_t b = std::max(sel_start_, sel_end_);
+            const size_t a = composed_index(std::min(sel_start_, sel_end_));
+            const size_t b = composed_index(std::max(sel_start_, sel_end_));
             const float x0 = tx + render::FontEngine::caret_x(shown, a, f);
             const float x1 = tx + render::FontEngine::caret_x(shown, b + 1, f);  // 含尾：+1
             p.fill_rect(Rect{.origin = Point{.x = x0, .y = ty}, .size = Size{.width = x1 - x0, .height = th}},
                         selection_color_);
         }
 
+        // 组合态：preedit 内选区高亮 + 整段下划线
+        if (is_composing()) {
+            paint_composition(p, shown, tx, ty, th, f);
+        }
+
         p.draw_text(Rect{.origin = Point{.x = tx, .y = ty},
                          .size = Size{.width = bounds.size.width - padding_.left - padding_.right, .height = th}},
                     shown, f, text_col);
 
-        // 光标（仅非占位文本、聚焦且未禁用时显示）
+        // 光标（仅非占位文本、聚焦且未禁用时显示）；组合时光标落在 preedit 内的候选插入点并加粗。
         if (is_focused() && !empty && !disabled) {
-            const float cx = tx + render::FontEngine::caret_x(shown, caret_, f);
-            p.fill_rect(Rect{.origin = Point{.x = cx, .y = ty}, .size = Size{.width = 1.5F, .height = th}},
-                        cursor_color_);
+            const size_t ci = composed_index(caret_) + preedit_cursor_;
+            const float cx = tx + render::FontEngine::caret_x(shown, ci, f);
+            p.fill_rect(
+                Rect{.origin = Point{.x = cx, .y = ty}, .size = Size{.width = is_composing() ? 2.0F : 1.5F, .height = th}},
+                cursor_color_);
         }
     }
 
@@ -715,11 +756,101 @@ class TextInput : public LeafWidget {
         return out;
     }
 
-    /// @brief 编辑后统一上报（on_changed 回调）。
+    /// @brief 在光标处插入文本（选区替换 + `max_length` 限长 + 光标前进）。
+    ///
+    /// 普通文本输入与 IME 上屏（`TextCompositionEvent::committed`）共用此路径，保证限长/选区
+    /// 语义一致。`text` 为空时为空操作。
+    auto insert_at_caret(const std::string &text) -> void {
+        if (text.empty()) {
+            return;
+        }
+        if (sel_end_ != NO_SEL) {
+            delete_selection();  // 选区替换
+        }
+        std::string ins = text;
+        if (max_length_ > 0) {
+            const size_t room = max_length_ > cp_count(value_.get()) ? max_length_ - cp_count(value_.get()) : 0;
+            ins = cp_slice(ins, 0, room);  // 限长：仅插入剩余额度内的码点
+            if (ins.empty()) {
+                return;
+            }
+        }
+        std::string v = value_.get();
+        size_t i = 0;
+        size_t cp = 0;
+        while (i < v.size() && cp < caret_) {
+            i += cp_len(static_cast<unsigned char>(v[i]));
+            ++cp;
+        }
+        v.insert(i, ins);
+        value_ = v;
+        caret_ += cp_count(ins);
+        sel_start_ = caret_;
+        sel_end_ = NO_SEL;
+        notify_changed();
+        mark_needs_paint();
+    }
+
+    /// @brief 组合显示串：把 preedit 插到 `base` 的光标处（`base` 可为掩码后的显示值）。
+    ///
+    /// 绘制与测量一律走此串，故 preedit 与既有文本共用一套 `caret_x` 度量，天然支持中文混排。
+    [[nodiscard]] auto composed_text(const std::string &base) const -> std::string {
+        if (preedit_.empty()) {
+            return base;
+        }
+        const size_t n = cp_count(base);
+        const size_t at = std::min(caret_, n);
+        return cp_slice(base, 0, at) + preedit_ + cp_slice(base, at, n - at);
+    }
+
+    /// @brief `base` 的码点下标 `i` 在 `composed_text(base)` 中的对应下标（preedit 插在 caret_ 处）。
+    [[nodiscard]] auto composed_index(size_t i) const -> size_t {
+        return preedit_.empty() ? i : i + (i >= caret_ ? cp_count(preedit_) : 0U);
+    }
+
+    /// @brief 组合态绘制：preedit 选区高亮 + 下划线（候选串底衬）。返回 preedit 占用的宽度。
+    ///
+    /// `x0` 为 preedit 起始 x；`f` 为当前字体。仅 `is_composing()` 时调用。
+    auto paint_composition(Painter &p, const std::string &shown, float x0, float ty, float th, const Font &f) const
+        -> float {
+        const float px0 = x0 + render::FontEngine::caret_x(shown, caret_, f);
+        const float pw = render::FontEngine::measure_width(preedit_, f);
+
+        // ① preedit 内选区（输入法高亮「待转换片段」）
+        if (preedit_sel_end_ != NO_SEL) {
+            const size_t a = std::min(preedit_sel_start_, preedit_sel_end_);
+            const size_t b = std::max(preedit_sel_start_, preedit_sel_end_);
+            const float sx0 = px0 + render::FontEngine::caret_x(preedit_, a, f);
+            const float sx1 = px0 + render::FontEngine::caret_x(preedit_, b + 1, f);  // 含尾
+            p.fill_rect(Rect{.origin = Point{.x = sx0, .y = ty}, .size = Size{.width = sx1 - sx0, .height = th}},
+                        preedit_selection_color_);
+        }
+        // ② 组合下划线（整段 preedit，区别于正式文本）
+        p.fill_rect(Rect{.origin = Point{.x = px0, .y = ty + th - 1.0F}, .size = Size{.width = pw, .height = 2.0F}},
+                    preedit_underline_color_);
+        return pw;
+    }
+
+    /// @brief 取消组合：清空 preedit 与其选区（失焦 / 只读 / 平台侧取消时调用）。
+    auto cancel_composition() -> void {
+        if (preedit_.empty()) {
+            return;
+        }
+        preedit_.clear();
+        preedit_cursor_ = 0;
+        preedit_sel_start_ = 0;
+        preedit_sel_end_ = NO_SEL;
+        mark_needs_paint();
+    }
+
+    /// @brief 编辑后统一上报（on_changed 回调 + 无障碍 ValueChanged 事件）。
+    ///
+    /// 所有编辑路径（插入 / 粘贴 / 删除 / 退格）都收口于此，故无障碍上报放在这里而非逐处补。
     auto notify_changed() const -> void {
         if (on_changed_) {
             on_changed_(value_.get());
         }
+        notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
@@ -739,6 +870,8 @@ class TextInput : public LeafWidget {
     std::optional<Color> focused_border_color_;  ///< 聚焦态边框色；空 = 跟随主题 primary
     float border_width_ = 1.0F;  ///< 边框线宽 dp；0 = 不描边
     Color selection_color_ = Color{80, 120, 220, 90};  ///< 选区高亮色
+    Color preedit_underline_color_ = Color{30, 110, 220, 255};  ///< 组合串（preedit）下划线色
+    Color preedit_selection_color_ = Color{255, 200, 80, 120};  ///< preedit 内选区（待转换片段）高亮色
     std::size_t max_length_ = 0;  ///< 最大长度（码点）；0 = 不限
     bool read_only_ = false;  ///< 只读：可选择/复制不可编辑
     bool obscure_ = false;  ///< 密码掩码显示
@@ -752,6 +885,12 @@ class TextInput : public LeafWidget {
     size_t caret_ = 0;
     bool selecting_ = false;
     static constexpr size_t NO_SEL = static_cast<size_t>(-1);
+
+    // IME 组合态（A1）：preedit 不进 value_（数据模型保持纯净），仅在绘制/测量期插入 caret_ 处。
+    std::string preedit_;  ///< 预编辑串（UTF-8）；空 = 无组合
+    size_t preedit_cursor_ = 0;  ///< 组合光标在 preedit 内的码点下标
+    size_t preedit_sel_start_ = 0;  ///< preedit 内选区起点（码点下标）
+    size_t preedit_sel_end_ = NO_SEL;  ///< preedit 内选区终点（含尾）；NO_SEL = 无
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
     // UTF-8 码点原语已收口到 aurora::utf8_cp_*（见 core/utf8.h，dup-1）；此处委托，避免重复实现。

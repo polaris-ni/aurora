@@ -1,8 +1,10 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/text_input.h
 /// 测试说明: 覆盖 TextInput——Props 构造与链式 setter、只读/限长/禁用状态、布局尺寸与字号关系、
-/// 经公开文本输入入口验证 on_changed 回调与截断/吞输入行为、序列化往返与默认键省略
+/// 经公开文本输入入口验证 on_changed 回调与截断/吞输入行为、IME 组合输入（preedit 显示 /
+/// 上屏落字 / 限长 / 失焦取消 / 参与测量）、序列化往返与默认键省略
 
+#include <cstddef>
 #include <string>
 
 #include "aurora/layout/layout_engine.h"
@@ -156,6 +158,109 @@ AURORA_TEST_CASE(read_only_and_disabled_swallow_text_input) {
     disabled.on_text_input(disabled_event);
     AURORA_TEST_CHECK_FALSE(disabled_event.is_handled);
     AURORA_TEST_CHECK_EQ(disabled.value(), std::string{});
+}
+
+AURORA_TEST_CASE(composition_shows_preedit_without_touching_value) {
+    // 拼音输入的完整三段序列：preedit → 候选替换 → 上屏。
+    // 关键不变量：preedit 期间 value() 保持干净（golden 可复现），仅上屏时落字。
+    TextInput ti;
+    ti.on_focus_change(true);
+
+    TextCompositionEvent typing;
+    typing.preedit = "nihao";
+    typing.cursor_index = 5;
+    ti.on_text_composition(typing);
+    AURORA_TEST_CHECK_TRUE(typing.is_handled);
+    AURORA_TEST_CHECK_TRUE(ti.is_composing());
+    AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{"nihao"});
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{""});  // 未上屏，值不变
+    AURORA_TEST_CHECK_EQ(ti.composition_cursor(), static_cast<std::size_t>(5));
+    AURORA_TEST_CHECK_EQ(ti.accessibility_value(), std::string{"nihao"});  // 读屏需播报组合态
+
+    TextCompositionEvent candidate;
+    candidate.preedit = "你好";
+    candidate.cursor_index = 2;
+    ti.on_text_composition(candidate);
+    AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{"你好"});
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{""});
+
+    TextCompositionEvent commit;
+    commit.committed = "你好";
+    ti.on_text_composition(commit);
+    AURORA_TEST_CHECK_FALSE(ti.is_composing());
+    AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{""});
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"你好"});
+    AURORA_TEST_CHECK_EQ(ti.accessibility_value(), std::string{"你好"});
+}
+
+AURORA_TEST_CASE(composition_commit_respects_max_length_read_only_and_disabled) {
+    // 上屏文本走与普通输入同一条 `insert_at_caret`，故限长语义自动一致。
+    TextInput limited;
+    limited.set_max_length(2);
+    limited.on_focus_change(true);
+    TextCompositionEvent over;
+    over.committed = "abcdef";
+    limited.on_text_composition(over);
+    AURORA_TEST_CHECK_EQ(limited.value(), std::string{"ab"});
+
+    // 只读：吞事件、不上屏、不显示 preedit
+    TextInput ro;
+    ro.set_value("keep").set_read_only(true);
+    ro.on_focus_change(true);
+    TextCompositionEvent blocked;
+    blocked.preedit = "ni";
+    blocked.committed = "x";
+    ro.on_text_composition(blocked);
+    AURORA_TEST_CHECK_TRUE(blocked.is_handled);
+    AURORA_TEST_CHECK_FALSE(ro.is_composing());
+    AURORA_TEST_CHECK_EQ(ro.value(), std::string{"keep"});
+
+    // 禁用：与 TextInputEvent 一致，连事件都不消费
+    TextInput disabled;
+    disabled.set_enabled(false);
+    disabled.on_focus_change(true);
+    TextCompositionEvent ignored;
+    ignored.preedit = "ni";
+    disabled.on_text_composition(ignored);
+    AURORA_TEST_CHECK_FALSE(ignored.is_handled);
+    AURORA_TEST_CHECK_FALSE(disabled.is_composing());
+}
+
+AURORA_TEST_CASE(blur_cancels_pending_composition) {
+    // 失焦即取消未上屏的组合（平台 IME 惯例），且取消不落字。
+    TextInput ti;
+    ti.on_focus_change(true);
+    TextCompositionEvent composing;
+    composing.preedit = "zhong";
+    composing.sel_start = 0;
+    composing.sel_end = 5;
+    ti.on_text_composition(composing);
+    AURORA_TEST_CHECK_TRUE(ti.is_composing());
+
+    ti.on_focus_change(false);
+    AURORA_TEST_CHECK_FALSE(ti.is_composing());
+    AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{""});
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{""});
+}
+
+AURORA_TEST_CASE(preedit_participates_in_layout_measurement) {
+    // preedit 参与宽度测量：组合中的中文应把输入框撑开（否则文字被裁切）。
+    // 注意用无界约束测内在宽度——有界约束下 on_layout 恒取 c.max.width，观察不到内容差异。
+    const Constraints loose{};  // max = 无限
+    TextInput base;
+    base.set_value("ab");
+    LayoutEngine::layout(base, loose);
+
+    TextInput composing;
+    composing.set_value("ab");
+    composing.on_focus_change(true);
+    TextCompositionEvent e;
+    e.preedit = "你好吗";
+    composing.on_text_composition(e);
+    LayoutEngine::layout(composing, loose);
+
+    AURORA_TEST_CHECK_TRUE(composing.size().width > base.size().width);
+    AURORA_TEST_CHECK_NEAR(composing.size().height, base.size().height, 1e-4F);  // 单行：高度不变
 }
 
 AURORA_TEST_CASE(serialize_deserialize_roundtrip_and_defaults) {

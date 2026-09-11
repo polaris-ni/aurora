@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <ranges>
+#include <string>
 #include <vector>
 
 #include "aurora/core/aurora_assert.h"
@@ -33,6 +34,22 @@ inline constexpr std::size_t AURORA_DEFAULT_MAX_WIDGET_DEPTH = 64;
 class Painter;  // 前向声明（render 模块定义于 render/painter.h）
 
 class Widget;  // 前向声明（HitNode 以 std::weak_ptr<Widget> 作为成员；Widget 在下方定义）
+
+/// @brief 上报**焦点变化**到无障碍事件通道（`AccessibilityEventKind::FocusChanged`）。
+///
+/// 定义在 `src/aurora/widget/widget.cpp`：该 TU 才包含 `core/accessibility.h`——后者反向包含
+/// `widget/widget.h`（语义树要用 `Widget::child_nodes()`），故 `widget.h` 只能前置声明，不能反向包含。
+/// @param target 焦点发生变化的控件
+/// @note Thread: main-thread only
+/// @note Side-effects: invokes accessibility event handler
+auto notify_accessibility_focus_changed(const Widget *target) -> void;
+
+/// @brief 上报**结构变化**到无障碍事件通道（`AccessibilityEventKind::StructureChanged`）。
+/// 定义位置与依赖同 `notify_accessibility_focus_changed`。
+/// @param host 子节点发生增删/替换的容器
+/// @note Thread: main-thread only
+/// @note Side-effects: invokes accessibility event handler
+auto notify_accessibility_structure_changed(const Widget *host) -> void;
 
 /// @brief 命中链节点：携带命中控件及其相对根的全局 origin（用于事件坐标本地化）。
 /// 命中链递归下降时，子节点的 `Node::bounds_.origin` 即其全局 origin，直接带入；
@@ -365,13 +382,22 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @brief 文本输入入口（焦点 widget 上调用）。默认标记为已消费。
     virtual auto on_text_input(TextInputEvent &e) -> void { e.is_handled = true; }
 
+    /// @brief IME 组合输入入口（焦点 widget 上调用）。默认标记为已消费但**不落地任何文本**：
+    ///       未接组合语义的控件吞掉事件，避免平台侧因「无人处理」而重复上屏。
+    ///       可编辑控件（`TextInput` / `RichTextEdit`）覆写之：先落 `committed`，再更新 preedit 显示态。
+    virtual auto on_text_composition(TextCompositionEvent &e) -> void { e.is_handled = true; }
+
     /// @brief 操作系统文件拖放落在本控件时触发；消费时置 `e.is_handled_` 阻止继续。
     /// 默认不处理（交给命中目标自身）。
     virtual auto on_file_drop(FileDropEvent &e) -> void { (void)e; }
 
     /// @brief 焦点变更通知（获焦 focus=true / 失焦 focus=false）。
     /// 基类默认维护 `is_focused_` 以便 `is_focused()` 正确；子类可覆写以更新聚焦态绘制。
-    virtual auto on_focus_change(bool focused) -> void { is_focused_ = focused; }
+    /// 无论是否覆写，进入本实现即代表一次真实焦点转移，故在此统一上抛无障碍事件。
+    virtual auto on_focus_change(bool focused) -> void {
+        is_focused_ = focused;
+        notify_accessibility_focus_changed(this);
+    }
 
     // ---- 焦点能力（specification/05-event-navigation.md §4）----
     /// @brief 是否可参与焦点序（默认 true）。交互控件保持 true；纯展示控件可设 false。
@@ -404,6 +430,26 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 默认实现返回 `{ .name = type_name() }`：无富描述控件（叶/简单容器）可省略 override，
     /// 仅当需要额外 properties/events/children_policy 时才覆写。
     [[nodiscard]] virtual auto describe() const -> WidgetDescriptor;
+
+    /// @brief 无障碍可读名称（语义树 `AccessibilityNode::name`）：屏幕阅读器对控件的播报名。
+    ///
+    /// 默认空串；需要语义的控件覆写返回可读文本（Button 取 label、Text 取显示文本…）。
+    /// 覆写返回值**优先于**任何按角色推断的默认取值，宿主（App）可据此覆盖控件自带文案。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto accessibility_label() const -> std::string { return std::string{}; }
+
+    /// @brief 无障碍当前值（语义树 `AccessibilityNode::value`）：可变量控件的现值文本。
+    ///
+    /// 默认空串；可取值的控件覆写返回当前值（TextInput 取内容、Checkbox/Switch 取布尔、
+    /// Slider/Progress 取数值…）。语义树构建时每次实时读取，故 reflected 值变化自动同步。
+    /// @note Side-effects: reads state
+    [[nodiscard]] virtual auto accessibility_value() const -> std::string { return std::string{}; }
+
+    /// @brief 无障碍用途提示（语义树 `AccessibilityNode::hint`）：补充 name 语义的操作说明。
+    ///
+    /// 默认空串；宿主可覆写给屏幕阅读器额外的用法描述（如「双击展开」）。不参与布局与绘制。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto accessibility_hint() const -> std::string { return std::string{}; }
 
     /// @brief 序列化自有属性到 props JSON（结构快照/工具链用）。
     /// 子类覆写时应先调用基类默认实现以保留通用属性。
@@ -778,6 +824,7 @@ class Container : public Widget {
     auto add(const Node &child) -> void {
         children_.push_back(child);
         mark_needs_layout();
+        notify_accessibility_structure_changed(this);
     }
 
     /// @brief 运行时访问第 `i` 个子节点（可变，用于设置 `id` / 替换内容等）。越界抛 `std::out_of_range`。

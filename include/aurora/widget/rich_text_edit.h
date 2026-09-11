@@ -8,6 +8,7 @@
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/core/types.h"
+#include "aurora/core/utf8.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/undo_stack.h"
 #include "aurora/widget/text_span.h"
@@ -149,6 +150,16 @@ class RichTextEdit : public LeafWidget {
 
     [[nodiscard]] auto type_name() const -> const char * override { return "RichTextEdit"; }
 
+    /// @brief 无障碍值：文档纯文本，组合期间含光标处的 preedit（读屏应播报未上屏内容）。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_value() const -> std::string override {
+        std::string out = plain_text();
+        if (is_composing()) {
+            out.insert(std::min(caret_, out.size()), preedit_);
+        }
+        return out;
+    }
+
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
 
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
@@ -166,6 +177,45 @@ class RichTextEdit : public LeafWidget {
             do_insert(e.text);
             mark_needs_paint();
             e.is_handled = true;
+        }
+    }
+
+    /// @brief IME 组合输入（CJK 攻坚 A1）：先落 `committed` 上屏（走 `do_insert`，带 undo），
+    ///        再更新 preedit 显示态。preedit 不进 `doc_`（未上屏文本不参与撤销栈 / 序列化），
+    ///        仅在绘制期插到光标处（见 `paint_preedit`）。
+    ///
+    /// 典型序列（拼音输入法）：`preedit="nihao"` → `preedit="你好",cursor_index=2` →
+    /// `preedit="",committed="你好"`（落字）。
+    auto on_text_composition(TextCompositionEvent &e) -> void override {
+        e.is_handled = true;  // 无论是否落地都吞掉，避免平台侧因「无人处理」重复上屏
+        if (!e.committed.empty()) {
+            do_insert(e.committed);
+        }
+        preedit_ = e.preedit;
+        const std::size_t pn = utf8_cp_count(preedit_);
+        preedit_cursor_ = std::min(e.cursor_index, pn);
+        preedit_sel_start_ = std::min(e.sel_start, pn);
+        preedit_sel_end_ = e.has_preedit_selection() ? std::min(e.sel_end, pn) : kNoPreeditSelection;
+        if (preedit_sel_end_ != kNoPreeditSelection && preedit_sel_end_ < preedit_sel_start_) {
+            preedit_sel_end_ = preedit_sel_start_;  // 端点倒置退化为单点选区
+        }
+        mark_needs_paint();
+    }
+
+    /// @brief 当前预编辑串（组合中的未上屏文本）；无组合时为空串。
+    [[nodiscard]] auto preedit() const -> std::string { return preedit_; }
+
+    /// @brief 是否处于组合态（preedit 非空）。
+    [[nodiscard]] auto is_composing() const -> bool { return !preedit_.empty(); }
+
+    /// @brief 组合光标在 preedit 内的码点下标（候选插入点）。
+    [[nodiscard]] auto composition_cursor() const -> std::size_t { return preedit_cursor_; }
+
+    /// @brief 焦点变更：失焦即取消未上屏的组合（平台 IME 惯例）。
+    auto on_focus_change(bool focused) -> void override {
+        Widget::on_focus_change(focused);
+        if (!focused) {
+            cancel_composition();
         }
     }
 
@@ -221,6 +271,13 @@ class RichTextEdit : public LeafWidget {
 
     auto paint_cursor(Painter &p, const Rect &bounds) const -> void;
 
+    /// @brief 组合态绘制：preedit 内选区高亮 + preedit 文本 + 下划线 + 候选插入点光标。
+    ///        在 `(x, y)` 处绘制，返回占用宽度（供调用方推进游标，实现「预编辑串挤开后续文本」）。
+    auto paint_preedit(Painter &p, float x, float y) const -> float;
+
+    /// @brief 取消组合：清空 preedit 与其选区（失焦 / 平台侧取消时调用）。
+    auto cancel_composition() -> void;
+
     // ---- 数据成员 ----
     std::vector<StyledChar> doc_;
     std::size_t caret_ = 0;
@@ -232,6 +289,14 @@ class RichTextEdit : public LeafWidget {
     UndoStack *undo_ = nullptr;
     float line_height_ = 20.0F;
     std::vector<Line> lines_;
+
+    // IME 组合态（A1）：preedit 不进 doc_，仅在绘制期插到 caret_ 处。
+    /// @brief preedit 内「无选区」哨兵。
+    static constexpr std::size_t kNoPreeditSelection = TextCompositionEvent::kNoSelection;
+    std::string preedit_;  ///< 预编辑串（UTF-8）；空 = 无组合
+    std::size_t preedit_cursor_ = 0;  ///< 组合光标在 preedit 内的码点下标
+    std::size_t preedit_sel_start_ = 0;  ///< preedit 内选区起点（码点下标）
+    std::size_t preedit_sel_end_ = kNoPreeditSelection;  ///< 选区终点（含尾）；kNoPreeditSelection = 无
 };
 
 }  // namespace aurora

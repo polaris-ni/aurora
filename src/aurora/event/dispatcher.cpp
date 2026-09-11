@@ -384,4 +384,17 @@ auto EventDispatcher::dispatch(Widget & /*root*/, TextInputEvent &e, FocusManage
     return e.is_handled;
 }
 
+auto EventDispatcher::dispatch(Widget & /*root*/, TextCompositionEvent &e, FocusManager &fm) -> bool {
+    FocusManager *prev = current_focus_manager();
+    set_current_focus_manager(&fm);
+    Widget *focused = fm.focused();
+    if (focused == nullptr) {
+        set_current_focus_manager(prev);
+        return false;
+    }
+    focused->on_text_composition(e);
+    set_current_focus_manager(prev);
+    return e.is_handled;
+}
+
 } // namespace aurora

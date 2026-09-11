@@ -19,6 +19,7 @@ namespace aurora {
  * - `dispatch(KeyEvent, FocusManager)`：Tab / Shift+Tab 触发焦点移动，否则只派发到焦点 widget（不冒泡）。
  * - `dispatch(ScrollEvent)`：派发到命中目标 widget 的 `onScroll`（不冒泡）。
  * - `dispatch(TextInputEvent, FocusManager)`：派发到当前焦点 widget 的 `onTextInput`（不冒泡）。
+ * - `dispatch(TextCompositionEvent, FocusManager)`：派发到当前焦点 widget 的 `onTextComposition`（不冒泡）。
  * - `dispatch(FileDropEvent)`：派发到命中目标 widget（不冒泡）。
  *
  * 冒泡并不依赖 widget 父链指针：`hit_test_chain` 在命中时已把整条祖先链一并返回，
@@ -83,6 +84,14 @@ class EventDispatcher {
     /// @param fm   焦点管理器；其当前焦点 widget 为唯一接收者，无焦点则直接返回 false。
     /// @return 事件是否被焦点控件消费（取 `e.is_handled_`）。
     static auto dispatch(Widget &root, TextInputEvent &e, FocusManager &fm) -> bool;
+
+    /// @brief 同步派发 IME 组合事件到焦点 widget；无焦点则返回 false。
+    /// @param root 派发起点（根 widget）；组合事件只路由到焦点控件，不经命中链。
+    /// @param e    待派发的组合事件（不冒泡）。平台后端（TSF/IMM32、NSTextInputClient、
+    ///             zwp_text_input_v3、浏览器 IME）把平台组合回调翻译成此事件后经本入口注入。
+    /// @param fm   焦点管理器；其当前焦点 widget 为唯一接收者，无焦点则直接返回 false。
+    /// @return 事件是否被焦点控件消费（取 `e.is_handled_`）。
+    static auto dispatch(Widget &root, TextCompositionEvent &e, FocusManager &fm) -> bool;
 
   private:
     /// @brief 鼠标（pointer_id 缺省）捕获键：鼠标无 pointer id，用此哨兵键与触控 id 区分。

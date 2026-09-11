@@ -145,6 +145,16 @@ class RichText : public LeafWidget {
 
     [[nodiscard]] auto type_name() const -> const char * override { return "RichText"; }
 
+    /// @brief 无障碍名称：拼接全部 span 的解析文本（无障碍视图不区分富文本样式）。
+    /// @note Side-effects: reads i18n table
+    [[nodiscard]] auto accessibility_label() const -> std::string override {
+        std::string out;
+        for (const auto &s : spans_.get()) {
+            out += s.text.resolve(&default_string_table(), Locale{});
+        }
+        return out;
+    }
+
     /// @brief 运行时自描述（规格附录 B）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{

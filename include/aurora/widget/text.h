@@ -168,6 +168,18 @@ class Text : public LeafWidget, public TextProps {
 
     [[nodiscard]] auto type_name() const -> const char * override { return "Text"; }
 
+    /// @brief 无障碍名称：取文本内容。
+    ///
+    /// 优先复用绘制期缓存的解析结果 `display_text_`（= `cached_resolved_text_`，已解析 i18n）；
+    /// 未经绘制时退回按默认 locale 现场解析 `content`，保证无绘制查询也有 name。
+    /// @note Side-effects: reads i18n table
+    [[nodiscard]] auto accessibility_label() const -> std::string override {
+        if (!display_text_.empty()) {
+            return display_text_;
+        }
+        return content.get().resolve(&default_string_table(), Locale{});
+    }
+
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
 
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
@@ -234,7 +246,11 @@ class Text : public LeafWidget, public TextProps {
                                int max_lines, TextOverflow overflow, const render::TextLayoutOpts &opts) -> WrapResult;
     static auto wrap_lines(const std::string &text, const Font &f, float max_w, bool soft_wrap, int max_lines,
                            TextOverflow overflow, const render::TextLayoutOpts &opts) -> WrapResult;
+    /// @brief 生效字体：补齐非法字号并施加无障碍字号缩放（倍率取进程级设置）。
     static auto effective_font(const Font &base) -> Font;
+    /// @brief 生效字体（带上下文）：字号倍率优先取 `Environment` 注入的 `AccessibilitySettings`，
+    ///        未注入时回落进程级设置——即「树级覆盖 > 进程默认」。
+    static auto effective_font(const Font &base, const BuildContext &ctx) -> Font;
     static auto cp_len(unsigned char c) -> size_t;
     static auto cp_count(const std::string &s) -> size_t;
     static auto cp_slice(const std::string &s, size_t start, size_t count) -> std::string;

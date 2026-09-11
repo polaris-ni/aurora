@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
@@ -94,6 +95,35 @@ struct ScrollEvent : Event {
 /// @brief 文本输入事件（specification/05-event-navigation.md §2.2）：由键盘/输入法产生的 Unicode 文本片段。
 struct TextInputEvent : Event {
     std::string text;  ///< UTF-8 文本片段
+};
+
+/**
+ * @brief 输入法（IME）组合事件（CJK 攻坚 A1）。
+ *
+ * 与 `TextInputEvent` 并存、职责分离：
+ * - **已提交文本**（上屏）走 `TextInputEvent`；
+ * - **组合态**（preedit / 候选 / 组合内选区）走本事件。
+ *
+ * 一次中文输入的典型序列（`TextInput` / `RichTextEdit` 均按此消费）：
+ * 1. `preedit="ni hao"` → 显示带下划线的预编辑串；
+ * 2. `preedit="你好"`、`cursor_index=2` → 候选替换预编辑串，光标停在候选插入点；
+ * 3. `preedit=""`、`committed="你好"` → 预编辑串落字为正式文本，组合结束。
+ *
+ * `sel_start` / `sel_end` 描述 **preedit 内部** 的选中区间（含头含尾，码点下标），
+ * 用于输入法高亮「待转换的拼音片段」；无区间时 `sel_end == kNoSelection`。
+ */
+struct TextCompositionEvent : Event {
+    /// @brief preedit 内「无选区」哨兵（与 `TextInput::NO_SEL` 同语义，独立定义以免跨头依赖）。
+    static constexpr std::size_t kNoSelection = static_cast<std::size_t>(-1);
+
+    std::string preedit;  ///< 预编辑串（UTF-8）；空串 = 组合结束 / 取消
+    std::size_t cursor_index = 0;  ///< 光标在 preedit 内的码点下标（候选插入点）
+    std::size_t sel_start = 0;  ///< preedit 内选中区间起点（码点下标）
+    std::size_t sel_end = kNoSelection;  ///< preedit 内选中区间终点（含尾）；kNoSelection = 无
+    std::string committed;  ///< 本次随组合一并上屏的文本（UTF-8），可为空
+
+    /// @brief preedit 内是否存在选中区间。
+    [[nodiscard]] auto has_preedit_selection() const -> bool { return sel_end != kNoSelection; }
 };
 
 /// @brief 操作系统文件拖放事件（窗口级；位置为窗口逻辑坐标，specification/05-event-navigation.md §2.2）。

@@ -5,6 +5,7 @@
 #include <numbers>
 #include <ranges>
 
+#include "aurora/core/accessibility.h"
 #include "aurora/core/debug.h"
 #include "aurora/event/focus.h"
 #include "aurora/modifier/modifier.h"
@@ -13,6 +14,15 @@
 #include "aurora/render/painter.h"
 
 namespace aurora {
+
+// ---- 无障碍事件上抛（头文件中前置声明的定义点，避免 core/accessibility.h ↔ widget.h 循环包含）----
+auto notify_accessibility_focus_changed(const Widget *target) -> void {
+    notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::FocusChanged, .target = target});
+}
+
+auto notify_accessibility_structure_changed(const Widget *host) -> void {
+    notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::StructureChanged, .target = host});
+}
 
 // Node 析构：子节点销毁时清空其缓存的布局父指针，避免向上失效传播解引用悬垂指针
 // （见 node.h 中 Node 类注释）。需完整 Widget，故定义于此而非头文件。
