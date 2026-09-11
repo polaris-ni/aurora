@@ -3,6 +3,7 @@
 #include <initializer_list>
 #include <vector>
 
+#include "aurora/core/directionality.h"
 #include "aurora/layout/flex.h"
 #include "aurora/layout/flex_layouter.h"
 #include "aurora/widget/descriptor.h"
@@ -188,6 +189,8 @@ class Column : public Container, public ColumnProps {
         }
         Flex cfg = flex;
         cfg.gap = gap > 0.0F ? gap : flex.gap;
+        // A2 布局镜像：按生效书写方向（Environment/进程级）翻转水平排布。
+        cfg.rtl = resolved_text_direction(ctx) == TextDirection::RTL;
         const FlexLayout result = FlexLayouter::layout(cfg, c, items);
         for (size_t i = 0; i < children_.size(); ++i) {
             children_[i].set_bounds(result.children[i]);
@@ -356,6 +359,8 @@ class Row : public Container, public RowProps {
         }
         Flex cfg = flex;
         cfg.gap = gap > 0.0F ? gap : flex.gap;
+        // A2 布局镜像：按生效书写方向（Environment/进程级）翻转水平排布。
+        cfg.rtl = resolved_text_direction(ctx) == TextDirection::RTL;
         const FlexLayout result = FlexLayouter::layout(cfg, c, items);
         for (size_t i = 0; i < children_.size(); ++i) {
             children_[i].set_bounds(result.children[i]);

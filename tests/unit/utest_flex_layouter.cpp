@@ -231,4 +231,51 @@ AURORA_TEST_CASE(container_size_clamps_into_parent_min) {
     AURORA_TEST_CHECK_NEAR(layout.size.height, 50.0F, 1e-4F);
 }
 
+AURORA_TEST_CASE(row_rtl_mirrors_child_order_and_start_end) {
+    // A2 布局镜像：Row(rtl) 的 Start 排布镜像后首项贴右缘（视觉顺序翻转）。
+    // LTR：a@0, b@30（容器 60）；RTL：a@30, b@0。
+    FixedCtx a;
+    FixedCtx b;
+    Flex cfg;
+    cfg.rtl = true;
+    const auto layout = FlexLayouter::layout(cfg, parent_constraints(),
+                                             {fixed_item2(30.0F, 10.0F, a), fixed_item2(30.0F, 10.0F, b)});
+    AURORA_TEST_CHECK_NEAR(layout.size.width, 60.0F, 1e-4F);
+    AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.x, 30.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.x, 0.0F, 1e-4F);
+    // 子项尺寸不受镜像影响。
+    AURORA_TEST_CHECK_NEAR(layout.children[0].size.width, 30.0F, 1e-4F);
+
+    // Max 容器 + End 对齐：LTR 末项贴右缘（x=270），RTL 镜像后贴左缘（x=0）——End 语义对调。
+    FixedCtx c;
+    Flex cfg2;
+    cfg2.main_axis_size = MainAxisSize::Max;
+    cfg2.main_axis = MainAxisAlignment::End;
+    cfg2.rtl = true;
+    const auto layout2 =
+        FlexLayouter::layout(cfg2, parent_constraints(), {fixed_item2(30.0F, 10.0F, c)});
+    AURORA_TEST_CHECK_NEAR(layout2.size.width, 300.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout2.children[0].origin.x, 0.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(column_rtl_mirrors_cross_axis_start_end) {
+    // A2 布局镜像：Column(rtl) 交叉轴（水平）Start 对齐镜像为视觉上的右缘对齐。
+    // 窄项(30) + 宽项(100)：容器交叉宽 100；LTR Start 窄项 x=0，RTL 镜像后 x=70。
+    FixedCtx a;
+    FixedCtx b;
+    Flex cfg;
+    cfg.direction = FlexDirection::Column;
+    cfg.rtl = true;
+    const auto layout = FlexLayouter::layout(cfg, parent_constraints(),
+                                             {fixed_item2(30.0F, 10.0F, a), fixed_item2(100.0F, 10.0F, b)});
+    AURORA_TEST_CHECK_NEAR(layout.size.width, 100.0F, 1e-4F);
+    AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.x, 70.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.x, 0.0F, 1e-4F);
+    // 纵向排布顺序不变（主轴不受镜像影响）。
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.y, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.y, 10.0F, 1e-4F);
+}
+
 }  // namespace aurora::test_cases::utest_flex_layouter

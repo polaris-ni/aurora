@@ -31,6 +31,12 @@ struct Flex {
     /// - `Min`（默认）：容器主轴取"内容所需尺寸"，主轴对齐仅当父约束强制更大尺寸时才有可见自由空间。
     /// - `Max`：容器主轴撑满父级可用主轴空间，从而让 `main_axis` 对齐在内容不足时产生可见自由空间。
     MainAxisSize main_axis_size = MainAxisSize::Min;
+    /// @brief 书写方向镜像（A2）：RTL 时全部子项在容器内容宽度内做水平镜像——
+    /// 水平主轴（Row/RowReverse）子项视觉顺序翻转且 `Start/End` 语义对调；
+    /// 垂直主轴（Column/ColumnReverse）交叉轴（水平）`Start/End` 对调；
+    /// `Center`/`Space*` 对称结果不变。由 Row/Column 按 `Directionality` 注入（见
+    /// core/directionality.h）；FlexLayouter 单测可直接置位验证几何。
+    bool rtl = false;
 };
 
 }  // namespace aurora

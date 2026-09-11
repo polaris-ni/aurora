@@ -7,6 +7,8 @@
 #include <memory>
 #include <string>
 
+#include "aurora/core/directionality.h"
+#include "aurora/environment/environment.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
@@ -165,6 +167,36 @@ AURORA_TEST_CASE(describe_reports_metadata) {
         }
     }
     AURORA_TEST_CHECK_TRUE(has_gap);
+}
+
+AURORA_TEST_CASE(row_rtl_via_environment_mirrors_children) {
+    // A2 布局镜像端到端：经 Environment 注入 Directionality(RTL) 后，
+    // Row 子项视觉顺序翻转（Start 排布首项贴右缘）——容器按 resolved_text_direction 注入。
+    const Environment env =
+        Environment{}.with<Directionality>(Directionality{.direction = TextDirection::RTL, .host_set = true});
+    BuildContext ctx;
+    ctx.env = &env;
+
+    Row row;
+    row.add(box(40.0F, 20.0F));
+    row.add(box(60.0F, 20.0F));
+
+    row.mount(ctx);
+    row.layout(bounded(300.0F, 100.0F), ctx);
+
+    // 内容宽 100：LTR 时 child0@0、child1@40；RTL 镜像后 child0@60、child1@0。
+    AURORA_TEST_CHECK_NEAR(row.child_nodes()[0].bounds().origin.x, 60.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(row.child_nodes()[1].bounds().origin.x, 0.0F, 1e-4F);
+
+    // 无环境注入的对照组：保持 LTR 物理序（镜像不生效）。
+    Row ltr;
+    ltr.add(box(40.0F, 20.0F));
+    ltr.add(box(60.0F, 20.0F));
+    BuildContext plain;
+    ltr.mount(plain);
+    ltr.layout(bounded(300.0F, 100.0F), plain);
+    AURORA_TEST_CHECK_NEAR(ltr.child_nodes()[0].bounds().origin.x, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(ltr.child_nodes()[1].bounds().origin.x, 40.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_containers

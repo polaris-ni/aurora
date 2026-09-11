@@ -286,6 +286,14 @@ auto FlexLayouter::layout(const Flex &config, const Constraints &parent, const s
     } else {
         result.size = Size{.width = ctx.container_cross, .height = ctx.container_main};
     }
+    // A2 布局镜像：RTL 时把全部子项在容器内容宽度内做水平镜像（水平主轴翻子项顺序 +
+    // Start/End 对调；垂直主轴翻交叉轴 Start/End；Center/Space* 对称不变）。
+    // 镜像在「相对容器原点」的最终 rect 上做，天然覆盖 overflow 越界子项（镜像到负 x）。
+    if (config.rtl) {
+        for (auto &r : result.children) {
+            r.origin.x = result.size.width - r.origin.x - r.size.width;
+        }
+    }
     return result;
 }
 
