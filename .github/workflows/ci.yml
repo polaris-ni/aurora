@@ -17,8 +17,15 @@
 #   5. coverage    — AURORA_ENABLE_COVERAGE=ON 的 `coverage` 聚合目标（内含 ctest + gcov 摘要）。
 #   6. wasm        — emcmake + AURORA_BACKEND_WASM=ON，构建库与测试 runner 并跑 ctest
 #                    （Emscripten 无线程/子进程的能力用例以 SKIP 计入，见 tests/framework/assertions.h）。
-#   7. install     — cmake --install + 工作流内联最小消费端端到端验证
+#  7. install     — cmake --install + 工作流内联最小消费端端到端验证
 #                    （find_package(Aurora) + 静态链接 + feature 宏导出一致性）。
+#
+# 编译缓存（ccache-action）：core（Linux/macOS/MinGW）、backends（Linux/macOS）、
+#   toggles、asan、coverage、install 各 job 接入，key 按 job/矩阵名分桶；
+#   口径（SLOPPINESS / BASEDIR / NOHASHDIR / 压缩）统一由 cmake/AuroraCcache.cmake
+#   经编译器启动器注入，与本地构建共享同一缓存语义。windows-msvc 两 job 走默认
+#   VS 生成器——CMake 仅在 Makefile/Ninja 生成器实现编译器启动器，VS 生成器下
+#   sccache/ccache 均无法挂接，故不接入缓存。
 #
 # 选项语义以 codespec/BUILD_OPTIONS.md 为唯一权威来源。
 # ---------------------------------------------------------------------------
@@ -111,7 +118,7 @@ jobs:
         run: sudo apt-get update -y && sudo apt-get install -y ${{ matrix.apt-pkgs }}
 
       - name: Setup ccache
-        if: runner.os == 'Linux' || runner.os == 'macOS'
+        if: runner.os == 'Linux' || runner.os == 'macOS' || matrix.mingw
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: core-${{ matrix.name }}
@@ -131,7 +138,7 @@ jobs:
 
       # 收束期可观测性：ccache 命中率纳入 CI 输出（hendrikmuhs/ccache-action 已注入 PATH）
       - name: ccache stats
-        if: runner.os == 'Linux' || runner.os == 'macOS'
+        if: runner.os == 'Linux' || runner.os == 'macOS' || matrix.mingw
         run: ccache --show-stats --verbose || ccache --show-stats
 
       # demos 不进默认构建（EXCLUDE_FROM_ALL），单独拉起聚合目标确保持续可编译
@@ -178,11 +185,21 @@ jobs:
         if: matrix.apt-deps
         run: sudo apt-get update -y && sudo apt-get install -y ${{ matrix.apt-deps }}
 
+      - name: Setup ccache
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: backends-${{ matrix.name }}
+
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake-flags }}
 
       - name: Build (library + tools + tests)
         run: cmake --build build --config Release
+
+      - name: ccache stats
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        run: ccache --show-stats --verbose || ccache --show-stats
 
       - name: Test
         env:
@@ -221,11 +238,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: toggles-${{ matrix.name }}
+
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake-flags }}
 
       - name: Build (library + tools + tests)
         run: cmake --build build --config Release
+
+      - name: ccache stats
+        run: ccache --show-stats --verbose || ccache --show-stats
 
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
@@ -240,11 +265,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ASan 强制关 PCH（CMakeLists 的 AURORA_PCH_ENABLED 门控），消费者命令行无 PCH
+      # 依赖，ccache 直接全量可缓存
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: asan-ubuntu-gcc
+
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_ASAN=ON
 
       - name: Build
         run: cmake --build build --config Release
+
+      - name: ccache stats
+        run: ccache --show-stats --verbose || ccache --show-stats
 
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
@@ -259,11 +294,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 覆盖率构建同样强制关 PCH，ccache 直接全量可缓存；coverage 聚合目标内的
+      # ctest 保持串行（gcda 并发写在非加锁平台有损坏风险）
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: coverage-ubuntu-gcc
+
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_COVERAGE=ON
 
       - name: Build + ctest + gcov summary (coverage target)
         run: cmake --build build --target coverage
+
+      - name: ccache stats
+        run: ccache --show-stats --verbose || ccache --show-stats
 
       - name: Upload coverage report (CSV + HTML)
         if: always()
@@ -322,10 +367,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: install-${{ matrix.name }}
+
       - name: Configure + Build
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release ${{ matrix.configure-flags }}
           cmake --build build --config Release
+
+      - name: ccache stats
+        run: ccache --show-stats --verbose || ccache --show-stats
 
       - name: Install
         run: cmake --install build --config Release --prefix "${{ github.workspace }}/install-prefix"

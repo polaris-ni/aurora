@@ -104,7 +104,14 @@
         "构建/GCC：关闭消费者 PCH——实测消费者 .gch 达 296MB 且从未被消费者命中（生成/消费侧编译器设置失配，每个 TU 都 -Winvalid-pch 拒用），但拒用前仍要每 TU 全量探测加载（GCC）+ 全文 hash（ccache），每 TU ≈ 600MB 纯亏损 I/O（250 TU ≈ 144GB/次脏构建，16 并发下单边由 0.9s 膨胀至 10-39s）；且即便修复失配，生效的 296MB gch 仍要每 TU 全量加载，净收益为负。GCC 下消费者改走伞头文本编译 + ccache 缓存；MSVC/Clang 行为不变。",
         "core/environment.h 与 core/build_context.h：依赖图单向化，build_context.h 直依赖 environment.h；各使用方（text / window / provider / title_bar / hero / modifier_layout / layout_engine / offscreen / media_query）补显式包含。",
         "构建：诊断压制按编译器族成对守卫——GCC 专有告警组（-Wdangling-pointer / -Wstringop-overflow / -Wmaybe-uninitialized）以 AURORA_COMPILER_GCC 包裹 push/pop，clang 侧的 EM_ASM 占位符误报以 AURORA_COMPILER_CLANG 包裹 push/ignored/pop。",
-        "构建/GCC：库自身 PCH 一并关闭——122MB 的库 gch（标准库 + nlohmann/json）每库 TU 全量加载 + ccache 全文 hash，且 gch 字节参与缓存 key（任何头文件变更都使全部库 TU 缓存键失效）；关闭后库侧全量重编 155.4s（266 边）→ 68s（91 边）。PCH 门控变量现统一作用于库与消费者，MSVC/Clang 行为不变。"
+        "构建/GCC：库自身 PCH 一并关闭——122MB 的库 gch（标准库 + nlohmann/json）每库 TU 全量加载 + ccache 全文 hash，且 gch 字节参与缓存 key（任何头文件变更都使全部库 TU 缓存键失效）；关闭后库侧全量重编 155.4s（266 边）→ 68s（91 边）。PCH 门控变量现统一作用于库与消费者，MSVC/Clang 行为不变。",
+        "ci：编译缓存覆盖补全——backends（Linux/macOS）、toggles、asan、coverage、install-consumer 各 job 与 core 的 windows-mingw 接入 ccache-action（key 按 job/矩阵名分桶，构建后统一输出命中率统计），缓存口径（SLOPPINESS/BASEDIR/NOHASHDIR/压缩）与本地共用 AuroraCcache 的启动器注入机制；windows-msvc（VS 多配置生成器）不接入——CMake 编译器启动器仅 Makefile/Ninja 生成器实现，VS 生成器下静默忽略，接缓存须先切换 Ninja + cl。"
+      ],
+      "added": [
+        "core/platform.h：新增恒定义（取值 0/1）的能力宏族 AURORA_CAP_*，回答「本 TU 能用什么能力」而非「目标是什么平台」；现仅 AURORA_CAP_THREADS（Emscripten 未开 -pthread 时为 0，其余目标为 1）。测试框架（assertions / death_test / isolation / test_main / value_print / test_assert / test_death）的裸平台与编译器宏判据全量收敛到 AURORA_PLATFORM_* / AURORA_COMPILER_* / AURORA_CAP_*，framework 头层原「零 aurora 依赖」不变量放宽为允许纯宏头 core/platform.h。",
+        "构建：WebAssembly（Emscripten 6.0.9）构建预设与 ctest 全链路——NODERAWFS 下 cwd 经 --post-js 运行时改写成 POSIX 形态、-fexceptions 须编译与链接同参、打开 ALLOW_MEMORY_GROWTH；宿主代码生成器（gen_api / gen_error_codes / gen_debug_api）在 wasm 构建下改为原生子项目构建。",
+        "inspector/：交互模拟（Inspector::simulate_click / simulate_scroll / simulate_text_input）打通远程与 AI 工具面——InspectorServer 新增 POST /api/input/{click|scroll|text} 端点，aurora_mcp 新增 simulate_interaction 工具，无头环境即可完成「生成 → 交互 → 断言」闭环。",
+        "tools：新增 tools/check/build_baseline.py 构建基线观测脚本——解析 .ninja_log 输出编译边数/p95 单边/耗时分布直方图/top-N 慢边，解析 ctest LastTest.log 输出串行耗时合计与 top-N 慢测，--json 可落机器可读基线供跨次对照；观测用途，不进门禁、恒退出 0。"
       ],
       "fixed": [
         "构建/ccache：配置在构建期全部无效——AuroraCcache.cmake 经 set(ENV{...}) 在 configure 期写入的 COMPRESS/MAXSIZE 等环境变量不随 ninja 构建期子进程传递，实际编译从未使用（实测缓存大小恒为系统默认而非设定值）；且无 CCACHE_SLOPPINESS 时命令行带 -include cmake_pch.hxx 的消费者 TU 被直接判 Uncacheable（实测 88.7% 调用不可缓存）。现全部配置改经编译器启动器注入（CMAKE_{C,CXX}_COMPILER_LAUNCHER = cmake -E env <CCACHE_*>… ccache），构建期生效：SLOPPINESS 含 pch_defines/time_macros/include_file_mtime/include_file_ctime，BASEDIR=<源码根> + NOHASHDIR 支持多构建目录共享缓存，AURORA_CCACHE_DIR/AURORA_CCACHE_MAXSIZE（默认 2G → 5G）构建期真正生效；移除与压缩互斥的 hardlink。",
