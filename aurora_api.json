@@ -1360,6 +1360,85 @@
       "type": "BottomNavBar"
     },
     {
+      "children_policy": "single",
+      "container": false,
+      "default_props": {
+        "height": "auto",
+        "overflow": "Visible",
+        "show": true,
+        "width": "auto"
+      },
+      "dynamic_children": false,
+      "events": [],
+      "examples": [
+        "au::BreakpointBuilder([](au::Breakpoint bp){ return au::Text(bp == au::Breakpoint::Compact ? \"phone\" : \"wide\"); })"
+      ],
+      "is_clickable": false,
+      "is_container": false,
+      "is_layout": false,
+      "prop_descriptors": [
+        {
+          "default": "auto",
+          "name": "width",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "auto",
+          "name": "height",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "true",
+          "name": "show",
+          "required": false,
+          "type": "bool"
+        },
+        {
+          "default": "600.0",
+          "name": "medium_max_width",
+          "note": "Compact 上界(dp)",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "840.0",
+          "name": "expanded_min_width",
+          "note": "Expanded 下界(dp)",
+          "required": false,
+          "type": "float"
+        }
+      ],
+      "props": [
+        "height",
+        "overflow",
+        "show",
+        "width"
+      ],
+      "props_schema": {
+        "expanded_min_width": {
+          "default": "840.0",
+          "description": "Expanded 下界(dp)"
+        },
+        "height": {
+          "default": "auto"
+        },
+        "medium_max_width": {
+          "default": "600.0",
+          "description": "Compact 上界(dp)"
+        },
+        "show": {
+          "default": "true"
+        },
+        "width": {
+          "default": "auto"
+        }
+      },
+      "thread": "main",
+      "type": "BreakpointBuilder"
+    },
+    {
       "children_policy": "none",
       "container": false,
       "default_props": {
@@ -3254,6 +3333,126 @@
       },
       "thread": "main",
       "type": "Grid"
+    },
+    {
+      "children_policy": "none",
+      "container": false,
+      "default_props": {
+        "cache_extent": 200.0,
+        "cell_extent": 96.0,
+        "columns": 1,
+        "count": 0,
+        "height": "auto",
+        "overflow": "Visible",
+        "scroll_offset": 0.0,
+        "show": true,
+        "width": "auto"
+      },
+      "dynamic_children": false,
+      "events": [],
+      "examples": [
+        "au::GridView(1000, 3, [](int i){ return au::Text(std::to_string(i)); }, 96.0F)"
+      ],
+      "invariants": [
+        "count >= 0",
+        "columns >= 1",
+        "cell_extent > 0"
+      ],
+      "is_clickable": false,
+      "is_container": false,
+      "is_layout": false,
+      "prop_descriptors": [
+        {
+          "default": "0",
+          "json_type": "integer",
+          "minimum": "0",
+          "name": "count",
+          "note": "总项数",
+          "required": true,
+          "type": "int"
+        },
+        {
+          "default": "2",
+          "json_type": "integer",
+          "minimum": "1",
+          "name": "columns",
+          "note": "列数",
+          "required": true,
+          "type": "int"
+        },
+        {
+          "default": "96.0",
+          "json_type": "number",
+          "minimum": "0",
+          "name": "cell_extent",
+          "note": "单元格高(dp)（宽=视口宽/列数）",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "0.0",
+          "json_type": "number",
+          "minimum": "0",
+          "name": "scroll_offset",
+          "note": "纵向滚动偏移(dp)",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "200.0",
+          "json_type": "number",
+          "minimum": "0",
+          "name": "cache_extent",
+          "note": "可见区外预取缓冲(dp)",
+          "required": false,
+          "type": "float"
+        }
+      ],
+      "props": [
+        "cache_extent",
+        "cell_extent",
+        "columns",
+        "count",
+        "height",
+        "overflow",
+        "scroll_offset",
+        "show",
+        "width"
+      ],
+      "props_schema": {
+        "cache_extent": {
+          "default": "200.0",
+          "description": "可见区外预取缓冲(dp)",
+          "minimum": "0",
+          "type": "number"
+        },
+        "cell_extent": {
+          "default": "96.0",
+          "description": "单元格高(dp)（宽=视口宽/列数）",
+          "minimum": "0",
+          "type": "number"
+        },
+        "columns": {
+          "default": "2",
+          "description": "列数",
+          "minimum": "1",
+          "type": "integer"
+        },
+        "count": {
+          "default": "0",
+          "description": "总项数",
+          "minimum": "0",
+          "type": "integer"
+        },
+        "scroll_offset": {
+          "default": "0.0",
+          "description": "纵向滚动偏移(dp)",
+          "minimum": "0",
+          "type": "number"
+        }
+      },
+      "thread": "main",
+      "type": "GridView"
     },
     {
       "children_policy": "single",
@@ -5352,6 +5551,107 @@
       },
       "thread": "main",
       "type": "Show"
+    },
+    {
+      "children_policy": "none",
+      "container": false,
+      "default_props": {
+        "color": [
+          220,
+          220,
+          220,
+          255
+        ],
+        "duration": 1.5,
+        "height": 16.0,
+        "highlight": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "overflow": "Visible",
+        "show": true,
+        "width": 0.0
+      },
+      "dynamic_children": false,
+      "events": [],
+      "examples": [
+        "au::Skeleton(au::Size{120,16})"
+      ],
+      "is_clickable": false,
+      "is_container": false,
+      "is_layout": false,
+      "prop_descriptors": [
+        {
+          "default": "auto",
+          "name": "width",
+          "note": "占位宽（0=占满）",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "16",
+          "name": "height",
+          "note": "占位高",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "{220,220,220,255}",
+          "name": "color",
+          "note": "底色",
+          "required": false,
+          "type": "Color"
+        },
+        {
+          "default": "{255,255,255,255}",
+          "name": "highlight",
+          "note": "高亮带色",
+          "required": false,
+          "type": "Color"
+        },
+        {
+          "default": "1.5",
+          "name": "duration",
+          "note": "shimmer 周期(秒)",
+          "required": false,
+          "type": "double"
+        }
+      ],
+      "props": [
+        "color",
+        "duration",
+        "height",
+        "highlight",
+        "overflow",
+        "show",
+        "width"
+      ],
+      "props_schema": {
+        "color": {
+          "default": "{220,220,220,255}",
+          "description": "底色"
+        },
+        "duration": {
+          "default": "1.5",
+          "description": "shimmer 周期(秒)"
+        },
+        "height": {
+          "default": "16",
+          "description": "占位高"
+        },
+        "highlight": {
+          "default": "{255,255,255,255}",
+          "description": "高亮带色"
+        },
+        "width": {
+          "default": "auto",
+          "description": "占位宽（0=占满）"
+        }
+      },
+      "thread": "main",
+      "type": "Skeleton"
     },
     {
       "children_policy": "none",

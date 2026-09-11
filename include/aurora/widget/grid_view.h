@@ -30,7 +30,9 @@ class GridView : public Widget {
   public:
     using ItemBuilder = std::function<Node(int index)>;
 
-    GridView() = default;
+    /// @brief 默认构造：空数据、1 列占位（保持既有默认行为，避免 0 列除零）。
+    /// 重建路径（serialization 工厂）使用此构造——条目由宿主经运行时 builder 回填。
+    GridView() : GridView(0, 1, nullptr) {}
     GridView(int count, int columns, ItemBuilder builder, float cell_extent = 96.0F)
         : count_(count < 0 ? 0 : count),
           columns_(columns > 0 ? columns : (Diagnostics::degraded("layout", "GridView columns 非正已降级为 1"), 1)),

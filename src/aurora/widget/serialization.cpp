@@ -10,6 +10,7 @@
 #include "aurora/media/video_player.h"
 #include "aurora/navigation/hero.h"
 #include "aurora/widget/bottom_nav_bar.h"
+#include "aurora/widget/breakpoint_builder.h"
 #include "aurora/widget/checkbox.h"
 #include "aurora/widget/chip.h"
 #include "aurora/widget/containers.h"
@@ -20,6 +21,7 @@
 #include "aurora/widget/expansion_panel.h"
 #include "aurora/widget/form.h"
 #include "aurora/widget/grid.h"
+#include "aurora/widget/grid_view.h"
 #include "aurora/widget/image_widget.h"
 #include "aurora/widget/lazy_list.h"
 #include "aurora/widget/lazy_row.h"
@@ -35,6 +37,7 @@
 #include "aurora/widget/scroll.h"
 #include "aurora/widget/segmented_control.h"
 #include "aurora/widget/show.h"
+#include "aurora/widget/skeleton.h"
 #include "aurora/widget/slider.h"
 #include "aurora/widget/spacer.h"
 #include "aurora/widget/splitter.h"
@@ -219,6 +222,8 @@ auto register_core_widgets() -> void {
     reg_default<Badge>("Badge");
     reg_default<SegmentedControl>("SegmentedControl");
     reg_default<Stepper>("Stepper");
+    // 骨架屏（F2）：属性完整可序列化（尺寸/颜色/周期），可从静态 JSON 完整重建。
+    reg_default<Skeleton>("Skeleton");
 
     // ---- 默认构造、无属性反序列化（Provider 系 / 运行时态控件）----
     // Provider 系：值（T）不参与序列化，构造占位后由 from_json 的 adopt_children 挂入真实子节点。
@@ -232,6 +237,11 @@ auto register_core_widgets() -> void {
     // LazyList / LazyRow 持运行时 ItemBuilder，注册供 API 描述收录。
     reg_no_props<LazyList>("LazyList", 0, nullptr);
     reg_no_props<LazyRow>("LazyRow", 0, nullptr);
+    // GridView（F2）同 LazyList：持运行时 ItemBuilder，条目不可从静态 JSON 重建；
+    // 注册为已知类型（标量属性 count/columns 等可序列化，重建后为空数据占位，条目由宿主回填）。
+    reg_no_props<GridView>("GridView");
+    // BreakpointBuilder（F2）持运行时 builder 回调，注册供 API 描述收录。
+    reg_no_props<BreakpointBuilder>("BreakpointBuilder");
     // BottomNavBar 持运行时图标绘制器与回调，注册供 API 描述收录。
     reg_no_props<BottomNavBar>("BottomNavBar");
 

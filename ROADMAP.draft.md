@@ -305,6 +305,7 @@ MCP 实时改运行中 UI、NL→UI、UI→代码往返保真、语义化视觉�
 **Phase F2：响应式原语 + 序列化补全**
 - 任务：基于现有 `layout_builder.h`/`media_query.h` 增 breakpoint-aware 容器；`Skeleton`/`GridView` 接入序列化工厂（`CONCEPTS.md` 明写未接）。
 - 测试：`utest_serialization`（Skeleton/GridView 往返）、`utest_media_query`。
+- **状态：已落地（2026-09-12）**。序列化：Skeleton 全属性往返重建（reg_default）、GridView 注册为已知类型（运行时 ItemBuilder 同 LazyList 先例，重建空数据占位；默认构造顺带消除 0 列除零隐患），两者入 aurora_api.json；BreakpointBuilder：`Breakpoint{Compact,Medium,Expanded}` + 按注入宽度构建子树（无 MediaQuery 退化父约束宽），阈值 600/840 可调，档位变化才重建、关闭布局缓存（防档位冻结）。测试：`utest_serialization` 3 例、`utest_media_query` 6→9 例（断点边界/注入驱动/约束回退）全过，全量 252/252 绿。
 
 ## Track G — AI-first 护城河 + 命令系统
 
