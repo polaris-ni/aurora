@@ -281,8 +281,14 @@ jobs:
       - name: ccache stats
         run: ccache --show-stats --verbose || ccache --show-stats
 
-      - name: Test
-        run: ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
+      # headless runner 无 X display、无剪贴板工具：装 xvfb 提供虚拟显示 + xclip/xsel，
+      # 并用 xvfb-run 包裹 ctest，让依赖系统剪贴板的用例（如 itest_text_selection 的
+      # Ctrl+C 复制）真正执行，而非因「剪贴板不可用」永久 SKIP。
+      - name: Install virtual display + clipboard tools
+        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel
+
+      - name: Test (under virtual X display)
+        run: xvfb-run -a ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
 
   # ---------------------------------------------------------------------------
   # 5. 行覆盖率：coverage 聚合目标自带 ctest + gcov 终端摘要
@@ -304,8 +310,13 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_COVERAGE=ON
 
-      - name: Build + ctest + gcov summary (coverage target)
-        run: cmake --build build --target coverage
+      # headless runner 无 X display、无剪贴板工具：装 xvfb + xclip/xsel 提供虚拟显示，
+      # 让 coverage 聚合目标内的 ctest 中依赖系统剪贴板的用例真正执行而非 SKIP。
+      - name: Install virtual display + clipboard tools
+        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel
+
+      - name: Build + ctest + gcov summary (coverage target, under virtual X display)
+        run: xvfb-run -a cmake --build build --target coverage
 
       - name: ccache stats
         run: ccache --show-stats --verbose || ccache --show-stats
