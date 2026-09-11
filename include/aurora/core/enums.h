@@ -25,6 +25,20 @@ enum class TextOverflow : std::uint8_t {
     Fade,  ///< 渐隐（Painter 不支持时降级为 Clip）
 };
 
+/// @brief 书写方向（参考 Flutter TextDirection；A2）。
+///
+/// 三条作用路径：
+///  1. **shaping**：`TextLayoutOpts::direction` 显式设置（nullopt = 按内容自动 guess，现状），
+///     RTL 时 HarfBuzz 把字形反转为视觉序（绘制按数组顺序左→右即为正确视觉序）；
+///  2. **caret/命中**：RTL 下逻辑下标 ↔ 视觉位置镜像映射（逻辑首字符在右缘）；
+///  3. **对齐**：`TextAlign::Start/End` 按方向解析（RTL: Start=Right，End=Left）。
+/// @note Thread: thread-safe
+/// @note Side-effects: pure
+enum class TextDirection : std::uint8_t {
+    LTR,  ///< 从左到右（默认）
+    RTL,  ///< 从右到左（阿拉伯语 / 希伯来语等）
+};
+
 /// @brief 字重（参考 Flutter FontWeight，枚举值即字重数值 100..900）。
 enum class FontWeight : std::uint16_t {
     Thin = 100,

@@ -199,4 +199,63 @@ AURORA_TEST_CASE(describe_metadata_signals_and_resolved_text) {
     AURORA_TEST_CHECK_EQ(t.resolved_text(ctx), "hi");
 }
 
+AURORA_TEST_CASE(text_direction_serialize_and_unset_omitted) {
+    // A2：显式 direction 序列化为 "RTL"/"LTR"；未设置（继承环境）时不输出键。
+    Text rtl("مرحبا");
+    rtl.set_direction(TextDirection::RTL);
+    Json props;
+    rtl.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["direction"].get<std::string>(), std::string{"RTL"});
+
+    Text back;
+    back.deserialize_props(props);
+    AURORA_TEST_CHECK_TRUE(back.direction.has_value());
+    AURORA_TEST_CHECK_TRUE(*back.direction == TextDirection::RTL);
+
+    Text inherit("inherit");
+    Json plain;
+    inherit.serialize_props(plain);
+    AURORA_TEST_CHECK_TRUE(!plain.contains("direction"));  // 继承语义不落盘
+}
+
+AURORA_TEST_CASE(text_start_end_alignment_follows_direction) {
+    // A2：End 对齐——LTR 靠右、RTL 靠左（Start 对称）。
+    // 用折行文本的可视行验证：End 对齐时短行贴齐端侧，方向翻转后贴齐另一侧。
+    const std::string words = "MMMM MMMM MMMM MMMM";
+    const Font f{};
+    const float natural = render::FontEngine::measure_width(words, f);
+    // 取约束 = 固有宽的 60%：必然折行，第二行是短行（对齐偏移可见）。
+    const float wrap_w = natural * 0.6F;
+
+    auto leftmost_ink_of_second_line = [&](bool rtl) -> float {
+        Text t(words);
+        t.set_align(TextAlign::End);
+        if (rtl) {
+            t.set_direction(TextDirection::RTL);
+        }
+        LayoutEngine::layout(t, bounded(wrap_w, 500.0F));
+        AURORA_TEST_REQUIRE_TRUE(t.size().height > render::FontEngine::measure_height(f));
+        Painter p;
+        p.begin(static_cast<int>(wrap_w) + 8, static_cast<int>(t.size().height) + 4);
+        const BuildContext ctx;
+        t.paint(p, Rect{.origin = Point{.x = 2.0F, .y = 2.0F}, .size = t.size()}, ctx);
+        const float line_h = render::FontEngine::measure_height(f);
+        const int y0 = static_cast<int>(line_h);  // 第二行（0-based 行 1）中部
+        for (int x = 0; x < static_cast<int>(wrap_w) + 8; ++x) {
+            if (p.get_pixel(x, y0 + static_cast<int>(line_h / 2.0F)) != Color{0, 0, 0, 0}) {
+                return static_cast<float>(x);
+            }
+        }
+        return -1.0F;
+    };
+
+    const float ltr_left = leftmost_ink_of_second_line(false);
+    const float rtl_left = leftmost_ink_of_second_line(true);
+    AURORA_TEST_CHECK_TRUE(ltr_left > 0.0F);
+    AURORA_TEST_CHECK_TRUE(rtl_left > 0.0F);
+    // End 对齐：LTR 短行贴右缘（左侧留白大），RTL 短行贴左缘（左侧几乎无留白）。
+    AURORA_TEST_CHECK_TRUE(ltr_left > rtl_left + 10.0F);
+    AURORA_TEST_CHECK_TRUE(rtl_left <= 4.0F);
+}
+
 }  // namespace aurora::test_cases::utest_text

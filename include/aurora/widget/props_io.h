@@ -157,6 +157,28 @@ using Json = nlohmann::json;
     return TextAlign::Left;
 }
 
+/// @brief TextDirection -> JSON 字符串（A2）。
+[[nodiscard]] inline auto text_direction_to_json(TextDirection v) -> Json {
+    switch (v) {
+        case TextDirection::LTR:
+            return "LTR";
+        case TextDirection::RTL:
+            return "RTL";
+    }
+    return "LTR";
+}
+
+/// @brief JSON -> TextDirection（未知值回退 LTR）。
+[[nodiscard]] inline auto json_to_text_direction(const Json &j) -> TextDirection {
+    if (j.is_string()) {
+        const std::string s = j.get<std::string>();
+        if (s == "RTL") {
+            return TextDirection::RTL;
+        }
+    }
+    return TextDirection::LTR;
+}
+
 /// @brief TextOverflow -> JSON 字符串。
 [[nodiscard]] inline auto text_overflow_to_json(TextOverflow v) -> Json {
     switch (v) {

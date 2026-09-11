@@ -17,7 +17,8 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
     display_text_ = s;  // 缓存显示文本供命中测试/选区
     const Font f = effective_font(font, ctx);
     const render::TextLayoutOpts opts{
-        .letter_spacing = letter_spacing, .word_spacing = word_spacing, .italic = (font_style == FontStyle::Italic)};
+        .letter_spacing = letter_spacing, .word_spacing = word_spacing, .italic = (font_style == FontStyle::Italic),
+        .direction = effective_direction(ctx)};
     const render::TextAAMode aa = text_aa_mode.has_value() ? *text_aa_mode : render::FontEngine::text_aa_mode();
     paint_scale_ = p.scale();  // 实显宽度校正与绘制同源：命中测试（无 Painter）复用最近一次绘制的像素比
 
@@ -35,6 +36,8 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
 
     const bool justify = (text_align == TextAlign::Justify);
     float y = bounds.origin.y;
+    // Start/End 为方向相对语义（A2）：RTL 时 Start=Right、End=Left（每行一致，行外解析一次）。
+    const bool rtl = effective_direction(ctx) == TextDirection::RTL;
     for (std::size_t li = 0; li < lines_.size(); ++li) {
         // NOLINTNEXTLINE 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         const std::string &line = lines_[li];
@@ -42,14 +45,18 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
         float x = bounds.origin.x;
         switch (text_align) {
             case TextAlign::Right:
-            case TextAlign::End:
                 x = bounds.origin.x + (bounds.size.width - line_w);
+                break;
+            case TextAlign::End:
+                x = rtl ? bounds.origin.x : (bounds.origin.x + (bounds.size.width - line_w));
+                break;
+            case TextAlign::Start:
+                x = rtl ? (bounds.origin.x + (bounds.size.width - line_w)) : bounds.origin.x;
                 break;
             case TextAlign::Center:
                 x = bounds.origin.x + ((bounds.size.width - line_w) * 0.5F);
                 break;
             case TextAlign::Left:
-            case TextAlign::Start:
             case TextAlign::Justify:
             default:
                 break;
@@ -158,8 +165,13 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
             float line_off = 0.0F;
             switch (text_align) {
                 case TextAlign::Right:
-                case TextAlign::End:
                     line_off = bounds.size.width - line_w;
+                    break;
+                case TextAlign::End:
+                    line_off = rtl ? 0.0F : (bounds.size.width - line_w);
+                    break;
+                case TextAlign::Start:
+                    line_off = rtl ? (bounds.size.width - line_w) : 0.0F;
                     break;
                 case TextAlign::Center:
                     line_off = (bounds.size.width - line_w) * 0.5F;

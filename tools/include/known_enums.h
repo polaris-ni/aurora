@@ -45,6 +45,7 @@ namespace aurora::tools {
 
     // ---- text ----
     enums["TextAlign"] = {"Left", "Right", "Center", "Start", "End", "Justify"};
+    enums["TextDirection"] = {"LTR", "RTL"};
     enums["TextOverflow"] = {"Clip", "Ellipsis", "Fade"};
     enums["TextDecoration"] = {"None", "Underline", "Overline", "LineThrough"};
     enums["FontWeight"] = {"Thin", "ExtraLight", "Light", "Normal", "Medium", "SemiBold", "Bold", "ExtraBold", "Black"};

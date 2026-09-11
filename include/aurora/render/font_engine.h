@@ -2,10 +2,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "aurora/core/color.h"
+#include "aurora/core/enums.h"
 #include "aurora/core/font.h"
 #include "aurora/core/types.h"
 #include "aurora/render/painter.h"
@@ -50,9 +52,16 @@ struct TextLayoutOpts {
     float letter_spacing = 0.0F;  ///< 字形间额外间距（逻辑 dp），加在每对相邻字形之间
     float word_spacing = 0.0F;  ///< 词间额外间距（逻辑 dp），加在每个空格之后
     bool italic = false;  ///< 是否斜体（FreeType 经 FT_Set_Transform 施加 shear 变换实现）
+    /// @brief 书写方向（A2）：nullopt = 按内容自动 guess（现状，golden 零影响）；
+    ///        显式 RTL 时 HarfBuzz 把字形反转为**视觉序**（绘制按数组顺序左→右即为正确
+    ///        视觉序），`caret_x`/`hit_test_*` 相应做逻辑↔视觉镜像映射（逻辑首字符在右缘）。
+    ///        已知限制（alpha 范围）：按「1 码点 = 1 字形」近似映射（连字/簇未建模）；
+    ///        混排 UBA 多 run 视觉重排、BitmapFont 兜底路径不支持 RTL。
+    std::optional<TextDirection> direction = std::nullopt;
 
     auto operator==(const TextLayoutOpts &o) const -> bool {
-        return letter_spacing == o.letter_spacing && word_spacing == o.word_spacing && italic == o.italic;
+        return letter_spacing == o.letter_spacing && word_spacing == o.word_spacing && italic == o.italic &&
+               direction == o.direction;
     }
 };
 

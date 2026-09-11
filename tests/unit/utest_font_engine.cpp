@@ -203,4 +203,64 @@ AURORA_TEST_CASE(caret_x_is_codepoint_indexed_for_utf8) {
     AURORA_TEST_CHECK_GT(render::FontEngine::caret_x(text, 2, font), render::FontEngine::caret_x(text, 1, font));
 }
 
+AURORA_TEST_CASE(rtl_measure_width_matches_ltr) {
+    // A2：视觉宽度与方向无关（字形集合相同，仅排列镜像）。
+    const Font font;
+    const std::string text = "Hello World";
+    const render::TextLayoutOpts ltr{};
+    const render::TextLayoutOpts rtl{.direction = TextDirection::RTL};
+    AURORA_TEST_CHECK_NEAR(render::FontEngine::measure_width(text, font, rtl),
+                           render::FontEngine::measure_width(text, font, ltr), 0.5);
+}
+
+AURORA_TEST_CASE(rtl_caret_x_mirrors_to_right_edge) {
+    // A2 RTL：逻辑首字符在右缘——caret(0) = 整串宽，caret(n) = 0，随逻辑下标单调递减。
+    const Font font;
+    const std::string text = "Aurora";
+    const render::TextLayoutOpts rtl{.direction = TextDirection::RTL};
+    const float total = render::FontEngine::measure_width(text, font, rtl);
+    AURORA_TEST_CHECK_NEAR(render::FontEngine::caret_x(text, 0, font, rtl), total, 0.5);
+    AURORA_TEST_CHECK_NEAR(render::FontEngine::caret_x(text, text.size(), font, rtl), 0.0, 0.5);
+
+    float previous = total;
+    for (std::size_t i = 1; i <= text.size(); ++i) {
+        const float x = render::FontEngine::caret_x(text, i, font, rtl);
+        AURORA_TEST_CHECK_LE(x, previous);
+        previous = x;
+    }
+}
+
+AURORA_TEST_CASE(rtl_hit_test_mirrors_ltr) {
+    // A2 RTL：同一文本，LTR 在 x 命中的逻辑下标 i ⇔ RTL 在 (total − x) 命中 i（含入语义）。
+    const Font font;
+    const std::string text = "Aurora";
+    const render::TextLayoutOpts ltr{};
+    const render::TextLayoutOpts rtl{.direction = TextDirection::RTL};
+    const float total = render::FontEngine::measure_width(text, font, ltr);
+
+    AURORA_TEST_CHECK_EQ(render::FontEngine::hit_test_char(text, total + 10.0F, font, rtl), 0U);
+    AURORA_TEST_CHECK_EQ(render::FontEngine::hit_test_char(text, 0.5F, font, rtl), text.size());
+
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const float mid_ltr =
+            (render::FontEngine::caret_x(text, i, font, ltr) + render::FontEngine::caret_x(text, i + 1, font, ltr)) *
+            0.5F;
+        const std::size_t hit_ltr = render::FontEngine::hit_test_char_inclusive(text, mid_ltr, font, ltr);
+        const std::size_t hit_rtl = render::FontEngine::hit_test_char_inclusive(text, total - mid_ltr, font, rtl);
+        AURORA_TEST_CHECK_EQ(hit_rtl, hit_ltr);
+    }
+}
+
+AURORA_TEST_CASE(rtl_direction_participates_in_shape_cache_key) {
+    // A2：direction 进 shaping 缓存键——同一文本 LTR/RTL 两次 shape 不串缓存（字形序不同）。
+    const Font font;
+    const std::string text = "Cache";
+    const auto before = render::FontEngine::shape_cache_stats();
+    (void)render::FontEngine::caret_x(text, 0, font, render::TextLayoutOpts{});
+    (void)render::FontEngine::caret_x(text, 0, font, render::TextLayoutOpts{.direction = TextDirection::RTL});
+    const auto after = render::FontEngine::shape_cache_stats();
+    // 两个不同的 opts 各自至少 miss 一次（不因 direction 缺失而错误命中同一键）。
+    AURORA_TEST_CHECK_GE(after.misses, before.misses + 2U);
+}
+
 }  // namespace aurora::test_cases::utest_font_engine

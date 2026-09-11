@@ -206,6 +206,8 @@ struct ShapeCacheKeyHash {
         std::memcpy(&u, &k.opts.word_spacing, 4);
         mix(u);
         mix(k.opts.italic ? 0x1001ULL : 0ULL);
+        // direction 进缓存键：nullopt=guess（0），显式 LTR/RTL 各占一档（A2）。
+        mix(k.opts.direction.has_value() ? (0x2000ULL + static_cast<std::uint64_t>(*k.opts.direction)) : 0ULL);
         mix(k.faces_key);
         return h;
     }
@@ -365,6 +367,11 @@ class ShapeCache {
         hb_buffer_t *buf = hb_buffer_create();
         hb_buffer_add_utf8(buf, run_str.data(), static_cast<int>(run_str.size()), 0, static_cast<int>(run_str.size()));
         hb_buffer_guess_segment_properties(buf);
+        // A2：显式 direction 覆盖 guess（nullopt 保持 guess —— 默认行为与接入前逐位一致）。
+        // RTL 时 hb 把字形反转输出为**视觉序**（x_advance 恒正），绘制按数组顺序左→右即为正确视觉序。
+        if (opts.direction.has_value()) {
+            hb_buffer_set_direction(buf, *opts.direction == TextDirection::RTL ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
+        }
         hb_shape(hb_font, buf, nullptr, 0);
         unsigned int ng = 0;
         const hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(buf, &ng);
@@ -444,6 +451,12 @@ class ShapeCache {
         if (char_index <= acc + lcount) {
             const std::size_t local = char_index - acc;
             const auto sl = shape_line(line, faces, px, opts);
+            // A2 RTL：逻辑下标 ↔ 视觉位置镜像。逻辑首字符在右缘：逻辑 caret i（前 i 个
+            // 字符的左边界）= 右起第 i 个视觉字形处 = 视觉前缀 (n - i) 的推进。
+            if (opts.direction == TextDirection::RTL) {
+                const std::size_t n = sl.glyphs.size();
+                return line_prefix(sl.glyphs, opts, spacing_scale, n - std::min(local, n));
+            }
             return line_prefix(sl.glyphs, opts, spacing_scale, local);
         }
         acc += lcount + 1;  // +1 计 '\n'
@@ -475,12 +488,19 @@ class ShapeCache {
 // divisor=1，实显版 divisor=scale，与逐次调用 caret_x / display_caret_x 的边界值逐位一致）。
 // inclusive=false：caret 语义（相邻边界中点取舍，返回 0..total）；
 // inclusive=true：含头含尾（x ≤ 右边界即命中该字符，行尾右侧命中末字符，返回 0..total-1）。
+// A2 RTL：视觉序字形数组按下标镜像回逻辑下标（视觉字形 j = 逻辑 m-1-j，m 为该行字形数）；
+// x 左右两端语义对调（x≤0 为逻辑末尾、x 超右缘为逻辑开头）。BitmapFont 兜底路径不支持 RTL。
 [[nodiscard]] auto hit_test_single_pass(const std::string &text, float x, const std::vector<FontFace *> &faces, int px,
                                         const TextLayoutOpts &opts, float spacing_scale, float divisor, bool inclusive)
     -> std::size_t {
     const std::size_t total = cp_count(text);
-    if (total == 0 || x <= 0.0F) {
+    if (total == 0) {
         return 0;
+    }
+    const bool rtl = opts.direction == TextDirection::RTL;
+    if (x <= 0.0F) {
+        // 左缘之外：LTR=逻辑开头；RTL=逻辑末尾（视觉最左=逻辑最后）。
+        return rtl ? (inclusive ? total - 1U : total) : 0;
     }
     const auto lines = split_lines(text);
     float w = 0.0F;
@@ -488,8 +508,9 @@ class ShapeCache {
     std::size_t line_char_offset = 0;  // 当前行首在全局文本中的字符下标（含前导 '\n'）
     for (const auto &line_str : lines) {
         const auto sl = shape_line(line_str, faces, px, opts);
+        const std::size_t m = sl.glyphs.size();
         w = 0.0F;  // 每行 pen 推进归零（与 draw_text_impl 每行重置 pen_x 一致）
-        for (std::size_t j = 0; j < sl.glyphs.size(); ++j) {
+        for (std::size_t j = 0; j < m; ++j) {
             if (j > 0) {
                 w += opts.letter_spacing * spacing_scale;
             }
@@ -501,19 +522,24 @@ class ShapeCache {
             const float boundary = w / divisor;  // 与 caret_x/display_caret_x 返回值逐位一致
             if (inclusive) {
                 if (x <= boundary) {
-                    return line_char_offset + j;
+                    // 视觉字形 j = 逻辑 m-1-j（RTL）；LTR 直接 j。
+                    return line_char_offset + (rtl ? (m - 1U - j) : j);
                 }
             } else {
                 const float mid = (prev_boundary + boundary) * 0.5F;
                 if (x < mid) {
-                    return line_char_offset + j;
+                    // 视觉前缀 j 的 caret 位置 = 逻辑 caret (m - j)（RTL）；LTR 直接 j。
+                    return line_char_offset + (rtl ? (m - j) : j);
                 }
                 prev_boundary = boundary;
             }
         }
         line_char_offset += cp_count(line_str) + 1;  // +1 计 '\n'
     }
-    // 行尾右侧：caret 语义返回末 caret（total）；含头含尾返回末字符（消除行尾漏选）。
+    // 行尾右侧：LTR=逻辑末尾（caret total / 含入末字符）；RTL=逻辑开头（caret 0 / 含入首字符）。
+    if (rtl) {
+        return 0;
+    }
     return inclusive ? total - 1U : total;
 }
 

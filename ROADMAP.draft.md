@@ -222,6 +222,7 @@ MCP 实时改运行中 UI、NL→UI、UI→代码往返保真、语义化视觉�
 - 触及：`core/enums.h`、`environment/environment.h`、`layout/*`、`render/font_engine.h/.cpp`、`widget/alignment.h`。
 - 测试：`utest_font_engine`（RTL shaping 逐位）、`utest_flex`（镜像布局）、golden 逻辑快照含 RTL 场景。
 - 完成判据：设 `TextDirection::Rtl` 后布局镜像 + 阿拉伯/希伯来文本正确 bidi。
+- **状态：核心切片已落地（2026-09-12）**。`TextDirection{LTR, RTL}`（枚举值定名 LTR/RTL，不再用计划中的 Auto——Auto 语义由 `explicit_text_direction` 返回 nullopt 表达）+ `core/directionality.h` 双来源注入；`FontEngine` 显式 direction（shape 缓存键含方向，RTL 走 hb 视觉序反转）、caret/hit 逻辑↔视觉镜像映射、Text `direction` 属性 + `TextAlign::Start/End` 方向解析。测试：utest_font_engine 16→20（RTL 镜像逐位）、utest_directionality 新增 3 例、utest_text +2（含 End 对齐方向翻转像素验证）；全量 254/254 绿。**顺延**：混排 UBA 多 run 视觉重排、Flex/Alignment/padding 布局镜像、TextInput RTL caret/选区、阿拉伯/希伯来真实字体（内置 Noto Sans 无 Arabic 字形，连字渲染待注册字体后验证）。
 
 **Phase A3：CLDR 复数 + 本地化格式**
 - 任务：`i18n/string_table.h` 复数从 `one/other` 扩到 CLDR 六类（zero/one/two/few/many/other，规则表驱动）；新增 `i18n/format.h`：数字/日期/货币按 `Locale` 格式化（轻量自研表 or opt-in ICU 子集，守零依赖）。

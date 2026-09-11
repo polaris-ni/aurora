@@ -444,6 +444,13 @@
       ]
     },
     {
+      "name": "TextDirection",
+      "values": [
+        "LTR",
+        "RTL"
+      ]
+    },
+    {
       "name": "TextOverflow",
       "values": [
         "Clip",
@@ -7097,6 +7104,18 @@
           "type": "TextAlign"
         },
         {
+          "default": "auto",
+          "enum": [
+            "LTR",
+            "RTL"
+          ],
+          "json_type": "string",
+          "name": "direction",
+          "note": "书写方向(auto=继承环境)",
+          "required": false,
+          "type": "TextDirection"
+        },
+        {
           "default": "0",
           "json_type": "integer",
           "minimum": "0",
@@ -7285,6 +7304,15 @@
           "default": "Color::black()",
           "description": "装饰线颜色",
           "type": "array"
+        },
+        "direction": {
+          "default": "auto",
+          "description": "书写方向(auto=继承环境)",
+          "enum": [
+            "LTR",
+            "RTL"
+          ],
+          "type": "string"
         },
         "font_size": {
           "default": "14.0",
