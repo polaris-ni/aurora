@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <string>
 
+#include "aurora/core/directionality.h"
+#include "aurora/environment/environment.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
@@ -314,6 +316,107 @@ AURORA_TEST_CASE(cursor_shape_hook_defaults_to_ibeam) {
     // I1：TextInput 悬停默认 IBeam（控件级虚钩子）；修饰链显式声明在派发器解析时优先，此处只验钩子值。
     TextInput ti;
     AURORA_TEST_CHECK(ti.cursor_shape() == std::optional{CursorShape::IBeam});
+}
+
+AURORA_TEST_CASE(rtl_arrow_keys_invert_logical_direction) {
+    // A2：RTL 输入框方向键按视觉语义反转——ArrowRight = 逻辑后退。
+    // 末尾输入 "ab"（caret=2）后按 ArrowRight：RTL 下 caret 退到 1，再输入 X → "aXb"；
+    // LTR 对照组：ArrowRight 在末尾 no-op（clamp），X 追加 → "abX"。
+    const Environment env =
+        Environment{}.with<Directionality>(Directionality{.direction = TextDirection::RTL, .host_set = true});
+    BuildContext ctx;
+    ctx.env = &env;
+
+    TextInput rtl;
+    rtl.on_focus_change(true);
+    TextInputEvent seed;
+    seed.text = "ab";
+    rtl.on_text_input(seed);
+    rtl.mount(ctx);
+    rtl.layout(bounded(300.0F, 60.0F), ctx);  // 布局期缓存生效方向 = RTL
+
+    KeyEvent right;
+    right.key = static_cast<int>(KeyCode::ArrowRight);
+    rtl.on_key_event(right);
+    TextInputEvent ins;
+    ins.text = "X";
+    rtl.on_text_input(ins);
+    AURORA_TEST_CHECK_EQ(rtl.value(), std::string{"aXb"});
+
+    TextInput ltr;
+    ltr.on_focus_change(true);
+    ltr.on_text_input(seed);
+    BuildContext plain;
+    ltr.mount(plain);
+    ltr.layout(bounded(300.0F, 60.0F), plain);
+    ltr.on_key_event(right);
+    ltr.on_text_input(ins);
+    AURORA_TEST_CHECK_EQ(ltr.value(), std::string{"abX"});
+}
+
+AURORA_TEST_CASE(rtl_caret_paints_at_right_edge) {
+    // A2：RTL 下逻辑 caret 0 镜像到文本右缘（caret_x = 文本全宽）——
+    // 唯一光标色像素扫描：RTL 光标 x 显著大于 LTR（LTR caret 0 在左内边距处）。
+    const Color magenta{255, 0, 255, 255};
+    auto paint_caret_min_x = [magenta](TextInput &ti, const BuildContext &ctx) -> float {
+        const Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F},
+                          .size = Size{.width = ti.size().width, .height = ti.size().height}};
+        Painter p;
+        p.begin(static_cast<int>(ti.size().width), static_cast<int>(ti.size().height));
+        ti.paint(p, bounds, ctx);
+        float min_x = -1.0F;
+        for (int x = 0; x < static_cast<int>(ti.size().width); ++x) {
+            for (int y = 0; y < static_cast<int>(ti.size().height); ++y) {
+                if (p.get_pixel(x, y) == magenta) {
+                    min_x = (min_x < 0.0F) ? static_cast<float>(x) : std::min(min_x, static_cast<float>(x));
+                }
+            }
+        }
+        return min_x;
+    };
+
+    TextInput ltr;
+    ltr.set_value("ab").set_cursor_color(magenta);
+    ltr.on_focus_change(true);
+    BuildContext plain;
+    ltr.mount(plain);
+    ltr.layout(bounded(200.0F, 60.0F), plain);
+    const float ltr_x = paint_caret_min_x(ltr, plain);
+    AURORA_TEST_CHECK_TRUE(ltr_x >= 0.0F);  // 光标已绘制
+
+    TextInput rtl;
+    rtl.set_value("ab").set_cursor_color(magenta).set_direction(TextDirection::RTL);
+    rtl.on_focus_change(true);
+    BuildContext plain2;
+    rtl.mount(plain2);
+    rtl.layout(bounded(200.0F, 60.0F), plain2);
+    const float rtl_x = paint_caret_min_x(rtl, plain2);
+
+    const Font f{.size_pt = 14.0F};
+    const float text_w = render::FontEngine::measure_width("ab", f);
+    const float padding = 8.0F;  // 与控件默认内边距一致的量级下界即可，用相对断言防脆
+    (void)padding;
+    // RTL 光标（逻辑首字符 → 右缘）必须落在 LTR 光标右侧至少一个文本宽度处。
+    AURORA_TEST_CHECK_TRUE(rtl_x >= ltr_x + text_w - 2.0F);
+}
+
+AURORA_TEST_CASE(direction_prop_serialization_roundtrip) {
+    // A2：显式方向落盘；未设置不输出（保留「继承环境」语义）。
+    TextInput rtl;
+    rtl.set_direction(TextDirection::RTL);
+    Json props;
+    rtl.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["direction"].get<std::string>(), "RTL");
+
+    TextInput dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_REQUIRE_TRUE(dst.direction().has_value());
+    AURORA_TEST_CHECK_TRUE(*dst.direction() == TextDirection::RTL);
+
+    Json defaults;
+    TextInput def;
+    def.serialize_props(defaults);
+    AURORA_TEST_CHECK_FALSE(defaults.contains("direction"));  // 未设置不落盘
 }
 
 }  // namespace aurora::test_cases::utest_text_input

@@ -6,6 +6,7 @@
 
 #include "aurora/app/clipboard.h"
 #include "aurora/core/accessibility.h"
+#include "aurora/core/directionality.h"
 #include "aurora/core/types.h"
 #include "aurora/core/utf8.h"
 #include "aurora/event/event.h"
@@ -144,6 +145,16 @@ class TextInput : public LeafWidget {
         obscure_ = v;
         return *this;
     }
+    /// @brief 设置书写方向（链式；A2）。nullopt = 继承环境（`Directionality` 注入/进程级），
+    ///        与 Text::direction 语义一致。RTL 时光标/命中走逻辑↔视觉镜像（逻辑首字符在右缘）、
+    ///        方向键反转（ArrowLeft = 逻辑前进）。
+    auto set_direction(std::optional<TextDirection> d) -> TextInput & {
+        direction_ = d;
+        mark_needs_paint();
+        return *this;
+    }
+    /// @brief 显式方向（nullopt = 继承环境）。
+    [[nodiscard]] auto direction() const -> std::optional<TextDirection> { return direction_; }
     /// @brief 设置变化回调（链式）；每次用户编辑（输入/退格/剪切/粘贴）后触发。
     auto set_on_changed(std::function<void(const std::string &)> cb) -> TextInput & {
         on_changed_ = std::move(cb);
@@ -338,6 +349,9 @@ class TextInput : public LeafWidget {
         }
         props["border_width"] = border_width_;
         props["selection_color"] = color_to_json(selection_color_);
+        if (direction_.has_value()) {  // 未设置不输出：保留「继承环境」语义（A2）
+            props["direction"] = *direction_ == TextDirection::RTL ? "RTL" : "LTR";
+        }
         if (max_length_ > 0) {
             props["max_length"] = max_length_;
         }
@@ -405,6 +419,9 @@ class TextInput : public LeafWidget {
         if (props.contains("obscure_text")) {
             obscure_ = props["obscure_text"].get<bool>();
         }
+        if (props.contains("direction") && props["direction"].is_string()) {  // A2
+            direction_ = props["direction"].get<std::string>() == "RTL" ? TextDirection::RTL : TextDirection::LTR;
+        }
     }
 
     auto on_pointer_event(MouseEvent &e) -> void override {
@@ -417,12 +434,13 @@ class TextInput : public LeafWidget {
         // 命中测试与实绘同源：掩码态下按掩码串定位（逐字符一一对应，码点下标一致）。
         const std::string v = display_value();
         const Font f{.size_pt = font_size_ > 0.0F ? font_size_ : 14.0F};
+        const render::TextLayoutOpts opts = layout_opts();
         const float lx = e.local_position.x - padding_.left;  // 文本左内边距
         if (e.action == MouseAction::Press) {
             // 含头含尾：选区端点用 hit_test_char_inclusive（点击字符任意位置均计入该字符），
             // caret_ 仍用 hit_test_char（caret 模型）作为编辑光标位置。
-            const size_t ch = render::FontEngine::hit_test_char_inclusive(v, lx, f);
-            caret_ = render::FontEngine::hit_test_char(v, lx, f);
+            const size_t ch = render::FontEngine::hit_test_char_inclusive(v, lx, f, opts);
+            caret_ = render::FontEngine::hit_test_char(v, lx, f, opts);
             sel_start_ = ch;  // 锚点（含入字符）
             sel_end_ = NO_SEL;  // 尚未形成选区，待拖拽
             selecting_ = true;
@@ -430,8 +448,8 @@ class TextInput : public LeafWidget {
             mark_needs_paint();
             e.is_handled = true;
         } else if (e.action == MouseAction::Move && selecting_) {
-            const size_t ch = render::FontEngine::hit_test_char_inclusive(v, lx, f);
-            caret_ = render::FontEngine::hit_test_char(v, lx, f);
+            const size_t ch = render::FontEngine::hit_test_char_inclusive(v, lx, f, opts);
+            caret_ = render::FontEngine::hit_test_char(v, lx, f, opts);
             sel_end_ = ch;  // 拖拽终点（含入字符）：按下与松开所在字符均计入选区
             mark_needs_paint();
             e.is_handled = true;
@@ -531,6 +549,10 @@ class TextInput : public LeafWidget {
             dir = -1;
         } else if (e.key == static_cast<int>(KeyCode::ArrowRight)) {
             dir = 1;
+        }
+        // A2：RTL 下方向键按视觉方向语义反转（ArrowLeft = 逻辑前进）。
+        if (dir != 0 && cached_direction_ == TextDirection::RTL) {
+            dir = -dir;
         }
         if (dir != 0) {
             if (shift) {
@@ -652,7 +674,18 @@ class TextInput : public LeafWidget {
   protected:
     // ---- 继承扩展点 ----
 
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+    /// @brief 生效布局选项（A2）：direction 取缓存方向（布局期解析），nullopt 时保持默认
+    ///        （FontEngine 按内容 guess）——默认行为与接入前逐位一致。
+    [[nodiscard]] auto layout_opts() const -> render::TextLayoutOpts {
+        render::TextLayoutOpts opts;
+        opts.direction = cached_direction_;
+        return opts;
+    }
+
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        // 缓存生效方向（A2）：事件路径（on_pointer_event/on_key_event）拿不到 BuildContext，
+        // 与 Text 缓存 resolved_text 同模式——布局期解析一次，事件/绘制共用。
+        cached_direction_ = direction_.has_value() ? direction_ : explicit_text_direction(ctx);
         const float fs = font_size_ > 0.0F ? font_size_ : 14.0F;
         const Font f{.size_pt = fs};
         const std::string shown = composed_text(value_.get().empty() ? placeholder_ : display_value());
@@ -690,15 +723,16 @@ class TextInput : public LeafWidget {
         if (!empty && sel_end_ != NO_SEL) {
             const size_t a = composed_index(std::min(sel_start_, sel_end_));
             const size_t b = composed_index(std::max(sel_start_, sel_end_));
-            const float x0 = tx + render::FontEngine::caret_x(shown, a, f);
-            const float x1 = tx + render::FontEngine::caret_x(shown, b + 1, f);  // 含尾：+1
+            const render::TextLayoutOpts opts = layout_opts();
+            const float x0 = tx + render::FontEngine::caret_x(shown, a, f, opts);
+            const float x1 = tx + render::FontEngine::caret_x(shown, b + 1, f, opts);  // 含尾：+1
             p.fill_rect(Rect{.origin = Point{.x = x0, .y = ty}, .size = Size{.width = x1 - x0, .height = th}},
                         selection_color_);
         }
 
         // 组合态：preedit 内选区高亮 + 整段下划线
         if (is_composing()) {
-            paint_composition(p, shown, tx, ty, th, f);
+            paint_composition(p, shown, tx, ty, th, f, layout_opts());
         }
 
         p.draw_text(Rect{.origin = Point{.x = tx, .y = ty},
@@ -708,7 +742,7 @@ class TextInput : public LeafWidget {
         // 光标（仅非占位文本、聚焦且未禁用时显示）；组合时光标落在 preedit 内的候选插入点并加粗。
         if (is_focused() && !empty && !disabled) {
             const size_t ci = composed_index(caret_) + preedit_cursor_;
-            const float cx = tx + render::FontEngine::caret_x(shown, ci, f);
+            const float cx = tx + render::FontEngine::caret_x(shown, ci, f, layout_opts());
             p.fill_rect(
                 Rect{.origin = Point{.x = cx, .y = ty}, .size = Size{.width = is_composing() ? 2.0F : 1.5F, .height = th}},
                 cursor_color_);
@@ -814,18 +848,18 @@ class TextInput : public LeafWidget {
 
     /// @brief 组合态绘制：preedit 选区高亮 + 下划线（候选串底衬）。返回 preedit 占用的宽度。
     ///
-    /// `x0` 为 preedit 起始 x；`f` 为当前字体。仅 `is_composing()` 时调用。
-    auto paint_composition(Painter &p, const std::string &shown, float x0, float ty, float th, const Font &f) const
-        -> float {
-        const float px0 = x0 + render::FontEngine::caret_x(shown, caret_, f);
+    /// `x0` 为 preedit 起始 x；`f` 为当前字体；`opts` 为布局选项（含生效方向，A2）。仅 `is_composing()` 时调用。
+    auto paint_composition(Painter &p, const std::string &shown, float x0, float ty, float th, const Font &f,
+                           const render::TextLayoutOpts &opts) const -> float {
+        const float px0 = x0 + render::FontEngine::caret_x(shown, caret_, f, opts);
         const float pw = render::FontEngine::measure_width(preedit_, f);
 
         // ① preedit 内选区（输入法高亮「待转换片段」）
         if (preedit_sel_end_ != NO_SEL) {
             const size_t a = std::min(preedit_sel_start_, preedit_sel_end_);
             const size_t b = std::max(preedit_sel_start_, preedit_sel_end_);
-            const float sx0 = px0 + render::FontEngine::caret_x(preedit_, a, f);
-            const float sx1 = px0 + render::FontEngine::caret_x(preedit_, b + 1, f);  // 含尾
+            const float sx0 = px0 + render::FontEngine::caret_x(preedit_, a, f, opts);
+            const float sx1 = px0 + render::FontEngine::caret_x(preedit_, b + 1, f, opts);  // 含尾
             p.fill_rect(Rect{.origin = Point{.x = sx0, .y = ty}, .size = Size{.width = sx1 - sx0, .height = th}},
                         preedit_selection_color_);
         }
@@ -879,6 +913,11 @@ class TextInput : public LeafWidget {
     std::size_t max_length_ = 0;  ///< 最大长度（码点）；0 = 不限
     bool read_only_ = false;  ///< 只读：可选择/复制不可编辑
     bool obscure_ = false;  ///< 密码掩码显示
+    /// @brief 书写方向（A2）：nullopt = 继承环境（Directionality 注入/进程级）。
+    std::optional<TextDirection> direction_;
+    /// @brief 生效方向缓存：on_layout 解析（显式属性 > Environment > 进程级 > nullopt），
+    ///        供无 BuildContext 的事件路径与绘制路径共用。
+    std::optional<TextDirection> cached_direction_;
     std::function<void(const std::string &)> on_changed_;  ///< 每次编辑后触发
     std::function<void(const std::string &)> on_submit_;  ///< Enter 提交触发
 
