@@ -91,20 +91,69 @@ auto Inspector::apply_patch(Node &root, const Json &patch) -> Result<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 交互模拟（需要事件系统支持，当前返回 GeneralNotSupported）
+// 交互模拟：合成事件经 EventDispatcher 派发（派发根 = 目标控件自身）
 // ---------------------------------------------------------------------------
+//
+// 语义为「目标式」：以目标控件为派发根与坐标原点、指针取该控件中心。因此不依赖
+// 控件在整棵树中的绝对位置（无需先绘制即可复现），代价是事件不沿命中链冒泡到
+// 目标控件的祖先——要断言祖先（如外层的 Clickable）的响应须以该祖先为目标。
+//
+// 目标不可命中（未布局出可命中区域，或整棵子树都不参与命中）时**在派发前**返回错误，
+// 因此失败的模拟不改变任何状态，调用方（AI Agent / 测试）也能据此区分「已派发」与
+// 「无事发生」。
+
+namespace {
+
+/// @brief 交互模拟的焦点上下文：优先复用派发期的焦点管理器，无则就地构造一个。
+///
+/// 合成指针事件必须携带焦点管理器：`Widget::request_focus()` 读取
+/// `current_focus_manager()`，为空时静默 no-op，于是点击输入框不获焦、后续文本输入
+/// 也没有接收者。已有的派发上下文（`current_focus_manager()` 非空）优先沿用，
+/// 避免与真实焦点状态脱节；无则用一个以目标控件为根的临时实例兜底。
+struct SimFocusContext {
+    FocusManager local;
+
+    [[nodiscard]] auto resolve(Widget &target) -> FocusManager * {
+        if (FocusManager *active = current_focus_manager()) {
+            return active;
+        }
+        local.set_root(&target);
+        return &local;
+    }
+};
+
+/// @brief 目标控件中心点（控件局部坐标系；与「以控件为派发根」一致）。
+[[nodiscard]] auto center_of(const Widget &w) -> Point {
+    return Point{.x = w.size().width * 0.5F, .y = w.size().height * 0.5F};
+}
+
+}  // namespace
 
 auto Inspector::simulate_click(Widget &w) -> Result<void> {
-    // 在 Widget 自身中心触发一次 press + release，走完整的命中测试 + 冒泡派发路径。
-    const Point center{.x = w.size().width * 0.5F, .y = w.size().height * 0.5F};
+    SimFocusContext focus;
+    FocusManager *fm = focus.resolve(w);
+    const Point center = center_of(w);
+
+    // 先按要求做一次与派发器同口径的命中测试：未命中则直接返回错误，不进入派发。
+    // 否则 `dispatch_mouse` 会按「点击空白」语义清除当前焦点——一次失败的模拟点击
+    // 不应改变任何状态。（命中测试是只读的，此处多跑一次不影响结果。）
+    const Rect root_rect{.origin = Point{}, .size = w.size()};
+    if (w.hit_test_chain(center, root_rect, BuildContext{}).empty()) {
+        return make_error(ErrorCode::GeneralNotSupported,
+                          "simulate_click: target widget has no hit-testable area at its center");
+    }
+
+    // 一次完整点击 = Press + Release，走完整的命中测试 + 冒泡派发路径。
+    // 焦点经派发器在 Press 时交给命中链上最近的可获焦控件。
     MouseEvent press;
     press.action = MouseAction::Press;
     press.button = MouseButton::Left;
     press.position = center;
-    EventDispatcher::dispatch(w, press);
+    EventDispatcher::dispatch(w, press, fm);
+
     MouseEvent release = press;
     release.action = MouseAction::Release;
-    EventDispatcher::dispatch(w, release);
+    EventDispatcher::dispatch(w, release, fm);
     return Result<void>{};
 }
 
@@ -112,24 +161,32 @@ auto Inspector::simulate_scroll(Widget &w, float dx, float dy) -> Result<void> {
     ScrollEvent e;
     e.delta_x = dx;
     e.delta_y = dy;
-    e.position = Point{.x = w.size().width * 0.5F, .y = w.size().height * 0.5F};
+    e.position = center_of(w);
+    // 同样先做与派发器同口径的命中测试（滚轮不改变焦点，故不经焦点管理器）。
+    if (EventDispatcher::hit_test(w, e.position) == nullptr) {
+        return make_error(ErrorCode::GeneralNotSupported,
+                          "simulate_scroll: target widget has no hit-testable area at its center");
+    }
     EventDispatcher::dispatch(w, e);
     return Result<void>{};
 }
 
 auto Inspector::simulate_text_input(Widget &w, std::string_view text) -> Result<void> {
     if (text.empty()) {
-        return Result<void>{};
+        return Result<void>{};  // 空片段无副作用，直接视为完成
     }
-    // 文本输入派发到当前焦点 widget，这里以目标 w 为焦点根并直接置焦。
-    FocusManager fm;
-    fm.set_root(&w);
-    fm.set_focus(&w);
-    set_current_focus_manager(&fm);
+    SimFocusContext focus;
+    FocusManager *fm = focus.resolve(w);
+    // 目标语义：文本须落到指定控件，故先把它置为焦点——`TextInput::on_text_input`
+    // 以 `is_focused()` 为前提，未获焦时直接丢弃输入。
+    fm->set_focus(&w);
+
     TextInputEvent e;
     e.text = std::string(text);
-    EventDispatcher::dispatch(w, e, fm);
-    set_current_focus_manager(nullptr);
+    if (!EventDispatcher::dispatch(w, e, *fm)) {
+        return make_error(ErrorCode::GeneralNotSupported,
+                          "simulate_text_input: target widget did not accept the text input");
+    }
     return Result<void>{};
 }
 

@@ -171,7 +171,7 @@ Column#root { bounds:[0,0,640,480]; visible:true; listeners:[on_click] }
 |:---|:---|:---|
 | 节点查询 | `query(type, root)` / `get_state(path, root)` / `find_node(root, path)` / `widget_info(w)` | 按类型名检索、按路径取状态片段、按索引路径定位节点、Widget 完整信息 |
 | 属性读写 | `get_prop(w)` / `get_prop_value(w, key)` / `set_prop(w, key, val)` / `apply_patch(root, patch)` | 单属性回写返回 `Result<void>`；`apply_patch` 把 JSON Patch 逐条经 `set_prop` 应用到树 |
-| 交互模拟 | `simulate_click(w)` / `simulate_scroll(w, dx, dy)` / `simulate_text_input(w, text)` | 事件系统尚未接线，当前三者均返回 `GeneralNotSupported` |
+| 交互模拟 | `simulate_click(w)` / `simulate_scroll(w, dx, dy)` / `simulate_text_input(w, text)` | 合成事件经 `EventDispatcher` 走真实命中测试 + 冒泡派发；派发根与坐标原点均为 `w` 自身、指针取 `w` 中心，故不依赖控件在树中的绝对位置（无需先绘制）。目标不可命中时返回 `GeneralNotSupported` 且不派发、不改状态 |
 | 组件发现 | `components()` / `component_schema(name)` | 已注册组件 schema 列表 / 单组件 schema |
 | 代码生成 | `to_code(root)` | UI 树 → 源码（转发 §2.5） |
 | 验证 | `validate(root) -> std::vector<Diagnostic>` | 整树验证（`inspector_api.h:94`） |
