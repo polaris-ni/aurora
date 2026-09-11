@@ -4,6 +4,7 @@
 /// static_assert）；真实 X 连接与窗口上屏不触碰。头整体被 AURORA_PLATFORM_LINUX &&
 /// AURORA_BACKEND_X11 门控，非 Linux / 未开后端时用例恒注册并 SKIP
 
+#include "aurora/core/platform.h"  // 守卫求值前必须先有平台宏（TU 自包含，不依赖 PCH 伞头带入）
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
 #include <type_traits>
 

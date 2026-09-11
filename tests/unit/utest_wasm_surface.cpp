@@ -3,6 +3,7 @@
 /// 测试说明: WASM 后端类型契约 skip 桩——头整体被
 /// AURORA_PLATFORM_WASM && AURORA_BACKEND_WASM 门控（含 <emscripten.h>），非 Emscripten 工具链无法编译
 
+#include "aurora/core/platform.h"  // 守卫求值前必须先有平台宏（TU 自包含，不依赖 PCH 伞头带入）
 #if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)
 #include <type_traits>
 
