@@ -146,6 +146,12 @@ jobs:
         if: matrix.build-demos
         run: cmake --build build --config ${{ matrix.build-type }} --target demos
 
+      # Linux headless runner 无 X display、无剪贴板工具：装 xvfb + xclip/xsel 并用 xvfb-run
+      # 包裹 ctest，让依赖系统剪贴板的用例真正执行而非 SKIP；Windows/macOS 剪贴板原生可用，直跑 ctest。
+      - name: Install virtual display + clipboard tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel
+
       - name: Test
         env:
           # Windows (windows-msvc / windows-msvc-debug, default Visual Studio generator) uses a
@@ -154,7 +160,12 @@ jobs:
           PYTHONUTF8: 1
         # bash 显式指定（Windows 默认 pwsh）：统一用 nproc 取核数并行（本地实测 9 倍提速）。
         shell: bash
-        run: ctest --test-dir build --output-on-failure -C ${{ matrix.build-type }} -j "$(nproc)"
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a ctest --test-dir build --output-on-failure -C ${{ matrix.build-type }} -j "$(nproc)"
+          else
+            ctest --test-dir build --output-on-failure -C ${{ matrix.build-type }} -j "$(nproc)"
+          fi
 
   # ---------------------------------------------------------------------------
   # 2. 后端矩阵：AURORA_BACKEND_* 各非默认后端至少编译一次
@@ -201,11 +212,22 @@ jobs:
         if: runner.os == 'Linux' || runner.os == 'macOS'
         run: ccache --show-stats --verbose || ccache --show-stats
 
+      # Linux headless runner 无 X display、无剪贴板工具：装 xvfb + xclip/xsel 并用 xvfb-run
+      # 包裹 ctest，让依赖系统剪贴板的用例真正执行而非 SKIP；Windows/macOS 剪贴板原生可用，直跑 ctest。
+      - name: Install virtual display + clipboard tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel
+
       - name: Test
         env:
           PYTHONUTF8: 1
         shell: bash
-        run: ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
+          else
+            ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
+          fi
 
   # ---------------------------------------------------------------------------
   # 3. feature 宏极性矩阵（ubuntu/gcc，Release）：
@@ -252,8 +274,13 @@ jobs:
       - name: ccache stats
         run: ccache --show-stats --verbose || ccache --show-stats
 
-      - name: Test
-        run: ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
+      # headless ubuntu 无 X display、无剪贴板工具：装 xvfb + xclip/xsel 并用 xvfb-run 包裹
+      # ctest，让依赖系统剪贴板的用例真正执行而非「剪贴板不可用」永久 SKIP。
+      - name: Install virtual display + clipboard tools
+        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel
+
+      - name: Test (under virtual X display)
+        run: xvfb-run -a ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
 
   # ---------------------------------------------------------------------------
   # 4. AddressSanitizer + UndefinedBehaviorSanitizer（全量 ctest）
