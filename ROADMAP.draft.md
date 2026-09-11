@@ -58,7 +58,7 @@
 
 ## Track F — 布局系统补强（Tier 2）
 
-**缺口**：`CrossAxisAlignment` 无 baseline；`OverflowStrategy::Scroll` 等同 Hidden；缺响应式布局原语；`Skeleton`/`GridView` 未接序列化工厂。
+**缺口**：`CrossAxisAlignment` 无 baseline；缺响应式布局原语（BreakpointBuilder 已落地）。~~`OverflowStrategy::Scroll` 等同 Hidden~~（D0b 已落地）；~~`Skeleton`/`GridView` 未接序列化工厂~~（F2 已落地）。
 
 ## Track G — AI-first 护城河 + 命令系统（Tier 2）
 
@@ -244,6 +244,7 @@ MCP 实时改运行中 UI、NL→UI、UI→代码往返保真、语义化视觉�
 **Phase D0b：OverflowStrategy::Scroll + 色彩管理**
 - 任务：`OverflowStrategy::Scroll` 从「等同 Hidden」补真实滚动裁剪；`core/color.h` 加色彩空间标注（sRGB/Display P3），输出按目标 profile 转换（Painter 合成在线性/统一空间）。
 - 完成判据：Overflow::Scroll 内容可滚；广色域下颜色转换 golden 容差内。
+- **状态：已落地（2026-09-12）**。① Overflow::Scroll：新增 `ScrollViewport` 内核（全库统一 clamp/符号约定，Scroll::on_scroll 与 Widget 基类共用）；Widget 基类轻量滚动（内容平移 + 视口裁剪，不建离屏缓冲），`can_cache_display_list` 对滚动控件返回 false；滚轮派发改沿命中链找最近 `wants_scroll()` 者（最深滚动者优先、可点击子控件不拦截）。② 色彩管理（分层策略，2026-09-12 拍板）：`core/color_space.h`（ColorSpace{SRGB,DisplayP3} + D65 矩阵转换，8bit 往返 ≤ ±3 LSB）；**sRGB golden 保持逐位精确**（GOLDEN_COLORSPACE 常量 + golden 注记字段守卫，不全局放宽容差）；P3 转换路径以独立单测验收。测试：itest_overflow_strategy 5→9、utest_color_space 新增 8 例；全量 ctest 253/253 绿。
 
 **Phase D1：RHI 抽象层抽取（纯重构，零 GPU 依赖）**
 - 目标：把 `DisplayList::replay` 的目标从硬编码 `Painter` 改为 RHI 后端接口。
@@ -343,9 +344,9 @@ MCP 实时改运行中 UI、NL→UI、UI→代码往返保真、语义化视觉�
 - **破坏性许可点（实际触发）**：`environment → build_context` 依赖方向翻转（使用方须显式 `#include "aurora/core/build_context.h"`）· 移除 clang-tidy 门禁与 `aurora_lint` 工具/目标 · `Widget::focus_bounds()` 取值语义变更（恒零盒 → 最近绘制绝对盒）
 - 门禁：`check_version_consistency` 通过（currentVersion == 库版本）；`utest_inspector_server` / `itest_mcp` 新增模拟用例全绿；wasm 下 ctest 全量开启（能力缺失用例走 `AURORA_TEST_REQUIRE_*` 的 SKIP 路径）
 
-**顺延项（原 alpha.3 计划、仍未排期）**：C4 测试临时文件规范 · I1 光标形状 · I2 焦点作用域/陷阱 · D0 异步图片(fetcher) · D0b `OverflowStrategy::Scroll` · F2 Skeleton/GridView 序列化补全 —— 待后续 alpha 重新纳入（建议并入 alpha.4 或 alpha.5 的功能阶梯，避免长期悬空）。
+**顺延项（原 alpha.3 计划）**：C4 测试临时文件规范 · I1 光标形状 · I2 焦点作用域/陷阱 · D0 异步图片(fetcher) · D0b `OverflowStrategy::Scroll` · F2 Skeleton/GridView 序列化补全 —— **六项已全部并入 alpha.4 落地完毕（2026-09-12）**。
 
-**`1.0.0-alpha.4` — 无障碍 + 中文输入（CJK 攻坚）**（进行中：B1、B2、A1 核心已落地 2026-09-11；A1 平台 IME 接线、B3、A2 待排）
+**`1.0.0-alpha.4` — 无障碍 + 中文输入（CJK 攻坚）**（进行中：B1、B2、A1 核心与 alpha.3 顺延六项（C4/I1/I2/F2/D0/D0b）已落地 2026-09-11~12；A1 平台 IME 接线、B3、A2 待排）
 
 
 - B1–B3 无障碍语义树补全 + Win32 UIAutomation 桥 · A1 IME 组合输入 · A2 RTL/bidi

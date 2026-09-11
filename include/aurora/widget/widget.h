@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <functional>
@@ -25,6 +26,7 @@
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/node.h"
 #include "aurora/widget/props_io.h"
+#include "aurora/widget/scroll_viewport.h"
 
 namespace aurora {
 
@@ -182,9 +184,10 @@ class Widget : public std::enable_shared_from_this<Widget> {
     [[nodiscard]] auto height_spec() const -> const Length & { return height_; }
 
     /// @brief 溢出策略（参考 CSS overflow）：控制子内容超出本控件边界时的行为。
-    /// Visible=溢出可见（默认）；Hidden/Clip/Scroll=裁剪到本控件盒子内。
-    /// Hidden 与 Clip 当前行为相同（均裁剪视觉），Clip 保留 hit-test（预留语义）。
-    /// Scroll 当前等同 Hidden（滚动预留）。
+    /// Visible=溢出可见（默认）；Hidden/Clip=裁剪到本控件盒子内（Clip 保留 hit-test，预留语义）；
+    /// Scroll=裁剪 + **滚轮滚动**（D0b 落地）：内容按滚轮增量垂直平移，经共享 `ScrollViewport`
+    /// 内核夹取；滚轮沿命中链路由到最近可滚动祖先（`wants_scroll`），可点击子控件不拦截。
+    /// 轻量实现不建离屏缓冲，重内容/长列表请用 Scroll / LazyList。
     virtual auto overflow_strategy(OverflowStrategy strategy) -> Widget & {
         overflow_ = strategy;
         mark_needs_layout();
@@ -192,6 +195,21 @@ class Widget : public std::enable_shared_from_this<Widget> {
         return *this;
     }
     [[nodiscard]] auto overflow_strategy() const -> OverflowStrategy { return overflow_; }
+
+    /// @brief 当前滚动偏移（仅 OverflowStrategy::Scroll 有意义；0 = 顶部）。
+    [[nodiscard]] auto scroll_offset_y() const -> float { return scroll_viewport_.offset_y; }
+    /// @brief 程序化滚动（供测试/无障碍/外部控制器驱动），语义同滚轮：delta_y 正方向为向上滚动。
+    /// @return offset 是否实际变化（到达端点后再滚返回 false）。
+    auto scroll_by(float delta_y) -> bool {
+        ScrollEvent e;
+        e.delta_y = delta_y;
+        const bool changed = [&] {
+            const float before = scroll_viewport_.offset_y;
+            on_scroll(e);
+            return scroll_viewport_.offset_y != before;
+        }();
+        return changed;
+    }
 
     // ---- 脏标记（specification/04-widget.md §2.4）----
     auto mark_needs_layout() -> void { mark_needs_layout_impl(false); }
@@ -209,7 +227,11 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @brief 本控件是否可被 Display List 缓存（恒等变换且绘制无副作用、内容不每帧变动）。
     ///        默认 true；绘制时产生副作用（如 Hero 几何注册）或内容每帧变化（转场淡变）的
     ///        控件须覆盖为 false，否则缓存回放会跳过必要的每帧绘制（见 NavigatorHost/Hero/TransitionLayer）。
-    [[nodiscard]] virtual auto can_cache_display_list() const -> bool { return true; }
+    ///        D0b：`OverflowStrategy::Scroll` 例外——滚动偏移是每帧可变的绘制输入（同 Scroll
+    ///        组件禁自身 DL 缓存的同理），声明滚动的控件不缓存自身 DL。
+    [[nodiscard]] virtual auto can_cache_display_list() const -> bool {
+        return overflow_ != OverflowStrategy::Scroll;
+    }
 
     /// @brief 本控件布局结果是否可被缓存（约束不变 ⇒ on_layout 结果不变、且无非布局副作用）。
     ///        默认 true；与 `can_cache_display_list()` 对称：绘制每帧变动 → 禁 DL 缓存，
@@ -378,7 +400,29 @@ class Widget : public std::enable_shared_from_this<Widget> {
     virtual auto on_key_event(KeyEvent &e) -> void { e.is_handled = true; }
 
     /// @brief 滚轮事件入口（命中目标上调用）。默认标记为已消费。
-    virtual auto on_scroll(ScrollEvent &e) -> void { e.is_handled = true; }
+    ///
+    /// D0b：声明了 `OverflowStrategy::Scroll` 的控件在此获得**轻量滚动**能力——
+    /// 经共享 `ScrollViewport` 内核（与 Scroll 组件同一 clamp/符号约定）按滚轮增量
+    /// 平移内容绘制（见 `paint_content` 的平移与裁剪），不建离屏缓冲（重内容请用 Scroll）。
+    /// 派发路由见 `EventDispatcher::dispatch(ScrollEvent &)`：滚轮沿命中链自最深向根
+    /// 找第一个 `wants_scroll()` 者，可点击子控件不拦截滚轮。
+    virtual auto on_scroll(ScrollEvent &e) -> void {
+        e.is_handled = true;
+        if (overflow_ == OverflowStrategy::Scroll) {
+            scroll_viewport_.content_h = scroll_content_height();
+            scroll_viewport_.viewport_h = size_.height;
+            if (scroll_viewport_.apply_scroll(e.delta_y)) {
+                // 仅内容平移：请求重绘但不失效布局/显示列表缓存（与 Scroll 滚动帧同策略）。
+                request_frame(false);
+            }
+        }
+    }
+
+    /// @brief 本控件是否为「可滚动目标」（D0b）：滚轮派发沿命中链自最深向根找第一个
+    ///       wants_scroll 者派发。默认：声明了 `OverflowStrategy::Scroll` 的控件；
+    ///       真实滚动控件（Scroll / LazyList / LazyRow / GridView）覆写为 true，
+    ///       保证嵌套时**最深滚动者优先**（外层 Overflow::Scroll 不抢内层滚轮）。
+    [[nodiscard]] virtual auto wants_scroll() const -> bool { return overflow_ == OverflowStrategy::Scroll; }
 
     /// @brief 文本输入入口（焦点 widget 上调用）。默认标记为已消费。
     virtual auto on_text_input(TextInputEvent &e) -> void { e.is_handled = true; }
@@ -539,6 +583,9 @@ class Widget : public std::enable_shared_from_this<Widget> {
         (void)ctx;
         return {};
     }
+    /// @brief 内容自然高度（D0b，OverflowStrategy::Scroll 用）：滚轮夹取上限 = 内容高 − 视口高。
+    /// 默认取自身尺寸（叶控件无溢出内容 → 不可滚）；容器覆写为子节点 bounds 的最大 bottom。
+    [[nodiscard]] virtual auto scroll_content_height() const -> float { return size_.height; }
     /// @brief 子类可覆写：挂载时额外逻辑（默认递归挂载在 Container 中处理）。
     virtual auto on_mount(const BuildContext &ctx) -> void { (void)ctx; }
 
@@ -604,6 +651,9 @@ class Widget : public std::enable_shared_from_this<Widget> {
     Length width_;  ///< 显式宽度意图（默认 WrapContent）
     Length height_;  ///< 显式高度意图（默认 WrapContent）
     OverflowStrategy overflow_ = OverflowStrategy::Visible;  ///< 溢出策略（默认 Visible）
+    /// @brief 滚动视口内核（D0b）：OverflowStrategy::Scroll 的 offset/step 状态与夹取数学，
+    ///        与 Scroll 组件共享同一约定（见 scroll_viewport.h）。
+    ScrollViewport scroll_viewport_{};
 
     /// @brief 最近一次绘制遍历写入的全局盒，充当方向键焦点导航（`FocusManager::move_focus`）的几何基准。
     ///
@@ -788,6 +838,16 @@ class Container : public Widget {
         for (Node &child : children_) {
             child.widget().mount(ctx);
         }
+    }
+
+    /// @brief 内容自然高度（D0b）：取子节点 bounds 的最大 bottom（子 bounds 为相对本容器
+    ///        内容区的局部坐标，与 on_paint 的定位一致）。溢出滚动夹取上限据此计算。
+    [[nodiscard]] auto scroll_content_height() const -> float override {
+        float h = 0.0F;
+        for (const Node &child : children_) {
+            h = std::max(h, child.bounds().bottom());
+        }
+        return h;
     }
 
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {

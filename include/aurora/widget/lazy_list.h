@@ -147,6 +147,9 @@ class LazyList : public Widget {
         e.is_handled = true;
     }
 
+    /// @brief 真实滚动控件（D0b）：滚轮派发时本控件是可滚动目标（最深优先）。
+    [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
+
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         props["count"] = count_;

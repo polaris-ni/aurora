@@ -147,6 +147,9 @@ class LazyRow : public Widget, public LazyRowProps {
         mark_needs_paint();
     }
 
+    /// @brief 真实滚动控件（D0b）：滚轮派发时本控件是可滚动目标（最深优先）。
+    [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
+
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (e.action == MouseAction::Press) {
             pressed_ = true;

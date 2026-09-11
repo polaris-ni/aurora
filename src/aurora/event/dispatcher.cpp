@@ -386,6 +386,20 @@ auto EventDispatcher::dispatch(Widget & /*root*/, KeyEvent &e, FocusManager &fm)
 }
 
 auto EventDispatcher::dispatch(Widget &root, ScrollEvent &e) -> bool {
+    // D0b：滚轮沿命中链自最深（链尾）向根（链头）找第一个 wants_scroll() 者派发——
+    // 与 CSS/Flutter 语义一致：滚轮归属「最近可滚动祖先」，可点击子控件（Button 等）
+    // 不拦截滚轮；嵌套时最深滚动者优先（内层 Scroll / LazyList 胜过外层 Overflow::Scroll 容器）。
+    // 链路依赖：Overflow::Scroll 控件自身保证入链（Widget::hit_test_chain 的滚动区认领）。
+    std::vector<HitNode> chain =
+        root.hit_test_chain(e.position, Rect{.origin = Point{}, .size = root.size()}, BuildContext{});
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+        if (auto *w = it->ptr; w != nullptr && w->wants_scroll()) {
+            w->on_scroll(e);
+            return true;
+        }
+    }
+    // 兜底（兼容既有行为）：链上无可滚动者（如自定义 on_scroll 的非滚动控件、
+    // 或命中点在滚动区之外）→ 回落点命中目标直接派发，不冒泡。
     Widget *target = hit_test(root, e.position);
     if (target == nullptr) {
         return false;

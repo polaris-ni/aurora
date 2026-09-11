@@ -153,16 +153,18 @@
         "widget/dialog.h / popup.h / drawer.h：模态弹层接线焦点陷阱（I2）——Dialog::show/close、Popup::open_at/close、Drawer::set_open（permanent 模式排除）在开合时配对压/弹作用域；派发回调上下文外调用时降级为仅置位开合状态。",
         "widget/serialization：Skeleton 接入序列化工厂（F2）——属性完整可序列化，可从静态 JSON 完整重建；GridView 接入为已知类型（持运行时 ItemBuilder，同 LazyList 先例重建为空数据占位，条目由宿主回填）；两者自描述元数据随 aurora_api.json 收录。",
         "widget/breakpoint_builder.h：新增 `Breakpoint{Compact, Medium, Expanded}` 与 `BreakpointBuilder`（F2）——按 `MediaQuery` 注入宽度（无注入退化为父约束最大宽）解析档位并构建对应子树，阈值默认 600/840 可调；档位变化或 builder 替换才重建子树；关闭布局缓存（档位输入独立于子树约束）。",
-        "widget/image_widget.h：ImageView 新增异步 URL 源（D0，需求 #1 fetcher 方案）——`ImageFetcher` 类型（URL → `Task<std::vector<std::uint8_t>>`，库核心不内置 HTTP）、`ImageView::from_url(url, fetcher = {})` 三态加载（Placeholder → Loading → Loaded/Failed）：fetcher 取字节 → `ImageCodecRegistry::decode_memory` 解码 → `ImageCache` 按 URL 缓存 → 经 `Task` 主线程投递器回填 bitmap（`Application::run` 已接线，无投递器时 worker 内联）；缓存命中构造即 Loaded 不再触发 fetcher；未注入 fetcher 优雅降级停留占位（显式实参 > 进程级 `set_default_image_fetcher` > `Environment` 注入三级解析）；`load_state()` / `url()` 查询口。"
-      ],
-      "changed": [
+        "widget/image_widget.h：ImageView 新增异步 URL 源（D0，需求 #1 fetcher 方案）——`ImageFetcher` 类型（URL → `Task<std::vector<std::uint8_t>>`，库核心不内置 HTTP）、`ImageView::from_url(url, fetcher = {})` 三态加载（Placeholder → Loading → Loaded/Failed）：fetcher 取字节 → `ImageCodecRegistry::decode_memory` 解码 → `ImageCache` 按 URL 缓存 → 经 `Task` 主线程投递器回填 bitmap（`Application::run` 已接线，无投递器时 worker 内联）；缓存命中构造即 Loaded 不再触发 fetcher；未注入 fetcher 优雅降级停留占位（显式实参 > 进程级 `set_default_image_fetcher` > `Environment` 注入三级解析）；`load_state()` / `url()` 查询口。",
+        "widget/scroll_viewport.h：新增滚动视口内核 `ScrollViewport`（D0b）——全库统一的滚动夹取/符号约定（delta_y 正方向为向上滚动）；Widget 基类内嵌实例供 Overflow::Scroll 使用，Scroll::on_scroll 经静态 clamp_offset 复用同一数学。",
+        "widget/widget.h：`OverflowStrategy::Scroll` 落地真实滚动（D0b）——声明滚动的控件获得轻量滚轮滚动（内容平移 + 视口裁剪，不建离屏缓冲；重内容/长列表仍用 Scroll/LazyList）；新增公开 API `scroll_offset_y()`/`scroll_by()`、虚钩子 `wants_scroll()`（Scroll/LazyList/LazyRow/GridView 覆写为真实滚动目标）、容器默认 `scroll_content_height()`（子节点 bounds 最大 bottom）。滚轮派发（`EventDispatcher::dispatch(ScrollEvent)`）改为沿命中链自最深向根找最近 wants_scroll 者（CSS/Flutter 语义：嵌套时最深滚动者优先、可点击子控件不拦截滚轮），链上无可滚动者回落点命中目标直接派发（既有行为保持）。已知限制（与 Scroll 组件同源）：命中链用布局期 bounds，滚动后可点击子控件的点击定位不随内容平移。",
+        "core/color_space.h：新增色彩空间标注与转换（D0b）——`ColorSpace{SRGB, DisplayP3}`、`convert_color`/`srgb_to_display_p3`/`display_p3_to_srgb`（D65 白点 + sRGB 传递曲线、宽色域越界分量夹取、8bit 往返 ≤ ±3 LSB）、`GOLDEN_COLORSPACE` 常量锚定 golden 基准唯一色彩空间为 sRGB（软件参考路径逐位确定性红线不受影响）；utest_offscreen 的 golden 逻辑快照再生成路径写入 `colorspace` 注记字段并在读取时校验。"
       ],
       "changed": [
         "core/accessibility.h：build_accessibility_tree 现在填充 bounds——已绘制的节点取绘制遍历写入的绝对盒（含 Modifier 的 padding / border 位移），未绘制的节点按子节点 Node 局部原点逐级累加；子节点优先走 child_nodes()（其 Node 带父写入的局部盒），仅经 for_each_child 暴露子树的容器（LazyList / GridView / NavigatorHost / TransitionLayer 等）兜底展开、几何继承父盒；show == false 的子树与绘制 / 命中同口径不再入树。",
         "core/accessibility.h：新增带根盒的重载 build_accessibility_tree(const Widget&, const Rect&)；单参重载语义保持兼容（根盒 = 布局结果 size() 置于原点）。",
         "animation/animator.h：`AnimationController::tick` 响应 `reduce_motion`——启用后不再按时间渐变，单帧直落本次播放的目标端点（正向 → 1 / 反向 → 0）并置终态，状态机与「动画自然播完」一致，绑定端（State 写入 / 排版）无需特判；静止控制器不受影响。",
         "widget/text.h：`Text::effective_font` 施加无障碍字号缩放，并新增带 `BuildContext` 的重载优先取 Environment 注入值（on_layout / on_paint 两处走上下文版，命中测试与键盘路径走进程默认版）。默认倍率 1.0 ⇒ 度量与 golden 逐位不变。",
-        "widget/grid_view.h：`GridView` 默认构造由「零值成员」改为委托 `GridView(0, 1, nullptr)`——对外行为不变（默认 1 列、无条目），消除 0 列时的除零隐患（serialization 工厂重建路径将实际使用默认构造）。"
+        "widget/grid_view.h：`GridView` 默认构造由「零值成员」改为委托 `GridView(0, 1, nullptr)`——对外行为不变（默认 1 列、无条目），消除 0 列时的除零隐患（serialization 工厂重建路径将实际使用默认构造）。",
+        "widget/widget.h：`can_cache_display_list()` 基类默认值对声明 `OverflowStrategy::Scroll` 的控件返回 false——滚动偏移是每帧可变的绘制输入（与 Scroll 组件禁自身 DL 缓存同理），否则缓存回放会显示陈旧内容。"
       ],
       "migrations": [
         "build_accessibility_tree：无需迁移——此前 bounds 恒空、name/value 恒空，依赖它们的逻辑取不到任何有效数据；唯一行为差异是本次起忽略 show == false 的子树，若宿主依赖「隐藏控件也在语义树里」需显式处理可见性。"
@@ -170,7 +172,8 @@
       "notes": [
         "aurora_api.json（widgets / enums / layout_rules / state_patterns 四类，不含方法级 API）本次无新增条目，已在 cmake --build build --target aurora_api_json 后核实零漂移。",
         "alpha.4 阶梯其余 Phase（B3 Win32 UIAutomation 桥、A2 RTL/bidi、alpha.3 顺延的 I2/D0/D0b/F2）尚未开始；A1 IME 组合输入的核心（事件模型 / 派发 / 控件组合态）与 I1 光标形状的核心（枚举 / 修饰 / 解析 / Surface 契约）已落地，但**平台接线**（A1 的 Win32 TSF/IMM32、macOS NSTextInputClient、X11/Wayland zwp_text_input_v3、Wasm；I1 的 GLFW/X11/Win32/Wayland/macOS `set_cursor` 覆写）不在无头 Linux 上实现——须在对应平台编译与真实环境验收后补齐。currentVersion 仍为 1.0.0-alpha.3，待本阶梯收口时随升版提交 bump。",
-        "声明：B2 的 `high_contrast` 位已随设置结构落地，但**尚未有控件消费**——高对比换色需先定换色策略（是否改 Theme / 是否重写前景-背景对），属待拍板项，故本次未做半成品接线；`screen_reader_active` 同理只作为宿主向库传递的意图位，库内不据此改变行为。"
+        "声明：B2 的 `high_contrast` 位已随设置结构落地，但**尚未有控件消费**——高对比换色需先定换色策略（是否改 Theme / 是否重写前景-背景对），属待拍板项，故本次未做半成品接线；`screen_reader_active` 同理只作为宿主向库传递的意图位，库内不据此改变行为。",
+        "D0b（alpha.3 顺延最后一项）已落地：Overflow::Scroll 真实滚动（内核复用 + 滚轮最近可滚动者路由）+ 色彩管理分层策略（sRGB golden 逐位精确、P3 转换 ±3 LSB 单测、golden 注记）。测试：itest_overflow_strategy 5→9 例、utest_color_space 新增 8 例、utest_offscreen 注记校验；全量 ctest 253/253 绿。`high_contrast` 换色策略仍待拍板，未做接线。"
       ]
     }
   ]

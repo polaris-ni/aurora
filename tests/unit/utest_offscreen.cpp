@@ -254,6 +254,12 @@ AURORA_TEST_CASE(logical_snapshots_match_golden_baseline) {
                                 "(run with AURORA_UPDATE_GOLDEN=1 to create)");
         in >> baseline;
         AURORA_TEST_REQUIRE_TRUE(baseline.contains("scenarios"));
+        // D0b 色彩管理注记：golden 基准唯一色彩空间为 sRGB（软件参考路径 SSOT，逐位确定性红线）。
+        // 基线尚无此字段时跳过（向后兼容）；再生成路径会写入。
+        if (baseline.contains("colorspace")) {
+            AURORA_TEST_CHECK_MSG(baseline["colorspace"].get<std::string>() == std::string{"sRGB"},
+                                  "golden baseline colorspace must be sRGB");
+        }
     }
 
     Json out = Json::object();
@@ -276,6 +282,7 @@ AURORA_TEST_CASE(logical_snapshots_match_golden_baseline) {
         doc["_about"] =
             "Aurora logical-snapshot golden baseline (requirement #15). Do not hand-edit; regenerate with "
             "AURORA_UPDATE_GOLDEN=1 via aurora_test_runner --run=utest_offscreen.";
+        doc["colorspace"] = "sRGB";  // D0b 注记：golden 基准唯一色彩空间（软件参考路径 SSOT）
         doc["viewport"] = Json{{"w", view_w}, {"h", view_h}};
         doc["scenarios"] = out;
         std::error_code ec;

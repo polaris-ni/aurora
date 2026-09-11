@@ -248,13 +248,23 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
     }
 
     // 溢出策略裁剪：Hidden/Clip/Scroll 时把内容裁剪到本控件视觉盒子内（与 Clip 修饰语义一致）。
-    // Clip 与 Hidden 当前行为相同（均裁剪视觉）；Scroll 预留，当前等同 Hidden。
+    // Clip 与 Hidden 当前行为相同（均裁剪视觉）。
+    // Scroll（D0b）：裁剪之外再按滚动偏移把内容**上移平移**绘制——把平移量计入传给 on_paint 的
+    // 内容盒原点（与 Scroll 组件「偏移不烘焙进子控件 bounds」同一机制：子容器经 bounds.origin
+    // 叠加定位子节点，原点上移即内容上移），视觉盒裁剪保证只有视口内可见。
+    // 注意与 Scroll 组件同源的已知限制：命中链用布局期 bounds（未含滚动偏移），滚动后
+    // 可点击子控件的点击定位不随内容平移——需要精确点击定位的重内容场景用 Scroll。
+    const bool overflow_scroll = overflow_ == OverflowStrategy::Scroll;
     const bool overflow_clip = overflow_ != OverflowStrategy::Visible;
     if (overflow_clip) {
         p.push_clip(visual_box);
     }
 
-    on_paint(p, content_box, ctx);
+    Rect content_paint_box = content_box;
+    if (overflow_scroll) {
+        content_paint_box.origin.y -= scroll_viewport_.offset_y;
+    }
+    on_paint(p, content_paint_box, ctx);
 
     // 内容后修饰（Paint 切片）：边框绘制于内容之上 + 内容后效 + 弹出裁剪。
     for (const auto &mn : mod.nodes()) {
@@ -478,10 +488,15 @@ auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildC
     std::vector<HitNode> descendants = on_hit_test_chain(local_adj, bounds, ctx);
 
     // 本节点是否进入命中链：自身可点击（Button 的 on_click 或 Clickable 修饰）、
-    // 自身有 Input 修饰（Draggable/LongPress）覆盖该点，或存在命中的后代（作为祖先）。
+    // 自身有 Input 修饰（Draggable/LongPress）覆盖该点、存在命中的后代（作为祖先），
+    // 或自身为可滚动目标（wants_scroll，D0b：滚轮沿命中链找最近可滚动者——
+    // 内容全非可点击时滚动容器自身也必须在链内，否则滚轮落空）。
     // 注意：on_hit_test_chain 仅返回后代链（不含自身），自身是否入链统一在此决定，
     // 避免叶控件在 on_hit_test_chain 返回 [this] 时与基类前缀自身重复入链。
     bool self_hit = !descendants.empty() || wants_click();
+    if (!self_hit && wants_scroll() && content_box.contains(local_adj)) {
+        self_hit = true;
+    }
     if (!self_hit) {
         for (const auto &mn : mod.nodes()) {
             if (mn->kind() == ModifierNode::Kind::Input && content_box.contains(local_adj)) {

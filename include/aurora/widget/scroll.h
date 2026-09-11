@@ -12,6 +12,7 @@
 #include "aurora/perf/counters.h"
 #include "aurora/render/detail/paint_timing.h"
 #include "aurora/render/painter.h"
+#include "aurora/widget/scroll_viewport.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -162,10 +163,8 @@ class Scroll : public Container, public ScrollProps {
     }
 
     auto on_scroll(ScrollEvent &e) -> void override {
-        const float max_off = std::max(0.0F, content_h_ - viewport_h_);
-        // 与全库滚动约定一致（见 lazy_list/grid_view/lazy_row）：delta_y 正方向为「向上滚动」，
-        // 此时 offset_y_ 应减小；故用减号。offset_y_ 增大表示内容上移露出下方内容。
-        const float target = std::max(0.0F, std::min(max_off, offset_y_ - (e.delta_y * step)));
+        // clamp/符号约定走共享 ScrollViewport 内核（D0b：与 Widget 基类 Overflow::Scroll 一致）。
+        const float target = ScrollViewport::clamp_offset(offset_y_, e.delta_y, step, content_h_, viewport_h_);
         e.is_handled = true;
         if (target != offset_y_) {
             offset_y_ = target;
@@ -175,6 +174,9 @@ class Scroll : public Container, public ScrollProps {
             request_frame(false);
         }
     }
+
+    /// @brief 真实滚动控件（D0b）：滚轮派发时本控件是可滚动目标（最深优先）。
+    [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
 
     /// 程序化滚动（供测试 / 无障碍 / 外部控制器驱动），delta_y 正方向为向上滚动。
     auto scroll_by(float delta_y) -> void {
