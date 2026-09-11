@@ -357,6 +357,7 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
     AURORA_PROFILE_COUNT(paint_nodes, 1); // 本帧真正参与 paint 遍历的节点数（DL 命中的子树不计）
     detail::paint_timing().paint_nodes++; // [性能排查] 镜像到光栅计时累加器，供 glue 归因
     paint_bounds_ = bounds;              // 记录绝对（窗口逻辑 dp）盒，供脏区裁剪绘制精确标记几何
+    focus_bounds_ = bounds;              // 同源同值：方向键焦点导航的几何基准（见 focus_bounds_）
 
     const Modifier &mod = modifier.get();
     const bool cache = std::ranges::any_of(mod.nodes(), [](const std::shared_ptr<ModifierNode> &n) -> bool {

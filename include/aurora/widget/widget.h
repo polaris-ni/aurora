@@ -550,7 +550,14 @@ class Widget : public std::enable_shared_from_this<Widget> {
     Length height_;  ///< 显式高度意图（默认 WrapContent）
     OverflowStrategy overflow_ = OverflowStrategy::Visible;  ///< 溢出策略（默认 Visible）
 
-    Rect focus_bounds_;  ///< 布局后的全局盒（供方向键焦点导航使用，由布局系统写入）
+    /// @brief 最近一次绘制遍历写入的全局盒，充当方向键焦点导航（`FocusManager::move_focus`）的几何基准。
+    ///
+    /// 与 `paint_bounds_` 同源同值：二者都在 `Widget::paint` 入口按传入的绝对盒写入。之所以不放在
+    /// 布局期，是因为布局只确定自身尺寸、位置由父节点写 `Node::bounds_`（见 `Widget::layout`），
+    /// 布局调用链上拿不到控件自身的绝对盒。
+    /// @note 离屏缓冲（如 `Scroll` 内容）内的后代处于**内容坐标系**，其盒不等于屏幕坐标——同一视口
+    ///       内的相对几何仍成立，跨视口比较不精确（此限制与 `paint_bounds_` 相同）。
+    Rect focus_bounds_;
 
     /// @brief 最近一次 paint 接收的绝对（窗口逻辑 dp）盒；脏区标记据此标记精确几何，
     ///        使 `Window::present_root` 的脏区裁剪绘制（push_clip）命中正确区域，避免整帧重绘。
@@ -565,9 +572,10 @@ class Widget : public std::enable_shared_from_this<Widget> {
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
   public:
-    /// @brief 设置布局后的全局盒（由父节点/布局系统写入，供方向键焦点导航）。
+    /// @brief 覆盖焦点导航几何盒（测试 seam）：直接构造、未经绘制遍历的控件用它给出手工盒。
+    ///        生产路径由 `Widget::paint` 每次绘制按真实绝对盒写入，调用方无需设置。
     auto set_focus_bounds(const Rect &r) -> void { focus_bounds_ = r; }
-    /// @brief 读取布局后的全局盒。
+    /// @brief 读取焦点导航几何盒（最近一次绘制写入的绝对盒；从未绘制过则为零盒）。
     [[nodiscard]] auto focus_bounds() const -> Rect { return focus_bounds_; }
 
     /// @brief 读取最近一次 paint 的绝对（窗口逻辑 dp）盒（脏区标记用）。

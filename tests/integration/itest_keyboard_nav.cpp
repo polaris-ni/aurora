@@ -1,11 +1,15 @@
 /// 测试类型: integration
 /// 目标单元: include/aurora/event/focus.h
 /// 测试说明: 键盘导航集成——Tab 序前进/后退循环、方向键按 focus_bounds 几何导航
-/// （水平/垂直）、activate() 触发 on_click、无可聚焦候选时安全返回 false
+/// （水平/垂直）、activate() 触发 on_click、无可聚焦候选时安全返回 false。
+/// 另含一条端到端回归：控件盒由**真实绘制遍历**写入 focus_bounds（不做任何手工设置），
+/// 方向键导航据此即可工作——该写入点是方向键导航唯一的几何来源。
+/// AURORA_BACKEND_HEADLESS 未开启时该用例降级为 SKIP 桩（无绘制路径可用）。
 
 #include <memory>
 #include <utility>
 
+#include "aurora/aurora.h"
 #include "aurora/event/focus.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
@@ -124,6 +128,61 @@ AURORA_TEST_CASE(activate_triggers_on_click) {
     // activate() 应触发 on_click（Enter/Space 激活路径的直达入口）。
     btn.activate();
     AURORA_TEST_CHECK_TRUE(clicked);
+}
+
+AURORA_TEST_CASE(directional_nav_uses_geometry_written_by_paint) {
+#ifdef AURORA_BACKEND_HEADLESS
+    // 回归：focus_bounds 的生产写入点在绘制遍历（Widget::paint 按传入的绝对盒写入）。
+    // 该写入点缺失时全部候选都是零盒 → 方向键分支没有任何 in_direction 候选 → 方向键
+    // 静默失效；Tab 序只比较 tab_index，不受影响，故仅靠上面的 Tab 用例无法暴露。
+    constexpr int w = 400;
+    constexpr int h = 300;
+
+    auto surface = std::make_unique<HeadlessSurface>();
+    (void)surface->begin_frame(w, h);  // 先确立尺寸（present_root 首帧读取 size 布局整树）
+    Window win{std::move(surface)};
+
+    const auto top = std::make_shared<Button>("Top");
+    const auto bottom = std::make_shared<Button>("Bottom");
+    top->set_focusable(true);
+    bottom->set_focusable(true);
+    top->set_tab_index(0);
+    bottom->set_tab_index(1);
+
+    Node root{Column{Node{top}, Node{bottom}}};
+    root.widget().set_focusable(false);  // 容器不参与焦点序（Widget 默认 focusable=true）
+
+    AURORA_TEST_REQUIRE_TRUE(win.present_root(root).ok());
+
+    // 绘制遍历必须写出真实绝对盒；零盒即代表写入点缺失。
+    const Rect top_box = top->focus_bounds();
+    const Rect bottom_box = bottom->focus_bounds();
+    AURORA_TEST_CHECK_MSG(top_box.size.width > 0.0F && top_box.size.height > 0.0F,
+                          "paint traversal wrote a non-empty focus_bounds for the first child");
+    AURORA_TEST_CHECK_MSG(bottom_box.size.width > 0.0F && bottom_box.size.height > 0.0F,
+                          "paint traversal wrote a non-empty focus_bounds for the second child");
+    AURORA_TEST_CHECK_MSG(bottom_box.origin.y > top_box.origin.y,
+                          "vertical stacking reflected in focus_bounds");
+
+    // 全程不手工 set_focus_bounds：方向键导航只凭绘制写入的几何即可工作。
+    FocusManager fm;
+    fm.set_root(&root.widget());
+
+    AURORA_TEST_REQUIRE_TRUE(fm.move_focus(FocusDirection::Forward));  // → Top
+    AURORA_TEST_CHECK_TRUE(fm.focused() == top.get());
+
+    AURORA_TEST_REQUIRE_TRUE(fm.move_focus(FocusDirection::Down));  // → Bottom
+    AURORA_TEST_CHECK_TRUE(fm.focused() == bottom.get());
+
+    AURORA_TEST_REQUIRE_TRUE(fm.move_focus(FocusDirection::Up));  // → Top
+    AURORA_TEST_CHECK_TRUE(fm.focused() == top.get());
+
+    // 水平方向无候选：不得误移动。
+    AURORA_TEST_CHECK_FALSE(fm.move_focus(FocusDirection::Left));
+    AURORA_TEST_CHECK_TRUE(fm.focused() == top.get());
+#else
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：无绘制路径可驱动 focus_bounds 写入");
+#endif
 }
 
 AURORA_TEST_CASE(no_focusable_candidates_returns_false) {
