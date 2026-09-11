@@ -2,10 +2,11 @@
 # Aurora CI
 #
 # 覆盖策略（宏 = 编译结果，矩阵按「每个 feature 分支至少被一个 job 编译一次」设计）：
-#   1. core        — 四编译器（linux/gcc、linux/clang、windows/msvc、windows/mingw、macos/clang），
-#                    Release（DEBUG/PROFILING 走 AUTO=OFF 分支）+ Debug（AUTO=ON 分支，
-#                    linux/gcc 与 windows/msvc 各一份）；
-#                    linux 额外构建 demos 聚合目标（EXCLUDE_FROM_ALL，默认构建不含）。
+#   1. core        — 各 OS × 编译器默认配置矩阵（linux/gcc、linux/clang、windows/msvc、
+#                    windows/mingw、windows/clang-cl、macos/clang），覆盖 clang 在 MSVC 运行时
+#                    模式（clang-cl）下的可编译性；Release（AUTO=OFF）+ Debug（AUTO=ON 分支，
+#                    linux/gcc、windows/msvc、windows/clang-cl 各一份）；linux 与 windows/clang-cl
+#                    额外构建 demos 聚合目标（EXCLUDE_FROM_ALL，默认构建不含）。
 #   2. backends    — 非 HEADLESS 后端各自至少编译一次：X11/Wayland/GLFW（linux）、
 #                    D3D11/GLFW（win32）、macOS/GLFW（darwin）；ctest 下无显示环境，
 #                    create_native_window 回退 HeadlessSurface，编译与注册逻辑仍被覆盖。
@@ -79,6 +80,14 @@ jobs:
             build-type: Release
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
             mingw: true
+          # clang-cl（x86_64-pc-windows-msvc，MSVC 运行时 + lld-link）：与 msvc/mingw 并列的
+          # Windows 第三编译器；覆盖 SIMD target 属性、__builtin_cpu_supports 回退 __cpuid、
+          # 静态链接门禁从「Clang+WIN32」收窄为 MINGW。Debug 下 AUTO 宏生效（类布局与 Release 不同）。
+          - name: windows-llvm
+            os: windows-latest
+            build-type: Debug
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DAURORA_ENABLE_LLD=ON
+            build-demos: true
           - name: macos-clang
             os: macos-latest
             build-type: Release
@@ -136,35 +145,9 @@ jobs:
           # cp1252 console codepage that cannot encode CJK; several tools/check/*.py scripts print
           # Chinese. PEP 540 UTF-8 mode forces UTF-8 stdio so they don't raise UnicodeEncodeError.
           PYTHONUTF8: 1
-        run: ctest --test-dir build --output-on-failure -C ${{ matrix.build-type }}
-
-  # ---------------------------------------------------------------------------
-  # 1b. Windows + LLVM/clang-cl（x86_64-pc-windows-msvc）编译组合
-  #     与 windows-msvc / windows-mingw 并列的 Windows 第三编译器；覆盖 clang 在
-  #     MSVC 运行时模式（clang-cl）下的可编译性：SIMD target 属性、__builtin_cpu_supports
-  #     回退 __cpuid、静态链接门禁从「Clang+WIN32」收窄为 MINGW。Debug 下 AUTO 宏生效
-  #     （类布局与 Release 不同），须独立构建并跑全量 ctest。本地对应 cmake-build-debug-llvm 目录。
-  # ---------------------------------------------------------------------------
-  windows-llvm:
-    name: windows-llvm (clang-cl)
-    runs-on: windows-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure
-        run: cmake -S . -B cmake-build-debug-llvm -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DAURORA_ENABLE_LLD=ON
-
-      - name: Build (library + tools + tests)
-        run: cmake --build cmake-build-debug-llvm --config Debug
-
-      - name: Build demos
-        run: cmake --build cmake-build-debug-llvm --config Debug --target demos
-
-      - name: Test
-        env:
-          PYTHONUTF8: 1
-        run: ctest --test-dir cmake-build-debug-llvm --output-on-failure -C Debug
+        # bash 显式指定（Windows 默认 pwsh）：统一用 nproc 取核数并行（本地实测 9 倍提速）。
+        shell: bash
+        run: ctest --test-dir build --output-on-failure -C ${{ matrix.build-type }} -j "$(nproc)"
 
   # ---------------------------------------------------------------------------
   # 2. 后端矩阵：AURORA_BACKEND_* 各非默认后端至少编译一次
@@ -204,7 +187,8 @@ jobs:
       - name: Test
         env:
           PYTHONUTF8: 1
-        run: ctest --test-dir build --output-on-failure -C Release
+        shell: bash
+        run: ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
 
   # ---------------------------------------------------------------------------
   # 3. feature 宏极性矩阵（ubuntu/gcc，Release）：
@@ -244,7 +228,7 @@ jobs:
         run: cmake --build build --config Release
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure -C Release
+        run: ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
 
   # ---------------------------------------------------------------------------
   # 4. AddressSanitizer + UndefinedBehaviorSanitizer（全量 ctest）
@@ -263,7 +247,7 @@ jobs:
         run: cmake --build build --config Release
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure -C Release
+        run: ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
 
   # ---------------------------------------------------------------------------
   # 5. 行覆盖率：coverage 聚合目标自带 ctest + gcov 终端摘要
