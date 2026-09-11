@@ -149,9 +149,11 @@ auto Clipboard::set_text(const std::string &text) -> void {
     if (text.empty()) {
         return;
     }
-    // xclip 需 -selection clipboard（默认 primary 为中键粘贴）；回退 xsel --clipboard
-    if (!pipe_to_command("xclip -selection clipboard 2>/dev/null", text)) {
-        if (!pipe_to_command("xsel --clipboard --input", text)) {
+    // 优先 xsel：xsel 写入后 fork 守护进程持有 X selection 并立即返回，不会阻塞调用方；
+    // 回退 xclip。注意 xclip 复制后前台常驻（等待 selection 被读取才退出），在 headless
+    // 无剪贴板管理器的环境（CI）下 pclose 会永久等待 → 测试挂死，故不作为首选。
+    if (!pipe_to_command("xsel --clipboard --input 2>/dev/null", text)) {
+        if (!pipe_to_command("xclip -selection clipboard 2>/dev/null", text)) {
             AURORA_LOG_WARN("clipboard", "set_text: xclip/xsel not available");
         }
     }
