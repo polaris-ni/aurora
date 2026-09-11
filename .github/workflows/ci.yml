@@ -139,6 +139,34 @@ jobs:
         run: ctest --test-dir build --output-on-failure -C ${{ matrix.build-type }}
 
   # ---------------------------------------------------------------------------
+  # 1b. Windows + LLVM/clang-cl（x86_64-pc-windows-msvc）编译组合
+  #     与 windows-msvc / windows-mingw 并列的 Windows 第三编译器；覆盖 clang 在
+  #     MSVC 运行时模式（clang-cl）下的可编译性：SIMD target 属性、__builtin_cpu_supports
+  #     回退 __cpuid、静态链接门禁从「Clang+WIN32」收窄为 MINGW。Debug 下 AUTO 宏生效
+  #     （类布局与 Release 不同），须独立构建并跑全量 ctest。本地对应 cmake-build-debug-llvm 目录。
+  # ---------------------------------------------------------------------------
+  windows-llvm:
+    name: windows-llvm (clang-cl)
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B cmake-build-debug-llvm -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DAURORA_ENABLE_LLD=ON
+
+      - name: Build (library + tools + tests)
+        run: cmake --build cmake-build-debug-llvm --config Debug
+
+      - name: Build demos
+        run: cmake --build cmake-build-debug-llvm --config Debug --target demos
+
+      - name: Test
+        env:
+          PYTHONUTF8: 1
+        run: ctest --test-dir cmake-build-debug-llvm --output-on-failure -C Debug
+
+  # ---------------------------------------------------------------------------
   # 2. 后端矩阵：AURORA_BACKEND_* 各非默认后端至少编译一次
   # ---------------------------------------------------------------------------
   backends:
