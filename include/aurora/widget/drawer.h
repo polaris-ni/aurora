@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/event/focus.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
 #include "aurora/widget/descriptor.h"
@@ -53,6 +54,14 @@ class Drawer : public Widget {
             return;  // 永久模式无开合
         }
         if (v != open_.get()) {
+            // 模态开合接线焦点作用域（I2）：打开压栈（Tab 关在抽屉面板内、焦点移入）、关闭弹栈恢复。
+            if (current_focus_manager() != nullptr) {
+                if (v) {
+                    current_focus_manager()->push_scope(this);
+                } else {
+                    current_focus_manager()->pop_scope();
+                }
+            }
             open_.set(v);
             mark_needs_layout();
             mark_needs_paint();

@@ -62,11 +62,45 @@ auto FocusManager::clear() -> void { set_focus(nullptr); }
 
 auto FocusManager::set_on_change(std::function<void(Widget *, Widget *)> cb) -> void { on_change_ = std::move(cb); }
 
+auto FocusManager::push_scope(Widget *subtree) -> void {
+    ScopeEntry entry;
+    entry.subtree = subtree;
+    entry.saved_focus = live_focused();
+    entry.saved_guard = focused_guard_;
+    entry.saved_guarded = focused_guarded_;
+    scopes_.push_back(entry);
+
+    // 焦点移入子树内首个可聚焦控件（模态弹层打开的惯例；无候选则保持原焦点不动）。
+    if (subtree != nullptr) {
+        const std::vector<Widget *> cands = collect_focusable(*subtree);
+        if (!cands.empty()) {
+            set_focus(cands.front(), FocusDirection::Forward);
+        }
+    }
+}
+
+auto FocusManager::pop_scope() -> void {
+    if (scopes_.empty()) {
+        return;
+    }
+    const ScopeEntry entry = scopes_.back();
+    scopes_.pop_back();
+    // 恢复压入前焦点：快照控件可能已被回收（页面切换等），经守卫判活后安全恢复/清除。
+    Widget *restore = entry.saved_guarded ? entry.saved_guard.lock().get() : entry.saved_focus;
+    set_focus(restore);
+}
+
 auto FocusManager::move_focus(FocusDirection dir) -> bool {
     if (root_ == nullptr) {
         return false;
     }
-    std::vector<Widget *> candidates = collect_focusable(*root_);
+    // 焦点作用域（I2）：栈顶非空子树把 Tab 序候选限定在其内部（模态弹层焦点不外泄，
+    // scope 内回卷由下方取模循环自然完成）；空栈遍历整棵根树。
+    Widget *scope_root = scopes_.empty() ? root_ : scopes_.back().subtree;
+    if (scope_root == nullptr) {
+        scope_root = root_;
+    }
+    std::vector<Widget *> candidates = collect_focusable(*scope_root);
     if (candidates.empty()) {
         return false;
     }

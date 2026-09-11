@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -61,6 +62,20 @@ class FocusManager {
      */
     auto move_focus(FocusDirection dir = FocusDirection::Forward) -> bool;
 
+    /// @brief 压入焦点作用域（I2 焦点陷阱）：此后 `move_focus` 的候选集限定在 `subtree` 子树内，
+    ///        Tab 循环不逃出（scope 内自然回卷）；同时自动把焦点移入子树内首个可聚焦控件
+    ///        （无候选则保持原焦点），并记录打开前焦点供 `pop_scope` 恢复。
+    ///
+    /// 供模态弹层（Dialog/Popup/Drawer）打开时调用、关闭时配对 `pop_scope`；可嵌套
+    /// （多层弹层各自 push/pop，恢复顺序与压栈相反）。`subtree` 为空指针时仅记录焦点快照。
+    auto push_scope(Widget *subtree) -> void;
+
+    /// @brief 弹出栈顶焦点作用域：恢复该作用域压入前的焦点（已回收则清除焦点）；空栈为 no-op。
+    auto pop_scope() -> void;
+
+    /// @brief 当前焦点作用域深度（0 = 无作用域，Tab 遍历整棵根树）。
+    [[nodiscard]] auto scope_depth() const -> std::size_t { return scopes_.size(); }
+
   private:
     /// @brief 收集根树下所有可聚焦且可见的 widget，按 (tabIndex, 遍历序) 排序。
     static auto collect_focusable(const Widget &root) -> std::vector<Widget *>;
@@ -79,6 +94,15 @@ class FocusManager {
     std::weak_ptr<Widget> focused_guard_;  ///< 生命周期守卫；仅当焦点控件由 shared_ptr 持有时有效
     bool focused_guarded_ = false;  ///< guard 是否关联控制块（区分「空弱引用」与「已失效弱引用」）
     std::function<void(Widget *, Widget *)> on_change_;
+
+    /// @brief 焦点作用域栈项：限定子树 + 压入前的焦点快照（同 `focused_` 的守卫语义）。
+    struct ScopeEntry {
+        Widget *subtree = nullptr;  ///< 候选限定子树（nullptr = 仅快照，不限定）
+        Widget *saved_focus = nullptr;  ///< 压入前的焦点（裸指针视图）
+        std::weak_ptr<Widget> saved_guard;  ///< 同 focused_guard_：shared_ptr 持有时判定存活
+        bool saved_guarded = false;
+    };
+    std::vector<ScopeEntry> scopes_;  ///< 作用域栈；栈顶为当前生效作用域
 };
 
 /// @brief 派发期间当前焦点管理器（单线程；由 `EventDispatcher` 在派发时设置，退出时复原）。

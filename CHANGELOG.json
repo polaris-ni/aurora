@@ -148,7 +148,9 @@
         "core/enums.h：新增 `CursorShape`（Arrow / IBeam / PointingHand / ResizeNS / ResizeEW / ResizeNWSE / ResizeNESW / Move / Crosshair / NotAllowed / Wait）并登记进 known_enums 与 aurora_api.json。",
         "modifier/：新增 `CursorNode`（Input 切片）与 `Modifier::cursor(CursorShape)` 工厂 / `cursor_shape()` 读取（链内最后一个声明生效）；`ModifierNode` 基类新增 `cursor_shape()` 虚查询（仅 CursorNode 覆盖）。",
         "window/surface.h：Surface 新增 `virtual set_cursor(CursorShape)`（默认空实现，仿 set_title 模式）；事件派发器在悬停链变化时解析目标光标（修饰链声明 > `Widget::cursor_shape()` 虚钩子 > 含 Clickable → PointingHand，最深命中者生效，形状变化才下发），`Application` 构造时接线到组合 Surface（无头构造安全 no-op）。",
-        "widget/：控件级默认光标——TextInput / RichTextEdit 悬停 IBeam、Button 悬停 PointingHand（经 `Widget::cursor_shape()` 虚钩子提供，修饰链显式声明可覆盖）。"
+        "widget/：控件级默认光标——TextInput / RichTextEdit 悬停 IBeam、Button 悬停 PointingHand（经 `Widget::cursor_shape()` 虚钩子提供，修饰链显式声明可覆盖）。",
+        "event/focus.h：FocusManager 新增焦点作用域栈（I2）——`push_scope(subtree)` / `pop_scope()` / `scope_depth()`：压栈把 `move_focus`（Tab 序）候选限定在子树内并自动把焦点移入首个可聚焦控件，弹栈恢复压入前焦点（快照控件已回收则安全清除）；可嵌套，恢复顺序与压栈相反。",
+        "widget/dialog.h / popup.h / drawer.h：模态弹层接线焦点陷阱（I2）——Dialog::show/close、Popup::open_at/close、Drawer::set_open（permanent 模式排除）在开合时配对压/弹作用域；派发回调上下文外调用时降级为仅置位开合状态。"
       ],
       "changed": [
         "core/accessibility.h：build_accessibility_tree 现在填充 bounds——已绘制的节点取绘制遍历写入的绝对盒（含 Modifier 的 padding / border 位移），未绘制的节点按子节点 Node 局部原点逐级累加；子节点优先走 child_nodes()（其 Node 带父写入的局部盒），仅经 for_each_child 暴露子树的容器（LazyList / GridView / NavigatorHost / TransitionLayer 等）兜底展开、几何继承父盒；show == false 的子树与绘制 / 命中同口径不再入树。",

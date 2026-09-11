@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "aurora/core/types.h"
+#include "aurora/event/focus.h"
 #include "aurora/render/painter.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
@@ -72,8 +73,11 @@ class Popup : public SingleChild {
 
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
 
-    /// @brief 在指定全局坐标打开弹出层（链式）。
+    /// @brief 在指定全局坐标打开弹出层（链式）：压入焦点作用域（I2），Tab 焦点关在本层内。
     auto open_at(Point anchor) -> Popup & {
+        if (!open_ && current_focus_manager() != nullptr) {
+            current_focus_manager()->push_scope(this);
+        }
         anchor_ = anchor;
         open_ = true;
         mark_needs_layout();
@@ -81,9 +85,12 @@ class Popup : public SingleChild {
         return *this;
     }
 
-    /// @brief 关闭弹出层。
+    /// @brief 关闭弹出层：弹出焦点作用域并恢复打开前焦点（I2）。
     auto close() -> void {
         if (open_) {
+            if (current_focus_manager() != nullptr) {
+                current_focus_manager()->pop_scope();
+            }
             open_ = false;
             mark_needs_paint();
             if (on_close_) {

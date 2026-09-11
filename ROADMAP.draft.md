@@ -144,6 +144,7 @@ MCP 实时改运行中 UI、NL→UI、UI→代码往返保真、语义化视觉�
 - 触及：`event/focus.h/.cpp`、`widget/dialog.h`、`widget/popup.h`、`widget/drawer.h`。
 - 测试：`utest_focus` 新增——打开 Dialog 后 Tab 循环不逃出、关闭后焦点恢复。
 - 完成判据：模态弹层焦点不外泄；`ctest -R focus` 全绿。
+- **状态：已落地（2026-09-12）**。`FocusManager` 作用域栈（`push_scope`/`pop_scope`/`scope_depth`，压栈自动移焦入内 + 记录快照、弹栈按守卫判活恢复、可嵌套逆序恢复；`move_focus` 候选限定栈顶子树，scope 内回卷）；Dialog（show/close）、Popup（open_at/close）、Drawer（set_open，permanent 排除）接线焦点陷阱。测试：`utest_focus` 7→11 例（陷阱/子树限定/嵌套恢复/Dialog 验收）全过，全量 251/251 绿。
 > **前置修复（alpha.3，`8686bfb`）**：`Widget::focus_bounds_` 此前无写入点，`FocusManager::move_focus` 方向键导航失效（Tab 序不受影响）；现由 `Widget::paint` 入口写入（与 `paint_bounds_` 同源同值），方向键导航恢复可用。本 Phase 的 scope 限制可在此之上叠加；看护见 `itest_keyboard_nav::directional_nav_uses_geometry_written_by_paint`。
 
 **Phase I3：多窗口（已确认需支持）**

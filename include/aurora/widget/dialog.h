@@ -3,6 +3,7 @@
 #include <functional>
 #include <string>
 
+#include "aurora/event/focus.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/descriptor.h"
@@ -47,11 +48,20 @@ class Dialog : public Container {
 
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
 
-    /// @brief 显示对话框。
-    auto show() -> void { open_ = true; }
+    /// @brief 显示对话框：压入焦点作用域（I2）——Tab 焦点关在本层内、焦点自动移入首个可聚焦控件。
+    /// 派发回调（点击处理器等）内调用时可取到当前 FocusManager；无焦点管理器时降级为仅置位。
+    auto show() -> void {
+        if (!open_ && current_focus_manager() != nullptr) {
+            current_focus_manager()->push_scope(this);
+        }
+        open_ = true;
+    }
 
-    /// @brief 关闭对话框。
+    /// @brief 关闭对话框：弹出焦点作用域并恢复打开前焦点（I2）。
     auto close() -> void {
+        if (open_ && current_focus_manager() != nullptr) {
+            current_focus_manager()->pop_scope();
+        }
         open_ = false;
         if (on_close_) {
             on_close_();
