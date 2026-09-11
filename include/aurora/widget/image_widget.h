@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+#include <functional>
 #include <optional>
 #include <string>
 #include <utility>
@@ -7,11 +9,37 @@
 #include "aurora/core/image.h"
 #include "aurora/core/result.h"
 #include "aurora/core/types.h"
+#include "aurora/image/image_codec.h"
+#include "aurora/render/image_cache.h"
 #include "aurora/render/painter.h"
+#include "aurora/state/async.h"
 #include "aurora/widget/props_io.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {
+
+/// @brief 图片加载状态（D0 异步 URL 源的三态 + 初始占位）。
+enum class ImageLoadState : std::uint8_t {
+    Placeholder,  ///< 占位（初始 / 未注入 fetcher 的降级态）
+    Loading,  ///< 加载中（fetcher 已启动、尚未回填）
+    Loaded,  ///< 已加载（bitmap 就绪）
+    Failed,  ///< 加载/解码失败（降级占位框）
+};
+
+/// @brief 图片获取器（D0，需求 #1 fetcher 方案）：URL → 字节流的异步任务工厂。
+///
+/// 库核心**不内置 HTTP**：App 提供实现（如 WinHTTP/curl/浏览器 fetch 包装），返回
+/// `Task<std::vector<std::uint8_t>>`（内部经 `async` 跑线程池，`then` 回主线程投递器）。
+using ImageFetcher = std::function<Task<std::vector<std::uint8_t>>(std::string_view url)>;
+
+/// @brief 进程级默认 fetcher（读写口；`Environment` 注入 `ImageFetcher` 优先于此值）。
+inline auto default_image_fetcher() -> ImageFetcher & {
+    static ImageFetcher f;  // NOLINT(misc-use-anonymous-namespace) 单例读写口
+    return f;
+}
+
+/// @brief 设置进程级默认 fetcher（App 启动时注入一次；传空 = 撤销，URL 源降级占位）。
+inline auto set_default_image_fetcher(ImageFetcher f) -> void { default_image_fetcher() = std::move(f); }
 
 /// @brief ImageView 属性（聚合）：位图图片。
 struct ImageViewProps {
@@ -56,6 +84,35 @@ class ImageView : public Widget, public ImageViewProps {
         }
         return ImageView{Image{}};
     }
+
+    /// @brief 异步加载 URL 源（D0）：占位 → fetcher 取字节 → 解码 → `ImageCache` 缓存 →
+    ///        主线程回填 bitmap。**未注入 fetcher 时优雅降级**：停留在 `Placeholder`。
+    ///
+    /// fetcher 解析优先级：显式实参 > 进程级默认（`set_default_image_fetcher`）> `Environment`
+    /// 注入（`on_mount` 时经 `ctx.environment<ImageFetcher>()` 补尝试）。
+    /// 线程契约：回填回调线程由 `Task` 主线程投递器决定——`Application::run` 已接线
+    /// （经 `drain_posted` 主线程执行）；无投递器（headless）时在 worker 内联执行。
+    /// @param url    图片 URL（同时作为 `ImageCache` 缓存键）
+    /// @param fetcher 显式 fetcher（可选；测试注入 mock 的入口）
+    /// @return 持有加载中实例的 shared_ptr（回填经弱引用守卫，实例销毁后安全丢弃）
+    [[nodiscard]] static auto from_url(std::string url, ImageFetcher fetcher = {})
+        -> std::shared_ptr<ImageView> {
+        auto w = std::make_shared<ImageView>();
+        w->url_ = std::move(url);
+        if (!fetcher) {
+            fetcher = default_image_fetcher();
+        }
+        if (fetcher) {
+            w->begin_load(std::move(fetcher));
+        }
+        return w;
+    }
+
+    /// @brief 当前加载状态（三态 + 占位；测试与上层 UI 判断用）。
+    [[nodiscard]] auto load_state() const -> ImageLoadState { return load_state_; }
+
+    /// @brief 当前 URL 源（区别于 `source` 文件路径；空 = 非异步源）。
+    [[nodiscard]] auto url() const -> const std::string & { return url_; }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "Image"; }
 
@@ -148,6 +205,17 @@ class ImageView : public Widget, public ImageViewProps {
         }
     }
 
+    auto on_mount(const BuildContext &ctx) -> void override {
+        Widget::on_mount(ctx);
+        // Environment 注入的 fetcher（D0）：构造时无显式/进程默认 fetcher 且尚未开始加载，
+        // 挂载后经环境链补取注入值再启动；仍未注入则保持 Placeholder 降级。
+        if (!url_.empty() && !loading_ && load_state_ == ImageLoadState::Placeholder) {
+            if (const auto *injected = ctx.environment<ImageFetcher>()) {
+                begin_load(*injected);
+            }
+        }
+    }
+
   private:
     auto resolve_width(const Constraints &c, float natural) const -> float {
         if (width_.kind == LengthKind::Fixed) {
@@ -161,6 +229,57 @@ class ImageView : public Widget, public ImageViewProps {
         }
         return std::max(c.min.height, std::min(natural, c.max.height));
     }
+
+    /// @brief 启动异步加载：缓存命中直读；否则 fetcher（worker）→ 解码 → 回填（主线程）。
+    auto begin_load(ImageFetcher fetcher) -> void {
+        if (url_.empty() || loading_) {
+            return;
+        }
+        ImageCache &cache = ImageCache::instance();
+        if (cache.contains(url_)) {
+            auto cached = cache.get(url_);
+            if (cached) {
+                bitmap = std::move(cached.value());
+                load_state_ = ImageLoadState::Loaded;
+                return;
+            }
+        }
+        loading_ = true;
+        load_state_ = ImageLoadState::Loading;
+        // 弱引用守卫：实例可能先于任务完成被销毁；回调线程见 Task 主线程投递器契约。
+        // Widget 基类持有 enable_shared_from_this<Widget>，锁回后安全下转回 ImageView。
+        std::weak_ptr<Widget> guard = weak_from_this();
+        fetcher(url_).then([guard, url = url_](const Result<std::vector<std::uint8_t>> &r) -> void {
+            auto base = guard.lock();
+            if (base == nullptr) {
+                return;  // 控件已销毁：丢弃结果
+            }
+            auto self = std::static_pointer_cast<ImageView>(base);  // NOLINT 笃定自身类型（唯一守卫来源）
+            self->loading_ = false;
+            if (!r.ok()) {
+                self->load_state_ = ImageLoadState::Failed;
+                self->mark_needs_paint();
+                return;
+            }
+            auto img = image::ImageCodecRegistry::instance().decode_memory(r.value());
+            if (!img.ok()) {
+                self->load_state_ = ImageLoadState::Failed;
+                self->mark_needs_paint();
+                return;
+            }
+            ImageCache::instance().put(url, std::move(img.value()));
+            auto cached = ImageCache::instance().get(url);
+            if (cached) {
+                self->bitmap = std::move(cached.value());
+            }
+            self->load_state_ = ImageLoadState::Loaded;
+            self->mark_needs_paint();
+        });
+    }
+
+    std::string url_;  ///< URL 源（异步加载；区别于 source 文件路径）
+    ImageLoadState load_state_ = ImageLoadState::Placeholder;
+    bool loading_ = false;  ///< 防重入：同一实例同一时刻至多一个在途任务
 };
 
 }  // namespace aurora

@@ -239,6 +239,7 @@ MCP 实时改运行中 UI、NL→UI、UI→代码往返保真、语义化视觉�
 - 触及：`widget/image_widget.h`、`render/image_cache.h`、`state/async.h`、`environment/environment.h`（fetcher 注入）。
 - 测试：`utest_image_widget`（注入 mock fetcher 返回内置字节，断言占位→加载→失败三态）。
 - 完成判据：注入 mock fetcher 后 URL 图片异步加载三态正确；未注入 fetcher 优雅降级。
+- **状态：已落地（2026-09-12）**。`ImageFetcher`（URL → Task<bytes>，核心不内置 HTTP）+ 三级解析（显式实参 > 进程级 `set_default_image_fetcher` > `Environment` 注入，无则停留占位降级）；`ImageView::from_url` 三态：占位 → Loading → fetcher（worker）→ `decode_memory` 解码 → `ImageCache`（URL 为键）→ `Task` 主线程投递器回填（`Application::run` 已接线）；缓存命中构造即 Loaded。测试：`utest_image_widget` 8→12 例（成功+缓存命中零 fetch / 取失败 / 解码失败 / 无 fetcher 降级）全过，全量 252/252 绿。
 
 **Phase D0b：OverflowStrategy::Scroll + 色彩管理**
 - 任务：`OverflowStrategy::Scroll` 从「等同 Hidden」补真实滚动裁剪；`core/color.h` 加色彩空间标注（sRGB/Display P3），输出按目标 profile 转换（Painter 合成在线性/统一空间）。

@@ -152,7 +152,10 @@
         "event/focus.h：FocusManager 新增焦点作用域栈（I2）——`push_scope(subtree)` / `pop_scope()` / `scope_depth()`：压栈把 `move_focus`（Tab 序）候选限定在子树内并自动把焦点移入首个可聚焦控件，弹栈恢复压入前焦点（快照控件已回收则安全清除）；可嵌套，恢复顺序与压栈相反。",
         "widget/dialog.h / popup.h / drawer.h：模态弹层接线焦点陷阱（I2）——Dialog::show/close、Popup::open_at/close、Drawer::set_open（permanent 模式排除）在开合时配对压/弹作用域；派发回调上下文外调用时降级为仅置位开合状态。",
         "widget/serialization：Skeleton 接入序列化工厂（F2）——属性完整可序列化，可从静态 JSON 完整重建；GridView 接入为已知类型（持运行时 ItemBuilder，同 LazyList 先例重建为空数据占位，条目由宿主回填）；两者自描述元数据随 aurora_api.json 收录。",
-        "widget/breakpoint_builder.h：新增 `Breakpoint{Compact, Medium, Expanded}` 与 `BreakpointBuilder`（F2）——按 `MediaQuery` 注入宽度（无注入退化为父约束最大宽）解析档位并构建对应子树，阈值默认 600/840 可调；档位变化或 builder 替换才重建子树；关闭布局缓存（档位输入独立于子树约束）。"
+        "widget/breakpoint_builder.h：新增 `Breakpoint{Compact, Medium, Expanded}` 与 `BreakpointBuilder`（F2）——按 `MediaQuery` 注入宽度（无注入退化为父约束最大宽）解析档位并构建对应子树，阈值默认 600/840 可调；档位变化或 builder 替换才重建子树；关闭布局缓存（档位输入独立于子树约束）。",
+        "widget/image_widget.h：ImageView 新增异步 URL 源（D0，需求 #1 fetcher 方案）——`ImageFetcher` 类型（URL → `Task<std::vector<std::uint8_t>>`，库核心不内置 HTTP）、`ImageView::from_url(url, fetcher = {})` 三态加载（Placeholder → Loading → Loaded/Failed）：fetcher 取字节 → `ImageCodecRegistry::decode_memory` 解码 → `ImageCache` 按 URL 缓存 → 经 `Task` 主线程投递器回填 bitmap（`Application::run` 已接线，无投递器时 worker 内联）；缓存命中构造即 Loaded 不再触发 fetcher；未注入 fetcher 优雅降级停留占位（显式实参 > 进程级 `set_default_image_fetcher` > `Environment` 注入三级解析）；`load_state()` / `url()` 查询口。"
+      ],
+      "changed": [
       ],
       "changed": [
         "core/accessibility.h：build_accessibility_tree 现在填充 bounds——已绘制的节点取绘制遍历写入的绝对盒（含 Modifier 的 padding / border 位移），未绘制的节点按子节点 Node 局部原点逐级累加；子节点优先走 child_nodes()（其 Node 带父写入的局部盒），仅经 for_each_child 暴露子树的容器（LazyList / GridView / NavigatorHost / TransitionLayer 等）兜底展开、几何继承父盒；show == false 的子树与绘制 / 命中同口径不再入树。",

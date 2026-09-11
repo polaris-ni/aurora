@@ -2,7 +2,8 @@
 /// 目标单元: include/aurora/widget/image_widget.h
 /// 测试说明: 覆盖 ImageView——默认不变量与自描述、无图占位自然尺寸、位图自然尺寸与约束钳制、
 /// Fixed 宽高意图严格等值覆盖（显式盒语义，不受 max 约束钳制）、无图占位描边框/有图栅格化（内存位图，软件 Painter
-/// 像素断言）、 source 序列化往返与非字符串防御、from_file 失败回退占位
+/// 像素断言）、 source 序列化往返与非字符串防御、from_file 失败回退占位、
+/// D0 异步 URL 源三态（占位→加载→成功/失败）与缓存命中、未注入 fetcher 优雅降级
 
 #include <cstddef>
 #include <cstdint>
@@ -10,7 +11,15 @@
 #include <utility>
 #include <vector>
 
+#include <chrono>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <thread>
+
+#include "aurora/image/image_codec.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/state/async.h"
 #include "aurora/widget/image_widget.h"
 #include "framework/aurora_test.h"
 
@@ -188,6 +197,125 @@ AURORA_TEST_CASE(from_file_missing_path_falls_back_to_empty) {
     LayoutEngine::layout(iv, bounded(300.0F, 300.0F));
     AURORA_TEST_CHECK_NEAR(iv.size().width, 100.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(iv.size().height, 100.0F, 1e-4F);
+}
+
+/// @brief D0 测试基础设施：安装「排队式主线程投递器」，由用例线程手动排水（与
+/// Application::run 的 drain_posted 同构），使控件回填在测试线程确定性执行。
+class PosterGuard {
+  public:
+    PosterGuard() {
+        Task<bool>::set_main_poster([this](std::function<void()> fn) -> void {
+            std::scoped_lock lock(mutex_);
+            queue_.push_back(std::move(fn));
+        });
+    }
+    ~PosterGuard() { Task<bool>::set_main_poster(nullptr); }
+    auto drain() -> void {
+        for (;;) {
+            std::function<void()> fn;
+            {
+                std::scoped_lock lock(mutex_);
+                if (queue_.empty()) {
+                    return;
+                }
+                fn = std::move(queue_.front());
+                queue_.erase(queue_.begin());
+            }
+            fn();
+        }
+    }
+
+  private:
+    std::mutex mutex_;
+    std::vector<std::function<void()>> queue_;
+};
+
+/// @brief 排水直至控件进入期望状态（worker 写 result → 投递入队 → 排水执行 存在微秒级窗口，
+///        轮询消除竞态；上限 ~5s 防挂死）。
+auto drain_until(PosterGuard &poster, const ImageView &w, ImageLoadState expect) -> bool {
+    for (int i = 0; i < 5000; ++i) {
+        poster.drain();
+        if (w.load_state() == expect) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    poster.drain();
+    return w.load_state() == expect;
+}
+
+AURORA_TEST_CASE(from_url_loads_bytes_and_caches) {
+    AURORA_TEST_REQUIRE_THREADS();
+    PosterGuard poster;
+    ImageCache::instance().remove("mock://ok");
+
+    // mock fetcher：worker 内返回一张经编码器产出的合法 PNG 字节（成功态）。
+    auto png_bytes = image::ImageCodecRegistry::instance().encode(make_image(4, 3), image::EncodeOptions{});
+    AURORA_TEST_REQUIRE_TRUE(png_bytes.ok());
+    const auto payload = png_bytes.value();
+
+    auto iv = ImageView::from_url("mock://ok", [&](std::string_view) -> Task<std::vector<std::uint8_t>> {
+        return async([&payload]() -> std::vector<std::uint8_t> { return payload; });
+    });
+    // 占位 → 加载中（fetcher 已启动；回填须待排水）
+    AURORA_TEST_CHECK_EQ(static_cast<int>(iv->load_state()), static_cast<int>(ImageLoadState::Loading));
+
+    // 主线程排水：字节 → 解码 → 缓存 → 回填 bitmap（drain_until 消除投递窗口竞态）
+    AURORA_TEST_REQUIRE_TRUE(drain_until(poster, *iv, ImageLoadState::Loaded));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(iv->load_state()), static_cast<int>(ImageLoadState::Loaded));
+    AURORA_TEST_CHECK_EQ(iv->bitmap.width, 4);
+    AURORA_TEST_CHECK_EQ(iv->bitmap.height, 3);
+
+    // 缓存命中：同一 URL 的第二个实例不经 fetcher、构造即 Loaded（同步）。
+    int fetch_calls = 0;
+    auto cached = ImageView::from_url("mock://ok", [&](std::string_view) -> Task<std::vector<std::uint8_t>> {
+        ++fetch_calls;
+        return async([]() -> std::vector<std::uint8_t> { return {}; });
+    });
+    AURORA_TEST_CHECK_EQ(static_cast<int>(cached->load_state()), static_cast<int>(ImageLoadState::Loaded));
+    AURORA_TEST_CHECK_EQ(cached->bitmap.width, 4);
+    AURORA_TEST_CHECK_EQ(fetch_calls, 0);
+    poster.drain();
+    AURORA_TEST_CHECK_EQ(fetch_calls, 0);  // 缓存命中：fetcher 始终未被调用
+}
+
+AURORA_TEST_CASE(from_url_fetch_error_degrades_to_failed) {
+    AURORA_TEST_REQUIRE_THREADS();
+    PosterGuard poster;
+
+    auto iv = ImageView::from_url("mock://err", [&](std::string_view) -> Task<std::vector<std::uint8_t>> {
+        return async([]() -> Result<std::vector<std::uint8_t>> {
+            return make_error(ErrorCode::IOFileNotFound, "mock fetch unavailable");
+        });
+    });
+    AURORA_TEST_CHECK_EQ(static_cast<int>(iv->load_state()), static_cast<int>(ImageLoadState::Loading));
+    AURORA_TEST_REQUIRE_TRUE(drain_until(poster, *iv, ImageLoadState::Failed));
+    // 失败态：降级占位（bitmap 仍空 → 绘制走占位框路径）
+    AURORA_TEST_CHECK_EQ(static_cast<int>(iv->load_state()), static_cast<int>(ImageLoadState::Failed));
+    AURORA_TEST_CHECK_TRUE(iv->bitmap.pixels.empty());
+}
+
+AURORA_TEST_CASE(from_url_undecodable_bytes_degrade_to_failed) {
+    AURORA_TEST_REQUIRE_THREADS();
+    PosterGuard poster;
+
+    auto iv = ImageView::from_url("mock://garbage", [&](std::string_view) -> Task<std::vector<std::uint8_t>> {
+        return async([]() -> std::vector<std::uint8_t> { return {1, 2, 3, 4}; });
+    });
+    AURORA_TEST_REQUIRE_TRUE(drain_until(poster, *iv, ImageLoadState::Failed));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(iv->load_state()), static_cast<int>(ImageLoadState::Failed));
+    AURORA_TEST_CHECK_TRUE(iv->bitmap.pixels.empty());
+}
+
+AURORA_TEST_CASE(from_url_without_fetcher_stays_placeholder) {
+    // 未注入 fetcher（显式空 + 进程默认空 + 无 Environment 注入）：优雅降级，停留占位。
+    auto saved = default_image_fetcher();
+    set_default_image_fetcher(nullptr);
+
+    auto iv = ImageView::from_url("mock://none");
+    AURORA_TEST_CHECK_EQ(static_cast<int>(iv->load_state()), static_cast<int>(ImageLoadState::Placeholder));
+
+    set_default_image_fetcher(std::move(saved));  // 还原进程级默认
 }
 
 }  // namespace aurora::test_cases::utest_image_widget
