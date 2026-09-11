@@ -52,5 +52,19 @@
       "configurePreset": "wasm",
       "targets": ["aurora"]
     }
+  ],
+  "testPresets": [
+    {
+      "name": "ninja-test",
+      "displayName": "Test (build/, parallel)",
+      "description": "Run the full ctest suite in build/ with per-test process isolation in parallel (equivalent to ctest --test-dir build --output-on-failure -j N).",
+      "configurePreset": "ninja",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 16
+      }
+    }
   ]
 }

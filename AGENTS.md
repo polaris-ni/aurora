@@ -70,6 +70,10 @@
   （每条 = `aurora_test_runner --run=<stem>`，文件级进程隔离）。`cmake/AuroraTests.cmake` 已为依赖相对路径的测试
   （含 `tests/golden`）把 `WORKING_DIRECTORY` 设为仓库根，故 `ctest` 下直接可跑；仅手工直跑时须从仓库根执行
   （`./build/aurora_test_runner --run=utest_offscreen`，或设 `AURORA_GOLDEN_DIR` 覆盖）。
+  推荐用并行测试 preset 跑全量（进程隔离模型下并行安全，远快于默认串行）：
+  ```powershell
+  ctest --preset ninja-test   # 等价 ctest --test-dir build --output-on-failure -j 16
+  ```
 - **测试/示例组织约定**（详见 `CODING_STANDARDS.md` §3 与 §6.2 默认参数章节）：每个公共源文件对应一个 `demo_*.cpp`（`examples/demos/`
   ）与一个 `utest_*.cpp`（`tests/unit/`），二者用文件夹区分；测试文件以 `utest`（单元）/ `itest`（集成）为前缀（非 `_test` 后缀），
   每个测试 TU 包裹在 `namespace aurora::test_cases::utest_<名>` 内。框架位于 `tests/framework/`，入口头

@@ -1,8 +1,8 @@
 // 测试框架入口：main 由框架唯一提供，测试文件禁止自定义 main()。
 #include "aurora/core/platform.h"  // NOLINT
 
-// MSVC CRT 家族（MSVC 与 clang-cl 共用同一套 CRT，故同一分支）。
-#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
+// Windows CRT 家族（MSVC/clang-cl 与 MinGW 同走 ucrtbase，abort 行为控制一致）。
+#if defined(AURORA_PLATFORM_WINDOWS)
 #include <crtdbg.h>  // _set_abort_behavior / _CrtSetReportMode（关闭 Debug CRT abort 弹窗）
 #endif
 
@@ -309,11 +309,14 @@ auto run_selected(const std::vector<const TestCase*>& selected, const CliOptions
 }  // namespace
 
 auto main(int argc, char** argv) -> int {
-#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
-    // MSVC Debug CRT 的 abort() 默认弹「abort() has been called」模态对话框
-    // （_CALL_REPORTFAULT + _CRT_ASSERT 窗口模式）。死亡测试子进程以 abort() 为致死路径，
-    // 弹窗会挂住无人值守的 ctest / CLion 运行；统一降级为调试器输出（父进程与 death-child
-    // 子进程经此处重跑 main 均生效）。abort 的退出码（3）与「已致死」判据不受影响。
+#if defined(AURORA_PLATFORM_WINDOWS)
+    // Windows CRT（MSVC/clang-cl 与 MinGW 的 abort 同在 ucrtbase 实现）：abort() 默认带
+    // _CALL_REPORTFAULT，以 fail-fast（0xC0000409，WER 事件类型 BEX64）终止——Debug CRT
+    // 会弹「abort() has been called」模态对话框挂住无人值守运行；Release 下则触发 WER
+    // 崩溃报告管线（实测死亡测试每个站点被拖慢约 5s，伴随 WerFault 与杀软行为分析）。
+    // 死亡测试子进程以 abort() 为致死路径，统一降级为调试器输出并关闭 fail-fast 上报：
+    // 弹窗与 WER 均不再介入，abort 的退出码（3）与「已致死」判据不受影响。父进程与
+    // death-child 子进程经此处重跑 main 均生效。
     _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG);
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
     _set_abort_behavior(0, _CALL_REPORTFAULT);

@@ -52,7 +52,6 @@
         "animation/animator.h：AnimationController 状态语义收紧——stop() 按最近端点报状态（value ≥ 0.5 → Completed，否则 Dismissed，进度冻结在当前位置）；带初值构造时 value ≥ 1.0 报 Completed（原先一律 Dismissed）；forward(from) 的 from ≥ 0 时夹取到 [0,1]（原先可越界）。",
         "event/gesture.h：RotationRecognizer::angle_delta() 返回单位由角度（度）统一为弧度（[-π, π]），与 TouchEvent::pinch_angle() 一致；按度消费的调用方需自行换算（× 180/π）。",
         "state/subscription.h：自由函数 bind(SignalView&, F) / bind(Store&, F) 改名 connect——State 基类链上的 std::enable_shared_from_this 使 std 进入实参的 ADL 关联命名空间集，无限定 bind(state, fn) 会被变参转发的 std::bind 吸走（编译通过但回调永不执行的静默错误，GCC 16 部分排序实测复现）；connect 与任何 std 名字无重叠，从根上排除歧义。迁移路径：将 aurora::bind( / au::bind( 全局替换为 aurora::connect( / au::connect(；Animator::bind 为成员函数不经 ADL，保持原名。",
-
         "include/aurora/test_helpers.h 退出公共 API：该头（EventDispatcher 模拟、离屏渲染助手等测试专用设施，从未进入 GUIDELINE 配方）随测试体系重写移出安装面，落位仓库私有 tests/support/test_helpers.h 并停止随 cmake --install 导出。",
         "core/assert.h 重命名为 core/aurora_assert.h：头文件名与 C 标准库 <assert.h> 同名——core/types.h 的 #include \"assert.h\" 依赖「引号包含先搜同目录」这一脆弱解析，且同名头随安装面导出后会污染消费者的 include 搜索空间。宏名 AURORA_CHECK / AURORA_ASSERT 与签名均不变，仅头文件路径改名。"
       ],
@@ -100,18 +99,23 @@
       ],
       "changed": [
         "tests/：wasm 目标下 ctest 全量开启——能力缺失用例统一走 AURORA_TEST_REQUIRE_THREADS / AURORA_TEST_REQUIRE_SUBPROCESS 的 SKIP 路径，死亡测试整条跳过。",
-        "ci：core 矩阵补 linux-clang（消除 GCC 单编译器盲区）与 windows-msvc Debug；install-consumer 拆为「默认」与「非默认宏一致性」两组，后者在 Release 下强制 DEBUG=ON 把该类缺陷变为红灯；release 产物名按 runner.arch 实际取值命名（macos-latest 现为 arm64）。",
+        "ci：core 矩阵补 linux-clang（消除 GCC 单编译器盲区）与 windows-msvc Debug；install-consumer 拆为「默认」与「非默认宏一致性」两组，后者在 Release 下强制 DEBUG=ON 把该类缺陷变为红灯；release 产物名按 runner.arch 实际取值命名（macos-latest 现为 arm64）；全部 ctest 步骤并行化（-j 按 runner 核数，wasm job 原有口径向其余 job 对齐）。",
+        "构建：新增并行测试 preset `ninja-test`（CMakePresets.json testPresets，等价 ctest --test-dir build --output-on-failure -j 16）——测试框架的进程隔离模型下并行安全，本地实测较串行约 9 倍提速。",
+        "构建/GCC：关闭消费者 PCH——实测消费者 .gch 达 296MB 且从未被消费者命中（生成/消费侧编译器设置失配，每个 TU 都 -Winvalid-pch 拒用），但拒用前仍要每 TU 全量探测加载（GCC）+ 全文 hash（ccache），每 TU ≈ 600MB 纯亏损 I/O（250 TU ≈ 144GB/次脏构建，16 并发下单边由 0.9s 膨胀至 10-39s）；且即便修复失配，生效的 296MB gch 仍要每 TU 全量加载，净收益为负。GCC 下消费者改走伞头文本编译 + ccache 缓存；MSVC/Clang 行为不变。",
         "core/environment.h 与 core/build_context.h：依赖图单向化，build_context.h 直依赖 environment.h；各使用方（text / window / provider / title_bar / hero / modifier_layout / layout_engine / offscreen / media_query）补显式包含。",
-        "构建：诊断压制按编译器族成对守卫——GCC 专有告警组（-Wdangling-pointer / -Wstringop-overflow / -Wmaybe-uninitialized）以 AURORA_COMPILER_GCC 包裹 push/pop，clang 侧的 EM_ASM 占位符误报以 AURORA_COMPILER_CLANG 包裹 push/ignored/pop。"
+        "构建：诊断压制按编译器族成对守卫——GCC 专有告警组（-Wdangling-pointer / -Wstringop-overflow / -Wmaybe-uninitialized）以 AURORA_COMPILER_GCC 包裹 push/pop，clang 侧的 EM_ASM 占位符误报以 AURORA_COMPILER_CLANG 包裹 push/ignored/pop。",
+        "构建/GCC：库自身 PCH 一并关闭——122MB 的库 gch（标准库 + nlohmann/json）每库 TU 全量加载 + ccache 全文 hash，且 gch 字节参与缓存 key（任何头文件变更都使全部库 TU 缓存键失效）；关闭后库侧全量重编 155.4s（266 边）→ 68s（91 边）。PCH 门控变量现统一作用于库与消费者，MSVC/Clang 行为不变。"
       ],
       "fixed": [
-        "安装导出：AuroraConfig.cmake 补导 AURORA_ENABLE_DEBUG——该宏在 Widget 下新增数据成员、改变类布局，此前只导出后端与架构优化宏，漏导即库与消费端 ABI 不一致 → ODR 违规（实测 Release 库强制 DEBUG=ON 安装后，消费端零额外宏运行 render_to_png 跳 0x0、SIGSEGV 139）。现按安装产物实际取值条件导出：强制 ON、或 AUTO + 单配置 Debug/RelWithDebInfo 才导出，AUTO + Release 与强制 OFF 不导出。",
+        "构建/ccache：配置在构建期全部无效——AuroraCcache.cmake 经 set(ENV{...}) 在 configure 期写入的 COMPRESS/MAXSIZE 等环境变量不随 ninja 构建期子进程传递，实际编译从未使用（实测缓存大小恒为系统默认而非设定值）；且无 CCACHE_SLOPPINESS 时命令行带 -include cmake_pch.hxx 的消费者 TU 被直接判 Uncacheable（实测 88.7% 调用不可缓存）。现全部配置改经编译器启动器注入（CMAKE_{C,CXX}_COMPILER_LAUNCHER = cmake -E env <CCACHE_*>… ccache），构建期生效：SLOPPINESS 含 pch_defines/time_macros/include_file_mtime/include_file_ctime，BASEDIR=<源码根> + NOHASHDIR 支持多构建目录共享缓存，AURORA_CCACHE_DIR/AURORA_CCACHE_MAXSIZE（默认 2G → 5G）构建期真正生效；移除与压缩互斥的 hardlink。",
+        "安装导出：AuroraConfig.cmake 补导 AURORA_ENABLE_DEBUG——该宏在 Widget 下新增数据成员、改变类布局，此前只导出后端与架构优化宏，漏导即库与消费端 ABI 不一致 → ODR 违规（实测 Release 库强制 DEBUG=ON 安装后，消费端零额外宏运行 render_to_png 跳 0x0、SIGSEGV 139）。现按安装产物实际取值条件导出：强制 ON、或 AUTO + 单配置 Debug/RelWithDebInfo 才导出，AUTO + Release（含空构建类型）与强制 OFF 不导出。",
         "widget/：Widget::focus_bounds_ 无写入点，FocusManager::move_focus 的方向键导航因此失效（Tab 序按注册序、不受影响）；现由绘制遍历在 Widget::paint 入口写入，与 paint_bounds_ 同源同值。",
         "inspector/：simulate_click / simulate_scroll 不携带焦点管理器（控件 request_focus() 读到空槽静默 no-op，点击输入框不获焦、后续键盘与文本输入都没有接收者）、simulate_text_input 结束时把焦点槽写成 nullptr 而非复原、目标不可命中时仍返回 ok；现补焦点上下文（优先复用派发上下文，无则用以目标控件为根的临时实例）与失败判据（点击/滚动派发前做同口径命中测试、文本以目标是否消费为判据），失败一律 GeneralNotSupported 且不改状态。",
         "tests/：utest_freetype_library 裸调 ft_shutdown() 只销毁 FT_Library，留下 font_discovery 注册表中由其派生的野 FT_Face，单进程顺序跑全量时污染后续所有字体用例（原生 SIGSEGV；wasm 下野字段被复用为垃圾函数指针 → call_indirect 失败且崩点随 --shuffle 漂移）；改走 shutdown_font_discovery() 完整关闭路径并补重建后度量可用的回归断言。",
         "告警：GCC 13/14 对 const 引用绑定的 -Wdangling-reference 误报、GCC 15 对 vector 下标界的 -Warray-bounds 误报、clang 在 -Wpedantic 下对 EM_ASM 内 $0/$1 占位符的 -Wdollar-in-identifier-extension 误报（wasm_surface.h 该 TU 11 → 0）；image_stb 的 load_image_stb 以 std::copy_n 替换 std::memcpy。",
         "window/：macOS 的 GL 头改走 OpenGL.framework 的 <OpenGL/gl.h>；X11Surface::data() 定义移出 DEBUG 守卫以修 Release 链接失败；Glfw 工厂异常转 PlatformUnavailable，对齐 Result 契约。",
-        "构建：MSVC 多配置下生成器守卫与中文编码崩溃；消费端冒烟示例与 README 快速上手（Node 从 Widget 派生对象接管所有权，Widget 拷贝构造已 delete，须显式 std::move）。"
+        "构建：MSVC 多配置下生成器守卫与中文编码崩溃；消费端冒烟示例与 README 快速上手（Node 从 Widget 派生对象接管所有权，Widget 拷贝构造已 delete，须显式 std::move）。",
+        "tests/framework：MinGW 下死亡测试子进程被 WER 拖至每站点 ~4.6s——MinGW 同样链接 UCRT，abort() 默认带 _CALL_REPORTFAULT 以 fail-fast（0xC0000409，WER 事件 BEX64）终止并触发 WER 崩溃报告管线与杀软行为分析（子进程线程被外部全挂起 + 命令行不可读的影子进程），而 abort 行为修复此前仅门控于 MSVC/clang-cl 家族；现统一以 AURORA_PLATFORM_WINDOWS 生效，每站点 ~4.6s → ~20ms，全量并行 ctest 11.8s → 3.0s。"
       ],
       "migrations": [
         "environment → build_context：显式 #include \"aurora/core/build_context.h\"（此前经 environment.h 隐式获得）；调用形式 Environment::get<T>() 不变。",
