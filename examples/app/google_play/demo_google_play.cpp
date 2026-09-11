@@ -107,7 +107,7 @@ auto main() -> int {
         });
         // 运行时信息：一次性打印全部门面 JSON 到 stdout（人工触发，不刷屏）。
         app.shortcuts().add(au::KeyCombo{au::ModifierKey::Control, au::KeyCode::P}, [&app]() -> void {
-            AURORA_LOG_RAW("demo", "=== runtime info (Phase 4) ===\n");
+            AURORA_LOG_RAW("demo", "=== runtime info ===\n");
             if (app.window()) {
                 AURORA_LOG_RAW("demo", "surface_state:\n", au::debug::surface_state(app.window()->surface()).dump(2),
                                "\n");

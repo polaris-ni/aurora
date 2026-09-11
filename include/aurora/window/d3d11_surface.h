@@ -68,6 +68,10 @@ class D3D11Surface : public Surface {
 
     /// @brief 接收本帧脏矩形（设备坐标）；present 时仅增量上传这些区域，空向量 = 全量上传。
     auto set_present_dirty(const std::vector<Rect> &device_rects) -> void override { dirty_ = device_rects; }
+    /// @brief 增量裁剪帧底色：与 begin_frame 预填的背景色一致（不透明），
+    /// 使脏区裁剪重绘时裁剪内零基底被重铺为同一底色，避免圆角按钮悬停时
+    /// 裁剪矩形四角露出透明黑（视觉上表现为阴影与圆角不匹配）。
+    [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 245, 255}; }
 
     [[nodiscard]] auto data() const -> const std::uint8_t * override { return painter_.data(); }
     /// @brief 帧缓冲物理像素尺寸：D3D11 painter 按 DPI 物理分辨率（dev_w_/dev_h_ = 逻辑×scale）分配，
@@ -104,7 +108,6 @@ class D3D11Surface : public Surface {
     // 由 D3D11CreateDeviceAndSwapChain 创建，返回的是 IDXGISwapChain（非 1 版本）接口；
     // 本类只用到其 GetBuffer/Present 等 IDXGISwapChain 方法，故按该类型持有，避免向下转换。
     IDXGISwapChain *swap_ = nullptr;
-    ID3D11Texture2D *rt_ = nullptr;
     ID3D11RenderTargetView *rtv_ = nullptr;
     ID3D11Texture2D *src_ = nullptr;  ///< 源纹理（CPU 上传目标，与 painter 同尺寸）
     ID3D11ShaderResourceView *src_srv_ = nullptr;
@@ -115,7 +118,8 @@ class D3D11Surface : public Surface {
     ID3D11BlendState *bs_ = nullptr;
 
     std::vector<Rect> dirty_;  ///< 本帧脏矩形（设备坐标），present 时消费。
-    int dev_w_ = 0, dev_h_ = 0;
+    int dev_w_ = 0, dev_h_ = 0;   ///< painter/源纹理设备尺寸（逻辑×scale）
+    int swap_w_ = 0, swap_h_ = 0;  ///< 交换链后缓冲物理尺寸（ResizeBuffers 后更新）
     int frame_ = 0;
     bool ok_ = false;  ///< 设备初始化是否成功（失败则 present 直接报错，便于测试跳过）。
     bool vsync_ = true;  ///< 垂直同步（Present 第一参数 1/0）。

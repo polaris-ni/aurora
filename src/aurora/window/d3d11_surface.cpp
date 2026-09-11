@@ -6,9 +6,7 @@
 
 #include <algorithm>
 #include <array>
-#include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <span>
 #include <utility>
 
@@ -33,7 +31,9 @@ VSOut VSMain(uint id : SV_VertexID) {
     float2 p = float2(id == 2 ? 3.0F : -1.0F, id == 1 ? 3.0F : -1.0F);
     VSOut o;
     o.pos = float4(p, 0.0F, 1.0F);
-    o.uv = float2(p.x * 0.5f + 0.5f, p.y * 0.5f + 0.5f); // upload_region 已将数据转为顶行优先，无需再翻转 v
+    // Painter 与 D3D11 纹理均为顶行优先（top-down），V=0 在顶部。
+    // NDC Y=+1（屏幕顶部）→ v=0（纹理顶部 = Painter 顶部），无需 Y 翻转。
+    o.uv = float2(p.x * 0.5f + 0.5f, 0.5f - p.y * 0.5f);
     return o;
 }
 )HLSL";
@@ -118,10 +118,11 @@ auto D3D11Surface::release_device() -> void {
     safe_release(src_srv_);
     safe_release(src_);
     safe_release(rtv_);
-    safe_release(rt_);
     safe_release(swap_);
     safe_release(ctx_);
     safe_release(device_);
+    swap_w_ = 0;
+    swap_h_ = 0;
 }
 
 auto D3D11Surface::poll_platform_events() -> void {
@@ -261,53 +262,65 @@ auto D3D11Surface::ensure_swap_chain(int w, int h) -> bool {
         AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: invalid dimensions ", w, "x", h);
         return false;
     }
-    // 尺寸变化：重建交换链与源纹理，避免拉伸模糊（DWM 由着色器缩放）。
-    if ((rt_ != nullptr) && dev_w_ == w && dev_h_ == h && (src_ != nullptr)) {
-        return true;
+    // 尺寸变化：先 ResizeBuffers 重建交换链后缓冲至新尺寸，再重建 RTV 与源纹理。
+    // ResizeBuffers 前须释放所有对后缓冲的引用（RTV），否则返回 DXGI_ERROR_INVALID_CALL。
+    if (swap_w_ != w || swap_h_ != h) {
+        safe_release(rtv_);
+        safe_release(src_srv_);
+        safe_release(src_);
+        // BufferCount=0 保留原缓冲数；Width/Height=0 自动取窗口客户区尺寸；
+        // NewFormat=DXGI_FORMAT_UNKNOWN 保留创建时格式。
+        const HRESULT rb_hr = swap_->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
+        if (FAILED(rb_hr)) {
+            AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: ResizeBuffers failed, hr=", rb_hr);
+            return false;
+        }
+        swap_w_ = w;
+        swap_h_ = h;
     }
-    safe_release(rtv_);
-    safe_release(rt_);
-    safe_release(src_srv_);
-    safe_release(src_);
-
-    ID3D11Texture2D *back = nullptr;
-    // 显式 IID（等价于 IID_ID3D11Texture2D），避免 IID_PPV_ARGS 展开出的 __uuidof 扩展 token 警告。
-    static constexpr IID IID_TEX2_D = {.Data1 = 0x6f15aaf2,
-                                       .Data2 = 0xd208,
-                                       .Data3 = 0x4e89,
-                                       .Data4 = {0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c}};
-    void *back_tmp = nullptr;
-    const HRESULT get_hr = swap_->GetBuffer(0, IID_TEX2_D, &back_tmp);
-    if (FAILED(get_hr)) {
-        AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: GetBuffer failed, hr=", get_hr);
-        return false;
+    // RTV 须在 ResizeBuffers 后（或首次）重建。
+    if (rtv_ == nullptr) {
+        ID3D11Texture2D *back = nullptr;
+        // 显式 IID（等价于 IID_ID3D11Texture2D），避免 IID_PPV_ARGS 展开出的 __uuidof 扩展 token 警告。
+        static constexpr IID IID_TEX2_D = {.Data1 = 0x6f15aaf2,
+                                           .Data2 = 0xd208,
+                                           .Data3 = 0x4e89,
+                                           .Data4 = {0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c}};
+        void *back_tmp = nullptr;
+        const HRESULT get_hr = swap_->GetBuffer(0, IID_TEX2_D, &back_tmp);
+        if (FAILED(get_hr)) {
+            AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: GetBuffer failed, hr=", get_hr);
+            return false;
+        }
+        back = static_cast<ID3D11Texture2D *>(back_tmp);
+        const HRESULT rtv_hr = device_->CreateRenderTargetView(back, nullptr, &rtv_);
+        safe_release(back);
+        if (FAILED(rtv_hr)) {
+            AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: CreateRenderTargetView failed, hr=", rtv_hr);
+            return false;
+        }
     }
-    back = static_cast<ID3D11Texture2D *>(back_tmp);
-    const HRESULT rtv_hr = device_->CreateRenderTargetView(back, nullptr, &rtv_);
-    safe_release(back);
-    if (FAILED(rtv_hr)) {
-        AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: CreateRenderTargetView failed, hr=", rtv_hr);
-        return false;
-    }
-
-    D3D11_TEXTURE2D_DESC td{};
-    td.Width = static_cast<UINT>(w);
-    td.Height = static_cast<UINT>(h);
-    td.MipLevels = 1;
-    td.ArraySize = 1;
-    td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    td.SampleDesc.Count = 1;
-    td.Usage = D3D11_USAGE_DEFAULT;
-    td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    const HRESULT tex_hr = device_->CreateTexture2D(&td, nullptr, &src_);
-    if (FAILED(tex_hr)) {
-        AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: CreateTexture2D failed, hr=", tex_hr);
-        return false;
-    }
-    const HRESULT srv_hr = device_->CreateShaderResourceView(src_, nullptr, &src_srv_);
-    if (FAILED(srv_hr)) {
-        AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: CreateShaderResourceView failed, hr=", srv_hr);
-        return false;
+    // 源纹理与 painter 同尺寸，尺寸变化后（src_ 已释放）重建。
+    if (src_ == nullptr) {
+        D3D11_TEXTURE2D_DESC td{};
+        td.Width = static_cast<UINT>(w);
+        td.Height = static_cast<UINT>(h);
+        td.MipLevels = 1;
+        td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_DEFAULT;
+        td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        const HRESULT tex_hr = device_->CreateTexture2D(&td, nullptr, &src_);
+        if (FAILED(tex_hr)) {
+            AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: CreateTexture2D failed, hr=", tex_hr);
+            return false;
+        }
+        const HRESULT srv_hr = device_->CreateShaderResourceView(src_, nullptr, &src_srv_);
+        if (FAILED(srv_hr)) {
+            AURORA_LOG_ERROR("d3d11", "ensure_swap_chain: CreateShaderResourceView failed, hr=", srv_hr);
+            return false;
+        }
     }
     dev_w_ = w;
     dev_h_ = h;
@@ -318,12 +331,16 @@ auto D3D11Surface::begin_frame(int width, int height) -> Result<bool> {
     const float s = scale_factor();
     dev_w_ = std::max(1, static_cast<int>(std::lround(static_cast<float>(width) * s)));
     dev_h_ = std::max(1, static_cast<int>(std::lround(static_cast<float>(height) * s)));
-    painter_.begin(dev_w_, dev_h_);
+    // Painter 按 scale 将逻辑 dp 坐标映射到物理像素：begin 传入逻辑尺寸，
+    // Painter 内部 ×scale_ 分配物理缓冲；故设置 scale 后传逻辑 w/h（与 Win32Surface 同源）。
+    painter_.set_scale(s);
+    painter_.begin(width, height);
     // 用不透明背景色填充 painter 缓冲区（与 present() 的 ClearRenderTargetView 颜色一致）。
     // Painter 的 set_pixel 在混合后将 alpha 强制写 255，若缓冲区初始为透明黑(0,0,0,0)，
     // 文字抗锯齿边缘会与黑色混合导致发暗/黑边。预填不透明背景使抗锯齿与正确底色混合。
+    // 传逻辑尺寸：Painter 内部 ×scale_ 映射到物理像素，覆盖整个缓冲区。
     painter_.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                            .size = Size{.width = static_cast<float>(dev_w_), .height = static_cast<float>(dev_h_)}},
+                            .size = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)}},
                        Color{245, 245, 245, 255});
     if (ok_) {
         ensure_swap_chain(dev_w_, dev_h_);
@@ -345,12 +362,12 @@ auto D3D11Surface::upload_region(int x, int y, int w, int h) const -> bool {
         return false;
     }
     std::vector<std::uint8_t> buf(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U);
-    // Painter 自下而上行序（RGBA）→ 纹理顶行优先（BGRA）。
+    // Painter 与 D3D11 纹理均为顶行优先（top-down），直接同行拷贝（RGBA→BGRA swizzle）。
     const std::span painter_data(painter_.data(),
                                  static_cast<std::size_t>(dev_w_) * static_cast<std::size_t>(dev_h_) * 4U);
     const std::span buf_span(buf);
     for (int ry = 0; ry < h; ++ry) {
-        const int src_y = dev_h_ - 1 - (y + ry);
+        const int src_y = y + ry;
         const std::size_t src_row_start =
             ((static_cast<std::size_t>(src_y) * static_cast<std::size_t>(dev_w_)) + static_cast<std::size_t>(x)) * 4U;
         const auto src_row = painter_data.subspan(src_row_start, static_cast<std::size_t>(w) * 4U);
@@ -386,13 +403,17 @@ auto D3D11Surface::present() -> Result<bool> {
                           "aurora/window/d3d11_surface.h");
     }
     // 增量上传：脏矩形非空时仅更新变化区，否则整帧上传。
+    // 向外取整（floor/ceil）覆盖裁剪绘制触及的全部像素，与 Painter 的 ceil/floor 取整一致。
     bool upload_ok = false;
     if (dirty_.empty()) {
         upload_ok = upload_region(0, 0, dev_w_, dev_h_);
     } else {
         for (const Rect &r : dirty_) {
-            upload_ok = upload_region(static_cast<int>(r.origin.x), static_cast<int>(r.origin.y),
-                                      static_cast<int>(r.size.width), static_cast<int>(r.size.height));
+            const int x0 = std::max(0, static_cast<int>(std::floor(r.origin.x)));
+            const int y0 = std::max(0, static_cast<int>(std::floor(r.origin.y)));
+            const int x1 = std::min(dev_w_, static_cast<int>(std::ceil(r.right())));
+            const int y1 = std::min(dev_h_, static_cast<int>(std::ceil(r.bottom())));
+            upload_ok = upload_region(x0, y0, x1 - x0, y1 - y0);
         }
     }
     dirty_.clear();
