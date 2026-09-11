@@ -93,13 +93,26 @@ class EventDispatcher {
     /// @return 事件是否被焦点控件消费（取 `e.is_handled_`）。
     static auto dispatch(Widget &root, TextCompositionEvent &e, FocusManager &fm) -> bool;
 
+    /// @brief 悬停光标下发钩子（I1 光标形状 API）：悬停链变化导致解析出的光标形状改变时回调。
+    ///
+    /// 由 `Application` 接线到 `Surface::set_cursor`（宿主可替换为自定义光标管理）。
+    /// 解析规则（自命中链最深者向根回溯，第一个命中者生效，链空/无声明 → `CursorShape::Arrow`）：
+    /// 修饰链 `Modifier::cursor(...)` > `Widget::cursor_shape()` 虚钩子 > 含 Clickable 修饰 → PointingHand。
+    using CursorHandler = std::function<void(CursorShape shape)>;
+    auto set_cursor_handler(CursorHandler h) -> void { cursor_handler_ = std::move(h); }
+
   private:
     /// @brief 鼠标（pointer_id 缺省）捕获键：鼠标无 pointer id，用此哨兵键与触控 id 区分。
     static constexpr int AURORA_MOUSE_CAPTURE_KEY = -1;
 
     /// @brief 悬停追踪：无捕获 Move 时把新命中链与上次悬停链 diff，对离开/进入的控件
-    ///       分别回调 `on_hover_change(false/true)`（Checkbox 等据此绘制 hover 反馈）。
+    ///       分别回调 `on_hover_change(false/true)`（Checkbox 等据此绘制 hover 反馈）；
+    ///       随后解析悬停光标（见 `set_cursor_handler`），形状变化时经 handler 下发。
     auto update_hover(const std::vector<HitNode> &chain) -> void;
+
+    /// @brief 悬停光标解析：自命中链最深（链尾）向根（链头）回溯，第一个声明者生效；
+    ///       无任何声明返回 `CursorShape::Arrow`。链中弱引用失效的控件安全跳过。
+    [[nodiscard]] auto resolve_cursor(const std::vector<HitNode> &chain) const -> CursorShape;
 
     /// @brief 按指针 ID 缓存的命中链（指针捕获表）。Press 命中后写入，Release 清除；
     ///       活跃期 Move/Release 复用该链（即使光标移出根/窗口外或落入重叠兄弟控件），
@@ -110,6 +123,11 @@ class EventDispatcher {
     ///        HitNode.widget 为 `std::weak_ptr<Widget>`：虚拟列表（LazyList）等滚动回收子控件时，
     ///        悬停链中对应的弱引用失效，`update_hover` 经 `lock()` 检测后安全跳过，绝不解引用悬垂指针。
     std::vector<HitNode> hover_chain_;
+
+    /// @brief 悬停光标下发钩子与当前已下发形状（只在变化时回调，避免每 Move 都打平台光标 API）。
+    CursorHandler cursor_handler_;
+    CursorShape current_cursor_ = CursorShape::Arrow;
+    bool cursor_emitted_ = false;  ///< 首次解析也回调（初始 Arrow → 显式 Arrow 的过渡不吞）
 };
 
 /// @brief 多点触控派发器（按指针 ID 做命中链捕获）。

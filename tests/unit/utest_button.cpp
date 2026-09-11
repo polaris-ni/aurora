@@ -153,4 +153,10 @@ AURORA_TEST_CASE(button_serialize_deserialize_roundtrip) {
     AURORA_TEST_CHECK_NEAR(dst.min_height, 36.0F, 1e-4F);
 }
 
+AURORA_TEST_CASE(cursor_shape_hook_defaults_to_pointing_hand) {
+    // I1：Button 悬停默认 PointingHand（控件级虚钩子）；修饰链显式声明在派发器解析时优先。
+    Button b;
+    AURORA_TEST_CHECK(b.cursor_shape() == std::optional{CursorShape::PointingHand});
+}
+
 }  // namespace aurora::test_cases::utest_button

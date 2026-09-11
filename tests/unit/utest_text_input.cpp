@@ -310,4 +310,10 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip_and_defaults) {
     AURORA_TEST_CHECK_FALSE(defaults.contains("obscure_text"));
 }
 
+AURORA_TEST_CASE(cursor_shape_hook_defaults_to_ibeam) {
+    // I1：TextInput 悬停默认 IBeam（控件级虚钩子）；修饰链显式声明在派发器解析时优先，此处只验钩子值。
+    TextInput ti;
+    AURORA_TEST_CHECK(ti.cursor_shape() == std::optional{CursorShape::IBeam});
+}
+
 }  // namespace aurora::test_cases::utest_text_input

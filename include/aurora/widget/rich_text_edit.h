@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -159,6 +160,10 @@ class RichTextEdit : public LeafWidget {
         }
         return out;
     }
+
+    /// @brief 悬停默认文本光标（I1）：文本编辑区悬停 IBeam；修饰链显式 `cursor(...)` 声明优先。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return CursorShape::IBeam; }
 
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
 

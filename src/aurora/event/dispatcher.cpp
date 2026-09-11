@@ -86,6 +86,38 @@ auto EventDispatcher::update_hover(const std::vector<HitNode> &chain) -> void {
         }
     }
     hover_chain_ = chain;
+
+    // 悬停光标解析与下发：只在形状变化时回调 handler（避免每个 Move 事件都打平台光标 API）。
+    const CursorShape want = resolve_cursor(chain);
+    if (!cursor_emitted_ || want != current_cursor_) {
+        current_cursor_ = want;
+        cursor_emitted_ = true;
+        if (cursor_handler_) {
+            cursor_handler_(want);
+        }
+    }
+}
+
+auto EventDispatcher::resolve_cursor(const std::vector<HitNode> &chain) const -> CursorShape {
+    // 自最深（链尾）向根（链头）回溯：内层控件的光标声明覆盖外层容器。
+    // 优先级：修饰链 CursorNode > Widget::cursor_shape() 虚钩子 > 含 Clickable → PointingHand。
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+        Widget *sp = it->get();
+        if (sp == nullptr) {
+            continue;  // 弱引用已回收，安全跳过
+        }
+        const Modifier &mod = sp->modifier.get();
+        if (const auto declared = mod.cursor_shape()) {
+            return *declared;
+        }
+        if (const auto hook = sp->cursor_shape()) {
+            return *hook;
+        }
+        if (mod.has_clickable()) {
+            return CursorShape::PointingHand;
+        }
+    }
+    return CursorShape::Arrow;
 }
 
 auto EventDispatcher::dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *fm) -> bool {

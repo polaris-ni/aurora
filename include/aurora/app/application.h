@@ -49,6 +49,7 @@ class Application {
     /// @brief 无头便捷构造：不持有 Window，仅用于 render_to_png / 程序化派发。
     Application(Scene scene, int width, int height) : scene_(std::move(scene)), width_(width), height_(height) {
         focus_.set_root(&scene_.root());
+        wire_cursor();
     }
 
     /// @brief 自定义后端（稳定入口，不随 backend 数量增长）：注入已构造的 `unique_ptr<Surface>`。
@@ -59,6 +60,7 @@ class Application {
         : scene_(std::move(scene)), width_(static_cast<int>(opts.size.width)),
           height_(static_cast<int>(opts.size.height)), opts_(opts) {
         focus_.set_root(&scene_.root());
+        wire_cursor();
         auto res = create_window(std::move(surface), opts);
         if (res) {
             attach_window(std::move(res.value()));
@@ -74,6 +76,7 @@ class Application {
     Application(Scene scene, std::unique_ptr<Window> window, const WindowOptions &opts = {})
         : scene_(std::move(scene)) {
         focus_.set_root(&scene_.root());
+        wire_cursor();
         if (window) {
             width_ = static_cast<int>(window->size().width);
             height_ = static_cast<int>(window->size().height);
@@ -328,6 +331,16 @@ class Application {
         window_->surface().set_event_handler([this](Event &e) -> void { dispatch(e); });
         window_->surface().set_window_state_handler([this](WindowState s) -> void { on_window_state_changed(s); });
         window_->surface().set_window_mode_handler([this](WindowMode m) -> void { on_window_mode_changed(m); });
+    }
+
+    /// @brief 接线悬停光标下发（I1）：派发器解析出的光标形状变化时经组合 Surface 生效。
+    /// 无头构造（window_ 为空）时安全 no-op；捕获 `this`，运行期取当前 window_，不绑定构造顺序。
+    auto wire_cursor() -> void {
+        mouse_.set_cursor_handler([this](CursorShape shape) -> void {
+            if (window_ != nullptr) {
+                window_->surface().set_cursor(shape);
+            }
+        });
     }
 
     /// @brief 排水跨线程回投队列（主线程，每帧开头/退出前调用）。

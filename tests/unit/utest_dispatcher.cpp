@@ -1,7 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/event/dispatcher.h
 /// 测试说明: 命中测试最深目标、鼠标冒泡与 stop-on-handled、本地坐标写入与 Press
-/// 焦点转移/空白清焦、指针捕获越界续发、悬停进出 diff、键盘
+/// 焦点转移/空白清焦、指针捕获越界续发、悬停进出 diff、悬停光标解析
+/// （修饰链 > 虚钩子 > Clickable 缺省，变化才下发）、键盘
 /// Tab/激活快捷键与焦点路由、滚轮/文本/文件拖放路由、TouchDispatcher 按指针 id 捕获与合成鼠标事件
 
 #include <algorithm>
@@ -39,6 +40,7 @@ class TestBox final : public LeafWidget {
     int drop_count = 0;
     Point last_local{};
     std::optional<int> last_pointer_id;
+    std::optional<CursorShape> cursor_hook;  // 非 nullopt 时作为 cursor_shape() 虚钩子返回
 
     using Widget::on_pointer_event;  // 保持基类 TouchEvent 重载可见
 
@@ -106,6 +108,8 @@ class TestBox final : public LeafWidget {
             e.is_handled = true;
         }
     }
+
+    [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return cursor_hook; }
 };
 
 /// 水平排列容器：子控件依次从左往右铺，各自取固定期望尺寸。
@@ -315,6 +319,62 @@ AURORA_TEST_CASE(hover_move_diffs_enter_and_leave) {
     AURORA_TEST_CHECK_EQ(tree.box1->hover_changes, 2);  // 离开
     AURORA_TEST_CHECK_FALSE(tree.box1->hovered());
     AURORA_TEST_CHECK_FALSE(tree.row->hovered());
+}
+
+AURORA_TEST_CASE(hover_cursor_resolves_and_emits_on_change) {
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    std::vector<CursorShape> emitted;
+    dispatcher.set_cursor_handler([&emitted](CursorShape s) { emitted.push_back(s); });
+
+    auto move_to = [&](float x, float y) {
+        MouseEvent m;
+        m.position = Point{.x = x, .y = y};
+        m.action = MouseAction::Move;
+        dispatcher.dispatch_mouse(*tree.row, m);
+    };
+
+    // 1) 无任何声明：首次解析也回调（Arrow），同形状重复移动不重复下发
+    move_to(20.0F, 20.0F);  // box1 内
+    AURORA_TEST_CHECK_EQ(emitted.size(), 1);
+    AURORA_TEST_CHECK_EQ(emitted.back(), CursorShape::Arrow);
+    move_to(30.0F, 30.0F);  // 仍在 box1，链与声明均未变
+    AURORA_TEST_CHECK_EQ(emitted.size(), 1);
+
+    // 2) 修饰链 CursorNode 声明生效（悬停驱动的重解析：再次 Move 触发）
+    tree.box1->modifier = Modifier{}.cursor(CursorShape::IBeam);
+    move_to(25.0F, 25.0F);
+    AURORA_TEST_CHECK_EQ(emitted.size(), 2);
+    AURORA_TEST_CHECK_EQ(emitted.back(), CursorShape::IBeam);
+
+    // 3) Widget 虚钩子生效；修饰链声明优先于钩子
+    tree.box2->cursor_hook = CursorShape::Crosshair;
+    move_to(60.0F, 20.0F);  // box2 内
+    AURORA_TEST_CHECK_EQ(emitted.size(), 3);
+    AURORA_TEST_CHECK_EQ(emitted.back(), CursorShape::Crosshair);
+    tree.box2->modifier = Modifier{}.cursor(CursorShape::Wait);
+    move_to(65.0F, 25.0F);
+    AURORA_TEST_CHECK_EQ(emitted.size(), 4);
+    AURORA_TEST_CHECK_EQ(emitted.back(), CursorShape::Wait);
+
+    // 4) 含 Clickable 修饰且无声明/钩子 → 缺省 PointingHand
+    tree.box2->modifier = Modifier{};
+    tree.box2->cursor_hook.reset();
+    tree.box2->modifier = Modifier{}.clickable([] {});
+    move_to(60.0F, 20.0F);
+    AURORA_TEST_CHECK_EQ(emitted.size(), 5);
+    AURORA_TEST_CHECK_EQ(emitted.back(), CursorShape::PointingHand);
+
+    // 5) 内层覆盖外层：根声明 Move，box2 无声明 → 沿命中链回溯取根的 Move；
+    //    移到空白（链空）→ 回落 Arrow
+    tree.box2->modifier = Modifier{};
+    tree.row->modifier = Modifier{}.cursor(CursorShape::Move);
+    move_to(60.0F, 20.0F);
+    AURORA_TEST_CHECK_EQ(emitted.size(), 6);
+    AURORA_TEST_CHECK_EQ(emitted.back(), CursorShape::Move);
+    move_to(500.0F, 500.0F);  // 空白
+    AURORA_TEST_CHECK_EQ(emitted.size(), 7);
+    AURORA_TEST_CHECK_EQ(emitted.back(), CursorShape::Arrow);
 }
 
 AURORA_TEST_CASE(key_dispatch_tab_navigation_and_activation_shortcuts) {

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <vector>
@@ -450,6 +451,14 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 默认空串；宿主可覆写给屏幕阅读器额外的用法描述（如「双击展开」）。不参与布局与绘制。
     /// @note Side-effects: pure
     [[nodiscard]] virtual auto accessibility_hint() const -> std::string { return std::string{}; }
+
+    /// @brief 控件级默认悬停光标（I1 光标形状 API）。
+    ///
+    /// 默认空 = 无控件级声明；文本编辑控件覆写返回 `IBeam`、按钮类返回 `PointingHand`。
+    /// 解析优先级：修饰链上的 `Modifier::cursor(...)` 声明**优先于**本钩子，本钩子优先于
+    /// 「含 Clickable 修饰 → PointingHand」的缺省策略（解析逻辑在 `EventDispatcher` 悬停链）。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto cursor_shape() const -> std::optional<CursorShape> { return std::nullopt; }
 
     /// @brief 序列化自有属性到 props JSON（结构快照/工具链用）。
     /// 子类覆写时应先调用基类默认实现以保留通用属性。

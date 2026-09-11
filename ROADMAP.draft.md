@@ -133,6 +133,7 @@ MCP 实时改运行中 UI、NL→UI、UI→代码往返保真、语义化视觉�
 - 触及：`core/enums.h`、`window/surface.h` + 各后端 `.cpp`、`modifier/modifier.h`、`window/window.h`。
 - 测试：`utest_surface`（Headless 记录 set_cursor 调用序列断言）；后端专属用例在宏未开时 `AURORA_TEST_SKIP`。
 - 完成判据：悬停不同控件触发对应 `set_cursor`；Headless 可断言；文档回填 `specification/03-layout-render.md` §8.3 Surface 表 + `BUILD_OPTIONS.md`（无新宏则免）。
+- **状态：核心已落地（2026-09-12），任务 2 的平台后端覆写待排**。已做：任务 1（`CursorShape` 枚举 + known_enums/aurora_api.json 登记）；任务 3（`CursorNode` + `Modifier::cursor(...)`、`Widget::cursor_shape()` 虚钩子、派发器悬停链解析——修饰链 > 钩子 > Clickable→PointingHand，最深命中者生效、形状变化才下发，`Application` 接线 `Surface::set_cursor`）；任务 4（TextInput/RichTextEdit→IBeam、Button→PointingHand）。任务 2 中 `Surface::set_cursor` 默认空实现已入（仿 set_title 模式），但 GLFW/X11/Win32/Wayland/macOS 覆写须在对应平台编译验证后补。测试：`utest_dispatcher` 9 例（悬停光标解析全序）、`utest_surface`、`utest_text_input`/`utest_button` 钩子用例全过。
 
 **Phase I2：焦点作用域 / 焦点陷阱**
 - 目标：模态弹层能把 Tab 焦点关在层内；为 Track B 无障碍铺路。

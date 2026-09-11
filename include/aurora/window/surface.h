@@ -7,6 +7,7 @@
 #include <string>
 #include <thread>
 
+#include "aurora/core/enums.h"
 #include "aurora/core/result.h"
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
@@ -157,6 +158,16 @@ class Surface {
 
     /// @brief 运行时更新窗口标题（默认空实现；Win32 后端经 SetWindowText 生效，Headless/GLFW 忽略）。
     virtual auto set_title(const std::string & /*title*/) -> void {}
+
+    /// @brief 运行时更新鼠标光标形状（默认空实现；仿 `set_title` 模式，各窗口后端覆写生效）。
+    ///
+    /// 由事件派发器在悬停链解析出的光标形状变化时经 `Application` 接线调用（I1 光标形状 API）。
+    /// 后端映射：GLFW `glfwSetCursor`+`glfwCreateStandardCursor`（Move→RESIZE_ALL，
+    /// NotAllowed/Wait 无标准形状回退 Arrow）；Win32 `SetCursor(LoadCursor(...))`；
+    /// X11 `XDefineCursor`；Wayland `wl_pointer.set_cursor`；macOS `NSCursor set`；
+    /// Headless/Wasm 默认空实现即可（无系统光标或浏览器自管）。
+    /// `CursorShape::Arrow` 由宿主在悬停回到无声明区域时下发，视为「恢复默认光标」。
+    virtual auto set_cursor(CursorShape /*shape*/) -> void {}
 
     /// @brief 运行期更新 CSD 自绘标题栏样式（默认空实现；Wayland 等客户端装饰后端覆写生效）。
     virtual auto set_title_bar_style(const TitleBarStyle & /*style*/) -> void {}

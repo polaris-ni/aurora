@@ -166,6 +166,10 @@ class TextInput : public LeafWidget {
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_value() const -> std::string override { return composed_text(value_.get()); }
 
+    /// @brief 悬停默认文本光标（I1）：输入框悬停 IBeam；修饰链显式 `cursor(...)` 声明优先。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return CursorShape::IBeam; }
+
     /// @brief 运行时自描述（规格附录 B）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{

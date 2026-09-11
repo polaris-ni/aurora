@@ -144,7 +144,11 @@
         "event/event.h：新增 `TextCompositionEvent{ preedit, cursor_index, sel_start, sel_end, committed }`（与 `TextInputEvent` 并存——committed 走 TextInputEvent 落字、组合态走本事件；含 `has_preedit_selection()` / `kNoSelection` 哨兵），承载 IME 预编辑串、组合内光标与待转换选区。",
         "event/dispatcher：`EventDispatcher::dispatch` 新增 `TextCompositionEvent` 重载——与文本输入同口径，只路由到焦点 widget 的 `on_text_composition`、不冒泡，无焦点返回 false。",
         "widget/widget.h：Widget 新增虚钩子 `on_text_composition(TextCompositionEvent&)`，默认消费事件（避免平台侧因「无人处理」重复上屏）。",
-        "widget/text_input.h / rich_text_edit：组合态支持——preedit 以插入点拼入显示文本并绘制组合下划线与待转换片段高亮，preedit 参与宽度测量（无界约束下撑开输入框）；失焦 / commit 取消组合态；commit 文本与普通输入共用同一落字路径（限长 / 选区替换 / on_changed / 无障碍 ValueChanged 全部一致生效）。"
+        "widget/text_input.h / rich_text_edit：组合态支持——preedit 以插入点拼入显示文本并绘制组合下划线与待转换片段高亮，preedit 参与宽度测量（无界约束下撑开输入框）；失焦 / commit 取消组合态；commit 文本与普通输入共用同一落字路径（限长 / 选区替换 / on_changed / 无障碍 ValueChanged 全部一致生效）。",
+        "core/enums.h：新增 `CursorShape`（Arrow / IBeam / PointingHand / ResizeNS / ResizeEW / ResizeNWSE / ResizeNESW / Move / Crosshair / NotAllowed / Wait）并登记进 known_enums 与 aurora_api.json。",
+        "modifier/：新增 `CursorNode`（Input 切片）与 `Modifier::cursor(CursorShape)` 工厂 / `cursor_shape()` 读取（链内最后一个声明生效）；`ModifierNode` 基类新增 `cursor_shape()` 虚查询（仅 CursorNode 覆盖）。",
+        "window/surface.h：Surface 新增 `virtual set_cursor(CursorShape)`（默认空实现，仿 set_title 模式）；事件派发器在悬停链变化时解析目标光标（修饰链声明 > `Widget::cursor_shape()` 虚钩子 > 含 Clickable → PointingHand，最深命中者生效，形状变化才下发），`Application` 构造时接线到组合 Surface（无头构造安全 no-op）。",
+        "widget/：控件级默认光标——TextInput / RichTextEdit 悬停 IBeam、Button 悬停 PointingHand（经 `Widget::cursor_shape()` 虚钩子提供，修饰链显式声明可覆盖）。"
       ],
       "changed": [
         "core/accessibility.h：build_accessibility_tree 现在填充 bounds——已绘制的节点取绘制遍历写入的绝对盒（含 Modifier 的 padding / border 位移），未绘制的节点按子节点 Node 局部原点逐级累加；子节点优先走 child_nodes()（其 Node 带父写入的局部盒），仅经 for_each_child 暴露子树的容器（LazyList / GridView / NavigatorHost / TransitionLayer 等）兜底展开、几何继承父盒；show == false 的子树与绘制 / 命中同口径不再入树。",
@@ -157,7 +161,7 @@
       ],
       "notes": [
         "aurora_api.json（widgets / enums / layout_rules / state_patterns 四类，不含方法级 API）本次无新增条目，已在 cmake --build build --target aurora_api_json 后核实零漂移。",
-        "alpha.4 阶梯其余 Phase（B3 Win32 UIAutomation 桥、A2 RTL/bidi）尚未开始；A1 IME 组合输入的核心（事件模型 / 派发 / 控件组合态）已落地，但**平台 IME 接线**（Win32 TSF/IMM32、macOS NSTextInputClient、X11/Wayland zwp_text_input_v3、Wasm）不在无头 Linux 上实现——须在对应平台以真实输入法验收后补齐。currentVersion 仍为 1.0.0-alpha.3，待本阶梯收口时随升版提交 bump。",
+        "alpha.4 阶梯其余 Phase（B3 Win32 UIAutomation 桥、A2 RTL/bidi、alpha.3 顺延的 I2/D0/D0b/F2）尚未开始；A1 IME 组合输入的核心（事件模型 / 派发 / 控件组合态）与 I1 光标形状的核心（枚举 / 修饰 / 解析 / Surface 契约）已落地，但**平台接线**（A1 的 Win32 TSF/IMM32、macOS NSTextInputClient、X11/Wayland zwp_text_input_v3、Wasm；I1 的 GLFW/X11/Win32/Wayland/macOS `set_cursor` 覆写）不在无头 Linux 上实现——须在对应平台编译与真实环境验收后补齐。currentVersion 仍为 1.0.0-alpha.3，待本阶梯收口时随升版提交 bump。",
         "声明：B2 的 `high_contrast` 位已随设置结构落地，但**尚未有控件消费**——高对比换色需先定换色策略（是否改 Theme / 是否重写前景-背景对），属待拍板项，故本次未做半成品接线；`screen_reader_active` 同理只作为宿主向库传递的意图位，库内不据此改变行为。"
       ]
     }

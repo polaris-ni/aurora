@@ -228,6 +228,22 @@
       ]
     },
     {
+      "name": "CursorShape",
+      "values": [
+        "Arrow",
+        "IBeam",
+        "PointingHand",
+        "ResizeNS",
+        "ResizeEW",
+        "ResizeNWSE",
+        "ResizeNESW",
+        "Move",
+        "Crosshair",
+        "NotAllowed",
+        "Wait"
+      ]
+    },
+    {
       "name": "Curve",
       "values": [
         "Linear",
@@ -4758,7 +4774,8 @@
       },
       "dynamic_children": false,
       "events": [
-        "on_text_input"
+        "on_text_input",
+        "on_text_composition"
       ],
       "examples": [
         "au::RichTextEdit()"

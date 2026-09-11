@@ -56,6 +56,10 @@ AURORA_TEST_CASE(surface_default_virtual_implementations) {
     AURORA_TEST_CHECK_NEAR(inset.right, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(inset.bottom, 0.0F, 1e-4F);
 
+    // 悬停光标默认空实现（I1）：可调用且不崩溃即契约（Headless 无系统光标）。
+    surface.set_cursor(CursorShape::IBeam);
+    surface.set_cursor(CursorShape::Arrow);
+
     // 默认空实现的回调注册/窗口控制接口：可调用且不崩溃即契约。
     surface.poll_platform_events();
     surface.set_event_handler({});

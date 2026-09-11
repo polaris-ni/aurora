@@ -124,6 +124,24 @@ enum class BoxFit : std::uint8_t {
     ScaleDown,  ///< 仅当大于容器时等比缩小，否则保持原尺寸
 };
 
+/// @brief 鼠标光标形状（参考 Flutter SystemMouseCursors / Win32 LoadCursor 家族）。
+///
+/// 由 `Modifier::cursor(...)` 声明在控件上、`Widget::cursor_shape()` 虚钩子提供控件级默认；
+/// 事件派发器在悬停链变化时解析出目标形状，经 `Surface::set_cursor` 下发到平台光标。
+enum class CursorShape : std::uint8_t {
+    Arrow,  ///< 默认箭头
+    IBeam,  ///< 文本输入 I 形光标
+    PointingHand,  ///< 可点击手型
+    ResizeNS,  ///< 上下调整大小
+    ResizeEW,  ///< 左右调整大小
+    ResizeNWSE,  ///< 主对角线（↘↖）调整大小
+    ResizeNESW,  ///< 副对角线（↗↙）调整大小
+    Move,  ///< 移动
+    Crosshair,  ///< 十字准星
+    NotAllowed,  ///< 禁止
+    Wait,  ///< 等待/忙碌
+};
+
 /// @} // thread-safe, pure
 
 }  // namespace aurora
