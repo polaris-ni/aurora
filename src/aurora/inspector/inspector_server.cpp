@@ -639,6 +639,105 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         return error_response(405, "Method not allowed for /api/widget");
     }
 
+    // POST /api/input/{click|scroll|text} — 交互模拟（合成事件经 EventDispatcher 真实派发）
+    //
+    // 请求体为 JSON 对象：`path`（索引路径，如 "0/1"）必填；`scroll` 另取 `dx`/`dy`
+    // （数值，缺省 0），`text` 另取 `text`（字符串）。
+    //
+    // 派发必须落在主线程：`Inspector::simulate_*` 为 main-thread only，且会写控件状态与
+    // 派发期的焦点槽。故与调试端点同走 `marshal_get`（无事件循环时直接执行，测试 / 无头
+    // 下仍可同步验证）。
+    //
+    // 语义为「目标式」：以 `path` 命中的控件为派发根与坐标原点、指针取该控件中心，因此
+    // 不依赖其在树中的绝对位置。目标不可命中时回 400（与失败属性回写同一约定），且失败的
+    // 模拟不改变任何状态。
+    if (route.starts_with("/api/input/")) {
+        if (method != "POST") {
+            return error_response(405, "Method not allowed for /api/input");
+        }
+        const std::string action = route.substr(std::string("/api/input/").size());
+        if (action != "click" && action != "scroll" && action != "text") {
+            return error_response(404, "Unknown input action: " + action);
+        }
+        nlohmann::json payload;
+        try {
+            payload = nlohmann::json::parse(body);
+        } catch (const nlohmann::json::parse_error &e) {
+            return error_response(400, std::string("Invalid JSON body: ") + e.what());
+        }
+        if (!payload.is_object()) {
+            return error_response(400, "Request body must be a JSON object");
+        }
+        // 字段类型一律前置显式校验：nlohmann 的 value()/get() 遇类型不符会抛 type_error，
+        // 任其逃逸只会变成 500，调用方拿不到「哪个字段错了」。
+        // `path` 必须存在且为字符串；空串表示树根本身（与 `find_node_by_path` 的空路径语义一致）。
+        const auto path_it = payload.find("path");
+        if (path_it == payload.end() || !path_it->is_string()) {
+            return error_response(
+                400, "Missing or invalid 'path' (tree index path string, e.g. \"0/1\"; empty string targets the root)");
+        }
+        const std::string widget_path = path_it->get<std::string>();
+        float dx = 0.0F;
+        float dy = 0.0F;
+        std::string text;
+        if (action == "scroll") {
+            for (const char *key : {"dx", "dy"}) {
+                if (payload.contains(key) && !payload[key].is_number()) {
+                    return error_response(400, std::string("'") + key + "' must be a number");
+                }
+            }
+            dx = payload.value("dx", 0.0F);
+            dy = payload.value("dy", 0.0F);
+        } else if (action == "text") {
+            if (const auto text_it = payload.find("text"); text_it != payload.end()) {
+                if (!text_it->is_string()) {
+                    return error_response(400, "'text' must be a string");
+                }
+                text = text_it->get<std::string>();
+            }
+        }
+
+        try {
+            const Json outcome = marshal_get<Json>([&]() -> Json {
+                std::scoped_lock lock(tree_mutex);
+                Node root = root_getter();
+                if (!root) {
+                    return Json{{"ok", false}, {"status", 500}, {"error", "Widget tree root is null"}};
+                }
+                Node target = Inspector::find_node(root, widget_path);
+                if (!target) {
+                    return Json{{"ok", false}, {"status", 404}, {"error", "Widget not found at path: " + widget_path}};
+                }
+                std::string failure;
+                if (action == "click") {
+                    const Result<void> r = Inspector::simulate_click(target.widget());
+                    failure = r ? std::string{} : r.error().message;
+                } else if (action == "scroll") {
+                    const Result<void> r = Inspector::simulate_scroll(target.widget(), dx, dy);
+                    failure = r ? std::string{} : r.error().message;
+                } else {
+                    const Result<void> r = Inspector::simulate_text_input(target.widget(), text);
+                    failure = r ? std::string{} : r.error().message;
+                }
+                if (!failure.empty()) {
+                    return Json{{"ok", false}, {"status", 400}, {"error", std::move(failure)}};
+                }
+                return Json{{"ok", true}, {"status", 200}, {"error", ""}};
+            });
+            if (!outcome.value("ok", false)) {
+                return error_response(outcome.value("status", 500),
+                                      outcome.value("error", std::string("simulate failed")));
+            }
+            nlohmann::json ok = nlohmann::json::object();
+            ok["status"] = "ok";
+            ok["action"] = action;
+            ok["widget_path"] = widget_path;
+            return json_response(200, "OK", ok);
+        } catch (const std::exception &e) {
+            return error_response(500, std::string("simulate failed: ") + e.what());
+        }
+    }
+
     // GET /api/components — 组件 schema 列表
     if (route == "/api/components") {
         if (method != "GET") {

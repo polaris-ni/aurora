@@ -171,7 +171,7 @@ Column#root { bounds:[0,0,640,480]; visible:true; listeners:[on_click] }
 |:---|:---|:---|
 | 节点查询 | `query(type, root)` / `get_state(path, root)` / `find_node(root, path)` / `widget_info(w)` | 按类型名检索、按路径取状态片段、按索引路径定位节点、Widget 完整信息 |
 | 属性读写 | `get_prop(w)` / `get_prop_value(w, key)` / `set_prop(w, key, val)` / `apply_patch(root, patch)` | 单属性回写返回 `Result<void>`；`apply_patch` 把 JSON Patch 逐条经 `set_prop` 应用到树 |
-| 交互模拟 | `simulate_click(w)` / `simulate_scroll(w, dx, dy)` / `simulate_text_input(w, text)` | 合成事件经 `EventDispatcher` 走真实命中测试 + 冒泡派发；派发根与坐标原点均为 `w` 自身、指针取 `w` 中心，故不依赖控件在树中的绝对位置（无需先绘制）。目标不可命中时返回 `GeneralNotSupported` 且不派发、不改状态 |
+| 交互模拟 | `simulate_click(w)` / `simulate_scroll(w, dx, dy)` / `simulate_text_input(w, text)` | 合成事件经 `EventDispatcher` 走真实命中测试 + 冒泡派发；派发根与坐标原点均为 `w` 自身、指针取 `w` 中心，故不依赖控件在树中的绝对位置（无需先绘制，但目标须已布局——未布局时尺寸为零、中心退化为自身原点）。目标不可命中时返回 `GeneralNotSupported` 且不派发、不改状态 |
 | 组件发现 | `components()` / `component_schema(name)` | 已注册组件 schema 列表 / 单组件 schema |
 | 代码生成 | `to_code(root)` | UI 树 → 源码（转发 §2.5） |
 | 验证 | `validate(root) -> std::vector<Diagnostic>` | 整树验证（`inspector_api.h:94`） |
@@ -229,6 +229,9 @@ server.stop();        // 停止并 join 工作线程
 | GET | `/api/components` | 全部已注册组件 schema 列表 |
 | GET | `/api/yaml` | 当前 widget 树的 YAML 格式字符串 |
 | POST | `/api/to_code` | UI 树 → C++ 代码。请求体可含 `style` 参数：`0`=Fluent、`1`=StepByStep、`2`=DesignatedInit；`style` 存在但非整数返回 400，越界整数回退 Fluent |
+| POST | `/api/input/{click\|scroll\|text}` | 交互模拟：以 `path` 命中的控件为派发根与坐标原点（指针取该控件中心）合成事件，经 `EventDispatcher` 走真实命中测试 + 冒泡派发。请求体须为对象且 `path` 为字符串（空串=树根）；`scroll` 另取数值 `dx`/`dy`（缺省 0），`text` 另取字符串 `text`。经主线程 marshal 执行，成功返回 `{status:"ok", action, widget_path}`；路径不存在 404、目标存在但不可派发 400、字段类型不符 400、方法非 POST 405 |
+
+> `/api/input/*` 为「目标式」语义：落点取目标控件中心，故目标须已布局（未布局时尺寸为零、中心退化为自身原点）。失败（路径不存在 / 不可派发 / 参数不符）一律在派发前返回，**不改变任何控件状态**。滚动只派发事件，偏移量不在响应里（`Scroll` 不序列化 offset），需要读回偏移请走 `scroll_offset` 类属性或 C++ 测试。
 
 ### 5.2 调试端点
 
@@ -296,6 +299,9 @@ stdio JSON-RPC 2.0。传输格式：`Content-Length: <N>\r\n\r\n<JSON-RPC 2.0 bo
 | `to_code` | `{tree, style?}` | C++ 代码 | `to_code()` |
 | `to_yaml` | `{tree}` | YAML 格式字符串 | `serialization::to_yaml(Json)` |
 | `get_schema` | 无 | 完整 API schema | `list_all_schemas()` + enums |
+| `simulate_interaction` | `{tree, path, action, dx?, dy?, text?, width?, height?}` | 目标控件属性 + 交互后逻辑快照 | `from_json()` + `render_to_logical_snapshot()`（派发前布局）+ `find_node()` + `simulate_click/scroll/text_input()` + `get_prop()` |
+
+> `simulate_interaction` 把「生成 → 交互 → 断言」闭环搬到无头环境：`action` 取 `click`/`scroll`/`text`，`path` 为索引路径（空串=树根），返回目标控件的属性快照与整棵树的交互后逻辑快照；目标未找到或中心不可命中时置 `isError`（此时不改状态）。**只能验证可观测状态**：JSON 树不带用户回调，故点击须经状态变化（如 `Checkbox.checked`、焦点转移）而非回调副作用来确认；滚动偏移不经此通道暴露（`Scroll` 不序列化 offset，`LazyList`/`GridView` 的 `scroll_offset` 又依赖运行时 ItemBuilder，静态 JSON 树给不出），偏移须由 C++ 测试读回。
 
 ### 7.2 CLI（`aurora_cli`）
 
@@ -531,7 +537,7 @@ int main() {
 
 三件套的 API 契约见 §7：
 
-- **MCP Server（`aurora_mcp`）**：stdio JSON-RPC 2.0，暴露 10 个 MCP tools。
+- **MCP Server（`aurora_mcp`）**：stdio JSON-RPC 2.0，暴露 11 个 MCP tools。
 - **CLI（`aurora_cli`）**：子命令 `components` / `describe` / `search` / `validate` / `snapshot` / `render` / `preview` / `to-code` / `to-yaml` / `schema`。
 - **LSP（`aurora_lsp`）**：stdio JSON-RPC 2.0 语言服务，对声明式写法提供 completion / hover / diagnostics / codeAction 四件套，消费库 live API（`describe_component` + `known_enums`），无需读取 `aurora_api.json` 文件，始终与代码同步。
 
