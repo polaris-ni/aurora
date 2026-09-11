@@ -19,7 +19,8 @@
   `WaylandSurface`（原生 Wayland：wl_shm+xdg-shell+xkbcommon，Linux 桌面，CMake 开关）、
   `WasmSurface`（Emscripten/Canvas 2D，浏览器 rAF 驱动）、`MacOSSurface`（AppKit/CoreGraphics，骨架）。
 - 线程模型：单线程 UI、同步事件、响应式细粒度信号。
-- **版本状态**：当前版本 **1.0.0-alpha.1**（早期预览开发版）。alpha 阶段 API 形态已完整但 **尚不构成稳定性承诺**，
+- **版本状态**：早期预览开发版（alpha 阶段）。当前版本号以 `CHANGELOG.json` 的 `currentVersion` 为准
+  （`check_version_consistency` 守门保证其与库内 `version.h` 一致）。alpha 阶段 API 形态已完整但 **尚不构成稳定性承诺**，
   仍可能破坏性变更；任何变更须遵循 semver 在 `CHANGELOG.json` 记录并提供迁移路径。
 
 ---
@@ -33,7 +34,7 @@
 | `examples/`         | 示例：每个组件一个 `demo_<组件>.cpp` 位于 `examples/demos/`（1:1，CMake 自动 GLOB）；`examples/demos/demo_common.h` 含 `Card`/`BrandBadge`/`GradientTitle` 等demo使用的全局控件 |
 | `tests/`            | 测试 + CTest：单元测试 `tests/unit/utest_*.cpp`、集成测试 `tests/integration/itest_*.cpp`、公共 fixture `tests/common/`、golden 基准 `tests/golden/`                          |
 | `third_party/`      | 三方库文件                                                                                                                                                                      |
-| `tools/`            | 工具链，按职责分子目录：`gen/`（三生成器 `gen_api`/`gen_error_codes`/`gen_debug_api`）、`servers/`（mcp / lsp / cli）、`bench/`（4 基准 + `bench_common.h`）、`check/`（校验与门禁脚本 + `perf_gates.json`）、`coverage/`（GCC/Clang/LLVM 覆盖率聚合）、`include/`（共享头，含枚举 SSOT `known_enums.h` 与 LSP 三层 `lsp_*.h`）。API 生成落盘 `aurora_api.json`，CMake 聚合目标 `aurora_api_json`；详见 `cmake/AuroraTools.cmake` 与 `cmake/AuroraInstrumentation.cmake` |
+| `tools/`            | 工具链，按职责分子目录：`gen/`（三生成器 `gen_api`/`gen_error_codes`/`gen_debug_api`）、`servers/`（mcp / lsp / cli）、`bench/`（4 基准 + `bench_common.h`）、`check/`（校验与门禁脚本 + `perf_gates.json` + 观测脚本 `build_baseline.py`：解析 `.ninja_log` / ctest 日志输出构建与测试耗时基线，非门禁）、`coverage/`（GCC/Clang/LLVM 覆盖率聚合）、`include/`（共享头，含枚举 SSOT `known_enums.h` 与 LSP 三层 `lsp_*.h`）。API 生成落盘 `aurora_api.json`，CMake 聚合目标 `aurora_api_json`；详见 `cmake/AuroraTools.cmake` 与 `cmake/AuroraInstrumentation.cmake` |
 | `cmake/`            | CMake 模块（顶层 `CMakeLists.txt` 只做编排）：`AuroraFeatures`（feature 宏单一入口 `aurora_define_feature`）/`AuroraThirdParty`（三方构建）/`AuroraImageCodecs`（图片编解码）/`AuroraCcache`（编译缓存）/`AuroraSimd`（SIMD）/`AuroraBackends`（后端开关）/`AuroraTools`（工具）/`AuroraDemos`（示例）/`AuroraTests`（测试）/`AuroraInstrumentation`（插桩）/`AuroraInstall`（安装）/`AuroraUtils`（公共辅助函数：消费者目标统一配置），共 12 个；布局与职责详见 `codespec/BUILD_OPTIONS.md` §1.1 |
 | `codespec/`         | **全部项目文档**（需求/架构/规范/指南/概念），见下方导航表                                                                                                                      |
 | `build/`            | 构建产物，CMake 生成，不纳入版本管理                                                                                                                                            |
