@@ -6,7 +6,8 @@
 // 并行模型（CTest 进程隔离 + 资源虚拟化）的进程内侧：
 //   - cwd：runner 启动时统一切到仓库根（经可执行文件位置向上定位），
 //     相对路径解析不再依赖 CTest 的 WORKING_DIRECTORY 白名单；
-//   - tmpdir：每个用例开始时创建唯一临时目录并接管 TMPDIR/TMP/TEMP，
+//   - tmpdir：每个用例开始时创建**运行路径下 `test_temp/` 内的唯一子目录**
+//     （`fs::current_path()/test_temp/<case>`，见 C4 约定）并接管 TMPDIR/TMP/TEMP，
 //     用例结束后清理，偏好 / 存储类用例的临时文件写入彼此隔离；
 //   - 剪贴板：用例结束兜底卸载库侧 memory 注入后端（Clipboard::remove_test_backend），
 //     防止用例把注入状态泄漏到后续用例。

@@ -276,8 +276,9 @@ auto run_selected(const std::vector<const TestCase*>& selected, const CliOptions
                 std::printf("[ RUN      ] %s\n", test_case->full_name().c_str());
             }
             // 用例边界资源隔离：进用例前开新临时目录并接管 TMP/TMPDIR/TEMP、兜底卸载
-            // 剪贴板注入残留；出用例后清理临时目录、卸载注入。死亡测试子进程同样生效
-            // （幂等，且子进程短暂存在的临时目录由自身 end_case 清理）。
+            // 剪贴板注入残留；出用例后清理临时目录、卸载注入。死亡测试子进程**不**自建目录，
+            // 而是复用父进程经 TMPDIR 继承的唯一临时目录（见 isolation.cpp），由父进程 end_case
+            // 统一回收——避免子进程异常退出后 test_temp/ 残留（C4 验收）。
             aurora::testing::isolation::begin_case();
             auto result = aurora::testing::run_case(*test_case);
             aurora::testing::isolation::end_case();

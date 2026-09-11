@@ -31,7 +31,7 @@ auto make_2x2_bmp() -> std::vector<std::uint8_t> {
 }
 
 auto write_temp_file(const std::string& file_name, const std::vector<std::uint8_t>& bytes) -> std::filesystem::path {
-    const auto dir = std::filesystem::temp_directory_path() / "aurora_utest_image_sequence";
+    const auto dir = std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_image_sequence";
     std::filesystem::create_directories(dir);
     const auto file = dir / file_name;
     std::ofstream out{file, std::ios::binary};
@@ -177,11 +177,11 @@ AURORA_TEST_CASE(open_single_path_loads_single_frame) {
     AURORA_TEST_CHECK_EQ(s.frame_count(), 1U);
     AURORA_TEST_CHECK_NEAR(s.natural_size().width, 2.0F, 0.0F);
     AURORA_TEST_CHECK_EQ(s.position().count(), 0);
-    std::filesystem::remove_all(std::filesystem::temp_directory_path() / "aurora_utest_image_sequence");
+    std::filesystem::remove_all(std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_image_sequence");
 }
 
 AURORA_TEST_CASE(open_semicolon_separated_paths_load_all) {
-    const auto dir = std::filesystem::temp_directory_path() / "aurora_utest_image_sequence";
+    const auto dir = std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_image_sequence";
     std::filesystem::create_directories(dir);
     const auto f1 = dir / "a.bmp";
     const auto f2 = dir / "b.bmp";

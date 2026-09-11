@@ -152,6 +152,15 @@
 
 ---
 
+### 3.4 测试临时文件规范
+
+所有测试产生的临时文件**一律**经框架隔离机制走 `aurora::testing::isolation::temp_dir()`（即运行路径下的 `test_temp/<case>/`），**禁止**自行调用 `std::filesystem::temp_directory_path()`、裸写 `"/tmp"`，或往当前工作目录 / 仓库根写文件：
+
+- 用例边界由 `tests/framework/isolation.cpp` 统一接管 `TMPDIR/TMP/TEMP`，基目录定为 `fs::current_path()/test_temp`；每用例一个唯一子目录，用例结束自动清理，会话结束 `test_temp/` 清空（显式给定路径如 `--report` 产物除外）。
+- 取临时文件时，用 `temp_dir()` 拼路径——如 `std::filesystem::path{aurora::testing::isolation::temp_dir()} / "foo.png"`，不要手写系统临时目录。
+- 确有特殊原因须绕过的（框架自检在用例隔离前运行、`current_path()` 断言产品默认输出目录、模拟拖入的假路径字符串等），必须在调用点上方紧邻注释写明 `TEST_TEMP_EXEMPT: <原因>`，由守门脚本 `tools/check/check_test_temp_hygiene.py` 放行。
+- 守护：`check_test_temp_hygiene`（CTest 用例）扫描 `tests/` 内 `temp_directory_path` / 裸 `/tmp` / 写 cwd 的未豁免写法，命中即红灯。
+
 ## 4 元数据与可观测
 
 - **错误可机读**：`Error::to_json()` 输出结构化错误（`code` / `message` / `suggestion` / `docs` / `where`），供 AI 解析。

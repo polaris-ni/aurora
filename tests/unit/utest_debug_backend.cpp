@@ -57,9 +57,9 @@ class StubSurface final : public Surface {
     int height_ = 4;
 };
 
-/// @brief 用例专属临时 PNG 路径（系统临时目录下固定名；各套件独立进程不会互撞）。
+/// @brief 用例专属临时 PNG 路径（框架隔离临时目录 test_temp/<case> 下固定名；各套件独立进程不会互撞）。
 [[nodiscard]] auto temp_png_path(const std::string& name) -> std::string {
-    return (std::filesystem::temp_directory_path() / name).string();
+    return (std::filesystem::path{aurora::testing::isolation::temp_dir()} / name).string();
 }
 
 /// @brief 清理临时文件（忽略不存在/权限错误）。
@@ -80,7 +80,7 @@ AURORA_TEST_CASE(resolve_empty_path_returns_output_directory) {
 
 AURORA_TEST_CASE(resolve_pure_filename_joins_output_directory) {
     const std::string original = output_directory();
-    const std::string custom = (std::filesystem::temp_directory_path() / "aurora_utest_outdir").string();
+    const std::string custom = (std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_outdir").string();
     set_output_directory(custom);
 
     // 纯文件名（无目录分隔）落入缺省输出目录。
@@ -92,7 +92,7 @@ AURORA_TEST_CASE(resolve_pure_filename_joins_output_directory) {
 
 AURORA_TEST_CASE(resolve_explicit_paths_pass_through) {
     const std::string original = output_directory();
-    set_output_directory((std::filesystem::temp_directory_path() / "aurora_utest_outdir").string());
+    set_output_directory((std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_outdir").string());
 
     // 绝对路径原样返回。
     const std::string absolute = temp_png_path("abs_shot.png");
@@ -106,12 +106,13 @@ AURORA_TEST_CASE(resolve_explicit_paths_pass_through) {
 AURORA_TEST_CASE(output_directory_roundtrip_and_default_reset) {
     const std::string original = output_directory();
 
-    const std::string custom = (std::filesystem::temp_directory_path() / "aurora_utest_outdir2").string();
+    const std::string custom = (std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_outdir2").string();
     set_output_directory(custom);
     AURORA_TEST_CHECK_EQ(output_directory(), custom);
 
     // 空串恢复缺省：当前程序运行目录下的 ./aurora_debug/。
     set_output_directory("");
+    // TEST_TEMP_EXEMPT: 断言调试后端默认输出目录为 cwd/aurora_debug（产品默认行为，非写入测试临时文件）。
     const std::filesystem::path expected_default = std::filesystem::current_path() / "aurora_debug";
     AURORA_TEST_CHECK_EQ(output_directory(), expected_default.string());
 

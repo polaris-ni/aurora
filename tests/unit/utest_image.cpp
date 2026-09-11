@@ -98,7 +98,7 @@ namespace {
 /// @brief 在用例唯一临时目录下建独立子目录并写入字节文件（用例结束由调用方 remove_all）。
 [[nodiscard]] auto write_temp_file(const std::string& dir_name, const std::string& file_name,
                                    const std::vector<std::uint8_t>& bytes) -> std::filesystem::path {
-    const auto dir = std::filesystem::temp_directory_path() / dir_name;
+    const auto dir = std::filesystem::path{aurora::testing::isolation::temp_dir()} / dir_name;
     std::filesystem::create_directories(dir);
     const auto file = dir / file_name;
     std::ofstream out{file, std::ios::binary};
@@ -120,7 +120,7 @@ AURORA_TEST_CASE(default_image_is_empty) {
 AURORA_TEST_CASE(load_missing_file_returns_error) {
     namespace m = aurora::testing::matchers;
 
-    const auto dir = std::filesystem::temp_directory_path() / "aurora_utest_image_missing";
+    const auto dir = std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_image_missing";
     std::filesystem::create_directories(dir);
     const auto result = aurora::Image::load((dir / "no_such_file.bmp").string());
     AURORA_TEST_CHECK(!result.ok());
@@ -190,7 +190,7 @@ AURORA_TEST_CASE(load_bmp_rejects_non_24bit_or_compressed) {
 
 AURORA_TEST_CASE(load_svg_error_paths) {
     // 缺文件：结构化错误返回。
-    const auto dir = std::filesystem::temp_directory_path() / "aurora_utest_image_svg";
+    const auto dir = std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_image_svg";
     std::filesystem::create_directories(dir);
     const auto missing = aurora::Image::load_svg((dir / "no_such.svg").string());
     AURORA_TEST_CHECK(!missing.ok());

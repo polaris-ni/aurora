@@ -138,6 +138,7 @@ AURORA_TEST_CASE(plain_scene_dispatches_are_safe_noops) {
     AURORA_TEST_CHECK_NO_THROW(app.dispatch_click(5.0F, 5.0F));
     AURORA_TEST_CHECK_NO_THROW(app.dispatch_pointer(6.0F, 6.0F, MouseAction::Move));
     AURORA_TEST_CHECK_NO_THROW(app.tick());
+    // TEST_TEMP_EXEMPT: 模拟拖入的假路径字符串，非真实临时目录。
     const std::vector<std::string> dropped_paths{"C:/tmp/a.txt"};
     AURORA_TEST_CHECK_NO_THROW(app.dispatch_file_drop(dropped_paths, 1.0F, 2.0F));
 

@@ -99,7 +99,7 @@ inline auto migrate_storage(std::uint32_t old_version, const MigratingDoc* /*doc
 
 /// @brief 用例临时目录（fs 门面用例专用）。
 [[nodiscard]] auto make_case_dir(std::string_view tag) -> std::filesystem::path {
-    return std::filesystem::temp_directory_path() / "aurora_utest_storage" / std::filesystem::path{tag};
+    return std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_storage" / std::filesystem::path{tag};
 }
 
 /// @brief 创建注入 MemoryBackend 的门面（绝大多数用例的底座）。

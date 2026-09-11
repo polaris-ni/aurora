@@ -81,6 +81,11 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_platform_macros
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_platform_macros.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 测试临时文件纪律（C4）：tests/ 内禁止绕过 isolation::temp_dir() 的
+        # temp_directory_path() / 裸 /tmp / 写 cwd；合法例外须带 TEST_TEMP_EXEMPT 注释。
+        add_test(NAME check_test_temp_hygiene
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_test_temp_hygiene.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
         # 公共 API 体量/token 预算门禁（#24）：aurora_api.json 估算 token 数不得超预算上限。
         add_test(NAME check_api_budget
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_api_budget.py"

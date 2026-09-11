@@ -23,7 +23,7 @@ namespace m = aurora::testing::matchers;  // 匹配器工厂别名
 /// @brief 本用例的临时目录：框架每用例接管 TMP/TEMP/TMPDIR，temp_directory_path() 已是
 /// 用例唯一目录，再挂固定子目录并先行清场，保证幂等与跨用例/跨进程并行安全。
 [[nodiscard]] auto make_case_dir(std::string_view tag) -> std::filesystem::path {
-    return std::filesystem::temp_directory_path() / "aurora_utest_prefs" / std::filesystem::path{tag};
+    return std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_prefs" / std::filesystem::path{tag};
 }
 
 AURORA_TEST_CASE(memory_mode_basic_get_set) {

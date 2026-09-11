@@ -134,25 +134,32 @@ auto set_env(const char* name, const std::string& value) -> void {
 }
 
 /// @brief 创建本轮唯一临时目录（时间戳 + 序号 + create_directory 原生排他，重试上限兜底）。
+///
+/// 基目录约定（C4，2026-09-11 定论）：优先定为**运行路径下的 test_temp/**（即
+/// `fs::current_path()/test_temp`）。这样所有用例临时文件收敛到仓库运行目录、可被
+/// `.gitignore` 统一忽略，且每用例一个唯一子目录（`test_temp/<case>`，`<case>` 为
+/// `aurora_test_<时间戳>_<序号>` 唯一令牌）彼此隔离。
+///
+/// 回退链仅在运行路径**不可写**（只读挂载 / 沙箱 / 某些 CI 文件系统）时触发，保证隔离
+/// 机制永不失效；每一级回退都已在下方注释写明原因（守门脚本 `check_test_temp_hygiene`
+/// 也据此放行框架内部的必要例外）。
 [[nodiscard]] auto make_unique_temp_dir() -> std::string {
-    // 基目录按优先级回退：系统临时目录 → POSIX /tmp → 工作目录下的隐藏目录。
-    // 必须回退到一个**可用目录**而非返回空串：空串等于放弃接管 TMPDIR/TMP/TEMP，
-    // 用例里抛异常的 temp_directory_path() 会直接失败，temp_dir() 拼出的路径也会退化成根路径
-    // （如 WSL 继承了 Windows 的 TMP/TEMP，libstdc++ 的 temp_directory_path 直接报 ENOENT）。
-    std::error_code base_ec;
-    auto base = ensure_base_dir(fs::temp_directory_path(base_ec));
+    // 主基目录：运行路径下的 test_temp/（cwd 已由 setup() 切到仓库根，故实际落在 <repo>/test_temp）。
+    // 用例边界经此目录隔离；不可写时才向下回退。
+    std::error_code cwd_ec;
+    const auto cwd = fs::current_path(cwd_ec);
+    auto base = cwd_ec ? fs::path{} : ensure_base_dir(cwd / "test_temp");
+    if (base.empty()) {
+        // 回退①：运行路径不可写（如只读挂载 / 沙箱）→ 退到系统临时目录，仍保证隔离不失效。
+        std::error_code sys_ec;
+        base = ensure_base_dir(fs::temp_directory_path(sys_ec));
+    }
 #if !defined(AURORA_PLATFORM_WINDOWS)
     if (base.empty()) {
+        // 回退②：系统临时目录也不可用 → 退到 POSIX /tmp（最后兜底，正常开发/CI 不应命中）。
         base = ensure_base_dir(fs::path{"/tmp"});
     }
 #endif
-    if (base.empty()) {
-        std::error_code cwd_ec;
-        const auto cwd = fs::current_path(cwd_ec);
-        if (!cwd_ec) {
-            base = ensure_base_dir(cwd / ".aurora_test_tmp");
-        }
-    }
     if (base.empty()) {
         return {};
     }
@@ -196,6 +203,14 @@ auto begin_case() -> void {
         state.saved_temp = get_env("TEMP");
         state.env_saved = true;
     }
+    // 死亡测试子进程：复用父进程经 TMPDIR 继承下来的唯一临时目录，**不再自建目录**。
+    // 子进程异常退出时 end_case 来不及执行，自建目录会残留在 test_temp/ 下且父进程
+    // 不知其名、无法代为清理；复用父目录后由父进程 end_case 统一回收，满足 C4
+    // 「跑完 test_temp/ 应为空」的验收。子进程同样禁止删除该目录（见 end_case 守卫）。
+    if (detail::death_child_mode()) {
+        state.temp_dir = get_env("TMPDIR");
+        return;
+    }
     // 兜底清理上一轮残留（end_case 正常已清；容忍异常路径跳过 end 的极端情况）。
     if (!state.temp_dir.empty()) {
         std::error_code ec;
@@ -216,8 +231,12 @@ auto begin_case() -> void {
 auto end_case() -> void {
     auto& state = case_state();
     if (!state.temp_dir.empty()) {
-        std::error_code ec;
-        fs::remove_all(state.temp_dir, ec);
+        // 死亡测试子进程复用的是父进程目录，删除权归父进程 end_case；子进程自身
+        // （即便走到 end_case，如 statement 未致死）不得删除，否则会误删父进程仍在用的目录。
+        if (!detail::death_child_mode()) {
+            std::error_code ec;
+            fs::remove_all(state.temp_dir, ec);
+        }
         state.temp_dir.clear();
     }
     (void)aurora::Clipboard::remove_test_backend();
