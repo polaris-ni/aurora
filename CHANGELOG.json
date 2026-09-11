@@ -1,6 +1,6 @@
 {
   "schema": "aurora-changelog/1.0",
-  "currentVersion": "1.0.0-alpha.2",
+  "currentVersion": "1.0.0-alpha.3",
   "policy": "semver",
   "freeze": "minor-versions-are-additive",
   "rules": [
@@ -81,6 +81,45 @@
       ],
       "notes": [
         "版本定位与已知限制延续 1.0.0-alpha.1 条目 notes；本条目起 MSVC 与 GCC/Clang 同为受支持工具链，ctest 全量验收在两者上执行。"
+      ]
+    },
+    {
+      "version": "1.0.0-alpha.3",
+      "date": "2026-09-11",
+      "type": "pre-release",
+      "summary": "开发迭代版：WebAssembly（Emscripten）接入完整构建与测试链路（wasm 预设 + ctest 全量跑通 + 宿主生成器改原生子项目）；平台宏体系新增能力宏族 AURORA_CAP_*，测试设施的裸平台宏判据全量收敛；Inspector 交互模拟打通远程与 AI 工具面（HTTP /api/input/* 与 MCP simulate_interaction）；修复安装导出漏导 AURORA_ENABLE_DEBUG 导致的消费端 ODR 违规与崩溃，以及焦点导航几何缺失、GCC/Clang 误报告警等一批缺陷。",
+      "breakingChanges": [
+        "core/environment.h 依赖图单向化（environment ← build_context）：environment.h 不再隐式包含 build_context.h。只包含前者而体内调用 Environment::get<T>() 的 TU 在 wasm-ld 下链接失败（undefined symbol）——native 侧此前靠其他归档成员的同名弱定义侥幸通过。迁移路径：显式 #include \"aurora/core/build_context.h\"。",
+        "移除 clang-tidy 门禁与 aurora_lint 工具：.clang-tidy、cmake/AuroraLint.cmake、tools/check/run_clang_tidy.py、lint 与 lint-fix 目标、aurora_lint 可执行及其用例 itest_au_lint 全部移出仓库。迁移路径：CI 里调用 --target lint / lint-fix 的地方改用编译器告警（-Wall -Wextra -Wpedantic），或由消费者侧自行接入 clang-tidy。",
+        "widget/：Widget::focus_bounds() 的取值语义变更——此前无写入点、恒返回零盒，现返回最近一次绘制写入的绝对盒（与 paint_bounds_ 同源同值），从未绘制过则仍为零盒。无迁移：此前依赖该取值的逻辑没有任何可能是正确的。"
+      ],
+      "added": [
+        "core/platform.h：新增恒定义（取值 0/1）的能力宏族 AURORA_CAP_*，回答「本 TU 能用什么能力」而非「目标是什么平台」；现仅 AURORA_CAP_THREADS（Emscripten 未开 -pthread 时为 0，其余目标为 1）。测试框架（assertions / death_test / isolation / test_main / value_print / test_assert / test_death）的裸平台与编译器宏判据全量收敛到 AURORA_PLATFORM_* / AURORA_COMPILER_* / AURORA_CAP_*，framework 头层原「零 aurora 依赖」不变量放宽为允许纯宏头 core/platform.h。",
+        "构建：WebAssembly（Emscripten 6.0.9）构建预设与 ctest 全链路——NODERAWFS 下 cwd 经 --post-js 运行时改写成 POSIX 形态、-fexceptions 须编译与链接同参、打开 ALLOW_MEMORY_GROWTH；宿主代码生成器（gen_api / gen_error_codes / gen_debug_api）在 wasm 构建下改为原生子项目构建。",
+        "inspector/：交互模拟（Inspector::simulate_click / simulate_scroll / simulate_text_input）打通远程与 AI 工具面——InspectorServer 新增 POST /api/input/{click|scroll|text} 端点，aurora_mcp 新增 simulate_interaction 工具，无头环境即可完成「生成 → 交互 → 断言」闭环。"
+      ],
+      "changed": [
+        "tests/：wasm 目标下 ctest 全量开启——能力缺失用例统一走 AURORA_TEST_REQUIRE_THREADS / AURORA_TEST_REQUIRE_SUBPROCESS 的 SKIP 路径，死亡测试整条跳过。",
+        "ci：core 矩阵补 linux-clang（消除 GCC 单编译器盲区）与 windows-msvc Debug；install-consumer 拆为「默认」与「非默认宏一致性」两组，后者在 Release 下强制 DEBUG=ON 把该类缺陷变为红灯；release 产物名按 runner.arch 实际取值命名（macos-latest 现为 arm64）。",
+        "core/environment.h 与 core/build_context.h：依赖图单向化，build_context.h 直依赖 environment.h；各使用方（text / window / provider / title_bar / hero / modifier_layout / layout_engine / offscreen / media_query）补显式包含。",
+        "构建：诊断压制按编译器族成对守卫——GCC 专有告警组（-Wdangling-pointer / -Wstringop-overflow / -Wmaybe-uninitialized）以 AURORA_COMPILER_GCC 包裹 push/pop，clang 侧的 EM_ASM 占位符误报以 AURORA_COMPILER_CLANG 包裹 push/ignored/pop。"
+      ],
+      "fixed": [
+        "安装导出：AuroraConfig.cmake 补导 AURORA_ENABLE_DEBUG——该宏在 Widget 下新增数据成员、改变类布局，此前只导出后端与架构优化宏，漏导即库与消费端 ABI 不一致 → ODR 违规（实测 Release 库强制 DEBUG=ON 安装后，消费端零额外宏运行 render_to_png 跳 0x0、SIGSEGV 139）。现按安装产物实际取值条件导出：强制 ON、或 AUTO + 单配置 Debug/RelWithDebInfo 才导出，AUTO + Release 与强制 OFF 不导出。",
+        "widget/：Widget::focus_bounds_ 无写入点，FocusManager::move_focus 的方向键导航因此失效（Tab 序按注册序、不受影响）；现由绘制遍历在 Widget::paint 入口写入，与 paint_bounds_ 同源同值。",
+        "inspector/：simulate_click / simulate_scroll 不携带焦点管理器（控件 request_focus() 读到空槽静默 no-op，点击输入框不获焦、后续键盘与文本输入都没有接收者）、simulate_text_input 结束时把焦点槽写成 nullptr 而非复原、目标不可命中时仍返回 ok；现补焦点上下文（优先复用派发上下文，无则用以目标控件为根的临时实例）与失败判据（点击/滚动派发前做同口径命中测试、文本以目标是否消费为判据），失败一律 GeneralNotSupported 且不改状态。",
+        "tests/：utest_freetype_library 裸调 ft_shutdown() 只销毁 FT_Library，留下 font_discovery 注册表中由其派生的野 FT_Face，单进程顺序跑全量时污染后续所有字体用例（原生 SIGSEGV；wasm 下野字段被复用为垃圾函数指针 → call_indirect 失败且崩点随 --shuffle 漂移）；改走 shutdown_font_discovery() 完整关闭路径并补重建后度量可用的回归断言。",
+        "告警：GCC 13/14 对 const 引用绑定的 -Wdangling-reference 误报、GCC 15 对 vector 下标界的 -Warray-bounds 误报、clang 在 -Wpedantic 下对 EM_ASM 内 $0/$1 占位符的 -Wdollar-in-identifier-extension 误报（wasm_surface.h 该 TU 11 → 0）；image_stb 的 load_image_stb 以 std::copy_n 替换 std::memcpy。",
+        "window/：macOS 的 GL 头改走 OpenGL.framework 的 <OpenGL/gl.h>；X11Surface::data() 定义移出 DEBUG 守卫以修 Release 链接失败；Glfw 工厂异常转 PlatformUnavailable，对齐 Result 契约。",
+        "构建：MSVC 多配置下生成器守卫与中文编码崩溃；消费端冒烟示例与 README 快速上手（Node 从 Widget 派生对象接管所有权，Widget 拷贝构造已 delete，须显式 std::move）。"
+      ],
+      "migrations": [
+        "environment → build_context：显式 #include \"aurora/core/build_context.h\"（此前经 environment.h 隐式获得）；调用形式 Environment::get<T>() 不变。",
+        "lint 目标：CI 中的 --target lint / lint-fix 已不存在，改用编译器告警（-Wall -Wextra -Wpedantic）或在消费者侧自行接入 clang-tidy。",
+        "focus_bounds()：无需迁移（此前恒返回零盒，任何依赖它的逻辑都取不到有效几何）。"
+      ],
+      "notes": [
+        "版本定位与已知限制延续 1.0.0-alpha.1 / alpha.2 条目；本条目起 WebAssembly（Emscripten）与 GCC / Clang / MSVC 同为受支持构建目标，ctest 全量验收在三大原生工具链与 wasm 上执行。"
       ]
     }
   ]

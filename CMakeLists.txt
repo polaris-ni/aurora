@@ -24,7 +24,7 @@ project(aurora
 # 由 include/aurora/core/version.h 经 AURORA_VERSION_STRING 暴露给程序。
 # 带 FORCE：版本号以仓库声明为单一事实来源，既有 build 目录重新 configure 即同步升级；
 # 如需临时覆盖可改仓库源（发布 stable 时置空串）。
-set(AURORA_VERSION_SUFFIX "alpha.2" CACHE STRING
+set(AURORA_VERSION_SUFFIX "alpha.3" CACHE STRING
         "Pre-release suffix appended after PROJECT_VERSION (empty for stable releases)" FORCE)
 
 # ============================================================
