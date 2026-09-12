@@ -813,8 +813,14 @@ auto FontEngine::hit_test_char(const std::string &text, float x, const Font &f) 
 auto FontEngine::hit_test_char(const std::string &text, float x, const Font &f, const TextLayoutOpts &opts)
     -> std::size_t {
     const std::size_t total = cp_count(text);
-    if (total == 0 || x <= 0.0F) {
+    if (total == 0) {
         return 0;
+    }
+    // A2 RTL：x≤0（视觉左缘之外）= 逻辑末尾——视觉最左即逻辑最后，caret 语义落逻辑尾边界；
+    // 与 hit_test_single_pass 的 x≤0 分支（L519-521）及 display_hit_test_char 语义一致。
+    // （此前入口无条件返回 0，导致 RTL 段点击行左缘 caret 恒落逻辑首——A2 验收发现。）
+    if (x <= 0.0F) {
+        return opts.direction == TextDirection::RTL ? total : 0;
     }
     const auto &faces = resolve_faces(f.family);
     if (faces.empty()) {
@@ -841,8 +847,14 @@ auto FontEngine::hit_test_char_inclusive(const std::string &text, float x, const
 auto FontEngine::hit_test_char_inclusive(const std::string &text, float x, const Font &f, const TextLayoutOpts &opts)
     -> std::size_t {
     const std::size_t total = cp_count(text);
-    if (total == 0 || x <= 0.0F) {
+    if (total == 0) {
         return 0;
+    }
+    // A2 RTL：x≤0（视觉左缘之外）= 命中逻辑尾字符（含头含尾语义，镜像 LTR 的「行尾右侧
+    // 命中末字符」）；与 hit_test_single_pass 的 x≤0 分支及 display_hit_test_char_inclusive
+    // 语义一致。（此前入口无条件返回 0，导致 RTL 段点击行左缘恒命中逻辑首——A2 验收发现。）
+    if (x <= 0.0F) {
+        return opts.direction == TextDirection::RTL ? total - 1U : 0;
     }
     const auto &faces = resolve_faces(f.family);
     if (faces.empty()) {
