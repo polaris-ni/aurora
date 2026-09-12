@@ -5018,6 +5018,14 @@
           "name": "show",
           "required": false,
           "type": "bool"
+        },
+        {
+          "default": "\"auto\"",
+          "json_type": "string",
+          "name": "direction",
+          "note": "书写方向(auto=继承环境)",
+          "required": false,
+          "type": "TextDirection"
         }
       ],
       "props": [
@@ -5028,6 +5036,11 @@
         "width"
       ],
       "props_schema": {
+        "direction": {
+          "default": "\"auto\"",
+          "description": "书写方向(auto=继承环境)",
+          "type": "string"
+        },
         "height": {
           "default": "auto",
           "type": "array"

@@ -105,6 +105,15 @@ class RichTextEdit : public LeafWidget {
         return *this;
     }
 
+    /// @brief 设置书写方向（链式；A2）。nullopt = 继承环境（`Directionality` 注入/进程级），
+    ///        与 Text/TextInput 语义一致。RTL 时光标/选区/命中走逻辑↔视觉镜像（逻辑首字符在右缘）、
+    ///        段落整体右对齐。
+    auto set_direction(std::optional<TextDirection> d) -> RichTextEdit & {
+        direction_ = d;
+        return *this;
+    }
+    [[nodiscard]] auto direction() const -> std::optional<TextDirection> { return direction_; }
+
     /// @brief 切换当前字体粗体（weight 400 ↔ 700）。
     auto toggle_bold() -> void { cur_font_.weight = (cur_font_.weight >= 700) ? 400 : 700; }
     /// @brief 切换当前字体斜体（通过 family 后缀 "*" 模拟，实际渲染依赖 FontEngine）。
@@ -232,13 +241,16 @@ class RichTextEdit : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override;
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override;
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override;
 
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override;
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override;
 
-    /// @brief 文本方向（A2）：caret 绘制与命中测试的镜像依据。基类默认 LTR；
-    ///        子类（TextInput）于布局期将解析得到的生效方向写入此处。
-    TextDirection layout_direction_ = TextDirection::LTR;
+    /// @brief 生效书写方向（A2）：布局期解析并缓存。nullopt = 无显式来源，shaping 保持按内容 guess
+    ///        （默认行为与接入前一致，golden 逐位不变）；进程级默认 LTR 不强制覆盖 guess。
+    std::optional<TextDirection> cached_direction_;
+
+    /// @brief 显式书写方向（A2）：nullopt = 继承环境（`Directionality` 注入/进程级）。
+    std::optional<TextDirection> direction_;
 
   private:
     // ---- 内部行结构（布局用）----
@@ -249,6 +261,27 @@ class RichTextEdit : public LeafWidget {
     auto relayout_lines(float max_width) -> void;
 
     auto pos_from_line_col(size_t line_idx, size_t col) const -> size_t;
+
+    /// @brief 单行「生效方向 + 各同样式 run」的视觉布局（A2 RTL）：连续同样式字符合并为 shaping run，
+    ///        逐 run 经 `FontEngine` 整形（方向取各 run 自身内容方向，跨 run 顺序取段落基准方向）；
+    ///        RTL 段落整体右对齐并翻转 run 顺序。返回每个 run 的视觉起点 x、宽度与行内下标区间。
+    struct RunLayout {
+        std::string text;
+        Font font = {};
+        Color color = Color::black();
+        std::vector<char> underline;  ///< 与 text 逐字对应的下划线标记（0/1）
+        float x = 0.0F;
+        float w = 0.0F;
+        std::size_t begin = 0;  ///< 该 run 首字符在行内的逻辑下标（含 '\n' 计 1）
+        std::size_t end = 0;    ///< 该 run 末字符逻辑下标 +1
+    };
+
+    auto compute_line_runs(const Line &line, TextDirection base, const Rect &bounds) const -> std::vector<RunLayout>;
+
+    /// @brief 计算给定行内、逻辑下标 `caret_local` 处光标的视觉 x（相对 bounds 左缘）。
+    ///        RTL 下 `FontEngine::caret_x` 返回逻辑 0 在右缘的视觉偏移，调用方无需再镜像。
+    auto caret_visual_x(const Line &line, TextDirection base, std::size_t caret_local, const Rect &bounds) const
+        -> float;
 
     // ---- 编辑操作（带 UndoStack 集成）----
 
