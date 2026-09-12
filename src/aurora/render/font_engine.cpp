@@ -19,6 +19,7 @@
 #include "aurora/core/log.h"
 #include "aurora/core/utf8.h"
 #include "aurora/perf/counters.h"
+#include "aurora/render/bidi.h"
 #include "aurora/render/bitmap_font.h"
 #include "aurora/render/font_discovery.h"
 #include "aurora/render/glyph_atlas.h"
@@ -319,6 +320,10 @@ class ShapeCache {
     if (line.empty()) {
         return out;
     }
+    // 段落基准方向：显式 direction 优先，否则按首个强方向字符推断（UBA P2/P3）。
+    // 该基准同时作为各 run 的 hb 基准方向（hb 在其下应用 UBA，嵌的异向子段仍保持可读），
+    // 并驱动下方的跨 run 视觉重排。
+    const TextDirection base = opts.direction.has_value() ? *opts.direction : detail::guess_paragraph_direction(line);
     // 1) 解码整行码点并标注每个码点所属面。
     struct CpInfo {
         unsigned cp;
@@ -340,7 +345,9 @@ class ShapeCache {
             cps.push_back({.cp = cp, .face = ff, .byte_start = bs, .byte_end = i});
         }
     }
-    // 2) 把连续同面码点切为 run，逐 run 调 hb_shape。
+    // 2) 把连续同面码点切为 run；逐 run 调 hb_shape，每个 run 的字形序列先独立收集。
+    //    段内 bidi 由 HarfBuzz 负责（base 方向下保持嵌的异向子段可读），本函数只做跨 run 重排。
+    std::vector<std::vector<ShapedGlyph>> segs;
     for (std::size_t k = 0; k < cps.size();) {
         const auto &cp = cps.at(k);
         FontFace *rf = cp.face;
@@ -356,6 +363,7 @@ class ShapeCache {
         if (run_str.empty()) {
             continue;
         }
+        std::vector<ShapedGlyph> seg;
         const FT_Face face = rf->face;
         FT_Set_Pixel_Sizes(face, 0, px);
         apply_italic(face, opts.italic);  // 决定字形变换，使 shaping 与绘制变换一致（斜体剪切不改变 x 推进）
@@ -367,10 +375,9 @@ class ShapeCache {
         hb_buffer_t *buf = hb_buffer_create();
         hb_buffer_add_utf8(buf, run_str.data(), static_cast<int>(run_str.size()), 0, static_cast<int>(run_str.size()));
         hb_buffer_guess_segment_properties(buf);
-        // A2：显式 direction 覆盖 guess（nullopt 保持 guess —— 默认行为与接入前逐位一致）。
-        // RTL 时 hb 把字形反转输出为**视觉序**（x_advance 恒正），绘制按数组顺序左→右即为正确视觉序。
+        // A2：显式 direction 作为该 run 的基准方向；hb 在 base 下应用 UBA，嵌的异向子段仍保持可读。
         if (opts.direction.has_value()) {
-            hb_buffer_set_direction(buf, *opts.direction == TextDirection::RTL ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
+            hb_buffer_set_direction(buf, base == TextDirection::RTL ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
         }
         hb_shape(hb_font, buf, nullptr, 0);
         unsigned int ng = 0;
@@ -378,6 +385,7 @@ class ShapeCache {
         const hb_glyph_position_t *poss = hb_buffer_get_glyph_positions(buf, &ng);
         // HarfBuzz 返回 C 风格数组，此处是三方 C API 的必经指针遍历；用 NOLINT 块收口。
         // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        seg.reserve(ng);
         for (unsigned int j = 0; j < ng; ++j) {
             ShapedGlyph sg{};
             sg.face = rf;
@@ -393,11 +401,21 @@ class ShapeCache {
             sg.x_off = static_cast<float>(poss[j].x_offset) / 64.0F;
             sg.y_off = static_cast<float>(poss[j].y_offset) / 64.0F;
             sg.x_adv = static_cast<float>(poss[j].x_advance) / 64.0F;
-            out.glyphs.push_back(sg);
+            seg.push_back(sg);
         }
         // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         hb_buffer_destroy(buf);
         hb_font_destroy(hb_font);
+        segs.push_back(std::move(seg));
+    }
+    // 3) 跨 run 视觉重排（UBA-lite）：段落 RTL 时整体右→左翻转 run 顺序，使逻辑首 run 落在右缘；
+    //    单 run / LTR 段落为恒等变换（与接入前逐位一致，golden 零影响）。段内字形已为视觉序，
+    //    此处只交换 run 间的先后，不改变任一 run 内部的字形顺序。
+    const auto order = detail::bidi_visual_run_order(segs.size(), base);
+    for (const std::size_t idx : order) {
+        if (idx < segs.size()) {
+            out.glyphs.insert(out.glyphs.end(), segs[idx].begin(), segs[idx].end());
+        }
     }
     return out;
 }
