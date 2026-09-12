@@ -506,12 +506,21 @@ auto RichTextEdit::paint_cursor(Painter &p, const Rect &bounds) const -> void {
     for (const auto &line : lines_) {
         const size_t line_end = idx + line.chars.size();
         if (caret_ >= idx && caret_ <= line_end) {
-            float x = bounds.origin.x;
-            for (size_t i = 0; i < line.chars.size() && i + idx < caret_; ++i) {
+            // 计算 caret 前的逻辑累积宽度与整行视觉宽度；RTL 下把 caret 镜像到行右缘起算。
+            float logical_x = 0.0F;
+            float line_w = 0.0F;
+            for (size_t i = 0; i < line.chars.size(); ++i) {
                 // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-                x += render::FontEngine::measure_width(std::string(1, line.chars[i].ch), line.chars[i].font);
+                const float cw = render::FontEngine::measure_width(std::string(1, line.chars[i].ch), line.chars[i].font);
+                line_w += cw;
+                if (i + idx < caret_) {
+                    logical_x += cw;
+                }
             }
+            const float x = (layout_direction_ == TextDirection::RTL)
+                                ? bounds.origin.x + line_w - logical_x
+                                : bounds.origin.x + logical_x;
             p.fill_rect(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = 1.0F, .height = line_height_}},
                         Color::black());
             return;

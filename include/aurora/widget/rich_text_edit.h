@@ -13,6 +13,7 @@
 #include "aurora/render/painter.h"
 #include "aurora/state/undo_stack.h"
 #include "aurora/widget/text_span.h"
+#include "aurora/core/enums.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -234,6 +235,10 @@ class RichTextEdit : public LeafWidget {
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override;
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override;
+
+    /// @brief 文本方向（A2）：caret 绘制与命中测试的镜像依据。基类默认 LTR；
+    ///        子类（TextInput）于布局期将解析得到的生效方向写入此处。
+    TextDirection layout_direction_ = TextDirection::LTR;
 
   private:
     // ---- 内部行结构（布局用）----

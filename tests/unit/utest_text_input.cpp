@@ -358,7 +358,13 @@ AURORA_TEST_CASE(rtl_caret_paints_at_right_edge) {
     // A2：RTL 下逻辑 caret 0 镜像到文本右缘（caret_x = 文本全宽）——
     // 唯一光标色像素扫描：RTL 光标 x 显著大于 LTR（LTR caret 0 在左内边距处）。
     const Color magenta{255, 0, 255, 255};
-    auto paint_caret_min_x = [magenta](TextInput &ti, const BuildContext &ctx) -> float {
+    // caret 以 magenta 纯色绘制；AA/合成及不同编译器/优化级别（-O1/-O2）、不同平台字体
+    // hinting 会使实际像素与精确 (255,0,255) 产生 1~数 LSB 偏差，故用宽松「类 magenta」判定
+    // 而非精确相等，对齐项目既有像素测试的结构性检测约定（见 itest_font_pixel_snap）。
+    auto paint_caret_min_x = [](TextInput &ti, const BuildContext &ctx) -> float {
+        auto magenta_like = [](const Color &c) -> bool {
+            return c.a > 180 && c.r > 180 && c.b > 180 && c.g < 80;
+        };
         const Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F},
                           .size = Size{.width = ti.size().width, .height = ti.size().height}};
         Painter p;
@@ -367,7 +373,7 @@ AURORA_TEST_CASE(rtl_caret_paints_at_right_edge) {
         float min_x = -1.0F;
         for (int x = 0; x < static_cast<int>(ti.size().width); ++x) {
             for (int y = 0; y < static_cast<int>(ti.size().height); ++y) {
-                if (p.get_pixel(x, y) == magenta) {
+                if (magenta_like(p.get_pixel(x, y))) {
                     min_x = (min_x < 0.0F) ? static_cast<float>(x) : std::min(min_x, static_cast<float>(x));
                 }
             }
@@ -382,7 +388,6 @@ AURORA_TEST_CASE(rtl_caret_paints_at_right_edge) {
     ltr.mount(plain);
     ltr.layout(bounded(200.0F, 60.0F), plain);
     const float ltr_x = paint_caret_min_x(ltr, plain);
-    AURORA_TEST_CHECK_TRUE(ltr_x >= 0.0F);  // 光标已绘制
 
     TextInput rtl;
     rtl.set_value("ab").set_cursor_color(magenta).set_direction(TextDirection::RTL);
@@ -392,12 +397,16 @@ AURORA_TEST_CASE(rtl_caret_paints_at_right_edge) {
     rtl.layout(bounded(200.0F, 60.0F), plain2);
     const float rtl_x = paint_caret_min_x(rtl, plain2);
 
-    const Font f{.size_pt = 14.0F};
-    const float text_w = render::FontEngine::measure_width("ab", f);
-    const float padding = 8.0F;  // 与控件默认内边距一致的量级下界即可，用相对断言防脆
-    (void)padding;
-    // RTL 光标（逻辑首字符 → 右缘）必须落在 LTR 光标右侧至少一个文本宽度处。
-    AURORA_TEST_CHECK_TRUE(rtl_x >= ltr_x + text_w - 2.0F);
+    // 两个方向的光标都必须确实被绘制出来。
+    AURORA_TEST_REQUIRE_TRUE(ltr_x >= 0.0F);
+    AURORA_TEST_REQUIRE_TRUE(rtl_x >= 0.0F);
+
+    // 结构性断言（对齐项目跨平台稳健约定）：控件宽 200，以中线 x=100 分界。
+    // LTR 逻辑首字符 caret 落在左半区；RTL 镜像到文本右缘 → 落点在右半区。
+    // 用「右缘相对左缘」的相对关系而非绝对像素，吸收字体度量/优化级别导致的若干 px 抖动。
+    AURORA_TEST_CHECK_TRUE(ltr_x < 100.0F);
+    AURORA_TEST_CHECK_TRUE(rtl_x > 100.0F);
+    AURORA_TEST_CHECK_TRUE(rtl_x > ltr_x + 40.0F);
 }
 
 AURORA_TEST_CASE(direction_prop_serialization_roundtrip) {

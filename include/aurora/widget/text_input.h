@@ -714,7 +714,17 @@ class TextInput : public LeafWidget {
             return text_color_;
         }();
         const float th = render::FontEngine::measure_height(f);
-        const float tx = bounds.origin.x + padding_.left;
+        // A2 RTL：文本右对齐到控件右内边距处（逻辑首字符落在右缘），与 Text 控件方向相对语义一致；
+        // caret / 选区 / 组合下划线均以 tx 为锚，故 RTL 下一并右移，使 rtl_caret_paints_at_right_edge 成立。
+        const float text_w = render::FontEngine::measure_width(shown, f, layout_opts());
+        float tx = bounds.origin.x + padding_.left;
+        if (cached_direction_ == TextDirection::RTL) {
+            const float right_tx = bounds.origin.x + (bounds.size.width - padding_.right - text_w);
+            // 文本未超宽才右对齐；超宽回退左对齐，避免文本溢出到控件右侧之外。
+            if (right_tx > tx) {
+                tx = right_tx;
+            }
+        }
         const float ty =
             bounds.origin.y + padding_.top + ((bounds.size.height - padding_.top - padding_.bottom - th) * 0.5F);
 

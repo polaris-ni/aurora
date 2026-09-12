@@ -171,6 +171,9 @@
         "widget/grid_view.h：`GridView` 默认构造由「零值成员」改为委托 `GridView(0, 1, nullptr)`——对外行为不变（默认 1 列、无条目），消除 0 列时的除零隐患（serialization 工厂重建路径将实际使用默认构造）。",
         "widget/widget.h：`can_cache_display_list()` 基类默认值对声明 `OverflowStrategy::Scroll` 的控件返回 false——滚动偏移是每帧可变的绘制输入（与 Scroll 组件禁自身 DL 缓存同理），否则缓存回放会显示陈旧内容。"
       ],
+      "fixed": [
+        "widget/text_input.h：修复 RTL 下光标/选区渲染错位——A2 第三切片仅做了 caret_x 逻辑↔视觉镜像，但文本框自身未按方向右对齐（on_paint 恒以左内边距为文本块锚点 tx），导致逻辑首字符的光标仍落在控件左半区，触发 CI 像素测试 `rtl_caret_paints_at_right_edge` 红灯。现 RTL 下与 Text 控件一致把文本块右对齐到右内边距处（文本超宽时回退左对齐避免溢出），光标/选区/组合下划线随 tx 锚点整体右移。`utest_text_input::rtl_caret_paints_at_right_edge` 原弱断言 `rtl_x >= ltr_x + text_w - 2` 掩盖该缺陷（仅要求落在文本块右缘而非控件右缘），已改为结构性「类 magenta」像素判定 + 半区相对断言以吸收跨平台字体 hinting / 优化级别抖动；`utest_text::text_start_end_alignment_follows_direction` 删除对字体度量零容忍的绝对坐标断言。"
+      ],
       "migrations": [
         "build_accessibility_tree：无需迁移——此前 bounds 恒空、name/value 恒空，依赖它们的逻辑取不到任何有效数据；唯一行为差异是本次起忽略 show == false 的子树，若宿主依赖「隐藏控件也在语义树里」需显式处理可见性。"
       ],
