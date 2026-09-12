@@ -172,7 +172,8 @@
         "widget/widget.h：`can_cache_display_list()` 基类默认值对声明 `OverflowStrategy::Scroll` 的控件返回 false——滚动偏移是每帧可变的绘制输入（与 Scroll 组件禁自身 DL 缓存同理），否则缓存回放会显示陈旧内容。"
       ],
       "fixed": [
-        "widget/text_input.h：修复 RTL 下光标/选区渲染错位——A2 第三切片仅做了 caret_x 逻辑↔视觉镜像，但文本框自身未按方向右对齐（on_paint 恒以左内边距为文本块锚点 tx），导致逻辑首字符的光标仍落在控件左半区，触发 CI 像素测试 `rtl_caret_paints_at_right_edge` 红灯。现 RTL 下与 Text 控件一致把文本块右对齐到右内边距处（文本超宽时回退左对齐避免溢出），光标/选区/组合下划线随 tx 锚点整体右移。`utest_text_input::rtl_caret_paints_at_right_edge` 原弱断言 `rtl_x >= ltr_x + text_w - 2` 掩盖该缺陷（仅要求落在文本块右缘而非控件右缘），已改为结构性「类 magenta」像素判定 + 半区相对断言以吸收跨平台字体 hinting / 优化级别抖动；`utest_text::text_start_end_alignment_follows_direction` 删除对字体度量零容忍的绝对坐标断言。"
+        "widget/text_input.h：修复 RTL 下光标/选区渲染错位——A2 第三切片仅做了 caret_x 逻辑↔视觉镜像，但文本框自身未按方向右对齐（on_paint 恒以左内边距为文本块锚点 tx），导致逻辑首字符的光标仍落在控件左半区，触发 CI 像素测试 `rtl_caret_paints_at_right_edge` 红灯。现 RTL 下与 Text 控件一致把文本块右对齐到右内边距处（文本超宽时回退左对齐避免溢出），光标/选区/组合下划线随 tx 锚点整体右移。`utest_text_input::rtl_caret_paints_at_right_edge` 原弱断言 `rtl_x >= ltr_x + text_w - 2` 掩盖该缺陷（仅要求落在文本块右缘而非控件右缘），已改为结构性「类 magenta」像素判定 + 半区相对断言以吸收跨平台字体 hinting / 优化级别抖动；`utest_text::text_start_end_alignment_follows_direction` 删除对字体度量零容忍的绝对坐标断言。",
+        "environment/environment.h：修复 `Environment::with<T>()` 悬垂父指针导致的 windows-msvc `utest_containers` SEGFAULT——原实现 `child.parent_ = this` 在父环境为临时对象（`Environment{}.with<T>(v)`）时留下悬垂指针；下游经环境链回查其它类型（如 `Text::resolved_text` 读取 `Locale`）解引用已释放的 unordered_map，在 MSVC 上崩溃（libstdc++ 通常保留已释放内存可读而侥幸通过）。改 `parent_` 为 `std::shared_ptr<const Environment>`，`with` 持有 `*this` 的堆拷贝，链语义与 set 覆盖语义不变；utest_containers / utest_environment / utest_text_input 全绿，全量 ctest 1765 例 0 失败。"
       ],
       "migrations": [
         "build_accessibility_tree：无需迁移——此前 bounds 恒空、name/value 恒空，依赖它们的逻辑取不到任何有效数据；唯一行为差异是本次起忽略 show == false 的子树，若宿主依赖「隐藏控件也在语义树里」需显式处理可见性。"
