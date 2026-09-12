@@ -1,6 +1,6 @@
 {
   "schema": "aurora-changelog/1.0",
-  "currentVersion": "1.0.0-alpha.3",
+  "currentVersion": "1.0.0-alpha.4",
   "policy": "semver",
   "freeze": "minor-versions-are-additive",
   "rules": [
@@ -130,9 +130,9 @@
     },
     {
       "version": "1.0.0-alpha.4",
-      "date": "2026-09-11",
+      "date": "2026-09-12",
       "type": "pre-release",
-      "summary": "进行中：B1 无障碍语义树补全（几何 + 语义）+ B2 无障碍事件与设置注入 + A1 IME 组合输入核心（事件模型 / 派发 / 组合态渲染，平台 IME 接线待有真实输入法环境验收）；B3（Win32 UIAutomation 桥）/ A2（RTL/bidi）待排。",
+      "summary": "无障碍 + 输入与文本国际化阶梯：B1 无障碍语义树补全（几何 + 语义）、B2 无障碍事件与设置注入、A1 IME 组合输入核心（事件模型 / 派发 / 组合态渲染）、A2 RTL/bidi 全切片（方向 API + shaping/caret/命中镜像 + 布局镜像 + TextInput / RichTextEdit RTL + 完整逐字符 UBA + 阿拉伯文真实字体验收），并清偿 alpha.3 顺延六项（C4 测试临时文件规范 / I1 光标形状 / I2 焦点作用域 / D0 异步图片 / D0b 真实滚动与色彩管理 / F2 序列化补全）。**仍顺延至 alpha.5**：B3 Win32 UIAutomation 桥、A1 平台 IME 接线、I1 光标形状平台接线（均需对应平台编译与真实环境验收，无头 Linux 无法完成）。",
       "breakingChanges": [],
       "added": [
         "core/accessibility.h：AccessibilityNode 新增 hint 字段（用途补充提示，供屏幕阅读器补语义）。",
@@ -182,7 +182,8 @@
       ],
       "notes": [
         "aurora_api.json（widgets / enums / layout_rules / state_patterns 四类，不含方法级 API）本次新增 1 条 widgets 条目——RichTextEdit 的 `direction` 属性（与 Text / TextInput 同口径，仅显式设置时序列化）；已在 cmake --build build --target aurora_api_json 后核实 diff 限于该条目、无其它漂移。",
-        "alpha.4 阶梯其余 Phase（B3 Win32 UIAutomation 桥、A2 RTL/bidi、alpha.3 顺延的 I2/D0/D0b/F2）尚未开始；A1 IME 组合输入的核心（事件模型 / 派发 / 控件组合态）与 I1 光标形状的核心（枚举 / 修饰 / 解析 / Surface 契约）已落地，但**平台接线**（A1 的 Win32 TSF/IMM32、macOS NSTextInputClient、X11/Wayland zwp_text_input_v3、Wasm；I1 的 GLFW/X11/Win32/Wayland/macOS `set_cursor` 覆写）不在无头 Linux 上实现——须在对应平台编译与真实环境验收后补齐。currentVersion 仍为 1.0.0-alpha.3，待本阶梯收口时随升版提交 bump。",
+        "本阶梯收口（2026-09-12）：A2 RTL/bidi 全部切片落地并收官——方向 API 面与 shaping/caret/命中镜像、Flex 布局镜像、TextInput / RichTextEdit RTL、混排 UBA 多 run 视觉重排、完整逐字符 UBA（X/W/N0/N/I + L2，含 N0 成对括号与 W1 NSM）、阿拉伯文真实字体（Amiri）端到端验收（顺带修复 `hit_test_char` / `hit_test_char_inclusive` 对 x<=0 无条件返回 0 的 RTL 语义 bug）。至此 alpha.4 阶梯内**本机可完成的功能项全部落地**，currentVersion 随本提交 bump 至 1.0.0-alpha.4（三处事实来源同改：CMakeLists.txt 的 `AURORA_VERSION_SUFFIX`、version.h 兜底串、CHANGELOG.json 的 currentVersion，`check_version_consistency` 通过）。",
+        "**顺延至 alpha.5（平台依赖，无头 Linux 无法验收）**：① B3 Win32 UIAutomation 桥（需 Windows + inspect.exe / Narrator 验收）；② A1 平台 IME 接线（Win32 TSF/IMM32、macOS NSTextInputClient、X11/Wayland zwp_text_input_v3、Wasm）——核心事件模型 / 派发 / 控件组合态已落地，仅缺平台侧；③ I1 光标形状平台接线（GLFW/X11/Win32/Wayland/macOS `set_cursor` 覆写）——枚举 / 修饰 / 解析 / Surface 契约已落地，仅缺平台侧。",
         "声明：B2 的 `high_contrast` 位已随设置结构落地，但**尚未有控件消费**——高对比换色需先定换色策略（是否改 Theme / 是否重写前景-背景对），属待拍板项，故本次未做半成品接线；`screen_reader_active` 同理只作为宿主向库传递的意图位，库内不据此改变行为。",
         "D0b（alpha.3 顺延最后一项）已落地：Overflow::Scroll 真实滚动（内核复用 + 滚轮最近可滚动者路由）+ 色彩管理分层策略（sRGB golden 逐位精确、P3 转换 ±3 LSB 单测、golden 注记）。测试：itest_overflow_strategy 5→9 例、utest_color_space 新增 8 例、utest_offscreen 注记校验；全量 ctest 253/253 绿。`high_contrast` 换色策略仍待拍板，未做接线。",
         "A2 RTL/bidi 核心切片落地（2026-09-12）：方向 API 面 + shaping/caret/命中/对齐四条路径打通并以确定性测试锁定（强制 RTL 的镜像语义）；阿拉伯语连字字形等真实 RTL 字体渲染待注册 Arabic 字体后验证。顺延：混排 UBA 多 run 视觉重排、Flex/Alignment/padding 布局镜像、TextInput 的 RTL caret/选区。测试：utest_font_engine 16→20、utest_directionality 新增 3 例、utest_text +2 例；aurora_api.json 增 TextDirection 枚举登记（tools/include/known_enums.h + itest_known_enums 锚点）；全量 ctest 254/254 绿。",

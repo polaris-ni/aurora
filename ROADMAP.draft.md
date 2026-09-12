@@ -1,7 +1,7 @@
 # Aurora 演进路线图 + 详细 Phase 计划（草案）
 
 > 状态：规划草案，未纳入 `codespec/`。采纳后相应条目须回填对应规格文档。
-> 版本基线：`1.0.0-alpha.3`。**个人开源项目，不追求快速收敛**——按 `1.0.0-alpha.n` 逐步推进（见文末「落地计划」）。
+> 版本基线：`1.0.0-alpha.4`。**个人开源项目，不追求快速收敛**——按 `1.0.0-alpha.n` 逐步推进（见文末「落地计划」）。
 > **当前处于 alpha 阶段：允许任意破坏性修改**（`SPECIFICATIONS.md` §12.1）。因此 RHI 抽取、多窗口 `Application` 生命周期改造、`FocusManager` scope API、`commands.h` 重塑、GPU 从非目标→可选加速等「会动既有 API 形态」的结构级改动，正应在 alpha 阶梯内一次做定，不必迁就旧签名。「只增不删」的 SemVer 纪律**从 beta 冻结起才生效**。
 >
 > **已确认决策（2026-09-11）**
@@ -44,7 +44,7 @@
 
 ## Track C — 可测试性：交互模拟接线 + 测试临时文件规范（Tier 1）
 
-**缺口（已核实）**：① `simulate_click/scroll/text_input` 三件套**已接线**（alpha.3，`b3bde1d`）——经 `EventDispatcher` 走真实命中测试 + 派发，并打通远程/AI 工具面（InspectorServer `POST /api/input/{click|scroll|text}` + `aurora_mcp` `simulate_interaction`，`c798cea`），直接服务 #11「AI 可验证正确性」。② 测试临时文件规范（C4）**尚未落地**，仍默认落系统 temp（`isolation.cpp:138+`），无运行路径 `test_tmp/` 约定。
+**缺口（已核实，2026-09-12 更新）**：① `simulate_click/scroll/text_input` 三件套**已接线**（alpha.3，`b3bde1d`）——经 `EventDispatcher` 走真实命中测试 + 派发，并打通远程/AI 工具面（InspectorServer `POST /api/input/{click|scroll|text}` + `aurora_mcp` `simulate_interaction`，`c798cea`），直接服务 #11「AI 可验证正确性」。② 测试临时文件规范（C4）**已落地（2026-09-11~12）**——`isolation.cpp` 基目录改为 `fs::current_path()/test_temp`（不可写时回退系统 temp 并注原因）、每用例唯一子目录 + `end_case` 清理、`.gitignore` 覆盖、`check_test_temp_hygiene` 看护 + `CODING_STANDARDS.md` §3 成文。剩余缺口：C2（TestController）/ C3（ai_compat fixture）消费者侧仍未排期。
 
 ## Track D — 渲染与图形（Tier 3，GPU=wgpu）
 
@@ -108,6 +108,7 @@ MCP 实时改运行中 UI、NL→UI、UI→代码往返保真、语义化视觉�
 - 完成判据：`ai_compat_test` 覆盖至少 3 个交互回归 fixture。
 
 **Phase C4：测试临时文件统一落 `test_temp/` + 收尾清理**
+> **状态：已完成（2026-09-11~12，alpha.4）**——基目录 `cwd()/test_temp`（不可写回退系统 temp 并注原因）、逐用例唯一子目录 + `end_case` 清理、报告排除在清理外、`.gitignore` 覆盖、`check_test_temp_hygiene` 看护（扫描绕过 `temp_dir()` 的裸 `temp_directory_path()`/`/tmp`/写 cwd）与 `CODING_STANDARDS.md` §3 约定均已就位；全量 ctest 后 `test_temp/` 空/不存在（报告除外）。
 - 目标：所有测试产生的临时文件统一存放在**当前程序运行路径下的 `test_temp/`**（即 `fs::current_path()/test_temp`）；测试完成后自动删除；**测试报告（`--report` 产物）等可保留**；确有特殊原因须放他处的，代码注释写清理由。
 - 现状（已核实）：`tests/framework/isolation.cpp:138+` 基目录优先级是「系统临时目录 → `/tmp` → 工作目录隐藏目录」，即**默认落系统 temp、不在运行路径**；`temp_dir()`（isolation.h:35）接管 `TMPDIR/TMP/TEMP`，`end_case` 还原环境。**改造即翻转此默认。**
 - 任务：
@@ -222,7 +223,7 @@ MCP 实时改运行中 UI、NL→UI、UI→代码往返保真、语义化视觉�
 - 触及：`core/enums.h`、`environment/environment.h`、`layout/*`、`render/font_engine.h/.cpp`、`widget/alignment.h`。
 - 测试：`utest_font_engine`（RTL shaping 逐位）、`utest_flex`（镜像布局）、golden 逻辑快照含 RTL 场景。
 - 完成判据：设 `TextDirection::Rtl` 后布局镜像 + 阿拉伯/希伯来文本正确 bidi。
-- **状态：核心切片已落地（2026-09-12）**。`TextDirection{LTR, RTL}`（枚举值定名 LTR/RTL，不再用计划中的 Auto——Auto 语义由 `explicit_text_direction` 返回 nullopt 表达）+ `core/directionality.h` 双来源注入；`FontEngine` 显式 direction（shape 缓存键含方向，RTL 走 hb 视觉序反转）、caret/hit 逻辑↔视觉镜像映射、Text `direction` 属性 + `TextAlign::Start/End` 方向解析。测试：utest_font_engine 16→20（RTL 镜像逐位）、utest_directionality 新增 3 例、utest_text +2（含 End 对齐方向翻转像素验证）；全量 254/254 绿。**第二切片：Flex 布局镜像已落地（2026-09-12）**——`Flex.rtl` + FlexLayouter 镜像 pass + Row/Column 经 Directionality 自动接线（Environment 注入 > 进程级）。`Alignment`/`EdgeInsets`/`padding` 保持物理语义不镜像（对标 Flutter）。**第三切片：TextInput RTL caret/选区已落地（2026-09-12）**——direction 属性 + 生效方向缓存 + caret/命中/方向键/preedit 四路径镜像。**仍顺延**：混排 UBA 多 run 视觉重排、RichTextEdit RTL、阿拉伯/希伯来真实字体（内置 Noto Sans 无 Arabic 字形，连字渲染待注册字体后验证）。
+- **状态：核心切片已落地（2026-09-12）**。`TextDirection{LTR, RTL}`（枚举值定名 LTR/RTL，不再用计划中的 Auto——Auto 语义由 `explicit_text_direction` 返回 nullopt 表达）+ `core/directionality.h` 双来源注入；`FontEngine` 显式 direction（shape 缓存键含方向，RTL 走 hb 视觉序反转）、caret/hit 逻辑↔视觉镜像映射、Text `direction` 属性 + `TextAlign::Start/End` 方向解析。测试：utest_font_engine 16→20（RTL 镜像逐位）、utest_directionality 新增 3 例、utest_text +2（含 End 对齐方向翻转像素验证）；全量 254/254 绿。**第二切片：Flex 布局镜像已落地（2026-09-12）**——`Flex.rtl` + FlexLayouter 镜像 pass + Row/Column 经 Directionality 自动接线（Environment 注入 > 进程级）。`Alignment`/`EdgeInsets`/`padding` 保持物理语义不镜像（对标 Flutter）。**第三切片：TextInput RTL caret/选区已落地（2026-09-12）**——direction 属性 + 生效方向缓存 + caret/命中/方向键/preedit 四路径镜像。**第四切片与收官已落地（2026-09-12，本 Phase 完成）**：RichTextEdit RTL（整段右对齐 + 跨 run 顺序 + caret/选区/命中镜像）；混排 UBA 多 run 视觉重排（「字体面 + UBA 层级」双键切 run + L2 层叠反转）；完整逐字符 UBA（`uba_levels` 走 X1-X9 / W1-W7 / N0-N2 / I1-I2，`uba_visual_order` 走 L2，含 N0 成对括号 BD16 配对与 W1 NSM）；阿拉伯/希伯来真实字体验收（仓库内 Amiri，连字与 cursive joining 度量断言），顺带修复 `hit_test_char` / `hit_test_char_inclusive` 对 x<=0 无条件返回 0 的 RTL 语义 bug。行为修正（标准 UBA 语义）：RTL 段内同层连续 run 不再整体互换、显式 LTR 段落中的阿文按内容脚本层级 1 正确整形、RTL 段内数字内序保持（如 `م 34` 显示 `34 م`）。**仍顺延**：TextInput 对 bidi 控制符（LRE/RLE/PDF/LRI/RLI/PDI）的输入侧支持（UBA 解析侧已支持，控件侧待接）。
 
 **Phase A3：CLDR 复数 + 本地化格式**
 - 任务：`i18n/string_table.h` 复数从 `one/other` 扩到 CLDR 六类（zero/one/two/few/many/other，规则表驱动）；新增 `i18n/format.h`：数字/日期/货币按 `Locale` 格式化（轻量自研表 or opt-in ICU 子集，守零依赖）。
@@ -347,7 +348,7 @@ MCP 实时改运行中 UI、NL→UI、UI→代码往返保真、语义化视觉�
 
 **顺延项（原 alpha.3 计划）**：C4 测试临时文件规范 · I1 光标形状 · I2 焦点作用域/陷阱 · D0 异步图片(fetcher) · D0b `OverflowStrategy::Scroll` · F2 Skeleton/GridView 序列化补全 —— **六项已全部并入 alpha.4 落地完毕（2026-09-12）**。
 
-**`1.0.0-alpha.4` — 无障碍 + 中文输入（CJK 攻坚）**（进行中：B1、B2、A1 核心与 alpha.3 顺延六项（C4/I1/I2/F2/D0/D0b）已落地 2026-09-11~12；A1 平台 IME 接线、B3、A2 待排）
+**`1.0.0-alpha.4` — 无障碍 + 输入与文本国际化（已收口，2026-09-12）**（B1、B2、A1 核心、A2 全切片、alpha.3 顺延六项（C4/I1/I2/F2/D0/D0b）已落地 2026-09-11~12；**顺延至 alpha.5**：B3 Win32 UIAutomation 桥、A1 平台 IME 接线、I1 光标形状平台接线——均需对应平台编译与真实环境验收，无头 Linux 无法完成）
 
 
 - B1–B3 无障碍语义树补全 + Win32 UIAutomation 桥 · A1 IME 组合输入 · A2 RTL/bidi
