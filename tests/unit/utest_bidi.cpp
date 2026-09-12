@@ -3,6 +3,8 @@
 /// 测试说明: 覆盖 A2 混排 UBA 切片的段落级 run 视觉重排：
 ///   - 纯函数：guess_paragraph_direction（首个强方向字符定基准，UBA P2/P3）与
 ///     bidi_visual_run_order（RTL 段落整体右→左翻转 run 顺序，LTR 恒等）。
+///   - 纯函数：完整逐字符 UBA（UAX #9）——uba_levels（X/W/N/I 规则 → 逐码点层级，
+///     经典向量：W2/W4/W5/W7、N1/N2、I1/I2、显式嵌入/隔离）与 uba_visual_order（L2）。
 ///   - 集成：注册真实双字体 Roboto(拉丁)+Amiri(阿拉伯) 到同一 family（find_glyph 跨面回退，
 ///     自然形成两个 face-run），绘制「ab مرحبا」RTL 段落，按墨迹分布桶比对验证最左 run 为阿拉伯文
 ///     （即跨 run 重排生效；未重排时最左应为拉丁 "ab"，分布必不同）。
@@ -128,6 +130,167 @@ AURORA_TEST_CASE(run_order_single_run_is_identity) {
 
 AURORA_TEST_CASE(run_order_zero_runs_is_empty) {
     AURORA_TEST_CHECK(aurora::render::detail::bidi_visual_run_order(0, aurora::TextDirection::RTL).empty());
+}
+
+// ============================================================================
+// 完整逐字符 UBA（UAX #9）：uba_levels（X/W/N/I 规则）与 uba_visual_order（L2）
+// ----------------------------------------------------------------------------
+
+namespace {
+// char32_t 字面量 → 码点向量（U"" 前缀字符串即 UTF-32）。
+[[nodiscard]] auto cps32(const char32_t *s) -> std::vector<char32_t> {
+    std::vector<char32_t> v;
+    while (*s != U'\0') {
+        v.push_back(*s++);
+    }
+    return v;
+}
+
+[[nodiscard]] auto levels_of(const char32_t *s, std::uint8_t base) -> std::vector<std::uint8_t> {
+    return aurora::render::detail::uba_levels(cps32(s), base);
+}
+
+void check_levels(const char32_t *s, std::uint8_t base, const std::vector<std::uint8_t> &expect)
+{
+    const auto got = levels_of(s, base);
+    AURORA_TEST_REQUIRE_EQ(got.size(), expect.size());
+    AURORA_TEST_CHECK(got == expect);
+}
+}  // namespace
+
+// ---- I1/I2 隐式层级与基本强类型 ----
+AURORA_TEST_CASE(uba_levels_ltr_plain_all_zero) {
+    check_levels(U"ab 12", 0, {0, 0, 0, 0, 0});  // W7: EN 前有 L → L；全 LTR
+}
+
+AURORA_TEST_CASE(uba_levels_rtl_paragraph_latin_upgrades_to_even) {
+    // RTL 段（base 1）内的拉丁：I1 → 层 2（偶，内序 LTR）。
+    check_levels(U"abc", 1, {2, 2, 2});
+}
+
+AURORA_TEST_CASE(uba_levels_rtl_paragraph_digits_upgrade_to_even) {
+    // RTL 段「مرحبا 34」：阿文 R 层 1；空格 N1 两侧 R → 层 1；数字 EN 奇嵌入 → 层 2
+    // （内序 LTR；L2 层叠反转后显示 "34 مرحبا"）。
+    check_levels(U"مرحبا 34", 1, {1, 1, 1, 1, 1, 1, 2, 2});
+}
+
+AURORA_TEST_CASE(uba_levels_ltr_paragraph_hebrew_upgrades_to_odd) {
+    // LTR 段（base 0）内的希伯来：I2 → 层 1（奇）。
+    check_levels(U"aבc", 0, {0, 1, 0});
+}
+
+AURORA_TEST_CASE(uba_levels_empty_is_empty) {
+    AURORA_TEST_CHECK(levels_of(U"", 0).empty());
+    AURORA_TEST_CHECK(levels_of(U"", 1).empty());
+}
+
+// ---- W 阶段：弱类型 ----
+AURORA_TEST_CASE(uba_levels_w2_en_after_al_becomes_an) {
+    // 「م3」base 1：م AL→R 层 1；3 EN 因最近强类型 AL → AN；AN 奇嵌入 → 层 2。
+    check_levels(U"م3", 1, {1, 2});
+}
+
+AURORA_TEST_CASE(uba_levels_w4_cs_between_en_stays_number) {
+    // 「1.5」base 0：CS 夹 EN 之间 → EN → 全层 0（数字串内序保持）。
+    check_levels(U"1.5", 0, {0, 0, 0});
+}
+
+AURORA_TEST_CASE(uba_levels_w4_cs_between_an_becomes_an) {
+    // 「١.٢」base 1（阿-印数字 0660/0662 夹 CS）：AN CS AN → AN；AN 奇嵌入 → 层 2。
+    check_levels(U"١.٢", 1, {2, 2, 2});
+}
+
+AURORA_TEST_CASE(uba_levels_w5_et_adjacent_en_becomes_en) {
+    // 「$5」/「5$」base 0：ET 与 EN 相邻 → EN（货币符号并入数字段）。
+    check_levels(U"$5", 0, {0, 0});
+    check_levels(U"5$", 0, {0, 0});
+}
+
+AURORA_TEST_CASE(uba_levels_w6_isolated_punct_stays_neutral) {
+    // 「a-b」base 0：ES 两侧非 EN → W6 → ON → N1 两侧 L → L → 全层 0。
+    check_levels(U"a-b", 0, {0, 0, 0});
+}
+
+// ---- N 阶段：中性 ----
+AURORA_TEST_CASE(uba_levels_n1_neutral_between_same_sides) {
+    // 「ab - cd」base 0：中性 '-' 两侧同为 L → L → 全层 0。
+    check_levels(U"ab - cd", 0, {0, 0, 0, 0, 0, 0, 0});
+}
+
+AURORA_TEST_CASE(uba_levels_n2_neutral_takes_embedding_direction) {
+    // 「مرحبا - abc」base 1：两侧 ' '/'-' 左 R 右 L → N2 → 嵌入方向 RTL → R → 层 1；abc 层 2。
+    check_levels(U"مرحبا - abc", 1, {1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2});
+}
+
+// ---- X 阶段：显式嵌入与隔离 ----
+AURORA_TEST_CASE(uba_levels_rle_embeds_latin_to_level2) {
+    // RLE(→1, RTL) + "abc" + PDF：拉丁在 RTL embedding → 层 2；控制符占位所在
+    // embedding 层级（RLE 处 0、PDF 处 pop 前 1）。
+    check_levels(U"\u202Babc\u202C", 0, {0, 2, 2, 2, 1});
+}
+
+AURORA_TEST_CASE(uba_levels_lre_keeps_ltr_inside) {
+    // LRE(→2, LTR；新层级 = 严格大于当前的最小偶数) + "abc"：L 在 LTR embedding → 层 2；
+    // PDF 占位 pop 前层级 2。
+    check_levels(U"\u202Aabc\u202C", 0, {0, 2, 2, 2, 2});
+}
+
+AURORA_TEST_CASE(uba_levels_rlo_overrides_latin_to_rtl) {
+    // RLO(→1, RTL) + "ab"：override 强制 R → 层 1（内序反转由 L2/绘制层处理）；PDF 占位 1。
+    check_levels(U"\u202Eab\u202C", 0, {0, 1, 1, 1});
+}
+
+AURORA_TEST_CASE(uba_levels_rli_isolate_latin_to_level1) {
+    // RLI 隔离不增层级（方向 RTL）：拉丁 → 层 1；PDI 占位。
+    check_levels(U"\u2067ab\u2069", 0, {0, 1, 1, 0});
+}
+
+AURORA_TEST_CASE(uba_levels_fsi_strong_latin_acts_ltr) {
+    // FSI 按隔离内容首强字符判定：拉丁 → LTR 隔离 → 内部 L 层不变（0）。
+    check_levels(U"\u2068ab\u2069", 0, {0, 0, 0, 0});
+}
+
+// ---- L2：uba_visual_order ----
+AURORA_TEST_CASE(uba_visual_order_ltr_identity) {
+    const std::vector<std::uint8_t> levels{0, 0, 0};
+    const std::vector<std::size_t> expect{0, 1, 2};
+    AURORA_TEST_CHECK(aurora::render::detail::uba_visual_order(levels) == expect);
+}
+
+AURORA_TEST_CASE(uba_visual_order_all_rtl_reverses) {
+    const std::vector<std::uint8_t> levels{1, 1, 1};
+    const std::vector<std::size_t> expect{2, 1, 0};
+    AURORA_TEST_CHECK(aurora::render::detail::uba_visual_order(levels) == expect);
+}
+
+AURORA_TEST_CASE(uba_visual_order_rtl_digits_stay_ltr_inner) {
+    // 「م 34」run 级层级 [1,1,2,2]：L2 反转后视觉序 [2,3,1,0]——数字 span 整体在左
+    // 且内部保持逻辑序（显示 "34 م" 而非 "43 م"）。
+    const std::vector<std::uint8_t> levels{1, 1, 2, 2};
+    const std::vector<std::size_t> expect{2, 3, 1, 0};
+    AURORA_TEST_CHECK(aurora::render::detail::uba_visual_order(levels) == expect);
+}
+
+AURORA_TEST_CASE(uba_visual_order_single_rtl_subsegment_in_ltr_is_identity) {
+    // LTR 段内单 RTL run [0,1,0]：L2 的区间反转不跨层移动位置——单元素区间反转恒等，
+    // 子段内部字形序由 hb 按 run 级 RTL 方向负责；run 间保持逻辑序。
+    const std::vector<std::uint8_t> levels{0, 1, 0};
+    const std::vector<std::size_t> expect{0, 1, 2};
+    AURORA_TEST_CHECK(aurora::render::detail::uba_visual_order(levels) == expect);
+}
+
+AURORA_TEST_CASE(uba_visual_order_nested_levels_reversed_twice) {
+    // [2,1,2]（RTL 段内两个 LTR 子段）：L=2 单元素不动、L=1 全反 → [2,1,0]。
+    const std::vector<std::uint8_t> levels{2, 1, 2};
+    const std::vector<std::size_t> expect{2, 1, 0};
+    AURORA_TEST_CHECK(aurora::render::detail::uba_visual_order(levels) == expect);
+}
+
+AURORA_TEST_CASE(uba_visual_order_rli_chars_reverse_inside) {
+    // 字符级 [0,1,1,0]（RLI 内 "ab"）：内层反转 → [0,2,1,3]（b 在 a 前）。
+    const std::vector<std::uint8_t> levels{0, 1, 1, 0};
+    const std::vector<std::size_t> expect{0, 2, 1, 3};
+    AURORA_TEST_CHECK(aurora::render::detail::uba_visual_order(levels) == expect);
 }
 
 // ---------------- 集成：真实双字体跨 run 重排 ----------------
@@ -269,40 +432,15 @@ AURORA_TEST_CASE(arabic_real_shaping_ligature_and_joining) {
     aurora::render::FontEngine::register_font("__bidi_arabic", amiri_path);
 
     const auto font = arabic_font();
-    const aurora::render::TextLayoutOpts ltr{.direction = aurora::TextDirection::LTR};
     const aurora::render::TextLayoutOpts rtl{.direction = aurora::TextDirection::RTL};
-
-    // 逐列墨迹布尔 + 墨迹范围 [最左, 最右]。
-    struct InkScan {
-        std::vector<bool> cols;
-        int lo = -1;
-        int hi = -1;
-    };
-    auto ink = [&](const aurora::render::TextLayoutOpts &opts) -> InkScan {
-        Painter p;
-        p.begin(400, 80);
-        aurora::render::FontEngine::draw_text(p, rect_at(0.0F, 0.0F, 400.0F, 80.0F), kArabicHello, font,
-                                              aurora::Color::black(), opts);
-        InkScan s;
-        s.cols.assign(400, false);
-        for (int x = 0; x < 400; ++x) {
-            if (column_has_ink(p, x)) {
-                s.cols[static_cast<std::size_t>(x)] = true;
-                if (s.lo < 0) {
-                    s.lo = x;
-                }
-                s.hi = x;
-            }
-        }
-        return s;
-    };
 
     // FontEngine::draw_text 的 pen 恒从 rect 左缘起（段落级右对齐是 RichTextEdit 的职责，
     // 见 arabic_richtextedit_rtl_right_aligns）。本用例验证真实 HarfBuzz 整形语义（纯度量断言，
     // 不依赖像素字形形态假设）：
     // ① Lam-Alef 必合连字（GSUB liga）："لا" 整形为单个连字字形，宽度远小于两 isolated 字形之和；
-    // ② Cursive joining：连写 "بت" 采用窄连接形，宽度小于两 isolated 字形之和；
-    // ③ 方向感知：显式 RTL 与显式 LTR（退化序）的绘制墨迹分布显著不同（视觉序受方向影响）。
+    // ② Cursive joining：连写 "بت" 采用窄连接形，宽度小于两 isolated 字形之和。
+    // （完整 UBA 接入后，显式 LTR 段落中的阿文按内容脚本层级 1 整形——与 RTL 相同的正确
+    // 行为，「LTR 强制阿文退化序」的旧方向敏感断言随之失效，见 uba_levels 纯函数用例。）
     const float w_lam = aurora::render::FontEngine::measure_width("ل", font, rtl);
     const float w_alef = aurora::render::FontEngine::measure_width("ا", font, rtl);
     const float w_lamalef = aurora::render::FontEngine::measure_width("لا", font, rtl);
@@ -320,20 +458,6 @@ AURORA_TEST_CASE(arabic_real_shaping_ligature_and_joining) {
     AURORA_TEST_REQUIRE(w_joined > 0.0F);
     // 连接形（initial/final）比 isolated 形窄：连写宽度 < isolated 之和。
     AURORA_TEST_CHECK(w_joined < w_beh + w_teh);
-
-    // 方向感知：统计 RTL 与 LTR 绘制墨迹并集范围内「分布不同」的列占比 ≥ 15%。
-    const auto ltr_scan = ink(ltr);
-    const auto rtl_scan = ink(rtl);
-    const int union_lo = std::min(ltr_scan.lo, rtl_scan.lo);
-    const int union_hi = std::max(ltr_scan.hi, rtl_scan.hi);
-    AURORA_TEST_REQUIRE(union_lo >= 0 && union_hi > union_lo);
-    int differ = 0;
-    for (int x = union_lo; x <= union_hi; ++x) {
-        if (ltr_scan.cols[static_cast<std::size_t>(x)] != rtl_scan.cols[static_cast<std::size_t>(x)]) {
-            ++differ;
-        }
-    }
-    AURORA_TEST_CHECK(differ * 20 >= (union_hi - union_lo + 1) * 3);
 }
 
 AURORA_TEST_CASE(arabic_richtextedit_rtl_right_aligns) {
@@ -413,6 +537,50 @@ AURORA_TEST_CASE(arabic_richtextedit_rtl_pointer_hit_no_overflow) {
         kArabicHello, arabic_font(), aurora::render::TextLayoutOpts{.direction = aurora::TextDirection::RTL});
     click(t.size().width - w * 0.5F);  // 行内中点
     AURORA_TEST_CHECK(t.caret() > 0U && t.caret() < kArabicN);
+}
+
+AURORA_TEST_CASE(arabic_richtextedit_cross_level_runs_reorder) {
+    // 完整 UBA 跨层翻转（RichTextEdit 端到端）：RTL 段内阿文 run（Amiri，层 1）+ 拉丁 run
+    // （Roboto，层 2）。L2：层 2 span 反转后随层 1 段落反转 → 逻辑尾 run（拉丁）落视觉左缘、
+    // 逻辑首 run（阿文）落视觉右缘 → 点左缘命中 "a"（caret 5）、点右缘命中阿文首字符（caret 0）。
+    const auto root = aurora::testing::isolation::repo_root();
+    const std::filesystem::path amiri =
+        std::filesystem::path{root} / "third_party/harfbuzz/perf/fonts/Amiri-Regular.ttf";
+    const std::filesystem::path roboto =
+        std::filesystem::path{root} / "third_party/harfbuzz/perf/fonts/Roboto-Regular.ttf";
+    if (root.empty() || !std::filesystem::exists(amiri) || !std::filesystem::exists(roboto)) {
+        AURORA_TEST_SKIP("Amiri/Roboto TTF 不可用（CI/headless 无 Arabic 字体），跳过跨层集成");
+    }
+    aurora::render::FontEngine::register_font("__bidi_arabic", amiri.string());
+    aurora::render::FontEngine::register_font("__bidi_latin", roboto.string());
+
+    RichTextEdit t;
+    t.load_spans({
+        TextSpan{.text = LocalizedString{kArabicHello},
+                 .font = Font{.family = "__bidi_arabic", .size_pt = 24.0F},
+                 .color = aurora::Color::black()},
+        TextSpan{.text = LocalizedString{"ab"},
+                 .font = Font{.family = "__bidi_latin", .size_pt = 24.0F},
+                 .color = aurora::Color::black()},
+    });
+    t.set_direction(aurora::TextDirection::RTL);
+    LayoutEngine::layout(
+        t, Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 400.0F}});
+
+    auto click = [&](float x) -> void {
+        MouseEvent ev;
+        ev.action = MouseAction::Press;
+        ev.button = MouseButton::Left;
+        ev.local_position = Point{.x = x, .y = 0.0F};
+        t.on_pointer_event(ev);
+    };
+
+    click(0.5F);  // 视觉左缘 → 拉丁 run "ab" 左缘 → caret = 阿文 run 的 StyledChar 数（跨层翻转：逻辑尾 run 落左）
+    // doc_ 以 StyledChar（UTF-8 字节）为单位（既有行为，多字节字符占多个单元），
+    // 阿文 5 码点占 10 个单元，拉丁 run 的行内 begin 即 10。
+    AURORA_TEST_CHECK_EQ(t.caret(), std::string{kArabicHello}.size());
+    click(t.size().width - 0.5F);  // 视觉右缘 → 阿文 run 右缘 → caret 0（逻辑首在右）
+    AURORA_TEST_CHECK_EQ(t.caret(), 0U);
 }
 
 }  // namespace aurora::test_cases::utest_bidi

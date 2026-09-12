@@ -345,16 +345,27 @@ class ShapeCache {
             cps.push_back({.cp = cp, .face = ff, .byte_start = bs, .byte_end = i});
         }
     }
-    // 2) 把连续同面码点切为 run；逐 run 调 hb_shape，每个 run 的字形序列先独立收集。
-    //    段内 bidi 由 HarfBuzz 负责（base 方向下保持嵌的异向子段可读），本函数只做跨 run 重排。
+    // 2) 完整 UBA（UAX #9）：逐码点嵌入层级（X/W/N/I 规则），供「面 + 层级」双键切 run
+    //    与跨 run 的 L2 层叠反转重排。
+    std::vector<char32_t> cps32;
+    cps32.reserve(cps.size());
+    for (const auto &c : cps) {
+        cps32.push_back(static_cast<char32_t>(c.cp));
+    }
+    const std::uint8_t base_level = (base == TextDirection::RTL) ? 1U : 0U;
+    const auto levels = detail::uba_levels(cps32, base_level);
+    // 3) 把「同面且同层级」的连续码点切为 run；逐 run 调 hb_shape，每个 run 的字形序列先独立收集。
+    //    run 层级单一，hb 基准方向取该 run 层级奇偶（显式 direction 时；否则交给 hb guess）。
     std::vector<std::vector<ShapedGlyph>> segs;
+    std::vector<std::uint8_t> seg_levels;
     for (std::size_t k = 0; k < cps.size();) {
         const auto &cp = cps.at(k);
         FontFace *rf = cp.face;
+        const std::uint8_t run_level = levels.at(k);
         const std::size_t run_byte_start = cp.byte_start;
         std::size_t run_byte_end = cp.byte_end;
         std::size_t kk = k + 1;
-        while (kk < cps.size() && cps.at(kk).face == rf) {
+        while (kk < cps.size() && cps.at(kk).face == rf && levels.at(kk) == run_level) {
             run_byte_end = cps.at(kk).byte_end;
             ++kk;
         }
@@ -375,9 +386,10 @@ class ShapeCache {
         hb_buffer_t *buf = hb_buffer_create();
         hb_buffer_add_utf8(buf, run_str.data(), static_cast<int>(run_str.size()), 0, static_cast<int>(run_str.size()));
         hb_buffer_guess_segment_properties(buf);
-        // A2：显式 direction 作为该 run 的基准方向；hb 在 base 下应用 UBA，嵌的异向子段仍保持可读。
+        // A2：显式 direction 时按该 run 的 UBA 层级奇偶设定基准方向（run 层级单一，内序
+        // 由 hb 反转为视觉序）；无显式 direction 时保持 hb guess（与接入前行为逐位一致）。
         if (opts.direction.has_value()) {
-            hb_buffer_set_direction(buf, base == TextDirection::RTL ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
+            hb_buffer_set_direction(buf, (run_level % 2U) != 0U ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
         }
         hb_shape(hb_font, buf, nullptr, 0);
         unsigned int ng = 0;
@@ -406,12 +418,13 @@ class ShapeCache {
         // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         hb_buffer_destroy(buf);
         hb_font_destroy(hb_font);
+        seg_levels.push_back(run_level);
         segs.push_back(std::move(seg));
     }
-    // 3) 跨 run 视觉重排（UBA-lite）：段落 RTL 时整体右→左翻转 run 顺序，使逻辑首 run 落在右缘；
-    //    单 run / LTR 段落为恒等变换（与接入前逐位一致，golden 零影响）。段内字形已为视觉序，
-    //    此处只交换 run 间的先后，不改变任一 run 内部的字形顺序。
-    const auto order = detail::bidi_visual_run_order(segs.size(), base);
+    // 4) 跨 run 视觉重排（完整 UBA L2）：按 run 层级序列层叠反转——RTL 段整体翻转、段内
+    //    数字内序保持、LTR 段内 RTL 子段原位等均由此统一推出；全零层级为恒等变换（与
+    //    接入前逐位一致，golden 零影响）。run 内字形已为该 run 视觉序，此处只重排 run 间序。
+    const auto order = detail::uba_visual_order(seg_levels);
     for (const std::size_t idx : order) {
         if (idx < segs.size()) {
             out.glyphs.insert(out.glyphs.end(), segs[idx].begin(), segs[idx].end());

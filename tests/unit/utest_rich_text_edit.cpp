@@ -247,11 +247,12 @@ AURORA_TEST_CASE(rtl_direction_api_roundtrip_and_unset_omitted) {
     AURORA_TEST_CHECK_FALSE(plain.contains("direction"));
 }
 
-AURORA_TEST_CASE(rtl_pointer_hit_test_flips_run_order) {
-    // RTL 段落的核心 RichTextEdit 逻辑：跨 run 顺序翻转——逻辑首 run 落视觉右缘、逻辑尾 run 落视觉左缘
-    // （run 内仍按各自内容脚本整形，A2 设计）。用两色 "a"+"b" 构造两 run 验证：
-    //   LTR：run[0]="a"(begin 0) 在左、run[1]="b"(begin 1) 在右 → 点左缘 caret 0、点右缘 caret 1。
-    //   RTL：run[0]="a"(begin 0) 在右、run[1]="b"(begin 1) 在左 → 点左缘 caret 1、点右缘 caret 0。
+AURORA_TEST_CASE(rtl_pointer_hit_test_same_level_runs_keep_logical_order) {
+    // 完整 UBA（UAX #9）语义：RTL 段内两色拉丁 run "a"+"b" 同属嵌入层 2（连续同层 span），
+    // L2 层叠反转在段落层与 span 层各反转一次而相互抵消 → span 内保持逻辑序，显示 "ab"
+    // （a 左 b 右）。点击映射因此与 LTR 相同（旧 UBA-lite 的「整体翻转」会把同层 run
+    // 错误地互换为 "ba"，已被完整 UBA 修正）。跨层 run 的翻转见 utest_bidi 的
+    // arabic_richtextedit_cross_level_runs_reorder（阿文 run 层 1 vs 拉丁 run 层 2）。
     // 拉丁字形在 headless 可用，且短 run 不会溢出 300px 约束，故不依赖阿拉伯字体整形。
     auto click = [&](RichTextEdit &e, float x) -> void {
         MouseEvent ev;
@@ -277,9 +278,10 @@ AURORA_TEST_CASE(rtl_pointer_hit_test_flips_run_order) {
     rtl.load_spans(spans);
     rtl.set_direction(TextDirection::RTL);
     LayoutEngine::layout(rtl, bounded(300.0F, 300.0F));
-    click(rtl, rtl.size().width - 0.5F);  // 视觉右缘 → run[0]="a" 右缘 → caret 0
+    // 同层 span 逻辑序保持：RTL 段右对齐但不改变 run 间逻辑序 → 点击映射与 LTR 一致。
+    click(rtl, 0.0F);  // 视觉左缘 → run[0]="a" 左缘 → caret 0
     AURORA_TEST_CHECK_EQ(rtl.caret(), 0U);
-    click(rtl, 0.0F);  // 视觉左缘 → run[1]="b" 左缘 → caret 1
+    click(rtl, rtl.size().width - 0.5F);  // 视觉右缘 → run[1]="b" 右缘 → caret 1
     AURORA_TEST_CHECK_EQ(rtl.caret(), 1U);
 }
 

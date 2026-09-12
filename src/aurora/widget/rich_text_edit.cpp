@@ -103,7 +103,7 @@ auto RichTextEdit::on_paint(Painter &p, const Rect &bounds, const BuildContext &
         // 逐 run 整形绘制（run 内 hb 按自身内容方向 shaping，跨 run 顺序按段落基准方向）。
         const auto runs = compute_line_runs(line, base, bounds);
         for (const auto &r : runs) {
-            const TextDirection run_dir = aurora::render::detail::guess_paragraph_direction(r.text);
+            const TextDirection run_dir = r.dir;  // UBA 层级奇偶（compute_line_runs 预解析）
             const render::TextLayoutOpts ropts{.direction = run_dir};
             render::FontEngine::draw_text(
                 p, Rect{.origin = Point{.x = r.x, .y = y}, .size = Size{.width = r.w, .height = line_h}}, r.text,
@@ -188,7 +188,7 @@ auto RichTextEdit::on_pointer_event(MouseEvent &e) -> void {
             const float d = std::fabs(e.local_position.x - clamped);
             if (d < best_dist) {
                 best_dist = d;
-                const TextDirection run_dir = aurora::render::detail::guess_paragraph_direction(r.text);
+                const TextDirection run_dir = r.dir;  // UBA 层级奇偶（compute_line_runs 预解析）
                 const render::TextLayoutOpts ropts{.direction = run_dir};
                 const std::size_t idx =
                     render::FontEngine::hit_test_char_inclusive(r.text, e.local_position.x - r.x, r.font, ropts);
@@ -486,11 +486,85 @@ auto RichTextEdit::compute_line_runs(const Line &line, TextDirection base, const
         i = j;
     }
 
-    // 逐 run 测宽（方向取各 run 自身内容方向，跨 run 顺序取段落基准方向）。
-    float total_w = 0.0F;
+    // 逐样式 run 解码码点并按完整 UBA（UAX #9）求逐码点嵌入层级；样式 run 内层级变化处
+    // 再切分为层级 run（层级单一 → hb 方向 = 层级奇偶），随后跨 run 按 L2 重排。
+    const std::uint8_t base_level = (base == TextDirection::RTL) ? 1U : 0U;
+    auto decode_cp = [](const std::string &s, std::size_t &p) -> char32_t {
+        const auto b0 = static_cast<unsigned char>(s[p]);
+        std::size_t len = 1U;
+        std::uint32_t cp = b0;
+        if ((b0 & 0x80U) != 0U) {
+            const std::size_t extra = ((b0 & 0xE0U) == 0xC0U) ? 1U
+                : ((b0 & 0xF0U) == 0xE0U)                     ? 2U
+                : ((b0 & 0xF8U) == 0xF0U)                     ? 3U
+                                                              : 0U;
+            cp = static_cast<std::uint32_t>(b0 & static_cast<unsigned char>(0xFFU >> (extra + 1U)));
+            len = 1U + extra;
+            for (std::size_t q = 1U; q <= extra && p + q < s.size(); ++q) {
+                cp = (cp << 6U) | (static_cast<unsigned char>(s[p + q]) & 0x3FU);
+            }
+        }
+        p += len;
+        return static_cast<char32_t>(cp);
+    };
+    std::vector<RunLayout> level_runs;
+    std::vector<std::uint8_t> run_levels;
     for (auto &r : runs) {
-        const TextDirection run_dir = guess_paragraph_direction(r.text);
-        r.w = render::FontEngine::measure_width(r.text, r.font, render::TextLayoutOpts{.direction = run_dir});
+        std::vector<char32_t> cps;
+        for (std::size_t p = 0; p < r.text.size();) {
+            cps.push_back(decode_cp(r.text, p));
+        }
+        const auto lv = render::detail::uba_levels(cps, base_level);
+        std::size_t s = 0;
+        while (s < cps.size()) {
+            std::size_t e = s + 1;
+            while (e < cps.size() && lv[e] == lv[s]) {
+                ++e;
+            }
+            // 子 run = [s, e)：按码点字节区间取子串并保留逐字下划线标记。
+            RunLayout sub;
+            sub.begin = r.begin + s;
+            sub.end = r.begin + e;
+            std::size_t byte_s = 0;
+            std::size_t byte_e = r.text.size();
+            {
+                std::size_t p = 0;
+                std::size_t idx = 0;
+                while (idx < e && p < r.text.size()) {
+                    const std::size_t byte_start = p;
+                    decode_cp(r.text, p);
+                    if (idx == s) {
+                        byte_s = byte_start;
+                    }
+                    if (idx == e - 1U) {
+                        byte_e = p;
+                    }
+                    ++idx;
+                }
+            }
+            sub.text = r.text.substr(byte_s, byte_e - byte_s);
+            sub.underline.assign(sub.text.size(), 0);
+            for (std::size_t k = 0; k < sub.underline.size(); ++k) {
+                sub.underline[k] = r.underline[s + k];
+            }
+            sub.font = r.font;
+            sub.color = r.color;
+            sub.dir = (lv[s] % 2U != 0U) ? TextDirection::RTL : TextDirection::LTR;
+            run_levels.push_back(lv[s]);
+            level_runs.push_back(std::move(sub));
+            s = e;
+        }
+    }
+
+    // 逐 run 测宽（方向取 UBA 层级奇偶）。
+    for (auto &r : level_runs) {
+        r.w = render::FontEngine::measure_width(r.text, r.font, render::TextLayoutOpts{.direction = r.dir});
+    }
+
+    // 跨 run 视觉重排：完整 UBA L2 层叠反转（RTL 段整体翻转/段内数字内序保持等均由此推出）。
+    const auto order = render::detail::uba_visual_order(run_levels);
+    float total_w = 0.0F;
+    for (const auto &r : level_runs) {
         total_w += r.w;
     }
 
@@ -498,18 +572,13 @@ auto RichTextEdit::compute_line_runs(const Line &line, TextDirection base, const
     const float x0 = (base == TextDirection::RTL) ? bounds.origin.x + bounds.size.width - total_w
                                                  : bounds.origin.x;
     float cursor = x0;
-    if (base != TextDirection::RTL) {
-        for (auto &r : runs) {
-            r.x = cursor;
-            cursor += r.w;
-        }
-    } else {
-        for (auto it = runs.rbegin(); it != runs.rend(); ++it) {
-            it->x = cursor;
-            cursor += it->w;
+    for (const std::size_t idx : order) {
+        if (idx < level_runs.size()) {
+            level_runs[idx].x = cursor;
+            cursor += level_runs[idx].w;
         }
     }
-    return runs;
+    return level_runs;
 }
 
 auto RichTextEdit::caret_visual_x(const Line &line, TextDirection base, std::size_t caret_local,
@@ -518,7 +587,7 @@ auto RichTextEdit::caret_visual_x(const Line &line, TextDirection base, std::siz
     for (const auto &r : runs) {
         if (caret_local >= r.begin && caret_local <= r.end) {
             const std::size_t k = caret_local - r.begin;
-            const TextDirection run_dir = aurora::render::detail::guess_paragraph_direction(r.text);
+            const TextDirection run_dir = r.dir;  // UBA 层级奇偶（compute_line_runs 预解析）
             return r.x + render::FontEngine::caret_x(r.text, k, r.font, render::TextLayoutOpts{.direction = run_dir});
         }
     }
@@ -607,7 +676,7 @@ auto RichTextEdit::paint_selection_highlight(Painter &p, const Rect &bounds) con
                 for (std::size_t k = 0; k < r.text.size(); ++k) {
                     const std::size_t doc_pos = line_begin + r.begin + k;
                     if (doc_pos >= a && doc_pos < b) {
-                        const TextDirection run_dir = aurora::render::detail::guess_paragraph_direction(r.text);
+                        const TextDirection run_dir = r.dir;  // UBA 层级奇偶（compute_line_runs 预解析）
                         const render::TextLayoutOpts ropts{.direction = run_dir};
                         const float x0 = r.x + render::FontEngine::caret_x(r.text, k, r.font, ropts);
                         const float x1 = r.x + render::FontEngine::caret_x(r.text, k + 1, r.font, ropts);

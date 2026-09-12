@@ -262,9 +262,10 @@ class RichTextEdit : public LeafWidget {
 
     auto pos_from_line_col(size_t line_idx, size_t col) const -> size_t;
 
-    /// @brief 单行「生效方向 + 各同样式 run」的视觉布局（A2 RTL）：连续同样式字符合并为 shaping run，
-    ///        逐 run 经 `FontEngine` 整形（方向取各 run 自身内容方向，跨 run 顺序取段落基准方向）；
-    ///        RTL 段落整体右对齐并翻转 run 顺序。返回每个 run 的视觉起点 x、宽度与行内下标区间。
+    /// @brief 单行「生效方向 + 各样式/层级 run」的视觉布局（A2 RTL + 完整 UBA）：连续同样式
+    ///        字符合并为样式 run，再逐 run 按完整 UBA（UAX #9）嵌入层级细分为层级 run（层级
+    ///        单一，hb 方向取层级奇偶）；跨 run 顺序按 `uba_visual_order`（L2 层叠反转）重排；
+    ///        RTL 段落整体右对齐。返回每个 run 的视觉起点 x、宽度、行内下标区间与整形方向。
     struct RunLayout {
         std::string text;
         Font font = {};
@@ -274,6 +275,7 @@ class RichTextEdit : public LeafWidget {
         float w = 0.0F;
         std::size_t begin = 0;  ///< 该 run 首字符在行内的逻辑下标（含 '\n' 计 1）
         std::size_t end = 0;    ///< 该 run 末字符逻辑下标 +1
+        TextDirection dir = TextDirection::LTR;  ///< 该 run 的整形方向（UBA 层级奇偶）
     };
 
     auto compute_line_runs(const Line &line, TextDirection base, const Rect &bounds) const -> std::vector<RunLayout>;
