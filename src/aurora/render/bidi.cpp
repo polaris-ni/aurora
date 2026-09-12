@@ -59,10 +59,20 @@ enum class Bc : std::uint8_t {
     RLI,
     FSI,
     PDI,
+    NSM,  // 鼻音化/组合符（W1：取前字符类型）
 };
 
 // 单个码点的双向类型（UAX #9 第 4-5 节主要区间的务实覆盖）。
 [[nodiscard]] auto bidi_class_of(char32_t cp) -> Bc {
+    // NSM（组合/鼻音化符，W1）：务实覆盖希伯来点、阿文 tashkeel 与拉丁组合附加符。
+    // 必须在阿文/希伯来区块判定之前（这些区间落在其内部）。
+    if ((cp >= 0x0591U && cp <= 0x05BDU) || cp == 0x05BFU || cp == 0x05C1U || cp == 0x05C2U ||
+        cp == 0x05C4U || cp == 0x05C5U || cp == 0x05C7U || (cp >= 0x064BU && cp <= 0x065FU) ||
+        cp == 0x0670U || (cp >= 0x06D6U && cp <= 0x06DCU) || (cp >= 0x06DFU && cp <= 0x06E8U) ||
+        (cp >= 0x06EAU && cp <= 0x06EDU) || (cp >= 0x08E3U && cp <= 0x08FFU) ||
+        (cp >= 0x0300U && cp <= 0x036FU)) {
+        return Bc::NSM;
+    }
     // 显式嵌入与隔离控制。
     if (cp == 0x202AU) return Bc::LRE;
     if (cp == 0x202BU) return Bc::RLE;
@@ -261,13 +271,42 @@ struct XResult {
         return {};
     }
     std::vector<Bc> t(n);
+    // 原始 NSM 记录（W1 之前的分类）：N0 修改括号方向后需向其后紧跟的原始 NSM 传播。
+    std::vector<bool> was_nsm(n, false);
     for (std::size_t i = 0; i < n; ++i) {
         t[i] = bidi_class_of(text[i]);
+        was_nsm[i] = (t[i] == Bc::NSM);
         // X4/X5 override（X9 后处理）：LRO/RLO 把覆盖范围内的字符强类型强制为 L/R。
         if (x.override_dir[i] == 1U) {
             t[i] = Bc::L;
         } else if (x.override_dir[i] == 2U) {
             t[i] = Bc::R;
+        }
+    }
+
+    // W1：NSM → 前一字符的类型（自左向右解析，前一 NSM 已解析 → 链式）；段首取 sos。
+    // isolate 起始符（LRI/RLI/FSI）或 PDI 之后的 NSM → ON（UAX #9 tr9-45 W1 附注）。
+    // LRE/RLE/PDF/LRO/RLO 在 X9 已移除，不构成「前一字符」，回溯时跳过。
+    {
+        const Bc sos = x.rtl_embedding[0] ? Bc::R : Bc::L;
+        for (std::size_t i = 0; i < n; ++i) {
+            if (x.control_placeholder[i] || t[i] != Bc::NSM) {
+                continue;
+            }
+            Bc resolved = sos;
+            for (std::size_t p = i; p-- > 0;) {
+                const Bc pc = bidi_class_of(text[p]);
+                if (pc == Bc::LRE || pc == Bc::RLE || pc == Bc::PDF || pc == Bc::LRO || pc == Bc::RLO) {
+                    continue;  // X9 移除类型：继续向前找「前一字符」
+                }
+                if (pc == Bc::LRI || pc == Bc::RLI || pc == Bc::FSI || pc == Bc::PDI) {
+                    resolved = Bc::ON;
+                } else {
+                    resolved = t[p];
+                }
+                break;
+            }
+            t[i] = resolved;
         }
     }
 
@@ -338,7 +377,126 @@ struct XResult {
         }
     }
 
-    // ---- N1/N2 阶段（N0 括号未实现，括号按普通中性参与 N1/N2）----
+    // ---- N0 阶段：成对括号（BD16 栈配对；N0a / N0c1 / N0c2，UAX #9 tr9-45）----
+    // 语境只查两处：括号内部（最先）与开括号之前（回看至第一个强类型或 sos）；
+    // 闭括号之后的内容永不参与。EN/AN 在本规则中视作 R。按开括号逻辑序逐对处理
+    // （嵌套括号：外层先处理，内层内容扫描时外层括号已是解析后的强类型）。
+    auto bracket_of = [](char32_t cp) -> int {
+        // >0 开括号 id、<0 闭括号 -id、0 非括号；同 id 配对。
+        switch (cp) {
+        case U'(':
+            return 1;
+        case U')':
+            return -1;
+        case U'[':
+            return 2;
+        case U']':
+            return -2;
+        case U'{':
+            return 3;
+        case U'}':
+            return -3;
+        case U'<':
+            return 4;
+        case U'>':
+            return -4;
+        default:
+            return 0;
+        }
+    };
+    std::vector<std::pair<std::size_t, std::size_t>> pairs;
+    {
+        // BD16：栈深上限 63，超限即停止收集。
+        std::vector<std::pair<int, std::size_t>> open_stack;
+        for (std::size_t i = 0; i < n; ++i) {
+            const int b = bracket_of(text[i]);
+            if (b == 0 || x.control_placeholder[i] || t[i] != Bc::ON) {
+                continue;  // 仅当前类型为 ON 的括号参与（override 强转后的括号除外）
+            }
+            if (b > 0) {
+                if (open_stack.size() >= 63U) {
+                    break;
+                }
+                open_stack.emplace_back(b, i);
+            } else if (!open_stack.empty() && open_stack.back().first == -b) {
+                pairs.emplace_back(open_stack.back().second, i);
+                open_stack.pop_back();
+            }
+            // 不匹配的闭括号：不配对、不出栈（BD16）。
+        }
+    }
+    auto n0_side = [&](Bc bc) -> int {
+        // N0 语境方向语义：L → 0；R/AL/EN/AN → 1（EN/AN 视作 R）。
+        if (bc == Bc::L) {
+            return 0;
+        }
+        if (bc == Bc::R || bc == Bc::EN || bc == Bc::AN) {
+            return 1;
+        }
+        return -1;
+    };
+    for (const auto &pr : pairs) {
+        const std::size_t o = pr.first;
+        const std::size_t c = pr.second;
+        const int e = x.rtl_embedding[o] ? 1 : 0;  // 嵌入方向（1=R）取开括号处层级奇偶
+        // 1) 括号内部（原始 NSM 经 W1 已随前字，无需特判；括号后跟的 NSM 为 ON 自然跳过）。
+        bool has_e = false;
+        bool has_o = false;
+        for (std::size_t k = o + 1U; k < c; ++k) {
+            if (x.control_placeholder[k]) {
+                continue;
+            }
+            const int s = n0_side(t[k]);
+            if (s < 0) {
+                continue;
+            }
+            if (s == e) {
+                has_e = true;
+                break;
+            }
+            has_o = true;
+        }
+        int new_dir = -1;  // -1 = 不改（N0c 留给 N1/N2）
+        if (has_e) {
+            new_dir = e;  // 内部有嵌入方向强类型 → 两括号 = e
+        } else if (has_o) {
+            // 内部强类型全为相反方向：向开括号之前回看至第一个强类型（isolate 边界截断 → sos；
+            // X9 移除类型 LRE/RLE/PDF/LRO/RLO 不构成边界，跳过）。
+            int ctx = -1;
+            for (std::size_t k = o; k-- > 0;) {
+                if (x.control_placeholder[k]) {
+                    const Bc pc = bidi_class_of(text[k]);
+                    if (pc == Bc::LRE || pc == Bc::RLE || pc == Bc::PDF || pc == Bc::LRO || pc == Bc::RLO) {
+                        continue;
+                    }
+                    break;  // LRI/RLI/FSI/PDI：isolating run 序列边界，回看到此为止
+                }
+                const int s = n0_side(t[k]);
+                if (s >= 0) {
+                    ctx = s;
+                    break;
+                }
+            }
+            if (ctx < 0) {
+                ctx = e;  // sos ≈ 首字符 embedding 方向（与 W 阶段 last_strong 初值同口径）
+            }
+            new_dir = ctx;  // 前置强类型为 o → = o（N0c1）；为 e/sos=e → = e（N0c2）
+        }
+        if (new_dir >= 0) {
+            const Bc nb = (new_dir == 1) ? Bc::R : Bc::L;
+            t[o] = nb;
+            t[c] = nb;
+            // N0 附注：紧跟已改向括号之后的原始 NSM 随括号改为同向（W1 已把它们置为括号旧类型 ON）。
+            for (std::size_t k = o + 1U; k < n && was_nsm[k] && !x.control_placeholder[k]; ++k) {
+                t[k] = nb;
+            }
+            for (std::size_t k = c + 1U; k < n && was_nsm[k] && !x.control_placeholder[k]; ++k) {
+                t[k] = nb;
+            }
+        }
+    }
+
+    // ---- N1/N2 阶段 ----
     // 中性 = ON/WS（BN 已被 X9 占位排除）。EN/AN 在 N1 中视作 R。
     auto neutral_of = [&](Bc bc) -> bool { return bc == Bc::ON || bc == Bc::WS; };
     auto strong_side_of = [&](Bc bc) -> int {

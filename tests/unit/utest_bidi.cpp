@@ -250,6 +250,47 @@ AURORA_TEST_CASE(uba_levels_fsi_strong_latin_acts_ltr) {
     check_levels(U"\u2068ab\u2069", 0, {0, 0, 0, 0});
 }
 
+// ---- W1：NSM ----
+AURORA_TEST_CASE(uba_levels_w1_nsm_takes_previous_type) {
+    // W1：NSM 取前一字符类型（fatha 跟在 a 后 → L）。
+    check_levels(U"a\u064E", 0, {0, 0});
+}
+
+AURORA_TEST_CASE(uba_levels_w1_nsm_chain_at_sos) {
+    // W1：段首 NSM 取 sos（RTL 基准 → R → 层 1）；链式 NSM 取前一 NSM 已解析值。
+    check_levels(U"\u064E\u064Fa", 1, {1, 1, 2});
+}
+
+// ---- N0：成对括号（BD16 + N0a/N0c1/N0c2）----
+AURORA_TEST_CASE(uba_levels_n0a_content_matching_embedding_sets_brackets) {
+    // N0a：括号内含嵌入方向强类型（RTL 基准下 "שלום"=R=e）→ 两括号 = e = R（层 1）。
+    // 对照：无 N0 时括号按中性走 N2 → 同为 R，但内部 L（DEF）与 R（שלום）的分段边界不同。
+    check_levels(U"abc (DEF \u05E9\u05DC\u05D5\u05DD) ghi", 1, {2, 2, 2, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2});
+}
+
+AURORA_TEST_CASE(uba_levels_n0c1_preceding_strong_opposite_sets_brackets) {
+    // N0c1：括号内强类型全为相反方向（DEF=L=o），开括号前回看首强 = c=L=o → 括号 = o = L（层 2）。
+    // 无 N0 时括号按 N2 取嵌入方向 R（层 1）——本用例区分 N0c1 生效。
+    check_levels(U"abc (DEF) ghi", 1, {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2});
+}
+
+AURORA_TEST_CASE(uba_levels_n0c2_preceding_strong_matching_sets_brackets) {
+    // N0c2：括号内强类型全为相反方向（ABC=L=o），开括号前回看首强 = ל=R=e → 括号 = e = R（层 1）。
+    // N0 只回看开括号之前，永不检查闭括号之后（闭括号后的 "xyz"=L 不影响括号）。
+    check_levels(U"\u05DE\u05DC (ABC) xyz", 1, {1, 1, 1, 1, 2, 2, 2, 1, 1, 2, 2, 2});
+}
+
+AURORA_TEST_CASE(uba_levels_n0c2_sos_fallback) {
+    // N0c2 兜底：括号前无强类型 → sos（= 段落方向 R=e）→ 括号 = e = R（层 1）。
+    check_levels(U"(abc) def", 1, {1, 2, 2, 2, 1, 1, 2, 2, 2});
+}
+
+AURORA_TEST_CASE(uba_levels_n0_nsm_follows_changed_bracket) {
+    // N0 附注：紧跟已改向括号之后的原始 NSM 随括号改向。闭括号经 N0c1 → L（层 2），
+    // 其后 NSM 随之 L（层 2）；若不传播，NSM 与后随空格走 N1/N2（右侧 א=R，混合 → 段落 R → 层 1）。
+    check_levels(U"ab (c)\u064E \u05D0", 1, {2, 2, 2, 2, 2, 2, 2, 1, 1});
+}
+
 // ---- L2：uba_visual_order ----
 AURORA_TEST_CASE(uba_visual_order_ltr_identity) {
     const std::vector<std::uint8_t> levels{0, 0, 0};

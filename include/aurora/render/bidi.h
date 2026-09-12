@@ -8,8 +8,8 @@
 //   ② 完整逐字符 UBA（UAX #9）：`uba_levels`（X/W/N/I 规则 → 逐码点嵌入层级）+
 //     `uba_visual_order`（L2 层叠反转），供 shape_line 以「面 + 层级」双键切 run 后
 //     精确重排（LTR 段内 RTL 子段、RTL 段内数字/拉丁内序保持等）。
-// - 已知限制（A2）：N0（成对括号）与 W1（NSM）未实现；括号/鼻音化符按普通字符参与
-//   N1/N2。显式控制符（LRE/RLE/LRO/RLO/PDF/LRI/RLI/FSI/PDI）参与解析。
+// - 显式控制符（LRE/RLE/LRO/RLO/PDF/LRI/RLI/FSI/PDI）参与解析；N0（成对括号，
+//   BD16 + N0a/N0c1/N0c2）与 W1（NSM）已实现。
 //
 // 全部为纯函数，不依赖 FreeType/HarfBuzz，可独立单测。
 #pragma once
@@ -35,12 +35,11 @@ namespace aurora::render::detail {
 [[nodiscard]] auto bidi_visual_run_order(std::size_t run_count, TextDirection base) -> std::vector<std::size_t>;
 
 /// @brief 逐码点 UBA 嵌入层级（UAX #9：X1-X9 显式嵌入/隔离 + W1-W7 弱类型 +
-///        N1-N2 中性 + I1-I2 隐式层级）。
+///        N0 成对括号 + N1-N2 中性 + I1-I2 隐式层级）。
 /// @param text 码点序列（调用方已完成 UTF-8 解码；`'\n'` 等按中性处理）。
 /// @param base_level 段落基准层级（0 = LTR 基准，1 = RTL 基准）。
 /// @return 与 `text` 等长的层级数组；显式控制符占位为其所在 embedding 的层级
 ///         （调用方的重排/绘制按需跳过；Aurora 文本流通常不含控制符）。
-/// @note 已知限制：N0（成对括号）与 W1（NSM）未实现。
 [[nodiscard]] auto uba_levels(const std::vector<char32_t> &text, std::uint8_t base_level)
     -> std::vector<std::uint8_t>;
 
