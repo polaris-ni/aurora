@@ -61,7 +61,7 @@ jobs:
           tar -czf "aurora-${{ github.ref_name }}-${OSNAME}-${ARCH}.tar.gz" -C staging .
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: aurora-${{ matrix.os }}
           path: aurora-${{ github.ref_name }}-*
@@ -71,13 +71,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           merge-multiple: true
           path: dist
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true
