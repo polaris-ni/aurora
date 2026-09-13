@@ -25,6 +25,20 @@ enum class TextOverflow : std::uint8_t {
     Fade,  ///< 渐隐（Painter 不支持时降级为 Clip）
 };
 
+/// @brief 书写方向（参考 Flutter TextDirection）。
+///
+/// 三条作用路径：
+///  1. **shaping**：`TextLayoutOpts::direction` 显式设置（nullopt = 按内容自动 guess，现状），
+///     RTL 时 HarfBuzz 把字形反转为视觉序（绘制按数组顺序左→右即为正确视觉序）；
+///  2. **caret/命中**：RTL 下逻辑下标 ↔ 视觉位置镜像映射（逻辑首字符在右缘）；
+///  3. **对齐**：`TextAlign::Start/End` 按方向解析（RTL: Start=Right，End=Left）。
+/// @note Thread: thread-safe
+/// @note Side-effects: pure
+enum class TextDirection : std::uint8_t {
+    LTR,  ///< 从左到右（默认）
+    RTL,  ///< 从右到左（阿拉伯语 / 希伯来语等）
+};
+
 /// @brief 字重（参考 Flutter FontWeight，枚举值即字重数值 100..900）。
 enum class FontWeight : std::uint16_t {
     Thin = 100,
@@ -122,6 +136,24 @@ enum class BoxFit : std::uint8_t {
     FitHeight,  ///< 高适配（宽度按比例）
     None,  ///< 原始尺寸
     ScaleDown,  ///< 仅当大于容器时等比缩小，否则保持原尺寸
+};
+
+/// @brief 鼠标光标形状（参考 Flutter SystemMouseCursors / Win32 LoadCursor 家族）。
+///
+/// 由 `Modifier::cursor(...)` 声明在控件上、`Widget::cursor_shape()` 虚钩子提供控件级默认；
+/// 事件派发器在悬停链变化时解析出目标形状，经 `Surface::set_cursor` 下发到平台光标。
+enum class CursorShape : std::uint8_t {
+    Arrow,  ///< 默认箭头
+    IBeam,  ///< 文本输入 I 形光标
+    PointingHand,  ///< 可点击手型
+    ResizeNS,  ///< 上下调整大小
+    ResizeEW,  ///< 左右调整大小
+    ResizeNWSE,  ///< 主对角线（↘↖）调整大小
+    ResizeNESW,  ///< 副对角线（↗↙）调整大小
+    Move,  ///< 移动
+    Crosshair,  ///< 十字准星
+    NotAllowed,  ///< 禁止
+    Wait,  ///< 等待/忙碌
 };
 
 /// @} // thread-safe, pure

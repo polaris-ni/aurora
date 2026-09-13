@@ -74,6 +74,23 @@ class X11Surface final : public Surface {
     auto set_event_handler(const EventHandler &h) -> void override;
     /// @brief 运行时更新窗口标题（XStoreName + _NET_WM_NAME，UTF-8）。
     auto set_title(const std::string &title) -> void override;
+
+    /// @brief 运行时更新悬停光标形状：`XCreateFontCursor` + `XDefineCursor` + `XFlush`。
+    /// 句柄按 `CursorShape` 取值序缓存在 Impl（`XCreateFontCursor` 每次调用都产生新资源，
+    /// 反复悬停切换必泄漏），析构统一 `XFreeCursor`。
+    /// 后端映射：Arrow→`XC_left_ptr`、IBeam→`XC_xterm`、PointingHand→`XC_hand2`、ResizeNS→`XC_sb_v_double_arrow`、
+    /// ResizeEW→`XC_sb_h_double_arrow`、ResizeNWSE→`XC_top_left_corner`、ResizeNESW→`XC_top_right_corner`、
+    /// Move→`XC_fleur`、Crosshair→`XC_crosshair`、NotAllowed→`XC_X_cursor`、Wait→`XC_watch`。
+    /// @note 真机已验证（2026-09-13）：以 `AURORA_BACKEND_X11=ON` 编译通过；并在真实 X server
+    /// 上运行时读回（XFIXES `XFixesGetCursorImage`）确认 11 个形状逐个改变了屏幕显示光标且两两互异，
+    /// 名称与上表逐项吻合（left_ptr / xterm / hand2 / sb_v_double_arrow / sb_h_double_arrow /
+    /// top_left_corner / top_right_corner / fleur / crosshair / X_cursor / watch）。
+    /// 复验工具：`tools/verify/x11_cursor_live_probe.cpp`；协议级回归：`utest_x11_surface`
+    /// 的 `AURORA_LIVE_X11=1` 用例。
+    /// @warning 本 TU 会被 `<X11/X.h>` 的 `#define CursorShape 0` 宏污染（本项目类型同名），
+    /// 任何引入 Xlib 的翻译单元都必须在 Xlib 头之后 `#undef CursorShape`，详见 x11_surface.cpp。
+    auto set_cursor(CursorShape shape) -> void override;
+
     /// @brief 原生窗口句柄：X11 `Window`（XID）经 uintptr_t 装入 void*。
     [[nodiscard]] auto native_handle() const -> void * override;
 

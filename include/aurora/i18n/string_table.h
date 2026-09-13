@@ -8,6 +8,7 @@
 
 #include "aurora/i18n/locale.h"
 #include "aurora/i18n/localized_string.h"
+#include "aurora/i18n/plural.h"
 
 namespace aurora {
 
@@ -70,7 +71,7 @@ class StringTable {
         for (const auto &a : ls.args) {
             as.push_back(resolve(a, loc));
         }
-        return format(*r, as);
+        return format(*r, as, loc);
     }
 
     /// @brief 从 open 位置的 '{' 起，找到与之配平（考虑嵌套 {}）的 '}' 下标。
@@ -90,7 +91,8 @@ class StringTable {
     }
 
     /// @brief 格式化模板：替换 `{i}` 占位与 `{n, plural, one=… other=…}` 复数块。
-    [[nodiscard]] static auto format(const std::string &tmpl, const std::vector<std::string> &args) -> std::string {
+    [[nodiscard]] static auto format(const std::string &tmpl, const std::vector<std::string> &args,
+                                      const Locale &loc = Locale{}) -> std::string {
         std::string out;
         out.reserve(tmpl.size());
         const std::size_t n = tmpl.size();
@@ -113,24 +115,18 @@ class StringTable {
                         idx = 0;
                     }
                     const std::string rest = inner.substr(ppos + 9);  // 跳过 ", plural,"
-                    const std::size_t oi = rest.find("one=");
-                    const std::size_t oti = rest.find("other=");
-                    if (oi != std::string::npos && oti != std::string::npos && oti > oi) {
-                        std::string one = rest.substr(oi + 4, oti - (oi + 4));
-                        std::string other = rest.substr(oti + 6);
-                        trim(one);
-                        trim(other);
-                        const std::string val = (idx >= 0 && std::cmp_less(idx, args.size())) ? args[idx] : "";
-                        const int num = to_int(val);
-                        std::string chosen = (num == 1) ? one : other;
-                        // 分支值被模板写成 one={...} / other={...}，去掉包裹花括号后再递归格式化，
-                        // 否则 "{one item}" 会被当成 {0} 占位再次替换成参数值。
-                        if (!chosen.empty() && chosen.front() == '{' && chosen.back() == '}') {
-                            chosen = chosen.substr(1, chosen.size() - 2);
-                        }
-                        // 复数分支内可能含 {0} 占位（如 "one={0} item"），需递归格式化。
-                        out += format(chosen, args);
+                    const std::string val = (idx >= 0 && std::cmp_less(idx, args.size())) ? args[idx] : "";
+                    // CLDR 六类复数：依 loc.language 的规则表把数值映射到类别，再选对应分支。
+                    // 旧式 one=/other= 模板在缺类别时回退 other=，与既有 num==1→one 行为向后兼容。
+                    const PluralCategory cat = plural_category(to_double(val), loc);
+                    std::string chosen = select_plural_branch(rest, cat);
+                    // 分支值被模板写成 {…} 整段包裹（如 "other={many items}"）时去掉包裹花括号后再递归格式化，
+                    // 否则 "{many items}" 会被当成 {0} 占位再次替换成参数值。
+                    if (!chosen.empty() && chosen.front() == '{' && chosen.back() == '}') {
+                        chosen = chosen.substr(1, chosen.size() - 2);
                     }
+                    // 复数分支内可能含 {0} 占位（如 "one={0} item"），需递归格式化（带 locale 透传）。
+                    out += format(chosen, args, loc);
                 } else {
                     int idx = 0;
                     try {
@@ -167,6 +163,62 @@ class StringTable {
         } catch (...) {
             return 0;
         }
+    }
+
+    /// @brief 把字符串解析为 double（用于复数类别判定）；失败回退 0。
+    static auto to_double(const std::string &s) -> double {
+        try {
+            return std::stod(s);
+        } catch (...) {
+            return 0.0;
+        }
+    }
+
+    /// @brief 把复数类别映射到模板关键字串（zero/one/two/few/many/other）。
+    static auto category_keyword(PluralCategory cat) -> const char * {
+        switch (cat) {
+            case PluralCategory::Zero:  return "zero";
+            case PluralCategory::One:   return "one";
+            case PluralCategory::Two:   return "two";
+            case PluralCategory::Few:   return "few";
+            case PluralCategory::Many:  return "many";
+            case PluralCategory::Other: return "other";
+        }
+        return "other";
+    }
+
+    /// @brief 从复数块（rest）提取 `kw=` 之后的分支值，直到下一个分支关键字（或结尾）。
+    static auto extract_branch(const std::string &rest, const std::string &kw) -> std::string {
+        const std::string token = kw + "=";
+        const std::size_t pos = rest.find(token);
+        if (pos == std::string::npos) {
+            return "";
+        }
+        const std::size_t start = pos + token.size();
+        static const char *kws[] = {"zero=", "one=", "two=", "few=", "many=", "other="};
+        std::size_t end = std::string::npos;
+        for (const char *k : kws) {
+            const std::size_t p = rest.find(k, start);
+            if (p != std::string::npos && (end == std::string::npos || p < end)) {
+                end = p;
+            }
+        }
+        std::string val = (end == std::string::npos) ? rest.substr(start) : rest.substr(start, end - start);
+        trim(val);
+        return val;
+    }
+
+    /// @brief 按类别选择复数分支：先取该类别，缺则回退 other=，再缺则回退 one=；皆无返回空串。
+    static auto select_plural_branch(const std::string &rest, PluralCategory cat) -> std::string {
+        std::string v = extract_branch(rest, category_keyword(cat));
+        if (!v.empty()) {
+            return v;
+        }
+        v = extract_branch(rest, "other");
+        if (!v.empty()) {
+            return v;
+        }
+        return extract_branch(rest, "one");
     }
 
     std::map<std::string, std::map<std::string, std::string>> data_;  ///< localeTag → key → 模板

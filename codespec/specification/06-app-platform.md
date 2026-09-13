@@ -314,6 +314,8 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 - `install_test_backend()` 清空并激活后端、返回是否生效；`reset_test_backend()` 仅清内容；`remove_test_backend()` 卸载并恢复平台实现、返回是否确有后端被卸载。
 - 编译开关语义见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §4（`AURORA_ENABLE_TEST_HOOKS`）。
 
+**Linux/macOS 实现（及为何测试不得断言系统剪贴板）**：非 Win32 平台经 `xsel`/`xclip`（macOS `pbcopy`/`pbpaste`）外壳进程中转（`popen`），并在作用域内把 `SIGPIPE` 置为忽略，避免工具缺失或无显示时子进程立即退出导致写已关闭管道把本进程杀掉。该路径的 selection 所有权是**异步**的（xsel 二次写入依赖既有守护进程交接、xclip 常驻等待读者），内容读回还受各工具的换行约定影响——因此**仓库测试禁止用系统剪贴板做内容断言**（既非确定，也不是 aurora 自身的契约）：`itest_text_selection` 的 Ctrl+C 复制用例改为先断言环境无关的选区范围，再在 `install_test_backend()` 成功时经进程内后端断言复制内容；双测试宏未开（Release）时仅跳过内容断言，选区/焦点/按键消费断言仍生效。
+
 ### 8.3 系统托盘
 
 `SystemTray`（`app/system_tray.h`）在 Win32 经 `Shell_NotifyIcon` + 隐藏消息窗口实现，支持图标、气泡与激活回调 `on_activate`；非 Win32 为 no-op（仅记录 `last_balloon_message`）。
@@ -427,7 +429,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 **门控与 ODR 安全**：API 头**始终声明**，调试能力函数的 `.cpp` 体按 `AURORA_ENABLE_DEBUG` 裁切（例外：输出目录三函数的定义不裁切、无条件编译，与「始终可用」一致）；`Surface::save_snapshot` / `capture_window` 默认实现按运行时 `data()` 判空（宏无关），后端专属截图体门控。两函数在 `Surface` 上**始终声明**（vtable 槽稳定，属 `Surface` 契约）。
 
-`Surface` 另新增虚函数 `framebuffer_size()`（默认返回逻辑 `size()`）：`save_snapshot` 以它作 PNG 宽高；按 DPI 物理分辨率分配缓冲的后端须覆写返回物理像素，避免缩放比 ≠ 1 时 PNG 尺寸与像素数据错位。`native_handle()` 为 `const`（只读查询）。
+`Surface` 另新增虚函数 `framebuffer_size()`（默认返回逻辑 `size()`）：`save_snapshot` 以它作 PNG 宽高；按 DPI 物理分辨率分配缓冲的后端须覆写返回物理像素，避免缩放比 ≠ 1 时 PNG 尺寸与像素数据错位。`native_handle()` 为 `const`（只读查询），**基类默认返回 `nullptr`**；真实窗口后端必须覆写为宿主原生句柄——Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用同一 `Win32Window` 宿主）**均**覆写为 `hwnd()`。上表 `surface_state()` 的 `has_native_window` 即由它非空判定，漏覆写会让真实窗口后端**恒报 false**（`D3D11Surface` 曾如此，2026-09-13 补齐），故由 `utest_native_surfaces` 的 `windows_family_native_handle_contract` 类型级守门。
 
 ### 11.1 可视化调试叠层
 

@@ -2,8 +2,8 @@
 /// 目标单元: include/aurora/widget/serialization.h
 /// 测试说明: aurora-mcp 工具链测试——库 API（list_all_components/describe_component/
 ///           search_components/from_json+validate/render_to_logical_snapshot/to_code/
-///           list_all_schemas）直测 MCP 工具消费的逻辑；协议端到端按构建产物探测，
-///           未构建则 SKIP
+///           list_all_schemas/simulate_*）直测 MCP 工具消费的逻辑；协议端到端按构建产物
+///           探测，未构建则 SKIP
 /// 覆盖说明: aurora_mcp 是独立可执行（tools/servers/），e2e 仅验证进程可运行
 
 #include <cstdlib>
@@ -13,6 +13,7 @@
 #include "aurora/app/validate.h"
 #include "aurora/aurora.h"
 #include "aurora/core/platform.h"
+#include "aurora/inspector/inspector_api.h"
 #include "aurora/render/offscreen.h"
 #include "aurora/widget/codegen.h"
 #include "framework/aurora_test.h"
@@ -188,6 +189,191 @@ AURORA_TEST_CASE(mcp_get_schema_matches_component_count) {
     for (const auto& s : schemas) {
         AURORA_TEST_CHECK(s.contains("type"));
         AURORA_TEST_CHECK(s.contains("prop_descriptors"));
+    }
+}
+
+// ---------- simulate_interaction 工具消费的库 API 测试 ----------
+//
+// 工具本体在 tools/servers/aurora_mcp.cpp（独立可执行，测试进程内无法直调），故此处按
+// 其实现顺序调用同一组库 API：JSON 构树 → 派发前布局 → 按路径定位 → 合成事件 → 读回
+// 目标属性与交互后快照。接线若偏离实现（例如漏掉派发前的布局），本组用例会失败。
+
+namespace {
+
+/// @brief 一次模拟的观测结果：目标属性快照 / 交互后逻辑快照 / 布局后的树 / 失败原因。
+struct Simulation {
+    au::Json props = au::Json::object();
+    au::Json snapshot = au::Json::object();
+    au::Node root;  // 交互发生后仍可继续导航，用于检查目标之外的控件
+    std::string error;
+};
+
+[[nodiscard]] auto node_json(const std::string& type, au::Json props = au::Json::object(),
+                             au::Json children = au::Json::array()) -> au::Json {
+    au::Json n = au::Json::object();
+    n["type"] = type;
+    n["props"] = std::move(props);
+    n["children"] = std::move(children);
+    return n;
+}
+
+/// @brief 复刻 `simulate_interaction` 的消费路径。
+[[nodiscard]] auto simulate(const au::Json& tree, const std::string& action, const std::string& path,
+                            float dx = 0.0F, float dy = 0.0F, const std::string& text = {}) -> Simulation {
+    constexpr int kWidth = 800;
+    constexpr int kHeight = 600;
+    Simulation out;
+    auto widget = from_json(tree);
+    if (!widget) {
+        out.error = widget.error().message;
+        return out;
+    }
+    au::Node root(std::move(widget.value()));
+    // from_json 只构树不布局，而 simulate_* 以目标「中心点」为指针位置：未布局时控件尺寸为零、
+    // 中心退化为自身原点，落点就不再是目标的真实中心。故与工具一致，先布局一次确立几何；
+    // 其产物仅用于几何，不回传（回传的是交互之后的那份）。
+    (void)au::render_to_logical_snapshot(root, kWidth, kHeight);
+    out.root = root;
+
+    au::Node target = au::Inspector::find_node(root, path);
+    if (!target) {
+        out.error = "widget not found at path '" + path + "'";
+        return out;
+    }
+
+    std::string failure;
+    if (action == "click") {
+        const aurora::Result<void> r = au::Inspector::simulate_click(target.widget());
+        failure = r ? std::string{} : r.error().message;
+    } else if (action == "scroll") {
+        const aurora::Result<void> r = au::Inspector::simulate_scroll(target.widget(), dx, dy);
+        failure = r ? std::string{} : r.error().message;
+    } else if (action == "text") {
+        const aurora::Result<void> r = au::Inspector::simulate_text_input(target.widget(), text);
+        failure = r ? std::string{} : r.error().message;
+    } else {
+        failure = "'action' must be one of click | scroll | text";
+    }
+    if (!failure.empty()) {
+        out.error = failure;
+        return out;
+    }
+    out.props = au::Inspector::get_prop(target.widget());
+    out.snapshot = au::render_to_logical_snapshot(root, kWidth, kHeight);
+    return out;
+}
+
+/// @brief 取属性快照中 `values` 段的某键（形状见 `get_widget_props`）。
+[[nodiscard]] auto prop_value(const Simulation& s, const std::string& key) -> au::Json {
+    if (!s.props.contains("values")) {
+        return au::Json{};
+    }
+    return s.props["values"].value(key, au::Json{});
+}
+
+}  // namespace
+
+AURORA_TEST_CASE(mcp_simulate_click_reports_target_state_change) {
+    register_core_widgets();
+    const au::Json tree =
+        node_json("Column", au::Json::object(), au::Json::array({node_json("Checkbox")}));
+
+    const Simulation s = simulate(tree, "click", "0");
+    AURORA_TEST_CHECK_MSG(s.error.empty(), s.error.c_str());
+    // 「已派发」不等于「状态变了」：必须读回属性确认事件真的落到了该控件（Checkbox 在
+    // Release 时翻转 checked）。
+    AURORA_TEST_CHECK(prop_value(s, "checked") == true);
+    // 工具还会回传交互后的快照，供 AI 观察整棵树的后续状态。
+    AURORA_TEST_CHECK(s.snapshot.contains("type"));
+    AURORA_TEST_CHECK(s.snapshot.contains("children"));
+}
+
+AURORA_TEST_CASE(mcp_simulate_text_inserts_into_target) {
+    register_core_widgets();
+    const au::Json tree =
+        node_json("Column", au::Json::object(), au::Json::array({node_json("TextInput")}));
+
+    const Simulation s = simulate(tree, "text", "0", 0.0F, 0.0F, "hi");
+    AURORA_TEST_CHECK_MSG(s.error.empty(), s.error.c_str());
+    AURORA_TEST_CHECK(prop_value(s, "value") == "hi");
+}
+
+AURORA_TEST_CASE(mcp_simulate_scroll_reaches_layout_backed_target) {
+    register_core_widgets();
+    const au::Json content = node_json("Column", au::Json::object(),
+                                       au::Json::array({node_json("Text", au::Json{{"content", "a"}}),
+                                                        node_json("Text", au::Json{{"content", "b"}})}));
+    const au::Json tree = node_json("Scroll", au::Json{{"step", 20.0}}, au::Json::array({content}));
+
+    const Simulation s = simulate(tree, "scroll", "0", 0.0F, -24.0F);
+    AURORA_TEST_CHECK_MSG(s.error.empty(), s.error.c_str());
+    // 语义边界：滚动偏移不在这条通道的属性面上（Scroll 不序列化 offset；LazyList/GridView
+    // 虽序列化 scroll_offset，但其子项由运行时 ItemBuilder 提供，静态 JSON 树给不出来），
+    // 故此处断言的是「事件已派发到布局出的可命中目标」，偏移量本身须由 C++ 测试读回。
+    AURORA_TEST_CHECK(s.snapshot.contains("type"));
+}
+
+AURORA_TEST_CASE(mcp_simulate_scroll_depends_on_the_layout_pass) {
+    register_core_widgets();
+    // 视口 600 高、内容远高于视口：滚动容器只有在布局后才算得出可滚动范围。
+    au::Json rows = au::Json::array();
+    for (int i = 0; i < 120; ++i) {
+        rows.push_back(node_json("Text", au::Json{{"content", "row"}}));
+    }
+    const au::Json content = node_json("Column", au::Json::object(), std::move(rows));
+    const au::Json tree = node_json("Scroll", au::Json{{"step", 20.0}}, au::Json::array({content}));
+
+    // 未布局就派发：视口与内容尺寸都还是零，可滚动范围为零 → 滚轮事件空转，偏移不动。
+    // 这正是工具在派发前必须先布局一次的理由。
+    {
+        auto widget = from_json(tree);
+        AURORA_TEST_REQUIRE(widget.ok());
+        au::Node root(std::move(widget.value()));
+        au::Node target = au::Inspector::find_node(root, "");
+        AURORA_TEST_REQUIRE(target);
+        auto* scroll = dynamic_cast<au::Scroll*>(&target.widget());
+        AURORA_TEST_REQUIRE(scroll != nullptr);
+        (void)au::Inspector::simulate_scroll(target.widget(), 0.0F, -200.0F);
+        AURORA_TEST_CHECK(scroll->offset_y() == 0.0F);
+    }
+
+    // 工具路径（派发前布局一次）：几何成立后同一事件真正改变滚动偏移。
+    {
+        const Simulation s = simulate(tree, "scroll", "", 0.0F, -200.0F);
+        AURORA_TEST_CHECK_MSG(s.error.empty(), s.error.c_str());
+        au::Node target = au::Inspector::find_node(s.root, "");
+        AURORA_TEST_REQUIRE(target);
+        auto* scroll = dynamic_cast<au::Scroll*>(&target.widget());
+        AURORA_TEST_REQUIRE(scroll != nullptr);
+        AURORA_TEST_CHECK(scroll->offset_y() > 0.0F);
+    }
+}
+
+AURORA_TEST_CASE(mcp_simulate_reports_missing_path_hidden_target_and_unknown_action) {
+    register_core_widgets();
+    const au::Json tree =
+        node_json("Column", au::Json::object(), au::Json::array({node_json("Checkbox")}));
+
+    // 路径不存在：定位失败，不改动任何控件、也不产生快照。
+    {
+        const Simulation missing = simulate(tree, "click", "9");
+        AURORA_TEST_CHECK(!missing.error.empty());
+        AURORA_TEST_CHECK(missing.props.empty());
+    }
+
+    // 目标存在但整个子树不参与命中（show=false）：派发前即失败，不改变状态。
+    {
+        const au::Json hidden =
+            node_json("Column", au::Json::object(),
+                      au::Json::array({node_json("Checkbox", au::Json{{"show", false}})}));
+        const Simulation s = simulate(hidden, "click", "0");
+        AURORA_TEST_CHECK(!s.error.empty());
+    }
+
+    // 未知动作：工具侧在派发前即拒绝。
+    {
+        const Simulation s = simulate(tree, "hover", "0");
+        AURORA_TEST_CHECK(!s.error.empty());
     }
 }
 

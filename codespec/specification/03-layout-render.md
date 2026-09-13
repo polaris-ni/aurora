@@ -1,6 +1,6 @@
 # 布局与渲染（layout / render / image / media）
 
-> 覆盖 `include/aurora/layout/`、`render/`、`image/`、`media/`（`render/` 顶层 15 个头，另有 `render/detail/` 下 3 个头——`gamma_lut.h`、`paint_timing.h`、`painter_simd.h`——合计 18）。
+> 覆盖 `include/aurora/layout/`、`render/`、`image/`、`media/`（`render/` 顶层 16 个头，另有 `render/detail/` 下 3 个头——`gamma_lut.h`、`paint_timing.h`、`painter_simd.h`——与 `render/rhi/` 下 2 个头——`rhi_backend.h`、`software_rhi.h`——合计 21）。
 > 布局协议以 `src/aurora/layout/flex_layouter.cpp` 的 `FlexLayouter::layout` 与 `include/aurora/widget/grid.h` 的 `Grid::on_layout` **实现为准**。
 > 基础类型 `Point` / `Size` / `Rect` / `EdgeInsets` / `Length` / `Constraints` 定义见 [`01-core.md`](01-core.md) §2，本文只写其布局语义。
 
@@ -14,7 +14,8 @@
 | 软件栅格绘制 | `render/painter.h`、`render/font_engine.h`、`render/display_list.h` |
 | 离屏与快照 | `render/offscreen.h`、`window/surface.h`（`HeadlessSurface`） |
 | 增量渲染与缓存 | `render/dirty_region.h`、`render/snapshot_diff.h`、`render/image_cache.h`（职责见 §8.4） |
-| 显示列表 | `render/display_list.h` |
+| 显示列表 | `render/display_list.h`（唯一绘制指令源，见 §8.6） |
+| RHI 后端抽象 | `render/rhi/rhi_backend.h`、`render/rhi/software_rhi.h`（回放目标，见 §8.6） |
 | 图像编解码 | `image/image_codec.h` |
 | 媒体播放 | `media/`（`video_player.h`、`video_controls.h`、`video_source.h`、`image_sequence_source.h`） |
 
@@ -426,7 +427,7 @@ au::Column{}
 
 **显示列表**
 
-`record(DisplayList&)` 开始录制，`stop()` 结束，`is_recording()` 查询状态，`mark_recording_dynamic()` 标记动态内容。`set_skip_dl_record(bool)` / `skip_dl_record()` 控制是否跳过录制。
+`record(DisplayList&)` 开始录制，`stop()` 结束，`is_recording()` 查询状态，`mark_recording_dynamic()` 标记动态内容。`set_skip_dl_record(bool)` / `skip_dl_record()` 控制是否跳过录制。命令结构、变长数据池与**回放目标抽象（RHI 后端）**见 §8.6。
 
 > **录制态不变量**：`Painter::composite(const Image&, ...)` 在录制态**必须**录制 Composite 命令而非就地写像素。否则缓存的显示列表回放进祖先录制时，祖先列表缺失该合成，回放时子树像素整体缺失。
 >
@@ -472,6 +473,26 @@ au::Column{}
 | `scale_factor()` | 默认 `1.0`；`Win32Surface` / `D3D11Surface` 返回 `dpi/96`，启用 Per-Monitor DPI 感知，按物理像素创建窗口与帧缓冲，事件坐标除以 scale 还原为 dp |
 | `set_present_dirty(const std::vector<Rect>&)` | `Window::present_root` 在清脏前把本帧脏矩形（逻辑→设备坐标）交给后端；支持增量上屏的后端仅更新变化区，空向量表示全量上传 |
 | `set_title(const std::string&)` | 虚方法，默认空实现；`Win32Window` 经 `SetWindowTextA` + `utf8_to_acp` 生效，`Headless` / `Glfw` 忽略。`Window::set_title` 写 `title_` 后同步下发 |
+| `set_cursor(CursorShape)` | 虚方法，默认空实现。宿主在悬停链解析出的形状**变化**时下发（`EventDispatcher` 按 `cursor_emitted_` / `current_cursor_` 去重，避免每个 Move 都打平台 API）。平台映射在各后端 `.cpp`：GLFW `glfwSetCursor` + `glfwCreateStandardCursor`（句柄缓存）、Win32 `SetCursor` + `LoadCursor(nullptr, IDC_*)`、X11 `XDefineCursor` + `XCreateFontCursor`（`XC_*` 字形，句柄缓存）、Wayland `wl_pointer.set_cursor`（须 cursor `wl_surface` + 主题，契约见 `.cpp` TODO）、macOS `[[NSCursor …] set]`。`HeadlessSurface` 覆写为「按序记录」（`cursor_log()` / `last_cursor()` / `clear_cursor_log()`），使整链在无头环境可端到端断言；`D3D11Surface` 复用 Win32 宿主映射（内部头 `src/aurora/window/win32_cursor.h` 的 `detail::set_win32_cursor`，与 `Win32Surface` 共用一份），`WasmSurface` 保持空实现（浏览器自管 cursor） |
+| `native_handle() -> void*`（`const`） | 虚方法，**基类默认返回 `nullptr`**；真实窗口后端须覆写为宿主原生句柄。Win32 家族两路 `Win32Surface`（GDI 上屏）/ `D3D11Surface`（GPU 上屏）共用同一个 `Win32Window` 宿主，**二者均**返回 `hwnd()`（与 `hwnd()` 访问器同义）。`aurora::debug::surface_state()` 的 `has_native_window` 就由它非空判定——**漏覆写会让真实窗口后端误报「无原生窗口」**（`D3D11Surface` 曾如此，2026-09-13 补齐）。该契约由 `tests/unit/utest_native_surfaces.cpp` 的 `windows_family_native_handle_contract` 以类型级 `static_assert` 守门（`decltype(&T::native_handle)` 判定覆写存在） |
+| ⚠️ X11 翻译单元的宏碰撞（实现约束，非 API 变更） | `<X11/X.h>`（经 `Xlib.h` 引入）**无条件** `#define CursorShape 0`（"largest size that can be displayed"），与本表类型名 `aurora::CursorShape` 硬碰撞：不解除时该记号一律被预处理器展开为 `0`，`CursorShape shape` 变成 `0 shape`，报出极难定位的 `expected ')' before 'shape'`（2026-09-13 开 `AURORA_BACKEND_X11=ON` 真编译时才暴露）。故**任何引入 Xlib 的翻译单元**都必须在 Xlib 头之后、并在引入 `cursor_map.h` 之前 `#undef CursorShape`（同款处置见 `src/aurora/window/x11_surface.cpp` 顶部与 `x11_surface.h` 的 `@warning`）。同理 `#undef None` 用于避免污染 `ModifierKey::None` |
+
+> **光标形状映射 SSOT**：形状 → 平台中立的规范名由 `window/cursor_map.h` 提供唯一一份表——
+> `cursor_rfc_name(CursorShape)` 返回 freedesktop 光标主题名，同时即 W3C CSS `cursor` 关键字
+> （`default` / `text` / `pointer` / `ns-resize` / `ew-resize` / `nwse-resize` / `nesw-resize` /
+> `move` / `crosshair` / `not-allowed` / `wait`），未知取值回退 `default`。Wayland
+> （`wl_cursor_theme_get_cursor`）与浏览器/Wasm（canvas CSS cursor）可直接消费该字符串；需原生常量的
+> 后端（GLFW/Win32/X11/macOS）在各自 `.cpp` 内按 `CursorShape` 取值序 `switch`，长度契约由
+> `kCursorShapeCount` 对齐（新增形状漏填即编译期红灯）。
+
+> **`set_cursor` 的真机验收（无头 CI 无法覆盖的部分）**：单元/集成测试只能断言到
+> 「`HeadlessSurface` 记录序列」与「各后端覆写存在」这一层——「屏幕上显示的光标是否真的变了」
+> 必须建真实窗口、在真实桌面会话里验收。为此 `tools/verify/` 提供四份**人工触发**的探针
+> （`cmake/AuroraVerify.cmake` 定义、`AURORA_BUILD_VERIFY_TOOLS` 门控、**不进 CTest**）：
+> X11 经 XFIXES `XFixesGetCursorImage` 读回、Win32 经 `GetCursorInfo` 读回、macOS 经
+> `[NSCursor currentCursor]` 单例同一性读回、GLFW（无光标查询 API）走「自动能力核对 +
+> `--interactive` 人工目视」。各探针的验收范围与退出码语义见其源文件头注释；
+> 跨平台当前状态与验收台账见 `ROADMAP.draft.md`。
 
 ### 8.4 离屏渲染与快照
 
@@ -513,6 +534,45 @@ au::Column{}
 **自定义后端入口**：扩展点收口于 `Surface` 子类与 `create_window` 工厂，而非 `Application` 构造重载。`Application` / `App` 只认两种形态——(a) `create_window(XxxOptions)` 产出的 `unique_ptr<Window>`；(b) 任意自定义后端经 `Application(Scene, unique_ptr<Surface>, WindowOptions)` 或 `App().surface(...)` 注入的 `unique_ptr<Surface>`。空 `Surface` / `Window` 仅告警降级。无头便捷构造 `Application(Scene, w, h)` 保持不变。
 
 **DPI 感知**：`enable_dpi_awareness()`（`window/window.h`）在进程创建**任何窗口之前**启用高 DPI 感知。这是 **OS/进程级**设置，非 per-Window、非 per-Surface——Win32 经 `SetProcessDpiAwarenessContext`（Per-Monitor V2 → V1 → `SetProcessDPIAware`）一次性启用；macOS 与 Linux 无需 opt-in，为空实现。**关键不变量**：必须在 `init_console()`（`AllocConsole` 会创建控制台窗口）与 `create_window()` 之前调用，否则 Windows 上启用失败会退化为 DPI 未感知（scale = 1.0）。每窗口的 scale 查询仍是各 `Surface::scale_factor()` 的职责，与「启用」正交。
+
+### 8.6 显示列表与 RHI 后端
+
+`DisplayList`（`render/display_list.h`）是**绘制指令的唯一来源**：`Painter` 在录制态把每条上屏原语追加为一条 `DrawCmd`——几何 / 颜色 / 标量内联，文本字符串 / 渐变色标 / 字体 / 图像 / 变换矩阵等**变长数据入池**、命令只持下标（避免每条命令内嵌大对象）。命中缓存时父级整树一次 `replay` 即可压平重放。
+
+**回放目标抽象**：`replay` 的目标是 `rhi::RhiBackend`，而非具体的 `Painter`。
+
+```cpp
+namespace aurora::rhi {
+struct CmdData {  // 池下标解析出的只读指针；不引用的字段为 nullptr
+    const std::string *text = nullptr;
+    const Font *font = nullptr;
+    const std::vector<Color> *colors = nullptr;
+    const std::vector<float> *stops = nullptr;
+    const Image *image = nullptr;
+    const Matrix2D *matrix = nullptr;
+};
+class RhiBackend {
+  public:
+    [[nodiscard]] virtual auto name() const -> std::string_view = 0;
+    virtual auto submit(const DrawCmd &cmd, const CmdData &data) -> void = 0;
+};
+}  // namespace aurora::rhi
+```
+
+`DisplayList::replay` 因此有两个重载：
+
+| 重载 | 语义 |
+|:---|:---|
+| `replay(rhi::RhiBackend&)` | **唯一实现**：遍历 `cmds_`，把池下标解析为 `CmdData`（负下标 → `nullptr`）后逐条 `submit` |
+| `replay(Painter&)` | 兼容薄壳：构造临时 `rhi::SoftwareRhi{p}` 后转发到上式（调用点无需改动） |
+
+**首个后端 `SoftwareRhi`**（`render/rhi/software_rhi.h`）把 18 类 `CmdKind` 逐条转发回 `Painter` 的对应原语，参数逐字段与抽取前的 `replay` 一致，故 **DC 像素输出逐位不变**（重构红线，由 `utest_rhi` 的 `SoftwareRhi` 与直接绘制逐字节比对锁定）。未绑定 `Painter` 时 `submit` 为 no-op（便于测试构造空后端）；GPU 后端（D 轨后续切片）实现同一接口，成为**平级第二消费者**——新增后端不改动录制侧与 `DisplayList`。
+
+**设计取舍**：接口收成**单一 `submit`**，而非把 18 个绘制原语各设一个虚函数。命令的几何 / 标量已全在 `DrawCmd` 里，单入口既让回放循环保持一行，也把「如何解释命令、如何合并成批次」留给后端——GPU 后端正靠这一点做管线切换与批处理，而 18 个平铺虚函数会强迫它在原语之间重新推断管线状态。`Painter` 侧无需任何改动。
+
+> **池下标是录制方契约**：`DrawCmd` 的 `str_idx` / `font_idx` / `col_idx` / `flt_idx` / `image_idx` / `matrix_idx` 由 `Painter::record*` 生成，回放侧**只解析、不构造**；`DisplayList` 的 `string_at` / `colors_at` / `floats_at` / `font_at` / `image_at` / `matrix_at` 只读访问器即为此提供。
+>
+> **`CmdKind::Composite` 的例外**：离屏合成在录制态**必须**录制为命令（见 §8.1 录制态不变量），但其像素来源是离屏缓冲快照（`Image`），故 `CmdData` 的 `image` / `matrix` 两字段专供它使用。
 
 ---
 

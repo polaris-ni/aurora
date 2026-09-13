@@ -1,10 +1,13 @@
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <ranges>
+#include <string>
 #include <vector>
 
 #include "aurora/core/aurora_assert.h"
@@ -23,6 +26,7 @@
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/node.h"
 #include "aurora/widget/props_io.h"
+#include "aurora/widget/scroll_viewport.h"
 
 namespace aurora {
 
@@ -33,6 +37,22 @@ inline constexpr std::size_t AURORA_DEFAULT_MAX_WIDGET_DEPTH = 64;
 class Painter;  // 前向声明（render 模块定义于 render/painter.h）
 
 class Widget;  // 前向声明（HitNode 以 std::weak_ptr<Widget> 作为成员；Widget 在下方定义）
+
+/// @brief 上报**焦点变化**到无障碍事件通道（`AccessibilityEventKind::FocusChanged`）。
+///
+/// 定义在 `src/aurora/widget/widget.cpp`：该 TU 才包含 `core/accessibility.h`——后者反向包含
+/// `widget/widget.h`（语义树要用 `Widget::child_nodes()`），故 `widget.h` 只能前置声明，不能反向包含。
+/// @param target 焦点发生变化的控件
+/// @note Thread: main-thread only
+/// @note Side-effects: invokes accessibility event handler
+auto notify_accessibility_focus_changed(const Widget *target) -> void;
+
+/// @brief 上报**结构变化**到无障碍事件通道（`AccessibilityEventKind::StructureChanged`）。
+/// 定义位置与依赖同 `notify_accessibility_focus_changed`。
+/// @param host 子节点发生增删/替换的容器
+/// @note Thread: main-thread only
+/// @note Side-effects: invokes accessibility event handler
+auto notify_accessibility_structure_changed(const Widget *host) -> void;
 
 /// @brief 命中链节点：携带命中控件及其相对根的全局 origin（用于事件坐标本地化）。
 /// 命中链递归下降时，子节点的 `Node::bounds_.origin` 即其全局 origin，直接带入；
@@ -164,9 +184,10 @@ class Widget : public std::enable_shared_from_this<Widget> {
     [[nodiscard]] auto height_spec() const -> const Length & { return height_; }
 
     /// @brief 溢出策略（参考 CSS overflow）：控制子内容超出本控件边界时的行为。
-    /// Visible=溢出可见（默认）；Hidden/Clip/Scroll=裁剪到本控件盒子内。
-    /// Hidden 与 Clip 当前行为相同（均裁剪视觉），Clip 保留 hit-test（预留语义）。
-    /// Scroll 当前等同 Hidden（滚动预留）。
+    /// Visible=溢出可见（默认）；Hidden/Clip=裁剪到本控件盒子内（Clip 保留 hit-test，预留语义）；
+    /// Scroll=裁剪 + **滚轮滚动**（落地）：内容按滚轮增量垂直平移，经共享 `ScrollViewport`
+    /// 内核夹取；滚轮沿命中链路由到最近可滚动祖先（`wants_scroll`），可点击子控件不拦截。
+    /// 轻量实现不建离屏缓冲，重内容/长列表请用 Scroll / LazyList。
     virtual auto overflow_strategy(OverflowStrategy strategy) -> Widget & {
         overflow_ = strategy;
         mark_needs_layout();
@@ -174,6 +195,21 @@ class Widget : public std::enable_shared_from_this<Widget> {
         return *this;
     }
     [[nodiscard]] auto overflow_strategy() const -> OverflowStrategy { return overflow_; }
+
+    /// @brief 当前滚动偏移（仅 OverflowStrategy::Scroll 有意义；0 = 顶部）。
+    [[nodiscard]] auto scroll_offset_y() const -> float { return scroll_viewport_.offset_y; }
+    /// @brief 程序化滚动（供测试/无障碍/外部控制器驱动），语义同滚轮：delta_y 正方向为向上滚动。
+    /// @return offset 是否实际变化（到达端点后再滚返回 false）。
+    auto scroll_by(float delta_y) -> bool {
+        ScrollEvent e;
+        e.delta_y = delta_y;
+        const bool changed = [&] {
+            const float before = scroll_viewport_.offset_y;
+            on_scroll(e);
+            return scroll_viewport_.offset_y != before;
+        }();
+        return changed;
+    }
 
     // ---- 脏标记（specification/04-widget.md §2.4）----
     auto mark_needs_layout() -> void { mark_needs_layout_impl(false); }
@@ -191,7 +227,11 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @brief 本控件是否可被 Display List 缓存（恒等变换且绘制无副作用、内容不每帧变动）。
     ///        默认 true；绘制时产生副作用（如 Hero 几何注册）或内容每帧变化（转场淡变）的
     ///        控件须覆盖为 false，否则缓存回放会跳过必要的每帧绘制（见 NavigatorHost/Hero/TransitionLayer）。
-    [[nodiscard]] virtual auto can_cache_display_list() const -> bool { return true; }
+    ///        `OverflowStrategy::Scroll` 例外——滚动偏移是每帧可变的绘制输入（同 Scroll
+    ///        组件禁自身 DL 缓存的同理），声明滚动的控件不缓存自身 DL。
+    [[nodiscard]] virtual auto can_cache_display_list() const -> bool {
+        return overflow_ != OverflowStrategy::Scroll;
+    }
 
     /// @brief 本控件布局结果是否可被缓存（约束不变 ⇒ on_layout 结果不变、且无非布局副作用）。
     ///        默认 true；与 `can_cache_display_list()` 对称：绘制每帧变动 → 禁 DL 缓存，
@@ -360,10 +400,37 @@ class Widget : public std::enable_shared_from_this<Widget> {
     virtual auto on_key_event(KeyEvent &e) -> void { e.is_handled = true; }
 
     /// @brief 滚轮事件入口（命中目标上调用）。默认标记为已消费。
-    virtual auto on_scroll(ScrollEvent &e) -> void { e.is_handled = true; }
+    ///
+    /// 声明了 `OverflowStrategy::Scroll` 的控件在此获得**轻量滚动**能力——
+    /// 经共享 `ScrollViewport` 内核（与 Scroll 组件同一 clamp/符号约定）按滚轮增量
+    /// 平移内容绘制（见 `paint_content` 的平移与裁剪），不建离屏缓冲（重内容请用 Scroll）。
+    /// 派发路由见 `EventDispatcher::dispatch(ScrollEvent &)`：滚轮沿命中链自最深向根
+    /// 找第一个 `wants_scroll()` 者，可点击子控件不拦截滚轮。
+    virtual auto on_scroll(ScrollEvent &e) -> void {
+        e.is_handled = true;
+        if (overflow_ == OverflowStrategy::Scroll) {
+            scroll_viewport_.content_h = scroll_content_height();
+            scroll_viewport_.viewport_h = size_.height;
+            if (scroll_viewport_.apply_scroll(e.delta_y)) {
+                // 仅内容平移：请求重绘但不失效布局/显示列表缓存（与 Scroll 滚动帧同策略）。
+                request_frame(false);
+            }
+        }
+    }
+
+    /// @brief 本控件是否为「可滚动目标」：滚轮派发沿命中链自最深向根找第一个
+    ///       wants_scroll 者派发。默认：声明了 `OverflowStrategy::Scroll` 的控件；
+    ///       真实滚动控件（Scroll / LazyList / LazyRow / GridView）覆写为 true，
+    ///       保证嵌套时**最深滚动者优先**（外层 Overflow::Scroll 不抢内层滚轮）。
+    [[nodiscard]] virtual auto wants_scroll() const -> bool { return overflow_ == OverflowStrategy::Scroll; }
 
     /// @brief 文本输入入口（焦点 widget 上调用）。默认标记为已消费。
     virtual auto on_text_input(TextInputEvent &e) -> void { e.is_handled = true; }
+
+    /// @brief IME 组合输入入口（焦点 widget 上调用）。默认标记为已消费但**不落地任何文本**：
+    ///       未接组合语义的控件吞掉事件，避免平台侧因「无人处理」而重复上屏。
+    ///       可编辑控件（`TextInput` / `RichTextEdit`）覆写之：先落 `committed`，再更新 preedit 显示态。
+    virtual auto on_text_composition(TextCompositionEvent &e) -> void { e.is_handled = true; }
 
     /// @brief 操作系统文件拖放落在本控件时触发；消费时置 `e.is_handled_` 阻止继续。
     /// 默认不处理（交给命中目标自身）。
@@ -371,7 +438,11 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 焦点变更通知（获焦 focus=true / 失焦 focus=false）。
     /// 基类默认维护 `is_focused_` 以便 `is_focused()` 正确；子类可覆写以更新聚焦态绘制。
-    virtual auto on_focus_change(bool focused) -> void { is_focused_ = focused; }
+    /// 无论是否覆写，进入本实现即代表一次真实焦点转移，故在此统一上抛无障碍事件。
+    virtual auto on_focus_change(bool focused) -> void {
+        is_focused_ = focused;
+        notify_accessibility_focus_changed(this);
+    }
 
     // ---- 焦点能力（specification/05-event-navigation.md §4）----
     /// @brief 是否可参与焦点序（默认 true）。交互控件保持 true；纯展示控件可设 false。
@@ -404,6 +475,34 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 默认实现返回 `{ .name = type_name() }`：无富描述控件（叶/简单容器）可省略 override，
     /// 仅当需要额外 properties/events/children_policy 时才覆写。
     [[nodiscard]] virtual auto describe() const -> WidgetDescriptor;
+
+    /// @brief 无障碍可读名称（语义树 `AccessibilityNode::name`）：屏幕阅读器对控件的播报名。
+    ///
+    /// 默认空串；需要语义的控件覆写返回可读文本（Button 取 label、Text 取显示文本…）。
+    /// 覆写返回值**优先于**任何按角色推断的默认取值，宿主（App）可据此覆盖控件自带文案。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto accessibility_label() const -> std::string { return std::string{}; }
+
+    /// @brief 无障碍当前值（语义树 `AccessibilityNode::value`）：可变量控件的现值文本。
+    ///
+    /// 默认空串；可取值的控件覆写返回当前值（TextInput 取内容、Checkbox/Switch 取布尔、
+    /// Slider/Progress 取数值…）。语义树构建时每次实时读取，故 reflected 值变化自动同步。
+    /// @note Side-effects: reads state
+    [[nodiscard]] virtual auto accessibility_value() const -> std::string { return std::string{}; }
+
+    /// @brief 无障碍用途提示（语义树 `AccessibilityNode::hint`）：补充 name 语义的操作说明。
+    ///
+    /// 默认空串；宿主可覆写给屏幕阅读器额外的用法描述（如「双击展开」）。不参与布局与绘制。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto accessibility_hint() const -> std::string { return std::string{}; }
+
+    /// @brief 控件级默认悬停光标（光标形状 API）。
+    ///
+    /// 默认空 = 无控件级声明；文本编辑控件覆写返回 `IBeam`、按钮类返回 `PointingHand`。
+    /// 解析优先级：修饰链上的 `Modifier::cursor(...)` 声明**优先于**本钩子，本钩子优先于
+    /// 「含 Clickable 修饰 → PointingHand」的缺省策略（解析逻辑在 `EventDispatcher` 悬停链）。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto cursor_shape() const -> std::optional<CursorShape> { return std::nullopt; }
 
     /// @brief 序列化自有属性到 props JSON（结构快照/工具链用）。
     /// 子类覆写时应先调用基类默认实现以保留通用属性。
@@ -484,6 +583,9 @@ class Widget : public std::enable_shared_from_this<Widget> {
         (void)ctx;
         return {};
     }
+    /// @brief 内容自然高度（OverflowStrategy::Scroll 用）：滚轮夹取上限 = 内容高 − 视口高。
+    /// 默认取自身尺寸（叶控件无溢出内容 → 不可滚）；容器覆写为子节点 bounds 的最大 bottom。
+    [[nodiscard]] virtual auto scroll_content_height() const -> float { return size_.height; }
     /// @brief 子类可覆写：挂载时额外逻辑（默认递归挂载在 Container 中处理）。
     virtual auto on_mount(const BuildContext &ctx) -> void { (void)ctx; }
 
@@ -549,8 +651,18 @@ class Widget : public std::enable_shared_from_this<Widget> {
     Length width_;  ///< 显式宽度意图（默认 WrapContent）
     Length height_;  ///< 显式高度意图（默认 WrapContent）
     OverflowStrategy overflow_ = OverflowStrategy::Visible;  ///< 溢出策略（默认 Visible）
+    /// @brief 滚动视口内核：OverflowStrategy::Scroll 的 offset/step 状态与夹取数学，
+    ///        与 Scroll 组件共享同一约定（见 scroll_viewport.h）。
+    ScrollViewport scroll_viewport_{};
 
-    Rect focus_bounds_;  ///< 布局后的全局盒（供方向键焦点导航使用，由布局系统写入）
+    /// @brief 最近一次绘制遍历写入的全局盒，充当方向键焦点导航（`FocusManager::move_focus`）的几何基准。
+    ///
+    /// 与 `paint_bounds_` 同源同值：二者都在 `Widget::paint` 入口按传入的绝对盒写入。之所以不放在
+    /// 布局期，是因为布局只确定自身尺寸、位置由父节点写 `Node::bounds_`（见 `Widget::layout`），
+    /// 布局调用链上拿不到控件自身的绝对盒。
+    /// @note 离屏缓冲（如 `Scroll` 内容）内的后代处于**内容坐标系**，其盒不等于屏幕坐标——同一视口
+    ///       内的相对几何仍成立，跨视口比较不精确（此限制与 `paint_bounds_` 相同）。
+    Rect focus_bounds_;
 
     /// @brief 最近一次 paint 接收的绝对（窗口逻辑 dp）盒；脏区标记据此标记精确几何，
     ///        使 `Window::present_root` 的脏区裁剪绘制（push_clip）命中正确区域，避免整帧重绘。
@@ -565,9 +677,10 @@ class Widget : public std::enable_shared_from_this<Widget> {
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
   public:
-    /// @brief 设置布局后的全局盒（由父节点/布局系统写入，供方向键焦点导航）。
+    /// @brief 覆盖焦点导航几何盒（测试 seam）：直接构造、未经绘制遍历的控件用它给出手工盒。
+    ///        生产路径由 `Widget::paint` 每次绘制按真实绝对盒写入，调用方无需设置。
     auto set_focus_bounds(const Rect &r) -> void { focus_bounds_ = r; }
-    /// @brief 读取布局后的全局盒。
+    /// @brief 读取焦点导航几何盒（最近一次绘制写入的绝对盒；从未绘制过则为零盒）。
     [[nodiscard]] auto focus_bounds() const -> Rect { return focus_bounds_; }
 
     /// @brief 读取最近一次 paint 的绝对（窗口逻辑 dp）盒（脏区标记用）。
@@ -727,6 +840,16 @@ class Container : public Widget {
         }
     }
 
+    /// @brief 内容自然高度：取子节点 bounds 的最大 bottom（子 bounds 为相对本容器
+    ///        内容区的局部坐标，与 on_paint 的定位一致）。溢出滚动夹取上限据此计算。
+    [[nodiscard]] auto scroll_content_height() const -> float override {
+        float h = 0.0F;
+        for (const Node &child : children_) {
+            h = std::max(h, child.bounds().bottom());
+        }
+        return h;
+    }
+
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Widget::tick_gestures(now);  // 本节点修饰链（LongPress 等）
         for (Node &child : children_) {
@@ -770,6 +893,7 @@ class Container : public Widget {
     auto add(const Node &child) -> void {
         children_.push_back(child);
         mark_needs_layout();
+        notify_accessibility_structure_changed(this);
     }
 
     /// @brief 运行时访问第 `i` 个子节点（可变，用于设置 `id` / 替换内容等）。越界抛 `std::out_of_range`。

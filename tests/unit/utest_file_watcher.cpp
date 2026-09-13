@@ -25,7 +25,7 @@ namespace {
 /// 本用例唯一子目录，析构时兜底清理。
 class ScopedTempDir {
   public:
-    explicit ScopedTempDir(const std::string& name) : path_{fs::temp_directory_path() / name} {
+    explicit ScopedTempDir(const std::string& name) : path_{std::filesystem::path{aurora::testing::isolation::temp_dir()} / name} {
         std::error_code ec;
         fs::remove_all(path_, ec);  // 兜底清残留
         fs::create_directories(path_);

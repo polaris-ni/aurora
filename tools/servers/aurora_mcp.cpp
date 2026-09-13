@@ -7,10 +7,10 @@
 //
 // Usage: aurora_mcp (launched by an AI Agent in stdio mode; no human interaction required)
 //
-// Exposes 10 MCP Tools:
+// Exposes 11 MCP Tools:
 //   list_components / describe_component / search_components /
 //   validate_tree / validate_ui / render_snapshot / render_png /
-//   to_code / to_yaml / get_schema
+//   to_code / to_yaml / get_schema / simulate_interaction
 
 #include <filesystem>
 #include <iostream>
@@ -138,6 +138,12 @@ auto write_message(const au::Json &msg) -> void {
         p["description"] = desc;
         return p;
     };
+    auto num_prop = [](const char *desc) -> au::Json {
+        au::Json p = au::Json::object();
+        p["type"] = "number";
+        p["description"] = desc;
+        return p;
+    };
     auto obj_prop = [](const char *desc) -> au::Json {
         au::Json p = au::Json::object();
         p["type"] = "object";
@@ -257,6 +263,34 @@ auto write_message(const au::Json &msg) -> void {
         t["name"] = "get_schema";
         t["description"] = "Return the full Aurora API schema (all components + enums)";
         t["inputSchema"] = schema_obj(au::Json::object(), au::Json::array());
+        tools.push_back(std::move(t));
+    }
+    // simulate_interaction
+    {
+        au::Json props = au::Json::object();
+        props["tree"] = obj_prop("UI-tree JSON");
+        props["path"] =
+            str_prop("Target widget index path, e.g. \"0/1\" = second child of the first child; empty string targets the tree root");
+        props["action"] = str_prop("Interaction to simulate: click | scroll | text");
+        props["dx"] = num_prop("Horizontal scroll delta (action=scroll, default 0)");
+        props["dy"] = num_prop("Vertical scroll delta (action=scroll, default 0; positive scrolls content up)");
+        props["text"] = str_prop("UTF-8 text to insert (action=text)");
+        props["width"] = int_prop("Viewport width used for the layout pass (default 800)");
+        props["height"] = int_prop("Viewport height used for the layout pass (default 600)");
+        au::Json t = au::Json::object();
+        t["name"] = "simulate_interaction";
+        t["description"] =
+            "Build the UI-tree JSON offscreen, lay it out, dispatch a synthetic interaction (click / scroll / "
+            "text input) at the target widget, then return that widget's props and the post-interaction logical "
+            "snapshot. This closes the generate -> interact -> assert loop without running an app. Observable "
+            "state only: widgets built from JSON carry no user callbacks, so a click is verified through state "
+            "changes (e.g. Checkbox.checked, focus movement) rather than a callback side effect. Scroll exposes "
+            "no serialized state through this path: Scroll does not serialize its offset, and the containers "
+            "that do (LazyList / GridView 'scroll_offset') build their items from a runtime builder that a JSON "
+            "tree cannot supply. A successful scroll therefore only means the event reached a hit-testable "
+            "target after layout; read the offset itself back in a C++ test. Returns isError when the target "
+            "is not found or nothing at its centre is hit-testable (in that case no state is changed).";
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"tree", "path", "action"}));
         tools.push_back(std::move(t));
     }
 
@@ -411,6 +445,77 @@ auto write_message(const au::Json &msg) -> void {
     if (name == "get_schema") {
         au::Json api = aurora::tools::build_api_skeleton();
         return au::Json{{"content", json_content(api)}};
+    }
+
+    if (name == "simulate_interaction") {
+        if (!args.contains("tree") || !args["tree"].is_object()) {
+            return au::Json{{"content", text_content("Error: missing 'tree' parameter")}, {"isError", true}};
+        }
+        if (!args.contains("path") || !args["path"].is_string()) {
+            return au::Json{{"content", text_content("Error: missing 'path' parameter")}, {"isError", true}};
+        }
+        if (!args.contains("action") || !args["action"].is_string()) {
+            return au::Json{{"content", text_content("Error: missing 'action' parameter")}, {"isError", true}};
+        }
+        const std::string path = args["path"].get<std::string>();
+        const std::string action = args["action"].get<std::string>();
+        if (action != "click" && action != "scroll" && action != "text") {
+            return au::Json{
+                {"content", text_content("Error: 'action' must be one of click | scroll | text")}, {"isError", true}};
+        }
+        // 参数判型前置：nlohmann 的 get<>/value<> 遇类型不符会抛 type_error，而本进程主循环
+        // 不捕获异常（stdio 服务直接终止），故所有取值前先判型，类型错了回 isError。
+        for (const char *key : {"dx", "dy", "width", "height"}) {
+            if (const auto it = args.find(key); it != args.end() && !it->is_number()) {
+                return au::Json{{"content", text_content(std::string("Error: '") + key + "' must be a number")},
+                                {"isError", true}};
+            }
+        }
+        if (const auto it = args.find("text"); it != args.end() && !it->is_string()) {
+            return au::Json{{"content", text_content("Error: 'text' must be a string")}, {"isError", true}};
+        }
+
+        const int width = args.value("width", 800);
+        const int height = args.value("height", 600);
+        auto widget = aurora::serialization::from_json(args["tree"]);
+        if (!widget) {
+            return au::Json{{"content", text_content("Error: " + widget.error().message)}, {"isError", true}};
+        }
+        aurora::Node root(std::move(widget.value()));
+        // 先布局一次：from_json 只构树不布局，而 simulate_* 要求目标控件有可命中区域
+        // （滚动容器还须真正布局出非零视口）。此处复用无头快照的 mount + layout 路径，
+        // 其结果仅用于确立几何，不回传（回传的是交互之后的那份）。
+        (void)render_to_logical_snapshot(root, width, height);
+
+        aurora::Node target = aurora::Inspector::find_node(root, path);
+        if (!target) {
+            return au::Json{{"content", text_content("Error: widget not found at path '" + path + "'")},
+                            {"isError", true}};
+        }
+
+        std::string failure;
+        if (action == "click") {
+            const aurora::Result<void> r = aurora::Inspector::simulate_click(target.widget());
+            failure = r ? std::string{} : r.error().message;
+        } else if (action == "scroll") {
+            const aurora::Result<void> r =
+                aurora::Inspector::simulate_scroll(target.widget(), args.value("dx", 0.0F), args.value("dy", 0.0F));
+            failure = r ? std::string{} : r.error().message;
+        } else {
+            const aurora::Result<void> r =
+                aurora::Inspector::simulate_text_input(target.widget(), args.value("text", std::string("")));
+            failure = r ? std::string{} : r.error().message;
+        }
+        if (!failure.empty()) {
+            return au::Json{{"content", text_content("Error: " + failure)}, {"isError", true}};
+        }
+
+        au::Json out = au::Json::object();
+        out["action"] = action;
+        out["path"] = path;
+        out["target"] = aurora::Inspector::get_prop(target.widget());
+        out["snapshot"] = render_to_logical_snapshot(root, width, height);
+        return au::Json{{"content", json_content(out)}};
     }
 
     // unknown tool

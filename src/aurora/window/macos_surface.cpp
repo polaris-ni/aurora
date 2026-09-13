@@ -92,6 +92,45 @@ auto MacOSSurface::size() const -> Size { return size_; }
 
 auto MacOSSurface::should_close() const -> bool { return impl_ ? impl_->should_close : true; }
 
+auto MacOSSurface::set_cursor(CursorShape shape) -> void {
+    // 光标形状：NSCursor 为进程级单例，`set` 即改当前光标，无需持有/释放。
+    // 须在主线程调用（AppKit 契约）；本方法由事件派发栈（主线程）调用。
+    switch (shape) {
+        case CursorShape::Arrow:
+            [[NSCursor arrowCursor] set];
+            break;
+        case CursorShape::IBeam:
+            [[NSCursor IBeamCursor] set];
+            break;
+        case CursorShape::PointingHand:
+            [[NSCursor pointingHandCursor] set];
+            break;
+        case CursorShape::ResizeNS:
+            [[NSCursor resizeUpDownCursor] set];
+            break;
+        case CursorShape::ResizeEW:
+            [[NSCursor resizeLeftRightCursor] set];
+            break;
+        case CursorShape::Move:
+            [[NSCursor openHandCursor] set];
+            break;
+        case CursorShape::Crosshair:
+            [[NSCursor crosshairCursor] set];
+            break;
+        case CursorShape::NotAllowed:
+            [[NSCursor operationNotAllowedCursor] set];
+            break;
+        case CursorShape::Wait:
+            [[NSCursor busyButClickableCursor] set];
+            break;
+        case CursorShape::ResizeNWSE:
+        case CursorShape::ResizeNESW:
+            // macOS 无公开的对角缩放光标（仅有 private `_windowResize*` 系列），回退默认箭头。
+            [[NSCursor arrowCursor] set];
+            break;
+    }
+}
+
 }  // namespace aurora
 
 #endif  // AURORA_BACKEND_MACOS / AURORA_PLATFORM_MACOS

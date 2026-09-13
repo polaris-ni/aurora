@@ -24,9 +24,13 @@
 #include <GLFW/glfw3native.h>
 #endif
 
+#include <array>
+#include <cstddef>
+
 #include "aurora/core/utf8.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
+#include "aurora/window/cursor_map.h"
 #include "aurora/window/win32_capture.h"
 #include "aurora/window/window_state.h"
 
@@ -242,6 +246,12 @@ struct GlfwSurface::Impl {
     WindowStateHandler window_state_handler;
     WindowModeHandler window_mode_handler;
 
+    // ---- 光标形状：标准光标句柄按 CursorShape 取值序缓存（nullptr = 未创建/不可用）----
+    // 复用句柄而非每次 glfwCreateStandardCursor：后者每次创建都是新资源，反复悬停切换必泄漏。
+    std::array<GLFWcursor *, kCursorShapeCount> cursors{};
+    /// @brief 取（惰性创建）该形状的标准光标句柄；GLFW 无对应形状时返回 nullptr（调用方回退 Arrow）。
+    auto cursor_for(CursorShape shape) -> GLFWcursor *;
+
     explicit Impl(const Config &cfg);
     ~Impl();
 
@@ -341,10 +351,93 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
 }
 
 GlfwSurface::Impl::~Impl() {
+    for (GLFWcursor *c : cursors) {
+        if (c != nullptr) {
+            glfwDestroyCursor(c);
+        }
+    }
     if (window != nullptr) {
         glfwDestroyWindow(window);
     }
     glfwTerminate();
+}
+
+// ---- 光标形状：CursorShape → GLFW 标准光标常量 ----
+
+namespace {
+
+/// @brief `CursorShape` → GLFW 标准光标常量；GLFW 无对应形状时返回 -1（调用方回退 Arrow）。
+/// resize/NOT_ALLOWED 系列自 GLFW 3.4 起提供，按宏存在性守卫（3.3 上回退 Arrow）。
+constexpr auto glfw_standard_cursor(CursorShape shape) -> int {
+    switch (shape) {
+        case CursorShape::Arrow:
+            return GLFW_ARROW_CURSOR;
+        case CursorShape::IBeam:
+            return GLFW_IBEAM_CURSOR;
+        case CursorShape::PointingHand:
+            return GLFW_HAND_CURSOR;
+        case CursorShape::ResizeNS:
+            return GLFW_VRESIZE_CURSOR;
+        case CursorShape::ResizeEW:
+            return GLFW_HRESIZE_CURSOR;
+        case CursorShape::Crosshair:
+            return GLFW_CROSSHAIR_CURSOR;
+        case CursorShape::ResizeNWSE:
+#ifdef GLFW_RESIZE_NWSE_CURSOR
+            return GLFW_RESIZE_NWSE_CURSOR;
+#else
+            break;
+#endif
+        case CursorShape::ResizeNESW:
+#ifdef GLFW_RESIZE_NESW_CURSOR
+            return GLFW_RESIZE_NESW_CURSOR;
+#else
+            break;
+#endif
+        case CursorShape::Move:
+#ifdef GLFW_RESIZE_ALL_CURSOR
+            return GLFW_RESIZE_ALL_CURSOR;
+#else
+            break;
+#endif
+        case CursorShape::NotAllowed:
+#ifdef GLFW_NOT_ALLOWED_CURSOR
+            return GLFW_NOT_ALLOWED_CURSOR;
+#else
+            break;
+#endif
+        case CursorShape::Wait:
+            break;  // GLFW 无 busy/wait 标准形状：回退 Arrow。
+    }
+    return -1;
+}
+
+}  // namespace
+
+auto GlfwSurface::Impl::cursor_for(CursorShape shape) -> GLFWcursor * {
+    const auto idx = static_cast<std::size_t>(shape);
+    if (idx >= cursors.size()) {
+        return nullptr;
+    }
+    if (cursors.at(idx) == nullptr) {
+        const int id = glfw_standard_cursor(shape);
+        if (id < 0) {
+            return nullptr;
+        }
+        cursors.at(idx) = glfwCreateStandardCursor(id);
+    }
+    return cursors.at(idx);
+}
+
+auto GlfwSurface::set_cursor(CursorShape shape) -> void {
+    if (pimpl_ == nullptr || pimpl_->window == nullptr) {
+        return;  // 窗口未建成（初始化失败）：安全 no-op。
+    }
+    GLFWcursor *handle = pimpl_->cursor_for(shape);
+    if (handle == nullptr) {
+        handle = pimpl_->cursor_for(CursorShape::Arrow);  // 无标准形状 → 回退默认箭头。
+    }
+    glfwSetCursor(pimpl_->window, handle);
 }
 
 auto GlfwSurface::Impl::begin_frame(int /*width*/, int /*height*/) -> Result<bool> {

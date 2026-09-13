@@ -4,12 +4,14 @@
 /// 响应式初值）、子系统句柄（scene/focus/scheduler/shortcuts）、快捷键优先派发（消费/落空/禁用）、
 /// 空场景同步派发安全性与 App 流式构建器链式配置（不进入真实帧循环）
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "aurora/app/application.h"
 #include "aurora/widget/text.h"
+#include "aurora/window/surface.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_application {
@@ -17,6 +19,26 @@ namespace aurora::test_cases::utest_application {
 namespace {
 
 auto make_scene() -> Scene { return Scene{Node{std::make_shared<Text>("hi")}}; }
+
+/// 固定尺寸探针控件（端到端用例）：几何由期望尺寸直接决定，不依赖字体度量；
+/// `modifier` 可挂 `Modifier::cursor(...)` 以驱动派发器的悬停光标解析。
+class CursorProbe final : public Widget {
+  public:
+    explicit CursorProbe(Size want) : want_(want) {}
+
+    auto type_name() const -> const char * override { return "CursorProbe"; }
+
+    auto on_layout(const Constraints &c, [[maybe_unused]] const BuildContext &ctx) -> Size override {
+        size_ = c.constrain(want_);
+        return size_;
+    }
+
+    auto on_paint([[maybe_unused]] Painter &p, [[maybe_unused]] const Rect &bounds,
+                  [[maybe_unused]] const BuildContext &ctx) -> void override {}
+
+  private:
+    Size want_;
+};
 
 }  // namespace
 
@@ -138,6 +160,7 @@ AURORA_TEST_CASE(plain_scene_dispatches_are_safe_noops) {
     AURORA_TEST_CHECK_NO_THROW(app.dispatch_click(5.0F, 5.0F));
     AURORA_TEST_CHECK_NO_THROW(app.dispatch_pointer(6.0F, 6.0F, MouseAction::Move));
     AURORA_TEST_CHECK_NO_THROW(app.tick());
+    // TEST_TEMP_EXEMPT: 模拟拖入的假路径字符串，非真实临时目录。
     const std::vector<std::string> dropped_paths{"C:/tmp/a.txt"};
     AURORA_TEST_CHECK_NO_THROW(app.dispatch_file_drop(dropped_paths, 1.0F, 2.0F));
 
@@ -162,6 +185,48 @@ AURORA_TEST_CASE(app_builder_chains_fluently) {
     // 显式 Node 构造与 view() 替换（仅配置，不进入帧循环）；elaborated 类型名绕开函数隐藏。
     class aurora::App with_view{Node{std::make_shared<Text>("root")}};
     AURORA_TEST_CHECK_NO_THROW(with_view.view(Node{std::make_shared<Text>("replaced")}));
+}
+
+AURORA_TEST_CASE(application_wires_hover_cursor_to_surface) {
+#ifdef AURORA_BACKEND_HEADLESS
+    // 光标形状完成判据的端到端验收：派发器解析出的悬停光标经 Application 接线落到 Surface。
+    // 链路：app.dispatch(Move) → EventDispatcher::dispatch_mouse → update_hover → resolve_cursor
+    //       → EventDispatcher::cursor_handler_ → Application::wire_cursor → Surface::set_cursor。
+    // 用 HeadlessSurface 的记录 seam 断言（无系统光标亦可确定性验证）。
+    auto root = std::make_shared<CursorProbe>(Size{.width = 200.0F, .height = 80.0F});
+    root->layout(Constraints{}, BuildContext{});
+    Scene scene{Node{root}};
+
+    auto surface = std::make_unique<HeadlessSurface>("", Size{.width = 200.0F, .height = 80.0F});
+    HeadlessSurface *probe = surface.get();
+    Application app{std::move(scene), std::move(surface),
+                    WindowOptions{.size = Size{.width = 200.0F, .height = 80.0F}}};
+    AURORA_TEST_REQUIRE_TRUE(app.window() != nullptr);  // 无 Window 时 wire_cursor 不落到 Surface
+
+    auto move_to = [&](float x, float y) -> void { app.dispatch_pointer(x, y, MouseAction::Move); };
+
+    // 1) 无任何光标声明 → 首次解析为 Arrow 并下发（cursor_emitted_ 初值 false）。
+    move_to(100.0F, 40.0F);
+    AURORA_TEST_REQUIRE_TRUE(probe->last_cursor().has_value());
+    AURORA_TEST_CHECK_EQ(*probe->last_cursor(), CursorShape::Arrow);
+
+    // 2) 同形状重复移动 → 派发器按 current_cursor_ 去重，不再下发。
+    move_to(110.0F, 40.0F);
+    AURORA_TEST_CHECK_EQ(probe->cursor_log().size(), std::size_t{1});
+
+    // 3) 悬停链声明改为 Crosshair → 形状变化 → 再次下发（证明修饰链经 Application 生效）。
+    root->modifier = Modifier{}.cursor(CursorShape::Crosshair);
+    move_to(120.0F, 40.0F);
+    AURORA_TEST_REQUIRE_EQ(probe->cursor_log().size(), std::size_t{2});
+    AURORA_TEST_CHECK_EQ(*probe->last_cursor(), CursorShape::Crosshair);
+
+    // 4) 移出根矩形（链空）→ 回落 Arrow，再次变化即下发。
+    move_to(500.0F, 500.0F);
+    AURORA_TEST_REQUIRE_EQ(probe->cursor_log().size(), std::size_t{3});
+    AURORA_TEST_CHECK_EQ(*probe->last_cursor(), CursorShape::Arrow);
+#else
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
+#endif
 }
 
 }  // namespace aurora::test_cases::utest_application

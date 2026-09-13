@@ -2,7 +2,9 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 
+#include "aurora/core/enums.h"
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
 
@@ -71,6 +73,10 @@ class ModifierNode {
     /// @brief Flex 权重（仅 `FlexWeight` 节点覆盖；其余节点返回 0 = 不扩展）。
     /// 由 Row/Column 在 flex 布局时读取，用于瓜分主轴剩余空间（对应 Expand）。
     [[nodiscard]] virtual auto flex_weight() const -> float { return 0.0F; }
+
+    /// @brief 悬停光标形状（仅 `CursorNode` 覆盖；其余节点返回空 = 不声明）。
+    /// 由事件派发器在悬停链变化时读取，解析出目标形状后经 `Surface::set_cursor` 下发。
+    [[nodiscard]] virtual auto cursor_shape() const -> std::optional<CursorShape> { return std::nullopt; }
 
     /// @brief 触发点击回调（仅 `Clickable` 节点覆盖；其余节点为空操作）。
     /// 由事件派发器在命中目标上调用（架构 §7 事件与命中测试）。

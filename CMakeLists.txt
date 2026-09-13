@@ -5,6 +5,7 @@
 #   cmake/AuroraThirdParty.cmake      — FreeType/HarfBuzz 源码构建
 #   cmake/AuroraBackends.cmake        — 后端剪裁开关（Headless/Win32/D3D11/GLFW/X11/Wayland/macOS/WASM）
 #   cmake/AuroraTools.cmake           — 工具/基准可执行（gen_api/MCP/CLI/LSP/bench_* 等）
+#   cmake/AuroraVerify.cmake          — 真机验收探针（tools/verify/ 下，默认 OFF + EXCLUDE_FROM_ALL）
 #   cmake/AuroraTests.cmake           — CTest 注册式 runner（GLOB tests/unit + tests/integration 链入单一 aurora_test_runner，AURORA_TEST() 自注册）
 #   cmake/AuroraDemos.cmake           — 示例 demo 目标（examples/demos/ 下每组件一个可运行窗口；须在 AuroraTools 之后 include）
 #   cmake/AuroraInstrumentation.cmake — 覆盖率/ASan 插桩（须在全部目标定义之后）
@@ -24,7 +25,7 @@ project(aurora
 # 由 include/aurora/core/version.h 经 AURORA_VERSION_STRING 暴露给程序。
 # 带 FORCE：版本号以仓库声明为单一事实来源，既有 build 目录重新 configure 即同步升级；
 # 如需临时覆盖可改仓库源（发布 stable 时置空串）。
-set(AURORA_VERSION_SUFFIX "alpha.2" CACHE STRING
+set(AURORA_VERSION_SUFFIX "alpha.3" CACHE STRING
         "Pre-release suffix appended after PROJECT_VERSION (empty for stable releases)" FORCE)
 
 # ============================================================
@@ -197,13 +198,35 @@ target_link_libraries(aurora PUBLIC freetype harfbuzz)
 include(AuroraFeatures)
 include(AuroraImageCodecs)
 
+# ---- PCH 门控决策（库自身与消费者共用单一真相变量 AURORA_PCH_ENABLED） ----
+# 插桩构建（覆盖率/ASan）强制关闭 PCH：AuroraInstrumentation 对全部目标 DISABLE_PRECOMPILE_HEADERS，
+# PCH 编排须一并跳过，否则 CMake 对「REUSE_FROM 一个 DISABLE_PRECOMPILE_HEADERS 锚点」报 "ignoring" 警告。
+set(AURORA_PCH_ENABLED ON)
+if (AURORA_ENABLE_COVERAGE OR AURORA_ENABLE_ASAN)
+    set(AURORA_PCH_ENABLED OFF)
+endif ()
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # GCC 侧实测（MinGW/gcc 16.1）：消费者 .gch 达 296MB 且从未被命中——gch 生成/消费侧
+    # 编译器设置失配致每个消费者 TU 都报 -Winvalid-pch 拒用，但拒用前仍完整探测该文件；
+    # 且 ccache 为算 key 也要全文 hash 一遍。每个 TU ≈ 600MB 纯亏损 I/O × 250 TU ≈ 144GB/
+    # 次脏构建，16 并发下每边膨胀至 10-39s（solo 0.9s）。即便修好失配，生效的 gch 仍要
+    # 每 TU 全量加载 296MB + ccache 全量 hash，净收益为负——故 GCC 直接关闭消费者 PCH，
+    # 消费者走伞头文本编译 + ccache 缓存（配置经 AuroraCcache 启动器注入）。
+    # 库自身 gch（122MB，标准库 + nlohmann/json）同病：每库 TU 全量加载 + ccache 全文
+    # hash，全量重编 155.4s（266 边）→ 关闭后库侧重编 68s（91 边），冷构建省约 1 分钟，
+    # 且头文件变更不再使全部库 TU 的缓存键失效（gch 字节参与 key）。一并关闭。
+    set(AURORA_PCH_ENABLED OFF)
+endif ()
+
 # ---- Precompiled header (规格 §3.5 增量编译) ----
 # 库自身 PCH：只聚合「稳定且不常变更」的重型头（标准库 + nlohmann/json），不纳入高频
 # 变更的 aurora 自有头以保证库开发时的命中率（见 aurora_pch.h 收录原则）；PRIVATE 仅
 # aurora 库编译一份 .gch。消费者（demo/测试/工具）另有含 aurora.h 的共享 PCH，见下方
 # aurora_consumer_pch 目标（历史上 PUBLIC + 空 PCH：每目标一份空 .gch，纯开销零收益）。
-target_precompile_headers(aurora PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/aurora/aurora_pch.h")
+if (AURORA_PCH_ENABLED)
+    target_precompile_headers(aurora PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/aurora/aurora_pch.h")
+endif ()
 
 # 抑制 MSVC 对 std::fopen 等 POSIX 函数的弃用警告（render/png.h 使用 std::fopen）
 if (MSVC)
@@ -259,13 +282,6 @@ include(AuroraSimd)
 # 的 PCH 刻意不含库内头（保证库开发时命中率），但对消费者而言 aurora.h 变更本就会
 # 触发其 TU 重编，把它整体预编译并共享**不增加任何失效面**，只省去 250+ TU 的重复解析：
 # 锚定到一个空静态库目标编一份 .gch，全部消费者经 REUSE_FROM 复用。
-# ⚠️ 插桩构建（覆盖率/ASan）强制关闭 PCH（见 AuroraInstrumentation）：此时须跳过锚定目标
-# 与全部 REUSE_FROM，否则 CMake 会对「REUSE_FROM 一个 DISABLE_PRECOMPILE_HEADERS 锚点」
-# 报 "ignoring" 警告。AURORA_PCH_ENABLED 为单一真相变量，供下方 demo/测试/工具复用。
-set(AURORA_PCH_ENABLED ON)
-if (AURORA_ENABLE_COVERAGE OR AURORA_ENABLE_ASAN)
-    set(AURORA_PCH_ENABLED OFF)
-endif ()
 if (AURORA_PCH_ENABLED)
     file(WRITE "${CMAKE_BINARY_DIR}/aurora_consumer_pch.cpp"
             "// 自动生成：消费者共享 PCH 的锚定 TU（无内容，仅承载 .gch 编译）。\n")
@@ -285,6 +301,9 @@ include(AuroraUtils)
 # ---- 工具/基准 + 测试 ----
 include(AuroraTools)
 include(AuroraTests)
+
+# ---- 真机验收探针（tools/verify/，默认 OFF + EXCLUDE_FROM_ALL；须在后端开关之后 include）----
+include(AuroraVerify)
 
 # ---- 示例 demo（examples/demos/ 下每组件一个可运行窗口；独立模块，须在 AuroraTools 之后 include）----
 include(AuroraDemos)

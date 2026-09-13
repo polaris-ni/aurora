@@ -33,7 +33,8 @@ namespace {
            static_cast<int>(au::CrossAxisAlignment::Stretch) + static_cast<int>(au::MainAxisAlignment::SpaceEvenly) +
            static_cast<int>(au::MainAxisSize::Max) + static_cast<int>(au::StackFit::Passthrough) +
            static_cast<int>(au::LengthKind::Fraction) + static_cast<int>(au::LengthKind::Expand) +
-           static_cast<int>(au::TextAlign::Justify) + static_cast<int>(au::TextOverflow::Fade) +
+           static_cast<int>(au::TextAlign::Justify) + static_cast<int>(au::TextDirection::RTL) +
+           static_cast<int>(au::TextOverflow::Fade) +
            static_cast<int>(au::TextDecoration::LineThrough) + static_cast<int>(au::FontWeight::ExtraBold) +
            static_cast<int>(au::FontStyle::Italic) + static_cast<int>(au::CurveKind::Custom) +
            static_cast<int>(au::KeyCode::D0) + static_cast<int>(au::KeyCode::Backquote) +

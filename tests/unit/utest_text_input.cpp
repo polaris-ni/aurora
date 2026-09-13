@@ -1,11 +1,17 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/text_input.h
 /// 测试说明: 覆盖 TextInput——Props 构造与链式 setter、只读/限长/禁用状态、布局尺寸与字号关系、
-/// 经公开文本输入入口验证 on_changed 回调与截断/吞输入行为、序列化往返与默认键省略
+/// 经公开文本输入入口验证 on_changed 回调与截断/吞输入行为、IME 组合输入（preedit 显示 /
+/// 上屏落字 / 限长 / 失焦取消 / 参与测量）、序列化往返与默认键省略
 
+#include <cstddef>
 #include <string>
 
+#include "aurora/core/directionality.h"
+#include "aurora/core/log.h"
+#include "aurora/environment/environment.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/render/font_engine.h"
 #include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
 
@@ -158,6 +164,109 @@ AURORA_TEST_CASE(read_only_and_disabled_swallow_text_input) {
     AURORA_TEST_CHECK_EQ(disabled.value(), std::string{});
 }
 
+AURORA_TEST_CASE(composition_shows_preedit_without_touching_value) {
+    // 拼音输入的完整三段序列：preedit → 候选替换 → 上屏。
+    // 关键不变量：preedit 期间 value() 保持干净（golden 可复现），仅上屏时落字。
+    TextInput ti;
+    ti.on_focus_change(true);
+
+    TextCompositionEvent typing;
+    typing.preedit = "nihao";
+    typing.cursor_index = 5;
+    ti.on_text_composition(typing);
+    AURORA_TEST_CHECK_TRUE(typing.is_handled);
+    AURORA_TEST_CHECK_TRUE(ti.is_composing());
+    AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{"nihao"});
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{""});  // 未上屏，值不变
+    AURORA_TEST_CHECK_EQ(ti.composition_cursor(), static_cast<std::size_t>(5));
+    AURORA_TEST_CHECK_EQ(ti.accessibility_value(), std::string{"nihao"});  // 读屏需播报组合态
+
+    TextCompositionEvent candidate;
+    candidate.preedit = "你好";
+    candidate.cursor_index = 2;
+    ti.on_text_composition(candidate);
+    AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{"你好"});
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{""});
+
+    TextCompositionEvent commit;
+    commit.committed = "你好";
+    ti.on_text_composition(commit);
+    AURORA_TEST_CHECK_FALSE(ti.is_composing());
+    AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{""});
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"你好"});
+    AURORA_TEST_CHECK_EQ(ti.accessibility_value(), std::string{"你好"});
+}
+
+AURORA_TEST_CASE(composition_commit_respects_max_length_read_only_and_disabled) {
+    // 上屏文本走与普通输入同一条 `insert_at_caret`，故限长语义自动一致。
+    TextInput limited;
+    limited.set_max_length(2);
+    limited.on_focus_change(true);
+    TextCompositionEvent over;
+    over.committed = "abcdef";
+    limited.on_text_composition(over);
+    AURORA_TEST_CHECK_EQ(limited.value(), std::string{"ab"});
+
+    // 只读：吞事件、不上屏、不显示 preedit
+    TextInput ro;
+    ro.set_value("keep").set_read_only(true);
+    ro.on_focus_change(true);
+    TextCompositionEvent blocked;
+    blocked.preedit = "ni";
+    blocked.committed = "x";
+    ro.on_text_composition(blocked);
+    AURORA_TEST_CHECK_TRUE(blocked.is_handled);
+    AURORA_TEST_CHECK_FALSE(ro.is_composing());
+    AURORA_TEST_CHECK_EQ(ro.value(), std::string{"keep"});
+
+    // 禁用：与 TextInputEvent 一致，连事件都不消费
+    TextInput disabled;
+    disabled.set_enabled(false);
+    disabled.on_focus_change(true);
+    TextCompositionEvent ignored;
+    ignored.preedit = "ni";
+    disabled.on_text_composition(ignored);
+    AURORA_TEST_CHECK_FALSE(ignored.is_handled);
+    AURORA_TEST_CHECK_FALSE(disabled.is_composing());
+}
+
+AURORA_TEST_CASE(blur_cancels_pending_composition) {
+    // 失焦即取消未上屏的组合（平台 IME 惯例），且取消不落字。
+    TextInput ti;
+    ti.on_focus_change(true);
+    TextCompositionEvent composing;
+    composing.preedit = "zhong";
+    composing.sel_start = 0;
+    composing.sel_end = 5;
+    ti.on_text_composition(composing);
+    AURORA_TEST_CHECK_TRUE(ti.is_composing());
+
+    ti.on_focus_change(false);
+    AURORA_TEST_CHECK_FALSE(ti.is_composing());
+    AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{""});
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{""});
+}
+
+AURORA_TEST_CASE(preedit_participates_in_layout_measurement) {
+    // preedit 参与宽度测量：组合中的中文应把输入框撑开（否则文字被裁切）。
+    // 注意用无界约束测内在宽度——有界约束下 on_layout 恒取 c.max.width，观察不到内容差异。
+    const Constraints loose{};  // max = 无限
+    TextInput base;
+    base.set_value("ab");
+    LayoutEngine::layout(base, loose);
+
+    TextInput composing;
+    composing.set_value("ab");
+    composing.on_focus_change(true);
+    TextCompositionEvent e;
+    e.preedit = "你好吗";
+    composing.on_text_composition(e);
+    LayoutEngine::layout(composing, loose);
+
+    AURORA_TEST_CHECK_TRUE(composing.size().width > base.size().width);
+    AURORA_TEST_CHECK_NEAR(composing.size().height, base.size().height, 1e-4F);  // 单行：高度不变
+}
+
 AURORA_TEST_CASE(serialize_deserialize_roundtrip_and_defaults) {
     TextInput src;
     src.set_value("user")
@@ -203,6 +312,189 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip_and_defaults) {
     AURORA_TEST_CHECK_FALSE(defaults.contains("focused_border_color"));  // 保留「跟随主题」语义
     AURORA_TEST_CHECK_FALSE(defaults.contains("max_length"));
     AURORA_TEST_CHECK_FALSE(defaults.contains("obscure_text"));
+}
+
+AURORA_TEST_CASE(cursor_shape_hook_defaults_to_ibeam) {
+    // TextInput 悬停默认 IBeam（控件级虚钩子）；修饰链显式声明在派发器解析时优先，此处只验钩子值。
+    TextInput ti;
+    AURORA_TEST_CHECK(ti.cursor_shape() == std::optional{CursorShape::IBeam});
+}
+
+AURORA_TEST_CASE(rtl_arrow_keys_invert_logical_direction) {
+    // RTL 输入框方向键按视觉语义反转——ArrowRight = 逻辑后退。
+    // 末尾输入 "ab"（caret=2）后按 ArrowRight：RTL 下 caret 退到 1，再输入 X → "aXb"；
+    // LTR 对照组：ArrowRight 在末尾 no-op（clamp），X 追加 → "abX"。
+    const Environment env =
+        Environment{}.with<Directionality>(Directionality{.direction = TextDirection::RTL, .host_set = true});
+    BuildContext ctx;
+    ctx.env = &env;
+
+    TextInput rtl;
+    rtl.on_focus_change(true);
+    TextInputEvent seed;
+    seed.text = "ab";
+    rtl.on_text_input(seed);
+    rtl.mount(ctx);
+    rtl.layout(bounded(300.0F, 60.0F), ctx);  // 布局期缓存生效方向 = RTL
+
+    KeyEvent right;
+    right.key = static_cast<int>(KeyCode::ArrowRight);
+    rtl.on_key_event(right);
+    TextInputEvent ins;
+    ins.text = "X";
+    rtl.on_text_input(ins);
+    AURORA_TEST_CHECK_EQ(rtl.value(), std::string{"aXb"});
+
+    TextInput ltr;
+    ltr.on_focus_change(true);
+    ltr.on_text_input(seed);
+    BuildContext plain;
+    ltr.mount(plain);
+    ltr.layout(bounded(300.0F, 60.0F), plain);
+    ltr.on_key_event(right);
+    ltr.on_text_input(ins);
+    AURORA_TEST_CHECK_EQ(ltr.value(), std::string{"abX"});
+}
+
+AURORA_TEST_CASE(rtl_caret_paints_at_right_edge) {
+    // RTL 下逻辑 caret 0 镜像到文本右缘（caret_x = 文本全宽）——
+    // 唯一光标色像素扫描：RTL 光标 x 显著大于 LTR（LTR caret 0 在左内边距处）。
+    const Color magenta{255, 0, 255, 255};
+    // caret 以 magenta 纯色绘制；AA/合成及不同编译器/优化级别（-O1/-O2）、不同平台字体
+    // hinting 会使实际像素与精确 (255,0,255) 产生 1~数 LSB 偏差，故用宽松「类 magenta」判定
+    // 而非精确相等，对齐项目既有像素测试的结构性检测约定（见 itest_font_pixel_snap）。
+    auto paint_caret_min_x = [](TextInput &ti, const BuildContext &ctx) -> float {
+        auto magenta_like = [](const Color &c) -> bool {
+            return c.a > 180 && c.r > 180 && c.b > 180 && c.g < 80;
+        };
+        const Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F},
+                          .size = Size{.width = ti.size().width, .height = ti.size().height}};
+        Painter p;
+        p.begin(static_cast<int>(ti.size().width), static_cast<int>(ti.size().height));
+        ti.paint(p, bounds, ctx);
+        float min_x = -1.0F;
+        for (int x = 0; x < static_cast<int>(ti.size().width); ++x) {
+            for (int y = 0; y < static_cast<int>(ti.size().height); ++y) {
+                if (magenta_like(p.get_pixel(x, y))) {
+                    min_x = (min_x < 0.0F) ? static_cast<float>(x) : std::min(min_x, static_cast<float>(x));
+                }
+            }
+        }
+        return min_x;
+    };
+
+    TextInput ltr;
+    ltr.set_value("ab").set_cursor_color(magenta);
+    ltr.on_focus_change(true);
+    BuildContext plain;
+    ltr.mount(plain);
+    ltr.layout(bounded(200.0F, 60.0F), plain);
+    const float ltr_x = paint_caret_min_x(ltr, plain);
+
+    TextInput rtl;
+    rtl.set_value("ab").set_cursor_color(magenta).set_direction(TextDirection::RTL);
+    rtl.on_focus_change(true);
+    BuildContext plain2;
+    rtl.mount(plain2);
+    rtl.layout(bounded(200.0F, 60.0F), plain2);
+    const float rtl_x = paint_caret_min_x(rtl, plain2);
+
+    // 两个方向的光标都必须确实被绘制出来。
+    AURORA_TEST_REQUIRE_TRUE(ltr_x >= 0.0F);
+    AURORA_TEST_REQUIRE_TRUE(rtl_x >= 0.0F);
+
+    // 结构性断言（对齐项目跨平台稳健约定）：控件宽 200，以中线 x=100 分界。
+    // LTR 逻辑首字符 caret 落在左半区；RTL 镜像到文本右缘 → 落点在右半区。
+    // 用「右缘相对左缘」的相对关系而非绝对像素，吸收字体度量/优化级别导致的若干 px 抖动。
+    AURORA_TEST_CHECK_TRUE(ltr_x < 100.0F);
+    AURORA_TEST_CHECK_TRUE(rtl_x > 100.0F);
+    AURORA_TEST_CHECK_TRUE(rtl_x > ltr_x + 40.0F);
+}
+
+AURORA_TEST_CASE(direction_prop_serialization_roundtrip) {
+    // 显式方向落盘；未设置不输出（保留「继承环境」语义）。
+    TextInput rtl;
+    rtl.set_direction(TextDirection::RTL);
+    Json props;
+    rtl.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["direction"].get<std::string>(), "RTL");
+
+    TextInput dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_REQUIRE_TRUE(dst.direction().has_value());
+    AURORA_TEST_CHECK_TRUE(*dst.direction() == TextDirection::RTL);
+
+    Json defaults;
+    TextInput def;
+    def.serialize_props(defaults);
+    AURORA_TEST_CHECK_FALSE(defaults.contains("direction"));  // 未设置不落盘
+}
+
+// ============================================================================
+// 尾巴：TextInput 对 bidi 格式控制符的输入侧支持
+// ----------------------------------------------------------------------------
+// UBA 解析侧早已支持控制符（uba_levels 走 X1–X9 / uba_visual_order 走 L2），本组锁定
+// 「输入侧」：控制符原样落字、参与逻辑 caret（不剥离）、序列化往返保留原始字节、且插入后
+// 可见文本宽度不变。渲染侧的零宽零墨迹保证由 utest_bidi 的
+// bidi_format_control_zero_width_and_ink_font_independent 覆盖。
+// ============================================================================
+AURORA_TEST_CASE(bidi_control_chars_preserved_verbatim_in_value) {
+    // 输入 "a" + RLI + "b" + PDI + "c"（分三次 on_text_input）：控制符必须逐字节原样存下，
+    // value 含 U+2067 / U+2069，且 UTF-8 字节长度 == 1+3+1+3+1 = 9。跨多次输入也保持。
+    TextInput ti;
+    ti.on_focus_change(true);
+    TextInputEvent e1;
+    e1.text = "a";
+    ti.on_text_input(e1);
+    TextInputEvent e2;
+    e2.text = std::string{"\u2067"} + "b" + "\u2069";  // RLI … PDI 包 b
+    ti.on_text_input(e2);
+    TextInputEvent e3;
+    e3.text = "c";
+    ti.on_text_input(e3);
+
+    AURORA_TEST_CHECK(ti.value().find("\u2067") != std::string::npos);  // 含 RLI
+    AURORA_TEST_CHECK(ti.value().find("\u2069") != std::string::npos);  // 含 PDI
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"a"} + "\u2067" + "b" + "\u2069" + "c");
+    AURORA_TEST_CHECK_EQ(ti.value().size(), static_cast<std::size_t>(9));  // a/RLI/b/PDI/c 的 UTF-8 字节数
+}
+
+AURORA_TEST_CASE(bidi_control_chars_roundtrip_serialization) {
+    // 含控制符的 value 经 serialize_props / deserialize_props 往返后字节不变。
+    // 注意：direction 仅承载 RTL/LTR，与控制符正交；此处只验「值串不被改写」。
+    TextInput ti;
+    ti.set_value(std::string{"a"} + "\u202B" + "bc" + "\u202C");  // RLE … PDF 包 bc
+
+    const std::string before = ti.value();
+    Json props;
+    ti.serialize_props(props);
+    TextInput dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(dst.value(), before);  // 往返保留控制符字节
+}
+
+AURORA_TEST_CASE(bidi_control_chars_do_not_shift_visible_width) {
+    // 在可见字母间穿插控制符后，可见文本（"abc"）的宽度必须不变——控制符零宽不可见。
+    // 用默认捆绑字体（TextInput 实际所用），不依赖外部 TTF，故不 SKIP。
+    // 此处用 LRM（类 L、零宽、不改变层级）穿插，避免相邻字母被翻成 RTL 影响视觉序对照；
+    // 各控制符「零宽零墨迹」的更强保证由 utest_bidi 的
+    // bidi_format_control_zero_width_and_ink_font_independent 覆盖。
+    using aurora::render::FontEngine;
+    const Font f{.size_pt = 24.0F};
+    const std::string plain = "abc";
+    const std::string with_ctrl = std::string{"a"} + "\u200E" + "b" + "\u200E" + "c";
+
+    const float w_plain = FontEngine::measure_width(plain, f);
+    const float w_ctrl = FontEngine::measure_width(with_ctrl, f);
+    AURORA_TEST_REQUIRE(w_plain > 0.0F);
+    AURORA_TEST_CHECK_NEAR(w_plain, w_ctrl, 0.01F);  // 控制符不增加可见宽度
+
+    // 可见字母在两种串中的逻辑下标映射：plain[i] ↔ with_ctrl[i + 其前控制符数]
+    //   a: 0↔0   b: 1↔2   c: 2↔4   末尾: 3↔5（控制符零宽，不挤占相邻可见字符位置）。
+    const std::pair<std::size_t, std::size_t> pairs[] = {{0U, 0U}, {1U, 2U}, {2U, 4U}, {3U, 5U}};
+    for (const auto &[pi, ci] : pairs) {
+        AURORA_TEST_CHECK_NEAR(FontEngine::caret_x(plain, pi, f), FontEngine::caret_x(with_ctrl, ci, f), 0.01F);
+    }
 }
 
 }  // namespace aurora::test_cases::utest_text_input

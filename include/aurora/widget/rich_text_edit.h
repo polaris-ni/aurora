@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -8,9 +9,11 @@
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/core/types.h"
+#include "aurora/core/utf8.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/undo_stack.h"
 #include "aurora/widget/text_span.h"
+#include "aurora/core/enums.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -102,6 +105,15 @@ class RichTextEdit : public LeafWidget {
         return *this;
     }
 
+    /// @brief 设置书写方向（链式）。nullopt = 继承环境（`Directionality` 注入/进程级），
+    ///        与 Text/TextInput 语义一致。RTL 时光标/选区/命中走逻辑↔视觉镜像（逻辑首字符在右缘）、
+    ///        段落整体右对齐。
+    auto set_direction(std::optional<TextDirection> d) -> RichTextEdit & {
+        direction_ = d;
+        return *this;
+    }
+    [[nodiscard]] auto direction() const -> std::optional<TextDirection> { return direction_; }
+
     /// @brief 切换当前字体粗体（weight 400 ↔ 700）。
     auto toggle_bold() -> void { cur_font_.weight = (cur_font_.weight >= 700) ? 400 : 700; }
     /// @brief 切换当前字体斜体（通过 family 后缀 "*" 模拟，实际渲染依赖 FontEngine）。
@@ -149,6 +161,20 @@ class RichTextEdit : public LeafWidget {
 
     [[nodiscard]] auto type_name() const -> const char * override { return "RichTextEdit"; }
 
+    /// @brief 无障碍值：文档纯文本，组合期间含光标处的 preedit（读屏应播报未上屏内容）。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_value() const -> std::string override {
+        std::string out = plain_text();
+        if (is_composing()) {
+            out.insert(std::min(caret_, out.size()), preedit_);
+        }
+        return out;
+    }
+
+    /// @brief 悬停默认文本光标：文本编辑区悬停 IBeam；修饰链显式 `cursor(...)` 声明优先。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return CursorShape::IBeam; }
+
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
 
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
@@ -169,6 +195,45 @@ class RichTextEdit : public LeafWidget {
         }
     }
 
+    /// @brief IME 组合输入（CJK 攻坚）：先落 `committed` 上屏（走 `do_insert`，带 undo），
+    ///        再更新 preedit 显示态。preedit 不进 `doc_`（未上屏文本不参与撤销栈 / 序列化），
+    ///        仅在绘制期插到光标处（见 `paint_preedit`）。
+    ///
+    /// 典型序列（拼音输入法）：`preedit="nihao"` → `preedit="你好",cursor_index=2` →
+    /// `preedit="",committed="你好"`（落字）。
+    auto on_text_composition(TextCompositionEvent &e) -> void override {
+        e.is_handled = true;  // 无论是否落地都吞掉，避免平台侧因「无人处理」重复上屏
+        if (!e.committed.empty()) {
+            do_insert(e.committed);
+        }
+        preedit_ = e.preedit;
+        const std::size_t pn = utf8_cp_count(preedit_);
+        preedit_cursor_ = std::min(e.cursor_index, pn);
+        preedit_sel_start_ = std::min(e.sel_start, pn);
+        preedit_sel_end_ = e.has_preedit_selection() ? std::min(e.sel_end, pn) : kNoPreeditSelection;
+        if (preedit_sel_end_ != kNoPreeditSelection && preedit_sel_end_ < preedit_sel_start_) {
+            preedit_sel_end_ = preedit_sel_start_;  // 端点倒置退化为单点选区
+        }
+        mark_needs_paint();
+    }
+
+    /// @brief 当前预编辑串（组合中的未上屏文本）；无组合时为空串。
+    [[nodiscard]] auto preedit() const -> std::string { return preedit_; }
+
+    /// @brief 是否处于组合态（preedit 非空）。
+    [[nodiscard]] auto is_composing() const -> bool { return !preedit_.empty(); }
+
+    /// @brief 组合光标在 preedit 内的码点下标（候选插入点）。
+    [[nodiscard]] auto composition_cursor() const -> std::size_t { return preedit_cursor_; }
+
+    /// @brief 焦点变更：失焦即取消未上屏的组合（平台 IME 惯例）。
+    auto on_focus_change(bool focused) -> void override {
+        Widget::on_focus_change(focused);
+        if (!focused) {
+            cancel_composition();
+        }
+    }
+
     // ---- 序列化 ----
 
     auto serialize_props(Json &props) const -> void override;
@@ -176,9 +241,16 @@ class RichTextEdit : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override;
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override;
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override;
 
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override;
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override;
+
+    /// @brief 生效书写方向：布局期解析并缓存。nullopt = 无显式来源，shaping 保持按内容 guess
+    ///        （默认行为与接入前一致，golden 逐位不变）；进程级默认 LTR 不强制覆盖 guess。
+    std::optional<TextDirection> cached_direction_;
+
+    /// @brief 显式书写方向：nullopt = 继承环境（`Directionality` 注入/进程级）。
+    std::optional<TextDirection> direction_;
 
   private:
     // ---- 内部行结构（布局用）----
@@ -189,6 +261,29 @@ class RichTextEdit : public LeafWidget {
     auto relayout_lines(float max_width) -> void;
 
     auto pos_from_line_col(size_t line_idx, size_t col) const -> size_t;
+
+    /// @brief 单行「生效方向 + 各样式/层级 run」的视觉布局（RTL + 完整 UBA）：连续同样式
+    ///        字符合并为样式 run，再逐 run 按完整 UBA（UAX #9）嵌入层级细分为层级 run（层级
+    ///        单一，hb 方向取层级奇偶）；跨 run 顺序按 `uba_visual_order`（L2 层叠反转）重排；
+    ///        RTL 段落整体右对齐。返回每个 run 的视觉起点 x、宽度、行内下标区间与整形方向。
+    struct RunLayout {
+        std::string text;
+        Font font = {};
+        Color color = Color::black();
+        std::vector<char> underline;  ///< 与 text 逐字对应的下划线标记（0/1）
+        float x = 0.0F;
+        float w = 0.0F;
+        std::size_t begin = 0;  ///< 该 run 首字符在行内的逻辑下标（含 '\n' 计 1）
+        std::size_t end = 0;    ///< 该 run 末字符逻辑下标 +1
+        TextDirection dir = TextDirection::LTR;  ///< 该 run 的整形方向（UBA 层级奇偶）
+    };
+
+    auto compute_line_runs(const Line &line, TextDirection base, const Rect &bounds) const -> std::vector<RunLayout>;
+
+    /// @brief 计算给定行内、逻辑下标 `caret_local` 处光标的视觉 x（相对 bounds 左缘）。
+    ///        RTL 下 `FontEngine::caret_x` 返回逻辑 0 在右缘的视觉偏移，调用方无需再镜像。
+    auto caret_visual_x(const Line &line, TextDirection base, std::size_t caret_local, const Rect &bounds) const
+        -> float;
 
     // ---- 编辑操作（带 UndoStack 集成）----
 
@@ -221,6 +316,13 @@ class RichTextEdit : public LeafWidget {
 
     auto paint_cursor(Painter &p, const Rect &bounds) const -> void;
 
+    /// @brief 组合态绘制：preedit 内选区高亮 + preedit 文本 + 下划线 + 候选插入点光标。
+    ///        在 `(x, y)` 处绘制，返回占用宽度（供调用方推进游标，实现「预编辑串挤开后续文本」）。
+    auto paint_preedit(Painter &p, float x, float y) const -> float;
+
+    /// @brief 取消组合：清空 preedit 与其选区（失焦 / 平台侧取消时调用）。
+    auto cancel_composition() -> void;
+
     // ---- 数据成员 ----
     std::vector<StyledChar> doc_;
     std::size_t caret_ = 0;
@@ -232,6 +334,14 @@ class RichTextEdit : public LeafWidget {
     UndoStack *undo_ = nullptr;
     float line_height_ = 20.0F;
     std::vector<Line> lines_;
+
+    // IME 组合态：preedit 不进 doc_，仅在绘制期插到 caret_ 处。
+    /// @brief preedit 内「无选区」哨兵。
+    static constexpr std::size_t kNoPreeditSelection = TextCompositionEvent::kNoSelection;
+    std::string preedit_;  ///< 预编辑串（UTF-8）；空 = 无组合
+    std::size_t preedit_cursor_ = 0;  ///< 组合光标在 preedit 内的码点下标
+    std::size_t preedit_sel_start_ = 0;  ///< preedit 内选区起点（码点下标）
+    std::size_t preedit_sel_end_ = kNoPreeditSelection;  ///< 选区终点（含尾）；kNoPreeditSelection = 无
 };
 
 }  // namespace aurora

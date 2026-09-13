@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <functional>
 #include <optional>
+#include <string>
 #include <vector>
 
+#include "aurora/core/accessibility.h"
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/binding.h"
@@ -99,6 +101,7 @@ class Checkbox : public LeafWidget {
             on_changed_(v);
         }
         mark_needs_paint();
+        notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
     }
 
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
@@ -109,6 +112,11 @@ class Checkbox : public LeafWidget {
     }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "Checkbox"; }
+
+    /// @brief 无障碍值：勾选态的字面布尔串（`true` / `false`）。
+    /// @note 取字面值而非本地化文案：屏幕阅读器/自动化均可稳定解析，不受 locale 影响。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_value() const -> std::string override { return value() ? "true" : "false"; }
 
     /// @brief 运行时自描述（规格附录 B）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {

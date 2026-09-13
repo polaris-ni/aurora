@@ -86,6 +86,38 @@ auto EventDispatcher::update_hover(const std::vector<HitNode> &chain) -> void {
         }
     }
     hover_chain_ = chain;
+
+    // 悬停光标解析与下发：只在形状变化时回调 handler（避免每个 Move 事件都打平台光标 API）。
+    const CursorShape want = resolve_cursor(chain);
+    if (!cursor_emitted_ || want != current_cursor_) {
+        current_cursor_ = want;
+        cursor_emitted_ = true;
+        if (cursor_handler_) {
+            cursor_handler_(want);
+        }
+    }
+}
+
+auto EventDispatcher::resolve_cursor(const std::vector<HitNode> &chain) const -> CursorShape {
+    // 自最深（链尾）向根（链头）回溯：内层控件的光标声明覆盖外层容器。
+    // 优先级：修饰链 CursorNode > Widget::cursor_shape() 虚钩子 > 含 Clickable → PointingHand。
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+        Widget *sp = it->get();
+        if (sp == nullptr) {
+            continue;  // 弱引用已回收，安全跳过
+        }
+        const Modifier &mod = sp->modifier.get();
+        if (const auto declared = mod.cursor_shape()) {
+            return *declared;
+        }
+        if (const auto hook = sp->cursor_shape()) {
+            return *hook;
+        }
+        if (mod.has_clickable()) {
+            return CursorShape::PointingHand;
+        }
+    }
+    return CursorShape::Arrow;
 }
 
 auto EventDispatcher::dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *fm) -> bool {
@@ -354,6 +386,20 @@ auto EventDispatcher::dispatch(Widget & /*root*/, KeyEvent &e, FocusManager &fm)
 }
 
 auto EventDispatcher::dispatch(Widget &root, ScrollEvent &e) -> bool {
+    // 滚轮沿命中链自最深（链尾）向根（链头）找第一个 wants_scroll() 者派发——
+    // 与 CSS/Flutter 语义一致：滚轮归属「最近可滚动祖先」，可点击子控件（Button 等）
+    // 不拦截滚轮；嵌套时最深滚动者优先（内层 Scroll / LazyList 胜过外层 Overflow::Scroll 容器）。
+    // 链路依赖：Overflow::Scroll 控件自身保证入链（Widget::hit_test_chain 的滚动区认领）。
+    std::vector<HitNode> chain =
+        root.hit_test_chain(e.position, Rect{.origin = Point{}, .size = root.size()}, BuildContext{});
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+        if (auto *w = it->ptr; w != nullptr && w->wants_scroll()) {
+            w->on_scroll(e);
+            return true;
+        }
+    }
+    // 兜底（兼容既有行为）：链上无可滚动者（如自定义 on_scroll 的非滚动控件、
+    // 或命中点在滚动区之外）→ 回落点命中目标直接派发，不冒泡。
     Widget *target = hit_test(root, e.position);
     if (target == nullptr) {
         return false;
@@ -380,6 +426,19 @@ auto EventDispatcher::dispatch(Widget & /*root*/, TextInputEvent &e, FocusManage
         return false;
     }
     focused->on_text_input(e);
+    set_current_focus_manager(prev);
+    return e.is_handled;
+}
+
+auto EventDispatcher::dispatch(Widget & /*root*/, TextCompositionEvent &e, FocusManager &fm) -> bool {
+    FocusManager *prev = current_focus_manager();
+    set_current_focus_manager(&fm);
+    Widget *focused = fm.focused();
+    if (focused == nullptr) {
+        set_current_focus_manager(prev);
+        return false;
+    }
+    focused->on_text_composition(e);
     set_current_focus_manager(prev);
     return e.is_handled;
 }

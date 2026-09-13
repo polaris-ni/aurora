@@ -1,8 +1,18 @@
 #include "aurora/widget/rich_text_edit.h"
 
+// 完整 BuildContext 定义（explicit_text_direction 模板在 on_layout 内实例化，需用到
+// ctx.environment<Directionality>()，前向声明不足以编译）。
+#include "aurora/environment/build_context.h"
+
 #include "aurora/app/clipboard.h"
 #include "aurora/core/diagnostics.h"
+#include "aurora/core/directionality.h"
+#include "aurora/core/utf8.h"
 #include "aurora/event/keycode.h"
+#include <algorithm>
+#include <cmath>
+
+#include "aurora/render/bidi.h"
 #include "aurora/render/font_engine.h"
 
 namespace aurora {
@@ -36,18 +46,27 @@ auto RichTextEdit::describe_static() -> WidgetDescriptor {
                  .required = false,
                  .note = "",
                  .json_type = "boolean"},
+                {.name = "direction",
+                 .type = "TextDirection",
+                 .default_value = "\"auto\"",
+                 .required = false,
+                 .note = "书写方向(auto=继承环境)",
+                 .json_type = "string"},
             },
-        .events = {"on_text_input"},
+        .events = {"on_text_input", "on_text_composition"},
         .children_policy = "none",
         .examples = {"au::RichTextEdit()"},
     };
 }
 
-auto RichTextEdit::on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size {
+auto RichTextEdit::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
     line_height_ = render::FontEngine::measure_height(cur_font_);
     if (line_height_ < 1.0F) {
         line_height_ = 20.0F;
     }
+    // 解析生效书写方向（控件显式属性 > Environment 注入 > 进程级；均无则 nullopt，
+    // shaping 保持按内容 guess，默认行为逐位不变）。
+    cached_direction_ = direction_.has_value() ? direction_ : explicit_text_direction(ctx);
     relayout_lines(c.max.width);
     const float h = static_cast<float>(lines_.size()) * line_height_;
     return c.constrain(Size{.width = c.max.width, .height = std::max(h, line_height_)});
@@ -57,28 +76,68 @@ auto RichTextEdit::on_paint(Painter &p, const Rect &bounds, const BuildContext &
     if (lines_.empty()) {
         relayout_lines(bounds.size.width);
     }
-    if (has_selection()) {
-        paint_selection_highlight(p, bounds);
-    }
+    const float line_h = line_height_;
+    std::size_t doc_idx = 0;
     float y = bounds.origin.y;
     for (const auto &line : lines_) {
-        float x = bounds.origin.x;
-        for (const auto &sc : line.chars) {
-            if (sc.ch != '\n') {
-                const float cw = render::FontEngine::measure_width(std::string(1, sc.ch), sc.font);
-                p.draw_text(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = cw, .height = line_height_}},
-                            std::string(1, sc.ch), sc.font, sc.color);
-                if (sc.underline) {
-                    p.fill_rect(Rect{.origin = Point{.x = x, .y = y + line_height_ - 2.0F},
-                                     .size = Size{.width = cw, .height = 1.0F}},
-                                sc.color);
-                }
-                x += cw;
+        const std::size_t line_begin = doc_idx;
+        const std::size_t line_end = doc_idx + line.chars.size();
+
+        std::string line_text;
+        line_text.reserve(line.chars.size());
+        for (const auto &c : line.chars) {
+            line_text.push_back(c.ch);
+        }
+        // 段落基准方向（显式 direction 优先，否则按该行内容 guess）。
+        const TextDirection base =
+            cached_direction_.value_or(aurora::render::detail::guess_paragraph_direction(line_text));
+
+        if (has_selection()) {
+            const auto a = std::min(sel_start_, sel_end_);
+            const auto b = std::max(sel_start_, sel_end_);
+            if (line_end > a && line_begin < b) {
+                paint_selection_highlight(p, bounds);
             }
         }
-        y += line_height_;
+
+        // 逐 run 整形绘制（run 内 hb 按自身内容方向 shaping，跨 run 顺序按段落基准方向）。
+        const auto runs = compute_line_runs(line, base, bounds);
+        for (const auto &r : runs) {
+            const TextDirection run_dir = r.dir;  // UBA 层级奇偶（compute_line_runs 预解析）
+            const render::TextLayoutOpts ropts{.direction = run_dir};
+            render::FontEngine::draw_text(
+                p, Rect{.origin = Point{.x = r.x, .y = y}, .size = Size{.width = r.w, .height = line_h}}, r.text,
+                r.font, r.color, ropts);
+            // 逐字下划线（仅带 underline 者；caret_x 返回视觉偏移，RTL 下仍正确）。
+            for (std::size_t k = 0; k < r.text.size(); ++k) {
+                if (r.underline[k] == 0) {
+                    continue;
+                }
+                const float x0 = r.x + render::FontEngine::caret_x(r.text, k, r.font, ropts);
+                const float x1 = r.x + render::FontEngine::caret_x(r.text, k + 1, r.font, ropts);
+                const float xL = std::min(x0, x1);
+                const float xR = std::max(x0, x1);
+                if (xR > xL) {
+                    p.fill_rect(Rect{.origin = Point{.x = xL, .y = y + line_h - 2.0F},
+                                     .size = Size{.width = xR - xL, .height = 1.0F}},
+                                r.color);
+                }
+            }
+        }
+
+        // 组合串绘制：在文档光标处叠加 preedit（下划线 + 组合内选区 + 候选插入点光标）。
+        if (is_composing() && caret_ >= line_begin && caret_ <= line_end) {
+            const float cx = caret_visual_x(line, base, caret_ - line_begin, bounds);
+            if (cx >= 0.0F) {
+                paint_preedit(p, cx, y);
+            }
+        }
+
+        y += line_h;
+        doc_idx = line_end + 1;
     }
-    if (is_focused()) {
+    // 组合时光标画在 preedit 内（`paint_preedit` 负责），避免与文档光标重叠。
+    if (is_focused() && !is_composing()) {
         paint_cursor(p, bounds);
     }
 }
@@ -86,13 +145,57 @@ auto RichTextEdit::on_paint(Painter &p, const Rect &bounds, const BuildContext &
 auto RichTextEdit::on_pointer_event(MouseEvent &e) -> void {
     if (e.action == MouseAction::Press && e.button == MouseButton::Left) {
         request_focus();
-        const float avg_w = render::FontEngine::measure_width("M", cur_font_);
-        if (avg_w <= 0.0F) {
+        const float line_h = line_height_;
+        if (line_h <= 0.0F || lines_.empty()) {
+            e.is_handled = true;
             return;
         }
-        const size_t line_idx = static_cast<size_t>(std::max(0.0F, e.local_position.y) / line_height_);
-        const size_t col = static_cast<size_t>(std::max(0.0F, e.local_position.x) / avg_w);
-        caret_ = pos_from_line_col(line_idx, col);
+        const std::size_t line_idx =
+            static_cast<std::size_t>(std::max(0.0F, e.local_position.y) / line_h);
+        // 命中测试用控件本地坐标（左缘为 0），与绘制侧 run 布局一致。
+        const Rect bounds{.origin = Point{0.0F, 0.0F}, .size = size()};
+        if (line_idx >= lines_.size()) {
+            caret_ = doc_.size();
+            sel_start_ = sel_end_ = caret_;
+            mark_needs_paint();
+            e.is_handled = true;
+            return;
+        }
+        // 累加得到该行在 doc_ 中的起始下标。
+        std::size_t doc_idx = 0;
+        for (std::size_t li = 0; li < line_idx; ++li) {
+            doc_idx += lines_[li].chars.size() + 1;
+        }
+        const auto &line = lines_[line_idx];
+        const std::size_t line_begin = doc_idx;
+
+        std::string line_text;
+        for (const auto &c : line.chars) {
+            line_text.push_back(c.ch);
+        }
+        // 段落基准方向（显式 direction 优先，否则按行内容 guess）。
+        const TextDirection base =
+            cached_direction_.value_or(aurora::render::detail::guess_paragraph_direction(line_text));
+        const auto runs = compute_line_runs(line, base, bounds);
+
+        // 取距点击 x 最近 run 中的命中字符（含头含尾，消除端点 off-by-one）。
+        std::size_t best_doc = line_begin;
+        float best_dist = 1e18F;
+        for (const auto &r : runs) {
+            const float rx0 = r.x;
+            const float rx1 = r.x + r.w;
+            const float clamped = std::clamp(e.local_position.x, rx0, rx1);
+            const float d = std::fabs(e.local_position.x - clamped);
+            if (d < best_dist) {
+                best_dist = d;
+                const TextDirection run_dir = r.dir;  // UBA 层级奇偶（compute_line_runs 预解析）
+                const render::TextLayoutOpts ropts{.direction = run_dir};
+                const std::size_t idx =
+                    render::FontEngine::hit_test_char_inclusive(r.text, e.local_position.x - r.x, r.font, ropts);
+                best_doc = line_begin + r.begin + idx;
+            }
+        }
+        caret_ = best_doc;
         sel_start_ = sel_end_ = caret_;
         mark_needs_paint();
         e.is_handled = true;
@@ -188,12 +291,15 @@ auto RichTextEdit::handle_control_shortcut(KeyEvent &e, bool shift, std::size_t 
 }
 
 auto RichTextEdit::handle_move_key(KeyEvent &e, bool shift, std::size_t n) -> bool {
-    // 方向键
+    // 方向键（RTL：逻辑↔视觉镜像——RTL 下 ArrowLeft = 逻辑前进）。
     int dir = 0;
+    const bool rtl =
+        cached_direction_.value_or(aurora::render::detail::guess_paragraph_direction(plain_text())) ==
+        TextDirection::RTL;
     if (e.key == static_cast<int>(KeyCode::ArrowLeft)) {
-        dir = -1;
+        dir = rtl ? 1 : -1;
     } else if (e.key == static_cast<int>(KeyCode::ArrowRight)) {
-        dir = 1;
+        dir = rtl ? -1 : 1;
     }
     if (dir != 0) {
         if (shift) {
@@ -281,6 +387,10 @@ auto RichTextEdit::serialize_props(Json &props) const -> void {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     props["text"] = plain_text();
+    // 仅显式设置时序列化方向（继承环境语义不落盘）。
+    if (direction_.has_value()) {
+        props["direction"] = (*direction_ == TextDirection::RTL) ? "RTL" : "LTR";
+    }
 }
 
 auto RichTextEdit::deserialize_props(const Json &props) -> void {
@@ -301,6 +411,10 @@ auto RichTextEdit::deserialize_props(const Json &props) -> void {
         } else {
             Diagnostics::degraded("text expects string", type_name(), "invalid-prop-value");
         }
+    }
+    // 书写方向反序列化（仅当显式提供）。auto/继承环境由运行期 Directionality 注入决定。
+    if (props.contains("direction") && props["direction"].is_string()) {
+        direction_ = props["direction"].get<std::string>() == "RTL" ? TextDirection::RTL : TextDirection::LTR;
     }
 }
 
@@ -341,6 +455,143 @@ auto RichTextEdit::pos_from_line_col(size_t line_idx, size_t col) const -> size_
         offset += lines_[li].chars.size() + 1;  // +1 for '\n'
     }
     return doc_.size();
+}
+
+auto RichTextEdit::compute_line_runs(const Line &line, TextDirection base, const Rect &bounds) const
+    -> std::vector<RunLayout> {
+    using aurora::render::detail::guess_paragraph_direction;
+    std::vector<RunLayout> runs;
+    const std::size_t n = line.chars.size();
+    std::size_t i = 0;
+    while (i < n) {
+        const auto &sc = line.chars[i];
+        RunLayout r;
+        r.begin = i;
+        std::string s;
+        std::vector<char> ul;
+        s.push_back(sc.ch);
+        ul.push_back(sc.underline ? 1 : 0);
+        std::size_t j = i + 1;
+        while (j < n && line.chars[j].font == sc.font && line.chars[j].color == sc.color) {
+            s.push_back(line.chars[j].ch);
+            ul.push_back(line.chars[j].underline ? 1 : 0);
+            ++j;
+        }
+        r.end = j;
+        r.text = std::move(s);
+        r.underline = std::move(ul);
+        r.font = sc.font;
+        r.color = sc.color;
+        runs.push_back(std::move(r));
+        i = j;
+    }
+
+    // 逐样式 run 解码码点并按完整 UBA（UAX #9）求逐码点嵌入层级；样式 run 内层级变化处
+    // 再切分为层级 run（层级单一 → hb 方向 = 层级奇偶），随后跨 run 按 L2 重排。
+    const std::uint8_t base_level = (base == TextDirection::RTL) ? 1U : 0U;
+    auto decode_cp = [](const std::string &s, std::size_t &p) -> char32_t {
+        const auto b0 = static_cast<unsigned char>(s[p]);
+        std::size_t len = 1U;
+        std::uint32_t cp = b0;
+        if ((b0 & 0x80U) != 0U) {
+            const std::size_t extra = ((b0 & 0xE0U) == 0xC0U) ? 1U
+                : ((b0 & 0xF0U) == 0xE0U)                     ? 2U
+                : ((b0 & 0xF8U) == 0xF0U)                     ? 3U
+                                                              : 0U;
+            cp = static_cast<std::uint32_t>(b0 & static_cast<unsigned char>(0xFFU >> (extra + 1U)));
+            len = 1U + extra;
+            for (std::size_t q = 1U; q <= extra && p + q < s.size(); ++q) {
+                cp = (cp << 6U) | (static_cast<unsigned char>(s[p + q]) & 0x3FU);
+            }
+        }
+        p += len;
+        return static_cast<char32_t>(cp);
+    };
+    std::vector<RunLayout> level_runs;
+    std::vector<std::uint8_t> run_levels;
+    for (auto &r : runs) {
+        std::vector<char32_t> cps;
+        for (std::size_t p = 0; p < r.text.size();) {
+            cps.push_back(decode_cp(r.text, p));
+        }
+        const auto lv = render::detail::uba_levels(cps, base_level);
+        std::size_t s = 0;
+        while (s < cps.size()) {
+            std::size_t e = s + 1;
+            while (e < cps.size() && lv[e] == lv[s]) {
+                ++e;
+            }
+            // 子 run = [s, e)：按码点字节区间取子串并保留逐字下划线标记。
+            RunLayout sub;
+            sub.begin = r.begin + s;
+            sub.end = r.begin + e;
+            std::size_t byte_s = 0;
+            std::size_t byte_e = r.text.size();
+            {
+                std::size_t p = 0;
+                std::size_t idx = 0;
+                while (idx < e && p < r.text.size()) {
+                    const std::size_t byte_start = p;
+                    decode_cp(r.text, p);
+                    if (idx == s) {
+                        byte_s = byte_start;
+                    }
+                    if (idx == e - 1U) {
+                        byte_e = p;
+                    }
+                    ++idx;
+                }
+            }
+            sub.text = r.text.substr(byte_s, byte_e - byte_s);
+            sub.underline.assign(sub.text.size(), 0);
+            for (std::size_t k = 0; k < sub.underline.size(); ++k) {
+                sub.underline[k] = r.underline[s + k];
+            }
+            sub.font = r.font;
+            sub.color = r.color;
+            sub.dir = (lv[s] % 2U != 0U) ? TextDirection::RTL : TextDirection::LTR;
+            run_levels.push_back(lv[s]);
+            level_runs.push_back(std::move(sub));
+            s = e;
+        }
+    }
+
+    // 逐 run 测宽（方向取 UBA 层级奇偶）。
+    for (auto &r : level_runs) {
+        r.w = render::FontEngine::measure_width(r.text, r.font, render::TextLayoutOpts{.direction = r.dir});
+    }
+
+    // 跨 run 视觉重排：完整 UBA L2 层叠反转（RTL 段整体翻转/段内数字内序保持等均由此推出）。
+    const auto order = render::detail::uba_visual_order(run_levels);
+    float total_w = 0.0F;
+    for (const auto &r : level_runs) {
+        total_w += r.w;
+    }
+
+    // 视觉起点：LTR 左对齐（控件左缘）；RTL 整体右对齐（右缘 - 总宽）。
+    const float x0 = (base == TextDirection::RTL) ? bounds.origin.x + bounds.size.width - total_w
+                                                 : bounds.origin.x;
+    float cursor = x0;
+    for (const std::size_t idx : order) {
+        if (idx < level_runs.size()) {
+            level_runs[idx].x = cursor;
+            cursor += level_runs[idx].w;
+        }
+    }
+    return level_runs;
+}
+
+auto RichTextEdit::caret_visual_x(const Line &line, TextDirection base, std::size_t caret_local,
+                                 const Rect &bounds) const -> float {
+    const auto runs = compute_line_runs(line, base, bounds);
+    for (const auto &r : runs) {
+        if (caret_local >= r.begin && caret_local <= r.end) {
+            const std::size_t k = caret_local - r.begin;
+            const TextDirection run_dir = r.dir;  // UBA 层级奇偶（compute_line_runs 预解析）
+            return r.x + render::FontEngine::caret_x(r.text, k, r.font, render::TextLayoutOpts{.direction = run_dir});
+        }
+    }
+    return -1.0F;
 }
 
 auto RichTextEdit::push_undo(const UndoSnapshot &snap) -> void {
@@ -407,59 +658,109 @@ auto RichTextEdit::paint_selection_highlight(Painter &p, const Rect &bounds) con
     const auto a = std::min(sel_start_, sel_end_);
     const auto b = std::max(sel_start_, sel_end_);
     constexpr Color sel_bg{51, 153, 255, 80};
+    const float line_h = line_height_;
+    std::size_t doc_idx = 0;
     float y = bounds.origin.y;
-    size_t idx = 0;
     for (const auto &line : lines_) {
-        const size_t line_start = idx;
-        const size_t line_end = idx + line.chars.size();
-        if (line_end > a && line_start < b) {
-            float x_start = bounds.origin.x;
-            float x_end = bounds.origin.x;
-            float x = bounds.origin.x;
-            for (const auto &i : line.chars) {
-                const float cw = render::FontEngine::measure_width(std::string(1, i.ch), i.font);
-                if (idx >= a && idx < b) {
-                    if (idx == a) {
-                        x_start = x;
+        const std::size_t line_begin = doc_idx;
+        const std::size_t line_end = doc_idx + line.chars.size();
+        if (line_end > a && line_begin < b) {
+            std::string line_text;
+            for (const auto &c : line.chars) {
+                line_text.push_back(c.ch);
+            }
+            const TextDirection base =
+                cached_direction_.value_or(aurora::render::detail::guess_paragraph_direction(line_text));
+            const auto runs = compute_line_runs(line, base, bounds);
+            for (const auto &r : runs) {
+                for (std::size_t k = 0; k < r.text.size(); ++k) {
+                    const std::size_t doc_pos = line_begin + r.begin + k;
+                    if (doc_pos >= a && doc_pos < b) {
+                        const TextDirection run_dir = r.dir;  // UBA 层级奇偶（compute_line_runs 预解析）
+                        const render::TextLayoutOpts ropts{.direction = run_dir};
+                        const float x0 = r.x + render::FontEngine::caret_x(r.text, k, r.font, ropts);
+                        const float x1 = r.x + render::FontEngine::caret_x(r.text, k + 1, r.font, ropts);
+                        const float xL = std::min(x0, x1);
+                        const float xR = std::max(x0, x1);
+                        if (xR > xL) {
+                            p.fill_rect(Rect{.origin = Point{.x = xL, .y = y},
+                                             .size = Size{.width = xR - xL, .height = line_h}},
+                                        sel_bg);
+                        }
                     }
-                    x_end = x + cw;
                 }
-                x += cw;
-                ++idx;
             }
-            if (x_end > x_start) {
-                p.fill_rect(Rect{.origin = Point{.x = x_start, .y = y},
-                                 .size = Size{.width = x_end - x_start, .height = line_height_}},
-                            sel_bg);
-            }
-            ++idx;  // skip conceptual '\n'
-        } else {
-            idx = line_end + 1;
         }
-        y += line_height_;
+        y += line_h;
+        doc_idx = line_end + 1;
     }
-    (void)a;
-    (void)b;  // selection range used above
+}
+
+auto RichTextEdit::paint_preedit(Painter &p, float x, float y) const -> float {
+    constexpr Color preedit_underline{30, 110, 220, 255};
+    constexpr Color preedit_selection{255, 200, 80, 140};
+    const float w = render::FontEngine::measure_width(preedit_, cur_font_);
+    const std::size_t pn = utf8_cp_count(preedit_);
+
+    // ① preedit 内选区（输入法高亮「待转换片段」）
+    if (preedit_sel_end_ != kNoPreeditSelection) {
+        const auto a = std::min(preedit_sel_start_, preedit_sel_end_);
+        const auto b = std::min(std::max(preedit_sel_start_, preedit_sel_end_) + 1U, pn);
+        const float sx0 = x + render::FontEngine::measure_width(utf8_cp_slice(preedit_, 0, a), cur_font_);
+        const float sx1 = x + render::FontEngine::measure_width(utf8_cp_slice(preedit_, 0, b), cur_font_);
+        if (sx1 > sx0) {
+            p.fill_rect(
+                Rect{.origin = Point{.x = sx0, .y = y}, .size = Size{.width = sx1 - sx0, .height = line_height_}},
+                preedit_selection);
+        }
+    }
+
+    // ② preedit 文本 + 组合下划线（区别于正式文本）
+    p.draw_text(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = w, .height = line_height_}}, preedit_,
+                cur_font_, cur_color_);
+    p.fill_rect(Rect{.origin = Point{.x = x, .y = y + line_height_ - 2.0F}, .size = Size{.width = w, .height = 2.0F}},
+                preedit_underline);
+
+    // ③ 候选插入点光标（仅聚焦时；组合期间它取代文档光标）
+    if (is_focused()) {
+        const float cx = x + render::FontEngine::measure_width(utf8_cp_slice(preedit_, 0, preedit_cursor_), cur_font_);
+        p.fill_rect(Rect{.origin = Point{.x = cx, .y = y}, .size = Size{.width = 2.0F, .height = line_height_}},
+                    Color::black());
+    }
+    return w;
+}
+
+auto RichTextEdit::cancel_composition() -> void {
+    preedit_.clear();
+    preedit_cursor_ = 0;
+    preedit_sel_start_ = 0;
+    preedit_sel_end_ = kNoPreeditSelection;
 }
 
 auto RichTextEdit::paint_cursor(Painter &p, const Rect &bounds) const -> void {
+    const float line_h = line_height_;
+    std::size_t doc_idx = 0;
     float y = bounds.origin.y;
-    size_t idx = 0;
     for (const auto &line : lines_) {
-        const size_t line_end = idx + line.chars.size();
-        if (caret_ >= idx && caret_ <= line_end) {
-            float x = bounds.origin.x;
-            for (size_t i = 0; i < line.chars.size() && i + idx < caret_; ++i) {
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-                x += render::FontEngine::measure_width(std::string(1, line.chars[i].ch), line.chars[i].font);
+        const std::size_t line_begin = doc_idx;
+        const std::size_t line_end = doc_idx + line.chars.size();
+        if (caret_ >= line_begin && caret_ <= line_end) {
+            std::string line_text;
+            for (const auto &c : line.chars) {
+                line_text.push_back(c.ch);
             }
-            p.fill_rect(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = 1.0F, .height = line_height_}},
-                        Color::black());
+            // 段落基准方向（显式 direction 优先，否则按行内容 guess）。
+            const TextDirection base =
+                cached_direction_.value_or(aurora::render::detail::guess_paragraph_direction(line_text));
+            const float cx = caret_visual_x(line, base, caret_ - line_begin, bounds);
+            if (cx >= 0.0F) {
+                p.fill_rect(Rect{.origin = Point{.x = cx, .y = y}, .size = Size{.width = 1.0F, .height = line_h}},
+                            Color::black());
+            }
             return;
         }
-        idx = line_end + 1;
-        y += line_height_;
+        doc_idx = line_end + 1;
+        y += line_h;
     }
 }
 

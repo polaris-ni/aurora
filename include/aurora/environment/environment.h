@@ -1,6 +1,7 @@
 #pragma once
 
 #include <any>
+#include <memory>
 #include <typeindex>
 #include <unordered_map>
 
@@ -26,7 +27,12 @@ class Environment {
     template <typename T>
     [[nodiscard]] auto with(T value) const -> Environment {
         Environment child;
-        child.parent_ = this;
+        // 持有 `*this` 的堆拷贝，避免形如 `Environment{}.with<T>(v)` 的临时父环境
+        // 析构后留下悬垂父指针；下游经环境链回查其它类型（如 Text::resolved_text
+        // 读取 Locale）时解引用已释放的 unordered_map，在 MSVC 上表现为 SEGFAULT
+        // （libstdc++ 通常保留已释放内存可读而侥幸通过）。链语义不变：子环境仅含自身
+        // 覆盖项，其余沿 parent_ 向上查找最近祖先（堆拷贝保留了其祖先链）。
+        child.parent_ = std::make_shared<const Environment>(*this);
         child.map_.emplace(typeid(T), std::any(std::move(value)));
         return child;
     }
@@ -59,7 +65,7 @@ class Environment {
 
   private:
     std::unordered_map<std::type_index, std::any> map_;
-    const Environment *parent_ = nullptr;
+    std::shared_ptr<const Environment> parent_ = nullptr;
 };
 
 }  // namespace aurora

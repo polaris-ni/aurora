@@ -6,11 +6,10 @@
 #include <string>
 #include <string_view>
 
-#include "aurora/core/platform.h"
+#include "aurora/core/platform.h"// NOLINT
 #include "aurora/core/string_util.h"
 
 namespace aurora {
-
 /**
  * @brief 日志级别（规格：日志打印模块）。
  *
@@ -54,9 +53,9 @@ enum class LogLevel : std::uint8_t {
     const auto t = std::chrono::system_clock::to_time_t(now);
     std::tm tm{};
 #ifdef AURORA_PLATFORM_WINDOWS
-    localtime_s(&tm, &t);  // NOLINT：Windows 安全变体
+    localtime_s(&tm, &t); // NOLINT：Windows 安全变体
 #else
-    localtime_r(&t, &tm);  // NOLINT：POSIX 安全变体
+    localtime_r(&t, &tm); // NOLINT：POSIX 安全变体
 #endif
 
     return aurora::internal::string_format("%04d-%02d-%02d %02d:%02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1,
@@ -93,9 +92,9 @@ auto init_console() noexcept -> void;
  * @note Side-effects: none
  */
 class Logger {
-  public:
+public:
     /// @brief 取得全局唯一实例。
-    static auto instance() -> Logger &;
+    static auto instance() -> Logger&;
 
     /// @brief 设置最低输出级别（低于此级别的日志被丢弃）。
     auto set_level(LogLevel level) noexcept -> void;
@@ -129,7 +128,7 @@ class Logger {
     /// @brief 设置 raw 通道（功能输出）目标；传 nullptr 恢复默认 stdout。
     auto set_raw_sink(LogSink sink) -> void;
 
-  private:
+private:
     Logger() = default;
 
     static auto default_sink() -> LogSink;
@@ -142,7 +141,6 @@ class Logger {
 };
 
 namespace detail {
-
 /// @brief 无参数：返回空消息（允许 `AURORA_LOG_*(category)` 调用，向后兼容退化形式）。
 [[nodiscard]] inline auto log_concat() -> std::string { return {}; }
 
@@ -152,15 +150,13 @@ namespace detail {
  * 供 `AURORA_LOG_*` 宏的可变参数形态使用；单参数时退化为原样输出（与旧单 `msg` 行为一致）。
  */
 template <typename... Args>
-[[nodiscard]] auto log_concat(Args &&...args) -> std::string {
+[[nodiscard]] auto log_concat(Args&&... args) -> std::string {
     std::ostringstream oss;
     (oss << ... << std::forward<Args>(args));
     return std::move(oss).str();
 }
-
-}  // namespace detail
-
-}  // namespace aurora
+} // namespace detail
+} // namespace aurora
 
 #ifdef __FILE_NAME__
 #define AURORA_FILE_NAME __FILE_NAME__

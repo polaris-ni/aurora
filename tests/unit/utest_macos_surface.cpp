@@ -3,6 +3,7 @@
 /// 测试说明: macOS 后端类型契约 skip 桩——头整体被
 /// AURORA_PLATFORM_MACOS && AURORA_BACKEND_MACOS 门控，非 Apple 平台无法编译验证
 
+#include "aurora/core/platform.h"  // 守卫求值前必须先有平台宏（TU 自包含，不依赖 PCH 伞头带入）
 #if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
 #include <type_traits>
 

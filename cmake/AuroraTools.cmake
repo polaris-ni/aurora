@@ -9,6 +9,7 @@
 #   servers/  常驻与命令行服务端（MCP / LSP / CLI）
 #   bench/    性能基准（共享头 bench_common.h 与本目录同级）
 #   check/    静态校验与门禁脚本（.py / .ps1）
+#   verify/   真机验收探针（需真实桌面会话，由 cmake/AuroraVerify.cmake 条件定义，非本模块）
 #   coverage/ 覆盖率聚合脚本
 #   include/  跨工具共享 C++ 头（由本函数统一注入搜索路径）
 # ============================================================
@@ -32,7 +33,8 @@ target_include_directories(gen_error_codes PRIVATE
         ${CMAKE_SOURCE_DIR}/tools/include)
 set_target_properties(gen_error_codes PROPERTIES CXX_STANDARD 20)
 # 静态链接 GCC runtime，与所有 aurora 工具一致（见 AuroraUtils.cmake）。
-if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND WIN32)
+# 仅 MinGW 生效：clang-cl / MSVC 模式无 winpthread.lib，命中即链接失败。
+if (MINGW)
     target_link_options(gen_error_codes PRIVATE
             -static-libgcc -static-libstdc++
             -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
@@ -140,7 +142,8 @@ target_include_directories(gen_debug_api PRIVATE
         ${CMAKE_SOURCE_DIR}/tools/include)
 set_target_properties(gen_debug_api PROPERTIES CXX_STANDARD 20)
 # 静态链接 GCC runtime，与所有 aurora 工具一致（见 AuroraUtils.cmake）。
-if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND WIN32)
+# 仅 MinGW 生效：clang-cl / MSVC 模式无 winpthread.lib，命中即链接失败。
+if (MINGW)
     target_link_options(gen_debug_api PRIVATE
             -static-libgcc -static-libstdc++
             -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
@@ -181,7 +184,7 @@ aurora_add_tool(bench_win32_present tools/bench/bench_win32_present.cpp)
 # 活跃帧 max_fps 节流（非 CTest；无 Win32 后端时直接跳过）。
 aurora_add_tool(bench_idle_cpu tools/bench/bench_idle_cpu.cpp)
 
-# Phase 4 本机时间类门槛校验（check_perf_gates.ps1）：门槛已外置为 tools/check/perf_gates.json。
+# 本机时间类门槛校验（check_perf_gates.ps1）：门槛已外置为 tools/check/perf_gates.json。
 # 仅 Windows 有 bench 上屏基准可执行；pwsh 缺失时跳过（不阻断构建/CI）。
 # 说明：时间类门槛受环境抖动影响，不进 CTest；本目标供本机趋势对比，可选运行。
 if (WIN32)
@@ -191,7 +194,7 @@ if (WIN32)
                 COMMAND ${PWSH_EXE}
                         "${CMAKE_SOURCE_DIR}/tools/check/check_perf_gates.ps1"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-                COMMENT "Phase 4 本机时间类门槛校验（不进 CI，仅本机趋势对比）"
+                COMMENT "本机时间类门槛校验（不进 CI，仅本机趋势对比）"
                 VERBATIM)
     endif ()
 endif ()

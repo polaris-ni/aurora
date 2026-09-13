@@ -176,12 +176,37 @@ auto root = au::MediaQueryProvider{
 | `LocalizedString` | 可本地化的字符串。`LocalizedString::tr(key)` 按 key 查表，或 `LocalizedString{ "字面量" }` 原样显示；`resolve(const StringTable*, const Locale&)` 解析为最终文本 |
 | `StringTable` | 字符串表（key → 各语言文本）。`default_string_table()` 返回内置表；`StringTable::add(locale, key, tmpl)` 注册 |
 | `Locale` | 语言 / 地区标识（如 `"zh-CN"`），随 `LocaleProvider` 注入，文本解析时按当前 Locale 查表 |
+| `PluralCategory` | CLDR 复数类别（`Zero`/`One`/`Two`/`Few`/`Many`/`Other`），与 CLDR 定义一致；每个语言至少含 `Other` |
+| `plural_category` | `plural_category(double n, const Locale&)` —— 按 CLDR 基数规则表把计数值映射到类别，`loc.language` 选规则；未知语言回退英语规则。覆盖 ar(全六类)/ru(one·few·many·other)/fr(one·many·other)/en·de(one·other)/zh·ja(other) |
+| `Currency` | 货币代码（`USD`/`EUR`/`JPY`/`CNY`/`GBP`），符号与默认小数位取自轻量自研表 |
+| `format_number` / `format_currency` / `format_date` | 按 `Locale` 格式化：数字（千位分组 + 小数点）、货币（符号位 + 小数位）、日期（本地模式，如 de `dd.MM.yyyy`、zh/ja `yyyy年M月d日`） |
 
 所有文本属性类型为 `Reactive<LocalizedString>`，因此 `.content = "Hi"` 与 `.content = au::LocalizedString::tr("greeting")` 等价。
 
 ```cpp
 au::Button(au::ButtonProps{ .label = au::LocalizedString::tr("save") });
 au::Text(au::LocalizedString::tr("greeting"));
+```
+
+---
+
+### 6.1 CLDR 复数与本地化格式
+
+`StringTable` 复数语法从 `one/other` 扩到 CLDR 六类（`zero`/`one`/`two`/`few`/`many`/`other`），分支由 `plural_category(n, loc)` 依 `loc.language` 的规则表选择；旧式仅 `one=`/`other=` 的模板在缺类别时回退 `other=`，与既有行为兼容。
+
+```cpp
+t.add(Locale{"ar"}, "files",
+      "{0, plural, zero={0} 个文件 one={0} 个文件 two={0} 个文件 few={0} 个文件 many={0} 个文件 other={0} 个文件}");
+```
+
+覆盖语言：ar(全六类) / ru(one·few·many·other) / fr(one·many·other) / en·de(one·other) / zh·ja(other)，未知语言回退 en。
+
+数字 / 货币 / 日期按 `Locale` 格式化（守零依赖自研表）：
+
+```cpp
+au::format_number(1234567.0, Locale{"de"}, 0);                 // "1.234.567"
+au::format_currency(1234.56, au::Currency::EUR, Locale{"de"}); // "1.234,56 €"
+au::format_date(2025, 10, 25, Locale{"de"});                   // "25.10.2025"
 ```
 
 ---

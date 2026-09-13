@@ -62,6 +62,18 @@ class GlfwSurface : public Surface {
     /// @brief 注册窗口几何态上报句柄（Normal/Maximized/Minimized/FullScreen）。
     auto set_window_mode_handler(WindowModeHandler h) -> void override;
 
+    /// @brief 运行时更新悬停光标形状：`glfwSetCursor` + `glfwCreateStandardCursor`。
+    /// 标准光标句柄按 `CursorShape` 取值序缓存在 Impl（每次重建会泄漏，故复用），析构统一释放。
+    /// 后端映射：Arrow→`GLFW_ARROW_CURSOR`、IBeam→`GLFW_IBEAM_CURSOR`、PointingHand→`GLFW_HAND_CURSOR`、
+    /// ResizeNS→`GLFW_VRESIZE_CURSOR`、ResizeEW→`GLFW_HRESIZE_CURSOR`、Crosshair→`GLFW_CROSSHAIR_CURSOR`、
+    /// ResizeNWSE/NESW→`GLFW_RESIZE_NWSE/NESW_CURSOR`、Move→`GLFW_RESIZE_ALL_CURSOR`、
+    /// NotAllowed→`GLFW_NOT_ALLOWED_CURSOR`（后四项 GLFW 3.4+，宏缺失时回退 Arrow）；
+    /// Wait→GLFW 无 busy/wait 标准形状，回退 Arrow。
+    /// @note 未编译验证：本机（Linux 容器）缺 GL 与 X11 扩展开发包（`libgl-dev` /
+    /// `libxrandr-dev` 等），GLFW 源码构建在 configure 阶段即中止；须在有这些开发包的环境
+    /// （CI / Windows / macOS）构建后复查。
+    auto set_cursor(CursorShape shape) -> void override;
+
     [[nodiscard]] auto begin_frame(int width, int height) -> Result<bool> override;
     [[nodiscard]] auto painter() -> Painter & override;
     [[nodiscard]] auto present() -> Result<bool> override;

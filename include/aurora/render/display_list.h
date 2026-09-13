@@ -12,6 +12,10 @@
 #include "aurora/render/blend.h"
 #include "aurora/render/text_aa_mode.h"
 
+namespace aurora::rhi {
+class RhiBackend;  // 前置声明（完整定义见 render/rhi/rhi_backend.h）：回放目标抽象
+}  // namespace aurora::rhi
+
 namespace aurora {
 
 class Painter;  // 前置声明：replay 实现（display_list.cpp）依赖 Painter 完整类型
@@ -114,7 +118,33 @@ class DisplayList {
         return static_cast<int>(matrix_pool_.size()) - 1;
     }
 
-    /// @brief 回放整条命令流。
+    /// @brief 变长数据池的只读访问。下标由录制时生成，回放侧据此把下标解析为指针
+    ///        （见 `rhi::CmdData`）；调用方**不得**自行构造下标。
+    [[nodiscard]] auto string_at(int idx) const -> const std::string & {
+        return str_pool_[static_cast<std::size_t>(idx)];
+    }
+    [[nodiscard]] auto colors_at(int idx) const -> const std::vector<Color> & {
+        return color_pool_[static_cast<std::size_t>(idx)];
+    }
+    [[nodiscard]] auto floats_at(int idx) const -> const std::vector<float> & {
+        return float_pool_[static_cast<std::size_t>(idx)];
+    }
+    [[nodiscard]] auto font_at(int idx) const -> const Font & {
+        return font_pool_[static_cast<std::size_t>(idx)];
+    }
+    [[nodiscard]] auto image_at(int idx) const -> const Image & {
+        return image_pool_[static_cast<std::size_t>(idx)];
+    }
+    [[nodiscard]] auto matrix_at(int idx) const -> const Matrix2D & {
+        return matrix_pool_[static_cast<std::size_t>(idx)];
+    }
+
+    /// @brief 回放整条命令流到 RHI 后端（**唯一实现**；命令语义解释在各后端内，见
+    ///        `rhi::SoftwareRhi::submit`）。本类只负责「遍历命令 + 把池下标解析为 `rhi::CmdData`」。
+    auto replay(rhi::RhiBackend &backend) const -> void;
+
+    /// @brief 回放整条命令流到软件 `Painter`。等价于回放到一个临时包裹该 `Painter` 的
+    ///        `rhi::SoftwareRhi`（逐条转发回同一批原语，像素输出逐位不变）。
     auto replay(Painter &p) const -> void;
 
   private:

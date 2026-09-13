@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "aurora/event/focus.h"
+#include "aurora/widget/dialog.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_focus {
@@ -218,6 +219,99 @@ AURORA_TEST_CASE(widget_request_focus_uses_current_manager_slot) {
 
     set_current_focus_manager(nullptr);  // 复原槽位，避免泄漏到后续用例
     AURORA_TEST_CHECK(current_focus_manager() == nullptr);
+}
+
+AURORA_TEST_CASE(push_scope_traps_tab_and_restores_focus_on_pop) {
+    auto tree = make_row(2);
+    FocusManager fm;
+    fm.set_root(tree.first.get());
+
+    fm.request_focus(tree.second[0].get());
+    AURORA_TEST_REQUIRE_TRUE(fm.has_focus(tree.second[0].get()));
+
+    // 作用域只含 probes[1]：压栈即把焦点移入；Tab 前后循环都不逃出
+    fm.push_scope(tree.second[1].get());
+    AURORA_TEST_CHECK_EQ(fm.scope_depth(), 1);
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(tree.second[1].get()));
+    AURORA_TEST_REQUIRE_TRUE(fm.move_focus(FocusDirection::Forward));
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(tree.second[1].get()));  // scope 内回卷
+    AURORA_TEST_REQUIRE_TRUE(fm.move_focus(FocusDirection::Backward));
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(tree.second[1].get()));
+
+    // 弹栈恢复打开前焦点
+    fm.pop_scope();
+    AURORA_TEST_CHECK_EQ(fm.scope_depth(), 0);
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(tree.second[0].get()));
+}
+
+AURORA_TEST_CASE(scope_limits_candidates_to_subtree) {
+    // 根行: [p0, inner(row){p1, p2}]，scope = inner → 候选 {p1, p2}，循环不外泄到 p0
+    auto root = std::make_shared<FocusRow>();
+    root->set_focusable(false);
+    auto p0 = std::make_shared<FocusProbe>();
+    auto inner = std::make_shared<FocusRow>();
+    inner->set_focusable(false);
+    auto p1 = std::make_shared<FocusProbe>();
+    auto p2 = std::make_shared<FocusProbe>();
+    inner->add(Node{p1});
+    inner->add(Node{p2});
+    root->add(Node{p0});
+    root->add(Node{inner});
+
+    FocusManager fm;
+    fm.set_root(root.get());
+    fm.request_focus(p0.get());
+
+    fm.push_scope(inner.get());
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(p1.get()));  // 自动移入 scope 内首个
+    AURORA_TEST_REQUIRE_TRUE(fm.move_focus(FocusDirection::Forward));
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(p2.get()));
+    AURORA_TEST_REQUIRE_TRUE(fm.move_focus(FocusDirection::Forward));
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(p1.get()));  // 回卷，不逃到 p0
+    fm.pop_scope();
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(p0.get()));
+}
+
+AURORA_TEST_CASE(nested_scopes_restore_in_reverse_order) {
+    auto tree = make_row(3);
+    FocusManager fm;
+    fm.set_root(tree.first.get());
+    fm.request_focus(tree.second[0].get());
+
+    fm.push_scope(tree.second[1].get());  // 层 1 → 焦点 p1
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(tree.second[1].get()));
+    fm.push_scope(tree.second[2].get());  // 层 2 → 焦点 p2
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(tree.second[2].get()));
+    AURORA_TEST_CHECK_EQ(fm.scope_depth(), 2);
+
+    fm.pop_scope();  // 恢复层 2 压入前的焦点（p1）
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(tree.second[1].get()));
+    fm.pop_scope();
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(tree.second[0].get()));
+    AURORA_TEST_CHECK_EQ(fm.scope_depth(), 0);
+}
+
+AURORA_TEST_CASE(dialog_show_traps_focus_and_close_restores) {
+    auto tree = make_row(1);
+    auto dialog = std::make_shared<Dialog>();
+    dialog->set_focusable(false);
+    auto inner = std::make_shared<FocusProbe>();
+    dialog->set_content(Node{inner});
+    tree.first->add(Node{dialog});
+
+    FocusManager fm;
+    fm.set_root(tree.first.get());
+    fm.request_focus(tree.second[0].get());
+
+    set_current_focus_manager(&fm);  // 模拟派发上下文（show/close 从事件回调内调用）
+    dialog->show();
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(inner.get()));  // 焦点自动移入弹层
+    AURORA_TEST_REQUIRE_TRUE(fm.move_focus(FocusDirection::Forward));
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(inner.get()));  // Tab 不逃出弹层
+    dialog->close();
+    AURORA_TEST_CHECK_TRUE(fm.has_focus(tree.second[0].get()));  // 关闭恢复打开前焦点
+    AURORA_TEST_CHECK_EQ(fm.scope_depth(), 0);
+    set_current_focus_manager(nullptr);  // 复原槽位
 }
 
 }  // namespace aurora::test_cases::utest_focus

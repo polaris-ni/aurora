@@ -2,7 +2,9 @@
 /// 目标单元: include/aurora/inspector/inspector_server.h
 /// 测试说明: 覆盖 InspectorServer 生命周期与 HTTP 基本路径——初始停机态、start(0) 随机端口
 /// 启停、重复 start 失败、stop 幂等、析构收编 worker、/api/tree 与 /api/components 的
-/// 请求-响应、404/405/400/403 错误请求、/api/debug/state 的 surface getter 装配错误路径。
+/// 请求-响应、404/405/400/403 错误请求、/api/debug/state 的 surface getter 装配错误路径，
+/// 以及 /api/input/{click,scroll,text} 交互模拟（派发到目标控件、请求体校验、目标定位失败与
+/// 派发失败的错误映射）。
 /// 端口一律用 0（系统分配临时端口，无冲突）；无文件句柄副作用。客户端为本 TU 内最小
 /// 回环 socket 实现，随用例关闭清理。
 /// AURORA_BUILD_INSPECTOR_SERVER=OFF 时整文件降级为 skip 桩。
@@ -17,9 +19,13 @@
 
 #ifdef AURORA_BUILD_INSPECTOR_SERVER
 
+#include "aurora/event/event.h"  // ScrollEvent
 #include "aurora/inspector/inspector_server.h"
+#include "aurora/widget/checkbox.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
+#include "aurora/widget/text_input.h"
+#include "aurora/widget/widget.h"  // LeafWidget（滚动探针基类）
 #include "aurora/window/surface.h"  // set_surface_getter 的 Surface 完整类型
 
 #ifdef AURORA_PLATFORM_WINDOWS
@@ -145,6 +151,74 @@ auto send_all(int sock, const std::string& data) -> bool {
 /// @brief 带 Host 头的 GET 便捷封装。
 [[nodiscard]] auto http_get(std::uint16_t port, const std::string& target) -> std::string {
     return http_roundtrip(port, "GET " + target + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+}
+
+/// @brief 带 Host 头与 JSON body 的 POST 便捷封装。
+[[nodiscard]] auto http_post(std::uint16_t port, const std::string& target, const std::string& body) -> std::string {
+    return http_roundtrip(port, "POST " + target + " HTTP/1.1\r\nHost: 127.0.0.1\r\n" +
+                                    "Content-Type: application/json\r\nContent-Length: " +
+                                    std::to_string(body.size()) + "\r\n\r\n" + body);
+}
+
+/// @brief 滚动探针：把 `on_scroll` 命中次数与末次 `delta_y` 经序列化属性外显。
+///
+/// 真实 `Scroll::offset_y()` 不在其序列化属性里（`Scroll` 只序列化 `step`），故 HTTP 面
+/// 读不回滚动位置。要验证「滚动请求确实落到目标控件并改变了它的状态」，最直接的判据是
+/// 让目标控件自己把可观测状态作为属性发布出来——这正是本探针的用途。
+class ScrollProbe : public LeafWidget {
+  public:
+    [[nodiscard]] auto type_name() const -> const char* override { return "ScrollProbe"; }
+
+  protected:
+    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
+        return c.constrain(Size{.width = 40.0F, .height = 40.0F});
+    }
+    auto on_paint(Painter& p, const Rect& bounds, const BuildContext& /*ctx*/) -> void override {
+        p.fill_rect(bounds, Color{180, 180, 180, 255});
+    }
+    auto on_scroll(ScrollEvent& e) -> void override {
+        ++scroll_hits_;
+        last_delta_y_ = e.delta_y;
+        e.is_handled = true;
+    }
+    auto serialize_props(Json& props) const -> void override {
+        Widget::serialize_props(props);
+        props["scroll_hits"] = scroll_hits_;
+        props["last_delta_y"] = last_delta_y_;
+    }
+
+  private:
+    int scroll_hits_ = 0;
+    float last_delta_y_ = 0.0F;
+};
+
+/// @brief 交互模拟用例的树：Column[ Checkbox(0) / TextInput(1) / ScrollProbe(2) ]。
+///
+/// 逐用例自建而非复用静态共享树：模拟会改控件状态，静态树会让状态在用例间泄漏
+/// （`--repeat` 下尤其明显）。`root` 由 shared_ptr 持有，供 HTTP 工作线程经
+/// root_getter 读取。
+struct InputTree {
+    std::shared_ptr<Node> root;
+    std::shared_ptr<Checkbox> checkbox;
+    std::shared_ptr<TextInput> input;
+    std::shared_ptr<ScrollProbe> scroller;
+
+    /// @brief 供 InspectorServer 使用的取值函数（按值返回 Node 副本即共享底层控件）。
+    [[nodiscard]] auto getter() const -> std::function<Node()> {
+        const std::shared_ptr<Node> held = root;
+        return [held]() -> Node { return *held; };
+    }
+};
+
+[[nodiscard]] auto make_input_tree() -> InputTree {
+    auto checkbox = std::make_shared<Checkbox>();
+    auto input = std::make_shared<TextInput>();
+    auto scroller = std::make_shared<ScrollProbe>();
+    auto col = std::make_shared<Column>();
+    col->add(Node{checkbox});
+    col->add(Node{input});
+    col->add(Node{scroller});
+    return InputTree{std::make_shared<Node>(Node{col}), checkbox, input, scroller};
 }
 
 }  // namespace
@@ -329,6 +403,145 @@ AURORA_TEST_CASE(debug_state_requires_surface_getter) {
     server.set_surface_getter([]() -> Surface* { return nullptr; });
     const std::string with_null = http_get(server.port(), "/api/debug/state");
     AURORA_TEST_CHECK_TRUE(with_null.find("500") != std::string::npos);
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(input_click_dispatches_to_target_and_toggles_state) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    InputTree tree = make_input_tree();
+    AURORA_TEST_REQUIRE_FALSE(tree.checkbox->value());  // 起始未勾选，翻转可观测
+
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    const std::string resp = http_post(server.port(), "/api/input/click", R"({"path":"0"})");
+    AURORA_TEST_CHECK_TRUE(resp.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("\"status\":\"ok\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("\"action\":\"click\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("\"widget_path\":\"0\"") != std::string::npos);
+
+    // 「派发成功」不等于「状态变了」——必须读回状态端点确认事件真的落到了该控件。
+    const std::string props = http_get(server.port(), "/api/widget/0");
+    AURORA_TEST_CHECK_MSG(props.find("\"checked\":true") != std::string::npos,
+                          "click reached the Checkbox and toggled its checked state");
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(input_scroll_dispatches_to_target_and_reaches_on_scroll) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    InputTree tree = make_input_tree();
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    const std::string resp = http_post(server.port(), "/api/input/scroll", R"({"path":"2","dx":0,"dy":-24})");
+    AURORA_TEST_CHECK_TRUE(resp.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("\"action\":\"scroll\"") != std::string::npos);
+
+    // 探针把 on_scroll 命中次数与末次 delta_y 序列化外显，据此确认滚轮事件到达了目标控件。
+    const std::string props = http_get(server.port(), "/api/widget/2");
+    AURORA_TEST_CHECK_MSG(props.find("\"scroll_hits\":1") != std::string::npos,
+                          "scroll event reached the target widget's on_scroll");
+    AURORA_TEST_CHECK_TRUE(props.find("\"last_delta_y\":-24.0") != std::string::npos);
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(input_text_dispatches_to_target_and_inserts_text) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    InputTree tree = make_input_tree();
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    const std::string resp = http_post(server.port(), "/api/input/text", R"({"path":"1","text":"hi"})");
+    AURORA_TEST_CHECK_TRUE(resp.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("\"action\":\"text\"") != std::string::npos);
+
+    const std::string props = http_get(server.port(), "/api/widget/1");
+    AURORA_TEST_CHECK_MSG(props.find("\"value\":\"hi\"") != std::string::npos,
+                          "text input reached the TextInput and its value reads back");
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(input_endpoint_rejects_malformed_requests) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    InputTree tree = make_input_tree();
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    const std::uint16_t port = server.port();
+
+    // 未知动作。
+    AURORA_TEST_CHECK_TRUE(http_post(port, "/api/input/nope", "{}").find("404") != std::string::npos);
+    // 缺 path / path 类型不符。
+    AURORA_TEST_CHECK_TRUE(http_post(port, "/api/input/click", "{}").find("400") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_post(port, "/api/input/click", R"({"path":7})").find("400") != std::string::npos);
+    // scroll 增量类型不符。
+    AURORA_TEST_CHECK_TRUE(
+        http_post(port, "/api/input/scroll", R"({"path":"2","dx":"abc"})").find("400") != std::string::npos);
+    // text 类型不符。
+    AURORA_TEST_CHECK_TRUE(
+        http_post(port, "/api/input/text", R"({"path":"1","text":5})").find("400") != std::string::npos);
+    // body 非 JSON / 非对象。
+    AURORA_TEST_CHECK_TRUE(http_post(port, "/api/input/click", "not json").find("400") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_post(port, "/api/input/click", "[1,2]").find("400") != std::string::npos);
+    // 方法不符。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/input/click").find("405") != std::string::npos);
+
+    // 全部被拒的请求都不得改变控件状态（未勾选的仍有未勾选）。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/widget/0").find("\"checked\":false") != std::string::npos);
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(input_endpoint_accepts_empty_path_as_tree_root) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    // 空串路径即树根本身（与 find_node_by_path 的空路径语义一致），使根控件无需再包一层容器
+    // 就能被驱动；这里直接把 TextInput 作根来验证。
+    auto input = std::make_shared<TextInput>();
+    auto root = std::make_shared<Node>(Node{input});
+    InspectorServer server([root]() -> Node { return *root; });
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    const std::string resp = http_post(server.port(), "/api/input/text", R"({"path":"","text":"root"})");
+    AURORA_TEST_CHECK_TRUE(resp.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("\"widget_path\":\"\"") != std::string::npos);
+    // /api/widget/ 空路径本身被拒（400），故经完整树读回根控件的属性。
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/tree").find("\"value\":\"root\"") != std::string::npos);
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(input_endpoint_maps_missing_target_and_simulate_failure) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    InputTree tree = make_input_tree();
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    const std::uint16_t port = server.port();
+
+    // 路径指向不存在的节点：404（区别于「找到了但不可派发」的 400）。
+    const std::string missing = http_post(port, "/api/input/click", R"({"path":"7"})");
+    AURORA_TEST_CHECK_TRUE(missing.find("404") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(missing.find("Widget not found at path: 7") != std::string::npos);
+
+    // 目标命中但派发失败：禁用态 TextInput 不消费文本输入（不置 handled）→ 400，且不改状态。
+    tree.input->set_enabled(false);
+    const std::string failed = http_post(port, "/api/input/text", R"({"path":"1","text":"x"})");
+    AURORA_TEST_CHECK_TRUE(failed.find("400") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/widget/1").find("\"value\":\"\"") != std::string::npos);
     server.stop();
 #endif
 }

@@ -2,13 +2,39 @@
 
 /// @file modifier_input.h
 /// @brief 输入修饰节点（Input 切片）：Clickable / Draggable / LongPress / TouchListener /
-/// TooltipNode / ContextMenuNode。
+/// TooltipNode / ContextMenuNode / CursorNode。
 /// 本文件为 modifier.h 的子切片；消费者通常直接 #include "aurora/modifier/modifier.h"。
 
+#include <optional>
+
 #include "aurora/app/menu.h"
+#include "aurora/core/enums.h"
 #include "aurora/modifier/modifier_base.h"
 
 namespace aurora {
+
+/// @brief 鼠标光标形状修饰：悬停本控件时把光标切到声明形状（不影响尺寸/命中）。
+///
+/// 解析优先级（见 `EventDispatcher` 悬停链光标解析）：修饰链上的 `CursorNode`
+/// 优先于 `Widget::cursor_shape()` 虚钩子；同链多个 `CursorNode` 取最后一个。
+class CursorNode : public ModifierNode {
+  public:
+    explicit CursorNode(CursorShape shape) : shape_(shape) {}
+
+    [[nodiscard]] auto kind() const -> Kind override { return Kind::Input; }
+
+    auto layout(const Constraints &c, const std::function<Size(const Constraints &)> &measure_child) const
+        -> Size override {
+        return measure_child(c);
+    }
+
+    [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return shape_; }
+
+    [[nodiscard]] auto shape() const -> CursorShape { return shape_; }
+
+  private:
+    CursorShape shape_;
+};
 
 /// @brief 可点击修饰：不影响尺寸，命中时拦截事件（执行 onTap）。
 class Clickable : public ModifierNode {

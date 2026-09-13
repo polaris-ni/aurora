@@ -617,18 +617,35 @@ AURORA_TEST_CASE(dispatcher_click_focus_enables_ctrl_c_copy) {
     AURORA_TEST_CHECK_MSG(t->is_focused(), "mouse dispatch with fm focuses the text");
     AURORA_TEST_CHECK_MSG(fm.focused() == t.get(), "focus manager tracks the text");
 
-    Clipboard::set_text("__PROBE__");
-    if (Clipboard::get_text() != "__PROBE__") {
-        AURORA_TEST_TRACE("system clipboard unavailable in this env; skip Ctrl+C copy assertion");
-        return;
-    }
+    // 选中内容必须就是全文。这条断言**完全环境无关**，故置于任何剪贴板交互之前：若它先失败，
+    // 说明问题出在「派发路径给出的选区范围」而非剪贴板。历史上本用例在装有 xsel/xclip 的真实
+    // 桌面上失败时只报「剪贴板内容不符」，掩盖了真正该先排除的一环。
+    // `selection()` 对外是 caret 区间 [a, b+1)，全文选中的期望即 {0, 码点数}。
+    AURORA_TEST_CHECK_EQ(t->selection().first, std::size_t{0});
+    AURORA_TEST_CHECK_EQ(t->selection().second, src.size());
+
+    // Ctrl+C 的「落剪贴板」断言改走库侧**进程内**注入后端（Clipboard::install_test_backend）：
+    // Linux 的系统剪贴板由外部工具（xsel/xclip）实现，其 selection 所有权是**异步**的（xsel
+    // 二次写入依赖既有守护进程交接、xclip 常驻等待读者），内容还受各工具换行约定影响——拿它做
+    // 内容断言既非确定、也不是 aurora 自身的契约（本用例要证明的是「派发链把全文交给了剪贴板
+    // 抽象」，而不是「xsel 工作正常」）。双测试宏未开（Release：AURORA_ENABLE_DEBUG 自动 OFF）时
+    // install 返回 false，此时跳过内容断言；上面的焦点/选区断言与下面的 is_handled 断言仍生效。
+    const bool clipboard_backend_injected = Clipboard::install_test_backend();
+
     KeyEvent ke;
     ke.action = KeyAction::Down;
     ke.key = static_cast<int>(KeyCode::C);
     ke.modifiers = ModifierKey::Control;
     (void)EventDispatcher::dispatch(col, ke, fm);
     AURORA_TEST_CHECK_MSG(ke.is_handled, "Ctrl+C consumed by focused text");
-    AURORA_TEST_CHECK_MSG(Clipboard::get_text() == src, "full drag-selection copied to clipboard");
+
+    if (clipboard_backend_injected) {
+        AURORA_TEST_CHECK_MSG(Clipboard::get_text() == src, "full drag-selection copied to clipboard");
+        (void)Clipboard::remove_test_backend();
+    } else {
+        AURORA_TEST_TRACE("clipboard memory backend unavailable (needs AURORA_ENABLE_DEBUG + AURORA_ENABLE_TEST_HOOKS); "
+                          "skipped clipboard content assertion — selection content was asserted above");
+    }
 }
 
 AURORA_TEST_CASE(scaled_display_last_line_tail_fully_highlighted) {

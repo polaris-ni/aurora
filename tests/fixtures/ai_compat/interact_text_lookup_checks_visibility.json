@@ -1,0 +1,22 @@
+{
+  "name": "target lookup by text plus visibility assertion",
+  "note": "覆盖脚本 runner 的另两条分支：find_by_text 选目标 + expect_visible 断言（前几个 fixture 只走 type 选择器与 prop 断言）。",
+  "viewport": { "width": 320, "height": 180 },
+  "tree": {
+    "type": "Column",
+    "props": {},
+    "children": [
+      { "type": "Text", "props": { "content": "Welcome" } },
+      { "type": "Checkbox", "props": { "checked": false } }
+    ]
+  },
+  "steps": [
+    { "action": "settle" },
+    { "action": "tap", "target": { "type": "Checkbox", "index": 0 } },
+    { "action": "pump", "frames": 2 }
+  ],
+  "expect": [
+    { "target": { "text": "Welcome" }, "visible": true },
+    { "target": { "type": "Checkbox", "index": 0 }, "prop": "checked", "value": true }
+  ]
+}

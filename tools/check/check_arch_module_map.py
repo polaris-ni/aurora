@@ -3,7 +3,9 @@
 check_arch_module_map.py - validate header/source file references in the codespec ARCHITECTURE_RUNTIME §4 module map.
 
 Rules:
-- Only scan the content between "## 4. Module Map" and the next "## ".
+- Only scan the content between the §4 heading (`## 4 模块映射`; also accepts `## 4.` / bare `## 4`)
+  and the next level-2 `## ` heading. A missing §4 section is a hard error — never a vacuous pass
+  (see SEC4_RE for the historical bug this guards against).
 - Extract all backtick-wrapped tokens ending in a source extension (.h/.hpp/.hh/.cpp/.cc/.cxx/.inl).
   - Type names/symbols (e.g. `Result<T>`, `Signal`, `Window`) have no extension and are excluded automatically.
   - Directory references (e.g. `core/`) have no extension and are excluded automatically.
@@ -42,16 +44,27 @@ SRC_EXT = HEADER_EXT | IMPL_EXT
 TOKEN_RE = re.compile(r"`([^`]+)`")
 FILE_RE = re.compile(r"^[\w./\\-]+$")  # backtick content must be valid path characters
 
+# §4 的定位正则：接受 `## 4 模块映射` / `## 4. 模块映射` / 裸 `## 4`。
+# ⚠️ 历史上这里写的是 `ln.startswith("## 4.")`，而文档标题是 `## 4 模块映射`（无点号）——
+# 匹配永不成立 ⇒ 本门禁自建立起一直「扫描 0 条引用」并恒真通过（空扫即 PASS 的假门禁）。
+# 尾部的 (?:[.\s]|$) 同时排除 `## 40 …` 这类同前缀标题。
+SEC4_RE = re.compile(r"^## 4(?:[.\s]|$)")
+
+
+def is_section4(line):
+    """Whether a level-2 heading line starts §4 (`## 4 …`)。`### 4.x` 为三级标题，不匹配。"""
+    return bool(SEC4_RE.match(line))
+
 
 def iter_section4_lines(lines):
     """Yield only the lines of the §4 section (including the §4 heading, stopping at the next "## ")."""
     in_sec = False
     for ln in lines:
-        if ln.startswith("## 4."):
+        if is_section4(ln):
             in_sec = True
             yield ln
             continue
-        if in_sec and ln.startswith("## ") and not ln.startswith("## 4."):
+        if in_sec and ln.startswith("## ") and not is_section4(ln):
             return
         if in_sec:
             yield ln
@@ -195,7 +208,15 @@ def main():
     with open(doc_path, encoding="utf-8") as f:
         lines = f.read().splitlines()
     sec_lines = list(iter_section4_lines(lines))
+    # 空扫必须失败（而非恒真通过）：§4 标题写错格式曾让本门禁静默失效整段历史。
+    if not sec_lines:
+        print(f"[ERR] {DOC_REL} 中未找到 §4 模块映射章节（期望形如 '## 4 模块映射' 的二级标题）；"
+              f"拒绝以「扫描 0 条」的方式假通过。", file=sys.stderr)
+        return 2
     refs = collect_refs(sec_lines)
+    if not refs:
+        print(f"[ERR] {DOC_REL} §4 未解析出任何文件引用；请检查模块表格式。", file=sys.stderr)
+        return 2
 
     # Dedupe (same token + same anchor reported once)
     seen = set()

@@ -58,6 +58,14 @@ class Win32Surface final : public Surface {
     /// @brief 运行时更新窗口标题（转发给共享宿主）。
     auto set_title(const std::string &title) -> void override { win_->set_title(title); }
 
+    /// @brief 运行时更新悬停光标形状：`SetCursor` + 系统预置光标 `LoadCursor(nullptr, IDC_*)`。
+    /// 映射与实现抽到 `src/aurora/window/win32_cursor.h` 的 `detail::set_win32_cursor`，与
+    /// `D3D11Surface` 共用同一份（两者共用 `Win32Window` 宿主模型，映射不应重复实现）。
+    /// 系统预置光标由 OS 拥有，无需释放（无泄漏）；泛型宏随 `UNICODE` 解析 A/W 变体。
+    /// @note 未编译验证：须 Windows + `AURORA_BACKEND_WIN32=ON` 构建后复查（本仓库的无头
+    /// Linux 构建不含 Win32 后端）。
+    auto set_cursor(CursorShape shape) -> void override;
+
     /// @brief 控件发起窗口拖拽移动（Win32：伪装 NC 拖拽 HTCAPTION）。
     auto begin_window_move() -> void override {
         PostMessageW(static_cast<HWND>(win_->hwnd()), WM_NCLBUTTONDOWN, HTCAPTION, 0);

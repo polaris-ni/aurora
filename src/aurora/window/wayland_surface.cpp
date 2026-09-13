@@ -21,6 +21,7 @@
 #include "aurora/core/log.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
+#include "aurora/window/cursor_map.h"
 #include "aurora/window/keysym_map.h"
 #include "aurora/window/swizzle.h"
 #include "aurora/window/window_state.h"
@@ -124,6 +125,9 @@ struct WaylandSurface::Impl {
     int border = 6;  ///< 可拖拽缩放边框厚度（逻辑 px）
     bool csd_grab = false;  ///< 当前是否处于 CSD/修饰键拖拽交互中（吞噬指针事件）
     std::uint32_t last_press_serial = 0;  ///< 最近按键 serial：控件经 begin_window_move/resize 同步调用时有效
+    // ---- 光标形状（契约，平台侧待真机接线）----
+    CursorShape pending_cursor_shape = CursorShape::Arrow;  ///< 最近下发的语义形状（set_cursor 落盘）。
+    std::uint32_t pointer_enter_serial = 0;  ///< 最近 wl_pointer.enter 的 serial（wl_pointer.set_cursor 必需）。
     // 双击标题栏最大化检测（Wayland 不提供双击事件，客户端自行追踪）。
     std::uint32_t last_click_time = 0;  ///< 上次标题栏点击时间（ms，自某基准）
     double last_click_x = 0.0;  ///< 上次点击 X
@@ -233,9 +237,12 @@ void tl_caps(void * /*data*/, xdg_toplevel * /*tl*/, wl_array * /*caps*/) {}
 constexpr xdg_toplevel_listener TOP_LEVEL_LISTENER = {tl_configure, tl_close, tl_bounds, tl_caps};
 
 // ---- wl_pointer：进入/离开/移动/按键/滚轮 → MouseEvent/ScrollEvent。 ----
-void ptr_enter(void *data, wl_pointer * /*p*/, std::uint32_t /*serial*/, wl_surface * /*s*/, wl_fixed_t sx,
+void ptr_enter(void *data, wl_pointer * /*p*/, std::uint32_t serial, wl_surface * /*s*/, wl_fixed_t sx,
                wl_fixed_t sy) {
     Impl &d = *static_cast<Impl *>(data);
+    // 光标形状：捕获本次 enter 的 serial——wl_pointer.set_cursor 只接受 enter（或已有焦点）时的
+    // serial，故必须在 set_cursor 调用的那一刻之外缓存下来（见 set_cursor 的 TODO）。
+    d.pointer_enter_serial = serial;
     d.ptr_x = wl_fixed_to_double(sx);
     d.ptr_y = wl_fixed_to_double(sy);
     d.send_mouse(MouseAction::Move, MouseButton::Left, static_cast<float>(d.ptr_x), static_cast<float>(d.ptr_y));
@@ -1221,6 +1228,33 @@ auto WaylandSurface::set_title(const std::string &title) -> void {
         xdg_toplevel_set_title(d.toplevel, title.c_str());
         wl_display_flush(d.dpy);
     }
+}
+
+auto WaylandSurface::set_cursor(CursorShape shape) -> void {
+    // 光标形状 —— 契约实现（平台侧待真机接线）：
+    // 只落盘语义形状 + 复用已捕获的 enter serial；「真正下发」的三步留给真实 Wayland 会话，因为
+    // 它们需要 wl_cursor_theme / cursor wl_surface / wl_buffer 的资源生命周期，本仓库无头构建
+    // 既编译不到（AURORA_BACKEND_WAYLAND 默认 OFF）也验不了，盲写反成不可验证死代码。
+    //
+    // TODO 真机接线清单：
+    //   1) 取 cursor wl_surface：wl_compositor_create_surface(d.compositor)，仅此一个、随实例复用。
+    //   2) 取光标图像：wl_cursor_theme_load(nullptr, 24 * d.scale, d.shm) →
+    //      wl_cursor_theme_get_cursor(theme, cursor_rfc_name(shape))（cursor_map.h 即 freedesktop 名）。
+    //      命中失败（主题缺该名）回退 cursor_rfc_name(CursorShape::Arrow) 即 "default"。
+    //   3) 上传：把 wl_cursor_image 的 ARGB 像素拷入 wl_shm buffer → wl_surface_attach +
+    //      wl_surface_damage + wl_surface_commit；再
+    //      wl_pointer_set_cursor(d.pointer, d.pointer_enter_serial, cursor_surface,
+    //                           image->hotspot_x, image->hotspot_y)。
+    //      注意：set_cursor 常在 enter 之后被调用，此时 pointer_enter_serial 已缓存，可直接下发；
+    //      若在 enter 之前调用，则须在 ptr_enter 内补一次下发（读 pending_cursor_shape）。
+    // 备选（省去 1)~3)）：registry 绑定 wp_cursor_shape_manager_v1，
+    //      wp_cursor_shape_device_v1_set_shape(dev, serial, WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_*)。
+    Impl &d = *impl_;
+    d.pending_cursor_shape = shape;
+    // enter_serial == 0 表示指针尚未进入本窗口：真机接线后此情形须留待 ptr_enter 内补下发。
+    AURORA_LOG_DEBUG("wayland_surface", "set_cursor(", cursor_rfc_name(shape), ") recorded (pending=",
+                     static_cast<int>(d.pending_cursor_shape), ", enter_serial=", d.pointer_enter_serial,
+                     "); platform wiring pending (see TODO)");
 }
 
 auto WaylandSurface::begin_window_move() -> void {

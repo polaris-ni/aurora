@@ -7,9 +7,16 @@
 
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
+
+#ifdef AURORA_BACKEND_HEADLESS
+// TestController 的实现体同样以 AURORA_BACKEND_HEADLESS 门控（依赖 HeadlessSurface），
+// 故宏关闭时不得引入声明，否则链接期缺符号。
+#include "aurora/app/test_controller.h"
+#endif
 
 #include "aurora/app/validate_ui.h"
 #include "aurora/aurora.h"
@@ -165,5 +172,247 @@ AURORA_TEST_CASE(full_pipeline_roundtrip_to_code) {
     AURORA_TEST_CHECK_MSG(!code.empty(), "pipeline: to_code produces output");
     AURORA_TEST_CHECK(code.find("Column") != std::string::npos);
 }
+
+
+// ===========================================================================
+// 交互脚本 fixture（interact_*.json）——AI 兼容性管线的第二段：
+//   「静态树 → TestController 交互 → 状态断言」回归脚本。
+//
+// 格式契约（tests/fixtures/ai_compat/interact_*.json）：
+//   name      : 人类可读名（仅诊断用）
+//   viewport  : {width, height}，缺省 800×600
+//   tree      : 与 valid_*.json 同构的 widget 树（经 serialization::from_json 建树）
+//   steps     : 有序动作数组，每项 {"action": ..., ...}
+//                 settle               跑到 idle 帧（可选帧上限）
+//                 pump {"frames": n}     推 n 帧，缺省 1
+//                 tap {"target": sel}    点击目标
+//                 drag {"target": sel, "dx": x, "dy": y}   从目标中心拖拽
+//                 enter_text {"target": sel, "text": "..."}  目标输入文本
+//   expect    : 断言数组，每项含 target 且为下列之一
+//                 {"prop": k, "value": v}   属性值等于 v
+//                 {"prop": k, "changed": true}  属性值相对脚本起点已变化
+//                 {"visible": true}            目标可见（show 且几何非空）
+//   target(sel): {"type": "Checkbox", "index": 0} 或 {"text": "..."}，index 缺省 0
+//
+// 目标用「类型 + 同类型序号」而非 key 的原因：`serialization::from_json` 只产出
+// `shared_ptr<Widget>` 树，子节点 id 无法经 `Widget::child_nodes()`（const 引用）回填。
+// ===========================================================================
+
+#ifdef AURORA_BACKEND_HEADLESS
+
+namespace {
+
+/// @brief 脚本段的失败原因；空串表示该段通过。
+using ScriptError = std::string;
+
+/// @brief 目标定位：类型（+同类型序号）或文本命中。找不到返回空 Node。
+[[nodiscard]] auto script_target(au::TestController &tc, const au::Json &sel) -> au::Node {
+    std::vector<au::Node> hits;
+    if (sel.contains("type") && sel["type"].is_string()) {
+        hits = tc.find_by_type(sel["type"].get<std::string>());
+    } else if (sel.contains("text") && sel["text"].is_string()) {
+        hits = tc.find_by_text(sel["text"].get<std::string>());
+    } else {
+        return au::Node{};
+    }
+    const std::size_t index = sel.contains("index") && sel["index"].is_number_unsigned()
+                                  ? sel["index"].get<std::size_t>()
+                                  : 0U;
+    return index < hits.size() ? hits[index] : au::Node{};
+}
+
+/// @brief 读属性的 JSON 表示（缺失返回 null）。
+[[nodiscard]] auto script_prop(const au::Node &n, const std::string &key) -> au::Json {
+    au::Json props = au::Json::object();
+    n.widget().serialize_props(props);
+    return props.contains(key) ? props.at(key) : au::Json{};
+}
+
+/// @brief `changed` 断言的基线键（同一 props 组合唯一定位一条断言）。
+[[nodiscard]] auto baseline_key(const au::Json &expectation) -> std::string {
+    return expectation.value("target", au::Json::object()).dump() + "|" +
+           expectation.value("prop", std::string{});
+}
+
+/// @brief 执行单个步骤。
+[[nodiscard]] auto run_step(au::TestController &tc, const au::Json &step) -> ScriptError {
+    const au::Json action_json = step.value("action", au::Json{});
+    if (!action_json.is_string()) {
+        return "step missing string 'action'";
+    }
+    const std::string action = action_json.get<std::string>();
+
+    if (action == "settle") {
+        tc.pump_and_settle(step.value("max_frames", 60));
+        return ScriptError{};
+    }
+    if (action == "pump") {
+        const au::Result<void> r = tc.pump(step.value("frames", 1));
+        return r.ok() ? ScriptError{} : ScriptError{"pump: " + r.error().message};
+    }
+
+    const au::Node target = script_target(tc, step.value("target", au::Json::object()));
+    if (!target) {
+        return action + ": target not found";
+    }
+    if (action == "tap") {
+        const au::Result<void> r = tc.tap(target);
+        return r.ok() ? ScriptError{} : ScriptError{"tap: " + r.error().message};
+    }
+    if (action == "drag") {
+        const au::Point delta{.x = step.value("dx", 0.0F), .y = step.value("dy", 0.0F)};
+        const au::Result<void> r = tc.drag(target, delta);
+        return r.ok() ? ScriptError{} : ScriptError{"drag: " + r.error().message};
+    }
+    if (action == "enter_text") {
+        const std::string text = step.value("text", std::string{});
+        const au::Result<void> r = tc.enter_text(target, text);
+        return r.ok() ? ScriptError{} : ScriptError{"enter_text: " + r.error().message};
+    }
+    return "unknown action '" + action + "'";
+}
+
+/// @brief 建树 → 跑脚本 → 验断言；返回首个失败原因（空串表示全部通过）。
+[[nodiscard]] auto run_interact_fixture(const au::Json &fx) -> ScriptError {
+    const au::Json tree = fx.value("tree", au::Json{});
+    if (!tree.is_object()) {
+        return "fixture missing 'tree' object";
+    }
+    auto built = from_json(tree);
+    if (!built.ok()) {
+        return "from_json: " + built.error().message;
+    }
+
+    au::TestControllerConfig cfg{};
+    if (fx.contains("viewport")) {
+        cfg.width = fx["viewport"].value("width", cfg.width);
+        cfg.height = fx["viewport"].value("height", cfg.height);
+    }
+    au::TestController tc{au::Node{std::move(built.value())}, cfg};
+
+    // 首帧：布局与绘制确立几何；缺了这一步，后续 tap/drag 的命中测试没有可命中的框。
+    if (const au::Result<void> r = tc.pump(); !r.ok()) {
+        return "first frame: " + r.error().message;
+    }
+
+    const au::Json expectations = fx.value("expect", au::Json::array());
+    if (!expectations.is_array() || expectations.empty()) {
+        return "fixture must declare a non-empty 'expect' array";
+    }
+
+    // `changed` 断言的基线：脚本起点（首帧之后、任何交互之前）的属性快照。
+    std::map<std::string, au::Json> baseline;
+    for (const au::Json &e : expectations) {
+        if (!e.value("changed", false)) {
+            continue;
+        }
+        const au::Node target = script_target(tc, e.value("target", au::Json::object()));
+        if (!target) {
+            return "expect target not found";
+        }
+        baseline[baseline_key(e)] = script_prop(target, e.value("prop", std::string{}));
+    }
+
+    int step_index = 0;
+    for (const au::Json &step : fx.value("steps", au::Json::array())) {
+        const ScriptError err = run_step(tc, step);
+        if (!err.empty()) {
+            return "step[" + std::to_string(step_index) + "]: " + err;
+        }
+        ++step_index;
+    }
+
+    int expect_index = 0;
+    for (const au::Json &e : expectations) {
+        const au::Node target = script_target(tc, e.value("target", au::Json::object()));
+        if (!target) {
+            return "expect[" + std::to_string(expect_index) + "]: target not found";
+        }
+        if (e.contains("visible")) {
+            const au::Result<void> r = tc.expect_visible(target);
+            if (!r.ok()) {
+                return "expect[" + std::to_string(expect_index) + "]: " + r.error().message;
+            }
+        } else if (e.contains("prop")) {
+            const std::string prop = e["prop"].get<std::string>();
+            if (e.contains("value")) {
+                const au::Result<void> r = tc.expect_prop(target, prop, e["value"]);
+                if (!r.ok()) {
+                    return "expect[" + std::to_string(expect_index) + "]: " + r.error().message;
+                }
+            } else if (e.value("changed", false)) {
+                const au::Json before = baseline.at(baseline_key(e));
+                const au::Json after = script_prop(target, prop);
+                if (before == after) {
+                    return "expect[" + std::to_string(expect_index) + "]: prop '" + prop +
+                           "' unchanged (both " + after.dump() + ")";
+                }
+            } else {
+                return "expect[" + std::to_string(expect_index) + "]: needs 'value' or 'changed'";
+            }
+        } else {
+            return "expect[" + std::to_string(expect_index) + "]: needs 'prop' or 'visible'";
+        }
+        ++expect_index;
+    }
+    return ScriptError{};
+}
+
+}  // namespace
+
+AURORA_TEST_CASE(interact_fixtures_pass_testcontroller_scripts) {
+#ifdef AURORA_BACKEND_HEADLESS
+    register_core_widgets();
+
+    const std::filesystem::path dir = fixture_dir();
+    AURORA_TEST_REQUIRE(std::filesystem::is_directory(dir));
+    const auto files = collect_fixtures(dir, "interact_");
+    AURORA_TEST_REQUIRE_MSG(!files.empty(), "at least one interact_*.json fixture must exist");
+
+    for (const auto &p : files) {
+        const std::string label = "interact fixture " + p.filename().string();
+        const au::Json j = load_fixture(p);
+        AURORA_TEST_REQUIRE_MSG(!j.is_null(), label + ": loaded");
+        const ScriptError err = run_interact_fixture(j);
+        AURORA_TEST_CHECK_MSG(err.empty(), label + ": " + err);
+    }
+#else
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+#endif
+}
+
+AURORA_TEST_CASE(interact_fixtures_cover_at_least_three_scripts) {
+#ifdef AURORA_BACKEND_HEADLESS
+    // 完成判据固化成用例：至少 3 个交互回归 fixture。
+    const auto files = collect_fixtures(fixture_dir(), "interact_");
+    AURORA_TEST_CHECK_MSG(files.size() >= 3U, "interact fixtures count >= 3 (got " +
+                                                  std::to_string(files.size()) + ")");
+#else
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+#endif
+}
+
+AURORA_TEST_CASE(interact_script_reports_missing_target) {
+#ifdef AURORA_BACKEND_HEADLESS
+    register_core_widgets();
+
+    // 反面用例：目标选不到时脚本必须报错，而不是「零断言通过」地静默变绿。
+    au::Json fx;
+    fx["tree"] = au::Json{{"type", "Column"}, {"props", au::Json::object()}};
+    fx["steps"] = au::Json::array({au::Json{{"action", "tap"}, {"target", au::Json{{"type", "NoSuchWidget"}}}}});
+    fx["expect"] = au::Json::array({au::Json{{"target", au::Json{{"type", "NoSuchWidget"}}},
+                                             {"prop", "show"},
+                                             {"value", true}}});
+
+    const ScriptError err = run_interact_fixture(fx);
+    AURORA_TEST_CHECK_MSG(!err.empty(), "missing target must be reported");
+    AURORA_TEST_CHECK_MSG(err.find("target not found") != std::string::npos,
+                          "error must name the cause (got: " + err + ")");
+#else
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+#endif
+}
+
+#endif  // AURORA_BACKEND_HEADLESS
 
 }  // namespace aurora::test_cases::itest_ai_compat

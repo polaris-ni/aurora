@@ -1,5 +1,6 @@
 #include "aurora/app/clipboard.h"
 
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -56,10 +57,31 @@ struct TestBackend {
 
 #if (defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)) || defined(AURORA_PLATFORM_MACOS)
 namespace {
+
+/// @brief 作用域内将 SIGPIPE 置为忽略：Linux/macOS 无标准剪贴板 API，须借
+/// xclip/xsel/pbcopy 外壳进程中转。当这些工具缺失（或没有 X display）时子进程会立即退出，
+/// 导致后续 fwrite/pclose 向已关闭的管道写数据触发 SIGPIPE 直接杀死本进程（headless CI 等
+/// 无剪贴板环境常见，且 ASan 下因执行更慢更易命中风写竞态）。置 SIG_IGN 后写操作返回 EPIPE
+/// （fwrite 截断、pclose 返回非零），调用方据此判定剪贴板不可用并降级，而非崩溃。作用域结束即
+/// 恢复原处置，不影响进程其余部分。
+struct ScopedSigpipeIgnore {
+    using Handler = void (*)(int);
+    Handler prev;
+    ScopedSigpipeIgnore() : prev(std::signal(SIGPIPE, SIG_IGN)) {}
+    ~ScopedSigpipeIgnore() {
+        if (prev != SIG_ERR) {
+            std::signal(SIGPIPE, prev);
+        }
+    }
+    ScopedSigpipeIgnore(const ScopedSigpipeIgnore &) = delete;
+    ScopedSigpipeIgnore &operator=(const ScopedSigpipeIgnore &) = delete;
+};
+
 /// @brief 执行命令并向其 stdin 写入数据（用于 xclip/pbcopy 写入剪贴板）。
 /// @return 命令是否成功执行。
 auto pipe_to_command(const std::string &cmd, const std::string &data) -> bool {
     // Linux/macOS 无标准剪贴板 API，必须借 xclip/xsel/pbcopy 外壳；命令为硬编码常量、无外部输入拼接，无命令注入风险。
+    const ScopedSigpipeIgnore ignore_sigpipe;  // 防缺失/无显示的工具导致 SIGPIPE 杀死进程
     FILE *pipe = popen(cmd.c_str(), "w");  // NOLINT(bugprone-command-processor)
     if (pipe == nullptr) {
         return false;
@@ -127,9 +149,11 @@ auto Clipboard::set_text(const std::string &text) -> void {
     if (text.empty()) {
         return;
     }
-    // xclip 需 -selection clipboard（默认 primary 为中键粘贴）；回退 xsel --clipboard
-    if (!pipe_to_command("xclip -selection clipboard 2>/dev/null", text)) {
-        if (!pipe_to_command("xsel --clipboard --input", text)) {
+    // 优先 xsel：xsel 写入后 fork 守护进程持有 X selection 并立即返回，不会阻塞调用方；
+    // 回退 xclip。注意 xclip 复制后前台常驻（等待 selection 被读取才退出），在 headless
+    // 无剪贴板管理器的环境（CI）下 pclose 会永久等待 → 测试挂死，故不作为首选。
+    if (!pipe_to_command("xsel --clipboard --input 2>/dev/null", text)) {
+        if (!pipe_to_command("xclip -selection clipboard 2>/dev/null", text)) {
             AURORA_LOG_WARN("clipboard", "set_text: xclip/xsel not available");
         }
     }

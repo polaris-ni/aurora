@@ -26,6 +26,10 @@ struct TextProps {
 
     // ---- 文本排版（参考 Flutter TextStyle / Text） ----
     TextAlign text_align = TextAlign::Left;  ///< 水平对齐
+    /// @brief 书写方向：nullopt = 继承（`Environment`/进程级；无任何显式来源时
+    ///        shaping 按内容自动 guess——默认行为与接入前逐位一致）。
+    ///        RTL 时 `TextAlign::Start/End` 解析为 Right/Left，caret/命中做逻辑↔视觉镜像。
+    std::optional<TextDirection> direction = std::nullopt;
     int max_lines = 0;  ///< 最大行数（0=不限）；超出按 overflow 处理
     TextOverflow overflow = TextOverflow::Clip;  ///< 超出 max_lines 时的处理
     bool soft_wrap = true;  ///< 是否按宽度自动换行
@@ -109,6 +113,12 @@ class Text : public LeafWidget, public TextProps {
         return *this;
     }
 
+    /// @brief 设置书写方向：RTL 时 Start/End 对齐翻转、caret/命中镜像映射。
+    auto set_direction(TextDirection d) -> Text & {
+        direction = d;
+        return *this;
+    }
+
     auto set_max_lines(int n) -> Text & {
         max_lines = n;
         return *this;
@@ -167,6 +177,18 @@ class Text : public LeafWidget, public TextProps {
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&content); }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "Text"; }
+
+    /// @brief 无障碍名称：取文本内容。
+    ///
+    /// 优先复用绘制期缓存的解析结果 `display_text_`（= `cached_resolved_text_`，已解析 i18n）；
+    /// 未经绘制时退回按默认 locale 现场解析 `content`，保证无绘制查询也有 name。
+    /// @note Side-effects: reads i18n table
+    [[nodiscard]] auto accessibility_label() const -> std::string override {
+        if (!display_text_.empty()) {
+            return display_text_;
+        }
+        return content.get().resolve(&default_string_table(), Locale{});
+    }
 
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
 
@@ -234,7 +256,16 @@ class Text : public LeafWidget, public TextProps {
                                int max_lines, TextOverflow overflow, const render::TextLayoutOpts &opts) -> WrapResult;
     static auto wrap_lines(const std::string &text, const Font &f, float max_w, bool soft_wrap, int max_lines,
                            TextOverflow overflow, const render::TextLayoutOpts &opts) -> WrapResult;
+    /// @brief 生效字体：补齐非法字号并施加无障碍字号缩放（倍率取进程级设置）。
     static auto effective_font(const Font &base) -> Font;
+    /// @brief 生效字体（带上下文）：字号倍率优先取 `Environment` 注入的 `AccessibilitySettings`，
+    ///        未注入时回落进程级设置——即「树级覆盖 > 进程默认」。
+    static auto effective_font(const Font &base, const BuildContext &ctx) -> Font;
+    /// @brief 生效书写方向：控件显式属性 > `Environment` 注入 > 进程级（host_set）；
+    ///        无任何显式来源返回 nullopt（shaping 按内容 guess，默认行为不变）。
+    ///        命中测试路径无 `BuildContext`，用无 ctx 版本（回落进程级）。
+    [[nodiscard]] auto effective_direction(const BuildContext &ctx) const -> std::optional<TextDirection>;
+    [[nodiscard]] auto effective_direction() const -> std::optional<TextDirection>;
     static auto cp_len(unsigned char c) -> size_t;
     static auto cp_count(const std::string &s) -> size_t;
     static auto cp_slice(const std::string &s, size_t start, size_t count) -> std::string;

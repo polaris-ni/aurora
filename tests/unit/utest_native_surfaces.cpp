@@ -70,4 +70,68 @@ AURORA_TEST_CASE(aggregate_header_exposes_surface_contract) {
 #endif
 }
 
+AURORA_TEST_CASE(backend_surface_set_cursor_contract) {
+    // 各真实窗口后端须覆写 Surface::set_cursor（平台光标 API）。
+    // 判定为类型级、无须创建真实窗口：T 自身声明 set_cursor 时 `&T::set_cursor` 的类型是
+    // `void (T::*)(CursorShape)`；仅继承基类默认空实现时是 `void (Surface::*)(CursorShape)`。
+    // （不用「成员函数指针比较」——虚函数取址比较结果未指定，见 [expr.eq]。）
+    // 后端专属：本仓库默认无头构建下无任何真实后端宏 → 整例 SKIP；真机构建由 static_assert 守门。
+#if defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_GLFW) || defined(AURORA_BACKEND_X11) || \
+    defined(AURORA_BACKEND_WAYLAND) || defined(AURORA_BACKEND_MACOS) || defined(AURORA_BACKEND_D3D11)
+#ifdef AURORA_BACKEND_WIN32
+    static_assert(!std::is_same_v<decltype(&Win32Surface::set_cursor), void (Surface::*)(CursorShape)>,
+                  "Win32Surface 必须覆写 set_cursor");
+#endif
+#ifdef AURORA_BACKEND_D3D11
+    static_assert(!std::is_same_v<decltype(&D3D11Surface::set_cursor), void (Surface::*)(CursorShape)>,
+                  "D3D11Surface 必须覆写 set_cursor（复用 detail::set_win32_cursor）");
+#endif
+#ifdef AURORA_BACKEND_GLFW
+    static_assert(!std::is_same_v<decltype(&GlfwSurface::set_cursor), void (Surface::*)(CursorShape)>,
+                  "GlfwSurface 必须覆写 set_cursor");
+#endif
+#ifdef AURORA_BACKEND_X11
+    static_assert(!std::is_same_v<decltype(&X11Surface::set_cursor), void (Surface::*)(CursorShape)>,
+                  "X11Surface 必须覆写 set_cursor");
+#endif
+#ifdef AURORA_BACKEND_WAYLAND
+    static_assert(!std::is_same_v<decltype(&WaylandSurface::set_cursor), void (Surface::*)(CursorShape)>,
+                  "WaylandSurface 必须覆写 set_cursor");
+#endif
+#ifdef AURORA_BACKEND_MACOS
+    static_assert(!std::is_same_v<decltype(&MacOSSurface::set_cursor), void (Surface::*)(CursorShape)>,
+                  "MacOSSurface 必须覆写 set_cursor");
+#endif
+    AURORA_TEST_CHECK_TRUE(true);
+#else
+    AURORA_TEST_SKIP("无任何真实窗口后端开启（默认无头构建），后端 set_cursor 覆写契约无法判定");
+#endif
+}
+
+AURORA_TEST_CASE(windows_family_native_handle_contract) {
+    // Win32 家族（GDI 上屏与 D3D11 GPU 上屏）共用同一个 `Win32Window` 宿主，故「原生窗口
+    // 句柄」访问器必须两路都覆写：`Surface::native_handle()` 的默认实现恒返回 nullptr，
+    // 一旦漏覆写，`aurora::debug::surface_state()`（src/aurora/debug/debug_backend.cpp）的
+    // `has_native_window` 就会对**真实窗口后端**误报 false（`D3D11Surface` 曾如此）。
+    // 判定为类型级（同 set_cursor 契约用法），无须创建真实窗口。
+    // 后端专属：默认无头构建下两个宏皆未定义 → 整例 SKIP；真机构建由 static_assert 守门。
+#if defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_D3D11)
+#ifdef AURORA_BACKEND_WIN32
+    static_assert(!std::is_same_v<decltype(&Win32Surface::native_handle), void *(Surface::*)() const>,
+                  "Win32Surface 必须覆写 native_handle()（返回宿主 HWND）");
+    static_assert(std::is_same_v<decltype(&Win32Surface::hwnd), void *(Win32Surface::*)() const>,
+                  "Win32Surface::hwnd() 须为 const 且返回 void*");
+#endif
+#ifdef AURORA_BACKEND_D3D11
+    static_assert(!std::is_same_v<decltype(&D3D11Surface::native_handle), void *(Surface::*)() const>,
+                  "D3D11Surface 必须覆写 native_handle()（与 Win32Surface 同宿主）");
+    static_assert(std::is_same_v<decltype(&D3D11Surface::hwnd), void *(D3D11Surface::*)() const>,
+                  "D3D11Surface::hwnd() 须为 const 且返回 void*");
+#endif
+    AURORA_TEST_CHECK_TRUE(true);
+#else
+    AURORA_TEST_SKIP("Win32/D3D11 均未开启（默认无头构建），Win32 家族 native_handle 契约无法判定");
+#endif
+}
+
 }  // namespace aurora::test_cases::utest_native_surfaces

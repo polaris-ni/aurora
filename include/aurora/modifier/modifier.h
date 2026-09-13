@@ -315,6 +315,28 @@ class Modifier {
         return w;
     }
 
+    /// @brief 声明悬停光标形状：鼠标悬停本控件时把光标切到 `shape`（不影响布局/命中）。
+    /// 例：`Modifier{}.clickable(fn).cursor(CursorShape::PointingHand)`。
+    [[nodiscard]] auto cursor(CursorShape shape) const -> Modifier {
+        Modifier cc = *this;
+        cc.nodes_.push_back(std::make_shared<CursorNode>(shape));
+        return cc;
+    }
+
+    /// @brief 读取悬停光标声明：遍历修饰链取**最后一个** `CursorNode`（后写覆盖先写）；
+    /// 无则返回空（交由 `Widget::cursor_shape()` 虚钩子 / Clickable 缺省策略兜底）。
+    [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> {
+        std::optional<CursorShape> found;
+        for (const auto &n : nodes_) {
+            if (n) {
+                if (const auto s = n->cursor_shape()) {
+                    found = s;
+                }
+            }
+        }
+        return found;
+    }
+
     /// @brief 触发修饰链中所有 `Clickable` 的点击回调（事件派发器调用）。
     auto invoke_click() const -> void;
 

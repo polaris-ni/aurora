@@ -25,7 +25,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 ├───────────────────────────────────────────┤
 │  Layout Engine (include/aurora/layout/)   │  布局引擎：Constraints / flex / grid 求解
 ├───────────────────────────────────────────┤
-│  Render Core (include/aurora/render/)     │  渲染核心：Painter（软件栅格）
+│  Render Core (include/aurora/render/)     │  渲染核心：DisplayList → RHI 后端（Painter 软件栅格）
 ├───────────────────────────────────────────┤
 │  Platform Abstraction (include/aurora/window/) │  平台抽象：Surface 家族
 ├───────────────────────────────────────────┤
@@ -35,6 +35,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 - **依赖方向单向向下**：上层依赖下层，下层不感知上层（渲染核心不知道具体 widget）。
 - **内核 / 适配分离**：平台差异收敛到 `Surface` 实现。
+- **命令流与执行分离**：`DisplayList` 是绘制命令的**唯一来源**，`rhi::RhiBackend` 是它的**回放目标抽象**（command sink）；软件 `Painter`（经 `rhi::SoftwareRhi`）与 GPU 后端是它的**平级消费者**。新增后端只实现 `RhiBackend`，不改动录制侧与 `DisplayList`。
 - **响应式与渲染解耦**：状态变更经 `State` / `Signal` 精确投递到受影响的 widget 子树，不经「整树 diff + 重建」；渲染核心只负责把 widget 树绘制到 `Surface`。
 
 ---
@@ -91,7 +92,9 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 | 模块 | 路径 | 主要头文件 |
 |:---|:---|:---|
 | 布局引擎 | `layout/` | `flex.h` `flex_layouter.h` `layout_box.h` `layout_engine.h`（`Constraints` 在 `core/types.h`） |
-| 渲染核心 | `render/` | `painter.h` `font_engine.h` `bitmap_font.h` `png.h` `offscreen.h` `blend.h` `dirty_region.h` `display_list.h` `font_discovery.h` `glyph_atlas.h` `image_cache.h` `snapshot_diff.h` `text_aa_mode.h` |
+| 渲染核心 | `render/` | `painter.h` `font_engine.h` `bitmap_font.h` `png.h` `offscreen.h` `blend.h` `dirty_region.h` `display_list.h` `font_discovery.h` `glyph_atlas.h` `image_cache.h` `snapshot_diff.h` `text_aa_mode.h` `render/rhi/rhi_backend.h` `render/rhi/software_rhi.h` |
+
+> **RHI 抽象（command sink）**：`DisplayList` 回放的目标是 `rhi::RhiBackend`（`render/rhi/rhi_backend.h`：`name()` + 单一 `submit(const DrawCmd&, const CmdData&)`），`rhi::SoftwareRhi`（`render/rhi/software_rhi.h`）把每条命令逐条转发回 `Painter` 对应原语——即抽取前的 `DisplayList::replay(Painter&)` 语义，**像素输出逐位不变**。`DisplayList::replay` 的两个重载（`RhiBackend&` 为唯一实现、`Painter&` 为兼容薄壳）见 `specification/03-layout-render.md` §8.6。接口收成单一 `submit` 而非 18 个平铺虚函数：命令几何/标量已全在 `DrawCmd` 内，把「如何解释命令、如何合并批次」留给后端（GPU 后端正靠此做管线切换与批处理）。
 
 ### 4.3 平台抽象
 
@@ -129,7 +132,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 |:---|:---|:---|
 | 应用驱动 | `app/` | `application.h` `scheduler.h` `scene.h` `clipboard.h` `file_dialog.h` `system_tray.h` `display.h` `perf_overlay.h` `menu.h` `shortcuts.h` `validate.h` `validate_ui.h` `generate_ui.h` `hot_reload.h` |
 | 偏好配置 | `preferences/` | `preferences.h`（JSON 文件后端 + 响应式键值存储；不新增 UI 控件） |
-| 数据存储 | `storage/` | `storage.h`（`Storage` 门面） `backend.h` `memory_backend.h` `fs_backend.h` `serializable.h` `storage_types.h` |
+| 数据存储 | `storage/` | `storage.h`（`Storage` 门面） `storage_backend.h` `memory_backend.h` `fs_backend.h` `serializable.h` `storage_types.h` |
 
 ### 4.7 性能、媒体、调试、入口
 
@@ -441,7 +444,8 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 ### 14.3 组织约定
 
 - **命名**：测试文件以 `utest`（单元，`tests/unit/`）/ `itest`（集成，`tests/integration/`）为**前缀**（非 `_test` 后缀），与源文件同名主体；每个测试 TU 包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`）内。
-- **运行**：`ctest -R <名>` 逐条拉起 `aurora_test_runner --run=<stem>`；从仓库根运行以保证相对路径解析；本地复跑以最高并行度执行（`ctest -j` 配满核心）。并行模型为「CTest 进程隔离 + 框架用例边界资源虚拟化」（tmpdir / cwd / 单例 / 剪贴板注入，见 `tests/framework/isolation.h`），不使用 `RUN_SERIAL` 串行白名单。
+- **运行**：`ctest -R <名>` 逐条拉起 `aurora_test_runner --run=<stem>`；从仓库根运行以保证相对路径解析；本地全量复跑推荐 `ctest --preset ninja-test`（`CMakePresets.json` testPresets，等价 `ctest -j` 配满核心）。并行模型为「CTest 进程隔离 + 框架用例边界资源虚拟化」（tmpdir / cwd / 单例 / 剪贴板注入，见 `tests/framework/isolation.h`），不使用 `RUN_SERIAL` 串行白名单。
+- **耗时观测**：`tools/check/build_baseline.py`（手动跑、非门禁）解析构建目录的 `.ninja_log` 与 ctest `LastTest.log`，输出编译边耗时分布 / top-N 慢边与测试串行耗时合计 / top-N 慢测（并行关键路径），`--json` 落基线供跨次对照。
 - **新增约束**：新增公共 API / widget / 核心逻辑须配套单测并接入 CTest。
 
 ### 14.4 CI 执行层
@@ -450,7 +454,14 @@ CI 配置位于 `.github/workflows/`：
 
 | 工作流 | 作用 |
 |:---|:---|
-| `ci.yml` | 宏矩阵全量覆盖，每推送 / PR 触发，`concurrency` 取消旧运行以提速。共 7 组 job：**core**（linux/gcc + linux/clang + windows/msvc + windows/mingw + macos/clang，Release 与 Debug 各编一次覆盖 `AUTO` 三态的两个分支，Debug 覆盖 linux/gcc 与 windows/msvc；linux 额外构建 `demos` 聚合目标）；**backends**（X11/Wayland/GLFW、D3D11/GLFW、macOS/GLFW 各编译一次）；**toggles**（优化三开关全关 / SIMD 关 / 图像编解码+Inspector 开 / PROFILING+TRACING+DEBUG 强制开 / DEBUG 强制关，均 ubuntu/gcc）；**asan**（ASan+UBSan 全量 ctest）；**coverage**（`coverage` 聚合目标：ctest + gcov 摘要，CSV/HTML 入 artifact）；**wasm**（emcmake + `AURORA_BACKEND_WASM=ON` 仅构建库目标）；**install-consumer**（`cmake --install` + `find_package(Aurora)` 最小消费端冒烟，GUIDELINE §1 配方；默认配置与 Release 下强制 `AURORA_ENABLE_DEBUG=ON` 的「非默认宏一致性」各一组） |
+| `ci.yml` | 宏矩阵全量覆盖，每推送 / PR 触发，`concurrency` 取消旧运行以提速。共 7 组 job：**core**（linux/gcc + linux/clang + windows/msvc + windows/mingw + windows/llvm（clang-cl）+ macos/clang，Release 与 Debug 各编一次覆盖 `AUTO` 三态的两个分支，Debug 覆盖 linux/gcc、windows/msvc 与 windows/llvm；linux-gcc-release 与 windows-llvm 额外构建 `demos` 聚合目标）；**backends**（X11/Wayland/GLFW、D3D11/GLFW、macOS/GLFW 各编译一次）；**toggles**（优化三开关全关 / SIMD 关 / 图像编解码+Inspector 开 / PROFILING+TRACING+DEBUG 强制开 / DEBUG 强制关，均 ubuntu/gcc）；**asan**（ASan+UBSan 全量 ctest）；**coverage**（`coverage` 聚合目标：ctest + gcov 摘要，CSV/HTML 入 artifact）；**wasm**（emcmake + `AURORA_BACKEND_WASM=ON`，构建库与测试 runner 并全量 ctest，能力缺失用例走 SKIP 路径）；**install-consumer**（`cmake --install` + `find_package(Aurora)` 最小消费端冒烟，GUIDELINE §1 配方；默认配置与 Release 下强制 `AURORA_ENABLE_DEBUG=ON` 的「非默认宏一致性」各一组） |
 | `release.yml` | 发布流程（构建产物 / 版本标签） |
 
 矩阵按「每个 feature 宏分支至少被一个 job 编译一次」设计；选项语义见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md)。CI 只负责「拉起构建 + 跑 CTest」，不承载测试设计。
+
+**编译缓存与执行口径**：
+
+- 全部 Test 步骤并行执行（`ctest -j "$(nproc)"`；coverage 聚合目标内的 ctest 除外——gcda 并发写在非加锁平台有损坏风险）。
+- 编译缓存接入 `hendrikmuhs/ccache-action`（key 按 job / 矩阵名分桶）：core（Linux / macOS / windows-mingw）、backends（Linux / macOS）、toggles、asan、coverage、install-consumer；缓存口径（SLOPPINESS / BASEDIR / NOHASHDIR / 压缩）由 `cmake/AuroraCcache.cmake` 的编译器启动器统一注入，与本地构建共享同一语义，避免「本地命中、CI 全 miss」。
+- windows-msvc（默认 Visual Studio 多配置生成器）不接入编译缓存：CMake 的编译器启动器（`<LANG>_COMPILER_LAUNCHER`，sccache / ccache 的挂接点）仅在 Makefile / Ninja 生成器实现，VS 生成器下被静默忽略；要接入须先将该矩阵切换到 Ninja + cl，暂无必要（该配置无缓存路径、PCH 净收益显著，冷构建本身不构成瓶颈）。
+- windows 侧 Test 步骤显式 `shell: bash` 并设 `PYTHONUTF8=1`（默认 pwsh 无 `nproc`；cp1252 控制台无法编码 CJK 诊断输出）。

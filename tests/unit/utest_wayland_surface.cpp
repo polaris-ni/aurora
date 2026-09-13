@@ -3,6 +3,7 @@
 /// 测试说明: Wayland 后端类型契约 skip 桩——头整体被
 /// AURORA_PLATFORM_LINUX && !AURORA_PLATFORM_ANDROID && AURORA_BACKEND_WAYLAND 门控，非 Linux 平台无法编译
 
+#include "aurora/core/platform.h"  // 守卫求值前必须先有平台宏（TU 自包含，不依赖 PCH 伞头带入）
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_WAYLAND)
 #include <type_traits>
 

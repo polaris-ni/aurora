@@ -1,7 +1,9 @@
 #include "aurora/widget/text.h"
 
 #include "aurora/app/clipboard.h"
+#include "aurora/core/accessibility.h"
 #include "aurora/core/diagnostics.h"
+#include "aurora/core/directionality.h"
 #include "aurora/core/utf8.h"
 #include "aurora/event/keycode.h"
 #include "aurora/render/font_engine.h"
@@ -41,6 +43,13 @@ auto Text::describe_static() -> WidgetDescriptor {
                  .note = "水平对齐",
                  .json_type = "string",
                  .enum_values = {"Left", "Right", "Center", "Start", "End", "Justify"}},
+                {.name = "direction",
+                 .type = "TextDirection",
+                 .default_value = "auto",
+                 .required = false,
+                 .note = "书写方向(auto=继承环境)",
+                 .json_type = "string",
+                 .enum_values = {"LTR", "RTL"}},
                 {.name = "max_lines",
                  .type = "int",
                  .default_value = "0",
@@ -150,6 +159,9 @@ auto Text::serialize_props(Json &props) const -> void {
             props["color"] = color_to_json(text_color);
 
             props["text_align"] = text_align_to_json(text_align);
+            if (direction.has_value()) {
+                props["direction"] = text_direction_to_json(*direction);
+            }
             props["max_lines"] = max_lines;
             props["overflow"] = text_overflow_to_json(overflow);
             props["soft_wrap"] = soft_wrap;
@@ -182,6 +194,13 @@ auto Text::deserialize_props(const Json &props) -> void {
                                     text_align = json_to_text_align(props["text_align"]);
         } else {
             Diagnostics::degraded("text_align expects string", type_name(), "invalid-prop-value");
+        }
+    }
+    if (props.contains("direction")) {
+        if (props["direction"].is_string()) {
+            direction = json_to_text_direction(props["direction"]);
+        } else {
+            Diagnostics::degraded("direction expects string", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("max_lines")) {
@@ -275,7 +294,7 @@ auto Text::validate_props() const -> Result<void> {
 }
 
 auto Text::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
-    const Font f = effective_font(font);
+    const Font f = effective_font(font, ctx);
     // resolved_text 缓存：on_layout 在 content 变化时必被调用，此处计算并缓存
     cached_resolved_text_ = resolved_text(ctx);
     resolved_dirty_ = false;
@@ -284,7 +303,8 @@ auto Text::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
     const bool bounded = std::isfinite(c.max.width);
     const float max_w = bounded ? c.max.width : 1e9F;
     const render::TextLayoutOpts opts{
-        .letter_spacing = letter_spacing, .word_spacing = word_spacing, .italic = (font_style == FontStyle::Italic)};
+        .letter_spacing = letter_spacing, .word_spacing = word_spacing, .italic = (font_style == FontStyle::Italic),
+        .direction = effective_direction(ctx)};
     line_h_ = render::FontEngine::measure_height(f) * std::max(0.1F, line_height);
     auto [lines, cp_start] = wrap_lines(s, f, max_w, soft_wrap, max_lines, overflow, opts);
     lines_ = std::move(lines);
@@ -317,7 +337,8 @@ auto Text::on_pointer_event(MouseEvent &e) -> void {
     }
     const Font f = effective_font(font);
     const render::TextLayoutOpts opts{
-        .letter_spacing = letter_spacing, .word_spacing = word_spacing, .italic = (font_style == FontStyle::Italic)};
+        .letter_spacing = letter_spacing, .word_spacing = word_spacing, .italic = (font_style == FontStyle::Italic),
+        .direction = effective_direction()};
     const float lx = e.local_position.x;
     const float ly = e.local_position.y;
     // 命中测试须先按 ly 定位到可视行，再在该行内按 x 命中——否则多行文本会被当成「整段单行」
@@ -328,12 +349,19 @@ auto Text::on_pointer_event(MouseEvent &e) -> void {
     const std::size_t li =
         std::min<std::size_t>(static_cast<std::size_t>(std::max(0.0F, ly) / line_h_), lines_.size() - 1U);
     // 按对齐方式计算该行文本相对控件左缘的水平偏移（local 坐标下控件左缘为 0）。
+    // Start/End 为方向相对语义：RTL 时 Start=Right、End=Left。
+    const bool rtl = effective_direction() == TextDirection::RTL;
             const float line_w = render::FontEngine::measure_width(lines_[li], f, opts);
     float line_off = 0.0F;
     switch (text_align) {
         case TextAlign::Right:
-        case TextAlign::End:
             line_off = layout_w_ - line_w;
+            break;
+        case TextAlign::End:
+            line_off = rtl ? 0.0F : (layout_w_ - line_w);
+            break;
+        case TextAlign::Start:
+            line_off = rtl ? (layout_w_ - line_w) : 0.0F;
             break;
         case TextAlign::Center:
             line_off = (layout_w_ - line_w) * 0.5F;
@@ -585,7 +613,40 @@ auto Text::effective_font(const Font &base) -> Font {
     if (f.size_pt <= 0.0F) {
         f.size_pt = 14.0F;
     }
+    // 无障碍字号缩放（`AccessibilitySettings::font_scale`）：默认 1.0 ⇒ 行为与接入前逐位一致。
+    f.size_pt *= current_accessibility_settings().resolved_font_scale();
     return f;
+}
+
+auto Text::effective_font(const Font &base, const BuildContext &ctx) -> Font {
+    Font f = base;
+    if (f.size_pt <= 0.0F) {
+        f.size_pt = 14.0F;
+    }
+    // 带上下文版：先认 `Environment` 注入值，缺失再回落到进程级默认（见 core/accessibility.h）。
+    f.size_pt *= resolved_accessibility_settings(ctx).resolved_font_scale();
+    return f;
+}
+
+auto Text::effective_direction(const BuildContext &ctx) const -> std::optional<TextDirection> {
+    // 三级优先（见 core/directionality.h）：控件显式属性 > Environment > 进程级（host_set）；
+    // 无任何显式来源返回 nullopt——shaping 保持 hb 按内容 guess（默认行为逐位不变）。
+    if (direction.has_value()) {
+        return direction;
+    }
+    return explicit_text_direction(ctx);
+}
+
+auto Text::effective_direction() const -> std::optional<TextDirection> {
+    // 无上下文版（命中测试路径）：回落进程级。
+    if (direction.has_value()) {
+        return direction;
+    }
+    const Directionality &proc = current_directionality();
+    if (proc.host_set) {
+        return proc.direction;
+    }
+    return std::nullopt;
 }
 
 auto Text::cp_len(unsigned char c) -> size_t { return utf8_cp_len(c); }

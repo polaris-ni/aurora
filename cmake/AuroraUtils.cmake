@@ -41,8 +41,10 @@ function(aurora_setup_consumer_target _tgt)
     # MinGW 默认动态链接 libgcc_s_seh-1.dll / libstdc++-6.dll / libwinpthread-1.dll，这些 DLL
     # 不在 exe 同目录、也不在普通终端（双击 / 裸 cmd / PowerShell）的 PATH 上，导致运行时报
     # 「无法定位程序输入点 _gthr_win32_self」。
-    # 仅 GNU/Clang + Windows 生效；MSVC 与其他平台忽略。
-    if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND WIN32)
+    # 仅 MinGW 生效（GCC 或 clang 的 MinGW 目标，链接的是 GCC runtime 与 winpthread）。
+    # clang-cl / MSVC 模式链接 MSVCRT 且 lld-link 无 winpthread.lib，命中会「could not open
+    # 'winpthread.lib'」；MSVC 与其他平台亦忽略。故以 MINGW 为门禁而非「Clang + WIN32」。
+    if (MINGW)
         target_link_options(${_tgt} PRIVATE
                 -static-libgcc -static-libstdc++
                 -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)

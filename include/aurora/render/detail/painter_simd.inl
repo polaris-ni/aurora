@@ -8,15 +8,25 @@
 
 #include "aurora/render/detail/painter_simd.h"
 
-#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
+#if defined(AURORA_COMPILER_MSVC)
+// MSVC x64 基线已含 SSE2，_mm256_* 无需 /arch:AVX2 即可编译（指令照发，运行时经
+// g_simd_level 分发保证只在 AVX2 机器执行）；MSVC 不校验 intrinsic 的 target feature，
+// 故 target 属性留空即可。
 #define AURORA_AVX2_TARGET
 #define AURORA_SSE41_TARGET
 #define AURORA_NOINLINE __declspec(noinline)
 #else
+// GCC / Clang（含 clang-cl）：clang 强制校验「always_inline intrinsic 要求 target feature」，
+// 空 target 属性会让 _mm256_* 报 "requires target feature 'avx'"。须显式加 target 属性。
+// clang-cl 复用 MSVC 运行时但仍是 clang，同样需要该属性；noinline 与 MSVC 对齐用 __declspec。
 #define AURORA_AVX2_TARGET __attribute__((target("avx2")))
 // SSE2 路径用到 SSE4.1 内置（cvtepu8_epi32 / min_epi32 / max_epi32），须显式开 target。
 #define AURORA_SSE41_TARGET __attribute__((target("sse4.1")))
+#if defined(AURORA_COMPILER_CLANG_CL)
+#define AURORA_NOINLINE __declspec(noinline)
+#else
 #define AURORA_NOINLINE __attribute__((noinline))
+#endif
 #endif
 
 // x86 才存在 SSE2/AVX2 内置函数头；非 x86（ARM/NEON，本轮暂缓）不引用，回落标量。
@@ -752,7 +762,9 @@ inline AURORA_AVX2_TARGET AURORA_NOINLINE auto blur_region_avx2(std::uint8_t *pi
 
 inline auto detect_simd_level() noexcept -> SimdLevel {
 #if defined(AURORA_ARCH_X64) || defined(AURORA_ARCH_X86)
-#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG)
+#if defined(AURORA_COMPILER_GCC) || (defined(AURORA_COMPILER_CLANG) && !defined(AURORA_COMPILER_CLANG_CL))
+    // GCC 与 clang（非 clang-cl）：__builtin_cpu_supports 由 libgcc / compiler-rt 提供，
+    // 链接期需对应运行时（MinGW/clang-MinGW 静态链 libgcc，linux-clang 链 compiler-rt）。
     if (__builtin_cpu_supports("avx2")) {
         return SimdLevel::AVX2;
     }

@@ -4,6 +4,7 @@
 /// HeadlessSurface 帧生命周期、PNG 落盘、状态/重绘 seam（Headless 部分受 AURORA_BACKEND_HEADLESS 门控）
 
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <system_error>
 #include <type_traits>
@@ -55,6 +56,10 @@ AURORA_TEST_CASE(surface_default_virtual_implementations) {
     AURORA_TEST_CHECK_NEAR(inset.top, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(inset.right, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(inset.bottom, 0.0F, 1e-4F);
+
+    // 悬停光标默认空实现：可调用且不崩溃即契约（Headless 无系统光标）。
+    surface.set_cursor(CursorShape::IBeam);
+    surface.set_cursor(CursorShape::Arrow);
 
     // 默认空实现的回调注册/窗口控制接口：可调用且不崩溃即契约。
     surface.poll_platform_events();
@@ -195,6 +200,38 @@ AURORA_TEST_CASE(headless_surface_state_seams_dispatch_handlers) {
     bare.simulate_window_mode(WindowMode::Minimized);
     bare.simulate_present_request();
     AURORA_TEST_CHECK_TRUE(true);
+#else
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
+#endif
+}
+
+AURORA_TEST_CASE(headless_surface_records_cursor_sequence) {
+#ifdef AURORA_BACKEND_HEADLESS
+    // 光标形状（ROADMAP 完成判据的 Headless 验收入口）：Headless 无系统光标，
+    // 覆写 set_cursor 为「按序记录」，使「派发器解析 → Application 接线 → Surface 生效」
+    // 整条链路无须 OS 窗口即可确定性断言。此处只验记录 seam 自身的契约。
+    HeadlessSurface surface;
+    AURORA_TEST_CHECK_TRUE(surface.cursor_log().empty());
+    AURORA_TEST_CHECK_FALSE(surface.last_cursor().has_value());
+
+    surface.set_cursor(CursorShape::IBeam);
+    surface.set_cursor(CursorShape::PointingHand);
+    surface.set_cursor(CursorShape::Arrow);
+
+    AURORA_TEST_REQUIRE_EQ(surface.cursor_log().size(), std::size_t{3});
+    AURORA_TEST_CHECK_EQ(surface.cursor_log().at(0), CursorShape::IBeam);
+    AURORA_TEST_CHECK_EQ(surface.cursor_log().at(1), CursorShape::PointingHand);
+    AURORA_TEST_CHECK_EQ(surface.cursor_log().at(2), CursorShape::Arrow);
+    AURORA_TEST_REQUIRE_TRUE(surface.last_cursor().has_value());
+    AURORA_TEST_CHECK_EQ(*surface.last_cursor(), CursorShape::Arrow);
+
+    // 重复下发同一形状照常记录（去重发生在派发器，不在此层；见 utest_dispatcher）。
+    surface.set_cursor(CursorShape::Arrow);
+    AURORA_TEST_CHECK_EQ(surface.cursor_log().size(), std::size_t{4});
+
+    surface.clear_cursor_log();
+    AURORA_TEST_CHECK_TRUE(surface.cursor_log().empty());
+    AURORA_TEST_CHECK_FALSE(surface.last_cursor().has_value());
 #else
     AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
 #endif

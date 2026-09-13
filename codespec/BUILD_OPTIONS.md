@@ -31,6 +31,7 @@
 | `cmake/AuroraSimd.cmake` | `AURORA_ENABLE_SIMD`（光栅内核 SIMD 双实现，内部宏，不 PUBLIC 传播） |
 | `cmake/AuroraCcache.cmake` | `AURORA_ENABLE_CCACHE`（ccache 编译缓存启动器） |
 | `cmake/AuroraTools.cmake` | 工具 / 基准可执行（`aurora_add_tool()` 统一样板）+ `AURORA_BUILD_INSPECTOR_SERVER` |
+| `cmake/AuroraVerify.cmake` | `AURORA_BUILD_VERIFY_TOOLS`：真机验收探针（`tools/verify/` 下按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**） |
 | `cmake/AuroraDemos.cmake` | 示例 demo 定义块（须在 `AuroraTools` 与 `AuroraTests` 之后 include，因其依赖 `aurora_inspector_server` 目标） |
 | `cmake/AuroraTests.cmake` | `AURORA_BUILD_TESTS` 注册式 runner（GLOB `tests/unit/*.cpp` 与 `tests/integration/*.cpp` → 单一 `aurora_test_runner`，`AURORA_TEST()` 自注册） |
 | `cmake/AuroraInstrumentation.cmake` | `AURORA_ENABLE_COVERAGE` / `AURORA_ENABLE_ASAN` / `AURORA_ENABLE_PROFILING` / `AURORA_ENABLE_TRACING` / `AURORA_ENABLE_DEBUG` / `AURORA_ENABLE_TEST_HOOKS`（须在全部目标定义之后 include） |
@@ -48,6 +49,7 @@
 | `AURORA_BUILD_TESTS` | `ON` | 编译 `tests/` 下全部用例并接入 CTest：`AURORA_TEST()` 注册、单一 runner 一次链接，逐条 `--run=<stem>` 隔离 | `aurora_test_runner` 可执行 + `enable_testing()` + `registry_integrity` 守护 |
 | `AURORA_TEST_SHARDS` | `1` | 测试 runner 分片数（非开关、为正整数缓存变量）：`1` 与单 runner 完全等价；`N>1` 按 Suite（文件 stem）MD5 稳定散列把用例源拆为 N 个 runner（各含唯一 main），CTest 用例名带分片号（`<stem>_s<k>`），`registry_integrity` 对各 runner `--list` 取并集比对 | N 个 `aurora_test_runner_s<k>` 可执行；是否默认开启待收束期链接耗时数据 |
 | `AURORA_BUILD_INSPECTOR_SERVER` | `OFF` | 编译 Inspector 远程 HTTP 服务器（跨平台：Windows 链 `ws2_32` / POSIX 链 `pthread`） | `aurora_inspector_server` 静态库 |
+| `AURORA_BUILD_VERIFY_TOOLS` | `OFF` | **定义**（非默认构建）`tools/verify/` 下的真机验收探针：按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**（会创建真实窗口、读取屏幕光标，非确定且干扰用户桌面） | 各 `aurora_verify_<平台>_cursor` 可执行文件 + 聚合目标 `aurora_verify` |
 ### 2.1 图像编解码开关（已迁出）
 
 图像编解码开关原名 `AURORA_BUILD_IMAGE_*`，实为「编译期能力开关」而非「交付物开关」，已归入 `AURORA_ENABLE_*` 命名组并连同选项名一并改名为 `AURORA_ENABLE_IMAGE_*`——详见 §4.5。
@@ -58,9 +60,9 @@ demo 不进默认构建（`EXCLUDE_FROM_ALL`）：日常 `cmake --build build` �
 
 ### 2.3 预编译头（PCH）
 
-- **库自身**：`include/aurora/aurora_pch.h` 收录标准库 + `nlohmann/json.hpp`（不含 aurora 自有头，保证库开发时命中率），`aurora` 库 PRIVATE 编译一份。
-- **消费者**：`aurora_consumer_pch` 锚定目标把 `aurora.h` 伞头整体预编译一份，全部 demo / 测试 / 工具经 `target_precompile_headers(REUSE_FROM aurora_consumer_pch)` 复用。aurora 头变更本就触发消费者重编，不增加失效面。
-- 覆盖率 / ASan 开启时 PCH 全部自动关闭。
+- **库自身**：`include/aurora/aurora_pch.h` 收录标准库 + `nlohmann/json.hpp`（不含 aurora 自有头，保证库开发时命中率），`aurora` 库 PRIVATE 编译一份。**GCC（MinGW）下同样强制关闭**：实测 122MB 的库 gch 每库 TU 全量加载 + ccache 全文 hash，且 gch 字节参与缓存 key（头文件一变全部库 TU 失效）；关闭后全量重编 155.4s → 68s（库侧），冷构建省约 1 分钟。MSVC/Clang 不变。
+- **消费者**：MSVC/Clang 下 `aurora_consumer_pch` 锚定目标把 `aurora.h` 伞头整体预编译一份，全部 demo / 测试 / 工具经 `target_precompile_headers(REUSE_FROM aurora_consumer_pch)` 复用（aurora 头变更本就触发消费者重编，不增加失效面）。**GCC（MinGW）下消费者 PCH 强制关闭**：实测 296MB 的 .gch 从未被消费者命中（生成/消费侧编译器设置失配，`-Winvalid-pch` 拒用），却仍要每 TU 全量探测加载（GCC）+ 全文 hash（ccache），每 TU ≈ 600MB 纯亏损 I/O，净收益为负；消费者改走伞头文本编译 + ccache 缓存。
+- 覆盖率 / ASan 开启时 PCH 全部自动关闭（与 GCC 判定共用同一门控变量）。
 
 ### 2.4 `AURORA_BUILD_INSPECTOR_SERVER`
 
@@ -79,6 +81,33 @@ demo 不进默认构建（`EXCLUDE_FROM_ALL`）：日常 `cmake --build build` �
 ```powershell
 cmake -S . -B build -DAURORA_BUILD_INSPECTOR_SERVER=ON
 ```
+
+### 2.5 `AURORA_BUILD_VERIFY_TOOLS`（真机验收探针）
+
+| 属性 | 值 |
+|:---|:---|
+| 类型 | `option()` |
+| 默认值 | `OFF` |
+| 说明 | 定义 `tools/verify/` 下的**真机验收探针**可执行目标。这类探针证明的是「无头 CI 无法证明」的平台接线能力（典型：光标形状的各后端 `Surface::set_cursor` 是否真的改变了屏幕上显示的光标） |
+| 传播宏 | 无（纯交付物开关，不向库代码注入宏） |
+| 模块 | `cmake/AuroraVerify.cmake` |
+| 产物 | 按条件定义：`aurora_verify_x11_cursor`（`AURORA_BACKEND_X11`）/ `aurora_verify_win32_cursor`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`）/ `aurora_verify_macos_cursor`（`APPLE` 且开 `AURORA_BACKEND_MACOS`，需 ObjC++）/ `aurora_verify_glfw_cursor`（`AURORA_BACKEND_GLFW`）；聚合目标 `aurora_verify` |
+
+三点与其它"产物开关"不同的地方：
+
+1. **不进 CTest**：探针会创建真实窗口、读取屏幕光标/指针状态，非确定且会干扰用户桌面，属**人工触发的验收工具**而非自动化用例。
+2. **条件定义**：按「当前平台 + 已开启后端」逐一判定；无一匹配时连目标都不定义（与 demo `EXCLUDE_FROM_ALL` 同口径）。macOS 路会条件 `enable_language(OBJCXX)`，对其它平台零影响。
+3. **默认 OFF 且 `EXCLUDE_FROM_ALL`**：`cmake --build build` 不会连带构建，既有构建/门禁/CI 完全不受影响。
+
+```powershell
+# 例：在 Linux 桌面验收 X11 光标接线
+cmake -S . -B build-verify -G Ninja -DCMAKE_BUILD_TYPE=Release `
+      -DAURORA_BACKEND_X11=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+cmake --build build-verify --target aurora_verify_x11_cursor
+./build-verify/aurora_verify_x11_cursor
+```
+
+各探针的验收范围、逐项期望、退出码语义写在对应源文件头注释内（`tools/verify/*.cpp|.mm`）；跨平台状态与验收台账见 `ROADMAP.draft.md`。
 
 ---
 
@@ -209,7 +238,7 @@ cmake --build build --target gen_debug_api_json     # 仅刷新 debug 段
 | `AURORA_ENABLE_DEBUG` | `AUTO` | 真实后端 DEBUG 能力（截图、控件树、性能快照、可视化调试叠层、控件拾取） | 三态；注入 `AURORA_ENABLE_DEBUG`（**PUBLIC 传播**，经 `aurora_define_feature` 注册）。PUBLIC 的原因：Widget 类在宏下新增数据成员会改变类 ABI 布局，消费者（demo / tests / 宿主应用）必须与库同值，否则构造与成员偏移错位（ODR / 访问冲突）。**随安装导出**（`AuroraConfig.cmake`）且导出面严格对齐**安装产物的实际取值**：强制 ON、或 `AUTO` + 单配置 `Debug`/`RelWithDebInfo` 时导出；`AUTO` + Release（含空构建类型）与强制 OFF 时不导出（无条件导出会让发布态产物反向失配）。调试 API 与测试注入 API 均在头文件始终声明、`.cpp` 体按宏裁切，消费端调用始终可编译、关闭时返回 disabled |
 | `AURORA_ENABLE_TEST_HOOKS` | `ON` | 库侧测试注入点（进程内 memory 剪贴板后端等，供仓库私有测试设施并行隔离） | 注入 `AURORA_ENABLE_TEST_HOOKS`（**PUBLIC 传播**，经 `aurora_define_feature` 注册）。注入 API 声明常驻，实现体按 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` **双宏**裁切，任一关闭（含 Release 下 DEBUG AUTO 自动关闭）返回 `false` / no-op，平台行为不变；钩子本身无副作用，真正的行为开关是 `AURORA_ENABLE_DEBUG` |
 | `AURORA_ENABLE_SIMD` | `ON` | 光栅内核 SIMD 双实现（SSE2 基线 + AVX2 运行时分发） | 注入 `AURORA_ENABLE_SIMD`（仅库内部，不 PUBLIC 传播）；详见 §4.2 |
-| `AURORA_ENABLE_CCACHE` | `ON` | ccache 编译缓存（加速重复编译） | 设置 `CMAKE_C_COMPILER_LAUNCHER` 与 `CMAKE_CXX_COMPILER_LAUNCHER`；支持 winget 安装路径自动检测 |
+| `AURORA_ENABLE_CCACHE` | `ON` | ccache 编译缓存（加速重复编译） | 设置 `CMAKE_C_COMPILER_LAUNCHER` 与 `CMAKE_CXX_COMPILER_LAUNCHER`（`cmake -E env` 前缀注入 ccache 配置环境变量，构建期生效）；支持 winget 安装路径自动检测；详见 §4.3 |
 | `AURORA_ENABLE_LLD` | `ON` | 链接器选择（lld 加速静态链接） | GNU/Clang 下 `find_program(ld.lld)` + `check_linker_flag` 探测通过则全局注入 `-fuse-ld=lld -B<lld 目录>`；失败静默回退 GNU ld；**不注入 feature 宏** |
 | `AURORA_ENABLE_IMAGE_JPEG` | `OFF` | JPEG 图像解码能力（libjpeg-turbo 源码构建） | 注入 `AURORA_ENABLE_IMAGE_JPEG`（仅库内部，不 PUBLIC 传播）；详见 §4.5 |
 | `AURORA_ENABLE_IMAGE_WEBP` | `OFF` | WebP 图像解码能力（libwebp 源码构建） | 注入 `AURORA_ENABLE_IMAGE_WEBP`（同上） |
@@ -289,14 +318,16 @@ cmake -S . -B build-trace -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_TRACING=ON
 |:---|:---|
 | 默认值 | `ON` |
 | feature 宏 | 不注入，仅设置编译器启动器 |
-| 缓存策略 | 启用压缩（level 6）、硬链接、默认缓存大小 2GB |
+| 缓存策略 | 压缩（level 6）、默认缓存大小 5G、`SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime`、`BASEDIR=<源码根>` + `NOHASHDIR`（多构建目录共享缓存） |
 
 - **安装方式**：支持 PATH 中的 ccache，也支持 winget 安装路径自动检测（`%LOCALAPPDATA%/Microsoft/WinGet/Packages/Ccache.Ccache_*/ccache-*/ccache.exe`）。
-- **配置变量**：`AURORA_CCACHE_DIR`（缓存目录，默认系统默认）、`AURORA_CCACHE_MAXSIZE`（最大缓存，默认 `2G`）。
+- **配置注入机制**：CMake 的 `set(ENV{...})` 只在 configure 期生效、不随构建期子进程传递，因此全部 ccache 配置经编译器启动器注入——`CMAKE_{C,CXX}_COMPILER_LAUNCHER = cmake -E env <CCACHE_*>… ccache`，在每个编译边构建期展开，精确作用于本项目、不污染全局环境，对 Ninja / Make / Visual Studio 生成器与 GCC/Clang/MSVC 一律适用。
+- **SLOPPINESS 各项**：`pch_defines` + `time_macros` 为 PCH 场景必需（缺省时命令行带 `-include cmake_pch.hxx` 的消费者 TU 直接被判 Uncacheable）；`include_file_mtime` / `include_file_ctime` 让头文件时间戳变化而内容不变时仍命中（preprocessor 模式按内容摘要，安全）。
+- **配置变量**：`AURORA_CCACHE_DIR`（缓存目录，默认系统默认）、`AURORA_CCACHE_MAXSIZE`（最大缓存，默认 `5G`）。二者同样经启动器注入构建期生效。注意：既有构建目录中已缓存的旧默认值（`2G`）不会自动更新，需显式 `-D` 覆盖。
 
 ```powershell
 cmake -S . -B build -DAURORA_ENABLE_CCACHE=OFF                                  # 禁用
-cmake -S . -B build -DAURORA_CCACHE_DIR=D:/ccache -DAURORA_CCACHE_MAXSIZE=5G    # 自定义
+cmake -S . -B build -DAURORA_CCACHE_DIR=D:/ccache -DAURORA_CCACHE_MAXSIZE=10G   # 自定义
 ```
 
 ### 4.4 `AURORA_ENABLE_LLD`
@@ -498,6 +529,7 @@ cmake --build build
 -D AURORA_BUILD_TESTS=ON|OFF                  # CTest（默认 ON）
 -D AURORA_TEST_SHARDS=<N>                     # 测试 runner 分片数（默认 1 = 单 runner）
 -D AURORA_BUILD_INSPECTOR_SERVER=ON|OFF       # Inspector HTTP 服务器（默认 OFF）
+-D AURORA_BUILD_VERIFY_TOOLS=ON|OFF           # 真机验收探针 tools/verify/（默认 OFF，EXCLUDE_FROM_ALL）
 
 # 后端开关（= feature 宏，PUBLIC 传播）
 -D AURORA_BACKEND_HEADLESS=ON|OFF   # 无头 PNG（默认 ON）

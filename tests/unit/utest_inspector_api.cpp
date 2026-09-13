@@ -3,13 +3,19 @@
 /// 测试说明: 覆盖 Inspector 统一门面——树查询四件套（text/rich/json/json_full）、widget_info
 /// 与属性读写（get_prop_value 未命中返回 null、set_prop 容忍未知键）、apply_patch 路径补丁
 /// 与非数组错误、query/find_node/get_state 定位、validate 错误→Diagnostic 映射、组件发现、
-/// to_code、变化订阅生命周期、simulate_* 交互模拟（按当前实现派发事件并返回 ok）。
+/// to_code、变化订阅生命周期、simulate_* 交互模拟（点击计数 / 获焦、文本落字、滚动偏移等
+/// 状态变化与不可命中时的错误返回）。
 
+#include <memory>
 #include <string>
 
 #include "aurora/inspector/inspector_api.h"
+#include "aurora/layout/layout_engine.h"
+#include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
+#include "aurora/widget/scroll.h"
 #include "aurora/widget/text.h"
+#include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_inspector_api {
@@ -21,6 +27,30 @@ namespace {
     auto col = std::make_shared<Column>();
     col->add(Node{std::make_shared<Text>("hi")});
     return Node{col};
+}
+
+/// @brief 固定尺寸哑控件：布局返回构造时给定的自然尺寸（经约束钳制），绘制无副作用。
+class FixedBox final : public Widget {
+  public:
+    FixedBox(float w, float h) : w_(w), h_(h) {}
+
+    [[nodiscard]] auto type_name() const -> const char* override { return "FixedBox"; }
+
+  protected:
+    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
+        return c.constrain(Size{.width = w_, .height = h_});
+    }
+    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
+
+  private:
+    float w_;
+    float h_;
+};
+
+auto box(float w, float h) -> Node { return Node{std::make_shared<FixedBox>(w, h)}; }
+
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
 }  // namespace
@@ -184,16 +214,80 @@ AURORA_TEST_CASE(subscribe_notify_unsubscribe_cycle) {
     Inspector::unsubscribe(id1);  // 重复取消安全（erase 不存在键为 no-op）
 }
 
-AURORA_TEST_CASE(simulate_helpers_dispatch_and_return_ok) {
-    // 交互模拟：当前实现经 EventDispatcher 在控件自身中心派发事件并返回 ok
-    // （注意：头文件注释「当前返回 GeneralNotSupported」与实现不符，以运行时行为为准）。
-    auto w = std::make_shared<Text>("hi");
-    AURORA_TEST_CHECK_NO_THROW((void)Inspector::simulate_click(*w));
-    AURORA_TEST_CHECK_NO_THROW((void)Inspector::simulate_scroll(*w, 0.0F, -10.0F));
-    AURORA_TEST_CHECK_NO_THROW((void)Inspector::simulate_text_input(*w, "abc"));
+AURORA_TEST_CASE(simulate_click_fires_button_handler_once) {
+    // 目标式派发：以控件自身为根、指针取控件中心，一次完整 Press+Release 只触发一次点击。
+    Button btn("OK");
+    int clicks = 0;
+    btn.set_on_click([&clicks]() -> void { ++clicks; });
+    LayoutEngine::layout(btn, bounded(120.0F, 40.0F));
 
-    const Result<void> click = Inspector::simulate_click(*w);
-    AURORA_TEST_CHECK_TRUE(click.ok());
+    const Result<void> r = Inspector::simulate_click(btn);
+    AURORA_TEST_REQUIRE_TRUE(r.ok());
+    AURORA_TEST_CHECK_EQ(clicks, 1);
+}
+
+AURORA_TEST_CASE(simulate_click_moves_focus_to_target) {
+    // 合成指针事件携带焦点管理器：否则 request_focus() 静默 no-op，点击不会转移焦点。
+    TextInput ti;
+    LayoutEngine::layout(ti, bounded(200.0F, 40.0F));
+    AURORA_TEST_CHECK_FALSE(ti.is_focused());
+
+    const Result<void> r = Inspector::simulate_click(ti);
+    AURORA_TEST_REQUIRE_TRUE(r.ok());
+    AURORA_TEST_CHECK_TRUE(ti.is_focused());
+}
+
+AURORA_TEST_CASE(simulate_text_input_writes_into_target) {
+    // 文本落到被指定为目标的控件（内部先置焦，on_text_input 以 is_focused 为前提）。
+    TextInput ti;
+    LayoutEngine::layout(ti, bounded(200.0F, 40.0F));
+
+    const Result<void> r = Inspector::simulate_text_input(ti, "abc");
+    AURORA_TEST_REQUIRE_TRUE(r.ok());
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"abc"});
+}
+
+AURORA_TEST_CASE(simulate_scroll_moves_offset_and_clamps) {
+    // 以滚动容器为目标派发滚轮事件：delta_y 为负使偏移增大 |delta|×step，且钳制在可滚范围内。
+    Scroll sc{ScrollProps{.child = box(300.0F, 800.0F), .step = 10.0F}};
+    LayoutEngine::layout(sc, bounded(300.0F, 200.0F));
+    AURORA_TEST_CHECK_NEAR(sc.offset_y(), 0.0F, 1e-4F);
+
+    const Result<void> r = Inspector::simulate_scroll(sc, 0.0F, -30.0F);
+    AURORA_TEST_REQUIRE_TRUE(r.ok());
+    AURORA_TEST_CHECK_NEAR(sc.offset_y(), 300.0F, 1e-4F);
+
+    // 反向滚动回顶：可滚范围 800-200=600，越界被钳制。
+    AURORA_TEST_REQUIRE_TRUE(Inspector::simulate_scroll(sc, 0.0F, 1000.0F).ok());
+    AURORA_TEST_CHECK_NEAR(sc.offset_y(), 0.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(simulate_reports_error_when_target_cannot_be_hit) {
+    // 空容器：中心处既无命中的后代、自身也不是点击目标 → 派发前即判定，返回错误而非静默成功。
+    Column empty;
+
+    const Result<void> click = Inspector::simulate_click(empty);
+    AURORA_TEST_REQUIRE_FALSE(click.ok());
+    AURORA_TEST_CHECK_EQ(click.error().code_enum, aurora::ErrorCode::GeneralNotSupported);
+
+    const Result<void> scroll = Inspector::simulate_scroll(empty, 0.0F, -10.0F);
+    AURORA_TEST_REQUIRE_FALSE(scroll.ok());
+    AURORA_TEST_CHECK_EQ(scroll.error().code_enum, aurora::ErrorCode::GeneralNotSupported);
+
+    // 空文本片段无副作用，直接视为完成（不派发、不报错）。
+    AURORA_TEST_CHECK_TRUE(Inspector::simulate_text_input(empty, "").ok());
+}
+
+AURORA_TEST_CASE(simulate_text_input_reports_error_when_target_rejects_input) {
+    // 禁用态控件不消费文本输入（on_text_input 提前返回且不置 handled）→ 派发器返回未处理。
+    TextInput disabled;
+    disabled.set_enabled(false);
+    LayoutEngine::layout(disabled, bounded(200.0F, 40.0F));
+
+    const Result<void> r = Inspector::simulate_text_input(disabled, "x");
+    AURORA_TEST_REQUIRE_FALSE(r.ok());
+    AURORA_TEST_CHECK_EQ(r.error().code_enum, aurora::ErrorCode::GeneralNotSupported);
+    AURORA_TEST_CHECK_EQ(disabled.value(), std::string{});
 }
 
 }  // namespace aurora::test_cases::utest_inspector_api

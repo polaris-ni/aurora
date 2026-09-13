@@ -10,11 +10,23 @@
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/cursorfont.h>
+
+// X11 的 <X11/X.h>（经 Xlib.h 引入）**无条件**定义对象宏 `CursorShape`：
+//   `#define CursorShape 0  /* largest size that can be displayed */`
+// 它与本项目公共类型名 `aurora::CursorShape`（core/enums.h）硬碰撞：不解除时该记号一律
+// 被预处理器展开为 `0`，使 `CursorShape shape` 变成 `0 shape`，报出很难定位的
+// `expected ')' before 'shape'`（仅在本文件真正以 AURORA_BACKEND_X11 编译时暴露）。
+// 本项目不使用该 Xlib 常量（光标句柄一律经 XCreateFontCursor + cursorfont.h 的 XC_* 字形创建），
+// 故直接解除。必须在 `#include "aurora/window/cursor_map.h"` 之前解除，否则其签名先被宏污染。
+#undef CursorShape
+
 #include <fcntl.h>
 #include <poll.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <clocale>
 #include <cmath>
 #include <cstdint>
@@ -26,6 +38,7 @@
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/render/png.h"
+#include "aurora/window/cursor_map.h"
 #include "aurora/window/keysym_map.h"
 #include "aurora/window/window_state.h"
 
@@ -116,6 +129,9 @@ struct X11Surface::Impl {
     XIC ic = nullptr;
     // 自唤醒管道（request_wake → wait_events poll 立即返回）。
     int wake_fd[2] = {-1, -1};
+    // 光标形状：`XCreateFontCursor` 句柄按 CursorShape 取值序缓存（0 = 未创建）。
+    // 每次创建都是新 X 资源，必须复用；析构统一 XFreeCursor。
+    std::array<Cursor, kCursorShapeCount> cursors{};
     // Visual 掩码位移（present swizzle：RGBA → X 原生像素序）。
     int rshift = 16;
     int gshift = 8;
@@ -363,6 +379,12 @@ X11Surface::~X11Surface() {
         if (d.gc != nullptr) {
             XFreeGC(d.dpy, d.gc);
         }
+        // 光标句柄：XDefineCursor 后 X 服务端自持引用，此处只释放客户端引用（Xlib 契约）。
+        for (Cursor c : d.cursors) {
+            if (c != 0) {
+                XFreeCursor(d.dpy, c);
+            }
+        }
         if (d.win != 0) {
             XDestroyWindow(d.dpy, d.win);
         }
@@ -373,6 +395,60 @@ X11Surface::~X11Surface() {
     }
     if (d.wake_fd[1] >= 0) {
         ::close(d.wake_fd[1]);
+    }
+}
+
+// ---- 光标形状：CursorShape → X 核心光标字体字形（<X11/cursorfont.h>）----
+
+namespace {
+
+/// @brief `CursorShape` → `XC_*` 字形码（`XCreateFontCursor` 的入参）。
+/// X11 无「禁止」专用光标，`XC_X_cursor`（大叉号）为各工具包通行近似。
+constexpr auto x11_cursor_glyph(CursorShape shape) -> unsigned int {
+    switch (shape) {
+        case CursorShape::Arrow:
+            return XC_left_ptr;
+        case CursorShape::IBeam:
+            return XC_xterm;
+        case CursorShape::PointingHand:
+            return XC_hand2;
+        case CursorShape::ResizeNS:
+            return XC_sb_v_double_arrow;
+        case CursorShape::ResizeEW:
+            return XC_sb_h_double_arrow;
+        case CursorShape::ResizeNWSE:
+            return XC_top_left_corner;
+        case CursorShape::ResizeNESW:
+            return XC_top_right_corner;
+        case CursorShape::Move:
+            return XC_fleur;
+        case CursorShape::Crosshair:
+            return XC_crosshair;
+        case CursorShape::NotAllowed:
+            return XC_X_cursor;
+        case CursorShape::Wait:
+            return XC_watch;
+    }
+    return XC_left_ptr;
+}
+
+}  // namespace
+
+auto X11Surface::set_cursor(CursorShape shape) -> void {
+    Impl &d = *impl_;
+    if (d.dpy == nullptr || d.win == 0) {
+        return;  // 连接/窗口未建成：安全 no-op。
+    }
+    const auto idx = static_cast<std::size_t>(shape);
+    if (idx >= d.cursors.size()) {
+        return;
+    }
+    if (d.cursors.at(idx) == 0) {
+        d.cursors.at(idx) = XCreateFontCursor(d.dpy, x11_cursor_glyph(shape));
+    }
+    if (d.cursors.at(idx) != 0) {
+        XDefineCursor(d.dpy, d.win, d.cursors.at(idx));
+        XFlush(d.dpy);  // 立即生效：光标不由后续事件驱动刷新（避免等到下次 poll）。
     }
 }
 

@@ -4,9 +4,12 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
+#include "aurora/core/enums.h"
 #include "aurora/core/result.h"
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
@@ -158,6 +161,18 @@ class Surface {
     /// @brief 运行时更新窗口标题（默认空实现；Win32 后端经 SetWindowText 生效，Headless/GLFW 忽略）。
     virtual auto set_title(const std::string & /*title*/) -> void {}
 
+    /// @brief 运行时更新鼠标光标形状（默认空实现；仿 `set_title` 模式，各窗口后端覆写生效）。
+    ///
+    /// 由事件派发器在悬停链解析出的光标形状变化时经 `Application` 接线调用（光标形状 API）。
+    /// 后端映射：GLFW `glfwSetCursor`+`glfwCreateStandardCursor`（Move→RESIZE_ALL，
+    /// NotAllowed/Wait 无标准形状回退 Arrow）；Win32 `SetCursor(LoadCursor(...))`；
+    /// X11 `XDefineCursor`；Wayland `wl_pointer.set_cursor`；macOS `NSCursor set`；
+    /// Headless/Wasm 默认空实现即可（无系统光标或浏览器自管）。
+    /// `CursorShape::Arrow` 由宿主在悬停回到无声明区域时下发，视为「恢复默认光标」。
+    /// 无系统光标的后端（`HeadlessSurface`）覆写为「记录调用序列」，使悬停链路可在
+    /// 无头环境端到端断言（见 `HeadlessSurface::cursor_log()`）；`D3D11`/`Wasm` 保持默认空实现。
+    virtual auto set_cursor(CursorShape /*shape*/) -> void {}
+
     /// @brief 运行期更新 CSD 自绘标题栏样式（默认空实现；Wayland 等客户端装饰后端覆写生效）。
     virtual auto set_title_bar_style(const TitleBarStyle & /*style*/) -> void {}
 
@@ -298,6 +313,23 @@ class HeadlessSurface : public Surface {
     [[nodiscard]] auto size() const -> Size override { return size_; }
     [[nodiscard]] auto data() const -> const std::uint8_t * override { return painter_.data(); }
 
+    /// @brief 覆写悬停光标下发：Headless 无系统光标，改为按序记录下发形状，
+    /// 使「派发器解析 → Application 接线 → Surface 生效」整条链路在无头环境可确定性断言
+    /// （光标形状完成判据：悬停不同控件触发对应 `set_cursor`，Headless 可断言）。
+    /// 仅记录、不产生任何 OS 副作用；真实后端各自覆写为平台光标 API。
+    auto set_cursor(CursorShape shape) -> void override { cursor_log_.push_back(shape); }
+    /// @brief 已下发的光标形状序列（按调用先后）。
+    [[nodiscard]] auto cursor_log() const -> const std::vector<CursorShape> & { return cursor_log_; }
+    /// @brief 最近一次下发的形状；从未下发时为 `std::nullopt`。
+    [[nodiscard]] auto last_cursor() const -> std::optional<CursorShape> {
+        if (cursor_log_.empty()) {
+            return std::nullopt;
+        }
+        return cursor_log_.back();
+    }
+    /// @brief 清空记录（测试用例间隔离）。
+    auto clear_cursor_log() -> void { cursor_log_.clear(); }
+
     /// @brief 测试 seams：在无 OS 窗口下确定性驱动窗口级状态（供 `test_window_state` 使用）。
     auto simulate_window_state(WindowState s) const -> void { notify_window_state(s); }
     /// @brief 测试 seams：在无 OS 窗口下确定性驱动窗口几何态。
@@ -316,6 +348,7 @@ class HeadlessSurface : public Surface {
     std::string png_path_;
     Size size_{.width = 0.0F, .height = 0.0F};
     int frame_ = 0;
+    std::vector<CursorShape> cursor_log_;  ///< 悬停光标下发序列（无头验收入口；见 set_cursor）。
 };
 #endif  // AURORA_BACKEND_HEADLESS
 

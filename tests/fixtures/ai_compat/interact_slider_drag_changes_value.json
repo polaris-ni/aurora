@@ -1,0 +1,20 @@
+{
+  "name": "slider drag changes value",
+  "note": "Press 会就地取值，故本 fixture 断言的是「拖拽后值与交互前不同」而非具体数值（绝对值取决于布局宽度）。",
+  "viewport": { "width": 400, "height": 160 },
+  "tree": {
+    "type": "Column",
+    "props": {},
+    "children": [
+      { "type": "Slider", "props": { "value": 0.0, "min": 0.0, "max": 100.0 } }
+    ]
+  },
+  "steps": [
+    { "action": "settle" },
+    { "action": "drag", "target": { "type": "Slider", "index": 0 }, "dx": 60, "dy": 0 },
+    { "action": "pump", "frames": 2 }
+  ],
+  "expect": [
+    { "target": { "type": "Slider", "index": 0 }, "prop": "value", "changed": true }
+  ]
+}

@@ -8,11 +8,14 @@
 
 #include "aurora/window/swizzle.h"
 #include "aurora/window/win32_capture.h"
+#include "aurora/window/win32_cursor.h"
 
 namespace aurora {
 
 // 注意：begin_frame/present 仅做 GDI 上屏；窗口创建/消息泵/事件翻译/DPI/同步重渲染
 // 全部由共享 Win32Window 宿主负责（与本类共用宿主，行为与原 Win32Surface 逐位等价）。
+
+auto Win32Surface::set_cursor(CursorShape shape) -> void { detail::set_win32_cursor(shape); }
 
 auto Win32Surface::begin_frame(int width, int height) -> Result<bool> {
     // 新帧从零绘制：上一帧残留的增量脏区对本帧无效（低阶调用方 begin+present 手动拼装时

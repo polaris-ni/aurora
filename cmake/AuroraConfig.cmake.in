@@ -52,9 +52,12 @@ endif()
 
 # HarfBuzz 在部分平台（含 MinGW）使用 pthread 实现内部互斥；静态链接需显式传递（置于 harfbuzz 之后）。
 # MinGW 自带 winpthread，直接以库名交由链接器从其 sysroot 解析（无需猜测绝对路径）；
-# 其它平台回退到 pthread。
-if(WIN32)
+# clang-cl / MSVC 模式链接 MSVCRT、无 winpthread，故不传递线程库（运行时走 OS 线程）；
+# 其它（POSIX）平台回退到 pthread。
+if(MINGW)
     set(_aurora_thread_libs winpthread)
+elseif(WIN32)
+    set(_aurora_thread_libs "")
 else()
     set(_aurora_thread_libs pthread)
 endif()

@@ -102,6 +102,59 @@ AURORA_TEST_CASE(localized_string_resolve_dispatches_to_table) {
     AURORA_TEST_CHECK_EQ(ls.resolve(&table, en), std::string("Welcome, Aurora!"));
 }
 
+AURORA_TEST_CASE(format_plural_six_categories_arabic) {
+    // CLDR 六类：阿拉伯语全类别，模板给出 zero/one/two/few/many/other 六分支，按数值正确选择。
+    // 必须透传 ar 区域，否则 plural_category 走默认 en 规则（0→Other）会选错分支。
+    const aurora::Locale ar{.language = "ar"};
+    AURORA_TEST_CHECK_EQ(
+        aurora::StringTable::format("{0, plural, zero=ZERO one=ONE two=TWO few=FEW many=MANY other=OTHER}", {"0"}, ar),
+        std::string("ZERO"));
+    AURORA_TEST_CHECK_EQ(
+        aurora::StringTable::format("{0, plural, zero=ZERO one=ONE two=TWO few=FEW many=MANY other=OTHER}", {"1"}, ar),
+        std::string("ONE"));
+    AURORA_TEST_CHECK_EQ(
+        aurora::StringTable::format("{0, plural, zero=ZERO one=ONE two=TWO few=FEW many=MANY other=OTHER}", {"2"}, ar),
+        std::string("TWO"));
+    AURORA_TEST_CHECK_EQ(
+        aurora::StringTable::format("{0, plural, zero=ZERO one=ONE two=TWO few=FEW many=MANY other=OTHER}", {"3"}, ar),
+        std::string("FEW"));
+    AURORA_TEST_CHECK_EQ(
+        aurora::StringTable::format("{0, plural, zero=ZERO one=ONE two=TWO few=FEW many=MANY other=OTHER}", {"11"}, ar),
+        std::string("MANY"));
+    AURORA_TEST_CHECK_EQ(
+        aurora::StringTable::format("{0, plural, zero=ZERO one=ONE two=TWO few=FEW many=MANY other=OTHER}", {"100"}, ar),
+        std::string("OTHER"));
+}
+
+AURORA_TEST_CASE(format_plural_fallback_to_other_for_unlisted_category) {
+    // 旧式仅 one=/other= 的模板：俄语 n=5 属 many（无 many 分支）→ 回退 other 分支。
+    // 另以 n=21 验证 Locale 透传：俄语 21→One（英语 21→Other），故 ar 模板下结果必须随 ru 而非 en。
+    const aurora::Locale ru{.language = "ru"};
+    AURORA_TEST_CHECK_EQ(
+        aurora::StringTable::format("{0, plural, one={0} item other={0} items}", {"5"}, ru),
+        std::string("5 items"));
+    AURORA_TEST_CHECK_EQ(
+        aurora::StringTable::format("{0, plural, one={0} item other={0} items}", {"1"}, ru),
+        std::string("1 item"));
+    AURORA_TEST_CHECK_EQ(
+        aurora::StringTable::format("{0, plural, one={0} item other={0} items}", {"21"}, ru),
+        std::string("21 item"));  // 若 Locale 未透传（走 en），此处会得到 "21 items"
+}
+
+AURORA_TEST_CASE(format_plural_french_many_branch_selected) {
+    // 法语：n=1 → one 分支；n=1000000（百万整数倍）→ many 分支；n=2 → other 分支。
+    const aurora::Locale fr{.language = "fr"};
+    AURORA_TEST_CHECK_EQ(
+        aurora::StringTable::format("{0, plural, one=ONE many=MANY other=OTHER}", {"1"}, fr),
+        std::string("ONE"));
+    AURORA_TEST_CHECK_EQ(
+        aurora::StringTable::format("{0, plural, one=ONE many=MANY other=OTHER}", {"1000000"}, fr),
+        std::string("MANY"));
+    AURORA_TEST_CHECK_EQ(
+        aurora::StringTable::format("{0, plural, one=ONE many=MANY other=OTHER}", {"2"}, fr),
+        std::string("OTHER"));
+}
+
 AURORA_TEST_CASE(default_string_table_returns_stable_reference) {
     // 进程级默认表：两次调用返回同一实例（只读冒烟，不写入全局状态）。
     AURORA_TEST_CHECK(&aurora::default_string_table() == &aurora::default_string_table());

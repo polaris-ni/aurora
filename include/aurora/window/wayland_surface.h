@@ -78,6 +78,21 @@ class WaylandSurface final : public Surface {
     auto set_event_handler(const EventHandler &h) -> void override;
     /// @brief 运行时更新窗口标题（xdg_toplevel_set_title，UTF-8）。
     auto set_title(const std::string &title) -> void override;
+
+    /// @brief 运行时更新悬停光标形状——**契约实现，平台侧待真机接线**。
+    ///
+    /// Wayland 客户端不能直接「设光标形状」：须自备 cursor `wl_surface` + `wl_buffer`，
+    /// 并在 `wl_pointer.enter`（携带该次 serial）时经 `wl_pointer.set_cursor` 交合成器接受。
+    /// 本实现在此只落盘语义形状（`Impl::pending_cursor_shape`），并已捕获 enter serial
+    /// （`Impl::pointer_enter_serial`，见 `ptr_enter`）；真正下发的三步须在真实 Wayland 会话
+    /// 编译+人工验收后补（本仓库无头构建无法覆盖），详见 .cpp 内 TODO 注释。
+    /// 备选更简路径：绑定 `wp_cursor_shape_manager_v1`，用 `wp_cursor_shape_device_v1_set_shape`
+    /// 下发——免自管 buffer，但依赖合成器提供该扩展（GNOME 支持）。
+    /// 形状→规范名映射复用 `cursor_rfc_name`（cursor_map.h），即 freedesktop 主题名。
+    /// @note 已在 `AURORA_BACKEND_WAYLAND=ON` 构建内**编译验证**（2026-09-13）。真机语义验证
+    /// 仍依赖合成器侧接线（见 .cpp 的 TODO），本仓库无头构建内无法运行。
+    auto set_cursor(CursorShape shape) -> void override;
+
     /// @brief 运行期更新 CSD 标题栏样式（存入 Impl 并触发重绘，下帧 draw_decoration 生效）。
     auto set_title_bar_style(const TitleBarStyle &style) -> void override;
     /// @brief 控件发起窗口拖拽移动（Wayland：xdg_toplevel_move，须在 Press 派发栈内调用）。

@@ -19,6 +19,7 @@
 #include "aurora/core/log.h"
 #include "aurora/core/utf8.h"
 #include "aurora/perf/counters.h"
+#include "aurora/render/bidi.h"
 #include "aurora/render/bitmap_font.h"
 #include "aurora/render/font_discovery.h"
 #include "aurora/render/glyph_atlas.h"
@@ -206,6 +207,8 @@ struct ShapeCacheKeyHash {
         std::memcpy(&u, &k.opts.word_spacing, 4);
         mix(u);
         mix(k.opts.italic ? 0x1001ULL : 0ULL);
+        // direction 进缓存键：nullopt=guess（0），显式 LTR/RTL 各占一档。
+        mix(k.opts.direction.has_value() ? (0x2000ULL + static_cast<std::uint64_t>(*k.opts.direction)) : 0ULL);
         mix(k.faces_key);
         return h;
     }
@@ -317,6 +320,10 @@ class ShapeCache {
     if (line.empty()) {
         return out;
     }
+    // 段落基准方向：显式 direction 优先，否则按首个强方向字符推断（UBA P2/P3）。
+    // 该基准同时作为各 run 的 hb 基准方向（hb 在其下应用 UBA，嵌的异向子段仍保持可读），
+    // 并驱动下方的跨 run 视觉重排。
+    const TextDirection base = opts.direction.has_value() ? *opts.direction : detail::guess_paragraph_direction(line);
     // 1) 解码整行码点并标注每个码点所属面。
     struct CpInfo {
         unsigned cp;
@@ -338,14 +345,27 @@ class ShapeCache {
             cps.push_back({.cp = cp, .face = ff, .byte_start = bs, .byte_end = i});
         }
     }
-    // 2) 把连续同面码点切为 run，逐 run 调 hb_shape。
+    // 2) 完整 UBA（UAX #9）：逐码点嵌入层级（X/W/N/I 规则），供「面 + 层级」双键切 run
+    //    与跨 run 的 L2 层叠反转重排。
+    std::vector<char32_t> cps32;
+    cps32.reserve(cps.size());
+    for (const auto &c : cps) {
+        cps32.push_back(static_cast<char32_t>(c.cp));
+    }
+    const std::uint8_t base_level = (base == TextDirection::RTL) ? 1U : 0U;
+    const auto levels = detail::uba_levels(cps32, base_level);
+    // 3) 把「同面且同层级」的连续码点切为 run；逐 run 调 hb_shape，每个 run 的字形序列先独立收集。
+    //    run 层级单一，hb 基准方向取该 run 层级奇偶（显式 direction 时；否则交给 hb guess）。
+    std::vector<std::vector<ShapedGlyph>> segs;
+    std::vector<std::uint8_t> seg_levels;
     for (std::size_t k = 0; k < cps.size();) {
         const auto &cp = cps.at(k);
         FontFace *rf = cp.face;
+        const std::uint8_t run_level = levels.at(k);
         const std::size_t run_byte_start = cp.byte_start;
         std::size_t run_byte_end = cp.byte_end;
         std::size_t kk = k + 1;
-        while (kk < cps.size() && cps.at(kk).face == rf) {
+        while (kk < cps.size() && cps.at(kk).face == rf && levels.at(kk) == run_level) {
             run_byte_end = cps.at(kk).byte_end;
             ++kk;
         }
@@ -354,6 +374,7 @@ class ShapeCache {
         if (run_str.empty()) {
             continue;
         }
+        std::vector<ShapedGlyph> seg;
         const FT_Face face = rf->face;
         FT_Set_Pixel_Sizes(face, 0, px);
         apply_italic(face, opts.italic);  // 决定字形变换，使 shaping 与绘制变换一致（斜体剪切不改变 x 推进）
@@ -365,12 +386,18 @@ class ShapeCache {
         hb_buffer_t *buf = hb_buffer_create();
         hb_buffer_add_utf8(buf, run_str.data(), static_cast<int>(run_str.size()), 0, static_cast<int>(run_str.size()));
         hb_buffer_guess_segment_properties(buf);
+        // 显式 direction 时按该 run 的 UBA 层级奇偶设定基准方向（run 层级单一，内序
+        // 由 hb 反转为视觉序）；无显式 direction 时保持 hb guess（与接入前行为逐位一致）。
+        if (opts.direction.has_value()) {
+            hb_buffer_set_direction(buf, (run_level % 2U) != 0U ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
+        }
         hb_shape(hb_font, buf, nullptr, 0);
         unsigned int ng = 0;
         const hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(buf, &ng);
         const hb_glyph_position_t *poss = hb_buffer_get_glyph_positions(buf, &ng);
         // HarfBuzz 返回 C 风格数组，此处是三方 C API 的必经指针遍历；用 NOLINT 块收口。
         // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        seg.reserve(ng);
         for (unsigned int j = 0; j < ng; ++j) {
             ShapedGlyph sg{};
             sg.face = rf;
@@ -386,11 +413,28 @@ class ShapeCache {
             sg.x_off = static_cast<float>(poss[j].x_offset) / 64.0F;
             sg.y_off = static_cast<float>(poss[j].y_offset) / 64.0F;
             sg.x_adv = static_cast<float>(poss[j].x_advance) / 64.0F;
-            out.glyphs.push_back(sg);
+            // 双向格式控制符（LRE/RLE/PDF/LRO/RLO/LRI/RLI/FSI/PDI 与 LRM/RLM）视觉上为零宽
+            // 不可见标记；即便字体为其提供非零 advance（如缺字形回退 .notdef），也强制零推进，
+            // 使 measure_width / caret_x / hit_test_char 的度量与字体无关、确定为零宽。
+            if (detail::is_bidi_format_control(static_cast<char32_t>(sg.cp))) {
+                sg.x_adv = 0.0F;
+            }
+            seg.push_back(sg);
         }
         // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         hb_buffer_destroy(buf);
         hb_font_destroy(hb_font);
+        seg_levels.push_back(run_level);
+        segs.push_back(std::move(seg));
+    }
+    // 4) 跨 run 视觉重排（完整 UBA L2）：按 run 层级序列层叠反转——RTL 段整体翻转、段内
+    //    数字内序保持、LTR 段内 RTL 子段原位等均由此统一推出；全零层级为恒等变换（与
+    //    接入前逐位一致，golden 零影响）。run 内字形已为该 run 视觉序，此处只重排 run 间序。
+    const auto order = detail::uba_visual_order(seg_levels);
+    for (const std::size_t idx : order) {
+        if (idx < segs.size()) {
+            out.glyphs.insert(out.glyphs.end(), segs[idx].begin(), segs[idx].end());
+        }
     }
     return out;
 }
@@ -444,6 +488,12 @@ class ShapeCache {
         if (char_index <= acc + lcount) {
             const std::size_t local = char_index - acc;
             const auto sl = shape_line(line, faces, px, opts);
+            // RTL：逻辑下标 ↔ 视觉位置镜像。逻辑首字符在右缘：逻辑 caret i（前 i 个
+            // 字符的左边界）= 右起第 i 个视觉字形处 = 视觉前缀 (n - i) 的推进。
+            if (opts.direction == TextDirection::RTL) {
+                const std::size_t n = sl.glyphs.size();
+                return line_prefix(sl.glyphs, opts, spacing_scale, n - std::min(local, n));
+            }
             return line_prefix(sl.glyphs, opts, spacing_scale, local);
         }
         acc += lcount + 1;  // +1 计 '\n'
@@ -475,12 +525,19 @@ class ShapeCache {
 // divisor=1，实显版 divisor=scale，与逐次调用 caret_x / display_caret_x 的边界值逐位一致）。
 // inclusive=false：caret 语义（相邻边界中点取舍，返回 0..total）；
 // inclusive=true：含头含尾（x ≤ 右边界即命中该字符，行尾右侧命中末字符，返回 0..total-1）。
+// RTL：视觉序字形数组按下标镜像回逻辑下标（视觉字形 j = 逻辑 m-1-j，m 为该行字形数）；
+// x 左右两端语义对调（x≤0 为逻辑末尾、x 超右缘为逻辑开头）。BitmapFont 兜底路径不支持 RTL。
 [[nodiscard]] auto hit_test_single_pass(const std::string &text, float x, const std::vector<FontFace *> &faces, int px,
                                         const TextLayoutOpts &opts, float spacing_scale, float divisor, bool inclusive)
     -> std::size_t {
     const std::size_t total = cp_count(text);
-    if (total == 0 || x <= 0.0F) {
+    if (total == 0) {
         return 0;
+    }
+    const bool rtl = opts.direction == TextDirection::RTL;
+    if (x <= 0.0F) {
+        // 左缘之外：LTR=逻辑开头；RTL=逻辑末尾（视觉最左=逻辑最后）。
+        return rtl ? (inclusive ? total - 1U : total) : 0;
     }
     const auto lines = split_lines(text);
     float w = 0.0F;
@@ -488,8 +545,9 @@ class ShapeCache {
     std::size_t line_char_offset = 0;  // 当前行首在全局文本中的字符下标（含前导 '\n'）
     for (const auto &line_str : lines) {
         const auto sl = shape_line(line_str, faces, px, opts);
+        const std::size_t m = sl.glyphs.size();
         w = 0.0F;  // 每行 pen 推进归零（与 draw_text_impl 每行重置 pen_x 一致）
-        for (std::size_t j = 0; j < sl.glyphs.size(); ++j) {
+        for (std::size_t j = 0; j < m; ++j) {
             if (j > 0) {
                 w += opts.letter_spacing * spacing_scale;
             }
@@ -501,19 +559,24 @@ class ShapeCache {
             const float boundary = w / divisor;  // 与 caret_x/display_caret_x 返回值逐位一致
             if (inclusive) {
                 if (x <= boundary) {
-                    return line_char_offset + j;
+                    // 视觉字形 j = 逻辑 m-1-j（RTL）；LTR 直接 j。
+                    return line_char_offset + (rtl ? (m - 1U - j) : j);
                 }
             } else {
                 const float mid = (prev_boundary + boundary) * 0.5F;
                 if (x < mid) {
-                    return line_char_offset + j;
+                    // 视觉前缀 j 的 caret 位置 = 逻辑 caret (m - j)（RTL）；LTR 直接 j。
+                    return line_char_offset + (rtl ? (m - j) : j);
                 }
                 prev_boundary = boundary;
             }
         }
         line_char_offset += cp_count(line_str) + 1;  // +1 计 '\n'
     }
-    // 行尾右侧：caret 语义返回末 caret（total）；含头含尾返回末字符（消除行尾漏选）。
+    // 行尾右侧：LTR=逻辑末尾（caret total / 含入末字符）；RTL=逻辑开头（caret 0 / 含入首字符）。
+    if (rtl) {
+        return 0;
+    }
     return inclusive ? total - 1U : total;
 }
 
@@ -586,6 +649,12 @@ auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Fo
         float pen_x = std::floor(r.origin.x + 0.5F);  // 每行 pen 推进归零并 snap 到整数像素
         for (std::size_t j = 0; j < sl.glyphs.size(); ++j) {
             const auto &sg = sl.glyphs.at(j);
+            // 双向格式控制符（LRE/RLE/PDF/LRO/RLO/LRI/RLI/FSI/PDI 与 LRM/RLM）为零宽不可见
+            // 标记：跳过字形加载、光栅化与绘制，连字形推进一并跳过（其 x_adv 已在 shape 阶段
+            // 置零）。确保任何字体（含无对应字形→.notdef 豆腐盒）下都不出现可见墨迹或占位宽度。
+            if (detail::is_bidi_format_control(static_cast<char32_t>(sg.cp))) {
+                continue;
+            }
             const FT_Face face = sg.face->face;
             const std::uint64_t key =
                 make_key(static_cast<std::uint32_t>(sg.face->id), static_cast<std::uint32_t>(sg.gi),
@@ -769,8 +838,14 @@ auto FontEngine::hit_test_char(const std::string &text, float x, const Font &f) 
 auto FontEngine::hit_test_char(const std::string &text, float x, const Font &f, const TextLayoutOpts &opts)
     -> std::size_t {
     const std::size_t total = cp_count(text);
-    if (total == 0 || x <= 0.0F) {
+    if (total == 0) {
         return 0;
+    }
+    // RTL：x≤0（视觉左缘之外）= 逻辑末尾——视觉最左即逻辑最后，caret 语义落逻辑尾边界；
+    // 与 hit_test_single_pass 的 x≤0 分支（L519-521）及 display_hit_test_char 语义一致。
+    // （此前入口无条件返回 0，导致 RTL 段点击行左缘 caret 恒落逻辑首——验收发现。）
+    if (x <= 0.0F) {
+        return opts.direction == TextDirection::RTL ? total : 0;
     }
     const auto &faces = resolve_faces(f.family);
     if (faces.empty()) {
@@ -797,8 +872,14 @@ auto FontEngine::hit_test_char_inclusive(const std::string &text, float x, const
 auto FontEngine::hit_test_char_inclusive(const std::string &text, float x, const Font &f, const TextLayoutOpts &opts)
     -> std::size_t {
     const std::size_t total = cp_count(text);
-    if (total == 0 || x <= 0.0F) {
+    if (total == 0) {
         return 0;
+    }
+    // RTL：x≤0（视觉左缘之外）= 命中逻辑尾字符（含头含尾语义，镜像 LTR 的「行尾右侧
+    // 命中末字符」）；与 hit_test_single_pass 的 x≤0 分支及 display_hit_test_char_inclusive
+    // 语义一致。（此前入口无条件返回 0，导致 RTL 段点击行左缘恒命中逻辑首——验收发现。）
+    if (x <= 0.0F) {
+        return opts.direction == TextDirection::RTL ? total - 1U : 0;
     }
     const auto &faces = resolve_faces(f.family);
     if (faces.empty()) {

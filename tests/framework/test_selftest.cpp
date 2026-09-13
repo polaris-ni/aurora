@@ -643,6 +643,7 @@ auto selftest_tracing() -> bool {
 
 /// @brief 报告写出的临时文件路径。
 [[nodiscard]] auto scratch_path(std::string_view name) -> std::string {
+    // TEST_TEMP_EXEMPT: 框架自检在用例隔离前运行，temp_dir() 尚未就绪，须用系统临时目录（非测试临时文件）。
     return (std::filesystem::temp_directory_path() / std::string{name}).string();
 }
 
