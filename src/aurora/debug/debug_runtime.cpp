@@ -3,7 +3,6 @@
 
 #include "aurora/debug/debug_runtime.h"
 
-#include <cmath>
 #include <deque>
 #include <string>
 #include <vector>
@@ -20,7 +19,7 @@ namespace aurora::debug {
 
 namespace {
 
-constexpr auto AURORA_UNAVAILABLE_REASON = "AURORA_ENABLE_DEBUG not enabled";
+[[maybe_unused]] constexpr auto AURORA_UNAVAILABLE_REASON = "AURORA_ENABLE_DEBUG not enabled";
 
 // ---- why_trace 采集缓冲（仅 DEBUG 下存在）----
 #ifdef AURORA_ENABLE_DEBUG

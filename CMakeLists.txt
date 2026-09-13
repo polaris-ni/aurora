@@ -89,6 +89,42 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug" AND MSVC)
     string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 endif ()
 
+# ---- ASan 前置决策（仅 clang/Windows 生效；须先于 include(AuroraThirdParty)） ----
+# clang(Windows 非 MinGW) 的动态 ASan 运行时（clang_rt.asan_dynamic-*.dll）按 release CRT
+# 构建，而 CMake Debug 默认选 /MDd 调试 CRT——二者混用时，ucrtbased/MSVCP140D 在进程退出
+# 阶段的内部释放会被 ASan 判定 bad-free 稳定 abort（构建期生成器 gen_error_codes 因此无法
+# 运行）。故 ASan 开启时统一切 release CRT（MultiThreadedDLL）。CMAKE_MSVC_RUNTIME_LIBRARY
+# 只影响其后创建的目标，而 harfbuzz 是 C++ 静态库、_ITERATOR_DEBUG_LEVEL 随 CRT 走，与消费
+# 者混链会 LNK2038——本决策必须先于三方目标创建（含 freetype/harfbuzz）。Debug 配置下的
+# MSVC 调试 STL 检查由此让位于 ASan 检测。选项本体与 -fsanitize 注入仍在 AuroraInstrumentation.cmake。
+if (AURORA_ENABLE_ASAN AND WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT MINGW)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+    # 动态 ASan 运行时随构建目录分发：Windows 加载器对 exe 同目录的搜索优先于 PATH，
+    # 暂存后构建期生成器（gen_error_codes/gen_debug_api）与测试 runner 无需手工配 PATH。
+    execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -print-resource-dir
+            OUTPUT_VARIABLE _aurora_clang_res_dir
+            RESULT_VARIABLE _aurora_clang_res_rc
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+    if (_aurora_clang_res_rc EQUAL 0 AND _aurora_clang_res_dir)
+        file(GLOB _aurora_asan_rt_dlls "${_aurora_clang_res_dir}/lib/windows/clang_rt.asan_dynamic-*.dll")
+        if (_aurora_asan_rt_dlls)
+            file(COPY ${_aurora_asan_rt_dlls} DESTINATION "${CMAKE_BINARY_DIR}")
+            aurora_log("ASan runtime DLL staged into build dir: ${_aurora_asan_rt_dlls}")
+        else ()
+            aurora_warn("AURORA_ENABLE_ASAN=ON (clang/Windows): clang_rt.asan_dynamic-*.dll not found "
+                    "under '${_aurora_clang_res_dir}/lib/windows' — instrumented executables will fail "
+                    "to start with 0xc0000135 (DLL not found).")
+        endif ()
+    else ()
+        aurora_warn("AURORA_ENABLE_ASAN=ON (clang/Windows): failed to query clang resource dir via "
+                "'${CMAKE_CXX_COMPILER} -print-resource-dir' — cannot stage the ASan runtime DLL.")
+    endif ()
+    unset(_aurora_clang_res_dir)
+    unset(_aurora_clang_res_rc)
+    unset(_aurora_asan_rt_dlls)
+endif ()
+
 # 生成器建议：Makefiles 默认非并行，推荐 Ninja 以最大化编译吞吐（见 CMakePresets.json）。
 if (CMAKE_GENERATOR MATCHES "Makefiles")
     find_program(AURORA_NINJA_HINT NAMES ninja ninja-build)
@@ -228,8 +264,10 @@ if (AURORA_PCH_ENABLED)
             "${CMAKE_CURRENT_SOURCE_DIR}/include/aurora/aurora_pch.h")
 endif ()
 
-# 抑制 MSVC 对 std::fopen 等 POSIX 函数的弃用警告（render/png.h 使用 std::fopen）
-if (MSVC)
+# 抑制 MSVC 对 std::fopen 等 POSIX 函数的弃用警告（render/png.h 使用 std::fopen）。
+# clang(MSVC ABI、GNU 前端) 下 CMake 的 MSVC 变量为假但 SIMULATE_ID=MSVC，UCRT 的
+# __declspec(deprecated) 同样生效（getenv/freopen 报 -Wdeprecated-declarations），一并覆盖。
+if (MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC" OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
     target_compile_definitions(aurora PUBLIC _CRT_SECURE_NO_WARNINGS)
 endif ()
 

@@ -117,6 +117,9 @@ endif ()
 # ---- 内存错误检测（AddressSanitizer + UndefinedBehaviorSanitizer） ----
 # 开启后注入 -fsanitize=address,undefined 插桩，运行时检测越界、use-after-free、
 # 整数溢出、空指针解引用等。与 AURORA_ENABLE_COVERAGE 互斥（二者都改写代码生成）。
+# clang/Windows（MSVC ABI）的 CRT 统一（release CRT）与 ASan 运行时 DLL 暂存是**前置决策**，
+# 位于顶层 CMakeLists 的 ASan 前置决策块——CMAKE_MSVC_RUNTIME_LIBRARY 只影响其后创建的
+# 目标，须先于三方 freetype/harfbuzz（_ITERATOR_DEBUG_LEVEL 混链约束），故不放在本模块。
 option(AURORA_ENABLE_ASAN "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 if (AURORA_ENABLE_ASAN)
     if (AURORA_ENABLE_COVERAGE)

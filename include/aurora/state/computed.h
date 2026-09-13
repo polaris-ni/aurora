@@ -59,7 +59,7 @@ class Computed : public SignalView<T>, public StateBase {
             }
             ++it;
         }
-        const auto conn = std::make_shared<Connection>();
+        const auto conn = make_connection();
         conn->effect = e.anchor();
         conn->effect_raw = &e;
         conn->state = this->anchor();

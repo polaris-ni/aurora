@@ -232,7 +232,7 @@ cmake --build build --target gen_debug_api_json     # 仅刷新 debug 段
 | 选项 | 默认值 | 含义 | 注入内容 |
 |:---|:---|:---|:---|
 | `AURORA_ENABLE_COVERAGE` | `OFF` | 行覆盖率（终端摘要，不生成 HTML；按编译器分流） | GCC：`--coverage -O0 -g`（gcov，MinGW 追加 `-Wa,-mbig-obj`，并对 `painter.cpp` 单独提升 `-O1`，见下方约束）；Clang：`-fprofile-instr-generate -fcoverage-mapping -O0 -g`（LLVM 原生 source-based）。均清除默认 `-O3/-Os/-DNDEBUG`、关闭 PCH，提供 `coverage` custom target |
-| `AURORA_ENABLE_ASAN` | `OFF` | AddressSanitizer + UndefinedBehaviorSanitizer | 对所有目标注入 `-fsanitize=address,undefined -fno-omit-frame-pointer -g -O0`；仅 GNU/Clang 生效 |
+| `AURORA_ENABLE_ASAN` | `OFF` | AddressSanitizer + UndefinedBehaviorSanitizer | 对所有目标注入 `-fsanitize=address,undefined -fno-omit-frame-pointer -g -O0`；仅 GNU/Clang 生效。Clang + Windows 另有 release CRT 切换与运行时 DLL 暂存的前置决策（顶层 CMakeLists），见下方约束 |
 | `AURORA_ENABLE_PROFILING` | `AUTO` | 渲染性能插桩（作用域计时 + 渲染计数器） | 三态，见 §4.1 |
 | `AURORA_ENABLE_TRACING` | `OFF` | Chrome Trace Event 时间线落盘 | 注入 `AURORA_ENABLE_TRACING`（PUBLIC 传播 + 安装导出），**并强制**打开 `AURORA_ENABLE_PROFILING` |
 | `AURORA_ENABLE_DEBUG` | `AUTO` | 真实后端 DEBUG 能力（截图、控件树、性能快照、可视化调试叠层、控件拾取） | 三态；注入 `AURORA_ENABLE_DEBUG`（**PUBLIC 传播**，经 `aurora_define_feature` 注册）。PUBLIC 的原因：Widget 类在宏下新增数据成员会改变类 ABI 布局，消费者（demo / tests / 宿主应用）必须与库同值，否则构造与成员偏移错位（ODR / 访问冲突）。**随安装导出**（`AuroraConfig.cmake`）且导出面严格对齐**安装产物的实际取值**：强制 ON、或 `AUTO` + 单配置 `Debug`/`RelWithDebInfo` 时导出；`AUTO` + Release（含空构建类型）与强制 OFF 时不导出（无条件导出会让发布态产物反向失配）。调试 API 与测试注入 API 均在头文件始终声明、`.cpp` 体按宏裁切，消费端调用始终可编译、关闭时返回 disabled |
@@ -247,6 +247,7 @@ cmake --build build --target gen_debug_api_json     # 仅刷新 debug 段
 **约束**：
 
 - `AURORA_ENABLE_COVERAGE` 与 `AURORA_ENABLE_ASAN` **互斥**：同时 `ON` 触发 `FATAL_ERROR`（都改写代码生成）。
+- **Clang + Windows（非 MinGW）+ ASan 的 CRT 前置决策**：LLVM 的动态 ASan 运行时（`clang_rt.asan_dynamic-*.dll`）按 release CRT 构建，与 CMake Debug 默认的 `/MDd` 调试 CRT 不兼容——进程退出阶段 `ucrtbased`/`MSVCP140D` 的内部释放被 ASan 判定 bad-free 稳定 abort（构建期生成器因此无法运行）。开启 ASan 时，顶层 CMakeLists 的前置决策块统一切 `MultiThreadedDLL`（含三方 freetype/harfbuzz，避免 `_ITERATOR_DEBUG_LEVEL` 混链 `LNK2038`），并把运行时 DLL 暂存进构建目录（Windows 加载器对 exe 同目录的搜索优先于 PATH，生成器/测试无需手工配置）。Debug 配置的 MSVC 调试 STL 检查由 ASan 顶替。该决策须先于三方 `add_subdirectory`，故位于顶层 CMakeLists 而非 `AuroraInstrumentation.cmake`。
 - **Clang 下禁止注入 `--coverage`**：clang 的 gcov 兼容运行时（`llvm_gcda_*`）在 Windows 进程退出刷写 `.gcda` 时稳定崩溃（关闭窗口 / 测试退出即 `0xC0000005`）。现已按 `CMAKE_CXX_COMPILER_ID` 自动分流，同一开关对两套工具链透明。
 - **MinGW GCC 两项特例**：(1) `-O0 --coverage` 组合会击穿 COFF 目标文件默认段数上限（大 TU 汇编报 "file too big"），故追加 `-Wa,-mbig-obj`；(2) `-O0 --coverage` 下对带 `target("sse4.1")/target("avx2")` 属性的函数（`painter_simd.inl` SIMD 栅格内核）生成崩溃代码（box blur AVX2 路径运行时 `0xC0000005`，`-O3` 与标量路径均正常），故对 `painter.cpp`（该内核唯一 TU）以源文件级 `-O1` 覆盖，gcov 行映射完整、SIMD 实现行不豁免出统计。
 - 覆盖率需覆盖测试目标（大量 widget 是 header-only，仅在测试编译单元中被编译，否则覆盖率严重偏低）。

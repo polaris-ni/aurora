@@ -80,10 +80,25 @@ auto report(Severity severity, const char* file, int line, std::string message) 
 [[nodiscard]] auto message_message(bool satisfied, std::string_view expression, std::string_view message)
     -> std::string;
 
+// 混合符号比较的等价重写：两个算术类型的内建比较本就会按 usual arithmetic conversions
+// 统一后再比，显式转换到 std::common_type_t 只是把同一转换写出来——比较结果完全一致，
+// 却能让 -Wsign-compare 在 GCC（定义点诊断）与 clang（实例化点诊断）下同时静默，
+// 免去对 CHECK_EQ(size, 字面量) 这类混型用例的逐文件压制。非算术类型（指针/字符串/枚举）
+// 原样比较，行为不变。
+template <typename A, typename B, typename Op>
+[[nodiscard]] auto compare_values(const A& lhs, const B& rhs, Op op) -> bool {
+    if constexpr (std::is_arithmetic_v<A> && std::is_arithmetic_v<B>) {
+        using Common = std::common_type_t<A, B>;
+        return op(static_cast<Common>(lhs), static_cast<Common>(rhs));
+    } else {
+        return op(lhs, rhs);
+    }
+}
+
 template <typename A, typename B>
 [[nodiscard]] auto eq_message(const A& lhs, const B& rhs, std::string_view lhs_text, std::string_view rhs_text)
     -> std::string {
-    if (lhs == rhs) {
+    if (compare_values(lhs, rhs, [](const auto& l, const auto& r) { return l == r; })) {
         return {};
     }
     return std::string{lhs_text} + " == " + std::string{rhs_text} + compare_detail(lhs, rhs);
@@ -92,7 +107,7 @@ template <typename A, typename B>
 template <typename A, typename B>
 [[nodiscard]] auto ne_message(const A& lhs, const B& rhs, std::string_view lhs_text, std::string_view rhs_text)
     -> std::string {
-    if (lhs != rhs) {
+    if (compare_values(lhs, rhs, [](const auto& l, const auto& r) { return l != r; })) {
         return {};
     }
     return std::string{lhs_text} + " != " + std::string{rhs_text} + compare_detail(lhs, rhs);
@@ -101,7 +116,7 @@ template <typename A, typename B>
 template <typename A, typename B>
 [[nodiscard]] auto lt_message(const A& lhs, const B& rhs, std::string_view lhs_text, std::string_view rhs_text)
     -> std::string {
-    if (lhs < rhs) {
+    if (compare_values(lhs, rhs, [](const auto& l, const auto& r) { return l < r; })) {
         return {};
     }
     return std::string{lhs_text} + " < " + std::string{rhs_text} + compare_detail(lhs, rhs);
@@ -110,7 +125,7 @@ template <typename A, typename B>
 template <typename A, typename B>
 [[nodiscard]] auto le_message(const A& lhs, const B& rhs, std::string_view lhs_text, std::string_view rhs_text)
     -> std::string {
-    if (lhs <= rhs) {
+    if (compare_values(lhs, rhs, [](const auto& l, const auto& r) { return l <= r; })) {
         return {};
     }
     return std::string{lhs_text} + " <= " + std::string{rhs_text} + compare_detail(lhs, rhs);
@@ -119,7 +134,7 @@ template <typename A, typename B>
 template <typename A, typename B>
 [[nodiscard]] auto gt_message(const A& lhs, const B& rhs, std::string_view lhs_text, std::string_view rhs_text)
     -> std::string {
-    if (lhs > rhs) {
+    if (compare_values(lhs, rhs, [](const auto& l, const auto& r) { return l > r; })) {
         return {};
     }
     return std::string{lhs_text} + " > " + std::string{rhs_text} + compare_detail(lhs, rhs);
@@ -128,7 +143,7 @@ template <typename A, typename B>
 template <typename A, typename B>
 [[nodiscard]] auto ge_message(const A& lhs, const B& rhs, std::string_view lhs_text, std::string_view rhs_text)
     -> std::string {
-    if (lhs >= rhs) {
+    if (compare_values(lhs, rhs, [](const auto& l, const auto& r) { return l >= r; })) {
         return {};
     }
     return std::string{lhs_text} + " >= " + std::string{rhs_text} + compare_detail(lhs, rhs);

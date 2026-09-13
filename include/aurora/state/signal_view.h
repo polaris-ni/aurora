@@ -22,6 +22,20 @@ struct Connection {
 };
 using ConnectionPtr = std::shared_ptr<Connection>;
 
+/// @brief 锚点/观察边的统一构造入口（不用 make_shared）。
+/// libstdc++ 的 make_shared 把对象存储并入内联控制块（_Sp_counted_ptr_inplace），
+/// GCC 16 中端对该布局做下标越界分析时会产生 -Warray-bounds 误报（对象内存被当作
+/// 下标数组）。两类型的默认构造均 noexcept（weak_ptr 空构造不分配），改用非内联
+/// 控制块（new + _Sp_counted_ptr）语义等价、误报根除；State/Effect 构造与订阅均为
+/// 低频路径，多一次分配无感知。clang-tidy 的 modernize-make-shared 建议对此定向豁免。
+[[nodiscard]] inline auto make_anchor() -> AnchorPtr {
+    return std::shared_ptr<ReactiveAnchor>(new ReactiveAnchor());  // NOLINT
+}
+
+[[nodiscard]] inline auto make_connection() -> ConnectionPtr {
+    return std::shared_ptr<Connection>(new Connection());  // NOLINT
+}
+
 /**
  * @brief 信号视图基类（非模板）：仅提供订阅能力，供 Effect 依赖追踪使用。
  *

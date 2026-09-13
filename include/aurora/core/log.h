@@ -1,6 +1,5 @@
 #pragma once
 #include <chrono>
-#include <cstdio>
 #include <functional>
 #include <sstream>
 #include <string>
@@ -202,6 +201,12 @@ template <typename... Args>
 // `AURORA_TEST_PRINTF_ERR`：先用 `std::snprintf` 写入**内存缓冲**（非标准输出），再经
 // `Logger` 输出，从而把 printf 风格的诊断统一收口到日志接口，避免直接使用 stdout/stderr。
 // 仅作 printf → 日志的兼容桥接，新代码请直接用 `AURORA_LOG_*` / `AURORA_LOG_RAW`。
+// clang 对 `fmt, ##__VA_ARGS__` 的逗号吞并逐 TU 报 -Wgnu-zero-variadic-macro-arguments；
+// 零实参调用是本桥接的刻意设计（GCC 对该 GNU 扩展静默），此处定向压制。
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
+#endif
 #define AURORA_TEST_PRINTF(fmt, ...)                                                            \
     do {                                                                                        \
         char _aurora_buf[2048];                                                                 \
@@ -221,3 +226,6 @@ template <typename... Args>
             _aurora_sv.remove_suffix(1);                                                        \
         AURORA_LOG_ERROR("test", _aurora_sv);                                                   \
     } while (0)
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif

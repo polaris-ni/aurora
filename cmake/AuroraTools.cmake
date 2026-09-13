@@ -97,10 +97,14 @@ if (EMSCRIPTEN)
 else ()
     set(_gen_error_codes_exe $<TARGET_FILE:gen_error_codes>)
 endif ()
+# ⚠️ aurora_api.json 不得列入 OUTPUT/DEPNDS：它是仓库内的已提交多段数据文件（widgets/enums/
+# debug/…），而本命令只能产出 error_codes 单段。一旦声明为输出，`ninja -t clean`（cmake
+# --build --clean-first）会先删掉它，gen_error_codes 再按「文件缺失=首次生成」从空对象重建，
+# 其余段全部丢失、API 守门全红。列 gen.h/catalog 为输出即可（二者可由 errors.toml 完整再生）；
+# api 文件的 merge 在命令执行时照常进行，完整重建走 aurora_api_json 目标。
 add_custom_command(
         OUTPUT ${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h
         ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md
-        ${CMAKE_SOURCE_DIR}/aurora_api.json
         COMMAND "${_gen_error_codes_exe}"
         "${CMAKE_SOURCE_DIR}/codespec/errors.toml"
         "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h"
@@ -112,8 +116,7 @@ add_custom_command(
         VERBATIM)
 add_custom_target(generate_error_codes DEPENDS
         ${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h
-        ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md
-        ${CMAKE_SOURCE_DIR}/aurora_api.json)
+        ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md)
 if (EMSCRIPTEN)
     # 生成命令依赖原生 exe：先于 custom command 构建子项目产物。
     add_dependencies(generate_error_codes native_gen_tools)
@@ -124,13 +127,18 @@ add_dependencies(aurora generate_error_codes)
 aurora_add_tool(gen_api_tools tools/gen/gen_api.cpp)
 
 # 可复现生成：运行 gen_api_tools 直接写 aurora_api.json（跨平台，无需 shell 重定向）。
+# gen_api_tools 全量重写时保留既有 error_codes/debug 段（见 gen_api.cpp）；
+# 随后 gen_debug_api 以 codespec/debug_api.toml 为准重并 debug 段——单跑本目标即得完整文件，
+# 无需再手动补跑 gen_debug_api_json（否则 test 门禁 check_api_schema_sync / itest 会红）。
+# error_codes 段由 gen_api_tools 的链接依赖 aurora 触发 generate_error_codes 先行并入。
 # 运行：cmake --build build --target aurora_api_json
 add_custom_target(aurora_api_json
         COMMAND gen_api_tools "${CMAKE_SOURCE_DIR}/aurora_api.json"
+        COMMAND gen_debug_api "${CMAKE_SOURCE_DIR}/codespec/debug_api.toml" "${CMAKE_SOURCE_DIR}/aurora_api.json"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        COMMENT "Regenerating aurora_api.json from current public API (gen_api_tools)"
+        COMMENT "Regenerating aurora_api.json from current public API (gen_api_tools) and merging debug section (gen_debug_api)"
         VERBATIM)
-add_dependencies(aurora_api_json gen_api_tools)
+add_dependencies(aurora_api_json gen_api_tools gen_debug_api)
 
 # 配套：调试能力 API 生成器。解析 codespec/debug_api.toml -> aurora_api.json 的 "debug" 段。
 # 独立可执行文件，**不链接 aurora**（与 gen_error_codes 同构），仅依赖 third_party 的 nlohmann/json。

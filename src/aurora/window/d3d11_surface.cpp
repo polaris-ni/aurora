@@ -50,8 +50,9 @@ float4 PSMain(VSOut i) : SV_Target {
 
 auto compile_shader(const char *src, const char *entry, const char *profile, ID3DBlob **blob) -> bool {
     ID3DBlob *err = nullptr;
-    const HRESULT hr = D3DCompile(src, std::strlen(src), nullptr, nullptr, nullptr, entry, profile,
+    const HRESULT hr = D3DCompile(src, std::char_traits<char>::length(src), nullptr, nullptr, nullptr, entry, profile,
                                   D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, blob, &err);
+
     if (FAILED(hr)) {
         if (err != nullptr) {
             AURORA_LOG_ERROR("d3d11", "shader compile failed: ", static_cast<const char *>(err->GetBufferPointer()));

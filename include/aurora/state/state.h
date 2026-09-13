@@ -54,7 +54,7 @@ class StateBase {  // NOLINT(cppcoreguidelines-special-member-functions)
     // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
     std::vector<ConnectionPtr> observers_;
     // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
-    AnchorPtr anchor_{std::make_shared<ReactiveAnchor>()};
+    AnchorPtr anchor_{make_anchor()};
 
     friend class Effect;
     friend class StateGraph;
@@ -108,7 +108,7 @@ class State : public SignalView<T>, public StateBase, public std::enable_shared_
             }
             ++it;
         }
-        auto conn = std::make_shared<Connection>();
+        auto conn = make_connection();
         conn->effect = e.anchor();
         conn->effect_raw = &e;
         conn->state = this->anchor();

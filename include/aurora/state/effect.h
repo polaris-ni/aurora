@@ -88,7 +88,7 @@ class Effect {
     std::function<void()> fn_;
     std::vector<EffectDep> deps_;
     bool disposed_ = false;
-    AnchorPtr anchor_{std::make_shared<ReactiveAnchor>()};
+    AnchorPtr anchor_{make_anchor()};
 
     friend class StateGraph;
 };

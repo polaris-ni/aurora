@@ -22,7 +22,7 @@ std::uint64_t g_debug_frame = 0;  ///< 调试帧计数（repaint_highlight 时�
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 /// @brief 控件修饰链是否含离屏缓存层（对应 `Modifier::cache_layer()`）。
-[[nodiscard]] auto has_cache_layer(const Widget &w) -> bool {
+[[nodiscard]] [[maybe_unused]] auto has_cache_layer(const Widget &w) -> bool {
     return std::ranges::any_of(w.modifier.get().nodes(), [](const auto &n) -> bool {
         return n && n->paint_kind() == ModifierNode::PaintKind::CacheLayer;
     });
@@ -35,7 +35,7 @@ auto traverse(const Widget &w, const std::function<void(const Widget &)> &fn) ->
 }
 
 /// @brief repaint_highlight 循环调色板（rainbow）：每帧推进色相。
-[[nodiscard]] auto rainbow(std::uint64_t frame) -> Color {
+[[nodiscard]] [[maybe_unused]] auto rainbow(std::uint64_t frame) -> Color {
     static constexpr std::array AURORA_RAINBOW = {
         Color(255, 60, 60, 120),  Color(255, 160, 40, 120), Color(255, 230, 40, 120), Color(60, 220, 80, 120),
         Color(40, 200, 220, 120), Color(80, 120, 255, 120), Color(170, 90, 230, 120),

@@ -615,10 +615,19 @@ auto selftest_value_printing() -> bool {
 /// @brief 作用域追踪：块内失败携带上下文，离开块自动复原。
 auto selftest_tracing() -> bool {
     bool ok = true;
+    // PROBE 嵌套 TRACE 会双展开 __COUNTER__，clang（C++20 模式）报 -Wc2y-extensions；
+    // 唯一 id 生成依赖该内建，属刻意使用，定向压制。
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc2y-extensions"
+#endif
     const auto traced = probe(AURORA_TEST_PROBE(AURORA_TEST_TRACE("outer context"); {
         AURORA_TEST_TRACE("inner context");
         AURORA_TEST_CHECK(false);
     } AURORA_TEST_CHECK(false);));
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
     ok = expect(traced.failures.size() == 2, "traced case records two failures") && ok;
     if (traced.failures.size() == 2) {
         const auto& inner = traced.failures[0].message;

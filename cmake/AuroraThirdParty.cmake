@@ -36,7 +36,17 @@ set(HB_BUILD_RASTER OFF CACHE BOOL "" FORCE)
 set(HB_BUILD_VECTOR OFF CACHE BOOL "" FORCE)
 set(HB_BUILD_GPU OFF CACHE BOOL "" FORCE)
 set(HB_BUILD_UTILS OFF CACHE BOOL "" FORCE)
+# 作用域内收窄 configure 输出：harfbuzz 的 CMakeLists 会打印社区维护声明（message WARNING）
+# 与特性检测 STATUS——三方配置噪音不进本项目 configure 日志；ERROR 及以上仍正常显示。
+set(CMAKE_MESSAGE_LOG_LEVEL ERROR)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz)
+unset(CMAKE_MESSAGE_LOG_LEVEL)
+
+# 三方源码静音：harfbuzz 自身代码（如 hb-algs.hh 的 memcmp 边界分析）的编译告警不属
+# 本项目修复范围（上游官方构建是 Meson，CMake 构建为社区维护），统一 -w 关闭其全部告警。
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(harfbuzz PRIVATE -w)
+endif ()
 
 if (NOT TARGET freetype OR NOT TARGET harfbuzz)
     aurora_error("FreeType/HarfBuzz source build did not produce the 'freetype'/'harfbuzz' targets,"

@@ -11,6 +11,7 @@
 
 namespace aurora::test_cases::utest_signal_view {
 
+namespace {
 /// @brief 最小可观测 SignalView 桩：记录 get 次数与最近订阅者，不覆写 anchor()。
 class CountingView final : public SignalView<int> {
   public:
@@ -31,6 +32,7 @@ class CountingView final : public SignalView<int> {
     mutable int reads_ = 0;
     Effect* last_subscriber_ = nullptr;
 };
+}  // namespace
 
 AURORA_TEST_CASE(signal_view_read_dispatches_to_get) {
     // SignalView<T>::read() 即「读一次 get() 并丢弃」：经基类调用可观测到 get 被执行。
@@ -83,8 +85,8 @@ AURORA_TEST_CASE(signal_view_contract_held_by_state) {
 
 AURORA_TEST_CASE(connection_weak_anchors_expire_with_targets) {
     // Connection 以 weak_ptr 引用双方锚点：默认全空；目标锚点释放后 lock 失效。
-    AnchorPtr state_anchor = std::make_shared<ReactiveAnchor>();
-    AnchorPtr effect_anchor = std::make_shared<ReactiveAnchor>();
+    AnchorPtr state_anchor = make_anchor();
+    AnchorPtr effect_anchor = make_anchor();
 
     Connection c;
     AURORA_TEST_CHECK(c.effect.expired());
@@ -99,7 +101,7 @@ AURORA_TEST_CASE(connection_weak_anchors_expire_with_targets) {
     AURORA_TEST_CHECK(c.effect.lock() == effect_anchor);
     AURORA_TEST_CHECK(c.state.lock() == state_anchor);
 
-    ConnectionPtr shared = std::make_shared<Connection>();
+    ConnectionPtr shared = make_connection();
     shared->effect = effect_anchor;
     AURORA_TEST_CHECK_FALSE(shared->effect.expired());
 
