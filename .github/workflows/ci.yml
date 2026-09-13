@@ -101,7 +101,7 @@ jobs:
             cmake-flags: -G Ninja
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # windows-latest 自带 MSYS2 mingw-w64 工具链；choco mingw 路径作后备
       - name: Setup MinGW toolchain
@@ -190,7 +190,7 @@ jobs:
             cmake-flags: -G Ninja -DAURORA_BACKEND_MACOS=ON -DAURORA_BACKEND_GLFW=ON
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install desktop backend dev dependencies
         if: matrix.apt-deps
@@ -258,7 +258,7 @@ jobs:
             cmake-flags: -DAURORA_ENABLE_DEBUG=OFF
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -290,7 +290,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # ASan 强制关 PCH（CMakeLists 的 AURORA_PCH_ENABLED 门控），消费者命令行无 PCH
       # 依赖，ccache 直接全量可缓存
@@ -325,7 +325,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 覆盖率构建同样强制关 PCH，ccache 直接全量可缓存；coverage 聚合目标内的
       # ctest 保持串行（gcda 并发写在非加锁平台有损坏风险）
@@ -366,7 +366,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
@@ -403,7 +403,7 @@ jobs:
           - name: debug-forced-on
             configure-flags: -DAURORA_ENABLE_DEBUG=ON
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
