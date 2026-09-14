@@ -972,3 +972,54 @@ if (chrome && chrome->valid()) {
     chrome->toggle_maximize();   // 经 Surface 驱动真实窗口动作（Wayland serial 时效约束：仅事件栈内调用）
 }
 ```
+
+---
+
+## 29 Timeline 编排（多段交错动画）
+
+`TimelineSpec` 声明区间树（`sequence()` 子段首尾相接 / `parallel()` 同起点 / `staggered(时长, 间隔, 数量)` 交错糖），`build()` 自动计算各槽位归一化区间——无需手算 Flutter `Interval` 端点；`TimelinePlayer` 用单主控制器驱动全部轨道（槽位 → `Tween` → 目标 `State`）：
+
+```cpp
+au::State<double> slide{0.0}, fade{0.0};
+
+auto tl = au::TimelineSpec::sequence()
+              .add(0.3)                                        // 槽位 0：先滑入 0.3s
+              .add(au::TimelineSpec::staggered(0.2, 0.05, 3))  // 槽位 1..3：3 项 0.2s 交错入场
+              .build();                                        // 总时长 0.75s
+
+au::TimelinePlayer player{tl};
+player.track<double>(0, au::Tween<double>{0.0, 1.0}, slide);
+player.track<double>(1, au::Tween<double>{0.0, 1.0, au::Curves::ease_out()}, fade);
+player.attach(app.animator());   // app 为 au::Application（建窗见配方 2）；attach 后句柄可离开作用域
+player.forward();                // 正放；到达终点触发一次 on_completed
+player.on_completed([]() -> void { /* … */ });
+```
+
+要点：`reverse()` 从当前进度沿同一时间轴严格逆序镜像倒放；`stop()` / 方向切换都从当前进度续播（中断续播，手势接管的基础）；`reduce_motion` 开启时全轨道一步落端点（编排层零特判）；同槽位重复 `track` 覆盖前值；轨道目标 `State<T>` 为非拥有引用，必须比播放器存活更久。
+
+## 30 拖动消除（Dismissible）
+
+`Dismissible` 包住任意子树：水平 / 垂直拖出消除（跟手 1:1 映射 + 途中渐隐），松手按阈值（默认 0.5）裁决——过半程 spring 飞出并从树上摘除，未过半程 spring 回位（对标 Flutter `Dismissible`）：
+
+```cpp
+auto make_card = [](const char *label, bool custom_cb) -> au::Node {
+    au::Text title{label};
+    title.modifier.set(au::Modifier{}.size(280.0F, 56.0F));
+    auto dis = std::make_shared<au::Dismissible>(au::Node{std::move(title)});
+    if (custom_cb) {
+        dis->on_dismissed([]() -> void { /* 覆盖默认摘除：删除列表数据后重建子树 */ });
+    }
+    return au::Node{dis};   // 未注册回调时：飞出后自动从最近 Container 祖先摘除并重排
+};
+
+au::Node root = au::Node{ au::Column(au::ColumnProps{ .children = {
+    make_card("swipe me ->", false),
+    make_card("custom callback", true),
+} }) };
+
+au::Scene scene{ std::move(root) };
+au::Application app{ std::move(scene), 520, 420 };  // 无头便捷构造；真实窗口见配方 2
+app.run();  // spring 阶段由 Application 帧循环的 gesture tick 推进（跟手由指针事件驱动）
+```
+
+要点：构造第二参选主轴 `au::DragAxis::Vertical` 可纵向拖出；行程默认 200 逻辑 dp，首次布局后自动按主轴向尺寸校准（`travel_distance` 字段可手动覆写）；拖动 / 飞出进行中该子树消费指针事件，父级不响应点击；`progress()` / `is_animating()` 供诊断与联动绑定。可编译样例见 `examples/demos/demo_dismissible.cpp`。

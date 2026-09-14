@@ -327,4 +327,114 @@ class TweenAnimation {
     bool animating_ = false;
 };
 
+/**
+ * @brief 时间轴播放器：单主 `AnimationController`（时长 = `TimelineResolved::duration()`）
+ * 驱动全部轨道（对应 Flutter staggered 模式的「一个 controller + 多 Interval/Tween」）。
+ *
+ * 每轨道 = (槽位区间, Tween, 目标 State)：主进度 → `interval.local(t)` → Tween 插值 →
+ * `State::set`（信号定点刷新）。区间外夹取保证未开始的子段保持 Tween begin 值、
+ * 已完成的保持 end 值——**反向倒放天然镜像**（主进度标量倒退，区间映射对称），
+ * **中断续播** = `stop()`/`reverse()`/`forward(-1)` 都不动主进度，方向切换从当前续。
+ *
+ * 起播瞬间（`forward(0)`）统一把全部轨道初始化到 begin 值，消除「未播轨道保持旧值」
+ * 的不确定。`reduce_motion` 经主控制器短路：全轨道一步落端点，编排层零特判。
+ *
+ * 生命周期沿用 `AnimatedValue` 模式：载荷随句柄按值拷贝移动（TimelineResolved 与轨道
+ * 表皆值语义），`attach` 后帧循环持 shared_ptr 副本、句柄离开作用域不悬垂。轨道的
+ * 目标 `State<T>` 为非拥有引用——目标 State 必须比播放器存活更久（同 `AnimatedValue`
+ * 契约）。
+ *
+ * @example
+ * @code
+ *   au::State<double> a{0.0}, b{0.0};
+ *   auto tl = au::TimelineSpec::sequence().add(0.2).add(0.3).build();
+ *   au::TimelinePlayer player{tl};
+ *   player.track<double>(0, au::Tween<double>{0.0, 1.0}, a);
+ *   player.track<double>(1, au::Tween<double>{0.0, 1.0}, b);
+ *   player.forward();
+ *   player.attach(app.animator());
+ * @endcode
+ *
+ * @note Thread: main-thread only
+ * @note Side-effects: none
+ * @note Rebuildable: no
+ */
+class TimelinePlayer {
+  public:
+    /// @brief 构造：区间树求值结果（空 spec 合法——无轨道、时长夹取 1e-6，播放瞬时完成）。
+    explicit TimelinePlayer(TimelineResolved spec);
+
+    /// @brief 轨道绑定（类型安全）：槽位区间 + Tween → 目标 State。
+    /// 每槽位至多一轨，重复绑定同一槽位覆盖前值；越界槽位为无操作。
+    /// @warning 目标 State 为非拥有引用，必须比本播放器存活更久（同 `AnimatedValue`）。
+    template <typename T>
+    auto track(std::size_t slot, Tween<T> tw, State<T> &target) -> void {
+        Track t;
+        t.interval = m_->spec.interval(slot);
+        t.payload = std::make_shared<TrackBody<T>>(std::move(tw));
+        t.target = &target;
+        // 擦除仅限本 apply 函数内部：payload/target 窄化回 TrackBody<T>/State<T>。
+        t.apply = [](const Track &base, double master_t) -> void {
+            const auto &body = *static_cast<const TrackBody<T> *>(base.payload.get());
+            auto *dst = static_cast<State<T> *>(base.target);
+            dst->set(body.tween.value(base.interval.local(master_t)));
+        };
+        bind_track(slot, std::move(t));
+    }
+
+    /// @brief 正向播放（可选从 from∈[0,1] 起步；-1 哨兵 = 从当前进度续播）。
+    auto forward(double from = -1.0) -> void;
+
+    /// @brief 反向播放：沿时间轴镜像倒放（从当前进度倒退）。
+    auto reverse() -> void;
+
+    /// @brief 停止：保持当前进度（方向切换/手势接管用），静止于最近端点语义。
+    auto stop() -> void;
+
+    /// @brief 主进度（0..1，主控制器原始输出）。
+    [[nodiscard]] auto progress() const -> double;
+    /// @brief 播放状态（主控制器语义）。
+    [[nodiscard]] auto status() const -> AnimationStatus;
+    [[nodiscard]] auto is_completed() const -> bool;
+    [[nodiscard]] auto is_animating() const -> bool;
+
+    /// @brief 到达终点（Completed）的一次性回调（同 `AnimatedValue` 语义）。
+    auto on_completed(std::function<void()> cb) -> void;
+
+    /// @brief 接入 Animator 帧循环（载荷 shared_ptr 自持，句柄可离开作用域）。
+    auto attach(Animator &a) -> void;
+
+    /// @brief 无 Animator 时手动推进一帧：推进主控制器 → 应用全部轨道 → completed。
+    auto tick(double dt_seconds) -> void;
+
+  private:
+    // 轨道：区间 + 类型擦除载荷（Tween<T> 存 TrackBody<T>，apply 内窄化，不泄漏公共 API）。
+    struct Track {
+        TimelineInterval interval;
+        std::shared_ptr<void> payload;  // TrackBody<T>
+        void *target = nullptr;         // State<T>*（非拥有）
+        void (*apply)(const Track &, double) = nullptr;
+    };
+    template <typename T>
+    struct TrackBody {
+        explicit TrackBody(Tween<T> tw) : tween(std::move(tw)) {}
+        Tween<T> tween;
+    };
+
+    /// 驱动载荷：句柄按值拷贝共享同一份（同 `AnimatedValue`），attach 后帧循环持副本不悬垂。
+    struct Payload {
+        explicit Payload(TimelineResolved s) : spec(std::move(s)), master_(spec.duration()) {}
+        TimelineResolved spec;
+        AnimationController master_;  ///< 拥有的主控制器
+        std::vector<Track> tracks_;
+        std::function<void()> on_completed;
+        bool fired_completed = false;
+    };
+
+    auto bind_track(std::size_t slot, Track t) -> void;
+    static auto apply_all(const std::vector<Track> &tracks, double master_t) -> void;
+
+    std::shared_ptr<Payload> m_;
+};
+
 }  // namespace aurora

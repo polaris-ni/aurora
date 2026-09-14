@@ -15,6 +15,7 @@
 #include "aurora/widget/chip.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/data_widgets.h"
+#include "aurora/widget/dismissible.h"
 #include "aurora/widget/divider.h"
 #include "aurora/widget/drawer.h"
 #include "aurora/widget/dropdown.h"
@@ -244,6 +245,9 @@ auto register_core_widgets() -> void {
     reg_no_props<BreakpointBuilder>("BreakpointBuilder");
     // BottomNavBar 持运行时图标绘制器与回调，注册供 API 描述收录。
     reg_no_props<BottomNavBar>("BottomNavBar");
+    // Dismissible 持运行时手势 State 与消除回调，注册供 API 描述收录
+    // （from_json 重建出默认行程的空占位，手势进度与回调不随序列化还原）。
+    reg_no_props<Dismissible>("Dismissible", Node{}, DragAxis::Horizontal, SpringDescription{});
 
     // ---- 已知类型但不可从静态 JSON 重建：给出友好错误（避免被当作未知类型静默失败）----
     // Canvas / Repeater 持运行时回调/State，无法从静态 JSON 重建：注册为已知类型。

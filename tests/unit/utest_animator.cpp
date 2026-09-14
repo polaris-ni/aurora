@@ -1,7 +1,9 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/animation/animator.h
 /// 测试说明: 覆盖 AnimationController 构造夹取与正放/回放/复位/停止/帧推进状态机、Animator 驱动与 dirty
-/// 门控绑定/注销、AnimatedValue 自驱与一次性 completed 回调、animate 工厂与 TweenAnimation 自持动画
+/// 门控绑定/注销、AnimatedValue 自驱与一次性 completed 回调、animate 工厂与 TweenAnimation 自持动画、
+/// TimelinePlayer 多轨道编排（起播初始化 / 正放值序 / 反向镜像倒放 / 中断续播 / completed 一次性 /
+/// attach 生命周期 / 空 spec 与越界槽位防御）
 
 #include "aurora/animation/animator.h"
 #include "framework/aurora_test.h"
@@ -256,6 +258,132 @@ AURORA_TEST_CASE(animate_factory_and_tween_animation_drive_state) {
     AURORA_TEST_CHECK_FALSE(ta.is_animating());
     ta.tick(1.0);  // 结束后 tick 无副作用
     AURORA_TEST_CHECK_NEAR(ta.get(), 10.0, 1e-9);
+}
+
+// ---- TimelinePlayer ----
+
+/// @brief 编排测试夹具：sequence(0.2 + 0.3)，轨道 0 = 0→10，轨道 1 = 0→1。
+/// 总时长 0.5：轨道 0 区间 [0, 0.4]，轨道 1 区间 [0.4, 1.0]。
+namespace {
+auto make_two_segment_timeline() -> aurora::TimelineResolved {
+    return aurora::TimelineSpec::sequence().add(0.2).add(0.3).build();
+}
+}  // namespace
+
+AURORA_TEST_CASE(timeline_player_forward_initializes_and_advances) {
+    aurora::State<double> a{5.0};  // 初始脏值：起播应统一初始化到 begin 值
+    aurora::State<double> b{7.0};
+    aurora::TimelinePlayer player{make_two_segment_timeline()};
+    player.track<double>(0, aurora::Tween<double>{0.0, 10.0}, a);
+    player.track<double>(1, aurora::Tween<double>{0.0, 1.0}, b);
+
+    // 起播：全部轨道立刻落 begin 值（消除脏旧值）。
+    player.forward(0.0);
+    AURORA_TEST_CHECK_NEAR(a.get(), 0.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(b.get(), 0.0, 1e-12);
+    AURORA_TEST_CHECK_TRUE(player.is_animating());
+
+    // 推进 0.1s（主进度 0.2）：轨道 0 局部 t=0.5 → 5；轨道 1 未开始 → 0。
+    player.tick(0.1);
+    AURORA_TEST_CHECK_NEAR(a.get(), 5.0, 1e-9);
+    AURORA_TEST_CHECK_NEAR(b.get(), 0.0, 1e-12);
+
+    // 推进到 0.25s（主进度 0.5）：轨道 0 完成 → 10；轨道 1 局部 t = (0.5-0.4)/0.6 ≈ 0.1667。
+    player.tick(0.15);
+    AURORA_TEST_CHECK_NEAR(a.get(), 10.0, 1e-9);
+    AURORA_TEST_CHECK_NEAR(b.get(), (0.5 - 0.4) / 0.6, 1e-9);
+
+    // 推到端点：completed + 一次性回调。
+    int completed_count = 0;
+    player.on_completed([&completed_count]() { ++completed_count; });
+    player.tick(0.25);
+    AURORA_TEST_CHECK_TRUE(player.is_completed());
+    AURORA_TEST_CHECK_NEAR(b.get(), 1.0, 1e-9);
+    AURORA_TEST_CHECK_EQ(completed_count, 1);
+    // 重复到达不重复触发。
+    player.tick(0.1);
+    AURORA_TEST_CHECK_EQ(completed_count, 1);
+}
+
+AURORA_TEST_CASE(timeline_player_reverse_mirrors_and_interrupt_resume) {
+    aurora::State<double> a{0.0};
+    aurora::State<double> b{0.0};
+    aurora::TimelinePlayer player{make_two_segment_timeline()};
+    player.track<double>(0, aurora::Tween<double>{0.0, 10.0}, a);
+    player.track<double>(1, aurora::Tween<double>{0.0, 1.0}, b);
+    player.forward(0.0);
+
+    // 正放到主进度 0.5（轨道 0 完成、轨道 1 进行中）。
+    player.tick(0.25);
+    AURORA_TEST_CHECK_NEAR(a.get(), 10.0, 1e-9);
+    const double b_mid = b.get();
+    AURORA_TEST_CHECK_NEAR(b_mid, (0.5 - 0.4) / 0.6, 1e-9);
+
+    // 中断：stop 保持当前进度（不重置）。
+    player.stop();
+    AURORA_TEST_CHECK_NEAR(player.progress(), 0.5, 1e-12);
+    AURORA_TEST_CHECK_FALSE(player.is_animating());
+
+    // 续播：forward(-1) 从当前进度续。
+    player.forward();
+    AURORA_TEST_CHECK_NEAR(player.progress(), 0.5, 1e-12);
+    player.tick(0.05);
+    AURORA_TEST_CHECK_TRUE(a.get() > 10.0 - 1e-9);  // 轨道 0 已完成保持端点
+
+    // 反向镜像：reverse 从当前进度倒放——轨道 1 先退，轨道 0 后退。
+    player.tick(0.05);  // 先推到 ~0.6
+    const double progress_before_reverse = player.progress();
+    player.reverse();
+    AURORA_TEST_CHECK_NEAR(player.progress(), progress_before_reverse, 1e-12);  // 进度保留
+    player.tick(0.25);  // 倒退 0.5s → 主进度回 ~0.1
+    AURORA_TEST_CHECK_TRUE(player.status() == aurora::AnimationStatus::Reverse
+                           || player.status() == aurora::AnimationStatus::Dismissed);
+    // 轨道 0 倒放中（< 10），轨道 1 未开始（0）。
+    AURORA_TEST_CHECK_TRUE(a.get() < 10.0);
+    AURORA_TEST_CHECK_NEAR(b.get(), 0.0, 1e-12);
+
+    // 倒放到头：Dismissed + 全轨回 begin。
+    player.tick(0.5);
+    AURORA_TEST_CHECK_TRUE(player.status() == aurora::AnimationStatus::Dismissed);
+    AURORA_TEST_CHECK_NEAR(a.get(), 0.0, 1e-9);
+    AURORA_TEST_CHECK_NEAR(b.get(), 0.0, 1e-9);
+}
+
+AURORA_TEST_CASE(timeline_player_attach_survives_handle_scope) {
+    aurora::Animator animator;
+    aurora::State<double> a{0.0};
+    aurora::State<double> b{0.0};
+    {
+        aurora::TimelinePlayer player{make_two_segment_timeline()};
+        player.track<double>(0, aurora::Tween<double>{0.0, 10.0}, a);
+        player.track<double>(1, aurora::Tween<double>{0.0, 1.0}, b);
+        player.forward(0.0);
+        player.attach(animator);
+    }  // 句柄离开作用域：帧循环安全驱动（shared_ptr 载荷）。
+    animator.tick(0.5);
+    AURORA_TEST_CHECK_NEAR(a.get(), 10.0, 1e-9);
+    AURORA_TEST_CHECK_NEAR(b.get(), 1.0, 1e-9);
+}
+
+AURORA_TEST_CASE(timeline_player_empty_spec_and_out_of_range_slot) {
+    // 空 spec：无轨道、播放瞬时完成（时长夹取 1e-6）。
+    aurora::TimelinePlayer player{aurora::TimelineSpec::sequence().build()};
+    aurora::State<double> a{3.0};
+    player.track<double>(99, aurora::Tween<double>{0.0, 1.0}, a);  // 越界槽位：无操作
+    player.forward(0.0);
+    player.tick(0.1);
+    AURORA_TEST_CHECK_NEAR(a.get(), 3.0, 1e-12);  // 未被触碰
+    AURORA_TEST_CHECK_TRUE(player.is_completed() || player.is_animating());
+
+    // 同槽位重复绑定：覆盖前值（旧 Tween 不再驱动）。
+    aurora::State<double> x{0.0};
+    aurora::TimelinePlayer p2{make_two_segment_timeline()};
+    p2.track<double>(0, aurora::Tween<double>{0.0, 10.0}, x);
+    p2.track<double>(0, aurora::Tween<double>{100.0, 200.0}, x);  // 覆盖
+    p2.forward(0.0);
+    AURORA_TEST_CHECK_NEAR(x.get(), 100.0, 1e-9);  // 新 Tween 的 begin 值
+    p2.tick(0.1);
+    AURORA_TEST_CHECK_NEAR(x.get(), 150.0, 1e-9);  // 新 Tween 推进
 }
 
 }  // namespace aurora::test_cases::utest_animator

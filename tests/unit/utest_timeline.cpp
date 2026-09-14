@@ -1,7 +1,9 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/animation/timeline.h
 /// 测试说明: 覆盖 lerp 五类几何/颜色重载与算术截断、Tween 端点/夹取/曲线塑形与访问器、Keyframes
-/// 停靠点排序/区间外夹取/空表缺省/同时刻停靠点边界
+/// 停靠点排序/区间外夹取/空表缺省/同时刻停靠点边界、TimelineSpec 区间树计算（sequence 游标
+/// 推进 / parallel 取 max / staggered 偏移公式 / 嵌套组平移）、TimelineInterval::local 区间外
+/// 夹取、槽位深度优先序、空 spec / 非法时长夹取、duration 汇总
 
 #include "aurora/animation/timeline.h"
 #include "framework/aurora_test.h"
@@ -134,6 +136,117 @@ AURORA_TEST_CASE(keyframes_empty_clamp_and_duplicate_time_edges) {
                                          {.time = 1.0, .value = 2.0}}};
     AURORA_TEST_CHECK_NEAR(dup.value(0.5), 5.0, 1e-12);
     AURORA_TEST_CHECK_NEAR(dup.value(0.75), 3.5, 1e-12);  // 与后段 (0.5,5)→(1.0,2) 插值
+}
+
+/// @brief TimelineInterval::local 的区间内映射与区间外夹取端点语义。
+AURORA_TEST_CASE(timeline_interval_local_clamps_outside) {
+    const aurora::TimelineInterval iv{.begin = 0.25, .end = 0.75};
+    AURORA_TEST_CHECK_NEAR(iv.local(0.0), 0.0, 1e-12);    // t ≤ begin → 0（未开始）
+    AURORA_TEST_CHECK_NEAR(iv.local(0.25), 0.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(iv.local(0.5), 0.5, 1e-12);    // 区间中点 → 局部中点
+    AURORA_TEST_CHECK_NEAR(iv.local(0.75), 1.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(iv.local(1.0), 1.0, 1e-12);    // t ≥ end → 1（已完成）
+    AURORA_TEST_CHECK_TRUE(iv.contains(0.5));
+    AURORA_TEST_CHECK_FALSE(iv.contains(0.1));
+
+    // 零宽区间（夹取后的退化段）：任何 t ≥ begin 都取 1，避免除零。
+    const aurora::TimelineInterval zero{.begin = 0.4, .end = 0.4};
+    AURORA_TEST_CHECK_NEAR(zero.local(0.3), 0.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(zero.local(0.4), 1.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(zero.local(0.9), 1.0, 1e-12);
+}
+
+/// @brief sequence：游标推进、槽位深度优先序、duration 汇总。
+AURORA_TEST_CASE(timeline_sequence_cursor_and_dfs_slots) {
+    const auto tl = aurora::TimelineSpec::sequence().add(0.2).add(0.3).add(0.1).build();
+    AURORA_TEST_CHECK_EQ(tl.slot_count(), std::size_t{3});
+    AURORA_TEST_CHECK_NEAR(tl.duration(), 0.6, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(0).begin, 0.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(0).end, 0.2 / 0.6, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(1).begin, 0.2 / 0.6, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(1).end, 0.5 / 0.6, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(2).begin, 0.5 / 0.6, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(2).end, 1.0, 1e-12);
+    // 越界防御：返回全区间。
+    AURORA_TEST_CHECK_NEAR(tl.interval(99).begin, 0.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(99).end, 1.0, 1e-12);
+}
+
+/// @brief parallel：子段同起点、组长 = max(子)，组尾允许间隙。
+AURORA_TEST_CASE(timeline_parallel_anchor_and_gap) {
+    const auto tl = aurora::TimelineSpec::parallel().add(0.3).add(0.5).add(0.2).build();
+    AURORA_TEST_CHECK_EQ(tl.slot_count(), std::size_t{3});
+    AURORA_TEST_CHECK_NEAR(tl.duration(), 0.5, 1e-12);
+    for (std::size_t i = 0; i < 3; ++i) {
+        AURORA_TEST_CHECK_NEAR(tl.interval(i).begin, 0.0, 1e-12);  // 全部锚定组起点
+    }
+    AURORA_TEST_CHECK_NEAR(tl.interval(0).end, 0.3 / 0.5, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(1).end, 1.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(2).end, 0.2 / 0.5, 1e-12);
+}
+
+/// @brief staggered：偏移公式 [i*(item+gap), +item]；gap=0 退化为 sequence。
+AURORA_TEST_CASE(timeline_staggered_offsets) {
+    const auto tl = aurora::TimelineSpec::staggered(0.2, 0.1, 3).build();
+    AURORA_TEST_CHECK_EQ(tl.slot_count(), std::size_t{3});
+    AURORA_TEST_CHECK_NEAR(tl.duration(), 2 * (0.2 + 0.1) + 0.2, 1e-12);  // 0.8
+    // 总时长 0.8：叶子 i 起点 = i*0.3。
+    for (int i = 0; i < 3; ++i) {
+        AURORA_TEST_CHECK_NEAR(tl.interval(static_cast<std::size_t>(i)).begin, i * 0.3 / 0.8, 1e-12);
+        AURORA_TEST_CHECK_NEAR(tl.interval(static_cast<std::size_t>(i)).end, (i * 0.3 + 0.2) / 0.8, 1e-12);
+    }
+
+    // gap=0：等价 sequence（首尾相接）。
+    const auto no_gap = aurora::TimelineSpec::staggered(0.2, 0.0, 3).build();
+    AURORA_TEST_CHECK_NEAR(no_gap.interval(1).begin, no_gap.interval(0).end, 1e-12);
+    AURORA_TEST_CHECK_NEAR(no_gap.duration(), 0.6, 1e-12);
+}
+
+/// @brief 嵌套组：sequence 内嵌 parallel（组整体平移到游标）+ 深度优先槽位序。
+AURORA_TEST_CASE(timeline_nested_sequence_over_parallel) {
+    auto par = aurora::TimelineSpec::parallel();
+    par.add(0.3).add(0.5);
+    const auto tl = aurora::TimelineSpec::sequence().add(0.2).add(par).add(0.1).build();
+
+    // 总时长 = 0.2 + max(0.3,0.5) + 0.1 = 0.8。
+    AURORA_TEST_CHECK_EQ(tl.slot_count(), std::size_t{4});
+    AURORA_TEST_CHECK_NEAR(tl.duration(), 0.8, 1e-12);
+    // 槽位深度优先序：0=首叶子，1/2=parallel 两叶子，3=尾叶子。
+    AURORA_TEST_CHECK_NEAR(tl.interval(0).begin, 0.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(0).end, 0.25, 1e-12);   // 0.2/0.8
+    AURORA_TEST_CHECK_NEAR(tl.interval(1).begin, 0.25, 1e-12); // parallel 锚定 0.2s
+    AURORA_TEST_CHECK_NEAR(tl.interval(1).end, 0.25 + 0.3 / 0.8, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(2).begin, 0.25, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(2).end, 0.875, 1e-12);  // (0.2+0.5)/0.8
+    AURORA_TEST_CHECK_NEAR(tl.interval(3).begin, 0.875, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(3).end, 1.0, 1e-12);
+
+    // 组时长独立可查（嵌套 spec 自身）。
+    AURORA_TEST_CHECK_NEAR(par.duration(), 0.5, 1e-12);
+}
+
+/// @brief 空 spec / 非法时长：duration 夹取与空表防御。
+AURORA_TEST_CASE(timeline_empty_and_invalid_duration_edges) {
+    // 空 sequence：无槽位、时长 0。
+    const auto empty = aurora::TimelineSpec::sequence().build();
+    AURORA_TEST_CHECK_EQ(empty.slot_count(), std::size_t{0});
+    AURORA_TEST_CHECK_NEAR(empty.duration(), 0.0, 1e-12);
+
+    // staggered count=0：同空。
+    const auto no_items = aurora::TimelineSpec::staggered(0.2, 0.1, 0).build();
+    AURORA_TEST_CHECK_EQ(no_items.slot_count(), std::size_t{0});
+
+    // 负时长叶子：夹取 1e-6，不产生负区间。
+    const auto neg = aurora::TimelineSpec::sequence().add(-1.0).add(0.5).build();
+    AURORA_TEST_CHECK_EQ(neg.slot_count(), std::size_t{2});
+    AURORA_TEST_CHECK_NEAR(neg.interval(0).begin, 0.0, 1e-12);
+    AURORA_TEST_CHECK_TRUE(neg.interval(0).end >= 0.0);
+    AURORA_TEST_CHECK_NEAR(neg.interval(1).end, 1.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(neg.duration(), 0.5 + 1e-6, 1e-9);
+
+    // staggered 负 gap 夹取为 0。
+    const auto neg_gap = aurora::TimelineSpec::staggered(0.1, -5.0, 2).build();
+    AURORA_TEST_CHECK_NEAR(neg_gap.duration(), 0.2, 1e-12);
 }
 
 }  // namespace aurora::test_cases::utest_timeline

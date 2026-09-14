@@ -264,6 +264,14 @@
       ]
     },
     {
+      "name": "DragAxis",
+      "values": [
+        "None",
+        "Horizontal",
+        "Vertical"
+      ]
+    },
+    {
       "name": "DrawerSide",
       "values": [
         "Left",
@@ -2546,6 +2554,49 @@
       },
       "thread": "main",
       "type": "DatePicker"
+    },
+    {
+      "children_policy": "single",
+      "container": false,
+      "default_props": {
+        "height": "auto",
+        "overflow": "Visible",
+        "show": true,
+        "width": "auto"
+      },
+      "dynamic_children": false,
+      "events": [
+        "on_dismissed"
+      ],
+      "examples": [
+        "au::Dismissible(card) /* 水平拖出消除 */"
+      ],
+      "is_clickable": false,
+      "is_container": false,
+      "is_layout": false,
+      "prop_descriptors": [
+        {
+          "default": "Horizontal",
+          "name": "axis",
+          "note": "拖动主轴（Horizontal/Vertical）",
+          "required": false,
+          "type": "DragAxis"
+        }
+      ],
+      "props": [
+        "height",
+        "overflow",
+        "show",
+        "width"
+      ],
+      "props_schema": {
+        "axis": {
+          "default": "Horizontal",
+          "description": "拖动主轴（Horizontal/Vertical）"
+        }
+      },
+      "thread": "main",
+      "type": "Dismissible"
     },
     {
       "children_policy": "none",

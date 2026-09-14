@@ -125,12 +125,15 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 ### 5.1 手势识别器
 
-`event/gesture.h` 提供多指识别器：
+`event/gesture.h` 提供识别器：
 
 | 识别器 | 说明 |
 |:---|:---|
 | `PinchRecognizer` | 双指捏合缩放；锁定两个 pointer id，跟踪 `initial_distance_` / `current_distance_` |
 | `RotationRecognizer` | 双指旋转；锁定两个 pointer id，跟踪 `initial_angle_` / `current_angle_` |
+| `DragRecognizer` | 单指拖动（pointer-agnostic）：超 `slop`（默认 8 逻辑 dp）起拖，按 pointer_id 锁定首按点（中途其他指插入不换锁），起拖瞬间按 \|dx\|\>\|dy\| 锁主轴（`DragAxis`）；`delta()` 仅输出锁定主轴分量。`on_mouse` / `on_touch` 双入口（触摸取首个活跃点，单指语义）；纯识别器，不接触动画、不持有 State |
+
+`DragRecognizer` 的动画消费方 `DragToDismiss`（跟手 + spring 接管）见 §6.7。
 
 `Modifier` 层提供 `.draggable(...)` 与 `.long_press(...)` 两个手势修饰节点（单指），由 `Draggable` / `LongPress` 驱动（见 [`07-environment-modifier.md`](07-environment-modifier.md)）。
 
@@ -159,8 +162,11 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 | `Animator` | 帧循环驱动器 | `animator.h` |
 | `AnimatedValue<T>` | 「`State<T>` + `Tween` + 控制器」三合一句柄 | `animator.h` |
 | `TweenAnimation<T>` | 自包含动画值：拥有自己的 `State<T>`，可独立推进。`animate_to(target, duration_s[, curve])` 起步、`tick(dt)` 每帧推进、`get()` 取当前值、`is_animating()`、`as_signal()` 交出内部 `State<T>` 供响应式绑定 | `animator.h` |
+| `TimelineInterval` | 归一化子区间 [begin, end]（对应 Flutter `Interval`）；`contains(t)` 判归属，`local(t)` 把总进度映射为区间局部进度（区间外夹取端点：t ≤ begin → 0，t ≥ end → 1） | `timeline.h` |
+| `TimelineSpec` / `TimelineResolved` | 时间轴构建器与求值结果（纯值）：`sequence()` / `parallel()` / `staggered(item, gap, count)` 组合子方法链声明子段，`add(时长秒)` / `add(子组)` 追加；`build()` 展开为槽位区间表 + 总时长。见 §6.6 | `timeline.h` |
+| `TimelinePlayer` | 时间轴播放器：单主控制器驱动全部轨道（槽位 + `Tween<T>` + 目标 `State<T>`）；`forward` / `reverse` / `stop` 中断续播，`track<T>` 类型安全绑轨，`attach(Animator)` 接入帧循环。见 §6.6 | `animator.h` |
 
-`timeline.h` 实际只提供 `lerp` 重载族（算术 / `Point` / `Size` / `Color` / `EdgeInsets` / `Rect`）、`Tween<T>` 与 `Keyframes<T>`；**「时间轴编排」类型（如 `Timeline`）为规划中（未实现）**。当前多段时间轴编排以 `Animator` + `Tween`/`Keyframes` 组合实现：用单条 `Keyframes<T>` 的 `Stop{time, value}` 序列表达多关键帧段，或经 `Animator::add_binding` 追加帧回调按 `AnimationController::status()` / `value()` 分段驱动。
+`timeline.h` 实际只提供 `lerp` 重载族（算术 / `Point` / `Size` / `Color` / `EdgeInsets` / `Rect`）、`Tween<T>`、`Keyframes<T>` 与时间轴编排（`TimelineSpec` / `TimelineResolved`，见 §6.6）。多段编排优先用 `TimelineSpec` + `TimelinePlayer`；单条多关键帧曲线仍可用 `Keyframes<T>` 的 `Stop{time, value}` 序列表达，或经 `Animator::add_binding` 追加帧回调按 `AnimationController::status()` / `value()` 分段驱动。
 
 ### 6.2 Animator 与生命周期
 
@@ -204,6 +210,63 @@ auto h2 = au::animate(opacity, au::Tween<float>(1.0F, 0.0F, au::Curves::linear()
 动画只改变 `State<T>`（视觉属性如 opacity / transform），**不改变布局盒模型**；布局快照在动画前后一致（与 [`03-layout-render.md`](03-layout-render.md) §10.2 规则 7 同源）。
 
 **自驱动动画**：在 `on_paint` 末尾 `mark_needs_paint()` 自调度下一帧、并用 `std::chrono::steady_clock` 算 `dt` 手动缓动的控件，必须覆写 `can_cache_display_list()` 返回 `false`（[`04-widget.md`](04-widget.md) §2.4）。
+
+### 6.6 Timeline 编排（TimelineSpec / TimelinePlayer）
+
+声明式时间轴编排原语：构建器自动计算各子段归一化区间，消除 Flutter staggered 模式「手算 `Interval` 端点」的痛点。
+
+**区间树（纯值层，`timeline.h`）**——三种组合子覆盖编排形态，可嵌套（子组随父组规则展开）：
+
+- `sequence()`：子段首尾相接（游标推进）；
+- `parallel()`：子段同起点，组长 = max(子时长)，组尾允许间隙（同 Flutter `Interval` 语义）；
+- `staggered(item_duration, gap, count)`：交错糖，第 i 叶子区间 `[i×(item+gap), i×(item+gap)+item]`。
+
+区间计算在 `build()` 一次完成：叶子段按深度优先序获得槽位 0..n-1（与 `add` 调用序一致）；叶子时长非正值夹取 1e-6。`TimelineResolved` 保存槽位区间表 + 总时长（拷贝廉价），`interval(slot)` 越界防御返回全区间。
+
+**播放器（`animator.h`）**——单主 `AnimationController`（时长 = spec 总时长）驱动全部轨道，每轨道 = (槽位区间, `Tween<T>`, 目标 `State<T>`)：
+
+```cpp
+au::State<double> slide{0.0}, fade{0.0};
+auto tl = au::TimelineSpec::sequence()
+              .add(0.3)                                    // 槽位 0
+              .add(au::TimelineSpec::staggered(0.2, 0.05, 3))  // 槽位 1..3
+              .build();
+au::TimelinePlayer player{tl};
+player.track<double>(0, au::Tween<double>{0.0, 1.0}, slide);
+player.track<double>(1, au::Tween<double>{0.0, 1.0, au::Curves::ease_out()}, fade);
+player.forward();
+player.attach(app.animator());
+```
+
+关键语义：
+
+- **反向镜像**：`reverse()` 沿同一归一化进度倒放（主进度标量倒退），区间映射天然对称——交错序列严格逆序呈现，零额外实现；
+- **中断续播**：`stop()` / `reverse()` / `forward(-1)` 都不动主进度，任何方向切换从当前进度续（跟手接管的基础，见 §6.7）；
+- **区间外保值**：未开始的子段保持 Tween begin 值、已完成的保持 end 值；起播瞬间（`forward(0)`）统一把全部轨道初始化到 begin 值，消除「未播轨道保持旧值」的不确定；
+- **reduce_motion**：主控制器短路直接落端点 → 全轨道一步到位，继承 `AnimationController` 的无障碍语义，编排层零特判；
+- **生命周期**：沿用 `AnimatedValue` 模式——载荷 `shared_ptr` 自持，`attach` 后句柄可离开作用域不悬垂；轨道目标 `State<T>` 为非拥有引用，必须比播放器存活更久；
+- **类型擦除边界**：轨道存储在播放器内部以 `shared_ptr<void>` + apply 函数擦除；公共 API（`track<T>`）全程类型安全，擦除不经接口泄漏；
+- **写序**：同帧多轨道按槽位序写入，无相互依赖的 State 间无顺序假设。
+
+### 6.7 手势驱动动画（DragToDismiss / Dismissible）
+
+单指拖动跟手 + 松手 spring 裁决的 drag-to-dismiss 语义（pointer-agnostic，鼠标 / 触摸统一走 `pointer_id` 抽象流）。
+
+**`DragToDismiss`（`event/gesture.h`）**：拖动消除驱动器，内部持有 `DragRecognizer`。
+
+- **跟手 = 直接操作而非动画**：drag 期间 `progress` 逐事件写为「主轴位移 / `travel`（消除行程，逻辑 dp）」，1:1 映射；`reduce_motion` 不干预跟手（无障碍语义：直接操作保持 1:1 响应）。负方向夹取 0，超行程夹取 1。
+- **松手裁决**：`on_release()` 按 `progress ≥ threshold`（默认 0.5）判落点——≥ 阈值 spring 到 1，收敛后触发 `on_dismissed`；否则 spring 回 0（静默，不触发回调）。拖动速度（最近事件位移 / dt 估计，主轴分量）作 spring 初速度：方向与裁决一致保留、相反丢弃。
+- **reduce_motion**：spring 阶段单帧直接落端点（与 `AnimationController::tick` 的短路语义同源）。
+- **帧推进**：spring 阶段由使用方每帧 `tick(dt)` 推进（`attach` 之外的独立路径）；跟手阶段 `tick` 为 no-op。
+
+**`Dismissible`（`widget/dismissible.h`）**：拖动消除任意子树的容器控件（对标 Flutter `Dismissible`），内部持有 `DragToDismiss`。
+
+- 位移映射：`offset = progress × travel`（首次布局后按主轴向尺寸校准行程）；透明度联动 `1 − 0.5 × progress`（飞出途中渐隐）。位移与渐隐在 `paint` 期平移实现，**不动布局盒**（§6.5 约束）。
+- 事件消费：拖动 / spring 进行中消费指针事件（父级不响应点击）；spring 阶段经控件 `tick_gestures` 帧驱动（需挂入 `Application` 的 gesture tick）。
+- 摘除策略：spring 飞出完成后**默认从最近 `Container` 祖先摘除自身**（触发重排）；`on_dismissed(cb)` 注册自定义回调后覆盖默认摘除（如列表数据删除后由数据层重建子树）。
+- 序列化：手势进度与回调为运行时态，工厂注册仅收录自描述元数据（`Rebuildable: no`）。
+
+**与 TimelinePlayer 的配合**（编排侧接管）：drag 中 `player.stop()`；松手回位走 `player.reverse()` 从中断处续播——即 §6.6 中断续播语义的消费示例。`DragToDismiss` 自带 spring，不依赖 Timeline。
 
 ---
 

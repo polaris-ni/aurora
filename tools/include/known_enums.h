@@ -148,6 +148,8 @@ namespace aurora::tools {
     enums["Orientation"] = {"Horizontal", "Vertical"};
     enums["SplitterOrientation"] = {"Horizontal", "Vertical"};
     enums["ToastPosition"] = {"Bottom", "Top"};
+    // ---- gesture ----
+    enums["DragAxis"] = {"None", "Horizontal", "Vertical"};
 
     // ---- named colors (au::colors::AURORA_*, not an enum; provides value hints for the Color property) ----
     enums["ColorPalette"] = {"AURORA_WHITE", "AURORA_BLACK", "AURORA_BLUE",   "AURORA_RED",

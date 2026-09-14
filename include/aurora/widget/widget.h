@@ -852,8 +852,14 @@ class Container : public Widget {
 
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Widget::tick_gestures(now);  // 本节点修饰链（LongPress 等）
-        for (Node &child : children_) {
-            child.widget().tick(now);
+        for (std::size_t i = 0; i < children_.size();) {
+            Widget *cur = &children_[i].widget();
+            cur->tick(now);
+            // 子项 tick 可能从本容器摘除自身（如 Dismissible 飞出）：当前元素被后继顶替，
+            // 不前进、复查同一位置；地址比对保护其他位置的收缩（契约：子项只摘自身）。
+            if (i < children_.size() && &children_[i].widget() == cur) {
+                ++i;
+            }
         }
     }
 
@@ -865,8 +871,13 @@ class Container : public Widget {
             // 派生类（如 ToastHost 的过期、VideoPlayer 的播放时钟）可扩展自身每帧逻辑。
             tick_gestures(now);
         }
-        for (Node &child : children_) {
-            child.widget().tick(now);
+        for (std::size_t i = 0; i < children_.size();) {
+            Widget *cur = &children_[i].widget();
+            cur->tick(now);
+            // 同 tick_gestures：子项 tick 中摘除自身时不前进，避免迭代器失效 UB。
+            if (i < children_.size() && &children_[i].widget() == cur) {
+                ++i;
+            }
         }
     }
     auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
@@ -894,6 +905,19 @@ class Container : public Widget {
         children_.push_back(child);
         mark_needs_layout();
         notify_accessibility_structure_changed(this);
+    }
+
+    /// @brief 按控件地址移除子节点（如 Dismissible 飞出后自摘；Node 随之析构释放）。
+    /// @return 是否找到并移除。移除后标记重排（树结构变化对外可见，可后续 observe）。
+    auto remove_child(const Widget *w) -> bool {
+        const auto it = std::ranges::find_if(
+            children_, [w](const Node &n) { return &n.widget() == w; });
+        if (it == children_.end()) {
+            return false;
+        }
+        children_.erase(it);
+        mark_needs_layout();
+        return true;
     }
 
     /// @brief 运行时访问第 `i` 个子节点（可变，用于设置 `id` / 替换内容等）。越界抛 `std::out_of_range`。

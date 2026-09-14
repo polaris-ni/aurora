@@ -117,6 +117,8 @@ push_route(au::Checkbox{ au::Reactive<bool>{ flag } });   // flag 存活期 = �
 | Layout（Flex） | Flexbox | `Flex` / `Row` / `Column`（`MainAxisAlignment` / `CrossAxisAlignment` / `MainAxisSize` 与 Flutter 同名概念一一对应） | `Row` / `Column` 布局 |
 | `RelayoutBoundary` | 无直接等价（`React.memo` / `useMemo` 仅影响重渲染而非布局冒泡） | `RelayoutBoundary`（同源概念：截断 layout 脏冒泡、仅重排本子树；`isRepaintBoundary` 是其 paint 侧孪生） | 无直接等价（`QLayout` 无重排边界语义，整树重算） |
 | Animation | `react-spring` / Framer | `AnimationController` + `Curve` | `PropertyAnimation` |
+| Timeline 编排（`TimelineSpec` / `TimelinePlayer`） | 动画编排库（Framer `variants` / `react-spring` 序列） | `Interval` + `TweenSequence` / 官方 staggered 模式（`TimelineSpec::staggered` 自动完成手算端点）；WPF `Storyboard` 同类定位（Aurora 不做运行时时间线树） | `QSequentialAnimationGroup` / `QParallelAnimationGroup` |
+| 手势驱动动画（`DragRecognizer` / `DragToDismiss` / `Dismissible`） | `react-swipeable` / `framer-motion` drag | `Draggable` + `AnimationController` / `Dismissible`（跟手 + spring 裁决语义与 Flutter `Dismissible` 同构） | `SwipeDelegate`（Qt Quick） |
 | 定时任务（`Timer` / `Scheduler`） | `setTimeout` / `setInterval` | `Timer.periodic` / `Timer` | `QTimer` |
 | `Navigator` | React Router | `Navigator` / `Navigator 2.0`（`Hero` 共享元素转场、`open_uri` 深层链接对应 Flutter `Hero` / 路由 URI 解析） | `StackView` / 路由 |
 | `MediaQuery` / `LayoutBuilder` / `BreakpointBuilder` | 媒体查询 hook（无直接内置）/ 条件渲染 / 断点档位 | `MediaQuery` + `LayoutBuilder` + `BreakpointBuilder` | 屏幕度量 / `LayoutBuilder` 等价模式 / `Breakpoint{Compact,Medium,Expanded}`（阈值 600/840 可调） |
