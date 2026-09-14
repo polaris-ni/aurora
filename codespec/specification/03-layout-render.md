@@ -449,6 +449,8 @@ au::Column{}
 
 **抗锯齿**：`enum class TextAAMode { Supersample, ClearType }` 加进程级 `set_text_aa_mode(mode)` / `text_aa_mode()`，默认 `Supersample`。`Supersample` 用 `FT_RENDER_MODE_NORMAL` 输出 A8 灰度覆盖度，与背景无关；`ClearType` 用 `FT_RENDER_MODE_LCD` 输出 3× 水平 RGB 子像素覆盖度，经 `Painter::blend_subpixel` 逐通道合成，**仅当文本不透明时启用**，半透明或字体不可用时自动回退 `Supersample`。
 
+**光栅状态世代**：`FontEngine::raster_generation()` 返回全局计数，`set_text_aa_mode` 与三个字体注入接口（换用不同字面同样改变字形光栅结果）在**值真正变化**时自增它。控件的 Display List 与离屏层缓存在录制/生成那一刻固化了 AA 模式与字面，而 `Widget::mark_needs_paint()` 只沿父链向上传播失效、不触及后代缓存——故控件必须把本世代纳入缓存命中条件（`Widget::paint` 已内置），否则切换后后代仍回放旧光栅，表现为「切换瞬间无变化、过一会儿才随无关失效零星生效」。字形图集键已含 AA 模式与 `px`，世代失效只触发重录、不产生脏条目。
+
 **排版选项（`TextLayoutOpts`）**：`measure_width` / `caret_x` / `hit_test_char` / `draw_text` 均提供接受 `TextLayoutOpts` 的重载，携带 `letter_spacing`（相邻字形间间距，整串共 `n-1` 次）、`word_spacing`（词间距，仅空格后追加）、`italic`（经 FreeType `FT_Set_Transform` 仿斜）。统一 opts 保证度量、光标、命中、绘制四者完全一致。
 
 **锚定契约**：`draw_text(r, ...)` 的 `r.origin.y` 是**行盒顶**而非基线。实现内部首行基线 = `origin.y + 主 face ascender`，回退 face 字形统一按主 face 基线对齐。全库调用方均按顶锚定传值，**不得自行加减 ascent**。

@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/commands.h（bind_shortcuts / to_menu_items 三源投影）
+/// 目标单元: include/aurora/commands.h （bind_shortcuts / to_menu_items 三源投影）
 /// 测试说明: 覆盖命令默认快捷键接入 ShortcutRegistry（命中触发 invoke、无绑定不产生绑定、
 /// 重复绑定幂等、解绑与清空连带撤销绑定、启用条件拦住已消费的快捷键），
 /// 以及 to_menu_items 的字段投影与点击出口

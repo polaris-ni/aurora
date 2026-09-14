@@ -1036,6 +1036,18 @@ auto Painter::blend_subpixel_span(int x0, int y, Color c, const std::uint8_t *sr
         return;
     }
     // 纯矩形裁剪栈：求 x 区间与全部裁剪矩形 + 屏幕边界的交集（只算一次，不必逐像素遍历）。
+    // 必须先按 y 判否：整行落在任一裁剪矩形之外时直接返回。
+    // 【修复】此前只裁剪 X、漏裁 Y —— 部分脏区帧的裁剪矩形不含本行 y 时，背景 fill_rect
+    // 被正确裁掉（不重绘背景）而文字仍逐行写出，导致同一字形每帧往上一帧的墨迹上再混合，
+    // 墨量累积 → 文字逐帧变粗、边缘发糙（表现为「过一会儿开始锯齿/发虚」），约 1~2s 饱和。
+    // 取整约定与 blend_subpixel 慢路径一致：下边界 ceil、上边界 floor。
+    for (const ClipRegion &cr2 : clip_stack_) {
+        const int cy0 = static_cast<int>(std::ceil(cr2.rect.origin.y));
+        const int cy1 = static_cast<int>(std::floor(cr2.rect.bottom()));
+        if (y < cy0 || y > cy1) {
+            return;
+        }
+    }
     int x_lo = x0;
     int x_hi = x0 + n - 1;
     for (const ClipRegion &cr2 : clip_stack_) {

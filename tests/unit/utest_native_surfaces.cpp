@@ -12,7 +12,7 @@
 namespace aurora::test_cases::utest_native_surfaces {
 
 AURORA_TEST_CASE(window_style_options_defaults) {
-    const WindowStyleOptions opts;
+    constexpr WindowStyleOptions opts;
     AURORA_TEST_CHECK_FALSE(opts.always_on_top);
     AURORA_TEST_CHECK_FALSE(opts.frameless);
     AURORA_TEST_CHECK(opts.decoration == DecorationPolicy::Auto);
@@ -131,6 +131,29 @@ AURORA_TEST_CASE(windows_family_native_handle_contract) {
     AURORA_TEST_CHECK_TRUE(true);
 #else
     AURORA_TEST_SKIP("Win32/D3D11 均未开启（默认无头构建），Win32 家族 native_handle 契约无法判定");
+#endif
+}
+
+AURORA_TEST_CASE(windows_family_capture_window_contract) {
+    // Win32 家族（GDI 上屏与 D3D11 GPU 上屏）共用同一个 `Win32Window` 宿主，须都覆写
+    // `Surface::capture_window` 走共享 `detail::capture_window_by_hwnd` 的 PrintWindow 路径；
+    // 漏覆写会回落基类默认（unsupported）错误，导致 Ctrl+Shift+S 窗口截图在 D3D11 后端失效。
+    // 判定为类型级（同 native_handle 契约），无须创建真实窗口。
+    // 后端专属：默认无头构建下两宏未定义 → 整例 SKIP；真机构建由 static_assert 守门。
+#if defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_D3D11)
+#ifdef AURORA_BACKEND_WIN32
+    static_assert(
+        !std::is_same_v<decltype(&Win32Surface::capture_window), Result<bool> (Surface::*)(const std::string &)>,
+        "Win32Surface 必须覆写 capture_window（走 detail::capture_window_by_hwnd）");
+#endif
+#ifdef AURORA_BACKEND_D3D11
+    static_assert(
+        !std::is_same_v<decltype(&D3D11Surface::capture_window), Result<bool> (Surface::*)(const std::string &)>,
+        "D3D11Surface 必须覆写 capture_window（与 Win32Surface 共用 Win32Window 宿主）");
+#endif
+    AURORA_TEST_CHECK_TRUE(true);
+#else
+    AURORA_TEST_SKIP("Win32/D3D11 均未开启（默认无头构建），Win32 家族 capture_window 契约无法判定");
 #endif
 }
 

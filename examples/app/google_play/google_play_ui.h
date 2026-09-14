@@ -245,9 +245,9 @@ inline void draw_gp_icon(int idx, au::Painter &p, const au::Rect &b, bool select
             }
         }
     } else if (idx == 1) {  // 游戏：播放三角
-        au::Point a{.x = cx - (e * 0.55F), .y = cy - (e * 0.85F)};
-        au::Point b2{.x = cx - (e * 0.55F), .y = cy + (e * 0.85F)};
-        au::Point c2{.x = cx + (e * 0.90F), .y = cy};
+        const au::Point a{.x = cx - (e * 0.55F), .y = cy - (e * 0.85F)};
+        const au::Point b2{.x = cx - (e * 0.55F), .y = cy + (e * 0.85F)};
+        const au::Point c2{.x = cx + (e * 0.90F), .y = cy};
         const float lw = e * 0.60F;
         p.draw_line(a, b2, lw, c);
         p.draw_line(b2, c2, lw, c);
@@ -409,8 +409,11 @@ class AppCell : public au::LeafWidget {
         // 缓存仅需容纳边框（AppCell 无阴影，避免相邻卡片投影叠加形成黑边）。
         constexpr float k_shad = 2.0F;
         const bool is_dark = (dark != nullptr && dark->get());
+        // 光栅状态世代（AA 模式 / 默认字体）：离屏缓存把光栅结果固化在生成那一刻，世代变化
+        // 必须重建，否则切换 AA 模式后本卡片仍 blit 旧光栅（切了但看不出变化）。
+        const auto raster_gen = au::render::FontEngine::raster_generation();
         if (!pixel_ || !pixel_valid_ || pixel_w_ != b.size.width || pixel_h_ != b.size.height ||
-            pixel_dark_ != dark->get()) {
+            pixel_dark_ != dark->get() || pixel_gen_ != raster_gen) {
             if (!pixel_) {
                 pixel_ = std::make_unique<au::Painter>();
             }
@@ -421,6 +424,7 @@ class AppCell : public au::LeafWidget {
             pixel_w_ = b.size.width;
             pixel_h_ = b.size.height;
             pixel_dark_ = is_dark;
+            pixel_gen_ = raster_gen;
             pixel_valid_ = true;
         }
         // 离屏缓存 composite 位置 snap 到整数物理像素，避免半像素偏移让缓存内已清晰的
@@ -475,6 +479,7 @@ class AppCell : public au::LeafWidget {
     float pixel_w_ = 0.0F;
     float pixel_h_ = 0.0F;
     bool pixel_dark_ = false;
+    std::uint64_t pixel_gen_ = 0;  ///< 离屏缓存生成时的光栅状态世代（AA 模式变更须重建）
 };
 
 // ---- 推荐行单元（LazyRow 用，方形）----
@@ -538,8 +543,9 @@ class RecoCell : public au::LeafWidget {
         // 稳态：像素离屏缓存（同 AppCell；RecoCell 无阴影，缓存仅需容纳边框）。
         constexpr float k_shad = 2.0F;
         const bool is_dark = (dark != nullptr && dark->get());
+        const auto raster_gen = au::render::FontEngine::raster_generation();  // 同 AppCell：按世代重建
         if (!pixel_ || !pixel_valid_ || pixel_w_ != b.size.width || pixel_h_ != b.size.height ||
-            pixel_dark_ != dark->get()) {
+            pixel_dark_ != dark->get() || pixel_gen_ != raster_gen) {
             if (!pixel_) {
                 pixel_ = std::make_unique<au::Painter>();
             }
@@ -550,6 +556,7 @@ class RecoCell : public au::LeafWidget {
             pixel_w_ = b.size.width;
             pixel_h_ = b.size.height;
             pixel_dark_ = is_dark;
+            pixel_gen_ = raster_gen;
             pixel_valid_ = true;
         }
         // 离屏缓存 composite 位置 snap 到整数物理像素，避免半像素偏移让缓存内已清晰的
@@ -600,6 +607,7 @@ class RecoCell : public au::LeafWidget {
     float pixel_w_ = 0.0F;
     float pixel_h_ = 0.0F;
     bool pixel_dark_ = false;
+    std::uint64_t pixel_gen_ = 0;  ///< 同 AppCell：离屏缓存生成时的光栅状态世代
 };
 
 // ---- 精品横幅轮播（圆点 + 点击切换，渐变卡片）----
@@ -710,8 +718,11 @@ class BannerCarousel : public au::LeafWidget {
         if (n > 0 && banner_w_ > 0.0F) {
             const float lw = static_cast<float>(n) * step_;
             const bool is_dark = dark != nullptr && dark->get();
+            // 光栅状态世代（AA 模式 / 默认字体）：卡片层一次性渲染后长期复用，世代变化必须重建，
+            // 否则切换 AA 模式后横幅文本始终保持旧光栅。
+            const auto raster_gen = au::render::FontEngine::raster_generation();
             if (!layer_valid_ || std::fabs(layer_w_ - lw) > 0.5F || std::fabs(layer_h_ - card_h_) > 0.5F ||
-                layer_dark_ != dark->get()) {
+                layer_dark_ != dark->get() || layer_gen_ != raster_gen) {
                 layer_ = std::make_unique<au::Painter>();
                 layer_->set_scale(p.scale());
                 layer_->begin(static_cast<int>(std::ceil(lw)), static_cast<int>(std::ceil(card_h_)));
@@ -719,6 +730,7 @@ class BannerCarousel : public au::LeafWidget {
                 layer_w_ = lw;
                 layer_h_ = card_h_;
                 layer_dark_ = is_dark;
+                layer_gen_ = raster_gen;
                 layer_valid_ = true;
             }
         }
@@ -728,7 +740,13 @@ class BannerCarousel : public au::LeafWidget {
         if (layer_) {
             // 整条卡片带一次性渲染进离屏层（offset=0，层局部坐标卡片 i 位于 x=i*step_），每帧按当前
             // offset_ 平移合成到 banner 视口；裁剪保证仅可见窗口参与合成。
-            p.composite(*layer_, au::Matrix2D::from_translate(b.origin.x + left_ + offset_, b.origin.y));
+            // 离屏层按 device 分辨率栅格化：滑动时 offset_ 为小数，直接按逻辑坐标合成会让整层在物理
+            // 像素上做亚像素重采样（双线性）→ 文本在滚动中发虚。把平移吸附到设备像素网格
+            // （device-align）即可消除运动模糊，静止（offset_ 为整 step_ 倍数）本就对齐故无影响。
+            const float dev = p.scale();
+            const float x_log = b.origin.x + left_ + offset_;
+            const float x_snap = std::round(x_log * dev) / dev;
+            p.composite(*layer_, au::Matrix2D::from_translate(x_snap, b.origin.y));
         } else {
             draw_banner_direct(p, th, n, b);  // 兜底：首帧 layout 前尺寸未就绪时直绘（与旧逻辑一致）
         }
@@ -800,7 +818,9 @@ class BannerCarousel : public au::LeafWidget {
         mark_needs_paint();
     }
 
-    auto on_mount(const au::BuildContext & /*ctx*/) -> void override { schedule_next(); }
+    auto on_mount(const au::BuildContext & /*ctx*/) -> void override {
+        schedule_next();  // 注册一次性自动轮播定时任务（控件销毁后由弱引用守卫失效）
+    }
 
     /// @brief 注册一次性自动轮播定时任务：到点切换目标并标脏驱动滑动；用弱引用守卫，
     /// 控件销毁后定时器自动失效，避免悬空回调。无运行中 App（如无头基准）时 Scheduler 为空则跳过。
@@ -833,6 +853,7 @@ class BannerCarousel : public au::LeafWidget {
     bool layer_valid_ = false;
     float layer_w_ = 0.0F, layer_h_ = 0.0F;
     bool layer_dark_ = false;  // 主题（明暗）变化需重建离屏层
+    std::uint64_t layer_gen_ = 0;  // 离屏层生成时的光栅状态世代（AA 模式变更需重建）
     float offset_ = 0.0F;
     float step_ = 0.0F;
     float banner_w_ = 0.0F;
@@ -1240,10 +1261,10 @@ class BodyView : public au::Container {
 
     auto make_reco_row(const std::vector<gp::AppItem> &items) const -> au::Node {
         auto ptr = std::make_shared<std::vector<gp::AppItem>>(items);
-        auto row = std::make_shared<au::LazyRow>(
+        const auto row = std::make_shared<au::LazyRow>(
             static_cast<int>(ptr->size()),
             [ptr, this](int i) -> au::Node {
-                auto cell = std::make_shared<RecoCell>();
+                const auto cell = std::make_shared<RecoCell>();
                 cell->item = &ptr->at(i);
                 cell->on_open = on_open_;
                 cell->dark = dark_;
@@ -1261,7 +1282,7 @@ class BodyView : public au::Container {
     }
 
     auto make_filter_chips(const std::string &cat, const std::string &sub) const -> au::Node {
-        auto row = std::make_shared<au::Row>();
+        const auto row = std::make_shared<au::Row>();
         row->modifier =
             au::Modifier{}.padding(au::EdgeInsets{.left = 0.0F, .top = 0.0F, .right = 4.0F, .bottom = 4.0F});
         const auto subs = gp::subcategories_of(cat);

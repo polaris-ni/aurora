@@ -14,6 +14,8 @@ namespace aurora::render {
 struct FontFace {
     FT_Face face = nullptr;
     int id = 0;  ///< 图集缓存键所用的稳定序号
+    int weight = 400;  ///< CSS 字重 100..900；创建面时按 FT style_flags 判定（bold 文件→700，否则 400）。
+                       ///< 供 `resolve_faces(family, weight)` 按字重选面，使粗体真正生效。
     std::shared_ptr<std::vector<std::uint8_t>> mem;  ///< 内存字体字节（须保持存活至 face 释放）
 };
 
@@ -34,7 +36,11 @@ auto register_font_file(const std::string &family, const std::string &path) -> v
 auto set_default_font_file(const std::string &path) -> void;
 
 /// @brief 解析逻辑 family 为有序候选 FT_Face 列表（含默认链兜底，供缺字回退）。
-[[nodiscard]] auto resolve_faces(const std::string &family) -> const std::vector<FontFace *> &;
+///
+/// `weight` 参与排序：与请求字重精确匹配的面排最前（保持注册序），其余按字重距离升序
+/// 稳定排列在其后——`find_glyph` 取首个含该字形的面，故有粗体面时粗体字优先命中，
+/// 缺字仍可回退到其他字重/回退面（脚本回退语义不变）。
+[[nodiscard]] auto resolve_faces(const std::string &family, int weight = 400) -> const std::vector<FontFace *> &;
 
 /// @brief 内部：向默认链追加候选 FT_Face（平台字体发现使用）。
 auto add_default_face(const std::shared_ptr<FontFace> &ff) -> void;

@@ -32,7 +32,7 @@ auto invalidate_resolve_cache() -> void {
 }
 
 auto make_face_from_memory(std::vector<std::uint8_t> bytes) -> std::shared_ptr<FontFace> {
-    const FT_Library lib = ft_library();
+    const FT_Library lib = ft_library();  // NOLINT
     if (lib == nullptr) {
         return nullptr;
     }
@@ -44,12 +44,14 @@ auto make_face_from_memory(std::vector<std::uint8_t> bytes) -> std::shared_ptr<F
     if (FT_Select_Charmap(ff->face, FT_ENCODING_UNICODE) != 0) {
         ff->face->charmap = (ff->face->charmaps != nullptr) ? *ff->face->charmaps : nullptr;
     }
+    // 按 OS/2 style_flags 判定字重：bold 文件记 700，其余 400。供 resolve_faces 按字重选面。
+    ff->weight = ((ff->face->style_flags & FT_STYLE_FLAG_BOLD) != 0U) ? 700 : 400;
     ff->id = g_next_id++;
     return ff;
 }
 
 auto make_face_from_file(const std::string &path) -> std::shared_ptr<FontFace> {
-    const FT_Library lib = ft_library();
+    const FT_Library lib = ft_library();  // NOLINT
     if (lib == nullptr) {
         return nullptr;
     }
@@ -62,6 +64,7 @@ auto make_face_from_file(const std::string &path) -> std::shared_ptr<FontFace> {
     if (FT_Select_Charmap(ff->face, FT_ENCODING_UNICODE) != 0) {
         ff->face->charmap = (ff->face->charmaps != nullptr) ? *ff->face->charmaps : nullptr;
     }
+    ff->weight = ((ff->face->style_flags & FT_STYLE_FLAG_BOLD) != 0U) ? 700 : 400;
     ff->id = g_next_id++;
     return ff;
 }
@@ -147,17 +150,19 @@ auto add_default_face(const std::shared_ptr<FontFace> &ff) -> void {
     invalidate_resolve_cache();
 }
 
-auto resolve_faces(const std::string &family) -> const std::vector<FontFace *> & {
+auto resolve_faces(const std::string &family, int weight) -> const std::vector<FontFace *> & {
     init_font_discovery();
+    // 缓存键 = family + 请求字重（不同字重的排序结果不同，须分别缓存）。
+    const std::string cache_key = family + "#" + std::to_string(weight);
     // 裸指针缓存命中：直接返回引用，零分配。
-    const auto pit = g_resolve_ptr_cache.find(family);
+    const auto pit = g_resolve_ptr_cache.find(cache_key);
     if (pit != g_resolve_ptr_cache.end()) {
         return pit->second;
     }
     // shared_ptr 缓存命中：从 owned 重建裸指针 vector 并缓存。
-    const auto cit = g_resolve_cache.find(family);
+    const auto cit = g_resolve_cache.find(cache_key);
     if (cit != g_resolve_cache.end()) {
-        auto &ptrs = g_resolve_ptr_cache[family];
+        auto &ptrs = g_resolve_ptr_cache[cache_key];
         ptrs.reserve(cit->second.size());
         for (auto &sp : cit->second) {
             ptrs.push_back(sp.get());
@@ -187,14 +192,24 @@ auto resolve_faces(const std::string &family) -> const std::vector<FontFace *> &
     emit("default");
     // 去重：按裸指针地址去重，保留首次出现。
     std::vector<std::shared_ptr<FontFace>> uniq;
-    auto &seen = g_resolve_ptr_cache[family];
+    auto &seen = g_resolve_ptr_cache[cache_key];
     for (auto &sp : owned) {
         if (std::ranges::find(seen, sp.get()) == seen.end()) {
             seen.push_back(sp.get());
             uniq.push_back(sp);
         }
     }
-    g_resolve_cache[family] = std::move(uniq);
+    // 字重感知排序：精确匹配请求字重的面排最前（保持注册序），其余按字重距离升序稳定排列。
+    // find_glyph 取首个含该字形的面 → 有粗体面时粗体字优先命中，缺字仍回退其他字重/脚本回退面。
+    // 注意：必须同步重排 `seen`（返回给调用方的裸指针序列），否则排序只作用于 owned 缓存、
+    // 实际选面顺序不变，weight 参数形同虚设。
+    std::ranges::stable_sort(uniq, [weight](const auto &a, const auto &b) {
+        return std::abs(a->weight - weight) < std::abs(b->weight - weight);
+    });
+    for (std::size_t i = 0; i < uniq.size(); ++i) {
+        seen[i] = uniq[i].get();
+    }
+    g_resolve_cache[cache_key] = std::move(uniq);
     return seen;
 }
 

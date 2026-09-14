@@ -2,14 +2,19 @@
 /// 目标单元: include/aurora/widget/containers.h
 /// 测试说明: 覆盖 Column/Row 容器级行为——初始化列表构造与所有权、gap 落位、
 /// MainAxisSize::Max 撑满、MainAxisAlignment::End 收尾对齐、CrossAxisAlignment::Stretch
-/// 拉伸子项交叉轴、负 gap 校验、属性序列化往返
+/// 拉伸子项交叉轴、负 gap 校验、属性序列化往返，以及容器子树绘制缓存（Display List /
+/// cache_layer）随全局光栅状态（AA 模式）世代失效
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
 #include "aurora/core/directionality.h"
 #include "aurora/environment/environment.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/modifier/modifier.h"
+#include "aurora/render/font_engine.h"
+#include "aurora/render/painter.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
@@ -37,6 +42,59 @@ auto box_cross_expand(float main_extent, bool stretch_w) -> Node {
 auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
+
+// ---- 子树绘制缓存（Display List / cache_layer）观测设施 ----
+constexpr int CACHE_W = 260;
+constexpr int CACHE_H = 48;
+
+/// 父 Column + 子 Text：后代绘制缓存是观测对象，故必须有层级。
+auto text_column(bool cache_layer) -> std::shared_ptr<Column> {
+    auto txt = std::make_shared<Text>("Aurora Wedge 123");
+    txt->font_size(20.0F);
+    auto col = std::make_shared<Column>(ColumnProps{.children = {Node{std::shared_ptr<Widget>(txt)}}});
+    if (cache_layer) {
+        col->modifier.set(Modifier().cache_layer());
+    }
+    LayoutEngine::layout(*col, bounded(static_cast<float>(CACHE_W), static_cast<float>(CACHE_H)));
+    return col;
+}
+
+/// 把容器子树绘制进离屏画布并返回像素校验和（同一实例连续绘制可观察缓存是否命中）。
+auto paint_hash(Widget& w) -> std::uint64_t {
+    Painter p;
+    p.begin(CACHE_W, CACHE_H);
+    // 白底 + 不透明黑字：满足 ClearType 生效条件（c.a == 255）。
+    p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                     .size = Size{.width = static_cast<float>(CACHE_W), .height = static_cast<float>(CACHE_H)}},
+                Color{255, 255, 255, 255});
+    constexpr BuildContext ctx;
+    w.paint(p,
+            Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                 .size = Size{.width = static_cast<float>(CACHE_W), .height = static_cast<float>(CACHE_H)}},
+            ctx);
+    std::uint64_t h = 0xcbf29ce484222325ULL;
+    const std::uint8_t* d = p.data();
+    constexpr std::size_t n = static_cast<std::size_t>(CACHE_W) * static_cast<std::size_t>(CACHE_H) * 4U;
+    for (std::size_t i = 0; i < n; ++i) {
+        h ^= d[i];
+        h *= 0x100000001b3ULL;
+    }
+    return h;
+}
+
+/// AA 模式是进程级状态：用例结束还原，避免污染同文件后续用例。
+class AaModeRestore {
+  public:
+    AaModeRestore() : saved_(render::FontEngine::text_aa_mode()) {}
+    ~AaModeRestore() { render::FontEngine::set_text_aa_mode(saved_); }
+    AaModeRestore(const AaModeRestore&) = delete;
+    auto operator=(const AaModeRestore&) -> AaModeRestore& = delete;
+    AaModeRestore(AaModeRestore&&) = delete;
+    auto operator=(AaModeRestore&&) -> AaModeRestore& = delete;
+
+  private:
+    render::TextAAMode saved_;
+};
 
 }  // namespace
 
@@ -197,6 +255,40 @@ AURORA_TEST_CASE(row_rtl_via_environment_mirrors_children) {
     ltr.layout(bounded(300.0F, 100.0F), plain);
     AURORA_TEST_CHECK_NEAR(ltr.child_nodes()[0].bounds().origin.x, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(ltr.child_nodes()[1].bounds().origin.x, 40.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(column_subtree_re_records_when_text_aa_mode_changes) {
+    const AaModeRestore guard;
+    render::FontEngine::set_text_aa_mode(render::TextAAMode::ClearType);
+    const auto col = text_column(false);
+    const auto before = paint_hash(*col);
+
+    // 切换 AA 模式后只给根标脏：后代 Display List 也须按光栅世代失效并重录，
+    // 否则回放的是录制时固化的旧光栅（表现为「切换瞬间无变化、过一会儿才零星生效」）。
+    render::FontEngine::set_text_aa_mode(render::TextAAMode::Supersample);
+    col->mark_needs_paint();
+    AURORA_TEST_CHECK_TRUE(paint_hash(*col) != before);
+}
+
+AURORA_TEST_CASE(column_cache_layer_rebuilds_when_text_aa_mode_changes) {
+    const AaModeRestore guard;
+    render::FontEngine::set_text_aa_mode(render::TextAAMode::ClearType);
+    const auto col = text_column(true);
+    const auto before = paint_hash(*col);
+
+    render::FontEngine::set_text_aa_mode(render::TextAAMode::Supersample);
+    col->mark_needs_paint();
+    AURORA_TEST_CHECK_TRUE(paint_hash(*col) != before);
+}
+
+AURORA_TEST_CASE(column_subtree_cache_hits_when_raster_state_unchanged) {
+    const AaModeRestore guard;
+    render::FontEngine::set_text_aa_mode(render::TextAAMode::Supersample);
+    const auto col = text_column(false);
+    const auto first = paint_hash(*col);
+    // 光栅状态未变：标脏重绘后像素必须完全一致——世代校验不得误伤缓存命中。
+    col->mark_needs_paint();
+    AURORA_TEST_CHECK_EQ(paint_hash(*col), first);
 }
 
 }  // namespace aurora::test_cases::utest_containers

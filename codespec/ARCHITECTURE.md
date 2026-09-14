@@ -185,6 +185,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 - 状态变更**不**触发整树重建，只通知订阅它的 widget 子树（fine-grained）。
 - **布局与渲染按脏分类按需执行**（脏区追踪，默认开启），决策矩阵见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §3.2。仅绘制脏的帧跳过 `begin_frame` 保留上帧缓冲、对脏区并界先 `clear_rect` 零基底、再以 `Surface::clear_color()` 重铺脏区底色、然后 `push_clip` 裁剪重绘，使脏区重绘与整帧**逐位一致**。若不重铺底色，脏区内无不透明背景的控件（裸 `Text`、无背景 `LazyList` 子项）归零后只画字形会露出黑底。
 - **脏区裁剪期间禁用 Display List 子树缓存**（`Painter::set_skip_dl_record`，部分脏路径设置、退出即清）：partial clip 下 `paint` 只遍历命中裁剪区的子节点，若此时录制 DL 会**丢失裁剪区外子节点的命令**，后续整帧回放该 DL 时这些子节点永久消失。故裁剪帧强制直绘，下帧整帧再重录完整 DL。
+- **全局光栅状态变更按世代失效缓存**：控件 DL（`dl_valid_`）与离屏层（**`Modifier::cache_layer`**，`paint_cache_valid_`）把光栅结果固化在录制/生成时点，而 `mark_needs_paint()` 只沿父链向上失效、不触及后代缓存。故两类缓存的命中条件均含 `render::FontEngine::raster_generation()`——AA 模式 / 默认字体变更会自增该世代，使全树缓存在下一帧按需重录，无需整树遍历。缺少此判据时，切换 AA 模式后后代控件仍回放旧光栅（表现为「切换瞬间无变化、过一会儿才零星生效」）。
 - **子节点视图接口 `child_nodes()` 返回 `const std::vector<Node>&`（引用，非副本）**：`Container` 直接返回 `children_` 成员，单子容器与惰性容器以 `mutable` 成员缓存惰性重建。若按值返回 `std::vector<Node>`，临时副本析构会触发 `Node::~Node` 清空子控件的 `layout_parent_`，遍历后子控件 `request_frame` 沿父链上溯断链、脏标记无法到达渲染根。调用方仅限**单帧内只读遍历**（`dump_tree` / `validate` / `hit_test` / inspector），树重建期间引用可能失效。
 - **三端一致**：脏追踪是 `Surface` 无关的核心层改动，全部后端共用同一 `present_root`；仅各后端在上屏方式（`BitBlt` / `XPutImage` / `wl_shm` / 纹理上传 / `putImageData`）与系统重绘处理上有差异。
 

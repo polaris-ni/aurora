@@ -4,7 +4,6 @@
 /// 裁剪栈（矩形/圆角/边界查询）、global_alpha 乘入、blend_pixel、draw_image 缩放、线性渐变方向、
 /// draw_line 覆盖、shift_pixels 垂直搬移、to_image 导出与 get_pixel 越界兜底
 
-#include <cstddef>
 #include <cstdint>
 
 #include "aurora/core/image.h"
@@ -121,6 +120,39 @@ AURORA_TEST_CASE(rect_clip_confines_drawing) {
 
     p.pop_clip();
     AURORA_TEST_CHECK_FALSE(p.has_clip());
+}
+
+AURORA_TEST_CASE(text_respects_rect_clip_in_y) {
+    // 回归守门：`blend_subpixel_span` 曾只按 X 裁剪、漏裁 Y —— 部分脏区帧的裁剪矩形不含
+    // 文本所在行时，背景 fill_rect 被正确裁掉而文字仍逐行写出，同一字形每帧往上一帧墨迹上
+    // 再混合，墨量累积致文字逐帧变粗发糙（「过一会儿开始锯齿」，约 1~2s 饱和）。
+    auto ink_in_rows = [](const Painter &p, int y0, int y1) -> int {
+        int n = 0;
+        for (int y = y0; y < y1; ++y) {
+            for (int x = 0; x < p.width(); ++x) {
+                if (p.get_pixel(x, y).a > 0) {
+                    ++n;
+                }
+            }
+        }
+        return n;
+    };
+
+    // 基线：无裁剪时上半区与下半区都有墨。
+    Painter base;
+    base.begin(64, 24);
+    base.draw_text(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 24.0F}},
+                   "Aurora", Font{.size_pt = 16.0F}, Color::black());
+    AURORA_TEST_CHECK_GT(ink_in_rows(base, 0, 10), 0);
+
+    // 裁剪只覆盖下半区（y>=12）：上半区的文字行必须完全不落笔。
+    Painter clipped;
+    clipped.begin(64, 24);
+    clipped.push_clip(Rect{.origin = Point{.x = 0.0F, .y = 12.0F}, .size = Size{.width = 64.0F, .height = 12.0F}});
+    clipped.draw_text(
+        Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 24.0F}}, "Aurora",
+        Font{.size_pt = 16.0F}, Color::black());
+    AURORA_TEST_CHECK_EQ(ink_in_rows(clipped, 0, 12), 0);  // 裁剪外（y<12）不得落笔
 }
 
 AURORA_TEST_CASE(clip_bounds_covers_canvas_without_clip) {

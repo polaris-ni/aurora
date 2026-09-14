@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -200,7 +201,10 @@ class Widget : public std::enable_shared_from_this<Widget> {
     [[nodiscard]] auto scroll_offset_y() const -> float { return scroll_viewport_.offset_y; }
     /// @brief 程序化滚动（供测试/无障碍/外部控制器驱动），语义同滚轮：delta_y 正方向为向上滚动。
     /// @return offset 是否实际变化（到达端点后再滚返回 false）。
-    auto scroll_by(float delta_y) -> bool {
+    ///
+    /// 设为虚：真实滚动控件（`Scroll`）需以同名同签名覆写，否则派生版本会**隐藏**本非虚函数
+    /// （同名仅返回类型不同不构成重载），静态分析据此报警且经基类引用调用时语义不一致。
+    virtual auto scroll_by(float delta_y) -> bool {
         ScrollEvent e;
         e.delta_y = delta_y;
         const bool changed = [&] {
@@ -738,12 +742,18 @@ class Widget : public std::enable_shared_from_this<Widget> {
     mutable std::unique_ptr<Painter> paint_cache_;
     mutable Size paint_cache_size_{.width = 0.0F, .height = 0.0F};
     mutable bool paint_cache_valid_ = false;
+    /// @brief 离屏缓存生成时的光栅状态世代（`render::FontEngine::raster_generation`）。
+    ///        世代变更即代表 AA 模式 / 默认字体已变，缓存中的光栅结果过期，必须重绘。
+    mutable std::uint64_t paint_cache_raster_gen_ = 0;
 
 #ifdef AURORA_ENABLE_DISPLAY_LIST
     // ---- Display List 缓存（AURORA_ENABLE_DISPLAY_LIST）----
     DisplayList display_list_;  ///< 本控件子树（含后代）的录制命令缓冲
     bool dl_valid_ = false;  ///< 缓存是否有效（内容未变且 bounds 未变）
     Rect last_paint_bounds_{};  ///< 上次录制时的绘制全局矩形（bounds 变化须重录）
+    /// @brief 录制时的光栅状态世代（同 `paint_cache_raster_gen_`）：DL 的 DrawText 命令
+    ///        固化了录制时的 AA 模式，世代不匹配即须重录，否则回放旧光栅。
+    std::uint64_t dl_raster_gen_ = 0;
 #endif
 
   protected:

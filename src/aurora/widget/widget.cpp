@@ -11,6 +11,7 @@
 #include "aurora/modifier/modifier.h"
 #include "aurora/perf/counters.h"
 #include "aurora/render/detail/paint_timing.h"
+#include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 
 namespace aurora {
@@ -383,10 +384,14 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
     const bool cache = std::ranges::any_of(mod.nodes(), [](const std::shared_ptr<ModifierNode> &n) -> bool {
         return n->paint_kind() == ModifierNode::PaintKind::CacheLayer;
     });
+    // 全局光栅状态世代（AA 模式 / 默认字体，见 FontEngine::raster_generation）：两类缓存都把
+    // 光栅结果固化在生成/录制那一刻，而 mark_needs_paint 只沿父链向上失效、不触及后代缓存，
+    // 故世代是「旧光栅是否已过期」的唯一 O(1) 判据——世代不匹配一律重绘，避免回放旧光栅。
+    const std::uint64_t raster_gen = render::FontEngine::raster_generation();
 
     if (cache) {
-        if (paint_cache_ && paint_cache_valid_ && paint_cache_size_.width == bounds.size.width &&
-            paint_cache_size_.height == bounds.size.height) {
+        if (paint_cache_ && paint_cache_valid_ && paint_cache_raster_gen_ == raster_gen &&
+            paint_cache_size_.width == bounds.size.width && paint_cache_size_.height == bounds.size.height) {
             p.composite(*paint_cache_, Matrix2D::from_translate(bounds.origin.x, bounds.origin.y));
             return;
         }
@@ -395,6 +400,7 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
         paint_cache_->begin(static_cast<int>(bounds.size.width), static_cast<int>(bounds.size.height));
         render_into(*paint_cache_, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}, ctx);
         paint_cache_size_ = bounds.size;
+        paint_cache_raster_gen_ = raster_gen;
         paint_cache_valid_ = true;
         p.composite(*paint_cache_, Matrix2D::from_translate(bounds.origin.x, bounds.origin.y));
         return;
@@ -414,7 +420,7 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
         // 逐像素尊重，故「在裁剪下回放缓存 DL」与「在裁剪下直绘」逐位一致，不会越界绘制。
         // 仅此一项即可消除「连续动画每帧产生脏区 → 根裁剪使全树 DL 缓存永久失效 → 每帧重录重放」
         // 的 11ms 级 glue 浪费（Google Play demo 稳态 banner/shimmer 动画持续标脏即此场景）。
-        if (dl_valid_ && bounds == last_paint_bounds_) {
+        if (dl_valid_ && dl_raster_gen_ == raster_gen && bounds == last_paint_bounds_) {
             const double saved_alpha = p.global_alpha();
             AURORA_PROFILE_COUNT(dl_replays, 1);
             detail::paint_timing().dl_replays++; // [性能排查] 镜像到光栅计时累加器，供 glue 归因
@@ -431,6 +437,7 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
         p.stop();                                          // 退出录制（恢复 Direct）
         if (!was_dynamic) {
             dl_valid_ = true;
+            dl_raster_gen_ = raster_gen;
             last_paint_bounds_ = bounds;
         }
         display_list_.replay(p); // 立即回放（Direct）上屏

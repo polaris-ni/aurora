@@ -11,6 +11,7 @@
 #include "aurora/event/event.h"
 #include "aurora/perf/counters.h"
 #include "aurora/render/detail/paint_timing.h"
+#include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/widget/scroll_viewport.h"
 #include "aurora/widget/widget.h"
@@ -179,10 +180,13 @@ class Scroll : public Container, public ScrollProps {
     [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
 
     /// 程序化滚动（供测试 / 无障碍 / 外部控制器驱动），delta_y 正方向为向上滚动。
-    auto scroll_by(float delta_y) -> void {
+    /// 覆写 `Widget::scroll_by`（基类为虚，避免同名隐藏非虚函数）；返回 offset 是否实际变化。
+    auto scroll_by(float delta_y) -> bool override {
         ScrollEvent e;
         e.delta_y = delta_y;
+        const float before = offset_y_;
         on_scroll(e);
+        return offset_y_ != before;
     }
     [[nodiscard]] auto offset_y() const -> float { return offset_y_; }
 
@@ -259,7 +263,12 @@ class Scroll : public Container, public ScrollProps {
         //     避免整块 3 屏离屏缓冲每帧全量重录（动画后代标脏拖垮帧率的症结，见 on_descendant_dirty）。
         //  ③ 增量重锚：长内容滚动（reanchor，见下方注释）。
         //  ④ 其余（缓冲有效、内容未变、非重锚、无脏带）仅平移合成（blit），不重栅。
-        bool whole_redraw = !content_valid_ || content_dirty_;
+        // 全局光栅状态世代（AA 模式 / 默认字体，见 FontEngine::raster_generation）：content_ 把整棵
+        // 子树的光栅结果固化在录制那一刻，而 mark_needs_paint 只沿父链向上失效、不触及后代缓存，故世代
+        // 是「缓冲内旧光栅是否过期」的唯一 O(1) 判据。世代不匹配一律整块重录，避免回放切换 AA 前的旧
+        // 光栅（表现为「F6 切了没变化、直到某子控件标脏时局部才零星刷新」）。
+        const std::uint64_t raster_gen = render::FontEngine::raster_generation();
+        bool whole_redraw = !content_valid_ || content_dirty_ || content_raster_gen_ != raster_gen;
         // 计算脏带（缓冲局部坐标，夹到缓冲窗口）；无效则降级整块重录。
         Rect band;
         bool band_redraw = false;
@@ -321,6 +330,7 @@ class Scroll : public Container, public ScrollProps {
                                             ctx);
                 content_->pop_clip();
                 content_valid_ = true;
+                content_raster_gen_ = raster_gen;  // 整块重录后全缓冲统一为当前光栅世代
             } else if (band_redraw) {
                 // 局部重录：仅重绘脏带（动画后代区域），其余缓冲像素（静态内容）经下方 blit 复用，
                 // 不再把整块 3 屏离屏缓冲每帧全量重录。脏带已夹到缓冲窗口（见上方计算）。
@@ -415,6 +425,7 @@ class Scroll : public Container, public ScrollProps {
     float buffer_origin_y_ = 0.0F;  ///< 滑动窗口锚点：缓冲顶对应的内容坐标 Y（重锚点时更新）
     std::unique_ptr<Painter> content_;  ///< 滑动窗口离屏缓冲（尺寸 = 视口宽 × 视口高×(1+2×overscan)，与滚动偏移无关）
     bool content_valid_ = false;  ///< 离屏缓冲是否需要整体重建（首建 / 内容尺寸变化 / 重锚点）
+    std::uint64_t content_raster_gen_ = 0;  ///< 离屏缓冲栅格化时的光栅状态世代（AA 模式 / 默认字体变更须整块重录）
     bool scrolling_ = false;  ///< 本帧是否由滚动驱动（=true 时仅 blit，不重录内容）
     bool content_dirty_ = true;  ///< 内容子树自上次栅格化后是否变化（由 on_descendant_dirty 置位；首帧必重录）
     Rect dirty_band_{.origin = Point{.x = 0.0F, .y = 0.0F},

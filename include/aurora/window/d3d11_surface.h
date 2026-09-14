@@ -49,6 +49,13 @@ class D3D11Surface : public Surface {
     /// Linux 构建不含 D3D11 后端）。
     auto set_cursor(CursorShape shape) -> void override;
 
+    /// @brief 真实窗口截图（含非客户区/标题栏/边框）：与 `Win32Surface` 共用 `Win32Window` 宿主，
+    /// 故复用共享 `detail::capture_window_by_hwnd`（`src/aurora/window/win32_capture.h`）走 PrintWindow 路径。
+    /// DEBUG 下生效；Release（未开 `AURORA_ENABLE_DEBUG`）回落 unsupported 错误（零截图代码）。
+    /// 未编译验证：须 Windows + `AURORA_BACKEND_D3D11=ON` 构建后复查（本仓库的无头
+    /// Linux 构建不含 D3D11 后端）。
+    [[nodiscard]] auto capture_window(const std::string &path) -> Result<bool> override;
+
     auto poll_platform_events() -> void override;
     auto set_event_handler(const EventHandler &h) -> void override { win_->set_event_handler(h); }
     auto set_window_state_handler(WindowStateHandler h) -> void override {

@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/render/font_engine.h
 /// 测试说明: 覆盖 FontEngine 度量契约（空串零宽、长度/字号单调、行高为正）、caret_x 与 hit_test_char 的
-/// 码点索引与往返一致性、TextLayoutOpts 字距/词距对宽度的影响、AA 策略读写、
+/// 码点索引与往返一致性、TextLayoutOpts 字距/词距对宽度的影响、AA 策略读写与光栅状态世代自增、
 /// draw_text 实际落笔、shaping 缓存统计与清空，以及 UTF-8 串的码点安全性
 
 #include <cstddef>
@@ -35,6 +35,7 @@ namespace {
 }
 }  // namespace
 
+namespace {
 /// @brief AA 策略是进程级状态：用例结束还原默认，避免影响同文件后续用例。
 class AaModeGuard : public ::aurora::testing::Fixture {
   protected:
@@ -44,6 +45,7 @@ class AaModeGuard : public ::aurora::testing::Fixture {
   private:
     render::TextAAMode saved_ = render::TextAAMode::Supersample;
 };
+}  // namespace
 
 AURORA_TEST_CASE(measure_width_of_empty_text_is_zero) {
     AURORA_TEST_CHECK_NEAR(render::FontEngine::measure_width("", Font{}), 0.0, 1e-6);
@@ -108,10 +110,10 @@ AURORA_TEST_CASE(hit_test_char_clamps_and_round_trips_with_caret) {
 }
 
 AURORA_TEST_CASE(hit_test_char_inclusive_selects_clicked_character) {
-    const Font font;
     const std::string text = "Aurora";
     // 含头含尾语义：点击任一字符内部都应命中该字符下标（不是下一个光标位）。
     for (std::size_t i = 0; i < text.size(); ++i) {
+        const Font font;
         AURORA_TEST_TRACE(std::string{"char "} + std::to_string(i));
         const float mid =
             (render::FontEngine::caret_x(text, i, font) + render::FontEngine::caret_x(text, i + 1, font)) * 0.5F;
@@ -122,7 +124,7 @@ AURORA_TEST_CASE(hit_test_char_inclusive_selects_clicked_character) {
 
 AURORA_TEST_CASE(letter_spacing_increases_width) {
     const Font font;
-    const render::TextLayoutOpts plain{};
+    constexpr render::TextLayoutOpts plain{};
     render::TextLayoutOpts spaced{};
     spaced.letter_spacing = 4.0F;
 
@@ -132,7 +134,7 @@ AURORA_TEST_CASE(letter_spacing_increases_width) {
 
 AURORA_TEST_CASE(word_spacing_only_affects_text_with_spaces) {
     const Font font;
-    const render::TextLayoutOpts plain{};
+    constexpr render::TextLayoutOpts plain{};
     render::TextLayoutOpts spaced{};
     spaced.word_spacing = 8.0F;
 
@@ -144,7 +146,7 @@ AURORA_TEST_CASE(word_spacing_only_affects_text_with_spaces) {
 
 AURORA_TEST_CASE(display_width_degenerates_to_measure_width_at_scale_one) {
     const Font font;
-    const render::TextLayoutOpts opts{};
+    constexpr render::TextLayoutOpts opts{};
     AURORA_TEST_CHECK_NEAR(render::FontEngine::display_width("Scaled", font, opts, 1.0F),
                            render::FontEngine::measure_width("Scaled", font, opts), 1e-6);
 }
@@ -159,6 +161,19 @@ AURORA_TEST_F(AaModeGuard, text_aa_mode_is_readable_and_writable) {
                          static_cast<int>(render::TextAAMode::Supersample));
 }
 
+AURORA_TEST_F(AaModeGuard, raster_generation_bumps_only_on_real_aa_change) {
+    // 光栅状态世代是控件绘制缓存（Display List / 离屏层）判定「录制时点的光栅设置是否已过期」
+    // 的 O(1) 依据：只有值真正变化才自增，避免无谓击穿全树缓存。
+    render::FontEngine::set_text_aa_mode(render::TextAAMode::ClearType);
+    const auto g0 = render::FontEngine::raster_generation();
+
+    render::FontEngine::set_text_aa_mode(render::TextAAMode::ClearType);  // 同值：不自增
+    AURORA_TEST_CHECK_EQ(render::FontEngine::raster_generation(), g0);
+
+    render::FontEngine::set_text_aa_mode(render::TextAAMode::Supersample);  // 异值：+1
+    AURORA_TEST_CHECK_EQ(render::FontEngine::raster_generation(), g0 + 1U);
+}
+
 AURORA_TEST_CASE(draw_text_puts_ink_on_canvas) {
     Painter p;
     p.begin(64, 16);
@@ -166,6 +181,28 @@ AURORA_TEST_CASE(draw_text_puts_ink_on_canvas) {
 
     render::FontEngine::draw_text(p, rect_at(0.0F, 0.0F, 64.0F, 16.0F), "Aurora", Font{}, Color::black());
     AURORA_TEST_CHECK_GT(count_opaque(p), 0);
+}
+
+AURORA_TEST_CASE(synthetic_bold_adds_ink_when_no_bold_face_registered) {
+    // Font.weight 语义：请求 weight>=600 而字体族无 bold 面时，渲染层经 FT_Outline_Embolden
+    // 合成粗体——粗体文本的落墨量必须显著高于 regular（此前 weight 被渲染层完全忽略，
+    // 粗体与 regular 逐位相同，本用例守门该缺口不再回归）。
+    const std::string text = "Aurora bold";
+    const Font regular{.size_pt = 24.0F, .weight = 400};
+    const Font bold{.size_pt = 24.0F, .weight = 700};
+
+    Painter p_reg;
+    p_reg.begin(160, 40);
+    render::FontEngine::draw_text(p_reg, rect_at(0.0F, 0.0F, 160.0F, 40.0F), text, regular, Color::black());
+    const int ink_reg = count_opaque(p_reg);
+
+    Painter p_bold;
+    p_bold.begin(160, 40);
+    render::FontEngine::draw_text(p_bold, rect_at(0.0F, 0.0F, 160.0F, 40.0F), text, bold, Color::black());
+    const int ink_bold = count_opaque(p_bold);
+
+    AURORA_TEST_CHECK_GT(ink_reg, 0);
+    AURORA_TEST_CHECK_GT(ink_bold, ink_reg);  // 合成加粗 → 覆盖度增加
 }
 
 AURORA_TEST_CASE(draw_text_of_empty_string_is_noop) {
@@ -207,8 +244,8 @@ AURORA_TEST_CASE(rtl_measure_width_matches_ltr) {
     // 视觉宽度与方向无关（字形集合相同，仅排列镜像）。
     const Font font;
     const std::string text = "Hello World";
-    const render::TextLayoutOpts ltr{};
-    const render::TextLayoutOpts rtl{.direction = TextDirection::RTL};
+    constexpr render::TextLayoutOpts ltr{};
+    constexpr render::TextLayoutOpts rtl{.direction = TextDirection::RTL};
     AURORA_TEST_CHECK_NEAR(render::FontEngine::measure_width(text, font, rtl),
                            render::FontEngine::measure_width(text, font, ltr), 0.5);
 }
@@ -217,7 +254,7 @@ AURORA_TEST_CASE(rtl_caret_x_mirrors_to_right_edge) {
     // RTL：逻辑首字符在右缘——caret(0) = 整串宽，caret(n) = 0，随逻辑下标单调递减。
     const Font font;
     const std::string text = "Aurora";
-    const render::TextLayoutOpts rtl{.direction = TextDirection::RTL};
+    constexpr render::TextLayoutOpts rtl{.direction = TextDirection::RTL};
     const float total = render::FontEngine::measure_width(text, font, rtl);
     AURORA_TEST_CHECK_NEAR(render::FontEngine::caret_x(text, 0, font, rtl), total, 0.5);
     AURORA_TEST_CHECK_NEAR(render::FontEngine::caret_x(text, text.size(), font, rtl), 0.0, 0.5);
@@ -234,8 +271,8 @@ AURORA_TEST_CASE(rtl_hit_test_mirrors_ltr) {
     // RTL：同一文本，LTR 在 x 命中的逻辑下标 i ⇔ RTL 在 (total − x) 命中 i（含入语义）。
     const Font font;
     const std::string text = "Aurora";
-    const render::TextLayoutOpts ltr{};
-    const render::TextLayoutOpts rtl{.direction = TextDirection::RTL};
+    constexpr render::TextLayoutOpts ltr{};
+    constexpr render::TextLayoutOpts rtl{.direction = TextDirection::RTL};
     const float total = render::FontEngine::measure_width(text, font, ltr);
 
     AURORA_TEST_CHECK_EQ(render::FontEngine::hit_test_char(text, total + 10.0F, font, rtl), 0U);

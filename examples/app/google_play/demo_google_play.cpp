@@ -41,6 +41,10 @@ auto main() -> int {
     opts.max_fps = 0;  // 解除帧率上限：内部帧循环以显示器/GPU 允许的最高速率运行，滚动与动画更跟手
     opts.size = au::Size{.width = 1100.0F, .height = 760.0F};
     opts.title = "Google Play";
+    // 文本 AA 策略：屏幕演示选 ClearType（LCD 子像素）——灰度 AA 的窄过渡在 1x 下曲线/斜笔画
+    // 呈 1px 台阶（锯齿感）；子像素水平 3x 覆盖度分辨率可显著平滑。运行时可按 F6 切回灰度对比
+    // （库默认仍为 Supersample，多色/渐变背景上无子像素羽化，见 text_aa_mode.h）。
+    au::render::FontEngine::set_text_aa_mode(au::render::TextAAMode::ClearType);
     auto win_res = create_native_window(opts);
     aurora::Application app{std::move(scene), win_res ? std::move(win_res.value()) : nullptr, opts};
     app.set_overlay(std::make_shared<au::PerfOverlay>());
@@ -83,6 +87,21 @@ auto main() -> int {
                             [&]() -> void { toggle_flag(dbg_flags.repaint_highlight, "repaint_highlight"); });
         app.shortcuts().add(au::KeyCombo{au::KeyCode::F5},
                             [&]() -> void { toggle_flag(dbg_flags.overdraw, "overdraw"); });
+        // 文本 AA 模式切换（ClearType ↔ 灰度）：现场对比两种光栅策略。图集键含 AA 模式，
+        // 新模式字形按需重光栅化，无脏条目；切换会自增 FontEngine::raster_generation，
+        // 使全树 Display List / 离屏层缓存按世代失效（否则后代控件仍回放切换前的旧光栅，
+        // 表现为「切换瞬间无变化、过一会儿才零星生效」）。此处标脏只为请求下一帧。
+        app.shortcuts().add(au::KeyCombo{au::KeyCode::F6}, [&app]() -> void {
+            const auto next = au::render::FontEngine::text_aa_mode() == au::render::TextAAMode::ClearType
+                                  ? au::render::TextAAMode::Supersample
+                                  : au::render::TextAAMode::ClearType;
+            au::render::FontEngine::set_text_aa_mode(next);
+            if (app.window() != nullptr) {
+                app.scene().root_node().widget().mark_needs_paint();
+            }
+            AURORA_LOG_RAW("demo", "text AA mode: ",
+                           next == au::render::TextAAMode::ClearType ? "ClearType (LCD)" : "Supersample (gray)", "\n");
+        });
         // 截图：软件帧缓冲（确定性）/ 真实屏幕窗口（含 OS 装饰，按后端能力）。
         app.shortcuts().add(au::KeyCombo{au::ModifierKey::Control, au::KeyCode::S}, [&app]() -> void {
             if (!app.window()) {
@@ -119,7 +138,7 @@ auto main() -> int {
             AURORA_LOG_RAW("demo", "diagnostics:\n", au::debug::diagnostics().dump(2), "\n");
         });
         AURORA_LOG_RAW("demo",
-                       "DEBUG shortcuts: F1-F5 overlays | Ctrl+S framebuffer | Ctrl+Shift+S window | "
+                       "DEBUG shortcuts: F1-F5 overlays | F6 text AA | Ctrl+S framebuffer | Ctrl+Shift+S window | "
                        "Ctrl+P runtime info\n");
     }
 #endif

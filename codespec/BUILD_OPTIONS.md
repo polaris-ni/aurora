@@ -25,7 +25,7 @@
 |:---|:---|
 | `cmake/AuroraFeatures.cmake` | **feature 宏单一入口** `aurora_define_feature(<宏> [SCOPE] [TARGET] [RAW] [EXPORT])`：定义注入 + `AURORA_FEATURE_DEFINES` 导出登记二合一；全部 feature 宏调用点（后端 / 优化 / SIMD / PROFILING / TRACING / DEBUG / 编解码）经它声明。运行时查询入口 `aurora::debug::feature_flags()`（`include/aurora/debug/feature_flags.h`） |
 | `cmake/AuroraThirdParty.cmake` | FreeType / HarfBuzz 源码构建 |
-| `cmake/AuroraUtils.cmake` | 消费者目标统一配置辅助（`aurora_setup_consumer_target`，demo / 测试 / 工具复用链接 / PCH / C++20 / 告警） |
+| `cmake/AuroraUtils.cmake` | 消费者目标统一配置辅助（`aurora_setup_consumer_target`，demo / 测试 / 工具复用链接 / PCH / C++20 / 告警 / MinGW `-Wa,-mbig-obj`） |
 | `cmake/AuroraBackends.cmake` | 全部 `AURORA_BACKEND_*` 后端剪裁开关 + 架构级优化宏（`AURORA_ENABLE_LAYOUT_CACHE` 等） |
 | `cmake/AuroraImageCodecs.cmake` | `AURORA_ENABLE_IMAGE_JPEG` / `AURORA_ENABLE_IMAGE_WEBP` / `AURORA_ENABLE_IMAGE_PNG`（编译期能力开关） |
 | `cmake/AuroraSimd.cmake` | `AURORA_ENABLE_SIMD`（光栅内核 SIMD 双实现，内部宏，不 PUBLIC 传播） |
@@ -185,6 +185,7 @@ cmake -S . -B build -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_DISPLAY_LIS
 
 - **绘制副作用 / 每帧变动内容的控件必须退出 DL 缓存**：`Widget::can_cache_display_list()` 默认 `true`；绘制阶段产生副作用（如 `Hero` 向 `HeroRegistry` 上报几何）或内容每帧变化（如 `TransitionLayer` / `NavigatorHost` 按 `progress` 合成淡变）的控件**必须**覆盖为 `false`，否则缓存回放会跳过必要的每帧 `on_paint`，导致注册丢失 / 转场冻结。命中不可缓存控件时，其祖先录制会被标记 `mark_recording_dynamic()`。
 - **外部裁剪不参与控件 DL**：`present_root` 的脏区裁剪 `push_clip` 不录入控件 DL；故 `Widget::paint` 在 `Painter::has_clip()` 为真时直接重录但**不缓存**，避免无裁剪帧回放越界绘制（见 `tests/integration/itest_dirty_clip_paint.cpp`）。
+- **全局光栅状态按世代失效**：`Widget::paint` 的 DL / 离屏层缓存命中条件含 `FontEngine::raster_generation()`；`set_text_aa_mode` 与字体注入接口在值变化时自增它，从而让全树缓存下一帧重录。新增「全局影响字形光栅」的设置时，须在 setter 内自增该世代，否则缓存会回放旧光栅。
 - **布局变更同步失效 DL**：`Widget::mark_needs_layout()` 一并调用 `invalidate_display_list_up()`，保证重排后的几何 / 内容不被旧 `bounds` 录制的 DL 回放。
 - **`layout_parent_` 悬垂安全**：`Node` 析构时将其持有的子控件 `layout_parent_` 置空，使树重建（父容器销毁而子控件经共享所有权存活）时 `mark_needs_layout()` / `invalidate_display_list_up()` 不会解引用已释放的父指针。
 
@@ -394,6 +395,8 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `NOMINMAX` | `add_compile_definitions(NOMINMAX)` | 全局 | 抑制 `<windows.h>` 的 `min` / `max` 宏，保证 `std::min` / `std::max` 在 Windows 可用 |
 | `_CRT_SECURE_NO_WARNINGS` | `target_compile_definitions(aurora PUBLIC …)` | 仅 MSVC | 抑制 MSVC 对 `std::fopen` 等 POSIX 函数的弃用警告 |
 | `AURORA_BACKEND_*` | `target_compile_definitions(aurora PUBLIC …)` | 由 §3 开关控制 | 后端 feature 宏 |
+
+除宏定义外，`aurora_setup_consumer_target`（`cmake/AuroraUtils.cmake`）在 **MinGW** 下对全部消费者目标（demo / 测试 / 工具）追加 `-Wa,-mbig-obj`：MinGW 汇编器的 COFF 目标文件默认段数上限 65535 会被 Debug（`-g`）下的超大消费者 TU 击穿（实测 `demo_google_play.cpp` 达 33614 段，报 "too many sections" / "file too big"），该标志把上限放宽到 2^32 段，产物仍为标准 COFF，对链接器透明；MSVC / clang-cl 的汇编器无此上限，不注入。`AURORA_ENABLE_COVERAGE` 的 GCC 分支出于同一原因亦注入（见 §4 约束）。
 
 ---
 

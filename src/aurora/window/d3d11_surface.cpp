@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "aurora/core/log.h"
+#include "aurora/window/win32_capture.h"
 #include "aurora/window/win32_cursor.h"
 
 namespace aurora {
@@ -65,7 +66,9 @@ auto compile_shader(const char *src, const char *entry, const char *profile, ID3
 
 auto make_sampler_desc() -> D3D11_SAMPLER_DESC {
     D3D11_SAMPLER_DESC sd;
-    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    // 用线性采样：源纹理与后缓冲/视口尺寸若因 DPI 取整或缩放差 1px，最近邻会出现锯齿/闪烁，
+    // 线性可在微小差异下保持边缘平滑；1:1 时与点采样等价。
+    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
     sd.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
     sd.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
     sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -112,6 +115,18 @@ D3D11Surface::D3D11Surface(int width, int height, const std::string &title, cons
 D3D11Surface::~D3D11Surface() { release_device(); }
 
 auto D3D11Surface::set_cursor(CursorShape shape) -> void { detail::set_win32_cursor(shape); }
+
+auto D3D11Surface::capture_window(const std::string &path) -> Result<bool> {
+#ifdef AURORA_ENABLE_DEBUG
+    // 与 Win32Surface 同源：D3D11 复用同一 Win32Window 宿主（共享 HWND），
+    // 直接走共享的 PrintWindow 截图路径抓取真实窗口（含非客户区）。
+    return detail::capture_window_by_hwnd(static_cast<HWND>(native_handle()), path);
+#else
+    (void)path;
+    return Result<bool>{
+        make_error(ErrorCode::GeneralNotSupported, "capture_window: disabled (AURORA_ENABLE_DEBUG not enabled)")};
+#endif
+}
 
 auto D3D11Surface::release_device() -> void {
     safe_release(bs_);
@@ -412,12 +427,28 @@ auto D3D11Surface::present() -> Result<bool> {
     if (dirty_.empty()) {
         upload_ok = upload_region(0, 0, dev_w_, dev_h_);
     } else {
+        bool any_upload = false;
         for (const Rect &r : dirty_) {
             const int x0 = std::max(0, static_cast<int>(std::floor(r.origin.x)));
             const int y0 = std::max(0, static_cast<int>(std::floor(r.origin.y)));
             const int x1 = std::min(dev_w_, static_cast<int>(std::ceil(r.right())));
             const int y1 = std::min(dev_h_, static_cast<int>(std::ceil(r.bottom())));
-            upload_ok = upload_region(x0, y0, x1 - x0, y1 - y0);
+            const int w = x1 - x0;
+            const int h = y1 - y0;
+            // 退化（零面积）脏矩形：逻辑坐标下合法、经设备坐标 floor/ceil 取整后塌缩为零高度/宽度，
+            // 本就无像素可传。跳过它，既避免无谓报错，也（关键地）不让它把整批上传结果判为失败。
+            if (w <= 0 || h <= 0) {
+                continue;
+            }
+            if (upload_region(x0, y0, w, h)) {
+                any_upload = true;
+            }
+        }
+        upload_ok = any_upload;
+        // 脏集非空但全部为退化矩形（没有任何有效区域被上传）→ 降级整帧上传，
+        // 否则本帧变更区域完全未上屏，纹理停留上一帧 → 残影/发虚。
+        if (!any_upload) {
+            upload_ok = upload_region(0, 0, dev_w_, dev_h_);
         }
     }
     dirty_.clear();

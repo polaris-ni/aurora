@@ -7,6 +7,7 @@
 #   - CXX_STANDARD 20
 #   - 复用消费者共享 PCH（REUSE_FROM aurora_consumer_pch，受 AURORA_PCH_ENABLED 门控）
 #   - 注入项目统一告警标志（与 aurora 自身一致）
+#   - MinGW 下追加 -Wa,-mbig-obj（放宽 COFF 段数上限，见函数内注释）
 #   - 可选额外 PRIVATE include 目录（ARGN）
 # NOMINMAX 由顶层全局 add_compile_definitions 提供（第三方库同样需要），此处不再重复。
 # 调用方须在本文件 include 之后、且 aurora_consumer_pch 锚点目标已定义之后调用。
@@ -30,6 +31,16 @@ function(aurora_setup_consumer_target _tgt)
     if (NOT MSVC)
         target_compile_options(${_tgt} PRIVATE
                 -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
+    endif ()
+
+    # MinGW 的 COFF 目标文件默认段数上限（65535）会被超大消费者 TU 在 Debug（-g + 大量
+    # 模板/内联实体的 header-only 控件）下击穿，汇编器报 "too many sections" / "file too big"
+    #（实测 examples/app/google_play/demo_google_play.cpp 达 33614 段）。
+    # -Wa,-mbig-obj 把上限放宽到 2^32 段，对象仍是标准 COFF，对链接器与其他平台透明。
+    # 与 AURORA_ENABLE_COVERAGE（AuroraInstrumentation.cmake）同口径，此处覆盖 demo / 测试 / 工具
+    # 全部消费者目标；MSVC / clang-cl 的汇编器无此限制，不加。
+    if (MINGW)
+        target_compile_options(${_tgt} PRIVATE -Wa,-mbig-obj)
     endif ()
 
     # 可选额外 PRIVATE include 目录（如 examples/demos、tests/）。

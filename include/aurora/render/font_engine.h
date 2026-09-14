@@ -99,10 +99,23 @@ class FontEngine {
         -> void;
 
     /// @brief 设置文本抗锯齿策略（影响 FreeType 渲染模式；默认 `TextAAMode::Supersample`）。
+    ///
+    /// 会自增 `raster_generation()`：控件缓存（Display List / 离屏层）在录制时固化了光栅
+    /// 结果，须以该世代失效，否则切换后仍回放旧光栅。
     static auto set_text_aa_mode(TextAAMode mode) -> void;
 
     /// @brief 取得当前文本抗锯齿策略。
     [[nodiscard]] static auto text_aa_mode() -> TextAAMode;
+
+    /// @brief 光栅状态世代：凡「全局影响字形光栅结果」的设置变更（`set_text_aa_mode`、
+    ///        `set_default_font` / `register_font*`）均自增本计数。
+    ///
+    /// 必要性：控件的 Display List 与离屏层缓存（`Modifier::cache_layer`）在**录制时**就把
+    /// 光栅结果（含 AA 模式、所选字面）固化进命令/位图，而 `Widget::mark_needs_paint()`
+    /// 只沿父链向上传播失效、**不会**失效后代缓存——若不以本世代校验，切换 AA 模式后
+    /// 后代仍回放旧光栅，表现为「切换瞬间无变化，过一会儿才随无关失效零星生效」。
+    /// 控件把本世代纳入缓存命中条件即可 O(1) 感知全局光栅状态变化，无需整树遍历。
+    [[nodiscard]] static auto raster_generation() -> std::uint64_t;
 
     /// @brief 测量字符串宽度（设备像素，含字距/kerning）。
     [[nodiscard]] static auto measure_width(const std::string &text, const Font &f) -> float;

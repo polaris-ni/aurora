@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <vector>
 #include FT_FREETYPE_H
+#include FT_OUTLINE_H  // FT_Outline_Embolden（合成粗体）
 #include <hb-ft.h>
 #include <hb.h>
 
@@ -38,6 +39,13 @@ namespace {
     static auto m = TextAAMode::Supersample;
     return m;
 }
+// 光栅状态世代（见 FontEngine::raster_generation）：任何全局影响字形光栅结果的设置变更
+// 都在此自增，控件缓存以它判定「录制时的光栅状态是否仍然成立」。
+[[nodiscard]] auto raster_gen_counter() -> std::uint64_t & {
+    static std::uint64_t g = 0;
+    return g;
+}
+auto bump_raster_generation() -> void { ++raster_gen_counter(); }
 class ShapeCache;  // 前向声明：定义在下方，函数体随后置。
 [[nodiscard]] auto shape_cache() -> ShapeCache &;
 
@@ -122,7 +130,7 @@ auto find_glyph(const std::vector<FontFace *> &faces, unsigned cp, FontFace *&ff
 }
 
 [[nodiscard]] auto line_height_px(const std::vector<FontFace *> &faces, int px) -> float {
-    const FT_Face face = faces.front()->face;
+    const FT_Face face = faces.front()->face;  // NOLINT
     FT_Set_Pixel_Sizes(face, 0, px);
     return static_cast<float>(face->size->metrics.height) / 64.0F;
 }
@@ -131,22 +139,23 @@ auto find_glyph(const std::vector<FontFace *> &faces, unsigned cp, FontFace *&ff
 // 历史语义，全库调用方均按此传值），首行基线 = 顶 + ascender；回退 face 的字形统一按
 // 主 face 基线对齐，保证混排（拉丁+CJK）同行基线一致。
 [[nodiscard]] auto ascender_px(const std::vector<FontFace *> &faces, int px) -> float {
-    const FT_Face face = faces.front()->face;
+    const FT_Face face = faces.front()->face;  // NOLINT
     FT_Set_Pixel_Sizes(face, 0, px);
     return static_cast<float>(face->size->metrics.ascender) / 64.0F;
 }
 
-// key 布局（42 bit 有效）：
+// key 布局（43 bit 有效）：
 // [0:15]  glyph_index  (16 bit, max 65535)
 // [16:31] px           (16 bit, max 65535)
 // [32:39] face_id      (8 bit, max 255)
 // [40]    mode         (1 bit, 0=normal/Gray, 1=Lcd)
 // [41]    italic       (1 bit)
+// [42]    embolden     (1 bit，合成粗体：常规与加粗字形位图不同，必须分键避免图集碰撞)
 [[nodiscard]] constexpr auto make_key(std::uint32_t face_id, std::uint32_t glyph_index, std::uint32_t px, bool mode,
-                                      bool italic) -> std::uint64_t {
+                                      bool italic, bool embolden) -> std::uint64_t {
     return static_cast<std::uint64_t>(face_id) << 32U | static_cast<std::uint64_t>(glyph_index) |
            static_cast<std::uint64_t>(px) << 16U | static_cast<std::uint64_t>(mode ? 1 : 0) << 40U |
-           static_cast<std::uint64_t>(italic ? 1 : 0) << 41U;
+           static_cast<std::uint64_t>(italic ? 1 : 0) << 41U | static_cast<std::uint64_t>(embolden ? 1 : 0) << 42U;
 }
 
 auto apply_italic(FT_Face face, bool italic) -> void {
@@ -253,8 +262,7 @@ class ShapeCache {
         return (g.size() * sizeof(ShapedGlyph)) + 32U;  // 估算（含对齐）
     }
     auto evict_to_fit(std::size_t extra, std::size_t extra_bytes) -> void {
-        while ((map_.size() + extra > max_entries_ || stats_.bytes + extra_bytes > max_bytes_) &&
-               !lru_.empty()) {
+        while ((map_.size() + extra > max_entries_ || stats_.bytes + extra_bytes > max_bytes_) && !lru_.empty()) {
             const auto &old = lru_.back();
             auto it = map_.find(old);
             if (it != map_.end()) {
@@ -376,7 +384,7 @@ class ShapeCache {
             continue;
         }
         std::vector<ShapedGlyph> seg;
-        const FT_Face face = rf->face;
+        const FT_Face face = rf->face;  // NOLINT
         FT_Set_Pixel_Sizes(face, 0, px);
         apply_italic(face, opts.italic);  // 决定字形变换，使 shaping 与绘制变换一致（斜体剪切不改变 x 推进）
         hb_font_t *hb_font = hb_ft_font_create(face, nullptr);
@@ -629,12 +637,21 @@ auto draw_text_bitmap_fallback(Painter &p, const Rect &r, const std::string &tex
 template <typename Sink>
 auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLayoutOpts &opts, float scale,
                            TextAAMode aa, Color c, float origin_x, float origin_y, Sink &&sink) -> bool {
-    const auto &faces = resolve_faces(f.family);
+    const auto &faces = resolve_faces(f.family, f.weight);
     if (faces.empty()) {
         return false;
     }
     // 与度量（px_measure）保持一致的逻辑像素尺寸，再按设备缩放；保证绘制字形尺寸 == 布局度量尺寸。
     const int px = std::max(1, static_cast<int>(std::lround(static_cast<float>(px_measure(f)) * scale)));
+    // 合成粗体：请求 weight>=600 而已解析面均无 bold 时，经 FT_Outline_Embolden 加粗轮廓。
+    // embolden_px 同时叠加到 pen 推进与图集 advance，避免字形相互重叠（度量/命中走常规
+    // advance，粗体文本选区宽度差约 1px，可接受）。
+    const bool want_bold = f.weight >= 600;
+    const bool has_bold_face = std::ranges::any_of(faces, [](const FontFace *fc) { return fc->weight >= 600; });
+    const FT_Pos embolden_strength =
+        (want_bold && !has_bold_face) ? static_cast<FT_Pos>(std::lround(static_cast<float>(px) * 0.045F * 64.0F)) : 0;
+    const bool synthetic_bold = embolden_strength > 0;
+    const float embolden_px = static_cast<float>(embolden_strength) / 64.0F;
     const GlyphAtlas::Mode mode =
         (aa == TextAAMode::ClearType && c.a == 255) ? GlyphAtlas::Mode::Lcd : GlyphAtlas::Mode::Gray;
     const float line_h = line_height_px(faces, px);
@@ -659,10 +676,10 @@ auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLay
             if (detail::is_bidi_format_control(static_cast<char32_t>(sg.cp))) {
                 continue;
             }
-            const FT_Face face = sg.face->face;
+            const FT_Face face = sg.face->face;  // NOLINT
             const std::uint64_t key =
                 make_key(static_cast<std::uint32_t>(sg.face->id), static_cast<std::uint32_t>(sg.gi),
-                         static_cast<std::uint32_t>(px), mode == GlyphAtlas::Mode::Lcd, opts.italic);
+                         static_cast<std::uint32_t>(px), mode == GlyphAtlas::Mode::Lcd, opts.italic, synthetic_bold);
             const GlyphAtlas::Entry *e = atlas().find(key);
             AURORA_PROFILE_COUNT(glyphs_rendered, 1);
             AURORA_PROFILE_COUNT(glyph_cache_hits, e != nullptr ? 1 : 0);
@@ -673,7 +690,11 @@ auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLay
                 FT_Set_Pixel_Sizes(face, 0, px);
                 apply_italic(face, opts.italic);  // 与首绘同字形变换，保证逐位一致
                 FT_Load_Glyph(face, sg.gi, FT_LOAD_DEFAULT);
-                const FT_GlyphSlot slot = face->glyph;
+                const FT_GlyphSlot slot = face->glyph;  // NOLINT
+                // 合成粗体：加载后、渲染前加粗轮廓（strength 为 F26.6 像素）。仅可缩放轮廓有效。
+                if (synthetic_bold && (slot->format == FT_GLYPH_FORMAT_OUTLINE)) {
+                    FT_Outline_Embolden(&slot->outline, embolden_strength);
+                }
                 FT_Render_Glyph(slot, mode == GlyphAtlas::Mode::Lcd ? FT_RENDER_MODE_LCD : FT_RENDER_MODE_NORMAL);
                 GlyphAtlas::Entry ne;
                 ne.mode = mode;
@@ -685,7 +706,7 @@ auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLay
                     static_cast<int>(mode == GlyphAtlas::Mode::Lcd ? slot->bitmap.width / 3 : slot->bitmap.width);
                 ne.rows = static_cast<int>(slot->bitmap.rows);
                 ne.pitch = slot->bitmap.pitch;
-                ne.advance = static_cast<float>(slot->advance.x) / 64.0F;
+                ne.advance = static_cast<float>(slot->advance.x) / 64.0F + (synthetic_bold ? embolden_px : 0.0F);
                 // copy_w 为 FT 位图每行真实字节数（LCD 已含 3× 子像素宽度），与绘制循环的行步长一致。
                 const int copy_w = static_cast<int>(slot->bitmap.width);
                 ne.buf.resize(static_cast<std::size_t>(copy_w) * static_cast<std::size_t>(ne.rows));
@@ -712,7 +733,9 @@ auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLay
             // 推进：hb 的 x_adv 已在物理 px 空间（已含 hinting/kerning/OT 特性），
             // 叠加 letter/word_spacing（dp 间距须乘 scale 换算到物理像素），与 metric 同源。
             // letter_spacing 仅加在相邻字形之间（整串共 (n-1) 次），末字形后不加，与 line_prefix 一致。
-            pen_x += sg.x_adv;
+            // 合成粗体额外叠加 embolden_px：轮廓加粗向右扩展约 strength/64，若不扩推进，
+            // 相邻字形会以 embolden_px 重叠。
+            pen_x += sg.x_adv + (synthetic_bold ? embolden_px : 0.0F);
             if (sg.cp == ' ' && opts.word_spacing != 0.0F) {
                 pen_x += opts.word_spacing * scale;
             }
@@ -783,30 +806,41 @@ auto FontEngine::shape_cache_clear() -> void { shape_cache().clear(); }
 
 auto FontEngine::set_default_font(const std::string &ttf_path) -> void {
     shape_cache_clear();
+    bump_raster_generation();
     set_default_font_file(ttf_path);
 }
 
 auto FontEngine::register_font(const std::string &family, const std::string &ttf_path) -> void {
     shape_cache_clear();
+    bump_raster_generation();
     register_font_file(family, ttf_path);
 }
 
 auto FontEngine::register_font_from_memory(const std::string &family, const std::vector<std::uint8_t> &ttf_bytes)
     -> void {
     shape_cache_clear();
+    bump_raster_generation();
     register_font_memory(family, std::vector<std::uint8_t>(ttf_bytes));
 }
 
-auto FontEngine::set_text_aa_mode(TextAAMode mode) -> void { aa_mode() = mode; }
+auto FontEngine::set_text_aa_mode(TextAAMode mode) -> void {
+    if (aa_mode() == mode) {
+        return;  // 同值不自增世代：避免无谓击穿全树 DL / 离屏层缓存
+    }
+    aa_mode() = mode;
+    bump_raster_generation();
+}
 
 auto FontEngine::text_aa_mode() -> TextAAMode { return aa_mode(); }
+
+auto FontEngine::raster_generation() -> std::uint64_t { return raster_gen_counter(); }
 
 auto FontEngine::measure_width(const std::string &text, const Font &f) -> float {
     return measure_width(text, f, TextLayoutOpts{});
 }
 
 auto FontEngine::measure_width(const std::string &text, const Font &f, const TextLayoutOpts &opts) -> float {
-    const auto &faces = resolve_faces(f.family);
+    const auto &faces = resolve_faces(f.family, f.weight);
     if (faces.empty()) {
         return BitmapFont::measure_width(text, f.size_pt);
     }
@@ -819,7 +853,7 @@ auto FontEngine::display_width(const std::string &text, const Font &f, const Tex
     // 实显宽度：按绘制同源的物理像素尺寸真算后折回 dp。FT hinting 把 advance 取整到
     // 整像素，同一字形在两个像素尺寸下的 advance 不成 scale 比例，故不能用自然度量
     // 线性近似（行尾可差数 dp，行内累计误差造成选区/命中与实绘错位）。
-    const auto &faces = resolve_faces(f.family);
+    const auto &faces = resolve_faces(f.family, f.weight);
     if (faces.empty() || scale == 1.0F) {
         return measure_width(text, f, opts);
     }
@@ -830,7 +864,7 @@ auto FontEngine::display_caret_x(const std::string &text, std::size_t char_index
                                  const TextLayoutOpts &opts, float scale) -> float {
     // 实显 caret：物理像素尺寸下的前缀推进折回 dp，与 draw_text_impl 的 pen_x 逐字符对齐；
     // scale=1 退化为 caret_x（两者同源，结果逐位相等）。
-    const auto &faces = resolve_faces(f.family);
+    const auto &faces = resolve_faces(f.family, f.weight);
     if (faces.empty() || scale == 1.0F) {
         return caret_x(text, char_index, f, opts);
     }
@@ -838,7 +872,7 @@ auto FontEngine::display_caret_x(const std::string &text, std::size_t char_index
 }
 
 auto FontEngine::measure_height(const Font &f) -> float {
-    const auto &faces = resolve_faces(f.family);
+    const auto &faces = resolve_faces(f.family, f.weight);
     if (faces.empty()) {
         return BitmapFont::measure_height(f.size_pt);
     }
@@ -851,7 +885,7 @@ auto FontEngine::caret_x(const std::string &text, std::size_t char_index, const 
 
 auto FontEngine::caret_x(const std::string &text, std::size_t char_index, const Font &f, const TextLayoutOpts &opts)
     -> float {
-    const auto &faces = resolve_faces(f.family);
+    const auto &faces = resolve_faces(f.family, f.weight);
     if (faces.empty()) {
         return BitmapFont::measure_width(cp_substr(text, char_index), f.size_pt);
     }
@@ -875,7 +909,7 @@ auto FontEngine::hit_test_char(const std::string &text, float x, const Font &f, 
     if (x <= 0.0F) {
         return opts.direction == TextDirection::RTL ? total : 0;
     }
-    const auto &faces = resolve_faces(f.family);
+    const auto &faces = resolve_faces(f.family, f.weight);
     if (faces.empty()) {
         // BitmapFont 兜底：逐边界走 caret_x（位图字体恒定宽，成本低，无需单趟优化）。
         float prev = 0.0F;
@@ -909,7 +943,7 @@ auto FontEngine::hit_test_char_inclusive(const std::string &text, float x, const
     if (x <= 0.0F) {
         return opts.direction == TextDirection::RTL ? total - 1U : 0;
     }
-    const auto &faces = resolve_faces(f.family);
+    const auto &faces = resolve_faces(f.family, f.weight);
     if (faces.empty()) {
         // BitmapFont 兜底：逐边界走 caret_x。
         for (std::size_t i = 0; i < total; ++i) {
@@ -926,7 +960,7 @@ auto FontEngine::hit_test_char_inclusive(const std::string &text, float x, const
 
 auto FontEngine::display_hit_test_char(const std::string &text, float x, const Font &f, const TextLayoutOpts &opts,
                                        float scale) -> std::size_t {
-    const auto &faces = resolve_faces(f.family);
+    const auto &faces = resolve_faces(f.family, f.weight);
     if (faces.empty() || scale == 1.0F) {
         return hit_test_char(text, x, f, opts);
     }
@@ -937,7 +971,7 @@ auto FontEngine::display_hit_test_char(const std::string &text, float x, const F
 
 auto FontEngine::display_hit_test_char_inclusive(const std::string &text, float x, const Font &f,
                                                  const TextLayoutOpts &opts, float scale) -> std::size_t {
-    const auto &faces = resolve_faces(f.family);
+    const auto &faces = resolve_faces(f.family, f.weight);
     if (faces.empty() || scale == 1.0F) {
         return hit_test_char_inclusive(text, x, f, opts);
     }
