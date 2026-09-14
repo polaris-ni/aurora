@@ -175,6 +175,10 @@ class RichTextEdit : public LeafWidget {
     /// @note Side-effects: pure
     [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return CursorShape::IBeam; }
 
+    /// @brief Enter 优先经 `on_key_event` 投递（换行插入依赖它，而非激活语义）。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto wants_activation_keys() const -> bool override { return true; }
+
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
 
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }

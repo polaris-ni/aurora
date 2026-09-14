@@ -424,6 +424,14 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///       保证嵌套时**最深滚动者优先**（外层 Overflow::Scroll 不抢内层滚轮）。
     [[nodiscard]] virtual auto wants_scroll() const -> bool { return overflow_ == OverflowStrategy::Scroll; }
 
+    /// @brief 激活键（Enter/Space）是否优先投递给 `on_key_event`。
+    ///
+    /// 派发器对 Enter/Space 的默认处理是直接调用 `activate()`（按钮等「按下即激活」语义），
+    /// 控件本身观察不到这两个按键。文本录入类控件需要看到 Enter 本身（提交 / 换行），
+    /// 故覆写为 true：派发器先调 `on_key_event`，其消费（`is_handled`）即止；未消费再回落 `activate()`。
+    /// 默认 false，保持既有激活语义（按钮 / Checkbox / Switch 等不受影响）。
+    [[nodiscard]] virtual auto wants_activation_keys() const -> bool { return false; }
+
     /// @brief 文本输入入口（焦点 widget 上调用）。默认标记为已消费。
     virtual auto on_text_input(TextInputEvent &e) -> void { e.is_handled = true; }
 

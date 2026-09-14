@@ -3,7 +3,8 @@
 /// 测试说明: 命中测试最深目标、鼠标冒泡与 stop-on-handled、本地坐标写入与 Press
 /// 焦点转移/空白清焦、指针捕获越界续发、悬停进出 diff、悬停光标解析
 /// （修饰链 > 虚钩子 > Clickable 缺省，变化才下发）、键盘
-/// Tab/激活快捷键与焦点路由、滚轮/文本/文件拖放路由、TouchDispatcher 按指针 id 捕获与合成鼠标事件
+/// Tab/激活快捷键与焦点路由（含激活键优先投递 on_key_event 的控件级 opt-in）、滚轮/文本/文件拖放路由、
+/// TouchDispatcher 按指针 id 捕获与合成鼠标事件
 
 #include <algorithm>
 #include <memory>
@@ -27,6 +28,7 @@ class TestBox final : public LeafWidget {
     bool consume_pointer = false;
     bool consume_keys = true;
     bool consume_drop = false;
+    bool activation_keys_to_key_event = false;  ///< 覆写 wants_activation_keys() 的开关
 
     int press_count = 0;
     int release_count = 0;
@@ -81,6 +83,8 @@ class TestBox final : public LeafWidget {
     }
 
     auto activate() -> void override { ++activations; }
+
+    [[nodiscard]] auto wants_activation_keys() const -> bool override { return activation_keys_to_key_event; }
 
     auto on_hover_change(bool entered) -> void override {
         ++hover_changes;
@@ -434,6 +438,45 @@ AURORA_TEST_CASE(key_dispatch_tab_navigation_and_activation_shortcuts) {
     KeyEvent no_focus_enter;
     no_focus_enter.key = static_cast<int>(KeyCode::Enter);
     AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, no_focus_enter, fm));
+    AURORA_TEST_CHECK_EQ(tree.box1->activations, 2);
+}
+
+AURORA_TEST_CASE(activation_keys_route_to_key_event_for_opt_in_widgets) {
+    auto tree = make_tree();
+    FocusManager fm;
+    fm.set_root(tree.row.get());
+
+    // 聚焦 box1（根不可聚焦，首个候选即 box1）。
+    KeyEvent tab;
+    tab.key = static_cast<int>(KeyCode::Tab);
+    tab.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, tab, fm));
+    AURORA_TEST_CHECK(fm.focused() == tree.box1.get());
+
+    // 默认（未 opt-in）：Enter 直接激活，不进入 on_key_event（既有语义不变）。
+    KeyEvent enter;
+    enter.key = static_cast<int>(KeyCode::Enter);
+    enter.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, enter, fm));
+    AURORA_TEST_CHECK_EQ(tree.box1->activations, 1);
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 0);
+
+    // opt-in 且 on_key_event 消费：Enter 只走键盘入口，不再触发激活。
+    tree.box1->activation_keys_to_key_event = true;
+    KeyEvent enter_opt_in;
+    enter_opt_in.key = static_cast<int>(KeyCode::Enter);
+    enter_opt_in.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, enter_opt_in, fm));
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 1);
+    AURORA_TEST_CHECK_EQ(tree.box1->activations, 1);
+
+    // opt-in 但 on_key_event 不消费：回落激活语义（Space 同理）。
+    tree.box1->consume_keys = false;
+    KeyEvent space;
+    space.key = static_cast<int>(KeyCode::Space);
+    space.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, space, fm));
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 2);
     AURORA_TEST_CHECK_EQ(tree.box1->activations, 2);
 }
 

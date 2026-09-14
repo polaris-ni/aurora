@@ -109,6 +109,8 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 `move_focus` 按 `tab_index` 稳定排序后循环取前 / 后一个；Tab / Shift+Tab 由 `dispatch(Widget&, KeyEvent&, FocusManager&)` 识别并转 `move_focus`。
 
+**激活键（Enter / Space）路由**：`Enter` 与 `Space` 归为「激活键」，默认由派发器直接调用焦点控件的 `activate()`（按钮等「按下即激活」语义），控件本身观察不到这两个按键。需要观察 Enter 的文本录入类控件（`TextInput` / `RichTextEdit`）覆写 `Widget::wants_activation_keys()` 返回 true：派发器先投递 `on_key_event`，其消费（`is_handled`）即止；未消费才回落 `activate()`。`TextInput::on_submit`（Enter 提交）即由此路径可达——若只依赖激活语义，Enter 会被在焦点路由前消费掉而永远到不了控件。
+
 ### 4.3 Press 焦点归属与点击失焦契约
 
 鼠标 / 触控 `Press` 时，焦点归属为**命中链上自最深命中向根找到的第一个可获焦控件**（点到不可获焦的装饰子控件时归属其可获焦祖先，如按钮内的图标）。

@@ -181,6 +181,10 @@ class TextInput : public LeafWidget {
     /// @note Side-effects: pure
     [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return CursorShape::IBeam; }
 
+    /// @brief Enter 优先经 `on_key_event` 投递（提交回调 `on_submit` 依赖它，而非激活语义）。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto wants_activation_keys() const -> bool override { return true; }
+
     /// @brief 运行时自描述（规格附录 B）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{

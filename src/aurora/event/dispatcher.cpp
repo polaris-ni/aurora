@@ -347,6 +347,13 @@ struct MergedModifiers {
         if (focused == nullptr) {
             return std::nullopt; // 无焦点控件则不消费
         }
+        // 自带激活键语义的控件（文本录入）：先经键盘入口观察 Enter，未消费再回落激活。
+        if (focused->wants_activation_keys()) {
+            focused->on_key_event(e);
+            if (e.is_handled) {
+                return true;
+            }
+        }
         focused->activate();
         e.is_handled = true;
         return true;

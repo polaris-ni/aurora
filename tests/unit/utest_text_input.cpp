@@ -5,11 +5,13 @@
 /// 上屏落字 / 限长 / 失焦取消 / 参与测量）、序列化往返与默认键省略
 
 #include <cstddef>
+#include <memory>
 #include <string>
 
 #include "aurora/core/directionality.h"
 #include "aurora/core/log.h"
 #include "aurora/environment/environment.h"
+#include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/widget/text_input.h"
@@ -24,6 +26,42 @@ auto bounded(float w, float h) -> Constraints {
 }
 
 }  // namespace
+
+AURORA_TEST_CASE(enter_key_reaches_submit_callback_via_dispatcher) {
+    auto field = std::make_shared<TextInput>();
+    field->set_value("hello");
+    int submits = 0;
+    std::string submitted;
+    field->set_on_submit([&submits, &submitted](const std::string &v) -> void {
+        ++submits;
+        submitted = v;
+    });
+
+    FocusManager fm;
+    fm.set_root(field.get());
+
+    // 未聚焦：Enter 不消费，也不触发提交。
+    KeyEvent enter_unfocused;
+    enter_unfocused.key = static_cast<int>(KeyCode::Enter);
+    enter_unfocused.action = KeyAction::Down;
+    AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*field, enter_unfocused, fm));
+    AURORA_TEST_CHECK_EQ(submits, 0);
+
+    // Tab 聚焦（根即唯一候选）。
+    KeyEvent tab;
+    tab.key = static_cast<int>(KeyCode::Tab);
+    tab.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*field, tab, fm));
+    AURORA_TEST_CHECK_TRUE(fm.focused() == field.get());
+
+    // 聚焦后 Enter：经键盘入口触发 on_submit 并消费（而非被激活语义吞掉）。
+    KeyEvent enter;
+    enter.key = static_cast<int>(KeyCode::Enter);
+    enter.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*field, enter, fm));
+    AURORA_TEST_CHECK_EQ(submits, 1);
+    AURORA_TEST_CHECK_EQ(submitted, std::string{"hello"});
+}
 
 AURORA_TEST_CASE(props_constructor_sets_initial_state) {
     const TextInputProps props{.value = "init", .placeholder = "ph", .font_size = 16.0F};
