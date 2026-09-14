@@ -7,10 +7,11 @@
 //
 // Usage: aurora_mcp (launched by an AI Agent in stdio mode; no human interaction required)
 //
-// Exposes 11 MCP Tools:
+// Exposes 13 MCP Tools:
 //   list_components / describe_component / search_components /
 //   validate_tree / validate_ui / render_snapshot / render_png /
-//   to_code / to_yaml / get_schema / simulate_interaction
+//   to_code / to_yaml / get_schema / simulate_interaction /
+//   list_commands / invoke_command
 
 #include <filesystem>
 #include <iostream>
@@ -24,6 +25,7 @@
 #include "aurora/widget/codegen.h"
 #include "aurora/widget/yaml.h"
 #include "code_style.h"
+#include "command_listing.h"
 
 // ---------- Known enums (single source of truth: tools/include/known_enums.h) ----------
 
@@ -293,6 +295,44 @@ auto write_message(const au::Json &msg) -> void {
         t["inputSchema"] = schema_obj(std::move(props), req_arr({"tree", "path", "action"}));
         tools.push_back(std::move(t));
     }
+    // list_commands
+    {
+        au::Json props = au::Json::object();
+        props["commands"] =
+            obj_prop("Command descriptors (the {\"commands\":[...]} envelope produced by CommandRegistry::to_json(); "
+                     "a bare array is also accepted)");
+        props["query"] = str_prop("Optional fuzzy query over command titles; empty matches all");
+        props["limit"] = int_prop("Maximum number of returned commands (default 50; negative = unlimited)");
+        au::Json include_disabled = au::Json::object();
+        include_disabled["type"] = "boolean";
+        include_disabled["description"] = "Include commands whose enabled flag is false (default false)";
+        props["include_disabled"] = std::move(include_disabled);
+        au::Json t = au::Json::object();
+        t["name"] = "list_commands";
+        t["description"] =
+            "Filter and rank a host-exported command list (CommandRegistry::to_json()): same fuzzy scoring and "
+            "ordering as the in-app command palette, so AI-side discovery matches what a user sees. Stateless: the "
+            "descriptors travel with the request, no running app is required.";
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"commands"}));
+        tools.push_back(std::move(t));
+    }
+    // invoke_command
+    {
+        au::Json props = au::Json::object();
+        props["commands"] =
+            obj_prop("Command descriptors (the {\"commands\":[...]} envelope produced by CommandRegistry::to_json(); "
+                     "a bare array is also accepted)");
+        props["id"] = str_prop("Command identifier to resolve, e.g. \"file.open\"");
+        au::Json t = au::Json::object();
+        t["name"] = "invoke_command";
+        t["description"] =
+            "Resolve a command identifier against a host-exported command list and report whether it can be invoked: "
+            "status is one of invocable / not-found / disabled / not-invocable. This server is stateless and cannot "
+            "run the host process' command action, so it returns the invocation intent - the host performs the actual "
+            "call. Never reports success for a command it cannot run.";
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"commands", "id"}));
+        tools.push_back(std::move(t));
+    }
 
     return tools;
 }
@@ -515,6 +555,92 @@ auto write_message(const au::Json &msg) -> void {
         out["path"] = path;
         out["target"] = aurora::Inspector::get_prop(target.widget());
         out["snapshot"] = render_to_logical_snapshot(root, width, height);
+        return au::Json{{"content", json_content(out)}};
+    }
+
+    if (name == "list_commands") {
+        if (!args.contains("commands")) {
+            return au::Json{{"content", text_content("Error: missing 'commands' parameter")}, {"isError", true}};
+        }
+        const au::Json *items = aurora::tools::command_descriptors(args["commands"]);
+        if (items == nullptr) {
+            return au::Json{
+                {"content", text_content("Error: 'commands' must be an array or the {\"commands\": [...]} envelope")},
+                {"isError", true}};
+        }
+        std::string query;
+        if (const auto it = args.find("query"); it != args.end()) {
+            if (!it->is_string()) {
+                return au::Json{{"content", text_content("Error: 'query' must be a string")}, {"isError", true}};
+            }
+            query = it->get<std::string>();
+        }
+        int limit = 50;
+        if (const auto it = args.find("limit"); it != args.end()) {
+            if (!it->is_number_integer()) {
+                return au::Json{{"content", text_content("Error: 'limit' must be an integer")}, {"isError", true}};
+            }
+            limit = it->get<int>();
+        }
+        bool include_disabled = false;
+        if (const auto it = args.find("include_disabled"); it != args.end()) {
+            if (!it->is_boolean()) {
+                return au::Json{{"content", text_content("Error: 'include_disabled' must be a boolean")},
+                                {"isError", true}};
+            }
+            include_disabled = it->get<bool>();
+        }
+
+        const aurora::tools::CommandListing listing = aurora::tools::list_commands(*items, query, include_disabled);
+        au::Json listed = au::Json::array();
+        int count = 0;
+        for (const std::size_t index : listing.indices) {
+            if (limit >= 0 && count >= limit) {
+                break;
+            }
+            listed.push_back((*items)[index]);
+            ++count;
+        }
+        au::Json out = au::Json::object();
+        out["count"] = count;
+        out["matched"] = static_cast<int>(listing.indices.size());
+        out["considered"] = static_cast<int>(listing.considered);
+        out["commands"] = std::move(listed);
+        return au::Json{{"content", json_content(out)}};
+    }
+
+    if (name == "invoke_command") {
+        if (!args.contains("commands")) {
+            return au::Json{{"content", text_content("Error: missing 'commands' parameter")}, {"isError", true}};
+        }
+        if (!args.contains("id") || !args["id"].is_string()) {
+            return au::Json{{"content", text_content("Error: missing 'id' parameter")}, {"isError", true}};
+        }
+        const au::Json *items = aurora::tools::command_descriptors(args["commands"]);
+        if (items == nullptr) {
+            return au::Json{
+                {"content", text_content("Error: 'commands' must be an array or the {\"commands\": [...]} envelope")},
+                {"isError", true}};
+        }
+        const std::string id = args["id"].get<std::string>();
+        aurora::tools::CommandStatus status = aurora::tools::CommandStatus::NotFound;
+        const au::Json *found = aurora::tools::resolve_command(*items, id, status);
+
+        au::Json out = au::Json::object();
+        out["id"] = id;
+        out["resolved"] = found != nullptr;
+        out["enabled"] = found != nullptr && aurora::tools::command_bool_field(*found, "enabled", true);
+        out["invocable"] = found != nullptr && aurora::tools::command_bool_field(*found, "invocable", false);
+        out["status"] = aurora::tools::command_status_name(status);
+        if (found != nullptr) {
+            if (const auto it = found->find("title"); it != found->end() && it->is_string()) {
+                out["title"] = it->get<std::string>();
+            }
+            if (const auto it = found->find("when"); it != found->end() && it->is_string()) {
+                out["when"] = it->get<std::string>();
+            }
+        }
+        out["note"] = "Resolution only; the host performs the actual call.";
         return au::Json{{"content", json_content(out)}};
     }
 

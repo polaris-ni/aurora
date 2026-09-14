@@ -30,6 +30,7 @@
 | 17 | **Render（渲染）** | `Painter` `Surface` `HeadlessSurface` `Win32Surface` `D3D11Surface` `GlfwSurface` `X11Surface` `WaylandSurface` `MacOSSurface` `WasmSurface` `create_window`（工厂） `auto_detect_surface` | `render/painter.h` `window/*.h` |
 | 18 | **Result / Error（错误）** | `Result<T>` `Error` | `core/result.h` `core/error_codes.h` |
 | 19 | **Lifecycle / Window（生命周期）** | `Lifecycle`（控件挂载 / 卸载副作用） `WindowState`（Visible / Occluded / Hidden） `WindowMode`（Normal / Maximized / Minimized / FullScreen） | `widget/lifecycle.h` `window/window_state.h` |
+| 20 | **Command（命令）** | `Command`（id / title / icon / category / action / default_binding / scope / enabled 谓词 / when_label 标签）`CommandRegistry`（注册 / 解绑 / 启停 / 调用 / 模糊检索 / 序列化信封 / 快捷键与菜单投影）`command_fuzzy_score`（子序列打分）`CommandPalette`（模态面板：搜索框 + 结果列表 + Esc/↑/↓/Enter 键位 + 焦点陷阱） | `commands.h` `widget/command_palette.h` |
 
 ### 1.1 序列化工厂注册状态
 
@@ -119,6 +120,7 @@ push_route(au::Checkbox{ au::Reactive<bool>{ flag } });   // flag 存活期 = �
 | Animation | `react-spring` / Framer | `AnimationController` + `Curve` | `PropertyAnimation` |
 | Timeline 编排（`TimelineSpec` / `TimelinePlayer`） | 动画编排库（Framer `variants` / `react-spring` 序列） | `Interval` + `TweenSequence` / 官方 staggered 模式（`TimelineSpec::staggered` 自动完成手算端点）；WPF `Storyboard` 同类定位（Aurora 不做运行时时间线树） | `QSequentialAnimationGroup` / `QParallelAnimationGroup` |
 | 手势驱动动画（`DragRecognizer` / `DragToDismiss` / `Dismissible`） | `react-swipeable` / `framer-motion` drag | `Draggable` + `AnimationController` / `Dismissible`（跟手 + spring 裁决语义与 Flutter `Dismissible` 同构） | `SwipeDelegate`（Qt Quick） |
+| 命令系统（`Command` / `CommandRegistry` / `CommandPalette`） | 无内置命令表（context + 自建菜单 / 快捷键 hook，同一动作常在多处重复定义） | `Intent` + `Actions` + `Shortcuts`（Aurora 把三者收敛到单一 `CommandRegistry`，快捷键与菜单降为其投影）；面板形态对照 Flutter `SearchAnchor` / VSCode Command Palette | `QAction` + `QShortcut` + `QMenu`（`QAction` 即同源「动作唯一真源」，但无内建命令面板） |
 | 定时任务（`Timer` / `Scheduler`） | `setTimeout` / `setInterval` | `Timer.periodic` / `Timer` | `QTimer` |
 | `Navigator` | React Router | `Navigator` / `Navigator 2.0`（`Hero` 共享元素转场、`open_uri` 深层链接对应 Flutter `Hero` / 路由 URI 解析） | `StackView` / 路由 |
 | `MediaQuery` / `LayoutBuilder` / `BreakpointBuilder` | 媒体查询 hook（无直接内置）/ 条件渲染 / 断点档位 | `MediaQuery` + `LayoutBuilder` + `BreakpointBuilder` | 屏幕度量 / `LayoutBuilder` 等价模式 / `Breakpoint{Compact,Medium,Expanded}`（阈值 600/840 可调） |

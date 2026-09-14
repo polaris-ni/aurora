@@ -1023,3 +1023,46 @@ app.run();  // spring 阶段由 Application 帧循环的 gesture tick 推进（�
 ```
 
 要点：构造第二参选主轴 `au::DragAxis::Vertical` 可纵向拖出；行程默认 200 逻辑 dp，首次布局后自动按主轴向尺寸校准（`travel_distance` 字段可手动覆写）；拖动 / 飞出进行中该子树消费指针事件，父级不响应点击；`progress()` / `is_animating()` 供诊断与联动绑定。可编译样例见 `examples/demos/demo_dismissible.cpp`。
+
+---
+
+## 31 命令系统（命令注册 + 三源统一 + 命令面板）
+
+`CommandRegistry`（`commands.h`）是命令的**唯一真源**：`bind_shortcuts()` 把它投影到快捷键表、`to_menu_items()` 投影到菜单数据层，`CommandPalette`（`widget/command_palette.h`）是第三个消费方。同一动作只定义一次，启用条件与「无动作体」判定单点生效。
+
+```cpp
+#include "aurora/aurora.h"
+
+using namespace au;
+
+au::Command greet;
+greet.id = "demo.greet";
+greet.title = "Say Hello";
+greet.icon = "chat";
+greet.category = "Demo";
+greet.default_binding = au::KeyCombo{au::ModifierKey::Control, au::KeyCode::H};  // 默认快捷键（可选）
+greet.action = []() -> void { /* 执行体 */ };
+
+au::Command unavailable;
+unavailable.id = "demo.unavailable";
+unavailable.title = "Unavailable Action";
+unavailable.when_label = "never";                                    // 仅展示 / 序列化标签，不参与求值
+unavailable.enabled = []() -> bool { return false; };                // 运行期启用条件（空 = 恒启用）
+
+app.commands().add(std::move(greet));
+app.commands().add(std::move(unavailable));
+app.commands().bind_shortcuts(app.shortcuts());  // ① 默认快捷键接入（必须显式调用一次）
+
+// ② 菜单投影：交给 MenuBar 的数据层
+for (const au::MenuItem &item : app.commands().to_menu_items()) {
+    // item.label / item.icon / item.shortcut_text / item.enabled / item.on_click
+}
+
+// ③ 命令面板：Ctrl+K 唤出，模糊检索 + ↑/↓ 导航 + Enter 执行
+auto palette = std::make_shared<au::CommandPalette>(&app.commands());
+app.shortcuts().add(au::KeyCombo{au::ModifierKey::Control, au::KeyCode::K},
+                    [palette]() -> void { palette->toggle(); });
+// 面板须进 widget 树（例如 `Stack{ content, palette }` + `StackFit::Expand`）才会渲染与参与命中。
+```
+
+要点：`bind_shortcuts()` 必须**显式**调用（`run()` 不会自动绑定，否则 `run()` 之后注册的命令会静默失效），且面板的 Esc / ↑ / ↓ 键位依赖它——未接线时面板仍可鼠标操作与 Enter 执行，但键盘导航不可用并会记一条 WARN。`invoke(id)` 求值启用条件后才执行，未启用 / 无 `action` 时返回 `false` 而不静默成功；`remove(id)` / `clear()` 会**连带撤销**对应的快捷键绑定。检索用 `command_fuzzy_score`（不区分大小写的子序列匹配，词首命中与连续命中加权），与 MCP `list_commands` 工具共用同一打分与排序，故 AI 侧检索次序与面板一致。`to_json()` 产出 `{"commands":[…]}` 自描述信封供 AI 工具面枚举。可编译样例见 `examples/demos/demo_command_palette.cpp`。

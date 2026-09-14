@@ -6,16 +6,20 @@
 ///           探测，未构建则 SKIP
 /// 覆盖说明: aurora_mcp 是独立可执行（tools/servers/），e2e 仅验证进程可运行
 
+#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <utility>
 
 #include "aurora/app/validate.h"
 #include "aurora/aurora.h"
+#include "aurora/commands.h"
 #include "aurora/core/platform.h"
 #include "aurora/inspector/inspector_api.h"
 #include "aurora/render/offscreen.h"
 #include "aurora/widget/codegen.h"
+#include "command_listing.h"
 #include "framework/aurora_test.h"
 #include "paths.h"
 
@@ -386,6 +390,127 @@ AURORA_TEST_CASE(mcp_protocol_e2e_binary_smoke) {
         AURORA_TEST_SKIP("aurora_mcp 未构建");
     }
     AURORA_TEST_CHECK(ret == 0 || ret == 1);  // stdin EOF 后正常退出
+}
+
+// ---------- 命令枚举 / 解析工具（无状态：描述符随请求传入） ----------
+
+AURORA_TEST_CASE(mcp_list_commands_ranks_and_filters_like_the_palette) {
+    au::CommandRegistry commands;
+    au::Command open;
+    open.id = "file.open";
+    open.title = "Open File";
+    open.action = []() -> void {};
+    commands.add(std::move(open));
+    au::Command copy;
+    copy.id = "file.copy";
+    copy.title = "Copy";
+    copy.action = []() -> void {};
+    commands.add(std::move(copy));
+    au::Command hidden;
+    hidden.id = "file.close";
+    hidden.title = "Close File";
+    hidden.enabled = []() -> bool { return false; };
+    commands.add(std::move(hidden));
+
+    const au::Json envelope = commands.to_json();
+    const au::Json *items = au::tools::command_descriptors(envelope);
+    AURORA_TEST_REQUIRE_TRUE(items != nullptr);
+    AURORA_TEST_CHECK_EQ(items->size(), std::size_t{3});
+
+    // 空查询：仅启用者，标题升序（"Copy" < "Open File"）。
+    const au::tools::CommandListing all = au::tools::list_commands(*items, "", false);
+    AURORA_TEST_CHECK_EQ(all.indices.size(), std::size_t{2});
+    AURORA_TEST_CHECK_EQ(all.considered, std::size_t{3});  // 形态合法的描述符总数（含未启用）
+    AURORA_TEST_CHECK_EQ((*items)[all.indices[0]]["id"].get<std::string>(), std::string{"file.copy"});
+    AURORA_TEST_CHECK_EQ((*items)[all.indices[1]]["id"].get<std::string>(), std::string{"file.open"});
+
+    // 模糊查询 "op"：词首命中者排前（与命令面板同一打分与排序）。
+    const au::tools::CommandListing hits = au::tools::list_commands(*items, "op", false);
+    AURORA_TEST_CHECK_EQ(hits.indices.size(), std::size_t{2});
+    AURORA_TEST_CHECK_EQ((*items)[hits.indices[0]]["id"].get<std::string>(), std::string{"file.open"});
+    AURORA_TEST_CHECK_EQ((*items)[hits.indices[1]]["id"].get<std::string>(), std::string{"file.copy"});
+
+    // 未启用者默认被过滤，显式放开后可见。
+    AURORA_TEST_CHECK_EQ(au::tools::list_commands(*items, "clo", false).indices.size(), std::size_t{0});
+    AURORA_TEST_CHECK_EQ(au::tools::list_commands(*items, "clo", true).indices.size(), std::size_t{1});
+
+    // 非子序列无命中。
+    AURORA_TEST_CHECK_EQ(au::tools::list_commands(*items, "zzz", false).indices.size(), std::size_t{0});
+}
+
+AURORA_TEST_CASE(mcp_invoke_command_reports_status_without_claiming_execution) {
+    au::CommandRegistry commands;
+    au::Command runnable;
+    runnable.id = "file.open";
+    runnable.title = "Open File";
+    runnable.action = []() -> void {};
+    commands.add(std::move(runnable));
+    au::Command inert;
+    inert.id = "file.placeholder";
+    inert.title = "Placeholder";
+    commands.add(std::move(inert));
+    au::Command gated;
+    gated.id = "file.close";
+    gated.title = "Close File";
+    gated.enabled = []() -> bool { return false; };
+    gated.action = []() -> void {};
+    commands.add(std::move(gated));
+
+    const au::Json envelope = commands.to_json();
+    const au::Json *items = au::tools::command_descriptors(envelope);
+    AURORA_TEST_REQUIRE_TRUE(items != nullptr);
+
+    au::tools::CommandStatus status = au::tools::CommandStatus::NotFound;
+
+    const au::Json *found = au::tools::resolve_command(*items, "file.open", status);
+    AURORA_TEST_REQUIRE_TRUE(found != nullptr);
+    AURORA_TEST_CHECK_TRUE(status == au::tools::CommandStatus::Invocable);
+    AURORA_TEST_CHECK_TRUE(au::tools::command_bool_field(*found, "invocable", false));
+
+    found = au::tools::resolve_command(*items, "file.placeholder", status);
+    AURORA_TEST_REQUIRE_TRUE(found != nullptr);
+    AURORA_TEST_CHECK_TRUE(status == au::tools::CommandStatus::NotInvocable);
+    AURORA_TEST_CHECK_FALSE(au::tools::command_bool_field(*found, "invocable", false));
+
+    found = au::tools::resolve_command(*items, "file.close", status);
+    AURORA_TEST_REQUIRE_TRUE(found != nullptr);
+    AURORA_TEST_CHECK_TRUE(status == au::tools::CommandStatus::Disabled);
+    AURORA_TEST_CHECK_FALSE(au::tools::command_bool_field(*found, "enabled", true));
+
+    found = au::tools::resolve_command(*items, "no.such.command", status);
+    AURORA_TEST_CHECK_NULL(found);
+    AURORA_TEST_CHECK_TRUE(status == au::tools::CommandStatus::NotFound);
+
+    // 状态标识是工具面的稳定契约。
+    AURORA_TEST_CHECK_EQ(std::string{au::tools::command_status_name(au::tools::CommandStatus::Invocable)},
+                         std::string{"invocable"});
+    AURORA_TEST_CHECK_EQ(std::string{au::tools::command_status_name(au::tools::CommandStatus::Disabled)},
+                         std::string{"disabled"});
+    AURORA_TEST_CHECK_EQ(std::string{au::tools::command_status_name(au::tools::CommandStatus::NotInvocable)},
+                         std::string{"not-invocable"});
+    AURORA_TEST_CHECK_EQ(std::string{au::tools::command_status_name(au::tools::CommandStatus::NotFound)},
+                         std::string{"not-found"});
+}
+
+AURORA_TEST_CASE(mcp_command_descriptors_accepts_envelope_and_bare_array) {
+    au::CommandRegistry commands;
+    au::Command one;
+    one.id = "a.one";
+    one.title = "One";
+    one.action = []() -> void {};
+    commands.add(std::move(one));
+
+    const au::Json envelope = commands.to_json();
+    const au::Json *from_envelope = au::tools::command_descriptors(envelope);
+    AURORA_TEST_REQUIRE_TRUE(from_envelope != nullptr);
+    AURORA_TEST_CHECK_EQ(from_envelope->size(), std::size_t{1});
+
+    const au::Json bare = envelope["commands"];
+    AURORA_TEST_CHECK_TRUE(au::tools::command_descriptors(bare) != nullptr);
+
+    // 形态不符：无 commands 键的对象 / 标量 → 不识别。
+    AURORA_TEST_CHECK_NULL(au::tools::command_descriptors(au::Json::object()));
+    AURORA_TEST_CHECK_NULL(au::tools::command_descriptors(au::Json(42)));
 }
 
 }  // namespace aurora::test_cases::itest_mcp

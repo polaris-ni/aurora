@@ -21,11 +21,17 @@ auto Application::dispatch_pointer(float x, float y, MouseAction action) -> void
 auto Application::tick() -> void { scene_.root().tick(std::chrono::steady_clock::now()); }
 
 auto Application::dispatch_key(KeyEvent e) -> bool {
+    // 派发上下文：快捷键动作内同样可取到当前焦点管理器（与 dispatch(Event&) 路径一致）。
+    FocusManager *const prev_fm = current_focus_manager();
+    set_current_focus_manager(&focus_);
     // 快捷键优先：匹配到已启用绑定则消费，不再向焦点控件派发（与 dispatch(Event&) 路径一致）。
     if (shortcuts_.handle(e, focus_.focused() != nullptr)) {
+        set_current_focus_manager(prev_fm);
         return true;
     }
-    return EventDispatcher::dispatch(scene_.root(), e, focus_);
+    const bool result = EventDispatcher::dispatch(scene_.root(), e, focus_);
+    set_current_focus_manager(prev_fm);
+    return result;
 }
 
 auto Application::dispatch_text(TextInputEvent e) -> bool {

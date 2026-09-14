@@ -300,6 +300,10 @@ stdio JSON-RPC 2.0。传输格式：`Content-Length: <N>\r\n\r\n<JSON-RPC 2.0 bo
 | `to_yaml` | `{tree}` | YAML 格式字符串 | `serialization::to_yaml(Json)` |
 | `get_schema` | 无 | 完整 API schema | `list_all_schemas()` + enums |
 | `simulate_interaction` | `{tree, path, action, dx?, dy?, text?, width?, height?}` | 目标控件属性 + 交互后逻辑快照 | `from_json()` + `render_to_logical_snapshot()`（派发前布局）+ `find_node()` + `simulate_click/scroll/text_input()` + `get_prop()` |
+| `list_commands` | `{commands, query?, limit?, include_disabled?}` | 过滤排序后的命令描述符 + 计数 | `command_fuzzy_score()`（与命令面板同一打分与排序） |
+| `invoke_command` | `{commands, id}` | 命中信息与可调用性 `status` | 描述符解析 + 启用 / 可调用判定（**不执行**宿主动作） |
+
+> `list_commands` / `invoke_command` 是**无状态**工具：命令描述符由调用方随请求传入（宿主 `CommandRegistry::to_json()` 的产物，接受 `{"commands":[…]}` 信封或裸数组），服务器不持有运行中的应用状态。`list_commands` 复用库的 `command_fuzzy_score()` 与「得分降序、标题升序」排序，故 AI 侧检索次序与用户看到的命令面板一致。`invoke_command` **只解析与校验**——`status` 取 `invocable` / `not-found` / `disabled` / `not-invocable`，并返回调用意图；真正的调用由宿主完成。对无法远程调用的命令（无动作体 / 启用条件不满足）如实报出状态，**不伪报成功**。
 
 > `simulate_interaction` 把「生成 → 交互 → 断言」闭环搬到无头环境：`action` 取 `click`/`scroll`/`text`，`path` 为索引路径（空串=树根），返回目标控件的属性快照与整棵树的交互后逻辑快照；目标未找到或中心不可命中时置 `isError`（此时不改状态）。**只能验证可观测状态**：JSON 树不带用户回调，故点击须经状态变化（如 `Checkbox.checked`、焦点转移）而非回调副作用来确认；滚动偏移不经此通道暴露（`Scroll` 不序列化 offset，`LazyList`/`GridView` 的 `scroll_offset` 又依赖运行时 ItemBuilder，静态 JSON 树给不出），偏移须由 C++ 测试读回。
 
@@ -537,7 +541,7 @@ int main() {
 
 三件套的 API 契约见 §7：
 
-- **MCP Server（`aurora_mcp`）**：stdio JSON-RPC 2.0，暴露 11 个 MCP tools。
+- **MCP Server（`aurora_mcp`）**：stdio JSON-RPC 2.0，暴露 13 个 MCP tools。
 - **CLI（`aurora_cli`）**：子命令 `components` / `describe` / `search` / `validate` / `snapshot` / `render` / `preview` / `to-code` / `to-yaml` / `schema`。
 - **LSP（`aurora_lsp`）**：stdio JSON-RPC 2.0 语言服务，对声明式写法提供 completion / hover / diagnostics / codeAction 四件套，消费库 live API（`describe_component` + `known_enums`），无需读取 `aurora_api.json` 文件，始终与代码同步。
 

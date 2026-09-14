@@ -11,6 +11,7 @@
 #include "aurora/app/scene.h"
 #include "aurora/app/scheduler.h"
 #include "aurora/app/shortcuts.h"
+#include "aurora/commands.h"
 #include "aurora/core/log.h"
 #include "aurora/core/strict_mode.h"
 #include "aurora/core/thread.h"
@@ -108,6 +109,11 @@ class Application {
     /// @brief 快捷键注册表：在键盘事件派发到焦点控件前优先匹配（specification/06-app-platform.md §8.4）。
     /// 用法：`app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::O}, []{ open(); })`。
     [[nodiscard]] auto shortcuts() -> ShortcutRegistry & { return shortcuts_; }
+
+    /// @brief 命令注册表：快捷键、菜单与命令面板的统一真源（specification/06-app-platform.md §8.4）。
+    /// 用法：注册命令后经 `app.commands().bind_shortcuts(app.shortcuts())` 接入默认快捷键；
+    /// 菜单与命令面板分别经 `to_menu_items()` / `CommandPalette` 消费同一份命令。
+    [[nodiscard]] auto commands() -> CommandRegistry & { return commands_; }
 
     /// @brief 设置每帧回调（在 present_root 之前调用），用于注入自定义每帧逻辑
     ///        （如把共享状态写入 Reactive 标签）。默认为空。
@@ -273,6 +279,10 @@ class Application {
   private:
     /// @brief 集中事件派发：把后端上抛的 Event 按类型经 EventDispatcher 派发到 widget 树。
     auto dispatch(Event &e) -> void {
+        // 派发上下文：快捷键动作与控件回调内同样可取到当前焦点管理器（弹层开合、模态焦点陷阱等
+        // 依赖它）；子派发路径会自行保存/复原该槽位，嵌套安全。
+        FocusManager *const prev_fm = current_focus_manager();
+        set_current_focus_manager(&focus_);
         auto &root = scene_.root();
         if (auto *m = dynamic_cast<MouseEvent *>(&e)) {
             mouse_.dispatch_mouse(root, *m, &focus_);
@@ -292,6 +302,7 @@ class Application {
         } else if (auto *fde = dynamic_cast<FileDropEvent *>(&e)) {
             EventDispatcher::dispatch(root, *fde);
         }
+        set_current_focus_manager(prev_fm);
     }
 
     /// @brief 窗口可见性状态变化时聚合为响应式 State 并 forward 到 Window（供根 Environment 注入）。
@@ -369,6 +380,7 @@ class Application {
     std::function<void()> on_frame_;  ///< 每帧回调（在 present_root 前调用）。
     Animator anim_;  ///< 帧动画管理器（run() 每帧按 dt 推进）。
     Scheduler sched_;  ///< 定时任务调度器（run() 每帧按 dt 推进）。
+    CommandRegistry commands_;    ///< 命令注册表（快捷键/菜单/面板的统一真源）。
     ShortcutRegistry shortcuts_;  ///< 快捷键注册表（键盘事件派发前优先匹配）。
     State<WindowState> window_state_{WindowState::Visible};  ///< 窗口可见性状态（响应式）。
     State<WindowMode> window_mode_{WindowMode::Normal};  ///< 窗口几何态（响应式）。
