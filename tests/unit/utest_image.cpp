@@ -204,4 +204,33 @@ AURORA_TEST_CASE(load_svg_error_paths) {
     std::filesystem::remove_all(dir);
 }
 
+AURORA_TEST_CASE(image_content_hash_lazy_and_invalidation) {
+    // 内容寻址：同内容同摘要、异内容异摘要（GPU 纹理缓存键语义）。
+    Image a{.width = 1, .height = 1, .pixels = {1, 2, 3, 4}};
+    Image b{.width = 1, .height = 1, .pixels = {1, 2, 3, 4}};
+    Image c{.width = 1, .height = 1, .pixels = {1, 2, 3, 5}};
+    AURORA_TEST_CHECK_EQ(a.content_hash(), b.content_hash());
+    AURORA_TEST_CHECK_NE(a.content_hash(), c.content_hash());
+
+    // 惰性缓存：重复调用稳定（缓存生效）。
+    const auto h = a.content_hash();
+    AURORA_TEST_CHECK_EQ(a.content_hash(), h);
+
+    // 拷贝携带缓存：副本零重算返回同摘要。
+    const Image cp = a;
+    AURORA_TEST_CHECK_EQ(cp.content_hash(), h);
+
+    // 直接改写 pixels 未 invalidate：仍返回旧摘要（契约：失效责任在调用方）。
+    a.pixels[0] = 9;
+    AURORA_TEST_CHECK_EQ(a.content_hash(), h);
+    // invalidate 后摘要随新内容更新。
+    a.invalidate_content_hash();
+    AURORA_TEST_CHECK_NE(a.content_hash(), h);
+    AURORA_TEST_CHECK_NE(a.content_hash(), b.content_hash());
+
+    // 空 Image：摘要稳定且非零种子域（两次调用一致）。
+    Image empty;
+    AURORA_TEST_CHECK_EQ(empty.content_hash(), empty.content_hash());
+}
+
 }  // namespace aurora::test_cases::utest_image

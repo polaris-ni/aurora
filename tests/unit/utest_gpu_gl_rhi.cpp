@@ -1,12 +1,13 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/render/rhi/gpu_gl_rhi.h + include/aurora/render/rhi/rhi_frame_sink.h
 /// 测试说明: GLFn 函数表完整性判定与 load_gl 空装载；GpuGlRhi 占位（未装载）契约；
-/// fake GL 驱动桩下的帧生命周期（begin 零基底 / 命令翻译批切分 / end resolve+呈现 blit /
-/// read_pixels）；渐变 LUT 内容语义与缓存合批；图像 PMA 纹理与内容键缓存；文本字形图集
-///（R8 子上传 / 槽位缓存 / Text-Solid 断批 / 空字形与空文本契约）；效果管线（Shadow 单批
-/// 同构 / BlurRegion ping-pong 双 pass / Blend-Mask 单 pass 直写 / Composite 仿射四角顶点 /
-/// 脏 resolve 跟踪）；初始化失败链（函数表缺项 / 版本不足 / 链接失败）→ valid()=false
-/// 软件回退契约。
+/// fake GL 驱动桩下的帧生命周期（begin 零基底 / 命令翻译批切分 / end 上屏 blit——resolve
+/// 懒执行 / read_pixels）；渐变 LUT 内容语义与缓存合批；图像 PMA 纹理与内容摘要缓存
+///（Image::content_hash + invalidate 契约）；文本字形图集（R8 子上传 / 槽位缓存 /
+/// Text-Solid 断批 / 空字形与空文本契约 / 多页架式 + 页数封顶 LRU 淘汰）；效果管线
+///（Shadow 单批同构 / BlurRegion ping-pong 双 pass / Blend-Mask 单 pass 直写 /
+/// Composite 仿射四角顶点 / 脏 resolve 跟踪）；初始化失败链（函数表缺项 / 版本不足 /
+/// 链接失败）→ valid()=false 软件回退契约。
 
 #include <cmath>
 #include <cstdint>
@@ -26,14 +27,16 @@ namespace rhi = aurora::rhi;  // GLFn / GL 类型别名（GLenum_ 等）均居 r
 namespace {
 
 // GL 常量值（与 GL 官方规范一致；fake 桩只回填固定值，不引入 src/ 私有头）。
-constexpr std::uint32_t kGLVersionQuery = 0x1F02;
-constexpr std::uint32_t kFramebufferComplete = 0x8CD5;
-constexpr std::uint32_t kArrayBufferTarget = 0x8892;
-constexpr std::uint32_t kFramebufferTarget = 0x8D40;
-constexpr std::uint32_t kDrawFramebufferTarget = 0x8CA9;
-constexpr std::uint32_t kTextureMinFilter = 0x2801;
-constexpr std::uint32_t kFilterNearest = 0x2600;
-constexpr std::uint32_t kFilterLinear = 0x2601;
+// 命名按仓库常量规范（CODING_STANDARDS.md §2：AURORA_ 前缀 UPPER_CASE）——k 前缀 CamelCase
+// 禁用；外部 API 镜像豁免（gl_core.h）不适用于测试 TU。
+constexpr std::uint32_t AURORA_GL_VERSION_QUERY = 0x1F02;
+constexpr std::uint32_t AURORA_GL_FRAMEBUFFER_COMPLETE = 0x8CD5;
+constexpr std::uint32_t AURORA_GL_ARRAY_BUFFER_TARGET = 0x8892;
+constexpr std::uint32_t AURORA_GL_FRAMEBUFFER_TARGET = 0x8D40;
+constexpr std::uint32_t AURORA_GL_DRAW_FRAMEBUFFER_TARGET = 0x8CA9;
+constexpr std::uint32_t AURORA_GL_TEXTURE_MIN_FILTER = 0x2801;
+constexpr std::uint32_t AURORA_GL_FILTER_NEAREST = 0x2600;
+constexpr std::uint32_t AURORA_GL_FILTER_LINEAR = 0x2601;
 
 /// @brief fake GL 驱动桩：全量填充 GLFn 函数表，行为模拟「3.3 core 完整实现」并记录关键
 /// 调用（draw/clear/blit）供断言。GLFn 成员是裸函数指针，桩为静态函数 + `current` 实例
@@ -133,13 +136,12 @@ class FakeGl {
     static void uniform2f(rhi::GLint_, rhi::GLfloat_, rhi::GLfloat_) {}
     static void uniform3f(rhi::GLint_, rhi::GLfloat_, rhi::GLfloat_, rhi::GLfloat_) {}
     static void uniform4f(rhi::GLint_, rhi::GLfloat_, rhi::GLfloat_, rhi::GLfloat_, rhi::GLfloat_) {}
-    static void uniform4fv(rhi::GLint_, rhi::GLsizei_, const rhi::GLfloat_ *) {}
 
     // ---- 顶点数组与缓冲 ----
     static void bind_vertex_array(rhi::GLuint_) {}
     static void bind_buffer(rhi::GLenum_, rhi::GLuint_) {}
     static void buffer_data(rhi::GLenum_ target, rhi::GLsizeiptr_ size, const void *data, rhi::GLenum_) {
-        if (target == kArrayBufferTarget && data != nullptr) {
+        if (target == AURORA_GL_ARRAY_BUFFER_TARGET && data != nullptr) {
             const auto *p = static_cast<const std::uint8_t *>(data);
             current->last_vbo_data.assign(p, p + static_cast<std::size_t>(size));
         }
@@ -164,7 +166,7 @@ class FakeGl {
         }
     }
     static void tex_parameter_i(rhi::GLenum_, rhi::GLenum_ pname, rhi::GLint_ param) {
-        if (pname == kTextureMinFilter) {
+        if (pname == AURORA_GL_TEXTURE_MIN_FILTER) {
             current->tex_min_filters.push_back(param);
         }
     }
@@ -209,14 +211,14 @@ class FakeGl {
         }
     }
     static void bind_framebuffer(rhi::GLenum_ target, rhi::GLuint_ fbo) {
-        if (target == kFramebufferTarget || target == kDrawFramebufferTarget) {
+        if (target == AURORA_GL_FRAMEBUFFER_TARGET || target == AURORA_GL_DRAW_FRAMEBUFFER_TARGET) {
             current->cur_draw_fbo = fbo;
         }
     }
     static void framebuffer_texture_2d(rhi::GLenum_, rhi::GLenum_, rhi::GLenum_, rhi::GLuint_, rhi::GLint_) {}
     static void framebuffer_renderbuffer(rhi::GLenum_, rhi::GLenum_, rhi::GLenum_, rhi::GLuint_) {}
     static auto check_framebuffer_status(rhi::GLenum_) -> rhi::GLenum_ {
-        return kFramebufferComplete;
+        return AURORA_GL_FRAMEBUFFER_COMPLETE;
     }
     static void bind_renderbuffer(rhi::GLenum_, rhi::GLuint_) {}
     static void renderbuffer_storage_multisample(rhi::GLenum_, rhi::GLsizei_, rhi::GLenum_, rhi::GLsizei_,
@@ -232,7 +234,7 @@ class FakeGl {
 
     // ---- 查询 ----
     static auto get_string(rhi::GLenum_ name) -> const rhi::GLubyte_ * {
-        if (name == kGLVersionQuery) {
+        if (name == AURORA_GL_VERSION_QUERY) {
             return reinterpret_cast<const rhi::GLubyte_ *>(current->version_.c_str());  // NOLINT(*-pro-type-reinterpret-cast)
         }
         return reinterpret_cast<const rhi::GLubyte_ *>("");  // NOLINT(*-pro-type-reinterpret-cast)
@@ -262,7 +264,6 @@ class FakeGl {
         fn.uniform2f = &uniform2f;
         fn.uniform3f = &uniform3f;
         fn.uniform4f = &uniform4f;
-        fn.uniform4fv = &uniform4fv;
         fn.gen_vertex_arrays = &gen_ids;
         fn.delete_vertex_arrays = &delete_objects;
         fn.bind_vertex_array = &bind_vertex_array;
@@ -526,9 +527,10 @@ AURORA_TEST_CASE(gpu_gl_fake_frame_lifecycle_and_batching) {
     AURORA_TEST_CHECK_EQ(stats.skipped_cmds, 0U);
     AURORA_TEST_CHECK_EQ(fake.draw_calls, 5);
     AURORA_TEST_CHECK_EQ(fake.clears, 1);
-    AURORA_TEST_CHECK_EQ(fake.blits, 2);  // resolve + 呈现
+    AURORA_TEST_CHECK_EQ(fake.blits, 2);  // read_pixels 懒 resolve 1 + 上屏直 blit 1
 
     // 第二帧：stats 逐帧复位；同尺寸复用帧缓冲（仅一次额外 clear）。
+    // 无效果命令且无读回：end_frame 走 MSAA 直 blit（零中间 resolve）。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(64, 48, 1.0F));
     DisplayList frame2;
     frame2.push_cmd(
@@ -541,7 +543,7 @@ AURORA_TEST_CASE(gpu_gl_fake_frame_lifecycle_and_batching) {
     AURORA_TEST_CHECK_EQ(stats2.vertices, 4U);
     AURORA_TEST_CHECK_EQ(stats2.skipped_cmds, 0U);
     AURORA_TEST_CHECK_EQ(fake.clears, 2);
-    AURORA_TEST_CHECK_EQ(fake.blits, 4);
+    AURORA_TEST_CHECK_EQ(fake.blits, 3);  // 本帧仅上屏 1 次
     AURORA_TEST_CHECK_EQ(fake.draw_calls, 6);
 
     // 尺寸变化触发帧缓冲重建。
@@ -714,10 +716,12 @@ AURORA_TEST_CASE(gpu_gl_image_tex_cache_and_batching) {
     AURORA_TEST_CHECK_EQ(up.data[7], 128);
 
     // 换内容 → 第二次上传 + PMA 混合批与渐变/实心批互斥（断批）。
+    //（拷贝携带旧摘要缓存，直接改写 pixels 后须 invalidate_content_hash——公共契约。）
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(64, 48, 1.0F));
     DisplayList dl2;
     Image other = img;
     other.pixels = {10, 20, 30, 255, 40, 50, 60, 255};
+    other.invalidate_content_hash();
     dl2.push_cmd(make_image_cmd(area, img, dl2));    // 缓存命中
     dl2.push_cmd(make_image_cmd(area, other, dl2));  // 未命中
     dl2.push_cmd(make_fill(area, Color{0, 0, 0, 255}));  // Solid 管线断批
@@ -810,6 +814,40 @@ AURORA_TEST_CASE(gpu_gl_glyph_atlas_text_pipeline) {
     AURORA_TEST_CHECK_EQ(fake.sub_uploads.size(), 3U);
 }
 
+AURORA_TEST_CASE(gpu_gl_glyph_atlas_multipage_and_lru_eviction) {
+    FakeGl fake;
+    rhi::GpuGlRhi rhi_obj(fake.fn);
+    AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
+    rhi::RhiFrameSink &sink = rhi_obj;
+    const Rect area{.origin = Point{.x = 4.0F, .y = 4.0F}, .size = Size{.width = 400.0F, .height = 32.0F}};
+    const Font font;
+
+    // 小页注入（默认 1024）：62 个字母数字字形远超 8 页 × 16² 容量，强制覆盖
+    //「满页开新页 → 页数封顶 LRU 淘汰」全路径（含淘汰前 flush）。
+    rhi_obj.set_glyph_page_size(16);
+    const std::string alnum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+    AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(512, 64, 1.0F));
+    DisplayList dl;
+    dl.push_cmd(make_text_cmd(area, alnum, font, dl));
+    dl.replay(sink.backend());
+    rhi_obj.end_frame();
+    const std::size_t first_uploads = fake.sub_uploads.size();
+    AURORA_TEST_CHECK_TRUE(first_uploads > 0U);   // 每个非空字形一次放置上传
+    AURORA_TEST_CHECK_TRUE(rhi_obj.valid());      // 翻页/淘汰链不判死后端
+    AURORA_TEST_CHECK_TRUE(rhi_obj.stats().draw_calls > 0U);
+
+    // 第二帧同文本：部分槽位已被 LRU 淘汰 → 重新放置上传（> 0）；后端仍可用。
+    AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(512, 64, 1.0F));
+    DisplayList dl2;
+    dl2.push_cmd(make_text_cmd(area, alnum, font, dl2));
+    dl2.replay(sink.backend());
+    rhi_obj.end_frame();
+    AURORA_TEST_CHECK_TRUE(fake.sub_uploads.size() > first_uploads);  // 淘汰路径实际触发
+    AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
+    AURORA_TEST_CHECK_TRUE(rhi_obj.stats().draw_calls > 0U);
+}
+
 AURORA_TEST_CASE(gpu_gl_shadow_pipeline) {
     FakeGl fake;
     rhi::GpuGlRhi rhi_obj(fake.fn);
@@ -867,8 +905,8 @@ AURORA_TEST_CASE(gpu_gl_blur_region_pingpong) {
     rhi_obj.end_frame();
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 3U);  // 1 实心批 + 2 效果 pass
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().skipped_cmds, 0U);
-    // blit = 效果前置 resolve 1 + end_frame resolve 1 + 呈现 1。
-    AURORA_TEST_CHECK_EQ(fake.blits, 3);
+    // blit = 效果前置 resolve 1 + 上屏 1（end_frame MSAA 直 blit，中间 resolve 按需懒做）。
+    AURORA_TEST_CHECK_EQ(fake.blits, 2);
     AURORA_TEST_REQUIRE(fake.draw_fbo_targets.size() == 3U);
     AURORA_TEST_CHECK_EQ(fake.draw_fbo_targets[0], msaa_fbo);
     AURORA_TEST_CHECK_EQ(fake.draw_fbo_targets[1], temp_fbo);
@@ -893,16 +931,16 @@ AURORA_TEST_CASE(gpu_gl_blur_region_pingpong) {
     dl2.replay(sink.backend());
     rhi_obj.end_frame();
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 2U);
-    AURORA_TEST_CHECK_EQ(fake.blits, 6);  // 两帧各 3 次（脏跟踪不吞必要 resolve）
+    AURORA_TEST_CHECK_EQ(fake.blits, 4);  // 两帧各 2 次（脏跟踪不吞必要 resolve）
 
-    // radius ≤ 0：软件契约直接返回，无 pass（本帧仅 end_frame 的 resolve + 呈现）。
+    // radius ≤ 0：软件契约直接返回，无 pass（本帧仅上屏直 blit 1 次）。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(200, 150, 1.0F));
     DisplayList dl3;
     dl3.push_cmd(make_blur_cmd(area, 0.0F));
     dl3.replay(sink.backend());
     rhi_obj.end_frame();
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 0U);
-    AURORA_TEST_CHECK_EQ(fake.blits, 8);
+    AURORA_TEST_CHECK_EQ(fake.blits, 5);
 
     // 区域完全在画布外：空区域跳过（软件同形钳制后为空）。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(200, 150, 1.0F));
@@ -912,7 +950,7 @@ AURORA_TEST_CASE(gpu_gl_blur_region_pingpong) {
     dl4.replay(sink.backend());
     rhi_obj.end_frame();
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 0U);
-    AURORA_TEST_CHECK_EQ(fake.blits, 10);
+    AURORA_TEST_CHECK_EQ(fake.blits, 6);
 }
 
 AURORA_TEST_CASE(gpu_gl_blend_mask_region_pass) {
@@ -933,7 +971,7 @@ AURORA_TEST_CASE(gpu_gl_blend_mask_region_pass) {
     rhi_obj.end_frame();
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 2U);
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().skipped_cmds, 0U);
-    AURORA_TEST_CHECK_EQ(fake.blits, 3);
+    AURORA_TEST_CHECK_EQ(fake.blits, 2);  // 前置 resolve 1 + 上屏 1
     AURORA_TEST_REQUIRE(fake.draw_fbo_targets.size() == 2U);
     AURORA_TEST_CHECK_EQ(fake.draw_fbo_targets[0], msaa_fbo);
     AURORA_TEST_CHECK_EQ(fake.draw_fbo_targets[1], msaa_fbo);
@@ -945,7 +983,7 @@ AURORA_TEST_CASE(gpu_gl_blend_mask_region_pass) {
     dl2.replay(sink.backend());
     rhi_obj.end_frame();
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 1U);
-    AURORA_TEST_CHECK_EQ(fake.blits, 6);
+    AURORA_TEST_CHECK_EQ(fake.blits, 4);
 
     // strength ≤ 0（blend/mask 软件契约直接返回）与半径 0：全部跳过。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(200, 150, 1.0F));
@@ -956,7 +994,7 @@ AURORA_TEST_CASE(gpu_gl_blend_mask_region_pass) {
     dl3.replay(sink.backend());
     rhi_obj.end_frame();
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 0U);
-    AURORA_TEST_CHECK_EQ(fake.blits, 8);  // 本帧仅 end_frame 的 resolve + 呈现
+    AURORA_TEST_CHECK_EQ(fake.blits, 5);  // 本帧仅上屏直 blit 1 次
 }
 
 AURORA_TEST_CASE(gpu_gl_composite_transform_quad) {
@@ -1003,7 +1041,7 @@ AURORA_TEST_CASE(gpu_gl_composite_transform_quad) {
     }
     // Composite 走 NEAREST（逐像素 floor 取样同软件）；DrawImage 走 LINEAR（双线性）。
     AURORA_TEST_REQUIRE(!fake.tex_min_filters.empty());
-    AURORA_TEST_CHECK_EQ(static_cast<std::uint32_t>(fake.tex_min_filters.back()), kFilterNearest);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint32_t>(fake.tex_min_filters.back()), AURORA_GL_FILTER_NEAREST);
 
     // DrawImage 对照：同纹理管线双批（LINEAR vs NEAREST 采样模式断批）。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(200, 150, 1.0F));
@@ -1015,7 +1053,7 @@ AURORA_TEST_CASE(gpu_gl_composite_transform_quad) {
     rhi_obj.end_frame();
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 2U);
     AURORA_TEST_REQUIRE(!fake.tex_min_filters.empty());
-    AURORA_TEST_CHECK_EQ(static_cast<std::uint32_t>(fake.tex_min_filters.back()), kFilterLinear);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint32_t>(fake.tex_min_filters.back()), AURORA_GL_FILTER_LINEAR);
 
     // 非法图像（空像素 / 缓冲不足）：跳过不绘制（软件 composite_pixels 前置校验同形）。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(200, 150, 1.0F));

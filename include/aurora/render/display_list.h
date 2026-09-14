@@ -110,6 +110,9 @@ class DisplayList {
         return static_cast<int>(font_pool_.size()) - 1;
     }
     auto add_image(const Image &img) -> int {
+        // 预热源对象的内容摘要（const 下经 mutable 缓存落回源）：GPU 纹理缓存经
+        // `Image::content_hash()` 寻址，预热后逐帧的池拷贝携带有效缓存，免除每帧全量哈希。
+        (void)img.content_hash();
         image_pool_.push_back(img);
         return static_cast<int>(image_pool_.size()) - 1;
     }

@@ -580,7 +580,7 @@ class RhiBackend {
 
 **职责切分**：GL 上下文创建与 swapBuffers 呈现归所在 Surface（GLFW）；本类只做「DisplayList → GL 批渲染」。GL 函数表 `GLFn` 由 `load_gl(proc)` 经加载回调逐名装载（如 `glfwGetProcAddress`），**自写最小 loader，无 GLAD/gl3w 三方依赖**；公共头不含任何 GL 原生头（类型以 `GLenum_` 等同宽别名承载）。本类与 `load_gl` / `GLFn` **恒编译进库**（不裁切于 feature 宏）：宏只控制 `GlfwSurface` 是否接线 GPU 模式，未开启时本类同样可显式装配（供测试桩与自定义 Surface）。
 
-**帧调度契约（`RhiFrameSink`）**：`Window::present_root` 在 GPU 路径按序 `begin_frame(设备宽, 设备高, scale)` → `replay(sink.backend())` → `end_frame`，随后 `Surface::present()` 完成 swap。GPU 路径恒全量重绘（`begin_frame` 重置零基底并复位裁剪/alpha 态）；`end_frame` 完成 flush + MSAA resolve + blit 到默认帧缓冲。`begin_frame` 返回 false = 后端不可用，调用方本帧回退软件路径，此后视该后端永久失效（`valid()` 转 false）。
+**帧调度契约（`RhiFrameSink`）**：`Window::present_root` 在 GPU 路径按序 `begin_frame(设备宽, 设备高, scale)` → `replay(sink.backend())` → `end_frame`，随后 `Surface::present()` 完成 swap。GPU 路径恒全量重绘（`begin_frame` 重置零基底并复位裁剪/alpha 态）；`end_frame` 完成 flush + blit 到默认帧缓冲——resolve 纹理仍新鲜（本帧效果 pass 已 resolve 且其后无新绘制）时直接从它上屏，否则 MSAA 直 blit（省一次无人消费的中间 resolve；`read_pixels` 按需补做）。`begin_frame` 返回 false = 后端不可用，调用方本帧回退软件路径，此后视该后端永久失效（`valid()` 转 false）。
 
 **批渲染模型**：`submit` 只做「命令 → 顶点/状态」翻译（不触 GL），GL 调用集中在批 flush 与 `end_frame`。批切分**保序不重排**：管线（Solid/Border/Grad/Image/Text/Shadow）、裁剪态、混合态、纹理任一变化即断批；全局 alpha 烘焙进顶点色不断批。索引缓冲 quad 复用、顶点 `pos2f + uv2f + color4ub`（20 字节）。`FrameStats{draw_calls, vertices, skipped_cmds}` 供诊断与测试断言。
 
@@ -590,16 +590,16 @@ class RhiBackend {
 |:---|:---|
 | 几何 / 状态 / 裁剪 | 矩形与圆角裁剪统一走 shader 内 SDF alpha（不用 scissor、不 discard），栈顶 = 各层矩形交集（与 `Painter::push_clip` 交叠语义一致） |
 | LinearGradient / RadialGradient | 256×1 LUT 纹理采样，LUT 内容复现软件 `sample_gradient` 的取值语义；渐变几何参数属批 key，同 LUT 可合批 |
-| DrawImage | 上传时预乘 alpha（PMA），混合 `ONE / ONE_MINUS_SRC_ALPHA`，双线性采样（在 PMA 空间插值，与 §9.1 同理）；纹理按内容键（FNV-1a）缓存 |
+| DrawImage | 上传时预乘 alpha（PMA），混合 `ONE / ONE_MINUS_SRC_ALPHA`，双线性采样（在 PMA 空间插值，与 §9.1 同理）；纹理按 `Image::content_hash()` 惰性摘要 + 维度缓存（`DisplayList::add_image` 预热源对象，逐帧拷贝零重算；直接改写 `pixels` 后须 `invalidate_content_hash()`） |
 | Composite | 仿射矩阵直烘四角顶点（uv = 源逻辑角点归一化），NEAREST 逐像素 floor 取样同软件 `composite_pixels`；空像素 / 维度非法 / 缓冲不足与软件同形跳过 |
-| DrawText | 光栅化**复用软件 `GlyphAtlas`**（经字形发射桥 `emit_text_glyphs`——shaping / 行切分 / 基线 snap / 间距推进与 `FontEngine::draw_text` 单一代码路径），GPU 侧架式打包 A8（R8）纹理图集，`tex_sub_image_2d` 槽位增量上传；LCD 子像素模式不进 GPU（一律灰度） |
+| DrawText | 光栅化**复用软件 `GlyphAtlas`**（经字形发射桥 `emit_text_glyphs`——shaping / 行切分 / 基线 snap / 间距推进与 `FontEngine::draw_text` 单一代码路径），GPU 侧**多页**架式打包 A8（R8）图集：常规页 1024² 满页开新页，页数达 8 后 LRU 页淘汰（清槽位、复用纹理，淘汰前 flush）；超大字形开 ≤ 2048² 专用页，放不下放弃。`tex_sub_image_2d` 槽位增量上传，槽位携带页纹理与预归一化 uv（跨页文本自然断批）；LCD 子像素模式不进 GPU（一律灰度）。页边长可经 `set_glyph_page_size` 注入（测试覆盖翻页/淘汰路径） |
 | Shadow | 单 quad 覆盖扩展区（外扩 `blur × 2`），shader 内到阴影矩形欧氏距离线性衰减 `max(0, 1 − dist/blur)`，与软件 `draw_shadow` 衰减因子同构；`blur ≤ 0` 硬阴影退化为 Solid 实心 quad |
 | BlurRegion | 两遍分离 box blur（水平 → 垂直）经 resolve → temp FBO ping-pong，tap 钳制在区域内；半径 `max(1, trunc(radius × scale))`、区域 floor/ceil + 画布钳制与软件同形；`radius ≤ 0` 直接跳过 |
 | BlendRegion / MaskRegion | 单 pass 采样 resolve 纹理直写回 MSAA（直写替换，混合禁用）；Blend 八模式枚举序与 shader `u_mode` 分支一一对应，Mask 三种渐变因子按区域内像素索引计算；`strength` 截断 `[0,1]`、`≤ 0` 跳过与软件同形 |
 
-**效果 pass 机制**：已绘内容位于 MSAA 渲染缓冲（不可采样），效果命令前先把 MSAA resolve 成纹理（`msaa_dirty` 门控：同帧连续效果只在内容变化后重新 blit）。
+**效果 pass 机制**：已绘内容位于 MSAA 渲染缓冲（不可采样），效果命令前先把 MSAA resolve 成纹理（`msaa_dirty` 门控：同帧连续效果只在内容变化后重新 blit）。纹理缓存（渐变 LUT / 图像纹理）溢出淘汰前先 flush 当前批——待提交批可能仍引用将被删除的纹理（与字形图集满页 flush 同因）。
 
-**初始化失败链**（函数表缺项 / GL 版本不足 / 着色器链接失败 / GL 错误）→ `valid()` 为 false，调用方整体回退软件路径，**不做逐命令混合**。`Surface::gpu_backend()` 非空时其 `name()` 恒为 `"gpu-gl"`；首帧初始化失败时 Window 内部永久回退软件路径（`gpu_backend()` 仍可能非空——契约只断言「非空即 `gpu-gl`」）。`read_pixels()` 提供 MSAA resolve 后帧内容读回（诊断 / 快照用）。
+**初始化失败链**（函数表缺项 / GL 版本不足 / 着色器链接失败 / GL 错误）→ `valid()` 为 false，调用方整体回退软件路径，**不做逐命令混合**。`Surface::gpu_backend()` 非空时其 `name()` 恒为 `"gpu-gl"`；首帧初始化失败时 Window 内部永久回退软件路径（`gpu_backend()` 仍可能非空——契约只断言「非空即 `gpu-gl`」）。`read_pixels()` 提供当前帧内容读回（诊断 / 快照用）：懒 resolve——调用时按需补 MSAA→resolve blit；调用窗口为 `end_frame` 之后、下一次 `begin_frame` 之前；GLFW 侧 `data()` 在 DEBUG 下经此懒读回（无消费者时零 GPU→CPU 读回成本，Release 恒空）。
 
 **测试**：`utest_gpu_gl_rhi` 以 fake GL 驱动桩（全量填充 `GLFn` + 调用记录）覆盖帧生命周期 / 各管线批切分 / 渐变 LUT 内容 / PMA 上传 / 字形图集子上传 / 效果 ping-pong 序 / 初始化失败链；`itest_gpu_gl_smoke` 在真实 GLFW 窗口验证 GPU 模式呈现与后端身份契约（无显示环境自动 SKIP）。
 
@@ -612,6 +612,8 @@ class RhiBackend {
 `image/image_codec.h` 提供图像编解码，能力由编译期开关 `AURORA_ENABLE_IMAGE_JPEG` / `AURORA_ENABLE_IMAGE_WEBP` / `AURORA_ENABLE_IMAGE_PNG` 控制（见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md)）。
 
 `Painter::draw_image(const Image&, const Rect&)` 采用双线性采样，在 **premultiplied-alpha 空间插值**，避免半透明边缘暗边与光晕。
+
+`Image::content_hash()`（`core/image.h`）提供像素内容的 FNV-1a 64 位惰性摘要：首次调用计算并缓存（const 访问经 mutable 落回本对象），拷贝携带缓存；GPU 纹理缓存等内容寻址消费方经此寻址，免除每帧全量哈希。**契约**：直接改写 `pixels` 后必须调用 `invalidate_content_hash()`，否则摘要过期、内容寻址消费方可能命中旧内容。
 
 ### 9.2 VideoPlayer
 

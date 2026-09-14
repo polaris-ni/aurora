@@ -391,21 +391,17 @@ auto compile_shader(const GLFn &gl, GLenum_ type, const char *src, std::string &
     return sh;
 }
 
-auto link_program(const GLFn &gl, const char *vert_src, const char *frag_src, std::string &err) -> GLuint_ {
-    const GLuint_ vs = compile_shader(gl, VERTEX_SHADER, vert_src, err);
-    if (vs == 0) {
-        return 0;
-    }
+// 以预编译顶点着色器链接程序（九条管线共享同一 vs，编译一次省 8 次 compile）；
+// 片元着色器逐条编译，链接后即删。失败返回 0 并回填 err。
+auto link_program_with(const GLFn &gl, GLuint_ vs, const char *frag_src, std::string &err) -> GLuint_ {
     const GLuint_ fs = compile_shader(gl, FRAGMENT_SHADER, frag_src, err);
     if (fs == 0) {
-        gl.delete_shader(vs);
         return 0;
     }
     const GLuint_ prog = gl.create_program();
     gl.attach_shader(prog, vs);
     gl.attach_shader(prog, fs);
     gl.link_program(prog);
-    gl.delete_shader(vs);
     gl.delete_shader(fs);
     GLint_ ok = 0;
     gl.get_program_iv(prog, LINK_STATUS, &ok);
@@ -461,21 +457,13 @@ constexpr int AURORA_LUT_WIDTH = 256;
 constexpr std::size_t AURORA_LUT_CACHE_CAP = 64;
 // 图像纹理缓存容量上限（与 LUT 同策略：溢出清空重建）。
 constexpr std::size_t AURORA_IMAGE_CACHE_CAP = 64;
-// 字形图集初始边长（px，R8）；满页倍增重建，2048 封顶后改为整页失效（槽位清空重排）。
-constexpr int AURORA_GLYPH_ATLAS_START = 512;
-constexpr int AURORA_GLYPH_ATLAS_MAX = 2048;
-
-// FNV-1a 64 位内容摘要：图像纹理缓存键（维度混入尾部）。同帧逐命令重算 O(N)——
-// 相对软件路径的逐像素双线性采样可忽略；命中后零上传，收益远大于摘要成本。
-auto fnv1a_64(const std::uint8_t *data, std::size_t n, std::uint64_t seed = 14695981039346656037ULL)
-    -> std::uint64_t {
-    std::uint64_t h = seed;
-    for (std::size_t i = 0; i < n; ++i) {
-        h ^= data[i];
-        h *= 1099511628211ULL;
-    }
-    return h;
-}
+// 字形图集多页策略：常规页固定边长（R8，1 MB/页），满页开新页；页数达上限后淘汰
+// 最久未用页（槽位清空重排、纹理对象复用）。替代旧「单页倍增至 2048 封顶后整页失效」，
+// 消除 CJK 多字号/多字重场景页满即全量字形重传的抖动悬崖。超大字形（任一维超常规页）
+// 开 AURORA_GLYPH_PAGE_MAX 以内的专用页；仍放不下则放弃该字形（同旧契约）。
+constexpr int AURORA_GLYPH_PAGE = 1024;
+constexpr int AURORA_GLYPH_PAGE_MAX = 2048;
+constexpr std::size_t AURORA_GLYPH_PAGE_CAP = 8;
 
 }  // namespace
 
@@ -487,7 +475,7 @@ auto GLFn::complete() const -> bool {
         && create_program != nullptr && attach_shader != nullptr && link_program != nullptr
         && get_program_iv != nullptr && get_program_info_log != nullptr && delete_program != nullptr
         && use_program != nullptr && get_uniform_location != nullptr && uniform1i != nullptr && uniform1f != nullptr
-        && uniform2f != nullptr && uniform3f != nullptr && uniform4f != nullptr && uniform4fv != nullptr
+        && uniform2f != nullptr && uniform3f != nullptr && uniform4f != nullptr
         && gen_vertex_arrays != nullptr && delete_vertex_arrays != nullptr && bind_vertex_array != nullptr
         && gen_buffers != nullptr && delete_buffers != nullptr && bind_buffer != nullptr && buffer_data != nullptr
         && enable_vertex_attrib_array != nullptr && vertex_attrib_pointer != nullptr
@@ -534,7 +522,6 @@ auto load_gl(void *(*proc)(const char *name)) -> GLFn {
     load("glUniform2f", fn.uniform2f);
     load("glUniform3f", fn.uniform3f);
     load("glUniform4f", fn.uniform4f);
-    load("glUniform4fv", fn.uniform4fv);
     // 顶点数组与缓冲
     load("glGenVertexArrays", fn.gen_vertex_arrays);
     load("glDeleteVertexArrays", fn.delete_vertex_arrays);
@@ -622,7 +609,7 @@ struct GpuGlRhi::Impl {
         // Image 管线专用：PMA 纹理与混合模式（PMA 走 ONE/ONE_MINUS_SRC_ALPHA，变化断批）
         bool blend_pma = false;
         GLuint_ image_tex = 0;
-        // Text 管线专用：字形图集纹理（纹理对象跨页重建沿用同名，整生命周期仅一个名字）
+        // Text 管线专用：槽位所在字形图集页纹理（多页图集；跨页文本自然断批）
         GLuint_ glyph_atlas_tex = 0;
         // Shadow 管线专用：阴影矩形（偏移后）中心/半宽半高与模糊半径（逻辑 dp）
         float shadow_cx = 0.0F;
@@ -651,12 +638,29 @@ struct GpuGlRhi::Impl {
         GLuint_ tex = 0;
     };
 
-    // 字形图集槽位：纹理内像素矩形（Gray 条目按 width×rows 紧密排列，无 padding）。
+    // 字形图集槽位：所在页纹理 + 页内像素矩形 + 预归一化 uv（页尺寸各异，放置时即算；
+    // Gray 条目按 width×rows 紧密排列，无 padding）。w/h ≤ 0 = 无需绘制。
     struct GlyphSlotRect {
+        GLuint_ tex = 0;
         int x = 0;
         int y = 0;
         int w = 0;
         int h = 0;
+        float u0 = 0.0F;
+        float v0 = 0.0F;
+        float u1 = 0.0F;
+        float v1 = 0.0F;
+    };
+
+    // 字形图集页：独立 R8 纹理 + 架式打包游标 + LRU 计数（命中/放置时刷新）。
+    struct GlyphPage {
+        GLuint_ tex = 0;
+        int w = 0;
+        int h = 0;
+        int pack_x = 0;
+        int pack_y = 0;
+        int pack_row_h = 0;
+        std::uint64_t lru = 0;
     };
 
     GLFn gl;
@@ -737,16 +741,15 @@ struct GpuGlRhi::Impl {
     std::vector<LutEntry> lut_cache;
     std::vector<ImageTexEntry> image_cache;
 
-    // 字形图集（GPU 侧独立大图集，R8 架式打包）：槽位键 = 软件图集键（同字形同键 → 跨帧
+    // 字形图集（GPU 侧多页 R8 架式打包）：槽位键 = 软件图集键（同字形同键 → 跨帧
     // 复用零重复上传）；位图内容来自软件 GlyphAtlas 条目（发射回调内即时拷贝上传，规避
-    // LRU 悬垂）。纹理对象名整生命周期唯一，页重建只重定义存储不改名——批 key 无需感知页代。
+    // 淘汰悬垂）。glyph_page_size_ 可注入（默认 AURORA_GLYPH_PAGE；测试缩小以覆盖翻页/
+    // LRU 淘汰路径）。批 key 携带槽位页纹理名——跨页文本自然断批，同页连续字形合批。
     std::unordered_map<std::uint64_t, GlyphSlotRect> glyph_slots;
-    GLuint_ glyph_atlas = 0;
-    int atlas_w = 0;
-    int atlas_h = 0;
-    int pack_x = 0;
-    int pack_y = 0;
-    int pack_row_h = 0;
+    std::vector<GlyphPage> glyph_pages;  // 惰性创建；放置只走 active_glyph_page_
+    int active_glyph_page_ = -1;         // 当前放置页下标（-1 = 无）
+    std::uint64_t glyph_lru_clock_ = 0;
+    int glyph_page_size_ = AURORA_GLYPH_PAGE;
 
     // 画布
     int device_w = 0;
@@ -781,69 +784,58 @@ struct GpuGlRhi::Impl {
             failed = true;
             return;
         }
-        // 版本门槛：核心版本 ≥ 3.3（字符串形如 "4.5.0 - build 27" / "3.3 (Core Profile) ..."）
+        // 版本门槛：核心版本 ≥ 3.3。数字解析 major.minor（兼容 "4.5.0 - build 27" /
+        // "10.1 ..." 等驱动形态；非数字开头解析失败即拒绝）。
         const char *ver = reinterpret_cast<const char *>(gl.get_string(VERSION));  // NOLINT(*-pro-type-reinterpret-cast)
-        if (ver == nullptr || ver[0] < '3' || (ver[0] == '3' && ver[1] == '.' && ver[2] < '3')) {
+        int major = 0;
+        int minor = 0;
+        bool parsed = false;
+        if (ver != nullptr) {
+            const char *p = ver;
+            if (*p >= '0' && *p <= '9') {
+                while (*p >= '0' && *p <= '9') {
+                    major = major * 10 + (*p++ - '0');
+                }
+                if (*p == '.') {
+                    ++p;
+                    while (*p >= '0' && *p <= '9') {
+                        minor = minor * 10 + (*p++ - '0');
+                    }
+                    parsed = true;
+                }
+            }
+        }
+        if (!parsed || major < 3 || (major == 3 && minor < 3)) {
             AURORA_LOG_ERROR("gpu-gl", "OpenGL 3.3+ required, got: ", ver != nullptr ? ver : "(null)");
             failed = true;
             return;
         }
 
+        // 九条管线共享同一顶点着色器：编译一次，逐条链接后释放。
         std::string err;
-        program_solid = link_program(gl, AURORA_GLSL_VERT, AURORA_GLSL_SOLID, err);
-        if (program_solid == 0) {
-            AURORA_LOG_ERROR("gpu-gl", "solid program link failed: ", err);
+        const GLuint_ shared_vs = compile_shader(gl, VERTEX_SHADER, AURORA_GLSL_VERT, err);
+        if (shared_vs == 0) {
+            AURORA_LOG_ERROR("gpu-gl", "vertex shader compile failed: ", err);
             failed = true;
             return;
         }
-        program_border = link_program(gl, AURORA_GLSL_VERT, AURORA_GLSL_BORDER, err);
-        if (program_border == 0) {
-            AURORA_LOG_ERROR("gpu-gl", "border program link failed: ", err);
-            failed = true;
-            return;
+        const char *frag_srcs[9] = {AURORA_GLSL_SOLID, AURORA_GLSL_BORDER,      AURORA_GLSL_GRAD,
+                                    AURORA_GLSL_IMAGE, AURORA_GLSL_TEXT,        AURORA_GLSL_SHADOW,
+                                    AURORA_GLSL_BLUR,  AURORA_GLSL_BLEND,      AURORA_GLSL_MASK};
+        GLuint_ *progs[9] = {&program_solid, &program_border, &program_grad, &program_image, &program_text,
+                             &program_shadow, &program_blur,  &program_blend, &program_mask};
+        const char *names[9] = {"solid",   "border", "gradient", "image", "text",
+                                "shadow",  "blur",   "blend",    "mask"};
+        for (int i = 0; i < 9; ++i) {
+            *progs[i] = link_program_with(gl, shared_vs, frag_srcs[i], err);
+            if (*progs[i] == 0) {
+                AURORA_LOG_ERROR("gpu-gl", names[i], " program link failed: ", err);
+                gl.delete_shader(shared_vs);
+                failed = true;
+                return;
+            }
         }
-        program_grad = link_program(gl, AURORA_GLSL_VERT, AURORA_GLSL_GRAD, err);
-        if (program_grad == 0) {
-            AURORA_LOG_ERROR("gpu-gl", "gradient program link failed: ", err);
-            failed = true;
-            return;
-        }
-        program_image = link_program(gl, AURORA_GLSL_VERT, AURORA_GLSL_IMAGE, err);
-        if (program_image == 0) {
-            AURORA_LOG_ERROR("gpu-gl", "image program link failed: ", err);
-            failed = true;
-            return;
-        }
-        program_text = link_program(gl, AURORA_GLSL_VERT, AURORA_GLSL_TEXT, err);
-        if (program_text == 0) {
-            AURORA_LOG_ERROR("gpu-gl", "text program link failed: ", err);
-            failed = true;
-            return;
-        }
-        program_shadow = link_program(gl, AURORA_GLSL_VERT, AURORA_GLSL_SHADOW, err);
-        if (program_shadow == 0) {
-            AURORA_LOG_ERROR("gpu-gl", "shadow program link failed: ", err);
-            failed = true;
-            return;
-        }
-        program_blur = link_program(gl, AURORA_GLSL_VERT, AURORA_GLSL_BLUR, err);
-        if (program_blur == 0) {
-            AURORA_LOG_ERROR("gpu-gl", "blur program link failed: ", err);
-            failed = true;
-            return;
-        }
-        program_blend = link_program(gl, AURORA_GLSL_VERT, AURORA_GLSL_BLEND, err);
-        if (program_blend == 0) {
-            AURORA_LOG_ERROR("gpu-gl", "blend program link failed: ", err);
-            failed = true;
-            return;
-        }
-        program_mask = link_program(gl, AURORA_GLSL_VERT, AURORA_GLSL_MASK, err);
-        if (program_mask == 0) {
-            AURORA_LOG_ERROR("gpu-gl", "mask program link failed: ", err);
-            failed = true;
-            return;
-        }
+        gl.delete_shader(shared_vs);
         solid_u_logical = gl.get_uniform_location(program_solid, "u_logical");
         solid_u_clip = gl.get_uniform_location(program_solid, "u_clip");
         solid_u_clip_ctl = gl.get_uniform_location(program_solid, "u_clip_ctl");
@@ -952,9 +944,11 @@ struct GpuGlRhi::Impl {
                 gl.delete_textures(1, &tex);
             }
         }
-        if (glyph_atlas != 0) {
-            const GLuint_ tex = glyph_atlas;
-            gl.delete_textures(1, &tex);
+        for (const GlyphPage &pg : glyph_pages) {
+            if (pg.tex != 0) {
+                const GLuint_ tex = pg.tex;
+                gl.delete_textures(1, &tex);
+            }
         }
         if (program_solid != 0) {
             gl.delete_program(program_solid);
@@ -996,6 +990,9 @@ struct GpuGlRhi::Impl {
             }
         }
         if (lut_cache.size() >= AURORA_LUT_CACHE_CAP) {
+            // 先 flush：待提交批可能仍引用将被删除的 LUT 纹理（同字形图集满页 flush 的成因），
+            // 先删除会把 flush 时的纹理绑定变成悬垂名 → GL error 判死整个后端。
+            flush_batch();
             for (const LutEntry &e : lut_cache) {
                 if (e.tex != 0) {
                     GLuint_ tex = e.tex;
@@ -1030,11 +1027,12 @@ struct GpuGlRhi::Impl {
     }
 
     // ---- 图像纹理缓存 ----
-    // 键 = 像素内容摘要 + 维度；未命中时上传预乘 alpha（PMA）副本，LINEAR 滤波在 PMA
-    // 空间插值（与软件双线性语义同源）。管线输出按 PMA 语义整体缩放，混合走
-    // ONE/ONE_MINUS_SRC_ALPHA（blend_pma 批成员）。
+    // 键 = Image::content_hash()（惰性摘要，add_image 预热源后逐帧拷贝零重算）+ 维度；
+    // 未命中时上传预乘 alpha（PMA）副本，LINEAR 滤波在 PMA 空间插值（与软件双线性
+    // 语义同源）。管线输出按 PMA 语义整体缩放，混合走 ONE/ONE_MINUS_SRC_ALPHA
+    //（blend_pma 批成员）。直接改写 pixels 的调用方须先 invalidate_content_hash()。
     auto acquire_image_tex(const Image &img) -> GLuint_ {
-        std::uint64_t hash = fnv1a_64(img.pixels.data(), img.pixels.size());
+        std::uint64_t hash = img.content_hash();
         hash ^= static_cast<std::uint64_t>(img.width);
         hash *= 1099511628211ULL;
         hash ^= static_cast<std::uint64_t>(img.height);
@@ -1045,6 +1043,8 @@ struct GpuGlRhi::Impl {
             }
         }
         if (image_cache.size() >= AURORA_IMAGE_CACHE_CAP) {
+            // 先 flush：同 LUT 缓存——待提交批可能仍引用将被删除的图像纹理。
+            flush_batch();
             for (const ImageTexEntry &e : image_cache) {
                 if (e.tex != 0) {
                     GLuint_ tex = e.tex;
@@ -1082,94 +1082,156 @@ struct GpuGlRhi::Impl {
         return tex;
     }
 
-    // ---- GPU 字形图集（R8 架式打包）----
-    // 页策略（设计文档 §6.5「GPU 侧独立大图集」）：初始 AURORA_GLYPH_ATLAS_START 见方，
-    // 满页倍增重建；AURORA_GLYPH_ATLAS_MAX 封顶后整页失效（槽位清空，字形按需重传）。
-    // 纹理对象名整生命周期唯一——重建只重定义存储（tex_image_2d），批 key 与已提交批次
-    // 不受影响（旧批在重建前先 flush，GL 命令流保序，旧内容采样已完成）。
-    auto ensure_glyph_atlas(int w, int h) -> bool {
-        if (glyph_atlas != 0 && atlas_w == w && atlas_h == h) {
-            return !failed;
-        }
-        if (glyph_atlas == 0) {
-            GLuint_ tex = 0;
-            gl.gen_textures(1, &tex);
-            glyph_atlas = tex;
-        }
-        atlas_w = w;
-        atlas_h = h;
-        pack_x = 0;
-        pack_y = 0;
-        pack_row_h = 0;
-        glyph_slots.clear();  // 尺寸变化后旧槽位坐标失效
-        gl.bind_texture(TEXTURE_2D, glyph_atlas);
+    // ---- GPU 字形图集（多页 R8 架式打包 + LRU 页淘汰）----
+    // 页策略：常规字形放活跃页（glyph_page_size_ 见方，架式游标推进）；放不下即开新页；
+    // 页数达 AURORA_GLYPH_PAGE_CAP 后改为淘汰最久未用页（清其槽位、复位游标，纹理对象
+    // 复用——槽位重排覆盖旧内容，无需清除）。淘汰/换页前先 flush：待提交批可能仍引用
+    // 该页上的字形（与纹理缓存淘汰同因）。超大字形开 AURORA_GLYPH_PAGE_MAX 以内专用页。
+    auto new_glyph_page(int w, int h) -> int {
+        GlyphPage page;
+        GLuint_ tex = 0;
+        gl.gen_textures(1, &tex);
+        page.tex = tex;
+        page.w = w;
+        page.h = h;
+        gl.bind_texture(TEXTURE_2D, tex);
         gl.tex_parameter_i(TEXTURE_2D, TEXTURE_MIN_FILTER, static_cast<GLint_>(NEAREST));
         gl.tex_parameter_i(TEXTURE_2D, TEXTURE_MAG_FILTER, static_cast<GLint_>(NEAREST));
         gl.tex_parameter_i(TEXTURE_2D, TEXTURE_WRAP_S, static_cast<GLint_>(CLAMP_TO_EDGE));
         gl.tex_parameter_i(TEXTURE_2D, TEXTURE_WRAP_T, static_cast<GLint_>(CLAMP_TO_EDGE));
         gl.pixel_store_i(UNPACK_ALIGNMENT, 1);
         gl.tex_image_2d(TEXTURE_2D, 0, static_cast<GLint_>(R8), w, h, 0, RED, UNSIGNED_BYTE, nullptr);
-        check_error("ensure_glyph_atlas");
-        return !failed;
+        check_error("new_glyph_page");
+        if (failed) {
+            return -1;
+        }
+        glyph_pages.push_back(page);
+        return static_cast<int>(glyph_pages.size()) - 1;
     }
 
-    // 取字形槽位；未命中即打包上传。返回空矩形 = 无需绘制（空位图字形或异常大字形）。
+    // 淘汰最久未用页并作为新活跃页（复用纹理对象）。调用前须保证 glyphs 待放置。
+    auto evict_glyph_page() -> int {
+        // 先 flush：待提交批可能引用将被回收槽位上的字形（纹理复用不改名，但旧槽位
+        // 会被新字形覆盖——先画完旧批再重排，保证本帧已发射字形采样到原位图）。
+        flush_batch();
+        std::size_t victim = 0;
+        for (std::size_t i = 1; i < glyph_pages.size(); ++i) {
+            if (glyph_pages[i].lru < glyph_pages[victim].lru) {
+                victim = i;
+            }
+        }
+        const GLuint_ victim_tex = glyph_pages[victim].tex;
+        std::erase_if(glyph_slots, [victim_tex](const auto &kv) { return kv.second.tex == victim_tex; });
+        GlyphPage &pg = glyph_pages[victim];
+        pg.pack_x = 0;
+        pg.pack_y = 0;
+        pg.pack_row_h = 0;
+        return static_cast<int>(victim);
+    }
+
+    // 取字形槽位；未命中即放置上传。返回空矩形（w/h ≤ 0）= 无需绘制
+    //（空位图字形或超出 AURORA_GLYPH_PAGE_MAX 的异常大字形）。
     auto acquire_glyph_slot(std::uint64_t key, const render::GlyphAtlas::Entry &e) -> GlyphSlotRect {
         const auto it = glyph_slots.find(key);
         if (it != glyph_slots.end()) {
+            // 命中：刷新所在页 LRU。
+            const GLuint_ tex = it->second.tex;
+            for (GlyphPage &pg : glyph_pages) {
+                if (pg.tex == tex) {
+                    pg.lru = ++glyph_lru_clock_;
+                    break;
+                }
+            }
             return it->second;
         }
         // 空字形（空格等）：位图为空，无需图集槽位（发射核心照常推进 pen）。
         if (e.width <= 0 || e.rows <= 0 || e.buf.empty()) {
             return GlyphSlotRect{};
         }
-        if (!ensure_glyph_atlas(AURORA_GLYPH_ATLAS_START, AURORA_GLYPH_ATLAS_START)) {
-            return GlyphSlotRect{};
-        }
         const int w = e.width;
         const int h = e.rows;
-        // 超大字形（比当前页还宽/高）：先倍增到能装下；封顶仍装不下则放弃该字形。
-        while ((w > atlas_w || h > atlas_h) && atlas_w < AURORA_GLYPH_ATLAS_MAX) {
-            if (!ensure_glyph_atlas(std::min(atlas_w * 2, AURORA_GLYPH_ATLAS_MAX),
-                                    std::min(atlas_h * 2, AURORA_GLYPH_ATLAS_MAX))) {
+        const int side = glyph_page_size_;
+        // 超大字形：开专用页（pow2 上限 AURORA_GLYPH_PAGE_MAX）；仍放不下则放弃（旧契约）。
+        if (w > side || h > side) {
+            int big = side;
+            while (big < w || big < h) {
+                big *= 2;
+            }
+            if (big > AURORA_GLYPH_PAGE_MAX) {
                 return GlyphSlotRect{};
             }
-        }
-        if (w > atlas_w || h > atlas_h) {
-            return GlyphSlotRect{};
-        }
-        if (pack_x + w > atlas_w) {
-            pack_x = 0;
-            pack_y += pack_row_h;
-            pack_row_h = 0;
-        }
-        if (pack_y + h > atlas_h) {
-            // 满页：先 flush（旧页上的顶点先画完，重建重定义存储不影响已提交批次），再扩页。
-            flush_batch();
-            const int next = std::min(atlas_w * 2, AURORA_GLYPH_ATLAS_MAX);
-            if (next == atlas_w) {
-                // 已封顶：整页失效（槽位清空重排，纹理复用；旧内容无需清除，槽位重排覆盖）。
-                glyph_slots.clear();
-                pack_x = 0;
-                pack_y = 0;
-                pack_row_h = 0;
-            } else if (!ensure_glyph_atlas(next, next)) {
-                return GlyphSlotRect{};
+            if (glyph_pages.size() >= AURORA_GLYPH_PAGE_CAP) {
+                // 页数封顶：淘汰 victim 后把其纹理重定义存储为专用大页（淘汰内已 flush，
+                // 纹理名不变，与旧「满页重定义存储」路径同构）。
+                active_glyph_page_ = evict_glyph_page();
+                GlyphPage &vp = glyph_pages[static_cast<std::size_t>(active_glyph_page_)];
+                vp.w = big;
+                vp.h = big;
+                gl.bind_texture(TEXTURE_2D, vp.tex);
+                gl.pixel_store_i(UNPACK_ALIGNMENT, 1);
+                gl.tex_image_2d(TEXTURE_2D, 0, static_cast<GLint_>(R8), big, big, 0, RED, UNSIGNED_BYTE, nullptr);
+                check_error("acquire_glyph_slot-big");
+                if (failed) {
+                    return GlyphSlotRect{};
+                }
+            } else {
+                active_glyph_page_ = new_glyph_page(big, big);
+                if (active_glyph_page_ < 0) {
+                    return GlyphSlotRect{};
+                }
             }
-            if (pack_x + w > atlas_w) {
-                return GlyphSlotRect{};  // 封顶重排后仍放不下一行（异常大字形），放弃
+        } else if (active_glyph_page_ < 0) {
+            // 首页。
+            if (glyph_pages.size() >= AURORA_GLYPH_PAGE_CAP) {
+                active_glyph_page_ = evict_glyph_page();
+            } else {
+                active_glyph_page_ = new_glyph_page(side, side);
+                if (active_glyph_page_ < 0) {
+                    return GlyphSlotRect{};
+                }
             }
         }
-        const GlyphSlotRect slot{pack_x, pack_y, w, h};
-        gl.bind_texture(TEXTURE_2D, glyph_atlas);
+        // 用指针而非引用：页满分支可能 push 新页使 vector 重分配，须重取。
+        GlyphPage *pg = &glyph_pages[static_cast<std::size_t>(active_glyph_page_)];
+        // 架式放置：行满换行，页满换页/淘汰。
+        if (pg->pack_x + w > pg->w) {
+            pg->pack_x = 0;
+            pg->pack_y += pg->pack_row_h;
+            pg->pack_row_h = 0;
+        }
+        if (pg->pack_y + h > pg->h) {
+            if (glyph_pages.size() < AURORA_GLYPH_PAGE_CAP) {
+                active_glyph_page_ = new_glyph_page(side, side);
+                if (active_glyph_page_ < 0) {
+                    return GlyphSlotRect{};
+                }
+            } else {
+                active_glyph_page_ = evict_glyph_page();
+            }
+            pg = &glyph_pages[static_cast<std::size_t>(active_glyph_page_)];  // 重取（push 可能重分配）
+            if (w > pg->w || h > pg->h || pg->pack_x + w > pg->w) {
+                return GlyphSlotRect{};  // 换页后仍放不下（异常大字形），放弃
+            }
+        }
+        const GlyphSlotRect slot{pg->tex,
+                                 pg->pack_x,
+                                 pg->pack_y,
+                                 w,
+                                 h,
+                                 static_cast<float>(pg->pack_x) / static_cast<float>(pg->w),
+                                 static_cast<float>(pg->pack_y) / static_cast<float>(pg->h),
+                                 static_cast<float>(pg->pack_x + w) / static_cast<float>(pg->w),
+                                 static_cast<float>(pg->pack_y + h) / static_cast<float>(pg->h)};
+        gl.bind_texture(TEXTURE_2D, pg->tex);
         gl.pixel_store_i(UNPACK_ALIGNMENT, 1);
         gl.tex_sub_image_2d(TEXTURE_2D, 0, slot.x, slot.y, w, h, RED, UNSIGNED_BYTE, e.buf.data());
         check_error("acquire_glyph_slot");
         if (failed) {
             return GlyphSlotRect{};
         }
-        pack_x += w;
-        pack_row_h = std::max(pack_row_h, h);
+        pg->pack_x += w;
+        pg->pack_row_h = std::max(pg->pack_row_h, h);
+        pg->lru = ++glyph_lru_clock_;
         glyph_slots.emplace(key, slot);
         return slot;
     }
@@ -1261,10 +1323,11 @@ struct GpuGlRhi::Impl {
             return;
         }
         const std::uint32_t want = quads * 2 < 4096 ? 4096 : quads * 2;
+        // 增量追加：thread_local 模式跨帧保留，只补新生 quad 段（整体重传 buffer_data，
+        // 孤儿化重分配，流式用法标准姿势）。
         static thread_local std::vector<GLuint_> pattern;
-        pattern.clear();
         pattern.reserve(static_cast<std::size_t>(want) * 6);
-        for (std::uint32_t q = 0; q < want; ++q) {
+        for (std::uint32_t q = ibo_quads; q < want; ++q) {
             const GLuint_ b = q * 4;
             pattern.insert(pattern.end(), {b, b + 1, b + 2, b + 2, b + 3, b});
         }
@@ -1614,7 +1677,7 @@ struct GpuGlRhi::Impl {
                         if (mode != render::GlyphAtlas::Mode::Gray) {
                             return;  // 防御：GPU 路径恒灰度
                         }
-                        // 取槽位可能触发满页 flush/扩页，须在 begin_batch 之前完成。
+                        // 取槽位可能触发满页 flush/淘汰，须在 begin_batch 之前完成。
                         const GlyphSlotRect slot = acquire_glyph_slot(key, entry);
                         if (slot.w <= 0 || slot.h <= 0 || failed) {
                             return;
@@ -1622,19 +1685,15 @@ struct GpuGlRhi::Impl {
                         BatchKey k{};
                         k.pipeline = Pipeline::Text;
                         k.clip = clip;
-                        k.glyph_atlas_tex = glyph_atlas;
+                        k.glyph_atlas_tex = slot.tex;  // 槽位所在页纹理（跨页文本自然断批）
                         begin_batch(k);
-                        // 顶点坐标：物理像素 → 逻辑 dp（NDC 映射基准）；uv = 图集槽位归一化矩形。
+                        // 顶点坐标：物理像素 → 逻辑 dp（NDC 映射基准）；uv = 槽位预归一化矩形。
                         const float inv_s = 1.0F / scale;
-                        const float aw = static_cast<float>(atlas_w);
-                        const float ah = static_cast<float>(atlas_h);
                         const float x0 = static_cast<float>(dx0) * inv_s;
                         const float y0 = static_cast<float>(dy0) * inv_s;
                         push_quad_uv(x0, y0, x0 + static_cast<float>(slot.w) * inv_s,
-                                     y0 + static_cast<float>(slot.h) * inv_s,
-                                     static_cast<float>(slot.x) / aw, static_cast<float>(slot.y) / ah,
-                                     static_cast<float>(slot.x + slot.w) / aw,
-                                     static_cast<float>(slot.y + slot.h) / ah, bake_alpha(cmd.color, alpha));
+                                     y0 + static_cast<float>(slot.h) * inv_s, slot.u0, slot.v0, slot.u1, slot.v1,
+                                     bake_alpha(cmd.color, alpha));
                     });
                 (void)ok;  // 无字体面（引擎恒有内置字体，理论不触发）：GPU 路径无位图兜底，跳过
                 break;
@@ -1992,11 +2051,10 @@ auto GpuGlRhi::end_frame() -> void {
     }
     const GLsizei_ w = impl_->device_w;
     const GLsizei_ h = impl_->device_h;
-    // resolve：MSAA 渲染缓冲 → 普通纹理 FBO（read_pixels / 后续效果 pass 采样依赖）。
-    impl_->gl.bind_framebuffer(READ_FRAMEBUFFER, impl_->msaa_fbo);
-    impl_->gl.bind_framebuffer(DRAW_FRAMEBUFFER, impl_->resolve_fbo);
-    impl_->gl.blit_framebuffer(0, 0, w, h, 0, 0, w, h, COLOR_BUFFER_BIT, NEAREST);
-    // 呈现：blit 至默认帧缓冲（GLFW 侧 present() 只做 swapBuffers）。
+    // 呈现：resolve 纹理仍新鲜（本帧效果 pass 已 resolve 且其后无新绘制）时直接从它上屏；
+    // 否则 MSAA 直 blit 默认帧缓冲（多重采样 resolve blit），跳过无人消费的中间 resolve——
+    // resolve 延迟到 read_pixels / 后续效果 pass 按需补做（msaa_dirty 保持脏标记）。
+    impl_->gl.bind_framebuffer(READ_FRAMEBUFFER, impl_->msaa_dirty ? impl_->msaa_fbo : impl_->resolve_fbo);
     impl_->gl.bind_framebuffer(DRAW_FRAMEBUFFER, 0);
     impl_->gl.blit_framebuffer(0, 0, w, h, 0, 0, w, h, COLOR_BUFFER_BIT, NEAREST);
     impl_->check_error("end_frame");
@@ -2006,10 +2064,29 @@ auto GpuGlRhi::stats() const -> FrameStats {
     return impl_ != nullptr ? impl_->stats : FrameStats{};
 }
 
+auto GpuGlRhi::set_glyph_page_size(int side) -> void {
+    if (impl_ != nullptr && side > 0) {
+        impl_->glyph_page_size_ = side;
+    }
+}
+
 auto GpuGlRhi::read_pixels(std::vector<std::uint8_t> &out) -> bool {
     if (impl_ == nullptr || impl_->failed || impl_->resolve_fbo == 0 || impl_->device_w <= 0
         || impl_->device_h <= 0) {
         return false;
+    }
+    // 懒 resolve：end_frame 走 MSAA 直 blit 时 resolve 纹理已过期，读回前按需补一次 blit。
+    // 调用窗口：end_frame 之后、下一次 begin_frame 之前（此后 MSAA 已被清屏为下一帧零基底）。
+    if (impl_->msaa_dirty) {
+        impl_->gl.bind_framebuffer(READ_FRAMEBUFFER, impl_->msaa_fbo);
+        impl_->gl.bind_framebuffer(DRAW_FRAMEBUFFER, impl_->resolve_fbo);
+        impl_->gl.blit_framebuffer(0, 0, impl_->device_w, impl_->device_h, 0, 0, impl_->device_w, impl_->device_h,
+                                   COLOR_BUFFER_BIT, NEAREST);
+        impl_->msaa_dirty = false;
+        impl_->check_error("read_pixels-resolve");
+        if (impl_->failed) {
+            return false;
+        }
     }
     out.resize(static_cast<std::size_t>(impl_->device_w) * static_cast<std::size_t>(impl_->device_h) * 4U);
     impl_->gl.bind_framebuffer(READ_FRAMEBUFFER, impl_->resolve_fbo);

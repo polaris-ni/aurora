@@ -18,7 +18,8 @@ class RhiBackend;  // 前置声明：命令消费面（backend() 返回其引用
 /// - GPU 路径恒全量重绘（GPU 帧每帧整帧重建，不做部分裁剪）：`begin_frame` 将帧缓冲
 ///   重置为**零基底**（透明黑）并复位裁剪/全局 alpha 状态，整帧内容完全由本次回放的
 ///   命令建立（与软件路径 `begin` 后零基底语义同源）。
-/// - `end_frame` 后画面处于可呈现状态（管线 flush + MSAA resolve + blit 到默认帧缓冲）。
+/// - `end_frame` 后画面处于可呈现状态（管线 flush + blit 到默认帧缓冲；resolve 等中间
+///   步骤由实现按需执行）。
 /// - `begin_frame` 返回 false 表示后端不可用（初始化失败 / 上下文丢失）；调用方本帧回退
 ///   软件路径，此后应视该后端为永久失效（实现方须保证 `valid()` 随之转 false）。
 ///

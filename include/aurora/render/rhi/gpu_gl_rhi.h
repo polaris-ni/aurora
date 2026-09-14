@@ -52,7 +52,6 @@ struct GLFn {
     void (*uniform2f)(GLint_ location, GLfloat_ v0, GLfloat_ v1) = nullptr;
     void (*uniform3f)(GLint_ location, GLfloat_ v0, GLfloat_ v1, GLfloat_ v2) = nullptr;
     void (*uniform4f)(GLint_ location, GLfloat_ v0, GLfloat_ v1, GLfloat_ v2, GLfloat_ v3) = nullptr;
-    void (*uniform4fv)(GLint_ location, GLsizei_ count, const GLfloat_ *value) = nullptr;
 
     // ---- 顶点数组与缓冲 ----
     void (*gen_vertex_arrays)(GLsizei_ n, GLuint_ *arrays) = nullptr;
@@ -127,17 +126,17 @@ auto load_gl(void *(*proc)(const char *name)) -> GLFn;
 /// @brief GPU 栅格后端：`DisplayList` 的 OpenGL 3.3 core 消费者（`RhiBackend` + `RhiFrameSink`）。
 ///
 /// 命令消费（`submit`）只做「命令 → 顶点/状态」翻译，**不触 GL**；GL 调用集中在
-/// `flush`（批提交）与 `end_frame`（resolve + 呈现）。批切分保序不重排：管线/裁剪态/
+/// `flush`（批提交）与 `end_frame`（上屏 blit）。批切分保序不重排：管线/裁剪态/
 /// 混合态变化即断批。全局 alpha（`SetAlpha`）烘焙进顶点色，不断批。
 ///
 /// 命令覆盖（全部为 GPU 实路径，无跳过降级）：几何组（FillRect/ClearRect/DrawRect/
 /// DrawLine/RoundedBorder）、状态组（PushClip/PushClipRounded/PopClip/SetAlpha）、渐变组
 ///（LinearGradient/RadialGradient，经 256×1 LUT 纹理采样，语义与软件 `sample_gradient`
-/// 对齐）、图像组（DrawImage，PMA 纹理 + 内容键缓存；Composite，仿射矩阵直烘四角顶点 +
-/// NEAREST 逐像素取样同软件）、文本（DrawText，字形图集 R8 纹理，光栅化复用软件
-/// `GlyphAtlas` 经字形发射桥同源发射）与效果组（Shadow 单批 SDF 距离衰减；BlurRegion
-/// 两遍分离 box blur 经 resolve/temp FBO ping-pong；BlendRegion/MaskRegion 单 pass 采样
-/// 回写——三者区域物理像素换算与软件三原语同形）。
+/// 对齐）、图像组（DrawImage，PMA 纹理 + `Image::content_hash()` 摘要缓存；Composite，
+/// 仿射矩阵直烘四角顶点 + NEAREST 逐像素取样同软件）、文本（DrawText，多页 R8 字形图集
+///——满页开新页、页数封顶 LRU 淘汰，光栅化复用软件 `GlyphAtlas` 经字形发射桥同源发射）
+/// 与效果组（Shadow 单批 SDF 距离衰减；BlurRegion 两遍分离 box blur 经 resolve/temp FBO
+/// ping-pong；BlendRegion/MaskRegion 单 pass 采样回写——三者区域物理像素换算与软件三原语同形）。
 /// 裁剪语义与软件路径对齐：矩形/圆角裁剪统一走 shader 内 SDF alpha（不 discard，
 /// 不用 scissor），栈顶即各层矩形交集（与 `Painter::push_clip` 交叠语义一致）。
 ///
@@ -185,8 +184,14 @@ class GpuGlRhi final : public RhiBackend, public RhiFrameSink {
     /// @brief 本帧（自 `begin_frame` 起）累计诊断计数。
     [[nodiscard]] auto stats() const -> FrameStats;
 
-    /// @brief MSAA resolve 后的帧内容读回（RGBA8，行序自底向上为 GL 帧缓冲原序）。
-    /// 仅供诊断/快照；返回 false 表示 resolve 帧缓冲不可用。
+    /// @brief 字形图集页边长（默认 1024；须在 `begin_frame` 前设置，非正值忽略）。
+    /// 常规消费者无须调用；测试用小页覆盖「满页开新页 / 页数封顶 LRU 淘汰」路径。
+    auto set_glyph_page_size(int side) -> void;
+
+    /// @brief 当前帧内容读回（RGBA8，行序自底向上为 GL 帧缓冲原序）。仅供诊断/快照。
+    /// resolve 延迟到本次调用按需补做（`end_frame` 无效果消费时直接 MSAA 上屏）；
+    /// 调用窗口：`end_frame` 之后、下一次 `begin_frame` 之前（此后 MSAA 已清屏）。
+    /// 返回 false 表示后端不可用或读回失败。
     [[nodiscard]] auto read_pixels(std::vector<std::uint8_t> &out) -> bool;
 
   private:

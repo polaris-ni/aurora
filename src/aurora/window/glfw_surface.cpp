@@ -252,8 +252,10 @@ struct GlfwSurface::Impl {
     // ---- GPU 栅格（DisplayList → OpenGL 3.3 core 批渲染；非空 = GPU 模式生效）----
     // 初始化失败（函数表缺项/着色器链接失败/上下文过老）即置空回退软件纹理路径。
     std::unique_ptr<rhi::GpuGlRhi> gpu;
-    /// DEBUG 抓帧缓存：present 时从 resolve 帧缓冲读回（save_snapshot/data() 复用）；Release 恒空。
-    std::vector<std::uint8_t> gpu_readback;
+    /// DEBUG 抓帧缓存：data() 首次访问时懒读回（present 置失效），未消费即零 GPU→CPU 停顿；
+    /// Release 恒空。mutable：data() 为 const 而读回时机由访问触发。
+    mutable std::vector<std::uint8_t> gpu_readback;
+    mutable bool gpu_readback_fresh = false;
 #endif
 
     WindowStateHandler window_state_handler;
@@ -285,8 +287,16 @@ struct GlfwSurface::Impl {
     [[nodiscard]] auto data() const -> const std::uint8_t * {
 #ifdef AURORA_BACKEND_GPU_GL
         if (gpu != nullptr) {
-            // GPU 模式：像素在显存，经 DEBUG 抓帧缓存读回（present 时刷新）；Release 恒空 → nullptr。
-            return gpu_readback.empty() ? nullptr : gpu_readback.data();
+            // GPU 模式：像素在显存，经 DEBUG 抓帧缓存读回；懒读回——本帧首次访问才执行
+            //（present 置失效），无消费者时零全屏 GPU→CPU 读回停顿。Release 恒空 → nullptr。
+#ifdef AURORA_ENABLE_DEBUG
+            if (!gpu_readback_fresh) {
+                gpu_readback_fresh = gpu->read_pixels(gpu_readback);
+            }
+            return gpu_readback_fresh && !gpu_readback.empty() ? gpu_readback.data() : nullptr;
+#else
+            return nullptr;
+#endif
         }
 #endif
         return painter_impl.data();
@@ -530,13 +540,22 @@ auto GlfwSurface::Impl::begin_frame(int /*width*/, int /*height*/) -> Result<boo
 
     // 每帧用浅色背景清空软件帧缓冲：默认文字为黑色，需要浅色底才能可见
     // （widget 默认 Color::black()；此前全屏纹理为透明黑导致黑底黑字不可见）。
+    // GPU 模式下本 fill 处于录制模式（present_root 先 record 后 begin_frame），
+    // 命令入帧 DL 承担窗口底色，软件像素缓冲仅为回退兜底。
     painter_impl.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
                            .size = Size{.width = static_cast<float>(c_w), .height = static_cast<float>(c_h)}},
                       Color{245, 245, 247, 255});
 
-    glViewport(0, 0, fb_w, fb_h);
-    glClearColor(0.961F, 0.961F, 0.969F, 1.0F);
-    glClear(GL_COLOR_BUFFER_BIT);
+    // 默认帧缓冲清屏仅软件路径需要（立即模式全屏 quad 不覆盖区外的边角）；
+    // GPU 路径 end_frame 整帧 blit 覆盖默认帧缓冲，清屏纯冗余。
+#ifdef AURORA_BACKEND_GPU_GL
+    if (gpu == nullptr)
+#endif
+    {
+        glViewport(0, 0, fb_w, fb_h);
+        glClearColor(0.961F, 0.961F, 0.969F, 1.0F);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
     return Result<bool>{true};
 }
 
@@ -544,10 +563,8 @@ auto GlfwSurface::Impl::present() -> Result<bool> {
 #ifdef AURORA_BACKEND_GPU_GL
     if (gpu != nullptr) {
         // GPU 路径：栅格已在 GpuGlRhi::end_frame 内完成（blit 至默认帧缓冲），跳过 CPU 上传直接 swap。
-        // DEBUG 下刷新抓帧缓存（resolve FBO 读回），save_snapshot/data() 复用；Release 零开销。
-#ifdef AURORA_ENABLE_DEBUG
-        (void)gpu->read_pixels(gpu_readback);
-#endif
+        // 抓帧缓存置失效：data() 下次访问时懒读回（未访问即零 GPU→CPU 读回成本）。
+        gpu_readback_fresh = false;
         glfwSwapBuffers(window);
         ++frame;
         return Result<bool>{true};

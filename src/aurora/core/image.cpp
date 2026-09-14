@@ -117,4 +117,19 @@ auto Image::load_svg(std::string_view path, int target_w, int target_h) -> Resul
     return detail::load_image_svg(buf, target_w, target_h);
 }
 
+auto Image::content_hash() const -> std::uint64_t {
+    if (!content_hash_valid_) {
+        // FNV-1a 64 位：逐字节折叠像素缓冲。单线程 UI 模型下无并发求值；
+        // const 访问经 mutable 缓存落回本对象（拷贝携带缓存，见头文件契约）。
+        std::uint64_t h = 14695981039346656037ULL;
+        for (const std::uint8_t byte : pixels) {
+            h ^= byte;
+            h *= 1099511628211ULL;
+        }
+        content_hash_ = h;
+        content_hash_valid_ = true;
+    }
+    return content_hash_;
+}
+
 }  // namespace aurora
