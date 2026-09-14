@@ -23,6 +23,7 @@
 #include "aurora/render/bitmap_font.h"
 #include "aurora/render/font_discovery.h"
 #include "aurora/render/glyph_atlas.h"
+#include "aurora/render/glyph_emit.h"
 
 namespace aurora::render {
 
@@ -621,16 +622,19 @@ auto draw_text_bitmap_fallback(Painter &p, const Rect &r, const std::string &tex
     }
 }
 
-// ---------- 真·FreeType 绘制 ----------
-auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Font &f, Color c, TextAAMode aa,
-                    const TextLayoutOpts &opts) -> void {
+// ---------- 字形发射核心（软件 blit 与 GPU 图集上传共用） ----------
+// 与 draw_text 历史语义逐位一致：faces 解析 → px（lround(px_measure·scale)）→ 行切分 →
+// 逐行 shape_line → 逐字形确保软件图集条目（未命中即 FT 光栅化插入）→ 回调 sink。
+// 返回 false 表示无可用字体面（调用方自行兜底，如软件路径回退 BitmapFont）。
+template <typename Sink>
+auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLayoutOpts &opts, float scale,
+                           TextAAMode aa, Color c, float origin_x, float origin_y, Sink &&sink) -> bool {
     const auto &faces = resolve_faces(f.family);
     if (faces.empty()) {
-        draw_text_bitmap_fallback(p, r, text, f, c, opts);
-        return;
+        return false;
     }
     // 与度量（px_measure）保持一致的逻辑像素尺寸，再按设备缩放；保证绘制字形尺寸 == 布局度量尺寸。
-    const int px = std::max(1, static_cast<int>(std::lround(static_cast<float>(px_measure(f)) * p.scale())));
+    const int px = std::max(1, static_cast<int>(std::lround(static_cast<float>(px_measure(f)) * scale)));
     const GlyphAtlas::Mode mode =
         (aa == TextAAMode::ClearType && c.a == 255) ? GlyphAtlas::Mode::Lcd : GlyphAtlas::Mode::Gray;
     const float line_h = line_height_px(faces, px);
@@ -638,15 +642,15 @@ auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Fo
     // 与度量/绘制逐位同源：整段按行切分，逐行调用 shape_line（hb_shape）得到字形序列，
     // 再按 shaped run 推进 pen 并合成为像素——度量（measure/caret）与命中测试复用同一逻辑。
     const auto lines = split_lines(text);
-    // r.origin.y 为行盒顶（历史 GDI TA_TOP 语义），FreeType 以基线定位字形：
+    // origin_y 为行盒顶（历史 GDI TA_TOP 语义），FreeType 以基线定位字形：
     // 首行基线 = 顶 + ascender，否则整体上移一个 ascent（顶部控件文字被裁出窗外）。
     // 将行首 snap 到整数物理像素：hinted 字形 advance 为整像素，从整数坐标开始绘制
     // 可避免高 DPI/非整数列宽造成的半像素模糊（如 125% DPI 下 GridView 列宽为半整数
     // 时，1、3 列清晰而 2、4 列发虚）。
-    float pen_y = std::floor(r.origin.y + ascender_px(faces, px) + 0.5F);
+    float pen_y = std::floor(origin_y + ascender_px(faces, px) + 0.5F);
     for (const auto &line_str : lines) {
         const auto sl = shape_line(line_str, faces, px, opts);
-        float pen_x = std::floor(r.origin.x + 0.5F);  // 每行 pen 推进归零并 snap 到整数像素
+        float pen_x = std::floor(origin_x + 0.5F);  // 每行 pen 推进归零并 snap 到整数像素
         for (std::size_t j = 0; j < sl.glyphs.size(); ++j) {
             const auto &sg = sl.glyphs.at(j);
             // 双向格式控制符（LRE/RLE/PDF/LRO/RLO/LRI/RLI/FSI/PDI 与 LRM/RLM）为零宽不可见
@@ -703,19 +707,44 @@ auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Fo
             // hb placement 偏移（x_off/y_off）已实现连字/复杂脚本的字形微位移。
             const int dx0 = static_cast<int>(std::floor(pen_x + sg.x_off)) + e->left;
             const int dy0 = static_cast<int>(std::floor(pen_y + sg.y_off)) - e->top;
+            sink(*e, mode, dx0, dy0, key);
+
+            // 推进：hb 的 x_adv 已在物理 px 空间（已含 hinting/kerning/OT 特性），
+            // 叠加 letter/word_spacing（dp 间距须乘 scale 换算到物理像素），与 metric 同源。
+            // letter_spacing 仅加在相邻字形之间（整串共 (n-1) 次），末字形后不加，与 line_prefix 一致。
+            pen_x += sg.x_adv;
+            if (sg.cp == ' ' && opts.word_spacing != 0.0F) {
+                pen_x += opts.word_spacing * scale;
+            }
+            if (j + 1 < sl.glyphs.size()) {
+                pen_x += opts.letter_spacing * scale;
+            }
+        }
+        pen_y += line_h;
+        pen_y = std::floor(pen_y + 0.5F);  // 下一行同样 snap 到整数像素
+    }
+    return true;
+}
+
+// ---------- 真·FreeType 绘制 ----------
+auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Font &f, Color c, TextAAMode aa,
+                    const TextLayoutOpts &opts) -> void {
+    const bool emitted = emit_text_glyphs_core(
+        text, f, opts, p.scale(), aa, c, r.origin.x, r.origin.y,
+        [&p, &c](const GlyphAtlas::Entry &e, GlyphAtlas::Mode mode, int dx0, int dy0, std::uint64_t /*key*/) {
             if (mode == GlyphAtlas::Mode::Gray) {
-                const std::span<const std::uint8_t> buf(e->buf);
-                for (int y = 0; y < e->rows; ++y) {
+                const std::span<const std::uint8_t> buf(e.buf);
+                for (int y = 0; y < e.rows; ++y) {
                     const int py = dy0 + y;
-                    const std::size_t off = static_cast<std::size_t>(y) * static_cast<std::size_t>(e->width);
+                    const std::size_t off = static_cast<std::size_t>(y) * static_cast<std::size_t>(e.width);
                     // 批处理整行：裁剪只判一次，内联 gamma 混合，消除逐像素开销。
-                    p.blend_subpixel_span(dx0, py, c, buf.subspan(off, static_cast<std::size_t>(e->width)).data(),
-                                          e->width, false, static_cast<float>(c.a) / 255.0F);
+                    p.blend_subpixel_span(dx0, py, c, buf.subspan(off, static_cast<std::size_t>(e.width)).data(),
+                                          e.width, false, static_cast<float>(c.a) / 255.0F);
                 }
             } else {
-                const int cols = e->width;
-                const std::span<const std::uint8_t> buf(e->buf);
-                for (int y = 0; y < e->rows; ++y) {
+                const int cols = e.width;
+                const std::span<const std::uint8_t> buf(e.buf);
+                for (int y = 0; y < e.rows; ++y) {
                     const int py = dy0 + y;
                     const std::size_t off = static_cast<std::size_t>(y) * static_cast<std::size_t>(cols) * 3U;
                     // 批处理整行（LCD 三通道）：裁剪只判一次，内联 gamma 混合。
@@ -723,26 +752,25 @@ auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Fo
                                           cols, true);
                 }
             }
-
-            // 推进：hb 的 x_adv 已在物理 px 空间（已含 hinting/kerning/OT 特性），
-            // 叠加 letter/word_spacing（dp 间距须乘 scale 换算到物理像素），与 metric 同源。
-            // letter_spacing 仅加在相邻字形之间（整串共 (n-1) 次），末字形后不加，与 line_prefix 一致。
-            pen_x += sg.x_adv;
-            if (sg.cp == ' ' && opts.word_spacing != 0.0F) {
-                pen_x += opts.word_spacing * p.scale();
-            }
-            if (j + 1 < sl.glyphs.size()) {
-                pen_x += opts.letter_spacing * p.scale();
-            }
-        }
-        pen_y += line_h;
-        pen_y = std::floor(pen_y + 0.5F);  // 下一行同样 snap 到整数像素
+        });
+    if (!emitted) {
+        draw_text_bitmap_fallback(p, r, text, f, c, opts);
     }
 }
 
 }  // namespace
 
 // ============================ 公共 API ============================
+
+// ---- 字形发射桥（glyph_emit.h；软件 blit 与 GPU 图集上传共用的对外出口） ----
+auto emit_text_glyphs(const std::string &text, const Font &f, const TextLayoutOpts &opts, float scale,
+                      TextAAMode aa, Color c, float origin_x, float origin_y, const GlyphEmitSink &sink) -> bool {
+    return emit_text_glyphs_core(
+        text, f, opts, scale, aa, c, origin_x, origin_y,
+        [&sink](const GlyphAtlas::Entry &e, GlyphAtlas::Mode mode, int dx0, int dy0, std::uint64_t key) {
+            sink(e, mode, dx0, dy0, key);
+        });
+}
 
 auto FontEngine::instance() -> FontEngine & {
     static FontEngine s;

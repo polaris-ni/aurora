@@ -38,6 +38,14 @@ namespace aurora {
  */
 class GlfwSurface : public Surface {
   public:
+    /// @brief 渲染模式：软件栅格 + 全屏纹理上传（默认，全平台可用）或 GPU 栅格。
+    enum class RenderMode : std::uint8_t {
+        SoftwareTexture,  ///< 软件栅格，每帧 CPU 像素上传为 GL 纹理呈现（历史路径）
+        HardwareGL,  ///< GPU 栅格：帧级 `DisplayList` 经 `GpuGlRhi` 批量渲染进 MSAA 帧缓冲，
+                     ///< 消除每帧全屏上传带宽（需 `AURORA_BACKEND_GPU_GL` 编译进库；初始化
+                     ///< 失败或窗口创建失败自动回退软件模式，诊断日志说明原因）
+    };
+
     /// @brief 后端配置。逻辑尺寸为 aurora 坐标系下的像素（不含 DPI 缩放）。
     struct Config {
         Size size{.width = 800.0F, .height = 600.0F};  ///< 逻辑尺寸（= GLFW 内容尺寸）
@@ -45,6 +53,7 @@ class GlfwSurface : public Surface {
         int gl_major = 3;
         int gl_minor = 3;
         bool resizable = true;
+        RenderMode render_mode = RenderMode::SoftwareTexture;  ///< 渲染模式（默认软件上传）。
     };
 
     explicit GlfwSurface(const Config &cfg);
@@ -92,6 +101,9 @@ class GlfwSurface : public Surface {
 
     [[nodiscard]] auto data() const -> const std::uint8_t * override;
     [[nodiscard]] auto frame_count() const -> int override;
+    /// @brief GPU 帧调度挂点：GPU 模式生效时返回 `GpuGlRhi`，否则 nullptr（软件路径/回退后）。
+    /// 未编译 `AURORA_BACKEND_GPU_GL` 时恒为 nullptr。
+    [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink * override;
     /// @brief 真实窗口截图（含非客户区）：Windows 下经 GLFW 原生 HWND 复用 PrintWindow 路径；
     /// 其它平台/未开 DEBUG 回落 unsupported。
     [[nodiscard]] auto capture_window(const std::string &path) -> Result<bool> override;

@@ -82,6 +82,21 @@ if (AURORA_BACKEND_GLFW)
     aurora_log("GLFW backend enabled (source build under third_party/glfw)")
 endif ()
 
+# ---- GPU GL（DisplayList 的 OpenGL 3.3 core GPU 栅格后端；默认 OFF） ----
+# 依赖 AURORA_BACKEND_GLFW：GL 上下文创建 / swapBuffers 呈现均由 GlfwSurface 承担，本后端
+# 只实现「DisplayList → GL 批渲染」（自写最小函数表 loader，无 GLAD/gl3w 三方依赖）。
+# 开启后 `GlfwSurface::Config` 提供 GPU 渲染模式；初始化失败（驱动过老/无 GL）运行期
+# 自动回退软件纹理上传路径，不抛异常。
+option(AURORA_BACKEND_GPU_GL "Build GPU OpenGL 3.3 core DisplayList raster backend (requires AURORA_BACKEND_GLFW)" OFF)
+if (AURORA_BACKEND_GPU_GL)
+    if (NOT AURORA_BACKEND_GLFW)
+        aurora_error("AURORA_BACKEND_GPU_GL requires AURORA_BACKEND_GLFW=ON"
+                " (GL context creation and present are owned by the GLFW backend).")
+    endif ()
+    aurora_define_feature(AURORA_BACKEND_GPU_GL EXPORT)
+    aurora_log("GPU GL backend enabled (OpenGL 3.3 core DisplayList raster)")
+endif ()
+
 # ---- X11 / Wayland / macOS / WASM ----
 # X11/Wayland 用于 Linux 桌面、macOS 用于 Apple、WASM 用于 Emscripten 工具链；
 # 默认构建（含本机 Windows/MinGW）不受影响，仍仅 Headless 必开。

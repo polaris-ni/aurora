@@ -20,6 +20,10 @@
 
 namespace aurora {
 
+namespace rhi {
+class RhiFrameSink;  // 前置声明：GPU 帧调度挂点（完整定义见 render/rhi/rhi_frame_sink.h）
+}
+
 /// @brief 窗口高级样式选项：跨后端声明，由各 Surface 按能力映射。
 /// Headless 忽略（无 OS 窗口）；Win32 映射到 WS_EX_TOPMOST / WS_POPUP / 去 WS_THICKFRAME /
 /// WM_GETMINMAXINFO；GLFW 映射到对应 window hint（后续接入）。
@@ -247,6 +251,12 @@ class Surface {
     /// 用于跨模块窗口操作（如多显示器窗口迁移）。默认空实现，由具体后端覆盖。
     /// 为只读查询，声明为 const（不修改 Surface 状态）。
     [[nodiscard]] virtual auto native_handle() const -> void * { return nullptr; }
+
+    /// @brief GPU 帧调度挂点：后端提供 GPU 栅格（`rhi::RhiFrameSink`）时返回其指针，默认 nullptr。
+    /// `Window::present_root` 据此选择「帧级 DisplayList 录制 → GPU 回放」或软件栅格路径；
+    /// 两路径不做逐命令混合（同帧软硬混渲引入合成次序歧义）。返回非空后若首帧
+    /// `begin_frame` 失败，Window 即永久回退软件路径（该 Surface 生命周期内不再尝试 GPU）。
+    [[nodiscard]] virtual auto gpu_backend() -> rhi::RhiFrameSink * { return nullptr; }
 
   protected:
     /// @brief 上报当前窗口可见性状态（由真实后端在状态变化时调用）。

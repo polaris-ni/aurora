@@ -9,8 +9,13 @@
 # 因此所有 ccache 配置统一经编译器启动器注入：
 #     CMAKE_{C,CXX}_COMPILER_LAUNCHER = cmake -E env CCACHE_*=... ccache
 # 「cmake -E env」在每个编译边构建期展开，环境精确作用于本项目的 ccache 调用，
-# 不污染用户全局环境，也不依赖构建 shell 是否导出过变量；对 Ninja / Make /
-# Visual Studio 各生成器与 GCC/Clang/MSVC 各编译器一律适用。
+# 不污染用户全局环境，也不依赖构建 shell 是否导出过变量；对 Ninja / Make 各生成器
+# 与 GCC/Clang 各编译器适用。
+#
+# ⚠️ MSVC（cl）不接入：ccache 对 MSVC 的 PCH 旗标组合（/Yu + /FI + /Fp）支持不完整，
+# 会把强制包含改写后丢失 PCH 边界匹配 → C1010（查找预编译头时遇到意外的文件结尾）。
+# 且 VS 多配置生成器本就不实现 <LANG>_COMPILER_LAUNCHER（Ninja + cl 同样命中此坑），
+# 故编译器为 MSVC 时整体跳过注入，靠 PCH 提速（PCH 在 MSVC 为正收益，见 BUILD_OPTIONS）。
 # ============================================================
 
 option(AURORA_ENABLE_CCACHE "Use ccache for compilation caching" ON)
@@ -38,8 +43,14 @@ if (AURORA_ENABLE_CCACHE)
                 OUTPUT_QUIET ERROR_QUIET)
         if (NOT _aurora_ccache_ver_result EQUAL 0)
             aurora_log("ccache: found but --version failed, caching disabled")
-            unset(CCACHE_PROGRAM)
+            unset(CCACHE_PROGRAM CACHE)  # find_program 落在 cache；unset(普通变量) 后 if() 仍会回退读 cache
         endif ()
+    endif ()
+
+    if (CCACHE_PROGRAM AND CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+        aurora_log("ccache: MSVC (cl) compiler detected, caching disabled"
+                " (ccache does not support MSVC /Yu+/FI PCH flags; PCH is kept as the accelerator)")
+        unset(CCACHE_PROGRAM CACHE)  # 同上：必须清 cache 条目才能真正禁用
     endif ()
 
     if (CCACHE_PROGRAM)

@@ -233,6 +233,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 - **`Painter`**：纯软件栅格（RGBA8 帧缓冲），不依赖 GPU；接口为纯函数式（给定节点 + 约束 → 确定像素），支持确定性快照比对。
 - **圆角抗锯齿裁剪**：`Painter` 用 SDF coverage + 1px 羽化。
 - **矢量描边原语**：`draw_line(a, b, width, color)`（点到线段距离 SDF，圆帽 + 1px 羽化）、`fill_rounded_rect(r, radius, color)`、`draw_rounded_border(r, radius, thickness, color)`（圆角矩形 SDF 带状覆盖、向内描边）；三者均接入 Display List 录制回放，回放与直绘逐位一致。
+- **GPU 栅格后端（`GpuGlRhi`）**：`DisplayList` 的第二类消费者（与软件 `Painter` 平级，见 §2 命令流与执行分离）。语义与软件路径**同源**——渐变经 1D LUT 纹理复现软件采样；图像预乘 alpha（PMA）上传、`ONE/ONE_MINUS_SRC_ALPHA` 混合规避半透明缩放暗晕；文本复用软件 `GlyphAtlas` 光栅化（经字形发射桥 `emit_text_glyphs`，shaping / 度量 / 缓存单一代码路径）；Shadow/Blur/Blend/Mask 按软件逐像素公式以 SDF / ping-pong pass 等价实现。GL 函数表自写最小 loader（无 GLAD/gl3w），GL 上下文创建与呈现由所在 Surface（GLFW）承担，本后端只做「DisplayList → 批渲染」。
 
 ### 8.2 高 DPI
 
@@ -259,7 +260,8 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 | `HeadlessSurface` | 内存帧缓冲，可同步导出 PNG | `AURORA_BACKEND_HEADLESS`（默认 ON） |
 | `Win32Surface` | 常驻 BGRA DIB section + `BitBlt`（RGBA→BGRA CPU swizzle），支持 `set_present_dirty` 增量上屏 | `AURORA_BACKEND_WIN32`（Windows 默认 ON） |
 | `D3D11Surface` | 复用 `Win32Window` 宿主，把 `Painter` RGBA8 帧缓冲作为动态纹理，脏矩形经 `UpdateSubresource` 增量上传，全屏三角形 + 像素着色器线性采样呈现（`Present(1,0)`） | `AURORA_BACKEND_D3D11`（默认 OFF） |
-| `GlfwSurface` | OpenGL 3.3 兼容剖面（绘制采用 1.1 立即模式），pimpl 隔离 | `AURORA_BACKEND_GLFW` |
+| `GlfwSurface` | OpenGL 3.3 兼容剖面（绘制采用 1.1 立即模式），pimpl 隔离；开 `AURORA_BACKEND_GPU_GL` 后可请求 GPU 渲染模式（`GlfwOptions::gpu`），上下文与 swapBuffers 仍由本后端承担 | `AURORA_BACKEND_GLFW` |
+| `GpuGlRhi`（`Surface::gpu_backend()`） | DisplayList 的 OpenGL 3.3 core 批渲染：整帧回放 → Solid/Border/Grad/Image/Text/Shadow 管线合批（纹理 / 状态变化断批）；MSAA 渲染缓冲 + resolve 呈现；区域效果（Blur/Blend/Mask）经 resolve 纹理 ping-pong 回写；初始化失败运行期回退软件路径 | `AURORA_BACKEND_GPU_GL`（依赖 GLFW） |
 | `X11Surface` | 按 Visual 掩码 CPU swizzle 后 `XPutImage`，支持增量上屏；`wait_events` 经 `poll(2)`；`scale_factor` 解析 `Xft.dpi` | `AURORA_BACKEND_X11`（默认 OFF） |
 | `WaylandSurface` | CPU swizzle 到 `WL_SHM_FORMAT_XRGB8888` 经 `wl_shm` 共享内存双缓冲槽；`wait_events` 经 `poll(2)`；`scale_factor` 取 `wl_output.scale` | `AURORA_BACKEND_WAYLAND`（默认 OFF） |
 | `WasmSurface` | `<canvas>` 像素写回（`EM_ASM` `putImageData`） | `AURORA_BACKEND_WASM`（默认 OFF） |

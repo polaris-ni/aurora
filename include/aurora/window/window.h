@@ -9,6 +9,7 @@
 
 #include "aurora/app/perf_overlay.h"
 #include "aurora/core/aurora_assert.h"
+#include "aurora/core/log.h"
 #include "aurora/core/result.h"
 #include "aurora/core/strict_mode.h"
 #include "aurora/core/thread.h"
@@ -19,8 +20,10 @@
 #include "aurora/environment/media_query.h"
 #include "aurora/perf/profiler.h"
 #include "aurora/render/detail/paint_timing.h"
+#include "aurora/render/display_list.h"
 #include "aurora/render/dirty_region.h"
 #include "aurora/render/painter.h"
+#include "aurora/render/rhi/rhi_frame_sink.h"
 #include "aurora/widget/widget.h"
 #include "aurora/window/surface.h"
 #include "aurora/window/window_chrome.h"
@@ -125,6 +128,9 @@ struct GlfwOptions : WindowOptions {
     int gl_major = 3;  ///< OpenGL 主版本。
     int gl_minor = 3;  ///< OpenGL 次版本。
     bool resizable = true;  ///< 窗口是否可缩放。
+    bool gpu = false;  ///< GPU 栅格模式：帧级 DisplayList 经 OpenGL 3.3 core 批渲染，消除每帧
+                       ///< 全屏像素上传（需 `AURORA_BACKEND_GPU_GL` 编译进库；窗口创建或后端
+                       ///< 初始化失败自动回退软件纹理路径，诊断日志说明原因）。
 };
 #endif
 
@@ -365,16 +371,32 @@ class Window {
             }
         }
 
+        Painter &p = surface_->painter();
+        // GPU 帧路径：Surface 提供 RhiFrameSink 时整帧录制为 DisplayList，随后批量回放栅格。
+        // 软件路径逐行不动；两路径不做逐命令混合（同帧软硬混渲引入合成次序歧义）。
+        rhi::RhiFrameSink *gpu_sink = gpu_fallback_ ? nullptr : surface_->gpu_backend();
+        DisplayList frame_dl;
+        if (gpu_sink != nullptr) {
+            // GPU 恒全量重绘：partial clip 依赖「上帧软件像素保留」，GPU 每帧整帧重建，禁用之。
+            plan.clip_logical = Rect{};
+            p.record(frame_dl);
+        }
         auto bf = begin_frame_for_plan(plan);
         if (!bf) {
+            if (gpu_sink != nullptr) {
+                p.stop();
+            }
             return bf;
         }
 
-        Painter &p = surface_->painter();
         BuildContext ctx = prepare_context(root, root_changed);
         const double layout_ms = run_layout(root, plan, ctx);
         const double paint_ms = run_paint(p, root, ctx, plan);
         const bool hud_refreshed = compose_hud_maybe(p, ctx);
+        if (gpu_sink != nullptr) {
+            p.stop();  // HUD 合成命令亦入帧级 DL，录制到此收口
+            return present_gpu_frame(*gpu_sink, frame_dl, plan, hud_refreshed, layout_ms, paint_ms);
+        }
         return finish_present(plan, hud_refreshed, layout_ms, paint_ms);
     }
 
@@ -540,6 +562,7 @@ class Window {
     bool present_wired_ = false;  ///< present-request 回调是否已接线到 Surface。
     bool presenting_ = false;  ///< present_root 重入护栏（同步重渲染回调用）。
     bool system_redraw_ = false;  ///< 本次 present_root 由系统重绘请求驱动（WM_PAINT 等）：跳帧时仍须重新上屏。
+    bool gpu_fallback_ = false;  ///< GPU 后端首帧失败后的永久软件路径标记（本 Window 生命周期内不再尝试 GPU）。
     bool idle_frame_ = false;  ///< 最近一次 present_root 是否为 idle 跳过（无脏区、未渲染）。
     double next_wait_ms_ = 0.0;  ///< 本帧末尾的等待请求（一次性消费，0=不等）。
 
@@ -850,6 +873,24 @@ class Window {
         // 记录阶段计时
         FrameStats::instance().record_phases(layout_ms, paint_ms, present_ms);
         return result;
+    }
+
+    /// @brief GPU 帧上屏：帧级 DL 回放至 RhiFrameSink 并驱动帧生命周期（begin → replay → end），
+    /// 随后走与软件路径相同的 finish_present（GLFW GPU 模式下 present 即 swapBuffers）。
+    /// `begin_frame` 失败（初始化失败/上下文丢失）：本帧已录命令回退软件栅格化（底色 FillRect
+    /// 已在 DL 内，replay 即完整帧），此后本 Window 生命周期永久走软件路径，不做逐帧软硬混合。
+    [[nodiscard]] auto present_gpu_frame(rhi::RhiFrameSink &sink, DisplayList &frame_dl, const FramePlan &plan,
+                                         bool hud_refreshed, double layout_ms, double paint_ms) -> Result<bool> {
+        const Size sz = size();
+        if (!sink.begin_frame(static_cast<int>(sz.width), static_cast<int>(sz.height), surface_->scale_factor())) {
+            gpu_fallback_ = true;
+            AURORA_LOG_INFO("gpu-gl", "GPU backend begin_frame failed; permanently falling back to software raster");
+            frame_dl.replay(surface_->painter());
+            return finish_present(plan, hud_refreshed, layout_ms, paint_ms);
+        }
+        frame_dl.replay(sink.backend());
+        sink.end_frame();
+        return finish_present(plan, hud_refreshed, layout_ms, paint_ms);
     }
 };
 

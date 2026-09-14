@@ -332,6 +332,27 @@ opts.renderer = au::RendererPreference::GpuD3D11;  // 不可用时 create_window
 - 持续重绘场景（如自定义每帧动画）可 `opts.power_saving = false` 或 `app.window()->enable_dirty_tracking(false)` 退回不限速重绘。
 - `RendererPreference` 仅影响「像素如何上屏」；所有绘制仍由软件 `Painter` 完成，widget 层不感知后端。
 
+### 13.1 GPU 栅格（GLFW 窗口，整条管线 GPU 化）
+
+上一节的 D3D11 偏置只加速「上屏」，绘制仍走软件 `Painter`。若要**栅格管线本身**走 GPU（帧级 DisplayList 经 OpenGL 3.3 core 批渲染进 MSAA 帧缓冲，跳过每帧全屏像素上传），用 GLFW 窗口的 GPU 模式（需 CMake `-DAURORA_BACKEND_GLFW=ON -DAURORA_BACKEND_GPU_GL=ON`）：
+
+```cpp
+au::GlfwOptions opts;
+opts.size = au::Size{.width = 560.0F, .height = 380.0F};
+opts.title = "GPU raster";
+opts.gpu = true;  // GPU 栅格模式；初始化失败（驱动过老 / 无 GL）自动回退软件纹理路径
+
+auto win_res = au::create_window(opts);
+if (win_res) {
+    auto win = std::move(win_res.value());
+    // win->surface().gpu_backend() 非空即 GPU 路径生效（name() 恒 "gpu-gl"）；
+    // nullptr 表示未编译 GPU_GL 或已回退软件纹理路径。
+}
+```
+
+- widget 层与绘制代码**完全无感知**——同一棵控件树无需任何改动即可在 GPU / 软件路径间切换；GPU 实现与软件路径逐公式对齐（渐变 LUT / PMA 图像 / 字形图集共用软件光栅化 / 效果 pass）。
+- 完整契约（管线模型、语义同源承诺、初始化失败链）见 `specification/03-layout-render.md` §8.7；可运行示例见 `examples/demos/demo_gpu.cpp`。
+
 ---
 
 ## 14 渲染性能测量（确定性基准）

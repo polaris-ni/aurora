@@ -25,7 +25,7 @@
 - **强类型几何**：`Length` / `Color` / `Size` / `Point` 为强类型；禁止 `Length(int)` 隐式转换（裸整数编译失败）。已采纳用户字面量 `au::literals`（`100_dp`、`16_ms`、`0xRRGGBB_rgb`），`px(100)` 与 `100_dp` 互补；**禁止头文件全局 `using`**，字面量只在 TU 内按需引入（示例代码用 `using namespace au::literals;`，测试代码按 §3.1 用 using 声明 / 命名空间别名引入，不得用 using-directive）。
 - **所有权清晰**：资源所有权用 `unique_ptr` / `shared_ptr` 明确；跨边界传递用 `std::move`；`Binding<T>` 为非拥有引用（上游生命周期须更长）。
 - **成员变量命名**：`struct` 成员与类 `public` 成员用**裸名**（无前缀、无后缀，如 `Color::r`、`DragData::mime_type`）；类的 `protected` / `private` 非静态成员统一**尾部下划线**后缀（如 `children_`、`value_`、`on_close_`）；**全仓禁止 `m_` 前缀**。`static` 常量按本条「常量命名」走 `UPPER_CASE`（如 `NO_SEL`）；`static` 可变成员、`static` `protected`/`private` 成员规则与普通成员一致（尾部下划线）。
-- **常量命名**：命名空间 / 文件级与类内 `static constexpr` 常量统一 `AURORA_` 前缀 + `UPPER_CASE` 全大写下划线（如 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`）；禁止 `k` 前缀 CamelCase。
+- **常量命名**：命名空间 / 文件级与类内 `static constexpr` 常量统一 `AURORA_` 前缀 + `UPPER_CASE` 全大写下划线（如 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`）；禁止 `k` 前缀 CamelCase。**豁免**：镜像外部标准 API 枚举值的常量按官方名原样保留（`AURORA_` 前缀会破坏与外部文档 / 官方头的逐名对照），前提是收敛在专属命名空间内隔离作用域——现有两例：`colors` 命名空间的色板常量（`core/color.h`）与 `rhi::gl` 命名空间的 GL 枚举镜像（`src/aurora/render/gpu/gl_core.h`，如 `TEXTURE_2D` / `RGBA8`，值逐一取自 GL 官方规范）。`FALSE_` / `TRUE_` 的尾部下划线为规避平台宏碰撞的例外，不作为成员命名惯例。
 - **生命周期回调强类型**：`au::Lifecycle` 的 `on_mount` / `on_unmount`、窗口级 `WindowState` / `WindowMode` 的 `set_on_*` 回调均为具名 `std::function` 强类型（`MountCb = std::function<void(const BuildContext&)>`、`UnmountCb = std::function<void()>`，`WindowStateHandler` / `WindowModeHandler` 同理）；枚举取值穷尽且按「可见性 / 几何态」正交划分（`WindowState` 不并入 `Maximized`），AI 无需猜测「是否还有隐藏状态」。回调均可空（无副作用时不传），且不走异常捕获（与主线程事件回调一致）。
 
 ---

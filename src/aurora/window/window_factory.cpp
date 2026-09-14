@@ -131,6 +131,8 @@ auto create_window(const GlfwOptions &opts) -> Result<std::unique_ptr<Window>> {
     cfg.gl_major = opts.gl_major;
     cfg.gl_minor = opts.gl_minor;
     cfg.resizable = opts.resizable;
+    cfg.render_mode = opts.gpu ? GlfwSurface::RenderMode::HardwareGL
+                               : GlfwSurface::RenderMode::SoftwareTexture;
     // 无显示环境 / GL 上下文不可用（无头 CI、Basic Render 仅 GL 1.1 等）：构造抛
     // std::runtime_error，转为 PlatformUnavailable 错误，对齐 X11/Wayland 工厂的 Result 契约，
     // 异常不跨公共 API 边界。

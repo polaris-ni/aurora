@@ -28,11 +28,16 @@
 #include <cstddef>
 
 #include "aurora/core/utf8.h"
+#include "aurora/core/log.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/window/cursor_map.h"
 #include "aurora/window/win32_capture.h"
 #include "aurora/window/window_state.h"
+
+#ifdef AURORA_BACKEND_GPU_GL
+#include "aurora/render/rhi/gpu_gl_rhi.h"
+#endif
 
 namespace aurora {
 
@@ -243,6 +248,14 @@ struct GlfwSurface::Impl {
     int tex_w = 0;
     int tex_h = 0;
 
+#ifdef AURORA_BACKEND_GPU_GL
+    // ---- GPU 栅格（DisplayList → OpenGL 3.3 core 批渲染；非空 = GPU 模式生效）----
+    // 初始化失败（函数表缺项/着色器链接失败/上下文过老）即置空回退软件纹理路径。
+    std::unique_ptr<rhi::GpuGlRhi> gpu;
+    /// DEBUG 抓帧缓存：present 时从 resolve 帧缓冲读回（save_snapshot/data() 复用）；Release 恒空。
+    std::vector<std::uint8_t> gpu_readback;
+#endif
+
     WindowStateHandler window_state_handler;
     WindowModeHandler window_mode_handler;
 
@@ -269,8 +282,23 @@ struct GlfwSurface::Impl {
     static auto poll_platform_events() -> void { glfwPollEvents(); }
     auto wait_events(double timeout_ms) const -> void;
     static auto request_wake() -> void { glfwPostEmptyEvent(); }
-    [[nodiscard]] auto data() const -> const std::uint8_t * { return painter_impl.data(); }
+    [[nodiscard]] auto data() const -> const std::uint8_t * {
+#ifdef AURORA_BACKEND_GPU_GL
+        if (gpu != nullptr) {
+            // GPU 模式：像素在显存，经 DEBUG 抓帧缓存读回（present 时刷新）；Release 恒空 → nullptr。
+            return gpu_readback.empty() ? nullptr : gpu_readback.data();
+        }
+#endif
+        return painter_impl.data();
+    }
     [[nodiscard]] auto frame_count() const -> int { return frame; }
+    [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink * {
+#ifdef AURORA_BACKEND_GPU_GL
+        return gpu.get();
+#else
+        return nullptr;
+#endif
+    }
 
     auto ensure_gl_objects() -> void;
     auto upload_and_draw() -> void;
@@ -318,19 +346,50 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
     if (glfwInit() == 0) {
         throw std::runtime_error("GlfwSurface: glfwInit failed");
     }
+    bool want_gpu = false;
+#ifdef AURORA_BACKEND_GPU_GL
+    want_gpu = cfg.render_mode == RenderMode::HardwareGL;
+#else
+    if (cfg.render_mode == RenderMode::HardwareGL) {
+        AURORA_LOG_WARN("gpu-gl", "HardwareGL render mode requested but built without"
+                                  " AURORA_BACKEND_GPU_GL; using software texture path");
+    }
+#endif
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, cfg.gl_major);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, cfg.gl_minor);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
+    // GPU 模式请求 core profile（GLSL 管线需要；软件模式维持兼容剖面走 1.1 立即模式）。
+    glfwWindowHint(GLFW_OPENGL_PROFILE, want_gpu ? GLFW_OPENGL_CORE_PROFILE : GLFW_OPENGL_COMPAT_PROFILE);
     glfwWindowHint(GLFW_RESIZABLE, cfg.resizable ? GLFW_TRUE : GLFW_FALSE);
 
     window = glfwCreateWindow(static_cast<int>(cfg.size.width), static_cast<int>(cfg.size.height), cfg.title.c_str(),
                               nullptr, nullptr);
+    if (window == nullptr && want_gpu) {
+        // core profile 创建失败（驱动过老/远程桌面/虚拟机等）：降级软件模式重建窗口，不整体失败。
+        AURORA_LOG_INFO("gpu-gl", "core-profile window creation failed; retrying with software compat profile");
+        want_gpu = false;
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
+        window = glfwCreateWindow(static_cast<int>(cfg.size.width), static_cast<int>(cfg.size.height),
+                                  cfg.title.c_str(), nullptr, nullptr);
+    }
     if (window == nullptr) {
         glfwTerminate();
         throw std::runtime_error("GlfwSurface: glfwCreateWindow failed");
     }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);  // 启用 VSync（帧循环调度，见 specification/06-app-platform.md §3.1）
+
+#ifdef AURORA_BACKEND_GPU_GL
+    if (want_gpu) {
+        // 装载 GL 3.3 core 函数表（经 glfwGetProcAddress）并初始化 GPU 栅格后端；
+        // 失败（函数表缺项/着色器链接失败/GL 错误）→ gpu 置空，软件纹理路径兜底。
+        rhi::GLFn fn = rhi::load_gl(reinterpret_cast<void *(*)(const char *)>(&glfwGetProcAddress));
+        gpu = std::make_unique<rhi::GpuGlRhi>(fn);
+        if (!gpu->valid()) {
+            AURORA_LOG_INFO("gpu-gl", "GPU raster backend unavailable; falling back to software texture path");
+            gpu.reset();
+        }
+    }
+#endif
 
     // 转发 GLFW 回调到本实例（ARCHITECTURE.md §3.1 事件来源）。用户指针存 Impl*，回调据此取回。
     glfwSetWindowUserPointer(window, this);
@@ -482,6 +541,18 @@ auto GlfwSurface::Impl::begin_frame(int /*width*/, int /*height*/) -> Result<boo
 }
 
 auto GlfwSurface::Impl::present() -> Result<bool> {
+#ifdef AURORA_BACKEND_GPU_GL
+    if (gpu != nullptr) {
+        // GPU 路径：栅格已在 GpuGlRhi::end_frame 内完成（blit 至默认帧缓冲），跳过 CPU 上传直接 swap。
+        // DEBUG 下刷新抓帧缓存（resolve FBO 读回），save_snapshot/data() 复用；Release 零开销。
+#ifdef AURORA_ENABLE_DEBUG
+        (void)gpu->read_pixels(gpu_readback);
+#endif
+        glfwSwapBuffers(window);
+        ++frame;
+        return Result<bool>{true};
+    }
+#endif
     upload_and_draw();
     glfwSwapBuffers(window);
     ++frame;
@@ -673,6 +744,7 @@ auto GlfwSurface::wait_events(double timeout_ms) -> void { pimpl_->wait_events(t
 auto GlfwSurface::request_wake() -> void { Impl::request_wake(); }
 [[nodiscard]] auto GlfwSurface::data() const -> const std::uint8_t * { return pimpl_->data(); }
 [[nodiscard]] auto GlfwSurface::frame_count() const -> int { return pimpl_->frame_count(); }
+[[nodiscard]] auto GlfwSurface::gpu_backend() -> rhi::RhiFrameSink * { return pimpl_->gpu_backend(); }
 
 auto GlfwSurface::capture_window(const std::string &path) -> Result<bool> {
 #if defined(AURORA_PLATFORM_WINDOWS) && defined(AURORA_ENABLE_DEBUG)
