@@ -383,6 +383,14 @@
       ]
     },
     {
+      "name": "LegendPosition",
+      "values": [
+        "Top",
+        "Bottom",
+        "Right"
+      ]
+    },
+    {
       "name": "LengthKind",
       "values": [
         "WrapContent",
@@ -1313,6 +1321,234 @@
       },
       "thread": "main",
       "type": "Badge"
+    },
+    {
+      "children_policy": "none",
+      "container": false,
+      "default_props": {
+        "axis_x": {
+          "include_zero": true,
+          "show_grid_lines": true,
+          "tick_count": 5,
+          "visible": true
+        },
+        "axis_y": {
+          "include_zero": true,
+          "show_grid_lines": true,
+          "tick_count": 5,
+          "visible": true
+        },
+        "bar_corner_radius": 2.0,
+        "bar_width_ratio": 0.699999988079071,
+        "categories": [],
+        "height": "auto",
+        "legend": {
+          "position": "Top",
+          "visible": true
+        },
+        "overflow": "Visible",
+        "padding": {
+          "bottom": 8.0,
+          "left": 8.0,
+          "right": 8.0,
+          "top": 8.0
+        },
+        "series": [],
+        "show": true,
+        "stacked": false,
+        "width": "auto"
+      },
+      "dynamic_children": false,
+      "events": [
+        "on_point_tapped"
+      ],
+      "examples": [
+        "au::BarChart(au::BarChartProps{ .series = {{ .name = \"A\", .values = {1, 2, 3} }} })"
+      ],
+      "invariants": [
+        "0 < bar_width_ratio <= 1",
+        "padding >= 0"
+      ],
+      "is_clickable": false,
+      "is_container": false,
+      "is_layout": false,
+      "prop_descriptors": [
+        {
+          "default": "[]",
+          "json_type": "array",
+          "name": "series",
+          "note": "数据系列数组：[{name, values:[double], color?}]",
+          "required": false,
+          "type": "vector<ChartSeries>"
+        },
+        {
+          "default": "[]",
+          "json_type": "array",
+          "name": "categories",
+          "note": "x 轴类目标签；缺省为序号",
+          "required": false,
+          "type": "vector<string>"
+        },
+        {
+          "default": "false",
+          "json_type": "boolean",
+          "name": "stacked",
+          "note": "堆叠模式（同 x 多系列累加）",
+          "required": false,
+          "type": "bool"
+        },
+        {
+          "default": "0.7",
+          "json_type": "number",
+          "maximum": "1",
+          "minimum": "0.05",
+          "name": "bar_width_ratio",
+          "note": "柱宽在带内占比，夹取 (0,1]",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "2.0",
+          "json_type": "number",
+          "minimum": "0",
+          "name": "bar_corner_radius",
+          "note": "柱圆角(dp)，自动不超过柱宽/柱高一半",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "{}",
+          "json_type": "object",
+          "name": "axis_x",
+          "note": "类目轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+          "required": false,
+          "type": "Json"
+        },
+        {
+          "default": "{}",
+          "json_type": "object",
+          "name": "axis_y",
+          "note": "数值轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+          "required": false,
+          "type": "Json"
+        },
+        {
+          "default": "{\"visible\":true,\"position\":\"Top\"}",
+          "json_type": "object",
+          "name": "legend",
+          "note": "图例规格：{visible,position:Top|Bottom|Right}",
+          "required": false,
+          "type": "Json"
+        },
+        {
+          "default": "{8,8,8,8}",
+          "json_type": "object",
+          "name": "padding",
+          "note": "图内留白(dp)，轴标签与值框避让区",
+          "required": false,
+          "type": "EdgeInsets"
+        },
+        {
+          "default": "auto",
+          "json_type": "array",
+          "name": "width",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "auto",
+          "json_type": "array",
+          "name": "height",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "true",
+          "json_type": "boolean",
+          "name": "show",
+          "required": false,
+          "type": "bool"
+        }
+      ],
+      "props": [
+        "axis_x",
+        "axis_y",
+        "bar_corner_radius",
+        "bar_width_ratio",
+        "categories",
+        "height",
+        "legend",
+        "overflow",
+        "padding",
+        "series",
+        "show",
+        "stacked",
+        "width"
+      ],
+      "props_schema": {
+        "axis_x": {
+          "default": "{}",
+          "description": "类目轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+          "type": "object"
+        },
+        "axis_y": {
+          "default": "{}",
+          "description": "数值轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+          "type": "object"
+        },
+        "bar_corner_radius": {
+          "default": "2.0",
+          "description": "柱圆角(dp)，自动不超过柱宽/柱高一半",
+          "minimum": "0",
+          "type": "number"
+        },
+        "bar_width_ratio": {
+          "default": "0.7",
+          "description": "柱宽在带内占比，夹取 (0,1]",
+          "maximum": "1",
+          "minimum": "0.05",
+          "type": "number"
+        },
+        "categories": {
+          "default": "[]",
+          "description": "x 轴类目标签；缺省为序号",
+          "type": "array"
+        },
+        "height": {
+          "default": "auto",
+          "type": "array"
+        },
+        "legend": {
+          "default": "{\"visible\":true,\"position\":\"Top\"}",
+          "description": "图例规格：{visible,position:Top|Bottom|Right}",
+          "type": "object"
+        },
+        "padding": {
+          "default": "{8,8,8,8}",
+          "description": "图内留白(dp)，轴标签与值框避让区",
+          "type": "object"
+        },
+        "series": {
+          "default": "[]",
+          "description": "数据系列数组：[{name, values:[double], color?}]",
+          "type": "array"
+        },
+        "show": {
+          "default": "true",
+          "type": "boolean"
+        },
+        "stacked": {
+          "default": "false",
+          "description": "堆叠模式（同 x 多系列累加）",
+          "type": "boolean"
+        },
+        "width": {
+          "default": "auto",
+          "type": "array"
+        }
+      },
+      "thread": "main",
+      "type": "BarChart"
     },
     {
       "children_policy": "none",

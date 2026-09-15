@@ -6,7 +6,9 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "aurora/widget/bar_chart.h"
 #include "aurora/widget/grid_view.h"
 #include "aurora/widget/serialization.h"
 #include "aurora/widget/skeleton.h"
@@ -59,6 +61,35 @@ AURORA_TEST_CASE(unknown_type_still_rejected) {
     const auto w = from_json(j);
     AURORA_TEST_REQUIRE_MSG(!w.ok(), "unknown type rejected");
     AURORA_TEST_CHECK_EQ(w.error().code_enum, ErrorCode::WidgetUnknownType);
+}
+
+AURORA_TEST_CASE(barchart_rebuilds_nested_series_array) {
+    // 图表数据进序列化面（D5）：series 是对象数组（首个「数组属性」先例），
+    // 嵌套的 name / values / color 必须逐字段往返，且未设色的系列不输出 color 键。
+    auto src = std::make_shared<BarChart>(BarChartProps{
+        .series = {ChartSeries{.name = "A", .values = {1.0, 2.0, 3.0}, .color = Color{1, 2, 3, 255}},
+                   ChartSeries{.name = "B", .values = {4.0}}},
+        .categories = {"Mon", "Tue", "Wed"},
+        .stacked = true,
+        .legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Right},
+    });
+
+    const Json j = to_json(*src);
+    AURORA_TEST_REQUIRE_TRUE(j.contains("props"));
+    AURORA_TEST_REQUIRE_TRUE(j["props"].contains("series"));
+    AURORA_TEST_CHECK_EQ(j["props"]["series"].size(), 2U);
+    AURORA_TEST_CHECK_FALSE(j["props"]["series"][1].contains("color"));
+
+    const auto rebuilt = from_json(j);
+    AURORA_TEST_REQUIRE_MSG(rebuilt.ok(), "BarChart from_json succeeds");
+    const auto *chart = dynamic_cast<const BarChart *>(rebuilt.value().get());
+    AURORA_TEST_REQUIRE_MSG(chart != nullptr, "rebuilt widget is a BarChart");
+    AURORA_TEST_CHECK_EQ(chart->series.size(), 2U);
+    AURORA_TEST_CHECK_TRUE(chart->series[1].name == "B");
+    AURORA_TEST_CHECK_TRUE(chart->series[0].values == std::vector<double>{1.0, 2.0, 3.0});
+    AURORA_TEST_CHECK_TRUE(chart->categories == std::vector<std::string>{"Mon", "Tue", "Wed"});
+    AURORA_TEST_CHECK_TRUE(chart->stacked);
+    AURORA_TEST_CHECK_TRUE(chart->legend.position == LegendPosition::Right);
 }
 
 }  // namespace aurora::test_cases::utest_serialization

@@ -54,6 +54,9 @@ namespace aurora::tools {
     // ---- image / media ----
     enums["BoxFit"] = {"Fill", "Contain", "Cover", "FitWidth", "FitHeight", "None", "ScaleDown"};
 
+    // ---- chart ----
+    enums["LegendPosition"] = {"Top", "Bottom", "Right"};
+
     // ---- animation (CurveKind, the discriminating enum of class Curve) ----
     enums["Curve"] = {"Linear",      "EaseIn",        "EaseOut",        "EaseInOut",   "EaseInSine",
                       "EaseOutSine", "EaseInOutSine", "EaseInQuad",     "EaseOutQuad", "EaseInOutQuad",

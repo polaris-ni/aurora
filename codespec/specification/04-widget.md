@@ -253,6 +253,26 @@ au::Text("Welcome").font_size(24).bold();
 | `inspect.h` | 控件树检查函数集 |
 | `recipes.h` | 高频组合配方 |
 
+### 3.8 图表控件
+
+图表控件族按「每图一个叶控件 + 纯值 Props」组织（设计见 `CHARTS_DESIGN.draft.md`；切片 1–3 已落地，切片 4–9 规划中）。
+
+| 控件 | 说明 |
+|:---|:---|
+| `BarChart` | 柱状图（`widget/bar_chart.h`）。`series`（`ChartSeries{name, values, color?}` 数组，多系列分组并排）、`categories`（类目标签，缺省序号）、`stacked`、`bar_width_ratio`、`bar_corner_radius`、`axis_x`（类目轴）/ `axis_y`（数值轴）、`legend`、`padding`；回调 `on_point_tapped(series_idx, point_idx)` |
+| `LineChart` / `Sparkline` / `PieChart` / `ScatterChart` | 规划中（切片 4–6） |
+
+**公共数据层**（`widget/chart_common.h`，纯值、可无头单测）：`ChartPoint` / `ChartSeries` / `ScatterSeries` / `PieSection` / `ChartAxisSpec` / `LegendPosition` / `ChartLegendSpec` / `LinearScale` / `BandScale` / `chart_palette` / `resolve_series_color`。
+
+四条族级契约：
+
+1. **数据与视觉配置都是纯值属性**，整包进序列化面（`to_json` / `from_json` / `diff` / `apply_patch`）——AI 可经 schema + `from_json` 生成带真实数据的图表；交互回调（如 `on_point_tapped`）旁挂、**不进序列化面**。
+2. **轴域与命中反查同源**：渲染、刻度生成、hover 命中都消费同一份 `LinearScale` / `BandScale`，不得各算一遍。
+3. **绘制不得越出控件 `bounds`**：`Widget::paint_bounds_` 决定脏区，越界像素不会被擦除（残影）。轴留白与图例带在控件内部以 `padding` 预留，悬浮值框按可用区夹取 / 翻转。
+4. **取色与取 Locale 一律带回退**：系列色 = 显式 `color` > `Theme` 命名令牌 `chart.palette.<i%8>` > 内置 8 色板；网格 / 标签色取自 `inherit_theme(ctx)`；刻度文本经 `format_number(v, locale, digits)`，Locale 用 `ctx.environment<Locale>()` 取值、**未注入回退 `Locale{}`**（`render_to_png` 传 `constexpr BuildContext`，`env_of<Locale>` 会断言失败）。
+
+健壮性降级（D15）：空数据只画轴；`range == 0` 时域退化为 `[v, v+1]`（全 0 即 `[0,1]`）；NaN / ±inf 数据点跳过；点数超限时截断。反序列化对畸形数组元素逐项跳过并 `Diagnostics::degraded`，绝不抛异常。
+
 ---
 
 ## 4 控件可定制性契约

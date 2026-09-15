@@ -39,8 +39,8 @@ namespace {
            static_cast<int>(au::FontStyle::Italic) + static_cast<int>(au::CurveKind::Custom) +
            static_cast<int>(au::KeyCode::D0) + static_cast<int>(au::KeyCode::Backquote) +
            static_cast<int>(au::KeyCode::F12) + static_cast<int>(au::DrawerSide::Right) +
-           static_cast<int>(au::Orientation::Vertical) + static_cast<int>(au::SplitterOrientation::Horizontal) +
-           static_cast<int>(au::ToastPosition::Top);
+           static_cast<int>(au::Orientation::Vertical) +            static_cast<int>(au::SplitterOrientation::Horizontal) +
+           static_cast<int>(au::ToastPosition::Top) + static_cast<int>(au::LegendPosition::Right);
 }
 
 /// @brief 属性类型是否属于「不需要枚举登记」的基础 / 容器类型。
