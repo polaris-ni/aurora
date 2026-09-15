@@ -1355,6 +1355,7 @@
         },
         "series": [],
         "show": true,
+        "show_crosshair": true,
         "stacked": false,
         "width": "auto"
       },
@@ -1415,6 +1416,14 @@
           "note": "柱圆角(dp)，自动不超过柱宽/柱高一半",
           "required": false,
           "type": "float"
+        },
+        {
+          "default": "true",
+          "json_type": "boolean",
+          "name": "show_crosshair",
+          "note": "悬停时绘制吸附最近类目的十字准线",
+          "required": false,
+          "type": "bool"
         },
         {
           "default": "{}",
@@ -1482,6 +1491,7 @@
         "padding",
         "series",
         "show",
+        "show_crosshair",
         "stacked",
         "width"
       ],
@@ -1535,6 +1545,11 @@
         },
         "show": {
           "default": "true",
+          "type": "boolean"
+        },
+        "show_crosshair": {
+          "default": "true",
+          "description": "悬停时绘制吸附最近类目的十字准线",
           "type": "boolean"
         },
         "stacked": {
@@ -4079,6 +4094,247 @@
       "children_policy": "none",
       "container": false,
       "default_props": {
+        "axis_x": {
+          "include_zero": true,
+          "show_grid_lines": true,
+          "tick_count": 5,
+          "visible": true
+        },
+        "axis_y": {
+          "include_zero": true,
+          "show_grid_lines": true,
+          "tick_count": 5,
+          "visible": true
+        },
+        "categories": [],
+        "dot_radius": 3.0,
+        "height": "auto",
+        "legend": {
+          "position": "Top",
+          "visible": true
+        },
+        "line_width": 2.0,
+        "overflow": "Visible",
+        "padding": {
+          "bottom": 8.0,
+          "left": 8.0,
+          "right": 8.0,
+          "top": 8.0
+        },
+        "series": [],
+        "show": true,
+        "show_crosshair": true,
+        "show_dots": true,
+        "width": "auto"
+      },
+      "dynamic_children": false,
+      "events": [
+        "on_point_tapped"
+      ],
+      "examples": [
+        "au::LineChart(au::LineChartProps{ .series = {{ .name = \"A\", .values = {1, 3, 2} }} })"
+      ],
+      "invariants": [
+        "line_width >= 0",
+        "dot_radius >= 0"
+      ],
+      "is_clickable": false,
+      "is_container": false,
+      "is_layout": false,
+      "prop_descriptors": [
+        {
+          "default": "[]",
+          "json_type": "array",
+          "name": "series",
+          "note": "数据系列数组（values 等距，x = 索引）",
+          "required": false,
+          "type": "vector<ChartSeries>"
+        },
+        {
+          "default": "[]",
+          "json_type": "array",
+          "name": "categories",
+          "note": "x 轴类目标签；缺省为序号",
+          "required": false,
+          "type": "vector<string>"
+        },
+        {
+          "default": "true",
+          "json_type": "boolean",
+          "name": "show_dots",
+          "note": "是否绘制数据点圆点",
+          "required": false,
+          "type": "bool"
+        },
+        {
+          "default": "2.0",
+          "json_type": "number",
+          "minimum": "0",
+          "name": "line_width",
+          "note": "折线宽度(dp)",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "3.0",
+          "json_type": "number",
+          "minimum": "0",
+          "name": "dot_radius",
+          "note": "数据点半径(dp)",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "true",
+          "json_type": "boolean",
+          "name": "show_crosshair",
+          "note": "悬停时绘制吸附最近数据点的十字准线",
+          "required": false,
+          "type": "bool"
+        },
+        {
+          "default": "{}",
+          "json_type": "object",
+          "name": "axis_x",
+          "note": "类目轴规格：{visible,label,tick_count,show_grid_lines}",
+          "required": false,
+          "type": "Json"
+        },
+        {
+          "default": "{}",
+          "json_type": "object",
+          "name": "axis_y",
+          "note": "数值轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+          "required": false,
+          "type": "Json"
+        },
+        {
+          "default": "{\"visible\":true,\"position\":\"Top\"}",
+          "json_type": "object",
+          "name": "legend",
+          "note": "图例规格：{visible,position:Top|Bottom|Right}",
+          "required": false,
+          "type": "Json"
+        },
+        {
+          "default": "{8,8,8,8}",
+          "json_type": "object",
+          "name": "padding",
+          "note": "图内留白(dp)",
+          "required": false,
+          "type": "EdgeInsets"
+        },
+        {
+          "default": "auto",
+          "json_type": "array",
+          "name": "width",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "auto",
+          "json_type": "array",
+          "name": "height",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "true",
+          "json_type": "boolean",
+          "name": "show",
+          "required": false,
+          "type": "bool"
+        }
+      ],
+      "props": [
+        "axis_x",
+        "axis_y",
+        "categories",
+        "dot_radius",
+        "height",
+        "legend",
+        "line_width",
+        "overflow",
+        "padding",
+        "series",
+        "show",
+        "show_crosshair",
+        "show_dots",
+        "width"
+      ],
+      "props_schema": {
+        "axis_x": {
+          "default": "{}",
+          "description": "类目轴规格：{visible,label,tick_count,show_grid_lines}",
+          "type": "object"
+        },
+        "axis_y": {
+          "default": "{}",
+          "description": "数值轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+          "type": "object"
+        },
+        "categories": {
+          "default": "[]",
+          "description": "x 轴类目标签；缺省为序号",
+          "type": "array"
+        },
+        "dot_radius": {
+          "default": "3.0",
+          "description": "数据点半径(dp)",
+          "minimum": "0",
+          "type": "number"
+        },
+        "height": {
+          "default": "auto",
+          "type": "array"
+        },
+        "legend": {
+          "default": "{\"visible\":true,\"position\":\"Top\"}",
+          "description": "图例规格：{visible,position:Top|Bottom|Right}",
+          "type": "object"
+        },
+        "line_width": {
+          "default": "2.0",
+          "description": "折线宽度(dp)",
+          "minimum": "0",
+          "type": "number"
+        },
+        "padding": {
+          "default": "{8,8,8,8}",
+          "description": "图内留白(dp)",
+          "type": "object"
+        },
+        "series": {
+          "default": "[]",
+          "description": "数据系列数组（values 等距，x = 索引）",
+          "type": "array"
+        },
+        "show": {
+          "default": "true",
+          "type": "boolean"
+        },
+        "show_crosshair": {
+          "default": "true",
+          "description": "悬停时绘制吸附最近数据点的十字准线",
+          "type": "boolean"
+        },
+        "show_dots": {
+          "default": "true",
+          "description": "是否绘制数据点圆点",
+          "type": "boolean"
+        },
+        "width": {
+          "default": "auto",
+          "type": "array"
+        }
+      },
+      "thread": "main",
+      "type": "LineChart"
+    },
+    {
+      "children_policy": "none",
+      "container": false,
+      "default_props": {
         "height": "auto",
         "items": [],
         "multi_select": false,
@@ -4464,6 +4720,193 @@
       },
       "thread": "main",
       "type": "PerfOverlay"
+    },
+    {
+      "children_policy": "none",
+      "container": false,
+      "default_props": {
+        "center_space_ratio": 0.0,
+        "height": "auto",
+        "legend": {
+          "position": "Top",
+          "visible": true
+        },
+        "overflow": "Visible",
+        "padding": {
+          "bottom": 8.0,
+          "left": 8.0,
+          "right": 8.0,
+          "top": 8.0
+        },
+        "section_gap": 2.0,
+        "sections": [],
+        "show": true,
+        "show_percentage_labels": false,
+        "start_angle": -90.0,
+        "width": "auto"
+      },
+      "dynamic_children": false,
+      "events": [
+        "on_section_tapped"
+      ],
+      "examples": [
+        "au::PieChart(au::PieChartProps{ .sections = {{ .name = \"A\", .value = 3 }, { .name = \"B\", .value = 1 }} })"
+      ],
+      "invariants": [
+        "0 <= center_space_ratio <= 0.95"
+      ],
+      "is_clickable": false,
+      "is_container": false,
+      "is_layout": false,
+      "prop_descriptors": [
+        {
+          "default": "[]",
+          "json_type": "array",
+          "name": "sections",
+          "note": "扇区数组：[{name, value, color?}]，占比 = value / Σvalue",
+          "required": false,
+          "type": "vector<PieSection>"
+        },
+        {
+          "default": "0.0",
+          "json_type": "number",
+          "maximum": "0.95",
+          "minimum": "0",
+          "name": "center_space_ratio",
+          "note": "内径 / 外径比；> 0 即环图，夹取 [0,0.95]",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "-90.0",
+          "json_type": "number",
+          "name": "start_angle",
+          "note": "起始角（度，0 = +x 方向；-90 = 12 点钟）",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "false",
+          "json_type": "boolean",
+          "name": "show_percentage_labels",
+          "note": "扇区内百分比文本",
+          "required": false,
+          "type": "bool"
+        },
+        {
+          "default": "2.0",
+          "json_type": "number",
+          "minimum": "0",
+          "name": "section_gap",
+          "note": "扇区间隙(dp)",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "{\"visible\":true,\"position\":\"Top\"}",
+          "json_type": "object",
+          "name": "legend",
+          "note": "图例规格：{visible,position:Top|Bottom|Right}",
+          "required": false,
+          "type": "Json"
+        },
+        {
+          "default": "{8,8,8,8}",
+          "json_type": "object",
+          "name": "padding",
+          "note": "图内留白(dp)",
+          "required": false,
+          "type": "EdgeInsets"
+        },
+        {
+          "default": "auto",
+          "json_type": "array",
+          "name": "width",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "auto",
+          "json_type": "array",
+          "name": "height",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "true",
+          "json_type": "boolean",
+          "name": "show",
+          "required": false,
+          "type": "bool"
+        }
+      ],
+      "props": [
+        "center_space_ratio",
+        "height",
+        "legend",
+        "overflow",
+        "padding",
+        "section_gap",
+        "sections",
+        "show",
+        "show_percentage_labels",
+        "start_angle",
+        "width"
+      ],
+      "props_schema": {
+        "center_space_ratio": {
+          "default": "0.0",
+          "description": "内径 / 外径比；> 0 即环图，夹取 [0,0.95]",
+          "maximum": "0.95",
+          "minimum": "0",
+          "type": "number"
+        },
+        "height": {
+          "default": "auto",
+          "type": "array"
+        },
+        "legend": {
+          "default": "{\"visible\":true,\"position\":\"Top\"}",
+          "description": "图例规格：{visible,position:Top|Bottom|Right}",
+          "type": "object"
+        },
+        "padding": {
+          "default": "{8,8,8,8}",
+          "description": "图内留白(dp)",
+          "type": "object"
+        },
+        "section_gap": {
+          "default": "2.0",
+          "description": "扇区间隙(dp)",
+          "minimum": "0",
+          "type": "number"
+        },
+        "sections": {
+          "default": "[]",
+          "description": "扇区数组：[{name, value, color?}]，占比 = value / Σvalue",
+          "type": "array"
+        },
+        "show": {
+          "default": "true",
+          "type": "boolean"
+        },
+        "show_percentage_labels": {
+          "default": "false",
+          "description": "扇区内百分比文本",
+          "type": "boolean"
+        },
+        "start_angle": {
+          "default": "-90.0",
+          "description": "起始角（度，0 = +x 方向；-90 = 12 点钟）",
+          "type": "number"
+        },
+        "width": {
+          "default": "auto",
+          "type": "array"
+        }
+      },
+      "thread": "main",
+      "type": "PieChart"
     },
     {
       "children_policy": "none",
@@ -5514,6 +5957,182 @@
       "type": "Row"
     },
     {
+      "children_policy": "none",
+      "container": false,
+      "default_props": {
+        "axis_x": {
+          "include_zero": true,
+          "show_grid_lines": true,
+          "tick_count": 5,
+          "visible": true
+        },
+        "axis_y": {
+          "include_zero": true,
+          "show_grid_lines": true,
+          "tick_count": 5,
+          "visible": true
+        },
+        "height": "auto",
+        "legend": {
+          "position": "Top",
+          "visible": true
+        },
+        "overflow": "Visible",
+        "padding": {
+          "bottom": 8.0,
+          "left": 8.0,
+          "right": 8.0,
+          "top": 8.0
+        },
+        "series": [],
+        "show": true,
+        "show_crosshair": true,
+        "width": "auto"
+      },
+      "dynamic_children": false,
+      "events": [
+        "on_point_tapped"
+      ],
+      "examples": [
+        "au::ScatterChart(au::ScatterChartProps{ .series = {{ .name = \"A\", .points = {{1, 2}, {3, 4}} }} })"
+      ],
+      "invariants": [
+        "dot_radius >= 0"
+      ],
+      "is_clickable": false,
+      "is_container": false,
+      "is_layout": false,
+      "prop_descriptors": [
+        {
+          "default": "[]",
+          "json_type": "array",
+          "name": "series",
+          "note": "散点系列数组：[{name, points:[[x,y],...], color?, dot_radius}]",
+          "required": false,
+          "type": "vector<ScatterSeries>"
+        },
+        {
+          "default": "true",
+          "json_type": "boolean",
+          "name": "show_crosshair",
+          "note": "悬停时绘制吸附最近点的十字准线",
+          "required": false,
+          "type": "bool"
+        },
+        {
+          "default": "{}",
+          "json_type": "object",
+          "name": "axis_x",
+          "note": "x 轴规格：{visible,label,tick_count,min,max,show_grid_lines}",
+          "required": false,
+          "type": "Json"
+        },
+        {
+          "default": "{}",
+          "json_type": "object",
+          "name": "axis_y",
+          "note": "y 轴规格：{visible,label,tick_count,min,max,show_grid_lines}",
+          "required": false,
+          "type": "Json"
+        },
+        {
+          "default": "{\"visible\":true,\"position\":\"Top\"}",
+          "json_type": "object",
+          "name": "legend",
+          "note": "图例规格：{visible,position:Top|Bottom|Right}",
+          "required": false,
+          "type": "Json"
+        },
+        {
+          "default": "{8,8,8,8}",
+          "json_type": "object",
+          "name": "padding",
+          "note": "图内留白(dp)",
+          "required": false,
+          "type": "EdgeInsets"
+        },
+        {
+          "default": "auto",
+          "json_type": "array",
+          "name": "width",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "auto",
+          "json_type": "array",
+          "name": "height",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "true",
+          "json_type": "boolean",
+          "name": "show",
+          "required": false,
+          "type": "bool"
+        }
+      ],
+      "props": [
+        "axis_x",
+        "axis_y",
+        "height",
+        "legend",
+        "overflow",
+        "padding",
+        "series",
+        "show",
+        "show_crosshair",
+        "width"
+      ],
+      "props_schema": {
+        "axis_x": {
+          "default": "{}",
+          "description": "x 轴规格：{visible,label,tick_count,min,max,show_grid_lines}",
+          "type": "object"
+        },
+        "axis_y": {
+          "default": "{}",
+          "description": "y 轴规格：{visible,label,tick_count,min,max,show_grid_lines}",
+          "type": "object"
+        },
+        "height": {
+          "default": "auto",
+          "type": "array"
+        },
+        "legend": {
+          "default": "{\"visible\":true,\"position\":\"Top\"}",
+          "description": "图例规格：{visible,position:Top|Bottom|Right}",
+          "type": "object"
+        },
+        "padding": {
+          "default": "{8,8,8,8}",
+          "description": "图内留白(dp)",
+          "type": "object"
+        },
+        "series": {
+          "default": "[]",
+          "description": "散点系列数组：[{name, points:[[x,y],...], color?, dot_radius}]",
+          "type": "array"
+        },
+        "show": {
+          "default": "true",
+          "type": "boolean"
+        },
+        "show_crosshair": {
+          "default": "true",
+          "description": "悬停时绘制吸附最近点的十字准线",
+          "type": "boolean"
+        },
+        "width": {
+          "default": "auto",
+          "type": "array"
+        }
+      },
+      "thread": "main",
+      "type": "ScatterChart"
+    },
+    {
       "children_policy": "single",
       "container": true,
       "default_props": {
@@ -6260,6 +6879,169 @@
       },
       "thread": "main",
       "type": "Spacer"
+    },
+    {
+      "children_policy": "none",
+      "container": false,
+      "default_props": {
+        "dot_radius": 2.0,
+        "height": "auto",
+        "line_width": 1.5,
+        "overflow": "Visible",
+        "padding": {
+          "bottom": 2.0,
+          "left": 2.0,
+          "right": 2.0,
+          "top": 2.0
+        },
+        "show": true,
+        "show_end_dot": true,
+        "values": [],
+        "width": "auto"
+      },
+      "dynamic_children": false,
+      "events": [],
+      "examples": [
+        "au::Sparkline(au::SparklineProps{ .values = {1, 3, 2, 5, 4} })"
+      ],
+      "invariants": [
+        "line_width >= 0"
+      ],
+      "is_clickable": false,
+      "is_container": false,
+      "is_layout": false,
+      "prop_descriptors": [
+        {
+          "default": "[]",
+          "json_type": "array",
+          "name": "values",
+          "note": "单系列数据（等距）",
+          "required": false,
+          "type": "vector<double>"
+        },
+        {
+          "default": "palette[0]",
+          "json_type": "array",
+          "name": "color",
+          "note": "线条色；缺省取内置色板第 0 色",
+          "required": false,
+          "type": "Color"
+        },
+        {
+          "default": "1.5",
+          "json_type": "number",
+          "minimum": "0",
+          "name": "line_width",
+          "note": "线宽(dp)",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "true",
+          "json_type": "boolean",
+          "name": "show_end_dot",
+          "note": "末端数据点圆点",
+          "required": false,
+          "type": "bool"
+        },
+        {
+          "default": "2.0",
+          "json_type": "number",
+          "minimum": "0",
+          "name": "dot_radius",
+          "note": "末端圆点半径(dp)",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "{2,2,2,2}",
+          "json_type": "object",
+          "name": "padding",
+          "note": "图内留白(dp)",
+          "required": false,
+          "type": "EdgeInsets"
+        },
+        {
+          "default": "auto",
+          "json_type": "array",
+          "name": "width",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "auto",
+          "json_type": "array",
+          "name": "height",
+          "required": false,
+          "type": "Length"
+        },
+        {
+          "default": "true",
+          "json_type": "boolean",
+          "name": "show",
+          "required": false,
+          "type": "bool"
+        }
+      ],
+      "props": [
+        "dot_radius",
+        "height",
+        "line_width",
+        "overflow",
+        "padding",
+        "show",
+        "show_end_dot",
+        "values",
+        "width"
+      ],
+      "props_schema": {
+        "color": {
+          "default": "palette[0]",
+          "description": "线条色；缺省取内置色板第 0 色",
+          "type": "array"
+        },
+        "dot_radius": {
+          "default": "2.0",
+          "description": "末端圆点半径(dp)",
+          "minimum": "0",
+          "type": "number"
+        },
+        "height": {
+          "default": "auto",
+          "type": "array"
+        },
+        "line_width": {
+          "default": "1.5",
+          "description": "线宽(dp)",
+          "minimum": "0",
+          "type": "number"
+        },
+        "padding": {
+          "default": "{2,2,2,2}",
+          "description": "图内留白(dp)",
+          "type": "object"
+        },
+        "show": {
+          "default": "true",
+          "type": "boolean"
+        },
+        "show_end_dot": {
+          "default": "true",
+          "description": "末端数据点圆点",
+          "type": "boolean"
+        },
+        "values": {
+          "default": "[]",
+          "description": "单系列数据（等距）",
+          "type": "array"
+        },
+        "width": {
+          "default": "auto",
+          "type": "array"
+        }
+      },
+      "thread": "main",
+      "type": "Sparkline"
     },
     {
       "children_policy": "none",

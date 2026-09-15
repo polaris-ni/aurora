@@ -25,6 +25,8 @@
 #include "aurora/widget/grid.h"
 #include "aurora/widget/grid_view.h"
 #include "aurora/widget/image_widget.h"
+#include "aurora/widget/line_chart.h"
+#include "aurora/widget/pie_chart.h"
 #include "aurora/widget/lazy_list.h"
 #include "aurora/widget/lazy_row.h"
 #include "aurora/widget/menu_bar.h"
@@ -36,9 +38,11 @@
 #include "aurora/widget/radio_spin.h"
 #include "aurora/widget/rich_text.h"
 #include "aurora/widget/rich_text_edit.h"
+#include "aurora/widget/scatter_chart.h"
 #include "aurora/widget/scroll.h"
 #include "aurora/widget/segmented_control.h"
 #include "aurora/widget/show.h"
+#include "aurora/widget/sparkline.h"
 #include "aurora/widget/skeleton.h"
 #include "aurora/widget/slider.h"
 #include "aurora/widget/spacer.h"
@@ -224,8 +228,12 @@ auto register_core_widgets() -> void {
     reg_default<Badge>("Badge");
     reg_default<SegmentedControl>("SegmentedControl");
     reg_default<Stepper>("Stepper");
-    // 图表控件族（切片 3）：属性完整可序列化（含 series 对象数组），默认构造后回填属性即可重建。
+    // 图表控件族（切片 3–6）：属性完整可序列化（含 series 对象数组），默认构造后回填属性即可重建。
     reg_default<BarChart>("BarChart");
+    reg_default<LineChart>("LineChart");
+    reg_default<PieChart>("PieChart");
+    reg_default<ScatterChart>("ScatterChart");
+    reg_default<Sparkline>("Sparkline");
     // 骨架屏：属性完整可序列化（尺寸/颜色/周期），可从静态 JSON 完整重建。
     reg_default<Skeleton>("Skeleton");
 

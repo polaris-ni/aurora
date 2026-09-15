@@ -42,11 +42,15 @@ AURORA_TEST_CASE(basic_leaf_widgets_default_construct_and_layout) {
         au::Node{au::RichTextEdit{}},
         au::Node{au::Canvas{}},
         au::Node{au::BarChart{}},
+        au::Node{au::LineChart{}},
+        au::Node{au::PieChart{}},
+        au::Node{au::ScatterChart{}},
+        au::Node{au::Sparkline{}},
     }};
 
     const au::Json snap = layout_frame(root);
     AURORA_TEST_CHECK_EQ(snap["type"].get<std::string>(), std::string{"Column"});
-    AURORA_TEST_CHECK_EQ(snap["children"].size(), 14U);
+    AURORA_TEST_CHECK_EQ(snap["children"].size(), 18U);
 }
 
 AURORA_TEST_CASE(layout_containers_default_construct_and_layout) {

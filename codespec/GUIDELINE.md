@@ -1131,3 +1131,63 @@ auto main() -> int {
 - **几何持久化**：`preferences::Preferences` + `WindowOptions::persist_id`，`app.set_window_geometry_store(&prefs)` 之后**打开自动恢复、关闭自动保存**（非法/越界几何自动回退默认布局）；窗口组用 `prefs.group("windows")` 分组建键。
 - **调试枚举**：`InspectorServer::set_window_ids_getter(...)` 注册后 `GET /api/windows` 可枚举全部窗口 id。
 - 可编译样例见 `examples/demos/demo_multi_window.cpp`。
+
+---
+
+## 33 图表控件
+
+五图（`BarChart` / `LineChart` / `Sparkline` / `PieChart` / `ScatterChart`）均为「`XxxProps` 纯值属性 + `class Xxx : public LeafWidget, public XxxProps` + `defaults()`」形态；数据进序列化面，AI 可经 `aurora_api.json` schema + `from_json` 生成带真实数据的图表。
+
+```cpp
+#include "aurora/aurora.h"
+
+using namespace au;
+
+auto main() -> int {
+    BarChart chart{BarChartProps{
+        .series = {
+            ChartSeries{.name = "cpu", .values = {12.0, 18.0, 9.0, 24.0}, .color = Color{0x2D, 0x9B, 0xFD, 255}},
+            ChartSeries{.name = "mem", .values = {8.0, 10.0, 14.0, 12.0}},
+        },
+        .categories = {"Mon", "Tue", "Wed", "Thu"},
+        .legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Top},
+    }};
+    chart.set_stacked(true);  // 分组并排 / 堆叠切换（链式 setter）
+    chart.on_point_tapped = [](int si, int pi) -> void {  // 回调旁挂，不进序列化面
+        AURORA_LOG_INFO("chart", "tapped series ", si, " point ", pi);
+    };
+
+    PieChart donut{PieChartProps{
+        .sections = {PieSection{.name = "mobile", .value = 45.0},
+                     PieSection{.name = "desktop", .value = 30.0},
+                     PieSection{.name = "tablet", .value = 15.0}},
+        .center_space_ratio = 0.45F,  // > 0 ⇒ 环形
+        .show_percentage_labels = true,
+    }};
+
+    LineChart trend{LineChartProps{
+        .series = {ChartSeries{.name = "latency", .values = {4.0, 6.0, 3.0, 8.0, 5.0}}},
+        .show_dots = true,
+    }};
+
+    ScatterChart pts{ScatterChartProps{
+        .series = {ScatterSeries{.name = "samples",
+                                 .points = {ChartPoint{.x = 1.0, .y = 2.0}, ChartPoint{.x = 3.0, .y = 4.0}}}},
+    }};
+
+    Sparkline spark{SparklineProps{.values = {4.0, 6.0, 3.0, 8.0, 5.0}, .line_width = 2.0F}};
+
+    Application app{Scene{Column{ColumnProps{.children = {Node{chart}, Node{donut}, Node{trend},
+                                                              Node{pts}, Node{spark}}}}}};
+    return app.run();
+}
+```
+
+要点：
+
+- **数据进序列化面**：`series` / `sections` / `values` / `points` 都是属性键（值经 `to_json` / `from_json` 往返，畸形元素逐项跳过、绝不抛异常）；交互回调（`on_point_tapped` / `on_section_tapped`）是 `std::function` 成员，**不进序列化面**，Inspector PUT 与 `from_json` 都不会重建它们。
+- **取色三级优先**：系列显式 `color` > `Theme` 命名令牌 `chart.palette.N`（N = 系列序号取模 8）> 内置 Material 风 8 色板（`chart_palette(i)`）。
+- **轴域与命中同源**：渲染、刻度、hover 命中都消费同一份 `LinearScale` / `BandScale`，不要各算一遍；`axis_x`/`axis_y` 的 `min`/`max` 显式指定即锁定域，否则按数据 nice 化（含 0 基线由 `include_zero` 控制）。
+- **绘制不得越出 `bounds`**：`Widget::paint_bounds_` 决定脏区，越界像素不会被擦除（残影）；悬浮值框 / 十字准线 / 百分比标签都按可用区夹取或翻转。
+- **无头渲染 golden**：`render_to_png` 无 `Application` ⇒ `Animator::current() == nullptr` ⇒ grow-in 动画进度恒为 1（终态），故 golden 基线稳定可复现。
+- 可编译样例见 `examples/demos/demo_bar_chart.cpp` / `demo_line_chart.cpp` / `demo_pie_chart.cpp` / `demo_scatter_chart.cpp` / `demo_sparkline.cpp`；设计见 `CHARTS_DESIGN.draft.md`。

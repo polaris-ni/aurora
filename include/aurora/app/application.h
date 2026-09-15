@@ -310,6 +310,7 @@ class Application {
         Task<bool>::set_main_poster(nullptr);
         drain_posted();
         Scheduler::set_current(nullptr);
+        Animator::set_current(nullptr);
         aurora::set_strict_mode(prev_strict);
     }
 

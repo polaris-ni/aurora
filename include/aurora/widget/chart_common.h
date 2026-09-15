@@ -8,8 +8,13 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/animation/animator.h"
+#include "aurora/animation/easing.h"
 #include "aurora/core/color.h"
 #include "aurora/core/types.h"
+#include "aurora/render/font_engine.h"
+#include "aurora/render/painter.h"
+#include "aurora/state/state.h"
 #include "aurora/theming/theme.h"
 #include "aurora/widget/props_io.h"
 
@@ -561,6 +566,150 @@ class BandScale {
         l.position = json_to_legend_position(j["position"]);
     }
     return l;
+}
+
+// ---------- grow-in 动画载荷（切片 8）----------
+
+/// @brief 图表入场动画（grow-in）：控制器 + 进度 `State<double>` + 帧循环注册/注销。
+///
+/// 进度写入 `State<double>`，随 `collect_signals` 参与响应式刷新，故动画不另起通道。
+/// **无运行中 `Animator`（`Animator::current() == nullptr`，典型为 `render_to_png` / golden）时
+/// 进度恒为 1**——终态降级，保证无头渲染输出确定（D11）。`reduce_motion` 由
+/// `AnimationController::tick` 统一短路，本类无需特判。
+///
+/// 用法：控件持有一个成员，`on_mount` 调 `mount()`，数据变更调 `replay()`，绘制读 `progress()`。
+class ChartGrowIn {
+  public:
+    ChartGrowIn() = default;
+    ~ChartGrowIn() {
+        if (bound_) {
+            if (Animator *a = Animator::current()) {
+                a->remove(ctrl_);
+            }
+            bound_ = false;
+        }
+    }
+    ChartGrowIn(const ChartGrowIn &) = delete;
+    auto operator=(const ChartGrowIn &) -> ChartGrowIn & = delete;
+    auto operator=(ChartGrowIn &&) -> ChartGrowIn & = delete;
+
+    /// @brief 移动构造：控件经 `Node{widget}` 入树必须可移动。
+    ///
+    /// 绑定建立在 `on_mount`（入树之后，此后不再移动），故此处若已登记则先摘除再转移进度值——
+    /// 绝不让 `Animator` 持有已失效的控制器 / 目标地址（`Animator::drive` 存裸指针，UAF 风险）。
+    ChartGrowIn(ChartGrowIn &&other) noexcept : progress_{other.progress_.get()} {
+        if (other.bound_) {
+            if (Animator *a = Animator::current()) {
+                a->remove(other.ctrl_);
+            }
+            other.bound_ = false;
+        }
+        other.progress_.set(1.0);
+    }
+
+    /// @brief 当前进度（0..1）；未接动画时恒为 1（终态）。
+    [[nodiscard]] auto progress() const -> double { return progress_.get(); }
+    /// @brief 进度信号（供 `collect_signals` 登记）。
+    [[nodiscard]] auto signal() -> State<double> & { return progress_; }
+    /// @brief 是否正在播放（用于 `can_cache_display_list()`）。
+    [[nodiscard]] auto animating() const -> bool { return bound_ && ctrl_.is_animating(); }
+
+    /// @brief 在 `on_mount` 中调用：接上帧循环并从头播放；无 Animator 时落到终态。
+    auto mount() -> void {
+        Animator *a = Animator::current();
+        if (a == nullptr) {
+            progress_.set(1.0);  // 降级：无运行循环（无头渲染）直接呈现终态
+            return;
+        }
+        progress_.set(0.0);
+        a->bind(ctrl_, Tween<double>{0.0, 1.0, Curves::ease_out()}, progress_);
+        bound_ = true;
+        ctrl_.forward();
+    }
+
+    /// @brief 数据变更时重放（未接动画时为 no-op，进度已恒为终态）。
+    auto replay() -> void {
+        if (!bound_) {
+            progress_.set(1.0);
+            return;
+        }
+        progress_.set(0.0);
+        ctrl_.forward();
+    }
+
+  private:
+    AnimationController ctrl_{0.45};  ///< 450ms 入场
+    State<double> progress_{1.0};     ///< 初值为终态（未播放 = 已完成）
+    bool bound_ = false;              ///< 是否已登记进 Animator（决定析构是否摘除）
+};
+
+// ---------- 轴绘制共享实现（Bar / Line / Scatter 共用，避免四份漂移）----------
+
+/// @brief 刻度小数位：由 nice step 推导（step ≥ 1 → 0 位）。
+[[nodiscard]] inline auto tick_digits(double step) -> int {
+    if (!(step > 0.0) || !std::isfinite(step) || step >= 1.0) {
+        return 0;
+    }
+    return std::clamp(static_cast<int>(std::ceil(-std::log10(step))), 0, 6);
+}
+
+/// @brief 数值轴（y）绘制：网格线 + 刻度标签 + 轴标题。
+///
+/// `origin` 为控件在画布中的全局原点（几何一律用局部坐标，绘制时才平移），
+/// 保证「渲染与命中同源」。`plot` 为局部坐标下的绘图区。
+inline auto draw_numeric_axis(Painter &p, Point origin, const Rect &plot, const LinearScale &scale,
+                              const ChartAxisSpec &spec, const Font &font, Color grid_color, Color text_color) -> void {
+    if (plot.size.height <= 0.0F) {
+        return;
+    }
+    const float line_h = render::FontEngine::measure_height(font) + 4.0F;
+    const int digits = tick_digits(scale.step());
+    for (const double t : scale.ticks()) {
+        const float y = scale.to_px(t, plot.bottom(), plot.origin.y);
+        if (y < plot.origin.y - 0.5F || y > plot.bottom() + 0.5F) {
+            continue;
+        }
+        if (spec.show_grid_lines) {
+            p.draw_line(Point{.x = origin.x + plot.origin.x, .y = origin.y + y},
+                        Point{.x = origin.x + plot.right(), .y = origin.y + y}, 1.0F, grid_color);
+        }
+        const std::string s = format_number(t, Locale{}, digits);
+        const float w = render::FontEngine::measure_width(s, font);
+        const Rect box{.origin = Point{.x = origin.x + plot.origin.x - w - 6.0F, .y = origin.y + y - (line_h * 0.5F)},
+                       .size = Size{.width = w + 2.0F, .height = line_h}};
+        p.draw_text(box, s, font, text_color);
+    }
+    if (!spec.label.empty()) {
+        const float w = render::FontEngine::measure_width(spec.label, font);
+        const Rect box{.origin = Point{.x = origin.x + plot.origin.x - w - 6.0F - line_h, .y = origin.y + plot.origin.y},
+                       .size = Size{.width = w + 2.0F, .height = line_h}};
+        p.draw_text(box, spec.label, font, text_color);
+    }
+}
+
+/// @brief 类目轴（x）绘制：带中心标签 + 轴标题。`cats` 为空时直接返回。
+inline auto draw_category_axis(Painter &p, Point origin, const Rect &plot, const BandScale &band,
+                               const std::vector<std::string> &cats, const ChartAxisSpec &spec, const Font &font,
+                               Color text_color) -> void {
+    if (cats.empty() || plot.size.width <= 0.0F) {
+        return;
+    }
+    const float line_h = render::FontEngine::measure_height(font) + 4.0F;
+    for (std::size_t j = 0; j < cats.size(); ++j) {
+        const std::string &s = cats[j];
+        const float w = render::FontEngine::measure_width(s, font);
+        const float center = band.band_center_px(j, plot.origin.x, plot.right());
+        const Rect box{.origin = Point{.x = origin.x + center - (w * 0.5F), .y = origin.y + plot.bottom() + 2.0F},
+                       .size = Size{.width = w + 2.0F, .height = line_h}};
+        p.draw_text(box, s, font, text_color);
+    }
+    if (!spec.label.empty()) {
+        const float w = render::FontEngine::measure_width(spec.label, font);
+        const Rect box{.origin = Point{.x = origin.x + plot.origin.x + (plot.size.width * 0.5F) - (w * 0.5F),
+                                       .y = origin.y + plot.bottom() + line_h + 2.0F},
+                       .size = Size{.width = w + 2.0F, .height = line_h}};
+        p.draw_text(box, spec.label, font, text_color);
+    }
 }
 
 /// @brief 扇区归一化占比（Σ ≤ 0 时返回全 0，由调用方按 D15 降级处理）。

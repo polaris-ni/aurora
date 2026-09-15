@@ -26,6 +26,7 @@ struct BarChartProps {
     bool stacked = false;                 ///< 堆叠模式（同 x 的多系列累加）
     float bar_width_ratio = 0.7F;         ///< 柱宽在带内的占比，夹取 (0,1]
     float bar_corner_radius = 2.0F;       ///< 柱圆角（自动不超过柱宽/柱高的一半）
+    bool show_crosshair = true;           ///< 悬停时是否绘制十字准线（吸附最近类目）
     ChartAxisSpec axis_x;                 ///< 类目轴（Band）
     ChartAxisSpec axis_y;                 ///< 数值轴（Linear）
     ChartLegendSpec legend;               ///< 图例
@@ -66,6 +67,7 @@ class BarChart : public LeafWidget, public BarChartProps {
         series = std::move(s);
         mark_needs_layout();
         mark_needs_paint();
+        grow_.replay();  // 数据变更 → 重放入场动画（无 Animator 时为 no-op）
         return *this;
     }
     auto set_categories(std::vector<std::string> c) -> BarChart & {
@@ -86,6 +88,11 @@ class BarChart : public LeafWidget, public BarChartProps {
     }
     auto set_bar_corner_radius(float r) -> BarChart & {
         bar_corner_radius = r;
+        mark_needs_paint();
+        return *this;
+    }
+    auto set_show_crosshair(bool v) -> BarChart & {
+        show_crosshair = v;
         mark_needs_paint();
         return *this;
     }
@@ -126,8 +133,9 @@ class BarChart : public LeafWidget, public BarChartProps {
     /// @brief 悬停离开时清除高亮（基类默认只置 `hover_` 不标脏，必须覆写）。
     auto on_hover_change(bool entered) -> void override {
         hover_ = entered;
-        if (!entered && hovered_point_.has_value()) {
+        if (!entered && (hovered_point_.has_value() || legend_hover_.has_value())) {
             hovered_point_.reset();
+            legend_hover_.reset();
             mark_needs_paint();
         }
     }
@@ -141,10 +149,14 @@ class BarChart : public LeafWidget, public BarChartProps {
 
     /// @brief 当前悬停的数据点（系列索引, 类目索引）；无悬停为空。测试与调试用。
     [[nodiscard]] auto hovered_point() const -> std::optional<std::pair<int, int>> { return hovered_point_; }
+    /// @brief 当前悬停的图例项索引；无悬停为空。
+    [[nodiscard]] auto hovered_legend() const -> std::optional<std::size_t> { return legend_hover_; }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override;
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override;
+    /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态，D11）。
+    auto on_mount(const BuildContext & /*ctx*/) -> void override { grow_.mount(); }
 
   private:
     /// @brief 布局期算定的绘图几何（局部坐标，原点 0）：渲染与命中反查共用同一份（D6）。
@@ -156,6 +168,7 @@ class BarChart : public LeafWidget, public BarChartProps {
         float band_w = 0.0F;  ///< 单类目带宽
         float group_w = 0.0F;  ///< 带内柱组总宽
         float bar_w = 0.0F;   ///< 单柱宽（堆叠时 = group_w）
+        std::vector<Rect> legend_rects;  ///< 图例项命中区（局部坐标）
     };
 
     [[nodiscard]] auto resolved_categories() const -> std::vector<std::string>;
@@ -163,10 +176,14 @@ class BarChart : public LeafWidget, public BarChartProps {
     [[nodiscard]] auto compute_y_scale() const -> LinearScale;
     [[nodiscard]] auto compute_geometry(const Size &size, const Font &font) const -> Geometry;
     [[nodiscard]] auto hit_test_point(const Point &local) const -> std::optional<std::pair<int, int>>;
+    [[nodiscard]] auto legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t>;
     [[nodiscard]] auto series_value(std::size_t series_idx, std::size_t cat_idx) const -> double;
+    [[nodiscard]] auto category_center(const Geometry &g, std::size_t cat_idx) const -> float;
 
     Geometry geom_;
+    ChartGrowIn grow_;
     std::optional<std::pair<int, int>> hovered_point_;
+    std::optional<std::size_t> legend_hover_;
 };
 
 // ---------------------------------------------------------------------------
@@ -309,7 +326,49 @@ inline auto BarChart::compute_geometry(const Size &size, const Font &font) const
     g.group_w = g.band_w * ratio;
     const std::size_t n_series = series.size();
     g.bar_w = (stacked || n_series == 0U) ? g.group_w : (g.group_w / static_cast<float>(n_series));
+
+    // 图例项命中区（与绘制同一套游标推进规则；命中优先于数据区）
+    if (legend.visible && !series.empty()) {
+        float cursor_x = g.plot.origin.x;
+        float cursor_y = g.plot.origin.y;
+        if (legend.position == LegendPosition::Top) {
+            cursor_y = padding.top;
+        } else if (legend.position == LegendPosition::Bottom) {
+            cursor_y = size.height - padding.bottom - line_h;
+        } else {
+            cursor_x = g.plot.right() + 8.0F;
+            cursor_y = g.plot.origin.y;
+        }
+        for (const ChartSeries &s : series) {
+            const float name_w = render::FontEngine::measure_width(s.name, font);
+            const float item_w = 14.0F + name_w;
+            if (legend.position != LegendPosition::Right && cursor_x + item_w > size.width - padding.right) {
+                break;
+            }
+            g.legend_rects.push_back(
+                Rect{.origin = Point{.x = cursor_x, .y = cursor_y}, .size = Size{.width = item_w, .height = line_h}});
+            if (legend.position == LegendPosition::Right) {
+                cursor_y += line_h;
+            } else {
+                cursor_x += item_w + 12.0F;
+            }
+        }
+    }
     return g;
+}
+
+inline auto BarChart::category_center(const Geometry &g, std::size_t cat_idx) const -> float {
+    return g.x_band.band_center_px(cat_idx, g.plot.origin.x, g.plot.right());
+}
+
+inline auto BarChart::legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t> {
+    for (std::size_t i = 0; i < g.legend_rects.size(); ++i) {
+        const Rect &r = g.legend_rects[i];
+        if (local.x >= r.origin.x && local.x <= r.right() && local.y >= r.origin.y && local.y <= r.bottom()) {
+            return i;
+        }
+    }
+    return std::nullopt;
 }
 
 inline auto BarChart::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
@@ -366,15 +425,16 @@ inline auto BarChart::hit_test_point(const Point &local) const -> std::optional<
 }
 
 inline auto BarChart::on_pointer_event(MouseEvent &e) -> void {
-    const Rect local_bounds{Point{}, size_};
     if (e.action == MouseAction::Move) {
-        const auto hit = hit_test_point(e.local_position);
-        if (hit != hovered_point_) {
+        // 图例项区域优先于数据区：命中图例即联动高亮，不再解析数据点。
+        const auto legend = legend_hit(geom_, e.local_position);
+        const auto hit = legend.has_value() ? std::nullopt : hit_test_point(e.local_position);
+        if (legend != legend_hover_ || hit != hovered_point_) {
+            legend_hover_ = legend;
             hovered_point_ = hit;
             mark_needs_paint();
         }
         e.is_handled = true;
-        (void)local_bounds;
         return;
     }
     if (e.action == MouseAction::Release) {
@@ -443,6 +503,12 @@ inline auto BarChart::describe_static() -> WidgetDescriptor {
                  .note = "柱圆角(dp)，自动不超过柱宽/柱高一半",
                  .json_type = "number",
                  .min_value = "0"},
+                {.name = "show_crosshair",
+                 .type = "bool",
+                 .default_value = "true",
+                 .required = false,
+                 .note = "悬停时绘制吸附最近类目的十字准线",
+                 .json_type = "boolean"},
                 {.name = "axis_x",
                  .type = "Json",
                  .default_value = "{}",
@@ -500,6 +566,7 @@ inline auto BarChart::serialize_props(Json &props) const -> void {
     props["stacked"] = stacked;
     props["bar_width_ratio"] = bar_width_ratio;
     props["bar_corner_radius"] = bar_corner_radius;
+    props["show_crosshair"] = show_crosshair;
     props["axis_x"] = chart_axis_spec_to_json(axis_x);
     props["axis_y"] = chart_axis_spec_to_json(axis_y);
     props["legend"] = chart_legend_spec_to_json(legend);
@@ -522,6 +589,9 @@ inline auto BarChart::deserialize_props(const Json &props) -> void {
     }
     if (props.contains("bar_corner_radius") && props["bar_corner_radius"].is_number()) {
         bar_corner_radius = std::max(0.0F, props["bar_corner_radius"].get<float>());
+    }
+    if (props.contains("show_crosshair") && props["show_crosshair"].is_boolean()) {
+        show_crosshair = props["show_crosshair"].get<bool>();
     }
     if (props.contains("axis_x")) {
         axis_x = json_to_chart_axis_spec(props["axis_x"]);
@@ -574,10 +644,15 @@ inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
     const std::size_t n_series = series.size();
     std::vector<double> stack_acc(n_cat, 0.0);
     std::optional<Rect> hovered_bar;
+    const double grow_t = grow_.progress();  // grow-in：柱高 0 → 1（无 Animator 时恒 1）
     for (std::size_t i = 0; i < n_series; ++i) {
-        const Color c = resolve_series_color(i, series[i].color, theme);
+        Color c = resolve_series_color(i, series[i].color, theme);
+        // 图例联动：命中某图例项时，其余系列降透明（0.35）
+        if (legend_hover_.has_value() && (*legend_hover_ != i)) {
+            c.a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.a) * 0.35F));
+        }
         for (std::size_t j = 0; j < n_cat; ++j) {
-            const double v = series_value(i, j);
+            const double v = series_value(i, j) * grow_t;
             const double lo = stacked ? stack_acc[j] : 0.0;
             const double hi = stacked ? stack_acc[j] + v : v;
             if (stacked) {
@@ -667,42 +742,31 @@ inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
         }
     }
 
-    // ---- 图例 ----
-    if (legend.visible && n_series > 0U) {
-        float cursor_x = plot.origin.x;
-        float cursor_y = plot.origin.y;
-        if (legend.position == LegendPosition::Top) {
-            cursor_y = padding.top;
-        } else if (legend.position == LegendPosition::Bottom) {
-            cursor_y = bounds.size.height - padding.bottom - line_h;
-        } else {
-            cursor_x = plot.right() + 8.0F;
-            cursor_y = plot.origin.y;
-        }
-        for (std::size_t i = 0; i < n_series; ++i) {
-            const Color c = resolve_series_color(i, series[i].color, theme);
-            const float name_w = render::FontEngine::measure_width(series[i].name, font);
-            const float item_w = 14.0F + name_w;
-            if (legend.position != LegendPosition::Right &&
-                cursor_x + item_w > bounds.size.width - padding.right) {
-                break;  // 超宽截断（值框/图例一律不得越界，D12）
+    // ---- 图例（命中区与绘制同源于 geom_.legend_rects）----
+    if (legend.visible) {
+        for (std::size_t i = 0; i < g.legend_rects.size() && i < n_series; ++i) {
+            const Rect &r = g.legend_rects[i];
+            Color c = resolve_series_color(i, series[i].color, theme);
+            if (legend_hover_.has_value() && (*legend_hover_ != i)) {
+                c.a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.a) * 0.35F));
             }
-            const Rect swatch{.origin = Point{.x = gx(cursor_x), .y = gy(cursor_y + 3.0F)},
+            const Rect swatch{.origin = Point{.x = gx(r.origin.x), .y = gy(r.origin.y + 3.0F)},
                               .size = Size{.width = 10.0F, .height = 10.0F}};
             p.fill_rounded_rect(grect(swatch), 2.0F, c);
-            const Rect box{.origin = Point{.x = gx(cursor_x + 14.0F), .y = gy(cursor_y)},
-                           .size = Size{.width = name_w + 2.0F, .height = line_h}};
+            const Rect box{.origin = Point{.x = gx(r.origin.x + 14.0F), .y = gy(r.origin.y)},
+                           .size = Size{.width = std::max(0.0F, r.size.width - 14.0F), .height = line_h}};
             p.draw_text(grect(box), series[i].name, font, axis);
-            if (legend.position == LegendPosition::Right) {
-                cursor_y += line_h;
-            } else {
-                cursor_x += item_w + 12.0F;
-            }
         }
     }
 
-    // ---- 悬停高亮 + 自绘值框 ----
+    // ---- 悬停高亮 + 十字准线 + 自绘值框 ----
     if (hovered_bar.has_value()) {
+        // 十字准线：吸附最近类目的垂直参考线
+        if (show_crosshair && hovered_point_.has_value() && hovered_point_->second >= 0) {
+            const float cx = category_center(g, static_cast<std::size_t>(hovered_point_->second));
+            p.draw_line(Point{.x = gx(cx), .y = gy(plot.origin.y)}, Point{.x = gx(cx), .y = gy(plot.bottom())}, 1.0F,
+                        grid);
+        }
         p.draw_rounded_border(grect(*hovered_bar), 2.0F, 2.0F, theme.text);
         if (hovered_point_.has_value()) {
             const auto [si, ci] = *hovered_point_;

@@ -112,11 +112,14 @@ struct TestController::Impl {
 
         // 定时任务挂载点：与 Application::run 同——`Timer` 控件在 mount 时经 current() 注册。
         Scheduler::set_current(&scheduler);
+        // 组件级动画挂载点：图表 grow-in 在 mount 时经 current() 注册（无则降级到终态）。
+        Animator::set_current(&animator);
     }
 
     ~Impl() {
-        // 若仍有其它 Scheduler 期待成为 current，此处置空以避免本对象析构后残留悬垂指针。
+        // 若仍有其它 Scheduler / Animator 期待成为 current，此处置空以避免本对象析构后残留悬垂指针。
         Scheduler::set_current(nullptr);
+        Animator::set_current(nullptr);
     }
 
     Impl(const Impl &) = delete;

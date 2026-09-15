@@ -105,6 +105,14 @@ class Animator {
         std::erase_if(on_tick_, [&c](const Binding &b) -> bool { return b.owner == &c; });
     }
 
+    /// @brief 当前运行中的应用级动画管理器（由 `Application::run()` 起止设置）。
+    ///        组件级动画（如图表 grow-in）在 `on_mount` 时取用；无运行中 App 时返回 nullptr
+    ///        ——调用方须据此**降级到终态**，无头渲染（golden）才有确定性输出。
+    [[nodiscard]] static auto current() -> Animator * { return current_; }
+
+    /// @brief 设置/清除当前运行实例（由 `Application::run()` 内部调用；与 `Scheduler::set_current` 同范式）。
+    static auto set_current(Animator *a) -> void { current_ = a; }
+
     /// @brief 是否有运行中的控制器（Forward/Reverse），供帧调度决策取值，无活跃动画时 idle 帧可阻塞等待事件。
     [[nodiscard]] auto has_active() const -> bool {
         return std::ranges::any_of(
@@ -150,6 +158,9 @@ class Animator {
 
     std::vector<AnimationController *> controllers_;  ///< 非拥有
     std::vector<Binding> on_tick_;
+
+    /// @brief 当前运行实例槽位（由 `Application::run()` 起止设置；无运行时为 nullptr）。
+    static Animator *current_;
 };
 
 /**

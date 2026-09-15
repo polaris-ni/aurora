@@ -124,6 +124,7 @@ push_route(au::Checkbox{ au::Reactive<bool>{ flag } });   // flag 存活期 = �
 | 定时任务（`Timer` / `Scheduler`） | `setTimeout` / `setInterval` | `Timer.periodic` / `Timer` | `QTimer` |
 | `Navigator` | React Router | `Navigator` / `Navigator 2.0`（`Hero` 共享元素转场、`open_uri` 深层链接对应 Flutter `Hero` / 路由 URI 解析） | `StackView` / 路由 |
 | `MediaQuery` / `LayoutBuilder` / `BreakpointBuilder` | 媒体查询 hook（无直接内置）/ 条件渲染 / 断点档位 | `MediaQuery` + `LayoutBuilder` + `BreakpointBuilder` | 屏幕度量 / `LayoutBuilder` 等价模式 / `Breakpoint{Compact,Medium,Expanded}`（阈值 600/840 可调） |
+| 图表控件族 `BarChart` / `LineChart` / `Sparkline` / `PieChart` / `ScatterChart` | 无官方图表库（Recharts / `react-chartjs-2` / visx）；`CustomPainter` 思路对应 `Painter` | `bar_chart` / `charts_flutter`（同族：数据进 props、`toJson`/`fromJson` 可序列化、轴域与命中反查同源） | 无官方图表（QCustomPlot / QChart 第三方）；Aurora 五图均为 `LeafWidget` + 纯值 `XxxProps` + `defaults()`，AI 可经 `aurora_api.json` schema + `from_json` 生成带真实数据的图表 |
 
 **视频播放器定制**：`VideoPlayer` 可子类化（`create_default_controls()` 虚化并在挂载期生效、`current_frame()` / `paint_frame()` 读 / 绘帧、`on_pointer_event` / `wants_click` 为 public）；`VideoControls` 可子类化换肤 / 重排（`play_button()` / `time_text()` / `mute_button()` 访问器 + `build_children()` 虚函数）。详见 [`specification/03-layout-render.md`](specification/03-layout-render.md) §9.2。
 

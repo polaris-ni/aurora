@@ -6,6 +6,9 @@
 
 namespace aurora {
 
+// 当前运行中的 Animator 槽位（无 Application 在跑时为 nullptr，见图表 grow-in 的终态降级）。
+Animator *Animator::current_ = nullptr;
+
 auto AnimationController::forward(double from) -> void {
     if (from >= 0.0) {
         value_ = std::clamp(from, 0.0, 1.0);  // 起点夹取到合法进度区间（-1 为哨兵=从当前值继续）

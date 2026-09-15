@@ -255,12 +255,15 @@ au::Text("Welcome").font_size(24).bold();
 
 ### 3.8 图表控件
 
-图表控件族按「每图一个叶控件 + 纯值 Props」组织（设计见 `CHARTS_DESIGN.draft.md`；切片 1–3 已落地，切片 4–9 规划中）。
+图表控件族按「每图一个叶控件 + 纯值 Props」组织（设计见 `CHARTS_DESIGN.draft.md`；切片 1–9 已全部落地）。五图共享公共数据层 `widget/chart_common.h`、事件三件套（`wants_click` / `on_hover_change` 标脏 / `on_pointer_event` 自处理 Move·Release）、`geom_` 缓存（绘制与命中同源）、十字准线 + 图例 hover 联动（切片 7）、grow-in 进入动画（`Animator::current()`，无 Animator 时降级到终态，切片 8）。
 
 | 控件 | 说明 |
 |:---|:---|
-| `BarChart` | 柱状图（`widget/bar_chart.h`）。`series`（`ChartSeries{name, values, color?}` 数组，多系列分组并排）、`categories`（类目标签，缺省序号）、`stacked`、`bar_width_ratio`、`bar_corner_radius`、`axis_x`（类目轴）/ `axis_y`（数值轴）、`legend`、`padding`；回调 `on_point_tapped(series_idx, point_idx)` |
-| `LineChart` / `Sparkline` / `PieChart` / `ScatterChart` | 规划中（切片 4–6） |
+| `BarChart` | 柱状图（`widget/bar_chart.h`）。`series`（`ChartSeries{name, values, color?}` 数组，多系列分组并排）、`categories`（类目标签，缺省序号）、`stacked`、`bar_width_ratio`、`bar_corner_radius`、`show_crosshair`、`axis_x`（类目轴）/ `axis_y`（数值轴）、`legend`、`padding`；回调 `on_point_tapped(series_idx, point_idx)` |
+| `LineChart` | 折线图（`widget/line_chart.h`）。`series`（等距 x = 索引）、`show_dots`、`line_width`、`axis_x` / `axis_y`（双 `LinearScale`）、`legend`、`padding`；`show_crosshair` 控制十字准线；回调 `on_point_tapped(series_idx, point_idx)` |
+| `Sparkline` | 迷你走势图（`widget/sparkline.h`），最薄：**无轴 / 无网格 / 无图例 / 无交互**。`values`（单系列）、`color`（可选，缺省按色板取色）、`line_width`、`show_end_dot`、`dot_radius`、`padding` |
+| `PieChart` | 饼图 / 环形图（`widget/pie_chart.h`）。`sections`（`PieSection{name, value, color?}` 数组）、`center_space_ratio`（> 0 即环形）、`start_angle`（度，12 点起）、`show_percentage_labels`、`section_gap`、`legend`、`padding`；命中按极坐标（半径 + 角度）判扇区；回调 `on_section_tapped(section_idx)` |
+| `ScatterChart` | 散点图（`widget/scatter_chart.h`）。`series`（`ScatterSeries{name, points: [{x,y}], dot_radius, color?}`，显式 `ChartPoint`）、`axis_x` / `axis_y`（双 `LinearScale`）、`legend`、`padding`；命中按最近点欧氏距离（半径 = `dot_radius + 4dp`）；回调 `on_point_tapped(series_idx, point_idx)` |
 
 **公共数据层**（`widget/chart_common.h`，纯值、可无头单测）：`ChartPoint` / `ChartSeries` / `ScatterSeries` / `PieSection` / `ChartAxisSpec` / `LegendPosition` / `ChartLegendSpec` / `LinearScale` / `BandScale` / `chart_palette` / `resolve_series_color`。
 
