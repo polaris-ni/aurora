@@ -77,7 +77,7 @@ namespace {
 
 // 验收串：5 码点（م ر ح ب ا）。用于端到端验证阿拉伯文连字/cursive joining 与视觉序。
 constexpr char kArabicHello[] = "مرحبا";  // NOLINT(*-avoid-c-arrays)
-constexpr std::size_t kArabicN = 5;
+constexpr std::size_t AURORA_ARABIC_N = 5;
 
 // 专用 family（仅 Amiri）：保证阿拉伯文走真实整形，而非回落到无 Arabic 覆盖的默认字体/位图兜底。
 [[nodiscard]] auto arabic_font() -> aurora::Font {
@@ -452,9 +452,9 @@ AURORA_TEST_CASE(arabic_rtl_caret_x_mirrors_logical_order) {
 
     // 端点（char_index=0 与 =N）与字形簇无关，断言稳定。
     const float cxl0 = aurora::render::FontEngine::caret_x(kArabicHello, 0, font, ltr);
-    const float cxlN = aurora::render::FontEngine::caret_x(kArabicHello, kArabicN, font, ltr);
+    const float cxlN = aurora::render::FontEngine::caret_x(kArabicHello, AURORA_ARABIC_N, font, ltr);
     const float cxr0 = aurora::render::FontEngine::caret_x(kArabicHello, 0, font, rtl);
-    const float cxrN = aurora::render::FontEngine::caret_x(kArabicHello, kArabicN, font, rtl);
+    const float cxrN = aurora::render::FontEngine::caret_x(kArabicHello, AURORA_ARABIC_N, font, rtl);
 
     AURORA_TEST_CHECK_NEAR(cxl0, 0.0F, 1e-3F);        // LTR：逻辑首在左缘
     AURORA_TEST_CHECK_NEAR(cxlN, w_ltr, 1e-3F);        // LTR：逻辑尾在右缘
@@ -571,13 +571,13 @@ AURORA_TEST_CASE(arabic_richtextedit_rtl_pointer_hit_no_overflow) {
     // 视觉左缘（run 左侧之外）→ 逻辑尾。含头含尾（inclusive）语义命中逻辑尾**字符**本身，
     // 即下标 N-1（镜像 LTR「行尾右侧命中末字符」返回 total-1 的语义）。
     click(0.5F);
-    AURORA_TEST_CHECK_EQ(t.caret(), kArabicN - 1U);
+    AURORA_TEST_CHECK_EQ(t.caret(), AURORA_ARABIC_N - 1U);
 
     // 行内中部点击应落在逻辑中段（真实度量下非溢出 clamp 到 0）。
     const float w = aurora::render::FontEngine::measure_width(
         kArabicHello, arabic_font(), aurora::render::TextLayoutOpts{.direction = aurora::TextDirection::RTL});
     click(t.size().width - w * 0.5F);  // 行内中点
-    AURORA_TEST_CHECK(t.caret() > 0U && t.caret() < kArabicN);
+    AURORA_TEST_CHECK(t.caret() > 0U && t.caret() < AURORA_ARABIC_N);
 }
 
 AURORA_TEST_CASE(arabic_richtextedit_cross_level_runs_reorder) {

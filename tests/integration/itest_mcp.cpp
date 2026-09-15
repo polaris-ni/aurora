@@ -224,8 +224,8 @@ struct Simulation {
 /// @brief 复刻 `simulate_interaction` 的消费路径。
 [[nodiscard]] auto simulate(const au::Json& tree, const std::string& action, const std::string& path,
                             float dx = 0.0F, float dy = 0.0F, const std::string& text = {}) -> Simulation {
-    constexpr int kWidth = 800;
-    constexpr int kHeight = 600;
+    constexpr int AURORA_WIDTH = 800;
+    constexpr int AURORA_HEIGHT = 600;
     Simulation out;
     auto widget = from_json(tree);
     if (!widget) {
@@ -236,7 +236,7 @@ struct Simulation {
     // from_json 只构树不布局，而 simulate_* 以目标「中心点」为指针位置：未布局时控件尺寸为零、
     // 中心退化为自身原点，落点就不再是目标的真实中心。故与工具一致，先布局一次确立几何；
     // 其产物仅用于几何，不回传（回传的是交互之后的那份）。
-    (void)au::render_to_logical_snapshot(root, kWidth, kHeight);
+    (void)au::render_to_logical_snapshot(root, AURORA_WIDTH, AURORA_HEIGHT);
     out.root = root;
 
     au::Node target = au::Inspector::find_node(root, path);
@@ -263,7 +263,7 @@ struct Simulation {
         return out;
     }
     out.props = au::Inspector::get_prop(target.widget());
-    out.snapshot = au::render_to_logical_snapshot(root, kWidth, kHeight);
+    out.snapshot = au::render_to_logical_snapshot(root, AURORA_WIDTH, AURORA_HEIGHT);
     return out;
 }
 

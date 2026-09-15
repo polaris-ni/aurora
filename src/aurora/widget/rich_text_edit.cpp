@@ -703,7 +703,7 @@ auto RichTextEdit::paint_preedit(Painter &p, float x, float y) const -> float {
     const std::size_t pn = utf8_cp_count(preedit_);
 
     // ① preedit 内选区（输入法高亮「待转换片段」）
-    if (preedit_sel_end_ != kNoPreeditSelection) {
+    if (preedit_sel_end_ != AURORA_NO_PREEDIT_SELECTION) {
         const auto a = std::min(preedit_sel_start_, preedit_sel_end_);
         const auto b = std::min(std::max(preedit_sel_start_, preedit_sel_end_) + 1U, pn);
         const float sx0 = x + render::FontEngine::measure_width(utf8_cp_slice(preedit_, 0, a), cur_font_);
@@ -734,7 +734,7 @@ auto RichTextEdit::cancel_composition() -> void {
     preedit_.clear();
     preedit_cursor_ = 0;
     preedit_sel_start_ = 0;
-    preedit_sel_end_ = kNoPreeditSelection;
+    preedit_sel_end_ = AURORA_NO_PREEDIT_SELECTION;
 }
 
 auto RichTextEdit::paint_cursor(Painter &p, const Rect &bounds) const -> void {

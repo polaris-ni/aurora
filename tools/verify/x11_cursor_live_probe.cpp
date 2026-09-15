@@ -260,7 +260,7 @@ auto main(int argc, char **argv) -> int {
     std::uint64_t distinct = 0;
     std::uint64_t last_hash = 0;
     int identical_runs = 0;
-    for (int i = 0; i < static_cast<int>(aurora::kCursorShapeCount); ++i) {
+    for (int i = 0; i < static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT); ++i) {
         const auto shape = static_cast<aurora::CursorShape>(i);
         surface.set_cursor(shape);
         const CursorSnapshot snap = read_cursor_settled(dpy);
@@ -287,7 +287,7 @@ auto main(int argc, char **argv) -> int {
     }
     XCloseDisplay(dpy);
 
-    const int total = static_cast<int>(aurora::kCursorShapeCount);
+    const int total = static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT);
     AURORA_LOG_RAW("verify", "读回互异形状数=", aurora_verify::format_uint(distinct), " / ",
                    aurora_verify::format_int(total), "，相邻相同次数=", aurora_verify::format_int(identical_runs),
                    "\n");

@@ -169,18 +169,18 @@ AURORA_TEST_CASE(image_and_matrix_indices_resolve_for_composite) {
 
 AURORA_TEST_CASE(software_rhi_replay_matches_direct_painting_bitwise) {
     // 零行为变化红线：同一批绘制，经 SoftwareRhi 回放与直接调用 Painter 必须逐位一致。
-    constexpr int kWidth = 24;
-    constexpr int kHeight = 24;
+    constexpr int AURORA_WIDTH = 24;
+    constexpr int AURORA_HEIGHT = 24;
 
     Painter direct;
-    direct.begin(kWidth, kHeight);
+    direct.begin(AURORA_WIDTH, AURORA_HEIGHT);
     direct.fill_rect(rect_at(0.0F, 0.0F, 12.0F, 12.0F), Color::red());
     direct.draw_line(Point{.x = 0.0F, .y = 0.0F}, Point{.x = 23.0F, .y = 23.0F}, 1.0F, Color::blue());
     direct.draw_linear_gradient(rect_at(0.0F, 12.0F, 12.0F, 12.0F), Point{.x = 0.0F, .y = 12.0F},
                                 Point{.x = 12.0F, .y = 12.0F}, {Color::red(), Color::green()}, {0.0F, 1.0F});
 
     Painter recorded;
-    recorded.begin(kWidth, kHeight);
+    recorded.begin(AURORA_WIDTH, AURORA_HEIGHT);
     DisplayList list;
     recorded.record(list);
     recorded.fill_rect(rect_at(0.0F, 0.0F, 12.0F, 12.0F), Color::red());
@@ -195,7 +195,7 @@ AURORA_TEST_CASE(software_rhi_replay_matches_direct_painting_bitwise) {
 
     // 同一命令流手工喂给 SoftwareRhi：结果同帧（证明 SoftwareRhi 与 replay(Painter&) 同一路径）。
     Painter via_rhi;
-    via_rhi.begin(kWidth, kHeight);
+    via_rhi.begin(AURORA_WIDTH, AURORA_HEIGHT);
     rhi::SoftwareRhi software{via_rhi};
     list.replay(software);
     AURORA_TEST_CHECK_TRUE(same_pixels(direct, via_rhi));

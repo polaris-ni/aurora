@@ -91,7 +91,7 @@ AURORA_TEST_CASE(result_defaults_are_untrusted) {
     AURORA_TEST_CHECK_NEAR(r.content_screens(), 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(r.reversal_ratio(), 0.0, 1e-9);
     AURORA_TEST_CHECK_FALSE(r.trustworthy());
-    AURORA_TEST_CHECK_NEAR(ScrollBenchHarness::Result::kMaxReversalRatio, 0.10, 1e-9);
+    AURORA_TEST_CHECK_NEAR(ScrollBenchHarness::Result::AURORA_MAX_REVERSAL_RATIO, 0.10, 1e-9);
 }
 
 AURORA_TEST_CASE(derived_readers_forward_to_report) {

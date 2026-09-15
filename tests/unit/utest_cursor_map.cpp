@@ -16,13 +16,13 @@ namespace aurora::test_cases::utest_cursor_map {
 
 namespace {
 
-/// @brief 全部 CursorShape 取值（按枚举取值序）；长度契约由 static_assert 对齐 kCursorShapeCount。
-constexpr std::array<CursorShape, kCursorShapeCount> ALL_SHAPES = {
+/// @brief 全部 CursorShape 取值（按枚举取值序）；长度契约由 static_assert 对齐 AURORA_CURSOR_SHAPE_COUNT。
+constexpr std::array<CursorShape, AURORA_CURSOR_SHAPE_COUNT> ALL_SHAPES = {
     CursorShape::Arrow,   CursorShape::IBeam,  CursorShape::PointingHand, CursorShape::ResizeNS,
     CursorShape::ResizeEW, CursorShape::ResizeNWSE, CursorShape::ResizeNESW, CursorShape::Move,
     CursorShape::Crosshair, CursorShape::NotAllowed, CursorShape::Wait,
 };
-static_assert(std::size(ALL_SHAPES) == kCursorShapeCount, "ALL_SHAPES 漏填：新增 CursorShape 后须同步扩列");
+static_assert(std::size(ALL_SHAPES) == AURORA_CURSOR_SHAPE_COUNT, "ALL_SHAPES 漏填：新增 CursorShape 后须同步扩列");
 
 }  // namespace
 
@@ -41,7 +41,7 @@ AURORA_TEST_CASE(cursor_shape_enum_order_contract) {
     static_assert(static_cast<std::uint8_t>(CursorShape::NotAllowed) == 9);
     static_assert(static_cast<std::uint8_t>(CursorShape::Wait) == 10);
     AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(CursorShape::Wait), 10);
-    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(kCursorShapeCount), 11);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(AURORA_CURSOR_SHAPE_COUNT), 11);
 }
 
 AURORA_TEST_CASE(cursor_shape_rfc_names_map_all_shapes) {

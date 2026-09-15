@@ -52,11 +52,11 @@ class WindowEventBus {
     auto operator=(WindowEventBus &&) -> WindowEventBus & = delete;
 
     /// @brief 订阅类型 `T` 的事件。
-    /// @param cb 回调 `(payload, from)`；`from` 为发布者窗口 id（发布时未指定则 `kInvalidWindowId`）。
-    /// @param filter_from 只接收来自该窗口的事件；`kInvalidWindowId`（默认）= 接收全部。
+    /// @param cb 回调 `(payload, from)`；`from` 为发布者窗口 id（发布时未指定则 `AURORA_INVALID_WINDOW_ID`）。
+    /// @param filter_from 只接收来自该窗口的事件；`AURORA_INVALID_WINDOW_ID`（默认）= 接收全部。
     /// @return RAII 订阅句柄：析构自动取消，可 `release()` 转为手动管理。
     template <typename T>
-    [[nodiscard]] auto on(std::function<void(const T &, WindowId)> cb, WindowId filter_from = kInvalidWindowId)
+    [[nodiscard]] auto on(std::function<void(const T &, WindowId)> cb, WindowId filter_from = AURORA_INVALID_WINDOW_ID)
         -> Subscription {
         const Token token = state_->next_token++;
         Entry entry;
@@ -71,9 +71,10 @@ class WindowEventBus {
     }
 
     /// @brief 发布类型 `T` 的事件：同步扇出给全部匹配订阅者。
+    /// @param payload 待广播的事件负载（按 `const T&` 派发到各订阅回调）。
     /// @param from 发布者窗口 id（可选；订阅侧可据此点对点过滤）。
     template <typename T>
-    auto post(const T &payload, WindowId from = kInvalidWindowId) -> void {
+    auto post(const T &payload, WindowId from = AURORA_INVALID_WINDOW_ID) -> void {
         const auto it = state_->subs.find(std::type_index(typeid(T)));
         if (it == state_->subs.end()) {
             return;
@@ -81,23 +82,23 @@ class WindowEventBus {
         // 拷贝订阅列表再遍历：回调内可能新订阅 / 取消订阅，直接遍历原容器会使迭代器失效。
         const std::vector<Entry> entries = it->second;
         for (const Entry &e : entries) {
-            if (e.filter_from == kInvalidWindowId || e.filter_from == from) {
+            if (e.filter_from == AURORA_INVALID_WINDOW_ID || e.filter_from == from) {
                 e.invoke(&payload, from);
             }
         }
     }
 
     /// @brief 取消订阅（幂等）；`Subscription` 析构时已自动调用。
-    auto off(Token token) -> void { erase_token(*state_, token); }
+    auto off(Token token) const -> void { erase_token(*state_, token); }
 
     /// @brief 取消全部订阅（窗口销毁 / 应用收尾时清理）。
-    auto clear() -> void { state_->subs.clear(); }
+    auto clear() const -> void { state_->subs.clear(); }
 
     /// @brief 当前订阅者总数（诊断 / 测试用）。
     [[nodiscard]] auto subscriber_count() const -> std::size_t {
         std::size_t n = 0;
-        for (const auto &kv : state_->subs) {
-            n += kv.second.size();
+        for (const auto &kvs : state_->subs | std::views::values) {
+            n += kvs.size();
         }
         return n;
     }
@@ -105,7 +106,7 @@ class WindowEventBus {
   private:
     struct Entry {
         Token token = 0;
-        WindowId filter_from = kInvalidWindowId;
+        WindowId filter_from = AURORA_INVALID_WINDOW_ID;
         std::function<void(const void *, WindowId)> invoke;
     };
     struct State {

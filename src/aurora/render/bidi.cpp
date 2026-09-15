@@ -187,7 +187,7 @@ struct XResult {
     stack.push_back(
         Embedding{.level = base_level, .rtl = (base_level % 2U) != 0U, .has_override = false,
                   .override_rtl = false, .isolate = false});
-    constexpr std::uint8_t kMaxLevel = 125U;
+    constexpr std::uint8_t AURORA_MAX_LEVEL = 125U;
 
     for (std::size_t i = 0; i < n; ++i) {
         const Bc bc = bidi_class_of(text[i]);
@@ -204,8 +204,8 @@ struct XResult {
             } else {
                 nl = static_cast<std::uint8_t>((nl % 2U == 0U) ? nl + 2U : nl + 1U);
             }
-            if (nl > kMaxLevel) {
-                nl = kMaxLevel;
+            if (nl > AURORA_MAX_LEVEL) {
+                nl = AURORA_MAX_LEVEL;
             }
             stack.push_back(Embedding{.level = nl, .rtl = (nl % 2U) != 0U,
                                       .has_override = (bc == Bc::LRO || bc == Bc::RLO),

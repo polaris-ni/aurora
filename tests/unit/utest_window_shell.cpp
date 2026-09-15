@@ -21,7 +21,7 @@ namespace {
 auto make_scene(std::string label) -> Scene { return Scene{Node{std::make_shared<Text>(std::move(label))}}; }
 
 /// @brief 窗口选项：角色 / owner / 模态 / 帧上限（帧上限保证 `run()` 必然收敛）。
-auto make_opts(std::string title, WindowRole role = WindowRole::Main, WindowId owner = kInvalidWindowId,
+auto make_opts(std::string title, WindowRole role = WindowRole::Main, WindowId owner = AURORA_INVALID_WINDOW_ID,
                bool modal = false, int frames = -1) -> WindowOptions {
     WindowOptions o;
     o.title = std::move(title);
@@ -51,7 +51,7 @@ auto surface_of(WindowHost *host) -> HeadlessSurface * {
 }  // namespace
 
 AURORA_TEST_CASE(modal_window_disables_owner_input_until_closed) {
-    const auto oa = make_opts("owner", WindowRole::Main, kInvalidWindowId, false, 3);
+    const auto oa = make_opts("owner", WindowRole::Main, AURORA_INVALID_WINDOW_ID, false, 3);
     Application app{make_scene("owner"), make_window(oa), oa};
     WindowHost *const owner = app.windows().front();
     HeadlessSurface *const owner_surface = surface_of(owner);

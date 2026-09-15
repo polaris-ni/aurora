@@ -185,7 +185,7 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title) -
         return 2;
     }
 
-    const int total = static_cast<int>(aurora::kCursorShapeCount);
+    const int total = static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT);
     emit(aurora_verify::pad_right("#", 3) + aurora_verify::pad_right("shape(rfc name)", 20) +
          aurora_verify::pad_right("expect(IDC_*)", 20) + aurora_verify::pad_right("readback", 20) +
          aurora_verify::pad_right("match", 7) + "GetCursor(thread)");

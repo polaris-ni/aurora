@@ -59,7 +59,7 @@ AURORA_TEST_CASE(open_window_registers_distinct_hosts) {
 
     AURORA_TEST_CHECK_EQ(app.window_count(), 3U);
     // id 唯一、非哨兵，且互不相等。
-    AURORA_TEST_CHECK_NE(id_a, kInvalidWindowId);
+    AURORA_TEST_CHECK_NE(id_a, AURORA_INVALID_WINDOW_ID);
     AURORA_TEST_CHECK_NE(id_a, id_b);
     AURORA_TEST_CHECK_NE(first, id_a);
     // 按 id 可检索到宿主；未知 id 返回 nullptr。

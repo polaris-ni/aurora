@@ -198,7 +198,7 @@ auto main(int argc, char **argv) -> int {
     emit(std::string("GLFW ") + aurora_verify::format_int(major) + "." + aurora_verify::format_int(minor) + "." +
          aurora_verify::format_int(revision) + "  " + glfwGetVersionString());
 
-    const int total = static_cast<int>(aurora::kCursorShapeCount);
+    const int total = static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT);
     GLFWwindow *window =
         glfwCreateWindow(420, 260, "aurora-verify-i1-cursor-glfw", nullptr, nullptr);
     if (window == nullptr) {
@@ -210,8 +210,8 @@ auto main(int argc, char **argv) -> int {
     glfwShowWindow(window);
 
     // ---- 句柄池：每个「标准光标 id」只建一份（与后端 Impl::cursors 缓存语义一致）----
-    std::array<int, aurora::kCursorShapeCount> pool_ids{};
-    std::array<GLFWcursor *, aurora::kCursorShapeCount> pool_handles{};
+    std::array<int, aurora::AURORA_CURSOR_SHAPE_COUNT> pool_ids{};
+    std::array<GLFWcursor *, aurora::AURORA_CURSOR_SHAPE_COUNT> pool_handles{};
     int pool_size = 0;
     bool create_failed = false;
     const auto handle_for_id = [&](int id) -> GLFWcursor * {
@@ -232,7 +232,7 @@ auto main(int argc, char **argv) -> int {
     };
 
     // ---- 逐形状解析句柄（不可映射者复用 Arrow 句柄，等价后端的回退分支）----
-    std::array<GLFWcursor *, aurora::kCursorShapeCount> handles{};
+    std::array<GLFWcursor *, aurora::AURORA_CURSOR_SHAPE_COUNT> handles{};
     for (int i = 0; i < total; ++i) {
         const auto shape = static_cast<aurora::CursorShape>(i);
         const int id = mirrored_standard_cursor(shape);
@@ -250,7 +250,7 @@ auto main(int argc, char **argv) -> int {
 
     // ---- 自动段判定 ----
     int distinct_actual = 0;
-    std::array<const GLFWcursor *, aurora::kCursorShapeCount> seen{};
+    std::array<const GLFWcursor *, aurora::AURORA_CURSOR_SHAPE_COUNT> seen{};
     int fallback_mismatch = 0;
 
     emit(aurora_verify::pad_right("#", 3) + aurora_verify::pad_right("shape(rfc name)", 20) +

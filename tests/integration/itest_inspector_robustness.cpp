@@ -26,7 +26,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 using SOCKET = int;
-constexpr SOCKET kInvalidSocket = -1;
+constexpr SOCKET AURORA_INVALID_SOCKET = -1;
 inline auto closesocket(SOCKET s) -> int { return ::close(s); }
 #endif
 

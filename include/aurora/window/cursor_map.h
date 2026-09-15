@@ -17,15 +17,15 @@ namespace aurora {
 /// - **Wasm / 浏览器**：`canvas.style.cursor` 直接吃 CSS 关键字 → 本表即其映射。
 /// - **GLFW / Win32 / X11 / macOS**：需要各自原生句柄枚举（`GLFW_*_CURSOR` / `IDC_*` /
 ///   `XC_*` / `NSCursor` 选择器），无法共用字符串，故在各自后端 `.cpp` 内 `switch`
-///   按 `CursorShape` 取值序索引（见 `kCursorShapeCount` 长度契约）。
+///   按 `CursorShape` 取值序索引（见 `AURORA_CURSOR_SHAPE_COUNT` 长度契约）。
 ///
 /// @note 本表是「语义 → 规范名」的单向权威。新增 `CursorShape` 取值时须同步扩本表、
-/// 各后端映射表与 `utest_cursor_map`，三处长度契约由 `kCursorShapeCount` 对齐。
+/// 各后端映射表与 `utest_cursor_map`，三处长度契约由 `AURORA_CURSOR_SHAPE_COUNT` 对齐。
 
 /// @brief `CursorShape` 的全部取值个数。
-/// 各后端映射表（GLFW/Win32/X11/macOS）以 `static_assert(std::size(kMap) == kCursorShapeCount)`
+/// 各后端映射表（GLFW/Win32/X11/macOS）以 `static_assert(std::size(kMap) == AURORA_CURSOR_SHAPE_COUNT)`
 /// 断言长度，新增形状漏填即编译期红灯；`utest_cursor_map` 另断言本表本身覆盖全部取值。
-inline constexpr std::size_t kCursorShapeCount = 11;
+inline constexpr std::size_t AURORA_CURSOR_SHAPE_COUNT = 11;
 
 /// @brief 光标形状 → 规范名（freedesktop 光标主题名 / CSS `cursor` 关键字）。
 ///

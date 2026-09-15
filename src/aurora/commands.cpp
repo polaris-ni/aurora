@@ -20,10 +20,10 @@ constexpr auto is_word_boundary(char c) -> bool {
 }
 
 /// @brief 间隔惩罚上限（避免长间隔把得分压到哨兵值 -1 附近）。
-constexpr int kMaxGapPenalty = 3;
+constexpr int AURORA_MAX_GAP_PENALTY = 3;
 
 /// @brief 标题长度惩罚分母：标题越长，同分下越靠后（促使短标题优先）。
-constexpr std::size_t kLengthPenaltyDivisor = 16;
+constexpr std::size_t AURORA_LENGTH_PENALTY_DIVISOR = 16;
 
 }  // namespace
 
@@ -45,7 +45,7 @@ auto command_fuzzy_score(const std::string &query, const std::string &text) -> i
                 score += 2;  // 连续命中
             }
             const std::size_t gap = ti - prev_match - 1;
-            score -= static_cast<int>(std::min<std::size_t>(gap, kMaxGapPenalty));  // 间隔惩罚
+            score -= static_cast<int>(std::min<std::size_t>(gap, AURORA_MAX_GAP_PENALTY));  // 间隔惩罚
         }
         if (ti == 0 || is_word_boundary(text[ti - 1])) {
             score += 3;  // 首字符或词边界后命中
@@ -57,7 +57,7 @@ auto command_fuzzy_score(const std::string &query, const std::string &text) -> i
     if (qi < query.size()) {
         return -1;  // 非子序列：不匹配
     }
-    score -= static_cast<int>(text.size() / kLengthPenaltyDivisor);  // 轻微长度惩罚
+    score -= static_cast<int>(text.size() / AURORA_LENGTH_PENALTY_DIVISOR);  // 轻微长度惩罚
     return std::max(0, score);  // 有效匹配恒 ≥ 0，与「不匹配 = -1」不混
 }
 

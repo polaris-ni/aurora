@@ -18,7 +18,6 @@
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
-#include "aurora/widget/containers.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/text_input.h"
 #include "aurora/widget/widget.h"
@@ -56,7 +55,7 @@ class CommandPalette : public Container {
         });
         field->set_on_submit([this](const std::string & /*value*/) -> void { (void)execute_selected(); });
         field_raw_ = field.get();
-        children_.push_back(Node{std::move(field)});
+        children_.emplace_back(std::move(field));
         set_focusable(false);  // 面板本身不参与焦点序：子树内仅搜索框可聚焦（见类注释）
     }
 
@@ -214,104 +213,6 @@ class CommandPalette : public Container {
         mark_needs_paint();
     }
 
-  protected:
-    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        if (!open_) {
-            card_box_ = Rect{};
-            return Size{.width = 0.0F, .height = 0.0F};
-        }
-        Size self = c.max;
-        if (!c.max.is_finite()) {
-            self = Size{.width = kMaxCardWidth + (kMaskMargin * 2.0F), .height = 480.0F};
-        }
-        const float card_w = std::clamp(self.width - (kMaskMargin * 2.0F), kMinCardWidth, kMaxCardWidth);
-        const float list_h = results_.empty() ? kRowHeight : static_cast<float>(results_.size()) * kRowHeight;
-        const float card_h = kCardPadding + kFieldHeight + kGap + list_h + kFooterHeight + kCardPadding;
-        card_box_ = Rect{.origin = Point{.x = (self.width - card_w) * 0.5F, .y = (self.height - card_h) * 0.5F},
-                         .size = Size{.width = card_w, .height = card_h}};
-        if (field_raw_ != nullptr) {
-            const Size field_size{.width = card_w - (kCardPadding * 2.0F), .height = kFieldHeight};
-            (void)field_raw_->layout(Constraints{.min = field_size, .max = field_size}, ctx);
-        }
-        return self;
-    }
-
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        if (!open_) {
-            return;
-        }
-        const Theme &theme = inherit_theme(ctx);
-        const Rect card = to_global(card_box_, bounds);
-
-        // ① 半透明遮罩（与 Dialog 同款，视觉统一）
-        p.fill_rect(bounds, Color{0, 0, 0, 128});
-
-        // ② 居中圆角卡片
-        p.fill_rounded_rect(card, kCornerRadius, theme.background);
-
-        // ③ 搜索框（子控件自绘）
-        if (field_raw_ != nullptr) {
-            field_raw_->paint(p, to_global(field_box(), bounds), ctx);
-        }
-
-        // ④ 分隔线
-        const float divider_y = card.origin.y + kCardPadding + kFieldHeight + (kGap * 0.5F);
-        p.fill_rect(Rect{.origin = Point{.x = card.origin.x, .y = divider_y},
-                         .size = Size{.width = card.size.width, .height = 1.0F}},
-                    Color{0, 0, 0, 40});
-
-        // ⑤ 结果列表 / 空态
-        const Font row_font{.size_pt = kRowFontSize};
-        const float list_top = card.origin.y + kCardPadding + kFieldHeight + kGap;
-        const Color muted{150, 150, 152, 255};
-        if (results_.empty()) {
-            p.draw_text(Rect{.origin = Point{.x = card.origin.x + kCardPadding, .y = list_top},
-                             .size = Size{.width = card.size.width - (kCardPadding * 2.0F), .height = kRowHeight}},
-                        "No matching commands", row_font, muted);
-        } else {
-            const float text_h = render::FontEngine::measure_height(row_font);
-            for (std::size_t i = 0; i < results_.size(); ++i) {
-                const float row_y = list_top + (static_cast<float>(i) * kRowHeight);
-                const bool is_selected = (i == selected_);
-                if (is_selected) {
-                    p.fill_rounded_rect(Rect{.origin = Point{.x = card.origin.x + (kCardPadding * 0.5F), .y = row_y},
-                                             .size = Size{.width = card.size.width - kCardPadding, .height = kRowHeight}},
-                                        kRowCornerRadius, theme.primary.with_alpha(48));
-                }
-                const Command &cmd = *results_[i];
-                const float text_y = row_y + ((kRowHeight - text_h) * 0.5F);
-                const Color title_color = cmd.action ? theme.text : muted;
-                p.draw_text(Rect{.origin = Point{.x = card.origin.x + kCardPadding, .y = text_y},
-                                 .size = Size{.width = (card.size.width * 0.7F) - kCardPadding, .height = text_h}},
-                            cmd.title, row_font, title_color);
-                if (!cmd.category.empty()) {
-                    p.draw_text(Rect{.origin = Point{.x = card.origin.x + (card.size.width * 0.7F), .y = text_y},
-                                     .size = Size{.width = (card.size.width * 0.3F) - (kCardPadding * 2.0F),
-                                                  .height = text_h}},
-                                cmd.category, row_font, muted);
-                }
-            }
-        }
-
-        // ⑥ 底部：选中命令的快捷键提示
-        const std::string hint = selected_shortcut_text();
-        if (!hint.empty()) {
-            p.draw_text(Rect{.origin = Point{.x = card.origin.x + kCardPadding,
-                                             .y = card.origin.y + card.size.height - kFooterHeight},
-                             .size = Size{.width = card.size.width - (kCardPadding * 2.0F),
-                                          .height = kFooterHeight - kCardPadding}},
-                        hint, row_font, muted);
-        }
-    }
-
-    /// @brief 模态命中：打开时本控件占满命中（吞掉点击，点击遮罩即关闭）；关闭时不占位。
-    auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * override {
-        (void)local;
-        (void)bounds;
-        (void)ctx;
-        return open_ ? this : nullptr;
-    }
-
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (!open_) {
             return;
@@ -333,12 +234,117 @@ class CommandPalette : public Container {
         }
     }
 
+  protected:
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        if (!open_) {
+            card_box_ = Rect{};
+            return Size{.width = 0.0F, .height = 0.0F};
+        }
+        Size self = c.max;
+        if (!c.max.is_finite()) {
+            self = Size{.width = AURORA_MAX_CARD_WIDTH + (AURORA_MASK_MARGIN * 2.0F), .height = 480.0F};
+        }
+        const float card_w =
+            std::clamp(self.width - (AURORA_MASK_MARGIN * 2.0F), AURORA_MIN_CARD_WIDTH, AURORA_MAX_CARD_WIDTH);
+        const float list_h =
+            results_.empty() ? AURORA_ROW_HEIGHT : static_cast<float>(results_.size()) * AURORA_ROW_HEIGHT;
+        const float card_h = AURORA_CARD_PADDING + AURORA_FIELD_HEIGHT + AURORA_GAP + list_h + AURORA_FOOTER_HEIGHT +
+                             AURORA_CARD_PADDING;
+        card_box_ = Rect{.origin = Point{.x = (self.width - card_w) * 0.5F, .y = (self.height - card_h) * 0.5F},
+                         .size = Size{.width = card_w, .height = card_h}};
+        if (field_raw_ != nullptr) {
+            const Size field_size{.width = card_w - (AURORA_CARD_PADDING * 2.0F), .height = AURORA_FIELD_HEIGHT};
+            (void)field_raw_->layout(Constraints{.min = field_size, .max = field_size}, ctx);
+        }
+        return self;
+    }
+
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        if (!open_) {
+            return;
+        }
+        const Theme &theme = inherit_theme(ctx);
+        const Rect card = to_global(card_box_, bounds);
+
+        // ① 半透明遮罩（与 Dialog 同款，视觉统一）
+        p.fill_rect(bounds, Color{0, 0, 0, 128});
+
+        // ② 居中圆角卡片
+        p.fill_rounded_rect(card, AURORA_CORNER_RADIUS, theme.background);
+
+        // ③ 搜索框（子控件自绘）
+        if (field_raw_ != nullptr) {
+            field_raw_->paint(p, to_global(field_box(), bounds), ctx);
+        }
+
+        // ④ 分隔线
+        const float divider_y = card.origin.y + AURORA_CARD_PADDING + AURORA_FIELD_HEIGHT + (AURORA_GAP * 0.5F);
+        p.fill_rect(Rect{.origin = Point{.x = card.origin.x, .y = divider_y},
+                         .size = Size{.width = card.size.width, .height = 1.0F}},
+                    Color{0, 0, 0, 40});
+
+        // ⑤ 结果列表 / 空态
+        const Font row_font{.size_pt = AURORA_ROW_FONT_SIZE};
+        const float list_top = card.origin.y + AURORA_CARD_PADDING + AURORA_FIELD_HEIGHT + AURORA_GAP;
+        constexpr Color muted{150, 150, 152, 255};
+        if (results_.empty()) {
+            p.draw_text(Rect{.origin = Point{.x = card.origin.x + AURORA_CARD_PADDING, .y = list_top},
+                             .size = Size{.width = card.size.width - (AURORA_CARD_PADDING * 2.0F),
+                                          .height = AURORA_ROW_HEIGHT}},
+                        "No matching commands", row_font, muted);
+        } else {
+            const float text_h = render::FontEngine::measure_height(row_font);
+            for (std::size_t i = 0; i < results_.size(); ++i) {
+                const float row_y = list_top + (static_cast<float>(i) * AURORA_ROW_HEIGHT);
+                const bool is_selected = (i == selected_);
+                if (is_selected) {
+                    p.fill_rounded_rect(
+                        Rect{.origin = Point{.x = card.origin.x + (AURORA_CARD_PADDING * 0.5F), .y = row_y},
+                             .size = Size{.width = card.size.width - AURORA_CARD_PADDING, .height = AURORA_ROW_HEIGHT}},
+                        AURORA_ROW_CORNER_RADIUS, theme.primary.with_alpha(48));
+                }
+                const Command &cmd = *results_[i];
+                const float text_y = row_y + ((AURORA_ROW_HEIGHT - text_h) * 0.5F);
+                const Color title_color = cmd.action ? theme.text : muted;
+                p.draw_text(
+                    Rect{.origin = Point{.x = card.origin.x + AURORA_CARD_PADDING, .y = text_y},
+                         .size = Size{.width = (card.size.width * 0.7F) - AURORA_CARD_PADDING, .height = text_h}},
+                    cmd.title, row_font, title_color);
+                if (!cmd.category.empty()) {
+                    p.draw_text(Rect{.origin = Point{.x = card.origin.x + (card.size.width * 0.7F), .y = text_y},
+                                     .size = Size{.width = (card.size.width * 0.3F) - (AURORA_CARD_PADDING * 2.0F),
+                                                  .height = text_h}},
+                                cmd.category, row_font, muted);
+                }
+            }
+        }
+
+        // ⑥ 底部：选中命令的快捷键提示
+        const std::string hint = selected_shortcut_text();
+        if (!hint.empty()) {
+            p.draw_text(Rect{.origin = Point{.x = card.origin.x + AURORA_CARD_PADDING,
+                                             .y = card.origin.y + card.size.height - AURORA_FOOTER_HEIGHT},
+                             .size = Size{.width = card.size.width - (AURORA_CARD_PADDING * 2.0F),
+                                          .height = AURORA_FOOTER_HEIGHT - AURORA_CARD_PADDING}},
+                        hint, row_font, muted);
+        }
+    }
+
+    /// @brief 模态命中：打开时本控件占满命中（吞掉点击，点击遮罩即关闭）；关闭时不占位。
+    auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * override {
+        (void)local;
+        (void)bounds;
+        (void)ctx;
+        return open_ ? this : nullptr;
+    }
+
   private:
     /// @brief 搜索框在容器局部坐标系中的矩形（不含 bounds.origin）。
     [[nodiscard]] auto field_box() const -> Rect {
         return Rect{
-            .origin = Point{.x = card_box_.origin.x + kCardPadding, .y = card_box_.origin.y + kCardPadding},
-            .size = Size{.width = card_box_.size.width - (kCardPadding * 2.0F), .height = kFieldHeight}};
+            .origin =
+                Point{.x = card_box_.origin.x + AURORA_CARD_PADDING, .y = card_box_.origin.y + AURORA_CARD_PADDING},
+            .size = Size{.width = card_box_.size.width - (AURORA_CARD_PADDING * 2.0F), .height = AURORA_FIELD_HEIGHT}};
     }
 
     [[nodiscard]] static auto to_global(const Rect &local, const Rect &bounds) -> Rect {
@@ -351,12 +357,12 @@ class CommandPalette : public Container {
         if (local.x < card_box_.origin.x || local.x > card_box_.origin.x + card_box_.size.width) {
             return -1;
         }
-        const float list_top = card_box_.origin.y + kCardPadding + kFieldHeight + kGap;
+        const float list_top = card_box_.origin.y + AURORA_CARD_PADDING + AURORA_FIELD_HEIGHT + AURORA_GAP;
         const float dy = local.y - list_top;
         if (dy < 0.0F) {
             return -1;
         }
-        const auto index = static_cast<std::size_t>(dy / kRowHeight);
+        const auto index = static_cast<std::size_t>(dy / AURORA_ROW_HEIGHT);
         if (index >= results_.size()) {
             return -1;
         }
@@ -391,12 +397,14 @@ class CommandPalette : public Container {
         if (sr == nullptr || !key_bindings_.empty()) {
             return;
         }
-        key_bindings_.push_back(sr->add(KeyCombo{KeyCode::Escape}, [this]() -> void { close(); }, ShortcutScope::Global,
-                                        "Close command palette"));
-        key_bindings_.push_back(sr->add(KeyCombo{KeyCode::ArrowUp}, [this]() -> void { move_selection(-1); },
-                                        ShortcutScope::Global, "Select previous command"));
-        key_bindings_.push_back(sr->add(KeyCombo{KeyCode::ArrowDown}, [this]() -> void { move_selection(1); },
-                                        ShortcutScope::Global, "Select next command"));
+        key_bindings_.push_back(sr->add(
+            KeyCombo{KeyCode::Escape}, [this]() -> void { close(); }, ShortcutScope::Global, "Close command palette"));
+        key_bindings_.push_back(sr->add(
+            KeyCombo{KeyCode::ArrowUp}, [this]() -> void { move_selection(-1); }, ShortcutScope::Global,
+            "Select previous command"));
+        key_bindings_.push_back(sr->add(
+            KeyCombo{KeyCode::ArrowDown}, [this]() -> void { move_selection(1); }, ShortcutScope::Global,
+            "Select next command"));
     }
 
     auto remove_key_bindings() -> void {
@@ -409,29 +417,29 @@ class CommandPalette : public Container {
         key_bindings_.clear();
     }
 
-    static constexpr float kMaskMargin = 24.0F;
-    static constexpr float kMinCardWidth = 280.0F;
-    static constexpr float kMaxCardWidth = 560.0F;
-    static constexpr float kCardPadding = 12.0F;
-    static constexpr float kFieldHeight = 36.0F;
-    static constexpr float kRowHeight = 30.0F;
-    static constexpr float kFooterHeight = 24.0F;
-    static constexpr float kGap = 8.0F;
-    static constexpr float kCornerRadius = 8.0F;
-    static constexpr float kRowCornerRadius = 4.0F;
-    static constexpr float kRowFontSize = 14.0F;
+    static constexpr float AURORA_MASK_MARGIN = 24.0F;
+    static constexpr float AURORA_MIN_CARD_WIDTH = 280.0F;
+    static constexpr float AURORA_MAX_CARD_WIDTH = 560.0F;
+    static constexpr float AURORA_CARD_PADDING = 12.0F;
+    static constexpr float AURORA_FIELD_HEIGHT = 36.0F;
+    static constexpr float AURORA_ROW_HEIGHT = 30.0F;
+    static constexpr float AURORA_FOOTER_HEIGHT = 24.0F;
+    static constexpr float AURORA_GAP = 8.0F;
+    static constexpr float AURORA_CORNER_RADIUS = 8.0F;
+    static constexpr float AURORA_ROW_CORNER_RADIUS = 4.0F;
+    static constexpr float AURORA_ROW_FONT_SIZE = 14.0F;
 
-    CommandRegistry *commands_ = nullptr;      ///< 非拥有
-    TextInput *field_raw_ = nullptr;           ///< 子搜索框的非拥有视图
-    std::vector<const Command *> results_;     ///< 当前过滤结果（按得分排序）
-    std::size_t selected_ = 0;                 ///< 当前选中下标
-    std::size_t max_results_ = 50;             ///< 结果上限
-    std::string query_;                        ///< 当前查询串
-    bool open_ = false;                        ///< 是否显示
-    Rect card_box_ = {};                       ///< 卡片矩形（容器局部坐标，布局期计算）
-    std::vector<int> key_bindings_;            ///< 打开期临时快捷键绑定 id
+    CommandRegistry *commands_ = nullptr;  ///< 非拥有
+    TextInput *field_raw_ = nullptr;  ///< 子搜索框的非拥有视图
+    std::vector<const Command *> results_;  ///< 当前过滤结果（按得分排序）
+    std::size_t selected_ = 0;  ///< 当前选中下标
+    std::size_t max_results_ = 50;  ///< 结果上限
+    std::string query_;  ///< 当前查询串
+    bool open_ = false;  ///< 是否显示
+    Rect card_box_ = {};  ///< 卡片矩形（容器局部坐标，布局期计算）
+    std::vector<int> key_bindings_;  ///< 打开期临时快捷键绑定 id
     std::function<void(const std::string &)> on_execute_;  ///< 执行回调
-    std::function<void()> on_close_;                       ///< 关闭回调
+    std::function<void()> on_close_;  ///< 关闭回调
 };
 
 }  // namespace aurora

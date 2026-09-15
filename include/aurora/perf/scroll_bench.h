@@ -122,7 +122,7 @@ class ScrollBenchHarness {
         SettleReason settle_reason = SettleReason::FrameCap;  ///< 落定退出原因
 
         /// @brief 触边反向帧占比上限：超过则判定内容太短，整段读数以触边行为为主。
-        static constexpr double kMaxReversalRatio = 0.10;  // NOLINT(readability-identifier-naming)
+        static constexpr double AURORA_MAX_REVERSAL_RATIO = 0.10;  // NOLINT(readability-identifier-naming)
 
         /// @brief 采样期间内容几何是否稳定（采样前后行程一致）。
         ///
@@ -138,7 +138,7 @@ class ScrollBenchHarness {
 
         /// @brief 读数是否可信。全部满足才为 true：定位到滚动控件、落定阶段正常结束、
         /// 采样期每帧都真的在滚、无 idle 跳帧、树确实可滚、内容几何稳定、触边反向占比
-        /// 不超过 `kMaxReversalRatio`。任一不满足都说明「测了个寂寞」，性能数不该采信。
+        /// 不超过 `AURORA_MAX_REVERSAL_RATIO`。任一不满足都说明「测了个寂寞」，性能数不该采信。
         [[nodiscard]] auto trustworthy() const -> bool;
 
         // ---- 汇总读数（转发 `report`，单一数据源）----

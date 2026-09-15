@@ -263,7 +263,7 @@ struct GlfwSurface::Impl {
 
     // ---- 光标形状：标准光标句柄按 CursorShape 取值序缓存（nullptr = 未创建/不可用）----
     // 复用句柄而非每次 glfwCreateStandardCursor：后者每次创建都是新资源，反复悬停切换必泄漏。
-    std::array<GLFWcursor *, kCursorShapeCount> cursors{};
+    std::array<GLFWcursor *, AURORA_CURSOR_SHAPE_COUNT> cursors{};
     /// @brief 取（惰性创建）该形状的标准光标句柄；GLFW 无对应形状时返回 nullptr（调用方回退 Arrow）。
     auto cursor_for(CursorShape shape) -> GLFWcursor *;
 

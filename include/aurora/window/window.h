@@ -20,8 +20,8 @@
 #include "aurora/environment/media_query.h"
 #include "aurora/perf/profiler.h"
 #include "aurora/render/detail/paint_timing.h"
-#include "aurora/render/display_list.h"
 #include "aurora/render/dirty_region.h"
+#include "aurora/render/display_list.h"
 #include "aurora/render/painter.h"
 #include "aurora/render/rhi/rhi_frame_sink.h"
 #include "aurora/widget/widget.h"
@@ -40,12 +40,12 @@ namespace aurora {
 
 /// @brief 窗口标识：进程内唯一、单调递增的逻辑句柄（非 OS 窗口句柄）。
 ///
-/// 由 `Application` 在登记窗口宿主（`WindowHost`）时分配，`kInvalidWindowId` 为哨兵
+/// 由 `Application` 在登记窗口宿主（`WindowHost`）时分配，`AURORA_INVALID_WINDOW_ID` 为哨兵
 /// （表示「无窗口」/「无 owner」）。跨后端稳定：Headless 与真实后端同一套取值。
 using WindowId = std::uint32_t;
 
 /// @brief 无效窗口 id：未找到宿主、无 owner 或尚未分配时的取值（0 保留不用）。
-inline constexpr WindowId kInvalidWindowId = 0U;
+inline constexpr WindowId AURORA_INVALID_WINDOW_ID = 0U;
 
 /// @brief 窗口角色：决定窗口的生命周期归属与退出连带行为（多窗口退出策略的输入）。
 ///
@@ -55,7 +55,7 @@ inline constexpr WindowId kInvalidWindowId = 0U;
 ///
 /// 具体连带行为由 `Application` 的退出策略消费，本枚举只承载「身份」语义。
 enum class WindowRole : std::uint8_t {
-    Main,       ///< 主窗口：默认角色，保证既有单窗口用法行为不变
+    Main,  ///< 主窗口：默认角色，保证既有单窗口用法行为不变
     Auxiliary,  ///< 辅助窗口：与主窗口平级的独立顶层窗口
     Transient,  ///< 临时窗口：依附 owner 显示，随 owner 生命周期收敛
 };
@@ -66,7 +66,7 @@ enum class WindowRole : std::uint8_t {
 enum class ExitPolicy : std::uint8_t {
     LastWindowClosed,  ///< 默认：最后一个**有 OS 窗口**的宿主关闭即退出（≡ 历史单窗口行为）
     MainWindowClosed,  ///< 主窗口关闭即连带关闭**全部**窗口并退出（传统单主窗应用）
-    ExplicitOnly,      ///< 仅 `Application::quit()` 可退出：窗口全关也不退出（常驻型/托盘型应用）
+    ExplicitOnly,  ///< 仅 `Application::quit()` 可退出：窗口全关也不退出（常驻型/托盘型应用）
 };
 
 // =============================================================================
@@ -141,11 +141,11 @@ struct WindowOptions {
     /// @brief 窗口角色（多窗口生命周期语义，见 `WindowRole`；默认 `Main` 保证单窗口用法行为不变）。
     WindowRole role = WindowRole::Main;
 
-    /// @brief 依附的父窗口 id（`kInvalidWindowId` = 顶层窗口，无 owner）。
+    /// @brief 依附的父窗口 id（`AURORA_INVALID_WINDOW_ID` = 顶层窗口，无 owner）。
     ///
     /// 语义：`Transient`（及模态窗口）依附于 owner —— **owner 关闭时其从属窗口连带关闭**
     /// （由 `Application` 在帧末回收阶段执行）。
-    WindowId owner = kInvalidWindowId;
+    WindowId owner = AURORA_INVALID_WINDOW_ID;
 
     /// @brief 是否模态窗口：打开时建立到 `owner` 的 OS 层从属关系并**屏蔽 owner 的输入**，
     /// 关闭后自动恢复。
@@ -956,7 +956,7 @@ class Window {
     /// 随后走与软件路径相同的 finish_present（GLFW GPU 模式下 present 即 swapBuffers）。
     /// `begin_frame` 失败（初始化失败/上下文丢失）：本帧已录命令回退软件栅格化（底色 FillRect
     /// 已在 DL 内，replay 即完整帧），此后本 Window 生命周期永久走软件路径，不做逐帧软硬混合。
-    [[nodiscard]] auto present_gpu_frame(rhi::RhiFrameSink &sink, DisplayList &frame_dl, const FramePlan &plan,
+    [[nodiscard]] auto present_gpu_frame(rhi::RhiFrameSink &sink, const DisplayList &frame_dl, const FramePlan &plan,
                                          bool hud_refreshed, double layout_ms, double paint_ms) -> Result<bool> {
         const Size sz = size();
         if (!sink.begin_frame(static_cast<int>(sz.width), static_cast<int>(sz.height), surface_->scale_factor())) {

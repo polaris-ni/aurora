@@ -112,7 +112,7 @@ AURORA_TEST_CASE(x11_surface_live_real_window_and_cursor_sweep) {
 
         // 两轮全形状：第 2 轮命中 Impl 的「按形状缓存句柄」分支（首轮才 XCreateFontCursor）。
         for (int round = 0; round < 2; ++round) {
-            for (int i = 0; i < static_cast<int>(aurora::kCursorShapeCount); ++i) {
+            for (int i = 0; i < static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT); ++i) {
                 surface.set_cursor(static_cast<aurora::CursorShape>(i));
             }
         }

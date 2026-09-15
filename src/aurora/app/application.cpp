@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <utility>
 
 #include "aurora/app/window_geometry.h"
 #include "aurora/core/log.h"
@@ -63,7 +64,7 @@ auto Application::register_host(Scene scene, std::unique_ptr<Window> window, con
     raw->attach_surface();
     // 模态窗口：建立到 owner 的 OS 层从属关系（恒浮于其上、随其最小化）并屏蔽 owner 输入。
     // 焦点无需额外陷阱——FocusManager 逐窗口隔离，焦点本就不跨窗；关闭时由 reap_closed 恢复。
-    if (opts.modal && opts.owner != kInvalidWindowId) {
+    if (opts.modal && opts.owner != AURORA_INVALID_WINDOW_ID) {
         if (auto *owner_host = window_host(opts.owner)) {
             if (owner_host->window() != nullptr && raw->window() != nullptr) {
                 raw->window()->surface().set_owner(&owner_host->window()->surface());
@@ -108,7 +109,7 @@ auto Application::set_window_geometry_store(preferences::Preferences *prefs) -> 
     }
 }
 
-auto Application::restore_geometry_for(WindowHost &host, const std::string &persist_id) -> void {
+auto Application::restore_geometry_for(WindowHost &host, const std::string &persist_id) const -> void {
     if (geometry_store_ == nullptr || persist_id.empty() || !host.has_window()) {
         return;
     }
@@ -117,7 +118,7 @@ auto Application::restore_geometry_for(WindowHost &host, const std::string &pers
     }
 }
 
-auto Application::window_host(WindowId id) -> WindowHost * {
+auto Application::window_host(WindowId id) const -> WindowHost * {
     for (auto &h : hosts_) {
         if (h->id() == id) {
             return h.get();
@@ -126,7 +127,7 @@ auto Application::window_host(WindowId id) -> WindowHost * {
     return nullptr;
 }
 
-auto Application::windows() -> std::vector<WindowHost *> {
+auto Application::windows() const -> std::vector<WindowHost *> {
     std::vector<WindowHost *> out;
     out.reserve(hosts_.size());
     for (auto &h : hosts_) {
@@ -135,7 +136,7 @@ auto Application::windows() -> std::vector<WindowHost *> {
     return out;
 }
 
-auto Application::close_window(WindowId id) -> void {
+auto Application::close_window(WindowId id) const -> void {
     if (auto *h = window_host(id)) {
         h->request_close();  // 下一次帧末由 reap_closed 回收
     }
@@ -184,9 +185,12 @@ auto Application::should_exit() const -> bool {
     return any_window;  // 全为无头宿主（纯无头 app）不驱动循环退出
 }
 
-auto Application::pump_all_once() -> void {
+auto Application::pump_all_once() const -> void {
     bool shared_pumped = false;
-    for (auto &h : hosts_) {
+    // 索引遍历：事件回调内可能 re-entrant 地 open/close 窗口（改动 hosts_ 大小并触发 vector 重分配），
+    // 每轮重新取 size() 并按下标取宿主，避免范围 for 的迭代器在 push_back 后失效。
+    for (std::size_t i = 0; i < hosts_.size(); ++i) {  // NOLINT(*-loop-convert)
+        WindowHost *const h = hosts_[i].get();
         if (!h->has_window()) {
             continue;  // 无头宿主无后端事件可抽
         }
@@ -200,15 +204,17 @@ auto Application::pump_all_once() -> void {
     }
 }
 
-auto Application::tick_all() -> void {
-    for (auto &h : hosts_) {
-        h->tick();
+auto Application::tick_all() const -> void {
+    // 索引遍历：tick 中动画完成等回调可能 re-entrant 地 open/close 窗口，按下标取宿主避免迭代器失效。
+    for (std::size_t i = 0; i < hosts_.size(); ++i) {  // NOLINT(*-loop-convert)
+        hosts_[i]->tick();
     }
 }
 
-auto Application::render_all(double dt) -> void {
-    for (auto &h : hosts_) {
-        (void)h->render_frame(dt);
+auto Application::render_all(double dt) const -> void {
+    // 索引遍历：render_frame 可能触发 re-entrant 的 open/close 窗口，按下标取宿主避免迭代器失效。
+    for (std::size_t i = 0; i < hosts_.size(); ++i) {  // NOLINT(*-loop-convert)
+        (void)hosts_[i]->render_frame(dt);
     }
 }
 
@@ -242,12 +248,12 @@ auto Application::reap_closed() -> void {
     // 全关时**保留主窗口宿主**：`scene()`/`focus()`/`window()` 等访问器在 run() 结束后仍要可用。
     if (closing.size() == hosts_.size()) {
         const WindowId keep = main_host_ != nullptr ? main_host_->id() : closing.back();
-        closing.erase(std::find(closing.begin(), closing.end(), keep));
+        closing.erase(std::ranges::find(closing, keep));
     }
 
     // ④ 逐个回收：解绑后端回调 → 销毁宿主 → 通知上层 → 连带关闭其从属窗口。
     for (const WindowId id : closing) {
-        const auto it = std::find_if(hosts_.begin(), hosts_.end(), [id](const auto &h) { return h->id() == id; });
+        const auto it = std::ranges::find_if(hosts_, [id](const auto &h) { return h->id() == id; });
         if (it == hosts_.end()) {
             continue;
         }
@@ -255,7 +261,7 @@ auto Application::reap_closed() -> void {
         const WindowOptions &o = (*it)->options();
         // 模态窗口关闭 → 恢复被它屏蔽的 owner 输入。必须在宿主销毁**之前**做：
         // 销毁后 owner 将永远停在禁用态。（几何持久化已在 ② 阶段完成。）
-        if (o.modal && o.owner != kInvalidWindowId) {
+        if (o.modal && o.owner != AURORA_INVALID_WINDOW_ID) {
             if (auto *owner_host = window_host(o.owner)) {
                 if (owner_host != it->get() && owner_host->window() != nullptr) {
                     owner_host->window()->surface().set_enabled(true);
@@ -328,7 +334,8 @@ auto Application::wait_once(const std::chrono::steady_clock::time_point &frame_s
         return;  // 全为无头宿主：无等待通道
     }
     if (!waiter->window()->surface().waits_thread_queue() && count_window_hosts() > 1) {
-        wait_ms = wait_ms < 0.0 ? kMultiSurfaceWaitCapMs : std::min(wait_ms, kMultiSurfaceWaitCapMs);
+        wait_ms =
+            wait_ms < 0.0 ? AURORA_MULTI_SURFACE_WAIT_CAP_MS : std::min(wait_ms, AURORA_MULTI_SURFACE_WAIT_CAP_MS);
     }
     const auto t0 = std::chrono::steady_clock::now();
     waiter->window()->surface().wait_events(wait_ms);
@@ -336,7 +343,7 @@ auto Application::wait_once(const std::chrono::steady_clock::time_point &frame_s
     waiter->frame_stats().record_wait(std::chrono::duration<double, std::milli>(t1 - t0).count());
 }
 
-auto Application::first_window_host() -> WindowHost * {
+auto Application::first_window_host() const -> WindowHost * {
     for (auto &h : hosts_) {
         if (h->has_window()) {
             return h.get();
@@ -355,10 +362,11 @@ auto Application::count_window_hosts() const -> std::size_t {
     return n;
 }
 
-auto Application::request_wake_all() -> void {
-    for (auto &h : hosts_) {
-        if (h->has_window()) {
-            h->window()->surface().request_wake();
+auto Application::request_wake_all() const -> void {
+    // 索引遍历：回调内可能 re-entrant 地修改 hosts_，按下标取宿主避免迭代器失效。
+    for (std::size_t i = 0; i < hosts_.size(); ++i) {  // NOLINT(*-loop-convert)
+        if (hosts_[i]->has_window()) {
+            hosts_[i]->window()->surface().request_wake();
         }
     }
 }
@@ -367,25 +375,25 @@ auto Application::request_wake_all() -> void {
 // 程序化派发（作用于主窗口；多窗口请用 `window_host(id)->dispatch_*`）
 // =============================================================================
 
-auto Application::dispatch_click(float x, float y) -> void {
+auto Application::dispatch_click(float x, float y) const -> void {
     if (main_host_ != nullptr) {
         main_host_->dispatch_pointer(x, y, MouseAction::Press);
     }
 }
 
-auto Application::dispatch_pointer(float x, float y, MouseAction action) -> void {
+auto Application::dispatch_pointer(float x, float y, MouseAction action) const -> void {
     if (main_host_ != nullptr) {
         main_host_->dispatch_pointer(x, y, action);
     }
 }
 
-auto Application::tick() -> void {
+auto Application::tick() const -> void {
     if (main_host_ != nullptr) {
         main_host_->tick();
     }
 }
 
-auto Application::dispatch_key(KeyEvent e) -> bool {
+auto Application::dispatch_key(const KeyEvent &e) const -> bool {
     if (main_host_ == nullptr) {
         return false;
     }
@@ -396,11 +404,11 @@ auto Application::dispatch_key(KeyEvent e) -> bool {
     return main_host_->dispatch_key(e);
 }
 
-auto Application::dispatch_text(TextInputEvent e) -> bool {
-    return main_host_ != nullptr && main_host_->dispatch_text(e);
+auto Application::dispatch_text(TextInputEvent e) const -> bool {
+    return main_host_ != nullptr && main_host_->dispatch_text(std::move(e));
 }
 
-auto Application::dispatch_touch(const TouchEvent &e) -> void {
+auto Application::dispatch_touch(const TouchEvent &e) const -> void {
     if (main_host_ != nullptr) {
         main_host_->dispatch_touch(e);
     }

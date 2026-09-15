@@ -131,7 +131,7 @@ struct X11Surface::Impl {
     int wake_fd[2] = {-1, -1};
     // 光标形状：`XCreateFontCursor` 句柄按 CursorShape 取值序缓存（0 = 未创建）。
     // 每次创建都是新 X 资源，必须复用；析构统一 XFreeCursor。
-    std::array<Cursor, kCursorShapeCount> cursors{};
+    std::array<Cursor, AURORA_CURSOR_SHAPE_COUNT> cursors{};
     // Visual 掩码位移（present swizzle：RGBA → X 原生像素序）。
     int rshift = 16;
     int gshift = 8;

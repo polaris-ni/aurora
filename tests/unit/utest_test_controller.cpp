@@ -27,8 +27,8 @@ namespace aurora::test_cases::utest_test_controller {
 namespace {
 
 /// @brief 固定视口（320×240）：文本在窄视口下必须换行，便于验证 set_viewport 的重排效果。
-constexpr int kWidth = 320;
-constexpr int kHeight = 240;
+constexpr int AURORA_WIDTH = 320;
+constexpr int AURORA_HEIGHT = 240;
 
 /// @brief 测试树干：Column[ Button#ok(label="OK"), Text#msg(content="hello"), TextInput#in ]。
 struct Fixture {
@@ -59,7 +59,7 @@ struct Fixture {
     }
 
     [[nodiscard]] auto controller() const -> TestController {
-        return TestController{tree(), TestControllerConfig{.width = kWidth, .height = kHeight}};
+        return TestController{tree(), TestControllerConfig{.width = AURORA_WIDTH, .height = AURORA_HEIGHT}};
     }
 };
 
@@ -109,7 +109,7 @@ AURORA_TEST_CASE(set_viewport_relayouts_tree) {
     Fixture fx;
     auto tc = fx.controller();
     AURORA_TEST_REQUIRE_TRUE(tc.pump().ok());
-    AURORA_TEST_CHECK_NEAR(tc.root_node().bounds().size.width, static_cast<float>(kWidth), 0.5F);
+    AURORA_TEST_CHECK_NEAR(tc.root_node().bounds().size.width, static_cast<float>(AURORA_WIDTH), 0.5F);
 
     AURORA_TEST_REQUIRE_TRUE(tc.set_viewport(640, 480).ok());
     AURORA_TEST_REQUIRE_TRUE(tc.pump().ok());

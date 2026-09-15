@@ -25,7 +25,7 @@ auto make_scene(std::string label) -> Scene { return Scene{Node{std::make_shared
 ///
 /// ⚠️ `open_window` 不会从 `Window` 反推选项——角色与 owner 必须显式传入，
 /// 否则宿主拿到的是默认选项（Main + 无 owner），连带关闭等语义将失效。
-auto make_opts(std::string title, WindowRole role = WindowRole::Main, WindowId owner = kInvalidWindowId,
+auto make_opts(std::string title, WindowRole role = WindowRole::Main, WindowId owner = AURORA_INVALID_WINDOW_ID,
                int frames = -1) -> WindowOptions {
     WindowOptions o;
     o.title = std::move(title);
@@ -48,7 +48,7 @@ auto make_window(const WindowOptions &o) -> std::unique_ptr<Window> {
 }  // namespace
 
 AURORA_TEST_CASE(default_policy_exits_when_last_window_closes) {
-    const auto oa = make_opts("A", WindowRole::Main, kInvalidWindowId, 5);
+    const auto oa = make_opts("A", WindowRole::Main, AURORA_INVALID_WINDOW_ID, 5);
     Application app{make_scene("A"), make_window(oa), oa};
     AURORA_TEST_CHECK_EQ(app.exit_policy(), ExitPolicy::LastWindowClosed);
 
@@ -66,7 +66,7 @@ AURORA_TEST_CASE(default_policy_exits_when_last_window_closes) {
 }
 
 AURORA_TEST_CASE(explicit_only_policy_runs_until_quit) {
-    const auto oa = make_opts("A", WindowRole::Main, kInvalidWindowId, 4);
+    const auto oa = make_opts("A", WindowRole::Main, AURORA_INVALID_WINDOW_ID, 4);
     Application app{make_scene("A"), make_window(oa), oa};
     app.set_exit_policy(ExitPolicy::ExplicitOnly);
     AURORA_TEST_CHECK_EQ(app.exit_policy(), ExitPolicy::ExplicitOnly);
@@ -85,7 +85,7 @@ AURORA_TEST_CASE(explicit_only_policy_runs_until_quit) {
 }
 
 AURORA_TEST_CASE(quit_exits_regardless_of_policy) {
-    const auto oa = make_opts("A", WindowRole::Main, kInvalidWindowId, 6);
+    const auto oa = make_opts("A", WindowRole::Main, AURORA_INVALID_WINDOW_ID, 6);
     Application app{make_scene("A"), make_window(oa), oa};
     app.set_exit_policy(ExitPolicy::ExplicitOnly);  // 最严格的策略下 quit() 依然生效
 
@@ -102,7 +102,7 @@ AURORA_TEST_CASE(quit_exits_regardless_of_policy) {
 }
 
 AURORA_TEST_CASE(main_window_closed_policy_closes_every_window) {
-    const auto oa = make_opts("main", WindowRole::Main, kInvalidWindowId, 6);
+    const auto oa = make_opts("main", WindowRole::Main, AURORA_INVALID_WINDOW_ID, 6);
     Application app{make_scene("main"), make_window(oa), oa};
     app.set_exit_policy(ExitPolicy::MainWindowClosed);
 
@@ -127,7 +127,7 @@ AURORA_TEST_CASE(main_window_closed_policy_closes_every_window) {
 }
 
 AURORA_TEST_CASE(transient_window_follows_its_owner) {
-    const auto oa = make_opts("owner", WindowRole::Main, kInvalidWindowId, 4);
+    const auto oa = make_opts("owner", WindowRole::Main, AURORA_INVALID_WINDOW_ID, 4);
     Application app{make_scene("owner"), make_window(oa), oa};
     const WindowId id_owner = app.main_window();
 
@@ -157,7 +157,7 @@ AURORA_TEST_CASE(transient_window_follows_its_owner) {
 }
 
 AURORA_TEST_CASE(on_window_closed_reports_reaped_window) {
-    const auto oa = make_opts("A", WindowRole::Main, kInvalidWindowId, 3);
+    const auto oa = make_opts("A", WindowRole::Main, AURORA_INVALID_WINDOW_ID, 3);
     Application app{make_scene("A"), make_window(oa), oa};
     const auto ob = make_opts("B", WindowRole::Auxiliary);
     const WindowId id_b = app.open_window(make_window(ob), make_scene("B"), ob);

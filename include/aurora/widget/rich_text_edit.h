@@ -7,13 +7,13 @@
 #include <vector>
 
 #include "aurora/core/color.h"
+#include "aurora/core/enums.h"
 #include "aurora/core/font.h"
 #include "aurora/core/types.h"
 #include "aurora/core/utf8.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/undo_stack.h"
 #include "aurora/widget/text_span.h"
-#include "aurora/core/enums.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -214,8 +214,8 @@ class RichTextEdit : public LeafWidget {
         const std::size_t pn = utf8_cp_count(preedit_);
         preedit_cursor_ = std::min(e.cursor_index, pn);
         preedit_sel_start_ = std::min(e.sel_start, pn);
-        preedit_sel_end_ = e.has_preedit_selection() ? std::min(e.sel_end, pn) : kNoPreeditSelection;
-        if (preedit_sel_end_ != kNoPreeditSelection && preedit_sel_end_ < preedit_sel_start_) {
+        preedit_sel_end_ = e.has_preedit_selection() ? std::min(e.sel_end, pn) : AURORA_NO_PREEDIT_SELECTION;
+        if (preedit_sel_end_ != AURORA_NO_PREEDIT_SELECTION && preedit_sel_end_ < preedit_sel_start_) {
             preedit_sel_end_ = preedit_sel_start_;  // 端点倒置退化为单点选区
         }
         mark_needs_paint();
@@ -278,7 +278,7 @@ class RichTextEdit : public LeafWidget {
         float x = 0.0F;
         float w = 0.0F;
         std::size_t begin = 0;  ///< 该 run 首字符在行内的逻辑下标（含 '\n' 计 1）
-        std::size_t end = 0;    ///< 该 run 末字符逻辑下标 +1
+        std::size_t end = 0;  ///< 该 run 末字符逻辑下标 +1
         TextDirection dir = TextDirection::LTR;  ///< 该 run 的整形方向（UBA 层级奇偶）
     };
 
@@ -341,11 +341,11 @@ class RichTextEdit : public LeafWidget {
 
     // IME 组合态：preedit 不进 doc_，仅在绘制期插到 caret_ 处。
     /// @brief preedit 内「无选区」哨兵。
-    static constexpr std::size_t kNoPreeditSelection = TextCompositionEvent::kNoSelection;
+    static constexpr std::size_t AURORA_NO_PREEDIT_SELECTION = TextCompositionEvent::AURORA_NO_SELECTION;
     std::string preedit_;  ///< 预编辑串（UTF-8）；空 = 无组合
     std::size_t preedit_cursor_ = 0;  ///< 组合光标在 preedit 内的码点下标
     std::size_t preedit_sel_start_ = 0;  ///< preedit 内选区起点（码点下标）
-    std::size_t preedit_sel_end_ = kNoPreeditSelection;  ///< 选区终点（含尾）；kNoPreeditSelection = 无
+    std::size_t preedit_sel_end_ = AURORA_NO_PREEDIT_SELECTION;  ///< 选区终点（含尾）；AURORA_NO_PREEDIT_SELECTION = 无
 };
 
 }  // namespace aurora

@@ -133,7 +133,7 @@ auto ScrollBenchHarness::Result::reversal_ratio() const -> double {
 
 auto ScrollBenchHarness::Result::trustworthy() const -> bool {
     return scrollable_found && settled && report.frame_count > 0 && moved_frames == report.frame_count &&
-           idle_frames == 0 && max_offset > 0.5F && geometry_stable() && reversal_ratio() <= kMaxReversalRatio;
+           idle_frames == 0 && max_offset > 0.5F && geometry_stable() && reversal_ratio() <= AURORA_MAX_REVERSAL_RATIO;
 }
 
 auto ScrollBenchHarness::Result::to_markdown() const -> std::string {
@@ -148,7 +148,7 @@ auto ScrollBenchHarness::Result::to_markdown() const -> std::string {
     out += aurora::internal::string_format("| idle (skipped) frames | %zu | %s |\n", idle_frames,
                                            idle_frames == 0 ? "ok" : "**FAIL**");
     out += aurora::internal::string_format("| reversals | %zu（%.1f%%） | %s |\n", reversals, reversal_ratio() * 100.0,
-                                           reversal_ratio() <= kMaxReversalRatio ? "ok" : "**FAIL 内容太短**");
+                                           reversal_ratio() <= AURORA_MAX_REVERSAL_RATIO ? "ok" : "**FAIL 内容太短**");
     out += aurora::internal::string_format(
         "| scrolled | %.1f dp（%.1f dp/帧） | — |\n", scrolled_px,
         report.frame_count > 0 ? scrolled_px / static_cast<double>(report.frame_count) : 0.0);
@@ -281,13 +281,13 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
         if (!probe.valid()) {
             return 0.0F;
         }
-        constexpr float kHugeDelta = 1.0e6F;  // NOLINT(readability-identifier-naming)
+        constexpr float AURORA_HUGE_DELTA = 1.0e6F;
         const int saved_dir = dir;
         dir = 1;
-        dispatch_scroll(kHugeDelta);  // 拉到底
+        dispatch_scroll(AURORA_HUGE_DELTA);  // 拉到底
         const float extent = probe.offset();
         dir = -1;
-        dispatch_scroll(kHugeDelta);  // 拉回顶，恢复采样起点
+        dispatch_scroll(AURORA_HUGE_DELTA);  // 拉回顶，恢复采样起点
         dir = saved_dir;
         return extent;
     };

@@ -110,20 +110,20 @@ struct TextInputEvent : Event {
  * 3. `preedit=""`、`committed="你好"` → 预编辑串落字为正式文本，组合结束。
  *
  * `sel_start` / `sel_end` 描述 **preedit 内部** 的选中区间（含头含尾，码点下标），
- * 用于输入法高亮「待转换的拼音片段」；无区间时 `sel_end == kNoSelection`。
+ * 用于输入法高亮「待转换的拼音片段」；无区间时 `sel_end == AURORA_NO_SELECTION`。
  */
 struct TextCompositionEvent : Event {
     /// @brief preedit 内「无选区」哨兵（与 `TextInput::NO_SEL` 同语义，独立定义以免跨头依赖）。
-    static constexpr std::size_t kNoSelection = static_cast<std::size_t>(-1);
+    static constexpr std::size_t AURORA_NO_SELECTION = static_cast<std::size_t>(-1);
 
     std::string preedit;  ///< 预编辑串（UTF-8）；空串 = 组合结束 / 取消
     std::size_t cursor_index = 0;  ///< 光标在 preedit 内的码点下标（候选插入点）
     std::size_t sel_start = 0;  ///< preedit 内选中区间起点（码点下标）
-    std::size_t sel_end = kNoSelection;  ///< preedit 内选中区间终点（含尾）；kNoSelection = 无
+    std::size_t sel_end = AURORA_NO_SELECTION;  ///< preedit 内选中区间终点（含尾）；AURORA_NO_SELECTION = 无
     std::string committed;  ///< 本次随组合一并上屏的文本（UTF-8），可为空
 
     /// @brief preedit 内是否存在选中区间。
-    [[nodiscard]] auto has_preedit_selection() const -> bool { return sel_end != kNoSelection; }
+    [[nodiscard]] auto has_preedit_selection() const -> bool { return sel_end != AURORA_NO_SELECTION; }
 };
 
 /// @brief 操作系统文件拖放事件（窗口级；位置为窗口逻辑坐标，specification/05-event-navigation.md §2.2）。
