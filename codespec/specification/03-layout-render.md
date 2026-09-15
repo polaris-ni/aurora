@@ -383,6 +383,9 @@ au::Column{}
 | `draw_line(Point, Point, float, Color)` | 画线 |
 | `fill_rounded_rect(Rect, float radius, Color)` | 填充圆角矩形 |
 | `draw_rounded_border(Rect, float radius, float thickness, Color)` | 圆角描边 |
+| `stroke_polyline(const vector<Point>&, float width, Color)` | 抗锯齿多段线（真距离场 SDF：圆角连接 + 圆帽，1px 羽化）。覆盖度按**几何一次算成**，故半透明下顶点不会二次合成串珠 |
+| `fill_sector(Point center, float outer_r, float inner_r, float a0, float a1, Color)` | 抗锯齿扇形 / 环扇（y 轴向下，弧度制；`a1 - a0 >= 2π` 视为整圆 / 整环；`inner_r <= 0` 即实心扇形） |
+| `stroke_arc(Point center, float radius, float thickness, float a0, float a1, Color)` | 弧线描边（`fill_sector` 的环带语义糖） |
 | `draw_text(Rect, string, Font, Color[, TextLayoutOpts][, TextAAMode])` | 绘制文本，三个重载 |
 | `draw_image(const Image&, const Rect&)` | 绘制图像（双线性采样） |
 
@@ -552,6 +555,7 @@ struct CmdData {  // 池下标解析出的只读指针；不引用的字段为 n
     const std::vector<float> *stops = nullptr;
     const Image *image = nullptr;
     const Matrix2D *matrix = nullptr;
+    const std::vector<Point> *points = nullptr;  // Polyline 点集
 };
 class RhiBackend {
   public:
@@ -568,11 +572,13 @@ class RhiBackend {
 | `replay(rhi::RhiBackend&)` | **唯一实现**：遍历 `cmds_`，把池下标解析为 `CmdData`（负下标 → `nullptr`）后逐条 `submit` |
 | `replay(Painter&)` | 兼容薄壳：构造临时 `rhi::SoftwareRhi{p}` 后转发到上式（调用点无需改动） |
 
-**首个后端 `SoftwareRhi`**（`render/rhi/software_rhi.h`）把 18 类 `CmdKind` 逐条转发回 `Painter` 的对应原语，参数逐字段与抽取前的 `replay` 一致，故 **DC 像素输出逐位不变**（重构红线，由 `utest_rhi` 的 `SoftwareRhi` 与直接绘制逐字节比对锁定）。未绑定 `Painter` 时 `submit` 为 no-op（便于测试构造空后端）；GPU 后端 `GpuGlRhi`（§8.7）实现同一接口，成为**平级第二消费者**——新增后端不改动录制侧与 `DisplayList`。
+**首个后端 `SoftwareRhi`**（`render/rhi/software_rhi.h`）把 20 类 `CmdKind`（含图表原语 `Polyline` / `Sector`，见 §8.1）逐条转发回 `Painter` 的对应原语，参数逐字段与抽取前的 `replay` 一致，故 **DC 像素输出逐位不变**（重构红线，由 `utest_rhi` 的 `SoftwareRhi` 与直接绘制逐字节比对锁定）。未绑定 `Painter` 时 `submit` 为 no-op（便于测试构造空后端）；GPU 后端 `GpuGlRhi`（§8.7）实现同一接口，成为**平级第二消费者**——新增后端不改动录制侧与 `DisplayList`。
 
 **设计取舍**：接口收成**单一 `submit`**，而非把 18 个绘制原语各设一个虚函数。命令的几何 / 标量已全在 `DrawCmd` 里，单入口既让回放循环保持一行，也把「如何解释命令、如何合并成批次」留给后端——GPU 后端正靠这一点做管线切换与批处理，而 18 个平铺虚函数会强迫它在原语之间重新推断管线状态。`Painter` 侧无需任何改动。
 
-> **池下标是录制方契约**：`DrawCmd` 的 `str_idx` / `font_idx` / `col_idx` / `flt_idx` / `image_idx` / `matrix_idx` 由 `Painter::record*` 生成，回放侧**只解析、不构造**；`DisplayList` 的 `string_at` / `colors_at` / `floats_at` / `font_at` / `image_at` / `matrix_at` 只读访问器即为此提供。
+> **池下标是录制方契约**：`DrawCmd` 的 `str_idx` / `font_idx` / `col_idx` / `flt_idx` / `image_idx` / `matrix_idx` / `pt_idx`（`Polyline` 点集）由 `Painter::record*` 生成，回放侧**只解析、不构造**；`DisplayList` 的 `string_at` / `colors_at` / `floats_at` / `font_at` / `image_at` / `matrix_at` / `points_at` 只读访问器即为此提供。
+>
+> **标量槽位**：`DrawCmd` 的 `f0..f3` 按命令语义取用（`Sector` 占满四槽：外半径 / 内半径 / 起角 / 止角），新增原语优先复用既有槽位，确需扩展时才加槽（+4B/命令）。
 >
 > **`CmdKind::Composite` 的例外**：离屏合成在录制态**必须**录制为命令（见 §8.1 录制态不变量），但其像素来源是离屏缓冲快照（`Image`），故 `CmdData` 的 `image` / `matrix` 两字段专供它使用。
 

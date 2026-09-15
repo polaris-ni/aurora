@@ -24,6 +24,7 @@ struct CmdData {
     const std::vector<float> *stops = nullptr;   ///< 渐变色标停靠数组（归一化 [0,1]）
     const Image *image = nullptr;                ///< DrawImage / Composite 的图像
     const Matrix2D *matrix = nullptr;            ///< Composite 的仿射变换矩阵
+    const std::vector<Point> *points = nullptr;  ///< Polyline 的折线点集（逻辑 dp）
 };
 
 /// @brief RHI 后端：`DisplayList` 回放的**目标抽象**（command sink）。

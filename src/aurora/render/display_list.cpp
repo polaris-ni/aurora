@@ -33,6 +33,9 @@ auto resolve_cmd_data(const DrawCmd &cmd, const DisplayList &dl) -> rhi::CmdData
     if (cmd.matrix_idx >= 0) {
         data.matrix = &dl.matrix_at(cmd.matrix_idx);
     }
+    if (cmd.pt_idx >= 0) {
+        data.points = &dl.points_at(cmd.pt_idx);
+    }
     return data;
 }
 }  // namespace

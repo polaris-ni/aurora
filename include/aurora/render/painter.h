@@ -79,6 +79,22 @@ class Painter {
     /// radius = min(w,h)/2 时即圆环（RadioButton 外圈）；thickness <= 0 无操作。
     auto draw_rounded_border(const Rect &r, float radius, float thickness, Color c) -> void;
 
+    /// @brief 绘制抗锯齿多段线（圆角连接 + 圆帽）：逐像素取「到折线的最小距离」SDF，
+    ///        1px 羽化（与 `draw_line` 同口径），join/cap 由距离场的 min 天然融合。
+    /// 覆盖度只按**几何**计算一次，故半透明（如系列降透明）不会出现顶点处二次合成的串珠。
+    /// 点集为逻辑 dp；宽度 `width` 为逻辑 dp。点数 < 2 / width <= 0 / 全透明时无操作。
+    auto stroke_polyline(const std::vector<Point> &pts, float width, Color c) -> void;
+
+    /// @brief 填充抗锯齿扇形 / 环扇：圆心 `center`，内/外半径（`inner_r <= 0` 即实心扇形），
+    ///        角度区间 [a0, a1) 弧度制（y 轴向下，0 = +x 方向）；`a1 - a0 >= 2π` 视为整圆 / 整环。
+    /// 径向（内外弧）与角向（两侧半径边）四条边各 1px 羽化，覆盖度取「到最近边的距离」SDF。
+    /// 半径为逻辑 dp。`outer_r <= 0` / `inner_r >= outer_r` / 角差 <= 0 / 全透明时无操作。
+    auto fill_sector(Point center, float outer_r, float inner_r, float a0, float a1, Color c) -> void;
+
+    /// @brief 描边弧线（语义糖）：等价于 `fill_sector` 的环带形式——
+    ///        inner = radius - thickness/2，outer = radius + thickness/2（向内夹取到 0）。
+    auto stroke_arc(Point center, float radius, float thickness, float a0, float a1, Color c) -> void;
+
     /// @brief 绘制文本：委托 FontEngine（真实字体渲染；无 GDI/字体时回退内置位图字体）。
     auto draw_text(const Rect &r, const std::string &s, const Font &f, Color c) -> void;
 

@@ -458,6 +458,168 @@ auto Painter::fill_rounded_rect(const Rect &r, float radius, Color c) -> void {
     pop_clip();
 }
 
+auto Painter::stroke_polyline(const std::vector<Point> &pts, float width, Color c) -> void {
+    if (is_recording()) {
+        DrawCmd cmd;
+        cmd.kind = CmdKind::Polyline;
+        cmd.f0 = width;
+        cmd.color = c;
+        cmd.pt_idx = recording_stack_.back()->add_points(pts);
+        recording_stack_.back()->push_cmd(cmd);
+        return;
+    }
+    if (pts.size() < 2 || width <= 0.0f || c.a == 0) {
+        return;
+    }
+    AURORA_PROFILE_COUNT(draw_calls, 1);
+    detail::PaintTimer guard{&g_pt.line};
+    // 逻辑 dp → 物理像素；半宽 + 1px 羽化带决定包围盒（与 draw_line 同口径）。
+    const float hw = width * scale_ * 0.5f;
+    const float pad = hw + 1.0f;
+    struct Segment {
+        float ax, ay, dx, dy, len_sq, min_y, max_y;
+    };
+    std::vector<Segment> segs;
+    segs.reserve(pts.size() - 1);
+    float bb_x0 = pts[0].x * scale_;
+    float bb_y0 = pts[0].y * scale_;
+    float bb_x1 = bb_x0;
+    float bb_y1 = bb_y0;
+    for (std::size_t i = 0; i + 1 < pts.size(); ++i) {
+        const float ax = pts[i].x * scale_;
+        const float ay = pts[i].y * scale_;
+        const float bx = pts[i + 1].x * scale_;
+        const float by = pts[i + 1].y * scale_;
+        bb_x0 = std::min(bb_x0, bx);
+        bb_y0 = std::min(bb_y0, by);
+        bb_x1 = std::max(bb_x1, bx);
+        bb_y1 = std::max(bb_y1, by);
+        const float dx = bx - ax;
+        const float dy = by - ay;
+        segs.push_back(Segment{.ax = ax,
+                               .ay = ay,
+                               .dx = dx,
+                               .dy = dy,
+                               .len_sq = (dx * dx) + (dy * dy),
+                               .min_y = std::min(ay, by),
+                               .max_y = std::max(ay, by)});
+    }
+    int x0 = std::max(0, static_cast<int>(std::floor(bb_x0 - pad)));
+    int y0 = std::max(0, static_cast<int>(std::floor(bb_y0 - pad)));
+    int x1 = std::min(width_, static_cast<int>(std::ceil(bb_x1 + pad)) + 1);
+    int y1 = std::min(height_, static_cast<int>(std::ceil(bb_y1 + pad)) + 1);
+    if (!shrink_to_clips(x0, y0, x1, y1)) {
+        return;
+    }
+    for (int y = y0; y < y1; ++y) {
+        const float py = static_cast<float>(y) + 0.5f;
+        for (int x = x0; x < x1; ++x) {
+            const float px = static_cast<float>(x) + 0.5f;
+            // 到折线的最小距离：join / cap 由 min 天然融合为圆角 / 圆帽（半透明下也不会二次合成）。
+            float min_dist = pad;  // 初值即羽化带外边界：更近者才可能产生覆盖
+            for (const Segment &s : segs) {
+                if ((py < s.min_y - pad) || (py > s.max_y + pad)) {
+                    continue;  // 扫描线早退：y 区间外线段不可能贡献覆盖
+                }
+                const float wx = px - s.ax;
+                const float wy = py - s.ay;
+                const float t = s.len_sq > 0.0f ? aurora::saturate(((wx * s.dx) + (wy * s.dy)) / s.len_sq) : 0.0f;
+                const float ex = wx - (t * s.dx);
+                const float ey = wy - (t * s.dy);
+                const float d = std::sqrt((ex * ex) + (ey * ey));
+                if (d < min_dist) {
+                    min_dist = d;
+                }
+            }
+            const float cov = aurora::saturate(hw + 0.5f - min_dist);  // 1px 羽化
+            if (cov <= 0.0f) {
+                continue;
+            }
+            Color pc = c;
+            pc.a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.a) * cov));
+            set_pixel(x, y, pc);  // set_pixel 另行应用裁剪 coverage 与全局透明度
+        }
+    }
+}
+
+auto Painter::fill_sector(Point center, float outer_r, float inner_r, float a0, float a1, Color c) -> void {
+    if (is_recording()) {
+        DrawCmd cmd;
+        cmd.kind = CmdKind::Sector;
+        cmd.pt0 = center;
+        cmd.f0 = outer_r;
+        cmd.f1 = inner_r;
+        cmd.f2 = a0;
+        cmd.f3 = a1;
+        cmd.color = c;
+        recording_stack_.back()->push_cmd(cmd);
+        return;
+    }
+    constexpr float TWO_PI = 6.28318530717958647692F;
+    const float sweep = a1 - a0;
+    if (outer_r <= 0.0f || sweep <= 0.0f || c.a == 0) {
+        return;
+    }
+    const float inner = std::max(0.0f, inner_r);
+    if (inner >= outer_r) {
+        return;
+    }
+    AURORA_PROFILE_COUNT(draw_calls, 1);
+    detail::PaintTimer guard{&g_pt.fill};
+    const float cx = center.x * scale_;
+    const float cy = center.y * scale_;
+    const float outer = outer_r * scale_;
+    const float inner_px = inner * scale_;
+    const bool full = sweep >= TWO_PI - 1.0e-4F;  // 角差 ≥ 2π 视为整圆 / 整环
+    int x0 = std::max(0, static_cast<int>(std::floor(cx - outer - 1.0f)));
+    int y0 = std::max(0, static_cast<int>(std::floor(cy - outer - 1.0f)));
+    int x1 = std::min(width_, static_cast<int>(std::ceil(cx + outer + 1.0f)) + 1);
+    int y1 = std::min(height_, static_cast<int>(std::ceil(cy + outer + 1.0f)) + 1);
+    if (!shrink_to_clips(x0, y0, x1, y1)) {
+        return;
+    }
+    for (int y = y0; y < y1; ++y) {
+        const float py = static_cast<float>(y) + 0.5f - cy;
+        for (int x = x0; x < x1; ++x) {
+            const float px = static_cast<float>(x) + 0.5f - cx;
+            const float r = std::sqrt((px * px) + (py * py));
+            // 径向带符号距离（正 = 带内）：外弧与内弧取近者。
+            float radial = outer - r;
+            if (inner_px > 0.0f) {
+                radial = std::min(radial, r - inner_px);
+            }
+            if (radial <= -1.0f) {
+                continue;
+            }
+            // 角向带符号距离（正 = 区间内）：弧长 = 半径 × 角差，与径向同为 px 单位。
+            float angular = radial;  // 整圆 / 整环：无角向约束
+            if (!full) {
+                float t = std::atan2(py, px) - a0;
+                t = std::fmod(t, TWO_PI);
+                if (t < 0.0f) {
+                    t += TWO_PI;
+                }
+                angular = (t <= sweep) ? std::min(t, sweep - t) * r : -std::min(t - sweep, TWO_PI - t) * r;
+            }
+            const float cov = aurora::saturate(std::min(radial, angular) + 0.5f);
+            if (cov <= 0.0f) {
+                continue;
+            }
+            Color pc = c;
+            pc.a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.a) * cov));
+            set_pixel(x, y, pc);
+        }
+    }
+}
+
+auto Painter::stroke_arc(Point center, float radius, float thickness, float a0, float a1, Color c) -> void {
+    if (radius <= 0.0f || thickness <= 0.0f) {
+        return;
+    }
+    const float half = thickness * 0.5f;
+    fill_sector(center, radius + half, std::max(0.0f, radius - half), a0, a1, c);
+}
+
 auto Painter::draw_rounded_border(const Rect &r, float radius, float thickness, Color c) -> void {
     if (is_recording()) {
         DrawCmd cmd;

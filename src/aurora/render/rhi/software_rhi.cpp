@@ -15,6 +15,7 @@ const std::vector<float> AURORA_EMPTY_FLOATS;
 const Font AURORA_DEFAULT_FONT{};
 const Image AURORA_DEFAULT_IMAGE{};
 const Matrix2D AURORA_IDENTITY_MATRIX;
+const std::vector<Point> AURORA_EMPTY_POINTS;
 }  // namespace
 
 auto SoftwareRhi::submit(const DrawCmd &cmd, const CmdData &data) -> void {
@@ -90,6 +91,14 @@ auto SoftwareRhi::submit(const DrawCmd &cmd, const CmdData &data) -> void {
         }
         case CmdKind::SetAlpha:
             p.set_alpha(cmd.alpha);
+            break;
+        case CmdKind::Polyline: {
+            const std::vector<Point> &pts = data.points != nullptr ? *data.points : AURORA_EMPTY_POINTS;
+            p.stroke_polyline(pts, cmd.f0, cmd.color);
+            break;
+        }
+        case CmdKind::Sector:
+            p.fill_sector(cmd.pt0, cmd.f0, cmd.f1, cmd.f2, cmd.f3, cmd.color);
             break;
     }
 }

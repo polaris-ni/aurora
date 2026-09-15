@@ -1599,6 +1599,85 @@ struct GpuGlRhi::Impl {
                 verts.insert(verts.end(), base, base + 4);
                 break;
             }
+            case CmdKind::Polyline: {
+                if (data.points == nullptr || data.points->size() < 2 || cmd.f0 <= 0.0F || cmd.color.a == 0) {
+                    break;
+                }
+                const float hw = cmd.f0 * 0.5F;
+                BatchKey k{};
+                k.pipeline = Pipeline::Solid;
+                k.clip = effective_clip();
+                begin_batch(k);
+                const Color c = bake_alpha(cmd.color, alpha);
+                // 首版降级：逐段方头 quad（与 DrawLine 同形）+ 顶点方形帽近似软件的 round join/cap。
+                // 顶点处会二次合成（半透明系列呈串珠），与软件真 SDF 不逐位一致——
+                // GPU 与软件的逐位对齐由后续「容差 golden」阶梯收口，本波只保证结构正确。
+                const std::vector<Point> &pts = *data.points;
+                for (std::size_t i = 0; i + 1 < pts.size(); ++i) {
+                    const float dx = pts[i + 1].x - pts[i].x;
+                    const float dy = pts[i + 1].y - pts[i].y;
+                    const float len = std::sqrt((dx * dx) + (dy * dy));
+                    if (len < 1e-4F) {
+                        continue;
+                    }
+                    const float ux = dx / len;
+                    const float uy = dy / len;
+                    const float nx = -uy * hw;
+                    const float ny = ux * hw;
+                    const float ax = pts[i].x - (ux * hw);
+                    const float ay = pts[i].y - (uy * hw);
+                    const float bx = pts[i + 1].x + (ux * hw);
+                    const float by = pts[i + 1].y + (uy * hw);
+                    const Vertex quad[4] = {
+                        Vertex{ax + nx, ay + ny, 0.0F, 0.0F, c.r, c.g, c.b, c.a},
+                        Vertex{bx + nx, by + ny, 1.0F, 0.0F, c.r, c.g, c.b, c.a},
+                        Vertex{bx - nx, by - ny, 1.0F, 1.0F, c.r, c.g, c.b, c.a},
+                        Vertex{ax - nx, ay - ny, 0.0F, 1.0F, c.r, c.g, c.b, c.a},
+                    };
+                    verts.insert(verts.end(), quad, quad + 4);
+                }
+                for (const Point &pt : pts) {
+                    push_quad(pt.x - hw, pt.y - hw, pt.x + hw, pt.y + hw, c);
+                }
+                break;
+            }
+            case CmdKind::Sector: {
+                constexpr float TWO_PI = 6.28318530717958647692F;
+                if (cmd.f0 <= 0.0F || cmd.color.a == 0) {
+                    break;
+                }
+                const float sweep = std::min(cmd.f3 - cmd.f2, TWO_PI);
+                const float outer = cmd.f0;
+                const float inner = std::max(0.0F, cmd.f1);
+                if (sweep <= 0.0F || inner >= outer) {
+                    break;
+                }
+                BatchKey k{};
+                k.pipeline = Pipeline::Solid;
+                k.clip = effective_clip();
+                begin_batch(k);
+                const Color c = bake_alpha(cmd.color, alpha);
+                // 首版降级：把（环）扇按角度细分为梯形 quad，以弦逼近弧（无 SDF 羽化）。
+                // 与软件 SDF 不逐位一致，同 Polyline 归后续容差 golden 阶梯。
+                constexpr float STEP = 0.12F;  // 每段弧度（≈6.9°），弦误差 < 外径的 0.1%
+                const int slices = std::clamp(static_cast<int>(std::ceil(sweep / STEP)), 8, 256);
+                for (int i = 0; i < slices; ++i) {
+                    const float t0 = cmd.f2 + (sweep * static_cast<float>(i)) / static_cast<float>(slices);
+                    const float t1 = cmd.f2 + (sweep * static_cast<float>(i + 1)) / static_cast<float>(slices);
+                    const float c0 = std::cos(t0);
+                    const float s0 = std::sin(t0);
+                    const float c1 = std::cos(t1);
+                    const float s1 = std::sin(t1);
+                    const Vertex quad[4] = {
+                        Vertex{cmd.pt0.x + (c0 * inner), cmd.pt0.y + (s0 * inner), 0.0F, 0.0F, c.r, c.g, c.b, c.a},
+                        Vertex{cmd.pt0.x + (c0 * outer), cmd.pt0.y + (s0 * outer), 1.0F, 0.0F, c.r, c.g, c.b, c.a},
+                        Vertex{cmd.pt0.x + (c1 * outer), cmd.pt0.y + (s1 * outer), 1.0F, 1.0F, c.r, c.g, c.b, c.a},
+                        Vertex{cmd.pt0.x + (c1 * inner), cmd.pt0.y + (s1 * inner), 0.0F, 1.0F, c.r, c.g, c.b, c.a},
+                    };
+                    verts.insert(verts.end(), quad, quad + 4);
+                }
+                break;
+            }
             case CmdKind::RoundedBorder: {
                 if (cmd.f1 <= 0.0F || cmd.color.a == 0 || cmd.bounds.size.width <= 0.0F
                     || cmd.bounds.size.height <= 0.0F) {

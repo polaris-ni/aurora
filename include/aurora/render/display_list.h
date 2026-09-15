@@ -41,6 +41,8 @@ enum class CmdKind : std::uint8_t {
     PopClip,
     Composite,  ///< 离屏合成（cache_layer / 非恒等 Transform）：录制时捕获离屏像素缓冲
     SetAlpha,
+    Polyline,  ///< 抗锯齿多段线：点集经 `pt_idx` 引用 point_pool_，f0 = 线宽（逻辑 dp）
+    Sector,  ///< 抗锯齿扇形 / 环扇：pt0 = 圆心，f0 = 外半径，f1 = 内半径，f2 = 起角，f3 = 止角
 };
 
 /// @brief 单条绘制命令。变长数据（文本 / 渐变色标 / 渐变停靠）经索引引用 DisplayList 的数据池，
@@ -51,7 +53,7 @@ struct DrawCmd {
     Color color;
     Point pt0{};  ///< 渐变起点 / 圆心 / 阴影形状（与 bounds 同义时忽略）
     Point pt1{};  ///< 渐变终点
-    float f0 = 0, f1 = 0, f2 = 0;  ///< 半径 / 模糊 / 强度 / 偏移（按命令语义取用）
+    float f0 = 0, f1 = 0, f2 = 0, f3 = 0;  ///< 半径 / 模糊 / 强度 / 偏移（按命令语义取用）
     bool rounded_aa = true;  ///< PushClipRounded 抗锯齿标志
     BlendMode blend_mode = BlendMode::Normal;
     ShaderMaskKind mask_kind = ShaderMaskKind::LinearFade;
@@ -65,6 +67,7 @@ struct DrawCmd {
     bool text_italic = false;
     int font_idx = -1;  ///< 文本字体在 font_pool_ 的索引
     int image_idx = -1;  ///< 图像在 image_pool_ 的索引
+    int pt_idx = -1;  ///< Polyline 点集在 point_pool_ 的索引
     // Composite（离屏合成）专用
     int matrix_idx = -1;  ///< 离屏缓冲变换矩阵在 matrix_pool_ 的索引
     float composite_scale = 1.0F;  ///< 离屏缓冲的设备像素缩放（源 Painter 的 scale）
@@ -84,6 +87,7 @@ class DisplayList {
         font_pool_.clear();
         image_pool_.clear();
         matrix_pool_.clear();
+        point_pool_.clear();
     }
     [[nodiscard]] auto empty() const -> bool { return cmds_.empty(); }
 
@@ -120,6 +124,10 @@ class DisplayList {
         matrix_pool_.push_back(m);
         return static_cast<int>(matrix_pool_.size()) - 1;
     }
+    auto add_points(const std::vector<Point> &v) -> int {
+        point_pool_.push_back(v);
+        return static_cast<int>(point_pool_.size()) - 1;
+    }
 
     /// @brief 变长数据池的只读访问。下标由录制时生成，回放侧据此把下标解析为指针
     ///        （见 `rhi::CmdData`）；调用方**不得**自行构造下标。
@@ -141,6 +149,9 @@ class DisplayList {
     [[nodiscard]] auto matrix_at(int idx) const -> const Matrix2D & {
         return matrix_pool_[static_cast<std::size_t>(idx)];
     }
+    [[nodiscard]] auto points_at(int idx) const -> const std::vector<Point> & {
+        return point_pool_[static_cast<std::size_t>(idx)];
+    }
 
     /// @brief 回放整条命令流到 RHI 后端（**唯一实现**；命令语义解释在各后端内，见
     ///        `rhi::SoftwareRhi::submit`）。本类只负责「遍历命令 + 把池下标解析为 `rhi::CmdData`」。
@@ -158,6 +169,7 @@ class DisplayList {
     std::vector<Font> font_pool_;
     std::vector<Image> image_pool_;
     std::vector<Matrix2D> matrix_pool_;
+    std::vector<std::vector<Point>> point_pool_;
 };
 
 }  // namespace aurora
