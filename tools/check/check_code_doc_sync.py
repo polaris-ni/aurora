@@ -180,15 +180,27 @@ def target_exists(repo, target):
     return resolve_target(repo, target) is not None
 
 
+# 从「目标单元 / 目标源单元」声明中提取路径 token。声明可能是用空白/标点分隔的
+# 多个路径，且路径后常附带中文括号说明（如 `include/aurora/foo.h（说明文字）`）。
+# 故对每个拆分段先尝试整段匹配（多路径情形），否则退化到「子串提取」——抓出
+# `…/xxx.h` / `…/xxx.cpp` 子串，说明噪声被自然丢弃；这与 TEST-R2「目标单元必须是
+# 真实路径」的语义一致（仅放宽解析，路径存在性仍由 resolve_target 校验）。
+PATH_TOKEN_RE = re.compile(r"[A-Za-z0-9_./-]+\.(?:h|cpp)")
+
+
 def split_targets(val):
     if not val:
         return []
     parts = re.split(r"[+\s、,；;]+", val)
     out = []
     for p in parts:
-        p = p.strip().strip("`").strip('"').strip("'").rstrip(")").strip()
+        p = p.strip().strip("`").strip('"').strip("'").strip()
         if re.search(r"/.*\.(h|cpp)$", p):
             out.append(p)
+        else:
+            m = PATH_TOKEN_RE.search(p)
+            if m:
+                out.append(m.group(0))
     return out
 
 
