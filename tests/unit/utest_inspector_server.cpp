@@ -546,4 +546,62 @@ AURORA_TEST_CASE(input_endpoint_maps_missing_target_and_simulate_failure) {
 #endif
 }
 
+AURORA_TEST_CASE(tree_endpoint_by_window_returns_target_window_tree) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    // 主窗用共享树（Column[Text "hello"]）；window=1 → Column[Text "window-one"]，
+    // window=2 → Checkbox 根；其它 id → 空 Node（路由层 404）。
+    InspectorServer server(tree_getter);
+    server.set_window_tree_getter([](std::uint32_t id) -> Node {
+        if (id == 1U) {
+            auto col = std::make_shared<Column>();
+            col->add(Node{std::make_shared<Text>("window-one")});
+            return Node{col};
+        }
+        if (id == 2U) {
+            return Node{std::make_shared<Checkbox>()};
+        }
+        return Node{};  // 无效 id
+    });
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    // window=1 命中对应树（含特异性标记文本）。
+    const std::string w1 = http_get(server.port(), "/api/tree?window=1");
+    AURORA_TEST_CHECK_TRUE(w1.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(w1.find("window-one") != std::string::npos);
+
+    // window=2 命中另一棵结构不同的树（Checkbox 根）。
+    const std::string w2 = http_get(server.port(), "/api/tree?window=2");
+    AURORA_TEST_CHECK_TRUE(w2.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(w2.find("Checkbox") != std::string::npos);
+
+    // 无效 id → 404（getter 返回空 Node）。
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/tree?window=999").find("404") != std::string::npos);
+
+    // 非数值 id → 400（参数解析失败，而非找不到窗口）。
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/tree?window=abc").find("400") != std::string::npos);
+
+    // 无 window 参数：回退主窗（共享树 Column[Text "hello"]），向后兼容既有 /api/tree。
+    const std::string main = http_get(server.port(), "/api/tree");
+    AURORA_TEST_CHECK_TRUE(main.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(main.find("hello") != std::string::npos);
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(tree_endpoint_window_param_requires_getter) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    // 未注册 window_tree_getter 时，带 window 参数的请求必须回 400（明确告知需配置），
+    // 而非静默回退主窗或 404。
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    const std::string resp = http_get(server.port(), "/api/tree?window=1");
+    AURORA_TEST_CHECK_TRUE(resp.find("400") != std::string::npos);
+    server.stop();
+#endif
+}
+
 }  // namespace aurora::test_cases::utest_inspector_server

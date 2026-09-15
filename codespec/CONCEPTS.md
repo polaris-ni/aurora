@@ -134,6 +134,9 @@ push_route(au::Checkbox{ au::Reactive<bool>{ flag } });   // flag 存活期 = �
 | `Diagnostics` | Error Boundary + 控制台 | 调试断言 / `debugFillProperties` | 警告输出 |
 | Lifecycle（控件挂载 / 卸载副作用） | `useEffect(…, [])` + cleanup 返回 | `StatefulWidget.initState` + `dispose` | `QObject` 父子 RAII / `QWidget` 事件（无内置钩子，靠析构） |
 | 窗口生命周期 `WindowState` / `WindowMode` | `document.visibilityState` / `window` focus-blur（仅应用级） | `WidgetsBindingObserver.didChangeAppLifecycleState` + 窗口尺寸状态 | `QWindow::windowStateChanged` / `QApplication::applicationStateChanged` |
+| 多窗口（一个进程多个顶层窗口） | 多 `window` / 多 `document`（各自独立树与焦点） | 多 `FlutterView` / 多 Engine 实例（各自 `WidgetsApp`） | 单个 `QApplication` + 多个 `QWindow` |
+| 窗口宿主 `WindowHost` | 一个 `document` 的根 scope | 一个 `FlutterView` + 其 `Binding` | `QWindow` + 其 `QWidget` 树 |
+| 跨窗通信 `WindowEventBus` | `window.postMessage` / `BroadcastChannel` | 无原生对应（靠上层注入共享 `InheritedWidget` / 单例） | 信号槽 / `QCoreApplication::postEvent` |
 | `TitleBar`（自绘标题栏 / CSD） | 无原生对应 ≈ 社区 window chrome 方案 | `AppBar` + `window_manager` | `QQuickWindow` headerBar 或 `KWindowSystem` |
 
 > 与 §3.1 并列于同一概念清单、仅因跨框架直接等价较少而单独成表的基础设施 / 平台层概念：Event（#12）、Platform Shell（#14）、Accessibility（#15）、DevTools（#16）、Result / Error（#18）。

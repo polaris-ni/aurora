@@ -218,12 +218,13 @@ server.stop();        // 停止并 join 工作线程
 | `is_running() -> bool` | 查询是否运行中 |
 | `port() -> uint16_t` | 返回监听端口（未启动返回 0） |
 | `set_surface_getter(std::function<Surface*()>)` | 注入 Surface 获取器：调试端点（`snapshot` / `state`）借此访问运行时 Surface；可选，未设置时这两类端点返回 400。`pick` 不依赖（未设置时以根控件尺寸为命中范围） |
+| `set_window_tree_getter(std::function<Node(std::uint32_t)>)` | 注入「按窗口 id 取树根」获取器（多窗口）：`GET /api/tree?window=<id>` 借此返回指定窗口的树；可选，未设置时带 `window` 参数返回 400。回调经主线程 marshal 执行（与 `Surface` 的 main-thread-only 约束一致）；无效 id 应返回空 `Node`，路由层据此回 404 |
 
 ### 5.1 REST 端点
 
 | 方法 | 路径 | 说明 |
 |:---|:---|:---|
-| GET | `/api/tree` | 完整 widget 树 JSON |
+| GET | `/api/tree` | 完整 widget 树 JSON；`?window=<id>` 取指定窗口树（需 `set_window_tree_getter`），无效 id 回 404、未注册 getter 时带 `window` 参数回 400 |
 | GET | `/api/widget/{path}` | 单 widget 属性 JSON（`path` 为索引路径如 `0/1/2`） |
 | PUT | `/api/widget/{path}/{prop}` | 回写指定属性（请求体为 JSON 值） |
 | GET | `/api/components` | 全部已注册组件 schema 列表 |

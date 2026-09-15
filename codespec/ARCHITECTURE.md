@@ -45,6 +45,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 ### 3.1 线程与事件模型
 
 - **单线程 UI**：所有 widget 树操作、状态变更、事件处理都在主线程。`State::set` 仅限主线程调用（赋值 + notify 无锁无原子）；跨线程计算结果须经 `au::async` / `Task::set_main_poster` 回投主线程后再写 `State`。
+- **多窗口（仍在同一线程内）**：一个 `Application` 持有一组 `WindowHost`（各自 `Window` + `Scene` + `FocusManager` + 指针/触控捕获表 + 帧统计），由**单一帧循环**统一驱动（`Application::run`，不再委托 `Window::run`）。**焦点与捕获不跨窗口**；`Animator` / `Scheduler` / 快捷键 / 命令注册表为应用级共享（`dt` 每帧只推进一次）。详见 `specification/06-app-platform.md` §2.4。
 - **同步事件**：`EventDispatcher` 在收到原生平台事件后同步派发，命中测试链自最深节点向根冒泡，写 `e.handled = true` 即止。
 - **响应式细粒度信号**：`State<T>` / `Signal` 订阅精确到具体订阅者；状态变更只刷新依赖它的 widget，避免整树重绘。
 
@@ -130,7 +131,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 | 模块 | 路径 | 职责 |
 |:---|:---|:---|
-| 应用驱动 | `app/` | `application.h` `scheduler.h` `scene.h` `clipboard.h` `file_dialog.h` `system_tray.h` `display.h` `perf_overlay.h` `menu.h` `shortcuts.h` `validate.h` `validate_ui.h` `generate_ui.h` `hot_reload.h` |
+| 应用驱动 | `app/` | `application.h` `scheduler.h` `scene.h` `clipboard.h` `file_dialog.h` `system_tray.h` `display.h` `perf_overlay.h` `menu.h` `shortcuts.h` `validate.h` `validate_ui.h` `generate_ui.h` `hot_reload.h` `window_host.h`（窗口宿主）`window_bus.h`（跨窗事件总线）`window_geometry.h`（几何持久化） |
 | 偏好配置 | `preferences/` | `preferences.h`（JSON 文件后端 + 响应式键值存储；不新增 UI 控件） |
 | 数据存储 | `storage/` | `storage.h`（`Storage` 门面） `storage_backend.h` `memory_backend.h` `fs_backend.h` `serializable.h` `storage_types.h` |
 
@@ -270,6 +271,8 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 `Win32Surface` 与 `D3D11Surface` 共用 `Win32Window` 宿主（创建 / 消息泵 / 事件翻译 / DPI / 同步重渲染 / 运行期标题），仅 present 后端不同。宿主采用 pimpl 隔离，故 `hwnd()` / `background_brush()` 以 `void*` 返回（调用方 `static_cast`）。窗口过程按**消息族**分派到各 `handle_*` 函数，取代单体 switch。
 
+**多窗口契约（`Surface` 上的可选覆写）**：多窗口帧循环需要后端自述两类能力——`pumps_thread_queue()`（事件泵是否抽干线程/进程级共享队列：Win32/GLFW/D3D11 = true，X11/Wayland/Wasm = false）与 `waits_thread_queue()`（等待通道是否覆盖全部窗口）。此外提供父子/模态（`set_owner` / `set_enabled`）、z 序与显示（`raise` / `focus_window` / `display_id` / `position` / `set_position` / `set_size`）与 DPI 变化上报（`set_scale_change_handler`）。**全部有默认空实现**，自定义后端不覆写即退化为单窗口语义，源码兼容。详见 `specification/06-app-platform.md` §2.4。
+
 **自定义后端**：任意 `Surface` 子类经 `Application(Scene, unique_ptr<Surface>)` / `App().surface(...)` 注入，无需为每种后端在 `Application` 上加构造重载；`Surface` 之外的扩展点收口在 `create_window` 工厂。
 
 **编译 / 链接期代码剪裁**：关闭某 `AURORA_BACKEND_*` 后，对应 `Surface` 子类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端；自定义 `Surface` 注入路径不受影响，故「只用自定义 backend」可不编译任何内置后端。
@@ -292,7 +295,9 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 ### 10.1 FrameStats
 
-`include/aurora/app/perf_overlay.h`，进程级单例，128 帧环形缓冲区 O(1) 采集。
+`include/aurora/app/perf_overlay.h`，128 帧环形缓冲区 O(1) 采集。
+
+**归属（多窗口）**：默认实例为进程级单例 `FrameStats::instance()`；单窗口用法（含既有基准与性能集成测试）始终写入它，行为不变。登记**第二个**窗口起，各 `WindowHost` 改绑自有实例（`Window::set_frame_stats`），避免多窗数据互相污染；`PerfOverlay` 经 `Application::set_overlay` 自动绑定主窗口统计，其他窗口请显式 `bind_frame_stats(&host->frame_stats())`。
 
 **指标**：FPS（滑动窗口平均）、平均帧时间、P50 / P95 / P99 百分位帧时间、帧时间标准差（jitter）、掉帧计数与掉帧率、hitch 计数（帧耗时超过帧预算 2 倍）、idle 帧计数。
 

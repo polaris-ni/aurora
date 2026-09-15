@@ -73,6 +73,32 @@ class Win32Window {
     /// PostMessage 本身线程安全，可由后台线程（async 回投）直接调用。
     auto request_wake() const -> void;
 
+    // ---- 父子窗口与模态（多窗口）----
+
+    /// @brief 设置 owner 窗口（HWND，以 `void*` 传入；nullptr = 解除从属）。
+    /// 走 `GWLP_HWNDPARENT`：子窗恒浮于 owner 之上、随 owner 最小化，且不产生独立任务栏条目。
+    auto set_owner(void *owner_hwnd) const -> void;
+    /// @brief 启用/禁用窗口输入（`EnableWindow`）——模态窗口屏蔽其 owner 时使用。
+    auto set_enabled(bool on) const -> void;
+
+    // ---- z 序、显示器与 DPI（多窗口）----
+
+    /// @brief 提升 z 序到同组顶部（不激活）：`BringWindowToTop`。
+    auto raise() const -> void;
+    /// @brief 激活窗口（置顶 + 键盘焦点）：`SetForegroundWindow` + `SetFocus`。
+    auto focus_window() const -> void;
+    /// @brief 当前所在显示器的稳定 id（`MonitorFromWindow` 的 HMONITOR 句柄值，
+    /// 与 `app::Display::id` 同源）；未知返回 -1。
+    [[nodiscard]] auto display_id() const -> int;
+    /// @brief 窗口在屏幕上的位置（**物理像素**，`GetWindowRect` 左上角）。
+    [[nodiscard]] auto position() const -> Point;
+    /// @brief 程序化移动窗口（`SetWindowPos`，物理像素）。
+    auto set_position(Point p) const -> void;
+    /// @brief 程序化设置窗口**外框**尺寸（`SetWindowPos`，物理像素）。
+    auto set_size(Size s) const -> void;
+    /// @brief 注册 DPI 缩放变化回调：`WM_DPICHANGED` 处理后上报新的 `scale_factor`。
+    auto set_scale_change_handler(std::function<void(float)> h) const -> void;
+
   private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_;

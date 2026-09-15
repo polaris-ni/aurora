@@ -1066,3 +1066,68 @@ app.shortcuts().add(au::KeyCombo{au::ModifierKey::Control, au::KeyCode::K},
 ```
 
 要点：`bind_shortcuts()` 必须**显式**调用（`run()` 不会自动绑定，否则 `run()` 之后注册的命令会静默失效），且面板的 Esc / ↑ / ↓ 键位依赖它——未接线时面板仍可鼠标操作与 Enter 执行，但键盘导航不可用并会记一条 WARN。`invoke(id)` 求值启用条件后才执行，未启用 / 无 `action` 时返回 `false` 而不静默成功；`remove(id)` / `clear()` 会**连带撤销**对应的快捷键绑定。检索用 `command_fuzzy_score`（不区分大小写的子序列匹配，词首命中与连续命中加权），与 MCP `list_commands` 工具共用同一打分与排序，故 AI 侧检索次序与面板一致。`to_json()` 产出 `{"commands":[…]}` 自描述信封供 AI 工具面枚举。可编译样例见 `examples/demos/demo_command_palette.cpp`。
+
+---
+
+## 32 多窗口
+
+一个 `Application` 可同时驱动多个窗口：每个窗口是一个 `WindowHost`（自带 `Scene` + `FocusManager` + 帧统计），由**单一帧循环**统一驱动，**焦点与捕获不跨窗口**。
+
+```cpp
+#include "aurora/aurora.h"
+
+using namespace au;
+
+auto main() -> int {
+    enable_dpi_awareness();  // 必须在建窗前
+
+    auto pings = std::make_shared<State<int>>(0);  // 共享状态：多窗口共用一个 State 即可
+    auto root = Column{ColumnProps{.children = {
+        Text{"Main window"},
+        Text{TextProps{.content = Reactive{pings}}},
+        Button{ButtonProps{.label = "Broadcast"}},
+    }}};
+
+    WindowOptions opts;
+    opts.size = Size{.width = 800.0F, .height = 600.0F};
+    opts.title = "Main";
+    auto win = create_native_window(opts);
+    if (!win) {
+        return -1;
+    }
+
+    Application app{Scene{std::move(root)}, std::move(win.value()), opts};
+
+    // 跨窗通信：`bus()` 承载**一次性通知/命令**；共享**状态**直接用共享 State/Store。
+    auto sub = app.bus().on<std::string>([](const std::string &msg, WindowId from) -> void {
+        AURORA_LOG_INFO("demo", "msg from window ", from, ": ", msg);
+    });
+    (void)sub;  // RAII：保持存活即订阅，离开作用域自动取消
+
+    // 追加独立顶层窗口（Auxiliary：关闭只影响自己）。
+    WindowOptions aux_opts;
+    aux_opts.size = Size{.width = 480.0F, .height = 320.0F};
+    aux_opts.title = "Auxiliary";
+    aux_opts.role = WindowRole::Auxiliary;
+    if (auto aux = create_native_window(aux_opts)) {
+        Node aux_root = Column{ColumnProps{.children = {
+            Text{"Auxiliary window"},
+            Text{TextProps{.content = Reactive{pings}}},
+        }}};
+        (void)app.open_window(std::move(aux.value()), Scene{std::move(aux_root)}, aux_opts);
+    }
+
+    app.bus().post(std::string{"hello"}, app.main_window());
+    app.run();  // 默认 ExitPolicy::LastWindowClosed：关掉最后一个窗口即退出
+    return 0;
+}
+```
+
+要点：
+
+- **角色与退出策略**：`WindowRole{Main, Auxiliary, Transient}` 决定连带关闭（`Transient` 随 `owner` 关闭）；`ExitPolicy{LastWindowClosed（默认）, MainWindowClosed, ExplicitOnly}` 决定何时结束 `run()`，`quit()` 在任何策略下都生效。
+- **模态与父子**：`WindowOptions` 的 `owner` + `modal = true` → 打开时建立 OS 层从属关系并**屏蔽 owner 输入**，关闭后自动恢复；无需焦点陷阱（焦点本就不跨窗）。
+- **每窗口 DPI / 显示器 / z 序**：`WindowHost::display_id()` / `move_to_display(id)` / `raise()` / `focus_window()`；DPI 变化由后端上报并触发整帧重排重绘。
+- **几何持久化**：`preferences::Preferences` + `WindowOptions::persist_id`，`app.set_window_geometry_store(&prefs)` 之后**打开自动恢复、关闭自动保存**（非法/越界几何自动回退默认布局）；窗口组用 `prefs.group("windows")` 分组建键。
+- **调试枚举**：`InspectorServer::set_window_ids_getter(...)` 注册后 `GET /api/windows` 可枚举全部窗口 id。
+- 可编译样例见 `examples/demos/demo_multi_window.cpp`。

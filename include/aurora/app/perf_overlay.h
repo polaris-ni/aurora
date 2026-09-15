@@ -369,9 +369,22 @@ class PerfOverlay : public SingleChild {
     }
     [[nodiscard]] auto show_counters() const -> bool { return show_counters_; }
 
-    /// @brief 第一行统计文本：FPS + P99 + jitter。
-    [[nodiscard]] static auto stats_line1() -> std::string {
-        const FrameStats &s = FrameStats::instance();
+    /// @brief 绑定本面板读取的帧统计实例（多窗口：绑到宿主窗口自己的统计）。
+    ///
+    /// 未绑定时回退 `FrameStats::instance()`（进程级单例）——历史行为，单窗口用法零变化。
+    /// 多窗口下各 `WindowHost` 有独立统计，不绑定会读到混合/空数据。
+    auto bind_frame_stats(const FrameStats *s) -> PerfOverlay & {
+        bound_stats_ = s;
+        mark_needs_paint();
+        return *this;
+    }
+    /// @brief 当前绑定的帧统计实例（未绑定返回 nullptr，表示回退全局单例）。
+    [[nodiscard]] auto bound_frame_stats() const -> const FrameStats * { return bound_stats_; }
+
+    /// @brief 第一行统计文本：FPS + P99 + jitter（数据源：进程级单例 `FrameStats::instance()`）。
+    [[nodiscard]] static auto stats_line1() -> std::string { return stats_line1(FrameStats::instance()); }
+    /// @brief 同上，数据源显式给定（多窗口 / 离线统计场景）。
+    [[nodiscard]] static auto stats_line1(const FrameStats &s) -> std::string {
         // 样本不足（<2 帧）时除零会得到 9765.6 这类假 FPS，直接显示 — 而非误导数字。
         if (s.window_size() < 2) {
             return "FPS — (采样中) | P99 — | jitter —";
@@ -380,16 +393,18 @@ class PerfOverlay : public SingleChild {
                                                s.avg_frame_ms(), s.percentile_ms(0.99), s.jitter_ms());
     }
 
-    /// @brief 第二行统计文本：dropped + hitch + idle。
-    [[nodiscard]] static auto stats_line2() -> std::string {
-        const FrameStats &s = FrameStats::instance();
+    /// @brief 第二行统计文本：dropped + hitch + idle（数据源：进程级单例）。
+    [[nodiscard]] static auto stats_line2() -> std::string { return stats_line2(FrameStats::instance()); }
+    /// @brief 同上，数据源显式给定。
+    [[nodiscard]] static auto stats_line2(const FrameStats &s) -> std::string {
         return aurora::internal::string_format("dropped: %zu | hitch: %zu | idle: %zu", s.dropped_frame_count(),
                                                s.hitch_count(), s.idle_frame_count());
     }
 
-    /// @brief 第三行统计文本：唤醒频率 + 睡眠占比（事件驱动帧循环观测）。
-    [[nodiscard]] static auto stats_line3() -> std::string {
-        const FrameStats &s = FrameStats::instance();
+    /// @brief 第三行统计文本：唤醒频率 + 睡眠占比（数据源：进程级单例）。
+    [[nodiscard]] static auto stats_line3() -> std::string { return stats_line3(FrameStats::instance()); }
+    /// @brief 同上，数据源显式给定。
+    [[nodiscard]] static auto stats_line3(const FrameStats &s) -> std::string {
         return aurora::internal::string_format("wakeups/s: %.1f | sleep: %.0F%%", s.wakeups_per_sec(),
                                                s.sleep_ratio() * 100.0);
     }
@@ -465,7 +480,8 @@ class PerfOverlay : public SingleChild {
             return;
         }
 
-        const FrameStats &s = FrameStats::instance();
+        // 数据源：优先本面板绑定的实例（多窗口每窗口独立），未绑定回退进程级单例。
+        const FrameStats &s = bound_stats_ != nullptr ? *bound_stats_ : FrameStats::instance();
         Font f;
         f.size_pt = 10.0F;
 
@@ -539,6 +555,7 @@ class PerfOverlay : public SingleChild {
   private:
     bool visible_ = true;
     bool show_counters_ = true;
+    const FrameStats *bound_stats_ = nullptr;  ///< 面板数据源绑定（nullptr = 回退 `FrameStats::instance()`）。
 };
 
 }  // namespace aurora

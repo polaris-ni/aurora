@@ -98,6 +98,22 @@ class GlfwSurface : public Surface {
     auto wait_events(double timeout_ms) -> void override;
     /// @brief 跨线程唤醒：`glfwPostEmptyEvent` 使阻塞在 wait_events 的主循环立即返回（线程安全）。
     auto request_wake() -> void override;
+    /// @brief GLFW 的 `glfwPollEvents()` 是进程级共享队列：一次调用处理**全部**窗口事件，
+    /// 多窗口帧循环每帧只需 pump 一次。
+    [[nodiscard]] auto pumps_thread_queue() const -> bool override { return true; }
+    /// @brief GLFW 的 `glfwWaitEventsTimeout` 对任意窗口事件均返回，等待通道是进程级的。
+    [[nodiscard]] auto waits_thread_queue() const -> bool override { return true; }
+
+    /// @brief 激活窗口（`glfwFocusWindow`）。
+    auto focus_window() -> void override;
+    /// @brief 提升 z 序：GLFW 无独立 API，以 `glfwShowWindow` 近似（已可见时为空操作）。
+    auto raise() -> void override;
+    /// @brief 窗口屏幕位置（`glfwGetWindowPos`，物理像素）。
+    [[nodiscard]] auto position() const -> Point override;
+    /// @brief 程序化移动窗口（`glfwSetWindowPos`）。
+    auto set_position(Point p) -> void override;
+    /// @brief 程序化设置窗口尺寸（`glfwSetWindowSize`）。
+    auto set_size(Size s) -> void override;
 
     [[nodiscard]] auto data() const -> const std::uint8_t * override;
     [[nodiscard]] auto frame_count() const -> int override;

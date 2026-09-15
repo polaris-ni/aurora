@@ -120,6 +120,68 @@ class Surface {
     /// （默认 `wait_events` 为分段 sleep，最迟 1000ms 自然醒，不丢事件仅延迟）。
     virtual auto request_wake() -> void {}
 
+    /// @brief 本后端的 `poll_platform_events()` 是否抽干「线程/进程级共享队列」。
+    ///
+    /// Windows（Win32 `PeekMessage(nullptr,…)`）与 GLFW（`glfwPollEvents()`）一次调用即
+    /// 抽出**全部**窗口的消息并路由到各自宿主；X11/Wayland/Wasm 则是每 Surface 独立队列。
+    /// 多窗口帧循环据此决定 pump 策略：共享队列只需 pump 一次（后续为空转），
+    /// 独立队列则必须逐个 pump，否则事件滞留。默认 `false`（per-surface 语义）。
+    [[nodiscard]] virtual auto pumps_thread_queue() const -> bool { return false; }
+
+    /// @brief 本后端的 `wait_events()` 是否会因「任意窗口的事件到达」而返回。
+    ///
+    /// Windows/GLFW 的等待通道是线程/进程级的（`MsgWaitForMultipleObjectsEx(QS_ALLINPUT)` /
+    /// `glfwWaitEventsTimeout`），任一窗口有消息即唤醒；X11/Wayland/Wasm 的等待只覆盖
+    /// **本 Surface 自己的连接 fd**，多窗口下若只等一个 surface 会让其余窗口的事件迟迟不被
+    /// 处理。多窗口帧循环据此施加等待上限兜底。默认 `false`（per-surface 语义）。
+    [[nodiscard]] virtual auto waits_thread_queue() const -> bool { return false; }
+
+    // ---- 父子窗口与模态（多窗口：specification/06-app-platform.md §2.4）----
+
+    /// @brief 设定本窗口的 owner（父窗口），建立 OS 层的「从属」关系。
+    ///
+    /// 典型效果：子窗口恒浮于 owner 之上、随 owner 最小化、不产生独立任务栏条目。
+    /// 与 `WindowOptions::owner`（Aurora 层的连带**生命周期**语义）互补——本方法只管显示层级。
+    /// `owner == nullptr` 表示解除从属关系。默认空实现（后端不支持父子关系时为 no-op）。
+    virtual auto set_owner(const Surface * /*owner*/) -> void {}
+
+    /// @brief 启用/禁用本窗口接收输入（模态窗口屏蔽其 owner 时使用）。
+    ///
+    /// 模态语义的另一半由焦点保证：Aurora 的 `FocusManager` 是**逐窗口**的（焦点不跨窗），
+    /// 故无需在同窗口内做焦点陷阱，只需禁用 owner 的 OS 输入。
+    /// 默认空实现（后端不支持时为 no-op）。
+    virtual auto set_enabled(bool /*on*/) -> void {}
+
+    // ---- z 序、显示与 DPI（多窗口）----
+
+    /// @brief 把窗口提到同组 z 序顶部（不改变激活状态）。默认空实现。
+    virtual auto raise() -> void {}
+
+    /// @brief 激活窗口（置顶 + 取得键盘焦点）。默认空实现。
+    virtual auto focus_window() -> void {}
+
+    /// @brief 本窗口当前所在显示器的稳定 id（与 `app::Display::id` 同源）；未知返回 -1。
+    ///
+    /// 与 `app::display_containing()` / `app::move_window_to_display()` 使用同一套 id 空间，
+    /// 供窗口几何持久化与「迁移到指定显示器」使用。默认 -1（后端不提供）。
+    [[nodiscard]] virtual auto display_id() const -> int { return -1; }
+
+    /// @brief 本窗口在屏幕上的位置（**物理像素**，与 `app::Display` 同一坐标系）。
+    /// 默认 (0,0)（后端不提供，或纯内存后端）。
+    [[nodiscard]] virtual auto position() const -> Point { return Point{.x = 0.0F, .y = 0.0F}; }
+    /// @brief 程序化移动窗口到屏幕坐标（物理像素）。默认空实现。
+    /// 与 `display_id()` / `position()` 配合实现窗口几何的保存与恢复。
+    virtual auto set_position(Point /*p*/) -> void {}
+    /// @brief 程序化设置窗口**外框**尺寸（物理像素）。默认空实现。
+    virtual auto set_size(Size /*s*/) -> void {}
+
+    /// @brief 注册 DPI 缩放变化回调：窗口被拖到不同缩放比的显示器、或系统缩放变更时触发。
+    ///
+    /// 参数为本窗口新的 `scale_factor`（dpi/96）。`Window` 据此强制全量重排重绘并重建
+    /// HUD 缓冲（否则 logical↔physical 换算失配会导致内容错位/发虚）。默认空实现。
+    using ScaleChangeHandler = std::function<void(float)>;
+    virtual auto set_scale_change_handler(ScaleChangeHandler h) -> void { scale_change_handler_ = std::move(h); }
+
     /// @brief 后端是否自带帧节拍（如 D3D11 vsync `Present(1,0)` 阻塞到 vblank）。
     /// 帧调度决策据此在活跃帧跳过 CPU 端 sleep 节流，避免双重限速；默认 false。
     [[nodiscard]] virtual auto paces_frames() const -> bool { return false; }
@@ -272,6 +334,12 @@ class Surface {
             window_mode_handler_(m);
         }
     }
+    /// @brief 上报本窗口 DPI 缩放变化（由真实后端在 `WM_DPICHANGED` 等时机调用）。
+    auto notify_scale_change(float scale) const -> void {
+        if (scale_change_handler_) {
+            scale_change_handler_(scale);
+        }
+    }
 
     WindowStateHandler window_state_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
                                                ///< 窗口可见性状态上报句柄（子类经 set_* 注册）。
@@ -279,6 +347,8 @@ class Surface {
                                              ///< 窗口几何态上报句柄（子类经 set_* 注册）。
     PresentRequest present_request_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
                                       ///< 立即重绘请求（子类在几何变化/WM_PAINT 时调用；默认空）。
+    ScaleChangeHandler scale_change_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+                                               ///< DPI 缩放变化上报句柄（子类经 set_scale_change_handler 注册）。
 };
 
 #ifdef AURORA_BACKEND_HEADLESS
@@ -324,6 +394,14 @@ class HeadlessSurface : public Surface {
     [[nodiscard]] auto size() const -> Size override { return size_; }
     [[nodiscard]] auto data() const -> const std::uint8_t * override { return painter_.data(); }
 
+    /// @brief 平台是否已请求关闭：无头后端无 OS 关闭事件，默认恒 false。
+    [[nodiscard]] auto should_close() const -> bool override { return should_close_; }
+    /// @brief 测试 seam：程序化置位关闭请求（多窗口测试需驱动「某一窗口被关闭」）。
+    ///
+    /// 无 OS 窗口就没有 × 按钮事件，`Window::run` / `Application::run` 的退出必须可被
+    /// 确定性驱动，否则多窗口帧循环无法在无头环境断言。
+    auto set_should_close(bool v) -> void { should_close_ = v; }
+
     /// @brief 覆写悬停光标下发：Headless 无系统光标，改为按序记录下发形状，
     /// 使「派发器解析 → Application 接线 → Surface 生效」整条链路在无头环境可确定性断言
     /// （光标形状完成判据：悬停不同控件触发对应 `set_cursor`，Headless 可断言）。
@@ -353,12 +431,38 @@ class HeadlessSurface : public Surface {
         }
     }
 
+    // ---- 多窗口测试 seams（无 OS 窗口：记录调用而非产生副作用）----
+
+    auto set_owner(const Surface *owner) -> void override { owner_ = owner; }  ///< 记录 owner 供断言。
+    [[nodiscard]] auto owner_surface() const -> const Surface * { return owner_; }
+    auto set_enabled(bool on) -> void override { enabled_ = on; }  ///< 记录输入启用态（模态屏蔽 owner）。
+    [[nodiscard]] auto enabled() const -> bool { return enabled_; }
+    auto raise() -> void override { ++raise_count_; }
+    auto focus_window() -> void override { ++focus_count_; }
+    [[nodiscard]] auto raise_count() const -> int { return raise_count_; }
+    [[nodiscard]] auto focus_count() const -> int { return focus_count_; }
+    [[nodiscard]] auto display_id() const -> int override { return display_id_; }
+    auto set_display_id(int id) -> void { display_id_ = id; }
+    [[nodiscard]] auto position() const -> Point override { return origin_; }
+    auto set_position(Point p) -> void override { origin_ = p; }
+    auto set_size(Size s) -> void override { size_ = s; }
+
+    /// @brief 测试 seams：模拟 DPI 缩放变化（窗口被拖到不同缩放比的显示器）。
+    auto emit_scale_change(float scale) const -> void { notify_scale_change(scale); }
+
   private:
     Painter painter_;
     // 声明顺序须与构造函数初始化列表一致（png_path_ 先于 size_），否则触发 -Wreorder。
     std::string png_path_;
     Size size_{.width = 0.0F, .height = 0.0F};
     int frame_ = 0;
+    bool should_close_ = false;       ///< 关闭请求（经 `set_should_close` 置位；见 `should_close()`）。
+    const Surface *owner_ = nullptr;  ///< 记录的 owner（多窗口测试观测点）。
+    bool enabled_ = true;             ///< 输入启用态（模态屏蔽 owner 的观测点）。
+    int raise_count_ = 0;             ///< `raise()` 调用次数。
+    int focus_count_ = 0;             ///< `focus_window()` 调用次数。
+    int display_id_ = -1;             ///< 设定值（模拟所在显示器）。
+    Point origin_{};                  ///< 模拟的屏幕位置（几何持久化测试观测点）。
     std::vector<CursorShape> cursor_log_;  ///< 悬停光标下发序列（无头验收入口；见 set_cursor）。
 };
 #endif  // AURORA_BACKEND_HEADLESS

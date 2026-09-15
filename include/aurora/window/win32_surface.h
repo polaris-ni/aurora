@@ -130,6 +130,35 @@ class Win32Surface final : public Surface {
     auto wait_events(double timeout_ms) -> void override { win_->wait_events(timeout_ms); }
     /// @brief 跨线程唤醒主循环（转发共享宿主；PostMessage 线程安全）。
     auto request_wake() -> void override { win_->request_wake(); }
+    /// @brief Win32 消息泵是线程级共享队列：一次 `poll_platform_events()` 即抽干本线程全部
+    /// 窗口消息（`PeekMessageA(nullptr,…)` 无 hwnd 过滤）并经 `DispatchMessage` 按 HWND 路由，
+    /// 故多窗口帧循环每帧只需 pump 一次。
+    [[nodiscard]] auto pumps_thread_queue() const -> bool override { return true; }
+    /// @brief Win32 等待是线程级：`MsgWaitForMultipleObjectsEx(QS_ALLINPUT)` 对任意窗口的
+    /// 消息到达均返回，多窗口下不存在「只等某一个窗口」的饥饿问题。
+    [[nodiscard]] auto waits_thread_queue() const -> bool override { return true; }
+    /// @brief 建立 OS 层 owner 关系（转发共享宿主；`native_handle()` 取对方 HWND）。
+    auto set_owner(const Surface *owner) -> void override {
+        win_->set_owner(owner != nullptr ? owner->native_handle() : nullptr);
+    }
+    /// @brief 启用/禁用窗口输入（转发共享宿主；模态窗口屏蔽 owner）。
+    auto set_enabled(bool on) -> void override { win_->set_enabled(on); }
+    /// @brief 提升 z 序（转发共享宿主）。
+    auto raise() -> void override { win_->raise(); }
+    /// @brief 激活窗口（转发共享宿主）。
+    auto focus_window() -> void override { win_->focus_window(); }
+    /// @brief 所在显示器 id（转发共享宿主；与 `app::Display::id` 同源）。
+    [[nodiscard]] auto display_id() const -> int override { return win_->display_id(); }
+    /// @brief 窗口屏幕位置（转发共享宿主；物理像素）。
+    [[nodiscard]] auto position() const -> Point override { return win_->position(); }
+    /// @brief 程序化移动窗口（转发共享宿主）。
+    auto set_position(Point p) -> void override { win_->set_position(p); }
+    /// @brief 程序化设置外框尺寸（转发共享宿主）。
+    auto set_size(Size s) -> void override { win_->set_size(s); }
+    /// @brief DPI 缩放变化回调（转发共享宿主）。
+    auto set_scale_change_handler(ScaleChangeHandler h) -> void override {
+        win_->set_scale_change_handler(std::move(h));
+    }
 
   private:
     /// @brief 释放常驻 DIB section 与内存 DC（析构/尺寸变化重建时）。

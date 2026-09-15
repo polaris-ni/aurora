@@ -30,11 +30,11 @@
 
 | 构造 | 说明 |
 |:---|:---|
-| `Application(Scene, unique_ptr<Window>, WindowOptions)` | 接受 `create_window(XxxOptions)` 产出的已组装 `Window`；`max_frames` 等运行期参数由 `WindowOptions` 透传；内部 `set_event_handler` 把上抛事件经 `EventDispatcher` + `FocusManager` 集中派发 |
-| `Application(Scene, unique_ptr<Surface>, WindowOptions)` | 注入自定义 `Surface`，内部同样经 `create_window` 组装 `Window` |
-| `Application(Scene, w, h)` | 无头便捷构造，不持有 `Window`，仅用于 `render_to_png` 与程序化派发 |
+| `Application(Scene, unique_ptr<Window>, WindowOptions)` | 接受 `create_window(XxxOptions)` 产出的已组装 `Window`；`max_frames` 等运行期参数由 `WindowOptions` 透传；内部把该 `Window` 登记为**主窗口宿主**（`WindowHost`） |
+| `Application(Scene, unique_ptr<Surface>, WindowOptions)` | 注入自定义 `Surface`，内部同样经 `create_window` 组装 `Window` 后登记宿主 |
+| `Application(Scene, w, h)` | 无头便捷构造，**登记一个没有 OS 窗口的宿主**，仅用于 `render_to_png` 与程序化派发 |
 
-两个持有 `Window` 的构造共用私有 `attach_window` 接线（事件派发 + 窗口级可见性 / 几何态上报），避免重复。
+三个构造共用私有 `register_host` 接线：创建 `WindowHost`、绑定后端事件与窗口级可见性/几何态上报、安装应用级快捷键前置拦截，并把首个登记的宿主指定为主窗口（多窗口见 §2.4）。
 
 ### 2.2 主要接口
 
@@ -60,13 +60,109 @@
 
 序列化输出的形态与补丁协议见 [`08-tooling.md`](08-tooling.md)。
 
+### 2.4 多窗口
+
+一个 `Application` 可同时驱动多个窗口。每个窗口是一个 **`WindowHost`**（`app/window_host.h`）：一个完整可运行单元。
+
+| 归属 | 内容 |
+|:---|:---|
+| `WindowHost`（逐窗口） | `Window`（**可为 nullptr**）、`Scene`、`FocusManager`、`EventDispatcher`/`TouchDispatcher` 捕获表、帧统计 `FrameStats`、窗口角色 `WindowRole` |
+| `Application`（应用级共享） | `Animator`、`Scheduler`、`ShortcutRegistry`、`CommandRegistry`、跨线程回投队列、**统一帧循环** |
+
+- **隔离语义**：焦点与指针/触控捕获**不跨窗口**，事件只在其所属宿主的作用域内派发；脏区、HUD 叠加层、窗口状态快照（`WindowState`/`WindowMode`）均为逐窗口状态。
+- **共享语义**：`Animator`/`Scheduler` 每帧只推进一次（`dt` 唯一）；快捷键与命令注册表跨窗口一致（经宿主键盘前置拦截器注入）。
+- **无头宿主**：`Window` 可为 nullptr，把「有/无窗口」统一成一条代码路径（无头构造即登记无窗宿主）。
+- **兼容**：`window()` / `scene()` / `focus()` / `dispatch_*()` / `render_to_png` 作用于**主窗口**（首个登记的宿主），单窗口用法行为与历史完全一致。
+
+**登记与查询**
+
+| 成员 | 说明 |
+|:---|:---|
+| `open_window(unique_ptr<Window>, Scene, WindowOptions) -> WindowId` | 追加窗口宿主；`Window` 为 nullptr 时退化为无头宿主 |
+| `open_window(unique_ptr<Surface>, Scene, WindowOptions) -> Result<WindowId>` | 注入自定义 `Surface`，内部经 `create_window` 组装 |
+| `close_window(WindowId)` | 程序化请求关闭（下一次帧末回收） |
+| `window_host(WindowId)` / `windows()` / `window_count()` | 宿主检索与枚举 |
+| `WindowHost`：id() / scene() / focus() / frame_stats() / dispatch_*() / render_frame() / tick() / should_close() / teardown() | 逐窗口运行期接口 |
+
+**角色与退出策略**
+
+| 角色 `WindowRole` | 语义 |
+|:---|:---|
+| `Main` | 主窗口（默认）：`scene()`/`focus()`/`window()` 的作用对象；`MainWindowClosed` 策略下其关闭连带关闭全部窗口 |
+| `Auxiliary` | 独立辅助窗口：关闭只影响自己 |
+| `Transient` | 从属窗口：`WindowOptions::owner` 指向所依附的宿主，**owner 关闭时连带关闭**（帧末回收阶段执行） |
+
+| 退出策略 `ExitPolicy` | 行为 |
+|:---|:---|
+| `LastWindowClosed`（默认） | 最后一个**有 OS 窗口**的宿主关闭即退出；单窗口用法 ≡ 历史行为 |
+| `MainWindowClosed` | 主窗口关闭 → 连带关闭全部窗口并退出（传统单主窗应用） |
+| `ExplicitOnly` | 仅 `Application::quit()` 可退出：窗口全关也继续运行（常驻 / 托盘型应用） |
+
+- `quit()` 在**任何**策略下都使 `run()` 退出；`set_main_window(WindowId)` 可改主窗口（默认首个登记的宿主）。
+- `set_on_window_closed(cb)`：宿主被回收**之后**触发一次（参数为被关闭窗口 id），供释放外部资源。
+- **回收规则**：`reap_closed()` 每帧末执行——先收集待回收 id 再统一销毁（杜绝迭代中销毁）；从属窗口的连带关闭只置位、由**下一次**回收执行；全部窗口都关闭时**保留主窗口宿主**，使 `scene()`/`window()` 等访问器在 `run()` 结束后仍可用。
+
+**模态与父子窗口**
+
+- `WindowOptions::owner` 声明所依附的宿主；`WindowOptions::modal = true` 时打开窗口会：① 对其 owner 调用 `Surface::set_owner()` 建立 OS 层从属（恒浮于 owner 之上、随其最小化、不产生独立任务栏条目）；② 对其 owner 调用 `Surface::set_enabled(false)` 屏蔽输入。窗口被回收时自动 `set_enabled(true)` 恢复（否则 owner 将永久停在禁用态）。
+- **无需焦点陷阱**：`FocusManager` 逐窗口隔离，焦点本就不跨窗；模态只需阻断 owner 的 OS 输入。
+- 后端映射：Win32 / D3D11 = `GWLP_HWNDPARENT` + `EnableWindow`；GLFW 无父子 API（`set_owner` 空实现，层级由 WM 决定）；Headless 记录调用供测试断言。
+
+**z 序、显示器与 DPI**
+
+| 能力 | 入口 | 后端映射 |
+|:---|:---|:---|
+| 提升 z 序 | `WindowHost::raise()` / `Surface::raise()` | Win32 `BringWindowToTop`；GLFW 以 `glfwShowWindow` 近似（无独立 API） |
+| 激活窗口 | `WindowHost::focus_window()` / `Surface::focus_window()` | Win32 `SetForegroundWindow` + `SetFocus`；GLFW `glfwFocusWindow` |
+| 所在显示器 | `Surface::display_id()` / `WindowHost::display_id()` | Win32 `MonitorFromWindow`（HMONITOR 句柄值，与 `app::Display::id` 同源）；未知 -1 |
+| 迁移到显示器 | `WindowHost::move_to_display(id)` | 转发既有 `app::move_window_to_display`（居中到目标工作区） |
+| DPI 变化 | `Surface::set_scale_change_handler()` → `WindowHost::on_scale_changed()` | Win32 `WM_DPICHANGED`（取 wParam 高位的建议 DPI）→ 更新 `scale` 并强制整帧重排重绘 |
+
+**已知后端限制（多窗口）**
+
+- **Wasm**：鼠标事件按 canvas 元素注册（多窗口可用），但**键盘**与 **resize** 注册在 `document` / `window` 级——多窗口下只有最后注册的 Surface 能收到，故 Wasm 上的多窗口键盘输入尚不可用。修复需拆成「document 级单一分发器 + 按焦点 Surface 路由」，须在 Emscripten 工具链下真机验证，属后续专项。
+- **X11 / Wayland**：无全局窗口枚举能力，`raise` / `focus_window` 为尽力而为；等待通道是 per-surface 的，帧循环对这类后端施加 8ms 等待上限（见「统一帧循环」）。
+
+**跨窗通信**
+
+- **共享状态** → 直接用既有 `Store<S>`：多个窗口共享同一实例，各自 `au::connect(store, ...)` 订阅并在 `asSignal()` 上绑定控件，**无需新 API**。
+- **一次性通知 / 命令** → `Application::bus()`（`WindowEventBus`）：`post<T>(payload, from)` 类型化发布，`on<T>(cb, filter_from)` 订阅（返回 RAII `Subscription`，析构自动取消；`filter_from` 用于点对点来源过滤）。
+- 语义：主线程**同步扇出**（与 `Application` 的同步事件派发一致）；遍历前拷贝订阅列表，订阅者可在回调内安全新增 / 取消订阅；订阅句柄内部持有共享状态，**总线先析构、句柄后析构**也安全。
+
+**窗口几何持久化**
+
+| 接口 | 说明 |
+|:---|:---|
+| `WindowOptions::persist_id` | 几何持久化键（空 = 不持久化），多个窗口用不同键区分 |
+| `Application::set_window_geometry_store(prefs)` | 指定 `Preferences` 存储；会对**已登记**窗口补做恢复（主窗口在构造期即已登记） |
+| `WindowGeometry{origin, size, mode, display_id}` | 坐标与尺寸为**屏幕物理像素**（与 `app::Display` 同源）——只有物理坐标跨 DPI 稳定；恢复时按当前 `scale_factor` 折回逻辑 dp |
+| `save_window_geometry` / `load_window_geometry` | 读写；另有 `Preferences::Group` 重载用于**窗口组**：`prefs.group("windows")` + 各窗口键 |
+| `is_window_geometry_usable(g, displays)` | 判据：尺寸为正，且与某显示器工作区**有交集**（部分越界算可用，多屏拼接/任务栏遮挡下不应拒绝恢复） |
+
+- **时机**：窗口**打开时自动恢复**（`register_host` 与 `set_window_geometry_store` 两处入口）、**关闭时自动保存**（帧末回收阶段的收集步骤——包含因「保留最后一个宿主」而未真正销毁的单窗口场景，否则「关掉唯一窗口后下次启动恢复」永不生效；`WindowHost::geometry_saved()` 保证只写一次）。
+- **兜底**：键缺失 / JSON 格式错误 / 几何不可用（显示器被拔除、分辨率变小导致完全落在屏外）→ 一律回退默认布局。**格式错误与不可用分两类 WARN**，便于区分「存储被破坏」与「显示器变了」。
+- 本类不做隐式 I/O：落盘由调用方 `Preferences::flush()` 决定。
+
+**统一帧循环**（`Application::run`，不再委托 `Window::run`）：
+
+```
+drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/sched tick → 逐宿主 render_frame → reap_closed → wait_once
+```
+
+- **pump 一次还是 N 次**：由 `Surface::pumps_thread_queue()` 决定。Win32（`PeekMessage(nullptr,…)`）与 GLFW（`glfwPollEvents()`）是线程/进程级共享队列，一次 pump 即抽干全部窗口消息并按 HWND 路由，故每帧只 pump 一次；X11/Wayland/Wasm 为 per-surface 队列，逐个 pump。
+- **等待聚合**：每帧只等待一次，取各宿主 `decide_wait` 的**最小正值**（任一为 `0` 则不等待；全为「无限」才无限等待）。优先交由 `waits_thread_queue()==true` 的后端（Win32/GLFW）执行；无此类后端时（X11/Wayland）封顶 8ms 轮询，避免其余窗口饥饿。
+- **回收时机**：`reap_closed()` 在**帧末**执行（不在事件派发栈内销毁宿主），并保留最后一个宿主，使 `scene()`/`window()` 等访问器在 `run()` 结束后仍可用。
+- **跨线程回投**：`Task::set_main_poster` 唤醒**全部**窗口的等待通道，避免回投工作只唤醒其中一个窗口而延迟执行。
+
+**帧统计归属**：单窗口刻意保留写入进程级单例 `FrameStats::instance()`（既有 `PerfOverlay`、基准工具与性能集成测试直读之，行为零变化）；登记第二个窗口起，各宿主切到自有实例（`WindowHost::own_frame_stats()`）。`PerfOverlay` 经 `Application::set_overlay` 自动绑定到主窗口统计，其他窗口的叠加层请显式 `bind_frame_stats(&host->frame_stats())`。
+
 ---
 
 ## 3 Window 与帧循环
 
 ### 3.1 帧循环
 
-`Window` 提供 VSync 回调，每帧 `tick(dt)` → `present_root`（脏区决策）→ `present()`。所有构建、事件、重绘都在 UI 线程（单线程 UI，见 [`01-core.md`](01-core.md) §8.1）。
+帧循环由 **`Application::run()` 统一驱动**（多窗口语义见 §2.4）：每帧 pump 事件 → 集中派发 → `tick` → 逐窗口 `present_root`（脏区决策）→ `present()`。`Window::run(on_frame, max_frames)` **保留**供单窗口低阶调用方（自拼帧循环、测试、demo 直驱）使用；多窗口请走 `Application::run`。所有构建、事件、重绘都在 UI 线程（单线程 UI，见 [`01-core.md`](01-core.md) §8.1）。
 
 ### 3.2 脏区追踪（默认开启）
 
@@ -127,6 +223,8 @@ compute_wait_timeout(has_dirty, anim_active, next_deadline_ms, frame_budget_ms, 
 **系统重绘处理**：窗口类背景刷 `wc.hbrBackground` 用浅灰实心刷 `RGB(245,245,247)`（而非默认黑色擦除）；`wnd_proc` 处理 `WM_PAINT`，在系统要求重绘时立即 `present()` 当前已就绪帧缓冲。
 
 **最大化白闪处理**：`Surface` 提供 `set_present_request` 回调通道（默认空实现），`Window` 构造时把该回调接为「对当前缓存根再渲染一帧」；`Win32Surface` 的 `WM_SIZE` / `WM_PAINT` 在几何变化当下同步调用该回调，使离屏缓冲在 DWM 合成前已为新尺寸真实内容。浅灰刷保留作兜底。`present_count()` 观测器供测试验证「WM_SIZE 触发了同步重渲染」。
+
+**关窗语义（多窗口）**：`WM_DESTROY` 只置位**本窗口**的 `should_close`，**不再** `PostQuitMessage(0)`——`WM_QUIT` 是**线程级**的，任一窗口销毁都投递它，会让同线程内所有窗口（乃至之后新建的窗口）在首次 poll 时被误判为「已请求关闭」，这是「关一个窗口整个应用退出」与「顺序创建多窗口立即退出」的根因。是否退出帧循环改由 `Application` 的 `ExitPolicy` 决定（§2.4）；外部/宿主代码主动 `PostQuitMessage` 时，`poll_platform_events` 仍按历史行为把 `WM_QUIT` 折算为关闭请求。
 
 ### 3.5 硬件加速上屏偏好
 

@@ -17,6 +17,7 @@
 #include <emscripten/html5.h>
 
 #include <string>
+#include <unordered_set>
 
 #include "aurora/window/surface.h"
 
@@ -35,22 +36,32 @@ namespace aurora {
 class WasmSurface : public Surface {
   public:
     WasmSurface(int w, int h, const char *canvas_id = "#canvas") : canvas_id_(canvas_id), w_(w), h_(h) {
-        // 注册 Emscripten 事件回调（鼠标/键盘/触摸/resize）
+        // 鼠标事件按 canvas 元素注册（多窗口各 canvas 独立，天然可用）。
         emscripten_set_mousedown_callback(canvas_id_.c_str(), this, true, &on_mouse);
         emscripten_set_mouseup_callback(canvas_id_.c_str(), this, true, &on_mouse);
         emscripten_set_mousemove_callback(canvas_id_.c_str(), this, true, &on_mouse);
-        emscripten_set_keydown_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, this, true, &on_key);
-        emscripten_set_keyup_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, this, true, &on_key);
-        emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, this, true, &on_resize);
+        // 键盘 / resize 注册在 document / window 级：多窗口下必须「单一分发器 + 按焦点路由」，
+        // 否则各 Surface 各自注册 document 级键盘回调会被后者覆盖，仅最后创建的窗口能收到。
+        // 故全局仅注册一次，由全局回调按 focused_surface_ 路由键盘、按实例集合广播 resize。
+        instances_.insert(this);
+        if (!global_handlers_registered_) {
+            emscripten_set_keydown_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, true, &on_key_dispatch);
+            emscripten_set_keyup_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, true, &on_key_dispatch);
+            emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, true, &on_resize_dispatch);
+            global_handlers_registered_ = true;
+        }
     }
 
     ~WasmSurface() override {
+        // 仅注销本 canvas 的鼠标回调；document/window 级全局分发器常驻（进程生命周期内
+        // 有效，实例清空后遍历自然跳过，无副作用）。
         emscripten_set_mousedown_callback(canvas_id_.c_str(), nullptr, true, nullptr);
         emscripten_set_mouseup_callback(canvas_id_.c_str(), nullptr, true, nullptr);
         emscripten_set_mousemove_callback(canvas_id_.c_str(), nullptr, true, nullptr);
-        emscripten_set_keydown_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, true, nullptr);
-        emscripten_set_keyup_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, true, nullptr);
-        emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, true, nullptr);
+        instances_.erase(this);
+        if (focused_surface_ == this) {
+            focused_surface_ = nullptr;
+        }
     }
 
     [[nodiscard]] auto begin_frame(int w, int h) -> Result<bool> override {
@@ -116,6 +127,13 @@ class WasmSurface : public Surface {
     auto wait_events(double /*timeout_ms*/) -> void override {}
 
   private:
+    // 多窗口事件路由支撑（document/window 级单一分发器）：全局仅注册一次回调，
+    // 键盘按 focused_surface_ 路由、resize 按实例集合广播。Wasm 为单线程 JS 环境，
+    // 实例集合与焦点指针的读写均发生在主线程事件回调内，无需加锁。
+    inline static std::unordered_set<WasmSurface *> instances_;
+    inline static WasmSurface *focused_surface_ = nullptr;
+    inline static bool global_handlers_registered_ = false;
+
     std::string canvas_id_;
     Painter painter_;
     int w_ = 0;
@@ -137,13 +155,17 @@ class WasmSurface : public Surface {
         ev.action = (type == EMSCRIPTEN_EVENT_MOUSEDOWN) ? MouseAction::Press
                     : (type == EMSCRIPTEN_EVENT_MOUSEUP) ? MouseAction::Release
                                                          : MouseAction::Move;
+        // 多窗口：最近交互（按下）的 canvas 成为键盘/事件焦点。
+        if (ev.action == MouseAction::Press) {
+            focused_surface_ = self;
+        }
         self->event_handler_(ev);
         return EM_TRUE;
     }
 
-    static EM_BOOL on_key(int type, const EmscriptenKeyboardEvent *e, void *user_data) {
-        auto *self = static_cast<WasmSurface *>(user_data);
-        if (!self->event_handler_) {
+    // 把 Emscripten 键盘事件翻译为 Aurora KeyEvent 并派发到指定 Surface（focused_surface_ 或测试桩）。
+    static EM_BOOL dispatch_key_to(WasmSurface *target, int type, const EmscriptenKeyboardEvent *e) {
+        if (!target || !target->event_handler_) {
             return EM_FALSE;
         }
         KeyEvent ev;
@@ -161,18 +183,30 @@ class WasmSurface : public Surface {
         if (e->metaKey) {
             ev.modifiers = ev.modifiers | ModifierKey::Meta;
         }
-        self->event_handler_(ev);
+        target->event_handler_(ev);
         return EM_TRUE;
     }
 
-    static EM_BOOL on_resize(int /*type*/, const EmscriptenUiEvent * /*e*/, void *user_data) {
-        auto *self = static_cast<WasmSurface *>(user_data);
-        // 查询 canvas 当前 CSS 尺寸并更新
+    // 全局 document 级键盘分发器：仅注册一次，按当前焦点 Surface 路由（多窗口语义）。
+    static EM_BOOL on_key_dispatch(int type, const EmscriptenKeyboardEvent *e, void * /*user_data*/) {
+        return dispatch_key_to(focused_surface_, type, e);
+    }
+
+    // 查询本 canvas 当前 CSS 尺寸并更新（window resize 时各实例自行刷新）。
+    auto update_css_size() -> void {
         double css_w = 0, css_h = 0;
-        emscripten_get_element_css_size(self->canvas_id_.c_str(), &css_w, &css_h);
+        emscripten_get_element_css_size(canvas_id_.c_str(), &css_w, &css_h);
         if (css_w > 0 && css_h > 0) {
-            self->w_ = static_cast<int>(css_w);
-            self->h_ = static_cast<int>(css_h);
+            w_ = static_cast<int>(css_w);
+            h_ = static_cast<int>(css_h);
+        }
+    }
+
+    // 全局 window 级 resize 分发器：仅注册一次，遍历所有实例刷新各自 canvas 尺寸
+    // （浏览器窗口 resize 影响全部 canvas 布局，应广播而非只给焦点窗口）。
+    static EM_BOOL on_resize_dispatch(int /*type*/, const EmscriptenUiEvent * /*e*/, void * /*user_data*/) {
+        for (auto *s : instances_) {
+            s->update_css_size();
         }
         return EM_TRUE;
     }

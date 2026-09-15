@@ -70,6 +70,32 @@ class D3D11Surface : public Surface {
     auto wait_events(double timeout_ms) -> void override { win_->wait_events(timeout_ms); }
     /// @brief 跨线程唤醒主循环（转发共享宿主；PostMessage 线程安全）。
     auto request_wake() -> void override { win_->request_wake(); }
+    /// @brief 与 Win32Surface 同源：宿主 `Win32Window` 的消息泵是线程级共享队列。
+    [[nodiscard]] auto pumps_thread_queue() const -> bool override { return true; }
+    /// @brief 与 Win32Surface 同源：等待经由线程级消息通道，覆盖本进程任意窗口。
+    [[nodiscard]] auto waits_thread_queue() const -> bool override { return true; }
+    /// @brief 与 Win32Surface 同源：经共享宿主建立 OS 层 owner 关系。
+    auto set_owner(const Surface *owner) -> void override {
+        win_->set_owner(owner != nullptr ? owner->native_handle() : nullptr);
+    }
+    /// @brief 与 Win32Surface 同源：模态窗口屏蔽 owner 输入。
+    auto set_enabled(bool on) -> void override { win_->set_enabled(on); }
+    /// @brief 与 Win32Surface 同源：提升 z 序。
+    auto raise() -> void override { win_->raise(); }
+    /// @brief 与 Win32Surface 同源：激活窗口。
+    auto focus_window() -> void override { win_->focus_window(); }
+    /// @brief 与 Win32Surface 同源：所在显示器 id。
+    [[nodiscard]] auto display_id() const -> int override { return win_->display_id(); }
+    /// @brief 与 Win32Surface 同源：窗口屏幕位置。
+    [[nodiscard]] auto position() const -> Point override { return win_->position(); }
+    /// @brief 与 Win32Surface 同源：程序化移动窗口。
+    auto set_position(Point p) -> void override { win_->set_position(p); }
+    /// @brief 与 Win32Surface 同源：程序化设置外框尺寸。
+    auto set_size(Size s) -> void override { win_->set_size(s); }
+    /// @brief 与 Win32Surface 同源：DPI 缩放变化回调。
+    auto set_scale_change_handler(ScaleChangeHandler h) -> void override {
+        win_->set_scale_change_handler(std::move(h));
+    }
     /// @brief vsync 开启且设备可用时，`Present(1,0)` 阻塞到 vblank 自带帧节拍；
     /// 帧调度据此在活跃帧跳过 CPU 端 sleep 节流，避免双重限速。
     [[nodiscard]] auto paces_frames() const -> bool override { return ok_ && vsync_; }

@@ -32,6 +32,44 @@
 namespace aurora {
 
 // =============================================================================
+// 窗口标识与角色（多窗口：specification/06-app-platform.md §2.4）
+// -----------------------------------------------------------------------------
+// `WindowId` 是进程内唯一的逻辑句柄，`Window` 与 `WindowHost` 一一对应；它不是 OS 句柄
+// （OS 句柄经 `Surface::native_handle()` 取 native focus use）。
+// =============================================================================
+
+/// @brief 窗口标识：进程内唯一、单调递增的逻辑句柄（非 OS 窗口句柄）。
+///
+/// 由 `Application` 在登记窗口宿主（`WindowHost`）时分配，`kInvalidWindowId` 为哨兵
+/// （表示「无窗口」/「无 owner」）。跨后端稳定：Headless 与真实后端同一套取值。
+using WindowId = std::uint32_t;
+
+/// @brief 无效窗口 id：未找到宿主、无 owner 或尚未分配时的取值（0 保留不用）。
+inline constexpr WindowId kInvalidWindowId = 0U;
+
+/// @brief 窗口角色：决定窗口的生命周期归属与退出连带行为（多窗口退出策略的输入）。
+///
+/// - `Main`：应用主窗口，进程默认要求唯一（首个登记的 Main 即主窗口）。
+/// - `Auxiliary`：独立辅助窗口，关闭不影响其他窗口。
+/// - `Transient`：临时窗口（工具面板/对话框等），通常依附某个 owner（owner 关闭时连带关闭）。
+///
+/// 具体连带行为由 `Application` 的退出策略消费，本枚举只承载「身份」语义。
+enum class WindowRole : std::uint8_t {
+    Main,       ///< 主窗口：默认角色，保证既有单窗口用法行为不变
+    Auxiliary,  ///< 辅助窗口：与主窗口平级的独立顶层窗口
+    Transient,  ///< 临时窗口：依附 owner 显示，随 owner 生命周期收敛
+};
+
+/// @brief 应用退出策略：决定「窗口关闭」如何收敛到「帧循环退出」。
+///
+/// 单窗口用法下三种策略行为一致（关掉唯一的窗口即退出），多窗口下才显现差异。
+enum class ExitPolicy : std::uint8_t {
+    LastWindowClosed,  ///< 默认：最后一个**有 OS 窗口**的宿主关闭即退出（≡ 历史单窗口行为）
+    MainWindowClosed,  ///< 主窗口关闭即连带关闭**全部**窗口并退出（传统单主窗应用）
+    ExplicitOnly,      ///< 仅 `Application::quit()` 可退出：窗口全关也不退出（常驻型/托盘型应用）
+};
+
+// =============================================================================
 // 窗口构建：选项 / 类型安全工厂 / Surface 种类（原 window/backend.h，已并入本模块）
 // -----------------------------------------------------------------------------
 class Window;  // 前向声明：下方 create_window 工厂返回 unique_ptr<Window>，Window 实体定义见下方
@@ -99,6 +137,29 @@ struct WindowOptions {
     bool power_saving = true;  ///< 省电模式：idle 时阻塞等待事件（默认开）；false = 忙轮询旧行为，
                                ///< 供持续重绘场景 opt-out（与 `enable_dirty_tracking(false)` 语义配套）。
     RendererPreference renderer = RendererPreference::Auto;  ///< 上屏后端偏好。
+
+    /// @brief 窗口角色（多窗口生命周期语义，见 `WindowRole`；默认 `Main` 保证单窗口用法行为不变）。
+    WindowRole role = WindowRole::Main;
+
+    /// @brief 依附的父窗口 id（`kInvalidWindowId` = 顶层窗口，无 owner）。
+    ///
+    /// 语义：`Transient`（及模态窗口）依附于 owner —— **owner 关闭时其从属窗口连带关闭**
+    /// （由 `Application` 在帧末回收阶段执行）。
+    WindowId owner = kInvalidWindowId;
+
+    /// @brief 是否模态窗口：打开时建立到 `owner` 的 OS 层从属关系并**屏蔽 owner 的输入**，
+    /// 关闭后自动恢复。
+    ///
+    /// 无需额外的焦点陷阱：Aurora 的 `FocusManager` 是**逐窗口**的（焦点本就不跨窗），
+    /// 模态只需阻断 owner 的 OS 输入即可。
+    bool modal = false;
+
+    /// @brief 几何持久化键（空 = 不持久化）。
+    ///
+    /// 非空且 `Application::set_window_geometry_store()` 已指定存储时：窗口关闭自动保存几何，
+    /// 打开自动恢复（含显示器被拔除 / 几何完全落在屏幕外时的兜底回退）。
+    /// 多个窗口共用一个 `Preferences` 时用不同键区分（窗口组即一组键）。
+    std::string persist_id;
 };
 
 /// @brief Headless 后端专属选项（其余通用字段见 `WindowOptions`）。
@@ -306,6 +367,10 @@ class Window {
     /// @brief 设置当前窗口可见性状态快照（由 `Application` 在状态变化时调用）。
     /// 该快照每帧经 `present_root` 注入根 `BuildContext`，子树可 `ctx.env->get<WindowState>()` 读取。
     auto set_window_state(WindowState s) -> void { window_state_ = s; }
+    /// @brief 当前窗口可见性状态快照。
+    [[nodiscard]] auto window_state() const -> WindowState { return window_state_; }
+    /// @brief 当前窗口几何态快照（供几何持久化读取）。
+    [[nodiscard]] auto window_mode() const -> WindowMode { return window_mode_; }
     /// @brief 设置当前窗口几何态快照（由 `Application` 在状态变化时调用）。
     auto set_window_mode(WindowMode m) -> void { window_mode_ = m; }
 
@@ -457,6 +522,17 @@ class Window {
     /// `<0` 无限等待 / `0` 不等（默认，未设置则保持旧忙轮询行为）/ `>0` 等待毫秒数。
     auto set_next_wait(double timeout_ms) -> void { next_wait_ms_ = timeout_ms; }
 
+    /// @brief 绑定本窗口的帧统计实例（多窗口：每窗口独立统计，`FrameStats::instance()`
+    /// 在多窗口下会混入其他窗口数据）。
+    ///
+    /// 默认绑定进程级单例 `FrameStats::instance()`——未显式绑定时行为与历史完全一致，
+    /// 故既有的 `PerfOverlay` / 基准工具 / 性能集成测试零改动仍可工作。
+    /// @note Thread: main-thread only
+    auto set_frame_stats(FrameStats &s) -> void { stats_ = &s; }
+
+    /// @brief 本窗口当前绑定的帧统计实例（默认 `FrameStats::instance()`）。
+    [[nodiscard]] auto frame_stats() const -> FrameStats & { return *stats_; }
+
   private:
     /// @brief 在**根控件**安装子树脏汇聚点（全树仅此一处回调）。
     ///
@@ -565,6 +641,7 @@ class Window {
     bool gpu_fallback_ = false;  ///< GPU 后端首帧失败后的永久软件路径标记（本 Window 生命周期内不再尝试 GPU）。
     bool idle_frame_ = false;  ///< 最近一次 present_root 是否为 idle 跳过（无脏区、未渲染）。
     double next_wait_ms_ = 0.0;  ///< 本帧末尾的等待请求（一次性消费，0=不等）。
+    FrameStats *stats_ = &FrameStats::instance();  ///< 帧统计实例（默认进程级单例；多窗口各窗绑定自己的实例）。
 
     // ---- 分层 HUD 叠加层 ----
     std::shared_ptr<Widget> overlay_;  ///< 叠加层 widget（典型 PerfOverlay）；空 = 无叠加层。
@@ -870,8 +947,8 @@ class Window {
         }
         const auto t_present_end = std::chrono::steady_clock::now();
         const double present_ms = std::chrono::duration<double, std::milli>(t_present_end - t_present_start).count();
-        // 记录阶段计时
-        FrameStats::instance().record_phases(layout_ms, paint_ms, present_ms);
+        // 记录阶段计时（写入本窗口绑定的统计实例，多窗口互不干扰）
+        stats_->record_phases(layout_ms, paint_ms, present_ms);
         return result;
     }
 

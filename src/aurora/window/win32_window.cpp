@@ -178,6 +178,7 @@ struct Win32Window::Impl {
     WindowStateHandler window_state_handler;
     WindowModeHandler window_mode_handler;
     PresentRequest present_request;
+    std::function<void(float)> scale_handler;  ///< DPI 缩放变化上报（`WM_DPICHANGED` 后触发）。
 
     inline static bool class_registered = false;
     inline static HBRUSH bg_brush = nullptr;  ///< 浅色背景擦除刷（消除最大化黑屏），注册时创建一次。
@@ -208,7 +209,11 @@ struct Win32Window::Impl {
     auto handle_size(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESULT;
     auto handle_paint(HWND hwnd_in) -> LRESULT;
     auto handle_activate(WPARAM wp) -> LRESULT;
-    static auto handle_dpi_changed(HWND hwnd, LPARAM lp) -> LRESULT;
+    /// @brief DPI 变化：先按系统给出的新矩形就位，再按 wParam 的新 DPI 更新缩放并上报。
+    /// 非 static：`WM_DPICHANGED` 需要回写本窗口的 `scale` 并通知其 handler。
+    auto handle_dpi_changed(HWND hwnd, WPARAM wp, LPARAM lp) -> LRESULT;
+    /// @brief 上报当前 DPI 缩放（由 `handle_dpi_changed` 调用）。
+    auto notify_scale_changed() const -> void;
     [[nodiscard]] auto handle_getminmaxinfo(LPARAM lp) const -> LRESULT;
     auto handle_close() -> LRESULT;
     auto handle_destroy() -> LRESULT;
@@ -295,9 +300,9 @@ Win32Window::Impl::~Impl() {
     if (hwnd != nullptr) {
         DestroyWindow(hwnd);
         hwnd = nullptr;
-        // 排干残留 WM_QUIT：WM_DESTROY 里的 PostQuitMessage 把 WM_QUIT 挂在线程队列，
-        // 若不消费，同线程后续新建窗口的消息循环首次 poll 就会误判 should_close
-        // （顺序创建多窗口/基准多场景时立即退出）。
+        // 排干残留 WM_QUIT（历史防御）：本后端已不再投递 WM_QUIT（见 handle_destroy），
+        // 但若宿主代码/系统经 PostQuitMessage 主动请求退出，残留的 WM_QUIT 仍会让同线程
+        // 后续新建窗口的消息循环首次 poll 就误判 should_close（顺序创建多窗口时立即退出）。
         MSG msg{};
         while (PeekMessageA(&msg, nullptr, WM_QUIT, WM_QUIT, PM_REMOVE) != 0) {
         }
@@ -481,11 +486,24 @@ auto Win32Window::Impl::handle_activate(WPARAM wp) -> LRESULT {
 }
 
 // ---- DPI 变化分族（WM_DPICHANGED）----
-auto Win32Window::Impl::handle_dpi_changed(HWND hwnd, LPARAM lp) -> LRESULT {
+auto Win32Window::Impl::handle_dpi_changed(HWND hwnd, WPARAM wp, LPARAM lp) -> LRESULT {
     const auto *pr = reinterpret_cast<RECT *>(lp);  // NOLINT(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
     SetWindowPos(hwnd, nullptr, pr->left, pr->top, pr->right - pr->left, pr->bottom - pr->top,
                  SWP_NOZORDER | SWP_NOACTIVATE);
+    // wParam 的 HIWORD 为系统建议的新 Y 轴 DPI：更新逻辑缩放并上报表层，
+    // 由 `Window` 强制全量重排重绘（否则 logical↔physical 换算失配会内容错位/发虚）。
+    const int dpi_y = static_cast<int>(HIWORD(wp));
+    if (dpi_y > 0) {
+        scale = static_cast<float>(dpi_y) / 96.0F;
+        notify_scale_changed();
+    }
     return 0;
+}
+
+auto Win32Window::Impl::notify_scale_changed() const -> void {
+    if (scale_handler) {
+        scale_handler(scale);
+    }
 }
 
 // ---- 尺寸限制分族（WM_GETMINMAXINFO）----
@@ -518,7 +536,12 @@ auto Win32Window::Impl::handle_close() -> LRESULT {
 auto Win32Window::Impl::handle_destroy() -> LRESULT {
     should_close = true;
     hwnd = nullptr;
-    PostQuitMessage(0);
+    // 多窗口：**不再** `PostQuitMessage(0)`。
+    // `WM_QUIT` 是**线程级**的：任一个窗口销毁都投递它，会让同线程内所有窗口
+    // （乃至之后新建的窗口）在首次 poll 时被误判为「已请求关闭」——这正是
+    // 「关掉一个窗口整个应用退出」以及「顺序创建多窗口时立即退出」的根因。
+    // 现在关闭语义完全收敛到**本窗口**的 should_close，是否退出进程由
+    // `Application` 的退出策略（`ExitPolicy`）决定。
     return 0;
 }
 
@@ -624,7 +647,7 @@ auto WINAPI Win32Window::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
         case WM_ACTIVATE:
             return self->handle_activate(wp);
         case WM_DPICHANGED:
-            return handle_dpi_changed(hwnd, lp);
+            return self->handle_dpi_changed(hwnd, wp, lp);
         case WM_GETMINMAXINFO:
             return self->handle_getminmaxinfo(lp);
         case WM_CLOSE:
@@ -696,6 +719,86 @@ auto Win32Window::request_wake() const -> void {
     if (pimpl_->hwnd != nullptr) {
         PostMessageA(pimpl_->hwnd, WM_NULL, 0, 0);  // 线程安全；空消息仅用于打断 wait_events
     }
+}
+
+// ---- 父子窗口与模态 ----
+
+auto Win32Window::set_owner(void *owner_hwnd) const -> void {
+    if (pimpl_->hwnd == nullptr) {
+        return;
+    }
+    // `GWLP_HWNDPARENT` 改变的是 **owner**（不是子窗口 parent）：子窗恒浮于 owner 之上、
+    // 随 owner 最小化、不产生独立任务栏条目。传 nullptr 解除从属关系。
+    SetWindowLongPtrA(pimpl_->hwnd, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(owner_hwnd));
+}
+
+auto Win32Window::set_enabled(bool on) const -> void {
+    if (pimpl_->hwnd == nullptr) {
+        return;
+    }
+    EnableWindow(pimpl_->hwnd, on ? TRUE : FALSE);  // 模态窗口屏蔽其 owner 的输入
+}
+
+// ---- z 序、显示器与 DPI ----
+
+auto Win32Window::raise() const -> void {
+    if (pimpl_->hwnd == nullptr) {
+        return;
+    }
+    BringWindowToTop(pimpl_->hwnd);  // 仅提 z 序，不改变激活状态
+}
+
+auto Win32Window::focus_window() const -> void {
+    if (pimpl_->hwnd == nullptr) {
+        return;
+    }
+    SetForegroundWindow(pimpl_->hwnd);
+    SetFocus(pimpl_->hwnd);
+}
+
+auto Win32Window::display_id() const -> int {
+    if (pimpl_->hwnd == nullptr) {
+        return -1;
+    }
+    const HMONITOR hmon = MonitorFromWindow(pimpl_->hwnd, MONITOR_DEFAULTTONEAREST);
+    if (hmon == nullptr) {
+        return -1;
+    }
+    // 与 `app::Display::id` 同源：`display_win32.cpp` 以 HMONITOR 句柄值作稳定 id。
+    return static_cast<int>(reinterpret_cast<std::intptr_t>(hmon));
+}
+
+auto Win32Window::set_scale_change_handler(std::function<void(float)> h) const -> void {
+    pimpl_->scale_handler = std::move(h);
+}
+
+// ---- 窗口几何（多窗口：几何持久化的读写端）----
+
+auto Win32Window::position() const -> Point {
+    if (pimpl_->hwnd == nullptr) {
+        return Point{};
+    }
+    RECT r{};
+    if (GetWindowRect(pimpl_->hwnd, &r) == 0) {
+        return Point{};
+    }
+    return Point{.x = static_cast<float>(r.left), .y = static_cast<float>(r.top)};
+}
+
+auto Win32Window::set_position(Point p) const -> void {
+    if (pimpl_->hwnd == nullptr) {
+        return;
+    }
+    SetWindowPos(pimpl_->hwnd, nullptr, static_cast<int>(std::lround(p.x)), static_cast<int>(std::lround(p.y)), 0, 0,
+                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+auto Win32Window::set_size(Size s) const -> void {
+    if (pimpl_->hwnd == nullptr) {
+        return;
+    }
+    SetWindowPos(pimpl_->hwnd, nullptr, 0, 0, static_cast<int>(std::lround(s.width)),
+                 static_cast<int>(std::lround(s.height)), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 }  // namespace aurora

@@ -76,6 +76,8 @@ namespace aurora {
 struct InspectorServer::Impl {
     std::function<Node()> root_getter;
     std::function<Surface *()> surface_getter;  // 可选：debug 端点访问运行时 Surface
+    std::function<std::vector<std::uint32_t>()> window_ids_getter;  // 可选：多窗口枚举（/api/windows）
+    std::function<Node(std::uint32_t)> window_tree_getter;  // 可选：按窗口 id 取树（/api/tree?window=）
     SOCKET listen_socket = INVALID_SOCKET;
     std::thread worker;
     std::atomic<bool> running{false};
@@ -445,6 +447,21 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         }
     }
 
+    // GET /api/windows — 枚举全部窗口 id（多窗口调试）
+    if (route == "/api/windows") {
+        if (method != "GET") {
+            return error_response(405, "Method not allowed for /api/windows");
+        }
+        nlohmann::json ids = nlohmann::json::array();
+        if (window_ids_getter) {
+            for (const std::uint32_t id : window_ids_getter()) {
+                ids.push_back(id);
+            }
+        }
+        // 未注册枚举回调时返回空数组而非错误：单窗口应用不必为此配置任何东西。
+        return json_response(200, "OK", nlohmann::json{{"count", ids.size()}, {"windows", ids}});
+    }
+
     // GET /api/debug/tree — Widget 树 JSON
     if (route == "/api/debug/tree") {
         if (method != "GET") {
@@ -564,6 +581,37 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         if (method != "GET") {
             return error_response(405, "Method not allowed for /api/tree");
         }
+        // 多窗口：?window=<id> 取指定窗口的树（需注册 window_tree_getter）。
+        const std::string win_param = query_param(path, "window");
+        if (!win_param.empty()) {
+            if (!window_tree_getter) {
+                return error_response(400, "Window tree getter not configured");
+            }
+            std::uint32_t wid = 0;
+            try {
+                wid = static_cast<std::uint32_t>(std::stoul(win_param));
+            } catch (...) {
+                return error_response(400, "window param must be a numeric id");
+            }
+            bool found = false;
+            try {
+                auto tree = marshal_get<nlohmann::json>([&]() -> nlohmann::json {
+                    Node root = window_tree_getter(wid);
+                    if (!root) {
+                        return nlohmann::json{};  // 标记窗口不存在
+                    }
+                    found = true;
+                    return Inspector::tree_json_full(root);
+                });
+                if (!found) {
+                    return error_response(404, "Window " + win_param + " not found");
+                }
+                return json_response(200, "OK", tree);
+            } catch (const std::exception &e) {
+                return error_response(500, std::string("window tree failed: ") + e.what());
+            }
+        }
+        // 回退：主窗口（构造时注入的 root_getter），向后兼容既有 /api/tree。
         std::scoped_lock lock(tree_mutex);
         Node root = root_getter();
         if (!root) {
@@ -1011,6 +1059,14 @@ void InspectorServer::Impl::accept_loop() {
 // ---------------------------------------------------------------------------
 InspectorServer::InspectorServer(std::function<Node()> root_getter) : impl_(std::make_unique<Impl>()) {
     impl_->root_getter = std::move(root_getter);
+}
+
+auto InspectorServer::set_window_ids_getter(std::function<std::vector<std::uint32_t>()> getter) const -> void {
+    impl_->window_ids_getter = std::move(getter);
+}
+
+auto InspectorServer::set_window_tree_getter(std::function<Node(std::uint32_t)> getter) const -> void {
+    impl_->window_tree_getter = std::move(getter);
 }
 
 InspectorServer::~InspectorServer() { stop(); }

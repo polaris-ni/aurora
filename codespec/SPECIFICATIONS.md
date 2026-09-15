@@ -4,7 +4,7 @@
 > **设计内核**：声明式、响应式、概念可枚举
 > **版本说明**：本文档为设计规格（文档自身无版本号）。库发布版本见 `CHANGELOG.json`（`currentVersion`）；文档与实现冲突时以**代码运行时**为准并回填本文档。
 >
-> 本文件是**总纲与索引**：定位、设计原则、范围、约束、24 条特性清单与文档导航。各主题的详细契约见 `specification/` 八份子系统文档与五份顶层文档。
+> 本文件是**总纲与索引**：定位、设计原则、范围、约束、25 条特性清单与文档导航。各主题的详细契约见 `specification/` 八份子系统文档与五份顶层文档。
 
 ---
 
@@ -105,6 +105,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | 22 | 可逆性：UI → 代码的参考还原 | AI 可分析现有界面并重构 | [`08-tooling.md`](specification/08-tooling.md) §10.7（工具链侧）、[`04-widget.md`](specification/04-widget.md) §6.2（控件侧） |
 | 23 | 部分代码容错（半成品可编译可运行） | AI 可增量开发 | [`01-core.md`](specification/01-core.md) §8.4 |
 | 24 | Token 效率 + 编译速度约束 | AI 迭代循环效率 | 本文 §4.3 |
+| 25 | 多窗口（一个进程多个顶层窗口） | AI 生成的复合应用可多窗协同，且不退化单窗调用模型 | [`06-app-platform.md`](specification/06-app-platform.md) §2.4 |
 
 ---
 
@@ -178,7 +179,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | [`03-layout-render.md`](specification/03-layout-render.md) | `layout/` + `render/` + `image/` + `media/`：布局协议、Flex / Grid 算法、Painter、字体引擎、Surface 与后端；需求 #11 / #20 |
 | [`04-widget.md`](specification/04-widget.md) | `widget/` + `ui/`：控件基类契约、自描述、控件清单、可定制性契约；需求 #7 / #22 |
 | [`05-event-navigation.md`](specification/05-event-navigation.md) | `event/` + `animation/` + `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈；需求 #8 |
-| [`06-app-platform.md`](specification/06-app-platform.md) | `app/` + `window/` + `platform/` + `preferences/` + `storage/` + `perf/` + `debug/`：应用驱动、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面；需求 #14 / #15 |
+| [`06-app-platform.md`](specification/06-app-platform.md) | `app/` + `window/` + `platform/` + `preferences/` + `storage/` + `perf/` + `debug/`：应用驱动、多窗口容器（`WindowHost`）、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面；需求 #14 / #15 / #25 |
 | [`07-environment-modifier.md`](specification/07-environment-modifier.md) | `environment/` + `theming/` + `i18n/` + `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier；需求 #12 |
 | [`08-tooling.md`](specification/08-tooling.md) | 序列化 / 代码生成 / YAML、控件树检查、Inspector 面板与远程服务、自描述发现、MCP / CLI / LSP、测试原语、日志通道；需求 #9 / #10 / #12 / #13 / #16 / #17 / #22 |
 

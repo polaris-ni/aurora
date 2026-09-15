@@ -748,6 +748,48 @@ auto GlfwSurface::set_window_state_handler(WindowStateHandler h) -> void {
 }
 auto GlfwSurface::set_window_mode_handler(WindowModeHandler h) -> void { pimpl_->window_mode_handler = std::move(h); }
 
+// ---- z 序（多窗口）----
+
+auto GlfwSurface::focus_window() -> void {
+    if (pimpl_ != nullptr && pimpl_->window != nullptr) {
+        glfwFocusWindow(pimpl_->window);  // GLFW 标准入口：置顶 + 取键盘焦点
+    }
+}
+
+auto GlfwSurface::raise() -> void {
+    // GLFW 没有独立的「提升 z 序而不激活」API；`glfwShowWindow` 会把窗口带到前面，
+    // 是最接近的近似（窗口已可见时为空操作）。
+    if (pimpl_ != nullptr && pimpl_->window != nullptr) {
+        glfwShowWindow(pimpl_->window);
+    }
+}
+
+// ---- 窗口几何（多窗口：几何持久化的读写端）----
+
+auto GlfwSurface::position() const -> Point {
+    if (pimpl_ == nullptr || pimpl_->window == nullptr) {
+        return Point{};
+    }
+    int x = 0;
+    int y = 0;
+    glfwGetWindowPos(pimpl_->window, &x, &y);
+    return Point{.x = static_cast<float>(x), .y = static_cast<float>(y)};
+}
+
+auto GlfwSurface::set_position(Point p) -> void {
+    if (pimpl_ == nullptr || pimpl_->window == nullptr) {
+        return;
+    }
+    glfwSetWindowPos(pimpl_->window, static_cast<int>(std::lround(p.x)), static_cast<int>(std::lround(p.y)));
+}
+
+auto GlfwSurface::set_size(Size s) -> void {
+    if (pimpl_ == nullptr || pimpl_->window == nullptr) {
+        return;
+    }
+    glfwSetWindowSize(pimpl_->window, static_cast<int>(std::lround(s.width)), static_cast<int>(std::lround(s.height)));
+}
+
 [[nodiscard]] auto GlfwSurface::begin_frame(int width, int height) -> Result<bool> {
     return pimpl_->begin_frame(width, height);
 }
