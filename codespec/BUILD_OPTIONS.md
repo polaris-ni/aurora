@@ -325,14 +325,16 @@ cmake -S . -B build-trace -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_TRACING=ON
 | feature 宏 | 不注入，仅设置编译器启动器 |
 | 缓存策略 | 压缩（level 6）、默认缓存大小 5G、`SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime`、`BASEDIR=<源码根>` + `NOHASHDIR`（多构建目录共享缓存） |
 
-- **安装方式**：支持 PATH 中的 ccache，也支持 winget 安装路径自动检测（`%LOCALAPPDATA%/Microsoft/WinGet/Packages/Ccache.Ccache_*/ccache-*/ccache.exe`）。
-- **配置注入机制**：CMake 的 `set(ENV{...})` 只在 configure 期生效、不随构建期子进程传递，因此全部 ccache 配置经编译器启动器注入——`CMAKE_{C,CXX}_COMPILER_LAUNCHER = cmake -E env <CCACHE_*>… ccache`，在每个编译边构建期展开，精确作用于本项目、不污染全局环境，对 Ninja / Make / Visual Studio 生成器与 GCC/Clang/MSVC 一律适用。
+- **安装方式**：Aurora 作为三方库**不主动安装 ccache**，仅在 `PATH` 中查找；未找到则提示用户自行安装（见 configure 日志），缓存关闭不影响构建正确性。不支持扫描 winget 等安装目录的自动检测。
+- **配置注入机制**：CMake 的 `set(ENV{...})` 只在 configure 期生效、不随构建期子进程传递，因此全部 ccache 配置经编译器启动器注入——`CMAKE_{C,CXX}_COMPILER_LAUNCHER = cmake -E env <CCACHE_*>… ccache [<用户选项>]`，在每个编译边构建期展开，精确作用于本项目、不污染全局环境，对 Ninja / Make / Visual Studio 生成器与 GCC/Clang/MSVC 一律适用。
 - **SLOPPINESS 各项**：`pch_defines` + `time_macros` 为 PCH 场景必需（缺省时命令行带 `-include cmake_pch.hxx` 的消费者 TU 直接被判 Uncacheable）；`include_file_mtime` / `include_file_ctime` 让头文件时间戳变化而内容不变时仍命中（preprocessor 模式按内容摘要，安全）。
-- **配置变量**：`AURORA_CCACHE_DIR`（缓存目录，默认系统默认）、`AURORA_CCACHE_MAXSIZE`（最大缓存，默认 `5G`）。二者同样经启动器注入构建期生效。注意：既有构建目录中已缓存的旧默认值（`2G`）不会自动更新，需显式 `-D` 覆盖。
+- **配置变量**：`AURORA_CCACHE_DIR`（缓存目录，默认系统默认）、`AURORA_CCACHE_MAXSIZE`（最大缓存，默认 `5G`）。二者同样经启动器注入构建期生效，仅在未设置 `AURORA_CCACHE_OPTIONS` 时作为 Aurora 默认值使用。注意：既有构建目录中已缓存的旧默认值（`2G`）不会自动更新，需显式 `-D` 覆盖。
+- **用户自定义选项 `AURORA_CCACHE_OPTIONS`**：字符串，原样透传为 ccache 命令行选项。一旦设置，**直接使用用户输入**，不再注入 Aurora 默认的 `CCACHE_*` 环境配置（用户自行承担完整配置责任，含 PCH 缓存所需的 `--sloppiness=...`）。未设置时使用 Aurora 默认配置。
 
 ```powershell
 cmake -S . -B build -DAURORA_ENABLE_CCACHE=OFF                                  # 禁用
-cmake -S . -B build -DAURORA_CCACHE_DIR=D:/ccache -DAURORA_CCACHE_MAXSIZE=10G   # 自定义
+cmake -S . -B build -DAURORA_CCACHE_DIR=D:/ccache -DAURORA_CCACHE_MAXSIZE=10G   # 自定义（默认分支）
+cmake -S . -B build -DAURORA_CCACHE_OPTIONS="--max-size=5G --sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime"  # 完全接管配置
 ```
 
 ### 4.4 `AURORA_ENABLE_LLD`
