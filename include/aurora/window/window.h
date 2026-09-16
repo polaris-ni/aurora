@@ -91,25 +91,21 @@ class Window;  // 前向声明：下方 create_window 工厂返回 unique_ptr<Wi
 /// 用于运行期统一检测（`auto_detect_surface()` 返回类型）与平台能力探测
 /// （`Platform::surface` 字段）。**不再用于构造选择**——选择 Surface 请走类型安全的
 /// `create_window(const XxxOptions&)` 重载或自定义 `Surface` 注入。
+///
+/// **枚举值稳定性契约**：所有枚举器无条件出现，且显式赋值、不随 `AURORA_BACKEND_*`
+/// 宏开关增减。原因：该枚举可能被序列化（日志/持久化/进程间传递）或用于 ABI 边界，
+/// 若按后端宏裁剪枚举器，不同构建配置下同一标签的数值会漂移，破坏兼容性与反序列化。
+/// 未编译的后端其标签仍然存在（只是运行期不会被 `auto_detect_surface()` 产出、
+/// `create_window` 对应重载不可用），调用方应据此走自定义 `Surface` 注入路径。
 enum class SurfaceKind : std::uint8_t {
-    Headless,  ///< 内存帧缓冲 + 可选 PNG（零依赖、跨平台，用于无头测试/校验）
-    Win32,  ///< Win32/GDI 原生窗口（仅 Windows，零三方依赖）
-    Glfw,  ///< GLFW + OpenGL（需系统 OpenGL + glfw3，见 AURORA_BACKEND_GLFW）
-#ifdef AURORA_BACKEND_D3D11
-    D3D11,  ///< D3D11 增量上屏（仅 Windows，需 d3d11/dxgi；见 AURORA_BACKEND_D3D11）
-#endif
-#ifdef AURORA_BACKEND_X11
-    X11,  ///< X11/Xlib 原生窗口（Linux 桌面，需 libX11；见 AURORA_BACKEND_X11）
-#endif
-#ifdef AURORA_BACKEND_WAYLAND
-    Wayland,  ///< 原生 Wayland 窗口（Linux 桌面，需 wayland-client/xkbcommon；见 AURORA_BACKEND_WAYLAND）
-#endif
-#ifdef AURORA_BACKEND_MACOS
-    MacOS,  ///< macOS/Cocoa 原生窗口（Apple 平台，需 Cocoa/AppKit；见 AURORA_BACKEND_MACOS）
-#endif
-#ifdef AURORA_BACKEND_WASM
-    Wasm,  ///< WebAssembly/Canvas 原生窗口（Emscripten 工具链；见 AURORA_BACKEND_WASM）
-#endif
+    Headless = 0,  ///< 内存帧缓冲 + 可选 PNG（零依赖、跨平台，用于无头测试/校验）
+    Win32 = 1,  ///< Win32/GDI 原生窗口（仅 Windows，零三方依赖）
+    Glfw = 2,  ///< GLFW + OpenGL（需系统 OpenGL + glfw3，见 AURORA_BACKEND_GLFW）
+    D3D11 = 3,  ///< D3D11 增量上屏（仅 Windows，需 d3d11/dxgi；见 AURORA_BACKEND_D3D11）
+    X11 = 4,  ///< X11/Xlib 原生窗口（Linux 桌面，需 libX11；见 AURORA_BACKEND_X11）
+    Wayland = 5,  ///< 原生 Wayland 窗口（Linux 桌面，需 wayland-client/xkbcommon；见 AURORA_BACKEND_WAYLAND）
+    MacOS = 6,  ///< macOS/Cocoa 原生窗口（Apple 平台，需 Cocoa/AppKit；见 AURORA_BACKEND_MACOS）
+    Wasm = 7,  ///< WebAssembly/Canvas 原生窗口（Emscripten 工具链；见 AURORA_BACKEND_WASM）
 };
 
 /// @brief 渲染后端偏好：统一的硬件加速可选开关。

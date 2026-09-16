@@ -514,7 +514,7 @@ au::Column{}
 
 ### 8.5 后端与工厂
 
-`SurfaceKind{Headless, Win32, Glfw, X11, Wayland, MacOS, Wasm, D3D11}` 现仅为**类型标签**（只用于 `auto_detect_surface()` 返回类型与 `Platform::surface` 字段），不再用于构造选择。
+`SurfaceKind{Headless, Win32, Glfw, D3D11, X11, Wayland, MacOS, Wasm}` 现仅为**类型标签**（只用于 `auto_detect_surface()` 返回类型与 `Platform::surface` 字段），不再用于构造选择。枚举器无条件全部出现且数值固定（见 `window.h`），不随 `AURORA_BACKEND_*` 宏开关增减，以保证序列化与 ABI 兼容：未编译的后端其标签仍存在，只是运行期不会被 `auto_detect_surface()` 产出、对应 `create_window` 重载不可用。
 
 后端选择收口于类型安全工厂 `create_window(const XxxOptions&)`（`window/window.h`），每个后端有专属选项结构：`HeadlessOptions{png_path}` / `Win32Options{}` / `D3D11Options{vsync}` / `GlfwOptions{gl_major, gl_minor, resizable, gpu}` / `X11Options{}` / `WaylandOptions{}` / `MacOSOptions{}` / `WasmOptions{canvas_id}`，外加通用 `WindowOptions{size, title, max_frames}`。编译器会拒绝把某后端专属字段误用到不相关后端。`GlfwOptions::gpu = true` 请求 GPU 栅格模式（§8.7，需 `AURORA_BACKEND_GPU_GL` 编译进库），窗口创建或 GPU 初始化失败自动回退软件纹理路径。
 
