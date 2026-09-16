@@ -30,7 +30,7 @@ struct PieChartProps {
 };
 
 /**
- * @brief 饼图 / 环图控件（叶控件，切片 5；设计见 CHARTS_DESIGN.draft.md）。
+ * @brief 饼图 / 环图控件（叶控件，切片 5；契约见 specification/04-widget.md §3.8）。
  *
  * 扇区经 `fill_sector` 绘制（`center_space_ratio > 0` 即环图），间隙以角度让位实现（非描边）。
  * 命中使用**极坐标**判定：先按半径落在 `[inner, outer]`，再按角度定位扇区（与渲染同源）。

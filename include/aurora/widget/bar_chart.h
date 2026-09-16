@@ -34,7 +34,7 @@ struct BarChartProps {
 };
 
 /**
- * @brief 柱状图控件（叶控件，切片 3；设计见 CHARTS_DESIGN.draft.md）。
+ * @brief 柱状图控件（叶控件，切片 3；契约见 specification/04-widget.md §3.8）。
  *
  * 纯值属性驱动（`BarChartProps`），数据进序列化面（D5），绘制全部经软件 `Painter`：
  * 柱体 = `fill_rounded_rect`、网格 / 轴 = `draw_line` + `draw_text`、悬停值框自绘。

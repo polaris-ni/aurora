@@ -34,7 +34,7 @@ struct LineChartProps {
 };
 
 /**
- * @brief 折线图控件（叶控件，切片 4；设计见 CHARTS_DESIGN.draft.md）。
+ * @brief 折线图控件（叶控件，切片 4；契约见 specification/04-widget.md §3.8）。
  *
  * 折线经 Painter 的 `stroke_polyline`（真 SDF，圆角连接），数据点用圆角矩形复用圆形。
  * x 为等距索引（无独立 x 域），y 域与命中反查同源于 `LinearScale`（D6）。

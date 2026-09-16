@@ -8,7 +8,7 @@
 #      禁止中英文序号（第一章 / 一、/ Section One 等）；
 #   R3 章节号在单文件内同层级不重复、不跳号；
 #   R4 反引号包裹的路径必须真实存在（就近解析：同目录 → codespec/ → 仓库根）；
-#   R5 SPECIFICATIONS.md 特性表（#1–#24）「规格落点」列中的链接逐行可达。
+#   R5 SPECIFICATIONS.md 特性表（#1–#25）「规格落点」列中的链接逐行可达。
 #
 # 排除范围（防误报）：
 #   - fenced code block（``` / ~~~）内的链接与路径不校验（多为示例占位）；
@@ -236,7 +236,7 @@ def check_backtick_paths(rel, lines, repo, problems):
 
 
 def check_spec_table(rel, lines, repo, problems):
-    """R5: SPECIFICATIONS.md feature table rows (#1-#24) must have a reachable spec link."""
+    """R5: SPECIFICATIONS.md feature table rows (#1-#25) must have a reachable spec link."""
     if os.path.basename(rel) != "SPECIFICATIONS.md":
         return
     base_dir = os.path.dirname(os.path.join(repo, rel))
@@ -251,7 +251,9 @@ def check_spec_table(rel, lines, repo, problems):
             number = int(cells[0])
         except ValueError:
             continue
-        if not 1 <= number <= 24:
+        # 上界刻意不写死：SPECIFICATIONS.md 中唯一「数字首列」的表就是特性清单表（R5 已按 basename
+        # 限定本文件），硬编码上界（曾为 24）会让新增需求的落点链接静默逃过校验。
+        if number < 1:
             continue
         if not LINK_RE.search(cells[-1]):
             # 「本文 §N」is a legitimate in-document reference (the landing point lives in this

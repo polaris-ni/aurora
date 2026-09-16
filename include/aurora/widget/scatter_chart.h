@@ -30,7 +30,7 @@ struct ScatterChartProps {
 };
 
 /**
- * @brief 散点图控件（叶控件，切片 6；设计见 CHARTS_DESIGN.draft.md）。
+ * @brief 散点图控件（叶控件，切片 6；契约见 specification/04-widget.md §3.8）。
  *
  * x / y 双 `LinearScale`（域由数据推导，可经 `axis_*.min/max` 覆盖），圆点绘制。
  * 命中按**最近点欧氏距离**（阈值 = `dot_radius + 4dp`），与渲染同源于同一组比例尺（D6）。

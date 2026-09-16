@@ -1190,4 +1190,4 @@ auto main() -> int {
 - **轴域与命中同源**：渲染、刻度、hover 命中都消费同一份 `LinearScale` / `BandScale`，不要各算一遍；`axis_x`/`axis_y` 的 `min`/`max` 显式指定即锁定域，否则按数据 nice 化（含 0 基线由 `include_zero` 控制）。
 - **绘制不得越出 `bounds`**：`Widget::paint_bounds_` 决定脏区，越界像素不会被擦除（残影）；悬浮值框 / 十字准线 / 百分比标签都按可用区夹取或翻转。
 - **无头渲染 golden**：`render_to_png` 无 `Application` ⇒ `Animator::current() == nullptr` ⇒ grow-in 动画进度恒为 1（终态），故 golden 基线稳定可复现。
-- 可编译样例见 `examples/demos/demo_bar_chart.cpp` / `demo_line_chart.cpp` / `demo_pie_chart.cpp` / `demo_scatter_chart.cpp` / `demo_sparkline.cpp`；设计见 `CHARTS_DESIGN.draft.md`。
+- 可编译样例见 `examples/demos/demo_bar_chart.cpp` / `demo_line_chart.cpp` / `demo_pie_chart.cpp` / `demo_scatter_chart.cpp` / `demo_sparkline.cpp`；控件契约见 `specification/04-widget.md` §3.8，矢量原语（`Polyline` / `Sector`）见 `specification/03-layout-render.md` §8.1。

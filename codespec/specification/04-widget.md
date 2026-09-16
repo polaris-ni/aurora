@@ -255,7 +255,7 @@ au::Text("Welcome").font_size(24).bold();
 
 ### 3.8 图表控件
 
-图表控件族按「每图一个叶控件 + 纯值 Props」组织（设计见 `CHARTS_DESIGN.draft.md`；切片 1–9 已全部落地）。五图共享公共数据层 `widget/chart_common.h`、事件三件套（`wants_click` / `on_hover_change` 标脏 / `on_pointer_event` 自处理 Move·Release）、`geom_` 缓存（绘制与命中同源）、十字准线 + 图例 hover 联动（切片 7）、grow-in 进入动画（`Animator::current()`，无 Animator 时降级到终态，切片 8）。
+图表控件族按「每图一个叶控件 + 纯值 Props」组织（切片 1–9 已全部落地）。五图共享公共数据层 `widget/chart_common.h`、事件三件套（`wants_click` / `on_hover_change` 标脏 / `on_pointer_event` 自处理 Move·Release）、`geom_` 缓存（绘制与命中同源）、十字准线 + 图例 hover 联动（切片 7）、grow-in 进入动画（`Animator::current()`，无 Animator 时降级到终态，切片 8）。
 
 | 控件 | 说明 |
 |:---|:---|

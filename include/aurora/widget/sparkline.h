@@ -27,7 +27,7 @@ struct SparklineProps {
 };
 
 /**
- * @brief 迷你折线（叶控件，切片 4；设计见 CHARTS_DESIGN.draft.md）。
+ * @brief 迷你折线（叶控件，切片 4；契约见 specification/04-widget.md §3.8）。
  *
  * **无轴、无网格、无图例、无交互**——最薄的图表控件，用于表格 / 卡片内的趋势缩览。
  * 值域直接取数据 min/max（退化时回退 `[0,1]`），绘制 = `stroke_polyline` + 末端圆点。

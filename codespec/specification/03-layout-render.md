@@ -497,7 +497,7 @@ au::Column{}
 > X11 经 XFIXES `XFixesGetCursorImage` 读回、Win32 经 `GetCursorInfo` 读回、macOS 经
 > `[NSCursor currentCursor]` 单例同一性读回、GLFW（无光标查询 API）走「自动能力核对 +
 > `--interactive` 人工目视」。各探针的验收范围与退出码语义见其源文件头注释；
-> 跨平台当前状态与验收台账见 `ROADMAP.draft.md`。
+> 真机验收须在对应平台手工执行（探针不进 CTest）。
 
 ### 8.4 离屏渲染与快照
 

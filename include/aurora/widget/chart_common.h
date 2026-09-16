@@ -21,7 +21,7 @@
 namespace aurora {
 
 /**
- * @brief 图表公共纯值数据层（切片 2；设计见 CHARTS_DESIGN.draft.md）。
+ * @brief 图表公共纯值数据层（切片 2；契约见 specification/04-widget.md §3.8）。
  *
  * 本头只放**纯值类型、纯函数与比例尺**：无状态、不持有资源、可在无头环境（无 Application、
  * 无 Surface、无字体）完整单测。绘制 / 刻度生成 / 命中反查三处**同源**消费这些类型（D6），

@@ -107,7 +107,7 @@ cmake --build build-verify --target aurora_verify_x11_cursor
 ./build-verify/aurora_verify_x11_cursor
 ```
 
-各探针的验收范围、逐项期望、退出码语义写在对应源文件头注释内（`tools/verify/*.cpp|.mm`）；跨平台状态与验收台账见 `ROADMAP.draft.md`。
+各探针的验收范围、逐项期望、退出码语义写在对应源文件头注释内（`tools/verify/*.cpp|.mm`）；真机验收须在**对应平台**手工执行（探针不进 CTest，见上方三点）。
 
 ---
 
