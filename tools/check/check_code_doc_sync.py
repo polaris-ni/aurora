@@ -6,7 +6,7 @@
 #
 # 规则（测试头部，编号 TEST-R1–TEST-R10，定义见 codespec/CODING_STANDARDS.md §3.2）：
 #   DOC1    代码注释中的 `架构 §N` 引用 → codespec/ARCHITECTURE.md 必须存在该章节；
-#   DOC2    代码注释中的 `规格 §N` 引用 → 需求 #N 必须存在于 SPECIFICATIONS.md 特性表（#1–#25）；
+#   DOC2    代码注释中的 `规格 §N` 引用 → 需求 #N 必须存在于 SPECIFICATIONS.md 特性表（#1–#28）；
 #   TEST-R1 测试头部必须含标准三行块：/// 测试类型 / /// 目标单元 / /// 测试说明
 #           （历史 // 目标源单元： 约定不计入标准块，视为 TEST-R1 违规，须归一）；
 #   TEST-R2 测试头部「目标单元 / 目标源单元」声明路径必须真实存在（防注释路径烂掉）；

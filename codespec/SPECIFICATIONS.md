@@ -4,7 +4,7 @@
 > **设计内核**：声明式、响应式、概念可枚举
 > **版本说明**：本文档为设计规格（文档自身无版本号）。库发布版本见 `CHANGELOG.json`（`currentVersion`）；文档与实现冲突时以**代码运行时**为准并回填本文档。
 >
-> 本文件是**总纲与索引**：定位、设计原则、范围、约束、25 条特性清单与文档导航。各主题的详细契约见 `specification/` 八份子系统文档与五份顶层文档。
+> 本文件是**总纲与索引**：定位、设计原则、范围、约束、28 条特性清单与文档导航。各主题的详细契约见 `specification/` 八份子系统文档与五份顶层文档。
 
 ---
 
@@ -75,7 +75,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 
 ---
 
-## 5 特性清单（#1–#25）
+## 5 特性清单（#1–#28）
 
 需求编号 `#N` 是稳定的需求标识。下表给出每条需求的**规格落点**（文档 + 章节）。
 
@@ -106,6 +106,9 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | 23 | 部分代码容错（半成品可编译可运行） | AI 可增量开发 | [`01-core.md`](specification/01-core.md) §8.4 |
 | 24 | Token 效率 + 编译速度约束 | AI 迭代循环效率 | 本文 §4.3 |
 | 25 | 多窗口（一个进程多个顶层窗口） | AI 生成的复合应用可多窗协同，且不退化单窗调用模型 | [`06-app-platform.md`](specification/06-app-platform.md) §2.4 |
+| 26 | 交叉轴基线对齐（`CrossAxisAlignment::Baseline`） | 同一行内文本与控件的首行基线共线（含 Modifier 内边距与退化路径） | [`03-layout-render.md`](specification/03-layout-render.md) §3.8、[`04-widget.md`](specification/04-widget.md) §3.3 |
+| 27 | 滚动位置保存/恢复（`app::ScrollStorage`） | 重建 / 重启后滚动位置可还原，且多窗口与同键争用不串味 | [`06-app-platform.md`](specification/06-app-platform.md) §9.3、[`04-widget.md`](specification/04-widget.md) §3.3 |
+| 28 | 列表拖拽重排（`ReorderableList`） | 用户可拖动条目换位：跟手 / 让位 / 近边缘自动滚动 / 落位动画，数据由控件改写 | [`04-widget.md`](specification/04-widget.md) §3.4、[`GUIDELINE.md`](GUIDELINE.md) §36 |
 
 ---
 
