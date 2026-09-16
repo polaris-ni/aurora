@@ -1191,3 +1191,48 @@ auto main() -> int {
 - **绘制不得越出 `bounds`**：`Widget::paint_bounds_` 决定脏区，越界像素不会被擦除（残影）；悬浮值框 / 十字准线 / 百分比标签都按可用区夹取或翻转。
 - **无头渲染 golden**：`render_to_png` 无 `Application` ⇒ `Animator::current() == nullptr` ⇒ grow-in 动画进度恒为 1（终态），故 golden 基线稳定可复现。
 - 可编译样例见 `examples/demos/demo_bar_chart.cpp` / `demo_line_chart.cpp` / `demo_pie_chart.cpp` / `demo_scatter_chart.cpp` / `demo_sparkline.cpp`；控件契约见 `specification/04-widget.md` §3.8，矢量原语（`Polyline` / `Sector`）见 `specification/03-layout-render.md` §8.1。
+
+---
+
+## 34 基线对齐（CrossAxisAlignment::Baseline）
+
+`Row` 内各子项按**首行文本基线**对齐：不同字号的文字、图标、按钮同行时视觉下沿不再参差。几何契约见 [`specification/03-layout-render.md`](specification/03-layout-render.md) §3.8。
+
+```cpp
+#include "aurora/aurora.h"
+
+using namespace au;
+
+auto main() -> int {
+    // ① 不同字号：小字号整体下移，首行基线共线。
+    Row mixed;
+    mixed.add(Node{Text{"12pt"}.font_size(12.0F)});
+    mixed.add(Node{Text{"28pt"}.font_size(28.0F)});
+    mixed.set_cross_axis_alignment(CrossAxisAlignment::Baseline);
+    mixed.set_gap(12.0F);
+
+    // ② 无基线子项（如图标：任何未覆写 baseline_distance 的控件）按 CSS 式合成基线 =
+    //    自身交叉轴底边参与对齐，不会 assert 崩溃。
+    Column icon;  // Column 无基线钩子 ⇒ nullopt
+    icon.modifier.set(Modifier{}.size(20.0F, 20.0F).background(Color{37, 99, 235, 255}));
+
+    // ③ 内边距与按钮：Modifier 的内边距把内容盒下移，容器会补入该位移；
+    //    Button 的钩子与 paint_label 同源（标签居中偏移 + ascent）。
+    Row with_button;
+    auto padded = Text{"padded"};
+    padded.modifier.set(Modifier{}.padding(10.0F));
+    with_button.add(Node{padded});
+    with_button.add(Node{Button{"OK"}});
+    with_button.set_cross_axis_alignment(CrossAxisAlignment::Baseline);
+
+    Application app{Scene{Column{ColumnProps{.children = {Node{mixed}, Node{icon}, Node{with_button}}}}}};
+    return app.run();
+}
+```
+
+要点：
+
+- **仅水平主轴有意义**：`Column` 的交叉轴是水平的，`Baseline` 在 `Column` 上按 `Start` 处理，并每实例发一次 `Diagnostics::degraded`（不逐帧刷屏）。
+- **无基线子项宽容降级**：钩子返回 `std::nullopt` 即走合成基线（自身底边）；全部子项都无基线时整体退化为 `End` 对齐。
+- **自定义控件接入**：覆写 `Widget::baseline_distance(const BuildContext &) const -> std::optional<float>`，返回**内容盒顶 → 首行基线**的距离（含自身内边距/居中偏移）；**不要**在其中做整像素 `floor` snap——容器按 `max_above - baseline` 定位后，绘制侧 pen_y 的 ascent 与之相消，各子项实绘基线才能像素一致。
+- **可编译样例**：`examples/demos/demo_baseline.cpp`。

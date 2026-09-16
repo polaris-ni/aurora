@@ -2,19 +2,23 @@
 /// 目标单元: include/aurora/widget/containers.h
 /// 测试说明: 覆盖 Column/Row 容器级行为——初始化列表构造与所有权、gap 落位、
 /// MainAxisSize::Max 撑满、MainAxisAlignment::End 收尾对齐、CrossAxisAlignment::Stretch
-/// 拉伸子项交叉轴、负 gap 校验、属性序列化往返，以及容器子树绘制缓存（Display List /
-/// cache_layer）随全局光栅状态（AA 模式）世代失效
+/// 拉伸子项交叉轴、CrossAxisAlignment::Baseline 基线对齐（Text/Button 混排、Modifier 内边距换算、
+/// Column 回退 Start 并一次性降级提示）、负 gap 校验、属性序列化往返，以及容器子树绘制缓存
+/// （Display List / cache_layer）随全局光栅状态（AA 模式）世代失效
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
 
+#include "aurora/core/diagnostics.h"
 #include "aurora/core/directionality.h"
 #include "aurora/environment/environment.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/modifier/modifier.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
@@ -182,6 +186,115 @@ AURORA_TEST_CASE(cross_axis_stretch_expands_child) {
     const Size cs = col.size();
     AURORA_TEST_CHECK_NEAR(cs.width, 200.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(col.child_nodes()[0].bounds().size.width, 200.0F, 1e-4F);
+}
+
+/// @brief 判定诊断列表中是否含「Column + Baseline」降级提示（消息以 Column 开头、where 为 layout）。
+auto has_column_baseline_notice(const std::vector<Diagnostic> &diags) -> bool {
+    for (const auto &d : diags) {
+        if (std::string{d.where} == "layout" && std::string{d.message}.starts_with("Column")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+AURORA_TEST_CASE(row_baseline_aligns_text_widgets_on_common_line) {
+    // Row + Baseline：不同字号的两个 Text 首行基线共线。Text 的钩子即有效字体 ascent，
+    // 容器按 cross_pos = max_above - ascent 定位 ⇒ 各子项「bounds.y + ascent」相等。
+    auto small = std::make_shared<Text>("small");
+    small->font_size(12.0F);
+    auto large = std::make_shared<Text>("large");
+    large->font_size(24.0F);
+
+    Row row;
+    row.add(Node{std::shared_ptr<Widget>(small)});
+    row.add(Node{std::shared_ptr<Widget>(large)});
+    row.set_cross_axis_alignment(CrossAxisAlignment::Baseline);
+
+    LayoutEngine::layout(row, bounded(400.0F, 200.0F));
+
+    const float ascent_small = render::FontEngine::measure_ascent(Font{.size_pt = 12.0F});
+    const float ascent_large = render::FontEngine::measure_ascent(Font{.size_pt = 24.0F});
+    const float baseline_small = row.child_nodes()[0].bounds().origin.y + ascent_small;
+    const float baseline_large = row.child_nodes()[1].bounds().origin.y + ascent_large;
+    AURORA_TEST_CHECK_NEAR(baseline_small, baseline_large, 1e-3F);
+    // 大字号上沿更高 ⇒ 小字号整体下移（基线对齐的必然结果）。
+    AURORA_TEST_CHECK_GT(row.child_nodes()[0].bounds().origin.y, row.child_nodes()[1].bounds().origin.y);
+    // 容器交叉轴 = max(基线上沿) + max(基线下沿)，其中下沿按各子项「实测高 - 自身基线」取最大。
+    const float h_small = row.child_nodes()[0].bounds().size.height;
+    const float h_large = row.child_nodes()[1].bounds().size.height;
+    const float expected_cross = ascent_large + std::max(h_small - ascent_small, h_large - ascent_large);
+    AURORA_TEST_CHECK_NEAR(row.size().height, expected_cross, 1e-3F);
+}
+
+AURORA_TEST_CASE(row_baseline_accounts_for_modifier_padding) {
+    // 带 `Modifier::padding` 的 Text：钩子给「内容盒顶 → 基线」，容器须补 Modifier 的内容盒位移，
+    // 否则带内边距的文本基线会整体上移 padding.top。
+    auto plain = std::make_shared<Text>("Ag");
+    plain->font_size(16.0F);
+    auto padded = std::make_shared<Text>("Ag");
+    padded->font_size(16.0F);
+    padded->modifier.set(Modifier().padding(10.0F));
+
+    Row row;
+    row.add(Node{std::shared_ptr<Widget>(plain)});
+    row.add(Node{std::shared_ptr<Widget>(padded)});
+    row.set_cross_axis_alignment(CrossAxisAlignment::Baseline);
+    LayoutEngine::layout(row, bounded(400.0F, 200.0F));
+
+    const float ascent = render::FontEngine::measure_ascent(Font{.size_pt = 16.0F});
+    const float baseline_plain = row.child_nodes()[0].bounds().origin.y + ascent;
+    const float baseline_padded = row.child_nodes()[1].bounds().origin.y + 10.0F + ascent;
+    AURORA_TEST_CHECK_NEAR(baseline_plain, baseline_padded, 1e-3F);
+    // 带内边距者内容盒下移 10dp ⇒ 其布局盒须整体上移 10dp 才能与前者的基线共线
+    // （即 max_above 由 padding 那一项决定）。
+    AURORA_TEST_CHECK_NEAR(row.child_nodes()[1].bounds().origin.y, 0.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(row.child_nodes()[0].bounds().origin.y, 10.0F, 1e-3F);
+}
+
+AURORA_TEST_CASE(row_baseline_mixes_button_and_text) {
+    // Button（内边距 + 标签垂直居中）与 Text 同行：按钮钩子 = 居中偏移 + ascent（见 paint_label），
+    // 与 Text 的 ascent 在容器内共线。
+    auto button = std::make_shared<Button>("OK");
+    auto label = std::make_shared<Text>("ok");
+    label->font_size(14.0F);
+
+    Row row;
+    row.add(Node{std::shared_ptr<Widget>(button)});
+    row.add(Node{std::shared_ptr<Widget>(label)});
+    row.set_cross_axis_alignment(CrossAxisAlignment::Baseline);
+    LayoutEngine::layout(row, bounded(400.0F, 200.0F));
+
+    const Font btn_font{.size_pt = 14.0F};
+    const float ascent = render::FontEngine::measure_ascent(btn_font);
+    const float text_h = render::FontEngine::measure_height(btn_font);
+    const float btn_h = row.child_nodes()[0].bounds().size.height;
+    const float baseline_button = row.child_nodes()[0].bounds().origin.y + ((btn_h - text_h) * 0.5F) + ascent;
+    const float baseline_text = row.child_nodes()[1].bounds().origin.y + ascent;
+    AURORA_TEST_CHECK_NEAR(baseline_button, baseline_text, 1e-3F);
+}
+
+AURORA_TEST_CASE(column_baseline_falls_back_to_start_and_warns_once) {
+    (void)Diagnostics::take();  // 清场：只观测本用例产生的提示
+    auto a = std::make_shared<Text>("A");
+    a->font_size(20.0F);
+    auto b = std::make_shared<Text>("B");
+    b->font_size(20.0F);
+
+    Column col;
+    col.add(Node{std::shared_ptr<Widget>(a)});
+    col.add(Node{std::shared_ptr<Widget>(b)});
+    col.set_cross_axis_alignment(CrossAxisAlignment::Baseline);
+
+    LayoutEngine::layout(col, bounded(200.0F, 200.0F));
+    // Column 交叉轴是水平的：按 Start（x 均为 0），不崩。
+    AURORA_TEST_CHECK_NEAR(col.child_nodes()[0].bounds().origin.x, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(col.child_nodes()[1].bounds().origin.x, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_MSG(has_column_baseline_notice(Diagnostics::take()), "Column + Baseline 须发一次降级提示");
+
+    // 重复布局不再提示（每实例一次，避免逐帧刷屏）。
+    LayoutEngine::layout(col, bounded(200.0F, 200.0F));
+    AURORA_TEST_CHECK_MSG(!has_column_baseline_notice(Diagnostics::take()), "降级提示不得每帧重复");
 }
 
 AURORA_TEST_CASE(validate_props_rejects_negative_gap) {

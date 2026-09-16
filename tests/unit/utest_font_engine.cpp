@@ -2,8 +2,10 @@
 /// 目标单元: include/aurora/render/font_engine.h
 /// 测试说明: 覆盖 FontEngine 度量契约（空串零宽、长度/字号单调、行高为正）、caret_x 与 hit_test_char 的
 /// 码点索引与往返一致性、TextLayoutOpts 字距/词距对宽度的影响、AA 策略读写与光栅状态世代自增、
-/// draw_text 实际落笔、shaping 缓存统计与清空，以及 UTF-8 串的码点安全性
+/// draw_text 实际落笔、基线上沿度量（measure_ascent）与实绘落墨带自洽、shaping 缓存统计与清空，
+/// 以及 UTF-8 串的码点安全性
 
+#include <cmath>
 #include <cstddef>
 #include <string>
 
@@ -71,6 +73,50 @@ AURORA_TEST_CASE(measure_height_is_positive_and_scales) {
     const Font large{.family = "sans-serif", .size_pt = 20.0F};
     AURORA_TEST_CHECK_GT(render::FontEngine::measure_height(small), 0.0);
     AURORA_TEST_CHECK_GT(render::FontEngine::measure_height(large), render::FontEngine::measure_height(small));
+}
+
+AURORA_TEST_CASE(measure_ascent_is_positive_and_within_line_height) {
+    // 基线对齐（CrossAxisAlignment::Baseline）的合成基线与夹取依赖该不变量：
+    // 0 < ascent <= measure_height，且随字号单调。
+    const Font small{.family = "sans-serif", .size_pt = 10.0F};
+    const Font large{.family = "sans-serif", .size_pt = 20.0F};
+    const float ascent_small = render::FontEngine::measure_ascent(small);
+    const float ascent_large = render::FontEngine::measure_ascent(large);
+
+    AURORA_TEST_CHECK_GT(ascent_small, 0.0);
+    AURORA_TEST_CHECK_LE(ascent_small, render::FontEngine::measure_height(small));
+    AURORA_TEST_CHECK_GT(ascent_large, ascent_small);
+    AURORA_TEST_CHECK_LE(ascent_large, render::FontEngine::measure_height(large));
+}
+
+AURORA_TEST_CASE(measure_ascent_agrees_with_drawn_ink_band) {
+    // 与 draw_text 同源的关键锚点：用 measure_ascent 推出的首行 pen_y，必须让实绘墨迹落在
+    // [pen_y - ascent, pen_y + (height - ascent)] 之内，且确有字身越过基线上方。两条兜底路径
+    // （真实字体 / BitmapFont）都须满足。
+    const Font font{.size_pt = 24.0F};
+    const float ascent = render::FontEngine::measure_ascent(font);
+    const float descent = render::FontEngine::measure_height(font) - ascent;
+    const float pen_y = std::floor(ascent + 0.5F);  // 与绘制侧整像素 snap 同口径（origin_y = 0）
+
+    Painter p;
+    p.begin(64, 48);
+    render::FontEngine::draw_text(p, rect_at(0.0F, 0.0F, 64.0F, 48.0F), "Ag", font, Color::black());
+
+    int top = -1;
+    int bottom = -1;
+    for (int y = 0; y < p.height(); ++y) {
+        for (int x = 0; x < p.width(); ++x) {
+            if (p.get_pixel(x, y).a > 0) {
+                top = (top < 0) ? y : top;
+                bottom = y;
+                break;
+            }
+        }
+    }
+    AURORA_TEST_REQUIRE_GT(top, -1);  // 确有着墨
+    AURORA_TEST_CHECK_LT(static_cast<float>(top), pen_y);                      // 字身在基线上方
+    AURORA_TEST_CHECK_GE(static_cast<float>(top), pen_y - ascent - 1.0F);      // 不越出 ascent 上沿
+    AURORA_TEST_CHECK_LE(static_cast<float>(bottom), pen_y + descent + 1.0F);  // 不越出 descent 下沿
 }
 
 AURORA_TEST_CASE(caret_x_starts_at_zero_and_is_monotonic) {

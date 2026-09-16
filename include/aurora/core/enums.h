@@ -110,6 +110,10 @@ enum class CrossAxisAlignment : std::uint8_t {
     Center,  ///< 居中
     End,  ///< 靠终点
     Stretch,  ///< 拉伸填满
+    /// 按子项首行文本基线对齐（仅水平主轴有意义，见 specification/03-layout-render.md §3.8）。
+    /// 无基线的子项按 CSS 式合成基线（自身交叉轴底边）参与，不报错；纵向主轴（Column）
+    /// 下交叉轴是水平的，基线无意义，按 `Start` 处理并提示一次降级。
+    Baseline,
 };
 
 /// @brief Stack 子项尺寸拟合（参考 Flutter StackFit）。

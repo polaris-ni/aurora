@@ -30,7 +30,8 @@ namespace {
     (void)&aurora::colors::AURORA_WHITE;  // ColorPalette
     (void)&aurora::colors::AURORA_TRANSPARENT;  // ColorPalette
     return static_cast<int>(aurora::Alignment::BottomRight) + static_cast<int>(au::BoxFit::ScaleDown) +
-           static_cast<int>(au::CrossAxisAlignment::Stretch) + static_cast<int>(au::MainAxisAlignment::SpaceEvenly) +
+           static_cast<int>(au::CrossAxisAlignment::Stretch) + static_cast<int>(au::CrossAxisAlignment::Baseline) +
+           static_cast<int>(au::MainAxisAlignment::SpaceEvenly) +
            static_cast<int>(au::MainAxisSize::Max) + static_cast<int>(au::StackFit::Passthrough) +
            static_cast<int>(au::LengthKind::Fraction) + static_cast<int>(au::LengthKind::Expand) +
            static_cast<int>(au::TextAlign::Justify) + static_cast<int>(au::TextDirection::RTL) +
@@ -107,6 +108,11 @@ AURORA_TEST_CASE(known_enums_historical_wrong_values_do_not_return) {
     // Alignment：九方位，不是 Flutter 的 Leading / Trailing 三值。
     AURORA_TEST_CHECK(static_cast<int>(reg.at("Alignment").size()) == 9);
     AURORA_TEST_CHECK(!has_value(reg.at("Alignment"), "Leading"));
+
+    // CrossAxisAlignment：五态；末位 Baseline 是「Row 内按文本首行基线对齐」，不是 Flutter 的
+    // textBaseline 分档（alphabetic / ideographic 在 Aurora 未区分）。
+    AURORA_TEST_CHECK(static_cast<int>(reg.at("CrossAxisAlignment").size()) == 5);
+    AURORA_TEST_CHECK(has_value(reg.at("CrossAxisAlignment"), "Baseline"));
 }
 
 AURORA_TEST_CASE(known_enums_cover_all_enum_typed_props) {

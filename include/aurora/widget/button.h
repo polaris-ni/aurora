@@ -146,6 +146,10 @@ class Button : public LeafWidget, public ButtonProps {
 
     [[nodiscard]] auto type_name() const -> const char * override { return "Button"; }
 
+    /// @brief 首行基线（内容盒顶 → 基线）：与 `paint_label` 同源——标签在内容盒内垂直居中
+    ///        （`ty = top + (h - th) / 2`），故基线 = 居中偏移 + 有效字体 ascent。
+    [[nodiscard]] auto baseline_distance(const BuildContext &ctx) const -> std::optional<float> override;
+
     /// @brief 无障碍名称：取按钮文字（经 i18n 表解析后的最终显示串）。
     /// @note Side-effects: reads i18n table
     [[nodiscard]] auto accessibility_label() const -> std::string override {

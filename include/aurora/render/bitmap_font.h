@@ -184,6 +184,16 @@ class BitmapFont {
         return static_cast<float>(AURORA_CELL) * static_cast<float>(pixel_size(size_pt));
     }
 
+    /// @brief 测量单行基线上沿（设备像素）：行盒顶 → 基线。
+    ///
+    /// 位图字形实际占 8 格中的第 0..6 格（第 7 格恒为空白底衬，见各字形数据），故基线落在
+    /// 第 7 格下沿 = `(AURORA_CELL - 1) * pixel_size`，与 `draw_text_bitmap_fallback`
+    /// 「行盒顶起笔逐格下绘」的绘制口径同源。
+    /// 恒满足 `0 <= measure_ascent <= measure_height`（基线对齐的合成基线依赖该不变量）。
+    static auto measure_ascent(float size_pt) -> float {
+        return static_cast<float>(AURORA_CELL - 1) * static_cast<float>(pixel_size(size_pt));
+    }
+
   private:
     static constexpr Glyph AURORA_SPACE = {"        ", "        ", "        ", "        ",
                                            "        ", "        ", "        ", "        "};

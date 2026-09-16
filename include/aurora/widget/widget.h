@@ -516,6 +516,24 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @note Side-effects: pure
     [[nodiscard]] virtual auto cursor_shape() const -> std::optional<CursorShape> { return std::nullopt; }
 
+    /// @brief 首行文本基线相对**内容盒顶**的距离（`nullopt` = 本控件无基线概念）。
+    ///
+    /// 语义：内容盒顶 → 首行基线的距离，**含**控件自身内边距与垂直居中偏移（如 Button/TextInput
+    /// 的 padding），**不含** `Modifier` 造成的内容盒位移——后者由容器换算到布局盒时补入
+    /// （见 `widget/containers.h` 的 `container_baseline`）。
+    ///
+    /// @warning 返回值**不做整像素 snap**：容器按 `cross_pos = max_above - baseline` 定位后，
+    ///          绘制侧 `pen_y = floor(top + ascent + 0.5)` 里的 ascent 与之相消，各子项实绘基线
+    ///          像素一致（幅度不超过 1px 的取整差被 floor 吸收）；若在此提前 snap 反而会引入
+    ///          0.5dp 偏置。勿"顺手"补 floor。
+    ///
+    /// 供 `CrossAxisAlignment::Baseline` 使用（见 specification/03-layout-render.md §3.8）；
+    /// 默认 `nullopt`，布局器对无基线子项按 CSS 式合成基线（交叉轴底边）处理。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto baseline_distance(const BuildContext & /*ctx*/) const -> std::optional<float> {
+        return std::nullopt;
+    }
+
     /// @brief 序列化自有属性到 props JSON（结构快照/工具链用）。
     /// 子类覆写时应先调用基类默认实现以保留通用属性。
     /// @note Rebuildable: yes, via from_json

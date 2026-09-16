@@ -3,6 +3,7 @@
 #include <initializer_list>
 #include <vector>
 
+#include "aurora/core/diagnostics.h"
 #include "aurora/core/directionality.h"
 #include "aurora/layout/flex.h"
 #include "aurora/layout/flex_layouter.h"
@@ -24,6 +25,27 @@ inline auto container_measure(void *ctx, const Constraints &c) -> Size {
     const auto *lc = static_cast<ContainerLayoutCtx *>(ctx);
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic) trampoline 用裸指针+索引解包子节点
     return lc->children[lc->index].widget().layout(c, *lc->build_ctx);
+}
+
+/// @brief ContainerLayoutCtx 的基线 trampoline（`FlexItem::BaselineFn`）：
+///        解包子控件 → 取控件级基线 → 补上内容盒位移，得到「布局盒顶 → 基线」。
+///
+/// 语义链：`Widget::baseline_distance(ctx)` 给出「**内容盒**顶 → 首行基线」（含控件自身内边距），
+/// 而布局器需要的是「**布局盒**顶 → 基线」，两者相差 `Modifier::transform(measured).translation`
+/// 的 y 分量（`Modifier::padding` / Align 造成的内容盒平移）。子控件无基线时返回 `nullopt`，
+/// 布局器对之走 CSS 式合成基线（交叉轴底边），不报错。
+///
+/// `measured` 由布局器传入（测量期的子项尺寸），因此本函数**不**依赖 `Node::bounds`——
+/// 布局器是在 `Row/Column::on_layout` 的 `set_bounds` 之前被调用的。
+inline auto container_baseline(void *ctx, Size measured) -> std::optional<float> {
+    const auto *lc = static_cast<ContainerLayoutCtx *>(ctx);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic) trampoline 用裸指针+索引解包子节点
+    const Widget &child = lc->children[lc->index].widget();
+    const std::optional<float> baseline = child.baseline_distance(*lc->build_ctx);
+    if (!baseline.has_value()) {
+        return std::nullopt;
+    }
+    return *baseline + child.modifier.get().transform(measured).translation.y;
 }
 
 /// @brief Column 属性（聚合）。
@@ -133,7 +155,7 @@ class Column : public Container, public ColumnProps {
                      .required = false,
                      .note = "交叉轴对齐",
                      .json_type = "string",
-                     .enum_values = {"Start", "Center", "End", "Stretch"}},
+                     .enum_values = {"Start", "Center", "End", "Stretch", "Baseline"}},
                     {.name = "main_axis_size",
                      .type = "MainAxisSize",
                      .default_value = "Min",
@@ -179,13 +201,23 @@ class Column : public Container, public ColumnProps {
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        // Column 的交叉轴是水平的：`CrossAxisAlignment::Baseline` 没有基线语义，布局器按 `Start` 处理。
+        // 一次性降级提示（每实例仅一次，不每帧刷屏）——放在布局入口可同时覆盖 setter / from_json /
+        // 直写 `flex.cross_axis` 三条路径，无需在每处状态变更点重复接线。
+        if (flex.cross_axis == CrossAxisAlignment::Baseline && !baseline_degraded_warned_) {
+            baseline_degraded_warned_ = true;
+            Diagnostics::degraded("Column 的交叉轴是水平的，CrossAxisAlignment::Baseline 无基线语义，已按 Start 处理",
+                                  "layout");
+        }
         std::vector<ContainerLayoutCtx> ctxs(children_.size());
         std::vector<FlexItem> items;
         items.reserve(children_.size());
         for (size_t i = 0; i < children_.size(); ++i) {
             ctxs[i] = ContainerLayoutCtx{{}, children_.data(), i, &ctx};
             const float w = children_[i].widget().modifier.get().flex_weight();
-            items.push_back(FlexItem::make<ContainerLayoutCtx>(w, &ctxs[i], container_measure));
+            // 基线通道一并挂上：布局器仅在 `cross_axis == Baseline` 时调用（其余配置零调用开销）。
+            items.push_back(
+                FlexItem::make<ContainerLayoutCtx>(w, &ctxs[i], container_measure, container_baseline, &ctxs[i]));
         }
         Flex cfg = flex;
         cfg.gap = gap > 0.0F ? gap : flex.gap;
@@ -197,6 +229,9 @@ class Column : public Container, public ColumnProps {
         }
         return c.constrain(result.size);
     }
+
+  private:
+    bool baseline_degraded_warned_ = false;  ///< `Baseline` 降级提示是否已发（每实例一次，避免逐帧刷屏）
 };
 
 /// @brief Row 属性（聚合）。
@@ -303,7 +338,7 @@ class Row : public Container, public RowProps {
                      .required = false,
                      .note = "交叉轴对齐",
                      .json_type = "string",
-                     .enum_values = {"Start", "Center", "End", "Stretch"}},
+                     .enum_values = {"Start", "Center", "End", "Stretch", "Baseline"}},
                     {.name = "main_axis_size",
                      .type = "MainAxisSize",
                      .default_value = "Min",
@@ -355,7 +390,9 @@ class Row : public Container, public RowProps {
         for (size_t i = 0; i < children_.size(); ++i) {
             ctxs[i] = ContainerLayoutCtx{{}, children_.data(), i, &ctx};
             const float w = children_[i].widget().modifier.get().flex_weight();
-            items.push_back(FlexItem::make<ContainerLayoutCtx>(w, &ctxs[i], container_measure));
+            // 基线通道一并挂上：布局器仅在 `cross_axis == Baseline` 时调用（其余配置零调用开销）。
+            items.push_back(
+                FlexItem::make<ContainerLayoutCtx>(w, &ctxs[i], container_measure, container_baseline, &ctxs[i]));
         }
         Flex cfg = flex;
         cfg.gap = gap > 0.0F ? gap : flex.gap;

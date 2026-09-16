@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <vector>
 
 #include "aurora/core/types.h"
@@ -17,10 +18,12 @@ struct LayoutCtxBase {
 };
 
 /**
- * @brief 单个 flex 子项：权重 + 测量回调（给定约束返回自身尺寸）。
+ * @brief 单个 flex 子项：权重 + 测量回调（给定约束返回自身尺寸）+ 可选基线回调。
  *
  * 与具体 widget 解耦：容器（Row/Column）把"测某子节点"封装成 `measure` 回调传给布局器，
  * 布局器只负责按 Flutter 语义分配主轴空间并算位置，不做任何 widget 专属逻辑。
+ * `baseline` 与 `measure` 同构（函数指针 + void* 上下文，零堆分配），且仅在
+ * `cross_axis == CrossAxisAlignment::Baseline` 且主轴为水平时被布局器调用。
  */
 struct FlexItem {
     float flex = 0.0F;  ///< 主轴权重；0 = 不扩展（仅占内容尺寸）
@@ -30,8 +33,22 @@ struct FlexItem {
     MeasureFn measure = nullptr;  ///< 测量函数指针
     void *measure_ctx = nullptr;  ///< 测量函数上下文
 
+    /// @brief 基线函数指针（零堆分配，与 `measure` 同构）。
+    ///
+    /// `measured` 为该项测量后的尺寸（换算 `Modifier::transform(measured).translation.y` 等
+    /// 内容盒偏移需要它）；返回值语义 = **布局盒顶 → 首行基线** 的距离，`nullopt` 表示无基线
+    /// （布局器按 CSS 式合成基线 = 交叉轴底边处理，见 specification/03-layout-render.md §3.8）。
+    using BaselineFn = auto (*)(void *ctx, Size measured) -> std::optional<float>;
+    BaselineFn baseline = nullptr;  ///< 基线函数指针（仅 Baseline 对齐路径被调用）
+    void *baseline_ctx = nullptr;  ///< 基线函数上下文
+
     /// @brief 调用测量函数。
     [[nodiscard]] auto do_measure(const Constraints &c) const -> Size { return measure(measure_ctx, c); }
+
+    /// @brief 调用基线函数（未提供回调时返回 `nullopt`）。
+    [[nodiscard]] auto do_baseline(const Size &measured) const -> std::optional<float> {
+        return baseline != nullptr ? baseline(baseline_ctx, measured) : std::nullopt;
+    }
 
     /// @brief 工厂：将容器布局上下文打包为 FlexItem，零堆分配。
     ///
@@ -41,7 +58,16 @@ struct FlexItem {
     /// @param fn      trampoline 函数指针：解包 ctx → 调用实际 widget::layout
     template <typename Ctx>
     static auto make(float w, Ctx *ctx, MeasureFn fn) -> FlexItem {
-        return FlexItem{w, fn, ctx};
+        return FlexItem{w, fn, ctx, nullptr, nullptr};
+    }
+
+    /// @brief 工厂（带基线通道）：`bfn` 仅在该容器的交叉轴对齐为 `Baseline` 时被调用。
+    ///
+    /// @param bfn 基线 trampoline（解包 ctx → 查子 widget 基线并计入内容盒偏移）
+    /// @param bctx 基线函数上下文（通常与 `ctx` 同一个容器布局上下文）
+    template <typename Ctx>
+    static auto make(float w, Ctx *ctx, MeasureFn fn, BaselineFn bfn, Ctx *bctx) -> FlexItem {
+        return FlexItem{w, fn, ctx, bfn, bctx};
     }
 };
 

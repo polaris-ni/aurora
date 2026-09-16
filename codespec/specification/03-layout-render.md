@@ -174,8 +174,18 @@ origin.main = container_main - (origin.main + size.main)
 | `Center` | `(container_cross - size_i.cross) / 2` | `size_i.cross` |
 | `End` | `container_cross - size_i.cross` | `size_i.cross` |
 | `Stretch` | `0` | `container_cross`（强制拉伸填满） |
+| `Baseline` | `max_above - b_i` | `size_i.cross`（不拉伸） |
 
 **`Stretch` 语义**：子项交叉轴尺寸被强制设为 `container_cross`，无论其内容尺寸。若 `container_cross` 由 `P_min_cross` 撑大（如父 `min.width = 80`），子项也被拉伸到该值；子项同时受自身 `width` / `height` 等显式约束夹取。
+
+**`Baseline` 语义**（仅水平主轴 / `Row` 有意义）：各子项按**首行文本基线**共线——图标与不同字号文字同行、按钮与说明文字混排时，视觉下沿不再参差。
+
+- `b_i` 是子项「布局盒顶 → 首行基线」的距离：`Widget::baseline_distance(ctx)` 给出**内容盒**内距离（含控件自身内边距与垂直居中偏移），容器再补入 `Modifier::transform(size).translation.y`（`Modifier::padding` / Align 造成的内容盒位移）。
+- **无基线子项**（钩子返回 `nullopt`，如图标）按 CSS 规则以**自身交叉轴底边**为合成基线参与，不报错、不崩溃；基线一律夹取到 `[0, size_i.cross]`。
+- 容器交叉轴 = `max(b_i) + max(size_i.cross - b_i)`（记作 `max_above` / `max_below`），再夹入父约束；**全部子项无基线**时退化为 `End` 语义。
+- 纵向主轴（`Column`）的交叉轴是水平的，基线无意义 ⇒ 按 `Start` 处理，并发出一次降级诊断（`Diagnostics::degraded`，每控件实例一次，不逐帧刷屏）。
+- 该取值经 `props_io` 的 `cross_axis_alignment` 键往返；读到未知取值仍回退 `Start`（向后兼容）。
+- 钩子返回值**不做整像素 snap**：容器按 `max_above - b_i` 定位后，绘制侧 `pen_y = floor(top + ascent + 0.5)` 中的 ascent 与之相消，各子项实绘基线像素一致。
 
 ---
 
@@ -444,7 +454,7 @@ au::Column{}
 
 **字体注入**：`set_default_font(ttf_path)` / `register_font(family, ttf_path)` / `register_font_from_memory(family, ttf_bytes)`（`family` 为空表示默认 sans-serif）。
 
-**度量与绘制**：`measure_width` / `measure_height` / `draw_text`。
+**度量与绘制**：`measure_width` / `measure_height` / `measure_ascent` / `draw_text`。
 
 **选中原语**：`caret_x(text, idx, font)` / `hit_test_char(text, x, font)` / `hit_test_char_inclusive`（以码点为索引，UTF-8 安全）。
 
@@ -456,7 +466,7 @@ au::Column{}
 
 **排版选项（`TextLayoutOpts`）**：`measure_width` / `caret_x` / `hit_test_char` / `draw_text` 均提供接受 `TextLayoutOpts` 的重载，携带 `letter_spacing`（相邻字形间间距，整串共 `n-1` 次）、`word_spacing`（词间距，仅空格后追加）、`italic`（经 FreeType `FT_Set_Transform` 仿斜）。统一 opts 保证度量、光标、命中、绘制四者完全一致。
 
-**锚定契约**：`draw_text(r, ...)` 的 `r.origin.y` 是**行盒顶**而非基线。实现内部首行基线 = `origin.y + 主 face ascender`，回退 face 字形统一按主 face 基线对齐。全库调用方均按顶锚定传值，**不得自行加减 ascent**。
+**锚定契约**：`draw_text(r, ...)` 的 `r.origin.y` 是**行盒顶**而非基线。实现内部首行基线 = `origin.y + 主 face ascender`，回退 face 字形统一按主 face 基线对齐。全库调用方均按顶锚定传值，**不得自行加减 ascent**。该 ascent 由 `measure_ascent(f)` 公开（与绘制同源、不做绘制侧的整像素 snap），供 `CrossAxisAlignment::Baseline` 的控件级基线使用；无可用字体面时回退 `BitmapFont::measure_ascent`（同一 `pixel_size` 口径），恒有 `0 <= measure_ascent <= measure_height`。
 
 **实显度量（`display_*`）**：FT hinting 把每个字形 advance 取整到整像素，同一字形在不同像素尺寸下的 advance 不成 scale 比例。因此 `display_width` / `display_caret_x` / `display_hit_test_char{,_inclusive}` 必须按「绘制同源的物理像素尺寸 `lround(px × scale)` 真算前缀推进后折回 dp」，**不得写成自然度量的转发别名**——否则缩放屏下行内累计误差跨字符边界，造成命中 off-by-one。`scale == 1` 时退化为对应自然版。
 

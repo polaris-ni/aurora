@@ -142,6 +142,15 @@ class FontEngine {
     /// @brief 测量单行高度（设备像素，ascent+descent）。
     [[nodiscard]] static auto measure_height(const Font &f) -> float;
 
+    /// @brief 测量单行基线上沿（单位与 `measure_height` 完全一致）：行盒顶 → 首行基线。
+    ///
+    /// 与 `draw_text` 计算首行 pen_y 的口径同源（同一 `px_measure` 尺寸下的主 face ascender，
+    /// 回退 face 字形按主 face 基线对齐），唯一差别是本函数**不做**绘制侧的整像素 snap
+    /// （`floor(origin_y + ascent + 0.5)`，见 emit_text_glyphs_core）——需要与实绘首行逐位
+    /// 一致的调用方自行 snap。无可用字体面时回退 `BitmapFont::measure_ascent`（同一
+    /// `pixel_size` 口径），恒有 `0 <= measure_ascent <= measure_height`。
+    [[nodiscard]] static auto measure_ascent(const Font &f) -> float;
+
     /// @brief 选中原语：第 `char_index` 个码点之前的基线 x（码点索引，UTF-8 安全）。
     [[nodiscard]] static auto caret_x(const std::string &text, std::size_t char_index, const Font &f) -> float;
 

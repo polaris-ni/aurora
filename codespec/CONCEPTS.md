@@ -117,6 +117,7 @@ push_route(au::Checkbox{ au::Reactive<bool>{ flag } });   // flag 存活期 = �
 | 视频播放 / 媒体 | `<video>` / `react-player` | `video_player` / `ExoPlayer` | `QMediaPlayer` + `QVideoWidget` |
 | Layout（Flex） | Flexbox | `Flex` / `Row` / `Column`（`MainAxisAlignment` / `CrossAxisAlignment` / `MainAxisSize` 与 Flutter 同名概念一一对应） | `Row` / `Column` 布局 |
 | `RelayoutBoundary` | 无直接等价（`React.memo` / `useMemo` 仅影响重渲染而非布局冒泡） | `RelayoutBoundary`（同源概念：截断 layout 脏冒泡、仅重排本子树；`isRepaintBoundary` 是其 paint 侧孪生） | 无直接等价（`QLayout` 无重排边界语义，整树重算） |
+| 基线对齐（`CrossAxisAlignment::Baseline`） | `align-items: baseline`（无基线项的合成基线 = 其 margin box 底边） | `CrossAxisAlignment.baseline`（Flutter 另需 `textBaseline` 分档 alphabetic / ideographic，且任一子项无基线即 assert 崩溃；Aurora **只做 alphabetic 单档**、无基线子项按 CSS 规则以自身底边合成基线，不崩溃） | 无直接等价（QML 需手工计算基线偏移） |
 | Animation | `react-spring` / Framer | `AnimationController` + `Curve` | `PropertyAnimation` |
 | Timeline 编排（`TimelineSpec` / `TimelinePlayer`） | 动画编排库（Framer `variants` / `react-spring` 序列） | `Interval` + `TweenSequence` / 官方 staggered 模式（`TimelineSpec::staggered` 自动完成手算端点）；WPF `Storyboard` 同类定位（Aurora 不做运行时时间线树） | `QSequentialAnimationGroup` / `QParallelAnimationGroup` |
 | 手势驱动动画（`DragRecognizer` / `DragToDismiss` / `Dismissible`） | `react-swipeable` / `framer-motion` drag | `Draggable` + `AnimationController` / `Dismissible`（跟手 + spring 裁决语义与 Flutter `Dismissible` 同构） | `SwipeDelegate`（Qt Quick） |

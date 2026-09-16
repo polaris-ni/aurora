@@ -374,6 +374,8 @@ using Json = nlohmann::json;
             return "End";
         case CrossAxisAlignment::Stretch:
             return "Stretch";
+        case CrossAxisAlignment::Baseline:
+            return "Baseline";
     }
     return "Start";
 }
@@ -390,6 +392,9 @@ using Json = nlohmann::json;
         }
         if (s == "Stretch") {
             return CrossAxisAlignment::Stretch;
+        }
+        if (s == "Baseline") {
+            return CrossAxisAlignment::Baseline;
         }
     }
     return CrossAxisAlignment::Start;

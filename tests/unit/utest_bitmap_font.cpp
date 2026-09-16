@@ -1,7 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/render/bitmap_font.h
 /// 测试说明: 覆盖内置位图字形的网格不变量（8×8、行宽一致）、小写到大写的自动映射、
-/// 未知字符降级为空格字形、数字/字母/常用标点具备前景像素，以及空格字形恒为空白
+/// 未知字符降级为空格字形、数字/字母/常用标点具备前景像素、空格字形恒为空白，
+/// 以及基线上沿度量落在行高之内（基线对齐的合成基线依赖该不变量）
 
 #include <array>
 #include <cstddef>
@@ -65,6 +66,21 @@ AURORA_TEST_CASE(unknown_character_degrades_to_space) {
     // 未覆盖字符（含控制字符与非 ASCII 字节）降级为空格，避免出现豆腐块。
     AURORA_TEST_CHECK_EQ(render::BitmapFont::glyph('\x01').rows, render::BitmapFont::glyph(' ').rows);
     AURORA_TEST_CHECK_EQ(ink_count(render::BitmapFont::glyph('\x7F')), 0);
+}
+
+AURORA_TEST_CASE(measure_ascent_fits_within_line_height) {
+    // 基线对齐（CrossAxisAlignment::Baseline）的合成基线与夹取依赖该不变量：
+    // 0 < ascent <= height，且差值恰为 1 格（字形占 8 格中的 0..6 格）。
+    const std::array<float, 3> sizes{8.0F, 12.0F, 24.0F};
+    for (const float size : sizes) {
+        AURORA_TEST_TRACE("size_pt=" + std::to_string(size));
+        const float ascent = render::BitmapFont::measure_ascent(size);
+        const float height = render::BitmapFont::measure_height(size);
+        const float cell = static_cast<float>(render::BitmapFont::pixel_size(size));
+        AURORA_TEST_CHECK_GT(ascent, 0.0F);
+        AURORA_TEST_CHECK_LE(ascent, height);
+        AURORA_TEST_CHECK_NEAR(height - ascent, cell, 1e-6);
+    }
 }
 
 }  // namespace aurora::test_cases::utest_bitmap_font

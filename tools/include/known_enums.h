@@ -38,7 +38,7 @@ namespace aurora::tools {
     enums["Alignment"] = {"TopLeft",     "TopCenter",  "TopRight",     "CenterLeft", "Center",
                           "CenterRight", "BottomLeft", "BottomCenter", "BottomRight"};
     enums["MainAxisAlignment"] = {"Start", "Center", "End", "SpaceBetween", "SpaceAround", "SpaceEvenly"};
-    enums["CrossAxisAlignment"] = {"Start", "Center", "End", "Stretch"};
+    enums["CrossAxisAlignment"] = {"Start", "Center", "End", "Stretch", "Baseline"};
     enums["MainAxisSize"] = {"Min", "Max"};
     enums["StackFit"] = {"Loose", "Expand", "Passthrough"};
     enums["LengthKind"] = {"WrapContent", "Expand", "Fixed", "Fraction"};

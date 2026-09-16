@@ -205,6 +205,15 @@ auto Button::paint_background(Painter &p, const Rect &bounds, Color bg) -> void 
     }
 }
 
+auto Button::baseline_distance(const BuildContext & /*ctx*/) const -> std::optional<float> {
+    // 与 paint_label 同源：标签在内容盒内垂直居中（ty = top + (h - th) / 2），
+    // 故基线 = 居中偏移 + 字体 ascent。字号兜底与 th 的口径均取自 paint_label。
+    const float fs = font.size_pt > 0.0F ? font.size_pt : 14.0F;
+    const Font f{.size_pt = fs};
+    const float th = render::FontEngine::measure_height(f);
+    return ((size().height - th) * 0.5F) + render::FontEngine::measure_ascent(f);
+}
+
 auto Button::paint_border(Painter &p, const Rect &bounds) -> void {
     if (border_width <= 0.0F || !border_color.has_value()) {
         return;

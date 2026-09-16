@@ -178,6 +178,11 @@ class Text : public LeafWidget, public TextProps {
 
     [[nodiscard]] auto type_name() const -> const char * override { return "Text"; }
 
+    /// @brief 首行基线（内容盒顶 → 基线）：Text 的首行就从内容盒顶起排（`on_paint` 的 `y = bounds.origin.y`），
+    ///        故即有效字体的 ascent，与 `draw_text` 的 pen_y 同源（`FontEngine::measure_ascent`）。
+    ///        多行文本仍取首行；不做整像素 snap（见 `Widget::baseline_distance` 的说明）。
+    [[nodiscard]] auto baseline_distance(const BuildContext &ctx) const -> std::optional<float> override;
+
     /// @brief 无障碍名称：取文本内容。
     ///
     /// 优先复用绘制期缓存的解析结果 `display_text_`（= `cached_resolved_text_`，已解析 i18n）；

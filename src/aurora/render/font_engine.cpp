@@ -879,6 +879,16 @@ auto FontEngine::measure_height(const Font &f) -> float {
     return line_height_px(faces, px_measure(f));
 }
 
+auto FontEngine::measure_ascent(const Font &f) -> float {
+    const auto &faces = resolve_faces(f.family, f.weight);
+    if (faces.empty()) {
+        return BitmapFont::measure_ascent(f.size_pt);
+    }
+    // 与 draw_text 的首行基线同源：同一 px_measure 尺寸下的主 face ascender；绘制侧在此基础上
+    // 额外做整像素 snap（emit_text_glyphs_core 的 pen_y），布局度量保持未 snap 值。
+    return ascender_px(faces, px_measure(f));
+}
+
 auto FontEngine::caret_x(const std::string &text, std::size_t char_index, const Font &f) -> float {
     return caret_x(text, char_index, f, TextLayoutOpts{});
 }

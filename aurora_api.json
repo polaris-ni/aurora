@@ -224,7 +224,8 @@
         "Start",
         "Center",
         "End",
-        "Stretch"
+        "Stretch",
+        "Baseline"
       ]
     },
     {
@@ -1116,7 +1117,8 @@
         "Start",
         "Center",
         "End",
-        "Stretch"
+        "Stretch",
+        "Baseline"
       ],
       "description": "Flex layout (Column/Row): children are laid out along the main axis, aligned on the cross axis",
       "gap_constraint": "gap >= 0",
@@ -2502,7 +2504,8 @@
             "Start",
             "Center",
             "End",
-            "Stretch"
+            "Stretch",
+            "Baseline"
           ],
           "json_type": "string",
           "name": "cross_axis_alignment",
@@ -2571,7 +2574,8 @@
             "Start",
             "Center",
             "End",
-            "Stretch"
+            "Stretch",
+            "Baseline"
           ],
           "type": "string"
         },
@@ -5839,7 +5843,8 @@
             "Start",
             "Center",
             "End",
-            "Stretch"
+            "Stretch",
+            "Baseline"
           ],
           "json_type": "string",
           "name": "cross_axis_alignment",
@@ -5908,7 +5913,8 @@
             "Start",
             "Center",
             "End",
-            "Stretch"
+            "Stretch",
+            "Baseline"
           ],
           "type": "string"
         },

@@ -27,9 +27,12 @@ struct FlexLayoutContext {
 
     // ---- 工作态（逐趟累积）----
     std::vector<Size> sizes;
+    std::vector<std::optional<float>> baselines;  ///< 各项「布局盒顶 → 基线」距离（仅 Baseline 模式填充）
     float used_main = 0.0F;
     float max_cross = 0.0F;
     float total_flex = 0.0F;
+    float max_above = 0.0F;  ///< 基线上沿最大值（仅 Baseline 模式）
+    float max_below = 0.0F;  ///< 基线下沿最大值（仅 Baseline 模式）
 
     float container_main = 0.0F;
     float container_cross = 0.0F;
@@ -44,7 +47,8 @@ struct FlexLayoutContext {
           reverse(cfg.direction == FlexDirection::RowReverse || cfg.direction == FlexDirection::ColumnReverse),
           main_axis(horizontal ? 0 : 1), inf(Size::infinity().width), main_finite(p_max_main() != inf),
           parent_max_main(p_max_main()), parent_min_main(p_min_main()), parent_max_cross(p_max_cross()),
-          parent_min_cross(p_min_cross()), gap(cfg.gap > 0.0F ? cfg.gap : 0.0F), sizes(it.size(), Size{}) {}
+          parent_min_cross(p_min_cross()), gap(cfg.gap > 0.0F ? cfg.gap : 0.0F), sizes(it.size(), Size{}),
+          baselines(it.size(), std::nullopt) {}
 
     // ---- 轴访问器（与主轴/交叉轴选择绑定）----
     [[nodiscard]] auto get_main(const Size &s) const -> float { return main_axis == 0 ? s.width : s.height; }
@@ -62,6 +66,12 @@ struct FlexLayoutContext {
         } else {
             s.height = v;
         }
+    }
+
+    /// @brief 是否走基线对齐路径：仅水平主轴（Row）下 `CrossAxisAlignment::Baseline` 有意义。
+    ///        纵向主轴（Column）的交叉轴是水平的，基线无意义 ⇒ 按 `Start` 处理。
+    [[nodiscard]] auto baseline_mode() const -> bool {
+        return horizontal && config.cross_axis == CrossAxisAlignment::Baseline;
     }
 
   private:
@@ -161,9 +171,31 @@ struct FlexLayoutContext {
         container_cross = std::clamp(max_cross, parent_min_cross, parent_max_cross);
     }
 
-    // 交叉轴对齐 pass（容器交叉轴尺寸已定，此处仅为语义分组占位，保持 pass 边界清晰）。
-    static auto cross_axis_align_pass() -> void {
-        // 容器交叉轴尺寸由 main_axis_alloc_pass 确定；子项交叉轴定位在 place_children_pass 完成。
+    // 交叉轴基线 pass：仅 Baseline 模式做事。
+    //
+    // 调用时机关键：必须在 main_axis_alloc_pass **之前**——容器交叉轴尺寸在那里按 max_cross
+    // 夹取定稿，而基线对齐要求交叉轴 = max(基线上沿) + max(基线下沿)，需先于它写入 max_cross。
+    // 非 Baseline 配置下本 pass 保持空操作，既有四值路径与历史逐位一致。
+    auto cross_axis_align_pass() -> void {
+        if (!baseline_mode()) {
+            return;
+        }
+        const size_t n = items.size();
+        for (size_t i = 0; i < n; ++i) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 与 measure_pass 同源热路径
+            const Size s = sizes[i];
+            const float cross_size = get_cross(s);
+            // CSS 式合成基线：无基线的子项（如纯图标）以自身交叉轴底边为基线，宽容降级不报错。
+            // baseline 已由容器换算为「布局盒顶 → 基线」，此处仅做边界夹取。
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 同上
+            const float b = std::clamp(items[i].do_baseline(s).value_or(cross_size), 0.0F, cross_size);
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 同上
+            baselines[i] = b;
+            max_above = std::max(max_above, b);
+            max_below = std::max(max_below, cross_size - b);
+        }
+        // 每项恒有 above + below == cross_size，故 max_above + max_below >= 原 max_cross。
+        max_cross = max_above + max_below;
     }
 
     // 主轴对齐 pass：由 main_axis 对齐方式推出首项前导间距 leading 与子项间间距 between。
@@ -214,6 +246,9 @@ struct FlexLayoutContext {
             // 的边界检查开销会影响计时
             Size s = sizes[i];
             float cross_size = get_cross(s);
+            // 非 Baseline 模式下 baselines[i] 为 nullopt ⇒ 取 cross_size（该分支不使用此值）。
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 同上
+            const float cross_baseline = baselines[i].value_or(cross_size);
             float cross_pos = 0.0F;
             switch (config.cross_axis) {
                 case CrossAxisAlignment::Start:
@@ -228,6 +263,10 @@ struct FlexLayoutContext {
                 case CrossAxisAlignment::Stretch:
                     cross_size = container_cross;
                     cross_pos = 0.0F;
+                    break;
+                case CrossAxisAlignment::Baseline:
+                    // 各子项基线共线在 max_above 处；纵向主轴无基线语义 ⇒ 0（Start）。
+                    cross_pos = horizontal ? (max_above - cross_baseline) : 0.0F;
                     break;
             }
             cross_pos = std::max(cross_pos, 0.0F);
@@ -269,10 +308,11 @@ auto FlexLayouter::layout(const Flex &config, const Constraints &parent, const s
 
     // 测量 pass：非 flex + flex 瓜分 + 固定间距计入容器主轴占用。
     ctx.measure_pass();
+    // 交叉轴基线 pass：须在主轴分配 pass 之前（容器交叉轴尺寸在那里按 max_cross 定稿）；
+    // 非 Baseline 配置为空操作，不改变既有四值路径的任何算术。
+    ctx.cross_axis_align_pass();
     // 主轴分配 pass：容器尺寸 + 自由空间 + 交叉轴尺寸。
     ctx.main_axis_alloc_pass();
-    // 交叉轴对齐 pass（容器交叉轴尺寸已定）。
-    FlexLayoutContext::cross_axis_align_pass();
     // 主轴对齐 pass：leading / between。
     ctx.main_axis_align_pass();
     // 定位后处理 pass：逐子项定位 + 反向镜像。

@@ -293,6 +293,13 @@ auto Text::validate_props() const -> Result<void> {
     return Result<void>{};
 }
 
+auto Text::baseline_distance(const BuildContext &ctx) const -> std::optional<float> {
+    // 首行从内容盒顶起排（见 on_paint 的 `float y = bounds.origin.y;`），故基线即有效字体的 ascent。
+    // 不做整像素 snap：容器按 cross_pos = max_above - baseline 定位后，绘制侧
+    // pen_y = floor(top + ascent + 0.5) 里的 ascent 与之相消，各子项实绘基线像素一致。
+    return render::FontEngine::measure_ascent(effective_font(font, ctx));
+}
+
 auto Text::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
     const Font f = effective_font(font, ctx);
     // resolved_text 缓存：on_layout 在 content 变化时必被调用，此处计算并缓存

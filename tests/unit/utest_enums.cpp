@@ -42,7 +42,8 @@ AURORA_TEST_CASE(layout_enum_layout_is_stable) {
     // 布局族枚举：末枚举量数值锁定（数量 = 值 + 1）。
     AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::MainAxisSize::Max), 1);  // 共 2 个
     AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::MainAxisAlignment::SpaceEvenly), 5);  // 共 6 个
-    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::CrossAxisAlignment::Stretch), 3);  // 共 4 个
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::CrossAxisAlignment::Stretch), 3);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::CrossAxisAlignment::Baseline), 4);  // 共 5 个
     AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::StackFit::Passthrough), 2);  // 共 3 个
     AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::OverflowStrategy::Scroll), 3);  // 共 4 个
     AURORA_TEST_CHECK_EQ(static_cast<int>(aurora::BoxFit::ScaleDown), 6);  // 共 7 个

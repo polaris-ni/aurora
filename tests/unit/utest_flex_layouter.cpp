@@ -2,8 +2,10 @@
 /// 目标单元: include/aurora/layout/flex_layouter.h
 /// 测试说明: 覆盖 Flex 布局算法的 Flutter 语义——Row/Column 主轴排布、RowReverse 镜像、
 /// flex 权重瓜分剩余空间、gap 插入与分配扣除、MainAxisSize::Max 下的主轴对齐
-/// （Center/End/SpaceBetween/SpaceAround/SpaceEvenly）、交叉轴对齐（Start/Center/End/Stretch）
+/// （Center/End/SpaceBetween/SpaceAround/SpaceEvenly）、交叉轴对齐（Start/Center/End/Stretch/Baseline
+/// 含无基线子项的合成基线、全无基线退化为 End、Column 回退 Start、RTL 正交性、父约束夹取）
 
+#include <optional>
 #include <vector>
 
 #include "aurora/layout/flex_layouter.h"
@@ -39,6 +41,34 @@ auto flex_item(float weight, float w, float h, FixedCtx& ctx) -> FlexItem {
 
 auto parent_constraints(float max_w = 300.0F, float max_h = 100.0F) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = max_w, .height = max_h}};
+}
+
+/// 带基线通道的测量上下文：`baseline` 为「布局盒顶 → 首行基线」距离；< 0 表示无基线（nullopt）。
+struct BaselineCtx : aurora::LayoutCtxBase {
+    float w = 0.0F;
+    float h = 0.0F;
+    float baseline = -1.0F;
+};
+
+auto baseline_measure(void* ctx, const Constraints& c) -> Size {
+    const auto* self = static_cast<BaselineCtx*>(ctx);
+    return c.constrain(Size{.width = self->w, .height = self->h});
+}
+
+auto baseline_of(void* ctx, Size /*measured*/) -> std::optional<float> {
+    const auto* self = static_cast<BaselineCtx*>(ctx);
+    if (self->baseline < 0.0F) {
+        return std::nullopt;
+    }
+    return self->baseline;
+}
+
+/// 带基线通道的子项（baseline < 0 = 无基线，走 CSS 式合成基线 = 交叉轴底边）。
+auto baseline_item(float w, float h, float baseline, BaselineCtx& ctx) -> FlexItem {
+    ctx.w = w;
+    ctx.h = h;
+    ctx.baseline = baseline;
+    return FlexItem::make(0.0F, &ctx, &baseline_measure, &baseline_of, &ctx);
 }
 
 }  // namespace
@@ -276,6 +306,143 @@ AURORA_TEST_CASE(column_rtl_mirrors_cross_axis_start_end) {
     // 纵向排布顺序不变（主轴不受镜像影响）。
     AURORA_TEST_CHECK_NEAR(layout.children[0].origin.y, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(layout.children[1].origin.y, 10.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(baseline_aligns_mixed_sizes_on_common_line) {
+    // 大字号（h=30, b=24）与小字号（h=20, b=15）：容器交叉轴 = max_above(24) + max_below(max(6,5)=6) = 30；
+    // 小字号整体下移 24-15=9，两者首行基线同处 y=24。
+    BaselineCtx small;
+    BaselineCtx large;
+    Flex cfg;
+    cfg.cross_axis = CrossAxisAlignment::Baseline;
+    const auto layout = FlexLayouter::layout(cfg, parent_constraints(),
+                                             {baseline_item(30.0F, 20.0F, 15.0F, small),
+                                              baseline_item(30.0F, 30.0F, 24.0F, large)});
+
+    AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
+    AURORA_TEST_CHECK_NEAR(layout.size.height, 30.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.y, 9.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.y, 0.0F, 1e-4F);
+    // 基线共线：各自 y + 自身 baseline 相等（基线对齐的定义式断言）。
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.y + 15.0F, layout.children[1].origin.y + 24.0F, 1e-4F);
+    // 主轴排布不受交叉轴对齐影响。
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.x, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.x, 30.0F, 1e-4F);
+    // 子项尺寸不被拉伸（Baseline 不是 Stretch）。
+    AURORA_TEST_CHECK_NEAR(layout.children[0].size.height, 20.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(baseline_synthesizes_bottom_edge_for_items_without_baseline) {
+    // 无基线子项（图标类）按 CSS 式合成基线 = 自身交叉轴底边：h=40 的项 b=40；
+    // max_above = max(15, 40) = 40、max_below = max(5, 0) = 5 ⇒ 容器交叉轴 45。
+    BaselineCtx text;
+    BaselineCtx icon;
+    Flex cfg;
+    cfg.cross_axis = CrossAxisAlignment::Baseline;
+    const auto layout = FlexLayouter::layout(cfg, parent_constraints(),
+                                             {baseline_item(30.0F, 20.0F, 15.0F, text),
+                                              baseline_item(20.0F, 40.0F, -1.0F, icon)});
+
+    AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
+    AURORA_TEST_CHECK_NEAR(layout.size.height, 45.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.y, 25.0F, 1e-4F);  // 40 - 15
+    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.y, 0.0F, 1e-4F);   // 40 - 40：合成基线贴容器底
+    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.y + 40.0F, 40.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(all_items_without_baseline_degrade_to_end_alignment) {
+    // 全部子项无基线 ⇒ max_above = max(cross_size)、max_below = 0 ⇒ cross_pos = 容器交叉轴 - 自身交叉尺寸，
+    // 与 End 语义逐位一致（宽容降级，不报错、不崩溃）。
+    BaselineCtx a;
+    BaselineCtx b;
+    Flex baseline_cfg;
+    baseline_cfg.cross_axis = CrossAxisAlignment::Baseline;
+    const auto degraded = FlexLayouter::layout(baseline_cfg, parent_constraints(),
+                                               {baseline_item(10.0F, 5.0F, -1.0F, a),
+                                                baseline_item(30.0F, 10.0F, -1.0F, b)});
+
+    FixedCtx ca;
+    FixedCtx cb;
+    Flex end_cfg;
+    end_cfg.cross_axis = CrossAxisAlignment::End;
+    const auto ended = FlexLayouter::layout(end_cfg, parent_constraints(),
+                                            {fixed_item2(10.0F, 5.0F, ca), fixed_item2(30.0F, 10.0F, cb)});
+
+    AURORA_TEST_REQUIRE_EQ(degraded.children.size(), 2U);
+    AURORA_TEST_CHECK_NEAR(degraded.size.height, ended.size.height, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(degraded.children[0].origin.y, ended.children[0].origin.y, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(degraded.children[1].origin.y, ended.children[1].origin.y, 1e-4F);
+}
+
+AURORA_TEST_CASE(baseline_on_column_falls_back_to_start) {
+    // Column 的交叉轴是水平的：基线无意义 ⇒ 按 Start（x=0），且容器交叉轴仍取最大宽。
+    BaselineCtx a;
+    BaselineCtx b;
+    Flex cfg;
+    cfg.direction = FlexDirection::Column;
+    cfg.cross_axis = CrossAxisAlignment::Baseline;
+    const auto layout = FlexLayouter::layout(cfg, parent_constraints(),
+                                             {baseline_item(30.0F, 10.0F, 8.0F, a),
+                                              baseline_item(60.0F, 10.0F, 8.0F, b)});
+
+    AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
+    AURORA_TEST_CHECK_NEAR(layout.size.width, 60.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.x, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.x, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.y, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.y, 10.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(baseline_ignores_rtl_mirror_on_vertical_axis) {
+    // 基线与 RTL 正交：镜像只改主轴 x，交叉轴基线定位逐位不变。
+    BaselineCtx small;
+    BaselineCtx large;
+    Flex cfg;
+    cfg.cross_axis = CrossAxisAlignment::Baseline;
+    cfg.rtl = true;
+    const auto layout = FlexLayouter::layout(cfg, parent_constraints(),
+                                             {baseline_item(30.0F, 20.0F, 15.0F, small),
+                                              baseline_item(30.0F, 30.0F, 24.0F, large)});
+
+    AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
+    AURORA_TEST_CHECK_NEAR(layout.size.height, 30.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.y, 9.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.y, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.x, 30.0F, 1e-4F);  // 已镜像
+    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.x, 0.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(baseline_clamps_out_of_range_baseline_into_item_box) {
+    // 越界基线（远大于盒高）夹取到 [0, cross_size]：999 → 60 ⇒ 等价于「底边合成基线」，
+    // cross_pos = 60 - 60 = 0（若不夹取将得到负位移，把子项顶出容器上沿）。
+    BaselineCtx odd;
+    Flex cfg;
+    cfg.cross_axis = CrossAxisAlignment::Baseline;
+    const auto layout = FlexLayouter::layout(cfg, parent_constraints(300.0F, 100.0F),
+                                             {baseline_item(30.0F, 60.0F, 999.0F, odd)});
+
+    AURORA_TEST_REQUIRE_EQ(layout.children.size(), 1U);
+    AURORA_TEST_CHECK_NEAR(layout.size.height, 60.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.y, 0.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(baseline_container_cross_clamps_into_parent_constraint) {
+    // 基线在盒底（above=70/below=0）与基线在盒顶（above=0/below=70）混排时，
+    // max_above + max_below = 140，可超过父交叉轴约束 70 ⇒ 容器夹到父 max；
+    // 子项位移仍非负（此项越界属父约束给定的退化空间，不做额外裁剪）。
+    BaselineCtx bottom_heavy;
+    BaselineCtx top_heavy;
+    Flex cfg;
+    cfg.cross_axis = CrossAxisAlignment::Baseline;
+    const auto layout = FlexLayouter::layout(cfg, parent_constraints(300.0F, 70.0F),
+                                             {baseline_item(30.0F, 70.0F, 70.0F, bottom_heavy),
+                                              baseline_item(30.0F, 70.0F, 0.0F, top_heavy)});
+
+    AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
+    AURORA_TEST_CHECK_NEAR(layout.size.height, 70.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.y, 0.0F, 1e-4F);   // 70 - 70
+    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.y, 70.0F, 1e-4F);  // 70 - 0
+    AURORA_TEST_CHECK_GE(layout.children[1].origin.y, 0.0F);
 }
 
 }  // namespace aurora::test_cases::utest_flex_layouter

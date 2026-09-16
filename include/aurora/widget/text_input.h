@@ -169,6 +169,16 @@ class TextInput : public LeafWidget {
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&value_); }
     [[nodiscard]] auto type_name() const -> const char * override { return "TextInput"; }
 
+    /// @brief 首行基线（内容盒顶 → 基线）：与 `on_paint` 的文本原点 `ty` 同源——
+    ///        上内边距 + 文本在左右内边距之内的垂直居中偏移 + 有效字体 ascent。
+    [[nodiscard]] auto baseline_distance(const BuildContext & /*ctx*/) const -> std::optional<float> override {
+        const float fs = font_size_ > 0.0F ? font_size_ : 14.0F;
+        const Font f{.size_pt = fs};
+        const float th = render::FontEngine::measure_height(f);
+        return padding_.top + ((size().height - padding_.top - padding_.bottom - th) * 0.5F) +
+               render::FontEngine::measure_ascent(f);
+    }
+
     /// @brief 无障碍名称：无宿主覆写时以占位提示充当（编辑框的屏幕阅读器惯例）。
     /// @note Side-effects: pure
     [[nodiscard]] auto accessibility_label() const -> std::string override { return placeholder_; }
