@@ -262,8 +262,8 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 | `HeadlessSurface` | 内存帧缓冲，可同步导出 PNG | `AURORA_BACKEND_HEADLESS`（默认 ON） |
 | `Win32Surface` | 常驻 BGRA DIB section + `BitBlt`（RGBA→BGRA CPU swizzle），支持 `set_present_dirty` 增量上屏 | `AURORA_BACKEND_WIN32`（Windows 默认 ON） |
 | `D3D11Surface` | 复用 `Win32Window` 宿主，把 `Painter` RGBA8 帧缓冲作为动态纹理，脏矩形经 `UpdateSubresource` 增量上传，全屏三角形 + 像素着色器线性采样呈现（`Present(1,0)`） | `AURORA_BACKEND_D3D11`（默认 OFF） |
-| `GlfwSurface` | OpenGL 3.3 兼容剖面（绘制采用 1.1 立即模式），pimpl 隔离；开 `AURORA_BACKEND_GPU_GL` 后可请求 GPU 渲染模式（`GlfwOptions::gpu`），上下文与 swapBuffers 仍由本后端承担 | `AURORA_BACKEND_GLFW` |
-| `GpuGlRhi`（`Surface::gpu_backend()`） | DisplayList 的 OpenGL 3.3 core 批渲染：整帧回放 → Solid/Border/Grad/Image/Text/Shadow 管线合批（纹理 / 状态变化断批）；MSAA 渲染缓冲 + resolve 呈现；区域效果（Blur/Blend/Mask）经 resolve 纹理 ping-pong 回写；初始化失败运行期回退软件路径 | `AURORA_BACKEND_GPU_GL`（依赖 GLFW） |
+| `GlfwSurface` | OpenGL 3.3 兼容剖面（绘制采用 1.1 立即模式），pimpl 隔离；开 `AURORA_ENABLE_GLFW_GPU_GL` 后可请求 GPU 渲染模式（`GlfwOptions::gpu`），上下文与 swapBuffers 仍由本后端承担 | `AURORA_BACKEND_GLFW` |
+| `GpuGlRhi`（`Surface::gpu_backend()`） | DisplayList 的 OpenGL 3.3 core 批渲染：整帧回放 → Solid/Border/Grad/Image/Text/Shadow 管线合批（纹理 / 状态变化断批）；MSAA 渲染缓冲 + resolve 呈现；区域效果（Blur/Blend/Mask）经 resolve 纹理 ping-pong 回写；初始化失败运行期回退软件路径 | `AURORA_ENABLE_GLFW_GPU_GL`（依赖 GLFW） |
 | `X11Surface` | 按 Visual 掩码 CPU swizzle 后 `XPutImage`，支持增量上屏；`wait_events` 经 `poll(2)`；`scale_factor` 解析 `Xft.dpi` | `AURORA_BACKEND_X11`（默认 OFF） |
 | `WaylandSurface` | CPU swizzle 到 `WL_SHM_FORMAT_XRGB8888` 经 `wl_shm` 共享内存双缓冲槽；`wait_events` 经 `poll(2)`；`scale_factor` 取 `wl_output.scale` | `AURORA_BACKEND_WAYLAND`（默认 OFF） |
 | `WasmSurface` | `<canvas>` 像素写回（`EM_ASM` `putImageData`） | `AURORA_BACKEND_WASM`（默认 OFF） |

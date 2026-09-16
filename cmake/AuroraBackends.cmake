@@ -82,19 +82,20 @@ if (AURORA_BACKEND_GLFW)
     aurora_log("GLFW backend enabled (source build under third_party/glfw)")
 endif ()
 
-# ---- GPU GL（DisplayList 的 OpenGL 3.3 core GPU 栅格后端；默认 OFF） ----
-# 依赖 AURORA_BACKEND_GLFW：GL 上下文创建 / swapBuffers 呈现均由 GlfwSurface 承担，本后端
+# ---- GLFW GPU GL（DisplayList 的 OpenGL 3.3 core GPU 栅格能力；默认 OFF；依赖 AURORA_BACKEND_GLFW） ----
+# 依赖 AURORA_BACKEND_GLFW：GL 上下文创建 / swapBuffers 呈现均由 GlfwSurface 承担，本能力
 # 只实现「DisplayList → GL 批渲染」（自写最小函数表 loader，无 GLAD/gl3w 三方依赖）。
 # 开启后 `GlfwSurface::Config` 提供 GPU 渲染模式；初始化失败（驱动过老/无 GL）运行期
-# 自动回退软件纹理上传路径，不抛异常。
-option(AURORA_BACKEND_GPU_GL "Build GPU OpenGL 3.3 core DisplayList raster backend (requires AURORA_BACKEND_GLFW)" OFF)
-if (AURORA_BACKEND_GPU_GL)
+# 自动回退软件纹理上传路径，不抛异常。注意：此选项**不是**独立 `Surface` 后端（无
+# `SurfaceKind`），仅切换 GLFW 窗口的栅格实现，故名为 `AURORA_ENABLE_*` 而非 `AURORA_BACKEND_*`。
+option(AURORA_ENABLE_GLFW_GPU_GL "Enable GLFW GPU OpenGL 3.3 core DisplayList raster (requires AURORA_BACKEND_GLFW)" OFF)
+if (AURORA_ENABLE_GLFW_GPU_GL)
     if (NOT AURORA_BACKEND_GLFW)
-        aurora_error("AURORA_BACKEND_GPU_GL requires AURORA_BACKEND_GLFW=ON"
+        aurora_error("AURORA_ENABLE_GLFW_GPU_GL requires AURORA_BACKEND_GLFW=ON"
                 " (GL context creation and present are owned by the GLFW backend).")
     endif ()
-    aurora_define_feature(AURORA_BACKEND_GPU_GL EXPORT)
-    aurora_log("GPU GL backend enabled (OpenGL 3.3 core DisplayList raster)")
+    aurora_define_feature(AURORA_ENABLE_GLFW_GPU_GL EXPORT)
+    aurora_log("GLFW GPU GL raster enabled (OpenGL 3.3 core DisplayList raster)")
 endif ()
 
 # ---- X11 / Wayland / macOS / WASM ----

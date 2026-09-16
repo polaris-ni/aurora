@@ -143,7 +143,7 @@ auto load_gl(void *(*proc)(const char *name)) -> GLFn;
 /// 初始化失败（版本不足 / 着色器链接失败 / GL 错误）→ `valid()` 为 false，调用方
 /// 整体回退软件路径，不做逐命令混合。
 ///
-/// 本类与 `load_gl` / `GLFn` **恒编译进库**（不裁切于 `AURORA_BACKEND_GPU_GL`）：
+/// 本类与 `load_gl` / `GLFn` **恒编译进库**（不裁切于 `AURORA_ENABLE_GLFW_GPU_GL`）：
 /// feature 宏只控制 `GlfwSurface` 是否接线 GPU 模式；未开启时本类同样可用（构造即
 /// invalid），供测试桩与消费者显式装配。
 class GpuGlRhi final : public RhiBackend, public RhiFrameSink {

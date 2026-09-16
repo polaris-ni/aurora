@@ -55,7 +55,7 @@ auto present_two_frames_gpu() -> int {
 #endif  // AURORA_BACKEND_GLFW
 
 AURORA_TEST_CASE(glfw_gpu_mode_present_smoke) {
-#if defined(AURORA_BACKEND_GLFW) && defined(AURORA_BACKEND_GPU_GL)
+#if defined(AURORA_BACKEND_GLFW) && defined(AURORA_ENABLE_GLFW_GPU_GL)
     const int frames = present_two_frames_gpu();
     if (frames == 0) {
         AURORA_TEST_SKIP("显示环境不可用（开窗失败），GPU smoke 无窗口可验");
@@ -74,7 +74,7 @@ AURORA_TEST_CASE(glfw_gpu_mode_present_smoke) {
 }
 
 AURORA_TEST_CASE(glfw_gpu_backend_identity_contract) {
-#if defined(AURORA_BACKEND_GLFW) && defined(AURORA_BACKEND_GPU_GL)
+#if defined(AURORA_BACKEND_GLFW) && defined(AURORA_ENABLE_GLFW_GPU_GL)
     au::GlfwOptions opts;
     opts.size = au::Size{.width = 160.0F, .height = 120.0F};
     opts.title = "itest_gpu_backend_identity";

@@ -121,7 +121,7 @@ cmake --build build-verify --target aurora_verify_x11_cursor
 | `AURORA_BACKEND_WIN32` | Windows `ON`，否则 `OFF` | Win32/GDI 后端（`Win32Surface` + `Win32Window` 共享宿主） | `AURORA_BACKEND_WIN32` | `user32` `gdi32`（仅 `_WIN32`） |
 | `AURORA_BACKEND_D3D11` | `OFF` | D3D11 GPU 增量上屏后端（`D3D11Surface`） | `AURORA_BACKEND_D3D11` | `d3d11` `dxgi` `d3dcompiler`（仅 `_WIN32`） |
 | `AURORA_BACKEND_GLFW` | `OFF` | GLFW + OpenGL（上下文 3.3 兼容剖面，绘制 1.1 立即模式） | `AURORA_BACKEND_GLFW` | `glfw` 目标（源码静态库）+ `opengl32`(Windows)/`OpenGL::GL`(其他平台) |
-| `AURORA_BACKEND_GPU_GL` | `OFF` | GPU OpenGL 3.3 core 栅格后端（`GpuGlRhi`：DisplayList 批渲染 + MSAA；GL 上下文与呈现由 GLFW 后端承担，未开 GLFW 配置期 FATAL） | `AURORA_BACKEND_GPU_GL` | 复用 `AURORA_BACKEND_GLFW` 的 OpenGL 链接（无新增） |
+| `AURORA_ENABLE_GLFW_GPU_GL` | `OFF` | GLFW 的 GPU OpenGL 3.3 core 栅格能力（`GpuGlRhi`：DisplayList 批渲染 + MSAA；**非独立 `Surface` 后端**，仅切换 GLFW 窗口的 GPU 栅格模式，无 `SurfaceKind`；GL 上下文与呈现由 GLFW 后端承担，未开 GLFW 配置期 FATAL） | `AURORA_ENABLE_GLFW_GPU_GL` | 复用 `AURORA_BACKEND_GLFW` 的 OpenGL 链接（无新增） |
 | `AURORA_BACKEND_X11` | `OFF` | X11 / Linux 桌面后端（`X11Surface`，pimpl 完整实现） | `AURORA_BACKEND_X11` | `${X11_LIBRARIES}`（`find_package(X11)`） |
 | `AURORA_BACKEND_WAYLAND` | `OFF` | 原生 Wayland / Linux 桌面后端（`WaylandSurface`，pimpl 完整实现） | `AURORA_BACKEND_WAYLAND` | `${WAYLAND_CLIENT_LIBRARIES}` `${XKBCOMMON_LIBRARIES}`（`pkg-config`） |
 | `AURORA_BACKEND_MACOS` | `OFF` | macOS 后端（`MacOSSurface`，顶层 `enable_language(OBJCXX)` 先于目标定义，非 Apple 开启 FATAL） | `AURORA_BACKEND_MACOS` | `Cocoa` `AppKit`（框架） |
@@ -137,7 +137,7 @@ cmake -S . -B build -DAURORA_BACKEND_GLFW=ON
 
 构建细节：关 examples / tests / docs / install、`EXCLUDE_FROM_ALL`（仅 aurora 链接时连带构建）、静态链接无 DLL 依赖。仓库缺 `third_party/glfw` 源码时配置期直接 `FATAL_ERROR`（不回退外部二进制，避免发行版路径漂移）。
 
-`AURORA_BACKEND_GPU_GL=ON` 时 GLFW 窗口可请求 GPU 渲染模式（`GlfwOptions::gpu = true`）：`GlfwSurface` 负责创建 3.3 core 上下文与 swapBuffers 呈现，`GpuGlRhi` 只实现「DisplayList → GL 批渲染」（自写最小函数表 loader，无 GLAD/gl3w 三方依赖）。GPU 初始化失败（驱动过老 / 无 3.3）运行期自动回退软件纹理上传路径，不抛异常；`Surface::gpu_backend()` 非空时其 `name()` 恒为 `"gpu-gl"`。
+`AURORA_ENABLE_GLFW_GPU_GL=ON` 时 GLFW 窗口可请求 GPU 渲染模式（`GlfwOptions::gpu = true`）：`GlfwSurface` 负责创建 3.3 core 上下文与 swapBuffers 呈现，`GpuGlRhi` 只实现「DisplayList → GL 批渲染」（自写最小函数表 loader，无 GLAD/gl3w 三方依赖）。GPU 初始化失败（驱动过老 / 无 3.3）运行期自动回退软件纹理上传路径，不抛异常；`Surface::gpu_backend()` 非空时其 `name()` 恒为 `"gpu-gl"`。
 
 ### 3.2 Linux 桌面后端（X11 / 原生 Wayland）
 
@@ -543,7 +543,7 @@ cmake --build build
 -D AURORA_BACKEND_WIN32=ON|OFF      # Win32/GDI（Win 默认 ON，否则 OFF）
 -D AURORA_BACKEND_D3D11=ON|OFF      # D3D11 GPU 上屏（默认 OFF）
 -D AURORA_BACKEND_GLFW=ON|OFF       # GLFW/OpenGL（默认 OFF；源码构建）
--D AURORA_BACKEND_GPU_GL=ON|OFF    # GPU OpenGL 3.3 core 栅格（默认 OFF；依赖 GLFW=ON）
+-D AURORA_ENABLE_GLFW_GPU_GL=ON|OFF    # GPU OpenGL 3.3 core 栅格（默认 OFF；依赖 GLFW=ON）
 -D AURORA_BACKEND_X11=ON|OFF        # X11/Xlib（Linux 桌面，默认 OFF）
 -D AURORA_BACKEND_WAYLAND=ON|OFF    # 原生 Wayland（Linux 桌面，默认 OFF）
 -D AURORA_BACKEND_MACOS=ON|OFF      # macOS（默认 OFF）

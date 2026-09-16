@@ -186,7 +186,7 @@ struct GlfwOptions : WindowOptions {
     int gl_minor = 3;  ///< OpenGL 次版本。
     bool resizable = true;  ///< 窗口是否可缩放。
     bool gpu = false;  ///< GPU 栅格模式：帧级 DisplayList 经 OpenGL 3.3 core 批渲染，消除每帧
-                       ///< 全屏像素上传（需 `AURORA_BACKEND_GPU_GL` 编译进库；窗口创建或后端
+                       ///< 全屏像素上传（需 `AURORA_ENABLE_GLFW_GPU_GL` 编译进库；窗口创建或后端
                        ///< 初始化失败自动回退软件纹理路径，诊断日志说明原因）。
 };
 #endif

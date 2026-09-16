@@ -516,7 +516,7 @@ au::Column{}
 
 `SurfaceKind{Headless, Win32, Glfw, D3D11, X11, Wayland, MacOS, Wasm}` 现仅为**类型标签**（只用于 `auto_detect_surface()` 返回类型与 `Platform::surface` 字段），不再用于构造选择。枚举器无条件全部出现且数值固定（见 `window.h`），不随 `AURORA_BACKEND_*` 宏开关增减，以保证序列化与 ABI 兼容：未编译的后端其标签仍存在，只是运行期不会被 `auto_detect_surface()` 产出、对应 `create_window` 重载不可用。
 
-后端选择收口于类型安全工厂 `create_window(const XxxOptions&)`（`window/window.h`），每个后端有专属选项结构：`HeadlessOptions{png_path}` / `Win32Options{}` / `D3D11Options{vsync}` / `GlfwOptions{gl_major, gl_minor, resizable, gpu}` / `X11Options{}` / `WaylandOptions{}` / `MacOSOptions{}` / `WasmOptions{canvas_id}`，外加通用 `WindowOptions{size, title, max_frames}`。编译器会拒绝把某后端专属字段误用到不相关后端。`GlfwOptions::gpu = true` 请求 GPU 栅格模式（§8.7，需 `AURORA_BACKEND_GPU_GL` 编译进库），窗口创建或 GPU 初始化失败自动回退软件纹理路径。
+后端选择收口于类型安全工厂 `create_window(const XxxOptions&)`（`window/window.h`），每个后端有专属选项结构：`HeadlessOptions{png_path}` / `Win32Options{}` / `D3D11Options{vsync}` / `GlfwOptions{gl_major, gl_minor, resizable, gpu}` / `X11Options{}` / `WaylandOptions{}` / `MacOSOptions{}` / `WasmOptions{canvas_id}`，外加通用 `WindowOptions{size, title, max_frames}`。编译器会拒绝把某后端专属字段误用到不相关后端。`GlfwOptions::gpu = true` 请求 GPU 栅格模式（§8.7，需 `AURORA_ENABLE_GLFW_GPU_GL` 编译进库），窗口创建或 GPU 初始化失败自动回退软件纹理路径。
 
 | 后端 | 说明 | 开关 |
 |:---|:---|:---|
@@ -578,7 +578,7 @@ class RhiBackend {
 
 ### 8.7 GPU GL 栅格后端（GpuGlRhi）
 
-定义于 `render/rhi/gpu_gl_rhi.h`，实现 `src/aurora/render/gpu/gpu_gl_rhi.cpp`；同时实现 `RhiBackend`（§8.6 命令消费）与 `RhiFrameSink`（帧调度，`render/rhi/rhi_frame_sink.h`）。开关 `AURORA_BACKEND_GPU_GL`（默认 OFF，依赖 `AURORA_BACKEND_GLFW`，见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §3）。
+定义于 `render/rhi/gpu_gl_rhi.h`，实现 `src/aurora/render/gpu/gpu_gl_rhi.cpp`；同时实现 `RhiBackend`（§8.6 命令消费）与 `RhiFrameSink`（帧调度，`render/rhi/rhi_frame_sink.h`）。开关 `AURORA_ENABLE_GLFW_GPU_GL`（默认 OFF，依赖 `AURORA_BACKEND_GLFW`，见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §3）。
 
 **职责切分**：GL 上下文创建与 swapBuffers 呈现归所在 Surface（GLFW）；本类只做「DisplayList → GL 批渲染」。GL 函数表 `GLFn` 由 `load_gl(proc)` 经加载回调逐名装载（如 `glfwGetProcAddress`），**自写最小 loader，无 GLAD/gl3w 三方依赖**；公共头不含任何 GL 原生头（类型以 `GLenum_` 等同宽别名承载）。本类与 `load_gl` / `GLFn` **恒编译进库**（不裁切于 feature 宏）：宏只控制 `GlfwSurface` 是否接线 GPU 模式，未开启时本类同样可显式装配（供测试桩与自定义 Surface）。
 

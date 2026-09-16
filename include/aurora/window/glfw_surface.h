@@ -42,7 +42,7 @@ class GlfwSurface : public Surface {
     enum class RenderMode : std::uint8_t {
         SoftwareTexture,  ///< 软件栅格，每帧 CPU 像素上传为 GL 纹理呈现（历史路径）
         HardwareGL,  ///< GPU 栅格：帧级 `DisplayList` 经 `GpuGlRhi` 批量渲染进 MSAA 帧缓冲，
-                     ///< 消除每帧全屏上传带宽（需 `AURORA_BACKEND_GPU_GL` 编译进库；初始化
+                     ///< 消除每帧全屏上传带宽（需 `AURORA_ENABLE_GLFW_GPU_GL` 编译进库；初始化
                      ///< 失败或窗口创建失败自动回退软件模式，诊断日志说明原因）
     };
 
@@ -118,7 +118,7 @@ class GlfwSurface : public Surface {
     [[nodiscard]] auto data() const -> const std::uint8_t * override;
     [[nodiscard]] auto frame_count() const -> int override;
     /// @brief GPU 帧调度挂点：GPU 模式生效时返回 `GpuGlRhi`，否则 nullptr（软件路径/回退后）。
-    /// 未编译 `AURORA_BACKEND_GPU_GL` 时恒为 nullptr。
+    /// 未编译 `AURORA_ENABLE_GLFW_GPU_GL` 时恒为 nullptr。
     [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink * override;
     /// @brief 真实窗口截图（含非客户区）：Windows 下经 GLFW 原生 HWND 复用 PrintWindow 路径；
     /// 其它平台/未开 DEBUG 回落 unsupported。

@@ -35,7 +35,7 @@
 #include "aurora/window/win32_capture.h"
 #include "aurora/window/window_state.h"
 
-#ifdef AURORA_BACKEND_GPU_GL
+#ifdef AURORA_ENABLE_GLFW_GPU_GL
 #include "aurora/render/rhi/gpu_gl_rhi.h"
 #endif
 
@@ -248,7 +248,7 @@ struct GlfwSurface::Impl {
     int tex_w = 0;
     int tex_h = 0;
 
-#ifdef AURORA_BACKEND_GPU_GL
+#ifdef AURORA_ENABLE_GLFW_GPU_GL
     // ---- GPU 栅格（DisplayList → OpenGL 3.3 core 批渲染；非空 = GPU 模式生效）----
     // 初始化失败（函数表缺项/着色器链接失败/上下文过老）即置空回退软件纹理路径。
     std::unique_ptr<rhi::GpuGlRhi> gpu;
@@ -285,7 +285,7 @@ struct GlfwSurface::Impl {
     auto wait_events(double timeout_ms) const -> void;
     static auto request_wake() -> void { glfwPostEmptyEvent(); }
     [[nodiscard]] auto data() const -> const std::uint8_t * {
-#ifdef AURORA_BACKEND_GPU_GL
+#ifdef AURORA_ENABLE_GLFW_GPU_GL
         if (gpu != nullptr) {
             // GPU 模式：像素在显存，经 DEBUG 抓帧缓存读回；懒读回——本帧首次访问才执行
             //（present 置失效），无消费者时零全屏 GPU→CPU 读回停顿。Release 恒空 → nullptr。
@@ -303,7 +303,7 @@ struct GlfwSurface::Impl {
     }
     [[nodiscard]] auto frame_count() const -> int { return frame; }
     [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink * {
-#ifdef AURORA_BACKEND_GPU_GL
+#ifdef AURORA_ENABLE_GLFW_GPU_GL
         return gpu.get();
 #else
         return nullptr;
@@ -357,12 +357,12 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
         throw std::runtime_error("GlfwSurface: glfwInit failed");
     }
     bool want_gpu = false;
-#ifdef AURORA_BACKEND_GPU_GL
+#ifdef AURORA_ENABLE_GLFW_GPU_GL
     want_gpu = cfg.render_mode == RenderMode::HardwareGL;
 #else
     if (cfg.render_mode == RenderMode::HardwareGL) {
         AURORA_LOG_WARN("gpu-gl", "HardwareGL render mode requested but built without"
-                                  " AURORA_BACKEND_GPU_GL; using software texture path");
+                                  " AURORA_ENABLE_GLFW_GPU_GL; using software texture path");
     }
 #endif
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, cfg.gl_major);
@@ -388,7 +388,7 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);  // 启用 VSync（帧循环调度，见 specification/06-app-platform.md §3.1）
 
-#ifdef AURORA_BACKEND_GPU_GL
+#ifdef AURORA_ENABLE_GLFW_GPU_GL
     if (want_gpu) {
         // 装载 GL 3.3 core 函数表（经 glfwGetProcAddress）并初始化 GPU 栅格后端；
         // 失败（函数表缺项/着色器链接失败/GL 错误）→ gpu 置空，软件纹理路径兜底。
@@ -548,7 +548,7 @@ auto GlfwSurface::Impl::begin_frame(int /*width*/, int /*height*/) -> Result<boo
 
     // 默认帧缓冲清屏仅软件路径需要（立即模式全屏 quad 不覆盖区外的边角）；
     // GPU 路径 end_frame 整帧 blit 覆盖默认帧缓冲，清屏纯冗余。
-#ifdef AURORA_BACKEND_GPU_GL
+#ifdef AURORA_ENABLE_GLFW_GPU_GL
     if (gpu == nullptr)
 #endif
     {
@@ -560,7 +560,7 @@ auto GlfwSurface::Impl::begin_frame(int /*width*/, int /*height*/) -> Result<boo
 }
 
 auto GlfwSurface::Impl::present() -> Result<bool> {
-#ifdef AURORA_BACKEND_GPU_GL
+#ifdef AURORA_ENABLE_GLFW_GPU_GL
     if (gpu != nullptr) {
         // GPU 路径：栅格已在 GpuGlRhi::end_frame 内完成（blit 至默认帧缓冲），跳过 CPU 上传直接 swap。
         // 抓帧缓存置失效：data() 下次访问时懒读回（未访问即零 GPU→CPU 读回成本）。

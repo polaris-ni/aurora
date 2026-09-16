@@ -334,7 +334,7 @@ opts.renderer = au::RendererPreference::GpuD3D11;  // 不可用时 create_window
 
 ### 13.1 GPU 栅格（GLFW 窗口，整条管线 GPU 化）
 
-上一节的 D3D11 偏置只加速「上屏」，绘制仍走软件 `Painter`。若要**栅格管线本身**走 GPU（帧级 DisplayList 经 OpenGL 3.3 core 批渲染进 MSAA 帧缓冲，跳过每帧全屏像素上传），用 GLFW 窗口的 GPU 模式（需 CMake `-DAURORA_BACKEND_GLFW=ON -DAURORA_BACKEND_GPU_GL=ON`）：
+上一节的 D3D11 偏置只加速「上屏」，绘制仍走软件 `Painter`。若要**栅格管线本身**走 GPU（帧级 DisplayList 经 OpenGL 3.3 core 批渲染进 MSAA 帧缓冲，跳过每帧全屏像素上传），用 GLFW 窗口的 GPU 模式（需 CMake `-DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_GLFW_GPU_GL=ON`）：
 
 ```cpp
 au::GlfwOptions opts;
