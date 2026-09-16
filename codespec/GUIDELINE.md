@@ -1279,3 +1279,53 @@ auto main() -> int {
 - **多窗口不串味**：`WindowHost::render_frame` 每帧建立本窗口作用域（键 = `scope + 0x1f + key`）；无头 / 无宿主路径退化为全局单桶。
 - **重复键**：同一 `restore_key` 被两个控件认领时按「后写覆盖」工作并在认领路径提示一次（不在滚动热路径刷屏）；确需两处独立记忆请用不同 key。
 - **可编译样例**：`examples/demos/demo_scroll_restore.cpp`。
+
+---
+
+## 36 列表拖拽重排
+
+需要用户手动排序的列表（任务、播放队列、仪表盘卡片）用 `ReorderableList<T>`：按住条目拖动换位，跟手 + 其余项实时让位 + 松手弹簧落位，数据顺序由控件自己改写。
+
+```cpp
+#include "aurora/widget/reorderable_list.h"
+#include "aurora/aurora.h"
+
+using namespace au;
+
+auto main() -> int {
+    auto items = std::make_shared<State<std::vector<std::string>>>(
+        std::vector<std::string>{"需求评审", "接口联调", "写回归用例"});
+
+    auto list = std::make_shared<ReorderableList<std::string>>(
+        items,
+        [](const std::string &value, int index) -> Node {
+            auto row = std::make_shared<Row>();                 // 条目自带背景与内边距
+            row->modifier.set(Modifier{}.background(pal::AURORA_SURFACE, 6.0F).padding(10.0F));
+            row->add(Node{Text(value)});
+            return Node{std::shared_ptr<Widget>(row)};
+        },
+        8.0F);
+    list->set_drag_handle(true);   // 条目含可点击控件时**必须**：手柄带留给列表（见下）
+
+    // 数据已由控件改写，这里只做持久化 / 派生状态刷新。
+    list->set_on_reorder([items](int from, int to) -> void {
+        save_order(items->get());   // from → to（下标均为改写后的语义）
+    });
+
+    auto viewport = std::make_shared<Column>();                 // 给明确高度 ⇒ 列表按父约束取视口
+    viewport->modifier.set(Modifier{}.size(360.0F, 420.0F));
+    viewport->add(Node{std::shared_ptr<Widget>(list)});
+
+    Application app{Scene{Node{viewport}}};
+    return app.run();
+}
+```
+
+要点：
+
+- **控件改写数据**：松手落位后控件把 `State<std::vector<T>>` 旋转到新顺序再触发 `on_reorder(from, new_index)`；宿主要复用顺序请读 `items->get()`，别在回调里再改一次（会重复换位）。程序化重排用 `list->reorder(from, to)`，`to` 是**落位后的最终下标**。
+- **手柄带 vs 整项拖**：条目若自带 `Clickable` / `Button`，其 Press 会被子项消费（冒泡 stop-on-handled），列表收不到按下 ⇒ 只能 `set_drag_handle(true)`（右侧 48dp 手柄带由列表自留）；条目是纯展示（`Row`/`Text`，无点击）时整项可拖（默认）。
+- **落位与让位**：让位是**绘制期偏移**（`Node::bounds` 不动，命中链同步补偿），松手 spring 落位后才提交数据；`reduce_motion` 下直接落位。换位判定带 ±2dp 滞回。
+- **近边缘自动滚动**：被拖项进入视口上下 `auto_scroll_threshold`（默认 48dp）带内按比例滚动，且滚动量吃进跟手位移（被拖项屏幕位置守恒）；拖拽期间滚轮被吞。
+- **虚拟化列表不重排**：长列表请用 `LazyList`（只读滚动）；重排是全量实例化（适合 <500 项）。
+- **可编译样例**：`examples/demos/demo_reorderable_list.cpp`。

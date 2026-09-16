@@ -217,6 +217,15 @@ au::Text("Welcome").font_size(24).bold();
 | `ListView` | `items`（行数据）、`multi_select`（多选模式）；回调 `on_select` / `on_remove`（`widget/data_widgets.h`） |
 | `DataTable` | `columns`（列描述）、`row_count`（只读）、`selected_row`（-1 = 无）、`sort_column`（-1 = 无）；回调 `on_sort` / `on_select` |
 | `TreeView` | 树形数据展示；`selected_row`（选中可见行，-1 = 无）；回调 `on_select` / `on_toggle` |
+| `ReorderableList<T>` | 可拖拽重排列表（全量实例化、可变行高、内建垂直滚动）：`gap`、`scroll_offset`、`restore_key`、`drag_handle`（是否限定右侧手柄带起拖）、`auto_scroll_threshold`；回调 `on_reorder(from, new_index)`；辅助 API `reorder` / `slot_for_center` / `item_top` / `drag_index` / `drop_slot` / `is_dragging` / `is_settling`（`widget/reorderable_list.h`） |
+
+**拖拽重排的数据契约与交互边界**：
+
+- **控件直接改写数据**：构造注入 `State<std::vector<T>>` + `ItemBuilder`；松手落位后**控件自己**改写该 vector（`std::rotate` 语义）并重建子项，`on_reorder(from, new_index)` 在数据已改写之后触发（供宿主持久化）——避免「UI 动了数据没动」。`reorder(from, to)` 可程序化重排，`to` 为**落位后的最终下标**（与 `drop_slot()` 同语义）。
+- **手柄带边界**：条目若自带点击（`Clickable` / `Button`），其 Press 被子项消费（冒泡 stop-on-handled），列表收不到按下事件 ⇒ 必须 `set_drag_handle(true)`：右侧 48dp 手柄带内命中链**不下降给子项**，由列表自己起拖；纯展示型条目（无点击）则整项可拖。
+- **让位是绘制期偏移**：跟手 1:1；其余条目按「移除被拖项后的目标序」在 `on_paint` 位移、`on_hit_test_chain` 同步补偿 —— `Node::bounds` 保持不动（几何权威在 Node，逐帧改会击穿子控件 Display List 缓存）。换位判定取相邻项中点并带 **±2dp 滞回**（防边界抖动）。
+- **落位动画**：松手后 spring 收敛到目标槽位（初速度按帧间差分估计），静止才提交数据；`reduce_motion` 下直接落位（同 `Dismissible` / `AnimationController` 的短路语义）。自驱动 `tick_gestures`，不使用 `Animator`。
+- **近边缘自动滚动**：被拖项进入视口上下 48dp（`auto_scroll_threshold`）带内时按侵入深度比例滚动；滚动量吃进跟手位移（被拖项**屏幕位置守恒**）。拖拽期间滚轮被吞（同轴冲突）。虚拟化列表的重排**不做**（`LazyList` 保持只读滚动）。键盘替代路径（可聚焦条目 + 升降位快捷键）尚未提供，记入后续增量。
 
 ### 3.5 结构与生命周期
 

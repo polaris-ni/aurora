@@ -155,6 +155,7 @@
 #include "aurora/widget/provider.h"
 #include "aurora/widget/radio_spin.h"
 #include "aurora/widget/recipes.h"
+#include "aurora/widget/reorderable_list.h"
 #include "aurora/widget/repeater.h"
 #include "aurora/widget/rich_text.h"
 #include "aurora/widget/rich_text_edit.h"

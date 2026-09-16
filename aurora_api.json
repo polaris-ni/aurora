@@ -3657,6 +3657,7 @@
         "count": 0,
         "height": "auto",
         "overflow": "Visible",
+        "restore_key": "",
         "scroll_offset": 0.0,
         "show": true,
         "width": "auto"
@@ -3719,6 +3720,14 @@
           "note": "可见区外预取缓冲(dp)",
           "required": false,
           "type": "float"
+        },
+        {
+          "default": "",
+          "json_type": "string",
+          "name": "restore_key",
+          "note": "滚动位置保存键（空=不参与恢复）",
+          "required": false,
+          "type": "string"
         }
       ],
       "props": [
@@ -3728,6 +3737,7 @@
         "count",
         "height",
         "overflow",
+        "restore_key",
         "scroll_offset",
         "show",
         "width"
@@ -3756,6 +3766,10 @@
           "description": "总项数",
           "minimum": "0",
           "type": "integer"
+        },
+        "restore_key": {
+          "description": "滚动位置保存键（空=不参与恢复）",
+          "type": "string"
         },
         "scroll_offset": {
           "default": "0.0",
@@ -3928,6 +3942,7 @@
         "height": "auto",
         "item_extent": 48.0,
         "overflow": "Visible",
+        "restore_key": "",
         "scroll_offset": 0.0,
         "show": true,
         "width": "auto"
@@ -3980,6 +3995,14 @@
           "note": "可见区外预取缓冲(dp)",
           "required": false,
           "type": "float"
+        },
+        {
+          "default": "",
+          "json_type": "string",
+          "name": "restore_key",
+          "note": "滚动位置保存键（空=不参与恢复）",
+          "required": false,
+          "type": "string"
         }
       ],
       "props": [
@@ -3988,6 +4011,7 @@
         "height",
         "item_extent",
         "overflow",
+        "restore_key",
         "scroll_offset",
         "show",
         "width"
@@ -4011,6 +4035,10 @@
           "minimum": "0",
           "type": "number"
         },
+        "restore_key": {
+          "description": "滚动位置保存键（空=不参与恢复）",
+          "type": "string"
+        },
         "scroll_offset": {
           "default": "0.0",
           "description": "当前滚动偏移(dp)",
@@ -4029,7 +4057,9 @@
         "height": "auto",
         "item_count": 0,
         "item_extent": 96.0,
+        "offset": 0.0,
         "overflow": "Visible",
+        "restore_key": "",
         "show": true,
         "width": "auto"
       },
@@ -4066,6 +4096,13 @@
           "note": "视口外预构建缓冲(px)",
           "required": false,
           "type": "float"
+        },
+        {
+          "default": "",
+          "name": "restore_key",
+          "note": "滚动位置保存键（空=不参与恢复）",
+          "required": false,
+          "type": "string"
         }
       ],
       "props": [
@@ -4073,7 +4110,9 @@
         "height",
         "item_count",
         "item_extent",
+        "offset",
         "overflow",
+        "restore_key",
         "show",
         "width"
       ],
@@ -4089,6 +4128,9 @@
         "item_extent": {
           "default": "96.0",
           "description": "子项固定宽度(px)"
+        },
+        "restore_key": {
+          "description": "滚动位置保存键（空=不参与恢复）"
         }
       },
       "thread": "main",
@@ -5613,6 +5655,21 @@
       "children_policy": "none",
       "container": false,
       "default_props": {},
+      "dynamic_children": false,
+      "events": [],
+      "examples": [],
+      "is_clickable": false,
+      "is_container": false,
+      "is_layout": false,
+      "prop_descriptors": [],
+      "props": [],
+      "thread": "main",
+      "type": "ReorderableList"
+    },
+    {
+      "children_policy": "none",
+      "container": false,
+      "default_props": {},
       "dynamic_children": true,
       "events": [],
       "examples": [],
@@ -6143,7 +6200,9 @@
       "container": true,
       "default_props": {
         "height": "auto",
+        "offset": 0.0,
         "overflow": "Visible",
+        "restore_key": "",
         "show": true,
         "step": 16.0,
         "width": "auto"
@@ -6163,6 +6222,13 @@
           "note": "滚轮增量(px)",
           "required": false,
           "type": "float"
+        },
+        {
+          "default": "",
+          "name": "restore_key",
+          "note": "滚动位置保存键（空=不参与恢复）",
+          "required": false,
+          "type": "string"
         },
         {
           "default": "auto",
@@ -6185,7 +6251,9 @@
       ],
       "props": [
         "height",
+        "offset",
         "overflow",
+        "restore_key",
         "show",
         "step",
         "width"
@@ -6193,6 +6261,9 @@
       "props_schema": {
         "height": {
           "default": "auto"
+        },
+        "restore_key": {
+          "description": "滚动位置保存键（空=不参与恢复）"
         },
         "show": {
           "default": "true"

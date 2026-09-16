@@ -104,6 +104,7 @@ AURORA_TEST_CASE(data_media_widgets_default_construct_and_layout) {
         au::Node{au::DataTable{}},
         au::Node{au::TreeView{}},
         au::Node{au::ListView{}},
+        au::Node{au::ReorderableList<int>{}},
         au::Node{au::Form{}},
         au::Node{au::FormField{}},
         au::Node{au::VideoPlayer{}},
@@ -112,7 +113,7 @@ AURORA_TEST_CASE(data_media_widgets_default_construct_and_layout) {
 
     const au::Json snap = layout_frame(root);
     AURORA_TEST_CHECK_EQ(snap["type"].get<std::string>(), std::string{"Column"});
-    AURORA_TEST_CHECK_EQ(snap["children"].size(), 7U);
+    AURORA_TEST_CHECK_EQ(snap["children"].size(), 8U);
 }
 
 AURORA_TEST_CASE(registry_rebuilds_every_registered_type) {
@@ -121,7 +122,7 @@ AURORA_TEST_CASE(registry_rebuilds_every_registered_type) {
     AURORA_TEST_REQUIRE_MSG(!types.empty(), "WidgetRegistry registers at least one widget type");
 
     // 已知类型但不可从静态 JSON 重建（持运行时回调/未注册 T），工厂给出友好错误而非崩溃。
-    const std::vector<std::string> not_rebuildable = {"Canvas", "Repeater", "Provider"};
+    const std::vector<std::string> not_rebuildable = {"Canvas", "Repeater", "Provider", "ReorderableList"};
 
     for (const auto& type : types) {
         const bool expect_error = std::ranges::find(not_rebuildable, type) != not_rebuildable.end();
