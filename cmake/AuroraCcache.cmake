@@ -76,11 +76,11 @@ if (AURORA_ENABLE_CCACHE)
                     "CCACHE_COMPRESSLEVEL=6")
 
             # 缓存目录与容量（经启动器注入后构建期真正生效）。
-            set(AURORA_CCACHE_DIR "" CACHE PATH "ccache 缓存目录（默认使用系统默认）")
+            set(AURORA_CCACHE_DIR "" CACHE PATH "ccache cache directory (default: system default)")
             if (AURORA_CCACHE_DIR)
                 list(APPEND _aurora_ccache_env "CCACHE_DIR=${AURORA_CCACHE_DIR}")
             endif ()
-            set(AURORA_CCACHE_MAXSIZE "5G" CACHE STRING "ccache 最大缓存大小")
+            set(AURORA_CCACHE_MAXSIZE "5G" CACHE STRING "ccache maximum cache size")
             if (AURORA_CCACHE_MAXSIZE)
                 list(APPEND _aurora_ccache_env "CCACHE_MAXSIZE=${AURORA_CCACHE_MAXSIZE}")
             endif ()

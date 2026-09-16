@@ -46,7 +46,7 @@
 #include "aurora/core/platform.h"
 
 #if !defined(AURORA_PLATFORM_WINDOWS)
-#error "aurora_verify_win32_cursor 只能在 Windows 上构建（AURORA_PLATFORM_WINDOWS）"
+#error "aurora_verify_win32_cursor can only be built on Windows (AURORA_PLATFORM_WINDOWS)"
 #endif
 
 #if defined(AURORA_BACKEND_WIN32)
@@ -56,7 +56,7 @@
 #include "aurora/window/d3d11_surface.h"
 #endif
 #if !defined(AURORA_BACKEND_WIN32) && !defined(AURORA_BACKEND_D3D11)
-#error "须开启 AURORA_BACKEND_WIN32 或 AURORA_BACKEND_D3D11"
+#error "AURORA_BACKEND_WIN32 or AURORA_BACKEND_D3D11 must be enabled"
 #endif
 
 // 与库内同口径：先在**任何**平台头之前定好这两个宏，避免 <windows.h> 的 min/max 宏污染
@@ -72,7 +72,6 @@
 // 此处再显式包含一次以取用窗口/GDI 符号（重复包含由 include guard 消解）。
 #include <windows.h>
 
-#include <cstdint>
 #include <string>
 
 #include "aurora/window/cursor_map.h"
@@ -80,9 +79,9 @@
 
 namespace {
 
-/// 期望映射表：与 `src/aurora/window/win32_cursor.h` 的 `detail::set_win32_cursor` 逐项对齐。
-/// 该头位于 src/ 内部、不对探针暴露接口，故此处镜像一份；探针的逐行比对（match 列）即
-/// 「实现与本文档声明是否一致」的漂移检测——任何一侧改动而另一侧未同步，本探针立刻变红。
+// 期望映射表：与 `src/aurora/window/win32_cursor.h` 的 `detail::set_win32_cursor` 逐项对齐。
+// 该头位于 src/ 内部、不对探针暴露接口，故此处镜像一份；探针的逐行比对（match 列）即
+// 「实现与本文档声明是否一致」的漂移检测——任何一侧改动而另一侧未同步，本探针立刻变红。
 auto expected_cursor(aurora::CursorShape shape) -> HCURSOR {
     switch (shape) {
         case aurora::CursorShape::Arrow:
@@ -111,7 +110,7 @@ auto expected_cursor(aurora::CursorShape shape) -> HCURSOR {
     return nullptr;
 }
 
-/// 读回「当前屏幕显示的光标句柄」。失败（光标被隐藏/无桌面）返回 nullptr。
+// 读回「当前屏幕显示的光标句柄」。失败（光标被隐藏/无桌面）返回 nullptr。
 auto displayed_cursor() -> HCURSOR {
     CURSORINFO info{};
     info.cbSize = sizeof(CURSORINFO);
@@ -121,13 +120,13 @@ auto displayed_cursor() -> HCURSOR {
     return info.hCursor;
 }
 
-/// 被测窗口是否真的在指针之下（含子窗口/被祖先包裹的情况）。
+// 被测窗口是否真的在指针之下（含子窗口/被祖先包裹的情况）。
 auto pointer_over(HWND hwnd) -> bool {
     POINT probe{};
     if (GetCursorPos(&probe) == FALSE) {
         return false;
     }
-    const HWND under = WindowFromPoint(probe);
+    const HWND under = WindowFromPoint(probe);  // NOLINT
     if (under == nullptr) {
         return false;
     }
@@ -136,7 +135,7 @@ auto pointer_over(HWND hwnd) -> bool {
 
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
-/// 逐形状下发 + 读回 + 打印表格。返回该路后端自己的退出码。
+// 逐形状下发 + 读回 + 打印表格。返回该路后端自己的退出码。
 auto run_sweep(aurora::Surface &surface, const char *label, const char *title) -> int {
     emit(std::string("==== ") + label + " ====");
 
@@ -149,7 +148,8 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title) -
         hwnd = FindWindowA(nullptr, title);
     }
     if (hwnd == nullptr) {
-        AURORA_LOG_ERROR("verify", std::string(label) + "：拿不到 HWND（native_handle 为 null 且按标题查找失败）");
+        AURORA_LOG_ERROR("verify",
+                         std::string(label) + ": cannot obtain HWND (native_handle is null and title lookup failed)");
         return 2;
     }
 
@@ -163,7 +163,7 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title) -
 
     RECT client{};
     if (GetClientRect(hwnd, &client) == FALSE) {
-        AURORA_LOG_ERROR("verify", std::string(label) + "：GetClientRect 失败");
+        AURORA_LOG_ERROR("verify", std::string(label) + ": GetClientRect failed");
         return 2;
     }
     POINT center{(client.left + client.right) / 2, (client.top + client.bottom) / 2};
@@ -177,15 +177,16 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title) -
 
     if (!pointer_over(hwnd)) {
         AURORA_LOG_ERROR("verify", std::string(label) +
-                                       "：指针不在被测窗口上（拿不到光标所有权）。"
-                                       "典型原因：窗口被遮挡/被置顶窗口压住、或远程桌面会话隔离。");
+                                       ": pointer is not over the target window (cannot take cursor ownership). "
+                                       "Typical cause: window is occluded / covered by a topmost window, or a remote "
+                                       "desktop session is isolated.");
         if (have_saved) {
             SetCursorPos(saved.x, saved.y);
         }
         return 2;
     }
 
-    const int total = static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT);
+    constexpr int total = static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT);
     emit(aurora_verify::pad_right("#", 3) + aurora_verify::pad_right("shape(rfc name)", 20) +
          aurora_verify::pad_right("expect(IDC_*)", 20) + aurora_verify::pad_right("readback", 20) +
          aurora_verify::pad_right("match", 7) + "GetCursor(thread)");
@@ -219,27 +220,29 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title) -
              aurora_verify::pad_right(aurora::cursor_rfc_name(shape), 20) +
              aurora_verify::pad_right(aurora_verify::format_handle(want), 20) +
              aurora_verify::pad_right(aurora_verify::format_handle(got), 20) +
-             aurora_verify::pad_right(match ? "YES" : "no", 7) +
-             aurora_verify::format_handle(owned));
+             aurora_verify::pad_right(match ? "YES" : "no", 7) + aurora_verify::format_handle(owned));
     }
 
     if (have_saved) {
         SetCursorPos(saved.x, saved.y);
     }
 
-    emit(std::string("命中 ") + aurora_verify::format_int(hits) + "/" + aurora_verify::format_int(total) +
-         "，读回互异 " + aurora_verify::format_int(distinct) + "/" + aurora_verify::format_int(total) +
-         "，GetCursor 命中 " + aurora_verify::format_int(owned_matches) + "/" + aurora_verify::format_int(total));
+    emit(std::string("Hits ") + aurora_verify::format_int(hits) + "/" + aurora_verify::format_int(total) +
+         ", distinct read-back " + aurora_verify::format_int(distinct) + "/" + aurora_verify::format_int(total) +
+         ", GetCursor hits " + aurora_verify::format_int(owned_matches) + "/" + aurora_verify::format_int(total));
 
     if (distinct <= 1) {
-        AURORA_LOG_ERROR("verify", std::string(label) + "：读回恒为同一光标，本会话不支持可靠读回（FAIL 4）");
+        AURORA_LOG_ERROR("verify",
+                         std::string(label) +
+                             ": read-back is always the same cursor; this session cannot reliably read back (FAIL 4)");
         return 4;
     }
     if (hits != total) {
-        AURORA_LOG_ERROR("verify", std::string(label) + "：部分形状读回与期望句柄不符（FAIL 5）");
+        AURORA_LOG_ERROR("verify",
+                         std::string(label) + ": some shapes read back do not match the expected handle (FAIL 5)");
         return 5;
     }
-    emit(std::string("PASS: ") + label + " 的 11 个 CursorShape 皆改变了屏幕显示的光标");
+    emit(std::string("PASS: ") + label + "'s 11 CursorShapes all changed the cursor shown on screen");
     return 0;
 }
 
@@ -267,7 +270,7 @@ auto main() -> int {
         const char *title = "aurora-verify-i1-cursor-d3d11";
         aurora::D3D11Surface surface(360, 240, title, aurora::WindowStyleOptions{});
         if (!surface.is_available()) {
-            AURORA_LOG_WARN("verify", "D3D11Surface 设备不可用（无适配器），跳过该路");
+            AURORA_LOG_WARN("verify", "D3D11Surface device unavailable (no adapter); skipping this path");
         } else {
             worse_of(run_sweep(surface, "D3D11Surface(GPU)", title));
         }
@@ -275,7 +278,7 @@ auto main() -> int {
 #endif
 
     if (worst == 0) {
-        emit("PASS: Win32 家族光标接线真机验收通过");
+        emit("PASS: Win32 family cursor wiring acceptance passed");
     }
     return worst;
 }

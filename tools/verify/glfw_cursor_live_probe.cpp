@@ -38,7 +38,7 @@
 #include "aurora/core/platform.h"
 
 #if !defined(AURORA_BACKEND_GLFW)
-#error "须开启 AURORA_BACKEND_GLFW"
+#error "AURORA_BACKEND_GLFW must be enabled"
 #endif
 
 #include "aurora/window/glfw_surface.h"
@@ -60,11 +60,11 @@
 
 namespace {
 
-/// 探针侧镜像的「语义形状 → GLFW 标准光标 id」映射，逐项对齐
-/// `src/aurora/window/glfw_surface.cpp` 的 `glfw_standard_cursor`（含 `#ifdef` 版本守卫）。
-/// 返回 -1 表示本 GLFW 版本无对应标准光标（后端据此回退 Arrow）。
-/// 说明：无法直接复用库内那份（它是 .cpp 匿名命名空间里的 constexpr），故镜像；自动段的
-/// 「互异数与回退关系」断言即是漂移检测。
+// 探针侧镜像的「语义形状 → GLFW 标准光标 id」映射，逐项对齐
+// `src/aurora/window/glfw_surface.cpp` 的 `glfw_standard_cursor`（含 `#ifdef` 版本守卫）。
+// 返回 -1 表示本 GLFW 版本无对应标准光标（后端据此回退 Arrow）。
+// 说明：无法直接复用库内那份（它是 .cpp 匿名命名空间里的 constexpr），故镜像；自动段的
+// 「互异数与回退关系」断言即是漂移检测。
 constexpr auto mirrored_standard_cursor(aurora::CursorShape shape) -> int {
     switch (shape) {
         case aurora::CursorShape::Arrow:
@@ -109,7 +109,7 @@ constexpr auto mirrored_standard_cursor(aurora::CursorShape shape) -> int {
     return -1;
 }
 
-/// GLFW 标准光标 id → 报告用常量名。
+// GLFW 标准光标 id → 报告用常量名。
 auto standard_cursor_name(int id) -> const char * {
     switch (id) {
         case GLFW_ARROW_CURSOR:
@@ -148,33 +148,33 @@ auto standard_cursor_name(int id) -> const char * {
 
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
-/// 人工段的提示语：说完「应该看到什么」，让人去看屏幕。
+// 人工段的提示语：说完「应该看到什么」，让人去看屏幕。
 auto human_expectation(aurora::CursorShape shape) -> const char * {
     switch (shape) {
         case aurora::CursorShape::Arrow:
-            return "默认箭头";
+            return "default arrow";
         case aurora::CursorShape::IBeam:
-            return "文本 I 形（工字形）";
+            return "text I-beam";
         case aurora::CursorShape::PointingHand:
-            return "手形（食指指向）";
+            return "hand (pointing finger)";
         case aurora::CursorShape::ResizeNS:
-            return "上下双向箭头";
+            return "vertical double-headed arrow";
         case aurora::CursorShape::ResizeEW:
-            return "左右双向箭头";
+            return "horizontal double-headed arrow";
         case aurora::CursorShape::ResizeNWSE:
-            return "主对角（↖↘）双向箭头；本机 GLFW < 3.4 时回退箭头";
+            return "main diagonal (NW-SE) double-headed arrow; falls back to arrow if local GLFW < 3.4";
         case aurora::CursorShape::ResizeNESW:
-            return "副对角（↗↙）双向箭头；本机 GLFW < 3.4 时回退箭头";
+            return "anti-diagonal (NE-SW) double-headed arrow; falls back to arrow if local GLFW < 3.4";
         case aurora::CursorShape::Move:
-            return "四向移动箭头（十字）";  // GLFW_RESIZE_ALL_CURSOR；< 3.4 回退箭头
+            return "four-way move arrow (cross)";  // GLFW_RESIZE_ALL_CURSOR；< 3.4 回退箭头
         case aurora::CursorShape::Crosshair:
-            return "十字准星";
+            return "crosshair";
         case aurora::CursorShape::NotAllowed:
-            return "禁止（圆圈加斜杠）";  // < 3.4 回退箭头
+            return "not allowed (circle with slash)";  // < 3.4 回退箭头
         case aurora::CursorShape::Wait:
-            return "等待/忙碌";
+            return "wait / busy";
     }
-    return "(未知)";
+    return "(unknown)";
 }
 
 }  // namespace
@@ -188,7 +188,7 @@ auto main(int argc, char **argv) -> int {
     }
 
     if (glfwInit() != GLFW_TRUE) {
-        AURORA_LOG_ERROR("verify", "glfwInit 失败（无显示 / 无驱动）");
+        AURORA_LOG_ERROR("verify", "glfwInit failed (no display / no driver)");
         return 2;
     }
     int major = 0;
@@ -198,11 +198,10 @@ auto main(int argc, char **argv) -> int {
     emit(std::string("GLFW ") + aurora_verify::format_int(major) + "." + aurora_verify::format_int(minor) + "." +
          aurora_verify::format_int(revision) + "  " + glfwGetVersionString());
 
-    const int total = static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT);
-    GLFWwindow *window =
-        glfwCreateWindow(420, 260, "aurora-verify-i1-cursor-glfw", nullptr, nullptr);
+    constexpr int total = static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT);
+    GLFWwindow *window = glfwCreateWindow(420, 260, "aurora-verify-i1-cursor-glfw", nullptr, nullptr);
     if (window == nullptr) {
-        AURORA_LOG_ERROR("verify", "glfwCreateWindow 失败");
+        AURORA_LOG_ERROR("verify", "glfwCreateWindow failed");
         glfwTerminate();
         return 2;
     }
@@ -236,13 +235,12 @@ auto main(int argc, char **argv) -> int {
     for (int i = 0; i < total; ++i) {
         const auto shape = static_cast<aurora::CursorShape>(i);
         const int id = mirrored_standard_cursor(shape);
-        handles[static_cast<std::size_t>(i)] =
-            (id < 0) ? handle_for_id(GLFW_ARROW_CURSOR) : handle_for_id(id);
+        handles[static_cast<std::size_t>(i)] = (id < 0) ? handle_for_id(GLFW_ARROW_CURSOR) : handle_for_id(id);
     }
 
     const GLFWcursor *arrow_handle = handles[static_cast<std::size_t>(aurora::CursorShape::Arrow)];
     if (create_failed || arrow_handle == nullptr) {
-        AURORA_LOG_ERROR("verify", "glfwCreateStandardCursor 失败（无 GL/窗口系统后端可用）");
+        AURORA_LOG_ERROR("verify", "glfwCreateStandardCursor failed (no GL / window-system backend available)");
         glfwDestroyWindow(window);
         glfwTerminate();
         return 2;
@@ -255,7 +253,7 @@ auto main(int argc, char **argv) -> int {
 
     emit(aurora_verify::pad_right("#", 3) + aurora_verify::pad_right("shape(rfc name)", 20) +
          aurora_verify::pad_right("expect standard cursor", 32) + aurora_verify::pad_right("handle", 20) +
-         "回退Arrow?");
+         "Fallback to Arrow?");
 
     for (int i = 0; i < total; ++i) {
         const auto shape = static_cast<aurora::CursorShape>(i);
@@ -284,26 +282,30 @@ auto main(int argc, char **argv) -> int {
         emit(aurora_verify::pad_right(aurora_verify::format_int(i), 3) +
              aurora_verify::pad_right(aurora::cursor_rfc_name(shape), 20) +
              aurora_verify::pad_right(standard_cursor_name(id), 32) +
-             aurora_verify::pad_right(aurora_verify::format_handle(handle), 20) +
-             (is_arrow ? "yes" : "no"));
+             aurora_verify::pad_right(aurora_verify::format_handle(handle), 20) + (is_arrow ? "yes" : "no"));
     }
 
-    emit(std::string("互异句柄数 ") + aurora_verify::format_int(distinct_actual) + "，期望 " +
-         aurora_verify::format_int(pool_size) + "（= 本 GLFW 版本实际可映射的标准光标种类数）");
+    emit(std::string("Distinct handle count ") + aurora_verify::format_int(distinct_actual) + ", expected " +
+         aurora_verify::format_int(pool_size) +
+         " (= number of standard cursors actually mappable in this GLFW version)");
 
     bool auto_ok = true;
     if (pool_size != distinct_actual) {
-        AURORA_LOG_ERROR("verify", "不符项：互异句柄数与期望不符 —— 形状间句柄被意外共享/未共享");
+        AURORA_LOG_ERROR("verify",
+                         "Mismatch: distinct handle count does not match expected -- handles unexpectedly "
+                         "shared/unshared between shapes");
         auto_ok = false;
     }
     if (fallback_mismatch != 0) {
-        AURORA_LOG_ERROR("verify", "不符项：回退 Arrow 关系不符（" + aurora_verify::format_int(fallback_mismatch) +
-                                       " 处）—— 后端映射表与本文档声明不一致");
+        AURORA_LOG_ERROR("verify",
+                         "Mismatch: Arrow-fallback relationship incorrect (" +
+                             aurora_verify::format_int(fallback_mismatch) +
+                             " place(s)) -- backend mapping table disagrees with this document's declaration");
         auto_ok = false;
     }
     for (int k = 0; k < pool_size; ++k) {
         if (pool_handles[static_cast<std::size_t>(k)] == nullptr) {
-            AURORA_LOG_ERROR("verify", "不符项：存在创建失败的标准光标句柄");
+            AURORA_LOG_ERROR("verify", "Mismatch: a standard cursor handle failed to be created");
             auto_ok = false;
         }
     }
@@ -312,13 +314,19 @@ auto main(int argc, char **argv) -> int {
     if (!auto_ok) {
         rc = 6;
     } else if (!interactive) {
-        emit("自动段通过（映射/回退语义一致）。屏幕表现仍未被证明，请补 `--interactive` 人工目视确认。");
+        emit(
+            "Auto stage passed (mapping/fallback semantics consistent). Screen behavior is still unproven; add "
+            "`--interactive` for a manual visual confirmation.");
         rc = 8;
     } else {
         // ---- 人工段：逐个形状让人对照屏幕 ----
         emit("");
-        emit("人工段开始：请把鼠标移入刚出现的 GLFW 窗口（点击一下使其获得焦点），");
-        emit("每次按回车切到下一个形状，然后目视「鼠标指针形状」是否与提示一致。");
+        emit(
+            "Interactive stage starting: please move the mouse into the GLFW window that just appeared (click it to "
+            "give it focus),");
+        emit(
+            "press Enter each time to switch to the next shape, then visually check whether the 'mouse pointer shape' "
+            "matches the hint.");
         int rejected = 0;
         for (int i = 0; i < total; ++i) {
             const auto shape = static_cast<aurora::CursorShape>(i);
@@ -326,23 +334,24 @@ auto main(int argc, char **argv) -> int {
             glfwFocusWindow(window);
             glfwPollEvents();
 
-            emit(std::string("[") + aurora_verify::format_int(i + 1) + "/" + aurora_verify::format_int(total) +
-                 "] " + aurora::cursor_rfc_name(shape) + " —— 期望看到：" + human_expectation(shape) +
-                 "；按回车确认（输入 n + 回车判为不符）");
+            emit(std::string("[") + aurora_verify::format_int(i + 1) + "/" + aurora_verify::format_int(total) + "] " +
+                 aurora::cursor_rfc_name(shape) + " -- expected to see: " + human_expectation(shape) +
+                 "; press Enter to confirm (type n + Enter to judge as mismatch)");
             std::string answer;
             if (!std::getline(std::cin, answer)) {
-                AURORA_LOG_WARN("verify", "标准输入已结束，人工段提前收尾");
+                AURORA_LOG_WARN("verify", "stdin ended; interactive stage terminated early");
                 break;
             }
             if (!answer.empty() && (answer[0] == 'n' || answer[0] == 'N')) {
                 ++rejected;
-                AURORA_LOG_ERROR("verify", std::string("人工判定不符：") + aurora::cursor_rfc_name(shape));
+                AURORA_LOG_ERROR("verify", std::string("Manual judgment mismatch: ") + aurora::cursor_rfc_name(shape));
             }
         }
         if (rejected == 0) {
-            emit("PASS: GLFW 光标接线真机验收通过（自动段 + 人工段）");
+            emit("PASS: GLFW cursor wiring acceptance passed (auto stage + interactive stage)");
         } else {
-            AURORA_LOG_ERROR("verify", "人工段存在不符形状：" + aurora_verify::format_int(rejected) + " 个");
+            AURORA_LOG_ERROR("verify", "Interactive stage has mismatched shapes: " +
+                                           aurora_verify::format_int(rejected) + " shape(s)");
             rc = 7;
         }
     }

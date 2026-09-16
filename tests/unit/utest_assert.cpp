@@ -12,14 +12,14 @@ namespace aurora::test_cases::utest_assert {
 
 AURORA_TEST_CASE(check_passing_condition_does_not_abort) {
     // 通过路径：硬检查成立时不得中断进程。
-    int guarded = 1;
-    AURORA_TEST_CHECK_NO_THROW({ AURORA_CHECK(guarded == 1, "不变量成立"); });
+    constexpr int guarded = 1;
+    AURORA_TEST_CHECK_NO_THROW({ AURORA_CHECK(guarded == 1, "invariant holds"); });
     AURORA_TEST_CHECK_EQ(guarded, 1);
 }
 
 AURORA_TEST_CASE(check_failing_condition_aborts_process) {
     // 硬检查无 NDEBUG 裁切：失败 → FATAL 日志 + abort，所有构建生效。
-    AURORA_TEST_CHECK_DEATH(AURORA_CHECK(1 == 2, "utest 预期失败的硬不变量"), "");
+    AURORA_TEST_CHECK_DEATH(AURORA_CHECK(1 == 2, "utest expected-failure hard invariant"), "");
 }
 
 AURORA_TEST_CASE(check_macro_shape_composes_with_unbraced_if_else) {
@@ -29,9 +29,9 @@ AURORA_TEST_CASE(check_macro_shape_composes_with_unbraced_if_else) {
     // clang-format off
     // NOLINTBEGIN
     if (true)
-        AURORA_CHECK(true, "then 分支内的检查");
+        AURORA_CHECK(true, "check inside then-branch");
     else
-        AURORA_CHECK(false, "不可达分支");
+        AURORA_CHECK(false, "unreachable branch");
     // NOLINTEND
     // clang-format on
     taken = 1;
@@ -43,14 +43,14 @@ AURORA_TEST_CASE(check_macro_shape_composes_with_unbraced_if_else) {
 AURORA_TEST_CASE(assert_passing_condition_does_not_abort) {
     // Debug：断言成立不中断；Release：宏裁切为 (void)0，同样不中断。
     constexpr int guarded = 1;
-    AURORA_TEST_CHECK_NO_THROW({ AURORA_ASSERT(guarded == 1, "不变量成立"); });
+    AURORA_TEST_CHECK_NO_THROW({ AURORA_ASSERT(guarded == 1, "invariant holds"); });
     AURORA_TEST_CHECK_EQ(guarded, 1);  // 兜底使用，避免裁切后 unused-variable
 }
 
 AURORA_TEST_CASE(assert_condition_evaluation_follows_build_config) {
     // Debug：条件真实求值一次（副作用可见）；Release：整体裁切、条件不求值。
     int evaluated = 0;
-    AURORA_TEST_CHECK_NO_THROW({ AURORA_ASSERT(++evaluated > 0, "条件被求值"); });
+    AURORA_TEST_CHECK_NO_THROW({ AURORA_ASSERT(++evaluated > 0, "condition is evaluated"); });
 #ifndef NDEBUG
     AURORA_TEST_CHECK_EQ(evaluated, 1);
 #else
@@ -63,9 +63,9 @@ AURORA_TEST_CASE(assert_macro_shape_composes_with_unbraced_if_else) {
     // clang-format off
     // NOLINTBEGIN
     if (true)
-        AURORA_ASSERT(true, "then 分支内的断言");
+        AURORA_ASSERT(true, "assert inside then-branch");
     else
-        AURORA_ASSERT(false, "不可达分支");  // Release 下裁切，else 分支不会触发
+        AURORA_ASSERT(false, "unreachable branch");  // Release 下裁切，else 分支不会触发
     // NOLINTEND
     // clang-format on
     taken = 1;
@@ -75,9 +75,10 @@ AURORA_TEST_CASE(assert_macro_shape_composes_with_unbraced_if_else) {
 AURORA_TEST_CASE(assert_failing_condition_aborts_in_debug_only) {
     // Debug 下验证「断言失败 → 进程异常终止」；Release 下按契约编译掉、死亡行为不适用。
 #ifndef NDEBUG
-    AURORA_TEST_CHECK_DEATH(AURORA_ASSERT(1 == 2, "utest 预期失败的不变量"), "");
+    AURORA_TEST_CHECK_DEATH(AURORA_ASSERT(1 == 2, "utest expected-failure invariant"), "");
 #else
-    AURORA_TEST_SKIP("Release（NDEBUG）构建下 AURORA_ASSERT 按契约编译掉，死亡行为不适用");
+    AURORA_TEST_SKIP(
+        "Under a Release (NDEBUG) build AURORA_ASSERT is compiled out per contract; death behavior does not apply");
 #endif
 }
 

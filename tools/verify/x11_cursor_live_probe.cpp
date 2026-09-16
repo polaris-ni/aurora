@@ -43,10 +43,10 @@
 #include "aurora/core/platform.h"
 
 #if !defined(AURORA_PLATFORM_UNIX) || defined(AURORA_PLATFORM_MACOS)
-#error "aurora_verify_x11_cursor 只能在 Linux/Unix（非 Apple）上构建"
+#error "aurora_verify_x11_cursor can only be built on Linux/Unix (non-Apple)"
 #endif
 #if !defined(AURORA_BACKEND_X11)
-#error "须开启 AURORA_BACKEND_X11"
+#error "AURORA_BACKEND_X11 must be enabled"
 #endif
 
 #include "aurora/window/x11_surface.h"  // aurora 头必须先于 Xlib（None/Bool/Status 宏污染）
@@ -115,7 +115,7 @@ struct CursorSnapshot {
     unsigned long serial = 0;
 };
 
-/// 同步 + 稳定读回：读两次一致才采信（消除「服务器尚未应用」造成的陈旧值）。
+// 同步 + 稳定读回：读两次一致才采信（消除「服务器尚未应用」造成的陈旧值）。
 auto read_cursor_settled(Display *dpy) -> CursorSnapshot {
     CursorSnapshot out;
     for (int attempt = 0; attempt < 20; ++attempt) {
@@ -152,7 +152,7 @@ auto read_cursor_settled(Display *dpy) -> CursorSnapshot {
     return out;
 }
 
-/// 轮询命中：指针所在 root 子窗口是否为本窗口（Xwayland 需与合成器往返，故要等待）。
+// 轮询命中：指针所在 root 子窗口是否为本窗口（Xwayland 需与合成器往返，故要等待）。
 auto wait_pointer_over(Display *dpy, Window root, Window win, int max_ms) -> bool {
     for (int waited = 0; waited <= max_ms; waited += 100) {
         Window child = 0;
@@ -181,14 +181,14 @@ auto main(int argc, char **argv) -> int {
 
     aurora::X11Surface surface(240, 160, "aurora-verify-i1-cursor-x11");
     if (!surface.is_available()) {
-        AURORA_LOG_ERROR("verify", "X11Surface 不可用 —— 无 DISPLAY 或无可用 X server");
+        AURORA_LOG_ERROR("verify", "X11Surface unavailable -- no DISPLAY or no usable X server");
         return 2;
     }
     const auto win = static_cast<Window>(reinterpret_cast<std::uintptr_t>(surface.native_handle()));
 
     Display *dpy = XOpenDisplay(nullptr);
     if (dpy == nullptr) {
-        AURORA_LOG_ERROR("verify", "观测侧 XOpenDisplay 失败");
+        AURORA_LOG_ERROR("verify", "Observation-side XOpenDisplay failed");
         return 2;
     }
     void *lib = dlopen("libXfixes.so.3", RTLD_NOW);
@@ -196,7 +196,7 @@ auto main(int argc, char **argv) -> int {
         lib = dlopen("libXfixes.so", RTLD_NOW);
     }
     if (lib == nullptr) {
-        AURORA_LOG_ERROR("verify", "缺 libXfixes（运行时库），无法读回光标");
+        AURORA_LOG_ERROR("verify", "Missing libXfixes (runtime lib); cannot read back cursor");
         XCloseDisplay(dpy);
         return 2;
     }
@@ -206,7 +206,7 @@ auto main(int argc, char **argv) -> int {
     int error_base = 0;
     if (g_get_cursor_image == nullptr || query_extension == nullptr ||
         query_extension(dpy, &event_base, &error_base) == 0) {
-        AURORA_LOG_ERROR("verify", "XFIXES 扩展不可用");
+        AURORA_LOG_ERROR("verify", "XFIXES extension unavailable");
         XCloseDisplay(dpy);
         return 2;
     }
@@ -229,7 +229,7 @@ auto main(int argc, char **argv) -> int {
     // ---- 策略 2：接管为 override-redirect + 全屏 + 置顶（rootless Xwayland 下必须）----
     bool took_over = false;
     if (!hit) {
-        AURORA_LOG_RAW("verify", "策略 1 未命中（WM 重定向 / 合成器阻挡指针），改用策略 2（全屏接管）\n");
+        AURORA_LOG_RAW("verify", "Strategy 1 missed (WM redirect / compositor blocking pointer); switching to strategy 2 (fullscreen takeover)\n");
         XUnmapWindow(dpy, win);
         XSetWindowAttributes attrs{};
         attrs.override_redirect = True;
@@ -243,14 +243,15 @@ auto main(int argc, char **argv) -> int {
 
     if (!hit) {
         AURORA_LOG_ERROR("verify",
-                         "指针无法落在被测窗口上。典型原因：Wayland 会话下 rootless Xwayland 不把指针位置"
-                         "暴露给 X 客户端（XWarpPointer 不移动物理指针）。请在 X11 会话（非 Wayland）下重跑。");
+                         "Pointer cannot be placed over the target window. Typical cause: under a Wayland session, "
+                         "rootless Xwayland does not expose pointer position to X clients (XWarpPointer does not move "
+                         "the physical pointer). Re-run under an X11 session (not Wayland).");
         XUnmapWindow(dpy, win);
         XSync(dpy, False);
         XCloseDisplay(dpy);
         return 3;
     }
-    AURORA_LOG_RAW("verify", "指针已落在被测窗口上（策略 ", took_over ? 2 : 1, "）\n");
+    AURORA_LOG_RAW("verify", "Pointer is now over the target window (strategy ", took_over ? 2 : 1, ")\n");
 
     // ---- 11 形状逐个下发 + 读回 ----
     AURORA_LOG_RAW("verify", aurora_verify::pad_right("shape(rfc name)", 20), aurora_verify::pad_right("w", 5),
@@ -288,19 +289,19 @@ auto main(int argc, char **argv) -> int {
     XCloseDisplay(dpy);
 
     const int total = static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT);
-    AURORA_LOG_RAW("verify", "读回互异形状数=", aurora_verify::format_uint(distinct), " / ",
-                   aurora_verify::format_int(total), "，相邻相同次数=", aurora_verify::format_int(identical_runs),
+    AURORA_LOG_RAW("verify", "Distinct shapes read back=", aurora_verify::format_uint(distinct), " / ",
+                   aurora_verify::format_int(total), ", adjacent-equal runs=", aurora_verify::format_int(identical_runs),
                    "\n");
     if (distinct <= 1) {
         AURORA_LOG_ERROR("verify",
-                         "读回恒为同一光标 —— 本会话不支持可靠读回（已知 Wayland/Xwayland 限制）。"
-                         "请在 X11 会话下重跑本探针。");
+                         "Read-back is always the same cursor -- this session cannot reliably read back "
+                         "(known Wayland/Xwayland limitation). Re-run this probe under an X11 session.");
         return 4;
     }
     if (distinct < static_cast<std::uint64_t>(total)) {
-        AURORA_LOG_ERROR("verify", "读回互异形状数不足，疑似读回竞态 —— 请重跑；若稳定复现请人工目视复核。");
+        AURORA_LOG_ERROR("verify", "Too few distinct shapes read back; possible read-back race -- please re-run; if it reproduces stably, do a manual visual review.");
         return 5;
     }
-    AURORA_LOG_RAW("verify", "PASS: 11 个 CursorShape 在真实 X server 上皆改变了屏幕上显示的光标\n");
+    AURORA_LOG_RAW("verify", "PASS: all 11 CursorShapes changed the cursor shown on the real X server\n");
     return 0;
 }
