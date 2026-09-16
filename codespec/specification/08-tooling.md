@@ -232,7 +232,7 @@ server.stop();        // 停止并 join 工作线程
 | POST | `/api/to_code` | UI 树 → C++ 代码。请求体可含 `style` 参数：`0`=Fluent、`1`=StepByStep、`2`=DesignatedInit；`style` 存在但非整数返回 400，越界整数回退 Fluent |
 | POST | `/api/input/{click\|scroll\|text}` | 交互模拟：以 `path` 命中的控件为派发根与坐标原点（指针取该控件中心）合成事件，经 `EventDispatcher` 走真实命中测试 + 冒泡派发。请求体须为对象且 `path` 为字符串（空串=树根）；`scroll` 另取数值 `dx`/`dy`（缺省 0），`text` 另取字符串 `text`。经主线程 marshal 执行，成功返回 `{status:"ok", action, widget_path}`；路径不存在 404、目标存在但不可派发 400、字段类型不符 400、方法非 POST 405 |
 
-> `/api/input/*` 为「目标式」语义：落点取目标控件中心，故目标须已布局（未布局时尺寸为零、中心退化为自身原点）。失败（路径不存在 / 不可派发 / 参数不符）一律在派发前返回，**不改变任何控件状态**。滚动只派发事件，偏移量不在响应里（`Scroll` 不序列化 offset），需要读回偏移请走 `scroll_offset` 类属性或 C++ 测试。
+> `/api/input/*` 为「目标式」语义：落点取目标控件中心，故目标须已布局（未布局时尺寸为零、中心退化为自身原点）。失败（路径不存在 / 不可派发 / 参数不符）一律在派发前返回，**不改变任何控件状态**。滚动只派发事件，偏移量不在响应里（控件虽各自序列化 `offset` / `scroll_offset`，但响应体不回传），需要读回偏移请读控件属性或写 C++ 测试。
 
 ### 5.2 调试端点
 
@@ -306,7 +306,7 @@ stdio JSON-RPC 2.0。传输格式：`Content-Length: <N>\r\n\r\n<JSON-RPC 2.0 bo
 
 > `list_commands` / `invoke_command` 是**无状态**工具：命令描述符由调用方随请求传入（宿主 `CommandRegistry::to_json()` 的产物，接受 `{"commands":[…]}` 信封或裸数组），服务器不持有运行中的应用状态。`list_commands` 复用库的 `command_fuzzy_score()` 与「得分降序、标题升序」排序，故 AI 侧检索次序与用户看到的命令面板一致。`invoke_command` **只解析与校验**——`status` 取 `invocable` / `not-found` / `disabled` / `not-invocable`，并返回调用意图；真正的调用由宿主完成。对无法远程调用的命令（无动作体 / 启用条件不满足）如实报出状态，**不伪报成功**。
 
-> `simulate_interaction` 把「生成 → 交互 → 断言」闭环搬到无头环境：`action` 取 `click`/`scroll`/`text`，`path` 为索引路径（空串=树根），返回目标控件的属性快照与整棵树的交互后逻辑快照；目标未找到或中心不可命中时置 `isError`（此时不改状态）。**只能验证可观测状态**：JSON 树不带用户回调，故点击须经状态变化（如 `Checkbox.checked`、焦点转移）而非回调副作用来确认；滚动偏移不经此通道暴露（`Scroll` 不序列化 offset，`LazyList`/`GridView` 的 `scroll_offset` 又依赖运行时 ItemBuilder，静态 JSON 树给不出），偏移须由 C++ 测试读回。
+> `simulate_interaction` 把「生成 → 交互 → 断言」闭环搬到无头环境：`action` 取 `click`/`scroll`/`text`，`path` 为索引路径（空串=树根），返回目标控件的属性快照与整棵树的交互后逻辑快照；目标未找到或中心不可命中时置 `isError`（此时不改状态）。**只能验证可观测状态**：JSON 树不带用户回调，故点击须经状态变化（如 `Checkbox.checked`、焦点转移）而非回调副作用来确认；滚动偏移不经此通道暴露（`Scroll` 序列化 `offset`、`LazyList`/`GridView` 序列化 `scroll_offset`，但后两者的工厂是 `reg_no_props` 空占位、静态 JSON 树给不出），偏移须由 C++ 测试读回。
 
 ### 7.2 CLI（`aurora_cli`）
 

@@ -1,6 +1,7 @@
 #include "aurora/app/window_host.h"
 
 #include "aurora/app/display.h"
+#include "aurora/app/scroll_storage.h"
 #include "aurora/window/frame_pacing.h"
 
 namespace aurora {
@@ -11,6 +12,7 @@ namespace aurora {
 
 WindowHost::WindowHost(WindowId id, Scene scene, std::unique_ptr<Window> window, const WindowOptions &opts)
     : id_(id),
+      scroll_scope_(std::to_string(id)),
       role_(opts.role),
       opts_(opts),
       scene_(std::move(scene)),
@@ -145,6 +147,9 @@ auto WindowHost::render_frame(double dt) -> Result<bool> {
     if (window_ == nullptr) {
         return Result<bool>{true};  // 无头宿主不参与上屏（render_to_png 另有路径）
     }
+    // 滚动位置按窗口隔离：`BuildContext` 不携带窗口标识，故由宿主在渲染入口给出作用域，
+    // 同进程多窗口下同名 `restore_key` 不互相串味（同值重复构造走零分配快路径）。
+    const ScrollStorage::Scope scroll_scope(scroll_scope_);
     Result<bool> r = window_->present_root(scene_.root_node());
     // present_root 返回 Result<bool>：idle 跳过亦为 true（内部未做任何渲染）。
     if (window_->is_idle_frame()) {

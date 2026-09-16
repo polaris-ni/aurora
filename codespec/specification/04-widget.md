@@ -193,8 +193,8 @@ au::Text("Welcome").font_size(24).bold();
 | `Row` / `Column` | `children`、`gap`、`flex`（含 `main_axis` / `cross_axis` / `main_axis_size`）。`cross_axis` 的 `Baseline` 取值仅对水平主轴（`Row`）有语义（`03-layout-render.md` §3.8）。`modifier` 属 `Widget` 基类，不在此列 |
 | `Stack` | 层叠，`children` 叠加 |
 | `Grid` | `columns`、`children` |
-| `Grid` 虚拟化版 `GridView` | `count`、`columns`、`cell_extent`、`cache_extent`、`scroll_offset` |
-| `Scroll` | 可滚动容器，`child` 单子节点，`step` 滚动步长 |
+| `Grid` 虚拟化版 `GridView` | `count`、`columns`、`cell_extent`、`cache_extent`、`scroll_offset`、`restore_key` |
+| `Scroll` | 可滚动容器，`child` 单子节点，`step` 滚动步长、`restore_key`；运行时偏移经序列化键 `offset` 可读回；程序化跳转 `set_offset(offset) -> bool` |
 | `Spacer` / `Divider` | 弹性空间 / 分隔线 |
 | `Splitter` | 可拖拽分隔 |
 | `LayoutBuilder` | 按布局约束动态构建子树 |
@@ -205,12 +205,14 @@ au::Text("Welcome").font_size(24).bold();
 
 `Scroll` 把内容录进**滑窗**离屏缓冲 `content_`（尺寸 = 视口高 ×(1 + 2 × `overscan`)，`buffer_origin_y_` 为缓冲锚点），滚动帧只做一次 blit。
 
+**滚动位置保存/恢复**：四个滚动控件（`Scroll` / `LazyList` / `LazyRow` / `GridView`）都有 `restore_key`（空 = 不参与）。控件在**首次可滚动布局**时按 `app::ScrollStorage` 恢复偏移（由 `deserialize_props` 显式给入的偏移优先），此后位置变化（滚轮 / 拖拽 / `set_scroll_offset`）即写回（仅内存，落盘由 App 决定）；恢复只生效一次，用户主动滚动不会再被回拉。契约与多窗口作用域隔离见 `06-app-platform.md` §9.3。
+
 ### 3.4 列表与虚拟化
 
 | 控件 | 关键属性 |
 |:---|:---|
-| `LazyList` | `count`、`item_extent`（固定行高，默认 48dp）、`scroll_offset`、`cache_extent`（可见区外预取缓冲）；辅助 API `set_scroll_offset` / `scroll_to_item` / `visible_range` / `live_item_count` / `set_cache_extent`；滚轮滚动经 `on_scroll` 覆写处理（`widget/lazy_list.h`） |
-| `LazyRow` | 主轴为水平；`item_count`、`item_extent`（子项固定宽度，默认 96）、`cache_extent`、`padding`；`set_padding` 与 `set_on_item_click`（`on_item_click` 事件，参数为索引）属本控件（`widget/lazy_row.h`） |
+| `LazyList` | `count`、`item_extent`（固定行高，默认 48dp）、`scroll_offset`、`cache_extent`（可见区外预取缓冲）、`restore_key`；辅助 API `set_scroll_offset` / `scroll_to_item` / `visible_range` / `live_item_count` / `set_cache_extent` / `set_restore_key`；滚轮滚动经 `on_scroll` 覆写处理（`widget/lazy_list.h`） |
+| `LazyRow` | 主轴为水平；`item_count`、`item_extent`（子项固定宽度，默认 96）、`cache_extent`、`padding`、`restore_key`；辅助 API `scroll_offset` / `max_scroll_offset` / `set_scroll_offset`（仅标绘制脏——可见窗口在 `on_paint` 现算，与 `LazyList` 需标布局脏不同）；`set_padding` 与 `set_on_item_click`（`on_item_click` 事件，参数为索引）属本控件（`widget/lazy_row.h`） |
 | `Repeater` | `items`（信号驱动），按模板渲染每个元素 |
 | `ListView` | `items`（行数据）、`multi_select`（多选模式）；回调 `on_select` / `on_remove`（`widget/data_widgets.h`） |
 | `DataTable` | `columns`（列描述）、`row_count`（只读）、`selected_row`（-1 = 无）、`sort_column`（-1 = 无）；回调 `on_sort` / `on_select` |

@@ -498,6 +498,28 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 存储相关错误码：`storage-backend-unavailable`、`storage-record-not-found`、`storage-record-corrupt`、`storage-type-mismatch`、`storage-encoding-mismatch`、`storage-io-error`（见 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)）。
 
+### 9.3 ScrollStorage
+
+`ScrollStorage`（`app/scroll_storage.h`）是滚动位置注册表：`restore_key → offset`，让滚动容器在重建 / 重启后回到原位置（对标 Flutter `PageStorage` + Android `rememberSaveable`）。
+
+| 成员 | 说明 |
+|:---|:---|
+| `instance()` | 进程级单例（main-thread only；单线程 UI 故不加锁） |
+| `write(key, offset)` / `read(key)` | 会话内读写。`write` 只动内存 map（滚动热路径零 JSON / 零磁盘）；`read` 内存优先，缺失且已 `attach` 时**懒回读** `Preferences` 并缓存 |
+| `clear(key)` / `clear_all()` / `size()` | 清除单个键（对持久化侧打墓碑，随下次 `sync` 删除）/ 全量重置（测试用） |
+| `attach(prefs)` / `detach()` / `attached()` | 绑定/解绑持久化后端（非拥有）。`attach` 不做全量预热枚举——读取走懒回读，避免大配置文件在注入时被整体搬运 |
+| `sync()` / `pending_writes()` | 把待落盘改动（值 + 墓碑）**批量**写穿 `Preferences` 内存；文件落盘仍由 `Preferences::flush()` 决定。未 `attach` 时为空操作且不丢内存值。同键反复写只占 1 条待落盘（按**键数**而非滚动次数付费） |
+| `Scope`（RAII） / `current_scope()` | 多窗口作用域：内部键为 `scope + 0x1f + key`；同值重复构造走零分配快路径 |
+| `claim(key, owner)` / `release` / `owner_count` | 键认领：同一键被**不同持有者**认领时提示一次（`Diagnostics::warn`），运行语义为「后写覆盖、最后活跃者为准」 |
+
+**数据落点**：`Preferences::group("scroll_positions")` 下，键为作用域化后的完整键。
+
+**多窗口隔离**：`BuildContext` 不携带窗口标识，故由 `WindowHost::render_frame` 在渲染入口构造 `ScrollStorage::Scope`（作用域 = 本窗口 id 的字符串形式）；无头 / 无 `WindowHost` 的路径（`TestController`、golden、单窗口用法）作用域为空，退化为全局单桶，行为与不隔离时一致。
+
+**恢复时机**：控件在**首次可滚动布局**恢复（`Scroll` 判 `content_h_ > viewport_h_`，虚拟化控件判 `max_scroll_offset() > 0`）——不可滚动时保持等待，避免先夹到 0 后真正可滚动时再也恢复不了；恢复只生效一次，用户主动滚动后不再被回拉。控件侧契约见 [`04-widget.md`](04-widget.md) §3.3。
+
+**示例与验收**：`examples/demos/demo_scroll_restore.cpp`、`tests/integration/itest_scroll_restore.cpp`。
+
 ---
 
 ## 10 性能观测

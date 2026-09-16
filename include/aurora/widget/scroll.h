@@ -4,8 +4,12 @@
 #include <cmath>
 #include <initializer_list>
 #include <memory>
+#include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
+#include "aurora/app/scroll_storage.h"
 #include "aurora/core/transform.h"
 #include "aurora/environment/build_context.h"
 #include "aurora/event/event.h"
@@ -23,6 +27,9 @@ struct ScrollProps {
     Node child;
     float step = 16.0F;  ///< 每单位滚轮增量的滚动像素
     float overscan = 1.0F;  ///< 缓冲上下各留 overscan 屏：离屏缓冲 = 视口高 ×(1+2×overscan)（滑动窗口）
+    /// @brief 滚动位置保存键（空 = 不参与）：控件重建后据 `app::ScrollStorage` 恢复滚动偏移。
+    ///        恢复延迟到**首次可滚动布局**；显式反序列化的 `offset` 优先于本键的恢复。
+    std::string restore_key;
 };
 
 /**
@@ -56,6 +63,7 @@ class Scroll : public Container, public ScrollProps {
         }
         step = props.step;
         overscan = props.overscan;
+        restore_key = std::move(props.restore_key);
     }
     /// @brief 便捷构造：扁平罗列子项，取首项为唯一子节点（Scroll{ Column{...} }）。
     Scroll(std::initializer_list<Node> kids) {
@@ -78,6 +86,11 @@ class Scroll : public Container, public ScrollProps {
                      .default_value = "16.0",
                      .required = false,
                      .note = "滚轮增量(px)"},
+                    {.name = "restore_key",
+                     .type = "string",
+                     .default_value = "",
+                     .required = false,
+                     .note = "滚动位置保存键（空=不参与恢复）"},
                     {.name = "width", .type = "Length", .default_value = "auto", .required = false},
                     {.name = "height", .type = "Length", .default_value = "auto", .required = false},
                     {.name = "show", .type = "bool", .default_value = "true", .required = false},
@@ -92,11 +105,21 @@ class Scroll : public Container, public ScrollProps {
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         props["step"] = step;
+        props["offset"] = offset_y_;  // 运行时滚动位置（AI-first 可观测；与 LazyList/GridView 同口径）
+        props["restore_key"] = restore_key;
     }
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("step")) {
             step = props["step"].get<float>();
+        }
+        if (props.contains("restore_key")) {
+            restore_key = props["restore_key"].get<std::string>();
+        }
+        if (props.contains("offset")) {
+            // 显式偏移优先于 restore_key 恢复（见 maybe_restore_scroll）：记入 pending 待布局后应用。
+            pending_offset_ = props["offset"].get<float>();
+            scroll_restored_ = false;
         }
     }
 
@@ -172,6 +195,8 @@ class Scroll : public Container, public ScrollProps {
             // 仅请求重绘本视口、不触发子树缓存失效：滚动不改内容，只改下方 composite 平移量，
             // 复用已录制的离屏内容缓冲，整页仅一次 blit → 跟手、不卡顿。
             scrolling_ = true;
+            scroll_restored_ = true;  // 用户主动滚动：放弃尚未生效的键恢复
+            write_back_offset();
             request_frame(false);
         }
     }
@@ -189,6 +214,28 @@ class Scroll : public Container, public ScrollProps {
         return offset_y_ != before;
     }
     [[nodiscard]] auto offset_y() const -> float { return offset_y_; }
+
+    /// @brief 程序化设置滚动偏移（返回是否实际变化）：夹取到 `[0, 内容高 - 视口高]`。
+    ///
+    /// 与 `scroll_by` 同一符号约定（offset 增大 = 内容上移、露出下方内容）。契约（与
+    /// `LazyList::set_scroll_offset` 的差异见 specification/03-layout-render.md §8.1）：
+    /// - **不标布局脏**：偏移不参与子布局（内容以稳定内容坐标录制，子控件 bounds 不随偏移变化）；
+    /// - **不置 `content_valid_ = false`**：大跳越出已录制窗口时，由 `on_paint` 的
+    ///   `!in_buffer → reanchor` 分支整块/条带重录兜底，无需在此强制整块重录；
+    /// - 内容/视口尚未确定（未布局过）时夹到 0 并返回 `false`——调用方（如 `restore_key` 恢复）
+    ///   须等到「首次可滚动布局」再调用。
+    auto set_offset(float offset) -> bool {
+        const float target = ScrollViewport::clamp_offset(offset, 0.0F, step, content_h_, viewport_h_);
+        if (target == offset_y_) {
+            return false;
+        }
+        offset_y_ = target;
+        scroll_restored_ = true;  // 外部程序化设置：视为已就位，不再被键恢复覆盖
+        write_back_offset();
+        // 只请求重绘本视口：滚动不改内容，越窗跳转由重锚点路径重录（见上）。
+        request_frame(false);
+        return true;
+    }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
@@ -220,6 +267,8 @@ class Scroll : public Container, public ScrollProps {
         viewport_w_ = viewport_w;
         // 内容脏由 on_descendant_dirty 结构式接收（后代 request_frame 沿布局父链上溯），
         // 此处无需接线——旧的 wire_content_dirty 快照式接线漏掉 on_layout 中动态新建的子控件。
+        // 恢复滚动位置（延迟到内容/视口确定之后；内容尚不可滚动时继续等待下一帧布局）。
+        maybe_restore_scroll();
         return c.constrain(Size{.width = viewport_w, .height = vh});
     }
 
@@ -396,6 +445,50 @@ class Scroll : public Container, public ScrollProps {
     }
 
   private:
+    /// @brief 恢复路径专用：夹取 → 赋值 → 强制整块重录（不写回、不改归属标记）。
+    auto apply_restored_offset(float raw) -> void {
+        const float target = ScrollViewport::clamp_offset(raw, 0.0F, step, content_h_, viewport_h_);
+        if (target == offset_y_) {
+            return;
+        }
+        offset_y_ = target;
+        // 恢复是一次性成帧：显式置缓冲无效（首帧本就无效，此处只为语义明确、防未来改动回放旧像素）。
+        content_valid_ = false;
+        mark_needs_paint();
+    }
+
+    /// @brief 首次可滚动布局时恢复滚动位置：
+    ///        ① 显式反序列化的 `offset` 优先；② 否则查 `ScrollStorage` 的 `restore_key`；
+    ///        ③ 内容尚不可滚动（`content_h_ <= viewport_h_`）时保持等待，避免先夹到 0 再被内容吞掉。
+    auto maybe_restore_scroll() -> void {
+        if (scroll_restored_) {
+            return;
+        }
+        if (pending_offset_.has_value()) {
+            scroll_restored_ = true;
+            const float explicit_offset = *pending_offset_;
+            pending_offset_.reset();
+            apply_restored_offset(explicit_offset);
+            return;
+        }
+        if (restore_key.empty() || content_h_ <= viewport_h_) {
+            return;
+        }
+        scroll_restored_ = true;
+        ScrollStorage::instance().claim(restore_key, this);
+        if (const auto stored = ScrollStorage::instance().read(restore_key); stored.has_value()) {
+            apply_restored_offset(*stored);
+        }
+    }
+
+    /// @brief 位置变化时写回注册表（**仅内存**：落盘由 App 经 `ScrollStorage::sync` + `Preferences::flush` 决定）。
+    auto write_back_offset() -> void {
+        if (restore_key.empty()) {
+            return;
+        }
+        ScrollStorage::instance().write(restore_key, offset_y_);
+    }
+
     auto ensure_content_buffer(const BuildContext &ctx) -> void {
         if (content_w_ <= 0.0F || viewport_h_ <= 0.0F) {
             return;
@@ -418,6 +511,8 @@ class Scroll : public Container, public ScrollProps {
     }
 
     float offset_y_ = 0.0F;
+    std::optional<float> pending_offset_;  ///< 显式反序列化的偏移（优先于 restore_key 恢复，布局后应用）
+    bool scroll_restored_ = false;  ///< 是否已就位（恢复过一次 / 用户或外部程序化设置过）
     float content_h_ = 0.0F;
     float content_w_ = 0.0F;
     float viewport_h_ = 0.0F;

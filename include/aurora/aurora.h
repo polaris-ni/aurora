@@ -28,6 +28,7 @@
 #include "aurora/app/perf_overlay.h"
 #include "aurora/app/scene.h"
 #include "aurora/app/scheduler.h"
+#include "aurora/app/scroll_storage.h"
 #include "aurora/app/shortcuts.h"
 #include "aurora/app/system_tray.h"
 #include "aurora/app/test_controller.h"

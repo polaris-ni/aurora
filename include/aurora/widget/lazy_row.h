@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
+#include "aurora/app/scroll_storage.h"
 #include "aurora/core/platform.h"  // NOLINT
 #include "aurora/event/event.h"
 #include "aurora/widget/widget.h"
@@ -19,6 +22,8 @@ struct LazyRowProps {
     EdgeInsets padding;  ///< 内边距
     float cache_extent = 0.0F;  ///< 视口外预构建缓冲（主轴像素）
     std::function<Node(int)> item_builder;  ///< 子项构造器（按需惰性调用）
+    /// @brief 滚动位置保存键（空 = 不参与）：控件重建后据 `app::ScrollStorage` 恢复滚动偏移。
+    std::string restore_key;
 };
 
 /**
@@ -44,6 +49,7 @@ class LazyRow : public Widget, public LazyRowProps {
         padding = props.padding;
         cache_extent = props.cache_extent;
         item_builder = std::move(props.item_builder);
+        restore_key = std::move(props.restore_key);
         set_relayout_boundary(true);  // 视口尺寸由父约束决定、不依赖子节点（虚拟化）
     }
     LazyRow(int count, ItemBuilder builder, float item_extent = 96.0F)
@@ -73,6 +79,11 @@ class LazyRow : public Widget, public LazyRowProps {
                      .default_value = "0.0",
                      .required = false,
                      .note = "视口外预构建缓冲(px)"},
+                    {.name = "restore_key",
+                     .type = "string",
+                     .default_value = "",
+                     .required = false,
+                     .note = "滚动位置保存键（空=不参与恢复）"},
                 },
             .events = {{"on_item_click", "void(int)", "子项被点击时回调（参数为索引）"}},
             .children_policy = "virtual",
@@ -86,6 +97,8 @@ class LazyRow : public Widget, public LazyRowProps {
         props["item_count"] = item_count;
         props["item_extent"] = item_extent_;
         props["cache_extent"] = cache_extent;
+        props["offset"] = offset_;  // 运行时滚动位置（AI-first 可观测）
+        props["restore_key"] = restore_key;
     }
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
@@ -99,6 +112,14 @@ class LazyRow : public Widget, public LazyRowProps {
         }
         if (props.contains("cache_extent")) {
             cache_extent = props["cache_extent"].get<float>();
+        }
+        if (props.contains("restore_key")) {
+            restore_key = props["restore_key"].get<std::string>();
+        }
+        if (props.contains("offset")) {
+            // 显式偏移优先于 restore_key 恢复：记入 pending，首次可滚动布局时应用。
+            pending_offset_ = props["offset"].get<float>();
+            scroll_restored_ = false;
         }
     }
 
@@ -139,11 +160,40 @@ class LazyRow : public Widget, public LazyRowProps {
         return *this;
     }
 
+    /// @brief 当前滚动偏移（dp，内容左移为正）。
+    [[nodiscard]] auto scroll_offset() const -> float { return offset_; }
+
+    /// @brief 最大滚动偏移（内容宽 - 视口宽，不小于 0）。
+    [[nodiscard]] auto max_scroll_offset() const -> float {
+        // 视口宽度优先取最近一次布局的约束结果（`size()` 在 on_layout 返回后才更新，恢复路径依赖此值）。
+        const float viewport_w =
+            viewport_w_ > 0.0F ? viewport_w_ : std::max(1.0F, size().width - padding.left - padding.right);
+        return std::max(0.0F, full_content_ - viewport_w);
+    }
+
+    /// @brief 程序化设置滚动偏移（夹取到 `[0, max_scroll_offset()]`；仅绘制脏，不标布局脏）。
+    ///
+    /// 与 `LazyList::set_scroll_offset` 的契约差异：本控件的可见窗口是在 `on_paint` 里按
+    /// `offset_` 现场计算的（`on_layout` 只算内容总宽），故偏移变化**不需要**重布局；而
+    /// `LazyList` 的子项在布局期排布，其 setter 须一并标布局脏。
+    auto set_scroll_offset(float offset) -> void {
+        const float clamped = std::clamp(offset, 0.0F, max_scroll_offset());
+        if (clamped == offset_) {
+            return;
+        }
+        offset_ = clamped;
+        scroll_restored_ = true;  // 外部程序化设置：视为已就位，不再被键恢复覆盖
+        write_back_offset();
+        mark_needs_paint();
+    }
+
     auto on_scroll(ScrollEvent &e) -> void override {
         const float vw = std::max(1.0F, size().width - padding.left - padding.right);
         const float max_off = std::max(0.0F, full_content_ - vw);
         offset_ = std::max(0.0F, std::min(max_off, offset_ + (e.delta_y * item_extent_ * 0.5F)));
         e.is_handled = true;
+        scroll_restored_ = true;  // 用户主动滚动：放弃尚未生效的键恢复
+        write_back_offset();
         mark_needs_paint();
     }
 
@@ -167,6 +217,8 @@ class LazyRow : public Widget, public LazyRowProps {
                     const float vw = std::max(1.0F, size().width - padding.left - padding.right);
                     const float max_off = std::max(0.0F, full_content_ - vw);
                     offset_ = std::max(0.0F, std::min(max_off, offset_ - dx));
+                    scroll_restored_ = true;  // 拖拽即用户主动滚动
+                    write_back_offset();
                     last_drag_x_ = e.local_position.x;
                     e.is_handled = true;
                     mark_needs_paint();
@@ -195,7 +247,12 @@ class LazyRow : public Widget, public LazyRowProps {
         const float full = (static_cast<float>(item_count_) * item_extent_) + h_pad;
         const float h = item_extent_ + v_pad;
         full_content_ = full;
-        return c.constrain(Size{.width = full, .height = h});
+        const Size constrained = c.constrain(Size{.width = full, .height = h});
+        // 视口宽用**本次**约束结果（`size()` 在 on_layout 返回后才更新，恢复判定不能依赖它）。
+        viewport_w_ = std::max(1.0F, constrained.width - h_pad);
+        // 滚动位置恢复（首次可滚动布局时生效；显式反序列化的 offset 优先）。
+        maybe_restore_scroll();
+        return constrained;
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
@@ -255,6 +312,48 @@ class LazyRow : public Widget, public LazyRowProps {
 #endif
 
   private:
+    /// @brief 恢复路径专用：夹取 → 赋值 → 标绘制脏（不写回、不改归属标记）。
+    auto apply_restored_offset(float raw) -> void {
+        const float clamped = std::clamp(raw, 0.0F, max_scroll_offset());
+        if (clamped == offset_) {
+            return;
+        }
+        offset_ = clamped;
+        mark_needs_paint();
+    }
+
+    /// @brief 首次可滚动布局时恢复滚动位置：
+    ///        ① 显式反序列化的 `offset` 优先；② 否则查 `ScrollStorage` 的 `restore_key`；
+    ///        ③ 尚无内容可滚（`max_scroll_offset() == 0`）时保持等待，避免先夹到 0 再被内容吞掉。
+    auto maybe_restore_scroll() -> void {
+        if (scroll_restored_) {
+            return;
+        }
+        if (pending_offset_.has_value()) {
+            scroll_restored_ = true;
+            const float explicit_offset = *pending_offset_;
+            pending_offset_.reset();
+            apply_restored_offset(explicit_offset);
+            return;
+        }
+        if (restore_key.empty() || max_scroll_offset() <= 0.0F) {
+            return;
+        }
+        scroll_restored_ = true;
+        ScrollStorage::instance().claim(restore_key, this);
+        if (const auto stored = ScrollStorage::instance().read(restore_key); stored.has_value()) {
+            apply_restored_offset(*stored);
+        }
+    }
+
+    /// @brief 位置变化时写回注册表（**仅内存**：落盘由 App 经 `ScrollStorage::sync` + `Preferences::flush` 决定）。
+    auto write_back_offset() -> void {
+        if (restore_key.empty()) {
+            return;
+        }
+        ScrollStorage::instance().write(restore_key, offset_);
+    }
+
     [[nodiscard]] auto index_at(float local_x) const -> int {
         const float idx = std::floor((local_x - padding.left + offset_) / item_extent_);
         const int i = static_cast<int>(idx);
@@ -269,6 +368,9 @@ class LazyRow : public Widget, public LazyRowProps {
     float item_extent_ = 96.0F;
     float full_content_ = 0.0F;
     float offset_ = 0.0F;
+    float viewport_w_ = 0.0F;  ///< 最近一次布局得到的视口宽（`size()` 在 on_layout 内尚是旧值）
+    std::optional<float> pending_offset_;  ///< 显式反序列化的偏移（优先于 restore_key 恢复）
+    bool scroll_restored_ = false;  ///< 是否已就位（恢复过一次 / 用户或外部程序化设置过）
     std::vector<Node> built_;
 
     std::function<void(int)> on_item_click_;

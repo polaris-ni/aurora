@@ -4,9 +4,12 @@
 #include <cmath>
 #include <functional>
 #include <map>
+#include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
+#include "aurora/app/scroll_storage.h"
 #include "aurora/core/diagnostics.h"
 #include "aurora/render/painter.h"
 #include "aurora/widget/descriptor.h"
@@ -90,6 +93,14 @@ class GridView : public Widget {
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
+                    {.name = "restore_key",
+                     .type = "string",
+                     .default_value = "",
+                     .required = false,
+                     .note = "滚动位置保存键（空=不参与恢复）",
+                     .json_type = "string",
+                     .enum_values = {},
+                     .min_value = ""},
                 },
             .events = {},
             .children_policy = "none",
@@ -120,9 +131,18 @@ class GridView : public Widget {
         const float clamped = std::clamp(offset, 0.0F, max_scroll_offset());
         if (clamped != offset_) {
             offset_ = clamped;
+            scroll_restored_ = true;  // 外部程序化设置 / 用户滚动：视为已就位，不再被键恢复覆盖
+            write_back_offset();
             mark_needs_layout();
             mark_needs_paint();
         }
+    }
+
+    /// @brief 滚动位置保存键（空 = 不参与恢复；控件重建后据 `app::ScrollStorage` 恢复偏移）。
+    [[nodiscard]] auto restore_key() const -> const std::string & { return restore_key_; }
+    auto set_restore_key(std::string key) -> GridView & {
+        restore_key_ = std::move(key);
+        return *this;
     }
 
     auto set_cache_extent(float extent) -> GridView & {
@@ -157,6 +177,7 @@ class GridView : public Widget {
         props["cell_extent"] = cell_extent_;
         props["scroll_offset"] = offset_;
         props["cache_extent"] = cache_extent_;
+        props["restore_key"] = restore_key_;
     }
 
     auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
@@ -173,6 +194,8 @@ class GridView : public Widget {
         }
         viewport_height_ = self.height;
         cell_width_ = self.width / static_cast<float>(columns_);
+        // 滚动位置恢复（首次可滚动布局时生效）——须在计算可见窗口之前，使恢复在本帧即生效。
+        maybe_restore_scroll();
 
         const auto [first, last] = visible_row_range();
 
@@ -279,6 +302,40 @@ class GridView : public Widget {
     float offset_ = 0.0F;
     float cache_extent_ = 200.0F;
     float viewport_height_ = 0.0F;
+
+    /// @brief 恢复路径专用：夹取 → 赋值 → 标脏（不写回、不改归属标记）。
+    auto apply_restored_offset(float raw) -> void {
+        const float clamped = std::clamp(raw, 0.0F, max_scroll_offset());
+        if (clamped == offset_) {
+            return;
+        }
+        offset_ = clamped;
+        mark_needs_layout();
+        mark_needs_paint();
+    }
+
+    /// @brief 首次可滚动布局时按 `restore_key` 恢复滚动位置；内容尚不可滚动则等待下一帧布局。
+    auto maybe_restore_scroll() -> void {
+        if (scroll_restored_ || restore_key_.empty() || max_scroll_offset() <= 0.0F) {
+            return;
+        }
+        scroll_restored_ = true;
+        ScrollStorage::instance().claim(restore_key_, this);
+        if (const auto stored = ScrollStorage::instance().read(restore_key_); stored.has_value()) {
+            apply_restored_offset(*stored);
+        }
+    }
+
+    /// @brief 位置变化时写回注册表（**仅内存**：落盘由 App 经 `ScrollStorage::sync` + `Preferences::flush` 决定）。
+    auto write_back_offset() -> void {
+        if (restore_key_.empty()) {
+            return;
+        }
+        ScrollStorage::instance().write(restore_key_, offset_);
+    }
+
+    std::string restore_key_;  ///< 滚动位置保存键（空 = 不参与恢复）
+    bool scroll_restored_ = false;  ///< 是否已就位（恢复过一次 / 用户或外部程序化设置过）
     std::map<int, Node> live_;
 };
 

@@ -1,7 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/lazy_row.h
 /// 测试说明: 覆盖 LazyRow——默认不变量与自描述、双模字段同步、内容/内边距布局尺寸、按需构建仅可见窗口
-/// （cache_extent 预取与重复绘制复用）、滚轮位移与钳制、条目点击回调、拖拽抑制点击、序列化往返
+/// （cache_extent 预取与重复绘制复用）、滚轮位移与钳制、程序化 set_scroll_offset 的夹取与可见窗口位移、
+/// 条目点击回调、拖拽抑制点击、序列化往返
 
 #include <map>
 #include <memory>
@@ -9,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/app/scroll_storage.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/lazy_row.h"
 #include "framework/aurora_test.h"
@@ -170,6 +172,61 @@ AURORA_TEST_CASE(scroll_shifts_window_and_clamps) {
     AURORA_TEST_CHECK_NEAR(rec.items.at(9)->paint_bounds().origin.x, 204.0F, 1e-4F);  // 9*96 - 660
     // 全程只构建进过窗口的条目（1..4 与 6..9），而非全部 10 条。
     AURORA_TEST_CHECK_EQ(rec.built_order.size(), 8U);
+}
+
+AURORA_TEST_CASE(programmatic_scroll_offset_clamps_and_shifts_window) {
+    BuildRecorder rec;
+    LazyRow row{10, rec.builder(), 96.0F};
+    LayoutEngine::layout(row, bounded(300.0F, 96.0F));
+
+    AURORA_TEST_CHECK_NEAR(row.scroll_offset(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(row.max_scroll_offset(), (10.0F * 96.0F) - 300.0F, 1e-3F);
+
+    Painter p;
+    p.begin(300, 96);
+    row.paint(p, viewport(300.0F, 96.0F), BuildContext{});
+    AURORA_TEST_CHECK_NEAR(rec.items.at(0)->paint_bounds().origin.x, 0.0F, 1e-4F);
+
+    row.set_scroll_offset(96.0F);  // 右移一项
+    AURORA_TEST_CHECK_NEAR(row.scroll_offset(), 96.0F, 1e-4F);
+    p.begin(300, 96);
+    row.paint(p, viewport(300.0F, 96.0F), BuildContext{});
+    // 可见窗口 1..4：第 1 项贴左缘、第 2 项紧随其后；第 0 项滚出窗口被回收（不再重绘，缓存条目保留）。
+    AURORA_TEST_CHECK_NEAR(rec.items.at(1)->paint_bounds().origin.x, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rec.items.at(2)->paint_bounds().origin.x, 96.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rec.items.at(4)->paint_bounds().origin.x, 288.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(rec.built_order.size(), 5U);  // 首帧 0..3，本帧新构建仅第 4 项
+
+    row.set_scroll_offset(-10.0F);  // 负值夹到 0
+    AURORA_TEST_CHECK_NEAR(row.scroll_offset(), 0.0F, 1e-4F);
+    row.set_scroll_offset(1.0e6F);  // 超界夹到最大
+    AURORA_TEST_CHECK_NEAR(row.scroll_offset(), row.max_scroll_offset(), 1e-3F);
+}
+
+AURORA_TEST_CASE(restore_key_restores_offset_and_writes_back) {
+    auto &storage = ScrollStorage::instance();
+    storage.clear_all();
+    storage.write("row.k", 192.0F);  // 模拟上一次会话留下的位置
+
+    BuildRecorder rec;
+    LazyRow row{10, rec.builder(), 96.0F};
+    row.restore_key = "row.k";
+    LayoutEngine::layout(row, bounded(300.0F, 96.0F));
+    AURORA_TEST_CHECK_NEAR(row.scroll_offset(), 192.0F, 1e-4F);  // 首次可滚动布局即恢复
+
+    // 用户滚动 → 写回注册表（供下次重建 / 跨进程恢复）。
+    ScrollEvent e;
+    e.delta_y = 1.0F;  // offset += 1 * 96 * 0.5 = 48
+    row.on_scroll(e);
+    AURORA_TEST_CHECK_NEAR(row.scroll_offset(), 240.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(storage.read("row.k").value_or(-1.0F), 240.0F, 1e-4F);
+
+    // 序列化面：offset 与 restore_key 双向可见。
+    Json props;
+    row.serialize_props(props);
+    AURORA_TEST_CHECK_NEAR(props["offset"].get<float>(), 240.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(props["restore_key"].get<std::string>(), std::string{"row.k"});
+    storage.clear_all();
 }
 
 AURORA_TEST_CASE(click_reports_pressed_index) {

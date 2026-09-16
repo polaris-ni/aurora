@@ -1236,3 +1236,46 @@ auto main() -> int {
 - **无基线子项宽容降级**：钩子返回 `std::nullopt` 即走合成基线（自身底边）；全部子项都无基线时整体退化为 `End` 对齐。
 - **自定义控件接入**：覆写 `Widget::baseline_distance(const BuildContext &) const -> std::optional<float>`，返回**内容盒顶 → 首行基线**的距离（含自身内边距/居中偏移）；**不要**在其中做整像素 `floor` snap——容器按 `max_above - baseline` 定位后，绘制侧 pen_y 的 ascent 与之相消，各子项实绘基线才能像素一致。
 - **可编译样例**：`examples/demos/demo_baseline.cpp`。
+
+---
+
+## 35 滚动位置保存/恢复
+
+滚动容器的位置默认随控件销毁而消失（标签页切换、详情页返回、热重载、进程重启）。给容器一个 `restore_key` 即接入 `app::ScrollStorage`：重建或重启后回到原位置。
+
+```cpp
+#include "aurora/app/scroll_storage.h"
+#include "aurora/preferences/preferences.h"
+#include "aurora/aurora.h"
+
+using namespace au;
+
+auto main() -> int {
+    // ① 绑定持久化后端（文件模式 = 跨进程；内存模式 = 仅会话内）。
+    auto &prefs = preferences::Preferences::instance("app");
+    ScrollStorage::instance().attach(prefs);
+
+    // ② 容器声明 restore_key：同 key 的新实例会恢复位置（不同 key 互不干扰）。
+    auto list = std::make_shared<LazyList>(
+        1000, [](int i) -> Node { return Node{Text(std::to_string(i))}; }, 48.0F);
+    list->set_restore_key("feed");
+
+    // ③ 位置变化（滚轮 / 拖拽 / set_scroll_offset）自动写回注册表。
+    Application app{Scene{Node{list}}};
+    const int rc = app.run();
+
+    // ④ 退出前批量落盘（运行中亦可随时 sync + flush）。
+    ScrollStorage::instance().sync();
+    (void)prefs.flush();
+    ScrollStorage::instance().detach();
+    return rc;
+}
+```
+
+要点：
+
+- **四个控件同一契约**：`Scroll` / `LazyList` / `LazyRow` / `GridView` 都支持 `restore_key`（空 = 不参与）；恢复只在**首次可滚动布局**生效一次，用户主动滚动不会再被回拉。程序化跳转另有 `Scroll::set_offset(offset) -> bool`。
+- **写回是内存操作**：滚动帧只更新内存 map（零 JSON / 零磁盘），`sync()` 批量写穿 `Preferences` 内存，落盘时机由 `flush()` 决定——与窗口几何持久化同一哲学。
+- **多窗口不串味**：`WindowHost::render_frame` 每帧建立本窗口作用域（键 = `scope + 0x1f + key`）；无头 / 无宿主路径退化为全局单桶。
+- **重复键**：同一 `restore_key` 被两个控件认领时按「后写覆盖」工作并在认领路径提示一次（不在滚动热路径刷屏）；确需两处独立记忆请用不同 key。
+- **可编译样例**：`examples/demos/demo_scroll_restore.cpp`。

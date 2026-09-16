@@ -173,6 +173,7 @@ class WindowHost {
     auto on_scale_changed() -> void;
 
     WindowId id_;
+    std::string scroll_scope_;  ///< `ScrollStorage` 作用域键（本窗口 id 的字符串形式，构造时定稿）
     WindowRole role_;
     WindowOptions opts_;
     // ⚠️ 声明顺序即销毁顺序的逆序：`window_` 声明在 `scene_` 之后 → `window_` 先析构，

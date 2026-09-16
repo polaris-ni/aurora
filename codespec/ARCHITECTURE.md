@@ -250,6 +250,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 `Scroll` 把内容录进与滚动偏移无关的**内容坐标滑窗缓冲** `content_`（`unique_ptr<Painter>`），尺寸 = 视口高 × (1 + 2 × `overscan`)，仅覆盖可见区上下各 `overscan` 视口高的带而非整页；`buffer_origin_y_` 标记该带在内容坐标系中的锚点。`ScrollProps::overscan`（默认 `1.0F`，共 3 屏厚）控制缓冲带厚度。
 
 - 滚动帧满足「内容仍有效且为纯滚动且未触发重锚点」时，直接 `p.composite(*content_, translate(0, buffer_origin_y_ - offset_y_))` 一次 blit，不重新栅格。
+- **程序化跳转**（`set_offset` / `restore_key` 恢复）**不**置 `content_valid_ = false`：偏移不参与内容录制（内容以稳定内容坐标录进缓冲），跳越缓冲窗口时由 `on_paint` 的 `!in_buffer → reanchor` 分支整块/条带重录兜底，故无需在此强制整块重录。
 - 视口逼近缓冲带两端时把 `buffer_origin_y_` 重锚并**重录当前缓冲带**。
 - 非滚动帧（子动画 / 内容变化）按脏区**重录当前缓冲带**。
 
