@@ -165,6 +165,12 @@ add_dependencies(gen_debug_api_json gen_debug_api)
 
 # MCP Server：stdio JSON-RPC 2.0，供 AI Agent 直接调用。
 aurora_add_tool(aurora_mcp tools/servers/aurora_mcp.cpp)
+# aurora_mcp 的 live_* 工具族要连本机 Inspector（loopback HTTP），故需平台 socket 库。
+# 刻意**不**依赖 AURORA_BUILD_INSPECTOR_SERVER：客户端只需要 socket，不需要把服务端实现编进来
+# （应用侧是否起 InspectorServer 由应用自己 opt-in）。POSIX 下 socket 在 libc，无需额外链接。
+if (WIN32)
+    target_link_libraries(aurora_mcp PRIVATE ws2_32)
+endif ()
 
 # CLI 工具：组件发现 / 校验 / 离屏渲染 / 代码生成。
 aurora_add_tool(aurora_cli tools/servers/aurora_cli.cpp)

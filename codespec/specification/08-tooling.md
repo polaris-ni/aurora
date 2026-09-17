@@ -141,6 +141,36 @@ std::string code = au::serialization::to_code(json, au::serialization::CodeStyle
 
 ---
 
+### 2.6 自然语言 → UI
+
+分三层，**红线是核心零网络依赖**：本库绝不发起 HTTP 请求，调用 LLM 的是外部 Agent。
+
+| 层 | 符号（`app/`） | 作用 |
+|:---|:---|:---|
+| 确定性生成 | `generate_ui(description) -> Result<Json>`<br>`validate_generate_ui(description) -> bool`（`generate_ui.h`） | 关键词匹配（**不依赖 LLM**）。覆盖面由 `serialization::list_all_components()` 派生 —— 新增控件无需改代码即可被识别；另有口语别名表。文案属性写**控件真实读的键**（`Text`→`content`、`Button`→`label`），不再硬编码 `text` |
+| prompt 投影 | `build_ui_prompt(types, opt) -> std::string`<br>`ui_prompt_for(description) -> std::string`（`ui_prompt.h`） | 把 schema 压缩成一段紧凑文本供外部 LLM 消费。`UiPromptOptions{include_children_policy, include_defaults, include_examples, max_types}`。`ui_prompt_for` 先用关键词探测相关类型、再补上 `Stack`/`Column`/`Row`/`Text`，避免把全量 schema 塞进上下文 |
+| 自修复环 | `repair_ui_tree(tree) -> Json`<br>`generate_ui_repair(description, llm = {}, max_attempts = 3) -> UiRepairResult`（`ui_prompt.h`） | 机修 + 重试。**机修优先**：未知类型（大小写/拼写）、缺属性（按 `default_props` 回填）、`children_policy=none` 却带子节点（丢弃）三类可确定性修好，不浪费一次 LLM 往返。修不了的才把 `ValidationError{path,message,suggestion}` 拼进 prompt 让 LLM 重来 |
+
+`GenerateUiFn = std::function<Json(const std::string &prompt, const std::vector<ValidationError> &errors)>`
+由调用方注入；**不注入时只用关键词生成 + 机修**，仍然自洽可测。`UiRepairResult` 带逐轮 `history`
+（每轮的产物 / 错误 / 是否机修好），供人或 AI 自省「为什么没修好」。
+
+MCP 侧对应三个工具：`generate_ui` / `build_ui_prompt` / `repair_tree`。
+
+---
+
+### 2.7 JSON 热重载
+
+`HotReload`（`app/hot_reload.h`）：监视 JSON 变化 → `from_json` 重建整棵树，并保留上一棵树里源文件**未显式声明**的属性值。
+
+- **状态保留按「树路径」而非 id**：`Widget::id` 不经 JSON 往返（`serialize_props` 不含 id、`from_json` 也不读），故按 id 匹配在热重载下根本对不上 —— 树路径（`"0"` / `"1/2"`，与 `Inspector::find_node` 同格式）只要结构没变就稳定，且无需给 `Widget` 增加新虚接口。
+- **只回填标量**（string / number / boolean）：回调、订阅者、复杂对象无法经 JSON 表达。
+- **源文件显式声明的值永远优先**：热重载不该把用户刚改的 JSON 覆盖回去。
+- 只对**新旧都存在**的路径回填；结构重排后宁可少恢复几项也不猜。仅保留标量属性，不保留订阅者。
+- 逐节点状态经 `Inspector::set_prop` 落回活控件。
+
+---
+
 ## 3 控件树检查
 
 UI 树 dump 统一以 `widget/inspect.h` 内的**自由函数**提供，**不提供 `Widget::dump()` 成员方法**——富格式需求由 `dump_tree_rich` 覆盖，避免为每个控件重复实现 dump 逻辑。
@@ -154,6 +184,9 @@ UI 树 dump 统一以 `widget/inspect.h` 内的**自由函数**提供，**不提
 | `find_node_by_path(root, path) -> Node` | 按索引路径定位节点（如 `"0/2/1"`） |
 | `get_widget_props(w) -> Json` | 获取 Widget 属性快照（`describe` + `serialize_props`） |
 | `set_widget_prop(w, key, value)` | 单属性回写（经 `deserialize_props`） |
+| `collect_widget_boxes(root) -> std::vector<WidgetBox>` | 把控件树拍平成「布局盒表」（`{path, type, bounds}`）。**输出顺序即先序**，是差异归因 tie-break 依赖的契约 |
+| `diff_trees(old, new) -> std::vector<WidgetPatchOp>` | 逐节点产出把旧树变成新树的**属性补丁**（最小 patch，非整树替换）；只比较公共前缀，不越界 |
+| `trees_differ_structurally(old, new) -> bool` | 是否存在属性补丁**表达不了**的结构差异（类型变了 / 某层子节点数不同）；为真时调用方须整树替换 |
 
 `dump_tree_rich` 输出形态：
 
@@ -227,6 +260,7 @@ server.stop();        // 停止并 join 工作线程
 | GET | `/api/tree` | 完整 widget 树 JSON；`?window=<id>` 取指定窗口树（需 `set_window_tree_getter`），无效 id 回 404、未注册 getter 时带 `window` 参数回 400 |
 | GET | `/api/widget/{path}` | 单 widget 属性 JSON（`path` 为索引路径如 `0/1/2`） |
 | PUT | `/api/widget/{path}/{prop}` | 回写指定属性（请求体为 JSON 值） |
+| POST | `/api/patch` | **最小属性补丁**：请求体为 JSON **数组**，每项 `{path, value}`，`path` 形如 `/1/content`（最后一段是属性名，其余为索引路径，根为空）。一次请求批量回写，交由 `Inspector::apply_patch`；非数组返回 400，属性写失败返回 400 并带原因。**只覆盖属性**，结构性增删无法表达（见 `trees_differ_structurally`） |
 | GET | `/api/components` | 全部已注册组件 schema 列表 |
 | GET | `/api/yaml` | 当前 widget 树的 YAML 格式字符串 |
 | POST | `/api/to_code` | UI 树 → C++ 代码。请求体可含 `style` 参数：`0`=Fluent、`1`=StepByStep、`2`=DesignatedInit；`style` 存在但非整数返回 400，越界整数回退 Fluent |
@@ -255,6 +289,23 @@ server.stop();        // 停止并 join 工作线程
 `InspectorServer` 内部以 `std::mutex` 保护 widget 树访问，`root_getter` 回调在 HTTP 工作线程中被调用。使用者应确保 `root_getter` 返回的 `Node` 是线程安全的（如每次返回新树，或在回调内加锁）。
 
 调试门面的完整能力见 [`06-app-platform.md`](06-app-platform.md) §11。
+
+### 5.4 MCP 如何连到运行中的应用
+
+`aurora_mcp` 是被 AI 客户端 spawn 的**独立进程**，其离线工具（以 `tree` 入参）在自身进程内临时建树，
+**与运行中的应用无关**。要操作**正在运行**的 UI，走 `live_*` 工具族 —— 它们是本 HTTP 服务的客户端：
+
+- `live_tree` / `live_widget_get` / `live_widget_set` / `live_patch` / `live_simulate`，分别映射到 §5.1 表的
+  `GET /api/tree` / `GET /api/widget/{path}` / `PUT /api/widget/{path}/{prop}` / `POST /api/patch` / `POST /api/input/*`。
+- **会话发现按「方案 ③」（不落进程注册表文件）**：优先级为 ① 工具入参 `session`（`"6280"` 或 `"127.0.0.1:6280"`）
+  ② 环境变量 `AURORA_INSPECTOR_PORT` ③ 默认 `6280`（与 `InspectorServer::start()` 默认值一致）。
+  主机**恒被 pin 到回环**：客户端不做 DNS，只认 `127.0.0.1` / `localhost` / `::1`，且一律连到 `127.0.0.1`。
+- HTTP 客户端只落在 `tools/servers/inspector_client.h`（**不进 `include/` / `src/`**），故不改变核心的零依赖承诺。
+- 前提：应用需自己 opt-in 启动 `InspectorServer`（CMake 开关 `AURORA_BUILD_INSPECTOR_SERVER`）；
+  未启动时 `live_*` 返回传输层错误（连不上）而非空结果。
+
+`InspectorServer::start(0)` 可由系统分配临时端口（`port()` 读回实际值），但 MCP 侧不做端口扫描
+—— 需要临时端口时请自行经 `session` 入参或环境变量告知。
 
 ---
 

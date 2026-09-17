@@ -7,12 +7,18 @@
 //
 // Usage: aurora_mcp (launched by an AI Agent in stdio mode; no human interaction required)
 //
-// Exposes 13 MCP Tools:
+// Exposes 21 MCP Tools:
 //   list_components / describe_component / search_components /
-//   validate_tree / validate_ui / render_snapshot / render_png /
+//   validate_tree / validate_ui / render_snapshot / render_png / compare_snapshot /
+//   generate_ui / build_ui_prompt / repair_tree /
+//   live_tree / live_widget_get / live_widget_set / live_patch / live_simulate /
 //   to_code / to_yaml / get_schema / simulate_interaction /
 //   list_commands / invoke_command
+//
+// 其中 `live_*` 五个面向**正在运行的应用**（经其 Inspector HTTP 服务，仅回环，端口见
+// `AURORA_INSPECTOR_PORT`）；其余均为**离线无状态**——以 `tree` 入参在本进程内临时建树。
 
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -26,6 +32,7 @@
 #include "aurora/widget/yaml.h"
 #include "code_style.h"
 #include "command_listing.h"
+#include "inspector_client.h"
 
 // ---------- Known enums (single source of truth: tools/include/known_enums.h) ----------
 
@@ -110,6 +117,58 @@ auto write_message(const au::Json &msg) -> void {
         return false;  // reject absolute paths, drive letters and UNC prefixes
     }
     return std::ranges::all_of(p, [](const auto &part) -> auto { return part != ".."; });
+}
+
+// ---------- 运行中应用的会话解析（Track A）----------
+//
+// 会话发现按「方案 ③」：不做进程注册表，只认
+//   ① 工具入参 `session`（"6280" 或 "127.0.0.1:6280"）
+//   ② 环境变量 `AURORA_INSPECTOR_PORT`
+//   ③ 默认值 6280（与 InspectorServer::start() 的默认端口一致）
+// 主机**永远**被 pin 到回环 —— 客户端自身也拒绝非 loopback 目标（见 inspector_client.h）。
+
+struct InspectorSession {
+    std::string host{"127.0.0.1"};
+    std::uint16_t port{aurora::tools::inspector::kDefaultPort};
+};
+
+/// @brief 解析目标会话。解析失败返回空串原因（调用方据此回 isError）。
+[[nodiscard]] auto resolve_session(const au::Json &args, std::string &error_out) -> InspectorSession {
+    InspectorSession session;
+
+    std::string raw = args.value("session", std::string{});
+    if (raw.empty()) {
+        // 环境变量兜底：便于本机固定一个非默认端口，省去每次传参。
+        if (const char *env = std::getenv("AURORA_INSPECTOR_PORT"); (env != nullptr) && (*env != '\0')) {
+            raw = env;
+        }
+    }
+
+    if (!raw.empty()) {
+        std::string port_text = raw;
+        const auto colon = raw.find(':');
+        if (colon != std::string::npos) {
+            const std::string host_part = raw.substr(0, colon);
+            if (!aurora::tools::inspector::is_loopback_host(host_part)) {
+                error_out = "session host must be loopback (127.0.0.1 / localhost / ::1)";
+                return session;
+            }
+            session.host = host_part;
+            port_text = raw.substr(colon + 1);
+        }
+        try {
+            const long parsed = std::stol(port_text);  // NOLINT
+            if (parsed <= 0 || parsed > 65535) {
+                error_out = "session port out of range: " + port_text;
+                return session;
+            }
+            session.port = static_cast<std::uint16_t>(parsed);
+        } catch (const std::exception &) {
+            error_out = "session is not a valid port or host:port: " + raw;
+            return session;
+        }
+    }
+    return session;
 }
 
 // ---------- MCP tool definitions ----------
@@ -238,6 +297,26 @@ auto write_message(const au::Json &msg) -> void {
         t["inputSchema"] = schema_obj(std::move(props), req_arr({"tree"}));
         tools.push_back(std::move(t));
     }
+    // compare_snapshot
+    {
+        au::Json props = au::Json::object();
+        props["tree"] = obj_prop("UI-tree JSON");
+        props["baseline_path"] = str_prop(
+            "Golden baseline PNG to compare against; must be a relative path inside the working directory "
+            "without '..'");
+        props["width"] = int_prop("Canvas width (default 800)");
+        props["height"] = int_prop("Canvas height (default 600)");
+        props["tolerance"] = int_prop("Per-channel color tolerance 0..255 (default 0)");
+        au::Json t = au::Json::object();
+        t["name"] = "compare_snapshot";
+        t["description"] =
+            "Render the UI-tree JSON offscreen and compare it against a golden baseline PNG. Returns a "
+            "semantic report: per-pixel statistics plus spatially clustered diff regions, each attributed "
+            "to the widget that drew it (widget_path understood by GET/PUT /api/widget/{path}). Use this "
+            "instead of eyeballing raw pixel counts when a visual regression fails.";
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"tree", "baseline_path"}));
+        tools.push_back(std::move(t));
+    }
     // to_code
     {
         au::Json props = au::Json::object();
@@ -257,6 +336,117 @@ auto write_message(const au::Json &msg) -> void {
         t["name"] = "to_yaml";
         t["description"] = "Convert a UI-tree JSON into a YAML-formatted string";
         t["inputSchema"] = schema_obj(std::move(props), req_arr({"tree"}));
+        tools.push_back(std::move(t));
+    }
+    // generate_ui（Track B）
+    {
+        au::Json props = au::Json::object();
+        props["description"] = str_prop("Natural-language description, e.g. \"a column with a button and a slider\"");
+        au::Json t = au::Json::object();
+        t["name"] = "generate_ui";
+        t["description"] =
+            "Keyword-match natural language to a UI-tree JSON (no LLM involved). Covers every registered "
+            "component type; unmatched input falls back to a Text node. For LLM-backed generation, use "
+            "build_ui_prompt instead.";
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"description"}));
+        tools.push_back(std::move(t));
+    }
+    // build_ui_prompt（Track B）
+    {
+        au::Json props = au::Json::object();
+        props["description"] = str_prop("What the end UI should be; used to narrow down the relevant types");
+        au::Json t = au::Json::object();
+        t["name"] = "build_ui_prompt";
+        t["description"] =
+            "Project the Aurora schema into a compact prompt for an EXTERNAL LLM. Aurora never calls any "
+            "network service itself — hand this text to your own model, then feed the result to repair_tree.";
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"description"}));
+        tools.push_back(std::move(t));
+    }
+    // repair_tree（Track B）
+    {
+        au::Json props = au::Json::object();
+        props["tree"] = obj_prop("UI-tree JSON (node object; a {\"node\": ...} wrapper is accepted too)");
+        au::Json t = au::Json::object();
+        t["name"] = "repair_tree";
+        t["description"] =
+            "Deterministically repair a UI-tree JSON without any LLM: fix unknown type names, fill missing "
+            "props from schema defaults, and drop children on types that declare children_policy=none. "
+            "Returns the repaired tree plus the remaining validation errors.";
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"tree"}));
+        tools.push_back(std::move(t));
+    }
+    // live_tree（Track A）
+    {
+        au::Json props = au::Json::object();
+        props["session"] =
+            str_prop("Optional \"6280\" or \"127.0.0.1:6280\"; defaults to env AURORA_INSPECTOR_PORT, then 6280");
+        props["window"] = int_prop("Optional window id; omit for the main window");
+        au::Json t = au::Json::object();
+        t["name"] = "live_tree";
+        t["description"] =
+            "Read the LIVE widget tree of a running Aurora application (via its Inspector HTTP server). "
+            "Unlike render_snapshot, this is the real UI with real runtime state. Requires the app to have "
+            "started an InspectorServer.";
+        t["inputSchema"] = schema_obj(std::move(props), au::Json::array());
+        tools.push_back(std::move(t));
+    }
+    // live_widget_get（Track A）
+    {
+        au::Json props = au::Json::object();
+        props["session"] = str_prop("Optional \"6280\" or \"127.0.0.1:6280\"");
+        props["path"] = str_prop("Widget index path, e.g. \"0\" or \"1/2\"; empty string = root");
+        au::Json t = au::Json::object();
+        t["name"] = "live_widget_get";
+        t["description"] = "Read all properties of one widget in a running application.";
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"path"}));
+        tools.push_back(std::move(t));
+    }
+    // live_widget_set（Track A）
+    {
+        au::Json props = au::Json::object();
+        props["session"] = str_prop("Optional \"6280\" or \"127.0.0.1:6280\"");
+        props["path"] = str_prop("Widget index path, e.g. \"1\"; empty string = root");
+        props["prop"] = str_prop("Property name, e.g. \"content\" or \"checked\"");
+        props["value"] = obj_prop("New value as JSON (number, string, boolean, object or array)");
+        au::Json t = au::Json::object();
+        t["name"] = "live_widget_set";
+        t["description"] =
+            "Write one property of a widget in a RUNNING application — this is how you edit live UI. "
+            "On failure the response carries the reason so you can retry with a corrected value.";
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"path", "prop", "value"}));
+        tools.push_back(std::move(t));
+    }
+    // live_patch（Track A）
+    {
+        au::Json props = au::Json::object();
+        props["session"] = str_prop("Optional \"6280\" or \"127.0.0.1:6280\"");
+        props["ops"] =
+            obj_prop("JSON array of {\"path\": \"/1/content\", \"value\": <v>} (last path segment is the prop)");
+        au::Json t = au::Json::object();
+        t["name"] = "live_patch";
+        t["description"] =
+            "Apply a minimal property patch to a RUNNING application in ONE request. Prefer this over "
+            "repeated live_widget_set: fewer round-trips and no whole-tree rebuild. Property-only — "
+            "structural add/remove is not expressible and requires replacing the tree.";
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"ops"}));
+        tools.push_back(std::move(t));
+    }
+    // live_simulate（Track A）
+    {
+        au::Json props = au::Json::object();
+        props["session"] = str_prop("Optional \"6280\" or \"127.0.0.1:6280\"");
+        props["path"] = str_prop("Target widget index path, e.g. \"0\"");
+        props["action"] = str_prop("Interaction to simulate: click | scroll | text");
+        props["dx"] = num_prop("Horizontal scroll delta (action=scroll, default 0)");
+        props["dy"] = num_prop("Vertical scroll delta (action=scroll, default 0; positive scrolls content up)");
+        props["text"] = str_prop("UTF-8 text to insert (action=text)");
+        au::Json t = au::Json::object();
+        t["name"] = "live_simulate";
+        t["description"] =
+            "Dispatch a synthetic interaction (click / scroll / text) into a RUNNING application, going "
+            "through the real hit-test and dispatch path.";
+        t["inputSchema"] = schema_obj(std::move(props), req_arr({"path", "action"}));
         tools.push_back(std::move(t));
     }
     // get_schema
@@ -350,6 +540,33 @@ auto write_message(const au::Json &msg) -> void {
 }
 
 [[nodiscard]] auto json_content(const au::Json &j) -> au::Json { return text_content(j.dump(2)); }
+
+/// @brief 向运行中的应用发一次请求，并把 HTTP 结果翻译成 MCP 工具结果。
+///
+/// 刻意放在 `text_content` / `json_content` 之后：它俩是工具结果的组装原语，先定义才能被复用
+/// （匿名命名空间内不存在跨函数的隐式前向声明）。
+[[nodiscard]] auto inspector_result(const InspectorSession &session, std::string_view method,
+                                    const std::string &target, const std::string &body = {})
+    -> au::Json {
+    const aurora::tools::inspector::HttpResponse r =
+        aurora::tools::inspector::http_request(method, session.host, session.port, target, body);
+    if (!r.ok()) {
+        return au::Json{{"content", text_content("Error: " + r.error)}, {"isError", true}};
+    }
+    if (r.status < 200 || r.status >= 300) {
+        return au::Json{{"content", text_content("Error: HTTP " + std::to_string(r.status) + " " + r.body)},
+                        {"isError", true}};
+    }
+    // 成功时优先回结构化 JSON，解析不了才回落成纯文本。
+    auto parsed = au::Json::parse(r.body, nullptr, false);
+    if (parsed.is_discarded()) {
+        return au::Json{{"content", json_content(au::Json{{"status", r.status}, {"body", r.body}})}};
+    }
+    if (parsed.is_object()) {
+        parsed["http_status"] = r.status;
+    }
+    return au::Json{{"content", json_content(parsed)}};
+}
 
 /// Execute the named tool and return the MCP tools/call result.
 [[nodiscard]] auto execute_tool(const std::string &name, const au::Json &args) -> au::Json {
@@ -461,6 +678,184 @@ auto write_message(const au::Json &msg) -> void {
             return au::Json{{"content", text_content("Error: " + ok.error().message)}, {"isError", true}};
         }
         return au::Json{{"content", json_content(au::Json{{"path", path}, {"width", w}, {"height", h}})}};
+    }
+
+    // 渲染 树 → 逐像素比对 golden 基线 → 产出「在哪儿 + 是谁画的」的语义报告。
+    if (name == "compare_snapshot") {
+        if (!args.contains("tree") || !args["tree"].is_object()) {
+            return au::Json{{"content", text_content("Error: missing 'tree' parameter")}, {"isError", true}};
+        }
+        if (!args.contains("baseline_path") || !args["baseline_path"].is_string()) {
+            return au::Json{{"content", text_content("Error: missing 'baseline_path' parameter")},
+                            {"isError", true}};
+        }
+        std::string baseline_path = args["baseline_path"].get<std::string>();
+        if (!is_confined_output_path(baseline_path)) {
+            return au::Json{
+                {"content",
+                 text_content("Error: 'baseline_path' must be a relative path inside the working directory "
+                              "(no '..')")},
+                {"isError", true}};
+        }
+        int w = args.value("width", 800);
+        int h = args.value("height", 600);
+        int tolerance = args.value("tolerance", 0);
+
+        const au::Result<aurora::Image> baseline = aurora::Image::load(baseline_path);
+        if (!baseline) {
+            return au::Json{{"content", text_content("Error: cannot load baseline: " + baseline.error().message)},
+                            {"isError", true}};
+        }
+        auto widget = aurora::serialization::from_json(args["tree"]);
+        if (!widget) {
+            return au::Json{{"content", text_content("Error: " + widget.error().message)}, {"isError", true}};
+        }
+        aurora::Node root(std::move(widget.value()));
+        const aurora::Image current = render_to_image(root, w, h);
+
+        // 归因需要布局盒；root 经过 render_to_image 后已 mount + layout + 落定几何。
+        const std::vector<aurora::WidgetBox> boxes = aurora::collect_widget_boxes(root);
+        const aurora::SnapshotDiffReport report =
+            aurora::build_snapshot_diff_report(baseline.value(), current, boxes, tolerance);
+
+        au::Json payload = report.to_json();
+        payload["summary"] = report.to_text();
+        payload["baseline"] = baseline_path;
+        return au::Json{{"content", json_content(payload)}};
+    }
+
+    // ───────────────────── Track B：NL→UI ─────────────────────
+
+    if (name == "generate_ui") {
+        if (!args.contains("description") || !args["description"].is_string()) {
+            return au::Json{{"content", text_content("Error: missing 'description' parameter")}, {"isError", true}};
+        }
+        const auto r = aurora::generate_ui(args["description"].get<std::string>());
+        if (!r.ok()) {
+            return au::Json{{"content", text_content("Error: " + r.error().message)}, {"isError", true}};
+        }
+        return au::Json{{"content", json_content(r.value())}};
+    }
+
+    if (name == "build_ui_prompt") {
+        if (!args.contains("description") || !args["description"].is_string()) {
+            return au::Json{{"content", text_content("Error: missing 'description' parameter")}, {"isError", true}};
+        }
+        // 只产出文本 —— 本库不发起任何网络请求，调用 LLM 的是调用方。
+        const std::string prompt = aurora::ui_prompt_for(args["description"].get<std::string>());
+        return au::Json{{"content", text_content(prompt)}};
+    }
+
+    if (name == "repair_tree") {
+        if (!args.contains("tree") || !args["tree"].is_object()) {
+            return au::Json{{"content", text_content("Error: missing 'tree' parameter")}, {"isError", true}};
+        }
+        au::Json tree = args["tree"];
+        if (tree.contains("node")) {
+            tree = tree["node"];  // 兼容 generate_ui 的 {"node": ...} 包装
+        }
+        const au::Json repaired = aurora::repair_ui_tree(tree);
+        const std::vector<aurora::ValidationError> errors = aurora::validate_ui_tree(repaired);
+
+        au::Json out = au::Json::object();
+        out["tree"] = repaired;
+        out["valid"] = errors.empty();
+        au::Json errs = au::Json::array();
+        for (const aurora::ValidationError &e : errors) {
+            errs.push_back(e.to_json());
+        }
+        out["errors"] = errs;
+        return au::Json{{"content", json_content(out)}};
+    }
+
+    // ───────────────────── Track A：运行中的应用 ─────────────────────
+
+    if (name == "live_tree") {
+        std::string session_error;
+        const InspectorSession session = resolve_session(args, session_error);
+        if (!session_error.empty()) {
+            return au::Json{{"content", text_content("Error: " + session_error)}, {"isError", true}};
+        }
+        std::string target = "/api/tree";
+        const int window = args.value("window", 0);
+        if (window > 0) {
+            target += "?window=" + std::to_string(window);
+        }
+        return inspector_result(session, "GET", target);
+    }
+
+    if (name == "live_widget_get") {
+        std::string session_error;
+        const InspectorSession session = resolve_session(args, session_error);
+        if (!session_error.empty()) {
+            return au::Json{{"content", text_content("Error: " + session_error)}, {"isError", true}};
+        }
+        if (!args.contains("path") || !args["path"].is_string()) {
+            return au::Json{{"content", text_content("Error: missing 'path' parameter")}, {"isError", true}};
+        }
+        return inspector_result(session, "GET", "/api/widget/" + args["path"].get<std::string>());
+    }
+
+    if (name == "live_widget_set") {
+        std::string session_error;
+        const InspectorSession session = resolve_session(args, session_error);
+        if (!session_error.empty()) {
+            return au::Json{{"content", text_content("Error: " + session_error)}, {"isError", true}};
+        }
+        for (const char *key : {"path", "prop"}) {
+            if (!args.contains(key) || !args[key].is_string()) {
+                return au::Json{{"content", text_content(std::string("Error: missing '") + key + "' parameter")},
+                                {"isError", true}};
+            }
+        }
+        if (!args.contains("value")) {
+            return au::Json{{"content", text_content("Error: missing 'value' parameter")}, {"isError", true}};
+        }
+        const std::string path = args["path"].get<std::string>();
+        const std::string prop = args["prop"].get<std::string>();
+        // REST 约定：/api/widget/{tree_path}/{prop_name}；根节点的树路径为空。
+        const std::string target = "/api/widget/" + (path.empty() ? std::string{} : path + "/") + prop;
+        return inspector_result(session, "PUT", target, args["value"].dump());
+    }
+
+    if (name == "live_patch") {
+        std::string session_error;
+        const InspectorSession session = resolve_session(args, session_error);
+        if (!session_error.empty()) {
+            return au::Json{{"content", text_content("Error: " + session_error)}, {"isError", true}};
+        }
+        if (!args.contains("ops") || !args["ops"].is_array()) {
+            return au::Json{{"content", text_content("Error: 'ops' must be a JSON array")}, {"isError", true}};
+        }
+        return inspector_result(session, "POST", "/api/patch", args["ops"].dump());
+    }
+
+    if (name == "live_simulate") {
+        std::string session_error;
+        const InspectorSession session = resolve_session(args, session_error);
+        if (!session_error.empty()) {
+            return au::Json{{"content", text_content("Error: " + session_error)}, {"isError", true}};
+        }
+        if (!args.contains("path") || !args["path"].is_string() || !args.contains("action") ||
+            !args["action"].is_string()) {
+            return au::Json{{"content", text_content("Error: missing 'path' or 'action' parameter")},
+                            {"isError", true}};
+        }
+        const std::string action = args["action"].get<std::string>();
+        if (action != "click" && action != "scroll" && action != "text") {
+            return au::Json{{"content", text_content("Error: action must be click | scroll | text")},
+                            {"isError", true}};
+        }
+        au::Json body = au::Json::object();
+        body["path"] = args["path"].get<std::string>();
+        if (action == "scroll") {
+            body["dx"] = args.value("dx", 0.0F);
+            body["dy"] = args.value("dy", 0.0F);
+        }
+        if (action == "text") {
+            body["text"] = args.value("text", std::string{});
+        }
+        return inspector_result(session, "POST", "/api/input/" + action, body.dump());
     }
 
     if (name == "to_code") {

@@ -604,4 +604,32 @@ AURORA_TEST_CASE(tree_endpoint_window_param_requires_getter) {
 #endif
 }
 
+AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    // 一条最小补丁：改掉第一个子控件的 content（路径 "/0/content"，最后一段是属性名）。
+    const std::string resp =
+        http_post(server.port(), "/api/patch", R"([{"path":"/0/content","value":"patched"}])");
+    AURORA_TEST_CHECK_TRUE(resp.find("200") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("\"ops\":1") != std::string::npos);
+
+    // 关键：值必须真的落到活控件上，而不只是回了个 200。
+    Json props = Json::object();
+    shared_tree()->child_nodes().at(0).widget().serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props.value("content", std::string{}), std::string{"patched"});
+
+    // 非数组请求体必须被拒 —— 否则调用方无从知道补丁没生效。
+    const std::string bad = http_post(server.port(), "/api/patch", R"({"path":"/0/content","value":"x"})");
+    AURORA_TEST_CHECK_TRUE(bad.find("400") != std::string::npos);
+
+    // 复原共享树，避免污染同进程内的其它用例。
+    static_cast<void>(http_post(server.port(), "/api/patch", R"([{"path":"/0/content","value":"hello"}])"));
+    server.stop();
+#endif
+}
+
 }  // namespace aurora::test_cases::utest_inspector_server

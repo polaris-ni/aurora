@@ -786,6 +786,48 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         }
     }
 
+    // POST /api/patch — 批量属性回写（AI 实时编辑的「最小补丁」通道）
+    //
+    // 请求体是 JSON **数组**，每项 {path, value}；path 形如 "/1/content" —— 最后一段是属性名，
+    // 其余是索引路径（根为空），与 `Inspector::apply_patch` / `PUT /api/widget/{path}/{prop}` 同源。
+    //
+    // 与「整棵树替换」相对：AI 微调 UI 通常只动一两个属性，走 patch 既少传数据，
+    // 也避免一次全树重建把运行期状态（滚动位置、焦点等）冲掉。
+    //
+    // ⚠️ 只覆盖**属性**差异：结构性增删无法用属性回写表达，调用方须自行整树替换
+    // （`trees_differ_structurally` 可据此判断）。
+    if (route == "/api/patch") {
+        if (method != "POST") {
+            return error_response(405, "Method not allowed for /api/patch");
+        }
+        nlohmann::json payload;
+        try {
+            payload = nlohmann::json::parse(body);
+        } catch (const nlohmann::json::parse_error &e) {
+            return error_response(400, std::string("Invalid JSON body: ") + e.what());
+        }
+        if (!payload.is_array()) {
+            return error_response(400, "Request body must be a JSON array of {path, value}");
+        }
+        try {
+            std::scoped_lock lock(tree_mutex);
+            Node root = root_getter();
+            if (!root) {
+                return error_response(500, "Widget tree root is null");
+            }
+            const auto result = Inspector::apply_patch(root, payload);
+            if (!result) {
+                return error_response(400, std::string("patch rejected: ") + result.error().message);
+            }
+            nlohmann::json ok = nlohmann::json::object();
+            ok["status"] = "ok";
+            ok["ops"] = payload.size();
+            return json_response(200, "OK", ok);
+        } catch (const std::exception &e) {
+            return error_response(500, std::string("patch failed: ") + e.what());
+        }
+    }
+
     // GET /api/components — 组件 schema 列表
     if (route == "/api/components") {
         if (method != "GET") {
