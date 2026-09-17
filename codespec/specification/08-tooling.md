@@ -416,6 +416,11 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 | `type_text(env, widget, text)` | 合成 `TextInputEvent` |
 | `expect_text` / `expect_tree_contains` / `expect_bounds` / `expect_visible` / `expect_count` | 断言辅助（内部统一 `AURORA_TEST_CHECK*` 宏族，依赖 `tests/framework/aurora_test.h`） |
 
+`tests/support/fake_gl.h`（同为**仓库私有设施**）：`aurora::testing::FakeGl` 全量 GLFn 驱动桩——
+模拟「3.3 core 完整实现」并记录 draw / clear / blit / 上传与纹理分配/删除计数，供
+`utest_gpu_gl_rhi`（GpuGlRhi 契约断言）与 `tools/bench/bench_gpu.cpp`（GPU 特性基准的
+确定性计数器，无需真实 GL 上下文）共用。
+
 ### 8.1 框架设施（`tests/framework/`）
 
 | 设施 | 说明 |

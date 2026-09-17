@@ -81,8 +81,15 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     if (AURORA_BACKEND_GLFW)
         aurora_add_verify_probe(aurora_verify_glfw_cursor "${_aurora_verify_dir}/glfw_cursor_live_probe.cpp")
         list(APPEND _aurora_verify_targets aurora_verify_glfw_cursor)
-    endif ()
 
+    # ---- GLFW GPU 特性（跨平台真实窗口）：常驻流式纹理与 GPU 层缓存真机核对 ----
+    # 自动段核对能力位/契约位/流式逐版本像素/层缓存跨帧持久性；--interactive 人工目视。
+    # 需 GPU 通道编译进库（AURORA_ENABLE_GLFW_GPU_GL）。
+    if (AURORA_ENABLE_GLFW_GPU_GL)
+        aurora_add_verify_probe(aurora_verify_glfw_gpu_features "${_aurora_verify_dir}/glfw_gpu_features_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_glfw_gpu_features)
+    endif ()
+    endif ()
     if (_aurora_verify_targets)
         add_custom_target(aurora_verify DEPENDS ${_aurora_verify_targets})
         aurora_log("Verify probes enabled: ${_aurora_verify_targets} (build all with --target aurora_verify)")

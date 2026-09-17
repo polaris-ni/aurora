@@ -845,10 +845,16 @@ struct GpuGlRhi::Impl {
             }
         }
         gl.delete_shader(shared_vs);
+        check_error("init-programs");
         // 原生 GPU 表面导入探测（扩展点契约，specification/03 §8.7）：GL 3.3 仅探测扩展并
         // 记录诊断，不做真实导入（import_native_surface 恒回退）；能力位保守置 false，
         // 真实导入（memory object 绑定 / EGLImage）随 wgpu 阶梯兑现。
         const GLubyte_ *ext_str = gl.get_string(EXTENSIONS);
+        // ⚠️ 部分驱动在 core profile 下对 glGetString(GL_EXTENSIONS) 抛 INVALID_ENUM（真机探针实测）：
+        // 该查询仅服务于扩展探测诊断（能力位在 GL 3.3 契约上恒 false，见下），错误不判败——
+        // 查询后清空错误队列，防粘滞错误污染后续 init 检查点与帧内 check_error。
+        while (gl.get_error() != NO_ERROR) {
+        }
         const std::string extensions = ext_str != nullptr ? reinterpret_cast<const char *>(ext_str) : "";
         // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
         native_surface_ext = extensions.find("GL_EXT_memory_object") != std::string::npos ||
@@ -908,6 +914,7 @@ struct GpuGlRhi::Impl {
         blur_u_logical = gl.get_uniform_location(program_blur, "u_logical");
         blend_u_logical = gl.get_uniform_location(program_blend, "u_logical");
         mask_u_logical = gl.get_uniform_location(program_mask, "u_logical");
+        check_error("init-uniforms");
 
         // VAO + 流式 VBO + 共享 quad 索引（GL core 必须经 VAO 绘制）
         GLuint_ va = 0;
@@ -927,6 +934,7 @@ struct GpuGlRhi::Impl {
         gl.vertex_attrib_pointer(2, 4, UNSIGNED_BYTE, TRUE_, 20, reinterpret_cast<const void *>(16));  // NOLINT
         gl.bind_buffer(ELEMENT_ARRAY_BUFFER, ibo);
         gl.bind_vertex_array(0);
+        check_error("init-vao");
 
         // 状态初始化（blend 语义与软件路径同源：直色 src-over）
         gl.disable(SCISSOR_TEST);
@@ -2546,6 +2554,13 @@ auto GpuGlRhi::set_glyph_page_size(int side) -> void {
 auto GpuGlRhi::read_pixels(std::vector<std::uint8_t> &out) -> bool {
     if (impl_ == nullptr || impl_->failed || impl_->resolve_fbo == 0 || impl_->device_w <= 0
         || impl_->device_h <= 0) {
+        return false;
+    }
+    // 批渲染的 GL 绘制集中在 flush_batch（end_frame 内触发）；若在 end_frame 之前读回
+    // （探针/测试直驱通道），须先把挂起顶点批落地，否则读回的是清屏零基底。
+    // end_frame 后调用则批已空，本调用为空操作。
+    impl_->flush_batch();
+    if (impl_->failed) {
         return false;
     }
     // 懒 resolve：end_frame 走 MSAA 直 blit 时 resolve 纹理已过期，读回前按需补一次 blit。

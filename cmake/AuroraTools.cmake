@@ -198,6 +198,12 @@ aurora_add_tool(bench_win32_present tools/bench/bench_win32_present.cpp)
 # 活跃帧 max_fps 节流（非 CTest；无 Win32 后端时直接跳过）。
 aurora_add_tool(bench_idle_cpu tools/bench/bench_idle_cpu.cpp)
 
+# GPU 特性基准：常驻流式纹理（视频逐帧更新）与 GPU 层缓存（transform-only 动画）的
+# CPU/分配计数对比（非 CTest）。fake GL 驱动桩与 utest_gpu_gl_rhi 共用
+# tests/support/fake_gl.h（全量 GLFn 桩 + 确定性计数器），无需真实 GL 上下文。
+aurora_add_tool(bench_gpu tools/bench/bench_gpu.cpp)
+target_include_directories(bench_gpu PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+
 # 本机时间类门槛校验（check_perf_gates.ps1）：门槛已外置为 tools/check/perf_gates.json。
 # 仅 Windows 有 bench 上屏基准可执行；pwsh 缺失时跳过（不阻断构建/CI）。
 # 说明：时间类门槛受环境抖动影响，不进 CTest；本目标供本机趋势对比，可选运行。
