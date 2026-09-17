@@ -1,11 +1,14 @@
 #pragma once
 
+#include <algorithm>
 #include <cctype>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+#include "aurora/render/snapshot_diff.h"
 #include "aurora/widget/data_widgets.h"
 #include "aurora/widget/text.h"
 #include "aurora/widget/text_input.h"
@@ -23,6 +26,185 @@ namespace aurora {
  * @note Side-effects: none
  * @note Rebuildable: no
  */
+
+/**
+ * @brief 把控件树拍平成「布局盒表」（specification/03-layout-render.md §8.4）。
+ *
+ * 用途：`attribute_diff_regions` 需要知道每个控件的位置与类型，但它刻意只接受纯值数据
+ * （`render/` 不得反向依赖 `widget/`）。本函数是二者的桥：把树降级为表。
+ *
+ * **输出顺序即先序（pre-order）**，这一点是契约的一部分 —— 归因遇到交叠面积相同的候选时，
+ * 取 DFS 序更靠后者（= 更深的后代）。因此不要对返回的 vector 重新排序。
+ *
+ * `path` 与 `find_node_by_path` / `PUT /api/widget/{path}` 同格式：根为空串，第 i 个子节点为
+ * `"i"`，孙节点为 `"i/j"` —— 即归因结果可直接回喂去改那个控件的属性。
+ *
+ * @note Thread: main-thread only（读 `child_nodes()` 与 `bounds()`）
+ * @note Side-effects: none
+ */
+[[nodiscard]] inline auto collect_widget_boxes(const Node &root) -> std::vector<WidgetBox> {
+    std::vector<WidgetBox> out;
+    if (!root) {
+        return out;
+    }
+    // 显式栈做深度优先（避免深树递归爆栈）。存 Node **值**而非指针：Node 的拷贝只是 shared_ptr 拷贝，
+    // 成本极低，却不必论证 `child_nodes()` 返回的引用在跨迭代后是否仍然有效。
+    struct Pending {
+        Node node;
+        std::string path;
+    };
+    std::vector<Pending> stack;
+    stack.push_back(Pending{.node = root, .path = std::string{}});
+    while (!stack.empty()) {
+        const Pending cur = std::move(stack.back());
+        stack.pop_back();
+
+        WidgetBox box;
+        box.path = cur.path;
+        box.type = cur.node.widget().type_name();
+        box.bounds = cur.node.bounds();
+        out.push_back(std::move(box));
+
+        const std::vector<Node> &children = cur.node.widget().child_nodes();
+        for (std::size_t i = children.size(); i > 0; --i) {
+            // 逆序压入以保证正序弹出；路径在弹出时才用，故此处可直接格式化。
+            std::string child_path =
+                cur.path.empty() ? std::to_string(i - 1) : cur.path + "/" + std::to_string(i - 1);
+            stack.push_back(Pending{.node = children[i - 1], .path = std::move(child_path)});
+        }
+    }
+    return out;
+}
+
+/// @brief 控件补丁操作（specification/08-tooling.md §3）。
+///
+/// 与 `serialization::JsonPatchOp`（RFC6902 子集，作用于 **JSON 树**）区分开：本结构作用于
+/// **活的控件树**，`path` 直接是 `Inspector::apply_patch` / `PUT /api/widget/{path}/{prop}` 认得的格式
+/// —— 最后一段是属性名，前面是索引路径（根为空）。
+///
+/// 只支持 `replace`：结构性的增删无法经「属性回写」表达，那类差异由 `trees_differ_structurally`
+/// 报告，调用方须整树替换。
+struct WidgetPatchOp {
+    std::string op = "replace";  ///< 恒为 "replace"
+    std::string path;            ///< 如 "/1/content"（根属性为 "/content"）
+    Json value;                  ///< 新值
+
+    [[nodiscard]] auto to_json() const -> Json {
+        Json j = Json::object();
+        j["op"] = op;
+        j["path"] = path;
+        j["value"] = value;
+        return j;
+    }
+};
+
+/// @brief 逐节点比对两棵控件树，产出把旧树变成新树的属性补丁（specification/08-tooling.md §3）。
+///
+/// 产出「最小 patch」而非整树替换的意义：AI 微调 UI 时通常只动一两个属性，走 patch 可以
+/// ① 少传数据、② 少触发一次全树重建（从而少丢一份运行期状态）。
+///
+/// 只覆盖**属性差异**。类型变了或子节点数变了属于结构性差异，无法用属性回写表达，
+/// 由 `trees_differ_structurally` 如实报告；此时补丁仍然给出（对可比较的子树），
+/// 但调用方必须自行决定是否整树替换。
+///
+/// @return 补丁操作列表（按树的先序）。两树都为空时返回空列表。
+///
+/// @note Thread: main-thread only（读 `serialize_props`）
+/// @note Side-effects: none
+[[nodiscard]] inline auto diff_trees(const Node &old_root, const Node &new_root)
+    -> std::vector<WidgetPatchOp> {
+    std::vector<WidgetPatchOp> out;
+    if (!old_root || !new_root) {
+        return out;
+    }
+
+    // 显式栈：存 (旧节点, 新节点, 路径)。Node 拷贝只是 shared_ptr 拷贝。
+    struct Pending {
+        Node old_node;
+        Node new_node;
+        std::string path;
+    };
+    std::vector<Pending> stack;
+    stack.push_back(Pending{.old_node = old_root, .new_node = new_root, .path = std::string{}});
+
+    while (!stack.empty()) {
+        const Pending cur = std::move(stack.back());
+        stack.pop_back();
+
+        Json old_props = Json::object();
+        Json new_props = Json::object();
+        cur.old_node.widget().serialize_props(old_props);
+        cur.new_node.widget().serialize_props(new_props);
+
+        // 并集遍历：新增与删除的属性都要体现（删了的属性在 new_props 里缺失，视为 null）。
+        std::vector<std::string> keys;
+        for (auto kv = old_props.begin(); kv != old_props.end(); ++kv) {
+            keys.push_back(kv.key());
+        }
+        for (auto kv = new_props.begin(); kv != new_props.end(); ++kv) {
+            if (old_props.contains(kv.key())) {
+                continue;
+            }
+            keys.push_back(kv.key());
+        }
+        std::sort(keys.begin(), keys.end());  // 确定性：与 JSON 的对象序无关
+
+        for (const std::string &key : keys) {
+            const Json before = old_props.value(key, Json(nullptr));
+            const Json after = new_props.value(key, Json(nullptr));
+            if (before == after) {
+                continue;
+            }
+            WidgetPatchOp op;
+            op.path = "/" + (cur.path.empty() ? std::string{} : cur.path + "/") + key;
+            op.value = after;
+            out.push_back(std::move(op));
+        }
+
+        const std::vector<Node> &old_kids = cur.old_node.widget().child_nodes();
+        const std::vector<Node> &new_kids = cur.new_node.widget().child_nodes();
+        const std::size_t count = old_kids.size() < new_kids.size() ? old_kids.size() : new_kids.size();
+        for (std::size_t i = count; i-- > 0;) {
+            const std::string child_path =
+                cur.path.empty() ? std::to_string(i) : cur.path + "/" + std::to_string(i);
+            stack.push_back(Pending{.old_node = old_kids[i], .new_node = new_kids[i], .path = child_path});
+        }
+    }
+    return out;
+}
+
+/// @brief 两棵树是否存在**结构性**差异（某节点类型变了，或某层子节点数不同）。
+///
+/// 结构性差异无法用属性补丁表达 —— `diff_trees` 覆盖不到，调用方须整树替换。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+[[nodiscard]] inline auto trees_differ_structurally(const Node &old_root, const Node &new_root) -> bool {
+    if (static_cast<bool>(old_root) != static_cast<bool>(new_root)) {
+        return true;
+    }
+    if (!old_root) {
+        return false;
+    }
+    if (old_root.widget().type_name() != new_root.widget().type_name()) {
+        // type_name() 返回 const char*，比较指针值无意义，按内容比。
+        if (std::string_view{old_root.widget().type_name()} !=
+            std::string_view{new_root.widget().type_name()}) {
+            return true;
+        }
+    }
+    const std::vector<Node> &old_kids = old_root.widget().child_nodes();
+    const std::vector<Node> &new_kids = new_root.widget().child_nodes();
+    if (old_kids.size() != new_kids.size()) {
+        return true;
+    }
+    for (std::size_t i = 0; i < old_kids.size(); ++i) {
+        if (trees_differ_structurally(old_kids[i], new_kids[i])) {
+            return true;
+        }
+    }
+    return false;
+}
 
 /// @brief 人类可读的缩进树（每行一个 widget 的 type_name）。
 [[nodiscard]] inline auto dump_tree(const Node &root, int depth = 0) -> std::string {

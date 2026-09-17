@@ -128,6 +128,86 @@ AURORA_TEST_CASE(invalid_structure_returns_nullptr_and_keeps_root) {
     AURORA_TEST_CHECK_TRUE(hr.root() == first);
 }
 
+AURORA_TEST_CASE(state_is_preserved_for_props_the_json_does_not_declare) {
+    // 热重载的核心价值：改结构不该把用户刚勾上的状态冲掉。
+    Json current = Json::object();
+    current["type"] = "Column";
+    Json checkbox_node = Json::object();
+    checkbox_node["type"] = "Checkbox";
+    checkbox_node["props"] = Json::object();
+    checkbox_node["props"]["checked"] = false;
+    current["children"] = Json::array({checkbox_node});
+
+    HotReload hr("ui.json");
+    hr.set_loader([&current]() -> Json { return current; });
+
+    auto root = hr.try_sync();
+    AURORA_TEST_REQUIRE_TRUE(root != nullptr);
+
+    // 模拟「用户运行期勾上了它」。
+    {
+        Node checkbox = root->child_nodes().at(0);
+        AURORA_TEST_REQUIRE_TRUE(Inspector::set_prop(checkbox.widget(), "checked", Json(true)).ok());
+    }
+
+    // 新 JSON 追加了一个兄弟，且**没有**声明 checked ⇒ 勾选状态应被保留。
+    Json bare = Json::object();
+    bare["type"] = "Checkbox";
+    Json added = Json::object();
+    added["type"] = "Text";
+    added["props"] = Json::object();
+    added["props"]["content"] = "added";
+    current["children"] = Json::array({bare, added});
+
+    auto rebuilt = hr.try_sync();
+    AURORA_TEST_REQUIRE_TRUE(rebuilt != nullptr);
+    Node checkbox = rebuilt->child_nodes().at(0);
+    Json props = Json::object();
+    checkbox.widget().serialize_props(props);
+    AURORA_TEST_CHECK_TRUE(props.value("checked", false));
+}
+
+AURORA_TEST_CASE(declared_props_win_over_preserved_state) {
+    // 反面对照：源文件显式声明的值永远优先，热重载不得反过来覆盖用户的 JSON。
+    Json current = Json::object();
+    current["type"] = "Column";
+    Json checkbox_node = Json::object();
+    checkbox_node["type"] = "Checkbox";
+    checkbox_node["props"] = Json::object();
+    checkbox_node["props"]["checked"] = false;
+    current["children"] = Json::array({checkbox_node});
+
+    HotReload hr("ui.json");
+    hr.set_loader([&current]() -> Json { return current; });
+    auto root = hr.try_sync();
+    AURORA_TEST_REQUIRE_TRUE(root != nullptr);
+
+    {
+        Node checkbox = root->child_nodes().at(0);
+        AURORA_TEST_REQUIRE_TRUE(Inspector::set_prop(checkbox.widget(), "checked", Json(true)).ok());
+    }
+
+    // 这次新 JSON **显式写了** checked=false ⇒ 必须落到 false。
+    // 注意：JSON 必须与上一轮**确有不同**，否则 HotReload 按「无变化」直接跳过（返回 nullptr），
+    // 那是在测另一条分支。这里追加一个无关兄弟来制造差异。
+    Json redeclared = Json::object();
+    redeclared["type"] = "Checkbox";
+    redeclared["props"] = Json::object();
+    redeclared["props"]["checked"] = false;
+    Json unrelated = Json::object();
+    unrelated["type"] = "Text";
+    unrelated["props"] = Json::object();
+    unrelated["props"]["content"] = "unrelated";
+    current["children"] = Json::array({redeclared, unrelated});
+
+    auto rebuilt = hr.try_sync();
+    AURORA_TEST_REQUIRE_TRUE(rebuilt != nullptr);
+    Node checkbox = rebuilt->child_nodes().at(0);
+    Json props = Json::object();
+    checkbox.widget().serialize_props(props);
+    AURORA_TEST_CHECK_FALSE(props.value("checked", true));
+}
+
 AURORA_TEST_CASE(set_state_key_and_deferred_loader_injection) {
     // 仅路径构造（不触文件系统），随后注入 loader 与状态 key 均可生效。
     HotReload hr("unused.json");
