@@ -32,6 +32,7 @@
 #include "aurora/app/shortcuts.h"
 #include "aurora/app/system_tray.h"
 #include "aurora/app/test_controller.h"
+#include "aurora/app/ui_prompt.h"
 #include "aurora/app/validate.h"
 #include "aurora/app/validate_ui.h"
 #include "aurora/commands.h"

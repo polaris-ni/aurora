@@ -1,18 +1,32 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "aurora/core/result.h"
 #include "aurora/widget/serialization.h"
 
 namespace aurora {
 
-/// @brief NL→UI 生成（specification/08-tooling.md §2.5）：由自然语言描述生成 Widget JSON 树。
+/// @brief 「文案类属性」的候选键（按优先级）。
 ///
-/// 当前为关键词匹配简版（不依赖 LLM）：扫描描述中的控件关键词（button/text/column/row/checkbox），
-/// 从 aurora_api.json schema 提取默认属性，组装为可 `from_json` 的 JSON 片段。
-/// 完整 NL→UI 需外部 LLM 工具链。
+/// 各控件的文本属性名并不统一（`Text` 用 `content`、`Button` 用 `label`），生成时按下表挑第一个
+/// **在该类型 schema 里真实存在**的键。⚠️ 早期版本硬编码写 `props.text`，而没有任何控件读 `text`
+/// —— 生成的树看着有文案，实际反序列化后是空的。这是本函数改为查 schema 的直接原因。
+inline constexpr std::array<std::string_view, 3> kUiTextPropCandidates = {"content", "label", "text"};
+
+/// @brief NL→UI 生成（specification/08-tooling.md §2.6）：由自然语言描述生成 Widget JSON 树。
+///
+/// 当前为关键词匹配简版（**不依赖 LLM**）：把描述切成词，逐个词与已注册控件类型名（小写）比对，
+/// 命中即生成一个该类型的节点，全部平铺在一个 `Stack` 下。完整 NL→UI 需外部 LLM，
+/// 见 `ui_prompt.h`（prompt 投影 + 自修复环）。
+///
+/// 覆盖面由 `serialization::list_all_components()` 派生 —— 新增控件无需改本函数即可被识别。
+/// 额外的口语别名见 `kUiKeywordAliases`（如 `label`→`Text`、`btn`→`Button`）。
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: none
@@ -22,63 +36,122 @@ namespace aurora {
         return make_error(ErrorCode::GenerateUiEmpty, "empty description");
     }
 
-    Json tree = Json::object();
-    Json children = Json::array();
-
-    // 关键词 → 类型映射
-    struct Entry {
-        std::string keyword;
-        std::string type;
-        std::string text;
-    };
-    static const std::array<Entry, 8> MAP = {{
-        {.keyword = "button", .type = "Button", .text = "Button"},
-        {.keyword = "text", .type = "Text", .text = "Text"},
-        {.keyword = "label", .type = "Text", .text = "Text"},
-        {.keyword = "column", .type = "Column", .text = ""},
-        {.keyword = "row", .type = "Row", .text = ""},
-        {.keyword = "checkbox", .type = "Checkbox", .text = ""},
-        {.keyword = "switch", .type = "Switch", .text = ""},
-        {.keyword = "slider", .type = "Slider", .text = ""},
-    }};
-
-    for (const auto &m : MAP) {
-        if (description.find(m.keyword) != std::string::npos) {
-            Json node;
-            node["type"] = m.type;
-            if (!m.text.empty()) {
-                node["props"]["text"] = m.text;
+    // ── 切词：非字母数字即分隔符，统一小写 ──
+    std::vector<std::string> tokens;
+    {
+        std::string cur;
+        for (const char c : description) {
+            const auto uc = static_cast<unsigned char>(c);
+            if (std::isalnum(uc) != 0) {
+                cur.push_back(static_cast<char>(std::tolower(uc)));
+            } else if (!cur.empty()) {
+                tokens.push_back(std::move(cur));
+                cur.clear();
             }
-            children.push_back(node);
+        }
+        if (!cur.empty()) {
+            tokens.push_back(std::move(cur));
         }
     }
 
-    // 无匹配时返回空
-    if (children.empty()) {
-        Json node;
-        node["type"] = "Text";
-        node["props"]["text"] = "?" + description.substr(0, std::min<std::size_t>(description.size(), 20));
+    auto lower = [](std::string s) -> std::string {
+        for (char &c : s) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        return s;
+    };
+
+    // ── 别名表：口语词 → 类型。仅在精确匹配阶段使用，故不会误伤子串 ──
+    static const std::array<std::pair<std::string_view, std::string_view>, 4> kUiKeywordAliases = {{
+        {"label", "Text"},
+        {"btn", "Button"},
+        {"pic", "ImageView"},
+        {"dropdown", "Dropdown"},
+    }};
+
+    const std::vector<std::string> types = aurora::list_all_components();
+
+    std::vector<std::string> hits;
+    auto remember = [&hits](const std::string &type) -> void {
+        if (std::find(hits.begin(), hits.end(), type) == hits.end()) {
+            hits.push_back(type);
+        }
+    };
+
+    // ── 第一轮：整词精确匹配类型名（小写）与别名 ──
+    for (const std::string &tok : tokens) {
+        for (const std::string &type : types) {
+            if (lower(type) == tok) {
+                remember(type);
+            }
+        }
+        for (const auto &[alias, target] : kUiKeywordAliases) {
+            if (tok == alias) {
+                remember(std::string(target));
+            }
+        }
+    }
+
+    // ── 第二轮：仍无命中时，放宽为「长词做子串匹配」（短词太容易误命中，故要求 >= 4 字符）──
+    if (hits.empty()) {
+        for (const std::string &tok : tokens) {
+            if (tok.size() < 4U) {
+                continue;
+            }
+            for (const std::string &type : types) {
+                if (lower(type).find(tok) != std::string::npos) {
+                    remember(type);
+                }
+            }
+        }
+    }
+
+    // ── 组装：命中的按注册顺序平铺进一个 Stack ──
+    Json children = Json::array();
+    for (const std::string &type : hits) {
+        Json node = Json::object();
+        node["type"] = type;
+
+        // 该类型若有文案类属性，填入类型名作为占位文案（与旧行为一致：Button→"Button"）。
+        const Json schema = aurora::describe_component(type);
+        if (schema.contains("default_props")) {
+            const Json &defaults = schema["default_props"];
+            for (const std::string_view key : kUiTextPropCandidates) {
+                if (defaults.contains(std::string(key))) {
+                    node["props"][std::string(key)] = type;
+                    break;
+                }
+            }
+        }
         children.push_back(node);
     }
 
+    // ── 回退：一个都没命中时产出带原描述片段的 Text（截断 20 字符）──
+    if (children.empty()) {
+        Json node = Json::object();
+        node["type"] = "Text";
+        node["props"]["content"] =
+            "?" + description.substr(0, std::min<std::size_t>(description.size(), 20));
+        children.push_back(node);
+    }
+
+    Json tree = Json::object();
     tree["node"] = Json::object();
     tree["node"]["type"] = "Stack";
     tree["node"]["props"] = Json::object();
     tree["node"]["children"] = children;
-
     return tree;
 }
 
 /// @brief 快速验证：描述 → JSON → from_json 往返成功即表示 schema 匹配。
 [[nodiscard]] inline auto validate_generate_ui(const std::string &desc) -> bool {
-    auto r = generate_ui(desc);
+    const auto r = generate_ui(desc);
     if (!r.ok()) {
         return false;
     }
     // generate_ui 返回带 "node" 包装的树，from_json 需要顶层 "type" 的节点对象。
     const Json &node = r.value().value("node", Json::object());
-    auto w = serialization::from_json(node);
-    return w.ok();
+    return aurora::serialization::from_json(node).ok();
 }
 
 }  // namespace aurora
