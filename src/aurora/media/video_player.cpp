@@ -1,6 +1,7 @@
 #include "aurora/media/video_player.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 
 #include "aurora/core/color.h"
@@ -128,6 +129,16 @@ auto VideoPlayer::set_muted(bool m) -> void {
 
 auto VideoPlayer::on_frame(const Image &frame) -> void {
     current_frame_ = frame;
+    // 常驻流式纹理通道（specification/03 §8.7）：帧像素打上流式标识，GPU 后端按键寻址
+    // 固定纹理槽、按版本增量 sub-upload——消除每帧纹理新建 / PMA 全帧 CPU 预乘副本 /
+    // 通用缓存淘汰抖动。软件路径忽略流式字段（零回归）。
+    if (stream_key_ == 0) {
+        // 流式键进程内唯一（本计数器独立分配；0 保留为「非流式」）。
+        static std::atomic<std::uint64_t> stream_key_counter{1}; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+        stream_key_ = stream_key_counter.fetch_add(1, std::memory_order_relaxed);
+    }
+    current_frame_.stream_key = stream_key_;
+    current_frame_.stream_version = ++stream_version_;
     mark_needs_paint();
 }
 

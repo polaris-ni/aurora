@@ -11,6 +11,7 @@
 #include "aurora/modifier/modifier.h"
 #include "aurora/perf/counters.h"
 #include "aurora/render/detail/paint_timing.h"
+#include "aurora/render/detail/gpu_layer.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 
@@ -390,6 +391,31 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
     const std::uint64_t raster_gen = render::FontEngine::raster_generation();
 
     if (cache) {
+        // 录制模式（GPU 帧 DL / 祖先 DL 缓存录制）：GPU 层缓存命令化路径——干净帧仅记一条
+        // DrawLayer（子树零重绘、零像素搬运），失效帧记 BeginLayer + 子树 + EndLayer
+        // （消费端重定向到常驻层纹理重绘子树）。失效判定与 paint_cache_ 同辙：内容脏
+        // （invalidate_paint_cache）+ 尺寸 + 光栅世代 + 层代际（消费端层存储整体丢弃）。
+        if (p.is_recording()) {
+            if (gpu_layer_key_ == 0) {
+                gpu_layer_key_ = render::detail::next_gpu_layer_key();
+            }
+            const std::uint64_t epoch = render::detail::gpu_layer_epoch();
+            const Matrix2D place = Matrix2D::from_translate(bounds.origin.x, bounds.origin.y);
+            if (gpu_layer_valid_ && gpu_layer_raster_gen_ == raster_gen && gpu_layer_epoch_ == epoch &&
+                gpu_layer_size_.width == bounds.size.width && gpu_layer_size_.height == bounds.size.height) {
+                p.draw_layer(gpu_layer_key_, place, p.scale());
+                return;
+            }
+            p.begin_layer(gpu_layer_key_, bounds.size);
+            render_into(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}, ctx);
+            p.end_layer();
+            p.draw_layer(gpu_layer_key_, place, p.scale());
+            gpu_layer_size_ = bounds.size;
+            gpu_layer_raster_gen_ = raster_gen;
+            gpu_layer_epoch_ = epoch;
+            gpu_layer_valid_ = true;
+            return;
+        }
         if (paint_cache_ && paint_cache_valid_ && paint_cache_raster_gen_ == raster_gen &&
             paint_cache_size_.width == bounds.size.width && paint_cache_size_.height == bounds.size.height) {
             p.composite(*paint_cache_, Matrix2D::from_translate(bounds.origin.x, bounds.origin.y));
@@ -454,7 +480,10 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
     render_into(p, bounds, ctx);
 }
 
-auto Widget::invalidate_paint_cache() const -> void { paint_cache_valid_ = false; }
+auto Widget::invalidate_paint_cache() const -> void {
+    paint_cache_valid_ = false;
+    gpu_layer_valid_ = false;  // 子树内容变化：位图缓存与 GPU 层纹理一并失效
+}
 
 auto Widget::hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * {
     if (!show.get()) {

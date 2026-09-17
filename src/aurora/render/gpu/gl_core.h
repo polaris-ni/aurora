@@ -52,6 +52,7 @@ constexpr GLenum_ TEXTURE_WRAP_S = 0x2802;
 constexpr GLenum_ TEXTURE_WRAP_T = 0x2803;
 constexpr GLenum_ CLAMP_TO_EDGE = 0x812F;
 constexpr GLenum_ UNPACK_ALIGNMENT = 0x0CF5;
+constexpr GLenum_ UNPACK_ROW_LENGTH = 0x0CF2;
 
 // 状态
 constexpr GLenum_ BLEND = 0x0BE2;
@@ -72,6 +73,7 @@ constexpr GLenum_ FRAMEBUFFER_COMPLETE = 0x8CD5;
 
 // 查询
 constexpr GLenum_ VERSION = 0x1F02;
+constexpr GLenum_ EXTENSIONS = 0x1F03;
 constexpr GLenum_ NO_ERROR = 0;
 
 }  // namespace aurora::rhi::gl

@@ -115,6 +115,10 @@ class VideoPlayer : public Container, public VideoController {
 
     std::shared_ptr<VideoSource> source_;
     Image current_frame_;
+    /// @brief 流式纹理标识（GPU 常驻流式通道，specification/03 §8.7）：键惰性分配、
+    ///        进程内唯一；`on_frame` 每帧递增版本触发后端增量 sub-upload。软件路径忽略。
+    std::uint64_t stream_key_ = 0;
+    std::uint64_t stream_version_ = 0;
     BoxFit fit_ = BoxFit::Contain;
     bool show_controls_ = true;
 

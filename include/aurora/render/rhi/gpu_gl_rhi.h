@@ -194,6 +194,27 @@ class GpuGlRhi final : public RhiBackend, public RhiFrameSink {
     /// 返回 false 表示后端不可用或读回失败。
     [[nodiscard]] auto read_pixels(std::vector<std::uint8_t> &out) -> bool;
 
+    // ---- RhiBackend 能力位与流式纹理契约（specification/03 §8.7）----
+
+    /// @brief GL 3.3 core 能力位：gpu=true；原生表面导入不实现（恒 false）；无 compute。
+    [[nodiscard]] auto capabilities() const -> RhiCapabilities override;
+
+    /// @brief 取常驻流式纹理槽（键寻址，槽复用、尺寸变化就地重定义；与 `DrawImage`
+    /// 流式分支共享同一存储）。@return 句柄（非零）；`0` = 后端不可用。
+    [[nodiscard]] auto acquire_stream_image(std::uint64_t key, int width, int height) -> StreamImageId override;
+
+    /// @brief 流式图像增量更新：`pixels` 为整图像素基址（RGBA8 直色非预乘），
+    /// `stride_bytes` 行跨距字节数（`0` = 紧凑行，槽宽 × 4），脏矩形 (x,y,w,h) sub-upload。
+    auto update_stream_image(StreamImageId id, const std::uint8_t *pixels, std::size_t stride_bytes, int x, int y,
+                             int w, int h) -> void override;
+
+    /// @brief 释放流式纹理槽（先落地待提交批再删除；句柄此后无效，重复释放无害）。
+    auto release_stream_image(StreamImageId id) -> void override;
+
+    /// @brief 原生表面导入：GL 3.3 core 不实现（能力位恒 false），调用即单次告警并返回
+    /// `0`，调用方回退 CPU 上传路径。
+    [[nodiscard]] auto import_native_surface(const NativeSurfaceFrame &frame) -> StreamImageId override;
+
   private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

@@ -13,6 +13,7 @@
 #include <unordered_map>
 
 #include "aurora/core/log.h"
+#include "aurora/render/detail/gpu_layer.h"
 #include "aurora/render/glyph_emit.h"
 #include "aurora/render/gpu/gl_core.h"
 
@@ -146,11 +147,14 @@ void main() {
 // 图像（DrawImage）：RGBA8 直色图上传时预乘 alpha（PMA），LINEAR 双线性滤波在 PMA 空间
 // 插值——与软件路径的 premultiplied 采样语义同源，避免半透明缩放边缘暗晕。片元输出按
 // PMA 语义整体缩放（rgb 与 a 同乘全局 alpha × 裁剪 coverage），混合走 ONE/ONE_MINUS_SRC_ALPHA。
+// u_pma = 1：直色纹理（常驻流式通道上传未预乘像素），片元内一乘做 PMA（`t.rgb *= t.a`）——
+// 视频逐帧更新免全帧 CPU 预乘副本；静态图保持 u_pma = 0（上传期预乘，行为不变）。
 constexpr const char *AURORA_GLSL_IMAGE = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
 in vec4 v_color;
 uniform sampler2D u_tex;
+uniform int u_pma;
 uniform vec4 u_clip;
 uniform vec3 u_clip_ctl;
 out vec4 o;
@@ -160,6 +164,9 @@ float sd_rbox(vec2 p, vec2 b, float r) {
 }
 void main() {
     vec4 t = texture(u_tex, v_uv);
+    if (u_pma == 1) {
+        t.rgb *= t.a;
+    }
     float cov = 1.0;
     if (u_clip_ctl.y > 0.5) {
         vec2 ctr = u_clip.xy + u_clip.zw * 0.5;
@@ -608,6 +615,7 @@ struct GpuGlRhi::Impl {
         GLuint_ grad_lut = 0;
         // Image 管线专用：PMA 纹理与混合模式（PMA 走 ONE/ONE_MINUS_SRC_ALPHA，变化断批）
         bool blend_pma = false;
+        bool pma_in_shader = false;  // 1 = 直色纹理片元内 PMA（常驻流式通道；静态图恒 false）
         GLuint_ image_tex = 0;
         // Text 管线专用：槽位所在字形图集页纹理（多页图集；跨页文本自然断批）
         GLuint_ glyph_atlas_tex = 0;
@@ -696,6 +704,7 @@ struct GpuGlRhi::Impl {
     GLint_ image_u_clip = -1;
     GLint_ image_u_clip_ctl = -1;
     GLint_ image_u_tex = -1;
+    GLint_ image_u_pma = -1;
     GLint_ text_u_logical = -1;
     GLint_ text_u_clip = -1;
     GLint_ text_u_clip_ctl = -1;
@@ -836,6 +845,19 @@ struct GpuGlRhi::Impl {
             }
         }
         gl.delete_shader(shared_vs);
+        // 原生 GPU 表面导入探测（扩展点契约，specification/03 §8.7）：GL 3.3 仅探测扩展并
+        // 记录诊断，不做真实导入（import_native_surface 恒回退）；能力位保守置 false，
+        // 真实导入（memory object 绑定 / EGLImage）随 wgpu 阶梯兑现。
+        const GLubyte_ *ext_str = gl.get_string(EXTENSIONS);
+        const std::string extensions = ext_str != nullptr ? reinterpret_cast<const char *>(ext_str) : "";
+        // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
+        native_surface_ext = extensions.find("GL_EXT_memory_object") != std::string::npos ||
+                             extensions.find("GL_OES_EGL_image") != std::string::npos;
+        if (native_surface_ext) {
+            AURORA_LOG_INFO("gpu-gl",
+                            "native surface import extensions present (GL_EXT_memory_object/EGLImage), "
+                            "import stays on wgpu ladder");
+        }
         solid_u_logical = gl.get_uniform_location(program_solid, "u_logical");
         solid_u_clip = gl.get_uniform_location(program_solid, "u_clip");
         solid_u_clip_ctl = gl.get_uniform_location(program_solid, "u_clip_ctl");
@@ -856,6 +878,7 @@ struct GpuGlRhi::Impl {
         image_u_clip = gl.get_uniform_location(program_image, "u_clip");
         image_u_clip_ctl = gl.get_uniform_location(program_image, "u_clip_ctl");
         image_u_tex = gl.get_uniform_location(program_image, "u_tex");
+        image_u_pma = gl.get_uniform_location(program_image, "u_pma");
         text_u_logical = gl.get_uniform_location(program_text, "u_logical");
         text_u_clip = gl.get_uniform_location(program_text, "u_clip");
         text_u_clip_ctl = gl.get_uniform_location(program_text, "u_clip_ctl");
@@ -948,6 +971,23 @@ struct GpuGlRhi::Impl {
             if (pg.tex != 0) {
                 const GLuint_ tex = pg.tex;
                 gl.delete_textures(1, &tex);
+            }
+        }
+        for (auto &kv : stream_slots) {
+            const GLuint_ tex = kv.second.tex;
+            if (tex != 0) {
+                gl.delete_textures(1, &tex);
+            }
+        }
+        for (auto &kv : layer_cache) {
+            const LayerEntry &e = kv.second;
+            if (e.fbo != 0 || e.aux_fbo != 0) {
+                const GLuint_ fbos[2] = {e.fbo, e.aux_fbo};
+                gl.delete_framebuffers(2, fbos);
+            }
+            if (e.tex != 0 || e.aux_tex != 0) {
+                const GLuint_ texs[2] = {e.tex, e.aux_tex};
+                gl.delete_textures(2, texs);
             }
         }
         if (program_solid != 0) {
@@ -1311,11 +1351,145 @@ struct GpuGlRhi::Impl {
     }
 
     [[nodiscard]] auto logical_w() const -> float {
+        // 层重定向中：逻辑尺寸为层自身（NDC / 裁剪 / 效果区域均以层为基准）。
+        if (!layer_stack.empty()) {
+            return layer_stack.back().logical_w;
+        }
         return static_cast<float>(device_w) / (scale > 0.0F ? scale : 1.0F);
     }
     [[nodiscard]] auto logical_h() const -> float {
+        if (!layer_stack.empty()) {
+            return layer_stack.back().logical_h;
+        }
         return static_cast<float>(device_h) / (scale > 0.0F ? scale : 1.0F);
     }
+    /// @brief 当前绘制目标设备尺寸（层重定向中 = 层纹理尺寸；否则 = 画布）。
+    [[nodiscard]] auto target_w() const -> int { return layer_stack.empty() ? device_w : layer_stack.back().width; }
+    [[nodiscard]] auto target_h() const -> int { return layer_stack.empty() ? device_h : layer_stack.back().height; }
+
+    // ---- 常驻流式纹理槽（specification/03 §8.7）----
+    // 固定槽复用：不走 content_hash 缓存、不参与 AURORA_IMAGE_CACHE_CAP 淘汰；直色上传
+    //（无 CPU 预乘，采样期片元一乘），按 stream_version 增量 sub-upload。
+    struct StreamSlot {
+        int width = 0;
+        int height = 0;
+        std::uint64_t version = 0;  // 已上传内容对应的流式版本
+        GLuint_ tex = 0;
+    };
+    std::unordered_map<std::uint64_t, StreamSlot> stream_slots;
+
+    /// @brief 取流式槽（不存在则建槽；尺寸变化就地重定义存储）。失败返回 nullptr。
+    auto ensure_stream_slot(std::uint64_t key, int width, int height) -> StreamSlot * {
+        if (key == 0 || width <= 0 || height <= 0 || failed) {
+            return nullptr;
+        }
+        auto it = stream_slots.find(key);
+        if (it == stream_slots.end()) {
+            GLuint_ tex = 0;
+            gl.gen_textures(1, &tex);
+            gl.bind_texture(TEXTURE_2D, tex);
+            gl.tex_parameter_i(TEXTURE_2D, TEXTURE_MIN_FILTER, static_cast<GLint_>(LINEAR));
+            gl.tex_parameter_i(TEXTURE_2D, TEXTURE_MAG_FILTER, static_cast<GLint_>(LINEAR));
+            gl.tex_parameter_i(TEXTURE_2D, TEXTURE_WRAP_S, static_cast<GLint_>(CLAMP_TO_EDGE));
+            gl.tex_parameter_i(TEXTURE_2D, TEXTURE_WRAP_T, static_cast<GLint_>(CLAMP_TO_EDGE));
+            gl.pixel_store_i(UNPACK_ALIGNMENT, 1);
+            gl.tex_image_2d(TEXTURE_2D, 0, RGBA8, width, height, 0, RGBA, UNSIGNED_BYTE, nullptr);
+            check_error("stream-alloc");
+            if (failed || tex == 0) {
+                if (tex != 0) {
+                    gl.delete_textures(1, &tex);
+                }
+                return nullptr;
+            }
+            it = stream_slots.emplace(key, StreamSlot{.width = width, .height = height, .version = 0, .tex = tex})
+                     .first;
+        } else if (it->second.width != width || it->second.height != height) {
+            // 尺寸变化：先落地可能引用旧存储的待提交批，再就地重定义。
+            flush_batch();
+            gl.bind_texture(TEXTURE_2D, it->second.tex);
+            gl.pixel_store_i(UNPACK_ALIGNMENT, 1);
+            gl.tex_image_2d(TEXTURE_2D, 0, RGBA8, width, height, 0, RGBA, UNSIGNED_BYTE, nullptr);
+            check_error("stream-resize");
+            if (failed) {
+                return nullptr;
+            }
+            it->second.width = width;
+            it->second.height = height;
+            it->second.version = 0;
+        }
+        return &it->second;
+    }
+
+    // ---- GPU 层缓存（FBO 常驻层纹理；specification/03 §8.7）----
+    struct LayerEntry {
+        GLuint_ fbo = 0;
+        GLuint_ tex = 0;
+        GLuint_ aux_fbo = 0;  // 层内效果（Blur/Blend/Mask）的采样拷贝（惰性分配）
+        GLuint_ aux_tex = 0;
+        int width = 0;   // 设备像素
+        int height = 0;
+    };
+    struct LayerFrame {
+        std::uint64_t key = 0;
+        std::vector<ClipState> saved_clip;
+        double saved_alpha = 1.0;
+        int width = 0;
+        int height = 0;
+        float logical_w = 0.0F;
+        float logical_h = 0.0F;
+    };
+    std::unordered_map<std::uint64_t, LayerEntry> layer_cache;
+    std::vector<LayerFrame> layer_stack;
+    bool layer_miss_warned = false;  // DrawLayer 未命中告警只发一次
+    bool native_surface_ext = false; // 原生表面扩展探测结果（仅诊断；能力位恒 false）
+    bool native_import_warned = false;  // import_native_surface 回退告警只发一次
+
+    /// @brief 建 / 调整层附件（纹理 + FBO）。NEAREST：层合成与软件位图 floor 采样同语义。
+    auto create_layer_attachment(GLuint_ *fbo, GLuint_ *tex, int width, int height, const char *where) -> bool {
+        if (*fbo == 0) {
+            GLuint_ f = 0;
+            GLuint_ t = 0;
+            gl.gen_framebuffers(1, &f);
+            gl.gen_textures(1, &t);
+            gl.bind_texture(TEXTURE_2D, t);
+            gl.tex_parameter_i(TEXTURE_2D, TEXTURE_MIN_FILTER, static_cast<GLint_>(NEAREST));
+            gl.tex_parameter_i(TEXTURE_2D, TEXTURE_MAG_FILTER, static_cast<GLint_>(NEAREST));
+            gl.tex_parameter_i(TEXTURE_2D, TEXTURE_WRAP_S, static_cast<GLint_>(CLAMP_TO_EDGE));
+            gl.tex_parameter_i(TEXTURE_2D, TEXTURE_WRAP_T, static_cast<GLint_>(CLAMP_TO_EDGE));
+            *fbo = f;
+            *tex = t;
+        } else {
+            gl.bind_texture(TEXTURE_2D, *tex);
+        }
+        gl.pixel_store_i(UNPACK_ALIGNMENT, 1);
+        gl.tex_image_2d(TEXTURE_2D, 0, RGBA8, width, height, 0, RGBA, UNSIGNED_BYTE, nullptr);
+        gl.bind_framebuffer(FRAMEBUFFER, *fbo);
+        gl.framebuffer_texture_2d(FRAMEBUFFER, COLOR_ATTACHMENT0, TEXTURE_2D, *tex, 0);
+        if (gl.check_framebuffer_status(FRAMEBUFFER) != FRAMEBUFFER_COMPLETE) {
+            AURORA_LOG_ERROR("gpu-gl", "层帧缓冲不完整（layer attachment incomplete）");
+            failed = true;
+            return false;
+        }
+        check_error(where);
+        return !failed;
+    }
+
+    /// @brief 把层当前内容拷贝到层 aux 采样纹理（层内效果读侧，避免反馈环）。
+    auto copy_layer_to_aux(LayerEntry &entry) -> bool {
+        if (entry.aux_fbo == 0) {
+            if (!create_layer_attachment(&entry.aux_fbo, &entry.aux_tex, entry.width, entry.height, "layer-aux")) {
+                return false;
+            }
+        }
+        flush_batch();
+        gl.bind_framebuffer(READ_FRAMEBUFFER, entry.fbo);
+        gl.bind_framebuffer(DRAW_FRAMEBUFFER, entry.aux_fbo);
+        gl.blit_framebuffer(0, 0, entry.width, entry.height, 0, 0, entry.width, entry.height, COLOR_BUFFER_BIT,
+                            static_cast<GLint_>(NEAREST));
+        check_error("layer-aux-blit");
+        return !failed;
+    }
+
 
     // ---- 顶点发射 ----
     auto ensure_ibo(std::uint32_t quads) -> void {
@@ -1423,6 +1597,7 @@ struct GpuGlRhi::Impl {
             gl.active_texture(TEXTURE0);
             gl.bind_texture(TEXTURE_2D, key.image_tex);
             gl.uniform1i(image_u_tex, 0);
+            gl.uniform1i(image_u_pma, key.pma_in_shader ? 1 : 0);
             // 采样模式随批切换（DrawImage 双线性 / Composite 逐像素取样）——纹理参数是
             // 纹理对象状态，同纹理可能被两种管线复用，flush 时显式设定消除跨批残留。
             const GLint_ filter = static_cast<GLint_>(key.nearest_filter ? NEAREST : LINEAR);
@@ -1454,7 +1629,9 @@ struct GpuGlRhi::Impl {
         stats.draw_calls++;
         stats.vertices += static_cast<std::uint32_t>(verts.size());
         verts.clear();
-        msaa_dirty = true;  // MSAA 内容已变：效果采样前置与后续 resolve 需刷新
+        if (layer_stack.empty()) {
+            msaa_dirty = true;  // 主目标内容已变：效果采样前置与后续 resolve 需刷新（层重定向不触及 MSAA）
+        }
         check_error("flush");
     }
 
@@ -1499,14 +1676,15 @@ struct GpuGlRhi::Impl {
         stats.vertices += 4;
     }
 
-    /// 区域效果共享的物理像素区域换算：floor/ceil + 画布钳制（同软件三原语）。
+    /// 区域效果共享的物理像素区域换算：floor/ceil + 当前绘制目标钳制（同软件三原语；
+    /// 层重定向中区域坐标为层局部，钳制基准 = 层尺寸）。
     /// 返回 false = 空区域（调用方直接跳过，同软件提前返回）。
     [[nodiscard]] auto effect_region_px(const Rect &region, int &rx0, int &ry0, int &rx1, int &ry1) const -> bool {
         const float s = scale > 0.0F ? scale : 1.0F;
         rx0 = std::max(0, static_cast<int>(std::floor(region.origin.x * s)));
         ry0 = std::max(0, static_cast<int>(std::floor(region.origin.y * s)));
-        rx1 = std::min(device_w, static_cast<int>(std::ceil((region.origin.x + region.size.width) * s)));
-        ry1 = std::min(device_h, static_cast<int>(std::ceil((region.origin.y + region.size.height) * s)));
+        rx1 = std::min(target_w(), static_cast<int>(std::ceil((region.origin.x + region.size.width) * s)));
+        ry1 = std::min(target_h(), static_cast<int>(std::ceil((region.origin.y + region.size.height) * s)));
         return rx1 > rx0 && ry1 > ry0;
     }
 
@@ -1733,6 +1911,107 @@ struct GpuGlRhi::Impl {
             case CmdKind::SetAlpha:
                 alpha = cmd.alpha;
                 break;
+            case CmdKind::BeginLayer: {
+                // GPU 层缓存（specification/03 §8.7）：重定向到 FBO 常驻层纹理。层键缺席
+                // / 尺寸变化时（重）分配；随后清空层内裁剪栈（层局部坐标），全局 alpha 保持
+                // （子树命令自带绝对 SetAlpha，与 DL 语义一致）。
+                const std::uint64_t lkey = cmd.aux_key;
+                if (lkey == 0 || failed) {
+                    break;
+                }
+                const float s = scale > 0.0F ? scale : 1.0F;
+                const int lw =
+                    std::max(1, static_cast<int>(std::lround(cmd.bounds.size.width * s)));
+                const int lh =
+                    std::max(1, static_cast<int>(std::lround(cmd.bounds.size.height * s)));
+                LayerEntry &entry = layer_cache[lkey];
+                if (entry.width != lw || entry.height != lh) {
+                    // 尺寸变化：层与 aux 采样拷贝一并重定义；待提交批可能引用旧层纹理，先落地。
+                    flush_batch();
+                    if (entry.aux_fbo != 0) {
+                        gl.delete_framebuffers(1, &entry.aux_fbo);
+                        gl.delete_textures(1, &entry.aux_tex);
+                        entry.aux_fbo = 0;
+                        entry.aux_tex = 0;
+                    }
+                    if (!create_layer_attachment(&entry.fbo, &entry.tex, lw, lh, "layer-alloc")) {
+                        layer_cache.erase(lkey);
+                        break;
+                    }
+                    entry.width = lw;
+                    entry.height = lh;
+                } else {
+                    flush_batch();
+                }
+                LayerFrame frame;
+                frame.key = lkey;
+                frame.saved_clip = clip_stack;
+                frame.saved_alpha = alpha;
+                frame.width = lw;
+                frame.height = lh;
+                frame.logical_w = cmd.bounds.size.width;
+                frame.logical_h = cmd.bounds.size.height;
+                layer_stack.push_back(std::move(frame));
+                gl.bind_framebuffer(FRAMEBUFFER, entry.fbo);
+                gl.viewport(0, 0, lw, lh);
+                gl.clear_color(0.0F, 0.0F, 0.0F, 0.0F);
+                gl.clear(COLOR_BUFFER_BIT);
+                clip_stack.clear();  // 层局部坐标：外部裁剪不带入（合成时经 DrawLayer 批裁剪）
+                break;
+            }
+            case CmdKind::EndLayer: {
+                // 层内容落盘，恢复重定向前的目标与状态（裁剪栈 / alpha）。
+                if (layer_stack.empty()) {
+                    break;  // 防御：不配对的 EndLayer
+                }
+                flush_batch();
+                const LayerFrame frame = std::move(layer_stack.back());
+                layer_stack.pop_back();
+                clip_stack = std::move(frame.saved_clip);
+                alpha = frame.saved_alpha;
+                gl.bind_framebuffer(FRAMEBUFFER, msaa_fbo);
+                gl.viewport(0, 0, device_w, device_h);
+                break;
+            }
+            case CmdKind::DrawLayer: {
+                // 层合成：常驻层纹理按放置矩阵上屏（直色 src-over 语义 + NEAREST 采样）。
+                const auto it = layer_cache.find(cmd.aux_key);
+                if (it == layer_cache.end() || it->second.fbo == 0) {
+                    // 冷存储未命中（后端重建等）：本帧跳过并整体失效层代际，下帧重录自愈。
+                    if (!layer_miss_warned) {
+                        AURORA_LOG_WARN("gpu-gl", "DrawLayer 未命中常驻层纹理，本帧跳过（下帧重录）");
+                        layer_miss_warned = true;
+                    }
+                    render::detail::bump_gpu_layer_epoch();
+                    break;
+                }
+                const LayerEntry &entry = it->second;
+                const Matrix2D identity_mat{};
+                const Matrix2D &mat = data.matrix != nullptr ? *data.matrix : identity_mat;
+                const float src_scale = cmd.composite_scale > 0.0F ? cmd.composite_scale : 1.0F;
+                const float lw = static_cast<float>(entry.width) / src_scale;
+                const float lh = static_cast<float>(entry.height) / src_scale;
+                BatchKey k{};
+                k.pipeline = Pipeline::Image;
+                k.clip = effective_clip();
+                k.nearest_filter = true;  // 与软件位图 floor 采样同语义
+                k.image_tex = entry.tex;  // 层纹理为画布同构直色内容：非 PMA 混合
+                begin_batch(k);
+                // 仿射矩阵直烘进四角顶点（与 Composite 同构）；uv = 层逻辑角点归一化。
+                const Point c0 = mat.apply_to_point(Point{.x = 0.0F, .y = 0.0F});
+                const Point c1 = mat.apply_to_point(Point{.x = lw, .y = 0.0F});
+                const Point c2 = mat.apply_to_point(Point{.x = lw, .y = lh});
+                const Point c3 = mat.apply_to_point(Point{.x = 0.0F, .y = lh});
+                const Color c = bake_alpha(Color{255, 255, 255, 255}, alpha);
+                const Vertex quad[4] = {
+                    Vertex{c0.x, c0.y, 0.0F, 0.0F, c.r, c.g, c.b, c.a},
+                    Vertex{c1.x, c1.y, 1.0F, 0.0F, c.r, c.g, c.b, c.a},
+                    Vertex{c2.x, c2.y, 1.0F, 1.0F, c.r, c.g, c.b, c.a},
+                    Vertex{c3.x, c3.y, 0.0F, 1.0F, c.r, c.g, c.b, c.a},
+                };
+                verts.insert(verts.end(), quad, quad + 4);
+                break;
+            }
             case CmdKind::DrawText: {
                 // 与 software_rhi 同形的数据契约；缺文本/字体直接跳过（录制方恒带 font_idx，
                 // 正常路径不会触发）。空色不绘（软件同契约）。
@@ -1788,6 +2067,38 @@ struct GpuGlRhi::Impl {
                 }
                 if (img.pixels.size()
                     < static_cast<std::uint64_t>(img.width) * static_cast<std::uint64_t>(img.height) * 4U) {
+                    break;
+                }
+                // 常驻流式通道（specification/03 §8.7）：stream_key != 0 走固定纹理槽复用 +
+                // 版本增量 sub-upload（无 PMA 全帧副本、不参与通用缓存淘汰）；版本未变零上传。
+                if (img.stream_key != 0) {
+                    StreamSlot *slot = ensure_stream_slot(img.stream_key, img.width, img.height);
+                    if (slot == nullptr || failed) {
+                        break;
+                    }
+                    if (slot->version != img.stream_version) {
+                        flush_batch();  // 版本重定义前落地可能引用旧内容的待提交批
+                        gl.bind_texture(TEXTURE_2D, slot->tex);
+                        gl.pixel_store_i(UNPACK_ALIGNMENT, 1);
+                        gl.tex_sub_image_2d(TEXTURE_2D, 0, 0, 0, img.width, img.height, RGBA, UNSIGNED_BYTE,
+                                            img.pixels.data());
+                        check_error("stream-update");
+                        if (failed) {
+                            break;
+                        }
+                        slot->version = img.stream_version;
+                    }
+                    BatchKey k{};
+                    k.pipeline = Pipeline::Image;
+                    k.clip = effective_clip();
+                    k.blend_pma = true;      // 片元一乘 PMA → 输出 PMA 语义，混合同静态图
+                    k.pma_in_shader = true;  // 直色纹理：PMA 下沉到片元（上传期无 CPU 预乘）
+                    k.image_tex = slot->tex;
+                    begin_batch(k);
+                    push_quad(cmd.bounds.origin.x, cmd.bounds.origin.y,
+                              cmd.bounds.origin.x + cmd.bounds.size.width,
+                              cmd.bounds.origin.y + cmd.bounds.size.height,
+                              bake_alpha(Color{255, 255, 255, 255}, alpha));
                     break;
                 }
                 const GLuint_ tex = acquire_image_tex(img);
@@ -1919,6 +2230,42 @@ struct GpuGlRhi::Impl {
                 }
                 const float s = scale > 0.0F ? scale : 1.0F;
                 const int r = std::max(1, static_cast<int>(cmd.f0 * s));
+                const float inv_s = 1.0F / s;
+                const float lx0 = static_cast<float>(rx0) * inv_s;
+                const float ly0 = static_cast<float>(ry0) * inv_s;
+                const float lx1 = static_cast<float>(rx1) * inv_s;
+                const float ly1 = static_cast<float>(ry1) * inv_s;
+                if (!layer_stack.empty()) {
+                    // 层内模糊：层内容 blit 到 aux 采样拷贝 → 读 aux 写 temp → 读 temp 回写层
+                    // FBO（避免反馈环）。区域坐标为层局部；temp（画布尺寸）以层 viewport 写入
+                    // 左上子区，层局部像素 1:1 对应。
+                    LayerEntry &entry = layer_cache[layer_stack.back().key];
+                    if (!copy_layer_to_aux(entry)) {
+                        break;
+                    }
+                    gl.disable(BLEND);
+                    gl.use_program(program_blur);
+                    gl.uniform2f(blur_u_logical, logical_w(), logical_h());
+                    gl.uniform1i(blur_u_src, 0);
+                    gl.uniform1i(blur_u_radius, r);
+                    gl.uniform1f(blur_u_scale, s);
+                    gl.uniform2f(blur_u_origin, static_cast<float>(rx0), static_cast<float>(ry0));
+                    gl.uniform2f(blur_u_size, static_cast<float>(rx1 - rx0), static_cast<float>(ry1 - ry0));
+                    gl.uniform1i(blur_u_dir, 0);
+                    gl.uniform2f(blur_u_canvas, static_cast<float>(entry.width), static_cast<float>(entry.height));
+                    bind_sample_tex(entry.aux_tex);
+                    gl.bind_framebuffer(FRAMEBUFFER, temp_fbo);
+                    gl.viewport(0, 0, entry.width, entry.height);
+                    draw_effect_quad(lx0, ly0, lx1, ly1, 0.0F, 0.0F, 1.0F, 1.0F);
+                    gl.uniform1i(blur_u_dir, 1);
+                    gl.uniform2f(blur_u_canvas, static_cast<float>(device_w), static_cast<float>(device_h));
+                    bind_sample_tex(temp_tex);
+                    gl.bind_framebuffer(FRAMEBUFFER, entry.fbo);
+                    gl.viewport(0, 0, entry.width, entry.height);
+                    draw_effect_quad(lx0, ly0, lx1, ly1, 0.0F, 0.0F, 1.0F, 1.0F);
+                    check_error("blur-region-layer");
+                    break;
+                }
                 flush_and_resolve();
                 gl.disable(BLEND);
                 gl.use_program(program_blur);
@@ -1929,11 +2276,6 @@ struct GpuGlRhi::Impl {
                 gl.uniform1f(blur_u_scale, s);
                 gl.uniform2f(blur_u_origin, static_cast<float>(rx0), static_cast<float>(ry0));
                 gl.uniform2f(blur_u_size, static_cast<float>(rx1 - rx0), static_cast<float>(ry1 - ry0));
-                const float inv_s = 1.0F / s;
-                const float lx0 = static_cast<float>(rx0) * inv_s;
-                const float ly0 = static_cast<float>(ry0) * inv_s;
-                const float lx1 = static_cast<float>(rx1) * inv_s;
-                const float ly1 = static_cast<float>(ry1) * inv_s;
                 const float u0 = static_cast<float>(rx0) / static_cast<float>(device_w);
                 const float v0 = static_cast<float>(ry0) / static_cast<float>(device_h);
                 const float u1 = static_cast<float>(rx1) / static_cast<float>(device_w);
@@ -1967,6 +2309,32 @@ struct GpuGlRhi::Impl {
                     break;
                 }
                 const float s = scale > 0.0F ? scale : 1.0F;
+                if (!layer_stack.empty()) {
+                    // 层内混合：读 aux 采样拷贝 → 回写层 FBO（单 pass；区域坐标为层局部）。
+                    LayerEntry &entry = layer_cache[layer_stack.back().key];
+                    if (!copy_layer_to_aux(entry)) {
+                        break;
+                    }
+                    gl.bind_framebuffer(FRAMEBUFFER, entry.fbo);
+                    gl.disable(BLEND);
+                    gl.use_program(program_blend);
+                    gl.uniform2f(blend_u_logical, logical_w(), logical_h());
+                    gl.uniform1i(blend_u_src, 0);
+                    gl.uniform1i(blend_u_mode, static_cast<int>(cmd.blend_mode));
+                    gl.uniform3f(blend_u_tint, static_cast<float>(cmd.color.r) / 255.0F,
+                                 static_cast<float>(cmd.color.g) / 255.0F,
+                                 static_cast<float>(cmd.color.b) / 255.0F);
+                    gl.uniform1f(blend_u_strength, strength);
+                    bind_sample_tex(entry.aux_tex);
+                    draw_effect_quad(static_cast<float>(rx0) / s, static_cast<float>(ry0) / s,
+                                     static_cast<float>(rx1) / s, static_cast<float>(ry1) / s,
+                                     static_cast<float>(rx0) / static_cast<float>(entry.width),
+                                     static_cast<float>(ry0) / static_cast<float>(entry.height),
+                                     static_cast<float>(rx1) / static_cast<float>(entry.width),
+                                     static_cast<float>(ry1) / static_cast<float>(entry.height));
+                    check_error("blend-region-layer");
+                    break;
+                }
                 flush_and_resolve();
                 gl.bind_framebuffer(FRAMEBUFFER, msaa_fbo);
                 gl.disable(BLEND);
@@ -2003,6 +2371,32 @@ struct GpuGlRhi::Impl {
                     break;
                 }
                 const float s = scale > 0.0F ? scale : 1.0F;
+                if (!layer_stack.empty()) {
+                    // 层内遮罩：读 aux 采样拷贝 → 回写层 FBO（单 pass；区域坐标为层局部）。
+                    LayerEntry &entry = layer_cache[layer_stack.back().key];
+                    if (!copy_layer_to_aux(entry)) {
+                        break;
+                    }
+                    gl.bind_framebuffer(FRAMEBUFFER, entry.fbo);
+                    gl.disable(BLEND);
+                    gl.use_program(program_mask);
+                    gl.uniform2f(mask_u_logical, logical_w(), logical_h());
+                    gl.uniform1i(mask_u_src, 0);
+                    gl.uniform1i(mask_u_kind, static_cast<int>(cmd.mask_kind));
+                    gl.uniform1f(mask_u_strength, strength);
+                    gl.uniform2f(mask_u_origin, static_cast<float>(rx0), static_cast<float>(ry0));
+                    gl.uniform2f(mask_u_size, static_cast<float>(rx1 - rx0), static_cast<float>(ry1 - ry0));
+                    gl.uniform1f(mask_u_scale, s);
+                    bind_sample_tex(entry.aux_tex);
+                    draw_effect_quad(static_cast<float>(rx0) / s, static_cast<float>(ry0) / s,
+                                     static_cast<float>(rx1) / s, static_cast<float>(ry1) / s,
+                                     static_cast<float>(rx0) / static_cast<float>(entry.width),
+                                     static_cast<float>(ry0) / static_cast<float>(entry.height),
+                                     static_cast<float>(rx1) / static_cast<float>(entry.width),
+                                     static_cast<float>(ry1) / static_cast<float>(entry.height));
+                    check_error("mask-region-layer");
+                    break;
+                }
                 flush_and_resolve();
                 gl.bind_framebuffer(FRAMEBUFFER, msaa_fbo);
                 gl.disable(BLEND);
@@ -2172,6 +2566,78 @@ auto GpuGlRhi::read_pixels(std::vector<std::uint8_t> &out) -> bool {
     impl_->gl.read_pixels(0, 0, impl_->device_w, impl_->device_h, RGBA, UNSIGNED_BYTE, out.data());
     impl_->check_error("read_pixels");
     return !impl_->failed;
+}
+
+// ---- RhiBackend 能力位与流式纹理契约（specification/03 §8.7）----
+
+auto GpuGlRhi::capabilities() const -> RhiCapabilities {
+    // GL 3.3 core：GPU 实路径；原生表面导入不实现（扩展探测仅启动期诊断，见 init）；
+    // 无 compute（GL 3.3 无 compute shader）。
+    return impl_ != nullptr && !impl_->failed ? RhiCapabilities{.gpu = true} : RhiCapabilities{};
+}
+
+auto GpuGlRhi::acquire_stream_image(std::uint64_t key, int width, int height) -> StreamImageId {
+    if (impl_ == nullptr || impl_->failed) {
+        return 0;
+    }
+    // 句柄 = 槽纹理名；DrawImage 流式分支按键寻址同一存储，两路共享同槽。
+    const auto *slot = impl_->ensure_stream_slot(key, width, height);
+    return slot != nullptr ? slot->tex : 0;
+}
+
+auto GpuGlRhi::update_stream_image(StreamImageId id, const std::uint8_t *pixels, std::size_t stride_bytes, int x,
+                                   int y, int w, int h) -> void {
+    if (impl_ == nullptr || impl_->failed || id == 0 || pixels == nullptr || w <= 0 || h <= 0) {
+        return;
+    }
+    for (auto &kv : impl_->stream_slots) {
+        if (kv.second.tex != id) {
+            continue;
+        }
+        const auto &slot = kv.second;
+        if (x < 0 || y < 0 || x + w > slot.width || y + h > slot.height) {
+            return;  // 脏矩形越界：按契约忽略（界内性由调用方保证）
+        }
+        impl_->flush_batch();  // 上传改绑纹理状态：先落地可能引用该槽的待提交批
+        impl_->gl.bind_texture(TEXTURE_2D, slot.tex);
+        impl_->gl.pixel_store_i(UNPACK_ALIGNMENT, 1);
+        // 行跨距经 UNPACK_ROW_LENGTH 表达（单位 = 像素数）；0 = 紧凑行无需设置。
+        impl_->gl.pixel_store_i(UNPACK_ROW_LENGTH,
+                                stride_bytes != 0 ? static_cast<GLint_>(stride_bytes / 4U) : 0);
+        const std::size_t stride = stride_bytes != 0 ? stride_bytes : static_cast<std::size_t>(slot.width) * 4U;
+        impl_->gl.tex_sub_image_2d(TEXTURE_2D, 0, x, y, w, h, RGBA, UNSIGNED_BYTE,
+                                    pixels + stride * static_cast<std::size_t>(y)
+                                        + static_cast<std::size_t>(x) * 4U);
+        impl_->gl.pixel_store_i(UNPACK_ROW_LENGTH, 0);
+        impl_->check_error("stream-update");
+        return;
+    }
+}
+
+auto GpuGlRhi::release_stream_image(StreamImageId id) -> void {
+    if (impl_ == nullptr || impl_->failed || id == 0) {
+        return;
+    }
+    for (auto it = impl_->stream_slots.begin(); it != impl_->stream_slots.end(); ++it) {
+        if (it->second.tex != id) {
+            continue;
+        }
+        impl_->flush_batch();  // 待提交批可能引用该纹理：先落地再删除
+        const GLuint_ tex = it->second.tex;
+        impl_->gl.delete_textures(1, &tex);
+        impl_->stream_slots.erase(it);
+        return;
+    }
+}
+
+auto GpuGlRhi::import_native_surface(const NativeSurfaceFrame &frame) -> StreamImageId {
+    (void)frame;
+    // GL 3.3 core 不实现真实导入（能力位恒 false，扩展探测仅诊断）：单次告警 + 回退 CPU 上传。
+    if (impl_ != nullptr && !impl_->failed && !impl_->native_import_warned) {
+        impl_->native_import_warned = true;
+        AURORA_LOG_WARN("gpu-gl", "import_native_surface: not supported on GL 3.3 core; falling back to CPU upload");
+    }
+    return 0;
 }
 
 }  // namespace aurora::rhi

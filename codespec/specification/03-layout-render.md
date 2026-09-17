@@ -609,9 +609,25 @@ class RhiBackend {
   public:
     [[nodiscard]] virtual auto name() const -> std::string_view = 0;
     virtual auto submit(const DrawCmd &cmd, const CmdData &data) -> void = 0;
+
+    // 能力位（默认全 false）：GPU 后端按实现如实申报。
+    [[nodiscard]] virtual auto capabilities() const -> RhiCapabilities { return {}; }
+
+    // 流式纹理常驻槽（逐帧更新通道，见 §8.7）：键寻址 + 版本门控增量上传。
+    [[nodiscard]] virtual auto acquire_stream_image(std::uint64_t key, int width, int height)
+        -> StreamImageId { return 0; }  // 0 = 后端不支持
+    virtual auto update_stream_image(StreamImageId id, const std::uint8_t *pixels,
+                                     std::size_t stride_bytes, int x, int y, int w, int h) -> void {}
+    virtual auto release_stream_image(StreamImageId id) -> void {}
+
+    // 原生 GPU 表面导入契约位（平台互操作，GL 恒返回 0）。
+    [[nodiscard]] virtual auto import_native_surface(const NativeSurfaceFrame &frame)
+        -> StreamImageId { return 0; }
 };
 }  // namespace aurora::rhi
 ```
+
+**能力位与流式接口（后端无关契约）**：`RhiCapabilities{gpu, native_surface_import, compute}` 由 `capabilities()` 申报（`StreamImageId` 为非零句柄、0 = 不可用哨兵）。流式三接口服务**逐帧更新型内容**（视频 / 大图）：`acquire_stream_image(key, w, h)` 按 `stream_key` 取常驻纹理槽、同键复用；`update_stream_image` 按 `stride_bytes`（0 = 紧凑行）与脏矩形增量上传，版本门控在调用方；`release_stream_image` 释放（重复释放无害）。`import_native_surface` 收 `NativeSurfaceFrame`（`core/native_surface.h`，携带平台句柄与可空 `release` 回调——**先判空再调用**）。三个接口默认实现均为「不支持」（返回 0 / no-op），软件后端零负担。
 
 `DisplayList::replay` 因此有两个重载：
 
@@ -620,9 +636,13 @@ class RhiBackend {
 | `replay(rhi::RhiBackend&)` | **唯一实现**：遍历 `cmds_`，把池下标解析为 `CmdData`（负下标 → `nullptr`）后逐条 `submit` |
 | `replay(Painter&)` | 兼容薄壳：构造临时 `rhi::SoftwareRhi{p}` 后转发到上式（调用点无需改动） |
 
-**首个后端 `SoftwareRhi`**（`render/rhi/software_rhi.h`）把 20 类 `CmdKind`（含图表原语 `Polyline` / `Sector`，见 §8.1）逐条转发回 `Painter` 的对应原语，参数逐字段与抽取前的 `replay` 一致，故 **DC 像素输出逐位不变**（重构红线，由 `utest_rhi` 的 `SoftwareRhi` 与直接绘制逐字节比对锁定）。未绑定 `Painter` 时 `submit` 为 no-op（便于测试构造空后端）；GPU 后端 `GpuGlRhi`（§8.7）实现同一接口，成为**平级第二消费者**——新增后端不改动录制侧与 `DisplayList`。
+**首个后端 `SoftwareRhi`**（`render/rhi/software_rhi.h`）把 23 类 `CmdKind`（含图表原语 `Polyline` / `Sector` 与 GPU 层命令三件套，见 §8.1）逐条转发回 `Painter` 的对应原语，参数逐字段与抽取前的 `replay` 一致，故 **DC 像素输出逐位不变**（重构红线，由 `utest_rhi` 的 `SoftwareRhi` 与直接绘制逐字节比对锁定）。未绑定 `Painter` 时 `submit` 为 no-op（便于测试构造空后端）；GPU 后端 `GpuGlRhi`（§8.7）实现同一接口，成为**平级第二消费者**——新增后端不改动录制侧与 `DisplayList`。
 
 **设计取舍**：接口收成**单一 `submit`**，而非把 18 个绘制原语各设一个虚函数。命令的几何 / 标量已全在 `DrawCmd` 里，单入口既让回放循环保持一行，也把「如何解释命令、如何合并成批次」留给后端——GPU 后端正靠这一点做管线切换与批处理，而 18 个平铺虚函数会强迫它在原语之间重新推断管线状态。`Painter` 侧无需任何改动。
+
+**GPU 层命令三件套（`BeginLayer` / `EndLayer` / `DrawLayer`）**：带 `cache_layer` 修饰的控件在 GPU / 录制路径不再逐帧走离屏 `Composite` 重栅，而是把子树绘制**重定向到常驻层纹理**——录制侧 `Painter::begin_layer(key, size)` / `end_layer()` / `draw_layer(key, matrix, src_scale)` 分别落为三命令（Direct 直绘模式 no-op，仍走 paint_cache 位图路径）。命令字段：`BeginLayer` 携 `aux_key`（层键：进程内唯一、0 保留、`next_gpu_layer_key()` 惰性取号且永不回收）与 `bounds`（层逻辑尺寸）；`DrawLayer` 携 `aux_key` + `matrix_idx`（放置矩阵）+ `composite_scale`（层录制缩放）。整体失效由**全局层代际（epoch）**承载：消费端层存储整体丢弃或 `DrawLayer` 未命中时 bump 一次，全部控件下帧整体重录 `BeginLayer`——单帧缺口自愈，不逐帧抖动。
+
+**`SoftwareRhi` 层仿真**（软件回退下语义对齐）：`BeginLayer` 起把后续命令缓冲进捕获栈（嵌套层成栈），`EndLayer` 触发离屏定稿——子树命令离屏重放为层位图，以层键存入**进程级全局层存储**（GPU 录制的 DL 回退软件回放时逐帧构造临时 `SoftwareRhi`，回退帧与离屏渲染共用一份存储，干净帧 `DrawLayer` 才能跨帧命中）；容量上限 64 条，超限清空并 bump epoch。`DrawLayer` 未命中时跳过本帧并 bump epoch（告警键级去重），下帧由控件重录补齐。
 
 > **池下标是录制方契约**：`DrawCmd` 的 `str_idx` / `font_idx` / `col_idx` / `flt_idx` / `image_idx` / `matrix_idx` / `pt_idx`（`Polyline` 点集）由 `Painter::record*` 生成，回放侧**只解析、不构造**；`DisplayList` 的 `string_at` / `colors_at` / `floats_at` / `font_at` / `image_at` / `matrix_at` / `points_at` 只读访问器即为此提供。
 >
@@ -655,9 +675,15 @@ class RhiBackend {
 
 **效果 pass 机制**：已绘内容位于 MSAA 渲染缓冲（不可采样），效果命令前先把 MSAA resolve 成纹理（`msaa_dirty` 门控：同帧连续效果只在内容变化后重新 blit）。纹理缓存（渐变 LUT / 图像纹理）溢出淘汰前先 flush 当前批——待提交批可能仍引用将被删除的纹理（与字形图集满页 flush 同因）。
 
+**GPU 层缓存（`cache_layer` 对齐，见 §8.6 层命令三件套）**：`BeginLayer` 把绘制重定向到 FBO 常驻层纹理（直色 RGBA，与画布同构；层键缺席或尺寸变化才重建，重建前先 flush 待提交批），随后清空层内裁剪栈（层局部坐标，全局 alpha 保持）；`EndLayer` 定稿并恢复 MSAA 目标与状态；`DrawLayer` 走 Image 管线合成——NEAREST 逐像素取样与软件 `composite_pixels` 同语义、放置矩阵直烘四角顶点、非 PMA 直色混合。层内效果命令（Blur/Blend/Mask）经**惰性分配的 aux 采样拷贝**（aux FBO + 纹理）读取层内容，不污染主画布；尺寸变化时 aux 一并重建。`DrawLayer` 未命中常驻层纹理（后端重建等冷存储）时告警（键级一次性）+ bump 全局 epoch + 本帧跳过，下帧控件重录自愈。干净帧子树零重栅：仅一条 `DrawLayer` 合成。
+
+**流式纹理常驻槽**：`RhiBackend` 流式接口（§8.6）的 GL 落地——`stream_key` 寻址**固定纹理槽**，同键跨帧复用（不重建 storage，尺寸变化才重定义），`stream_version` 变化触发**增量 sub-upload**（`UNPACK_ROW_LENGTH` 承载跨距行、脏矩形区域上传、PMA 预乘下沉到上传时），逐帧视频 / 大图更新免全量重传与逐帧新建纹理。防御性 no-op：句柄 0 / 空指针 / 零尺寸 / 越界脏矩形；`release_stream_image` flush 后删除纹理（重复释放无害）。`DrawImage` 命令路径同样感知 `Image::stream_key`（非 0 时绕过 `content_hash` 纹理缓存直走流式槽，与显式流式 API 共用同一槽表）。
+
+**能力位与原生表面导入（后端无关契约）**：`capabilities()` 返回 `RhiCapabilities{gpu, native_surface_import, compute}`——GL 3.3 core 下 `gpu = true`、`compute = false`（无 compute 内部加速路径）、`native_surface_import = false`。`import_native_surface(frame)` 为平台原生 GPU 表面零拷贝导入的**契约位**（供 D3D11 / Metal 互操作后端未来兑现）：GL 侧恒不支持，warn-once 后返回 0（0 = 不可用哨兵），不抛异常、不破坏帧状态。
+
 **初始化失败链**（函数表缺项 / GL 版本不足 / 着色器链接失败 / GL 错误）→ `valid()` 为 false，调用方整体回退软件路径，**不做逐命令混合**。`Surface::gpu_backend()` 非空时其 `name()` 恒为 `"gpu-gl"`；首帧初始化失败时 Window 内部永久回退软件路径（`gpu_backend()` 仍可能非空——契约只断言「非空即 `gpu-gl`」）。`read_pixels()` 提供当前帧内容读回（诊断 / 快照用）：懒 resolve——调用时按需补 MSAA→resolve blit；调用窗口为 `end_frame` 之后、下一次 `begin_frame` 之前；GLFW 侧 `data()` 在 DEBUG 下经此懒读回（无消费者时零 GPU→CPU 读回成本，Release 恒空）。
 
-**测试**：`utest_gpu_gl_rhi` 以 fake GL 驱动桩（全量填充 `GLFn` + 调用记录）覆盖帧生命周期 / 各管线批切分 / 渐变 LUT 内容 / PMA 上传 / 字形图集子上传 / 效果 ping-pong 序 / 初始化失败链；`itest_gpu_gl_smoke` 在真实 GLFW 窗口验证 GPU 模式呈现与后端身份契约（无显示环境自动 SKIP）。
+**测试**：`utest_gpu_gl_rhi` 以 fake GL 驱动桩（全量填充 `GLFn` + 调用记录）覆盖帧生命周期 / 各管线批切分 / 渐变 LUT 内容 / PMA 上传 / 字形图集子上传 / 效果 ping-pong 序 / 初始化失败链 / 能力位与流式拒绝 / 流式槽版本门控子上传 / 流式公共 API 契约（复用 / 跨距 / 防御 no-op）/ 层缓存生命周期与 miss 自愈；`utest_gpu_layers` 覆盖层键唯一性与 epoch 单调、`NativeSurfaceFrame` 契约、`Painter` 层命令录制与 `SoftwareRhi` 层仿真（roundtrip 逐位一致 / miss 跳过 + bump / 跨实例共享存储）；`itest_gpu_layer_cache` 覆盖控件级首帧层录制 / 干净帧仅 `DrawLayer` / 失效重录且像素与直绘一致 / epoch 推进整体失效 / miss 自愈闭环 / 尺寸变化重录；`itest_gpu_gl_smoke` 在真实 GLFW 窗口验证 GPU 模式呈现与后端身份契约（无显示环境自动 SKIP）。
 
 ---
 
@@ -671,6 +697,8 @@ class RhiBackend {
 
 `Image::content_hash()`（`core/image.h`）提供像素内容的 FNV-1a 64 位惰性摘要：首次调用计算并缓存（const 访问经 mutable 落回本对象），拷贝携带缓存；GPU 纹理缓存等内容寻址消费方经此寻址，免除每帧全量哈希。**契约**：直接改写 `pixels` 后必须调用 `invalidate_content_hash()`，否则摘要过期、内容寻址消费方可能命中旧内容。
 
+`Image` 另携**流式章**：`stream_key` / `stream_version`（均 0 = 非流式）。`stream_key != 0` 时 GPU 后端按键寻址固定纹理槽（不走 `content_hash` 缓存、不参与通用缓存淘汰），`stream_version` 变化即触发增量 sub-upload——视频 / 大图逐帧更新免全量重传（见 §8.7 流式纹理常驻槽）；软件路径不感知该章。
+
 ### 9.2 VideoPlayer
 
 `VideoPlayer`（`media/video_player.h`）是视频播放控件，可子类化定制。
@@ -678,6 +706,8 @@ class RhiBackend {
 **播放控制**：`play()` / `pause()` / `toggle_play()` / `is_playing()` / `seek(microseconds)` / `seek_fraction(double)` / `position()` / `position_fraction()` / `duration()` / `set_volume(double)` / `set_muted(bool)` / `volume()` / `muted()`。
 
 **数据源**：`set_source(shared_ptr<VideoSource>)` / `source()`；`set_fit(BoxFit)` / `fit()`。
+
+**帧数据与 GPU 流式通道**：帧以 `VideoFrame`（`media/video_source.h`）承载——`image`（解码像素，原生表面路径可空）+ `native_surface`（平台原生 GPU 表面变体，None = CPU 路径）+ `pts`。播放器为每个实例惰性分配流式键：新帧到达时给 `Image` 盖 `stream_key` / `stream_version` 章，绘制随 `DrawImage` 命令进 GPU 流式常驻纹理槽（§8.7）——同键跨帧复用纹理、版本变化仅增量子上传，逐帧播放免全量重传；软件路径照常栅格，无额外成本。
 
 **控件与回调**：`set_show_controls(bool)` / `show_controls()` / `set_controls(unique_ptr<Widget>)` / `set_on_tap(fn)` / `set_on_double_tap(fn)`。
 

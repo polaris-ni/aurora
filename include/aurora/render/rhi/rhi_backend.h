@@ -7,10 +7,24 @@
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/core/image.h"
+#include "aurora/core/native_surface.h"
 #include "aurora/core/transform.h"
 #include "aurora/render/display_list.h"
 
 namespace aurora::rhi {
+
+/// @brief 流式图像句柄（后端不透明值；`0` 恒为无效句柄）。
+///
+/// 由 `acquire_stream_image` / `import_native_surface` 签发，指向后端内的常驻纹理槽
+///（固定槽复用、不参与通用缓存淘汰）。生命周期由调用方管理：用毕 `release_stream_image`。
+using StreamImageId = std::uint64_t;
+
+/// @brief RHI 后端能力位（构造时确定，帧间不变；软件后端全 false）。
+struct RhiCapabilities {
+    bool gpu = false;                   ///< 硬件加速命令消费（GPU 后端为 true）
+    bool native_surface_import = false; ///< 可导入平台原生 GPU 表面（`import_native_surface` 可用）
+    bool compute = false;               ///< 支持 compute 内部加速（blur / mask / 重采样 / 层合成）
+};
 
 /// @brief 一条绘制命令所需的**变长数据**，由 `DisplayList` 在回放时把池下标解析为只读指针。
 ///
@@ -54,6 +68,46 @@ class RhiBackend {
     /// @param cmd  命令（几何 / 颜色 / 标量；变长部分见 `data`）
     /// @param data 该命令引用的变长数据（不引用的字段为 `nullptr`）
     virtual auto submit(const DrawCmd &cmd, const CmdData &data) -> void = 0;
+
+    // ---- 资源扩展面（可选能力；默认实现 = 不支持，调用方按返回值回退常规路径） ----
+
+    /// @brief 能力位查询（构造时确定）。
+    [[nodiscard]] virtual auto capabilities() const -> RhiCapabilities { return {}; }
+
+    /// @brief 取流式图像槽（固定纹理槽复用，不走 content_hash 缓存、不参与通用缓存淘汰）。
+    /// 同 `key` 重复获取复用同槽；尺寸变化时后端就地重定义纹理存储。
+    /// @return 句柄；`0` = 后端不支持（调用方回退常规 `DrawImage` 上传路径）。
+    [[nodiscard]] virtual auto acquire_stream_image(std::uint64_t key, int width, int height) -> StreamImageId {
+        (void)key;
+        (void)width;
+        (void)height;
+        return 0;
+    }
+
+    /// @brief 流式图像增量更新：按行跨距 + 脏矩形 sub-upload（GL `glTexSubImage2D`）。
+    /// @param pixels       像素基址（RGBA8 直色，非预乘；PMA 由后端在采样/上传阶段处理）
+    /// @param stride_bytes 行跨距字节数；`0` = 紧凑行（width*4）
+    /// @param x,y,w,h      脏矩形（像素坐标，左上原点；全图更新传整图范围）
+    virtual auto update_stream_image(StreamImageId id, const std::uint8_t *pixels, std::size_t stride_bytes, int x,
+                                     int y, int w, int h) -> void {
+        (void)id;
+        (void)pixels;
+        (void)stride_bytes;
+        (void)x;
+        (void)y;
+        (void)w;
+        (void)h;
+    }
+
+    /// @brief 释放流式图像槽（句柄此后无效；重复释放无害）。
+    virtual auto release_stream_image(StreamImageId id) -> void { (void)id; }
+
+    /// @brief 导入平台原生 GPU 表面（dmabuf / IOSurface / D3D11 共享纹理 / AHardwareBuffer）。
+    /// @return 流式图像句柄；`0` = 不支持或导入失败（调用方回退 CPU 上传路径，单帧警告不刷屏）。
+    [[nodiscard]] virtual auto import_native_surface(const NativeSurfaceFrame &frame) -> StreamImageId {
+        (void)frame;
+        return 0;
+    }
 };
 
 }  // namespace aurora::rhi

@@ -46,6 +46,14 @@ struct Image {
     /// 非 SVG 文件返回错误。
     [[nodiscard]] static auto load_svg(std::string_view path, int target_w = 0, int target_h = 0) -> Result<Image>;
 
+    // ---- 流式纹理标识（GPU 常驻流式通道；软件路径忽略）----
+    // `stream_key != 0` 时 GPU 后端按键寻址固定纹理槽（不走 content_hash 缓存、不参与
+    // 通用缓存淘汰），`stream_version` 变化即触发增量 sub-upload——视频 / 大图逐帧更新
+    // 场景消除每帧纹理新建 / PMA 全帧副本 / 淘汰抖动（见 specification/03 §8.7）。
+    // 生命周期跟随产生方（如 `VideoPlayer`），键由产生方保证进程内唯一（0 保留为无效）。
+    std::uint64_t stream_key = 0;
+    std::uint64_t stream_version = 0;
+
     // ---- 内部缓存（勿直接读写）----
     // content_hash 惰性求值状态；声明在 pixels 之后，保持既有
     // `Image{.width=…, .height=…, .pixels=…}` 聚合初始化兼容（未列字段取默认值）。

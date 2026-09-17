@@ -228,6 +228,17 @@ class Painter {
         return !rec_dynamic_.empty() && (rec_dynamic_.back() != 0);
     }
 
+    // ---- GPU 层缓存命令（仅录制模式；Direct 模式为 no-op）----
+    // 层语义见 `rhi::RhiBackend` 消费侧与 `specification/03` §8.7：`begin_layer` 后至
+    // `end_layer` 前的命令重定向到常驻层纹理（`aux_key` 寻址，尺寸 = bounds.size 逻辑 dp），
+    // `draw_layer` 把层纹理按矩阵合成回画布。仅软件直绘（非录制）不走层命令（走 paint_cache_）。
+    /// @brief 开始层捕获（录制模式下记 BeginLayer 命令；Direct 模式 no-op）。
+    auto begin_layer(std::uint64_t key, const Size &size) -> void;
+    /// @brief 结束层捕获（录制模式下记 EndLayer 命令；Direct 模式 no-op）。
+    auto end_layer() -> void;
+    /// @brief 合成层纹理到当前画布（录制模式下记 DrawLayer 命令；Direct 模式 no-op）。
+    auto draw_layer(std::uint64_t key, const Matrix2D &matrix, float src_scale) -> void;
+
   private:
     struct ClipRegion {
         Rect rect;

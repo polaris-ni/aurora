@@ -254,7 +254,7 @@ save_btn.modifier = au::Modifier{}
 | `.shadow(offset_x = 0, offset_y = 2, blur = 4, color = 黑色 25%)` | 投影阴影（绘制于内容之下） |
 | `.blur(float radius)` | 内容模糊：子树绘制完成后对整个内容盒做高斯近似模糊 |
 | `.backdrop_filter(float radius)` | 背景滤镜（毛玻璃）：绘制内容前先模糊内容盒背后已绘像素，配合半透明 `background` |
-| `.blend_mode(...)` / `.shader_mask(...)` / `.cache_layer(...)` | 像素混合 / 渐变遮罩 / 离屏缓存（`BlendMode` / `ShaderMaskKind` 枚举见 `render/blend.h`） |
+| `.blend_mode(...)` / `.shader_mask(...)` / `.cache_layer(...)` | 像素混合 / 渐变遮罩 / 离屏缓存（`BlendMode` / `ShaderMaskKind` 枚举见 `render/blend.h`；GPU 路径经常驻层纹理缓存，epoch 键控失效，见 `render/detail/gpu_layer.h`） |
 | `.draggable(...)` / `.long_press(...)` | 手势（单指，由 `Draggable` / `LongPress` 修饰节点驱动） |
 | `.touch(on_touch)` | 原始多点触摸流回调（`TouchListener` 节点，不消费命中） |
 | `.tooltip(std::string, float delay_ms = 500)` / `.context_menu(std::vector<MenuItem>)` | 悬停提示气泡 / 右键上下文菜单 |

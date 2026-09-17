@@ -6,16 +6,26 @@
 #include <span>
 
 #include "aurora/core/image.h"
+#include "aurora/core/native_surface.h"
 #include "aurora/core/result.h"
 #include "aurora/core/types.h"
 #include "aurora/state/reactive.h"
 
 namespace aurora {
 
-/// @brief 单帧视频画面（已解码 RGBA8 像素，与 `core::Image` 同构，可直接 `Painter::draw_image`）。
+/// @brief 单帧视频画面（双形态：CPU RGBA8 `Image` 或 GPU 原生表面）。
+///
+/// - `native_surface.kind != None`：解码器交出原生 GPU 表面（dmabuf / IOSurface /
+///   D3D11 共享纹理 / AHardwareBuffer），GPU 后端经 `import_native_surface` 零拷贝导入。
+///   `image` 可为空（纯 GPU 路径），核心侧不复制像素。
+/// - 否则：`image` 承载已解码 RGBA8 像素，可直 `Painter::draw_image` / 流式纹理上传。
+///
+/// 原生表面导入失败时调用方回退 CPU 上传路径（`image` 必须有像素），单帧警告不刷屏
+///（见 ROADMAP 子项二 / `rhi::RhiCapabilities::native_surface_import`）。
 struct VideoFrame {
-    Image image;  ///< 解码后的像素（RGBA8）。
-    std::chrono::microseconds pts{0};  ///< 该帧的呈现时间戳（相对起点）。
+    Image image;                              ///< 解码后的像素（CPU 路径；原生表面时可空）
+    NativeSurfaceFrame native_surface;        ///< 原生 GPU 表面（None = CPU 路径）
+    std::chrono::microseconds pts{0};         ///< 该帧的呈现时间戳（相对起点）
 };
 
 /// @brief 视频源抽象（**核心扩展点①**：可插拔解码/源）。

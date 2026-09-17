@@ -43,6 +43,9 @@ enum class CmdKind : std::uint8_t {
     SetAlpha,
     Polyline,  ///< 抗锯齿多段线：点集经 `pt_idx` 引用 point_pool_，f0 = 线宽（逻辑 dp）
     Sector,  ///< 抗锯齿扇形 / 环扇：pt0 = 圆心，f0 = 外半径，f1 = 内半径，f2 = 起角，f3 = 止角
+    BeginLayer,  ///< GPU 层缓存开始：后续命令重定向到常驻层纹理（aux_key = 层键，bounds = 层尺寸）
+    EndLayer,    ///< GPU 层缓存结束：层纹理定稿，恢复重定向前的目标与状态
+    DrawLayer,   ///< 层合成：aux_key = 层键，matrix_idx = 放置矩阵，composite_scale = 层录制缩放
 };
 
 /// @brief 单条绘制命令。变长数据（文本 / 渐变色标 / 渐变停靠）经索引引用 DisplayList 的数据池，
@@ -71,6 +74,8 @@ struct DrawCmd {
     // Composite（离屏合成）专用
     int matrix_idx = -1;  ///< 离屏缓冲变换矩阵在 matrix_pool_ 的索引
     float composite_scale = 1.0F;  ///< 离屏缓冲的设备像素缩放（源 Painter 的 scale）
+    // BeginLayer / DrawLayer（GPU 层缓存）专用：层键（进程内唯一，0 保留）
+    std::uint64_t aux_key = 0;
 };
 
 /// @brief Display List：绘制命令缓冲 + 变长数据池，支持录制（由 Painter 驱动）与回放。
@@ -116,7 +121,10 @@ class DisplayList {
     auto add_image(const Image &img) -> int {
         // 预热源对象的内容摘要（const 下经 mutable 缓存落回源）：GPU 纹理缓存经
         // `Image::content_hash()` 寻址，预热后逐帧的池拷贝携带有效缓存，免除每帧全量哈希。
-        (void)img.content_hash();
+        // 流式图像（stream_key != 0）不走摘要寻址路径，跳过预热（视频逐帧更新免全帧哈希）。
+        if (img.stream_key == 0) {
+            (void)img.content_hash();
+        }
         image_pool_.push_back(img);
         return static_cast<int>(image_pool_.size()) - 1;
     }

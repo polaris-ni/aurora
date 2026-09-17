@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include "aurora/core/native_surface.h"
+#include "aurora/render/detail/gpu_layer.h"
 #include "aurora/render/display_list.h"
 #include "aurora/render/rhi/gpu_gl_rhi.h"
 #include "aurora/render/rhi/rhi_frame_sink.h"
@@ -37,6 +39,7 @@ constexpr std::uint32_t AURORA_GL_DRAW_FRAMEBUFFER_TARGET = 0x8CA9;
 constexpr std::uint32_t AURORA_GL_TEXTURE_MIN_FILTER = 0x2801;
 constexpr std::uint32_t AURORA_GL_FILTER_NEAREST = 0x2600;
 constexpr std::uint32_t AURORA_GL_FILTER_LINEAR = 0x2601;
+constexpr std::uint32_t AURORA_GL_FORMAT_RGBA = 0x1908;
 
 /// @brief fake GL 驱动桩：全量填充 GLFn 函数表，行为模拟「3.3 core 完整实现」并记录关键
 /// 调用（draw/clear/blit）供断言。GLFn 成员是裸函数指针，桩为静态函数 + `current` 实例
@@ -88,6 +91,8 @@ class FakeGl {
         std::vector<std::uint8_t> data;
     };
     std::vector<SubUpload> sub_uploads;
+    /// @brief RGBA 直色子上传记录（常驻流式纹理通道验证用；4 字节/像素）。
+    std::vector<SubUpload> rgba_sub_uploads;
 
   private:
     bool fail_link_;
@@ -171,7 +176,7 @@ class FakeGl {
         }
     }
     static void tex_sub_image_2d(rhi::GLenum_, rhi::GLint_, rhi::GLint_ xoffset, rhi::GLint_ yoffset,
-                                 rhi::GLsizei_ width, rhi::GLsizei_ height, rhi::GLenum_, rhi::GLenum_,
+                                 rhi::GLsizei_ width, rhi::GLsizei_ height, rhi::GLenum_ format, rhi::GLenum_,
                                  const void *pixels) {
         SubUpload up;
         up.x = xoffset;
@@ -180,9 +185,14 @@ class FakeGl {
         up.height = height;
         if (pixels != nullptr) {
             const auto *p = static_cast<const std::uint8_t *>(pixels);
-            up.data.assign(p, p + static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+            const std::size_t bpp = format == AURORA_GL_FORMAT_RGBA ? 4U : 1U;
+            up.data.assign(p, p + static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * bpp);
         }
-        current->sub_uploads.push_back(std::move(up));
+        if (format == AURORA_GL_FORMAT_RGBA) {
+            current->rgba_sub_uploads.push_back(std::move(up));
+        } else {
+            current->sub_uploads.push_back(std::move(up));
+        }
     }
     static void pixel_store_i(rhi::GLenum_, rhi::GLint_) {}
 
@@ -1069,6 +1079,221 @@ AURORA_TEST_CASE(gpu_gl_composite_transform_quad) {
     rhi_obj.end_frame();
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 0U);
     AURORA_TEST_CHECK_EQ(fake.uploads.size(), 1U);
+}
+
+AURORA_TEST_CASE(gpu_gl_capabilities_bits) {
+    // 未装载：能力位全 false（与软件回退语义一致）；流式契约整体拒绝。
+    rhi::GpuGlRhi not_loaded;
+    const auto cap_bad = not_loaded.capabilities();
+    AURORA_TEST_CHECK_FALSE(cap_bad.gpu);
+    AURORA_TEST_CHECK_FALSE(cap_bad.native_surface_import);
+    AURORA_TEST_CHECK_FALSE(cap_bad.compute);
+    AURORA_TEST_CHECK_EQ(not_loaded.acquire_stream_image(1, 8, 8), 0U);
+    AURORA_TEST_CHECK_NO_THROW(not_loaded.update_stream_image(1, nullptr, 0, 0, 0, 1, 1));
+    AURORA_TEST_CHECK_NO_THROW(not_loaded.release_stream_image(1));
+    AURORA_TEST_CHECK_EQ(not_loaded.import_native_surface(aurora::NativeSurfaceFrame{}), 0U);
+
+    // GL 3.3 core：gpu=true；原生表面导入不实现（恒 false）；无 compute。
+    FakeGl fake;
+    rhi::GpuGlRhi rhi_obj(fake.fn);
+    AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
+    const auto cap = rhi_obj.capabilities();
+    AURORA_TEST_CHECK_TRUE(cap.gpu);
+    AURORA_TEST_CHECK_FALSE(cap.native_surface_import);
+    AURORA_TEST_CHECK_FALSE(cap.compute);
+}
+
+AURORA_TEST_CASE(gpu_gl_stream_texture_slot_version_gating) {
+    FakeGl fake;
+    rhi::GpuGlRhi rhi_obj(fake.fn);
+    AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
+    rhi::RhiFrameSink &sink = rhi_obj;
+    const Rect area{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 32.0F, .height = 16.0F}};
+
+    // 流式图像：直色像素（未预乘）+ 流式键/版本标识。
+    Image img;
+    img.width = 2;
+    img.height = 1;
+    img.pixels = {200, 100, 50, 255, 200, 100, 50, 128};
+    img.stream_key = 42;
+    img.stream_version = 1;
+
+    // 首帧：槽纹理创建走空数据 tex_image_2d（不入 uploads），像素经 RGBA 直色子上传。
+    AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(32, 16, 1.0F));
+    DisplayList dl;
+    dl.push_cmd(make_image_cmd(area, img, dl));
+    dl.replay(sink.backend());
+    rhi_obj.end_frame();
+    AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 1U);
+    AURORA_TEST_CHECK_EQ(rhi_obj.stats().skipped_cmds, 0U);
+    AURORA_TEST_CHECK_EQ(fake.uploads.size(), 0U);
+    AURORA_TEST_REQUIRE(fake.rgba_sub_uploads.size() == 1U);
+    const auto &up = fake.rgba_sub_uploads[0];
+    AURORA_TEST_CHECK_EQ(up.x, 0);
+    AURORA_TEST_CHECK_EQ(up.y, 0);
+    AURORA_TEST_CHECK_EQ(up.width, 2);
+    AURORA_TEST_CHECK_EQ(up.height, 1);
+    AURORA_TEST_CHECK_EQ(up.data.size(), static_cast<std::size_t>(2) * 4U);
+    AURORA_TEST_CHECK_EQ(up.data[0], 200);  // 直色原样上传（无 CPU 预乘；PMA 下沉片元）
+    AURORA_TEST_CHECK_EQ(up.data[1], 100);
+    AURORA_TEST_CHECK_EQ(up.data[2], 50);
+    AURORA_TEST_CHECK_EQ(up.data[4], 200);
+    AURORA_TEST_CHECK_EQ(up.data[5], 100);
+    AURORA_TEST_CHECK_EQ(up.data[6], 50);
+    AURORA_TEST_CHECK_EQ(up.data[7], 128);
+
+    // 版本未变：零上传（版本门控），仅合成。
+    AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(32, 16, 1.0F));
+    DisplayList dl2;
+    dl2.push_cmd(make_image_cmd(area, img, dl2));
+    dl2.replay(sink.backend());
+    rhi_obj.end_frame();
+    AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 1U);
+    AURORA_TEST_CHECK_EQ(fake.rgba_sub_uploads.size(), 1U);
+
+    // 版本推进：一次全帧子上传，内容为新像素。
+    Image v2 = img;
+    v2.stream_version = 2;
+    v2.pixels = {10, 20, 30, 255, 40, 50, 60, 200};
+    AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(32, 16, 1.0F));
+    DisplayList dl3;
+    dl3.push_cmd(make_image_cmd(area, v2, dl3));
+    dl3.replay(sink.backend());
+    rhi_obj.end_frame();
+    AURORA_TEST_CHECK_EQ(fake.rgba_sub_uploads.size(), 2U);
+    AURORA_TEST_CHECK_EQ(fake.rgba_sub_uploads.back().data[0], 10);
+    AURORA_TEST_CHECK_EQ(fake.rgba_sub_uploads.back().data[6], 60);
+
+    // 尺寸变化：就地重定义存储（空数据重定义不入 uploads）+ 一次新帧上传；全程零全量上传。
+    Image v3 = v2;
+    v3.stream_version = 3;
+    v3.width = 4;
+    v3.pixels = {1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255};
+    AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(32, 16, 1.0F));
+    DisplayList dl4;
+    dl4.push_cmd(make_image_cmd(area, v3, dl4));
+    dl4.replay(sink.backend());
+    rhi_obj.end_frame();
+    AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
+    AURORA_TEST_CHECK_EQ(fake.rgba_sub_uploads.size(), 3U);
+    AURORA_TEST_CHECK_EQ(fake.rgba_sub_uploads.back().width, 4);
+    AURORA_TEST_CHECK_EQ(fake.uploads.size(), 0U);
+}
+
+AURORA_TEST_CASE(gpu_gl_stream_public_api_contract) {
+    FakeGl fake;
+    rhi::GpuGlRhi rhi_obj(fake.fn);
+    AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
+    AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(32, 32, 1.0F));
+
+    // 取槽：非零句柄；同键复用同槽。
+    const auto id = rhi_obj.acquire_stream_image(7, 8, 4);
+    AURORA_TEST_CHECK_TRUE(id != 0);
+    AURORA_TEST_CHECK_EQ(rhi_obj.acquire_stream_image(7, 8, 4), id);
+
+    // 紧凑行增量更新：内容原样进入 RGBA 子上传。
+    std::vector<std::uint8_t> px(static_cast<std::size_t>(8) * 4U * 4U);
+    for (std::size_t i = 0; i < px.size(); ++i) {
+        px[i] = static_cast<std::uint8_t>(i & 0xFFU);
+    }
+    rhi_obj.update_stream_image(id, px.data(), 0, 0, 0, 8, 4);
+    AURORA_TEST_REQUIRE(fake.rgba_sub_uploads.size() == 1U);
+    AURORA_TEST_CHECK_TRUE(fake.rgba_sub_uploads.back().data == px);
+
+    // 跨距行（UNPACK_ROW_LENGTH 路径）：仅记录一次。
+    const std::size_t stride = static_cast<std::size_t>(8) * 4U + 8U;
+    const std::vector<std::uint8_t> strided(stride * 4U, 0x5A);
+    rhi_obj.update_stream_image(id, strided.data(), stride, 0, 0, 8, 4);
+    AURORA_TEST_CHECK_EQ(fake.rgba_sub_uploads.size(), 2U);
+
+    // 契约防御：id=0 / 空指针 / 零尺寸 / 越界脏矩形 → no-op（不判死后端）。
+    rhi_obj.update_stream_image(0, px.data(), 0, 0, 0, 8, 4);
+    rhi_obj.update_stream_image(id, nullptr, 0, 0, 0, 8, 4);
+    rhi_obj.update_stream_image(id, px.data(), 0, 0, 0, 0, 0);
+    rhi_obj.update_stream_image(id, px.data(), 0, 0, 0, 99, 4);
+    AURORA_TEST_CHECK_EQ(fake.rgba_sub_uploads.size(), 2U);
+    AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
+
+    // 释放后更新为 no-op；重复释放无害；同键重新取槽得新句柄。
+    rhi_obj.release_stream_image(id);
+    rhi_obj.release_stream_image(id);
+    rhi_obj.update_stream_image(id, px.data(), 0, 0, 0, 8, 4);
+    AURORA_TEST_CHECK_EQ(fake.rgba_sub_uploads.size(), 2U);
+    const auto id2 = rhi_obj.acquire_stream_image(7, 8, 4);
+    AURORA_TEST_CHECK_TRUE(id2 != 0);
+    AURORA_TEST_CHECK_TRUE(id2 != id);
+
+    // 原生表面导入：恒不支持（返回 0，调用方回退 CPU 路径）。
+    const aurora::NativeSurfaceFrame frame;
+    AURORA_TEST_CHECK_EQ(rhi_obj.import_native_surface(frame), 0U);
+}
+
+AURORA_TEST_CASE(gpu_gl_layer_cache_lifecycle_and_miss_epoch) {
+    FakeGl fake;
+    rhi::GpuGlRhi rhi_obj(fake.fn);
+    AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
+    rhi::RhiFrameSink &sink = rhi_obj;
+    constexpr std::uint64_t KEY = 7;
+
+    // 失效帧命令形态：BeginLayer（建常驻层 FBO）→ 子树重定向层 FBO → EndLayer → DrawLayer 回 MSAA。
+    auto make_layer_dl = [&KEY](DisplayList &dl) {
+        DrawCmd begin;
+        begin.kind = CmdKind::BeginLayer;
+        begin.bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 48.0F}};
+        begin.aux_key = KEY;
+        dl.push_cmd(begin);
+        dl.push_cmd(make_fill(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 48.0F}},
+                              Color{255, 0, 0, 255}));
+        DrawCmd end;
+        end.kind = CmdKind::EndLayer;
+        dl.push_cmd(end);
+        DrawCmd draw_layer;
+        draw_layer.kind = CmdKind::DrawLayer;
+        draw_layer.aux_key = KEY;
+        draw_layer.matrix_idx = dl.add_matrix(Matrix2D{});
+        draw_layer.composite_scale = 1.0F;
+        dl.push_cmd(draw_layer);
+    };
+
+    AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(64, 48, 1.0F));
+    AURORA_TEST_REQUIRE(fake.gen_fbo_ids.size() == 3U);  // msaa / resolve / temp
+    DisplayList dl;
+    make_layer_dl(dl);
+    dl.replay(sink.backend());
+    rhi_obj.end_frame();
+    AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 2U);  // 层内 fill + DrawLayer 合成
+    AURORA_TEST_CHECK_EQ(rhi_obj.stats().skipped_cmds, 0U);
+    AURORA_TEST_CHECK_EQ(fake.gen_fbo_ids.size(), 4U);     // 新建层 FBO（常驻）
+    const auto layer_fbo = fake.gen_fbo_ids.back();
+    AURORA_TEST_REQUIRE(fake.draw_fbo_targets.size() == 2U);
+    AURORA_TEST_CHECK_EQ(fake.draw_fbo_targets[0], layer_fbo);             // 子树重定向层 FBO
+    AURORA_TEST_CHECK_EQ(fake.draw_fbo_targets[1], fake.gen_fbo_ids[0]);   // 合成回 MSAA
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint32_t>(fake.tex_min_filters.back()), AURORA_GL_FILTER_NEAREST);
+
+    // 同键重录：层 FBO 复用（零新建），后端不判死。
+    AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(64, 48, 1.0F));
+    DisplayList dl2;
+    make_layer_dl(dl2);
+    dl2.replay(sink.backend());
+    rhi_obj.end_frame();
+    AURORA_TEST_CHECK_EQ(fake.gen_fbo_ids.size(), 4U);
+    AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
+
+    // DrawLayer 未命中：跳过不绘制 + bump 层代际（单帧自愈信号），后端不判死。
+    const auto epoch_before = render::detail::gpu_layer_epoch();
+    AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(64, 48, 1.0F));
+    DisplayList dl3;
+    DrawCmd miss;
+    miss.kind = CmdKind::DrawLayer;
+    miss.aux_key = 999;
+    miss.matrix_idx = dl3.add_matrix(Matrix2D{});
+    miss.composite_scale = 1.0F;
+    dl3.push_cmd(miss);
+    dl3.replay(sink.backend());
+    rhi_obj.end_frame();
+    AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 0U);
+    AURORA_TEST_CHECK_EQ(render::detail::gpu_layer_epoch(), epoch_before + 1);
+    AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
 }
 
 }  // namespace aurora::test_cases::utest_gpu_gl_rhi

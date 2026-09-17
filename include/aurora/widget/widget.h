@@ -764,6 +764,15 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///        世代变更即代表 AA 模式 / 默认字体已变，缓存中的光栅结果过期，必须重绘。
     mutable std::uint64_t paint_cache_raster_gen_ = 0;
 
+    // ---- GPU 层缓存状态（录制模式专用；软件直绘不走层命令）----
+    // 语义见 specification/03 §8.7：子树内容脏 / 尺寸变 / 光栅世代变 / 层代际变（消费端
+    // 层存储整体丢弃）任一发生即重录 BeginLayer；干净帧仅记一条 DrawLayer（子树零重绘）。
+    mutable std::uint64_t gpu_layer_key_ = 0;          ///< 进程内唯一层键（0 = 未分配）
+    mutable bool gpu_layer_valid_ = false;             ///< 层纹理是否与子树内容同步
+    mutable Size gpu_layer_size_{.width = 0.0F, .height = 0.0F};  ///< 层录制时的子树尺寸
+    mutable std::uint64_t gpu_layer_raster_gen_ = 0;   ///< 层录制时的光栅状态世代
+    mutable std::uint64_t gpu_layer_epoch_ = 0;        ///< 层录制时的层代际（消费端整体失效信号）
+
 #ifdef AURORA_ENABLE_DISPLAY_LIST
     // ---- Display List 缓存（AURORA_ENABLE_DISPLAY_LIST）----
     DisplayList display_list_;  ///< 本控件子树（含后代）的录制命令缓冲

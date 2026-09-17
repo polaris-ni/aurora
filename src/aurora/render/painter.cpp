@@ -1260,6 +1260,40 @@ auto Painter::set_alpha(double a) -> void {
     global_alpha_ = (a < 0.0) ? 0.0 : (a > 1.0 ? 1.0 : a);
 }
 
+// ---- GPU 层缓存命令（仅录制模式；Direct 模式 no-op——软件直绘走 paint_cache_ 位图路径）----
+
+auto Painter::begin_layer(std::uint64_t key, const Size &size) -> void {
+    if (!is_recording()) {
+        return;
+    }
+    DrawCmd cmd;
+    cmd.kind = CmdKind::BeginLayer;
+    cmd.bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = size};
+    cmd.aux_key = key;
+    recording_stack_.back()->push_cmd(cmd);
+}
+
+auto Painter::end_layer() -> void {
+    if (!is_recording()) {
+        return;
+    }
+    DrawCmd cmd;
+    cmd.kind = CmdKind::EndLayer;
+    recording_stack_.back()->push_cmd(cmd);
+}
+
+auto Painter::draw_layer(std::uint64_t key, const Matrix2D &matrix, float src_scale) -> void {
+    if (!is_recording()) {
+        return;
+    }
+    DrawCmd cmd;
+    cmd.kind = CmdKind::DrawLayer;
+    cmd.aux_key = key;
+    cmd.matrix_idx = recording_stack_.back()->add_matrix(matrix);
+    cmd.composite_scale = src_scale;
+    recording_stack_.back()->push_cmd(cmd);
+}
+
 auto Painter::composite(const Painter &src, const Matrix2D &matrix) -> void {
     if (is_recording()) {
         DrawCmd cmd;
