@@ -19,8 +19,11 @@
 #include "aurora/render/offscreen.h"
 #include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
+#include "framework/golden.h"
 
 namespace aurora::test_cases::utest_offscreen {
+
+namespace golden = aurora::testing::golden;
 
 namespace {
 
@@ -140,45 +143,6 @@ auto scenarios() -> std::vector<Scenario> {
     };
 }
 
-/// @brief 定位 golden 目录：优先环境变量，其次仓库根相对路径。
-auto golden_dir() -> std::filesystem::path {
-    const char* override_dir = std::getenv("AURORA_GOLDEN_DIR");
-    if (override_dir != nullptr && *override_dir != '\0') {
-        return {override_dir};
-    }
-    if (!testing::isolation::repo_root().empty()) {
-        return std::filesystem::path(testing::isolation::repo_root()) / "tests" / "golden";
-    }
-    return {"tests/golden"};
-}
-
-/// @brief 读取环境变量；空/未设置返回空视图（避免下标访问裸指针）。
-[[nodiscard]] auto env_value(const char* name) -> std::string_view {
-    const char* raw = std::getenv(name);
-    if (raw == nullptr) {
-        return {};
-    }
-    return {raw};
-}
-
-[[nodiscard]] auto env_flag(const char* name) -> bool { return !env_value(name).empty(); }
-
-[[nodiscard]] auto env_int(const char* name, int fallback) -> int {
-    const std::string_view raw = env_value(name);
-    if (raw.empty()) {
-        return fallback;
-    }
-    int parsed = fallback;
-    // from_chars 需要 [begin, end) 指针区间，末指针只能由 data() + size() 求得，属必要指针算术。
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    const char* last = raw.data() + raw.size();
-    // from_chars 不抛异常、不依赖 errno，转换失败时保留 fallback。
-    // raw 为 std::string_view，data() 不保证 null 结尾，但已用 size() 推出的 end 界定读取区间，
-    // from_chars 仅访问 [begin, end)，不存在越界。
-    // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
-    const auto [end, ec] = std::from_chars(raw.data(), last, parsed);
-    return (ec == std::errc{} && end == last) ? parsed : fallback;
-}
 
 }  // namespace
 
@@ -243,8 +207,8 @@ AURORA_TEST_CASE(logical_snapshot_children_stay_within_parent) {
 AURORA_TEST_CASE(logical_snapshots_match_golden_baseline) {
     constexpr int view_w = 320;
     constexpr int view_h = 240;
-    const std::filesystem::path path = golden_dir() / "logical_snapshots.json";
-    const bool regen = env_flag("AURORA_UPDATE_GOLDEN");
+    const std::filesystem::path path = golden::dir() / "logical_snapshots.json";
+    const bool regen = golden::env_flag("AURORA_UPDATE_GOLDEN");
 
     Json baseline = Json::object();
     if (!regen) {
@@ -296,8 +260,6 @@ AURORA_TEST_CASE(logical_snapshots_match_golden_baseline) {
 AURORA_TEST_CASE(pixel_snapshot_matches_golden_baseline) {
     constexpr int w = 240;
     constexpr int h = 120;
-    const std::filesystem::path dir = golden_dir();
-    const std::filesystem::path golden_path = dir / "golden_basic_column.png";
     const std::filesystem::path current_path =
         std::filesystem::path(testing::isolation::temp_dir()) / "current_render.png";
 
@@ -307,18 +269,13 @@ AURORA_TEST_CASE(pixel_snapshot_matches_golden_baseline) {
     }};
     AURORA_TEST_REQUIRE_TRUE(render_to_png(root, w, h, current_path.string().c_str()).ok());
 
-    const auto current = Image::load(current_path.string());
-    AURORA_TEST_REQUIRE_TRUE(current.ok());
-
-    if (env_flag("AURORA_UPDATE_GOLDEN")) {
-        std::error_code ec;
-        std::filesystem::create_directories(dir, ec);
-        std::filesystem::copy_file(current_path, golden_path, std::filesystem::copy_options::overwrite_existing, ec);
-        AURORA_TEST_CHECK_FALSE(static_cast<bool>(ec));
+    // 重生成模式下基线可能尚不存在，故先跑更新分支再回读做尺寸校验。
+    if (golden::env_flag("AURORA_UPDATE_GOLDEN")) {
+        golden::compare_or_update("golden_basic_column", current_path);
         return;
     }
 
-    const auto golden = Image::load(golden_path.string());
+    const auto golden = Image::load((golden::dir() / "golden_basic_column.png").string());
     AURORA_TEST_REQUIRE_MSG(golden.ok(),
                             "golden_basic_column.png missing or undecodable "
                             "(run with AURORA_UPDATE_GOLDEN=1 to regenerate)");
@@ -326,15 +283,8 @@ AURORA_TEST_CASE(pixel_snapshot_matches_golden_baseline) {
     AURORA_TEST_REQUIRE_EQ(golden.value().height, h);
 
     // 默认严格：逐像素零容差；容差仅用于吸收抗锯齿/字体 hinting 的跨平台抖动。
-    const int tolerance = env_int("AURORA_GOLDEN_MAX_DIFF", 0);
-    const int max_pixels = env_int("AURORA_GOLDEN_MAX_PIXELS", 0);
-
-    const SnapshotDiff diff = compare_snapshots(golden.value(), current.value(), tolerance);
-    // 两侧已显式同型比较；tidy 对含显式 cast 的操作数仍误报混比（C++20 无 ssize 转换惯用法）。
-    // NOLINTNEXTLINE(modernize-use-integer-sign-comparison)
-    const bool within_budget = diff.pixel_diff_count <= static_cast<std::size_t>(std::max(0, max_pixels));
-    AURORA_TEST_CHECK_MSG(within_budget, "pixel drift vs golden: " + std::to_string(diff.pixel_diff_count) +
-                                             " px, max delta " + std::to_string(diff.max_color_delta));
+    // 传入 root 以启用归因：失败时报告会说清差异落在哪个控件的盒子里。
+    golden::compare_or_update("golden_basic_column", current_path, &root);
 }
 
 }  // namespace aurora::test_cases::utest_offscreen

@@ -16,36 +16,16 @@
 #include "aurora/render/offscreen.h"
 #include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
+#include "framework/golden.h"
 
 namespace aurora::test_cases::utest_sparkline {
+
+namespace golden = aurora::testing::golden;
 
 namespace {
 
 constexpr int WIDTH = 120;
 constexpr int HEIGHT = 40;
-
-[[nodiscard]] auto env_value(const char *name) -> std::string_view {
-    const char *raw = std::getenv(name);
-    if (raw == nullptr) {
-        return {};
-    }
-    return {raw};
-}
-
-[[nodiscard]] auto env_flag(const char *name) -> bool { return !env_value(name).empty(); }
-
-[[nodiscard]] auto env_int(const char *name, int fallback) -> int {
-    const std::string_view raw = env_value(name);
-    if (raw.empty()) {
-        return fallback;
-    }
-    int parsed = fallback;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    const char *last = raw.data() + raw.size();
-    // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
-    const auto [end, ec] = std::from_chars(raw.data(), last, parsed);
-    return (ec == std::errc{} && end == last) ? parsed : fallback;
-}
 
 [[nodiscard]] auto render_chart(const SparklineProps &props) -> std::filesystem::path {
     auto chart = std::make_shared<Sparkline>(props);
@@ -55,29 +35,6 @@ constexpr int HEIGHT = 40;
         std::filesystem::path(testing::isolation::temp_dir()) / "current_chart_sparkline.png";
     AURORA_TEST_REQUIRE_TRUE(render_to_png(root, WIDTH, HEIGHT, tmp.string().c_str()).ok());
     return tmp;
-}
-
-auto compare_or_update_golden(const std::filesystem::path &current_path, const std::string &base_name) -> void {
-    const std::filesystem::path dir = std::filesystem::path(testing::isolation::repo_root()) / "tests" / "golden";
-    const std::filesystem::path golden_path = dir / (base_name + ".png");
-    const auto current = Image::load(current_path.string());
-    AURORA_TEST_REQUIRE_TRUE(current.ok());
-    if (env_flag("AURORA_UPDATE_GOLDEN")) {
-        std::error_code ec;
-        std::filesystem::create_directories(dir, ec);
-        std::filesystem::copy_file(current_path, golden_path, std::filesystem::copy_options::overwrite_existing, ec);
-        AURORA_TEST_CHECK_FALSE(static_cast<bool>(ec));
-        return;
-    }
-    const auto golden = Image::load(golden_path.string());
-    AURORA_TEST_REQUIRE_MSG(golden.ok(), base_name + ".png missing (run with AURORA_UPDATE_GOLDEN=1)");
-    const SnapshotDiff diff =
-        compare_snapshots(golden.value(), current.value(), env_int("AURORA_GOLDEN_MAX_DIFF", 0));
-    // NOLINTNEXTLINE(modernize-use-integer-sign-comparison)
-    const bool within_budget =
-        diff.pixel_diff_count <= static_cast<std::size_t>(std::max(0, env_int("AURORA_GOLDEN_MAX_PIXELS", 0)));
-    AURORA_TEST_CHECK_MSG(within_budget,
-                          "pixel drift vs golden " + base_name + ": " + std::to_string(diff.pixel_diff_count) + " px");
 }
 
 }  // namespace
@@ -161,7 +118,7 @@ AURORA_TEST_CASE(golden_sparkline_matches_baseline) {
     p.values = {4.0, 6.0, 3.0, 8.0, 5.0, 9.0, 7.0, 11.0};
     p.line_width = 2.0F;
     p.dot_radius = 2.5F;
-    compare_or_update_golden(render_chart(p), "chart_sparkline");
+    golden::compare_or_update("chart_sparkline", render_chart(p));
 }
 
 }  // namespace aurora::test_cases::utest_sparkline

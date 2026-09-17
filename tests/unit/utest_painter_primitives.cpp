@@ -19,8 +19,11 @@
 #include "aurora/render/png.h"
 #include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
+#include "framework/golden.h"
 
 namespace aurora::test_cases::utest_painter_primitives {
+
+namespace golden = aurora::testing::golden;
 
 namespace {
 
@@ -55,72 +58,6 @@ constexpr int DIM_ALPHA = 89;
         }
     }
     return count;
-}
-
-[[nodiscard]] auto env_value(const char *name) -> std::string_view {
-    const char *raw = std::getenv(name);
-    if (raw == nullptr) {
-        return {};
-    }
-    return {raw};
-}
-
-[[nodiscard]] auto env_flag(const char *name) -> bool { return !env_value(name).empty(); }
-
-[[nodiscard]] auto env_int(const char *name, int fallback) -> int {
-    const std::string_view raw = env_value(name);
-    if (raw.empty()) {
-        return fallback;
-    }
-    int parsed = fallback;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    const char *last = raw.data() + raw.size();
-    // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
-    const auto [end, ec] = std::from_chars(raw.data(), last, parsed);
-    return (ec == std::errc{} && end == last) ? parsed : fallback;
-}
-
-[[nodiscard]] auto golden_dir() -> std::filesystem::path {
-    const char *override_dir = std::getenv("AURORA_GOLDEN_DIR");
-    if (override_dir != nullptr && *override_dir != '\0') {
-        return {override_dir};
-    }
-    if (!testing::isolation::repo_root().empty()) {
-        return std::filesystem::path(testing::isolation::repo_root()) / "tests" / "golden";
-    }
-    return {"tests/golden"};
-}
-
-/// @brief 与 golden 基线比对（零容差）；AURORA_UPDATE_GOLDEN=1 时改为重生成基线。
-auto compare_or_update_golden(const Painter &p, const std::string &base_name) -> void {
-    const std::filesystem::path dir = golden_dir();
-    const std::filesystem::path golden_path = dir / (base_name + ".png");
-    const std::filesystem::path current_path =
-        std::filesystem::path(testing::isolation::temp_dir()) / ("current_" + base_name + ".png");
-
-    AURORA_TEST_REQUIRE_TRUE(write_png(current_path.string().c_str(), p.width(), p.height(), p.data()).ok());
-    const auto current = Image::load(current_path.string());
-    AURORA_TEST_REQUIRE_TRUE(current.ok());
-
-    if (env_flag("AURORA_UPDATE_GOLDEN")) {
-        std::error_code ec;
-        std::filesystem::create_directories(dir, ec);
-        std::filesystem::copy_file(current_path, golden_path, std::filesystem::copy_options::overwrite_existing, ec);
-        AURORA_TEST_CHECK_FALSE(static_cast<bool>(ec));
-        return;
-    }
-
-    const auto golden = Image::load(golden_path.string());
-    AURORA_TEST_REQUIRE_MSG(golden.ok(),
-                            base_name + ".png missing or undecodable (run with AURORA_UPDATE_GOLDEN=1 to regenerate)");
-    const int tolerance = env_int("AURORA_GOLDEN_MAX_DIFF", 0);
-    const int max_pixels = env_int("AURORA_GOLDEN_MAX_PIXELS", 0);
-    const SnapshotDiff diff = compare_snapshots(golden.value(), current.value(), tolerance);
-    // NOLINTNEXTLINE(modernize-use-integer-sign-comparison)
-    const bool within_budget = diff.pixel_diff_count <= static_cast<std::size_t>(std::max(0, max_pixels));
-    AURORA_TEST_CHECK_MSG(within_budget, "pixel drift vs golden " + base_name + ": " +
-                                             std::to_string(diff.pixel_diff_count) + " px, max delta " +
-                                             std::to_string(diff.max_color_delta));
 }
 
 }  // namespace
@@ -295,7 +232,7 @@ AURORA_TEST_CASE(golden_polyline_matches_baseline) {
                                          Point{.x = 56.0F, .y = 8.0F},
                                          Point{.x = 56.0F, .y = 24.0F}},
                       4.0F, Color{255, 0, 0, static_cast<std::uint8_t>(DIM_ALPHA)});
-    compare_or_update_golden(p, "painter_polyline");
+    golden::compare_or_update_painter("painter_polyline", p);
 }
 
 AURORA_TEST_CASE(golden_sector_matches_baseline) {
@@ -308,7 +245,7 @@ AURORA_TEST_CASE(golden_sector_matches_baseline) {
     p.fill_sector(Point{.x = 46.0F, .y = 16.0F}, 14.0F, 7.0F, -HALF_PI, HALF_PI, Color::blue());
     p.fill_sector(Point{.x = 16.0F, .y = 46.0F}, 12.0F, 0.0F, 0.0F, TWO_PI, Color::green());
     p.stroke_arc(Point{.x = 46.0F, .y = 46.0F}, 10.0F, 3.0F, -HALF_PI, HALF_PI, Color{0, 0, 0, 255});
-    compare_or_update_golden(p, "painter_sector");
+    golden::compare_or_update_painter("painter_sector", p);
 }
 
 }  // namespace aurora::test_cases::utest_painter_primitives

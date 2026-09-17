@@ -19,8 +19,11 @@
 #include "aurora/render/png.h"
 #include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
+#include "framework/golden.h"
 
 namespace aurora::test_cases::utest_line_chart {
+
+namespace golden = aurora::testing::golden;
 
 namespace {
 
@@ -57,52 +60,6 @@ auto layout_only(Widget &w) -> void {
     e.action = MouseAction::Release;
     e.local_position = Point{.x = x, .y = y};
     return e;
-}
-
-[[nodiscard]] auto env_value(const char *name) -> std::string_view {
-    const char *raw = std::getenv(name);
-    if (raw == nullptr) {
-        return {};
-    }
-    return {raw};
-}
-
-[[nodiscard]] auto env_flag(const char *name) -> bool { return !env_value(name).empty(); }
-
-[[nodiscard]] auto env_int(const char *name, int fallback) -> int {
-    const std::string_view raw = env_value(name);
-    if (raw.empty()) {
-        return fallback;
-    }
-    int parsed = fallback;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    const char *last = raw.data() + raw.size();
-    // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
-    const auto [end, ec] = std::from_chars(raw.data(), last, parsed);
-    return (ec == std::errc{} && end == last) ? parsed : fallback;
-}
-
-auto compare_or_update_golden(const std::filesystem::path &current_path, const std::string &base_name) -> void {
-    const std::filesystem::path dir = std::filesystem::path(testing::isolation::repo_root()) / "tests" / "golden";
-    const std::filesystem::path golden_path = dir / (base_name + ".png");
-    const auto current = Image::load(current_path.string());
-    AURORA_TEST_REQUIRE_TRUE(current.ok());
-    if (env_flag("AURORA_UPDATE_GOLDEN")) {
-        std::error_code ec;
-        std::filesystem::create_directories(dir, ec);
-        std::filesystem::copy_file(current_path, golden_path, std::filesystem::copy_options::overwrite_existing, ec);
-        AURORA_TEST_CHECK_FALSE(static_cast<bool>(ec));
-        return;
-    }
-    const auto golden = Image::load(golden_path.string());
-    AURORA_TEST_REQUIRE_MSG(golden.ok(),
-                            base_name + ".png missing (run with AURORA_UPDATE_GOLDEN=1 to regenerate)");
-    const SnapshotDiff diff =
-        compare_snapshots(golden.value(), current.value(), env_int("AURORA_GOLDEN_MAX_DIFF", 0));
-    // NOLINTNEXTLINE(modernize-use-integer-sign-comparison)
-    const bool within_budget = diff.pixel_diff_count <= static_cast<std::size_t>(std::max(0, env_int("AURORA_GOLDEN_MAX_PIXELS", 0)));
-    AURORA_TEST_CHECK_MSG(within_budget, "pixel drift vs golden " + base_name + ": " +
-                                             std::to_string(diff.pixel_diff_count) + " px");
 }
 
 /// @brief 无头渲染一帧到临时 PNG（无 Application ⇒ grow-in 降级为终态，输出确定）。
@@ -262,7 +219,7 @@ AURORA_TEST_CASE(golden_line_chart_matches_baseline) {
                 ChartSeries{.name = "mem", .values = {8.0, 10.0, 14.0, 12.0, 18.0, 16.0}}};
     p.categories = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     p.axis_y = ChartAxisSpec{.label = "%", .tick_count = 5};
-    compare_or_update_golden(render_chart(p), "chart_line");
+    golden::compare_or_update("chart_line", render_chart(p));
 }
 
 }  // namespace aurora::test_cases::utest_line_chart

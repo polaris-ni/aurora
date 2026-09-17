@@ -21,8 +21,11 @@
 #include "aurora/render/png.h"
 #include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
+#include "framework/golden.h"
 
 namespace aurora::test_cases::utest_bar_chart {
+
+namespace golden = aurora::testing::golden;
 
 namespace {
 
@@ -62,28 +65,6 @@ auto layout_only(Widget &w) -> void {
     return e;
 }
 
-[[nodiscard]] auto env_value(const char *name) -> std::string_view {
-    const char *raw = std::getenv(name);
-    if (raw == nullptr) {
-        return {};
-    }
-    return {raw};
-}
-
-[[nodiscard]] auto env_flag(const char *name) -> bool { return !env_value(name).empty(); }
-
-[[nodiscard]] auto env_int(const char *name, int fallback) -> int {
-    const std::string_view raw = env_value(name);
-    if (raw.empty()) {
-        return fallback;
-    }
-    int parsed = fallback;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    const char *last = raw.data() + raw.size();
-    // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
-    const auto [end, ec] = std::from_chars(raw.data(), last, parsed);
-    return (ec == std::errc{} && end == last) ? parsed : fallback;
-}
 
 }  // namespace
 
@@ -274,36 +255,14 @@ AURORA_TEST_CASE(golden_bar_chart_matches_baseline) {
     chart->modifier.set(Modifier{}.width(320.0F).height(200.0F));
 
     Node root{Column{Node{chart}}};
-    const std::filesystem::path dir =
-        std::filesystem::path(testing::isolation::repo_root()) / "tests" / "golden";
-    const std::filesystem::path golden_path = dir / "chart_bar.png";
     const std::filesystem::path current_path =
         std::filesystem::path(testing::isolation::temp_dir()) / "current_chart_bar.png";
 
     AURORA_TEST_REQUIRE_TRUE(
         render_to_png(root, static_cast<int>(WIDTH), static_cast<int>(HEIGHT), current_path.string().c_str()).ok());
-    const auto current = Image::load(current_path.string());
-    AURORA_TEST_REQUIRE_TRUE(current.ok());
 
-    if (env_flag("AURORA_UPDATE_GOLDEN")) {
-        std::error_code ec;
-        std::filesystem::create_directories(dir, ec);
-        std::filesystem::copy_file(current_path, golden_path, std::filesystem::copy_options::overwrite_existing, ec);
-        AURORA_TEST_CHECK_FALSE(static_cast<bool>(ec));
-        return;
-    }
-
-    const auto golden = Image::load(golden_path.string());
-    AURORA_TEST_REQUIRE_MSG(golden.ok(),
-                            "chart_bar.png missing or undecodable (run with AURORA_UPDATE_GOLDEN=1 to regenerate)");
-    const int tolerance = env_int("AURORA_GOLDEN_MAX_DIFF", 0);
-    const int max_pixels = env_int("AURORA_GOLDEN_MAX_PIXELS", 0);
-    const SnapshotDiff diff = compare_snapshots(golden.value(), current.value(), tolerance);
-    // NOLINTNEXTLINE(modernize-use-integer-sign-comparison)
-    const bool within_budget = diff.pixel_diff_count <= static_cast<std::size_t>(std::max(0, max_pixels));
-    AURORA_TEST_CHECK_MSG(within_budget, "pixel drift vs golden chart_bar: " +
-                                             std::to_string(diff.pixel_diff_count) + " px, max delta " +
-                                             std::to_string(diff.max_color_delta));
+    // 传入 root 以启用归因：失败时报告会说清差异落在哪个控件的盒子里。
+    golden::compare_or_update("chart_bar", current_path, &root);
 }
 
 }  // namespace aurora::test_cases::utest_bar_chart

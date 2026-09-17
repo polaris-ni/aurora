@@ -161,6 +161,14 @@
 - 确有特殊原因须绕过的（框架自检在用例隔离前运行、`current_path()` 断言产品默认输出目录、模拟拖入的假路径字符串等），必须在调用点上方紧邻注释写明 `TEST_TEMP_EXEMPT: <原因>`，由守门脚本 `tools/check/check_test_temp_hygiene.py` 放行。
 - 守护：`check_test_temp_hygiene`（CTest 用例）扫描 `tests/` 内 `temp_directory_path` / 裸 `/tmp` / 写 cwd 的未豁免写法，命中即红灯。
 
+### 3.5 golden 基线测试规范
+
+新增或改动像素 / 逻辑 golden 测试时，**一律走共享设施 `tests/framework/golden.h`**（`aurora::testing::golden`），**禁止**在测试文件里再抄一份 `golden_dir()` / `env_value|flag|int` / `compare_or_update*`：
+
+- 该文件提供 `dir()`、`env_value` / `env_flag` / `env_int`、`write_temp_png(painter, tag)`、`compare_or_update(name, current_path, root = nullptr)` 与 `compare_or_update_painter(name, painter)`；判据与四个运行时环境变量见 [`specification/03-layout-render.md`](specification/03-layout-render.md) §8.4.2。
+- **尽量传 `root`**（已完成布局的控件树根）：`compare_or_update` 只在失败时才顺带做差异归因，把 `SnapshotDiffReport::to_text()` 附进断言消息 —— 给出差异区域的位置与归因到的控件路径，而不是只有一句「N px, max delta M」。通过路径上零额外开销。
+- 历史原因：这三者曾在 7 个测试文件里各抄一份，导致任何 golden 基础设施的改进都要改 7 处。收敛后已全部迁移，新增用例不得再复制。
+
 ## 4 元数据与可观测
 
 - **错误可机读**：`Error::to_json()` 输出结构化错误（`code` / `message` / `suggestion` / `docs` / `where`），供 AI 解析。
