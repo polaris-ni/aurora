@@ -1,6 +1,6 @@
 {
   "schema": "aurora-changelog/1.0",
-  "currentVersion": "1.0.0-alpha.5",
+  "currentVersion": "1.0.0-alpha.6",
   "policy": "semver",
   "freeze": "minor-versions-are-additive",
   "rules": [
@@ -340,6 +340,35 @@
         "会话发现刻意按**方案 ③**（默认 `6280` + `AURORA_INSPECTOR_PORT` + 工具 `session` 入参），**不做进程注册表文件**：目录位置一旦落地就成了 beta 冻结后不能随便改的对外约定，故留到确实需要多实例或临时端口时再加。`InspectorServer::start(0)` 已支持系统分配临时端口（`port()` 读回实际值），MCP 侧只需显式告知即可用。",
         "图表族设计约定（本波已落地的部分）：数据进序列化面以便 AI 经 schema + `from_json` 生成带真实数据的图表；轴域与 hover 命中同源（`LinearScale` / `BandScale`）；绘制不得越出控件 `bounds`；半透明系列降透明要求折线走真 SDF 而非「逐段 `draw_line` 复合」（后者顶点二次合成出串珠）。`generate_ui` 仍是 8 关键词的简版映射、不产出数据属性，AI 生成路径请以 `aurora_api.json` / `describe_static()` 的 schema 为准。",
         "多窗口测试直接驱动 `WindowHost` API（`render_frame`/`dispatch_*`），未扩展 `TestController` 到「绑定指定窗口宿主」——其内部自持哑 `Window`/`Surface`，绑定宿主需重构其 Impl，收益低于直接使用宿主 API，故本版不做。"
+      ]
+    },
+    {
+      "version": "1.0.0-alpha.6",
+      "date": "2026-09-17",
+      "type": "pre-release",
+      "summary": "GPU 独有能力交付（GL 路径）：GPU 层缓存——`cache_layer` 修饰对齐 FBO 常驻层，干净帧子树零重栅格化；流式纹理常驻槽——视频/大图逐帧更新免全量重传；RHI 能力位与原生表面导入契约位。配套确定性基准（fake GL 桩）与真机探针——探针实测修复两处无头 CI 无法暴露的驱动接线缺陷。GCC/MSVC/clang-LLVM 三工具链 ctest 286/286 全绿。",
+      "breakingChanges": [
+        "render/display_list.h：`CmdKind` 由 20 类增至 23 类（新增 BeginLayer/EndLayer/DrawLayer），`DrawCmd` 新增 `aux_key` 层键字段。自定义 `rhi::RhiBackend::submit` 实现须处理三条新层命令（建议默认跳过）；既有命令字段与枚举值不变，软件路径对既有内容像素输出逐位不变。"
+      ],
+      "added": [
+        "render/display_list.h + render/painter.h + render/detail/gpu_layer.h：GPU 层缓存三件套——DisplayList 新增 `BeginLayer`/`EndLayer`/`DrawLayer` 命令（`DrawCmd.aux_key` 层键），Painter 新增 `begin_layer`/`end_layer`/`draw_layer` 录制 API（Direct 直绘 no-op，仍走 `paint_cache` 位图路径）；`cache_layer` 修饰的 GPU 路径重定向 FBO 常驻层纹理——层键惰性取号、epoch + 尺寸键控失效，干净帧子树零重栅格化（仅一条 DrawLayer 合成命令）；层内效果经惰性分配的 aux 采样拷贝读取层内容，不污染主画布；DrawLayer 未命中告警（键级一次）+ 全局 epoch 推进 + 下帧重录自愈。",
+        "render/rhi/software_rhi.{h,cpp}：`SoftwareRhi` 层仿真对齐——捕获栈 → 离屏定稿为层位图 → 进程级全局层存储（GPU 录制 DL 回退软件回放的临时实例与离屏渲染共用一份存储，干净帧 DrawLayer 跨帧命中）；容量上限 64 条，超限清空并 bump epoch。",
+        "core/image.h：`Image` 新增 `stream_key` / `stream_version` 流式章——同键跨帧绑定常驻纹理槽，版本递进触发增量上传。",
+        "render/rhi/gpu_gl_rhi.{h,cpp}：`GpuGlRhi` 流式纹理常驻槽——DrawImage 路径感知流式章后绕过 content_hash 纹理缓存直走固定纹理槽（同键跨帧复用，尺寸变化才重定义 storage）、版本门控 `texSubImage2D` 子上传（`UNPACK_ROW_LENGTH` 承载跨距行、脏矩形区域上传、PMA 预乘下沉到上传时）。",
+        "render/rhi/rhi_backend.h：`RhiCapabilities{gpu, native_surface_import, compute}` 能力位；流式三接口 `acquire_stream_image` / `update_stream_image` / `release_stream_image`（默认实现 = 不支持，句柄 0 = 不可用哨兵）；`import_native_surface` 原生 GPU 表面导入契约位（`core/native_surface.h` 新增 `NativeSurfaceFrame` 平台句柄 + 可空 release 回调；GL 侧恒 warn-once 返回 0，供 D3D11 / Metal 互操作后端兑现）。",
+        "media/video_source.h + media/video_player.{h,cpp}：`VideoFrame` 新增原生表面变体（原生路径 CPU 像素可空）；`VideoPlayer` 为每实例惰性分配流式键，新帧盖章后随 DrawImage 进流式通道，软件路径无额外成本。",
+        "tools/bench/bench_gpu.cpp（新增）：GPU 特性确定性基准（fake GL 桩计数 + 上传 memcpy 成本）——视频逐帧更新：流式通道 vs content_hash 缓存纹理分配 125→0、删除 64→0、每帧 CPU 4.28×（0.150ms vs 0.643ms，480×270 × 128 帧）；transform-only 旋转动画：cache_layer vs 逐帧离屏合成稳态 19.07×（0.071ms vs 1.348ms，192 盒网格 × 60 帧）。",
+        "tools/verify/glfw_gpu_features_live_probe.cpp（新增）：GL GPU 特性真机探针（条件构建、不进 CTest）——自动段覆盖 GPU 通道与能力位核对、`import_native_surface` 契约、流式纹理逐版本像素（真实 glTexSubImage2D 上传 + 采样读回）、层缓存 FBO 跨帧持久性、`present_root` 上屏链路；`--interactive` 人工目视常驻窗口段（流式「视频」+ 旋转层缓存网格并存）。",
+        "tests/support/fake_gl.h（新增）：`aurora::testing::FakeGl` 全量 GL 3.3 core 驱动桩（`AURORA_GL_*` 常量随迁），utest_gpu_gl_rhi 与 bench_gpu 共用同一桩，并新增纹理分配/删除计数器（`texture_gens` / `texture_deletes`）。",
+        "codespec 文档回写：specification/03-layout-render.md §8.6 / §8.7 / §9.1 / §9.2（层命令协议、流式纹理、RHI 能力位与原生表面契约）、ARCHITECTURE.md §8.1 / §8.4、specification/07-environment-modifier.md `cache_layer` 修饰行、specification/08-tooling.md §8 fake_gl.h 段。"
+      ],
+      "fixed": [
+        "render/gpu/gpu_gl_rhi.cpp：部分驱动在 core profile 上下文对 `glGetString(GL_EXTENSIONS)` 抛 `GL_INVALID_ENUM`（真机探针实测）——粘滞错误使 GPU 通道 init 整体判败回退软件路径；诊断性扩展查询后清空错误队列不再判败，init 增分段检查点（init-programs / init-uniforms / init-vao / init）精准归因。",
+        "render/gpu/gpu_gl_rhi.cpp：`read_pixels` 在 `end_frame` 之前读回（探针/测试直驱通道）时挂起顶点批未落地——批渲染的 GL 绘制集中在 `flush_batch`（end_frame 内触发），此前读回的是清屏零基底；现读回前幂等 flush，任意时刻读回即本帧合成结果。"
+      ],
+      "notes": [
+        "验证口径：GCC / MSVC / clang-LLVM 三工具链全量 ctest **286/286** 全绿（含 4 项守护）；真机探针（Windows + 真实 GL 驱动）自动段 ALL PASS——流式上传与采样、FBO 层跨帧存续、present 链路等无头 CI 无法证明的驱动接线由 tools/verify/ 探针补位。",
+        "原生 GPU 表面导入在 GL 3.3 路径为契约位（能力位恒 false、import 恒回退），真实兑现（memory object 绑定 / EGLImage）随 wgpu 阶梯推进；`compute` 能力位同理为前瞻声明（GL 3.3 无 compute shader）。"
       ]
     }
   ]
