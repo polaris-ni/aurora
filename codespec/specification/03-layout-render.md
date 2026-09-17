@@ -515,15 +515,53 @@ au::Column{}
 
 ```cpp
 [[nodiscard]] auto render_to_png(Node &root, int width, int height, const char *path) -> Result<bool>;
+[[nodiscard]] auto render_to_image(Node &root, int width, int height) -> Image;
 [[nodiscard]] auto render_to_logical_snapshot(Node &root, int width, int height) -> Json;
 ```
 
 - `render_to_png`：`root` 为 `Node&`，内部自行 `mount`，调用方无需预挂载；`width` / `height` 为画布逻辑尺寸。
+- `render_to_image`：与 `render_to_png` 同源同结果，但不落盘，直接返回 RGBA8 内存图 —— 供需要在进程内二次消费像素的路径使用（如快照比对、MCP `compare_snapshot`）。`render_to_png` 现为其薄壳（渲染 + 写出）。
 - `render_to_logical_snapshot`：返回平台无关的**逻辑快照** JSON（结构树 + 盒模型），供 AI 在无头环境校验。
 
 `Scene::render_to_png(path, width, height)`（`app/scene.h:29`）与 `Application::render_to_png(path)`（`app/application.h:224`）是无头便捷封装。
 
 **其余渲染支撑头**（`render/`，公开）：`dirty_region.h` 提供 `DirtyRegionTracker`——收集脏矩形并把重叠项合并为并集，条数超上限（默认 `16`，可经 `set_max_rects` 调整）即退化为整帧脏（`mark_all` / `is_full`），以 `rects()` / `merged_bounds()` 出结果，衔接 §8.3 `set_present_dirty` 的增量上屏；`snapshot_diff.h` 提供 `compare_snapshots(baseline, current, tolerance = 0) -> SnapshotDiff`——逐像素比对两张 RGBA8 快照，产出差异像素数、最大通道差、差异占比与差异可视化图，`SnapshotDiff::passed(max_ratio)` 按阈值判定通过，供 golden 回归与 `aurora-cli snapshot --compare` 使用；`image_cache.h` 提供 `ImageCache`——进程级单例（`instance()`）的按路径 LRU 解码缓存（`get` / `put` / `remove` / `clear`，字节上限 `set_max_bytes`，解码失败不缓存），`count()` / `hit_count()` 供诊断与性能覆盖层读取。
+
+#### 8.4.1 快照差异的语义化
+
+`compare_snapshots` 只回答「有多少像素不对」，回答不了「**在哪儿**」和「**是谁画的**」。下面这组 API 是它的纯增量扩展（`compare_snapshots` 签名与语义零改动），把逐像素统计升级成可定位、可归因的报告，供 golden 回归、MCP 与 Inspector 消费。
+
+| 符号 | 说明 |
+|:---|:---|
+| `DiffRegionOptions{tile_size=8, tile_dirty_ratio=0.0, min_region_pixels=1}` | 聚合选项：`tile_size` 为网格边长（`<=0` 退化为逐像素）；`tile_dirty_ratio` 为网格判脏阈值（默认 0 即「有一处差异即脏」，宁可多报不漏报）；`min_region_pixels` 滤碎块 |
+| `DiffRegion{bounds, diff_pixels, coverage, max_color_delta}` | 差异区域。矩形以**图像像素**为单位，复用既有 `Rect`（本库无整数矩形类型，像素值以 float 承载） |
+| `cluster_diff_regions(baseline, current, tolerance, opt) -> vector<DiffRegion>` | 网格归并：切网格 → 判脏 → 四连通（并查集，恒以较小根为根故结果确定）→ 每连通块取包络。按 `diff_pixels` 降序输出 |
+| `WidgetBox{path, type, bounds}` | 控件的布局盒快照（纯值）。`path` 为**索引路径**，与 `find_node_by_path` / `PUT /api/widget/{path}` 同格式（根为空串） |
+| `RegionAttribution{region, widget_path, widget_type, widget_bounds, widget_area_ratio, partial_overlap}` | 已归因的区域。`attributed()` 判据是**类型名非空**——根控件的合法路径本身就是空串，用路径判空会误判 |
+| `attribute_diff_regions(regions, span<const WidgetBox>, pixels_per_unit=1.0)` | 归因：取交叠面积最大者，交叠相等时取 DFS 序更靠后者（= 更深的后代，真正画出像素的那个） |
+| `SnapshotDiffReport{raw, regions, attributed, attributed_ratio}` | 报告。`to_json()` 给机器、`to_text(max_regions)` 给人或 LLM 直接读；`passed()` 沿用逐像素判据 |
+| `build_snapshot_diff_report(baseline, current, boxes={}, tolerance, opt, pixels_per_unit)` | 一步产出报告的推荐入口（等价于依次调用上面三个） |
+
+由 `collect_widget_boxes(const Node&) -> vector<WidgetBox>`（`widget/inspect.h`）把控件树拍平成 `WidgetBox` 表；其输出顺序即**先序**，是归因 tie-break 依赖的契约。
+
+消费方：
+
+- **golden 回归**：`tests/framework/golden.h` 的 `compare_or_update(name, current_path, root)` 在失败时把 `SnapshotDiffReport::to_text()` 附在断言消息里（归因只在失败时计算，通过路径零开销）。
+- **MCP**：`compare_snapshot` 工具渲染 UI 树 JSON 并与 golden 基线比对，返回 `report.to_json()`（含 `summary` 文本摘要）。
+
+#### 8.4.2 golden 测试的共享设施
+
+`golden_dir()` / `env_value|flag|int` / `compare_or_update_golden()` 曾在 7 个测试文件里各抄一份，现收敛为 `tests/framework/golden.h`（`aurora::testing::golden`，仅测试框架内部、不进 `include/`）：
+
+| 符号 | 说明 |
+|:---|:---|
+| `dir()` | golden 真值目录，`AURORA_GOLDEN_DIR` 覆盖优先 |
+| `env_value` / `env_flag` / `env_int` | 环境变量读取（`env_int` 解析失败回退 fallback，不抛异常） |
+| `write_temp_png(painter, tag)` | 把 Painter 写成用例临时 PNG 并返回路径 |
+| `compare_or_update(name, current_path, root = nullptr)` | 与基线比对；`AURORA_UPDATE_GOLDEN` 非空时改为重生成基线 |
+| `compare_or_update_painter(name, painter)` | 便捷重载，直接吃 Painter |
+
+判据沿用历史语义（差异像素数 <= `AURORA_GOLDEN_MAX_PIXELS`、单通道差 > `AURORA_GOLDEN_MAX_DIFF` 才算差异像素），故本次收敛**不改变任何 golden 的通过结论**。
 
 ### 8.5 后端与工厂
 

@@ -30,7 +30,7 @@ namespace aurora {
  * @param path  输出 PNG 路径
  * @return 成功返回 true，失败返回带信息的 Error。
  */
-[[nodiscard]] inline auto render_to_png(Node &root, int width, int height, const char *path) -> Result<bool> {
+[[nodiscard]] inline auto render_to_image(Node &root, int width, int height) -> Image {
     constexpr BuildContext ctx;  // 根环境（树内 Provider 注入子树环境）
 
     root->mount(ctx);
@@ -49,7 +49,17 @@ namespace aurora {
     root.set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
                          .size = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)}});
 
-    return write_png(path, width, height, painter.data());
+    Image out;
+    out.width = width;
+    out.height = height;
+    const std::size_t bytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
+    out.pixels.assign(painter.data(), painter.data() + bytes);
+    return out;
+}
+
+[[nodiscard]] inline auto render_to_png(Node &root, int width, int height, const char *path) -> Result<bool> {
+    const Image image = render_to_image(root, width, height);
+    return write_png(path, width, height, image.pixels.data());
 }
 
 /**
