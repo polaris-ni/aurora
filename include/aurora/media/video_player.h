@@ -14,6 +14,9 @@
 
 namespace aurora {
 
+class AudioContext;
+class AudioSinkGraphBridge;
+
 /// @brief 视频播放器控件（继承 `Container`，故可叠加子节点 = 控件叠层）。
 ///
 /// 设计目标：**易于被继承定制**。提供四类扩展点：
@@ -34,8 +37,19 @@ class VideoPlayer : public Container, public VideoController {
     explicit VideoPlayer(std::shared_ptr<VideoSource> src) : source_(std::move(src)) {}
 
     /// @brief 设置 / 获取解码源。
-    auto set_source(std::shared_ptr<VideoSource> src) -> void { source_ = std::move(src); }
+    auto set_source(std::shared_ptr<VideoSource> src) -> void;
     [[nodiscard]] auto source() const -> std::shared_ptr<VideoSource> { return source_; }
+
+    /// @brief 接入音频图（alpha 音频子系统）：此后 `set_audio_callback` 通道收到的 PCM
+    ///        自动经图内 `AudioStreamSourceNode` 播放（`AudioSinkGraphBridge` 承载）。
+    ///
+    /// 接线后 `set_volume`/`set_muted` 改为经图内 `GainNode` 施加（不重复转发给源，
+    /// 避免双重衰减）；未接线时保持既有语义（转发给 `VideoSource::set_volume`）。
+    /// 传入 nullptr 解除接线（清空源的音频回调并断开图内边）。
+    /// @note 典型接线：`player.set_audio_context(app.audio_shared());`
+    auto set_audio_context(std::shared_ptr<AudioContext> ctx) -> void;
+    /// @brief 当前接入的音频上下文（未接线为 nullptr）。
+    [[nodiscard]] auto audio_context() const -> const std::shared_ptr<AudioContext> & { return audio_ctx_; }
 
     /// @brief 适配模式（letterbox）：Contain 留黑边 / Fill 拉伸 / Cover 裁剪。
     auto set_fit(BoxFit fit) -> void { fit_ = fit; }
@@ -108,6 +122,7 @@ class VideoPlayer : public Container, public VideoController {
 
   private:
     auto adopt_default_controls() -> void;
+    auto attach_audio_bridge_to_source() const -> void;
     auto draw_frame(Painter &p, const Rect &bounds) const -> void;
     [[nodiscard]] auto current_video_pos() const -> std::chrono::microseconds;
     [[nodiscard]] auto resolve_width(const Constraints &c, float natural) const -> float;
@@ -135,6 +150,10 @@ class VideoPlayer : public Container, public VideoController {
     std::chrono::steady_clock::time_point last_tap_;
     std::function<void()> on_tap_;
     std::function<void()> on_double_tap_;
+
+    // ---- 音频图接线（audio_sink_bridge.h）----
+    std::shared_ptr<AudioContext> audio_ctx_;  ///< 接入的上下文（未接线为 nullptr）。
+    std::shared_ptr<AudioSinkGraphBridge> audio_bridge_;  ///< PCM → 图桥（接线期持有）。
 };
 
 }  // namespace aurora

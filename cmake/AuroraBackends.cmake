@@ -1,10 +1,13 @@
 # ============================================================
 # AuroraBackends.cmake — 后端代码剪裁（feature 宏 + CMake 开关）
 # ------------------------------------------------------------
-# 每个内置后端可经 CMake 开关整体剔除：关闭后对应 Surface 子类、工厂重载与重型平台头
-# （<windows.h> / GLFW / OpenGL）被预处理器剔除，链接产物不再含该后端。自定义 Surface
-# 注入路径（Application(Scene,unique_ptr<Surface>) 等）始终可用，故「只用自定义 backend」
-# 可不编译任何内置后端。宏由 aurora 目标以 PUBLIC 编译定义传播给所有消费者。
+# 每个内置 Surface 图形后端可经 AURORA_BACKEND_* 开关整体剔除：关闭后
+# 对应 Surface 子类、工厂重载与重型平台头（<windows.h> / GLFW / OpenGL）被预处理器
+# 剔除，链接产物不再含该后端。音频设备后端开关（AURORA_ENABLE_AUDIO / AURORA_ENABLE_AUDIO_WASAPI，
+# ENABLE 组）亦定义于本文件末段。自定义注入路径（自定义 Surface 经
+# Application(Scene,unique_ptr<Surface>)、自定义 AudioDeviceBackend 经 AudioContext 构造注入）
+# 始终可用，故「只用自定义 backend」可不编译任何内置后端。feature 宏由 aurora 目标以
+# PUBLIC 编译定义传播给所有消费者。
 # 全部开关/宏/环境变量统一列于 codespec/BUILD_OPTIONS.md（唯一权威来源）。
 # ============================================================
 
@@ -186,6 +189,30 @@ if (AURORA_BACKEND_WASM)
     endif ()
     aurora_define_feature(AURORA_BACKEND_WASM EXPORT)
     aurora_log("WASM backend enabled (Emscripten).")
+endif ()
+
+# ---- 音频（图模型 API 恒编译；内置设备后端 opt-in，默认 OFF） ----
+# media/audio.h 的 AudioContext 图 API 始终编译（对齐 RHI 先例：契约恒在，能力运行期查询）；
+# AURORA_ENABLE_AUDIO 决定是否编入内置音频设备后端。未启用或设备初始化失败 →
+# AudioContext 静默模式（图照常运转、样本消费后丢弃），对齐 GPU 通道回退语义。
+option(AURORA_ENABLE_AUDIO "Build built-in audio device backends (graph API always compiled; OFF = silent mode)" OFF)
+if (AURORA_ENABLE_AUDIO)
+    aurora_define_feature(AURORA_ENABLE_AUDIO EXPORT)
+    if (WIN32)
+        option(AURORA_ENABLE_AUDIO_WASAPI "Build WASAPI audio backend (Windows shared-mode, event-driven)" ON)
+    else ()
+        option(AURORA_ENABLE_AUDIO_WASAPI "Build WASAPI audio backend (Windows shared-mode, event-driven)" OFF)
+    endif ()
+    if (AURORA_ENABLE_AUDIO_WASAPI)
+        if (NOT WIN32)
+            aurora_error("AURORA_ENABLE_AUDIO_WASAPI is only supported on Windows;"
+                    " disable it or turn off AURORA_ENABLE_AUDIO on other platforms.")
+        endif ()
+        aurora_define_feature(AURORA_ENABLE_AUDIO_WASAPI EXPORT)
+        # ole32：COM 初始化（CoInitialize/CoCreateInstance，MMDevice + IAudioClient）。
+        target_link_libraries(aurora PUBLIC ole32)
+        aurora_log("WASAPI audio backend enabled")
+    endif ()
 endif ()
 
 # ---- 架构级优化开关（性能，独立退化，默认开启） ----

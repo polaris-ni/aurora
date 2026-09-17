@@ -592,3 +592,80 @@ fix_category = "resource_error"
 retryable = false
 message = "Storage underlying I/O failed"
 hint = "Check disk space/permissions; rename failure may be a cross-volume move, use a same-volume path"
+
+[[error]]
+enum = "AudioGraphCycle"
+slug = "audio-graph-cycle"
+category = "validation"
+severity = "error"
+auto_fixable = false
+fix_category = "layout_conflict"
+retryable = false
+message = "Audio graph connection would create a cycle ({src} -> {dst})"
+hint = "Remove the back-edge; the audio graph must remain acyclic (DAG)"
+
+[[error]]
+enum = "AudioEdgeNotFound"
+slug = "audio-edge-not-found"
+category = "validation"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Audio connection does not exist and cannot be disconnected"
+hint = "Connect the nodes first; connect() result is the authoritative edge state"
+
+[[error]]
+enum = "AudioContextClosed"
+slug = "audio-context-closed"
+category = "runtime"
+severity = "error"
+auto_fixable = false
+fix_category = "unknown"
+retryable = false
+message = "AudioContext is closed; audio operations are no longer available"
+hint = "Create a new AudioContext; close() is terminal"
+
+[[error]]
+enum = "AudioParamInvalid"
+slug = "audio-param-invalid"
+category = "validation"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Invalid audio parameter automation ({reason})"
+hint = "Check times (non-negative, non-decreasing), exponential ramp must not cross zero, time_constant > 0"
+
+[[error]]
+enum = "AudioBufferInvalid"
+slug = "audio-buffer-invalid"
+category = "validation"
+severity = "error"
+auto_fixable = false
+fix_category = "empty"
+retryable = false
+message = "Invalid audio buffer ({reason})"
+hint = "Ensure sample_rate > 0, channels in {1,2} and samples non-empty before playback"
+
+[[error]]
+enum = "AudioDeviceUnavailable"
+slug = "audio-device-unavailable"
+category = "platform"
+severity = "warning"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = true
+message = "Audio device unavailable ({reason}); running in silent mode"
+hint = "The audio graph keeps running and drops samples; build with AURORA_ENABLE_AUDIO and check the platform device"
+
+[[error]]
+enum = "AudioRecordingFailed"
+slug = "audio-recording-failed"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = true
+message = "Audio recording failed: {reason}"
+hint = "Check the output path and permissions; capture device availability is reported separately as audio-device-unavailable"

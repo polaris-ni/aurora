@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <span>
 
 #include "aurora/core/color.h"
 #include "aurora/core/types.h"
+#include "aurora/media/audio_sink_bridge.h"
 #include "aurora/media/video_controls.h"
 #include "aurora/widget/props_io.h"
 
@@ -113,6 +115,10 @@ auto VideoPlayer::duration() const -> std::chrono::microseconds {
 auto VideoPlayer::set_volume(double v) -> void {
     v = std::clamp(v, 0.0, 1.0);
     volume_.set(v);
+    if (audio_bridge_) {
+        audio_bridge_->set_volume(v);  // 已接图：图内 GainNode 单点施加（不转发源，避免双重衰减）
+        return;
+    }
     if (source_) {
         source_->set_volume(v);
     }
@@ -120,9 +126,55 @@ auto VideoPlayer::set_volume(double v) -> void {
 
 auto VideoPlayer::set_muted(bool m) -> void {
     muted_.set(m);
+    if (audio_bridge_) {
+        audio_bridge_->set_muted(m);  // 已接图：图内 GainNode 归零（不转发源，避免双重衰减）
+        return;
+    }
     if (source_) {
         source_->set_muted(m);
     }
+}
+
+// ---- 音频图接线（media/audio.h §9.4 / audio_sink_bridge.h） ----
+
+auto VideoPlayer::set_source(std::shared_ptr<VideoSource> src) -> void {
+    if (source_ && audio_bridge_) {
+        source_->set_audio_callback({});  // 旧源解除桥接管
+    }
+    source_ = std::move(src);
+    if (source_ && audio_bridge_) {
+        attach_audio_bridge_to_source();  // 新源重新接管 PCM 通道
+    }
+}
+
+auto VideoPlayer::set_audio_context(std::shared_ptr<AudioContext> ctx) -> void {
+    if (ctx == audio_ctx_) {
+        return;
+    }
+    if (source_ && audio_bridge_) {
+        source_->set_audio_callback({});  // 先解除旧桥对源回调的占用
+    }
+    audio_bridge_.reset();
+    audio_ctx_ = std::move(ctx);
+    if (audio_ctx_) {
+        audio_bridge_ = std::make_shared<AudioSinkGraphBridge>(audio_ctx_);
+        audio_bridge_->set_volume(volume_.get());
+        audio_bridge_->set_muted(muted_.get());
+        if (source_) {
+            attach_audio_bridge_to_source();
+        }
+    } else if (source_) {
+        source_->set_audio_callback({});  // 解除接线：清空源音频回调
+    }
+}
+
+auto VideoPlayer::attach_audio_bridge_to_source() const -> void {
+    // 桥以 shared_ptr 进回调：解码器线程推流期间播放器先行析构亦无悬垂
+    // （源仍存活时会继续经桥推流——与既有「App 自接线回调」生命周期语义一致）。
+    const std::shared_ptr<AudioSinkGraphBridge> bridge = audio_bridge_;
+    source_->set_audio_callback([bridge](std::span<const std::int16_t> pcm, int sample_rate, int channels) -> void {
+        bridge->play_samples(pcm, sample_rate, channels);
+    });
 }
 
 // ---- 受保护虚函数（扩展点） ----
@@ -134,7 +186,8 @@ auto VideoPlayer::on_frame(const Image &frame) -> void {
     // 通用缓存淘汰抖动。软件路径忽略流式字段（零回归）。
     if (stream_key_ == 0) {
         // 流式键进程内唯一（本计数器独立分配；0 保留为「非流式」）。
-        static std::atomic<std::uint64_t> stream_key_counter{1}; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+        static std::atomic<std::uint64_t> stream_key_counter{
+            1};  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
         stream_key_ = stream_key_counter.fetch_add(1, std::memory_order_relaxed);
     }
     current_frame_.stream_key = stream_key_;
@@ -255,7 +308,7 @@ auto VideoPlayer::draw_frame(Painter &p, const Rect &bounds) const -> void {
     float dh = bounds.size.height;
     if (fit_ != BoxFit::Fill) {
         const float scale = (fit_ == BoxFit::Cover) ? std::max(bounds.size.width / iw, bounds.size.height / ih)
-                                                     : std::min(bounds.size.width / iw, bounds.size.height / ih);
+                                                    : std::min(bounds.size.width / iw, bounds.size.height / ih);
         dw = iw * scale;
         dh = ih * scale;
     }

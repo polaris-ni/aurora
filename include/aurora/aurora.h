@@ -79,6 +79,7 @@
 #include "aurora/layout/flex_layouter.h"
 #include "aurora/layout/layout_box.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/media/audio.h"
 #include "aurora/media/image_sequence_source.h"
 #include "aurora/media/video_controls.h"
 #include "aurora/media/video_player.h"

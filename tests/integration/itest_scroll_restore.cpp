@@ -14,7 +14,6 @@
 #include "aurora/app/scroll_storage.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/preferences/preferences.h"
-#include "aurora/render/painter.h"
 #include "aurora/widget/grid_view.h"
 #include "aurora/widget/lazy_list.h"
 #include "aurora/widget/lazy_row.h"
@@ -178,12 +177,12 @@ AURORA_TEST_CASE(user_scroll_wins_over_restore) {
 
     LayoutEngine::layout(list, bounded(200.0F, AURORA_VIEW_H));  // 再次布局（模拟后续帧）
     AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 120.0F, 1e-4F);
-    reset_storage();
+    (void)reset_storage();
 }
 
 AURORA_TEST_CASE(scope_isolates_same_key_across_windows) {
     // 多窗口隔离：同一 restore_key 在不同作用域下互不可见（宿主每帧设置本窗口作用域）。
-    auto &storage = reset_storage();
+    (void)reset_storage();
     {
         const ScrollStorage::Scope win_a{"win-a"};
         LazyList feed{100, make_item_builder(), 40.0F};

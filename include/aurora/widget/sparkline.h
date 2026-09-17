@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "aurora/core/types.h"
-#include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/chart_common.h"
@@ -18,12 +17,12 @@ namespace aurora {
 
 /// @brief Sparkline 属性（聚合；所有字段均有默认值）。
 struct SparklineProps {
-    std::vector<double> values;   ///< 单系列数据（等距，x = 索引）
-    std::optional<Color> color;   ///< 线条色；空 = 按索引 0 取内置色板
-    float line_width = 1.5F;      ///< 线宽（dp）
-    bool show_end_dot = true;     ///< 末端数据点圆点
-    float dot_radius = 2.0F;      ///< 末端圆点半径（dp）
-    EdgeInsets padding{2.0F, 2.0F, 2.0F, 2.0F};  ///< 图内留白
+    std::vector<double> values;  ///< 单系列数据（等距，x = 索引）
+    std::optional<Color> color;  ///< 线条色；空 = 按索引 0 取内置色板
+    float line_width = 1.5F;  ///< 线宽（dp）
+    bool show_end_dot = true;  ///< 末端数据点圆点
+    float dot_radius = 2.0F;  ///< 末端圆点半径（dp）
+    EdgeInsets padding{.left = 2.0F, .top = 2.0F, .right = 2.0F, .bottom = 2.0F};  ///< 图内留白
 };
 
 /**
@@ -129,14 +128,14 @@ class Sparkline : public LeafWidget, public SparklineProps {
         for (std::size_t i = 0; i < values.size(); ++i) {
             const double v = std::isfinite(values[i]) ? values[i] : lo;
             const float t = static_cast<float>(i) / static_cast<float>(values.size() - 1U);
-            const float yv = static_cast<float>((hi - v) / (hi - lo));
+            const auto yv = static_cast<float>((hi - v) / (hi - lo));
             pts.push_back(Point{.x = left + (t * w), .y = top + (yv * h)});
         }
         // grow-in：只绘制到 t 对应的折线前缀（末段按分数插值端点）
         std::vector<Point> drawn = pts;
-        if (const float grow_t = static_cast<float>(grow_.progress()); grow_t < 1.0F) {
+        if (const auto grow_t = static_cast<float>(grow_.progress()); grow_t < 1.0F) {
             const float span = static_cast<float>(pts.size() - 1) * grow_t;
-            const std::size_t whole = static_cast<std::size_t>(std::floor(span));
+            const auto whole = static_cast<std::size_t>(std::floor(span));
             const float frac = span - static_cast<float>(whole);
             const std::size_t keep = std::min(whole + 1U, pts.size());
             drawn.assign(pts.begin(), pts.begin() + static_cast<std::ptrdiff_t>(keep));
@@ -150,17 +149,14 @@ class Sparkline : public LeafWidget, public SparklineProps {
         if (show_end_dot && dot_radius > 0.0F && grow_.progress() >= 1.0) {
             const Point &last = pts.back();
             const float d = dot_radius * 2.0F;
-            const Rect dot{
-                .origin = Point{.x = last.x - dot_radius, .y = last.y - dot_radius},
-                .size = Size{.width = d, .height = d},
-            };
             // 末端圆点须夹在控件内（D12：越界像素不会被脏区擦除）
-            const float cx = std::clamp(last.x, bounds.origin.x + dot_radius, bounds.origin.x + bounds.size.width - dot_radius);
+            const float cx =
+                std::clamp(last.x, bounds.origin.x + dot_radius, bounds.origin.x + bounds.size.width - dot_radius);
             const float cy =
                 std::clamp(last.y, bounds.origin.y + dot_radius, bounds.origin.y + bounds.size.height - dot_radius);
-            p.fill_rounded_rect(
-                Rect{.origin = Point{.x = cx - dot_radius, .y = cy - dot_radius}, .size = Size{.width = d, .height = d}},
-                dot_radius, c);
+            p.fill_rounded_rect(Rect{.origin = Point{.x = cx - dot_radius, .y = cy - dot_radius},
+                                     .size = Size{.width = d, .height = d}},
+                                dot_radius, c);
         }
         (void)theme;
     }

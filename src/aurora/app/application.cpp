@@ -6,6 +6,7 @@
 
 #include "aurora/app/window_geometry.h"
 #include "aurora/core/log.h"
+#include "aurora/media/audio.h"
 
 namespace aurora {
 
@@ -52,7 +53,7 @@ auto Application::register_host(Scene scene, std::unique_ptr<Window> window, con
     // 单窗口用法刻意保留写入全局单例的历史语义（既有 PerfOverlay / bench / 性能集成测试直读之）。
     const bool isolate_stats = !hosts_.empty();
     if (isolate_stats) {
-        for (auto &h : hosts_) {
+        for (const auto &h : hosts_) {
             h->own_frame_stats();
         }
     }
@@ -74,7 +75,7 @@ auto Application::register_host(Scene scene, std::unique_ptr<Window> window, con
     }
     // 键盘前置拦截：快捷键是应用级共享的，但命中与否取决于**当前宿主**是否已有焦点控件。
     raw->set_key_pre_handler([this, raw](Event &e) -> bool {
-        auto *k = dynamic_cast<KeyEvent *>(&e);
+        const auto *k = dynamic_cast<KeyEvent *>(&e);
         return k != nullptr && shortcuts_.handle(*k, raw->focus().focused() != nullptr);
     });
     // 窗口级状态上报：沿用「主窗口状态 ≡ 应用窗口状态」的历史语义；非主窗口状态只落在自己的宿主上。
@@ -113,7 +114,7 @@ auto Application::restore_geometry_for(WindowHost &host, const std::string &pers
     if (geometry_store_ == nullptr || persist_id.empty() || !host.has_window()) {
         return;
     }
-    if (auto g = load_window_geometry(*geometry_store_, persist_id)) {
+    if (const auto g = load_window_geometry(*geometry_store_, persist_id)) {
         apply_host_geometry(host, *g);
     }
 }
@@ -146,6 +147,23 @@ auto Application::set_main_window(WindowId id) -> void {
     if (auto *h = window_host(id)) {
         main_host_ = h;  // 未知 id 为 no-op，保持当前主窗口
     }
+}
+
+// =============================================================================
+// 应用级默认音频上下文（惰性创建；媒体/audio.h §9.4）
+// =============================================================================
+
+auto Application::audio() -> AudioContext & {
+    if (!audio_ctx_) {
+        // 内置后端未编译 / 设备启动失败时 AudioContext 构造内自动静默降级，无需分支。
+        audio_ctx_ = std::make_shared<AudioContext>();
+    }
+    return *audio_ctx_;
+}
+
+auto Application::audio_shared() -> const std::shared_ptr<AudioContext> & {
+    static_cast<void>(audio());  // 触发惰性创建
+    return audio_ctx_;
 }
 
 // =============================================================================
@@ -222,7 +240,7 @@ auto Application::reap_closed() -> void {
     // ① 策略连带：`MainWindowClosed` 下主窗关闭即关闭全部窗口（真正回收在下一帧，
     //    本帧仅置位，避免在同一轮里一边遍历一边销毁）。
     if (exit_policy_ == ExitPolicy::MainWindowClosed && main_host_ != nullptr && main_host_->should_close()) {
-        for (auto &h : hosts_) {
+        for (const auto &h : hosts_) {
             h->request_close();
         }
     }
@@ -278,7 +296,7 @@ auto Application::reap_closed() -> void {
         }
         // 从属窗口连带关闭（Transient 依附于 owner）：置位后由**下一次** reap 回收，
         // 保持「每轮只销毁 ② 收集到的宿主」的不变式，杜绝迭代中销毁。
-        for (auto &h : hosts_) {
+        for (const auto &h : hosts_) {
             if (h->options().owner == id) {
                 h->request_close();
             }
@@ -324,7 +342,7 @@ auto Application::wait_once(const std::chrono::steady_clock::time_point &frame_s
     // 执行等待的宿主：优先「线程/进程级等待通道」的后端（Win32/GLFW 一次覆盖全部窗口）；
     // 无此类后端时只能等某一个 Surface，多窗口下须压上限防止其余窗口饥饿。
     WindowHost *waiter = first_window_host();
-    for (auto &h : hosts_) {
+    for (const auto &h : hosts_) {
         if (h->has_window() && h->window()->surface().waits_thread_queue()) {
             waiter = h.get();
             break;

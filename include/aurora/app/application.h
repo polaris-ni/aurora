@@ -33,6 +33,8 @@ namespace preferences {
 class Preferences;  // 前置声明：几何持久化存储（仅作指针成员，避免拉入 preferences.h 重型头）
 }  // namespace preferences
 
+class AudioContext;  // 前置声明：应用级默认音频上下文（仅作 shared_ptr 成员，避免拉入 audio.h）
+
 /**
  * @brief 应用组合根：持有**一组窗口宿主**（`WindowHost`），以单一帧循环统一驱动它们。
  *
@@ -198,6 +200,16 @@ class Application {
 
     /// @brief 定时任务调度器：每帧由 run() 按 dt 驱动，供 `set_timeout`/`set_interval` 与组件级 `Timer` 使用。
     [[nodiscard]] auto scheduler() -> Scheduler & { return sched_; }
+
+    /// @brief 应用级默认音频上下文（**惰性创建**，首次调用时构造并启动内置设备后端）。
+    ///
+    /// 内置后端未编译（`AURORA_ENABLE_AUDIO=OFF`）或设备启动失败时自动进入静默模式：
+    /// 图照常运转、样本消费后丢弃（`AudioContext::device_state()==Silent`），调用方无需分支。
+    /// 典型接线：`player.set_audio_context(app.audio_shared());`（见 `VideoPlayer`）。
+    /// @note Thread: main-thread only（图变更走命令环，渲染在设备线程或 render_block）
+    auto audio() -> AudioContext &;
+    /// @brief 默认音频上下文的 shared_ptr 形态（同源惰性创建；传给 `VideoPlayer::set_audio_context`）。
+    auto audio_shared() -> const std::shared_ptr<AudioContext> &;
 
     /// @brief 快捷键注册表：在键盘事件派发到焦点控件前优先匹配（specification/06-app-platform.md §8.4）。
     /// 用法：`app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::O}, []{ open(); })`。
@@ -471,6 +483,8 @@ class Application {
     std::function<void()> on_frame_;  ///< 每帧回调（在 present_root 前调用）。
     Animator anim_;  ///< 帧动画管理器（run() 每帧按 dt 推进）。
     Scheduler sched_;  ///< 定时任务调度器（run() 每帧按 dt 推进）。
+
+    std::shared_ptr<AudioContext> audio_ctx_{nullptr};  ///< 应用级默认音频上下文（惰性创建，见 audio()）。
     CommandRegistry commands_;  ///< 命令注册表（快捷键/菜单/面板的统一真源）。
     ShortcutRegistry shortcuts_;  ///< 快捷键注册表（键盘事件派发前优先匹配）。
     State<WindowState> window_state_{WindowState::Visible};  ///< 窗口可见性状态（响应式）。

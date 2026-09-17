@@ -24,7 +24,7 @@ struct FlagKeyPair {
     bool FeatureFlags::* field;
 };
 
-/// 全部 18 个归一化镜像字段（与 BUILD_OPTIONS.md 三层命名分组一一对应）。
+/// 全部 20 个归一化镜像字段（与 BUILD_OPTIONS.md 三层命名分组一一对应）。
 [[nodiscard]] auto flag_key_table() -> const std::vector<FlagKeyPair>& {
     static const std::vector<FlagKeyPair> AURORA_FLAG_KEY_TABLE = {
         {.key = "AURORA_BACKEND_HEADLESS", .field = &FeatureFlags::backend_headless},
@@ -42,6 +42,8 @@ struct FlagKeyPair {
         {.key = "AURORA_ENABLE_PROFILING", .field = &FeatureFlags::profiling},
         {.key = "AURORA_ENABLE_TRACING", .field = &FeatureFlags::tracing},
         {.key = "AURORA_ENABLE_DEBUG", .field = &FeatureFlags::debug},
+        {.key = "AURORA_ENABLE_AUDIO", .field = &FeatureFlags::audio},
+        {.key = "AURORA_ENABLE_AUDIO_WASAPI", .field = &FeatureFlags::enable_audio_wasapi},
         {.key = "AURORA_ENABLE_IMAGE_JPEG", .field = &FeatureFlags::image_jpeg},
         {.key = "AURORA_ENABLE_IMAGE_WEBP", .field = &FeatureFlags::image_webp},
         {.key = "AURORA_ENABLE_IMAGE_PNG", .field = &FeatureFlags::image_png},
@@ -69,6 +71,8 @@ AURORA_TEST_CASE(value_initialized_flags_are_all_false) {
     AURORA_TEST_CHECK_FALSE(defaults.profiling);
     AURORA_TEST_CHECK_FALSE(defaults.tracing);
     AURORA_TEST_CHECK_FALSE(defaults.debug);
+    AURORA_TEST_CHECK_FALSE(defaults.audio);
+    AURORA_TEST_CHECK_FALSE(defaults.enable_audio_wasapi);
     AURORA_TEST_CHECK_FALSE(defaults.image_jpeg);
     AURORA_TEST_CHECK_FALSE(defaults.image_webp);
     AURORA_TEST_CHECK_FALSE(defaults.image_png);

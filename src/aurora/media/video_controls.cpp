@@ -24,9 +24,7 @@ auto VideoControls::format_time(long long ms) -> std::string {
     return oss.str();
 }
 
-VideoControls::VideoControls(VideoController *controller) : controller_(controller) {
-    VideoControls::build_children();
-}
+VideoControls::VideoControls(VideoController *controller) : controller_(controller) { VideoControls::build_children(); }
 
 auto VideoControls::build_children() -> void {
     auto play = std::make_unique<Button>("Play");
@@ -39,12 +37,12 @@ auto VideoControls::build_children() -> void {
     // 控制器为空（独立反序列化场景）时使用本地占位信号，避免空指针。
     Reactive fallback_progress{0.0};
     Reactive fallback_volume{1.0};
-    auto seek = std::make_unique<Slider>(
-        (controller_ != nullptr) ? *controller_->progress_signal() : fallback_progress, [this](double f) -> void {
-            if (controller_) {
-                controller_->seek_fraction(f);
-            }
-        });
+    auto seek = std::make_unique<Slider>((controller_ != nullptr) ? *controller_->progress_signal() : fallback_progress,
+                                         [this](double f) -> void {
+                                             if (controller_) {
+                                                 controller_->seek_fraction(f);
+                                             }
+                                         });
     seek->modifier.set(Modifier{}.expand());  // 在 Row 中撑满剩余空间
 
     auto time = std::make_unique<Text>("0:00 / 0:00");

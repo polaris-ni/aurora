@@ -48,6 +48,7 @@
 | `set_on_window_state(cb)` / `set_on_window_mode(cb)` | 命令式回调 |
 | `scheduler()` | 取应用级 `Scheduler` |
 | `animator()` | 取应用级 `Animator &`，由 `run()` 每帧按 `dt` 驱动，供注册动画控制器 |
+| `audio()` / `audio_shared()` | 应用级默认音频上下文（**惰性创建**，`media/audio.h` 图，[`03-layout-render.md`](03-layout-render.md) §9.4）：首次调用构造 `AudioContext` 并启动内置设备后端，未编译/启动失败自动静默模式；典型接线 `player.set_audio_context(app.audio_shared())` |
 | `set_strict_mode(StrictMode)` / `strict_mode()` | 严格模式设置器与**无参**取值器（[`01-core.md`](01-core.md) §4.3）。Application **没有**带参的 `strict_mode(StrictMode)` 形式；带参链式方法属 `App` 构建器（§4），其 `run()` 内部经 `set_strict_mode` 套用到 `Application` |
 
 ### 2.3 Scene

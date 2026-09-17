@@ -346,7 +346,7 @@
       "version": "1.0.0-alpha.6",
       "date": "2026-09-17",
       "type": "pre-release",
-      "summary": "GPU 独有能力交付（GL 路径）：GPU 层缓存——`cache_layer` 修饰对齐 FBO 常驻层，干净帧子树零重栅格化；流式纹理常驻槽——视频/大图逐帧更新免全量重传；RHI 能力位与原生表面导入契约位。配套确定性基准（fake GL 桩）与真机探针——探针实测修复两处无头 CI 无法暴露的驱动接线缺陷。GCC/MSVC/clang-LLVM 三工具链 ctest 286/286 全绿。",
+      "summary": "GPU 独有能力交付（GL 路径）：GPU 层缓存——`cache_layer` 修饰对齐 FBO 常驻层，干净帧子树零重栅格化；流式纹理常驻槽——视频/大图逐帧更新免全量重传；RHI 能力位与原生表面导入契约位。音频子系统全套追加：Web Audio 语义节点图（`AURORA_ENABLE_AUDIO` opt-in，未编译/初始化失败静默降级）+ WASAPI 输出/采集后端 + VideoPlayer/Application 接入 + 节点族全套（Panner/Analyser/录制/Sinc SRC）。配套确定性基准（fake GL 桩）、fake 音频桩与真机探针——探针实测修复两处无头 CI 无法暴露的驱动接线缺陷。GCC/MSVC/clang-LLVM 三工具链 ctest 289/289 全绿。",
       "breakingChanges": [
         "render/display_list.h：`CmdKind` 由 20 类增至 23 类（新增 BeginLayer/EndLayer/DrawLayer），`DrawCmd` 新增 `aux_key` 层键字段。自定义 `rhi::RhiBackend::submit` 实现须处理三条新层命令（建议默认跳过）；既有命令字段与枚举值不变，软件路径对既有内容像素输出逐位不变。"
       ],
@@ -360,15 +360,23 @@
         "tools/bench/bench_gpu.cpp（新增）：GPU 特性确定性基准（fake GL 桩计数 + 上传 memcpy 成本）——视频逐帧更新：流式通道 vs content_hash 缓存纹理分配 125→0、删除 64→0、每帧 CPU 4.28×（0.150ms vs 0.643ms，480×270 × 128 帧）；transform-only 旋转动画：cache_layer vs 逐帧离屏合成稳态 19.07×（0.071ms vs 1.348ms，192 盒网格 × 60 帧）。",
         "tools/verify/glfw_gpu_features_live_probe.cpp（新增）：GL GPU 特性真机探针（条件构建、不进 CTest）——自动段覆盖 GPU 通道与能力位核对、`import_native_surface` 契约、流式纹理逐版本像素（真实 glTexSubImage2D 上传 + 采样读回）、层缓存 FBO 跨帧持久性、`present_root` 上屏链路；`--interactive` 人工目视常驻窗口段（流式「视频」+ 旋转层缓存网格并存）。",
         "tests/support/fake_gl.h（新增）：`aurora::testing::FakeGl` 全量 GL 3.3 core 驱动桩（`AURORA_GL_*` 常量随迁），utest_gpu_gl_rhi 与 bench_gpu 共用同一桩，并新增纹理分配/删除计数器（`texture_gens` / `texture_deletes`）。",
-        "codespec 文档回写：specification/03-layout-render.md §8.6 / §8.7 / §9.1 / §9.2（层命令协议、流式纹理、RHI 能力位与原生表面契约）、ARCHITECTURE.md §8.1 / §8.4、specification/07-environment-modifier.md `cache_layer` 修饰行、specification/08-tooling.md §8 fake_gl.h 段。"
+        "codespec 文档回写：specification/03-layout-render.md §8.6 / §8.7 / §9.1 / §9.2（层命令协议、流式纹理、RHI 能力位与原生表面契约）、ARCHITECTURE.md §8.1 / §8.4、specification/07-environment-modifier.md `cache_layer` 修饰行、specification/08-tooling.md §8 fake_gl.h 段。",
+        "media/audio.{h,cpp}（新增）：音频子系统图核心——Web Audio 语义节点图（`AudioContext` → `AudioNode` 图 → `AudioDestinationNode` 汇聚，内部 stereo float32 混音）：拓扑管理（connect/disconnect，DFS 禁环校验）、suspend/resume/close、主音量；`AudioParam` 直写 + AutomationTimeline（set_value_at_time / linear / exponential / set_target + cancel，COW 快照 `atomic<shared_ptr>` 渲染线程无锁读）；基础节点族 `AudioDestinationNode`（多入汇聚）/ `AudioStreamSourceNode`（App 推 PCM → SPSC 环 → 设备线程拉；溢出丢最旧 + 键级一次告警；线性/Sinc 双档 SRC）/ `GainNode` / `AudioBufferSourceNode`（一次性/循环）；API 恒编译——`AURORA_ENABLE_AUDIO`（opt-in 默认 OFF）只决定编不编内置设备后端，未编译/初始化失败 → 静默模式（图照常运转、样本丢弃，`device_state()==Silent`）。",
+        "media/audio.{h,cpp}（新增）：节点族全套——`PannerNode`（equal-power 声像：方位角 `pan=sin(az)`，L²+R²=1 能量守恒；inverse 距离衰减；`AudioListener` 世界坐标系）；`AnalyserNode`（Blackman 窗 + radix-2 复 FFT 自实现零三方；`get_float_frequency_data`/`get_byte_frequency_data`/`get_byte_time_data` 语义对齐 Web Audio；dB 域平滑默认 τ=0.8）；录制链 `AudioMicrophoneSourceNode`（采集线程 = 推流环唯一生产者）→ `AudioRecordingDestinationNode`（WAV 16-bit PCM 导出）——**录制是显式能力**：设备不可用返回 `AudioDeviceUnavailable`、落盘失败返回 `AudioRecordingFailed`，不静默降级；`SrcQuality::Sinc` 32-tap Blackman 窗核 + 256 子相位量化表（行归一 DC 增益 1）。",
+        "media/audio_wasapi.{h,cpp}（新增）：WASAPI 设备后端（`AURORA_ENABLE_AUDIO_WASAPI` 门控，仅 Windows，pimpl 隔离 windows.h 不外泄）——输出：shared mode event-driven、格式协商对齐图契约（48000/2 float32，`AUTOCONVERTPCM|SRC_DEFAULT_QUALITY` 保持重路由后契约稳定）、`IMMNotificationClient` 默认设备变更/丢失重路由（退避重建，期间时钟冻结）；采集：默认捕获端点 shared 引擎混合格式、SILENT 包补零；宏关闭时 disabled 桩 start 恒 false（输出走静默模式、录制显式报错）。",
+        "media/audio_sink_bridge.h（新增）：`AudioSinkGraphBridge`——`AudioSink` 契约 → 图桥适配器（自持 StreamSource + GainNode），App 自定义输出扩展点兜底；`app/application.{h,cpp}`：`Application::audio()/audio_shared()` 惰性默认上下文；`media/video_player.{h,cpp}`：`set_audio_context()` 接入后音轨 PCM 经桥自动入图，`set_volume`/`set_muted` 语义不变（图内 GainNode 单点施加）。",
+        "tests/support/fake_audio.h（新增）：`FakeAudioDevice` 渲染桩（手动驱动 render_block、可注入 start 失败）+ `FakeAudioCaptureDevice` 采集桩（手动 emit PCM、可注入 start 失败）；tests/unit/utest_audio.cpp（图拓扑/环检测/溢出/SRC/Automation 曲线/静默模式 18 例）、utest_audio_nodes.cpp（Panner 能量守恒/Analyser 峰值桶/录制 WAV 头/显式错误/采集全链路/Sinc 恒量保真 13 例）、utest_audio_sink_bridge.cpp（桥与 VideoPlayer 接线 7 例）。",
+        "tools/verify/wasapi_audio_live_probe.cpp（新增）：WASAPI 真机探针（条件构建、不进 CTest）——自动段覆盖端点激活/格式协商/时钟推进/缓冲推流/suspend-resume；`--interactive` 人工出声段（扫频/双源混音/设备热切换）；真机自动段 14/14 PASS。",
+        "codespec 文档回写：specification/03-layout-render.md §9.4 音频图（图模型/静默模式/节点清单/AudioParam/线程模型/WASAPI 后端/应用接线/错误码）、specification/06-app-platform.md §2.2 `audio()` 行、BUILD_OPTIONS.md `AURORA_ENABLE_AUDIO` + `AURORA_ENABLE_AUDIO_WASAPI` 登记、errors.toml 新错误码、SPECIFICATIONS.md 特性表 03 行音频落点描述。"
       ],
       "fixed": [
         "render/gpu/gpu_gl_rhi.cpp：部分驱动在 core profile 上下文对 `glGetString(GL_EXTENSIONS)` 抛 `GL_INVALID_ENUM`（真机探针实测）——粘滞错误使 GPU 通道 init 整体判败回退软件路径；诊断性扩展查询后清空错误队列不再判败，init 增分段检查点（init-programs / init-uniforms / init-vao / init）精准归因。",
         "render/gpu/gpu_gl_rhi.cpp：`read_pixels` 在 `end_frame` 之前读回（探针/测试直驱通道）时挂起顶点批未落地——批渲染的 GL 绘制集中在 `flush_batch`（end_frame 内触发），此前读回的是清屏零基底；现读回前幂等 flush，任意时刻读回即本帧合成结果。"
       ],
       "notes": [
-        "验证口径：GCC / MSVC / clang-LLVM 三工具链全量 ctest **286/286** 全绿（含 4 项守护）；真机探针（Windows + 真实 GL 驱动）自动段 ALL PASS——流式上传与采样、FBO 层跨帧存续、present 链路等无头 CI 无法证明的驱动接线由 tools/verify/ 探针补位。",
-        "原生 GPU 表面导入在 GL 3.3 路径为契约位（能力位恒 false、import 恒回退），真实兑现（memory object 绑定 / EGLImage）随 wgpu 阶梯推进；`compute` 能力位同理为前瞻声明（GL 3.3 无 compute shader）。"
+        "验证口径：GCC / MSVC / clang-LLVM 三工具链全量 ctest **289/289** 全绿（含 4 项守护）；音频另跑 `AURORA_ENABLE_AUDIO=ON` 配置 ctest 289/289 全绿（内置 WASAPI 后端接线真实验证）；真机探针（Windows + 真实 GL 驱动 / Windows + 真实 WASAPI 设备）自动段 ALL PASS——流式上传与采样、FBO 层跨帧存续、present 链路、音频格式协商与推流等无头 CI 无法证明的驱动接线由 tools/verify/ 探针补位。",
+        "原生 GPU 表面导入在 GL 3.3 路径为契约位（能力位恒 false、import 恒回退），真实兑现（memory object 绑定 / EGLImage）随 wgpu 阶梯推进；`compute` 能力位同理为前瞻声明（GL 3.3 无 compute shader）。",
+        "音频图 API 恒编译、`AURORA_ENABLE_AUDIO` 只门控内置设备后端：未启用时 AudioContext 构造即静默模式，消费代码零分支；录制为显式能力（失败显式报错），与静默降级语义明确区分。音频后续增量（CoreAudio / ALSA / WebAudio 后端、HRTF 声像卷积模型）顺延 alpha.7 或平台窗口期。"
       ]
     }
   ]

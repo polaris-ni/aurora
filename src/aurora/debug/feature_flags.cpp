@@ -62,6 +62,12 @@ auto feature_flags() -> FeatureFlags {
 #ifdef AURORA_ENABLE_DEBUG
     f.debug = true;
 #endif
+#ifdef AURORA_ENABLE_AUDIO
+    f.audio = true;
+#endif
+#ifdef AURORA_ENABLE_AUDIO_WASAPI
+    f.enable_audio_wasapi = true;
+#endif
 
     // ---- AURORA_ENABLE_IMAGE_*（编解码能力）----
 #ifdef AURORA_ENABLE_IMAGE_JPEG
@@ -94,6 +100,8 @@ auto FeatureFlags::to_json() const -> Json {
     j["AURORA_ENABLE_PROFILING"] = profiling;
     j["AURORA_ENABLE_TRACING"] = tracing;
     j["AURORA_ENABLE_DEBUG"] = debug;
+    j["AURORA_ENABLE_AUDIO"] = audio;
+    j["AURORA_ENABLE_AUDIO_WASAPI"] = enable_audio_wasapi;
     j["AURORA_ENABLE_IMAGE_JPEG"] = image_jpeg;
     j["AURORA_ENABLE_IMAGE_WEBP"] = image_webp;
     j["AURORA_ENABLE_IMAGE_PNG"] = image_png;

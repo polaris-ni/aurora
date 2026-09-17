@@ -733,6 +733,41 @@ class RhiBackend {
 - 虚函数：`build_children()` 重建子控件布局。
 - 静态工具：`format_time(long long ms)`。
 
+### 9.4 音频图（media/audio.h）
+
+`media/audio.h` 提供声明式音频图：`AudioContext` 为图与设备生命周期所有者，`AudioNode` 为图节点，信号自源节点流向 `AudioDestinationNode` 汇聚。内部固定 **stereo（2ch）float32** 混音；单声道源在上游混音时复制到双声道。语义模型对齐 Web Audio（节点图 + AudioParam 自动化），但零三方依赖。
+
+**恒编译与静默模式**：图 API 始终编译（对齐 RHI 先例：契约常在、能力经 `feature_flags().audio` 运行期查询）；`AURORA_ENABLE_AUDIO`（见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md)）只决定是否编入内置设备后端。未启用或设备启动失败 → **静默模式**：图照常运转、样本消费后丢弃（`device_state()==Silent`、`silent()==true`），对齐 GPU 通道回退语义——消费代码无需分支。
+
+**节点清单**（`AudioContext` 工厂创建，节点归属唯一上下文）：
+
+| 节点 | 工厂 | 说明 |
+|:---|:---|:---|
+| `AudioDestinationNode` | `create_destination()` / `destination()` | 图的终端；混音输出经主音量缩放后送设备 |
+| `AudioStreamSourceNode` | `create_stream_source(ring_capacity_frames=16384)` | 实时推流源：`push(span<const int16_t>, rate, channels)` int16 PCM 入环；线性插值 SRC（拉，相位累加器，`step = src_rate/dev_rate`；推入率中途变更报错） |
+| `GainNode` | `create_gain()` | 纯增益；`gain()` 返回 `AudioParam&` |
+| `AudioBufferSourceNode` | `create_buffer_source()` | 内存缓冲播放：`set_buffer(shared_ptr<const AudioBuffer>)` / `start(when=0)` / `stop()` / `set_loop(bool)` / `finished()`；一次性播完自动 `finished()` |
+| `PannerNode` | `create_panner()` | equal-power 立体声声像（对齐 Web Audio `panningModel='equalpower'`）：由声源相对 `ctx.listener()`（`AudioListener`，默认原点/朝 -Z/上向 +Y）的方位角计算 `pan = sin(az)`，`L=cos((pan+1)·π/4)`、`R=sin((pan+1)·π/4)`（能量守恒 L²+R²=1）；距离衰减 inverse 模型 `gain = ref/(ref + rolloff·(max(d,ref)-ref))`（`set_ref_distance`/`set_rolloff`）；位置/衰减块级更新；HRTF/锥形属后续增量 |
+| `AnalyserNode` | `create_analyser()` | 直通分析节点：Blackman 窗 + radix-2 复 FFT（自实现零三方）；`set_fft_size`（2 的幂 32..32768，非法 → `AudioParamInvalid`）/`frequency_bin_count()`（= fft_size/2）/`set_smoothing_time_constant`（dB 域平滑 τ∈[0,1]，默认 0.8）/`set_min/max_decibels`（默认 [-100,-30]）；快照访问器 `get_float_frequency_data`（钳位 dB）/`get_byte_frequency_data`（dB 归一 0..255）/`get_byte_time_data`（-1..1 → 0..255，静音=128）；mono 下混 (L+R)/2，渲染线程逐块分析，UI 线程 mutex 读快照；幅度归一 mag/(N/4)（全幅正弦峰值桶 ≈ -1.5 dB） |
+| `AudioMicrophoneSourceNode` | `create_microphone_source()` | 麦克风源（继承推流源，复用推流环；采集线程为唯一生产者）：**录制是显式能力**——采集设备不可用/权限拒绝返回 `AudioDeviceUnavailable` 显式错误，**不静默降级**；析构先停采集再释放环 |
+| `AudioRecordingDestinationNode` | `create_recording_destination()` | 直通录制汇：`start()`（幂等；closed → `AudioContextClosed`）起录/`stop()` 停录（幂等，保留数据）；样本常驻内存（设备采样率 stereo float32），`recording()`/`recorded_frames()` 快照；`to_wav_bytes()` 导出 16-bit PCM stereo RIFF（44 字节头）；`save_wav(path)` 落盘失败 → `AudioRecordingFailed` 显式报错，不静默 |
+
+**推流重采样质量档位**：`SrcQuality { Linear, Sinc }`，`set_src_quality()/src_quality()`，默认 Linear。Sinc 为 32-tap Blackman 窗 sinc 核 + 相位量化表（256 子相位 × 32 tap，行归一 DC 增益 1，构造期生成）：需 **16 帧前瞻**（前瞻不足停相位，窗尾帧须续推后才输出），读端保留 15 帧窗历史；流起点无历史按复制首帧处理（行归一保证 DC 保真）。
+
+**拓扑管理**：`connect(src, dst)` / `disconnect(src, dst)` / `connection_count()`。UI 侧 DFS 禁环校验（成环 → `AudioGraphCycle`；边不存在 → `AudioEdgeNotFound`；destination 为终端不可作源）。节点由 `shared_ptr` 持有，上下文析构即拆图。
+
+**AudioParam 与 AutomationTimeline**：`AudioParam` 双轨取值——即时 `set_value()/value()` + 事件链 `set_value_at_time` / `linear_ramp_to_value_at_time` / `exponential_ramp_to_value_at_time` / `set_target_at_time` / `cancel_scheduled_values`。事件时刻非负且不回退（违规 → `AudioParamInvalid`）；ramp 锚点 = 上一事件时刻 + 落点值（纯数学插值，不依赖渲染时钟）；指数 ramp 起终点须非零同号。事件链以 COW 快照存储（`atomic<shared_ptr>`），渲染线程无锁读。
+
+**线程模型**：UI 线程提交图变更（connect/disconnect/参数/推流），渲染线程（设备回调或手动驱动）执行 `render_block`；图变更经 **SPSC 命令环**（256 槽）在块首排空生效。推流环单调 uint64 帧游标：**溢出丢最旧**（生产端 CAS 单调推进读端 + 键级一次告警 `AURORA_LOG_WARN`）、**欠载输出静音停在环头**（不跳相位，渲染端检测落后即重同步）。无设备（静默模式）时命令直接生效（direct 模式）。
+
+**设备层**：`AudioDeviceBackend` 接口（`format()` / `start(RenderFn)` / `stop()`），真实后端自起设备线程，测试用 `FakeAudioDevice`（`tests/support/fake_audio.h`）手动驱动保证确定性。`render_block(out, frames)` 公开可手动泵图（无头/测试）。`suspend()` 冻结时钟输出静音；`close()` 终态不可逆。
+
+**WASAPI 后端**（Windows，`AURORA_ENABLE_AUDIO_WASAPI`，pimpl 隔离于 `src/aurora/media/audio_wasapi.*`，windows.h 不外泄）：shared mode event-driven——引擎事件驱动设备线程逐块 `GetCurrentPadding → render → GetBuffer/ReleaseBuffer`；格式协商优先以图契约格式（48000/2 float32）+ `AUTOCONVERTPCM` 初始化（引擎侧转换吸收设备差异，重路由后契约不变），旧系统回退 float32 stereo 混合格式直用；协商失败 → `start()` 返回 false → 静默降级。**重路由**：`IMMNotificationClient` 监听默认设备变更/设备状态变化，设备线程重建端点客户端（失败退避 200ms 重试），期间时钟冻结（对齐 suspend 语义）。真机探针 `aurora_verify_wasapi_audio`（`tools/verify/`，自动段 + `--interactive` 出声段，不进 CTest）。
+
+**应用接线**（`media/audio_sink_bridge.h` + `VideoPlayer`）：`AudioSinkGraphBridge` 实现既有 `AudioSink` 契约——`play_samples` 推入自持 `AudioStreamSourceNode`，音量/静音经图内 `GainNode` 单点施加；析构断边，未连图/上下文关闭时推入即丢弃（兜底路径不报错）。`VideoPlayer::set_audio_context(ctx)`（典型取 `app.audio_shared()`，见 `Application::audio()`，specification/06 §2.2）自动接管 `set_audio_callback` 的 PCM 通道：桥以 shared_ptr 进源回调（解码器线程推流无悬垂），换源自动重绑，`set_audio_context(nullptr)` 断边并清空回调；接线后 `set_volume`/`set_muted` 路由到图内 GainNode（不转发源，避免双重衰减），未接线保持既有转发语义。
+
+**错误码**（slug 见 `ERROR_CATALOG.md`）：`AudioGraphCycle` / `AudioEdgeNotFound` / `AudioContextClosed` / `AudioParamInvalid` / `AudioBufferInvalid` / `AudioDeviceUnavailable`（设备不可用为 warning 级——静默降级而非失败）。
+
 ---
 
 ## 10 需求规格

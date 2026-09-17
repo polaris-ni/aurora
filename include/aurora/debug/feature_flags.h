@@ -11,7 +11,7 @@
 // - 结果为**编译期常量快照**：反映链接进来的 aurora 静态库的宏取值，与运行环境无关。
 // - JSON 键 = 完整宏名（自描述），供 Inspector / CLI / MCP 等工具直读。
 
-#include "aurora/widget/props_io.h"  // Json
+#include "aurora/widget/props_io.h"
 
 namespace aurora::debug {
 
@@ -40,6 +40,8 @@ struct FeatureFlags {
     bool profiling = false;
     bool tracing = false;
     bool debug = false;
+    bool audio = false;
+    bool enable_audio_wasapi = false;
     // ---- AURORA_ENABLE_IMAGE_*（编解码能力）----
     bool image_jpeg = false;
     bool image_webp = false;

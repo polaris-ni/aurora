@@ -90,6 +90,14 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_glfw_gpu_features)
     endif ()
     endif ()
+
+    # ---- WASAPI 音频（Windows）：真实设备线程 / 格式协商 / 图时钟 / 出声路径真机核对 ----
+    # 自动段核对激活/格式契约/时钟推进/缓冲源与推流通路/suspend-resume；--interactive 出声人工段
+    # （扫频/双源混音/设备热切换）。需音频后端编译进库（AURORA_ENABLE_AUDIO=ON）。
+    if (WIN32 AND AURORA_ENABLE_AUDIO_WASAPI)
+        aurora_add_verify_probe(aurora_verify_wasapi_audio "${_aurora_verify_dir}/wasapi_audio_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_wasapi_audio)
+    endif ()
     if (_aurora_verify_targets)
         add_custom_target(aurora_verify DEPENDS ${_aurora_verify_targets})
         aurora_log("Verify probes enabled: ${_aurora_verify_targets} (build all with --target aurora_verify)")

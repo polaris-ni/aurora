@@ -103,7 +103,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 |:---|:---|:---|
 | 平台抽象 | `window/` | `surface.h`（`Surface` / `HeadlessSurface`） `window.h` `native_surfaces.h` `win32_window.h` `win32_surface.h` `glfw_surface.h` `x11_surface.h` `wayland_surface.h` `wasm_surface.h` `macos_surface.h` `d3d11_surface.h` `frame_pacing.h` `title_bar_geometry.h` `title_bar_style.h` `window_chrome.h` `window_state.h` `platform.h`（`au::platform()` / `Platform` / `PlatformCapabilities`） |
 
-`Surface` 为可扩展边界：自定义 Surface 经 `Application(Scene, unique_ptr<Surface>)` 注入，不随内置 Surface 增长；各后端由 feature 宏 `AURORA_BACKEND_*` 控制代码剪裁。
+`Surface` 为可扩展边界：自定义 Surface 经 `Application(Scene, unique_ptr<Surface>)` 注入，不随内置 Surface 增长；各后端由 feature 宏 `AURORA_BACKEND_*` 控制代码剪裁（该宏组覆盖内置 `Surface` 图形后端；音频设备后端开关归 `AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI`，见 `BUILD_OPTIONS.md` §1/§3/§4）。
 
 `win32_window.h` 与 `glfw_surface.h` 均 **pimpl 隔离**，公共头零 `<windows.h>` / GLFW / OpenGL 依赖。全部真实后端（`Win32Window` / `GlfwSurface` / `X11Surface` / `WaylandSurface`）的公共头均已收敛为 pimpl 句柄，即便后端开启，消费者编译单元也不会被拉入重型平台头，连带避免 `min` / `max`、`None` / `Bool` / `Status` 等宏污染。
 
@@ -276,7 +276,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 **自定义后端**：任意 `Surface` 子类经 `Application(Scene, unique_ptr<Surface>)` / `App().surface(...)` 注入，无需为每种后端在 `Application` 上加构造重载；`Surface` 之外的扩展点收口在 `create_window` 工厂。
 
-**编译 / 链接期代码剪裁**：关闭某 `AURORA_BACKEND_*` 后，对应 `Surface` 子类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端；自定义 `Surface` 注入路径不受影响，故「只用自定义 backend」可不编译任何内置后端。
+**编译 / 链接期代码剪裁**：关闭某 `AURORA_BACKEND_*` 后，对应 `Surface` 实现类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端；关闭 `AURORA_ENABLE_AUDIO_WASAPI` 同样剔除音频设备后端实现。自定义注入路径（自定义 `Surface` / 自定义 `AudioDeviceBackend`）不受影响，故「只用自定义 backend」可不编译任何内置后端。
 
 ---
 

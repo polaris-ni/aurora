@@ -56,5 +56,12 @@
 | 48 | `StorageTypeMismatch` | `storage-type-mismatch` | validation | error | false | type_error | false | Typed read type mismatch | Ensure put/get use the same type T; or use get_value to read the raw payload |
 | 49 | `StorageEncodingMismatch` | `storage-encoding-mismatch` | validation | error | false | type_error | false | Serialized wire format mismatch | Record stored as binary but type T only supports JSON (or vice versa); use get_value or fix T's serialization concept |
 | 50 | `StorageIoError` | `storage-io-error` | io | error | false | resource_error | false | Storage underlying I/O failed | Check disk space/permissions; rename failure may be a cross-volume move, use a same-volume path |
+| 51 | `AudioGraphCycle` | `audio-graph-cycle` | validation | error | false | layout_conflict | false | Audio graph connection would create a cycle ({src} -> {dst}) | Remove the back-edge; the audio graph must remain acyclic (DAG) |
+| 52 | `AudioEdgeNotFound` | `audio-edge-not-found` | validation | error | false | invalid_value | false | Audio connection does not exist and cannot be disconnected | Connect the nodes first; connect() result is the authoritative edge state |
+| 53 | `AudioContextClosed` | `audio-context-closed` | runtime | error | false | unknown | false | AudioContext is closed; audio operations are no longer available | Create a new AudioContext; close() is terminal |
+| 54 | `AudioParamInvalid` | `audio-param-invalid` | validation | error | false | invalid_value | false | Invalid audio parameter automation ({reason}) | Check times (non-negative, non-decreasing), exponential ramp must not cross zero, time_constant > 0 |
+| 55 | `AudioBufferInvalid` | `audio-buffer-invalid` | validation | error | false | empty | false | Invalid audio buffer ({reason}) | Ensure sample_rate > 0, channels in {1,2} and samples non-empty before playback |
+| 56 | `AudioDeviceUnavailable` | `audio-device-unavailable` | platform | warning | false | resource_error | true | Audio device unavailable ({reason}); running in silent mode | The audio graph keeps running and drops samples; build with AURORA_ENABLE_AUDIO and check the platform device |
+| 57 | `AudioRecordingFailed` | `audio-recording-failed` | io | error | false | resource_error | true | Audio recording failed: {reason} | Check the output path and permissions; capture device availability is reported separately as audio-device-unavailable |
 
-<!-- count: total 51 error codes -->
+<!-- count: total 58 error codes -->
