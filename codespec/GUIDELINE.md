@@ -353,6 +353,26 @@ if (win_res) {
 - widget 层与绘制代码**完全无感知**——同一棵控件树无需任何改动即可在 GPU / 软件路径间切换；GPU 实现与软件路径逐公式对齐（渐变 LUT / PMA 图像 / 字形图集共用软件光栅化 / 效果 pass）。
 - 完整契约（管线模型、语义同源承诺、初始化失败链）见 `specification/03-layout-render.md` §8.7；可运行示例见 `examples/demos/demo_gpu.cpp`。
 
+### 13.2 GPU 栅格（wgpu 窗口，跨平台 GPU 主力路径）
+
+§13.1 的 GLFW 模式依赖 OpenGL 3.3 上下文；若要走**同一套 WGSL 管线覆盖 Vulkan / D3D12 / Metal / GLES** 的跨平台 GPU 栅格，用 wgpu 窗口（需 CMake `-DAURORA_BACKEND_GPU_WGPU=ON -DAURORA_BACKEND_WIN32=ON`，构建期需 Rust 工具链 + libclang，见 `BUILD_OPTIONS.md` §3.8；宿主当前为 Win32）：
+
+```cpp
+au::WgpuOptions opts;
+opts.size = au::Size{.width = 560.0F, .height = 380.0F};
+opts.title = "wgpu raster";
+opts.vsync = true;  // FIFO 呈现节拍
+
+auto win_res = au::create_window(opts);
+if (!win_res) {
+    // 无可用 adapter / 开窗失败：返回 renderer-unavailable 错误——该工厂不静默降级
+}
+// win->surface().gpu_backend() 非空且 name() 恒 "gpu-wgpu" = GPU 栅格路径挂点就绪；
+// 首帧运行期失效后整窗永久回退 GDI 上传路径（WgpuSurface::gpu_active() 转 false）。
+```
+
+也可经通用 Win32 工厂强制路由：`Win32Options{}.renderer = au::RendererPreference::GpuWgpu`（`Auto` 优先序不含 wgpu，避免改变既有默认行为）。widget 层同样零感知——同一棵控件树在 GPU / 软件回退路径间切换，语义与 §8.7 同源。完整契约见 `specification/03-layout-render.md` §8.8；真机验收探针 `aurora_verify_win32_wgpu`。
+
 ---
 
 ## 14 渲染性能测量（确定性基准）

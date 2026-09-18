@@ -18,7 +18,9 @@
 
 #include <webgpu.h>
 
-#ifdef _WIN32
+#include "aurora/core/platform.h"  // 平台宏折算（AURORA_PLATFORM_*，门禁禁裸 _WIN32/__linux__ 条件）
+
+#ifdef AURORA_PLATFORM_WINDOWS
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -825,7 +827,7 @@ struct WgpuRhi::Impl {
 
     [[nodiscard]] bool create_surface() {
         WGPUSurfaceDescriptor desc{};
-#ifdef _WIN32
+#ifdef AURORA_PLATFORM_WINDOWS
         WGPUSurfaceSourceWindowsHWND src{};
         src.chain.sType = WGPUSType_SurfaceSourceWindowsHWND;
         // hinstance 不可为 NULL：v29 下 `wgpuSurfaceGetCapabilities` 对 null-HINSTANCE 的
@@ -839,7 +841,7 @@ struct WgpuRhi::Impl {
         src.hinstance = hinstance;
         src.hwnd = options.native_window;
         desc.nextInChain = &src.chain;
-#elif defined(__linux__)
+#elif defined(AURORA_PLATFORM_LINUX)
         if (options.native_display == nullptr) {
             AURORA_LOG_ERROR("gpu-wgpu", "Xlib surface requires native_display (Display*)");
             return false;

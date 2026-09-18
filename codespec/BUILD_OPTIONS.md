@@ -91,7 +91,7 @@ cmake -S . -B build -DAURORA_BUILD_INSPECTOR_SERVER=ON
 | 说明 | 定义 `tools/verify/` 下的**真机验收探针**可执行目标。这类探针证明的是「无头 CI 无法证明」的平台接线能力（典型：光标形状的各后端 `Surface::set_cursor` 是否真的改变了屏幕上显示的光标；输入法桥的 `WM_IME_*` 是否真的落到焦点控件） |
 | 传播宏 | 无（纯交付物开关，不向库代码注入宏） |
 | 模块 | `cmake/AuroraVerify.cmake` |
-| 产物 | 按条件定义：`aurora_verify_x11_cursor`（`AURORA_BACKEND_X11`）/ `aurora_verify_win32_cursor`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`）/ `aurora_verify_macos_cursor`（`APPLE` 且开 `AURORA_BACKEND_MACOS`，需 ObjC++）/ `aurora_verify_glfw_cursor`（`AURORA_BACKEND_GLFW`）/ `aurora_verify_win32_ua`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，另链 `oleacc`）/ `aurora_verify_win32_ime`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，`imm32` 已随库 PUBLIC 链接）；聚合目标 `aurora_verify` |
+| 产物 | 按条件定义：`aurora_verify_x11_cursor`（`AURORA_BACKEND_X11`）/ `aurora_verify_win32_cursor`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`）/ `aurora_verify_macos_cursor`（`APPLE` 且开 `AURORA_BACKEND_MACOS`，需 ObjC++）/ `aurora_verify_glfw_cursor`（`AURORA_BACKEND_GLFW`）/ `aurora_verify_glfw_gpu_features`（`AURORA_BACKEND_GLFW` 且开 `AURORA_ENABLE_GLFW_GPU_GL`）/ `aurora_verify_win32_ua`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，另链 `oleacc`）/ `aurora_verify_win32_ime`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，`imm32` 已随库 PUBLIC 链接）/ `aurora_verify_win32_wgpu`（`WIN32` 且开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_WIN32`，§3.8）/ `aurora_verify_wasapi_audio`（`WIN32` 且开 `AURORA_ENABLE_AUDIO_WASAPI`）；聚合目标 `aurora_verify` |
 
 三点与其它"产物开关"不同的地方：
 
@@ -113,13 +113,14 @@ cmake --build build-verify --target aurora_verify_x11_cursor
 
 ## 3 `AURORA_BACKEND_*`：后端开关（= feature 宏）
 
-每个内置 `Surface` 图形后端一个开关；后续非 Surface 的 GPU 渲染后端（规划的 wgpu）亦归此组。而 `AURORA_ENABLE_GLFW_GPU_GL` 是既有 GLFW 后端之上的 GPU 栅格模式增强、非独立后端，内置音频设备后端（`AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI`）为能力开关，二者均归 `AURORA_ENABLE_*` 组（§4）。**开关名与 PUBLIC 编译宏名完全相同**，宏以 `target_compile_definitions(aurora PUBLIC …)` 传播给所有消费者；库代码用 `#ifdef AURORA_BACKEND_XXX` 做代码剪裁。关闭某后端后，对应实现类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端。自定义注入路径（自定义 `Surface` / 自定义 `AudioDeviceBackend`）始终可用，故「只用自定义 backend」可不编译任何内置后端。
+每个内置 `Surface` 图形后端一个开关；GPU 栅格后端 `AURORA_BACKEND_GPU_WGPU`（wgpu，§3.8）亦归此组。而 `AURORA_ENABLE_GLFW_GPU_GL` 是既有 GLFW 后端之上的 GPU 栅格模式增强、非独立后端，内置音频设备后端（`AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI`）为能力开关，二者均归 `AURORA_ENABLE_*` 组（§4）。**开关名与 PUBLIC 编译宏名完全相同**，宏以 `target_compile_definitions(aurora PUBLIC …)` 传播给所有消费者；库代码用 `#ifdef AURORA_BACKEND_XXX` 做代码剪裁。关闭某后端后，对应实现类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端。自定义注入路径（自定义 `Surface` / 自定义 `AudioDeviceBackend`）始终可用，故「只用自定义 backend」可不编译任何内置后端。
 
 | 选项 | 默认值 | 含义 | 传播宏 | 额外链接 |
 |:---|:---|:---|:---|:---|
 | `AURORA_BACKEND_HEADLESS` | `ON` | 无头内存 / PNG 后端（`HeadlessSurface`，离线渲染 / 测试） | `AURORA_BACKEND_HEADLESS` | — |
 | `AURORA_BACKEND_WIN32` | Windows `ON`，否则 `OFF` | Win32/GDI 后端（`Win32Surface` + `Win32Window` 共享宿主） | `AURORA_BACKEND_WIN32` | `user32` `gdi32` `shell32` `ole32` `uuid` `imm32`（仅 `_WIN32`；`imm32` 供输入法组合桥） |
 | `AURORA_BACKEND_D3D11` | `OFF` | D3D11 GPU 增量上屏后端（`D3D11Surface`） | `AURORA_BACKEND_D3D11` | `d3d11` `dxgi` `d3dcompiler`（仅 `_WIN32`） |
+| `AURORA_BACKEND_GPU_WGPU` | `OFF` | wgpu GPU 栅格后端（`WgpuRhi`；`WgpuSurface` 另需 `AURORA_BACKEND_WIN32`），源码经 cargo 构建，需 Rust 工具链 + libclang，配置期缺项 FATAL，见 §3.8 | `AURORA_BACKEND_GPU_WGPU` | `wgpu_native` 静态库 + `ws2_32` `userenv` `bcrypt` `advapi32` `oleaut32` `ntdll`(Windows)/`dl` `pthread`(Linux) |
 | `AURORA_BACKEND_GLFW` | `OFF` | GLFW + OpenGL（上下文 3.3 兼容剖面，绘制 1.1 立即模式） | `AURORA_BACKEND_GLFW` | `glfw` 目标（源码静态库）+ `opengl32`(Windows)/`OpenGL::GL`(其他平台) |
 | `AURORA_BACKEND_X11` | `OFF` | X11 / Linux 桌面后端（`X11Surface`，pimpl 完整实现） | `AURORA_BACKEND_X11` | `${X11_LIBRARIES}`（`find_package(X11)`） |
 | `AURORA_BACKEND_WAYLAND` | `OFF` | 原生 Wayland / Linux 桌面后端（`WaylandSurface`，pimpl 完整实现） | `AURORA_BACKEND_WAYLAND` | `${WAYLAND_CLIENT_LIBRARIES}` `${XKBCOMMON_LIBRARIES}`（`pkg-config`） |
@@ -198,13 +199,14 @@ cmake -S . -B build -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_DISPLAY_LIS
 | `power_saving` | `bool` | `true` | idle 时阻塞等待事件（省电）；`false` = 忙轮询旧行为，供持续重绘场景 opt-out |
 | `renderer` | `RendererPreference` | `Auto` | 上屏后端偏好，见下表 |
 
-**`renderer` 与 `AURORA_BACKEND_D3D11` 编译开关的关系**（仅 Win32 工厂 `create_window(Win32Options)` 生效）：
+**`renderer` 与 `AURORA_BACKEND_D3D11` / `AURORA_BACKEND_GPU_WGPU` 编译开关的关系**（仅 Win32 工厂 `create_window(Win32Options)` 生效；列 = 对应后端「编译进库且设备/adapter 可用」与否）：
 
-| `renderer` \ 编译 | `AURORA_BACKEND_D3D11=ON` 且设备可用 | D3D11 未编译 / 设备创建失败 |
+| `renderer` \ 编译 | 对应后端 `ON` 且设备可用 | 后端未编译 / 设备（adapter）创建失败 |
 |:---|:---|:---|
 | `Auto`（默认） | 选 D3D11 GPU 上屏 | 静默回退 Win32/GDI（`AURORA_LOG_INFO` 说明） |
 | `Software` | 强制 Win32/GDI | Win32/GDI |
 | `GpuD3D11` | 选 D3D11（含 WARP 兜底） | 返回 `renderer-unavailable` 错误（不静默降级，错误归属调用方） |
+| `GpuWgpu` | 与 `AURORA_BACKEND_GPU_WGPU` 合取：编译且 adapter 可用时选 `WgpuSurface`（GPU 栅格，§3.8） | 未编译 / 无 adapter 时返回 `renderer-unavailable`（不降级；`Auto` 优先序不含 wgpu） |
 
 `AURORA_BACKEND_D3D11=ON` 时 `D3D11Options.vsync`（默认 `true`）控制 `Present(1,0)`（阻塞到 vblank，后端自带帧节拍，帧调度跳过 CPU sleep）或 `Present(0,0)`（交还 CPU 帧预算节流）。
 
@@ -232,6 +234,27 @@ cmake --build build --target gen_debug_api_json     # 仅刷新 debug 段
 
 1. **编译门控**：Win32 UIA 桥实现在 `src/aurora/window/detail/win32_ua.{h,cpp}`，随 `AURORA_BACKEND_WIN32`（Windows 默认 ON）编入；`AURORA_BACKEND_D3D11` 复用同一桥，故门控为「平台宏 ∧ 后端宏析取」，与 `src/aurora/window/win32_cursor.h` 同款。语义树 / 钩子升级（`core/accessibility.h`、`core/a11y_*.h`、`Widget` 虚钩子）**无任何门控**——公共头纯增量，所有构建路径可见。
 2. **运行期门控**：`UIAutomationCore.dll` **动态加载**（`LoadLibraryA`），无链接期依赖；缺库或必要导出缺失时整桥降级为 no-op 并 `Diagnostics::warn` 一次。桥本身**惰性构造**——首个平台查询（`WM_GETOBJECT`）到达才构建，无读屏在线时零开销。
+
+### 3.8 wgpu GPU 栅格后端（cargo 源码构建 + Rust 工具链探测）
+
+`AURORA_BACKEND_GPU_WGPU=ON`（默认 `OFF`）启用 `WgpuRhi`（同一套 WGSL 管线覆盖 Vulkan / D3D12 / Metal / GLES）；`WgpuSurface` / `create_window(WgpuOptions)` 另与 `AURORA_BACKEND_WIN32` 合取门控。依赖为仓库内置 `third_party/wgpu-native/`（gfx-rs v29 源码，**保持上游原样不修改**），经 cargo 构建为静态库（staticlib）链入——对齐「静态交付、消费者无额外 DLL」。
+
+```powershell
+cmake -S . -B build -DAURORA_BACKEND_GPU_WGPU=ON -DAURORA_BACKEND_WIN32=ON
+cmake --build build   # 首次连带 cargo build --release wgpu-native（在线拉取 crates.io 依赖）
+```
+
+- **Rust 依赖不入库**：仅 `wgpu-native` 自身源码 + `Cargo.lock`（版本确定）入库，crates.io 依赖首次构建由 cargo 在线拉取进本机缓存，缓存命中后支持断网增量构建；cargo 的 `target/` 构建树不入库（`.gitignore`），静态库产物拷贝至 `build/wgpu-native/` 供 IMPORTED 目标引用。国内网络可在用户 cargo 配置（家目录下 `.cargo` 目录内的 config.toml）配 rsproxy 镜像加速：
+  ```toml
+  [source.crates-io]
+  replace-with = 'rsproxy-sparse'
+  [source.rsproxy-sparse]
+  registry = "sparse+https://rsproxy.cn/index/"
+  ```
+- **配置期探测**（任一缺项 `FATAL_ERROR`，不静默回退）：`cargo` / `rustc` 在 `PATH`；host 三元组与 C++ 编译器 ABI 一致（MinGW 要求 `*-windows-gnu`、MSVC 要求 `*-windows-msvc`，否则静态库 ABI 不兼容并给出修复命令）；`libclang` 共享库（wgpu-native 的 `build.rs` 经 bindgen 从 `webgpu.h` 生成 FFI 所必需，探测 LLVM/clang 安装目录并注入 `LIBCLANG_PATH`）；`third_party/wgpu-native` 源文件完整。
+- **构建接线**：`add_custom_command` 执行 `cargo build --release --target <host 三元组>`（`DEPENDS` `src/*.rs` / `build.rs` / `Cargo.toml` / `Cargo.lock` 做增量），聚合为 `wgpu_native_build` 目标；以 `RUSTUP_TOOLCHAIN=<当前活动工具链完整 id>` 覆盖上游 `rust-toolchain.toml` 的钉版通道（避免 rustup 按宿主启发误装其它 toolchain）。
+- **链接面**：`wgpu_native` 静态库 + Rust `windows` crate 族的系统库（Windows：`ws2_32` `userenv` `bcrypt` `advapi32` `oleaut32` `ntdll`；Linux：`dl` `pthread`，Vulkan 运行期动态加载）。`webgpu.h` / `wgpu.h` 仅给库内实现 TU（pimpl 隔离，公共头不外泄三方头）。
+- **运行期**：无可用 adapter / 驱动失败 → `WgpuRhi::valid()` false；`create_window(WgpuOptions)` 与 `renderer = GpuWgpu` 强制路由报 `renderer-unavailable`（不降级），`Auto` 偏好优先序不含 wgpu 路径，行为不变。
 
 ---
 
@@ -554,6 +577,7 @@ cmake --build build
 -D AURORA_BACKEND_HEADLESS=ON|OFF   # 无头 PNG（默认 ON）
 -D AURORA_BACKEND_WIN32=ON|OFF      # Win32/GDI（Win 默认 ON，否则 OFF）
 -D AURORA_BACKEND_D3D11=ON|OFF      # D3D11 GPU 上屏（默认 OFF）
+-D AURORA_BACKEND_GPU_WGPU=ON|OFF   # wgpu GPU 栅格（默认 OFF；需 Rust 工具链 + libclang，见 §3.8）
 -D AURORA_BACKEND_GLFW=ON|OFF       # GLFW/OpenGL（默认 OFF；源码构建）
 -D AURORA_BACKEND_X11=ON|OFF        # X11/Xlib（Linux 桌面，默认 OFF）
 -D AURORA_BACKEND_WAYLAND=ON|OFF    # 原生 Wayland（Linux 桌面，默认 OFF）

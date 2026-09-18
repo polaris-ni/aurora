@@ -18,7 +18,7 @@
 | layout | Flex/Grid 布局器、`Length` 四态约束求解、两阶段测量-定位、布局缓存与溢出策略 |
 | event / animation / navigation | 命中测试 + 同步派发、焦点、手势与拖拽、快捷键；`Easing`/`Spring`/`Animator` 帧动画；`Route`/`Navigator`/`Router`、转场与 Hero、deep linking |
 | theming / i18n / environment | 设计令牌与 `StyleProps`、`Provider` 依赖注入、媒体查询与响应式构建、多语言、`Modifier` 正交修饰 |
-| window | Headless / Win32(GDI) / GLFW / X11 / Wayland / WASM / macOS / D3D11 上屏偏置；事件驱动帧循环（空闲 CPU 趋近 0） |
+| window | Headless / Win32(GDI) / GLFW / X11 / Wayland / WASM / macOS / D3D11 上屏偏置 / WGPU GPU 栅格（Vulkan·D3D12·Metal·GLES）；事件驱动帧循环（空闲 CPU 趋近 0） |
 | storage / preferences | 信封式记录仓储（内存/文件系统后端）；JSON 键值配置（多进程安全 LWW 合并） |
 | inspector / 工具链 | 本地回环 HTTP 检视服务、`aurora_lsp` 语言服务器、`aurora_mcp` MCP Server、`aurora_cli` |
 
@@ -85,7 +85,7 @@ ctest --test-dir build --output-on-failure   # 运行测试
 全部 CMake 开关、编译宏与运行期环境变量统一见
 [codespec/BUILD_OPTIONS.md](codespec/BUILD_OPTIONS.md)。常用项：
 
-- `-DAURORA_BACKEND_WIN32=ON/OFF`（Windows 默认 ON）、`AURORA_BACKEND_GLFW/X11/WAYLAND/D3D11/MACOS/WASM`（默认 OFF）
+- `-DAURORA_BACKEND_WIN32=ON/OFF`（Windows 默认 ON）、`AURORA_BACKEND_GLFW/X11/WAYLAND/D3D11/GPU_WGPU/MACOS/WASM`（默认 OFF）
 - demo 目标按名构建：`cmake --build build --target demo_lazy_list`
 
 ## 作为第三方库消费（安装 + find_package）
@@ -103,7 +103,7 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 
 | 平台 | 后端 | 状态 |
 |------|------|------|
-| Windows | Win32Surface（GDI）/ D3D11 上屏偏置 | ✅ 完整（默认） |
+| Windows | Win32Surface（GDI）/ D3D11 上屏偏置 / WgpuSurface（GPU 栅格，需 Rust 工具链构建） | ✅ 完整（默认；WGPU 经 CMake 开启） |
 | Linux | X11Surface / WaylandSurface | ✅ 可用（CMake 开启） |
 | 跨平台 | GlfwSurface（OpenGL 3.x） | ✅ 可用（CMake 开启，默认 OFF） |
 | Headless（内存 PNG） | HeadlessSurface | ✅ 全平台，测试与 CI 基座 |

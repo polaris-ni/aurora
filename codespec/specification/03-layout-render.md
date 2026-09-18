@@ -567,13 +567,14 @@ au::Column{}
 
 `SurfaceKind{Headless, Win32, Glfw, D3D11, X11, Wayland, MacOS, Wasm}` 现仅为**类型标签**（只用于 `auto_detect_surface()` 返回类型与 `Platform::surface` 字段），不再用于构造选择。枚举器无条件全部出现且数值固定（见 `window.h`），不随 `AURORA_BACKEND_*` 宏开关增减，以保证序列化与 ABI 兼容：未编译的后端其标签仍存在，只是运行期不会被 `auto_detect_surface()` 产出、对应 `create_window` 重载不可用。
 
-后端选择收口于类型安全工厂 `create_window(const XxxOptions&)`（`window/window.h`），每个后端有专属选项结构：`HeadlessOptions{png_path}` / `Win32Options{}` / `D3D11Options{vsync}` / `GlfwOptions{gl_major, gl_minor, resizable, gpu}` / `X11Options{}` / `WaylandOptions{}` / `MacOSOptions{}` / `WasmOptions{canvas_id}`，外加通用 `WindowOptions{size, title, max_frames}`。编译器会拒绝把某后端专属字段误用到不相关后端。`GlfwOptions::gpu = true` 请求 GPU 栅格模式（§8.7，需 `AURORA_ENABLE_GLFW_GPU_GL` 编译进库），窗口创建或 GPU 初始化失败自动回退软件纹理路径。
+后端选择收口于类型安全工厂 `create_window(const XxxOptions&)`（`window/window.h`），每个后端有专属选项结构：`HeadlessOptions{png_path}` / `Win32Options{}` / `D3D11Options{vsync}` / `WgpuOptions{vsync}` / `GlfwOptions{gl_major, gl_minor, resizable, gpu}` / `X11Options{}` / `WaylandOptions{}` / `MacOSOptions{}` / `WasmOptions{canvas_id}`，外加通用 `WindowOptions{size, title, max_frames}`。编译器会拒绝把某后端专属字段误用到不相关后端。`GlfwOptions::gpu = true` 请求 GPU 栅格模式（§8.7，需 `AURORA_ENABLE_GLFW_GPU_GL` 编译进库），窗口创建或 GPU 初始化失败自动回退软件纹理路径；`WgpuOptions` 与 `create_window(WgpuOptions)` 工厂随 `AURORA_BACKEND_GPU_WGPU`（Win32 宿主，§8.8）编译。
 
 | 后端 | 说明 | 开关 |
 |:---|:---|:---|
 | `HeadlessSurface` | 内存帧缓冲 / 离线 PNG，软件 `Painter` | `AURORA_BACKEND_HEADLESS`（默认 ON） |
 | `Win32Surface` | Win32/GDI，零三方依赖，仅 `_WIN32` | `AURORA_BACKEND_WIN32`（Windows 默认 ON） |
 | `D3D11Surface` | D3D11 GPU 增量上屏，Win32 专属 | `AURORA_BACKEND_D3D11`（默认 OFF） |
+| `WgpuSurface` | wgpu GPU 栅格上屏（帧级 DisplayList 在 GPU 端光栅化），Win32 宿主 | `AURORA_BACKEND_GPU_WGPU`（默认 OFF，§8.8） |
 | `GlfwSurface` | GLFW/OpenGL 3.3 兼容剖面 | `AURORA_BACKEND_GLFW` |
 | `X11Surface` | X11/Xlib 原生窗口，仅 Linux 桌面 | `AURORA_BACKEND_X11`（默认 OFF） |
 | `WaylandSurface` | 原生 Wayland（`wl_shm` + `xdg-shell` + `xkbcommon`） | `AURORA_BACKEND_WAYLAND`（默认 OFF） |
@@ -685,13 +686,25 @@ class RhiBackend {
 
 **测试**：`utest_gpu_gl_rhi` 以 fake GL 驱动桩（全量填充 `GLFn` + 调用记录）覆盖帧生命周期 / 各管线批切分 / 渐变 LUT 内容 / PMA 上传 / 字形图集子上传 / 效果 ping-pong 序 / 初始化失败链 / 能力位与流式拒绝 / 流式槽版本门控子上传 / 流式公共 API 契约（复用 / 跨距 / 防御 no-op）/ 层缓存生命周期与 miss 自愈；`utest_gpu_layers` 覆盖层键唯一性与 epoch 单调、`NativeSurfaceFrame` 契约、`Painter` 层命令录制与 `SoftwareRhi` 层仿真（roundtrip 逐位一致 / miss 跳过 + bump / 跨实例共享存储）；`itest_gpu_layer_cache` 覆盖控件级首帧层录制 / 干净帧仅 `DrawLayer` / 失效重录且像素与直绘一致 / epoch 推进整体失效 / miss 自愈闭环 / 尺寸变化重录；`itest_gpu_gl_smoke` 在真实 GLFW 窗口验证 GPU 模式呈现与后端身份契约（无显示环境自动 SKIP）。
 
-### 8.8 无障碍桥扩展点（Surface）
+### 8.8 GPU wgpu 栅格后端（WgpuRhi）与 WgpuSurface
+
+跨平台 GPU 主力路径：同一套 WGSL 管线经 **wgpu-native**（Rust，gfx-rs v29，`third_party/wgpu-native/` 源码 vendored、保持上游原样）覆盖 Vulkan / D3D12 / Metal / GLES，由 cargo 构建为静态库链入（开关 `AURORA_BACKEND_GPU_WGPU`，默认 OFF，工具链要求见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §3.8）。类声明以 `#ifdef AURORA_BACKEND_GPU_WGPU` 整体门控（区别于 `GpuGlRhi` 的恒编译口径）——特性关闭时头不导出声明、库内无实现 TU。公共头 pimpl 隔离，`webgpu.h` / `wgpu.h` 不外泄。
+
+**WgpuRhi**（`render/rhi/wgpu_rhi.h` + `src/aurora/render/gpu/wgpu_rhi.cpp`）：`RhiBackend` + `RhiFrameSink` 双实现，命令语义、批切分与裁剪/混合口径以 §8.6/§8.7 为同源参照——shader 内 SDF 裁剪、256×1 LUT 渐变、PMA 图像上传、字形复用软件 `GlyphAtlas`（`emit_text_glyphs` 单一代码路径）、GPU 层缓存与流式纹理常驻槽齐备。装配选项 `WgpuRhiOptions{backend, native_window, native_display, offscreen_width/height, vsync}`：`native_window = nullptr` 为**离屏模式**（渲染目标内部纹理，`read_pixels` 可全帧读回，测试/探针通道）；宿主模式当前接 Win32 HWND（X11 宿主为后续切片）。`backend` 默认 `Auto`（Windows 偏好 D3D12 → Vulkan → GLES），运行期实测以 `backend up (<api>, surface=host|offscreen)` 日志申报。初始化失败（无 adapter / device 申请失败）→ `valid()` false，调用方整体回退软件路径，不做逐命令混合。与 GL 的读回窗口差异：wgpu `read_pixels` 仅离屏模式提供且必须在 `end_frame`（GPU 提交 + 读回映射登记）之后、下一次 `begin_frame` 之前调用。能力位 `gpu = true`、`compute` 随所选后端（GLES 为 false）；`native_surface_import` 恒 false——wgpu-native v29 C API 无外部共享纹理导入入口，`import_native_surface` 与 GL 同款 warn-once 返回 0（兑现路径随上游 C API 扩展）。批顶点为无索引三角列（单 fill quad = 6 顶点，与 GL 索引 quad 的 4 顶点计数不同形）。
+
+**WgpuSurface**（`window/wgpu_surface.h`，门控 `AURORA_BACKEND_GPU_WGPU ∧ AURORA_BACKEND_WIN32`）：复用 `Win32Window` 宿主（消息泵 / 事件翻译 / DPI / 光标 / IME / UIA 桥与 `Win32Surface` / `D3D11Surface` 同款转发），`Surface::gpu_backend()` 返回嵌套 `Sink` 适配器（`name()` 恒 `"gpu-wgpu"`，逻辑 dp × scale → 设备像素后转发 `WgpuRhi::begin_frame`）。帧序：`present_gpu_frame` 走 begin→replay→end（`end_frame` 内完成 submit + `wgpuSurfacePresent`，`present()` 对 GPU 帧为 no-op）；GPU 初始化或首帧失败后**永久回退** GDI `SetDIBitsToDevice` 上传路径（`gpu_active()` 为诊断读口）。`WgpuOptions{vsync}` + 专属工厂 `create_window(WgpuOptions)`（构造期 adapter/HWND 不可得即返回错误）；`Win32Options.renderer = GpuWgpu` 为**强制路由**——不可用报 `renderer-unavailable`，不静默降级，`Auto` 偏好的优先序不含它。
+
+**运行时契约注意**（wgpu-native v29）：`wgpuBufferGetMapState` / `wgpuInstanceWaitAny` 为未实现桩（panic=abort），映射状态自跟踪；`bufferMapAsync` 必须在 `queueSubmit` 之后登记（提交前登记映射触发 Validation panic）；`wgpuSurfaceGetCurrentTexture` 取回 surfaces 纹理须持有到 submit + present 之后再释放（提前释放 → Validation panic）；Win32 surface 描述符必须携带真实 HINSTANCE（NULL 使 `wgpuSurfaceGetCapabilities` 返回 Error）。
+
+**测试**：`utest_wgpu_rhi` 离屏真实设备通路（无 adapter 自动 SKIP）——占位构造契约 / 帧生命周期与精确像素（裁剪内外 / ClearRect 基底 / 逐帧统计复位 / 尺寸变化）/ 流式槽键稳定与 `import_native_surface` 不兑现契约；`itest_wgpu_present` 真实 Win32 窗口三帧不回退 + `GpuWgpu` 强制路由与 `Auto` 不受影响（无桌面会话或无 adapter SKIP）。GPU 后端不做逐位 golden（跨驱动 AA/采样不可复现，与 GL 路径同口径），真机验收由探针 `aurora_verify_win32_wgpu`（`tools/verify/`，不进 CTest）覆盖：宿主装配 / 能力契约 / 流式逐版本像素 / 层缓存跨帧持久性 / 多帧上屏 17 项 + `--interactive` 人工目视段。
+
+### 8.9 无障碍桥扩展点（Surface）
 
 `Surface` 上另有**两个**无障碍扩展点，均有默认空实现，故自定义后端不覆写即退化为「无无障碍桥」（源码兼容）：
 
 | 方法 | 说明 |
 |:---|:---|
-| `accessibility_provider() const -> a11y::Provider*` | 虚方法，**基类默认返回 `nullptr`**；返回本窗口的无障碍桥。**只读、不构造**——桥是惰性构造的（首个平台查询到达才存在），故此处返回 `nullptr` 不等于「本后端不支持无障碍」。Win32 家族两路（`Win32Surface` / `D3D11Surface`）都转发**同一个** `Win32Window` 宿主持有的桥实例，使 id → Widget* 映射不分裂 |
+| `accessibility_provider() const -> a11y::Provider*` | 虚方法，**基类默认返回 `nullptr`**；返回本窗口的无障碍桥。**只读、不构造**——桥是惰性构造的（首个平台查询到达才存在），故此处返回 `nullptr` 不等于「本后端不支持无障碍」。Win32 家族三路（`Win32Surface` / `D3D11Surface` / `WgpuSurface`）都转发**同一个** `Win32Window` 宿主持有的桥实例，使 id → Widget* 映射不分裂 |
 | `set_accessibility_root(Widget* root) -> void` | 每帧由 `Window::present_root` 在**布局与绘制完成之后**调用，注入语义树根。为何不直接调 `accessibility_provider()->set_root()`：桥惰性构造，首个查询到达时它才存在，此刻若还没有注入记录就无根可投影——根必须由**恒存在**的宿主承接，桥构造后由宿主补喂 |
 
 `surface.h` 仅前向声明 `aurora::a11y::Provider` 与 `aurora::Widget`，完整定义在 `core/a11y_provider.h` / `widget/widget.h`，公共头零平台污染。语义树几何取自布局与绘制产物（`paint_bounds` 语义），故注入点必须在 `paint` 之后。桥抽象、重建模型与根的生命周期不变量见 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) §8.5。

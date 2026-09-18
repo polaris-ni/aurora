@@ -188,8 +188,26 @@ freely, subject to the following restrictions:
 
 ---
 
+## 8. wgpu-native — GPU 栅格后端（可选后端依赖）
+
+- **版本**：gfx-rs/wgpu-native v29 系列（依赖锁 wgpu-core 29.0.3，以 `third_party/wgpu-native/Cargo.lock` 为准）
+- **来源**：vendored 于 `third_party/wgpu-native/`（源码保持上游原样、不做本地修改）；
+  WebGPU C 头 vendored 于 `third_party/wgpu-native/ffi/webgpu-headers/`
+- **用途**：`AURORA_BACKEND_GPU_WGPU=ON` 时提供 `WgpuRhi` GPU 栅格后端与 `WgpuSurface` 宿主上屏
+  （Vulkan / D3D12 / Metal / GLES 统一 WGSL 管线），见 `codespec/BUILD_OPTIONS.md` §3.8
+- **集成方式**：仅开关开启时经 cargo 以 staticlib 源码构建、静态链入（Rust 依赖树不入库，
+  首次构建由 cargo 在线自 crates.io 按 `Cargo.lock` 拉取；`target/` 构建树不入库）。
+  关闭时链接产物完全不含该组件。上游 crate 依赖树各自携带 MIT / Apache-2.0 / BSD 等宽松许可，
+  由 `Cargo.lock` 版本锁定可审计
+- **许可**：MIT OR Apache-2.0 双许可（二选一，均兼容静态链接分发），全文见
+  `third_party/wgpu-native/LICENSE.MIT` / `LICENSE.APACHE`
+- **webgpu-headers**：BSD 3-Clause（"WebGPU native" developers，版权见
+  `third_party/wgpu-native/ffi/webgpu-headers/LICENSE`），仅提供头文件，随本组件同路径 vendored
+
+---
+
 ## 合规说明
 
-- 上述组件均以源码形式 vendored 于仓库内，可在无网络环境下构建，版本锁定、可审计。
-- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、nlohmann/json（MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）均为自由/宽松许可，兼容 Aurora 的静态库分发模式。
+- 上述组件均以源码形式 vendored 于仓库内，版本锁定、可审计；除 wgpu-native 的 Rust 依赖树（首次构建需 cargo 在线拉取，见第 8 节）外均可无网络构建。
+- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、nlohmann/json（MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）、wgpu-native（MIT OR Apache-2.0，仅 `AURORA_BACKEND_GPU_WGPU=ON` 时编入）均为自由/宽松许可，兼容 Aurora 的静态库分发模式。
 - 许可全文以各组件目录内原始 `LICENSE.TXT` / `COPYING` / 头注释为权威来源；本文件仅作索引与归档。

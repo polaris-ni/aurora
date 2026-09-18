@@ -27,7 +27,7 @@ Aurora 是一个 C++20 跨平台 **AI-first** GUI 库：以「声明式、响应
 - **Token 经济**：API 表面紧凑，AI 在有限上下文即可装载全部概念。
 - **AI 友好错误**：错误信息携带「修复建议」与文档锚点（见 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §1）。
 - **降级而非中止**：非法输入产出 `Diagnostics` 并降级，而非崩溃（见 [`01-core.md`](specification/01-core.md) §8.3）。
-- **跨平台零依赖**：核心渲染（软件栅格）不依赖 GPU，且是像素输出唯一参考实现（golden SSOT）；Win32/GDI 零三方依赖；D3D11 仅作可选 GPU 像素上屏（默认 OFF）；GPU 栅格（`GpuGlRhi`，OpenGL 3.3 core，自写 GL loader 零三方）为 DisplayList 的可选平级消费者（默认 OFF，与软件路径逐公式同源，失败自动回退软件），见 [`03-layout-render.md`](specification/03-layout-render.md) §8.7。
+- **跨平台零依赖**：核心渲染（软件栅格）不依赖 GPU，且是像素输出唯一参考实现（golden SSOT）；Win32/GDI 零三方依赖；D3D11 仅作可选 GPU 像素上屏（默认 OFF）；GPU 栅格（`GpuGlRhi`，OpenGL 3.3 core，自写 GL loader 零三方，§8.7；`WgpuRhi`，经 wgpu-native 覆盖 Vulkan/D3D12/Metal/GLES，宿主 `WgpuSurface`，§8.8）为 DisplayList 的可选平级消费者（默认 OFF，与软件路径逐公式同源，失败自动回退软件），见 [`03-layout-render.md`](specification/03-layout-render.md) §8.7/§8.8。
 
 ---
 
@@ -67,7 +67,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 
 - C++20 最小标准。
 - 静态库交付（非 header-only）。
-- 软件栅格渲染，核心不依赖 GPU（D3D11 仅用于可选 GPU 像素上屏，默认 OFF；GPU 栅格 `GpuGlRhi` 为可选平级渲染路径，默认 OFF，契约见 [`03-layout-render.md`](specification/03-layout-render.md) §8.7）。
+- 软件栅格渲染，核心不依赖 GPU（D3D11 仅用于可选 GPU 像素上屏，默认 OFF；GPU 栅格 `GpuGlRhi` / `WgpuRhi` 为可选平级渲染路径，默认 OFF，契约见 [`03-layout-render.md`](specification/03-layout-render.md) §8.7/§8.8）。
 - Windows 优先验证（Win32/GDI），跨平台后端可选。
 - 模板深度 ≤ 3 层，避免模板元编程导致的编译爆炸与不可读错误。
 - 头文件尽量只放声明、实现下沉 `src/aurora/*.cpp`，减少编译单元重编范围。
