@@ -108,6 +108,13 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     endif ()
     endif ()
 
+    # ---- Win32 wgpu GPU 栅格（真实窗口 + 离屏直驱）：宿主装配 / 能力契约 / 流式逐版本像素 /
+    # 层缓存跨帧持久性 / 平台 present 多帧上屏。需 WGPU 通道编译进库（AURORA_BACKEND_GPU_WGPU）。
+    if (WIN32 AND AURORA_BACKEND_GPU_WGPU AND AURORA_BACKEND_WIN32)
+        aurora_add_verify_probe(aurora_verify_win32_wgpu "${_aurora_verify_dir}/win32_wgpu_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_wgpu)
+    endif ()
+
     # ---- WASAPI 音频（Windows）：真实设备线程 / 格式协商 / 图时钟 / 出声路径真机核对 ----
     # 自动段核对激活/格式契约/时钟推进/缓冲源与推流通路/suspend-resume；--interactive 出声人工段
     # （扫频/双源混音/设备热切换）。需音频后端编译进库（AURORA_ENABLE_AUDIO=ON）。
