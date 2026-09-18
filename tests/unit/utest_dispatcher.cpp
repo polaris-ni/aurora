@@ -4,6 +4,7 @@
 /// 焦点转移/空白清焦、指针捕获越界续发、悬停进出 diff、悬停光标解析
 /// （修饰链 > 虚钩子 > Clickable 缺省，变化才下发）、键盘
 /// Tab/激活快捷键与焦点路由（含激活键优先投递 on_key_event 的控件级 opt-in）、滚轮/文本/文件拖放路由、
+/// 滚轮余量自最深可滚动者上冒给更浅祖先（嵌套滚动协调：内层到顶后外层下拉刷新接手）、
 /// TouchDispatcher 按指针 id 捕获与合成鼠标事件
 
 #include <algorithm>
@@ -14,6 +15,9 @@
 
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/keycode.h"
+#include "aurora/layout/layout_engine.h"
+#include "aurora/widget/pull_to_refresh.h"
+#include "aurora/widget/scroll.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_dispatcher {
@@ -187,6 +191,23 @@ auto make_tree() -> Tree {
     row->add(Node{box2});
     row->layout(Constraints{}, BuildContext{});
     return Tree{.row = row, .box1 = box1, .box2 = box2};
+}
+
+struct NestedScrollTree {
+    std::shared_ptr<PullToRefresh> outer;
+    std::shared_ptr<Scroll> inner;
+};
+
+/// 外层下拉刷新包住内层滚动：视口 300×300、内容 800 → 内层可滚 [0, 500]（step=1 便于按 dp 推算）。
+auto make_nested_scroll_tree() -> NestedScrollTree {
+    auto content = std::make_shared<TestBox>();
+    content->box_width = 300.0F;
+    content->box_height = 800.0F;
+    auto inner = std::make_shared<Scroll>(ScrollProps{.child = Node{content}, .step = 1.0F});
+    auto outer = std::make_shared<PullToRefresh>(Node{inner});
+    LayoutEngine::layout(*outer,
+                         Constraints{.min = Size{}, .max = Size{.width = 300.0F, .height = 300.0F}});
+    return NestedScrollTree{.outer = outer, .inner = inner};
 }
 
 }  // namespace
@@ -484,13 +505,13 @@ AURORA_TEST_CASE(scroll_text_input_and_file_drop_route_to_target) {
     auto tree = make_tree();
     FocusManager fm;
 
-    // 滚轮：只给命中最深叶（不冒泡）；窗外未命中 → false
+    // 滚轮：链上无可滚动者时兜底交给点命中目标，且不冒泡（窗外未命中 → false）。
     ScrollEvent scroll;
     scroll.position = Point{.x = 20.0F, .y = 20.0F};
     scroll.delta_y = -3.0F;
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, scroll));
     AURORA_TEST_CHECK_EQ(tree.box1->scroll_count, 1);
-    AURORA_TEST_CHECK_EQ(tree.row->scroll_count, 0);  // 不冒泡
+    AURORA_TEST_CHECK_EQ(tree.row->scroll_count, 0);  // 未回传余量：就此止步
     AURORA_TEST_CHECK_TRUE(scroll.is_handled);
 
     ScrollEvent blank_scroll;
@@ -596,6 +617,50 @@ AURORA_TEST_CASE(touch_dispatcher_captures_and_synthesizes_per_pointer) {
     redown.points.push_back(TouchPoint{.id = 1, .position = Point{.x = 20.0F, .y = 20.0F}});
     AURORA_TEST_CHECK_TRUE(dispatcher.dispatch(*tree.row, redown));
     AURORA_TEST_CHECK_EQ(tree.box1->press_count, 2);
+}
+
+AURORA_TEST_CASE(wheel_margin_bubbles_from_inner_scroll_to_pull_to_refresh) {
+    constexpr Point kCenter{.x = 150.0F, .y = 150.0F};
+
+    // 内层已在顶部：向上滚的全量作为余量上冒，外层按橡皮筋折算为下拉距离。
+    auto at_top = make_nested_scroll_tree();
+    ScrollEvent bubble;
+    bubble.position = kCenter;
+    bubble.delta_y = 5.0F;  // 5 单位 × 16dp（库内滚轮步长口径）= 80dp 物理下拉
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*at_top.outer, bubble));
+    AURORA_TEST_CHECK_NEAR(at_top.inner->offset_y(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(at_top.outer->pull_distance(), 49.23F, 0.01F);  // 80·128/(80+128)
+    AURORA_TEST_CHECK_EQ(static_cast<int>(at_top.outer->state()), static_cast<int>(PullToRefreshState::Pulling));
+
+    // 内层离顶且能吃尽请求：余量为 0，外层不动（下拉手势不与正常滚动抢手）。
+    auto mid = make_nested_scroll_tree();
+    mid.inner->set_offset(120.0F);
+    ScrollEvent inner_only;
+    inner_only.position = kCenter;
+    inner_only.delta_y = 1.0F;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*mid.outer, inner_only));
+    AURORA_TEST_CHECK_NEAR(mid.inner->offset_y(), 119.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(mid.outer->pull_distance(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(mid.outer->state()), static_cast<int>(PullToRefreshState::Idle));
+
+    // 内层只吃掉 120dp（200 单位请求中的 120 单位）：余 80 单位上冒，外层折算 1280dp 橡皮筋输入。
+    auto partial = make_nested_scroll_tree();
+    partial.inner->set_offset(120.0F);
+    ScrollEvent over_top;
+    over_top.position = kCenter;
+    over_top.delta_y = 200.0F;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*partial.outer, over_top));
+    AURORA_TEST_CHECK_NEAR(partial.inner->offset_y(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(partial.outer->pull_distance(), 116.36F, 0.01F);  // 1280·128/(1280+128)
+
+    // 向下滚（露出下方内容）永不算下拉：内层自身消费，外层保持空闲。
+    auto down = make_nested_scroll_tree();
+    ScrollEvent downward;
+    downward.position = kCenter;
+    downward.delta_y = -5.0F;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*down.outer, downward));
+    AURORA_TEST_CHECK_NEAR(down.inner->offset_y(), 5.0F, 1e-4F);  // step=1：5 单位 = 5dp
+    AURORA_TEST_CHECK_NEAR(down.outer->pull_distance(), 0.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_dispatcher

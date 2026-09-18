@@ -1464,3 +1464,170 @@ class Divider : public au::LeafWidget {
 - **只读钩子别有副作用**：`accessibility_*()` 会在任意平台查询时刻被调用（可能远多于你的绘制次数），其间不要改控件状态、不要发布局请求、不要触发事件。
 - **别把语义树当性能热点**：重建是**拉取式**的（平台查询到达才做全量重投影），不进帧循环；但若你有上千节点的大列表，请优先用虚拟化容器，别让读屏一次拉全量。
 - **`runtime_id` 不是 `Node::id`**：前者是进程级原子自增的无障碍身份（构造时分配、生命周期恒定），后者是树内定位标识。桥用前者保证「同一控件跨事件可比」。
+
+---
+
+## 38 滚动增强：吸附分页 / 下拉刷新 / 吸顶头部 / 滚动驱动动画
+
+轮播与卡片流要**整页对齐**、分组列表要**头部钉顶**、信息流要**下拉刷新**、视差与进度条要**跟着滚动偏移走**。这四件事共用同一套滚动内核（`ScrollSnap` + `ScrollGlide` + `ScrollEvent::remaining_y` + `offset_signal()`），不需要第三方组件。
+
+### 38.1 整页翻页与条目吸附
+
+```cpp
+#include "aurora/aurora.h"
+
+using namespace au;
+
+// 整页：周期取视口高，配 Start / Center / End 对齐方位
+au::Scroll pager{au::ScrollProps{
+    .child = au::Node{build_pages()},
+    .snap = ScrollSnap::page(ScrollSnapAlignment::Start),
+}};
+
+// 条目吸附：按固定周期（= 行高 / 格高）收位，居中展示
+auto list = std::make_shared<LazyList>(200, [](int i) -> Node { return Node{Text(std::to_string(i))}; },
+                                       48.0F);
+list->set_snap(ScrollSnap{.extent = 48.0F, .alignment = ScrollSnapAlignment::Center});
+```
+
+收位不是跳变：滚轮落点后 150ms easeOutCubic 短滑动收敛到对齐点（自驱动 `tick_gestures`，不占 `Animator`）。程序化滚动用 `scroll_to(offset, animate)`（`LazyList` 另有 `scroll_to_item(index, animate)`），`animate = false` 即时落位；`set_offset` / `set_scroll_offset` 会**作废进行中的滑动**。观测点 `is_gliding()`。
+
+### 38.2 下拉刷新
+
+```cpp
+auto scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{build_feed()}});
+auto pull = std::make_shared<PullToRefresh>(
+    PullToRefreshProps{.child = Node{std::move(scroll)}, .threshold = 64.0F, .max_pull = 128.0F});
+
+std::weak_ptr<PullToRefresh> weak_pull = pull;   // 回调可能晚于控件析构
+pull->on_refresh([weak_pull]() -> void {
+    fetch_remote([weak_pull]() -> void {
+        if (auto p = weak_pull.lock()) {
+            p->finish_refresh();                 // 收拢指示器；不调用则 spinner 常驻
+        }
+    });
+});
+```
+
+指示器是覆盖层（顶部半透明带 + 弧线 spinner），不改布局盒、不推挤内容。`state()` / `pull_distance()` / `progress()` 供宿主联动（例如把 `progress()` 绑到文案或图标旋转）。
+
+### 38.3 吸顶分组头部
+
+```cpp
+au::Scroll grouped{au::ScrollProps{.child = au::Node{au::Column{au::ColumnProps{
+    .children = {
+        au::Node{au::StickyHeader{au::Node{au::Text{"今天"}}}},
+        au::Node{message_row(1)},  // ...
+        au::Node{au::StickyHeader{au::Node{au::Text{"昨天"}}}},
+        au::Node{message_row(2)},  // ...
+    }}}}}};
+```
+
+`StickyHeader` 正常参与布局（占自身高度、随内容滚），滚过视口顶部后由宿主按 pin 位压顶重绘；下一条头部逼近时把本条**顶出**（CSS `position: sticky` 同语义）。宿主为 `Scroll`（多个头部依次堆叠）或 `LazyList`（粘性项作为普通行实例化）。
+
+### 38.4 滚动驱动动画与嵌套滚动
+
+```cpp
+auto scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{build_hero()}});
+
+// 偏移信号：任何滚动通道（滚轮 / 拖拽 / 收位滑动帧 / 程序化）落位即发布
+auto fade = std::make_shared<State<float>>(1.0F);
+au::Effect drive([&]() -> void {
+    const float offset = scroll->offset_signal().get();   // Effect 作用域内读取即订阅
+    fade->set(std::clamp(1.0F - offset / 200.0F, 0.0F, 1.0F));
+});
+```
+
+嵌套滚动无需接线：滚轮判给**最近可滚动祖先**，内层滚到端点后未消费的量经 `ScrollEvent::remaining_y` 上冒给外层（故 `PullToRefresh{Scroll{...}}` 到顶即下拉、外层 `Scroll` 内嵌 `LazyList` 内层先滚）。路由细节见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §3.3。
+
+要点：
+
+- **吸附三属性同一套键**：`snap_extent` / `snap_paging` / `snap_alignment` 在 `Scroll` / `LazyList` / `GridView` 上语义与序列化一致（`LazyRow` 暂无吸附）；`snap_extent <= 0` 且非分页 = 关闭。
+- **分页末尾停在整页对齐点**：剩余内容不足一整页时结果夹到 `max_scroll_offset`，不会停在半页。
+- **`reduce_motion` 全程短路**：收位滑动、`scroll_to(…, true)`、下拉回弹在系统「减少动态效果」下直落端点，不产生中间帧（与 `Dismissible` / `ReorderableList` 一致）。
+- **回调属运行时接线**：`on_refresh` 不进序列化，UI 重建 / 热重载后须重挂（`threshold` / `max_pull` 会随属性还原）。
+- **可编译样例**：`examples/demos/demo_scroll_snap.cpp`、`examples/demos/demo_pull_to_refresh.cpp`、`examples/demos/demo_sticky_header.cpp`。
+
+---
+
+## 39 输入法组合输入（CJK / IME）
+
+拼音 / 五笔 / 假名输入的本质是「有一段**还没定下来**的文字要显示，但不能进数据模型」。Aurora 把它收敛成一条事件 `TextCompositionEvent`：`preedit` 管显示，`committed` 管落字，`value()` 全程干净。
+
+### 39.1 用现成文本控件：零接线
+
+```cpp
+#include "aurora/aurora.h"
+
+using namespace au;
+
+au::TextInput field{au::TextInputProps{.placeholder = "请输入姓名"}};
+field.on_changed([](const std::string &s) -> void { /* 只收到已上屏文本 */ });
+```
+
+`TextInput` / `RichTextEdit` 已内置：preedit 下划线 + 待转换选区高亮、组合光标落在候选插入点、preedit 参与宽度测量（组合中的中文会撑开输入框，不被裁切）、失焦自动取消未上屏的组合。**应用侧一行都不用写。**
+
+### 39.2 自定义文本控件：两个钩子
+
+```cpp
+class MyEditor : public Widget {
+  public:
+    // ① 收组合态：先落 committed，再更新 preedit 显示态
+    auto on_text_composition(TextCompositionEvent &e) -> void override {
+        if (!e.committed.empty()) {
+            insert_at_caret(e.committed);          // 上屏：唯一写数据模型的时机
+        }
+        preedit_ = e.preedit;                      // 空串 = 组合结束 / 取消
+        preedit_cursor_ = e.cursor_index;          // preedit 内「码点」下标
+        mark_dirty();
+    }
+
+    // ② 候选窗定位盒：preedit 光标处的零宽竖盒（窗口逻辑 dp）
+    [[nodiscard]] auto composition_caret_bounds() const -> Rect override {
+        return caret_box_in_window_coords(preedit_cursor_);
+    }
+};
+```
+
+只读 / 禁用的编辑器应**吞掉**事件（不落字、不显示 preedit），别让它半进半退。
+
+### 39.3 无头测试里模拟一段拼音
+
+```cpp
+TextCompositionEvent e;
+e.preedit = "你好";
+e.cursor_index = 2;              // 码点，不是字节
+e.sel_start = 0;
+e.sel_end = 2;                   // 含尾；AURORA_NO_SELECTION = 无待转换选区
+ti.on_text_composition(e);       // 组合期：preedit 显示，value() 不变
+AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{"你好"});
+AURORA_TEST_CHECK_EQ(ti.value(), std::string{""});
+
+e.preedit.clear();
+e.committed = "你好";            // 上屏：value() 才落字
+ti.on_text_composition(e);
+AURORA_TEST_CHECK_EQ(ti.value(), std::string{"你好"});
+```
+
+完整三段序列（preedit → 候选替换 → 上屏）、`max_length` 截断、只读吞输入、失焦取消、preedit 参与测量均由 `tests/unit/utest_text_input.cpp` 守住。
+
+### 39.4 Win32 真机验收
+
+```powershell
+cmake --preset ninja                     # 如未配置
+cmake -S . -B build -DAURORA_BUILD_VERIFY_TOOLS=ON   # 探针不在默认构建、也不进 CTest
+cmake --build build --target aurora_verify_win32_ime
+build\aurora_verify_win32_ime.exe --interactive
+```
+
+用微软拼音输入「你好世界」，目视：① preedit 带下划线且随拼音更新；② 候选窗出现在插入点旁而非屏幕左上角；③ 选字后只上一次屏；④ Esc 取消后无残留；⑤ 切走焦点再回来无半截拼音。
+
+要点：
+
+- **preedit 绝不进 `value()`**：数据模型、序列化与 golden 因此始终不含半截拼音；显示与测量走 `composed_text()`。
+- **下标是码点**：`cursor_index` / `sel_*` 按码点折算，代理对不会被切半。
+- **组合事件只到焦点控件**：不经命中链、不冒泡，故容器不会误吞。
+- **只有 `Application` 驱动才有 IME**：裸 `Window` + `present_root` 没有任何事件处理器（连 Tab 焦点都不通），详见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.5。
+- **非 Win32 后端目前只有契约**：macOS / X11 / Wayland / Wasm 缺平台桥，写了钩子也收不到事件；接线状态见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §2.4。
+
+---

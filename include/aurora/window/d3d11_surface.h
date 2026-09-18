@@ -139,6 +139,11 @@ class D3D11Surface : public Surface {
     /// @brief 注入语义树根（转发共享宿主；桥未构造时由宿主记下）。
     auto set_accessibility_root(Widget *root) -> void override { win_->set_accessibility_root(root); }
 
+    /// @brief 注入 IME 候选窗定位查询（转发共享宿主，GDI/GPU 两路同一桥）。
+    auto set_composition_caret_provider(std::function<Rect()> provider) -> void override {
+        win_->set_composition_caret_provider(std::move(provider));
+    }
+
     /// @brief 设备是否可用（无适配器时为 false，测试应跳过）。
     [[nodiscard]] auto is_available() const -> bool { return ok_; }
     /// @brief 测试 seam：模拟 device-lost（置不可用 + 重建标志），

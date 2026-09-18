@@ -31,6 +31,7 @@ auto WindowHost::teardown() -> void {
         sf.set_event_handler({});
         sf.set_window_state_handler({});
         sf.set_window_mode_handler({});
+        sf.set_composition_caret_provider({});  // 同样捕获 this，须解绑
     }
     key_pre_ = nullptr;
     state_sink_ = nullptr;
@@ -61,6 +62,11 @@ auto WindowHost::attach_surface() -> void {
     });
     // DPI 缩放变化：窗口被拖到不同缩放比的显示器 / 系统缩放变更 → 强制全量重排重绘。
     sf.set_scale_change_handler([this](float /*scale*/) -> void { on_scale_changed(); });
+    // IME 候选窗定位：后端桥据此将候选列表摆到当前焦点控件的插入点旁（逻辑 dp，桥内换算像素）。
+    sf.set_composition_caret_provider([this]() -> Rect {
+        Widget *focused = focus_.focused();
+        return focused != nullptr ? focused->composition_caret_bounds() : Rect{};
+    });
     // per-window 帧统计：默认仍写全局单例（单窗口用法零回归），多窗口下已由
     // `own_frame_stats()` 切到自有实例后再接线。
     window_->set_frame_stats(*active_stats_);
@@ -213,6 +219,8 @@ auto WindowHost::dispatch(Event &e) -> void {
         EventDispatcher::dispatch(root, *k, focus_);
     } else if (auto *t = dynamic_cast<TextInputEvent *>(&e)) {
         EventDispatcher::dispatch(root, *t, focus_);
+    } else if (auto *ce = dynamic_cast<TextCompositionEvent *>(&e)) {
+        EventDispatcher::dispatch(root, *ce, focus_);
     } else if (auto *te = dynamic_cast<TouchEvent *>(&e)) {
         touch_.dispatch(root, *te, &focus_);
     } else if (auto *fde = dynamic_cast<FileDropEvent *>(&e)) {

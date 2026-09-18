@@ -2,14 +2,18 @@
 /// 目标单元: include/aurora/widget/grid_view.h
 /// 测试说明: 覆盖 GridView——默认不变量、非法 count/列数/格高钳制降级、行数向上取整与内容高、
 /// 视口填充与单元格整形、按需构建仅可见行（含末行不满格）、滚动偏移钳制与滚轮步进、
-/// 单元格网格落位、序列化与自描述
+/// 单元格网格落位、序列化与自描述、snap/paging 逐帧收位、reduce-motion 直落、offset_signal 发布
+///
+/// 行窗口与偏移的换算按 `item_extent = 96` 的整行推进（滚轮步进 40 为控件内部常量）。
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "aurora/core/accessibility.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/grid_view.h"
 #include "framework/aurora_test.h"
@@ -53,6 +57,47 @@ struct BuildRecorder {
             return Node{items.at(index)};
         };
     }
+};
+
+/// @brief 假想帧钟：单调递增，令自驱动的收位滑动逐帧可测（不依赖墙钟抖动）。
+auto frame_clock() -> std::chrono::steady_clock::time_point& {
+    static std::chrono::steady_clock::time_point now = std::chrono::steady_clock::time_point{};
+    return now;
+}
+
+/// @brief 推进 n 帧（每帧 16ms），驱动 snap 收位 / scroll_to 短滑动。
+auto pump(GridView& grid, int frames) -> void {
+    for (int i = 0; i < frames; ++i) {
+        frame_clock() += std::chrono::milliseconds(16);
+        grid.tick(frame_clock());
+    }
+}
+
+/// @brief 等滑动走完：滑满时长 150ms + 余量。
+auto settle(GridView& grid) -> void { pump(grid, 16); }
+
+/// @brief 滚轮事件入口（step 为控件内部常量 40，故 1 单位 = 40dp）。
+auto wheel(GridView& grid, float delta_y) -> ScrollEvent {
+    ScrollEvent e;
+    e.delta_y = delta_y;
+    grid.on_scroll(e);
+    return e;
+}
+
+/// @brief reduce-motion 守卫：作用域内开启，离开时复原进程级设置（单例，测试须自清）。
+class ReduceMotionGuard final {
+  public:
+    ReduceMotionGuard() : saved_(current_accessibility_settings()) {
+        AccessibilitySettings s = saved_;
+        s.reduce_motion = true;
+        set_accessibility_settings(s);
+    }
+    ~ReduceMotionGuard() { set_accessibility_settings(saved_); }
+    ReduceMotionGuard(const ReduceMotionGuard&) = delete;
+    auto operator=(const ReduceMotionGuard&) -> ReduceMotionGuard& = delete;
+
+  private:
+    AccessibilitySettings saved_;
 };
 
 }  // namespace
@@ -223,6 +268,95 @@ AURORA_TEST_CASE(serialize_and_describe) {
     AURORA_TEST_CHECK_TRUE(columns_required);
     AURORA_TEST_CHECK_TRUE(columns_min_one);
     AURORA_TEST_CHECK_FALSE(d.invariants.empty());
+}
+
+AURORA_TEST_CASE(snap_glide_advances_every_frame_until_row_boundary) {
+    // 格高 96、snap extent 192（两行一站）：滚轮落在 120 → 收位到 192，须逐帧推进到终点。
+    GridView grid{30, 3, {}, 96.0F};
+    grid.set_snap(ScrollSnap{.extent = 192.0F});
+    LayoutEngine::layout(grid, bounded(300.0F, 300.0F));  // 内容 960 / 视口 300 → [0, 660]
+
+    wheel(grid, -3.0F);  // 3 单位 × 40dp = 120
+    AURORA_TEST_CHECK_NEAR(grid.scroll_offset(), 120.0F, 1e-4F);
+    AURORA_TEST_CHECK_TRUE(grid.is_gliding());
+
+    pump(grid, 1);
+    AURORA_TEST_CHECK_TRUE(grid.scroll_offset() > 120.0F && grid.scroll_offset() < 192.0F);
+    AURORA_TEST_CHECK_TRUE(grid.is_gliding());  // 中间帧仍在滑动（曾在此处被作废而冻结）
+
+    settle(grid);
+    AURORA_TEST_CHECK_NEAR(grid.scroll_offset(), 192.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(grid.is_gliding());
+}
+
+AURORA_TEST_CASE(snap_paging_pages_by_viewport_height) {
+    GridView grid{30, 3, {}, 96.0F};
+    grid.set_snap(ScrollSnap::page());  // 视口高 300 = 一页
+    LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
+
+    wheel(grid, -2.0F);  // 80 < 半页 → 回弹本页
+    AURORA_TEST_CHECK_NEAR(grid.scroll_offset(), 80.0F, 1e-4F);
+    settle(grid);
+    AURORA_TEST_CHECK_NEAR(grid.scroll_offset(), 0.0F, 1e-4F);
+
+    wheel(grid, -5.0F);  // 200 > 半页 → 下一页 300
+    settle(grid);
+    AURORA_TEST_CHECK_NEAR(grid.scroll_offset(), 300.0F, 1e-4F);
+
+    // 末段不足一页：以整页对齐为准（600），不因滚轮夹在 660 而停在非对齐点。
+    wheel(grid, -10.0F);
+    AURORA_TEST_CHECK_NEAR(grid.scroll_offset(), 660.0F, 1e-4F);
+    settle(grid);
+    AURORA_TEST_CHECK_NEAR(grid.scroll_offset(), 600.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(reduce_motion_snaps_and_jumps_without_intermediate_frames) {
+    ReduceMotionGuard guard;
+    GridView grid{30, 3, {}, 96.0F};
+    grid.set_snap(ScrollSnap{.extent = 192.0F});
+    LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
+
+    wheel(grid, -3.0F);
+    AURORA_TEST_CHECK_NEAR(grid.scroll_offset(), 192.0F, 1e-4F);  // 直落对齐点
+    AURORA_TEST_CHECK_FALSE(grid.is_gliding());
+
+    grid.scroll_to(0.0F);  // animate=true 同样短路：状态与走完一致
+    AURORA_TEST_CHECK_NEAR(grid.scroll_offset(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(grid.is_gliding());
+}
+
+AURORA_TEST_CASE(offset_signal_follows_programmatic_and_glide_frames) {
+    GridView grid{30, 3, {}, 96.0F};
+    LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
+
+    SignalView<float>& offset = grid.offset_signal();  // 懒创建：初值取当前偏移
+    AURORA_TEST_CHECK_NEAR(offset.get(), 0.0F, 1e-4F);
+
+    grid.set_scroll_offset(100.0F);
+    AURORA_TEST_CHECK_NEAR(offset.get(), 100.0F, 1e-4F);
+    wheel(grid, 1.0F);  // 向上 40dp
+    AURORA_TEST_CHECK_NEAR(offset.get(), 60.0F, 1e-4F);
+
+    grid.scroll_to(400.0F);  // 滑动期逐帧发布
+    pump(grid, 1);
+    AURORA_TEST_CHECK_TRUE(offset.get() > 60.0F && offset.get() < 400.0F);
+    settle(grid);
+    AURORA_TEST_CHECK_NEAR(offset.get(), 400.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(snap_properties_are_serialized) {
+    GridView src{9, 3, {}, 96.0F};
+    src.set_snap(ScrollSnap{.extent = 288.0F, .alignment = ScrollSnapAlignment::End});
+    Json props;
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_NEAR(props["snap_extent"].get<float>(), 288.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(props["snap_paging"].get<bool>());
+    AURORA_TEST_CHECK_EQ(props["snap_alignment"].get<std::string>(), std::string{"End"});
+
+    // 吸附开关的可观测性：本控件以 set_snap 接线（builder 属运行时回调，from_json 不重建条目）。
+    AURORA_TEST_CHECK_TRUE(src.snap().enabled(300.0F));
+    GridView off{9, 3, {}, 96.0F};
+    AURORA_TEST_CHECK_FALSE(off.snap().enabled(300.0F));
 }
 
 }  // namespace aurora::test_cases::utest_grid_view

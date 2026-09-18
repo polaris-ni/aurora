@@ -73,6 +73,15 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_ua)
     endif ()
 
+    # ---- Win32 IMM32 输入法桥（WM_IME_* → 组合事件 / 候选窗定位 / 双通道吞字纪律）----
+    # 自动段覆盖「消息泵 + 派发 + 吞字纪律」；组合串注入（ImmSetCompositionStringW）在 TSF 型
+    # 输入法（如微软拼音）下被拒，故 preedit/上屏为 best-effort SKIP，其验收交由 --interactive 人工段。
+    # imm32 已随 aurora PUBLIC 链接，探针无需额外链接。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
+        aurora_add_verify_probe(aurora_verify_win32_ime "${_aurora_verify_dir}/win32_ime_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_ime)
+    endif ()
+
     # ---- macOS 光标（NSCursor 派发接线）：[NSCursor currentCursor] 单例同一性读回 ----
     # 需 ObjC++ 语言：条件启用，其它平台上完全不涉及（不改动默认构建的语言集合）。
     if (APPLE AND AURORA_BACKEND_MACOS)

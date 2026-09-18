@@ -66,10 +66,12 @@ class EventDispatcher {
     /// @return 事件是否被处理（焦点移动或焦点 widget 消费）。
     static auto dispatch(Widget &root, KeyEvent &e, FocusManager &fm) -> bool;
 
-    /// @brief 同步派发滚轮事件到命中目标；返回是否命中。
-    /// @param root 派发起点（根 widget）；在其子树内做命中测试确定滚动目标。
-    /// @param e    待派发的滚轮事件（不冒泡，仅交给命中链最深叶节点）。
-    /// @return 是否命中到可滚动目标。
+    /// @brief 同步派发滚轮事件；沿命中链自最深向根找可滚动者派发，返回是否命中滚动目标。
+    /// @param root 派发起点（根 widget）；在其子树内做命中测试组装滚动链。
+    /// @param e    待派发的滚轮事件。消费方若在端点被夹掉，可写 `e.remaining_y` 回传余量，
+    ///             派发器把余量作为新的 `delta_y` 继续交给更浅一层可滚动祖先（嵌套滚动协调）；
+    ///             不写 `remaining_y` 视为全量消费、就此止步。
+    /// @return 是否命中到可滚动目标（或点命中目标）。
     static auto dispatch(Widget &root, ScrollEvent &e) -> bool;
 
     /// @brief 同步派发文件拖放事件到命中目标；返回是否命中（is_handled_ 由 widget 写入 e）。

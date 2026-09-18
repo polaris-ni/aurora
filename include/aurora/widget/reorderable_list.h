@@ -274,8 +274,11 @@ class ReorderableList : public Container {
         if (is_dragging()) {
             return;
         }
-        const float target = ScrollViewport::clamp_offset(offset_, e.delta_y, step_, content_h_, viewport_h_);
-        if (target == offset_) {
+        const float before = offset_;
+        const float target = ScrollViewport::clamp_offset(before, e.delta_y, step_, content_h_, viewport_h_);
+        // 余量回传（嵌套滚动协调）：端点被夹掉的部分上冒给更浅可滚动祖先。
+        e.remaining_y = ScrollViewport::remaining_offset(before, target, e.delta_y, step_);
+        if (target == before) {
             return;
         }
         offset_ = target;

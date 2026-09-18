@@ -426,6 +426,14 @@
       ]
     },
     {
+      "name": "ScrollSnapAlignment",
+      "values": [
+        "Start",
+        "Center",
+        "End"
+      ]
+    },
+    {
       "name": "SplitterOrientation",
       "values": [
         "Horizontal",
@@ -3744,6 +3752,9 @@
         "restore_key": "",
         "scroll_offset": 0.0,
         "show": true,
+        "snap_alignment": "Start",
+        "snap_extent": 0.0,
+        "snap_paging": false,
         "width": "auto"
       },
       "dynamic_children": false,
@@ -3812,6 +3823,36 @@
           "note": "滚动位置保存键（空=不参与恢复）",
           "required": false,
           "type": "string"
+        },
+        {
+          "default": "0.0",
+          "json_type": "number",
+          "minimum": "0",
+          "name": "snap_extent",
+          "note": "吸附行周期dp（<=0=关闭；snap_paging=true 时忽略）",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "false",
+          "json_type": "boolean",
+          "name": "snap_paging",
+          "note": "分页模式：以视口高为一页吸附",
+          "required": false,
+          "type": "bool"
+        },
+        {
+          "default": "Start",
+          "enum": [
+            "Start",
+            "Center",
+            "End"
+          ],
+          "json_type": "string",
+          "name": "snap_alignment",
+          "note": "吸附对齐方位（Start/Center/End）",
+          "required": false,
+          "type": "ScrollSnapAlignment"
         }
       ],
       "props": [
@@ -3824,6 +3865,9 @@
         "restore_key",
         "scroll_offset",
         "show",
+        "snap_alignment",
+        "snap_extent",
+        "snap_paging",
         "width"
       ],
       "props_schema": {
@@ -3860,6 +3904,27 @@
           "description": "纵向滚动偏移(dp)",
           "minimum": "0",
           "type": "number"
+        },
+        "snap_alignment": {
+          "default": "Start",
+          "description": "吸附对齐方位（Start/Center/End）",
+          "enum": [
+            "Start",
+            "Center",
+            "End"
+          ],
+          "type": "string"
+        },
+        "snap_extent": {
+          "default": "0.0",
+          "description": "吸附行周期dp（<=0=关闭；snap_paging=true 时忽略）",
+          "minimum": "0",
+          "type": "number"
+        },
+        "snap_paging": {
+          "default": "false",
+          "description": "分页模式：以视口高为一页吸附",
+          "type": "boolean"
         }
       },
       "thread": "main",
@@ -4029,6 +4094,9 @@
         "restore_key": "",
         "scroll_offset": 0.0,
         "show": true,
+        "snap_alignment": "Start",
+        "snap_extent": 0.0,
+        "snap_paging": false,
         "width": "auto"
       },
       "dynamic_children": false,
@@ -4087,6 +4155,36 @@
           "note": "滚动位置保存键（空=不参与恢复）",
           "required": false,
           "type": "string"
+        },
+        {
+          "default": "0.0",
+          "json_type": "number",
+          "minimum": "0",
+          "name": "snap_extent",
+          "note": "吸附周期dp（<=0=关闭；snap_paging=true 时忽略）",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "false",
+          "json_type": "boolean",
+          "name": "snap_paging",
+          "note": "分页模式：以视口高为一页吸附",
+          "required": false,
+          "type": "bool"
+        },
+        {
+          "default": "Start",
+          "enum": [
+            "Start",
+            "Center",
+            "End"
+          ],
+          "json_type": "string",
+          "name": "snap_alignment",
+          "note": "吸附对齐方位（Start/Center/End）",
+          "required": false,
+          "type": "ScrollSnapAlignment"
         }
       ],
       "props": [
@@ -4098,6 +4196,9 @@
         "restore_key",
         "scroll_offset",
         "show",
+        "snap_alignment",
+        "snap_extent",
+        "snap_paging",
         "width"
       ],
       "props_schema": {
@@ -4128,6 +4229,27 @@
           "description": "当前滚动偏移(dp)",
           "minimum": "0",
           "type": "number"
+        },
+        "snap_alignment": {
+          "default": "Start",
+          "description": "吸附对齐方位（Start/Center/End）",
+          "enum": [
+            "Start",
+            "Center",
+            "End"
+          ],
+          "type": "string"
+        },
+        "snap_extent": {
+          "default": "0.0",
+          "description": "吸附周期dp（<=0=关闭；snap_paging=true 时忽略）",
+          "minimum": "0",
+          "type": "number"
+        },
+        "snap_paging": {
+          "default": "false",
+          "description": "分页模式：以视口高为一页吸附",
+          "type": "boolean"
         }
       },
       "thread": "main",
@@ -5534,6 +5656,64 @@
       "type": "Provider"
     },
     {
+      "children_policy": "single",
+      "container": true,
+      "default_props": {
+        "height": "auto",
+        "max_pull": 128.0,
+        "overflow": "Visible",
+        "show": true,
+        "threshold": 64.0,
+        "width": "auto"
+      },
+      "dynamic_children": false,
+      "events": [
+        "on_refresh"
+      ],
+      "examples": [
+        "au::PullToRefresh(au::Scroll{...}) /* 顶部下拉触发刷新 */"
+      ],
+      "is_clickable": false,
+      "is_container": true,
+      "is_layout": true,
+      "prop_descriptors": [
+        {
+          "default": "64.0",
+          "name": "threshold",
+          "note": "触发刷新的下拉距离(dp)",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "128.0",
+          "name": "max_pull",
+          "note": "橡皮筋下拉上限(dp)",
+          "required": false,
+          "type": "float"
+        }
+      ],
+      "props": [
+        "height",
+        "max_pull",
+        "overflow",
+        "show",
+        "threshold",
+        "width"
+      ],
+      "props_schema": {
+        "max_pull": {
+          "default": "128.0",
+          "description": "橡皮筋下拉上限(dp)"
+        },
+        "threshold": {
+          "default": "64.0",
+          "description": "触发刷新的下拉距离(dp)"
+        }
+      },
+      "thread": "main",
+      "type": "PullToRefresh"
+    },
+    {
       "children_policy": "none",
       "container": false,
       "default_props": {
@@ -6288,6 +6468,9 @@
         "overflow": "Visible",
         "restore_key": "",
         "show": true,
+        "snap_alignment": "Start",
+        "snap_extent": 0.0,
+        "snap_paging": false,
         "step": 16.0,
         "width": "auto"
       },
@@ -6315,6 +6498,36 @@
           "type": "string"
         },
         {
+          "default": "0.0",
+          "json_type": "number",
+          "minimum": "0",
+          "name": "snap_extent",
+          "note": "吸附周期dp（<=0=关闭；snap_paging=true 时忽略）",
+          "required": false,
+          "type": "float"
+        },
+        {
+          "default": "false",
+          "json_type": "boolean",
+          "name": "snap_paging",
+          "note": "分页模式：以视口高为一页吸附",
+          "required": false,
+          "type": "bool"
+        },
+        {
+          "default": "Start",
+          "enum": [
+            "Start",
+            "Center",
+            "End"
+          ],
+          "json_type": "string",
+          "name": "snap_alignment",
+          "note": "吸附对齐方位（Start/Center/End）",
+          "required": false,
+          "type": "ScrollSnapAlignment"
+        },
+        {
           "default": "auto",
           "name": "width",
           "required": false,
@@ -6339,6 +6552,9 @@
         "overflow",
         "restore_key",
         "show",
+        "snap_alignment",
+        "snap_extent",
+        "snap_paging",
         "step",
         "width"
       ],
@@ -6351,6 +6567,27 @@
         },
         "show": {
           "default": "true"
+        },
+        "snap_alignment": {
+          "default": "Start",
+          "description": "吸附对齐方位（Start/Center/End）",
+          "enum": [
+            "Start",
+            "Center",
+            "End"
+          ],
+          "type": "string"
+        },
+        "snap_extent": {
+          "default": "0.0",
+          "description": "吸附周期dp（<=0=关闭；snap_paging=true 时忽略）",
+          "minimum": "0",
+          "type": "number"
+        },
+        "snap_paging": {
+          "default": "false",
+          "description": "分页模式：以视口高为一页吸附",
+          "type": "boolean"
         },
         "step": {
           "default": "16.0",
@@ -7827,6 +8064,34 @@
       },
       "thread": "main",
       "type": "Stepper"
+    },
+    {
+      "children_policy": "single",
+      "container": true,
+      "default_props": {
+        "height": "auto",
+        "overflow": "Visible",
+        "show": true,
+        "width": "auto"
+      },
+      "dynamic_children": false,
+      "events": [],
+      "examples": [
+        "au::StickyHeader(au::Text(\"分组标题\")) /* Scroll 内容中滚动时钉驻顶部 */"
+      ],
+      "is_clickable": false,
+      "is_container": true,
+      "is_layout": true,
+      "prop_descriptors": [],
+      "props": [
+        "height",
+        "overflow",
+        "show",
+        "width"
+      ],
+      "props_schema": {},
+      "thread": "main",
+      "type": "StickyHeader"
     },
     {
       "children_policy": "none",

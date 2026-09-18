@@ -123,6 +123,18 @@ class Win32Window {
     auto set_accessibility_hook(std::function<std::optional<std::intptr_t>(std::uintptr_t, std::intptr_t)> h) const
         -> void;
 
+    // ---- 输入法桥（IMM32 组合输入）----
+
+    /// @brief 注入 IME 候选窗定位查询（返回**窗口逻辑 dp** 零宽竖盒；默认空 → 系统默认位置）。
+    ///
+    /// 与 `Surface::set_composition_caret_provider` 同一契约：`Win32Surface`(GDI) 与
+    /// `D3D11Surface`(GPU) 共用本宿主，宿主在 `WM_IME_STARTCOMPOSITION`/`WM_IME_COMPOSITION`
+    /// 时调用它取当前焦点控件的插入点，再 `× scale` + `ClientToScreen` 喂 `ImmSetCandidateWindow`。
+    auto set_composition_caret_provider(std::function<Rect()> provider) const -> void;
+
+    /// @brief 是否处于 IME 组合中（真机验收探针 / 自检观测器用）。
+    [[nodiscard]] auto ime_composing() const -> bool;
+
   private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_;

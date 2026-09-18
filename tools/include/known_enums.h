@@ -42,6 +42,7 @@ namespace aurora::tools {
     enums["MainAxisSize"] = {"Min", "Max"};
     enums["StackFit"] = {"Loose", "Expand", "Passthrough"};
     enums["LengthKind"] = {"WrapContent", "Expand", "Fixed", "Fraction"};
+    enums["ScrollSnapAlignment"] = {"Start", "Center", "End"};
 
     // ---- text ----
     enums["TextAlign"] = {"Left", "Right", "Center", "Start", "End", "Justify"};

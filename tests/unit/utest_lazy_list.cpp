@@ -1,14 +1,17 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/lazy_list.h
 /// 测试说明: 覆盖 LazyList——默认不变量、count/行高参数钳制与降级、按需构建仅可见窗口条目（实例复用）、
-/// cache_extent 窗口、滚动偏移钳制与 scroll_to_item、滚轮步进、滚出窗口回收重建、序列化与自描述
+/// cache_extent 窗口、滚动偏移钳制与 scroll_to_item、滚轮步进、滚出窗口回收重建、序列化与自描述、
+/// snap/paging 收位短滑动（逐帧推进至终点对齐）、reduce-motion 直落、offset_signal 发布、滚轮余量上冒
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "aurora/core/accessibility.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/lazy_list.h"
 #include "framework/aurora_test.h"
@@ -52,6 +55,47 @@ struct BuildRecorder {
             return Node{items.at(index)};
         };
     }
+};
+
+/// @brief 假想帧钟：单调递增，令自驱动的收位滑动逐帧可测（不依赖墙钟抖动）。
+auto frame_clock() -> std::chrono::steady_clock::time_point& {
+    static std::chrono::steady_clock::time_point now = std::chrono::steady_clock::time_point{};
+    return now;
+}
+
+/// @brief 推进 n 帧（每帧 16ms），驱动 snap 收位 / scroll-to 短滑动。
+auto pump(LazyList& list, int frames) -> void {
+    for (int i = 0; i < frames; ++i) {
+        frame_clock() += std::chrono::milliseconds(16);
+        list.tick(frame_clock());
+    }
+}
+
+/// @brief 等滑动走完：滑满时长 150ms + 余量。
+auto settle(LazyList& list) -> void { pump(list, 16); }
+
+/// @brief 滚轮事件入口（step 为控件内部常量 40，故 1 单位 = 40dp）。
+auto wheel(LazyList& list, float delta_y) -> ScrollEvent {
+    ScrollEvent e;
+    e.delta_y = delta_y;
+    list.on_scroll(e);
+    return e;
+}
+
+/// @brief reduce-motion 守卫：作用域内开启，离开时复原进程级设置（单例，测试须自清）。
+class ReduceMotionGuard final {
+  public:
+    ReduceMotionGuard() : saved_(current_accessibility_settings()) {
+        AccessibilitySettings s = saved_;
+        s.reduce_motion = true;
+        set_accessibility_settings(s);
+    }
+    ~ReduceMotionGuard() { set_accessibility_settings(saved_); }
+    ReduceMotionGuard(const ReduceMotionGuard&) = delete;
+    auto operator=(const ReduceMotionGuard&) -> ReduceMotionGuard& = delete;
+
+  private:
+    AccessibilitySettings saved_;
 };
 
 }  // namespace
@@ -195,6 +239,131 @@ AURORA_TEST_CASE(serialize_props_and_describe_metadata) {
     }
     AURORA_TEST_CHECK_TRUE(count_required);
     AURORA_TEST_CHECK_FALSE(d.invariants.empty());
+}
+
+AURORA_TEST_CASE(snap_glide_advances_every_frame_until_row_boundary) {
+    // 行高 48、snap extent 240（5 行一站）：滚轮落在 160 → 收位到 240，且必须逐帧推进到终点。
+    BuildRecorder rec;
+    LazyList list{100, rec.builder(), 48.0F};
+    list.set_snap(ScrollSnap{.extent = 240.0F});
+    list.set_cache_extent(0.0F);  // 关预取：窗口起点即偏移所在行
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+
+    wheel(list, -4.0F);  // 4 单位 × 40dp = 160
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 160.0F, 1e-4F);
+    AURORA_TEST_CHECK_TRUE(list.is_gliding());
+
+    pump(list, 1);
+    AURORA_TEST_CHECK_TRUE(list.scroll_offset() > 160.0F && list.scroll_offset() < 240.0F);
+    AURORA_TEST_CHECK_TRUE(list.is_gliding());  // 中间帧仍在滑动（曾在此处被作废而冻结）
+
+    settle(list);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 240.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(list.is_gliding());
+    AURORA_TEST_CHECK_TRUE(list.live_item_count() > 0U);  // 滑动帧照常虚拟化
+
+    // 窗口随滑动位移重建（对齐点 240 → 首项 index 5 起）。
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    AURORA_TEST_CHECK_EQ(list.visible_range().first, 5);
+}
+
+AURORA_TEST_CASE(snap_paging_pages_by_viewport_height_and_bounces_back) {
+    LazyList list{100, {}, 48.0F};
+    list.set_snap(ScrollSnap::page());  // 视口高 400 = 一页
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+
+    wheel(list, -3.0F);  // 120 < 半页 → 回弹本页
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 120.0F, 1e-4F);
+    settle(list);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 0.0F, 1e-4F);
+
+    wheel(list, -6.0F);  // 240 > 半页 → 进下一页 400
+    settle(list);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 400.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(list.is_gliding());
+
+    // 配置读取与关闭：snap() 回读；置 extent<=0 且非分页 = 关闭，滚轮不再收位。
+    AURORA_TEST_CHECK_TRUE(list.snap().paging);
+    list.set_snap(ScrollSnap{});
+    AURORA_TEST_CHECK_FALSE(list.snap().enabled(400.0F));
+    wheel(list, -2.0F);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 480.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(list.is_gliding());
+}
+
+AURORA_TEST_CASE(reduce_motion_snaps_without_intermediate_frames) {
+    ReduceMotionGuard guard;
+    LazyList list{100, {}, 48.0F};
+    list.set_snap(ScrollSnap{.extent = 240.0F});
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+
+    wheel(list, -4.0F);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 240.0F, 1e-4F);  // 直落对齐点
+    AURORA_TEST_CHECK_FALSE(list.is_gliding());
+
+    list.scroll_to_item(30, true);  // animate=true 同样短路
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 1440.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(list.is_gliding());
+}
+
+AURORA_TEST_CASE(scroll_to_item_supports_instant_and_animated) {
+    LazyList list{100, {}, 48.0F};
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+
+    list.scroll_to_item(10);  // 缺省即时
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 480.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(list.is_gliding());
+
+    list.scroll_to_item(20, true);  // 动画：先起滑动，位置待逐帧推进
+    AURORA_TEST_CHECK_TRUE(list.is_gliding());
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 480.0F, 1e-4F);
+    settle(list);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 960.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(list.is_gliding());
+
+    // scroll_to 同口径：越界夹到 max = 4800 - 400。
+    AURORA_TEST_CHECK_TRUE(list.scroll_to(99999.0F, false));
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 4400.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(list.scroll_to(4400.0F, false));
+}
+
+AURORA_TEST_CASE(offset_signal_follows_wheel_glide_and_programmatic) {
+    LazyList list{100, {}, 48.0F};
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+
+    SignalView<float>& offset = list.offset_signal();  // 懒创建：初值取当前偏移
+    AURORA_TEST_CHECK_NEAR(offset.get(), 0.0F, 1e-4F);
+
+    list.set_scroll_offset(100.0F);
+    AURORA_TEST_CHECK_NEAR(offset.get(), 100.0F, 1e-4F);
+    wheel(list, 1.0F);  // 向上 40dp
+    AURORA_TEST_CHECK_NEAR(offset.get(), 60.0F, 1e-4F);
+
+    list.scroll_to(400.0F);  // 滑动期逐帧发布
+    pump(list, 1);
+    AURORA_TEST_CHECK_TRUE(offset.get() > 60.0F && offset.get() < 400.0F);
+    settle(list);
+    AURORA_TEST_CHECK_NEAR(offset.get(), 400.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(wheel_margin_bubbles_up_when_clamped_at_edges) {
+    // 嵌套滚动协调：端点被夹掉的量以 remaining_y 回传（单位同 delta_y，保留符号）。
+    LazyList list{100, {}, 48.0F};
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+
+    const ScrollEvent at_top = wheel(list, 5.0F);
+    AURORA_TEST_CHECK_TRUE(at_top.is_handled);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(at_top.remaining_y, 5.0F, 1e-4F);
+
+    list.set_scroll_offset(4400.0F);  // 到底
+    const ScrollEvent at_bottom = wheel(list, -2.0F);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 4400.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(at_bottom.remaining_y, -2.0F, 1e-4F);
+
+    const ScrollEvent mid = wheel(list, 3.0F);  // 中途全量消费
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 4280.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(mid.remaining_y, 0.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_lazy_list

@@ -131,7 +131,7 @@
 | `TEST-R2` | 目标路径有效 | `目标单元`（含头部注释里的路径引用）所声明的路径必须真实存在，防注释路径烂掉 | 是 |
 | `TEST-R3` | 一一对应 1:1 | 一测试文件只声明一个目标单元、一单元头至多被一个 `tests/unit/` 测试声明；无法拆到独立单元者（同时覆盖多个互不相关单元、或属跨模块流程验证）归 `tests/integration/`——两目录由同一 target GLOB、注册名取文件 stem，迁移不改构建与运行行为 | 否（评审 + 审计） |
 | `TEST-R4` | 禁止指向聚合头 | 目标单元不得为 `aurora.h` / `aurora_fwd.h` / `aurora_pch.h`；也不得在头部注释以「域/文件名.h」或「src/aurora/域/文件名.cpp」路径形式再声明其他单元——注释路径引用同样计入；注释提及被测类型时写类型名（如 `TextSpan`）不写头路径 | 是 |
-| `TEST-R5` | 公共头覆盖 | 每个公共单元头须被某测试显式声明为目标单元，或在该测试中直接 `#include`、其符号在 `tests/` 全树被引用 | 是（测试体系重写期间降级为仅报告，收束时恢复硬门禁） |
+| `TEST-R5` | 公共头覆盖 | 每个公共单元头须被某测试显式声明为目标单元，或在该测试中直接 `#include`、其符号在 `tests/` 全树被引用 | 是 |
 | `TEST-R6` | 注册完整性 | `runner --list` 输出的**用例级**集合必须与测试源中注册的用例集合一致；含「`TEST_P` 漏 `INSTANTIATE` → 用例静默不运行」检测 | 是（CTest `registry_integrity`，由 `tools/check/check_test_registry.py` 承担） |
 | `TEST-R7` | 并行安全 | 测试体系禁止新增 `RUN_SERIAL`（CMake 编排与测试源一并扫描）；并行模型为 CTest 进程隔离 + 框架用例边界资源虚拟化，申请串行须登记脚本内 `TEST_R7_WHITELIST` 并注明根因 | 是 |
 | `TEST-R8` | 命名纪律 | 目录定类型 + 前缀强制——`tests/unit/` 一律 `utest_`、`tests/integration/` 一律 `itest_`，测试 TU 不得放在两目录之外；**Suite 强制等于文件 stem、不可自定义**（`__FILE__` 推导，自定义套件宏禁止） | 是 |

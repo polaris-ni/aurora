@@ -6,6 +6,7 @@
 #include "aurora/core/color.h"
 #include "aurora/core/enums.h"
 #include "aurora/core/types.h"
+#include "aurora/widget/scroll_viewport.h"
 #include "nlohmann/json.hpp"
 
 namespace aurora {
@@ -311,6 +312,33 @@ using Json = nlohmann::json;
 /// @brief MainAxisSize -> JSON 字符串。
 [[nodiscard]] inline auto main_axis_size_to_json(MainAxisSize v) -> Json {
     return v == MainAxisSize::Max ? Json("Max") : Json("Min");
+}
+
+/// @brief ScrollSnapAlignment -> JSON 字符串（snap/paging 吸附方位，三控件共享）。
+[[nodiscard]] inline auto snap_alignment_to_json(ScrollSnapAlignment v) -> Json {
+    switch (v) {
+        case ScrollSnapAlignment::Start:
+            return "Start";
+        case ScrollSnapAlignment::Center:
+            return "Center";
+        case ScrollSnapAlignment::End:
+            return "End";
+    }
+    return "Start";
+}
+
+/// @brief JSON -> ScrollSnapAlignment（未知值回退 Start）。
+[[nodiscard]] inline auto json_to_snap_alignment(const Json &j) -> ScrollSnapAlignment {
+    if (j.is_string()) {
+        const std::string s = j.get<std::string>();
+        if (s == "Center") {
+            return ScrollSnapAlignment::Center;
+        }
+        if (s == "End") {
+            return ScrollSnapAlignment::End;
+        }
+    }
+    return ScrollSnapAlignment::Start;
 }
 
 /// @brief JSON -> MainAxisSize（未知值回退 Min）。

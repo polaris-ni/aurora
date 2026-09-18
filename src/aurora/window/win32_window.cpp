@@ -1,6 +1,7 @@
 #include "aurora/window/win32_window.h"
 
 #include "aurora/window/detail/win32_ua.h"
+#include "aurora/window/detail/win32_ime.h"
 
 #ifdef AURORA_BACKEND_WIN32
 
@@ -188,6 +189,11 @@ struct Win32Window::Impl {
     /// @brief 最近一次注入的语义树根（非拥有；桥尚未构造时先由宿主记下）。
     Widget *a11y_root = nullptr;
 
+    /// @brief IMM32 组合输入桥（与窗口同生命周期；无输入法激活时零消息、零成本）。
+    std::unique_ptr<detail::Win32ImeBridge> ime;
+    /// @brief 焦点控件的候选窗定位盒查询（由 `WindowHost` 注入；空 = 无定位，走系统默认）。
+    std::function<Rect()> composition_caret_provider;
+
     inline static bool class_registered = false;
     inline static HBRUSH bg_brush = nullptr;  ///< 浅色背景擦除刷（消除最大化黑屏），注册时创建一次。
     static constexpr auto AURORA_CLASS_NAME = "AuroraWin32Surface";
@@ -228,6 +234,9 @@ struct Win32Window::Impl {
     /// @brief `WM_GETOBJECT`：仅应答 UIA 根请求（`UiaRootObjectId`），其余交 `DefWindowProc`
     ///        （MSAA / 系统代理兜底，非目标）。返回 nullopt = 未处理。
     [[nodiscard]] auto handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<LRESULT>;
+    /// @brief `WM_IME_*` 分族：交 IMM32 桥翻译组合；桥不认领（含 `WM_KILLFOCUS` 的取消侧路径）
+    ///        时回落 `DefWindowProc`。
+    [[nodiscard]] auto handle_ime(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT;
     auto handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT;
 
     auto register_class() const -> void;
@@ -294,6 +303,18 @@ Win32Window::Impl::Impl(int w, int h, const std::string &title, const WindowStyl
         ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
         DragAcceptFiles(hwnd, TRUE);  // 启用操作系统文件拖放（WM_DROPFILES）
+        // IMM32 组合桥：桥自身只吃 WM_IME_*，无输入法时一条也不来，故随窗口直接构造。
+        ime = std::make_unique<detail::Win32ImeBridge>(
+            hwnd, detail::Win32ImeBridge::Hooks{
+                      .emit = [this](Event &e) -> void {
+                          if (handler) {
+                              handler(e);
+                          }
+                      },
+                      .caret_bounds = [this]() -> Rect {
+                          return composition_caret_provider ? composition_caret_provider() : Rect{};
+                      },
+                      .scale_factor = [this]() -> float { return scale; }});
     }
     size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // 逻辑 dp（布局用）
 }
@@ -308,6 +329,8 @@ Win32Window::Impl::~Impl() {
     window_state_handler = nullptr;
     window_mode_handler = nullptr;
     present_request = nullptr;
+    composition_caret_provider = nullptr;
+    ime.reset();  // 桥的 hooks 捕获本 Impl，须在 DestroyWindow 前先散
     if (hwnd != nullptr) {
         DestroyWindow(hwnd);
         hwnd = nullptr;
@@ -436,6 +459,11 @@ auto Win32Window::Impl::handle_key(UINT msg, WPARAM wp) const -> LRESULT {
 }
 
 auto Win32Window::Impl::handle_char(WPARAM wp) const -> LRESULT {
+    // 组合期残余 WM_CHAR 整条丢弃：IME 上屏结果统一走 `GCS_RESULTSTR`（见 win32_ime 桥），
+    // 两条通道并存即「同一汉字上屏两次」。
+    if (ime != nullptr && ime->is_composing()) {
+        return 0;
+    }
     on_char(static_cast<std::uint32_t>(wp));
     return 0;
 }
@@ -586,6 +614,16 @@ auto Win32Window::Impl::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional
     return a11y->handle_get_object(wp, lp);
 }
 
+// ---- 输入法分族（WM_IME_* → IMM32 组合桥）----
+auto Win32Window::Impl::handle_ime(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
+    if (ime != nullptr) {
+        if (const std::optional<LRESULT> answered = ime->handle(msg, lp); answered.has_value()) {
+            return *answered;
+        }
+    }
+    return DefWindowProcA(hwnd, msg, wp, lp);
+}
+
 auto Win32Window::accessibility_provider() const -> a11y::Provider * { return pimpl_->a11y.get(); }
 
 auto Win32Window::set_accessibility_hook(std::function<std::optional<std::intptr_t>(std::uintptr_t, std::intptr_t)> h)
@@ -599,6 +637,12 @@ auto Win32Window::set_accessibility_root(Widget *root) const -> void {
         pimpl_->a11y->set_root(root);
     }
 }
+
+auto Win32Window::set_composition_caret_provider(std::function<Rect()> provider) const -> void {
+    pimpl_->composition_caret_provider = std::move(provider);
+}
+
+auto Win32Window::ime_composing() const -> bool { return pimpl_->ime != nullptr && pimpl_->ime->is_composing(); }
 
 // ---- 文件拖放分族（WM_DROPFILES）----
 auto Win32Window::Impl::handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT {
@@ -695,6 +739,12 @@ auto WINAPI Win32Window::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
             return self->handle_key(msg, wp);
         case WM_CHAR:
             return self->handle_char(wp);
+        case WM_IME_STARTCOMPOSITION:
+        case WM_IME_COMPOSITION:
+        case WM_IME_ENDCOMPOSITION:
+        case WM_IME_CHAR:
+        case WM_KILLFOCUS:
+            return self->handle_ime(msg, wp, lp);
         case WM_SIZE:
             return self->handle_size(hwnd, wp, lp);
         case WM_PAINT:

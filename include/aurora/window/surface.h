@@ -351,6 +351,16 @@ class Surface {
         }
     }
 
+    /// @brief 注入 IME 候选窗定位查询（默认 no-op）。
+    ///
+    /// 平台输入法桥（Win32 IMM32/TSF、macOS NSTextInputClient、Wayland 文本输入）在组合期
+    /// 要把候选列表摆到插入点旁，而「当前焦点是哪个控件」只有上层 `FocusManager` 知道，
+    /// 故由宿主提供查询：返回 `Widget::composition_caret_bounds()`（**窗口逻辑 dp**，
+    /// 零宽竖盒）。后端自行 `× scale_factor` + `ClientToScreen` 折算物理屏幕像素。
+    /// 返回零盒 = 无有效定位，后端退化为系统默认位置（候选窗贴在鼠标/窗口角落，仍可用）。
+    /// @note Thread: main-thread only
+    virtual auto set_composition_caret_provider(std::function<Rect()> /*provider*/) -> void {}
+
     /// @brief GPU 帧调度挂点：后端提供 GPU 栅格（`rhi::RhiFrameSink`）时返回其指针，默认 nullptr。
     /// `Window::present_root` 据此选择「帧级 DisplayList 录制 → GPU 回放」或软件栅格路径；
     /// 两路径不做逐命令混合（同帧软硬混渲引入合成次序歧义）。返回非空后若首帧

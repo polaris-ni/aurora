@@ -35,6 +35,7 @@
 #include "aurora/widget/popup.h"
 #include "aurora/widget/progress.h"
 #include "aurora/widget/provider.h"
+#include "aurora/widget/pull_to_refresh.h"
 #include "aurora/widget/radio_spin.h"
 #include "aurora/widget/rich_text.h"
 #include "aurora/widget/rich_text_edit.h"
@@ -49,6 +50,7 @@
 #include "aurora/widget/splitter.h"
 #include "aurora/widget/stack.h"
 #include "aurora/widget/stepper.h"
+#include "aurora/widget/sticky_header.h"
 #include "aurora/widget/switch.h"
 #include "aurora/widget/tab_bar.h"
 #include "aurora/widget/text_input.h"
@@ -259,6 +261,10 @@ auto register_core_widgets() -> void {
     // Dismissible 持运行时手势 State 与消除回调，注册供 API 描述收录
     // （from_json 重建出默认行程的空占位，手势进度与回调不随序列化还原）。
     reg_no_props<Dismissible>("Dismissible", Node{}, DragAxis::Horizontal, SpringDescription{});
+    // PullToRefresh：threshold/max_pull 走属性反序列化；on_refresh 回调属运行时接线，重建后须重挂。
+    reg_default<PullToRefresh>("PullToRefresh");
+    // StickyHeader：无自有属性，单子包装器（子节点经通用 children 路径还原）。
+    reg_default<StickyHeader>("StickyHeader");
 
     // ---- 已知类型但不可从静态 JSON 重建：给出友好错误（避免被当作未知类型静默失败）----
     // Canvas / Repeater 持运行时回调/State，无法从静态 JSON 重建：注册为已知类型。
@@ -409,7 +415,8 @@ auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void {
 
 namespace {
 auto is_container_type(const std::string &t) -> bool {
-    return t == "Column" || t == "Row" || t == "Stack" || t == "Grid" || t == "Scroll";
+    return t == "Column" || t == "Row" || t == "Stack" || t == "Grid" || t == "Scroll" || t == "PullToRefresh"
+           || t == "StickyHeader";
 }
 }  // namespace
 

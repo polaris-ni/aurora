@@ -303,6 +303,10 @@ class RichTextEdit : public LeafWidget {
     /// @brief 组合光标在 preedit 内的码点下标（候选插入点）。
     [[nodiscard]] auto composition_cursor() const -> std::size_t { return preedit_cursor_; }
 
+    /// @brief IME 候选窗定位盒：文档光标处叠加 preedit 前缀宽度（组合中即候选插入点）。
+    ///        未经绘制遍历（无有效光标行）时回退基类的控件盒。
+    [[nodiscard]] auto composition_caret_bounds() const -> Rect override;
+
     /// @brief 焦点变更：失焦即取消未上屏的组合（平台 IME 惯例）。
     auto on_focus_change(bool focused) -> void override {
         Widget::on_focus_change(focused);
@@ -392,6 +396,11 @@ class RichTextEdit : public LeafWidget {
     auto paint_selection_highlight(Painter &p, const Rect &bounds) const -> void;
 
     auto paint_cursor(Painter &p, const Rect &bounds) const -> void;
+
+    /// @brief 文档光标定位盒（绝对窗口逻辑 dp，`width` 为光标笔宽）；caret 不在任何已排版行内
+    ///        （未绘制 / 空文档未换行）或视觉 x 无效时返回 `nullopt`。
+    ///        `paint_cursor` 与 IME 候选窗定位（`composition_caret_bounds`）共用同一算式。
+    [[nodiscard]] auto caret_box_at(const Rect &bounds) const -> std::optional<Rect>;
 
     /// @brief 组合态绘制：preedit 内选区高亮 + preedit 文本 + 下划线 + 候选插入点光标。
     ///        在 `(x, y)` 处绘制，返回占用宽度（供调用方推进游标，实现「预编辑串挤开后续文本」）。

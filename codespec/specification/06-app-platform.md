@@ -447,6 +447,28 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 **命令面板键位**：`CommandPalette` 打开时把自己的作用域压入 `FocusManager`（子树内**唯一**可聚焦控件是搜索框，故左右方向键仍落到搜索框做光标移动、上下方向键不引发焦点跳转）；Enter 经搜索框的提交回调执行选中项；Esc / ↑ / ↓ 经打开期临时注册的快捷键绑定接管（依赖注册表已 `bind_shortcuts`，未接线时这几键不可用，面板以 WARN 提示）。Space 只经文本输入落字，不触发执行。命令清单可经 `to_json()` 序列化并由 MCP 工具面枚举，见 [`08-tooling.md`](08-tooling.md) §7.1。
 
+### 8.5 输入法桥（Win32 IMM32 首桥）
+
+事件侧契约（`TextCompositionEvent` 字段口径、preedit 不进 `value()`、候选窗定位盒）见 [`05-event-navigation.md`](05-event-navigation.md) §2.4；本节只记平台壳的接线。
+
+**桥的位置与生命周期**：`src/aurora/window/detail/win32_ime.h`（`detail::Win32ImeBridge`），由 `Win32Window::Impl` **随窗口构造**、与窗口一一对应（不像 §6.3 的无障碍桥那样惰性激活——IMM32 无查询代价，无输入法时 `WM_IME_*` 一条也不会投递）。`Win32Surface`（GDI）与 `D3D11Surface` 共用同一 `Win32Window` 宿主与同一份桥，故接一次覆盖两路后端。
+
+**两条通道**：桥经 `Hooks{emit, caret_bounds, scale_factor}` 三个回调与宿主对话——`emit` 复用窗口既有的事件单槽（`Impl::handler`，与鼠标/键盘同径，最终落到 `WindowHost::dispatch` → `EventDispatcher`），`caret_bounds` 由 `Surface::set_composition_caret_provider()` 注入（宿主侧查询当前焦点控件的 `composition_caret_bounds()`），`scale_factor` 供 dp→像素换算。`WndProc` 侧把 IME 单独分族：`handle_ime(msg, wp, lp)`（`win32_window.cpp:618`）认领 `WM_IME_STARTCOMPOSITION` / `WM_IME_COMPOSITION` / `WM_IME_ENDCOMPOSITION` / `WM_IME_CHAR` 与 `WM_KILLFOCUS`（失焦取消侧路径），桥返回 `std::nullopt` 表示不处理、回落 `DefWindowProc`。
+
+**三条实机才暴露的纪律**（无头 CI 无法验证，由 `tools/verify/win32_ime_live_probe.cpp` 自动段守住）：
+
+1. `WM_IME_CHAR` **必须吞掉**（返回 0 不放行）。否则 `DefWindowProc` 会把它转成逐字 `WM_CHAR`，与 `GCS_RESULTSTR` 通道叠加 ⇒ 同一汉字上屏两次；DBCS ACP 下还会把宽字符拆成前导/尾随字节产出乱码。
+2. 组合期间的 `WM_CHAR` **整条丢弃**（`handle_char` 查 `ime->is_composing()`）。输入法回发的逐字符 `WM_CHAR` 与 preedit 是同一份内容，上屏只认 `GCS_RESULTSTR`。
+3. `WM_IME_COMPOSITION` 的 `lParam` 是**标志位集合**（`GCS_COMPSTR` / `GCS_CURSORPOS` / `GCS_COMPATTR` / `GCS_RESULTSTR`），只在命中相应位时刷新对应缓存；组合串每次都要重读（`ImmGetCompositionStringW` 无「未变」通知），光标位缺失时按「串尾」解释（`< 0` 一律夹紧）。
+
+**IMM32 而非 TSF**：TSF 要求实现 `ITextStoreACPServices` 全套文本存储代理（约 1.5k 行 COM，且与 aurora「控件自持状态、无 Windows 文本对象」的模型正交），而 Win10/11 的 CTF 加载器对**非 TSF-store 窗口**会提供 IMM32 兼容读通道——`GCS_COMPSTR` / `GCS_RESULTSTR` / `GCS_CURSORPOS` / `GCS_COMPATTR` 全部可读，候选窗定位 `ImmSetCandidateWindow` 亦生效。故选 IMM32 首桥，覆盖中文/日文/韩文输入法的主流程；代价是**外部写组合串被拒**（见下）。将来若接 TSF，桥的对外形状（`Hooks` + `handle()`）无需变化。
+
+**⚠️ 自动化局限**：`ImmSetCompositionStringW(SCS_SETSTR)` 在 TSF 型输入法（微软拼音、五笔等）下**被拒**（返回 FALSE、`GetLastError()` 为 0）——TSF 不允许外部往 IME32 兼容上下文写组合串。因此探针**不能**靠注入组合串来验收 preedit 渲染与上屏：该段按 SKIP 处理，改由 `--interactive` 人工段用真实输入法逐项目视（preedit 下划线更新、候选窗落在插入点旁、选字只上一次屏、Esc 取消无残留、切走焦点无半截拼音）。折算层本身（UTF-16 单元 → 码点、`GCS_COMPATTR` → 待转换选区、代理对夹紧）由无头单测 `tests/unit/utest_ime_composition.cpp` 全覆盖。
+
+**依赖**：`imm32` 随 `aurora` PUBLIC 链接（`cmake/AuroraBackends.cmake` 的 Win32 分支：`user32 gdi32 shell32 ole32 uuid imm32`），属系统库，无三方依赖、无编译期裁剪开关。
+
+**⚠️ 只有 `Application` 下才有效**：`set_event_handler` / `set_composition_caret_provider` 由 `WindowHost::attach_surface()` 接线，而焦点（组合事件的路由前提）也归 `WindowHost::focus_` 管。以 `create_native_window` 得到**裸 `Window`** 并直接 `present_root` 时，窗口没有任何事件处理器——鼠标、键盘、Tab 焦点与 IME 一律不通。真机探针与自建消息泵都必须经 `Application`（本文 §2.1）驱动。
+
 ---
 
 ## 9 偏好与存储

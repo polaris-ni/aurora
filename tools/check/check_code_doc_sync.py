@@ -6,7 +6,7 @@
 #
 # 规则（测试头部，编号 TEST-R1–TEST-R10，定义见 codespec/CODING_STANDARDS.md §3.2）：
 #   DOC1    代码注释中的 `架构 §N` 引用 → codespec/ARCHITECTURE.md 必须存在该章节；
-#   DOC2    代码注释中的 `规格 §N` 引用 → 需求 #N 必须存在于 SPECIFICATIONS.md 特性表（#1–#28）；
+#   DOC2    代码注释中的 `规格 §N` 引用 → 需求 #N 必须存在于 SPECIFICATIONS.md 特性表（#1–#29）；
 #   TEST-R1 测试头部必须含标准三行块：/// 测试类型 / /// 目标单元 / /// 测试说明
 #           （历史 // 目标源单元： 约定不计入标准块，视为 TEST-R1 违规，须归一）；
 #   TEST-R2 测试头部「目标单元 / 目标源单元」声明路径必须真实存在（防注释路径烂掉）；
@@ -57,10 +57,6 @@ TEST_R7_WHITELIST = {}
 
 # TEST-R10 趋势基线：跨 ≥3 模块域的测试文件（catch-all 反模式）允许存量上限。
 CATCH_ALL_BASELINE = 20
-
-# TEST-R5 全局硬门禁（收束阶段已恢复）：每个公共单元头必须被某测试覆盖
-# （声明为目标单元 / 直接 #include / 符号被 tests/ 引用，header-only 工具类型豁免）。
-TEST_R5_ENFORCED = True
 
 ARCH_REF_RE = re.compile(r"架构\s*§\s*([\d.]+)")
 SPEC_REF_RE = re.compile(r"规格\s*§\s*([\d.]+)")
@@ -496,19 +492,11 @@ def main() -> int:
     report_catch_all_trend(repo)
 
     remaining = []
-    r5_reported = []
     for rule, rel, lineno, detail in problems:
         rel = rel.replace("\\", "/")
         if (rule, rel, detail) in WHITELIST:
             continue
-        if rule == "R5" and not TEST_R5_ENFORCED:
-            r5_reported.append((rule, rel, lineno, detail))
-            continue
         remaining.append((rule, rel, lineno, detail))
-
-    if r5_reported:
-        print(f"[WARN] TEST-R5 降级中（测试体系重写期间）：{len(r5_reported)} 个公共头暂无测试覆盖，"
-              f"仅报告、不判失败。")
 
     if not remaining:
         print("[OK] code-doc sync clean: 0 problems.")

@@ -103,6 +103,9 @@ auto info = au::Button::describe_static();
 | `on_mount(const BuildContext&) -> void` | 挂载后恰好一次 | `widget.h:482` |
 | `tick(time_point) -> void` | NVI 入口 | `widget.h:350` |
 | `tick_gestures(time_point) -> void` | 手势推进 | `widget.h:486` |
+| `on_scroll(ScrollEvent&) -> void` | 滚轮入口：默认按 `overflow_` 的内建滑窗夹取滚动并写 `remaining_y` 余量；真实滚动控件覆写（路由见 `05-event-navigation.md` §3.3） | `widget.h:445` |
+| `wants_scroll() -> bool` | 是否参与滚轮命中链路由。默认 = 声明了 `OverflowStrategy::Scroll`；`Scroll` / `LazyList` / `LazyRow` / `GridView` / `PullToRefresh` 覆写为 `true`，保证嵌套时**最深滚动者优先** | `widget.h:464` |
+| `is_sticky_header() -> bool` | 是否为吸顶头部（`StickyHeader` 覆写为 `true`），供滚动宿主在 blit 后以覆盖层按 pin 位重绘 | `widget.h:469` |
 
 **可见性约定**：布局 / 绘制 / 命中测试类内部虚回调 `on_layout` / `on_paint` / `on_hit_test` / `on_mount` / `tick_gestures` 位于 `protected` 区（`widget.h:457` 起）；指针事件入口 `on_pointer_event` 的两个重载（`MouseEvent`，`widget.h:288`；`TouchEvent`，`widget.h:345`）与 `on_hover_change` / `wants_click` 位于 **public 区**且为虚函数——派发器与外部工具直接调用，子类按需要覆写；`tick` 走 NVI（模板方法），不由子类直接覆盖。
 
@@ -237,8 +240,10 @@ au::Text("Welcome").font_size(24).bold();
 | `Row` / `Column` | `children`、`gap`、`flex`（含 `main_axis` / `cross_axis` / `main_axis_size`）。`cross_axis` 的 `Baseline` 取值仅对水平主轴（`Row`）有语义（`03-layout-render.md` §3.8）。`modifier` 属 `Widget` 基类，不在此列 |
 | `Stack` | 层叠，`children` 叠加 |
 | `Grid` | `columns`、`children` |
-| `Grid` 虚拟化版 `GridView` | `count`、`columns`、`cell_extent`、`cache_extent`、`scroll_offset`、`restore_key` |
-| `Scroll` | 可滚动容器，`child` 单子节点，`step` 滚动步长、`restore_key`；运行时偏移经序列化键 `offset` 可读回；程序化跳转 `set_offset(offset) -> bool` |
+| `Grid` 虚拟化版 `GridView` | `count`、`columns`、`cell_extent`、`cache_extent`、`scroll_offset`、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`（吸附三属性，见下「滚动增强契约」）；辅助 API `set_scroll_offset` / `scroll_to` / `set_snap` / `offset_signal` / `is_gliding` / `visible_row_range` / `live_item_count` |
+| `Scroll` | 可滚动容器，`child` 单子节点，`step` 滚动步长、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`；运行时偏移经序列化键 `offset` 可读回；程序化跳转 `set_offset(offset) -> bool`（纯夹取）、`scroll_to(offset, animate = true) -> bool`；滚动驱动动画原语 `offset_signal()`；观测点 `is_gliding()`（`widget/scroll.h`） |
+| `PullToRefresh` | 下拉刷新容器（`widget/pull_to_refresh.h`）：`threshold`（触发距离 64dp）、`max_pull`（橡皮筋上限 128dp）；回调 `on_refresh`；API `finish_refresh()` / `state()` / `pull_distance()` / `progress()` |
+| `StickyHeader` | 吸顶头部包装（`widget/sticky_header.h`），单子节点、无自有属性；正常参与布局，滚动经过视口顶部时由宿主以覆盖层钉驻 |
 | `Spacer` / `Divider` | 弹性空间 / 分隔线 |
 | `Splitter` | 可拖拽分隔 |
 | `LayoutBuilder` | 按布局约束动态构建子树 |
@@ -251,11 +256,20 @@ au::Text("Welcome").font_size(24).bold();
 
 **滚动位置保存/恢复**：四个滚动控件（`Scroll` / `LazyList` / `LazyRow` / `GridView`）都有 `restore_key`（空 = 不参与）。控件在**首次可滚动布局**时按 `app::ScrollStorage` 恢复偏移（由 `deserialize_props` 显式给入的偏移优先），此后位置变化（滚轮 / 拖拽 / `set_scroll_offset`）即写回（仅内存，落盘由 App 决定）；恢复只生效一次，用户主动滚动不会再被回拉。契约与多窗口作用域隔离见 `06-app-platform.md` §9.3。
 
+**滚动增强契约**（吸附 / 下拉刷新 / 吸顶 / 余量上冒 / 偏移信号）：
+
+- **吸附的单一实现**：`snap_extent`（吸附周期 dp，`<= 0` = 关闭）、`snap_paging`（以视口高为周期，此时 `snap_extent` 被忽略）、`snap_alignment`（`Start` / `Center` / `End`，条目对齐点相对视口顶部的取法）三属性由 `ScrollSnap` 承载，对齐点计算集中于 `ScrollViewport::snap_target`（`widget/scroll_viewport.h`），`Scroll` / `LazyList` / `GridView` 三个宿主共用（`LazyRow` 暂无吸附）；三键 `snap_extent` / `snap_paging` / `snap_alignment` 在三个宿主下一致往返，运行时偏移键仍各自沿用既有的 `offset`（`Scroll` / `LazyRow`）与 `scroll_offset`（`LazyList` / `GridView`）。收位周期内不做整除假设：末段不足一格时结果夹到 `max_scroll_offset`，故分页末尾停在最后一个**整页**对齐点。
+- **收位是短滑动，不是跳变**：滚轮 / 拖拽落点后由 `begin_snap_glide()` 启动 `ScrollGlide`（150ms easeOutCubic）逐帧推进，自驱动 `tick_gestures`（不占 `Animator`，同 `ReorderableList`）。`set_offset` / `set_scroll_offset` 这类**外部程序化跳转作废进行中的滑动**；滑动帧自身走私有 `apply_offset(offset, cancel_glide)` 且传 `cancel_glide = false`——否则收位只推进一帧即冻结在中途。`scroll_to(offset, animate)` 是公开的程序化滚动入口：`animate = false` 即时落位，`true` 时经同一条滑动时序（`reduce_motion` 下仍直落）。观测点 `is_gliding()`。
+- **`reduce_motion` 短路**：`current_accessibility_settings().reduce_motion` 为真时，snap 收位与 `scroll_to(…, true)` 一律直落端点、不产生中间帧（状态与「走完」一致），对齐 `AnimationController::tick` / `Dismissible` / `ReorderableList` 的既有短路语义。
+- **`PullToRefresh` 的双输入通道**：仅当滚动子树**已在顶部**才积累下拉距离——顶部判定取最近可滚动后代的 `accessibility_scroll()` 区间（`position <= min + 0.5`；无可滚动后代视为在顶部，静态内容可整体下拉）。① `DragRecognizer` 判定主轴为垂直（`|dy| ≥ |dx|`）且正在向下拖时劫持手势，位移经**双曲橡皮筋**映射 `raw·max_pull/(raw+max_pull)`：起段近 1:1 跟手、渐近 `max_pull` 且恒不越界（拖满 `max_pull` 恰达半上限，与缺省 `threshold = max_pull/2` 对齐保证可触发）；② 嵌套滚动协调下，子级到顶后未消费的滚轮余量经 `ScrollEvent::remaining_y` 上冒给本容器（本容器在命中链上位于子滚动控件的更浅层，路由见 `05-event-navigation.md` §3.3），余量按 16dp / 增量单位折算后同样走橡皮筋（与 `ScrollProps::step` 缺省同值）；门控不通过（刷新中 / 子树不在顶部 / 增量方向相反）时**原样回传 `remaining_y`** 交还更浅层，而非静默吞掉。三态 `Idle` / `Pulling` / `Refreshing`：松手时 `pull >= threshold` 且已注册 `on_refresh` 才触发一次回调并回弹到驻留高度（约 `threshold/2`，spinner 持续旋转），否则直接回弹归零；数据加载完成后由宿主调 `finish_refresh()` 收拢——不回调解散回调则 spinner 常驻。指示器是**覆盖层**（顶部半透明带 + 弧线 spinner）——不动布局盒、不推挤内容（`05-event-navigation.md` §6.5「动画不改布局」），回弹走同一 `ScrollGlide`，`progress()`（`pull/threshold`，可 >1）供宿主联动。
+- **`StickyHeader` 是纯绘制层语义**：控件正常参与布局（占据自身高度、随内容滚动被录入内容缓冲），宿主在内容 blit 合成之后把「已滚过头顶」的头部按 pin 位重绘于视口顶部——内容缓冲不因此逐帧重录（否则滑窗模型破产）。宿主识别钩子是 `Widget::is_sticky_header()`（默认 `false`）。**顶出规则**同 CSS `position: sticky` / `RecyclerView`：下一条头部的视口顶部逼近时把本条向上顶出，最后一条钉到底。`Scroll` 经 `child_nodes()` 递归累加 y 收集多个头部（多段堆叠），`LazyList` 的 `child_nodes()` 为空、粘性项作为普通行实例化，故各条目自管其 sticky。
+- **偏移信号驱动滚动动画**：`offset_signal()` 懒创建 `State<float>` 并返回 `SignalView<float>` 引用，任何滚动通道（滚轮、拖拽、收位滑动帧、程序化跳转）落位即发布；镜像值比较而非 `State::get()` 回读（后者在 `Effect` 作用域会自订阅本控件而闭环）。宿主由此把偏移映射为视差、透明度、进度条——无需轮询，也无需子类化。
+
 ### 3.4 列表与虚拟化
 
 | 控件 | 关键属性 |
 |:---|:---|
-| `LazyList` | `count`、`item_extent`（固定行高，默认 48dp）、`scroll_offset`、`cache_extent`（可见区外预取缓冲）、`restore_key`；辅助 API `set_scroll_offset` / `scroll_to_item` / `visible_range` / `live_item_count` / `set_cache_extent` / `set_restore_key`；滚轮滚动经 `on_scroll` 覆写处理（`widget/lazy_list.h`） |
+| `LazyList` | `count`、`item_extent`（固定行高，默认 48dp）、`scroll_offset`、`cache_extent`（可见区外预取缓冲）、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`（`0` 表示无吸附）；辅助 API `set_scroll_offset` / `scroll_to_item` / `scroll_to` / `set_snap` / `offset_signal` / `is_gliding` / `visible_range` / `live_item_count` / `set_cache_extent` / `set_restore_key`；滚轮滚动经 `on_scroll` 覆写处理（`widget/lazy_list.h`） |
 | `LazyRow` | 主轴为水平；`item_count`、`item_extent`（子项固定宽度，默认 96）、`cache_extent`、`padding`、`restore_key`；辅助 API `scroll_offset` / `max_scroll_offset` / `set_scroll_offset`（仅标绘制脏——可见窗口在 `on_paint` 现算，与 `LazyList` 需标布局脏不同）；`set_padding` 与 `set_on_item_click`（`on_item_click` 事件，参数为索引）属本控件（`widget/lazy_row.h`） |
 | `Repeater` | `items`（信号驱动），按模板渲染每个元素 |
 | `ListView` | `items`（行数据）、`multi_select`（多选模式）；回调 `on_select` / `on_remove`（`widget/data_widgets.h`） |

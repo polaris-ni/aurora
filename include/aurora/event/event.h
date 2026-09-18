@@ -90,6 +90,13 @@ struct ScrollEvent : Event {
     Point position;  ///< 事件发生的逻辑坐标（鼠标所在处）
     float delta_x = 0;  ///< 水平滚动增量（右为正）
     float delta_y = 0;  ///< 垂直滚动增量（上为正）
+    /// @brief 消费后未用尽的垂直余量（与 delta_y 同单位、同号；嵌套滚动协调的回传通道）。
+    ///
+    /// 消费方在 `on_scroll` 内写入本字段声明「我只吃了这么多」，派发器据此沿命中链
+    /// 向更浅可滚动祖先继续派发（见 `EventDispatcher::dispatch(Widget&, ScrollEvent&)`）。
+    /// **默认 0 = 全量消费**：不写本字段的既有自定义 handler 行为与「最深可滚动者
+    /// 一次性消费、不冒泡」的旧约定逐位一致。
+    float remaining_y = 0;
 };
 
 /// @brief 文本输入事件（specification/05-event-navigation.md §2.2）：由键盘/输入法产生的 Unicode 文本片段。

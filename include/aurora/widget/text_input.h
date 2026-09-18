@@ -784,6 +784,37 @@ class TextInput : public LeafWidget {
         notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
     }
 
+    /// @brief IME 候选窗定位盒：preedit 光标处的零宽竖盒（绝对窗口逻辑 dp）。
+    ///
+    /// 与 `on_paint` 用同一套算式（字体解析、RTL 右对齐锚、垂直居中、`composed_index` 映射），
+    /// 使候选窗落在带下划线的组合串末端而非控件角落。未经绘制遍历（`focus_bounds` 为零盒）时
+    /// 原样返回零盒，平台侧退化为系统默认位置。
+    [[nodiscard]] auto composition_caret_bounds() const -> Rect override {
+        const Rect box = focus_bounds();
+        if (box.size.width <= 0.0F || box.size.height <= 0.0F) {
+            return box;
+        }
+        const float fs = font_size_ > 0.0F ? font_size_ : 14.0F;
+        const Font f{.size_pt = fs};
+        const bool empty = value_.get().empty() && !is_composing();
+        const std::string shown = composed_text(empty ? placeholder_ : display_value());
+        const float th = render::FontEngine::measure_height(f);
+        const render::TextLayoutOpts opts = layout_opts();
+        float tx = box.origin.x + padding_.left;
+        if (cached_direction_ == TextDirection::RTL) {
+            const float text_w = render::FontEngine::measure_width(shown, f, opts);
+            const float right_tx = box.origin.x + (box.size.width - padding_.right - text_w);
+            if (right_tx > tx) {
+                tx = right_tx;
+            }
+        }
+        const float ty =
+            box.origin.y + padding_.top + ((box.size.height - padding_.top - padding_.bottom - th) * 0.5F);
+        const size_t ci = composed_index(caret_) + preedit_cursor_;
+        const float cx = tx + render::FontEngine::caret_x(shown, ci, f, opts);
+        return Rect{.origin = Point{.x = cx, .y = ty}, .size = Size{.width = 0.0F, .height = th}};
+    }
+
     /// @brief 当前预编辑串（组合中的未上屏文本）；无组合时为空串。
     [[nodiscard]] auto preedit() const -> std::string { return preedit_; }
 

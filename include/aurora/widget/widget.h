@@ -440,16 +440,20 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 经共享 `ScrollViewport` 内核（与 Scroll 组件同一 clamp/符号约定）按滚轮增量
     /// 平移内容绘制（见 `paint_content` 的平移与裁剪），不建离屏缓冲（重内容请用 Scroll）。
     /// 派发路由见 `EventDispatcher::dispatch(ScrollEvent &)`：滚轮沿命中链自最深向根
-    /// 找第一个 `wants_scroll()` 者，可点击子控件不拦截滚轮。
+    /// 找 `wants_scroll()` 者，可点击子控件不拦截滚轮；clamp 吃不尽的余量经
+    /// `ScrollEvent::remaining_y` 上冒给更浅可滚动祖先（嵌套滚动协调）。
     virtual auto on_scroll(ScrollEvent &e) -> void {
         e.is_handled = true;
         if (overflow_ == OverflowStrategy::Scroll) {
             scroll_viewport_.content_h = scroll_content_height();
             scroll_viewport_.viewport_h = size_.height;
+            const float before = scroll_viewport_.offset_y;
             if (scroll_viewport_.apply_scroll(e.delta_y)) {
                 // 仅内容平移：请求重绘但不失效布局/显示列表缓存（与 Scroll 滚动帧同策略）。
                 request_frame(false);
             }
+            e.remaining_y =
+                ScrollViewport::remaining_offset(before, scroll_viewport_.offset_y, e.delta_y, scroll_viewport_.step);
         }
     }
 
@@ -458,6 +462,11 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///       真实滚动控件（Scroll / LazyList / LazyRow / GridView）覆写为 true，
     ///       保证嵌套时**最深滚动者优先**（外层 Overflow::Scroll 不抢内层滚轮）。
     [[nodiscard]] virtual auto wants_scroll() const -> bool { return overflow_ == OverflowStrategy::Scroll; }
+
+    /// @brief 本控件是否为「吸顶头部」：`StickyHeader` 覆写为 true，供滚动宿主（`Scroll`）
+    ///        在 blit 合成后以**覆盖层**按 pin 位重绘——内容缓冲不因此逐帧重录
+    ///        （sticky 是纯绘制层语义，不改布局盒，spec §6.5）。默认 false。
+    [[nodiscard]] virtual auto is_sticky_header() const -> bool { return false; }
 
     /// @brief 激活键（Enter/Space）是否优先投递给 `on_key_event`。
     ///
@@ -474,6 +483,15 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///       未接组合语义的控件吞掉事件，避免平台侧因「无人处理」而重复上屏。
     ///       可编辑控件（`TextInput` / `RichTextEdit`）覆写之：先落 `committed`，再更新 preedit 显示态。
     virtual auto on_text_composition(TextCompositionEvent &e) -> void { e.is_handled = true; }
+
+    /// @brief IME 候选窗定位盒（最近一次绘制的**绝对窗口逻辑 dp** 盒）。
+    ///
+    /// 平台输入法桥（Win32 IMM32/TSF、macOS `characterRangeForBounds:` 等）需要把候选列表
+    /// 摆到插入点旁，而组合期 preedit 尚未进 `value_`，故单列此钩子而非复用无障碍盒。
+    /// 默认回退 `focus_bounds_`（整个控件盒）——未覆写的控件候选窗落在控件左上角，仍可用；
+    /// 文本录入类控件（`TextInput` / `RichTextEdit`）覆写为 **preedit 光标处** 的零宽竖盒。
+    /// 从未绘制过则返回零盒，平台侧按「无有效定位」处理（IMM32 用系统默认位置）。
+    [[nodiscard]] virtual auto composition_caret_bounds() const -> Rect { return focus_bounds_; }
 
     /// @brief 操作系统文件拖放落在本控件时触发；消费时置 `e.is_handled_` 阻止继续。
     /// 默认不处理（交给命中目标自身）。

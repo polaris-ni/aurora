@@ -36,16 +36,19 @@ struct Event {
 
 | 事件 | 字段 | 位置 |
 |:---|:---|:---|
-| `MouseEvent` | `position`（全局窗口逻辑坐标，由 Surface 后端写入）、`local_position`（相对当前控件的本地坐标，由 `EventDispatcher` 写入）、`action`、`button` | `event.h:67` |
-| `KeyEvent` | `key`、`action`（`KeyAction::Down` / `Up`）、`modifiers` | `event.h:79` |
-| `ScrollEvent` | `position`、`delta_x`（右为正）、`delta_y`（**上为正**） | `event.h:86` |
-| `TextInputEvent` | `text`（UTF-8 文本片段） | `event.h:93` |
-| `FileDropEvent` | `position` 与拖放文件信息 | `event.h:98` |
-| `TouchEvent` | `TouchPoint{id, position, prev_position, active}` 集合 | `event.h:112` |
+| `MouseEvent` | `position`（全局窗口逻辑坐标，由 Surface 后端写入）、`local_position`（相对当前控件的本地坐标，由 `EventDispatcher` 写入）、`action`、`button` | `event.h:70` |
+| `KeyEvent` | `key`、`action`（`KeyAction::Down` / `Up`）、`modifiers` | `event.h:82` |
+| `ScrollEvent` | `position`、`delta_x`（右为正）、`delta_y`（**上为正**）、`remaining_y`（消费后未用尽的垂直余量，与 `delta_y` 同单位同号，默认 0） | `event.h:89` |
+| `TextInputEvent` | `text`（UTF-8 文本片段） | `event.h:103` |
+| `TextCompositionEvent` | `preedit`（UTF-8 预编辑串，空 = 组合结束/取消）、`cursor_index`（组合光标，**preedit 内码点下标**）、`sel_start` / `sel_end`（待转换选区，含尾；无选区时 `sel_end == AURORA_NO_SELECTION`）、`committed`（本次上屏文本，UTF-8） | `event.h:122` |
+| `FileDropEvent` | `position` 与拖放文件信息 | `event.h:137` |
+| `TouchEvent` | `TouchPoint{id, position, prev_position, active}` 集合 | `event.h:151` |
 
-枚举：`MouseButton{Left, Right, Middle}`、`MouseAction`（`event.h:20`）、`KeyAction{Down, Up}`、`ModifierKey`（`event.h:30）、`KeyCode`（`keycode.h:12`）。
+枚举：`MouseButton{Left, Right, Middle}`、`MouseAction`（`event.h:20`）、`KeyAction{Down, Up}`、`ModifierKey`（`event.h:31）、`KeyCode`（`keycode.h:12`）。
 
 **滚动方向约定**：`ScrollEvent::delta_y` 正方向为「向上滚动」（应露出上方内容、offset 减小）。所有滚动控件统一用 `offset_ - e.delta_y * step`；误用 `+` 会导致方向相反。
+
+**滚动增量单位**：`delta_y` 是**设备无关增量**（滚轮格数口径），不是 dp；控件按自己的 `step`（dp/增量单位）换算位移。回传余量 `remaining_y` **与 `delta_y` 同单位同号**（未吃尽的增量数），派发器把它原样作为下一跳的 `delta_y`，故跨控件嵌套时各层按自己的 `step` 折算——内层 `step=16`、外层 `step=1` 也不会串味。
 
 ### 2.3 坐标契约
 
@@ -60,26 +63,56 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 }
 ```
 
+### 2.4 输入法组合（IME）契约
+
+`TextCompositionEvent` 是 **CJK 输入的唯一入口**：后端桥把平台输入法状态**同步折算**成契约口径后投出，控件据此渲染 preedit（预编辑串）。「上屏」与「组合中」严格分离：
+
+| 约定 | 内容 |
+|:---|:---|
+| 下标口径 | `preedit` 为 UTF-8；`cursor_index` / `sel_start` / `sel_end` 一律是 **preedit 内码点下标**（非字节、非 UTF-16 单元）。代理对由折算层夹紧，绝不切半字符 |
+| 选区 | `sel_end` **含尾**；无待转换选区时 `sel_end == AURORA_NO_SELECTION`（`sel_end < sel_start` 时控件退化为单点选区，不报错） |
+| 结束/取消 | `preedit` 为空即组合结束或取消；`committed` 只在本次确有文本上屏时非空 |
+| 数据模型纯净 | **preedit 不进 `value()`**。`TextInput` / `RichTextEdit` 只在绘制与测量期把 preedit 插到光标处（`composed_text()`），故 `value()`、序列化与 golden 始终不含半截拼音 |
+| 路由 | 只派发给**当前焦点控件**，不冒泡、不经命中链（§3.1）；控件覆写 `on_text_composition`（`widget/widget.h:485`），默认实现直接消费 |
+| 失焦 | 失焦即取消未上屏的组合（平台惯例，避免 preedit 残留在旧控件里） |
+
+典型序列（微软拼音输入「你好」）：`preedit="nihao",cursor=5` → `preedit="你好",cursor=2,sel=[0,2)` → `preedit="",committed="你好"`。
+
+**候选窗定位**：输入法候选列表必须落在插入点旁，而非屏幕左上角。控件侧钩子为 `Widget::composition_caret_bounds()`（`widget/widget.h:494`，默认返回 `focus_bounds_`，即自身焦点框；文本控件覆写为 **preedit 光标处的零宽竖盒**），宿主经 `Surface::set_composition_caret_provider()`（`window/surface.h:362`）把它交给后端，桥内按 DPI 缩放换算成像素并 `ClientToScreen`。该盒坐标为**窗口逻辑 dp**。
+
+> ⚠️ `composition_caret_bounds()` 的返回值在**首帧绘制之后**才有效——`focus_bounds_` 由 `Widget::paint` 写入（控件无几何缓存，见 §2.3）。空树/未绘制时返回退化矩形，后端据此退化为「不移动候选窗」。
+
+**平台接线状态**：
+
+| 后端 | 状态 |
+|:---|:---|
+| `Win32Surface`（GDI）/ `D3D11Surface` | ✅ **IMM32 首桥已接**（`src/aurora/window/detail/win32_ime.h`）。二者共用同一 `Win32Window` 宿主与同一份桥，故一条路径覆盖两路 |
+| `HeadlessSurface` | 无输入法概念；组合事件由测试直接构造并派发（`tests/unit/utest_ime_composition.cpp`） |
+| GLFW / X11 / Wayland / Wasm / macOS | ⬜ **契约级**：事件与控件侧行为已完备，缺平台桥（X11 IMClient / Wayland text-input-v3 + IBus/Fcitx、macOS `NSTextInputClient`、Wasm DOM `composition*`）。须有真实桌面/浏览器输入法环境后补，无头 CI 无法完成 |
+
+Win32 侧的取舍与实现细节（IMM32 而非 TSF、`WM_IME_*` 认领集、`WM_IME_CHAR` 吞字纪律）见 `specification/06-app-platform.md`；真机验收见 `tools/verify/win32_ime_live_probe.cpp`。
+
 ---
 
 ## 3 派发与命中测试
 
 ### 3.1 EventDispatcher
 
-`EventDispatcher`（`event/dispatcher.h:29`）提供 **5 个静态 `dispatch(Widget &root, …)` 重载** + **1 个实例级鼠标入口**；所有派发入口首参均为派发起点根 widget `root`，命中测试与命中链局限于该子树：
+`EventDispatcher`（`event/dispatcher.h:31`）提供 **6 个静态 `dispatch(Widget &root, …)` 重载** + **1 个实例级鼠标入口**；所有派发入口首参均为派发起点根 widget `root`，命中测试与命中链局限于该子树：
 
 | 入口 | 说明 |
 |:---|:---|
 | `static dispatch(Widget& root, MouseEvent&, FocusManager* = nullptr) -> bool` | 指针事件；委托进程内持久 `EventDispatcher` 单例，故同样保留跨事件指针捕获；`FocusManager*` 可选，非空时派发期暴露为「当前焦点管理器」 |
 | `dispatch_mouse(Widget& root, MouseEvent&, FocusManager* = nullptr) -> bool`（实体方法） | 带指针捕获的鼠标派发：Press 命中后缓存命中链，后续 Move/Release 即使命中失败也持续派发给按下时目标，直到 Release 解除捕获（`Application` 走此路径） |
 | `static dispatch(Widget& root, KeyEvent&, FocusManager&) -> bool` | 键盘事件；识别 Tab / Shift+Tab 并转为 `move_focus`；`root` 为统一重载签名而保留，键盘不经命中链 |
-| `static dispatch(Widget& root, ScrollEvent&) -> bool` | 滚动事件（不冒泡，仅交给命中链最深叶） |
+| `static dispatch(Widget& root, ScrollEvent&) -> bool` | 滚动事件：沿命中链**自最深向根**找 `wants_scroll()` 者逐个派发，余量经 `remaining_y` 上冒（§3.3） |
 | `static dispatch(Widget& root, FileDropEvent&) -> bool` | 文件拖放事件（不冒泡，仅交给命中目标） |
 | `static dispatch(Widget& root, TextInputEvent&, FocusManager&) -> bool` | 文本输入（只路由到焦点控件；无焦点返回 `false`） |
+| `static dispatch(Widget& root, TextCompositionEvent&, FocusManager&) -> bool` | IME 组合态同步推送（`event/dispatcher.h:96`）：与文本输入同径——**只路由到当前焦点控件**的 `on_text_composition`，不经命中链、不冒泡（组合串属于正在输入的编辑器，上冒只会让容器误吞）；无焦点返回 `false` |
 
 派发流程：先经 `Widget::hit_test` 找到最深命中的目标组件，再沿父链向上调用处理方法，直到 `handled` 为真或到达根。
 
-`TouchDispatcher`（`dispatcher.h:115`）处理触控路径：实体方法 `dispatch(Widget& root, TouchEvent&, FocusManager* = nullptr) -> bool`，按 `TouchPoint::id` 做指针捕获，原始多点流全链广播 + 合成 `MouseEvent` 手势流冒泡，焦点行为与鼠标路径一致。
+`TouchDispatcher`（`dispatcher.h:145`）处理触控路径：实体方法 `dispatch(Widget& root, TouchEvent&, FocusManager* = nullptr) -> bool`，按 `TouchPoint::id` 做指针捕获，原始多点流全链广播 + 合成 `MouseEvent` 手势流冒泡，焦点行为与鼠标路径一致。
 
 ### 3.2 命中测试
 
@@ -87,7 +120,18 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **z 序语义（与绘制一致）**：有重叠子节点的容器（如 `Stack`）的命中测试**反向**遍历子节点——最后绘制（视觉最上层）的子节点优先命中。即重叠区域中「视觉在上层」的控件优先接收事件，底层控件不会在重叠区抢走本应属于顶层控件的命中。非重叠布局（`Row` / `Column`）各子节点区域互斥，遍历方向不影响结果。
 
-**可滚动容器须覆盖 `on_hit_test` 返回 `this`**：`dispatch(Widget&, ScrollEvent&)` 只调用命中链最深叶的 `on_scroll`，不冒泡。
+**可滚动容器自动进入命中链**：`Widget::hit_test_chain` 在「无命中的后代、自身不可点击」时仍会把 `wants_scroll()` 为真且命中点落在内容盒内的控件自身纳入链尾——内容全非可点击时滚动容器也必须在链内，否则滚轮落空。容器**无需**再覆写 `on_hit_test` 返回 `this`。
+
+### 3.3 嵌套滚动协调（滚轮余量上冒）
+
+`dispatch(Widget&, ScrollEvent&)`（`event/dispatcher.cpp`）把滚轮判给**最近可滚动祖先**，并在内层吃到端点后把余量交给外层：
+
+1. 取命中链，自**最深**（链尾）向根遍历，跳过 `wants_scroll()` 为假的控件——可点击子控件（`Button` 等）不拦截滚轮，嵌套时最深滚动者优先。
+2. 每一跳先把 `e.remaining_y` 归零再调 `on_scroll`：**不写余量的 handler 视为全量消费**（默认 0），与旧「一次性消费、不冒泡」约定逐位兼容，既有自定义 `on_scroll` 无需改动。
+3. 该跳回传非零余量（clamp 后没吃尽的增量，与 `delta_y` 同单位同号）⇒ 令 `e.delta_y = e.remaining_y`，继续交给更浅一层可滚动祖先。
+4. 链上存在可滚动者但全部吃完仍有剩 ⇒ 止步（返回 `true`）；链上**无可滚动者** ⇒ 兜底回落点命中目标直接派发一次、不再冒泡（保持历史行为）。
+
+典型接线：`PullToRefresh` 包住 `Scroll`（外层，`wants_scroll()` 恒真且仅当子树在顶部时吃余量下拉）、`Scroll` 内嵌 `LazyList`（内层先滚，到顶/到底才把余量让给外层）。内层到端点、外层接手的端到端行为由 `utest_dispatcher` 的 `wheel_margin_bubbles_from_inner_scroll_to_pull_to_refresh` 钉住（全量冒 / 零冒 / 部分冒 / 反方向门控四种组合）。
 
 ---
 

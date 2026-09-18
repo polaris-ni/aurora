@@ -224,6 +224,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 - **指针点击语义**：`Press` 置 `pressed`；`Release` 且 `pressed` 触发一次；点击与长按互斥（`click_pending_` 在 Press 置位，Release 时若未触发长按且未拖拽才触发 click）。
 - **焦点**：`FocusManager`（root + focused）按 `tab_index()` 排序移动（`move_focus(FocusDirection)` 循环取前 / 后）；`Widget::request_focus()` 读取派发期线程局部「当前焦点管理器」（`current_focus_manager()`），控件自身不持有 `FocusManager*`。
 - **多点触控并发（按指针分发）**：`TouchDispatcher`（实例级，由 `Application` 持有）对 `TouchEvent` 按 pointer id 做命中缓存与独立路由——某 pointer id 首按做命中测试并缓存链，活跃期复用缓存链，抬起即清缓存。因此 `draggable` / `long_press` / `pinch` / `rotate` 各自绑定具体指针，支持单指持发 + 多指并发。每次 `TouchEvent` 同时 (1) 向缓存链广播完整 `TouchEvent`（原始流，供 `TouchListener` 修饰回调）、(2) 合成带 `pointer_id` 的 `MouseEvent` 驱动既有点击 / 拖拽手势。
+- **输入法组合只到焦点控件**：`TextCompositionEvent` 与 `TextInputEvent` 同径——不经命中链、不冒泡，仅交给 `FocusManager` 当前焦点控件的 `on_text_composition`（容器误吞即丢字）。组合串由平台桥折算后同步投出，preedit 不进 `value()`（详见 §8.6）。
 - **悬停态基础设施**：`EventDispatcher` 在无捕获 Move 时把新命中链与上次悬停链 diff，对离开 / 进入控件回调 `Widget::on_hover_change(bool)`（默认仅记录 `hover_` 不标脏；需要视觉反馈的控件覆写并追加 `mark_needs_paint`）；`Widget::hovered()` 供 `on_paint` 读取。Win32 宿主经 `TrackMouseEvent(TME_LEAVE)` 在光标离窗时合成远离 Move 清除悬停，否则高亮残留。
 
 ---
@@ -300,6 +301,23 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 `deactivate()` 与 `disconnect_all()` 等价且幂等，并在其中**从 `ProviderRegistry` 注销** —— 缺这一步，进程级事件广播会在已析构的桥上调用 `is_active()`（use-after-free）。
 
 **线程与降级。** 全 main-thread（in-proc provider 由 UIA core 在 UI 线程回调，桥激活时把套间初始化为 STA）；`UIAutomationCore.dll` 运行时 `LoadLibraryA` 动态加载，缺库或函数缺失即整桥降级 no-op + 一次 `Diagnostics::warn`，无链接期依赖。
+
+### 8.6 输入法桥接（platform IME bridge）
+
+**分层与所有权。** 与无障碍桥同构，但方向相反（平台 → 树，而非树 → 平台）：组合事件值类型（`event/event.h` 的 `TextCompositionEvent`，平台中立）→ 折算层（`src/aurora/window/detail/ime_composition.{h,cpp}`，**零 Windows 头**：UTF-16 组合串 → UTF-8、UTF-16 下标 → 码点、`GCS_COMPATTR` → 待转换选区）→ 平台桥（Win32 IMM32 = `src/aurora/window/detail/win32_ime.{h,cpp}`）。折算层刻意不含平台头，故「无头 CI 证明不了的只有与 IMM32 的那一条接缝」——接缝本身由真机验收探针 `tools/verify/win32_ime_live_probe.cpp` 覆盖，其余全部落在 `utest_ime_composition` 的可执行覆盖里。
+
+桥与窗口一一对应，由 `Win32Window::Impl` **唯一持有并随窗口构造**（`Win32Surface` / `D3D11Surface` 转发同一实例）。与 a11y 桥的**惰性激活相反**：IMM32 没有查询代价，且无输入法环境下一条 `WM_IME_*` 也不会投递，早构造零成本，故无需门闩与注册表。
+
+**Surface 扩展点（一处，默认空实现）**：`Surface::set_composition_caret_provider(std::function<Rect()>)`。方向与 a11y 的 `set_accessibility_root`（宿主 push）相反——插入点是**拉取**的：候选窗定位只在组合期每次 `WM_IME_COMPOSITION` 才需要，而「当前焦点是哪个控件」只有上层 `FocusManager` 知道，故由宿主提供查询回调（`WindowHost` 返回焦点控件的 `Widget::composition_caret_bounds()`，窗口逻辑 dp；桥内 `× scale` + `ClientToScreen`）。
+
+**两条不变量（均为实机行为结论，非推测）**：
+
+1. **上屏只有一条通道**。`GCS_RESULTSTR` 是唯一的 commit 来源，故 `WM_IME_CHAR` 必须吞掉、组合期间的 `WM_CHAR` 必须丢弃——放行任一条即与 `DefWindowProc` 的逐字 `WM_CHAR` 转换叠加，同一汉字上屏两次（DBCS ACP 下还会被拆成前导/尾随字节产出乱码）。
+2. **preedit 永不进数据模型**。组合串只在绘制与测量期参与（`composed_text()`），`value()` / 序列化 / golden 因此与「用户是否正打到一半」无关，保持确定性。
+
+**为何是 IMM32 而非 TSF**：TSF 要求实现 `ITextStoreACPServices` 全套文本存储代理（约 1.5k 行 COM，且与「控件自持状态、无 Windows 文本对象」的模型正交）；Win10/11 的 CTF 加载器对非 TSF-store 窗口提供 IMM32 兼容**读**通道，组合串 / 上屏串 / 光标 / 属性全部可读、候选窗定位亦生效。代价是该通道不接受外部**写**（`ImmSetCompositionStringW` 被 TSF 型输入法拒绝），因此组合文本无法自动化注入，preedit 渲染须人工目视收口。桥的对外形状（`Hooks` + `handle()`）与 TSF 无冲突，后续替换不动上层。
+
+契约与接线状态表见 `specification/05-event-navigation.md` §2.4，Win32 侧细节见 `specification/06-app-platform.md` §8.5。
 
 ---
 
@@ -452,7 +470,7 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 8. **单向 / 纯函数**：状态变更单向；`Computed` 为纯函数派生值，无副作用，可安全重算。
 9. **扁平组合**：以 `Modifier` 包裹 + 容器组合替代深层继承嵌套。
 10. **布局代数**：布局以可组合的 `Constraints` + 对齐参数表达，避免魔法数字。
-11. **事件模型**：统一事件类型（`MouseEvent` / `KeyEvent` / `ScrollEvent` / `TextInputEvent` / `TouchEvent` / `FileDropEvent`）+ 冒泡协议；事件坐标在 `e.position` 而非 `e.x` / `e.y`。
+11. **事件模型**：统一事件类型（`MouseEvent` / `KeyEvent` / `ScrollEvent` / `TextInputEvent` / `TextCompositionEvent` / `TouchEvent` / `FileDropEvent`）+ 冒泡协议；事件坐标在 `e.position` 而非 `e.x` / `e.y`。
 12. **状态作用域**：状态作用域显式——局部 `State` 由组件持有，全局 `Store` 由应用持有并通过 `Environment` 注入；`Binding<T>` 为非拥有引用，上游生命周期须更长。
 
 ---

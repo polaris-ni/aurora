@@ -30,8 +30,9 @@ if (AURORA_BACKEND_WIN32)
     aurora_define_feature(AURORA_BACKEND_WIN32 EXPORT)
     if (WIN32)
         # user32/gdi32：窗口与 GDI；shell32/ole32：Shell_NotifyIcon 与 COM 文件对话框；
-        # uuid：CLSID/IID 常量（IFileOpenDialog 等）。
-        target_link_libraries(aurora PUBLIC user32 gdi32 shell32 ole32 uuid)
+        # uuid：CLSID/IID 常量（IFileOpenDialog 等）；imm32：IMM32 组合输入桥
+        # （ImmGetContext / ImmGetCompositionStringW / ImmSetCandidateWindow，见 window/detail/win32_ime.*）。
+        target_link_libraries(aurora PUBLIC user32 gdi32 shell32 ole32 uuid imm32)
     endif ()
 endif ()
 

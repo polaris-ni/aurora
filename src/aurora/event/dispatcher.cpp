@@ -393,17 +393,31 @@ auto EventDispatcher::dispatch(Widget & /*root*/, KeyEvent &e, FocusManager &fm)
 }
 
 auto EventDispatcher::dispatch(Widget &root, ScrollEvent &e) -> bool {
-    // 滚轮沿命中链自最深（链尾）向根（链头）找第一个 wants_scroll() 者派发——
-    // 与 CSS/Flutter 语义一致：滚轮归属「最近可滚动祖先」，可点击子控件（Button 等）
-    // 不拦截滚轮；嵌套时最深滚动者优先（内层 Scroll / LazyList 胜过外层 Overflow::Scroll 容器）。
+    // 滚轮沿命中链自最深（链尾）向根（链头）找可滚动者派发——与 CSS/Flutter 语义一致：
+    // 滚轮归属「最近可滚动祖先」，可点击子控件（Button 等）不拦截滚轮；嵌套时最深滚动者优先。
+    // 消费方经 ScrollEvent::remaining_y 回传未吃尽的余量（到顶/到底 clamp 后的剩余增量），
+    // 派发器据此把余量作为新请求继续交给更浅一层可滚动祖先——嵌套滚动协调（内层滚到端点
+    // 后外层接手）。不写 remaining_y 的 handler 视为全量消费（默认 0），与旧「一次性消费、
+    // 不冒泡」约定逐位兼容。
     // 链路依赖：Overflow::Scroll 控件自身保证入链（Widget::hit_test_chain 的滚动区认领）。
     std::vector<HitNode> chain =
         root.hit_test_chain(e.position, Rect{.origin = Point{}, .size = root.size()}, BuildContext{});
+    bool has_scrollable = false;
     for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
-        if (auto *w = it->ptr; w != nullptr && w->wants_scroll()) {
-            w->on_scroll(e);
+        auto *w = it->ptr;
+        if (w == nullptr || !w->wants_scroll()) {
+            continue;
+        }
+        has_scrollable = true;
+        e.remaining_y = 0.0F;  // 每跳重置：消费方不声明余量即视为全量吃掉
+        w->on_scroll(e);
+        if (e.remaining_y == 0.0F) {
             return true;
         }
+        e.delta_y = e.remaining_y;  // 余量作为新请求上冒
+    }
+    if (has_scrollable) {
+        return true;  // 链上可滚动者全部吃到端点仍有剩：无人接手，就此止步
     }
     // 兜底（兼容既有行为）：链上无可滚动者（如自定义 on_scroll 的非滚动控件、
     // 或命中点在滚动区之外）→ 回落点命中目标直接派发，不冒泡。

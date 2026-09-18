@@ -737,7 +737,7 @@ auto RichTextEdit::cancel_composition() -> void {
     preedit_sel_end_ = AURORA_NO_PREEDIT_SELECTION;
 }
 
-auto RichTextEdit::paint_cursor(Painter &p, const Rect &bounds) const -> void {
+auto RichTextEdit::caret_box_at(const Rect &bounds) const -> std::optional<Rect> {
     const float line_h = line_height_;
     std::size_t doc_idx = 0;
     float y = bounds.origin.y;
@@ -753,15 +753,36 @@ auto RichTextEdit::paint_cursor(Painter &p, const Rect &bounds) const -> void {
             const TextDirection base =
                 cached_direction_.value_or(aurora::render::detail::guess_paragraph_direction(line_text));
             const float cx = caret_visual_x(line, base, caret_ - line_begin, bounds);
-            if (cx >= 0.0F) {
-                p.fill_rect(Rect{.origin = Point{.x = cx, .y = y}, .size = Size{.width = 1.0F, .height = line_h}},
-                            Color::black());
+            if (cx < 0.0F) {
+                return std::nullopt;
             }
-            return;
+            return Rect{.origin = Point{.x = cx, .y = y}, .size = Size{.width = 1.0F, .height = line_h}};
         }
         doc_idx = line_end + 1;
         y += line_h;
     }
+    return std::nullopt;
+}
+
+auto RichTextEdit::paint_cursor(Painter &p, const Rect &bounds) const -> void {
+    if (const std::optional<Rect> box = caret_box_at(bounds); box.has_value()) {
+        p.fill_rect(*box, Color::black());
+    }
+}
+
+auto RichTextEdit::composition_caret_bounds() const -> Rect {
+    const std::optional<Rect> caret = caret_box_at(focus_bounds());
+    if (!caret.has_value()) {
+        return Widget::composition_caret_bounds();  // 无有效光标行：回退控件盒
+    }
+    // 组合期候选插入点在文档光标右侧 preedit 前缀之后（与 paint_preedit 同一度量）。
+    float dx = 0.0F;
+    if (is_composing() && preedit_cursor_ > 0) {
+        const std::size_t pn = utf8_cp_count(preedit_);
+        dx = render::FontEngine::measure_width(utf8_cp_slice(preedit_, 0, std::min(preedit_cursor_, pn)), cur_font_);
+    }
+    return Rect{.origin = Point{.x = caret->origin.x + dx, .y = caret->origin.y},
+                .size = Size{.width = 0.0F, .height = caret->size.height}};
 }
 
 }  // namespace aurora

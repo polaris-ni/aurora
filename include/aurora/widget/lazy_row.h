@@ -190,9 +190,13 @@ class LazyRow : public Widget, public LazyRowProps {
     auto on_scroll(ScrollEvent &e) -> void override {
         const float vw = std::max(1.0F, size().width - padding.left - padding.right);
         const float max_off = std::max(0.0F, full_content_ - vw);
-        offset_ = std::max(0.0F, std::min(max_off, offset_ + (e.delta_y * item_extent_ * 0.5F)));
+        const float before = offset_;
+        offset_ = std::max(0.0F, std::min(max_off, before + (e.delta_y * item_extent_ * 0.5F)));
         e.is_handled = true;
         scroll_restored_ = true;  // 用户主动滚动：放弃尚未生效的键恢复
+        // 余量回传（嵌套滚动协调）：横向消费系数 item_extent×0.5/单位，端点夹掉的部分上冒。
+        const float factor = item_extent_ * 0.5F;
+        e.remaining_y = factor > 0.0F ? (e.delta_y - ((offset_ - before) / factor)) : e.delta_y;
         write_back_offset();
         mark_needs_paint();
     }
