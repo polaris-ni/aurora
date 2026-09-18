@@ -102,6 +102,157 @@ if (AURORA_ENABLE_GLFW_GPU_GL)
     aurora_log("GLFW GPU GL raster enabled (OpenGL 3.3 core DisplayList raster)")
 endif ()
 
+# ---- GPU WGPU（wgpu-native RHI 后端，跨平台 GPU 主力：Vulkan/D3D12/Metal/GL 自动选择；默认 OFF） ----
+# 依赖来源：仓库内置 third_party/wgpu-native（Rust，gfx-rs v29.0.1.1，源码保持上游原样、
+# 不做本地修改）经 cargo 构建为静态库（staticlib）链接——对齐「静态交付、消费者无额外 DLL」
+# 口径。与 freetype/harfbuzz 的差异：Rust crate 依赖图按平台/工具链三元组而异，**不做
+# cargo vendor 入库**，首次构建由 cargo 在线自 crates.io 拉取（国内可配 rsproxy 镜像，见
+# codespec/BUILD_OPTIONS.md）；拉取成功后 cargo 本地缓存即支持断网增量构建。
+# 构建机前提：rustup 工具链（host 三元组须与 C++ 编译器 ABI 一致：MinGW↔windows-gnu、
+# MSVC↔windows-msvc、Linux↔gnu），缺失或不匹配时 configure 阶段 FATAL 并给出安装指引。
+option(AURORA_BACKEND_GPU_WGPU "Build wgpu-native GPU RHI backend (WgpuRhi; requires Rust toolchain)" OFF)
+if (AURORA_BACKEND_GPU_WGPU)
+    set(_wgpu_src "${CMAKE_CURRENT_SOURCE_DIR}/third_party/wgpu-native")
+    if (NOT EXISTS "${_wgpu_src}/Cargo.toml" OR NOT EXISTS "${_wgpu_src}/ffi/wgpu.h"
+            OR NOT EXISTS "${_wgpu_src}/ffi/webgpu-headers/webgpu.h")
+        aurora_error("AURORA_BACKEND_GPU_WGPU=ON but third_party/wgpu-native sources are missing"
+                " (expected Cargo.toml, ffi/wgpu.h and ffi/webgpu-headers/webgpu.h; the webgpu-headers"
+                " submodule must be populated: git submodule update --init under third_party/wgpu-native).")
+    endif ()
+
+    # Rust 工具链探测：cargo 必须存在（rustup 安装）。
+    find_program(AURORA_CARGO_EXECUTABLE cargo)
+    if (NOT AURORA_CARGO_EXECUTABLE)
+        aurora_error("AURORA_BACKEND_GPU_WGPU=ON but 'cargo' was not found on PATH."
+                " Install the Rust toolchain first, e.g.: winget install --id Rustlang.Rustup -e;"
+                " then a toolchain whose host triple matches the C++ ABI - on Windows with MinGW:"
+                " rustup toolchain install stable-x86_64-pc-windows-gnu"
+                " && rustup default stable-x86_64-pc-windows-gnu.")
+    endif ()
+
+    # host 三元组 + 完整工具链 id 探测（在 wgpu-native 目录之外执行，避开上游
+    # rust-toolchain.toml 钉版触发的一次性工具链下载）。⚠️ 不能用裸 "stable" 覆盖
+    # RUSTUP_TOOLCHAIN——rustup 对通道别名按「通道+宿主启发」解析（可能命中非默认宿主
+    # 的损坏工具链）；必须注入 active toolchain 的完整 id（如 stable-x86_64-pc-windows-gnu）。
+    find_program(AURORA_RUSTUP_EXECUTABLE rustup)
+    if (AURORA_RUSTUP_EXECUTABLE)
+        execute_process(COMMAND "${AURORA_RUSTUP_EXECUTABLE}" show active-toolchain
+                WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                OUTPUT_VARIABLE _rust_active OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        string(REGEX MATCH "^[^ \t]+" AURORA_RUST_TOOLCHAIN_ID "${_rust_active}")
+    endif ()
+    # host 三元组探测：用 `rustc -vV` 而非 `cargo rustc -vV`——后者是「编译」子命令，
+    # 在无 Cargo.toml 的目录（仓库根）直接报错。同样在 wgpu-native 之外执行，避开钉版文件。
+    find_program(AURORA_RUSTC_EXECUTABLE rustc)
+    if (NOT AURORA_RUSTC_EXECUTABLE)
+        aurora_error("AURORA_BACKEND_GPU_WGPU=ON but 'rustc' was not found on PATH"
+                " (rustup's cargo found without rustc is abnormal - try: rustup self update).")
+    endif ()
+    execute_process(COMMAND "${AURORA_RUSTC_EXECUTABLE}" -vV
+            OUTPUT_VARIABLE _rust_vv OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    string(REGEX MATCH "host: ([A-Za-z0-9_.-]+)" _rust_host_match "${_rust_vv}")
+    set(AURORA_RUST_HOST_TRIPLE "${CMAKE_MATCH_1}")
+    if (NOT AURORA_RUST_HOST_TRIPLE)
+        aurora_error("AURORA_BACKEND_GPU_WGPU=ON but the Rust host triple could not be determined"
+                " ('cargo rustc -vV' failed - the default toolchain may be corrupted;"
+                " repair with: rustup toolchain install stable && rustup default stable).")
+    endif ()
+    # ABI 守卫：Windows 上 Rust host 与 C++ 编译器必须同族（静态库跨 ABI 不可链接）。
+    # （不用 MINGW 预变——其自 CMake 3.25 才定义，本仓库下限 3.20，改判编译器 ID。）
+    if (WIN32 AND NOT MSVC AND NOT AURORA_RUST_HOST_TRIPLE MATCHES "-windows-gnu$")
+        aurora_error("AURORA_BACKEND_GPU_WGPU: C++ compiler is GNU/MinGW but the default Rust toolchain is"
+                " '${AURORA_RUST_HOST_TRIPLE}' (ABI-incompatible static libs). Install & select the gnu host:"
+                " rustup toolchain install stable-x86_64-pc-windows-gnu"
+                " && rustup default stable-x86_64-pc-windows-gnu.")
+    endif ()
+    if (MSVC AND NOT AURORA_RUST_HOST_TRIPLE MATCHES "-windows-msvc$")
+        aurora_error("AURORA_BACKEND_GPU_WGPU: C++ compiler is MSVC but the default Rust toolchain is"
+                " '${AURORA_RUST_HOST_TRIPLE}' (ABI-incompatible static libs). Fix with:"
+                " rustup default stable-x86_64-pc-windows-msvc.")
+    endif ()
+
+    # libclang 探测：wgpu-native 的 build.rs 经 bindgen 从 webgpu.h 生成 FFI 头，构建期硬
+    # 依赖 libclang 共享库。PATH 上找 clang 取同目录；再查 Windows 常见 LLVM 安装根。
+    set(_wgpu_libclang_dir "")
+    find_program(AURORA_CLANG_EXECUTABLE clang)
+    if (AURORA_CLANG_EXECUTABLE)
+        get_filename_component(_wgpu_libclang_dir "${AURORA_CLANG_EXECUTABLE}" DIRECTORY)
+    elseif (WIN32)
+        foreach (_cand "[HKEY_LOCAL_MACHINE\\SOFTWARE\\LLVM\\LLVM;]"
+                       "C:/Program Files/LLVM/bin" "D:/Development/Environment/LLVM/bin")
+            if (_cand AND EXISTS "${_cand}/libclang.dll")
+                set(_wgpu_libclang_dir "${_cand}")
+                break ()
+            endif ()
+        endforeach ()
+    elseif (UNIX)
+        find_file(_wgpu_libclang_so NAMES libclang.so libclang.so.* PATHS /usr/lib/llvm-*/lib /usr/lib
+                NO_DEFAULT_PATH NO_CACHE)
+        if (_wgpu_libclang_so)
+            get_filename_component(_wgpu_libclang_dir "${_wgpu_libclang_so}" DIRECTORY)
+        endif ()
+    endif ()
+    if (NOT _wgpu_libclang_dir)
+        aurora_error("AURORA_BACKEND_GPU_WGPU=ON but no libclang shared library was found (required by"
+                " wgpu-native's bindgen build script). Install LLVM/Clang and ensure clang/libclang"
+                " is on PATH, or set LIBCLANG_PATH manually.")
+    endif ()
+
+    # cargo 构建：--target 显式指定 host 三元组，产物路径确定为 target/<triple>/release，
+    # 不受「有无 --target」的目录布局差异影响。产物名按平台：gnu/类 Unix 为
+    # libwgpu_native.a，MSVC 为 wgpu_native.lib。产物拷贝进 build 目录供 IMPORTED 引用
+    # （cargo target 树本身不入库，见 .gitignore）。
+    if (MSVC)
+        set(_wgpu_staticlib_name "wgpu_native.lib")
+    else ()
+        set(_wgpu_staticlib_name "libwgpu_native.a")
+    endif ()
+    set(_wgpu_artifact "${_wgpu_src}/target/${AURORA_RUST_HOST_TRIPLE}/release/${_wgpu_staticlib_name}")
+    set(_wgpu_out "${CMAKE_BINARY_DIR}/wgpu-native/${_wgpu_staticlib_name}")
+    # 上游冻结源码：configure 期 GLOB 一次即可（本仓库不编辑 .rs 文件）。
+    file(GLOB _wgpu_rs_sources "${_wgpu_src}/src/*.rs" "${_wgpu_src}/build.rs")
+    # 注入的环境：LIBCLANG_PATH 指向探测到的 libclang 目录；有 rustup 时以 active
+    # toolchain 完整 id 覆盖上游 rust-toolchain.toml 的 1.93 一次性钉版（纯 cargo 安装
+    # 无 rustup 时该文件本就不生效，不注入）。add_custom_command 无 ENVIRONMENT 参数，
+    # 经 cmake -E env 注入。
+    set(_wgpu_env "LIBCLANG_PATH=${_wgpu_libclang_dir}")
+    if (AURORA_RUST_TOOLCHAIN_ID)
+        list(APPEND _wgpu_env "RUSTUP_TOOLCHAIN=${AURORA_RUST_TOOLCHAIN_ID}")
+    endif ()
+    add_custom_command(OUTPUT "${_wgpu_out}"
+            COMMAND "${CMAKE_COMMAND}" -E env ${_wgpu_env}
+                    "${AURORA_CARGO_EXECUTABLE}" build --release --target "${AURORA_RUST_HOST_TRIPLE}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_wgpu_artifact}" "${_wgpu_out}"
+            DEPENDS "${_wgpu_src}/Cargo.toml" "${_wgpu_src}/Cargo.lock"
+                    "${_wgpu_src}/ffi/wgpu.h" "${_wgpu_src}/ffi/webgpu-headers/webgpu.h"
+                    ${_wgpu_rs_sources}
+            WORKING_DIRECTORY "${_wgpu_src}"
+            VERBATIM
+            COMMENT "cargo build --release wgpu-native (${AURORA_RUST_HOST_TRIPLE})")
+    add_custom_target(wgpu_native_build DEPENDS "${_wgpu_out}")
+
+    add_library(wgpu_native STATIC IMPORTED GLOBAL)
+    set_target_properties(wgpu_native PROPERTIES
+            IMPORTED_LOCATION "${_wgpu_out}"
+            IMPORTED_NO_SONAME TRUE)
+    add_dependencies(wgpu_native wgpu_native_build)
+
+    aurora_define_feature(AURORA_BACKEND_GPU_WGPU EXPORT)
+    # wgpu.h / webgpu.h 只给库内实现 TU（wgpu_rhi.*）用——公共头 pimpl 隔离，不外泄三方头。
+    target_include_directories(aurora PRIVATE "${_wgpu_src}/ffi" "${_wgpu_src}/ffi/webgpu-headers")
+    # Rust staticlib 的系统库依赖：windows crate 族引入的 WinAPI 库 + 运行时；
+    # Linux 侧 Vulkan 后端运行期动态加载，仅需 dl/pthread。
+    if (WIN32)
+        target_link_libraries(aurora PUBLIC wgpu_native ws2_32 userenv bcrypt advapi32 oleaut32 ntdll)
+    elseif (UNIX)
+        target_link_libraries(aurora PUBLIC wgpu_native ${CMAKE_DL_LIBS} pthread)
+    else ()
+        target_link_libraries(aurora PUBLIC wgpu_native)
+    endif ()
+    aurora_log("wgpu GPU RHI enabled (wgpu-native source build, host=${AURORA_RUST_HOST_TRIPLE},"
+            " libclang=${_wgpu_libclang_dir})")
+endif ()
+
 # ---- X11 / Wayland / macOS / WASM ----
 # X11/Wayland 用于 Linux 桌面、macOS 用于 Apple、WASM 用于 Emscripten 工具链；
 # 默认构建（含本机 Windows/MinGW）不受影响，仍仅 Headless 必开。

@@ -14,3 +14,9 @@ test_temp/
 
 # 规划/设计草稿：未纳入 codespec/ 的开发过程文档，只作本地推演载体，不进版本库
 *.draft.md
+
+# wgpu-native（third_party，Rust）：cargo 构建产物与编译期依赖下载均不入库
+# （Rust crate 依赖图按平台/工具链而异，由 cargo 首次构建时自 crates.io/镜像拉取，不做 vendor）
+third_party/wgpu-native/target/
+third_party/wgpu-native/vendor/
+third_party/wgpu-native/.cargo/
