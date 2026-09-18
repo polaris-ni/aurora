@@ -1329,3 +1329,138 @@ auto main() -> int {
 - **近边缘自动滚动**：被拖项进入视口上下 `auto_scroll_threshold`（默认 48dp）带内按比例滚动，且滚动量吃进跟手位移（被拖项屏幕位置守恒）；拖拽期间滚轮被吞。
 - **虚拟化列表不重排**：长列表请用 `LazyList`（只读滚动）；重排是全量实例化（适合 <500 项）。
 - **可编译样例**：`examples/demos/demo_reorderable_list.cpp`。
+
+---
+
+## 37 无障碍：让读屏读出你的界面
+
+Aurora 的无障碍**默认在跑**——你不需要为「让 NVDA 读出界面」写任何接线代码。桥在首个读屏查询到达时才构造，无读屏在线时零开销（不建语义树、不发平台事件）。
+
+### 37.1 开箱即得的默认行为
+
+```cpp
+au::Scene build_ui() {
+    return au::Column{
+        au::Text{au::TextProps{ .content = "订单总额" }},
+        au::Button{au::ButtonProps{ .label = "提交" }},
+        au::TextInput{au::TextInputProps{ .value = "abc", .placeholder = "请输入" }},
+        au::Slider{au::Reactive{volume}},
+        au::Checkbox{au::Reactive{agreed}},
+    };
+}
+
+au::WindowOptions wopts;
+wopts.title = "我的应用";
+wopts.size = au::Size{ .width = 520.0F, .height = 420.0F };
+auto win = au::create_native_window(wopts);
+au::Application app{ build_ui(), std::move(win.value()) };
+app.run();          // 读屏（讲述人 / NVDA / Inspect.exe）此时已能读出控件
+```
+
+跑起来后打开 Windows 自带的「讲述人」或 Inspect.exe，即可看到树形结构与各控件的 Name / ControlType / 可用 pattern。**角色、状态、取值域与文本都从控件自身读出**：
+
+| 你用的控件 | 读屏看到 |
+|:---|:---|
+| `Button` | ControlType=Button，Name=标签文本，可用 `Invoke` 动作（读屏可「按下」它，走真实点击路径） |
+| `TextInput` | ControlType=Edit，Name=placeholder，Value=当前文本，可用 `Value` 动作；选区 / 逐字导航经 TextPattern |
+| `Slider` | ControlType=Slider，可用 `RangeValue`（可读写当前值、最小/最大/步长）与 `Value` |
+| `Checkbox` / `Switch` | ControlType=CheckBox，状态位 `checkable` + `checked`，可用 `Toggle` |
+| `Text` | ControlType=Text，Name=内容文本 |
+| 图表族（`BarChart` 等） | ControlType=Image |
+| `Scroll` | `Scroll` / `ScrollItem` pattern（含滚动到指定偏移） |
+
+### 37.2 补一个可访问名
+
+若控件的可见文字不是它的合适读法（或控件本身没有文字，如纯图形按钮），覆写 `accessibility_label()`：
+
+```cpp
+class IconButton : public au::LeafWidget {
+  public:
+    [[nodiscard]] auto accessibility_label() const -> std::string override { return "关闭"; }
+    // ...
+};
+```
+
+**名称回退链**（不覆写时的自动推导顺序）：
+
+1. `accessibility_label()` 返回非空 → 用它；
+2. 角色是 `Text` / `TextInput` → 用控件文本（`accessibility_text()`），再退到 `accessibility_value()`；
+3. 否则看**唯一文本子节点**：子树里恰有 1 个 `Text` / `RichText` / `Label` 子节点时取它的标签。
+
+> ⚠️ **兄弟标签不被自动关联**。`au::Checkbox` 与 `au::Slider` 是叶子控件、没有内建 label；本库里它们的标签通常是**兄弟** `Text` 而不是子节点，第 3 条回退因此取不到。目前须显式覆写 `accessibility_label()`（子类化），或在设计上接受该控件无读屏名。是否引入 `aria-labelledby` 式的标签关联 API 尚未裁决。
+
+### 37.3 描述状态与取值（自定义控件）
+
+```cpp
+class Rating : public au::LeafWidget {
+  public:
+    [[nodiscard]] auto accessibility_role() const -> au::AccessibilityRole override {
+        return au::AccessibilityRole::Slider;   // 借用平台既有语义
+    }
+    [[nodiscard]] auto accessibility_label() const -> std::string override { return "评分"; }
+    [[nodiscard]] auto accessibility_state() const -> au::AccessibilityState override {
+        auto s = au::Widget::accessibility_state();   // 先取基类（含 focused）
+        s.read_only = false;
+        return s;
+    }
+    [[nodiscard]] auto accessibility_range() const -> std::optional<au::AccessibilityRange> override {
+        return au::AccessibilityRange{ .min = 0.0, .max = 5.0, .step = 1.0, .value = value_ };
+    }
+    auto perform_accessibility_action(const au::AccessibilityActionRequest &req) -> bool override {
+        if (req.action == au::AccessibilityAction::Value) {
+            value_ = std::clamp(req.number, 0.0, 5.0);
+            mark_needs_paint();
+            return true;
+        }
+        return au::Widget::perform_accessibility_action(req);   // 其余交基类默认路由
+    }
+  private:
+    double value_ = 0.0;
+};
+```
+
+`perform_accessibility_action` 的**基类默认实现**把动作路由到真实事件路径（聚焦 / 点击 / 调用 / 滚动经 `EventDispatcher`），所以「读屏按下按钮」与「鼠标按下按钮」走同一条码路——不覆写即正确。
+
+### 37.4 动态播报（toast / 异步结果）
+
+焦点不变、取值不变的临时文本只会被忽略。用 `announce` 显式请求朗读：
+
+```cpp
+save_button.set_on_click([&] {
+    const auto ok = do_save();
+    save_button.announce(ok ? "已保存" : "保存失败，请重试");
+});
+
+// 无控件归属的全局提示（如后台任务完成）
+au::notify_accessibility_announcement("导出完成，共 128 条", nullptr);
+```
+
+播报走**独立事件通道**，不经语义树 diff，因此不受「无焦点/取值变化」限制。对应平台映射：UIA `UiaRaiseNotificationEvent`（老系统回退 `LiveRegionChanged`）、macOS `announcementRequested`、AT-SPI2 `object:announcement`、Wasm `aria-live`。
+
+### 37.5 排除装饰性控件
+
+纯装饰的图形 / 分隔线不该被读屏逐个念出来。覆写 `accessibility_is_semantic()` 返回 `false` 即把它（及其标记含义）从语义树里摘掉：
+
+```cpp
+class Divider : public au::LeafWidget {
+  public:
+    [[nodiscard]] auto accessibility_is_semantic() const -> bool override { return false; }
+};
+```
+
+无 label 的 `Image` 与「无名 + 无交互」的纯布局容器无需你动手：共享层已按同一规则把前者标记为非控件、把后者排除出内容视图（避免读屏不停念「pane」）。
+
+### 37.6 想验证时用什么
+
+| 手段 | 看什么 |
+|:---|:---|
+| **讲述人**（Win+Ctrl+Enter） | 端到端朗读体验；Tab 走焦点、空格/回车激活 |
+| **Inspect.exe**（Windows SDK） | UIA 元素树、属性清单、可用 pattern；`FrameworkId` 应显示 `Aurora` |
+| `tools/verify/win32_ua_live_probe` | 真机自动化验收：以 COM UIA 客户端（与读屏同路径）遍历控件视图并与期望表比对（见 [`specification/08-tooling.md`](specification/08-tooling.md) §7.5） |
+| 单元测试 | 平台中立层：快照 / diff / 偏移映射 / 动作路由；`utest_a11y_*` 四个套件 |
+
+### 37.7 常见坑
+
+- **只读钩子别有副作用**：`accessibility_*()` 会在任意平台查询时刻被调用（可能远多于你的绘制次数），其间不要改控件状态、不要发布局请求、不要触发事件。
+- **别把语义树当性能热点**：重建是**拉取式**的（平台查询到达才做全量重投影），不进帧循环；但若你有上千节点的大列表，请优先用虚拟化容器，别让读屏一次拉全量。
+- **`runtime_id` 不是 `Node::id`**：前者是进程级原子自增的无障碍身份（构造时分配、生命周期恒定），后者是树内定位标识。桥用前者保证「同一控件跨事件可比」。

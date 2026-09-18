@@ -148,6 +148,50 @@ au::Text("Welcome").font_size(24).bold();
 
 **二层属性划分**：固有属性（`XxxProps` 字段）描述控件身份并随控件序列化；`Modifier` 承载跨切面装饰。重叠能力以**固有属性优先**；绘制时 `Modifier` 在外、固有属性在内（详见 [`03-layout-render.md`](03-layout-render.md) §7.4）。
 
+### 2.6 无障碍虚钩子
+
+控件通过一组**虚钩子**自述无障碍语义；语义树构建（`core/accessibility.h` §7.2）与平台桥只读这些钩子，不探控件内部。全部为虚函数且**基类默认值即合法**——自定义控件零改动仍可被推断（`infer_accessibility_role(type_name())` 兜底）。
+
+**身份与角色**
+
+| 钩子 | 默认 | 说明 |
+|:---|:---|:---|
+| `runtime_id() const -> std::uint64_t` | 基类构造时分配的进程级原子自增值（从 1 起） | 节点稳定身份；**非虚**，生命周期内恒定，直接进入 `AccessibilityNode::id` |
+| `accessibility_role() const -> AccessibilityRole` | 走 `infer_accessibility_role(type_name())` 表 | 控件可覆写（如图表族五控件统一返回 `Image`） |
+| `accessibility_label() const -> std::string` | 空串 | 可访问名首选来源 |
+| `accessibility_value() const -> std::string` | 空串 | 平台 Value 属性来源 |
+| `accessibility_hint() const -> std::string` | 空串 | HelpText 来源 |
+
+**状态 / 取值域 / 层级**（结构化，供平台映射为位属性）
+
+| 钩子 | 默认 | 典型覆写 |
+|:---|:---|:---|
+| `accessibility_state() const -> AccessibilityState` | 只填 `focused` | `Checkbox` / `Switch` 补 `checkable` + `checked`；`Slider` / `Progress` 补 `read_only`；`TextInput` 补 `read_only` / `password` / `multiline` |
+| `accessibility_range() const -> std::optional<AccessibilityRange>` | `nullopt` | `Slider`（min/max/step/value）、`Progress`（0–1） |
+| `accessibility_level() const -> std::optional<int>` | `nullopt` | 标题层级（`Header` 角色用于文档结构导航） |
+| `accessibility_scroll() const -> std::optional<AccessibilityScrollRange>` | `nullopt` | `Scroll`（可滚动范围的当前位置与边界） |
+| `accessibility_is_semantic() const -> bool` | `true` | 声明「不参与语义树」的纯装饰控件返回 `false`（该控件及其标记含义被平台完全忽略） |
+
+**可编辑文本（TextPattern 支撑）**
+
+| 钩子 | 默认 | 典型覆写 |
+|:---|:---|:---|
+| `accessibility_text() const -> std::string_view` | 空 | `TextInput`（原文）/ `RichTextEdit` |
+| `accessibility_selection() const -> std::optional<AccessibilityTextSelection>` | `nullopt` | 同上；UTF-8 **字节**半开区间 |
+| `accessibility_set_selection(std::size_t start, std::size_t end) -> void` | no-op | 同上 |
+| `accessibility_char_bounds(std::size_t utf8_index) const -> std::optional<Rect>` | `nullopt` | 同上；须经 `FontEngine` 度量，**无头环境不加载字体**故只能返回 `nullopt` |
+| `accessibility_replace_text(std::size_t start, std::size_t end, std::string_view) -> void` | no-op | 同上；以 UTF-8 偏移表达 |
+
+**动作通道**
+
+| 钩子 | 说明 |
+|:---|:---|
+| `perform_accessibility_action(const AccessibilityActionRequest&) -> bool` | 读屏反向操作控件的**唯一**入口。基类默认实现把动作**路由到真实事件路径**（聚焦 / 点击 / 调用 / 滚动经 `EventDispatcher` 与 `resolve_focus_manager`），不另造旁路；控件可覆写定制语义（如 `Toggle` → `set_value`、`Value` → `set_value`）；无法处理返回 `false` |
+| `accessibility_scroll_to(double offset) -> void` | 默认 no-op；`Scroll` 覆写为「语义滚动到指定偏移」（平台 `ScrollIntoView` 的落点） |
+| `announce(const std::string&) const -> void` | 动态播报（Live Region）：上抛 `AccessibilityEventKind::Announcement`，不经语义树 diff。无控件归属的播报走自由函数 `notify_accessibility_announcement(text, nullptr)` |
+
+> **只读钩子必须无副作用**：`accessibility_*` 查询会被桥在**任意平台查询时刻**调用，链路是「平台回调 → 快照重投影 → 构建节点 → 读钩子」，其间不允许改控件状态、发布局请求或触发事件。唯一的例外是 `announce()`——它是动作而非查询，且经独立事件通道。
+
 ---
 
 ## 3 控件清单

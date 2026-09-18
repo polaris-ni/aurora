@@ -16,6 +16,7 @@
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/chart_common.h"
 #include "aurora/widget/widget.h"
+#include "aurora/core/accessibility.h"
 
 namespace aurora {
 
@@ -143,6 +144,13 @@ class BarChart : public LeafWidget, public BarChartProps {
     auto on_pointer_event(MouseEvent &e) -> void override;
 
     /// @brief 无障碍标签：图类型与规模（数据本身不进语义树，避免读屏念出一长串数字）。
+    /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `BarChart`，
+    ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override {
+        return AccessibilityRole::Image;
+    }
+
     [[nodiscard]] auto accessibility_label() const -> std::string override;
     /// @brief 无障碍值：当前悬停 / 选中的数据点（未悬停时为空）。
     [[nodiscard]] auto accessibility_value() const -> std::string override;

@@ -91,7 +91,7 @@ cmake -S . -B build -DAURORA_BUILD_INSPECTOR_SERVER=ON
 | 说明 | 定义 `tools/verify/` 下的**真机验收探针**可执行目标。这类探针证明的是「无头 CI 无法证明」的平台接线能力（典型：光标形状的各后端 `Surface::set_cursor` 是否真的改变了屏幕上显示的光标） |
 | 传播宏 | 无（纯交付物开关，不向库代码注入宏） |
 | 模块 | `cmake/AuroraVerify.cmake` |
-| 产物 | 按条件定义：`aurora_verify_x11_cursor`（`AURORA_BACKEND_X11`）/ `aurora_verify_win32_cursor`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`）/ `aurora_verify_macos_cursor`（`APPLE` 且开 `AURORA_BACKEND_MACOS`，需 ObjC++）/ `aurora_verify_glfw_cursor`（`AURORA_BACKEND_GLFW`）；聚合目标 `aurora_verify` |
+| 产物 | 按条件定义：`aurora_verify_x11_cursor`（`AURORA_BACKEND_X11`）/ `aurora_verify_win32_cursor`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`）/ `aurora_verify_macos_cursor`（`APPLE` 且开 `AURORA_BACKEND_MACOS`，需 ObjC++）/ `aurora_verify_glfw_cursor`（`AURORA_BACKEND_GLFW`）/ `aurora_verify_win32_ua`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，另链 `oleacc`）；聚合目标 `aurora_verify` |
 
 三点与其它"产物开关"不同的地方：
 
@@ -225,6 +225,13 @@ cmake --build build --target gen_debug_api_json     # 仅刷新 debug 段
 ```
 
 新增 / 删除 widget 或类型后，须重新生成 aurora_api.json 以使其与 `register_core_widgets()` 注册表保持一致。
+
+### 3.7 无障碍桥（Win32 UIA）：**无独立开关**
+
+无障碍桥**不引入任何 CMake 选项或 feature 宏**（编译期定义按模块头直接 `#include core/platform.h`，无新宏）。门控规则只有两条：
+
+1. **编译门控**：Win32 UIA 桥实现在 `src/aurora/window/detail/win32_ua.{h,cpp}`，随 `AURORA_BACKEND_WIN32`（Windows 默认 ON）编入；`AURORA_BACKEND_D3D11` 复用同一桥，故门控为「平台宏 ∧ 后端宏析取」，与 `src/aurora/window/win32_cursor.h` 同款。语义树 / 钩子升级（`core/accessibility.h`、`core/a11y_*.h`、`Widget` 虚钩子）**无任何门控**——公共头纯增量，所有构建路径可见。
+2. **运行期门控**：`UIAutomationCore.dll` **动态加载**（`LoadLibraryA`），无链接期依赖；缺库或必要导出缺失时整桥降级为 no-op 并 `Diagnostics::warn` 一次。桥本身**惰性构造**——首个平台查询（`WM_GETOBJECT`）到达才构建，无读屏在线时零开销。
 
 ---
 

@@ -187,6 +187,130 @@ class TextInput : public LeafWidget {
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_value() const -> std::string override { return composed_text(value_.get()); }
 
+    // ---- 无障碍语义（切片 1/2）：状态 + TextPattern 支撑的四组文本钩子 + Value 动作 ----
+
+    /// @brief 无障碍状态：只读（含禁用）、密码掩码（读屏不得逐字朗出）、单行。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_state() const -> AccessibilityState override {
+        AccessibilityState s = Widget::accessibility_state();
+        s.read_only = read_only_ || !enabled_;
+        s.disabled = !enabled_;
+        s.password = obscure_;
+        s.multiline = false;  // 单行输入框（UIA Edit；多行控件覆写为 true → Document）
+        return s;
+    }
+
+    /// @brief 无障碍文本全文（UTF-8）：`value_` 本体，**不含**组合期 preedit
+    ///        （组合中文本属未确定态，读屏读 value 即可）。
+    /// @note 返回视图指向 `value_` 的存量字符串：控件存活期间有效。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_text() const -> std::string_view override { return value_.get(); }
+
+    /// @brief 无障碍选区：内部「含头含尾码点下标」模型 → UTF-8 字节半开区间 `[start, end)`。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_selection() const -> std::optional<AccessibilityTextSelection> override {
+        const std::string &v = value_.get();
+        AccessibilityTextSelection sel;
+        if (has_selection()) {
+            const std::size_t a = std::min(sel_start_, sel_end_);
+            const std::size_t b = std::max(sel_start_, sel_end_) + 1U;  // 含尾 → 半开
+            sel.start = cp_to_byte(v, a);
+            sel.end = cp_to_byte(v, b);
+        } else {
+            const std::size_t at = cp_to_byte(v, caret_);
+            sel.start = at;
+            sel.end = at;  // 空选区 = 光标位置
+        }
+        return sel;
+    }
+
+    /// @brief 设置选区（UTF-8 字节半开区间 → 内部码点模型）；只读态仍允许移动光标/选区。
+    /// @note Side-effects: mutates selection state
+    auto accessibility_set_selection(std::size_t start, std::size_t end) -> void override {
+        const std::string &v = value_.get();
+        const std::size_t b0 = byte_to_cp(v, std::min(start, v.size()));
+        const std::size_t b1 = byte_to_cp(v, std::min(end, v.size()));
+        const std::size_t a = std::min(b0, b1);
+        const std::size_t b = std::max(b0, b1);
+        sel_start_ = a;
+        if (b <= a) {
+            sel_end_ = NO_SEL;
+            caret_ = a;
+        } else {
+            sel_end_ = b - 1U;  // 含尾模型
+            caret_ = b;
+        }
+        selecting_ = false;
+        mark_needs_paint();
+    }
+
+    /// @brief 单字符盒（**窗口本地 DIP**）：经 `FontEngine::caret_x` 取该字符左右边界。
+    ///
+    /// @note 无字体度量时（Headless 不加载字体，G10）返回 nullopt —— 契约是「不崩溃」，
+    ///       几何断言只能靠真机探针（`tools/verify/win32_ua_live_probe`）。
+    /// @note Side-effects: reads layout/state
+    [[nodiscard]] auto accessibility_char_bounds(std::size_t utf8_index) const -> std::optional<Rect> override {
+        const std::string &v = value_.get();
+        if (utf8_index >= v.size()) {
+            return std::nullopt;
+        }
+        const Rect box = paint_bounds();
+        if (box.size.width <= 0.0F || box.size.height <= 0.0F) {
+            return std::nullopt;
+        }
+        const float fs = font_size_ > 0.0F ? font_size_ : 14.0F;
+        const Font f{.size_pt = fs};
+        if (!v.empty() && render::FontEngine::measure_width(v, f) <= 0.0F) {
+            return std::nullopt;  // 无可用字体：度量不可用，交由真机验证
+        }
+        const std::size_t cp = byte_to_cp(v, utf8_index);
+        const float x0 = render::FontEngine::caret_x(v, cp, f);
+        const float x1 = render::FontEngine::caret_x(v, cp + 1, f);
+        const float th = render::FontEngine::measure_height(f);
+        return Rect{.origin = Point{.x = box.origin.x + padding_.left + x0, .y = box.origin.y + padding_.top},
+                    .size = Size{.width = std::max(0.0F, x1 - x0), .height = th}};
+    }
+
+    /// @brief 替换文本（UTF-8 字节半开区间）：读屏编辑动作（`ITextRangeProvider` / AT-SPI2
+    ///        `EditableText`）的落点；只读 / 禁用时 no-op。
+    /// @note Side-effects: mutates state（写回 `value_`，触发 `on_changed` 与 ValueChanged 事件）
+    auto accessibility_replace_text(std::size_t start, std::size_t end, std::string_view utf8) -> void override {
+        if (read_only_ || !enabled_) {
+            return;
+        }
+        std::string v = value_.get();
+        const std::size_t a = std::min(start, v.size());
+        const std::size_t b = std::clamp(end, a, v.size());
+        std::string next = v.substr(0, a);
+        next.append(utf8);
+        next.append(v, b, std::string::npos);
+        if (max_length_ > 0 && cp_count(next) > max_length_) {
+            next = cp_slice(next, 0, max_length_);  // 限长按码点截断（与键盘输入同口径）
+        }
+        value_ = std::move(next);
+        const std::size_t caret_cp = byte_to_cp(value_.get(), std::min(a + utf8.size(), value_.get().size()));
+        caret_ = caret_cp;
+        sel_start_ = caret_cp;
+        sel_end_ = NO_SEL;
+        mark_needs_layout();
+        mark_needs_paint();
+        if (on_changed_) {
+            on_changed_(value_.get());
+        }
+        notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
+    }
+
+    /// @brief 读屏 Value 动作：整值替换（与 `IValueProvider::SetValue` 同语义）；
+    ///        Focus 走基类（另把光标置于文末）。
+    /// @note Side-effects: mutates state
+    auto perform_accessibility_action(const AccessibilityActionRequest &req) -> bool override {
+        if (req.action == AccessibilityAction::Value) {
+            accessibility_replace_text(0, value_.get().size(), req.text);
+            return true;
+        }
+        return Widget::perform_accessibility_action(req);
+    }
+
     /// @brief 悬停默认文本光标：输入框悬停 IBeam；修饰链显式 `cursor(...)` 声明优先。
     /// @note Side-effects: pure
     [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return CursorShape::IBeam; }
@@ -965,6 +1089,26 @@ class TextInput : public LeafWidget {
     static auto cp_count(const std::string &s) -> size_t { return utf8_cp_count(s); }
     static auto cp_slice(const std::string &s, size_t start, size_t count) -> std::string {
         return utf8_cp_slice(s, start, count);
+    }
+    /// @brief 码点下标 → UTF-8 字节偏移（越界夹紧到串尾；无障碍文本钩子的换算原语）。
+    [[nodiscard]] static auto cp_to_byte(const std::string &s, size_t cp_index) -> size_t {
+        size_t i = 0;
+        size_t cp = 0;
+        while (i < s.size() && cp < cp_index) {
+            i += cp_len(static_cast<unsigned char>(s[i]));
+            ++cp;
+        }
+        return i;
+    }
+    /// @brief UTF-8 字节偏移 → 码点下标（越界夹紧到串尾）。
+    [[nodiscard]] static auto byte_to_cp(const std::string &s, size_t byte_index) -> size_t {
+        size_t i = 0;
+        size_t cp = 0;
+        while (i < s.size() && i < byte_index) {
+            i += cp_len(static_cast<unsigned char>(s[i]));
+            ++cp;
+        }
+        return cp;
     }
     auto delete_selection() -> void {
         if (!has_selection()) {

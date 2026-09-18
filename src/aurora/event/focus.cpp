@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
+#include <utility>
+#include <vector>
 
 namespace aurora {
 
@@ -16,11 +19,58 @@ namespace {
     thread_local FocusManager *slot = nullptr;
     return slot;
 }
+
+/// @brief 兜底焦点管理器注册表（供派发栈外的动作通道取用，见 `resolve_focus_manager`）。
+///
+/// 按**控件根**缓存一份 `FocusManager`：根通常由 `Node` 以 `shared_ptr` 持有，故以
+/// `weak_ptr` 为键并在每次解析时清理已失效条目（避免根销毁后残留悬垂键与泄漏）。
+/// 未由 `shared_ptr` 持有的根（栈/成员对象，`weak_from_this()` 恒空）无法安全键控，
+/// 退化为共享单实例——单线程 UI 模型下该形态只见于测试，行为仍正确。
+struct FallbackRegistry {
+    std::vector<std::pair<std::weak_ptr<Widget>, std::unique_ptr<FocusManager>>> by_root;
+    FocusManager unowned_root;
+
+    [[nodiscard]] auto resolve(Widget &root) -> FocusManager * {
+        std::weak_ptr<Widget> guard = root.weak_from_this();
+        if (guard.lock() == nullptr) {
+            unowned_root.set_root(&root);
+            return &unowned_root;
+        }
+        std::erase_if(by_root, [](const auto &entry) -> bool { return entry.first.expired(); });
+        for (auto &entry : by_root) {
+            if (entry.first.lock().get() == &root) {
+                entry.second->set_root(&root);
+                return entry.second.get();
+            }
+        }
+        auto fm = std::make_unique<FocusManager>();
+        fm->set_root(&root);
+        FocusManager *raw = fm.get();
+        by_root.emplace_back(guard, std::move(fm));
+        return raw;
+    }
+};
+
+[[nodiscard]] auto fallback_registry() -> FallbackRegistry & {
+    static FallbackRegistry registry;  // NOLINT
+    return registry;
+}
 }  // namespace
 
 auto current_focus_manager() noexcept -> FocusManager * { return focus_manager_slot(); }
 
 auto set_current_focus_manager(FocusManager *fm) noexcept -> void { focus_manager_slot() = fm; }
+
+auto resolve_focus_manager(Widget &w) -> FocusManager * {
+    if (FocusManager *active = current_focus_manager(); active != nullptr) {
+        return active;
+    }
+    Widget *root = &w;
+    for (Widget *p = root->layout_parent(); p != nullptr; p = root->layout_parent()) {
+        root = p;
+    }
+    return fallback_registry().resolve(*root);
+}
 
 auto FocusManager::set_root(Widget *root) -> void { root_ = root; }
 

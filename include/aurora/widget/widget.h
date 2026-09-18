@@ -1,16 +1,20 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "aurora/core/a11y_types.h"
 #include "aurora/core/aurora_assert.h"
 #include "aurora/core/platform.h"  // NOLINT
 #include "aurora/core/strict_mode.h"
@@ -39,6 +43,12 @@ class Painter;  // 前向声明（render 模块定义于 render/painter.h）
 
 class Widget;  // 前向声明（HitNode 以 std::weak_ptr<Widget> 作为成员；Widget 在下方定义）
 
+// 无障碍枚举 / 请求结构：`widget.h` 与 `core/accessibility.h` 互相依赖后者反向包含前者，
+// 故此处只能前向声明（返回枚举 / 常量引用参数在声明点无需完整类型），默认实现定义在
+// `src/aurora/widget/widget.cpp`（该 TU 才包含 `core/accessibility.h`）。
+enum class AccessibilityRole : std::uint8_t;  // 定义见 core/accessibility.h
+struct AccessibilityActionRequest;            // 定义见 core/accessibility.h
+
 /// @brief 上报**焦点变化**到无障碍事件通道（`AccessibilityEventKind::FocusChanged`）。
 ///
 /// 定义在 `src/aurora/widget/widget.cpp`：该 TU 才包含 `core/accessibility.h`——后者反向包含
@@ -50,10 +60,21 @@ auto notify_accessibility_focus_changed(const Widget *target) -> void;
 
 /// @brief 上报**结构变化**到无障碍事件通道（`AccessibilityEventKind::StructureChanged`）。
 /// 定义位置与依赖同 `notify_accessibility_focus_changed`。
-/// @param host 子节点发生增删/替换的容器
+/// @param host 子节点发生增删/替换的容器（可为 nullptr：宿主未知时的合法取值，§4.6）
 /// @note Thread: main-thread only
 /// @note Side-effects: invokes accessibility event handler
 auto notify_accessibility_structure_changed(const Widget *host) -> void;
+
+/// @brief 上报**动态播报**（Live Region / Announcement，G4）到无障碍事件通道。
+///
+/// 与 `Widget::announce(text)` 的区别：本入口不绑定控件（`target` 可空），供 toast /
+/// 异步结果等无控件归属的临时文本使用；控件级播报用 `Widget::announce`。
+/// 定义位置与依赖同 `notify_accessibility_focus_changed`。
+/// @param text 待朗读文本（UTF-8；空串不上报）
+/// @param target 关联控件（可为 nullptr）
+/// @note Thread: main-thread only
+/// @note Side-effects: invokes accessibility event handler
+auto notify_accessibility_announcement(const std::string &text, const Widget *target) -> void;
 
 /// @brief 命中链节点：携带命中控件及其相对根的全局 origin（用于事件坐标本地化）。
 /// 命中链递归下降时，子节点的 `Node::bounds_.origin` 即其全局 origin，直接带入；
@@ -132,12 +153,22 @@ class Widget : public std::enable_shared_from_this<Widget> {
   public:
     virtual ~Widget() = default;
 
-    Widget() = default;
+    Widget() : runtime_id_(next_runtime_id()) {}
 
     Widget(const Widget &) = delete;
     auto operator=(const Widget &) -> Widget & = delete;
+    // 移动构造保留默认实现（成员众多且含不可移动项）：**移动源与移动目标共享 runtime_id**。
+    // Widget 通常由 `Node` 以 shared_ptr 就地构造、不做移动，被移动后的源对象随即析构，
+    // 故此共享在实践中不可观测；若将来出现「移动后仍使用源对象」的形态须显式改派 id。
     Widget(Widget &&) = default;
     auto operator=(Widget &&) -> Widget & = default;
+
+    /// @brief 进程级唯一运行时身份（原子自增，自 1 起；0 保留为无效）。
+    ///
+    /// 用途：语义树节点身份（`AccessibilityNode::id`）与平台桥的 diff 键（D5）。
+    /// 构造时分配、实例生命周期内恒定；非序列化属性。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto runtime_id() const noexcept -> std::uint64_t { return runtime_id_; }
 
     /// @brief 测量：应用 modifier 包裹后调用 layoutImpl。
     virtual auto layout(const Constraints &c, const BuildContext &ctx) -> Size;
@@ -508,6 +539,95 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @note Side-effects: pure
     [[nodiscard]] virtual auto accessibility_hint() const -> std::string { return std::string{}; }
 
+    // ---- 无障碍语义钩子（切片 1：D6–D8 / G23 / G33 / OQ4）----
+
+    /// @brief 无障碍语义角色：默认走既有 `infer_accessibility_role(type_name())` 推断表（零改动兼容）。
+    ///
+    /// 控件可覆写声明语义（图表族覆写为 `Image`），宿主自定义控件亦可覆写而不必改推断表。
+    /// @note 定义见 `src/aurora/widget/widget.cpp`（需完整 `AccessibilityRole`）。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto accessibility_role() const -> AccessibilityRole;
+
+    /// @brief 无障碍状态位集：基类默认只填 `focused`（D6）。
+    ///
+    /// 派生位 `visible` / `focusable` / `offscreen` 由共享语义层（`core/accessibility.h`
+    /// 的 `build_accessibility_node`）统一填，覆写时无需关心。
+    /// @note Side-effects: reads state
+    [[nodiscard]] virtual auto accessibility_state() const -> AccessibilityState {
+        return AccessibilityState{.focused = is_focused_};
+    }
+
+    /// @brief 无障碍取值域（D7）：默认无（nullopt）；Slider / ProgressIndicator 覆写。
+    /// @note Side-effects: reads state
+    [[nodiscard]] virtual auto accessibility_range() const -> std::optional<AccessibilityRange> {
+        return std::nullopt;
+    }
+
+    /// @brief 标题层级（OQ4）：`Header` 角色控件的 `aria-level` / UIA level；默认无。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto accessibility_level() const -> std::optional<int> { return std::nullopt; }
+
+    /// @brief 是否参与语义树（G23 裁剪钩子）：默认 true。
+    ///
+    /// 纯装饰控件覆写返回 false ⇒ 读屏完全忽略（对标 Flutter `excludeSemantics` /
+    ///  Chromium `IsIgnored`）；判定在共享层生效，三桥语义一致。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto accessibility_is_semantic() const -> bool { return true; }
+
+    /// @brief 无障碍滚动量（G32）：默认无（nullopt）；`Scroll` 等滚动容器覆写返回 {min,max,position}。
+    /// @note Side-effects: reads state
+    [[nodiscard]] virtual auto accessibility_scroll() const -> std::optional<AccessibilityScrollRange> {
+        return std::nullopt;
+    }
+
+    /// @brief 无障碍滚动定位（G32）：把偏移直接设到 `offset`（语义同 `accessibility_scroll()`
+    ///        的 position 分量）；非滚动控件默认 no-op。
+    ///
+    /// 供 UIA `IScrollProvider::SetScrollPercent` / AT-SPI2 `Component.ScrollTo` 这类
+    /// 「绝对定位」通道使用——逐次 `ScrollUp` / `ScrollDown` 无法表达百分比跳转。
+    /// @param offset 目标偏移（由桥按 min/max 夹取后传入）
+    /// @note Side-effects: mutates scroll state
+    virtual auto accessibility_scroll_to(double /*offset*/) -> void {}
+
+    // ---- 无障碍文本语义钩子（A4 / §4.5：全部默认空实现，仅可编辑文本控件覆写）----
+
+    /// @brief 纯文本全文（UTF-8；不含组合期 preedit——组合中文本属未确定态，读屏读 value 即可）。
+    [[nodiscard]] virtual auto accessibility_text() const -> std::string_view { return std::string_view{}; }
+    /// @brief 当前选区（UTF-8 字节偏移半开区间）；无选区语义时返回 nullopt。
+    [[nodiscard]] virtual auto accessibility_selection() const -> std::optional<AccessibilityTextSelection> {
+        return std::nullopt;
+    }
+    /// @brief 设置选区（UTF-8 字节偏移）；无选区语义时 no-op。
+    virtual auto accessibility_set_selection(std::size_t /*start*/, std::size_t /*end*/) -> void {}
+    /// @brief 单字符盒（**窗口本地 DIP**）；无字体度量 / 越界时返回 nullopt（不得崩溃，G10）。
+    [[nodiscard]] virtual auto accessibility_char_bounds(std::size_t /*utf8_index*/) const -> std::optional<Rect> {
+        return std::nullopt;
+    }
+    /// @brief 替换文本（编辑动作；UTF-8 字节偏移半开区间）；只读 / 无编辑语义时 no-op。
+    virtual auto accessibility_replace_text(std::size_t /*start*/, std::size_t /*end*/, std::string_view /*utf8*/)
+        -> void {}
+
+    // ---- 无障碍动作通道（切片 2：D3）----
+
+    /// @brief 读屏反向操作入口（A3）。
+    ///
+    /// 默认实现路由到**真实事件路径**：Focus → 焦点管理器；Click/Invoke → 与
+    /// `Inspector::simulate_click` 同口径的中心点 press+release 派发（不可命中则失败）。
+    /// Toggle / Value / Select 语义强相关，基类不支持，须控件显式覆写。
+    /// @return 是否执行；false = 动作不支持（桥转平台侧「不支持」应答）。
+    /// @note 定义见 `src/aurora/widget/widget.cpp`（需完整 `AccessibilityActionRequest`）。
+    /// @note Side-effects: dispatches events
+    virtual auto perform_accessibility_action(const AccessibilityActionRequest &req) -> bool;
+
+    /// @brief 动态播报：请求读屏立即朗读本段文本（G4 / Live Region）。
+    ///
+    /// 不经语义树 diff（临时文本没有焦点或取值变化），由各桥直译平台「立即朗读」信号；
+    /// 无读屏在线时为空转（事件通道无处理器）。
+    /// @param text 待朗读文本（UTF-8）
+    /// @note 定义见 `src/aurora/widget/widget.cpp`（需完整 `AccessibilityEvent`）。
+    /// @note Side-effects: invokes accessibility event handler
+    auto announce(const std::string &text) const -> void;
+
     /// @brief 控件级默认悬停光标（光标形状 API）。
     ///
     /// 默认空 = 无控件级声明；文本编辑控件覆写返回 `IBeam`、按钮类返回 `PointingHand`。
@@ -739,6 +859,18 @@ class Widget : public std::enable_shared_from_this<Widget> {
     bool focusable_ = true;  ///< 是否可参与焦点序（specification/05-event-navigation.md §4）
     int tab_index_ = 0;  ///< Tab 序权重（越小越靠前）
     bool is_focused_ = false;  ///< 当前是否持有焦点
+    // NOLINTEND(*-non-private-member-variables-in-classes)
+
+  private:
+    /// @brief 分配下一个运行时身份（进程级原子自增，自 1 起；0 保留为无效）。
+    [[nodiscard]] static auto next_runtime_id() -> std::uint64_t {
+        static std::atomic<std::uint64_t> counter{0};  // NOLINT
+        return counter.fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+
+  protected:
+    // NOLINTBEGIN(*-non-private-member-variables-in-classes)
+    std::uint64_t runtime_id_ = 0;  ///< 运行时身份（构造时分配；见 `runtime_id()`）
     // NOLINTEND(*-non-private-member-variables-in-classes)
     /// @brief 声明本控件为 relayout boundary（尺寸由约束决定、不依赖子节点）。
     ///        虚拟化列表/滚动容器等应在构造时调用，以截断布局脏向上冒泡、避免整树重排。

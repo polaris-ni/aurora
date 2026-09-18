@@ -8,6 +8,7 @@
 #include <string>
 
 #include "aurora/app/perf_overlay.h"
+#include "aurora/core/a11y_provider.h"
 #include "aurora/core/aurora_assert.h"
 #include "aurora/core/log.h"
 #include "aurora/core/result.h"
@@ -297,6 +298,13 @@ class Window {
     [[nodiscard]] auto surface() -> Surface & { return *surface_; }
     [[nodiscard]] auto surface() const -> const Surface & { return *surface_; }
 
+    /// @brief 设置 RTL 标志（#5：应用侧按自身方向决策推送；默认转发到 Surface）。
+    auto set_accessibility_rtl(bool rtl) -> void {
+        if (surface_) {
+            surface_->set_accessibility_rtl(rtl);
+        }
+    }
+
     [[nodiscard]] auto size() const -> Size { return surface_->size(); }
     [[nodiscard]] auto title() const -> const std::string & { return title_; }
     auto set_title(std::string t) -> void {
@@ -453,6 +461,10 @@ class Window {
         BuildContext ctx = prepare_context(root, root_changed);
         const double layout_ms = run_layout(root, plan, ctx);
         const double paint_ms = run_paint(p, root, ctx, plan);
+        // 无障碍根注入（D9）：布局与绘制都完成后语义树几何才有效，故放在 paint 之后。
+        // 走宿主级通道而非 `accessibility_provider()`：桥惰性构造（D14），首个平台查询到达
+        // 时它才存在，此时若无注入记录就无根可投影。无桥后端为 no-op。
+        surface_->set_accessibility_root(&root.widget());
         const bool hud_refreshed = compose_hud_maybe(p, ctx);
         if (gpu_sink != nullptr) {
             p.stop();  // HUD 合成命令亦入帧级 DL，录制到此收口

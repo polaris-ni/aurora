@@ -17,12 +17,19 @@
 #include "aurora/render/png.h"
 #include "aurora/window/title_bar_style.h"
 #include "aurora/window/window_state.h"
+#include "aurora/core/a11y_provider.h"  // Provider 完整定义（set_accessibility_rtl 默认实现需调用其虚方法）
 
 namespace aurora {
 
 namespace rhi {
 class RhiFrameSink;  // 前置声明：GPU 帧调度挂点（完整定义见 render/rhi/rhi_frame_sink.h）
 }
+
+namespace a11y {
+class Provider;  // 前向声明：平台无障碍桥抽象（完整定义见 core/a11y_provider.h）
+}
+
+class Widget;  // 前向声明：语义树根（无障碍根注入参数；完整定义见 widget/widget.h）
 
 /// @brief 窗口高级样式选项：跨后端声明，由各 Surface 按能力映射。
 /// Headless 忽略（无 OS 窗口）；Win32 映射到 WS_EX_TOPMOST / WS_POPUP / 去 WS_THICKFRAME /
@@ -314,6 +321,35 @@ class Surface {
     /// 用于跨模块窗口操作（如多显示器窗口迁移）。默认空实现，由具体后端覆盖。
     /// 为只读查询，声明为 const（不修改 Surface 状态）。
     [[nodiscard]] virtual auto native_handle() const -> void * { return nullptr; }
+
+    /// @brief 本窗口的无障碍桥（`a11y::Provider`）；默认 nullptr（无桥 / 未激活）。
+    ///
+    /// 扩展点（D13）：各平台后端按能力返回自己的桥实例——Win32 家族（`Win32Surface` /
+    /// `D3D11Surface`，共用 `Win32Window` 宿主）返回同一个 `Win32UiaBridge`；其余平台
+    /// 后续按 §8 契约接入。桥**惰性激活**：无读屏在线时返回 nullptr 或已注册但未激活的实例，
+    /// 宿主据此零开销。公共头不引入任何平台头（仅前向声明）。
+    /// @note Thread: main-thread only
+    [[nodiscard]] virtual auto accessibility_provider() const -> a11y::Provider * { return nullptr; }
+
+    /// @brief 把语义树根注入本窗口（每帧调用；默认 no-op）。
+    ///
+    /// 为何不只用 `accessibility_provider()->set_root()`：桥是**惰性**构造的（D14，无读屏查询
+    /// 时零开销），首个 `WM_GETOBJECT` 到达时它才存在——此刻若还没有任何注入记录，桥就无根可投影。
+    /// 故根必须由**宿主**（恒存在）承接：桥构造后由宿主补喂，之后每次换根即时转发。
+    /// @note Thread: main-thread only
+    /// @note Side-effects: stores a non-owning pointer
+    virtual auto set_accessibility_root(Widget * /*root*/) -> void {}
+
+    /// @brief 设置 RTL 标志（每帧或状态变化时调用；默认 no-op）。
+    ///
+    /// 桥在 a11y 查询路径无 `BuildContext`，无法自动判定方向，故由**应用侧推送** RTL 状态。
+    /// 默认实现转发到 `accessibility_provider()->set_rtl()`（桥存在且支持 RTL 时生效）。
+    /// @note Thread: main-thread only
+    virtual auto set_accessibility_rtl(bool rtl) -> void {
+        if (auto *p = accessibility_provider()) {
+            p->set_rtl(rtl);
+        }
+    }
 
     /// @brief GPU 帧调度挂点：后端提供 GPU 栅格（`rhi::RhiFrameSink`）时返回其指针，默认 nullptr。
     /// `Window::present_root` 据此选择「帧级 DisplayList 录制 → GPU 回放」或软件栅格路径；

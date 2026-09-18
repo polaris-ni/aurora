@@ -19,6 +19,7 @@
 #include "aurora/render/painter.h"
 #include "aurora/widget/scroll_viewport.h"
 #include "aurora/widget/widget.h"
+#include "aurora/core/accessibility.h"
 
 namespace aurora {
 
@@ -214,6 +215,38 @@ class Scroll : public Container, public ScrollProps {
         return offset_y_ != before;
     }
     [[nodiscard]] auto offset_y() const -> float { return offset_y_; }
+
+    /// @brief 无障碍滚动量（G32）：{0, 内容量−视口量, 当前偏移}。
+    ///
+    /// 供读屏驱动滚动（UIA `IScrollProvider` / AT-SPI2 `Component.ScrollTo` /
+    /// macOS `accessibilityPerformScrollToVisible`）；不可滚时 max = 0，桥据此不暴露滚动 pattern。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_scroll() const -> std::optional<AccessibilityScrollRange> override {
+        const float max_offset = std::max(0.0F, content_h_ - viewport_h_);
+        return AccessibilityScrollRange{.min = 0.0,
+                                        .max = static_cast<double>(max_offset),
+                                        .position = static_cast<double>(offset_y_)};
+    }
+
+    /// @brief 无障碍滚动定位（G32）：走 `set_offset` 既有夹取路径（不标布局脏）。
+    /// @note Side-effects: mutates scroll state
+    auto accessibility_scroll_to(double offset) -> void override {
+        (void)set_offset(static_cast<float>(offset));
+        mark_needs_paint();
+    }
+
+    /// @brief 读屏滚动动作：按自身 step 换算「一屏」增量（比基类的通用估算精确）。
+    /// @note Side-effects: mutates scroll state
+    auto perform_accessibility_action(const AccessibilityActionRequest &req) -> bool override {
+        const bool down = req.action == AccessibilityAction::ScrollDown;
+        const bool up = req.action == AccessibilityAction::ScrollUp;
+        if (!down && !up) {
+            return Container::perform_accessibility_action(req);
+        }
+        const float unit = step > 0.0F ? step : 16.0F;
+        const float delta = (down ? -1.0F : 1.0F) * (viewport_h_ / unit);
+        return scroll_by(delta);
+    }
 
     /// @brief 程序化设置滚动偏移（返回是否实际变化）：夹取到 `[0, 内容高 - 视口高]`。
     ///

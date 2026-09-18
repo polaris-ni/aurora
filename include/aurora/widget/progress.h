@@ -5,6 +5,8 @@
 #include <optional>
 #include <string>
 
+#include "aurora/core/accessibility.h"
+#include "aurora/core/a11y_types.h"
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/binding.h"
@@ -87,6 +89,12 @@ class ProgressIndicator : public LeafWidget {
     /// @brief 无障碍值：当前进度的十进制串（值域 [0,1]，`std::to_string` 格式）。
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_value() const -> std::string override { return std::to_string(value()); }
+
+    /// @brief 无障碍取值域（D7）：进度恒为 [0,1] 只读区间（`step` 0 = 连续）。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_range() const -> std::optional<AccessibilityRange> override {
+        return AccessibilityRange{.min = 0.0, .max = 1.0, .step = 0.0, .value = value()};
+    }
 
     /// @brief 运行时自描述（规格附录 B）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {

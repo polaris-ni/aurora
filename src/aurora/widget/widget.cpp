@@ -7,6 +7,8 @@
 
 #include "aurora/core/accessibility.h"
 #include "aurora/core/debug.h"
+#include "aurora/core/diagnostics.h"
+#include "aurora/event/dispatcher.h"
 #include "aurora/event/focus.h"
 #include "aurora/modifier/modifier.h"
 #include "aurora/perf/counters.h"
@@ -26,12 +28,123 @@ auto notify_accessibility_structure_changed(const Widget *host) -> void {
     notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::StructureChanged, .target = host});
 }
 
+auto notify_accessibility_announcement(const std::string &text, const Widget *target) -> void {
+    announce_accessibility(text, target);
+}
+
+// ---- 无障碍语义钩子：默认实现（需完整 AccessibilityRole / AccessibilityActionRequest，故在此定义）----
+
+auto Widget::accessibility_role() const -> AccessibilityRole { return infer_accessibility_role(type_name()); }
+
+auto Widget::announce(const std::string &text) const -> void { notify_accessibility_announcement(text, this); }
+
+auto Widget::perform_accessibility_action(const AccessibilityActionRequest &req) -> bool {
+    switch (req.action) {
+        case AccessibilityAction::Focus: {
+            // 不得走 `request_focus()`：后者读派发期线程局部，在 UIA/AT-SPI2 回调栈里恒为空（G1）。
+            FocusManager *fm = resolve_focus_manager(*this);
+            if (fm == nullptr) {
+                Diagnostics::warn("perform_accessibility_action(Focus): no focus manager available",
+                                  "Widget::perform_accessibility_action", "a11y-no-focus-manager");
+                return false;
+            }
+            fm->set_focus(this);
+            return true;
+        }
+        case AccessibilityAction::Click:
+        case AccessibilityAction::Invoke: {
+            // 与 `Inspector::simulate_click` 同口径：以本控件为派发根、中心点为指针位置，
+            // 先做同口径命中测试（未命中即失败，不改变任何状态），再 press+release 两段派发。
+            FocusManager *fm = resolve_focus_manager(*this);
+            if (fm == nullptr) {
+                Diagnostics::warn("perform_accessibility_action(Click): no focus manager available",
+                                  "Widget::perform_accessibility_action", "a11y-no-focus-manager");
+                return false;
+            }
+            // 零尺寸（未布局 / 已折叠 / 完全被裁）不可命中：零盒的 contains(0,0) 恒真，
+            // 若不显式拒收，读屏会对不可见元素「成功点击」却毫无效果。与滚动分支同口径。
+            if (size_.width <= 0.0F || size_.height <= 0.0F) {
+                return false;
+            }
+            const Point center{.x = size_.width * 0.5F, .y = size_.height * 0.5F};
+            const Rect root_rect{.origin = Point{}, .size = size_};
+            if (hit_test_chain(center, root_rect, BuildContext{}).empty()) {
+                return false;  // 不可命中：动作不支持，桥转平台侧「不支持」应答
+            }
+            MouseEvent press;
+            press.action = MouseAction::Press;
+            press.button = MouseButton::Left;
+            press.position = center;
+            EventDispatcher::dispatch(*this, press, fm);
+            MouseEvent release = press;
+            release.action = MouseAction::Release;
+            EventDispatcher::dispatch(*this, release, fm);
+            return true;
+        }
+        case AccessibilityAction::ScrollUp:
+        case AccessibilityAction::ScrollDown:
+        case AccessibilityAction::ScrollLeft:
+        case AccessibilityAction::ScrollRight: {
+            // 滚动语义（G32）：把读屏的「上下左右滚一屏」翻译为滚轮同款增量派发。
+            // 步长取视口尺寸的 80%（与常见读屏滚动手感一致），方向沿用 ScrollEvent 约定。
+            const bool vertical = (req.action == AccessibilityAction::ScrollUp ||
+                                   req.action == AccessibilityAction::ScrollDown);
+            const float extent = vertical ? size_.height : size_.width;
+            if (extent <= 0.0F) {
+                return false;
+            }
+            // 增量以「滚轮单位」计（全库约定：`offset -= delta * step`，即 delta 正 = 向上滚），
+            // 故一屏 = 视口尺寸 / 每单位像素，而非直接用像素值（否则会滚过头数十倍）。
+            const float unit = scroll_viewport_.step > 0.0F ? scroll_viewport_.step : 16.0F;
+            const float delta = extent / unit;
+            ScrollEvent e;
+            if (vertical) {
+                e.delta_y = (req.action == AccessibilityAction::ScrollDown) ? -delta : delta;
+            } else {
+                e.delta_x = (req.action == AccessibilityAction::ScrollRight) ? -delta : delta;
+            }
+            e.position = Point{.x = size_.width * 0.5F, .y = size_.height * 0.5F};
+            EventDispatcher::dispatch(*this, e);
+            return true;
+        }
+        case AccessibilityAction::ScrollIntoView:
+            // 无布局期几何写入能力（滚动由最近可滚动祖先承载）：留给容器覆写，基类不支持。
+            return false;
+        case AccessibilityAction::Toggle:
+        case AccessibilityAction::Value:
+        case AccessibilityAction::Select:
+            // 语义强相关：必须控件显式覆写（Checkbox/Switch → Toggle、Slider → Value …）。
+            return false;
+        case AccessibilityAction::None:
+        default:
+            return false;
+    }
+}
+
 // Node 析构：子节点销毁时清空其缓存的布局父指针，避免向上失效传播解引用悬垂指针
 // （见 node.h 中 Node 类注释）。需完整 Widget，故定义于此而非头文件。
 Node::~Node() {
-    if (widget_) {
-        widget_->set_layout_parent(nullptr);
+    if (widget_ == nullptr) {
+        return;
     }
+    // 结构事件的**唯一**上报点（G3）：所有摘除路径（`Container::remove_child`、`children_`
+    // 重排、容器析构）最终都走到本析构，若再在摘除处各报一次会双发 StructureChanged。
+    //
+    // 只在**真正销毁控件实例**时上报：`Node` 是可共享句柄（`shared_ptr` 语义），拷贝/临时
+    // （如 `SingleChild::child_view_` 缓存、`set_children` 的初始化列表）析构时控件仍在世，
+    // 此时上报会把「换了个容器持有同一控件」误报成结构变化。
+    const bool destroying_widget = widget_.use_count() == 1;
+    if (destroying_widget) {
+        // 先告知桥「这个控件要没了」：若它正是桥缓存的语义根，桥必须立刻切断投影，
+        // 否则宿主「先拆 UI 树、后拆窗口」的常规顺序下，窗口存活期间的平台查询会拿
+        // 悬垂根重建语义树。此处 `widget_` 仍由 shared_ptr 持有，指针有效。
+        notify_accessibility_widget_destroying(widget_.get());
+        // 目标取**宿主容器**而非正在析构的控件自身：后者的 `Widget*` 返回后即失效（悬垂）。
+        // 宿主未知（控件尚未接入树）时传 nullptr —— UIA ChildrenInvalidated 不要求具体节点。
+        Widget *host = widget_->layout_parent();
+        notify_accessibility_structure_changed(host);
+    }
+    widget_->set_layout_parent(nullptr);
 }
 
 /// @brief 把 widget 局部坐标 `local` 经修饰链的平移与仿射矩阵映射回「内容局部」坐标。

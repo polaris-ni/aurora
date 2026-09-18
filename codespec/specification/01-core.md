@@ -17,7 +17,8 @@
 | 异步底座 | `thread_pool.h`、`thread.h` |
 | 时间与周期 | `time.h`、`duration.h`、`event_stream.h`、`file_watcher.h` |
 | 文本与编码 | `utf8.h`、`string_util.h` |
-| 平台与能力查询 | `platform.h`、`enums.h`、`accessibility.h` |
+| 平台与能力查询 | `platform.h`、`enums.h` |
+| 无障碍（a11y） | `accessibility.h`（语义树 / 事件 / 设置）、`a11y_types.h`（状态 / 取值域 / 选区值类型）、`a11y_provider.h`（桥抽象与注册表）、`a11y_diff.h`（快照与 diff）、`a11y_text.h`（UTF-8 ↔ UTF-16 偏移映射） |
 | 其他 | `immutable.h`、`image.h`、`font.h`、`literals.h`、`version.h` |
 
 根级头文件：`aurora.h`（唯一入口）、`aurora_fwd.h`（仅前向声明，供只需指针/引用的编译单元降低包含成本）、`aurora_pch.h`、`commands.h`、`todo.h`。（原根级 `test_helpers.h` 已迁至 `tests/support/test_helpers.h`，定位为仓库私有测试设施，退出公共 API 与 `aurora_api.json`。）
@@ -273,7 +274,7 @@ auto widget = restored.value();
 | `immutable.h` | 不可变包装 |
 | `image.h` / `font.h` | 图像与字体的基础类型（具体能力见 [`03-layout-render.md`](03-layout-render.md)） |
 | `version.h` | 库版本 |
-| `accessibility.h` | 无障碍基础 |
+| `accessibility.h` | 无障碍基础（语义树 / 事件 / 设置；详见 §7.2） |
 | `todo.h`（根级） | `au::TODO` 占位回调 |
 
 ### 7.1 au::TODO
@@ -284,6 +285,38 @@ auto widget = restored.value();
 auto btn = au::Button(au::ButtonProps{ .label = "OK" });
 btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可读警告
 ```
+
+### 7.2 无障碍基础（a11y）
+
+无障碍能力在 `core/` 内分四头，全部**平台中立**（不含任何平台头，不依赖 GUI 后端）：
+
+| 头文件 | 内容 |
+|:---|:---|
+| `accessibility.h` | 语义树（`AccessibilityNode`）、角色（`AccessibilityRole`）、动作（`AccessibilityAction` / `AccessibilityActionRequest`）、事件（`AccessibilityEvent` / `AccessibilityEventKind`）、设置（`AccessibilitySettings`）、树构建与名称回退（`build_accessibility_tree` / `resolve_accessibility_name` / `unique_text_child_name` / `apply_semantic_pruning`） |
+| `a11y_types.h` | 纯值类型：`AccessibilityState`（13 位状态集）、`AccessibilityRange`（min/max/step/value）、`AccessibilityTextSelection`（UTF-8 字节半开区间）、`AccessibilityScrollRange` |
+| `a11y_provider.h` | 桥抽象 `a11y::Provider` + 进程级 `a11y::detail::ProviderRegistry`（注册 / 广播 / 注销） |
+| `a11y_diff.h` | `TreeSnapshot` / `NodeSnapshot` / `TreeDiff` / `build_tree_snapshot` / `diff_snapshots` |
+| `a11y_text.h` | `UtfOffsetMap`（UTF-8 ↔ UTF-16 偏移换算，代理对按码点起点夹取）、`utf8_to_utf16` / `utf16_to_utf8`、`TextUnit` / `expand_to_unit` |
+
+**语义树节点（`AccessibilityNode`）** 在既有 `role / name / value / hint / bounds / actions` 之外新增：
+
+| 字段 | 说明 |
+|:---|:---|
+| `id` | `Widget::runtime_id()` 取值——进程级原子自增、构造时分配、生命周期内恒定。**不用**路径字符串（虚拟化列表复用 / 重排下不稳定）也不用指针值（无跨事件可比性） |
+| `state` | `AccessibilityState` 位集 |
+| `range` | `std::optional<AccessibilityRange>` |
+| `level` | `std::optional<int>`，标题层级（文档结构导航用） |
+| `is_control` / `is_content` | 裁剪结论：是否进入平台的「控件视图」/「内容视图」 |
+
+新增字段一律带默认成员初始化，且**追加在既有字段之后**——既有聚合初始化与序列化面零变化。
+
+**名称回退链（对标 ARIA accessible name computation）**：`accessibility_label()` → （`Text` / `TextInput` 角色）控件文本 / 取值 → 唯一文本子节点之标签。最后一级只在一棵子树恰有一个 `Text` / `RichText` / `Label` 子节点时生效（多个候选即弃权，避免猜错）。**已知缺口**：`Checkbox` / `Slider` 无内建 label，而本库里它们的标签通常是**兄弟**节点而非子节点，故其可访问名可能为空——是否引入标签关联（`aria-labelledby` 式关系，或 `set_accessibility_label` 显式接口）留待设计裁决。
+
+**事件通道（两条并列，互不覆盖）。** 事件处理器在 `accessibility.h` 内是**进程级单槽**（`current_accessibility_event_handler()`，宿主用）；桥另经 `detail::a11y_broadcast_hook` 独立接收同一批事件。两条通道**并列**而非链式：宿主处理器永远被调用，桥广播独立生效，安装顺序无关（历史上「保存旧处理器 + 链式包裹」会让先安装者失效）。另有第三条并列通道 `detail::a11y_widget_destroy_hook`：控件实例销毁前**带上其指针**广播一次，供桥判定「我缓存的根是不是没了」（语义树事件只能给出宿主容器，无法承载这一判定）。
+
+`AccessibilityEventKind` 含 `Announcement`（动态播报 / Live Region）：`announce_accessibility(text, target)` 走独立事件通道，**不经**语义树 diff——toast / 状态提示 / 异步结果这类临时文本没有焦点或取值变化，只有此通道能被读屏感知。
+
+`screen_reader_active`（`AccessibilitySettings`）的语义是 **heuristic**：以「读屏主动取根对象」近似「有读屏在线」，由桥激活时回填 `true`、桥去激活时回填 `false`；读屏退出无反向信号，故不保证及时复位。
 
 ---
 

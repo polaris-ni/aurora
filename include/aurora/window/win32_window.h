@@ -1,12 +1,16 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
 #include "aurora/window/surface.h"
 #include "aurora/window/window_state.h"
+
+#include "aurora/core/a11y_provider.h"
 
 // 共享 Win32 窗口宿主：仅依赖 Windows SDK（user32/gdi32），零三方依赖。
 // 把「窗口创建 / 消息泵 / 事件翻译 / DPI / WM_PAINT·WM_SIZE 同步重渲染 / 白闪修复刷」
@@ -98,6 +102,26 @@ class Win32Window {
     auto set_size(Size s) const -> void;
     /// @brief 注册 DPI 缩放变化回调：`WM_DPICHANGED` 处理后上报新的 `scale_factor`。
     auto set_scale_change_handler(std::function<void(float)> h) const -> void;
+
+    // ---- 无障碍桥（D13/D14/G14）----
+
+    /// @brief 本窗口的无障碍桥（`a11y::Provider`）；未激活（尚无读屏查询）返回 nullptr。
+    ///
+    /// 桥实例**由窗口宿主持有**（而非任一 Surface）：`Win32Surface`(GDI) 与 `D3D11Surface`(GPU)
+    /// 共用本宿主，二者 `Surface::accessibility_provider()` 都返回同一实例，避免两份
+    /// id→Widget* 映射分裂。惰性：首个 `WM_GETOBJECT(UiaRootObjectId)` 到达时才构造并激活。
+    [[nodiscard]] auto accessibility_provider() const -> a11y::Provider *;
+
+    /// @brief 注入语义树根（每帧调用；桥尚未构造时由宿主记下，构造后补喂）。
+    auto set_accessibility_root(Widget *root) const -> void;
+
+    /// @brief 覆盖 `WM_GETOBJECT` 处理（宿主可抢先接管；默认空 → 走内置 UIA 桥）。
+    ///
+    /// 以指针宽度整数传递 `WPARAM`/`LPARAM`、返回 `LRESULT`，避免在公共头引入 `<windows.h>`；
+    /// 宿主侧（`.cpp`）在调用前 `static_cast` 回原生类型。
+    /// @param hook 返回 `std::nullopt` 表示「未处理，交内置桥 / DefWindowProc」。
+    auto set_accessibility_hook(std::function<std::optional<std::intptr_t>(std::uintptr_t, std::intptr_t)> h) const
+        -> void;
 
   private:
     struct Impl;

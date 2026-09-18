@@ -1,5 +1,7 @@
 #include "aurora/window/win32_window.h"
 
+#include "aurora/window/detail/win32_ua.h"
+
 #ifdef AURORA_BACKEND_WIN32
 
 #ifndef NOMINMAX
@@ -179,6 +181,12 @@ struct Win32Window::Impl {
     WindowModeHandler window_mode_handler;
     PresentRequest present_request;
     std::function<void(float)> scale_handler;  ///< DPI 缩放变化上报（`WM_DPICHANGED` 后触发）。
+    /// @brief 无障碍桥（G14：由窗口宿主持有，GDI / D3D11 两个 Surface 共用同一实例）。
+    std::unique_ptr<detail::Win32UiaBridge> a11y;
+    /// @brief 宿主接管 `WM_GETOBJECT` 的钩子（默认空 → 走内置桥）。
+    std::function<std::optional<std::intptr_t>(std::uintptr_t, std::intptr_t)> a11y_hook;
+    /// @brief 最近一次注入的语义树根（非拥有；桥尚未构造时先由宿主记下）。
+    Widget *a11y_root = nullptr;
 
     inline static bool class_registered = false;
     inline static HBRUSH bg_brush = nullptr;  ///< 浅色背景擦除刷（消除最大化黑屏），注册时创建一次。
@@ -217,6 +225,9 @@ struct Win32Window::Impl {
     [[nodiscard]] auto handle_getminmaxinfo(LPARAM lp) const -> LRESULT;
     auto handle_close() -> LRESULT;
     auto handle_destroy() -> LRESULT;
+    /// @brief `WM_GETOBJECT`：仅应答 UIA 根请求（`UiaRootObjectId`），其余交 `DefWindowProc`
+    ///        （MSAA / 系统代理兜底，非目标）。返回 nullopt = 未处理。
+    [[nodiscard]] auto handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<LRESULT>;
     auto handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT;
 
     auto register_class() const -> void;
@@ -535,6 +546,12 @@ auto Win32Window::Impl::handle_close() -> LRESULT {
 
 auto Win32Window::Impl::handle_destroy() -> LRESULT {
     should_close = true;
+    // 窗口销毁：先全量断连 UIA provider 再置空 hwnd —— 否则 UIA 侧缓存的 provider 会
+    // 在窗口已销毁后回调进来（Chromium / Qt 已知崩溃源，R1）。
+    if (a11y != nullptr) {
+        a11y->disconnect_all();
+        a11y.reset();
+    }
     hwnd = nullptr;
     // 多窗口：**不再** `PostQuitMessage(0)`。
     // `WM_QUIT` 是**线程级**的：任一个窗口销毁都投递它，会让同线程内所有窗口
@@ -543,6 +560,44 @@ auto Win32Window::Impl::handle_destroy() -> LRESULT {
     // 现在关闭语义完全收敛到**本窗口**的 should_close，是否退出进程由
     // `Application` 的退出策略（`ExitPolicy`）决定。
     return 0;
+}
+
+// ---- 无障碍分族（WM_GETOBJECT → UIA 桥，D14）----
+auto Win32Window::Impl::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<LRESULT> {
+    if (a11y_hook) {
+        // 公共签名用指针宽度整数（避免公共头引入 <windows.h>），此处还原为原生类型。
+        if (auto answered = a11y_hook(static_cast<std::uintptr_t>(wp), static_cast<std::intptr_t>(lp));
+            answered.has_value()) {
+            return static_cast<LRESULT>(*answered);  // 宿主接管
+        }
+    }
+    constexpr LONG UIA_ROOT_OBJECT_ID = -25;
+    if (static_cast<LONG>(static_cast<DWORD>(lp)) != UIA_ROOT_OBJECT_ID) {
+        return std::nullopt;  // 非 UIA 根请求：交 DefWindowProc（MSAA 兜底）
+    }
+    if (hwnd == nullptr) {
+        return std::nullopt;
+    }
+    if (a11y == nullptr) {
+        // 惰性构造（D14）：无读屏在线时连桥对象都不存在 ⇒ 零开销。
+        a11y = std::make_unique<detail::Win32UiaBridge>(hwnd);
+        a11y->set_root(a11y_root);  // 补喂：宿主在桥存在前已记下的根
+    }
+    return a11y->handle_get_object(wp, lp);
+}
+
+auto Win32Window::accessibility_provider() const -> a11y::Provider * { return pimpl_->a11y.get(); }
+
+auto Win32Window::set_accessibility_hook(std::function<std::optional<std::intptr_t>(std::uintptr_t, std::intptr_t)> h)
+    const -> void {
+    pimpl_->a11y_hook = std::move(h);
+}
+
+auto Win32Window::set_accessibility_root(Widget *root) const -> void {
+    pimpl_->a11y_root = root;
+    if (pimpl_->a11y != nullptr) {
+        pimpl_->a11y->set_root(root);
+    }
 }
 
 // ---- 文件拖放分族（WM_DROPFILES）----
@@ -656,6 +711,10 @@ auto WINAPI Win32Window::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
             return self->handle_destroy();
         case WM_DROPFILES:
             return self->handle_dropfiles(hwnd, lp);
+        case WM_GETOBJECT: {
+            const std::optional<LRESULT> answered = self->handle_get_object(wp, lp);
+            return answered.has_value() ? *answered : DefWindowProcA(hwnd, msg, wp, lp);
+        }
         default:
             return DefWindowProcA(hwnd, msg, wp, lp);
     }

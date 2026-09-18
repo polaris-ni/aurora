@@ -571,6 +571,8 @@ class AudioContext {
     auto suspend() -> Result<void>;
     auto resume() -> Result<void>;
     /// @brief 关闭（终止设备与图；终态，不可逆）。
+    ///        返回前设备线程已退出并停止设备后端；后端对象保留至上下文析构时释放，
+    ///        期间任何节点/连接操作均返回 audio-context-closed。
     auto close() -> Result<void>;
     [[nodiscard]] auto closed() const -> bool { return closed_.load(std::memory_order_acquire); }
     [[nodiscard]] auto suspended() const -> bool { return suspended_.load(std::memory_order_acquire); }

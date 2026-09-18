@@ -130,6 +130,14 @@ class D3D11Surface : public Surface {
     /// `Win32Window::hwnd()`），故两路行为一致。
     [[nodiscard]] auto hwnd() const -> void * { return win_->hwnd(); }
     [[nodiscard]] auto native_handle() const -> void * override { return win_->hwnd(); }
+    /// @brief 本窗口的无障碍桥（D13）：转发共享宿主 `Win32Window` 持有的唯一实例，
+    /// 使 GDI 与 GPU 两路上屏共用同一份 id→Widget* 映射，不产生分裂。
+    [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override {
+        return win_->accessibility_provider();
+    }
+
+    /// @brief 注入语义树根（转发共享宿主；桥未构造时由宿主记下）。
+    auto set_accessibility_root(Widget *root) -> void override { win_->set_accessibility_root(root); }
 
     /// @brief 设备是否可用（无适配器时为 false，测试应跳过）。
     [[nodiscard]] auto is_available() const -> bool { return ok_; }

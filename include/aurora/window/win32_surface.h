@@ -93,6 +93,14 @@ class Win32Surface final : public Surface {
     /// @brief 原生窗口句柄（测试/自检用）：可向该句柄发送 WM_PAINT/WM_SIZE 验证黑屏修复。
     [[nodiscard]] auto hwnd() const -> void * { return win_->hwnd(); }
     [[nodiscard]] auto native_handle() const -> void * override { return win_->hwnd(); }
+    /// @brief 本窗口的无障碍桥（D13）：转发共享宿主 `Win32Window` 持有的唯一实例，
+    /// 使 GDI 与 GPU 两路上屏共用同一份 id→Widget* 映射，不产生分裂。
+    [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override {
+        return win_->accessibility_provider();
+    }
+
+    /// @brief 注入语义树根（转发共享宿主；桥未构造时由宿主记下）。
+    auto set_accessibility_root(Widget *root) -> void override { win_->set_accessibility_root(root); }
     /// @brief 已呈现次数（测试/自检用）：验证 WM_SIZE/WM_PAINT 触发了同步重渲染。
     [[nodiscard]] auto present_count() const -> int { return win_->present_count(); }
 

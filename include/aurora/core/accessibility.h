@@ -1,11 +1,16 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <functional>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+#include "aurora/core/a11y_types.h"
 #include "aurora/core/types.h"
 #include "aurora/widget/widget.h"
 
@@ -37,6 +42,22 @@ enum class AccessibilityAction : std::uint16_t {  // NOLINT(*-enum-size)
     Select = 1U << 3U,
     Invoke = 1U << 4U,  ///< 默认动作（按钮触发等）
     Toggle = 1U << 5U,  ///< 切换状态（复选 / 开关）
+    ScrollUp = 1U << 6U,        ///< 向上滚动（G32；对应 Flutter scrollUp）
+    ScrollDown = 1U << 7U,      ///< 向下滚动（G32）
+    ScrollLeft = 1U << 8U,      ///< 向左滚动（G32）
+    ScrollRight = 1U << 9U,     ///< 向右滚动（G32）
+    ScrollIntoView = 1U << 10U,  ///< 请求把本控件滚入视口（G32；UIA IScrollItemProvider）
+};
+
+/// @brief 读屏反向动作请求：`Widget::perform_accessibility_action` 的入参。
+///
+/// `text` 为 `std::string_view`：桥（如 UIA `IValueProvider::SetValue` 传入 UTF-16 BSTR）
+/// 在调用前须把文本转 UTF-8 并以 `std::string` 持有，调用返回前不得析构（G15）。
+/// @note Thread: main-thread only
+struct AccessibilityActionRequest {
+    AccessibilityAction action = AccessibilityAction::None;
+    double number = 0.0;      ///< Value 动作的数值（Slider 设值）
+    std::string_view text;    ///< Value 动作的文本（文本替换）
 };
 
 [[nodiscard]] inline auto operator|(AccessibilityAction a, AccessibilityAction b) -> AccessibilityAction {
@@ -50,15 +71,32 @@ enum class AccessibilityAction : std::uint16_t {  // NOLINT(*-enum-size)
 /// @note Side-effects: pure
 struct AccessibilityNode {
     AccessibilityRole role = AccessibilityRole::Generic;
-    std::string name;  ///< 可读标签（控件自填，如按钮文字）
+    std::string name;  ///< 可读标签（按 §4 Name 回退链求值：label → 文本内容 → 唯一文本子节点）
     std::string value;  ///< 当前值（如文本内容、复选状态）
     std::string hint;  ///< 用途补充提示（控件可选覆写 `accessibility_hint()`）
-    Rect bounds;  ///< 屏幕坐标盒（语义树构建时按布局/绘制几何填充）
+    /// 几何盒：**窗口本地 DIP**（原点为窗口客户区左上；与 `Widget::paint_bounds()` 同语义）。
+    /// 平台桥统一换算到屏幕物理像素（D12：`物理 = bounds × scale_factor + position`）。
+    Rect bounds;
     AccessibilityAction actions = AccessibilityAction::None;
     std::vector<AccessibilityNode> children;
 
+    // ---- 切片 1 新增：身份 / 状态 / 取值域 / 层级 / 树裁剪（追加在末尾，兼容既有聚合初始化）----
+    std::uint64_t id = 0;                              ///< 稳定身份（`Widget::runtime_id()`；0 = 无身份）
+    AccessibilityState state;                          ///< 状态位集（含 visible/focusable/offscreen 派生位）
+    std::optional<AccessibilityRange> range;           ///< 取值域（Slider / ProgressIndicator）
+    std::optional<int> level;                          ///< 标题层级（OQ4；`accessibility_level()`）
+    bool is_control = true;                            ///< 是否进控制视图（UIA IsControlElement / macOS isAccessibilityElement）
+    bool is_content = true;                            ///< 是否进内容视图（UIA IsContentElement）
+
     [[nodiscard]] auto has_action(AccessibilityAction a) const -> bool {
         return (static_cast<std::uint16_t>(actions) & static_cast<std::uint16_t>(a)) != 0;
+    }
+
+    /// @brief 是否有「交互类」动作（Click/Invoke/Toggle/Value/Select）：内容视图判定的输入之一。
+    [[nodiscard]] auto has_interactive_action() const -> bool {
+        return has_action(AccessibilityAction::Click) || has_action(AccessibilityAction::Invoke) ||
+               has_action(AccessibilityAction::Toggle) || has_action(AccessibilityAction::Value) ||
+               has_action(AccessibilityAction::Select);
     }
 };
 
@@ -151,17 +189,185 @@ namespace detail {
     return layout_box;
 }
 
+/// @brief 直接子节点中的「唯一文本子节点」文本（G24 Name 回退链第三级）。
+///
+/// 图标 + 文字按钮是常见形态：容器本身无 label，其唯一 `Text` 子节点即读屏应念的内容。
+/// 多个文本子节点时**不猜测**（避免把整段内容拼成名字），返回空串交由调用方回落。
+[[nodiscard]] inline auto unique_text_child_name(const Widget &w) -> std::string {
+    std::string found;
+    int text_children = 0;
+    w.for_each_child([&found, &text_children](const Widget &child) -> void {
+        if (!child.show.get()) {
+            return;
+        }
+        const char *tn = child.type_name();
+        if (tn == nullptr) {
+            return;
+        }
+        const std::string_view name{tn};
+        if (name != "Text" && name != "RichText" && name != "Label") {
+            return;
+        }
+        ++text_children;
+        if (text_children == 1) {
+            found = child.accessibility_label();
+        }
+    });
+    return (text_children == 1) ? found : std::string{};
+}
+
+/// @brief 兄弟标签关联（G24 Name 回退链第四级；设计 §16.2 #1-C）。
+///
+/// CheckBox / Switch / Slider 是无内置文本的叶子控件，其可读标签通常是**同容器的兄弟**
+/// `Text` / `Label` / `RichText` 节点（如 `Row { Text("启用"), Checkbox() }`）。
+/// 第三级「唯一文本子节点」兜底只在标签是**子节点**时命中，对兄弟形态失效。
+///
+/// 启发式：在父容器的直接子节点中，找到与控件**垂直重叠**且**水平相邻**（间隙 ≈ 0，容差 12 DIP）
+/// 的文本兄弟，取几何最近者作为标签。仅对需要标签的控件角色生效，避免对 Button / Generic
+/// 等误关联。无父 / 几何缺失（未绘制）时安全回落空串。
+///
+/// @note RTL 下标签可能在控件右侧；本兜底接受左右两侧的最近者，方向无关。
+[[nodiscard]] inline auto sibling_label_name(const Widget &w, const Rect &box) -> std::string {
+    const AccessibilityRole role = w.accessibility_role();
+    if (role != AccessibilityRole::Checkbox && role != AccessibilityRole::Switch &&
+        role != AccessibilityRole::Slider) {
+        return std::string{};
+    }
+    const Widget *parent = w.layout_parent();
+    if (parent == nullptr) {
+        return std::string{};
+    }
+    const Rect wb = (box.size.width > 0.0F || box.size.height > 0.0F) ? box : w.paint_bounds();
+    if (wb.size.width <= 0.0F || wb.size.height <= 0.0F) {
+        return std::string{};  // 几何缺失：不安全关联
+    }
+    const Point wc{wb.origin.x + wb.size.width * 0.5F, wb.origin.y + wb.size.height * 0.5F};
+    constexpr float kTol = 12.0F;
+    std::string best;
+    double best_score = std::numeric_limits<double>::infinity();
+    parent->for_each_child([&](const Widget &sib) -> void {
+        if (&sib == &w) {
+            return;
+        }
+        const char *tn = sib.type_name();
+        if (tn == nullptr) {
+            return;
+        }
+        const std::string_view name{tn};
+        if (name != "Text" && name != "RichText" && name != "Label") {
+            return;
+        }
+        const std::string label = sib.accessibility_label();
+        if (label.empty()) {
+            return;
+        }
+        const Rect sb = sib.paint_bounds();
+        if (sb.size.width <= 0.0F || sb.size.height <= 0.0F) {
+            return;
+        }
+        // 垂直重叠（带容差）：标签与控件应在同一行。
+        const bool v_overlap = (sb.origin.y + sb.size.height) >= (wb.origin.y - kTol) &&
+                               sb.origin.y <= (wb.origin.y + wb.size.height + kTol);
+        if (!v_overlap) {
+            return;
+        }
+        const Point sc{sb.origin.x + sb.size.width * 0.5F, sb.origin.y + sb.size.height * 0.5F};
+        // 水平相邻：标签在左（gap = 控件左 − 标签右）或在右（gap = 标签左 − 控件右）。
+        const double gap = (sc.x <= wc.x) ? (wb.origin.x - (sb.origin.x + sb.size.width))
+                                          : (sb.origin.x - (wb.origin.x + wb.size.width));
+        if (gap < -kTol || gap > kTol) {
+            return;  // 非相邻（间隙过大或重叠过多）
+        }
+        const double score = std::abs(gap) + std::abs(sc.y - wc.y);
+        if (score < best_score) {
+            best_score = score;
+            best = label;
+        }
+    });
+    return best;
+}
+
+/// @brief Name（可访问名）回退链（G24，对标 ARIA accessible name computation）。
+///
+/// ```
+/// name = accessibility_label()                       // 显式标签优先
+///      ?: 文本内容（Text / TextInput 的 value）       // 文本类控件的内容即名字
+///      ?: 唯一 Text 子节点的文本                      // 图标 + 文字按钮
+///      ?: 兄弟标签关联（最近且相邻的文本兄弟）          // CheckBox/Slider 等叶子控件（#1-C）
+///      ?: ""                                         // 装饰节点，交由 G23 裁剪忽略
+/// ```
+/// @note 只对本控件求值，不含子节点递归（回退链第三级是唯一例外，且只在恰好一个文本子节点时生效）。
+[[nodiscard]] inline auto resolve_accessibility_name(const Widget &w, AccessibilityRole role) -> std::string {
+    if (auto label = w.accessibility_label(); !label.empty()) {
+        return label;
+    }
+    if (role == AccessibilityRole::Text || role == AccessibilityRole::TextInput) {
+        if (auto text = w.accessibility_text(); !text.empty()) {
+            return std::string{text};
+        }
+        return w.accessibility_value();
+    }
+    const std::string sib = sibling_label_name(w, Rect{});
+    if (!sib.empty()) {
+        return sib;
+    }
+    return unique_text_child_name(w);
+}
+
+/// @brief 树裁剪 / 语义标记（G23，对标 Chromium `IsIgnored`、Flutter `excludeSemantics`）。
+///
+/// 判定落在**共享层**（三桥共用，避免各桥语义漂移，见设计 §8.4-1）：
+/// - 控件显式声明「不参与语义树」（`accessibility_is_semantic() == false`）→ 非控制、非内容；
+/// - 无 label 且非交互的 `Image`（装饰图）→ 非控制（UIA 完全忽略该元素）；
+/// - 其余一律进控制视图；纯布局容器（`Generic` + 无名 + 无交互动作）不进内容视图，
+///   只保留结构父职，避免读屏不停念「pane」。
+/// @param n 已填 name/actions 的节点（尚未填 is_control/is_content）
+/// @param semantic 控件的 `accessibility_is_semantic()` 取值
+inline auto apply_semantic_pruning(AccessibilityNode &n, bool semantic) -> void {
+    n.is_control = semantic;
+    if (!semantic) {
+        n.is_content = false;
+        return;
+    }
+    if (n.role == AccessibilityRole::Image && n.name.empty() && !n.has_interactive_action()) {
+        n.is_control = false;  // 装饰图：完全忽略
+        n.is_content = false;
+        return;
+    }
+    if (n.role == AccessibilityRole::Generic && n.name.empty() && !n.has_interactive_action()) {
+        n.is_content = false;  // 纯布局容器：保留结构，不进内容视图
+        return;
+    }
+    n.is_content = true;
+}
+
 /// @brief 递归构建单个节点：几何由 `layout_box` 累加，子节点累加各自 `Node` 局部原点。
 /// @param w 当前控件
 /// @param layout_box 当前控件按布局累加得到的候选全局盒（未绘制时采用）
-[[nodiscard]] inline auto build_accessibility_node(const Widget &w, const Rect &layout_box) -> AccessibilityNode {
+/// @param clip_box 父级可见盒（判定 `offscreen` 用；根为其自身盒）
+[[nodiscard]] inline auto build_accessibility_node(const Widget &w, const Rect &layout_box, const Rect &clip_box)
+    -> AccessibilityNode {
     AccessibilityNode node;
-    node.role = infer_accessibility_role(w.type_name());
+    node.id = w.runtime_id();
+    node.role = w.accessibility_role();
     node.actions = default_actions(node.role);
-    node.name = w.accessibility_label();
     node.value = w.accessibility_value();
     node.hint = w.accessibility_hint();
     node.bounds = accessibility_box(w, layout_box);
+    node.range = w.accessibility_range();
+    node.level = w.accessibility_level();
+
+    // 滚动语义（G32）：容器声明了可滚动量即补滚动动作位（三桥共用同一来源）。
+    if (const auto scroll = w.accessibility_scroll(); scroll.has_value() && scroll->max > scroll->min) {
+        node.actions = node.actions | AccessibilityAction::ScrollDown | AccessibilityAction::ScrollUp;
+    }
+
+    // 状态位：控件填自身可知的位，派生位（visible/focusable/offscreen）由共享层统一补。
+    node.state = w.accessibility_state();
+    node.state.visible = true;  // 已按 show 过滤：进入语义树即可见
+    node.state.focusable = node.has_action(AccessibilityAction::Focus);
+    const bool zero_sized = node.bounds.size.width <= 0.0F || node.bounds.size.height <= 0.0F;
+    node.state.offscreen = zero_sized || !clip_box.intersects(node.bounds);
 
     // 子节点优先走 `child_nodes()`：其 `Node` 带父写入的局部盒，可累加出真实几何。
     const auto &nodes = w.child_nodes();
@@ -180,22 +386,30 @@ namespace detail {
                 .origin = Point{.x = layout_box.origin.x + cb.origin.x, .y = layout_box.origin.y + cb.origin.y},
                 .size = cb.size,
             };
-            node.children.push_back(build_accessibility_node(child.widget(), child_box));
+            node.children.push_back(build_accessibility_node(child.widget(), child_box, node.bounds));
         }
-        return node;
+    } else {
+        // 兜底：虚拟化列表 / 导航栈等容器把子节点存在 `Node` 之外的私有表中，不覆写
+        // `child_nodes()`（因而无 Node 局部盒），只经 `for_each_child` 暴露子树。此处与其行为对齐
+        // 展开，几何缺失 ⇒ 后代继承本节点盒。（不可把 Node 拷出容器补几何：`Node` 析构会清子节点
+        // 的 `layout_parent_`，脏标记传播会断链。）
+        w.for_each_child([&node](const Widget &child) -> void {
+            if (!child.show.get()) {
+                return;
+            }
+            node.children.push_back(build_accessibility_node(child, node.bounds, node.bounds));
+        });
     }
 
-    // 兜底：虚拟化列表 / 导航栈等容器把子节点存在 `Node` 之外的私有表中，不覆写
-    // `child_nodes()`（因而无 Node 局部盒），只经 `for_each_child` 暴露子树。此处与其行为对齐
-    // 展开，几何缺失 ⇒ 后代继承本节点盒。（不可把 Node 拷出容器补几何：`Node` 析构会清子节点
-    // 的 `layout_parent_`，脏标记传播会断链。）
-    w.for_each_child([&node](const Widget &child) -> void {
-        if (!child.show.get()) {
-            return;
-        }
-        node.children.push_back(build_accessibility_node(child, node.bounds));
-    });
+    // Name 回退链需在子节点之后求值（第三级要读子节点文本）。
+    node.name = resolve_accessibility_name(w, node.role);
+    apply_semantic_pruning(node, w.accessibility_is_semantic());
     return node;
+}
+
+/// @brief 递归构建单个节点（根的裁剪盒即自身盒）。
+[[nodiscard]] inline auto build_accessibility_node(const Widget &w, const Rect &layout_box) -> AccessibilityNode {
+    return build_accessibility_node(w, layout_box, layout_box);
 }
 
 }  // namespace detail
@@ -215,7 +429,9 @@ struct AccessibilitySettings {
     bool reduce_motion = false;  ///< 减弱动态效果：`AnimationController` 不再渐变而是直落端点
     bool high_contrast = false;  ///< 高对比样式请求（色 Responder 由各控件按此位取用）
     float font_scale = 1.0F;  ///< 字号缩放倍率（<= 0 或 NaN 视为 1.0，不缩放）
-    bool screen_reader_active = false;  ///< 读屏在线（宿主据 OS 查询结果填写）
+    /// 读屏是否在线：**由平台桥在激活时回填**（heuristic——以「读屏主动取根对象」近似「有读屏
+    /// 在线」；读屏退出无反向信号，故仅窗口销毁 / 桥去激活时复位。见设计 R9 / §5.1）。
+    bool screen_reader_active = false;
 
     /// @brief 归一化后的字号倍率：非法值（<= 0 / 非有限）回落到 1.0，避免污染度量。
     [[nodiscard]] auto resolved_font_scale() const -> float {
@@ -259,6 +475,7 @@ enum class AccessibilityEventKind : std::uint8_t {
     FocusChanged,  ///< 焦点转移（获焦 / 失焦均上报，一次聚焦变更一条）
     ValueChanged,  ///< 可取值的控件取值变化（Checkbox / Switch / Slider / TextInput …）
     StructureChanged,  ///< 子树结构变化（子节点增删 / 替换）
+    Announcement,  ///< 动态播报 / Live Region：请立即朗读 `announcement_text`（G4）
 };
 
 /// @brief 无障碍事件：携带种类与来源控件（非拥有指针，仅回调期间有效）。
@@ -266,6 +483,9 @@ enum class AccessibilityEventKind : std::uint8_t {
 struct AccessibilityEvent {
     AccessibilityEventKind kind = AccessibilityEventKind::FocusChanged;
     const Widget *target = nullptr;  ///< 来源控件；可为 nullptr（仅类型已知的场景）
+    /// 播报文本（仅 `Announcement` 使用）：不经语义树 diff，由桥直译平台「立即朗读」信号。
+    /// 不要求 `target` 在语义树内有对应节点（toast / 临时浮层的常见形态）。
+    std::string announcement_text;
 };
 
 /// @brief 无障碍事件处理器签名。
@@ -283,11 +503,88 @@ inline auto set_accessibility_event_handler(AccessibilityEventHandler h) -> void
     current_accessibility_event_handler() = std::move(h);
 }
 
+namespace detail {
+
+/// @brief 无障碍事件**广播钩子**（平台桥注册表安装；与宿主单槽处理器并列，互不覆盖）。
+///
+/// 为何不复用单槽：宿主可能在桥激活**之后**才 `set_accessibility_event_handler`，若桥以
+/// 「保存旧处理器 + 链式包裹」的方式挂载，先保存的处理器会失效、链式断裂（G12）。
+/// 独立钩子使二者顺序无关——宿主处理器永远被调用，桥广播独立生效，公共契约不变。
+using AccessibilityBroadcastHook = std::function<void(const AccessibilityEvent &)>;
+
+[[nodiscard]] inline auto a11y_broadcast_hook() -> AccessibilityBroadcastHook & {
+    static AccessibilityBroadcastHook hook;  // NOLINT
+    return hook;
+}
+
+/// @brief 安装/卸载广播钩子（由 `a11y::ProviderRegistry` 调用；宿主不应直接使用）。
+inline auto set_a11y_broadcast_hook(AccessibilityBroadcastHook h) -> void {
+    a11y_broadcast_hook() = std::move(h);
+}
+
+/// @brief 「控件实例即将销毁」的通知钩子（与广播钩子**并列**的第二条独立通道）。
+///
+/// 为何需要独立通道：桥按设计只持**裸根指针 + 节点 id**，快照可随时重投影，故子节点生死
+/// 无需桥感知；但**根控件**一旦销毁，桥缓存的 `root_` 即悬垂——若宿主先拆 UI 树、后拆窗口
+/// （常规顺序），窗口仍活着期间任何平台查询都会拿悬垂根去重建语义树（实机 SIGSEGV）。
+/// 语义树事件（`AccessibilityEvent`）只能给出**宿主容器**（G3 要求上报父级、不得上报正在
+/// 析构的控件），无法用于「是不是我的根没了」这一判定，故单列此通道传递正在销毁的控件指针。
+using AccessibilityWidgetDestroyHook = std::function<void(const Widget *)>;
+
+[[nodiscard]] inline auto a11y_widget_destroy_hook() -> AccessibilityWidgetDestroyHook & {
+    static AccessibilityWidgetDestroyHook hook;  // NOLINT
+    return hook;
+}
+
+/// @brief 安装/卸载控件销毁钩子（由 `a11y::ProviderRegistry` 调用；宿主不应直接使用）。
+inline auto set_a11y_widget_destroy_hook(AccessibilityWidgetDestroyHook h) -> void {
+    a11y_widget_destroy_hook() = std::move(h);
+}
+
+}  // namespace detail
+
 /// @brief 上报一条无障碍事件（无处理器时为空操作，不改变控件状态）。
 inline auto notify_accessibility_event(AccessibilityEvent e) -> void {
     if (const auto &handler = current_accessibility_event_handler()) {
         handler(e);
     }
+    if (const auto &hook = detail::a11y_broadcast_hook()) {
+        hook(e);
+    }
+}
+
+/// @brief 上报「某个控件实例即将销毁」（在 `Widget` 释放**之前**调用，指针仍有效）。
+///
+/// 调用点唯一：`Node::~Node()` 中确认「真销毁控件实例」的分支（与结构事件同源，G3）。
+/// 桥据此判定自己缓存的根是否已亡并立即切断投影，避免解引用悬垂指针。
+/// @param w 正在销毁的控件（调用返回后即失效；接收方不得保存）
+/// @note Thread: main-thread only
+inline auto notify_accessibility_widget_destroying(const Widget *w) -> void {
+    if (w == nullptr) {
+        return;
+    }
+    if (const auto &hook = detail::a11y_widget_destroy_hook()) {
+        hook(w);
+    }
+}
+
+/// @brief 动态播报：「请现在朗读这段文本」（Live Region / Announcement，G4）。
+///
+/// 走独立事件通道（`AccessibilityEventKind::Announcement`），**不经**语义树 diff——
+/// toast / 状态提示 / 异步结果这类临时文本没有焦点或取值变化，只有此通道能被读屏感知。
+/// 各桥映射：UIA `UiaRaiseNotificationEvent`（回退 `UIA_LiveRegionChangedEventId`）、
+/// macOS `NSAccessibilityAnnouncementRequestedNotification`、AT-SPI2 `object:announcement`、
+/// Wasm ARIA `aria-live` 镜像。
+/// @param text 待朗读文本（UTF-8；空串不上报）
+/// @param target 关联控件（可为 nullptr）
+/// @note Thread: main-thread only
+/// @note Side-effects: invokes accessibility event handler
+inline auto announce_accessibility(const std::string &text, const Widget *target = nullptr) -> void {
+    if (text.empty()) {
+        return;
+    }
+    notify_accessibility_event(AccessibilityEvent{
+        .kind = AccessibilityEventKind::Announcement, .target = target, .announcement_text = text});
 }
 
 /// @brief 递归构建控件树的无障碍视图（含几何）。

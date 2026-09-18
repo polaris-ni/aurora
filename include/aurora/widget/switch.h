@@ -120,6 +120,25 @@ class Switch : public LeafWidget {
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_value() const -> std::string override { return value() ? "true" : "false"; }
 
+    /// @brief 无障碍状态：开关语义两位（checkable 恒 true、checked 取当前值）。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_state() const -> AccessibilityState override {
+        AccessibilityState s = Widget::accessibility_state();
+        s.checkable = true;
+        s.checked = value();
+        return s;
+    }
+
+    /// @brief 读屏 Toggle 动作：翻转开关态（走 `set_value` 既有路径）。
+    /// @note Side-effects: mutates state
+    auto perform_accessibility_action(const AccessibilityActionRequest &req) -> bool override {
+        if (req.action == AccessibilityAction::Toggle) {
+            set_value(!value());
+            return true;
+        }
+        return Widget::perform_accessibility_action(req);
+    }
+
     /// @brief 运行时自描述（规格附录 B）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{

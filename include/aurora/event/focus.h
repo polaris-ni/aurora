@@ -112,4 +112,22 @@ class FocusManager {
 /// @brief 设置/复原派发期间的当前焦点管理器（由 `EventDispatcher` 配对调用；嵌套派发须自行保存旧值）。
 auto set_current_focus_manager(FocusManager *fm) noexcept -> void;
 
+/// @brief 解析与某控件关联的焦点管理器（无障碍动作 / 交互模拟的统一取用点，G1）。
+///
+/// `current_focus_manager()` 只在 `EventDispatcher::dispatch` 的派发栈内有效，而读屏桥的
+/// provider 回调（UIA Invoke/SetFocus、AT-SPI2 DoAction…）发生在**平台调用栈**里、不在任何
+/// 派发栈内 —— 那里 `current_focus_manager()` 恒为 nullptr，`Widget::request_focus()` 会静默
+/// no-op、`EventDispatcher::dispatch` 会收到空焦点管理器。故凡「不在派发栈内发起动作」的通道
+/// 都必须经本函数取用，而非直接读线程局部。
+///
+/// 解析顺序：
+/// 1. 派发期上下文（`current_focus_manager()`）非空 → 直接复用（与真实焦点状态不脱节）；
+/// 2. 否则沿 `layout_parent()` 上溯到控件根，取/建**按根缓存**的进程级兜底实例。
+///
+/// @param w 目标控件（沿其布局父链上溯定位根）
+/// @return 可用焦点管理器；仅在控件根无法解析时返回 nullptr（实践上不会发生）
+/// @note Thread: main-thread only
+/// @note Side-effects: may lazily create a fallback FocusManager (cached per root)
+[[nodiscard]] auto resolve_focus_manager(Widget &w) -> FocusManager *;
+
 }  // namespace aurora

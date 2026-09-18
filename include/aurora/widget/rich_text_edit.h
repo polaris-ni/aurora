@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/core/accessibility.h"
 #include "aurora/core/color.h"
 #include "aurora/core/enums.h"
 #include "aurora/core/font.h"
@@ -171,6 +172,78 @@ class RichTextEdit : public LeafWidget {
         return out;
     }
 
+    // ---- 无障碍语义（切片 1/2）：多行文本 + TextPattern 支撑 ----
+
+    /// @brief 无障碍状态：多行文本（UIA 侧映射 `Document` 而非 `Edit`）。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_state() const -> AccessibilityState override {
+        AccessibilityState s = Widget::accessibility_state();
+        s.multiline = true;
+        return s;
+    }
+
+    /// @brief 无障碍文本全文（UTF-8 字节口径，与 `doc_` 的 char 序列一一对应）。
+    ///
+    /// @note 文档以 `StyledChar` 序列存储、`plain_text()` 按值拼接，无法给出持久视图，故经
+    ///       `mutable` 缓存中转：**调用方须在本控件下一次文本操作前消费该视图**（桥侧立即复制）。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_text() const -> std::string_view override {
+        a11y_text_cache_ = plain_text();
+        return a11y_text_cache_;
+    }
+
+    /// @brief 无障碍选区：内部 `sel_start_/sel_end_` 即 UTF-8 字节偏移（半开区间）。
+    /// @note Side-effects: reads state
+    [[nodiscard]] auto accessibility_selection() const -> std::optional<AccessibilityTextSelection> override {
+        return AccessibilityTextSelection{.start = std::min(sel_start_, sel_end_),
+                                          .end = std::max(sel_start_, sel_end_)};
+    }
+
+    /// @brief 设置选区（UTF-8 字节半开区间），光标置于选区终点。
+    /// @note Side-effects: mutates selection state
+    auto accessibility_set_selection(std::size_t start, std::size_t end) -> void override {
+        const std::string t = plain_text();
+        const std::size_t a = std::min(start, t.size());
+        const std::size_t b = std::min(std::max(end, a), t.size());
+        sel_start_ = a;
+        sel_end_ = b;
+        caret_ = b;
+        mark_needs_paint();
+    }
+
+    /// @brief 替换文本（UTF-8 字节半开区间）：按纯文本重建文档（样式以当前输入样式统一）。
+    ///
+    /// @note 富文本样式在替换区间内退化为当前样式——这是「读屏改写文本」语义下的可接受代价
+    ///       （三桥的文本编辑通道都只传纯文本，无样式信息）。
+    /// @note Side-effects: mutates document
+    auto accessibility_replace_text(std::size_t start, std::size_t end, std::string_view utf8) -> void override {
+        std::string next = plain_text();
+        const std::size_t a = std::min(start, next.size());
+        const std::size_t b = std::clamp(end, a, next.size());
+        std::string rebuilt = next.substr(0, a);
+        rebuilt.append(utf8);
+        rebuilt.append(next, b, std::string::npos);
+        TextSpan span;
+        span.text.text = std::move(rebuilt);
+        span.font = cur_font_;
+        span.color = cur_color_;
+        load_spans({span});
+        caret_ = std::min(a + utf8.size(), plain_text().size());
+        sel_start_ = caret_;
+        sel_end_ = caret_;
+        mark_needs_paint();
+    }
+
+    /// @brief 读屏 Value 动作：整值替换。
+    /// @note Side-effects: mutates document
+    auto perform_accessibility_action(const AccessibilityActionRequest &req) -> bool override {
+        if (req.action == AccessibilityAction::Value) {
+            accessibility_replace_text(0, plain_text().size(), req.text);
+            return true;
+        }
+        return Widget::perform_accessibility_action(req);
+    }
+
     /// @brief 悬停默认文本光标：文本编辑区悬停 IBeam；修饰链显式 `cursor(...)` 声明优先。
     /// @note Side-effects: pure
     [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return CursorShape::IBeam; }
@@ -332,6 +405,8 @@ class RichTextEdit : public LeafWidget {
     std::size_t caret_ = 0;
     std::size_t sel_start_ = 0;
     std::size_t sel_end_ = 0;
+    /// @brief `accessibility_text()` 的视图中转缓存（见该方法注释：调用方须即时消费）。
+    mutable std::string a11y_text_cache_;
     Font cur_font_{};
     Color cur_color_ = Color::black();
     bool cur_underline_ = false;

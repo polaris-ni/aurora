@@ -340,6 +340,18 @@ app.set_on_window_state([](au::WindowState s) {
 });
 ```
 
+### 6.3 无障碍桥的激活与销毁
+
+**惰性激活。** 桥不是窗口创建时构建的，而是**首个平台查询到达**时才构造（Win32 = 首个 `WM_GETOBJECT(lParam == UiaRootObjectId)`），并在此时把 `AccessibilitySettings::screen_reader_active` 回填为 `true`（进程级设置，其余字段保留）。未激活 = 语义树零构建、零事件，即无读屏在线时无障碍路径完全不进热路径。桥的构造点即挂接点：语义树根由宿主 `Win32Window::Impl` 承接（`set_accessibility_root`，每帧在 `paint` 之后由 `Window::present_root` 注入），桥构造后由宿主补喂已记录的根。
+
+**事件路由（保持单槽契约）。** `accessibility.h` 的事件处理器仍是**进程级单槽**（宿主用），桥不占用它：桥经进程级 `a11y::ProviderRegistry` 注册，事件到达时广播给全部**已激活**桥，桥内按 `id → Widget*` 映射判定归属、无关即忽略（多窗口规模下广播成本可忽略；不为桥把单槽改多播）。故「宿主处理器 + 桥」二者同时在场、安装顺序无关。
+
+**销毁顺序（两条硬不变量，均为实机崩溃的修复结论）。** 关闭窗口时 `Win32Window::Impl` 先 `disconnect_all()`（全量 `UiaDisconnectProvider`）再析构桥（`deactivate()` 与 `disconnect_all()` 等价且幂等，并在其中**从注册表注销**——否则进程级广播会在已析构的桥上调用 `is_active()`）。另有一条与窗口无关的路径：桥缓存的语义树根是裸指针，**根控件销毁**时经单源通道 `notify_accessibility_widget_destroying()`（出自 `Node::~Node()`）立即切断根与快照。两条路径的成因、机制与不变量见 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) §8.5。
+
+**多窗口。** 桥与窗口一一对应（`Win32Window::Impl` 唯一持有），多窗口即多个桥同时注册；`screen_reader_active` 是**进程级**设置，任一桥激活即置 `true`、任一桥去激活即试置 `false`（多窗口下复位语义为 best-effort，见 §6.2 同类启发式约定）。
+
+`UIAutomationCore.dll` 运行时动态加载，缺库或必要导出缺失即整桥降级 no-op + 一次 `Diagnostics::warn`（无链接期依赖、无编译期裁剪开关）。
+
 ---
 
 ## 7 定时任务

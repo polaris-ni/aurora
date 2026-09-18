@@ -85,7 +85,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 | 模块 | 路径 | 主要头文件 |
 |:---|:---|:---|
-| 基础层 | `core/` | `types.h` `result.h`（`Result<T>` / `Error`） `log.h` `diagnostics.h` `color.h` `dimension.h` `image.h` `font.h` `expected.h` `immutable.h` `strict_mode.h` `event_stream.h` |
+| 基础层 | `core/` | `types.h` `result.h`（`Result<T>` / `Error`） `log.h` `diagnostics.h` `color.h` `dimension.h` `image.h` `font.h` `expected.h` `immutable.h` `strict_mode.h` `event_stream.h` `accessibility.h` `a11y_types.h` `a11y_provider.h` `a11y_diff.h` `a11y_text.h` |
 | 响应式核心 | `state/` | `state.h` `computed.h` `effect.h` `binding.h` `store.h` `reactive.h` `signal_view.h` `async.h` `coroutine.h` `state_graph.h` `state_registry.h` |
 
 ### 4.2 布局与渲染
@@ -277,6 +277,29 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 **自定义后端**：任意 `Surface` 子类经 `Application(Scene, unique_ptr<Surface>)` / `App().surface(...)` 注入，无需为每种后端在 `Application` 上加构造重载；`Surface` 之外的扩展点收口在 `create_window` 工厂。
 
 **编译 / 链接期代码剪裁**：关闭某 `AURORA_BACKEND_*` 后，对应 `Surface` 实现类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端；关闭 `AURORA_ENABLE_AUDIO_WASAPI` 同样剔除音频设备后端实现。自定义注入路径（自定义 `Surface` / 自定义 `AudioDeviceBackend`）不受影响，故「只用自定义 backend」可不编译任何内置后端。
+
+### 8.5 无障碍桥接（platform accessibility bridge）
+
+**分层与所有权。** 无障碍能力分三层，公共头零平台污染：语义树（`core/accessibility.h` + `core/a11y_types.h`，平台中立值类型）→ 桥抽象（`core/a11y_provider.h` 的 `a11y::Provider` 接口 + 进程级 `ProviderRegistry`）→ 平台实现（Win32 = `src/aurora/window/detail/win32_ua.{h,cpp}`，随 `AURORA_BACKEND_WIN32` 编入；D3D11 复用同一桥，门控为「平台宏 ∧ 后端宏析取」，与 `win32_cursor.h` 同款）。桥实例由 `Win32Window::Impl` **唯一持有**（`Win32Surface` / `D3D11Surface` 都转发同一实例），避免两份 `id → Widget*` 映射分裂。
+
+**Surface 扩展点（两处，均有默认空实现）。**
+
+| 扩展点 | 作用 |
+|:---|:---|
+| `Surface::accessibility_provider() const -> a11y::Provider*` | 返回本窗口的桥（无桥后端返回 `nullptr`）。**只读**：不构造桥。 |
+| `Surface::set_accessibility_root(Widget*) -> void` | 每帧由 `Window::present_root` 在布局与绘制完成后调用，注入语义树根。 |
+
+为什么不只靠 `accessibility_provider()`：桥是**惰性**构造的（首个平台查询到达才构造，见下）——首个查询到达时它才存在，此刻若还没有任何注入记录就无根可投影。故根由**恒存在**的宿主（`Win32Window::Impl::a11y_root`）承接，桥构造后由宿主补喂；无桥后端为 no-op。注入点在 `paint` 之后：语义树几何取自布局与绘制产物，先于此即无效。
+
+**重建模型（拉取式）。** 事件到达只置 dirty（`Provider::mark_dirty()`），平台查询（UIA `Navigate` / 属性拉取）到达时才 `sync_if_dirty()` → 全量重投影 + 快照 diff + 派发平台事件。**不进帧循环**：无读屏在线时零构建、零事件。规模假设是「桌面应用百级节点」，全量 O(n) 足够，避免高频变更下的重建风暴。
+
+**根的生命周期（两处硬不变量，均为实机崩溃的修复结论）。**
+1. 桥只持**根**的裸指针（子节点每次查询重投影，不缓存）。根控件销毁时经 `Node::~Node()` 的单源通道 `notify_accessibility_widget_destroying()` 广播到已激活桥，桥立即切断根 / 快照 / 平台对象并停发事件——否则宿主「先拆 UI 树、后拆窗口」的常规顺序下，窗口存活期间的平台查询会拿悬垂根重建语义树。
+2. 窗口销毁时 `disconnect_all()` 会先立**单向拆除门闩**再调 `UiaDisconnectProvider`：该 API 会**同步重入** provider 取属性（UIA 需为被丢弃的侦听者补发属性变更事件），门闩保证重入路径只读旧快照、绝不重建。
+
+`deactivate()` 与 `disconnect_all()` 等价且幂等，并在其中**从 `ProviderRegistry` 注销** —— 缺这一步，进程级事件广播会在已析构的桥上调用 `is_active()`（use-after-free）。
+
+**线程与降级。** 全 main-thread（in-proc provider 由 UIA core 在 UI 线程回调，桥激活时把套间初始化为 STA）；`UIAutomationCore.dll` 运行时 `LoadLibraryA` 动态加载，缺库或函数缺失即整桥降级 no-op + 一次 `Diagnostics::warn`，无链接期依赖。
 
 ---
 

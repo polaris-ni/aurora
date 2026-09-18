@@ -685,6 +685,19 @@ class RhiBackend {
 
 **测试**：`utest_gpu_gl_rhi` 以 fake GL 驱动桩（全量填充 `GLFn` + 调用记录）覆盖帧生命周期 / 各管线批切分 / 渐变 LUT 内容 / PMA 上传 / 字形图集子上传 / 效果 ping-pong 序 / 初始化失败链 / 能力位与流式拒绝 / 流式槽版本门控子上传 / 流式公共 API 契约（复用 / 跨距 / 防御 no-op）/ 层缓存生命周期与 miss 自愈；`utest_gpu_layers` 覆盖层键唯一性与 epoch 单调、`NativeSurfaceFrame` 契约、`Painter` 层命令录制与 `SoftwareRhi` 层仿真（roundtrip 逐位一致 / miss 跳过 + bump / 跨实例共享存储）；`itest_gpu_layer_cache` 覆盖控件级首帧层录制 / 干净帧仅 `DrawLayer` / 失效重录且像素与直绘一致 / epoch 推进整体失效 / miss 自愈闭环 / 尺寸变化重录；`itest_gpu_gl_smoke` 在真实 GLFW 窗口验证 GPU 模式呈现与后端身份契约（无显示环境自动 SKIP）。
 
+### 8.8 无障碍桥扩展点（Surface）
+
+`Surface` 上另有**两个**无障碍扩展点，均有默认空实现，故自定义后端不覆写即退化为「无无障碍桥」（源码兼容）：
+
+| 方法 | 说明 |
+|:---|:---|
+| `accessibility_provider() const -> a11y::Provider*` | 虚方法，**基类默认返回 `nullptr`**；返回本窗口的无障碍桥。**只读、不构造**——桥是惰性构造的（首个平台查询到达才存在），故此处返回 `nullptr` 不等于「本后端不支持无障碍」。Win32 家族两路（`Win32Surface` / `D3D11Surface`）都转发**同一个** `Win32Window` 宿主持有的桥实例，使 id → Widget* 映射不分裂 |
+| `set_accessibility_root(Widget* root) -> void` | 每帧由 `Window::present_root` 在**布局与绘制完成之后**调用，注入语义树根。为何不直接调 `accessibility_provider()->set_root()`：桥惰性构造，首个查询到达时它才存在，此刻若还没有注入记录就无根可投影——根必须由**恒存在**的宿主承接，桥构造后由宿主补喂 |
+
+`surface.h` 仅前向声明 `aurora::a11y::Provider` 与 `aurora::Widget`，完整定义在 `core/a11y_provider.h` / `widget/widget.h`，公共头零平台污染。语义树几何取自布局与绘制产物（`paint_bounds` 语义），故注入点必须在 `paint` 之后。桥抽象、重建模型与根的生命周期不变量见 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) §8.5。
+
+> **真机验收（无头 CI 无法覆盖的部分）**：桥与 Windows 的接缝（`WM_GETOBJECT` 能否应答根对象、树能否 `Navigate`、属性是否有值、pattern 能否 QueryInterface 到）只能在本机真实窗口上证明。`tools/verify/win32_ua_live_probe.cpp` 以 **COM UIA 客户端**（`CUIAutomation8`，与 NVDA / Narrator 同路径）`ElementFromHandle` 取根，再用**控件视图**遍历器先序下钻，逐节点读属性与 pattern 并与期望表比对；`FrameworkId == "Aurora"` 用于把桥投影的元素与 UIA 默认 HWND provider 合成的非客户区（标题栏 / 系统菜单 / 最小化-最大化-关闭）区分开。验收范围与退出码语义见源文件头注释。
+
 ---
 
 ## 9 图像与媒体

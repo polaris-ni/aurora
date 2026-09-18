@@ -401,6 +401,17 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 | `gen_debug_api_json` | 读 [`debug_api.toml`](../debug_api.toml) → 更新 `aurora_api.json` 的 `"debug"` 段 |
 | `ai_compat_test` | AI 兼容性批量验证：遍历 `tests/fixtures/ai_compat/` 下的 JSON fixture（`valid_*` 期望通过、`error_*` 期望报错），无 LLM 调用 |
 
+### 7.5 真机验收探针（`tools/verify/`）
+
+探针证明的是**无头 CI 无法证明**的平台接线：单元测试只能断言到「平台中立层」（快照 / diff / 偏移映射 / 动作路由），而「平台回调是否真的到达、平台侧对象是否真的可查」只能建真实窗口、在真实桌面会话里验收。全部由 `cmake/AuroraVerify.cmake` 定义、`AURORA_BUILD_VERIFY_TOOLS` 门控、**不进 CTest**（会创建真实窗口 / 读取屏幕状态，非确定且干扰用户桌面）。
+
+| 探针 | 验证目标 | 读回方式 |
+|:---|:---|:---|
+| `aurora_verify_win32_cursor` / `aurora_verify_x11_cursor` / `aurora_verify_macos_cursor` / `aurora_verify_glfw_cursor` | `Surface::set_cursor` 是否真的改变了屏幕上显示的**光标** | 平台查询读回（Win32 `GetCursorInfo` / X11 XFIXES `XFixesGetCursorImage` / macOS `[NSCursor currentCursor]` 单例同一性；GLFW 无查询 API → 能力核对 + 人工目视） |
+| `aurora_verify_win32_ua` | Win32 UIA 无障碍桥与 Windows 的接缝：根对象能否应答、语义树能否 `Navigate`、必需属性是否有值、各 pattern 能否 QueryInterface 到 | **COM UIA 客户端**（`CUIAutomation8`，与 NVDA / Narrator 同路径）`ElementFromHandle` 取根 → 控件视图遍历器先序下钻 → 逐节点读属性与 pattern 并与期望表比对；`FrameworkId == "Aurora"` 区分桥投影元素与 UIA 默认 HWND provider 合成的非客户区 |
+
+各探针的验收范围、逐项期望与退出码语义写在对应源文件头注释内（`tools/verify/*.cpp|.mm`）；真机验收须在**对应平台**手工执行。
+
 ---
 
 ## 8 测试原语（`aurora::test`）
@@ -420,6 +431,13 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 模拟「3.3 core 完整实现」并记录 draw / clear / blit / 上传与纹理分配/删除计数，供
 `utest_gpu_gl_rhi`（GpuGlRhi 契约断言）与 `tools/bench/bench_gpu.cpp`（GPU 特性基准的
 确定性计数器，无需真实 GL 上下文）共用。
+
+**无障碍桥签（`RecordingProvider`，`tests/unit/utest_a11y_bridge.cpp`）**：沿 `FakeSink` / `FakeGl`
+同款「假实现记录调用序列」范式，`RecordingProvider : a11y::Provider` 只观测「桥侧收到了什么」
+（激活 / 置脏 / 事件 / 播报 / 控件销毁通知），不触任何平台 API——使桥注册表语义、事件广播与宿主
+处理器并存、播报直投、`screen_reader_active` 回填、语义根销毁通知等**平台中立契约可在无头环境
+端到端断言**。平台实现（Win32 UIA COM provider / 平台事件 API）不在单测射程内，由 `tools/verify/`
+的真机探针覆盖（§7.5）。
 
 ### 8.1 框架设施（`tests/framework/`）
 

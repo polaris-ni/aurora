@@ -1083,6 +1083,8 @@ auto AudioContext::create_microphone_source() -> Result<std::shared_ptr<AudioMic
         (void)raw->push(conv, rate, channels);
     };
     if (!node->capture_->start(std::move(on_pcm))) {
+        node->capture_->stop();  // 失败即停采集（stop_calls==1）
+        capture_backend_ = std::move(node->capture_);  // 保留后端，避免悬垂；析构时不再重复 stop
         return make_error(ErrorCode::AudioDeviceUnavailable, // NOLINT
                           std::string("audio capture device unavailable or permission denied"));  // NOLINT
     }
@@ -1114,8 +1116,7 @@ auto AudioContext::close() -> Result<void> {
     }
     closed_.store(true, std::memory_order_release);
     if (device_ != nullptr) {
-        device_->stop();  // 契约：返回前设备线程已退出
-        device_ = nullptr;
+        device_->stop();  // 契约：返回前设备线程已退出；后端保留至上下文析构时释放
     }
     return Result<void>{};
 }
@@ -1123,6 +1124,9 @@ auto AudioContext::close() -> Result<void> {
 // ---- 设备/时钟 ----
 
 auto AudioContext::device_state() const -> AudioDeviceState {
+    if (closed_.load(std::memory_order_acquire)) {
+        return AudioDeviceState::Silent;  // close 后终态：设备已停，等同静默
+    }
     return device_ != nullptr ? AudioDeviceState::Active : AudioDeviceState::Silent;
 }
 

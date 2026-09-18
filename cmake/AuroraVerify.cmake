@@ -65,6 +65,14 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_cursor)
     endif ()
 
+    # ---- Win32 UIA 无障碍桥（WM_GETOBJECT / provider 树 / pattern 暴露）----
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
+        aurora_add_verify_probe(aurora_verify_win32_ua "${_aurora_verify_dir}/win32_ua_live_probe.cpp")
+        # ObjectFromLresult（取回 provider）与 IID_* 符号来自 oleacc / uuid。
+        target_link_libraries(aurora_verify_win32_ua PRIVATE oleacc)
+        list(APPEND _aurora_verify_targets aurora_verify_win32_ua)
+    endif ()
+
     # ---- macOS 光标（NSCursor 派发接线）：[NSCursor currentCursor] 单例同一性读回 ----
     # 需 ObjC++ 语言：条件启用，其它平台上完全不涉及（不改动默认构建的语言集合）。
     if (APPLE AND AURORA_BACKEND_MACOS)
