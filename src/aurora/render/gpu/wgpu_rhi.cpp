@@ -18,6 +18,17 @@
 
 #include <webgpu.h>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming)
+#define WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming)
+#endif
+#include <windows.h>  // GetWindowLongPtrW / GetModuleHandle：HWND surface 的 HINSTANCE 推导
+#undef DrawText       // wingdi.h 宏会吞掉 CmdKind::DrawText 枚举名
+#endif
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -447,6 +458,9 @@ struct WgpuRhi::Impl {
     WGPUCommandEncoder encoder = nullptr;
     WGPURenderPassEncoder pass = nullptr;  // 当前打开的目标 pass（效果序列中可短暂为空）
     WGPUTextureView frame_view = nullptr;  // 本帧 swapchain view（持有引用，帧尾释放）
+    // swapchain 纹理本体引用：⚠️ 必须活到 submit/present 之后（texture_arrays example 同序），
+    // 提前释放会让 wgpu-core 在提交时判定「附着纹理已销毁」直接 Validation Error panic。
+    WGPUTexture frame_tex = nullptr;
     enum PassKind : int { kPassNone = 0, kPassCanvas, kPassLayer, kPassAlt };
     PassKind pass_kind = kPassNone;
     bool frame_open = false;
@@ -652,6 +666,7 @@ struct WgpuRhi::Impl {
         AURORA_WGPU_RELEASE(bgl_, wgpuBindGroupLayoutRelease)
         AURORA_WGPU_RELEASE(shader_, wgpuShaderModuleRelease)
         AURORA_WGPU_RELEASE(frame_view, wgpuTextureViewRelease)
+        AURORA_WGPU_RELEASE(frame_tex, wgpuTextureRelease)
         AURORA_WGPU_RELEASE(surface, wgpuSurfaceRelease)
         AURORA_WGPU_RELEASE(queue, wgpuQueueRelease)
         AURORA_WGPU_RELEASE(device, wgpuDeviceRelease)
@@ -813,7 +828,15 @@ struct WgpuRhi::Impl {
 #ifdef _WIN32
         WGPUSurfaceSourceWindowsHWND src{};
         src.chain.sType = WGPUSType_SurfaceSourceWindowsHWND;
-        src.hinstance = nullptr;
+        // hinstance 不可为 NULL：v29 下 `wgpuSurfaceGetCapabilities` 对 null-HINSTANCE 的
+        // HWND surface 直接返回 Error（真机 cap 探针隔离证实）。优先取窗口实主实例，
+        // 兜底 GetModuleHandle(nullptr)（webgpu.h 头注推荐值）。
+        auto *hwnd = static_cast<HWND>(options.native_window);
+        auto *hinstance = reinterpret_cast<void *>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
+        if (hinstance == nullptr) {
+            hinstance = GetModuleHandle(nullptr);
+        }
+        src.hinstance = hinstance;
         src.hwnd = options.native_window;
         desc.nextInChain = &src.chain;
 #elif defined(__linux__)
@@ -2732,6 +2755,9 @@ struct WgpuRhi::Impl {
             if (st.status == WGPUSurfaceGetCurrentTextureStatus_Outdated
                 || st.status == WGPUSurfaceGetCurrentTextureStatus_Lost) {
                 // 尺寸/设备变化：重配一次再取；仍失败则本帧放弃。
+                if (st.texture != nullptr) {
+                    wgpuTextureRelease(st.texture);  // Outdated 亦回纹理：先弃再重取
+                }
                 surface_configured = false;
                 if (!configure_surface(device_width, device_height)) {
                     return false;
@@ -2752,8 +2778,9 @@ struct WgpuRhi::Impl {
                 return false;
             }
             AURORA_WGPU_RELEASE(frame_view, wgpuTextureViewRelease)
+            AURORA_WGPU_RELEASE(frame_tex, wgpuTextureRelease)  // 上帧滞留引用（防御：end_frame 未跑）
             frame_view = wgpuTextureCreateView(st.texture, nullptr);
-            wgpuTextureRelease(st.texture);  // view 已接管引用
+            frame_tex = st.texture;  // 本体引用持到 end_frame submit 后释放（见成员注释）
             if (frame_view == nullptr) {
                 return false;
             }
@@ -2805,6 +2832,7 @@ struct WgpuRhi::Impl {
             AURORA_LOG_WARN("gpu-wgpu", "surfacePresent failed");
         }
         AURORA_WGPU_RELEASE(frame_view, wgpuTextureViewRelease)
+        AURORA_WGPU_RELEASE(frame_tex, wgpuTextureRelease)
     }
 
     // 目标纹理 → MAP_READ 缓冲拷贝（编入本帧 command buffer）。⚠️ mapAsync 必须延后到

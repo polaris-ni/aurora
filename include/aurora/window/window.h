@@ -116,11 +116,16 @@ enum class SurfaceKind : std::uint8_t {
 /// - `Software`：强制软件 GDI 上屏。
 /// - `GpuD3D11`：强制 D3D11；未编译/设备创建失败时返回 `Result` 错误（不静默降级，
 ///   错误归属调用方）。
-/// 仅影响「像素如何上屏」：绘制仍由软件 `Painter` 完成，widget 层不感知。
+/// - `GpuWgpu`：强制 wgpu GPU 栅格路径（帧级 DisplayList 在 GPU 端光栅化，非 CPU 像素
+///   上传；需 `AURORA_BACKEND_GPU_WGPU` + 宿主后端，v1 仅 Win32）。不可用时返回
+///   `Result` 错误，不降级（与 `GpuD3D11` 同口径）。
+/// 仅影响「像素如何上屏」：绘制仍由软件 `Painter` 完成，widget 层不感知
+/// （`GpuWgpu` 例外：整帧 DisplayList 交由 GPU 光栅，Painter 不再接收命令）。
 enum class RendererPreference : std::uint8_t {
     Auto,  ///< 自动：优先 GPU 上屏（如可用），否则软件（默认）
     Software,  ///< 强制软件上屏（Win32/GDI）
     GpuD3D11,  ///< 强制 D3D11 GPU 上屏（不可用时报错，不降级）
+    GpuWgpu,  ///< 强制 wgpu GPU 栅格上屏（不可用时报错，不降级）
 };
 
 /// @brief 跨所有后端共享的窗口选项。
@@ -179,6 +184,16 @@ struct D3D11Options : WindowOptions {
 };
 #endif
 
+/// @brief wgpu GPU 栅格后端专属选项（Win32 宿主）。
+/// 仅当 `AURORA_BACKEND_GPU_WGPU` 且 `AURORA_BACKEND_WIN32` 均定义时可用
+/// （v1 宿主仅 Windows；X11 宿主另片接入）。
+#if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WIN32)
+struct WgpuOptions : WindowOptions {
+    bool vsync = true;  ///< 垂直同步（wgpu FIFO）：true = present 阻塞到 vblank（后端自带帧节拍）；
+                        ///< false = immediate 提交，交还 CPU 端帧预算节流。
+};
+#endif
+
 /// @brief Glfw 后端专属选项（其余通用字段见 `WindowOptions`）。
 /// 仅当 `AURORA_BACKEND_GLFW` 定义（GLFW 后端编译进构建）时可用。
 #ifdef AURORA_BACKEND_GLFW
@@ -229,6 +244,11 @@ struct WasmOptions : WindowOptions {
 #ifdef AURORA_BACKEND_D3D11
 /// @brief D3D11 专属工厂（接受 `D3D11Options`）。仅 `AURORA_BACKEND_D3D11` 构建可用。
 [[nodiscard]] auto create_window(const D3D11Options &opts) -> Result<std::unique_ptr<Window>>;
+#endif
+
+#if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WIN32)
+/// @brief wgpu GPU 栅格专属工厂（接受 `WgpuOptions`，Win32 宿主）。仅两宏同时开启时可用。
+[[nodiscard]] auto create_window(const WgpuOptions &opts) -> Result<std::unique_ptr<Window>>;
 #endif
 
 #ifdef AURORA_BACKEND_GLFW

@@ -31,6 +31,11 @@
 #include "aurora/window/d3d11_surface.h"
 #endif
 
+// wgpu GPU 栅格分支需 AURORA_BACKEND_GPU_WGPU + Win32 宿主（v1 仅 Windows，见 wgpu_surface.h）。
+#if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WIN32)
+#include "aurora/window/wgpu_surface.h"
+#endif
+
 // Glfw 分支仅在 AURORA_BACKEND_GLFW 定义时编译，避免默认构建引入 GLFW/OpenGL 依赖
 // （保证零三方依赖的默认库）。
 #ifdef AURORA_BACKEND_GLFW
@@ -83,6 +88,32 @@ auto create_window(const HeadlessOptions &opts) -> Result<std::unique_ptr<Window
 #ifdef AURORA_BACKEND_WIN32
 auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> {
     // 渲染后端偏好：统一的硬件加速可选开关。
+#if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WIN32)
+    if (opts.renderer == RendererPreference::GpuWgpu) {
+        // wgpu GPU 栅格路径（DisplayList 直接在 GPU 端光栅化，非 CPU 像素上传）。
+        // Auto 不隐式选择本路径（保持既有 D3D11 优先序），仅显式强制时启用。
+        auto gpu = std::make_unique<WgpuSurface>(static_cast<int>(opts.size.width),
+                                                 static_cast<int>(opts.size.height), opts.title, opts.style);
+        if (!gpu->is_available()) {
+            // 强制 GPU 栅格：设备创建失败不静默降级，错误归属调用方（对齐 GpuD3D11 口径）。
+            return make_error(ErrorCode::RendererUnavailable,
+                              "create_window: RendererPreference::GpuWgpu requested but WgpuSurface init failed.",
+                              "Use RendererPreference::Auto to fall back to D3D11/GDI presenters.",
+                              "aurora/window/window.h");
+        }
+        return make_window(std::move(gpu), opts);
+    }
+#else
+    if (opts.renderer == RendererPreference::GpuWgpu) {
+        // 未编译 wgpu 后端（或缺 Win32 宿主）：强制 GPU 栅格时报错（Auto 不会隐式选它）。
+        return make_error(
+            ErrorCode::RendererUnavailable,
+            "create_window: RendererPreference::GpuWgpu requested but AURORA_BACKEND_GPU_WGPU (with Win32 host) "
+            "is not compiled in.",
+            "Rebuild with -DAURORA_BACKEND_GPU_WGPU=ON, or use RendererPreference::Auto/Software.",
+            "aurora/window/window.h");
+    }
+#endif
 #ifdef AURORA_BACKEND_D3D11
     if (opts.renderer == RendererPreference::Auto || opts.renderer == RendererPreference::GpuD3D11) {
         auto gpu = std::make_unique<D3D11Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
@@ -119,6 +150,22 @@ auto create_window(const D3D11Options &opts) -> Result<std::unique_ptr<Window>> 
     auto surf = std::make_unique<D3D11Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
                                                opts.title, opts.style);
     surf->set_vsync(opts.vsync);  // vsync 可选（false 交还 CPU 端帧预算节流）
+    return make_window(std::move(surf), opts);
+}
+#endif
+
+#if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WIN32)
+auto create_window(const WgpuOptions &opts) -> Result<std::unique_ptr<Window>> {
+    auto surf = std::make_unique<WgpuSurface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
+                                              opts.title, opts.style, opts.vsync);
+    if (!surf->is_available()) {
+        // 专属工厂不静默降级为 GDI：初始化失败（无 adapter/device/swapchain）归属调用方。
+        return make_error(ErrorCode::RendererUnavailable,
+                          "create_window(Wgpu): wgpu device/surface init failed (no adapter or HWND?).",
+                          "Check GPU driver availability, or use create_window(Win32Options) with "
+                          "RendererPreference::Auto/Software.",
+                          "aurora/window/wgpu_surface.h");
+    }
     return make_window(std::move(surf), opts);
 }
 #endif

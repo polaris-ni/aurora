@@ -30,6 +30,10 @@
 #include "aurora/window/d3d11_surface.h"
 #endif
 
+#if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WIN32)
+#include "aurora/window/wgpu_surface.h"  // wgpu GPU 栅格（v1 宿主仅 Win32，见 wgpu_surface.h）
+#endif
+
 #ifdef AURORA_BACKEND_GLFW
 #include "aurora/window/glfw_surface.h"
 #endif
