@@ -1,6 +1,6 @@
 {
   "schema": "aurora-changelog/1.0",
-  "currentVersion": "1.0.0-alpha.6",
+  "currentVersion": "1.0.0-alpha.7",
   "policy": "semver",
   "freeze": "minor-versions-are-additive",
   "rules": [
@@ -377,6 +377,30 @@
         "验证口径：GCC / MSVC / clang-LLVM 三工具链全量 ctest **289/289** 全绿（含 4 项守护）；音频另跑 `AURORA_ENABLE_AUDIO=ON` 配置 ctest 289/289 全绿（内置 WASAPI 后端接线真实验证）；真机探针（Windows + 真实 GL 驱动 / Windows + 真实 WASAPI 设备）自动段 ALL PASS——流式上传与采样、FBO 层跨帧存续、present 链路、音频格式协商与推流等无头 CI 无法证明的驱动接线由 tools/verify/ 探针补位。",
         "原生 GPU 表面导入在 GL 3.3 路径为契约位（能力位恒 false、import 恒回退），真实兑现（memory object 绑定 / EGLImage）随 wgpu 阶梯推进；`compute` 能力位同理为前瞻声明（GL 3.3 无 compute shader）。",
         "音频图 API 恒编译、`AURORA_ENABLE_AUDIO` 只门控内置设备后端：未启用时 AudioContext 构造即静默模式，消费代码零分支；录制为显式能力（失败显式报错），与静默降级语义明确区分。音频后续增量（CoreAudio / ALSA / WebAudio 后端、HRTF 声像卷积模型）顺延 alpha.7 或平台窗口期。"
+      ]
+    },
+    {
+      "version": "1.0.0-alpha.7",
+      "date": "2026-09-18",
+      "type": "pre-release",
+      "summary": "无障碍平台桥首桥落地（Win32 UIAutomation）：语义树升级（role/name/state/range/text/level/semantic）→ 动作执行通道（invoke/toggle/set_value/set_range/set_text/scroll 虚钩子）→ 共享桥抽象（Provider/ProviderRegistry/脏标记/diff）→ Win32 IUIAutomationProvider 与各 UIA Pattern 实现、懒激活（首个 WM_GETOBJECT 才构造）、反投影；Surface/Window 扩展点 accessibility_provider() + set_accessibility_root()（WIN32/D3D11 共用 Win32Window 宿主）。公共无障碍钩子升为公共 API；RTL 由应用侧 Window::set_accessibility_rtl 推送、桥内 Navigate 反转遍历。配套真机验收探针（GDI/D3D11 双过）与 NVDA 人工验收手册；14 项实现期裁定全部收口。",
+      "added": [
+        "src/aurora/window/detail/win32_ua.{h,cpp}（新增）：Win32 UIA 桥全量实现——Widget 语义树 → UIA 元素/Pattern/事件映射；Provider 基类 + ProviderRegistry + 脏标记驱动 pull-based 重投影（sync_if_dirty）；懒激活（首个 WM_GETOBJECT 才构造根 Provider）；Navigation/Value/Range/Text/Toggle/Invoke 各 Pattern；IRawElementProviderFragment/FragmentRoot 反投影。暴露 accessibility_provider()/set_accessibility_root() 扩展点，WIN32 与 D3D11 后端共用 Win32Window 宿主。",
+        "include/aurora/core/accessibility.h：resolve_accessibility_name 新增第四级回退 sibling_label_name——几何启发式（垂直重叠 + 水平相邻、容差 12 DIP），覆盖 Checkbox/Switch/Slider 这类标签为兄弟 Text 的控件，解决 G24 唯一文本子节点兜底取不到名字的问题（实现期裁定 #1-C）。",
+        "include/aurora/core/a11y_provider.h（新增）+ include/aurora/window/surface.h + window.h：Provider 基类扩展 set_rtl 虚钩子；Surface/Window 新增 accessibility_provider()/set_accessibility_root()/set_accessibility_rtl 扩展点；aurora::a11y 命名空间新增公共钩子 set_accessibility_broadcast_hook / set_accessibility_widget_destroy_hook（升为公共 API，裁定 #9-B）。",
+        "include/aurora/aurora.h：拉入 a11y_provider.h，公共 API 暴露无障碍钩子。",
+        "tools/verify/win32_ua_live_probe.cpp（新增）：UIA 客户端真机验收探针（COM UIA 同款入口），逐控件校验 ControlType/Name/FrameworkId/Pattern 在场；含 #1-C 兄弟标签场景（Row 包裹 Text 标签 + Checkbox/Slider，UIA Name 解析为兄弟标签文本）、#3 离屏裁剪硬断言、#7 TextPattern 几何探针。GDI 与 D3D11 两路 ALL PASS。",
+        "tools/verify/NVDA_A11Y_RUNBOOK.md（新增）：屏幕阅读器（NVDA）人工验收手册——步骤 A–H、预期播报、观察点、记录模板；含工具链坑注记（默认 LLVM/clang 编不过 UIAutomationCore.h 的 interface 关键字，须显式 mingw64 g++）。"
+      ],
+      "fixed": [
+        "src/aurora/window/detail/win32_ua.cpp：修复两处仅真机可复现崩溃——(1) UiaDisconnectProvider 在同步重入中访问已悬垂 root（懒激活 + 反投影并发路径）；(2) ProviderRegistry 反注册缺失导致的 UAF（销毁钩子未配对注销）。两处均经真机探针复测稳定。",
+        "include/aurora/window/surface.h + a11y_provider.h：修复编译期错误——set_accessibility_rtl 默认体调用 Provider::set_rtl 时 Provider 仅前向声明（不完整类型），补 #include；公共钩子转发函数 detail:: 误解析到 aurora::a11y::detail，改为完全限定 ::aurora::detail::。"
+      ],
+      "notes": [
+        "验收口径：GDI 探针 aurora_verify_win32_ua 退出码 0（含 #1-C 兄弟标签、#3 离屏、#7 Text 几何）；D3D11 探针（build-d3d11，WIN32=ON D3D11=ON）GDI + GPU 两路上屏路径 ALL PASS——桥与 Win32Window 宿主共享，GPU 上屏不影响 a11y 投影；全量 ctest 292/292 全绿（build-mingw，g++ debug，16 并行）；五道文档门禁（codespec_xref/code_doc_sync/arch_module_map/naming_conventions/version_consistency）全绿。",
+        "决策偏差（实现期裁定 #4-B）：用户选 B（按元素类型派生 RuntimeId 第三段）经核查为基于错误前提——NodeSnapshot::id 即稳定 Widget::runtime_id()，段 2–5 已用之；UiaAppendRuntimeId 值 3 是强制协议常量；派生会使同类型兄弟碰撞并破坏 UIA 缓存。故保留稳定 runtime id，未盲从 B，偏差记入设计稿 §16.2。",
+        "工具链坑：默认 CC/CXX=LLVM/clang 编不过 UIAutomationCore.h（interface 关键字），须显式 mingw64 g++（D:/Development/Environment/mingw64/bin/g++.exe）。ROADMAP 与 NVDA 手册均已注记。",
+        "其余 14 项裁定：#2-A 根保持 Pane；#3-A 离屏裁剪补偿 + IsOffscreen；#5-B RTL 桥内遍历反转 + 应用侧推送；#6-B 虚拟化 id 契约写入设计稿 §16.6；#8-B reset_teardown + set_root 换根复位；#10-A aurora_api.json 确认不动；#11-C 版本手动收口（本条目）；#12-A ROADMAP 已补；#13-B NVDA 手册产出；#14-B D3D11 探针已跑。"
       ]
     }
   ]

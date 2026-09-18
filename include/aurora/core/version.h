@@ -28,7 +28,7 @@
 
 // 预发布后缀字符串（不含前导 '-'；稳定版置 AURORA_HAS_VERSION_SUFFIX 为 0 即可）。
 #ifndef AURORA_VERSION_SUFFIX_STR
-#define AURORA_VERSION_SUFFIX_STR "alpha.6"
+#define AURORA_VERSION_SUFFIX_STR "alpha.7"
 #endif
 
 #ifndef AURORA_HAS_VERSION_SUFFIX
