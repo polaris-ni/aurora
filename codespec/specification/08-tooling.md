@@ -407,12 +407,16 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 
 | 探针 | 验证目标 | 读回方式 |
 |:---|:---|:---|
-| `aurora_verify_win32_cursor` / `aurora_verify_x11_cursor` / `aurora_verify_macos_cursor` / `aurora_verify_glfw_cursor` | `Surface::set_cursor` 是否真的改变了屏幕上显示的**光标** | 平台查询读回（Win32 `GetCursorInfo` / X11 XFIXES `XFixesGetCursorImage` / macOS `[NSCursor currentCursor]` 单例同一性；GLFW 无查询 API → 能力核对 + 人工目视） |
+| `aurora_verify_win32_cursor` / `aurora_verify_x11_cursor` / `aurora_verify_macos_cursor` / `aurora_verify_glfw_cursor` | `Surface::set_cursor` 是否真的改变了屏幕上显示的**光标**（Win32 一支同时验 `Win32Surface`(GDI)、`D3D11Surface` 与 `WgpuSurface` 三个宿主调用点，共用 `detail::set_win32_cursor` 映射） | 平台查询读回（Win32 `GetCursorInfo` / X11 XFIXES `XFixesGetCursorImage` / macOS `[NSCursor currentCursor]` 单例同一性；GLFW 无查询 API → 能力核对 + 人工目视） |
 | `aurora_verify_win32_ua` | Win32 UIA 无障碍桥与 Windows 的接缝：根对象能否应答、语义树能否 `Navigate`、必需属性是否有值、各 pattern 能否 QueryInterface 到 | **COM UIA 客户端**（`CUIAutomation8`，与 NVDA / Narrator 同路径）`ElementFromHandle` 取根 → 控件视图遍历器先序下钻 → 逐节点读属性与 pattern 并与期望表比对；`FrameworkId == "Aurora"` 区分桥投影元素与 UIA 默认 HWND provider 合成的非客户区 |
 
 各探针的验收范围、逐项期望与退出码语义写在对应源文件头注释内（`tools/verify/*.cpp|.mm`）；真机验收须在**对应平台**手工执行。
 
-**由后台进程执行时的物理前提**（不是软件缺陷，探针按退出码如实申报而非假通过）：凡判据落在「屏幕上真实显示的指针/光标」上的探针（`aurora_verify_win32_cursor`，以及各探针的 `--interactive` 人工段），要求**已解锁且处于活动状态的交互桌面**——探针会把被测窗口置顶（`HWND_TOPMOST`）、摆到屏幕中心并多次重试落点，以绕开「后台进程抢不到前台」（`SetForegroundWindow` 受前台锁约束）这一常规干扰；若控制台会话处于锁屏，落点会被系统的 `LockScreenBackstopFrame` 窗口占据，探针以退出码 3 报出「期望落点 / 实际指针位置 / 该点上的窗口类名」三件套现场证据后终止（远程桌面会话隔离同理）。纯逻辑/句柄类判据（如 GLFW 探针自动段：`glfwCreateStandardCursor` 句柄互异计数）不受此约束，可在任意会话内跑通。
+**由后台进程执行时的物理前提**（不是软件缺陷，探针按退出码如实申报而非假通过）：凡判据落在「屏幕上真实显示的指针/光标」上的探针（`aurora_verify_win32_cursor`，以及各探针的 `--interactive` 人工段），要求**已解锁且处于活动状态的交互桌面**——探针会把被测窗口置顶（`HWND_TOPMOST`）并依次试摆「屏幕中心 → 四角内侧」共 5 个落点（同处置顶带内他人窗口可长期压住中心点，`SetForegroundWindow` 又受前台锁约束），多次不中才以退出码 3 报出「期望落点 / 实际指针位置 / 该点上的窗口类名 / 试过的落点数」现场证据后终止（远程桌面会话隔离、锁屏时的 `LockScreenBackstopFrame` 同理）。纯逻辑/句柄类判据（如 GLFW 探针自动段：`glfwCreateStandardCursor` 句柄互异计数）不受此约束，可在任意会话内跑通。
+
+**读回屏幕光标前必须真正派发平台事件**（探针侧时序约束，非库缺陷）：`Surface::wait_events` 只等待、不派发（Win32 侧派发在 `poll_platform_events` 的 `PeekMessage`/`DispatchMessage`），而 `GetCursorInfo` 读回的共享光标随 WM_SETCURSOR 走完 wndproc 才刷新——只 wait 不 poll 会让读回恒停在上一手的值，本线程 `GetCursor()` 却逐形状命中，极易误判成「本会话读不回」。故 Win32 探针每形状按时序「1px 位移 → 派发 → `set_cursor` → 立刻读回（不再派发，避免 DefWindowProc 用窗口类光标覆盖）」执行；实测（2026-09-20，Windows 11 + MinGW 构建）`Win32Surface` / `D3D11Surface` / `WgpuSurface` 三路各 11/11 读回命中且两两互异。
+
+**X11 侧落点必须按窗口自身几何求，不能按请求坐标**（同上类约束）：`XMoveResizeWindow` 只是请求，rootless Xwayland 下合成器会把窗口安放到别处（实测请求全屏 `(0,0,7680x2160)` 后窗口报回左上角 `(639,1214)`），故「按硬编码点 warp + 按另一份几何判」两套口径互斥、恒判「指针放不过去」。探针改为等窗口几何稳定且完整落在 root 内、按**该几何中心** warp、再用同一次读回判命中（强判据 `XQueryPointer` 的 `child==win`，Xwayland 常不回 child 故按几何包含放行）。放行不是假阳性——判据仍是 XFIXES 读回；实测（2026-09-20，WSLg）11 形状读回 11/11 互异且逐行等于 `x11_cursor_glyph` 期望字形名。
 
 ---
 
