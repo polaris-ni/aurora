@@ -102,6 +102,16 @@ AURORA_TEST_CASE(backend_surface_set_cursor_contract) {
     static_assert(!std::is_same_v<decltype(&MacOSSurface::set_cursor), void (Surface::*)(CursorShape)>,
                   "MacOSSurface 必须覆写 set_cursor");
 #endif
+#ifdef AURORA_BACKEND_GPU_WGPU
+#ifdef AURORA_BACKEND_WIN32
+    static_assert(!std::is_same_v<decltype(&WgpuSurface::set_cursor), void (Surface::*)(CursorShape)>,
+                  "WgpuSurface 必须覆写 set_cursor（转发 Win32Window 宿主）");
+#endif
+#ifdef AURORA_BACKEND_X11
+    static_assert(!std::is_same_v<decltype(&WgpuX11Surface::set_cursor), void (Surface::*)(CursorShape)>,
+                  "WgpuX11Surface 必须覆写 set_cursor（转发内嵌 X11Surface 宿主）");
+#endif
+#endif
     AURORA_TEST_CHECK_TRUE(true);
 #else
     AURORA_TEST_SKIP("无任何真实窗口后端开启（默认无头构建），后端 set_cursor 覆写契约无法判定");

@@ -5,6 +5,8 @@
 
 #include "win32_ime.h"
 
+#if defined(AURORA_PLATFORM_WINDOWS) && (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_D3D11))
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -173,3 +175,5 @@ auto Win32ImeBridge::position_candidate_window() -> void {
 }
 
 }  // namespace aurora::detail
+
+#endif  // AURORA_PLATFORM_WINDOWS && (AURORA_BACKEND_WIN32 || AURORA_BACKEND_D3D11)

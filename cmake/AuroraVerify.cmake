@@ -115,6 +115,13 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_wgpu)
     endif ()
 
+    # ---- X11 wgpu GPU 栅格（Linux 真实窗口 + 离屏直驱，WSLg vGPU 可验）：与 Win32 探针同段结构，
+    # 宿主动态类型为 WgpuX11Surface，另加 XGetImage 截图落盘物证。需 WGPU+X11 通道编译进库。
+    if (AURORA_BACKEND_GPU_WGPU AND AURORA_BACKEND_X11)
+        aurora_add_verify_probe(aurora_verify_x11_wgpu "${_aurora_verify_dir}/x11_wgpu_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_x11_wgpu)
+    endif ()
+
     # ---- WASAPI 音频（Windows）：真实设备线程 / 格式协商 / 图时钟 / 出声路径真机核对 ----
     # 自动段核对激活/格式契约/时钟推进/缓冲源与推流通路/suspend-resume；--interactive 出声人工段
     # （扫频/双源混音/设备热切换）。需音频后端编译进库（AURORA_ENABLE_AUDIO=ON）。

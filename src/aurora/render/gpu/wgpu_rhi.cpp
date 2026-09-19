@@ -849,7 +849,8 @@ struct WgpuRhi::Impl {
         WGPUSurfaceSourceXlibWindow src{};
         src.chain.sType = WGPUSType_SurfaceSourceXlibWindow;
         src.display = options.native_display;
-        src.window = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(options.native_window));
+        // webgpu.h 的 SurfaceSourceXlibWindow::window 是 uint64_t（XID 全宽），勿窄化为 u32。
+        src.window = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(options.native_window));
         desc.nextInChain = &src.chain;
 #else
         AURORA_LOG_ERROR("gpu-wgpu", "native window surface not supported on this platform yet");

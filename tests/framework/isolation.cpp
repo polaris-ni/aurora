@@ -61,12 +61,24 @@ struct CaseState {
     return fs::is_directory(dir / "codespec", ec) && !ec && fs::exists(dir / "CMakeLists.txt", ec);
 }
 
+/// @brief 读取环境变量（未设置返回空串）。定义在本文件后段，此处前向声明供仓库根定位使用。
+[[nodiscard]] auto get_env(const char* name) -> std::string;
+
 /// @brief 从可执行文件位置向上定位仓库根；失败回退从 cwd 向上找。
 ///
 /// CTest 以绝对路径调用 runner（<repo>/build[/x]/aurora_test_runner），向上最多 6 层
-/// 足以覆盖任意构建目录布局；安装到仓库外的 runner 定位失败，返回空串（cwd 不动）。
+/// 足以覆盖任意构建目录布局；exe 侧未命中再从 cwd 向上找（覆盖仓库外构建目录 +
+/// WORKING_DIRECTORY 已切仓库根的布局，如 WSL 跨文件系统构建）；两者皆失败返回空串。
+/// 环境变量 `AURORA_REPO_ROOT` 可显式指定仓库根（runner 安装/构建于仓库外时的唯一
+/// 可靠锚点，如 WSL home 目录构建 /mnt/c 源码仓），值须形如仓库根，否则忽略回落自动查找。
 [[nodiscard]] auto locate_repo_root() -> std::string {
     std::error_code ec;
+    if (const auto override_root = get_env("AURORA_REPO_ROOT"); !override_root.empty()) {
+        const fs::path forced{override_root};
+        if (looks_like_repo_root(forced)) {
+            return override_root;
+        }
+    }
 #if defined(AURORA_PLATFORM_WASM)
     // Emscripten：argv[0] 是宿主给出的 .js 路径（Windows 带盘符），须去盘符才能被
     // fs::absolute 认作绝对路径（否则会拼上 cwd 多出一层假路径，见 strip_windows_drive）。
@@ -80,15 +92,23 @@ struct CaseState {
             return {};
         }
     }
-    for (int depth = 0; depth < 6 && !dir.empty(); ++depth) {
-        if (looks_like_repo_root(dir)) {
-            return dir.string();
+    for (int round = 0; round < 2; ++round) {
+        for (int depth = 0; depth < 6 && !dir.empty(); ++depth) {
+            if (looks_like_repo_root(dir)) {
+                return dir.string();
+            }
+            const fs::path parent = dir.parent_path();
+            if (parent == dir) {
+                break;
+            }
+            dir = parent;
         }
-        const fs::path parent = dir.parent_path();
-        if (parent == dir) {
-            break;
+        if (round == 0) {
+            dir = fs::current_path(ec);  // exe 链未命中：回退 cwd 链（见上方说明）
+            if (ec) {
+                return {};
+            }
         }
-        dir = parent;
     }
     return {};
 }

@@ -31,7 +31,11 @@
 #endif
 
 #if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WIN32)
-#include "aurora/window/wgpu_surface.h"  // wgpu GPU 栅格（v1 宿主仅 Win32，见 wgpu_surface.h）
+#include "aurora/window/wgpu_surface.h"  // wgpu GPU 栅格（Win32 宿主）
+#endif
+
+#if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_X11)
+#include "aurora/window/wgpu_x11_surface.h"  // wgpu GPU 栅格（X11 宿主，组合内嵌 X11Surface）
 #endif
 
 #ifdef AURORA_BACKEND_GLFW

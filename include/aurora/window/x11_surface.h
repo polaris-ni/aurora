@@ -94,6 +94,11 @@ class X11Surface final : public Surface {
     /// @brief 原生窗口句柄：X11 `Window`（XID）经 uintptr_t 装入 void*。
     [[nodiscard]] auto native_handle() const -> void * override;
 
+    /// @brief 该窗口所在的 X 服务器连接：`Display*` 装入 void*（未连接 = nullptr）。
+    /// 与 `native_handle()`（XID Window）配对使用——wgpu Xlib surface 创建（
+    /// `WGPUSurfaceSourceXlibWindow`）等外部 GPU 接线需要两者同源。
+    [[nodiscard]] auto native_display() const -> void *;
+
   private:
     struct Impl;  ///< 全部 Xlib 状态（Display/Window/GC/XImage/XIM/唤醒管道），见 x11_surface.cpp。
     std::unique_ptr<Impl> impl_;

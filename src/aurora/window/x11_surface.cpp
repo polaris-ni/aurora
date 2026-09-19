@@ -643,6 +643,10 @@ auto X11Surface::native_handle() const -> void * {
     return reinterpret_cast<void *>(impl_->win);  // NOLINT(*-pro-type-reinterpret-cast, performance-no-int-to-ptr)
 }
 
+auto X11Surface::native_display() const -> void * {
+    return impl_->dpy;  // Display* → void* 隐式转换；未连接时为 nullptr
+}
+
 auto X11Surface::poll_platform_events() -> void {
     Impl &d = *impl_;
     if (d.dpy == nullptr) {

@@ -123,11 +123,18 @@ if (AURORA_BACKEND_GPU_WGPU)
     # Rust 工具链探测：cargo 必须存在（rustup 安装）。
     find_program(AURORA_CARGO_EXECUTABLE cargo)
     if (NOT AURORA_CARGO_EXECUTABLE)
-        aurora_error("AURORA_BACKEND_GPU_WGPU=ON but 'cargo' was not found on PATH."
-                " Install the Rust toolchain first, e.g.: winget install --id Rustlang.Rustup -e;"
-                " then a toolchain whose host triple matches the C++ ABI - on Windows with MinGW:"
-                " rustup toolchain install stable-x86_64-pc-windows-gnu"
-                " && rustup default stable-x86_64-pc-windows-gnu.")
+        if (WIN32)
+            aurora_error("AURORA_BACKEND_GPU_WGPU=ON but 'cargo' was not found on PATH."
+                    " Install the Rust toolchain first, e.g.: winget install --id Rustlang.Rustup -e;"
+                    " then a toolchain whose host triple matches the C++ ABI - on Windows with MinGW:"
+                    " rustup toolchain install stable-x86_64-pc-windows-gnu"
+                    " && rustup default stable-x86_64-pc-windows-gnu.")
+        else ()
+            aurora_error("AURORA_BACKEND_GPU_WGPU=ON but 'cargo' was not found on PATH."
+                    " Install the Rust toolchain first, e.g.:"
+                    " curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y;"
+                    " then make sure ~/.cargo/bin is on PATH.")
+        endif ()
     endif ()
 
     # host 三元组 + 完整工具链 id 探测（在 wgpu-native 目录之外执行，避开上游
@@ -170,6 +177,12 @@ if (AURORA_BACKEND_GPU_WGPU)
                 " '${AURORA_RUST_HOST_TRIPLE}' (ABI-incompatible static libs). Fix with:"
                 " rustup default stable-x86_64-pc-windows-msvc.")
     endif ()
+    if (UNIX AND NOT APPLE AND NOT AURORA_RUST_HOST_TRIPLE MATCHES "-linux-(gnu|musl)$")
+        aurora_error("AURORA_BACKEND_GPU_WGPU: C++ compiler is GNU (Linux) but the default Rust toolchain is"
+                " '${AURORA_RUST_HOST_TRIPLE}' (ABI-incompatible static libs). Expecting a"
+                " *-linux-gnu (or explicitly *-linux-musl) host; fix with:"
+                " rustup toolchain install stable-<triple> && rustup default stable-<triple>.")
+    endif ()
 
     # libclang 探测：wgpu-native 的 build.rs 经 bindgen 从 webgpu.h 生成 FFI 头，构建期硬
     # 依赖 libclang 共享库。PATH 上找 clang 取同目录；再查 Windows 常见 LLVM 安装根。
@@ -186,8 +199,25 @@ if (AURORA_BACKEND_GPU_WGPU)
             endif ()
         endforeach ()
     elseif (UNIX)
-        find_file(_wgpu_libclang_so NAMES libclang.so libclang.so.* PATHS /usr/lib/llvm-*/lib /usr/lib
-                NO_DEFAULT_PATH NO_CACHE)
+        # Ubuntu/Debian 的 libclang 实际文件名为 libclang-XX.so(.1)，dev 包装为
+        # /usr/lib/llvm-XX/lib/libclang.so 符号链接——多模式 GLOB 后按版本号取最高
+        # （字典序会把 llvm-9 排在 llvm-19 前）。
+        file(GLOB _wgpu_libclang_cands "/usr/lib/llvm-*/lib/libclang.so*" "/usr/lib/*/libclang*.so*"
+                "/usr/lib/libclang*.so*")
+        set(_wgpu_libclang_so "")
+        set(_wgpu_libclang_ver "0")
+        foreach (_cand IN LISTS _wgpu_libclang_cands)
+            set(_cand_ver "0")
+            if (_cand MATCHES "libclang-([0-9]+(\\.[0-9]+)*)\\.so")
+                set(_cand_ver "${CMAKE_MATCH_1}")
+            elseif (_cand MATCHES "llvm-([0-9]+)")
+                set(_cand_ver "${CMAKE_MATCH_1}")
+            endif ()
+            if (_wgpu_libclang_so STREQUAL "" OR _cand_ver VERSION_GREATER _wgpu_libclang_ver)
+                set(_wgpu_libclang_so "${_cand}")
+                set(_wgpu_libclang_ver "${_cand_ver}")
+            endif ()
+        endforeach ()
         if (_wgpu_libclang_so)
             get_filename_component(_wgpu_libclang_dir "${_wgpu_libclang_so}" DIRECTORY)
         endif ()
@@ -241,11 +271,12 @@ if (AURORA_BACKEND_GPU_WGPU)
     # wgpu.h / webgpu.h 只给库内实现 TU（wgpu_rhi.*）用——公共头 pimpl 隔离，不外泄三方头。
     target_include_directories(aurora PRIVATE "${_wgpu_src}/ffi" "${_wgpu_src}/ffi/webgpu-headers")
     # Rust staticlib 的系统库依赖：windows crate 族引入的 WinAPI 库 + 运行时；
-    # Linux 侧 Vulkan 后端运行期动态加载，仅需 dl/pthread。
+    # Linux 侧 Vulkan/EGL 均运行期 dlopen（ash/khronos-egl dynamic feature），仅需
+    # dl/pthread/m（Rust std 的 libm 符号，缺则 pow/fmod 未定义）。
     if (WIN32)
         target_link_libraries(aurora PUBLIC wgpu_native ws2_32 userenv bcrypt advapi32 oleaut32 ntdll)
     elseif (UNIX)
-        target_link_libraries(aurora PUBLIC wgpu_native ${CMAKE_DL_LIBS} pthread)
+        target_link_libraries(aurora PUBLIC wgpu_native ${CMAKE_DL_LIBS} pthread m)
     else ()
         target_link_libraries(aurora PUBLIC wgpu_native)
     endif ()

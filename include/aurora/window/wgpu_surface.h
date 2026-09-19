@@ -3,8 +3,8 @@
 // ============================================================
 // wgpu_surface.h — Win32 宿主 + WgpuRhi GPU 栅格上屏后端
 // ------------------------------------------------------------
-// 仅当 AURORA_BACKEND_GPU_WGPU 且 AURORA_BACKEND_WIN32 定义时编译（v1 宿主仅 Windows；
-// X11 宿主随 wgpu Xlib surface 验证后另片接入）。
+// 仅当 AURORA_BACKEND_GPU_WGPU 且 AURORA_BACKEND_WIN32 定义时编译（Windows 宿主；
+// X11 宿主见 wgpu_x11_surface.h 的 WgpuX11Surface）。
 // 与 D3D11Surface 同族：共用 `Win32Window` 宿主，但本类是 **GPU 栅格路径**——
 // `Window::present_root` 经 `gpu_backend()` 把帧级 DisplayList 回放至 `rhi::WgpuRhi`，
 // 命令在 GPU 端光栅化并直接 present 到 HWND swapchain，消除每帧全屏像素上传。

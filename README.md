@@ -104,7 +104,7 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 | 平台 | 后端 | 状态 |
 |------|------|------|
 | Windows | Win32Surface（GDI）/ D3D11 上屏偏置 / WgpuSurface（GPU 栅格，需 Rust 工具链构建） | ✅ 完整（默认；WGPU 经 CMake 开启） |
-| Linux | X11Surface / WaylandSurface | ✅ 可用（CMake 开启） |
+| Linux | X11Surface / WaylandSurface / WgpuX11Surface（GPU 栅格，需 Rust 工具链构建） | ✅ 可用（CMake 开启） |
 | 跨平台 | GlfwSurface（OpenGL 3.x） | ✅ 可用（CMake 开启，默认 OFF） |
 | Headless（内存 PNG） | HeadlessSurface | ✅ 全平台，测试与 CI 基座 |
 | macOS | MacOSSurface | 🚧 骨架 |

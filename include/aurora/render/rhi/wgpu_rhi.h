@@ -40,8 +40,8 @@ struct WgpuRhiOptions {
     Backend backend = Backend::Auto;
 
     /// @brief 原生窗口句柄（`Surface::native_handle()` 口径：Win32 为 HWND，X11 为
-    /// Display*，见 `native_display`）。`nullptr` = 离屏模式（渲染目标为内部纹理，
-    /// 供 `read_pixels` 读回；无 swapchain，测试/探针通道）。
+    /// XID `Window`——X11 下须同时给 `native_display`）。`nullptr` = 离屏模式（渲染目标
+    /// 为内部纹理，供 `read_pixels` 读回；无 swapchain，测试/探针通道）。
     void *native_window = nullptr;
 
     /// @brief X11 `Display*`（仅 `native_window` 为 Xlib Window 时使用；Win32 忽略）。
