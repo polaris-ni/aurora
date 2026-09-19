@@ -631,6 +631,7 @@ struct WgpuRhi::Impl {
     std::uint32_t readback_bpr = 0;
     bool map_done = false;
     bool map_armed = false;
+    bool readback_enabled = true;  // 离屏帧尾是否录读回 copy + 登记 map（见 set_readback_enabled）
     bool readback_mapped = false;  // 自行跟踪映射态：v29 的 wgpuBufferGetMapState 是 unimplemented 存根，调用即 panic
 
     std::vector<std::uint8_t> upload_scratch;  // writeTexture 行 256 对齐暂存
@@ -2935,12 +2936,21 @@ struct WgpuRhi::Impl {
         if (!device_ok || device_width <= 0 || device_height <= 0) {
             return false;
         }
-        // 上一帧读回若未被消费（宿主跳过 read_pixels），先解除滞留映射再复用缓冲。
-        if (readback_mapped) {
-            wgpuBufferUnmap(readback);
-            readback_mapped = false;
-            map_armed = false;
-            map_done = false;
+        // 上一帧读回若未被消费（宿主跳过 `read_pixels`）：先把映射**结清**再允许本帧复用
+        // readback 缓冲——对已映射/映射中的缓冲提交 copy 是 wgpu Validation Error（Rust 侧
+        // panic 经 C FFI 不可 unwind，直接 abort）。map 回调只在 `pump` 里推进，故此处必须
+        // 主动泵一次；泵不完（超时）则保持 armed，由 `end_frame` 跳过本帧读回。
+        if (map_armed) {
+            if (!map_done) {
+                (void)pump(map_done, 2000);
+            }
+            if (map_done) {
+                if (readback_mapped) {
+                    wgpuBufferUnmap(readback);
+                    readback_mapped = false;
+                }
+                map_armed = false;  // 映射已结清（成功解除或失败本就未映射）：缓冲可复用
+            }
         }
         stats = {};
         clip_stack.clear();
@@ -2952,7 +2962,6 @@ struct WgpuRhi::Impl {
         vstage.clear();
         ustage.clear();
         scale = scale_ > 0.0F ? scale_ : 1.0F;
-        map_armed = false;
         map_done = false;
 
         if (surface != nullptr) {
@@ -3022,7 +3031,13 @@ struct WgpuRhi::Impl {
         close_pass();  // 最终 resolve：canvas_ 纹理此刻承载整帧内容
 
         if (surface == nullptr) {
-            arm_readback();  // 离屏诊断通道：帧尾拷贝，read_pixels 处等待 map
+            // 离屏诊断通道：帧尾拷贝，read_pixels 处等待 map。上一次 map 仍未落地
+            // （宿主跳过 read_pixels）时**不再复用** readback 缓冲——向已映射/映射中的
+            // 缓冲提交 copy 是 wgpu Validation Error（Rust 侧 panic 经 C FFI 不可 unwind，
+            // 直接 abort），此处按「本帧无读回数据」降级。
+            if (readback_enabled && !map_armed) {
+                arm_readback();
+            }
         } else {
             draw_present();
         }
@@ -3101,9 +3116,10 @@ struct WgpuRhi::Impl {
     }
 
     [[nodiscard]] bool read_pixels(std::vector<std::uint8_t> &out) {
-        // 仅离屏模式提供读回（宿主 swapchain 的读回由宿主自行缓存，对齐 GL 路径）。
-        if (!device_ok || surface != nullptr || readback == nullptr || !map_armed || device_w <= 0
-            || device_h <= 0) {
+        // 仅离屏模式提供读回（宿主 swapchain 的读回由宿主自行缓存，对齐 GL 路径）；
+        // 读回通道关闭期间帧尾不登记拷贝，故无数据可读。
+        if (!device_ok || surface != nullptr || !readback_enabled || readback == nullptr || !map_armed
+            || device_w <= 0 || device_h <= 0) {
             return false;
         }
         map_armed = false;
@@ -3166,6 +3182,12 @@ auto WgpuRhi::stats() const -> FrameStats {
 auto WgpuRhi::set_glyph_page_size(int side) -> void {
     if (impl_ != nullptr && side > 0) {
         impl_->glyph_page_size_ = side;
+    }
+}
+
+auto WgpuRhi::set_readback_enabled(bool on) -> void {
+    if (impl_ != nullptr) {
+        impl_->readback_enabled = on;
     }
 }
 

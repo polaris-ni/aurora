@@ -5,7 +5,9 @@
 /// read_pixels 像素断言（精确色与透明零基底）、stats 逐帧复位且 skipped_cmds 恒零；
 /// 流式纹理槽（acquire 键稳定 / update 不抛 / release 幂等）与 import_native_surface
 /// 恒 0 回退契约（wgpu-native v29 无外部共享纹理导入入口）；compute mip 链——64×64
-/// 棋盘图 4× 降采样整块为均匀均值色（三线性命中 mip≥1），1:1 绘制仍是端点色（lod 0 无混）。
+/// 棋盘图 4× 降采样整块为均匀均值色（三线性命中 mip≥1），1:1 绘制仍是端点色（lod 0 无混）；
+/// 离屏读回通道开关与连帧 submit——连帧不逐帧消费 read_pixels 不踩「缓冲仍映射」验证错误，
+/// 关闭期间 read_pixels 整体拒绝、重新打开后下一帧恢复。
 /// 依赖 Vulkan/D3D12 adapter：无可用设备环境整体 SKIP（真实 GPU 断言不做假通过）。
 
 #include <array>
@@ -256,6 +258,44 @@ AURORA_TEST_CASE(wgpu_compute_mip_downscale_sampling) {
     }
 }
 
+AURORA_TEST_CASE(wgpu_readback_toggle_and_multi_frame_submit) {
+    rhi::WgpuRhi rhi_obj(offscreen());
+    if (!rhi_obj.valid()) {
+        AURORA_TEST_SKIP("无可用 wgpu adapter/device，离屏读回通道契约跳过");
+    }
+    auto fill_frame = [&](Color color) {
+        AURORA_TEST_REQUIRE(rhi_obj.begin_frame(64, 48, 1.0F));
+        DisplayList dl;
+        dl.push_cmd(make_fill(
+            Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 48.0F}}, color));
+        dl.replay(rhi_obj.backend());
+        rhi_obj.end_frame();
+    };
+
+    // 连帧提交、只消费末帧读回：帧尾待 map 由下一帧 begin 退役，不得复用仍在映射的缓冲
+    // （修复前：wgpuQueueSubmit Validation → Rust panic 不可展开 → 进程 abort）。
+    fill_frame(Color{200, 40, 40, 255});
+    fill_frame(Color{40, 180, 40, 255});
+    fill_frame(Color{40, 40, 200, 255});
+    std::vector<std::uint8_t> px;
+    AURORA_TEST_REQUIRE(rhi_obj.read_pixels(px));
+    AURORA_TEST_CHECK_EQ(pixel_at(px, 64, 32, 24), (std::array<int, 4>{40, 40, 200, 255}));  // 末帧色，非首帧
+
+    // 关闭读回：连帧零读回开销，read_pixels 整体拒绝；重新打开后下一帧起恢复。
+    rhi_obj.set_readback_enabled(false);
+    fill_frame(Color{240, 240, 40, 255});
+    fill_frame(Color{240, 240, 40, 255});
+    std::vector<std::uint8_t> none;
+    AURORA_TEST_CHECK_FALSE(rhi_obj.read_pixels(none));
+    AURORA_TEST_CHECK_TRUE(none.empty());
+
+    rhi_obj.set_readback_enabled(true);
+    fill_frame(Color{20, 220, 220, 255});
+    std::vector<std::uint8_t> px2;
+    AURORA_TEST_REQUIRE(rhi_obj.read_pixels(px2));
+    AURORA_TEST_CHECK_EQ(pixel_at(px2, 64, 32, 24), (std::array<int, 4>{20, 220, 220, 255}));
+}
+
 }  // namespace aurora::test_cases::utest_wgpu_rhi
 
 #else  // !AURORA_BACKEND_GPU_WGPU
@@ -272,6 +312,9 @@ AURORA_TEST_CASE(wgpu_stream_image_and_native_import_contract) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
 }
 AURORA_TEST_CASE(wgpu_compute_mip_downscale_sampling) {
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
+}
+AURORA_TEST_CASE(wgpu_readback_toggle_and_multi_frame_submit) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
 }
 

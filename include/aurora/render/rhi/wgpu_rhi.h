@@ -124,6 +124,17 @@ class WgpuRhi final : public RhiBackend, public RhiFrameSink {
     /// 常规消费者无须调用；测试用小页覆盖「满页开新页 / 页数封顶 LRU 淘汰」路径。
     auto set_glyph_page_size(int side) -> void;
 
+    /// @brief 离屏读回通道开关（默认 `true`，即每帧 `end_frame` 录一次目标纹理 → MAP_READ
+    /// 缓冲拷贝并登记 `bufferMapAsync`）。仅供离屏诊断通路（`read_pixels`）使用。
+    ///
+    /// 关掉它用于**连帧提交而不逐帧读回**的场合（吞吐基准、队列排空测量）：读回缓冲是单块
+    /// 复用缓冲，帧尾登记映射后必须由 `read_pixels` 或下一帧 `begin_frame` 结清，否则
+    /// wgpu 会对「向映射中的缓冲提交拷贝」报 Validation Error（Rust panic 经 C FFI 不可
+    /// unwind）。关闭期间 `read_pixels` 返回 false；重新打开后的**下一帧**起才有读回数据。
+    ///
+    /// 真窗口（swapchain）模式不登记读回，本开关无作用。
+    auto set_readback_enabled(bool on) -> void;
+
     /// @brief 当前帧内容读回（RGBA8，行序自上而下）。仅供诊断/快照/容差 golden。
     /// 调用窗口：`end_frame` 之后、下一次 `begin_frame` 之前。返回 false = 不可用或失败。
     [[nodiscard]] auto read_pixels(std::vector<std::uint8_t> &out) -> bool;
