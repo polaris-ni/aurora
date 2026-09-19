@@ -110,7 +110,7 @@
 | **架构 / 运行时 / 分层 / 模块映射 / 设计不变量**      | `codespec/ARCHITECTURE.md`     | 🥇 架构与设计以它为准：分层、运行时、模块映射、核心数据流、组件树、事件、渲染、性能、11 条设计不变量、错误处理架构、AI-first 原则、测试与 CI |
 | **核心概念 / 跨框架映射 / 概念可枚举性**              | `codespec/CONCEPTS.md`         | 可枚举 UI 原语审计、状态作用域决策树、React / Flutter / Qt 概念映射、迁移要点                              |
 | **编码规范 / 命名 / 错误 / AI 友好性 / 版本管理**     | `codespec/CODING_STANDARDS.md` | 🥇 编码规则以它为准：错误处理、命名、文档与示例、日志纪律、契约标注、AI 友好性、SemVer、函数签名、内部工具层、提交信息规范 |
-| **使用指南 / 复制即用配方**                           | `codespec/GUIDELINE.md`        | 39 组最小可编译片段：界面 / 布局 / 状态 / 异步 / 持久化 / 媒体 / 字体 / Inspector / 工厂 / 测试 / 样式 / 输入法 / 坑 / 调试 |
+| **使用指南 / 复制即用配方**                           | `codespec/GUIDELINE.md`        | 40 组最小可编译片段：界面 / 布局 / 状态 / 异步 / 持久化 / 媒体 / 字体 / Inspector / 工厂 / 测试 / 样式 / 输入法 / 坑 / 调试 |
 | **编译选项 / 宏 / 环境变量（统一参考）**              | `codespec/BUILD_OPTIONS.md`    | 🥇 所有 CMake 开关、缓存变量、feature 宏、运行时环境变量与 find_package 集成以它为准                       |
 
 > 导航表与文档内部引用由 CTest `check_codespec_xref` 守护（断链 / 失效锚点 / 章节号重复跳号 / 反引号路径 / 特性表落点可达），

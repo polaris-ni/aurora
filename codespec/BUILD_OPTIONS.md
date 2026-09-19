@@ -26,7 +26,7 @@
 | `cmake/AuroraFeatures.cmake` | **feature 宏单一入口** `aurora_define_feature(<宏> [SCOPE] [TARGET] [RAW] [EXPORT])`：定义注入 + `AURORA_FEATURE_DEFINES` 导出登记二合一；全部 feature 宏调用点（后端 / 优化 / SIMD / PROFILING / TRACING / DEBUG / 编解码）经它声明。运行时查询入口 `aurora::debug::feature_flags()`（`include/aurora/debug/feature_flags.h`） |
 | `cmake/AuroraThirdParty.cmake` | FreeType / HarfBuzz 源码构建 |
 | `cmake/AuroraUtils.cmake` | 消费者目标统一配置辅助（`aurora_setup_consumer_target`，demo / 测试 / 工具复用链接 / PCH / C++20 / 告警 / MinGW `-Wa,-mbig-obj`） |
-| `cmake/AuroraBackends.cmake` | 全部 `AURORA_BACKEND_*` Surface 图形后端剪裁开关 + 音频设备后端开关（`AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI`，ENABLE 组）+ 架构级优化宏（`AURORA_ENABLE_LAYOUT_CACHE` 等） |
+| `cmake/AuroraBackends.cmake` | 全部 `AURORA_BACKEND_*` Surface 图形后端剪裁开关 + 音频设备后端开关（`AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI`，ENABLE 组）+ 存储 SQLite 后端开关（`AURORA_ENABLE_STORAGE_SQLITE`，ENABLE 组）+ 架构级优化宏（`AURORA_ENABLE_LAYOUT_CACHE` 等） |
 | `cmake/AuroraImageCodecs.cmake` | `AURORA_ENABLE_IMAGE_JPEG` / `AURORA_ENABLE_IMAGE_WEBP` / `AURORA_ENABLE_IMAGE_PNG`（编译期能力开关） |
 | `cmake/AuroraSimd.cmake` | `AURORA_ENABLE_SIMD`（光栅内核 SIMD 双实现，内部宏，不 PUBLIC 传播） |
 | `cmake/AuroraCcache.cmake` | `AURORA_ENABLE_CCACHE`（ccache 编译缓存启动器） |
@@ -278,6 +278,7 @@ cmake --build build   # 首次连带 cargo build --release wgpu-native（在线�
 | `AURORA_ENABLE_IMAGE_PNG` | `OFF` | PNG/GIF 图像解码能力（wuffs 源码构建） | 注入 `AURORA_ENABLE_IMAGE_PNG`（同上） |
 | `AURORA_ENABLE_AUDIO` | `OFF` | 内置音频设备后端（`media/audio.h` 的 `AudioContext` 图 API **恒编译**——对齐 RHI 先例：契约常在、能力经 `feature_flags().audio` 运行期查询；本开关只决定是否编入内置设备后端。未启用或设备初始化失败 → `AudioContext` 静默模式：图照常运转、样本消费后丢弃，`device_state()==Silent`，对齐 GPU 通道回退语义）。后端明细见下一行 | 注入 `AURORA_ENABLE_AUDIO`（PUBLIC 传播，经 `aurora_define_feature` 注册） |
 | `AURORA_ENABLE_AUDIO_WASAPI` | `AURORA_ENABLE_AUDIO=ON` 时 Windows `ON`，否则 `OFF` | WASAPI 音频设备后端（shared mode event-driven；`AudioContext` 的内置默认设备。**前置依赖 `AURORA_ENABLE_AUDIO=ON`**，未开启音频时本开关不生效；非 Windows 开启 FATAL） | 注入 `AURORA_ENABLE_AUDIO_WASAPI`（PUBLIC 传播，经 `aurora_define_feature` 注册；额外链接 `ole32`——COM：MMDevice + IAudioClient，仅 Windows） |
+| `AURORA_ENABLE_STORAGE_SQLITE` | `OFF` | 存储层 `SqliteBackend` 后端（记录仓储第三后端：真事务 BEGIN IMMEDIATE/COMMIT/ROLLBACK、二进制载荷 BLOB 内联无 sidecar、`contains`/`clear` 单语句化）。存储门面与 Memory/Filesystem 两后端**恒编译**；本开关只决定是否编入 SQLite 后端与 `Storage::create(SqliteOptions)` 重载。sqlite3 以 amalgamation 源码入库 `third_party/sqlite/`（3.53.4，Public Domain），关闭时链接产物完全不含该组件 | 注入 `AURORA_ENABLE_STORAGE_SQLITE`（PUBLIC 传播，经 `aurora_define_feature` 注册；独立静态目标 `aurora_sqlite3` 编入 `sqlite3.c`，定义 `SQLITE_THREADSAFE=1` / `SQLITE_OMIT_LOAD_EXTENSION`，非 Win 另链 `dl`/`pthread`） |
 | `AURORA_ENABLE_GLFW_GPU_GL` | `OFF` | GLFW 的 GPU OpenGL 3.3 core 栅格能力（`GpuGlRhi`：DisplayList 批渲染 + MSAA）。**非独立 `Surface` 后端**——仅为 `GlfwSurface` 的 GPU 栅格模式增强：无 `SurfaceKind`、硬依赖 `AURORA_BACKEND_GLFW`、GL 上下文与呈现由 GLFW 后端承担；未开 `AURORA_BACKEND_GLFW` 配置期 FATAL，GPU 初始化失败运行期自动回退软件纹理上传路径，`Surface::gpu_backend()` 非空时 `name()` 恒为 `"gpu-gl"`。细节见 §3.1 | 注入 `AURORA_ENABLE_GLFW_GPU_GL`（仅库内部，不 PUBLIC 传播；`GpuGlRhi` 类恒编译进库，宏只控制 `GlfwSurface` 是否接线 GPU 模式） |
 
 **约束**：
@@ -585,6 +586,7 @@ cmake --build build
 -D AURORA_BACKEND_WASM=ON|OFF       # WebAssembly（默认 OFF）
 -D AURORA_ENABLE_AUDIO=ON|OFF       # 内置音频设备后端（默认 OFF；图 API 恒编译，关闭=静默模式）
 -D AURORA_ENABLE_AUDIO_WASAPI=ON|OFF   # WASAPI 音频（依赖 ENABLE_AUDIO=ON；Win 默认 ON，否则 OFF）
+-D AURORA_ENABLE_STORAGE_SQLITE=ON|OFF   # SQLite 存储后端（默认 OFF；存储门面与 Memory/Filesystem 恒编译）
 
 # 架构级优化（= feature 宏，PUBLIC 传播，默认均 ON）
 -D AURORA_ENABLE_LAYOUT_CACHE=ON|OFF

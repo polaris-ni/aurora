@@ -501,6 +501,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 | 方法 | 说明 |
 |:---|:---|
 | `create(FilesystemOptions = {}) -> Result<Storage>` | 打开缺省文件系统后端（零额外依赖，始终可构造）；打开失败返回 `storage-backend-unavailable` 错误（`:28`） |
+| `create(SqliteOptions) -> Result<Storage>` | SQLite 后端（**需 `AURORA_ENABLE_STORAGE_SQLITE=ON`**，默认 OFF 时该重载不声明）：单文件库或 `:memory:`（`in_memory`），文件库默认 WAL（`wal`）；路径空 → `default_config_dir()/"aurora_storage.db"`；打开失败返回 `storage-backend-unavailable` |
 | `create(unique_ptr<StorageBackend>) -> Storage` | 注入任意后端（自定义 / SQLite / 测试 Memory），对标 `Application(Scene, unique_ptr<Surface>)`（`:31`） |
 | `set_default(Storage)` / `default_instance()` | 可选的进程级默认实例（对标 `Preferences::instance`，`:156`–`:157`） |
 
@@ -529,7 +530,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 - `transaction(std::function<Result<void>(Storage&)>) -> Result<void>`（`:61`）：跨记录事务。
 - `on_change(StorageChangeCallback) -> aurora::Subscription`（`:153`）：变更订阅，返回 RAII 句柄。
 
-**后端抽象**：`storage/storage_backend.h` 定义后端接口，`fs_backend.h`（文件系统）与 `memory_backend.h`（内存）是两个实现；`serializable.h` 定义可序列化概念，`storage_types.h` 定义 `StorageRecord` / `StorageValue` / `StorageBytes`。
+**后端抽象**：`storage/storage_backend.h` 定义后端接口，`fs_backend.h`（文件系统）与 `memory_backend.h`（内存）是两个恒编译实现，`sqlite_backend.h`（`SqliteBackend`，opt-in：`AURORA_ENABLE_STORAGE_SQLITE`）是第三后端——真事务（`BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK`，嵌套加入同一事务）、二进制载荷 BLOB 内联（`blob_ref` 恒空，无 sidecar）、`contains` 走 SELECT EXISTS、`clear` 单语句 DELETE、`flush` 做 WAL checkpoint；`serializable.h` 定义可序列化概念，`storage_types.h` 定义 `StorageRecord` / `StorageValue` / `StorageBytes` / `FilesystemOptions` / `SqliteOptions`。
 
 存储相关错误码：`storage-backend-unavailable`、`storage-record-not-found`、`storage-record-corrupt`、`storage-type-mismatch`、`storage-encoding-mismatch`、`storage-io-error`（见 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)）。
 

@@ -367,6 +367,34 @@ if (AURORA_ENABLE_AUDIO)
     endif ()
 endif ()
 
+# ---- 存储 SQLite 后端（记录仓储第三后端，opt-in，默认 OFF） ----
+# 存储层 Memory/Filesystem 两后端恒编译；SqliteBackend（真事务 BEGIN/COMMIT/ROLLBACK +
+# 二进制载荷 BLOB 内联存储）由 AURORA_ENABLE_STORAGE_SQLITE 决定是否编入。sqlite3 以
+# amalgamation 源码入库（third_party/sqlite/，public domain），独立静态目标编译，
+# 不 FetchContent 联网拉取。未启用时公共头不声明该类，消费者构建口径由 EXPORT 宏对齐。
+option(AURORA_ENABLE_STORAGE_SQLITE "Build SqliteBackend storage backend (SQLite amalgamation under third_party/sqlite)" OFF)
+if (AURORA_ENABLE_STORAGE_SQLITE)
+    add_library(aurora_sqlite3 STATIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite/sqlite3.c)
+    target_include_directories(aurora_sqlite3 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite)
+    # SQLITE_THREADSAFE=1：serialized 模式——Storage 异步 API 会从 worker 线程触库
+    # （C++ 侧另有互斥守卫事务边界，双保险）。SQLITE_OMIT_LOAD_EXTENSION：封死
+    # load_extension 任意代码加载面。
+    target_compile_definitions(aurora_sqlite3 PUBLIC SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION)
+    # 三方 amalgamation 源码静音：不受本项目告警配置影响（同 freetype/harfbuzz 纪律）。
+    if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(aurora_sqlite3 PRIVATE -w)
+    elseif (MSVC)
+        target_compile_options(aurora_sqlite3 PRIVATE /w)
+    endif ()
+    if (NOT WIN32)
+        target_link_libraries(aurora_sqlite3 PUBLIC ${CMAKE_DL_LIBS} pthread)
+    endif ()
+    # 头不带 sqlite3 类型（pimpl），PRIVATE 足够且不外泄三方 include。
+    target_link_libraries(aurora PRIVATE aurora_sqlite3)
+    aurora_define_feature(AURORA_ENABLE_STORAGE_SQLITE EXPORT)
+    aurora_log("SQLite storage backend enabled (third_party/sqlite amalgamation source build)")
+endif ()
+
 # ---- 架构级优化开关（性能，独立退化，默认开启） ----
 # 三项互不依赖的渲染/布局优化；宏由 aurora 目标以 PUBLIC 编译定义传播给所有消费者。
 # 关闭任一开关即回退到原始实现路径（等价无优化）。

@@ -206,8 +206,23 @@ freely, subject to the following restrictions:
 
 ---
 
+## 9. SQLite — 存储后端（可选依赖）
+
+- **版本**：3.53.4（sqlite-amalgamation-3530400.zip，官方发布页校验 SHA3-256
+  `628a44cfe82c66aed1ccbbe85a562d2e33ebe64b3288981ed76285612227934e`）
+- **来源**：vendored 于 `third_party/sqlite/`（仅取 amalgamation 的 `sqlite3.c` / `sqlite3.h` /
+  `sqlite3ext.h`，`shell.c` 未入库；源码保持上游原样）
+- **用途**：`AURORA_ENABLE_STORAGE_SQLITE=ON` 时编译 `SqliteBackend` 存储后端（真事务 + 二进制
+  载荷 BLOB 内联），见 `codespec/BUILD_OPTIONS.md`
+- **集成方式**：独立静态目标 `aurora_sqlite3`（CMake 编入），`SQLITE_OMIT_LOAD_EXTENSION` 封死
+  扩展加载面；关闭时链接产物完全不含该组件
+- **许可**：Public Domain（无限制，兼容任何分发模式；上游无 LICENSE 文件，公版声明见
+  sqlite.org/copyright.html）
+
+---
+
 ## 合规说明
 
 - 上述组件均以源码形式 vendored 于仓库内，版本锁定、可审计；除 wgpu-native 的 Rust 依赖树（首次构建需 cargo 在线拉取，见第 8 节）外均可无网络构建。
-- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、nlohmann/json（MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）、wgpu-native（MIT OR Apache-2.0，仅 `AURORA_BACKEND_GPU_WGPU=ON` 时编入）均为自由/宽松许可，兼容 Aurora 的静态库分发模式。
+- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、nlohmann/json（MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）、wgpu-native（MIT OR Apache-2.0，仅 `AURORA_BACKEND_GPU_WGPU=ON` 时编入）、SQLite（Public Domain，仅 `AURORA_ENABLE_STORAGE_SQLITE=ON` 时编入）均为自由/宽松/公版许可，兼容 Aurora 的静态库分发模式。
 - 许可全文以各组件目录内原始 `LICENSE.TXT` / `COPYING` / 头注释为权威来源；本文件仅作索引与归档。

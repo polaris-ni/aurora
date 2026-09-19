@@ -115,7 +115,7 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 - API 在 1.0 正式版前仍可能有破坏性变更（遵循 semver 并提供迁移路径）
 - `media/`、`perf/` 模块为 experimental 成熟度
 - Windows 为首要测试平台，Linux/macOS 覆盖有限
-- 存储层 SQLite 后端尚未实现（当前 Memory/Filesystem 两后端）
+- 存储层 SQLite 后端为可选编译（`AURORA_ENABLE_STORAGE_SQLITE`，默认 OFF），开启后提供真事务 + 内联 BLOB；未开启时为 Memory/Filesystem 两后端
 
 ## 文档
 

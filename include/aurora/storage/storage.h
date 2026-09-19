@@ -27,6 +27,12 @@ class Storage {
     /// @brief 默认文件系统后端（零额外依赖，始终可用）。打开失败返回错误（StorageBackendUnavailable）。
     [[nodiscard]] static auto create(FilesystemOptions opts = {}) -> Result<Storage>;
 
+    /// @brief SQLite 后端（需 `AURORA_ENABLE_STORAGE_SQLITE`，默认 OFF）。打开失败返回
+    ///        StorageBackendUnavailable；真事务语义见 `SqliteBackend::transaction`。
+#ifdef AURORA_ENABLE_STORAGE_SQLITE
+    [[nodiscard]] static auto create(SqliteOptions opts) -> Result<Storage>;
+#endif
+
     /// @brief 注入任意后端（自定义 / SQLite / 测试 Memory）—— 对标 Application(Scene, unique_ptr<Surface>)。
     [[nodiscard]] static auto create(std::unique_ptr<StorageBackend> backend) -> Storage;
 

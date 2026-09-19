@@ -154,7 +154,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 **契约要点：**
 
 - **门面**：`put` / `get` / `remove` / `list` / `contains` / `clear`（value 为 `Json` 或原生 `StorageBytes`）；类型化 `put<T>` / `get<T>` 经 `StorageSerializable` ADL 定制点序列化；信封级 `put_record` / `get_record`；异步 `async_put` / `async_get` / `async_get_value` / `async_remove` / `async_list`（返回 `aurora::Task<T>`，把 IO 卸载出 UI 线程）；`on_change(cb)` 返回 `aurora::Subscription`；`transaction(body)`（跨记录原子，失败全回滚）；进程级 `default_instance()` 单例。
-- **后端抽象** `StorageBackend`：纯虚 `put_record` / `get_record` / `remove` / `list`（信封级），另有带默认实现的 `contains` / `clear` / `flush` / `close` 与默认 `transaction`（顺序 apply + 异常回滚）。`MemoryBackend` 以 `std::map` 全量快照实现回滚；`FilesystemBackend` 每记录一文件（原子写 `tmp` + `rename`）、目录级锁串行化事务。
+- **后端抽象** `StorageBackend`：纯虚 `put_record` / `get_record` / `remove` / `list`（信封级），另有带默认实现的 `contains` / `clear` / `flush` / `close` 与默认 `transaction`（顺序 apply + 异常回滚）。`MemoryBackend` 以 `std::map` 全量快照实现回滚；`FilesystemBackend` 每记录一文件（原子写 `tmp` + `rename`）、目录级锁串行化事务；`SqliteBackend`（opt-in：`AURORA_ENABLE_STORAGE_SQLITE`，sqlite3 amalgamation 源码构建）单文件库或 `:memory:`，真事务 `BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK`（嵌套计深度加入同一事务）、二进制载荷 BLOB 内联（无 sidecar）、`contains`/`clear` 单语句化，C++ 侧递归互斥 + serialized  sqlite 双保险支撑 `async_*` 的 worker 线程触库。
 - **信封** `StorageRecord{ id, type, version, encoding, mtime, payload, blob_ref }`：版本号支撑乐观并发与迁移。`StorageChange{ op(Put|Remove|Clear|Batch), id }` 供 `on_change` 投递。
 - **错误模型**：统一经 `Result<T>`；后端 IO 失败返回 `Error` 而非抛异常；`get` 未命中返回「未找到」错误（区分于 `null` 值）；事务中途失败回滚并报告首个失败原因。
 - **线程模型**：门面 API 主线程调用，`async_*` 经 `au::async` 卸载到 worker 线程；同步 `get` 直通后端（门面无内存缓存）。后端实现须线程安全。

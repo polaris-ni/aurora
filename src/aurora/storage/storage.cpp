@@ -15,6 +15,7 @@
 #include "aurora/preferences/preferences.h"
 #include "aurora/storage/fs_backend.h"
 #include "aurora/storage/memory_backend.h"
+#include "aurora/storage/sqlite_backend.h"
 
 namespace aurora::storage {
 
@@ -43,6 +44,17 @@ auto Storage::create(FilesystemOptions opts) -> Result<Storage> {
 }
 
 auto Storage::create(std::unique_ptr<StorageBackend> backend) -> Storage { return Storage(std::move(backend)); }
+
+#ifdef AURORA_ENABLE_STORAGE_SQLITE
+auto Storage::create(SqliteOptions opts) -> Result<Storage> {
+    auto be = std::make_unique<SqliteBackend>(std::move(opts));
+    if (!be->is_open()) {
+        return Result<Storage>{make_error(ErrorCode::StorageBackendUnavailable,
+                                          "SQLite storage open failed: cannot open database or prepare schema")};
+    }
+    return Result{Storage(std::move(be))};
+}
+#endif
 
 // ---------- 原始 JSON 记录 API ----------
 

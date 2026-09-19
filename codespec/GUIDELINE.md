@@ -1651,3 +1651,44 @@ build\aurora_verify_win32_ime.exe --interactive
 - **非 Win32 后端目前只有契约**：macOS / X11 / Wayland / Wasm 缺平台桥，写了钩子也收不到事件；接线状态见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §2.4。
 
 ---
+
+## 40 命名记录仓储（Storage）
+
+命名记录仓储：`id → Json / 原生二进制`，后端可插拔（Memory / Filesystem / SQLite），门面负责信封化、类型化、异步卸载与变更通知。
+
+```cpp
+#include "aurora/aurora.h"
+using namespace aurora;
+using namespace aurora::storage;
+
+// 1) 默认文件系统后端（零依赖，始终可用）：每记录一个 JSON 信封文件
+auto s = Storage::create(FilesystemOptions{.root = "C:/data/myapp_store"});
+if (!s) { /* s.error() = StorageBackendUnavailable */ }
+Storage &store = s.value();
+
+// 2) JSON 记录 + 二进制记录（sidecar `<id>.bin`，零 base64 膨胀）
+store.put("profile", Json{{"name", "ada"}, {"age", 36}});
+auto profile = store.get("profile");        // Result<Json>
+store.put("avatar", StorageBytes{std::byte{0x89}, std::byte{0x50}});
+auto bytes = store.get_bytes("avatar");     // Result<StorageBytes>
+
+// 3) SQLite 后端（需 CMake 开启 AURORA_ENABLE_STORAGE_SQLITE，默认 OFF）：真事务 + 内联 BLOB
+#ifdef AURORA_ENABLE_STORAGE_SQLITE
+auto db = Storage::create(SqliteOptions{.path = "C:/data/myapp.db"});  // 或 {.in_memory = true}
+db.value().transaction([](Storage &tx) -> Result<void> {
+    tx.put("k1", Json{1});
+    tx.put("k2", Json{2});
+    return {};                              // 返回错误 → 整体 ROLLBACK
+});
+#endif
+
+// 4) 变更通知（主线程发射），Subscription RAII 退订
+auto sub = store.on_change([](const StorageChange &ch) { /* ch.op / ch.id */ });
+```
+
+- **三后端契约统一**：Memory（内存，测试用，`Storage::create(std::make_unique<MemoryBackend>())`）/ Filesystem（默认）/ SQLite（可选编译），后端只认 `StorageRecord` 信封，见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §9.2。
+- **事务语义随后端**：SQLite 是真事务（BEGIN IMMEDIATE/COMMIT/ROLLBACK，嵌套并入外层）；Filesystem 顺序执行尽力而为，单条失败不撤销已完成的写。
+- **类型化与迁移**：实现 `to_storage_json` / `from_storage_json`（或二进制版）的 `StorageStorable` 类型可直接 `put<T>` / `get<T>`，`version` 落后时自动走 `migrate_storage`。
+- **异步**：`async_put` / `async_get` / `async_list` 等经 worker 线程卸载，返回 `Task<T>`。
+
+---
