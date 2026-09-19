@@ -29,13 +29,16 @@
 //            build-win32\Release\harfbuzz.lib user32.lib gdi32.lib shell32.lib ole32.lib ^
 //            uuid.lib d3d11.lib dxgi.lib d3dcompiler.lib
 //
-// 运行：直接双击或命令行执行。过程会短暂把鼠标移到探针窗口中心，**退出前恢复原指针
-//       位置**，不改动其他窗口。
+// 运行：直接双击或命令行执行。过程会短暂把被测窗口置顶并摆到屏幕中心、把鼠标移到其
+//       客户区中心，**退出前恢复原指针位置与窗口层级**，不改动其他窗口。
+//       物理前提：控制台会话须**已解锁且活动**——锁屏时系统的全屏
+//       `LockScreenBackstopFrame` 占据指针落点，本探针取不到光标所有权，会以退出码 3
+//       打印「期望落点 / 实际指针位置 / 该点上的窗口类名」现场证据后终止（不给假阳性）。
 //
 // 退出码（多路时取其中最差者）：
 //   0  全部形状读回皆命中期望句柄且两两互异 —— 真机验收通过
 //   2  环境不可用（窗口创建失败 / 取不到 HWND / GetCursorInfo 失败）
-//   3  指针无法落在被测窗口上（本线程拿不到光标所有权）
+//   3  指针无法落在被测窗口上（本线程拿不到光标所有权；锁屏 / 远程会话隔离即此）
 //   4  读回恒为同一光标 —— 本会话无可靠读回（远程桌面 / 会话隔离等）
 //   5  部分形状读回不符 —— 见逐行表格 match 列
 //   6  本机未编译进任何 Win32 家族后端（须开 AURORA_BACKEND_WIN32 / D3D11）
@@ -154,7 +157,16 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title) -
     }
 
     // ---- 把指针安置到被测窗口上，使本线程取得光标所有权 ----
+    // 探针常由**后台进程**（CI / agent 会话）启动，而 `SetForegroundWindow` 受前台锁约束
+    // （非前台进程的调用会被系统忽略），故这里改为「窗口置顶 + 摆到屏幕中央」：不置顶时
+    // 指针落点极易被别的窗口占据，`WindowFromPoint` 取不到本窗口即拿不到光标所有权。
     ShowWindow(hwnd, SW_SHOWNORMAL);
+    RECT frame{};
+    const bool have_frame = GetWindowRect(hwnd, &frame) != FALSE;
+    const int fw = have_frame ? frame.right - frame.left : 360;
+    const int fh = have_frame ? frame.bottom - frame.top : 240;
+    SetWindowPos(hwnd, HWND_TOPMOST, (GetSystemMetrics(SM_CXSCREEN) - fw) / 2,
+                 (GetSystemMetrics(SM_CYSCREEN) - fh) / 2, fw, fh, SWP_SHOWWINDOW);
     SetForegroundWindow(hwnd);
     UpdateWindow(hwnd);
 
@@ -168,22 +180,43 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title) -
     }
     POINT center{(client.left + client.right) / 2, (client.top + client.bottom) / 2};
     ClientToScreen(hwnd, &center);
-    SetCursorPos(center.x, center.y);
 
-    // 等待 WM_SETCURSOR / WM_MOUSEMOVE 走完，本线程成为光标所有者。
-    for (int i = 0; i < 8; ++i) {
-        surface.wait_events(20.0);
+    // 落点后泵消息等 WM_SETCURSOR / WM_MOUSEMOVE 走完（本线程成为光标所有者）；窗口刚
+    // 被别的置顶窗口压住时重试落点，避免把「竞态」误判成「接线不成立」。
+    bool over = false;
+    for (int attempt = 0; attempt < 6 && !over; ++attempt) {
+        SetCursorPos(center.x, center.y);
+        for (int i = 0; i < 8; ++i) {
+            surface.wait_events(20.0);
+        }
+        over = pointer_over(hwnd);
     }
 
-    if (!pointer_over(hwnd)) {
-        AURORA_LOG_ERROR("verify", std::string(label) +
-                                       ": pointer is not over the target window (cannot take cursor ownership). "
-                                       "Typical cause: window is occluded / covered by a topmost window, or a remote "
-                                       "desktop session is isolated.");
+    if (!over) {
+        SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+        // 落点失败的真实原因只能靠现场证据区分（他人置顶窗口遮挡 / 远程会话指针隔离 /
+        // SetCursorPos 被策略拒），故把「期望落点 vs 实际指针位置 vs 该点上的窗口」一并报出。
+        POINT actual{};
+        const bool have_actual = GetCursorPos(&actual) != FALSE;
+        const HWND blocker = have_actual ? WindowFromPoint(actual) : nullptr;  // NOLINT
+        char blocker_class[128] = "n/a";
+        if (blocker != nullptr) {
+            GetClassNameA(blocker, blocker_class, sizeof(blocker_class) - 1);  // NOLINT
+        }
+        AURORA_LOG_ERROR("verify",
+                         std::string(label) +
+                             ": pointer is not over the target window (cannot take cursor ownership). "
+                             "Typical cause: window is occluded / covered by a topmost window, or a remote "
+                             "desktop session is isolated. want=(" +
+                             std::to_string(center.x) + "," + std::to_string(center.y) + ") actual=(" +
+                             (have_actual ? std::to_string(actual.x) : "?") + "," +
+                             (have_actual ? std::to_string(actual.y) : "?") + ") hwnd=" +
+                             aurora_verify::format_handle(hwnd) + " point_hwnd=" +
+                             aurora_verify::format_handle(blocker) + " point_class=" + blocker_class);
         if (have_saved) {
             SetCursorPos(saved.x, saved.y);
         }
-        return 2;
+        return 3;
     }
 
     constexpr int total = static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT);
@@ -223,6 +256,7 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title) -
              aurora_verify::pad_right(match ? "YES" : "no", 7) + aurora_verify::format_handle(owned));
     }
 
+    SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     if (have_saved) {
         SetCursorPos(saved.x, saved.y);
     }
@@ -290,6 +324,6 @@ auto main() -> int {
 //      故该兜底对二者不触发；保留它是为**尚未覆写**该虚函数的自定义 Surface 后端仍能
 //      给出可判定结果，而非一律报「拿不到 HWND」。
 //   2. `Win32Surface` / `D3D11Surface` 的光标下发依赖窗口线程的光标所有权；若被测窗口
-//      被其他置顶窗口完全遮挡，本探针会以退出码 2 明确报告「指针不在被测窗口上」而非
+//      被其他置顶窗口完全遮挡，本探针会以退出码 3 明确报告「指针不在被测窗口上」而非
 //      静默给出假阳性。
 // ---------------------------------------------------------------------------
