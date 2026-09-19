@@ -1300,6 +1300,12 @@ auto WaylandSurface::set_title_bar_icon(const std::shared_ptr<Image> &icon) -> v
 
 auto WaylandSurface::native_handle() const -> void * { return static_cast<void *>(impl_->surface); }
 
+auto WaylandSurface::native_display() const -> void * { return static_cast<void *>(impl_->dpy); }
+
+auto WaylandSurface::uses_client_decorations() const -> bool {
+    return impl_->csd_title || impl_->csd_border;
+}
+
 auto WaylandSurface::content_inset() const -> EdgeInsets {
     const Impl &d = *impl_;
     float tb = d.csd_title ? d.tb_style.height : 0.0F;

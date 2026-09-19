@@ -31,12 +31,15 @@
 #include "aurora/window/d3d11_surface.h"
 #endif
 
-// wgpu GPU 栅格分支需 AURORA_BACKEND_GPU_WGPU + 宿主（Win32 或 X11，各自平台专属）。
+// wgpu GPU 栅格分支需 AURORA_BACKEND_GPU_WGPU + 宿主（Win32/X11/Wayland，各自平台专属）。
 #if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WIN32)
 #include "aurora/window/wgpu_surface.h"
 #endif
 #if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_X11)
 #include "aurora/window/wgpu_x11_surface.h"
+#endif
+#if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WAYLAND)
+#include "aurora/window/wgpu_wayland_surface.h"
 #endif
 
 // Glfw 分支仅在 AURORA_BACKEND_GLFW 定义时编译，避免默认构建引入 GLFW/OpenGL 依赖
@@ -157,14 +160,23 @@ auto create_window(const D3D11Options &opts) -> Result<std::unique_ptr<Window>> 
 }
 #endif
 
-#if defined(AURORA_BACKEND_GPU_WGPU) && (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11))
+#if defined(AURORA_BACKEND_GPU_WGPU) &&                                                                  \
+    (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))
 auto create_window(const WgpuOptions &opts) -> Result<std::unique_ptr<Window>> {
+    // 宿主编译期择一：Win32 → X11 → Wayland（Linux 两宏并开时取 X11，经 XWayland 亦可跑；
+    // 直达 Wayland 宿主走 create_window(WaylandOptions)+GpuWgpu 或本函数下方的运行期口径——
+    // WindowOptions 侧由 create_native_window 按会话选择）。
 #ifdef AURORA_BACKEND_WIN32
     auto surf = std::make_unique<WgpuSurface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
                                               opts.title, opts.style, opts.vsync);
+#elif defined(AURORA_BACKEND_X11)
+    auto surf = std::make_unique<WgpuX11Surface>(static_cast<int>(opts.size.width),
+                                                 static_cast<int>(opts.size.height), opts.title, opts.style,
+                                                 opts.vsync);
 #else
-    auto surf = std::make_unique<WgpuX11Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
-                                                 opts.title, opts.style, opts.vsync);
+    auto surf = std::make_unique<WgpuWaylandSurface>(static_cast<int>(opts.size.width),
+                                                     static_cast<int>(opts.size.height), opts.title, opts.style,
+                                                     opts.vsync);
 #endif
     if (!surf->is_available()) {
         // 专属工厂不静默降级为软件路径：初始化失败（无 DISPLAY/adapter/device/swapchain）归属调用方。
@@ -246,6 +258,31 @@ auto create_window(const X11Options &opts) -> Result<std::unique_ptr<Window>> {
 
 #ifdef AURORA_BACKEND_WAYLAND
 auto create_window(const WaylandOptions &opts) -> Result<std::unique_ptr<Window>> {
+#if defined(AURORA_BACKEND_GPU_WGPU)
+    if (opts.renderer == RendererPreference::GpuWgpu) {
+        // wgpu GPU 栅格路径（Wayland 宿主）：Auto 不隐式选择本路径，仅显式强制时启用（Win32/X11 同口径）。
+        auto gpu = std::make_unique<WgpuWaylandSurface>(static_cast<int>(opts.size.width),
+                                                        static_cast<int>(opts.size.height), opts.title, opts.style);
+        if (!gpu->is_available()) {
+            // 强制 GPU 栅格：init 失败不静默降级，错误归属调用方。
+            return make_error(
+                ErrorCode::RendererUnavailable,
+                "create_window: RendererPreference::GpuWgpu requested but WgpuWaylandSurface init failed.",
+                "Use RendererPreference::Auto to fall back to the wl_shm software presenter.",
+                "aurora/window/window.h");
+        }
+        return make_window(std::move(gpu), opts);
+    }
+#else
+    if (opts.renderer == RendererPreference::GpuWgpu) {
+        // 未编译 wgpu 后端：强制 GPU 栅格时报错（Auto 不会隐式选它）。
+        return make_error(
+            ErrorCode::RendererUnavailable,
+            "create_window: RendererPreference::GpuWgpu requested but AURORA_BACKEND_GPU_WGPU is not compiled in.",
+            "Rebuild with -DAURORA_BACKEND_GPU_WGPU=ON, or use RendererPreference::Auto/Software.",
+            "aurora/window/window.h");
+    }
+#endif
     auto surf = std::make_unique<WaylandSurface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
                                                  opts.title, opts.style);
     if (!surf->is_available()) {
@@ -282,11 +319,22 @@ auto create_native_window(const WindowOptions &opts) -> Result<std::unique_ptr<W
 #if defined(AURORA_BACKEND_WAYLAND) || defined(AURORA_BACKEND_X11)
     // Linux 桌面：运行期按会话类型选择——Wayland 会话优先原生 Wayland，
     // 失败（或 X11 会话）再试 X11（Wayland 会话下经 XWayland），最后 Headless 兜底。
-#ifdef AURORA_BACKEND_X11
+#ifdef AURORA_BACKEND_GPU_WGPU
     if (opts.renderer == RendererPreference::GpuWgpu) {
-        // 强制 GPU 栅格：直达 X11 宿主专属分支（当前唯一 Linux wgpu 宿主；错误归属调用方，
-        // 不静默降级），跳过 Wayland 会话选择。
+        // 强制 GPU 栅格：运行期按会话选宿主（Wayland 会话优先原生 Wayland 宿主，与下方
+        // 软件路径的会话选择同序；X11 会话/兜底走 X11 宿主）。错误归属调用方不静默降级；
+        // 宿主专属工厂 init 失败即返回该错误，不再换宿主重试。
+#ifdef AURORA_BACKEND_WAYLAND
+        if (std::getenv("WAYLAND_DISPLAY") != nullptr) {
+            return create_window(WaylandOptions{opts});
+        }
+#endif
+#ifdef AURORA_BACKEND_X11
         return create_window(X11Options{opts});
+#else
+        // 仅编译了 Wayland 宿主（无 X11）：落到上面的 Wayland 分支或此处专属工厂报错。
+        return create_window(WaylandOptions{opts});
+#endif
     }
 #endif
 #ifdef AURORA_BACKEND_WAYLAND

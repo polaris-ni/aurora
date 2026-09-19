@@ -120,7 +120,7 @@ cmake --build build-verify --target aurora_verify_x11_cursor
 | `AURORA_BACKEND_HEADLESS` | `ON` | 无头内存 / PNG 后端（`HeadlessSurface`，离线渲染 / 测试） | `AURORA_BACKEND_HEADLESS` | — |
 | `AURORA_BACKEND_WIN32` | Windows `ON`，否则 `OFF` | Win32/GDI 后端（`Win32Surface` + `Win32Window` 共享宿主） | `AURORA_BACKEND_WIN32` | `user32` `gdi32` `shell32` `ole32` `uuid` `imm32`（仅 `_WIN32`；`imm32` 供输入法组合桥） |
 | `AURORA_BACKEND_D3D11` | `OFF` | D3D11 GPU 增量上屏后端（`D3D11Surface`） | `AURORA_BACKEND_D3D11` | `d3d11` `dxgi` `d3dcompiler`（仅 `_WIN32`） |
-| `AURORA_BACKEND_GPU_WGPU` | `OFF` | wgpu GPU 栅格后端（`WgpuRhi`；真窗口帧路径 `WgpuSurface` / `WgpuX11Surface` 另与宿主 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` 合取），源码经 cargo 构建，需 Rust 工具链 + libclang，配置期缺项 FATAL，见 §3.8 | `AURORA_BACKEND_GPU_WGPU` | `wgpu_native` 静态库 + `ws2_32` `userenv` `bcrypt` `advapi32` `oleaut32` `ntdll`(Windows)/`dl` `pthread` `m`(Linux) |
+| `AURORA_BACKEND_GPU_WGPU` | `OFF` | wgpu GPU 栅格后端（`WgpuRhi`；真窗口帧路径 `WgpuSurface` / `WgpuX11Surface` / `WgpuWaylandSurface` 另与宿主 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` ∨ `AURORA_BACKEND_WAYLAND` 合取），源码经 cargo 构建，需 Rust 工具链 + libclang，配置期缺项 FATAL，见 §3.8 | `AURORA_BACKEND_GPU_WGPU` | `wgpu_native` 静态库 + `ws2_32` `userenv` `bcrypt` `advapi32` `oleaut32` `ntdll`(Windows)/`dl` `pthread` `m`(Linux) |
 | `AURORA_BACKEND_GLFW` | `OFF` | GLFW + OpenGL（上下文 3.3 兼容剖面，绘制 1.1 立即模式） | `AURORA_BACKEND_GLFW` | `glfw` 目标（源码静态库）+ `opengl32`(Windows)/`OpenGL::GL`(其他平台) |
 | `AURORA_BACKEND_X11` | `OFF` | X11 / Linux 桌面后端（`X11Surface`，pimpl 完整实现） | `AURORA_BACKEND_X11` | `${X11_LIBRARIES}`（`find_package(X11)`） |
 | `AURORA_BACKEND_WAYLAND` | `OFF` | 原生 Wayland / Linux 桌面后端（`WaylandSurface`，pimpl 完整实现） | `AURORA_BACKEND_WAYLAND` | `${WAYLAND_CLIENT_LIBRARIES}` `${XKBCOMMON_LIBRARIES}`（`pkg-config`） |
@@ -206,7 +206,7 @@ cmake -S . -B build -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_DISPLAY_LIS
 | `Auto`（默认） | 选 D3D11 GPU 上屏 | 静默回退 Win32/GDI（`AURORA_LOG_INFO` 说明） |
 | `Software` | 强制 Win32/GDI | Win32/GDI |
 | `GpuD3D11` | 选 D3D11（含 WARP 兜底） | 返回 `renderer-unavailable` 错误（不静默降级，错误归属调用方） |
-| `GpuWgpu` | 与 `AURORA_BACKEND_GPU_WGPU` 合取：编译且 adapter 可用时选 `WgpuSurface`（Win32 宿主）/ `WgpuX11Surface`（X11 宿主）（GPU 栅格，§3.8） | 未编译 / 无 adapter 时返回 `renderer-unavailable`（不降级；`Auto` 优先序不含 wgpu） |
+| `GpuWgpu` | 与 `AURORA_BACKEND_GPU_WGPU` 合取：编译且 adapter 可用时选 `WgpuSurface`（Win32 宿主）/ `WgpuX11Surface`（X11 宿主）/ `WgpuWaylandSurface`（Wayland 宿主；`create_native_window` 运行期按 `WAYLAND_DISPLAY` 会话择路，§3.8）（GPU 栅格） | 未编译 / 无 adapter 时返回 `renderer-unavailable`（不降级；`Auto` 优先序不含 wgpu） |
 
 `AURORA_BACKEND_D3D11=ON` 时 `D3D11Options.vsync`（默认 `true`）控制 `Present(1,0)`（阻塞到 vblank，后端自带帧节拍，帧调度跳过 CPU sleep）或 `Present(0,0)`（交还 CPU 帧预算节流）。
 
@@ -237,7 +237,7 @@ cmake --build build --target gen_debug_api_json     # 仅刷新 debug 段
 
 ### 3.8 wgpu GPU 栅格后端（cargo 源码构建 + Rust 工具链探测）
 
-`AURORA_BACKEND_GPU_WGPU=ON`（默认 `OFF`）启用 `WgpuRhi`（同一套 WGSL 管线覆盖 Vulkan / D3D12 / Metal / GLES）；真窗口帧路径 `WgpuSurface`（Win32 宿主）/ `WgpuX11Surface`（X11 宿主）与 `create_window(WgpuOptions)` 另与 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` 合取门控（有哪个宿主宏就产出哪个宿主）。依赖为仓库内置 `third_party/wgpu-native/`（gfx-rs v29 源码，**保持上游原样不修改**），经 cargo 构建为静态库（staticlib）链入——对齐「静态交付、消费者无额外 DLL」。
+`AURORA_BACKEND_GPU_WGPU=ON`（默认 `OFF`）启用 `WgpuRhi`（同一套 WGSL 管线覆盖 Vulkan / D3D12 / Metal / GLES）；真窗口帧路径 `WgpuSurface`（Win32 宿主）/ `WgpuX11Surface`（X11 宿主）/ `WgpuWaylandSurface`（Wayland 宿主）与 `create_window(WgpuOptions)` 另与 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` ∨ `AURORA_BACKEND_WAYLAND` 合取门控（有哪个宿主宏就产出哪个宿主；Linux 两宏并开时 `WgpuOptions` 编译期取 X11，Wayland 宿主经 `WaylandOptions` + `GpuWgpu` 或 `create_native_window` 会话选择直达）。依赖为仓库内置 `third_party/wgpu-native/`（gfx-rs v29 源码，**保持上游原样不修改**），经 cargo 构建为静态库（staticlib）链入——对齐「静态交付、消费者无额外 DLL」。
 
 ```powershell
 cmake -S . -B build -DAURORA_BACKEND_GPU_WGPU=ON -DAURORA_BACKEND_WIN32=ON

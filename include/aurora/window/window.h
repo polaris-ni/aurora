@@ -184,10 +184,14 @@ struct D3D11Options : WindowOptions {
 };
 #endif
 
-/// @brief wgpu GPU 栅格后端专属选项（宿主：Win32 或 X11）。
-/// 仅当 `AURORA_BACKEND_GPU_WGPU` 且（`AURORA_BACKEND_WIN32` 或 `AURORA_BACKEND_X11`）
-/// 定义时可用——两宿主宏各自只在对应平台可开，任一平台至多命中一种。
-#if defined(AURORA_BACKEND_GPU_WGPU) && (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11))
+/// @brief wgpu GPU 栅格后端专属选项（宿主：Win32 / X11 / Wayland）。
+/// 仅当 `AURORA_BACKEND_GPU_WGPU` 且任一宿主宏（`AURORA_BACKEND_WIN32`/`AURORA_BACKEND_X11`/
+/// `AURORA_BACKEND_WAYLAND`）定义时可用。Linux 上 X11/Wayland 宏可并开：本选项的专属工厂
+/// 按 Win32 → X11 → Wayland 编译期择一（X11 与 Wayland 并开时取 X11，经 XWayland 亦可跑）；
+/// 要直达 Wayland 宿主请用 `create_window(WaylandOptions)` + `RendererPreference::GpuWgpu`，
+/// 或 `create_native_window` 的 `GpuWgpu` 运行期会话选择。
+#if defined(AURORA_BACKEND_GPU_WGPU) && \
+    (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))
 struct WgpuOptions : WindowOptions {
     bool vsync = true;  ///< 垂直同步（wgpu FIFO）：true = present 阻塞到 vblank（后端自带帧节拍）；
                         ///< false = immediate 提交，交还 CPU 端帧预算节流。
@@ -246,9 +250,10 @@ struct WasmOptions : WindowOptions {
 [[nodiscard]] auto create_window(const D3D11Options &opts) -> Result<std::unique_ptr<Window>>;
 #endif
 
-#if defined(AURORA_BACKEND_GPU_WGPU) && (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11))
-/// @brief wgpu GPU 栅格专属工厂（接受 `WgpuOptions`；Win32/X11 宿主按平台择一）。
-/// 仅 `AURORA_BACKEND_GPU_WGPU` + 对应宿主宏开启时可用。
+#if defined(AURORA_BACKEND_GPU_WGPU) && \
+    (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))
+/// @brief wgpu GPU 栅格专属工厂（接受 `WgpuOptions`；Win32/X11/Wayland 宿主编译期择一，
+/// 口径见 `WgpuOptions` 注）。仅 `AURORA_BACKEND_GPU_WGPU` + 对应宿主宏开启时可用。
 [[nodiscard]] auto create_window(const WgpuOptions &opts) -> Result<std::unique_ptr<Window>>;
 #endif
 

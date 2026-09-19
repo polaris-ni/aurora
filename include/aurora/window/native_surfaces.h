@@ -38,6 +38,10 @@
 #include "aurora/window/wgpu_x11_surface.h"  // wgpu GPU 栅格（X11 宿主，组合内嵌 X11Surface）
 #endif
 
+#if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WAYLAND)
+#include "aurora/window/wgpu_wayland_surface.h"  // wgpu GPU 栅格（Wayland 宿主，组合内嵌 WaylandSurface）
+#endif
+
 #ifdef AURORA_BACKEND_GLFW
 #include "aurora/window/glfw_surface.h"
 #endif

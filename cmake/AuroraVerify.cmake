@@ -122,6 +122,14 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_x11_wgpu)
     endif ()
 
+    # ---- Wayland wgpu GPU 栅格（Linux 真实窗口 + 离屏直驱，WSLg Weston 可验）：与 X11 探针同段
+    # 结构，宿主动态类型为 WgpuWaylandSurface（WaylandOptions+GpuWgpu 直达）；Wayland 无抓屏
+    # 原语故无截图项，装饰归属由 --interactive 人工目视核对。需 WGPU+WAYLAND 通道编译进库。
+    if (AURORA_BACKEND_GPU_WGPU AND AURORA_BACKEND_WAYLAND)
+        aurora_add_verify_probe(aurora_verify_wayland_wgpu "${_aurora_verify_dir}/wayland_wgpu_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_wayland_wgpu)
+    endif ()
+
     # ---- WASAPI 音频（Windows）：真实设备线程 / 格式协商 / 图时钟 / 出声路径真机核对 ----
     # 自动段核对激活/格式契约/时钟推进/缓冲源与推流通路/suspend-resume；--interactive 出声人工段
     # （扫频/双源混音/设备热切换）。需音频后端编译进库（AURORA_ENABLE_AUDIO=ON）。

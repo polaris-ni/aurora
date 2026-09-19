@@ -1,12 +1,13 @@
 /// 测试类型: integration
-/// 目标单元: include/aurora/window/wgpu_surface.h + include/aurora/window/wgpu_x11_surface.h
+/// 目标单元: include/aurora/window/wgpu_surface.h + wgpu_x11_surface.h + wgpu_wayland_surface.h
 ///           + src/aurora/window/window_factory.cpp
 /// 测试说明: wgpu GPU 栅格真实窗口 smoke——create_window(WgpuOptions) 开窗后经
 ///           Window::present_root 帧调度连续出帧（gpu_backend 标识 "gpu-wgpu"、
 ///           gpu_active 恒真不回退、frame_count 递增）；RendererPreference::GpuWgpu
-///           经平台宿主选项（Win32Options/X11Options）强制路由（不可用时报
-///           RendererUnavailable 不静默降级）。宿主类型按编译口径别名切换。
-///           依赖桌面会话（HWND/X Display）+ wgpu adapter，任一缺失 SKIP。
+///           经平台宿主选项（Win32Options/X11Options/WaylandOptions）强制路由（不可用
+///           时报 RendererUnavailable 不静默降级）。宿主类型按编译口径别名切换（与
+///           工厂择一序 Win32 → X11 → Wayland 同序）。
+///           依赖桌面会话（HWND/X Display/Wayland compositor）+ wgpu adapter，任一缺失 SKIP。
 
 #include <chrono>
 #include <memory>
@@ -17,7 +18,8 @@
 
 namespace au = aurora;
 
-#if defined(AURORA_BACKEND_GPU_WGPU) && (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11))
+#if defined(AURORA_BACKEND_GPU_WGPU) &&                                                                  \
+    (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))
 
 #include "aurora/aurora.h"
 #include "aurora/window/native_surfaces.h"
@@ -25,14 +27,20 @@ namespace au = aurora;
 
 namespace aurora::test_cases::itest_wgpu_present {
 
-// 宿主切换：Windows → WgpuSurface(Win32Options)；Linux/X11 → WgpuX11Surface(X11Options)。
-// 两宿主宏互斥（BACKEND_WIN32 仅 Windows、BACKEND_X11 仅 Linux），任一构建至多命中一种。
+// 宿主切换（与 create_window(WgpuOptions) 的编译期择一序一致）：Windows → WgpuSurface
+// (Win32Options)；Linux/X11 → WgpuX11Surface(X11Options)；仅 Wayland → WgpuWaylandSurface
+// (WaylandOptions)。Linux 下 X11/Wayland 宏可并开，本别名取 X11；Wayland 宿主的强制路由
+// 由 create_native_window 会话选择与专属工厂覆盖（X11+Wayland 并开构建下亦可经
+// WaylandOptions+GpuWgpu 直达，见 gpu_wgpu_preference_routing 的宿主注）。
 #ifdef AURORA_BACKEND_WIN32
 using HostWgpuSurface = au::WgpuSurface;
 using HostOptions = au::Win32Options;
-#else
+#elif defined(AURORA_BACKEND_X11)
 using HostWgpuSurface = au::WgpuX11Surface;
 using HostOptions = au::X11Options;
+#else
+using HostWgpuSurface = au::WgpuWaylandSurface;
+using HostOptions = au::WaylandOptions;
 #endif
 
 AURORA_TEST_CASE(wgpu_surface_present_frames_and_no_fallback) {
@@ -96,6 +104,50 @@ AURORA_TEST_CASE(gpu_wgpu_preference_routing) {
     }
 }
 
+// Wayland 宿主专属：X11/Wayland 并开构建里上方别名取 X11，本用例不经别名、直接用
+// WaylandOptions+GpuWgpu 直达 WgpuWaylandSurface，验证装配 + 出帧不回退（Wayland-only
+// 构建与上方 routing 用例同语义，仍成立）。
+#ifdef AURORA_BACKEND_WAYLAND
+AURORA_TEST_CASE(wayland_host_gpu_routing_and_frames) {
+    au::WaylandOptions opts;
+    opts.size = au::Size{.width = 320.0F, .height = 240.0F};
+    opts.title = "itest_wgpu_wayland";
+    opts.renderer = au::RendererPreference::GpuWgpu;
+    auto created = au::create_window(opts);
+    if (!created) {
+        AURORA_TEST_CHECK_EQ(created.error().code, std::string{"renderer-unavailable"});
+        AURORA_TEST_SKIP("无 Wayland 会话或无 wgpu adapter，Wayland GPU 宿主无实例可验");
+    }
+    auto win = std::move(created.value());
+    auto *ws = dynamic_cast<au::WgpuWaylandSurface *>(&win->surface());
+    AURORA_TEST_REQUIRE(ws != nullptr);
+    AURORA_TEST_CHECK_TRUE(ws->gpu_active());
+    auto *sink = ws->gpu_backend();
+    AURORA_TEST_REQUIRE(sink != nullptr);
+    AURORA_TEST_CHECK_EQ(sink->name(), std::string_view("gpu-wgpu"));
+
+    au::Node page = au::Text{au::TextProps{.content = au::LocalizedString{"Wgpu Wayland Aa 01"}}};
+    // 同首用例口径：泵掉 map/configure 触发的同步重绘突发，保持逐帧帧数精确相等。
+    for (int k = 0; k < 5; ++k) {
+        ws->poll_platform_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    const int base = ws->frame_count();
+    for (int i = 1; i <= 3; ++i) {
+        win->force_full_redraw();
+        const auto r = win->present_root(page);
+        AURORA_TEST_CHECK(static_cast<bool>(r));
+        AURORA_TEST_CHECK_EQ(ws->frame_count(), base + i);
+        ws->poll_platform_events();
+    }
+    AURORA_TEST_CHECK_TRUE(ws->gpu_active());
+}
+#else
+AURORA_TEST_CASE(wayland_host_gpu_routing_and_frames) {
+    AURORA_TEST_SKIP("AURORA_BACKEND_WAYLAND 未开启，Wayland GPU 宿主整体被宏剔除");
+}
+#endif
+
 }  // namespace aurora::test_cases::itest_wgpu_present
 
 #else  // 后端未编译
@@ -103,12 +155,15 @@ AURORA_TEST_CASE(gpu_wgpu_preference_routing) {
 namespace aurora::test_cases::itest_wgpu_present {
 
 AURORA_TEST_CASE(wgpu_surface_present_frames_and_no_fallback) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 或宿主宏（WIN32/X11）未开启，Wgpu*Surface 整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 或宿主宏（WIN32/X11/WAYLAND）未开启，Wgpu*Surface 整体被宏剔除");
 }
 AURORA_TEST_CASE(gpu_wgpu_preference_routing) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 或宿主宏（WIN32/X11）未开启");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 或宿主宏（WIN32/X11/WAYLAND）未开启");
+}
+AURORA_TEST_CASE(wayland_host_gpu_routing_and_frames) {
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 或宿主宏（WIN32/X11/WAYLAND）未开启");
 }
 
 }  // namespace aurora::test_cases::itest_wgpu_present
 
-#endif  // AURORA_BACKEND_GPU_WGPU && (AURORA_BACKEND_WIN32 || AURORA_BACKEND_X11)
+#endif  // AURORA_BACKEND_GPU_WGPU && (AURORA_BACKEND_WIN32 || AURORA_BACKEND_X11 || AURORA_BACKEND_WAYLAND)

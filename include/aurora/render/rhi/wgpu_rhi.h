@@ -39,12 +39,23 @@ struct WgpuRhiOptions {
 
     Backend backend = Backend::Auto;
 
+    /// @brief Linux 原生窗口协议：两个 void* 句柄无法自述归属，须显式判别
+    /// （Xlib 与 Wayland 的 surface 创建走不同 `WGPUSurfaceSource*` 链）。Win32 忽略。
+    enum class LinuxHost : std::uint8_t {
+        X11,     ///< Xlib：native_display = `Display*`，native_window = XID `Window`
+        Wayland, ///< Wayland：native_display = `wl_display*`，native_window = `wl_surface*`
+    };
+
+    LinuxHost linux_host = LinuxHost::X11;
+
     /// @brief 原生窗口句柄（`Surface::native_handle()` 口径：Win32 为 HWND，X11 为
-    /// XID `Window`——X11 下须同时给 `native_display`）。`nullptr` = 离屏模式（渲染目标
-    /// 为内部纹理，供 `read_pixels` 读回；无 swapchain，测试/探针通道）。
+    /// XID `Window`，Wayland 为 `wl_surface*`——Linux 下须同时给 `native_display`，
+    /// 协议按 `linux_host` 判别）。`nullptr` = 离屏模式（渲染目标为内部纹理，供
+    /// `read_pixels` 读回；无 swapchain，测试/探针通道）。
     void *native_window = nullptr;
 
-    /// @brief X11 `Display*`（仅 `native_window` 为 Xlib Window 时使用；Win32 忽略）。
+    /// @brief 原生显示连接（X11 `Display*` / Wayland `wl_display*`，按 `linux_host`
+    /// 判别；Win32 忽略）。
     void *native_display = nullptr;
 
     /// @brief 离屏模式初始尺寸（设备像素；非离屏模式忽略，`begin_frame` 可再重设）。

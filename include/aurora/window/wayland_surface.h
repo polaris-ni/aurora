@@ -114,6 +114,16 @@ class WaylandSurface final : public Surface {
     /// @brief 原生窗口句柄：`wl_surface*`。
     [[nodiscard]] auto native_handle() const -> void * override;
 
+    /// @brief 该窗口所在的 Wayland 合成器连接：`wl_display*`（未连接 = nullptr）。
+    /// 与 `native_handle()`（wl_surface*）配对使用——wgpu Wayland surface 创建（
+    /// `WGPUSurfaceSourceWaylandSurface`）等外部 GPU 接线需要两者同源。
+    [[nodiscard]] auto native_display() const -> void *;
+
+    /// @brief 是否正在自绘 CSD 装饰（标题栏/边框，画进 Painter 帧缓冲）：合成器无
+    /// xdg-decoration SSD 且装饰策略需要兜底时为 true。GPU 宿主（WgpuWaylandSurface）
+    /// 据此申报「swapchain 帧不含自绘装饰」的口径差异。
+    [[nodiscard]] auto uses_client_decorations() const -> bool;
+
     /// @brief 全部 Wayland/xkb 状态（display/registry/shm 双缓冲/seat/唤醒管道），见 wayland_surface.cpp。
     /// public 而非 private：C 协议 listener（自由函数指针表）需在类外以 `Impl*` 收发 user data。
     struct Impl;

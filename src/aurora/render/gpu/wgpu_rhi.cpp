@@ -869,8 +869,19 @@ struct WgpuRhi::Impl {
 
     [[nodiscard]] bool create_surface() {
         WGPUSurfaceDescriptor desc{};
+        // 各 source 结构的链头均在偏移 0：union 让跨平台分支共用一个存活到 create 调用的链节点。
+        // 勿把 src 收进更深的 if 块——desc.nextInChain 须在 wgpuInstanceCreateSurface 时仍有效。
+        union Source {
+            WGPUChainedStruct chain;
 #ifdef AURORA_PLATFORM_WINDOWS
-        WGPUSurfaceSourceWindowsHWND src{};
+            WGPUSurfaceSourceWindowsHWND hwnd;
+#endif
+#if defined(AURORA_PLATFORM_LINUX)
+            WGPUSurfaceSourceWaylandSurface wl;
+            WGPUSurfaceSourceXlibWindow xlib;
+#endif
+        } src{};
+#ifdef AURORA_PLATFORM_WINDOWS
         src.chain.sType = WGPUSType_SurfaceSourceWindowsHWND;
         // hinstance 不可为 NULL：v29 下 `wgpuSurfaceGetCapabilities` 对 null-HINSTANCE 的
         // HWND surface 直接返回 Error（真机 cap 探针隔离证实）。优先取窗口实主实例，
@@ -880,19 +891,26 @@ struct WgpuRhi::Impl {
         if (hinstance == nullptr) {
             hinstance = GetModuleHandle(nullptr);
         }
-        src.hinstance = hinstance;
-        src.hwnd = options.native_window;
+        src.hwnd.hinstance = hinstance;
+        src.hwnd.hwnd = options.native_window;
         desc.nextInChain = &src.chain;
 #elif defined(AURORA_PLATFORM_LINUX)
         if (options.native_display == nullptr) {
-            AURORA_LOG_ERROR("gpu-wgpu", "Xlib surface requires native_display (Display*)");
+            AURORA_LOG_ERROR("gpu-wgpu", "native surface requires native_display (X11 Display* / Wayland wl_display*)");
             return false;
         }
-        WGPUSurfaceSourceXlibWindow src{};
-        src.chain.sType = WGPUSType_SurfaceSourceXlibWindow;
-        src.display = options.native_display;
-        // webgpu.h 的 SurfaceSourceXlibWindow::window 是 uint64_t（XID 全宽），勿窄化为 u32。
-        src.window = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(options.native_window));
+        if (options.linux_host == WgpuRhiOptions::LinuxHost::Wayland) {
+            // Wayland：display + wl_surface 双 void* 句柄直传（无 XID 那样的整数装拆）；
+            // wl_surface 已由宿主在首个 xdg_toplevel.configure 后才走到这里（构造阻塞等齐）。
+            src.chain.sType = WGPUSType_SurfaceSourceWaylandSurface;
+            src.wl.display = options.native_display;
+            src.wl.surface = options.native_window;
+        } else {
+            src.chain.sType = WGPUSType_SurfaceSourceXlibWindow;
+            src.xlib.display = options.native_display;
+            // webgpu.h 的 SurfaceSourceXlibWindow::window 是 uint64_t（XID 全宽），勿窄化为 u32。
+            src.xlib.window = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(options.native_window));
+        }
         desc.nextInChain = &src.chain;
 #else
         AURORA_LOG_ERROR("gpu-wgpu", "native window surface not supported on this platform yet");

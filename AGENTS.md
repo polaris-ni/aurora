@@ -15,7 +15,7 @@
 - 渲染内核：软件 `Painter`（ **无 `Renderer` 接口**）。
 - 后端：`Surface` 抽象 + `HeadlessSurface`（内存/离线 PNG）、`GlfwSurface`（OpenGL 3.x 兼容 profile，默认请求 3.3，CMake 开关）、
   `Win32Surface`（Win32/GDI，仅 `_WIN32`，零三方依赖）、`D3D11Surface`（Windows GPU 增量上屏偏置，CMake 开关）、
-  `WgpuSurface`（wgpu GPU 栅格上屏：帧级 DisplayList 经 `WgpuRhi` 在 Vulkan/D3D12/Metal/GLES 端光栅化，Win32/X11 宿主，CMake 开关 `AURORA_BACKEND_GPU_WGPU`，需 Rust 工具链）、
+  `WgpuSurface`（wgpu GPU 栅格上屏：帧级 DisplayList 经 `WgpuRhi` 在 Vulkan/D3D12/Metal/GLES 端光栅化，Win32/X11/Wayland 宿主，CMake 开关 `AURORA_BACKEND_GPU_WGPU`，需 Rust 工具链）、
   `X11Surface`（X11/Xlib，Linux 桌面，CMake 开关）、
   `WaylandSurface`（原生 Wayland：wl_shm+xdg-shell+xkbcommon，Linux 桌面，CMake 开关）、
   `WasmSurface`（Emscripten/Canvas 2D，浏览器 rAF 驱动）、`MacOSSurface`（AppKit/CoreGraphics，骨架）。

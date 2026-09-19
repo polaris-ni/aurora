@@ -355,7 +355,7 @@ if (win_res) {
 
 ### 13.2 GPU 栅格（wgpu 窗口，跨平台 GPU 主力路径）
 
-§13.1 的 GLFW 模式依赖 OpenGL 3.3 上下文；若要走**同一套 WGSL 管线覆盖 Vulkan / D3D12 / Metal / GLES** 的跨平台 GPU 栅格，用 wgpu 窗口（需 CMake `-DAURORA_BACKEND_GPU_WGPU=ON` 再叠宿主：Win32 加 `-DAURORA_BACKEND_WIN32=ON`、Linux 加 `-DAURORA_BACKEND_X11=ON`，构建期需 Rust 工具链 + libclang，见 `BUILD_OPTIONS.md` §3.8）：
+§13.1 的 GLFW 模式依赖 OpenGL 3.3 上下文；若要走**同一套 WGSL 管线覆盖 Vulkan / D3D12 / Metal / GLES** 的跨平台 GPU 栅格，用 wgpu 窗口（需 CMake `-DAURORA_BACKEND_GPU_WGPU=ON` 再叠宿主：Win32 加 `-DAURORA_BACKEND_WIN32=ON`、Linux 加 `-DAURORA_BACKEND_X11=ON` 或 `-DAURORA_BACKEND_WAYLAND=ON`，构建期需 Rust 工具链 + libclang，见 `BUILD_OPTIONS.md` §3.8）：
 
 ```cpp
 au::WgpuOptions opts;
@@ -368,11 +368,11 @@ if (!win_res) {
     // 无可用 adapter / 开窗失败：返回 renderer-unavailable 错误——该工厂不静默降级
 }
 // win->surface().gpu_backend() 非空且 name() 恒 "gpu-wgpu" = GPU 栅格路径挂点就绪；
-// 首帧运行期失效后整窗永久回退软件上传路径（Win32 宿主回 GDI、X11 宿主回 XPutImage；
-// WgpuSurface / WgpuX11Surface 的 gpu_active() 转 false）。
+// 首帧运行期失效后整窗永久回退软件上传路径（Win32 宿主回 GDI、X11 宿主回 XPutImage、
+// Wayland 宿主回 wl_shm；Wgpu*Surface 的 gpu_active() 转 false）。
 ```
 
-也可经宿主工厂强制路由：`Win32Options{}.renderer = au::RendererPreference::GpuWgpu`（Linux 下 `X11Options` 同款；`Auto` 优先序不含 wgpu，避免改变既有默认行为）。widget 层同样零感知——同一棵控件树在 GPU / 软件回退路径间切换，语义与 §8.7 同源。完整契约见 `specification/03-layout-render.md` §8.8；真机验收探针 `aurora_verify_win32_wgpu` / `aurora_verify_x11_wgpu`。
+也可经宿主工厂强制路由：`Win32Options{}.renderer = au::RendererPreference::GpuWgpu`（Linux 下 `X11Options` / `WaylandOptions` 同款；`Auto` 优先序不含 wgpu，避免改变既有默认行为）。Linux 两宿主宏并开时 `create_window(WgpuOptions)` 编译期取 X11，Wayland 宿主经 `WaylandOptions` + `GpuWgpu` 直达，或 `WindowOptions.renderer = GpuWgpu` 走 `create_native_window` 运行期按 `WAYLAND_DISPLAY` 会话择路。widget 层同样零感知——同一棵控件树在 GPU / 软件回退路径间切换，语义与 §8.7 同源。完整契约见 `specification/03-layout-render.md` §8.8；真机验收探针 `aurora_verify_win32_wgpu` / `aurora_verify_x11_wgpu` / `aurora_verify_wayland_wgpu`。
 
 ---
 
