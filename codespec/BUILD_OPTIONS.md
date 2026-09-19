@@ -450,8 +450,8 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 |:---|:---|:---|
 | `AURORA_GOLDEN_DIR` | 目录路径 | golden 真值目录；缺省为 `tests/golden` |
 | `AURORA_UPDATE_GOLDEN` | 非空（如 `1`） | 把当前渲染覆盖为新的 golden（首次生成 / 主动更新真值）；像素 golden 与 `utest_offscreen` 的逻辑快照基准（`tests/golden/logical_snapshots.json`）共用此变量 |
-| `AURORA_GOLDEN_MAX_DIFF` | 整数 | 像素最大允许色差阈值 |
-| `AURORA_GOLDEN_MAX_PIXELS` | 整数 | 允许不一致像素数上限 |
+| `AURORA_GOLDEN_MAX_DIFF` | 整数 | 像素最大允许色差阈值（软件逐位红线的显式放松开关；GPU 容差层 `golden::compare_gpu_tolerance` 不读此旋钮，容差带逐场景申报，见 `specification/03-layout-render.md` §8.4.2） |
+| `AURORA_GOLDEN_MAX_PIXELS` | 整数 | 允许不一致像素数上限（同上，仅 `compare_or_update` 族读取） |
 | `AURORA_REPO_ROOT` | 目录路径 | 测试框架仓库根定位的显式锚点（`tests/framework/isolation.cpp`）。缺省先按可执行文件位置、再按 cwd 逐级上溯找 `codespec/`+`CMakeLists.txt`；runner 构建 / 安装于仓库外（如 WSL home 目录构建 `/mnt/c` 源码仓）时上溯必然落空，用本变量指向仓库根即可，值须形如仓库根，否则忽略回落自动查找 |
 | `AURORA_INSPECTOR_PORT` | 1–65535 | `aurora_mcp` 的 `live_*` 工具连接运行中应用的默认端口；缺省 `6280`（与 `InspectorServer::start()` 默认值一致）。单个工具调用可用 `session` 入参（`"6280"` 或 `"127.0.0.1:6280"`）覆盖。主机恒为回环，见 `specification/08-tooling.md` §5.4 |
 
