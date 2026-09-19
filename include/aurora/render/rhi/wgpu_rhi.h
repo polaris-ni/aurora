@@ -65,8 +65,10 @@ struct WgpuRhiOptions {
 /// 调用方整体回退软件路径，不做逐命令混合（对齐 `RhiFrameSink::begin_frame` 契约）。
 ///
 /// 能力位（`capabilities()`）：gpu=true；compute 随所选后端（Vulkan/D3D12/Metal=true，
-/// GLES=false）；native_surface_import 本轮为 false——wgpu-native C API（v29）未暴露
-/// 外部共享纹理导入入口，兑现路径随上游 C API 扩展（探测回退契约不变）。
+/// GLES=false）——true 时已有实路径：静态大图整条 mip 链由 compute shader（2×2 box
+/// 降采样）生成，DrawImage 缩小采样走三线性 mip；native_surface_import 本轮为 false——
+/// wgpu-native C API（v29）未暴露外部共享纹理导入入口，兑现路径随上游 C API 扩展
+/// （探测回退契约不变）。
 ///
 /// @note Thread: main-thread only（wgpu device/surface 所属线程）
 class WgpuRhi final : public RhiBackend, public RhiFrameSink {

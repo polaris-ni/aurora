@@ -66,12 +66,17 @@ struct Globals {
     fx: vec4f,         // blend tint.rgb / mask+blend strength@a
     region: vec4f,     // 效果区域（设备像素）ox, oy, w, h
     canvas_ctl: vec4f, // 效果源纹理设备尺寸 w, h（uv 归一化基准）
-    tex_ctl: vec4f,    // image: (片元内 PMA, NEAREST 采样)；blur: (0,0, radius, dir)
+    tex_ctl: vec4f,    // image: (片元内 PMA, NEAREST 采样, MIP 三线性)；blur: (0,0, radius, dir)
 };
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var t_src: texture_2d<f32>;
 @group(0) @binding(2) var smp_point: sampler;
 @group(0) @binding(3) var smp_linear: sampler;
+@group(0) @binding(4) var smp_mip: sampler;
+// compute mip 链专用绑定（独立 bind group layout，仅 cs_mip 引用）：
+// 源 = 上一 mip 级单级 view，目标 = 写一级 storage view（WriteOnly，零 feature）。
+@group(0) @binding(5) var t_mip_src: texture_2d<f32>;
+@group(0) @binding(6) var t_mip_dst: texture_storage_2d<rgba8unorm, write>;
 
 struct VSOut {
     @builtin(position) fb: vec4f,
@@ -157,6 +162,9 @@ fn fs_image(in: VSOut) -> @location(0) vec4f {
     var tex = textureSampleLevel(t_src, smp_linear, in.uv, 0.0);
     if (g.tex_ctl.y > 0.5) {
         tex = textureSampleLevel(t_src, smp_point, in.uv, 0.0);
+    } else if (g.tex_ctl.z > 0.5) {
+        // 静态大图：导数 LOD + 三线性（mip 链由 cs_mip compute 生成），降采样不再走样。
+        tex = textureSample(t_src, smp_mip, in.uv);
     }
     if (g.tex_ctl.x > 0.5) {
         tex = vec4f(tex.rgb * tex.a, tex.a);
@@ -258,6 +266,28 @@ fn fs_mask(in: VSOut) -> @location(0) vec4f {
     let s4 = floor(textureSampleLevel(t_src, smp_linear, in.uv, 0.0) * 255.0 + 0.5);
     let rgb = clamp(floor(s4.rgb / 255.0 * factor * 255.0), vec3f(0.0), vec3f(255.0));
     return vec4f(rgb / 255.0, s4.a / 255.0);
+}
+
+// compute mip 链（capabilities().compute 的实路径）：每线程对上一级 2×2 盒均值写一级
+// mip。rgba8unorm 逐 texel 精确 /255 域，×0.25 求和即整数域盒平均——奇数尺寸边缘经
+// 钳位重复取样兜底（WebGPU 允许非 2 幂 mip 逐级 ceil/2）。
+@compute @workgroup_size(8, 8)
+fn cs_mip(@builtin(global_invocation_id) gid: vec3u) {
+    let dd = textureDimensions(t_mip_dst);
+    if (gid.x >= dd.x || gid.y >= dd.y) {
+        return;
+    }
+    let sd = textureDimensions(t_mip_src);
+    let sx = gid.x * 2u;
+    let sy = gid.y * 2u;
+    var acc = vec4f(0.0);
+    for (var dy: u32 = 0u; dy < 2u; dy = dy + 1u) {
+        for (var dx: u32 = 0u; dx < 2u; dx = dx + 1u) {
+            let p = vec2u(min(sx + dx, sd.x - 1u), min(sy + dy, sd.y - 1u));
+            acc = acc + textureLoad(t_mip_src, p, 0);
+        }
+    }
+    textureStore(t_mip_dst, vec2u(gid.x, gid.y), acc * 0.25);
 }
 )";
 
@@ -434,9 +464,10 @@ struct WgpuRhi::Impl {
     int device_w = 0;
     int device_h = 0;
 
-    // ---- 采样器（bind group 恒绑两枚；着色器按管线取用）----
+    // ---- 采样器（bind group 恒绑三枚；着色器按管线取用）----
     WGPUSampler samp_point_ = nullptr;
     WGPUSampler samp_linear_ = nullptr;
+    WGPUSampler samp_mip_ = nullptr;  // Linear/Linear + 三线性 mip（静态大图降采样）
 
     // ---- 着色器 / 管线 ----
     WGPUShaderModule shader_ = nullptr;
@@ -446,6 +477,10 @@ struct WgpuRhi::Impl {
     WGPURenderPipeline pipes4_[kPipeCount] = {};  // 采样数 4：画布 MSAA pass
     WGPURenderPipeline pipe_present_ = nullptr;   // vs_present + fs_copy（surface 格式）
     WGPUTextureFormat present_format_ = WGPUTextureFormat_Undefined;
+    // compute mip 链管线（仅 compute_cap 时创建；binding5 源纹理 + binding6 storage 目标）
+    WGPUBindGroupLayout bgl_mip_ = nullptr;
+    WGPUPipelineLayout pipeline_layout_mip_ = nullptr;
+    WGPUComputePipeline pipe_mip_ = nullptr;
 
     // ---- 顶点/uniform 帧内环（CPU 暂存 + GPU 镜像；扩容时整体重放暂存，偏移稳定）----
     // 帧内各批共用一次 submit：同区域 writeBuffer 只保留最后一次写，故每批写独立区段。
@@ -501,6 +536,7 @@ struct WgpuRhi::Impl {
         // Image 专用
         bool pma_in_shader = false;  // 1 = 直色纹理片元内 PMA（常驻流式通道）
         bool nearest_filter = false;  // Composite/DrawLayer 逐像素 floor 取样
+        bool use_mip = false;         // 静态大图：三线性 mip 采样（compute 链已生成）
         // 源纹理 view（Grad LUT / Image / 字形页 / 层纹理；nullptr = dummy 占位）
         WGPUTextureView view = nullptr;
         auto operator==(const BatchKey &) const -> bool = default;
@@ -527,6 +563,8 @@ struct WgpuRhi::Impl {
         int width = 0;
         int height = 0;
         Tex tex{};
+        int mip_levels = 1;       // compute 链级数（1 = 无 mip：GLES 后端 / 小图）
+        bool mips_pending = false;  // 新建帧首次使用前生成（需 pass 关闭 + encoder 直录）
     };
     std::vector<ImageTexEntry> image_cache;
 
@@ -636,6 +674,9 @@ struct WgpuRhi::Impl {
             AURORA_WGPU_RELEASE(pipes4_[i], wgpuRenderPipelineRelease)
         }
         AURORA_WGPU_RELEASE(pipe_present_, wgpuRenderPipelineRelease)
+        AURORA_WGPU_RELEASE(pipe_mip_, wgpuComputePipelineRelease)
+        AURORA_WGPU_RELEASE(pipeline_layout_mip_, wgpuPipelineLayoutRelease)
+        AURORA_WGPU_RELEASE(bgl_mip_, wgpuBindGroupLayoutRelease)
         for (LutEntry &e : lut_cache) {
             release_tex(&e.tex);
         }
@@ -664,6 +705,7 @@ struct WgpuRhi::Impl {
         release_tex(&dummy_);
         AURORA_WGPU_RELEASE(samp_point_, wgpuSamplerRelease)
         AURORA_WGPU_RELEASE(samp_linear_, wgpuSamplerRelease)
+        AURORA_WGPU_RELEASE(samp_mip_, wgpuSamplerRelease)
         AURORA_WGPU_RELEASE(pipeline_layout_, wgpuPipelineLayoutRelease)
         AURORA_WGPU_RELEASE(bgl_, wgpuBindGroupLayoutRelease)
         AURORA_WGPU_RELEASE(shader_, wgpuShaderModuleRelease)
@@ -916,7 +958,7 @@ struct WgpuRhi::Impl {
     // ---- 纹理所（创建 / 释放 / 上传）----
 
     [[nodiscard]] Tex make_tex(int w, int h, WGPUTextureFormat fmt, WGPUTextureUsage usage,
-                               std::uint32_t samples = 1) {
+                               std::uint32_t samples = 1, std::uint32_t mip_levels = 1) {
         Tex t;
         WGPUTextureDescriptor td{};
         td.usage = usage;
@@ -925,7 +967,7 @@ struct WgpuRhi::Impl {
         td.size.height = static_cast<std::uint32_t>(h);
         td.size.depthOrArrayLayers = 1;
         td.format = fmt;
-        td.mipLevelCount = 1;
+        td.mipLevelCount = mip_levels;
         td.sampleCount = samples;
         t.tex = wgpuDeviceCreateTexture(device, &td);
         if (t.tex == nullptr) {
@@ -999,8 +1041,9 @@ struct WgpuRhi::Impl {
             AURORA_LOG_ERROR("gpu-wgpu", "WGSL module creation failed");
             return false;
         }
-        // bind group：0 uniform，1 源纹理（Float：可滤性由格式推导），2/3 采样器（point/linear）。
-        WGPUBindGroupLayoutEntry bge[4] = {};
+        // bind group：0 uniform，1 源纹理（Float：可滤性由格式推导），2/3/4 采样器
+        // （point/linear/mip 三线性）。
+        WGPUBindGroupLayoutEntry bge[5] = {};
         bge[0].binding = 0;
         bge[0].visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
         bge[0].buffer.type = WGPUBufferBindingType_Uniform;
@@ -1015,8 +1058,11 @@ struct WgpuRhi::Impl {
         bge[3].binding = 3;
         bge[3].visibility = WGPUShaderStage_Fragment;
         bge[3].sampler.type = WGPUSamplerBindingType_Filtering;
+        bge[4].binding = 4;
+        bge[4].visibility = WGPUShaderStage_Fragment;
+        bge[4].sampler.type = WGPUSamplerBindingType_Filtering;
         WGPUBindGroupLayoutDescriptor bgld{};
-        bgld.entryCount = 4;
+        bgld.entryCount = 5;
         bgld.entries = bge;
         bgl_ = wgpuDeviceCreateBindGroupLayout(device, &bgld);
         WGPUPipelineLayoutDescriptor playout{};
@@ -1046,6 +1092,25 @@ struct WgpuRhi::Impl {
             AURORA_LOG_ERROR("gpu-wgpu", "sampler creation failed");
             return false;
         }
+        // mip 三线性采样器：Linear min/mag + Linear mipmap，lodMaxClamp 取宽上限
+        //（32 覆盖任意 ≤4G 边长纹理；单级纹理 LOD 自动钳到 0，行为与 smp_linear 等价）。
+        {
+            WGPUSamplerDescriptor sd{};
+            sd.addressModeU = WGPUAddressMode_ClampToEdge;
+            sd.addressModeV = WGPUAddressMode_ClampToEdge;
+            sd.addressModeW = WGPUAddressMode_ClampToEdge;
+            sd.magFilter = WGPUFilterMode_Linear;
+            sd.minFilter = WGPUFilterMode_Linear;
+            sd.mipmapFilter = WGPUMipmapFilterMode_Linear;
+            sd.lodMinClamp = 0.0F;
+            sd.lodMaxClamp = 32.0F;
+            sd.maxAnisotropy = 1;
+            samp_mip_ = wgpuDeviceCreateSampler(device, &sd);
+            if (samp_mip_ == nullptr) {
+                AURORA_LOG_ERROR("gpu-wgpu", "mip sampler creation failed");
+                return false;
+            }
+        }
         dummy_ = make_tex(1, 1, WGPUTextureFormat_RGBA8Unorm, WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst);
         if (dummy_.tex == nullptr) {
             AURORA_LOG_ERROR("gpu-wgpu", "dummy texture creation failed");
@@ -1053,7 +1118,47 @@ struct WgpuRhi::Impl {
         }
         static const std::uint8_t zeros[4] = {0, 0, 0, 0};
         write_tex_sub(dummy_, 0, 0, 1, 1, zeros, 0, 4);
+        ensure_compute_pipeline();
         return ensure_pipelines();
+    }
+
+    // compute mip 链管线（capabilities().compute 的兑现路径）：仅 compute_cap 时创建；
+    // 失败不致命——降级 compute_cap=false（能力位如实上报，图像回单级线性采样）。
+    auto ensure_compute_pipeline() -> void {
+        if (!compute_cap || pipe_mip_ != nullptr) {
+            return;
+        }
+        WGPUBindGroupLayoutEntry bge[2] = {};
+        bge[0].binding = 5;
+        bge[0].visibility = WGPUShaderStage_Compute;
+        bge[0].texture.sampleType = WGPUTextureSampleType_Float;
+        bge[0].texture.viewDimension = WGPUTextureViewDimension_2D;
+        bge[1].binding = 6;
+        bge[1].visibility = WGPUShaderStage_Compute;
+        bge[1].storageTexture.access = WGPUStorageTextureAccess_WriteOnly;
+        bge[1].storageTexture.format = WGPUTextureFormat_RGBA8Unorm;
+        bge[1].storageTexture.viewDimension = WGPUTextureViewDimension_2D;
+        WGPUBindGroupLayoutDescriptor bgld{};
+        bgld.entryCount = 2;
+        bgld.entries = bge;
+        bgl_mip_ = wgpuDeviceCreateBindGroupLayout(device, &bgld);
+        WGPUPipelineLayoutDescriptor playout{};
+        playout.bindGroupLayoutCount = 1;
+        playout.bindGroupLayouts = &bgl_mip_;
+        pipeline_layout_mip_ = wgpuDeviceCreatePipelineLayout(device, &playout);
+        WGPUComputeState cs{};
+        cs.module = shader_;
+        cs.entryPoint = sv("cs_mip");
+        WGPUComputePipelineDescriptor cpd{};
+        cpd.layout = pipeline_layout_mip_;
+        cpd.compute = cs;
+        pipe_mip_ = wgpuDeviceCreateComputePipeline(device, &cpd);
+        if (pipe_mip_ == nullptr) {
+            AURORA_LOG_WARN("gpu-wgpu", "compute pipeline creation failed; compute capability downgraded");
+            AURORA_WGPU_RELEASE(pipeline_layout_mip_, wgpuPipelineLayoutRelease)
+            AURORA_WGPU_RELEASE(bgl_mip_, wgpuBindGroupLayoutRelease)
+            compute_cap = false;
+        }
     }
 
     // 13 管线 × 2 采样数集（目标恒 RGBA8Unorm：画布/层/alt 全部离屏纹理；present 独立）。
@@ -1389,15 +1494,15 @@ struct WgpuRhi::Impl {
 
     // ---- 图像纹理缓存（键 = content_hash ^ 维度混列；PMA 上传，LINEAR 空间插值）----
 
-    [[nodiscard]] auto acquire_image_tex(const Image &img) -> WGPUTextureView {
+    [[nodiscard]] auto acquire_image_tex(const Image &img) -> ImageTexEntry * {
         std::uint64_t hash = img.content_hash();
         hash ^= static_cast<std::uint64_t>(img.width);
         hash *= 1099511628211ULL;
         hash ^= static_cast<std::uint64_t>(img.height);
         hash *= 1099511628211ULL;
-        for (const ImageTexEntry &e : image_cache) {
+        for (ImageTexEntry &e : image_cache) {
             if (e.hash == hash && e.width == img.width && e.height == img.height) {
-                return e.tex.view;
+                return &e;
             }
         }
         if (image_cache.size() >= kImageCacheCap) {
@@ -1421,15 +1526,87 @@ struct WgpuRhi::Impl {
         e.hash = hash;
         e.width = img.width;
         e.height = img.height;
+        // compute mip 链（大图降采样质量）：≥4 边长才有 ≥2 级收益；GLES 后端 compute_cap
+        // false → 单级纹理 + 原线性采样，行为与既有一致。
+        const int max_dim = std::max(img.width, img.height);
+        if (compute_cap && max_dim >= 4) {
+            e.mip_levels = 1;
+            for (int d = max_dim; d > 1; d >>= 1) {
+                e.mip_levels++;
+            }
+            e.mips_pending = true;
+        }
         e.tex = make_tex(img.width, img.height, WGPUTextureFormat_RGBA8Unorm,
-                         WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst);
+                         WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst |
+                             (e.mip_levels > 1 ? WGPUTextureUsage_StorageBinding : static_cast<WGPUTextureUsage>(0)),
+                         1, static_cast<std::uint32_t>(e.mip_levels));
         if (e.tex.tex == nullptr) {
             AURORA_LOG_WARN("gpu-wgpu", "image texture alloc failed");
             return nullptr;
         }
         write_tex_sub(e.tex, 0, 0, img.width, img.height, pma.data(), 0, 4);
         image_cache.push_back(std::move(e));
-        return image_cache.back().tex.view;
+        return &image_cache.back();
+    }
+
+    /// @brief compute 生成 mip 1..levels-1（每级一条 compute pass，读上一级 storage 写下一级）。
+    /// 调用契约：`encoder` 打开、无活动 render pass（同 canvas_blur 的 close 纪律）；
+    /// 同帧 queueWriteTexture 的 mip0 在本 submit 生效前写入，compute 读它安全（文件头
+    /// 「queue 写先于 submit」既定口径）。
+    void generate_mips(const Tex &t, int levels) {
+        if (pipe_mip_ == nullptr || t.tex == nullptr || encoder == nullptr) {
+            return;
+        }
+        for (int l = 1; l < levels; ++l) {
+            WGPUTextureViewDescriptor vsrc{};
+            vsrc.format = WGPUTextureFormat_RGBA8Unorm;
+            vsrc.dimension = WGPUTextureViewDimension_2D;
+            vsrc.baseMipLevel = static_cast<std::uint32_t>(l - 1);
+            vsrc.mipLevelCount = 1;
+            // ⚠️ 零初始化 arrayLayerCount 会被 v29 判 invalid（panic 不可 unwind）：显式 1 层。
+            vsrc.arrayLayerCount = 1;
+            vsrc.aspect = WGPUTextureAspect_All;
+            WGPUTextureView src = wgpuTextureCreateView(t.tex, &vsrc);
+            WGPUTextureViewDescriptor vdst = vsrc;
+            vdst.baseMipLevel = static_cast<std::uint32_t>(l);
+            WGPUTextureView dst = wgpuTextureCreateView(t.tex, &vdst);
+            if (src == nullptr || dst == nullptr) {
+                if (src != nullptr) {
+                    wgpuTextureViewRelease(src);
+                }
+                if (dst != nullptr) {
+                    wgpuTextureViewRelease(dst);
+                }
+                return;
+            }
+            WGPUBindGroupEntry entries[2] = {};
+            entries[0].binding = 5;
+            entries[0].textureView = src;
+            entries[1].binding = 6;
+            entries[1].textureView = dst;
+            WGPUBindGroupDescriptor bgd{};
+            bgd.layout = bgl_mip_;
+            bgd.entryCount = 2;
+            bgd.entries = entries;
+            WGPUBindGroup bg = wgpuDeviceCreateBindGroup(device, &bgd);
+            WGPUComputePassDescriptor cpd{};
+            WGPUComputePassEncoder cp = wgpuCommandEncoderBeginComputePass(encoder, &cpd);
+            if (cp != nullptr) {
+                wgpuComputePassEncoderSetPipeline(cp, pipe_mip_);
+                wgpuComputePassEncoderSetBindGroup(cp, 0, bg, 0, nullptr);
+                const int dw = std::max(1, t.width >> l);
+                const int dh = std::max(1, t.height >> l);
+                wgpuComputePassEncoderDispatchWorkgroups(cp, static_cast<std::uint32_t>((dw + 7) / 8),
+                                                         static_cast<std::uint32_t>((dh + 7) / 8), 1);
+                wgpuComputePassEncoderEnd(cp);
+                wgpuComputePassEncoderRelease(cp);
+            }
+            if (bg != nullptr) {
+                wgpuBindGroupRelease(bg);
+            }
+            wgpuTextureViewRelease(src);
+            wgpuTextureViewRelease(dst);
+        }
     }
 
     // ---- GPU 字形图集（多页 R8 架式打包 + LRU 页淘汰，策略同 GL 路径）----
@@ -1696,7 +1873,7 @@ struct WgpuRhi::Impl {
         ustage.insert(ustage.end(), gb, gb + sizeof(Globals));
         wgpuQueueWriteBuffer(queue, uniform_buf, uoff, &gu, sizeof(Globals));
 
-        WGPUBindGroupEntry entries[4] = {};
+        WGPUBindGroupEntry entries[5] = {};
         entries[0].binding = 0;
         entries[0].buffer = uniform_buf;
         entries[0].offset = uoff;
@@ -1707,9 +1884,11 @@ struct WgpuRhi::Impl {
         entries[2].sampler = samp_point_;
         entries[3].binding = 3;
         entries[3].sampler = samp_linear_;
+        entries[4].binding = 4;
+        entries[4].sampler = samp_mip_;
         WGPUBindGroupDescriptor bgd{};
         bgd.layout = bgl_;
-        bgd.entryCount = 4;
+        bgd.entryCount = 5;
         bgd.entries = entries;
         *bg_out = wgpuDeviceCreateBindGroup(device, &bgd);
         *uoff_out = uoff;
@@ -1839,6 +2018,7 @@ struct WgpuRhi::Impl {
             case kBaseImage:
                 gu.tex_ctl[0] = bk.pma_in_shader ? 1.0F : 0.0F;
                 gu.tex_ctl[1] = bk.nearest_filter ? 1.0F : 0.0F;
+                gu.tex_ctl[2] = bk.use_mip ? 1.0F : 0.0F;
                 break;
             default:
                 break;
@@ -2430,15 +2610,25 @@ struct WgpuRhi::Impl {
                               bake_alpha(Color{255, 255, 255, 255}, alpha));
                     break;
                 }
-                const WGPUTextureView tex = acquire_image_tex(img);
-                if (tex == nullptr) {
+                ImageTexEntry *entry = acquire_image_tex(img);
+                if (entry == nullptr) {
                     break;
+                }
+                // 静态大图首用：compute 生成整条 mip 链（需无开场 render pass，故先落批、
+                // 关 pass，生成后再重开目标 pass 继续本帧绘制）。
+                if (entry->mips_pending) {
+                    flush_batch();
+                    close_pass();
+                    generate_mips(entry->tex, entry->mip_levels);
+                    entry->mips_pending = false;
+                    (void)ensure_target_pass();
                 }
                 BatchKey k{};
                 k.pipeline = kBaseImage;
                 k.clip = effective_clip();
                 k.blend_pma = true;
-                k.view = tex;
+                k.use_mip = entry->mip_levels > 1;
+                k.view = entry->tex.view;
                 begin_batch(k);
                 // 片元色取自 PMA 纹理；顶点色只承载全局 alpha（uv 0..1 全图映射）。
                 push_quad(cmd.bounds.origin.x, cmd.bounds.origin.y, cmd.bounds.origin.x + cmd.bounds.size.width,
@@ -2634,8 +2824,8 @@ struct WgpuRhi::Impl {
                     < static_cast<std::uint64_t>(img.width) * static_cast<std::uint64_t>(img.height) * 4U) {
                     break;
                 }
-                const WGPUTextureView tex = acquire_image_tex(img);
-                if (tex == nullptr) {
+                ImageTexEntry *entry = acquire_image_tex(img);
+                if (entry == nullptr) {
                     break;
                 }
                 const Matrix2D identity{};
@@ -2647,7 +2837,7 @@ struct WgpuRhi::Impl {
                 k.pipeline = kBaseImage;
                 k.clip = effective_clip();
                 k.blend_pma = true;
-                k.view = tex;
+                k.view = entry->tex.view;
                 k.nearest_filter = true;
                 begin_batch(k);
                 const Point c0 = mat.apply_to_point(Point{.x = 0.0F, .y = 0.0F});

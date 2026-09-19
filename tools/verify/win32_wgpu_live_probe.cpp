@@ -12,7 +12,9 @@
 //      read_pixels 逐版本核对——证明真实 queueWriteTexture 上传 + 采样生效。
 //   4. 层缓存持久性：BeginLayer+内容+EndLayer+DrawLayer 冷帧与「仅 DrawLayer」暖帧读回
 //      像素一致——证明跨帧常驻层纹理存续且 draw_layer 路径生效。
-//   5. 平台 present 链路：真实窗口多帧 present_root（色块网格 + Text + 流式「视频」），
+//   5. compute mip 链（离屏直驱）：64×64 逐纹素棋盘 4× 缩小绘制读回均值色——证明 cs_mip
+//      生成的整条 mip 链与三线性采样生效（adapter 无 compute 时该段 SKIP）。
+//   6. 平台 present 链路：真实窗口多帧 present_root（色块网格 + Text + 流式「视频」），
 //      frame_count 增长且 gpu_active() 保持为真（未永久回退软件路径）。
 // 人工段（--interactive）：常驻窗口，流式「视频」与旋转层缓存网格并存，目视确认无花屏/
 //   撕裂/错位。退出码：0 全过；1 自动断言失败；2 环境不可用（无显示 / 无 adapter /
@@ -260,6 +262,47 @@ auto main(int argc, char **argv) -> int {
     check(s_cold_in[1] > 140 && s_cold_in[0] < 90, "层缓存冷帧层内为绿（BeginLayer+内容+DrawLayer）");
     check(s_warm_in[1] > 140 && s_warm_in[0] < 90, "层缓存稳态帧层内仍为绿（仅 DrawLayer 命中常驻层）");
     check(s_cold_in == s_warm_in, "冷帧与稳态帧层内像素一致（跨帧持久性）");
+
+    // compute mip 链（大图降采样质量）：64×64 逐纹素红/绿棋盘 4× 缩小绘制——三线性命中
+    // 均匀 mip≥1，整块为均值色 (120,120,20)；lod0 走样则是逐像素红/绿交替端点色。
+    {
+        aurora::Image board;
+        board.width = 64;
+        board.height = 64;
+        board.pixels.resize(static_cast<std::size_t>(64) * 64U * 4U);
+        for (int y = 0; y < 64; ++y) {
+            for (int x = 0; x < 64; ++x) {
+                const std::size_t idx = (static_cast<std::size_t>(y) * 64U + static_cast<std::size_t>(x)) * 4U;
+                const bool hi = ((x ^ y) & 1) == 0;
+                board.pixels[idx + 0] = static_cast<std::uint8_t>(hi ? 220 : 20);
+                board.pixels[idx + 1] = static_cast<std::uint8_t>(hi ? 20 : 220);
+                board.pixels[idx + 2] = 20;
+                board.pixels[idx + 3] = 255;
+            }
+        }
+        aurora::DisplayList dl;
+        aurora::Painter p;
+        p.begin(64, 64);
+        p.record(dl);
+        p.draw_image(board, aurora::Rect{.origin = aurora::Point{.x = 8.0F, .y = 8.0F},
+                                         .size = aurora::Size{.width = 16.0F, .height = 16.0F}});
+        p.stop();
+        (void)offscreen.begin_frame(64, 64, 1.0F);
+        dl.replay(offscreen.backend());
+        offscreen.end_frame();
+        std::vector<std::uint8_t> px;
+        (void)offscreen.read_pixels(px);
+        if (offscreen.capabilities().compute) {
+            const auto m1 = sample(px, 64, 12, 12);
+            const auto m2 = sample(px, 64, 20, 15);
+            const auto is_mean = [](const std::array<int, 3> &c) {
+                return c[0] > 106 && c[0] < 134 && c[1] > 106 && c[1] < 134 && c[2] > 6 && c[2] < 34;
+            };
+            check(is_mean(m1) && is_mean(m2), "大图 4× 降采样为 mip 均值色 (120,120,20)（compute mip 链 + 三线性）");
+        } else {
+            emit("[SKIP] adapter 无 compute（GLES 兜底端），mip 采样断言跳过");
+        }
+    }
 
     // ---- 平台 present 链路（真实窗口多帧上屏，含文本与流式图像）----
     // 控件用独立 stream key（与离屏段的 key 7 互不干扰）。

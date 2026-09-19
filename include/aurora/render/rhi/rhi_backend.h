@@ -23,7 +23,7 @@ using StreamImageId = std::uint64_t;
 struct RhiCapabilities {
     bool gpu = false;                   ///< 硬件加速命令消费（GPU 后端为 true）
     bool native_surface_import = false; ///< 可导入平台原生 GPU 表面（`import_native_surface` 可用）
-    bool compute = false;               ///< 支持 compute 内部加速（blur / mask / 重采样 / 层合成）
+    bool compute = false;               ///< 支持 compute 内部加速（当前兑现：大图重采样 mip 链生成；blur / mask / 层合成仍走片元路）
 };
 
 /// @brief 一条绘制命令所需的**变长数据**，由 `DisplayList` 在回放时把池下标解析为只读指针。

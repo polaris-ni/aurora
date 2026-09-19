@@ -4,7 +4,8 @@
 /// 离屏真实设备帧生命周期——非法尺寸拒绝、begin 零基底、命令流（fill/clip/clear）回放后
 /// read_pixels 像素断言（精确色与透明零基底）、stats 逐帧复位且 skipped_cmds 恒零；
 /// 流式纹理槽（acquire 键稳定 / update 不抛 / release 幂等）与 import_native_surface
-/// 恒 0 回退契约（wgpu-native v29 无外部共享纹理导入入口）。
+/// 恒 0 回退契约（wgpu-native v29 无外部共享纹理导入入口）；compute mip 链——64×64
+/// 棋盘图 4× 降采样整块为均匀均值色（三线性命中 mip≥1），1:1 绘制仍是端点色（lod 0 无混）。
 /// 依赖 Vulkan/D3D12 adapter：无可用设备环境整体 SKIP（真实 GPU 断言不做假通过）。
 
 #include <array>
@@ -30,6 +31,34 @@ auto make_fill(Rect bounds, Color color) -> DrawCmd {
     cmd.kind = CmdKind::FillRect;
     cmd.bounds = bounds;
     cmd.color = color;
+    return cmd;
+}
+
+// 64×64 单纹素红/绿棋盘：任一 2×2 块恒含 2A+2B → mip≥1 各级均为均匀均值色 (120,120,20)。
+// 4× 降采样三线性命中 mip2 → 整块均值；lod0 双线性则走样成红/绿逐像素交替。
+[[nodiscard]] auto make_checkerboard() -> Image {
+    Image img;
+    img.width = 64;
+    img.height = 64;
+    img.pixels.resize(static_cast<std::size_t>(64) * 64U * 4U);
+    for (int y = 0; y < 64; ++y) {
+        for (int x = 0; x < 64; ++x) {
+            const std::size_t idx = (static_cast<std::size_t>(y) * 64U + static_cast<std::size_t>(x)) * 4U;
+            const bool hi = ((x ^ y) & 1) == 0;
+            img.pixels[idx + 0] = hi ? 220 : 20;
+            img.pixels[idx + 1] = hi ? 20 : 220;
+            img.pixels[idx + 2] = 20;
+            img.pixels[idx + 3] = 255;
+        }
+    }
+    return img;
+}
+
+auto make_draw_image(Rect bounds, const Image &img, DisplayList &dl) -> DrawCmd {
+    DrawCmd cmd;
+    cmd.kind = CmdKind::DrawImage;
+    cmd.bounds = bounds;
+    cmd.image_idx = dl.add_image(img);
     return cmd;
 }
 
@@ -177,6 +206,56 @@ AURORA_TEST_CASE(wgpu_stream_image_and_native_import_contract) {
     AURORA_TEST_CHECK_TRUE(backend->capabilities().gpu);
 }
 
+AURORA_TEST_CASE(wgpu_compute_mip_downscale_sampling) {
+    rhi::WgpuRhi rhi_obj(offscreen(64, 64));
+    if (!rhi_obj.valid()) {
+        AURORA_TEST_SKIP("无可用 wgpu adapter/device，mip 采样断言跳过");
+    }
+    if (!rhi_obj.backend().capabilities().compute) {
+        AURORA_TEST_SKIP("adapter 无 compute（GLES 兜底端），mip 链不生成，采样保持 lod0 行为");
+    }
+    const Image board = make_checkerboard();
+
+    // 帧 1：64×64 棋盘缩到 16×16（4× 降采样，lod 恰为 2）——三线性命中均匀 mip，
+    // 块内像素应为均值色 (120,120,20)；容差 ±14 吸收跨驱动 LOD 抖动与边界 AA 余量。
+    AURORA_TEST_REQUIRE(rhi_obj.begin_frame(64, 64, 1.0F));
+    DisplayList down;
+    down.push_cmd(make_draw_image(
+        Rect{.origin = Point{.x = 8.0F, .y = 8.0F}, .size = Size{.width = 16.0F, .height = 16.0F}}, board, down));
+    down.replay(rhi_obj.backend());
+    rhi_obj.end_frame();
+    std::vector<std::uint8_t> px;
+    AURORA_TEST_REQUIRE(rhi_obj.read_pixels(px));
+    for (int y = 11; y <= 20; ++y) {
+        for (int x = 11; x <= 20; ++x) {
+            const auto c = pixel_at(px, 64, x, y);
+            AURORA_TEST_CHECK(c[0] > 106 && c[0] < 134);  // r ≈ 120（远离端点 220/20）
+            AURORA_TEST_CHECK(c[1] > 106 && c[1] < 134);  // g ≈ 120
+            AURORA_TEST_CHECK(c[2] > 6 && c[2] < 34);     // b ≈ 20
+            AURORA_TEST_CHECK_EQ(c[3], 255);
+        }
+    }
+
+    // 帧 2：同图 1:1 绘制——lod 0 仍取原始纹素（端点色），证明 mip 采样不破坏放大/等大。
+    AURORA_TEST_REQUIRE(rhi_obj.begin_frame(64, 64, 1.0F));
+    DisplayList full;
+    full.push_cmd(make_draw_image(
+        Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 64.0F}}, board, full));
+    full.replay(rhi_obj.backend());
+    rhi_obj.end_frame();
+    std::vector<std::uint8_t> px2;
+    AURORA_TEST_REQUIRE(rhi_obj.read_pixels(px2));
+    for (int y = 4; y <= 60; y += 8) {
+        for (int x = 4; x <= 60; x += 8) {
+            const auto c = pixel_at(px2, 64, x, y);
+            const bool hi = ((x ^ y) & 1) == 0;  // 与 make_checkerboard 同式
+            AURORA_TEST_CHECK_EQ(c[0], hi ? 220 : 20);
+            AURORA_TEST_CHECK_EQ(c[1], hi ? 20 : 220);
+            AURORA_TEST_CHECK_EQ(c[2], 20);
+        }
+    }
+}
+
 }  // namespace aurora::test_cases::utest_wgpu_rhi
 
 #else  // !AURORA_BACKEND_GPU_WGPU
@@ -190,6 +269,9 @@ AURORA_TEST_CASE(wgpu_offscreen_frame_lifecycle_and_pixels) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
 }
 AURORA_TEST_CASE(wgpu_stream_image_and_native_import_contract) {
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
+}
+AURORA_TEST_CASE(wgpu_compute_mip_downscale_sampling) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
 }
 
