@@ -225,6 +225,8 @@ compute_wait_timeout(has_dirty, anim_active, next_deadline_ms, frame_budget_ms, 
 
 **最大化白闪处理**：`Surface` 提供 `set_present_request` 回调通道（默认空实现），`Window` 构造时把该回调接为「对当前缓存根再渲染一帧」；`Win32Surface` 的 `WM_SIZE` / `WM_PAINT` 在几何变化当下同步调用该回调，使离屏缓冲在 DWM 合成前已为新尺寸真实内容。浅灰刷保留作兜底。`present_count()` 观测器供测试验证「WM_SIZE 触发了同步重渲染」。
 
+**系统重绘 × GPU 帧路径**（`Window::evaluate_dirty_plan` 的 `system_redraw_` 分支）：该请求落在「无脏、无布局脏、尺寸未变」的 idle 判定时，软件后端只需全量 blit 兜底（`set_present_dirty({})` → `present()`，GPU 无关）；但 **GPU 栅格生效期间** `present()` 上屏的是 `Painter` 软件缓冲，而该缓冲在 GPU 模式下只铺底色、从不含控件像素——裸 `present()` 等于闪一屏空白（白闪缺陷的真因）。故此时改为 `dirty_.mark_all()` 落回正常渲染决策，走完整的「重录帧 DL → `replay` → `sink.end_frame`」；`is_full` 已保证无裁剪、全量上屏。已永久回退（`gpu_fallback_`）的后端维持裸 `present()` 兜底。观测签名：各 wgpu 宿主的 `software_present_count()` 在 GPU 生效期间恒 0（`utest_window` 两例分别锁「GPU 生效时重渲染而非裸 present」与「回退后维持裸 blit」）。
+
 **关窗语义（多窗口）**：`WM_DESTROY` 只置位**本窗口**的 `should_close`，**不再** `PostQuitMessage(0)`——`WM_QUIT` 是**线程级**的，任一窗口销毁都投递它，会让同线程内所有窗口（乃至之后新建的窗口）在首次 poll 时被误判为「已请求关闭」，这是「关一个窗口整个应用退出」与「顺序创建多窗口立即退出」的根因。是否退出帧循环改由 `Application` 的 `ExitPolicy` 决定（§2.4）；外部/宿主代码主动 `PostQuitMessage` 时，`poll_platform_events` 仍按历史行为把 `WM_QUIT` 折算为关闭请求。
 
 ### 3.5 硬件加速上屏偏好

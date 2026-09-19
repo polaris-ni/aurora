@@ -3,10 +3,13 @@
 ///           + src/aurora/window/window_factory.cpp
 /// 测试说明: wgpu GPU 栅格真实窗口 smoke——create_window(WgpuOptions) 开窗后经
 ///           Window::present_root 帧调度连续出帧（gpu_backend 标识 "gpu-wgpu"、
-///           gpu_active 恒真不回退、frame_count 递增）；RendererPreference::GpuWgpu
+///           gpu_active 恒真不回退、frame_count 递增、software_present_count 恒 0
+///           ——含开窗初期系统重绘突发，该计数非零即「app 帧绕过 GPU 通道上屏软件缓冲」
+///           的白闪签名）；RendererPreference::GpuWgpu
 ///           经平台宿主选项（Win32Options/X11Options/WaylandOptions）强制路由（不可用
-///           时报 RendererUnavailable 不静默降级）。宿主类型按编译口径别名切换（与
-///           工厂择一序 Win32 → X11 → Wayland 同序）。
+///           时报 RendererUnavailable 不静默降级）；Wayland 侧另有强制 `ClientSide` 装饰
+///           的用例，把「自绘 CSD 装饰回放进 GPU 帧」锁成逐帧递增的确定断言。宿主类型按
+///           编译口径别名切换（与工厂择一序 Win32 → X11 → Wayland 同序）。
 ///           依赖桌面会话（HWND/X Display/Wayland compositor）+ wgpu adapter，任一缺失 SKIP。
 
 #include <chrono>
@@ -58,14 +61,19 @@ AURORA_TEST_CASE(wgpu_surface_present_frames_and_no_fallback) {
     AURORA_TEST_REQUIRE(sink != nullptr);
     AURORA_TEST_CHECK_EQ(sink->name(), std::string_view("gpu-wgpu"));
 
+    auto *ws = dynamic_cast<HostWgpuSurface *>(&surface);
+    AURORA_TEST_REQUIRE(ws != nullptr);
+
     au::Node page = au::Text{au::TextProps{.content = au::LocalizedString{"Wgpu Aa 01"}}};
-    // 开窗后的首批 map/configure/expose 事件会触发宿主「同步重绘」（present_request_ → 额外
-    // 一次 present），属真实窗口语义而非回退；先短 settle 泵掉该突发，保持下方逐帧帧数口径
-    // 为精确相等。
+    // 开窗后的首批 map/configure/expose 事件会触发宿主「同步重绘」（present_request_ → 对缓存
+    // 根再渲染一帧），属真实窗口语义而非回退；先短 settle 泵掉该突发，保持下方逐帧帧数口径为
+    // 精确相等。该路径若绕过 GPU 帧通道直接 present()，软件缓冲上屏即白闪——故此处一并断言
+    // 软件上屏帧数为 0（各宿主 software_present_count 的口径）。
     for (int k = 0; k < 5; ++k) {
         surface.poll_platform_events();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+    AURORA_TEST_CHECK_EQ(ws->software_present_count(), 0);
     const int base = surface.frame_count();
     for (int i = 1; i <= 3; ++i) {
         win->force_full_redraw();  // 绕过 idle 跳帧：逐帧走完整 GPU begin→replay→end→present
@@ -75,9 +83,8 @@ AURORA_TEST_CASE(wgpu_surface_present_frames_and_no_fallback) {
         surface.poll_platform_events();
     }
     // 全程无运行期失效（sink.begin_frame 恒成功 → 不触发永久软件回退）。
-    auto *ws = dynamic_cast<HostWgpuSurface *>(&surface);
-    AURORA_TEST_REQUIRE(ws != nullptr);
     AURORA_TEST_CHECK_TRUE(ws->gpu_active());
+    AURORA_TEST_CHECK_EQ(ws->software_present_count(), 0);
 }
 
 AURORA_TEST_CASE(gpu_wgpu_preference_routing) {
@@ -127,11 +134,13 @@ AURORA_TEST_CASE(wayland_host_gpu_routing_and_frames) {
     AURORA_TEST_CHECK_EQ(sink->name(), std::string_view("gpu-wgpu"));
 
     au::Node page = au::Text{au::TextProps{.content = au::LocalizedString{"Wgpu Wayland Aa 01"}}};
-    // 同首用例口径：泵掉 map/configure 触发的同步重绘突发，保持逐帧帧数精确相等。
+    // 同首用例口径：泵掉 map/configure 触发的同步重绘突发（该路径必须走 GPU 帧通道，不得以
+    // 软件 wl_shm 帧兜底），保持逐帧帧数精确相等。
     for (int k = 0; k < 5; ++k) {
         ws->poll_platform_events();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+    AURORA_TEST_CHECK_EQ(ws->software_present_count(), 0);
     const int base = ws->frame_count();
     for (int i = 1; i <= 3; ++i) {
         win->force_full_redraw();
@@ -141,9 +150,58 @@ AURORA_TEST_CASE(wayland_host_gpu_routing_and_frames) {
         ws->poll_platform_events();
     }
     AURORA_TEST_CHECK_TRUE(ws->gpu_active());
+    AURORA_TEST_CHECK_EQ(ws->software_present_count(), 0);
+    // CSD 装饰合成进 GPU 帧：SSD 合成器（Weston/KDE 等）下内嵌宿主不绘装饰、恒 0；
+    // CSD 兜底合成器（GNOME 等）下逐帧递增（settle 突发与 3 帧已保证 ≥ 总帧数 - 1）。
+    // 两态皆符合契约，故只锁「非 0 即覆盖几乎全部呈现帧」，不锁具体值。
+    const int deco = ws->decoration_replay_count();
+    AURORA_TEST_CHECK_TRUE(deco == 0 || deco >= ws->frame_count() - 3);
+}
+
+// CSD 装饰合成进 GPU 帧的确定性验证：上方用例在 SSD 合成器（Weston/KDE）下只会命中
+// `deco == 0` 分支，「装饰合成进 GPU 帧」这条实路径拿不到真机证据。本用例按规格 §4.1
+// 强制 `DecorationPolicy::ClientSide`（即便合成器支持 SSD 也自绘），于是安全区 top 必为
+// 标题栏高、每帧 `Sink::end_frame` 必录放一份装饰 → decoration_replay_count 逐帧递增。
+AURORA_TEST_CASE(wayland_csd_decoration_replays_into_gpu_frame) {
+    au::WaylandOptions opts;
+    opts.size = au::Size{.width = 320.0F, .height = 240.0F};
+    opts.title = "itest_wgpu_wayland_csd";
+    opts.renderer = au::RendererPreference::GpuWgpu;
+    opts.style.decoration = au::DecorationPolicy::ClientSide;
+    auto created = au::create_window(opts);
+    if (!created) {
+        AURORA_TEST_CHECK_EQ(created.error().code, std::string{"renderer-unavailable"});
+        AURORA_TEST_SKIP("无 Wayland 会话或无 wgpu adapter，CSD 装饰合成无实例可验");
+    }
+    auto win = std::move(created.value());
+    auto *ws = dynamic_cast<au::WgpuWaylandSurface *>(&win->surface());
+    AURORA_TEST_REQUIRE(ws != nullptr);
+    // 强制 CSD 确实生效的判据（否则下方「装饰回放递增」会因 csd_title=false 恒 0 而空转）。
+    AURORA_TEST_CHECK_GT(ws->content_inset().top, 0.0F);
+
+    au::Node page = au::Text{au::TextProps{.content = au::LocalizedString{"Wgpu CSD Aa 01"}}};
+    for (int k = 0; k < 5; ++k) {
+        ws->poll_platform_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    AURORA_TEST_CHECK_EQ(ws->software_present_count(), 0);
+    const int deco_base = ws->decoration_replay_count();
+    for (int i = 1; i <= 3; ++i) {
+        win->force_full_redraw();
+        const auto r = win->present_root(page);
+        AURORA_TEST_CHECK(static_cast<bool>(r));
+        ws->poll_platform_events();
+    }
+    // 每帧一份装饰回放（settle 泵期间若另有呈现帧则只多不少，故取下界）。
+    AURORA_TEST_CHECK_GE(ws->decoration_replay_count(), deco_base + 3);
+    AURORA_TEST_CHECK_TRUE(ws->gpu_active());
+    AURORA_TEST_CHECK_EQ(ws->software_present_count(), 0);
 }
 #else
 AURORA_TEST_CASE(wayland_host_gpu_routing_and_frames) {
+    AURORA_TEST_SKIP("AURORA_BACKEND_WAYLAND 未开启，Wayland GPU 宿主整体被宏剔除");
+}
+AURORA_TEST_CASE(wayland_csd_decoration_replays_into_gpu_frame) {
     AURORA_TEST_SKIP("AURORA_BACKEND_WAYLAND 未开启，Wayland GPU 宿主整体被宏剔除");
 }
 #endif

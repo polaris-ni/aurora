@@ -751,14 +751,22 @@ class Window {
         }
         // 无绘制脏、无布局脏、尺寸未变、根未变 → 整帧跳过（上帧画面仍有效）
         if (!first_frame_ && dirty_.is_empty() && !layout_dirty_ && !size_changed) {
+            if (!system_redraw_) {
+                idle_frame_ = true;  // 标记 idle 帧：无脏区、未做任何渲染
+                return Result<bool>{true};
+            }
             // 系统要求重绘时不能只跳过：帧缓冲内容仍有效，但窗口表面已被 OS 置为
-            // 无效（最小化还原后为类背景刷底色）——须全量 blit 重新上屏，否则白屏。
-            if (system_redraw_) {
+            // 无效（最小化还原后为类背景刷底色）——须重新上屏，否则白屏。
+            if (surface_->gpu_backend() != nullptr && !gpu_fallback_) {
+                // GPU 帧路径下 `present()` 上屏的是软件缓冲——而 GPU 模式 Painter 帧缓冲只铺
+                // 底色、从无控件像素，直接 present 等于闪一屏空白。故标全脏落回下方正常渲染
+                // 决策（本帧不再 idle），走完整的「重录帧 DL → replay → sink.end_frame」；
+                // is_full 已保证无裁剪、全量上屏。
+                dirty_.mark_all();
+            } else {
                 surface_->set_present_dirty({});  // 空向量 = 全量 blit（不残留旧增量脏区）
                 return present();
             }
-            idle_frame_ = true;  // 标记 idle 帧：无脏区、未做任何渲染
-            return Result<bool>{true};
         }
         // 布局决策：首帧、布局脏或尺寸变化时必须重排；否则复用上帧 Node 几何仅重绘。
         plan.do_layout = first_frame_ || layout_dirty_ || size_changed || !dirty_boundaries_.empty();

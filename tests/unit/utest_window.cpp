@@ -2,12 +2,15 @@
 /// 目标单元: include/aurora/window/window.h
 /// 测试说明: 覆盖 Window 纯逻辑路径——WindowOptions/HeadlessOptions 默认值不变量、
 /// 标题/尺寸/装饰内边距与帧生命周期向 Surface 的转发、程序化窗口控制、
-/// 脏追踪开关语义、HUD 叠加层槽位、run 帧数上限与空 Surface 工厂拒绝
+/// 脏追踪开关语义、HUD 叠加层槽位、run 帧数上限与空 Surface 工厂拒绝；
+/// 另以计数型 RhiFrameSink 桩锁定「系统重绘请求在 GPU 帧路径下重渲染而非裸 present」
 
 #include <memory>
 #include <optional>
 #include <string>
 
+#include "aurora/render/rhi/rhi_backend.h"
+#include "aurora/render/rhi/rhi_frame_sink.h"
 #include "aurora/widget/spacer.h"
 #include "aurora/window/window.h"
 #include "framework/aurora_test.h"
@@ -65,6 +68,79 @@ class RecordingSurface final : public Surface {
 
   private:
     Painter painter_;
+};
+
+/// @brief 计数型命令面桩：证明帧 DL（含系统重绘帧）确实回放到了 GPU 侧而非软件侧。
+class CountingRhi final : public rhi::RhiBackend {
+  public:
+    int submits = 0;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes) 测试替身记录成员
+
+    [[nodiscard]] auto name() const -> std::string_view override { return "gpu-stub"; }
+    auto submit(const DrawCmd & /*cmd*/, const rhi::CmdData & /*data*/) -> void override { ++submits; }
+};
+
+/// @brief 计数型 GPU 帧调度桩：`begin_frame` 可切换成败，以覆盖「GPU 生效」与「永久回退」两分支。
+class CountingSink final : public rhi::RhiFrameSink {
+  public:
+    int begin_calls = 0;  // NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes)
+    int end_calls = 0;
+    bool begin_ok = true;  // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
+
+    [[nodiscard]] auto name() const -> std::string_view override { return "gpu-stub"; }
+    [[nodiscard]] auto backend() -> rhi::RhiBackend & override { return rhi_; }
+    [[nodiscard]] auto begin_frame(int /*device_width*/, int /*device_height*/, float /*scale*/) -> bool override {
+        ++begin_calls;
+        return begin_ok;
+    }
+    auto end_frame() -> void override { ++end_calls; }
+
+    /// @brief 已消费命令数（GPU 侧真正收到帧内容的证据）。
+    [[nodiscard]] auto rhi_submits() const -> int { return rhi_.submits; }
+
+  private:
+    CountingRhi rhi_;
+};
+
+/// @brief 带 GPU 帧挂点的 Surface 桩：软件路径仍留真实 Painter 缓冲，供 GPU 失效回退时回放。
+class GpuStubSurface final : public Surface {
+  public:
+    // 测试替身的记录成员需被测试体直接读写，刻意 public，不改私有。
+    // NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes)
+    int present_count = 0;
+    int painter_begin_calls = 0;
+    CountingSink sink_;
+    // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
+
+    [[nodiscard]] auto begin_frame(int width, int height) -> Result<bool> override {
+        ++painter_begin_calls;
+        painter_.begin(width, height);
+        return Result<bool>{true};
+    }
+    [[nodiscard]] auto painter() -> Painter & override { return painter_; }
+    [[nodiscard]] auto present() -> Result<bool> override {
+        ++present_count;
+        return Result<bool>{true};
+    }
+    [[nodiscard]] auto size() const -> Size override { return Size{.width = 320.0F, .height = 240.0F}; }
+    [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink * override { return &sink_; }
+
+    /// @brief 触发系统重绘请求：真实后端在 WM_PAINT / Wayland configure 同址调用本回调。
+    auto fire_present_request() -> void {
+        if (present_request_) {
+            present_request_();
+        }
+    }
+
+  private:
+    Painter painter_;
+};
+
+/// @brief 会真正产出绘制命令的根：`Spacer` 自身无绘制，帧 DL 会为空，无法区分命令去向。
+class FilledSpacer final : public Spacer {
+  protected:
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+        p.fill_rect(bounds, Color{0x11U, 0x22U, 0x33U, 0xFFU});
+    }
 };
 
 }  // namespace
@@ -237,6 +313,57 @@ AURORA_TEST_CASE(create_window_rejects_null_surface) {
     const auto result = create_window(std::unique_ptr<Surface>{});
     AURORA_TEST_CHECK_FALSE(result.ok());
     AURORA_TEST_CHECK_EQ(result.error().code_enum, ErrorCode::PlatformUnavailable);
+}
+
+AURORA_TEST_CASE(system_redraw_with_gpu_sink_re_renders_instead_of_bare_present) {
+    auto stub = std::make_unique<GpuStubSurface>();
+    GpuStubSurface &surf = *stub;
+    Window w{std::move(stub)};
+    Node page = FilledSpacer{};
+
+    // 首帧走 GPU 通道：录帧 DL → sink.begin_frame → replay → sink.end_frame → present。
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    CountingSink &sink = surf.sink_;
+    AURORA_TEST_CHECK_EQ(sink.begin_calls, 1);
+    AURORA_TEST_CHECK_EQ(sink.end_calls, 1);
+    AURORA_TEST_CHECK_GT(sink.rhi_submits(), 0);  // 命令确实进了 GPU 消费面
+    AURORA_TEST_CHECK_EQ(surf.present_count, 1);
+
+    // 同根、无脏、尺寸未变 → idle 跳帧（整帧跳过，不上屏）。
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_CHECK_TRUE(w.is_idle_frame());
+    AURORA_TEST_CHECK_EQ(sink.begin_calls, 1);
+    AURORA_TEST_CHECK_EQ(surf.present_count, 1);
+
+    // WM_PAINT 语义（尺寸未变且无脏）：GPU 模式下必须重渲染整帧。裸 present 上屏的是
+    // 软件缓冲，而 GPU 模式 Painter 缓冲只有底色、从无控件像素 —— 即白闪缺陷。
+    surf.fire_present_request();
+    AURORA_TEST_CHECK_EQ(sink.begin_calls, 2);
+    AURORA_TEST_CHECK_EQ(sink.end_calls, 2);
+    AURORA_TEST_CHECK_EQ(surf.present_count, 2);
+    AURORA_TEST_CHECK_FALSE(w.is_idle_frame());
+}
+
+AURORA_TEST_CASE(system_redraw_after_gpu_fallback_keeps_bare_present) {
+    auto stub = std::make_unique<GpuStubSurface>();
+    GpuStubSurface &surf = *stub;
+    surf.sink_.begin_ok = false;  // 首帧即判定 GPU 失效 → Window 永久回退软件路径
+    Window w{std::move(stub)};
+    Node page = FilledSpacer{};
+
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_CHECK_EQ(surf.sink_.begin_calls, 1);
+    AURORA_TEST_CHECK_EQ(surf.sink_.end_calls, 0);  // begin 失败 → 无 end_frame
+    AURORA_TEST_CHECK_EQ(surf.present_count, 1);
+
+    // 回退后软件帧缓冲持有真实控件像素，兜底全量 blit 即正确：不重渲染、不再触碰 GPU。
+    const int presents = surf.present_count;
+    const int begins = surf.painter_begin_calls;
+    surf.fire_present_request();
+    AURORA_TEST_CHECK_EQ(surf.present_count, presents + 1);
+    AURORA_TEST_CHECK_EQ(surf.painter_begin_calls, begins);
+    AURORA_TEST_CHECK_EQ(surf.sink_.begin_calls, 1);
+    AURORA_TEST_CHECK_EQ(surf.sink_.end_calls, 0);
 }
 
 }  // namespace aurora::test_cases::utest_window

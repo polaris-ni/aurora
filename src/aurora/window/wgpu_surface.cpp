@@ -106,6 +106,7 @@ auto WgpuSurface::present() -> Result<bool> {
     }
     present_gdi();
     ++frame_;
+    ++software_present_;  // GPU 生效期间本分支不应到达（见 software_present_count()）
     return Result<bool>{true};
 }
 

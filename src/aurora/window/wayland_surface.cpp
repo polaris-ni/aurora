@@ -22,6 +22,7 @@
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/window/cursor_map.h"
+#include "aurora/window/detail/title_bar_painter.h"
 #include "aurora/window/keysym_map.h"
 #include "aurora/window/swizzle.h"
 #include "aurora/window/window_state.h"
@@ -204,6 +205,10 @@ struct WaylandSurface::Impl {
         }
     }
     auto draw_decoration(Painter &p) const -> void;  ///< 自绘装饰：标题栏（csd_title）+ 边框（csd_border）
+    /// @brief 装配本帧装饰绘制状态（软件光栅与 GPU 录制两条路径共用的唯一装配点）。
+    [[nodiscard]] auto decoration_state() const -> csd::TitleBarPaintState;
+    /// @brief 装饰录制专用 Painter：不复用 `painter`——app 帧录制期间其录制栈非空，嵌套会污染帧 DL。
+    Painter deco_recorder;
 };
 
 namespace {
@@ -1027,138 +1032,38 @@ auto WaylandSurface::data() const -> const std::uint8_t * {
     return nullptr;
 }
 
+auto WaylandSurface::Impl::decoration_state() const -> csd::TitleBarPaintState {
+    csd::TitleBarPaintState s;
+    s.width = static_cast<float>(size.width);
+    s.mode = mode;
+    s.fullscreen_bar_revealed = fs_bar_revealed;
+    s.title_bar = csd_title;
+    s.active = active;
+    s.resizable = resizable;
+    s.hovered_button = hovered_btn;  // 序号约定：0=min / 1=max / 2=close（ptr_motion 命中写入）
+    s.title = title;
+    s.icon = tb_icon;
+    s.style = tb_style;
+    return s;
+}
+
 auto WaylandSurface::Impl::draw_decoration(Painter &p) const -> void {
-    // 全屏默认隐藏标题栏；顶边悬停揭示由 ptr_motion 置 fs_bar_revealed 后经 present 重绘可见。
-    if (mode == WindowMode::FullScreen && !fs_bar_revealed) {
-        return;
+    // 绘制实现收敛在 `csd::paint_title_bar`——GPU 路径（WgpuWaylandSurface）录制同一份内容进帧，
+    // 两条上屏路径必须画同一套装饰，故此处只装配状态、不持有绘制代码。
+    csd::paint_title_bar(p, decoration_state());
+}
+
+auto WaylandSurface::record_client_decoration(DisplayList &dl) -> bool {
+    Impl &d = *impl_;
+    const csd::TitleBarPaintState s = d.decoration_state();
+    if (!s.paints_anything()) {
+        return false;
     }
-    const float W = static_cast<float>(size.width);
-    // 几何单一来源：与 ptr_button 命中测试共用同一纯函数，杜绝热区与绘制错位。
-    const TitleBarGeometry g = title_bar_geometry(W, tb_style, mode == WindowMode::Maximized, resizable);
-    const Color bg = active ? tb_style.bg_active : tb_style.bg_inactive;
-    const Color fg = active ? tb_style.fg_active : tb_style.fg_inactive;
-
-    if (csd_title) {
-        // 标题栏背景。
-        p.fill_rect(Rect{Point{0.0F, 0.0F}, Size{W, tb_style.height}}, bg);
-
-        // 图标槽（set_title_bar_icon 注入后显示；无图标留白，几何预留位不变）。
-        if (tb_icon != nullptr && g.icon.size.width > 0.0F) {
-            p.draw_image(*tb_icon, g.icon);
-        }
-
-        // 标题文字（draw_text 缺字体时回退内置位图字体，不依赖 FontEngine）。
-        if (tb_style.show_title && !title.empty() && g.title.size.width > 0.0F) {
-            Font f;
-            f.size_pt = 13.0F;
-            f.weight = 500;
-            p.draw_text(g.title, title, f, fg);
-        }
-
-        // 悬停序号约定：0=minimize / 1=maximize / 2=close（ptr_motion 命中写入，与布局无关）。
-        const int hb = hovered_btn;
-
-        auto center_of = [](const Rect &r) {
-            return Point{r.origin.x + r.size.width * 0.5f, r.origin.y + r.size.height * 0.5f};
-        };
-        auto glyph_min = [&](const Rect &r, float lw, const Color &c) {
-            const Point m = center_of(r);
-            const float e = r.size.width / 3.0F;
-            p.draw_line(Point{m.x - e, m.y}, Point{m.x + e, m.y}, lw, c);
-        };
-        auto glyph_max = [&](const Rect &r, float lw, const Color &c) {
-            const Point m = center_of(r);
-            const float e = r.size.width / 3.6f;
-            if (mode != WindowMode::Maximized) {
-                // □ 空心方框。
-                p.draw_line(Point{m.x - e, m.y - e}, Point{m.x + e, m.y - e}, lw, c);
-                p.draw_line(Point{m.x + e, m.y - e}, Point{m.x + e, m.y + e}, lw, c);
-                p.draw_line(Point{m.x + e, m.y + e}, Point{m.x - e, m.y + e}, lw, c);
-                p.draw_line(Point{m.x - e, m.y + e}, Point{m.x - e, m.y - e}, lw, c);
-            } else {
-                // ▯ 还原：前实框 + 右上错位背框（双框表达「已最大化，点击还原」）。
-                const float o = e * 0.45f;
-                p.draw_line(Point{m.x - e, m.y + o - e}, Point{m.x + e, m.y + o - e}, lw, c);
-                p.draw_line(Point{m.x + e, m.y + o - e}, Point{m.x + e, m.y + o + e}, lw, c);
-                p.draw_line(Point{m.x + e, m.y + o + e}, Point{m.x - e, m.y + o + e}, lw, c);
-                p.draw_line(Point{m.x - e, m.y + o + e}, Point{m.x - e, m.y + o - e}, lw, c);
-                p.draw_line(Point{m.x - e + o, m.y - e}, Point{m.x + e + o, m.y - e}, lw, c);
-                p.draw_line(Point{m.x + e + o, m.y - e}, Point{m.x + e + o, m.y + e}, lw, c);
-                p.draw_line(Point{m.x + e + o, m.y + e}, Point{m.x - e + o, m.y + e}, lw, c);
-                p.draw_line(Point{m.x - e + o, m.y + e}, Point{m.x - e + o, m.y - e}, lw, c);
-            }
-        };
-        auto glyph_close = [&](const Rect &r, float lw, const Color &c) {
-            const Point m = center_of(r);
-            const float e = r.size.width / 3.0F;
-            p.draw_line(Point{m.x - e, m.y - e}, Point{m.x + e, m.y + e}, lw, c);
-            p.draw_line(Point{m.x + e, m.y - e}, Point{m.x - e, m.y + e}, lw, c);
-        };
-
-        if (tb_style.button_layout == TitleBarButtonLayout::Adwaita) {
-            // Adwaita：扁平单色符号，悬停浮出圆形底（关闭钮红底为其视觉签名）。
-            if (g.minimize.size.width > 0.0F) {
-                if (hb == 0) {
-                    p.fill_rounded_rect(g.minimize, g.minimize.size.width * 0.5f, tb_style.hover_tint);
-                }
-                glyph_min(g.minimize, 1.5f, fg);
-            }
-            if (g.maximize.size.width > 0.0F) {
-                if (hb == 1) {
-                    p.fill_rounded_rect(g.maximize, g.maximize.size.width * 0.5f, tb_style.hover_tint);
-                }
-                glyph_max(g.maximize, 1.5f, fg);
-            }
-            if (g.close.size.width > 0.0F) {
-                if (hb == 2) {
-                    p.fill_rounded_rect(g.close, g.close.size.width * 0.5f, tb_style.close_hover);
-                }
-                glyph_close(g.close, 1.5f, Color{255, 255, 255, 235});
-            }
-        } else if (tb_style.button_layout == TitleBarButtonLayout::Windows) {
-            // Windows：整高矩形热区，悬停整块填充。
-            if (g.minimize.size.width > 0.0F) {
-                if (hb == 0) {
-                    p.fill_rect(g.minimize, tb_style.hover_tint);
-                }
-                glyph_min(g.minimize, 1.2f, fg);
-            }
-            if (g.maximize.size.width > 0.0F) {
-                if (hb == 1) {
-                    p.fill_rect(g.maximize, tb_style.hover_tint);
-                }
-                glyph_max(g.maximize, 1.2f, fg);
-            }
-            if (g.close.size.width > 0.0F) {
-                if (hb == 2) {
-                    p.fill_rect(g.close, tb_style.close_hover);
-                }
-                glyph_close(g.close, 1.2f, Color{255, 255, 255, 235});
-            }
-        } else {
-            // macOS：常显三色圆点，悬停浮现深色符号（close/min/max 左→右序由几何层保证）。
-            const Color sym{0x3D, 0x3D, 0x3D, 210};
-            if (g.minimize.size.width > 0.0F) {
-                p.fill_rounded_rect(g.minimize, g.minimize.size.width * 0.5f, Color{0xFE, 0xBC, 0x2E, 255});
-                if (hb == 0) {
-                    glyph_min(g.minimize, 1.2f, sym);
-                }
-            }
-            if (g.maximize.size.width > 0.0F) {
-                p.fill_rounded_rect(g.maximize, g.maximize.size.width * 0.5f, Color{0x28, 0xC8, 0x40, 255});
-                if (hb == 1) {
-                    glyph_max(g.maximize, 1.2f, sym);
-                }
-            }
-            if (g.close.size.width > 0.0F) {
-                p.fill_rounded_rect(g.close, g.close.size.width * 0.5f, Color{0xFF, 0x5F, 0x57, 255});
-                if (hb == 2) {
-                    glyph_close(g.close, 1.2f, sym);
-                }
-            }
-        }
-    }
-    // 可缩放边框：不画可见线（缩放由 ptr_button 边缘热区驱动，浅色背景上画线反而突兀）。
+    // 独立录制 Painter（见 Impl::deco_recorder 注）：调用点在外层 app 帧录制栈之上，二者互不干扰。
+    d.deco_recorder.record(dl);
+    csd::paint_title_bar(d.deco_recorder, s);
+    d.deco_recorder.stop();
+    return true;
 }
 
 auto WaylandSurface::present() -> Result<bool> {

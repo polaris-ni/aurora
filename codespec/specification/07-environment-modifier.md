@@ -135,6 +135,8 @@ auto root = au::MediaQueryProvider{
 
 **几何单一来源**：纯函数 `title_bar_geometry(width, style, maximized, resizable)` 返回各按钮 / 图标 / 标题矩形（隐藏 = 空盒）；绘制与命中测试共用，规则以其实现注释为唯一权威。
 
+**绘制单一来源**：`csd::paint_title_bar(Painter&, const TitleBarPaintState&)`（`src/aurora/window/detail/title_bar_painter.h`，库内私有）把 `title_bar_geometry` 的矩形集光栅为一次 `Painter` 调用（背景 + 图标 + 标题 + 三套视觉语言的按钮，hover/激活态入状态结构）。软件路径（`WaylandSurface::Impl::draw_decoration`）与 GPU 路径（`WaylandSurface::record_client_decoration` → 帧 `Sink::end_frame` 回放进 swapchain 帧，见 [`03-layout-render.md`](03-layout-render.md) §8.8）同为它的消费者，故两条上屏路径的装饰逐位一致（`utest_title_bar_painter` 以「直绘 vs 录制回放」全画布字节比对守门）；无装饰可绘（SSD 合成器 / `Frameless`）时录制侧返回 false、当帧不含装饰命令。
+
 **`Surface` 相关虚函数**：`set_title_bar_icon(std::shared_ptr<Image>)`（图标槽）、`begin_window_move()` / `begin_window_resize(WindowResizeEdge)`（控件发起拖拽 / 缩放——**须在指针按下事件派发栈内同步调用**，受 Wayland `xdg` move / resize 的 serial 时效约束）。
 
 **`WindowChrome` 服务**（`window/window_chrome.h`）：经 Environment 注入的窗口动作门面（`close` / `minimize` / `toggle_maximize` / `set_fullscreen` / `begin_move` / `begin_resize` / `content_inset`），由 `present_root` 注入根环境供控件消费（headless 安全 no-op）。

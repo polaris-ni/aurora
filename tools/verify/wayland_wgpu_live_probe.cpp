@@ -17,12 +17,13 @@
 //   5. compute mip 链（离屏直驱）：64×64 逐纹素棋盘 4× 缩小绘制读回均值色——证明 cs_mip
 //      生成的整条 mip 链与三线性采样生效（adapter 无 compute 时该段 SKIP）。
 //   6. 平台 present 链路：真实窗口多帧 present_root（色块网格 + Text + 流式「视频」），
-//      frame_count 增长且 gpu_active() 保持为真（未永久回退软件路径）。Wayland 无抓屏
-//      原语，无 capture_window 物证项（X11 版探针的第 6 项后半），改由 --interactive
-//      人工目视段覆盖。
+//      frame_count 增长且 gpu_active() 保持为真（未永久回退软件路径）；软件路径上屏帧数
+//      恒 0（白闪签名，含 map/configure 触发的系统重绘）；CSD 装饰回放进 GPU 帧计数为
+//      0（合成器 SSD）或 >= 出帧数（CSD 兜底）。Wayland 无抓屏原语，无 capture_window
+//      物证项（X11 版探针的第 6 项后半），改由 --interactive 人工目视段覆盖。
 // 人工段（--interactive）：常驻窗口，流式「视频」与旋转层缓存网格并存，目视确认无花屏/
-//   撕裂/错位；同时目视核对装饰归属（合成器 SSD 接管则标题栏正常；无 SSD 且自绘兜底时
-//   GPU 帧不含自绘标题栏——已知申报口径，见 wgpu_wayland_surface.h 头注）。退出码：
+//   撕裂/错位；同时目视核对 CSD 兜底合成器下自绘标题栏随 GPU 帧呈现、按钮 hover/点击热区
+//   一致、还原或遮挡揭开时不出现整屏白闪。退出码：
 //   0 全过；1 自动断言失败；2 环境不可用（无 WAYLAND_DISPLAY / 无 adapter / 特性未编译）。
 //
 // 运行：build 目录下 ./aurora_verify_wayland_wgpu [--interactive]
@@ -356,13 +357,23 @@ auto main(int argc, char **argv) -> int {
           "frame_count() >= " + std::to_string(AUTO_FRAMES) +
               "（实得 " + std::to_string(win.surface().frame_count()) + "）");
     check(ws->gpu_active(), "帧后 gpu_active() 仍为真（未永久回退软件路径）");
+    // 白闪签名：任何一帧经软件路径（wl_shm 上屏 Painter 缓冲）即为缺陷——GPU 模式下该缓冲
+    // 只有底色，无控件像素。系统重绘（map/configure → present_request_）亦必须落回 GPU 帧通道。
+    check(ws->software_present_count() == 0,
+          "软件路径上屏帧数 == 0（无白闪帧；实得 " + std::to_string(ws->software_present_count()) + "）");
+    // CSD 装饰合成：SSD 合成器不绘装饰恒 0；CSD 兜底合成器逐帧回放装饰命令。
+    const int deco = ws->decoration_replay_count();
+    check(deco == 0 || deco >= AUTO_FRAMES,
+          "CSD 装饰回放进 GPU 帧 == 0（SSD）或 >= 出帧数（CSD）；实得 " + std::to_string(deco));
+    emit("  · decoration_replay_count()=" + std::to_string(deco) + "，frame_count()=" +
+         std::to_string(win.surface().frame_count()) + "（>0 即本合成器走 CSD 兜底）");
 
     // ---- 人工段 ----
     if (interactive) {
         emit("\n[人工段] 窗口常驻：顶部为流式「视频」（逐帧重传），整体挂 cache_layer 并旋转。");
         emit("预期：画面连续旋转、无花屏/错位/撕裂；关闭窗口退出。");
-        emit("另目视核对装饰归属：合成器 SSD 接管 → 标题栏正常；无 SSD 自绘兜底 → GPU 帧");
-        emit("不含自绘标题栏（已知申报口径，事件热区仍可移动/关闭）。");
+        emit("另目视核对装饰归属：CSD 兜底合成器下自绘标题栏随 GPU 帧一同呈现（与软件路径同像素），");
+        emit("最小化/最大化/关闭按钮 hover 与点击热区一致；还原/遮挡揭开过程中不得出现整屏白闪。");
         float angle = 0.0F;
         while (!win.should_close()) {
             angle += 1.5F;

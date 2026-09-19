@@ -58,6 +58,11 @@ class WgpuSurface final : public Surface {
     /// （`sink.begin_frame` 返回 false 后转 false，此后 present 走 GDI）。测试/自检用。
     [[nodiscard]] auto gpu_active() const -> bool { return gpu_ != nullptr && !gpu_dead_; }
 
+    /// @brief 经 GDI 软件路径上屏的帧数——**GPU 生效期间应为 0**（口径同 WgpuWaylandSurface）。
+    /// 非零即「app 帧未走 GPU 通道」：软件回退，或系统要求的重绘绕过了 GPU 帧路径（GPU 模式下
+    /// Painter 帧缓冲只维护底色，此类 present 上屏即白闪），故本计数是白闪缺陷的观测签名。
+    [[nodiscard]] auto software_present_count() const -> int { return software_present_; }
+
     /// @brief GPU 帧调度挂点：wgpu 后端可用时返回帧 sink 适配器（恒非空于 is_available）。
     [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink * override;
 
@@ -162,6 +167,7 @@ class WgpuSurface final : public Surface {
     bool gpu_frame_active_ = false;  ///< 本帧 sink.begin_frame 成功（present 时消费）
     bool gpu_dead_ = false;          ///< 运行期 GPU 失效（sink.begin_frame 返回 false，永久软件回退）
     int frame_ = 0;                  ///< 已呈现帧计数
+    int software_present_ = 0;       ///< GDI 软件路径上屏帧数（见 software_present_count()）
 };
 
 }  // namespace aurora

@@ -7,20 +7,26 @@
 /// 恒 0 回退契约（wgpu-native v29 无外部共享纹理导入入口）；compute mip 链——64×64
 /// 棋盘图 4× 降采样整块为均匀均值色（三线性命中 mip≥1），1:1 绘制仍是端点色（lod 0 无混）；
 /// 离屏读回通道开关与连帧 submit——连帧不逐帧消费 read_pixels 不踩「缓冲仍映射」验证错误，
-/// 关闭期间 read_pixels 整体拒绝、重新打开后下一帧恢复。
+/// 关闭期间 read_pixels 整体拒绝、重新打开后下一帧恢复；CSD 装饰 DL 追加回放在内容帧之上——
+/// 读回证明装饰条带/悬停红底/图标像素上屏、装饰带以下仍是内容色、命令族零 skipped。
 /// 依赖 Vulkan/D3D12 adapter：无可用设备环境整体 SKIP（真实 GPU 断言不做假通过）。
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
+#include "aurora/core/image.h"
 #include "aurora/core/native_surface.h"
 #include "framework/aurora_test.h"
 
 #ifdef AURORA_BACKEND_GPU_WGPU
 
 #include "aurora/render/display_list.h"
+#include "aurora/render/painter.h"
 #include "aurora/render/rhi/wgpu_rhi.h"
+#include "aurora/window/detail/title_bar_painter.h"
+#include "aurora/window/title_bar_geometry.h"
 
 namespace aurora::test_cases::utest_wgpu_rhi {
 
@@ -62,6 +68,23 @@ auto make_draw_image(Rect bounds, const Image &img, DisplayList &dl) -> DrawCmd 
     cmd.bounds = bounds;
     cmd.image_idx = dl.add_image(img);
     return cmd;
+}
+
+// 纯色图标（CSD 图标槽用；`shared_ptr` 语义由绘制层按引用取像素，此处只填内容）。
+[[nodiscard]] auto solid_icon_ptr(int side, Color c) -> std::shared_ptr<Image> {
+    auto img = std::make_shared<Image>();
+    img->width = side;
+    img->height = side;
+    img->pixels.assign(static_cast<std::size_t>(side) * static_cast<std::size_t>(side) * 4U, 0U);
+    for (int i = 0; i < side * side; ++i) {
+        const std::size_t o = static_cast<std::size_t>(i) * 4U;
+        img->pixels[o + 0U] = c.r;
+        img->pixels[o + 1U] = c.g;
+        img->pixels[o + 2U] = c.b;
+        img->pixels[o + 3U] = c.a;
+    }
+    img->invalidate_content_hash();
+    return img;
 }
 
 [[nodiscard]] auto offscreen(int w = 64, int h = 48) -> rhi::WgpuRhiOptions {
@@ -296,6 +319,60 @@ AURORA_TEST_CASE(wgpu_readback_toggle_and_multi_frame_submit) {
     AURORA_TEST_CHECK_EQ(pixel_at(px2, 64, 32, 24), (std::array<int, 4>{20, 220, 220, 255}));
 }
 
+AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) {
+    // CSD 装饰合成进 GPU 帧的最小复现现场：内容帧 DL 之后追加装饰 DL（即
+    // `WgpuWaylandSurface::Sink::end_frame` 的做法），离屏读回证明装饰真的盖在内容之上、
+    // 且不越界涂抹内容区。装饰命令族含 FillRect/RoundedRect/DrawLine/DrawText/DrawImage
+    // 四类，`skipped_cmds` 恒零即「WgpuRhi 全族可消费、无静默丢命令」。
+    rhi::WgpuRhi rhi_obj(offscreen(160, 80));
+    if (!rhi_obj.valid()) {
+        AURORA_TEST_SKIP("无可用 wgpu adapter/device，装饰回放像素断言跳过");
+    }
+    constexpr Color kContent{0, 160, 0, 255};
+    csd::TitleBarPaintState s;
+    s.width = 160.0F;
+    s.title_bar = true;
+    s.hovered_button = 2;  // 悬停关闭钮 → 特征红圆底
+    s.title = "Aa 01";
+    s.icon = solid_icon_ptr(16, Color{60, 130, 228, 255});
+
+    // 装饰 DL：录制态 Painter（与 WaylandSurface::record_client_decoration 同一条通路）。
+    DisplayList deco;
+    {
+        Painter rec;
+        rec.record(deco);
+        csd::paint_title_bar(rec, s);
+        rec.stop();
+    }
+    AURORA_TEST_REQUIRE_FALSE(deco.empty());
+
+    AURORA_TEST_REQUIRE(rhi_obj.begin_frame(160, 80, 1.0F));
+    DisplayList content;
+    content.push_cmd(make_fill(
+        Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 160.0F, .height = 80.0F}}, kContent));
+    content.replay(rhi_obj.backend());
+    deco.replay(rhi_obj.backend());  // ← 帧尾追加回放：z 序在 app 内容之上
+    rhi_obj.end_frame();
+    AURORA_TEST_CHECK_EQ(rhi_obj.stats().skipped_cmds, 0U);
+
+    std::vector<std::uint8_t> px;
+    AURORA_TEST_REQUIRE(rhi_obj.read_pixels(px));
+    const TitleBarGeometry g = title_bar_geometry(160.0F, s.style, false, true);
+    const Color bg = s.style.bg_active;
+    // 标题栏条带（图标槽左侧的纯底色区）。
+    AURORA_TEST_CHECK_EQ(pixel_at(px, 160, 4, 18), (std::array<int, 4>{bg.r, bg.g, bg.b, bg.a}));
+    // 悬停关闭钮圆底 = 特征红（与内容绿显著区分）。圆心本身被白色 ✕ 字形穿过，故取圆心上方。
+    const Point above_close{g.close.origin.x + g.close.size.width * 0.5F, g.close.origin.y + 3.0F};
+    const auto cc = pixel_at(px, 160, static_cast<int>(above_close.x), static_cast<int>(above_close.y));
+    AURORA_TEST_CHECK(cc[0] > 180 && cc[1] < 90 && cc[2] < 90);
+    // 图标槽：DrawImage 经纹理链路上屏（蓝色占优即证图标像素而非底色/内容色）。
+    const Point icon_c{g.icon.origin.x + g.icon.size.width * 0.5F, g.icon.origin.y + g.icon.size.height * 0.5F};
+    const auto ic = pixel_at(px, 160, static_cast<int>(icon_c.x), static_cast<int>(icon_c.y));
+    AURORA_TEST_CHECK(ic[2] > 150 && ic[2] > ic[0] && ic[2] > ic[1]);
+    // 装饰带以下：仍是 app 内容绿（装饰未越界涂抹）。
+    AURORA_TEST_CHECK_EQ(pixel_at(px, 160, 4, 60), (std::array<int, 4>{kContent.r, kContent.g, kContent.b, 255}));
+}
+
 }  // namespace aurora::test_cases::utest_wgpu_rhi
 
 #else  // !AURORA_BACKEND_GPU_WGPU
@@ -315,6 +392,9 @@ AURORA_TEST_CASE(wgpu_compute_mip_downscale_sampling) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
 }
 AURORA_TEST_CASE(wgpu_readback_toggle_and_multi_frame_submit) {
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
+}
+AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
 }
 

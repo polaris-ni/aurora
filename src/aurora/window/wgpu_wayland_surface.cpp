@@ -31,6 +31,18 @@ auto WgpuWaylandSurface::Sink::begin_frame(int width, int height, float scale) -
     return ok;
 }
 
+auto WgpuWaylandSurface::Sink::end_frame() -> void {
+    // 自绘 CSD 装饰合成进当帧：swapchain 独占整块 wl_surface，内嵌宿主画进 Painter 的标题栏
+    // 不会随帧缓冲上屏，故装饰只能作为命令在 app 帧之上回放开（软件路径画的是同一份内容，
+    // 两条路径共用 `csd::paint_title_bar`，见 WaylandSurface::record_client_decoration）。
+    // 坐标同为逻辑 dp、同用本帧 scale，与 app 帧 DL 同一变换口径，故热区与像素不会错位。
+    if (owner_->host_->record_client_decoration(deco_dl_)) {
+        deco_dl_.replay(*rhi_);
+        ++owner_->deco_replays_;
+    }
+    rhi_->end_frame();
+}
+
 // ---- 构造 / 析构 ----
 
 WgpuWaylandSurface::WgpuWaylandSurface(int width, int height, const std::string &title,
@@ -51,13 +63,6 @@ WgpuWaylandSurface::WgpuWaylandSurface(int width, int height, const std::string 
     if (rhi->valid()) {
         gpu_ = std::move(rhi);
         sink_ = std::make_unique<Sink>(*gpu_, *this);
-        if (host_->uses_client_decorations()) {
-            // 申报口径差异（详见头注）：swapchain 直接 commit 整块 wl_surface，
-            // 内嵌宿主画进 Painter 的自绘标题栏/边框不会上屏；事件热区不受影响。
-            AURORA_LOG_WARN("wgpu-wayland-surface",
-                            "GPU mode with client-side decorations: drawn title bar/borders are not "
-                            "presented (swapchain owns the wl_surface). Interaction hotspots still work.");
-        }
     } else {
         // 构造期失败：is_available() false，工厂据此返回 Result 错误（错误归属调用方）；
         // 若被直接注入使用，则本类以 wl_shm 路径纯软件上屏。
@@ -99,6 +104,7 @@ auto WgpuWaylandSurface::present() -> Result<bool> {
     auto r = host_->present();  // 软件回退帧：wl_shm attach+commit 上屏
     if (r) {
         ++frame_;
+        ++software_present_;  // GPU 生效期间本分支不应到达（见 software_present_count()）
     }
     return r;
 }

@@ -121,8 +121,17 @@ class WaylandSurface final : public Surface {
 
     /// @brief 是否正在自绘 CSD 装饰（标题栏/边框，画进 Painter 帧缓冲）：合成器无
     /// xdg-decoration SSD 且装饰策略需要兜底时为 true。GPU 宿主（WgpuWaylandSurface）
-    /// 据此申报「swapchain 帧不含自绘装饰」的口径差异。
+    /// 据此决定是否需要把装饰录制进当帧。
     [[nodiscard]] auto uses_client_decorations() const -> bool;
+
+    /// @brief 把本帧 CSD 自绘装饰**录制**为 `DisplayList`（不触帧缓冲），供 GPU 宿主追加
+    /// 回放进当帧——swapchain 独占 `wl_surface`，`present()` 里的软件光栅上不了屏，故装饰
+    /// 必须走命令通道。绘制内容与软件路径逐命令同源（`csd::paint_title_bar` 单一实现）。
+    ///
+    /// 坐标为**逻辑 dp**（与帧级 DL 同口径，缩放在回放侧生效）。本帧无装饰可画（无 CSD
+    /// 标题栏、或全屏且未揭示顶边条）时返回 false 且不清空/不改写 `dl`，调用方据此跳过回放。
+    /// @note 用后端自带的独立录制 Painter，可在 app 帧 DL 录制期间安全调用（互不嵌套）。
+    auto record_client_decoration(DisplayList &dl) -> bool;
 
     /// @brief 全部 Wayland/xkb 状态（display/registry/shm 双缓冲/seat/唤醒管道），见 wayland_surface.cpp。
     /// public 而非 private：C 协议 listener（自由函数指针表）需在类外以 `Impl*` 收发 user data。

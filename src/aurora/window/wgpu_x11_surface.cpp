@@ -90,6 +90,7 @@ auto WgpuX11Surface::present() -> Result<bool> {
     auto r = host_->present();  // 软件回退帧：XPutImage 上屏
     if (r) {
         ++frame_;
+        ++software_present_;  // GPU 生效期间本分支不应到达（见 software_present_count()）
     }
     return r;
 }

@@ -17,11 +17,11 @@
 // 与 X11 版差异（如实申报）：
 // - 无 `capture_window`（Wayland 协议无抓屏原语，内嵌宿主同样未覆写，基类默认
 //   报 disabled 即最终行为）；
-// - GPU 模式下**自绘 CSD 装饰不上屏**：swapchain 直接 commit 整块 wl_surface，
-//   Painter 里的标题栏/边框不会进入该帧。合成器接管装饰（KDE 等提供
-//   xdg-decoration SSD）时无影响；无 SSD 的合成器（GNOME）下强制 GPU 会得到
-//   「无可见标题栏」的窗口——事件热区与移动/关闭逻辑仍在内嵌宿主生效，属可
-//   操作但观感降级，构造时输出一次性 WARN 申报（后续切片候选：装饰合成进 GPU 帧）。
+// - 自绘 CSD 装饰经命令通道合成进 GPU 帧：swapchain 独占整块 wl_surface，内嵌宿主画进
+//   Painter 的标题栏不会随帧缓冲上屏，故每帧在 `Sink::end_frame` 里把装饰录制成
+//   DisplayList 追加回放在 app 帧之后（绘制实现与软件路径同源 `csd::paint_title_bar`，
+//   见 `WaylandSurface::record_client_decoration`）。合成器提供 xdg-decoration SSD 时
+//   内嵌宿主不绘装饰，录制返回 false → 零额外开销。
 // ============================================================
 
 #if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && \
@@ -32,6 +32,7 @@
 
 #include "aurora/core/result.h"
 #include "aurora/core/types.h"
+#include "aurora/render/display_list.h"  // Sink 的装饰录制缓冲成员需完整类型
 #include "aurora/render/painter.h"
 #include "aurora/render/rhi/rhi_frame_sink.h"
 #include "aurora/render/rhi/wgpu_rhi.h"
@@ -66,6 +67,16 @@ class WgpuWaylandSurface final : public Surface {
 
     /// @brief GPU 栅格路径当前是否生效（回退观测点，语义同 Win32 WgpuSurface::gpu_active）。
     [[nodiscard]] auto gpu_active() const -> bool { return gpu_ != nullptr && !gpu_dead_; }
+
+    /// @brief 经软件路径（内嵌宿主 wl_shm）上屏的帧数——**GPU 生效期间应为 0**。
+    /// 非零即「app 帧未走 GPU 通道」：软件回退，或系统要求的重绘绕过了 GPU 帧路径
+    /// （后者是白闪缺陷的签名：`Window` 直接调 `present()`，而 GPU 模式下 Painter 帧缓冲
+    /// 从不清绘，上屏只剩底色）。真机探针据此断言「无白闪帧」。
+    [[nodiscard]] auto software_present_count() const -> int { return software_present_; }
+
+    /// @brief 把自绘 CSD 装饰回放进 GPU 帧的帧数（观测点）。合成器提供 SSD 时内嵌宿主不绘
+    /// 装饰，本计数恒 0；CSD 兜底合成器（GNOME 等）下应逐帧递增 = GPU 呈现帧数。
+    [[nodiscard]] auto decoration_replay_count() const -> int { return deco_replays_; }
 
     /// @brief GPU 帧调度挂点：wgpu 后端可用时返回帧 sink 适配器（恒非空于 is_available）。
     [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink * override;
@@ -134,11 +145,14 @@ class WgpuWaylandSurface final : public Surface {
         [[nodiscard]] auto name() const -> std::string_view override { return "gpu-wgpu"; }
         [[nodiscard]] auto backend() -> rhi::RhiBackend & override { return *rhi_; }
         [[nodiscard]] auto begin_frame(int width, int height, float scale) -> bool override;
-        auto end_frame() -> void override { rhi_->end_frame(); }
+        /// @brief 收口本帧：先把自绘 CSD 装饰回放在 app 帧之上（swapchain 独占 wl_surface，
+        /// 装饰只能走命令通道），再交 `WgpuRhi::end_frame` 提交 + present。见 `.cpp`。
+        auto end_frame() -> void override;
 
       private:
         rhi::WgpuRhi *rhi_;
         WgpuWaylandSurface *owner_;
+        DisplayList deco_dl_;  ///< 装饰录制缓冲（逐帧复用，避免每帧分配）
     };
 
     std::unique_ptr<WaylandSurface> host_;  ///< 内嵌 Wayland 宿主（窗口壳/事件/软件回退上屏）
@@ -149,6 +163,8 @@ class WgpuWaylandSurface final : public Surface {
     bool gpu_frame_active_ = false;  ///< 本帧 sink.begin_frame 成功（present 时消费）
     bool gpu_dead_ = false;          ///< 运行期 GPU 失效（永久软件回退）
     int frame_ = 0;                  ///< 已呈现帧计数
+    int software_present_ = 0;       ///< 软件路径上屏帧数（见 software_present_count()）
+    int deco_replays_ = 0;           ///< 装饰回放进 GPU 帧的帧数（见 decoration_replay_count()）
 };
 
 }  // namespace aurora
