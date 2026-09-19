@@ -492,7 +492,7 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 
 **单元测试（`tests/unit/utest_*.cpp`）**：每个公共源文件对应一个 `utest_*.cpp`（与 `examples/demos/demo_*.cpp` 同构：1 源文件 ↔ 1 测试 ↔ 1 demo）；跨控件 / 端到端集成用例放 `tests/integration/itest_*.cpp`。经 `cmake/AuroraTests.cmake` 收集（`file(GLOB CONFIGURE_DEPENDS)`），**全部用例链入单一可执行 `aurora_test_runner`**：用例用 `AURORA_TEST_CASE(<Case>)` 宏静态自注册（全名 = `<文件 stem>.<Case>`），`main()` 由 `tests/framework/test_main.cpp` 唯一提供。CTest 逐条以 `aurora_test_runner --run=<stem>` 注册（进程隔离），并由 `registry_integrity` 按用例级清单守护漏注册。
 
-**Golden 测试（渲染像素级）**：以 `utest_offscreen` 为主，把 widget 树渲染到 `HeadlessSurface` 内存缓冲，与 golden 基准图逐像素比对。依赖相对路径，须从**仓库根**运行（`ctest` 已为其把 CWD 设为仓库根），可用 `AURORA_GOLDEN_DIR` 覆盖解析基准。逐位红线唯一属软件路径；GPU 侧为**容差 golden 双层**——`itest_wgpu_golden` 把同一场景 DisplayList 经离屏 `WgpuRhi` 重放读回，与同一张软件基线按**场景级申报**的容差带比对（`golden::compare_gpu_tolerance`，不读全局放松旋钮、不回写基线），见 `specification/03-layout-render.md` §8.4.2 / §8.8。
+**Golden 测试（渲染像素级）**：以 `utest_offscreen` 为主，把 widget 树渲染到 `HeadlessSurface` 内存缓冲，与 golden 基准图逐像素比对。依赖相对路径，须从**仓库根**运行（`ctest` 已为其把 CWD 设为仓库根），可用 `AURORA_GOLDEN_DIR` 覆盖解析基准。逐位红线唯一属软件路径；GPU 侧为**容差 golden 双层**——`itest_wgpu_golden`（wgpu）与 `itest_gl_golden`（GL，需 GLFW + GPU_GL 配置）把同一场景 DisplayList 经离屏后端重放读回，与同一张软件基线按**场景级申报**的容差带比对（场景与帧装配单一来源 `tests/support/gpu_golden_scenes.h`；`golden::compare_gpu_tolerance`，不读全局放松旋钮、不回写基线），见 `specification/03-layout-render.md` §8.4.2 / §8.8。
 
 **性能基准**：见 §10 与 [`specification/06-app-platform.md`](specification/06-app-platform.md) §10。
 
