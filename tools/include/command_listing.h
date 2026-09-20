@@ -44,7 +44,7 @@ namespace aurora::tools {
 /// @brief 命令枚举结果：命中的描述符下标（对应入参数组）与参与过滤的描述符总数。
 struct CommandListing {
     std::vector<std::size_t> indices;  ///< 按（得分降序、标题升序）稳定排序后的下标
-    std::size_t considered = 0;        ///< 形态合法、参与过滤的描述符数量
+    std::size_t considered = 0;  ///< 形态合法、参与过滤的描述符数量
 };
 
 /// @brief 按查询过滤并按（得分降序、标题升序）稳定排序命令描述符。
@@ -74,16 +74,15 @@ struct CommandListing {
             continue;
         }
         const auto title_it = item.find("title");
-        const std::string title = (title_it != item.end() && title_it->is_string())
-                                      ? title_it->get<std::string>()
-                                      : id_it->get<std::string>();
+        const std::string title = (title_it != item.end() && title_it->is_string()) ? title_it->get<std::string>()
+                                                                                    : id_it->get<std::string>();
         const int score = command_fuzzy_score(query, title);
         if (score < 0) {
             continue;
         }
         hits.push_back(Hit{.index = i, .title = title, .score = score});
     }
-    std::stable_sort(hits.begin(), hits.end(), [](const Hit &a, const Hit &b) -> bool {
+    std::ranges::stable_sort(hits, [](const Hit &a, const Hit &b) -> bool {
         if (a.score != b.score) {
             return a.score > b.score;
         }
@@ -98,10 +97,10 @@ struct CommandListing {
 
 /// @brief 命令的远程可调用性判定结果。
 enum class CommandStatus {
-    NotFound,      ///< 描述符中不存在该标识
-    Disabled,      ///< `enabled` 为假（启用条件不满足）
+    NotFound,  ///< 描述符中不存在该标识
+    Disabled,  ///< `enabled` 为假（启用条件不满足）
     NotInvocable,  ///< `invocable` 为假（命令无动作体）
-    Invocable,     ///< 可调用
+    Invocable,  ///< 可调用
 };
 
 /// @brief 判定结果的稳定标识（工具面输出用）。

@@ -64,9 +64,8 @@ namespace aurora::tools {
                       "EaseInCubic", "EaseOutCubic",  "EaseInOutCubic", "BounceOut",   "Custom"};
 
     // ---- input ----
-    enums["CursorShape"] = {"Arrow",      "IBeam",   "PointingHand", "ResizeNS",      "ResizeEW",
-                            "ResizeNWSE", "ResizeNESW", "Move",      "Crosshair",     "NotAllowed",
-                            "Wait"};
+    enums["CursorShape"] = {"Arrow",      "IBeam", "PointingHand", "ResizeNS",   "ResizeEW", "ResizeNWSE",
+                            "ResizeNESW", "Move",  "Crosshair",    "NotAllowed", "Wait"};
     enums["KeyCode"] = {"Unknown",
                         "A",
                         "B",

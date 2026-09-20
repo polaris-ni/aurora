@@ -138,7 +138,7 @@ auto expected_cursor(aurora::CursorShape shape) -> HCURSOR {
 // 本线程是否是「前台线程」：读回恒不动时用它区分两种成因——非前台（共享光标由前台线程
 // 支配，属读回前提不成立 → 退出码 8）与已是前台（本会话根本读不回，→ 退出码 4）。
 auto owns_foreground() -> bool {
-    const HWND fg = GetForegroundWindow();
+    const HWND fg = GetForegroundWindow();  // NOLINT
     if (fg == nullptr) {
         return false;
     }
@@ -219,7 +219,7 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title, b
     // 「按唯一标题查找」兜底：探针入参是 `aurora::Surface&`，任何**自定义** Surface 后端
     // 都可能不覆写 native_handle()（基类默认返回 nullptr），有兜底才能对这类后端给出
     // 可判定的结果，而不是一律报「拿不到 HWND」。
-    HWND hwnd = static_cast<HWND>(surface.native_handle());
+    auto hwnd = static_cast<HWND>(surface.native_handle());
     if (hwnd == nullptr) {
         hwnd = FindWindowA(nullptr, title);
     }
@@ -243,9 +243,9 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title, b
     const auto client_center = [hwnd]() -> POINT {
         RECT c{};
         if (GetClientRect(hwnd, &c) == FALSE) {
-            return POINT{-1, -1};  // 负值 = 取不到客户几何（调用方据此返回环境错误）
+            return POINT{.x = -1, .y = -1};  // 负值 = 取不到客户几何（调用方据此返回环境错误）
         }
-        POINT p{(c.left + c.right) / 2, (c.top + c.bottom) / 2};
+        POINT p{.x = (c.left + c.right) / 2, .y = (c.top + c.bottom) / 2};
         ClientToScreen(hwnd, &p);
         return p;
     };
@@ -258,12 +258,12 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title, b
     const bool have_frame = GetWindowRect(hwnd, &frame) != FALSE;
     const int fw = have_frame ? frame.right - frame.left : 360;
     const int fh = have_frame ? frame.bottom - frame.top : 240;
-    constexpr int kMargin = 40;
+    constexpr int margin = 40;
     const int sw = GetSystemMetrics(SM_CXSCREEN);
     const int sh = GetSystemMetrics(SM_CYSCREEN);
-    const int spot_x[] = {(sw - fw) / 2, kMargin, sw - fw - kMargin, kMargin, sw - fw - kMargin};
-    const int spot_y[] = {(sh - fh) / 2, kMargin, kMargin, sh - fh - kMargin, sh - fh - kMargin};
-    constexpr int kSpotCount = static_cast<int>(sizeof(spot_x) / sizeof(spot_x[0]));
+    const int spot_x[] = {(sw - fw) / 2, margin, sw - fw - margin, margin, sw - fw - margin};
+    const int spot_y[] = {(sh - fh) / 2, margin, margin, sh - fh - margin, sh - fh - margin};
+    constexpr int spot_count = static_cast<int>(std::size(spot_x));
 
     POINT saved{};
     const bool have_saved = GetCursorPos(&saved) != FALSE;
@@ -274,7 +274,7 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title, b
     bool over = false;
     POINT center{};
     int last_spot = 0;
-    for (int attempt = 0; attempt < kSpotCount * 2 && !over; ++attempt) {
+    for (int attempt = 0; attempt < spot_count * 2 && !over; ++attempt) {
         const int s = attempt / 2;
         last_spot = s;
         SetWindowPos(hwnd, HWND_TOPMOST, spot_x[s], spot_y[s], fw, fh, SWP_SHOWWINDOW);
@@ -297,18 +297,17 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title, b
         if (blocker != nullptr) {
             GetClassNameA(blocker, blocker_class, sizeof(blocker_class) - 1);  // NOLINT
         }
-        AURORA_LOG_ERROR("verify",
-                         std::string(label) +
-                             ": pointer is not over the target window (cannot take cursor ownership). "
-                             "Typical cause: window is occluded / covered by a topmost window, or a remote "
-                             "desktop session is isolated. want=(" +
-                             std::to_string(center.x) + "," + std::to_string(center.y) + ") actual=(" +
-                             (have_actual ? std::to_string(actual.x) : "?") + "," +
-                             (have_actual ? std::to_string(actual.y) : "?") + ") hwnd=" +
-                             aurora_verify::format_handle(hwnd) + " point_hwnd=" +
-                             aurora_verify::format_handle(blocker) + " point_class=" + blocker_class +
-                             " spots_tried=" + aurora_verify::format_int(last_spot + 1) + "/" +
-                             aurora_verify::format_int(kSpotCount));
+        AURORA_LOG_ERROR("verify", std::string(label) +
+                                       ": pointer is not over the target window (cannot take cursor ownership). "
+                                       "Typical cause: window is occluded / covered by a topmost window, or a remote "
+                                       "desktop session is isolated. want=(" +
+                                       std::to_string(center.x) + "," + std::to_string(center.y) + ") actual=(" +
+                                       (have_actual ? std::to_string(actual.x) : "?") + "," +
+                                       (have_actual ? std::to_string(actual.y) : "?") +
+                                       ") hwnd=" + aurora_verify::format_handle(hwnd) + " point_hwnd=" +
+                                       aurora_verify::format_handle(blocker) + " point_class=" + blocker_class +
+                                       " spots_tried=" + aurora_verify::format_int(last_spot + 1) + "/" +
+                                       aurora_verify::format_int(spot_count));
         if (have_saved) {
             SetCursorPos(saved.x, saved.y);
         }
@@ -394,8 +393,7 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title, b
             ++confirmed;
             if (!answer.empty() && (answer[0] == 'n' || answer[0] == 'N')) {
                 ++rejected;
-                AURORA_LOG_ERROR("verify",
-                                 std::string("Manual judgment mismatch: ") + aurora::cursor_rfc_name(shape));
+                AURORA_LOG_ERROR("verify", std::string("Manual judgment mismatch: ") + aurora::cursor_rfc_name(shape));
             }
         }
         if (stdin_open && rejected == 0) {

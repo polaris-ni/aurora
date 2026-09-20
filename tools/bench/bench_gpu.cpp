@@ -74,8 +74,8 @@ constexpr int VIDEO_WARMUP = 3;
 
 constexpr int SCENE_W = 480;
 constexpr int SCENE_H = 400;
-constexpr int GRID_COLS = 12;   ///< 网格列数（盒 40×24 无重叠铺满 480×384）
-constexpr int GRID_ROWS = 16;   ///< 网格行数（12×16 = 192 盒；不重叠——剔除剔除不干扰基线）
+constexpr int GRID_COLS = 12;  ///< 网格列数（盒 40×24 无重叠铺满 480×384）
+constexpr int GRID_ROWS = 16;  ///< 网格行数（12×16 = 192 盒；不重叠——剔除剔除不干扰基线）
 constexpr int SCENE_FRAMES = 60;
 constexpr int SCENE_WARMUP = 3;
 
@@ -125,9 +125,7 @@ struct GlCounters {
 }
 
 // 伪视频帧：逐帧内容唯一。
-auto make_video_frame(std::uint64_t seed) -> Image {
-    return make_noise_image(VIDEO_W, VIDEO_H, seed);
-}
+auto make_video_frame(std::uint64_t seed) -> Image { return make_noise_image(VIDEO_W, VIDEO_H, seed); }
 
 /// @brief 回放一帧 DrawImage（legacy：无流式字段；streaming：固定键 + 递增版本）。
 auto push_video_frame(DisplayList &dl, const Image &frame, bool streaming, std::uint64_t version) -> void {
@@ -139,8 +137,7 @@ auto push_video_frame(DisplayList &dl, const Image &frame, bool streaming, std::
     DrawCmd cmd;
     cmd.kind = aurora::CmdKind::DrawImage;
     cmd.bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                      .size = Size{.width = static_cast<float>(img.width),
-                                   .height = static_cast<float>(img.height)}};
+                      .size = Size{.width = static_cast<float>(img.width), .height = static_cast<float>(img.height)}};
     cmd.image_idx = dl.add_image(img);
     dl.push_cmd(cmd);
 }
@@ -193,8 +190,7 @@ auto bench_video(bool streaming) -> VideoResult {
     const GlCounters after = GlCounters::capture(fake);
 
     VideoResult r;
-    r.cpu_ms_per_frame =
-        std::chrono::duration<double, std::milli>(t1 - t0).count() / static_cast<double>(VIDEO_FRAMES);
+    r.cpu_ms_per_frame = std::chrono::duration<double, std::milli>(t1 - t0).count() / static_cast<double>(VIDEO_FRAMES);
     r.counters = after.delta_from(before);
     return r;
 }
@@ -209,12 +205,8 @@ class BenchBox final : public LeafWidget {
     [[nodiscard]] auto type_name() const -> const char * override { return "BenchBox"; }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(sz_);
-    }
-    void on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) override {
-        p.fill_rect(b, color_);
-    }
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(sz_); }
+    void on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) override { p.fill_rect(b, color_); }
 
   private:
     Size sz_;
@@ -222,7 +214,7 @@ class BenchBox final : public LeafWidget {
 };
 
 struct LayerResult {
-    double cold_ms = 0.0;              ///< 首帧（层冷 / 离屏位图冷）
+    double cold_ms = 0.0;  ///< 首帧（层冷 / 离屏位图冷）
     double steady_ms_per_frame = 0.0;  ///< 稳态帧均
 };
 
@@ -256,10 +248,10 @@ struct LayerResult {
 
 /// @brief 层缓存场景：一次装配布局，逐帧重录 + 回放；冷帧与稳态分开计时。
 auto bench_layer(bool cache_layer) -> LayerResult {
-    std::shared_ptr<Column> root = make_grid_root();
+    const std::shared_ptr<Column> root = make_grid_root();
     constexpr BuildContext ctx;
 
-    testing::FakeGl fake;
+    const testing::FakeGl fake;
     rhi::GpuGlRhi rhi_obj(fake.fn);
     rhi::RhiFrameSink &sink = rhi_obj;
     if (!rhi_obj.valid()) {
@@ -274,9 +266,9 @@ auto bench_layer(bool cache_layer) -> LayerResult {
         Painter p;
         p.begin(SCENE_W, SCENE_H);
         p.record(dl);
-        root->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                            .size = Size{.width = static_cast<float>(SCENE_W),
-                                         .height = static_cast<float>(SCENE_H)}},
+        root->paint(p,
+                    Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                         .size = Size{.width = static_cast<float>(SCENE_W), .height = static_cast<float>(SCENE_H)}},
                     ctx);
         p.stop();
         (void)rhi_obj.begin_frame(SCENE_W, SCENE_H, 1.0F);
@@ -309,14 +301,14 @@ auto bench_layer(bool cache_layer) -> LayerResult {
 
 // ---- 场景三/四/五：wgpu 真 GPU 离屏实测（端到端帧成本）----
 
-constexpr int MIP_DIM = 512;     ///< 静态大图边长（≥ 4 才有 ≥ 2 级 mip 链）
-constexpr int MIP_DRAW = 128;    ///< 缩小绘制边长（4× 降采样，三线性命中 mip ≥ 1）
-constexpr int MIP_FRAMES = 24;   ///< 稳态帧数（unique 变体须预生成同样多的唯一内容图）
+constexpr int MIP_DIM = 512;  ///< 静态大图边长（≥ 4 才有 ≥ 2 级 mip 链）
+constexpr int MIP_DRAW = 128;  ///< 缩小绘制边长（4× 降采样，三线性命中 mip ≥ 1）
+constexpr int MIP_FRAMES = 24;  ///< 稳态帧数（unique 变体须预生成同样多的唯一内容图）
 constexpr int MIP_WARMUP = 3;
 
-constexpr int FX_DIM = 512;      ///< 场景六画幅边长（三效果族各以整幅为一遍）
-constexpr int FX_PASSES = 3;     ///< 每帧效果三连重数（提亮 GPU 工作量，压过批尾排空地板）
-constexpr int FX_FRAMES = 128;   ///< 稳态帧数（排空量子 ≈15.6ms 摊到 0.12 ms/帧地板）
+constexpr int FX_DIM = 512;  ///< 场景六画幅边长（三效果族各以整幅为一遍）
+constexpr int FX_PASSES = 3;  ///< 每帧效果三连重数（提亮 GPU 工作量，压过批尾排空地板）
+constexpr int FX_FRAMES = 128;  ///< 稳态帧数（排空量子 ≈15.6ms 摊到 0.12 ms/帧地板）
 constexpr int FX_WARMUP = 8;
 
 /// @brief 离屏 `WgpuRhi` 装载（`native_window = nullptr` → 无 swapchain 的诊断通路，
@@ -343,7 +335,7 @@ auto wgpu_submit_frame(rhi::WgpuRhi &gpu, int w, int h, const DisplayList &dl) -
 /// @brief 一批帧的双口径计时结果。
 struct WgpuFrameCost {
     double submit_ms = 0.0;  ///< CPU 侧翻译 + 提交均帧（与场景一 fake 桩同口径）
-    double e2e_ms = 0.0;     ///< 批尾一次排空后的均帧（含 GPU 执行与背压）
+    double e2e_ms = 0.0;  ///< 批尾一次排空后的均帧（含 GPU 执行与背压）
 };
 
 /// @brief 预热 warmup 帧后计时 frames 帧，给出双口径。
@@ -357,8 +349,7 @@ struct WgpuFrameCost {
 /// 定时器粒度实测把一次等待放大到 ≈15.6 ms），逐帧同步会让所有场景读到同一个等待量子地板、
 /// 场景差异全被淹没；批尾一次则按帧数摊薄（128 帧 ≈0.12 ms/帧）。
 template <class Fn>
-[[nodiscard]] auto time_batch(rhi::WgpuRhi &gpu, int w, int h, int warmup, int frames, const Fn &one)
-    -> WgpuFrameCost {
+[[nodiscard]] auto time_batch(rhi::WgpuRhi &gpu, int w, int h, int warmup, int frames, const Fn &one) -> WgpuFrameCost {
     auto run_one = [&](int i) {
         DisplayList dl;
         one(i, dl);
@@ -378,25 +369,23 @@ template <class Fn>
     std::vector<std::uint8_t> buf;
     (void)gpu.read_pixels(buf);
     const auto t2 = std::chrono::steady_clock::now();
-    const double n = static_cast<double>(frames);
-    return {std::chrono::duration<double, std::milli>(t1 - t0).count() / n,
-            std::chrono::duration<double, std::milli>(t2 - t0).count() / n};
+    const auto n = static_cast<double>(frames);
+    return {.submit_ms = std::chrono::duration<double, std::milli>(t1 - t0).count() / n,
+            .e2e_ms = std::chrono::duration<double, std::milli>(t2 - t0).count() / n};
 }
 
 /// @brief 场景三：视频流式 vs legacy（与场景一同一批输入与路径判别，真 GPU 双口径）。
 /// @return submit/e2e 均为 0 = 无可用 adapter（调用方整段跳过）。
 auto bench_video_wgpu(bool streaming) -> WgpuFrameCost {
     const std::vector<Image> frames = make_video_frames();
-    auto gpu = offscreen_rhi(VIDEO_W, VIDEO_H);
+    const auto gpu = offscreen_rhi(VIDEO_W, VIDEO_H);
     if (gpu == nullptr) {
         return {};
     }
     std::uint64_t version = 0;
-    return time_batch(*gpu, VIDEO_W, VIDEO_H, VIDEO_WARMUP, VIDEO_FRAMES,
-                      [&](int i, DisplayList &dl) {
-                          push_video_frame(dl, frames[static_cast<std::size_t>(i % frames.size())], streaming,
-                                           ++version);
-                      });
+    return time_batch(*gpu, VIDEO_W, VIDEO_H, VIDEO_WARMUP, VIDEO_FRAMES, [&](int i, DisplayList &dl) {
+        push_video_frame(dl, frames[static_cast<std::size_t>(i % frames.size())], streaming, ++version);
+    });
 }
 
 /// @brief 场景四：GPU 层缓存（transform-only 旋转动画，与场景二同一批输入）。
@@ -413,9 +402,9 @@ auto bench_layer_wgpu(bool cache_layer) -> WgpuFrameCost {
         Painter p;
         p.begin(SCENE_W, SCENE_H);
         p.record(dl);
-        root->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                            .size = Size{.width = static_cast<float>(SCENE_W),
-                                         .height = static_cast<float>(SCENE_H)}},
+        root->paint(p,
+                    Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                         .size = Size{.width = static_cast<float>(SCENE_W), .height = static_cast<float>(SCENE_H)}},
                     ctx);
         p.stop();
     });
@@ -438,7 +427,7 @@ auto bench_mip(bool unique_content) -> MipResult {
     MipResult r;
     r.compute = gpu->capabilities().compute;
 
-    const int total = MIP_WARMUP + MIP_FRAMES;
+    constexpr int total = MIP_WARMUP + MIP_FRAMES;
     std::vector<Image> frames;
     frames.reserve(static_cast<std::size_t>(total));
     frames.push_back(make_noise_image(MIP_DIM, MIP_DIM, 1));
@@ -508,13 +497,12 @@ auto bench_fx_wgpu(bool compute) -> WgpuFrameCost {
     }
     gpu->set_compute_effects_enabled(compute);
     const DisplayList proto = make_fx_proto();
-    return time_batch(*gpu, FX_DIM, FX_DIM, FX_WARMUP, FX_FRAMES,
-                      [&](int, DisplayList &dl) { dl = proto; });
+    return time_batch(*gpu, FX_DIM, FX_DIM, FX_WARMUP, FX_FRAMES, [&](int, DisplayList &dl) { dl = proto; });
 }
 
 auto run_wgpu_scenarios() -> void {
     AURORA_LOG_RAW("bench", "## 场景三：wgpu 真 GPU 离屏——视频逐帧更新（端到端帧成本，含提交与等待）\n\n");
-    auto probe = offscreen_rhi(1, 1);
+    const auto probe = offscreen_rhi(1, 1);
     if (probe == nullptr) {
         AURORA_LOG_RAW("bench", "（无可用 wgpu adapter/device：场景三/四/五/六整段跳过）\n\n");
         return;
@@ -528,8 +516,7 @@ auto run_wgpu_scenarios() -> void {
                    ffmt(3, wl_stream.e2e_ms), " ms |\n");
     AURORA_LOG_RAW("bench", "\n提交口径加速比 ",
                    ffmt(2, wl_stream.submit_ms > 0.0 ? wl_legacy.submit_ms / wl_stream.submit_ms : 0.0),
-                   " 倍、端到端口径 ",
-                   ffmt(2, wl_stream.e2e_ms > 0.0 ? wl_legacy.e2e_ms / wl_stream.e2e_ms : 0.0),
+                   " 倍、端到端口径 ", ffmt(2, wl_stream.e2e_ms > 0.0 ? wl_legacy.e2e_ms / wl_stream.e2e_ms : 0.0),
                    " 倍。与场景一（fake 桩）同口径可比：本段 legacy 每帧唯一内容 → 每帧 PMA 全帧副本 + 新建纹理 + "
                    "缓存超限全清淘汰；streaming 只整幅 sub-upload（无 CPU 预乘、槽复用）。\n\n");
 
@@ -542,8 +529,7 @@ auto run_wgpu_scenarios() -> void {
     AURORA_LOG_RAW("bench", "| cache_layer（GPU 层缓存） | ", ffmt(3, wcached.submit_ms), " ms | ",
                    ffmt(3, wcached.e2e_ms), " ms |\n");
     AURORA_LOG_RAW("bench", "\n提交口径加速比 ",
-                   ffmt(2, wcached.submit_ms > 0.0 ? wbase.submit_ms / wcached.submit_ms : 0.0),
-                   " 倍、端到端口径 ",
+                   ffmt(2, wcached.submit_ms > 0.0 ? wbase.submit_ms / wcached.submit_ms : 0.0), " 倍、端到端口径 ",
                    ffmt(2, wcached.e2e_ms > 0.0 ? wbase.e2e_ms / wcached.e2e_ms : 0.0),
                    " 倍。端到端口径的差额小于提交口径即说明该场景 GPU 侧并非瓶颈（本段每帧只一条 DrawLayer 或全量命令"
                    "翻译，GPU 工作量小）。\n\n");
@@ -557,17 +543,19 @@ auto run_wgpu_scenarios() -> void {
                    ffmt(3, mstatic.cost.e2e_ms), " ms |\n");
     AURORA_LOG_RAW("bench", "| 逐帧唯一内容（每帧重建 mip 链） | ", ffmt(3, munique.cost.submit_ms), " ms | ",
                    ffmt(3, munique.cost.e2e_ms), " ms |\n");
-    AURORA_LOG_RAW("bench", "\ncompute 能力位 ", (mstatic.compute ? "true" : "false"),
-                   "（false = GLES 后端，无 mip 链，两行退化为纯上传对照）。两行之差即「大图每帧换内容走通用图像缓存」的"
-                   "代价：PMA 全帧副本 + 整幅上传 + 整条 mip 链逐级 compute 重建。结论与场景三同向——逐帧更新的大图输入"
-                   "必须走流式槽（流式槽恒单级、无 mip churn）。读绝对值注意：本段每帧重建 DisplayList（含整幅 ",
-                   std::to_string(MIP_DIM), "×", std::to_string(MIP_DIM), " 图像值拷贝与 content_hash 计算），故静态行的"
-                   "地板值是**帧装配的 CPU 成本**（录制侧按值入池，流式分支亦然）而非 GPU 成本——流式路的净收益在槽复用、"
-                   "免 PMA 副本与免 mip churn（场景三即此差额的体现）。\n\n");
+    AURORA_LOG_RAW(
+        "bench", "\ncompute 能力位 ", mstatic.compute ? "true" : "false",
+        "（false = GLES 后端，无 mip 链，两行退化为纯上传对照）。两行之差即「大图每帧换内容走通用图像缓存」的"
+        "代价：PMA 全帧副本 + 整幅上传 + 整条 mip 链逐级 compute 重建。结论与场景三同向——逐帧更新的大图输入"
+        "必须走流式槽（流式槽恒单级、无 mip churn）。读绝对值注意：本段每帧重建 DisplayList（含整幅 ",
+        std::to_string(MIP_DIM), "×", std::to_string(MIP_DIM),
+        " 图像值拷贝与 content_hash 计算），故静态行的"
+        "地板值是**帧装配的 CPU 成本**（录制侧按值入池，流式分支亦然）而非 GPU 成本——流式路的净收益在槽复用、"
+        "免 PMA 副本与免 mip churn（场景三即此差额的体现）。\n\n");
 
     AURORA_LOG_RAW("bench", "## 场景六：区域效果 compute vs 片元兜底两路（", std::to_string(FX_DIM), "×",
-                   std::to_string(FX_DIM), "，blur r6 + Multiply + LinearFade 整幅连做 ",
-                   std::to_string(FX_PASSES), " 遍，", std::to_string(FX_FRAMES), " 帧）\n\n");
+                   std::to_string(FX_DIM), "，blur r6 + Multiply + LinearFade 整幅连做 ", std::to_string(FX_PASSES),
+                   " 遍，", std::to_string(FX_FRAMES), " 帧）\n\n");
     AURORA_LOG_RAW("bench", "| 路径 | 每帧提交（CPU） | 每帧端到端（批尾一次排空） |\n|:---|---:|---:|\n");
     const WgpuFrameCost fxf = bench_fx_wgpu(false);
     const WgpuFrameCost fxc = bench_fx_wgpu(true);
@@ -575,15 +563,14 @@ auto run_wgpu_scenarios() -> void {
                    " ms | ", ffmt(3, fxf.e2e_ms), " ms |\n");
     AURORA_LOG_RAW("bench", "| compute 实路（默认） | ", ffmt(3, fxc.submit_ms), " ms | ", ffmt(3, fxc.e2e_ms),
                    " ms |\n");
-    AURORA_LOG_RAW("bench", "\n提交口径加速比 ",
-                   ffmt(2, fxc.submit_ms > 0.0 ? fxf.submit_ms / fxc.submit_ms : 0.0), " 倍、端到端口径 ",
-                   ffmt(2, fxc.e2e_ms > 0.0 ? fxf.e2e_ms / fxc.e2e_ms : 0.0),
-                   " 倍。compute 能力位 ", (probe->capabilities().compute ? "true" : "false"),
+    AURORA_LOG_RAW("bench", "\n提交口径加速比 ", ffmt(2, fxc.submit_ms > 0.0 ? fxf.submit_ms / fxc.submit_ms : 0.0),
+                   " 倍、端到端口径 ", ffmt(2, fxc.e2e_ms > 0.0 ? fxf.e2e_ms / fxc.e2e_ms : 0.0),
+                   " 倍。compute 能力位 ", probe->capabilities().compute ? "true" : "false",
                    "（false = GLES 端 compute 管线未建成：两行同为片元路，比值无意义）。差额主要在端到端口径"
                    "（效果族 compute 存储纹理路 vs 片元离屏读-改-写路）；提交口径两路同为回放同一帧内容，"
                    "片元路略高源于每次效果额外的离屏 render pass/绑定组装配。本段帧内容恒定（棋盘格 + 斜线带 + "
-                   "整幅效果三连，无图像上传），排空量子（≈15.6 ms/批尾一次）按 ", std::to_string(FX_FRAMES),
-                   " 帧摊薄进 e2e 地板值，两路同额、不影响差额。\n\n");
+                   "整幅效果三连，无图像上传），排空量子（≈15.6 ms/批尾一次）按 ",
+                   std::to_string(FX_FRAMES), " 帧摊薄进 e2e 地板值，两路同额、不影响差额。\n\n");
 }
 
 #endif  // AURORA_BACKEND_GPU_WGPU
@@ -594,8 +581,8 @@ auto run() -> void {
                    "场景三/四/五/六 = wgpu 真 GPU 离屏端到端帧成本）\n\n");
 
     // ---- 场景一：视频流式纹理 ----
-    AURORA_LOG_RAW("bench", "## 场景一：视频逐帧更新（", std::to_string(VIDEO_W), "x", std::to_string(VIDEO_H),
-                   " x ", std::to_string(VIDEO_FRAMES), " 帧，每帧内容唯一）\n\n");
+    AURORA_LOG_RAW("bench", "## 场景一：视频逐帧更新（", std::to_string(VIDEO_W), "x", std::to_string(VIDEO_H), " x ",
+                   std::to_string(VIDEO_FRAMES), " 帧，每帧内容唯一）\n\n");
     AURORA_LOG_RAW("bench", "| 路径 | 纹理分配次数 | 纹理删除次数 | 每帧上传字节 | 每帧 CPU |\n");
     AURORA_LOG_RAW("bench", "|:---|---:|---:|---:|---:|\n");
     const auto legacy = bench_video(false);
@@ -604,11 +591,11 @@ auto run() -> void {
         return ffmt(0, static_cast<double>(c.upload_bytes) / static_cast<double>(VIDEO_FRAMES));
     };
     AURORA_LOG_RAW("bench", "| legacy（content_hash 缓存） | ", std::to_string(legacy.counters.texture_gens), " | ",
-                   std::to_string(legacy.counters.texture_deletes), " | ", per_frame_bytes(legacy.counters),
-                   " | ", ffmt(3, legacy.cpu_ms_per_frame), " ms |\n");
+                   std::to_string(legacy.counters.texture_deletes), " | ", per_frame_bytes(legacy.counters), " | ",
+                   ffmt(3, legacy.cpu_ms_per_frame), " ms |\n");
     AURORA_LOG_RAW("bench", "| streaming（常驻流式槽） | ", std::to_string(stream.counters.texture_gens), " | ",
-                   std::to_string(stream.counters.texture_deletes), " | ", per_frame_bytes(stream.counters),
-                   " | ", ffmt(3, stream.cpu_ms_per_frame), " ms |\n");
+                   std::to_string(stream.counters.texture_deletes), " | ", per_frame_bytes(stream.counters), " | ",
+                   ffmt(3, stream.cpu_ms_per_frame), " ms |\n");
     const auto speedup = stream.cpu_ms_per_frame > 0.0 ? legacy.cpu_ms_per_frame / stream.cpu_ms_per_frame : 0.0;
     AURORA_LOG_RAW("bench", "\nlegacy 每帧 CPU 为 streaming 的 ", ffmt(2, speedup),
                    " 倍；差额即 CPU 预乘全帧副本 + 纹理新建/淘汰 churn（上传字节两路径同量级，"
@@ -616,8 +603,8 @@ auto run() -> void {
 
     // ---- 场景二：GPU 层缓存 ----
     AURORA_LOG_RAW("bench", "## 场景二：transform-only 旋转动画（", std::to_string(GRID_COLS), "×",
-                   std::to_string(GRID_ROWS), " 静态盒网格，", std::to_string(SCENE_W), "x",
-                   std::to_string(SCENE_H), "）\n\n");
+                   std::to_string(GRID_ROWS), " 静态盒网格，", std::to_string(SCENE_W), "x", std::to_string(SCENE_H),
+                   "）\n\n");
     AURORA_LOG_RAW("bench", "| 变体 | 首帧（冷） | 稳态每帧 |\n");
     AURORA_LOG_RAW("bench", "|:---|---:|---:|\n");
     const auto base = bench_layer(false);

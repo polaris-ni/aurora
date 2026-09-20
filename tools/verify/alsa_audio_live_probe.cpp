@@ -62,8 +62,7 @@ auto sine_buffer(int sample_rate, double seconds, double freq, float amp) -> aur
     buf.channels = 2;
     buf.samples.resize(static_cast<std::size_t>(frames) * 2U);
     for (int i = 0; i < frames; ++i) {
-        const float v = amp * static_cast<float>(std::sin(2.0 * kPi * freq *
-                                                          static_cast<double>(i) / sample_rate));
+        const float v = amp * static_cast<float>(std::sin(2.0 * kPi * freq * static_cast<double>(i) / sample_rate));
         buf.samples[static_cast<std::size_t>(i) * 2U] = v;
         buf.samples[static_cast<std::size_t>(i) * 2U + 1U] = v;
     }
@@ -75,8 +74,7 @@ auto sine_pcm(int sample_rate, int frames, double freq, std::int16_t amp) -> std
     std::vector<std::int16_t> pcm(static_cast<std::size_t>(frames) * 2U);
     for (int i = 0; i < frames; ++i) {
         const auto v = static_cast<std::int16_t>(static_cast<double>(amp) *
-                                                 std::sin(2.0 * kPi * freq * static_cast<double>(i) /
-                                                          sample_rate));
+                                                 std::sin(2.0 * kPi * freq * static_cast<double>(i) / sample_rate));
         pcm[static_cast<std::size_t>(i) * 2U] = v;
         pcm[static_cast<std::size_t>(i) * 2U + 1U] = v;
     }
@@ -113,8 +111,8 @@ auto main(int argc, char **argv) -> int {
     const double t0 = ctx->current_time();
     sleep_ms(300);
     const double t1 = ctx->current_time();
-    check(t1 - t0 >= 0.2, "render clock advances via device thread (" +
-                              std::to_string(t1 - t0).substr(0, 5) + "s in 300ms)");
+    check(t1 - t0 >= 0.2,
+          "render clock advances via device thread (" + std::to_string(t1 - t0).substr(0, 5) + "s in 300ms)");
 
     // 4. 缓冲源出声通路（440Hz × 2s → Gain 0.25 → destination）
     {
@@ -123,8 +121,8 @@ auto main(int argc, char **argv) -> int {
         const bool c1 = ctx->connect(src, gain).ok();
         const bool c2 = ctx->connect(gain, ctx->destination()).ok();
         gain->gain().set_value(0.25F);
-        const bool b = src->set_buffer(
-            std::make_shared<const aurora::AudioBuffer>(sine_buffer(48000, 2.0, 440.0, 0.8F))).ok();
+        const bool b =
+            src->set_buffer(std::make_shared<const aurora::AudioBuffer>(sine_buffer(48000, 2.0, 440.0, 0.8F))).ok();
         const bool s = src->start().ok();
         check(c1 && c2 && b && s, "buffer source path: connect + set_buffer + start");
         sleep_ms(2500);
@@ -181,12 +179,12 @@ auto main(int argc, char **argv) -> int {
 
         // a. 扫频 200Hz→2kHz（3s）
         {
-            auto src = ctx->create_buffer_source();
-            auto gain = ctx->create_gain();
+            const auto src = ctx->create_buffer_source();
+            const auto gain = ctx->create_gain();
             static_cast<void>(ctx->connect(src, gain));
             static_cast<void>(ctx->connect(gain, ctx->destination()));
             gain->gain().set_value(0.2F);
-            const int frames = 48000 * 3;
+            constexpr int frames = 48000 * 3;
             aurora::AudioBuffer buf;
             buf.sample_rate = 48000;
             buf.channels = 2;
@@ -199,8 +197,7 @@ auto main(int argc, char **argv) -> int {
                 buf.samples[static_cast<std::size_t>(i) * 2U] = v;
                 buf.samples[static_cast<std::size_t>(i) * 2U + 1U] = v;
             }
-            static_cast<void>(src->set_buffer(
-                std::make_shared<const aurora::AudioBuffer>(std::move(buf))));
+            static_cast<void>(src->set_buffer(std::make_shared<const aurora::AudioBuffer>(std::move(buf))));
             static_cast<void>(src->start());
             wait_key("[a] sweep 200Hz->2kHz playing: audible, no clicks/pops?");
         }

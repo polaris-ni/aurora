@@ -17,13 +17,13 @@ using serialization::CodeStyle;
 
 // Parse the style argument of to-code / to-yaml into a CodeStyle enum; unknown values fall back to Fluent.
 inline auto parse_code_style(const std::string &style_str) -> CodeStyle {
-    auto style = CodeStyle::Fluent;
     if (style_str == "step") {
-        style = CodeStyle::StepByStep;
-    } else if (style_str == "di") {
-        style = CodeStyle::DesignatedInit;
+        return CodeStyle::StepByStep;
     }
-    return style;
+    if (style_str == "di") {
+        return CodeStyle::DesignatedInit;
+    }
+    return CodeStyle::Fluent;
 }
 
 }  // namespace aurora::tools

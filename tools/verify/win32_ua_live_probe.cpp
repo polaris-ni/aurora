@@ -77,7 +77,6 @@
 #include <utility>
 #include <vector>
 
-#include "aurora/core/accessibility.h"
 #include "aurora/state/state.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/checkbox.h"
@@ -94,12 +93,12 @@ using aurora::Node;
 
 /// @brief 探针要看到的控件清单：期望 ControlType + 期望 pattern（按设计 §7.3 映射表）。
 struct Expectation {
-    const char *label;
-    CONTROLTYPEID control_type;
-    bool want_invoke;
-    bool want_toggle;
-    bool want_value;
-    bool want_range;
+    const char *label{};
+    CONTROLTYPEID control_type{};
+    bool want_invoke{};
+    bool want_toggle{};
+    bool want_value{};
+    bool want_range{};
     /// @brief 是否要求 Non-empty Name。
     ///
     /// 只对**自带标签来源**的控件为真：Button（`ButtonProps::label`）、TextInput
@@ -107,7 +106,7 @@ struct Expectation {
     /// 与 `Slider` 是叶子控件、没有内建 label，而本库里标签通常是它们的**兄弟**节点而非
     /// 子节点，G24 的「唯一文本子节点」兜底因此拿不到名字。是否补 `aria-labelledby` 式的
     /// 标签关联（或 `set_accessibility_label`）属设计决策，探针只如实呈现、不作判负。
-    bool require_name;
+    bool require_name{};
     /// @brief 期望经「兄弟标签关联」解析出的 Name（#1-C 验收）；`nullptr` 表示不作此断言。
     ///
     /// 仅对 `Checkbox` / `Slider` 这类「标签常为兄弟」的控件有意义：探针将它们放进
@@ -116,11 +115,43 @@ struct Expectation {
 };
 
 constexpr Expectation kExpectations[] = {
-    {"Button", UIA_ButtonControlTypeId, true, false, false, false, true},
-    {"Checkbox", UIA_CheckBoxControlTypeId, false, true, false, false, false, "启用自动更新"},
-    {"Slider", UIA_SliderControlTypeId, false, false, false, true, false, "音量"},
-    {"TextInput", UIA_EditControlTypeId, false, false, true, false, true},
-    {"Text", UIA_TextControlTypeId, false, false, false, false, true},
+    {.label = "Button",
+     .control_type = UIA_ButtonControlTypeId,
+     .want_invoke = true,
+     .want_toggle = false,
+     .want_value = false,
+     .want_range = false,
+     .require_name = true},
+    {.label = "Checkbox",
+     .control_type = UIA_CheckBoxControlTypeId,
+     .want_invoke = false,
+     .want_toggle = true,
+     .want_value = false,
+     .want_range = false,
+     .require_name = false,
+     .sibling_expect = "启用自动更新"},
+    {.label = "Slider",
+     .control_type = UIA_SliderControlTypeId,
+     .want_invoke = false,
+     .want_toggle = false,
+     .want_value = false,
+     .want_range = true,
+     .require_name = false,
+     .sibling_expect = "音量"},
+    {.label = "TextInput",
+     .control_type = UIA_EditControlTypeId,
+     .want_invoke = false,
+     .want_toggle = false,
+     .want_value = true,
+     .want_range = false,
+     .require_name = true},
+    {.label = "Text",
+     .control_type = UIA_TextControlTypeId,
+     .want_invoke = false,
+     .want_toggle = false,
+     .want_value = false,
+     .want_range = false,
+     .require_name = true},
 };
 
 /// @brief 一次遍历采到的节点事实（对齐 UIA 客户端可见的属性面）。
@@ -155,7 +186,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     if (s == nullptr) {
         return {};
     }
-    const int wide = SysStringLen(s);
+    const int wide = static_cast<int>(SysStringLen(s));
     const int narrow = WideCharToMultiByte(CP_UTF8, 0, s, wide, nullptr, 0, nullptr, nullptr);
     if (narrow <= 0) {
         return {};
@@ -260,14 +291,16 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     }
     VARIANT v{};
     VariantInit(&v);
-    const bool ok = SUCCEEDED(e->GetCurrentPropertyValueEx(id, TRUE, &v)) && v.vt == VT_BOOL &&
-                    v.boolVal != VARIANT_FALSE;
-    VariantClear(&v);
+    const bool ok =
+        SUCCEEDED(e->GetCurrentPropertyValueEx(id, TRUE, &v)) && v.vt == VT_BOOL && v.boolVal != VARIANT_FALSE;
+    (void)VariantClear(&v);
     return ok;
 }
 
 /// @brief 取 pattern：`GetCurrentPattern`（读屏取 pattern 的同款调用）。
 /// @param hr 出参：调用返回码（`S_OK` 表示可用，`E_FAIL`/`UIA_E_NOTSUPPORTED` 表示不支持）。
+/// @param e 目标元素；`nullptr` 时直接返回 false。
+/// @param pid 要查询的模式 ID（如 `UIA_InvokePatternId`）。
 [[nodiscard]] auto query_pattern(IUIAutomationElement *e, PATTERNID pid, HRESULT *hr) -> bool {
     if (hr != nullptr) {
         *hr = E_POINTER;
@@ -488,7 +521,8 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
     if (const aurora::a11y::Provider *bridge = surface.accessibility_provider(); bridge != nullptr) {
         emit("bridge = " + bridge->name() + ", active = " + (bridge->is_active() ? "true" : "false"));
     } else {
-        AURORA_LOG_ERROR("verify", std::string(label) + ": bridge still absent after client query (WM_GETOBJECT not wired)");
+        AURORA_LOG_ERROR("verify",
+                         std::string(label) + ": bridge still absent after client query (WM_GETOBJECT not wired)");
         root_el->Release();
         automation->Release();
         return 4;
@@ -534,10 +568,8 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
 
     // 每个期望控件：`FrameworkId == "Aurora"`（确属本桥投影）∧ ControlType 命中 ∧
     // 其声明的 pattern 可取到 ∧ 具备可访问名（G22 必需属性集；无 label 的控件由唯一文本子节点兜底）。
-    const std::size_t own_nodes =
-        static_cast<std::size_t>(std::count_if(nodes.begin(), nodes.end(), [](const Visited &v) -> bool {
-            return v.framework_id == "Aurora";
-        }));
+    const auto own_nodes = static_cast<std::size_t>(
+        std::ranges::count_if(nodes, [](const Visited &v) -> bool { return v.framework_id == "Aurora"; }));
     emit("own (FrameworkId=Aurora) nodes = " + aurora_verify::format_uint(own_nodes) + " / visited " +
          aurora_verify::format_uint(nodes.size()) + " (剩余为 UIA 默认 HWND provider 合成的非客户区)");
     if (own_nodes == 0) {
@@ -546,7 +578,7 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
     }
 
     for (const Expectation &exp : kExpectations) {
-        const auto it = std::find_if(nodes.begin(), nodes.end(), [&exp](const Visited &v) -> bool {
+        const auto it = std::ranges::find_if(nodes, [&exp](const Visited &v) -> bool {
             return v.framework_id == "Aurora" && v.control_type == static_cast<long long>(exp.control_type);
         });
         if (it == nodes.end()) {
@@ -561,8 +593,8 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
         if (!ok) {
             AURORA_LOG_ERROR("verify", std::string(label) + ": " + exp.label + " (controlType " +
                                            std::to_string(exp.control_type) + ") missing required pattern; got [" +
-                                           patterns_of(v) + "] hr{Invoke=" + hex_hr(v.hr_invoke) + " Toggle=" +
-                                           hex_hr(v.hr_toggle) + " Value=" + hex_hr(v.hr_value) +
+                                           patterns_of(v) + "] hr{Invoke=" + hex_hr(v.hr_invoke) +
+                                           " Toggle=" + hex_hr(v.hr_toggle) + " Value=" + hex_hr(v.hr_value) +
                                            " Range=" + hex_hr(v.hr_range) + "} (0x0=S_OK/可用)");
             ++failures;
             continue;
@@ -581,9 +613,8 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
         }
         // #1-C 兄弟标签关联验收：期望 Name 由最近相邻文本兄弟解析而来。
         if (exp.sibling_expect != nullptr && v.name != exp.sibling_expect) {
-            AURORA_LOG_ERROR("verify", std::string(label) + ": " + exp.label +
-                                               " sibling-label Name mismatch: got \"" + v.name +
-                                               "\" expected \"" + exp.sibling_expect + "\" (#1-C)");
+            AURORA_LOG_ERROR("verify", std::string(label) + ": " + exp.label + " sibling-label Name mismatch: got \"" +
+                                           v.name + "\" expected \"" + exp.sibling_expect + "\" (#1-C)");
             ++failures;
             continue;
         }
@@ -593,7 +624,7 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
 
     // #3 / #7 几何验收：自有（Aurora）控件必须投影非空矩形（#3）；文本控件补文本几何盲区断言（#7）。
     for (const Expectation &exp : kExpectations) {
-        const auto it = std::find_if(nodes.begin(), nodes.end(), [&exp](const Visited &v) -> bool {
+        const auto it = std::ranges::find_if(nodes, [&exp](const Visited &v) -> bool {
             return v.framework_id == "Aurora" && v.control_type == static_cast<long long>(exp.control_type);
         });
         if (it == nodes.end()) {
@@ -647,27 +678,29 @@ auto main() -> int {
     int rc = 0;
 
 #if defined(AURORA_BACKEND_WIN32)
-    rc = std::max(rc, run_backend("Win32Surface/GDI", "Aurora UIA verify (GDI)", []() -> std::unique_ptr<aurora::Window> {
-        auto res = aurora::create_native_window(aurora::WindowOptions{
-            .size = aurora::Size{.width = 520.0F, .height = 420.0F}, .title = "Aurora UIA verify (GDI)"});
-        return res ? std::move(res.value()) : nullptr;
-    }));
+    rc = std::max(rc,
+                  run_backend("Win32Surface/GDI", "Aurora UIA verify (GDI)", []() -> std::unique_ptr<aurora::Window> {
+                      auto res = aurora::create_native_window(aurora::WindowOptions{
+                          .size = aurora::Size{.width = 520.0F, .height = 420.0F}, .title = "Aurora UIA verify (GDI)"});
+                      return res ? std::move(res.value()) : nullptr;
+                  }));
 #else
     emit("Win32Surface/GDI: SKIPPED (AURORA_BACKEND_WIN32 off)");
 #endif
 
 #if defined(AURORA_BACKEND_D3D11)
-    rc = std::max(rc, run_backend("D3D11Surface/GPU", "Aurora UIA verify (D3D11)",
-                                  []() -> std::unique_ptr<aurora::Window> {
-        auto res = aurora::create_native_window(aurora::WindowOptions{
-            .size = aurora::Size{.width = 520.0F, .height = 420.0F},
-            .title = "Aurora UIA verify (D3D11)",
-            .renderer = aurora::RendererPreference::GpuD3D11});
-        return res ? std::move(res.value()) : nullptr;
-    }));
+    rc = std::max(rc,
+                  run_backend("D3D11Surface/GPU", "Aurora UIA verify (D3D11)", []() -> std::unique_ptr<aurora::Window> {
+                      auto res = aurora::create_native_window(
+                          aurora::WindowOptions{.size = aurora::Size{.width = 520.0F, .height = 420.0F},
+                                                .title = "Aurora UIA verify (D3D11)",
+                                                .renderer = aurora::RendererPreference::GpuD3D11});
+                      return res ? std::move(res.value()) : nullptr;
+                  }));
 #else
-    emit("D3D11Surface/GPU: SKIPPED (AURORA_BACKEND_D3D11 off; SAME Win32Window host as GDI -- "
-         "the bridge is shared, enable the backend to cover the GPU blit path)");
+    emit(
+        "D3D11Surface/GPU: SKIPPED (AURORA_BACKEND_D3D11 off; SAME Win32Window host as GDI -- "
+        "the bridge is shared, enable the backend to cover the GPU blit path)");
 #endif
 
     if (rc == 0) {

@@ -186,12 +186,8 @@ auto main() -> int {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
             // 的边界检查开销会影响计时
             bi_b.masks[0] = 0x000000FFU;
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
-            // 的边界检查开销会影响计时
-            bi_b.masks[1] = 0x0000FF00U;
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
-            // 的边界检查开销会影响计时
-            bi_b.masks[2] = 0x00FF0000U;
+            bi_b.masks[1] = 0x0000FF00U;  // NOLINT
+            bi_b.masks[2] = 0x00FF0000U;  // NOLINT
             void *bits_b = nullptr;
             HBITMAP dib_b = CreateDIBSection(
                 wdc,

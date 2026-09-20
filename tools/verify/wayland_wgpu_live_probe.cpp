@@ -47,9 +47,7 @@
 
 namespace {
 
-auto emit(const std::string &text) -> void {
-    AURORA_LOG_RAW("verify", text, "\n");
-}
+auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
 int failures = 0;
 
@@ -80,16 +78,13 @@ auto make_video_frame(int w, int h, std::uint8_t r, std::uint8_t g, std::uint8_t
 // 流式「视频」控件：pixels 恒定、仅 stream_version 递增（流式通道逐帧重传的语义）。
 class StreamVideoBox final : public aurora::LeafWidget {
   public:
-    StreamVideoBox(int w, int h, std::uint64_t key)
-        : frame_(make_video_frame(w, h, 255, 0, 0)) {
+    StreamVideoBox(int w, int h, std::uint64_t key) : frame_(make_video_frame(w, h, 255, 0, 0)) {
         frame_.stream_key = key;
         frame_.stream_version = 1;
         sz_ = aurora::Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
     }
 
-    void advance_version() {
-        frame_.stream_version++;
-    }
+    void advance_version() { frame_.stream_version++; }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "StreamVideoBox"; }
 
@@ -128,8 +123,8 @@ class GridBox final : public aurora::LeafWidget {
 
 // read_pixels 输出（RGBA8，行序自上而下）取样，越界返回全零。
 auto sample(const std::vector<std::uint8_t> &px, int canvas_w, int x, int y) -> std::array<int, 3> {
-    const std::size_t idx = (static_cast<std::size_t>(y) * static_cast<std::size_t>(canvas_w) +
-                             static_cast<std::size_t>(x)) * 4U;
+    const std::size_t idx =
+        (static_cast<std::size_t>(y) * static_cast<std::size_t>(canvas_w) + static_cast<std::size_t>(x)) * 4U;
     if (px.size() < idx + 3) {
         return {0, 0, 0};
     }
@@ -151,6 +146,7 @@ auto main(int argc, char **argv) -> int {
     emit("== aurora verify: Wayland wgpu GPU raster (host window + offscreen streams) ==");
 
 #if !defined(AURORA_BACKEND_GPU_WGPU) || !defined(AURORA_BACKEND_WAYLAND)
+    (void)interactive;
     emit("[SKIP] 此构建未编译 Wayland wgpu 通道（AURORA_BACKEND_GPU_WGPU / AURORA_BACKEND_WAYLAND）");
     return 2;
 #else
@@ -255,12 +251,11 @@ auto main(int argc, char **argv) -> int {
         p.begin(LCANVAS_W, LH + 40);
         p.record(dl);
         if (content) {
-            p.begin_layer(LAYER_KEY, aurora::Size{.width = static_cast<float>(LW),
-                                                  .height = static_cast<float>(LH)});
-            p.fill_rect(aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = 0.0F},
-                                     .size = aurora::Size{.width = static_cast<float>(LW),
-                                                          .height = static_cast<float>(LH)}},
-                        aurora::Color{0, 200, 80, 255});
+            p.begin_layer(LAYER_KEY, aurora::Size{.width = static_cast<float>(LW), .height = static_cast<float>(LH)});
+            p.fill_rect(
+                aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = 0.0F},
+                             .size = aurora::Size{.width = static_cast<float>(LW), .height = static_cast<float>(LH)}},
+                aurora::Color{0, 200, 80, 255});
             p.end_layer();
         }
         p.draw_layer(LAYER_KEY, aurora::Matrix2D::from_translate(20.0F, 20.0F), 1.0F);
@@ -325,8 +320,7 @@ auto main(int argc, char **argv) -> int {
     if (!offscreen.capabilities().compute) {
         emit("[SKIP] adapter 无 compute，区域效果 compute 探针跳过（片元兜底由 golden 覆盖）");
     } else {
-        auto fx_frame = [&](void (*apply_fx)(aurora::Painter &)
-                            ) -> std::vector<std::uint8_t> {
+        auto fx_frame = [&](void (*apply_fx)(aurora::Painter &)) -> std::vector<std::uint8_t> {
             aurora::DisplayList dl;
             aurora::Painter p;
             p.begin(64, 64);
@@ -358,10 +352,11 @@ auto main(int argc, char **argv) -> int {
                                        .size = aurora::Size{.width = 32.0F, .height = 16.0F}},
                           1.0F);
         });
-        const auto b_edge = sample(pb, 64, 16, 32);   // 期望 ≈(136,73,43)：H 趟钳位 tap 混入 1 列底色
-        const auto b_in = sample(pb, 64, 32, 32);     // 块内 3×3 全同色 → 恒等 (200,100,50)
-        const auto b_out = sample(pb, 64, 60, 60);    // 区外 untouched
-        check(b_edge[0] > 100 && b_edge[0] < 190, "cs_blur：边界像素混入底色（r∈(100,190)，实得 " + std::to_string(b_edge[0]) + "）");
+        const auto b_edge = sample(pb, 64, 16, 32);  // 期望 ≈(136,73,43)：H 趟钳位 tap 混入 1 列底色
+        const auto b_in = sample(pb, 64, 32, 32);  // 块内 3×3 全同色 → 恒等 (200,100,50)
+        const auto b_out = sample(pb, 64, 60, 60);  // 区外 untouched
+        check(b_edge[0] > 100 && b_edge[0] < 190,
+              "cs_blur：边界像素混入底色（r∈(100,190)，实得 " + std::to_string(b_edge[0]) + "）");
         check(b_in == std::array<int, 3>{200, 100, 50}, "cs_blur：块内恒权均值恒等（精确不变）");
         check(b_out == std::array<int, 3>{10, 20, 30}, "cs_blur：区外 untouched");
         // blend：Multiply [8,24)²，tint=(255,0,255)，strength=0.5 → g 通道减半（s·0 混回）。
@@ -370,10 +365,12 @@ auto main(int argc, char **argv) -> int {
                                         .size = aurora::Size{.width = 16.0F, .height = 16.0F}},
                            aurora::BlendMode::Multiply, aurora::Color{255, 0, 255, 255}, 0.5F);
         });
-        const auto j_bg = sample(pj, 64, 12, 12);   // 底 (10,20,30) → g: 20+0.5·(0−20)=10
+        const auto j_bg = sample(pj, 64, 12, 12);  // 底 (10,20,30) → g: 20+0.5·(0−20)=10
         const auto j_blk = sample(pj, 64, 20, 20);  // 块 (200,100,50) → g: 100+0.5·(0−100)=50
-        check(std::abs(j_bg[1] - 10) <= 2, "cs_blend：Multiply 底色 g 减半（期望≈10，实得 " + std::to_string(j_bg[1]) + "）");
-        check(std::abs(j_blk[1] - 50) <= 2, "cs_blend：Multiply 块色 g 减半（期望≈50，实得 " + std::to_string(j_blk[1]) + "）");
+        check(std::abs(j_bg[1] - 10) <= 2,
+              "cs_blend：Multiply 底色 g 减半（期望≈10，实得 " + std::to_string(j_bg[1]) + "）");
+        check(std::abs(j_blk[1] - 50) <= 2,
+              "cs_blend：Multiply 块色 g 减半（期望≈50，实得 " + std::to_string(j_blk[1]) + "）");
         // mask：LinearFade [16,48)² 纵向淡出 → 顶行近原色、底行近全黑。
         const auto pm = fx_frame([](aurora::Painter &p) {
             p.mask_region(aurora::Rect{.origin = aurora::Point{.x = 16.0F, .y = 16.0F},
@@ -423,9 +420,8 @@ auto main(int argc, char **argv) -> int {
         win.surface().poll_platform_events();
     }
     check(present_ok, "present_root 连续 " + std::to_string(AUTO_FRAMES) + " 帧成功（真实窗口上屏 + 文本 + 流式图像）");
-    check(win.surface().frame_count() >= AUTO_FRAMES,
-          "frame_count() >= " + std::to_string(AUTO_FRAMES) +
-              "（实得 " + std::to_string(win.surface().frame_count()) + "）");
+    check(win.surface().frame_count() >= AUTO_FRAMES, "frame_count() >= " + std::to_string(AUTO_FRAMES) + "（实得 " +
+                                                          std::to_string(win.surface().frame_count()) + "）");
     check(ws->gpu_active(), "帧后 gpu_active() 仍为真（未永久回退软件路径）");
     // 白闪签名：任何一帧经软件路径（wl_shm 上屏 Painter 缓冲）即为缺陷——GPU 模式下该缓冲
     // 只有底色，无控件像素。系统重绘（map/configure → present_request_）亦必须落回 GPU 帧通道。
@@ -435,8 +431,8 @@ auto main(int argc, char **argv) -> int {
     const int deco = ws->decoration_replay_count();
     check(deco == 0 || deco >= AUTO_FRAMES,
           "CSD 装饰回放进 GPU 帧 == 0（SSD）或 >= 出帧数（CSD）；实得 " + std::to_string(deco));
-    emit("  · decoration_replay_count()=" + std::to_string(deco) + "，frame_count()=" +
-         std::to_string(win.surface().frame_count()) + "（>0 即本合成器走 CSD 兜底）");
+    emit("  · decoration_replay_count()=" + std::to_string(deco) +
+         "，frame_count()=" + std::to_string(win.surface().frame_count()) + "（>0 即本合成器走 CSD 兜底）");
 
     // ---- 人工段 ----
     if (interactive) {

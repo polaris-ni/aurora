@@ -70,8 +70,14 @@
 #error "AURORA_BACKEND_X11 or AURORA_BACKEND_WAYLAND must be enabled"
 #endif
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -80,32 +86,26 @@
 #include <string>
 #include <vector>
 
-#include <csignal>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include "aurora/i18n/localized_string.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
 #include "aurora/widget/text_input.h"
-#include "aurora/window/window.h"
 #include "aurora/window/surface.h"
+#include "aurora/window/window.h"
 #include "verify_print.h"
 
 namespace {
 
-constexpr const char *kAppName = "Aurora";        ///< 桥 env.app_name（宿主接线固定值）
-constexpr const char *kFrameTitle = "Aurora AT-SPI verify";  ///< FRAME Name（窗口标题）
+constexpr auto AURORA_AT_SPI_APP_NAME = "Aurora";  ///< 桥 env.app_name（宿主接线固定值）
+constexpr auto AURORA_AT_SPI_FRAME_TITLE = "Aurora AT-SPI verify";  ///< FRAME Name（窗口标题）
 
 bool g_press_executed = false;  ///< DoAction 跨半程闭环证据（on_click 在 UI 线程同步置位）
 
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
 /// @brief 客户端脚本（libatspi 官方 GI 绑定，与 Accerciser 同栈）。逐断言打 RES 行。
-const char *kClientScript = R"PY(
+constexpr auto AURORA_AT_SPI_CLIENT_SCRIPT = R"PY(
 import sys, time
 import gi
 gi.require_version('Atspi', '2.0')
@@ -236,8 +236,9 @@ print('DONE', flush=True)
 
 /// @brief python3 + gi/Atspi 可用性（阻塞调用即可：此步不触本进程桥）。
 [[nodiscard]] auto python_atspi_available() -> bool {
-    return std::system("python3 -c \"import gi; gi.require_version('Atspi','2.0'); "
-                       "from gi.repository import Atspi\" >/dev/null 2>&1") == 0;
+    return std::system(
+               "python3 -c \"import gi; gi.require_version('Atspi','2.0'); "
+               "from gi.repository import Atspi\" >/dev/null 2>&1") == 0;
 }
 
 [[nodiscard]] auto write_text_file(const std::string &path, const std::string &text) -> bool {
@@ -266,7 +267,7 @@ print('DONE', flush=True)
                 close(fd);
             }
         }
-        execlp("python3", "python3", script_path.c_str(), kAppName, kFrameTitle,
+        execlp("python3", "python3", script_path.c_str(), AURORA_AT_SPI_APP_NAME, AURORA_AT_SPI_FRAME_TITLE,
                static_cast<char *>(nullptr));
         _exit(127);
     }
@@ -353,7 +354,7 @@ auto main(int argc, char **argv) -> int {
 
     // ---- 1) 建真实窗口 + 注根（桥首帧建链并 eager Embed）----
     auto made = aurora::create_native_window(aurora::WindowOptions{
-        .size = aurora::Size{.width = 480.0F, .height = 320.0F}, .title = kFrameTitle});
+        .size = aurora::Size{.width = 480.0F, .height = 320.0F}, .title = AURORA_AT_SPI_FRAME_TITLE});
     if (!made) {
         AURORA_LOG_ERROR("verify", "create_native_window failed: " + made.error().message);
         return 2;
@@ -377,14 +378,13 @@ auto main(int argc, char **argv) -> int {
                          "(designed permanent degradation; NO_AT_BRIDGE also lands here)");
         return 3;
     }
-    emit("bridge = " + std::string{bridge->name()} +
-         ", active = " + (bridge->is_active() ? "true" : "false"));
+    emit("bridge = " + std::string{bridge->name()} + ", active = " + (bridge->is_active() ? "true" : "false"));
 
     // ---- 3) 起跨进程 libatspi 客户端；父进程持续泵桥（客户端每个调用都等我们应答）----
     const std::string tag = std::to_string(static_cast<long>(::getpid()));
     const std::string script_path = "/tmp/aurora_verify_atspi_client_" + tag + ".py";
     const std::string out_path = "/tmp/aurora_verify_atspi_out_" + tag + ".txt";
-    if (!write_text_file(script_path, kClientScript)) {
+    if (!write_text_file(script_path, AURORA_AT_SPI_CLIENT_SCRIPT)) {
         AURORA_LOG_ERROR("verify", "Cannot write client script to " + script_path);
         return 4;
     }
@@ -429,7 +429,7 @@ auto main(int argc, char **argv) -> int {
     }
     // 跨半程闭环：DoAction 应答过后，进程内 on_click 必须真的被触发。
     const bool do_action_ran =
-        std::any_of(results.begin(), results.end(), [](const ResLine &r) { return r.id == "button-do-action" && r.status == "pass"; });
+        std::ranges::any_of(results, [](const ResLine &r) { return r.id == "button-do-action" && r.status == "pass"; });
     if (do_action_ran) {
         const bool fired = g_press_executed;
         emit(aurora_verify::pad_right(fired ? "pass" : "fail", 8) +
@@ -441,7 +441,9 @@ auto main(int argc, char **argv) -> int {
     }
     emit("summary: checks=" + aurora_verify::format_uint(results.size()) +
          ", failures=" + aurora_verify::format_int(failures) +
-         (timed_out ? " [client TIMEOUT]" : done ? "" : " [client truncated (no DONE)]"));
+         (timed_out ? " [client TIMEOUT]"
+          : done    ? ""
+                    : " [client truncated (no DONE)]"));
 
     std::remove(script_path.c_str());
     std::remove(out_path.c_str());
@@ -455,8 +457,8 @@ auto main(int argc, char **argv) -> int {
 
     // ---- 5) 人工段：驻留泵桥，供 Accerciser / 手工脚本下钻 ----
     if (keep_seconds > 0) {
-        emit("interactive: pumping for " + std::to_string(keep_seconds) +
-             "s -- inspect with Accerciser (app \"" + kAppName + "\", frame \"" + kFrameTitle + "\")");
+        emit("interactive: pumping for " + std::to_string(keep_seconds) + "s -- inspect with Accerciser (app \"" +
+             AURORA_AT_SPI_APP_NAME + "\", frame \"" + AURORA_AT_SPI_FRAME_TITLE + "\")");
         const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(keep_seconds);
         while (std::chrono::steady_clock::now() < end) {
             window->surface().wait_events(50.0);

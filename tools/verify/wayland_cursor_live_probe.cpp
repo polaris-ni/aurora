@@ -60,8 +60,6 @@
 //   构建命令中的行尾反斜杠为续行符，故本头注释整体使用块注释形态（避免 -Wcomment）。
 // ============================================================================ */
 
-#include "aurora/core/platform.h"
-
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
@@ -70,17 +68,16 @@
 #include <vector>
 
 #include "aurora/aurora.h"
+#include "aurora/core/platform.h"
 #include "aurora/window/cursor_map.h"
 #include "aurora/window/native_surfaces.h"
 #include "verify_print.h"
 
 namespace {
 
-auto emit(const std::string &text) -> void {
-    AURORA_LOG_RAW("verify", text, "\n");
-}
+auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
-int failures = 0;
+int failures = 0;  // NOLINT
 
 auto check(bool ok, const std::string &label) -> void {
     emit(std::string("[") + (ok ? "PASS" : "FAIL") + "] " + label);
@@ -132,8 +129,7 @@ auto main(int argc, char **argv) -> int {
     // 「本会话究竟有没有指针设备」的现场证据（无指针时 rc=3 的诊断靠它区分）。
     std::int64_t mouse_events = 0;
     surface.set_event_handler([&mouse_events](aurora::Event &ev) {
-        if (dynamic_cast<aurora::MouseEvent *>(&ev) != nullptr ||
-            dynamic_cast<aurora::ScrollEvent *>(&ev) != nullptr) {
+        if (dynamic_cast<aurora::MouseEvent *>(&ev) != nullptr || dynamic_cast<aurora::ScrollEvent *>(&ev) != nullptr) {
             ++mouse_events;
         }
     });
@@ -153,14 +149,13 @@ auto main(int argc, char **argv) -> int {
             if (entered) {
                 break;
             }
-            (void)surface.begin_frame(static_cast<int>(surface.size().width),
-                                      static_cast<int>(surface.size().height));
+            (void)surface.begin_frame(static_cast<int>(surface.size().width), static_cast<int>(surface.size().height));
             (void)surface.present();
             nap_ms(20);
         }
     }
-    emit("WAYLAND_DISPLAY=" + std::string(std::getenv("WAYLAND_DISPLAY") != nullptr ? std::getenv("WAYLAND_DISPLAY")
-                                                                                    : "") +
+    emit("WAYLAND_DISPLAY=" +
+         std::string(std::getenv("WAYLAND_DISPLAY") != nullptr ? std::getenv("WAYLAND_DISPLAY") : "") +
          "，scale=" + aurora_verify::format_uint(static_cast<unsigned>(surface.scale_factor())) +
          "，落点策略=" + aurora_verify::format_int(strategy) +
          "，窗口尺寸=" + aurora_verify::format_int(static_cast<long long>(surface.size().width)) + "x" +
@@ -188,10 +183,9 @@ auto main(int argc, char **argv) -> int {
     // ---- 11 形状逐个下发 + 逐项读回 ----
     emit("");
     emit(aurora_verify::pad_right("shape(rfc name)", 20) + aurora_verify::pad_right("resolved", 16) +
-         aurora_verify::pad_right("w", 5) + aurora_verify::pad_right("h", 5) +
-         aurora_verify::pad_right("bscale", 7) + aurora_verify::pad_right("xhot", 6) +
-         aurora_verify::pad_right("yhot", 6) + aurora_verify::pad_right("frames", 8) +
-         aurora_verify::pad_right("commits", 9) + "buffer_id");
+         aurora_verify::pad_right("w", 5) + aurora_verify::pad_right("h", 5) + aurora_verify::pad_right("bscale", 7) +
+         aurora_verify::pad_right("xhot", 6) + aurora_verify::pad_right("yhot", 6) +
+         aurora_verify::pad_right("frames", 8) + aurora_verify::pad_right("commits", 9) + "buffer_id");
 
     const int total = static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT);
     std::set<std::uint64_t> buffers;
@@ -263,8 +257,7 @@ auto main(int argc, char **argv) -> int {
         int idx = 0;
         while (!surface.should_close()) {
             surface.set_cursor(static_cast<aurora::CursorShape>(idx % total));
-            (void)surface.begin_frame(static_cast<int>(surface.size().width),
-                                      static_cast<int>(surface.size().height));
+            (void)surface.begin_frame(static_cast<int>(surface.size().width), static_cast<int>(surface.size().height));
             (void)surface.present();
             surface.poll_platform_events();
             nap_ms(1200);

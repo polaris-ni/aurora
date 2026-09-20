@@ -31,9 +31,9 @@ namespace aurora::tools::inspector {
 
 /// @brief 一次 HTTP 的响应。
 struct HttpResponse {
-    int status = 0;         ///< HTTP 状态码（0 = 未收到响应）
-    std::string body;       ///< 响应体
-    std::string error;      ///< 传输层错误说明；空表示成功
+    int status = 0;  ///< HTTP 状态码（0 = 未收到响应）
+    std::string body;  ///< 响应体
+    std::string error;  ///< 传输层错误说明；空表示成功
 
     [[nodiscard]] auto ok() const -> bool { return error.empty(); }
 };
@@ -79,8 +79,7 @@ inline constexpr std::size_t kMaxResponseBody = 4U * 1024U * 1024U;  // 4 MiB
 /// @note Thread: safe（每次调用独立建连，自带 WSA 初始化）
 /// @note Side-effects: 网络 I/O（仅限 loopback）
 [[nodiscard]] inline auto http_request(std::string_view method, std::string_view host, std::uint16_t port,
-                                      std::string_view target, std::string_view body = {})
-    -> HttpResponse {
+                                       std::string_view target, std::string_view body = {}) -> HttpResponse {
     HttpResponse out;
     if (!is_loopback_host(host)) {
         out.error = "refusing non-loopback host: " + std::string(host);
@@ -199,7 +198,7 @@ inline constexpr std::size_t kMaxResponseBody = 4U * 1024U * 1024U;  // 4 MiB
     const std::size_t sp1 = head.find(' ');
     if (sp1 != std::string::npos) {
         const std::size_t sp2 = head.find(' ', sp1 + 1);
-        const std::string code = head.substr(sp1 + 1, (sp2 == std::string::npos ? std::string::npos : sp2 - sp1 - 1));
+        const std::string code = head.substr(sp1 + 1, sp2 == std::string::npos ? std::string::npos : sp2 - sp1 - 1);
         try {
             out.status = std::stoi(code);
         } catch (...) {

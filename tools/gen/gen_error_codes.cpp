@@ -59,7 +59,7 @@ constexpr std::array<const char *, 4> AURORA_SEVERITIES = {"info", "warning", "e
 auto cpp_escape(const std::string &s) -> std::string {
     std::string out;
     out.reserve(s.size() + 8);
-    for (char c : s) {
+    for (const char c : s) {
         switch (c) {
             case '\\':
                 out += "\\\\";
@@ -371,10 +371,10 @@ void write_file(const std::string &path, const std::string &content) {
 // ofstream failures), so main should not be forced to noexcept; hence exception-escape is suppressed.
 auto main(int argc, char **argv) -> int {  // NOLINT(bugprone-exception-escape)
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-bounds-constant-array-index)
-    std::string toml = (argc > 1) ? argv[1] : "codespec/errors.toml";
-    std::string genh = (argc > 2) ? argv[2] : "include/aurora/core/error_codes.gen.h";
-    std::string catalog = (argc > 3) ? argv[3] : "codespec/ERROR_CATALOG.md";
-    std::string api = (argc > 4) ? argv[4] : "aurora_api.json";
+    const std::string toml = (argc > 1) ? argv[1] : "codespec/errors.toml";
+    const std::string gen_h = (argc > 2) ? argv[2] : "include/aurora/core/error_codes.gen.h";
+    const std::string catalog = (argc > 3) ? argv[3] : "codespec/ERROR_CATALOG.md";
+    const std::string api = (argc > 4) ? argv[4] : "aurora_api.json";
     // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-bounds-constant-array-index)
 
     std::vector<ErrorEntry> entries;
@@ -383,7 +383,7 @@ auto main(int argc, char **argv) -> int {  // NOLINT(bugprone-exception-escape)
         return 1;
     }
 
-    write_file(genh, gen_header(entries));
+    write_file(gen_h, gen_header(entries));
     write_file(catalog, gen_catalog(entries));
 
     // Update the "error_codes" section of aurora_api.json (preserving other keys). The merge-only semantics are
@@ -393,7 +393,7 @@ auto main(int argc, char **argv) -> int {  // NOLINT(bugprone-exception-escape)
         return 1;
     }
 
-    err("generation complete:" + std::to_string(entries.size()) + " error codes (" + genh + ", " + catalog + ", " +
+    err("generation complete:" + std::to_string(entries.size()) + " error codes (" + gen_h + ", " + catalog + ", " +
         api + ")");
     return 0;
 }

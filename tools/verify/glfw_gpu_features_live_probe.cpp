@@ -28,9 +28,7 @@
 
 namespace {
 
-auto emit(const std::string &text) -> void {
-    AURORA_LOG_RAW("verify", text, "\n");
-}
+auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
 int failures = 0;
 
@@ -59,16 +57,13 @@ auto make_video_frame(int w, int h, std::uint8_t r, std::uint8_t g, std::uint8_t
 // 流式「视频」控件：pixels 恒定、仅 stream_version 递增（流式通道逐帧重传的语义）。
 class StreamVideoBox final : public aurora::LeafWidget {
   public:
-    StreamVideoBox(int w, int h, std::uint64_t key)
-        : frame_(make_video_frame(w, h, 255, 0, 0)) {
+    StreamVideoBox(int w, int h, std::uint64_t key) : frame_(make_video_frame(w, h, 255, 0, 0)) {
         frame_.stream_key = key;
         frame_.stream_version = 1;
         sz_ = aurora::Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
     }
 
-    void advance_version() {
-        frame_.stream_version++;
-    }
+    void advance_version() { frame_.stream_version++; }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "StreamVideoBox"; }
 
@@ -141,7 +136,7 @@ auto main(int argc, char **argv) -> int {
     }
     auto &backend = sink->backend();
     check(backend.name() == "gpu-gl", "GPU 通道 name == gpu-gl");
-    auto *gpu = static_cast<aurora::rhi::GpuGlRhi *>(&backend);
+    auto *gpu = dynamic_cast<aurora::rhi::GpuGlRhi *>(&backend);
 
     const auto caps = gpu->capabilities();
     check(caps.gpu, "capabilities().gpu == true");
@@ -185,9 +180,9 @@ auto main(int argc, char **argv) -> int {
 
     const auto center_of = [&](const std::vector<std::uint8_t> &px) -> std::array<int, 3> {
         // read_pixels 为 GL 底行序；图像矩形在画布内居中对称，中心取样与行序无关。
-        const std::size_t row = static_cast<std::size_t>(FRAME_H + 8);
-        const std::size_t col = static_cast<std::size_t>(FRAME_W + 8);
-        const std::size_t idx = ((row / 2) * col + (col / 2)) * 4U;
+        constexpr std::size_t row = FRAME_H + 8;
+        constexpr std::size_t col = FRAME_W + 8;
+        constexpr std::size_t idx = ((row / 2) * col + (col / 2)) * 4U;
         if (px.size() < idx + 3) {
             return {0, 0, 0};
         }
@@ -211,12 +206,11 @@ auto main(int argc, char **argv) -> int {
         p.begin(LW + 40, LH + 40);
         p.record(dl);
         if (content) {
-            p.begin_layer(LAYER_KEY, aurora::Size{.width = static_cast<float>(LW),
-                                                  .height = static_cast<float>(LH)});
-            p.fill_rect(aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = 0.0F},
-                                     .size = aurora::Size{.width = static_cast<float>(LW),
-                                                          .height = static_cast<float>(LH)}},
-                        aurora::Color{0, 200, 80, 255});
+            p.begin_layer(LAYER_KEY, aurora::Size{.width = static_cast<float>(LW), .height = static_cast<float>(LH)});
+            p.fill_rect(
+                aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = 0.0F},
+                             .size = aurora::Size{.width = static_cast<float>(LW), .height = static_cast<float>(LH)}},
+                aurora::Color{0, 200, 80, 255});
             p.end_layer();
         }
         p.draw_layer(LAYER_KEY, aurora::Matrix2D::from_translate(20.0F, 20.0F), 1.0F);
@@ -231,7 +225,7 @@ auto main(int argc, char **argv) -> int {
     const auto layer_cold = layer_frame(true);
     const auto layer_warm = layer_frame(false);
     const auto sample = [&](const std::vector<std::uint8_t> &px, int x, int y) -> std::array<int, 3> {
-        const std::size_t col = static_cast<std::size_t>(LW + 40);
+        constexpr std::size_t col = LW + 40;
         const std::size_t idx = (static_cast<std::size_t>(y) * col + static_cast<std::size_t>(x)) * 4U;
         if (px.size() < idx + 3) {
             return {0, 0, 0};
@@ -261,7 +255,7 @@ auto main(int argc, char **argv) -> int {
     aurora::ColumnProps grid_props;
     grid_props.children = std::move(rows);
     aurora::ColumnProps cp;
-    cp.children.push_back(std::move(video_widget));
+    cp.children.emplace_back(std::move(video_widget));
     cp.children.emplace_back(std::make_shared<aurora::Column>(std::move(grid_props)));
     auto root_widget = std::make_shared<aurora::Column>(std::move(cp));
     // Node 以 shared_ptr 重载接管所有权（无控件拷贝）；present_root(Node&) 需命名左值逐帧传引用，

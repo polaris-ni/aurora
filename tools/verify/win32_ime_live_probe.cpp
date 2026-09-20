@@ -66,7 +66,6 @@
 // clang-format on
 
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -101,8 +100,8 @@ auto skip(const std::string &label) -> void { emit("[SKIP] " + label); }
         return {};
     }
     std::u16string out(static_cast<std::size_t>(wide), u'\0');
-    MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()),
-                        reinterpret_cast<LPWSTR>(out.data()), wide);
+    MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), reinterpret_cast<LPWSTR>(out.data()),
+                        wide);
     return out;
 }
 
@@ -114,7 +113,7 @@ auto skip(const std::string &label) -> void { emit("[SKIP] " + label); }
     if (himc == nullptr) {
         return false;
     }
-    char16_t *bytes = const_cast<char16_t *>(text.data());  // NOLINT(cppcoreguidelines-pro-type-const-cast)
+    auto *bytes = const_cast<char16_t *>(text.data());  // NOLINT(cppcoreguidelines-pro-type-const-cast)
     return ImmSetCompositionStringW(himc, SCS_SETSTR | gcs_index, bytes,
                                     static_cast<DWORD>(text.size() * sizeof(char16_t)), nullptr, 0) != FALSE;
 }
@@ -124,7 +123,7 @@ auto skip(const std::string &label) -> void { emit("[SKIP] " + label); }
     if (himc == nullptr) {
         return false;
     }
-    SHORT pos = static_cast<SHORT>(utf16_index);
+    auto pos = static_cast<SHORT>(utf16_index);
     return ImmSetCompositionStringW(himc, SCS_SETSTR | GCS_CURSORPOS, &pos, sizeof(pos), nullptr, 0) != FALSE;
 }
 
@@ -167,10 +166,10 @@ auto report_caret(const char *phase, const aurora::Rect &box) -> void {
 }
 
 /// @brief 人工段：逐帧轮询打印组合态，直到窗口关闭（无自动判定，供真实输入法目视）。
-auto report_interactive(aurora::TextInput &input, std::string &last_line) -> void {
-    const std::string line = "preedit=\"" + input.preedit() + "\" cursor=" +
-                             std::to_string(input.composition_cursor()) + " value=\"" + input.value() + "\" caret=(" +
-                             std::to_string(input.composition_caret_bounds().origin.x) + "," +
+auto report_interactive(const aurora::TextInput &input, std::string &last_line) -> void {
+    const std::string line = "preedit=\"" + input.preedit() +
+                             "\" cursor=" + std::to_string(input.composition_cursor()) + " value=\"" + input.value() +
+                             "\" caret=(" + std::to_string(input.composition_caret_bounds().origin.x) + "," +
                              std::to_string(input.composition_caret_bounds().origin.y) + ")";
     if (line != last_line) {
         emit(line);
@@ -193,7 +192,7 @@ auto enable_and_report_ime(HIMC himc) -> void {
 }
 
 /// @brief 自动段：合成一整套 IMM32 组合序列并逐项断言控件侧读回的契约口径。
-auto run_automated(HWND hwnd, aurora::TextInput &input, const char *focused_type) -> void {
+auto run_automated(HWND hwnd, const aurora::TextInput &input, const char *focused_type) -> void {
     // 焦点：VK_TAB + WM_CHAR 经真实消息路径落焦（组合事件只派发给焦点控件）。
     emit(std::string("focused widget = ") + (focused_type != nullptr ? focused_type : "(none)"));
     if (input.value() != "a") {
@@ -272,9 +271,9 @@ auto main(int argc, char **argv) -> int {
     const bool interactive = argc > 1 && std::string(argv[1]) == "--interactive";
     emit("==== Win32 IMM32 输入法桥 真机验收 ====");
 
-    ProbeUi ui = build_ui();
-    auto made = aurora::create_native_window(aurora::WindowOptions{
-        .size = aurora::Size{.width = 480.0F, .height = 300.0F}, .title = "Aurora IME verify"});
+    const ProbeUi ui = build_ui();
+    auto made = aurora::create_native_window(
+        aurora::WindowOptions{.size = aurora::Size{.width = 480.0F, .height = 300.0F}, .title = "Aurora IME verify"});
     if (!made) {
         AURORA_LOG_ERROR("verify", "cannot create native window");
         return 2;

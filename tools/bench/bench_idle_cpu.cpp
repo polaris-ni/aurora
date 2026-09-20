@@ -15,7 +15,7 @@
 #define NOMINMAX
 #endif
 #ifndef WIN32_LEAN_AND_MEAN  // NOLINT(*-identifier-naming)
-#define AURORA_WI_N32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN  // NOLINT(*-identifier-naming)
 #endif
 #include <windows.h>
 #endif

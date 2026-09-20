@@ -380,7 +380,7 @@ struct InspectorSession {
     {
         au::Json props = au::Json::object();
         props["session"] =
-            str_prop("Optional \"6280\" or \"127.0.0.1:6280\"; defaults to env AURORA_INSPECTOR_PORT, then 6280");
+            str_prop(R"(Optional "6280" or "127.0.0.1:6280"; defaults to env AURORA_INSPECTOR_PORT, then 6280)");
         props["window"] = int_prop("Optional window id; omit for the main window");
         au::Json t = au::Json::object();
         t["name"] = "live_tree";
@@ -394,8 +394,8 @@ struct InspectorSession {
     // live_widget_get（Track A）
     {
         au::Json props = au::Json::object();
-        props["session"] = str_prop("Optional \"6280\" or \"127.0.0.1:6280\"");
-        props["path"] = str_prop("Widget index path, e.g. \"0\" or \"1/2\"; empty string = root");
+        props["session"] = str_prop(R"(Optional "6280" or "127.0.0.1:6280")");
+        props["path"] = str_prop(R"(Widget index path, e.g. "0" or "1/2"; empty string = root)");
         au::Json t = au::Json::object();
         t["name"] = "live_widget_get";
         t["description"] = "Read all properties of one widget in a running application.";
@@ -405,9 +405,9 @@ struct InspectorSession {
     // live_widget_set（Track A）
     {
         au::Json props = au::Json::object();
-        props["session"] = str_prop("Optional \"6280\" or \"127.0.0.1:6280\"");
+        props["session"] = str_prop(R"(Optional "6280" or "127.0.0.1:6280")");
         props["path"] = str_prop("Widget index path, e.g. \"1\"; empty string = root");
-        props["prop"] = str_prop("Property name, e.g. \"content\" or \"checked\"");
+        props["prop"] = str_prop(R"(Property name, e.g. "content" or "checked")");
         props["value"] = obj_prop("New value as JSON (number, string, boolean, object or array)");
         au::Json t = au::Json::object();
         t["name"] = "live_widget_set";
@@ -420,9 +420,9 @@ struct InspectorSession {
     // live_patch（Track A）
     {
         au::Json props = au::Json::object();
-        props["session"] = str_prop("Optional \"6280\" or \"127.0.0.1:6280\"");
+        props["session"] = str_prop(R"(Optional "6280" or "127.0.0.1:6280")");
         props["ops"] =
-            obj_prop("JSON array of {\"path\": \"/1/content\", \"value\": <v>} (last path segment is the prop)");
+            obj_prop(R"(JSON array of {"path": "/1/content", "value": <v>} (last path segment is the prop))");
         au::Json t = au::Json::object();
         t["name"] = "live_patch";
         t["description"] =
@@ -435,7 +435,7 @@ struct InspectorSession {
     // live_simulate（Track A）
     {
         au::Json props = au::Json::object();
-        props["session"] = str_prop("Optional \"6280\" or \"127.0.0.1:6280\"");
+        props["session"] = str_prop(R"(Optional "6280" or "127.0.0.1:6280")");
         props["path"] = str_prop("Target widget index path, e.g. \"0\"");
         props["action"] = str_prop("Interaction to simulate: click | scroll | text");
         props["dx"] = num_prop("Horizontal scroll delta (action=scroll, default 0)");
@@ -461,8 +461,9 @@ struct InspectorSession {
     {
         au::Json props = au::Json::object();
         props["tree"] = obj_prop("UI-tree JSON");
-        props["path"] =
-            str_prop("Target widget index path, e.g. \"0/1\" = second child of the first child; empty string targets the tree root");
+        props["path"] = str_prop(
+            "Target widget index path, e.g. \"0/1\" = second child of the first child; empty string targets the tree "
+            "root");
         props["action"] = str_prop("Interaction to simulate: click | scroll | text");
         props["dx"] = num_prop("Horizontal scroll delta (action=scroll, default 0)");
         props["dy"] = num_prop("Vertical scroll delta (action=scroll, default 0; positive scrolls content up)");
@@ -488,9 +489,9 @@ struct InspectorSession {
     // list_commands
     {
         au::Json props = au::Json::object();
-        props["commands"] =
-            obj_prop("Command descriptors (the {\"commands\":[...]} envelope produced by CommandRegistry::to_json(); "
-                     "a bare array is also accepted)");
+        props["commands"] = obj_prop(
+            "Command descriptors (the {\"commands\":[...]} envelope produced by CommandRegistry::to_json(); "
+            "a bare array is also accepted)");
         props["query"] = str_prop("Optional fuzzy query over command titles; empty matches all");
         props["limit"] = int_prop("Maximum number of returned commands (default 50; negative = unlimited)");
         au::Json include_disabled = au::Json::object();
@@ -509,9 +510,9 @@ struct InspectorSession {
     // invoke_command
     {
         au::Json props = au::Json::object();
-        props["commands"] =
-            obj_prop("Command descriptors (the {\"commands\":[...]} envelope produced by CommandRegistry::to_json(); "
-                     "a bare array is also accepted)");
+        props["commands"] = obj_prop(
+            "Command descriptors (the {\"commands\":[...]} envelope produced by CommandRegistry::to_json(); "
+            "a bare array is also accepted)");
         props["id"] = str_prop("Command identifier to resolve, e.g. \"file.open\"");
         au::Json t = au::Json::object();
         t["name"] = "invoke_command";
@@ -545,9 +546,8 @@ struct InspectorSession {
 ///
 /// 刻意放在 `text_content` / `json_content` 之后：它俩是工具结果的组装原语，先定义才能被复用
 /// （匿名命名空间内不存在跨函数的隐式前向声明）。
-[[nodiscard]] auto inspector_result(const InspectorSession &session, std::string_view method,
-                                    const std::string &target, const std::string &body = {})
-    -> au::Json {
+[[nodiscard]] auto inspector_result(const InspectorSession &session, std::string_view method, const std::string &target,
+                                    const std::string &body = {}) -> au::Json {
     const aurora::tools::inspector::HttpResponse r =
         aurora::tools::inspector::http_request(method, session.host, session.port, target, body);
     if (!r.ok()) {
@@ -686,15 +686,13 @@ struct InspectorSession {
             return au::Json{{"content", text_content("Error: missing 'tree' parameter")}, {"isError", true}};
         }
         if (!args.contains("baseline_path") || !args["baseline_path"].is_string()) {
-            return au::Json{{"content", text_content("Error: missing 'baseline_path' parameter")},
-                            {"isError", true}};
+            return au::Json{{"content", text_content("Error: missing 'baseline_path' parameter")}, {"isError", true}};
         }
         std::string baseline_path = args["baseline_path"].get<std::string>();
         if (!is_confined_output_path(baseline_path)) {
             return au::Json{
-                {"content",
-                 text_content("Error: 'baseline_path' must be a relative path inside the working directory "
-                              "(no '..')")},
+                {"content", text_content("Error: 'baseline_path' must be a relative path inside the working directory "
+                                         "(no '..')")},
                 {"isError", true}};
         }
         int w = args.value("width", 800);
@@ -895,8 +893,8 @@ struct InspectorSession {
         const std::string path = args["path"].get<std::string>();
         const std::string action = args["action"].get<std::string>();
         if (action != "click" && action != "scroll" && action != "text") {
-            return au::Json{
-                {"content", text_content("Error: 'action' must be one of click | scroll | text")}, {"isError", true}};
+            return au::Json{{"content", text_content("Error: 'action' must be one of click | scroll | text")},
+                            {"isError", true}};
         }
         // 参数判型前置：nlohmann 的 get<>/value<> 遇类型不符会抛 type_error，而本进程主循环
         // 不捕获异常（stdio 服务直接终止），故所有取值前先判型，类型错了回 isError。
