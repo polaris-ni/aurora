@@ -122,6 +122,14 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_x11_wgpu)
     endif ()
 
+    # ---- Wayland 光标（Linux/Wayland 真实窗口）：客户端主题光标提交物证 + 人工目视 ----
+    # Wayland 无「屏幕当前光标」读回 API（不同于 Win32 GetCursorInfo / X11 XFIXES），故自动段判据
+    # 落在「本端向合成器提交了什么」（主题命中名/位图尺寸/热点/buffer 身份/提交次数）。
+    if (AURORA_BACKEND_WAYLAND)
+        aurora_add_verify_probe(aurora_verify_wayland_cursor "${_aurora_verify_dir}/wayland_cursor_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_wayland_cursor)
+    endif ()
+
     # ---- Wayland wgpu GPU 栅格（Linux 真实窗口 + 离屏直驱，WSLg Weston 可验）：与 X11 探针同段
     # 结构，宿主动态类型为 WgpuWaylandSurface（WaylandOptions+GpuWgpu 直达）；Wayland 无抓屏
     # 原语故无截图项，装饰归属由 --interactive 人工目视核对。需 WGPU+WAYLAND 通道编译进库。

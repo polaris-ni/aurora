@@ -288,7 +288,7 @@ endif ()
 # X11/Wayland 用于 Linux 桌面、macOS 用于 Apple、WASM 用于 Emscripten 工具链；
 # 默认构建（含本机 Windows/MinGW）不受影响，仍仅 Headless 必开。
 option(AURORA_BACKEND_X11 "Enable X11 (Xlib) backend for Linux desktop (requires libX11)" OFF)
-option(AURORA_BACKEND_WAYLAND "Enable native Wayland backend for Linux desktop (requires wayland-client + xkbcommon)" OFF)
+option(AURORA_BACKEND_WAYLAND "Enable native Wayland backend for Linux desktop (requires wayland-client + wayland-cursor + xkbcommon)" OFF)
 option(AURORA_BACKEND_MACOS "Enable macOS (Cocoa/AppKit) backend (Apple only)" OFF)
 option(AURORA_BACKEND_WASM "Enable WebAssembly (Emscripten) backend (Emscripten toolchain only)" OFF)
 
@@ -309,10 +309,15 @@ if (AURORA_BACKEND_WAYLAND)
         aurora_error("AURORA_BACKEND_WAYLAND is only supported on Linux/Unix (non-Apple) platforms;"
                 " cannot enable on the current platform. Disable with -DAURORA_BACKEND_WAYLAND=OFF.")
     endif ()
-    # 依赖：wayland-client（线协议）+ xkbcommon（键盘 keymap）+ wayland-protocols（xdg-shell XML）
+    # 依赖：wayland-client（线协议）+ wayland-cursor（客户端主题光标：加载 XCursor 位图）
+    # + xkbcommon（键盘 keymap）+ wayland-protocols（xdg-shell XML）
     # + wayland-scanner（协议 XML → C 胶水；生成物落在 build 目录，不入仓）。
+    # Wayland 客户端不能像 X11 那样让服务端换光标：形状必须由本进程自绘成 ARGB 位图，
+    # 经独立 cursor `wl_surface` 提交后用 `wl_pointer_set_cursor` 交回合成器，故 libwayland-cursor
+    # 是**必需**依赖而非可选增强（缺它则 set_cursor 只能停在契约级落盘）。
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(WAYLAND_CLIENT REQUIRED wayland-client)
+    pkg_check_modules(WAYLAND_CURSOR REQUIRED wayland-cursor)
     pkg_check_modules(XKBCOMMON REQUIRED xkbcommon)
     pkg_get_variable(AURORA_WL_PROTO_DIR wayland-protocols pkgdatadir)
     pkg_get_variable(AURORA_WL_SCANNER wayland-scanner wayland_scanner)
@@ -342,9 +347,11 @@ if (AURORA_BACKEND_WAYLAND)
     # 生成的 C 胶水非本项目代码：屏蔽 -Wall/-Wpedantic 告警（不改动其内容）。
     set_source_files_properties(${AURORA_WL_GEN_SRCS} PROPERTIES COMPILE_OPTIONS "-w")
     target_sources(aurora PRIVATE ${AURORA_WL_GEN_SRCS})
-    target_include_directories(aurora PRIVATE "${AURORA_WL_GEN_DIR}" ${WAYLAND_CLIENT_INCLUDE_DIRS} ${XKBCOMMON_INCLUDE_DIRS})
+    target_include_directories(aurora PRIVATE "${AURORA_WL_GEN_DIR}" ${WAYLAND_CLIENT_INCLUDE_DIRS}
+            ${WAYLAND_CURSOR_INCLUDE_DIRS} ${XKBCOMMON_INCLUDE_DIRS})
     aurora_define_feature(AURORA_BACKEND_WAYLAND EXPORT)
-    target_link_libraries(aurora PUBLIC ${WAYLAND_CLIENT_LIBRARIES} ${XKBCOMMON_LIBRARIES})
+    target_link_libraries(aurora PUBLIC ${WAYLAND_CLIENT_LIBRARIES} ${WAYLAND_CURSOR_LIBRARIES}
+            ${XKBCOMMON_LIBRARIES})
     aurora_log("Wayland backend enabled: protocols=${AURORA_WL_PROTO_DIR} scanner=${AURORA_WL_SCANNER}")
 endif ()
 

@@ -91,7 +91,7 @@ cmake -S . -B build -DAURORA_BUILD_INSPECTOR_SERVER=ON
 | 说明 | 定义 `tools/verify/` 下的**真机验收探针**可执行目标。这类探针证明的是「无头 CI 无法证明」的平台接线能力（典型：光标形状的各后端 `Surface::set_cursor` 是否真的改变了屏幕上显示的光标；输入法桥的 `WM_IME_*` 是否真的落到焦点控件） |
 | 传播宏 | 无（纯交付物开关，不向库代码注入宏） |
 | 模块 | `cmake/AuroraVerify.cmake` |
-| 产物 | 按条件定义：`aurora_verify_x11_cursor`（`AURORA_BACKEND_X11`）/ `aurora_verify_win32_cursor`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`）/ `aurora_verify_macos_cursor`（`APPLE` 且开 `AURORA_BACKEND_MACOS`，需 ObjC++）/ `aurora_verify_glfw_cursor`（`AURORA_BACKEND_GLFW`）/ `aurora_verify_glfw_gpu_features`（`AURORA_BACKEND_GLFW` 且开 `AURORA_ENABLE_GLFW_GPU_GL`）/ `aurora_verify_win32_ua`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，另链 `oleacc`）/ `aurora_verify_win32_ime`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，`imm32` 已随库 PUBLIC 链接）/ `aurora_verify_win32_wgpu`（`WIN32` 且开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_WIN32`，§3.8）/ `aurora_verify_x11_wgpu`（开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_X11`，§3.8，XGetImage 截图物证，需 `AURORA_ENABLE_DEBUG` 开启）/ `aurora_verify_wasapi_audio`（`WIN32` 且开 `AURORA_ENABLE_AUDIO_WASAPI`）；聚合目标 `aurora_verify` |
+| 产物 | 按条件定义：`aurora_verify_x11_cursor`（`AURORA_BACKEND_X11`）/ `aurora_verify_wayland_cursor`（`AURORA_BACKEND_WAYLAND`）/ `aurora_verify_win32_cursor`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`）/ `aurora_verify_macos_cursor`（`APPLE` 且开 `AURORA_BACKEND_MACOS`，需 ObjC++）/ `aurora_verify_glfw_cursor`（`AURORA_BACKEND_GLFW`）/ `aurora_verify_glfw_gpu_features`（`AURORA_BACKEND_GLFW` 且开 `AURORA_ENABLE_GLFW_GPU_GL`）/ `aurora_verify_win32_ua`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，另链 `oleacc`）/ `aurora_verify_win32_ime`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，`imm32` 已随库 PUBLIC 链接）/ `aurora_verify_win32_wgpu`（`WIN32` 且开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_WIN32`，§3.8）/ `aurora_verify_x11_wgpu`（开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_X11`，§3.8，XGetImage 截图物证，需 `AURORA_ENABLE_DEBUG` 开启）/ `aurora_verify_wayland_wgpu`（开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_WAYLAND`，§3.8）/ `aurora_verify_wasapi_audio`（`WIN32` 且开 `AURORA_ENABLE_AUDIO_WASAPI`）；聚合目标 `aurora_verify` |
 
 三点与其它"产物开关"不同的地方：
 
@@ -123,7 +123,7 @@ cmake --build build-verify --target aurora_verify_x11_cursor
 | `AURORA_BACKEND_GPU_WGPU` | `OFF` | wgpu GPU 栅格后端（`WgpuRhi`；真窗口帧路径 `WgpuSurface` / `WgpuX11Surface` / `WgpuWaylandSurface` 另与宿主 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` ∨ `AURORA_BACKEND_WAYLAND` 合取），源码经 cargo 构建，需 Rust 工具链 + libclang，配置期缺项 FATAL，见 §3.8 | `AURORA_BACKEND_GPU_WGPU` | `wgpu_native` 静态库 + `ws2_32` `userenv` `bcrypt` `advapi32` `oleaut32` `ntdll`(Windows)/`dl` `pthread` `m`(Linux) |
 | `AURORA_BACKEND_GLFW` | `OFF` | GLFW + OpenGL（上下文 3.3 兼容剖面，绘制 1.1 立即模式） | `AURORA_BACKEND_GLFW` | `glfw` 目标（源码静态库）+ `opengl32`(Windows)/`OpenGL::GL`(其他平台) |
 | `AURORA_BACKEND_X11` | `OFF` | X11 / Linux 桌面后端（`X11Surface`，pimpl 完整实现） | `AURORA_BACKEND_X11` | `${X11_LIBRARIES}`（`find_package(X11)`） |
-| `AURORA_BACKEND_WAYLAND` | `OFF` | 原生 Wayland / Linux 桌面后端（`WaylandSurface`，pimpl 完整实现） | `AURORA_BACKEND_WAYLAND` | `${WAYLAND_CLIENT_LIBRARIES}` `${XKBCOMMON_LIBRARIES}`（`pkg-config`） |
+| `AURORA_BACKEND_WAYLAND` | `OFF` | 原生 Wayland / Linux 桌面后端（`WaylandSurface`，pimpl 完整实现） | `AURORA_BACKEND_WAYLAND` | `${WAYLAND_CLIENT_LIBRARIES}` `${WAYLAND_CURSOR_LIBRARIES}` `${XKBCOMMON_LIBRARIES}`（`pkg-config`） |
 | `AURORA_BACKEND_MACOS` | `OFF` | macOS 后端（`MacOSSurface`，顶层 `enable_language(OBJCXX)` 先于目标定义，非 Apple 开启 FATAL） | `AURORA_BACKEND_MACOS` | `Cocoa` `AppKit`（框架） |
 | `AURORA_BACKEND_WASM` | `OFF` | WebAssembly 后端（`WasmSurface`，需 Emscripten 工具链：`cmake --preset wasm`（经 `$EMSDK` 注入 toolchain，等价 `emcmake cmake`）；非 Emscripten 开启 FATAL。构建期生成器改经 `_native_tools` 原生子项目产出，见 `AuroraTools.cmake`） | `AURORA_BACKEND_WASM` | Emscripten 工具链 |
 
@@ -161,8 +161,8 @@ cmake --build build -j $(nproc)
 
 要点：
 
-- Wayland 后端在配置期用 `pkg-config` 检测 `wayland-client` / `xkbcommon`，并调用 `wayland-scanner` 把 `xdg-shell.xml` / `xdg-decoration-unstable-v1.xml` 生成为 C 胶水（落在 `build/wayland-gen/`，不入仓）。
-- 服务端窗口装饰经 `zxdg_decoration_manager_v1` 协商：KDE 等支持方绘制标题栏；**GNOME 不实现该协议 → 窗口无服务端标题栏**（`AURORA_LOG_INFO` 提示），属合成器限制而非缺陷。
+- Wayland 后端在配置期用 `pkg-config` 检测 `wayland-client` / `wayland-cursor` / `xkbcommon`（三者皆 `REQUIRED`：客户端主题光标 `wl_cursor_theme_*` 是 `set_cursor` 的硬依赖，缺失即配置期红灯而非运行期降级），并调用 `wayland-scanner` 把 `xdg-shell.xml` / `xdg-decoration-unstable-v1.xml` 生成为 C 胶水（落在 `build/wayland-gen/`，不入仓）。**依赖表无需追加包**：`libwayland-cursor` 属 wayland 核心项目，其头与 `.pc` 随核心 devel 包发布（Debian/Ubuntu 实测 `wayland-cursor.h` / `wayland-cursor.pc` 均在 `libwayland-dev` 内），上表已覆盖。
+- 服务端窗口装饰经 `zxdg_decoration_manager_v1` 协商：KDE 等支持方绘制标题栏；**GNOME / WSLg Weston 不实现该协议 → 后端自绘 CSD 标题栏兜底**（`AURORA_LOG_INFO` 提示），属合成器限制而非缺陷。
 - 非 Linux（含 Apple）平台开启任一后端将触发 `FATAL_ERROR`。
 
 ### 3.3 架构级渲染 / 布局优化开关
@@ -453,6 +453,7 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `AURORA_GOLDEN_MAX_DIFF` | 整数 | 像素最大允许色差阈值（软件逐位红线的显式放松开关；GPU 容差层 `golden::compare_gpu_tolerance` 不读此旋钮，容差带逐场景申报，见 `specification/03-layout-render.md` §8.4.2） |
 | `AURORA_GOLDEN_MAX_PIXELS` | 整数 | 允许不一致像素数上限（同上，仅 `compare_or_update` 族读取） |
 | `AURORA_REPO_ROOT` | 目录路径 | 测试框架仓库根定位的显式锚点（`tests/framework/isolation.cpp`）。缺省先按可执行文件位置、再按 cwd 逐级上溯找 `codespec/`+`CMakeLists.txt`；runner 构建 / 安装于仓库外（如 WSL home 目录构建 `/mnt/c` 源码仓）时上溯必然落空，用本变量指向仓库根即可，值须形如仓库根，否则忽略回落自动查找 |
+| `AURORA_LIVE_X11` / `AURORA_LIVE_WAYLAND` | 非空（如 `1`） | 后端**真机**单测用例的显式选择加入开关（`utest_x11_surface` / `utest_wayland_surface`）：未置时该用例走 `AURORA_TEST_SKIP` 桩，置了才连接真实 X server / 合成器并创建真实窗口断言端到端接线。默认关闭的原因与探针同源——需要桌面会话、非确定且会动用户屏幕，不进无头 CTest |
 | `AURORA_INSPECTOR_PORT` | 1–65535 | `aurora_mcp` 的 `live_*` 工具连接运行中应用的默认端口；缺省 `6280`（与 `InspectorServer::start()` 默认值一致）。单个工具调用可用 `session` 入参（`"6280"` 或 `"127.0.0.1:6280"`）覆盖。主机恒为回环，见 `specification/08-tooling.md` §5.4 |
 
 > CTest 默认 CWD = `build/`，故依赖相对路径的 golden 测试须从仓库根直接运行可执行文件（仓库 `cmake/AuroraTests.cmake` 已为依赖相对路径的测试显式设置 `WORKING_DIRECTORY` 为仓库根，故 `ctest` 下直接可跑）。

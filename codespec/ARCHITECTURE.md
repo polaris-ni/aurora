@@ -271,7 +271,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 | `WgpuRhi`（`Surface::gpu_backend()`） | DisplayList 的 wgpu（WGSL）批渲染：与 `GpuGlRhi` 同一命令契约与批切分口径；宿主模式（Win32 HWND / X11 Display+XID / Wayland display+wl_surface → swapchain）与离屏模式（内部纹理 + `read_pixels` 读回）双形态；后端 Auto 择链（Windows：D3D12 → Vulkan → GLES） | `AURORA_BACKEND_GPU_WGPU`（默认 OFF） |
 | `X11Surface` | 按 Visual 掩码 CPU swizzle 后 `XPutImage`，支持增量上屏；`wait_events` 经 `poll(2)`；`scale_factor` 解析 `Xft.dpi` | `AURORA_BACKEND_X11`（默认 OFF） |
 | `WgpuX11Surface` | 组合内嵌 `X11Surface` 宿主（窗口/事件/光标全走它，本类零 Xlib），帧级 DisplayList 交 `WgpuRhi` 在 GPU 端光栅化并 swapchain present 直渲上屏；GPU 失败永久回退内嵌宿主的 `XPutImage` 上传路径 | `AURORA_BACKEND_GPU_WGPU` ∧ `AURORA_BACKEND_X11`（默认 OFF） |
-| `WaylandSurface` | CPU swizzle 到 `WL_SHM_FORMAT_XRGB8888` 经 `wl_shm` 共享内存双缓冲槽；`wait_events` 经 `poll(2)`；`scale_factor` 取 `wl_output.scale` | `AURORA_BACKEND_WAYLAND`（默认 OFF） |
+| `WaylandSurface` | CPU swizzle 到 `WL_SHM_FORMAT_XRGB8888` 经 `wl_shm` 共享内存双缓冲槽；`wait_events` 经 `poll(2)`；`scale_factor` 取 `wl_output.scale`；光标走 `libwayland-cursor` 客户端主题（cursor 专用 `wl_surface` + `wl_pointer.set_cursor`，见 `specification/03` §8.3） | `AURORA_BACKEND_WAYLAND`（默认 OFF） |
 | `WgpuWaylandSurface` | 组合内嵌 `WaylandSurface` 宿主（窗口壳/事件/xkb/CSD 全走它，本类零 wayland-client），帧级 DisplayList 交 `WgpuRhi` 在 GPU 端光栅化并经 Wayland surface swapchain present 直渲同一 `wl_surface`；GPU 失败永久回退内嵌宿主的 `wl_shm` 上传路径；GPU 模式下自绘 CSD 不上屏（申报口径，见 `specification/03` §8.8） | `AURORA_BACKEND_GPU_WGPU` ∧ `AURORA_BACKEND_WAYLAND`（默认 OFF） |
 | `WasmSurface` | `<canvas>` 像素写回（`EM_ASM` `putImageData`） | `AURORA_BACKEND_WASM`（默认 OFF） |
 | `MacOSSurface` | AppKit / CoreGraphics | `AURORA_BACKEND_MACOS`（默认 OFF） |

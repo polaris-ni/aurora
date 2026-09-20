@@ -17,7 +17,7 @@
   `Win32Surface`（Win32/GDI，仅 `_WIN32`，零三方依赖）、`D3D11Surface`（Windows GPU 增量上屏偏置，CMake 开关）、
   `WgpuSurface`（wgpu GPU 栅格上屏：帧级 DisplayList 经 `WgpuRhi` 在 Vulkan/D3D12/Metal/GLES 端光栅化，Win32/X11/Wayland 宿主，CMake 开关 `AURORA_BACKEND_GPU_WGPU`，需 Rust 工具链）、
   `X11Surface`（X11/Xlib，Linux 桌面，CMake 开关）、
-  `WaylandSurface`（原生 Wayland：wl_shm+xdg-shell+xkbcommon，Linux 桌面，CMake 开关）、
+  `WaylandSurface`（原生 Wayland：wl_shm+xdg-shell+xkbcommon+libwayland-cursor，Linux 桌面，CMake 开关）、
   `WasmSurface`（Emscripten/Canvas 2D，浏览器 rAF 驱动）、`MacOSSurface`（AppKit/CoreGraphics，骨架）。
 - 线程模型：单线程 UI、同步事件、响应式细粒度信号。
 - **版本状态**：早期预览开发版（alpha 阶段）。当前版本号以 `CHANGELOG.json` 的 `currentVersion` 为准

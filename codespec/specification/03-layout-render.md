@@ -488,7 +488,7 @@ au::Column{}
 | `scale_factor()` | 默认 `1.0`；`Win32Surface` / `D3D11Surface` 返回 `dpi/96`，启用 Per-Monitor DPI 感知，按物理像素创建窗口与帧缓冲，事件坐标除以 scale 还原为 dp |
 | `set_present_dirty(const std::vector<Rect>&)` | `Window::present_root` 在清脏前把本帧脏矩形（逻辑→设备坐标）交给后端；支持增量上屏的后端仅更新变化区，空向量表示全量上传 |
 | `set_title(const std::string&)` | 虚方法，默认空实现；`Win32Window` 经 `SetWindowTextA` + `utf8_to_acp` 生效，`Headless` / `Glfw` 忽略。`Window::set_title` 写 `title_` 后同步下发 |
-| `set_cursor(CursorShape)` | 虚方法，默认空实现。宿主在悬停链解析出的形状**变化**时下发（`EventDispatcher` 按 `cursor_emitted_` / `current_cursor_` 去重，避免每个 Move 都打平台 API）。平台映射在各后端 `.cpp`：GLFW `glfwSetCursor` + `glfwCreateStandardCursor`（句柄缓存）、Win32 `SetCursor` + `LoadCursor(nullptr, IDC_*)`、X11 `XDefineCursor` + `XCreateFontCursor`（`XC_*` 字形，句柄缓存）、Wayland `wl_pointer.set_cursor`（须 cursor `wl_surface` + 主题，契约见 `.cpp` TODO）、macOS `[[NSCursor …] set]`。`HeadlessSurface` 覆写为「按序记录」（`cursor_log()` / `last_cursor()` / `clear_cursor_log()`），使整链在无头环境可端到端断言；`D3D11Surface` 复用 Win32 宿主映射（内部头 `src/aurora/window/win32_cursor.h` 的 `detail::set_win32_cursor`，与 `Win32Surface` 共用一份），`WasmSurface` 保持空实现（浏览器自管 cursor） |
+| `set_cursor(CursorShape)` | 虚方法，默认空实现。宿主在悬停链解析出的形状**变化**时下发（`EventDispatcher` 按 `cursor_emitted_` / `current_cursor_` 去重，避免每个 Move 都打平台 API）。平台映射在各后端 `.cpp`：GLFW `glfwSetCursor` + `glfwCreateStandardCursor`（句柄缓存）、Win32 `SetCursor` + `LoadCursor(nullptr, IDC_*)`、X11 `XDefineCursor` + `XCreateFontCursor`（`XC_*` 字形，句柄缓存）、Wayland 客户端主题光标（`wl_cursor_theme_load(nullptr, 24×scale, wl_shm)` + `wl_cursor_theme_get_cursor(cursor_rfc_name)` → 专用 cursor `wl_surface` attach 主题自有 ARGB `wl_buffer` → `wl_pointer_set_cursor(pointer, enter_serial, ...)`，详见下方 Wayland 光标条目）、macOS `[[NSCursor …] set]`。`HeadlessSurface` 覆写为「按序记录」（`cursor_log()` / `last_cursor()` / `clear_cursor_log()`），使整链在无头环境可端到端断言；`D3D11Surface` 复用 Win32 宿主映射（内部头 `src/aurora/window/win32_cursor.h` 的 `detail::set_win32_cursor`，与 `Win32Surface` 共用一份），`WasmSurface` 保持空实现（浏览器自管 cursor） |
 | `native_handle() -> void*`（`const`） | 虚方法，**基类默认返回 `nullptr`**；真实窗口后端须覆写为宿主原生句柄。Win32 家族两路 `Win32Surface`（GDI 上屏）/ `D3D11Surface`（GPU 上屏）共用同一个 `Win32Window` 宿主，**二者均**返回 `hwnd()`（与 `hwnd()` 访问器同义）。`aurora::debug::surface_state()` 的 `has_native_window` 就由它非空判定——**漏覆写会让真实窗口后端误报「无原生窗口」**（`D3D11Surface` 曾如此，2026-09-13 补齐）。该契约由 `tests/unit/utest_native_surfaces.cpp` 的 `windows_family_native_handle_contract` 以类型级 `static_assert` 守门（`decltype(&T::native_handle)` 判定覆写存在） |
 | ⚠️ X11 翻译单元的宏碰撞（实现约束，非 API 变更） | `<X11/X.h>`（经 `Xlib.h` 引入）**无条件** `#define CursorShape 0`（"largest size that can be displayed"），与本表类型名 `aurora::CursorShape` 硬碰撞：不解除时该记号一律被预处理器展开为 `0`，`CursorShape shape` 变成 `0 shape`，报出极难定位的 `expected ')' before 'shape'`（2026-09-13 开 `AURORA_BACKEND_X11=ON` 真编译时才暴露）。故**任何引入 Xlib 的翻译单元**都必须在 Xlib 头之后、并在引入 `cursor_map.h` 之前 `#undef CursorShape`（同款处置见 `src/aurora/window/x11_surface.cpp` 顶部与 `x11_surface.h` 的 `@warning`）。同理 `#undef None` 用于避免污染 `ModifierKey::None` |
 
@@ -500,13 +500,25 @@ au::Column{}
 > 后端（GLFW/Win32/X11/macOS）在各自 `.cpp` 内按 `CursorShape` 取值序 `switch`，长度契约由
 > `kCursorShapeCount` 对齐（新增形状漏填即编译期红灯）。
 
+> **Wayland 光标的实现口径**：`wl_pointer.set_cursor` 要求一个 **enter serial**（只来自
+> `wl_pointer.enter`），且合成器在指针重新进入本表面时会回到默认光标——故后端把形状存进
+> `pending_cursor_shape`，enter 前不下发（`set_cursor` 返回即生效，无须调用方重试），enter 与
+> `wl_output.scale` 变化时**强制重提交**（主题按 `24 × scale` 设备像素重载）。主题查找链为
+> `cursor_rfc_name(shape)` → `default` → `left_ptr`，全落空才 WARN 一次并留在合成器默认光标。
+> 动画光标（如 `wait`）取 `images[0]` 首帧，客户端不驱动帧序列。`wp_cursor_shape_manager_v1`
+> （新协议，免主题）实测本机 WSLg Weston 未发布该全局，故不走该路。观测面 `cursor_state()`
+> 返回本次提交的「主题命中名 / 位图尺寸 / 热点 / buffer 身份 / 提交次数」，用于真机探针判定。
+>
 > **`set_cursor` 的真机验收（无头 CI 无法覆盖的部分）**：单元/集成测试只能断言到
 > 「`HeadlessSurface` 记录序列」与「各后端覆写存在」这一层——「屏幕上显示的光标是否真的变了」
-> 必须建真实窗口、在真实桌面会话里验收。为此 `tools/verify/` 提供四份**人工触发**的探针
+> 必须建真实窗口、在真实桌面会话里验收。为此 `tools/verify/` 提供五份**人工触发**的探针
 > （`cmake/AuroraVerify.cmake` 定义、`AURORA_BUILD_VERIFY_TOOLS` 门控、**不进 CTest**）：
 > X11 经 XFIXES `XFixesGetCursorImage` 读回、Win32 经 `GetCursorInfo` 读回、macOS 经
 > `[NSCursor currentCursor]` 单例同一性读回、GLFW（无光标查询 API）走「自动能力核对 +
-> `--interactive` 人工目视」。各探针的验收范围与退出码语义见其源文件头注释；
+> `--interactive` 人工目视」。Wayland 与前三者有一处本质差别：**协议没有客户端可达的「屏幕当前
+> 光标」读回**（合成器不广播、也不允许查询），故 `aurora_verify_wayland_cursor` 的判据只能落在
+> 「本端向合成器提交了什么」（`cursor_state()` 逐项比对请求的规范名），「合成器接受并画在屏幕上」
+> 由 `--interactive` 人工目视段负责。各探针的验收范围与退出码语义见其源文件头注释；
 > 真机验收须在对应平台手工执行（探针不进 CTest）。
 
 ### 8.4 离屏渲染与快照
@@ -583,6 +595,8 @@ au::Column{}
 | `WasmSurface` | Emscripten / Canvas 2D，浏览器 rAF 驱动 | `AURORA_BACKEND_WASM`（默认 OFF） |
 
 全部开关的默认值与 `AURORA_BUILD_*` / `AURORA_ENABLE_*` 完整列表见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md)。
+
+**Wayland 上屏与 configure 竞态**：`wl_shm` 双缓冲槽在 `pick_slot` 内用 `wl_display_roundtrip` 等 `wl_buffer.release`，这是**一帧之内唯一的事件派发点**。其间的 `xdg_toplevel.configure` 会把表面 `size` 立刻改成新几何，而它请求的同步重绘又被 `present_root` 的重入护栏吞掉（同一帧栈内），于是 painter 与缓冲槽仍按旧尺寸分配。照旧 attach 就是一副「旧尺寸 buffer + 新 configure 态」，Weston 直接判协议错误并杀连接（实测报文 `xdg_surface buffer (3840 x 2088) does not match the configured maximized state (3840 x 2160)`，最大化→全屏切换瞬间命中）。故 `present()` 在 attach 前比对 painter 尺寸与 `size × scale`：不合即丢帧不 commit（脏区原样留下），并挂起「下次事件泵补一帧」——此刻已离开渲染栈，重绘请求不再被吞。`WgpuWaylandSurface` 的软件回退帧走同一 `WaylandSurface::present()`，故同受保护。
 
 **自动选择**：不显式指定时 `App::run()` 经 `auto_detect_surface()` 自动选用，优先级为原生 Wayland / X11 / MacOS / Wasm > Win32 > Glfw > Headless；X11 与 Wayland 同时编译时按运行期会话类型择优（`WAYLAND_DISPLAY` 存在选 Wayland，否则 X11）。`create_native_window()` 在 Linux 上按同序尝试并在真实显示不可用时回退 `Headless`。
 

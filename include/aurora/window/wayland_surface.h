@@ -3,8 +3,8 @@
 
 // 原生 Wayland Surface（ARCHITECTURE.md §8.4）：Linux 桌面 Wayland 会话原生窗口后端。
 // 仅在 defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && AURORA_BACKEND_WAYLAND 时提供；
-// 依赖：wayland-client + xkbcommon + wayland-protocols（xdg-shell）。
-// Debian/Ubuntu `apt install libwayland-dev libxkbcommon-dev wayland-protocols`；
+// 依赖：wayland-client + wayland-cursor + xkbcommon + wayland-protocols（xdg-shell）。
+// Debian/Ubuntu `apt install libwayland-dev libxkbcommon-dev wayland-protocols`（wayland-cursor 随 libwayland-dev）；
 // Fedora `dnf install wayland-devel libxkbcommon-devel wayland-protocols-devel`。
 //
 // 设计要点：
@@ -26,6 +26,7 @@
 
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_WAYLAND)
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -79,19 +80,53 @@ class WaylandSurface final : public Surface {
     /// @brief 运行时更新窗口标题（xdg_toplevel_set_title，UTF-8）。
     auto set_title(const std::string &title) -> void override;
 
-    /// @brief 运行时更新悬停光标形状——**契约实现，平台侧待真机接线**。
+    /// @brief 运行时更新悬停光标形状——**客户端主题光标真接线**（自绘位图经 cursor
+    /// `wl_surface` 提交后由 `wl_pointer.set_cursor` 交合成器接受）。
     ///
-    /// Wayland 客户端不能直接「设光标形状」：须自备 cursor `wl_surface` + `wl_buffer`，
-    /// 并在 `wl_pointer.enter`（携带该次 serial）时经 `wl_pointer.set_cursor` 交合成器接受。
-    /// 本实现在此只落盘语义形状（`Impl::pending_cursor_shape`），并已捕获 enter serial
-    /// （`Impl::pointer_enter_serial`，见 `ptr_enter`）；真正下发的三步须在真实 Wayland 会话
-    /// 编译+人工验收后补（本仓库无头构建无法覆盖），详见 .cpp 内 TODO 注释。
-    /// 备选更简路径：绑定 `wp_cursor_shape_manager_v1`，用 `wp_cursor_shape_device_v1_set_shape`
-    /// 下发——免自管 buffer，但依赖合成器提供该扩展（GNOME 支持）。
-    /// 形状→规范名映射复用 `cursor_rfc_name`（cursor_map.h），即 freedesktop 主题名。
-    /// @note 已在 `AURORA_BACKEND_WAYLAND=ON` 构建内**编译验证**（2026-09-13）。真机语义验证
-    /// 仍依赖合成器侧接线（见 .cpp 的 TODO），本仓库无头构建内无法运行。
+    /// Wayland 没有「服务端换光标」这回事：客户端必须自备一个 cursor `wl_surface`，把形状的
+    /// ARGB 位图 attach+commit 上去，再带着**本次进入表面时的 serial** 调
+    /// `wl_pointer.set_cursor`，合成器才会用它覆盖系统默认光标。本实现走
+    /// `libwayland-cursor`（`wl_cursor_theme_load` 按 `24 × scale` 设备像素加载 XCursor 主题，
+    /// `wl_cursor_image_get_buffer` 直接取主题自有的 ARGB `wl_buffer`，无需本端二次上传）：
+    /// - 形状 → 主题名取 `cursor_rfc_name`（`window/cursor_map.h`，即 freedesktop 规范名，
+    ///   与 W3C CSS `cursor` 关键字同源）；主题缺该名时回退 `default` → `left_ptr`，
+    ///   三者皆缺则一次性 WARN 并保持当前光标（不隐藏系统光标）。
+    /// - `set_cursor` 常在 `wl_pointer.enter` 之前被调用（首帧/无指针会话）：此时只落盘
+    ///   `pending_cursor_shape`，serial 一到（`ptr_enter`）立即补下发，故无需调用方重试。
+    /// - 每次 `enter` 都强制重下发：合成器在指针重新进入时回到默认光标，去重只做在「同一
+    ///   焦点期内同形状同缩放」。
+    /// - 缩放变化（`wl_output.scale`）→ 重载主题并按新尺寸重下发。
+    /// - 动画光标（如 `wait`）取首帧静态图，不做逐帧定时重提交：合成器侧的动画光标由主题
+    ///   自身决定，本端不模拟（已知限制）。
+    /// 备选更省路径 `wp_cursor_shape_manager_v1`（免自管 buffer）需合成器提供该扩展，本机
+    /// WSLg Weston 未发布（实测 registry globals 无之），故不走该路。
+    /// @note 读回口径：Wayland 客户端**无任何 API 可查询「屏幕上当前显示的光标」**（不同于
+    /// Win32 `GetCursorInfo` / X11 XFIXES）。可机器判定的只有本端提交了什么，见 `cursor_state()`
+    /// 与 `tools/verify/wayland_cursor_live_probe.cpp`；「屏幕像素确已改变」不在证明范围内。
     auto set_cursor(CursorShape shape) -> void override;
+
+    /// @brief `set_cursor` 的本端提交状态（真机验收探针的观测面，见 `set_cursor` 的读回口径）。
+    ///
+    /// 全部字段都是「本进程向合成器提交了什么」的物证，而非屏幕读回；未连接/无指针/主题缺失
+    /// 时 `applied` 为 false 且其余字段保持初值（不抛、不崩，便于无头环境安全调用）。
+    struct CursorState {
+        bool applied = false;  ///< 至少成功提交过一次（cursor 表面 commit + `wl_pointer_set_cursor`）。
+        bool pointer_entered = false;  ///< 是否收到过 `wl_pointer.enter`（无 enter 则无合法 serial）。
+        CursorShape shape = CursorShape::Arrow;  ///< 最近一次成功提交的语义形状。
+        std::string resolved_name;  ///< 主题侧实际命中的光标名（`wl_cursor::name`，可与请求名不同）。
+        int image_width = 0;  ///< 命中图像宽（设备像素；0 = 未命中）。
+        int image_height = 0;  ///< 命中图像高（设备像素）。
+        int buffer_scale = 1;  ///< cursor 表面的 `set_buffer_scale`（图像非缩放整数倍时退化 1）。
+        int hotspot_x = 0;  ///< 热点（表面逻辑坐标，已按 `buffer_scale` 折算）。
+        int hotspot_y = 0;
+        std::uint64_t buffer_id = 0;  ///< 提交的 `wl_buffer` 身份（主题持有；不同形状通常不同）。
+        int image_count = 0;  ///< 该光标的动画帧数（>1 即动画光标，本端只取首帧）。
+        int theme_size = 0;  ///< 主题加载尺寸（设备像素 = 24 × scale）。
+        int commits = 0;  ///< cursor 表面 commit 次数（去重后每次形状/缩放变化 +1，同形状幂等不加）。
+    };
+
+    /// @brief 取 `set_cursor` 的本端提交状态（探针逐项断言用；无 Wayland 会话时全零）。
+    [[nodiscard]] auto cursor_state() const -> CursorState;
 
     /// @brief 运行期更新 CSD 标题栏样式（存入 Impl 并触发重绘，下帧 draw_decoration 生效）。
     auto set_title_bar_style(const TitleBarStyle &style) -> void override;

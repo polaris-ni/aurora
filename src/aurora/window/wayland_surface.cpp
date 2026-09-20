@@ -11,10 +11,12 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client.h>
+#include <wayland-cursor.h>
 #include <xkbcommon/xkbcommon.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <vector>
 
@@ -85,6 +87,8 @@ struct WaylandSurface::Impl {
 
     Painter painter;
     std::vector<Rect> present_dirty;  ///< 本帧增量 damage 脏区（设备坐标；空=全量）。
+    /// @brief 本帧 attach 因 configure 打断而丢弃，需在下次事件泵补一帧（见 present() 内注释）。
+    bool present_stale = false;
     Size size{0.0F, 0.0F};  ///< 逻辑 dp（Wayland 表面坐标即逻辑坐标）。
     int scale = 1;
     bool configured = false;  ///< 收到首个 xdg_surface.configure 前不得 attach buffer。
@@ -126,9 +130,25 @@ struct WaylandSurface::Impl {
     int border = 6;  ///< 可拖拽缩放边框厚度（逻辑 px）
     bool csd_grab = false;  ///< 当前是否处于 CSD/修饰键拖拽交互中（吞噬指针事件）
     std::uint32_t last_press_serial = 0;  ///< 最近按键 serial：控件经 begin_window_move/resize 同步调用时有效
-    // ---- 光标形状（契约，平台侧待真机接线）----
-    CursorShape pending_cursor_shape = CursorShape::Arrow;  ///< 最近下发的语义形状（set_cursor 落盘）。
-    std::uint32_t pointer_enter_serial = 0;  ///< 最近 wl_pointer.enter 的 serial（wl_pointer.set_cursor 必需）。
+    // ---- 光标形状（客户端主题光标：libwayland-cursor 取位图 → cursor wl_surface → set_cursor）----
+    CursorShape pending_cursor_shape = CursorShape::Arrow;  ///< 期望的语义形状（set_cursor 落盘）。
+    std::uint32_t pointer_enter_serial = 0;  ///< 最近 wl_pointer.enter 的 serial（wl_pointer_set_cursor 必需）。
+    wl_cursor_theme *cursor_theme = nullptr;  ///< 主题句柄（按 24×scale 设备像素加载，scale 变即重载）。
+    int cursor_theme_size = 0;  ///< 已加载主题的尺寸（设备像素；0 = 未加载）。
+    wl_surface *cursor_surface = nullptr;  ///< 专用于光标的独立表面（随实例复用，仅在首次下发时创建）。
+    bool cursor_applied = false;  ///< 是否已成功提交过一次。
+    CursorShape cursor_applied_shape = CursorShape::Arrow;  ///< 最近成功提交的形状（去重用）。
+    int cursor_applied_scale = 0;  ///< 最近成功提交时的缩放（缩放变则须重提交）。
+    std::string cursor_resolved_name;  ///< 主题侧实际命中的名字（wl_cursor::name）。
+    int cursor_image_w = 0;
+    int cursor_image_h = 0;
+    int cursor_buffer_scale = 1;  ///< cursor 表面的 set_buffer_scale（图像尺寸非 scale 整数倍时退化 1）。
+    int cursor_hotspot_x = 0;  ///< 热点（表面逻辑坐标）。
+    int cursor_hotspot_y = 0;
+    std::uint64_t cursor_buffer_id = 0;  ///< 提交的 wl_buffer 身份（指针值；主题持有，勿销毁）。
+    int cursor_image_count = 0;  ///< 动画帧数（>1 = 动画光标，本端只取首帧）。
+    int cursor_commits = 0;  ///< cursor 表面 commit 次数（观测面：证明「确有提交」且同形状幂等）。
+    bool cursor_theme_warned = false;  ///< 主题/名字彻底缺失只 WARN 一次（不在悬停热路径刷屏）。
     // 双击标题栏最大化检测（Wayland 不提供双击事件，客户端自行追踪）。
     std::uint32_t last_click_time = 0;  ///< 上次标题栏点击时间（ms，自某基准）
     double last_click_x = 0.0;  ///< 上次点击 X
@@ -165,6 +185,9 @@ struct WaylandSurface::Impl {
         }
         if (want != scale) {
             scale = want;
+            // 光标主题按设备像素加载：缩放变了旧主题的位图就不再匹配，立即重载并重下发
+            // （force=true 跨过「同形状同缩放」去重——此处缩放恰已变，去重键本身也已失效）。
+            apply_cursor(true);
             if (self->present_request_) {
                 self->present_request_();
             }
@@ -185,6 +208,16 @@ struct WaylandSurface::Impl {
         s.h = 0;
         s.busy = false;
     }
+
+    /// @brief 光标逻辑尺寸（dp）：主题按 `kCursorSize * scale` 设备像素加载，与 Win32/X11 的系统光标同量级。
+    static constexpr int kCursorSize = 24;
+    /// @brief 确保主题已按当前缩放加载（scale 变化即销毁重载）。返回是否可用。
+    auto ensure_cursor_theme() -> bool;
+    /// @brief 把 `pending_cursor_shape` 的主题位图提交到 cursor 表面并交回合成器。
+    /// 位图直接用 `wl_cursor_image_get_buffer()` 返回的主题自有 ARGB `wl_buffer`（本端不再二次上传）。
+    /// @param force 忽略「同形状同缩放」去重（`wl_pointer.enter` 后必须走这条：合成器已回到默认光标）。
+    /// @return 是否已提交（false = 资源/serial 未就绪，或主题彻底缺名字）。
+    auto apply_cursor(bool force = false) -> bool;
 
     auto ensure_slot(Slot &s, int w, int h) const -> bool;
     auto pick_slot(int w, int h) -> Slot *;
@@ -246,8 +279,10 @@ void ptr_enter(void *data, wl_pointer * /*p*/, std::uint32_t serial, wl_surface 
                wl_fixed_t sy) {
     Impl &d = *static_cast<Impl *>(data);
     // 光标形状：捕获本次 enter 的 serial——wl_pointer.set_cursor 只接受 enter（或已有焦点）时的
-    // serial，故必须在 set_cursor 调用的那一刻之外缓存下来（见 set_cursor 的 TODO）。
+    // serial，故 set_cursor 早于 enter 时须在此补一次下发；且合成器在指针重新进入表面时会回到
+    // 默认光标，故每次 enter 都强制重下发（跨过同形状去重）。
     d.pointer_enter_serial = serial;
+    d.apply_cursor(true);
     d.ptr_x = wl_fixed_to_double(sx);
     d.ptr_y = wl_fixed_to_double(sy);
     d.send_mouse(MouseAction::Move, MouseButton::Left, static_cast<float>(d.ptr_x), static_cast<float>(d.ptr_y));
@@ -804,6 +839,119 @@ auto WaylandSurface::Impl::pick_slot(int w, int h) -> Slot * {
     return nullptr;
 }
 
+auto WaylandSurface::Impl::ensure_cursor_theme() -> bool {
+    const int want = kCursorSize * std::max(1, scale);  // 主题按设备像素加载
+    if (cursor_theme != nullptr && cursor_theme_size == want) {
+        return true;
+    }
+    if (cursor_theme != nullptr) {
+        // 旧主题持有全部光标位图的 wl_buffer（cursor_surface 正 attach 着其中一个）；销毁后必须
+        // 让下一次 apply 重新提交，否则 surface 上留着已失效的 buffer 身份。
+        wl_cursor_theme_destroy(cursor_theme);
+        cursor_theme = nullptr;
+        cursor_theme_size = 0;
+        cursor_applied = false;
+    }
+    if (shm == nullptr) {
+        return false;
+    }
+    // 首参 nullptr = 跟随桌面主题（$XCURSOR_THEME，缺省 default → 继承链落到具体主题目录）。
+    cursor_theme = wl_cursor_theme_load(nullptr, want, shm);
+    if (cursor_theme == nullptr) {
+        if (!cursor_theme_warned) {
+            cursor_theme_warned = true;
+            AURORA_LOG_WARN("window",
+                            "WaylandSurface: wl_cursor_theme_load(size=", want,
+                            ") failed (no icon theme installed); cursor shapes stay on the "
+                            "compositor default.");
+        }
+        return false;
+    }
+    cursor_theme_size = want;
+    return true;
+}
+
+auto WaylandSurface::Impl::apply_cursor(bool force) -> bool {
+    if (dpy == nullptr || compositor == nullptr || shm == nullptr || pointer == nullptr || !configured) {
+        return false;
+    }
+    if (pointer_enter_serial == 0U) {
+        return false;  // 指针尚未进入本表面：无合法 serial，留待 ptr_enter 内补下发
+    }
+    if (!force && cursor_applied && cursor_applied_shape == pending_cursor_shape && cursor_applied_scale == scale) {
+        return true;  // 同一焦点期内同形状同缩放：已上屏，幂等不再 commit
+    }
+    if (!ensure_cursor_theme()) {
+        return false;
+    }
+    const char *const want = cursor_rfc_name(pending_cursor_shape);
+    wl_cursor *cur = wl_cursor_theme_get_cursor(cursor_theme, want);
+    for (const char *fb : {"default", "left_ptr"}) {
+        if (cur != nullptr) {
+            break;
+        }
+        cur = wl_cursor_theme_get_cursor(cursor_theme, fb);  // 主题缺该形状：回退箭头语义
+    }
+    if (cur == nullptr || cur->image_count == 0U || cur->images[0] == nullptr) {
+        if (!cursor_theme_warned) {
+            cursor_theme_warned = true;
+            AURORA_LOG_WARN("window",
+                            "WaylandSurface: cursor theme resolved neither \"", want,
+                            "\" nor the default/left_ptr fallback; keeping the compositor cursor.");
+        }
+        return false;
+    }
+    wl_cursor_image *img = cur->images[0];  // 动画光标（wait/watch）取首帧静态图，本端不做逐帧重提交
+    wl_buffer *buf = wl_cursor_image_get_buffer(img);
+    if (buf == nullptr) {
+        return false;
+    }
+    if (cursor_surface == nullptr) {
+        cursor_surface = wl_compositor_create_surface(compositor);  // 一个实例一个，随实例复用
+        if (cursor_surface == nullptr) {
+            return false;
+        }
+    }
+    const int w = static_cast<int>(img->width);
+    const int h = static_cast<int>(img->height);
+    if (w <= 0 || h <= 0) {
+        return false;
+    }
+    // 仅当主题真的给出了高 DPI 位图（尺寸达设备像素目标且可被 scale 整除）才按 scale 上报缓冲
+    // 缩放；否则退回 1x——宁可在缺尺寸的主题下偏小，也不把热点折算到图像之外。
+    const int bscale = (scale > 1 && w % scale == 0 && h % scale == 0 && std::max(w, h) >= cursor_theme_size)
+                           ? scale
+                           : 1;
+    if (compositor_version >= 3U) {
+        wl_surface_set_buffer_scale(cursor_surface, bscale);
+    }
+    wl_surface_attach(cursor_surface, buf, 0, 0);
+    if (compositor_version >= 3U) {
+        wl_surface_damage_buffer(cursor_surface, 0, 0, w, h);  // buffer 坐标
+    } else {
+        wl_surface_damage(cursor_surface, 0, 0, w / bscale, h / bscale);  // 表面坐标（bscale 恒 1）
+    }
+    wl_surface_commit(cursor_surface);
+    // 热点是图像设备像素，须按 bscale 折算成表面逻辑坐标（与 attach 的 buffer_scale 同口径）。
+    wl_pointer_set_cursor(pointer, pointer_enter_serial, cursor_surface, static_cast<std::int32_t>(img->hotspot_x) /
+                                                                              bscale,
+                          static_cast<std::int32_t>(img->hotspot_y) / bscale);
+    wl_display_flush(dpy);
+    cursor_applied = true;
+    cursor_applied_shape = pending_cursor_shape;
+    cursor_applied_scale = scale;
+    cursor_resolved_name = (cur->name != nullptr) ? cur->name : want;
+    cursor_image_w = w;
+    cursor_image_h = h;
+    cursor_buffer_scale = bscale;
+    cursor_hotspot_x = static_cast<int>(img->hotspot_x) / bscale;
+    cursor_hotspot_y = static_cast<int>(img->hotspot_y) / bscale;
+    cursor_buffer_id = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(buf));
+    cursor_image_count = static_cast<int>(cur->image_count);
+    ++cursor_commits;
+    return true;
+}
+
 // =============================================================================
 // WaylandSurface：构造/析构与 Surface 接口实现
 // =============================================================================
@@ -941,6 +1089,14 @@ WaylandSurface::~WaylandSurface() {
         if (d.pointer != nullptr) {
             wl_pointer_destroy(d.pointer);
         }
+        // cursor 表面先于主题销毁：cursor_surface 附着的是主题自有的 wl_buffer，主题销毁会连带
+        // 释放它（表面被销毁时合成器已解除引用，顺序上无协议风险，但显式先表面后主题更易读）。
+        if (d.cursor_surface != nullptr) {
+            wl_surface_destroy(d.cursor_surface);
+        }
+        if (d.cursor_theme != nullptr) {
+            wl_cursor_theme_destroy(d.cursor_theme);
+        }
         if (d.keyboard != nullptr) {
             wl_keyboard_destroy(d.keyboard);
         }
@@ -1076,6 +1232,17 @@ auto WaylandSurface::present() -> Result<bool> {
             return make_error(ErrorCode::PlatformUnavailable, "WaylandSurface::present: no free wl_shm buffer slot.",
                               "Compositor may be unresponsive; retry next frame.", "aurora/window/wayland_surface.h");
         }
+        // 本帧几何是否仍与合成器的 configure 态吻合：begin_frame 之后、attach 之前唯一的派发点是
+        // pick_slot 的 roundtrip，其间的 xdg_toplevel.configure 会把 size 改成新尺寸，而它请求的同步重绘
+        // 又被 present_root 的重入护栏吞掉，于是 painter/缓冲槽仍按旧几何分配。这副「旧尺寸 buffer + 新
+        // configure 态」提交上去会被合成器判为协议错误并杀连接（Weston 实测报文的尺寸对即为
+        // 「stale buffer vs 新 configure」）。故丢帧不 attach（脏区原样留给补帧），下次事件泵补一帧。
+        const int want_w = static_cast<int>(std::lround(d.size.width)) * d.scale;
+        const int want_h = static_cast<int>(std::lround(d.size.height)) * d.scale;
+        if (w != want_w || h != want_h) {
+            d.present_stale = true;
+            return Result<bool>{true};
+        }
         if (d.csd_title || d.csd_border) {
             // 自绘装饰必须在 swizzle 前绘制到 painter（RGBA），随缓冲一同上屏。
             d.draw_decoration(d.painter);
@@ -1136,30 +1303,34 @@ auto WaylandSurface::set_title(const std::string &title) -> void {
 }
 
 auto WaylandSurface::set_cursor(CursorShape shape) -> void {
-    // 光标形状 —— 契约实现（平台侧待真机接线）：
-    // 只落盘语义形状 + 复用已捕获的 enter serial；「真正下发」的三步留给真实 Wayland 会话，因为
-    // 它们需要 wl_cursor_theme / cursor wl_surface / wl_buffer 的资源生命周期，本仓库无头构建
-    // 既编译不到（AURORA_BACKEND_WAYLAND 默认 OFF）也验不了，盲写反成不可验证死代码。
-    //
-    // TODO 真机接线清单：
-    //   1) 取 cursor wl_surface：wl_compositor_create_surface(d.compositor)，仅此一个、随实例复用。
-    //   2) 取光标图像：wl_cursor_theme_load(nullptr, 24 * d.scale, d.shm) →
-    //      wl_cursor_theme_get_cursor(theme, cursor_rfc_name(shape))（cursor_map.h 即 freedesktop 名）。
-    //      命中失败（主题缺该名）回退 cursor_rfc_name(CursorShape::Arrow) 即 "default"。
-    //   3) 上传：把 wl_cursor_image 的 ARGB 像素拷入 wl_shm buffer → wl_surface_attach +
-    //      wl_surface_damage + wl_surface_commit；再
-    //      wl_pointer_set_cursor(d.pointer, d.pointer_enter_serial, cursor_surface,
-    //                           image->hotspot_x, image->hotspot_y)。
-    //      注意：set_cursor 常在 enter 之后被调用，此时 pointer_enter_serial 已缓存，可直接下发；
-    //      若在 enter 之前调用，则须在 ptr_enter 内补一次下发（读 pending_cursor_shape）。
-    // 备选（省去 1)~3)）：registry 绑定 wp_cursor_shape_manager_v1，
-    //      wp_cursor_shape_device_v1_set_shape(dev, serial, WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_*)。
+    // 光标形状：落盘期望形状后即刻尝试下发（详见公共头 set_cursor 的协议说明）。
+    // 尝试可能空手而归——指针还没进过本表面（无 enter serial）或合成器无指针，此时形状留在
+    // pending 里，ptr_enter / refresh_scale 会补下发，调用方无须重试。
     Impl &d = *impl_;
     d.pending_cursor_shape = shape;
-    // enter_serial == 0 表示指针尚未进入本窗口：真机接线后此情形须留待 ptr_enter 内补下发。
-    AURORA_LOG_DEBUG("wayland_surface", "set_cursor(", cursor_rfc_name(shape), ") recorded (pending=",
-                     static_cast<int>(d.pending_cursor_shape), ", enter_serial=", d.pointer_enter_serial,
-                     "); platform wiring pending (see TODO)");
+    if (!d.apply_cursor()) {
+        AURORA_LOG_DEBUG("wayland_surface", "set_cursor(", cursor_rfc_name(shape),
+                         ") deferred (enter_serial=", d.pointer_enter_serial, ")");
+    }
+}
+
+auto WaylandSurface::cursor_state() const -> CursorState {
+    const Impl &d = *impl_;
+    CursorState s;
+    s.applied = d.cursor_applied;
+    s.pointer_entered = (d.pointer_enter_serial != 0U);
+    s.shape = d.cursor_applied_shape;
+    s.resolved_name = d.cursor_resolved_name;
+    s.image_width = d.cursor_image_w;
+    s.image_height = d.cursor_image_h;
+    s.buffer_scale = d.cursor_buffer_scale;
+    s.hotspot_x = d.cursor_hotspot_x;
+    s.hotspot_y = d.cursor_hotspot_y;
+    s.buffer_id = d.cursor_buffer_id;
+    s.image_count = d.cursor_image_count;
+    s.theme_size = d.cursor_theme_size;
+    s.commits = d.cursor_commits;
+    return s;
 }
 
 auto WaylandSurface::begin_window_move() -> void {
@@ -1286,6 +1457,12 @@ auto WaylandSurface::poll_platform_events() -> void {
         // 连接错误（合成器退出/协议错误）：按关闭处理，帧循环可退出。
         AURORA_LOG_WARN("window", "WaylandSurface: display connection error; treating as close.");
         d.close_requested = true;
+    }
+    if (d.present_stale) {
+        // 上一帧被派发点上的 configure 打断而丢帧（见 present()）：此刻已不在渲染栈内，重绘请求不再被
+        // 重入护栏吞掉，故在此补一帧，避免窗口停在旧尺寸画面上直到下次脏帧自发重绘。
+        d.present_stale = false;
+        d.request_repaint();
     }
 }
 
