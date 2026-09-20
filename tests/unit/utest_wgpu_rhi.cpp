@@ -8,10 +8,15 @@
 /// 棋盘图 4× 降采样整块为均匀均值色（三线性命中 mip≥1），1:1 绘制仍是端点色（lod 0 无混）；
 /// 离屏读回通道开关与连帧 submit——连帧不逐帧消费 read_pixels 不踩「缓冲仍映射」验证错误，
 /// 关闭期间 read_pixels 整体拒绝、重新打开后下一帧恢复；CSD 装饰 DL 追加回放在内容帧之上——
-/// 读回证明装饰条带/悬停红底/图标像素上屏、装饰带以下仍是内容色、命令族零 skipped。
+/// 读回证明装饰条带/悬停红底/图标像素上屏、装饰带以下仍是内容色、命令族零 skipped；
+/// compute 区域效果实路径（cs_blur/cs_blend/cs_mask）——blur 整数域可分离 box CPU 参照
+/// 精确匹配、blend Multiply/mask LinearFade ±1 量化容差比对、区域外 untouched，无 compute
+/// adapter 整体 SKIP。
 /// 依赖 Vulkan/D3D12 adapter：无可用设备环境整体 SKIP（真实 GPU 断言不做假通过）。
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -281,6 +286,158 @@ AURORA_TEST_CASE(wgpu_compute_mip_downscale_sampling) {
     }
 }
 
+namespace {
+
+// 逻辑矩形速构（帧尺寸/scale=1，设备像素 = 逻辑像素）。
+[[nodiscard]] auto mkrect(int x, int y, int w, int h) -> Rect {
+    return Rect{.origin = Point{.x = static_cast<float>(x), .y = static_cast<float>(y)},
+                .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}};
+}
+
+// 内容场（三帧共用、可解析重建）：64×64 底 (10,20,30) + [16,48)² 块 (200,100,50)。
+[[nodiscard]] auto field_at(int x, int y, int ch) -> int {
+    static constexpr int kColors[2][3] = {{10, 20, 30}, {200, 100, 50}};
+    const bool blk = x >= 16 && x < 48 && y >= 16 && y < 48;
+    return kColors[blk ? 1 : 0][ch];
+}
+
+}  // namespace
+
+AURORA_TEST_CASE(wgpu_compute_region_effects_match_cpu_reference) {
+    // blur/blend/mask 区域效果 compute 实路径（cs_blur/cs_blend/cs_mask）逐像素验收：
+    // 与 WGSL 同源公式（整数域恒权 box + 区域 tap 钳位 / blend_rgb / mask_base）的 CPU
+    // 参照比对——blur 两端整型运算精确无容差；blend/mask 经 rgba8unorm 落纹素量化，±1 吸收
+    // f32 中间域与 double 参照的边界差。adapter 无 compute 整体 SKIP（片元兜底语义由
+    // golden 容差测试覆盖，此处锁定 compute 路，不做假通过）。
+    rhi::WgpuRhi rhi_obj(offscreen(64, 64));
+    if (!rhi_obj.valid()) {
+        AURORA_TEST_SKIP("无可用 wgpu adapter/device，compute 区域效果断言跳过");
+    }
+    if (!rhi_obj.backend().capabilities().compute) {
+        AURORA_TEST_SKIP("adapter 无 compute（GLES 兜底端），效果走片元路，本用例锁定 compute 实路径");
+    }
+    auto content = [](DisplayList &dl) {
+        dl.push_cmd(make_fill(mkrect(0, 0, 64, 64), Color{10, 20, 30, 255}));
+        dl.push_cmd(make_fill(mkrect(16, 16, 32, 32), Color{200, 100, 50, 255}));
+    };
+
+    // ---- 帧 1：BlurRegion [16,48)²，r=1 —— H(canvas→alt)+V(alt→canvas) 两趟 compute dispatch。
+    // CPU 参照：整数域可分离 box，tap 钳位区域本地索引 [0,31]（不漏采区外），整除即 floor。
+    AURORA_TEST_REQUIRE(rhi_obj.begin_frame(64, 64, 1.0F));
+    {
+        DisplayList dl;
+        content(dl);
+        DrawCmd blur;
+        blur.kind = CmdKind::BlurRegion;
+        blur.bounds = mkrect(16, 16, 32, 32);
+        blur.f0 = 1.0F;  // scale=1 → r = max(1, trunc(1)) = 1
+        dl.push_cmd(blur);
+        dl.replay(rhi_obj.backend());
+        AURORA_TEST_CHECK_EQ(rhi_obj.stats().skipped_cmds, 0U);
+    }
+    rhi_obj.end_frame();
+    std::vector<std::uint8_t> px;
+    AURORA_TEST_REQUIRE(rhi_obj.read_pixels(px));
+    int hp[32][32][3];  // H 趟中间态（整数域，rgba8unorm 精确存回）
+    for (int ch = 0; ch < 3; ++ch) {
+        for (int y = 0; y < 32; ++y) {
+            for (int x = 0; x < 32; ++x) {
+                int acc = 0;
+                for (int k = -1; k <= 1; ++k) {
+                    acc += field_at(16 + std::clamp(x + k, 0, 31), 16 + y, ch);
+                }
+                hp[y][x][ch] = acc / 3;
+            }
+        }
+    }
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 32; ++x) {
+            for (int ch = 0; ch < 3; ++ch) {
+                int acc = 0;
+                for (int k = -1; k <= 1; ++k) {
+                    acc += hp[std::clamp(y + k, 0, 31)][x][ch];
+                }
+                const auto got = pixel_at(px, 64, 16 + x, 16 + y);
+                AURORA_TEST_CHECK_EQ(got[ch], acc / 3);  // 整数域两端精确匹配
+            }
+            const auto got = pixel_at(px, 64, 16 + x, 16 + y);
+            AURORA_TEST_CHECK_EQ(got[3], 255);
+        }
+    }
+    // 区域外 untouched：纯底 (10,20,30)。
+    AURORA_TEST_CHECK_EQ(pixel_at(px, 64, 4, 4), (std::array<int, 4>{10, 20, 30, 255}));
+    AURORA_TEST_CHECK_EQ(pixel_at(px, 64, 60, 60), (std::array<int, 4>{10, 20, 30, 255}));
+
+    // ---- 帧 2：BlendRegion Multiply [8,24)²，strength=0.5，tint=(255,0,255)。
+    // 255 域参照：m = s·t/255，o = clamp(s + a·(m−s))；±1 容差（compute 写 alt → 区域拷回，
+    // rgba8 RN 量化 vs double 参照）。alpha 通道原样保留。
+    AURORA_TEST_REQUIRE(rhi_obj.begin_frame(64, 64, 1.0F));
+    {
+        DisplayList dl;
+        content(dl);
+        DrawCmd blend;
+        blend.kind = CmdKind::BlendRegion;
+        blend.bounds = mkrect(8, 8, 16, 16);
+        blend.blend_mode = BlendMode::Multiply;
+        blend.f0 = 0.5F;
+        blend.color = Color{255, 0, 255, 255};
+        dl.push_cmd(blend);
+        dl.replay(rhi_obj.backend());
+        AURORA_TEST_CHECK_EQ(rhi_obj.stats().skipped_cmds, 0U);
+    }
+    rhi_obj.end_frame();
+    std::vector<std::uint8_t> px2;
+    AURORA_TEST_REQUIRE(rhi_obj.read_pixels(px2));
+    static constexpr int kTint[3] = {255, 0, 255};
+    for (int y = 8; y < 24; ++y) {
+        for (int x = 8; x < 24; ++x) {
+            const auto got = pixel_at(px2, 64, x, y);
+            for (int ch = 0; ch < 3; ++ch) {
+                const double s = static_cast<double>(field_at(x, y, ch));
+                const double m = s * static_cast<double>(kTint[ch]) / 255.0;
+                const double o = std::clamp(s + 0.5 * (m - s), 0.0, 255.0);
+                AURORA_TEST_CHECK(std::abs(static_cast<double>(got[ch]) - o) <= 1.5);
+            }
+            AURORA_TEST_CHECK_EQ(got[3], 255);
+        }
+    }
+    // 混合区外 untouched。
+    AURORA_TEST_CHECK_EQ(pixel_at(px2, 64, 40, 40), (std::array<int, 4>{200, 100, 50, 255}));
+
+    // ---- 帧 3：MaskRegion LinearFade [16,48)²，strength=1 —— RGB 乘区域纵向渐变因子。
+    // factor = base = 1 − y_local/32（ipx.y∈[0,31]，clamp 后不截）；输出 floor(s·factor)，
+    // ±1 容差吸收 f32 乘除往返（如 s/255·255 的 99.999… 边界）。alpha 保留。
+    AURORA_TEST_REQUIRE(rhi_obj.begin_frame(64, 64, 1.0F));
+    {
+        DisplayList dl;
+        content(dl);
+        DrawCmd mask;
+        mask.kind = CmdKind::MaskRegion;
+        mask.bounds = mkrect(16, 16, 32, 32);
+        mask.mask_kind = ShaderMaskKind::LinearFade;
+        mask.f0 = 1.0F;
+        dl.push_cmd(mask);
+        dl.replay(rhi_obj.backend());
+        AURORA_TEST_CHECK_EQ(rhi_obj.stats().skipped_cmds, 0U);
+    }
+    rhi_obj.end_frame();
+    std::vector<std::uint8_t> px3;
+    AURORA_TEST_REQUIRE(rhi_obj.read_pixels(px3));
+    for (int y = 16; y < 48; ++y) {
+        const double factor = 1.0 - static_cast<double>(y - 16) / 32.0;
+        for (int x = 16; x < 48; ++x) {
+            const auto got = pixel_at(px3, 64, x, y);
+            for (int ch = 0; ch < 3; ++ch) {
+                const double expected = std::floor(static_cast<double>(field_at(x, y, ch)) * factor);
+                AURORA_TEST_CHECK(std::abs(static_cast<double>(got[ch]) - expected) <= 1.5);
+            }
+            AURORA_TEST_CHECK_EQ(got[3], 255);  // alpha 原样
+        }
+    }
+    // 遮罩区外 untouched（首行恰证渐变起点无衰减语义）。
+    AURORA_TEST_CHECK_EQ(pixel_at(px3, 64, 4, 60), (std::array<int, 4>{10, 20, 30, 255}));
+}
+
 AURORA_TEST_CASE(wgpu_readback_toggle_and_multi_frame_submit) {
     rhi::WgpuRhi rhi_obj(offscreen());
     if (!rhi_obj.valid()) {
@@ -389,6 +546,9 @@ AURORA_TEST_CASE(wgpu_stream_image_and_native_import_contract) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
 }
 AURORA_TEST_CASE(wgpu_compute_mip_downscale_sampling) {
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
+}
+AURORA_TEST_CASE(wgpu_compute_region_effects_match_cpu_reference) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
 }
 AURORA_TEST_CASE(wgpu_readback_toggle_and_multi_frame_submit) {

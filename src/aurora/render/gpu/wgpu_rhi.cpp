@@ -77,6 +77,9 @@ struct Globals {
 // 源 = 上一 mip 级单级 view，目标 = 写一级 storage view（WriteOnly，零 feature）。
 @group(0) @binding(5) var t_mip_src: texture_2d<f32>;
 @group(0) @binding(6) var t_mip_dst: texture_storage_2d<rgba8unorm, write>;
+// 区域效果 compute 专用绑定（独立 bind group layout，仅 cs_blur/cs_blend/cs_mask 引用）：
+// binding 0/1 与渲染路同构（uniform + 源纹理），binding 7 = 区域写出的 storage 目标。
+@group(0) @binding(7) var t_fx_dst: texture_storage_2d<rgba8unorm, write>;
 
 struct VSOut {
     @builtin(position) fb: vec4f,
@@ -195,8 +198,61 @@ fn fs_copy(in: VSOut) -> @location(0) vec4f {
     return textureSampleLevel(t_src, smp_point, in.uv, 0.0);
 }
 
-// 区域模糊单遍：整数域恒权 box（tap 钳制在区域内，毛玻璃不漏采区外），设备像素索引
-// 域 = 片元 framebuffer 坐标（wgpu fb.xy 已是附着设备像素，免 GL 的 v_pos*scale 换算）。
+// ---- 区域效果共用公式（片元/compute 单一来源，杜绝两路漂移）----
+// blur tap：恒权 box、tap 钳制在区域内（毛玻璃不漏采区外）；ipx = 区域本地索引，sz = 区域 w/h。
+fn blur_tap(ipx: vec2f, k: i32, diry: bool, sz: vec2f) -> vec2f {
+    var t = clamp(ipx, vec2f(0.0), sz - vec2f(1.0));
+    if (diry) {
+        t.y = clamp(ipx.y + f32(k), 0.0, sz.y - 1.0);
+    } else {
+        t.x = clamp(ipx.x + f32(k), 0.0, sz.x - 1.0);
+    }
+    return t;
+}
+
+// 区域混合（CSS mix-blend-mode 子集 0..7）：浮点域近似软件整数运算，逐通道 ≤ 1 LSB 容差。
+fn blend_rgb(s: vec3f, t: vec3f, mode: i32) -> vec3f {
+    if (mode == 0) {
+        return t;
+    }
+    if (mode == 1) {
+        return s * t;
+    }
+    if (mode == 2) {
+        return vec3f(1.0) - (vec3f(1.0) - s) * (vec3f(1.0) - t);
+    }
+    if (mode == 3) {
+        return mix(2.0 * s * t, vec3f(1.0) - 2.0 * (vec3f(1.0) - s) * (vec3f(1.0) - t), step(vec3f(0.5), s));
+    }
+    if (mode == 4) {
+        return min(s, t);
+    }
+    if (mode == 5) {
+        return max(s, t);
+    }
+    if (mode == 6) {
+        return abs(s - t);
+    }
+    if (mode == 7) {
+        return s + t - 2.0 * s * t;
+    }
+    return s;
+}
+
+// 区域遮罩渐变因子（不截断，调用方 clamp）：LinearFade/LinearRise/RadialFade，基于区域本地索引。
+fn mask_base(kind: i32, ipx: vec2f, sz: vec2f) -> f32 {
+    if (kind == 0) {
+        return 1.0 - ipx.y / sz.y;
+    }
+    if (kind == 1) {
+        return ipx.y / sz.y;
+    }
+    let c = sz * 0.5;
+    return 1.0 - length(ipx - c) / (length(c) + 0.001);
+}
+
+// 区域模糊单遍：整数域恒权 box（tap 钳制在区域内），设备像素索引域 = 片元 framebuffer 坐标
+// （wgpu fb.xy 已是附着设备像素，免 GL 的 v_pos*scale 换算）。compute 实路径见 cs_blur。
 @fragment
 fn fs_blur(in: VSOut) -> @location(0) vec4f {
     let ipx = floor(in.fb.xy) - g.region.xy;
@@ -204,64 +260,29 @@ fn fs_blur(in: VSOut) -> @location(0) vec4f {
     let diry = g.tex_ctl.w > 0.5;
     var acc = vec4f(0.0);
     for (var k: i32 = -r; k <= r; k = k + 1) {
-        var t = clamp(ipx, vec2f(0.0), g.region.zw - vec2f(1.0));
-        if (diry) {
-            t.y = clamp(ipx.y + f32(k), 0.0, g.region.w - 1.0);
-        } else {
-            t.x = clamp(ipx.x + f32(k), 0.0, g.region.z - 1.0);
-        }
+        let t = blur_tap(ipx, k, diry, g.region.zw);
         let uv = (g.region.xy + t + vec2f(0.5)) / g.canvas_ctl.xy;
         acc = acc + floor(textureSampleLevel(t_src, smp_point, uv, 0.0) * 255.0 + 0.5);
     }
     return floor(acc / f32(2 * r + 1)) / 255.0;
 }
 
-// 区域混合（CSS mix-blend-mode 子集）：浮点域近似软件整数运算，逐通道 ≤ 1 LSB 容差；
-// alpha 通道不参与（软件只写 RGB）。
+// 区域混合：alpha 通道不参与（软件只写 RGB）。compute 实路径见 cs_blend。
 @fragment
 fn fs_blend(in: VSOut) -> @location(0) vec4f {
     let s4 = floor(textureSampleLevel(t_src, smp_linear, in.uv, 0.0) * 255.0 + 0.5);
     let s = s4.rgb / 255.0;
-    let t = g.fx.rgb;
-    var r = s;
-    let mode = i32(g.ctl.w);
-    if (mode == 0) {
-        r = t;
-    } else if (mode == 1) {
-        r = s * t;
-    } else if (mode == 2) {
-        r = vec3f(1.0) - (vec3f(1.0) - s) * (vec3f(1.0) - t);
-    } else if (mode == 3) {
-        r = mix(2.0 * s * t, vec3f(1.0) - 2.0 * (vec3f(1.0) - s) * (vec3f(1.0) - t), step(vec3f(0.5), s));
-    } else if (mode == 4) {
-        r = min(s, t);
-    } else if (mode == 5) {
-        r = max(s, t);
-    } else if (mode == 6) {
-        r = abs(s - t);
-    } else if (mode == 7) {
-        r = s + t - 2.0 * s * t;
-    }
+    let r = blend_rgb(s, g.fx.rgb, i32(g.ctl.w));
     let outc = clamp(s + g.fx.a * (r - s), vec3f(0.0), vec3f(1.0));
     return vec4f(outc, s4.a / 255.0);
 }
 
-// 区域遮罩：RGB 乘渐变因子（LinearFade/LinearRise/RadialFade，基于区域设备像素索引），
-// alpha 原样保留（同 GL 公式）。
+// 区域遮罩：RGB 乘渐变因子（1:1 映射下源纹素 = 同位设备像素），alpha 原样保留（同 GL 公式）。
+// compute 实路径见 cs_mask。
 @fragment
 fn fs_mask(in: VSOut) -> @location(0) vec4f {
     let ipx = floor(in.fb.xy) - g.region.xy;
-    var base = 1.0;
-    let kind = i32(g.ctl.z);
-    if (kind == 0) {
-        base = 1.0 - ipx.y / g.region.w;
-    } else if (kind == 1) {
-        base = ipx.y / g.region.w;
-    } else if (kind == 2) {
-        let c = g.region.zw * 0.5;
-        base = 1.0 - length(ipx - c) / (length(c) + 0.001);
-    }
-    base = clamp(base, 0.0, 1.0);
+    let base = clamp(mask_base(i32(g.ctl.z), ipx, g.region.zw), 0.0, 1.0);
     let factor = 1.0 - g.fx.a * (1.0 - base);
     let s4 = floor(textureSampleLevel(t_src, smp_linear, in.uv, 0.0) * 255.0 + 0.5);
     let rgb = clamp(floor(s4.rgb / 255.0 * factor * 255.0), vec3f(0.0), vec3f(255.0));
@@ -288,6 +309,62 @@ fn cs_mip(@builtin(global_invocation_id) gid: vec3u) {
         }
     }
     textureStore(t_mip_dst, vec2u(gid.x, gid.y), acc * 0.25);
+}
+
+// ---- 区域效果 compute 实路径（capabilities().compute 兑现项，公式与 fs_blur/fs_blend/fs_mask
+// 同源：blur_tap/blend_rgb/mask_base 单一来源）。约定：gid = 区域本地索引，源纹素与目标像素
+// 同址（q = region.xy + gid，1:1 映射下与片元路的 NEAREST/LINEAR-in.uv 取值逐位等价——
+// LINEAR 恰落纹素中心权重 1），区域外线程整体早退。区域合成（DrawLayer）维持片元路：
+// 画布是 MSAA 批式累加目标，compute 读-改-写需逐条 resolve+load 整幅往返并断合批，非收益方向。
+
+@compute @workgroup_size(8, 8)
+fn cs_blur(@builtin(global_invocation_id) gid: vec3u) {
+    let ipx = vec2f(f32(gid.x), f32(gid.y));
+    let sz = g.region.zw;
+    if (ipx.x >= sz.x || ipx.y >= sz.y) {
+        return;
+    }
+    let r = i32(g.tex_ctl.z);
+    let diry = g.tex_ctl.w > 0.5;
+    // 整数域累加 + 整数除法求均值：浮点除法在部分驱动上会把 f32(2r+1) 降解为倒数乘，
+    // floor(3v/d) 在 v≡0 (mod d) 时丢 1 LSB（实测每趟 −1）；整数除法是精确截断，
+    // /255.0 后的 unorm8 RN 存储吸收最后一 ulp，与 CPU 参考 floor(acc/窗口长) 逐位一致。
+    var acc = vec4i(0);
+    for (var k: i32 = -r; k <= r; k = k + 1) {
+        let p = vec2i(g.region.xy + blur_tap(ipx, k, diry, sz));
+        acc = acc + vec4i(floor(textureLoad(t_src, p, 0) * 255.0 + 0.5));
+    }
+    textureStore(t_fx_dst, vec2i(g.region.xy + ipx), vec4f(acc / (2 * r + 1)) / 255.0);
+}
+
+@compute @workgroup_size(8, 8)
+fn cs_blend(@builtin(global_invocation_id) gid: vec3u) {
+    let ipx = vec2f(f32(gid.x), f32(gid.y));
+    let sz = g.region.zw;
+    if (ipx.x >= sz.x || ipx.y >= sz.y) {
+        return;
+    }
+    let q = vec2i(g.region.xy + ipx);
+    let s4 = floor(textureLoad(t_src, q, 0) * 255.0 + 0.5);
+    let s = s4.rgb / 255.0;
+    let r = blend_rgb(s, g.fx.rgb, i32(g.ctl.w));
+    let outc = clamp(s + g.fx.a * (r - s), vec3f(0.0), vec3f(1.0));
+    textureStore(t_fx_dst, q, vec4f(outc, s4.a / 255.0));
+}
+
+@compute @workgroup_size(8, 8)
+fn cs_mask(@builtin(global_invocation_id) gid: vec3u) {
+    let ipx = vec2f(f32(gid.x), f32(gid.y));
+    let sz = g.region.zw;
+    if (ipx.x >= sz.x || ipx.y >= sz.y) {
+        return;
+    }
+    let q = vec2i(g.region.xy + ipx);
+    let base = clamp(mask_base(i32(g.ctl.z), ipx, sz), 0.0, 1.0);
+    let factor = 1.0 - g.fx.a * (1.0 - base);
+    let s4 = floor(textureLoad(t_src, q, 0) * 255.0 + 0.5);
+    let rgb = clamp(floor(s4.rgb / 255.0 * factor * 255.0), vec3f(0.0), vec3f(255.0));
+    textureStore(t_fx_dst, q, vec4f(rgb / 255.0, s4.a / 255.0));
 }
 )";
 
@@ -481,6 +558,13 @@ struct WgpuRhi::Impl {
     WGPUBindGroupLayout bgl_mip_ = nullptr;
     WGPUPipelineLayout pipeline_layout_mip_ = nullptr;
     WGPUComputePipeline pipe_mip_ = nullptr;
+    // 区域效果 compute 管线（同样仅 compute_cap 时创建；binding0 uniform + binding1 源 +
+    // binding7 storage 写出）。任一为 null = 创建失败，对应效果族回落片元路（不降级能力位）。
+    WGPUBindGroupLayout bgl_fx_ = nullptr;
+    WGPUPipelineLayout pipeline_layout_fx_ = nullptr;
+    WGPUComputePipeline pipe_blur_ = nullptr;
+    WGPUComputePipeline pipe_blend_ = nullptr;
+    WGPUComputePipeline pipe_mask_ = nullptr;
 
     // ---- 顶点/uniform 帧内环（CPU 暂存 + GPU 镜像；扩容时整体重放暂存，偏移稳定）----
     // 帧内各批共用一次 submit：同区域 writeBuffer 只保留最后一次写，故每批写独立区段。
@@ -678,6 +762,11 @@ struct WgpuRhi::Impl {
         AURORA_WGPU_RELEASE(pipe_mip_, wgpuComputePipelineRelease)
         AURORA_WGPU_RELEASE(pipeline_layout_mip_, wgpuPipelineLayoutRelease)
         AURORA_WGPU_RELEASE(bgl_mip_, wgpuBindGroupLayoutRelease)
+        AURORA_WGPU_RELEASE(pipe_blur_, wgpuComputePipelineRelease)
+        AURORA_WGPU_RELEASE(pipe_blend_, wgpuComputePipelineRelease)
+        AURORA_WGPU_RELEASE(pipe_mask_, wgpuComputePipelineRelease)
+        AURORA_WGPU_RELEASE(pipeline_layout_fx_, wgpuPipelineLayoutRelease)
+        AURORA_WGPU_RELEASE(bgl_fx_, wgpuBindGroupLayoutRelease)
         for (LutEntry &e : lut_cache) {
             release_tex(&e.tex);
         }
@@ -1177,6 +1266,48 @@ struct WgpuRhi::Impl {
             AURORA_WGPU_RELEASE(pipeline_layout_mip_, wgpuPipelineLayoutRelease)
             AURORA_WGPU_RELEASE(bgl_mip_, wgpuBindGroupLayoutRelease)
             compute_cap = false;
+            return;
+        }
+        // 区域效果 compute（blur/blend/mask 实路径）：bgl_fx = 0 uniform + 1 源纹理 + 7 storage 写。
+        // 任一管线失败不降级 compute_cap（mip 路仍兑现）——pipe_* 留 null，对应效果族走片元路。
+        WGPUBindGroupLayoutEntry bge_fx[3] = {};
+        bge_fx[0].binding = 0;
+        bge_fx[0].visibility = WGPUShaderStage_Compute;
+        bge_fx[0].buffer.type = WGPUBufferBindingType_Uniform;
+        bge_fx[1].binding = 1;
+        bge_fx[1].visibility = WGPUShaderStage_Compute;
+        bge_fx[1].texture.sampleType = WGPUTextureSampleType_Float;
+        bge_fx[1].texture.viewDimension = WGPUTextureViewDimension_2D;
+        bge_fx[2].binding = 7;
+        bge_fx[2].visibility = WGPUShaderStage_Compute;
+        bge_fx[2].storageTexture.access = WGPUStorageTextureAccess_WriteOnly;
+        bge_fx[2].storageTexture.format = WGPUTextureFormat_RGBA8Unorm;
+        bge_fx[2].storageTexture.viewDimension = WGPUTextureViewDimension_2D;
+        WGPUBindGroupLayoutDescriptor bgld_fx{};
+        bgld_fx.entryCount = 3;
+        bgld_fx.entries = bge_fx;
+        bgl_fx_ = wgpuDeviceCreateBindGroupLayout(device, &bgld_fx);
+        WGPUPipelineLayoutDescriptor playout_fx{};
+        playout_fx.bindGroupLayoutCount = 1;
+        playout_fx.bindGroupLayouts = &bgl_fx_;
+        pipeline_layout_fx_ = wgpuDeviceCreatePipelineLayout(device, &playout_fx);
+        auto build_fx = [&](const char *entry) -> WGPUComputePipeline {
+            if (bgl_fx_ == nullptr || pipeline_layout_fx_ == nullptr) {
+                return nullptr;
+            }
+            WGPUComputeState cs{};
+            cs.module = shader_;
+            cs.entryPoint = sv(entry);
+            WGPUComputePipelineDescriptor d{};
+            d.layout = pipeline_layout_fx_;
+            d.compute = cs;
+            return wgpuDeviceCreateComputePipeline(device, &d);
+        };
+        pipe_blur_ = build_fx("cs_blur");
+        pipe_blend_ = build_fx("cs_blend");
+        pipe_mask_ = build_fx("cs_mask");
+        if (pipe_blur_ == nullptr || pipe_blend_ == nullptr || pipe_mask_ == nullptr) {
+            AURORA_LOG_WARN("gpu-wgpu", "region-effect compute pipeline creation failed; effects stay on fragment path");
         }
     }
 
@@ -1321,6 +1452,11 @@ struct WgpuRhi::Impl {
 
     // ---- 目标管理 ----
 
+    /// @brief compute 区域效果/storage 写出可用时的附加用法位（GLES 兜底端为 0，不请求不支持的用法）。
+    [[nodiscard]] constexpr auto storage_usage() const -> WGPUTextureUsage {
+        return compute_cap ? static_cast<WGPUTextureUsage>(WGPUTextureUsage_StorageBinding) : static_cast<WGPUTextureUsage>(0);
+    }
+
     /// @brief 画布三件套随设备尺寸建/重建（旧对象经已录制引用保活，直接弃置安全）。
     [[nodiscard]] bool ensure_canvas_targets(int w, int h) {
         if (canvas_.width == w && canvas_.height == h && msaa_.tex != nullptr) {
@@ -1330,11 +1466,13 @@ struct WgpuRhi::Impl {
         release_tex(&msaa_);
         release_tex(&alt_);
         msaa_ = make_tex(w, h, WGPUTextureFormat_RGBA8Unorm, WGPUTextureUsage_RenderAttachment, kMsaaSamples);
+        // canvas：compute blur V 段/回写通道的目标（CopyDst = alt→canvas 区域拷贝；Storage = compute 写）。
         canvas_ = make_tex(w, h, WGPUTextureFormat_RGBA8Unorm,
-                           WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc);
+                           WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc |
+                               WGPUTextureUsage_CopyDst | storage_usage());
         alt_ = make_tex(w, h, WGPUTextureFormat_RGBA8Unorm,
                         WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc |
-                            WGPUTextureUsage_CopyDst);
+                            WGPUTextureUsage_CopyDst | storage_usage());
         if (msaa_.tex == nullptr || canvas_.tex == nullptr || alt_.tex == nullptr) {
             AURORA_LOG_ERROR("gpu-wgpu", "canvas targets ", w, "x", h, " creation failed");
             return false;
@@ -1354,7 +1492,7 @@ struct WgpuRhi::Impl {
         release_tex(&alt_);
         alt_ = make_tex(nw, nh, WGPUTextureFormat_RGBA8Unorm,
                         WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc |
-                            WGPUTextureUsage_CopyDst);
+                            WGPUTextureUsage_CopyDst | storage_usage());
         return alt_.tex != nullptr;
     }
 
@@ -1628,6 +1766,97 @@ struct WgpuRhi::Impl {
         }
     }
 
+    /// @brief 区域效果 compute 单趟 dispatch：uniform 复用帧内环 + bind group（bgl_fx 三 entry）。
+    /// 调用契约与 generate_mips 相同：`encoder` 打开、无活动 render pass（compute pass 不能录在
+    /// 开场 pass 上）。区域绝对坐标在 `gu.region`（WGSL 侧 gid = 区域本地索引），此处仅取尺寸。
+    [[nodiscard]] bool dispatch_region_fx(WGPUComputePipeline pipe, const Globals &gu, WGPUTextureView src,
+                                          WGPUTextureView dst, int rw, int rh) {
+        if (pipe == nullptr || bgl_fx_ == nullptr || encoder == nullptr || pass != nullptr || rw <= 0 || rh <= 0) {
+            return false;
+        }
+        const std::uint64_t uoff_raw = ustage.size();
+        const std::uint64_t uoff = (uoff_raw + (kUniformAlign - 1)) & ~(kUniformAlign - 1);
+        if (!grow_uniform_buffer(uoff + sizeof(Globals))) {
+            return false;
+        }
+        ustage.resize(static_cast<std::size_t>(uoff));
+        const auto *gb = reinterpret_cast<const std::uint8_t *>(&gu);
+        ustage.insert(ustage.end(), gb, gb + sizeof(Globals));
+        wgpuQueueWriteBuffer(queue, uniform_buf, uoff, &gu, sizeof(Globals));
+        WGPUBindGroupEntry entries[3] = {};
+        entries[0].binding = 0;
+        entries[0].buffer = uniform_buf;
+        entries[0].offset = uoff;
+        entries[0].size = sizeof(Globals);
+        entries[1].binding = 1;
+        entries[1].textureView = src;
+        entries[2].binding = 7;
+        entries[2].textureView = dst;
+        WGPUBindGroupDescriptor bgd{};
+        bgd.layout = bgl_fx_;
+        bgd.entryCount = 3;
+        bgd.entries = entries;
+        WGPUBindGroup bg = wgpuDeviceCreateBindGroup(device, &bgd);
+        if (bg == nullptr) {
+            return false;
+        }
+        WGPUComputePassDescriptor cpd{};
+        WGPUComputePassEncoder cp = wgpuCommandEncoderBeginComputePass(encoder, &cpd);
+        if (cp != nullptr) {
+            wgpuComputePassEncoderSetPipeline(cp, pipe);
+            wgpuComputePassEncoderSetBindGroup(cp, 0, bg, 0, nullptr);
+            wgpuComputePassEncoderDispatchWorkgroups(cp, static_cast<std::uint32_t>((rw + 7) / 8),
+                                                     static_cast<std::uint32_t>((rh + 7) / 8), 1);
+            wgpuComputePassEncoderEnd(cp);
+            wgpuComputePassEncoderRelease(cp);
+        }
+        wgpuBindGroupRelease(bg);
+        return cp != nullptr;
+    }
+
+    /// @brief encoder 区域拷贝（compute 效果回写通道）：src(rx,ry,w,h) → dst 同址区域。
+    /// 调用契约同上：无活动 render pass；src 需 CopySrc、dst 需 CopyDst（画布/层/alt 恒备）。
+    void copy_region(const Tex &src, const Tex &dst, int rx0, int ry0, int rw, int rh) {
+        if (encoder == nullptr || pass != nullptr || src.tex == nullptr || dst.tex == nullptr || rw <= 0 || rh <= 0) {
+            return;
+        }
+        WGPUTexelCopyTextureInfo s{};
+        s.texture = src.tex;
+        s.mipLevel = 0;
+        s.aspect = WGPUTextureAspect_All;
+        s.origin.x = static_cast<std::uint32_t>(rx0);
+        s.origin.y = static_cast<std::uint32_t>(ry0);
+        WGPUTexelCopyTextureInfo d = s;
+        d.texture = dst.tex;
+        WGPUExtent3D extent{};
+        extent.width = static_cast<std::uint32_t>(rw);
+        extent.height = static_cast<std::uint32_t>(rh);
+        extent.depthOrArrayLayers = 1;
+        wgpuCommandEncoderCopyTextureToTexture(encoder, &s, &d, &extent);
+    }
+
+    /// @brief 区域效果 uniform 装配（compute 路）：仅 region 与各内核分量，其余分量零。
+    [[nodiscard]] static auto fx_globals(int rx0, int ry0, int rw, int rh) -> Globals {
+        Globals gu{};
+        gu.region[0] = static_cast<float>(rx0);
+        gu.region[1] = static_cast<float>(ry0);
+        gu.region[2] = static_cast<float>(rw);
+        gu.region[3] = static_cast<float>(rh);
+        return gu;
+    }
+
+    /// @brief 区域效果 compute 总入口（blend/mask 单趟 + 回写）：fx 写 alt 后区域拷回目标。
+    /// 返回 false = compute 路不可用/失败，调用方走片元路（此刻仅关了 pass，无半态副作用：
+    /// fx 未录或整体被覆盖——片元 A pass 以 Clear 重开 alt，读写均区域级，不与本趟残留冲突）。
+    [[nodiscard]] bool fx_compute_to_target(WGPUComputePipeline pipe, const Globals &gu_fx, int rx0, int ry0,
+                                            int rx1, int ry1, WGPUTextureView src_view, const Tex &dst_tex) {
+        if (!dispatch_region_fx(pipe, gu_fx, src_view, alt_.view, rx1 - rx0, ry1 - ry0)) {
+            return false;
+        }
+        copy_region(alt_, dst_tex, rx0, ry0, rx1 - rx0, ry1 - ry0);
+        return true;
+    }
+
     // ---- GPU 字形图集（多页 R8 架式打包 + LRU 页淘汰，策略同 GL 路径）----
 
     [[nodiscard]] int new_glyph_page(int w, int h) {
@@ -1789,8 +2018,9 @@ struct WgpuRhi::Impl {
 
     [[nodiscard]] bool create_layer_attachment(LayerEntry *entry, int w, int h) {
         const auto usage = static_cast<WGPUTextureUsage>(WGPUTextureUsage_RenderAttachment
-                                                              | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc
-                                                              | WGPUTextureUsage_CopyDst);
+                                                         | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc
+                                                         | WGPUTextureUsage_CopyDst
+                                                         | storage_usage());  // compute blur V 段的写出目标
         release_tex(&entry->tex);
         release_tex(&entry->aux);  // 尺寸变化：aux 采样拷贝一并作废重建（惰性分配）
         entry->tex = make_tex(w, h, WGPUTextureFormat_RGBA8Unorm, usage);
@@ -2100,17 +2330,43 @@ struct WgpuRhi::Impl {
         return rx1 > rx0 && ry1 > ry0;
     }
 
-    // ---- 画布区域效果：两遍 A/B（WebGPU 不可采样 MSAA / 不可读写同纹理的结构性约束）----
+    // ---- 画布区域效果 ----
+    // compute 实路径（capabilities().compute，pipe_* 创建成功时）：区域局部 dispatch，fx 直读
+    // resolve 后的 canvas_ 写 alt_，回写走 encoder 区域拷贝——免掉两趟全屏 quad pass 与顶点/
+    // uniform 上传路径中的 quad 顶点。片元路（GLES 兜底 / 管线缺失）保持原两遍 A/B 结构：
     // A：关画布 pass（resolve 落 canvas_）→ alt pass 读 canvas_ 跑 fx（pipe_a）；
     // B：Load 重开画布 pass → fs_copy（pipe_b=kPipeCopy）读 alt 回写区域 → 关 pass。
     // ⚠️ 同帧 queue 写（ring writeBuffer）统一在 submit 前生效：两 pass 读取的纹理内容
     // 均为本帧已提交状态，效果采样前已 flush + 关闭画布 pass，无脏读窗口。
+
+    /// @brief pipe_fx（kPipeBlend/kPipeMask）→ compute 管线；未建则 null。
+    [[nodiscard]] constexpr auto fx_compute_pipe_of(int pipe_fx) const -> WGPUComputePipeline {
+        if (pipe_fx == kPipeBlend) {
+            return pipe_blend_;
+        }
+        if (pipe_fx == kPipeMask) {
+            return pipe_mask_;
+        }
+        return nullptr;
+    }
 
     void canvas_blend_mask(int pipe_fx, const Globals &gu_fx, int rx0, int ry0, int rx1, int ry1) {
         flush_batch();
         close_pass();  // resolve 落地：canvas_ 此刻新鲜
         if (!ensure_alt(device_w, device_h)) {
             return;
+        }
+        if (const WGPUComputePipeline cp = fx_compute_pipe_of(pipe_fx); cp != nullptr) {
+            Globals gu = gu_fx;
+            gu.cv4[0] = static_cast<float>(device_w) / (scale > 0.0F ? scale : 1.0F);
+            gu.cv4[1] = static_cast<float>(device_h) / (scale > 0.0F ? scale : 1.0F);
+            gu.region[0] = static_cast<float>(rx0);
+            gu.region[1] = static_cast<float>(ry0);
+            gu.region[2] = static_cast<float>(rx1 - rx0);
+            gu.region[3] = static_cast<float>(ry1 - ry0);
+            if (fx_compute_to_target(cp, gu, rx0, ry0, rx1, ry1, canvas_.view, canvas_)) {
+                return;  // pass 维持关闭：后续命令经 ensure_target_pass 以 Load 重开
+            }
         }
         const float s = scale > 0.0F ? scale : 1.0F;
         Globals gu_a = gu_fx;
@@ -2147,6 +2403,18 @@ struct WgpuRhi::Impl {
             return;
         }
         const float s = scale > 0.0F ? scale : 1.0F;
+        // compute 实路径：H（canvas→alt）+ V（alt→canvas）两趟区域 dispatch，V 段直写
+        // resolve 后的 canvas_（storage），免 B 段 MSAA 往返；canvas 保持关闭待重开。
+        if (pipe_blur_ != nullptr) {
+            Globals gu_h = fx_globals(rx0, ry0, rx1 - rx0, ry1 - ry0);
+            gu_h.tex_ctl[2] = static_cast<float>(r);
+            Globals gu_v = gu_h;
+            gu_v.tex_ctl[3] = 1.0F;
+            if (dispatch_region_fx(pipe_blur_, gu_h, canvas_.view, alt_.view, rx1 - rx0, ry1 - ry0) &&
+                dispatch_region_fx(pipe_blur_, gu_v, alt_.view, canvas_.view, rx1 - rx0, ry1 - ry0)) {
+                return;
+            }
+        }
         const auto lx0 = static_cast<float>(rx0) / s;
         const auto ly0 = static_cast<float>(ry0) / s;
         const auto lx1 = static_cast<float>(rx1) / s;
@@ -2181,7 +2449,10 @@ struct WgpuRhi::Impl {
         }
     }
 
-    // ---- 层内效果（目标 = 层 pass，源 = aux 采样拷贝；区域坐标层局部）----
+    // ---- 层内效果（目标 = 层纹理，源 = aux 采样拷贝；区域坐标层局部）----
+    // compute 实路径：fx 直读 aux 写 alt，encoder 区域拷回层纹理，层 pass 维持关闭（后续命令
+    // 经 ensure_target_pass 以 Load 重开——内容与片元路「pass 保持打开」等价，均在关闭时落地）。
+    // 片元路保持原结构：aux 为源、层 pass 内直写。
 
     void layer_blend_mask(int pipe_fx, const Globals &gu_fx, int rx0, int ry0, int rx1, int ry1) {
         LayerEntry *entry = current_layer_entry();
@@ -2190,6 +2461,17 @@ struct WgpuRhi::Impl {
         }
         if (!copy_layer_to_aux(*entry)) {
             return;
+        }
+        if (const WGPUComputePipeline cp = fx_compute_pipe_of(pipe_fx);
+            cp != nullptr && ensure_alt(entry->width, entry->height)) {
+            Globals gu = gu_fx;
+            gu.region[0] = static_cast<float>(rx0);
+            gu.region[1] = static_cast<float>(ry0);
+            gu.region[2] = static_cast<float>(rx1 - rx0);
+            gu.region[3] = static_cast<float>(ry1 - ry0);
+            if (fx_compute_to_target(cp, gu, rx0, ry0, rx1, ry1, entry->aux.view, entry->tex)) {
+                return;  // 层 pass 维持关闭（同下「compute 路」口径）
+            }
         }
         if (!ensure_target_pass()) {
             return;
@@ -2219,6 +2501,17 @@ struct WgpuRhi::Impl {
             return;
         }
         const float s = scale > 0.0F ? scale : 1.0F;
+        // compute 实路径：H（aux→alt）+ V（alt→层纹理 storage）两趟区域 dispatch。
+        if (pipe_blur_ != nullptr) {
+            Globals gu_h = fx_globals(rx0, ry0, rx1 - rx0, ry1 - ry0);
+            gu_h.tex_ctl[2] = static_cast<float>(r);
+            Globals gu_v = gu_h;
+            gu_v.tex_ctl[3] = 1.0F;
+            if (dispatch_region_fx(pipe_blur_, gu_h, entry->aux.view, alt_.view, rx1 - rx0, ry1 - ry0)
+                && dispatch_region_fx(pipe_blur_, gu_v, alt_.view, entry->tex.view, rx1 - rx0, ry1 - ry0)) {
+                return;  // 层 pass 维持关闭（同 layer_blend_mask 口径）
+            }
+        }
         const auto lx0 = static_cast<float>(rx0) / s;
         const auto ly0 = static_cast<float>(ry0) / s;
         const auto lx1 = static_cast<float>(rx1) / s;

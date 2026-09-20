@@ -16,11 +16,14 @@
 //      像素一致——证明跨帧常驻层纹理存续且 draw_layer 路径生效。
 //   5. compute mip 链（离屏直驱）：64×64 逐纹素棋盘 4× 缩小绘制读回均值色——证明 cs_mip
 //      生成的整条 mip 链与三线性采样生效（adapter 无 compute 时该段 SKIP）。
-//   6. 平台 present 链路：真实窗口多帧 present_root（色块网格 + Text + 流式「视频」），
+//   6. compute 区域效果（离屏直驱）：BlurRegion/BlendRegion/MaskRegion 单命令帧读回粗粒度
+//      判定（边界混合 / 通道衰减 / 淡出梯度 / 区外 untouched）——证明 cs_blur/cs_blend/cs_mask
+//      dispatch 路在真实驱动接线（逐位 CPU 对照由 utest_wgpu_rhi 锁定；无 compute 时 SKIP）。
+//   7. 平台 present 链路：真实窗口多帧 present_root（色块网格 + Text + 流式「视频」），
 //      frame_count 增长且 gpu_active() 保持为真（未永久回退软件路径）；软件路径上屏帧数
 //      恒 0（白闪签名，含 map/configure 触发的系统重绘）；CSD 装饰回放进 GPU 帧计数为
 //      0（合成器 SSD）或 >= 出帧数（CSD 兜底）。Wayland 无抓屏原语，无 capture_window
-//      物证项（X11 版探针的第 6 项后半），改由 --interactive 人工目视段覆盖。
+//      物证项（X11 版探针的第 7 项后半），改由 --interactive 人工目视段覆盖。
 // 人工段（--interactive）：常驻窗口，流式「视频」与旋转层缓存网格并存，目视确认无花屏/
 //   撕裂/错位；同时目视核对 CSD 兜底合成器下自绘标题栏随 GPU 帧呈现、按钮 hover/点击热区
 //   一致、还原或遮挡揭开时不出现整屏白闪。退出码：
@@ -314,6 +317,73 @@ auto main(int argc, char **argv) -> int {
         } else {
             emit("[SKIP] adapter 无 compute（GLES 兜底端），mip 采样断言跳过");
         }
+    }
+
+    // ---- compute 区域效果（BlurRegion/BlendRegion/MaskRegion → cs_* dispatch）----
+    // 粗粒度通断判定证明真实驱动接线；逐位 CPU 对照由 utest_wgpu_rhi 在 CI 锁定。
+    // 内容场：64×64 底 (10,20,30) + [16,48)² 块 (200,100,50)。
+    if (!offscreen.capabilities().compute) {
+        emit("[SKIP] adapter 无 compute，区域效果 compute 探针跳过（片元兜底由 golden 覆盖）");
+    } else {
+        auto fx_frame = [&](void (*apply_fx)(aurora::Painter &)
+                            ) -> std::vector<std::uint8_t> {
+            aurora::DisplayList dl;
+            aurora::Painter p;
+            p.begin(64, 64);
+            p.record(dl);
+            p.fill_rect(aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = 0.0F},
+                                     .size = aurora::Size{.width = 64.0F, .height = 64.0F}},
+                        aurora::Color{10, 20, 30, 255});
+            p.fill_rect(aurora::Rect{.origin = aurora::Point{.x = 16.0F, .y = 16.0F},
+                                     .size = aurora::Size{.width = 32.0F, .height = 32.0F}},
+                        aurora::Color{200, 100, 50, 255});
+            apply_fx(p);
+            p.stop();
+            (void)offscreen.begin_frame(64, 64, 1.0F);
+            dl.replay(offscreen.backend());
+            const bool no_skip = offscreen.stats().skipped_cmds == 0U;
+            offscreen.end_frame();
+            std::vector<std::uint8_t> pixels;
+            (void)offscreen.read_pixels(pixels);
+            static bool first = true;
+            if (first) {
+                check(no_skip, "区域效果三命令均被 compute 路接受（skipped_cmds == 0）");
+                first = false;
+            }
+            return pixels;
+        };
+        // blur：区域 [8,40)×[24,40) 跨块左缘，r=1 → 边界纹素混入底色、块内部恒权均值不动。
+        const auto pb = fx_frame([](aurora::Painter &p) {
+            p.blur_region(aurora::Rect{.origin = aurora::Point{.x = 8.0F, .y = 24.0F},
+                                       .size = aurora::Size{.width = 32.0F, .height = 16.0F}},
+                          1.0F);
+        });
+        const auto b_edge = sample(pb, 64, 16, 32);   // 期望 ≈(136,73,43)：H 趟钳位 tap 混入 1 列底色
+        const auto b_in = sample(pb, 64, 32, 32);     // 块内 3×3 全同色 → 恒等 (200,100,50)
+        const auto b_out = sample(pb, 64, 60, 60);    // 区外 untouched
+        check(b_edge[0] > 100 && b_edge[0] < 190, "cs_blur：边界像素混入底色（r∈(100,190)，实得 " + std::to_string(b_edge[0]) + "）");
+        check(b_in == std::array<int, 3>{200, 100, 50}, "cs_blur：块内恒权均值恒等（精确不变）");
+        check(b_out == std::array<int, 3>{10, 20, 30}, "cs_blur：区外 untouched");
+        // blend：Multiply [8,24)²，tint=(255,0,255)，strength=0.5 → g 通道减半（s·0 混回）。
+        const auto pj = fx_frame([](aurora::Painter &p) {
+            p.blend_region(aurora::Rect{.origin = aurora::Point{.x = 8.0F, .y = 8.0F},
+                                        .size = aurora::Size{.width = 16.0F, .height = 16.0F}},
+                           aurora::BlendMode::Multiply, aurora::Color{255, 0, 255, 255}, 0.5F);
+        });
+        const auto j_bg = sample(pj, 64, 12, 12);   // 底 (10,20,30) → g: 20+0.5·(0−20)=10
+        const auto j_blk = sample(pj, 64, 20, 20);  // 块 (200,100,50) → g: 100+0.5·(0−100)=50
+        check(std::abs(j_bg[1] - 10) <= 2, "cs_blend：Multiply 底色 g 减半（期望≈10，实得 " + std::to_string(j_bg[1]) + "）");
+        check(std::abs(j_blk[1] - 50) <= 2, "cs_blend：Multiply 块色 g 减半（期望≈50，实得 " + std::to_string(j_blk[1]) + "）");
+        // mask：LinearFade [16,48)² 纵向淡出 → 顶行近原色、底行近全黑。
+        const auto pm = fx_frame([](aurora::Painter &p) {
+            p.mask_region(aurora::Rect{.origin = aurora::Point{.x = 16.0F, .y = 16.0F},
+                                       .size = aurora::Size{.width = 32.0F, .height = 32.0F}},
+                          aurora::ShaderMaskKind::LinearFade, 1.0F);
+        });
+        const auto m_top = sample(pm, 64, 32, 16);
+        const auto m_bot = sample(pm, 64, 32, 47);
+        check(m_top[0] > 190, "cs_mask：LinearFade 顶行近原色（期望>190，实得 " + std::to_string(m_top[0]) + "）");
+        check(m_bot[0] < 20, "cs_mask：LinearFade 底行近全黑（期望<20，实得 " + std::to_string(m_bot[0]) + "）");
     }
 
     // ---- 平台 present 链路（真实窗口多帧上屏，含文本与流式图像）----
