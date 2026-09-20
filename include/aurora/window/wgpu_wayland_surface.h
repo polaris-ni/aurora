@@ -135,6 +135,12 @@ class WgpuWaylandSurface final : public Surface {
     auto toggle_maximize() -> void override { host_->toggle_maximize(); }
     auto set_fullscreen(bool on) -> void override { host_->set_fullscreen(on); }
 
+    // ---- 无障碍桥：落在内嵌宿主（AT-SPI2 桥由 WaylandSurface 承接，GPU/软件路径共用） ----
+    [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override {
+        return host_->accessibility_provider();
+    }
+    auto set_accessibility_root(Widget *root) -> void override { host_->set_accessibility_root(root); }
+
   private:
     /// @brief 帧 sink 适配器：逻辑 dp × 宿主 scale → 设备像素转发 `WgpuRhi`，
     /// 并记录本帧是否走 GPU 路径（present 据此分流）。同 Win32/X11 版内置 Sink。

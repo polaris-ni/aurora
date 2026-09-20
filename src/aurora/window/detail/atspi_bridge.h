@@ -81,7 +81,9 @@ class AtspiBridge final : public a11y::Provider {
 
   private:
     struct Impl;
-    explicit AtspiBridge(std::unique_ptr<Impl> d) : d_(std::move(d)) {}
+    // 构造体外置到 cpp：inline 体会在含头文件的 TU 里实例化 unique_ptr<Impl> 的析构
+    // （异常路径），而 Impl 对它们是残缺类型 ⇒ 必须只在 .cpp 里定义。
+    explicit AtspiBridge(std::unique_ptr<Impl> d);
 
     std::unique_ptr<Impl> d_;
     bool rtl_ = false;

@@ -18,12 +18,15 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include "aurora/core/log.h"
+#include "aurora/core/version.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/window/cursor_map.h"
+#include "aurora/window/detail/atspi_bridge.h"
 #include "aurora/window/detail/title_bar_painter.h"
 #include "aurora/window/keysym_map.h"
 #include "aurora/window/swizzle.h"
@@ -107,6 +110,10 @@ struct WaylandSurface::Impl {
     Surface::EventHandler handler;
     // 自唤醒管道（request_wake → wait_events poll 立即返回）。
     int wake_fd[2] = {-1, -1};
+    // AT-SPI2 无障碍桥（宿主惰性构造：首次 set_accessibility_root 尝试；失败永久降级）。
+    // 申报偏差：xdg-shell 不暴露窗口屏幕原点 ⇒ SCREEN 系几何按窗口本地 px 如实申报。
+    std::unique_ptr<detail::AtspiBridge> atspi;
+    bool atspi_attempted = false;
     // 指针表面坐标（逻辑 px；Wayland 事件坐标天然为表面坐标，无需除 scale）。
     double ptr_x = 0.0;
     double ptr_y = 0.0;
@@ -1300,6 +1307,41 @@ auto WaylandSurface::set_title(const std::string &title) -> void {
         xdg_toplevel_set_title(d.toplevel, title.c_str());
         wl_display_flush(d.dpy);
     }
+    if (d.atspi != nullptr) {
+        d.atspi->set_window_title(title);  // FRAME 节点 Name（AT 客户端读回窗口标题）
+    }
+}
+
+auto WaylandSurface::accessibility_provider() const -> a11y::Provider * { return impl_->atspi.get(); }
+
+auto WaylandSurface::set_accessibility_root(Widget *root) -> void {
+    Impl &d = *impl_;
+    if (!d.atspi_attempted) {
+        // 首帧根注入时构造桥（一次性尝试：失败 = 永久降级，无总线/无 libdbus 是常态）。
+        d.atspi_attempted = true;
+        detail::AtspiEnv env;
+        env.app_name = "Aurora";
+        env.window_title = d.title;
+        env.toolkit_version = AURORA_VERSION_STRING;
+        // DIP（表面逻辑坐标）→ 表面本地物理 px：原点向下取整、终点向上取整。SCREEN 系
+        // 与 WINDOW 系同源（协议不暴露屏幕原点，如实申报窗口本地口径）。
+        env.to_window_px = [&d](const Rect &r) -> detail::AtspiRectI {
+            const auto sc = static_cast<float>(d.scale);
+            const auto l = static_cast<std::int32_t>(std::floor(r.origin.x * sc));
+            const auto t = static_cast<std::int32_t>(std::floor(r.origin.y * sc));
+            const auto rr = static_cast<std::int32_t>(std::ceil((r.origin.x + r.size.width) * sc));
+            const auto bb = static_cast<std::int32_t>(std::ceil((r.origin.y + r.size.height) * sc));
+            return detail::AtspiRectI{.x = l, .y = t, .width = rr - l, .height = bb - t};
+        };
+        env.to_screen_px = env.to_window_px;
+        env.perform = [](Widget *w, const AccessibilityActionRequest &req) -> bool {
+            return w != nullptr && w->perform_accessibility_action(req);
+        };
+        d.atspi = detail::AtspiBridge::create(std::move(env));
+    }
+    if (d.atspi != nullptr) {
+        d.atspi->set_root(root);
+    }
 }
 
 auto WaylandSurface::set_cursor(CursorShape shape) -> void {
@@ -1468,6 +1510,9 @@ auto WaylandSurface::poll_platform_events() -> void {
 
 auto WaylandSurface::wait_events(double timeout_ms) -> void {
     Impl &d = *impl_;
+    if (d.atspi != nullptr) {
+        d.atspi->pump();  // 先非阻塞消化 AT-SPI 在途消息（wl 事件密集期桥不被饿死）
+    }
     if (d.dpy == nullptr || timeout_ms == 0.0 || d.close_requested) {
         return;
     }
@@ -1477,29 +1522,35 @@ auto WaylandSurface::wait_events(double timeout_ms) -> void {
     wl_display_flush(d.dpy);
     // 无限等待按 1000ms 分段兜底（对齐 Win32/X11）：唤醒渠道丢失也最迟 1s 自然醒。
     const double capped = (timeout_ms < 0.0 || timeout_ms > 1000.0) ? 1000.0 : timeout_ms;
-    struct pollfd fds[2];
-    nfds_t n = 0;
-    fds[n].fd = wl_display_get_fd(d.dpy);
-    fds[n].events = POLLIN;
-    fds[n].revents = 0;
-    ++n;
+    std::vector<pollfd> fds;
+    fds.reserve(2 + (d.atspi != nullptr ? 2 : 0));
+    fds.push_back(pollfd{wl_display_get_fd(d.dpy), POLLIN, 0});
+    int wake_idx = -1;
     if (d.wake_fd[0] >= 0) {
-        fds[n].fd = d.wake_fd[0];
-        fds[n].events = POLLIN;
-        fds[n].revents = 0;
-        ++n;
+        wake_idx = static_cast<int>(fds.size());
+        fds.push_back(pollfd{d.wake_fd[0], POLLIN, 0});
     }
-    const int rc = ::poll(fds, n, static_cast<int>(std::ceil(capped)));
+    if (d.atspi != nullptr) {
+        for (const auto &w : d.atspi->poll_watches()) {
+            fds.push_back(pollfd{w.fd, w.events, 0});
+        }
+    }
+    const int rc = ::poll(fds.data(), static_cast<nfds_t>(fds.size()),
+                          static_cast<int>(std::ceil(capped)));
     if (rc > 0 && (fds[0].revents & POLLIN) != 0) {
         wl_display_read_events(d.dpy);
     } else {
         wl_display_cancel_read(d.dpy);
     }
-    if (rc > 0 && n == 2 && (fds[1].revents & POLLIN) != 0) {
+    if (rc > 0 && wake_idx >= 0
+        && (fds[static_cast<std::size_t>(wake_idx)].revents & POLLIN) != 0) {
         char drain[64];
         while (::read(d.wake_fd[0], drain, sizeof(drain)) > 0) {
             // 排干唤醒字节（非阻塞读到 EAGAIN 为止），避免下次 wait 立即空醒。
         }
+    }
+    if (d.atspi != nullptr) {
+        d.atspi->pump();  // watch fd 就绪 ⇒ 读入并派发 AT-SPI 方法调用（应答经同一 fd 写出）
     }
 }
 

@@ -1302,6 +1302,8 @@ auto AtspiBridge::create(AtspiEnv env) -> std::unique_ptr<AtspiBridge> {
     return bridge;
 }
 
+AtspiBridge::AtspiBridge(std::unique_ptr<Impl> d) : d_(std::move(d)) {}
+
 AtspiBridge::~AtspiBridge() {
     deactivate();
 }

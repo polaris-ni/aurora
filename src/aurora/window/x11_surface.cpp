@@ -2,6 +2,10 @@
 
 #include "aurora/core/platform.h"
 
+// AT-SPI 头必须先于 Xlib（与首行 x11_surface.h 同理）：`AtspiPropValue::Kind::None`
+// 会被 Xlib 的 `#define None 0L` 污染，且本头不可在 #undef None 之后再包含。
+#include "aurora/window/detail/atspi_bridge.h"
+
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
 
 // aurora 头必须先于 Xlib：Xlib 会 #define None/Bool/Status 等通用词为宏，
@@ -35,6 +39,7 @@
 #include <vector>
 
 #include "aurora/core/log.h"
+#include "aurora/core/version.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/render/png.h"
@@ -129,6 +134,13 @@ struct X11Surface::Impl {
     XIC ic = nullptr;
     // 自唤醒管道（request_wake → wait_events poll 立即返回）。
     int wake_fd[2] = {-1, -1};
+    // AT-SPI2 无障碍桥（宿主惰性构造：首次 set_accessibility_root 时尝试连接 a11y 总线；
+    // 失败永久降级为 nullptr——无 libdbus/无会话总线/NO_AT_BRIDGE 都是 Linux 常态）。
+    std::unique_ptr<detail::AtspiBridge> atspi;
+    bool atspi_attempted = false;
+    std::string title;  ///< 最近标题缓存（桥构造时回填 FRAME 节点 Name）
+    int origin_x = 0;   ///< 客户区左上角的屏幕物理 px（ConfigureNotify 时 XTranslateCoordinates）
+    int origin_y = 0;
     // 光标形状：`XCreateFontCursor` 句柄按 CursorShape 取值序缓存（0 = 未创建）。
     // 每次创建都是新 X 资源，必须复用；析构统一 XFreeCursor。
     std::array<Cursor, AURORA_CURSOR_SHAPE_COUNT> cursors{};
@@ -154,12 +166,13 @@ struct X11Surface::Impl {
 };
 
 /// @brief 设置窗口标题：ICCCM `XStoreName`（latin1 兜底）+ EWMH `_NET_WM_NAME`（UTF-8，现代 WM 优先读）。
-auto X11Surface::Impl::apply_title(const std::string &title) -> void {
+auto X11Surface::Impl::apply_title(const std::string &title_in) -> void {
     Impl &d = *this;
-    XStoreName(d.dpy, d.win, title.c_str());
+    d.title = title_in;  // 缓存给 AT-SPI 桥（FRAME Name；桥可能晚于 set_title 构造）
+    XStoreName(d.dpy, d.win, title_in.c_str());
     XChangeProperty(d.dpy, d.win, d.net_wm_name, d.utf8_string, 8, PropModeReplace,
-                    reinterpret_cast<const unsigned char *>(title.c_str()),  // NOLINT(*-pro-type-reinterpret-cast)
-                    static_cast<int>(title.size()));
+                    reinterpret_cast<const unsigned char *>(title_in.c_str()),  // NOLINT(*-pro-type-reinterpret-cast)
+                    static_cast<int>(title_in.size()));
 }
 
 /// @brief 确保 XImage 与像素缓冲同尺寸（不同则重建）；失败返回 false。
@@ -637,6 +650,51 @@ auto X11Surface::set_title(const std::string &title) -> void {
         d.apply_title(title);
         XFlush(d.dpy);
     }
+    if (d.atspi != nullptr) {
+        d.atspi->set_window_title(title);  // FRAME 节点 Name（AT 客户端读回窗口标题）
+    }
+}
+
+auto X11Surface::accessibility_provider() const -> a11y::Provider * { return impl_->atspi.get(); }
+
+auto X11Surface::set_accessibility_root(Widget *root) -> void {
+    Impl &d = *impl_;
+    if (!d.atspi_attempted) {
+        // 首帧根注入时构造桥（一次性尝试：失败 = 永久降级，无总线/无 libdbus 是常态）。
+        d.atspi_attempted = true;
+        detail::AtspiEnv env;
+        env.app_name = "Aurora";
+        env.window_title = d.title;
+        env.toolkit_version = AURORA_VERSION_STRING;
+        env.window_origin_x = d.origin_x;
+        env.window_origin_y = d.origin_y;
+        // DIP（窗口本地逻辑）→ 窗口本地物理 px：原点向下取整、终点向上取整（protocol 层同款口径）。
+        env.to_window_px = [&d](const Rect &r) -> detail::AtspiRectI {
+            const auto l = static_cast<std::int32_t>(std::floor(r.origin.x * d.scale));
+            const auto t = static_cast<std::int32_t>(std::floor(r.origin.y * d.scale));
+            const auto rr = static_cast<std::int32_t>(std::ceil((r.origin.x + r.size.width) * d.scale));
+            const auto bb = static_cast<std::int32_t>(std::ceil((r.origin.y + r.size.height) * d.scale));
+            return detail::AtspiRectI{.x = l, .y = t, .width = rr - l, .height = bb - t};
+        };
+        env.to_screen_px = [&d](const Rect &r) -> detail::AtspiRectI {
+            const auto box = [&d](const Rect &q) -> detail::AtspiRectI {
+                const auto l = static_cast<std::int32_t>(std::floor(q.origin.x * d.scale));
+                const auto t = static_cast<std::int32_t>(std::floor(q.origin.y * d.scale));
+                const auto rr = static_cast<std::int32_t>(std::ceil((q.origin.x + q.size.width) * d.scale));
+                const auto bb = static_cast<std::int32_t>(std::ceil((q.origin.y + q.size.height) * d.scale));
+                return detail::AtspiRectI{.x = l, .y = t, .width = rr - l, .height = bb - t};
+            }(r);
+            return detail::AtspiRectI{.x = box.x + d.origin_x, .y = box.y + d.origin_y,
+                                      .width = box.width, .height = box.height};
+        };
+        env.perform = [](Widget *w, const AccessibilityActionRequest &req) -> bool {
+            return w != nullptr && w->perform_accessibility_action(req);
+        };
+        d.atspi = detail::AtspiBridge::create(std::move(env));
+    }
+    if (d.atspi != nullptr) {
+        d.atspi->set_root(root);
+    }
 }
 
 auto X11Surface::native_handle() const -> void * {
@@ -783,6 +841,21 @@ auto X11Surface::poll_platform_events() -> void {
             case ConfigureNotify: {
                 const int pw = ev.xconfigure.width;
                 const int ph = ev.xconfigure.height;
+                // 客户区屏幕原点（物理 px）：XTranslateCoordinates 对根窗口折算，规避
+                // reparenting WM 下 xconfigure.x/y 相对父窗口的歧义；AT-SPI 几何回填用。
+                {
+                    ::Window child = 0;
+                    int rx = 0;
+                    int ry = 0;
+                    if (XTranslateCoordinates(d.dpy, d.win, XDefaultRootWindow(d.dpy), 0, 0, &rx, &ry,
+                                              &child) != False) {
+                        d.origin_x = rx;
+                        d.origin_y = ry;
+                        if (d.atspi != nullptr) {
+                            d.atspi->set_window_origin(rx, ry);
+                        }
+                    }
+                }
                 if (pw > 0 && ph > 0) {
                     // NOLINTBEGIN(*-narrowing-conversions)
                     const Size want{.width = static_cast<float>(pw) / d.scale,
@@ -848,7 +921,10 @@ auto X11Surface::poll_platform_events() -> void {
 }
 
 auto X11Surface::wait_events(double timeout_ms) -> void {
-    const Impl &d = *impl_;
+    Impl &d = *impl_;
+    if (d.atspi != nullptr) {
+        d.atspi->pump();  // 先非阻塞消化 AT-SPI 在途消息（X 事件密集期桥不被饿死）
+    }
     if (d.dpy == nullptr || timeout_ms == 0.0 || d.close_requested) {
         return;
     }
@@ -857,27 +933,32 @@ auto X11Surface::wait_events(double timeout_ms) -> void {
     }
     // 无限等待按 1000ms 分段兜底（对齐 Win32/默认实现）：唤醒渠道丢失也最迟 1s 自然醒。
     const double capped = (timeout_ms < 0.0 || timeout_ms > 1000.0) ? 1000.0 : timeout_ms;
-    pollfd fds[2];
-    nfds_t n = 0;
-    // NOLINTBEGIN(*-pro-bounds-constant-array-index)
-    fds[n].fd = ConnectionNumber(d.dpy);
-    fds[n].events = POLLIN;
-    fds[n].revents = 0;
-    ++n;
+    std::vector<pollfd> fds;
+    fds.reserve(2 + (d.atspi != nullptr ? 2 : 0));
+    fds.push_back(pollfd{ConnectionNumber(d.dpy), POLLIN, 0});
+    int wake_idx = -1;
     if (d.wake_fd[0] >= 0) {
-        fds[n].fd = d.wake_fd[0];
-        fds[n].events = POLLIN;
-        fds[n].revents = 0;
-        ++n;
+        wake_idx = static_cast<int>(fds.size());
+        fds.push_back(pollfd{d.wake_fd[0], POLLIN, 0});
     }
-    const int rc = ::poll(fds, n, static_cast<int>(std::ceil(capped)));
-    if (rc > 0 && n == 2 && (fds[1].revents & POLLIN) != 0) {  // NOLINT(*-signed-bitwise)
+    std::vector<detail::AtspiBridge::WatchFd> watches;
+    if (d.atspi != nullptr) {
+        watches = d.atspi->poll_watches();
+        for (const auto &w : watches) {
+            fds.push_back(pollfd{w.fd, w.events, 0});
+        }
+    }
+    const int rc = ::poll(fds.data(), static_cast<nfds_t>(fds.size()),
+                          static_cast<int>(std::ceil(capped)));
+    if (rc > 0 && wake_idx >= 0 && (fds[static_cast<std::size_t>(wake_idx)].revents & POLLIN) != 0) {  // NOLINT(*-signed-bitwise)
         char drain[64];
         while (read(d.wake_fd[0], drain, sizeof(drain)) > 0) {
             // 排干唤醒字节（非阻塞读到 EAGAIN 为止），避免下次 wait 立即空醒。
         }
     }
-    // NOLINTEND(*-pro-bounds-constant-array-index)
+    if (d.atspi != nullptr) {
+        d.atspi->pump();  // watch fd 就绪 ⇒ 读入并派发 AT-SPI 方法调用（应答经同一 fd 写出）
+    }
 }
 
 auto X11Surface::request_wake() -> void {

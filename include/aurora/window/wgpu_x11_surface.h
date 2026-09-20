@@ -115,6 +115,12 @@ class WgpuX11Surface final : public Surface {
     /// @brief 原生窗口句柄：内嵌 X11Surface 的 XID（Window）。
     [[nodiscard]] auto native_handle() const -> void * override { return host_->native_handle(); }
 
+    // ---- 无障碍桥：落在内嵌宿主（AT-SPI2 桥由 X11Surface 承接，GPU/软件路径共用） ----
+    [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override {
+        return host_->accessibility_provider();
+    }
+    auto set_accessibility_root(Widget *root) -> void override { host_->set_accessibility_root(root); }
+
   private:
     /// @brief 帧 sink 适配器：逻辑 dp × 宿主 scale → 设备像素转发 `WgpuRhi`，
     /// 并记录本帧是否走 GPU 路径（present 据此分流）。同 Win32 版 WgpuSurface::Sink。

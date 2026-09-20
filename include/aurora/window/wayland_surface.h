@@ -154,6 +154,15 @@ class WaylandSurface final : public Surface {
     /// `WGPUSurfaceSourceWaylandSurface`）等外部 GPU 接线需要两者同源。
     [[nodiscard]] auto native_display() const -> void *;
 
+    /// @brief AT-SPI2 无障碍桥（`a11y::Provider`）：首次根注入前 / 降级（无 libdbus、
+    /// 无会话总线、`NO_AT_BRIDGE=1`）时恒 nullptr。
+    [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override;
+
+    /// @brief 语义树根注入（`Window::present_root` 每帧调用；D9 宿主通道）。
+    /// 首次调用即尝试建桥（dlopen libdbus + 连 a11y 总线 + Socket.Embed）；失败永久降级。
+    /// @note 申报偏差：xdg-shell 不暴露窗口屏幕原点 ⇒ 几何按窗口本地 px 申报。
+    auto set_accessibility_root(Widget *root) -> void override;
+
     /// @brief 是否正在自绘 CSD 装饰（标题栏/边框，画进 Painter 帧缓冲）：合成器无
     /// xdg-decoration SSD 且装饰策略需要兜底时为 true。GPU 宿主（WgpuWaylandSurface）
     /// 据此决定是否需要把装饰录制进当帧。

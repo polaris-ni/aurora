@@ -99,6 +99,15 @@ class X11Surface final : public Surface {
     /// `WGPUSurfaceSourceXlibWindow`）等外部 GPU 接线需要两者同源。
     [[nodiscard]] auto native_display() const -> void *;
 
+    /// @brief AT-SPI2 无障碍桥（`a11y::Provider`）：首次根注入前 / 降级（无 libdbus、
+    /// 无会话总线、`NO_AT_BRIDGE=1`）时恒 nullptr。
+    [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override;
+
+    /// @brief 语义树根注入（`Window::present_root` 每帧调用；D9 宿主通道）。
+    /// 首次调用即尝试建桥（dlopen libdbus + 连 a11y 总线 + Socket.Embed——AT-SPI 没有
+    /// `WM_GETOBJECT` 式查询触发点，构造期连上总线是 GNOME/Qt 应用同款形态）；失败永久降级。
+    auto set_accessibility_root(Widget *root) -> void override;
+
   private:
     struct Impl;  ///< 全部 Xlib 状态（Display/Window/GC/XImage/XIM/唤醒管道），见 x11_surface.cpp。
     std::unique_ptr<Impl> impl_;

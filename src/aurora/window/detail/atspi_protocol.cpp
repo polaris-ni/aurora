@@ -265,7 +265,7 @@ auto atspi_cp_slice(std::string_view utf8, std::int64_t start, std::int64_t end)
     std::int64_t s_pos = -1;
     std::int64_t e_pos = -1;
     while (i <= utf8.size()) {
-        if (static_cast<std::int64_t>(cp) == target(start)) {
+        if (static_cast<std::int64_t>(cp) == static_cast<std::int64_t>(target(start))) {
             s_pos = static_cast<std::int64_t>(i);
         }
         if (static_cast<std::int64_t>(cp) == want_end) {
@@ -646,18 +646,26 @@ auto AtspiModel::accessible_at_point(std::uint64_t id, std::int32_t x, std::int3
         sx = x + env_.window_origin_x;
         sy = y + env_.window_origin_y;
     }
-    // 先序逆序 = 后绘制者在者：取包含点位的**最深**节点（首个命中即返回）。
-    for (auto it = order_.rbegin(); it != order_.rend(); ++it) {
-        const LiveNode &l = *it;
-        if (l.id == k_atspi_app_id || !exists(l.id)) {
+    if (!exists(id)) {
+        return AtspiRef::null();
+    }
+    // 子树收集（含自身）：BFS 保证祖先恒在前 ⇒ 逆序即「后绘制/更深者在前」，首个命中即返回。
+    std::vector<std::uint64_t> sub{id};
+    for (std::size_t i = 0; i < sub.size(); ++i) {
+        const auto kids = children(sub[i]);
+        sub.insert(sub.end(), kids.begin(), kids.end());
+    }
+    for (auto it = sub.rbegin(); it != sub.rend(); ++it) {
+        const std::uint64_t lid = *it;
+        if (lid == k_atspi_app_id) {
             continue;
         }
-        const AtspiRectI r = extents(l.id, atspi::coord_screen);
+        const AtspiRectI r = extents(lid, atspi::coord_screen);
         if (r.width <= 0 || r.height <= 0) {
             continue;
         }
         if (sx >= r.x && sx < r.x + r.width && sy >= r.y && sy < r.y + r.height) {
-            return ref_of(l.id);
+            return ref_of(lid);
         }
     }
     return AtspiRef::null();
