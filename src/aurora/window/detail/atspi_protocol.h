@@ -271,6 +271,11 @@ class AtspiModel {
     // ---- org.a11y.atspi.Cache ----
     [[nodiscard]] auto cache_rows() const -> std::vector<AtspiCacheRow>;
 
+    /// @brief 可变环境量：`self_bus` / `registry_root` / 窗口原点等是**建连之后**才回填的
+    ///        事实，桥据其单源更新（模型是 env 的唯一持有者，避免副本漂移）。
+    [[nodiscard]] auto env_mut() -> AtspiEnv & { return env_; }
+    [[nodiscard]] auto env() const -> const AtspiEnv & { return env_; }
+
     /// @brief 本模型支撑某 (path, iface, member) 方法调用吗（桥的 UnknownMethod 判定同源）。
     ///
     /// 折算层与桥共用这张成员表：成员名单漂移只会在此一处发生。
