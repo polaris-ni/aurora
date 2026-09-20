@@ -209,9 +209,21 @@ class AudioParam {
     [[nodiscard]] auto chain_value_at(const EventList &events, double t) const -> float;
     /// 纯函数：在给定事件链上求时刻 t 的值（渲染/UI 共用）。
     [[nodiscard]] auto evaluate_at(const EventList &events, double t) const -> float;
+    /// COW 快照读取：拷贝指针即持有旧链生命期，锁外求值安全。
+    [[nodiscard]] auto events_snapshot() const -> std::shared_ptr<const EventList> {
+        std::lock_guard<std::mutex> lock(events_mutex_);
+        return events_;
+    }
+    auto set_events(std::shared_ptr<const EventList> next) -> void {
+        std::lock_guard<std::mutex> lock(events_mutex_);
+        events_ = std::move(next);
+    }
 
     std::atomic<float> value_{0.0F};
-    std::atomic<std::shared_ptr<const EventList>> events_{std::make_shared<const EventList>()};
+    // std::atomic<std::shared_ptr> 在 libc++/MSVC 未实现（仅 libstdc++ 有），不可移植；
+    // 事件链为「UI 写 / 渲染读」COW 指针，用短临界区互斥保护即可。
+    mutable std::mutex events_mutex_;
+    std::shared_ptr<const EventList> events_{std::make_shared<const EventList>()};
 };
 
 // ---- 节点 ----
@@ -359,7 +371,8 @@ class AudioBufferSourceNode final : public AudioNode {
     friend class AudioContext;
     explicit AudioBufferSourceNode(AudioContext &ctx) : AudioNode(ctx, 2) {}
 
-    std::atomic<std::shared_ptr<const AudioBuffer>> buffer_{nullptr};  // COW 指针（UI 写 / 渲染读）
+    std::mutex buffer_mutex_;                    // 保护 buffer_（libc++/MSVC 无 atomic<shared_ptr>）
+    std::shared_ptr<const AudioBuffer> buffer_;  // COW 指针（UI 写 / 渲染读）
     std::atomic<bool> loop_{false};
     std::atomic<bool> started_{false};
     std::atomic<bool> finished_{false};

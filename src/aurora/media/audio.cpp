@@ -50,7 +50,7 @@ auto AudioParam::validate_schedule_time(double t) const -> Result<void> {
     if (t < 0.0) {
         return make_param_error("time must be non-negative");
     }
-    const auto events = events_.load(std::memory_order_acquire);
+    const auto events = events_snapshot();
     if (events && !events->empty() && t < events->back().time) {
         return make_param_error("event times must be non-decreasing");
     }
@@ -106,10 +106,10 @@ auto AudioParam::set_value_at_time(float v, double t) -> Result<void> {
     if (const auto r = validate_schedule_time(t); !r.ok()) {
         return r;
     }
-    auto events = std::make_shared<EventList>(*events_.load(std::memory_order_acquire));
+    auto events = std::make_shared<EventList>(*events_snapshot());
     events->push_back(Event{
         .kind = EventKind::Set, .time = t, .value = v, .time_constant = 0.0, .start_time = 0.0, .start_value = 0.0F});
-    events_.store(std::move(events), std::memory_order_release);
+    set_events(std::move(events));
     return Result<void>{};
 }
 
@@ -119,7 +119,7 @@ auto AudioParam::ramp_impl(EventKind kind, float v, double t) -> Result<void> {
     if (const auto r = validate_schedule_time(t); !r.ok()) {
         return r;
     }
-    auto events = std::make_shared<EventList>(*events_.load(std::memory_order_acquire));
+    auto events = std::make_shared<EventList>(*events_snapshot());
     const double start_time = events->empty() ? 0.0 : events->back().time;
     const float start_value = chain_value_at(*events, start_time);
     if (kind == EventKind::ExponentialRamp &&
@@ -132,7 +132,7 @@ auto AudioParam::ramp_impl(EventKind kind, float v, double t) -> Result<void> {
                             .time_constant = 0.0,
                             .start_time = start_time,
                             .start_value = start_value});
-    events_.store(std::move(events), std::memory_order_release);
+    set_events(std::move(events));
     return Result<void>{};
 }
 
@@ -151,7 +151,7 @@ auto AudioParam::set_target_at_time(float target, double t, double time_constant
     if (!(time_constant > 0.0)) {
         return make_param_error("time_constant must be positive");
     }
-    auto events = std::make_shared<EventList>(*events_.load(std::memory_order_acquire));
+    auto events = std::make_shared<EventList>(*events_snapshot());
     const float start_value = chain_value_at(*events, t);
     events->push_back(Event{.kind = EventKind::SetTarget,
                             .time = t,
@@ -159,21 +159,21 @@ auto AudioParam::set_target_at_time(float target, double t, double time_constant
                             .time_constant = time_constant,
                             .start_time = 0.0,
                             .start_value = start_value});
-    events_.store(std::move(events), std::memory_order_release);
+    set_events(std::move(events));
     return Result<void>{};
 }
 
 auto AudioParam::cancel_scheduled_values() -> void {
-    events_.store(std::make_shared<const EventList>(), std::memory_order_release);
+    set_events(std::make_shared<const EventList>());
 }
 
 auto AudioParam::has_automation() const -> bool {
-    const auto events = events_.load(std::memory_order_acquire);
+    const auto events = events_snapshot();
     return events != nullptr && !events->empty();
 }
 
 auto AudioParam::evaluate_block(double t0, int frames, int sample_rate, float *out) -> void {
-    const auto events = events_.load(std::memory_order_acquire);
+    const auto events = events_snapshot();
     if (events == nullptr || events->empty()) {
         const float v = value_.load(std::memory_order_acquire);
         std::fill_n(out, frames, v);
@@ -408,7 +408,8 @@ auto AudioBufferSourceNode::set_buffer(std::shared_ptr<const AudioBuffer> buffer
             ErrorCode::AudioBufferInvalid,
             ErrorParams{{"reason", buffer == nullptr ? "null buffer" : "invalid sample_rate/channels/samples"}});
     }
-    buffer_.store(std::move(buffer), std::memory_order_release);
+    std::lock_guard<std::mutex> lock(buffer_mutex_);
+    buffer_ = std::move(buffer);
     return Result<void>{};
 }
 
@@ -429,7 +430,11 @@ auto AudioBufferSourceNode::stop() -> void {
 }
 
 auto AudioBufferSourceNode::process(const AudioRenderContext &p) -> void {
-    const auto buf = buffer_.load(std::memory_order_acquire);
+    std::shared_ptr<const AudioBuffer> buf;
+    {
+        std::lock_guard<std::mutex> lock(buffer_mutex_);
+        buf = buffer_;
+    }
     if (buf == nullptr || !buf->valid() || !started_.load(std::memory_order_acquire) ||
         finished_.load(std::memory_order_acquire)) {
         return;  // out_bus_ 已由渲染循环清零
