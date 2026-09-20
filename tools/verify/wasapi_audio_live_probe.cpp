@@ -13,6 +13,8 @@
 //      且无崩溃。
 //   5. 推流通路：StreamSource 推 0.2s 正弦并排空——buffered 归零、零溢出丢弃。
 //   6. suspend/resume：挂起时钟冻结、恢复后继续推进（真实设备线程上）。
+//   7. 采集后端观察口直连（库内部契约）：`failed()` 干净启停不误报、停后再启成功
+//      （守卫审计回归：通知回调/事件句柄生命周期）；无采集设备时该项 SKIP。
 // 人工段（--interactive，出声目视/耳听）：
 //   a. 扫频：200Hz→2kHz 线性扫频 3s——确认可闻且无爆音。
 //   b. 双源混音：440Hz + 660Hz 两路 StreamSource 同时推流——确认可闻混合无削波异响。
@@ -21,6 +23,7 @@
 //
 // 运行：build 目录下 ./aurora_verify_wasapi_audio [--interactive]
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -31,6 +34,7 @@
 #include <vector>
 
 #include "aurora/aurora.h"
+#include "aurora/media/audio_wasapi.h"  // 库内部头（探针经 src include 直连，见 AuroraVerify.cmake）
 
 namespace {
 
@@ -84,7 +88,7 @@ auto main(int argc, char **argv) -> int {
     const bool interactive = argc > 1 && std::string(argv[1]) == "--interactive";
 
     emit("== Aurora WASAPI audio live probe ==");
-    emit("auto segment: activation / format / clock / buffer source / stream / suspend-resume");
+    emit("auto segment: activation / format / clock / buffer source / stream / suspend-resume / capture port");
     if (interactive) {
         emit("interactive segment: sweep / dual-source mix / device hot-switch (audible)");
     }
@@ -144,6 +148,27 @@ auto main(int argc, char **argv) -> int {
         check(ctx->resume().ok(), "resume accepted");
         sleep_ms(250);
         check(ctx->current_time() > s1, "clock resumes after resume()");
+    }
+
+    // 7. 采集后端观察口直连（failed() + 二次 start 生命周期回归）
+    {
+        aurora::WasapiCaptureBackend cap;
+        std::atomic<int> packets{0};
+        auto sink_fn = [&packets](const float * /*pcm*/, int frames, int /*rate*/, int /*channels*/) {
+            packets.fetch_add(frames, std::memory_order_relaxed);
+        };
+        if (!cap.start(sink_fn)) {
+            emit("[SKIP] no usable capture device: observation-port items skipped");
+        } else {
+            sleep_ms(250);
+            cap.stop();
+            check(!cap.failed(), "capture failed()==false after clean start/stop");
+            const bool again = cap.start(sink_fn);
+            check(again, "capture restart after stop succeeds (lifecycle regression)");
+            if (again) {
+                cap.stop();
+            }
+        }
     }
 
     if (interactive) {

@@ -143,6 +143,9 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     # （扫频/双源混音/设备热切换）。需音频后端编译进库（AURORA_ENABLE_AUDIO=ON）。
     if (WIN32 AND AURORA_ENABLE_AUDIO_WASAPI)
         aurora_add_verify_probe(aurora_verify_wasapi_audio "${_aurora_verify_dir}/wasapi_audio_live_probe.cpp")
+        # 守卫审计观察口直连：采集后端 `failed()` 是库内部契约（src/aurora/media/audio_wasapi.h），
+        # 公共 API 不暴露，仅本探针直连验收其生命周期行为。
+        target_include_directories(aurora_verify_wasapi_audio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
         list(APPEND _aurora_verify_targets aurora_verify_wasapi_audio)
     endif ()
     if (_aurora_verify_targets)

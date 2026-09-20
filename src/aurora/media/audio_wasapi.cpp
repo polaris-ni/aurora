@@ -57,7 +57,10 @@ auto is_float_format(const WAVEFORMATEX *f) -> bool {
 }
 
 /// IMMNotificationClient 最小实现：默认渲染设备变更/任意设备状态变化 → 置重路由标志。
-/// 对象由 Impl 裸持有（注册期引用计数 ≥ 1，注销后释放），不自杀。
+/// 标准 COM 自毁引用计数：new 携带 Impl 的一份自有引用（ref=1），注册期若 COM 内部
+/// 另有持有由协议自行 AddRef/Release；`teardown_all` 注销后 Release 掉自有引用，
+/// 归零即 `delete this`——此前 Release 不归零删除且全链无 delete，对象每次后端生命
+/// 周期泄漏一份（审计缺陷 ①）。
 class DeviceNotifyClient final : public IMMNotificationClient {
   public:
     explicit DeviceNotifyClient(std::atomic<bool> &reroute) : reroute_(reroute) {}
@@ -65,6 +68,9 @@ class DeviceNotifyClient final : public IMMNotificationClient {
     ULONG STDMETHODCALLTYPE AddRef() override { return ref_.fetch_add(1, std::memory_order_relaxed) + 1; }
     ULONG STDMETHODCALLTYPE Release() override {
         const ULONG n = ref_.fetch_sub(1, std::memory_order_acq_rel) - 1;
+        if (n == 0) {
+            delete this;
+        }
         return n;
     }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppv) override {
@@ -312,14 +318,20 @@ auto WasapiDeviceBackend::start(RenderFn render_block) -> bool {
         return false;
     }
     impl_->render = std::move(render_block);
+    // 失败路径统一回收 event（审计缺陷 ②：此前只 stop() 成功路径关句柄，
+    // start 半途失败即漏一个事件句柄，重试 start 会再建一个覆盖旧值）。
     if (!impl_->create_enumerator() || !impl_->activate_default_device()) {
         impl_->teardown_all();
         impl_->com_uninit();
+        CloseHandle(impl_->event);
+        impl_->event = nullptr;
         return false;
     }
     if (FAILED(impl_->client->Start())) {
         impl_->teardown_all();
         impl_->com_uninit();
+        CloseHandle(impl_->event);
+        impl_->event = nullptr;
         return false;
     }
     impl_->running.store(true, std::memory_order_release);
@@ -355,6 +367,7 @@ struct WasapiCaptureBackend::Impl {
     HANDLE event = nullptr;
     std::thread thread;
     std::atomic<bool> running{false};
+    std::atomic<bool> device_failed{false};  ///< 中段设备失败（线程已退出、回调止流）
     bool com_owned = false;
 
     IMMDeviceEnumerator *enumerator = nullptr;
@@ -483,7 +496,10 @@ struct WasapiCaptureBackend::Impl {
                 continue;  // 超时（无新包）——空转重试
             }
             if (capture_client == nullptr || !pump()) {
-                break;  // 设备失败：采集线程退出（调用方经 is_running/静音感知，不静默续录）
+                // 设备失败：置观察位后线程退出（`running` 留作 stop 握手位——
+                // 若在此清零，stop 早退不 join，~thread joinable → std::terminate）。
+                device_failed.store(true, std::memory_order_release);
+                break;
             }
         }
         if (thread_com) {
@@ -511,9 +527,13 @@ auto WasapiCaptureBackend::start(CaptureFn on_pcm) -> bool {
         return false;
     }
     impl_->capture = std::move(on_pcm);
+    impl_->device_failed.store(false, std::memory_order_relaxed);  // 重开清旧败
+    // 失败路径统一回收 event（同设备后端审计缺陷 ②）。
     if (!impl_->activate()) {
         impl_->teardown_all();
         impl_->com_uninit();
+        CloseHandle(impl_->event);
+        impl_->event = nullptr;
         return false;
     }
     impl_->running.store(true, std::memory_order_release);
@@ -538,6 +558,10 @@ auto WasapiCaptureBackend::stop() -> void {
         impl_->event = nullptr;
     }
     impl_->com_uninit();
+}
+
+auto WasapiCaptureBackend::failed() const -> bool {
+    return impl_->device_failed.load(std::memory_order_acquire);
 }
 
 }  // namespace aurora
@@ -569,6 +593,8 @@ WasapiCaptureBackend::~WasapiCaptureBackend() = default;
 auto WasapiCaptureBackend::start(CaptureFn /*on_pcm*/) -> bool { return false; }
 
 auto WasapiCaptureBackend::stop() -> void {}
+
+auto WasapiCaptureBackend::failed() const -> bool { return false; }  // 桩无采集线程
 
 }  // namespace aurora
 

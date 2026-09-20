@@ -38,8 +38,10 @@ class WasapiDeviceBackend final : public AudioDeviceBackend {
 /// @brief WASAPI 采集后端（麦克风录制链输入；库内部，非公共 API）。
 ///
 /// 默认采集端点（eCapture/eConsole）shared mode event-driven，GetMixFormat
-/// （shared 引擎恒 float32）原生采样率/声道回调；SILENT 包补零。设备丢失/失败
-/// → start 返回 false 或采集线程退出（由调用方转显式错误，录制不静默降级）。
+/// （shared 引擎恒 float32）原生采样率/声道回调；SILENT 包补零。启动期设备/权限
+/// 不可用 → start 返回 false（调用方转显式错误）；**中段失败**（端点被移除 /
+/// GetBuffer 出错）→ 采集线程退出、回调止流，经 `failed()` 观察（审计修正：此前
+/// 注释声称「由调用方感知」但无任何观察通道，实为静默止流）。
 class WasapiCaptureBackend final : public AudioCaptureBackend {
   public:
     WasapiCaptureBackend();
@@ -51,6 +53,10 @@ class WasapiCaptureBackend final : public AudioCaptureBackend {
     auto start(CaptureFn on_pcm) -> bool override;
     /// @brief 停止并回收采集线程与全部 COM 资源（阻塞等待线程退出）。
     auto stop() -> void override;
+    /// @brief 中段设备失败观察口：true = 采集线程已因设备错误退出（回调不再到达）。
+    ///        内部 `running` 标志是 stop 握手位（承载 join 义务），不可作死活判据。
+    ///        disabled 桩恒 false（start 恒 false → 无中段可言）。
+    [[nodiscard]] auto failed() const -> bool;
 
   private:
     struct Impl;
