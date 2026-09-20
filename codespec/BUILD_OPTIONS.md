@@ -228,12 +228,12 @@ cmake --build build --target gen_debug_api_json     # 仅刷新 debug 段
 
 新增 / 删除 widget 或类型后，须重新生成 aurora_api.json 以使其与 `register_core_widgets()` 注册表保持一致。
 
-### 3.7 无障碍桥（Win32 UIA）：**无独立开关**
+### 3.7 无障碍桥（Win32 UIA / Linux AT-SPI2）：**无独立开关**
 
 无障碍桥**不引入任何 CMake 选项或 feature 宏**（编译期定义按模块头直接 `#include core/platform.h`，无新宏）。门控规则只有两条：
 
-1. **编译门控**：Win32 UIA 桥实现在 `src/aurora/window/detail/win32_ua.{h,cpp}`，随 `AURORA_BACKEND_WIN32`（Windows 默认 ON）编入；`AURORA_BACKEND_D3D11` 复用同一桥，故门控为「平台宏 ∧ 后端宏析取」，与 `src/aurora/window/win32_cursor.h` 同款。语义树 / 钩子升级（`core/accessibility.h`、`core/a11y_*.h`、`Widget` 虚钩子）**无任何门控**——公共头纯增量，所有构建路径可见。
-2. **运行期门控**：`UIAutomationCore.dll` **动态加载**（`LoadLibraryA`），无链接期依赖；缺库或必要导出缺失时整桥降级为 no-op 并 `Diagnostics::warn` 一次。桥本身**惰性构造**——首个平台查询（`WM_GETOBJECT`）到达才构建，无读屏在线时零开销。
+1. **编译门控**：Win32 UIA 桥实现在 `src/aurora/window/detail/win32_ua.{h,cpp}`，随 `AURORA_BACKEND_WIN32`（Windows 默认 ON）编入；`AURORA_BACKEND_D3D11` 复用同一桥，故门控为「平台宏 ∧ 后端宏析取」，与 `src/aurora/window/win32_cursor.h` 同款。Linux AT-SPI2 桥（`src/aurora/window/detail/atspi_{protocol,bridge}.{h,cpp}`）门控为「Linux 平台 ∧（`AURORA_BACKEND_X11` ∨ `AURORA_BACKEND_WAYLAND`）」，两后端共用同一桥。语义树 / 钩子升级（`core/accessibility.h`、`core/a11y_*.h`、`Widget` 虚钩子）**无任何门控**——公共头纯增量，所有构建路径可见。
+2. **运行期门控**：`UIAutomationCore.dll` **动态加载**（`LoadLibraryA`），无链接期依赖；缺库或必要导出缺失时整桥降级为 no-op 并 `Diagnostics::warn` 一次。桥本身**惰性构造**——首个平台查询（`WM_GETOBJECT`）到达才构建，无读屏在线时零开销。Linux 侧同样 **`dlopen("libdbus-1.so.3")`** 动态加载（无链接期依赖）：libdbus 缺失、无会话总线、`org.a11y.Bus` 不可达或 `NO_AT_BRIDGE=1` 时整桥降级为不存在；构造时机为首帧语义树根注入（Linux 无查询驱动信号，见 `specification/06-app-platform.md` §6.4），总线地址可用 `AT_SPI_BUS_ADDRESS` 显式直给。
 
 ### 3.8 wgpu GPU 栅格后端（cargo 源码构建 + Rust 工具链探测）
 
@@ -455,6 +455,9 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `AURORA_GOLDEN_MAX_PIXELS` | 整数 | 允许不一致像素数上限（同上，仅 `compare_or_update` 族读取） |
 | `AURORA_REPO_ROOT` | 目录路径 | 测试框架仓库根定位的显式锚点（`tests/framework/isolation.cpp`）。缺省先按可执行文件位置、再按 cwd 逐级上溯找 `codespec/`+`CMakeLists.txt`；runner 构建 / 安装于仓库外（如 WSL home 目录构建 `/mnt/c` 源码仓）时上溯必然落空，用本变量指向仓库根即可，值须形如仓库根，否则忽略回落自动查找 |
 | `AURORA_LIVE_X11` / `AURORA_LIVE_WAYLAND` | 非空（如 `1`） | 后端**真机**单测用例的显式选择加入开关（`utest_x11_surface` / `utest_wayland_surface`）：未置时该用例走 `AURORA_TEST_SKIP` 桩，置了才连接真实 X server / 合成器并创建真实窗口断言端到端接线。默认关闭的原因与探针同源——需要桌面会话、非确定且会动用户屏幕，不进无头 CTest |
+| `AURORA_LIVE_ATSPI` | 非空（如 `1`） | Linux AT-SPI2 桥**真机**单测用例（`utest_atspi_bridge.live_embed_handshake_and_teardown`）的选择加入开关：置了才连真实会话总线走完整 dlopen + `Socket.Embed` 握手；未置走 `AURORA_TEST_SKIP` 桩。外部客户端视角（libatspi 逐检查项比对）由探针 `aurora_verify_atspi` 把关，见 `specification/08-tooling.md` §7.5 |
+| `NO_AT_BRIDGE` | 非 `0` 即生效 | GNOME 惯例的显式免提开关：置位后 Linux AT-SPI2 桥 `create()` 恒返回 `nullptr`，不碰 libdbus / 总线，无障碍路径整体退出 |
+| `AT_SPI_BUS_ADDRESS` | D-Bus 地址串 | 无障碍总线地址显式直给（跳过 `org.a11y.Bus.GetAddress` 查询），用于非常规桌面 / 测试注入；置了但地址无效仍按降级处理 |
 | `AURORA_INSPECTOR_PORT` | 1–65535 | `aurora_mcp` 的 `live_*` 工具连接运行中应用的默认端口；缺省 `6280`（与 `InspectorServer::start()` 默认值一致）。单个工具调用可用 `session` 入参（`"6280"` 或 `"127.0.0.1:6280"`）覆盖。主机恒为回环，见 `specification/08-tooling.md` §5.4 |
 
 > CTest 默认 CWD = `build/`，故依赖相对路径的 golden 测试须从仓库根直接运行可执行文件（仓库 `cmake/AuroraTests.cmake` 已为依赖相对路径的测试显式设置 `WORKING_DIRECTORY` 为仓库根，故 `ctest` 下直接可跑）。

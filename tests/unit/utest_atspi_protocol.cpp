@@ -24,8 +24,43 @@ namespace aurora::test_cases::utest_atspi_protocol {
 
 using aurora::a11y::NodeSnapshot;
 using aurora::a11y::TreeSnapshot;
-using namespace aurora::detail;         // NOLINT(在测试套件命名空间内引入折算层符号，避免逐名罗列)
-using namespace aurora::detail::atspi;  // NOLINT
+// TEST-R9：测试禁 using-directive，折算层符号逐名引入。
+using aurora::detail::AtspiCacheRow;
+using aurora::detail::AtspiEnv;
+using aurora::detail::AtspiModel;
+using aurora::detail::AtspiPropValue;
+using aurora::detail::AtspiRef;
+using aurora::detail::atspi_actions_of;
+using aurora::detail::atspi_cp_count;
+using aurora::detail::atspi_cp_slice;
+using aurora::detail::atspi_interfaces_of;
+using aurora::detail::atspi_role_name;
+using aurora::detail::atspi_role_of;
+using aurora::detail::atspi_states_of;
+using aurora::detail::k_atspi_app_id;
+using aurora::detail::k_atspi_frame_id;
+using aurora::detail::atspi::coord_screen;
+using aurora::detail::atspi::coord_window;
+using aurora::detail::atspi::k_iface_accessible;
+using aurora::detail::atspi::k_iface_action;
+using aurora::detail::atspi::k_iface_application;
+using aurora::detail::atspi::k_iface_cache;
+using aurora::detail::atspi::k_iface_component;
+using aurora::detail::atspi::k_iface_socket;
+using aurora::detail::atspi::k_iface_text;
+using aurora::detail::atspi::k_iface_value;
+using aurora::detail::atspi::k_null_path;
+using aurora::detail::atspi::k_registry_root_path;
+using aurora::detail::atspi::state_defunct;
+using aurora::detail::atspi::state_editable;
+using aurora::detail::atspi::state_enabled;
+using aurora::detail::atspi::state_multi_line;
+using aurora::detail::atspi::state_read_only;
+using aurora::detail::atspi::state_selectable_text;
+using aurora::detail::atspi::state_sensitive;
+using aurora::detail::atspi::state_showing;
+using aurora::detail::atspi::state_single_line;
+using aurora::detail::atspi::state_visible;
 
 namespace {
 

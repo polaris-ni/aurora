@@ -782,6 +782,18 @@ auto AtspiModel::prop_get(std::uint64_t id, const std::string &iface, const std:
         }
         return {};
     }
+    if (iface == atspi::k_iface_action) {
+        if (prop == "version") {
+            return u32(2);
+        }
+        // libatspi 2.60 的 atspi_action_get_n_actions 走 Properties.Get("NActions") "i"
+        // （`_atspi_dbus_get_property (obj, atspi_interface_action, "NActions", …)`），
+        // 再按索引逐个调 GetName/GetLocalizedName/GetDescription/GetKeyBinding。
+        if (prop == "NActions") {
+            return i32(static_cast<std::int32_t>(actions(id).size()));
+        }
+        return {};
+    }
     if (iface == atspi::k_iface_cache) {
         if (prop == "version") {
             return u32(2);

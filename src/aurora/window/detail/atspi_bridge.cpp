@@ -57,7 +57,11 @@ using Fn_watch_add = int (*)(Watch, void *);
 using Fn_watch_remove = void (*)(Watch, void *);
 using Fn_watch_toggle = void (*)(Watch, void *);
 using Fn_free = void (*)(void *);
-using Fn_filter = int (*)(Msg, void *, Err *);
+// 注意：filter 回调真实签名是 `(connection, message, user_data)` 三参 —— 自 .so.3 线
+// 1.12 起即如此（`DBusHandleMessageFunction`，dbus-connection.h:170，1.12/1.14/1.16 逐版
+// 核对上游）。首版误按两参 `(message, user_data)` 折算，libdbus 实发 (conn, msg, ud)：
+// 把 conn 当 msg、msg 当 ud ⇒ dispatch 期解引用段错误（WSL 1.16.2 实测）。
+using Fn_filter = int (*)(Conn, Msg, void *);
 
 /// @brief 用到的 libdbus 符号集（34 个；类型码用 D-Bus 单字符常量）。
 struct LibDbus {
@@ -81,7 +85,9 @@ struct LibDbus {
     void (*connection_close)(Conn) = nullptr;
     void (*connection_unref)(Conn) = nullptr;
     int (*connection_send)(Conn, Msg, std::uint32_t *) = nullptr;
-    Msg (*connection_send_with_reply_and_block)(Conn, Msg, int) = nullptr;
+    // 注意：`_and_block` 的真实原型带第 4 参 `DBusError*`（且要求传入“未置位”错误），
+    // 少传会被 libdbus 断言直接 abort（1.16 实测）。
+    Msg (*connection_send_with_reply_and_block)(Conn, Msg, int, Err *) = nullptr;
     Msg (*message_new_method_call)(const char *, const char *, const char *, const char *) = nullptr;
     Msg (*message_new_method_return)(Msg) = nullptr;
     Msg (*message_new_error)(Msg, const char *, const char *) = nullptr;
@@ -152,7 +158,9 @@ auto LibDbus::instance() -> const LibDbus & {
         bind("dbus_message_get_interface", a.message_get_interface);
         bind("dbus_message_get_member", a.message_get_member);
         bind("dbus_message_get_sender", a.message_get_sender);
-        bind("dbus_message_get_no_reply_expected", a.message_get_no_reply_expected);
+        // 符号实名是 `dbus_message_get_no_reply`（文档里的 `*_expected` 长名从未落符号表，
+        // libdbus 1.16 实测仅导出短名）—— 绑错名会让整库判不可用。
+        bind("dbus_message_get_no_reply", a.message_get_no_reply_expected);
         bind("dbus_message_iter_init_append", a.iter_init_append);
         bind("dbus_message_iter_append_basic", a.iter_append_basic);
         bind("dbus_message_iter_open_container", a.iter_open_container);
@@ -175,11 +183,14 @@ auto LibDbus::instance() -> const LibDbus & {
     return api;
 }
 
-// D-Bus 常量（libdbus ABI 数值；仅本文件用到的子集）。
+// D-Bus 常量（libdbus ABI 数值；仅本文件用到的子集。枚举上游逐行核对 dbus-1.16.2：
+// DBusHandlerResult = {NOT_YET_HANDLED 0, HANDLED 1, NEED_MEMORY 2}；
+// DBusDispatchStatus = {DATA_REMAINS 0, COMPLETE 1, NEED_MEMORY 2}；
+// DBusMessageType = {INVALID 0, METHOD_CALL 1, ...}；DBusWatchFlags = {READABLE 1, WRITABLE 2}）。
 constexpr int mt_method_call = 1;
-constexpr int handler_more = 1;
-constexpr int handler_ok = 2;
-constexpr int dispatch_complete = 2;
+constexpr int handler_more = 0;  ///< NOT_YET_HANDLED：交还给后续 filter/对象树
+constexpr int handler_ok = 1;    ///< HANDLED：本端已应答
+constexpr int dispatch_remains = 0;  ///< 还有排队消息可派发（pump 的 drain 条件；空转期恒为 1 不可作循环条件）
 constexpr unsigned watch_readable = 1U;
 constexpr unsigned watch_writeable = 2U;
 constexpr char ty_bool = 'b';
@@ -190,8 +201,12 @@ constexpr char ty_string = 's';
 constexpr char ty_objpath = 'o';
 constexpr char ty_variant = 'v';
 constexpr char ty_array = 'a';
-constexpr char ty_struct = '(';
-constexpr char ty_dict = '{';
+// libdbus 的**内存型码**与**线签名字符**不同：结构体/字典项的 iter typecode 是字母
+// 'r'/'e'（`DBUS_TYPE_STRUCT`/`DBUS_TYPE_DICT_ENTRY`，dbus-protocol.h），而 `'('`/`'{'`
+// 只出现在签名字符串里（如 "(so)"）。把线字符当 typecode 传入会让 dbus_type_is_container
+// 断言直接 abort（libdbus 1.16 实测）。
+constexpr char ty_struct = 'r';
+constexpr char ty_dict = 'e';
 
 constexpr const char *err_unknown_object = "org.freedesktop.DBus.Error.UnknownObject";
 constexpr const char *err_unknown_method = "org.freedesktop.DBus.Error.UnknownMethod";
@@ -229,7 +244,8 @@ auto put_double(const LibDbus &L, Iter &it, double v) -> void {
 /// @brief 追加 `(so)` 对象引用。
 auto put_so(const LibDbus &L, Iter &it, const AtspiRef &r) -> void {
     Iter sub{};
-    if (L.iter_open_container(&it, ty_struct, "so", &sub) == 0) {
+    // STRUCT 开容器：contained_signature 必须为 NULL（成员逐个后补）。
+    if (L.iter_open_container(&it, ty_struct, nullptr, &sub) == 0) {
         return;
     }
     put_string(L, sub, ty_string, r.bus);
@@ -353,7 +369,8 @@ class Cur {
         next();
         return true;
     }
-    /// @brief 进入容器（'(' / 'a' / 'v'）填充 `sub`；返回 false = 类型不符（不消费游标）。
+    /// @brief 进入容器（'r' 结构 / 'a' 数组 / 'v' variant，即 `DBUS_TYPE_STRUCT` 系内存型码）
+    ///        填充 `sub`；返回 false = 类型不符（不消费游标）。
     ///        父游标的推进归调用方（读完子层后 `next()`）。
     auto into(int kind, Cur &sub) -> bool {
         if (ty() != kind) {
@@ -380,24 +397,42 @@ auto a11y_bus_address(const LibDbus &L) -> const std::string & {
         Conn session = nullptr;
         Err e{};
         L.error_init(&e);
+        // DBUS_BUS_SESSION == 0：WSL libdbus 1.16.2 实测 `dbus_bus_get` 断言
+        // `type >= 0 && type < N_BUS_TYPES`（N=3 ⇒ SESSION/SYSTEM/STARTER = 0/1/2）。
+        // 曾误改为 1（以为是新占位枚举），结果连上系统总线 —— org.a11y.Bus 只存在于
+        // 会话总线，GetAddress 回 ServiceUnknown。
         session = L.bus_get(0 /*SESSION*/, &e);
-        L.error_free(&e);
         if (session == nullptr) {
+            const std::string why = (e.name() != nullptr) ? e.name() : "no error name";
+            L.error_free(&e);
+            Diagnostics::warn("AtspiBridge: session bus unavailable [" + why +
+                                  "], no a11y bus lookup possible",
+                              "aurora.atspi", {});
             return std::string{};
         }
+        L.error_free(&e);
         Msg c = L.message_new_method_call(atspi::k_a11y_bus_service, atspi::k_a11y_bus_path,
                                           atspi::k_a11y_bus_iface, "GetAddress");
         if (c == nullptr) {
             return std::string{};
         }
-        Msg r = L.connection_send_with_reply_and_block(session, c, 3000);
+        Err qe{};
+        L.error_init(&qe);
+        Msg r = L.connection_send_with_reply_and_block(session, c, 3000, &qe);
+        if (r == nullptr) {
+            const std::string why = (qe.name() != nullptr) ? qe.name() : "no reply";
+            L.error_free(&qe);
+            L.message_unref(c);
+            Diagnostics::warn("AtspiBridge: org.a11y.Bus.GetAddress failed [" + why + "]",
+                              "aurora.atspi", {});
+            return std::string{};
+        }
+        L.error_free(&qe);
         L.message_unref(c);
         std::string out;
-        if (r != nullptr) {
-            Cur cur{L, r};
-            cur.take_string(out);
-            L.message_unref(r);
-        }
+        Cur cur{L, r};
+        cur.take_string(out);
+        L.message_unref(r);
         return out;
     }();
     return addr;
@@ -430,19 +465,33 @@ struct AtspiBridge::Impl {
     // ---- 建连 / 握手 ----
 
     [[nodiscard]] auto connect_and_embed() -> bool {
+        // 降级诊断：握手任一环节失败都指出是哪一步（生产排障关键；无会话总线是 Linux 常态，
+        // 但「有总线却哪步断了」与「根本没总线」必须可区分）。
+        const auto degraded = [](const char *step, const Err &e) {
+            std::string text = std::string{"AtspiBridge: "} + step + " failed";
+            if (e.name() != nullptr) {
+                text += " [";
+                text += e.name();
+                text += "]";
+            }
+            Diagnostics::warn(text + ", bridge degraded", "aurora.atspi", {});
+        };
         Err e{};
         L.error_init(&e);
         const std::string &addr = a11y_bus_address(L);
         if (addr.empty()) {
+            degraded("no a11y bus address (org.a11y.Bus.GetAddress failed or AT_SPI_BUS_ADDRESS empty)", e);
             return false;
         }
         conn = L.connection_open_private(addr.c_str(), &e);
         if (conn == nullptr) {
+            degraded("connection_open_private", e);
             L.error_free(&e);
             return false;
         }
         L.error_init(&e);
         if (L.bus_register(conn, &e) == 0) {
+            degraded("bus_register", e);
             L.error_free(&e);
             close_conn();
             return false;
@@ -451,16 +500,19 @@ struct AtspiBridge::Impl {
         const char *un = L.bus_get_unique_name(conn);
         unique_name = (un != nullptr) ? un : "";
         if (unique_name.empty()) {
+            degraded("bus_get_unique_name", e);
             close_conn();
             return false;
         }
         L.connection_set_exit_on_disconnect(conn, 0);
         if (L.connection_set_watch_functions(conn, &Impl::watch_added, &Impl::watch_removed,
                                              &Impl::watch_toggled, this, nullptr) == 0) {
+            degraded("set_watch_functions", e);
             close_conn();
             return false;
         }
         if (L.connection_add_filter(conn, &Impl::filter_tramp, this, nullptr) == 0) {
+            degraded("add_filter", e);
             close_conn();
             return false;
         }
@@ -470,20 +522,28 @@ struct AtspiBridge::Impl {
         Msg c = L.message_new_method_call(atspi::k_registry_bus, atspi::k_registry_root_path,
                                           atspi::k_iface_socket, "Embed");
         if (c == nullptr) {
+            degraded("message_new_method_call(Embed)", e);
             close_conn();
             return false;
         }
         Iter arg_top{};
         L.iter_init_append(c, &arg_top);
         Iter plug{};
-        if (L.iter_open_container(&arg_top, ty_struct, "so", &plug) != 0) {
-            put_string(L, plug, ty_string, unique_name);
-            put_string(L, plug, ty_objpath, model.env().base_path);
-            L.iter_close_container(&arg_top, &plug);
+        if (L.iter_open_container(&arg_top, ty_struct, nullptr, &plug) == 0) {
+            degraded("open Embed arg (so)", e);
+            L.message_unref(c);
+            close_conn();
+            return false;
         }
-        Msg r = L.connection_send_with_reply_and_block(conn, c, 3000);
+        put_string(L, plug, ty_string, unique_name);
+        put_string(L, plug, ty_objpath, model.env().base_path);
+        L.iter_close_container(&arg_top, &plug);
+        Msg r = L.connection_send_with_reply_and_block(conn, c, 3000, &e);
+        const Err embed_err = e;  // 应答前留存错误名（free 后不可读）
+        L.error_free(&e);
         L.message_unref(c);
         if (r == nullptr) {
+            degraded("Socket.Embed call", embed_err);
             close_conn();
             return false;  // 注册表不可达/超时（含 registryd 未装）
         }
@@ -540,8 +600,8 @@ struct AtspiBridge::Impl {
             return;
         }
         [[maybe_unused]] const int touched = L.connection_read_write(conn, 0);  // 非阻塞收发
-        while (L.connection_dispatch(conn) == dispatch_complete) {
-            // 逐条派发；filter 内完成应答（应答已入队）
+        while (L.connection_dispatch(conn) == dispatch_remains) {
+            // 逐条派发直到无排队消息；filter 内完成应答（应答已入队）
         }
         L.connection_flush(conn);  // 把派发期产生的回复一次写回传输
     }
@@ -558,7 +618,7 @@ struct AtspiBridge::Impl {
     }
     static void watch_toggled(Watch, void *) {}
 
-    static int filter_tramp(Msg m, void *ud, Err *) {
+    static int filter_tramp(Conn, Msg m, void *ud) {
         auto &self = *static_cast<Impl *>(ud);
         return self.on_message(m) ? handler_ok : handler_more;
     }
@@ -695,6 +755,46 @@ struct AtspiBridge::Impl {
         return reply_end(r);
     }
 
+    /// @brief Component.GetExtents 应答 = **结构体** `(iiii)`（libatspi 校验 "u=>(iiii)"；
+    /// 平铺四 int 会被拒：「returned signature iiii; expected (iiii)」）。
+    /// 注意与 Text.GetCharacterExtents 区分：后者按平铺 "iiii" 读。
+    [[nodiscard]] auto reply_i4_struct(Msg call, const AtspiRectI &v) -> bool {
+        Iter top{};
+        Msg r = reply_begin(call, top);
+        if (r == nullptr) {
+            return false;
+        }
+        Iter st{};
+        if (L.iter_open_container(&top, ty_struct, nullptr, &st) != 0) {
+            put_int(L, st, v.x);
+            put_int(L, st, v.y);
+            put_int(L, st, v.width);
+            put_int(L, st, v.height);
+            L.iter_close_container(&top, &st);
+        }
+        return reply_end(r);
+    }
+
+    /// @brief 往 parent 里写状态集线格式：**恰两枚 uint32** 位掩码组成的 "au"
+    /// （word0 = 位 0–31，word1 = 位 32–63）。libatspi `_atspi_dbus_set_state` 以
+    /// `states[1]<<32 | states[0]` 拼合且硬性要求元素数为 2（否则打印
+    /// "expected 2 values in states array; got N" 并整集丢弃）。旧版误按「计数 +
+    /// 枚举 id 列表」发送 ⇒ 客户端全部状态判定失败（WSL 实测）。
+    auto put_state_set(Iter &parent, const std::vector<std::uint32_t> &states) -> void {
+        std::uint32_t words[2] = {0U, 0U};
+        for (const std::uint32_t s : states) {
+            if (s < 64U) {
+                words[s >= 32U ? 1 : 0] |= 1U << (s % 32U);
+            }
+        }
+        Iter arr{};
+        if (L.iter_open_container(&parent, ty_array, "u", &arr) != 0) {
+            put_uint(L, arr, words[0]);
+            put_uint(L, arr, words[1]);
+            L.iter_close_container(&parent, &arr);
+        }
+    }
+
     // ---- 方法面：Accessible / Application / Component / Text / Action / Socket / Properties ----
 
     [[nodiscard]] auto dispatch_node(Msg m, std::uint64_t id, const std::string &iface,
@@ -730,22 +830,12 @@ struct AtspiBridge::Impl {
             return reply_s(m, model.role_name(id));
         }
         if (member == "GetState") {
-            const auto states = model.states(id);
             Iter top{};
             Msg r = reply_begin(m, top);
             if (r == nullptr) {
                 return false;
             }
-            // 上游线格式 = 前置计数 int + 状态数组（libatspi `extract_int_as_guint32` 先读 int，
-            // 且其 `get_state_set` 对缺计数的应答会静默丢状态集 ⇒ 计数必须发）。
-            put_int(L, top, static_cast<std::int32_t>(states.size()));
-            Iter arr{};
-            if (L.iter_open_container(&top, ty_array, "u", &arr) != 0) {
-                for (const std::uint32_t s : states) {
-                    put_uint(L, arr, s);
-                }
-                L.iter_close_container(&top, &arr);
-            }
+            put_state_set(top, model.states(id));
             return reply_end(r);
         }
         if (member == "GetInterfaces") {
@@ -821,7 +911,7 @@ struct AtspiBridge::Impl {
             }
             const AtspiRectI e = model.extents(id, coord);
             if (member == "GetExtents") {
-                return reply_i4(m, e);
+                return reply_i4_struct(m, e);
             }
             if (member == "GetPosition") {
                 Iter top{};
@@ -863,14 +953,9 @@ struct AtspiBridge::Impl {
             return reply_so(m, model.accessible_at_point(id, x, y, coord));
         }
         if (member == "GetLayer") {
-            Iter top{};
-            Msg r = reply_begin(m, top);
-            if (r == nullptr) {
-                return false;
-            }
-            put_int(L, top, 0);  // layer：本增量不建模叠层（申报）；depth
-            put_int(L, top, 0);
-            return reply_end(r);
+            // 2.60 线格式 = 单 uint（客户端 `_atspi_dbus_call(... "=>u", &zlayer)`）；
+            // 本增量不建模叠层（申报），恒 ATSPI_LAYER 0。
+            return reply_u(m, 0);
         }
         if (member == "GrabFocus") {
             // 尽力而为：经动作通道请求获焦（控件不支持即静默；调用本身按成功应答）。
@@ -932,7 +1017,7 @@ struct AtspiBridge::Impl {
             if (L.iter_open_container(&top, ty_array, "(sss)", &arr) != 0) {
                 for (const auto &row : model.actions(id)) {
                     Iter st{};
-                    if (L.iter_open_container(&arr, ty_struct, "sss", &st) != 0) {
+                    if (L.iter_open_container(&arr, ty_struct, nullptr, &st) == 0) {
                         continue;
                     }
                     put_string(L, st, ty_string, row.name);
@@ -1121,7 +1206,7 @@ struct AtspiBridge::Impl {
                         continue;
                     }
                     Iter ent{};
-                    if (L.iter_open_container(&arr, ty_dict, "sv", &ent) != 0) {
+                    if (L.iter_open_container(&arr, ty_dict, nullptr, &ent) == 0) {
                         continue;
                     }
                     put_string(L, ent, ty_string, p);
@@ -1170,7 +1255,7 @@ struct AtspiBridge::Impl {
                 Iter arr{};
                 if (L.iter_open_container(&top, ty_array, "{sv}", &arr) != 0) {
                     Iter ent{};
-                    if (L.iter_open_container(&arr, ty_dict, "sv", &ent) != 0) {
+                    if (L.iter_open_container(&arr, ty_dict, nullptr, &ent) == 0) {
                         return reply_end(r);
                     }
                     put_string(L, ent, ty_string, "version");
@@ -1202,10 +1287,14 @@ struct AtspiBridge::Impl {
             return false;
         }
         Iter rows{};
-        if (L.iter_open_container(&top, ty_array, "(so)(so)(so)iiassusau", &rows) != 0) {
+        // 数组的 contained_signature = **完整元素类型**：行本身是结构体 ⇒ 必须再套一层
+        // 括号 `"((so)...)"`。少包一层时 libdbus 只取首个完整类型 `(so)` 作元素（实测
+        // abort：'a(so)' byte 2 处写 struct）——对照上游 cache-adaptor.c 的
+        // SPI_CACHE_ITEM_SIGNATURE = "(" + "(so)"×3 + "iiassusau" + ")"。
+        if (L.iter_open_container(&top, ty_array, "((so)(so)(so)iiassusau)", &rows) != 0) {
             for (const AtspiCacheRow &row : model.cache_rows()) {
                 Iter st{};
-                if (L.iter_open_container(&rows, ty_struct, "(so)(so)(so)iiassusau", &st) == 0) {
+                if (L.iter_open_container(&rows, ty_struct, nullptr, &st) == 0) {
                     continue;
                 }
                 put_so(L, st, row.self);
@@ -1223,13 +1312,7 @@ struct AtspiBridge::Impl {
                 put_string(L, st, ty_string, row.name);
                 put_uint(L, st, row.role);
                 put_string(L, st, ty_string, row.description);
-                Iter states{};
-                if (L.iter_open_container(&st, ty_array, "u", &states) != 0) {
-                    for (const std::uint32_t s : row.states) {
-                        put_uint(L, states, s);
-                    }
-                    L.iter_close_container(&st, &states);
-                }
+                put_state_set(st, row.states);
                 L.iter_close_container(&rows, &st);
             }
             L.iter_close_container(&top, &rows);

@@ -286,7 +286,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 ### 8.5 无障碍桥接（platform accessibility bridge）
 
-**分层与所有权。** 无障碍能力分三层，公共头零平台污染：语义树（`core/accessibility.h` + `core/a11y_types.h`，平台中立值类型）→ 桥抽象（`core/a11y_provider.h` 的 `a11y::Provider` 接口 + 进程级 `ProviderRegistry`）→ 平台实现（Win32 = `src/aurora/window/detail/win32_ua.{h,cpp}`，随 `AURORA_BACKEND_WIN32` 编入；D3D11 复用同一桥，门控为「平台宏 ∧ 后端宏析取」，与 `win32_cursor.h` 同款）。桥实例由 `Win32Window::Impl` **唯一持有**（`Win32Surface` / `D3D11Surface` / `WgpuSurface` 都转发同一实例），避免两份 `id → Widget*` 映射分裂。
+**分层与所有权。** 无障碍能力分三层，公共头零平台污染：语义树（`core/accessibility.h` + `core/a11y_types.h`，平台中立值类型）→ 桥抽象（`core/a11y_provider.h` 的 `a11y::Provider` 接口 + 进程级 `ProviderRegistry`）→ 平台实现（Win32 = `src/aurora/window/detail/win32_ua.{h,cpp}`，随 `AURORA_BACKEND_WIN32` 编入；D3D11 复用同一桥，门控为「平台宏 ∧ 后端宏析取」，与 `win32_cursor.h` 同款；Linux = AT-SPI2 桥，拆「中立折算 `detail/atspi_protocol.{h,cpp}` + libdbus 传输 `detail/atspi_bridge.{h,cpp}`」两文件，门控为「Linux 平台 ∧（X11 ∨ Wayland）后端析取」，`dlopen("libdbus-1.so.3")` 运行时加载，折算层零 D-Bus 依赖故无头单测可全证其语义）。桥实例由 `Win32Window::Impl` **唯一持有**（`Win32Surface` / `D3D11Surface` / `WgpuSurface` 都转发同一实例），避免两份 `id → Widget*` 映射分裂。
 
 **Surface 扩展点（两处，均有默认空实现）。**
 
@@ -306,6 +306,8 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 `deactivate()` 与 `disconnect_all()` 等价且幂等，并在其中**从 `ProviderRegistry` 注销** —— 缺这一步，进程级事件广播会在已析构的桥上调用 `is_active()`（use-after-free）。
 
 **线程与降级。** 全 main-thread（in-proc provider 由 UIA core 在 UI 线程回调，桥激活时把套间初始化为 STA）；`UIAutomationCore.dll` 运行时 `LoadLibraryA` 动态加载，缺库或函数缺失即整桥降级 no-op + 一次 `Diagnostics::warn`，无链接期依赖。
+
+**Linux 桥差异（AT-SPI2）。** 无 `WM_GETOBJECT` 式「读屏在线才出现」的查询信号，故构造时机改为**首次语义树根注入时一次性尝试**（失败 = 永久降级，不再重试）；建树同步点仍是首个平台查询到达（拉取式不变）。D-Bus 传输 fd 经 `Provider` 侧 `poll_watches()` 并入 X11/Wayland 事件等待的 `poll`，fd 就绪由 `pump()` 读入并派发（单线程、无额外线程）。降级面 = 无会话总线 / `org.a11y.Bus` 不可达 / libdbus 缺失 / `NO_AT_BRIDGE=1`；线格式契约与申报空位见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.4。
 
 ### 8.6 输入法桥接（platform IME bridge）
 

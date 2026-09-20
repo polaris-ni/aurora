@@ -221,6 +221,9 @@ AURORA_TEST_CASE(gpu_wgpu_preference_routing) {
 AURORA_TEST_CASE(wayland_host_gpu_routing_and_frames) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 或宿主宏（WIN32/X11/WAYLAND）未开启");
 }
+AURORA_TEST_CASE(wayland_csd_decoration_replays_into_gpu_frame) {
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 或宿主宏（WIN32/X11/WAYLAND）未开启");
+}
 
 }  // namespace aurora::test_cases::itest_wgpu_present
 

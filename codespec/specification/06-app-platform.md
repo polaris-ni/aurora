@@ -354,6 +354,18 @@ app.set_on_window_state([](au::WindowState s) {
 
 `UIAutomationCore.dll` 运行时动态加载，缺库或必要导出缺失即整桥降级 no-op + 一次 `Diagnostics::warn`（无链接期依赖、无编译期裁剪开关）。
 
+### 6.4 Linux 无障碍桥（AT-SPI2）
+
+**分层与 Win32 UIA 同构**，翻译目标换成 AT-SPI2 D-Bus 协议：语义树快照（平台中立）→ 中立折算层（`src/aurora/window/detail/atspi_protocol.{h,cpp}`：`AtspiModel` 把 `a11y::TreeSnapshot` 投影为 id 寻址的 AT-SPI 对象表，角色/状态/接口/几何/文本偏移全部在此折算，**零 D-Bus 依赖**，无头单测 `utest_atspi_protocol` 全覆盖）→ 传输桥（`src/aurora/window/detail/atspi_bridge.{h,cpp}`：运行时 `dlopen("libdbus-1.so.3")` + 对象注册表 + `Socket.Embed` 握手，实现 `a11y::Provider`）。编译门控 = `AURORA_PLATFORM_LINUX ∧ (AURORA_BACKEND_X11 ∨ AURORA_BACKEND_WAYLAND)`；libdbus 缺失、无会话总线、`org.a11y.Bus` 不可达或 **`NO_AT_BRIDGE=1`**（GNOME 惯例显式免提）⇒ `create()` 恒返回 `nullptr`，整桥静默降级。总线地址可经 **`AT_SPI_BUS_ADDRESS`** 直给（跳过 `org.a11y.Bus.GetAddress` 查询）。
+
+**激活模型与 Win32 不同：宿主侧一次性尝试，而非平台查询驱动。** X11/Wayland 后端没有 `WM_GETOBJECT` 这类「读屏在线才出现」的查询信号（总线订阅对 app 不可见），故桥在**首个 `set_accessibility_root` 注入**时构造（`atspi_attempted` 一次性置位，失败 = 永久降级不再重试）；构造即向注册表 `Embed` 请求挂接。无读屏桌面下代价为一次总线握手 + 惰性方法派发，语义树仍只在首个 AT 查询到达时才构建（`sync_point()` 是方法派发路径上唯一建树点，同 §6.3「拉取式」）。
+
+**帧循环集成。** 桥暴露 `poll_watches()`（libdbus 传输 unix socket fd + 读/写_interest），X11 `wait_events` / Wayland 事件等待把这些 fd 一并 `poll`，fd 就绪即 `pump()` 读入并派发 AT-SPI 方法调用（应答经同一 fd 写出）。单线程 UI 内无额外线程；`pump` 只消化已排队消息（`dispatch` 返回 `DATA_REMAINS` 才继续）。
+
+**线格式契约（libatspi 2.60 客户端实测锁定，WSLg 真机验收）**：状态集 = 恰两枚 uint32 位掩码的 `"au"`（`states[1]<<32|states[0]` 拼合；计数 + 枚举列表会被整集丢弃）；`Component.GetExtents` 应答为结构体 `(iiii)`（`GetPosition`/`GetSize` 平铺）；Action 计数走 `Properties.Get("Action","NActions")`（`"i"`），逐动作 `GetName/GetLocalizedName/GetDescription/GetKeyBinding`（`"i=>s"`）与 `DoAction`（`"i=>b"`）；`Cache.GetItems` 行签名 `a((so)(so)(so)iiassusau)`，数组元素签名须带外层括号。关系集、叠层（`GetLayer` 恒 0）、键绑定、动态播报（`on_announcement`）为**如实申报的空位**，随后续增量补齐。
+
+**拆除**：`on_widget_destroying` 对根置单向拆除门闩（pump 期查询只读旧快照），析构 = deactivate + 关连接，与 §6.3 两条硬不变量对齐。真实总线接线由 `tools/verify/atspi_live_probe.cpp`（目标 `aurora_verify_atspi`）探针把关——外部 libatspi 客户端逐检查项比对，见 [`08-tooling.md`](08-tooling.md) §7.5；宿主生命周期面在 `utest_atspi_bridge` 的 `AURORA_LIVE_ATSPI=1` 选择加入用例中覆盖。
+
 ---
 
 ## 7 定时任务

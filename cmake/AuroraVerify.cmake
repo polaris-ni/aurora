@@ -138,6 +138,15 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_wayland_wgpu)
     endif ()
 
+    # ---- AT-SPI2 无障碍桥（Linux 桌面）：真实 org.a11y.Bus 握手 / 桌面树可见性 /
+    # Cache.GetItems 行格式 / 角色·状态·几何·文本·动作方法面 对上游 libatspi 客户端证明。
+    # 客户端为 python3-gi Atspi 子进程（Accerciser 同栈），父进程帧循环泵桥应答；
+    # DoAction 经桥路由回 Button::on_click 完成跨半程闭环。仅用公共 API，无需 src 私链。
+    if (LINUX AND (AURORA_BACKEND_X11 OR AURORA_BACKEND_WAYLAND))
+        aurora_add_verify_probe(aurora_verify_atspi "${_aurora_verify_dir}/atspi_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_atspi)
+    endif ()
+
     # ---- WASAPI 音频（Windows）：真实设备线程 / 格式协商 / 图时钟 / 出声路径真机核对 ----
     # 自动段核对激活/格式契约/时钟推进/缓冲源与推流通路/suspend-resume；--interactive 出声人工段
     # （扫频/双源混音/设备热切换）。需音频后端编译进库（AURORA_ENABLE_AUDIO=ON）。
