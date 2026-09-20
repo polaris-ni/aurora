@@ -330,6 +330,19 @@ if (AURORA_BACKEND_WAYLAND)
     set(AURORA_WL_PROTOS
             "${AURORA_WL_PROTO_DIR}/stable/xdg-shell/xdg-shell.xml|xdg-shell"
             "${AURORA_WL_PROTO_DIR}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml|xdg-decoration-unstable-v1")
+    # text-input-unstable-v3（客户端输入法：preedit/commit/候选窗定位）来自 wayland-protocols，
+    # 但该 XML 是较晚（≥1.24）才进入协议集，且并非所有发行版都打包它。缺失时不硬失败（否则
+    # 老协议集的整体 Wayland 构建会红）：跳过生成并置 AURORA_HAVE_WL_TEXT_INPUT=0，
+    # 宿主侧 text-input 桥整段降级为 no-op（preedit 仍可由合成器/输入法自带窗体外绘）。
+    set(AURORA_WL_TEXT_INPUT_XML "${AURORA_WL_PROTO_DIR}/unstable/text-input/text-input-unstable-v3.xml")
+    if (EXISTS "${AURORA_WL_TEXT_INPUT_XML}")
+        list(APPEND AURORA_WL_PROTOS "${AURORA_WL_TEXT_INPUT_XML}|text-input-unstable-v3")
+        target_compile_definitions(aurora PUBLIC AURORA_HAVE_WL_TEXT_INPUT=1)
+        aurora_log("Wayland text-input-unstable-v3: 协议 XML 就绪，客户端输入法桥启用")
+    else ()
+        target_compile_definitions(aurora PUBLIC AURORA_HAVE_WL_TEXT_INPUT=0)
+        aurora_log("Wayland text-input-unstable-v3: 协议 XML 缺失（wayland-protocols 过旧？），输入法桥降级 no-op")
+    endif ()
     set(AURORA_WL_GEN_SRCS "")
     foreach (_entry IN LISTS AURORA_WL_PROTOS)
         string(REPLACE "|" ";" _pair "${_entry}")

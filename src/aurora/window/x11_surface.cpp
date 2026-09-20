@@ -36,14 +36,18 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
+#include <string>
 #include <vector>
 
+#include "aurora/core/a11y_text.h"  // a11y::detail::decode_cp（XIM 组合串的码点步进）
 #include "aurora/core/log.h"
 #include "aurora/core/version.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/render/png.h"
 #include "aurora/window/cursor_map.h"
+#include "aurora/window/detail/ime_composition.h"
 #include "aurora/window/keysym_map.h"
 #include "aurora/window/window_state.h"
 
@@ -129,9 +133,26 @@ struct X11Surface::Impl {
     Atom st_fullscreen = 0;
     Atom net_wm_name = 0;
     Atom utf8_string = 0;
-    // 输入法（可选；打开失败时退化为 XLookupString latin1 路径）。
+    // 输入法（XIM，R6 公共头）：`ime_setup()` 协商 XIMPreeditCallbacks 风格（组合事件回推），
+    // IM 不支持则回退 XIMPreeditNothing（仅 commit 经 Xutf8LookupString）；XOpenIM 失败静默，
+    // 仍有 keysym → KeyEvent 路径。
     XIM im = nullptr;
     XIC ic = nullptr;
+    bool ime_cb_style = false;  ///< 协商到 PreeditCallbacks（观测面 + draw 回调仅在 cb 风格下触发）
+    std::string ime_preedit;    ///< 最近 draw 回调的组合串（UTF-8，commit/清空时置空）
+    std::function<Rect()> composition_caret_provider;  ///< 宿主注入的插入点查询（窗口逻辑 dp）
+    int ime_draw_cbs = 0;   ///< preedit draw 回调次数
+    int ime_spot_updates = 0;  ///< XNSpotLocation 实际下发次数（去重后）
+    /// @brief 建立/重建 IM 通道（构造期与首次 FocusIn 各调一次，幂等）：XOpenIM → 风格协商 →
+    /// XCreateIC → 注册 preedit 回调。任一步失败即降级（keysym 路径不受影响）。
+    auto ime_setup() -> void;
+    /// @brief 组合态变化：UTF-8 字节区间折算码点契约上抛 TextCompositionEvent，并同步锚点。
+    auto ime_emit_preedit(const std::string &utf8, int caret, int sel_begin_byte, int sel_end_byte) -> void;
+    /// @brief 把 provider 的插入点盒折算为客户窗口物理 px 写入 XNSpotLocation（变化才发）。
+    auto ime_update_spot() -> void;
+    XPoint ime_last_spot{};   ///< 上次下发的锚点（去重）
+    bool ime_spot_valid = false;
+    bool ime_focused = false;  ///< XSetICFocus 已发且未 XUnsetICFocus（观测面）
     // 自唤醒管道（request_wake → wait_events poll 立即返回）。
     int wake_fd[2] = {-1, -1};
     // AT-SPI2 无障碍桥（宿主惰性构造：首次 set_accessibility_root 时尝试连接 a11y 总线；
@@ -251,6 +272,212 @@ auto X11Surface::Impl::query_mode() -> WindowMode {
     return m;
 }
 
+// =============================================================================
+// XIM 输入法桥（R6 公共头，零新增依赖）
+// =============================================================================
+
+namespace {
+
+/// @brief XIMFeedback 位 → 是否属「目标段」（下划线/三类插入点皆视为高亮中的组合段，与
+/// Wayland preedit 高亮段及 Win32 GCS_COMPATTR 目标段口径一致）。
+constexpr auto ime_feedback_is_target(int fb) -> bool {
+    constexpr int kBits = XIMUnderline | XIMPrimary | XIMSecondary | XIMTertiary;
+    return (fb & kBits) != 0;
+}
+
+/// @brief XIMText（multi_byte 或 wide_char）→ UTF-8 串 + 逐码点反馈位。
+/// 宽字符路经 wcstombs 走进程 UTF-8 locale（构造期 setlocale(LC_CTYPE, "") 已保证）。
+/// 反馈数组按 XIM 惯例与「字符」（此处即码点）一一对应。
+auto xim_text_to_utf8(const XIMText *t, std::vector<int> &feedback) -> std::string {
+    std::string out;
+    feedback.clear();
+    if (t == nullptr || t->length == 0U) {
+        return out;
+    }
+    if (t->encoding_is_wchar != 0) {
+        const wchar_t *const w = t->string.wide_char;
+        std::vector<wchar_t> src(w, w + t->length);  // 拷贝一份保证 NUL 终止（wcstombs 读入参）
+        src.push_back(L'\0');
+        std::vector<char> tmp(src.size() * 4U + 1U, '\0');
+        const std::size_t conv = std::wcstombs(tmp.data(), src.data(), tmp.size() - 1U);  // NOLINT(mt-unsafe)
+        if (conv != static_cast<std::size_t>(-1)) {
+            out.assign(tmp.data(), conv);
+        }  // 非法序列：留空串（宁可不显示也不吐半截字节）
+    } else {
+        out.assign(t->string.multi_byte, static_cast<std::size_t>(t->length));
+    }
+    if (t->feedback != nullptr) {
+        for (unsigned short i = 0; i < t->length; ++i) {
+            // NOLINTNEXTLINE(*-pro-bounds-pointer-arithmetic)
+            feedback.push_back(static_cast<int>(t->feedback[i]));
+        }
+    }
+    return out;
+}
+
+/// @brief UTF-8 串 → 逐码点起始字节偏移表（含尾哨兵，长度 = 码点数 + 1）。
+auto ime_cp_offsets(const std::string &utf8) -> std::vector<std::size_t> {
+    std::vector<std::size_t> offs;
+    offs.push_back(0);
+    std::size_t i = 0;
+    while (i < utf8.size()) {
+        const auto [cp, len] = a11y::detail::decode_cp(utf8, i);
+        (void)cp;
+        i += (len == 0) ? 1 : len;
+        offs.push_back(i);
+    }
+    return offs;
+}
+
+/// @brief XNPreeditDrawCallback 跳板：XIMText → UTF-8 + 首个连续目标码点段（无反馈数组时
+/// 全串标为目标段——ibus-x11 常不带 feedback）→ 字节区间交 Impl 折算码点契约。
+/// R6 draw 无 action 枚举，全串重发即现状；空 text/零长 = 组合取消。
+/// 签名按 XICProc（Bool 返回，值无实义——Xlib 契约对 draw 回调返回值不检查）。
+auto ime_preedit_draw(XIC /*ic*/, XPointer cd, XIMPreeditDrawCallbackStruct *r) -> int {
+    auto &d = *reinterpret_cast<X11Surface::Impl *>(cd);  // NOLINT(*-pro-type-reinterpret-cast)
+    ++d.ime_draw_cbs;
+    std::vector<int> fb;
+    const std::string utf8 = (r != nullptr) ? xim_text_to_utf8(r->text, fb) : std::string{};
+    const std::vector<std::size_t> offs = ime_cp_offsets(utf8);
+    const std::size_t cps = offs.size() - 1U;
+    std::size_t begin = std::string::npos;
+    std::size_t end = 0;
+    for (std::size_t c = 0; c < cps && begin == std::string::npos; ++c) {
+        if (!ime_feedback_is_target(c < fb.size() ? fb[c] : 0)) {
+            continue;
+        }
+        begin = c;
+        end = c + 1;
+        while (end < cps && ime_feedback_is_target(end < fb.size() ? fb[end] : 0)) {
+            ++end;
+        }
+    }
+    if (fb.empty() && cps > 0) {
+        begin = 0;
+        end = cps;
+    }
+    const int sel_begin = (begin == std::string::npos) ? -1 : static_cast<int>(offs[begin]);
+    const int sel_end = (begin == std::string::npos) ? -1 : static_cast<int>(offs[end]);
+    d.ime_emit_preedit(utf8, (r != nullptr) ? r->caret : -1, sel_begin, sel_end);
+    return True;
+}
+
+/// @brief XNPreeditCaretCallback 跳板：IM 请求移动组合光标——以现串 + 新位重发并全量接受。
+/// @return True = 接受移动（本端无横向滚动，恒接受；False 会让 IM 停在原位）。
+auto ime_preedit_caret(XIC /*ic*/, XPointer cd, XIMPreeditCaretCallbackStruct *r) -> int {
+    auto &d = *reinterpret_cast<X11Surface::Impl *>(cd);  // NOLINT(*-pro-type-reinterpret-cast)
+    d.ime_emit_preedit(d.ime_preedit, (r != nullptr) ? r->position : -1, -1, -1);
+    return True;
+}
+
+}  // namespace
+
+/// @brief 建立/重建 IM 通道（幂等）：XOpenIM → XNQueryInputStyle 协商 → XCreateIC →
+/// 注册 preedit 回调。任一步失败逐级降级：cb 风格不可用回退 PreeditNothing（commit 仍可经
+/// Xutf8LookupString 到达），XOpenIM 失败则整桥缺席（keysym 路径不受影响）。
+/// 构造期与首次 FocusIn 各调一次——XMODIFIERS/IM 服务器晚就绪是 Linux 桌面常态。
+auto X11Surface::Impl::ime_setup() -> void {
+    if (dpy == nullptr || win == 0) {
+        return;
+    }
+    if (im == nullptr) {
+        im = XOpenIM(dpy, nullptr, nullptr, nullptr);
+        if (im == nullptr) {
+            return;  // 无 XIM 服务器（XMODIFIERS 未设/IM 未起）：静默降级
+        }
+    }
+    if (ic != nullptr) {
+        return;  // 已建过：不重协商（XIM 属性变更须重建，属运维路径而非运行期路径）
+    }
+    // 协商输入风格：只有 IM 广告 XIMPreeditCallbacks 才走全事件路（draw/caret 回推）。
+    // XGetIMValues 契约：成功返回 NULL（输出参数有效），失败返回错误字符串。
+    bool cb_style = false;
+    if (XIMStyles *styles = nullptr; XGetIMValues(im, XNQueryInputStyle, &styles, nullptr) == nullptr) {
+        if (styles != nullptr) {
+            // NOLINTBEGIN(*-pro-bounds-pointer-arithmetic)
+            for (int i = 0; i < styles->count_styles; ++i) {
+                if (styles->supported_styles[i] == static_cast<unsigned long>(XIMPreeditCallbacks | XIMStatusNothing)) {
+                    cb_style = true;
+                }
+            }
+            // NOLINTEND(*-pro-bounds-pointer-arithmetic)
+            XFree(styles);
+        }
+    } else if (styles != nullptr) {
+        XFree(styles);  // 失败路径按惯例仍可能带回顾句柄，不留悬挂
+    }
+    const unsigned long style =
+        cb_style ? static_cast<unsigned long>(XIMPreeditCallbacks | XIMStatusNothing)
+                 : static_cast<unsigned long>(XIMPreeditNothing | XIMStatusNothing);
+    ic = XCreateIC(im, XNInputStyle, style, XNClientWindow, win, nullptr);
+    if (ic == nullptr) {
+        return;  // IM 掉线等极端场景：留 im 句柄，下次 FocusIn 再试
+    }
+    ime_cb_style = cb_style;
+    if (cb_style) {
+        // 回调经嵌套属性挂 XNPreeditAttributes（Xlib R6 固定形态）；嵌套列表由 Xlib 分配、
+        // XFree 释放。draw 是 void 返回、caret 是 Bool 返回，均按 XICProc 形态注册（Xlib 的
+        // XICCallback 联合式分发契约）。client_data 直接指向本 Impl：回调全在事件派发栈内
+        // 同步触发，生命周期无忧。
+        XICCallback draw{};
+        draw.client_data = reinterpret_cast<XPointer>(this);  // NOLINT(*-pro-type-reinterpret-cast)
+        // Xlib 把一切 IC 回调统一擦成 XICProc（第三参 XPointer），XIM 规范即要求此形态转换
+        // （Qt/GTK 同款），派发时按注册名还原真实结构体指针。
+        draw.callback = reinterpret_cast<XICProc>(ime_preedit_draw);     // NOLINT(*-pro-type-reinterpret-cast)
+        XICCallback caret{};
+        caret.client_data = draw.client_data;
+        caret.callback = reinterpret_cast<XICProc>(ime_preedit_caret);   // NOLINT(*-pro-type-reinterpret-cast)
+        if (XVaNestedList nested =
+                XVaCreateNestedList(0, XNPreeditDrawCallback, &draw, XNPreeditCaretCallback, &caret, nullptr);
+            nested != nullptr) {
+            XSetICValues(ic, XNPreeditAttributes, nested, nullptr);
+            XFree(nested);
+        }
+    }
+    // 焦点补偿：XIC 建于映射之后时 WM 的 FocusIn 已错过（XIM 惯例，Qt/GTK 同款兜底）。
+    if (active) {
+        XSetICFocus(ic);
+        ime_focused = true;
+    }
+}
+
+/// @brief 组合态变化的统一出口：UTF-8 字节下标 → 码点契约（ime_composition 纯函数）上抛，
+/// 并同步候选窗锚点。caret < 0（XIM caret=-1 隐藏/未知）按「串尾」折算；无选区传 -1/-1。
+auto X11Surface::Impl::ime_emit_preedit(const std::string &utf8, int caret, int sel_begin_byte,
+                                        int sel_end_byte) -> void {
+    const bool was_composing = !ime_preedit.empty();
+    ime_preedit = utf8;
+    if (handler) {
+        TextCompositionEvent e = ime::make_preedit_state_utf8(utf8, caret, sel_begin_byte, sel_end_byte);
+        handler(e);
+    }
+    // 锚点只在组合期有意义（空串=取消，无须再摆候选窗）；provider 未接线的裸窗口路径自动跳过。
+    if (!utf8.empty() || was_composing) {
+        ime_update_spot();
+    }
+}
+
+/// @brief 插入点盒（窗口逻辑 dp，y 向下）→ 客户窗口物理 px 写 XNSpotLocation；盒未变则去重。
+auto X11Surface::Impl::ime_update_spot() -> void {
+    if (ic == nullptr || !composition_caret_provider) {
+        return;
+    }
+    const Rect box = composition_caret_provider();
+    XPoint pt{};
+    pt.x = static_cast<short>(std::lround(box.origin.x * scale));
+    pt.y = static_cast<short>(std::lround((box.origin.y + box.size.height) * scale));  // 候选窗落在组合串下方
+    if (ime_spot_valid && pt.x == ime_last_spot.x && pt.y == ime_last_spot.y) {
+        return;
+    }
+    ime_last_spot = pt;
+    ime_spot_valid = true;
+    if (XVaNestedList nested = XVaCreateNestedList(0, XNSpotLocation, &pt, nullptr); nested != nullptr) {
+        XSetICValues(ic, XNPreeditAttributes, nested, nullptr);
+        XFree(nested);
+        ++ime_spot_updates;
+    }
+}
+
 X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyleOptions &style)
     : impl_(std::make_unique<Impl>()) {
     Impl &d = *impl_;
@@ -351,11 +578,8 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
     }
     // 可检测自动重复：按住键仅收重复 KeyPress，不再收伪 KeyRelease（免抖动过滤）。
     XkbSetDetectableAutoRepeat(d.dpy, 1, nullptr);
-    // 输入法（可选）：失败静默，仍有 keysym → KeyEvent 路径。
-    d.im = XOpenIM(d.dpy, nullptr, nullptr, nullptr);
-    if (d.im != nullptr) {
-        d.ic = XCreateIC(d.im, XNInputStyle, XIMPreeditNothing | XIMStatusNothing, XNClientWindow, d.win, nullptr);
-    }
+    // 输入法桥（XIM）：协商 PreeditCallbacks 风格并注册回调；失败逐级降级（见 ime_setup）。
+    // XMapWindow 之后才建 IC（XNClientWindow 需已映射窗口收 compose 事件——XIM 惯例）。
     // 自唤醒管道（非阻塞 + CLOEXEC）：request_wake 线程安全写端。
     if (pipe2(d.wake_fd, O_NONBLOCK | O_CLOEXEC) != 0) {
         d.wake_fd[0] = d.wake_fd[1] = -1;
@@ -368,6 +592,7 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
     d.gc = XCreateGC(d.dpy, d.win, 0, nullptr);
     XMapWindow(d.dpy, d.win);
     XFlush(d.dpy);
+    d.ime_setup();
     d.size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // NOLINT(*-narrowing-conversions)
 }
 
@@ -378,12 +603,16 @@ X11Surface::~X11Surface() {
     window_state_handler_ = nullptr;
     window_mode_handler_ = nullptr;
     present_request_ = nullptr;
+    d.composition_caret_provider = nullptr;  // 捕获宿主 this 的回调：销毁前解绑（同 Win32 桥纪律）
     if (d.ximage != nullptr) {
         d.ximage->data = nullptr;  // 缓冲由 vector 持有，不得让 XDestroyImage free
         XDestroyImage(d.ximage);
     }
     if (d.dpy != nullptr) {
         if (d.ic != nullptr) {
+            if (d.ime_focused) {
+                XUnsetICFocus(d.ic);  // 先失焦再销毁：IM 侧组合状态随之释放，不留悬挂回调
+            }
             XDestroyIC(d.ic);
         }
         if (d.im != nullptr) {
@@ -644,6 +873,23 @@ auto X11Surface::set_present_dirty(const std::vector<Rect> &device_rects) -> voi
 
 auto X11Surface::set_event_handler(const EventHandler &h) -> void { impl_->handler = h; }
 
+auto X11Surface::set_composition_caret_provider(std::function<Rect()> provider) -> void {
+    impl_->composition_caret_provider = std::move(provider);
+}
+
+auto X11Surface::ime_state() const -> ImeState {
+    const Impl &d = *impl_;
+    ImeState s;
+    s.im_open = (d.im != nullptr);
+    s.ic_created = (d.ic != nullptr);
+    s.preedit_callbacks = d.ime_cb_style;
+    s.focused = d.ime_focused;
+    s.preedit = d.ime_preedit;
+    s.draw_callbacks = d.ime_draw_cbs;
+    s.spot_updates = d.ime_spot_updates;
+    return s;
+}
+
 auto X11Surface::set_title(const std::string &title) -> void {
     Impl &d = *impl_;
     if (d.dpy != nullptr && d.win != 0) {
@@ -822,9 +1068,18 @@ auto X11Surface::poll_platform_events() -> void {
                 // 可打印文本 → TextInputEvent；控制字符（回车/退格/Esc…）交给 KeyEvent。
                 if (d.handler && len > 0 &&
                     (len != 1 || (static_cast<unsigned char>(text[0]) >= 0x20 && text[0] != 0x7F))) {
-                    TextInputEvent te;
-                    te.text.assign(text, static_cast<std::size_t>(len));
-                    d.handler(te);
+                    if (d.ime_cb_style && !d.ime_preedit.empty()) {
+                        // PreeditCallbacks 风格下的 IM 提交串：与 Win32/Wayland 桥同走组合
+                        // committed 通道（widget 侧同一条落字路径，preedit 随之清空）。
+                        TextCompositionEvent ce;
+                        ce.committed.assign(text, static_cast<std::size_t>(len));
+                        d.ime_preedit.clear();
+                        d.handler(ce);
+                    } else {
+                        TextInputEvent te;
+                        te.text.assign(text, static_cast<std::size_t>(len));
+                        d.handler(te);
+                    }
                 }
                 break;
             }
@@ -880,10 +1135,23 @@ auto X11Surface::poll_platform_events() -> void {
             case FocusIn:
                 d.active = true;
                 update_state();
+                // IM 焦点绑定（XSetICFocus 缺口修复）：不宣告则 IM 永不把组合事件路由进本 IC，
+                // preedit 回调与 commit 都收不到。IC 晚建（IM 服务器迟就绪）时在此补建。
+                if (d.ic == nullptr) {
+                    d.ime_setup();
+                }
+                if (d.ic != nullptr) {
+                    XSetICFocus(d.ic);
+                    d.ime_focused = true;
+                }
                 break;
             case FocusOut:
                 d.active = false;
                 update_state();
+                if (d.ic != nullptr) {
+                    XUnsetICFocus(d.ic);
+                    d.ime_focused = false;
+                }
                 break;
             case MapNotify:
                 d.minimized = false;

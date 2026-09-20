@@ -78,7 +78,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 典型序列（微软拼音输入「你好」）：`preedit="nihao",cursor=5` → `preedit="你好",cursor=2,sel=[0,2)` → `preedit="",committed="你好"`。
 
-**候选窗定位**：输入法候选列表必须落在插入点旁，而非屏幕左上角。控件侧钩子为 `Widget::composition_caret_bounds()`（`widget/widget.h`，默认返回 `focus_bounds_`，即自身焦点框；文本控件覆写为 **preedit 光标处的零宽竖盒**），宿主经 `Surface::set_composition_caret_provider()`（`window/surface.h`）把它交给后端，桥内按 DPI 缩放换算成像素并 `ClientToScreen`。该盒坐标为**窗口逻辑 dp**。
+**候选窗定位**：输入法候选列表必须落在插入点旁，而非屏幕左上角。控件侧钩子为 `Widget::composition_caret_bounds()`（`widget/widget.h`，默认返回 `focus_bounds_`，即自身焦点框；文本控件覆写为 **preedit 光标处的零宽竖盒**），宿主经 `Surface::set_composition_caret_provider()`（`window/surface.h`）把它交给后端，桥内按 DPI 缩放换算成像素并映射到平台坐标系（Win32：`ClientToScreen`；X11：客户窗物理 px 写 `XNSpotLocation`；Wayland：表面本地物理 px 经 `set_cursor_rectangle`）。该盒坐标为**窗口逻辑 dp**。
 
 > ⚠️ `composition_caret_bounds()` 的返回值在**首帧绘制之后**才有效——`focus_bounds_` 由 `Widget::paint` 写入（控件无几何缓存，见 §2.3）。空树/未绘制时返回退化矩形，后端据此退化为「不移动候选窗」。
 
@@ -86,11 +86,13 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 | 后端 | 状态 |
 |:---|:---|
-| `Win32Surface`（GDI）/ `D3D11Surface` | ✅ **IMM32 首桥已接**（`src/aurora/window/detail/win32_ime.h`）。二者共用同一 `Win32Window` 宿主与同一份桥，故一条路径覆盖两路 |
+| `Win32Surface`（GDI）/ `D3D11Surface` | ✅ **IMM32 桥已接**（`src/aurora/window/detail/win32_ime.h`）。二者共用同一 `Win32Window` 宿主与同一份桥，故一条路径覆盖两路 |
+| `X11Surface` | ✅ **XIM 桥已接**（`src/aurora/window/x11_surface.cpp` 内联）：`XIMPreeditCallbacks` 风格协商 + draw/caret 回调回推，PreeditNothing 逐级降级 |
+| `WaylandSurface` | ✅ **text-input-unstable-v3 桥已接**（`src/aurora/window/wayland_surface.cpp` 内联，门 `AURORA_HAVE_WL_TEXT_INPUT`）：enable 判据 = 焦点 ∧ provider 非零盒；组合内容/上屏/回删全部折算成契约事件 |
 | `HeadlessSurface` | 无输入法概念；组合事件由测试直接构造并派发（`tests/unit/utest_ime_composition.cpp`） |
-| GLFW / X11 / Wayland / Wasm / macOS | ⬜ **契约级**：事件与控件侧行为已完备，缺平台桥（X11 IMClient / Wayland text-input-v3 + IBus/Fcitx、macOS `NSTextInputClient`、Wasm DOM `composition*`）。须有真实桌面/浏览器输入法环境后补，无头 CI 无法完成 |
+| GLFW / Wasm / macOS | ⬜ **契约级**：事件与控件侧行为已完备，缺平台桥（macOS `NSTextInputClient`、Wasm DOM `composition*`）。须有真实桌面/浏览器输入法环境后补，无头 CI 无法完成 |
 
-Win32 侧的取舍与实现细节（IMM32 而非 TSF、`WM_IME_*` 认领集、`WM_IME_CHAR` 吞字纪律）见 `specification/06-app-platform.md`；真机验收见 `tools/verify/win32_ime_live_probe.cpp`。
+各平台的取舍与实现细节（IMM32 而非 TSF、`WM_IME_CHAR` 吞字纪律、XIM 风格协商与溢出取字、v3 enable 判据与去重）见 [`06-app-platform.md`](06-app-platform.md) §8.5；真机验收见 `tools/verify/win32_ime_live_probe.cpp` / `x11_ime_live_probe.cpp` / `wayland_ime_live_probe.cpp`。
 
 ---
 

@@ -59,6 +59,14 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_x11_cursor)
     endif ()
 
+    # ---- X11 XIM 输入法桥（风格协商 / PreeditCallbacks 回调 / IC 焦点宣告 / 候选窗锚点）----
+    # 自动段验收协商与焦点接线（不要求本机装输入法；无 XIM 服务器按合法降级 SKIP）；
+    # preedit/上屏内容段交 --interactive 人工（需真实 XIM 进程驱动组合）。
+    if (AURORA_BACKEND_X11)
+        aurora_add_verify_probe(aurora_verify_x11_ime "${_aurora_verify_dir}/x11_ime_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_x11_ime)
+    endif ()
+
     # ---- Win32 家族光标（GDI 上屏 / D3D11 GPU 上屏共用 Win32Window 宿主）：GetCursorInfo 读回 ----
     if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
         aurora_add_verify_probe(aurora_verify_win32_cursor "${_aurora_verify_dir}/win32_cursor_live_probe.cpp")
@@ -128,6 +136,15 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     if (AURORA_BACKEND_WAYLAND)
         aurora_add_verify_probe(aurora_verify_wayland_cursor "${_aurora_verify_dir}/wayland_cursor_live_probe.cpp")
         list(APPEND _aurora_verify_targets aurora_verify_wayland_cursor)
+    endif ()
+
+    # ---- Wayland text-input-unstable-v3 输入法桥（manager 绑定 / enter-enable 判据 / 组合事件）----
+    # 合成器未发布 v3（WSLg Weston 常态）时自动段验收「优雅降级」；manager 在场时逐条断言
+    # enable/disable/去重。preedit/上屏内容段交 --interactive（需合成器侧输入法进程）。
+    # 依赖构建期代码生成门 AURORA_HAVE_WL_TEXT_INPUT（wayland-protocols 的 v3 XML）。
+    if (AURORA_BACKEND_WAYLAND)
+        aurora_add_verify_probe(aurora_verify_wayland_ime "${_aurora_verify_dir}/wayland_ime_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_wayland_ime)
     endif ()
 
     # ---- Wayland wgpu GPU 栅格（Linux 真实窗口 + 离屏直驱，WSLg Weston 可验）：与 X11 探针同段

@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/window/wayland_surface.h
-/// 测试说明: Wayland 后端类型契约 skip 桩 + 真机选择加入的光标提交断言
-/// （AURORA_LIVE_WAYLAND=1）——头整体被
+/// 测试说明: Wayland 后端类型契约 skip 桩 + 真机选择加入的光标提交断言与 text-input-v3 桥
+/// 观测面断言（AURORA_LIVE_WAYLAND=1）——头整体被
 /// AURORA_PLATFORM_LINUX && !AURORA_PLATFORM_ANDROID && AURORA_BACKEND_WAYLAND 门控，非 Linux 平台无法编译
 
 #include <chrono>
@@ -110,6 +110,66 @@ AURORA_TEST_CASE(wayland_surface_live_cursor_commit_sweep) {
     // 光标下发不得影响窗口自身可用性（协议错误会直接断链）。
     AURORA_TEST_CHECK_TRUE(surface.size().width > 0.0F);
     surface.set_title("aurora-live-wayland-cursor");
+    AURORA_TEST_CHECK_FALSE(surface.should_close());
+#else
+    AURORA_TEST_SKIP("Wayland 后端仅在 Linux + AURORA_BACKEND_WAYLAND 下编译，当前平台未开启");
+#endif
+}
+
+AURORA_TEST_CASE(wayland_surface_live_text_input_bridge_invariants) {
+#if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_WAYLAND)
+    const char *opt_in = std::getenv("AURORA_LIVE_WAYLAND");
+    if (opt_in == nullptr || *opt_in == '\0') {
+        AURORA_TEST_SKIP("需显式置 AURORA_LIVE_WAYLAND=1：本用例会连接真实合成器并创建真实窗口");
+    }
+
+    aurora::WaylandSurface surface(320, 240, "aurora-live-wayland-ime");
+    AURORA_TEST_REQUIRE_TRUE(surface.is_available());
+    AURORA_TEST_CHECK(static_cast<bool>(surface.begin_frame(320, 240)));
+    AURORA_TEST_CHECK(static_cast<bool>(surface.present()));
+    // 泵一段全局/能力事件（registry global 与 seat 能力在连接建立后陆续到达）。
+    for (int i = 0; i < 15; ++i) {
+        surface.poll_platform_events();
+        surface.wait_events(20.0);
+    }
+
+    auto st = surface.text_input_state();
+    if (st.protocol_disabled) {
+        AURORA_TEST_SKIP("本次构建缺 text-input-unstable-v3 XML（AURORA_HAVE_WL_TEXT_INPUT=0）⇒ 桥未编译");
+    }
+    // 一致性不变量：input 只能来自 manager 绑定，enable 只能发生在本端已建 input 之后。
+    AURORA_TEST_CHECK(!(st.input_created && !st.manager_bound));
+    AURORA_TEST_CHECK(!(st.enabled && !st.input_created));
+
+    surface.set_composition_caret_provider([] {
+        return aurora::Rect{aurora::Point{24.0F, 40.0F}, aurora::Size{6.0F, 16.0F}};
+    });
+    for (int i = 0; i < 10; ++i) {  // present 内含 IME 状态刷新
+        (void)surface.begin_frame(320, 240);
+        (void)surface.present();
+        surface.poll_platform_events();
+    }
+    st = surface.text_input_state();
+    if (!st.manager_bound) {
+        // WSLg Weston 常态：合成器不发布 v3 ⇒ 桥必须零请求且不影响连接健康。
+        AURORA_TEST_CHECK(!st.input_created && !st.enabled && st.commits == 0);
+        AURORA_TEST_CHECK_FALSE(surface.should_close());
+        AURORA_TEST_SKIP("合成器未发布 text-input-v3 ⇒ enable 判据段无从驱动（完整验收见 "
+                         "aurora_verify_wayland_ime 探针）");
+    }
+    AURORA_TEST_CHECK_TRUE(st.input_created);  // seat 键盘能力到达即建 input 对象
+    if (!st.entered) {
+        AURORA_TEST_SKIP("未取得 text_input.enter（键盘焦点未落入本表面）⇒ enable 判据交探针/人工");
+    }
+    // enable 判据：entered + 非零盒 ⇒ enabled；归零盒 ⇒ disable；再非零 ⇒ 可逆重启用。
+    AURORA_TEST_CHECK_TRUE(surface.text_input_state().enabled);
+    const int commits_enabled = surface.text_input_state().commits;
+    (void)surface.begin_frame(320, 240);
+    (void)surface.present();
+    AURORA_TEST_CHECK_EQ(surface.text_input_state().commits, commits_enabled);  // 同状态去重
+    surface.set_composition_caret_provider([] { return aurora::Rect{}; });
+    surface.poll_platform_events();
+    AURORA_TEST_CHECK_FALSE(surface.text_input_state().enabled);
     AURORA_TEST_CHECK_FALSE(surface.should_close());
 #else
     AURORA_TEST_SKIP("Wayland 后端仅在 Linux + AURORA_BACKEND_WAYLAND 下编译，当前平台未开启");

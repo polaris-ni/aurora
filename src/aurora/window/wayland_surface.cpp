@@ -18,7 +18,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 #include "aurora/core/log.h"
@@ -27,12 +29,19 @@
 #include "aurora/event/keycode.h"
 #include "aurora/window/cursor_map.h"
 #include "aurora/window/detail/atspi_bridge.h"
+#include "aurora/window/detail/ime_composition.h"
 #include "aurora/window/detail/title_bar_painter.h"
 #include "aurora/window/keysym_map.h"
 #include "aurora/window/swizzle.h"
 #include "aurora/window/window_state.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
+
+// text-input-unstable-v3 胶水由 CMake 在协议 XML 存在时代码生成并置宏（见 AuroraBackends.cmake）；
+// 缺 XML/老 distro 编译期退化为「无 IME 桥」，其余 Wayland 功能不受影响。
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+#include "text-input-unstable-v3-client-protocol.h"
+#endif
 
 namespace aurora {
 namespace {
@@ -54,6 +63,11 @@ struct WaylandSurface::Impl {
     wl_seat *seat = nullptr;
     xdg_wm_base *wm_base = nullptr;
     zxdg_decoration_manager_v1 *deco_mgr = nullptr;
+    // text-input 桥整体随代码生成宏进出：宏未置（协议 XML 缺失）时以下字段与桥方法都不存在。
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+    // 输入管理器全局（text-input-unstable-v3；合成器未发布则恒 nullptr，IME 桥整体优雅缺席）。
+    zwp_text_input_manager_v3 *text_input_mgr = nullptr;
+#endif
     // 窗口壳。
     wl_surface *surface = nullptr;
     xdg_surface *xsurface = nullptr;
@@ -156,6 +170,37 @@ struct WaylandSurface::Impl {
     int cursor_image_count = 0;  ///< 动画帧数（>1 = 动画光标，本端只取首帧）。
     int cursor_commits = 0;  ///< cursor 表面 commit 次数（观测面：证明「确有提交」且同形状幂等）。
     bool cursor_theme_warned = false;  ///< 主题/名字彻底缺失只 WARN 一次（不在悬停热路径刷屏）。
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+    // ---- 输入法桥（text-input-unstable-v3）----
+    // 与 X11 XIM / Win32 IME 的「服务端拥有输入」不同，v3 的输入焦点由客户端**声明**：
+    // 每帧 present 拉取 caret provider（非零盒 = 焦点在文本控件）决定 enable/disable，
+    // 组合/上屏事件由合成器侧输入法经 preedit_string/commit_string 回推。
+    zwp_text_input_v3 *text_input = nullptr;  ///< 本 seat 的 text-input 对象（keyboard 能力首现时创建）。
+    bool ti_entered = false;  ///< 收到过 enter（本表面持键盘输入焦点）。
+    bool ti_ime_wanted = false;  ///< 键盘输入焦点在本表面（wl_keyboard 与 text-input 任一 leave 即 false：此刻 provider 仍报非零盒，须强制 disable）。
+    bool ti_enabled = false;  ///< 当前 enable 态（与 provider 判据同步去重）。
+    std::string ti_preedit;  ///< 最近 preedit_string 原文（观测面 + leave 时清空）。
+    Rect ti_last_caret{};  ///< 上次 set_cursor_rectangle 的盒（逻辑 dp，去重用）。
+    int ti_commits = 0;  ///< 客户端 commit 轮次（观测面）。
+    int ti_delete_requests = 0;  ///< delete_surrounding_text 折算事件数（观测面）。
+    std::function<Rect()> composition_caret_provider;  ///< 宿主注入的插入点查询（窗口逻辑 dp）。
+
+    /// @brief 依 provider 判据同步 enable/disable 态并发出客户端 commit（每组状态变更批量生效一次）。
+    auto ti_refresh_enable() -> void;
+    /// @brief 拉取插入点盒 → `set_cursor_rectangle`（表面本地物理 px；盒变化才发）。
+    auto ti_update_cursor_rect() -> void;
+    /// @brief text-input.enter：记entered，立即补发内容类型并刷新 enable 判据。
+    auto ti_on_enter() -> void;
+    /// @brief text-input.leave：输入焦点易主——清组合态、置不可用（v3 要求重入后全量重发）。
+    auto ti_on_leave() -> void;
+    /// @brief preedit_string：UTF-8 字节下标折算码点契约后经 handler 上抛组合事件。
+    auto ti_on_preedit(const char *text, std::int32_t begin, std::int32_t end) -> void;
+    /// @brief commit_string：上屏串经组合事件的 committed 通道落字（与 Win32 桥同一收敛路径）。
+    auto ti_on_commit(const char *text) -> void;
+    /// @brief delete_surrounding_text：折算为 Left×n + Backspace×m + Right×k 键事件（本端不回传
+    /// surrounding text，恒为空上下文，n/k 实际恒 0，m 即整段删除）。
+    auto ti_on_delete(std::uint32_t before_length, std::uint32_t after_length) -> void;
+#endif
     // 双击标题栏最大化检测（Wayland 不提供双击事件，客户端自行追踪）。
     std::uint32_t last_click_time = 0;  ///< 上次标题栏点击时间（ms，自某基准）
     double last_click_x = 0.0;  ///< 上次点击 X
@@ -542,12 +587,22 @@ void kb_enter(void *data, wl_keyboard * /*k*/, std::uint32_t /*serial*/, wl_surf
     Impl &d = *static_cast<Impl *>(data);
     d.active = true;
     d.update_state();
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+    d.ti_ime_wanted = true;  // 键盘焦点回到本表面：立刻按 provider 判据恢复 enable（不等下一帧）
+    d.ti_refresh_enable();
+#endif
 }
 
 void kb_leave(void *data, wl_keyboard * /*k*/, std::uint32_t /*serial*/, wl_surface * /*s*/) {
     Impl &d = *static_cast<Impl *>(data);
     d.active = false;
     d.update_state();
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+    // 键盘输入焦点易主：显式 disable，否则输入法组合仍会打进本表面（v3 焦点由客户端声明）；
+    // 此刻上层焦点未变、provider 仍报非零盒，故必须先翻 ti_ime_wanted 再刷新。
+    d.ti_ime_wanted = false;
+    d.ti_refresh_enable();
+#endif
 }
 
 void kb_key(void *data, wl_keyboard * /*k*/, std::uint32_t /*serial*/, std::uint32_t /*time*/, std::uint32_t key,
@@ -566,6 +621,37 @@ void kb_repeat(void * /*data*/, wl_keyboard * /*k*/, std::int32_t /*rate*/, std:
 }
 
 constexpr wl_keyboard_listener KEYBOARD_LISTENER = {kb_keymap, kb_enter, kb_leave, kb_key, kb_modifiers, kb_repeat};
+
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+// ---- zwp_text_input_v3：输入法组合通道（enter/leave/preedit/commit/delete/done）。 ----
+void ti_enter(void *data, zwp_text_input_v3 * /*ti*/, wl_surface * /*s*/) {
+    static_cast<Impl *>(data)->ti_on_enter();
+}
+
+void ti_leave(void *data, zwp_text_input_v3 * /*ti*/, wl_surface * /*s*/) {
+    static_cast<Impl *>(data)->ti_on_leave();
+}
+
+void ti_preedit(void *data, zwp_text_input_v3 * /*ti*/, const char *text, std::int32_t begin, std::int32_t end) {
+    static_cast<Impl *>(data)->ti_on_preedit(text, begin, end);
+}
+
+void ti_commit(void *data, zwp_text_input_v3 * /*ti*/, const char *text) {
+    static_cast<Impl *>(data)->ti_on_commit(text);
+}
+
+void ti_delete(void *data, zwp_text_input_v3 * /*ti*/, std::uint32_t before_length, std::uint32_t after_length) {
+    static_cast<Impl *>(data)->ti_on_delete(before_length, after_length);
+}
+
+void ti_done(void * /*data*/, zwp_text_input_v3 * /*ti*/, std::uint32_t /*serial*/) {
+    // 服务端状态序列到此结束：插入点盒在 preedit 更新后可能已移位，随下一帧 present 的
+    // set_cursor_rectangle 统一刷新，此处无须动作。
+}
+
+constexpr zwp_text_input_v3_listener TEXT_INPUT_LISTENER = {ti_enter, ti_leave,       ti_preedit,
+                                                             ti_commit, ti_delete,    ti_done};
+#endif
 
 // ---- wl_seat：能力增减 → 惰性获取 pointer/keyboard。 ----
 void seat_caps(void *data, wl_seat * /*s*/, std::uint32_t caps) {
@@ -633,6 +719,11 @@ auto WaylandSurface::Impl::on_global(std::uint32_t name, const char *iface, std:
             wl_registry_bind(registry, name, &wl_output_interface, std::min<std::uint32_t>(version, 2U)));
         outputs.push_back(info);
         wl_output_add_listener(outputs.back().out, &OUTPUT_LISTENER, this);
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+    } else if (std::strcmp(iface, zwp_text_input_manager_v3_interface.name) == 0 && text_input_mgr == nullptr) {
+        text_input_mgr = static_cast<zwp_text_input_manager_v3 *>(
+            wl_registry_bind(registry, name, &zwp_text_input_manager_v3_interface, 1U));
+#endif
     }
 }
 
@@ -711,6 +802,13 @@ auto WaylandSurface::Impl::on_seat_capabilities(std::uint32_t caps) -> void {
     if (has_kb && keyboard == nullptr) {
         keyboard = wl_seat_get_keyboard(seat);
         wl_keyboard_add_listener(keyboard, &KEYBOARD_LISTENER, this);
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+        // text-input 对象按 seat 建（v3 与键盘能力同步出现；一窗口一 seat 的简化模型下即一实例）。
+        if (text_input_mgr != nullptr && text_input == nullptr) {
+            text_input = zwp_text_input_manager_v3_get_text_input(text_input_mgr, seat);
+            zwp_text_input_v3_add_listener(text_input, &TEXT_INPUT_LISTENER, this);
+        }
+#endif
     } else if (!has_kb && keyboard != nullptr) {
         wl_keyboard_destroy(keyboard);
         keyboard = nullptr;
@@ -959,6 +1057,139 @@ auto WaylandSurface::Impl::apply_cursor(bool force) -> bool {
     return true;
 }
 
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+// =============================================================================
+// 输入法桥（text-input-unstable-v3）：状态声明 + 组合事件折算
+// =============================================================================
+
+auto WaylandSurface::Impl::ti_refresh_enable() -> void {
+    if (text_input == nullptr) {
+        return;
+    }
+    // 判据 = 「键盘焦点在本表面」且「宿主 provider 报非零插入点盒（焦点在文本控件）」。
+    // provider 未接线时视为不接管（保持 disable，与 Win32 未接 provider 时仅剩系统默认行为对齐）。
+    bool want = false;
+    if (ti_ime_wanted && composition_caret_provider) {
+        const Rect caret = composition_caret_provider();
+        want = caret.size.width > 0.0F && caret.size.height > 0.0F;
+    }
+    if (want == ti_enabled) {
+        return;  // 去重：同帧重复刷新不发协议请求
+    }
+    ti_enabled = want;
+    if (want) {
+        zwp_text_input_v3_enable(text_input);
+        // 内容类型随 enable 一次性声明：本库当前只投正常文本（密码框等专用控件未落地，
+        // HIDDEN_TEXT/PASSWORD 留待其出现时按控件自描述映射）。
+        zwp_text_input_v3_set_content_type(text_input, ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE,
+                                           ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
+    } else {
+        zwp_text_input_v3_disable(text_input);
+    }
+    zwp_text_input_v3_commit(text_input);
+    ++ti_commits;
+    wl_display_flush(dpy);
+}
+
+auto WaylandSurface::Impl::ti_update_cursor_rect() -> void {
+    if (text_input == nullptr || !ti_enabled || !composition_caret_provider) {
+        return;
+    }
+    const Rect box = composition_caret_provider();
+    if (box.origin.x == ti_last_caret.origin.x && box.origin.y == ti_last_caret.origin.y &&
+        box.size.width == ti_last_caret.size.width && box.size.height == ti_last_caret.size.height) {
+        return;  // 盒未变：不重复声明（每帧 present 都会走此路径）
+    }
+    ti_last_caret = box;
+    // 逻辑 dp → 表面本地物理 px（set_cursor_rectangle 用表面坐标×buffer_scale 同口径）。
+    const auto sc = static_cast<float>(scale);
+    const auto x = static_cast<std::int32_t>(std::floor(box.origin.x * sc));
+    const auto y = static_cast<std::int32_t>(std::floor(box.origin.y * sc));
+    const auto w = static_cast<std::int32_t>(std::ceil(box.size.width * sc));
+    const auto h = static_cast<std::int32_t>(std::ceil(box.size.height * sc));
+    zwp_text_input_v3_set_cursor_rectangle(text_input, x, y, w, h);
+    zwp_text_input_v3_commit(text_input);
+    ++ti_commits;
+}
+
+auto WaylandSurface::Impl::ti_on_enter() -> void {
+    ti_entered = true;
+    ti_ime_wanted = true;
+    // enter 后服务端状态视图重建（v3 语义）：清去重缓存，令 enable/content_type/盒随下次刷新重发。
+    ti_enabled = false;
+    ti_last_caret = Rect{};
+    ti_refresh_enable();
+}
+
+auto WaylandSurface::Impl::ti_on_leave() -> void {
+    ti_entered = false;
+    ti_ime_wanted = false;
+    ti_enabled = false;
+    ti_last_caret = Rect{};
+    // 组合中断：清空显示态并通知控件（与 Win32 WM_IME_COMPOSITION 空串、失焦取消同收敛路径）。
+    if (!ti_preedit.empty()) {
+        ti_preedit.clear();
+        if (handler) {
+            TextCompositionEvent e;  // 全默认字段 = preedit 空 + committed 空 → 控件 cancel_composition
+            handler(e);
+        }
+    }
+}
+
+auto WaylandSurface::Impl::ti_on_preedit(const char *text, std::int32_t begin, std::int32_t end) -> void {
+    const std::string_view sv = (text != nullptr) ? std::string_view{text} : std::string_view{};
+    ti_preedit.assign(sv);
+    if (!handler) {
+        return;
+    }
+    // 字节下标 → 码点契约（ime::make_preedit_state_utf8：begin==end 为光标、异号为选区、
+    // 双 -1 为隐藏光标——按「串尾无选区」折算）。
+    TextCompositionEvent e = ime::make_preedit_state_utf8(sv, begin, begin, end);
+    handler(e);
+}
+
+auto WaylandSurface::Impl::ti_on_commit(const char *text) -> void {
+    ti_preedit.clear();  // 上屏即组合结束
+    if (text == nullptr || text[0] == '\0' || !handler) {
+        return;  // 空 commit（纯清 preedit 场景）不发事件
+    }
+    // 与 Win32 桥同一收敛路径：committed 走组合事件通道落字并通知组合结束（preedit 置空）。
+    TextCompositionEvent e;
+    e.committed = text;
+    handler(e);
+}
+
+auto WaylandSurface::Impl::ti_on_delete(std::uint32_t before_length, std::uint32_t after_length) -> void {
+    // 本端从不 set_surrounding_text（空上下文）：before/after 理论上恒为 0，非 0 即合成器/
+    // 输入法基于我们给过的视图请求回删。折算成编辑键事件交控件处理（与物理退格同一派发路径，
+    // 选择/剪贴板逻辑不旁路）。上限防恶意大值刷帧。
+    ti_delete_requests += static_cast<int>(before_length + after_length);
+    if (!handler) {
+        return;
+    }
+    // 语义 = 「删掉光标前 before_length、光标后 after_length 字节」：先左移再退格等效。
+    constexpr std::uint32_t kCap = 64;
+    for (std::uint32_t i = 0; i < std::min(before_length, kCap); ++i) {
+        KeyEvent left;
+        left.action = KeyAction::Down;
+        left.key = static_cast<int>(KeyCode::ArrowLeft);
+        handler(left);
+        KeyEvent up = left;
+        up.action = KeyAction::Up;
+        handler(up);
+    }
+    for (std::uint32_t i = 0; i < std::min(after_length, kCap); ++i) {
+        KeyEvent bs;
+        bs.action = KeyAction::Down;
+        bs.key = static_cast<int>(KeyCode::Backspace);
+        handler(bs);
+        KeyEvent up = bs;
+        up.action = KeyAction::Up;
+        handler(up);
+    }
+}
+#endif
+
 // =============================================================================
 // WaylandSurface：构造/析构与 Surface 接口实现
 // =============================================================================
@@ -1096,6 +1327,17 @@ WaylandSurface::~WaylandSurface() {
         if (d.pointer != nullptr) {
             wl_pointer_destroy(d.pointer);
         }
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+        // text-input 先于 seat/keyboard 销毁（它是 seat 的子对象）；manager 是 registry 子对象，最后销毁。
+        if (d.text_input != nullptr) {
+            zwp_text_input_v3_destroy(d.text_input);
+            d.text_input = nullptr;
+        }
+        if (d.text_input_mgr != nullptr) {
+            zwp_text_input_manager_v3_destroy(d.text_input_mgr);
+            d.text_input_mgr = nullptr;
+        }
+#endif
         // cursor 表面先于主题销毁：cursor_surface 附着的是主题自有的 wl_buffer，主题销毁会连带
         // 释放它（表面被销毁时合成器已解除引用，顺序上无协议风险，但显式先表面后主题更易读）。
         if (d.cursor_surface != nullptr) {
@@ -1231,6 +1473,13 @@ auto WaylandSurface::record_client_decoration(DisplayList &dl) -> bool {
 
 auto WaylandSurface::present() -> Result<bool> {
     Impl &d = *impl_;
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+    // IME 状态声明先于帧几何早退：插入点盒是「输入态」而非「像素」，即便本帧 attach 被 configure
+    // 打断丢弃，enable 判据与候选窗位置也不该顺延一帧（内部去重，稳态零请求）。
+    if (d.dpy != nullptr) {
+        refresh_ime_input_state();
+    }
+#endif
     if (d.dpy != nullptr && d.configured && d.painter.data() != nullptr) {
         const int w = d.painter.width();  // 物理像素（Painter 按 scale 放大分配）
         const int h = d.painter.height();
@@ -1375,6 +1624,40 @@ auto WaylandSurface::cursor_state() const -> CursorState {
     return s;
 }
 
+auto WaylandSurface::set_composition_caret_provider(std::function<Rect()> provider) -> void {
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+    impl_->composition_caret_provider = std::move(provider);
+    // 接线当下即刷一次：键盘焦点可能早已在本表面（首帧前 Tab 进文本框），不等下一帧。
+    impl_->ti_refresh_enable();
+#else
+    (void)provider;  // 协议代码生成缺席：桥不存在，契约退化为基类 no-op
+#endif
+}
+
+auto WaylandSurface::text_input_state() const -> TextInputState {
+    TextInputState s;
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+    const Impl &d = *impl_;
+    s.manager_bound = (d.text_input_mgr != nullptr);
+    s.input_created = (d.text_input != nullptr);
+    s.entered = d.ti_entered;
+    s.enabled = d.ti_enabled;
+    s.preedit = d.ti_preedit;
+    s.commits = d.ti_commits;
+    s.delete_requests = d.ti_delete_requests;
+#else
+    s.protocol_disabled = true;
+#endif
+    return s;
+}
+
+auto WaylandSurface::refresh_ime_input_state() -> void {
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+    impl_->ti_refresh_enable();
+    impl_->ti_update_cursor_rect();
+#endif
+}
+
 auto WaylandSurface::begin_window_move() -> void {
     // 控件（自绘 TitleBar 等）在 Press 派发栈内同步调用：last_press_serial 即触发键 serial。
     if (impl_->toplevel != nullptr && impl_->seat != nullptr) {
@@ -1484,6 +1767,12 @@ auto WaylandSurface::poll_platform_events() -> void {
     if (d.dpy == nullptr) {
         return;
     }
+#if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
+    // IME 输入态声明的兜底驱动点：present() 是软件上屏路径，GPU 宿主（WgpuWaylandSurface）的
+    // 帧不经过它——本函数两条路径每帧必经（wgpu 宿主原样转发），故 enable 判据与候选窗盒在此
+    // 再刷一次（两方法内部去重，稳态零协议流量）。
+    refresh_ime_input_state();
+#endif
     // 非阻塞抽干：prepare_read/read_events 单线程范式（避免 dispatch 内部阻塞）。
     while (wl_display_prepare_read(d.dpy) != 0) {
         wl_display_dispatch_pending(d.dpy);

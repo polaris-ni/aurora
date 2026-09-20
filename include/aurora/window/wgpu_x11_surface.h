@@ -92,6 +92,10 @@ class WgpuX11Surface final : public Surface {
     auto set_present_dirty(const std::vector<Rect> &device_rects) -> void override {
         host_->set_present_dirty(device_rects);
     }
+    /// @brief IME 桥 provider 转发（XIM 锚点/回调全在内嵌宿主的事件泵里生效）。
+    auto set_composition_caret_provider(std::function<Rect()> provider) -> void override {
+        host_->set_composition_caret_provider(std::move(provider));
+    }
 
     /// @brief vsync 开启且 GPU 路径可用时，FIFO present 阻塞到 vblank 自带帧节拍。
     [[nodiscard]] auto paces_frames() const -> bool override { return gpu_ != nullptr && vsync_; }

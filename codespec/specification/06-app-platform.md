@@ -463,7 +463,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 **命令面板键位**：`CommandPalette` 打开时把自己的作用域压入 `FocusManager`（子树内**唯一**可聚焦控件是搜索框，故左右方向键仍落到搜索框做光标移动、上下方向键不引发焦点跳转）；Enter 经搜索框的提交回调执行选中项；Esc / ↑ / ↓ 经打开期临时注册的快捷键绑定接管（依赖注册表已 `bind_shortcuts`，未接线时这几键不可用，面板以 WARN 提示）。Space 只经文本输入落字，不触发执行。命令清单可经 `to_json()` 序列化并由 MCP 工具面枚举，见 [`08-tooling.md`](08-tooling.md) §7.1。
 
-### 8.5 输入法桥（Win32 IMM32 首桥）
+### 8.5 输入法桥（Win32 IMM32 / X11 XIM / Wayland text-input-v3）
 
 事件侧契约（`TextCompositionEvent` 字段口径、preedit 不进 `value()`、候选窗定位盒）见 [`05-event-navigation.md`](05-event-navigation.md) §2.4；本节只记平台壳的接线。
 
@@ -484,6 +484,34 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 **依赖**：`imm32` 随 `aurora` PUBLIC 链接（`cmake/AuroraBackends.cmake` 的 Win32 分支：`user32 gdi32 shell32 ole32 uuid imm32`），属系统库，无三方依赖、无编译期裁剪开关。
 
 **⚠️ 只有 `Application` 下才有效**：`set_event_handler` / `set_composition_caret_provider` 由 `WindowHost::attach_surface()` 接线，而焦点（组合事件的路由前提）也归 `WindowHost::focus_` 管。以 `create_native_window` 得到**裸 `Window`** 并直接 `present_root` 时，窗口没有任何事件处理器——鼠标、键盘、Tab 焦点与 IME 一律不通。真机探针与自建消息泵都必须经 `Application`（本文 §2.1）驱动。
+
+#### 8.5.1 X11 桥（XIM，`src/aurora/window/x11_surface.cpp` 内联）
+
+Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：XIM 只有五个入口点（`XOpenIM`/`XCreateIC`/`XSetICFocus`/`Xutf8LookupString`/`XSetICValues`），直接挂在 `X11Surface::Impl` 上并与既有事件派发栈同构，拆文件只会把一条调用链劈成两半。
+
+**协商与逐级降级**（`ime_setup()`，构造期与首次 `FocusIn` 各调一次、幂等——`XMODIFIERS`/IM 服务器晚就绪是 Linux 桌面常态）：`XOpenIM` 失败（无 IM）→ 整桥静默缺席，keysym 取字路径不受影响；成功则经 `XNQueryInputStyle` 查询 IM 广告的风格（`XGetIMValues` 契约：**成功返回 NULL**，输出参数有效），只有精确命中 `XIMPreeditCallbacks | XIMStatusNothing` 才走全事件路（preedit draw/caret 回调回推），否则回退 `XIMPreeditNothing`（commit 仍可经 `Xutf8LookupString` 到达，仅无组合期内容）。
+
+**回调注册**：draw/caret 经 `XVaCreateNestedList` + `XSetICValues(XNPreeditAttributes)` 挂到 IC（Xlib R6 固定形态）；两者均按 `XICProc`（int 返回）形态注册——Xlib 把一切 IC 回调统一擦成该联合式签名、派发时按注册名还原（Qt/GTK 同款契约），`client_data` 直指 `Impl`（回调全在事件派发栈内同步触发，生命周期无忧）。
+
+**焦点宣告**：`FocusIn` → `XSetICFocus`、`FocusOut` → `XUnsetICFocus`——不宣告则 IM 永不把组合事件路由进本 IC。XIC 建于映射之后时 WM 的 `FocusIn` 已错过，故构造期若窗口已 `active` 立即补一次 `XSetICFocus`（XIM 惯例兜底）。
+
+**取字与通道收敛**：`KeyPress` 在 IC 在场时走 `Xutf8LookupString(ic)`；**溢出纪律**——`st == XBufferOverflow` 时 Xlib 不写缓冲而是返回所需字节数（一句中文即可超过 63 字节栈缓冲），此时改堆缓冲重查一次并一律 `clamp`，杜绝把未初始化栈内存当文本上屏。可打印文本：cb 风格且组合串非空 → `TextCompositionEvent.committed`（与 Win32/Wayland 同一条落字路径，preedit 随之清空）；其余（PreeditNothing 风格或组合未开始）→ `TextInputEvent`——**普通字符不得被 IM 接线吞掉**（防「接了 IM 反而吃掉键盘」回归，由探针 XTEST 段守住）。
+
+**候选窗锚点**：`ime_update_spot()` 把 provider 盒（窗口逻辑 dp）按 `× scale` 取**底边中点 y**（候选窗落在组合串下方）写入 `XNSpotLocation`（同样经嵌套列表），盒未变则去重；只在组合态变化时刷新（`ime_emit_preedit` 出口处，`!utf8.empty() || was_composing`）——空串 = 取消，无须再摆候选窗。另有一条全局前置：`XOpenIM` 前须 `setlocale(LC_CTYPE, "")` + `XSetLocaleModifiers("")`（构造期一次性），否则 `Xutf8LookupString` 退化为 latin1，CJK 全灭。
+
+**观测面**（供探针/单测）：`ImeState{im_open, ic_created, preedit_callbacks, focused, preedit, draw_callbacks, spot_updates}`。**降级面**：无 XIM 服务器机器上整桥缺席属合法形态（`XFilterEvent`/派发栈照常），探针该段 SKIP 不判负。**本机实测（WSLg/Xwayland）**：`XMODIFIERS` 未设时 `XOpenIM` 仍成功（Xlib 内建本地 XIM）且风格协商落到 PreeditNothing；`XSetInputFocus` 焦点往返与 XTEST 假键 `'a'` → `TextInputEvent("a")` 全绿——组合期 preedit 需真实 XIM 进程驱动，交 `--interactive`（`tools/verify/x11_ime_live_probe.cpp`）。
+
+#### 8.5.2 Wayland 桥（text-input-unstable-v3，`src/aurora/window/wayland_surface.cpp` 内联）
+
+**构建期门**：协议胶水由 `wayland-scanner` 从 `wayland-protocols` 的 `text-input-unstable-v3.xml` 生成，缺失即宏 `AURORA_HAVE_WL_TEXT_INPUT=0`、桥体整段裁切（软探测，不报配置期红灯，见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §3.2）。
+
+**对象生命周期**：`zwp_text_input_manager_v3` 在 `on_global` 绑定；`zwp_text_input_v3` 对象在本 `seat` **首次 offer keyboard 能力**时创建（v3 按 seat 建模，一个表面一个输入对象）。合成器不发布 manager（**WSLg Weston 实测即如此**）→ 整桥缺席、零协议请求，连接健康，属合法降级形态。
+
+**enable 判据**（`ti_refresh_enable()`，由 `present()` 与 `poll_platform_events()` 双路 `refresh_ime_input_state()` 驱动）：`want = 键盘焦点在本表面（enter/leave 维护）∧ provider 报非零插入点盒（焦点在文本控件）`；`want == 当前态` 即去重不发，故静态界面每帧零协议流量。enable 时随一次性 `set_content_type(NONE, NORMAL)`（密码框等专用 hint 留待控件自描述出现时映射）；provider 未接线视为不接管（保持 disable，与 Win32 未接 provider 时仅剩系统默认行为对齐）。
+
+**插入点盒**：`ti_update_cursor_rect()` 逻辑 dp → 表面本地物理 px（x/y 向下取整、宽高向上取整，与 `set_cursor_rectangle` 的 buffer_scale 口径一致），与上一盒逐字段去重、仅 enabled 时发送——每帧 present 都走此路径，去重是硬要求。`enter` 事件清空全部去重缓存（v3 语义：enter 后服务端状态视图重建，enable/content_type/盒须随下次刷新重发）。
+
+**事件折算**：`preedit_string` → `ime::make_preedit_state_utf8`（字节下标 → 码点契约，与 Win32 同一纯函数层）；`commit_string` → `TextCompositionEvent.committed`（空 commit 只清 preedit、不发事件）；`leave` 带残留组合串 → 全默认字段空事件 = 控件 `cancel_composition`（与 Win32 失焦取消同收敛路径）。`delete_surrounding_text`：本端从不 `set_surrounding_text`（空上下文），非零回删请求折算成 `ArrowLeft`×before + `Backspace`×after 的 `KeyEvent` 对交控件处理（与物理退格同一派发路径，不旁路选择/剪贴板逻辑），单侧上限 64 防恶意大值刷帧。
 
 ---
 

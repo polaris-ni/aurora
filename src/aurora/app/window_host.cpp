@@ -63,9 +63,15 @@ auto WindowHost::attach_surface() -> void {
     // DPI 缩放变化：窗口被拖到不同缩放比的显示器 / 系统缩放变更 → 强制全量重排重绘。
     sf.set_scale_change_handler([this](float /*scale*/) -> void { on_scale_changed(); });
     // IME 候选窗定位：后端桥据此将候选列表摆到当前焦点控件的插入点旁（逻辑 dp，桥内换算像素）。
+    // 只对**可编辑文本**角色给出（Wayland text-input-v3 的 enable/disable 判据即「当前是否有
+    // 文本录入焦点」，基类 composition_caret_bounds 的 focus_bounds_ 兜底会让按钮也返回非零盒）；
+    // 非文本焦点返回零盒 = 「无有效定位」，Win32/X11 侧行为退化为系统默认位置，不变。
     sf.set_composition_caret_provider([this]() -> Rect {
         Widget *focused = focus_.focused();
-        return focused != nullptr ? focused->composition_caret_bounds() : Rect{};
+        if (focused == nullptr || focused->accessibility_role() != AccessibilityRole::TextInput) {
+            return Rect{};
+        }
+        return focused->composition_caret_bounds();
     });
     // per-window 帧统计：默认仍写全局单例（单窗口用法零回归），多窗口下已由
     // `own_frame_stats()` 切到自有实例后再接线。

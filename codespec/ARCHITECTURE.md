@@ -311,20 +311,20 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 ### 8.6 输入法桥接（platform IME bridge）
 
-**分层与所有权。** 与无障碍桥同构，但方向相反（平台 → 树，而非树 → 平台）：组合事件值类型（`event/event.h` 的 `TextCompositionEvent`，平台中立）→ 折算层（`src/aurora/window/detail/ime_composition.{h,cpp}`，**零 Windows 头**：UTF-16 组合串 → UTF-8、UTF-16 下标 → 码点、`GCS_COMPATTR` → 待转换选区）→ 平台桥（Win32 IMM32 = `src/aurora/window/detail/win32_ime.{h,cpp}`）。折算层刻意不含平台头，故「无头 CI 证明不了的只有与 IMM32 的那一条接缝」——接缝本身由真机验收探针 `tools/verify/win32_ime_live_probe.cpp` 覆盖，其余全部落在 `utest_ime_composition` 的可执行覆盖里。
+**分层与所有权。** 与无障碍桥同构，但方向相反（平台 → 树，而非树 → 平台）：组合事件值类型（`event/event.h` 的 `TextCompositionEvent`，平台中立）→ 折算层（`src/aurora/window/detail/ime_composition.{h,cpp}`，**零平台头**：UTF-16/UTF-8 字节下标 → 码点、组合属性 → 待转换选区）→ 平台桥（Win32 IMM32 = `src/aurora/window/detail/win32_ime.{h,cpp}` 独立桥类；X11 XIM 与 Wayland text-input-v3 = 分别内联在 `x11_surface.cpp` / `wayland_surface.cpp` 的 `Impl` 内——各自只有五六个协议入口点，拆文件只会把一条调用链劈成两半）。折算层刻意不含平台头，故「无头 CI 证明不了的只有与 IMM32 / XIM / v3 的三条平台接缝」——接缝由真机验收探针 `tools/verify/win32_ime_live_probe.cpp` / `x11_ime_live_probe.cpp` / `wayland_ime_live_probe.cpp` 覆盖，其余全部落在 `utest_ime_composition` 的可执行覆盖里。
 
-桥与窗口一一对应，由 `Win32Window::Impl` **唯一持有并随窗口构造**（`Win32Surface` / `D3D11Surface` / `WgpuSurface` 转发同一实例）。与 a11y 桥的**惰性激活相反**：IMM32 没有查询代价，且无输入法环境下一条 `WM_IME_*` 也不会投递，早构造零成本，故无需门闩与注册表。
+桥与窗口一一对应：Win32 由 `Win32Window::Impl` **唯一持有并随窗口构造**（`Win32Surface` / `D3D11Surface` / `WgpuSurface` 转发同一实例），X11/Wayland 随各自 `Impl` 构造。与 a11y 桥的**惰性激活相反**：桥本身没有查询代价，且无输入法环境下一条平台事件也不会投递，早构造零成本，故无需门闩与注册表（Wayland 另有构建期软门 `AURORA_HAVE_WL_TEXT_INPUT`，缺协议 XML 即整桥裁切）。
 
-**Surface 扩展点（一处，默认空实现）**：`Surface::set_composition_caret_provider(std::function<Rect()>)`。方向与 a11y 的 `set_accessibility_root`（宿主 push）相反——插入点是**拉取**的：候选窗定位只在组合期每次 `WM_IME_COMPOSITION` 才需要，而「当前焦点是哪个控件」只有上层 `FocusManager` 知道，故由宿主提供查询回调（`WindowHost` 返回焦点控件的 `Widget::composition_caret_bounds()`，窗口逻辑 dp；桥内 `× scale` + `ClientToScreen`）。
+**Surface 扩展点（一处，默认空实现）**：`Surface::set_composition_caret_provider(std::function<Rect()>)`。方向与 a11y 的 `set_accessibility_root`（宿主 push）相反——插入点是**拉取**的：候选窗定位只在组合期才需要，而「当前焦点是哪个控件」只有上层 `FocusManager` 知道，故由宿主提供查询回调（`WindowHost` 返回焦点控件的 `Widget::composition_caret_bounds()`，窗口逻辑 dp；桥内 `× scale` 后映射到平台坐标——Win32 `ClientToScreen` / X11 `XNSpotLocation` / Wayland `set_cursor_rectangle`），三平台共用同一判据形状：provider 报零盒 = 不接管（Win32 不移候选窗、Wayland 保持 disable）。
 
 **两条不变量（均为实机行为结论，非推测）**：
 
-1. **上屏只有一条通道**。`GCS_RESULTSTR` 是唯一的 commit 来源，故 `WM_IME_CHAR` 必须吞掉、组合期间的 `WM_CHAR` 必须丢弃——放行任一条即与 `DefWindowProc` 的逐字 `WM_CHAR` 转换叠加，同一汉字上屏两次（DBCS ACP 下还会被拆成前导/尾随字节产出乱码）。
+1. **上屏只有一条通道**。Win32 侧 `GCS_RESULTSTR` 是唯一的 commit 来源，故 `WM_IME_CHAR` 必须吞掉、组合期间的 `WM_CHAR` 必须丢弃——放行任一条即与 `DefWindowProc` 的逐字 `WM_CHAR` 转换叠加，同一汉字上屏两次（DBCS ACP 下还会被拆成前导/尾随字节产出乱码）。X11/Wayland 同理：组合期上屏只认平台 commit 通道（cb 风格下 `Xutf8LookupString` 的提交串 / v3 `commit_string`）并折算进 `committed`，普通键文本路径仅在无组合时落字。
 2. **preedit 永不进数据模型**。组合串只在绘制与测量期参与（`composed_text()`），`value()` / 序列化 / golden 因此与「用户是否正打到一半」无关，保持确定性。
 
 **为何是 IMM32 而非 TSF**：TSF 要求实现 `ITextStoreACPServices` 全套文本存储代理（约 1.5k 行 COM，且与「控件自持状态、无 Windows 文本对象」的模型正交）；Win10/11 的 CTF 加载器对非 TSF-store 窗口提供 IMM32 兼容**读**通道，组合串 / 上屏串 / 光标 / 属性全部可读、候选窗定位亦生效。代价是该通道不接受外部**写**（`ImmSetCompositionStringW` 被 TSF 型输入法拒绝），因此组合文本无法自动化注入，preedit 渲染须人工目视收口。桥的对外形状（`Hooks` + `handle()`）与 TSF 无冲突，后续替换不动上层。
 
-契约与接线状态表见 `specification/05-event-navigation.md` §2.4，Win32 侧细节见 `specification/06-app-platform.md` §8.5。
+契约与接线状态表见 `specification/05-event-navigation.md` §2.4，各平台侧细节（IMM32 取舍 / XIM 风格协商与取字溢出 / v3 enable 判据与去重）见 `specification/06-app-platform.md` §8.5。
 
 ---
 

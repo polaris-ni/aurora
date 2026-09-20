@@ -1632,7 +1632,7 @@ AURORA_TEST_CHECK_EQ(ti.value(), std::string{"你好"});
 
 完整三段序列（preedit → 候选替换 → 上屏）、`max_length` 截断、只读吞输入、失焦取消、preedit 参与测量均由 `tests/unit/utest_text_input.cpp` 守住。
 
-### 39.4 Win32 真机验收
+### 39.4 真机验收（Win32 / X11 / Wayland）
 
 ```powershell
 cmake --preset ninja                     # 如未配置
@@ -1643,13 +1643,24 @@ build\aurora_verify_win32_ime.exe --interactive
 
 用微软拼音输入「你好世界」，目视：① preedit 带下划线且随拼音更新；② 候选窗出现在插入点旁而非屏幕左上角；③ 选字后只上一次屏；④ Esc 取消后无残留；⑤ 切走焦点再回来无半截拼音。
 
+Linux 桌面同形（探针按后端条件构建，各跑各的）：
+
+```bash
+cmake -S . -B build -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+cmake --build build --target aurora_verify_x11_ime aurora_verify_wayland_ime   # Wayland 探针另需协议门 AURORA_HAVE_WL_TEXT_INPUT=1
+./build/aurora_verify_x11_ime --interactive       # 配 XMODIFIERS 用真实 XIM 进程组合
+./build/aurora_verify_wayland_ime --interactive   # 需发布 text-input-v3 的合成器（KDE/mutter 级）
+```
+
+X11 自动段已覆盖焦点宣告往返与 XTEST 假键落字；Wayland 自动段覆盖 enable 判据与「合成器无 v3 ⇒ 零请求优雅降级」。两路的组合期内容（preedit/上屏）都需真实输入法进程，交 `--interactive`。
+
 要点：
 
 - **preedit 绝不进 `value()`**：数据模型、序列化与 golden 因此始终不含半截拼音；显示与测量走 `composed_text()`。
 - **下标是码点**：`cursor_index` / `sel_*` 按码点折算，代理对不会被切半。
 - **组合事件只到焦点控件**：不经命中链、不冒泡，故容器不会误吞。
 - **只有 `Application` 驱动才有 IME**：裸 `Window` + `present_root` 没有任何事件处理器（连 Tab 焦点都不通），详见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.5。
-- **非 Win32 后端目前只有契约**：macOS / X11 / Wayland / Wasm 缺平台桥，写了钩子也收不到事件；接线状态见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §2.4。
+- **平台桥覆盖**：Win32（IMM32）、X11（XIM）、Wayland（text-input-v3，门 `AURORA_HAVE_WL_TEXT_INPUT`）已接；GLFW / macOS / Wasm 仍只有契约——写了钩子也收不到事件，接线状态见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §2.4。
 
 ---
 

@@ -2,10 +2,13 @@
 /// 目标单元: src/aurora/window/detail/ime_composition.h
 /// 测试说明: 平台组合索引 → Aurora 码点下标的纯折算——ASCII/CJK 串长度与光标、代理对内部向下夹紧、
 /// 孤立代理替换计数、GCS_COMPATTR 目标段（含跨代理对边界）、属性数组缺尾/多余、
-/// 无目标段时 sel_end 落哨兵、make_preedit_state 端到端字段
+/// 无目标段时 sel_end 落哨兵、make_preedit_state 端到端字段；
+/// UTF-8 口径（X11 XIM / Wayland text-input-v3）：字节下标→码点、多字节码点内部夹紧、
+/// 半开区间选区折算、cursor=-1 退化串尾、越界夹紧
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "aurora/window/detail/ime_composition.h"
@@ -16,8 +19,10 @@ namespace aurora::test_cases::utest_ime_composition {
 using aurora::ime::Attr;
 using aurora::ime::CpRange;
 using aurora::ime::make_preedit_state;
+using aurora::ime::make_preedit_state_utf8;
 using aurora::ime::target_selection;
 using aurora::ime::utf16_index_to_cp_index;
+using aurora::ime::utf8_byte_to_cp_index;
 
 namespace {
 
@@ -141,6 +146,63 @@ AURORA_TEST_CASE(preedit_state_end_to_end_with_selection) {
     AURORA_TEST_CHECK_TRUE(e.has_preedit_selection());
     AURORA_TEST_CHECK_EQ(e.sel_start, std::size_t(1));
     AURORA_TEST_CHECK_EQ(e.sel_end, std::size_t(2));
+}
+
+// ---- UTF-8 口径（X11 XIM 组合串 / Wayland text-input-v3 index_in_text）----
+
+AURORA_TEST_CASE(utf8_byte_to_cp_index_passes_through_and_clamps) {
+    // 「你a好」：你=字节 0..2，a=3，好=4..6，总 7 字节、3 码点。
+    constexpr std::string_view s = "\xE4\xBD\xA0" "a" "\xE5\xA5\xBD";
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 0), std::size_t(0));  // 「你」起点
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 3), std::size_t(1));  // a（ASCII）
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 4), std::size_t(2));  // 「好」起点
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 7), std::size_t(3));  // 串尾 = 总码点数
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 99), std::size_t(3));  // 越界夹紧
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 1), std::size_t(0));  // 切进「你」中部 → 夹紧起点
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 5), std::size_t(2));  // 切进「好」中部 → 夹紧起点
+}
+
+AURORA_TEST_CASE(utf8_preedit_cursor_and_no_selection) {
+    // Wayland 形态：preedit 携 UTF-8 游标字节、无选区（v3 的 preedit_string 不带选区端点）。
+    const auto e = make_preedit_state_utf8("\xE4\xBD\xA0\xE5\xA5\xBD", 3, -1, -1);  // 「你好」游标在第 2 字前
+    AURORA_TEST_CHECK_EQ(e.preedit, std::string("\xE4\xBD\xA0\xE5\xA5\xBD"));
+    AURORA_TEST_CHECK_EQ(e.cursor_index, std::size_t(1));
+    AURORA_TEST_CHECK_FALSE(e.has_preedit_selection());
+    AURORA_TEST_CHECK(e.committed.empty());
+}
+
+AURORA_TEST_CASE(utf8_preedit_cursor_minus_one_falls_back_to_end) {
+    // cursor=-1（输入法未给游标）→ 退化到串尾码点下标。
+    const auto e = make_preedit_state_utf8("ni hao", -1, -1, -1);
+    AURORA_TEST_CHECK_EQ(e.cursor_index, std::size_t(6));
+}
+
+AURORA_TEST_CASE(utf8_preedit_half_open_selection_maps_to_inclusive_cp) {
+    // 「一二三」每字 3 字节。半开区间 [3,6) 恰含「二」→ 含尾码点区间 [1,1]。
+    constexpr std::string_view s = "\xE4\xB8\x80\xE4\xBA\x8C\xE4\xB8\x89";
+    const auto one = make_preedit_state_utf8(s, 6, 3, 6);
+    AURORA_TEST_CHECK_TRUE(one.has_preedit_selection());
+    AURORA_TEST_CHECK_EQ(one.sel_start, std::size_t(1));
+    AURORA_TEST_CHECK_EQ(one.sel_end, std::size_t(1));
+    // [0,6) 含「一二」→ 含尾 [0,1]。
+    const auto two = make_preedit_state_utf8(s, 0, 0, 6);
+    AURORA_TEST_CHECK_EQ(two.sel_start, std::size_t(0));
+    AURORA_TEST_CHECK_EQ(two.sel_end, std::size_t(1));
+}
+
+AURORA_TEST_CASE(utf8_preedit_empty_means_cancelled) {
+    const auto e = make_preedit_state_utf8("", -1, -1, -1);
+    AURORA_TEST_CHECK(e.preedit.empty());
+    AURORA_TEST_CHECK_EQ(e.cursor_index, std::size_t(0));
+    AURORA_TEST_CHECK_FALSE(e.has_preedit_selection());
+}
+
+AURORA_TEST_CASE(utf8_preedit_selection_end_clamped_to_last_cp) {
+    // 尾端点越界（半开区间 end ≥ 串长）→ 含尾码点夹紧到最后一个码点。
+    constexpr std::string_view s = "\xE4\xBD\xA0\xE5\xA5\xBD";  // 「你好」2 码点
+    const auto e = make_preedit_state_utf8(s, 0, 3, 99);
+    AURORA_TEST_CHECK_EQ(e.sel_start, std::size_t(1));
+    AURORA_TEST_CHECK_EQ(e.sel_end, std::size_t(1));  // total-1
 }
 
 }  // namespace aurora::test_cases::utest_ime_composition

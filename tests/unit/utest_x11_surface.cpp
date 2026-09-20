@@ -4,10 +4,11 @@
 /// static_assert）；真实 X 连接与窗口上屏默认不触碰。头整体被 AURORA_PLATFORM_LINUX &&
 /// AURORA_BACKEND_X11 门控，非 Linux / 未开后端时用例恒注册并 SKIP。
 ///
-/// 另含一个**显式选择加入**的真机用例（光标收尾）：置 `AURORA_LIVE_X11=1` 时连接真实
-/// X server、创建真实窗口，对 11 个 `CursorShape` 走两轮 `set_cursor`，并以进程级 X 错误
-/// 处理器断言服务器未拒绝任何 `XCreateFontCursor`/`XDefineCursor`（不依赖指针 hover，
-/// 故在 Wayland/Xwayland 会话下同样可判定）。
+/// 另含两个**显式选择加入**的真机用例：置 `AURORA_LIVE_X11=1` 时连接真实 X server、创建真实
+/// 窗口——① 光标收尾：对 11 个 `CursorShape` 走两轮 `set_cursor`，并以进程级 X 错误处理器断言
+/// 服务器未拒绝任何 `XCreateFontCursor`/`XDefineCursor`（不依赖指针 hover，故在 Wayland/
+/// Xwayland 会话下同样可判定）；② IME 桥观测面：`ime_state()` 一致性不变量、provider 接线零
+/// 副作用、（有 XIM 服务器时）FocusIn/Out → `X{Set,Unset}ICFocus` 焦点宣告往返。
 ///
 /// 注：Xlib 头按仓库约定放在文件级 `#if` 内（非 Linux / 未开后端时不能引入 X11 依赖）；
 /// 而**用例本身必须无条件注册**（`TEST-R6` / `check_test_registry`：`runner --list` 的用例集
@@ -130,6 +131,72 @@ AURORA_TEST_CASE(x11_surface_live_real_window_and_cursor_sweep) {
     }
 
     XSetErrorHandler(previous);
+#else
+    AURORA_TEST_SKIP("AURORA_BACKEND_X11 未开启（非 Linux 平台），头文件整体被宏剔除");
+#endif
+}
+
+AURORA_TEST_CASE(x11_surface_live_ime_bridge_invariants) {
+#if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
+    const char *opt_in = std::getenv("AURORA_LIVE_X11");
+    if (opt_in == nullptr || *opt_in == '\0') {
+        AURORA_TEST_SKIP("需显式置 AURORA_LIVE_X11=1：本用例会连接真实 X server 并创建真实窗口");
+    }
+
+    aurora::X11Surface surface(160, 120, "aurora-live-x11-ime");
+    AURORA_TEST_REQUIRE_TRUE(surface.is_available());
+
+    // 观测面一致性：IC 只可能随 IM 出现、preedit 回调风格只可能随 IC 出现（不可能倒挂）。
+    auto st = surface.ime_state();
+    AURORA_TEST_CHECK(!(st.ic_created && !st.im_open));
+    AURORA_TEST_CHECK(!(st.preedit_callbacks && !st.ic_created));
+
+    // provider 接线本身不得产生任何协议副作用（锚点只在组合期有意义）。
+    surface.set_composition_caret_provider([] {
+        return aurora::Rect{aurora::Point{24.0F, 40.0F}, aurora::Size{6.0F, 16.0F}};
+    });
+    for (int i = 0; i < 8; ++i) {
+        surface.poll_platform_events();
+        surface.wait_events(15.0);
+    }
+    st = surface.ime_state();
+    if (!st.im_open) {
+        // 无 XIM 服务器（WSLg 常态）：桥必须完全静默并留在 keysym 路径——降级即本用例断言本体。
+        AURORA_TEST_CHECK(st.ic_created == false && st.draw_callbacks == 0 && st.spot_updates == 0 &&
+                          st.preedit.empty());
+        AURORA_TEST_SKIP("本机无 XIM 服务器（XOpenIM 失败）⇒ 焦点宣告/组合回调无从驱动，"
+                         "完整验收见 aurora_verify_x11_ime 探针");
+    } else {
+        AURORA_TEST_CHECK_TRUE(st.ic_created);
+        // 焦点宣告接线：独立连接拉起/切走输入焦点 → FocusIn/Out 经事件循环驱动 X{Set,Unset}ICFocus。
+        Display *obs = XOpenDisplay(nullptr);
+        AURORA_TEST_REQUIRE_TRUE(obs != nullptr);
+        const auto win = static_cast<::Window>(reinterpret_cast<std::uintptr_t>(surface.native_handle()));
+        XMapWindow(obs, win);
+        XRaiseWindow(obs, win);
+        XSetInputFocus(obs, win, RevertToParent, CurrentTime);
+        XFlush(obs);
+        bool focused_in = false;
+        for (int i = 0; i < 20 && !focused_in; ++i) {
+            surface.poll_platform_events();
+            surface.wait_events(15.0);
+            focused_in = surface.ime_state().focused;
+        }
+        AURORA_TEST_CHECK_TRUE(focused_in);
+        XSetInputFocus(obs, DefaultRootWindow(obs), RevertToParent, CurrentTime);
+        XFlush(obs);
+        bool focused_out = false;
+        for (int i = 0; i < 20 && !focused_out; ++i) {
+            surface.poll_platform_events();
+            surface.wait_events(15.0);
+            focused_out = !surface.ime_state().focused;
+        }
+        AURORA_TEST_CHECK_TRUE(focused_out);
+        XCloseDisplay(obs);
+        // 未组合 ⇒ 无 preedit 事件、无锚点请求（回调内容段需真实输入法，见探针 --interactive）。
+        const auto idle = surface.ime_state();
+        AURORA_TEST_CHECK(idle.draw_callbacks == 0 && idle.preedit.empty());
+    }
 #else
     AURORA_TEST_SKIP("AURORA_BACKEND_X11 未开启（非 Linux 平台），头文件整体被宏剔除");
 #endif

@@ -91,6 +91,26 @@ class X11Surface final : public Surface {
     /// 任何引入 Xlib 的翻译单元都必须在 Xlib 头之后 `#undef CursorShape`，详见 x11_surface.cpp。
     auto set_cursor(CursorShape shape) -> void override;
 
+    // ---- 输入法（XIM/Xlib R6 公共面）----
+
+    /// @brief 接管组合插入点查询（Surface 契约见 surface.h）：XIM 侧用作 `XNSpotLocation`
+    /// （组合串/候选窗锚点，客户窗口物理 px），组合期每次 preedit 更新与焦点切换时拉取。
+    auto set_composition_caret_provider(std::function<Rect()> provider) -> void override;
+
+    /// @brief XIM 桥的本端状态（真机验收探针的观测面：「本端与 IM 协商到什么」的物证）。
+    struct ImeState {
+        bool im_open = false;         ///< XOpenIM 成功（无 XIM 服务器/未设 XMODIFIERS 时 false = 纯 keysym 路径）。
+        bool ic_created = false;      ///< XCreateIC 成功。
+        bool preedit_callbacks = false;  ///< 协商到 XIMPreeditCallbacks（组合事件可回推）；false = PreeditNothing 降级。
+        bool focused = false;         ///< 当前持有 X IM 焦点（XSetICFocus 已发且未 XUnsetICFocus）。
+        std::string preedit;          ///< 最近一次 preedit 回调的串（UTF-8；空 = 无组合）。
+        int draw_callbacks = 0;       ///< preedit draw 回调次数（含清空帧）。
+        int spot_updates = 0;         ///< XNSpotLocation 实际下发次数（去重后）。
+    };
+
+    /// @brief 取 XIM 桥本端状态（探针逐项断言用；无 X 会话时全零）。
+    [[nodiscard]] auto ime_state() const -> ImeState;
+
     /// @brief 原生窗口句柄：X11 `Window`（XID）经 uintptr_t 装入 void*。
     [[nodiscard]] auto native_handle() const -> void * override;
 
@@ -108,8 +128,12 @@ class X11Surface final : public Surface {
     /// `WM_GETOBJECT` 式查询触发点，构造期连上总线是 GNOME/Qt 应用同款形态）；失败永久降级。
     auto set_accessibility_root(Widget *root) -> void override;
 
+    /// @brief 全部 Xlib 状态（Display/Window/GC/XImage/XIM/唤醒管道），见 x11_surface.cpp。
+    /// public 而非 private：XIM preedit 回调（C 函数指针经 client_data 收发 user data）需在
+    /// 类外以 `Impl*` 转发，与 Wayland 后端 C listener 同一理由。
+    struct Impl;
+
   private:
-    struct Impl;  ///< 全部 Xlib 状态（Display/Window/GC/XImage/XIM/唤醒管道），见 x11_surface.cpp。
     std::unique_ptr<Impl> impl_;
 };
 

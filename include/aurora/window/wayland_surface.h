@@ -128,6 +128,39 @@ class WaylandSurface final : public Surface {
     /// @brief 取 `set_cursor` 的本端提交状态（探针逐项断言用；无 Wayland 会话时全零）。
     [[nodiscard]] auto cursor_state() const -> CursorState;
 
+    // ---- 输入法（text-input-unstable-v3）----
+
+    /// @brief `set_composition_caret_provider` 的接管（Surface 契约见 surface.h）。
+    ///
+    /// Wayland 侧该 provider 兼任 **enable/disable 判据**：present() 每帧拉取，非零盒（焦点在
+    /// 文本控件）→ `zwp_text_input_v3_enable`，零盒 → `disable`——v3 的输入焦点是「本客户端
+    /// 声明」而非服务端拥有，不 enable 则合成器/输入法不会把组合事件送进来。返回盒的物理像素
+    /// 几何另作 `set_cursor_rectangle`（表面本地物理 px，候选窗定位）；本后端不需要像素级
+    /// ClientToScreen 换算，故零盒退化为「无文本焦点」而非「默认位置」。
+    auto set_composition_caret_provider(std::function<Rect()> provider) -> void override;
+
+    /// @brief text-input 桥的本端状态（真机验收探针的观测面，与 `CursorState` 同口径的
+    /// 「本端提交了什么」物证，非合成器/输入法侧读回）。
+    struct TextInputState {
+        bool manager_bound = false;  ///< 合成器发布 zwp_text_input_manager_v3 并已绑定（false = 优雅缺席，桥不生效）。
+        bool input_created = false;  ///< 已取得 seat 的 zwp_text_input_v3 对象。
+        bool entered = false;  ///< text-input 收到过 enter（键盘焦点在本表面）。
+        bool enabled = false;  ///< 当前处于 enable 态（判据 = caret provider 非零盒）。
+        std::string preedit;  ///< 最近一次 preedit_string 内容（空 = 无组合）。
+        int commits = 0;  ///< 客户端 commit 次数（状态批量生效轮次，去重后每次变化 +1）。
+        int delete_requests = 0;  ///< delete_surrounding_text 折算为编辑键事件的次数。
+        bool protocol_disabled = false;  ///< 构建时未启用 text-input-v3 代码生成（协议 XML 缺失或后端关闭）。
+    };
+
+    /// @brief 取 text-input 桥的本端状态（探针断言用；协议缺席时仅 protocol 字段可辨）。
+    [[nodiscard]] auto text_input_state() const -> TextInputState;
+
+    /// @brief 刷新一次 IME 输入态声明（enable 判据 + 候选窗插入点盒）。
+    /// 软件宿主在 `present()` 内自刷；GPU 宿主（WgpuWaylandSurface）的帧不经过本类 present，
+    /// 在其转发的 `poll_platform_events()` 里经此入口刷新。内部按「与上次相同即零请求」去重，
+    /// 每帧调用无协议开销。
+    auto refresh_ime_input_state() -> void;
+
     /// @brief 运行期更新 CSD 标题栏样式（存入 Impl 并触发重绘，下帧 draw_decoration 生效）。
     auto set_title_bar_style(const TitleBarStyle &style) -> void override;
     /// @brief 控件发起窗口拖拽移动（Wayland：xdg_toplevel_move，须在 Press 派发栈内调用）。

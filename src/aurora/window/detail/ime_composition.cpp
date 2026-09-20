@@ -111,4 +111,48 @@ auto make_preedit_state(std::u16string_view comp, std::size_t caret, const std::
     return e;
 }
 
+auto utf8_byte_to_cp_index(std::string_view text, std::size_t byte_index) -> std::size_t {
+    // 只统计**完整落在游标之前**的码点；游标切进某多字节码点中间时停在它起点（向下夹紧），
+    // 与 utf16_index_to_cp_index 对代理对的处理同纪律。byte_index ≥ 串尾即总码点数。
+    std::size_t cp = 0;
+    std::size_t i = 0;
+    while (i < byte_index && i < text.size()) {
+        const auto [unused_cp, len] = a11y::detail::decode_cp(text, i);
+        (void)unused_cp;
+        const std::size_t n = (len == 0) ? 1 : len;  // len==0 仅越界出现；兜底前进 1 防死循环
+        if (i + n > byte_index) {
+            break;  // 游标落在本码点内部 → 夹紧到其起点（不 ++cp）
+        }
+        i += n;
+        ++cp;
+    }
+    return cp;
+}
+
+auto make_preedit_state_utf8(std::string_view preedit, std::int64_t cursor_byte, std::int64_t sel_begin_byte,
+                             std::int64_t sel_end_byte) -> TextCompositionEvent {
+    TextCompositionEvent e;
+    e.preedit.assign(preedit);
+    const std::size_t total = utf8_byte_to_cp_index(preedit, preedit.size());  // 总码点数
+    // cursor_byte<0 = 输入法未给游标 → 退化到串尾（新组合通常整体待选，串尾即候选插入点）。
+    const std::size_t caret =
+        (cursor_byte < 0) ? total : utf8_byte_to_cp_index(preedit, static_cast<std::size_t>(cursor_byte));
+    e.cursor_index = std::min(caret, total);
+    // 选区半开区间 [begin, end)（IBus/Fcitx index 口径）→ 契约的含尾码点区间 [start, end]。
+    if (sel_begin_byte >= 0 && sel_end_byte > sel_begin_byte) {
+        std::size_t start = utf8_byte_to_cp_index(preedit, static_cast<std::size_t>(sel_begin_byte));
+        std::size_t end = utf8_byte_to_cp_index(preedit, static_cast<std::size_t>(sel_end_byte));
+        // 半开区间的尾端点回退一个码点即含尾；退化（begin 与 end 落在同一码点）时 end=start。
+        if (end > start) {
+            --end;
+        }
+        e.sel_start = std::min(start, total);
+        e.sel_end = std::min(end, total == 0 ? 0 : total - 1);
+    } else {
+        e.sel_start = 0;
+        e.sel_end = TextCompositionEvent::AURORA_NO_SELECTION;
+    }
+    return e;
+}
+
 }  // namespace aurora::ime
