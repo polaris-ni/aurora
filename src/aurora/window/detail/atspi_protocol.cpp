@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <string_view>
 #include <unordered_set>
@@ -136,6 +137,28 @@ auto atspi_role_name(std::uint32_t role) -> std::string {
         default:
             return "unknown";
     }
+}
+
+// AtspiStateType → 规范状态名：`atspi-constants.h` 枚举**逐位序**（INVALID=0 … READ_ONLY=43），
+// 名字 = 去前缀小写、下划线转连字符 —— 与 GLib 枚举 nick 及 libatspi `set_by_name` 同源，
+// 是 `object:state-changed:<name>` 事件 minor 的单一来源（atk-adaptor 发送侧把 ATK 的
+// pname 原样转发，两侧名字必须逐字一致，Orca 按类型串匹配）。
+auto atspi_state_name(std::uint32_t state) -> const char * {
+    constexpr const char *k_names[] = {
+        "invalid",                "active",            "armed",            "busy",
+        "checked",                "collapsed",         "defunct",          "editable",
+        "enabled",                "expandable",        "expanded",         "focusable",
+        "focused",                "has-tooltip",       "horizontal",       "iconified",
+        "modal",                  "multi-line",        "multiselectable",  "opaque",
+        "pressed",                "resizable",         "selectable",       "selected",
+        "sensitive",              "showing",           "single-line",      "stale",
+        "transient",              "vertical",          "visible",          "manages-descendants",
+        "indeterminate",          "required",          "truncated",        "animated",
+        "invalid-entry",          "supports-autocompletion", "selectable-text", "is-default",
+        "visited",                "checkable",         "has-popup",        "read-only",
+    };
+    constexpr std::size_t count = std::size(k_names);
+    return state < count ? k_names[state] : nullptr;
 }
 
 auto atspi_interfaces_of(const AccessibilityNode &n) -> std::vector<std::string> {

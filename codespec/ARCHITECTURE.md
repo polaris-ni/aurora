@@ -307,7 +307,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 **线程与降级。** 全 main-thread（in-proc provider 由 UIA core 在 UI 线程回调，桥激活时把套间初始化为 STA）；`UIAutomationCore.dll` 运行时 `LoadLibraryA` 动态加载，缺库或函数缺失即整桥降级 no-op + 一次 `Diagnostics::warn`，无链接期依赖。
 
-**Linux 桥差异（AT-SPI2）。** 无 `WM_GETOBJECT` 式「读屏在线才出现」的查询信号，故构造时机改为**首次语义树根注入时一次性尝试**（失败 = 永久降级，不再重试）；建树同步点仍是首个平台查询到达（拉取式不变）。D-Bus 传输 fd 经 `Provider` 侧 `poll_watches()` 并入 X11/Wayland 事件等待的 `poll`，fd 就绪由 `pump()` 读入并派发（单线程、无额外线程）。降级面 = 无会话总线 / `org.a11y.Bus` 不可达 / libdbus 缺失 / `NO_AT_BRIDGE=1`；线格式契约与申报空位见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.4。
+**Linux 桥差异（AT-SPI2）。** 无 `WM_GETOBJECT` 式「读屏在线才出现」的查询信号，故构造时机改为**首次语义树根注入时一次性尝试**（失败 = 永久降级，不再重试）；建树同步点由「入站查询」与「帧循环 dirty」双侧驱动——`pump()` 每轮开头 `sync_point()`（若脏），事件推送不依赖客户端恰好在做查询。D-Bus 传输 fd 经 `Provider` 侧 `poll_watches()` 并入 X11/Wayland 事件等待的 `poll`，fd 就绪由 `pump()` 读入并派发（单线程、无额外线程）。事件通道 = 快照 diff 的另一种消费：`sync_point()` 产 `TreeDiff` 后按上游 `atk-adaptor` 线格式发 D-Bus 信号广播（added/removed → Cache Add/RemoveAccessible + children-changed；Name/Value/Hint/State → property-/state-changed；焦点 → Event.Focus；播报 → Announcement 直发），与 Win32 UIA 桥 `queue_*` 系列同一「diff → 平台事件」消费范式。降级面 = 无会话总线 / `org.a11y.Bus` 不可达 / libdbus 缺失 / `NO_AT_BRIDGE=1`；线格式契约与申报空位见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.4。
 
 ### 8.6 输入法桥接（platform IME bridge）
 

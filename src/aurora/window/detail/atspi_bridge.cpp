@@ -1,4 +1,5 @@
-// AT-SPI2 平台桥实现：libdbus dlopen 绑定 + a11y 总线连接 + Embed 握手 + 方法面应答。
+// AT-SPI2 平台桥实现：libdbus dlopen 绑定 + a11y 总线连接 + Embed 握手 + 方法面应答 +
+// 事件信号广播（Object:/Cache: 信号与播报，格式对 atk-adaptor/event.c 逐字核实）。
 //
 // 分层：所有「语义 → 协议值」的折算都在 `atspi_protocol.cpp`（无头可测）；本文件只剩
 // D-Bus 编解码与生命周期粘合。协议签名与成员名 2026-09-20 逐字核对上游
@@ -63,7 +64,7 @@ using Fn_free = void (*)(void *);
 // 把 conn 当 msg、msg 当 ud ⇒ dispatch 期解引用段错误（WSL 1.16.2 实测）。
 using Fn_filter = int (*)(Conn, Msg, void *);
 
-/// @brief 用到的 libdbus 符号集（34 个；类型码用 D-Bus 单字符常量）。
+/// @brief 用到的 libdbus 符号集（35 个；类型码用 D-Bus 单字符常量）。
 struct LibDbus {
     bool loaded = false;
     void *handle = nullptr;
@@ -91,6 +92,7 @@ struct LibDbus {
     Msg (*message_new_method_call)(const char *, const char *, const char *, const char *) = nullptr;
     Msg (*message_new_method_return)(Msg) = nullptr;
     Msg (*message_new_error)(Msg, const char *, const char *) = nullptr;
+    Msg (*message_new_signal)(const char *, const char *, const char *) = nullptr;
     void (*message_unref)(Msg) = nullptr;
     int (*message_get_type)(Msg) = nullptr;
     const char *(*message_get_path)(Msg) = nullptr;
@@ -152,6 +154,7 @@ auto LibDbus::instance() -> const LibDbus & {
         bind("dbus_message_new_method_call", a.message_new_method_call);
         bind("dbus_message_new_method_return", a.message_new_method_return);
         bind("dbus_message_new_error", a.message_new_error);
+        bind("dbus_message_new_signal", a.message_new_signal);
         bind("dbus_message_unref", a.message_unref);
         bind("dbus_message_get_type", a.message_get_type);
         bind("dbus_message_get_path", a.message_get_path);
@@ -599,6 +602,11 @@ struct AtspiBridge::Impl {
         if (conn == nullptr) {
             return;
         }
+        // 推送式事件：信号必须不依赖「恰好有入站查询」也能到达（读屏等待焦点/结构事件时
+        // 正是无查询期）。dirty 时每轮同步一次（事件广播只置脏 ⇒ 帧粒度合批，无重建风暴）。
+        if (dirty) {
+            sync_point();
+        }
         [[maybe_unused]] const int touched = L.connection_read_write(conn, 0);  // 非阻塞收发
         while (L.connection_dispatch(conn) == dispatch_remains) {
             // 逐条派发直到无排队消息；filter 内完成应答（应答已入队）
@@ -958,14 +966,18 @@ struct AtspiBridge::Impl {
             return reply_u(m, 0);
         }
         if (member == "GrabFocus") {
-            // 尽力而为：经动作通道请求获焦（控件不支持即静默；调用本身按成功应答）。
+            // 尽力而为：经动作通道请求获焦（控件不支持即静默）。回包 = **boolean**
+            // （libatspi `atspi_component_grab_focus` 按 "=>b" 校验，回空签会报
+            // 「returned signature ; expected b」并判失败；WSL 实测）。
+            bool handled = false;
             if (const a11y::NodeSnapshot *n = model.node(id); n != nullptr && n->widget != nullptr) {
                 if (model.env().perform) {
                     model.env().perform(const_cast<Widget *>(n->widget),
                                         AccessibilityActionRequest{.action = AccessibilityAction::Focus});
+                    handled = true;
                 }
             }
-            return reply_void(m);
+            return reply_b(m, handled);
         }
 
         // Text（码点偏移）
@@ -1279,6 +1291,33 @@ struct AtspiBridge::Impl {
         return error_reply(m, err_unknown_method, member.c_str());
     }
 
+    /// @brief 往数组游标里写一行 Cache 项（元素签名 `(so)(so)(so)iiassusau`）。
+    /// GetItems 全量表与 Cache.AddAccessible 单行信号共用同一落线器 —— 行格式必须逐字节
+    /// 一致，否则客户端两条获取路径的缓存形态分叉。
+    auto append_cache_row(Iter &rows, const AtspiCacheRow &row) -> void {
+        Iter st{};
+        if (L.iter_open_container(&rows, ty_struct, nullptr, &st) == 0) {
+            return;
+        }
+        put_so(L, st, row.self);
+        put_so(L, st, row.app);
+        put_so(L, st, row.parent);
+        put_int(L, st, row.index_in_parent);
+        put_int(L, st, row.child_count);
+        Iter ifaces{};
+        if (L.iter_open_container(&st, ty_array, "s", &ifaces) != 0) {
+            for (const std::string &s : row.interfaces) {
+                put_string(L, ifaces, ty_string, s);
+            }
+            L.iter_close_container(&st, &ifaces);
+        }
+        put_string(L, st, ty_string, row.name);
+        put_uint(L, st, row.role);
+        put_string(L, st, ty_string, row.description);
+        put_state_set(st, row.states);
+        L.iter_close_container(&rows, &st);
+    }
+
     /// @brief Cache.GetItems：全量行（签名 `a((so)(so)(so)iiassusau)`）。
     [[nodiscard]] auto cache_get_items(Msg call) -> bool {
         Iter top{};
@@ -1293,27 +1332,7 @@ struct AtspiBridge::Impl {
         // SPI_CACHE_ITEM_SIGNATURE = "(" + "(so)"×3 + "iiassusau" + ")"。
         if (L.iter_open_container(&top, ty_array, "((so)(so)(so)iiassusau)", &rows) != 0) {
             for (const AtspiCacheRow &row : model.cache_rows()) {
-                Iter st{};
-                if (L.iter_open_container(&rows, ty_struct, nullptr, &st) == 0) {
-                    continue;
-                }
-                put_so(L, st, row.self);
-                put_so(L, st, row.app);
-                put_so(L, st, row.parent);
-                put_int(L, st, row.index_in_parent);
-                put_int(L, st, row.child_count);
-                Iter ifaces{};
-                if (L.iter_open_container(&st, ty_array, "s", &ifaces) != 0) {
-                    for (const std::string &s : row.interfaces) {
-                        put_string(L, ifaces, ty_string, s);
-                    }
-                    L.iter_close_container(&st, &ifaces);
-                }
-                put_string(L, st, ty_string, row.name);
-                put_uint(L, st, row.role);
-                put_string(L, st, ty_string, row.description);
-                put_state_set(st, row.states);
-                L.iter_close_container(&rows, &st);
+                append_cache_row(rows, row);
             }
             L.iter_close_container(&top, &rows);
         }
@@ -1342,6 +1361,205 @@ struct AtspiBridge::Impl {
         return reply_s(call, xml);
     }
 
+    // ---- 事件信号发射（发送侧 SSOT = atk-adaptor/event.c `emit_event`）----
+    //
+    // 线格式（2026-09-20 逐字核对上游 + libatspi 消费者 `_atspi_dbus_handle_event`）：
+    //  * 信号 interface = 事件类（`Event.Object` / `Event.Focus`），member = major 名的
+    //    D-Bus 化（"state-changed"→"StateChanged" 等），path = 源对象自身路径，
+    //    **无 destination**（a11y 总线广播，registryd 按注册事件转发）。
+    //  * 对象事件体固定 `s i i v a{sv}` = (minor, detail1, detail2, any_data, properties)
+    //    —— libatspi 签名不符直接丢弃。properties 恒发空字典。
+    //  * 应用侧**无监听簿记**：RegisterEvent 由 registryd 记账，客户端本地过滤 ⇒ 恒发
+    //    （atk-adaptor 的 `signal_is_needed` 仅是省流量优化，非协议要求）。
+    //  * 事件要落地，源对象必须已在客户端缓存（`_atspi_ref_accessible` 解析失败即丢事件）
+    //    ⇒ 结构新增必须先 Cache.AddAccessible 再 children-changed:add。
+
+    /// @brief 发一条对象事件类信号（minor/d1/d2/variant 语义见各调用点）。
+    auto emit_object_event(std::uint64_t id, const char *iface, const char *member,
+                           const std::string &minor, std::int32_t d1, std::int32_t d2,
+                           const AtspiPropValue &var) -> void {
+        if (conn == nullptr) {
+            return;
+        }
+        const std::string path = model.path_of_id(id);
+        if (path == atspi::k_null_path) {
+            return;  // 未投影/已拆除的对象：无源路径 ⇒ 不发（客户端本就无法解析）
+        }
+        Msg s = L.message_new_signal(path.c_str(), iface, member);
+        if (s == nullptr) {
+            return;
+        }
+        Iter top{};
+        L.iter_init_append(s, &top);
+        put_string(L, top, ty_string, minor);
+        put_int(L, top, d1);
+        put_int(L, top, d2);
+        (void)put_variant(L, top, var);
+        Iter props{};
+        if (L.iter_open_container(&top, ty_array, "{sv}", &props) != 0) {
+            L.iter_close_container(&top, &props);  // 空 properties（与上游一致）
+        }
+        L.connection_send(conn, s, nullptr);
+        L.message_unref(s);
+    }
+
+    /// @brief state-changed 一行：minor = 规范状态名（`atspi_state_name` 表），d1 = 置位与否。
+    /// 上游形态：`emit_event(obj, Event.Object, "state-changed", <pname>, 1|0, 0, i32-0)`。
+    auto emit_state_changed(std::uint64_t id, std::uint32_t state, bool on) -> void {
+        const char *name = atspi_state_name(state);
+        if (name == nullptr) {
+            return;
+        }
+        AtspiPropValue v;  // variant = int32 0（上游 append_basic 常量）
+        v.kind = AtspiPropValue::Kind::I32;
+        emit_object_event(id, atspi::k_iface_event_object, "StateChanged", name, on ? 1 : 0, 0, v);
+    }
+
+    /// @brief property-change 一行：minor = 属性规范名，variant = int32 0。
+    /// 上游只带「变了什么名」，新值靠客户端重读（GetAttribute(s) / Properties.Get）。
+    auto emit_property_change(std::uint64_t id, const std::string &prop) -> void {
+        AtspiPropValue v;
+        v.kind = AtspiPropValue::Kind::I32;
+        emit_object_event(id, atspi::k_iface_event_object, "PropertyChange", prop, 0, 0, v);
+    }
+
+    /// @brief children-changed 一行：minor = "add"/"remove"，d1 = 子索引，
+    /// variant = 子对象引用 `(so)`（客户端 `cache_process_children_changed` 按此更新缓存）。
+    auto emit_children_changed(std::uint64_t parent_id, const char *minor, std::int32_t index,
+                               const AtspiRef &child) -> void {
+        AtspiPropValue v;
+        v.kind = AtspiPropValue::Kind::Ref;
+        v.ref = child;
+        emit_object_event(parent_id, atspi::k_iface_event_object, "ChildrenChanged", minor, index,
+                          0, v);
+    }
+
+    /// @brief Cache.AddAccessible：单行（体 = 完整行结构，无事件头三元组）。
+    auto emit_cache_add(std::uint64_t id) -> void {
+        if (conn == nullptr) {
+            return;
+        }
+        const std::string want = model.path_of_id(id);
+        for (const AtspiCacheRow &row : model.cache_rows()) {
+            if (row.self.path != want) {
+                continue;
+            }
+            Msg s = L.message_new_signal(atspi::k_cache_path, atspi::k_iface_cache, "AddAccessible");
+            if (s == nullptr) {
+                return;
+            }
+            Iter top{};
+            L.iter_init_append(s, &top);
+            append_cache_row(top, row);
+            L.connection_send(conn, s, nullptr);
+            L.message_unref(s);
+            return;
+        }
+    }
+
+    /// @brief Cache.RemoveAccessible：体 = `(so)` 引用。引用在模型同步**前**捕获 ——
+    /// 拆除期路径已随存活表丢弃，但客户端仍按 (bus, 旧路径) 寻址该对象。
+    auto emit_cache_remove(const AtspiRef &ref) -> void {
+        if (conn == nullptr || ref.is_null()) {
+            return;
+        }
+        Msg s = L.message_new_signal(atspi::k_cache_path, atspi::k_iface_cache, "RemoveAccessible");
+        if (s == nullptr) {
+            return;
+        }
+        Iter top{};
+        L.iter_init_append(s, &top);
+        put_so(L, top, ref);
+        L.connection_send(conn, s, nullptr);
+        L.message_unref(s);
+    }
+
+    /// @brief 被移除对象的事件素材（全部在 model.sync 之前定格：旧路径/有效父/旧索引）。
+    struct RemovedInfo {
+        AtspiRef ref;
+        std::uint64_t parent_id = 0;  ///< 同步前的模型有效父（裁剪层已折算到最近存活祖先）
+        std::int32_t index = -1;
+    };
+
+    /// @brief TreeDiff → AT-SPI 信号批次（与 UIA 桥 `queue_*` 系列同一消费范式，D11）。
+    ///
+    /// 覆盖面：added（AddAccessible + children-changed:add + focused 补位）、updated
+    /// （Name/Value/Hint → property-change:*，State → 逐位 state-changed）、focused_id
+    /// （Event.Focus "Focus"）、removed（children-changed:remove + RemoveAccessible，
+    /// 先子后父逆序）。moved 无规范事件词汇（换序不毁寻址）；Bounds/Range/Actions 同上 ——
+    /// 均按「无事件可报、查询恒取新值」放行（申报见 atspi_bridge.h 头注）。
+    auto publish_events(const a11y::TreeSnapshot &prev, const a11y::TreeDiff &diff,
+                        const std::vector<RemovedInfo> &removed) -> void {
+        // 1) 结构新增：先让对象在客户端缓存可解析，再报父子的增位。
+        for (const std::uint64_t id : diff.added) {
+            if (!model.exists(id)) {
+                continue;  // 裁剪层（is_control/is_content 皆假）未投影到模型
+            }
+            emit_cache_add(id);
+            const std::uint64_t parent = model.parent(id);
+            if (model.exists(parent)) {
+                emit_children_changed(parent, "add", model.index_in_parent(id), model.ref_of(id));
+            }
+            if (const auto *ns = model.node(id);
+                ns != nullptr && ns->node.state.focused) {
+                emit_state_changed(id, atspi::state_focused, true);  // 新节点带焦：父链无旧比较源
+            }
+        }
+        // 2) 字段变化（同 id 两侧都在）。
+        for (const auto &[id, field] : diff.updated) {
+            if (!model.exists(id)) {
+                continue;
+            }
+            switch (field) {
+                case a11y::FieldChange::Name:
+                    emit_property_change(id, "accessible-name");
+                    break;
+                case a11y::FieldChange::Value:
+                    emit_property_change(id, "accessible-value");
+                    break;
+                case a11y::FieldChange::Hint:
+                    emit_property_change(id, "accessible-description");
+                    break;
+                case a11y::FieldChange::State: {
+                    const auto *pn = prev.find(id);
+                    const auto *nn = model.node(id);
+                    if (pn == nullptr || nn == nullptr) {
+                        break;
+                    }
+                    const auto a = atspi_states_of(pn->node, atspi_interfaces_of(pn->node));
+                    const auto b = atspi_states_of(nn->node, atspi_interfaces_of(nn->node));
+                    for (const std::uint32_t s : a) {
+                        if (std::ranges::find(b, s) == b.end()) {
+                            emit_state_changed(id, s, false);
+                        }
+                    }
+                    for (const std::uint32_t s : b) {
+                        if (std::ranges::find(a, s) == a.end()) {
+                            emit_state_changed(id, s, true);
+                        }
+                    }
+                    break;
+                }
+                default:
+                    break;  // Bounds/Range/Actions：无规范事件词汇（申报）
+            }
+        }
+        // 3) 焦点：Event.Focus（state-changed:focused 已由 2) 的逐位对拍覆盖存活节点）。
+        if (diff.focused_id.has_value() && model.exists(*diff.focused_id)) {
+            AtspiPropValue v;
+            v.kind = AtspiPropValue::Kind::I32;
+            emit_object_event(*diff.focused_id, atspi::k_iface_event_focus, "Focus", "", 0, 0, v);
+        }
+        // 4) 结构移除：先报父的 remove 位（父仍存活时），再撤缓存；逆序 = 先子后父。
+        for (std::size_t i = removed.size(); i-- > 0;) {
+            const RemovedInfo &r = removed[i];
+            if (model.exists(r.parent_id)) {
+                emit_children_changed(r.parent_id, "remove", r.index, r.ref);
+            }
+            emit_cache_remove(r.ref);
+        }
+    }
+
     // ---- 快照同步 ----
 
     auto sync_point() -> void {
@@ -1353,8 +1571,27 @@ struct AtspiBridge::Impl {
             return;  // 拆除期只读旧快照（UIA #8 同款门闩）
         }
         // 单参重载：根几何按 root.size() 实时取，尺寸变化无需宿主重新 set_root。
+        a11y::TreeSnapshot prev = std::move(snap);
         snap = a11y::build_tree_snapshot(*root);
+        if (prev.flat.empty()) {
+            model.sync(snap);  // 首帧建树：客户端经 Cache.GetItems 全量可见，不回放增量
+            return;
+        }
+        const a11y::TreeDiff diff = a11y::diff_snapshots(prev, snap);
+        std::vector<RemovedInfo> removed;
+        for (const std::uint64_t id : diff.removed) {
+            if (!model.exists(id)) {
+                continue;  // 裁剪层从未投影 ⇒ 无缓存可撤
+            }
+            removed.push_back(RemovedInfo{
+                .ref = model.ref_of(id), .parent_id = model.parent(id),
+                .index = model.index_in_parent(id)});
+        }
         model.sync(snap);
+        if (conn != nullptr && !diff.empty()) {
+            publish_events(prev, diff, removed);
+            L.connection_flush(conn);  // 事件先于同轮应答落线（同一 flush 覆盖两者）
+        }
     }
 };
 
@@ -1446,8 +1683,28 @@ auto AtspiBridge::set_root(Widget *root) -> void {
     }
 }
 
-auto AtspiBridge::on_announcement(const std::string &, const Widget *) -> void {
-    // 动态播报（G4 平台直译）随事件信号增量落地（申报见头注）。
+auto AtspiBridge::on_announcement(const std::string &text, const Widget *target) -> void {
+    // 动态播报（G4 平台直译）：Event.Object 的 "Announcement" 信号，body = (minor "",
+    // detail1 = politeness, detail2 0, variant "s" text) —— 上游 announcement_event_listener
+    // 恒带 ATSPI_LIVE_POLITE(=1)。目标缺失/未投影 ⇒ 回落 FRAME（信号源必须可解析）。
+    if (d_->conn == nullptr || !d_->active || text.empty()) {
+        return;
+    }
+    if (d_->dirty) {
+        d_->sync_point();  // 目标可能刚入树：先投影再寻址
+    }
+    std::uint64_t id = k_atspi_frame_id;
+    if (target != nullptr) {
+        const std::uint64_t rid = target->runtime_id();
+        if (d_->model.exists(rid)) {
+            id = rid;
+        }
+    }
+    AtspiPropValue v;
+    v.kind = AtspiPropValue::Kind::Str;
+    v.str = text;
+    d_->emit_object_event(id, atspi::k_iface_event_object, "Announcement", "", 1, 0, v);
+    d_->L.connection_flush(d_->conn);
 }
 
 auto AtspiBridge::on_widget_destroying(const Widget *w) -> void {
@@ -1471,8 +1728,15 @@ auto AtspiBridge::set_window_origin(std::int32_t x, std::int32_t y) -> void {
 }
 
 auto AtspiBridge::set_window_title(std::string title) -> void {
+    const bool changed = d_->model.env().window_title != title;
     d_->model.env_mut().window_title = std::move(title);
     d_->dirty = true;
+    // FRAME 是合成节点、不在根树快照里 ⇒ 宿主驱动的名字变化无 diff 事件源，此处直发
+    // （上游同形：gtk_window 标题 → notify::title → property-change:accessible-name）。
+    if (changed && d_->conn != nullptr && d_->active) {
+        d_->emit_property_change(k_atspi_frame_id, "accessible-name");
+        d_->L.connection_flush(d_->conn);
+    }
 }
 
 }  // namespace aurora::detail

@@ -37,6 +37,7 @@ using aurora::detail::atspi_cp_slice;
 using aurora::detail::atspi_interfaces_of;
 using aurora::detail::atspi_role_name;
 using aurora::detail::atspi_role_of;
+using aurora::detail::atspi_state_name;
 using aurora::detail::atspi_states_of;
 using aurora::detail::k_atspi_app_id;
 using aurora::detail::k_atspi_frame_id;
@@ -55,6 +56,7 @@ using aurora::detail::atspi::k_registry_root_path;
 using aurora::detail::atspi::state_defunct;
 using aurora::detail::atspi::state_editable;
 using aurora::detail::atspi::state_enabled;
+using aurora::detail::atspi::state_focusable;
 using aurora::detail::atspi::state_multi_line;
 using aurora::detail::atspi::state_read_only;
 using aurora::detail::atspi::state_selectable_text;
@@ -178,6 +180,35 @@ AURORA_TEST_CASE(role_name_table_matches_libatspi_strings) {
     AURORA_TEST_CHECK_STREQ(atspi_role_name(23).c_str(), "frame");
     AURORA_TEST_CHECK_STREQ(atspi_role_name(67).c_str(), "unknown");
     AURORA_TEST_CHECK_STREQ(atspi_role_name(999).c_str(), "unknown");  // 越界兜底
+}
+
+AURORA_TEST_CASE(state_name_table_pins_event_minors) {
+    // `object:state-changed:<name>` 的 minor 单一来源：AtspiStateType 序号 → 规范名
+    // （小写连字符，GLib 枚举 nick 口径）。名字错位 = Orca 类型串匹配落空，事件静默丢失。
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(0), "invalid");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(1), "active");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(4), "checked");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(6), "defunct");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(8), "enabled");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(11), "focusable");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(12), "focused");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(17), "multi-line");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(20), "pressed");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(23), "selected");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(26), "single-line");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(30), "visible");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(38), "selectable-text");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(41), "checkable");
+    AURORA_TEST_CHECK_STREQ(atspi_state_name(43), "read-only");
+    AURORA_TEST_CHECK_TRUE(atspi_state_name(44) == nullptr);   // LAST_DEFINED 起越界
+    AURORA_TEST_CHECK_TRUE(atspi_state_name(999) == nullptr);  // 越界兜底：不发无名事件
+    // 本桥全部可申报状态都必须有名（发射器按 nullptr 静默丢弃 ⇒ 空名 = 事件漏发）。
+    for (const std::uint32_t s : {state_enabled, state_sensitive, state_showing, state_visible,
+                                  state_focusable, state_editable, state_multi_line,
+                                  state_single_line, state_selectable_text, state_read_only,
+                                  state_defunct}) {
+        AURORA_TEST_CHECK_NOT_NULL(atspi_state_name(s));
+    }
 }
 
 /// @brief 手搓节点补默认动作集（真实建树时 `build_accessibility_node` 自动填，见 accessibility.h）。

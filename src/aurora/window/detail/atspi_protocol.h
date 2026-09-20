@@ -45,6 +45,12 @@ inline constexpr const char *k_iface_action = "org.a11y.atspi.Action";
 inline constexpr const char *k_iface_cache = "org.a11y.atspi.Cache";
 inline constexpr const char *k_iface_socket = "org.a11y.atspi.Socket";
 inline constexpr const char *k_iface_registry = "org.a11y.atspi.Registry";
+/// @brief 事件信号接口（atk-adaptor `event.c` 发送侧：信号 interface = 事件类，成员名 =
+///        major 名转 D-Bus 风格 `signal_name_to_dbus`——"state-changed"→"StateChanged"、
+///        "property-change"→"PropertyChange"、"children-changed"→"ChildrenChanged"、
+///        "announcement"→"Announcement"；焦点单独成类 `Event.Focus`，成员 "Focus"）。
+inline constexpr const char *k_iface_event_object = "org.a11y.atspi.Event.Object";
+inline constexpr const char *k_iface_event_focus = "org.a11y.atspi.Event.Focus";
 
 /// @brief 注册表总线名与其根对象路径（Embed 的目标；`registryd/paths.h`）。
 inline constexpr const char *k_registry_bus = "org.a11y.atspi.Registry";
@@ -313,6 +319,9 @@ class AtspiModel {
 [[nodiscard]] auto atspi_role_of(const AccessibilityNode &n) -> std::uint32_t;
 /// @brief AtspiRole 序号 → 英文名（与 libatspi `_atspi_role_get_name` 表同源）。
 [[nodiscard]] auto atspi_role_name(std::uint32_t role) -> std::string;
+/// @brief AtspiStateType 序号 → 规范状态名（小写连字符，与 GLib 枚举 nick 同源：
+///        `object:state-changed:<name>` 事件 minor 的单一来源；越界 ⇒ nullptr）。
+[[nodiscard]] auto atspi_state_name(std::uint32_t state) -> const char *;
 /// @brief 状态位集折算（App/Frame 由模型直接给常量表）。
 [[nodiscard]] auto atspi_states_of(const AccessibilityNode &n, const std::vector<std::string> &ifaces)
     -> std::vector<std::uint32_t>;

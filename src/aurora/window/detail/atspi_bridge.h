@@ -12,8 +12,12 @@
 //  * **激活时机**：AT-SPI 没有 `WM_GETOBJECT` 式的「查询即激活」信号（连接建立本身就是
 //    被查询的前提），故首个语义树根注入时尝试建连 + Embed；但**语义树仍是拉取式惰性**：
 //    无客户端方法调用到达前零建树成本（与 D14 的初衷一致）。
-//  * **事件信号（Object:/Cache: Add/Remove/children-changed 等）为后续增量**：注册表经
-//    Cache.GetItems 全量拉取即可建树，Orca 浏览/读取可用；动态播报跟随该增量（如实申报）。
+//  * **事件信号已接线**（Object: 的 StateChanged/PropertyChange/ChildrenChanged/Focus/
+//    Announcement + Cache: 的 AddAccessible/RemoveAccessible）：`sync_point()` 对两次快照
+//    做 TreeDiff 并按 atk-adaptor 发送侧线格式广播；播报经 `on_announcement` 直译
+//    （G4）。**余下空位（申报）**：window:* 窗口态事件、Text 细粒度事件
+//    （text-changed/text-caret-moved）、Bounds/Range/Actions 变化（AT-SPI 无规范事件词汇，
+//    客户端重读恒取新值）、关系集与键绑定 —— 均不影响「可见性 + 浏览 + 操作」主链路。
 
 #include "aurora/core/platform.h"
 
