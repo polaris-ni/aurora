@@ -23,6 +23,10 @@
 
 // clang-format off
 #include <windows.h>
+// MSVC SDK 的 UIAutomationCore.h 不自带前置包含：`interface` 宏（objbase/combaseapi）与
+// VARIANT/SAFEARRAY（oleauto）在 WIN32_LEAN_AND_MEAN 下缺失，须先引伞头 <ole2.h>；
+// MinGW 版头已自行包含 ole2.h，重复包含有守卫，两侧均安全。
+#include <ole2.h>
 // 引**总头** <uiautomation.h>（= core + client 的正确包含顺序），而非分别引
 // <uiautomationcore.h> + <uiautomationclient.h>：
 //  1. 常量（UIA_*ControlTypeId / UIA_*PropertyId / UIA_*EventId …）在 MinGW SDK 下

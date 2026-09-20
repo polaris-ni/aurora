@@ -18,6 +18,14 @@
 
 namespace aurora::detail {
 
+// UIA 布尔出/入参：MSVC SDK 的 UIAutomationCore.h 用 BOOL，MinGW-w64 的 IDL 映射用 WINBOOL；
+// 两者均为 int，别名后 override 签名在两侧工具链同时精确匹配。
+#if defined(__MINGW32__)
+using UiaBool = WINBOOL;
+#else
+using UiaBool = BOOL;
+#endif
+
 namespace {
 
 // ---- VARIANT / BSTR / SAFEARRAY 辅助（桥边界的 COM 值构造）----
@@ -299,11 +307,11 @@ class UiaNodeProvider : public IRawElementProviderSimple,
     // ---- IValueProvider ----
     HRESULT STDMETHODCALLTYPE SetValue(LPCWSTR val) override;
     HRESULT STDMETHODCALLTYPE get_Value(BSTR *ret) override;
-    HRESULT STDMETHODCALLTYPE get_IsReadOnly(WINBOOL *ret) override;
+    HRESULT STDMETHODCALLTYPE get_IsReadOnly(UiaBool *ret) override;
 
     // ---- IRangeValueProvider ----
     //
-    // 注意：`get_IsReadOnly(WINBOOL*)` 在 IValueProvider 与 IRangeValueProvider 中**签名完全相同**，
+    // 注意：`get_IsReadOnly(UiaBool*)` 在 IValueProvider 与 IRangeValueProvider 中**签名完全相同**，
     // 重复声明会构成重复成员函数（编译错误）——一份声明同时满足两个基接口的覆盖，故此处不重复写。
     HRESULT STDMETHODCALLTYPE SetValue(double val) override;
     HRESULT STDMETHODCALLTYPE get_Value(double *ret) override;
@@ -319,8 +327,8 @@ class UiaNodeProvider : public IRawElementProviderSimple,
     HRESULT STDMETHODCALLTYPE get_VerticalScrollPercent(double *ret) override;
     HRESULT STDMETHODCALLTYPE get_HorizontalViewSize(double *ret) override;
     HRESULT STDMETHODCALLTYPE get_VerticalViewSize(double *ret) override;
-    HRESULT STDMETHODCALLTYPE get_HorizontallyScrollable(WINBOOL *ret) override;
-    HRESULT STDMETHODCALLTYPE get_VerticallyScrollable(WINBOOL *ret) override;
+    HRESULT STDMETHODCALLTYPE get_HorizontallyScrollable(UiaBool *ret) override;
+    HRESULT STDMETHODCALLTYPE get_VerticallyScrollable(UiaBool *ret) override;
 
     // ---- IScrollItemProvider ----
     HRESULT STDMETHODCALLTYPE ScrollIntoView() override;
@@ -426,14 +434,14 @@ class UiaTextRangeProvider : public ITextRangeProvider {
     }
 
     HRESULT STDMETHODCALLTYPE Clone(ITextRangeProvider **ret) override;
-    HRESULT STDMETHODCALLTYPE Compare(ITextRangeProvider *range, WINBOOL *ret) override;
+    HRESULT STDMETHODCALLTYPE Compare(ITextRangeProvider *range, UiaBool *ret) override;
     HRESULT STDMETHODCALLTYPE CompareEndpoints(enum TextPatternRangeEndpoint endpoint, ITextRangeProvider *target,
                                                enum TextPatternRangeEndpoint target_endpoint, int *ret) override;
     HRESULT STDMETHODCALLTYPE ExpandToEnclosingUnit(enum TextUnit unit) override;
-    HRESULT STDMETHODCALLTYPE FindAttribute(TEXTATTRIBUTEID, VARIANT, WINBOOL, ITextRangeProvider **) override {
+    HRESULT STDMETHODCALLTYPE FindAttribute(TEXTATTRIBUTEID, VARIANT, UiaBool, ITextRangeProvider **) override {
         return E_NOTIMPL;  // NVDA 不依赖（设计 §7.4 允许的合法降级）
     }
-    HRESULT STDMETHODCALLTYPE FindText(BSTR, WINBOOL, WINBOOL, ITextRangeProvider **) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE FindText(BSTR, UiaBool, UiaBool, ITextRangeProvider **) override { return E_NOTIMPL; }
     HRESULT STDMETHODCALLTYPE GetAttributeValue(TEXTATTRIBUTEID attribute_id, VARIANT *ret) override;
     HRESULT STDMETHODCALLTYPE GetBoundingRectangles(SAFEARRAY **ret) override;
     HRESULT STDMETHODCALLTYPE GetEnclosingElement(IRawElementProviderSimple **ret) override;
@@ -446,7 +454,7 @@ class UiaTextRangeProvider : public ITextRangeProvider {
     HRESULT STDMETHODCALLTYPE Select() override;
     HRESULT STDMETHODCALLTYPE AddToSelection() override { return E_NOTIMPL; }
     HRESULT STDMETHODCALLTYPE RemoveFromSelection() override { return E_NOTIMPL; }
-    HRESULT STDMETHODCALLTYPE ScrollIntoView(WINBOOL align_to_top) override;
+    HRESULT STDMETHODCALLTYPE ScrollIntoView(UiaBool align_to_top) override;
     HRESULT STDMETHODCALLTYPE GetChildren(SAFEARRAY **ret) override;
 
     [[nodiscard]] auto start() const -> std::size_t { return start_; }
@@ -890,7 +898,7 @@ auto UiaNodeProvider::get_Value(BSTR *ret) -> HRESULT {
     return (*ret != nullptr) ? S_OK : E_OUTOFMEMORY;
 }
 
-auto UiaNodeProvider::get_IsReadOnly(WINBOOL *ret) -> HRESULT {
+auto UiaNodeProvider::get_IsReadOnly(UiaBool *ret) -> HRESULT {
     if (ret == nullptr) {
         return E_POINTER;
     }
@@ -1061,7 +1069,7 @@ auto UiaNodeProvider::get_VerticalViewSize(double *ret) -> HRESULT {
     return S_OK;
 }
 
-auto UiaNodeProvider::get_HorizontallyScrollable(WINBOOL *ret) -> HRESULT {
+auto UiaNodeProvider::get_HorizontallyScrollable(UiaBool *ret) -> HRESULT {
     if (ret == nullptr) {
         return E_POINTER;
     }
@@ -1069,7 +1077,7 @@ auto UiaNodeProvider::get_HorizontallyScrollable(WINBOOL *ret) -> HRESULT {
     return S_OK;
 }
 
-auto UiaNodeProvider::get_VerticallyScrollable(WINBOOL *ret) -> HRESULT {
+auto UiaNodeProvider::get_VerticallyScrollable(UiaBool *ret) -> HRESULT {
     if (ret == nullptr) {
         return E_POINTER;
     }
@@ -1182,7 +1190,7 @@ auto UiaTextRangeProvider::Clone(ITextRangeProvider **ret) -> HRESULT {
     return S_OK;
 }
 
-auto UiaTextRangeProvider::Compare(ITextRangeProvider *range, WINBOOL *ret) -> HRESULT {
+auto UiaTextRangeProvider::Compare(ITextRangeProvider *range, UiaBool *ret) -> HRESULT {
     if (ret == nullptr || range == nullptr) {
         return E_POINTER;
     }
@@ -1414,7 +1422,7 @@ auto UiaTextRangeProvider::Select() -> HRESULT {
     return S_OK;
 }
 
-auto UiaTextRangeProvider::ScrollIntoView(WINBOOL align_to_top) -> HRESULT {
+auto UiaTextRangeProvider::ScrollIntoView(UiaBool align_to_top) -> HRESULT {
     Widget *w = nullptr;
     if (bridge_ != nullptr) {
         const auto *n = bridge_->find_node(id_);
