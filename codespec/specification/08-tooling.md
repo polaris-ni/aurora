@@ -441,9 +441,10 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 `utest_gpu_gl_rhi`（GpuGlRhi 契约断言）与 `tools/bench/bench_gpu.cpp`（GPU 特性基准的
 确定性计数器，无需真实 GL 上下文）共用。
 `bench_gpu` 的**两套口径**同档并存：场景一/二用 `FakeGl` 计数器隔离「CPU 侧翻译与纹理生命周期策略」
-（分配/删除次数、上传字节，跨机器确定），场景三/四/五在 `AURORA_BACKEND_GPU_WGPU` 配置下改用
+（分配/删除次数、上传字节，跨机器确定），场景三/四/五/六在 `AURORA_BACKEND_GPU_WGPU` 配置下改用
 `WgpuRhi` **真 GPU 离屏**端到端帧成本（流式槽 vs content_hash 缓存、`cache_layer` 层缓存、大图 compute
-mip 链），无可用 adapter 时整段如实跳过。真 GPU 段每帧报「提交（CPU）」与「端到端（批尾一次排空）」两列：
+mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effects_enabled` 切换），无可用 adapter 时整段
+如实跳过。真 GPU 段每帧报「提交（CPU）」与「端到端（批尾一次排空）」两列：
 后者靠 `WgpuRhi::set_readback_enabled(false)` 关掉逐帧读回、末尾一帧重开并单次 `read_pixels` 排空队列
 （逐帧 `read_pixels` 会让每帧都吃一次平台睡眠量子，Windows 实测把全部场景压成同一地板值，见
 [`specification/03-layout-render.md`](03-layout-render.md) §8.8 运行时契约注意）。基准数为**本机相对量**

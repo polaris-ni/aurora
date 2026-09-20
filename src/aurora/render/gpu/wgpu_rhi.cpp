@@ -565,6 +565,9 @@ struct WgpuRhi::Impl {
     WGPUComputePipeline pipe_blur_ = nullptr;
     WGPUComputePipeline pipe_blend_ = nullptr;
     WGPUComputePipeline pipe_mask_ = nullptr;
+    // 区域效果 compute 路总开关（见 WgpuRhi::set_compute_effects_enabled）：false = 三效果族
+    // 强制片元兜底路，如同管线未建；cs_mip 不受影响。默认 true。
+    bool fx_compute_enabled = true;
 
     // ---- 顶点/uniform 帧内环（CPU 暂存 + GPU 镜像；扩容时整体重放暂存，偏移稳定）----
     // 帧内各批共用一次 submit：同区域 writeBuffer 只保留最后一次写，故每批写独立区段。
@@ -2339,8 +2342,11 @@ struct WgpuRhi::Impl {
     // ⚠️ 同帧 queue 写（ring writeBuffer）统一在 submit 前生效：两 pass 读取的纹理内容
     // 均为本帧已提交状态，效果采样前已 flush + 关闭画布 pass，无脏读窗口。
 
-    /// @brief pipe_fx（kPipeBlend/kPipeMask）→ compute 管线；未建则 null。
+    /// @brief pipe_fx（kPipeBlend/kPipeMask）→ compute 管线；未建或开关关闭则 null。
     [[nodiscard]] constexpr auto fx_compute_pipe_of(int pipe_fx) const -> WGPUComputePipeline {
+        if (!fx_compute_enabled) {
+            return nullptr;
+        }
         if (pipe_fx == kPipeBlend) {
             return pipe_blend_;
         }
@@ -2405,7 +2411,7 @@ struct WgpuRhi::Impl {
         const float s = scale > 0.0F ? scale : 1.0F;
         // compute 实路径：H（canvas→alt）+ V（alt→canvas）两趟区域 dispatch，V 段直写
         // resolve 后的 canvas_（storage），免 B 段 MSAA 往返；canvas 保持关闭待重开。
-        if (pipe_blur_ != nullptr) {
+        if (fx_compute_enabled && pipe_blur_ != nullptr) {
             Globals gu_h = fx_globals(rx0, ry0, rx1 - rx0, ry1 - ry0);
             gu_h.tex_ctl[2] = static_cast<float>(r);
             Globals gu_v = gu_h;
@@ -2502,7 +2508,7 @@ struct WgpuRhi::Impl {
         }
         const float s = scale > 0.0F ? scale : 1.0F;
         // compute 实路径：H（aux→alt）+ V（alt→层纹理 storage）两趟区域 dispatch。
-        if (pipe_blur_ != nullptr) {
+        if (fx_compute_enabled && pipe_blur_ != nullptr) {
             Globals gu_h = fx_globals(rx0, ry0, rx1 - rx0, ry1 - ry0);
             gu_h.tex_ctl[2] = static_cast<float>(r);
             Globals gu_v = gu_h;
@@ -3481,6 +3487,12 @@ auto WgpuRhi::set_glyph_page_size(int side) -> void {
 auto WgpuRhi::set_readback_enabled(bool on) -> void {
     if (impl_ != nullptr) {
         impl_->readback_enabled = on;
+    }
+}
+
+auto WgpuRhi::set_compute_effects_enabled(bool on) -> void {
+    if (impl_ != nullptr) {
+        impl_->fx_compute_enabled = on;
     }
 }
 

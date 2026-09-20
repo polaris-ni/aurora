@@ -135,6 +135,14 @@ class WgpuRhi final : public RhiBackend, public RhiFrameSink {
     /// 真窗口（swapchain）模式不登记读回，本开关无作用。
     auto set_readback_enabled(bool on) -> void;
 
+    /// @brief 区域效果 compute 路开关（默认 `true`）：置 false 后 `BlurRegion`/`BlendRegion`/
+    /// `MaskRegion`（画布路与层路）整体强制走**片元兜底路**，如同 compute 管线未建成。
+    ///
+    /// 仅供基准对比（`bench_gpu` 场景六「compute vs 片元帧成本」）与两路行为差异诊断；
+    /// `cs_mip` 大图重采样不受本开关影响。两路语义同源（`blur_tap`/`blend_rgb`/`mask_base`
+    /// 单一来源），像素差异仅 quantization 顺序级别（见规格 §8.8）。
+    auto set_compute_effects_enabled(bool on) -> void;
+
     /// @brief 当前帧内容读回（RGBA8，行序自上而下）。仅供诊断/快照/容差 golden。
     /// 调用窗口：`end_frame` 之后、下一次 `begin_frame` 之前。返回 false = 不可用或失败。
     [[nodiscard]] auto read_pixels(std::vector<std::uint8_t> &out) -> bool;

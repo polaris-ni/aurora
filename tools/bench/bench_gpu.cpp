@@ -15,7 +15,7 @@
 //   - baseline：无 cache_layer——稳态为子控件 DL 缓存重放 + 全量命令翻译。
 //   - cache_layer：根挂 cache_layer——稳态为单条 DrawLayer（子树零重绘零翻译）。
 //
-// 场景三/四/五（`AURORA_BACKEND_GPU_WGPU` 编译进库时追加）为 **wgpu 真 GPU 离屏实测**：
+// 场景三/四/五/六（`AURORA_BACKEND_GPU_WGPU` 编译进库时追加）为 **wgpu 真 GPU 离屏实测**：
 // 同一批场景（视频流式 / 层缓存）经 `WgpuRhi` 离屏通路重放，与 fake 桩口径互补——
 // fake 桩量的是 CPU 侧翻译与分配次数（跨机可复现），wgpu 段量的是含 GPU 提交与等待的
 // 端到端帧成本（每帧 `read_pixels` 强制收敛，故不含队列堆积带来的假性加速）。数值随
@@ -23,6 +23,9 @@
 // 说明行并整段跳过（不失败，与 `AURORA_TEST_SKIP` 同口径）。
 //   - 场景五 wgpu 独有：静态大图 512×512 缩小重采样——冷帧含 CPU 预乘 + 整幅上传 +
 //     compute mip 链生成，稳态帧只三线性采样；对照「逐帧唯一内容」变体即 mip 链 churn。
+//   - 场景六 wgpu 独有：每帧整幅三区域效果族（blur/blend/mask 连做 3 遍）经
+//     `set_compute_effects_enabled` 切换 compute 实路与片元兜底路，两路同帧同内容，
+//     差额即 compute 存储纹理路相对「离屏渲染目标读-改-写片元路」的帧成本收益。
 //
 // 运行：build 目录下 ./build/bench_gpu（bazel 式路径随 aurora_add_tool 输出）。
 
@@ -311,6 +314,11 @@ constexpr int MIP_DRAW = 128;    ///< 缩小绘制边长（4× 降采样，三�
 constexpr int MIP_FRAMES = 24;   ///< 稳态帧数（unique 变体须预生成同样多的唯一内容图）
 constexpr int MIP_WARMUP = 3;
 
+constexpr int FX_DIM = 512;      ///< 场景六画幅边长（三效果族各以整幅为一遍）
+constexpr int FX_PASSES = 3;     ///< 每帧效果三连重数（提亮 GPU 工作量，压过批尾排空地板）
+constexpr int FX_FRAMES = 128;   ///< 稳态帧数（排空量子 ≈15.6ms 摊到 0.12 ms/帧地板）
+constexpr int FX_WARMUP = 8;
+
 /// @brief 离屏 `WgpuRhi` 装载（`native_window = nullptr` → 无 swapchain 的诊断通路，
 /// 与容差 golden / 探针同一条路）。失败返回 `nullptr`（无 adapter / device 申请失败）。
 [[nodiscard]] auto offscreen_rhi(int w, int h) -> std::unique_ptr<rhi::WgpuRhi> {
@@ -451,11 +459,64 @@ auto bench_mip(bool unique_content) -> MipResult {
     return r;
 }
 
+/// @brief 场景六原型帧：非均匀底图（棋盘格 + 斜线带）+ 整幅三效果族（blur/blend/mask）
+/// 连做 FX_PASSES 遍。帧内容恒定（无图像上传），两路（compute / 片元兜底）回放同一
+/// DisplayList，差额即效果路本身的成本；重数放大 GPU 工作量至可测。
+[[nodiscard]] auto make_fx_proto() -> DisplayList {
+    const auto mk = [](int x, int y, int w, int h) {
+        return Rect{.origin = Point{.x = static_cast<float>(x), .y = static_cast<float>(y)},
+                    .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}};
+    };
+    DisplayList dl;
+    Painter p;
+    p.begin(FX_DIM, FX_DIM);
+    p.record(dl);
+    p.fill_rect(mk(0, 0, FX_DIM, FX_DIM), Color(24, 28, 38));
+    // 8×8 棋盘（64px 块）：为 blur 提供恒定高频边缘；颜色随格号变化避免纯色块退化。
+    for (int cy = 0; cy < 8; ++cy) {
+        for (int cx = 0; cx < 8; ++cx) {
+            const auto shade = static_cast<std::uint8_t>(96 + 16 * ((cx * 3 + cy * 5) % 8));
+            p.fill_rect(mk(cx * 64, cy * 64, 64, 64),
+                        (cx + cy) % 2 == 0 ? Color(shade, shade, static_cast<std::uint8_t>(shade + 24))
+                                           : Color(static_cast<std::uint8_t>(220 - shade / 2), 224, 232));
+        }
+    }
+    // 斜线带：跨象限的细高频内容（1px 宽对角线，间距 8px）。
+    for (int i = 0; i < FX_DIM; i += 8) {
+        p.draw_line(Point{.x = static_cast<float>(i), .y = 0.0F}, Point{.x = 0.0F, .y = static_cast<float>(i)}, 1.0F,
+                    Color(255, 255, 255));
+    }
+    p.blur_region(mk(0, 0, 256, 256), 6.0F);
+    p.blend_region(mk(256, 0, 256, 256), BlendMode::Multiply, Color(255, 0, 255), 0.6F);
+    p.mask_region(mk(0, 256, 256, 256), ShaderMaskKind::LinearFade, 1.0F);
+    for (int i = 0; i < FX_PASSES; ++i) {
+        p.blur_region(mk(0, 0, FX_DIM, FX_DIM), 6.0F);
+        p.blend_region(mk(0, 0, FX_DIM, FX_DIM), BlendMode::Multiply, Color(255, 0, 255), 0.6F);
+        p.mask_region(mk(0, 0, FX_DIM, FX_DIM), ShaderMaskKind::LinearFade, 1.0F);
+    }
+    p.stop();
+    return dl;
+}
+
+/// @brief 场景六：区域效果两路帧成本。`compute = true` 走 compute 实路（默认），
+/// `false` 经 `set_compute_effects_enabled(false)` 强制片元兜底路（如同管线未建成）。
+/// @return submit/e2e 均为 0 = 无可用 adapter（调用方整段跳过）。
+auto bench_fx_wgpu(bool compute) -> WgpuFrameCost {
+    auto gpu = offscreen_rhi(FX_DIM, FX_DIM);
+    if (gpu == nullptr) {
+        return {};
+    }
+    gpu->set_compute_effects_enabled(compute);
+    const DisplayList proto = make_fx_proto();
+    return time_batch(*gpu, FX_DIM, FX_DIM, FX_WARMUP, FX_FRAMES,
+                      [&](int, DisplayList &dl) { dl = proto; });
+}
+
 auto run_wgpu_scenarios() -> void {
     AURORA_LOG_RAW("bench", "## 场景三：wgpu 真 GPU 离屏——视频逐帧更新（端到端帧成本，含提交与等待）\n\n");
     auto probe = offscreen_rhi(1, 1);
     if (probe == nullptr) {
-        AURORA_LOG_RAW("bench", "（无可用 wgpu adapter/device：场景三/四/五整段跳过）\n\n");
+        AURORA_LOG_RAW("bench", "（无可用 wgpu adapter/device：场景三/四/五/六整段跳过）\n\n");
         return;
     }
     AURORA_LOG_RAW("bench", "| 路径 | 每帧提交（CPU） | 每帧端到端（批尾一次排空） |\n|:---|---:|---:|\n");
@@ -503,6 +564,26 @@ auto run_wgpu_scenarios() -> void {
                    std::to_string(MIP_DIM), "×", std::to_string(MIP_DIM), " 图像值拷贝与 content_hash 计算），故静态行的"
                    "地板值是**帧装配的 CPU 成本**（录制侧按值入池，流式分支亦然）而非 GPU 成本——流式路的净收益在槽复用、"
                    "免 PMA 副本与免 mip churn（场景三即此差额的体现）。\n\n");
+
+    AURORA_LOG_RAW("bench", "## 场景六：区域效果 compute vs 片元兜底两路（", std::to_string(FX_DIM), "×",
+                   std::to_string(FX_DIM), "，blur r6 + Multiply + LinearFade 整幅连做 ",
+                   std::to_string(FX_PASSES), " 遍，", std::to_string(FX_FRAMES), " 帧）\n\n");
+    AURORA_LOG_RAW("bench", "| 路径 | 每帧提交（CPU） | 每帧端到端（批尾一次排空） |\n|:---|---:|---:|\n");
+    const WgpuFrameCost fxf = bench_fx_wgpu(false);
+    const WgpuFrameCost fxc = bench_fx_wgpu(true);
+    AURORA_LOG_RAW("bench", "| 片元兜底路（强制，`set_compute_effects_enabled(false)`） | ", ffmt(3, fxf.submit_ms),
+                   " ms | ", ffmt(3, fxf.e2e_ms), " ms |\n");
+    AURORA_LOG_RAW("bench", "| compute 实路（默认） | ", ffmt(3, fxc.submit_ms), " ms | ", ffmt(3, fxc.e2e_ms),
+                   " ms |\n");
+    AURORA_LOG_RAW("bench", "\n提交口径加速比 ",
+                   ffmt(2, fxc.submit_ms > 0.0 ? fxf.submit_ms / fxc.submit_ms : 0.0), " 倍、端到端口径 ",
+                   ffmt(2, fxc.e2e_ms > 0.0 ? fxf.e2e_ms / fxc.e2e_ms : 0.0),
+                   " 倍。compute 能力位 ", (probe->capabilities().compute ? "true" : "false"),
+                   "（false = GLES 端 compute 管线未建成：两行同为片元路，比值无意义）。差额主要在端到端口径"
+                   "（效果族 compute 存储纹理路 vs 片元离屏读-改-写路）；提交口径两路同为回放同一帧内容，"
+                   "片元路略高源于每次效果额外的离屏 render pass/绑定组装配。本段帧内容恒定（棋盘格 + 斜线带 + "
+                   "整幅效果三连，无图像上传），排空量子（≈15.6 ms/批尾一次）按 ", std::to_string(FX_FRAMES),
+                   " 帧摊薄进 e2e 地板值，两路同额、不影响差额。\n\n");
 }
 
 #endif  // AURORA_BACKEND_GPU_WGPU
@@ -510,7 +591,7 @@ auto run_wgpu_scenarios() -> void {
 auto run() -> void {
     AURORA_LOG_RAW("bench",
                    "# GPU 特性基准（场景一/二 = fake GL 桩确定性计数 + 上传 memcpy 成本；"
-                   "场景三/四/五 = wgpu 真 GPU 离屏端到端帧成本）\n\n");
+                   "场景三/四/五/六 = wgpu 真 GPU 离屏端到端帧成本）\n\n");
 
     // ---- 场景一：视频流式纹理 ----
     AURORA_LOG_RAW("bench", "## 场景一：视频逐帧更新（", std::to_string(VIDEO_W), "x", std::to_string(VIDEO_H),
@@ -555,7 +636,7 @@ auto run() -> void {
 #ifdef AURORA_BACKEND_GPU_WGPU
     run_wgpu_scenarios();
 #else
-    AURORA_LOG_RAW("bench", "## 场景三/四/五：未编译（`AURORA_BACKEND_GPU_WGPU=OFF`）\n\n");
+    AURORA_LOG_RAW("bench", "## 场景三/四/五/六：未编译（`AURORA_BACKEND_GPU_WGPU=OFF`）\n\n");
 #endif
 
     AURORA_LOG_RAW("bench", AURORA_BENCH_DISCLAIMER, "\n");
