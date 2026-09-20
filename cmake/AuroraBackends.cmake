@@ -3,8 +3,8 @@
 # ------------------------------------------------------------
 # 每个内置 Surface 图形后端可经 AURORA_BACKEND_* 开关整体剔除：关闭后
 # 对应 Surface 子类、工厂重载与重型平台头（<windows.h> / GLFW / OpenGL）被预处理器
-# 剔除，链接产物不再含该后端。音频设备后端开关（AURORA_ENABLE_AUDIO / AURORA_ENABLE_AUDIO_WASAPI，
-# ENABLE 组）亦定义于本文件末段。自定义注入路径（自定义 Surface 经
+# 剔除，链接产物不再含该后端。音频设备后端开关（AURORA_ENABLE_AUDIO / AURORA_ENABLE_AUDIO_WASAPI /
+# AURORA_ENABLE_AUDIO_ALSA，ENABLE 组）亦定义于本文件末段。自定义注入路径（自定义 Surface 经
 # Application(Scene,unique_ptr<Surface>)、自定义 AudioDeviceBackend 经 AudioContext 构造注入）
 # 始终可用，故「只用自定义 backend」可不编译任何内置后端。feature 宏由 aurora 目标以
 # PUBLIC 编译定义传播给所有消费者。
@@ -402,6 +402,24 @@ if (AURORA_ENABLE_AUDIO)
         # ole32：COM 初始化（CoInitialize/CoCreateInstance，MMDevice + IAudioClient）。
         target_link_libraries(aurora PUBLIC ole32)
         aurora_log("WASAPI audio backend enabled")
+    endif ()
+    # Linux 对位后端：ALSA（音频子系统对称设计——Windows WASAPI / Linux ALSA）。
+    # 运行时绑定 dlopen("libasound.so.2")：无 <alsa> 头、无 dev 包、不链 libasound，
+    # 构建机有无需 ALSA 开发环境即可编译（缺失仅运行期降级 start false → 静默模式）。
+    # ${CMAKE_DL_LIBS}：glibc < 2.34 需显式 -ldl（2.34+ 并入 libc 后为空）。
+    if (LINUX)
+        option(AURORA_ENABLE_AUDIO_ALSA "Build ALSA audio backend (Linux, runtime-bound libasound via dlopen)" ON)
+    else ()
+        option(AURORA_ENABLE_AUDIO_ALSA "Build ALSA audio backend (Linux, runtime-bound libasound via dlopen)" OFF)
+    endif ()
+    if (AURORA_ENABLE_AUDIO_ALSA)
+        if (NOT LINUX)
+            aurora_error("AURORA_ENABLE_AUDIO_ALSA is only supported on Linux;"
+                    " disable it or turn off AURORA_ENABLE_AUDIO on other platforms.")
+        endif ()
+        aurora_define_feature(AURORA_ENABLE_AUDIO_ALSA EXPORT)
+        target_link_libraries(aurora PUBLIC ${CMAKE_DL_LIBS})
+        aurora_log("ALSA audio backend enabled (runtime-bound libasound, zero build dependency)")
     endif ()
 endif ()
 

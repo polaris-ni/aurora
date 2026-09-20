@@ -148,6 +148,18 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         target_include_directories(aurora_verify_wasapi_audio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
         list(APPEND _aurora_verify_targets aurora_verify_wasapi_audio)
     endif ()
+
+    # ---- ALSA 音频（Linux）：libasound 运行时绑定 / 真实设备线程 / 格式协商 / 图时钟 /
+    # 出声路径真机核对。段结构与 WASAPI 探针对齐（激活/格式契约/时钟/缓冲源与推流/
+    # suspend-resume/采集观察口 + --interactive 出声人工段）。无 libasound 或无输出设备
+    # 的机器（如未装音频栈的 WSL）自动段以退出码 2 报 ENV-UNAVAILABLE，属合法降级。
+    if (LINUX AND AURORA_ENABLE_AUDIO_ALSA)
+        aurora_add_verify_probe(aurora_verify_alsa_audio "${_aurora_verify_dir}/alsa_audio_live_probe.cpp")
+        # 采集后端 `failed()` 是库内部契约（src/aurora/media/audio_alsa.h），
+        # 公共 API 不暴露，仅本探针直连验收其生命周期行为（同 WASAPI 探针口径）。
+        target_include_directories(aurora_verify_alsa_audio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        list(APPEND _aurora_verify_targets aurora_verify_alsa_audio)
+    endif ()
     if (_aurora_verify_targets)
         add_custom_target(aurora_verify DEPENDS ${_aurora_verify_targets})
         aurora_log("Verify probes enabled: ${_aurora_verify_targets} (build all with --target aurora_verify)")

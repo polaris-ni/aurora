@@ -20,6 +20,7 @@
 #include <ranges>
 #include <utility>
 
+#include "audio_alsa.h"
 #include "audio_wasapi.h"
 #include "aurora/core/log.h"
 
@@ -812,16 +813,26 @@ auto AudioRecordingDestinationNode::save_wav(const std::string &path) const -> R
 
 namespace {
 
-// 默认设备后端工厂：恒构造 WasapiDeviceBackend——宏关闭时其 .cpp 体为 disabled 桩
-// （start 恒 false），AudioContext 随即静默降级；真实 WASAPI 后端见 audio_wasapi.cpp。
+// 默认设备后端工厂：Linux 开启 AURORA_ENABLE_AUDIO_ALSA 时构造 AlsaDeviceBackend，
+// 其余平台构造 WasapiDeviceBackend——两者宏关闭时 .cpp 体均为 disabled 桩
+// （start 恒 false），AudioContext 随即静默降级；真实实现见 audio_alsa.cpp /
+// audio_wasapi.cpp。
 auto create_default_device_backend() -> std::unique_ptr<AudioDeviceBackend> {
+#ifdef AURORA_ENABLE_AUDIO_ALSA
+    return std::make_unique<AlsaDeviceBackend>();
+#else
     return std::make_unique<WasapiDeviceBackend>();
+#endif
 }
 
-// 默认采集后端工厂：恒构造 WasapiCaptureBackend——宏关闭时其 .cpp 体为 disabled 桩
-// （start 恒 false → create_microphone_source 显式报错，录制不静默降级）。
+// 默认采集后端工厂：与设备后端同口径（ALSA/WASAPI 按宏择路）——disabled 桩
+// start 恒 false → create_microphone_source 显式报错，录制不静默降级。
 [[maybe_unused]] auto create_default_capture_backend() -> std::unique_ptr<AudioCaptureBackend> {
+#ifdef AURORA_ENABLE_AUDIO_ALSA
+    return std::make_unique<AlsaCaptureBackend>();
+#else
     return std::make_unique<WasapiCaptureBackend>();
+#endif
 }
 
 }  // namespace

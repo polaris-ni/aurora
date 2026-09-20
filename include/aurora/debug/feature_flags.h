@@ -42,6 +42,7 @@ struct FeatureFlags {
     bool debug = false;
     bool audio = false;
     bool enable_audio_wasapi = false;
+    bool enable_audio_alsa = false;
     // ---- AURORA_ENABLE_IMAGE_*（编解码能力）----
     bool image_jpeg = false;
     bool image_webp = false;
