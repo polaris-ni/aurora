@@ -19,6 +19,7 @@
 
 #include <cmath>
 #include <exception>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -329,6 +330,23 @@ class TraceScope {
 #define AURORA_TEST_REQUIRE_MSG(expr, ...) \
     AURORA_TEST_REQUIRE_REPORT_(           \
         ::aurora::testing::detail::message_message(static_cast<bool>((expr)), #expr, (__VA_ARGS__)))
+
+namespace aurora::testing {
+
+/// @brief 断言 optional 持有值并取出它（未持有即本用例致命失败）。
+///
+/// 为什么需要这个包装：`AURORA_TEST_REQUIRE(opt.has_value())` 的展开会把判定结果
+/// 交给报告器函数，`bugprone-unchecked-optional-access` 的路径分析无法据此认定
+/// 「已检查」，紧随其后的 `opt->` / `*opt` 会被误报。把「检查 + 取值」收进本函数后
+/// 调用点不再直接触碰 optional，误报消除；代价是此处需要一处具名抑制。
+template <typename T>
+[[nodiscard]] auto require_value(const std::optional<T>& opt) -> T {
+    AURORA_TEST_REQUIRE(opt.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): 上一行 REQUIRE 已断言持有值，其宏展开对路径分析不透明
+    return *opt;
+}
+
+}  // namespace aurora::testing
 
 /// @brief 断言表达式为真（失败时打印 Actual / Expected）。
 #define AURORA_TEST_CHECK_TRUE(...) \

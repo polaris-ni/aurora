@@ -16,14 +16,16 @@ namespace aurora::rhi {
 /// @brief 流式图像句柄（后端不透明值；`0` 恒为无效句柄）。
 ///
 /// 由 `acquire_stream_image` / `import_native_surface` 签发，指向后端内的常驻纹理槽
-///（固定槽复用、不参与通用缓存淘汰）。生命周期由调用方管理：用毕 `release_stream_image`。
+/// （固定槽复用、不参与通用缓存淘汰）。生命周期由调用方管理：用毕 `release_stream_image`。
 using StreamImageId = std::uint64_t;
 
 /// @brief RHI 后端能力位（构造时确定，帧间不变；软件后端全 false）。
 struct RhiCapabilities {
-    bool gpu = false;                   ///< 硬件加速命令消费（GPU 后端为 true）
-    bool native_surface_import = false; ///< 可导入平台原生 GPU 表面（`import_native_surface` 可用）
-    bool compute = false;               ///< 支持 compute 内部加速（当前兑现：大图重采样 mip 链生成 + blur / blend / mask 区域效果；层合成维持片元路——MSAA 批式累加目标上读-改-写需逐层整幅 resolve+load 往返并断合批，非收益方向，见规格 §8.8）
+    bool gpu = false;  ///< 硬件加速命令消费（GPU 后端为 true）
+    bool native_surface_import = false;  ///< 可导入平台原生 GPU 表面（`import_native_surface` 可用）
+    bool compute = false;  ///< 支持 compute 内部加速（当前兑现：大图重采样 mip 链生成 + blur / blend / mask
+                           ///< 区域效果；层合成维持片元路——MSAA 批式累加目标上读-改-写需逐层整幅 resolve+load
+                           ///< 往返并断合批，非收益方向，见规格 §8.8）
 };
 
 /// @brief 一条绘制命令所需的**变长数据**，由 `DisplayList` 在回放时把池下标解析为只读指针。
@@ -32,12 +34,12 @@ struct RhiCapabilities {
 /// 文本 / 字体 / 渐变色标 / 图像 / 变换矩阵，**不需要也不应接触 `DisplayList` 的池下标语义**
 /// ——下标合法性是录制方（`Painter::record`）的契约，解析集中在一处，避免每个后端各判一遍。
 struct CmdData {
-    const std::string *text = nullptr;           ///< DrawText 字符串
-    const Font *font = nullptr;                  ///< DrawText 字体
+    const std::string *text = nullptr;  ///< DrawText 字符串
+    const Font *font = nullptr;  ///< DrawText 字体
     const std::vector<Color> *colors = nullptr;  ///< 渐变色标颜色数组
-    const std::vector<float> *stops = nullptr;   ///< 渐变色标停靠数组（归一化 [0,1]）
-    const Image *image = nullptr;                ///< DrawImage / Composite 的图像
-    const Matrix2D *matrix = nullptr;            ///< Composite 的仿射变换矩阵
+    const std::vector<float> *stops = nullptr;  ///< 渐变色标停靠数组（归一化 [0,1]）
+    const Image *image = nullptr;  ///< DrawImage / Composite 的图像
+    const Matrix2D *matrix = nullptr;  ///< Composite 的仿射变换矩阵
     const std::vector<Point> *points = nullptr;  ///< Polyline 的折线点集（逻辑 dp）
 };
 

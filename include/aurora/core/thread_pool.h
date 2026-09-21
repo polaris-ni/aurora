@@ -41,7 +41,7 @@ class ThreadPool {
   public:
     /// @brief 编译期默认是否 deferred：仅「无 `std::thread` 能力」的构建为 true
     ///        （现状即 Emscripten 未开 `-pthread`，见 platform.h `AURORA_CAP_THREADS`）。
-    static inline constexpr bool kCompileTimeDeferred = AURORA_CAP_THREADS == 0;
+    static inline constexpr bool AURORA_COMPILE_TIME_DEFERRED = AURORA_CAP_THREADS == 0;
 
     /// @brief 默认 worker 数：`hardware_concurrency()`，下限 2（单核/查询失败时为 2）。
     [[nodiscard]] static auto default_worker_count() -> std::size_t {
@@ -54,10 +54,10 @@ class ThreadPool {
 
     /**
      * @brief 构造：默认启动 `worker_count` 个 worker 线程；
-     *        deferred 模式（`kCompileTimeDeferred` 或显式 `force_deferred`）不启动线程。
+     *        deferred 模式（`AURORA_COMPILE_TIME_DEFERRED` 或显式 `force_deferred`）不启动线程。
      */
     explicit ThreadPool(std::size_t worker_count = default_worker_count(), bool force_deferred = false) {
-        deferred_ = kCompileTimeDeferred || force_deferred;
+        deferred_ = AURORA_COMPILE_TIME_DEFERRED || force_deferred;
         if (deferred_) {
             return;
         }
@@ -144,7 +144,7 @@ class ThreadPool {
             queue_.emplace([job = std::move(job)]() mutable -> void {
                 try {
                     job();
-                } catch (...) { // NOLINT(*-empty-catch)
+                } catch (...) {  // NOLINT(*-empty-catch)
                     // fire-and-forget：无处投递异常，吞掉即最后一道屏障
                 }
             });
@@ -222,7 +222,7 @@ class ThreadPool {
     std::queue<std::function<void()>> queue_;
     std::vector<std::thread> workers_;
     bool stop_ = false;
-    bool deferred_ = kCompileTimeDeferred;  ///< 延迟排空模式（见类头注释）
+    bool deferred_ = AURORA_COMPILE_TIME_DEFERRED;  ///< 延迟排空模式（见类头注释）
 };
 
 }  // namespace aurora

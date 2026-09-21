@@ -1,10 +1,10 @@
 // tools/verify/win32_wgpu_live_probe.cpp — Win32 + wgpu GPU 栅格真机探针（非 CTest）。
 //
-// 覆盖：AURORA_BACKEND_GPU_WGPU + AURORA_BACKEND_WIN32 构建下，WgpuSurface 宿主窗口与
+// 覆盖：AURORA_BACKEND_GPU_WGPU + AURORA_BACKEND_WIN32 构建下，WgpuWin32Surface 宿主窗口与
 // WgpuRhi（离屏直驱）在真实驱动（Vulkan/D3D12）上的接线——无头 CI 无法证明的部分。
 //
 // 自动段（无需人工）：
-//   1. 宿主装配：create_window(WgpuOptions) 真实开窗；surface 动态类型 WgpuSurface；
+//   1. 宿主装配：create_window(WgpuOptions) 真实开窗；surface 动态类型 WgpuWin32Surface；
 //      gpu_backend() 非空且 name == "gpu-wgpu"；is_available() / gpu_active() 初值为真。
 //   2. 能力与契约：capabilities().gpu == true、native_surface_import == false（v29 C API
 //      口径：仅契约位，不兑现）；import_native_surface 空帧恒返回 0（warn-once，不崩溃）。
@@ -157,8 +157,8 @@ auto main(int argc, char **argv) -> int {
     }
     auto &win = *created.value();
 
-    auto *ws = dynamic_cast<aurora::WgpuSurface *>(&win.surface());
-    check(ws != nullptr, "surface 动态类型为 WgpuSurface");
+    auto *ws = dynamic_cast<aurora::WgpuWin32Surface *>(&win.surface());
+    check(ws != nullptr, "surface 动态类型为 WgpuWin32Surface");
     if (ws == nullptr) {
         return 2;
     }

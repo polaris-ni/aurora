@@ -27,10 +27,10 @@ namespace aurora {
  * @note Rebuildable: yes, via `window_geometry_from_json`
  */
 struct WindowGeometry {
-    Point origin{};                        ///< 屏幕坐标（物理像素，与 `app::Display` 同一坐标系）
-    Size size{};                           ///< 外框尺寸（物理像素）
+    Point origin{};  ///< 屏幕坐标（物理像素，与 `app::Display` 同一坐标系）
+    Size size{};  ///< 外框尺寸（物理像素）
     WindowMode mode = WindowMode::Normal;  ///< 几何态（最大化/最小化/全屏需一并记忆）
-    int display_id = -1;                   ///< 所在显示器 id（与 `app::Display::id` 同源；-1 = 未知）
+    int display_id = -1;  ///< 所在显示器 id（与 `app::Display::id` 同源；-1 = 未知）
 };
 
 /// @brief 序列化为 JSON 对象（键稳定，供人工排查与跨版本兼容读取）。
@@ -65,7 +65,7 @@ auto save_window_geometry(preferences::Preferences::Group group, const std::stri
     -> void;
 
 /// @brief 分组视图下的读取（语义同 `Preferences` 重载）。
-[[nodiscard]] auto load_window_geometry(preferences::Preferences::Group group, const std::string &key)
+[[nodiscard]] auto load_window_geometry(const preferences::Preferences::Group &group, const std::string &key)
     -> std::optional<WindowGeometry>;
 
 }  // namespace aurora

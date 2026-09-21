@@ -48,10 +48,10 @@ enum class AccessibilityAction : std::uint16_t {  // NOLINT(*-enum-size)
     Select = 1U << 3U,
     Invoke = 1U << 4U,  ///< 默认动作（按钮触发等）
     Toggle = 1U << 5U,  ///< 切换状态（复选 / 开关）
-    ScrollUp = 1U << 6U,        ///< 向上滚动（G32；对应 Flutter scrollUp）
-    ScrollDown = 1U << 7U,      ///< 向下滚动（G32）
-    ScrollLeft = 1U << 8U,      ///< 向左滚动（G32）
-    ScrollRight = 1U << 9U,     ///< 向右滚动（G32）
+    ScrollUp = 1U << 6U,  ///< 向上滚动（G32；对应 Flutter scrollUp）
+    ScrollDown = 1U << 7U,  ///< 向下滚动（G32）
+    ScrollLeft = 1U << 8U,  ///< 向左滚动（G32）
+    ScrollRight = 1U << 9U,  ///< 向右滚动（G32）
     ScrollIntoView = 1U << 10U,  ///< 请求把本控件滚入视口（G32；UIA IScrollItemProvider）
 };
 
@@ -62,8 +62,8 @@ enum class AccessibilityAction : std::uint16_t {  // NOLINT(*-enum-size)
 /// @note Thread: main-thread only
 struct AccessibilityActionRequest {
     AccessibilityAction action = AccessibilityAction::None;
-    double number = 0.0;      ///< Value 动作的数值（Slider 设值）
-    std::string_view text;    ///< Value 动作的文本（文本替换）
+    double number = 0.0;  ///< Value 动作的数值（Slider 设值）
+    std::string_view text;  ///< Value 动作的文本（文本替换）
 };
 
 [[nodiscard]] inline auto operator|(AccessibilityAction a, AccessibilityAction b) -> AccessibilityAction {
@@ -87,12 +87,12 @@ struct AccessibilityNode {
     std::vector<AccessibilityNode> children;
 
     // ---- 切片 1 新增：身份 / 状态 / 取值域 / 层级 / 树裁剪（追加在末尾，兼容既有聚合初始化）----
-    std::uint64_t id = 0;                              ///< 稳定身份（`Widget::runtime_id()`；0 = 无身份）
-    AccessibilityState state;                          ///< 状态位集（含 visible/focusable/offscreen 派生位）
-    std::optional<AccessibilityRange> range;           ///< 取值域（Slider / ProgressIndicator）
-    std::optional<int> level;                          ///< 标题层级（OQ4；`accessibility_level()`）
-    bool is_control = true;                            ///< 是否进控制视图（UIA IsControlElement / macOS isAccessibilityElement）
-    bool is_content = true;                            ///< 是否进内容视图（UIA IsContentElement）
+    std::uint64_t id = 0;  ///< 稳定身份（`Widget::runtime_id()`；0 = 无身份）
+    AccessibilityState state;  ///< 状态位集（含 visible/focusable/offscreen 派生位）
+    std::optional<AccessibilityRange> range;  ///< 取值域（Slider / ProgressIndicator）
+    std::optional<int> level;  ///< 标题层级（OQ4；`accessibility_level()`）
+    bool is_control = true;  ///< 是否进控制视图（UIA IsControlElement / macOS isAccessibilityElement）
+    bool is_content = true;  ///< 是否进内容视图（UIA IsContentElement）
 
     [[nodiscard]] auto has_action(AccessibilityAction a) const -> bool {
         return (static_cast<std::uint16_t>(actions) & static_cast<std::uint16_t>(a)) != 0;
@@ -315,9 +315,7 @@ using AccessibilityBroadcastHook = std::function<void(const AccessibilityEvent &
 }
 
 /// @brief 安装/卸载广播钩子（由 `a11y::ProviderRegistry` 调用；宿主不应直接使用）。
-inline auto set_a11y_broadcast_hook(AccessibilityBroadcastHook h) -> void {
-    a11y_broadcast_hook() = std::move(h);
-}
+inline auto set_a11y_broadcast_hook(AccessibilityBroadcastHook h) -> void { a11y_broadcast_hook() = std::move(h); }
 
 /// @brief 「控件实例即将销毁」的通知钩子（与广播钩子**并列**的第二条独立通道）。
 ///
@@ -380,8 +378,8 @@ inline auto announce_accessibility(const std::string &text, const Widget *target
     if (text.empty()) {
         return;
     }
-    notify_accessibility_event(AccessibilityEvent{
-        .kind = AccessibilityEventKind::Announcement, .target = target, .announcement_text = text});
+    notify_accessibility_event(
+        AccessibilityEvent{.kind = AccessibilityEventKind::Announcement, .target = target, .announcement_text = text});
 }
 
 /// @brief 统计无障碍树节点总数（含根）。

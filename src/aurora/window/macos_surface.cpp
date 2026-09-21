@@ -70,7 +70,7 @@ auto MacOSSurface::begin_frame(int w, int h) -> Result<bool> {
     size_ = Size{static_cast<float>(w), static_cast<float>(h)};
     // 浅色底色（与 Win32/X11 一致）
     painter_.fill_rect(Rect{Point{0.0F, 0.0F}, Size{static_cast<float>(w), static_cast<float>(h)}},
-                        Color{245, 245, 247, 255});
+                       Color{245, 245, 247, 255});
     return true;
 }
 

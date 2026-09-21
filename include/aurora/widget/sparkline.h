@@ -7,12 +7,12 @@
 #include <string>
 #include <vector>
 
+#include "aurora/core/accessibility.h"
 #include "aurora/core/types.h"
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/chart_common.h"
 #include "aurora/widget/widget.h"
-#include "aurora/core/accessibility.h"
 
 namespace aurora {
 
@@ -85,9 +85,7 @@ class Sparkline : public LeafWidget, public SparklineProps {
     /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `Sparkline`，
     ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
     /// @note Side-effects: pure
-    [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override {
-        return AccessibilityRole::Image;
-    }
+    [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override { return AccessibilityRole::Image; }
 
     [[nodiscard]] auto accessibility_label() const -> std::string override;
     [[nodiscard]] auto accessibility_value() const -> std::string override;

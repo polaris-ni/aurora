@@ -59,7 +59,7 @@ using aurora::a11y::TreeSnapshot;
 class ProbeLeaf final : public LeafWidget {
   public:
     explicit ProbeLeaf(const char *type) : type_{type} {}
-    [[nodiscard]] auto type_name() const -> const char *override { return type_; }
+    [[nodiscard]] auto type_name() const -> const char * override { return type_; }
 
   protected:
     auto on_layout(const Constraints & /*c*/, const BuildContext & /*ctx*/) -> Size override { return {}; }
@@ -71,7 +71,7 @@ class ProbeLeaf final : public LeafWidget {
 
 class ProbeColumn final : public Container {
   public:
-    [[nodiscard]] auto type_name() const -> const char *override { return "Column"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "Column"; }
 
   protected:
     auto on_layout(const Constraints & /*c*/, const BuildContext & /*ctx*/) -> Size override { return {}; }

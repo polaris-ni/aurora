@@ -19,21 +19,31 @@ auto append_escaped(std::string &out, const char *s) -> void {
         out += "<null>";
         return;
     }
-    for (const char *p = s; *p != '\0'; ++p) { // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    for (const char *p = s; *p != '\0'; ++p) {  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         const char c = *p;
         switch (c) {
-        case '"': out += "\\\""; break;
-        case '\\': out += "\\\\"; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default:
-            if (static_cast<unsigned char>(c) < 0x20) {
-                out += internal::string_format("\\u%04x", static_cast<unsigned>(static_cast<unsigned char>(c)));
-            } else {
-                out += c;
-            }
-            break;
+            case '"':
+                out += "\\\"";
+                break;
+            case '\\':
+                out += "\\\\";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    out += internal::string_format("\\u%04x", static_cast<unsigned>(static_cast<unsigned char>(c)));
+                } else {
+                    out += c;
+                }
+                break;
         }
     }
 }
@@ -41,7 +51,7 @@ auto append_escaped(std::string &out, const char *s) -> void {
 /// @brief 毫秒 → 微秒（Trace Event 规范的时间单位）。
 [[nodiscard]] constexpr auto to_us(double ms) -> double { return ms * 1000.0; }
 
-} // namespace
+}  // namespace
 
 TraceWriter::TraceWriter() {
     events_.reserve(capacity_);
@@ -104,7 +114,7 @@ auto TraceWriter::capture_counters(std::uint64_t frame_index, double ts_ms, cons
         ++dropped_;
         return;
     }
-    counters_.push_back(TraceCounterSample{ .ts_ms = ts_ms, .frame_index = frame_index, .counters = counters });
+    counters_.push_back(TraceCounterSample{.ts_ms = ts_ms, .frame_index = frame_index, .counters = counters});
 }
 
 auto TraceWriter::add_complete_event(const char *name, double ts_ms, double dur_ms, std::uint16_t depth,
@@ -116,13 +126,13 @@ auto TraceWriter::add_complete_event(const char *name, double ts_ms, double dur_
         ++dropped_;
         return;
     }
-    events_.push_back(TraceEvent{ .name = name,
-                                   .ts_ms = ts_ms,
-                                   .dur_ms = dur_ms,
-                                   .frame_index = frame_index,
-                                   .depth = depth,
-                                   .phase = TracePhase::Complete,
-                                   .long_task = false });
+    events_.push_back(TraceEvent{.name = name,
+                                 .ts_ms = ts_ms,
+                                 .dur_ms = dur_ms,
+                                 .frame_index = frame_index,
+                                 .depth = depth,
+                                 .phase = TracePhase::Complete,
+                                 .long_task = false});
 }
 
 auto TraceWriter::add_instant_event(const char *name, double ts_ms, std::uint64_t frame_index) -> void {
@@ -133,13 +143,13 @@ auto TraceWriter::add_instant_event(const char *name, double ts_ms, std::uint64_
         ++dropped_;
         return;
     }
-    events_.push_back(TraceEvent{ .name = name,
-                                   .ts_ms = ts_ms,
-                                   .dur_ms = 0.0,
-                                   .frame_index = frame_index,
-                                   .depth = 0,
-                                   .phase = TracePhase::Instant,
-                                   .long_task = false });
+    events_.push_back(TraceEvent{.name = name,
+                                 .ts_ms = ts_ms,
+                                 .dur_ms = 0.0,
+                                 .frame_index = frame_index,
+                                 .depth = 0,
+                                 .phase = TracePhase::Instant,
+                                 .long_task = false});
 }
 
 // ---------------------------------------------------------------------------
@@ -253,9 +263,9 @@ auto TraceWriter::write_json(const char *path) const -> Result<bool> {
     if (!f.good()) {
         return make_error(ErrorCode::IOFileNotFound, std::string("TraceWriter::write_json: write failed ") + path);
     }
-    return Result<bool>{ true };
+    return Result<bool>{true};
 }
 
 auto TraceWriter::dump_to_log() const -> void { AURORA_LOG_RAW("perf", to_json()); }
 
-} // namespace aurora
+}  // namespace aurora

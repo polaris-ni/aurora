@@ -17,6 +17,8 @@
 
 namespace aurora::test_cases::utest_window_geometry {
 
+using aurora::testing::require_value;
+
 namespace {
 
 /// @brief 构造一个必然可用的几何：取主显示器工作区内的一小块。
@@ -34,15 +36,14 @@ auto usable_geometry() -> WindowGeometry {
 
 AURORA_TEST_CASE(geometry_json_round_trip) {
     const WindowGeometry g = usable_geometry();
-    const auto parsed = window_geometry_from_json(window_geometry_to_json(g));
-    AURORA_TEST_REQUIRE(parsed.has_value());
+    const WindowGeometry parsed = require_value(window_geometry_from_json(window_geometry_to_json(g)));
 
-    AURORA_TEST_CHECK_NEAR(parsed->origin.x, g.origin.x, 0.001);
-    AURORA_TEST_CHECK_NEAR(parsed->origin.y, g.origin.y, 0.001);
-    AURORA_TEST_CHECK_NEAR(parsed->size.width, g.size.width, 0.001);
-    AURORA_TEST_CHECK_NEAR(parsed->size.height, g.size.height, 0.001);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(parsed->mode), static_cast<int>(WindowMode::Maximized));
-    AURORA_TEST_CHECK_EQ(parsed->display_id, g.display_id);
+    AURORA_TEST_CHECK_NEAR(parsed.origin.x, g.origin.x, 0.001);
+    AURORA_TEST_CHECK_NEAR(parsed.origin.y, g.origin.y, 0.001);
+    AURORA_TEST_CHECK_NEAR(parsed.size.width, g.size.width, 0.001);
+    AURORA_TEST_CHECK_NEAR(parsed.size.height, g.size.height, 0.001);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(parsed.mode), static_cast<int>(WindowMode::Maximized));
+    AURORA_TEST_CHECK_EQ(parsed.display_id, g.display_id);
 }
 
 AURORA_TEST_CASE(malformed_json_is_rejected) {
@@ -52,23 +53,23 @@ AURORA_TEST_CASE(malformed_json_is_rejected) {
     AURORA_TEST_CHECK_FALSE(window_geometry_from_json(Json{{"origin_x", 0.0}}).has_value());
     // 类型不符（字符串代替数值）。
     AURORA_TEST_CHECK_FALSE(window_geometry_from_json(Json{
-                                                        {"origin_x", "x"},
-                                                        {"origin_y", 0.0},
-                                                        {"width", 10.0},
-                                                        {"height", 10.0},
-                                                        {"mode", 0},
-                                                        {"display_id", -1},
-                                                    })
+                                                          {"origin_x", "x"},
+                                                          {"origin_y", 0.0},
+                                                          {"width", 10.0},
+                                                          {"height", 10.0},
+                                                          {"mode", 0},
+                                                          {"display_id", -1},
+                                                      })
                                 .has_value());
     // 枚举越界（mode=99）。
     AURORA_TEST_CHECK_FALSE(window_geometry_from_json(Json{
-                                                        {"origin_x", 0.0},
-                                                        {"origin_y", 0.0},
-                                                        {"width", 10.0},
-                                                        {"height", 10.0},
-                                                        {"mode", 99},
-                                                        {"display_id", -1},
-                                                    })
+                                                          {"origin_x", 0.0},
+                                                          {"origin_y", 0.0},
+                                                          {"width", 10.0},
+                                                          {"height", 10.0},
+                                                          {"mode", 99},
+                                                          {"display_id", -1},
+                                                      })
                                 .has_value());
 }
 
@@ -99,10 +100,9 @@ AURORA_TEST_CASE(save_and_load_via_preferences) {
 
     AURORA_TEST_CHECK_FALSE(load_window_geometry(prefs, "main").has_value());  // 首次：无记录
     save_window_geometry(prefs, "main", g);
-    const auto loaded = load_window_geometry(prefs, "main");
-    AURORA_TEST_REQUIRE(loaded.has_value());
-    AURORA_TEST_CHECK_NEAR(loaded->size.width, g.size.width, 0.001);
-    AURORA_TEST_CHECK_NEAR(loaded->origin.x, g.origin.x, 0.001);
+    const WindowGeometry loaded = require_value(load_window_geometry(prefs, "main"));
+    AURORA_TEST_CHECK_NEAR(loaded.size.width, g.size.width, 0.001);
+    AURORA_TEST_CHECK_NEAR(loaded.origin.x, g.origin.x, 0.001);
 
     // 存储了「不可用」几何（显示器已拔除的典型场景）：load 兜底为 nullopt，由调用方回退默认布局。
     WindowGeometry broken = g;
@@ -122,12 +122,10 @@ AURORA_TEST_CASE(window_group_uses_distinct_keys) {
     save_window_geometry(group, "main", main_geo);
     save_window_geometry(group, "aux", aux_geo);
 
-    const auto l_main = load_window_geometry(group, "main");
-    const auto l_aux = load_window_geometry(group, "aux");
-    AURORA_TEST_REQUIRE(l_main.has_value());
-    AURORA_TEST_REQUIRE(l_aux.has_value());
+    const WindowGeometry l_main = require_value(load_window_geometry(group, "main"));
+    const WindowGeometry l_aux = require_value(load_window_geometry(group, "aux"));
     // 两个窗口的几何互不覆盖。
-    AURORA_TEST_CHECK_NE(l_main->origin.x, l_aux->origin.x);
+    AURORA_TEST_CHECK_NE(l_main.origin.x, l_aux.origin.x);
     AURORA_TEST_CHECK_FALSE(load_window_geometry(group, "missing").has_value());
 }
 
@@ -169,10 +167,9 @@ AURORA_TEST_CASE(application_restores_and_saves_geometry_across_runs) {
     app.close_window(app.main_window());
     app.run();
 
-    const auto saved = load_window_geometry(prefs, "main");
-    AURORA_TEST_REQUIRE(saved.has_value());
-    AURORA_TEST_CHECK_NEAR(saved->origin.x, stored.origin.x, 0.001);
-    AURORA_TEST_CHECK_NEAR(saved->size.height, stored.size.height, 0.001);
+    const WindowGeometry saved = require_value(load_window_geometry(prefs, "main"));
+    AURORA_TEST_CHECK_NEAR(saved.origin.x, stored.origin.x, 0.001);
+    AURORA_TEST_CHECK_NEAR(saved.size.height, stored.size.height, 0.001);
 }
 
 }  // namespace aurora::test_cases::utest_window_geometry

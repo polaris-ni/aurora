@@ -3,6 +3,7 @@
 /// 测试说明: 覆盖滚动位置注册表的会话内读写与清除、会话作用域隔离（含嵌套恢复）、Preferences 懒回读与
 /// sync 批量写穿（值 + 墓碑）、待落盘条目的键数上界（同键重复写节流），以及同键多持有者认领的一次性诊断
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -26,12 +27,7 @@ auto fresh() -> ScrollStorage & {
 
 /// @brief 判定诊断列表中是否含「同键多认领」提示。
 auto has_claim_notice(const std::vector<Diagnostic> &diags) -> bool {
-    for (const auto &d : diags) {
-        if (std::string{d.where} == "scroll_storage") {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(diags, [](const auto &d) { return std::string{d.where} == "scroll_storage"; });
 }
 
 }  // namespace
@@ -116,7 +112,7 @@ AURORA_TEST_CASE(read_falls_back_to_preferences_lazily) {
 
     AURORA_TEST_CHECK_NEAR(storage.read("feed").value_or(-1.0F), 140.0F, 1e-6F);  // 懒回读
     AURORA_TEST_CHECK_EQ(storage.pending_writes(), std::size_t{0});  // 回读不产生待落盘（值已在后端）
-    AURORA_TEST_CHECK_EQ(storage.size(), std::size_t{1});            // 已填充内存缓存
+    AURORA_TEST_CHECK_EQ(storage.size(), std::size_t{1});  // 已填充内存缓存
 }
 
 AURORA_TEST_CASE(clear_marks_tombstone_and_sync_removes_backend_key) {

@@ -4,8 +4,6 @@
 // 数据顺序随之改写（下方文本框实时显示当前顺序）。拖到视口上下边缘会出现自动滚动。
 // 条目自带点击回调，故拖拽限定在**右侧手柄带**（`set_drag_handle(true)`）：列表把该窄带留给自己，
 // 避免子项的点击消费掉按下事件（这是 `ReorderableList` 的交互边界，见 specification/04-widget.md §3.4）。
-#include "demo_common.h"
-
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -15,6 +13,7 @@
 
 #include "aurora/widget/reorderable_list.h"
 #include "aurora/widget/text.h"
+#include "demo_common.h"
 
 namespace {
 
@@ -41,8 +40,8 @@ auto task_row(const std::string &label, int index, au::Color accent) -> au::Node
 
 // NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径）
 auto main() -> int {
-    const std::vector<std::string> labels{"需求评审", "接口联调", "写回归用例", "性能采样",
-                                          "文档回写", "发布 alpha.5", "收集反馈", "排下轮计划"};
+    const std::vector<std::string> labels{"需求评审", "接口联调",     "写回归用例", "性能采样",
+                                          "文档回写", "发布 alpha.5", "收集反馈",   "排下轮计划"};
     auto items = std::make_shared<au::State<std::vector<std::string>>>(labels);
 
     // 顺序镜像：重排回调里刷新显示（数据已由控件改写；此处只做展示）。

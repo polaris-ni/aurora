@@ -22,9 +22,9 @@ namespace aurora {
 
 /// @brief 下拉刷新状态机（PullToRefresh 三态）。
 enum class PullToRefreshState : std::uint8_t {
-    Idle,       ///< 空闲（指示器收起）
-    Pulling,    ///< 下拉中（橡皮筋跟手）
-    Refreshing, ///< 刷新中（spinner 持续旋转，待 `finish_refresh()` 收拢）
+    Idle,  ///< 空闲（指示器收起）
+    Pulling,  ///< 下拉中（橡皮筋跟手）
+    Refreshing,  ///< 刷新中（spinner 持续旋转，待 `finish_refresh()` 收拢）
 };
 
 /// @brief PullToRefresh 属性（聚合，继承式双模 API：字段即控件公有成员）。
@@ -114,9 +114,7 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     /// @brief 当前下拉距离（dp，覆盖层高度；测试/联动观测点）。
     [[nodiscard]] auto pull_distance() const -> float { return pull_; }
     /// @brief 触发进度（pull/threshold，可 >1；绑定指示器旋转角度/透明度用）。
-    [[nodiscard]] auto progress() const -> float {
-        return threshold > 0.0F ? pull_ / threshold : 0.0F;
-    }
+    [[nodiscard]] auto progress() const -> float { return threshold > 0.0F ? pull_ / threshold : 0.0F; }
     /// @brief 是否正在回弹滑动（测试观测点）。
     [[nodiscard]] auto is_gliding() const -> bool { return glide_.active; }
 
@@ -183,8 +181,8 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
             drag_consumed_ = false;  // 顶部起按：开启下一次下拉候选
         }
         const bool vertical_down = drag_.axis() == DragAxis::Vertical && drag_.delta().y > 0.0F;
-        if (e.action == MouseAction::Move && drag_.is_dragging() && vertical_down && !drag_consumed_
-            && child_at_top() && state_ != PullToRefreshState::Refreshing) {
+        if (e.action == MouseAction::Move && drag_.is_dragging() && vertical_down && !drag_consumed_ &&
+            child_at_top() && state_ != PullToRefreshState::Refreshing) {
             pull_ = std::clamp(rubber(drag_.delta().y), 0.0F, max_pull);
             state_ = PullToRefreshState::Pulling;
             glide_.active = false;
@@ -234,12 +232,13 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
         p.fill_rect(band, Color{255, 255, 255, 255});
         p.set_alpha(prev_alpha);
         const float angle = spin_angle_;
-        p.stroke_arc(Point{.x = band.origin.x + (band.size.width / 2.0F), .y = band.origin.y + (band.size.height / 2.0F)},
-                     10.0F, 2.5F, angle, angle + (4.712389F * std::clamp(progress(), 0.25F, 1.0F)), accent);
+        p.stroke_arc(
+            Point{.x = band.origin.x + (band.size.width / 2.0F), .y = band.origin.y + (band.size.height / 2.0F)}, 10.0F,
+            2.5F, angle, angle + (4.712389F * std::clamp(progress(), 0.25F, 1.0F)), accent);
         if (state_ == PullToRefreshState::Refreshing) {
             const float th = render::FontEngine::measure_height(Font{.size_pt = 11.0F});
             p.draw_text(Rect{.origin = Point{.x = band.origin.x, .y = band.origin.y + pull_ - th - 4.0F},
-                              .size = Size{.width = band.size.width, .height = th}},
+                             .size = Size{.width = band.size.width, .height = th}},
                         "刷新中…", Font{.size_pt = 11.0F}, Color{120, 120, 120, 255});
         }
     }
@@ -247,8 +246,8 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     /// @brief 回弹/旋转逐帧推进（自驱动 tick，同 Scroll/Dismissible 模式）。
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         SingleChild::tick_gestures(now);
-        const double dt = last_tick_.has_value() ? std::chrono::duration<double>(now - *last_tick_).count()
-                                                 : (1.0 / 60.0);
+        const double dt =
+            last_tick_.has_value() ? std::chrono::duration<double>(now - *last_tick_).count() : (1.0 / 60.0);
         last_tick_ = now;
         bool busy = false;
         if (state_ == PullToRefreshState::Refreshing) {
@@ -347,9 +346,9 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     DragRecognizer drag_;
     bool drag_consumed_ = false;  ///< 本手势已被下拉劫持（子级点击不再参与）
     PullToRefreshState state_ = PullToRefreshState::Idle;
-    float pull_ = 0.0F;           ///< 当前下拉距离（dp）
-    float spin_angle_ = 0.0F;     ///< spinner 累计旋转角（弧度）
-    ScrollGlide glide_;           ///< 回弹短滑动时序
+    float pull_ = 0.0F;  ///< 当前下拉距离（dp）
+    float spin_angle_ = 0.0F;  ///< spinner 累计旋转角（弧度）
+    ScrollGlide glide_;  ///< 回弹短滑动时序
     std::optional<std::chrono::steady_clock::time_point> last_tick_;
 };
 

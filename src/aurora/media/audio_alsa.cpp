@@ -37,18 +37,18 @@ namespace {
 
 // ---- ALSA ABI 常量（内核 UAPI 转录，见文件头注释）----
 
-constexpr int kStreamPlayback = 0;      // SND_PCM_STREAM_PLAYBACK
-constexpr int kStreamCapture = 1;       // SND_PCM_STREAM_CAPTURE
-constexpr int kFormatFloatLE = 18;      // SNDRV_PCM_FORMAT_FLOAT_LE
-constexpr int kAccessRwInterleaved = 3;  // SND_PCM_ACCESS_RW_INTERLEAVED
-constexpr int kStateDisconnected = 7;  // SND_PCM_STATE_DISCONNECTED
+constexpr int AURORA_STREAM_PLAYBACK = 0;  // SND_PCM_STREAM_PLAYBACK
+constexpr int AURORA_STREAM_CAPTURE = 1;  // SND_PCM_STREAM_CAPTURE
+constexpr int AURORA_FORMAT_FLOAT_LE = 18;  // SNDRV_PCM_FORMAT_FLOAT_LE
+constexpr int AURORA_ACCESS_RW_INTERLEAVED = 3;  // SND_PCM_ACCESS_RW_INTERLEAVED
+constexpr int AURORA_STATE_DISCONNECTED = 7;  // SND_PCM_STATE_DISCONNECTED
 
-constexpr int kRenderRate = 48000;   // 图契约采样率（插件层吸收设备差异）
-constexpr int kRenderChannels = 2;   // 图契约声道数
-constexpr unsigned kLatencyUs = 20000;  // 缓冲目标延迟 20ms（≈ WASAPI 引擎缓冲）
-constexpr int kMaxBlockFrames = 960;  // 单轮渲染上限（20ms @48k）
-constexpr int kWaitTimeoutMs = 20;  // 无余量时 wait 超时（stop 响应性上界）
-constexpr int kOpenFailureBackoffMs = 200;  // 端点重开退避（对齐 WASAPI 重路由）
+constexpr int AURORA_RENDER_RATE = 48000;  // 图契约采样率（插件层吸收设备差异）
+constexpr int AURORA_RENDER_CHANNELS = 2;  // 图契约声道数
+constexpr unsigned AURORA_LATENCY_US = 20000;  // 缓冲目标延迟 20ms（≈ WASAPI 引擎缓冲）
+constexpr int AURORA_MAX_BLOCK_FRAMES = 960;  // 单轮渲染上限（20ms @48k）
+constexpr int AURORA_WAIT_TIMEOUT_MS = 20;  // 无余量时 wait 超时（stop 响应性上界）
+constexpr int AURORA_OPEN_FAILURE_BACKOFF_MS = 200;  // 端点重开退避（对齐 WASAPI 重路由）
 
 using PcmHandle = void;  // snd_pcm_t 为不透明句柄
 
@@ -106,9 +106,8 @@ struct AlsaApi {
         state = reinterpret_cast<State>(dlsym_fn(lib, "snd_pcm_state"));
         drop = reinterpret_cast<Drop>(dlsym_fn(lib, "snd_pcm_drop"));
         strerror_ = reinterpret_cast<StrError>(dlsym_fn(lib, "snd_strerror"));
-        ok = open != nullptr && close != nullptr && set_params != nullptr && recover != nullptr &&
-             writei != nullptr && readi != nullptr && avail_update != nullptr && wait != nullptr &&
-             state != nullptr && drop != nullptr;
+        ok = open != nullptr && close != nullptr && set_params != nullptr && recover != nullptr && writei != nullptr &&
+             readi != nullptr && avail_update != nullptr && wait != nullptr && state != nullptr && drop != nullptr;
         if (!ok) {
             AURORA_LOG_WARN("audio", "libasound present but required snd_pcm symbols missing; ALSA backend disabled");
         }
@@ -146,13 +145,13 @@ struct AlsaDeviceBackend::Impl {
             return true;
         }
         const auto &a = api();
-        if (!a.ok || a.open(&pcm, "default", kStreamPlayback, 0) != 0 || pcm == nullptr) {
+        if (!a.ok || a.open(&pcm, "default", AURORA_STREAM_PLAYBACK, 0) != 0 || pcm == nullptr) {
             pcm = nullptr;
             return false;
         }
         // soft_resync=1：XRUN 后自动重同步（恢复静音对齐），缓冲延迟 20ms。
-        if (a.set_params(pcm, kFormatFloatLE, kAccessRwInterleaved, kRenderChannels, kRenderRate, 1, kLatencyUs) !=
-            0) {
+        if (a.set_params(pcm, AURORA_FORMAT_FLOAT_LE, AURORA_ACCESS_RW_INTERLEAVED, AURORA_RENDER_CHANNELS,
+                         AURORA_RENDER_RATE, 1, AURORA_LATENCY_US) != 0) {
             a.close(pcm);
             pcm = nullptr;
             return false;
@@ -186,11 +185,11 @@ struct AlsaDeviceBackend::Impl {
                 if (!open_endpoint()) {
                     // 端点不可用：退避重试；期间时钟冻结（对齐 WASAPI 重路由）
                     reroute.store(true, std::memory_order_release);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(kOpenFailureBackoffMs));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(AURORA_OPEN_FAILURE_BACKOFF_MS));
                     continue;
                 }
             }
-            if (a.state(pcm) == kStateDisconnected) {
+            if (a.state(pcm) == AURORA_STATE_DISCONNECTED) {
                 reroute.store(true, std::memory_order_release);
                 continue;
             }
@@ -200,17 +199,17 @@ struct AlsaDeviceBackend::Impl {
                 continue;
             }
             if (avail == 0) {
-                const int w = a.wait(pcm, kWaitTimeoutMs);
+                const int w = a.wait(pcm, AURORA_WAIT_TIMEOUT_MS);
                 if (w < 0) {
                     recover_or_reroute(w);
                 }
-                continue;  // 无余量/超时——不空推时钟（stop 响应性上界 kWaitTimeoutMs）
+                continue;  // 无余量/超时——不空推时钟（stop 响应性上界 AURORA_WAIT_TIMEOUT_MS）
             }
-            const int frames = static_cast<int>(
-                static_cast<unsigned long>(avail) < static_cast<unsigned long>(kMaxBlockFrames)
-                    ? static_cast<unsigned long>(avail)
-                    : static_cast<unsigned long>(kMaxBlockFrames));
-            scratch.resize(static_cast<std::size_t>(frames) * kRenderChannels);
+            const int frames =
+                static_cast<int>(static_cast<unsigned long>(avail) < static_cast<unsigned long>(AURORA_MAX_BLOCK_FRAMES)
+                                     ? static_cast<unsigned long>(avail)
+                                     : static_cast<unsigned long>(AURORA_MAX_BLOCK_FRAMES));
+            scratch.resize(static_cast<std::size_t>(frames) * AURORA_RENDER_CHANNELS);
             render(scratch.data(), frames);
             const long written = a.writei(pcm, scratch.data(), static_cast<UFrames>(frames));
             if (written < 0) {
@@ -260,31 +259,31 @@ auto AlsaDeviceBackend::stop() -> void {
 struct AlsaCaptureBackend::Impl {
     CaptureFn capture;
     std::thread thread;
-    std::atomic<bool> running{false};      ///< stop 握手位（承载 join 义务），非死活判据
+    std::atomic<bool> running{false};  ///< stop 握手位（承载 join 义务），非死活判据
     std::atomic<bool> device_failed{false};  ///< 中段设备失败（线程已退出、回调止流）
     PcmHandle *pcm = nullptr;
-    int rate = 0;   // 协商结果（回调携带）
+    int rate = 0;  // 协商结果（回调携带）
     int channels = 0;
 
     ~Impl() { close_endpoint(); }
 
     /// "default" 捕获端点 + 格式顺位协商（48k 优先、stereo 优先）。
     auto open_endpoint() -> bool {
-        static constexpr int kRates[] = {48000, 44100};
-        static constexpr int kChannels[] = {2, 1};
+        static constexpr int AURORA_RATES[] = {48000, 44100};
+        static constexpr int AURORA_CHANNELS[] = {2, 1};
         const auto &a = api();
         if (!a.ok) {
             return false;
         }
-        for (const int candidate_rate : kRates) {
-            for (const int candidate_channels : kChannels) {
+        for (const int candidate_rate : AURORA_RATES) {
+            for (const int candidate_channels : AURORA_CHANNELS) {
                 PcmHandle *handle = nullptr;
-                if (a.open(&handle, "default", kStreamCapture, 0) != 0 || handle == nullptr) {
+                if (a.open(&handle, "default", AURORA_STREAM_CAPTURE, 0) != 0 || handle == nullptr) {
                     return false;  // 端点本身不可用：换格式无意义
                 }
-                if (a.set_params(handle, kFormatFloatLE, kAccessRwInterleaved,
+                if (a.set_params(handle, AURORA_FORMAT_FLOAT_LE, AURORA_ACCESS_RW_INTERLEAVED,
                                  static_cast<unsigned int>(candidate_channels),
-                                 static_cast<unsigned int>(candidate_rate), 1, kLatencyUs) == 0) {
+                                 static_cast<unsigned int>(candidate_rate), 1, AURORA_LATENCY_US) == 0) {
                     pcm = handle;
                     rate = candidate_rate;
                     channels = candidate_channels;
@@ -319,16 +318,16 @@ struct AlsaCaptureBackend::Impl {
                 continue;
             }
             if (avail == 0) {
-                const int w = a.wait(pcm, kWaitTimeoutMs);
+                const int w = a.wait(pcm, AURORA_WAIT_TIMEOUT_MS);
                 if (w < 0 && a.recover(pcm, w, 1) != 0) {
                     break;
                 }
                 continue;
             }
-            const int frames = static_cast<int>(
-                static_cast<unsigned long>(avail) < static_cast<unsigned long>(kMaxBlockFrames)
-                    ? static_cast<unsigned long>(avail)
-                    : static_cast<unsigned long>(kMaxBlockFrames));
+            const int frames =
+                static_cast<int>(static_cast<unsigned long>(avail) < static_cast<unsigned long>(AURORA_MAX_BLOCK_FRAMES)
+                                     ? static_cast<unsigned long>(avail)
+                                     : static_cast<unsigned long>(AURORA_MAX_BLOCK_FRAMES));
             scratch.resize(static_cast<std::size_t>(frames) * static_cast<std::size_t>(channels));
             const long got = a.readi(pcm, scratch.data(), static_cast<UFrames>(frames));
             if (got < 0) {
@@ -381,9 +380,7 @@ auto AlsaCaptureBackend::stop() -> void {
     }
 }
 
-auto AlsaCaptureBackend::failed() const -> bool {
-    return impl_->device_failed.load(std::memory_order_acquire);
-}
+auto AlsaCaptureBackend::failed() const -> bool { return impl_->device_failed.load(std::memory_order_acquire); }
 
 }  // namespace aurora
 

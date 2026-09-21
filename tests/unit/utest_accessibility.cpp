@@ -31,7 +31,7 @@ namespace aurora::test_cases::utest_accessibility {
 namespace {
 
 /// @brief 探测子项固定尺寸（SemanticTree 几何断言的基准值）。
-constexpr aurora::Size kProbeItem{.width = 100.0F, .height = 20.0F};
+constexpr aurora::Size AURORA_PROBE_ITEM{.width = 100.0F, .height = 20.0F};
 
 /// @brief 最小叶控件桩：仅补齐抽象纯虚函数，用于纯逻辑的无障碍树构建（不触发布局/绘制）。
 class ProbeLeaf final : public aurora::LeafWidget {
@@ -63,7 +63,7 @@ class ProbeContainer final : public aurora::Container {
     }
 };
 
-/// @brief 纵向排布的容器桩：子节点按固定 `kProbeItem` 纵向落位并写回 Node 局部盒。
+/// @brief 纵向排布的容器桩：子节点按固定 `AURORA_PROBE_ITEM` 纵向落位并写回 Node 局部盒。
 ///        用于验证语义树几何沿子节点局部原点的逐级累加（不经任何绘制）。
 class ProbeColumn final : public aurora::Container {
   public:
@@ -73,10 +73,10 @@ class ProbeColumn final : public aurora::Container {
     auto on_layout(const aurora::Constraints& /*c*/, const aurora::BuildContext& /*ctx*/) -> aurora::Size override {
         float y = 0.0F;
         for (auto& child : children_) {
-            child.set_bounds(aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = y}, .size = kProbeItem});
-            y += kProbeItem.height;
+            child.set_bounds(aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = y}, .size = AURORA_PROBE_ITEM});
+            y += AURORA_PROBE_ITEM.height;
         }
-        return aurora::Size{.width = kProbeItem.width, .height = y};
+        return aurora::Size{.width = AURORA_PROBE_ITEM.width, .height = y};
     }
 };
 
@@ -302,36 +302,35 @@ AURORA_TEST_CASE(build_tree_fills_bounds_from_child_local_boxes) {
     ProbeColumn column;
     column.add(aurora::Node{ProbeLeaf{"Button"}});
     column.add(aurora::Node{ProbeLeaf{"Text"}});
-    aurora::LayoutEngine::layout(column, aurora::Constraints{.min = aurora::Size{},
-                                                             .max = aurora::Size{.width = 400.0F, .height = 400.0F}});
+    aurora::LayoutEngine::layout(
+        column, aurora::Constraints{.min = aurora::Size{}, .max = aurora::Size{.width = 400.0F, .height = 400.0F}});
 
     const auto tree = aurora::build_accessibility_tree(column);
     // 根：未绘制 → 取布局结果置于原点（100 × 40）。
-    AURORA_TEST_CHECK_NEAR(tree.bounds.size.width, kProbeItem.width, 1e-5F);
-    AURORA_TEST_CHECK_NEAR(tree.bounds.size.height, 2.0F * kProbeItem.height, 1e-5F);
+    AURORA_TEST_CHECK_NEAR(tree.bounds.size.width, AURORA_PROBE_ITEM.width, 1e-5F);
+    AURORA_TEST_CHECK_NEAR(tree.bounds.size.height, 2.0F * AURORA_PROBE_ITEM.height, 1e-5F);
     AURORA_TEST_CHECK_NEAR(tree.bounds.origin.x, 0.0F, 1e-5F);
     AURORA_TEST_CHECK_NEAR(tree.bounds.origin.y, 0.0F, 1e-5F);
 
     AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
     // 子节点几何 = 根原点 + Node 局部原点累加（首项 y=0、次项 y=20）。
     AURORA_TEST_CHECK_NEAR(tree.children[0].bounds.origin.y, 0.0F, 1e-5F);
-    AURORA_TEST_CHECK_NEAR(tree.children[1].bounds.origin.y, kProbeItem.height, 1e-5F);
-    AURORA_TEST_CHECK_NEAR(tree.children[0].bounds.size.width, kProbeItem.width, 1e-5F);
-    AURORA_TEST_CHECK_NEAR(tree.children[1].bounds.size.height, kProbeItem.height, 1e-5F);
+    AURORA_TEST_CHECK_NEAR(tree.children[1].bounds.origin.y, AURORA_PROBE_ITEM.height, 1e-5F);
+    AURORA_TEST_CHECK_NEAR(tree.children[0].bounds.size.width, AURORA_PROBE_ITEM.width, 1e-5F);
+    AURORA_TEST_CHECK_NEAR(tree.children[1].bounds.size.height, AURORA_PROBE_ITEM.height, 1e-5F);
 }
 
 AURORA_TEST_CASE(build_tree_prefers_painted_bounds_over_layout_box) {
     ProbeColumn column;
     column.add(aurora::Node{ProbeLeaf{"Button"}});
-    aurora::LayoutEngine::layout(column, aurora::Constraints{.min = aurora::Size{},
-                                                             .max = aurora::Size{.width = 400.0F, .height = 400.0F}});
+    aurora::LayoutEngine::layout(
+        column, aurora::Constraints{.min = aurora::Size{}, .max = aurora::Size{.width = 400.0F, .height = 400.0F}});
 
     // 绘制盒（含祖先偏移）优先于布局累加盒：present 过的树几何即真实屏幕坐标。
     aurora::Painter painter;
     painter.begin(256, 256);
     constexpr aurora::Point root_origin{.x = 12.0F, .y = 34.0F};
-    column.paint(painter,
-                 aurora::Rect{.origin = root_origin, .size = aurora::Size{.width = 100.0F, .height = 20.0F}},
+    column.paint(painter, aurora::Rect{.origin = root_origin, .size = aurora::Size{.width = 100.0F, .height = 20.0F}},
                  aurora::BuildContext{});
 
     const auto tree = aurora::build_accessibility_tree(column);
@@ -410,8 +409,8 @@ AURORA_TEST_CASE(build_tree_skips_invisible_children) {
 
 AURORA_TEST_CASE(build_tree_expands_children_without_node_geometry) {
     ProbeVirtualList list;
-    aurora::LayoutEngine::layout(list, aurora::Constraints{.min = aurora::Size{},
-                                                           .max = aurora::Size{.width = 200.0F, .height = 300.0F}});
+    aurora::LayoutEngine::layout(
+        list, aurora::Constraints{.min = aurora::Size{}, .max = aurora::Size{.width = 200.0F, .height = 300.0F}});
 
     const auto tree = aurora::build_accessibility_tree(list);
     AURORA_TEST_CHECK_EQ(tree.role, aurora::AccessibilityRole::List);

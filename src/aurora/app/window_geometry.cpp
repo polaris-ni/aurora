@@ -1,5 +1,7 @@
 #include "aurora/app/window_geometry.h"
 
+#include <algorithm>
+
 #include "aurora/core/log.h"
 
 namespace aurora {
@@ -38,12 +40,8 @@ auto parse_and_validate(const Json &j, const std::string &key) -> std::optional<
 
 auto window_geometry_to_json(const WindowGeometry &g) -> Json {
     return Json{
-        {"origin_x", g.origin.x},
-        {"origin_y", g.origin.y},
-        {"width", g.size.width},
-        {"height", g.size.height},
-        {"mode", static_cast<int>(g.mode)},
-        {"display_id", g.display_id},
+        {"origin_x", g.origin.x},  {"origin_y", g.origin.y},           {"width", g.size.width},
+        {"height", g.size.height}, {"mode", static_cast<int>(g.mode)}, {"display_id", g.display_id},
     };
 }
 
@@ -74,14 +72,11 @@ auto is_window_geometry_usable(const WindowGeometry &g, const std::vector<Displa
     const float top = g.origin.y;
     const float right = g.origin.x + g.size.width;
     const float bottom = g.origin.y + g.size.height;
-    for (const Display &d : displays) {
+    // 与任一工作区有交集即视为可用（允许部分越界：多屏拼接/任务栏遮挡下不应拒绝恢复）。
+    return std::ranges::any_of(displays, [&](const Display &d) {
         const Rect &w = d.work_area;
-        // 与任一工作区有交集即视为可用（允许部分越界：多屏拼接/任务栏遮挡下不应拒绝恢复）。
-        if (left < w.right() && right > w.origin.x && top < w.bottom() && bottom > w.origin.y) {
-            return true;
-        }
-    }
-    return false;
+        return left < w.right() && right > w.origin.x && top < w.bottom() && bottom > w.origin.y;
+    });
 }
 
 auto is_window_geometry_usable(const WindowGeometry &g) -> bool {
@@ -92,8 +87,7 @@ auto save_window_geometry(preferences::Preferences &prefs, const std::string &ke
     prefs.set(key, window_geometry_to_json(g));
 }
 
-auto load_window_geometry(preferences::Preferences &prefs, const std::string &key)
-    -> std::optional<WindowGeometry> {
+auto load_window_geometry(preferences::Preferences &prefs, const std::string &key) -> std::optional<WindowGeometry> {
     if (!prefs.contains(key)) {
         return std::nullopt;
     }
@@ -105,7 +99,7 @@ auto save_window_geometry(preferences::Preferences::Group group, const std::stri
     group.set(key, window_geometry_to_json(g));
 }
 
-auto load_window_geometry(preferences::Preferences::Group group, const std::string &key)
+auto load_window_geometry(const preferences::Preferences::Group &group, const std::string &key)
     -> std::optional<WindowGeometry> {
     if (!group.contains(key)) {
         return std::nullopt;

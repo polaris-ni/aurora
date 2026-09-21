@@ -181,7 +181,7 @@ void main() {
 // 再乘全局 alpha × 裁剪 coverage），混合走直色 src-over——与软件 blend_subpixel_span 的
 // 灰度路径同源。字形位图按物理像素 1:1 对齐（原点与行基线均 snap 整数物理像素，同软件
 // 路径），采样点恒落 texel 中心，NEAREST 即逐位精确。LCD 子像素在 GPU 路径降级灰度
-//（发射桥强制 Supersample，设计容差决策），故无 RGB 分量分支。
+// （发射桥强制 Supersample，设计容差决策），故无 RGB 分量分支。
 constexpr const char *AURORA_GLSL_TEXT = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
@@ -209,7 +209,7 @@ void main() {
 
 // 阴影（Shadow）：矩形外部的欧氏距离线性衰减。软件 draw_shadow 的衰减因子为
 // alpha = max(0, 1 - dist / blur_px)，其中 dist = 到阴影矩形（偏移后）的欧氏距离
-//（外部；内部恒 1 由 fill_rect 快路径承担）。片元内 length(max(q, 0)) 与软件逐像素
+// （外部；内部恒 1 由 fill_rect 快路径承担）。片元内 length(max(q, 0)) 与软件逐像素
 // 的 sqrt(dx²+dy²) 逐项同构（内部 = 0 → 因子 1 = fill），blur 半径逻辑/物理换算后
 // scale 相消，直接用逻辑 dp 计算。硬阴影（blur ≤ 0）不走本管线，翻译期退化为实心 quad。
 constexpr const char *AURORA_GLSL_SHADOW = R"(#version 330 core
@@ -371,6 +371,8 @@ auto hex_u32(std::uint32_t v) -> std::string {
     const char *digits = "0123456789abcdef";
     std::string s(8, '0');
     for (int i = 7; i >= 0; --i) {
+        // 固定 8 字符十六进制缓冲，下标由循环变量限定在 [0,7]；格式化热路径不宜引入 .at()
+        // NOLINTNEXTLINE(*-bounds-constant-array-index, *-bounds-pointer-arithmetic)
         s[static_cast<std::size_t>(i)] = digits[v & 0xFU];
         v >>= 4U;
     }
@@ -447,11 +449,13 @@ auto sample_gradient_lut(const std::vector<Color> &colors, const std::vector<flo
             const float frac = (range > 0.0F) ? (t - stops[i]) / range : 0.0F;
             const Color &a = colors[i];
             const Color &b = colors[i + 1];
+            // 显式在各分量上做 float 转换：uint8_t/int 直接参与 float 运算会触发
+            // bugprone-narrowing-conversions（int → float 可能丢精度）。
             return Color{
-                static_cast<std::uint8_t>(a.r + ((b.r - a.r) * frac)),
-                static_cast<std::uint8_t>(a.g + ((b.g - a.g) * frac)),
-                static_cast<std::uint8_t>(a.b + ((b.b - a.b) * frac)),
-                static_cast<std::uint8_t>(a.a + ((b.a - a.a) * frac)),
+                static_cast<std::uint8_t>(static_cast<float>(a.r) + (static_cast<float>(b.r - a.r) * frac)),
+                static_cast<std::uint8_t>(static_cast<float>(a.g) + (static_cast<float>(b.g - a.g) * frac)),
+                static_cast<std::uint8_t>(static_cast<float>(a.b) + (static_cast<float>(b.b - a.b) * frac)),
+                static_cast<std::uint8_t>(static_cast<float>(a.a) + (static_cast<float>(b.a - a.a) * frac)),
             };
         }
     }
@@ -477,28 +481,25 @@ constexpr std::size_t AURORA_GLYPH_PAGE_CAP = 8;
 // ---- GLFn：装载与完整性 ----
 
 auto GLFn::complete() const -> bool {
-    return create_shader != nullptr && shader_source != nullptr && compile_shader != nullptr
-        && get_shader_iv != nullptr && get_shader_info_log != nullptr && delete_shader != nullptr
-        && create_program != nullptr && attach_shader != nullptr && link_program != nullptr
-        && get_program_iv != nullptr && get_program_info_log != nullptr && delete_program != nullptr
-        && use_program != nullptr && get_uniform_location != nullptr && uniform1i != nullptr && uniform1f != nullptr
-        && uniform2f != nullptr && uniform3f != nullptr && uniform4f != nullptr
-        && gen_vertex_arrays != nullptr && delete_vertex_arrays != nullptr && bind_vertex_array != nullptr
-        && gen_buffers != nullptr && delete_buffers != nullptr && bind_buffer != nullptr && buffer_data != nullptr
-        && enable_vertex_attrib_array != nullptr && vertex_attrib_pointer != nullptr
-        && gen_textures != nullptr && delete_textures != nullptr && bind_texture != nullptr
-        && active_texture != nullptr && tex_image_2d != nullptr && tex_sub_image_2d != nullptr
-        && tex_parameter_i != nullptr
-        && pixel_store_i != nullptr
-        && viewport != nullptr && clear_color != nullptr && clear != nullptr && enable != nullptr && disable != nullptr
-        && scissor != nullptr && blend_func_separate != nullptr && draw_elements != nullptr && draw_arrays != nullptr
-        && flush != nullptr
-        && gen_framebuffers != nullptr && delete_framebuffers != nullptr && bind_framebuffer != nullptr
-        && framebuffer_texture_2d != nullptr && framebuffer_renderbuffer != nullptr
-        && check_framebuffer_status != nullptr && gen_renderbuffers != nullptr && delete_renderbuffers != nullptr
-        && bind_renderbuffer != nullptr && renderbuffer_storage_multisample != nullptr && blit_framebuffer != nullptr
-        && read_pixels != nullptr
-        && get_string != nullptr && get_integer_v != nullptr && get_error != nullptr;
+    return create_shader != nullptr && shader_source != nullptr && compile_shader != nullptr &&
+           get_shader_iv != nullptr && get_shader_info_log != nullptr && delete_shader != nullptr &&
+           create_program != nullptr && attach_shader != nullptr && link_program != nullptr &&
+           get_program_iv != nullptr && get_program_info_log != nullptr && delete_program != nullptr &&
+           use_program != nullptr && get_uniform_location != nullptr && uniform1i != nullptr && uniform1f != nullptr &&
+           uniform2f != nullptr && uniform3f != nullptr && uniform4f != nullptr && gen_vertex_arrays != nullptr &&
+           delete_vertex_arrays != nullptr && bind_vertex_array != nullptr && gen_buffers != nullptr &&
+           delete_buffers != nullptr && bind_buffer != nullptr && buffer_data != nullptr &&
+           enable_vertex_attrib_array != nullptr && vertex_attrib_pointer != nullptr && gen_textures != nullptr &&
+           delete_textures != nullptr && bind_texture != nullptr && active_texture != nullptr &&
+           tex_image_2d != nullptr && tex_sub_image_2d != nullptr && tex_parameter_i != nullptr &&
+           pixel_store_i != nullptr && viewport != nullptr && clear_color != nullptr && clear != nullptr &&
+           enable != nullptr && disable != nullptr && scissor != nullptr && blend_func_separate != nullptr &&
+           draw_elements != nullptr && draw_arrays != nullptr && flush != nullptr && gen_framebuffers != nullptr &&
+           delete_framebuffers != nullptr && bind_framebuffer != nullptr && framebuffer_texture_2d != nullptr &&
+           framebuffer_renderbuffer != nullptr && check_framebuffer_status != nullptr && gen_renderbuffers != nullptr &&
+           delete_renderbuffers != nullptr && bind_renderbuffer != nullptr &&
+           renderbuffer_storage_multisample != nullptr && blit_framebuffer != nullptr && read_pixels != nullptr &&
+           get_string != nullptr && get_integer_v != nullptr && get_error != nullptr;
 }
 
 auto load_gl(void *(*proc)(const char *name)) -> GLFn {
@@ -507,7 +508,8 @@ auto load_gl(void *(*proc)(const char *name)) -> GLFn {
         return fn;
     }
     const auto load = [proc](const char *name, auto &dst) {
-        dst = reinterpret_cast<std::remove_reference_t<decltype(dst)>>(proc(name));  // NOLINT(*-pro-type-reinterpret-cast)
+        // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
+        dst = reinterpret_cast<std::remove_reference_t<decltype(dst)>>(proc(name));
     };
     // 着色器与程序
     load("glCreateShader", fn.create_shader);
@@ -756,9 +758,9 @@ struct GpuGlRhi::Impl {
     // LRU 淘汰路径）。批 key 携带槽位页纹理名——跨页文本自然断批，同页连续字形合批。
     std::unordered_map<std::uint64_t, GlyphSlotRect> glyph_slots;
     std::vector<GlyphPage> glyph_pages;  // 惰性创建；放置只走 active_glyph_page_
-    int active_glyph_page_ = -1;         // 当前放置页下标（-1 = 无）
-    std::uint64_t glyph_lru_clock_ = 0;
-    int glyph_page_size_ = AURORA_GLYPH_PAGE;
+    int active_glyph_page = -1;  // 当前放置页下标（-1 = 无）
+    std::uint64_t glyph_lru_clock = 0;
+    int glyph_page_size = AURORA_GLYPH_PAGE;
 
     // 画布
     int device_w = 0;
@@ -795,7 +797,8 @@ struct GpuGlRhi::Impl {
         }
         // 版本门槛：核心版本 ≥ 3.3。数字解析 major.minor（兼容 "4.5.0 - build 27" /
         // "10.1 ..." 等驱动形态；非数字开头解析失败即拒绝）。
-        const char *ver = reinterpret_cast<const char *>(gl.get_string(VERSION));  // NOLINT(*-pro-type-reinterpret-cast)
+        const char *ver =
+            reinterpret_cast<const char *>(gl.get_string(VERSION));  // NOLINT(*-pro-type-reinterpret-cast)
         int major = 0;
         int minor = 0;
         bool parsed = false;
@@ -803,12 +806,18 @@ struct GpuGlRhi::Impl {
             const char *p = ver;
             if (*p >= '0' && *p <= '9') {
                 while (*p >= '0' && *p <= '9') {
-                    major = major * 10 + (*p++ - '0');
+                    // 驱动返回的 GL 版本串逐字符扫描，改 std::from_chars 会改变对非数字前缀的容错行为
+                    // NOLINTNEXTLINE(*-bounds-pointer-arithmetic)
+                    major = (major * 10) + (*p++ - '0');
                 }
                 if (*p == '.') {
+                    // 驱动返回的 GL 版本串逐字符扫描，改 std::from_chars 会改变对非数字前缀的容错行为
+                    // NOLINTNEXTLINE(*-bounds-pointer-arithmetic)
                     ++p;
                     while (*p >= '0' && *p <= '9') {
-                        minor = minor * 10 + (*p++ - '0');
+                        // 驱动返回的 GL 版本串逐字符扫描，改 std::from_chars 会改变对非数字前缀的容错行为
+                        // NOLINTNEXTLINE(*-bounds-pointer-arithmetic)
+                        minor = (minor * 10) + (*p++ - '0');
                     }
                     parsed = true;
                 }
@@ -828,16 +837,21 @@ struct GpuGlRhi::Impl {
             failed = true;
             return;
         }
-        const char *frag_srcs[9] = {AURORA_GLSL_SOLID, AURORA_GLSL_BORDER,      AURORA_GLSL_GRAD,
-                                    AURORA_GLSL_IMAGE, AURORA_GLSL_TEXT,        AURORA_GLSL_SHADOW,
-                                    AURORA_GLSL_BLUR,  AURORA_GLSL_BLEND,      AURORA_GLSL_MASK};
-        GLuint_ *progs[9] = {&program_solid, &program_border, &program_grad, &program_image, &program_text,
-                             &program_shadow, &program_blur,  &program_blend, &program_mask};
-        const char *names[9] = {"solid",   "border", "gradient", "image", "text",
-                                "shadow",  "blur",   "blend",    "mask"};
+        const char *frag_srcs[9] = {AURORA_GLSL_SOLID, AURORA_GLSL_BORDER, AURORA_GLSL_GRAD,
+                                    AURORA_GLSL_IMAGE, AURORA_GLSL_TEXT,   AURORA_GLSL_SHADOW,
+                                    AURORA_GLSL_BLUR,  AURORA_GLSL_BLEND,  AURORA_GLSL_MASK};
+        GLuint_ *progs[9] = {&program_solid,  &program_border, &program_grad,  &program_image, &program_text,
+                             &program_shadow, &program_blur,   &program_blend, &program_mask};
+        const char *names[9] = {"solid", "border", "gradient", "image", "text", "shadow", "blur", "blend", "mask"};
         for (int i = 0; i < 9; ++i) {
+            // 固定 9 元着色器源/句柄表，下标由 for 的常量上界约束；逐 texel 热路径不宜引入 .at() 异常路径
+            // NOLINTNEXTLINE(*-bounds-constant-array-index)
             *progs[i] = link_program_with(gl, shared_vs, frag_srcs[i], err);
+            // 固定 9 元着色器源/句柄表，下标由 for 的常量上界约束；逐 texel 热路径不宜引入 .at() 异常路径
+            // NOLINTNEXTLINE(*-bounds-constant-array-index)
             if (*progs[i] == 0) {
+                // 固定 9 元着色器源/句柄表，下标由 for 的常量上界约束；逐 texel 热路径不宜引入 .at() 异常路径
+                // NOLINTNEXTLINE(*-bounds-constant-array-index)
                 AURORA_LOG_ERROR("gpu-gl", names[i], " program link failed: ", err);
                 gl.delete_shader(shared_vs);
                 failed = true;
@@ -855,6 +869,8 @@ struct GpuGlRhi::Impl {
         // 查询后清空错误队列，防粘滞错误污染后续 init 检查点与帧内 check_error。
         while (gl.get_error() != NO_ERROR) {
         }
+        // glGetString 返回 const GLubyte*，转 const char* 是 GL API 的既定视图别名
+        // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
         const std::string extensions = ext_str != nullptr ? reinterpret_cast<const char *>(ext_str) : "";
         // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
         native_surface_ext = extensions.find("GL_EXT_memory_object") != std::string::npos ||
@@ -1052,10 +1068,18 @@ struct GpuGlRhi::Impl {
         std::array<std::uint8_t, static_cast<std::size_t>(AURORA_LUT_WIDTH) * 4U> texels{};
         for (int j = 0; j < AURORA_LUT_WIDTH; ++j) {
             const Color c = sample_gradient_lut(colors, stops, static_cast<float>(j) / 255.0F);
-            texels[static_cast<std::size_t>(j) * 4U + 0] = c.r;
-            texels[static_cast<std::size_t>(j) * 4U + 1] = c.g;
-            texels[static_cast<std::size_t>(j) * 4U + 2] = c.b;
-            texels[static_cast<std::size_t>(j) * 4U + 3] = c.a;
+            // 按 RGBA 分量序写入 LUT texel 的固定 4 字节记录，下标即内存布局本身
+            // NOLINTNEXTLINE(*-bounds-constant-array-index)
+            texels[(static_cast<std::size_t>(j) * 4U) + 0] = c.r;
+            // 按 RGBA 分量序写入 LUT texel 的固定 4 字节记录，下标即内存布局本身
+            // NOLINTNEXTLINE(*-bounds-constant-array-index)
+            texels[(static_cast<std::size_t>(j) * 4U) + 1] = c.g;
+            // 按 RGBA 分量序写入 LUT texel 的固定 4 字节记录，下标即内存布局本身
+            // NOLINTNEXTLINE(*-bounds-constant-array-index)
+            texels[(static_cast<std::size_t>(j) * 4U) + 2] = c.b;
+            // 按 RGBA 分量序写入 LUT texel 的固定 4 字节记录，下标即内存布局本身
+            // NOLINTNEXTLINE(*-bounds-constant-array-index)
+            texels[(static_cast<std::size_t>(j) * 4U) + 3] = c.a;
         }
         GLuint_ tex = 0;
         gl.gen_textures(1, &tex);
@@ -1070,7 +1094,7 @@ struct GpuGlRhi::Impl {
         if (failed || tex == 0) {
             return 0;
         }
-        lut_cache.push_back(LutEntry{colors, stops, tex});
+        lut_cache.push_back(LutEntry{.colors = colors, .stops = stops, .tex = tex});
         return tex;
     }
 
@@ -1078,7 +1102,7 @@ struct GpuGlRhi::Impl {
     // 键 = Image::content_hash()（惰性摘要，add_image 预热源后逐帧拷贝零重算）+ 维度；
     // 未命中时上传预乘 alpha（PMA）副本，LINEAR 滤波在 PMA 空间插值（与软件双线性
     // 语义同源）。管线输出按 PMA 语义整体缩放，混合走 ONE/ONE_MINUS_SRC_ALPHA
-    //（blend_pma 批成员）。直接改写 pixels 的调用方须先 invalidate_content_hash()。
+    // （blend_pma 批成员）。直接改写 pixels 的调用方须先 invalidate_content_hash()。
     auto acquire_image_tex(const Image &img) -> GLuint_ {
         std::uint64_t hash = img.content_hash();
         hash ^= static_cast<std::uint64_t>(img.width);
@@ -1107,9 +1131,9 @@ struct GpuGlRhi::Impl {
         const std::size_t n = img.pixels.size();
         for (std::size_t i = 0; i + 3 < n; i += 4) {
             const unsigned a = img.pixels[i + 3];
-            pma[i + 0] = static_cast<std::uint8_t>((static_cast<unsigned>(img.pixels[i + 0]) * a + 127) / 255);
-            pma[i + 1] = static_cast<std::uint8_t>((static_cast<unsigned>(img.pixels[i + 1]) * a + 127) / 255);
-            pma[i + 2] = static_cast<std::uint8_t>((static_cast<unsigned>(img.pixels[i + 2]) * a + 127) / 255);
+            pma[i + 0] = static_cast<std::uint8_t>(((static_cast<unsigned>(img.pixels[i + 0]) * a) + 127) / 255);
+            pma[i + 1] = static_cast<std::uint8_t>(((static_cast<unsigned>(img.pixels[i + 1]) * a) + 127) / 255);
+            pma[i + 2] = static_cast<std::uint8_t>(((static_cast<unsigned>(img.pixels[i + 2]) * a) + 127) / 255);
             pma[i + 3] = static_cast<std::uint8_t>(a);
         }
         GLuint_ tex = 0;
@@ -1126,7 +1150,7 @@ struct GpuGlRhi::Impl {
         if (failed || tex == 0) {
             return 0;
         }
-        image_cache.push_back(ImageTexEntry{hash, img.width, img.height, tex});
+        image_cache.push_back(ImageTexEntry{.hash = hash, .width = img.width, .height = img.height, .tex = tex});
         return tex;
     }
 
@@ -1178,7 +1202,7 @@ struct GpuGlRhi::Impl {
     }
 
     // 取字形槽位；未命中即放置上传。返回空矩形（w/h ≤ 0）= 无需绘制
-    //（空位图字形或超出 AURORA_GLYPH_PAGE_MAX 的异常大字形）。
+    // （空位图字形或超出 AURORA_GLYPH_PAGE_MAX 的异常大字形）。
     auto acquire_glyph_slot(std::uint64_t key, const render::GlyphAtlas::Entry &e) -> GlyphSlotRect {
         const auto it = glyph_slots.find(key);
         if (it != glyph_slots.end()) {
@@ -1186,7 +1210,7 @@ struct GpuGlRhi::Impl {
             const GLuint_ tex = it->second.tex;
             for (GlyphPage &pg : glyph_pages) {
                 if (pg.tex == tex) {
-                    pg.lru = ++glyph_lru_clock_;
+                    pg.lru = ++glyph_lru_clock;
                     break;
                 }
             }
@@ -1198,7 +1222,7 @@ struct GpuGlRhi::Impl {
         }
         const int w = e.width;
         const int h = e.rows;
-        const int side = glyph_page_size_;
+        const int side = glyph_page_size;
         // 超大字形：开专用页（pow2 上限 AURORA_GLYPH_PAGE_MAX）；仍放不下则放弃（旧契约）。
         if (w > side || h > side) {
             int big = side;
@@ -1211,8 +1235,8 @@ struct GpuGlRhi::Impl {
             if (glyph_pages.size() >= AURORA_GLYPH_PAGE_CAP) {
                 // 页数封顶：淘汰 victim 后把其纹理重定义存储为专用大页（淘汰内已 flush，
                 // 纹理名不变，与旧「满页重定义存储」路径同构）。
-                active_glyph_page_ = evict_glyph_page();
-                GlyphPage &vp = glyph_pages[static_cast<std::size_t>(active_glyph_page_)];
+                active_glyph_page = evict_glyph_page();
+                GlyphPage &vp = glyph_pages[static_cast<std::size_t>(active_glyph_page)];
                 vp.w = big;
                 vp.h = big;
                 gl.bind_texture(TEXTURE_2D, vp.tex);
@@ -1223,24 +1247,24 @@ struct GpuGlRhi::Impl {
                     return GlyphSlotRect{};
                 }
             } else {
-                active_glyph_page_ = new_glyph_page(big, big);
-                if (active_glyph_page_ < 0) {
+                active_glyph_page = new_glyph_page(big, big);
+                if (active_glyph_page < 0) {
                     return GlyphSlotRect{};
                 }
             }
-        } else if (active_glyph_page_ < 0) {
+        } else if (active_glyph_page < 0) {
             // 首页。
             if (glyph_pages.size() >= AURORA_GLYPH_PAGE_CAP) {
-                active_glyph_page_ = evict_glyph_page();
+                active_glyph_page = evict_glyph_page();
             } else {
-                active_glyph_page_ = new_glyph_page(side, side);
-                if (active_glyph_page_ < 0) {
+                active_glyph_page = new_glyph_page(side, side);
+                if (active_glyph_page < 0) {
                     return GlyphSlotRect{};
                 }
             }
         }
         // 用指针而非引用：页满分支可能 push 新页使 vector 重分配，须重取。
-        GlyphPage *pg = &glyph_pages[static_cast<std::size_t>(active_glyph_page_)];
+        GlyphPage *pg = &glyph_pages[static_cast<std::size_t>(active_glyph_page)];
         // 架式放置：行满换行，页满换页/淘汰。
         if (pg->pack_x + w > pg->w) {
             pg->pack_x = 0;
@@ -1249,27 +1273,27 @@ struct GpuGlRhi::Impl {
         }
         if (pg->pack_y + h > pg->h) {
             if (glyph_pages.size() < AURORA_GLYPH_PAGE_CAP) {
-                active_glyph_page_ = new_glyph_page(side, side);
-                if (active_glyph_page_ < 0) {
+                active_glyph_page = new_glyph_page(side, side);
+                if (active_glyph_page < 0) {
                     return GlyphSlotRect{};
                 }
             } else {
-                active_glyph_page_ = evict_glyph_page();
+                active_glyph_page = evict_glyph_page();
             }
-            pg = &glyph_pages[static_cast<std::size_t>(active_glyph_page_)];  // 重取（push 可能重分配）
+            pg = &glyph_pages[static_cast<std::size_t>(active_glyph_page)];  // 重取（push 可能重分配）
             if (w > pg->w || h > pg->h || pg->pack_x + w > pg->w) {
                 return GlyphSlotRect{};  // 换页后仍放不下（异常大字形），放弃
             }
         }
-        const GlyphSlotRect slot{pg->tex,
-                                 pg->pack_x,
-                                 pg->pack_y,
-                                 w,
-                                 h,
-                                 static_cast<float>(pg->pack_x) / static_cast<float>(pg->w),
-                                 static_cast<float>(pg->pack_y) / static_cast<float>(pg->h),
-                                 static_cast<float>(pg->pack_x + w) / static_cast<float>(pg->w),
-                                 static_cast<float>(pg->pack_y + h) / static_cast<float>(pg->h)};
+        const GlyphSlotRect slot{.tex = pg->tex,
+                                 .x = pg->pack_x,
+                                 .y = pg->pack_y,
+                                 .w = w,
+                                 .h = h,
+                                 .u0 = static_cast<float>(pg->pack_x) / static_cast<float>(pg->w),
+                                 .v0 = static_cast<float>(pg->pack_y) / static_cast<float>(pg->h),
+                                 .u1 = static_cast<float>(pg->pack_x + w) / static_cast<float>(pg->w),
+                                 .v1 = static_cast<float>(pg->pack_y + h) / static_cast<float>(pg->h)};
         gl.bind_texture(TEXTURE_2D, pg->tex);
         gl.pixel_store_i(UNPACK_ALIGNMENT, 1);
         gl.tex_sub_image_2d(TEXTURE_2D, 0, slot.x, slot.y, w, h, RED, UNSIGNED_BYTE, e.buf.data());
@@ -1279,7 +1303,7 @@ struct GpuGlRhi::Impl {
         }
         pg->pack_x += w;
         pg->pack_row_h = std::max(pg->pack_row_h, h);
-        pg->lru = ++glyph_lru_clock_;
+        pg->lru = ++glyph_lru_clock;
         glyph_slots.emplace(key, slot);
         return slot;
     }
@@ -1377,7 +1401,7 @@ struct GpuGlRhi::Impl {
 
     // ---- 常驻流式纹理槽（specification/03 §8.7）----
     // 固定槽复用：不走 content_hash 缓存、不参与 AURORA_IMAGE_CACHE_CAP 淘汰；直色上传
-    //（无 CPU 预乘，采样期片元一乘），按 stream_version 增量 sub-upload。
+    // （无 CPU 预乘，采样期片元一乘），按 stream_version 增量 sub-upload。
     struct StreamSlot {
         int width = 0;
         int height = 0;
@@ -1409,8 +1433,8 @@ struct GpuGlRhi::Impl {
                 }
                 return nullptr;
             }
-            it = stream_slots.emplace(key, StreamSlot{.width = width, .height = height, .version = 0, .tex = tex})
-                     .first;
+            it =
+                stream_slots.emplace(key, StreamSlot{.width = width, .height = height, .version = 0, .tex = tex}).first;
         } else if (it->second.width != width || it->second.height != height) {
             // 尺寸变化：先落地可能引用旧存储的待提交批，再就地重定义。
             flush_batch();
@@ -1434,7 +1458,7 @@ struct GpuGlRhi::Impl {
         GLuint_ tex = 0;
         GLuint_ aux_fbo = 0;  // 层内效果（Blur/Blend/Mask）的采样拷贝（惰性分配）
         GLuint_ aux_tex = 0;
-        int width = 0;   // 设备像素
+        int width = 0;  // 设备像素
         int height = 0;
     };
     struct LayerFrame {
@@ -1449,7 +1473,7 @@ struct GpuGlRhi::Impl {
     std::unordered_map<std::uint64_t, LayerEntry> layer_cache;
     std::vector<LayerFrame> layer_stack;
     bool layer_miss_warned = false;  // DrawLayer 未命中告警只发一次
-    bool native_surface_ext = false; // 原生表面扩展探测结果（仅诊断；能力位恒 false）
+    bool native_surface_ext = false;  // 原生表面扩展探测结果（仅诊断；能力位恒 false）
     bool native_import_warned = false;  // import_native_surface 回退告警只发一次
 
     /// @brief 建 / 调整层附件（纹理 + FBO）。NEAREST：层合成与软件位图 floor 采样同语义。
@@ -1498,7 +1522,6 @@ struct GpuGlRhi::Impl {
         return !failed;
     }
 
-
     // ---- 顶点发射 ----
     auto ensure_ibo(std::uint32_t quads) -> void {
         if (quads <= ibo_quads) {
@@ -1514,8 +1537,8 @@ struct GpuGlRhi::Impl {
             pattern.insert(pattern.end(), {b, b + 1, b + 2, b + 2, b + 3, b});
         }
         gl.bind_buffer(ELEMENT_ARRAY_BUFFER, ibo);
-        gl.buffer_data(ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr_>(pattern.size() * sizeof(GLuint_)),
-                       pattern.data(), STATIC_DRAW);
+        gl.buffer_data(ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr_>(pattern.size() * sizeof(GLuint_)), pattern.data(),
+                       STATIC_DRAW);
         ibo_quads = want;
     }
 
@@ -1529,14 +1552,15 @@ struct GpuGlRhi::Impl {
         push_quad_uv(x0, y0, x1, y1, 0.0F, 0.0F, 1.0F, 1.0F, c);
     }
 
-    auto push_quad_uv(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, Color c)
-        -> void {
+    auto push_quad_uv(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, Color c) -> void {
         const Vertex base[4] = {
-            Vertex{x0, y0, u0, v0, c.r, c.g, c.b, c.a},
-            Vertex{x1, y0, u1, v0, c.r, c.g, c.b, c.a},
-            Vertex{x1, y1, u1, v1, c.r, c.g, c.b, c.a},
-            Vertex{x0, y1, u0, v1, c.r, c.g, c.b, c.a},
+            Vertex{.x = x0, .y = y0, .u = u0, .v = v0, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+            Vertex{.x = x1, .y = y0, .u = u1, .v = v0, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+            Vertex{.x = x1, .y = y1, .u = u1, .v = v1, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+            Vertex{.x = x0, .y = y1, .u = u0, .v = v1, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
         };
+        // 以「首指针 + 常量 4 顶点」追加一个四边形顶点块，与 std::copy 区间写法等价
+        // NOLINTNEXTLINE(*-bounds-pointer-arithmetic)
         verts.insert(verts.end(), base, base + 4);
     }
 
@@ -1557,19 +1581,18 @@ struct GpuGlRhi::Impl {
         const bool is_image = key.pipeline == Pipeline::Image;
         const bool is_text = key.pipeline == Pipeline::Text;
         const bool is_shadow = key.pipeline == Pipeline::Shadow;
-        const GLuint_ program = is_border ? program_border
-                                          : (is_grad ? program_grad
-                                                     : (is_image ? program_image
-                                                                 : (is_shadow ? program_shadow
-                                                                              : (is_text ? program_text
-                                                                                         : program_solid))));
+        const GLuint_ program =
+            is_border
+                ? program_border
+                : (is_grad ? program_grad
+                           : (is_image ? program_image
+                                       : (is_shadow ? program_shadow : (is_text ? program_text : program_solid))));
         gl.use_program(program);
         gl.uniform2f(is_border ? border_u_logical
                                : (is_grad ? grad_u_logical
-                                          : (is_image  ? image_u_logical
-                                                       : (is_shadow ? shadow_u_logical
-                                                                    : (is_text ? text_u_logical
-                                                                               : solid_u_logical)))),
+                                          : (is_image ? image_u_logical
+                                                      : (is_shadow ? shadow_u_logical
+                                                                   : (is_text ? text_u_logical : solid_u_logical)))),
                      logical_w(), logical_h());
         // 裁剪 uniform（栈顶 = 各层矩形交集，语义与 Painter::push_clip 一致）
         const ClipState &clip = key.clip;
@@ -1577,14 +1600,14 @@ struct GpuGlRhi::Impl {
             is_border ? border_u_clip
                       : (is_grad ? grad_u_clip
                                  : (is_image ? image_u_clip
-                                             : (is_shadow ? shadow_u_clip
-                                                          : (is_text ? text_u_clip : solid_u_clip))));
-        const GLint_ u_ctl = is_border ? border_u_clip_ctl
-                                       : (is_grad  ? grad_u_clip_ctl
-                                                   : (is_image ? image_u_clip_ctl
-                                                               : (is_shadow ? shadow_u_clip_ctl
-                                                                            : (is_text ? text_u_clip_ctl
-                                                                                       : solid_u_clip_ctl))));
+                                             : (is_shadow ? shadow_u_clip : (is_text ? text_u_clip : solid_u_clip))));
+        const GLint_ u_ctl =
+            is_border
+                ? border_u_clip_ctl
+                : (is_grad
+                       ? grad_u_clip_ctl
+                       : (is_image ? image_u_clip_ctl
+                                   : (is_shadow ? shadow_u_clip_ctl : (is_text ? text_u_clip_ctl : solid_u_clip_ctl))));
         gl.uniform4f(u_clip, clip.rect.origin.x, clip.rect.origin.y, clip.rect.size.width, clip.rect.size.height);
         gl.uniform3f(u_ctl, clip.radius, clip.on ? 1.0F : 0.0F, clip.aa ? 1.0F : 0.0F);
         if (is_border) {
@@ -1608,7 +1631,7 @@ struct GpuGlRhi::Impl {
             gl.uniform1i(image_u_pma, key.pma_in_shader ? 1 : 0);
             // 采样模式随批切换（DrawImage 双线性 / Composite 逐像素取样）——纹理参数是
             // 纹理对象状态，同纹理可能被两种管线复用，flush 时显式设定消除跨批残留。
-            const GLint_ filter = static_cast<GLint_>(key.nearest_filter ? NEAREST : LINEAR);
+            const auto filter = static_cast<GLint_>(key.nearest_filter ? NEAREST : LINEAR);
             gl.tex_parameter_i(TEXTURE_2D, TEXTURE_MIN_FILTER, filter);
             gl.tex_parameter_i(TEXTURE_2D, TEXTURE_MAG_FILTER, filter);
         }
@@ -1660,7 +1683,7 @@ struct GpuGlRhi::Impl {
         msaa_dirty = false;
     }
 
-    auto bind_sample_tex(GLuint_ tex) -> void {
+    auto bind_sample_tex(GLuint_ tex) const -> void {
         gl.active_texture(TEXTURE0);
         gl.bind_texture(TEXTURE_2D, tex);
     }
@@ -1670,10 +1693,10 @@ struct GpuGlRhi::Impl {
     /// 绝对设备坐标计算采样，v_uv 传入保持顶点形状一致）。
     auto draw_effect_quad(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1) -> void {
         const Vertex base[4] = {
-            Vertex{x0, y0, u0, v0, 255, 255, 255, 255},
-            Vertex{x1, y0, u1, v0, 255, 255, 255, 255},
-            Vertex{x1, y1, u1, v1, 255, 255, 255, 255},
-            Vertex{x0, y1, u0, v1, 255, 255, 255, 255},
+            Vertex{.x = x0, .y = y0, .u = u0, .v = v0, .r = 255, .g = 255, .b = 255, .a = 255},
+            Vertex{.x = x1, .y = y0, .u = u1, .v = v0, .r = 255, .g = 255, .b = 255, .a = 255},
+            Vertex{.x = x1, .y = y1, .u = u1, .v = v1, .r = 255, .g = 255, .b = 255, .a = 255},
+            Vertex{.x = x0, .y = y1, .u = u0, .v = v1, .r = 255, .g = 255, .b = 255, .a = 255},
         };
         gl.bind_vertex_array(vao);
         gl.bind_buffer(ARRAY_BUFFER, vbo);
@@ -1758,7 +1781,7 @@ struct GpuGlRhi::Impl {
                 }
                 const float dx = cmd.pt1.x - cmd.pt0.x;
                 const float dy = cmd.pt1.y - cmd.pt0.y;
-                const float len = std::sqrt(dx * dx + dy * dy);
+                const float len = std::sqrt((dx * dx) + (dy * dy));
                 if (len < 1e-4F) {
                     break;
                 }
@@ -1767,21 +1790,23 @@ struct GpuGlRhi::Impl {
                 const float nx = -uy * cmd.f0 * 0.5F;
                 const float ny = ux * cmd.f0 * 0.5F;
                 // 方头端帽：两端各延伸半宽（近似软件 AA 线段包围盒，容差覆盖）
-                const float ax = cmd.pt0.x - ux * cmd.f0 * 0.5F;
-                const float ay = cmd.pt0.y - uy * cmd.f0 * 0.5F;
-                const float bx = cmd.pt1.x + ux * cmd.f0 * 0.5F;
-                const float by = cmd.pt1.y + uy * cmd.f0 * 0.5F;
+                const float ax = cmd.pt0.x - (ux * cmd.f0 * 0.5F);
+                const float ay = cmd.pt0.y - (uy * cmd.f0 * 0.5F);
+                const float bx = cmd.pt1.x + (ux * cmd.f0 * 0.5F);
+                const float by = cmd.pt1.y + (uy * cmd.f0 * 0.5F);
                 BatchKey k{};
                 k.pipeline = Pipeline::Solid;
                 k.clip = effective_clip();
                 begin_batch(k);
                 const Color c = bake_alpha(cmd.color, alpha);
                 const Vertex base[4] = {
-                    Vertex{ax + nx, ay + ny, 0.0F, 0.0F, c.r, c.g, c.b, c.a},
-                    Vertex{bx + nx, by + ny, 1.0F, 0.0F, c.r, c.g, c.b, c.a},
-                    Vertex{bx - nx, by - ny, 1.0F, 1.0F, c.r, c.g, c.b, c.a},
-                    Vertex{ax - nx, ay - ny, 0.0F, 1.0F, c.r, c.g, c.b, c.a},
+                    Vertex{.x = ax + nx, .y = ay + ny, .u = 0.0F, .v = 0.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+                    Vertex{.x = bx + nx, .y = by + ny, .u = 1.0F, .v = 0.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+                    Vertex{.x = bx - nx, .y = by - ny, .u = 1.0F, .v = 1.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+                    Vertex{.x = ax - nx, .y = ay - ny, .u = 0.0F, .v = 1.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
                 };
+                // 以「首指针 + 常量 4 顶点」追加一个四边形顶点块，与 std::copy 区间写法等价
+                // NOLINTNEXTLINE(*-bounds-pointer-arithmetic)
                 verts.insert(verts.end(), base, base + 4);
                 break;
             }
@@ -1815,11 +1840,17 @@ struct GpuGlRhi::Impl {
                     const float bx = pts[i + 1].x + (ux * hw);
                     const float by = pts[i + 1].y + (uy * hw);
                     const Vertex quad[4] = {
-                        Vertex{ax + nx, ay + ny, 0.0F, 0.0F, c.r, c.g, c.b, c.a},
-                        Vertex{bx + nx, by + ny, 1.0F, 0.0F, c.r, c.g, c.b, c.a},
-                        Vertex{bx - nx, by - ny, 1.0F, 1.0F, c.r, c.g, c.b, c.a},
-                        Vertex{ax - nx, ay - ny, 0.0F, 1.0F, c.r, c.g, c.b, c.a},
+                        Vertex{
+                            .x = ax + nx, .y = ay + ny, .u = 0.0F, .v = 0.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+                        Vertex{
+                            .x = bx + nx, .y = by + ny, .u = 1.0F, .v = 0.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+                        Vertex{
+                            .x = bx - nx, .y = by - ny, .u = 1.0F, .v = 1.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+                        Vertex{
+                            .x = ax - nx, .y = ay - ny, .u = 0.0F, .v = 1.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
                     };
+                    // 以「首指针 + 常量 4 顶点」追加一个四边形顶点块，与 std::copy 区间写法等价
+                    // NOLINTNEXTLINE(*-bounds-pointer-arithmetic)
                     verts.insert(verts.end(), quad, quad + 4);
                 }
                 for (const Point &pt : pts) {
@@ -1828,11 +1859,11 @@ struct GpuGlRhi::Impl {
                 break;
             }
             case CmdKind::Sector: {
-                constexpr float TWO_PI = 6.28318530717958647692F;
+                constexpr float two_pi = 6.28318530717958647692F;
                 if (cmd.f0 <= 0.0F || cmd.color.a == 0) {
                     break;
                 }
-                const float sweep = std::min(cmd.f3 - cmd.f2, TWO_PI);
+                const float sweep = std::min(cmd.f3 - cmd.f2, two_pi);
                 const float outer = cmd.f0;
                 const float inner = std::max(0.0F, cmd.f1);
                 if (sweep <= 0.0F || inner >= outer) {
@@ -1845,39 +1876,68 @@ struct GpuGlRhi::Impl {
                 const Color c = bake_alpha(cmd.color, alpha);
                 // 首版降级：把（环）扇按角度细分为梯形 quad，以弦逼近弧（无 SDF 羽化）。
                 // 与软件 SDF 不逐位一致，同 Polyline 归后续容差 golden 阶梯。
-                constexpr float STEP = 0.12F;  // 每段弧度（≈6.9°），弦误差 < 外径的 0.1%
-                const int slices = std::clamp(static_cast<int>(std::ceil(sweep / STEP)), 8, 256);
+                constexpr float step = 0.12F;  // 每段弧度（≈6.9°），弦误差 < 外径的 0.1%
+                const int slices = std::clamp(static_cast<int>(std::ceil(sweep / step)), 8, 256);
                 for (int i = 0; i < slices; ++i) {
-                    const float t0 = cmd.f2 + (sweep * static_cast<float>(i)) / static_cast<float>(slices);
-                    const float t1 = cmd.f2 + (sweep * static_cast<float>(i + 1)) / static_cast<float>(slices);
+                    const float t0 = cmd.f2 + ((sweep * static_cast<float>(i)) / static_cast<float>(slices));
+                    const float t1 = cmd.f2 + ((sweep * static_cast<float>(i + 1)) / static_cast<float>(slices));
                     const float c0 = std::cos(t0);
                     const float s0 = std::sin(t0);
                     const float c1 = std::cos(t1);
                     const float s1 = std::sin(t1);
                     const Vertex quad[4] = {
-                        Vertex{cmd.pt0.x + (c0 * inner), cmd.pt0.y + (s0 * inner), 0.0F, 0.0F, c.r, c.g, c.b, c.a},
-                        Vertex{cmd.pt0.x + (c0 * outer), cmd.pt0.y + (s0 * outer), 1.0F, 0.0F, c.r, c.g, c.b, c.a},
-                        Vertex{cmd.pt0.x + (c1 * outer), cmd.pt0.y + (s1 * outer), 1.0F, 1.0F, c.r, c.g, c.b, c.a},
-                        Vertex{cmd.pt0.x + (c1 * inner), cmd.pt0.y + (s1 * inner), 0.0F, 1.0F, c.r, c.g, c.b, c.a},
+                        Vertex{.x = cmd.pt0.x + (c0 * inner),
+                               .y = cmd.pt0.y + (s0 * inner),
+                               .u = 0.0F,
+                               .v = 0.0F,
+                               .r = c.r,
+                               .g = c.g,
+                               .b = c.b,
+                               .a = c.a},
+                        Vertex{.x = cmd.pt0.x + (c0 * outer),
+                               .y = cmd.pt0.y + (s0 * outer),
+                               .u = 1.0F,
+                               .v = 0.0F,
+                               .r = c.r,
+                               .g = c.g,
+                               .b = c.b,
+                               .a = c.a},
+                        Vertex{.x = cmd.pt0.x + (c1 * outer),
+                               .y = cmd.pt0.y + (s1 * outer),
+                               .u = 1.0F,
+                               .v = 1.0F,
+                               .r = c.r,
+                               .g = c.g,
+                               .b = c.b,
+                               .a = c.a},
+                        Vertex{.x = cmd.pt0.x + (c1 * inner),
+                               .y = cmd.pt0.y + (s1 * inner),
+                               .u = 0.0F,
+                               .v = 1.0F,
+                               .r = c.r,
+                               .g = c.g,
+                               .b = c.b,
+                               .a = c.a},
                     };
+                    // 以「首指针 + 常量 4 顶点」追加一个四边形顶点块，与 std::copy 区间写法等价
+                    // NOLINTNEXTLINE(*-bounds-pointer-arithmetic)
                     verts.insert(verts.end(), quad, quad + 4);
                 }
                 break;
             }
             case CmdKind::RoundedBorder: {
-                if (cmd.f1 <= 0.0F || cmd.color.a == 0 || cmd.bounds.size.width <= 0.0F
-                    || cmd.bounds.size.height <= 0.0F) {
+                if (cmd.f1 <= 0.0F || cmd.color.a == 0 || cmd.bounds.size.width <= 0.0F ||
+                    cmd.bounds.size.height <= 0.0F) {
                     break;
                 }
                 BatchKey k{};
                 k.pipeline = Pipeline::Border;
                 k.clip = effective_clip();
-                const float radius =
-                    std::min(cmd.f0, std::min(cmd.bounds.size.width, cmd.bounds.size.height) * 0.5F);
+                const float radius = std::min(cmd.f0, std::min(cmd.bounds.size.width, cmd.bounds.size.height) * 0.5F);
                 k.border_radius = radius;
                 k.border_width = cmd.f1;
-                k.shape_cx = cmd.bounds.origin.x + cmd.bounds.size.width * 0.5F;
-                k.shape_cy = cmd.bounds.origin.y + cmd.bounds.size.height * 0.5F;
+                k.shape_cx = cmd.bounds.origin.x + (cmd.bounds.size.width * 0.5F);
+                k.shape_cy = cmd.bounds.origin.y + (cmd.bounds.size.height * 0.5F);
                 k.shape_hw = cmd.bounds.size.width * 0.5F;
                 k.shape_hh = cmd.bounds.size.height * 0.5F;
                 begin_batch(k);
@@ -1928,10 +1988,8 @@ struct GpuGlRhi::Impl {
                     break;
                 }
                 const float s = scale > 0.0F ? scale : 1.0F;
-                const int lw =
-                    std::max(1, static_cast<int>(std::lround(cmd.bounds.size.width * s)));
-                const int lh =
-                    std::max(1, static_cast<int>(std::lround(cmd.bounds.size.height * s)));
+                const int lw = std::max(1, static_cast<int>(std::lround(cmd.bounds.size.width * s)));
+                const int lh = std::max(1, static_cast<int>(std::lround(cmd.bounds.size.height * s)));
                 LayerEntry &entry = layer_cache[lkey];
                 if (entry.width != lw || entry.height != lh) {
                     // 尺寸变化：层与 aux 采样拷贝一并重定义；待提交批可能引用旧层纹理，先落地。
@@ -1975,7 +2033,7 @@ struct GpuGlRhi::Impl {
                 flush_batch();
                 const LayerFrame frame = std::move(layer_stack.back());
                 layer_stack.pop_back();
-                clip_stack = std::move(frame.saved_clip);
+                clip_stack = frame.saved_clip;
                 alpha = frame.saved_alpha;
                 gl.bind_framebuffer(FRAMEBUFFER, msaa_fbo);
                 gl.viewport(0, 0, device_w, device_h);
@@ -2012,19 +2070,20 @@ struct GpuGlRhi::Impl {
                 const Point c3 = mat.apply_to_point(Point{.x = 0.0F, .y = lh});
                 const Color c = bake_alpha(Color{255, 255, 255, 255}, alpha);
                 const Vertex quad[4] = {
-                    Vertex{c0.x, c0.y, 0.0F, 0.0F, c.r, c.g, c.b, c.a},
-                    Vertex{c1.x, c1.y, 1.0F, 0.0F, c.r, c.g, c.b, c.a},
-                    Vertex{c2.x, c2.y, 1.0F, 1.0F, c.r, c.g, c.b, c.a},
-                    Vertex{c3.x, c3.y, 0.0F, 1.0F, c.r, c.g, c.b, c.a},
+                    Vertex{.x = c0.x, .y = c0.y, .u = 0.0F, .v = 0.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+                    Vertex{.x = c1.x, .y = c1.y, .u = 1.0F, .v = 0.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+                    Vertex{.x = c2.x, .y = c2.y, .u = 1.0F, .v = 1.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+                    Vertex{.x = c3.x, .y = c3.y, .u = 0.0F, .v = 1.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
                 };
+                // 以「首指针 + 常量 4 顶点」追加一个四边形顶点块，与 std::copy 区间写法等价
+                // NOLINTNEXTLINE(*-bounds-pointer-arithmetic)
                 verts.insert(verts.end(), quad, quad + 4);
                 break;
             }
             case CmdKind::DrawText: {
                 // 与 software_rhi 同形的数据契约；缺文本/字体直接跳过（录制方恒带 font_idx，
                 // 正常路径不会触发）。空色不绘（软件同契约）。
-                if (data.text == nullptr || data.font == nullptr || data.text->empty() || cmd.color.a == 0
-                    || failed) {
+                if (data.text == nullptr || data.font == nullptr || data.text->empty() || cmd.color.a == 0 || failed) {
                     break;
                 }
                 const render::TextLayoutOpts opts{
@@ -2036,10 +2095,9 @@ struct GpuGlRhi::Impl {
                 // aa 恒 Supersample：GPU v1 容差决策——LCD 子像素着色依赖精确的 RGB 条纹布局，
                 // 降级灰度保证颜色安全（设计文档 §5 DrawText 行）。
                 const bool ok = render::emit_text_glyphs(
-                    *data.text, *data.font, opts, scale, render::TextAAMode::Supersample, cmd.color, origin_x,
-                    origin_y,
-                    [this, &clip, &cmd](const render::GlyphAtlas::Entry &entry, render::GlyphAtlas::Mode mode,
-                                        int dx0, int dy0, std::uint64_t key) {
+                    *data.text, *data.font, opts, scale, render::TextAAMode::Supersample, cmd.color, origin_x, origin_y,
+                    [this, &clip, &cmd](const render::GlyphAtlas::Entry &entry, render::GlyphAtlas::Mode mode, int dx0,
+                                        int dy0, std::uint64_t key) {
                         if (mode != render::GlyphAtlas::Mode::Gray) {
                             return;  // 防御：GPU 路径恒灰度
                         }
@@ -2057,8 +2115,8 @@ struct GpuGlRhi::Impl {
                         const float inv_s = 1.0F / scale;
                         const float x0 = static_cast<float>(dx0) * inv_s;
                         const float y0 = static_cast<float>(dy0) * inv_s;
-                        push_quad_uv(x0, y0, x0 + static_cast<float>(slot.w) * inv_s,
-                                     y0 + static_cast<float>(slot.h) * inv_s, slot.u0, slot.v0, slot.u1, slot.v1,
+                        push_quad_uv(x0, y0, x0 + (static_cast<float>(slot.w) * inv_s),
+                                     y0 + (static_cast<float>(slot.h) * inv_s), slot.u0, slot.v0, slot.u1, slot.v1,
                                      bake_alpha(cmd.color, alpha));
                     });
                 (void)ok;  // 无字体面（引擎恒有内置字体，理论不触发）：GPU 路径无位图兜底，跳过
@@ -2073,8 +2131,8 @@ struct GpuGlRhi::Impl {
                 if (img.pixels.empty() || img.width <= 0 || img.height <= 0) {
                     break;
                 }
-                if (img.pixels.size()
-                    < static_cast<std::uint64_t>(img.width) * static_cast<std::uint64_t>(img.height) * 4U) {
+                if (img.pixels.size() <
+                    static_cast<std::uint64_t>(img.width) * static_cast<std::uint64_t>(img.height) * 4U) {
                     break;
                 }
                 // 常驻流式通道（specification/03 §8.7）：stream_key != 0 走固定纹理槽复用 +
@@ -2099,12 +2157,11 @@ struct GpuGlRhi::Impl {
                     BatchKey k{};
                     k.pipeline = Pipeline::Image;
                     k.clip = effective_clip();
-                    k.blend_pma = true;      // 片元一乘 PMA → 输出 PMA 语义，混合同静态图
+                    k.blend_pma = true;  // 片元一乘 PMA → 输出 PMA 语义，混合同静态图
                     k.pma_in_shader = true;  // 直色纹理：PMA 下沉到片元（上传期无 CPU 预乘）
                     k.image_tex = slot->tex;
                     begin_batch(k);
-                    push_quad(cmd.bounds.origin.x, cmd.bounds.origin.y,
-                              cmd.bounds.origin.x + cmd.bounds.size.width,
+                    push_quad(cmd.bounds.origin.x, cmd.bounds.origin.y, cmd.bounds.origin.x + cmd.bounds.size.width,
                               cmd.bounds.origin.y + cmd.bounds.size.height,
                               bake_alpha(Color{255, 255, 255, 255}, alpha));
                     break;
@@ -2135,16 +2192,14 @@ struct GpuGlRhi::Impl {
                 const float dy = cmd.pt1.y - ay;
                 // 软件端退化阈值：物理像素 len_sq < 0.001 → fill_rect(首色)（走实心管线，
                 // 含裁剪 + 全局 alpha）；此处同形翻译，scale² 把逻辑长度折算到物理域。
-                const float len_sq_phys = (dx * dx + dy * dy) * scale * scale;
+                const float len_sq_phys = ((dx * dx) + (dy * dy)) * scale * scale;
                 if (len_sq_phys < 0.001F) {
                     BatchKey k{};
                     k.pipeline = Pipeline::Solid;
                     k.clip = effective_clip();
                     begin_batch(k);
-                    push_quad(cmd.bounds.origin.x, cmd.bounds.origin.y,
-                              cmd.bounds.origin.x + cmd.bounds.size.width,
-                              cmd.bounds.origin.y + cmd.bounds.size.height,
-                              bake_alpha(data.colors->front(), alpha));
+                    push_quad(cmd.bounds.origin.x, cmd.bounds.origin.y, cmd.bounds.origin.x + cmd.bounds.size.width,
+                              cmd.bounds.origin.y + cmd.bounds.size.height, bake_alpha(data.colors->front(), alpha));
                     break;
                 }
                 const GLuint_ lut = acquire_lut(*data.colors, *data.stops);
@@ -2167,8 +2222,8 @@ struct GpuGlRhi::Impl {
             }
             case CmdKind::RadialGradient: {
                 // 软件端契约：空色标 / radius<=0 直接返回。
-                if (data.colors == nullptr || data.stops == nullptr || data.colors->empty() || data.stops->empty()
-                    || cmd.f0 <= 0.0F) {
+                if (data.colors == nullptr || data.stops == nullptr || data.colors->empty() || data.stops->empty() ||
+                    cmd.f0 <= 0.0F) {
                     break;
                 }
                 const GLuint_ lut = acquire_lut(*data.colors, *data.stops);
@@ -2200,8 +2255,7 @@ struct GpuGlRhi::Impl {
                     k.pipeline = Pipeline::Solid;
                     k.clip = effective_clip();
                     begin_batch(k);
-                    push_quad(shadow_rect.origin.x, shadow_rect.origin.y,
-                              shadow_rect.origin.x + shadow_rect.size.width,
+                    push_quad(shadow_rect.origin.x, shadow_rect.origin.y, shadow_rect.origin.x + shadow_rect.size.width,
                               shadow_rect.origin.y + shadow_rect.size.height, bake_alpha(cmd.color, alpha));
                     break;
                 }
@@ -2209,16 +2263,15 @@ struct GpuGlRhi::Impl {
                 BatchKey k{};
                 k.pipeline = Pipeline::Shadow;
                 k.clip = effective_clip();
-                k.shadow_cx = shadow_rect.origin.x + shadow_rect.size.width * 0.5F;
-                k.shadow_cy = shadow_rect.origin.y + shadow_rect.size.height * 0.5F;
+                k.shadow_cx = shadow_rect.origin.x + (shadow_rect.size.width * 0.5F);
+                k.shadow_cy = shadow_rect.origin.y + (shadow_rect.size.height * 0.5F);
                 k.shadow_hw = shadow_rect.size.width * 0.5F;
                 k.shadow_hh = shadow_rect.size.height * 0.5F;
                 k.shadow_blur = cmd.f2;
                 begin_batch(k);
                 push_quad(shadow_rect.origin.x - expand, shadow_rect.origin.y - expand,
                           shadow_rect.origin.x + shadow_rect.size.width + expand,
-                          shadow_rect.origin.y + shadow_rect.size.height + expand,
-                          bake_alpha(cmd.color, alpha));
+                          shadow_rect.origin.y + shadow_rect.size.height + expand, bake_alpha(cmd.color, alpha));
                 break;
             }
             case CmdKind::BlurRegion: {
@@ -2330,8 +2383,7 @@ struct GpuGlRhi::Impl {
                     gl.uniform1i(blend_u_src, 0);
                     gl.uniform1i(blend_u_mode, static_cast<int>(cmd.blend_mode));
                     gl.uniform3f(blend_u_tint, static_cast<float>(cmd.color.r) / 255.0F,
-                                 static_cast<float>(cmd.color.g) / 255.0F,
-                                 static_cast<float>(cmd.color.b) / 255.0F);
+                                 static_cast<float>(cmd.color.g) / 255.0F, static_cast<float>(cmd.color.b) / 255.0F);
                     gl.uniform1f(blend_u_strength, strength);
                     bind_sample_tex(entry.aux_tex);
                     draw_effect_quad(static_cast<float>(rx0) / s, static_cast<float>(ry0) / s,
@@ -2354,9 +2406,8 @@ struct GpuGlRhi::Impl {
                              static_cast<float>(cmd.color.g) / 255.0F, static_cast<float>(cmd.color.b) / 255.0F);
                 gl.uniform1f(blend_u_strength, strength);
                 bind_sample_tex(resolve_tex);
-                draw_effect_quad(static_cast<float>(rx0) / s, static_cast<float>(ry0) / s,
-                                 static_cast<float>(rx1) / s, static_cast<float>(ry1) / s,
-                                 static_cast<float>(rx0) / static_cast<float>(device_w),
+                draw_effect_quad(static_cast<float>(rx0) / s, static_cast<float>(ry0) / s, static_cast<float>(rx1) / s,
+                                 static_cast<float>(ry1) / s, static_cast<float>(rx0) / static_cast<float>(device_w),
                                  static_cast<float>(ry0) / static_cast<float>(device_h),
                                  static_cast<float>(rx1) / static_cast<float>(device_w),
                                  static_cast<float>(ry1) / static_cast<float>(device_h));
@@ -2417,9 +2468,8 @@ struct GpuGlRhi::Impl {
                 gl.uniform2f(mask_u_size, static_cast<float>(rx1 - rx0), static_cast<float>(ry1 - ry0));
                 gl.uniform1f(mask_u_scale, s);
                 bind_sample_tex(resolve_tex);
-                draw_effect_quad(static_cast<float>(rx0) / s, static_cast<float>(ry0) / s,
-                                 static_cast<float>(rx1) / s, static_cast<float>(ry1) / s,
-                                 static_cast<float>(rx0) / static_cast<float>(device_w),
+                draw_effect_quad(static_cast<float>(rx0) / s, static_cast<float>(ry0) / s, static_cast<float>(rx1) / s,
+                                 static_cast<float>(ry1) / s, static_cast<float>(rx0) / static_cast<float>(device_w),
                                  static_cast<float>(ry0) / static_cast<float>(device_h),
                                  static_cast<float>(rx1) / static_cast<float>(device_w),
                                  static_cast<float>(ry1) / static_cast<float>(device_h));
@@ -2439,8 +2489,8 @@ struct GpuGlRhi::Impl {
                 if (img.pixels.empty() || img.width <= 0 || img.height <= 0) {
                     break;
                 }
-                if (img.pixels.size()
-                    < static_cast<std::uint64_t>(img.width) * static_cast<std::uint64_t>(img.height) * 4U) {
+                if (img.pixels.size() <
+                    static_cast<std::uint64_t>(img.width) * static_cast<std::uint64_t>(img.height) * 4U) {
                     break;
                 }
                 const GLuint_ tex = acquire_image_tex(img);
@@ -2465,11 +2515,13 @@ struct GpuGlRhi::Impl {
                 const Point c3 = mat.apply_to_point(Point{.x = 0.0F, .y = lh});
                 const Color c = bake_alpha(Color{255, 255, 255, 255}, alpha);
                 const Vertex quad[4] = {
-                    Vertex{c0.x, c0.y, 0.0F, 0.0F, c.r, c.g, c.b, c.a},
-                    Vertex{c1.x, c1.y, 1.0F, 0.0F, c.r, c.g, c.b, c.a},
-                    Vertex{c2.x, c2.y, 1.0F, 1.0F, c.r, c.g, c.b, c.a},
-                    Vertex{c3.x, c3.y, 0.0F, 1.0F, c.r, c.g, c.b, c.a},
+                    Vertex{.x = c0.x, .y = c0.y, .u = 0.0F, .v = 0.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+                    Vertex{.x = c1.x, .y = c1.y, .u = 1.0F, .v = 0.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+                    Vertex{.x = c2.x, .y = c2.y, .u = 1.0F, .v = 1.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
+                    Vertex{.x = c3.x, .y = c3.y, .u = 0.0F, .v = 1.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
                 };
+                // 以「首指针 + 常量 4 顶点」追加一个四边形顶点块，与 std::copy 区间写法等价
+                // NOLINTNEXTLINE(*-bounds-pointer-arithmetic)
                 verts.insert(verts.end(), quad, quad + 4);
                 break;
             }
@@ -2492,9 +2544,7 @@ GpuGlRhi::~GpuGlRhi() {
     }
 }
 
-auto GpuGlRhi::valid() const -> bool {
-    return impl_ != nullptr && !impl_->failed;
-}
+auto GpuGlRhi::valid() const -> bool { return impl_ != nullptr && !impl_->failed; }
 
 auto GpuGlRhi::submit(const DrawCmd &cmd, const CmdData &data) -> void {
     if (impl_ == nullptr || impl_->failed) {
@@ -2541,19 +2591,16 @@ auto GpuGlRhi::end_frame() -> void {
     impl_->check_error("end_frame");
 }
 
-auto GpuGlRhi::stats() const -> FrameStats {
-    return impl_ != nullptr ? impl_->stats : FrameStats{};
-}
+auto GpuGlRhi::stats() const -> FrameStats { return impl_ != nullptr ? impl_->stats : FrameStats{}; }
 
 auto GpuGlRhi::set_glyph_page_size(int side) -> void {
     if (impl_ != nullptr && side > 0) {
-        impl_->glyph_page_size_ = side;
+        impl_->glyph_page_size = side;
     }
 }
 
 auto GpuGlRhi::read_pixels(std::vector<std::uint8_t> &out) -> bool {
-    if (impl_ == nullptr || impl_->failed || impl_->resolve_fbo == 0 || impl_->device_w <= 0
-        || impl_->device_h <= 0) {
+    if (impl_ == nullptr || impl_->failed || impl_->resolve_fbo == 0 || impl_->device_w <= 0 || impl_->device_h <= 0) {
         return false;
     }
     // 批渲染的 GL 绘制集中在 flush_batch（end_frame 内触发）；若在 end_frame 之前读回
@@ -2600,8 +2647,8 @@ auto GpuGlRhi::acquire_stream_image(std::uint64_t key, int width, int height) ->
     return slot != nullptr ? slot->tex : 0;
 }
 
-auto GpuGlRhi::update_stream_image(StreamImageId id, const std::uint8_t *pixels, std::size_t stride_bytes, int x,
-                                   int y, int w, int h) -> void {
+auto GpuGlRhi::update_stream_image(StreamImageId id, const std::uint8_t *pixels, std::size_t stride_bytes, int x, int y,
+                                   int w, int h) -> void {
     if (impl_ == nullptr || impl_->failed || id == 0 || pixels == nullptr || w <= 0 || h <= 0) {
         return;
     }
@@ -2617,12 +2664,13 @@ auto GpuGlRhi::update_stream_image(StreamImageId id, const std::uint8_t *pixels,
         impl_->gl.bind_texture(TEXTURE_2D, slot.tex);
         impl_->gl.pixel_store_i(UNPACK_ALIGNMENT, 1);
         // 行跨距经 UNPACK_ROW_LENGTH 表达（单位 = 像素数）；0 = 紧凑行无需设置。
-        impl_->gl.pixel_store_i(UNPACK_ROW_LENGTH,
-                                stride_bytes != 0 ? static_cast<GLint_>(stride_bytes / 4U) : 0);
+        impl_->gl.pixel_store_i(UNPACK_ROW_LENGTH, stride_bytes != 0 ? static_cast<GLint_>(stride_bytes / 4U) : 0);
         const std::size_t stride = stride_bytes != 0 ? stride_bytes : static_cast<std::size_t>(slot.width) * 4U;
-        impl_->gl.tex_sub_image_2d(TEXTURE_2D, 0, x, y, w, h, RGBA, UNSIGNED_BYTE,
-                                    pixels + stride * static_cast<std::size_t>(y)
-                                        + static_cast<std::size_t>(x) * 4U);
+        impl_->gl.tex_sub_image_2d(
+            TEXTURE_2D, 0, x, y, w, h, RGBA, UNSIGNED_BYTE,
+            // glTexSubImage2D 行首偏移 = 行距 × y + 每像素 4 字节 × x，是 GL 像素布局的定义式
+            // NOLINTNEXTLINE(*-bounds-pointer-arithmetic)
+            pixels + (stride * static_cast<std::size_t>(y)) + (static_cast<std::size_t>(x) * 4U));
         impl_->gl.pixel_store_i(UNPACK_ROW_LENGTH, 0);
         impl_->check_error("stream-update");
         return;

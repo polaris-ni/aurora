@@ -80,7 +80,8 @@ AURORA_TEST_CASE(resolve_empty_path_returns_output_directory) {
 
 AURORA_TEST_CASE(resolve_pure_filename_joins_output_directory) {
     const std::string original = output_directory();
-    const std::string custom = (std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_outdir").string();
+    const std::string custom =
+        (std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_outdir").string();
     set_output_directory(custom);
 
     // 纯文件名（无目录分隔）落入缺省输出目录。
@@ -92,7 +93,8 @@ AURORA_TEST_CASE(resolve_pure_filename_joins_output_directory) {
 
 AURORA_TEST_CASE(resolve_explicit_paths_pass_through) {
     const std::string original = output_directory();
-    set_output_directory((std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_outdir").string());
+    set_output_directory(
+        (std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_outdir").string());
 
     // 绝对路径原样返回。
     const std::string absolute = temp_png_path("abs_shot.png");
@@ -106,7 +108,8 @@ AURORA_TEST_CASE(resolve_explicit_paths_pass_through) {
 AURORA_TEST_CASE(output_directory_roundtrip_and_default_reset) {
     const std::string original = output_directory();
 
-    const std::string custom = (std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_outdir2").string();
+    const std::string custom =
+        (std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_outdir2").string();
     set_output_directory(custom);
     AURORA_TEST_CHECK_EQ(output_directory(), custom);
 

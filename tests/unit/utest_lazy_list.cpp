@@ -93,6 +93,8 @@ class ReduceMotionGuard final {
     ~ReduceMotionGuard() { set_accessibility_settings(saved_); }
     ReduceMotionGuard(const ReduceMotionGuard&) = delete;
     auto operator=(const ReduceMotionGuard&) -> ReduceMotionGuard& = delete;
+    ReduceMotionGuard(ReduceMotionGuard&&) = delete;
+    auto operator=(ReduceMotionGuard&&) -> ReduceMotionGuard& = delete;
 
   private:
     AccessibilitySettings saved_;

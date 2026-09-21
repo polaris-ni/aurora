@@ -206,7 +206,8 @@ class NavigatorHost : public Widget {
         transitioning_ = true;
         progress_.set(0.0);
         if (!bound_) {
-            // 绑定一次：时长取首条转场；曲线固定 Curves::ease_in_out()，逐路由 RouteTransition::curve 当前未接线（MVP 不逐路由重建控制器，避免重复注册）。
+            // 绑定一次：时长取首条转场；曲线固定 Curves::ease_in_out()，逐路由 RouteTransition::curve 当前未接线（MVP
+            // 不逐路由重建控制器，避免重复注册）。
             ctrl_ = AnimationController{std::max(duration_seconds, 1e-6)};
             anim_.bind(ctrl_, Tween<double>{0.0, 1.0, Curves::ease_in_out()}, progress_);
             bound_ = true;

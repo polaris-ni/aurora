@@ -3,7 +3,7 @@
 // Win32 UIA 无障碍桥：**内部头**（与 `win32_cursor.h` / `win32_capture.h` 同列于 src/）。
 //
 // 为何不进公共头：实现要 `<windows.h>` / `<uiautomationcore.h>` 与 HWND，而
-// `Win32Window` 刻意 pimpl 隔离、公共头零平台污染；本文件仅供 `win32_window.cpp` /
+// `Win32Host` 刻意 pimpl 隔离、公共头零平台污染；本文件仅供 `win32_host.cpp` /
 // `win32_surface.cpp` / `d3d11_surface.cpp` 引入。
 //
 // 平台宏来源必须在守卫**之前**引入：`AURORA_PLATFORM_WINDOWS` 由本头导出，若依赖调用方
@@ -64,7 +64,8 @@ struct UiaApi {
     LRESULT(WINAPI *return_raw_element_provider)(HWND, WPARAM, LPARAM, IRawElementProviderSimple *) = nullptr;
     HRESULT(WINAPI *raise_automation_event)(IRawElementProviderSimple *, EVENTID) = nullptr;
     HRESULT(WINAPI *raise_property_changed)(IRawElementProviderSimple *, PROPERTYID, VARIANT, VARIANT) = nullptr;
-    HRESULT(WINAPI *raise_structure_changed)(IRawElementProviderSimple *, enum StructureChangeType, int *, int) = nullptr;
+    HRESULT(WINAPI *raise_structure_changed)(IRawElementProviderSimple *, enum StructureChangeType, int *,
+                                             int) = nullptr;
     HRESULT(WINAPI *disconnect_provider)(IRawElementProviderSimple *) = nullptr;
     HRESULT(WINAPI *host_provider_from_hwnd)(HWND, IRawElementProviderSimple **) = nullptr;
     HRESULT(WINAPI *get_reserved_not_supported)(IUnknown **) = nullptr;
@@ -77,7 +78,7 @@ struct UiaApi {
 
 /// @brief Win32 UIA 桥：快照 / diff / provider 缓存 / 事件映射 / 坐标换算。
 ///
-/// 所有权（G14）：由 `Win32Window::Impl` 持有；`Win32Surface` 与 `D3D11Surface` 的
+/// 所有权（G14）：由 `Win32Host::Impl` 持有；`Win32Surface` 与 `D3D11Surface` 的
 /// `accessibility_provider()` 都返回同一实例，避免两份 id→Widget* 映射分裂。
 ///
 /// 同步模型（D9/G2）：事件只置 dirty；平台查询（Navigate / 属性拉取）到达时
@@ -104,7 +105,7 @@ class Win32UiaBridge final : public a11y::Provider {
     auto on_announcement(const std::string &text, const Widget *target) -> void override;
     auto on_widget_destroying(const Widget *w) -> void override;
 
-    // ---- 宿主接线（Win32Window 的 WM_GETOBJECT 分支调用）----
+    // ---- 宿主接线（Win32Host 的 WM_GETOBJECT 分支调用）----
     /// @brief 应答 `WM_GETOBJECT`：`lParam == UiaRootObjectId` 时返回根 provider 的 LRESULT。
     /// @return 已处理返回其 LRESULT；非 UIA 请求返回 `std::nullopt`（交由 DefWindowProc）。
     [[nodiscard]] auto handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<LRESULT>;

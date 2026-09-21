@@ -95,7 +95,7 @@ AURORA_TEST_CASE(glfw_gpu_backend_identity_contract) {
     }
 
     // GPU 就绪：非空且标识 "gpu-gl"；首帧初始化失败时 Window 内部永久回退软件路径
-    //（gpu_fallback_），gpu_backend() 本身仍可能非空——契约只断言「非空即 gpu-gl」。
+    // （gpu_fallback_），gpu_backend() 本身仍可能非空——契约只断言「非空即 gpu-gl」。
     auto *gpu_sink = win->surface().gpu_backend();
     if (gpu_sink != nullptr) {
         AURORA_TEST_CHECK_EQ(gpu_sink->name(), std::string_view("gpu-gl"));

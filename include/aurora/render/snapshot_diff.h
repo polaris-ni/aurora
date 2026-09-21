@@ -5,8 +5,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iomanip>
-#include <sstream>
 #include <span>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -36,22 +36,21 @@ namespace detail {
 
 /// @brief 单个像素的最大单通道差值（0..255）。供 `compare_snapshots` 与区域聚合共用同一判定口径，
 ///        避免「入库」与「聚合」两处对容差的解释不一致。
-[[nodiscard]] inline auto snapshot_pixel_delta(const Image &baseline, const Image &current,
-                                              std::size_t off) -> int {
+[[nodiscard]] inline auto snapshot_pixel_delta(const Image &baseline, const Image &current, std::size_t off) -> int {
     int delta = 0;
     for (int ch = 0; ch < 4; ++ch) {
         delta = std::max(delta, std::abs(static_cast<int>(baseline.pixels[off + static_cast<std::size_t>(ch)]) -
-                                        static_cast<int>(current.pixels[off + static_cast<std::size_t>(ch)])));
+                                         static_cast<int>(current.pixels[off + static_cast<std::size_t>(ch)])));
     }
     return delta;
 }
 
 /// @brief 两个矩形的交叠面积（0 表示不相交）。用于把差异区域归因到控件。
 [[nodiscard]] inline auto rect_overlap_area(const Rect &a, const Rect &b) -> double {
-    const double ix = static_cast<double>(std::min(a.right(), b.right())) -
-                      static_cast<double>(std::max(a.origin.x, b.origin.x));
-    const double iy = static_cast<double>(std::min(a.bottom(), b.bottom())) -
-                      static_cast<double>(std::max(a.origin.y, b.origin.y));
+    const double ix =
+        static_cast<double>(std::min(a.right(), b.right())) - static_cast<double>(std::max(a.origin.x, b.origin.x));
+    const double iy =
+        static_cast<double>(std::min(a.bottom(), b.bottom())) - static_cast<double>(std::max(a.origin.y, b.origin.y));
     if (ix <= 0.0 || iy <= 0.0) {
         return 0.0;
     }
@@ -149,8 +148,8 @@ class TileUnion {
 struct DiffRegionOptions {
     int tile_size = 8;  ///< 网格边长（像素，左上角对齐）。<= 0 时退化为逐像素（等价于边长 1）。
     double tile_dirty_ratio = 0.0;  ///< 网格内差异像素占比**大于**该值才算脏网格。默认 0
-                                   ///< 即「有一处差异即脏」——诊断工具应当宁可多报不可漏报；
-                                   ///< 想过滤孤立噪点可调高（如 0.5 要求网格内过半像素有差异）。
+                                    ///< 即「有一处差异即脏」——诊断工具应当宁可多报不可漏报；
+                                    ///< 想过滤孤立噪点可调高（如 0.5 要求网格内过半像素有差异）。
     std::size_t min_region_pixels = 1;  ///< 差异像素数少于该值的区域被丢弃（滤碎块）。默认不丢弃。
 };
 
@@ -164,10 +163,10 @@ struct DiffRegionOptions {
  * 为避免仅为诊断目的新增一个 `RectI`（占用公共 API 预算），像素值以 float 承载，取用者按整点理解即可。
  */
 struct DiffRegion {
-    Rect bounds;                  ///< 区域矩形（像素坐标）。等于其全部脏网格的包络。
+    Rect bounds;  ///< 区域矩形（像素坐标）。等于其全部脏网格的包络。
     std::size_t diff_pixels = 0;  ///< 区域内超容差的像素数（精确值，不含因网格对齐引入的填充）
-    double coverage = 0.0;        ///< diff_pixels 占本区域面积之比；低表示差异在区域内很稀疏
-    int max_color_delta = 0;      ///< 区域内最大单通道色差（0..255）
+    double coverage = 0.0;  ///< diff_pixels 占本区域面积之比；低表示差异在区域内很稀疏
+    int max_color_delta = 0;  ///< 区域内最大单通道色差（0..255）
 };
 
 /**
@@ -191,9 +190,8 @@ struct DiffRegion {
  * @note Thread: safe, no shared state
  * @note Side-effects: none
  */
-[[nodiscard]] inline auto cluster_diff_regions(const Image &baseline, const Image &current,
-                                              int tolerance = 0,
-                                              const DiffRegionOptions &opt = {}) -> std::vector<DiffRegion> {
+[[nodiscard]] inline auto cluster_diff_regions(const Image &baseline, const Image &current, int tolerance = 0,
+                                               const DiffRegionOptions &opt = {}) -> std::vector<DiffRegion> {
     if (baseline.width != current.width || baseline.height != current.height) {
         return {};
     }
@@ -242,9 +240,8 @@ struct DiffRegion {
     for (int ty = 0; ty < tiles_y; ++ty) {
         for (int tx = 0; tx < tiles_x; ++tx) {
             const auto t = static_cast<std::size_t>(ty) * utx + static_cast<std::size_t>(tx);
-            const auto effective = tile_total[t] > 0 ? static_cast<double>(tile_diff[t]) /
-                                                           static_cast<double>(tile_total[t])
-                                                     : 0.0;
+            const auto effective =
+                tile_total[t] > 0 ? static_cast<double>(tile_diff[t]) / static_cast<double>(tile_total[t]) : 0.0;
             if (tile_diff[t] == 0 || effective <= opt.tile_dirty_ratio) {
                 continue;
             }
@@ -319,13 +316,12 @@ struct DiffRegion {
         }
         const auto x0 = static_cast<float>(min_x[c] * static_cast<std::size_t>(tile));
         const auto y0 = static_cast<float>(min_y[c] * static_cast<std::size_t>(tile));
-        const auto x1 = std::min(static_cast<float>(uw),
-                                 static_cast<float>((max_x[c] + 1) * static_cast<std::size_t>(tile)));
-        const auto y1 = std::min(static_cast<float>(uh),
-                                 static_cast<float>((max_y[c] + 1) * static_cast<std::size_t>(tile)));
+        const auto x1 =
+            std::min(static_cast<float>(uw), static_cast<float>((max_x[c] + 1) * static_cast<std::size_t>(tile)));
+        const auto y1 =
+            std::min(static_cast<float>(uh), static_cast<float>((max_y[c] + 1) * static_cast<std::size_t>(tile)));
         DiffRegion r;
-        r.bounds = Rect{.origin = Point{.x = x0, .y = y0},
-                        .size = Size{.width = x1 - x0, .height = y1 - y0}};
+        r.bounds = Rect{.origin = Point{.x = x0, .y = y0}, .size = Size{.width = x1 - x0, .height = y1 - y0}};
         r.diff_pixels = region_pixels[c];
         r.coverage = r.bounds.size.width > 0.0F && r.bounds.size.height > 0.0F
                          ? static_cast<double>(region_pixels[c]) /
@@ -358,7 +354,7 @@ struct DiffRegion {
 struct WidgetBox {
     std::string path;  ///< 索引路径，与 `find_node_by_path` / `PUT /api/widget/{path}` 同格式（根为空串）
     std::string type;  ///< 控件类型名（`Widget::type_name()`）
-    Rect bounds;       ///< 布局盒（逻辑单位 dp，与 `Node::bounds()` 同源）
+    Rect bounds;  ///< 布局盒（逻辑单位 dp，与 `Node::bounds()` 同源）
 };
 
 /**
@@ -368,12 +364,12 @@ struct WidgetBox {
  * 或 REST 的 `/api/widget/{path}`，AI 因此能从「有一块像素不对」走到「去改这个控件的属性」。
  */
 struct RegionAttribution {
-    DiffRegion region;              ///< 原始差异区域
-    std::string widget_path;        ///< 命中的控件路径；无法归因时为空串
-    std::string widget_type;        ///< 命中的控件类型；无法归因时为空串
-    Rect widget_bounds;             ///< 命中控件的布局盒
+    DiffRegion region;  ///< 原始差异区域
+    std::string widget_path;  ///< 命中的控件路径；无法归因时为空串
+    std::string widget_type;  ///< 命中的控件类型；无法归因时为空串
+    Rect widget_bounds;  ///< 命中控件的布局盒
     double widget_area_ratio = 0.0;  ///< 该控件被本区域覆盖的比例（0..1）
-    bool partial_overlap = false;   ///< 区域有部分溢出到该控件之外（说明还牵连同层兄弟或背景）
+    bool partial_overlap = false;  ///< 区域有部分溢出到该控件之外（说明还牵连同层兄弟或背景）
 
     /// @brief 是否成功归因到控件。
     ///
@@ -400,10 +396,9 @@ struct RegionAttribution {
  * @note Side-effects: none
  */
 [[nodiscard]] inline auto attribute_diff_regions(const std::vector<DiffRegion> &regions,
-                                                 std::span<const WidgetBox> boxes,
-                                                 float pixels_per_unit = 1.0F)
+                                                 std::span<const WidgetBox> boxes, float pixels_per_unit = 1.0F)
     -> std::vector<RegionAttribution> {
-    constexpr std::size_t kNone = static_cast<std::size_t>(-1);
+    constexpr std::size_t AURORA_NONE = static_cast<std::size_t>(-1);
     const double scale = pixels_per_unit > 0.0F ? static_cast<double>(pixels_per_unit) : 1.0;
 
     std::vector<RegionAttribution> out;
@@ -413,10 +408,10 @@ struct RegionAttribution {
         a.region = r;
 
         double best_overlap = 0.0;
-        std::size_t best = kNone;
+        std::size_t best = AURORA_NONE;
         for (std::size_t i = 0; i < boxes.size(); ++i) {
             const Rect device{.origin = Point{.x = static_cast<float>(boxes[i].bounds.origin.x * scale),
-                                             .y = static_cast<float>(boxes[i].bounds.origin.y * scale)},
+                                              .y = static_cast<float>(boxes[i].bounds.origin.y * scale)},
                               .size = Size{.width = static_cast<float>(boxes[i].bounds.size.width * scale),
                                            .height = static_cast<float>(boxes[i].bounds.size.height * scale)}};
             const double overlap = detail::rect_overlap_area(r.bounds, device);
@@ -427,7 +422,7 @@ struct RegionAttribution {
             }
         }
 
-        if (best == kNone) {
+        if (best == AURORA_NONE) {
             out.push_back(a);
             continue;
         }
@@ -459,10 +454,10 @@ struct RegionAttribution {
  * `to_text()` 产出人（或 LLM）可直接读的多行摘要，`to_json()` 产出同等信息的结构化信封。
  */
 struct SnapshotDiffReport {
-    SnapshotDiff raw;                           ///< 逐像素统计（向后兼容，语义不变）
-    std::vector<DiffRegion> regions;            ///< 未归因的差异区域
+    SnapshotDiff raw;  ///< 逐像素统计（向后兼容，语义不变）
+    std::vector<DiffRegion> regions;  ///< 未归因的差异区域
     std::vector<RegionAttribution> attributed;  ///< 已归因的差异区域，与 `regions` 等长同序
-    double attributed_ratio = 0.0;              ///< 成功归因的差异像素占全部差异像素之比
+    double attributed_ratio = 0.0;  ///< 成功归因的差异像素占全部差异像素之比
 
     /// @brief 是否通过（沿用 `SnapshotDiff::passed` 的逐像素判据；语义不因本报告改变）。
     [[nodiscard]] auto passed() const -> bool { return raw.passed(); }
@@ -528,21 +523,19 @@ inline auto SnapshotDiffReport::to_json() const -> Json {
 inline auto SnapshotDiffReport::to_text(std::size_t max_regions) const -> std::string {
     std::ostringstream os;
     os << "snapshot diff: " << raw.pixel_diff_count << " px (" << std::fixed << std::setprecision(2)
-       << raw.diff_ratio * 100.0 << "%), max delta " << raw.max_color_delta << ", " << regions.size()
-       << " region(s)" << (raw.size_mismatch ? " [SIZE MISMATCH]" : "") << '\n';
+       << raw.diff_ratio * 100.0 << "%), max delta " << raw.max_color_delta << ", " << regions.size() << " region(s)"
+       << (raw.size_mismatch ? " [SIZE MISMATCH]" : "") << '\n';
 
     const std::size_t shown = max_regions < attributed.size() ? max_regions : attributed.size();
     for (std::size_t i = 0; i < shown; ++i) {
         const RegionAttribution &a = attributed[i];
-        const double share = raw.pixel_diff_count > 0
-                                 ? static_cast<double>(a.region.diff_pixels) * 100.0 /
-                                       static_cast<double>(raw.pixel_diff_count)
-                                 : 0.0;
+        const double share = raw.pixel_diff_count > 0 ? static_cast<double>(a.region.diff_pixels) * 100.0 /
+                                                            static_cast<double>(raw.pixel_diff_count)
+                                                      : 0.0;
         os << "  [" << (i + 1) << "] " << std::fixed << std::setprecision(1) << share << "%  ";
         os << (a.attributed() ? (a.widget_path + " (" + a.widget_type + ")") : std::string("<unattributed>"));
-        os << "  bounds=(" << std::setprecision(0) << a.region.bounds.origin.x << ','
-           << a.region.bounds.origin.y << ' ' << a.region.bounds.size.width << 'x'
-           << a.region.bounds.size.height << ')';
+        os << "  bounds=(" << std::setprecision(0) << a.region.bounds.origin.x << ',' << a.region.bounds.origin.y << ' '
+           << a.region.bounds.size.width << 'x' << a.region.bounds.size.height << ')';
         if (a.attributed()) {
             os << "  widget_area=" << std::setprecision(2) << a.widget_area_ratio;
         }
@@ -572,10 +565,9 @@ inline auto SnapshotDiffReport::to_text(std::size_t max_regions) const -> std::s
  * @note Side-effects: none
  */
 [[nodiscard]] inline auto build_snapshot_diff_report(const Image &baseline, const Image &current,
-                                                    std::span<const WidgetBox> boxes = {},
-                                                    int tolerance = 0,
-                                                    const DiffRegionOptions &opt = {},
-                                                    float pixels_per_unit = 1.0F) -> SnapshotDiffReport {
+                                                     std::span<const WidgetBox> boxes = {}, int tolerance = 0,
+                                                     const DiffRegionOptions &opt = {}, float pixels_per_unit = 1.0F)
+    -> SnapshotDiffReport {
     SnapshotDiffReport report;
     report.raw = compare_snapshots(baseline, current, tolerance);
     if (report.raw.size_mismatch) {
@@ -590,10 +582,9 @@ inline auto SnapshotDiffReport::to_text(std::size_t max_regions) const -> std::s
             attributed_pixels += a.region.diff_pixels;
         }
     }
-    report.attributed_ratio = report.raw.pixel_diff_count > 0
-                                  ? static_cast<double>(attributed_pixels) /
-                                        static_cast<double>(report.raw.pixel_diff_count)
-                                  : 0.0;
+    report.attributed_ratio = report.raw.pixel_diff_count > 0 ? static_cast<double>(attributed_pixels) /
+                                                                    static_cast<double>(report.raw.pixel_diff_count)
+                                                              : 0.0;
     return report;
 }
 

@@ -34,7 +34,7 @@ namespace aurora {
 class Dismissible : public SingleChild {
   public:
     explicit Dismissible(Node child, DragAxis axis = DragAxis::Horizontal,
-                          SpringDescription spring = SpringDescription{})
+                         SpringDescription spring = SpringDescription{})
         : SingleChild(std::move(child)), dtd_(axis, 200.0, spring) {
         // spring 阶段由每帧 tick 驱动，须开启 gesture-tick（同 ToastHost 模式）。
         needs_gesture_tick_ = true;
@@ -88,8 +88,7 @@ class Dismissible : public SingleChild {
         // 首次布局后按主轴向尺寸校准行程（同步给 DragToDismiss，跟手 1:1 与 paint 平移共用同值）。
         if (!travel_calibrated_) {
             travel_calibrated_ = true;
-            const float axis_size =
-                (dtd_axis_ == DragAxis::Horizontal) ? self.width : self.height;
+            const float axis_size = (dtd_axis_ == DragAxis::Horizontal) ? self.width : self.height;
             if (axis_size > 0.0F) {
                 travel_distance = static_cast<double>(axis_size);
                 dtd_.set_travel(travel_distance);
@@ -140,9 +139,8 @@ class Dismissible : public SingleChild {
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         SingleChild::tick_gestures(now);
         // spring 推进：以墙钟差为 dt（tick 由 Application::tick 每帧驱动）。
-        const double dt = last_tick_.has_value()
-                              ? std::chrono::duration<double>(now - *last_tick_).count()
-                              : (1.0 / 60.0);
+        const double dt =
+            last_tick_.has_value() ? std::chrono::duration<double>(now - *last_tick_).count() : (1.0 / 60.0);
         last_tick_ = now;
         const bool was_animating = dtd_.is_animating();
         dtd_.tick(dt);

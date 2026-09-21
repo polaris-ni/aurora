@@ -154,44 +154,44 @@ auto Text::describe_static() -> WidgetDescriptor {
 
 auto Text::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-            props["content"] = content.get().text;
-            props["font_size"] = font.size_pt;
-            props["color"] = color_to_json(text_color);
+    props["content"] = content.get().text;
+    props["font_size"] = font.size_pt;
+    props["color"] = color_to_json(text_color);
 
-            props["text_align"] = text_align_to_json(text_align);
-            if (direction.has_value()) {
-                props["direction"] = text_direction_to_json(*direction);
-            }
-            props["max_lines"] = max_lines;
-            props["overflow"] = text_overflow_to_json(overflow);
-            props["soft_wrap"] = soft_wrap;
-            props["line_height"] = line_height;
-            props["letter_spacing"] = letter_spacing;
-            props["word_spacing"] = word_spacing;
-            props["font_weight"] = font_weight_to_json(static_cast<FontWeight>(font.weight));
-            props["font_style"] = font_style_to_json(font_style);
-            props["decoration"] = text_decoration_to_json(decoration);
-            props["decoration_color"] = color_to_json(decoration_color);
-            props["background_color"] = color_to_json(background_color);
+    props["text_align"] = text_align_to_json(text_align);
+    if (direction.has_value()) {
+        props["direction"] = text_direction_to_json(*direction);
+    }
+    props["max_lines"] = max_lines;
+    props["overflow"] = text_overflow_to_json(overflow);
+    props["soft_wrap"] = soft_wrap;
+    props["line_height"] = line_height;
+    props["letter_spacing"] = letter_spacing;
+    props["word_spacing"] = word_spacing;
+    props["font_weight"] = font_weight_to_json(static_cast<FontWeight>(font.weight));
+    props["font_style"] = font_style_to_json(font_style);
+    props["decoration"] = text_decoration_to_json(decoration);
+    props["decoration_color"] = color_to_json(decoration_color);
+    props["background_color"] = color_to_json(background_color);
 }
 
 auto Text::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("content")) {
         static const PropDescriptor D_CONTENT{.name = "content", .json_type = "string"};
-                        content.set(validate_or_default<LocalizedString>(props["content"], D_CONTENT, LocalizedString{}));
+        content.set(validate_or_default<LocalizedString>(props["content"], D_CONTENT, LocalizedString{}));
     }
     if (props.contains("font_size")) {
         static const PropDescriptor D_FONT_SIZE{.name = "font_size", .json_type = "number", .min_value = "0"};
-                        font.size_pt = validate_or_default<float>(props["font_size"], D_FONT_SIZE, 14.0F);
+        font.size_pt = validate_or_default<float>(props["font_size"], D_FONT_SIZE, 14.0F);
     }
     if (props.contains("color")) {
         static const PropDescriptor D_COLOR{.name = "color", .json_type = "array"};
-                        text_color = validate_or_default<Color>(props["color"], D_COLOR, Color::black());
+        text_color = validate_or_default<Color>(props["color"], D_COLOR, Color::black());
     }
     if (props.contains("text_align")) {
-                        if (props["text_align"].is_string()) {
-                                    text_align = json_to_text_align(props["text_align"]);
+        if (props["text_align"].is_string()) {
+            text_align = json_to_text_align(props["text_align"]);
         } else {
             Diagnostics::degraded("text_align expects string", type_name(), "invalid-prop-value");
         }
@@ -204,29 +204,29 @@ auto Text::deserialize_props(const Json &props) -> void {
         }
     }
     if (props.contains("max_lines")) {
-                        if (props["max_lines"].is_number()) {
-                                    max_lines = props["max_lines"].get<int>();
+        if (props["max_lines"].is_number()) {
+            max_lines = props["max_lines"].get<int>();
         } else {
             Diagnostics::degraded("max_lines expects integer", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("overflow")) {
-                        if (props["overflow"].is_string()) {
-                                    overflow = json_to_text_overflow(props["overflow"]);
+        if (props["overflow"].is_string()) {
+            overflow = json_to_text_overflow(props["overflow"]);
         } else {
             Diagnostics::degraded("overflow expects string", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("soft_wrap")) {
-                        if (props["soft_wrap"].is_boolean()) {
-                                    soft_wrap = props["soft_wrap"].get<bool>();
+        if (props["soft_wrap"].is_boolean()) {
+            soft_wrap = props["soft_wrap"].get<bool>();
         } else {
             Diagnostics::degraded("soft_wrap expects boolean", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("line_height")) {
-                        if (props["line_height"].is_number()) {
-                                    const float v = props["line_height"].get<float>();
+        if (props["line_height"].is_number()) {
+            const float v = props["line_height"].get<float>();
             if (v > 0) {
                 line_height = v;
             } else {
@@ -238,46 +238,46 @@ auto Text::deserialize_props(const Json &props) -> void {
         }
     }
     if (props.contains("letter_spacing")) {
-                        if (props["letter_spacing"].is_number()) {
-                                    letter_spacing = props["letter_spacing"].get<float>();
+        if (props["letter_spacing"].is_number()) {
+            letter_spacing = props["letter_spacing"].get<float>();
         } else {
             Diagnostics::degraded("letter_spacing expects number", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("word_spacing")) {
-                        if (props["word_spacing"].is_number()) {
-                                    word_spacing = props["word_spacing"].get<float>();
+        if (props["word_spacing"].is_number()) {
+            word_spacing = props["word_spacing"].get<float>();
         } else {
             Diagnostics::degraded("word_spacing expects number", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("font_weight")) {
-                        if (props["font_weight"].is_string() || props["font_weight"].is_number()) {
-                                    font.weight = static_cast<int>(json_to_font_weight(props["font_weight"]));
+        if (props["font_weight"].is_string() || props["font_weight"].is_number()) {
+            font.weight = static_cast<int>(json_to_font_weight(props["font_weight"]));
         } else {
             Diagnostics::degraded("font_weight expects string or number", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("font_style")) {
-                        if (props["font_style"].is_string()) {
-                                    font_style = json_to_font_style(props["font_style"]);
+        if (props["font_style"].is_string()) {
+            font_style = json_to_font_style(props["font_style"]);
         } else {
             Diagnostics::degraded("font_style expects string", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("decoration")) {
-                        decoration = json_to_text_decoration(props["decoration"]);
+        decoration = json_to_text_decoration(props["decoration"]);
     }
     if (props.contains("decoration_color")) {
-                        if (props["decoration_color"].is_array() && props["decoration_color"].size() >= 4) {
-                                    decoration_color = json_to_color(props["decoration_color"]);
+        if (props["decoration_color"].is_array() && props["decoration_color"].size() >= 4) {
+            decoration_color = json_to_color(props["decoration_color"]);
         } else {
             Diagnostics::degraded("decoration_color expects [r,g,b,a] array", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("background_color")) {
-                        if (props["background_color"].is_array() && props["background_color"].size() >= 4) {
-                                    background_color = json_to_color(props["background_color"]);
+        if (props["background_color"].is_array() && props["background_color"].size() >= 4) {
+            background_color = json_to_color(props["background_color"]);
         } else {
             Diagnostics::degraded("background_color expects [r,g,b,a] array", type_name(), "invalid-prop-value");
         }
@@ -309,9 +309,10 @@ auto Text::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
     display_text_ = s;  // 缓存显示文本供命中测试/选区：即便尚未绘制，拖选也应可用
     const bool bounded = std::isfinite(c.max.width);
     const float max_w = bounded ? c.max.width : 1e9F;
-    const render::TextLayoutOpts opts{
-        .letter_spacing = letter_spacing, .word_spacing = word_spacing, .italic = (font_style == FontStyle::Italic),
-        .direction = effective_direction(ctx)};
+    const render::TextLayoutOpts opts{.letter_spacing = letter_spacing,
+                                      .word_spacing = word_spacing,
+                                      .italic = (font_style == FontStyle::Italic),
+                                      .direction = effective_direction(ctx)};
     line_h_ = render::FontEngine::measure_height(f) * std::max(0.1F, line_height);
     auto [lines, cp_start] = wrap_lines(s, f, max_w, soft_wrap, max_lines, overflow, opts);
     lines_ = std::move(lines);
@@ -343,9 +344,10 @@ auto Text::on_pointer_event(MouseEvent &e) -> void {
         return;
     }
     const Font f = effective_font(font);
-    const render::TextLayoutOpts opts{
-        .letter_spacing = letter_spacing, .word_spacing = word_spacing, .italic = (font_style == FontStyle::Italic),
-        .direction = effective_direction()};
+    const render::TextLayoutOpts opts{.letter_spacing = letter_spacing,
+                                      .word_spacing = word_spacing,
+                                      .italic = (font_style == FontStyle::Italic),
+                                      .direction = effective_direction()};
     const float lx = e.local_position.x;
     const float ly = e.local_position.y;
     // 命中测试须先按 ly 定位到可视行，再在该行内按 x 命中——否则多行文本会被当成「整段单行」
@@ -358,7 +360,7 @@ auto Text::on_pointer_event(MouseEvent &e) -> void {
     // 按对齐方式计算该行文本相对控件左缘的水平偏移（local 坐标下控件左缘为 0）。
     // Start/End 为方向相对语义：RTL 时 Start=Right、End=Left。
     const bool rtl = effective_direction() == TextDirection::RTL;
-            const float line_w = render::FontEngine::measure_width(lines_[li], f, opts);
+    const float line_w = render::FontEngine::measure_width(lines_[li], f, opts);
     float line_off = 0.0F;
     switch (text_align) {
         case TextAlign::Right:
@@ -382,17 +384,17 @@ auto Text::on_pointer_event(MouseEvent &e) -> void {
     // Justify 行经 line_hit_test 按逐词均分布局反解，与绘制位置一致；
     // 非 Justify 行走实显命中（字符边界取物理 DPI 前缀 extent，与实绘字形逐字符对齐）。
     const auto [raw_caret, ch] = line_hit_test(li, lx - line_off, f, opts, layout_w_);
-            const size_t cp = line_cp_start_[li] + ch;
+    const size_t cp = line_cp_start_[li] + ch;
 
     if (e.action == MouseAction::Press) {
-                        caret_ = line_cp_start_[li] + raw_caret;
+        caret_ = line_cp_start_[li] + raw_caret;
         sel_start_ = cp;  // 锚点（含入字符）
         sel_end_ = NO_SEL;  // 尚未形成选区，待拖拽
         selecting_ = true;
         request_focus();
         mark_needs_paint();
     } else if (e.action == MouseAction::Move && selecting_) {
-                        caret_ = line_cp_start_[li] + raw_caret;
+        caret_ = line_cp_start_[li] + raw_caret;
         sel_end_ = cp;  // 拖拽终点（含入字符）：按下与松开所在字符均计入选区
         mark_needs_paint();
     } else if (e.action == MouseAction::Release) {
@@ -458,7 +460,7 @@ auto Text::split_words(const std::string &text) -> std::vector<std::string> {
     std::vector<std::string> out;
     std::string cur;
     for (size_t i = 0; i < text.size();) {
-                        const auto c = static_cast<unsigned char>(text[i]);
+        const auto c = static_cast<unsigned char>(text[i]);
         const size_t cl = cp_len(c);
         const std::string ch = text.substr(i, cl);
         i += cl;
@@ -491,7 +493,7 @@ auto Text::finalize_lines(std::vector<std::string> lines, std::vector<size_t> cp
                 size_t cut = 0;
                 size_t i = 0;
                 while (i < last.size()) {
-                                                            const size_t step = cp_len(static_cast<unsigned char>(last[i]));
+                    const size_t step = cp_len(static_cast<unsigned char>(last[i]));
                     if (i + step >= last.size()) {
                         break;
                     }
@@ -525,7 +527,7 @@ auto Text::wrap_lines(const std::string &text, const Font &f, float max_w, bool 
     {
         size_t i = 0;
         while (i < text.size()) {
-                                    const auto c = static_cast<unsigned char>(text[i]);
+            const auto c = static_cast<unsigned char>(text[i]);
             const size_t cl = cp_len(c);
             if (c == ' ') {
                 i += cl;
@@ -533,7 +535,7 @@ auto Text::wrap_lines(const std::string &text, const Font &f, float max_w, bool 
             }
             const size_t ws = i;
             while (i < text.size()) {
-                                                const auto d = static_cast<unsigned char>(text[i]);
+                const auto d = static_cast<unsigned char>(text[i]);
                 if (d == ' ') {
                     break;
                 }
@@ -549,7 +551,7 @@ auto Text::wrap_lines(const std::string &text, const Font &f, float max_w, bool 
     std::vector<std::string> lines;
     std::vector<size_t> starts;
     std::string line;  ///< 当前行已累积的可见内容
-            size_t line_start_off = words[0].start;  ///< 当前行首字符在 text 中的字节偏移
+    size_t line_start_off = words[0].start;  ///< 当前行首字符在 text 中的字节偏移
 
     const auto measure = [&](const std::string &s) -> float { return render::FontEngine::measure_width(s, f, opts); };
     // 把当前行压入结果，并依据其首字节偏移记录全局码点下标。
@@ -563,7 +565,7 @@ auto Text::wrap_lines(const std::string &text, const Font &f, float max_w, bool 
         size_t chunk_off = byte_off;
         size_t i = 0;
         while (i < word.size()) {
-                                    const size_t cl = cp_len(static_cast<unsigned char>(word[i]));
+            const size_t cl = cp_len(static_cast<unsigned char>(word[i]));
             const std::string ch = word.substr(i, cl);
             const size_t ch_off = byte_off + i;
             i += cl;
@@ -680,7 +682,7 @@ auto Text::justify_layout(const std::string &line, const Font &f, const render::
     size_t i = 0;
     size_t cp = 0;
     while (i < line.size()) {
-                        const auto c = static_cast<unsigned char>(line[i]);
+        const auto c = static_cast<unsigned char>(line[i]);
         if (c == ' ') {
             i += cp_len(c);
             ++cp;
@@ -688,8 +690,8 @@ auto Text::justify_layout(const std::string &line, const Font &f, const render::
         }
         const size_t bs = i;
         const size_t cps = cp;
-                        while (i < line.size() && line[i] != ' ') {
-                                    i += cp_len(static_cast<unsigned char>(line[i]));
+        while (i < line.size() && line[i] != ' ') {
+            i += cp_len(static_cast<unsigned char>(line[i]));
             ++cp;
         }
         words.push_back(
@@ -719,15 +721,15 @@ auto Text::is_justified_line(size_t li) const -> bool {
 
 auto Text::line_caret_x(size_t li, size_t cp_in_line, const Font &f, const render::TextLayoutOpts &opts,
                         float avail) const -> float {
-            const std::string &line = lines_[li];
+    const std::string &line = lines_[li];
     if (is_justified_line(li)) {
         const auto words = justify_layout(line, f, opts, avail);
         if (!words.empty()) {
             for (size_t k = 0; k < words.size(); ++k) {
-                                                const JustifiedWord &w = words[k];
+                const JustifiedWord &w = words[k];
                 if (cp_in_line < w.cp_begin) {
                     // 落在词间空格：caret 取上一词右缘，使空格高亮覆盖整个拉伸间隙。
-                                                            return (k == 0) ? 0.0F : words[k - 1].x + words[k - 1].w;
+                    return (k == 0) ? 0.0F : words[k - 1].x + words[k - 1].w;
                 }
                 if (cp_in_line <= w.cp_end) {
                     return w.x + render::FontEngine::caret_x(w.text, cp_in_line - w.cp_begin, f, opts);
@@ -744,19 +746,19 @@ auto Text::line_caret_x(size_t li, size_t cp_in_line, const Font &f, const rende
 
 auto Text::line_hit_test(size_t li, float x, const Font &f, const render::TextLayoutOpts &opts, float avail) const
     -> std::pair<size_t, size_t> {
-            const std::string &line = lines_[li];
+    const std::string &line = lines_[li];
     if (is_justified_line(li)) {
         const auto words = justify_layout(line, f, opts, avail);
         if (!words.empty()) {
             for (size_t k = 0; k < words.size(); ++k) {
-                                                const JustifiedWord &w = words[k];
+                const JustifiedWord &w = words[k];
                 if (x < w.x) {
                     // 词间拉伸间隙：整体归属其空格字符（含头含尾）；caret 按间隙中点取舍。
                     if (k == 0) {
                         return {0U, 0U};  // 首词左侧（理论上 x<0）：夹到行首
                     }
-                                                            const float left = words[k - 1].x + words[k - 1].w;
-                                                            const size_t space_cp = words[k - 1].cp_end;
+                    const float left = words[k - 1].x + words[k - 1].w;
+                    const size_t space_cp = words[k - 1].cp_end;
                     const size_t caret = (x < (left + w.x) * 0.5F) ? space_cp : w.cp_begin;
                     return {caret, space_cp};
                 }

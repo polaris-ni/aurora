@@ -3,23 +3,21 @@
 // 试法：滚动任一列表 → 点 `save now`（或直接关掉窗口）→ 重新运行本 demo，两个列表各自回到
 // 上次的位置；`reset left` 演示清除某个键。持久化落在平台配置目录的
 // `demo_scroll_restore.json`（`Preferences` 文件模式），故与真实应用一致地跨进程生效。
-#include "demo_common.h"
-
 #include <functional>
 #include <memory>
 #include <string>
 
 #include "aurora/app/scroll_storage.h"
 #include "aurora/preferences/preferences.h"
+#include "demo_common.h"
 
 namespace {
 
 /// 固定尺寸宿主容器：虚拟列表按父约束取视口尺寸，故须给它一个明确高度才会滚动。
-auto fixed(float w, float h, au::Node child) -> au::Node {
+auto fixed(float w, float h, const au::Node &child) -> au::Node {
     auto box = std::make_unique<au::Column>();
-    box->modifier.set(
-        au::Modifier{}.size(w, h).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
-    box->add(std::move(child));
+    box->modifier.set(au::Modifier{}.size(w, h).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
+    box->add(child);
     std::shared_ptr<au::Widget> holder = std::move(box);
     return au::Node{std::move(holder)};
 }
@@ -30,8 +28,7 @@ auto feed(std::shared_ptr<au::LazyList> &out, const char *key, int count, au::Co
         count,
         [accent](int i) -> au::Node {
             auto row = std::make_unique<au::Row>();
-            row->modifier.set(
-                au::Modifier{}.padding(8.0F).background(pal::AURORA_SURFACE).border(1.0F, accent));
+            row->modifier.set(au::Modifier{}.padding(8.0F).background(pal::AURORA_SURFACE).border(1.0F, accent));
             row->add(au::Node{std::make_shared<au::Text>(au::LocalizedString{"item " + std::to_string(i)})});
             std::shared_ptr<au::Widget> holder = std::move(row);
             return au::Node{std::move(holder)};
@@ -66,8 +63,8 @@ auto main() -> int {
     au::Node right = fixed(280.0F, 240.0F, feed(right_list, "demo.right", 60, pal::AURORA_ACCENT));
 
     au::Row columns;
-    columns.add(std::move(left));
-    columns.add(std::move(right));
+    columns.add(left);
+    columns.add(right);
     columns.set_gap(12.0F);
 
     au::Row actions;
@@ -78,7 +75,7 @@ auto main() -> int {
     }));
     actions.add(button("save now", [&prefs]() -> void {
         au::ScrollStorage::instance().sync();  // 内存 → Preferences 内存
-        (void)prefs.flush();                   // Preferences 内存 → 磁盘
+        (void)prefs.flush();  // Preferences 内存 → 磁盘
     }));
     actions.set_gap(8.0F);
 

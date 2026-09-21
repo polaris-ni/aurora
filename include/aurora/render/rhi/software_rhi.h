@@ -55,7 +55,7 @@ class SoftwareRhi final : public RhiBackend {
     /// @brief 层捕获帧：BeginLayer 起缓冲命令，EndLayer 时离屏重放定稿层位图。
     struct LayerCapture {
         std::uint64_t key = 0;
-        int width = 0;   ///< 层逻辑宽（dp）
+        int width = 0;  ///< 层逻辑宽（dp）
         int height = 0;  ///< 层逻辑高（dp）
         std::vector<std::pair<DrawCmd, CmdData>> cmds;
     };

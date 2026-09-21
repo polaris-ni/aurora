@@ -11,9 +11,9 @@ namespace aurora {
  * @brief 环境：沿树向下传播的类型化键值表（参考 Flutter InheritedWidget /
  * SwiftUI Environment / Compose CompositionLocal）。
  *
- * 采用「父指针 + 覆盖映射」链式结构：对外继承链不可变（`with<T>()` 生成子环境只覆盖键 T，子级读取不改写父级）；根 `Environment` 提供显式原地写入 API（`set_local<T>()` / `set<T>()` 直接改写 `map_`）：
- * 只覆盖键 T，读取时沿父链向上查找最近的定义。从而 Provider 注入的值对
- * 其子树可见，且天然实现「最近祖先优先」。
+ * 采用「父指针 + 覆盖映射」链式结构：对外继承链不可变（`with<T>()` 生成子环境只覆盖键 T，子级读取不改写父级）；根
+ * `Environment` 提供显式原地写入 API（`set_local<T>()` / `set<T>()` 直接改写 `map_`）： 只覆盖键
+ * T，读取时沿父链向上查找最近的定义。从而 Provider 注入的值对 其子树可见，且天然实现「最近祖先优先」。
  *
  * @note Thread: main-thread only
  * @note Side-effects: none

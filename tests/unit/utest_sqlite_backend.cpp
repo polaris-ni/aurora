@@ -30,9 +30,8 @@ namespace aus = aurora::storage;
 
 /// @brief 本用例的文件库路径：框架接管 TMP 后的用例唯一目录 + 固定名，先清场保幂等。
 [[nodiscard]] auto fresh_db(std::string_view tag) -> std::filesystem::path {
-    const auto path =
-        std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_sqlite" /
-        (std::string{tag} + ".db");
+    const auto path = std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_sqlite" /
+                      (std::string{tag} + ".db");
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     std::filesystem::remove(path, ec);
@@ -94,8 +93,8 @@ AURORA_TEST_CASE(in_memory_backend_opens_and_roundtrips_json) {
     AURORA_TEST_CHECK_EQ(got.value().version, 2U);
     AURORA_TEST_CHECK(got.value().encoding == aus::StorageEncoding::Json);
     AURORA_TEST_CHECK_EQ(epoch_ms(got.value().mtime), want_ms);  // 毫秒精度保真
-    AURORA_TEST_CHECK(got.value().blob_ref.empty());             // 无 sidecar 语义
-    AURORA_TEST_CHECK_EQ(std::get<aus::Json>(got.value().payload), (aus::Json{{"name", "ada"}, {"score", 42}}));
+    AURORA_TEST_CHECK(got.value().blob_ref.empty());  // 无 sidecar 语义
+    AURORA_TEST_CHECK_EQ(std::get<aus::Json>(got.value().payload), aus::Json{{"name", "ada"}, {"score", 42}});
 }
 
 AURORA_TEST_CASE(binary_payload_inline_blob_roundtrip) {
@@ -224,8 +223,7 @@ AURORA_TEST_CASE(nested_transaction_joins_outer) {
             if (auto e = inner.put_record("inner1", make_json_record("inner1", aus::Json{{"v", 1}})); !e) {
                 return e;
             }
-            return aurora::Result<void>{
-                aurora::make_error(ErrorCode::StorageIoError, "inner abort")};
+            return aurora::Result<void>{aurora::make_error(ErrorCode::StorageIoError, "inner abort")};
         });
         return outer.put_record("outer2", make_json_record("outer2", aus::Json{{"v", 2}}));
     });
@@ -286,9 +284,7 @@ AURORA_TEST_CASE(storage_facade_create_sqlite_roundtrip) {
 
 namespace aurora::test_cases::utest_sqlite_backend {
 
-AURORA_TEST_CASE(sqlite_backend_type_contract) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
-}
+AURORA_TEST_CASE(sqlite_backend_type_contract) { AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）"); }
 AURORA_TEST_CASE(in_memory_backend_opens_and_roundtrips_json) {
     AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
 }

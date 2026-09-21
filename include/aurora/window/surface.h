@@ -48,7 +48,7 @@ enum class DecorationPolicy : std::uint8_t {
 };
 
 /// @brief 可缩放窗口边缘（begin_window_resize 参数；跨后端声明，各 Surface 按平台语义映射）。
-/// 枚举值序即后端映射表的公共契约（Wayland kMap / Win32 kHt 均按下标取用），不得重排。
+/// 枚举值序即后端映射表的公共契约（Wayland AURORA_MAP / Win32 HT 均按下标取用），不得重排。
 enum class WindowResizeEdge : std::uint8_t {
     None,  ///< 无效/哨兵：不发起缩放（下标 0，后端据此拒绝）。
     Top,  ///< 上边缘
@@ -305,7 +305,7 @@ class Surface {
 
     /// @brief 导出真实屏幕窗口为 PNG（含 OS 装饰，尽力）。
     /// 默认实现：返回 unsupported 错误。Win32 家族（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，
-    /// 共用 `Win32Window` 宿主）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写；
+    /// 共用 `Win32Host` 宿主）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写；
     /// Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。本方法**始终声明**。
     [[nodiscard]] virtual auto capture_window(const std::string &path) -> Result<bool> {
         (void)path;
@@ -325,7 +325,7 @@ class Surface {
     /// @brief 本窗口的无障碍桥（`a11y::Provider`）；默认 nullptr（无桥 / 未激活）。
     ///
     /// 扩展点（D13）：各平台后端按能力返回自己的桥实例——Win32 家族（`Win32Surface` /
-    /// `D3D11Surface`，共用 `Win32Window` 宿主）返回同一个 `Win32UiaBridge`；其余平台
+    /// `D3D11Surface`，共用 `Win32Host` 宿主）返回同一个 `Win32UiaBridge`；其余平台
     /// 后续按 §8 契约接入。桥**惰性激活**：无读屏在线时返回 nullptr 或已注册但未激活的实例，
     /// 宿主据此零开销。公共头不引入任何平台头（仅前向声明）。
     /// @note Thread: main-thread only

@@ -62,8 +62,8 @@ class TestRow final : public aurora::Container {
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         float x = 0.0F;
         for (Node &ch : children_) {
-            const Size cs = ch.widget().layout(
-                Constraints{.min = Size{}, .max = Size{.width = 100.0F, .height = 50.0F}}, ctx);
+            const Size cs =
+                ch.widget().layout(Constraints{.min = Size{}, .max = Size{.width = 100.0F, .height = 50.0F}}, ctx);
             ch.set_bounds(Rect{.origin = Point{.x = x, .y = 0.0F}, .size = cs});
             x += cs.width;
         }
@@ -71,20 +71,19 @@ class TestRow final : public aurora::Container {
         return size_;
     }
 
-    auto on_paint(aurora::Painter &, const Rect &, const BuildContext &) -> void override {}
+    auto on_paint(aurora::Painter & /*painter*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/)
+        -> void override {}
 };
 
 /// reduce_motion 进程级全局设置守卫：构造开启、析构还原默认，防跨用例污染。
 class ReduceMotionGuard {
   public:
-    ReduceMotionGuard() {
-        aurora::set_accessibility_settings(aurora::AccessibilitySettings{.reduce_motion = true});
-    }
-    ~ReduceMotionGuard() {
-        aurora::set_accessibility_settings(aurora::AccessibilitySettings{});
-    }
+    ReduceMotionGuard() { aurora::set_accessibility_settings(aurora::AccessibilitySettings{.reduce_motion = true}); }
+    ~ReduceMotionGuard() { aurora::set_accessibility_settings(aurora::AccessibilitySettings{}); }
     ReduceMotionGuard(const ReduceMotionGuard &) = delete;
     auto operator=(const ReduceMotionGuard &) -> ReduceMotionGuard & = delete;
+    ReduceMotionGuard(ReduceMotionGuard &&) = delete;
+    auto operator=(ReduceMotionGuard &&) -> ReduceMotionGuard & = delete;
 };
 
 auto t_ms(long long ms) -> std::chrono::steady_clock::time_point {
@@ -146,8 +145,7 @@ AURORA_TEST_CASE(dismissible_drag_progresses_one_to_one_and_consumes_events) {
     auto dis = std::make_shared<Dismissible>(fixed_box());
     TestRow row;
     row.add(Node{dis});
-    row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}},
-               BuildContext{});
+    row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}}, BuildContext{});
     // 首次布局后行程按主轴向尺寸校准：100（TestRow 固定约束宽）。
     AURORA_TEST_CHECK_NEAR(dis->travel_distance, 100.0, 1e-6);
 
@@ -191,8 +189,7 @@ AURORA_TEST_CASE(dismissible_release_below_threshold_springs_back_and_stays) {
     auto dis = std::make_shared<Dismissible>(fixed_box());
     TestRow row;
     row.add(Node{dis});
-    row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}},
-               BuildContext{});
+    row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}}, BuildContext{});
 
     EventDispatcher dispatcher;
     MouseEvent press = make_mouse(MouseAction::Press, Point{.x = 10.0F, .y = 10.0F});
@@ -218,8 +215,7 @@ AURORA_TEST_CASE(dismissible_release_above_threshold_removes_self_from_container
     TestRow row;
     row.add(Node{first});
     row.add(Node{second});
-    row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}},
-               BuildContext{});
+    row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}}, BuildContext{});
     AURORA_TEST_CHECK_EQ(row.child_nodes().size(), 2U);
 
     // 拖第一项到 0.7（≥ 阈值）松手：spring 飞出 → 默认从容器摘除自身。
@@ -238,13 +234,12 @@ AURORA_TEST_CASE(dismissible_release_above_threshold_removes_self_from_container
     }
     AURORA_TEST_CHECK_FALSE(first->is_animating());
     AURORA_TEST_CHECK_NEAR(first->progress(), 1.0, 1e-3);
-    AURORA_TEST_CHECK_EQ(row.child_nodes().size(), 1U);       // 已摘除
-    AURORA_TEST_CHECK_EQ(first.use_count(), 1);               // 仅测试自身持有
-    AURORA_TEST_CHECK_EQ(second.use_count(), 2);              // 测试 + 容器
+    AURORA_TEST_CHECK_EQ(row.child_nodes().size(), 1U);  // 已摘除
+    AURORA_TEST_CHECK_EQ(first.use_count(), 1);  // 仅测试自身持有
+    AURORA_TEST_CHECK_EQ(second.use_count(), 2);  // 测试 + 容器
 
     // 摘除后重排（remove_child 标脏；真实帧循环派发事件前会重排），幸存项顶到首位。
-    row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}},
-               BuildContext{});
+    row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}}, BuildContext{});
     // 幸存子项仍可正常拖动（容器迭代器安全：摘除后同一帧 tick 不失效）。
     MouseEvent press2 = make_mouse(MouseAction::Press, Point{.x = 10.0F, .y = 10.0F});
     (void)dispatcher.dispatch_mouse(row, press2);
@@ -257,8 +252,7 @@ AURORA_TEST_CASE(dismissible_custom_callback_overrides_default_removal) {
     auto dis = std::make_shared<Dismissible>(fixed_box());
     TestRow row;
     row.add(Node{dis});
-    row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}},
-               BuildContext{});
+    row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}}, BuildContext{});
 
     int dismissed = 0;
     dis->on_dismissed([&dismissed]() { ++dismissed; });  // 覆盖默认摘除
@@ -273,9 +267,9 @@ AURORA_TEST_CASE(dismissible_custom_callback_overrides_default_removal) {
     for (int i = 0; i < 400 && dis->is_animating(); ++i) {
         row.tick(t_ms(static_cast<long long>(i + 1) * 16));
     }
-    AURORA_TEST_CHECK_EQ(dismissed, 1);                       // 回调触发
-    AURORA_TEST_CHECK_EQ(row.child_nodes().size(), 1U);       // 不自动摘除
-    AURORA_TEST_CHECK_EQ(dis.use_count(), 2);                 // 测试 + 容器仍持有
+    AURORA_TEST_CHECK_EQ(dismissed, 1);  // 回调触发
+    AURORA_TEST_CHECK_EQ(row.child_nodes().size(), 1U);  // 不自动摘除
+    AURORA_TEST_CHECK_EQ(dis.use_count(), 2);  // 测试 + 容器仍持有
 }
 
 }  // namespace aurora::test_cases::utest_dismissible

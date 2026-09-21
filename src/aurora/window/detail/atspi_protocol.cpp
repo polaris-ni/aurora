@@ -9,8 +9,10 @@
 #include <cmath>
 #include <iterator>
 #include <limits>
+#include <ranges>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 
 #include "aurora/core/a11y_text.h"
 #include "aurora/core/accessibility.h"
@@ -36,13 +38,17 @@ auto box_px(const AtspiEnv &env, const Rect &dip, std::uint32_t coord) -> AtspiR
         if (env.to_window_px) {
             return env.to_window_px(dip);
         }
-        return AtspiRectI{screen.x - env.window_origin_x, screen.y - env.window_origin_y, screen.width,
-                          screen.height};
+        return AtspiRectI{.x = screen.x - env.window_origin_x,
+                          .y = screen.y - env.window_origin_y,
+                          .width = screen.width,
+                          .height = screen.height};
     }
     if (coord == atspi::coord_parent) {
         // PARENT 系：以父的屏幕盒原点为基准；父原点未知时退化为 WINDOW 系（如实申报口径）。
-        return AtspiRectI{screen.x - env.window_origin_x, screen.y - env.window_origin_y, screen.width,
-                          screen.height};
+        return AtspiRectI{.x = screen.x - env.window_origin_x,
+                          .y = screen.y - env.window_origin_y,
+                          .width = screen.width,
+                          .height = screen.height};
     }
     return screen;
 }
@@ -132,8 +138,7 @@ auto atspi_role_name(std::uint32_t role) -> std::string {
             return "section";
         case atspi::role_notification:
             return "notification";
-        case atspi::role_unknown:
-            return "unknown";
+        // role_unknown 与其余未列角色一并映射为 "unknown"。
         default:
             return "unknown";
     }
@@ -145,38 +150,49 @@ auto atspi_role_name(std::uint32_t role) -> std::string {
 // pname 原样转发，两侧名字必须逐字一致，Orca 按类型串匹配）。
 auto atspi_state_name(std::uint32_t state) -> const char * {
     constexpr const char *k_names[] = {
-        "invalid",                "active",            "armed",            "busy",
-        "checked",                "collapsed",         "defunct",          "editable",
-        "enabled",                "expandable",        "expanded",         "focusable",
-        "focused",                "has-tooltip",       "horizontal",       "iconified",
-        "modal",                  "multi-line",        "multiselectable",  "opaque",
-        "pressed",                "resizable",         "selectable",       "selected",
-        "sensitive",              "showing",           "single-line",      "stale",
-        "transient",              "vertical",          "visible",          "manages-descendants",
-        "indeterminate",          "required",          "truncated",        "animated",
-        "invalid-entry",          "supports-autocompletion", "selectable-text", "is-default",
-        "visited",                "checkable",         "has-popup",        "read-only",
+        "invalid",         "active",
+        "armed",           "busy",
+        "checked",         "collapsed",
+        "defunct",         "editable",
+        "enabled",         "expandable",
+        "expanded",        "focusable",
+        "focused",         "has-tooltip",
+        "horizontal",      "iconified",
+        "modal",           "multi-line",
+        "multiselectable", "opaque",
+        "pressed",         "resizable",
+        "selectable",      "selected",
+        "sensitive",       "showing",
+        "single-line",     "stale",
+        "transient",       "vertical",
+        "visible",         "manages-descendants",
+        "indeterminate",   "required",
+        "truncated",       "animated",
+        "invalid-entry",   "supports-autocompletion",
+        "selectable-text", "is-default",
+        "visited",         "checkable",
+        "has-popup",       "read-only",
     };
     constexpr std::size_t count = std::size(k_names);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index): 下标已由上行的 count 上界判定约束
     return state < count ? k_names[state] : nullptr;
 }
 
 auto atspi_interfaces_of(const AccessibilityNode &n) -> std::vector<std::string> {
     std::vector<std::string> out{atspi::k_iface_accessible, atspi::k_iface_component};
     if (n.role == AccessibilityRole::Text || n.role == AccessibilityRole::TextInput) {
-        out.push_back(atspi::k_iface_text);
+        out.emplace_back(atspi::k_iface_text);
     }
     if (n.range.has_value()) {
-        out.push_back(atspi::k_iface_value);
+        out.emplace_back(atspi::k_iface_value);
     }
     if (!atspi_actions_of(n).empty()) {
-        out.push_back(atspi::k_iface_action);
+        out.emplace_back(atspi::k_iface_action);
     }
     return out;
 }
 
-auto atspi_states_of(const AccessibilityNode &n, const std::vector<std::string> &ifaces)
-    -> std::vector<std::uint32_t> {
+auto atspi_states_of(const AccessibilityNode &n, const std::vector<std::string> &ifaces) -> std::vector<std::uint32_t> {
     const auto has_iface = [&ifaces](const char *want) {
         return std::ranges::find(ifaces, std::string{want}) != ifaces.end();
     };
@@ -291,7 +307,7 @@ auto atspi_cp_slice(std::string_view utf8, std::int64_t start, std::int64_t end)
         if (static_cast<std::int64_t>(cp) == static_cast<std::int64_t>(target(start))) {
             s_pos = static_cast<std::int64_t>(i);
         }
-        if (static_cast<std::int64_t>(cp) == want_end) {
+        if (std::cmp_equal(cp, want_end)) {
             e_pos = static_cast<std::int64_t>(i);
         }
         if (s_pos >= 0 && e_pos >= 0) {
@@ -331,13 +347,12 @@ auto AtspiModel::sync(const a11y::TreeSnapshot &snap) -> void {
     // 注：old_paths 用成员缓存中转（见 header 的 by_path_id_cache_）——保留「同 id ⇒ 同路径」
     // 的跨帧不变式；消失 id 的路径直接丢弃（编号单调，不复用）。
     order_.push_back(LiveNode{.id = k_atspi_app_id, .parent_id = 0, .path = env_.base_path});
-    order_.push_back(LiveNode{
-        .id = k_atspi_frame_id, .parent_id = k_atspi_app_id, .path = env_.base_path + "/frame"});
+    order_.push_back(LiveNode{.id = k_atspi_frame_id, .parent_id = k_atspi_app_id, .path = env_.base_path + "/frame"});
     kids_[k_atspi_app_id].push_back(k_atspi_frame_id);
 
     // 先序重建存活表：裁剪节点（!is_control && !is_content）不入表，其子挂到最近存活祖先。
     std::unordered_map<std::uint64_t, std::uint64_t> eff_parent;  // 原父 id → 有效父 id
-    eff_parent[0] = k_atspi_frame_id;                             // 快照根挂 Frame 下
+    eff_parent[0] = k_atspi_frame_id;  // 快照根挂 Frame 下
     for (const a11y::NodeSnapshot &ns : snap.flat) {
         const bool keep = ns.node.is_control || ns.node.is_content;
         const auto it = eff_parent.find(ns.parent_id);
@@ -434,9 +449,7 @@ auto AtspiModel::role(std::uint64_t id) const -> std::uint32_t {
     return (n == nullptr) ? atspi::role_unknown : atspi_role_of(n->node);
 }
 
-auto AtspiModel::role_name(std::uint64_t id) const -> std::string {
-    return atspi_role_name(role(id));
-}
+auto AtspiModel::role_name(std::uint64_t id) const -> std::string { return atspi_role_name(role(id)); }
 
 auto AtspiModel::states(std::uint64_t id) const -> std::vector<std::uint32_t> {
     if (id == k_atspi_app_id) {
@@ -561,8 +574,7 @@ auto AtspiModel::text_caret(std::uint64_t id) const -> std::int32_t {
     return static_cast<std::int32_t>(atspi_cp_count(std::string_view{full}.substr(0, byte)));
 }
 
-auto AtspiModel::text_char_extents(std::uint64_t id, std::int32_t offset, std::uint32_t coord) const
-    -> AtspiRectI {
+auto AtspiModel::text_char_extents(std::uint64_t id, std::int32_t offset, std::uint32_t coord) const -> AtspiRectI {
     Widget *w = widget_of(id);
     if (w == nullptr || offset < 0) {
         return {};
@@ -580,8 +592,10 @@ auto AtspiModel::text_char_extents(std::uint64_t id, std::int32_t offset, std::u
     const auto box = w->accessibility_char_bounds(byte);
     const Rect dip = box.value_or(w->paint_bounds());
     Rect local{
-        .origin = Point{.x = dip.origin.x - w->paint_bounds().origin.x + (node(id) ? node(id)->node.bounds.origin.x : 0.0F),
-                        .y = dip.origin.y - w->paint_bounds().origin.y + (node(id) ? node(id)->node.bounds.origin.y : 0.0F)},
+        .origin = Point{.x = dip.origin.x - w->paint_bounds().origin.x +
+                             ((node(id) != nullptr) ? node(id)->node.bounds.origin.x : 0.0F),
+                        .y = dip.origin.y - w->paint_bounds().origin.y +
+                             ((node(id) != nullptr) ? node(id)->node.bounds.origin.y : 0.0F)},
         .size = dip.size,
     };
     return box_px(env_, local, coord);
@@ -642,7 +656,7 @@ auto AtspiModel::do_action(std::uint64_t id, std::int32_t index) const -> bool {
 
 auto AtspiModel::extents(std::uint64_t id, std::uint32_t coord) const -> AtspiRectI {
     if (id == k_atspi_frame_id) {
-        const a11y::NodeSnapshot *root = (snap_ && !snap_->flat.empty()) ? &snap_->flat[0] : nullptr;
+        const a11y::NodeSnapshot *root = ((snap_ != nullptr) && !snap_->flat.empty()) ? snap_->flat.data() : nullptr;
         if (root == nullptr) {
             return {};
         }
@@ -660,8 +674,8 @@ auto AtspiModel::contains(std::uint64_t id, std::int32_t x, std::int32_t y, std:
     return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
 }
 
-auto AtspiModel::accessible_at_point(std::uint64_t id, std::int32_t x, std::int32_t y,
-                                     std::uint32_t coord) const -> AtspiRef {
+auto AtspiModel::accessible_at_point(std::uint64_t id, std::int32_t x, std::int32_t y, std::uint32_t coord) const
+    -> AtspiRef {
     // 入参一律折算到屏幕系再比对（PARENT 系按 WINDOW 同口径退化，申报见头注）。
     std::int32_t sx = x;
     std::int32_t sy = y;
@@ -678,8 +692,7 @@ auto AtspiModel::accessible_at_point(std::uint64_t id, std::int32_t x, std::int3
         const auto kids = children(sub[i]);
         sub.insert(sub.end(), kids.begin(), kids.end());
     }
-    for (auto it = sub.rbegin(); it != sub.rend(); ++it) {
-        const std::uint64_t lid = *it;
+    for (unsigned long long lid : std::views::reverse(sub)) {
         if (lid == k_atspi_app_id) {
             continue;
         }
@@ -694,8 +707,7 @@ auto AtspiModel::accessible_at_point(std::uint64_t id, std::int32_t x, std::int3
     return AtspiRef::null();
 }
 
-auto AtspiModel::prop_get(std::uint64_t id, const std::string &iface, const std::string &prop) const
-    -> AtspiPropValue {
+auto AtspiModel::prop_get(std::uint64_t id, const std::string &iface, const std::string &prop) const -> AtspiPropValue {
     using P = AtspiPropValue;
     const auto str = [](std::string s) {
         P v;
@@ -801,7 +813,7 @@ auto AtspiModel::prop_get(std::uint64_t id, const std::string &iface, const std:
             return dbl(value_current(id));
         }
         if (prop == "Text") {
-            return str(node(id) ? node(id)->node.value : std::string{});
+            return str((node(id) != nullptr) ? node(id)->node.value : std::string{});
         }
         return {};
     }
@@ -832,8 +844,8 @@ auto AtspiModel::prop_get(std::uint64_t id, const std::string &iface, const std:
     return {};
 }
 
-auto AtspiModel::prop_set(std::uint64_t id, const std::string &iface, const std::string &prop,
-                          const AtspiPropValue &v) -> bool {
+auto AtspiModel::prop_set(std::uint64_t id, const std::string &iface, const std::string &prop, const AtspiPropValue &v)
+    -> bool {
     if (iface == atspi::k_iface_application && prop == "Id" && id == k_atspi_app_id &&
         v.kind == AtspiPropValue::Kind::I32) {
         app_id_ = v.i32;  // 注册表 Embed 握手回填
@@ -872,7 +884,7 @@ auto AtspiModel::cache_rows() const -> std::vector<AtspiCacheRow> {
 }
 
 auto AtspiModel::handles(const std::string &iface, const std::string &member) -> bool {
-    static const std::unordered_map<std::string, std::unordered_set<std::string>> table = {
+    static const std::unordered_map<std::string, std::unordered_set<std::string>> TABLE = {
         {atspi::k_iface_accessible,
          {"GetChildAtIndex", "GetChildren", "GetIndexInParent", "GetRelationSet", "GetRole", "GetRoleName",
           "GetLocalizedRoleName", "GetState", "GetAttributes", "GetApplication", "GetInterfaces"}},
@@ -882,19 +894,19 @@ auto AtspiModel::handles(const std::string &iface, const std::string &member) ->
         {atspi::k_iface_text,
          {"GetText", "GetCaretOffset", "SetCaretOffset", "GetCharacterExtents", "GetCharacterCount"}},
         {atspi::k_iface_value, {}},  // 纯 Properties 接口
-        {atspi::k_iface_action, {"GetActions", "DoAction", "GetName", "GetLocalizedName", "GetDescription",
-                                 "GetKeyBinding", "GetNActions"}},
+        {atspi::k_iface_action,
+         {"GetActions", "DoAction", "GetName", "GetLocalizedName", "GetDescription", "GetKeyBinding", "GetNActions"}},
         {atspi::k_iface_cache, {"GetItems"}},
         {atspi::k_iface_socket, {"Embed", "Embedded", "Unembed", "Available"}},
         {"org.freedesktop.DBus.Properties", {"Get", "GetAll", "Set"}},
         {"org.freedesktop.DBus.Introspectable", {"Introspect"}},
         {"org.freedesktop.DBus.Peer", {"Ping", "GetMachineId"}},
     };
-    const auto it = table.find(iface);
-    if (it == table.end()) {
+    const auto it = TABLE.find(iface);
+    if (it == TABLE.end()) {
         return false;
     }
-    return it->second.count(member) != 0;
+    return it->second.contains(member);
 }
 
 }  // namespace aurora::detail

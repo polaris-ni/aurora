@@ -58,16 +58,16 @@
 #error "AURORA_BACKEND_X11 must be enabled"
 #endif
 
-#include "aurora/window/x11_surface.h"  // aurora 头必须先于 Xlib（None/Bool/Status 宏污染）
-
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <dlfcn.h>
 
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
-#include <dlfcn.h>
 #include <string>
+
+#include "aurora/window/x11_surface.h"  // aurora 澶村繀椤诲厛浜?Xlib锛圢one/Bool/Status 瀹忔薄鏌擄級
 
 // <X11/X.h>（经 Xlib.h 引入）无条件 `#define CursorShape 0`，与 aurora::CursorShape 硬碰撞。
 #undef CursorShape
@@ -211,8 +211,8 @@ auto pointer_inside_geom(int rx, int ry, const WinGeom &g) -> bool {
 // 这里 warp 目标与判定依据同源，且几何未稳定前不落点，故判定反映的是真实接线。
 //
 // 返回 true 时 `*by_geometry` 说明命中的是哪一级判据；`*geom` / `*out_x/y/child` 是现场证据。
-auto place_pointer_over(Display *dpy, Window root, Window win, int screen_w, int screen_h, WinGeom *geom,
-                        int *out_x, int *out_y, Window *out_child, bool *by_geometry) -> bool {
+auto place_pointer_over(Display *dpy, Window root, Window win, int screen_w, int screen_h, WinGeom *geom, int *out_x,
+                        int *out_y, Window *out_child, bool *by_geometry) -> bool {
     for (int attempt = 0; attempt < 6; ++attempt) {
         XRaiseWindow(dpy, win);
         XSync(dpy, False);
@@ -330,8 +330,8 @@ auto main(int argc, char **argv) -> int {
     const Window root = DefaultRootWindow(dpy);
     const int screen_w = DisplayWidth(dpy, DefaultScreen(dpy));
     const int screen_h = DisplayHeight(dpy, DefaultScreen(dpy));
-    AURORA_LOG_RAW("verify", "display=", DisplayString(dpy), " root=",
-                   aurora_verify::format_int(screen_w), "x", aurora_verify::format_int(screen_h), " window=",
+    AURORA_LOG_RAW("verify", "display=", DisplayString(dpy), " root=", aurora_verify::format_int(screen_w), "x",
+                   aurora_verify::format_int(screen_h), " window=",
                    aurora_verify::format_handle(reinterpret_cast<const void *>(static_cast<std::uintptr_t>(win))),
                    "\n");
 
@@ -344,14 +344,12 @@ auto main(int argc, char **argv) -> int {
     Window pchild = 0;
     bool by_geometry = false;
     WinGeom geom;
-    bool hit =
-        place_pointer_over(dpy, root, win, screen_w, screen_h, &geom, &px, &py, &pchild, &by_geometry);
+    bool hit = place_pointer_over(dpy, root, win, screen_w, screen_h, &geom, &px, &py, &pchild, &by_geometry);
 
     // ---- 策略 2：改请求一个居中的小窗（合成器更易把它完整安放进屏内），再按几何落点 ----
     bool took_over = false;
     if (!hit) {
-        AURORA_LOG_RAW("verify",
-                       "Strategy 1 missed (child=", aurora_verify::format_uint(pchild), " root=(",
+        AURORA_LOG_RAW("verify", "Strategy 1 missed (child=", aurora_verify::format_uint(pchild), " root=(",
                        aurora_verify::format_int(px), ",", aurora_verify::format_int(py), ") geom=(",
                        aurora_verify::format_int(geom.x), ",", aurora_verify::format_int(geom.y), ",",
                        aurora_verify::format_int(geom.w), "x", aurora_verify::format_int(geom.h),
@@ -359,8 +357,8 @@ auto main(int argc, char **argv) -> int {
                        "); switching to strategy 2 (centered modest window)\n");
         const int mw = screen_w > 900 ? 800 : screen_w / 2;
         const int mh = screen_h > 700 ? 600 : screen_h / 2;
-        XMoveResizeWindow(dpy, win, (screen_w - mw) / 2, (screen_h - mh) / 2,
-                          static_cast<unsigned int>(mw), static_cast<unsigned int>(mh));
+        XMoveResizeWindow(dpy, win, (screen_w - mw) / 2, (screen_h - mh) / 2, static_cast<unsigned int>(mw),
+                          static_cast<unsigned int>(mh));
         XRaiseWindow(dpy, win);
         XSync(dpy, False);
         took_over = true;
@@ -372,12 +370,11 @@ auto main(int argc, char **argv) -> int {
                          "Pointer cannot be placed over the target window: the window geometry never settled fully "
                          "inside the root, or XWarpPointer did not take effect. Evidence: root child=" +
                              aurora_verify::format_uint(pchild) + " root_point=(" + aurora_verify::format_int(px) +
-                             "," + aurora_verify::format_int(py) + ") screen=" +
-                             aurora_verify::format_int(screen_w) + "x" + aurora_verify::format_int(screen_h) +
-                             " win_geom=(" + aurora_verify::format_int(geom.x) + "," +
-                             aurora_verify::format_int(geom.y) + "," + aurora_verify::format_int(geom.w) + "x" +
-                             aurora_verify::format_int(geom.h) + ", mapped=" +
-                             aurora_verify::format_int(geom.mapped) + ")");
+                             "," + aurora_verify::format_int(py) + ") screen=" + aurora_verify::format_int(screen_w) +
+                             "x" + aurora_verify::format_int(screen_h) + " win_geom=(" +
+                             aurora_verify::format_int(geom.x) + "," + aurora_verify::format_int(geom.y) + "," +
+                             aurora_verify::format_int(geom.w) + "x" + aurora_verify::format_int(geom.h) +
+                             ", mapped=" + aurora_verify::format_int(geom.mapped) + ")");
         XUnmapWindow(dpy, win);
         XSync(dpy, False);
         XCloseDisplay(dpy);
@@ -385,9 +382,9 @@ auto main(int argc, char **argv) -> int {
     }
     AURORA_LOG_RAW("verify", "Pointer is over the target window (strategy ", took_over ? 2 : 1,
                    by_geometry ? ", accepted by geometry; XQueryPointer returned child=None (rootless Xwayland)"
-                                : ", accepted by XQueryPointer child match",
-                   ", root=(", aurora_verify::format_int(px), ",", aurora_verify::format_int(py), ", child=",
-                   aurora_verify::format_uint(pchild), ")\n");
+                               : ", accepted by XQueryPointer child match",
+                   ", root=(", aurora_verify::format_int(px), ",", aurora_verify::format_int(py),
+                   ", child=", aurora_verify::format_uint(pchild), ")\n");
 
     // ---- 11 形状逐个下发 + 读回 ----
     AURORA_LOG_RAW("verify", aurora_verify::pad_right("shape(rfc name)", 20), aurora_verify::pad_right("w", 5),
@@ -423,8 +420,8 @@ auto main(int argc, char **argv) -> int {
 
     const int total = static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT);
     AURORA_LOG_RAW("verify", "Distinct shapes read back=", aurora_verify::format_uint(distinct), " / ",
-                   aurora_verify::format_int(total), ", adjacent-equal runs=", aurora_verify::format_int(identical_runs),
-                   "\n");
+                   aurora_verify::format_int(total),
+                   ", adjacent-equal runs=", aurora_verify::format_int(identical_runs), "\n");
     if (distinct <= 1) {
         AURORA_LOG_ERROR("verify",
                          "Read-back is always the same cursor -- this session cannot reliably read back "
@@ -432,7 +429,9 @@ auto main(int argc, char **argv) -> int {
         return 4;
     }
     if (distinct < static_cast<std::uint64_t>(total)) {
-        AURORA_LOG_ERROR("verify", "Too few distinct shapes read back; possible read-back race -- please re-run; if it reproduces stably, do a manual visual review.");
+        AURORA_LOG_ERROR("verify",
+                         "Too few distinct shapes read back; possible read-back race -- please re-run; if it "
+                         "reproduces stably, do a manual visual review.");
         return 5;
     }
     AURORA_LOG_RAW("verify", "PASS: all 11 CursorShapes changed the cursor shown on the real X server\n");

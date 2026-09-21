@@ -1,4 +1,4 @@
-#include "aurora/window/win32_window.h"
+#include "aurora/window/win32_host.h"
 
 #include "aurora/window/detail/win32_ua.h"
 #include "aurora/window/detail/win32_ime.h"
@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "aurora/core/utf8.h"
@@ -163,7 +164,7 @@ namespace aurora {
 }
 
 // pimpl：全部 Win32/GDI 状态与消息处理都在这里；公共头仅持有 unique_ptr<Impl>。
-struct Win32Window::Impl {
+struct Win32Host::Impl {
     HWND hwnd = nullptr;
     HINSTANCE hinst = nullptr;
     Size size{.width = 0.0F, .height = 0.0F};
@@ -236,7 +237,7 @@ struct Win32Window::Impl {
     [[nodiscard]] auto handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<LRESULT>;
     /// @brief `WM_IME_*` 分族：交 IMM32 桥翻译组合；桥不认领（含 `WM_KILLFOCUS` 的取消侧路径）
     ///        时回落 `DefWindowProc`。
-    [[nodiscard]] auto handle_ime(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT;
+    [[nodiscard]] auto handle_ime(UINT msg, WPARAM wp, LPARAM lp) const -> LRESULT;
     auto handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT;
 
     auto register_class() const -> void;
@@ -248,7 +249,7 @@ struct Win32Window::Impl {
 };
 
 // ---- Impl 构造：窗口创建 + DPI 适配 + 类注册 + 显示 ----
-Win32Window::Impl::Impl(int w, int h, const std::string &title, const WindowStyleOptions &style)
+Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleOptions &style)
     : scale(dpi_scale()),  // 创建时主显示器 DPI
       style(style) {
     enable_dpi_awareness();
@@ -319,7 +320,7 @@ Win32Window::Impl::Impl(int w, int h, const std::string &title, const WindowStyl
     size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // 逻辑 dp（布局用）
 }
 
-Win32Window::Impl::~Impl() {
+Win32Host::Impl::~Impl() {
     // 先断开全部上层回调再销毁窗口：DestroyWindow 会**同步**派发 WM_ACTIVATE/WM_KILLFOCUS/
     // WM_MOUSELEAVE 等消息，而此刻 Window 的其他成员（dirty_ 等，按声明逆序已先于
     // surface_ 析构）与上层 Application 状态可能已亡——回调链（事件派发 → hover 清除 →
@@ -330,7 +331,7 @@ Win32Window::Impl::~Impl() {
     window_mode_handler = nullptr;
     present_request = nullptr;
     composition_caret_provider = nullptr;
-    ime.reset();  // 桥的 hooks 捕获本 Impl，须在 DestroyWindow 前先散
+    ime = nullptr;  // 桥的 hooks 捕获本 Impl，须在 DestroyWindow 前先散
     if (hwnd != nullptr) {
         DestroyWindow(hwnd);
         hwnd = nullptr;
@@ -343,7 +344,7 @@ Win32Window::Impl::~Impl() {
     }
 }
 
-auto Win32Window::Impl::on_mouse(MouseAction action, MouseButton button, int x, int y) const -> void {
+auto Win32Host::Impl::on_mouse(MouseAction action, MouseButton button, int x, int y) const -> void {
     if (!handler) {
         return;
     }
@@ -360,7 +361,7 @@ auto Win32Window::Impl::on_mouse(MouseAction action, MouseButton button, int x, 
     handler(e);
 }
 
-auto Win32Window::Impl::on_wheel(int delta, int x, int y) const -> void {
+auto Win32Host::Impl::on_wheel(int delta, int x, int y) const -> void {
     if (!handler) {
         return;
     }
@@ -370,7 +371,7 @@ auto Win32Window::Impl::on_wheel(int delta, int x, int y) const -> void {
     handler(e);
 }
 
-auto Win32Window::Impl::on_key(KeyAction action, int vk) const -> void {
+auto Win32Host::Impl::on_key(KeyAction action, int vk) const -> void {
     if (!handler) {
         return;
     }
@@ -381,7 +382,7 @@ auto Win32Window::Impl::on_key(KeyAction action, int vk) const -> void {
     handler(e);
 }
 
-auto Win32Window::Impl::on_char(std::uint32_t ch) const -> void {
+auto Win32Host::Impl::on_char(std::uint32_t ch) const -> void {
     if (!handler) {
         return;
     }
@@ -393,7 +394,7 @@ auto Win32Window::Impl::on_char(std::uint32_t ch) const -> void {
     handler(e);
 }
 
-auto Win32Window::Impl::update_window_state() -> void {
+auto Win32Host::Impl::update_window_state() -> void {
     const WindowState want = compute_window_state(minimized, active);
     if (want != state) {
         state = want;
@@ -404,10 +405,10 @@ auto Win32Window::Impl::update_window_state() -> void {
 }
 
 // ---- 创建分族 ----
-auto Win32Window::Impl::handle_create() -> LRESULT { return 0; }
+auto Win32Host::Impl::handle_create() -> LRESULT { return 0; }
 
 // ---- 输入分族（鼠标按钮 / 移动 / 离开 / 滚轮 / 键 / 字符）----
-auto Win32Window::Impl::handle_mouse(HWND hwnd_in, UINT msg, LPARAM lp) -> LRESULT {
+auto Win32Host::Impl::handle_mouse(HWND hwnd_in, UINT msg, LPARAM lp) -> LRESULT {
     switch (msg) {
         case WM_LBUTTONDOWN:
             on_mouse(MouseAction::Press, MouseButton::Left, GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
@@ -446,19 +447,19 @@ auto Win32Window::Impl::handle_mouse(HWND hwnd_in, UINT msg, LPARAM lp) -> LRESU
     }
 }
 
-auto Win32Window::Impl::handle_wheel(HWND hwnd_in, WPARAM wp, LPARAM lp) const -> LRESULT {
+auto Win32Host::Impl::handle_wheel(HWND hwnd_in, WPARAM wp, LPARAM lp) const -> LRESULT {
     POINT pt{.x = GET_X_LPARAM(lp), .y = GET_Y_LPARAM(lp)};
     ScreenToClient(hwnd_in, &pt);
     on_wheel(GET_WHEEL_DELTA_WPARAM(wp), pt.x, pt.y);
     return 0;
 }
 
-auto Win32Window::Impl::handle_key(UINT msg, WPARAM wp) const -> LRESULT {
+auto Win32Host::Impl::handle_key(UINT msg, WPARAM wp) const -> LRESULT {
     on_key((msg == WM_KEYUP) ? KeyAction::Up : KeyAction::Down, static_cast<int>(wp));
     return 0;
 }
 
-auto Win32Window::Impl::handle_char(WPARAM wp) const -> LRESULT {
+auto Win32Host::Impl::handle_char(WPARAM wp) const -> LRESULT {
     // 组合期残余 WM_CHAR 整条丢弃：IME 上屏结果统一走 `GCS_RESULTSTR`（见 win32_ime 桥），
     // 两条通道并存即「同一汉字上屏两次」。
     if (ime != nullptr && ime->is_composing()) {
@@ -469,7 +470,7 @@ auto Win32Window::Impl::handle_char(WPARAM wp) const -> LRESULT {
 }
 
 // ---- 尺寸分族（WM_SIZE）----
-auto Win32Window::Impl::handle_size(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESULT {
+auto Win32Host::Impl::handle_size(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESULT {
     // DPI 感知下 lParam 为物理像素；换算回逻辑 dp 供布局使用。
     const int pw = static_cast<int>(LOWORD(lp));
     const int ph = static_cast<int>(HIWORD(lp));
@@ -500,7 +501,7 @@ auto Win32Window::Impl::handle_size(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESU
 }
 
 // ---- 绘制分族（WM_PAINT）----
-auto Win32Window::Impl::handle_paint(HWND hwnd_in) -> LRESULT {
+auto Win32Host::Impl::handle_paint(HWND hwnd_in) -> LRESULT {
     // 最大化/缩放时 OS 要求重绘：立即把已就绪的帧缓冲呈现到窗口，填平空档，避免黑屏与旧内容残留。
     // 未被覆盖的扩展区域由浅色背景刷擦除（非纯黑）。present_request_ 即 Window 的同步重渲染
     // （present_root 内含 present），已把缓冲上屏；此处仅触发一次。
@@ -515,7 +516,7 @@ auto Win32Window::Impl::handle_paint(HWND hwnd_in) -> LRESULT {
 }
 
 // ---- 激活分族（WM_ACTIVATE）----
-auto Win32Window::Impl::handle_activate(WPARAM wp) -> LRESULT {
+auto Win32Host::Impl::handle_activate(WPARAM wp) -> LRESULT {
     const bool new_active = (LOWORD(wp) != WA_INACTIVE);
     if (new_active != active) {
         active = new_active;
@@ -525,7 +526,7 @@ auto Win32Window::Impl::handle_activate(WPARAM wp) -> LRESULT {
 }
 
 // ---- DPI 变化分族（WM_DPICHANGED）----
-auto Win32Window::Impl::handle_dpi_changed(HWND hwnd, WPARAM wp, LPARAM lp) -> LRESULT {
+auto Win32Host::Impl::handle_dpi_changed(HWND hwnd, WPARAM wp, LPARAM lp) -> LRESULT {
     const auto *pr = reinterpret_cast<RECT *>(lp);  // NOLINT(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
     SetWindowPos(hwnd, nullptr, pr->left, pr->top, pr->right - pr->left, pr->bottom - pr->top,
                  SWP_NOZORDER | SWP_NOACTIVATE);
@@ -539,14 +540,14 @@ auto Win32Window::Impl::handle_dpi_changed(HWND hwnd, WPARAM wp, LPARAM lp) -> L
     return 0;
 }
 
-auto Win32Window::Impl::notify_scale_changed() const -> void {
+auto Win32Host::Impl::notify_scale_changed() const -> void {
     if (scale_handler) {
         scale_handler(scale);
     }
 }
 
 // ---- 尺寸限制分族（WM_GETMINMAXINFO）----
-auto Win32Window::Impl::handle_getminmaxinfo(LPARAM lp) const -> LRESULT {
+auto Win32Host::Impl::handle_getminmaxinfo(LPARAM lp) const -> LRESULT {
     // 尺寸限制：逻辑 dp × scale → 物理像素（含非客户区补偿）。
     auto *mmi = reinterpret_cast<MINMAXINFO *>(lp);  // NOLINT(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
     const float sc = dpi_scale();
@@ -567,12 +568,12 @@ auto Win32Window::Impl::handle_getminmaxinfo(LPARAM lp) const -> LRESULT {
 }
 
 // ---- 关闭分族（WM_CLOSE / WM_DESTROY）----
-auto Win32Window::Impl::handle_close() -> LRESULT {
+auto Win32Host::Impl::handle_close() -> LRESULT {
     should_close = true;
     return 0;
 }
 
-auto Win32Window::Impl::handle_destroy() -> LRESULT {
+auto Win32Host::Impl::handle_destroy() -> LRESULT {
     should_close = true;
     // 窗口销毁：先全量断连 UIA provider 再置空 hwnd —— 否则 UIA 侧缓存的 provider 会
     // 在窗口已销毁后回调进来（Chromium / Qt 已知崩溃源，R1）。
@@ -591,7 +592,7 @@ auto Win32Window::Impl::handle_destroy() -> LRESULT {
 }
 
 // ---- 无障碍分族（WM_GETOBJECT → UIA 桥，D14）----
-auto Win32Window::Impl::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<LRESULT> {
+auto Win32Host::Impl::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<LRESULT> {
     if (a11y_hook) {
         // 公共签名用指针宽度整数（避免公共头引入 <windows.h>），此处还原为原生类型。
         if (auto answered = a11y_hook(static_cast<std::uintptr_t>(wp), static_cast<std::intptr_t>(lp));
@@ -599,8 +600,8 @@ auto Win32Window::Impl::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional
             return static_cast<LRESULT>(*answered);  // 宿主接管
         }
     }
-    constexpr LONG UIA_ROOT_OBJECT_ID = -25;
-    if (static_cast<LONG>(static_cast<DWORD>(lp)) != UIA_ROOT_OBJECT_ID) {
+    constexpr LONG uia_root_object_id = -25;
+    if (std::cmp_not_equal(static_cast<DWORD>(lp), uia_root_object_id)) {
         return std::nullopt;  // 非 UIA 根请求：交 DefWindowProc（MSAA 兜底）
     }
     if (hwnd == nullptr) {
@@ -615,7 +616,7 @@ auto Win32Window::Impl::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional
 }
 
 // ---- 输入法分族（WM_IME_* → IMM32 组合桥）----
-auto Win32Window::Impl::handle_ime(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
+auto Win32Host::Impl::handle_ime(UINT msg, WPARAM wp, LPARAM lp) const -> LRESULT {
     if (ime != nullptr) {
         if (const std::optional<LRESULT> answered = ime->handle(msg, lp); answered.has_value()) {
             return *answered;
@@ -624,28 +625,28 @@ auto Win32Window::Impl::handle_ime(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
-auto Win32Window::accessibility_provider() const -> a11y::Provider * { return pimpl_->a11y.get(); }
+auto Win32Host::accessibility_provider() const -> a11y::Provider * { return pimpl_->a11y.get(); }
 
-auto Win32Window::set_accessibility_hook(std::function<std::optional<std::intptr_t>(std::uintptr_t, std::intptr_t)> h)
+auto Win32Host::set_accessibility_hook(std::function<std::optional<std::intptr_t>(std::uintptr_t, std::intptr_t)> h)
     const -> void {
     pimpl_->a11y_hook = std::move(h);
 }
 
-auto Win32Window::set_accessibility_root(Widget *root) const -> void {
+auto Win32Host::set_accessibility_root(Widget *root) const -> void {
     pimpl_->a11y_root = root;
     if (pimpl_->a11y != nullptr) {
         pimpl_->a11y->set_root(root);
     }
 }
 
-auto Win32Window::set_composition_caret_provider(std::function<Rect()> provider) const -> void {
+auto Win32Host::set_composition_caret_provider(std::function<Rect()> provider) const -> void {
     pimpl_->composition_caret_provider = std::move(provider);
 }
 
-auto Win32Window::ime_composing() const -> bool { return pimpl_->ime != nullptr && pimpl_->ime->is_composing(); }
+auto Win32Host::ime_composing() const -> bool { return pimpl_->ime != nullptr && pimpl_->ime->is_composing(); }
 
 // ---- 文件拖放分族（WM_DROPFILES）----
-auto Win32Window::Impl::handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT {
+auto Win32Host::Impl::handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT {
     // 操作系统文件拖放：解析 HDROP 为 UTF-8 路径列表，落点换算为窗口逻辑坐标。
     auto *const hdrop = reinterpret_cast<HDROP>(lp);  // NOLINT(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
     const UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, nullptr, 0);
@@ -675,7 +676,7 @@ auto Win32Window::Impl::handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESU
     return 0;
 }
 
-auto Win32Window::Impl::register_class() const -> void {
+auto Win32Host::Impl::register_class() const -> void {
     if (class_registered) {
         return;
     }
@@ -695,7 +696,7 @@ auto Win32Window::Impl::register_class() const -> void {
     }
 }
 
-auto Win32Window::Impl::dpi_scale() const -> float {
+auto Win32Host::Impl::dpi_scale() const -> float {
     int dpi = 96;
     const HDC dc = (hwnd != nullptr) ? GetDC(hwnd) : GetDC(nullptr);
     if (dc != nullptr) {
@@ -707,7 +708,7 @@ auto Win32Window::Impl::dpi_scale() const -> float {
 
 // ---- 窗口过程：仅在最早时机（WM_NCCREATE/WM_CREATE）把 Impl* 存入 GWLP_USERDATA，
 //      随后按消息族分发到对应 handle_* 处理函数（创建/输入/尺寸/绘制/关闭 等）。----
-auto WINAPI Win32Window::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
+auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
     // NOLINTBEGIN(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
     if (msg == WM_NCCREATE || msg == WM_CREATE) {
         auto *cs = reinterpret_cast<CREATESTRUCTA *>(lp);
@@ -770,35 +771,35 @@ auto WINAPI Win32Window::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
     }
 }
 
-// ===== Win32Window 公共 API：全部委托给 pimpl_ =====
-Win32Window::Win32Window(int w, int h, const std::string &title, const WindowStyleOptions &style)
+// ===== Win32Host 公共 API：全部委托给 pimpl_ =====
+Win32Host::Win32Host(int w, int h, const std::string &title, const WindowStyleOptions &style)
     : pimpl_(std::make_unique<Impl>(w, h, title, style)) {}
 
-Win32Window::~Win32Window() = default;
+Win32Host::~Win32Host() = default;
 
-auto Win32Window::set_event_handler(EventHandler h) const -> void { pimpl_->handler = std::move(h); }
-auto Win32Window::set_window_state_handler(WindowStateHandler h) const -> void {
+auto Win32Host::set_event_handler(EventHandler h) const -> void { pimpl_->handler = std::move(h); }
+auto Win32Host::set_window_state_handler(WindowStateHandler h) const -> void {
     pimpl_->window_state_handler = std::move(h);
 }
-auto Win32Window::set_window_mode_handler(WindowModeHandler h) const -> void {
+auto Win32Host::set_window_mode_handler(WindowModeHandler h) const -> void {
     pimpl_->window_mode_handler = std::move(h);
 }
-auto Win32Window::set_present_request(PresentRequest h) const -> void { pimpl_->present_request = std::move(h); }
+auto Win32Host::set_present_request(PresentRequest h) const -> void { pimpl_->present_request = std::move(h); }
 
-auto Win32Window::set_title(const std::string &title) const -> void {
+auto Win32Host::set_title(const std::string &title) const -> void {
     if (pimpl_->hwnd != nullptr) {
         SetWindowTextA(pimpl_->hwnd, utf8_to_acp(title).c_str());
     }
 }
 
-[[nodiscard]] auto Win32Window::hwnd() const -> void * { return pimpl_->hwnd; }
-[[nodiscard]] auto Win32Window::size() const -> Size { return pimpl_->size; }
-[[nodiscard]] auto Win32Window::scale_factor() const -> float { return pimpl_->scale; }
-[[nodiscard]] auto Win32Window::should_close() const -> bool { return pimpl_->should_close; }
-[[nodiscard]] auto Win32Window::present_count() const -> int { return pimpl_->present_count; }
-[[nodiscard]] auto Win32Window::background_brush() -> void * { return static_cast<void *>(Impl::bg_brush); }
+[[nodiscard]] auto Win32Host::hwnd() const -> void * { return pimpl_->hwnd; }
+[[nodiscard]] auto Win32Host::size() const -> Size { return pimpl_->size; }
+[[nodiscard]] auto Win32Host::scale_factor() const -> float { return pimpl_->scale; }
+[[nodiscard]] auto Win32Host::should_close() const -> bool { return pimpl_->should_close; }
+[[nodiscard]] auto Win32Host::present_count() const -> int { return pimpl_->present_count; }
+[[nodiscard]] auto Win32Host::background_brush() -> void * { return static_cast<void *>(Impl::bg_brush); }
 
-auto Win32Window::poll_platform_events() const -> void {
+auto Win32Host::poll_platform_events() const -> void {
     MSG msg{};
     while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE) != 0) {
         if (msg.message == WM_QUIT) {
@@ -810,7 +811,7 @@ auto Win32Window::poll_platform_events() const -> void {
     }
 }
 
-auto Win32Window::wait_events(double timeout_ms) const -> void {
+auto Win32Host::wait_events(double timeout_ms) const -> void {
     if (timeout_ms == 0.0 || pimpl_->should_close) {
         return;  // 无需等待 / 已请求关闭：立即回到循环退出判定
     }
@@ -824,7 +825,7 @@ auto Win32Window::wait_events(double timeout_ms) const -> void {
     MsgWaitForMultipleObjectsEx(0, nullptr, dw, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
 }
 
-auto Win32Window::request_wake() const -> void {
+auto Win32Host::request_wake() const -> void {
     if (pimpl_->hwnd != nullptr) {
         PostMessageA(pimpl_->hwnd, WM_NULL, 0, 0);  // 线程安全；空消息仅用于打断 wait_events
     }
@@ -832,16 +833,17 @@ auto Win32Window::request_wake() const -> void {
 
 // ---- 父子窗口与模态 ----
 
-auto Win32Window::set_owner(void *owner_hwnd) const -> void {
+auto Win32Host::set_owner(void *owner_hwnd) const -> void {
     if (pimpl_->hwnd == nullptr) {
         return;
     }
     // `GWLP_HWNDPARENT` 改变的是 **owner**（不是子窗口 parent）：子窗恒浮于 owner 之上、
     // 随 owner 最小化、不产生独立任务栏条目。传 nullptr 解除从属关系。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): Win32 要求 HWND 以 LONG_PTR 传入 GWLP_*，属 API 约定
     SetWindowLongPtrA(pimpl_->hwnd, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(owner_hwnd));
 }
 
-auto Win32Window::set_enabled(bool on) const -> void {
+auto Win32Host::set_enabled(bool on) const -> void {
     if (pimpl_->hwnd == nullptr) {
         return;
     }
@@ -850,14 +852,14 @@ auto Win32Window::set_enabled(bool on) const -> void {
 
 // ---- z 序、显示器与 DPI ----
 
-auto Win32Window::raise() const -> void {
+auto Win32Host::raise() const -> void {
     if (pimpl_->hwnd == nullptr) {
         return;
     }
     BringWindowToTop(pimpl_->hwnd);  // 仅提 z 序，不改变激活状态
 }
 
-auto Win32Window::focus_window() const -> void {
+auto Win32Host::focus_window() const -> void {
     if (pimpl_->hwnd == nullptr) {
         return;
     }
@@ -865,7 +867,7 @@ auto Win32Window::focus_window() const -> void {
     SetFocus(pimpl_->hwnd);
 }
 
-auto Win32Window::display_id() const -> int {
+auto Win32Host::display_id() const -> int {
     if (pimpl_->hwnd == nullptr) {
         return -1;
     }
@@ -874,16 +876,17 @@ auto Win32Window::display_id() const -> int {
         return -1;
     }
     // 与 `app::Display::id` 同源：`display_win32.cpp` 以 HMONITOR 句柄值作稳定 id。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): HMONITOR 为不透明句柄，取其句柄值作稳定 id 是与 display_win32 的既定契约
     return static_cast<int>(reinterpret_cast<std::intptr_t>(hmon));
 }
 
-auto Win32Window::set_scale_change_handler(std::function<void(float)> h) const -> void {
+auto Win32Host::set_scale_change_handler(std::function<void(float)> h) const -> void {
     pimpl_->scale_handler = std::move(h);
 }
 
 // ---- 窗口几何（多窗口：几何持久化的读写端）----
 
-auto Win32Window::position() const -> Point {
+auto Win32Host::position() const -> Point {
     if (pimpl_->hwnd == nullptr) {
         return Point{};
     }
@@ -894,7 +897,7 @@ auto Win32Window::position() const -> Point {
     return Point{.x = static_cast<float>(r.left), .y = static_cast<float>(r.top)};
 }
 
-auto Win32Window::set_position(Point p) const -> void {
+auto Win32Host::set_position(Point p) const -> void {
     if (pimpl_->hwnd == nullptr) {
         return;
     }
@@ -902,7 +905,7 @@ auto Win32Window::set_position(Point p) const -> void {
                  SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-auto Win32Window::set_size(Size s) const -> void {
+auto Win32Host::set_size(Size s) const -> void {
     if (pimpl_->hwnd == nullptr) {
         return;
     }

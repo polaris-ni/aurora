@@ -38,20 +38,16 @@ constexpr unsigned long AURORA_KEYSYM_comma = 0x2C, AURORA_KEYSYM_period = 0x2E,
 /// @brief keysym（X11 或 XKB，数值相同）→ 平台无关 KeyCode。
 inline auto keysym_to_keycode(unsigned long ks) -> KeyCode {
     if (ks >= keysym::AURORA_KEYSYM_a && ks <= keysym::AURORA_KEYSYM_z) {
-        return static_cast<KeyCode>(static_cast<int>(KeyCode::A)
-                                    + static_cast<int>(ks - keysym::AURORA_KEYSYM_a));
+        return static_cast<KeyCode>(static_cast<int>(KeyCode::A) + static_cast<int>(ks - keysym::AURORA_KEYSYM_a));
     }
     if (ks >= keysym::AURORA_KEYSYM_A && ks <= keysym::AURORA_KEYSYM_Z) {
-        return static_cast<KeyCode>(static_cast<int>(KeyCode::A)
-                                    + static_cast<int>(ks - keysym::AURORA_KEYSYM_A));
+        return static_cast<KeyCode>(static_cast<int>(KeyCode::A) + static_cast<int>(ks - keysym::AURORA_KEYSYM_A));
     }
     if (ks >= keysym::AURORA_KEYSYM_0 && ks <= keysym::AURORA_KEYSYM_9) {
-        return static_cast<KeyCode>(static_cast<int>(KeyCode::D0)
-                                    + static_cast<int>(ks - keysym::AURORA_KEYSYM_0));
+        return static_cast<KeyCode>(static_cast<int>(KeyCode::D0) + static_cast<int>(ks - keysym::AURORA_KEYSYM_0));
     }
     if (ks >= keysym::AURORA_KEYSYM_F1 && ks <= keysym::AURORA_KEYSYM_F12) {
-        return static_cast<KeyCode>(static_cast<int>(KeyCode::F1)
-                                    + static_cast<int>(ks - keysym::AURORA_KEYSYM_F1));
+        return static_cast<KeyCode>(static_cast<int>(KeyCode::F1) + static_cast<int>(ks - keysym::AURORA_KEYSYM_F1));
     }
     switch (ks) {
         case keysym::AURORA_KEYSYM_Return:

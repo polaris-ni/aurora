@@ -1,9 +1,9 @@
 #pragma once
 
 // Win32 家族共享的光标下发：`Win32Surface`（GDI 上屏）与 `D3D11Surface`（GPU 上屏）
-// 共用同一 `Win32Window` 宿主模型，故「语义形状 → 系统预置光标」的映射只应存在一份。
+// 共用同一 `Win32Host` 宿主模型，故「语义形状 → 系统预置光标」的映射只应存在一份。
 //
-// 为何是内部头（src/）而非公共头：`win32_window.h` 刻意 pimpl 隔离、公共头不含 <windows.h>，
+// 为何是内部头（src/）而非公共头：`win32_host.h` 刻意 pimpl 隔离、公共头不含 <windows.h>，
 // 而本文件需要 `SetCursor`/`LoadCursor` 与 `IDC_*`，故与 `win32_capture.h` / `swizzle.h` /
 // `keysym_map.h` 同列于 src/aurora/window/，由后端 .cpp 以 "aurora/window/win32_cursor.h" 引入，
 // 不进公共 API 面（亦无 codespec / 测试目标单元之义务）。

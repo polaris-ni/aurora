@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "aurora/app/scroll_storage.h"
+#include "aurora/core/accessibility.h"
 #include "aurora/core/transform.h"
 #include "aurora/environment/build_context.h"
 #include "aurora/event/event.h"
@@ -22,7 +23,6 @@
 #include "aurora/widget/props_io.h"
 #include "aurora/widget/scroll_viewport.h"
 #include "aurora/widget/widget.h"
-#include "aurora/core/accessibility.h"
 
 namespace aurora {
 
@@ -274,9 +274,8 @@ class Scroll : public Container, public ScrollProps {
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_scroll() const -> std::optional<AccessibilityScrollRange> override {
         const float max_offset = std::max(0.0F, content_h_ - viewport_h_);
-        return AccessibilityScrollRange{.min = 0.0,
-                                        .max = static_cast<double>(max_offset),
-                                        .position = static_cast<double>(offset_y_)};
+        return AccessibilityScrollRange{
+            .min = 0.0, .max = static_cast<double>(max_offset), .position = static_cast<double>(offset_y_)};
     }
 
     /// @brief 无障碍滚动定位（G32）：走 `set_offset` 既有夹取路径（不标布局脏）。
@@ -576,9 +575,8 @@ class Scroll : public Container, public ScrollProps {
             needs_gesture_tick_ = false;  // 静止后摘除每帧计时，回到空闲节流
             return;
         }
-        const double dt = glide_last_.has_value()
-                              ? std::chrono::duration<double>(now - *glide_last_).count()
-                              : (1.0 / 60.0);
+        const double dt =
+            glide_last_.has_value() ? std::chrono::duration<double>(now - *glide_last_).count() : (1.0 / 60.0);
         glide_last_ = now;
         float v = glide_.tick(dt);
         // 布局可能在滑动中改变内容/视口尺寸：目标随动夹取，防滑出可滚范围。

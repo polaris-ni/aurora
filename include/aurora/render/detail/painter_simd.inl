@@ -5,7 +5,6 @@
 #include <cmath>
 
 #include "aurora/core/platform.h"
-
 #include "aurora/render/detail/painter_simd.h"
 
 #if defined(AURORA_COMPILER_MSVC)
@@ -392,8 +391,8 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_radial_scanline_sse2(st
 
 // AVX2 实现：MSVC 下 AURORA_AVX2_TARGET 为空宏（x64 基线已含 SSE2，_mm256_* intrinsics
 // 无需 /arch:AVX2 即可编译，运行时经 g_simd_level 分发保证只在 AVX2 机器上执行）。
-#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG) || defined(AURORA_COMPILER_MSVC) \
-    || defined(AURORA_COMPILER_CLANG_CL)
+#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG) || defined(AURORA_COMPILER_MSVC) || \
+    defined(AURORA_COMPILER_CLANG_CL)
 #if defined(AURORA_SIMD_X86)
 AURORA_AVX2_TARGET AURORA_NOINLINE inline auto blend_srgb_over_region_avx2(std::uint8_t *px, std::uint8_t sr,
                                                                            std::uint8_t sg, std::uint8_t sb, float ar,
@@ -694,8 +693,8 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blur_region_sse2(std::uint8_t *p
 }
 #endif  // AURORA_SIMD_X86 (SSE2 blur)
 
-#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG) || defined(AURORA_COMPILER_MSVC) \
-    || defined(AURORA_COMPILER_CLANG_CL)
+#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG) || defined(AURORA_COMPILER_MSVC) || \
+    defined(AURORA_COMPILER_CLANG_CL)
 #if defined(AURORA_SIMD_X86)
 inline AURORA_AVX2_TARGET auto blur_load4_avx2(const std::uint8_t *p) -> __m256i {
     // 低 128 位装 4 通道，高 128 位置零（单线模式，仅用低 4 路）。

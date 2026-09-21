@@ -67,13 +67,13 @@ struct PieSection {
 
 /// @brief 轴规格（纯值；渲染 / 刻度 / 反查三用）。
 struct ChartAxisSpec {
-    bool visible = true;              ///< 是否绘制轴与刻度
-    std::string label;                ///< 轴标题（可选；非空时额外占留白）
-    int tick_count = 5;               ///< 期望刻度数（nice 化后可能 ±1）
-    std::optional<double> min;        ///< 域下界；空 = 取数据域并 nice 化
-    std::optional<double> max;        ///< 域上界；空 = 取数据域并 nice 化
-    bool show_grid_lines = true;      ///< 网格线
-    bool include_zero = true;         ///< 域是否必须含 0（Bar 的零基线依赖它）
+    bool visible = true;  ///< 是否绘制轴与刻度
+    std::string label;  ///< 轴标题（可选；非空时额外占留白）
+    int tick_count = 5;  ///< 期望刻度数（nice 化后可能 ±1）
+    std::optional<double> min;  ///< 域下界；空 = 取数据域并 nice 化
+    std::optional<double> max;  ///< 域上界；空 = 取数据域并 nice 化
+    bool show_grid_lines = true;  ///< 网格线
+    bool include_zero = true;  ///< 域是否必须含 0（Bar 的零基线依赖它）
 };
 
 /// @brief 图例位置。
@@ -233,14 +233,14 @@ class BandScale {
 /// @brief 内置系列色板（Material 风格 8 色；索引超界取模）。
 [[nodiscard]] inline auto chart_palette(std::size_t index) -> Color {
     constexpr Color PALETTE[8] = {
-        Color{66, 133, 244, 255},   // blue
-        Color{219, 68, 55, 255},    // red
-        Color{244, 180, 0, 255},    // yellow
-        Color{15, 157, 88, 255},    // green
-        Color{171, 71, 188, 255},   // purple
-        Color{255, 112, 67, 255},   // deep orange
-        Color{0, 172, 193, 255},    // cyan
-        Color{124, 179, 66, 255},   // light green
+        Color{66, 133, 244, 255},  // blue
+        Color{219, 68, 55, 255},  // red
+        Color{244, 180, 0, 255},  // yellow
+        Color{15, 157, 88, 255},  // green
+        Color{171, 71, 188, 255},  // purple
+        Color{255, 112, 67, 255},  // deep orange
+        Color{0, 172, 193, 255},  // cyan
+        Color{124, 179, 66, 255},  // light green
     };
     return PALETTE[index % 8U];
 }
@@ -639,8 +639,8 @@ class ChartGrowIn {
 
   private:
     AnimationController ctrl_{0.45};  ///< 450ms 入场
-    State<double> progress_{1.0};     ///< 初值为终态（未播放 = 已完成）
-    bool bound_ = false;              ///< 是否已登记进 Animator（决定析构是否摘除）
+    State<double> progress_{1.0};  ///< 初值为终态（未播放 = 已完成）
+    bool bound_ = false;  ///< 是否已登记进 Animator（决定析构是否摘除）
 };
 
 // ---------- 轴绘制共享实现（Bar / Line / Scatter 共用，避免四份漂移）----------
@@ -681,8 +681,9 @@ inline auto draw_numeric_axis(Painter &p, Point origin, const Rect &plot, const 
     }
     if (!spec.label.empty()) {
         const float w = render::FontEngine::measure_width(spec.label, font);
-        const Rect box{.origin = Point{.x = origin.x + plot.origin.x - w - 6.0F - line_h, .y = origin.y + plot.origin.y},
-                       .size = Size{.width = w + 2.0F, .height = line_h}};
+        const Rect box{
+            .origin = Point{.x = origin.x + plot.origin.x - w - 6.0F - line_h, .y = origin.y + plot.origin.y},
+            .size = Size{.width = w + 2.0F, .height = line_h}};
         p.draw_text(box, spec.label, font, text_color);
     }
 }

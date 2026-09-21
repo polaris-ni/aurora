@@ -7,7 +7,7 @@
 // CTF 装载器对**未注册 TSF 文本存储**的窗口提供 IME32 兼容通道——微软拼音 / 五笔 / 百度等
 // 在 `WM_IME_*` + `ImmGetCompositionString` 下能完整给出 preedit、待转换段与上屏串
 // （SDL2 / GLFW 生态多年实证）。故本切片取 IMM32 首桥：零 COM 依赖、零三方依赖、
-// 与既有 `Win32Window` pimpl 同构。TSF 作为后续增量（需要接管 `ITextProvider` 时再上）。
+// 与既有 `Win32Host` pimpl 同构。TSF 作为后续增量（需要接管 `ITextProvider` 时再上）。
 //
 // 门控与 `win32_ua.h` 同款：平台宏 ∧ 后端宏析取（Win32 GDI 与 D3D11 共用宿主）。
 #include "aurora/core/platform.h"
@@ -45,11 +45,11 @@ namespace aurora::detail {
 /// @note Thread: main-thread only（消息泵线程）
 class Win32ImeBridge {
   public:
-    /// @brief 上层通道：事件投递与焦点控件查询，全部由 `Win32Window::Impl` 提供。
+    /// @brief 上层通道：事件投递与焦点控件查询，全部由 `Win32Host::Impl` 提供。
     struct Hooks {
-        std::function<void(Event &)> emit;     ///< 投给宿主派发器（组合事件 / 上屏文本事件）
-        std::function<Rect()> caret_bounds;    ///< 候选窗定位盒（**窗口逻辑 dp**）；空 = 无定位
-        std::function<float()> scale_factor;   ///< 当前 DPI 缩放（dp → 物理像素）
+        std::function<void(Event &)> emit;  ///< 投给宿主派发器（组合事件 / 上屏文本事件）
+        std::function<Rect()> caret_bounds;  ///< 候选窗定位盒（**窗口逻辑 dp**）；空 = 无定位
+        std::function<float()> scale_factor;  ///< 当前 DPI 缩放（dp → 物理像素）
     };
 
     explicit Win32ImeBridge(HWND hwnd, Hooks hooks) : hwnd_(hwnd), hooks_(std::move(hooks)) {}
@@ -83,13 +83,13 @@ class Win32ImeBridge {
 
     /// @brief 投出一条组合事件：缓存的 UTF-16 组合串 + WCHAR 光标位 + 属性数组 → 契约口径
     ///        （UTF-8 preedit + 码点下标，折算见 `ime_composition.h`）。
-    auto emit_state(std::size_t caret_utf16, const std::vector<std::uint8_t> &attrs,
-                    const std::string &committed) -> void;
+    auto emit_state(std::size_t caret_utf16, const std::vector<std::uint8_t> &attrs, const std::string &committed)
+        -> void;
 
     HWND hwnd_ = nullptr;
     Hooks hooks_;
-    bool composing_ = false;     ///< 已收到 STARTCOMPOSITION 且尚未 END
-    std::u16string comp_;        ///< 最近一次 `GCS_COMPSTR`（未随状态更新消息重发时复用）
+    bool composing_ = false;  ///< 已收到 STARTCOMPOSITION 且尚未 END
+    std::u16string comp_;  ///< 最近一次 `GCS_COMPSTR`（未随状态更新消息重发时复用）
 };
 
 }  // namespace aurora::detail

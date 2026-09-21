@@ -55,7 +55,8 @@ AURORA_TEST_CASE(store_listener_receives_new_and_prev_state) {
     // Listener 签名为 (newState, prevState)：两次派发的序对逐一核对。
     std::vector<std::pair<int, int>> observed;
     auto store = make_store<int>(0, [](const int& s, const Action&) -> int { return s + 1; });
-    const auto unsubscribe = store->subscribe([&observed](const int& next, const int& prev) -> void { observed.emplace_back(next, prev); });
+    const auto unsubscribe =
+        store->subscribe([&observed](const int& next, const int& prev) -> void { observed.emplace_back(next, prev); });
     AURORA_TEST_CHECK_TRUE(unsubscribe);  // 订阅返回有效退订句柄
 
     store->dispatch(Action{"increment"});
@@ -73,7 +74,8 @@ AURORA_TEST_CASE(store_unsubscribe_stops_listener) {
     int second_calls = 0;
     auto store = make_store<int>(0, [](const int& s, const Action&) -> int { return s + 1; });
     auto unsubscribe_first = store->subscribe([&first_calls](const int&, const int&) -> void { ++first_calls; });
-    const auto unsubscribe_second = store->subscribe([&second_calls](const int&, const int&) -> void { ++second_calls; });
+    const auto unsubscribe_second =
+        store->subscribe([&second_calls](const int&, const int&) -> void { ++second_calls; });
     AURORA_TEST_CHECK_TRUE(unsubscribe_second);  // 第二条监听同样拿到有效句柄
 
     store->dispatch(Action{"increment"});

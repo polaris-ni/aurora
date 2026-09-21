@@ -48,8 +48,8 @@ auto bounded(float w, float h) -> Constraints {
 }
 
 // ---- 子树绘制缓存（Display List / cache_layer）观测设施 ----
-constexpr int CACHE_W = 260;
-constexpr int CACHE_H = 48;
+constexpr int AURORA_CACHE_W = 260;
+constexpr int AURORA_CACHE_H = 48;
 
 /// 父 Column + 子 Text：后代绘制缓存是观测对象，故必须有层级。
 auto text_column(bool cache_layer) -> std::shared_ptr<Column> {
@@ -59,27 +59,30 @@ auto text_column(bool cache_layer) -> std::shared_ptr<Column> {
     if (cache_layer) {
         col->modifier.set(Modifier().cache_layer());
     }
-    LayoutEngine::layout(*col, bounded(static_cast<float>(CACHE_W), static_cast<float>(CACHE_H)));
+    LayoutEngine::layout(*col, bounded(static_cast<float>(AURORA_CACHE_W), static_cast<float>(AURORA_CACHE_H)));
     return col;
 }
 
 /// 把容器子树绘制进离屏画布并返回像素校验和（同一实例连续绘制可观察缓存是否命中）。
 auto paint_hash(Widget& w) -> std::uint64_t {
     Painter p;
-    p.begin(CACHE_W, CACHE_H);
+    p.begin(AURORA_CACHE_W, AURORA_CACHE_H);
     // 白底 + 不透明黑字：满足 ClearType 生效条件（c.a == 255）。
-    p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                     .size = Size{.width = static_cast<float>(CACHE_W), .height = static_cast<float>(CACHE_H)}},
-                Color{255, 255, 255, 255});
+    p.fill_rect(
+        Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+             .size = Size{.width = static_cast<float>(AURORA_CACHE_W), .height = static_cast<float>(AURORA_CACHE_H)}},
+        Color{255, 255, 255, 255});
     constexpr BuildContext ctx;
-    w.paint(p,
-            Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                 .size = Size{.width = static_cast<float>(CACHE_W), .height = static_cast<float>(CACHE_H)}},
-            ctx);
+    w.paint(
+        p,
+        Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+             .size = Size{.width = static_cast<float>(AURORA_CACHE_W), .height = static_cast<float>(AURORA_CACHE_H)}},
+        ctx);
     std::uint64_t h = 0xcbf29ce484222325ULL;
     const std::uint8_t* d = p.data();
-    constexpr std::size_t n = static_cast<std::size_t>(CACHE_W) * static_cast<std::size_t>(CACHE_H) * 4U;
+    constexpr std::size_t n = static_cast<std::size_t>(AURORA_CACHE_W) * static_cast<std::size_t>(AURORA_CACHE_H) * 4U;
     for (std::size_t i = 0; i < n; ++i) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 对像素缓冲做字节级哈希，下标即字节偏移
         h ^= d[i];
         h *= 0x100000001b3ULL;
     }
@@ -189,13 +192,10 @@ AURORA_TEST_CASE(cross_axis_stretch_expands_child) {
 }
 
 /// @brief 判定诊断列表中是否含「Column + Baseline」降级提示（消息以 Column 开头、where 为 layout）。
-auto has_column_baseline_notice(const std::vector<Diagnostic> &diags) -> bool {
-    for (const auto &d : diags) {
-        if (std::string{d.where} == "layout" && std::string{d.message}.starts_with("Column")) {
-            return true;
-        }
-    }
-    return false;
+auto has_column_baseline_notice(const std::vector<Diagnostic>& diags) -> bool {
+    return std::ranges::any_of(diags, [](const auto& d) {
+        return std::string{d.where} == "layout" && std::string{d.message}.starts_with("Column");
+    });
 }
 
 AURORA_TEST_CASE(row_baseline_aligns_text_widgets_on_common_line) {

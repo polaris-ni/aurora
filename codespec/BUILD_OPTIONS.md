@@ -36,6 +36,7 @@
 | `cmake/AuroraTests.cmake` | `AURORA_BUILD_TESTS` 注册式 runner（GLOB `tests/*.cpp`、`tests/unit/*.cpp` 与 `tests/integration/*.cpp` → 单一 `aurora_test_runner`，`AURORA_TEST()` 自注册） |
 | `cmake/AuroraInstrumentation.cmake` | `AURORA_ENABLE_COVERAGE` / `AURORA_ENABLE_ASAN` / `AURORA_ENABLE_PROFILING` / `AURORA_ENABLE_TRACING` / `AURORA_ENABLE_DEBUG` / `AURORA_ENABLE_TEST_HOOKS`（须在全部目标定义之后 include） |
 | `cmake/AuroraInstall.cmake` | 安装 + `find_package(Aurora)` 导出（须在后端开关之后 include） |
+| `cmake/AuroraLint.cmake` | `AURORA_ENABLE_CLANG_TIDY`（`lint` / `lint-fix` 聚合目标，经 `tools/check/run_clang_tidy.py` 并行 lint 非 third_party 翻译单元；须在全部目标定义之后 include） |
 | `cmake/AuroraCheckTestRegistry.cmake` | **遗留模块**：当前无 CMake `include()` 引用（`registry_integrity` 已改由 `AuroraTests.cmake` 直接注册 python 脚本 `check_test_registry.py`）；保留仅供手工 / 历史参考，不计入常规构建 |
 
 ---
@@ -53,7 +54,7 @@
 | `AURORA_BUILD_VERIFY_TOOLS` | `OFF` | **定义**（非默认构建）`tools/verify/` 下的真机验收探针：按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**（会创建真实窗口、读取屏幕光标，非确定且干扰用户桌面） | 各 `aurora_verify_<平台>_cursor` 可执行文件 + 聚合目标 `aurora_verify` |
 ### 2.1 图像编解码开关（已迁出）
 
-图像编解码开关原名 `AURORA_BUILD_IMAGE_*`，实为「编译期能力开关」而非「交付物开关」，已归入 `AURORA_ENABLE_*` 命名组并连同选项名一并改名为 `AURORA_ENABLE_IMAGE_*`——详见 §4.5。
+图像编解码开关原名 `AURORA_BUILD_IMAGE_*`，实为「编译期能力开关」而非「交付物开关」，已归入 `AURORA_ENABLE_*` 命名组并连同选项名一并改名为 `AURORA_ENABLE_IMAGE_*`——详见 §4.6。
 
 ### 2.2 demo 构建方式
 
@@ -119,9 +120,9 @@ cmake --build build-verify --target aurora_verify_x11_cursor
 | 选项 | 默认值 | 含义 | 传播宏 | 额外链接 |
 |:---|:---|:---|:---|:---|
 | `AURORA_BACKEND_HEADLESS` | `ON` | 无头内存 / PNG 后端（`HeadlessSurface`，离线渲染 / 测试） | `AURORA_BACKEND_HEADLESS` | — |
-| `AURORA_BACKEND_WIN32` | Windows `ON`，否则 `OFF` | Win32/GDI 后端（`Win32Surface` + `Win32Window` 共享宿主） | `AURORA_BACKEND_WIN32` | `user32` `gdi32` `shell32` `ole32` `uuid` `imm32`（仅 `_WIN32`；`imm32` 供输入法组合桥） |
+| `AURORA_BACKEND_WIN32` | Windows `ON`，否则 `OFF` | Win32/GDI 后端（`Win32Surface` + `Win32Host` 共享宿主） | `AURORA_BACKEND_WIN32` | `user32` `gdi32` `shell32` `ole32` `uuid` `imm32`（仅 `_WIN32`；`imm32` 供输入法组合桥） |
 | `AURORA_BACKEND_D3D11` | `OFF` | D3D11 GPU 增量上屏后端（`D3D11Surface`） | `AURORA_BACKEND_D3D11` | `d3d11` `dxgi` `d3dcompiler`（仅 `_WIN32`） |
-| `AURORA_BACKEND_GPU_WGPU` | `OFF` | wgpu GPU 栅格后端（`WgpuRhi`；真窗口帧路径 `WgpuSurface` / `WgpuX11Surface` / `WgpuWaylandSurface` 另与宿主 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` ∨ `AURORA_BACKEND_WAYLAND` 合取），源码经 cargo 构建，需 Rust 工具链 + libclang，配置期缺项 FATAL，见 §3.8 | `AURORA_BACKEND_GPU_WGPU` | `wgpu_native` 静态库 + `ws2_32` `userenv` `bcrypt` `advapi32` `oleaut32` `ntdll`(Windows)/`dl` `pthread` `m`(Linux) |
+| `AURORA_BACKEND_GPU_WGPU` | `OFF` | wgpu GPU 栅格后端（`WgpuRhi`；真窗口帧路径 `WgpuWin32Surface` / `WgpuX11Surface` / `WgpuWaylandSurface` 另与宿主 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` ∨ `AURORA_BACKEND_WAYLAND` 合取），源码经 cargo 构建，需 Rust 工具链 + libclang，配置期缺项 FATAL，见 §3.8 | `AURORA_BACKEND_GPU_WGPU` | `wgpu_native` 静态库 + `ws2_32` `userenv` `bcrypt` `advapi32` `oleaut32` `ntdll`(Windows)/`dl` `pthread` `m`(Linux) |
 | `AURORA_BACKEND_GLFW` | `OFF` | GLFW + OpenGL（上下文 3.3 兼容剖面，绘制 1.1 立即模式） | `AURORA_BACKEND_GLFW` | `glfw` 目标（源码静态库）+ `opengl32`(Windows)/`OpenGL::GL`(其他平台) |
 | `AURORA_BACKEND_X11` | `OFF` | X11 / Linux 桌面后端（`X11Surface`，pimpl 完整实现） | `AURORA_BACKEND_X11` | `${X11_LIBRARIES}`（`find_package(X11)`） |
 | `AURORA_BACKEND_WAYLAND` | `OFF` | 原生 Wayland / Linux 桌面后端（`WaylandSurface`，pimpl 完整实现） | `AURORA_BACKEND_WAYLAND` | `${WAYLAND_CLIENT_LIBRARIES}` `${WAYLAND_CURSOR_LIBRARIES}` `${XKBCOMMON_LIBRARIES}`（`pkg-config`） |
@@ -208,7 +209,7 @@ cmake -S . -B build -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_DISPLAY_LIS
 | `Auto`（默认） | 选 D3D11 GPU 上屏 | 静默回退 Win32/GDI（`AURORA_LOG_INFO` 说明） |
 | `Software` | 强制 Win32/GDI | Win32/GDI |
 | `GpuD3D11` | 选 D3D11（含 WARP 兜底） | 返回 `renderer-unavailable` 错误（不静默降级，错误归属调用方） |
-| `GpuWgpu` | 与 `AURORA_BACKEND_GPU_WGPU` 合取：编译且 adapter 可用时选 `WgpuSurface`（Win32 宿主）/ `WgpuX11Surface`（X11 宿主）/ `WgpuWaylandSurface`（Wayland 宿主；`create_native_window` 运行期按 `WAYLAND_DISPLAY` 会话择路，§3.8）（GPU 栅格） | 未编译 / 无 adapter 时返回 `renderer-unavailable`（不降级；`Auto` 优先序不含 wgpu） |
+| `GpuWgpu` | 与 `AURORA_BACKEND_GPU_WGPU` 合取：编译且 adapter 可用时选 `WgpuWin32Surface`（Win32 宿主）/ `WgpuX11Surface`（X11 宿主）/ `WgpuWaylandSurface`（Wayland 宿主；`create_native_window` 运行期按 `WAYLAND_DISPLAY` 会话择路，§3.8）（GPU 栅格） | 未编译 / 无 adapter 时返回 `renderer-unavailable`（不降级；`Auto` 优先序不含 wgpu） |
 
 `AURORA_BACKEND_D3D11=ON` 时 `D3D11Options.vsync`（默认 `true`）控制 `Present(1,0)`（阻塞到 vblank，后端自带帧节拍，帧调度跳过 CPU sleep）或 `Present(0,0)`（交还 CPU 帧预算节流）。
 
@@ -239,7 +240,7 @@ cmake --build build --target gen_debug_api_json     # 仅刷新 debug 段
 
 ### 3.8 wgpu GPU 栅格后端（cargo 源码构建 + Rust 工具链探测）
 
-`AURORA_BACKEND_GPU_WGPU=ON`（默认 `OFF`）启用 `WgpuRhi`（同一套 WGSL 管线覆盖 Vulkan / D3D12 / Metal / GLES）；真窗口帧路径 `WgpuSurface`（Win32 宿主）/ `WgpuX11Surface`（X11 宿主）/ `WgpuWaylandSurface`（Wayland 宿主）与 `create_window(WgpuOptions)` 另与 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` ∨ `AURORA_BACKEND_WAYLAND` 合取门控（有哪个宿主宏就产出哪个宿主；Linux 两宏并开时 `WgpuOptions` 编译期取 X11，Wayland 宿主经 `WaylandOptions` + `GpuWgpu` 或 `create_native_window` 会话选择直达）。依赖为仓库内置 `third_party/wgpu-native/`（gfx-rs v29 源码，**保持上游原样不修改**），经 cargo 构建为静态库（staticlib）链入——对齐「静态交付、消费者无额外 DLL」。
+`AURORA_BACKEND_GPU_WGPU=ON`（默认 `OFF`）启用 `WgpuRhi`（同一套 WGSL 管线覆盖 Vulkan / D3D12 / Metal / GLES）；真窗口帧路径 `WgpuWin32Surface`（Win32 宿主）/ `WgpuX11Surface`（X11 宿主）/ `WgpuWaylandSurface`（Wayland 宿主）与 `create_window(WgpuOptions)` 另与 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` ∨ `AURORA_BACKEND_WAYLAND` 合取门控（有哪个宿主宏就产出哪个宿主；Linux 两宏并开时 `WgpuOptions` 编译期取 X11，Wayland 宿主经 `WaylandOptions` + `GpuWgpu` 或 `create_native_window` 会话选择直达）。依赖为仓库内置 `third_party/wgpu-native/`（gfx-rs v29 源码，**保持上游原样不修改**），经 cargo 构建为静态库（staticlib）链入——对齐「静态交付、消费者无额外 DLL」。
 
 ```powershell
 cmake -S . -B build -DAURORA_BACKEND_GPU_WGPU=ON -DAURORA_BACKEND_WIN32=ON
@@ -282,7 +283,8 @@ cmake --build build
 | `AURORA_ENABLE_SIMD` | `ON` | 光栅内核 SIMD 双实现（SSE2 基线 + AVX2 运行时分发） | 注入 `AURORA_ENABLE_SIMD`（仅库内部，不 PUBLIC 传播）；详见 §4.2 |
 | `AURORA_ENABLE_CCACHE` | `ON` | ccache 编译缓存（加速重复编译） | 设置 `CMAKE_C_COMPILER_LAUNCHER` 与 `CMAKE_CXX_COMPILER_LAUNCHER`（`cmake -E env` 前缀注入 ccache 配置环境变量，构建期生效）；支持 winget 安装路径自动检测；详见 §4.3 |
 | `AURORA_ENABLE_LLD` | `ON` | 链接器选择（lld 加速静态链接） | GNU/Clang 下 `find_program(ld.lld)` + `check_linker_flag` 探测通过则全局注入 `-fuse-ld=lld -B<lld 目录>`；失败静默回退 GNU ld；**不注入 feature 宏** |
-| `AURORA_ENABLE_IMAGE_JPEG` | `OFF` | JPEG 图像解码能力（libjpeg-turbo 源码构建） | 注入 `AURORA_ENABLE_IMAGE_JPEG`（仅库内部，不 PUBLIC 传播）；详见 §4.5 |
+| `AURORA_ENABLE_CLANG_TIDY` | `ON` | Clang-Tidy 门禁（`lint` / `lint-fix` 聚合目标） | 需 `clang-tidy` 与 python 在 PATH；未开启时自动打开 `CMAKE_EXPORT_COMPILE_COMMANDS`。经 `tools/check/run_clang_tidy.py` 并行 lint **非 third_party** 翻译单元并按 `(file, line, check)` 去重；详见 §4.5 |
+| `AURORA_ENABLE_IMAGE_JPEG` | `OFF` | JPEG 图像解码能力（libjpeg-turbo 源码构建） | 注入 `AURORA_ENABLE_IMAGE_JPEG`（仅库内部，不 PUBLIC 传播）；详见 §4.6 |
 | `AURORA_ENABLE_IMAGE_WEBP` | `OFF` | WebP 图像解码能力（libwebp 源码构建） | 注入 `AURORA_ENABLE_IMAGE_WEBP`（同上） |
 | `AURORA_ENABLE_IMAGE_PNG` | `OFF` | PNG/GIF 图像解码能力（wuffs 源码构建） | 注入 `AURORA_ENABLE_IMAGE_PNG`（同上） |
 | `AURORA_ENABLE_AUDIO` | `OFF` | 内置音频设备后端（`media/audio.h` 的 `AudioContext` 图 API **恒编译**——对齐 RHI 先例：契约常在、能力经 `feature_flags().audio` 运行期查询；本开关只决定是否编入内置设备后端。未启用或设备初始化失败 → `AudioContext` 静默模式：图照常运转、样本消费后丢弃，`device_state()==Silent`，对齐 GPU 通道回退语义）。后端明细见下两行 | 注入 `AURORA_ENABLE_AUDIO`（PUBLIC 传播，经 `aurora_define_feature` 注册） |
@@ -395,7 +397,29 @@ cmake -S . -B build -DAURORA_ENABLE_LLD=OFF                                     
 cmake -S . -B build -DAURORA_LLD_DIR="D:/Development/Environment/LLVM/bin"      # 显式指定
 ```
 
-### 4.5 `AURORA_ENABLE_IMAGE_*`（图像编解码能力）
+### 4.5 `AURORA_ENABLE_CLANG_TIDY`
+
+| 项 | 值 |
+|:---|:---|
+| 默认值 | `ON`（找不到 `clang-tidy` 或 python 时自动降级：仅告警，不定义目标） |
+| 提供目标 | `lint`（存在 warning 及以上即退出码 1）、`lint-fix`（就地应用 fix-it，**不因告警失败**） |
+| 配置来源 | 仓库根 `.clang-tidy`（`Checks` / `CheckOptions` / `HeaderFilterRegex`） |
+| 扫描范围 | `compile_commands.json` 中全部**非 `third_party/`** 翻译单元 |
+| 去重 | 按 `(file, line, check)` 去重——头文件诊断会在每个包含它的 TU 中重复上报，原始条数不可直接用作门禁计数 |
+| 依赖 | `clang-tidy`（PATH）+ python（PATH）+ `CMAKE_EXPORT_COMPILE_COMMANDS`（未开启时本模块自动打开） |
+
+为何不用 `CMAKE_CXX_CLANG_TIDY` 随构建执行：该变量必须在目标定义**之前**设置才生效，与本项目「模块在最后 include」的编排冲突；且会让每次编译额外跑一遍 clang-tidy，日常开发构建被拖慢一个数量级。
+
+```powershell
+cmake --build build --target lint        # 全量 lint，有告警则失败
+cmake --build build --target lint-fix    # 就地应用 fix-it，随后必须人工审阅 diff
+python tools/check/run_clang_tidy.py --build-dir build --json-out findings.json  # 结构化清单
+python tools/check/run_clang_tidy.py --build-dir build --include 'src/'          # 只 lint 库代码
+```
+
+**NOLINT 纪律**：凡用 `NOLINT` / `NOLINTNEXTLINE` 抑制告警，须遵守 `CODING_STANDARDS.md` §5.2——写明具体检查名（禁止裸 `NOLINT` 的新增使用），并紧邻注释说明「为何不能按建议修复」。
+
+### 4.6 `AURORA_ENABLE_IMAGE_*`（图像编解码能力）
 
 | 项 | 值 |
 |:---|:---|
@@ -622,6 +646,10 @@ cmake --build build
 -D AURORA_ENABLE_GLFW_GPU_GL=ON|OFF    # GPU OpenGL 3.3 core 栅格（默认 OFF；依赖 AURORA_BACKEND_GLFW=ON，非独立后端）
 -D AURORA_ENABLE_CCACHE=ON|OFF           # ccache 编译缓存（默认 ON）
 -D AURORA_ENABLE_LLD=ON|OFF              # lld 链接器（默认 ON）
+-D AURORA_ENABLE_CLANG_TIDY=ON|OFF       # lint / lint-fix 目标（默认 ON）
+
+# 静态检查
+cmake --build build --target lint        # 全量 lint（非 third_party，去重后计数）
 
 # 安装 / 消费端
 cmake --install build --prefix <PREFIX>

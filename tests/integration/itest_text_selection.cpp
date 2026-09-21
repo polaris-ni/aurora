@@ -643,8 +643,9 @@ AURORA_TEST_CASE(dispatcher_click_focus_enables_ctrl_c_copy) {
         AURORA_TEST_CHECK_MSG(Clipboard::get_text() == src, "full drag-selection copied to clipboard");
         (void)Clipboard::remove_test_backend();
     } else {
-        AURORA_TEST_TRACE("clipboard memory backend unavailable (needs AURORA_ENABLE_DEBUG + AURORA_ENABLE_TEST_HOOKS); "
-                          "skipped clipboard content assertion — selection content was asserted above");
+        AURORA_TEST_TRACE(
+            "clipboard memory backend unavailable (needs AURORA_ENABLE_DEBUG + AURORA_ENABLE_TEST_HOOKS); "
+            "skipped clipboard content assertion — selection content was asserted above");
     }
 }
 

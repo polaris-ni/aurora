@@ -1,25 +1,79 @@
 {
   "name": "text input receives text per target",
   "note": "两个 TextInput 分别落字，验证脚本 targeting 的精确定位（而非「谁持有焦点就送给谁」）。",
-  "viewport": { "width": 360, "height": 200 },
+  "viewport": {
+    "width": 360,
+    "height": 200
+  },
   "tree": {
     "type": "Column",
     "props": {},
     "children": [
-      { "type": "TextInput", "props": {} },
-      { "type": "TextInput", "props": {} }
+      {
+        "type": "TextInput",
+        "props": {}
+      },
+      {
+        "type": "TextInput",
+        "props": {}
+      }
     ]
   },
   "steps": [
-    { "action": "settle" },
-    { "action": "tap", "target": { "type": "TextInput", "index": 0 } },
-    { "action": "enter_text", "target": { "type": "TextInput", "index": 0 }, "text": "Hello" },
-    { "action": "tap", "target": { "type": "TextInput", "index": 1 } },
-    { "action": "enter_text", "target": { "type": "TextInput", "index": 1 }, "text": "World" },
-    { "action": "pump", "frames": 2 }
+    {
+      "action": "settle"
+    },
+    {
+      "action": "tap",
+      "target": {
+        "type": "TextInput",
+        "index": 0
+      }
+    },
+    {
+      "action": "enter_text",
+      "target": {
+        "type": "TextInput",
+        "index": 0
+      },
+      "text": "Hello"
+    },
+    {
+      "action": "tap",
+      "target": {
+        "type": "TextInput",
+        "index": 1
+      }
+    },
+    {
+      "action": "enter_text",
+      "target": {
+        "type": "TextInput",
+        "index": 1
+      },
+      "text": "World"
+    },
+    {
+      "action": "pump",
+      "frames": 2
+    }
   ],
   "expect": [
-    { "target": { "type": "TextInput", "index": 0 }, "prop": "value", "value": "Hello" },
-    { "target": { "type": "TextInput", "index": 1 }, "prop": "value", "value": "World" }
+    {
+      "target": {
+        "type": "TextInput",
+        "index": 0
+      },
+      "prop": "value",
+      "value": "Hello"
+    },
+    {
+      "target": {
+        "type": "TextInput",
+        "index": 1
+      },
+      "prop": "value",
+      "value": "World"
+    }
   ]
 }

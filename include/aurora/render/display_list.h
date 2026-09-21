@@ -44,8 +44,8 @@ enum class CmdKind : std::uint8_t {
     Polyline,  ///< 抗锯齿多段线：点集经 `pt_idx` 引用 point_pool_，f0 = 线宽（逻辑 dp）
     Sector,  ///< 抗锯齿扇形 / 环扇：pt0 = 圆心，f0 = 外半径，f1 = 内半径，f2 = 起角，f3 = 止角
     BeginLayer,  ///< GPU 层缓存开始：后续命令重定向到常驻层纹理（aux_key = 层键，bounds = 层尺寸）
-    EndLayer,    ///< GPU 层缓存结束：层纹理定稿，恢复重定向前的目标与状态
-    DrawLayer,   ///< 层合成：aux_key = 层键，matrix_idx = 放置矩阵，composite_scale = 层录制缩放
+    EndLayer,  ///< GPU 层缓存结束：层纹理定稿，恢复重定向前的目标与状态
+    DrawLayer,  ///< 层合成：aux_key = 层键，matrix_idx = 放置矩阵，composite_scale = 层录制缩放
 };
 
 /// @brief 单条绘制命令。变长数据（文本 / 渐变色标 / 渐变停靠）经索引引用 DisplayList 的数据池，
@@ -148,12 +148,8 @@ class DisplayList {
     [[nodiscard]] auto floats_at(int idx) const -> const std::vector<float> & {
         return float_pool_[static_cast<std::size_t>(idx)];
     }
-    [[nodiscard]] auto font_at(int idx) const -> const Font & {
-        return font_pool_[static_cast<std::size_t>(idx)];
-    }
-    [[nodiscard]] auto image_at(int idx) const -> const Image & {
-        return image_pool_[static_cast<std::size_t>(idx)];
-    }
+    [[nodiscard]] auto font_at(int idx) const -> const Font & { return font_pool_[static_cast<std::size_t>(idx)]; }
+    [[nodiscard]] auto image_at(int idx) const -> const Image & { return image_pool_[static_cast<std::size_t>(idx)]; }
     [[nodiscard]] auto matrix_at(int idx) const -> const Matrix2D & {
         return matrix_pool_[static_cast<std::size_t>(idx)];
     }

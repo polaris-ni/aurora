@@ -15,7 +15,7 @@ namespace {
     if (i >= s.size()) {
         return {0U, 0U};
     }
-    const unsigned char b0 = static_cast<unsigned char>(s[i]);
+    const auto b0 = static_cast<unsigned char>(s[i]);
     if (b0 < 0x80U) {
         return {b0, 1U};
     }
@@ -39,17 +39,17 @@ namespace {
 
 // UAX #9 双向字符类型（覆盖 Aurora 文本流会遇到的码点区间；未列出的码点一律 ON）。
 enum class Bc : std::uint8_t {
-    L,    // 强 LTR（拉丁/希腊/西里尔等字母）
-    R,    // 强 RTL（希伯来等）
-    AL,   // 阿拉伯字母（右到左阿拉伯）
-    EN,   // 欧洲数字（0-9）
-    AN,   // 阿拉伯-印度数字
-    ES,   // 欧洲数字分隔符（+ -）
-    ET,   // 欧洲数字终止符（# $ % 等）
-    CS,   // 数字分隔符（, . : 等）
-    WS,   // 空白
-    ON,   // 其余中性
-    BN,   // 边界中性（格式字符，参与解析但不参与显示）
+    L,  // 强 LTR（拉丁/希腊/西里尔等字母）
+    R,  // 强 RTL（希伯来等）
+    AL,  // 阿拉伯字母（右到左阿拉伯）
+    EN,  // 欧洲数字（0-9）
+    AN,  // 阿拉伯-印度数字
+    ES,  // 欧洲数字分隔符（+ -）
+    ET,  // 欧洲数字终止符（# $ % 等）
+    CS,  // 数字分隔符（, . : 等）
+    WS,  // 空白
+    ON,  // 其余中性
+    BN,  // 边界中性（格式字符，参与解析但不参与显示）
     LRE,  // 显式嵌入控制（202A-202E）
     RLE,
     PDF,
@@ -66,42 +66,70 @@ enum class Bc : std::uint8_t {
 [[nodiscard]] auto bidi_class_of(char32_t cp) -> Bc {
     // NSM（组合/鼻音化符，W1）：务实覆盖希伯来点、阿文 tashkeel 与拉丁组合附加符。
     // 必须在阿文/希伯来区块判定之前（这些区间落在其内部）。
-    if ((cp >= 0x0591U && cp <= 0x05BDU) || cp == 0x05BFU || cp == 0x05C1U || cp == 0x05C2U ||
-        cp == 0x05C4U || cp == 0x05C5U || cp == 0x05C7U || (cp >= 0x064BU && cp <= 0x065FU) ||
-        cp == 0x0670U || (cp >= 0x06D6U && cp <= 0x06DCU) || (cp >= 0x06DFU && cp <= 0x06E8U) ||
-        (cp >= 0x06EAU && cp <= 0x06EDU) || (cp >= 0x08E3U && cp <= 0x08FFU) ||
-        (cp >= 0x0300U && cp <= 0x036FU)) {
+    if ((cp >= 0x0591U && cp <= 0x05BDU) || cp == 0x05BFU || cp == 0x05C1U || cp == 0x05C2U || cp == 0x05C4U ||
+        cp == 0x05C5U || cp == 0x05C7U || (cp >= 0x064BU && cp <= 0x065FU) || cp == 0x0670U ||
+        (cp >= 0x06D6U && cp <= 0x06DCU) || (cp >= 0x06DFU && cp <= 0x06E8U) || (cp >= 0x06EAU && cp <= 0x06EDU) ||
+        (cp >= 0x08E3U && cp <= 0x08FFU) || (cp >= 0x0300U && cp <= 0x036FU)) {
         return Bc::NSM;
     }
     // 显式嵌入与隔离控制。
-    if (cp == 0x202AU) return Bc::LRE;
-    if (cp == 0x202BU) return Bc::RLE;
-    if (cp == 0x202CU) return Bc::PDF;
-    if (cp == 0x202DU) return Bc::LRO;
-    if (cp == 0x202EU) return Bc::RLO;
-    if (cp == 0x2066U) return Bc::LRI;
-    if (cp == 0x2067U) return Bc::RLI;
-    if (cp == 0x2068U) return Bc::FSI;
-    if (cp == 0x2069U) return Bc::PDI;
+    if (cp == 0x202AU) {
+        return Bc::LRE;
+    }
+    if (cp == 0x202BU) {
+        return Bc::RLE;
+    }
+    if (cp == 0x202CU) {
+        return Bc::PDF;
+    }
+    if (cp == 0x202DU) {
+        return Bc::LRO;
+    }
+    if (cp == 0x202EU) {
+        return Bc::RLO;
+    }
+    if (cp == 0x2066U) {
+        return Bc::LRI;
+    }
+    if (cp == 0x2067U) {
+        return Bc::RLI;
+    }
+    if (cp == 0x2068U) {
+        return Bc::FSI;
+    }
+    if (cp == 0x2069U) {
+        return Bc::PDI;
+    }
     // 边界中性（格式字符）。
     if (cp == 0x00ADU || cp == 0x200BU || cp == 0x200CU || cp == 0x200DU || cp == 0x2060U || cp == 0xFEFFU) {
         return Bc::BN;
     }
     // 强方向标记 LRM/RLM。
-    if (cp == 0x200EU) return Bc::L;
-    if (cp == 0x200FU) return Bc::R;
+    if (cp == 0x200EU) {
+        return Bc::L;
+    }
+    if (cp == 0x200FU) {
+        return Bc::R;
+    }
     // 强 RTL：希伯来。
-    if (cp >= 0x0590U && cp <= 0x05FFU) return Bc::R;
+    if (cp >= 0x0590U && cp <= 0x05FFU) {
+        return Bc::R;
+    }
     // 阿拉伯区：先摘出数字/分隔特例，其余一律 AL。
     if (cp >= 0x0600U && cp <= 0x06FFU) {
-        if (cp >= 0x0660U && cp <= 0x0669U) return Bc::AN;
-        if (cp >= 0x06F0U && cp <= 0x06F9U) return Bc::EN;
-        if (cp == 0x060CU || cp == 0x066BU || cp == 0x066CU) return Bc::CS;
+        if (cp >= 0x0660U && cp <= 0x0669U) {
+            return Bc::AN;
+        }
+        if (cp >= 0x06F0U && cp <= 0x06F9U) {
+            return Bc::EN;
+        }
+        if (cp == 0x060CU || cp == 0x066BU || cp == 0x066CU) {
+            return Bc::CS;
+        }
         return Bc::AL;
     }
-    if ((cp >= 0x0750U && cp <= 0x077FU) || (cp >= 0x08A0U && cp <= 0x08FFU) ||
-        (cp >= 0xFB50U && cp <= 0xFDFFU) || (cp >= 0xFE70U && cp <= 0xFEFFU) ||
-        (cp >= 0x1EC70U && cp <= 0x1ECBFU)) {
+    if ((cp >= 0x0750U && cp <= 0x077FU) || (cp >= 0x08A0U && cp <= 0x08FFU) || (cp >= 0xFB50U && cp <= 0xFDFFU) ||
+        (cp >= 0xFE70U && cp <= 0xFEFFU) || (cp >= 0x1EC70U && cp <= 0x1ECBFU)) {
         return Bc::AL;
     }
     // 强 LTR：拉丁/希腊/西里尔/亚美尼亚字母区。
@@ -111,14 +139,20 @@ enum class Bc : std::uint8_t {
         return Bc::L;
     }
     // 欧洲数字与阿拉伯-印度数字（阿区已摘）。
-    if (cp >= 0x0030U && cp <= 0x0039U) return Bc::EN;
+    if (cp >= 0x0030U && cp <= 0x0039U) {
+        return Bc::EN;
+    }
     // 数字分隔/终止符。
-    if (cp == 0x002BU || cp == 0x002DU || cp == 0x2212U) return Bc::ES;
+    if (cp == 0x002BU || cp == 0x002DU || cp == 0x2212U) {
+        return Bc::ES;
+    }
     if (cp == 0x0023U || cp == 0x0024U || cp == 0x0025U || (cp >= 0x00A2U && cp <= 0x00A5U) ||
         (cp >= 0x20A0U && cp <= 0x20CFU)) {
         return Bc::ET;
     }
-    if (cp == 0x002CU || cp == 0x002EU || cp == 0x002FU || cp == 0x003AU) return Bc::CS;
+    if (cp == 0x002CU || cp == 0x002EU || cp == 0x002FU || cp == 0x003AU) {
+        return Bc::CS;
+    }
     // 空白。
     if (cp == 0x0020U || cp == 0x00A0U || (cp >= 0x2000U && cp <= 0x200AU) || cp == 0x2028U || cp == 0x2029U ||
         cp == 0x202FU || cp == 0x205FU || cp == 0x3000U) {
@@ -127,13 +161,9 @@ enum class Bc : std::uint8_t {
     return Bc::ON;
 }
 
-[[nodiscard]] auto is_strong(Bc bc) -> bool {
-    return bc == Bc::L || bc == Bc::R || bc == Bc::AL;
-}
+[[nodiscard]] auto is_strong(Bc bc) -> bool { return bc == Bc::L || bc == Bc::R || bc == Bc::AL; }
 
-[[nodiscard]] auto is_isolate(Bc bc) -> bool {
-    return bc == Bc::LRI || bc == Bc::RLI || bc == Bc::FSI;
-}
+[[nodiscard]] auto is_isolate(Bc bc) -> bool { return bc == Bc::LRI || bc == Bc::RLI || bc == Bc::FSI; }
 
 // FSI 的方向判定（BD14/P2/P3 于隔离内容内：首个强方向字符，找不到则按段落基准 RTL 视之）。
 // 在 text [begin, end) 内找与 start 配对的 PDI（嵌套计数），扫描其中首强字符。
@@ -161,10 +191,10 @@ enum class Bc : std::uint8_t {
 // X 阶段（X1-X9）：显式嵌入/隔离解析。产出每码点的 embedding 层级、embedding 方向、
 // override 强制方向与控制符占位标记（X9：控制符视为 BN）。
 struct XResult {
-    std::vector<std::uint8_t> level;       // embedding 层级
-    std::vector<bool> rtl_embedding;       // 所在 embedding 方向（true=RTL）
+    std::vector<std::uint8_t> level;  // embedding 层级
+    std::vector<bool> rtl_embedding;  // 所在 embedding 方向（true=RTL）
     std::vector<std::uint8_t> override_dir;  // 0=无 override，1=强制 L（LRO），2=强制 R（RLO）
-    std::vector<bool> control_placeholder;   // 控制符（X9 后为 BN，不参与 W/N/I 的类型传播）
+    std::vector<bool> control_placeholder;  // 控制符（X9 后为 BN，不参与 W/N/I 的类型传播）
 };
 
 [[nodiscard]] auto resolve_x(const std::vector<char32_t> &text, std::uint8_t base_level) -> XResult {
@@ -184,81 +214,83 @@ struct XResult {
         bool isolate;
     };
     std::vector<Embedding> stack;
-    stack.push_back(
-        Embedding{.level = base_level, .rtl = (base_level % 2U) != 0U, .has_override = false,
-                  .override_rtl = false, .isolate = false});
-    constexpr std::uint8_t AURORA_MAX_LEVEL = 125U;
+    stack.push_back(Embedding{.level = base_level,
+                              .rtl = (base_level % 2U) != 0U,
+                              .has_override = false,
+                              .override_rtl = false,
+                              .isolate = false});
+    constexpr std::uint8_t max_level = 125U;
 
     for (std::size_t i = 0; i < n; ++i) {
         const Bc bc = bidi_class_of(text[i]);
         switch (bc) {
-        case Bc::RLE:  // X2
-        case Bc::LRE:  // X3
-        case Bc::RLO:  // X4
-        case Bc::LRO: {  // X5
-            const Embedding top = stack.back();  // 拷贝：push_back 可能 reallocate 使引用悬空
-            std::uint8_t nl = top.level;
-            // 新层级 = 严格大于当前层级的最小奇数（RLE/RLO）或偶数（LRE/LRO）。
-            if (bc == Bc::RLE || bc == Bc::RLO) {
-                nl = static_cast<std::uint8_t>((nl % 2U == 0U) ? nl + 1U : nl + 2U);
-            } else {
-                nl = static_cast<std::uint8_t>((nl % 2U == 0U) ? nl + 2U : nl + 1U);
+            case Bc::RLE:  // X2
+            case Bc::LRE:  // X3
+            case Bc::RLO:  // X4
+            case Bc::LRO: {  // X5
+                const Embedding top = stack.back();  // 拷贝：push_back 可能 reallocate 使引用悬空
+                std::uint8_t nl = top.level;
+                // 新层级 = 严格大于当前层级的最小奇数（RLE/RLO）或偶数（LRE/LRO）。
+                if (bc == Bc::RLE || bc == Bc::RLO) {
+                    nl = static_cast<std::uint8_t>((nl % 2U == 0U) ? nl + 1U : nl + 2U);
+                } else {
+                    nl = static_cast<std::uint8_t>((nl % 2U == 0U) ? nl + 2U : nl + 1U);
+                }
+                nl = std::min(nl, max_level);
+                stack.push_back(Embedding{.level = nl,
+                                          .rtl = (nl % 2U) != 0U,
+                                          .has_override = (bc == Bc::LRO || bc == Bc::RLO),
+                                          .override_rtl = (bc == Bc::RLO),
+                                          .isolate = false});
+                out.level[i] = top.level;  // X9：控制符占位（所在 embedding 层级）
+                out.rtl_embedding[i] = top.rtl;
+                out.control_placeholder[i] = true;
+                break;
             }
-            if (nl > AURORA_MAX_LEVEL) {
-                nl = AURORA_MAX_LEVEL;
+            case Bc::PDF: {  // X7
+                const Embedding top = stack.back();
+                if (stack.size() > 1U && !top.isolate) {
+                    stack.pop_back();
+                }
+                out.level[i] = top.level;
+                out.rtl_embedding[i] = top.rtl;
+                out.control_placeholder[i] = true;
+                break;
             }
-            stack.push_back(Embedding{.level = nl, .rtl = (nl % 2U) != 0U,
-                                      .has_override = (bc == Bc::LRO || bc == Bc::RLO),
-                                      .override_rtl = (bc == Bc::RLO), .isolate = false});
-            out.level[i] = top.level;  // X9：控制符占位（所在 embedding 层级）
-            out.rtl_embedding[i] = top.rtl;
-            out.control_placeholder[i] = true;
-            break;
-        }
-        case Bc::PDF: {  // X7
-            const Embedding top = stack.back();
-            if (stack.size() > 1U && !top.isolate) {
-                stack.pop_back();
+            case Bc::LRI:  // X6a
+            case Bc::RLI:
+            case Bc::FSI: {
+                const Embedding top = stack.back();
+                bool iso_rtl = (bc == Bc::RLI);
+                if (bc == Bc::FSI) {
+                    iso_rtl = fsi_is_rtl(text, i, i + 1U);
+                }
+                // 隔离不增层级（层级沿用当前 embedding），仅切换方向与重置 override。
+                stack.push_back(Embedding{
+                    .level = top.level, .rtl = iso_rtl, .has_override = false, .override_rtl = false, .isolate = true});
+                out.level[i] = top.level;
+                out.rtl_embedding[i] = top.rtl;
+                out.control_placeholder[i] = true;
+                break;
             }
-            out.level[i] = top.level;
-            out.rtl_embedding[i] = top.rtl;
-            out.control_placeholder[i] = true;
-            break;
-        }
-        case Bc::LRI:  // X6a
-        case Bc::RLI:
-        case Bc::FSI: {
-            const Embedding top = stack.back();
-            bool iso_rtl = (bc == Bc::RLI);
-            if (bc == Bc::FSI) {
-                iso_rtl = fsi_is_rtl(text, i, i + 1U);
+            case Bc::PDI: {
+                const Embedding top = stack.back();
+                if (stack.size() > 1U && top.isolate) {
+                    stack.pop_back();
+                }
+                out.level[i] = top.level;
+                out.rtl_embedding[i] = top.rtl;
+                out.control_placeholder[i] = true;
+                break;
             }
-            // 隔离不增层级（层级沿用当前 embedding），仅切换方向与重置 override。
-            stack.push_back(Embedding{.level = top.level, .rtl = iso_rtl, .has_override = false,
-                                      .override_rtl = false, .isolate = true});
-            out.level[i] = top.level;
-            out.rtl_embedding[i] = top.rtl;
-            out.control_placeholder[i] = true;
-            break;
-        }
-        case Bc::PDI: {
-            const Embedding top = stack.back();
-            if (stack.size() > 1U && top.isolate) {
-                stack.pop_back();
+            default: {  // X5a/X6：普通字符取栈顶 embedding；X4/X5 override 覆盖强类型
+                const Embedding &top = stack.back();  // 只读，无 push，引用安全
+                out.level[i] = top.level;
+                out.rtl_embedding[i] = top.rtl;
+                out.override_dir[i] = top.has_override ? (top.override_rtl ? 2U : 1U) : 0U;
+                out.control_placeholder[i] = false;
+                break;
             }
-            out.level[i] = top.level;
-            out.rtl_embedding[i] = top.rtl;
-            out.control_placeholder[i] = true;
-            break;
-        }
-        default: {  // X5a/X6：普通字符取栈顶 embedding；X4/X5 override 覆盖强类型
-            const Embedding &top = stack.back();  // 只读，无 push，引用安全
-            out.level[i] = top.level;
-            out.rtl_embedding[i] = top.rtl;
-            out.override_dir[i] = top.has_override ? (top.override_rtl ? 2U : 1U) : 0U;
-            out.control_placeholder[i] = false;
-            break;
-        }
         }
     }
     return out;
@@ -384,24 +416,24 @@ struct XResult {
     auto bracket_of = [](char32_t cp) -> int {
         // >0 开括号 id、<0 闭括号 -id、0 非括号；同 id 配对。
         switch (cp) {
-        case U'(':
-            return 1;
-        case U')':
-            return -1;
-        case U'[':
-            return 2;
-        case U']':
-            return -2;
-        case U'{':
-            return 3;
-        case U'}':
-            return -3;
-        case U'<':
-            return 4;
-        case U'>':
-            return -4;
-        default:
-            return 0;
+            case U'(':
+                return 1;
+            case U')':
+                return -1;
+            case U'[':
+                return 2;
+            case U']':
+                return -2;
+            case U'{':
+                return 3;
+            case U'}':
+                return -3;
+            case U'<':
+                return 4;
+            case U'>':
+                return -4;
+            default:
+                return 0;
         }
     };
     std::vector<std::pair<std::size_t, std::size_t>> pairs;
@@ -501,8 +533,12 @@ struct XResult {
     auto neutral_of = [&](Bc bc) -> bool { return bc == Bc::ON || bc == Bc::WS; };
     auto strong_side_of = [&](Bc bc) -> int {
         // N1 语境下的方向语义：L → 0；R/AL/EN/AN → 1。
-        if (bc == Bc::L) return 0;
-        if (bc == Bc::R || bc == Bc::EN || bc == Bc::AN) return 1;
+        if (bc == Bc::L) {
+            return 0;
+        }
+        if (bc == Bc::R || bc == Bc::EN || bc == Bc::AN) {
+            return 1;
+        }
         return -1;
     };
     std::size_t i = 0;
@@ -617,9 +653,9 @@ auto uba_visual_order(const std::vector<std::uint8_t> &levels) -> std::vector<st
     for (int lv = top; lv >= 1; --lv) {
         std::size_t i = 0;
         while (i < n) {
-            if (levels[order[i]] >= lv) {
+            if (std::cmp_greater_equal(levels[order[i]], lv)) {
                 std::size_t j = i;
-                while (j < n && levels[order[j]] >= lv) {
+                while (j < n && std::cmp_greater_equal(levels[order[j]], lv)) {
                     ++j;
                 }
                 std::reverse(order.begin() + static_cast<long>(i), order.begin() + static_cast<long>(j));
@@ -639,8 +675,7 @@ auto is_bidi_format_control(char32_t cp) -> bool {
     // - U+200E / U+200F：方向标记（LRM / RLM）
     // 这些字符参与 UBA 层级计算，但视觉上为零宽不可见格式标记；渲染侧据此强制零推进并跳过绘制。
     // 注意：不覆盖 ZWSP/ZWNJ/ZWJ/BN 等——其由 HarfBuzz 自行吞掉不影响连接，无需特殊处理。
-    return (cp >= 0x202AU && cp <= 0x202EU) || (cp >= 0x2066U && cp <= 0x2069U) ||
-           cp == 0x200EU || cp == 0x200FU;
+    return (cp >= 0x202AU && cp <= 0x202EU) || (cp >= 0x2066U && cp <= 0x2069U) || cp == 0x200EU || cp == 0x200FU;
 }
 
 }  // namespace aurora::render::detail

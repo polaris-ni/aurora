@@ -371,7 +371,7 @@ class AudioBufferSourceNode final : public AudioNode {
     friend class AudioContext;
     explicit AudioBufferSourceNode(AudioContext &ctx) : AudioNode(ctx, 2) {}
 
-    std::mutex buffer_mutex_;                    // 保护 buffer_（libc++/MSVC 无 atomic<shared_ptr>）
+    std::mutex buffer_mutex_;  // 保护 buffer_（libc++/MSVC 无 atomic<shared_ptr>）
     std::shared_ptr<const AudioBuffer> buffer_;  // COW 指针（UI 写 / 渲染读）
     std::atomic<bool> loop_{false};
     std::atomic<bool> started_{false};
@@ -636,7 +636,7 @@ class AudioContext {
     std::vector<AudioNode *> topo_;  // 拓扑序（源先于汇；不含 destination）
 
     // 命令队列（UI → 渲染，SPSC 定长环；direct_graph_ 时旁路）
-    static constexpr std::size_t kCommandRingCapacity = 256;
+    static constexpr std::size_t AURORA_COMMAND_RING_CAPACITY = 256;
     std::vector<GraphCommand> command_ring_;
     std::atomic<std::uint64_t> cmd_write_{0};
     std::atomic<std::uint64_t> cmd_read_{0};

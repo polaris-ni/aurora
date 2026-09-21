@@ -127,7 +127,7 @@ AURORA_TEST_CASE(registry_invoke_success_and_guards) {
     AURORA_TEST_CHECK_TRUE(reg.invoke("run"));
     AURORA_TEST_CHECK_EQ(calls, 1);
 
-    AURORA_TEST_CHECK_FALSE(reg.invoke("missing"));      // 未命中
+    AURORA_TEST_CHECK_FALSE(reg.invoke("missing"));  // 未命中
     AURORA_TEST_CHECK_FALSE(reg.invoke("placeholder"));  // 无 action
 
     reg.set_enabled("run", false);

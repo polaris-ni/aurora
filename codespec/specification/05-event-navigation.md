@@ -86,7 +86,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 | 后端 | 状态 |
 |:---|:---|
-| `Win32Surface`（GDI）/ `D3D11Surface` | ✅ **IMM32 桥已接**（`src/aurora/window/detail/win32_ime.h`）。二者共用同一 `Win32Window` 宿主与同一份桥，故一条路径覆盖两路 |
+| `Win32Surface`（GDI）/ `D3D11Surface` | ✅ **IMM32 桥已接**（`src/aurora/window/detail/win32_ime.h`）。二者共用同一 `Win32Host` 宿主与同一份桥，故一条路径覆盖两路 |
 | `X11Surface` | ✅ **XIM 桥已接**（`src/aurora/window/x11_surface.cpp` 内联）：`XIMPreeditCallbacks` 风格协商 + draw/caret 回调回推，PreeditNothing 逐级降级 |
 | `WaylandSurface` | ✅ **text-input-unstable-v3 桥已接**（`src/aurora/window/wayland_surface.cpp` 内联，门 `AURORA_HAVE_WL_TEXT_INPUT`）：enable 判据 = 焦点 ∧ provider 非零盒；组合内容/上屏/回删全部折算成契约事件 |
 | `HeadlessSurface` | 无输入法概念；组合事件由测试直接构造并派发（`tests/unit/utest_ime_composition.cpp`） |

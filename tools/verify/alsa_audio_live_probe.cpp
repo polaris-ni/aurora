@@ -52,7 +52,7 @@ auto check(bool ok, const std::string &label) -> void {
     }
 }
 
-constexpr double kPi = 3.14159265358979323846;
+constexpr double AURORA_PI = 3.14159265358979323846;
 
 /// 生成正弦缓冲（float32 交错 stereo）。
 auto sine_buffer(int sample_rate, double seconds, double freq, float amp) -> aurora::AudioBuffer {
@@ -62,7 +62,8 @@ auto sine_buffer(int sample_rate, double seconds, double freq, float amp) -> aur
     buf.channels = 2;
     buf.samples.resize(static_cast<std::size_t>(frames) * 2U);
     for (int i = 0; i < frames; ++i) {
-        const float v = amp * static_cast<float>(std::sin(2.0 * kPi * freq * static_cast<double>(i) / sample_rate));
+        const float v =
+            amp * static_cast<float>(std::sin(2.0 * AURORA_PI * freq * static_cast<double>(i) / sample_rate));
         buf.samples[static_cast<std::size_t>(i) * 2U] = v;
         buf.samples[static_cast<std::size_t>(i) * 2U + 1U] = v;
     }
@@ -73,8 +74,8 @@ auto sine_buffer(int sample_rate, double seconds, double freq, float amp) -> aur
 auto sine_pcm(int sample_rate, int frames, double freq, std::int16_t amp) -> std::vector<std::int16_t> {
     std::vector<std::int16_t> pcm(static_cast<std::size_t>(frames) * 2U);
     for (int i = 0; i < frames; ++i) {
-        const auto v = static_cast<std::int16_t>(static_cast<double>(amp) *
-                                                 std::sin(2.0 * kPi * freq * static_cast<double>(i) / sample_rate));
+        const auto v = static_cast<std::int16_t>(
+            static_cast<double>(amp) * std::sin(2.0 * AURORA_PI * freq * static_cast<double>(i) / sample_rate));
         pcm[static_cast<std::size_t>(i) * 2U] = v;
         pcm[static_cast<std::size_t>(i) * 2U + 1U] = v;
     }
@@ -192,7 +193,7 @@ auto main(int argc, char **argv) -> int {
             double phase = 0.0;
             for (int i = 0; i < frames; ++i) {
                 const double f = 200.0 + 1800.0 * static_cast<double>(i) / frames;
-                phase += 2.0 * kPi * f / 48000.0;
+                phase += 2.0 * AURORA_PI * f / 48000.0;
                 const float v = 0.5F * static_cast<float>(std::sin(phase));
                 buf.samples[static_cast<std::size_t>(i) * 2U] = v;
                 buf.samples[static_cast<std::size_t>(i) * 2U + 1U] = v;

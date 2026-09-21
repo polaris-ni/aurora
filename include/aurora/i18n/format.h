@@ -29,9 +29,9 @@ namespace detail {
 
 /// @brief 某语言的千位分隔符 / 小数点 / 分组位数（自研轻量表，CLDR 简化版）。
 struct NumberSymbols {
-    char group;        ///< 千位分隔符
-    char decimal;      ///< 小数点
-    int group_size;    ///< 从右起的分组位数
+    char group;  ///< 千位分隔符
+    char decimal;  ///< 小数点
+    int group_size;  ///< 从右起的分组位数
 };
 
 [[nodiscard]] inline auto number_symbols(const std::string &lang) -> NumberSymbols {
@@ -51,11 +51,16 @@ struct CurrencyInfo {
 
 [[nodiscard]] inline auto currency_info(Currency c) -> CurrencyInfo {
     switch (c) {
-        case Currency::USD: return {"$", 2};
-        case Currency::EUR: return {"\u20AC", 2};  // €
-        case Currency::JPY: return {"\u00A5", 0};  // ¥
-        case Currency::CNY: return {"\u00A5", 2};  // ¥
-        case Currency::GBP: return {"\u00A3", 2};  // £
+        case Currency::USD:
+            return {"$", 2};
+        case Currency::EUR:
+            return {"\u20AC", 2};  // €
+        case Currency::JPY:
+            return {"\u00A5", 0};  // ¥
+        case Currency::CNY:
+            return {"\u00A5", 2};  // ¥
+        case Currency::GBP:
+            return {"\u00A3", 2};  // £
     }
     return {"$", 2};
 }

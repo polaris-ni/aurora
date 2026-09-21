@@ -10,6 +10,8 @@
 
 #ifdef AURORA_ENABLE_STORAGE_SQLITE
 
+#include <sqlite3.h>
+
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -19,8 +21,6 @@
 #include <utility>
 #include <vector>
 
-#include <sqlite3.h>
-
 #include "aurora/core/result.h"
 #include "aurora/preferences/preferences.h"
 
@@ -28,7 +28,7 @@ namespace aurora::storage {
 
 namespace {
 
-constexpr int kSchemaVersion = 1;
+constexpr int AURORA_SCHEMA_VERSION = 1;
 
 [[nodiscard]] auto mtime_to_ms(const std::chrono::system_clock::time_point &tp) -> std::int64_t {
     return std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count();
@@ -45,9 +45,9 @@ constexpr int kSchemaVersion = 1;
 template <typename T>
 [[nodiscard]] auto sqlite_err(std::string_view op, int rc, sqlite3 *db) -> Result<T> {
     const char *msg = db ? sqlite3_errmsg(db) : nullptr;
-    return Result<T>{make_error(ErrorCode::StorageIoError,
-                                std::string(op) + " failed: sqlite rc=" + std::to_string(rc) +
-                                    (msg ? std::string(" (") + msg + ")" : ""))};
+    return Result<T>{make_error(
+        ErrorCode::StorageIoError,
+        std::string(op) + " failed: sqlite rc=" + std::to_string(rc) + (msg ? std::string(" (") + msg + ")" : ""))};
 }
 
 void exec_simple(sqlite3 *db, const char *sql, int *rc_out) {
@@ -99,19 +99,18 @@ SqliteBackend::SqliteBackend(SqliteOptions opts) : impl_(std::make_unique<Impl>(
         exec_simple(impl_->db, "PRAGMA journal_mode=WAL;", &prc);
         impl_->wal = prc == SQLITE_OK;
     }
-    exec_simple(
-        impl_->db,
-        "CREATE TABLE IF NOT EXISTS aurora_records("
-        "  id            TEXT PRIMARY KEY,"
-        "  type          TEXT NOT NULL DEFAULT '',"
-        "  version       INTEGER NOT NULL DEFAULT 1,"
-        "  encoding      INTEGER NOT NULL DEFAULT 0,"
-        "  mtime_ms      INTEGER NOT NULL DEFAULT 0,"
-        "  payload_json  TEXT,"
-        "  payload_blob  BLOB,"
-        "  blob_ref      TEXT NOT NULL DEFAULT ''"
-        ");",
-        &prc);
+    exec_simple(impl_->db,
+                "CREATE TABLE IF NOT EXISTS aurora_records("
+                "  id            TEXT PRIMARY KEY,"
+                "  type          TEXT NOT NULL DEFAULT '',"
+                "  version       INTEGER NOT NULL DEFAULT 1,"
+                "  encoding      INTEGER NOT NULL DEFAULT 0,"
+                "  mtime_ms      INTEGER NOT NULL DEFAULT 0,"
+                "  payload_json  TEXT,"
+                "  payload_blob  BLOB,"
+                "  blob_ref      TEXT NOT NULL DEFAULT ''"
+                ");",
+                &prc);
     if (prc != SQLITE_OK) {
         sqlite3_close_v2(impl_->db);
         impl_->db = nullptr;
@@ -138,18 +137,17 @@ auto SqliteBackend::put_record(const std::string &id, const StorageRecord &rec) 
         return Result<void>{make_error(ErrorCode::StorageBackendUnavailable, "SQLite backend not opened: " + id)};
     }
     const std::string json_text = rec.encoding == StorageEncoding::Json ? std::get<Json>(rec.payload).dump() : "";
-    static const std::vector<std::byte> kEmptyBytes;
+    static const std::vector<std::byte> AURORA_EMPTY_BYTES;
     const std::vector<std::byte> &bytes =
-        rec.encoding == StorageEncoding::Binary ? std::get<StorageBytes>(rec.payload) : kEmptyBytes;
+        rec.encoding == StorageEncoding::Binary ? std::get<StorageBytes>(rec.payload) : AURORA_EMPTY_BYTES;
 
     sqlite3_stmt *stmt = nullptr;
-    if (const int rc =
-            sqlite3_prepare_v2(impl_->db,
-                               "INSERT OR REPLACE INTO aurora_records"
-                               "(id,type,version,encoding,mtime_ms,payload_json,payload_blob,blob_ref)"
-                               " VALUES(?1,?2,?3,?4,?5, CASE WHEN ?4=0 THEN ?6 ELSE NULL END,"
-                               " CASE WHEN ?4=1 THEN ?7 ELSE NULL END, ?8);",
-                               -1, &stmt, nullptr);
+    if (const int rc = sqlite3_prepare_v2(impl_->db,
+                                          "INSERT OR REPLACE INTO aurora_records"
+                                          "(id,type,version,encoding,mtime_ms,payload_json,payload_blob,blob_ref)"
+                                          " VALUES(?1,?2,?3,?4,?5, CASE WHEN ?4=0 THEN ?6 ELSE NULL END,"
+                                          " CASE WHEN ?4=1 THEN ?7 ELSE NULL END, ?8);",
+                                          -1, &stmt, nullptr);
         rc != SQLITE_OK) {
         return sqlite_err<void>("prepare put", rc, impl_->db);
     }
@@ -159,8 +157,8 @@ auto SqliteBackend::put_record(const std::string &id, const StorageRecord &rec) 
     sqlite3_bind_int64(stmt, 4, static_cast<sqlite3_int64>(rec.encoding == StorageEncoding::Binary ? 1 : 0));
     sqlite3_bind_int64(stmt, 5, mtime_to_ms(rec.mtime));
     sqlite3_bind_text(stmt, 6, json_text.data(), static_cast<int>(json_text.size()), SQLITE_TRANSIENT);
-    sqlite3_bind_blob(
-        stmt, 7, bytes.empty() ? nullptr : reinterpret_cast<const void *>(bytes.data()), static_cast<int>(bytes.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_blob(stmt, 7, bytes.empty() ? nullptr : reinterpret_cast<const void *>(bytes.data()),
+                      static_cast<int>(bytes.size()), SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 8, rec.blob_ref.data(), static_cast<int>(rec.blob_ref.size()), SQLITE_TRANSIENT);
 
     const int step = sqlite3_step(stmt);
@@ -201,7 +199,8 @@ auto SqliteBackend::get_record(const std::string &id) -> Result<StorageRecord> {
     StorageRecord rec;
     auto text_at = [stmt](int col) -> std::string {
         const auto *p = sqlite3_column_text(stmt, col);
-        return p ? std::string(reinterpret_cast<const char *>(p), static_cast<std::size_t>(sqlite3_column_bytes(stmt, col)))
+        return p ? std::string(reinterpret_cast<const char *>(p),
+                               static_cast<std::size_t>(sqlite3_column_bytes(stmt, col)))
                  : std::string{};
     };
     rec.id = text_at(0);
@@ -272,7 +271,8 @@ auto SqliteBackend::list() -> Result<std::vector<std::string>> {
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         const auto *p = sqlite3_column_text(stmt, 0);
         if (p) {
-            ids.emplace_back(reinterpret_cast<const char *>(p), static_cast<std::size_t>(sqlite3_column_bytes(stmt, 0)));
+            ids.emplace_back(reinterpret_cast<const char *>(p),
+                             static_cast<std::size_t>(sqlite3_column_bytes(stmt, 0)));
         }
     }
     sqlite3_finalize(stmt);

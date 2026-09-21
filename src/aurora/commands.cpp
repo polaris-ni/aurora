@@ -10,9 +10,7 @@ namespace aurora {
 namespace {
 
 /// @brief ASCII 大小写折叠（非 ASCII 字节原样返回，按整字节参与子序列匹配）。
-constexpr auto fold_ascii(char c) -> char {
-    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-}
+constexpr auto fold_ascii(char c) -> char { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
 
 /// @brief 词边界：命令标题/标识中的分隔符，命中其后视为「新词起点」（加权）。
 constexpr auto is_word_boundary(char c) -> bool {
@@ -152,8 +150,7 @@ auto CommandRegistry::invoke(const std::string &id) const -> bool {
     return true;
 }
 
-auto CommandRegistry::search(const std::string &query, bool only_enabled) const
-    -> std::vector<const Command *> {
+auto CommandRegistry::search(const std::string &query, bool only_enabled) const -> std::vector<const Command *> {
     struct Scored {
         const Command *cmd = nullptr;
         int score = 0;
@@ -223,10 +220,8 @@ auto CommandRegistry::bind_shortcuts(ShortcutRegistry &sr) -> void {
             continue;
         }
         const std::string cid = cmd.id;  // 按值捕获，避免悬垂
-        const int bound = sr.add(*cmd.default_binding,
-                                 [this, cid]() -> void { (void)this->invoke(cid); },
-                                 cmd.scope,
-                                 cmd.title);
+        const int bound =
+            sr.add(*cmd.default_binding, [this, cid]() -> void { (void)this->invoke(cid); }, cmd.scope, cmd.title);
         shortcut_of_.emplace(cid, bound);
     }
 }

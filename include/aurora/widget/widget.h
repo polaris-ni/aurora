@@ -258,9 +258,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///        控件须覆盖为 false，否则缓存回放会跳过必要的每帧绘制（见 NavigatorHost/Hero/TransitionLayer）。
     ///        `OverflowStrategy::Scroll` 例外——滚动偏移是每帧可变的绘制输入（同 Scroll
     ///        组件禁自身 DL 缓存的同理），声明滚动的控件不缓存自身 DL。
-    [[nodiscard]] virtual auto can_cache_display_list() const -> bool {
-        return overflow_ != OverflowStrategy::Scroll;
-    }
+    [[nodiscard]] virtual auto can_cache_display_list() const -> bool { return overflow_ != OverflowStrategy::Scroll; }
 
     /// @brief 本控件布局结果是否可被缓存（约束不变 ⇒ on_layout 结果不变、且无非布局副作用）。
     ///        默认 true；与 `can_cache_display_list()` 对称：绘制每帧变动 → 禁 DL 缓存，
@@ -571,9 +569,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 无障碍取值域（D7）：默认无（nullopt）；Slider / ProgressIndicator 覆写。
     /// @note Side-effects: reads state
-    [[nodiscard]] virtual auto accessibility_range() const -> std::optional<AccessibilityRange> {
-        return std::nullopt;
-    }
+    [[nodiscard]] virtual auto accessibility_range() const -> std::optional<AccessibilityRange> { return std::nullopt; }
 
     /// @brief 标题层级（OQ4）：`Header` 角色控件的 `aria-level` / UIA level；默认无。
     /// @note Side-effects: pure
@@ -911,11 +907,11 @@ class Widget : public std::enable_shared_from_this<Widget> {
     // ---- GPU 层缓存状态（录制模式专用；软件直绘不走层命令）----
     // 语义见 specification/03 §8.7：子树内容脏 / 尺寸变 / 光栅世代变 / 层代际变（消费端
     // 层存储整体丢弃）任一发生即重录 BeginLayer；干净帧仅记一条 DrawLayer（子树零重绘）。
-    mutable std::uint64_t gpu_layer_key_ = 0;          ///< 进程内唯一层键（0 = 未分配）
-    mutable bool gpu_layer_valid_ = false;             ///< 层纹理是否与子树内容同步
+    mutable std::uint64_t gpu_layer_key_ = 0;  ///< 进程内唯一层键（0 = 未分配）
+    mutable bool gpu_layer_valid_ = false;  ///< 层纹理是否与子树内容同步
     mutable Size gpu_layer_size_{.width = 0.0F, .height = 0.0F};  ///< 层录制时的子树尺寸
-    mutable std::uint64_t gpu_layer_raster_gen_ = 0;   ///< 层录制时的光栅状态世代
-    mutable std::uint64_t gpu_layer_epoch_ = 0;        ///< 层录制时的层代际（消费端整体失效信号）
+    mutable std::uint64_t gpu_layer_raster_gen_ = 0;  ///< 层录制时的光栅状态世代
+    mutable std::uint64_t gpu_layer_epoch_ = 0;  ///< 层录制时的层代际（消费端整体失效信号）
 
 #ifdef AURORA_ENABLE_DISPLAY_LIST
     // ---- Display List 缓存（AURORA_ENABLE_DISPLAY_LIST）----
@@ -1099,8 +1095,7 @@ class Container : public Widget {
     /// @brief 按控件地址移除子节点（如 Dismissible 飞出后自摘；Node 随之析构释放）。
     /// @return 是否找到并移除。移除后标记重排（树结构变化对外可见，可后续 observe）。
     auto remove_child(const Widget *w) -> bool {
-        const auto it = std::ranges::find_if(
-            children_, [w](const Node &n) { return &n.widget() == w; });
+        const auto it = std::ranges::find_if(children_, [w](const Node &n) { return &n.widget() == w; });
         if (it == children_.end()) {
             return false;
         }

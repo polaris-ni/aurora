@@ -254,7 +254,7 @@ auto widget = restored.value();
 
 拷贝与移动均被删除。
 
-**延迟排空（deferred）模式**：`kCompileTimeDeferred` 仅在 Emscripten 且未启用 pthreads（`__EMSCRIPTEN_PTHREADS__` 未定义）时为 true——浏览器单线程下 `std::thread` 不可用，池不启动 worker，任务只入队，由宿主在安全点 `pump()` 于当前线程排空。`WasmSurface::present()` 已接帧尾排空（见 [`06-app-platform.md`](06-app-platform.md) §10 Web/WASM 表），故 `au::async` / 协程续体在浏览器下随帧回写、不开线程也不丢任务；以 `-pthread` 构建时回到普通 worker 池语义。注意：deferred 下 `submit()` 的 `future.get()` 不可与 `pump()` 同线程互等（会自锁），消费续体应经 `Task::then` / 协程或帧尾泵。deferred 池析构同样排空剩余队列，与 worker 池「drain-until-empty」语义对齐。
+**延迟排空（deferred）模式**：`AURORA_COMPILE_TIME_DEFERRED` 仅在 Emscripten 且未启用 pthreads（`__EMSCRIPTEN_PTHREADS__` 未定义）时为 true——浏览器单线程下 `std::thread` 不可用，池不启动 worker，任务只入队，由宿主在安全点 `pump()` 于当前线程排空。`WasmSurface::present()` 已接帧尾排空（见 [`06-app-platform.md`](06-app-platform.md) §10 Web/WASM 表），故 `au::async` / 协程续体在浏览器下随帧回写、不开线程也不丢任务；以 `-pthread` 构建时回到普通 worker 池语义。注意：deferred 下 `submit()` 的 `future.get()` 不可与 `pump()` 同线程互等（会自锁），消费续体应经 `Task::then` / 协程或帧尾泵。deferred 池析构同样排空剩余队列，与 worker 池「drain-until-empty」语义对齐。
 
 ### 6.2 使用约定
 

@@ -31,7 +31,8 @@ AURORA_TEST_CASE(post_delivers_by_type_without_crosstalk) {
     std::vector<int> themes;
 
     auto sub_open = bus.on<OpenFile>([&opened](const OpenFile &e, WindowId) -> void { opened.push_back(e.path); });
-    auto sub_theme = bus.on<ThemeChanged>([&themes](const ThemeChanged &e, WindowId) -> void { themes.push_back(e.index); });
+    auto sub_theme =
+        bus.on<ThemeChanged>([&themes](const ThemeChanged &e, WindowId) -> void { themes.push_back(e.index); });
 
     bus.post(OpenFile{.path = "a.txt"});
     bus.post(ThemeChanged{.index = 2});
@@ -68,14 +69,13 @@ AURORA_TEST_CASE(from_filter_receives_only_matching_source) {
 
     auto sub_all = bus.on<OpenFile>([&broadcast_hits](const OpenFile &, WindowId) -> void { ++broadcast_hits; });
     // 只接收来自窗口 7 的事件（点对点语义）。
-    auto sub_from7 =
-        bus.on<OpenFile>([&filtered_hits](const OpenFile &, WindowId) -> void { ++filtered_hits; }, 7);
+    auto sub_from7 = bus.on<OpenFile>([&filtered_hits](const OpenFile &, WindowId) -> void { ++filtered_hits; }, 7);
 
     bus.post(OpenFile{.path = "a"}, 3);
     bus.post(OpenFile{.path = "b"}, 7);
 
     AURORA_TEST_CHECK_EQ(broadcast_hits, 2);  // 不限来源者两者都收
-    AURORA_TEST_CHECK_EQ(filtered_hits, 1);   // 来源过滤者只收窗口 7 的
+    AURORA_TEST_CHECK_EQ(filtered_hits, 1);  // 来源过滤者只收窗口 7 的
 }
 
 AURORA_TEST_CASE(callback_may_unsubscribe_and_subscribe_safely) {
@@ -87,14 +87,14 @@ AURORA_TEST_CASE(callback_may_unsubscribe_and_subscribe_safely) {
     auto sub1 = std::make_shared<Subscription>();
     *sub1 = bus.on<OpenFile>([&bus, &first_hits, sub1](const OpenFile &, WindowId) -> void {
         ++first_hits;
-        sub1->reset();  // 回调内自取消：遍历须仍安全（内部先拷贝订阅列表）
+        (*sub1).reset();  // 回调内自取消：遍历须仍安全（内部先拷贝订阅列表）
     });
     auto sub2 = bus.on<OpenFile>([&second_hits](const OpenFile &, WindowId) -> void { ++second_hits; });
 
     bus.post(OpenFile{.path = "a"});
     bus.post(OpenFile{.path = "b"});
 
-    AURORA_TEST_CHECK_EQ(first_hits, 1);   // 自取消后不再收到
+    AURORA_TEST_CHECK_EQ(first_hits, 1);  // 自取消后不再收到
     AURORA_TEST_CHECK_EQ(second_hits, 2);  // 其他订阅者不受影响
 }
 
@@ -107,7 +107,7 @@ AURORA_TEST_CASE(bus_may_be_destroyed_before_subscription) {
         bus.post(OpenFile{.path = "live"});
     }  // bus 先析构：订阅句柄仍有效（内部持有共享状态），析构时不得崩溃或访问已释放内存
     AURORA_TEST_CHECK_EQ(got.size(), 1U);
-    sub.reset();  // 取消发生在总线销毁之后 —— 必须安全
+    sub = nullptr;  // 取消发生在总线销毁之后 —— 必须安全
     AURORA_TEST_CHECK_EQ(got.size(), 1U);
 }
 

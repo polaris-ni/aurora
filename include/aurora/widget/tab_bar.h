@@ -410,10 +410,9 @@ class TabBar : public Widget {
         p.draw_text(text_box, tabs_[index].label, label_font, text_color);
         // 关闭按钮
         if (tabs_[index].closable) {
-            const Rect close_box{
-                .origin = Point{.x = tab_box.origin.x + tab_box.size.width - AURORA_CLOSE_ZONE + 2.0F,
-                                .y = tab_box.origin.y + 10.0F},
-                .size = Size{.width = 12.0F, .height = tab_height_ - 20.0F}};
+            const Rect close_box{.origin = Point{.x = tab_box.origin.x + tab_box.size.width - AURORA_CLOSE_ZONE + 2.0F,
+                                                 .y = tab_box.origin.y + 10.0F},
+                                 .size = Size{.width = 12.0F, .height = tab_height_ - 20.0F}};
             p.draw_text(close_box, "x", label_font, Color{140, 140, 140, 255});
         }
     }

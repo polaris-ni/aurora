@@ -5,12 +5,11 @@
 #include <optional>
 #include <string>
 
+#include "aurora/core/a11y_provider.h"
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
 #include "aurora/window/surface.h"
 #include "aurora/window/window_state.h"
-
-#include "aurora/core/a11y_provider.h"
 
 // 共享 Win32 窗口宿主：仅依赖 Windows SDK（user32/gdi32），零三方依赖。
 // 把「窗口创建 / 消息泵 / 事件翻译 / DPI / WM_PAINT·WM_SIZE 同步重渲染 / 白闪修复刷」
@@ -18,7 +17,7 @@
 // 避免复制消息泵带来的行为分歧。
 //
 // pimpl 封装：公共头不再包含 <windows.h> / <windowsx.h>，所有 Win32/GDI 细节（HWND/HINSTANCE/
-// 消息分发 / 键码映射 / UTF-8 转换等）移入 src/aurora/window/win32_window.cpp 的 Impl，
+// 消息分发 / 键码映射 / UTF-8 转换等）移入 src/aurora/window/win32_host.cpp 的 Impl，
 // 仅暴露 `std::unique_ptr<Impl> pimpl_`；跨平台消费者（如 D3D11Surface、Headless 测试）
 // 无需拉入重型平台头。原生句柄以 `void*` 暴露（避免公共头引入 <windows.h>），
 // 调用方如需真实 `HWND` 显式 `static_cast` 即可。整文件被 #ifdef AURORA_BACKEND_WIN32 包裹。
@@ -31,7 +30,7 @@ namespace aurora {
 /// 不含「像素如何上屏」：present 由 Win32Surface(GDI SetDIBitsToDevice) /
 /// D3D11Surface(纹理上传) 各自实现，宿主仅在 WM_SIZE/WM_PAINT 时调用
 /// `present_request_` 触发 Window 的同步重渲染（消除最大化白闪）。
-class Win32Window {
+class Win32Host {
   public:
     using EventHandler = std::function<void(Event &)>;
     using WindowStateHandler = std::function<void(WindowState)>;
@@ -39,13 +38,13 @@ class Win32Window {
     using PresentRequest = std::function<void()>;
 
     /// @brief 创建原生窗口（带高级样式）。
-    Win32Window(int w, int h, const std::string &title, const WindowStyleOptions &style);
-    ~Win32Window();
+    Win32Host(int w, int h, const std::string &title, const WindowStyleOptions &style);
+    ~Win32Host();
 
-    Win32Window(const Win32Window &) = delete;
-    auto operator=(const Win32Window &) -> Win32Window & = delete;
-    Win32Window(Win32Window &&) = delete;
-    auto operator=(Win32Window &&) -> Win32Window & = delete;
+    Win32Host(const Win32Host &) = delete;
+    auto operator=(const Win32Host &) -> Win32Host & = delete;
+    Win32Host(Win32Host &&) = delete;
+    auto operator=(Win32Host &&) -> Win32Host & = delete;
 
     auto set_event_handler(EventHandler h) const -> void;
     auto set_window_state_handler(WindowStateHandler h) const -> void;

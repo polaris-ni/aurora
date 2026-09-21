@@ -284,7 +284,8 @@ AURORA_TEST_CASE(pointer_click_executes_row_and_mask_click_closes) {
 
     // 面板几何不对外暴露：按行探测出「按下后选中第 2 行」的位置，避免在测试里复制布局常量。
     float row_y = -1.0F;
-    for (float y = 1.0F; y < 479.0F; y += 1.0F) {
+    for (int yi = 1; yi < 479; ++yi) {
+        const auto y = static_cast<float>(yi);  // 用整型计数器避免浮点累加误差与 FloatLoopCounter 告警
         if (!palette.is_open()) {
             open_and_layout();
         }

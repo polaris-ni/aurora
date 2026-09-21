@@ -118,9 +118,9 @@ AURORA_TEST_CASE(drag_reorders_items_through_real_dispatch) {
     AURORA_TEST_REQUIRE(tc.pump().ok());  // 提交只标布局脏：一帧后落到新位置
 
     AURORA_TEST_CHECK_EQ(reorder_calls, 1);
-    AURORA_TEST_CHECK_EQ(items->get(), (std::vector<int>{0, 2, 1}));  // 第 1 项落到末位
+    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 2, 1});  // 第 1 项落到末位
     AURORA_TEST_CHECK_GT(events.count, 0);  // 结构变化已上报（读屏可感知）
-    events.uninstall();
+    StructureEventCounter::uninstall();
 }
 
 AURORA_TEST_CASE(reorder_and_scroll_restore_coexist) {
@@ -130,8 +130,7 @@ AURORA_TEST_CASE(reorder_and_scroll_restore_coexist) {
     auto list = std::make_shared<ReorderableList<int>>(items, make_builder());
     list->set_drag_slop(4.0);
     list->set_restore_key("itest.reorder");
-    LayoutEngine::layout(*list, Constraints{.min = Size{},
-                                            .max = Size{.width = 240.0F, .height = 240.0F}});
+    LayoutEngine::layout(*list, Constraints{.min = Size{}, .max = Size{.width = 240.0F, .height = 240.0F}});
     AURORA_TEST_REQUIRE_GT(list->max_scroll_offset(), 0.0F);
     list->set_scroll_offset(80.0F);
     AURORA_TEST_CHECK_NEAR(ScrollStorage::instance().read("itest.reorder").value_or(-1.0F), 80.0F, 1e-4F);
@@ -152,7 +151,8 @@ AURORA_TEST_CASE(reorder_and_scroll_restore_coexist) {
     AURORA_TEST_REQUIRE(tc.pump().ok());
 
     // 第 5 项与第 6 项互换（滚动坐标下的命中与换位几何联动正确）。
-    AURORA_TEST_CHECK_EQ(items->get(), (std::vector<int>{0, 1, 2, 3, 4, 6, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}));
+    AURORA_TEST_CHECK_EQ(items->get(),
+                         std::vector<int>{0, 1, 2, 3, 4, 6, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19});
     // 滚动位置不受重排影响，且仍在注册表里（App 退出时 sync 落盘）。
     AURORA_TEST_CHECK_NEAR(list->scroll_offset(), 80.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(ScrollStorage::instance().read("itest.reorder").value_or(-1.0F), 80.0F, 1e-4F);
@@ -160,11 +160,10 @@ AURORA_TEST_CASE(reorder_and_scroll_restore_coexist) {
     // 重建实例（同 restore_key）：位置恢复，顺序回到数据源顺序 —— 两个子系统各自独立。
     auto rebuilt = std::make_shared<ReorderableList<int>>(items, make_builder());
     rebuilt->set_restore_key("itest.reorder");
-    LayoutEngine::layout(*rebuilt, Constraints{.min = Size{},
-                                               .max = Size{.width = 240.0F, .height = 240.0F}});
+    LayoutEngine::layout(*rebuilt, Constraints{.min = Size{}, .max = Size{.width = 240.0F, .height = 240.0F}});
     AURORA_TEST_CHECK_NEAR(rebuilt->scroll_offset(), 80.0F, 1e-4F);
     AURORA_TEST_CHECK_EQ(rebuilt->data(),
-                         (std::vector<int>{0, 1, 2, 3, 4, 6, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}));
+                         std::vector<int>{0, 1, 2, 3, 4, 6, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19});
 
     ScrollStorage::instance().clear_all();
 }

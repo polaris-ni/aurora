@@ -1,5 +1,5 @@
 /// 测试类型: integration
-/// 目标单元: include/aurora/window/wgpu_surface.h + wgpu_x11_surface.h + wgpu_wayland_surface.h
+/// 目标单元: include/aurora/window/wgpu_win32_surface.h + wgpu_x11_surface.h + wgpu_wayland_surface.h
 ///           + src/aurora/window/window_factory.cpp
 /// 测试说明: wgpu GPU 栅格真实窗口 smoke——create_window(WgpuOptions) 开窗后经
 ///           Window::present_root 帧调度连续出帧（gpu_backend 标识 "gpu-wgpu"、
@@ -21,7 +21,7 @@
 
 namespace au = aurora;
 
-#if defined(AURORA_BACKEND_GPU_WGPU) &&                                                                  \
+#if defined(AURORA_BACKEND_GPU_WGPU) && \
     (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))
 
 #include "aurora/aurora.h"
@@ -30,13 +30,13 @@ namespace au = aurora;
 
 namespace aurora::test_cases::itest_wgpu_present {
 
-// 宿主切换（与 create_window(WgpuOptions) 的编译期择一序一致）：Windows → WgpuSurface
+// 宿主切换（与 create_window(WgpuOptions) 的编译期择一序一致）：Windows → WgpuWin32Surface
 // (Win32Options)；Linux/X11 → WgpuX11Surface(X11Options)；仅 Wayland → WgpuWaylandSurface
 // (WaylandOptions)。Linux 下 X11/Wayland 宏可并开，本别名取 X11；Wayland 宿主的强制路由
 // 由 create_native_window 会话选择与专属工厂覆盖（X11+Wayland 并开构建下亦可经
 // WaylandOptions+GpuWgpu 直达，见 gpu_wgpu_preference_routing 的宿主注）。
 #ifdef AURORA_BACKEND_WIN32
-using HostWgpuSurface = au::WgpuSurface;
+using HostWgpuSurface = au::WgpuWin32Surface;
 using HostOptions = au::Win32Options;
 #elif defined(AURORA_BACKEND_X11)
 using HostWgpuSurface = au::WgpuX11Surface;
@@ -46,7 +46,7 @@ using HostWgpuSurface = au::WgpuWaylandSurface;
 using HostOptions = au::WaylandOptions;
 #endif
 
-AURORA_TEST_CASE(wgpu_surface_present_frames_and_no_fallback) {
+AURORA_TEST_CASE(wgpu_win32_surface_present_frames_and_no_fallback) {
     au::WgpuOptions opts;
     opts.size = au::Size{.width = 320.0F, .height = 240.0F};
     opts.title = "itest_wgpu_present";
@@ -212,7 +212,7 @@ AURORA_TEST_CASE(wayland_csd_decoration_replays_into_gpu_frame) {
 
 namespace aurora::test_cases::itest_wgpu_present {
 
-AURORA_TEST_CASE(wgpu_surface_present_frames_and_no_fallback) {
+AURORA_TEST_CASE(wgpu_win32_surface_present_frames_and_no_fallback) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 或宿主宏（WIN32/X11/WAYLAND）未开启，Wgpu*Surface 整体被宏剔除");
 }
 AURORA_TEST_CASE(gpu_wgpu_preference_routing) {

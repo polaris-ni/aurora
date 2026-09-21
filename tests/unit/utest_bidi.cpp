@@ -63,7 +63,7 @@ namespace {
 // 阿拉伯文真实字体集成（Amiri）辅助：字体缺失则返回空串（调用方据此 AURORA_TEST_SKIP）。
 // CI/headless 环境通常不含 Arabic 字体，此时优雅跳过而非失败（与 mixed_rtl 集成用例一致）。
 [[nodiscard]] auto arabic_ttf_path() -> std::string {
-    const auto root = aurora::testing::isolation::repo_root();
+    const auto &root = aurora::testing::isolation::repo_root();
     if (root.empty()) {
         return {};
     }
@@ -76,13 +76,11 @@ namespace {
 }
 
 // 验收串：5 码点（م ر ح ب ا）。用于端到端验证阿拉伯文连字/cursive joining 与视觉序。
-constexpr char kArabicHello[] = "مرحبا";  // NOLINT(*-avoid-c-arrays)
+constexpr char AURORA_ARABIC_HELLO[] = "مرحبا";  // NOLINT(*-avoid-c-arrays)
 constexpr std::size_t AURORA_ARABIC_N = 5;
 
 // 专用 family（仅 Amiri）：保证阿拉伯文走真实整形，而非回落到无 Arabic 覆盖的默认字体/位图兜底。
-[[nodiscard]] auto arabic_font() -> aurora::Font {
-    return aurora::Font{.family = "__bidi_arabic", .size_pt = 24.0F};
-}
+[[nodiscard]] auto arabic_font() -> aurora::Font { return aurora::Font{.family = "__bidi_arabic", .size_pt = 24.0F}; }
 }  // namespace
 
 // ---------------- 纯函数：guess_paragraph_direction ----------------
@@ -125,7 +123,7 @@ AURORA_TEST_CASE(run_order_rtl_reverses_runs) {
 
 AURORA_TEST_CASE(run_order_single_run_is_identity) {
     AURORA_TEST_CHECK(aurora::render::detail::bidi_visual_run_order(1, aurora::TextDirection::RTL) ==
-                     std::vector<std::size_t>{0});
+                      std::vector<std::size_t>{0});
 }
 
 AURORA_TEST_CASE(run_order_zero_runs_is_empty) {
@@ -141,6 +139,7 @@ namespace {
 [[nodiscard]] auto cps32(const char32_t *s) -> std::vector<char32_t> {
     std::vector<char32_t> v;
     while (*s != U'\0') {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 遍历 C 字符串逐码点推进，是测试语义本身
         v.push_back(*s++);
     }
     return v;
@@ -150,8 +149,7 @@ namespace {
     return aurora::render::detail::uba_levels(cps32(s), base);
 }
 
-void check_levels(const char32_t *s, std::uint8_t base, const std::vector<std::uint8_t> &expect)
-{
+void check_levels(const char32_t *s, std::uint8_t base, const std::vector<std::uint8_t> &expect) {
     const auto got = levels_of(s, base);
     AURORA_TEST_REQUIRE_EQ(got.size(), expect.size());
     AURORA_TEST_CHECK(got == expect);
@@ -336,7 +334,7 @@ AURORA_TEST_CASE(uba_visual_order_rli_chars_reverse_inside) {
 
 // ---------------- 集成：真实双字体跨 run 重排 ----------------
 AURORA_TEST_CASE(mixed_rtl_reorders_runs_by_paragraph_direction) {
-    const auto root = aurora::testing::isolation::repo_root();
+    const auto &root = aurora::testing::isolation::repo_root();
     if (root.empty()) {
         AURORA_TEST_SKIP("repo_root 不可用，跳过真实字体集成测试");
     }
@@ -359,7 +357,8 @@ AURORA_TEST_CASE(mixed_rtl_reorders_runs_by_paragraph_direction) {
     const std::string mixed = "ab مرحبا";
     Painter p;
     p.begin(400, 80);
-    aurora::render::FontEngine::draw_text(p, rect_at(0.0F, 0.0F, 400.0F, 80.0F), mixed, font, aurora::Color::black(), rtl);
+    aurora::render::FontEngine::draw_text(p, rect_at(0.0F, 0.0F, 400.0F, 80.0F), mixed, font, aurora::Color::black(),
+                                          rtl);
     AURORA_TEST_REQUIRE(count_opaque(p) > 0);  // 两词都落笔
 
     // 阿拉伯词单独绘制（同 family/direction/size），作为「最左 run 应为阿拉伯文」的参照。
@@ -420,8 +419,8 @@ AURORA_TEST_CASE(arabic_real_font_shapes_into_ink_and_reasonable_metrics) {
     const aurora::render::TextLayoutOpts ltr{.direction = aurora::TextDirection::LTR};
     const aurora::render::TextLayoutOpts rtl{.direction = aurora::TextDirection::RTL};
 
-    const float w_ltr = aurora::render::FontEngine::measure_width(kArabicHello, font, ltr);
-    const float w_rtl = aurora::render::FontEngine::measure_width(kArabicHello, font, rtl);
+    const float w_ltr = aurora::render::FontEngine::measure_width(AURORA_ARABIC_HELLO, font, ltr);
+    const float w_rtl = aurora::render::FontEngine::measure_width(AURORA_ARABIC_HELLO, font, rtl);
     AURORA_TEST_REQUIRE(w_ltr > 0.0F);
     AURORA_TEST_REQUIRE(w_rtl > 0.0F);
     // 合理度量：不溢出画布（真实字体整形而非位图兜底 0 宽或整屏溢出）。
@@ -430,7 +429,7 @@ AURORA_TEST_CASE(arabic_real_font_shapes_into_ink_and_reasonable_metrics) {
 
     Painter p;
     p.begin(400, 80);
-    aurora::render::FontEngine::draw_text(p, rect_at(0.0F, 0.0F, 400.0F, 80.0F), kArabicHello, font,
+    aurora::render::FontEngine::draw_text(p, rect_at(0.0F, 0.0F, 400.0F, 80.0F), AURORA_ARABIC_HELLO, font,
                                           aurora::Color::black(), rtl);
     // 真实整形出字形墨迹（非豆腐块/空）——证明阿文 run 走 HarfBuzz shaping 而非位图兜底。
     AURORA_TEST_REQUIRE(count_opaque(p) > 0);
@@ -447,22 +446,22 @@ AURORA_TEST_CASE(arabic_rtl_caret_x_mirrors_logical_order) {
     const aurora::render::TextLayoutOpts ltr{.direction = aurora::TextDirection::LTR};
     const aurora::render::TextLayoutOpts rtl{.direction = aurora::TextDirection::RTL};
 
-    const float w_ltr = aurora::render::FontEngine::measure_width(kArabicHello, font, ltr);
-    const float w_rtl = aurora::render::FontEngine::measure_width(kArabicHello, font, rtl);
+    const float w_ltr = aurora::render::FontEngine::measure_width(AURORA_ARABIC_HELLO, font, ltr);
+    const float w_rtl = aurora::render::FontEngine::measure_width(AURORA_ARABIC_HELLO, font, rtl);
 
     // 端点（char_index=0 与 =N）与字形簇无关，断言稳定。
-    const float cxl0 = aurora::render::FontEngine::caret_x(kArabicHello, 0, font, ltr);
-    const float cxlN = aurora::render::FontEngine::caret_x(kArabicHello, AURORA_ARABIC_N, font, ltr);
-    const float cxr0 = aurora::render::FontEngine::caret_x(kArabicHello, 0, font, rtl);
-    const float cxrN = aurora::render::FontEngine::caret_x(kArabicHello, AURORA_ARABIC_N, font, rtl);
+    const float cxl0 = aurora::render::FontEngine::caret_x(AURORA_ARABIC_HELLO, 0, font, ltr);
+    const float cxl_n = aurora::render::FontEngine::caret_x(AURORA_ARABIC_HELLO, AURORA_ARABIC_N, font, ltr);
+    const float cxr0 = aurora::render::FontEngine::caret_x(AURORA_ARABIC_HELLO, 0, font, rtl);
+    const float cxr_n = aurora::render::FontEngine::caret_x(AURORA_ARABIC_HELLO, AURORA_ARABIC_N, font, rtl);
 
-    AURORA_TEST_CHECK_NEAR(cxl0, 0.0F, 1e-3F);        // LTR：逻辑首在左缘
-    AURORA_TEST_CHECK_NEAR(cxlN, w_ltr, 1e-3F);        // LTR：逻辑尾在右缘
-    AURORA_TEST_CHECK_NEAR(cxr0, w_rtl, 1e-3F);        // RTL：逻辑首在右缘（镜像）
-    AURORA_TEST_CHECK_NEAR(cxrN, 0.0F, 1e-3F);         // RTL：逻辑尾在左缘（镜像）
+    AURORA_TEST_CHECK_NEAR(cxl0, 0.0F, 1e-3F);  // LTR：逻辑首在左缘
+    AURORA_TEST_CHECK_NEAR(cxl_n, w_ltr, 1e-3F);  // LTR：逻辑尾在右缘
+    AURORA_TEST_CHECK_NEAR(cxr0, w_rtl, 1e-3F);  // RTL：逻辑首在右缘（镜像）
+    AURORA_TEST_CHECK_NEAR(cxr_n, 0.0F, 1e-3F);  // RTL：逻辑尾在左缘（镜像）
     // 逻辑首的视觉位置：RTL 远在 LTR 右侧（跨越整行宽度）。
     AURORA_TEST_CHECK(cxr0 > cxl0 + 50.0F);
-    AURORA_TEST_CHECK(cxrN < cxlN - 50.0F);
+    AURORA_TEST_CHECK(cxr_n < cxl_n - 50.0F);
 }
 
 AURORA_TEST_CASE(arabic_real_shaping_ligature_and_joining) {
@@ -510,14 +509,12 @@ AURORA_TEST_CASE(arabic_richtextedit_rtl_right_aligns) {
 
     auto leftmost = [&](bool force_rtl) -> float {
         RichTextEdit t;
-        t.load_spans({TextSpan{.text = LocalizedString{kArabicHello},
-                               .font = arabic_font(),
-                               .color = aurora::Color::black()}});
+        t.load_spans({TextSpan{
+            .text = LocalizedString{AURORA_ARABIC_HELLO}, .font = arabic_font(), .color = aurora::Color::black()}});
         // 阿文内容会被 guess_paragraph_direction 自动推断为 RTL，故对照组必须显式固定为 LTR，
         // 否则两侧同为 RTL、右对齐差异不可见。
         t.set_direction(force_rtl ? aurora::TextDirection::RTL : aurora::TextDirection::LTR);
-        LayoutEngine::layout(
-            t, Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 400.0F}});
+        LayoutEngine::layout(t, Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 400.0F}});
         Painter p;
         p.begin(408, static_cast<int>(t.size().height) + 4);
         const BuildContext ctx;
@@ -536,7 +533,7 @@ AURORA_TEST_CASE(arabic_richtextedit_rtl_right_aligns) {
     AURORA_TEST_REQUIRE(ltr_left > 0.0F);
     AURORA_TEST_REQUIRE(rtl_left > 0.0F);
     AURORA_TEST_CHECK(rtl_left > ltr_left + 100.0F);  // RTL 整段右对齐
-    AURORA_TEST_CHECK(rtl_left > 150.0F);             // 确实落在右半区
+    AURORA_TEST_CHECK(rtl_left > 150.0F);  // 确实落在右半区
 }
 
 AURORA_TEST_CASE(arabic_richtextedit_rtl_pointer_hit_no_overflow) {
@@ -551,12 +548,10 @@ AURORA_TEST_CASE(arabic_richtextedit_rtl_pointer_hit_no_overflow) {
     aurora::render::FontEngine::register_font("__bidi_arabic", amiri_path);
 
     RichTextEdit t;
-    t.load_spans({TextSpan{.text = LocalizedString{kArabicHello},
-                           .font = arabic_font(),
-                           .color = aurora::Color::black()}});
+    t.load_spans({TextSpan{
+        .text = LocalizedString{AURORA_ARABIC_HELLO}, .font = arabic_font(), .color = aurora::Color::black()}});
     t.set_direction(aurora::TextDirection::RTL);
-    LayoutEngine::layout(
-        t, Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 400.0F}});
+    LayoutEngine::layout(t, Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 400.0F}});
 
     auto click = [&](float x) -> void {
         MouseEvent ev;
@@ -575,8 +570,8 @@ AURORA_TEST_CASE(arabic_richtextedit_rtl_pointer_hit_no_overflow) {
 
     // 行内中部点击应落在逻辑中段（真实度量下非溢出 clamp 到 0）。
     const float w = aurora::render::FontEngine::measure_width(
-        kArabicHello, arabic_font(), aurora::render::TextLayoutOpts{.direction = aurora::TextDirection::RTL});
-    click(t.size().width - w * 0.5F);  // 行内中点
+        AURORA_ARABIC_HELLO, arabic_font(), aurora::render::TextLayoutOpts{.direction = aurora::TextDirection::RTL});
+    click(t.size().width - (w * 0.5F));  // 行内中点
     AURORA_TEST_CHECK(t.caret() > 0U && t.caret() < AURORA_ARABIC_N);
 }
 
@@ -584,7 +579,7 @@ AURORA_TEST_CASE(arabic_richtextedit_cross_level_runs_reorder) {
     // 完整 UBA 跨层翻转（RichTextEdit 端到端）：RTL 段内阿文 run（Amiri，层 1）+ 拉丁 run
     // （Roboto，层 2）。L2：层 2 span 反转后随层 1 段落反转 → 逻辑尾 run（拉丁）落视觉左缘、
     // 逻辑首 run（阿文）落视觉右缘 → 点左缘命中 "a"（caret 5）、点右缘命中阿文首字符（caret 0）。
-    const auto root = aurora::testing::isolation::repo_root();
+    const auto &root = aurora::testing::isolation::repo_root();
     const std::filesystem::path amiri =
         std::filesystem::path{root} / "third_party/harfbuzz/perf/fonts/Amiri-Regular.ttf";
     const std::filesystem::path roboto =
@@ -597,7 +592,7 @@ AURORA_TEST_CASE(arabic_richtextedit_cross_level_runs_reorder) {
 
     RichTextEdit t;
     t.load_spans({
-        TextSpan{.text = LocalizedString{kArabicHello},
+        TextSpan{.text = LocalizedString{AURORA_ARABIC_HELLO},
                  .font = Font{.family = "__bidi_arabic", .size_pt = 24.0F},
                  .color = aurora::Color::black()},
         TextSpan{.text = LocalizedString{"ab"},
@@ -605,8 +600,7 @@ AURORA_TEST_CASE(arabic_richtextedit_cross_level_runs_reorder) {
                  .color = aurora::Color::black()},
     });
     t.set_direction(aurora::TextDirection::RTL);
-    LayoutEngine::layout(
-        t, Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 400.0F}});
+    LayoutEngine::layout(t, Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 400.0F}});
 
     auto click = [&](float x) -> void {
         MouseEvent ev;
@@ -619,7 +613,7 @@ AURORA_TEST_CASE(arabic_richtextedit_cross_level_runs_reorder) {
     click(0.5F);  // 视觉左缘 → 拉丁 run "ab" 左缘 → caret = 阿文 run 的 StyledChar 数（跨层翻转：逻辑尾 run 落左）
     // doc_ 以 StyledChar（UTF-8 字节）为单位（既有行为，多字节字符占多个单元），
     // 阿文 5 码点占 10 个单元，拉丁 run 的行内 begin 即 10。
-    AURORA_TEST_CHECK_EQ(t.caret(), std::string{kArabicHello}.size());
+    AURORA_TEST_CHECK_EQ(t.caret(), std::string{AURORA_ARABIC_HELLO}.size());
     click(t.size().width - 0.5F);  // 视觉右缘 → 阿文 run 右缘 → caret 0（逻辑首在右）
     AURORA_TEST_CHECK_EQ(t.caret(), 0U);
 }
@@ -669,8 +663,8 @@ AURORA_TEST_CASE(bidi_format_control_zero_width_and_ink_font_independent) {
 
     // 可见字母相同：plain 与 with_ctrl 都恰好是 a…g 七个可见字符，差异只在穿插的控制符。
     const std::string visible = "abcdefg";
-    const std::string with_ctrl = std::string{"a"} + "\u202B" + "bc" + "\u202C" + "d" + "\u2067" + "e" +
-                                  "\u2069" + "\u200E" + "f" + "\u200F" + "g";
+    const std::string with_ctrl = std::string{"a"} + "\u202B" + "bc" + "\u202C" + "d" + "\u2067" + "e" + "\u2069" +
+                                  "\u200E" + "f" + "\u200F" + "g";
     const std::string pure_ctrl = std::string{"\u202B"} + "\u2067" + "\u2069" + "\u202C";
 
     // ① 度量：(a) 纯控制符串恒为零宽；(b) 穿插控制符不改变相同可见字母的整串宽度。
@@ -686,14 +680,14 @@ AURORA_TEST_CASE(bidi_format_control_zero_width_and_ink_font_independent) {
     // ② 绘制：(a) 纯控制符串零墨迹；(b) 穿插控制符不改变可见文本的墨迹（同字母、同位置）。
     Painter p;
     p.begin(400, 80);
-    aurora::render::FontEngine::draw_text(p, rect_at(0.0F, 0.0F, 400.0F, 80.0F), visible, font,
-                                         aurora::Color::black(), ltr);
+    aurora::render::FontEngine::draw_text(p, rect_at(0.0F, 0.0F, 400.0F, 80.0F), visible, font, aurora::Color::black(),
+                                          ltr);
     const int ink_vis = count_opaque(p);
 
     Painter q;
     q.begin(400, 80);
     aurora::render::FontEngine::draw_text(q, rect_at(0.0F, 0.0F, 400.0F, 80.0F), with_ctrl, font,
-                                         aurora::Color::black(), ltr);
+                                          aurora::Color::black(), ltr);
     const int ink_ctrl = count_opaque(q);
 
     AURORA_TEST_REQUIRE(ink_vis > 0);  // 可见字母确能落笔
@@ -702,7 +696,7 @@ AURORA_TEST_CASE(bidi_format_control_zero_width_and_ink_font_independent) {
     Painter r;
     r.begin(400, 80);
     aurora::render::FontEngine::draw_text(r, rect_at(0.0F, 0.0F, 400.0F, 80.0F), pure_ctrl, font,
-                                         aurora::Color::black(), ltr);
+                                          aurora::Color::black(), ltr);
     AURORA_TEST_CHECK_EQ(count_opaque(r), 0);  // 纯控制符串绝对零墨迹
 }
 

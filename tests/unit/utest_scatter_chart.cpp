@@ -4,6 +4,7 @@
 /// 工厂 from_json 重建、最近点欧氏距离命中（阈值 = dot_radius + 4dp）、on_point_tapped、
 /// 空数据与 NaN 点跳过，以及像素 golden 基线（chart_scatter.png，受 AURORA_UPDATE_GOLDEN 控制）
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
@@ -22,12 +23,14 @@
 
 namespace aurora::test_cases::utest_scatter_chart {
 
+using aurora::testing::require_value;
+
 namespace golden = aurora::testing::golden;
 
 namespace {
 
-constexpr int WIDTH = 320;
-constexpr int HEIGHT = 200;
+constexpr int AURORA_WIDTH = 320;
+constexpr int AURORA_HEIGHT = 200;
 
 [[nodiscard]] auto bare_props() -> ScatterChartProps {
     ScatterChartProps p{};
@@ -42,7 +45,7 @@ auto layout_only(Widget &w) -> void {
     constexpr BuildContext ctx;
     Constraints c;
     c.min = Size{.width = 0.0F, .height = 0.0F};
-    c.max = Size{.width = static_cast<float>(WIDTH), .height = static_cast<float>(HEIGHT)};
+    c.max = Size{.width = static_cast<float>(AURORA_WIDTH), .height = static_cast<float>(AURORA_HEIGHT)};
     w.layout(c, ctx);
 }
 
@@ -62,11 +65,11 @@ auto layout_only(Widget &w) -> void {
 
 [[nodiscard]] auto render_chart(const ScatterChartProps &props) -> std::filesystem::path {
     auto chart = std::make_shared<ScatterChart>(props);
-    chart->modifier.set(Modifier{}.width(static_cast<float>(WIDTH)).height(static_cast<float>(HEIGHT)));
+    chart->modifier.set(Modifier{}.width(static_cast<float>(AURORA_WIDTH)).height(static_cast<float>(AURORA_HEIGHT)));
     Node root{Column{Node{chart}}};
     const std::filesystem::path tmp =
         std::filesystem::path(testing::isolation::temp_dir()) / "current_chart_scatter.png";
-    AURORA_TEST_REQUIRE_TRUE(render_to_png(root, WIDTH, HEIGHT, tmp.string().c_str()).ok());
+    AURORA_TEST_REQUIRE_TRUE(render_to_png(root, AURORA_WIDTH, AURORA_HEIGHT, tmp.string().c_str()).ok());
     return tmp;
 }
 
@@ -88,12 +91,7 @@ AURORA_TEST_CASE(describe_static_is_complete) {
     AURORA_TEST_CHECK_TRUE(d.name == "ScatterChart");
     AURORA_TEST_CHECK_TRUE(d.events.front() == "on_point_tapped");
     auto has = [&d](const std::string &key) -> bool {
-        for (const PropDescriptor &p : d.properties) {
-            if (p.name == key) {
-                return true;
-            }
-        }
-        return false;
+        return std::ranges::any_of(d.properties, [&key](const PropDescriptor &p) { return p.name == key; });
     };
     for (const auto &key : {"series", "show_crosshair", "axis_x", "axis_y", "legend", "padding"}) {
         AURORA_TEST_CHECK_TRUE(has(key));
@@ -142,8 +140,8 @@ AURORA_TEST_CASE(nearest_point_hit_by_euclidean_distance) {
 
     MouseEvent at_center = move_at(160.0F, 100.0F);
     chart.on_pointer_event(at_center);
-    AURORA_TEST_REQUIRE_TRUE(chart.hovered_point().has_value());
-    AURORA_TEST_CHECK_EQ(chart.hovered_point()->second, 0);
+    const auto center_pt = require_value(chart.hovered_point());
+    AURORA_TEST_CHECK_EQ(center_pt.second, 0);
 
     MouseEvent far = move_at(10.0F, 10.0F);  // 超出命中半径
     chart.on_pointer_event(far);
@@ -184,8 +182,8 @@ AURORA_TEST_CASE(degenerate_data_is_safe) {
     layout_only(chart);
     MouseEvent e = move_at(160.0F, 100.0F);  // 点 (2,2) 在 [0,4] 域下 → (160,100)
     chart.on_pointer_event(e);
-    AURORA_TEST_REQUIRE_TRUE(chart.hovered_point().has_value());
-    AURORA_TEST_CHECK_EQ(chart.hovered_point()->second, 1);  // NaN 点被跳过
+    const auto nan_pt = require_value(chart.hovered_point());
+    AURORA_TEST_CHECK_EQ(nan_pt.second, 1);  // NaN 点被跳过
 }
 
 AURORA_TEST_CASE(golden_scatter_chart_matches_baseline) {

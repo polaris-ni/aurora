@@ -162,8 +162,7 @@ AURORA_TEST_CASE(wheel_margin_pulls_and_rubber_bands_are_capped) {
 AURORA_TEST_CASE(wheel_channel_gated_by_child_scroll_position) {
     auto scroll = std::make_shared<Scroll>();
     scroll->add(Node{std::make_shared<RedBox>()});  // 内容自然高 200
-    PullToRefresh ptr{
-        PullToRefreshProps{.child = Node{scroll}, .threshold = 64.0F, .max_pull = 128.0F}};
+    PullToRefresh ptr{PullToRefreshProps{.child = Node{scroll}, .threshold = 64.0F, .max_pull = 128.0F}};
     int refreshes = 0;
     ptr.on_refresh([&refreshes] { ++refreshes; });
     LayoutEngine::layout(ptr, bounded(200.0F, 100.0F));  // 视口高 100 < 内容 200 → 可滚 100

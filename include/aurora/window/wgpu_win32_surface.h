@@ -1,11 +1,11 @@
 #pragma once
 
 // ============================================================
-// wgpu_surface.h — Win32 宿主 + WgpuRhi GPU 栅格上屏后端
+// wgpu_win32_surface.h — Win32 宿主 + WgpuRhi GPU 栅格上屏后端
 // ------------------------------------------------------------
 // 仅当 AURORA_BACKEND_GPU_WGPU 且 AURORA_BACKEND_WIN32 定义时编译（Windows 宿主；
 // X11 宿主见 wgpu_x11_surface.h 的 WgpuX11Surface）。
-// 与 D3D11Surface 同族：共用 `Win32Window` 宿主，但本类是 **GPU 栅格路径**——
+// 与 D3D11Surface 同族：共用 `Win32Host` 宿主，但本类是 **GPU 栅格路径**——
 // `Window::present_root` 经 `gpu_backend()` 把帧级 DisplayList 回放至 `rhi::WgpuRhi`，
 // 命令在 GPU 端光栅化并直接 present 到 HWND swapchain，消除每帧全屏像素上传。
 // 软件回退：WgpuRhi 不可用（工厂层 is_available 闸）或运行期 `begin_frame` 失败
@@ -24,7 +24,7 @@
 #include "aurora/render/rhi/rhi_frame_sink.h"
 #include "aurora/render/rhi/wgpu_rhi.h"
 #include "aurora/window/surface.h"
-#include "aurora/window/win32_window.h"
+#include "aurora/window/win32_host.h"
 
 namespace aurora {
 
@@ -40,16 +40,16 @@ namespace aurora {
 ///   `RendererPreference` 报错或回退其他 Surface；
 /// - 运行期：swapchain 重建失败/设备丢失 → `begin_frame` false → Window 置永久软件
 ///   回退，本类 present() 走 GDI blit（Painter 帧缓冲仍由 begin_frame 维护）。
-class WgpuSurface final : public Surface {
+class WgpuWin32Surface final : public Surface {
   public:
-    WgpuSurface(int width, int height, const std::string &title, const WindowStyleOptions &style,
+    WgpuWin32Surface(int width, int height, const std::string &title, const WindowStyleOptions &style,
                 bool vsync = true);
-    ~WgpuSurface() override;
+    ~WgpuWin32Surface() override;
 
-    WgpuSurface(const WgpuSurface &) = delete;
-    auto operator=(const WgpuSurface &) -> WgpuSurface & = delete;
-    WgpuSurface(WgpuSurface &&) = delete;
-    auto operator=(WgpuSurface &&) -> WgpuSurface & = delete;
+    WgpuWin32Surface(const WgpuWin32Surface &) = delete;
+    auto operator=(const WgpuWin32Surface &) -> WgpuWin32Surface & = delete;
+    WgpuWin32Surface(WgpuWin32Surface &&) = delete;
+    auto operator=(WgpuWin32Surface &&) -> WgpuWin32Surface & = delete;
 
     /// @brief 宿主窗口与 wgpu 后端均就绪（false 时工厂应报错/改选其他后端）。
     [[nodiscard]] auto is_available() const -> bool;
@@ -142,7 +142,7 @@ class WgpuSurface final : public Surface {
     /// 走了 GPU 路径（present 据此跳过 GDI blit）。
     class Sink final : public rhi::RhiFrameSink {
       public:
-        Sink(rhi::WgpuRhi &rhi, WgpuSurface &owner) : rhi_(&rhi), owner_(&owner) {}
+        Sink(rhi::WgpuRhi &rhi, WgpuWin32Surface &owner) : rhi_(&rhi), owner_(&owner) {}
 
         [[nodiscard]] auto name() const -> std::string_view override { return "gpu-wgpu"; }
         [[nodiscard]] auto backend() -> rhi::RhiBackend & override { return *rhi_; }
@@ -151,13 +151,13 @@ class WgpuSurface final : public Surface {
 
       private:
         rhi::WgpuRhi *rhi_;
-        WgpuSurface *owner_;
+        WgpuWin32Surface *owner_;
     };
 
     /// @brief 软件回退上屏：RGBA Painter 缓冲 swizzle 到 BGRA 暂存后 `SetDIBitsToDevice`。
     auto present_gdi() -> void;
 
-    std::unique_ptr<Win32Window> win_;   ///< 共享窗口宿主（同 D3D11Surface 模式）
+    std::unique_ptr<Win32Host> win_;   ///< 共享窗口宿主（同 D3D11Surface 模式）
     Painter painter_;                    ///< CPU 帧缓冲：软件回退路径的绘制目标（GPU 模式维护底色缓冲）
     std::unique_ptr<rhi::WgpuRhi> gpu_;  ///< wgpu 后端（nullptr = 初始化失败，纯软件回退）
     std::unique_ptr<Sink> sink_;         ///< 帧 sink 适配器（与 gpu_ 同生命周期）

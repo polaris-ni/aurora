@@ -17,7 +17,8 @@ namespace aurora {
  * - `dispatch(MouseEvent)`：沿命中链自最深目标向根冒泡，逐级调用 `on_pointer_event`；
  *   任一控件设 `e.handled = true` 即终止冒泡；Press 时缓存命中链实现指针捕获。
  * - `dispatch(KeyEvent, FocusManager)`：Tab / Shift+Tab 触发焦点移动，否则只派发到焦点 widget（不冒泡）。
- * - `dispatch(ScrollEvent)`：沿命中链自最深向根找第一个 `wants_scroll()` 者派发（最近可滚动祖先；嵌套时最深滚动者优先）。
+ * - `dispatch(ScrollEvent)`：沿命中链自最深向根找第一个 `wants_scroll()`
+ * 者派发（最近可滚动祖先；嵌套时最深滚动者优先）。
  * - `dispatch(TextInputEvent, FocusManager)`：派发到当前焦点 widget 的 `onTextInput`（不冒泡）。
  * - `dispatch(TextCompositionEvent, FocusManager)`：派发到当前焦点 widget 的 `onTextComposition`（不冒泡）。
  * - `dispatch(FileDropEvent)`：派发到命中目标 widget（不冒泡）。

@@ -61,19 +61,18 @@
 #error "AURORA_BACKEND_X11 must be enabled"
 #endif
 
-#include "aurora/window/x11_surface.h"  // aurora 头必须先于 Xlib（None/Bool/Status 宏污染）
-
 #include <X11/Xlib.h>
+#include <dlfcn.h>
 
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <dlfcn.h>
 #include <string>
 #include <thread>
 
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
+#include "aurora/window/x11_surface.h"  // aurora 澶村繀椤诲厛浜?Xlib锛圢one/Bool/Status 瀹忔薄鏌擄級
 #include "verify_print.h"
 
 // <X11/X.h>（经 Xlib.h 引入）无条件 `#define CursorShape 0`，与 aurora::CursorShape 硬碰撞。
@@ -145,8 +144,8 @@ auto main(int argc, char **argv) -> int {
     surface.set_event_handler([&](aurora::Event &ev) {
         if (auto *ce = dynamic_cast<aurora::TextCompositionEvent *>(&ev); ce != nullptr) {
             ++compositions;
-            emit("[EVENT] TextCompositionEvent preedit=\"" + ce->preedit + "\" cursor=" +
-                 std::to_string(ce->cursor_index) + " sel=[" + std::to_string(ce->sel_start) + "," +
+            emit("[EVENT] TextCompositionEvent preedit=\"" + ce->preedit +
+                 "\" cursor=" + std::to_string(ce->cursor_index) + " sel=[" + std::to_string(ce->sel_start) + "," +
                  std::to_string(ce->sel_end) + "] committed=\"" + ce->committed + "\"");
         } else if (auto *te = dynamic_cast<aurora::TextInputEvent *>(&ev); te != nullptr) {
             ++text_inputs;
@@ -164,8 +163,9 @@ auto main(int argc, char **argv) -> int {
 
     if (!st.im_open) {
         // ① 降级路径（无 XIM 服务器）：本机合法结局，深水区交人工段。
-        skip("XOpenIM 失败 ⇒ 本机无 XIM 服务器（XMODIFIERS 未指向在跑的 IM）：整桥缺席、纯 keysym 输入，"
-             "属合法降级（与 Win32 无 IME 环境同口径）");
+        skip(
+            "XOpenIM 失败 ⇒ 本机无 XIM 服务器（XMODIFIERS 未指向在跑的 IM）：整桥缺席、纯 keysym 输入，"
+            "属合法降级（与 Win32 无 IME 环境同口径）");
         check(st.ic_created == false && st.draw_callbacks == 0 && st.spot_updates == 0,
               "无 XIM 时桥完全静默（无 IC、无回调、无锚点请求）");
     } else {
@@ -174,8 +174,9 @@ auto main(int argc, char **argv) -> int {
             check(false, "im_open 却未建 IC（XCreateIC 失败）—— 异常，请核对 IM 服务器状态");
         } else {
             check(true, "XCreateIC 成功（ic_created）");
-            emit(std::string("       协商风格：") + (st.preedit_callbacks ? "XIMPreeditCallbacks（组合事件回推全接线）"
-                                                                          : "XIMPreeditNothing（回退：仅 commit 通道）"));
+            emit(std::string("       协商风格：") + (st.preedit_callbacks
+                                                         ? "XIMPreeditCallbacks（组合事件回推全接线）"
+                                                         : "XIMPreeditNothing（回退：仅 commit 通道）"));
 
             // ---- ② 焦点宣告接线（不依赖输入法配合） ----
             // 用独立观测连接对被测窗口 XSetInputFocus 拉起/切走焦点，驱动被测 surface 自身事件
@@ -200,8 +201,7 @@ auto main(int argc, char **argv) -> int {
                 XSetInputFocus(obs, DefaultRootWindow(obs), RevertToParent, CurrentTime);
                 XSync(obs, False);
                 pump(surface, 12);
-                check(!surface.ime_state().focused,
-                      "焦点切走 → FocusOut → XUnsetICFocus（focused 归 n）");
+                check(!surface.ime_state().focused, "焦点切走 → FocusOut → XUnsetICFocus（focused 归 n）");
 
                 // 恢复焦点给 XTEST 段（假键须落入被测窗）。
                 XSetInputFocus(obs, win, RevertToParent, CurrentTime);
@@ -214,9 +214,10 @@ auto main(int argc, char **argv) -> int {
                 // 必须以 TextInputEvent 上屏（防「接了 IM 反而吞普通键」回归）。
                 using FakeKeyFn = int (*)(Display *, unsigned int, int, unsigned long);
                 void *xtst = dlopen("libXtst.so.6", RTLD_NOW | RTLD_GLOBAL);
-                auto fake_key = xtst != nullptr ? reinterpret_cast<FakeKeyFn>(
-                                                      dlsym(xtst, "XTestFakeKeyEvent"))  // NOLINT(*-pro-type-reinterpret-cast)
-                                                : nullptr;
+                auto fake_key = xtst != nullptr
+                                    ? reinterpret_cast<FakeKeyFn>(
+                                          dlsym(xtst, "XTestFakeKeyEvent"))  // NOLINT(*-pro-type-reinterpret-cast)
+                                    : nullptr;
                 const int keycode_a = XKeysymToKeycode(obs, 0x61 /*XK_a*/);
                 if (fake_key == nullptr || keycode_a == 0) {
                     skip("libXtst/XTEST 不可用 ⇒ 假键合成无从执行，commit 通道交 --interactive");
@@ -228,8 +229,8 @@ auto main(int argc, char **argv) -> int {
                     pump(surface, 12);
                     if (text_inputs == before || last_text != "a") {
                         emit("[INFO] 现场：TextInputEvent 计数 " + std::to_string(before) + " → " +
-                             std::to_string(text_inputs) + " 末条=\"" + last_text + "\" keycode=" +
-                             std::to_string(keycode_a) + "（供区分假键未达/被 IM 截走/取字为空）");
+                             std::to_string(text_inputs) + " 末条=\"" + last_text +
+                             "\" keycode=" + std::to_string(keycode_a) + "（供区分假键未达/被 IM 截走/取字为空）");
                     }
                     check(text_inputs > before && last_text == "a",
                           "XTEST 假键 'a' ⇒ TextInputEvent(\"a\") 上屏（IC/XIM 接线不吞普通字符）");

@@ -34,4 +34,4 @@ auto Scene::serialize_widget(const Widget &w, std::string &out) -> void {
     out += '}';
 }
 
-} // namespace aurora
+}  // namespace aurora

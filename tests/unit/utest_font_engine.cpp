@@ -114,8 +114,8 @@ AURORA_TEST_CASE(measure_ascent_agrees_with_drawn_ink_band) {
         }
     }
     AURORA_TEST_REQUIRE_GT(top, -1);  // 确有着墨
-    AURORA_TEST_CHECK_LT(static_cast<float>(top), pen_y);                      // 字身在基线上方
-    AURORA_TEST_CHECK_GE(static_cast<float>(top), pen_y - ascent - 1.0F);      // 不越出 ascent 上沿
+    AURORA_TEST_CHECK_LT(static_cast<float>(top), pen_y);  // 字身在基线上方
+    AURORA_TEST_CHECK_GE(static_cast<float>(top), pen_y - ascent - 1.0F);  // 不越出 ascent 上沿
     AURORA_TEST_CHECK_LE(static_cast<float>(bottom), pen_y + descent + 1.0F);  // 不越出 descent 下沿
 }
 

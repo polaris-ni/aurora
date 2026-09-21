@@ -5,7 +5,7 @@
 // wgpu_wayland_surface.h — Wayland 宿主 + WgpuRhi GPU 栅格上屏后端
 // ------------------------------------------------------------
 // 仅当 AURORA_BACKEND_GPU_WGPU 且 AURORA_BACKEND_WAYLAND（Linux）定义时编译。
-// 与 Win32 的 WgpuSurface、Linux/X11 的 WgpuX11Surface 同族、同帧调度契约：
+// 与 Win32 的 WgpuWin32Surface、Linux/X11 的 WgpuX11Surface 同族、同帧调度契约：
 // `Window::present_root` 经 `gpu_backend()` 把帧级 DisplayList 回放至 `rhi::WgpuRhi`，
 // GPU 端光栅化并经 Wayland surface（`WGPUSurfaceSourceWaylandSurface`，wl_display*
 // 与 wl_surface* 同源于 `WaylandSurface::native_display()/native_handle()`）present 上屏。
@@ -43,7 +43,7 @@ namespace aurora {
 
 /// @brief Wayland + wgpu GPU 栅格表面：帧级 DisplayList 经 `rhi::WgpuRhi` 光栅并 swapchain 上屏。
 ///
-/// 帧调度契约（`RhiFrameSink`）与 Win32 `WgpuSurface`、X11 `WgpuX11Surface` 完全一致：
+/// 帧调度契约（`RhiFrameSink`）与 Win32 `WgpuWin32Surface`、X11 `WgpuX11Surface` 完全一致：
 /// `Window::present_gpu_frame` 以**逻辑 dp** 尺寸调 `sink.begin_frame`，本类内置适配器
 /// 按内嵌宿主 scale 折算设备像素。
 ///
@@ -65,7 +65,7 @@ class WgpuWaylandSurface final : public Surface {
     /// @brief 内嵌 Wayland 宿主与 wgpu 后端均就绪（false 时工厂应报错/改选其他后端）。
     [[nodiscard]] auto is_available() const -> bool;
 
-    /// @brief GPU 栅格路径当前是否生效（回退观测点，语义同 Win32 WgpuSurface::gpu_active）。
+    /// @brief GPU 栅格路径当前是否生效（回退观测点，语义同 Win32 WgpuWin32Surface::gpu_active）。
     [[nodiscard]] auto gpu_active() const -> bool { return gpu_ != nullptr && !gpu_dead_; }
 
     /// @brief 经软件路径（内嵌宿主 wl_shm）上屏的帧数——**GPU 生效期间应为 0**。
@@ -166,15 +166,15 @@ class WgpuWaylandSurface final : public Surface {
     };
 
     std::unique_ptr<WaylandSurface> host_;  ///< 内嵌 Wayland 宿主（窗口壳/事件/软件回退上屏）
-    std::unique_ptr<rhi::WgpuRhi> gpu_;     ///< wgpu 后端（nullptr = 初始化失败，纯软件回退）
-    std::unique_ptr<Sink> sink_;            ///< 帧 sink 适配器（与 gpu_ 同生命周期）
+    std::unique_ptr<rhi::WgpuRhi> gpu_;  ///< wgpu 后端（nullptr = 初始化失败，纯软件回退）
+    std::unique_ptr<Sink> sink_;  ///< 帧 sink 适配器（与 gpu_ 同生命周期）
 
     bool vsync_ = true;
     bool gpu_frame_active_ = false;  ///< 本帧 sink.begin_frame 成功（present 时消费）
-    bool gpu_dead_ = false;          ///< 运行期 GPU 失效（永久软件回退）
-    int frame_ = 0;                  ///< 已呈现帧计数
-    int software_present_ = 0;       ///< 软件路径上屏帧数（见 software_present_count()）
-    int deco_replays_ = 0;           ///< 装饰回放进 GPU 帧的帧数（见 decoration_replay_count()）
+    bool gpu_dead_ = false;  ///< 运行期 GPU 失效（永久软件回退）
+    int frame_ = 0;  ///< 已呈现帧计数
+    int software_present_ = 0;  ///< 软件路径上屏帧数（见 software_present_count()）
+    int deco_replays_ = 0;  ///< 装饰回放进 GPU 帧的帧数（见 decoration_replay_count()）
 };
 
 }  // namespace aurora

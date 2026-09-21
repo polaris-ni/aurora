@@ -85,8 +85,7 @@ auto Animator::tick(double dt_seconds) const -> void {
 
 // ---- TimelinePlayer ----
 
-TimelinePlayer::TimelinePlayer(TimelineResolved spec)
-    : m_(std::make_shared<Payload>(std::move(spec))) {}
+TimelinePlayer::TimelinePlayer(TimelineResolved spec) : m_(std::make_shared<Payload>(std::move(spec))) {}
 
 auto TimelinePlayer::bind_track(std::size_t slot, Track t) -> void {
     if (slot >= m_->spec.slot_count()) {

@@ -344,13 +344,13 @@ app.set_on_window_state([](au::WindowState s) {
 
 ### 6.3 无障碍桥的激活与销毁
 
-**惰性激活。** 桥不是窗口创建时构建的，而是**首个平台查询到达**时才构造（Win32 = 首个 `WM_GETOBJECT(lParam == UiaRootObjectId)`），并在此时把 `AccessibilitySettings::screen_reader_active` 回填为 `true`（进程级设置，其余字段保留）。未激活 = 语义树零构建、零事件，即无读屏在线时无障碍路径完全不进热路径。桥的构造点即挂接点：语义树根由宿主 `Win32Window::Impl` 承接（`set_accessibility_root`，每帧在 `paint` 之后由 `Window::present_root` 注入），桥构造后由宿主补喂已记录的根。
+**惰性激活。** 桥不是窗口创建时构建的，而是**首个平台查询到达**时才构造（Win32 = 首个 `WM_GETOBJECT(lParam == UiaRootObjectId)`），并在此时把 `AccessibilitySettings::screen_reader_active` 回填为 `true`（进程级设置，其余字段保留）。未激活 = 语义树零构建、零事件，即无读屏在线时无障碍路径完全不进热路径。桥的构造点即挂接点：语义树根由宿主 `Win32Host::Impl` 承接（`set_accessibility_root`，每帧在 `paint` 之后由 `Window::present_root` 注入），桥构造后由宿主补喂已记录的根。
 
 **事件路由（保持单槽契约）。** `accessibility.h` 的事件处理器仍是**进程级单槽**（宿主用），桥不占用它：桥经进程级 `a11y::ProviderRegistry` 注册，事件到达时广播给全部**已激活**桥，桥内按 `id → Widget*` 映射判定归属、无关即忽略（多窗口规模下广播成本可忽略；不为桥把单槽改多播）。故「宿主处理器 + 桥」二者同时在场、安装顺序无关。
 
-**销毁顺序（两条硬不变量，均为实机崩溃的修复结论）。** 关闭窗口时 `Win32Window::Impl` 先 `disconnect_all()`（全量 `UiaDisconnectProvider`）再析构桥（`deactivate()` 与 `disconnect_all()` 等价且幂等，并在其中**从注册表注销**——否则进程级广播会在已析构的桥上调用 `is_active()`）。另有一条与窗口无关的路径：桥缓存的语义树根是裸指针，**根控件销毁**时经单源通道 `notify_accessibility_widget_destroying()`（出自 `Node::~Node()`）立即切断根与快照。两条路径的成因、机制与不变量见 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) §8.5。
+**销毁顺序（两条硬不变量，均为实机崩溃的修复结论）。** 关闭窗口时 `Win32Host::Impl` 先 `disconnect_all()`（全量 `UiaDisconnectProvider`）再析构桥（`deactivate()` 与 `disconnect_all()` 等价且幂等，并在其中**从注册表注销**——否则进程级广播会在已析构的桥上调用 `is_active()`）。另有一条与窗口无关的路径：桥缓存的语义树根是裸指针，**根控件销毁**时经单源通道 `notify_accessibility_widget_destroying()`（出自 `Node::~Node()`）立即切断根与快照。两条路径的成因、机制与不变量见 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) §8.5。
 
-**多窗口。** 桥与窗口一一对应（`Win32Window::Impl` 唯一持有），多窗口即多个桥同时注册；`screen_reader_active` 是**进程级**设置，任一桥激活即置 `true`、任一桥去激活即试置 `false`（多窗口下复位语义为 best-effort，见 §6.2 同类启发式约定）。
+**多窗口。** 桥与窗口一一对应（`Win32Host::Impl` 唯一持有），多窗口即多个桥同时注册；`screen_reader_active` 是**进程级**设置，任一桥激活即置 `true`、任一桥去激活即试置 `false`（多窗口下复位语义为 best-effort，见 §6.2 同类启发式约定）。
 
 `UIAutomationCore.dll` 运行时动态加载，缺库或必要导出缺失即整桥降级 no-op + 一次 `Diagnostics::warn`（无链接期依赖、无编译期裁剪开关）。
 
@@ -467,9 +467,9 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 事件侧契约（`TextCompositionEvent` 字段口径、preedit 不进 `value()`、候选窗定位盒）见 [`05-event-navigation.md`](05-event-navigation.md) §2.4；本节只记平台壳的接线。
 
-**桥的位置与生命周期**：`src/aurora/window/detail/win32_ime.h`（`detail::Win32ImeBridge`），由 `Win32Window::Impl` **随窗口构造**、与窗口一一对应（不像 §6.3 的无障碍桥那样惰性激活——IMM32 无查询代价，无输入法时 `WM_IME_*` 一条也不会投递）。`Win32Surface`（GDI）与 `D3D11Surface` 共用同一 `Win32Window` 宿主与同一份桥，故接一次覆盖两路后端。
+**桥的位置与生命周期**：`src/aurora/window/detail/win32_ime.h`（`detail::Win32ImeBridge`），由 `Win32Host::Impl` **随窗口构造**、与窗口一一对应（不像 §6.3 的无障碍桥那样惰性激活——IMM32 无查询代价，无输入法时 `WM_IME_*` 一条也不会投递）。`Win32Surface`（GDI）与 `D3D11Surface` 共用同一 `Win32Host` 宿主与同一份桥，故接一次覆盖两路后端。
 
-**两条通道**：桥经 `Hooks{emit, caret_bounds, scale_factor}` 三个回调与宿主对话——`emit` 复用窗口既有的事件单槽（`Impl::handler`，与鼠标/键盘同径，最终落到 `WindowHost::dispatch` → `EventDispatcher`），`caret_bounds` 由 `Surface::set_composition_caret_provider()` 注入（宿主侧查询当前焦点控件的 `composition_caret_bounds()`），`scale_factor` 供 dp→像素换算。`WndProc` 侧把 IME 单独分族：`handle_ime(msg, wp, lp)`（`win32_window.cpp`）认领 `WM_IME_STARTCOMPOSITION` / `WM_IME_COMPOSITION` / `WM_IME_ENDCOMPOSITION` / `WM_IME_CHAR` 与 `WM_KILLFOCUS`（失焦取消侧路径），桥返回 `std::nullopt` 表示不处理、回落 `DefWindowProc`。
+**两条通道**：桥经 `Hooks{emit, caret_bounds, scale_factor}` 三个回调与宿主对话——`emit` 复用窗口既有的事件单槽（`Impl::handler`，与鼠标/键盘同径，最终落到 `WindowHost::dispatch` → `EventDispatcher`），`caret_bounds` 由 `Surface::set_composition_caret_provider()` 注入（宿主侧查询当前焦点控件的 `composition_caret_bounds()`），`scale_factor` 供 dp→像素换算。`WndProc` 侧把 IME 单独分族：`handle_ime(msg, wp, lp)`（`win32_host.cpp`）认领 `WM_IME_STARTCOMPOSITION` / `WM_IME_COMPOSITION` / `WM_IME_ENDCOMPOSITION` / `WM_IME_CHAR` 与 `WM_KILLFOCUS`（失焦取消侧路径），桥返回 `std::nullopt` 表示不处理、回落 `DefWindowProc`。
 
 **三条实机才暴露的纪律**（无头 CI 无法验证，由 `tools/verify/win32_ime_live_probe.cpp` 自动段守住）：
 
@@ -635,9 +635,9 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 | `feature_flags() -> FeatureFlags` / `feature_flags_json() -> Json` | 编译期 feature 宏开关运行时查询（始终可用，编译期常量快照）。强类型结构体字段 + JSON 导出（键 = 完整宏名）。C++ 侧宏镜像单点收口于 `src/aurora/debug/feature_flags.cpp`，应用代码零 `#ifdef`（需求 #14） |
 | `surface_state(const Surface&) -> Json` | `width` / `height` / `scale_factor` / `frame_count` / `clear_color` / `should_close` / `has_native_window` |
 
-**门控与 ODR 安全**：API 头**始终声明**，调试能力函数的 `.cpp` 体按 `AURORA_ENABLE_DEBUG` 裁切（例外：输出目录三函数的定义不裁切、无条件编译，与「始终可用」一致）；`Surface::save_snapshot` / `capture_window` 默认实现按运行时 `data()` 判空（宏无关），后端专属截图体门控。两函数在 `Surface` 上**始终声明**（vtable 槽稳定，属 `Surface` 契约）。Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用 `Win32Window` 宿主，经共享 `detail::capture_window_by_hwnd` 走 PrintWindow 路径）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写 `capture_window`（GLFW：Windows 经原生 HWND 走 PrintWindow 含非客户区；X11/Wayland/Mac 走 GL 帧缓冲读回——软件路径先重放上一帧再 `glReadPixels`，GPU 路径经 `GpuGlRhi::read_pixels`，得客户区 framebuffer 尺寸画面，须在某次 present 之后调用）；Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。
+**门控与 ODR 安全**：API 头**始终声明**，调试能力函数的 `.cpp` 体按 `AURORA_ENABLE_DEBUG` 裁切（例外：输出目录三函数的定义不裁切、无条件编译，与「始终可用」一致）；`Surface::save_snapshot` / `capture_window` 默认实现按运行时 `data()` 判空（宏无关），后端专属截图体门控。两函数在 `Surface` 上**始终声明**（vtable 槽稳定，属 `Surface` 契约）。Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用 `Win32Host` 宿主，经共享 `detail::capture_window_by_hwnd` 走 PrintWindow 路径）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写 `capture_window`（GLFW：Windows 经原生 HWND 走 PrintWindow 含非客户区；X11/Wayland/Mac 走 GL 帧缓冲读回——软件路径先重放上一帧再 `glReadPixels`，GPU 路径经 `GpuGlRhi::read_pixels`，得客户区 framebuffer 尺寸画面，须在某次 present 之后调用）；Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。
 
-`Surface` 另新增虚函数 `framebuffer_size()`（默认返回逻辑 `size()`）：`save_snapshot` 以它作 PNG 宽高；按 DPI 物理分辨率分配缓冲的后端须覆写返回物理像素，避免缩放比 ≠ 1 时 PNG 尺寸与像素数据错位。`native_handle()` 为 `const`（只读查询），**基类默认返回 `nullptr`**；真实窗口后端必须覆写为宿主原生句柄——Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用同一 `Win32Window` 宿主）**均**覆写为 `hwnd()`。上表 `surface_state()` 的 `has_native_window` 即由它非空判定，漏覆写会让真实窗口后端**恒报 false**（`D3D11Surface` 曾如此，2026-09-13 补齐），故由 `utest_native_surfaces` 的 `windows_family_native_handle_contract` 类型级守门。
+`Surface` 另新增虚函数 `framebuffer_size()`（默认返回逻辑 `size()`）：`save_snapshot` 以它作 PNG 宽高；按 DPI 物理分辨率分配缓冲的后端须覆写返回物理像素，避免缩放比 ≠ 1 时 PNG 尺寸与像素数据错位。`native_handle()` 为 `const`（只读查询），**基类默认返回 `nullptr`**；真实窗口后端必须覆写为宿主原生句柄——Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用同一 `Win32Host` 宿主）**均**覆写为 `hwnd()`。上表 `surface_state()` 的 `has_native_window` 即由它非空判定，漏覆写会让真实窗口后端**恒报 false**（`D3D11Surface` 曾如此，2026-09-13 补齐），故由 `utest_native_surfaces` 的 `windows_family_native_handle_contract` 类型级守门。
 
 ### 11.1 可视化调试叠层
 

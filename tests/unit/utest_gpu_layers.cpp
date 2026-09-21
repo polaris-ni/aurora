@@ -59,13 +59,13 @@ class LayerRecordingRhi final : public rhi::RhiBackend {
         e.bounds_size = cmd.bounds.size;
         e.composite_scale = cmd.composite_scale;
         if (cmd.matrix_idx >= 0) {
-            e.matrix = list_->matrix_at(cmd.matrix_idx);
+            e.matrix = list->matrix_at(cmd.matrix_idx);
         }
         entries.push_back(e);
     }
 
     std::vector<Entry> entries;
-    DisplayList *list_ = nullptr;  // 测试助手：非 const（matrix_at 非只读接口）
+    DisplayList* list = nullptr;  // 测试助手：非 const（matrix_at 非只读接口）
 };
 
 }  // namespace
@@ -109,39 +109,39 @@ AURORA_TEST_CASE(native_surface_frame_defaults) {
 }
 
 AURORA_TEST_CASE(painter_layer_recording_commands) {
-    constexpr std::uint64_t KEY_OUTER = 11;
-    constexpr std::uint64_t KEY_INNER = 12;
+    constexpr std::uint64_t key_outer = 11;
+    constexpr std::uint64_t key_inner = 12;
 
     // 录制模式：层命令入 DL，字段完整（aux_key / 层尺寸 / 放置矩阵 / 录制缩放）。
     DisplayList dl;
     Painter rec;
     rec.begin(64, 32);
     rec.record(dl);
-    rec.begin_layer(KEY_OUTER, Size{.width = 64.0F, .height = 32.0F});
-    rec.begin_layer(KEY_INNER, Size{.width = 32.0F, .height = 16.0F});
+    rec.begin_layer(key_outer, Size{.width = 64.0F, .height = 32.0F});
+    rec.begin_layer(key_inner, Size{.width = 32.0F, .height = 16.0F});
     rec.fill_rect(rect_at(0.0F, 0.0F, 8.0F, 8.0F), Color::red());
     rec.end_layer();
     rec.end_layer();
-    rec.draw_layer(KEY_OUTER, Matrix2D::from_translate(2.0F, 3.0F), 1.5F);
+    rec.draw_layer(key_outer, Matrix2D::from_translate(2.0F, 3.0F), 1.5F);
     rec.stop();
 
     LayerRecordingRhi recorder;
-    recorder.list_ = &dl;
+    recorder.list = &dl;
     dl.replay(recorder);
 
     AURORA_TEST_REQUIRE(recorder.entries.size() == 6U);
     AURORA_TEST_CHECK_TRUE(recorder.entries[0].kind == CmdKind::BeginLayer);
-    AURORA_TEST_CHECK_EQ(recorder.entries[0].aux_key, KEY_OUTER);
+    AURORA_TEST_CHECK_EQ(recorder.entries[0].aux_key, key_outer);
     AURORA_TEST_CHECK_EQ(recorder.entries[0].bounds_size.width, 64.0F);
     AURORA_TEST_CHECK_EQ(recorder.entries[0].bounds_size.height, 32.0F);
     AURORA_TEST_CHECK_TRUE(recorder.entries[1].kind == CmdKind::BeginLayer);
-    AURORA_TEST_CHECK_EQ(recorder.entries[1].aux_key, KEY_INNER);
+    AURORA_TEST_CHECK_EQ(recorder.entries[1].aux_key, key_inner);
     AURORA_TEST_CHECK_EQ(recorder.entries[1].bounds_size.width, 32.0F);
     AURORA_TEST_CHECK_TRUE(recorder.entries[2].kind == CmdKind::FillRect);
     AURORA_TEST_CHECK_TRUE(recorder.entries[3].kind == CmdKind::EndLayer);
     AURORA_TEST_CHECK_TRUE(recorder.entries[4].kind == CmdKind::EndLayer);
     AURORA_TEST_CHECK_TRUE(recorder.entries[5].kind == CmdKind::DrawLayer);
-    AURORA_TEST_CHECK_EQ(recorder.entries[5].aux_key, KEY_OUTER);
+    AURORA_TEST_CHECK_EQ(recorder.entries[5].aux_key, key_outer);
     AURORA_TEST_CHECK_TRUE(std::fabs(recorder.entries[5].matrix.tx - 2.0F) < 1e-6F);
     AURORA_TEST_CHECK_TRUE(std::fabs(recorder.entries[5].matrix.ty - 3.0F) < 1e-6F);
     AURORA_TEST_CHECK_EQ(recorder.entries[5].composite_scale, 1.5F);
@@ -149,9 +149,9 @@ AURORA_TEST_CASE(painter_layer_recording_commands) {
     // Direct 模式：层 API 为 no-op（软件直绘走 paint_cache_ 路径），后续绘制不受影响。
     Painter direct;
     direct.begin(8, 8);
-    direct.begin_layer(KEY_OUTER, Size{.width = 4.0F, .height = 4.0F});
+    direct.begin_layer(key_outer, Size{.width = 4.0F, .height = 4.0F});
     direct.end_layer();
-    direct.draw_layer(KEY_OUTER, Matrix2D{}, 1.0F);
+    direct.draw_layer(key_outer, Matrix2D{}, 1.0F);
     direct.fill_rect(rect_at(0.0F, 0.0F, 8.0F, 8.0F), Color::red());
     AURORA_TEST_CHECK_EQ(static_cast<int>(direct.get_pixel(4, 4).r), 255);
 }
@@ -161,7 +161,7 @@ AURORA_TEST_CASE(rhi_backend_default_contract) {
     class MockRhi final : public rhi::RhiBackend {
       public:
         [[nodiscard]] auto name() const -> std::string_view override { return "mock"; }
-        auto submit(const DrawCmd &, const rhi::CmdData &) -> void override {}
+        auto submit(const DrawCmd& /*cmd*/, const rhi::CmdData& /*data*/) -> void override {}
     };
     MockRhi mock;
     const auto cap = mock.capabilities();
@@ -175,7 +175,7 @@ AURORA_TEST_CASE(rhi_backend_default_contract) {
 }
 
 AURORA_TEST_CASE(software_rhi_layer_roundtrip_matches_direct) {
-    constexpr std::uint64_t KEY = 21;
+    constexpr std::uint64_t key = 21;
     // 参照：直接绘制。
     Painter direct;
     direct.begin(64, 32);
@@ -186,27 +186,28 @@ AURORA_TEST_CASE(software_rhi_layer_roundtrip_matches_direct) {
     Painter recorded;
     recorded.begin(64, 32);
     recorded.record(dl);
-    recorded.begin_layer(KEY, Size{.width = 64.0F, .height = 32.0F});
+    recorded.begin_layer(key, Size{.width = 64.0F, .height = 32.0F});
     recorded.fill_rect(rect_at(0.0F, 0.0F, 64.0F, 32.0F), Color::red());
     recorded.end_layer();
-    recorded.draw_layer(KEY, Matrix2D{}, 1.0F);
+    recorded.draw_layer(key, Matrix2D{}, 1.0F);
     recorded.stop();
     dl.replay(recorded);
 
     AURORA_TEST_REQUIRE(direct.width() == recorded.width());
     const auto bytes = static_cast<std::size_t>(direct.width()) * static_cast<std::size_t>(direct.height()) * 4U;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 数据指针 + 字节数界定快照范围，对应 RHI 快照契约
     AURORA_TEST_CHECK_TRUE(std::equal(direct.data(), direct.data() + static_cast<std::ptrdiff_t>(bytes),
                                       recorded.data()));
 }
 
 AURORA_TEST_CASE(software_rhi_layer_miss_skips_and_bumps_epoch) {
     // 动态分配层键：全局层存储进程级持久，硬编码键在 --repeat 下会假命中。
-    const auto KEY = next_gpu_layer_key();
+    const auto key = next_gpu_layer_key();
     // 冷存储：DrawLayer 未命中 → 跳过（零绘制）+ bump 层代际（控件下帧重录的自愈信号）。
     DisplayList miss_dl;
     DrawCmd miss;
     miss.kind = CmdKind::DrawLayer;
-    miss.aux_key = KEY;
+    miss.aux_key = key;
     miss.matrix_idx = miss_dl.add_matrix(Matrix2D{});
     miss.composite_scale = 1.0F;
     miss_dl.push_cmd(miss);
@@ -223,17 +224,17 @@ AURORA_TEST_CASE(software_rhi_layer_miss_skips_and_bumps_epoch) {
     Painter recorder;
     recorder.begin(16, 16);
     recorder.record(full_dl);
-    recorder.begin_layer(KEY, Size{.width = 16.0F, .height = 16.0F});
+    recorder.begin_layer(key, Size{.width = 16.0F, .height = 16.0F});
     recorder.fill_rect(rect_at(0.0F, 0.0F, 16.0F, 16.0F), Color::red());
     recorder.end_layer();
-    recorder.draw_layer(KEY, Matrix2D{}, 1.0F);
+    recorder.draw_layer(key, Matrix2D{}, 1.0F);
     recorder.stop();
     full_dl.replay(target);
     AURORA_TEST_CHECK_EQ(static_cast<int>(target.get_pixel(8, 8).r), 255);
 }
 
 AURORA_TEST_CASE(software_rhi_layer_store_shared_across_instances) {
-    constexpr std::uint64_t KEY = 23;
+    constexpr std::uint64_t key = 23;
     // 共享层存储：实例 A 定稿层位图，实例 B 仅收 DrawLayer 即命中（嵌套离屏回放场景）。
     std::unordered_map<std::uint64_t, Image> store;
 
@@ -241,10 +242,10 @@ AURORA_TEST_CASE(software_rhi_layer_store_shared_across_instances) {
     Painter recorder;
     recorder.begin(16, 16);
     recorder.record(full_dl);
-    recorder.begin_layer(KEY, Size{.width = 16.0F, .height = 16.0F});
+    recorder.begin_layer(key, Size{.width = 16.0F, .height = 16.0F});
     recorder.fill_rect(rect_at(0.0F, 0.0F, 16.0F, 16.0F), Color::blue());
     recorder.end_layer();
-    recorder.draw_layer(KEY, Matrix2D{}, 1.0F);
+    recorder.draw_layer(key, Matrix2D{}, 1.0F);
     recorder.stop();
 
     Painter pa;
@@ -252,13 +253,13 @@ AURORA_TEST_CASE(software_rhi_layer_store_shared_across_instances) {
     rhi::SoftwareRhi swa{pa, &store};
     full_dl.replay(swa);
     AURORA_TEST_CHECK_EQ(static_cast<int>(pa.get_pixel(8, 8).b), 255);
-    AURORA_TEST_CHECK_TRUE(store.count(KEY) == 1U);
+    AURORA_TEST_CHECK_TRUE(store.count(key) == 1U);
 
     // 实例 B（冷 Painter、同一存储）：DrawLayer-only 命中，不 bump 代际。
     DisplayList draw_only;
     DrawCmd dl_cmd;
     dl_cmd.kind = CmdKind::DrawLayer;
-    dl_cmd.aux_key = KEY;
+    dl_cmd.aux_key = key;
     dl_cmd.matrix_idx = draw_only.add_matrix(Matrix2D{});
     dl_cmd.composite_scale = 1.0F;
     draw_only.push_cmd(dl_cmd);

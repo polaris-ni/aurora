@@ -54,7 +54,7 @@ auto deliver_chain(std::vector<HitNode> &chain, MouseEvent &e) -> void {
     }
     return nullptr;
 }
-} // namespace
+}  // namespace
 
 auto EventDispatcher::update_hover(const std::vector<HitNode> &chain) -> void {
     // 命中链 diff：旧链有、新链无 → 离开；新链有、旧链无 → 进入。链长度通常 ≤ 几十，
@@ -70,7 +70,7 @@ auto EventDispatcher::update_hover(const std::vector<HitNode> &chain) -> void {
     for (const HitNode &old_n : hover_chain_) {
         Widget *sp = old_n.get();
         if (sp == nullptr) {
-            continue; // 已回收，跳过离开通知
+            continue;  // 已回收，跳过离开通知
         }
         if (!contains(chain, sp)) {
             sp->on_hover_change(false);
@@ -101,8 +101,8 @@ auto EventDispatcher::update_hover(const std::vector<HitNode> &chain) -> void {
 auto EventDispatcher::resolve_cursor(const std::vector<HitNode> &chain) const -> CursorShape {
     // 自最深（链尾）向根（链头）回溯：内层控件的光标声明覆盖外层容器。
     // 优先级：修饰链 CursorNode > Widget::cursor_shape() 虚钩子 > 含 Clickable → PointingHand。
-    for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
-        Widget *sp = it->get();
+    for (const auto &it : std::views::reverse(chain)) {
+        Widget *sp = it.get();
         if (sp == nullptr) {
             continue;  // 弱引用已回收，安全跳过
         }
@@ -124,7 +124,7 @@ auto EventDispatcher::dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *
     FocusManager *prev = current_focus_manager();
     set_current_focus_manager(fm);
     const int key = e.pointer_id.has_value() ? e.pointer_id.value() : AURORA_MOUSE_CAPTURE_KEY;
-    const Rect root_rect{ .origin = Point(), .size = root.size() };
+    const Rect root_rect{.origin = Point(), .size = root.size()};
 
     // Press：命中后缓存命中链（指针捕获），后续 Move/Release 即使命中失败也复用。
     if (e.action == MouseAction::Press) {
@@ -153,7 +153,7 @@ auto EventDispatcher::dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *
     // 使光标移出根/窗口外、或落入重叠兄弟控件时仍连续派发给按下时的目标。
     const auto cit = pointer_capture_.find(key);
     if (cit != pointer_capture_.end()) {
-        std::vector<HitNode> chain = cit->second; // 复制：Release 会擦除原链
+        std::vector<HitNode> chain = cit->second;  // 复制：Release 会擦除原链
         if (e.action == MouseAction::Release) {
             pointer_capture_.erase(cit);
         }
@@ -167,7 +167,7 @@ auto EventDispatcher::dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *
     // Press 时转移），否则拖选结束落在邻行/窗口外时焦点被抢走、选区被清空。
     auto chain = root.hit_test_chain(e.position, root_rect, BuildContext{});
     if (e.action == MouseAction::Move) {
-        update_hover(chain); // 悬停追踪：空链也要 diff（光标移到空白/窗外 → 清除旧悬停）
+        update_hover(chain);  // 悬停追踪：空链也要 diff（光标移到空白/窗外 → 清除旧悬停）
     }
     if (chain.empty()) {
         set_current_focus_manager(prev);
@@ -220,10 +220,10 @@ struct TouchRoute {
 // ② 原始多点流：把完整 TouchEvent 交给整条命中链（touch() 修饰器 / PinchRecognizer 消费），全链广播不截断。
 auto broadcast_touch(const std::vector<HitNode> &chain, TouchEvent &e) -> void {
     for (const auto &it : std::views::reverse(chain)) {
-        std::shared_ptr<Widget> keepalive; // 回调可能销毁该控件，须持强引用跨越调用
+        std::shared_ptr<Widget> keepalive;  // 回调可能销毁该控件，须持强引用跨越调用
         Widget *sp = it.lock(keepalive);
         if (sp == nullptr) {
-            continue; // 控件已被回收，安全跳过
+            continue;  // 控件已被回收，安全跳过
         }
         sp->on_pointer_event(e);
     }
@@ -237,31 +237,31 @@ auto deliver_synthesized(const std::vector<HitNode> &chain, const TouchPoint &p,
     me.button = MouseButton::Left;
     me.pointer_id = p.id;
     for (const auto &it : std::views::reverse(chain)) {
-        std::shared_ptr<Widget> keepalive; // 同 ②：回调可能销毁该控件，须持强引用跨越调用
+        std::shared_ptr<Widget> keepalive;  // 同 ②：回调可能销毁该控件，须持强引用跨越调用
         Widget *sp = it.lock(keepalive);
         if (sp == nullptr) {
-            continue; // 控件已被回收，安全跳过
+            continue;  // 控件已被回收，安全跳过
         }
         me.local_position = p.position - it.origin;
         sp->on_pointer_event(me);
         if (me.is_handled) {
-            break; // 某级消费即停止冒泡
+            break;  // 某级消费即停止冒泡
         }
     }
 }
 
-} // namespace
+}  // namespace
 
 auto TouchDispatcher::dispatch(Widget &root, TouchEvent &e, FocusManager *fm) -> bool {
     FocusManager *prev = current_focus_manager();
     set_current_focus_manager(fm);
     bool any = false;
-    const Rect root_rect{ .origin = Point(), .size = root.size() };
+    const Rect root_rect{.origin = Point(), .size = root.size()};
 
     for (const TouchPoint &p : e.points) {
         const TouchRoute route = route_touch_point(root, root_rect, pointer_capture_, p);
         if (route.chain.empty()) {
-            continue; // 抬起的悬空点 / 完全未命中
+            continue;  // 抬起的悬空点 / 完全未命中
         }
         any = true;
 
@@ -286,14 +286,18 @@ enum class KeyCategory : std::uint8_t { Other, Tab, Arrow, Activate };
 
 [[nodiscard]] auto classify_key(const KeyEvent &e) -> KeyCategory {
     switch (static_cast<KeyCode>(e.key)) {
-    case KeyCode::Tab: return KeyCategory::Tab;
-    case KeyCode::ArrowUp:
-    case KeyCode::ArrowDown:
-    case KeyCode::ArrowLeft:
-    case KeyCode::ArrowRight: return KeyCategory::Arrow;
-    case KeyCode::Enter:
-    case KeyCode::Space: return KeyCategory::Activate;
-    default: return KeyCategory::Other;
+        case KeyCode::Tab:
+            return KeyCategory::Tab;
+        case KeyCode::ArrowUp:
+        case KeyCode::ArrowDown:
+        case KeyCode::ArrowLeft:
+        case KeyCode::ArrowRight:
+            return KeyCategory::Arrow;
+        case KeyCode::Enter:
+        case KeyCode::Space:
+            return KeyCategory::Activate;
+        default:
+            return KeyCategory::Other;
     }
 }
 
@@ -319,46 +323,56 @@ struct MergedModifiers {
 [[nodiscard]] auto match_shortcut(KeyEvent &e, FocusManager &fm, KeyCategory cat, const MergedModifiers &mods)
     -> std::optional<bool> {
     if (e.action != KeyAction::Down) {
-        return std::nullopt; // 仅按下阶段匹配快捷键；释放等交给焦点控件
+        return std::nullopt;  // 仅按下阶段匹配快捷键；释放等交给焦点控件
     }
     switch (cat) {
-    case KeyCategory::Tab: // Tab 序导航：Shift+Tab 后退，否则前进（specification/05-event-navigation.md §4）
-        fm.move_focus(mods.shift ? FocusDirection::Backward : FocusDirection::Forward);
-        e.is_handled = true;
-        return true;
-    case KeyCategory::Arrow: {
-        auto  dir = FocusDirection::Forward;
-        switch (static_cast<KeyCode>(e.key)) {
-        case KeyCode::ArrowUp: dir = FocusDirection::Up; break;
-        case KeyCode::ArrowDown: dir = FocusDirection::Down; break;
-        case KeyCode::ArrowLeft: dir = FocusDirection::Left; break;
-        case KeyCode::ArrowRight: dir = FocusDirection::Right; break;
-        default: return std::nullopt;
+        case KeyCategory::Tab:  // Tab 序导航：Shift+Tab 后退，否则前进（specification/05-event-navigation.md §4）
+            fm.move_focus(mods.shift ? FocusDirection::Backward : FocusDirection::Forward);
+            e.is_handled = true;
+            return true;
+        case KeyCategory::Arrow: {
+            auto dir = FocusDirection::Forward;
+            switch (static_cast<KeyCode>(e.key)) {
+                case KeyCode::ArrowUp:
+                    dir = FocusDirection::Up;
+                    break;
+                case KeyCode::ArrowDown:
+                    dir = FocusDirection::Down;
+                    break;
+                case KeyCode::ArrowLeft:
+                    dir = FocusDirection::Left;
+                    break;
+                case KeyCode::ArrowRight:
+                    dir = FocusDirection::Right;
+                    break;
+                default:
+                    return std::nullopt;
+            }
+            if (fm.move_focus(dir)) {
+                e.is_handled = true;
+                return true;
+            }
+            // 方向键但焦点未能移动：继续交给焦点控件（如文本框内部光标移动）
+            return std::nullopt;
         }
-        if (fm.move_focus(dir)) {
+        case KeyCategory::Activate: {  // Enter/Space 激活当前焦点控件（触发 click）
+            Widget *focused = fm.focused();
+            if (focused == nullptr) {
+                return std::nullopt;  // 无焦点控件则不消费
+            }
+            // 自带激活键语义的控件（文本录入）：先经键盘入口观察 Enter，未消费再回落激活。
+            if (focused->wants_activation_keys()) {
+                focused->on_key_event(e);
+                if (e.is_handled) {
+                    return true;
+                }
+            }
+            focused->activate();
             e.is_handled = true;
             return true;
         }
-        // 方向键但焦点未能移动：继续交给焦点控件（如文本框内部光标移动）
-        return std::nullopt;
-    }
-    case KeyCategory::Activate: { // Enter/Space 激活当前焦点控件（触发 click）
-        Widget *focused = fm.focused();
-        if (focused == nullptr) {
-            return std::nullopt; // 无焦点控件则不消费
-        }
-        // 自带激活键语义的控件（文本录入）：先经键盘入口观察 Enter，未消费再回落激活。
-        if (focused->wants_activation_keys()) {
-            focused->on_key_event(e);
-            if (e.is_handled) {
-                return true;
-            }
-        }
-        focused->activate();
-        e.is_handled = true;
-        return true;
-    }
-    default: return std::nullopt;
+        default:
+            return std::nullopt;
     }
 }
 
@@ -371,7 +385,7 @@ struct MergedModifiers {
     return e.is_handled;
 }
 
-} // namespace
+}  // namespace
 
 auto EventDispatcher::dispatch(Widget & /*root*/, KeyEvent &e, FocusManager &fm) -> bool {
     FocusManager *prev = current_focus_manager();
@@ -403,8 +417,8 @@ auto EventDispatcher::dispatch(Widget &root, ScrollEvent &e) -> bool {
     std::vector<HitNode> chain =
         root.hit_test_chain(e.position, Rect{.origin = Point{}, .size = root.size()}, BuildContext{});
     bool has_scrollable = false;
-    for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
-        auto *w = it->ptr;
+    for (auto &it : std::views::reverse(chain)) {
+        auto *w = it.ptr;
         if (w == nullptr || !w->wants_scroll()) {
             continue;
         }
@@ -443,7 +457,7 @@ auto EventDispatcher::dispatch(Widget & /*root*/, TextInputEvent &e, FocusManage
     set_current_focus_manager(&fm);
     Widget *focused = fm.focused();
     if (focused == nullptr) {
-        set_current_focus_manager(prev); // 与其余出口一致：不得把 &fm 泄漏到调用者作用域之外
+        set_current_focus_manager(prev);  // 与其余出口一致：不得把 &fm 泄漏到调用者作用域之外
         return false;
     }
     focused->on_text_input(e);
@@ -464,4 +478,4 @@ auto EventDispatcher::dispatch(Widget & /*root*/, TextCompositionEvent &e, Focus
     return e.is_handled;
 }
 
-} // namespace aurora
+}  // namespace aurora

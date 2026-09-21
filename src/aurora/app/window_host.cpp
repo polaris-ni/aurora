@@ -11,11 +11,7 @@ namespace aurora {
 // =============================================================================
 
 WindowHost::WindowHost(WindowId id, Scene scene, std::unique_ptr<Window> window, const WindowOptions &opts)
-    : id_(id),
-      scroll_scope_(std::to_string(id)),
-      role_(opts.role),
-      opts_(opts),
-      scene_(std::move(scene)),
+    : id_(id), scroll_scope_(std::to_string(id)), role_(opts.role), opts_(opts), scene_(std::move(scene)),
       window_(std::move(window)) {
     focus_.set_root(&scene_.root());  // Tab 焦点序遍历的起点（可为 nullptr → 禁用 Tab 导航）
 }
@@ -89,9 +85,7 @@ auto WindowHost::on_scale_changed() -> void {
     }
 }
 
-auto WindowHost::display_id() const -> int {
-    return window_ != nullptr ? window_->surface().display_id() : -1;
-}
+auto WindowHost::display_id() const -> int { return window_ != nullptr ? window_->surface().display_id() : -1; }
 
 auto WindowHost::move_to_display(int display_id) -> void {
     if (window_ != nullptr) {
@@ -172,8 +166,8 @@ auto WindowHost::render_frame(double dt) -> Result<bool> {
     return r;
 }
 
-auto WindowHost::decide_wait(double frame_budget_ms, bool anim_active, double next_deadline_ms,
-                             double elapsed_ms) const -> double {
+auto WindowHost::decide_wait(double frame_budget_ms, bool anim_active, double next_deadline_ms, double elapsed_ms) const
+    -> double {
     if (window_ == nullptr) {
         return 0.0;  // 无头宿主不等待（测试以有限帧驱动，引入等待会破坏确定性）
     }
@@ -251,9 +245,7 @@ auto WindowHost::dispatch_key(KeyEvent e) -> bool {
     return result;
 }
 
-auto WindowHost::dispatch_text(TextInputEvent e) -> bool {
-    return EventDispatcher::dispatch(scene_.root(), e, focus_);
-}
+auto WindowHost::dispatch_text(TextInputEvent e) -> bool { return EventDispatcher::dispatch(scene_.root(), e, focus_); }
 
 auto WindowHost::dispatch_touch(const TouchEvent &e) -> void {
     // 派发器需要非 const 事件（命中链按 pointer id 缓存、is_handled_ 回写），此处构造可变副本。

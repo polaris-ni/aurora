@@ -37,11 +37,11 @@ namespace {
 // 顶点、同一套规范化的 4× 多重采样位与同样的 resolve+blend 公式，故对软件参考点的残差是同一个
 // 确定性量；差异像素 >0 本身即证明未静默回退软件（回退软件则漂移为 0）。仍按后端各自申报，
 // 不共享常量：一旦某侧管线换 AA 方案，只有该侧预算需要重校准。
-constexpr int kGeometryTol = 48;                  // 单通道差 > tol 才算差异像素（与 wgpu 侧同词汇）
-constexpr std::size_t kPolylineBudget = 320;      // 64×64 ≈ 8% 画布（描边周长占比较高）
-constexpr std::size_t kSectorBudget = 256;        // 64×64 曲线边界同理
-constexpr std::size_t kTextBudget = 2048;         // 240×120 字形边缘 AA 与次像素定位抖动
-constexpr std::size_t kChartBudget = 12800;       // 320×200 网格细线 + 小字号文本复合
+constexpr int AURORA_GEOMETRY_TOL = 48;  // 单通道差 > tol 才算差异像素（与 wgpu 侧同词汇）
+constexpr std::size_t AURORA_POLYLINE_BUDGET = 320;  // 64×64 ≈ 8% 画布（描边周长占比较高）
+constexpr std::size_t AURORA_SECTOR_BUDGET = 256;  // 64×64 曲线边界同理
+constexpr std::size_t AURORA_TEXT_BUDGET = 2048;  // 240×120 字形边缘 AA 与次像素定位抖动
+constexpr std::size_t AURORA_CHART_BUDGET = 12800;  // 320×200 网格细线 + 小字号文本复合
 
 /// @brief 隐形 3.3 core 上下文宿主：只为 `load_gl` 提供 current 上下文；本 TU 不走 present
 ///        路径（帧缓冲与读回全在 `GpuGlRhi` 自持 FBO 内完成），窗口尺寸取场景上界以免
@@ -95,40 +95,40 @@ class HiddenGlContext {
 
 }  // namespace
 
-#define ITEST_GL_GPU_OR_SKIP(ctx, gpu)                                                                         \
-    HiddenGlContext ctx;                                                                                       \
-    if (!ctx.ok()) {                                                                                           \
-        AURORA_TEST_SKIP("显示环境不可用（隐形开窗失败），GL 容差 golden 跳过");                                \
-    }                                                                                                          \
-    au::rhi::GpuGlRhi gpu = load_rhi();                                                                        \
-    if (!gpu.valid()) {                                                                                        \
-        AURORA_TEST_SKIP("GL 3.3 core 装载失败（驱动过老 / 函数表缺项），GL 容差 golden 跳过");                 \
+#define ITEST_GL_GPU_OR_SKIP(ctx, gpu)                                                          \
+    HiddenGlContext ctx;                                                                        \
+    if (!ctx.ok()) {                                                                            \
+        AURORA_TEST_SKIP("显示环境不可用（隐形开窗失败），GL 容差 golden 跳过");                \
+    }                                                                                           \
+    au::rhi::GpuGlRhi gpu = load_rhi();                                                         \
+    if (!gpu.valid()) {                                                                         \
+        AURORA_TEST_SKIP("GL 3.3 core 装载失败（驱动过老 / 函数表缺项），GL 容差 golden 跳过"); \
     }
 
 AURORA_TEST_CASE(gpu_polyline_within_tolerance_of_software_golden) {
     ITEST_GL_GPU_OR_SKIP(ctx, gpu);
     const auto current = scenes::render_display_list(gpu, 64, 64, scenes::draw_polyline, true);
-    golden::compare_gpu_tolerance("painter_polyline", current, kGeometryTol, kPolylineBudget);
+    golden::compare_gpu_tolerance("painter_polyline", current, AURORA_GEOMETRY_TOL, AURORA_POLYLINE_BUDGET);
 }
 
 AURORA_TEST_CASE(gpu_sector_within_tolerance_of_software_golden) {
     ITEST_GL_GPU_OR_SKIP(ctx, gpu);
     const auto current = scenes::render_display_list(gpu, 64, 64, scenes::draw_sector, true);
-    golden::compare_gpu_tolerance("painter_sector", current, kGeometryTol, kSectorBudget);
+    golden::compare_gpu_tolerance("painter_sector", current, AURORA_GEOMETRY_TOL, AURORA_SECTOR_BUDGET);
 }
 
 AURORA_TEST_CASE(gpu_text_column_within_tolerance_of_software_golden) {
     ITEST_GL_GPU_OR_SKIP(ctx, gpu);
     au::Node root = scenes::build_text_column();
     const auto current = scenes::render_tree(gpu, root, 240, 120, true);
-    golden::compare_gpu_tolerance("golden_basic_column", current, kGeometryTol, kTextBudget, &root);
+    golden::compare_gpu_tolerance("golden_basic_column", current, AURORA_GEOMETRY_TOL, AURORA_TEXT_BUDGET, &root);
 }
 
 AURORA_TEST_CASE(gpu_bar_chart_within_tolerance_of_software_golden) {
     ITEST_GL_GPU_OR_SKIP(ctx, gpu);
     au::Node root = scenes::build_bar_chart();
     const auto current = scenes::render_tree(gpu, root, 320, 200, true);
-    golden::compare_gpu_tolerance("chart_bar", current, kGeometryTol, kChartBudget, &root);
+    golden::compare_gpu_tolerance("chart_bar", current, AURORA_GEOMETRY_TOL, AURORA_CHART_BUDGET, &root);
 }
 
 }  // namespace aurora::test_cases::itest_gl_golden

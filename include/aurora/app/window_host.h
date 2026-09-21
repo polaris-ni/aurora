@@ -181,16 +181,16 @@ class WindowHost {
     Scene scene_;
     std::unique_ptr<Window> window_;
     FocusManager focus_;
-    EventDispatcher mouse_;   ///< 鼠标指针捕获表（实例级，防止跨窗口捕获串味）。
-    TouchDispatcher touch_;   ///< 多点触控指针捕获表（实例级）。
-    FrameStats stats_;                       ///< 宿主自有帧统计实例（切换后启用）。
+    EventDispatcher mouse_;  ///< 鼠标指针捕获表（实例级，防止跨窗口捕获串味）。
+    TouchDispatcher touch_;  ///< 多点触控指针捕获表（实例级）。
+    FrameStats stats_;  ///< 宿主自有帧统计实例（切换后启用）。
     FrameStats *active_stats_ = &FrameStats::instance();  ///< 当前生效的统计实例（见 `own_frame_stats`）。
-    std::function<bool(Event &)> key_pre_;   ///< 键盘前置拦截（应用级快捷键）。
-    std::function<void(WindowState)> state_sink_;      ///< 可见性状态上报表。
-    std::function<void(WindowMode)> mode_sink_;        ///< 几何态上报表。
+    std::function<bool(Event &)> key_pre_;  ///< 键盘前置拦截（应用级快捷键）。
+    std::function<void(WindowState)> state_sink_;  ///< 可见性状态上报表。
+    std::function<void(WindowMode)> mode_sink_;  ///< 几何态上报表。
     bool close_requested_ = false;  ///< 程序化关闭请求（见 `request_close`；后端无关的兜底通道）。
-    bool geometry_saved_ = false;   ///< 几何是否已持久化（见 `geometry_saved()`）。
-    bool torn_down_ = false;        ///< teardown 幂等守卫。
+    bool geometry_saved_ = false;  ///< 几何是否已持久化（见 `geometry_saved()`）。
+    bool torn_down_ = false;  ///< teardown 幂等守卫。
 };
 
 }  // namespace aurora

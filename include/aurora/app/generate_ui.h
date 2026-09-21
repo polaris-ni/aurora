@@ -17,7 +17,7 @@ namespace aurora {
 /// 各控件的文本属性名并不统一（`Text` 用 `content`、`Button` 用 `label`），生成时按下表挑第一个
 /// **在该类型 schema 里真实存在**的键。⚠️ 早期版本硬编码写 `props.text`，而没有任何控件读 `text`
 /// —— 生成的树看着有文案，实际反序列化后是空的。这是本函数改为查 schema 的直接原因。
-inline constexpr std::array<std::string_view, 3> kUiTextPropCandidates = {"content", "label", "text"};
+inline constexpr std::array<std::string_view, 3> AURORA_UI_TEXT_PROP_CANDIDATES = {"content", "label", "text"};
 
 /// @brief NL→UI 生成（specification/08-tooling.md §2.6）：由自然语言描述生成 Widget JSON 树。
 ///
@@ -26,7 +26,7 @@ inline constexpr std::array<std::string_view, 3> kUiTextPropCandidates = {"conte
 /// 见 `ui_prompt.h`（prompt 投影 + 自修复环）。
 ///
 /// 覆盖面由 `serialization::list_all_components()` 派生 —— 新增控件无需改本函数即可被识别。
-/// 额外的口语别名见 `kUiKeywordAliases`（如 `label`→`Text`、`btn`→`Button`）。
+/// 额外的口语别名见 `AURORA_UI_KEYWORD_ALIASES`（如 `label`→`Text`、`btn`→`Button`）。
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: none
@@ -62,7 +62,7 @@ inline constexpr std::array<std::string_view, 3> kUiTextPropCandidates = {"conte
     };
 
     // ── 别名表：口语词 → 类型。仅在精确匹配阶段使用，故不会误伤子串 ──
-    static const std::array<std::pair<std::string_view, std::string_view>, 4> kUiKeywordAliases = {{
+    static const std::array<std::pair<std::string_view, std::string_view>, 4> AURORA_UI_KEYWORD_ALIASES = {{
         {"label", "Text"},
         {"btn", "Button"},
         {"pic", "ImageView"},
@@ -85,7 +85,7 @@ inline constexpr std::array<std::string_view, 3> kUiTextPropCandidates = {"conte
                 remember(type);
             }
         }
-        for (const auto &[alias, target] : kUiKeywordAliases) {
+        for (const auto &[alias, target] : AURORA_UI_KEYWORD_ALIASES) {
             if (tok == alias) {
                 remember(std::string(target));
             }
@@ -116,7 +116,7 @@ inline constexpr std::array<std::string_view, 3> kUiTextPropCandidates = {"conte
         const Json schema = aurora::describe_component(type);
         if (schema.contains("default_props")) {
             const Json &defaults = schema["default_props"];
-            for (const std::string_view key : kUiTextPropCandidates) {
+            for (const std::string_view key : AURORA_UI_TEXT_PROP_CANDIDATES) {
                 if (defaults.contains(std::string(key))) {
                     node["props"][std::string(key)] = type;
                     break;
@@ -130,8 +130,7 @@ inline constexpr std::array<std::string_view, 3> kUiTextPropCandidates = {"conte
     if (children.empty()) {
         Json node = Json::object();
         node["type"] = "Text";
-        node["props"]["content"] =
-            "?" + description.substr(0, std::min<std::size_t>(description.size(), 20));
+        node["props"]["content"] = "?" + description.substr(0, std::min<std::size_t>(description.size(), 20));
         children.push_back(node);
     }
 

@@ -120,7 +120,7 @@ auto Application::restore_geometry_for(WindowHost &host, const std::string &pers
 }
 
 auto Application::window_host(WindowId id) const -> WindowHost * {
-    for (auto &h : hosts_) {
+    for (const auto &h : hosts_) {
         if (h->id() == id) {
             return h.get();
         }
@@ -131,7 +131,7 @@ auto Application::window_host(WindowId id) const -> WindowHost * {
 auto Application::windows() const -> std::vector<WindowHost *> {
     std::vector<WindowHost *> out;
     out.reserve(hosts_.size());
-    for (auto &h : hosts_) {
+    for (const auto &h : hosts_) {
         out.push_back(h.get());
     }
     return out;
@@ -171,12 +171,7 @@ auto Application::audio_shared() -> const std::shared_ptr<AudioContext> & {
 // =============================================================================
 
 auto Application::has_renderable_window() const -> bool {
-    for (const auto &h : hosts_) {
-        if (h->has_window() && !h->should_close()) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(hosts_, [](const auto &h) { return h->has_window() && !h->should_close(); });
 }
 
 auto Application::should_exit() const -> bool {
@@ -362,7 +357,7 @@ auto Application::wait_once(const std::chrono::steady_clock::time_point &frame_s
 }
 
 auto Application::first_window_host() const -> WindowHost * {
-    for (auto &h : hosts_) {
+    for (const auto &h : hosts_) {
         if (h->has_window()) {
             return h.get();
         }

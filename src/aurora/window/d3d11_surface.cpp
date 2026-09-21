@@ -101,9 +101,9 @@ auto make_blend_desc() -> D3D11_BLEND_DESC {
 }  // namespace
 
 D3D11Surface::D3D11Surface(int width, int height, const std::string &title, const WindowStyleOptions &style) {
-    win_ = std::make_unique<Win32Window>(width, height, title, style);
+    win_ = std::make_unique<Win32Host>(width, height, title, style);
     if (win_->hwnd() == nullptr) {
-        AURORA_LOG_ERROR("d3d11", "Win32Window creation failed");
+        AURORA_LOG_ERROR("d3d11", "Win32Host creation failed");
         return;
     }
     ok_ = init_device(width, height);
@@ -118,7 +118,7 @@ auto D3D11Surface::set_cursor(CursorShape shape) -> void { detail::set_win32_cur
 
 auto D3D11Surface::capture_window(const std::string &path) -> Result<bool> {
 #ifdef AURORA_ENABLE_DEBUG
-    // 与 Win32Surface 同源：D3D11 复用同一 Win32Window 宿主（共享 HWND），
+    // 与 Win32Surface 同源：D3D11 复用同一 Win32Host 宿主（共享 HWND），
     // 直接走共享的 PrintWindow 截图路径抓取真实窗口（含非客户区）。
     return detail::capture_window_by_hwnd(static_cast<HWND>(native_handle()), path);
 #else

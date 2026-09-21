@@ -54,8 +54,8 @@ auto ScrollStorage::scoped_key(std::string_view key) const -> std::string {
 auto ScrollStorage::write(std::string_view key, float offset) -> void {
     const std::string k = scoped_key(key);
     offsets_[k] = offset;  // 键已存在时无重新分配
-    dirty_[k] = offset;    // 待落盘（未 attach 时也有界：条目数 ≤ 键数）
-    removed_.erase(k);     // 覆盖写撤销此前可能存在的墓碑
+    dirty_[k] = offset;  // 待落盘（未 attach 时也有界：条目数 ≤ 键数）
+    removed_.erase(k);  // 覆盖写撤销此前可能存在的墓碑
 }
 
 auto ScrollStorage::read(std::string_view key) -> std::optional<float> {
@@ -71,7 +71,7 @@ auto ScrollStorage::read(std::string_view key) -> std::optional<float> {
     if (!group.contains(k)) {
         return std::nullopt;
     }
-    const float stored = group.get<float>(k, 0.0F);
+    const auto stored = group.get<float>(k, 0.0F);
     offsets_[k] = stored;
     return stored;
 }

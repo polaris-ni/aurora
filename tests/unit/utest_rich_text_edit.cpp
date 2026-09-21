@@ -350,8 +350,8 @@ AURORA_TEST_CASE(rtl_selection_highlight_mirrors_to_right) {
 
     const float ltr_lo = highlight_left(false);
     const float rtl_lo = highlight_left(true);
-    AURORA_TEST_CHECK_TRUE(ltr_lo < 30.0F);    // LTR 选区贴左缘
-    AURORA_TEST_CHECK_TRUE(rtl_lo > 100.0F);   // RTL 选区贴右缘（镜像）
+    AURORA_TEST_CHECK_TRUE(ltr_lo < 30.0F);  // LTR 选区贴左缘
+    AURORA_TEST_CHECK_TRUE(rtl_lo > 100.0F);  // RTL 选区贴右缘（镜像）
 }
 
 AURORA_TEST_CASE(rtl_focused_caret_paints_at_right_edge) {

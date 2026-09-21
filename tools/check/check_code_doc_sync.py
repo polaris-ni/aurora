@@ -219,16 +219,20 @@ def parse_test_header(repo, rel):
             continue
         m = TYPE_RE.match(line)
         if m and type_v is None:
-            type_v = m.group(1).strip(); continue
+            type_v = m.group(1).strip();
+            continue
         m = NOTE_RE.match(line)
         if m and note_v is None:
-            note_v = m.group(1).strip(); continue
+            note_v = m.group(1).strip();
+            continue
         m = STD_TARGET_RE.match(line)
         if m and std_v is None:
-            std_v = m.group(1).strip(); continue
+            std_v = m.group(1).strip();
+            continue
         m = ALT_TARGET_RE.match(line)
         if m and alt_v is None:
-            alt_v = m.group(1).strip(); continue
+            alt_v = m.group(1).strip();
+            continue
     has_std_block = (type_v is not None and std_v is not None and note_v is not None)
     fmt = "standard" if has_std_block else ("alt" if alt_v is not None else "none")
 
@@ -283,7 +287,7 @@ def collect_public_unit_headers(repo):
                 continue
             rp = os.path.relpath(os.path.join(cur, name), repo).replace("\\", "/")
             if "/detail/" in rp or name.endswith(".gen.h") or rp in AGG_HEADERS \
-               or rp in HEADER_ONLY_EXEMPT:
+                    or rp in HEADER_ONLY_EXEMPT:
                 continue
             headers.append(rp)
     return sorted(headers)
@@ -449,7 +453,8 @@ def check_using_directive(repo, problems):
             code = _strip_line_and_block_comments(handle.read())
         for lineno, line in enumerate(code.splitlines(), start=1):
             if re.search(r"\busing\s+namespace\b", line):
-                problems.append(("TEST-R9", rel, lineno, "测试代码禁止 using-directive；用 using 声明 / 命名空间别名 / 显式限定"))
+                problems.append(
+                    ("TEST-R9", rel, lineno, "测试代码禁止 using-directive；用 using 声明 / 命名空间别名 / 显式限定"))
 
 
 def report_catch_all_trend(repo):

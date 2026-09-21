@@ -205,8 +205,7 @@ auto make_nested_scroll_tree() -> NestedScrollTree {
     content->box_height = 800.0F;
     auto inner = std::make_shared<Scroll>(ScrollProps{.child = Node{content}, .step = 1.0F});
     auto outer = std::make_shared<PullToRefresh>(Node{inner});
-    LayoutEngine::layout(*outer,
-                         Constraints{.min = Size{}, .max = Size{.width = 300.0F, .height = 300.0F}});
+    LayoutEngine::layout(*outer, Constraints{.min = Size{}, .max = Size{.width = 300.0F, .height = 300.0F}});
     return NestedScrollTree{.outer = outer, .inner = inner};
 }
 
@@ -620,12 +619,12 @@ AURORA_TEST_CASE(touch_dispatcher_captures_and_synthesizes_per_pointer) {
 }
 
 AURORA_TEST_CASE(wheel_margin_bubbles_from_inner_scroll_to_pull_to_refresh) {
-    constexpr Point kCenter{.x = 150.0F, .y = 150.0F};
+    constexpr Point center{.x = 150.0F, .y = 150.0F};
 
     // 内层已在顶部：向上滚的全量作为余量上冒，外层按橡皮筋折算为下拉距离。
     auto at_top = make_nested_scroll_tree();
     ScrollEvent bubble;
-    bubble.position = kCenter;
+    bubble.position = center;
     bubble.delta_y = 5.0F;  // 5 单位 × 16dp（库内滚轮步长口径）= 80dp 物理下拉
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*at_top.outer, bubble));
     AURORA_TEST_CHECK_NEAR(at_top.inner->offset_y(), 0.0F, 1e-4F);
@@ -636,7 +635,7 @@ AURORA_TEST_CASE(wheel_margin_bubbles_from_inner_scroll_to_pull_to_refresh) {
     auto mid = make_nested_scroll_tree();
     mid.inner->set_offset(120.0F);
     ScrollEvent inner_only;
-    inner_only.position = kCenter;
+    inner_only.position = center;
     inner_only.delta_y = 1.0F;
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*mid.outer, inner_only));
     AURORA_TEST_CHECK_NEAR(mid.inner->offset_y(), 119.0F, 1e-4F);
@@ -647,7 +646,7 @@ AURORA_TEST_CASE(wheel_margin_bubbles_from_inner_scroll_to_pull_to_refresh) {
     auto partial = make_nested_scroll_tree();
     partial.inner->set_offset(120.0F);
     ScrollEvent over_top;
-    over_top.position = kCenter;
+    over_top.position = center;
     over_top.delta_y = 200.0F;
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*partial.outer, over_top));
     AURORA_TEST_CHECK_NEAR(partial.inner->offset_y(), 0.0F, 1e-4F);
@@ -656,7 +655,7 @@ AURORA_TEST_CASE(wheel_margin_bubbles_from_inner_scroll_to_pull_to_refresh) {
     // 向下滚（露出下方内容）永不算下拉：内层自身消费，外层保持空闲。
     auto down = make_nested_scroll_tree();
     ScrollEvent downward;
-    downward.position = kCenter;
+    downward.position = center;
     downward.delta_y = -5.0F;
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*down.outer, downward));
     AURORA_TEST_CHECK_NEAR(down.inner->offset_y(), 5.0F, 1e-4F);  // step=1：5 单位 = 5dp

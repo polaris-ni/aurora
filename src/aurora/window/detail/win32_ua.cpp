@@ -16,11 +16,29 @@
 #include "aurora/core/version.h"
 #include "aurora/event/dispatcher.h"
 
+// 本 TU 是 Windows UI Automation 的 COM 桥接层：值的构造与解析必须直接操作 SDK 的
+// VARIANT union、BSTR(OLECHAR*) 与 HWND/HMONITOR 句柄，这正是下列 Core Guidelines
+// 检查要禁止的写法，但在 ABI 边界上无法按建议改写（换成 std::variant 会与
+// UIAutomationCore 的接口契约脱钩）。故在本命名空间内整块具名抑制，范围仅限四类：
+//   - cppcoreguidelines-pro-type-union-access：VARIANT 各分量的读写
+//   - cppcoreguidelines-pro-type-reinterpret-cast：BSTR / 句柄与整型互转
+//   - cppcoreguidelines-pro-type-static-cast-downcast：QueryInterface 后的接口下行
+//   - cppcoreguidelines-pro-type-const-cast：COM 方法多为 const 形参，桥接层需去掉 const 才能调用
+//   - cppcoreguidelines-pro-bounds-constant-array-index：SAFEARRAY 元素取值
+//   - cppcoreguidelines-special-member-functions / cppcoreguidelines-virtual-class-destructor：
+//     各 provider 是 COM 引用计数对象，只能经 QueryInterface/Release 取得与释放（IUnknown
+//     契约禁止按值拷贝/移动），且析构遵循 COM 惯例为 protected virtual —— 五法则与
+//     「公开非虚析构」在此均不适用。
+// NOLINTBEGIN(cppcoreguidelines-pro-type-union-access, cppcoreguidelines-pro-type-reinterpret-cast,
+// cppcoreguidelines-pro-type-static-cast-downcast, cppcoreguidelines-pro-type-const-cast,
+// cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-special-member-functions,
+// cppcoreguidelines-virtual-class-destructor)
+
 namespace aurora::detail {
 
 // UIA 布尔出/入参：MSVC SDK 的 UIAutomationCore.h 用 BOOL，MinGW-w64 的 IDL 映射用 WINBOOL；
 // 两者均为 int，别名后 override 签名在两侧工具链同时精确匹配。
-#if defined(__MINGW32__)
+#ifdef __MINGW32__
 using UiaBool = WINBOOL;
 #else
 using UiaBool = BOOL;
@@ -75,10 +93,8 @@ auto variant_not_supported(VARIANT &v) -> void {
 [[nodiscard]] auto runtime_id_array(HWND hwnd, std::uint64_t id) -> SAFEARRAY * {
     // 形态（设计 §7.2）：[UiaAppendRuntimeId, hwnd_lo, hwnd_hi, id_lo, id_hi] —— 窗口内唯一且跨进程稳定。
     const auto hw = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(hwnd));
-    int values[5] = {UiaAppendRuntimeId,
-                     static_cast<int>(hw & 0xFFFFFFFFULL),
-                     static_cast<int>((hw >> 32U) & 0xFFFFFFFFULL),
-                     static_cast<int>(id & 0xFFFFFFFFULL),
+    int values[5] = {UiaAppendRuntimeId, static_cast<int>(hw & 0xFFFFFFFFULL),
+                     static_cast<int>((hw >> 32U) & 0xFFFFFFFFULL), static_cast<int>(id & 0xFFFFFFFFULL),
                      static_cast<int>((id >> 32U) & 0xFFFFFFFFULL)};
     SAFEARRAY *arr = SafeArrayCreateVector(VT_I4, 0, 5);
     if (arr == nullptr) {
@@ -166,7 +182,7 @@ auto variant_not_supported(VARIANT &v) -> void {
 // ============================================================================
 
 auto UiaApi::instance() -> const UiaApi & {
-    static const UiaApi api = [] {
+    static const UiaApi UIA_API = [] {
         UiaApi a;
         a.loaded = false;
         HMODULE dll = LoadLibraryA("UIAutomationCore.dll");
@@ -175,24 +191,24 @@ auto UiaApi::instance() -> const UiaApi & {
         }
         // GetProcAddress 恒返 FARPROC（无参函数指针），向带参签名 reinterpret_cast 是
         // Win32 动态加载的标准写法——GCC 的 -Wcast-function-type 对此属误报，本地压制。
-#if defined(AURORA_COMPILER_GCC)
+#ifdef AURORA_COMPILER_GCC
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-function-type"
 #endif
-        a.return_raw_element_provider =
-            reinterpret_cast<decltype(a.return_raw_element_provider)>(GetProcAddress(dll, "UiaReturnRawElementProvider"));
+        a.return_raw_element_provider = reinterpret_cast<decltype(a.return_raw_element_provider)>(
+            GetProcAddress(dll, "UiaReturnRawElementProvider"));
         a.raise_automation_event =
             reinterpret_cast<decltype(a.raise_automation_event)>(GetProcAddress(dll, "UiaRaiseAutomationEvent"));
-        a.raise_property_changed =
-            reinterpret_cast<decltype(a.raise_property_changed)>(GetProcAddress(dll, "UiaRaiseAutomationPropertyChangedEvent"));
+        a.raise_property_changed = reinterpret_cast<decltype(a.raise_property_changed)>(
+            GetProcAddress(dll, "UiaRaiseAutomationPropertyChangedEvent"));
         a.raise_structure_changed =
             reinterpret_cast<decltype(a.raise_structure_changed)>(GetProcAddress(dll, "UiaRaiseStructureChangedEvent"));
         a.disconnect_provider =
             reinterpret_cast<decltype(a.disconnect_provider)>(GetProcAddress(dll, "UiaDisconnectProvider"));
         a.host_provider_from_hwnd =
             reinterpret_cast<decltype(a.host_provider_from_hwnd)>(GetProcAddress(dll, "UiaHostProviderFromHwnd"));
-        a.get_reserved_not_supported =
-            reinterpret_cast<decltype(a.get_reserved_not_supported)>(GetProcAddress(dll, "UiaGetReservedNotSupportedValue"));
+        a.get_reserved_not_supported = reinterpret_cast<decltype(a.get_reserved_not_supported)>(
+            GetProcAddress(dll, "UiaGetReservedNotSupportedValue"));
         // 可选：较老 Windows 上不存在，缺失时播报回退 LiveRegionChanged（G20/G30）。
         a.raise_notification_event =
             reinterpret_cast<decltype(a.raise_notification_event)>(GetProcAddress(dll, "UiaRaiseNotificationEvent"));
@@ -200,12 +216,12 @@ auto UiaApi::instance() -> const UiaApi & {
                    a.raise_property_changed != nullptr && a.raise_structure_changed != nullptr &&
                    a.disconnect_provider != nullptr && a.host_provider_from_hwnd != nullptr &&
                    a.get_reserved_not_supported != nullptr;
-#if defined(AURORA_COMPILER_GCC)
+#ifdef AURORA_COMPILER_GCC
 #pragma GCC diagnostic pop
 #endif
         return a;
     }();
-    return api;
+    return UIA_API;
 }
 
 // ============================================================================
@@ -399,7 +415,7 @@ class UiaRootProvider : public UiaNodeProvider,
     }
 
   protected:
-    virtual ~UiaRootProvider() = default;
+    ~UiaRootProvider() override = default;
 };
 
 // ============================================================================
@@ -438,10 +454,14 @@ class UiaTextRangeProvider : public ITextRangeProvider {
     HRESULT STDMETHODCALLTYPE CompareEndpoints(enum TextPatternRangeEndpoint endpoint, ITextRangeProvider *target,
                                                enum TextPatternRangeEndpoint target_endpoint, int *ret) override;
     HRESULT STDMETHODCALLTYPE ExpandToEnclosingUnit(enum TextUnit unit) override;
-    HRESULT STDMETHODCALLTYPE FindAttribute(TEXTATTRIBUTEID, VARIANT, UiaBool, ITextRangeProvider **) override {
+    HRESULT STDMETHODCALLTYPE FindAttribute(TEXTATTRIBUTEID /*attribute_id*/, VARIANT /*value*/,
+                                            UiaBool /*not_supported*/, ITextRangeProvider ** /*ret*/) override {
         return E_NOTIMPL;  // NVDA 不依赖（设计 §7.4 允许的合法降级）
     }
-    HRESULT STDMETHODCALLTYPE FindText(BSTR, UiaBool, UiaBool, ITextRangeProvider **) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE FindText(BSTR /*text*/, UiaBool /*backward*/, UiaBool /*ignore_case*/,
+                                       ITextRangeProvider ** /*ret*/) override {
+        return E_NOTIMPL;
+    }
     HRESULT STDMETHODCALLTYPE GetAttributeValue(TEXTATTRIBUTEID attribute_id, VARIANT *ret) override;
     HRESULT STDMETHODCALLTYPE GetBoundingRectangles(SAFEARRAY **ret) override;
     HRESULT STDMETHODCALLTYPE GetEnclosingElement(IRawElementProviderSimple **ret) override;
@@ -502,7 +522,7 @@ class UiaTextProvider : public ITextProvider {
 
     HRESULT STDMETHODCALLTYPE GetSelection(SAFEARRAY **ret) override;
     HRESULT STDMETHODCALLTYPE GetVisibleRanges(SAFEARRAY **ret) override;
-    HRESULT STDMETHODCALLTYPE RangeFromChild(IRawElementProviderSimple *, ITextRangeProvider **ret) override {
+    HRESULT STDMETHODCALLTYPE RangeFromChild(IRawElementProviderSimple * /*child*/, ITextRangeProvider **ret) override {
         if (ret != nullptr) {
             *ret = nullptr;
         }
@@ -1014,7 +1034,7 @@ auto UiaNodeProvider::SetScrollPercent(double horizontal_percent, double vertica
     if (vertical_percent < 0.0 && horizontal_percent < 0.0) {
         return S_OK;
     }
-    const double target = scroll->min + (std::clamp(vertical_percent, 0.0, 100.0) / 100.0) * span;
+    const double target = scroll->min + ((std::clamp(vertical_percent, 0.0, 100.0) / 100.0) * span);
     w->accessibility_scroll_to(target);
     return S_OK;
 }
@@ -1279,7 +1299,10 @@ auto UiaTextRangeProvider::GetBoundingRectangles(SAFEARRAY **ret) -> HRESULT {
     if (arr == nullptr) {
         return E_OUTOFMEMORY;
     }
-    for (LONG i = 0; i < static_cast<LONG>(rects.size()); ++i) {
+    // 循环上界先落到 LONG 常量：把 static_cast 直接写在条件里会被
+    // modernize-use-integer-sign-comparison 判为有符号/无符号混比（size_t → LONG）。
+    const LONG rect_count = static_cast<LONG>(rects.size());
+    for (LONG i = 0; i < rect_count; ++i) {
         SafeArrayPutElement(arr, &i, &rects[static_cast<std::size_t>(i)]);
     }
     *ret = arr;
@@ -1331,15 +1354,17 @@ auto UiaTextRangeProvider::Move(enum TextUnit unit, int count, int *ret) -> HRES
     int moved = 0;
     const int step = count > 0 ? 1 : -1;
     for (int i = 0; i < std::abs(count); ++i) {
-        std::size_t next = start_;
         const auto kind = to_shared_unit(unit);
-        if (kind == a11y::TextUnit::Character) {
-            next = (step > 0) ? a11y::UtfOffsetMap{text}.advance_utf8(end_, 1)  // 端点前进：整体右移
-                              : a11y::UtfOffsetMap{text}.advance_utf8(start_, -1);
-        } else {
+        // 两分支互斥且已全覆盖，故直接以 const 初始化求值：先声明后赋值会同时触发
+        // cppcoreguidelines-init-variables（未初始化）与 deadcode.DeadStores（初始化值从未被读取）。
+        const std::size_t next = [&]() -> std::size_t {
+            if (kind == a11y::TextUnit::Character) {
+                return (step > 0) ? a11y::UtfOffsetMap{text}.advance_utf8(end_, 1)  // 端点前进：整体右移
+                                  : a11y::UtfOffsetMap{text}.advance_utf8(start_, -1);
+            }
             const auto [s, e] = a11y::expand_to_unit(text, start_, kind);
-            next = (step > 0) ? e : (s == 0 ? 0 : a11y::expand_to_unit(text, s - 1, kind).first);
-        }
+            return (step > 0) ? e : (s == 0 ? 0 : a11y::expand_to_unit(text, s - 1, kind).first);
+        }();
         if (next == start_) {
             break;  // 已到边界
         }
@@ -1365,23 +1390,22 @@ auto UiaTextRangeProvider::MoveEndpointByUnit(enum TextPatternRangeEndpoint endp
     for (int i = 0; i < std::abs(count); ++i) {
         const bool is_start = endpoint == TextPatternRangeEndpoint_Start;
         std::size_t &edge_ref = is_start ? start_ : end_;
-        std::size_t next = edge_ref;
-        if (unit == TextUnit_Character) {
-            // G9：UTF-16 半代理索引由 `advance_utf16` 向下夹紧到码点起点。
-            next = map.advance_utf16(map.to_utf16(edge_ref), step);
-        } else {
+        // 同 MoveEndpointByUnit：分支互斥，直接以 const 初始化，避免未初始化告警与「初始化值未被读取」。
+        const std::size_t next = [&]() -> std::size_t {
+            if (unit == TextUnit_Character) {
+                // G9：UTF-16 半代理索引由 `advance_utf16` 向下夹紧到码点起点。
+                return map.advance_utf16(map.to_utf16(edge_ref), step);
+            }
             const auto [s, e] = a11y::expand_to_unit(text, edge_ref, to_shared_unit(unit));
-            next = (step > 0) ? e : (s == 0 ? 0 : a11y::expand_to_unit(text, s - 1, to_shared_unit(unit)).first);
-        }
+            return (step > 0) ? e : (s == 0 ? 0 : a11y::expand_to_unit(text, s - 1, to_shared_unit(unit)).first);
+        }();
         if (next == edge_ref) {
             break;
         }
         edge_ref = next;
         moved += step;
     }
-    if (end_ < start_) {
-        end_ = start_;
-    }
+    end_ = std::max(end_, start_);
     *ret = moved;
     return S_OK;
 }
@@ -1395,14 +1419,10 @@ auto UiaTextRangeProvider::MoveEndpointByRange(enum TextPatternRangeEndpoint end
     const std::size_t value = target_endpoint == TextPatternRangeEndpoint_Start ? other->start_ : other->end_;
     if (endpoint == TextPatternRangeEndpoint_Start) {
         start_ = value;
-        if (end_ < start_) {
-            end_ = start_;
-        }
+        end_ = std::max(end_, start_);
     } else {
         end_ = value;
-        if (start_ > end_) {
-            start_ = end_;
-        }
+        start_ = std::min(start_, end_);
     }
     clamp_to_text();
     return S_OK;
@@ -1525,8 +1545,8 @@ auto UiaTextProvider::RangeFromPoint(struct UiaPoint point, ITextRangeProvider *
             const auto [unused_cp, len] = a11y::detail::decode_cp(text, i);
             (void)unused_cp;
             if (cb.has_value()) {
-                const float dx = (cb->origin.x + cb->size.width * 0.5F) - local.x;
-                const float dy = (cb->origin.y + cb->size.height * 0.5F) - local.y;
+                const float dx = (cb->origin.x + (cb->size.width * 0.5F)) - local.x;
+                const float dy = (cb->origin.y + (cb->size.height * 0.5F)) - local.y;
                 const float d = std::abs(dx) + std::abs(dy);
                 if (d < best_dist) {
                     best_dist = d;
@@ -1602,12 +1622,10 @@ auto Win32UiaBridge::activate() -> void {
     // 激活即回填 `screen_reader_active`（D14；heuristic 语义见设计 R9）：保留其余字段。
     auto settings = current_accessibility_settings();
     settings.screen_reader_active = true;
-    set_accessibility_settings(std::move(settings));
+    set_accessibility_settings(settings);
 }
 
-auto Win32UiaBridge::deactivate() -> void {
-    disconnect_all();
-}
+auto Win32UiaBridge::deactivate() -> void { disconnect_all(); }
 
 auto Win32UiaBridge::is_active() const -> bool { return active_; }
 
@@ -1696,8 +1714,10 @@ auto Win32UiaBridge::on_announcement(const std::string &text, const Widget * /*t
 
 auto Win32UiaBridge::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<LRESULT> {
     // 只应答 UIA 根请求（`UiaRootObjectId` = -25）；其余 OBJID 交 `DefWindowProc`（MSAA 兜底，非目标）。
-    constexpr LONG UIA_ROOT_OBJECT_ID = -25;
-    if (static_cast<LONG>(static_cast<DWORD>(lp)) != UIA_ROOT_OBJECT_ID) {
+    constexpr LONG uia_root_object_id = -25;
+    // 比较在 DWORD 域进行：`UiaRootObjectId` 取值为 -25，转成同一无符号域后逐位等价，
+    // 同时避免有符号/无符号混比。lp 为其低 32 位。
+    if (static_cast<DWORD>(lp) != static_cast<DWORD>(uia_root_object_id)) {
         return std::nullopt;
     }
     if (!active_) {
@@ -1733,7 +1753,7 @@ auto Win32UiaBridge::disconnect_all() -> void {
         a11y::unregister_provider(*this);
         auto settings = current_accessibility_settings();
         settings.screen_reader_active = false;
-        set_accessibility_settings(std::move(settings));
+        set_accessibility_settings(settings);
     }
     release_platform_providers();
 }
@@ -1773,7 +1793,7 @@ auto Win32UiaBridge::scale_factor() const -> float {
     }
     const int dpi = GetDeviceCaps(dc, LOGPIXELSY);
     ReleaseDC(hwnd_, dc);
-    return dpi > 0 ? static_cast<float>(dpi) / 96.0F : 1.0F;  // 与 Win32Window::scale_factor 同口径
+    return dpi > 0 ? static_cast<float>(dpi) / 96.0F : 1.0F;  // 与 Win32Host::scale_factor 同口径
 }
 
 auto Win32UiaBridge::origin() const -> Point {
@@ -1790,8 +1810,8 @@ auto Win32UiaBridge::origin() const -> Point {
 auto Win32UiaBridge::to_physical(const Rect &dip) const -> UiaRect {
     const float s = scale_factor();
     const Point o = origin();
-    return UiaRect{.left = static_cast<double>(o.x + dip.origin.x * s),
-                   .top = static_cast<double>(o.y + dip.origin.y * s),
+    return UiaRect{.left = static_cast<double>(o.x + (dip.origin.x * s)),
+                   .top = static_cast<double>(o.y + (dip.origin.y * s)),
                    .width = static_cast<double>(dip.size.width * s),
                    .height = static_cast<double>(dip.size.height * s)};
 }
@@ -2042,7 +2062,8 @@ auto Win32UiaBridge::queue_property_changed(std::uint64_t id, PROPERTYID prop, c
     pending_.push_back(e);
 }
 
-auto Win32UiaBridge::queue_structure_changed(std::uint64_t parent_id, bool child_added, std::uint64_t child_id) -> void {
+auto Win32UiaBridge::queue_structure_changed(std::uint64_t parent_id, bool child_added, std::uint64_t child_id)
+    -> void {
     PendingEvent e{};
     e.kind = PendingEvent::Kind::Structure;
     e.id = parent_id;
@@ -2121,10 +2142,9 @@ auto Win32UiaBridge::emit_pending() -> void {
                         rid_len = 3;
                     }
                     api.raise_structure_changed(target,
-                                                e.child_id == 0
-                                                    ? StructureChangeType_ChildrenInvalidated
-                                                    : (e.child_added ? StructureChangeType_ChildAdded
-                                                                     : StructureChangeType_ChildRemoved),
+                                                e.child_id == 0 ? StructureChangeType_ChildrenInvalidated
+                                                                : (e.child_added ? StructureChangeType_ChildAdded
+                                                                                 : StructureChangeType_ChildRemoved),
                                                 rid, rid_len);
                 }
                 break;
@@ -2153,5 +2173,10 @@ auto Win32UiaBridge::emit_pending() -> void {
 }
 
 }  // namespace aurora::detail
+
+// NOLINTEND(cppcoreguidelines-pro-type-union-access, cppcoreguidelines-pro-type-reinterpret-cast,
+// cppcoreguidelines-pro-type-static-cast-downcast, cppcoreguidelines-pro-type-const-cast,
+// cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-special-member-functions,
+// cppcoreguidelines-virtual-class-destructor)
 
 #endif  // AURORA_PLATFORM_WINDOWS && (AURORA_BACKEND_WIN32 || AURORA_BACKEND_D3D11)

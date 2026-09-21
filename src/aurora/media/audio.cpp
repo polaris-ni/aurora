@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <numbers>
 #include <ranges>
 #include <utility>
 
@@ -29,11 +30,11 @@ namespace aurora {
 namespace {
 
 constexpr int AURORA_AUDIO_RENDER_CHANNELS = 2;  // 图内固定 stereo
-constexpr double AURORA_AUDIO_PI = 3.14159265358979323846;
+constexpr double AURORA_AUDIO_PI = std::numbers::pi;
 constexpr int AURORA_AUDIO_SINC_TAPS = 32;  // Sinc 核抽头数
 constexpr int AURORA_AUDIO_SINC_PHASES = 256;  // Sinc 相位量化子相位数
 // 抽头中心偏移与窗半宽：先在整型/浮点各自上下文里算好，避免整型除法落在浮点上下文（bugprone-integer-division）
-constexpr int AURORA_AUDIO_SINA_CENTER = AURORA_AUDIO_SINC_TAPS / 2 - 1;  // tap k ∈ [-15, 16] 的 -15 端
+constexpr int AURORA_AUDIO_SINA_CENTER = (AURORA_AUDIO_SINC_TAPS / 2) - 1;  // tap k ∈ [-15, 16] 的 -15 端
 constexpr double AURORA_AUDIO_SINC_HALF_WIDTH = static_cast<double>(AURORA_AUDIO_SINC_TAPS) / 2.0;  // Blackman 窗半宽
 
 auto make_param_error(const std::string &reason) -> Error {
@@ -83,7 +84,7 @@ auto AudioParam::evaluate_at(const EventList &events, double t) const -> float {
         }
         const double x = std::clamp((t - next->start_time) / span, 0.0, 1.0);
         if (next->kind == EventKind::LinearRamp) {
-            return next->start_value + (next->value - next->start_value) * static_cast<float>(x);
+            return next->start_value + ((next->value - next->start_value) * static_cast<float>(x));
         }
         // 指数 ramp：起点非零由插入期校验保证
         const float base = next->start_value;
@@ -93,7 +94,7 @@ auto AudioParam::evaluate_at(const EventList &events, double t) const -> float {
         if (cur->kind == EventKind::SetTarget) {
             const double dt = t - cur->time;
             const double tc = cur->time_constant > 0.0 ? cur->time_constant : 1e-6;
-            return cur->value + (cur->start_value - cur->value) * static_cast<float>(std::exp(-dt / tc));
+            return cur->value + ((cur->start_value - cur->value) * static_cast<float>(std::exp(-dt / tc)));
         }
         // Set / 已到位的 Ramp
         return cur->value;
@@ -163,15 +164,15 @@ auto AudioParam::set_target_at_time(float target, double t, double time_constant
     return Result<void>{};
 }
 
-auto AudioParam::cancel_scheduled_values() -> void {
-    set_events(std::make_shared<const EventList>());
-}
+auto AudioParam::cancel_scheduled_values() -> void { set_events(std::make_shared<const EventList>()); }
 
 auto AudioParam::has_automation() const -> bool {
     const auto events = events_snapshot();
     return events != nullptr && !events->empty();
 }
 
+// 音频缓冲按帧/通道步进的裸指针算术：步长由采样格式（交织 × 声道数）决定，迭代器无法表达跨通道步进
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 auto AudioParam::evaluate_block(double t0, int frames, int sample_rate, float *out) -> void {
     const auto events = events_snapshot();
     if (events == nullptr || events->empty()) {
@@ -181,10 +182,11 @@ auto AudioParam::evaluate_block(double t0, int frames, int sample_rate, float *o
     }
     const double dt = 1.0 / static_cast<double>(sample_rate);
     for (int i = 0; i < frames; ++i) {
-        out[i] = evaluate_at(*events, t0 + static_cast<double>(i) * dt);
+        out[i] = evaluate_at(*events, t0 + (static_cast<double>(i) * dt));
     }
     value_.store(out[frames - 1], std::memory_order_release);
 }
+// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 
 // ============================================================
 // AudioNode
@@ -222,21 +224,24 @@ AudioStreamSourceNode::AudioStreamSourceNode(AudioContext &ctx, std::size_t ring
         for (int t = 0; t < AURORA_AUDIO_SINC_TAPS; ++t) {
             const double d = frac - static_cast<double>(t - AURORA_AUDIO_SINA_CENTER);
             const double x = d / AURORA_AUDIO_SINC_HALF_WIDTH;
-            const double win = 0.42 + 0.5 * std::cos(AURORA_AUDIO_PI * x) + 0.08 * std::cos(2.0 * AURORA_AUDIO_PI * x);
+            const double win =
+                0.42 + (0.5 * std::cos(AURORA_AUDIO_PI * x)) + (0.08 * std::cos(2.0 * AURORA_AUDIO_PI * x));
             const double kern = (std::abs(d) < 1e-9) ? 1.0 : std::sin(AURORA_AUDIO_PI * d) / (AURORA_AUDIO_PI * d);
-            sinc_table_[static_cast<std::size_t>(s) * static_cast<std::size_t>(AURORA_AUDIO_SINC_TAPS) +
+            sinc_table_[(static_cast<std::size_t>(s) * static_cast<std::size_t>(AURORA_AUDIO_SINC_TAPS)) +
                         static_cast<std::size_t>(t)] = static_cast<float>(kern * win);
             sum += kern * win;
         }
         if (sum > 1e-12) {
             for (int t = 0; t < AURORA_AUDIO_SINC_TAPS; ++t) {
-                sinc_table_[static_cast<std::size_t>(s) * static_cast<std::size_t>(AURORA_AUDIO_SINC_TAPS) +
+                sinc_table_[(static_cast<std::size_t>(s) * static_cast<std::size_t>(AURORA_AUDIO_SINC_TAPS)) +
                             static_cast<std::size_t>(t)] /= static_cast<float>(sum);
             }
         }
     }
 }
 
+// 音频缓冲按帧/通道步进的裸指针算术：步长由采样格式（交织 × 声道数）决定，迭代器无法表达跨通道步进
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 auto AudioStreamSourceNode::push(std::span<const std::int16_t> pcm, int sample_rate, int channels) -> Result<void> {
     if (sample_rate <= 0 || (channels != 1 && channels != 2) || pcm.size() % static_cast<std::size_t>(channels) != 0) {
         return make_error(ErrorCode::GeneralInvalidArgument,
@@ -257,7 +262,7 @@ auto AudioStreamSourceNode::push(std::span<const std::int16_t> pcm, int sample_r
     constexpr float scale = 1.0F / 32768.0F;
     for (std::size_t f = 0; f < in_frames; ++f) {
         const float l = static_cast<float>(pcm[f * static_cast<std::size_t>(channels)]) * scale;
-        const float r = channels == 2 ? static_cast<float>(pcm[f * 2 + 1]) * scale : l;
+        const float r = channels == 2 ? static_cast<float>(pcm[(f * 2) + 1]) * scale : l;
         conv_.push_back(l);
         conv_.push_back(r);
     }
@@ -287,11 +292,12 @@ auto AudioStreamSourceNode::push(std::span<const std::int16_t> pcm, int sample_r
     for (std::size_t i = 0; i < frames; ++i) {
         const std::size_t slot = ((w + i) % capacity_) * static_cast<std::size_t>(AURORA_AUDIO_RENDER_CHANNELS);
         ring_[slot] = data[i * 2];
-        ring_[slot + 1] = data[i * 2 + 1];
+        ring_[slot + 1] = data[(i * 2) + 1];
     }
     write_.store(w + frames, std::memory_order_release);
     return Result<void>{};
 }
+// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 
 auto AudioStreamSourceNode::clear() -> void {
     // 约束：调用方保证无并发渲染（如暂停态 seek）。重置游标与渲染相位。
@@ -307,6 +313,8 @@ auto AudioStreamSourceNode::buffered_frames() const -> std::size_t {
 
 auto AudioStreamSourceNode::dropped_frames() const -> std::uint64_t { return dropped_.load(std::memory_order_relaxed); }
 
+// 音频缓冲按帧/通道步进的裸指针算术：步长由采样格式（交织 × 声道数）决定，迭代器无法表达跨通道步进
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 auto AudioStreamSourceNode::process(const AudioRenderContext &p) -> void {
     const std::uint64_t w = write_.load(std::memory_order_acquire);
     const std::uint64_t r = read_.load(std::memory_order_acquire);
@@ -320,33 +328,32 @@ auto AudioStreamSourceNode::process(const AudioRenderContext &p) -> void {
                             : 1.0;
     const auto end = static_cast<double>(w);
     const bool sinc = src_quality_.load(std::memory_order_acquire) == static_cast<int>(SrcQuality::Sinc);
-    constexpr int kHalf = AURORA_AUDIO_SINC_TAPS / 2;  // 前瞻 half 帧、回看 half-1 帧
+    constexpr int aurora_half = AURORA_AUDIO_SINC_TAPS / 2;  // 前瞻 half 帧、回看 half-1 帧
     for (int i = 0; i < p.frames; ++i) {
         const double fp = std::floor(src_pos_);
         const auto frac = static_cast<float>(src_pos_ - fp);
         if (sinc) {
-            if (fp + static_cast<double>(kHalf) >= end) {
+            if (fp + static_cast<double>(aurora_half) >= end) {
                 break;  // 前瞻不足：停相位（窗尾帧须续推后才输出）
             }
             const int sub = std::min(AURORA_AUDIO_SINC_PHASES - 1,
                                      static_cast<int>(frac * static_cast<float>(AURORA_AUDIO_SINC_PHASES)));
             const float *row =
-                sinc_table_.data() + static_cast<std::size_t>(sub) * static_cast<std::size_t>(AURORA_AUDIO_SINC_TAPS);
-            const std::int64_t base = static_cast<std::int64_t>(fp) - (kHalf - 1);
+                sinc_table_.data() + (static_cast<std::size_t>(sub) * static_cast<std::size_t>(AURORA_AUDIO_SINC_TAPS));
+            const std::int64_t base = static_cast<std::int64_t>(fp) - (aurora_half - 1);
             float acc_l = 0.0F;
             float acc_r = 0.0F;
             for (int t = 0; t < AURORA_AUDIO_SINC_TAPS; ++t) {
                 std::int64_t idx = base + static_cast<std::int64_t>(t);
-                if (idx < 0) {
-                    idx = 0;  // 流起点无历史：复制首帧（行归一保证 DC 保真）
-                }
+                idx = std::max<std::int64_t>(idx, 0);  // 流起点无历史：复制首帧（行归一保证 DC 保真）
+
                 const std::size_t s = (static_cast<std::size_t>(idx) % capacity_) *
                                       static_cast<std::size_t>(AURORA_AUDIO_RENDER_CHANNELS);
                 acc_l += ring_[s] * row[t];
                 acc_r += ring_[s + 1] * row[t];
             }
             out_bus_[static_cast<std::size_t>(i) * 2] = acc_l;
-            out_bus_[static_cast<std::size_t>(i) * 2 + 1] = acc_r;
+            out_bus_[(static_cast<std::size_t>(i) * 2) + 1] = acc_r;
             src_pos_ += step;
             continue;
         }
@@ -360,12 +367,12 @@ auto AudioStreamSourceNode::process(const AudioRenderContext &p) -> void {
         const std::size_t i1 = (static_cast<std::size_t>(fp) + 1U) % capacity_;
         const std::size_t s0 = i0 * static_cast<std::size_t>(AURORA_AUDIO_RENDER_CHANNELS);
         const std::size_t s1 = i1 * static_cast<std::size_t>(AURORA_AUDIO_RENDER_CHANNELS);
-        out_bus_[static_cast<std::size_t>(i) * 2] = ring_[s0] + (ring_[s1] - ring_[s0]) * frac;
-        out_bus_[static_cast<std::size_t>(i) * 2 + 1] = ring_[s0 + 1] + (ring_[s1 + 1] - ring_[s0 + 1]) * frac;
+        out_bus_[static_cast<std::size_t>(i) * 2] = ring_[s0] + ((ring_[s1] - ring_[s0]) * frac);
+        out_bus_[(static_cast<std::size_t>(i) * 2) + 1] = ring_[s0 + 1] + ((ring_[s1 + 1] - ring_[s0 + 1]) * frac);
         src_pos_ += step;
     }
     // 读端推进：线性模式保留插值锚 1 帧；Sinc 模式保留窗历史 half-1 帧（单调不回退）
-    const std::int64_t keep = sinc ? static_cast<std::int64_t>(std::floor(src_pos_)) - (kHalf - 1)
+    const std::int64_t keep = sinc ? static_cast<std::int64_t>(std::floor(src_pos_)) - (aurora_half - 1)
                                    : static_cast<std::int64_t>(std::floor(src_pos_));
     std::uint64_t new_read = keep > 0 ? static_cast<std::uint64_t>(keep) : 0U;
     new_read = std::min<std::uint64_t>(new_read, w);
@@ -373,6 +380,7 @@ auto AudioStreamSourceNode::process(const AudioRenderContext &p) -> void {
         read_.store(new_read, std::memory_order_release);
     }
 }
+// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 
 // ============================================================
 // GainNode
@@ -394,7 +402,7 @@ auto GainNode::process(const AudioRenderContext &p) -> void {
     for (int f = 0; f < p.frames; ++f) {
         const float v = scratch_[static_cast<std::size_t>(f)];
         out_bus_[static_cast<std::size_t>(f) * 2] = in_bus_[static_cast<std::size_t>(f) * 2] * v;
-        out_bus_[static_cast<std::size_t>(f) * 2 + 1] = in_bus_[static_cast<std::size_t>(f) * 2 + 1] * v;
+        out_bus_[(static_cast<std::size_t>(f) * 2) + 1] = in_bus_[(static_cast<std::size_t>(f) * 2) + 1] * v;
     }
 }
 
@@ -408,7 +416,7 @@ auto AudioBufferSourceNode::set_buffer(std::shared_ptr<const AudioBuffer> buffer
             ErrorCode::AudioBufferInvalid,
             ErrorParams{{"reason", buffer == nullptr ? "null buffer" : "invalid sample_rate/channels/samples"}});
     }
-    std::lock_guard<std::mutex> lock(buffer_mutex_);
+    std::scoped_lock lock(buffer_mutex_);
     buffer_ = std::move(buffer);
     return Result<void>{};
 }
@@ -432,7 +440,7 @@ auto AudioBufferSourceNode::stop() -> void {
 auto AudioBufferSourceNode::process(const AudioRenderContext &p) -> void {
     std::shared_ptr<const AudioBuffer> buf;
     {
-        std::lock_guard<std::mutex> lock(buffer_mutex_);
+        std::scoped_lock lock(buffer_mutex_);
         buf = buffer_;
     }
     if (buf == nullptr || !buf->valid() || !started_.load(std::memory_order_acquire) ||
@@ -465,11 +473,12 @@ auto AudioBufferSourceNode::process(const AudioRenderContext &p) -> void {
         }
         const double frac_d = play_pos_ - static_cast<double>(i0);
         const auto frac = static_cast<float>(frac_d);
-        const float l = buf->samples[i0 * ch] + (buf->samples[i1 * ch] - buf->samples[i0 * ch]) * frac;
+        const float l = buf->samples[i0 * ch] + ((buf->samples[i1 * ch] - buf->samples[i0 * ch]) * frac);
         const float r =
-            ch == 2 ? buf->samples[i0 * 2 + 1] + (buf->samples[i1 * 2 + 1] - buf->samples[i0 * 2 + 1]) * frac : l;
+            ch == 2 ? buf->samples[(i0 * 2) + 1] + ((buf->samples[(i1 * 2) + 1] - buf->samples[(i0 * 2) + 1]) * frac)
+                    : l;
         out_bus_[static_cast<std::size_t>(i) * 2] = l;
-        out_bus_[static_cast<std::size_t>(i) * 2 + 1] = r;
+        out_bus_[(static_cast<std::size_t>(i) * 2) + 1] = r;
         play_pos_ += step;
     }
     if (!loop && play_pos_ >= static_cast<double>(buf_frames)) {
@@ -534,23 +543,23 @@ auto PannerNode::process(const AudioRenderContext &p) -> void {
     const float dx = px_.load(std::memory_order_acquire) - lpos[0];
     const float dy = py_.load(std::memory_order_acquire) - lpos[1];
     const float dz = pz_.load(std::memory_order_acquire) - lpos[2];
-    const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+    const float dist = std::sqrt((dx * dx) + (dy * dy) + (dz * dz));
 
     // inverse 距离模型：gain = ref / (ref + rolloff·(max(d, ref) - ref))
     const float ref = ref_distance_.load(std::memory_order_acquire);
     const float rolloff = rolloff_.load(std::memory_order_acquire);
     const float dmax = std::max(dist, ref);
-    const float dist_gain = ref / (ref + rolloff * (dmax - ref));
+    const float dist_gain = ref / (ref + (rolloff * (dmax - ref)));
 
     // right = normalize(cross(forward, up))；pan = sin(方位角) = dot(dir, right)
     float pan = 0.0F;
     if (dist > 1e-9F) {
-        const float rx = lfwd[1] * lup[2] - lfwd[2] * lup[1];
-        const float ry = lfwd[2] * lup[0] - lfwd[0] * lup[2];
-        const float rz = lfwd[0] * lup[1] - lfwd[1] * lup[0];
-        const float rlen = std::sqrt(rx * rx + ry * ry + rz * rz);
+        const float rx = (lfwd[1] * lup[2]) - (lfwd[2] * lup[1]);
+        const float ry = (lfwd[2] * lup[0]) - (lfwd[0] * lup[2]);
+        const float rz = (lfwd[0] * lup[1]) - (lfwd[1] * lup[0]);
+        const float rlen = std::sqrt((rx * rx) + (ry * ry) + (rz * rz));
         if (rlen > 1e-9F) {
-            pan = (dx * rx + dy * ry + dz * rz) / (dist * rlen);
+            pan = ((dx * rx) + (dy * ry) + (dz * rz)) / (dist * rlen);
         }
     }
     const float angle = (pan + 1.0F) * static_cast<float>(AURORA_AUDIO_PI) * 0.25F;
@@ -558,7 +567,8 @@ auto PannerNode::process(const AudioRenderContext &p) -> void {
     const float rg = std::sin(angle);
     for (int i = 0; i < p.frames; ++i) {
         out_bus_[static_cast<std::size_t>(i) * 2] = in_bus_[static_cast<std::size_t>(i) * 2] * dist_gain * lg;
-        out_bus_[static_cast<std::size_t>(i) * 2 + 1] = in_bus_[static_cast<std::size_t>(i) * 2 + 1] * dist_gain * rg;
+        out_bus_[(static_cast<std::size_t>(i) * 2) + 1] =
+            in_bus_[(static_cast<std::size_t>(i) * 2) + 1] * dist_gain * rg;
     }
 }
 
@@ -581,9 +591,9 @@ auto AnalyserNode::set_smoothing_time_constant(float v) -> void {
 auto AnalyserNode::process(const AudioRenderContext &p) -> void {
     const std::size_t total = static_cast<std::size_t>(p.frames) * 2U;
     std::copy_n(in_bus_.data(), total, out_bus_.data());  // 直通
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     const int n = fft_size_.load(std::memory_order_acquire);
-    if (static_cast<int>(time_ring_.size()) != n) {
+    if (std::cmp_not_equal(time_ring_.size(), n)) {
         // fft_size 变更（或首块）：重建环/窗/工作缓冲；频域快照按 min_db 起平滑（数块收敛）
         time_ring_.assign(static_cast<std::size_t>(n), 0.0F);
         time_write_ = 0;
@@ -592,7 +602,7 @@ auto AnalyserNode::process(const AudioRenderContext &p) -> void {
         for (int j = 0; j < n; ++j) {
             const double ph = 2.0 * AURORA_AUDIO_PI * static_cast<double>(j) / static_cast<double>(n - 1);
             window_[static_cast<std::size_t>(j)] =
-                static_cast<float>(0.42 - 0.5 * std::cos(ph) + 0.08 * std::cos(2.0 * ph));
+                static_cast<float>(0.42 - (0.5 * std::cos(ph)) + (0.08 * std::cos(2.0 * ph)));
         }
         fft_re_.assign(static_cast<std::size_t>(n), 0.0F);
         fft_im_.assign(static_cast<std::size_t>(n), 0.0F);
@@ -602,14 +612,14 @@ auto AnalyserNode::process(const AudioRenderContext &p) -> void {
     // mono 下混 (L+R)/2 写入时域环
     for (int i = 0; i < p.frames; ++i) {
         time_ring_[time_write_] =
-            (in_bus_[static_cast<std::size_t>(i) * 2] + in_bus_[static_cast<std::size_t>(i) * 2 + 1]) * 0.5F;
+            (in_bus_[static_cast<std::size_t>(i) * 2] + in_bus_[(static_cast<std::size_t>(i) * 2) + 1]) * 0.5F;
         time_write_ = (time_write_ + 1U) % static_cast<std::size_t>(n);
     }
     time_fill_ = std::min(static_cast<std::size_t>(n), time_fill_ + static_cast<std::size_t>(p.frames));
 
     // 时域字节快照（时间序；缺历史前段补静音 128）
     const std::size_t silent_lead = static_cast<std::size_t>(n) - time_fill_;
-    for (std::size_t i = 0; i < static_cast<std::size_t>(n); ++i) {
+    for (std::size_t i = 0; std::cmp_less(i, n); ++i) {
         float s = 0.0F;
         if (i >= silent_lead) {
             const std::size_t j = i - silent_lead;
@@ -654,15 +664,15 @@ auto AnalyserNode::run_fft_locked() -> void {
             float cwi = 0.0F;
             for (int j = 0; j < len / 2; ++j) {
                 const auto a = static_cast<std::size_t>(i) + static_cast<std::size_t>(j);
-                const auto b = a + static_cast<std::size_t>(len) / 2U;
-                const float vr = fft_re_[b] * cwr - fft_im_[b] * cwi;
-                const float vi = fft_re_[b] * cwi + fft_im_[b] * cwr;
+                const auto b = a + (static_cast<std::size_t>(len) / 2U);
+                const float vr = (fft_re_[b] * cwr) - (fft_im_[b] * cwi);
+                const float vi = (fft_re_[b] * cwi) + (fft_im_[b] * cwr);
                 fft_re_[b] = fft_re_[a] - vr;
                 fft_im_[b] = fft_im_[a] - vi;
                 fft_re_[a] += vr;
                 fft_im_[a] += vi;
-                const float nwr = cwr * wr - cwi * wi;
-                cwi = cwr * wi + cwi * wr;
+                const float nwr = (cwr * wr) - (cwi * wi);
+                cwi = (cwr * wi) + (cwi * wr);
                 cwr = nwr;
             }
         }
@@ -674,14 +684,14 @@ auto AnalyserNode::run_fft_locked() -> void {
         spectrum_db_.assign(bins, min_db_.load(std::memory_order_acquire));
     }
     for (std::size_t k = 0; k < bins; ++k) {
-        const float mag = std::sqrt(fft_re_[k] * fft_re_[k] + fft_im_[k] * fft_im_[k]) / norm;
+        const float mag = std::sqrt((fft_re_[k] * fft_re_[k]) + (fft_im_[k] * fft_im_[k])) / norm;
         const float db = 20.0F * std::log10(std::max(mag, 1e-10F));
-        spectrum_db_[k] = tau * spectrum_db_[k] + (1.0F - tau) * db;
+        spectrum_db_[k] = (tau * spectrum_db_[k]) + ((1.0F - tau) * db);
     }
 }
 
 auto AnalyserNode::get_float_frequency_data(std::span<float> out) const -> void {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     const float lo = min_db_.load(std::memory_order_acquire);
     const float hi = max_db_.load(std::memory_order_acquire);
     const std::size_t count = std::min(out.size(), spectrum_db_.size());
@@ -691,7 +701,7 @@ auto AnalyserNode::get_float_frequency_data(std::span<float> out) const -> void 
 }
 
 auto AnalyserNode::get_byte_frequency_data(std::span<std::uint8_t> out) const -> void {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     const float lo = min_db_.load(std::memory_order_acquire);
     const float hi = max_db_.load(std::memory_order_acquire);
     const float range = std::max(hi - lo, 1.0F);
@@ -703,7 +713,7 @@ auto AnalyserNode::get_byte_frequency_data(std::span<std::uint8_t> out) const ->
 }
 
 auto AnalyserNode::get_byte_time_data(std::span<std::uint8_t> out) -> void {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     const std::size_t count = std::min(out.size(), time_bytes_.size());
     std::copy_n(time_bytes_.data(), count, out.begin());
 }
@@ -736,23 +746,26 @@ auto AudioRecordingDestinationNode::start() -> Result<void> {
 auto AudioRecordingDestinationNode::stop() -> void { recording_.store(false, std::memory_order_release); }
 
 auto AudioRecordingDestinationNode::recording() const -> std::vector<float> {
-    std::lock_guard<std::mutex> lock(data_mutex_);
+    std::scoped_lock lock(data_mutex_);
     return data_;
 }
 
 auto AudioRecordingDestinationNode::recorded_frames() const -> std::size_t {
-    std::lock_guard<std::mutex> lock(data_mutex_);
+    std::scoped_lock lock(data_mutex_);
     return data_.size() / 2U;
 }
 
+// 音频缓冲按帧/通道步进的裸指针算术：步长由采样格式（交织 × 声道数）决定，迭代器无法表达跨通道步进
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 auto AudioRecordingDestinationNode::process(const AudioRenderContext &p) -> void {
     const std::size_t total = static_cast<std::size_t>(p.frames) * 2U;
     if (recording_.load(std::memory_order_acquire)) {
-        std::lock_guard<std::mutex> lock(data_mutex_);
+        std::scoped_lock lock(data_mutex_);
         data_.insert(data_.end(), in_bus_.data(), in_bus_.data() + total);
     }
     std::copy_n(in_bus_.data(), total, out_bus_.data());  // 直通
 }
+// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 
 namespace {
 
@@ -775,7 +788,7 @@ auto AudioRecordingDestinationNode::to_wav_bytes() const -> std::vector<std::uin
     const auto data_bytes = static_cast<std::uint32_t>(snap.size() * 2U);
     const auto rate = static_cast<std::uint32_t>(ctx_.sample_rate());
     std::vector<std::uint8_t> bytes;
-    bytes.reserve(44U + snap.size() * 2U);
+    bytes.reserve(44U + (snap.size() * 2U));
     bytes.insert(bytes.end(), {'R', 'I', 'F', 'F'});
     append_u32(bytes, 36U + data_bytes);
     bytes.insert(bytes.end(), {'W', 'A', 'V', 'E'});
@@ -797,6 +810,8 @@ auto AudioRecordingDestinationNode::to_wav_bytes() const -> std::vector<std::uin
     return bytes;
 }
 
+// 音频缓冲按帧/通道步进的裸指针算术：步长由采样格式（交织 × 声道数）决定，迭代器无法表达跨通道步进
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 auto AudioRecordingDestinationNode::save_wav(const std::string &path) const -> Result<void> {
     const std::vector<std::uint8_t> bytes = to_wav_bytes();
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
@@ -811,6 +826,7 @@ auto AudioRecordingDestinationNode::save_wav(const std::string &path) const -> R
     }
     return Result<void>{};
 }
+// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 
 // ============================================================
 // AudioContext
@@ -843,15 +859,14 @@ auto create_default_device_backend() -> std::unique_ptr<AudioDeviceBackend> {
 }  // namespace
 
 AudioContext::AudioContext(std::unique_ptr<AudioDeviceBackend> device_backend,
-                           std::unique_ptr<AudioCaptureBackend> capture_backend) {
-    capture_backend_ = std::move(capture_backend);
-    device_ = std::move(device_backend);
+                           std::unique_ptr<AudioCaptureBackend> capture_backend)
+    : capture_backend_(std::move(capture_backend)), device_(std::move(device_backend)) {
     if (device_ == nullptr) {
         device_ = create_default_device_backend();
     }
     destination_ = std::shared_ptr<AudioDestinationNode>(new AudioDestinationNode(*this));
     nodes_.push_back(destination_);
-    command_ring_.resize(kCommandRingCapacity);
+    command_ring_.resize(AURORA_COMMAND_RING_CAPACITY);
     if (device_ != nullptr) {
         format_ = device_->format();
         auto render_fn = [this](float *out, int frames) { render_block(out, frames); };
@@ -931,10 +946,11 @@ auto AudioContext::connect(const std::shared_ptr<AudioNode> &src, const std::sha
         apply_connect(src.get(), dst.get());
     } else {
         const std::uint64_t w = cmd_write_.load(std::memory_order_relaxed);
-        if (w - cmd_read_.load(std::memory_order_acquire) >= kCommandRingCapacity) {
+        if (w - cmd_read_.load(std::memory_order_acquire) >= AURORA_COMMAND_RING_CAPACITY) {
             return make_error(ErrorCode::GeneralUnknown, std::string("audio command queue full; retry"));
         }
-        command_ring_[w % kCommandRingCapacity] = GraphCommand{GraphCommand::Kind::Connect, src, dst};
+        command_ring_[w % AURORA_COMMAND_RING_CAPACITY] =
+            GraphCommand{.kind = GraphCommand::Kind::Connect, .src = src, .dst = dst};
         cmd_write_.store(w + 1, std::memory_order_release);
     }
     edges_.emplace_back(src.get(), dst.get());
@@ -956,11 +972,12 @@ auto AudioContext::disconnect(const std::shared_ptr<AudioNode> &src, const std::
         apply_disconnect(src.get(), dst.get());
     } else {
         const std::uint64_t w = cmd_write_.load(std::memory_order_relaxed);
-        if (w - cmd_read_.load(std::memory_order_acquire) >= kCommandRingCapacity) {
+        if (w - cmd_read_.load(std::memory_order_acquire) >= AURORA_COMMAND_RING_CAPACITY) {
             edges_.emplace_back(src.get(), dst.get());  // 回滚 UI 视角
             return make_error(ErrorCode::GeneralUnknown, std::string("audio command queue full; retry"));
         }
-        command_ring_[w % kCommandRingCapacity] = GraphCommand{GraphCommand::Kind::Disconnect, src, dst};
+        command_ring_[w % AURORA_COMMAND_RING_CAPACITY] =
+            GraphCommand{.kind = GraphCommand::Kind::Disconnect, .src = src, .dst = dst};
         cmd_write_.store(w + 1, std::memory_order_release);
     }
     return Result<void>{};
@@ -1001,9 +1018,11 @@ auto AudioContext::rebuild_topo() -> void {
         indegree[n] = adj.sources.size();
     }
     std::vector<AudioNode *> ready;
-    for (const auto &[n, deg] : indegree) {
-        if (deg == 0) {
-            ready.push_back(n);
+    // 按 nodes_ 的插入序（稳定）挑选零入度节点：若直接遍历 indegree，其键为 AudioNode*，
+    // 迭代序随运行地址变化，会让同层无关节点的拓扑序不可复现（合成结果不变，但难复现/难断言）。
+    for (const auto &node : nodes_) {
+        if (const auto it = indegree.find(node.get()); it != indegree.end() && it->second == 0) {
+            ready.push_back(node.get());
         }
     }
     while (!ready.empty()) {
@@ -1076,6 +1095,8 @@ auto AudioContext::create_recording_destination() -> std::shared_ptr<AudioRecord
 }
 
 // 同上：`new` 立即归 `shared_ptr`（失败路径由局部 shared_ptr、成功路径由 nodes_释放）
+// 音频缓冲按帧/通道步进的裸指针算术：步长由采样格式（交织 × 声道数）决定，迭代器无法表达跨通道步进
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 auto AudioContext::create_microphone_source() -> Result<std::shared_ptr<AudioMicrophoneSourceNode>> {
     if (closed_.load(std::memory_order_acquire)) {
         return make_error(ErrorCode::AudioContextClosed, ErrorParams{});
@@ -1101,12 +1122,13 @@ auto AudioContext::create_microphone_source() -> Result<std::shared_ptr<AudioMic
     if (!node->capture_->start(std::move(on_pcm))) {
         node->capture_->stop();  // 失败即停采集（stop_calls==1）
         capture_backend_ = std::move(node->capture_);  // 保留后端，避免悬垂；析构时不再重复 stop
-        return make_error(ErrorCode::AudioDeviceUnavailable, // NOLINT
+        return make_error(ErrorCode::AudioDeviceUnavailable,  // NOLINT
                           std::string("audio capture device unavailable or permission denied"));  // NOLINT
     }
     nodes_.push_back(node);
     return node;  // NOLINT
 }
+// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 
 // ---- 生命周期 ----
 
@@ -1157,7 +1179,7 @@ auto AudioContext::drain_commands() -> void {
     std::uint64_t r = cmd_read_.load(std::memory_order_relaxed);
     const std::uint64_t w = cmd_write_.load(std::memory_order_acquire);
     while (r < w) {
-        const GraphCommand &c = command_ring_[r % kCommandRingCapacity];
+        const GraphCommand &c = command_ring_[r % AURORA_COMMAND_RING_CAPACITY];
         if (c.kind == GraphCommand::Kind::Connect) {
             apply_connect(c.src.get(), c.dst.get());
         } else {
@@ -1172,6 +1194,8 @@ auto AudioContext::render_silence(float *out, int frames) const -> void {
     std::memset(out, 0, static_cast<std::size_t>(frames) * static_cast<std::size_t>(format_.channels) * sizeof(float));
 }
 
+// 音频缓冲按帧/通道步进的裸指针算术：步长由采样格式（交织 × 声道数）决定，迭代器无法表达跨通道步进
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 auto AudioContext::render_block(float *interleaved_out, int frames) -> void {
     if (frames <= 0) {
         return;
@@ -1197,9 +1221,10 @@ auto AudioContext::render_block(float *interleaved_out, int frames) -> void {
     std::fill_n(destination_->input_bus(), dest_total, 0.0F);
     std::fill_n(destination_->output_bus(), dest_total, 0.0F);
 
-    const AudioRenderContext p{frames, format_.sample_rate,
-                               static_cast<double>(rendered_samples_.load(std::memory_order_relaxed)) /
-                                   static_cast<double>(format_.sample_rate)};
+    const AudioRenderContext p{.frames = frames,
+                               .sample_rate = format_.sample_rate,
+                               .time = static_cast<double>(rendered_samples_.load(std::memory_order_relaxed)) /
+                                       static_cast<double>(format_.sample_rate)};
     for (AudioNode *n : topo_) {
         n->process(p);
         const auto it = adj_.find(n);
@@ -1221,5 +1246,6 @@ auto AudioContext::render_block(float *interleaved_out, int frames) -> void {
     }
     rendered_samples_.fetch_add(static_cast<std::uint64_t>(frames), std::memory_order_relaxed);
 }
+// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 
 }  // namespace aurora

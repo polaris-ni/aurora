@@ -634,9 +634,11 @@ auto draw_text_bitmap_fallback(Painter &p, const Rect &r, const std::string &tex
 // 与 draw_text 历史语义逐位一致：faces 解析 → px（lround(px_measure·scale)）→ 行切分 →
 // 逐行 shape_line → 逐字形确保软件图集条目（未命中即 FT 光栅化插入）→ 回调 sink。
 // 返回 false 表示无可用字体面（调用方自行兜底，如软件路径回退 BitmapFont）。
+// sink 以 `const&` 接收：它在字形循环内被逐字形多次调用（转发/move 语义不适用），
+// 而各调用点传入的都是临时 lambda，`const&` 可同时绑定左值与右值。
 template <typename Sink>
 auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLayoutOpts &opts, float scale,
-                           TextAAMode aa, Color c, float origin_x, float origin_y, Sink &&sink) -> bool {
+                           TextAAMode aa, Color c, float origin_x, float origin_y, const Sink &sink) -> bool {
     const auto &faces = resolve_faces(f.family, f.weight);
     if (faces.empty()) {
         return false;
@@ -706,7 +708,7 @@ auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLay
                     static_cast<int>(mode == GlyphAtlas::Mode::Lcd ? slot->bitmap.width / 3 : slot->bitmap.width);
                 ne.rows = static_cast<int>(slot->bitmap.rows);
                 ne.pitch = slot->bitmap.pitch;
-                ne.advance = static_cast<float>(slot->advance.x) / 64.0F + (synthetic_bold ? embolden_px : 0.0F);
+                ne.advance = (static_cast<float>(slot->advance.x) / 64.0F) + (synthetic_bold ? embolden_px : 0.0F);
                 // copy_w 为 FT 位图每行真实字节数（LCD 已含 3× 子像素宽度），与绘制循环的行步长一致。
                 const int copy_w = static_cast<int>(slot->bitmap.width);
                 ne.buf.resize(static_cast<std::size_t>(copy_w) * static_cast<std::size_t>(ne.rows));
@@ -786,13 +788,11 @@ auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Fo
 // ============================ 公共 API ============================
 
 // ---- 字形发射桥（glyph_emit.h；软件 blit 与 GPU 图集上传共用的对外出口） ----
-auto emit_text_glyphs(const std::string &text, const Font &f, const TextLayoutOpts &opts, float scale,
-                      TextAAMode aa, Color c, float origin_x, float origin_y, const GlyphEmitSink &sink) -> bool {
-    return emit_text_glyphs_core(
-        text, f, opts, scale, aa, c, origin_x, origin_y,
-        [&sink](const GlyphAtlas::Entry &e, GlyphAtlas::Mode mode, int dx0, int dy0, std::uint64_t key) {
-            sink(e, mode, dx0, dy0, key);
-        });
+auto emit_text_glyphs(const std::string &text, const Font &f, const TextLayoutOpts &opts, float scale, TextAAMode aa,
+                      Color c, float origin_x, float origin_y, const GlyphEmitSink &sink) -> bool {
+    return emit_text_glyphs_core(text, f, opts, scale, aa, c, origin_x, origin_y,
+                                 [&sink](const GlyphAtlas::Entry &e, GlyphAtlas::Mode mode, int dx0, int dy0,
+                                         std::uint64_t key) { sink(e, mode, dx0, dy0, key); });
 }
 
 auto FontEngine::instance() -> FontEngine & {

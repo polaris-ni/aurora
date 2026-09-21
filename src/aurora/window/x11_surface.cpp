@@ -139,9 +139,9 @@ struct X11Surface::Impl {
     XIM im = nullptr;
     XIC ic = nullptr;
     bool ime_cb_style = false;  ///< 协商到 PreeditCallbacks（观测面 + draw 回调仅在 cb 风格下触发）
-    std::string ime_preedit;    ///< 最近 draw 回调的组合串（UTF-8，commit/清空时置空）
+    std::string ime_preedit;  ///< 最近 draw 回调的组合串（UTF-8，commit/清空时置空）
     std::function<Rect()> composition_caret_provider;  ///< 宿主注入的插入点查询（窗口逻辑 dp）
-    int ime_draw_cbs = 0;   ///< preedit draw 回调次数
+    int ime_draw_cbs = 0;  ///< preedit draw 回调次数
     int ime_spot_updates = 0;  ///< XNSpotLocation 实际下发次数（去重后）
     /// @brief 建立/重建 IM 通道（构造期与首次 FocusIn 各调一次，幂等）：XOpenIM → 风格协商 →
     /// XCreateIC → 注册 preedit 回调。任一步失败即降级（keysym 路径不受影响）。
@@ -150,7 +150,7 @@ struct X11Surface::Impl {
     auto ime_emit_preedit(const std::string &utf8, int caret, int sel_begin_byte, int sel_end_byte) -> void;
     /// @brief 把 provider 的插入点盒折算为客户窗口物理 px 写入 XNSpotLocation（变化才发）。
     auto ime_update_spot() -> void;
-    XPoint ime_last_spot{};   ///< 上次下发的锚点（去重）
+    XPoint ime_last_spot{};  ///< 上次下发的锚点（去重）
     bool ime_spot_valid = false;
     bool ime_focused = false;  ///< XSetICFocus 已发且未 XUnsetICFocus（观测面）
     // 自唤醒管道（request_wake → wait_events poll 立即返回）。
@@ -160,7 +160,7 @@ struct X11Surface::Impl {
     std::unique_ptr<detail::AtspiBridge> atspi;
     bool atspi_attempted = false;
     std::string title;  ///< 最近标题缓存（桥构造时回填 FRAME 节点 Name）
-    int origin_x = 0;   ///< 客户区左上角的屏幕物理 px（ConfigureNotify 时 XTranslateCoordinates）
+    int origin_x = 0;  ///< 客户区左上角的屏幕物理 px（ConfigureNotify 时 XTranslateCoordinates）
     int origin_y = 0;
     // 光标形状：`XCreateFontCursor` 句柄按 CursorShape 取值序缓存（0 = 未创建）。
     // 每次创建都是新 X 资源，必须复用；析构统一 XFreeCursor。
@@ -281,8 +281,8 @@ namespace {
 /// @brief XIMFeedback 位 → 是否属「目标段」（下划线/三类插入点皆视为高亮中的组合段，与
 /// Wayland preedit 高亮段及 Win32 GCS_COMPATTR 目标段口径一致）。
 constexpr auto ime_feedback_is_target(int fb) -> bool {
-    constexpr int kBits = XIMUnderline | XIMPrimary | XIMSecondary | XIMTertiary;
-    return (fb & kBits) != 0;
+    constexpr int AURORA_BITS = XIMUnderline | XIMPrimary | XIMSecondary | XIMTertiary;
+    return (fb & AURORA_BITS) != 0;
 }
 
 /// @brief XIMText（multi_byte 或 wide_char）→ UTF-8 串 + 逐码点反馈位。
@@ -406,9 +406,8 @@ auto X11Surface::Impl::ime_setup() -> void {
     } else if (styles != nullptr) {
         XFree(styles);  // 失败路径按惯例仍可能带回顾句柄，不留悬挂
     }
-    const unsigned long style =
-        cb_style ? static_cast<unsigned long>(XIMPreeditCallbacks | XIMStatusNothing)
-                 : static_cast<unsigned long>(XIMPreeditNothing | XIMStatusNothing);
+    const unsigned long style = cb_style ? static_cast<unsigned long>(XIMPreeditCallbacks | XIMStatusNothing)
+                                         : static_cast<unsigned long>(XIMPreeditNothing | XIMStatusNothing);
     ic = XCreateIC(im, XNInputStyle, style, XNClientWindow, win, nullptr);
     if (ic == nullptr) {
         return;  // IM 掉线等极端场景：留 im 句柄，下次 FocusIn 再试
@@ -423,10 +422,10 @@ auto X11Surface::Impl::ime_setup() -> void {
         draw.client_data = reinterpret_cast<XPointer>(this);  // NOLINT(*-pro-type-reinterpret-cast)
         // Xlib 把一切 IC 回调统一擦成 XICProc（第三参 XPointer），XIM 规范即要求此形态转换
         // （Qt/GTK 同款），派发时按注册名还原真实结构体指针。
-        draw.callback = reinterpret_cast<XICProc>(ime_preedit_draw);     // NOLINT(*-pro-type-reinterpret-cast)
+        draw.callback = reinterpret_cast<XICProc>(ime_preedit_draw);  // NOLINT(*-pro-type-reinterpret-cast)
         XICCallback caret{};
         caret.client_data = draw.client_data;
-        caret.callback = reinterpret_cast<XICProc>(ime_preedit_caret);   // NOLINT(*-pro-type-reinterpret-cast)
+        caret.callback = reinterpret_cast<XICProc>(ime_preedit_caret);  // NOLINT(*-pro-type-reinterpret-cast)
         if (XVaNestedList nested =
                 XVaCreateNestedList(0, XNPreeditDrawCallback, &draw, XNPreeditCaretCallback, &caret, nullptr);
             nested != nullptr) {
@@ -443,8 +442,8 @@ auto X11Surface::Impl::ime_setup() -> void {
 
 /// @brief 组合态变化的统一出口：UTF-8 字节下标 → 码点契约（ime_composition 纯函数）上抛，
 /// 并同步候选窗锚点。caret < 0（XIM caret=-1 隐藏/未知）按「串尾」折算；无选区传 -1/-1。
-auto X11Surface::Impl::ime_emit_preedit(const std::string &utf8, int caret, int sel_begin_byte,
-                                        int sel_end_byte) -> void {
+auto X11Surface::Impl::ime_emit_preedit(const std::string &utf8, int caret, int sel_begin_byte, int sel_end_byte)
+    -> void {
     const bool was_composing = !ime_preedit.empty();
     ime_preedit = utf8;
     if (handler) {
@@ -550,8 +549,8 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
                          .input_mode = 0L,
                          .status = 0UL};
         const Atom motif = XInternAtom(d.dpy, "_MOTIF_WM_HINTS", 0);
-        XChangeProperty(d.dpy, d.win, motif, motif, 32, PropModeReplace,
-                        reinterpret_cast<unsigned char *>(&hints), 5);  // NOLINT(*-pro-type-reinterpret-cast)
+        XChangeProperty(d.dpy, d.win, motif, motif, 32, PropModeReplace, reinterpret_cast<unsigned char *>(&hints),
+                        5);  // NOLINT(*-pro-type-reinterpret-cast)
     }
     // 尺寸限制（XSizeHints）：不可调大小 → min=max=创建尺寸。
     if (XSizeHints *sh = XAllocSizeHints()) {
@@ -598,7 +597,7 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
 
 X11Surface::~X11Surface() {
     Impl &d = *impl_;
-    // 先断开全部上层回调再销毁（对齐 Win32Window 析构次序教训：销毁期间不得回调已亡上层）。
+    // 先断开全部上层回调再销毁（对齐 Win32Host 析构次序教训：销毁期间不得回调已亡上层）。
     d.handler = nullptr;
     window_state_handler_ = nullptr;
     window_mode_handler_ = nullptr;
@@ -930,8 +929,8 @@ auto X11Surface::set_accessibility_root(Widget *root) -> void {
                 const auto bb = static_cast<std::int32_t>(std::ceil((q.origin.y + q.size.height) * d.scale));
                 return detail::AtspiRectI{.x = l, .y = t, .width = rr - l, .height = bb - t};
             }(r);
-            return detail::AtspiRectI{.x = box.x + d.origin_x, .y = box.y + d.origin_y,
-                                      .width = box.width, .height = box.height};
+            return detail::AtspiRectI{
+                .x = box.x + d.origin_x, .y = box.y + d.origin_y, .width = box.width, .height = box.height};
         };
         env.perform = [](Widget *w, const AccessibilityActionRequest &req) -> bool {
             return w != nullptr && w->perform_accessibility_action(req);
@@ -1102,8 +1101,8 @@ auto X11Surface::poll_platform_events() -> void {
                     ::Window child = 0;
                     int rx = 0;
                     int ry = 0;
-                    if (XTranslateCoordinates(d.dpy, d.win, XDefaultRootWindow(d.dpy), 0, 0, &rx, &ry,
-                                              &child) != False) {
+                    if (XTranslateCoordinates(d.dpy, d.win, XDefaultRootWindow(d.dpy), 0, 0, &rx, &ry, &child) !=
+                        False) {
                         d.origin_x = rx;
                         d.origin_y = ry;
                         if (d.atspi != nullptr) {
@@ -1216,9 +1215,9 @@ auto X11Surface::wait_events(double timeout_ms) -> void {
             fds.push_back(pollfd{w.fd, w.events, 0});
         }
     }
-    const int rc = ::poll(fds.data(), static_cast<nfds_t>(fds.size()),
-                          static_cast<int>(std::ceil(capped)));
-    if (rc > 0 && wake_idx >= 0 && (fds[static_cast<std::size_t>(wake_idx)].revents & POLLIN) != 0) {  // NOLINT(*-signed-bitwise)
+    const int rc = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), static_cast<int>(std::ceil(capped)));
+    if (rc > 0 && wake_idx >= 0 &&
+        (fds[static_cast<std::size_t>(wake_idx)].revents & POLLIN) != 0) {  // NOLINT(*-signed-bitwise)
         char drain[64];
         while (read(d.wake_fd[0], drain, sizeof(drain)) > 0) {
             // 排干唤醒字节（非阻塞读到 EAGAIN 为止），避免下次 wait 立即空醒。

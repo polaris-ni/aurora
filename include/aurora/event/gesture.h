@@ -272,8 +272,7 @@ class DragRecognizer {
         }
         current_delta_ = Point{.x = pos.x - origin_.x, .y = pos.y - origin_.y};
         if (axis_ == DragAxis::None) {
-            const float dist = std::sqrt((current_delta_.x * current_delta_.x)
-                                         + (current_delta_.y * current_delta_.y));
+            const float dist = std::sqrt((current_delta_.x * current_delta_.x) + (current_delta_.y * current_delta_.y));
             if (dist > static_cast<float>(slop)) {
                 // 起拖瞬间锁主轴：|dx| > |dy| 水平，否则垂直（相等取垂直，确定序）。
                 axis_ = (std::abs(current_delta_.x) > std::abs(current_delta_.y)) ? DragAxis::Horizontal

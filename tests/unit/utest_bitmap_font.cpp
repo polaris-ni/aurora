@@ -76,7 +76,7 @@ AURORA_TEST_CASE(measure_ascent_fits_within_line_height) {
         AURORA_TEST_TRACE("size_pt=" + std::to_string(size));
         const float ascent = render::BitmapFont::measure_ascent(size);
         const float height = render::BitmapFont::measure_height(size);
-        const float cell = static_cast<float>(render::BitmapFont::pixel_size(size));
+        const auto cell = static_cast<float>(render::BitmapFont::pixel_size(size));
         AURORA_TEST_CHECK_GT(ascent, 0.0F);
         AURORA_TEST_CHECK_LE(ascent, height);
         AURORA_TEST_CHECK_NEAR(height - ascent, cell, 1e-6);

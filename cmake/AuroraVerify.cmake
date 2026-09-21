@@ -67,7 +67,7 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_x11_ime)
     endif ()
 
-    # ---- Win32 家族光标（GDI 上屏 / D3D11 GPU 上屏共用 Win32Window 宿主）：GetCursorInfo 读回 ----
+    # ---- Win32 家族光标（GDI 上屏 / D3D11 GPU 上屏共用 Win32Host 宿主）：GetCursorInfo 读回 ----
     if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
         aurora_add_verify_probe(aurora_verify_win32_cursor "${_aurora_verify_dir}/win32_cursor_live_probe.cpp")
         list(APPEND _aurora_verify_targets aurora_verify_win32_cursor)

@@ -78,9 +78,8 @@ class FileLock {
     /// @brief 获取锁；`exclusive` 为 true 时独占（写），否则共享（读）。阻塞直到获取成功。
     auto lock(bool exclusive) -> bool {
 #ifdef AURORA_PLATFORM_WINDOWS
-        handle_ =
-            ::CreateFileW(lock_path_.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                          nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        handle_ = ::CreateFileW(lock_path_.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (handle_ == INVALID_HANDLE_VALUE) {
             return false;
         }
@@ -324,7 +323,7 @@ auto Preferences::load_from_file() -> void {
     std::ifstream in(file_, std::ios::binary);
     if (!in) {
         load_error_ = make_error(ErrorCode::PrefsOpenFailed, "Failed to open config file: " + file_.string(),
-                                  "Check file path and read permission", "", file_.string());
+                                 "Check file path and read permission", "", file_.string());
         root_ = Json::object();
         return;
     }
@@ -343,9 +342,8 @@ auto Preferences::load_from_file() -> void {
         // 应用持久化的墓碑/清空纪元，得到初始内存视图（不复活已删除键）。
         reconcile(root_, versions_);
     } catch (const std::exception &e) {
-        load_error_ =
-            make_error(ErrorCode::PrefsParseFailed, std::string("Config file JSON parse failed: ") + e.what(),
-                       "Check whether file is valid JSON", "", file_.string());
+        load_error_ = make_error(ErrorCode::PrefsParseFailed, std::string("Config file JSON parse failed: ") + e.what(),
+                                 "Check whether file is valid JSON", "", file_.string());
         root_ = Json::object();
     }
 }

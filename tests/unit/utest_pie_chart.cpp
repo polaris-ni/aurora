@@ -4,6 +4,7 @@
 /// 极坐标命中（半径 + 角度定位扇区）、on_section_tapped、Σ≤0 与负值降级、图例命中优先，
 /// 以及像素 golden 基线（chart_pie.png，受 AURORA_UPDATE_GOLDEN 控制）
 
+#include <algorithm>
 #include <charconv>
 #include <cstdlib>
 #include <filesystem>
@@ -25,8 +26,8 @@ namespace golden = aurora::testing::golden;
 
 namespace {
 
-constexpr int WIDTH = 320;
-constexpr int HEIGHT = 200;
+constexpr int AURORA_WIDTH = 320;
+constexpr int AURORA_HEIGHT = 200;
 
 [[nodiscard]] auto bare_props() -> PieChartProps {
     PieChartProps p{};
@@ -39,7 +40,7 @@ auto layout_only(Widget &w) -> void {
     constexpr BuildContext ctx;
     Constraints c;
     c.min = Size{.width = 0.0F, .height = 0.0F};
-    c.max = Size{.width = static_cast<float>(WIDTH), .height = static_cast<float>(HEIGHT)};
+    c.max = Size{.width = static_cast<float>(AURORA_WIDTH), .height = static_cast<float>(AURORA_HEIGHT)};
     w.layout(c, ctx);
 }
 
@@ -59,11 +60,10 @@ auto layout_only(Widget &w) -> void {
 
 [[nodiscard]] auto render_chart(const PieChartProps &props) -> std::filesystem::path {
     auto chart = std::make_shared<PieChart>(props);
-    chart->modifier.set(Modifier{}.width(static_cast<float>(WIDTH)).height(static_cast<float>(HEIGHT)));
+    chart->modifier.set(Modifier{}.width(static_cast<float>(AURORA_WIDTH)).height(static_cast<float>(AURORA_HEIGHT)));
     Node root{Column{Node{chart}}};
-    const std::filesystem::path tmp =
-        std::filesystem::path(testing::isolation::temp_dir()) / "current_chart_pie.png";
-    AURORA_TEST_REQUIRE_TRUE(render_to_png(root, WIDTH, HEIGHT, tmp.string().c_str()).ok());
+    const std::filesystem::path tmp = std::filesystem::path(testing::isolation::temp_dir()) / "current_chart_pie.png";
+    AURORA_TEST_REQUIRE_TRUE(render_to_png(root, AURORA_WIDTH, AURORA_HEIGHT, tmp.string().c_str()).ok());
     return tmp;
 }
 
@@ -87,12 +87,7 @@ AURORA_TEST_CASE(describe_static_is_complete) {
     AURORA_TEST_CHECK_TRUE(d.name == "PieChart");
     AURORA_TEST_CHECK_TRUE(d.events.front() == "on_section_tapped");
     auto has = [&d](const std::string &key) -> bool {
-        for (const PropDescriptor &p : d.properties) {
-            if (p.name == key) {
-                return true;
-            }
-        }
-        return false;
+        return std::ranges::any_of(d.properties, [&key](const PropDescriptor &p) { return p.name == key; });
     };
     for (const auto &key : {"sections", "center_space_ratio", "start_angle", "show_percentage_labels", "section_gap",
                             "legend", "padding"}) {

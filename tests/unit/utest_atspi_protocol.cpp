@@ -26,11 +26,6 @@ namespace aurora::test_cases::utest_atspi_protocol {
 using aurora::a11y::NodeSnapshot;
 using aurora::a11y::TreeSnapshot;
 // TEST-R9：测试禁 using-directive，折算层符号逐名引入。
-using aurora::detail::AtspiCacheRow;
-using aurora::detail::AtspiEnv;
-using aurora::detail::AtspiModel;
-using aurora::detail::AtspiPropValue;
-using aurora::detail::AtspiRef;
 using aurora::detail::atspi_actions_of;
 using aurora::detail::atspi_cp_count;
 using aurora::detail::atspi_cp_slice;
@@ -39,6 +34,11 @@ using aurora::detail::atspi_role_name;
 using aurora::detail::atspi_role_of;
 using aurora::detail::atspi_state_name;
 using aurora::detail::atspi_states_of;
+using aurora::detail::AtspiCacheRow;
+using aurora::detail::AtspiEnv;
+using aurora::detail::AtspiModel;
+using aurora::detail::AtspiPropValue;
+using aurora::detail::AtspiRef;
 using aurora::detail::k_atspi_app_id;
 using aurora::detail::k_atspi_frame_id;
 using aurora::detail::atspi::coord_screen;
@@ -73,7 +73,7 @@ class ProbeWidget final : public LeafWidget {
     explicit ProbeWidget(std::string text, std::string type = "Probe")
         : text_(std::move(text)), type_(std::move(type)) {}
 
-    [[nodiscard]] auto type_name() const -> const char *override { return type_.c_str(); }
+    [[nodiscard]] auto type_name() const -> const char * override { return type_.c_str(); }
     [[nodiscard]] auto accessibility_text() const -> std::string_view override { return text_; }
     [[nodiscard]] auto accessibility_selection() const -> std::optional<AccessibilityTextSelection> override {
         return selection;
@@ -132,12 +132,7 @@ class ProbeWidget final : public LeafWidget {
 }
 
 auto contains_str(const std::vector<std::string> &v, std::string_view s) -> bool {
-    for (const std::string &e : v) {
-        if (e == s) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(v, [s](const std::string &e) { return e == s; });
 }
 
 }  // namespace
@@ -154,11 +149,11 @@ AURORA_TEST_CASE(role_table_pins_upstream_numbers) {
         n.state.password = password;
         return atspi_role_of(n);
     };
-    AURORA_TEST_CHECK_EQ(of(AccessibilityRole::Button), std::uint32_t{43});   // BUTTON（PUSH_BUTTON 是别名）
+    AURORA_TEST_CHECK_EQ(of(AccessibilityRole::Button), std::uint32_t{43});  // BUTTON（PUSH_BUTTON 是别名）
     AURORA_TEST_CHECK_NE(of(AccessibilityRole::Button), std::uint32_t{132});  // 防漂移：绝不落 PUSH_BUTTON_MENU 段
-    AURORA_TEST_CHECK_EQ(of(AccessibilityRole::TextInput), std::uint32_t{79});           // ENTRY
-    AURORA_TEST_CHECK_EQ(of(AccessibilityRole::TextInput, true), std::uint32_t{40});     // PASSWORD_TEXT
-    AURORA_TEST_CHECK_EQ(of(AccessibilityRole::Switch), std::uint32_t{130});             // SWITCH
+    AURORA_TEST_CHECK_EQ(of(AccessibilityRole::TextInput), std::uint32_t{79});  // ENTRY
+    AURORA_TEST_CHECK_EQ(of(AccessibilityRole::TextInput, true), std::uint32_t{40});  // PASSWORD_TEXT
+    AURORA_TEST_CHECK_EQ(of(AccessibilityRole::Switch), std::uint32_t{130});  // SWITCH
     AURORA_TEST_CHECK_EQ(of(AccessibilityRole::Checkbox), std::uint32_t{7});
     AURORA_TEST_CHECK_EQ(of(AccessibilityRole::Slider), std::uint32_t{51});
     AURORA_TEST_CHECK_EQ(of(AccessibilityRole::Progress), std::uint32_t{42});
@@ -200,13 +195,12 @@ AURORA_TEST_CASE(state_name_table_pins_event_minors) {
     AURORA_TEST_CHECK_STREQ(atspi_state_name(38), "selectable-text");
     AURORA_TEST_CHECK_STREQ(atspi_state_name(41), "checkable");
     AURORA_TEST_CHECK_STREQ(atspi_state_name(43), "read-only");
-    AURORA_TEST_CHECK_TRUE(atspi_state_name(44) == nullptr);   // LAST_DEFINED 起越界
+    AURORA_TEST_CHECK_TRUE(atspi_state_name(44) == nullptr);  // LAST_DEFINED 起越界
     AURORA_TEST_CHECK_TRUE(atspi_state_name(999) == nullptr);  // 越界兜底：不发无名事件
     // 本桥全部可申报状态都必须有名（发射器按 nullptr 静默丢弃 ⇒ 空名 = 事件漏发）。
-    for (const std::uint32_t s : {state_enabled, state_sensitive, state_showing, state_visible,
-                                  state_focusable, state_editable, state_multi_line,
-                                  state_single_line, state_selectable_text, state_read_only,
-                                  state_defunct}) {
+    for (const std::uint32_t s :
+         {state_enabled, state_sensitive, state_showing, state_visible, state_focusable, state_editable,
+          state_multi_line, state_single_line, state_selectable_text, state_read_only, state_defunct}) {
         AURORA_TEST_CHECK_NOT_NULL(atspi_state_name(s));
     }
 }
@@ -243,15 +237,15 @@ AURORA_TEST_CASE(states_table) {
     AccessibilityNode n = with_actions(AccessibilityNode{.role = AccessibilityRole::Button});
     n.state.visible = true;
     auto s = atspi_states_of(n, atspi_interfaces_of(n));
-    AURORA_TEST_CHECK_TRUE(std::ranges::includes(s, std::vector<std::uint32_t>{state_enabled, state_sensitive,
-                                                                               state_showing, state_visible}));
+    AURORA_TEST_CHECK_TRUE(std::ranges::includes(
+        s, std::vector<std::uint32_t>{state_enabled, state_sensitive, state_showing, state_visible}));
     auto sorted = s;
     std::ranges::sort(sorted);
     AURORA_TEST_CHECK_TRUE(s == sorted);  // 输出升序（比对稳定）
 
     n.state.disabled = true;
     const auto ds = atspi_states_of(n, atspi_interfaces_of(n));
-    AURORA_TEST_CHECK_FALSE(std::ranges::find(ds, state_enabled) != ds.end());    // 禁用 ⇒ 抽掉 ENABLED
+    AURORA_TEST_CHECK_FALSE(std::ranges::find(ds, state_enabled) != ds.end());  // 禁用 ⇒ 抽掉 ENABLED
     AURORA_TEST_CHECK_FALSE(std::ranges::find(ds, state_sensitive) != ds.end());  // 无 DISABLED 位（atk 口径）
 
     n.state.disabled = false;
@@ -281,14 +275,14 @@ AURORA_TEST_CASE(actions_order_and_dedupe) {
     AURORA_TEST_CHECK_STREQ(press_only[0].name.c_str(), "press");
     AURORA_TEST_CHECK_TRUE(press_only[0].action == AccessibilityAction::Click);  // Click 优先于 Invoke
 
-    n.actions = n.actions | AccessibilityAction::Toggle | AccessibilityAction::Select |
-                AccessibilityAction::ScrollUp | AccessibilityAction::ScrollDown | AccessibilityAction::ScrollLeft |
-                AccessibilityAction::ScrollRight | AccessibilityAction::ScrollIntoView;
+    n.actions = n.actions | AccessibilityAction::Toggle | AccessibilityAction::Select | AccessibilityAction::ScrollUp |
+                AccessibilityAction::ScrollDown | AccessibilityAction::ScrollLeft | AccessibilityAction::ScrollRight |
+                AccessibilityAction::ScrollIntoView;
     std::vector<std::string> names;
     for (const auto &row : atspi_actions_of(n)) {
         names.push_back(row.name);
     }
-    const std::vector<std::string> want{"press",    "toggle",         "select",        "scroll up",
+    const std::vector<std::string> want{"press",       "toggle",      "select",       "scroll up",
                                         "scroll down", "scroll left", "scroll right", "scroll to visible"};
     AURORA_TEST_CHECK_TRUE(names == want);
 
@@ -313,9 +307,9 @@ AURORA_TEST_CASE(cp_count_and_slice) {
     AURORA_TEST_CHECK_STREQ(atspi_cp_slice("héllo", 1, 3).c_str(), "él");
     AURORA_TEST_CHECK_STREQ(atspi_cp_slice("a😀b", 1, 2).c_str(), "😀");  // 整码点切片不劈开多字节
     AURORA_TEST_CHECK_STREQ(atspi_cp_slice("abc", 1, 99).c_str(), "bc");  // 终点越界 ⇒ 夹紧到文末
-    AURORA_TEST_CHECK_TRUE(atspi_cp_slice("abc", 5, 9).empty());          // 起点越界 ⇒ 空
+    AURORA_TEST_CHECK_TRUE(atspi_cp_slice("abc", 5, 9).empty());  // 起点越界 ⇒ 空
     AURORA_TEST_CHECK_STREQ(atspi_cp_slice("abc", -1, -1).c_str(), "abc");  // 负起点夹紧 0
-    AURORA_TEST_CHECK_TRUE(atspi_cp_slice("abc", 2, 2).empty());            // 空区间
+    AURORA_TEST_CHECK_TRUE(atspi_cp_slice("abc", 2, 2).empty());  // 空区间
     AURORA_TEST_CHECK_TRUE(atspi_cp_slice("", 0, -1).empty());
 }
 
@@ -333,8 +327,8 @@ AURORA_TEST_CASE(model_synthesizes_app_and_frame) {
 
     AURORA_TEST_CHECK_TRUE(model.exists(k_atspi_app_id));
     AURORA_TEST_CHECK_TRUE(model.exists(k_atspi_frame_id));
-    AURORA_TEST_CHECK_EQ(model.role(k_atspi_app_id), std::uint32_t{75});   // APPLICATION
-    AURORA_TEST_CHECK_EQ(model.role(k_atspi_frame_id), std::uint32_t{23}); // FRAME
+    AURORA_TEST_CHECK_EQ(model.role(k_atspi_app_id), std::uint32_t{75});  // APPLICATION
+    AURORA_TEST_CHECK_EQ(model.role(k_atspi_frame_id), std::uint32_t{23});  // FRAME
     AURORA_TEST_CHECK_STREQ(model.name(k_atspi_app_id).c_str(), "probe-app");
     AURORA_TEST_CHECK_STREQ(model.name(k_atspi_frame_id).c_str(), "Probe Window");
     AURORA_TEST_CHECK_EQ(model.child_count(k_atspi_app_id), std::int32_t{1});
@@ -419,9 +413,9 @@ AURORA_TEST_CASE(model_geometry_and_hit_test) {
     model.sync(snap);
 
     const auto r = model.extents(11, coord_screen);
-    AURORA_TEST_CHECK_EQ(r.x, std::int32_t{50});   // 原点向下取整
+    AURORA_TEST_CHECK_EQ(r.x, std::int32_t{50});  // 原点向下取整
     AURORA_TEST_CHECK_EQ(r.y, std::int32_t{20});
-    AURORA_TEST_CHECK_EQ(r.width, std::int32_t{41});   // 终点向上取整（90.5→91）
+    AURORA_TEST_CHECK_EQ(r.width, std::int32_t{41});  // 终点向上取整（90.5→91）
     AURORA_TEST_CHECK_EQ(r.height, std::int32_t{17});  // 终点向上取整（36.25→37 − 20）
     AURORA_TEST_CHECK_TRUE(model.contains(11, 60, 25, coord_screen));
     AURORA_TEST_CHECK_FALSE(model.contains(11, 49, 25, coord_screen));
@@ -456,11 +450,11 @@ AURORA_TEST_CASE(model_text_value_action) {
     model.sync(snap);
 
     AURORA_TEST_CHECK_TRUE(model.has_text(11));
-    AURORA_TEST_CHECK_EQ(model.text_char_count(11), std::int32_t{5});   // 码点数，非字节数（6 字节）
+    AURORA_TEST_CHECK_EQ(model.text_char_count(11), std::int32_t{5});  // 码点数，非字节数（6 字节）
     AURORA_TEST_CHECK_STREQ(model.text_slice(11, 0, -1).c_str(), "héllo");
     AURORA_TEST_CHECK_STREQ(model.text_slice(11, 1, 3).c_str(), "él");
     AURORA_TEST_CHECK_EQ(model.text_caret(11), std::int32_t{2});  // 字节 3 → 码点 2
-    AURORA_TEST_CHECK_FALSE(model.has_text(10));                  // 容器无 Text 接口
+    AURORA_TEST_CHECK_FALSE(model.has_text(10));  // 容器无 Text 接口
     AURORA_TEST_CHECK_EQ(model.text_char_count(9999), std::int32_t{0});
 
     // Value 接口：range 存在才有；设值经 env.perform 转 Value 动作。

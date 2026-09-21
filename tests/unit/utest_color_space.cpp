@@ -18,7 +18,7 @@ AURORA_TEST_CASE(srgb_transfer_curve_boundaries) {
     AURORA_TEST_CHECK_NEAR(srgb_transfer_decode(255), 1.0F, 1e-6F);
     AURORA_TEST_CHECK_EQ(srgb_transfer_encode(0.0F), 0);
     AURORA_TEST_CHECK_EQ(srgb_transfer_encode(1.0F), 255);
-    AURORA_TEST_CHECK_EQ(srgb_transfer_encode(-0.5F), 0);   // 夹下界
+    AURORA_TEST_CHECK_EQ(srgb_transfer_encode(-0.5F), 0);  // 夹下界
     AURORA_TEST_CHECK_EQ(srgb_transfer_encode(1.5F), 255);  // 夹上界
     // 线性段拐点以下为线性（c/12.92）：8bit 1 ≈ 0.00392 → 线性段。
     AURORA_TEST_CHECK_NEAR(srgb_transfer_decode(1), 1.0F / 255.0F / 12.92F, 1e-7F);
@@ -57,9 +57,9 @@ AURORA_TEST_CASE(roundtrip_within_tolerance) {
     // P3 侧 8bit 量化的半步经曲线斜率放大后落在相消行上，实测最大漂移 3 LSB（绿/青原色 r 通道）。
     // 覆盖：纯色三原色、混合色、色域边角、暗部/亮部台阶。
     const Color samples[] = {
-        Color{255, 0, 0, 255}, Color{0, 255, 0, 255}, Color{0, 0, 255, 255}, Color{255, 255, 0, 255},
-        Color{0, 255, 255, 255}, Color{255, 0, 255, 255}, Color{12, 34, 56, 255}, Color{200, 100, 50, 255},
-        Color{1, 2, 3, 255}, Color{253, 254, 255, 255}, Color{90, 90, 200, 128},
+        Color{255, 0, 0, 255},   Color{0, 255, 0, 255},     Color{0, 0, 255, 255},   Color{255, 255, 0, 255},
+        Color{0, 255, 255, 255}, Color{255, 0, 255, 255},   Color{12, 34, 56, 255},  Color{200, 100, 50, 255},
+        Color{1, 2, 3, 255},     Color{253, 254, 255, 255}, Color{90, 90, 200, 128},
     };
     for (const Color &c : samples) {
         const Color rt = display_p3_to_srgb(srgb_to_display_p3(c));
@@ -75,7 +75,10 @@ AURORA_TEST_CASE(p3_first_roundtrip_within_one_lsb_for_in_gamut) {
     // 超出色域的 P3 颜色在 →sRGB 时被夹取（信息损失，宽色域 → 窄色域的固有约束），
     // 反向再转换会停在裁剪后的最近色（见 out_of_gamut_components_are_clamped）。
     const Color in_gamut[] = {
-        Color{128, 128, 128, 255}, Color{12, 34, 56, 255}, Color{90, 90, 200, 255}, Color{200, 100, 50, 128},
+        Color{128, 128, 128, 255},
+        Color{12, 34, 56, 255},
+        Color{90, 90, 200, 255},
+        Color{200, 100, 50, 128},
     };
     for (const Color &c : in_gamut) {
         const Color rt2 = srgb_to_display_p3(display_p3_to_srgb(c));

@@ -3,7 +3,7 @@
 // 覆盖接缝：`WM_IME_*` 消息族 → `detail::Win32ImeBridge` → `TextCompositionEvent`
 // → `EventDispatcher`（仅派发给焦点控件）→ `TextInput` 组合显示态，以及候选窗定位盒
 // （`Widget::composition_caret_bounds()` → `Surface::set_composition_caret_provider`）。
-// 后端：`Win32Surface`（GDI）与 `D3D11Surface`（GPU）共用同一 `Win32Window` 宿主与同一份桥，
+// 后端：`Win32Surface`（GDI）与 `D3D11Surface`（GPU）共用同一 `Win32Host` 宿主与同一份桥，
 // 故本探针只跑一路（GDI），另一路无需重复验收。
 //
 // 为什么必须真机：无头 CI 里没有真实窗口，`ImmGetContext` 取不到上下文、`WM_IME_*` 永不投递，

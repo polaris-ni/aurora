@@ -104,8 +104,8 @@ AURORA_TEST_CASE(backend_surface_set_cursor_contract) {
 #endif
 #ifdef AURORA_BACKEND_GPU_WGPU
 #ifdef AURORA_BACKEND_WIN32
-    static_assert(!std::is_same_v<decltype(&WgpuSurface::set_cursor), void (Surface::*)(CursorShape)>,
-                  "WgpuSurface 必须覆写 set_cursor（转发 Win32Window 宿主）");
+    static_assert(!std::is_same_v<decltype(&WgpuWin32Surface::set_cursor), void (Surface::*)(CursorShape)>,
+                  "WgpuWin32Surface 必须覆写 set_cursor（转发 Win32Host 宿主）");
 #endif
 #ifdef AURORA_BACKEND_X11
     static_assert(!std::is_same_v<decltype(&WgpuX11Surface::set_cursor), void (Surface::*)(CursorShape)>,
@@ -119,7 +119,7 @@ AURORA_TEST_CASE(backend_surface_set_cursor_contract) {
 }
 
 AURORA_TEST_CASE(windows_family_native_handle_contract) {
-    // Win32 家族（GDI 上屏与 D3D11 GPU 上屏）共用同一个 `Win32Window` 宿主，故「原生窗口
+    // Win32 家族（GDI 上屏与 D3D11 GPU 上屏）共用同一个 `Win32Host` 宿主，故「原生窗口
     // 句柄」访问器必须两路都覆写：`Surface::native_handle()` 的默认实现恒返回 nullptr，
     // 一旦漏覆写，`aurora::debug::surface_state()`（src/aurora/debug/debug_backend.cpp）的
     // `has_native_window` 就会对**真实窗口后端**误报 false（`D3D11Surface` 曾如此）。
@@ -145,7 +145,7 @@ AURORA_TEST_CASE(windows_family_native_handle_contract) {
 }
 
 AURORA_TEST_CASE(windows_family_capture_window_contract) {
-    // Win32 家族（GDI 上屏与 D3D11 GPU 上屏）共用同一个 `Win32Window` 宿主，须都覆写
+    // Win32 家族（GDI 上屏与 D3D11 GPU 上屏）共用同一个 `Win32Host` 宿主，须都覆写
     // `Surface::capture_window` 走共享 `detail::capture_window_by_hwnd` 的 PrintWindow 路径；
     // 漏覆写会回落基类默认（unsupported）错误，导致 Ctrl+Shift+S 窗口截图在 D3D11 后端失效。
     // 判定为类型级（同 native_handle 契约），无须创建真实窗口。
@@ -159,7 +159,7 @@ AURORA_TEST_CASE(windows_family_capture_window_contract) {
 #ifdef AURORA_BACKEND_D3D11
     static_assert(
         !std::is_same_v<decltype(&D3D11Surface::capture_window), Result<bool> (Surface::*)(const std::string &)>,
-        "D3D11Surface 必须覆写 capture_window（与 Win32Surface 共用 Win32Window 宿主）");
+        "D3D11Surface 必须覆写 capture_window（与 Win32Surface 共用 Win32Host 宿主）");
 #endif
     AURORA_TEST_CHECK_TRUE(true);
 #else

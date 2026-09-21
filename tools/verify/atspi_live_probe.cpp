@@ -322,7 +322,7 @@ print('DONE', flush=True)
 /// @brief 探针控件列 + 事件段变更所需的可变句柄（判据见头注「事件段」）。
 struct ProbeWidgets {
     aurora::Node root;
-    aurora::TextInput *entry = nullptr;   ///< set_value → property-change:accessible-value
+    aurora::TextInput *entry = nullptr;  ///< set_value → property-change:accessible-value
     aurora::ReorderableList<std::string> *list = nullptr;  ///< 收缩/增长 → children-changed
     std::shared_ptr<aurora::State<std::vector<std::string>>> items;
 };
@@ -334,8 +334,7 @@ struct ProbeWidgets {
     auto items = std::make_shared<aurora::State<std::vector<std::string>>>(
         std::vector<std::string>{"订单一", "订单二", "订单三"});
     // Node 以 shared_ptr 持有 widget：先建节点取裸指针，再拷进 Column（同一实例）。
-    aurora::Node entry_node{
-        aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "请输入"}}};
+    aurora::Node entry_node{aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "请输入"}}};
     aurora::Node list_node{aurora::ReorderableList<std::string>{
         items,
         [](const std::string &label, int) {
@@ -347,7 +346,9 @@ struct ProbeWidgets {
     probe.list = static_cast<aurora::ReorderableList<std::string> *>(&list_node.widget());
     probe.items = std::move(items);
     probe.root = aurora::Node{aurora::Column{
-        std::move(button), entry_node, list_node,
+        std::move(button),
+        entry_node,
+        list_node,
         aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"订单总额"}}},
     }};
     return probe;
@@ -554,11 +555,10 @@ auto main(int argc, char **argv) -> int {
             for (const auto &it : probe.items->get()) {
                 s += it + ',';
             }
-            emit(std::string("dbg ") + tag + ": data=[" + s + "] rendered=" +
-                 std::to_string(probe.list->item_count()));
+            emit(std::string("dbg ") + tag + ": data=[" + s + "] rendered=" + std::to_string(probe.list->item_count()));
         };
         pump_ms(800);  // 让客户端进入 GLib 事件环并挂好 grab_focus 定时器
-        window->set_title(std::string{kFrameTitle} + " v2");  // FRAME property-change:accessible-name
+        window->set_title(std::string{AURORA_FRAME_TITLE} + " v2");  // FRAME property-change:accessible-name
         pump_ms(500);
         probe.entry->set_value("abcd");  // entry property-change:accessible-value
         pump_ms(500);

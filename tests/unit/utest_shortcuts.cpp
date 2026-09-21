@@ -47,15 +47,19 @@ AURORA_TEST_CASE(key_combo_matches_without_modifiers) {
 }
 
 AURORA_TEST_CASE(key_combo_to_string_orders_modifiers) {
-    // lhs 含花括号逗号需加括号包裹（CHECK_EQ(lhs, ...) 首逗号切参）。
-    AURORA_TEST_CHECK_EQ((KeyCombo{ModifierKey::Control, KeyCode::O}.to_string()), std::string{"Ctrl+O"});
-    AURORA_TEST_CHECK_EQ((KeyCombo{ModifierKey::Control | ModifierKey::Shift, KeyCode::S}.to_string()),
-                         std::string{"Ctrl+Shift+S"});
-    AURORA_TEST_CHECK_EQ((KeyCombo{ModifierKey::Alt | ModifierKey::Meta, KeyCode::X}.to_string()),
-                         std::string{"Alt+Meta+X"});
+    // CHECK_EQ 在首个顶层逗号处切参，而预处理器的配对只认圆括号、不认花括号；
+    // 含「花括号 + 逗号」的表达式若加圆括号保护，又会被 clang-format 判为冗余括号剥掉，
+    // 故先落 KeyCombo 局部量再断言（改回内联写法会在下次格式化后编译失败）。
+    const KeyCombo ctrl_o{ModifierKey::Control, KeyCode::O};
+    const KeyCombo ctrl_shift_s{ModifierKey::Control | ModifierKey::Shift, KeyCode::S};
+    const KeyCombo alt_meta_x{ModifierKey::Alt | ModifierKey::Meta, KeyCode::X};
+    const KeyCombo none_f5{ModifierKey::None, KeyCode::F5};
+    AURORA_TEST_CHECK_EQ(ctrl_o.to_string(), std::string{"Ctrl+O"});
+    AURORA_TEST_CHECK_EQ(ctrl_shift_s.to_string(), std::string{"Ctrl+Shift+S"});
+    AURORA_TEST_CHECK_EQ(alt_meta_x.to_string(), std::string{"Alt+Meta+X"});
     // 无修饰键：仅键名。
     AURORA_TEST_CHECK_EQ(KeyCombo{KeyCode::A}.to_string(), std::string{"A"});
-    AURORA_TEST_CHECK_EQ((KeyCombo{ModifierKey::None, KeyCode::F5}.to_string()), std::string{"F5"});
+    AURORA_TEST_CHECK_EQ(none_f5.to_string(), std::string{"F5"});
     AURORA_TEST_CHECK_EQ(KeyCombo{KeyCode::D1}.to_string(), std::string{"1"});
 }
 

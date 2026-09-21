@@ -7,12 +7,16 @@
 #include "aurora/core/platform.h"
 #ifdef AURORA_PLATFORM_WINDOWS
 #ifndef _WIN32_WINNT
-#define _WI_N32_WINNT 0x0601  // NOLINT(cppcoreguidelines-macro-usage) Vista+：IFileOpenDialog / IFileSaveDialog
+// Windows SDK 版本旋钮，不可改名（见 platform.h 例外说明）
+// NOLINTNEXTLINE(*-macro-usage, *-reserved-identifier, *-identifier-naming)
+#define _WIN32_WINNT 0x0601
 #endif
 #ifndef _WIN32_IE
-#define WIN32_IE 0x0600  // NOLINT(cppcoreguidelines-macro-usage, readability-identifier-naming): Windows SDK 版本宏
+// Windows SDK 版本旋钮，不可改名
+// NOLINTNEXTLINE(*-macro-usage, *-reserved-identifier, *-identifier-naming)
+#define _WIN32_IE 0x0600
 #endif
-#define WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名
+#define WIN32_LEAN_AND_MEAN  // NOLINT(*-identifier-naming): Windows SDK 宏，不可改名
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif

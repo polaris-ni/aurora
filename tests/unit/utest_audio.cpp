@@ -9,9 +9,11 @@
 /// 节点族（Panner 能量守恒/Analyser 峰值桶与时域静音 128/WAV 头结构与显式错误/麦克风采集全链路/Sinc 恒量保真）。
 /// 注：原 utest_audio_nodes.cpp（节点类无独立源文件，实现同在 audio.cpp）已收编进本套件。
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <numbers>
 #include <span>
 #include <vector>
 
@@ -34,7 +36,7 @@ struct Rig {
     FakeAudioDevice *dev = nullptr;
     AudioContext ctx;
 
-    explicit Rig(int rate = AURORA_AUDIO_RATE, std::size_t = 0)
+    explicit Rig(int rate = AURORA_AUDIO_RATE, std::size_t /*unused*/ = 0)
         : owned(std::make_unique<FakeAudioDevice>(rate, 2)), dev(owned.get()), ctx(std::move(owned)) {}
 };
 
@@ -51,7 +53,7 @@ auto check_all_near(const std::vector<float> &buf, float value, double tol, int 
     }
     for (int i = 0; i < pairs; ++i) {
         if (std::fabs(static_cast<double>(buf[static_cast<std::size_t>(i) * 2U]) - static_cast<double>(value)) > tol ||
-            std::fabs(static_cast<double>(buf[static_cast<std::size_t>(i) * 2U + 1U]) - static_cast<double>(value)) >
+            std::fabs(static_cast<double>(buf[(static_cast<std::size_t>(i) * 2U) + 1U]) - static_cast<double>(value)) >
                 tol) {
             return false;
         }
@@ -62,13 +64,13 @@ auto check_all_near(const std::vector<float> &buf, float value, double tol, int 
 // ---- 来自 utest_audio_nodes：节点族辅助（静默上下文 + 3-arg 全缓冲近似） ----
 using aurora::testing::FakeAudioCaptureDevice;
 
-constexpr int kRate = 48000;
-constexpr int kFrames = 480;  // 10ms @ 48k
-constexpr double kPi = 3.14159265358979323846;
+constexpr int AURORA_RATE = 48000;
+constexpr int AURORA_FRAMES = 480;  // 10ms @ 48k
+constexpr double AURORA_PI = std::numbers::pi;
 
 /// 静默上下文（fail-start 桩保证跨构建配置确定性）+ 手动渲染辅助。
 struct SilentRig {
-    AudioContext ctx{std::make_unique<FakeAudioDevice>(kRate, 2, /*fail_start=*/true)};
+    AudioContext ctx{std::make_unique<FakeAudioDevice>(AURORA_RATE, 2, /*fail_start=*/true)};
 
     auto render(int frames) -> std::vector<float> {
         std::vector<float> out(static_cast<std::size_t>(frames) * 2U, 0.0F);
@@ -79,7 +81,7 @@ struct SilentRig {
 
 auto const_buffer(float v, int frames) -> std::shared_ptr<AudioBuffer> {
     auto b = std::make_shared<AudioBuffer>();
-    b->sample_rate = kRate;
+    b->sample_rate = AURORA_RATE;
     b->channels = 1;
     b->samples.assign(static_cast<std::size_t>(frames), v);
     return b;
@@ -87,25 +89,21 @@ auto const_buffer(float v, int frames) -> std::shared_ptr<AudioBuffer> {
 
 auto sine_buffer(float freq, float amp, int frames) -> std::shared_ptr<AudioBuffer> {
     auto b = std::make_shared<AudioBuffer>();
-    b->sample_rate = kRate;
+    b->sample_rate = AURORA_RATE;
     b->channels = 1;
     b->samples.resize(static_cast<std::size_t>(frames));
     for (int i = 0; i < frames; ++i) {
         b->samples[static_cast<std::size_t>(i)] =
-            static_cast<float>(amp * std::sin(2.0 * kPi * static_cast<double>(freq) * static_cast<double>(i) /
-                                              static_cast<double>(kRate)));
+            static_cast<float>(amp * std::sin(2.0 * AURORA_PI * static_cast<double>(freq) * static_cast<double>(i) /
+                                              static_cast<double>(AURORA_RATE)));
     }
     return b;
 }
 
 /// 检查整段缓冲所有样本 ≈ value（3-arg 重载，与上面的 pairs 版并存）。
 auto check_all_near(const std::vector<float> &buf, float value, double tol) -> bool {
-    for (const float i : buf) {
-        if (std::fabs(static_cast<double>(i) - static_cast<double>(value)) > tol) {
-            return false;
-        }
-    }
-    return true;
+    return std::ranges::all_of(
+        buf, [value, tol](float i) { return std::fabs(static_cast<double>(i) - static_cast<double>(value)) <= tol; });
 }
 
 }  // namespace
@@ -348,8 +346,8 @@ AURORA_TEST_CASE(buffer_source_one_shot_and_loop) {
     AURORA_TEST_CHECK_TRUE(src->start().ok());
     out = rig.dev->render(500);
     AURORA_TEST_CHECK_NEAR(out[0], 0.5F, 1e-6);
-    AURORA_TEST_CHECK_NEAR(out[200 * 2], 0.5F, 1e-6);  // 回绕后首帧
-    AURORA_TEST_CHECK_NEAR(out[499 * 2], 0.5F, 1e-6);
+    AURORA_TEST_CHECK_NEAR(out[static_cast<std::size_t>(200) * 2], 0.5F, 1e-6);  // 回绕后首帧
+    AURORA_TEST_CHECK_NEAR(out[static_cast<std::size_t>(499) * 2], 0.5F, 1e-6);
     AURORA_TEST_CHECK_FALSE(src->finished());
     src->stop();
     AURORA_TEST_CHECK_TRUE(src->finished());
@@ -420,7 +418,7 @@ AURORA_TEST_CASE(param_automation_curves) {
     // set_target：v(t) = target + (v0 - target)·e^{-(t-t0)/tc}
     AURORA_TEST_CHECK_TRUE(p.set_target_at_time(0.03F, 2.6, 0.05).ok());
     p.evaluate_block(2.65, 48, AURORA_AUDIO_RATE, curve.data());
-    AURORA_TEST_CHECK_NEAR(curve[0], 0.03F + (0.0625F - 0.03F) * static_cast<float>(std::exp(-1.0)), 1e-5);
+    AURORA_TEST_CHECK_NEAR(curve[0], 0.03F + ((0.0625F - 0.03F) * static_cast<float>(std::exp(-1.0))), 1e-5);
     AURORA_TEST_CHECK_NEAR(p.value(), curve[47], 1e-6);  // 块末回写 value()
 }
 
@@ -525,16 +523,16 @@ AURORA_TEST_CASE(device_start_failure_falls_back_silent) {
 AURORA_TEST_CASE(panner_center_energy) {
     SilentRig rig;
     auto src = rig.ctx.create_buffer_source();
-    AURORA_TEST_REQUIRE(src->set_buffer(const_buffer(1.0F, kFrames)).ok());
+    AURORA_TEST_REQUIRE(src->set_buffer(const_buffer(1.0F, AURORA_FRAMES)).ok());
     src->start();
     auto panner = rig.ctx.create_panner();
     panner->set_position(0.0F, 0.0F, -4.0F);  // 听者正前方 4 米（ref=1, rolloff=1）
     AURORA_TEST_REQUIRE(rig.ctx.connect(src, panner).ok());
     AURORA_TEST_REQUIRE(rig.ctx.connect(panner, rig.ctx.destination()).ok());
 
-    const auto out = rig.render(kFrames);
+    const auto out = rig.render(AURORA_FRAMES);
     // inverse 距离：gain = 1/(1 + (4-1)) = 0.25；正前方 pan=0 → L=R=cos(π/4)·0.25
-    const float expected = 0.25F * std::cos(static_cast<float>(kPi) * 0.25F);
+    const float expected = 0.25F * std::cos(static_cast<float>(AURORA_PI) * 0.25F);
     AURORA_TEST_CHECK_NEAR(out[0], static_cast<double>(expected), 1e-4);
     AURORA_TEST_CHECK_NEAR(out[1], static_cast<double>(expected), 1e-4);
     AURORA_TEST_CHECK_TRUE(check_all_near(out, expected, 1e-4F));
@@ -543,14 +541,14 @@ AURORA_TEST_CASE(panner_center_energy) {
 AURORA_TEST_CASE(panner_right_and_attenuation) {
     SilentRig rig;
     const auto src = rig.ctx.create_buffer_source();
-    AURORA_TEST_REQUIRE(src->set_buffer(const_buffer(1.0F, kFrames)).ok());
+    AURORA_TEST_REQUIRE(src->set_buffer(const_buffer(1.0F, AURORA_FRAMES)).ok());
     src->start();
     const auto panner = rig.ctx.create_panner();
     panner->set_position(1.0F, 0.0F, 0.0F);  // 正右方，距离 = ref → 无衰减
     AURORA_TEST_REQUIRE(rig.ctx.connect(src, panner).ok());
     AURORA_TEST_REQUIRE(rig.ctx.connect(panner, rig.ctx.destination()).ok());
 
-    const auto out = rig.render(kFrames);
+    const auto out = rig.render(AURORA_FRAMES);
     AURORA_TEST_CHECK_NEAR(out[0], 0.0, 1e-6);  // pan=1 → L = cos(π/2) ≈ 0
     AURORA_TEST_CHECK_NEAR(out[1], 1.0, 1e-6);  // R = sin(π/2) = 1（等于输入）
 }
@@ -558,19 +556,19 @@ AURORA_TEST_CASE(panner_right_and_attenuation) {
 AURORA_TEST_CASE(panner_energy_conservation) {
     SilentRig rig;
     const auto src = rig.ctx.create_buffer_source();
-    AURORA_TEST_REQUIRE(src->set_buffer(const_buffer(1.0F, kFrames)).ok());
+    AURORA_TEST_REQUIRE(src->set_buffer(const_buffer(1.0F, AURORA_FRAMES)).ok());
     src->start();
     const auto panner = rig.ctx.create_panner();
     panner->set_position(1.0F, 0.0F, -1.0F);  // 右前方 45° 对角
     AURORA_TEST_REQUIRE(rig.ctx.connect(src, panner).ok());
     AURORA_TEST_REQUIRE(rig.ctx.connect(panner, rig.ctx.destination()).ok());
 
-    const auto out = rig.render(kFrames);
-    const float dist = std::sqrt(2.0F);
+    const auto out = rig.render(AURORA_FRAMES);
+    const float dist = std::numbers::sqrt2_v<float>;
     const float dist_gain = 1.0F / (1.0F + (dist - 1.0F));  // ref=1, rolloff=1
     // equal-power：L² + R² = dist_gain²（能量守恒）
-    const double energy = static_cast<double>(out[0]) * static_cast<double>(out[0]) +
-                          static_cast<double>(out[1]) * static_cast<double>(out[1]);
+    const double energy = (static_cast<double>(out[0]) * static_cast<double>(out[0])) +
+                          (static_cast<double>(out[1]) * static_cast<double>(out[1]));
     AURORA_TEST_CHECK_NEAR(energy, static_cast<double>(dist_gain) * static_cast<double>(dist_gain), 1e-6);
 }
 
@@ -587,7 +585,7 @@ AURORA_TEST_CASE(analyser_sine_peak_bin) {
 
     // 5 × 480 = 2400 帧喂足 2048 点窗
     for (int i = 0; i < 5; ++i) {
-        (void)rig.render(kFrames);
+        (void)rig.render(AURORA_FRAMES);
     }
     std::vector<float> spec(static_cast<std::size_t>(analyser->frequency_bin_count()), 0.0F);
     analyser->get_float_frequency_data(spec);
@@ -605,7 +603,7 @@ AURORA_TEST_CASE(analyser_time_domain_silence_128) {
     SilentRig rig;
     auto analyser = rig.ctx.create_analyser();
     AURORA_TEST_REQUIRE(rig.ctx.connect(analyser, rig.ctx.destination()).ok());
-    (void)rig.render(kFrames);
+    (void)rig.render(AURORA_FRAMES);
 
     std::vector<std::uint8_t> time_data(static_cast<std::size_t>(analyser->fft_size()), 0U);
     analyser->get_byte_time_data(time_data);
@@ -621,13 +619,13 @@ AURORA_TEST_CASE(analyser_time_domain_silence_128) {
 AURORA_TEST_CASE(analyser_passthrough) {
     SilentRig rig;
     auto src = rig.ctx.create_buffer_source();
-    AURORA_TEST_REQUIRE(src->set_buffer(const_buffer(0.25F, kFrames)).ok());
+    AURORA_TEST_REQUIRE(src->set_buffer(const_buffer(0.25F, AURORA_FRAMES)).ok());
     src->start();
     auto analyser = rig.ctx.create_analyser();
     AURORA_TEST_REQUIRE(rig.ctx.connect(src, analyser).ok());
     AURORA_TEST_REQUIRE(rig.ctx.connect(analyser, rig.ctx.destination()).ok());
 
-    const auto out = rig.render(kFrames);
+    const auto out = rig.render(AURORA_FRAMES);
     AURORA_TEST_CHECK_TRUE(check_all_near(out, 0.25F, 1e-6F));  // 直通不改样本
 }
 
@@ -649,7 +647,7 @@ AURORA_TEST_CASE(analyser_fft_size_validation) {
 AURORA_TEST_CASE(recording_wav_header_and_samples) {
     SilentRig rig;
     auto src = rig.ctx.create_buffer_source();
-    AURORA_TEST_REQUIRE(src->set_buffer(const_buffer(0.25F, kFrames)).ok());
+    AURORA_TEST_REQUIRE(src->set_buffer(const_buffer(0.25F, AURORA_FRAMES)).ok());
     src->start();
     auto rec = rig.ctx.create_recording_destination();
     AURORA_TEST_REQUIRE(rig.ctx.connect(src, rec).ok());
@@ -657,13 +655,13 @@ AURORA_TEST_CASE(recording_wav_header_and_samples) {
 
     AURORA_TEST_REQUIRE(rec->start().ok());
     AURORA_TEST_CHECK_TRUE(rec->is_recording());
-    (void)rig.render(kFrames);
+    (void)rig.render(AURORA_FRAMES);
     rec->stop();
     AURORA_TEST_CHECK_FALSE(rec->is_recording());
-    AURORA_TEST_CHECK_EQ(rec->recorded_frames(), static_cast<std::size_t>(kFrames));
+    AURORA_TEST_CHECK_EQ(rec->recorded_frames(), static_cast<std::size_t>(AURORA_FRAMES));
 
     const auto wav = rec->to_wav_bytes();
-    AURORA_TEST_CHECK_EQ(wav.size(), 44U + static_cast<std::size_t>(kFrames) * 4U);
+    AURORA_TEST_CHECK_EQ(wav.size(), 44U + (static_cast<std::size_t>(AURORA_FRAMES) * 4U));
     AURORA_TEST_CHECK_TRUE(wav[0] == 'R' && wav[1] == 'I' && wav[2] == 'F' && wav[3] == 'F');
     AURORA_TEST_CHECK_TRUE(wav[8] == 'W' && wav[9] == 'A' && wav[10] == 'V' && wav[11] == 'E');
     // offset 24：采样率 48000（LE）
@@ -676,7 +674,7 @@ AURORA_TEST_CASE(recording_wav_header_and_samples) {
     const std::uint32_t data_bytes = static_cast<std::uint32_t>(wav[40]) | (static_cast<std::uint32_t>(wav[41]) << 8U) |
                                      (static_cast<std::uint32_t>(wav[42]) << 16U) |
                                      (static_cast<std::uint32_t>(wav[43]) << 24U);
-    AURORA_TEST_CHECK_EQ(data_bytes, static_cast<std::uint32_t>(kFrames) * 4U);
+    AURORA_TEST_CHECK_EQ(data_bytes, static_cast<std::uint32_t>(AURORA_FRAMES) * 4U);
     // 首个 int16 样本 ≈ 0.25 · 32767
     const auto s0 = static_cast<std::int16_t>(static_cast<std::uint16_t>(wav[44]) |
                                               static_cast<std::uint16_t>(static_cast<unsigned>(wav[45]) << 8U));
@@ -695,7 +693,7 @@ AURORA_TEST_CASE(recording_save_wav_explicit_error) {
 AURORA_TEST_CASE(microphone_capture_explicit_error) {
     auto cap = std::make_unique<FakeAudioCaptureDevice>(/*fail_start=*/true);
     auto *cap_ptr = cap.get();
-    AudioContext ctx{std::make_unique<FakeAudioDevice>(kRate, 2, /*fail_start=*/true), std::move(cap)};
+    AudioContext ctx{std::make_unique<FakeAudioDevice>(AURORA_RATE, 2, /*fail_start=*/true), std::move(cap)};
     // 录制是显式能力：采集启动失败 → audio-device-unavailable，不静默降级
     auto r = ctx.create_microphone_source();
     AURORA_TEST_CHECK_FALSE(r.ok());
@@ -707,7 +705,7 @@ AURORA_TEST_CASE(microphone_capture_explicit_error) {
 AURORA_TEST_CASE(microphone_capture_to_recording) {
     auto cap = std::make_unique<FakeAudioCaptureDevice>();
     auto *cap_ptr = cap.get();
-    AudioContext ctx{std::make_unique<FakeAudioDevice>(kRate, 2, /*fail_start=*/true), std::move(cap)};
+    AudioContext ctx{std::make_unique<FakeAudioDevice>(AURORA_RATE, 2, /*fail_start=*/true), std::move(cap)};
     auto mic_r = ctx.create_microphone_source();
     AURORA_TEST_REQUIRE(mic_r.ok());
     const auto &mic = mic_r.value();
@@ -719,13 +717,13 @@ AURORA_TEST_CASE(microphone_capture_to_recording) {
     AURORA_TEST_REQUIRE(rec->start().ok());
 
     // 采集线程侧（fake 手动触发）：480 帧 0.5 stereo @ 48k → 经 int16 往返推入环
-    std::vector<float> pcm(static_cast<std::size_t>(kFrames) * 2U, 0.5F);
-    cap_ptr->emit(pcm, kFrames, kRate, 2);
+    std::vector<float> pcm(static_cast<std::size_t>(AURORA_FRAMES) * 2U, 0.5F);
+    cap_ptr->emit(pcm, AURORA_FRAMES, AURORA_RATE, 2);
 
-    std::vector<float> out(static_cast<std::size_t>(kFrames) * 2U, 0.0F);
-    ctx.render_block(out.data(), kFrames);
+    std::vector<float> out(static_cast<std::size_t>(AURORA_FRAMES) * 2U, 0.0F);
+    ctx.render_block(out.data(), AURORA_FRAMES);
     AURORA_TEST_CHECK_TRUE(check_all_near(out, 0.5F, 1e-6F));
-    AURORA_TEST_CHECK_EQ(rec->recorded_frames(), static_cast<std::size_t>(kFrames));
+    AURORA_TEST_CHECK_EQ(rec->recorded_frames(), static_cast<std::size_t>(AURORA_FRAMES));
     const auto snap = rec->recording();
     AURORA_TEST_CHECK_NEAR(static_cast<double>(snap[0]), 0.5, 1e-3);
     AURORA_TEST_CHECK_NEAR(static_cast<double>(snap.back()), 0.5, 1e-3);
@@ -744,9 +742,9 @@ AURORA_TEST_CASE(sinc_quality_constant_fidelity) {
     AURORA_TEST_REQUIRE(rig.ctx.connect(src, rig.ctx.destination()).ok());
 
     // 恒量 0.5 × 544 帧（480 渲染 + 64 前瞻裕量）：行归一核保证 DC 保真
-    std::vector<std::int16_t> pcm(544U * 2U, 16384);
-    AURORA_TEST_REQUIRE(src->push(pcm, kRate, 2).ok());
-    const auto out = rig.render(kFrames);
+    std::vector<std::int16_t> pcm(static_cast<std::size_t>(544U) * 2U, 16384);
+    AURORA_TEST_REQUIRE(src->push(pcm, AURORA_RATE, 2).ok());
+    const auto out = rig.render(AURORA_FRAMES);
     AURORA_TEST_CHECK_TRUE(check_all_near(out, 0.5F, 5e-3F));
 }
 

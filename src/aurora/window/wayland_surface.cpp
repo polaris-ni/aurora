@@ -177,7 +177,8 @@ struct WaylandSurface::Impl {
     // 组合/上屏事件由合成器侧输入法经 preedit_string/commit_string 回推。
     zwp_text_input_v3 *text_input = nullptr;  ///< 本 seat 的 text-input 对象（keyboard 能力首现时创建）。
     bool ti_entered = false;  ///< 收到过 enter（本表面持键盘输入焦点）。
-    bool ti_ime_wanted = false;  ///< 键盘输入焦点在本表面（wl_keyboard 与 text-input 任一 leave 即 false：此刻 provider 仍报非零盒，须强制 disable）。
+    bool ti_ime_wanted = false;  ///< 键盘输入焦点在本表面（wl_keyboard 与 text-input 任一 leave 即 false：此刻 provider
+                                 ///< 仍报非零盒，须强制 disable）。
     bool ti_enabled = false;  ///< 当前 enable 态（与 provider 判据同步去重）。
     std::string ti_preedit;  ///< 最近 preedit_string 原文（观测面 + leave 时清空）。
     Rect ti_last_caret{};  ///< 上次 set_cursor_rectangle 的盒（逻辑 dp，去重用）。
@@ -261,8 +262,8 @@ struct WaylandSurface::Impl {
         s.busy = false;
     }
 
-    /// @brief 光标逻辑尺寸（dp）：主题按 `kCursorSize * scale` 设备像素加载，与 Win32/X11 的系统光标同量级。
-    static constexpr int kCursorSize = 24;
+    /// @brief 光标逻辑尺寸（dp）：主题按 `AURORA_CURSOR_SIZE * scale` 设备像素加载，与 Win32/X11 的系统光标同量级。
+    static constexpr int AURORA_CURSOR_SIZE = 24;
     /// @brief 确保主题已按当前缩放加载（scale 变化即销毁重载）。返回是否可用。
     auto ensure_cursor_theme() -> bool;
     /// @brief 把 `pending_cursor_shape` 的主题位图提交到 cursor 表面并交回合成器。
@@ -327,8 +328,7 @@ void tl_caps(void * /*data*/, xdg_toplevel * /*tl*/, wl_array * /*caps*/) {}
 constexpr xdg_toplevel_listener TOP_LEVEL_LISTENER = {tl_configure, tl_close, tl_bounds, tl_caps};
 
 // ---- wl_pointer：进入/离开/移动/按键/滚轮 → MouseEvent/ScrollEvent。 ----
-void ptr_enter(void *data, wl_pointer * /*p*/, std::uint32_t serial, wl_surface * /*s*/, wl_fixed_t sx,
-               wl_fixed_t sy) {
+void ptr_enter(void *data, wl_pointer * /*p*/, std::uint32_t serial, wl_surface * /*s*/, wl_fixed_t sx, wl_fixed_t sy) {
     Impl &d = *static_cast<Impl *>(data);
     // 光标形状：捕获本次 enter 的 serial——wl_pointer.set_cursor 只接受 enter（或已有焦点）时的
     // serial，故 set_cursor 早于 enter 时须在此补一次下发；且合成器在指针重新进入表面时会回到
@@ -624,13 +624,9 @@ constexpr wl_keyboard_listener KEYBOARD_LISTENER = {kb_keymap, kb_enter, kb_leav
 
 #if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
 // ---- zwp_text_input_v3：输入法组合通道（enter/leave/preedit/commit/delete/done）。 ----
-void ti_enter(void *data, zwp_text_input_v3 * /*ti*/, wl_surface * /*s*/) {
-    static_cast<Impl *>(data)->ti_on_enter();
-}
+void ti_enter(void *data, zwp_text_input_v3 * /*ti*/, wl_surface * /*s*/) { static_cast<Impl *>(data)->ti_on_enter(); }
 
-void ti_leave(void *data, zwp_text_input_v3 * /*ti*/, wl_surface * /*s*/) {
-    static_cast<Impl *>(data)->ti_on_leave();
-}
+void ti_leave(void *data, zwp_text_input_v3 * /*ti*/, wl_surface * /*s*/) { static_cast<Impl *>(data)->ti_on_leave(); }
 
 void ti_preedit(void *data, zwp_text_input_v3 * /*ti*/, const char *text, std::int32_t begin, std::int32_t end) {
     static_cast<Impl *>(data)->ti_on_preedit(text, begin, end);
@@ -649,8 +645,8 @@ void ti_done(void * /*data*/, zwp_text_input_v3 * /*ti*/, std::uint32_t /*serial
     // set_cursor_rectangle 统一刷新，此处无须动作。
 }
 
-constexpr zwp_text_input_v3_listener TEXT_INPUT_LISTENER = {ti_enter, ti_leave,       ti_preedit,
-                                                             ti_commit, ti_delete,    ti_done};
+constexpr zwp_text_input_v3_listener TEXT_INPUT_LISTENER = {ti_enter,  ti_leave,  ti_preedit,
+                                                            ti_commit, ti_delete, ti_done};
 #endif
 
 // ---- wl_seat：能力增减 → 惰性获取 pointer/keyboard。 ----
@@ -945,7 +941,7 @@ auto WaylandSurface::Impl::pick_slot(int w, int h) -> Slot * {
 }
 
 auto WaylandSurface::Impl::ensure_cursor_theme() -> bool {
-    const int want = kCursorSize * std::max(1, scale);  // 主题按设备像素加载
+    const int want = AURORA_CURSOR_SIZE * std::max(1, scale);  // 主题按设备像素加载
     if (cursor_theme != nullptr && cursor_theme_size == want) {
         return true;
     }
@@ -965,8 +961,7 @@ auto WaylandSurface::Impl::ensure_cursor_theme() -> bool {
     if (cursor_theme == nullptr) {
         if (!cursor_theme_warned) {
             cursor_theme_warned = true;
-            AURORA_LOG_WARN("window",
-                            "WaylandSurface: wl_cursor_theme_load(size=", want,
+            AURORA_LOG_WARN("window", "WaylandSurface: wl_cursor_theme_load(size=", want,
                             ") failed (no icon theme installed); cursor shapes stay on the "
                             "compositor default.");
         }
@@ -1000,8 +995,7 @@ auto WaylandSurface::Impl::apply_cursor(bool force) -> bool {
     if (cur == nullptr || cur->image_count == 0U || cur->images[0] == nullptr) {
         if (!cursor_theme_warned) {
             cursor_theme_warned = true;
-            AURORA_LOG_WARN("window",
-                            "WaylandSurface: cursor theme resolved neither \"", want,
+            AURORA_LOG_WARN("window", "WaylandSurface: cursor theme resolved neither \"", want,
                             "\" nor the default/left_ptr fallback; keeping the compositor cursor.");
         }
         return false;
@@ -1024,9 +1018,8 @@ auto WaylandSurface::Impl::apply_cursor(bool force) -> bool {
     }
     // 仅当主题真的给出了高 DPI 位图（尺寸达设备像素目标且可被 scale 整除）才按 scale 上报缓冲
     // 缩放；否则退回 1x——宁可在缺尺寸的主题下偏小，也不把热点折算到图像之外。
-    const int bscale = (scale > 1 && w % scale == 0 && h % scale == 0 && std::max(w, h) >= cursor_theme_size)
-                           ? scale
-                           : 1;
+    const int bscale =
+        (scale > 1 && w % scale == 0 && h % scale == 0 && std::max(w, h) >= cursor_theme_size) ? scale : 1;
     if (compositor_version >= 3U) {
         wl_surface_set_buffer_scale(cursor_surface, bscale);
     }
@@ -1038,8 +1031,8 @@ auto WaylandSurface::Impl::apply_cursor(bool force) -> bool {
     }
     wl_surface_commit(cursor_surface);
     // 热点是图像设备像素，须按 bscale 折算成表面逻辑坐标（与 attach 的 buffer_scale 同口径）。
-    wl_pointer_set_cursor(pointer, pointer_enter_serial, cursor_surface, static_cast<std::int32_t>(img->hotspot_x) /
-                                                                              bscale,
+    wl_pointer_set_cursor(pointer, pointer_enter_serial, cursor_surface,
+                          static_cast<std::int32_t>(img->hotspot_x) / bscale,
                           static_cast<std::int32_t>(img->hotspot_y) / bscale);
     wl_display_flush(dpy);
     cursor_applied = true;
@@ -1168,8 +1161,8 @@ auto WaylandSurface::Impl::ti_on_delete(std::uint32_t before_length, std::uint32
         return;
     }
     // 语义 = 「删掉光标前 before_length、光标后 after_length 字节」：先左移再退格等效。
-    constexpr std::uint32_t kCap = 64;
-    for (std::uint32_t i = 0; i < std::min(before_length, kCap); ++i) {
+    constexpr std::uint32_t AURORA_CAP = 64;
+    for (std::uint32_t i = 0; i < std::min(before_length, AURORA_CAP); ++i) {
         KeyEvent left;
         left.action = KeyAction::Down;
         left.key = static_cast<int>(KeyCode::ArrowLeft);
@@ -1178,7 +1171,7 @@ auto WaylandSurface::Impl::ti_on_delete(std::uint32_t before_length, std::uint32
         up.action = KeyAction::Up;
         handler(up);
     }
-    for (std::uint32_t i = 0; i < std::min(after_length, kCap); ++i) {
+    for (std::uint32_t i = 0; i < std::min(after_length, AURORA_CAP); ++i) {
         KeyEvent bs;
         bs.action = KeyAction::Down;
         bs.key = static_cast<int>(KeyCode::Backspace);
@@ -1669,16 +1662,16 @@ auto WaylandSurface::begin_window_move() -> void {
 
 auto WaylandSurface::begin_window_resize(WindowResizeEdge edge) -> void {
     // 序对应 WindowResizeEdge 枚举值序：None/Top/Bottom/Left/Right/TopLeft/TopRight/BottomLeft/BottomRight。
-    static constexpr xdg_toplevel_resize_edge kMap[] = {
+    static constexpr xdg_toplevel_resize_edge AURORA_MAP[] = {
         XDG_TOPLEVEL_RESIZE_EDGE_NONE,      XDG_TOPLEVEL_RESIZE_EDGE_TOP,         XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM,
         XDG_TOPLEVEL_RESIZE_EDGE_LEFT,      XDG_TOPLEVEL_RESIZE_EDGE_RIGHT,       XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT,
         XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT, XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT, XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT,
     };
     const auto idx = static_cast<std::size_t>(edge);
-    if (idx == 0 || idx >= std::size(kMap) || impl_->toplevel == nullptr || impl_->seat == nullptr) {
+    if (idx == 0 || idx >= std::size(AURORA_MAP) || impl_->toplevel == nullptr || impl_->seat == nullptr) {
         return;
     }
-    xdg_toplevel_resize(impl_->toplevel, impl_->seat, impl_->last_press_serial, kMap[idx]);
+    xdg_toplevel_resize(impl_->toplevel, impl_->seat, impl_->last_press_serial, AURORA_MAP[idx]);
     wl_surface_commit(impl_->surface);
     wl_display_flush(impl_->dpy);
 }
@@ -1703,9 +1696,7 @@ auto WaylandSurface::native_handle() const -> void * { return static_cast<void *
 
 auto WaylandSurface::native_display() const -> void * { return static_cast<void *>(impl_->dpy); }
 
-auto WaylandSurface::uses_client_decorations() const -> bool {
-    return impl_->csd_title || impl_->csd_border;
-}
+auto WaylandSurface::uses_client_decorations() const -> bool { return impl_->csd_title || impl_->csd_border; }
 
 auto WaylandSurface::content_inset() const -> EdgeInsets {
     const Impl &d = *impl_;
@@ -1824,15 +1815,13 @@ auto WaylandSurface::wait_events(double timeout_ms) -> void {
             fds.push_back(pollfd{w.fd, w.events, 0});
         }
     }
-    const int rc = ::poll(fds.data(), static_cast<nfds_t>(fds.size()),
-                          static_cast<int>(std::ceil(capped)));
+    const int rc = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), static_cast<int>(std::ceil(capped)));
     if (rc > 0 && (fds[0].revents & POLLIN) != 0) {
         wl_display_read_events(d.dpy);
     } else {
         wl_display_cancel_read(d.dpy);
     }
-    if (rc > 0 && wake_idx >= 0
-        && (fds[static_cast<std::size_t>(wake_idx)].revents & POLLIN) != 0) {
+    if (rc > 0 && wake_idx >= 0 && (fds[static_cast<std::size_t>(wake_idx)].revents & POLLIN) != 0) {
         char drain[64];
         while (::read(d.wake_fd[0], drain, sizeof(drain)) > 0) {
             // 排干唤醒字节（非阻塞读到 EAGAIN 为止），避免下次 wait 立即空醒。

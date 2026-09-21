@@ -4,6 +4,7 @@
 /// describe_static / 序列化往返（values 数组 + 可选 color）/ 工厂 from_json 重建、
 /// 空数据与单点 / 全等值不崩、以及像素 golden 基线（chart_sparkline.png，受 AURORA_UPDATE_GOLDEN 控制）
 
+#include <algorithm>
 #include <charconv>
 #include <cstdlib>
 #include <filesystem>
@@ -24,16 +25,16 @@ namespace golden = aurora::testing::golden;
 
 namespace {
 
-constexpr int WIDTH = 120;
-constexpr int HEIGHT = 40;
+constexpr int AURORA_WIDTH = 120;
+constexpr int AURORA_HEIGHT = 40;
 
 [[nodiscard]] auto render_chart(const SparklineProps &props) -> std::filesystem::path {
     auto chart = std::make_shared<Sparkline>(props);
-    chart->modifier.set(Modifier{}.width(static_cast<float>(WIDTH)).height(static_cast<float>(HEIGHT)));
+    chart->modifier.set(Modifier{}.width(static_cast<float>(AURORA_WIDTH)).height(static_cast<float>(AURORA_HEIGHT)));
     Node root{Column{Node{chart}}};
     const std::filesystem::path tmp =
         std::filesystem::path(testing::isolation::temp_dir()) / "current_chart_sparkline.png";
-    AURORA_TEST_REQUIRE_TRUE(render_to_png(root, WIDTH, HEIGHT, tmp.string().c_str()).ok());
+    AURORA_TEST_REQUIRE_TRUE(render_to_png(root, AURORA_WIDTH, AURORA_HEIGHT, tmp.string().c_str()).ok());
     return tmp;
 }
 
@@ -57,12 +58,7 @@ AURORA_TEST_CASE(describe_static_is_complete) {
     AURORA_TEST_CHECK_TRUE(d.name == "Sparkline");
     AURORA_TEST_CHECK_TRUE(d.events.empty());  // 无交互 ⇒ 无事件
     auto has = [&d](const std::string &key) -> bool {
-        for (const PropDescriptor &p : d.properties) {
-            if (p.name == key) {
-                return true;
-            }
-        }
-        return false;
+        return std::ranges::any_of(d.properties, [&key](const PropDescriptor &p) { return p.name == key; });
     };
     for (const auto &key : {"values", "color", "line_width", "show_end_dot", "dot_radius", "padding"}) {
         AURORA_TEST_CHECK_TRUE(has(key));

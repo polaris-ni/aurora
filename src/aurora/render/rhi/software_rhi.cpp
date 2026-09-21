@@ -14,6 +14,9 @@ namespace {
 const std::string AURORA_EMPTY_STR;
 const std::vector<Color> AURORA_EMPTY_COLORS;
 const std::vector<float> AURORA_EMPTY_FLOATS;
+// Font 的默认构造只做空 std::string/vector 初始化，实无抛出路径；改用函数内静态会改变
+// 下列哨兵对象的作用域与初始化时机，热路径语义不等价。
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization): 同上
 const Font AURORA_DEFAULT_FONT{};
 const Image AURORA_DEFAULT_IMAGE{};
 const Matrix2D AURORA_IDENTITY_MATRIX;
@@ -46,11 +49,10 @@ auto SoftwareRhi::submit(const DrawCmd &cmd, const CmdData &data) -> void {
     // 由捕获逻辑处理，其余命令只入栈顶缓冲——内容像素在 EndLayer 时离屏重放定稿。
     if (!layer_captures_.empty()) {
         if (cmd.kind == CmdKind::BeginLayer) {
-            layer_captures_.push_back(
-                LayerCapture{.key = cmd.aux_key,
-                             .width = static_cast<int>(cmd.bounds.size.width),
-                             .height = static_cast<int>(cmd.bounds.size.height),
-                             .cmds = {}});
+            layer_captures_.push_back(LayerCapture{.key = cmd.aux_key,
+                                                   .width = static_cast<int>(cmd.bounds.size.width),
+                                                   .height = static_cast<int>(cmd.bounds.size.height),
+                                                   .cmds = {}});
             return;
         }
         if (cmd.kind == CmdKind::EndLayer) {
@@ -188,7 +190,7 @@ auto SoftwareRhi::finalize_layer_capture() -> void {
         sub.submit(entry.first, entry.second);
     }
     auto &store = layer_storage(layer_store_);
-    if (store.find(cap.key) == store.end() && store.size() >= AURORA_LAYER_STORE_CAP) {
+    if (!store.contains(cap.key) && store.size() >= AURORA_LAYER_STORE_CAP) {
         // 容量上限：整体清空 + bump 层代际（控件下帧全量重录），防死控件条目无界滞留。
         store.clear();
         render::detail::bump_gpu_layer_epoch();

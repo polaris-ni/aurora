@@ -204,7 +204,7 @@ AURORA_TEST_CASE(programmatic_scroll_offset_clamps_and_shifts_window) {
 }
 
 AURORA_TEST_CASE(restore_key_restores_offset_and_writes_back) {
-    auto &storage = ScrollStorage::instance();
+    auto& storage = ScrollStorage::instance();
     storage.clear_all();
     storage.write("row.k", 192.0F);  // 模拟上一次会话留下的位置
 

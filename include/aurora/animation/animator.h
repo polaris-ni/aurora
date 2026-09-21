@@ -423,7 +423,7 @@ class TimelinePlayer {
     struct Track {
         TimelineInterval interval;
         std::shared_ptr<void> payload;  // TrackBody<T>
-        void *target = nullptr;         // State<T>*（非拥有）
+        void *target = nullptr;  // State<T>*（非拥有）
         void (*apply)(const Track &, double) = nullptr;
     };
     template <typename T>

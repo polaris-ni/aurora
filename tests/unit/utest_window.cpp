@@ -76,7 +76,7 @@ class CountingRhi final : public rhi::RhiBackend {
     int submits = 0;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes) 测试替身记录成员
 
     [[nodiscard]] auto name() const -> std::string_view override { return "gpu-stub"; }
-    auto submit(const DrawCmd & /*cmd*/, const rhi::CmdData & /*data*/) -> void override { ++submits; }
+    auto submit(const DrawCmd& /*cmd*/, const rhi::CmdData& /*data*/) -> void override { ++submits; }
 };
 
 /// @brief 计数型 GPU 帧调度桩：`begin_frame` 可切换成败，以覆盖「GPU 生效」与「永久回退」两分支。
@@ -87,7 +87,7 @@ class CountingSink final : public rhi::RhiFrameSink {
     bool begin_ok = true;  // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
 
     [[nodiscard]] auto name() const -> std::string_view override { return "gpu-stub"; }
-    [[nodiscard]] auto backend() -> rhi::RhiBackend & override { return rhi_; }
+    [[nodiscard]] auto backend() -> rhi::RhiBackend& override { return rhi_; }
     [[nodiscard]] auto begin_frame(int /*device_width*/, int /*device_height*/, float /*scale*/) -> bool override {
         ++begin_calls;
         return begin_ok;
@@ -108,7 +108,7 @@ class GpuStubSurface final : public Surface {
     // NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes)
     int present_count = 0;
     int painter_begin_calls = 0;
-    CountingSink sink_;
+    CountingSink sink;
     // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
 
     [[nodiscard]] auto begin_frame(int width, int height) -> Result<bool> override {
@@ -116,13 +116,13 @@ class GpuStubSurface final : public Surface {
         painter_.begin(width, height);
         return Result<bool>{true};
     }
-    [[nodiscard]] auto painter() -> Painter & override { return painter_; }
+    [[nodiscard]] auto painter() -> Painter& override { return painter_; }
     [[nodiscard]] auto present() -> Result<bool> override {
         ++present_count;
         return Result<bool>{true};
     }
     [[nodiscard]] auto size() const -> Size override { return Size{.width = 320.0F, .height = 240.0F}; }
-    [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink * override { return &sink_; }
+    [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink* override { return &sink; }
 
     /// @brief 触发系统重绘请求：真实后端在 WM_PAINT / Wayland configure 同址调用本回调。
     auto fire_present_request() -> void {
@@ -138,7 +138,7 @@ class GpuStubSurface final : public Surface {
 /// @brief 会真正产出绘制命令的根：`Spacer` 自身无绘制，帧 DL 会为空，无法区分命令去向。
 class FilledSpacer final : public Spacer {
   protected:
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+    auto on_paint(Painter& p, const Rect& bounds, const BuildContext& /*ctx*/) -> void override {
         p.fill_rect(bounds, Color{0x11U, 0x22U, 0x33U, 0xFFU});
     }
 };
@@ -317,13 +317,13 @@ AURORA_TEST_CASE(create_window_rejects_null_surface) {
 
 AURORA_TEST_CASE(system_redraw_with_gpu_sink_re_renders_instead_of_bare_present) {
     auto stub = std::make_unique<GpuStubSurface>();
-    GpuStubSurface &surf = *stub;
+    GpuStubSurface& surf = *stub;
     Window w{std::move(stub)};
     Node page = FilledSpacer{};
 
     // 首帧走 GPU 通道：录帧 DL → sink.begin_frame → replay → sink.end_frame → present。
     AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
-    CountingSink &sink = surf.sink_;
+    CountingSink& sink = surf.sink;
     AURORA_TEST_CHECK_EQ(sink.begin_calls, 1);
     AURORA_TEST_CHECK_EQ(sink.end_calls, 1);
     AURORA_TEST_CHECK_GT(sink.rhi_submits(), 0);  // 命令确实进了 GPU 消费面
@@ -346,14 +346,14 @@ AURORA_TEST_CASE(system_redraw_with_gpu_sink_re_renders_instead_of_bare_present)
 
 AURORA_TEST_CASE(system_redraw_after_gpu_fallback_keeps_bare_present) {
     auto stub = std::make_unique<GpuStubSurface>();
-    GpuStubSurface &surf = *stub;
-    surf.sink_.begin_ok = false;  // 首帧即判定 GPU 失效 → Window 永久回退软件路径
+    GpuStubSurface& surf = *stub;
+    surf.sink.begin_ok = false;  // 首帧即判定 GPU 失效 → Window 永久回退软件路径
     Window w{std::move(stub)};
     Node page = FilledSpacer{};
 
     AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
-    AURORA_TEST_CHECK_EQ(surf.sink_.begin_calls, 1);
-    AURORA_TEST_CHECK_EQ(surf.sink_.end_calls, 0);  // begin 失败 → 无 end_frame
+    AURORA_TEST_CHECK_EQ(surf.sink.begin_calls, 1);
+    AURORA_TEST_CHECK_EQ(surf.sink.end_calls, 0);  // begin 失败 → 无 end_frame
     AURORA_TEST_CHECK_EQ(surf.present_count, 1);
 
     // 回退后软件帧缓冲持有真实控件像素，兜底全量 blit 即正确：不重渲染、不再触碰 GPU。
@@ -362,8 +362,8 @@ AURORA_TEST_CASE(system_redraw_after_gpu_fallback_keeps_bare_present) {
     surf.fire_present_request();
     AURORA_TEST_CHECK_EQ(surf.present_count, presents + 1);
     AURORA_TEST_CHECK_EQ(surf.painter_begin_calls, begins);
-    AURORA_TEST_CHECK_EQ(surf.sink_.begin_calls, 1);
-    AURORA_TEST_CHECK_EQ(surf.sink_.end_calls, 0);
+    AURORA_TEST_CHECK_EQ(surf.sink.begin_calls, 1);
+    AURORA_TEST_CHECK_EQ(surf.sink.end_calls, 0);
 }
 
 }  // namespace aurora::test_cases::utest_window

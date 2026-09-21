@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/core/accessibility.h"
 #include "aurora/core/types.h"
 #include "aurora/i18n/format.h"
 #include "aurora/render/font_engine.h"
@@ -16,20 +17,19 @@
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/chart_common.h"
 #include "aurora/widget/widget.h"
-#include "aurora/core/accessibility.h"
 
 namespace aurora {
 
 /// @brief LineChart 属性（聚合；所有字段均有默认值）。
 struct LineChartProps {
-    std::vector<ChartSeries> series;      ///< 数据系列（`values` 等距，x = 索引）
+    std::vector<ChartSeries> series;  ///< 数据系列（`values` 等距，x = 索引）
     std::vector<std::string> categories;  ///< x 轴类目标签；缺省 "1","2",...
-    bool show_dots = true;                ///< 是否绘制数据点圆点
-    float line_width = 2.0F;              ///< 折线宽度（dp）
-    float dot_radius = 3.0F;              ///< 数据点半径（dp）
-    bool show_crosshair = true;           ///< 悬停时是否绘制十字准线（吸附最近数据 x）
-    ChartAxisSpec axis_x;                 ///< 类目轴
-    ChartAxisSpec axis_y;                 ///< 数值轴（Linear）
+    bool show_dots = true;  ///< 是否绘制数据点圆点
+    float line_width = 2.0F;  ///< 折线宽度（dp）
+    float dot_radius = 3.0F;  ///< 数据点半径（dp）
+    bool show_crosshair = true;  ///< 悬停时是否绘制十字准线（吸附最近数据 x）
+    ChartAxisSpec axis_x;  ///< 类目轴
+    ChartAxisSpec axis_y;  ///< 数值轴（Linear）
     ChartLegendSpec legend;
     EdgeInsets padding{8.0F, 8.0F, 8.0F, 8.0F};
 };
@@ -133,9 +133,7 @@ class LineChart : public LeafWidget, public LineChartProps {
     /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `LineChart`，
     ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
     /// @note Side-effects: pure
-    [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override {
-        return AccessibilityRole::Image;
-    }
+    [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override { return AccessibilityRole::Image; }
 
     [[nodiscard]] auto accessibility_label() const -> std::string override;
     [[nodiscard]] auto accessibility_value() const -> std::string override;
@@ -166,8 +164,7 @@ class LineChart : public LeafWidget, public LineChartProps {
     [[nodiscard]] auto compute_geometry(const Size &size, const Font &font) const -> Geometry;
     [[nodiscard]] auto point_x(const Geometry &g, std::size_t i) const -> float;
     [[nodiscard]] auto legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t>;
-    [[nodiscard]] auto nearest_point(const Geometry &g, const Point &local) const
-        -> std::optional<std::pair<int, int>>;
+    [[nodiscard]] auto nearest_point(const Geometry &g, const Point &local) const -> std::optional<std::pair<int, int>>;
     [[nodiscard]] auto series_value(std::size_t series_idx, std::size_t point_idx) const -> double;
 
     Geometry geom_;
@@ -649,9 +646,9 @@ inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildConte
                         Point{.x = origin.x + hovered_px->x, .y = origin.y + plot.bottom()}, 1.0F, grid);
         }
         const float d = std::max(4.0F, dot_radius * 2.0F) + 4.0F;
-        const Rect ring{.origin = Point{.x = origin.x + hovered_px->x - (d * 0.5F),
-                                        .y = origin.y + hovered_px->y - (d * 0.5F)},
-                        .size = Size{.width = d, .height = d}};
+        const Rect ring{
+            .origin = Point{.x = origin.x + hovered_px->x - (d * 0.5F), .y = origin.y + hovered_px->y - (d * 0.5F)},
+            .size = Size{.width = d, .height = d}};
         p.draw_rounded_border(ring, d * 0.5F, 2.0F, theme.text);
 
         if (hovered_point_.has_value()) {
@@ -668,8 +665,7 @@ inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildConte
                 by = std::clamp(by, 0.0F, std::max(0.0F, bounds.size.height - h));
                 const Rect box{.origin = Point{.x = origin.x + bx, .y = origin.y + by},
                                .size = Size{.width = w, .height = h}};
-                p.fill_rounded_rect(box, 4.0F,
-                                    Color{theme.background.r, theme.background.g, theme.background.b, 242});
+                p.fill_rounded_rect(box, 4.0F, Color{theme.background.r, theme.background.g, theme.background.b, 242});
                 p.draw_rounded_border(box, 4.0F, 1.0F, grid);
                 const Rect text_box{.origin = Point{.x = origin.x + bx + 8.0F, .y = origin.y + by + 4.0F},
                                     .size = Size{.width = w - 16.0F, .height = line_h}};

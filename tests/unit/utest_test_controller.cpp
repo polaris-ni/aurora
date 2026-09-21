@@ -23,7 +23,6 @@ namespace aurora::test_cases::utest_test_controller {
 /// 同一 AURORA_TEST_CASE 名在两种配置下都必须注册，否则 check_test_registry 会判
 /// 「源码有字面量但 --list 缺失」的漂移（该门禁不对预处理分支求值）。
 
-
 namespace {
 
 /// @brief 固定视口（320×240）：文本在窄视口下必须换行，便于验证 set_viewport 的重排效果。
@@ -65,7 +64,6 @@ struct Fixture {
 
 }  // namespace
 
-
 AURORA_TEST_CASE(pump_renders_first_frame_then_idle_frames_are_skipped) {
 #ifdef AURORA_BACKEND_HEADLESS
     Fixture fx;
@@ -85,7 +83,6 @@ AURORA_TEST_CASE(pump_renders_first_frame_then_idle_frames_are_skipped) {
 #endif
 }
 
-
 AURORA_TEST_CASE(pump_and_settle_stops_before_budget) {
 #ifdef AURORA_BACKEND_HEADLESS
     Fixture fx;
@@ -102,7 +99,6 @@ AURORA_TEST_CASE(pump_and_settle_stops_before_budget) {
     AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
 #endif
 }
-
 
 AURORA_TEST_CASE(set_viewport_relayouts_tree) {
 #ifdef AURORA_BACKEND_HEADLESS
@@ -125,7 +121,6 @@ AURORA_TEST_CASE(set_viewport_relayouts_tree) {
     AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
 #endif
 }
-
 
 AURORA_TEST_CASE(finders_locate_nodes_by_key_type_and_text) {
 #ifdef AURORA_BACKEND_HEADLESS
@@ -156,7 +151,6 @@ AURORA_TEST_CASE(finders_locate_nodes_by_key_type_and_text) {
 #endif
 }
 
-
 AURORA_TEST_CASE(tap_fires_on_click_and_enter_text_writes_into_input) {
 #ifdef AURORA_BACKEND_HEADLESS
     Fixture fx;
@@ -181,7 +175,6 @@ AURORA_TEST_CASE(tap_fires_on_click_and_enter_text_writes_into_input) {
 #endif
 }
 
-
 AURORA_TEST_CASE(drag_establishes_text_selection) {
 #ifdef AURORA_BACKEND_HEADLESS
     Fixture fx;
@@ -197,7 +190,6 @@ AURORA_TEST_CASE(drag_establishes_text_selection) {
 #endif
 }
 
-
 AURORA_TEST_CASE(interactions_reject_empty_node) {
 #ifdef AURORA_BACKEND_HEADLESS
     Fixture fx;
@@ -212,7 +204,6 @@ AURORA_TEST_CASE(interactions_reject_empty_node) {
     AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
 #endif
 }
-
 
 AURORA_TEST_CASE(expect_visible_passes_after_frame_and_fails_when_hidden) {
 #ifdef AURORA_BACKEND_HEADLESS
@@ -234,7 +225,6 @@ AURORA_TEST_CASE(expect_visible_passes_after_frame_and_fails_when_hidden) {
 #endif
 }
 
-
 AURORA_TEST_CASE(expect_prop_compares_resolved_value) {
 #ifdef AURORA_BACKEND_HEADLESS
     Fixture fx;
@@ -247,7 +237,8 @@ AURORA_TEST_CASE(expect_prop_compares_resolved_value) {
     AURORA_TEST_REQUIRE_TRUE(tc.expect_prop(msg.at(0), "content", Json(std::string{"hello"})).ok());
     AURORA_TEST_REQUIRE_TRUE(tc.expect_prop(msg.at(0), "show", Json(true)).ok());
 
-    const Result<void> mismatch = tc.expect_prop(msg.at(0), "content", Json(std::string{"goodbye"}));
+    const Result<void> mismatch =
+        aurora::TestController::expect_prop(msg.at(0), "content", Json(std::string{"goodbye"}));
     AURORA_TEST_CHECK_FALSE(mismatch.ok());
     AURORA_TEST_CHECK_NE(mismatch.error().message.find("goodbye"), std::string::npos);
     AURORA_TEST_CHECK_NE(mismatch.error().message.find("hello"), std::string::npos);  // 实际值也在错误里

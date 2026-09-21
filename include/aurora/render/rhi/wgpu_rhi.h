@@ -30,11 +30,11 @@ struct WgpuRhiOptions {
     /// @brief 底层图形 API 选择。Auto 按 wgpu 平台偏好（Windows: D3D12 → Vulkan → GLES；
     /// Linux: Vulkan → GLES；macOS: Metal）。
     enum class Backend : std::uint8_t {
-        Auto,    ///< 平台默认优先级链
+        Auto,  ///< 平台默认优先级链
         Vulkan,  ///< 显式 Vulkan
-        D3D12,   ///< 显式 D3D12（仅 Windows）
-        Metal,   ///< 显式 Metal（仅 macOS/iOS）
-        GLES,    ///< 显式 OpenGL ES（兼容兜底，能力受限：无 compute）
+        D3D12,  ///< 显式 D3D12（仅 Windows）
+        Metal,  ///< 显式 Metal（仅 macOS/iOS）
+        GLES,  ///< 显式 OpenGL ES（兼容兜底，能力受限：无 compute）
     };
 
     Backend backend = Backend::Auto;
@@ -42,8 +42,8 @@ struct WgpuRhiOptions {
     /// @brief Linux 原生窗口协议：两个 void* 句柄无法自述归属，须显式判别
     /// （Xlib 与 Wayland 的 surface 创建走不同 `WGPUSurfaceSource*` 链）。Win32 忽略。
     enum class LinuxHost : std::uint8_t {
-        X11,     ///< Xlib：native_display = `Display*`，native_window = XID `Window`
-        Wayland, ///< Wayland：native_display = `wl_display*`，native_window = `wl_surface*`
+        X11,  ///< Xlib：native_display = `Display*`，native_window = XID `Window`
+        Wayland,  ///< Wayland：native_display = `wl_display*`，native_window = `wl_surface*`
     };
 
     LinuxHost linux_host = LinuxHost::X11;
@@ -86,9 +86,9 @@ class WgpuRhi final : public RhiBackend, public RhiFrameSink {
   public:
     /// @brief 帧级诊断计数（性能观测 / 测试断言；与 GpuGlRhi::FrameStats 同意形）。
     struct FrameStats {
-        std::uint32_t draw_calls = 0;     ///< 批提交次数（= 渲染 pass 内 draw 数）
-        std::uint32_t vertices = 0;       ///< 本帧提交顶点数
-        std::uint32_t skipped_cmds = 0;   ///< 遇到未实现命令而跳过的条数
+        std::uint32_t draw_calls = 0;  ///< 批提交次数（= 渲染 pass 内 draw 数）
+        std::uint32_t vertices = 0;  ///< 本帧提交顶点数
+        std::uint32_t skipped_cmds = 0;  ///< 遇到未实现命令而跳过的条数
     };
 
     /// @brief 默认构造：不初始化 wgpu（`valid()` 为 false），供占位与测试桩场景。

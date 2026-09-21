@@ -39,10 +39,10 @@ struct HttpResponse {
 };
 
 /// @brief 默认端口：与 `InspectorServer::start()` 的默认值一致。
-inline constexpr std::uint16_t kDefaultPort = 6280;
+inline constexpr std::uint16_t AURORA_DEFAULT_PORT = 6280;
 
 /// @brief 环境变量：覆盖默认端口（`BUILD_OPTIONS.md` §5）。
-inline constexpr std::string_view kPortEnv = "AURORA_INSPECTOR_PORT";
+inline constexpr std::string_view AURORA_PORT_ENV = "AURORA_INSPECTOR_PORT";
 
 /// @brief 是否为允许连接的回环主机名。刻意**不做 DNS 解析** —— 解析会把「localhost」之外的
 ///        名字也变得可用，而本客户端的信任模型只允许本机。
@@ -54,15 +54,15 @@ namespace detail {
 
 #ifdef _WIN32
 using SocketHandle = SOCKET;
-inline constexpr SocketHandle kInvalidSocket = INVALID_SOCKET;
+inline constexpr SocketHandle AURORA_INVALID_SOCKET = INVALID_SOCKET;
 inline auto close_socket(SocketHandle s) -> void { closesocket(s); }
 #else
 using SocketHandle = int;
-inline constexpr SocketHandle kInvalidSocket = -1;
+inline constexpr SocketHandle AURORA_INVALID_SOCKET = -1;
 inline auto close_socket(SocketHandle s) -> void { ::close(s); }
 #endif
 
-inline constexpr std::size_t kMaxResponseBody = 4U * 1024U * 1024U;  // 4 MiB
+inline constexpr std::size_t AURORA_MAX_RESPONSE_BODY = 4U * 1024U * 1024U;  // 4 MiB
 
 }  // namespace detail
 
@@ -116,7 +116,7 @@ inline constexpr std::size_t kMaxResponseBody = 4U * 1024U * 1024U;  // 4 MiB
 
     const detail::SocketHandle sock = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 #ifdef _WIN32
-    if (sock == detail::kInvalidSocket) {
+    if (sock == detail::AURORA_INVALID_SOCKET) {
         return finish(HttpResponse{.error = "socket() failed"});
     }
 #else
@@ -170,7 +170,7 @@ inline constexpr std::size_t kMaxResponseBody = 4U * 1024U * 1024U;  // 4 MiB
     // 读到连接关闭（`InspectorServer` 固定回 Connection: close）。
     std::string raw;
     char buf[4096];
-    while (raw.size() < detail::kMaxResponseBody) {
+    while (raw.size() < detail::AURORA_MAX_RESPONSE_BODY) {
         const auto n = ::recv(sock, buf, static_cast<int>(sizeof(buf)), 0);
         if (n == 0) {
             break;  // 对端关闭

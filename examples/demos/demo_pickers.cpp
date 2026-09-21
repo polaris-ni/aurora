@@ -13,9 +13,8 @@ auto main() -> int {
     time.set_on_change([](au::TimeOfDay t) -> void { AURORA_LOG_INFO("demo", "Time: ", t.to_string()); });
 
     au::ColorPicker color{au::Color(0, 122, 255, 255)};
-    color.set_on_change([](au::Color c) -> void {
-        AURORA_LOG_INFO("demo", std::format("Color: #{:02X}{:02X}{:02X}", c.r, c.g, c.b));
-    });
+    color.set_on_change(
+        [](au::Color c) -> void { AURORA_LOG_INFO("demo", std::format("Color: #{:02X}{:02X}{:02X}", c.r, c.g, c.b)); });
 
     au::Node root = au::Column{
         GradientTitle{"Pickers trio"},

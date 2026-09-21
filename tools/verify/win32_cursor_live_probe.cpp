@@ -1,7 +1,7 @@
 /* 光标形状 —— Win32 家族真机验收探针（人工触发的验收工具，不进 CTest）
 // ============================================================================
-// 覆盖后端：`Win32Surface`（GDI 上屏）、`D3D11Surface`（GPU 上屏）与 `WgpuSurface`（wgpu GPU
-// 栅格上屏，Win32 宿主）。三者共用同一个 `Win32Window` 宿主与同一份 `detail::set_win32_cursor`
+// 覆盖后端：`Win32Surface`（GDI 上屏）、`D3D11Surface`（GPU 上屏）与 `WgpuWin32Surface`（wgpu GPU
+// 栅格上屏，Win32 宿主）。三者共用同一个 `Win32Host` 宿主与同一份 `detail::set_win32_cursor`
 // 映射，故一份探针同时验收：
 //   * 只开 AURORA_BACKEND_WIN32      → 验 Win32Surface
 //   * 再开 AURORA_BACKEND_D3D11      → 两路都验（D3D11Surface 依赖 Win32 宿主，故 WIN32 必须同时 ON）
@@ -77,7 +77,7 @@
 #include "aurora/window/d3d11_surface.h"
 #endif
 #if defined(AURORA_BACKEND_GPU_WGPU)
-#include "aurora/window/wgpu_surface.h"
+#include "aurora/window/wgpu_win32_surface.h"
 #endif
 #if !defined(AURORA_BACKEND_WIN32) && !defined(AURORA_BACKEND_D3D11)
 #error "AURORA_BACKEND_WIN32 or AURORA_BACKEND_D3D11 must be enabled"
@@ -170,7 +170,7 @@ auto pointer_over(HWND hwnd) -> bool {
 
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
-// 泵消息。关键：`wait_events` 只等待、**不派发**（`Win32Window::wait_events` 仅
+// 泵消息。关键：`wait_events` 只等待、**不派发**（`Win32Host::wait_events` 仅
 // `MsgWaitForMultipleObjectsEx`，派发在 `poll_platform_events` 的 PeekMessage/DispatchMessage
 // 里）。而「屏幕显示的光标」（`GetCursorInfo` 读回的共享光标）随 WM_SETCURSOR 的 wndproc
 // 处理才刷新，故只 wait 不 poll 会让读回恒停在上一手的值——实测如此，与接线无关。
@@ -482,14 +482,15 @@ auto main(int argc, char **argv) -> int {
 
 #if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WIN32)
     {
-        // WgpuSurface 的 Win32 宿主路：光标下发与 GDI 走同一份 `detail::set_win32_cursor`，
-        // 但它是**独立调用点**（`WgpuSurface::set_cursor`），故单独跑一遍而非由前两路代证。
+        // WgpuWin32Surface 的 Win32 宿主路：光标下发与 GDI 走同一份 `detail::set_win32_cursor`，
+        // 但它是**独立调用点**（`WgpuWin32Surface::set_cursor`），故单独跑一遍而非由前两路代证。
         const char *title = "aurora-verify-i1-cursor-wgpu";
-        aurora::WgpuSurface surface(360, 240, title, aurora::WindowStyleOptions{});
+        aurora::WgpuWin32Surface surface(360, 240, title, aurora::WindowStyleOptions{});
         if (!surface.is_available()) {
-            AURORA_LOG_WARN("verify", "WgpuSurface device unavailable (no adapter / wgpu lib); skipping this path");
+            AURORA_LOG_WARN("verify",
+                            "WgpuWin32Surface device unavailable (no adapter / wgpu lib); skipping this path");
         } else {
-            worse_of(run_sweep(surface, "WgpuSurface(GPU)", title, interactive));
+            worse_of(run_sweep(surface, "WgpuWin32Surface(GPU)", title, interactive));
         }
     }
 #endif

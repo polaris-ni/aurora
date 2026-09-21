@@ -7,8 +7,8 @@
 #ifdef AURORA_PLATFORM_WINDOWS
 // Windows SDK 的 <GL/gl.h> 非自洽：函数声明使用的 WINGDIAPI/APIENTRY 由 windef.h 先行
 // 定义，缺 windows.h 时新版 SDK（10.0.26100）在 MSVC 下整片解析失败。
-#include <windows.h>
 #include <GL/gl.h>
+#include <windows.h>
 #elif defined(AURORA_PLATFORM_MACOS)
 // macOS 无 <GL/gl.h>：GL 头位于 OpenGL.framework（GL 1.1 立即模式子集仍在，本文件仅用之）。
 // Apple 自 10.14 起将整个 OpenGL 标记 deprecated，须在包含前定义厂商宏消噪（宏名为厂商规定）。
@@ -29,8 +29,8 @@
 #include <cstddef>
 #include <vector>
 
-#include "aurora/core/utf8.h"
 #include "aurora/core/log.h"
+#include "aurora/core/utf8.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/render/png.h"
@@ -291,7 +291,7 @@ struct GlfwSurface::Impl {
 #ifdef AURORA_ENABLE_GLFW_GPU_GL
         if (gpu != nullptr) {
             // GPU 模式：像素在显存，经 DEBUG 抓帧缓存读回；懒读回——本帧首次访问才执行
-            //（present 置失效），无消费者时零全屏 GPU→CPU 读回停顿。Release 恒空 → nullptr。
+            // （present 置失效），无消费者时零全屏 GPU→CPU 读回停顿。Release 恒空 → nullptr。
 #ifdef AURORA_ENABLE_DEBUG
             if (!gpu_readback_fresh) {
                 gpu_readback_fresh = gpu->read_pixels(gpu_readback);
@@ -364,8 +364,9 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
     want_gpu = cfg.render_mode == RenderMode::HardwareGL;
 #else
     if (cfg.render_mode == RenderMode::HardwareGL) {
-        AURORA_LOG_WARN("gpu-gl", "HardwareGL render mode requested but built without"
-                                  " AURORA_ENABLE_GLFW_GPU_GL; using software texture path");
+        AURORA_LOG_WARN("gpu-gl",
+                        "HardwareGL render mode requested but built without"
+                        " AURORA_ENABLE_GLFW_GPU_GL; using software texture path");
     }
 #endif
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, cfg.gl_major);
@@ -546,8 +547,8 @@ auto GlfwSurface::Impl::begin_frame(int /*width*/, int /*height*/) -> Result<boo
     // GPU 模式下本 fill 处于录制模式（present_root 先 record 后 begin_frame），
     // 命令入帧 DL 承担窗口底色，软件像素缓冲仅为回退兜底。
     painter_impl.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                           .size = Size{.width = static_cast<float>(c_w), .height = static_cast<float>(c_h)}},
-                      Color{245, 245, 247, 255});
+                                .size = Size{.width = static_cast<float>(c_w), .height = static_cast<float>(c_h)}},
+                           Color{245, 245, 247, 255});
 
     // 默认帧缓冲清屏仅软件路径需要（立即模式全屏 quad 不覆盖区外的边角）；
     // GPU 路径 end_frame 整帧 blit 覆盖默认帧缓冲，清屏纯冗余。
@@ -599,7 +600,8 @@ auto GlfwSurface::Impl::upload_and_draw() -> void {
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, tex);
     if (tex_w != painter_w || tex_h != painter_h) {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, painter_w, painter_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, painter_impl.data());
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, painter_w, painter_h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     painter_impl.data());
         tex_w = painter_w;
         tex_h = painter_h;
     } else {
@@ -845,14 +847,14 @@ auto GlfwSurface::capture_window(const std::string &path) -> Result<bool> {
         }
         // read_pixels 以设备尺寸 resize；与当前 framebuffer 不一致 = 末帧后窗口已缩放，拒绝错位出图。
         if (gl_rows.size() != static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U) {
-            return Result<bool>{make_error(ErrorCode::GeneralNotSupported,
-                                           "capture_window: framebuffer resized since last present")};
+            return Result<bool>{
+                make_error(ErrorCode::GeneralNotSupported, "capture_window: framebuffer resized since last present")};
         }
     } else
 #endif
     {
         pimpl_->upload_and_draw();  // 重放上一帧 → back buffer 内容确定（不 swap，屏幕无变化）
-        glFinish();                 // 等待绘批落定后读回
+        glFinish();  // 等待绘批落定后读回
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, gl_rows.data());
         glfwMakeContextCurrent(prev);  // 还原调用方上下文，不劫持线程状态

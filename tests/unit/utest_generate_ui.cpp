@@ -25,15 +25,11 @@ namespace {
 }
 
 [[nodiscard]] auto is_alnum_only(const std::string &s) -> bool {
-    return std::ranges::all_of(s, [](char c) -> bool {
-        return std::isalnum(static_cast<unsigned char>(c)) != 0;
-    });
+    return std::ranges::all_of(s, [](char c) -> bool { return std::isalnum(static_cast<unsigned char>(c)) != 0; });
 }
 
 /// 生成的树恒为 Stack 包裹，取子节点数组便于断言。
-[[nodiscard]] auto children_of(const Json &tree) -> const Json & {
-    return tree["node"]["children"];
-}
+[[nodiscard]] auto children_of(const Json &tree) -> const Json & { return tree["node"]["children"]; }
 
 }  // namespace
 

@@ -44,7 +44,7 @@ auto render_block(AudioContext &ctx, int frames) -> std::vector<float> {
 auto check_all_near(const std::vector<float> &v, float expected, float eps, int pairs) -> bool {
     for (int i = 0; i < pairs; ++i) {
         const float l = v[static_cast<std::size_t>(i) * 2U];
-        const float r = v[static_cast<std::size_t>(i) * 2U + 1U];
+        const float r = v[(static_cast<std::size_t>(i) * 2U) + 1U];
         if (l < expected - eps || l > expected + eps || r < expected - eps || r > expected + eps) {
             return false;
         }
@@ -64,11 +64,13 @@ class CallbackSource final : public VideoSource {
     auto play() -> void override {}
     auto pause() -> void override {}
     [[nodiscard]] auto is_playing() const -> bool override { return false; }
-    auto seek(std::chrono::microseconds) -> void override {}
+    auto seek(std::chrono::microseconds /*pos*/) -> void override {}
     [[nodiscard]] auto position() const -> std::chrono::microseconds override { return {}; }
     auto set_volume(double v) -> void override { last_volume = v; }
     auto set_muted(bool m) -> void override { last_muted = m; }
-    [[nodiscard]] auto frame_at(std::chrono::microseconds) -> Result<VideoFrame> override { return VideoFrame{}; }
+    [[nodiscard]] auto frame_at(std::chrono::microseconds /*pos*/) -> Result<VideoFrame> override {
+        return VideoFrame{};
+    }
     auto set_audio_callback(std::function<void(std::span<const std::int16_t>, int, int)> cb) -> void override {
         audio_cb = std::move(cb);
     }

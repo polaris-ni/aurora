@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -96,7 +97,7 @@ struct CommandListing {
 }
 
 /// @brief 命令的远程可调用性判定结果。
-enum class CommandStatus {
+enum class CommandStatus : std::uint8_t {
     NotFound,  ///< 描述符中不存在该标识
     Disabled,  ///< `enabled` 为假（启用条件不满足）
     NotInvocable,  ///< `invocable` 为假（命令无动作体）

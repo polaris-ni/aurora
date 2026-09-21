@@ -52,7 +52,7 @@ def scan_source(path, stem):
         code = strip_comments(f.read())
     expected = {
         "literal": [f"{stem}.{name}" for name in RE_LITERAL_CASE.findall(code)]
-        + [f"{stem}.{fx}_{case}" for fx, case in RE_F_CASE.findall(code)],
+                   + [f"{stem}.{fx}_{case}" for fx, case in RE_F_CASE.findall(code)],
         "p_cases": RE_P_CASE.findall(code),  # (fixture, case) pairs
         "instantiated_fixtures": set(RE_INSTANTIATE.findall(code)),
         "typed_cases": RE_TYPED_CASE.findall(code),  # (fixture, case) pairs

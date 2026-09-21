@@ -16,17 +16,17 @@ namespace aurora::a11y {
 /// @brief 快照中的一个节点：语义树的扁平化（先序；父子关系由 `parent_id` 表达）。
 /// @note Thread: main-thread only
 struct NodeSnapshot {
-    std::uint64_t id = 0;       ///< 稳定身份（`Widget::runtime_id()`）
+    std::uint64_t id = 0;  ///< 稳定身份（`Widget::runtime_id()`）
     std::uint64_t parent_id = 0;  ///< 父节点 id（0 = 根）
-    AccessibilityNode node;      ///< 语义节点（含 id/state/range 等新字段）
+    AccessibilityNode node;  ///< 语义节点（含 id/state/range 等新字段）
     const Widget *widget = nullptr;  ///< 活指针（仅桥内使用，随快照刷新；不入序列化面）
 };
 
 /// @brief 一次语义树投影的完整快照（D9）。
 /// @note Thread: main-thread only
 struct TreeSnapshot {
-    std::vector<NodeSnapshot> flat;                             ///< 先序扁平表
-    std::unordered_map<std::uint64_t, std::size_t> by_id;        ///< id → flat 下标
+    std::vector<NodeSnapshot> flat;  ///< 先序扁平表
+    std::unordered_map<std::uint64_t, std::size_t> by_id;  ///< id → flat 下标
     std::unordered_map<std::uint64_t, std::vector<std::uint64_t>> children_of;  ///< parent_id → 子 id 序列（先序）
 
     /// @brief 按 id 查节点；未命中返回 nullptr（控件已销毁 ⇒ 平台侧应答「元素不可用」）。
@@ -52,9 +52,9 @@ enum class FieldChange : std::uint8_t {
 /// 语义：只描述「应让平台感知的变化」，不追求最小编辑脚本——结构整段重排时宁多报
 /// `moved` 也不误报 remove+add（读屏焦点稳定性优先）。
 struct TreeDiff {
-    std::vector<std::uint64_t> added;    ///< 新增节点
+    std::vector<std::uint64_t> added;  ///< 新增节点
     std::vector<std::uint64_t> removed;  ///< 移除节点（控件已销毁）
-    std::vector<std::uint64_t> moved;    ///< 同 id 换父或换序
+    std::vector<std::uint64_t> moved;  ///< 同 id 换父或换序
     std::vector<std::pair<std::uint64_t, FieldChange>> updated;  ///< 字段变化
     std::optional<std::uint64_t> focused_id;  ///< 新获焦节点（旧快照未获焦者）；无焦点变化为 nullopt
 
@@ -219,9 +219,9 @@ inline auto flatten_snapshot(const Widget &w, const AccessibilityNode &n, std::u
             a.bounds.size.width != b.bounds.size.width || a.bounds.size.height != b.bounds.size.height) {
             diff.updated.emplace_back(n.id, FieldChange::Bounds);
         }
-        const bool range_changed = a.range.has_value() != b.range.has_value() ||
-                                   (a.range.has_value() &&
-                                    (a.range->min != b.range->min || a.range->max != b.range->max ||
+        const bool range_changed =
+            a.range.has_value() != b.range.has_value() ||
+            (a.range.has_value() && (a.range->min != b.range->min || a.range->max != b.range->max ||
                                      a.range->step != b.range->step || a.range->value != b.range->value));
         if (range_changed) {
             diff.updated.emplace_back(n.id, FieldChange::Range);

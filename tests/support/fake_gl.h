@@ -4,10 +4,10 @@
 // fake GL 驱动桩（tests/support/fake_gl.h）—— 全量填充 GLFn 函数表
 // ------------------------------------------------------------
 // 供 utest_gpu_gl_rhi（GpuGlRhi 契约断言）与 tools/bench/bench_gpu.cpp
-//（GPU 特性基准的确定性计数器）共用：不依赖测试框架，仅依赖 rhi 公共头。
+// （GPU 特性基准的确定性计数器）共用：不依赖测试框架，仅依赖 rhi 公共头。
 // 行为模拟「3.3 core 完整实现」并记录关键调用（draw/clear/blit/上传）供
 // 断言与计数。GLFn 成员是裸函数指针，桩为静态函数 + `current` 实例转发
-//（进程内串行执行，无并发）。可注入失败点：链接失败 / 版本不足。
+// （进程内串行执行，无并发）。可注入失败点：链接失败 / 版本不足。
 // ============================================================
 
 #include <cstdint>
@@ -43,9 +43,7 @@ class FakeGl {
         current = this;
         fill();
     }
-    ~FakeGl() {
-        current = nullptr;
-    }
+    ~FakeGl() { current = nullptr; }
     FakeGl(const FakeGl &) = delete;
     auto operator=(const FakeGl &) -> FakeGl & = delete;
 
@@ -55,8 +53,8 @@ class FakeGl {
     int draw_calls = 0;  ///< draw_elements 次数（= 批提交次数）
     int clears = 0;
     int blits = 0;
-    int texture_gens = 0;    ///< gen_textures 发放纹理对象总数（纹理分配次数口径）
-    int texture_deletes = 0; ///< delete_textures 删除纹理对象总数（淘汰抖动口径）
+    int texture_gens = 0;  ///< gen_textures 发放纹理对象总数（纹理分配次数口径）
+    int texture_deletes = 0;  ///< delete_textures 删除纹理对象总数（淘汰抖动口径）
 
     /// @brief gen_framebuffers 发放顺序（ensure_framebuffer 固定发放 msaa → resolve → temp）。
     std::vector<rhi::GLuint_> gen_fbo_ids;
@@ -104,26 +102,16 @@ class FakeGl {
         current->texture_gens += n;
     }
     static void delete_objects(rhi::GLsizei_, const rhi::GLuint_ *) {}
-    static void delete_tex_objects(rhi::GLsizei_ n, const rhi::GLuint_ *) {
-        current->texture_deletes += n;
-    }
+    static void delete_tex_objects(rhi::GLsizei_ n, const rhi::GLuint_ *) { current->texture_deletes += n; }
 
     // ---- 着色器与程序 ----
-    static auto create_shader(rhi::GLenum_) -> rhi::GLuint_ {
-        return current->next_id_++;
-    }
+    static auto create_shader(rhi::GLenum_) -> rhi::GLuint_ { return current->next_id_++; }
     static void shader_source(rhi::GLuint_, rhi::GLsizei_, const rhi::GLchar_ *const *, const rhi::GLint_ *) {}
     static void compile_shader(rhi::GLuint_) {}
-    static void get_shader_iv(rhi::GLuint_, rhi::GLenum_, rhi::GLint_ *params) {
-        *params = 1;
-    }
-    static void get_shader_info_log(rhi::GLuint_, rhi::GLsizei_, rhi::GLsizei_ *length, rhi::GLchar_ *) {
-        *length = 0;
-    }
+    static void get_shader_iv(rhi::GLuint_, rhi::GLenum_, rhi::GLint_ *params) { *params = 1; }
+    static void get_shader_info_log(rhi::GLuint_, rhi::GLsizei_, rhi::GLsizei_ *length, rhi::GLchar_ *) { *length = 0; }
     static void delete_shader(rhi::GLuint_) {}
-    static auto create_program() -> rhi::GLuint_ {
-        return current->next_id_++;
-    }
+    static auto create_program() -> rhi::GLuint_ { return current->next_id_++; }
     static void attach_shader(rhi::GLuint_, rhi::GLuint_) {}
     static void link_program(rhi::GLuint_) {}
     static void get_program_iv(rhi::GLuint_, rhi::GLenum_, rhi::GLint_ *params) {
@@ -200,9 +188,7 @@ class FakeGl {
     // ---- 状态与绘制 ----
     static void viewport(rhi::GLint_, rhi::GLint_, rhi::GLsizei_, rhi::GLsizei_) {}
     static void clear_color(rhi::GLfloat_, rhi::GLfloat_, rhi::GLfloat_, rhi::GLfloat_) {}
-    static void clear(rhi::GLbitfield_) {
-        current->clears++;
-    }
+    static void clear(rhi::GLbitfield_) { current->clears++; }
     static void enable(rhi::GLenum_) {}
     static void disable(rhi::GLenum_) {}
     static void scissor(rhi::GLint_, rhi::GLint_, rhi::GLsizei_, rhi::GLsizei_) {}
@@ -228,9 +214,7 @@ class FakeGl {
     }
     static void framebuffer_texture_2d(rhi::GLenum_, rhi::GLenum_, rhi::GLenum_, rhi::GLuint_, rhi::GLint_) {}
     static void framebuffer_renderbuffer(rhi::GLenum_, rhi::GLenum_, rhi::GLenum_, rhi::GLuint_) {}
-    static auto check_framebuffer_status(rhi::GLenum_) -> rhi::GLenum_ {
-        return AURORA_GL_FRAMEBUFFER_COMPLETE;
-    }
+    static auto check_framebuffer_status(rhi::GLenum_) -> rhi::GLenum_ { return AURORA_GL_FRAMEBUFFER_COMPLETE; }
     static void bind_renderbuffer(rhi::GLenum_, rhi::GLuint_) {}
     static void renderbuffer_storage_multisample(rhi::GLenum_, rhi::GLsizei_, rhi::GLenum_, rhi::GLsizei_,
                                                  rhi::GLsizei_) {}
@@ -246,7 +230,8 @@ class FakeGl {
     // ---- 查询 ----
     static auto get_string(rhi::GLenum_ name) -> const rhi::GLubyte_ * {
         if (name == AURORA_GL_VERSION_QUERY) {
-            return reinterpret_cast<const rhi::GLubyte_ *>(current->version_.c_str());  // NOLINT(*-pro-type-reinterpret-cast)
+            return reinterpret_cast<const rhi::GLubyte_ *>(
+                current->version_.c_str());  // NOLINT(*-pro-type-reinterpret-cast)
         }
         return reinterpret_cast<const rhi::GLubyte_ *>("");  // NOLINT(*-pro-type-reinterpret-cast)
     }

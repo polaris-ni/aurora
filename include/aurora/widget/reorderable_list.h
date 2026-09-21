@@ -295,7 +295,7 @@ class ReorderableList : public Container {
     /// @brief 第 `index` 项的**内容坐标**顶端（未叠加滚动偏移）；越界返回 0。
     [[nodiscard]] auto item_top(int index) const -> float {
         return (index >= 0 && static_cast<std::size_t>(index) < tops_.size()) ? tops_[static_cast<std::size_t>(index)]
-                                                                            : 0.0F;
+                                                                              : 0.0F;
     }
     /// @brief 第 `index` 项的实测高度；越界返回 0。
     [[nodiscard]] auto item_height(int index) const -> float {
@@ -324,9 +324,7 @@ class ReorderableList : public Container {
     }
 
     /// @brief 视口局部 y（相对本控件原点）落在第几项；越界返回 -1（间隙 / 已滚出）。
-    [[nodiscard]] auto index_at_viewport_y(float local_y) const -> int {
-        return index_at_content_y(local_y + offset_);
-    }
+    [[nodiscard]] auto index_at_viewport_y(float local_y) const -> int { return index_at_content_y(local_y + offset_); }
 
     // ---- 拖拽（C2 / C3）----
 
@@ -376,7 +374,7 @@ class ReorderableList : public Container {
     [[nodiscard]] auto slot_for_center(int from_index, float center_y, int current_slot = -1) const -> int {
         const CompactGeometry g = build_compact_geometry(from_index);
         const int start = current_slot >= 0 ? current_slot : std::min(from_index, static_cast<int>(g.mids.size()));
-        return slot_from_center(g, start, center_y, kHysteresis);
+        return slot_from_center(g, start, center_y, AURORA_HYSTERESIS);
     }
 
     /// @brief 插入位 `slot` 对应的目标顶端（内容坐标）。测试 / 落位动画共用。
@@ -472,7 +470,7 @@ class ReorderableList : public Container {
         // 手柄带由列表**自留**（不下降给子项）：条目自带 Clickable/Button 时会消费 Press，
         // 事件冒不到列表 ⇒ 整项拖拽起不来。手柄带是列表自己的作用域，故 `set_drag_handle(true)`
         // 在「条目可点击」的常见场景下依然能起拖。整项可拖模式（默认）则要求条目不吃指针事件。
-        if (drag_handle_ && local.x >= bounds.size.width - kHandleBand) {
+        if (drag_handle_ && local.x >= bounds.size.width - AURORA_HANDLE_BAND) {
             return {};
         }
         // 逆向遍历：与绘制顺序一致（拖拽中的项绘制在顶层，故最先命中）。
@@ -491,8 +489,8 @@ class ReorderableList : public Container {
                 continue;
             }
             const Rect global{.origin = bounds.origin + cb.origin, .size = cb.size};
-            std::vector<HitNode> r = children_[static_cast<std::size_t>(i)].widget().hit_test_chain(
-                local - cb.origin, global, ctx);
+            std::vector<HitNode> r =
+                children_[static_cast<std::size_t>(i)].widget().hit_test_chain(local - cb.origin, global, ctx);
             if (!r.empty()) {
                 return r;
             }
@@ -587,9 +585,9 @@ class ReorderableList : public Container {
 
     /// @brief 压缩序几何（把被拖项从序列里拿掉后的顶端 / 中点表）：换位判定与让位位移的唯一输入。
     struct CompactGeometry {
-        std::vector<float> tops;   ///< 压缩序各项顶端（内容坐标）
-        std::vector<float> mids;   ///< 压缩序各项中点
-        float tail_top = 0.0F;     ///< 末尾插入位（slot = count-1）对应的顶端
+        std::vector<float> tops;  ///< 压缩序各项顶端（内容坐标）
+        std::vector<float> mids;  ///< 压缩序各项中点
+        float tail_top = 0.0F;  ///< 末尾插入位（slot = count-1）对应的顶端
     };
 
     [[nodiscard]] auto build_compact_geometry(int excluded_index) const -> CompactGeometry {
@@ -672,7 +670,7 @@ class ReorderableList : public Container {
         if (local_y < top || local_y >= top + h) {
             return;  // 落在间距 / 内容之外：不起拖
         }
-        if (drag_handle_ && e.local_position.x < viewport_w_ - kHandleBand) {
+        if (drag_handle_ && e.local_position.x < viewport_w_ - AURORA_HANDLE_BAND) {
             return;  // 限定手柄区域：按在项内非手柄处不起拖
         }
         press_index_ = idx;
@@ -705,11 +703,11 @@ class ReorderableList : public Container {
         // 初速度估计：**帧间**位移 / 固定 60Hz 采样（仿 DragToDismiss：识别器不持时钟，
         // 量级误差由 spring 阻尼自然吸收）。首次移动没有上一个样本，速度取 0——
         // 否则会把「起拖到首次移动的整段位移」误当成一帧的速度（虚高 60 倍，落位会冲过头）。
-        release_velocity_ = has_move_sample_ ? (clamped - drag_follow_) * kAssumedFps : 0.0F;
+        release_velocity_ = has_move_sample_ ? (clamped - drag_follow_) * AURORA_ASSUMED_FPS : 0.0F;
         has_move_sample_ = true;
         drag_follow_ = clamped;
         const float center = tops_[i] + (heights_[i] / 2.0F) + drag_follow_;
-        const int slot = slot_from_center(drag_geom_, drop_slot_, center, kHysteresis);
+        const int slot = slot_from_center(drag_geom_, drop_slot_, center, AURORA_HYSTERESIS);
         if (slot != drop_slot_) {
             drop_slot_ = slot;
         }
@@ -721,9 +719,9 @@ class ReorderableList : public Container {
         const auto i = static_cast<std::size_t>(drag_index_);
         const float target = target_top_for_slot(drop_slot_) - tops_[i];
         // 初速度按帧间估计并夹在上界内（防极端拖速把落位拉飞）。
-        const float velocity = std::clamp(release_velocity_, -kMaxReleaseVelocity, kMaxReleaseVelocity);
+        const float velocity = std::clamp(release_velocity_, -AURORA_MAX_RELEASE_VELOCITY, AURORA_MAX_RELEASE_VELOCITY);
         // 位移可忽略 / 无障碍要求减弱动态：直接落位，不逐帧动画。
-        if (current_accessibility_settings().reduce_motion || std::abs(target - drag_follow_) < kSettleEpsilon) {
+        if (current_accessibility_settings().reduce_motion || std::abs(target - drag_follow_) < AURORA_SETTLE_EPSILON) {
             drag_follow_ = target;
             commit_drop();
             mark_needs_paint();
@@ -771,9 +769,9 @@ class ReorderableList : public Container {
         const float band = std::min(auto_scroll_threshold_, viewport_h_ / 2.0F);
         float speed = 0.0F;  // dp/s，正 = offset 增大（内容上移、向下滚）
         if (local_top < band) {
-            speed = -kAutoScrollMaxSpeed * (1.0F - (std::max(0.0F, local_top) / band));
+            speed = -AURORA_AUTO_SCROLL_MAX_SPEED * (1.0F - (std::max(0.0F, local_top) / band));
         } else if (local_bottom > viewport_h_ - band) {
-            speed = kAutoScrollMaxSpeed * (1.0F - (std::max(0.0F, viewport_h_ - local_bottom) / band));
+            speed = AURORA_AUTO_SCROLL_MAX_SPEED * (1.0F - (std::max(0.0F, viewport_h_ - local_bottom) / band));
         }
         if (speed == 0.0F) {
             return;
@@ -786,7 +784,7 @@ class ReorderableList : public Container {
         drag_follow_ += offset_ - old_offset;  // 屏幕位置守恒（见上方注释）
         // 内容坐标变了：重算插入位（与拖拽共用同一份几何）。
         const float center = tops_[i] + (heights_[i] / 2.0F) + drag_follow_;
-        drop_slot_ = slot_from_center(drag_geom_, drop_slot_, center, kHysteresis);
+        drop_slot_ = slot_from_center(drag_geom_, drop_slot_, center, AURORA_HYSTERESIS);
         mark_needs_paint();
     }
 
@@ -844,9 +842,8 @@ class ReorderableList : public Container {
 
     /// @brief 每帧推进：拖拽中走 auto-scroll、落位中走 spring；空闲零开销。
     auto on_tick(std::chrono::steady_clock::time_point now) -> void {
-        const double dt = last_tick_.has_value()
-                              ? std::chrono::duration<double>(now - *last_tick_).count()
-                              : (1.0 / 60.0);
+        const double dt =
+            last_tick_.has_value() ? std::chrono::duration<double>(now - *last_tick_).count() : (1.0 / 60.0);
         last_tick_ = now;
         if (drag_state_ == DragState::Settling) {
             tick_settle(dt);
@@ -864,7 +861,7 @@ class ReorderableList : public Container {
     std::size_t built_count_ = 0;
     bool built_ = false;
 
-    std::vector<float> tops_;     ///< 内容坐标：每项顶端 y（布局期建立）
+    std::vector<float> tops_;  ///< 内容坐标：每项顶端 y（布局期建立）
     std::vector<float> heights_;  ///< 每项实测高度
     float content_h_ = 0.0F;
     float viewport_w_ = 0.0F;
@@ -879,24 +876,24 @@ class ReorderableList : public Container {
     // ---- 拖拽 / 落位态 ----
     DragState drag_state_ = DragState::Idle;
     DragRecognizer drag_;
-    int drag_index_ = -1;    ///< 被拖项 index（-1 = 无）
-    int drop_slot_ = -1;     ///< 目标插入位（0..count-1）
-    int press_index_ = -1;   ///< 按下点命中的候选被拖项（-1 = 未命中项）
-    float drag_follow_ = 0.0F;         ///< 被拖项跟手 / 落位位移（内容坐标 dp）
-    float release_velocity_ = 0.0F;    ///< 松手初速度估计（dp/s，帧间差分）
-    bool has_move_sample_ = false;     ///< 是否已有帧间速度样本（首次移动不算）
-    CompactGeometry drag_geom_;        ///< 起拖时定稿的压缩序几何
-    SpringDescription spring_{};       ///< 落位弹簧
+    int drag_index_ = -1;  ///< 被拖项 index（-1 = 无）
+    int drop_slot_ = -1;  ///< 目标插入位（0..count-1）
+    int press_index_ = -1;  ///< 按下点命中的候选被拖项（-1 = 未命中项）
+    float drag_follow_ = 0.0F;  ///< 被拖项跟手 / 落位位移（内容坐标 dp）
+    float release_velocity_ = 0.0F;  ///< 松手初速度估计（dp/s，帧间差分）
+    bool has_move_sample_ = false;  ///< 是否已有帧间速度样本（首次移动不算）
+    CompactGeometry drag_geom_;  ///< 起拖时定稿的压缩序几何
+    SpringDescription spring_{};  ///< 落位弹簧
     std::optional<SpringSimulation> spring_active_;  ///< 落位动画（Settling 期有效）
-    double settle_t_ = 0.0;                          ///< 落位动画已推进时间（秒）
+    double settle_t_ = 0.0;  ///< 落位动画已推进时间（秒）
     std::optional<std::chrono::steady_clock::time_point> last_tick_;  ///< 上一帧时间（求 dt）
 
-    static constexpr float kHysteresis = 2.0F;        ///< 换位滞回（dp，跨中点 ±2dp 内不切换）
-    static constexpr float kHandleBand = 48.0F;       ///< 手柄区域宽度（dp，`drag_handle` 模式）
-    static constexpr float kAutoScrollMaxSpeed = 600.0F;  ///< auto-scroll 最大速度（dp/s）
-    static constexpr float kSettleEpsilon = 0.5F;     ///< 位移小于该值直接落位（不做动画）
-    static constexpr float kAssumedFps = 60.0F;       ///< 帧间速度估计的采样率假设（Hz）
-    static constexpr float kMaxReleaseVelocity = 3000.0F;  ///< 松手初速度上界（dp/s）
+    static constexpr float AURORA_HYSTERESIS = 2.0F;  ///< 换位滞回（dp，跨中点 ±2dp 内不切换）
+    static constexpr float AURORA_HANDLE_BAND = 48.0F;  ///< 手柄区域宽度（dp，`drag_handle` 模式）
+    static constexpr float AURORA_AUTO_SCROLL_MAX_SPEED = 600.0F;  ///< auto-scroll 最大速度（dp/s）
+    static constexpr float AURORA_SETTLE_EPSILON = 0.5F;  ///< 位移小于该值直接落位（不做动画）
+    static constexpr float AURORA_ASSUMED_FPS = 60.0F;  ///< 帧间速度估计的采样率假设（Hz）
+    static constexpr float AURORA_MAX_RELEASE_VELOCITY = 3000.0F;  ///< 松手初速度上界（dp/s）
 };
 
 }  // namespace aurora

@@ -13,7 +13,7 @@
 namespace aurora {
 
 // 注意：begin_frame/present 仅做 GDI 上屏；窗口创建/消息泵/事件翻译/DPI/同步重渲染
-// 全部由共享 Win32Window 宿主负责（与本类共用宿主，行为与原 Win32Surface 逐位等价）。
+// 全部由共享 Win32Host 宿主负责（与本类共用宿主，行为与原 Win32Surface 逐位等价）。
 
 auto Win32Surface::set_cursor(CursorShape shape) -> void { detail::set_win32_cursor(shape); }
 
@@ -58,9 +58,9 @@ auto Win32Surface::begin_frame(int width, int height) -> Result<bool> {
     }
     // 浅色背景：默认文字为黑色，需浅色底才可见（详见 glfw_surface.h 注释）。
     painter_.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                             .size = Size{.width = static_cast<float>(painter_.width()),
-                                          .height = static_cast<float>(painter_.height())}},
-                        Color{245, 245, 247, 255});
+                            .size = Size{.width = static_cast<float>(painter_.width()),
+                                         .height = static_cast<float>(painter_.height())}},
+                       Color{245, 245, 247, 255});
     return Result<bool>{true};
 }
 

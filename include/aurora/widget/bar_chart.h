@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/core/accessibility.h"
 #include "aurora/core/types.h"
 #include "aurora/i18n/format.h"
 #include "aurora/render/font_engine.h"
@@ -16,21 +17,20 @@
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/chart_common.h"
 #include "aurora/widget/widget.h"
-#include "aurora/core/accessibility.h"
 
 namespace aurora {
 
 /// @brief BarChart 属性（聚合；所有字段均有默认值，支持指定初始化器）。
 struct BarChartProps {
-    std::vector<ChartSeries> series;      ///< 数据系列（多系列分组并排；单系列即普通柱状）
+    std::vector<ChartSeries> series;  ///< 数据系列（多系列分组并排；单系列即普通柱状）
     std::vector<std::string> categories;  ///< x 轴类目标签；缺省 "1","2",...
-    bool stacked = false;                 ///< 堆叠模式（同 x 的多系列累加）
-    float bar_width_ratio = 0.7F;         ///< 柱宽在带内的占比，夹取 (0,1]
-    float bar_corner_radius = 2.0F;       ///< 柱圆角（自动不超过柱宽/柱高的一半）
-    bool show_crosshair = true;           ///< 悬停时是否绘制十字准线（吸附最近类目）
-    ChartAxisSpec axis_x;                 ///< 类目轴（Band）
-    ChartAxisSpec axis_y;                 ///< 数值轴（Linear）
-    ChartLegendSpec legend;               ///< 图例
+    bool stacked = false;  ///< 堆叠模式（同 x 的多系列累加）
+    float bar_width_ratio = 0.7F;  ///< 柱宽在带内的占比，夹取 (0,1]
+    float bar_corner_radius = 2.0F;  ///< 柱圆角（自动不超过柱宽/柱高的一半）
+    bool show_crosshair = true;  ///< 悬停时是否绘制十字准线（吸附最近类目）
+    ChartAxisSpec axis_x;  ///< 类目轴（Band）
+    ChartAxisSpec axis_y;  ///< 数值轴（Linear）
+    ChartLegendSpec legend;  ///< 图例
     EdgeInsets padding{8.0F, 8.0F, 8.0F, 8.0F};  ///< 图内留白（轴标签 / 值框避让区，D12）
 };
 
@@ -147,9 +147,7 @@ class BarChart : public LeafWidget, public BarChartProps {
     /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `BarChart`，
     ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
     /// @note Side-effects: pure
-    [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override {
-        return AccessibilityRole::Image;
-    }
+    [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override { return AccessibilityRole::Image; }
 
     [[nodiscard]] auto accessibility_label() const -> std::string override;
     /// @brief 无障碍值：当前悬停 / 选中的数据点（未悬停时为空）。
@@ -169,13 +167,13 @@ class BarChart : public LeafWidget, public BarChartProps {
   private:
     /// @brief 布局期算定的绘图几何（局部坐标，原点 0）：渲染与命中反查共用同一份（D6）。
     struct Geometry {
-        Rect plot{};             ///< 柱体绘制区（不含轴留白）
-        LinearScale y_scale{};   ///< 数值轴
-        BandScale x_band{0};     ///< 类目轴
+        Rect plot{};  ///< 柱体绘制区（不含轴留白）
+        LinearScale y_scale{};  ///< 数值轴
+        BandScale x_band{0};  ///< 类目轴
         std::vector<std::string> cats;
         float band_w = 0.0F;  ///< 单类目带宽
         float group_w = 0.0F;  ///< 带内柱组总宽
-        float bar_w = 0.0F;   ///< 单柱宽（堆叠时 = group_w）
+        float bar_w = 0.0F;  ///< 单柱宽（堆叠时 = group_w）
         std::vector<Rect> legend_rects;  ///< 图例项命中区（局部坐标）
     };
 
@@ -469,8 +467,8 @@ inline auto BarChart::accessibility_value() const -> std::string {
     if (i < 0 || j < 0 || static_cast<std::size_t>(i) >= series.size()) {
         return std::string{};
     }
-    return series[static_cast<std::size_t>(i)].name + ": " + std::to_string(series_value(
-                                                          static_cast<std::size_t>(i), static_cast<std::size_t>(j)));
+    return series[static_cast<std::size_t>(i)].name + ": " +
+           std::to_string(series_value(static_cast<std::size_t>(i), static_cast<std::size_t>(j)));
 }
 
 inline auto BarChart::describe_static() -> WidgetDescriptor {
@@ -632,7 +630,7 @@ inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
     const Geometry &g = geom_;
     const Rect &plot = g.plot;
     const float line_h = render::FontEngine::measure_height(font) + 4.0F;
-    const Color grid = Color{theme.text.r, theme.text.g, theme.text.b, 31};   // ≈ text × 0.12
+    const Color grid = Color{theme.text.r, theme.text.g, theme.text.b, 31};  // ≈ text × 0.12
     const Color axis = Color{theme.text.r, theme.text.g, theme.text.b, 160};  // ≈ text × 0.63
 
     // ---- 网格线（y 刻度）----

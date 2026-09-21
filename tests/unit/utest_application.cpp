@@ -174,7 +174,7 @@ AURORA_TEST_CASE(app_builder_chains_fluently) {
     // 流式构建器：各 setter 返回同一实例引用（可链式）。
     // 注：命名空间里自由函数 App() 会隐藏类名 App，类型语境用 auto 绕开。
     auto builder = aurora::App::make();
-    auto& chained =
+    auto &chained =
         builder.title("utest").size(320, 240).frames(1).on_frame([]() -> void {}).strict_mode(StrictMode::Off);
     AURORA_TEST_CHECK_EQ(&chained, &builder);
 

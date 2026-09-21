@@ -23,8 +23,8 @@ namespace aurora {
 /// 各后端映射表与 `utest_cursor_map`，三处长度契约由 `AURORA_CURSOR_SHAPE_COUNT` 对齐。
 
 /// @brief `CursorShape` 的全部取值个数。
-/// 各后端映射表（GLFW/Win32/X11/macOS）以 `static_assert(std::size(kMap) == AURORA_CURSOR_SHAPE_COUNT)`
-/// 断言长度，新增形状漏填即编译期红灯；`utest_cursor_map` 另断言本表本身覆盖全部取值。
+/// 各后端映射表（GLFW/Win32/X11/macOS）以 `std::array<…, AURORA_CURSOR_SHAPE_COUNT>`
+/// 定长承载，新增形状漏填即编译期红灯；`utest_cursor_map` 另断言本表本身覆盖全部取值。
 inline constexpr std::size_t AURORA_CURSOR_SHAPE_COUNT = 11;
 
 /// @brief 光标形状 → 规范名（freedesktop 光标主题名 / CSS `cursor` 关键字）。

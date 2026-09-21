@@ -161,8 +161,7 @@ AURORA_TEST_CASE(directional_nav_uses_geometry_written_by_paint) {
                           "paint traversal wrote a non-empty focus_bounds for the first child");
     AURORA_TEST_CHECK_MSG(bottom_box.size.width > 0.0F && bottom_box.size.height > 0.0F,
                           "paint traversal wrote a non-empty focus_bounds for the second child");
-    AURORA_TEST_CHECK_MSG(bottom_box.origin.y > top_box.origin.y,
-                          "vertical stacking reflected in focus_bounds");
+    AURORA_TEST_CHECK_MSG(bottom_box.origin.y > top_box.origin.y, "vertical stacking reflected in focus_bounds");
 
     // 全程不手工 set_focus_bounds：方向键导航只凭绘制写入的几何即可工作。
     FocusManager fm;

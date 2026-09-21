@@ -1,20 +1,46 @@
 {
   "name": "switch tap toggles checked",
   "note": "Switch 与 Checkbox 同为 Release 时取反，独立 fixture 以防二者共用分支后被一起改坏。",
-  "viewport": { "width": 240, "height": 160 },
+  "viewport": {
+    "width": 240,
+    "height": 160
+  },
   "tree": {
     "type": "Column",
     "props": {},
     "children": [
-      { "type": "Switch", "props": { "checked": false } }
+      {
+        "type": "Switch",
+        "props": {
+          "checked": false
+        }
+      }
     ]
   },
   "steps": [
-    { "action": "settle" },
-    { "action": "tap", "target": { "type": "Switch", "index": 0 } },
-    { "action": "pump", "frames": 2 }
+    {
+      "action": "settle"
+    },
+    {
+      "action": "tap",
+      "target": {
+        "type": "Switch",
+        "index": 0
+      }
+    },
+    {
+      "action": "pump",
+      "frames": 2
+    }
   ],
   "expect": [
-    { "target": { "type": "Switch", "index": 0 }, "prop": "checked", "value": true }
+    {
+      "target": {
+        "type": "Switch",
+        "index": 0
+      },
+      "prop": "checked",
+      "value": true
+    }
   ]
 }

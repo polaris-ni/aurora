@@ -118,8 +118,7 @@ auto DataTable::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*
     Font f;
     f.size_pt = 12.0F;
     // 表头
-    const Rect head{.origin = bounds.origin,
-                    .size = Size{.width = bounds.size.width, .height = AURORA_HEADER_HEIGHT}};
+    const Rect head{.origin = bounds.origin, .size = Size{.width = bounds.size.width, .height = AURORA_HEADER_HEIGHT}};
     p.fill_rect(head, Color(246, 246, 248, 255));
     float x = bounds.origin.x;
     for (const auto &col : columns_) {

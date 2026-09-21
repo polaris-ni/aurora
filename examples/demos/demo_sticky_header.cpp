@@ -21,7 +21,8 @@ auto main() -> int {
     };
     auto row = [](const std::string &text) -> au::Node {
         au::Text item{au::LocalizedString{text}};
-        item.modifier.set(au::Modifier{}.padding(6.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
+        item.modifier.set(
+            au::Modifier{}.padding(6.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
         return item;
     };
 

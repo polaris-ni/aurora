@@ -67,17 +67,17 @@ using aurora::RowProps;
 using aurora::Size;
 
 // ---- 场景参数 ----
-constexpr int VIDEO_W = 480;
-constexpr int VIDEO_H = 270;
-constexpr int VIDEO_FRAMES = 128;  // > 2×AURORA_IMAGE_CACHE_CAP(64)：观察 legacy 淘汰抖动
-constexpr int VIDEO_WARMUP = 3;
+constexpr int AURORA_VIDEO_W = 480;
+constexpr int AURORA_VIDEO_H = 270;
+constexpr int AURORA_VIDEO_FRAMES = 128;  // > 2×AURORA_IMAGE_CACHE_CAP(64)：观察 legacy 淘汰抖动
+constexpr int AURORA_VIDEO_WARMUP = 3;
 
-constexpr int SCENE_W = 480;
-constexpr int SCENE_H = 400;
-constexpr int GRID_COLS = 12;  ///< 网格列数（盒 40×24 无重叠铺满 480×384）
-constexpr int GRID_ROWS = 16;  ///< 网格行数（12×16 = 192 盒；不重叠——剔除剔除不干扰基线）
-constexpr int SCENE_FRAMES = 60;
-constexpr int SCENE_WARMUP = 3;
+constexpr int AURORA_SCENE_W = 480;
+constexpr int AURORA_SCENE_H = 400;
+constexpr int AURORA_GRID_COLS = 12;  ///< 网格列数（盒 40×24 无重叠铺满 480×384）
+constexpr int AURORA_GRID_ROWS = 16;  ///< 网格行数（12×16 = 192 盒；不重叠——剔除剔除不干扰基线）
+constexpr int AURORA_SCENE_FRAMES = 60;
+constexpr int AURORA_SCENE_WARMUP = 3;
 
 // ---- 计数快照（fake GL 确定性计数器） ----
 struct GlCounters {
@@ -113,9 +113,9 @@ struct GlCounters {
     img.width = w;
     img.height = h;
     img.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U);
-    std::uint64_t x = seed * 0x9E3779B97F4A7C15ULL + 0x517C'CBFB'EB41'2C25ULL;
+    std::uint64_t x = (seed * 0x9E3779B97F4A7C15ULL) + 0x517C'CBFB'EB41'2C25ULL;
     for (std::size_t i = 0; i + 3 < img.pixels.size(); i += 4) {
-        x = x * 6364136223846793005ULL + 1442695040888963407ULL;
+        x = (x * 6364136223846793005ULL) + 1442695040888963407ULL;
         img.pixels[i + 0] = static_cast<std::uint8_t>(x >> 33);
         img.pixels[i + 1] = static_cast<std::uint8_t>(x >> 41);
         img.pixels[i + 2] = static_cast<std::uint8_t>(x >> 49);
@@ -125,7 +125,7 @@ struct GlCounters {
 }
 
 // 伪视频帧：逐帧内容唯一。
-auto make_video_frame(std::uint64_t seed) -> Image { return make_noise_image(VIDEO_W, VIDEO_H, seed); }
+auto make_video_frame(std::uint64_t seed) -> Image { return make_noise_image(AURORA_VIDEO_W, AURORA_VIDEO_H, seed); }
 
 /// @brief 回放一帧 DrawImage（legacy：无流式字段；streaming：固定键 + 递增版本）。
 auto push_video_frame(DisplayList &dl, const Image &frame, bool streaming, std::uint64_t version) -> void {
@@ -147,11 +147,11 @@ struct VideoResult {
     GlCounters counters;
 };
 
-/// @brief 预生成 VIDEO_FRAMES 帧唯一内容（两后端场景共用同一批输入）。
+/// @brief 预生成 AURORA_VIDEO_FRAMES 帧唯一内容（两后端场景共用同一批输入）。
 [[nodiscard]] auto make_video_frames() -> std::vector<Image> {
     std::vector<Image> frames;
-    frames.reserve(VIDEO_FRAMES);
-    for (int i = 0; i < VIDEO_FRAMES; ++i) {
+    frames.reserve(AURORA_VIDEO_FRAMES);
+    for (int i = 0; i < AURORA_VIDEO_FRAMES; ++i) {
         frames.push_back(make_video_frame(static_cast<std::uint64_t>(i) + 1U));
     }
     return frames;
@@ -169,8 +169,8 @@ auto bench_video(bool streaming) -> VideoResult {
 
     // 预热：管线/槽位等一次性成本（streaming 键同槽续版本，稳态即「只 sub-upload」）。
     std::uint64_t version = 0;
-    for (int i = 0; i < VIDEO_WARMUP; ++i) {
-        (void)rhi_obj.begin_frame(VIDEO_W, VIDEO_H, 1.0F);
+    for (int i = 0; i < AURORA_VIDEO_WARMUP; ++i) {
+        (void)rhi_obj.begin_frame(AURORA_VIDEO_W, AURORA_VIDEO_H, 1.0F);
         DisplayList dl;
         push_video_frame(dl, frames[static_cast<std::size_t>(i)], streaming, ++version);
         dl.replay(sink.backend());
@@ -179,8 +179,8 @@ auto bench_video(bool streaming) -> VideoResult {
 
     const GlCounters before = GlCounters::capture(fake);
     const auto t0 = std::chrono::steady_clock::now();
-    for (int i = 0; i < VIDEO_FRAMES; ++i) {
-        (void)rhi_obj.begin_frame(VIDEO_W, VIDEO_H, 1.0F);
+    for (int i = 0; i < AURORA_VIDEO_FRAMES; ++i) {
+        (void)rhi_obj.begin_frame(AURORA_VIDEO_W, AURORA_VIDEO_H, 1.0F);
         DisplayList dl;
         push_video_frame(dl, frames[static_cast<std::size_t>(i)], streaming, ++version);
         dl.replay(sink.backend());
@@ -190,7 +190,8 @@ auto bench_video(bool streaming) -> VideoResult {
     const GlCounters after = GlCounters::capture(fake);
 
     VideoResult r;
-    r.cpu_ms_per_frame = std::chrono::duration<double, std::milli>(t1 - t0).count() / static_cast<double>(VIDEO_FRAMES);
+    r.cpu_ms_per_frame =
+        std::chrono::duration<double, std::milli>(t1 - t0).count() / static_cast<double>(AURORA_VIDEO_FRAMES);
     r.counters = after.delta_from(before);
     return r;
 }
@@ -223,12 +224,12 @@ struct LayerResult {
 /// 两后端共用；`mount` + `layout` 在此完成，调用方只逐帧重录 + 回放。
 [[nodiscard]] auto make_grid_root() -> std::shared_ptr<Column> {
     std::vector<Node> rows;
-    rows.reserve(GRID_ROWS);
-    for (int r = 0; r < GRID_ROWS; ++r) {
+    rows.reserve(AURORA_GRID_ROWS);
+    for (int r = 0; r < AURORA_GRID_ROWS; ++r) {
         RowProps rp;
-        rp.children.reserve(GRID_COLS);
-        for (int c = 0; c < GRID_COLS; ++c) {
-            const auto idx = static_cast<unsigned>(r * GRID_COLS + c);
+        rp.children.reserve(AURORA_GRID_COLS);
+        for (int c = 0; c < AURORA_GRID_COLS; ++c) {
+            const auto idx = static_cast<unsigned>((r * AURORA_GRID_COLS) + c);
             const auto hue = static_cast<std::uint8_t>((idx * 37U) % 256U);
             rp.children.emplace_back(std::make_shared<BenchBox>(40.0F, 24.0F, Color{hue, 120, 200, 255}));
         }
@@ -241,7 +242,7 @@ struct LayerResult {
     root->mount(ctx);
     Constraints c;
     c.min = Size{.width = 0.0F, .height = 0.0F};
-    c.max = Size{.width = static_cast<float>(SCENE_W), .height = static_cast<float>(SCENE_H)};
+    c.max = Size{.width = static_cast<float>(AURORA_SCENE_W), .height = static_cast<float>(AURORA_SCENE_H)};
     root->layout(c, ctx);
     return root;
 }
@@ -264,36 +265,37 @@ auto bench_layer(bool cache_layer) -> LayerResult {
         root->modifier.set(base_modifier.rotate(static_cast<float>(frame) * 6.0F));
         DisplayList dl;
         Painter p;
-        p.begin(SCENE_W, SCENE_H);
+        p.begin(AURORA_SCENE_W, AURORA_SCENE_H);
         p.record(dl);
         root->paint(p,
                     Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                         .size = Size{.width = static_cast<float>(SCENE_W), .height = static_cast<float>(SCENE_H)}},
+                         .size = Size{.width = static_cast<float>(AURORA_SCENE_W),
+                                      .height = static_cast<float>(AURORA_SCENE_H)}},
                     ctx);
         p.stop();
-        (void)rhi_obj.begin_frame(SCENE_W, SCENE_H, 1.0F);
+        (void)rhi_obj.begin_frame(AURORA_SCENE_W, AURORA_SCENE_H, 1.0F);
         dl.replay(sink.backend());
         rhi_obj.end_frame();
     };
 
-    // 冷帧（首帧）单独计时；随后预热至稳态再计时 SCENE_FRAMES 帧。
+    // 冷帧（首帧）单独计时；随后预热至稳态再计时 AURORA_SCENE_FRAMES 帧。
     const auto c0 = std::chrono::steady_clock::now();
     run_frame(0);
     const auto c1 = std::chrono::steady_clock::now();
 
-    for (int i = 1; i <= SCENE_WARMUP; ++i) {
-        run_frame(SCENE_FRAMES + i);
+    for (int i = 1; i <= AURORA_SCENE_WARMUP; ++i) {
+        run_frame(AURORA_SCENE_FRAMES + i);
     }
     const auto t0 = std::chrono::steady_clock::now();
-    for (int i = 0; i < SCENE_FRAMES; ++i) {
-        run_frame(SCENE_WARMUP + 1 + i);
+    for (int i = 0; i < AURORA_SCENE_FRAMES; ++i) {
+        run_frame(AURORA_SCENE_WARMUP + 1 + i);
     }
     const auto t1 = std::chrono::steady_clock::now();
 
     LayerResult r;
     r.cold_ms = std::chrono::duration<double, std::milli>(c1 - c0).count();
     r.steady_ms_per_frame =
-        std::chrono::duration<double, std::milli>(t1 - t0).count() / static_cast<double>(SCENE_FRAMES);
+        std::chrono::duration<double, std::milli>(t1 - t0).count() / static_cast<double>(AURORA_SCENE_FRAMES);
     return r;
 }
 
@@ -378,36 +380,39 @@ template <class Fn>
 /// @return submit/e2e 均为 0 = 无可用 adapter（调用方整段跳过）。
 auto bench_video_wgpu(bool streaming) -> WgpuFrameCost {
     const std::vector<Image> frames = make_video_frames();
-    const auto gpu = offscreen_rhi(VIDEO_W, VIDEO_H);
+    const auto gpu = offscreen_rhi(AURORA_VIDEO_W, AURORA_VIDEO_H);
     if (gpu == nullptr) {
         return {};
     }
     std::uint64_t version = 0;
-    return time_batch(*gpu, VIDEO_W, VIDEO_H, VIDEO_WARMUP, VIDEO_FRAMES, [&](int i, DisplayList &dl) {
-        push_video_frame(dl, frames[static_cast<std::size_t>(i % frames.size())], streaming, ++version);
-    });
+    return time_batch(
+        *gpu, AURORA_VIDEO_W, AURORA_VIDEO_H, AURORA_VIDEO_WARMUP, AURORA_VIDEO_FRAMES, [&](int i, DisplayList &dl) {
+            push_video_frame(dl, frames[static_cast<std::size_t>(i % frames.size())], streaming, ++version);
+        });
 }
 
 /// @brief 场景四：GPU 层缓存（transform-only 旋转动画，与场景二同一批输入）。
 auto bench_layer_wgpu(bool cache_layer) -> WgpuFrameCost {
     std::shared_ptr<Column> root = make_grid_root();
-    auto gpu = offscreen_rhi(SCENE_W, SCENE_H);
+    auto gpu = offscreen_rhi(AURORA_SCENE_W, AURORA_SCENE_H);
     if (gpu == nullptr) {
         return {};
     }
     constexpr BuildContext ctx;
     const Modifier base_modifier = cache_layer ? Modifier{}.cache_layer() : Modifier{};
-    return time_batch(*gpu, SCENE_W, SCENE_H, SCENE_WARMUP, SCENE_FRAMES, [&](int frame, DisplayList &dl) {
-        root->modifier.set(base_modifier.rotate(static_cast<float>(frame) * 6.0F));
-        Painter p;
-        p.begin(SCENE_W, SCENE_H);
-        p.record(dl);
-        root->paint(p,
-                    Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                         .size = Size{.width = static_cast<float>(SCENE_W), .height = static_cast<float>(SCENE_H)}},
-                    ctx);
-        p.stop();
-    });
+    return time_batch(*gpu, AURORA_SCENE_W, AURORA_SCENE_H, AURORA_SCENE_WARMUP, AURORA_SCENE_FRAMES,
+                      [&](int frame, DisplayList &dl) {
+                          root->modifier.set(base_modifier.rotate(static_cast<float>(frame) * 6.0F));
+                          Painter p;
+                          p.begin(AURORA_SCENE_W, AURORA_SCENE_H);
+                          p.record(dl);
+                          root->paint(p,
+                                      Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                                           .size = Size{.width = static_cast<float>(AURORA_SCENE_W),
+                                                        .height = static_cast<float>(AURORA_SCENE_H)}},
+                                      ctx);
+                          p.stop();
+                      });
 }
 
 struct MipResult {
@@ -581,14 +586,15 @@ auto run() -> void {
                    "场景三/四/五/六 = wgpu 真 GPU 离屏端到端帧成本）\n\n");
 
     // ---- 场景一：视频流式纹理 ----
-    AURORA_LOG_RAW("bench", "## 场景一：视频逐帧更新（", std::to_string(VIDEO_W), "x", std::to_string(VIDEO_H), " x ",
-                   std::to_string(VIDEO_FRAMES), " 帧，每帧内容唯一）\n\n");
+    AURORA_LOG_RAW("bench", "## 场景一：视频逐帧更新（", std::to_string(AURORA_VIDEO_W), "x",
+                   std::to_string(AURORA_VIDEO_H), " x ", std::to_string(AURORA_VIDEO_FRAMES),
+                   " 帧，每帧内容唯一）\n\n");
     AURORA_LOG_RAW("bench", "| 路径 | 纹理分配次数 | 纹理删除次数 | 每帧上传字节 | 每帧 CPU |\n");
     AURORA_LOG_RAW("bench", "|:---|---:|---:|---:|---:|\n");
     const auto legacy = bench_video(false);
     const auto stream = bench_video(true);
     const auto per_frame_bytes = [](const GlCounters &c) {
-        return ffmt(0, static_cast<double>(c.upload_bytes) / static_cast<double>(VIDEO_FRAMES));
+        return ffmt(0, static_cast<double>(c.upload_bytes) / static_cast<double>(AURORA_VIDEO_FRAMES));
     };
     AURORA_LOG_RAW("bench", "| legacy（content_hash 缓存） | ", std::to_string(legacy.counters.texture_gens), " | ",
                    std::to_string(legacy.counters.texture_deletes), " | ", per_frame_bytes(legacy.counters), " | ",
@@ -602,9 +608,9 @@ auto run() -> void {
                    "全帧视频逐帧必有整幅传输）。\n\n");
 
     // ---- 场景二：GPU 层缓存 ----
-    AURORA_LOG_RAW("bench", "## 场景二：transform-only 旋转动画（", std::to_string(GRID_COLS), "×",
-                   std::to_string(GRID_ROWS), " 静态盒网格，", std::to_string(SCENE_W), "x", std::to_string(SCENE_H),
-                   "）\n\n");
+    AURORA_LOG_RAW("bench", "## 场景二：transform-only 旋转动画（", std::to_string(AURORA_GRID_COLS), "×",
+                   std::to_string(AURORA_GRID_ROWS), " 静态盒网格，", std::to_string(AURORA_SCENE_W), "x",
+                   std::to_string(AURORA_SCENE_H), "）\n\n");
     AURORA_LOG_RAW("bench", "| 变体 | 首帧（冷） | 稳态每帧 |\n");
     AURORA_LOG_RAW("bench", "|:---|---:|---:|\n");
     const auto base = bench_layer(false);

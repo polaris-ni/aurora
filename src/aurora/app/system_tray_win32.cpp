@@ -7,12 +7,16 @@
 #include "aurora/core/platform.h"
 #ifdef AURORA_PLATFORM_WINDOWS
 #ifndef _WIN32_WINNT
-#define _WI_N32_WINNT 0x0601  // NOLINT(cppcoreguidelines-macro-usage) Vista+ 版本宏
+// Windows SDK 版本旋钮，不可改名（见 platform.h 例外说明）
+// NOLINTNEXTLINE(*-macro-usage, *-reserved-identifier, *-identifier-naming)
+#define _WIN32_WINNT 0x0601
 #endif
 #ifndef _WIN32_IE
-#define WIN32_IE 0x0600  // NOLINT(cppcoreguidelines-macro-usage, readability-identifier-naming): Windows SDK 版本宏
+// Windows SDK 版本旋钮，不可改名
+// NOLINTNEXTLINE(*-macro-usage, *-reserved-identifier, *-identifier-naming)
+#define _WIN32_IE 0x0600
 #endif
-#define WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名
+#define WIN32_LEAN_AND_MEAN  // NOLINT(*-identifier-naming): Windows SDK 宏，不可改名
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -251,7 +255,7 @@ void SystemTray::Impl::update_icon(const std::string &path) {
     }
     if (!path.empty()) {
         hicon = static_cast<HICON>(LoadImageW(nullptr, aurora::internal::utf8_to_wstr(path).c_str(), IMAGE_ICON, 0, 0,
-                                               LR_LOADFROMFILE | LR_DEFAULTSIZE));
+                                              LR_LOADFROMFILE | LR_DEFAULTSIZE));
     }
     if (visible) {
         nid.hIcon = (hicon != nullptr) ? hicon : LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
@@ -384,8 +388,7 @@ void SystemTray::Impl::show_context_menu() const {
 
     // 必要：让菜单在失去焦点后正确关闭
     SetForegroundWindow(hwnd);
-    const UINT cmd =
-        TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+    const UINT cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
     PostMessageW(hwnd, WM_NULL, 0, 0);  // 修复已知 TrackPopupMenu 焦点问题
 
     DestroyMenu(menu);

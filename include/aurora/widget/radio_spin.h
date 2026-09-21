@@ -754,9 +754,9 @@ class SpinBox : public Widget {
     virtual auto paint_value(Painter &p, const Rect &bounds, Color text) -> void {
         Font f;
         f.size_pt = font_size_;
-        const Rect text_box{.origin = Point{.x = bounds.origin.x + 8.0F, .y = bounds.origin.y + 8.0F},
-                            .size = Size{.width = bounds.size.width - ARROW_ZONE - 12.0F,
-                                         .height = bounds.size.height - 16.0F}};
+        const Rect text_box{
+            .origin = Point{.x = bounds.origin.x + 8.0F, .y = bounds.origin.y + 8.0F},
+            .size = Size{.width = bounds.size.width - ARROW_ZONE - 12.0F, .height = bounds.size.height - 16.0F}};
         p.draw_text(text_box, display_text(), f, text);
     }
 
@@ -765,12 +765,10 @@ class SpinBox : public Widget {
         const float ax = bounds.origin.x + bounds.size.width - ARROW_ZONE;
         Font sf;
         sf.size_pt = 9.0F;
-        const Rect up_box{
-            .origin = Point{.x = ax + 6.0F, .y = bounds.origin.y + 2.0F},
-            .size = Size{.width = ARROW_ZONE - 8.0F, .height = (bounds.size.height * 0.5F) - 2.0F}};
-        const Rect dn_box{
-            .origin = Point{.x = ax + 6.0F, .y = bounds.origin.y + (bounds.size.height * 0.5F)},
-            .size = Size{.width = ARROW_ZONE - 8.0F, .height = (bounds.size.height * 0.5F) - 2.0F}};
+        const Rect up_box{.origin = Point{.x = ax + 6.0F, .y = bounds.origin.y + 2.0F},
+                          .size = Size{.width = ARROW_ZONE - 8.0F, .height = (bounds.size.height * 0.5F) - 2.0F}};
+        const Rect dn_box{.origin = Point{.x = ax + 6.0F, .y = bounds.origin.y + (bounds.size.height * 0.5F)},
+                          .size = Size{.width = ARROW_ZONE - 8.0F, .height = (bounds.size.height * 0.5F) - 2.0F}};
         p.draw_text(up_box, "^", sf, arrow);
         p.draw_text(dn_box, "v", sf, arrow);
     }

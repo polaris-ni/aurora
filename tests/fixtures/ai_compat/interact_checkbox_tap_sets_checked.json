@@ -1,20 +1,46 @@
 {
   "name": "checkbox tap sets checked",
   "note": "单次点击切换 Checkbox：false → true。",
-  "viewport": { "width": 240, "height": 160 },
+  "viewport": {
+    "width": 240,
+    "height": 160
+  },
   "tree": {
     "type": "Column",
     "props": {},
     "children": [
-      { "type": "Checkbox", "props": { "checked": false } }
+      {
+        "type": "Checkbox",
+        "props": {
+          "checked": false
+        }
+      }
     ]
   },
   "steps": [
-    { "action": "settle" },
-    { "action": "tap", "target": { "type": "Checkbox", "index": 0 } },
-    { "action": "pump", "frames": 2 }
+    {
+      "action": "settle"
+    },
+    {
+      "action": "tap",
+      "target": {
+        "type": "Checkbox",
+        "index": 0
+      }
+    },
+    {
+      "action": "pump",
+      "frames": 2
+    }
   ],
   "expect": [
-    { "target": { "type": "Checkbox", "index": 0 }, "prop": "checked", "value": true }
+    {
+      "target": {
+        "type": "Checkbox",
+        "index": 0
+      },
+      "prop": "checked",
+      "value": true
+    }
   ]
 }

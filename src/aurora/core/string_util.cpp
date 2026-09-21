@@ -13,9 +13,9 @@ auto string_format(const char *fmt, ...) -> std::string {
         return {};
     }
 
-    va_list args; // NOLINT(*-init-variables)
+    va_list args;  // NOLINT(*-init-variables)
     va_start(args, fmt);
-    va_list args_copy; // NOLINT(*-init-variables)
+    va_list args_copy;  // NOLINT(*-init-variables)
     va_copy(args_copy, args);
 
     // 使用 args_copy 做第一次测长，避免在第一次调用后丢失 args 的状态

@@ -1,7 +1,7 @@
 /* Win32 UIA 无障碍桥 —— 真机验收探针（人工触发的验收工具，不进 CTest）
 // ============================================================================
 // 覆盖后端：`Win32Surface`（GDI 上屏）与 `D3D11Surface`（GPU 上屏）。二者共用同一
-// `Win32Window` 宿主、同一份 `detail::Win32UiaBridge`，故一份探针同时验收两路：
+// `Win32Host` 宿主、同一份 `detail::Win32UiaBridge`，故一份探针同时验收两路：
 //   * 只开 AURORA_BACKEND_WIN32  → 验 Win32Surface
 //   * 再开 AURORA_BACKEND_D3D11  → 两路都验
 //
@@ -115,7 +115,7 @@ struct Expectation {
     const char *sibling_expect = nullptr;
 };
 
-constexpr Expectation kExpectations[] = {
+constexpr Expectation AURORA_EXPECTATIONS[] = {
     {.label = "Button",
      .control_type = UIA_ButtonControlTypeId,
      .want_invoke = true,
@@ -578,7 +578,7 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
         ++failures;
     }
 
-    for (const Expectation &exp : kExpectations) {
+    for (const Expectation &exp : AURORA_EXPECTATIONS) {
         const auto it = std::ranges::find_if(nodes, [&exp](const Visited &v) -> bool {
             return v.framework_id == "Aurora" && v.control_type == static_cast<long long>(exp.control_type);
         });
@@ -624,7 +624,7 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
     }
 
     // #3 / #7 几何验收：自有（Aurora）控件必须投影非空矩形（#3）；文本控件补文本几何盲区断言（#7）。
-    for (const Expectation &exp : kExpectations) {
+    for (const Expectation &exp : AURORA_EXPECTATIONS) {
         const auto it = std::ranges::find_if(nodes, [&exp](const Visited &v) -> bool {
             return v.framework_id == "Aurora" && v.control_type == static_cast<long long>(exp.control_type);
         });
@@ -700,7 +700,7 @@ auto main() -> int {
                   }));
 #else
     emit(
-        "D3D11Surface/GPU: SKIPPED (AURORA_BACKEND_D3D11 off; SAME Win32Window host as GDI -- "
+        "D3D11Surface/GPU: SKIPPED (AURORA_BACKEND_D3D11 off; SAME Win32Host host as GDI -- "
         "the bridge is shared, enable the backend to cover the GPU blit path)");
 #endif
 

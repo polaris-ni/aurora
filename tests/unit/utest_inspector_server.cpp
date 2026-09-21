@@ -156,8 +156,8 @@ auto send_all(int sock, const std::string& data) -> bool {
 /// @brief 带 Host 头与 JSON body 的 POST 便捷封装。
 [[nodiscard]] auto http_post(std::uint16_t port, const std::string& target, const std::string& body) -> std::string {
     return http_roundtrip(port, "POST " + target + " HTTP/1.1\r\nHost: 127.0.0.1\r\n" +
-                                    "Content-Type: application/json\r\nContent-Length: " +
-                                    std::to_string(body.size()) + "\r\n\r\n" + body);
+                                    "Content-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) +
+                                    "\r\n\r\n" + body);
 }
 
 /// @brief 滚动探针：把 `on_scroll` 命中次数与末次 `delta_y` 经序列化属性外显。
@@ -486,11 +486,11 @@ AURORA_TEST_CASE(input_endpoint_rejects_malformed_requests) {
     AURORA_TEST_CHECK_TRUE(http_post(port, "/api/input/click", "{}").find("400") != std::string::npos);
     AURORA_TEST_CHECK_TRUE(http_post(port, "/api/input/click", R"({"path":7})").find("400") != std::string::npos);
     // scroll 增量类型不符。
-    AURORA_TEST_CHECK_TRUE(
-        http_post(port, "/api/input/scroll", R"({"path":"2","dx":"abc"})").find("400") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_post(port, "/api/input/scroll", R"({"path":"2","dx":"abc"})").find("400") !=
+                           std::string::npos);
     // text 类型不符。
-    AURORA_TEST_CHECK_TRUE(
-        http_post(port, "/api/input/text", R"({"path":"1","text":5})").find("400") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_post(port, "/api/input/text", R"({"path":"1","text":5})").find("400") !=
+                           std::string::npos);
     // body 非 JSON / 非对象。
     AURORA_TEST_CHECK_TRUE(http_post(port, "/api/input/click", "not json").find("400") != std::string::npos);
     AURORA_TEST_CHECK_TRUE(http_post(port, "/api/input/click", "[1,2]").find("400") != std::string::npos);
@@ -612,8 +612,7 @@ AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     // 一条最小补丁：改掉第一个子控件的 content（路径 "/0/content"，最后一段是属性名）。
-    const std::string resp =
-        http_post(server.port(), "/api/patch", R"([{"path":"/0/content","value":"patched"}])");
+    const std::string resp = http_post(server.port(), "/api/patch", R"([{"path":"/0/content","value":"patched"}])");
     AURORA_TEST_CHECK_TRUE(resp.find("200") != std::string::npos);
     AURORA_TEST_CHECK_TRUE(resp.find("\"ops\":1") != std::string::npos);
 

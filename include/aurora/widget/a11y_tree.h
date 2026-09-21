@@ -83,8 +83,7 @@ namespace detail {
 /// @note RTL 下标签可能在控件右侧；本兜底接受左右两侧的最近者，方向无关。
 [[nodiscard]] inline auto sibling_label_name(const Widget &w, const Rect &box) -> std::string {
     const AccessibilityRole role = w.accessibility_role();
-    if (role != AccessibilityRole::Checkbox && role != AccessibilityRole::Switch &&
-        role != AccessibilityRole::Slider) {
+    if (role != AccessibilityRole::Checkbox && role != AccessibilityRole::Switch && role != AccessibilityRole::Slider) {
         return std::string{};
     }
     const Widget *parent = w.layout_parent();
@@ -96,7 +95,7 @@ namespace detail {
         return std::string{};  // 几何缺失：不安全关联
     }
     const Point wc{wb.origin.x + wb.size.width * 0.5F, wb.origin.y + wb.size.height * 0.5F};
-    constexpr float kTol = 12.0F;
+    constexpr float AURORA_TOL = 12.0F;
     std::string best;
     double best_score = std::numeric_limits<double>::infinity();
     parent->for_each_child([&](const Widget &sib) -> void {
@@ -120,8 +119,8 @@ namespace detail {
             return;
         }
         // 垂直重叠（带容差）：标签与控件应在同一行。
-        const bool v_overlap = (sb.origin.y + sb.size.height) >= (wb.origin.y - kTol) &&
-                               sb.origin.y <= (wb.origin.y + wb.size.height + kTol);
+        const bool v_overlap = (sb.origin.y + sb.size.height) >= (wb.origin.y - AURORA_TOL) &&
+                               sb.origin.y <= (wb.origin.y + wb.size.height + AURORA_TOL);
         if (!v_overlap) {
             return;
         }
@@ -129,7 +128,7 @@ namespace detail {
         // 水平相邻：标签在左（gap = 控件左 − 标签右）或在右（gap = 标签左 − 控件右）。
         const double gap = (sc.x <= wc.x) ? (wb.origin.x - (sb.origin.x + sb.size.width))
                                           : (sb.origin.x - (wb.origin.x + wb.size.width));
-        if (gap < -kTol || gap > kTol) {
+        if (gap < -AURORA_TOL || gap > AURORA_TOL) {
             return;  // 非相邻（间隙过大或重叠过多）
         }
         const double score = std::abs(gap) + std::abs(sc.y - wc.y);

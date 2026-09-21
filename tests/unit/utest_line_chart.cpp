@@ -4,6 +4,7 @@
 /// hover 最近点命中（等距 x = 索引，域与渲染同源）、on_point_tapped 触发、空数据与 NaN 降级、
 /// 以及像素 golden 基线（chart_line.png，受 AURORA_GOLDEN_DIR / MAX_DIFF / MAX_PIXELS / UPDATE_GOLDEN 控制）
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
@@ -23,12 +24,14 @@
 
 namespace aurora::test_cases::utest_line_chart {
 
+using aurora::testing::require_value;
+
 namespace golden = aurora::testing::golden;
 
 namespace {
 
-constexpr int WIDTH = 320;
-constexpr int HEIGHT = 200;
+constexpr int AURORA_WIDTH = 320;
+constexpr int AURORA_HEIGHT = 200;
 
 /// @brief 关掉轴与图例、清零留白：绘图区 = 整个控件，命中几何可精确预期。
 [[nodiscard]] auto bare_props() -> LineChartProps {
@@ -44,7 +47,7 @@ auto layout_only(Widget &w) -> void {
     constexpr BuildContext ctx;
     Constraints c;
     c.min = Size{.width = 0.0F, .height = 0.0F};
-    c.max = Size{.width = static_cast<float>(WIDTH), .height = static_cast<float>(HEIGHT)};
+    c.max = Size{.width = static_cast<float>(AURORA_WIDTH), .height = static_cast<float>(AURORA_HEIGHT)};
     w.layout(c, ctx);
 }
 
@@ -65,11 +68,10 @@ auto layout_only(Widget &w) -> void {
 /// @brief 无头渲染一帧到临时 PNG（无 Application ⇒ grow-in 降级为终态，输出确定）。
 [[nodiscard]] auto render_chart(const LineChartProps &props) -> std::filesystem::path {
     auto chart = std::make_shared<LineChart>(props);
-    chart->modifier.set(Modifier{}.width(static_cast<float>(WIDTH)).height(static_cast<float>(HEIGHT)));
+    chart->modifier.set(Modifier{}.width(static_cast<float>(AURORA_WIDTH)).height(static_cast<float>(AURORA_HEIGHT)));
     Node root{Column{Node{chart}}};
-    const std::filesystem::path tmp =
-        std::filesystem::path(testing::isolation::temp_dir()) / "current_chart_line.png";
-    AURORA_TEST_REQUIRE_TRUE(render_to_png(root, WIDTH, HEIGHT, tmp.string().c_str()).ok());
+    const std::filesystem::path tmp = std::filesystem::path(testing::isolation::temp_dir()) / "current_chart_line.png";
+    AURORA_TEST_REQUIRE_TRUE(render_to_png(root, AURORA_WIDTH, AURORA_HEIGHT, tmp.string().c_str()).ok());
     return tmp;
 }
 
@@ -92,15 +94,10 @@ AURORA_TEST_CASE(describe_static_is_complete) {
     const WidgetDescriptor d = LineChart::describe_static();
     AURORA_TEST_CHECK_TRUE(d.name == "LineChart");
     auto has = [&d](const std::string &key) -> bool {
-        for (const PropDescriptor &p : d.properties) {
-            if (p.name == key) {
-                return true;
-            }
-        }
-        return false;
+        return std::ranges::any_of(d.properties, [&key](const PropDescriptor &p) { return p.name == key; });
     };
-    for (const auto &key : {"series", "categories", "show_dots", "line_width", "dot_radius", "show_crosshair",
-                            "axis_x", "axis_y", "legend", "padding"}) {
+    for (const auto &key : {"series", "categories", "show_dots", "line_width", "dot_radius", "show_crosshair", "axis_x",
+                            "axis_y", "legend", "padding"}) {
         AURORA_TEST_CHECK_TRUE(has(key));
     }
     AURORA_TEST_CHECK_FALSE(d.events.empty());
@@ -147,18 +144,18 @@ AURORA_TEST_CASE(hover_snaps_to_nearest_point_index) {
 
     MouseEvent at_mid = move_at(160.0F, 100.0F);  // 点 index 1 (v=2 → y=100)
     chart.on_pointer_event(at_mid);
-    AURORA_TEST_REQUIRE_TRUE(chart.hovered_point().has_value());
-    AURORA_TEST_CHECK_EQ(chart.hovered_point()->second, 1);
+    const auto mid = require_value(chart.hovered_point());
+    AURORA_TEST_CHECK_EQ(mid.second, 1);
 
     MouseEvent at_first = move_at(2.0F, 198.0F);  // 点 index 0 (v=0 → y=200)
     chart.on_pointer_event(at_first);
-    AURORA_TEST_REQUIRE_TRUE(chart.hovered_point().has_value());
-    AURORA_TEST_CHECK_EQ(chart.hovered_point()->second, 0);
+    const auto first_pt = require_value(chart.hovered_point());
+    AURORA_TEST_CHECK_EQ(first_pt.second, 0);
 
     MouseEvent at_last = move_at(318.0F, 2.0F);  // 点 index 2 (v=4 → y=0)
     chart.on_pointer_event(at_last);
-    AURORA_TEST_REQUIRE_TRUE(chart.hovered_point().has_value());
-    AURORA_TEST_CHECK_EQ(chart.hovered_point()->second, 2);
+    const auto last_pt = require_value(chart.hovered_point());
+    AURORA_TEST_CHECK_EQ(last_pt.second, 2);
 
     MouseEvent outside = move_at(-30.0F, -30.0F);
     chart.on_pointer_event(outside);

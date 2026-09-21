@@ -57,8 +57,6 @@
 #error "AURORA_BACKEND_WAYLAND must be enabled"
 #endif
 
-#include "aurora/window/wayland_surface.h"
-
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -68,6 +66,7 @@
 
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
+#include "aurora/window/wayland_surface.h"
 #include "verify_print.h"
 
 namespace {
@@ -106,8 +105,8 @@ auto pump_until(aurora::WaylandSurface &surface, const std::function<bool()> &do
 [[nodiscard]] auto state_line(const aurora::WaylandSurface::TextInputState &s) -> std::string {
     return std::string("manager=") + (s.manager_bound ? "y" : "n") + " input=" + (s.input_created ? "y" : "n") +
            " entered=" + (s.entered ? "y" : "n") + " enabled=" + (s.enabled ? "y" : "n") +
-           " commits=" + std::to_string(s.commits) + " deletes=" + std::to_string(s.delete_requests) +
-           " preedit=\"" + s.preedit + "\"";
+           " commits=" + std::to_string(s.commits) + " deletes=" + std::to_string(s.delete_requests) + " preedit=\"" +
+           s.preedit + "\"";
 }
 
 }  // namespace
@@ -140,8 +139,8 @@ auto main(int argc, char **argv) -> int {
     // 事件面捕获（人工/自动段都挂）：committed/preedit 流逐条打印，供 --interactive 目视。
     surface.set_event_handler([](aurora::Event &ev) {
         if (auto *ce = dynamic_cast<aurora::TextCompositionEvent *>(&ev); ce != nullptr) {
-            emit("[EVENT] TextCompositionEvent preedit=\"" + ce->preedit + "\" cursor=" +
-                 std::to_string(ce->cursor_index) + " sel=[" + std::to_string(ce->sel_start) + "," +
+            emit("[EVENT] TextCompositionEvent preedit=\"" + ce->preedit +
+                 "\" cursor=" + std::to_string(ce->cursor_index) + " sel=[" + std::to_string(ce->sel_start) + "," +
                  std::to_string(ce->sel_end) + "] committed=\"" + ce->committed + "\"");
         } else if (auto *te = dynamic_cast<aurora::TextInputEvent *>(&ev); te != nullptr) {
             emit("[EVENT] TextInputEvent text=\"" + te->text + "\"");
@@ -153,8 +152,9 @@ auto main(int argc, char **argv) -> int {
 
     // ---- ① 代码生成门 ----
     if (st.protocol_disabled) {
-        emit("[ENV] 本次构建缺 text-input-unstable-v3 XML（AURORA_HAVE_WL_TEXT_INPUT=0）⇒ 桥未编译，"
-             "装 wayland-protocols 后重配置构建再跑");
+        emit(
+            "[ENV] 本次构建缺 text-input-unstable-v3 XML（AURORA_HAVE_WL_TEXT_INPUT=0）⇒ 桥未编译，"
+            "装 wayland-protocols 后重配置构建再跑");
         return 2;
     }
     check(true, "协议代码生成在场（protocol_disabled=false，listener/请求静态合法已由编译证明）");
@@ -196,8 +196,9 @@ auto main(int argc, char **argv) -> int {
     const bool entered =
         st.input_created && pump_until(surface, [&surface] { return surface.text_input_state().entered; }, 2000);
     if (!entered) {
-        skip("未收到 zwp_text_input_v3.enter（合成器未把键盘焦点给本表面）⇒ enable 判据交 --interactive "
-             "（点一下窗口即可）");
+        skip(
+            "未收到 zwp_text_input_v3.enter（合成器未把键盘焦点给本表面）⇒ enable 判据交 --interactive "
+            "（点一下窗口即可）");
     } else {
         check(true, "键盘焦点落入 ⇒ text_input.enter 到达（服务端 listener 表签名合法）");
         // ---- ④ enable 判据双向 + 去重 ----
@@ -213,19 +214,18 @@ auto main(int argc, char **argv) -> int {
         check(surface.text_input_state().commits == commits_after_enable,
               "同状态重复刷新去重（每帧 present 零协议开销）");
         caret_box = aurora::Rect{};  // 零盒 = 焦点离开文本控件
-        const bool disabled =
-            pump_until(surface, [&surface] { return !surface.text_input_state().enabled; }, 500);
+        const bool disabled = pump_until(surface, [&surface] { return !surface.text_input_state().enabled; }, 500);
         check(disabled && surface.text_input_state().commits > commits_after_enable,
               "插入点盒归零 ⇒ disable+commit 下发（enabled 翻假）");
         caret_box = aurora::Rect{aurora::Point{64.0F, 96.0F}, aurora::Size{8.0F, 20.0F}};
-        const bool re_enabled =
-            pump_until(surface, [&surface] { return surface.text_input_state().enabled; }, 500);
+        const bool re_enabled = pump_until(surface, [&surface] { return surface.text_input_state().enabled; }, 500);
         check(re_enabled, "重新非零盒 ⇒ 再次 enable（判据可逆，无粘滞）");
     }
 
     // ---- preedit/commit/delete：需真实输入法进程 ----
-    skip("preedit/上屏/delete_surrounding 需合成器侧输入法进程配合 ⇒ 交 --interactive 人工段"
-         "（判据：preedit 更新 → 选字单通道上屏 → Esc 无残留）");
+    skip(
+        "preedit/上屏/delete_surrounding 需合成器侧输入法进程配合 ⇒ 交 --interactive 人工段"
+        "（判据：preedit 更新 → 选字单通道上屏 → Esc 无残留）");
 
     if (interactive) {
         emit("");

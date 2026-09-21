@@ -195,7 +195,7 @@ class ScopedTimer {
     ~ScopedTimer() {
         try {
             Profiler::instance().end_zone();
-        } catch (...) { // NOLINT(*-empty-catch)
+        } catch (...) {  // NOLINT(*-empty-catch)
             // 析构不得抛出：性能采集失败绝不拖垮应用
         }
     }
@@ -242,7 +242,7 @@ class FrameScope {
         try {
             detail::on_frame_scope_end();
             Profiler::instance().end_frame();
-        } catch (...) { // NOLINT(*-empty-catch)
+        } catch (...) {  // NOLINT(*-empty-catch)
             // 析构不得抛出：性能采集失败绝不拖垮应用
         }
     }

@@ -165,7 +165,7 @@ AURORA_TEST_CASE(repair_loop_retries_with_errors_when_llm_is_injected) {
     AURORA_TEST_CHECK_EQ(r.attempts_used, std::size_t{2});
     // 第二轮必须带上第一轮的错误 —— 否则 LLM 无从知道上次错在哪。
     AURORA_TEST_CHECK_GT(errors_seen_on_second_call, std::size_t{0});
-    AURORA_TEST_CHECK_TRUE(r.history[0].errors.size() > 0);
+    AURORA_TEST_CHECK_TRUE(!r.history[0].errors.empty());
 }
 
 AURORA_TEST_CASE(repair_loop_machine_fix_avoids_a_second_llm_round_trip) {

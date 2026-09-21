@@ -5,17 +5,16 @@
 /// 像素断言）、 source 序列化往返与非字符串防御、from_file 失败回退占位、
 /// 异步 URL 源三态（占位→加载→成功/失败）与缓存命中、未注入 fetcher 优雅降级
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <string>
-#include <utility>
-#include <vector>
-
-#include <chrono>
 #include <future>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "aurora/image/image_codec.h"
 #include "aurora/layout/layout_engine.h"
@@ -55,7 +54,7 @@ AURORA_TEST_CASE(default_image_view_invariants) {
     bool has_source = false;
     bool has_image_width = false;
     bool has_image_height = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (p.name == "source") {
             has_source = true;
         }
@@ -210,6 +209,10 @@ class PosterGuard {
         });
     }
     ~PosterGuard() { Task<bool>::set_main_poster(nullptr); }
+    PosterGuard(const PosterGuard &) = delete;
+    auto operator=(const PosterGuard &) -> PosterGuard & = delete;
+    PosterGuard(PosterGuard &&) = delete;
+    auto operator=(PosterGuard &&) -> PosterGuard & = delete;
     auto drain() -> void {
         for (;;) {
             std::function<void()> fn;
@@ -252,7 +255,7 @@ AURORA_TEST_CASE(from_url_loads_bytes_and_caches) {
     // mock fetcher：worker 内返回一张经编码器产出的合法 PNG 字节（成功态）。
     auto png_bytes = image::ImageCodecRegistry::instance().encode(make_image(4, 3), image::EncodeOptions{});
     AURORA_TEST_REQUIRE_TRUE(png_bytes.ok());
-    const auto payload = png_bytes.value();
+    const auto &payload = png_bytes.value();
 
     auto iv = ImageView::from_url("mock://ok", [&](std::string_view) -> Task<std::vector<std::uint8_t>> {
         return async([&payload]() -> std::vector<std::uint8_t> { return payload; });

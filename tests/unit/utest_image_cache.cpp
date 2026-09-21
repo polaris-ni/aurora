@@ -121,7 +121,7 @@ AURORA_TEST_F(CacheGuard, get_promotes_entry_and_shifts_eviction_order) {
     AURORA_TEST_REQUIRE_TRUE(cache.contains("a.png"));
 
     const auto reread = cache.get("a.png");  // 提升 a → b 变为最久未用
-    AURORA_TEST_REQUIRE_TRUE(reread.ok());     // 提升不改变条目内容
+    AURORA_TEST_REQUIRE_TRUE(reread.ok());  // 提升不改变条目内容
     AURORA_TEST_CHECK_EQ(reread.value().width, 4);
     cache.put("c.png", make_image(4, 4));  // 192 > 160 → 淘汰 b
 

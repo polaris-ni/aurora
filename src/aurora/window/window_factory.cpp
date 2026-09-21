@@ -12,11 +12,12 @@
 #include "aurora/window/win32_surface.h"
 
 // DPI 感知常量（兼容较旧 Windows SDK，避免版本宏依赖）。
-// 注：原定义位于 win32_window.h；pimpl 重构后该头不再包含 <windows.h>，
+// 注：原定义位于 win32_host.h；pimpl 重构后该头不再包含 <windows.h>，
 // 故把兼容性垫片移至此文件（本文件使用这些常量且已间接包含 <windows.h>）。
-#ifndef PROCESS_PER_MONITOR_DPI_AWARE  // NOLINT(*-identifier-naming)
-#define PROCESS_PER_MONITOR_DPI_AWARE \
-    2  // NOLINT(cppcoreguidelines-macro-usage) 平台 DPI 版本宏，无 constexpr 等价物
+#ifndef PROCESS_PER_MONITOR_DPI_AWARE
+// Windows SDK 版本旋钮，不可改名
+// NOLINTNEXTLINE(*-macro-usage, *-identifier-naming)
+#define PROCESS_PER_MONITOR_DPI_AWARE 2
 #endif
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((DPI_AWARENESS_CONTEXT)(-3))
@@ -33,7 +34,7 @@
 
 // wgpu GPU 栅格分支需 AURORA_BACKEND_GPU_WGPU + 宿主（Win32/X11/Wayland，各自平台专属）。
 #if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WIN32)
-#include "aurora/window/wgpu_surface.h"
+#include "aurora/window/wgpu_win32_surface.h"
 #endif
 #if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_X11)
 #include "aurora/window/wgpu_x11_surface.h"
@@ -98,12 +99,12 @@ auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> 
     if (opts.renderer == RendererPreference::GpuWgpu) {
         // wgpu GPU 栅格路径（DisplayList 直接在 GPU 端光栅化，非 CPU 像素上传）。
         // Auto 不隐式选择本路径（保持既有 D3D11 优先序），仅显式强制时启用。
-        auto gpu = std::make_unique<WgpuSurface>(static_cast<int>(opts.size.width),
-                                                 static_cast<int>(opts.size.height), opts.title, opts.style);
+        auto gpu = std::make_unique<WgpuWin32Surface>(static_cast<int>(opts.size.width),
+                                                      static_cast<int>(opts.size.height), opts.title, opts.style);
         if (!gpu->is_available()) {
             // 强制 GPU 栅格：设备创建失败不静默降级，错误归属调用方（对齐 GpuD3D11 口径）。
             return make_error(ErrorCode::RendererUnavailable,
-                              "create_window: RendererPreference::GpuWgpu requested but WgpuSurface init failed.",
+                              "create_window: RendererPreference::GpuWgpu requested but WgpuWin32Surface init failed.",
                               "Use RendererPreference::Auto to fall back to D3D11/GDI presenters.",
                               "aurora/window/window.h");
         }
@@ -160,23 +161,21 @@ auto create_window(const D3D11Options &opts) -> Result<std::unique_ptr<Window>> 
 }
 #endif
 
-#if defined(AURORA_BACKEND_GPU_WGPU) &&                                                                  \
+#if defined(AURORA_BACKEND_GPU_WGPU) && \
     (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))
 auto create_window(const WgpuOptions &opts) -> Result<std::unique_ptr<Window>> {
     // 宿主编译期择一：Win32 → X11 → Wayland（Linux 两宏并开时取 X11，经 XWayland 亦可跑；
     // 直达 Wayland 宿主走 create_window(WaylandOptions)+GpuWgpu 或本函数下方的运行期口径——
     // WindowOptions 侧由 create_native_window 按会话选择）。
 #ifdef AURORA_BACKEND_WIN32
-    auto surf = std::make_unique<WgpuSurface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
-                                              opts.title, opts.style, opts.vsync);
+    auto surf = std::make_unique<WgpuWin32Surface>(
+        static_cast<int>(opts.size.width), static_cast<int>(opts.size.height), opts.title, opts.style, opts.vsync);
 #elif defined(AURORA_BACKEND_X11)
-    auto surf = std::make_unique<WgpuX11Surface>(static_cast<int>(opts.size.width),
-                                                 static_cast<int>(opts.size.height), opts.title, opts.style,
-                                                 opts.vsync);
+    auto surf = std::make_unique<WgpuX11Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
+                                                 opts.title, opts.style, opts.vsync);
 #else
-    auto surf = std::make_unique<WgpuWaylandSurface>(static_cast<int>(opts.size.width),
-                                                     static_cast<int>(opts.size.height), opts.title, opts.style,
-                                                     opts.vsync);
+    auto surf = std::make_unique<WgpuWaylandSurface>(
+        static_cast<int>(opts.size.width), static_cast<int>(opts.size.height), opts.title, opts.style, opts.vsync);
 #endif
     if (!surf->is_available()) {
         // 专属工厂不静默降级为软件路径：初始化失败（无 DISPLAY/adapter/device/swapchain）归属调用方。
@@ -184,7 +183,7 @@ auto create_window(const WgpuOptions &opts) -> Result<std::unique_ptr<Window>> {
                           "create_window(Wgpu): wgpu device/surface init failed (no adapter or native window?).",
                           "Check GPU driver availability and display session, or use the platform software "
                           "factory with RendererPreference::Auto/Software.",
-                          "aurora/window/wgpu_surface.h");
+                          "aurora/window/wgpu_win32_surface.h");
     }
     return make_window(std::move(surf), opts);
 }
@@ -198,8 +197,7 @@ auto create_window(const GlfwOptions &opts) -> Result<std::unique_ptr<Window>> {
     cfg.gl_major = opts.gl_major;
     cfg.gl_minor = opts.gl_minor;
     cfg.resizable = opts.resizable;
-    cfg.render_mode = opts.gpu ? GlfwSurface::RenderMode::HardwareGL
-                               : GlfwSurface::RenderMode::SoftwareTexture;
+    cfg.render_mode = opts.gpu ? GlfwSurface::RenderMode::HardwareGL : GlfwSurface::RenderMode::SoftwareTexture;
     // 无显示环境 / GL 上下文不可用（无头 CI、Basic Render 仅 GL 1.1 等）：构造抛
     // std::runtime_error，转为 PlatformUnavailable 错误，对齐 X11/Wayland 工厂的 Result 契约，
     // 异常不跨公共 API 边界。

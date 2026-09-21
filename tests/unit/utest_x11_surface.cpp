@@ -152,9 +152,8 @@ AURORA_TEST_CASE(x11_surface_live_ime_bridge_invariants) {
     AURORA_TEST_CHECK(!(st.preedit_callbacks && !st.ic_created));
 
     // provider 接线本身不得产生任何协议副作用（锚点只在组合期有意义）。
-    surface.set_composition_caret_provider([] {
-        return aurora::Rect{aurora::Point{24.0F, 40.0F}, aurora::Size{6.0F, 16.0F}};
-    });
+    surface.set_composition_caret_provider(
+        [] { return aurora::Rect{aurora::Point{24.0F, 40.0F}, aurora::Size{6.0F, 16.0F}}; });
     for (int i = 0; i < 8; ++i) {
         surface.poll_platform_events();
         surface.wait_events(15.0);
@@ -164,8 +163,9 @@ AURORA_TEST_CASE(x11_surface_live_ime_bridge_invariants) {
         // 无 XIM 服务器（WSLg 常态）：桥必须完全静默并留在 keysym 路径——降级即本用例断言本体。
         AURORA_TEST_CHECK(st.ic_created == false && st.draw_callbacks == 0 && st.spot_updates == 0 &&
                           st.preedit.empty());
-        AURORA_TEST_SKIP("本机无 XIM 服务器（XOpenIM 失败）⇒ 焦点宣告/组合回调无从驱动，"
-                         "完整验收见 aurora_verify_x11_ime 探针");
+        AURORA_TEST_SKIP(
+            "本机无 XIM 服务器（XOpenIM 失败）⇒ 焦点宣告/组合回调无从驱动，"
+            "完整验收见 aurora_verify_x11_ime 探针");
     } else {
         AURORA_TEST_CHECK_TRUE(st.ic_created);
         // 焦点宣告接线：独立连接拉起/切走输入焦点 → FocusIn/Out 经事件循环驱动 X{Set,Unset}ICFocus。

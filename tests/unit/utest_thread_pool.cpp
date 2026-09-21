@@ -71,10 +71,10 @@ AURORA_TEST_CASE(deferred_pump_budget_excludes_requeued_jobs) {
             (void)pool;
         });
     });
-    AURORA_TEST_CHECK_EQ(pool.pump(), std::size_t{1});   // 本轮只跑第 1 代
+    AURORA_TEST_CHECK_EQ(pool.pump(), std::size_t{1});  // 本轮只跑第 1 代
     AURORA_TEST_CHECK_EQ(generations, 1);
     AURORA_TEST_CHECK_EQ(pool.pending_count(), std::size_t{1});
-    AURORA_TEST_CHECK_EQ(pool.pump(), std::size_t{1});   // 第 2 代在下一轮
+    AURORA_TEST_CHECK_EQ(pool.pump(), std::size_t{1});  // 第 2 代在下一轮
     AURORA_TEST_CHECK_EQ(generations, 2);
 }
 

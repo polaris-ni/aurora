@@ -122,8 +122,7 @@ class HotReload {
         const std::vector<Node> &children = w.child_nodes();
         for (std::size_t i = 0; i < children.size(); ++i) {
             // 子节点路径：根为 ""，故首层直接是 "0"、"1"，与 find_node_by_path 同格式。
-            collect_state(children[i],
-                          path.empty() ? std::to_string(i) : path + "/" + std::to_string(i));
+            collect_state(children[i], path.empty() ? std::to_string(i) : path + "/" + std::to_string(i));
         }
     }
 
@@ -131,8 +130,7 @@ class HotReload {
     void restore_state(Node node, const Json &json_node) {
         const std::string path = current_path_;
         const auto it = saved_state_.find(path);
-        const Json declared = json_node.is_object() ? json_node.value("props", Json::object())
-                                                    : Json::object();
+        const Json declared = json_node.is_object() ? json_node.value("props", Json::object()) : Json::object();
 
         if (it != saved_state_.end() && declared.is_object()) {
             Widget &w = node.widget();
@@ -152,10 +150,8 @@ class HotReload {
         }
 
         const std::vector<Node> &children = node.widget().child_nodes();
-        const Json &json_children = json_node.is_object() ? json_node.value("children", Json::array())
-                                                          : Json::array();
-        const std::size_t count = children.size() < json_children.size() ? children.size()
-                                                                         : json_children.size();
+        const Json &json_children = json_node.is_object() ? json_node.value("children", Json::array()) : Json::array();
+        const std::size_t count = children.size() < json_children.size() ? children.size() : json_children.size();
         for (std::size_t i = 0; i < count; ++i) {
             const std::string saved = current_path_;
             current_path_ = path.empty() ? std::to_string(i) : path + "/" + std::to_string(i);
@@ -168,7 +164,7 @@ class HotReload {
     Json last_json_;
     std::shared_ptr<Widget> last_root_;
     JsonLoadFn loader_;
-    Json saved_state_;         ///< 路径 → 属性对象
+    Json saved_state_;  ///< 路径 → 属性对象
     std::string current_path_;  ///< restore_state 递归过程中的当前路径
 };
 

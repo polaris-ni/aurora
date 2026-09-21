@@ -145,9 +145,8 @@ class ProviderRegistry {
         }
         ::aurora::detail::set_a11y_broadcast_hook(
             [](const AccessibilityEvent &e) -> void { ProviderRegistry::instance().broadcast(e); });
-        ::aurora::detail::set_a11y_widget_destroy_hook([](const Widget *w) -> void {
-            ProviderRegistry::instance().broadcast_widget_destroying(w);
-        });
+        ::aurora::detail::set_a11y_widget_destroy_hook(
+            [](const Widget *w) -> void { ProviderRegistry::instance().broadcast_widget_destroying(w); });
         hook_installed_ = true;
     }
     auto uninstall_hook() -> void {
@@ -166,14 +165,10 @@ class ProviderRegistry {
 }  // namespace detail
 
 /// @brief 注册一个平台桥（activate 时调用）。
-inline auto register_provider(Provider &p) -> void {
-    detail::ProviderRegistry::instance().register_provider(p);
-}
+inline auto register_provider(Provider &p) -> void { detail::ProviderRegistry::instance().register_provider(p); }
 
 /// @brief 注销一个平台桥（deactivate 时调用）。
-inline auto unregister_provider(Provider &p) -> void {
-    detail::ProviderRegistry::instance().unregister_provider(p);
-}
+inline auto unregister_provider(Provider &p) -> void { detail::ProviderRegistry::instance().unregister_provider(p); }
 
 /// @brief 事件通道的桥侧入口：广播给全部已激活桥。
 inline auto broadcast_to_providers(const AccessibilityEvent &e) -> void {
@@ -199,8 +194,7 @@ inline auto broadcast_widget_destroying(const Widget *w) -> void {
 /// 允许宿主/应用在语义树事件广播到平台桥之前插入自定义逻辑（录制、断言、第三方转发）。
 /// 传空 callable 即卸载。桥自身在 `activate()` 时已自动安装其内部钩子，本接口用于**额外**的
 /// 消费者钩子，二者并存（链式调用）。
-inline auto set_accessibility_broadcast_hook(
-    ::aurora::detail::AccessibilityBroadcastHook h) -> void {
+inline auto set_accessibility_broadcast_hook(::aurora::detail::AccessibilityBroadcastHook h) -> void {
     ::aurora::detail::set_a11y_broadcast_hook(std::move(h));
 }
 
@@ -208,8 +202,7 @@ inline auto set_accessibility_broadcast_hook(
 ///
 /// 控件销毁经 `Node::~Node` 单源广播给已激活桥；本钩子允许消费者在桥之外也感知销毁
 /// （如资源清理、引用释放）。传空 callable 即卸载。
-inline auto set_accessibility_widget_destroy_hook(
-    ::aurora::detail::AccessibilityWidgetDestroyHook h) -> void {
+inline auto set_accessibility_widget_destroy_hook(::aurora::detail::AccessibilityWidgetDestroyHook h) -> void {
     ::aurora::detail::set_a11y_widget_destroy_hook(std::move(h));
 }
 

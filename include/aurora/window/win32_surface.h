@@ -1,7 +1,7 @@
 #pragma once
 
 // Win32/GDI 原生窗口后端：零三方依赖（仅 user32/gdi32），仅 `AURORA_PLATFORM_WINDOWS` 下编译。
-// 窗口宿主（创建/消息泵/事件翻译/DPI/同步重渲染）抽取到共享 `win32_window.h`，
+// 窗口宿主（创建/消息泵/事件翻译/DPI/同步重渲染）抽取到共享 `win32_host.h`，
 // 本类仅负责 GDI 上屏（SetDIBitsToDevice 把软件 Painter 帧缓冲拷到窗口）。
 // 重构后须保证行为与抽取前逐位等价：WM_SIZE/WM_PAINT 触发同步重渲染、白闪修复刷不变。
 #ifdef AURORA_BACKEND_WIN32
@@ -23,13 +23,13 @@
 #include "aurora/environment/media_query.h"
 #include "aurora/render/painter.h"
 #include "aurora/window/surface.h"
-#include "aurora/window/win32_window.h"
+#include "aurora/window/win32_host.h"
 
 namespace aurora {
 
 /// @brief Win32/GDI 后端：软件 Painter 帧缓冲经常驻 BGRA DIB section + `BitBlt` 上屏。
 ///
-/// 窗口宿主（`Win32Window`）负责创建/消息/事件/DPI/同步重渲染；本类只做 GDI blit，
+/// 窗口宿主（`Win32Host`）负责创建/消息/事件/DPI/同步重渲染；本类只做 GDI blit，
 /// 与 `D3D11Surface` 共用宿主但后端不同。上屏路径：RGBA 帧缓冲 CPU swizzle 到
 /// BGRA（GDI 原生序）DIB section 后 `BitBlt`——非原生 RGBA 掩码会迫使 GDI 逐像素
 /// 慢速转换（5760×3132px 实测 87ms），swizzle+BitBlt 仅 ~9ms（bench_win32_present ④）。
@@ -37,7 +37,7 @@ class Win32Surface final : public Surface {
   public:
     Win32Surface(int w, int h, const std::string &title) : Win32Surface(w, h, title, WindowStyleOptions{}) {}
     Win32Surface(int w, int h, const std::string &title, const WindowStyleOptions &style)
-        : win_(std::make_unique<Win32Window>(w, h, title, style)) {}
+        : win_(std::make_unique<Win32Host>(w, h, title, style)) {}
     ~Win32Surface() override { release_dib(); }
 
     Win32Surface(const Win32Surface &) = delete;
@@ -60,7 +60,7 @@ class Win32Surface final : public Surface {
 
     /// @brief 运行时更新悬停光标形状：`SetCursor` + 系统预置光标 `LoadCursor(nullptr, IDC_*)`。
     /// 映射与实现抽到 `src/aurora/window/win32_cursor.h` 的 `detail::set_win32_cursor`，与
-    /// `D3D11Surface` 共用同一份（两者共用 `Win32Window` 宿主模型，映射不应重复实现）。
+    /// `D3D11Surface` 共用同一份（两者共用 `Win32Host` 宿主模型，映射不应重复实现）。
     /// 系统预置光标由 OS 拥有，无需释放（无泄漏）；泛型宏随 `UNICODE` 解析 A/W 变体。
     /// @note 未编译验证：须 Windows + `AURORA_BACKEND_WIN32=ON` 构建后复查（本仓库的无头
     /// Linux 构建不含 Win32 后端）。
@@ -89,11 +89,11 @@ class Win32Surface final : public Surface {
     auto set_present_dirty(const std::vector<Rect> &device_rects) -> void override { present_dirty_ = device_rects; }
 
     /// @brief 类背景擦除刷（测试/自检用）：非空表示已消除最大化黑屏。
-    [[nodiscard]] static auto background_brush() -> void * { return Win32Window::background_brush(); }
+    [[nodiscard]] static auto background_brush() -> void * { return Win32Host::background_brush(); }
     /// @brief 原生窗口句柄（测试/自检用）：可向该句柄发送 WM_PAINT/WM_SIZE 验证黑屏修复。
     [[nodiscard]] auto hwnd() const -> void * { return win_->hwnd(); }
     [[nodiscard]] auto native_handle() const -> void * override { return win_->hwnd(); }
-    /// @brief 本窗口的无障碍桥（D13）：转发共享宿主 `Win32Window` 持有的唯一实例，
+    /// @brief 本窗口的无障碍桥（D13）：转发共享宿主 `Win32Host` 持有的唯一实例，
     /// 使 GDI 与 GPU 两路上屏共用同一份 id→Widget* 映射，不产生分裂。
     [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override {
         return win_->accessibility_provider();
@@ -182,7 +182,7 @@ class Win32Surface final : public Surface {
     /// @brief 增量上屏：逐脏矩形 swizzle + BitBlt。
     auto present_dirty(HDC hdc, int w, int h) const -> void;
 
-    std::unique_ptr<Win32Window> win_;
+    std::unique_ptr<Win32Host> win_;
     Painter painter_;
     std::vector<Rect> present_dirty_;  ///< 本帧增量上屏脏区（设备坐标；空=全量 blit）。
     // 常驻上屏资源：BGRA（GDI 原生序）DIB section，present 时 swizzle+BitBlt。

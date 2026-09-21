@@ -10,7 +10,7 @@
 #include "aurora/core/platform.h"
 #include "death_test.h"
 
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
 // 只需要进程与环境变量 API（同 test_death.cpp 的取舍，不自定义 WIN32_LEAN_AND_MEAN）。
 #include <windows.h>
 #endif
@@ -36,7 +36,7 @@ struct CaseState {
     return state;
 }
 
-#if defined(AURORA_PLATFORM_WASM)
+#ifdef AURORA_PLATFORM_WASM
 /// @brief 去掉 Windows 宿主的盘符前缀（`D:/x/y` → `/x/y`）。
 ///
 /// Emscripten 的 argv[0] 是宿主给出的 .js 路径（Windows 带盘符，如
@@ -79,7 +79,7 @@ struct CaseState {
             return override_root;
         }
     }
-#if defined(AURORA_PLATFORM_WASM)
+#ifdef AURORA_PLATFORM_WASM
     // Emscripten：argv[0] 是宿主给出的 .js 路径（Windows 带盘符），须去盘符才能被
     // fs::absolute 认作绝对路径（否则会拼上 cwd 多出一层假路径，见 strip_windows_drive）。
     fs::path dir = fs::absolute(strip_windows_drive(detail::executable_path()), ec).parent_path();
@@ -115,7 +115,7 @@ struct CaseState {
 
 /// @brief 跨进程安全的进程内环境变量写入（TMPDIR/TMP/TEMP 三处同步接管）。
 auto set_env(const char* name, const std::string& value) -> void {
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
     (void)_putenv_s(name, value.c_str());
 #else
     (void)setenv(name, value.c_str(), 1);
@@ -140,7 +140,7 @@ auto set_env(const char* name, const std::string& value) -> void {
 }
 
 /// @brief 校验（必要时创建）一个可用基目录；不可用返回空路径。
-[[nodiscard]] auto ensure_base_dir(const fs::path &candidate) -> fs::path {
+[[nodiscard]] auto ensure_base_dir(const fs::path& candidate) -> fs::path {
     if (candidate.empty()) {
         return {};
     }
@@ -174,7 +174,7 @@ auto set_env(const char* name, const std::string& value) -> void {
         std::error_code sys_ec;
         base = ensure_base_dir(fs::temp_directory_path(sys_ec));
     }
-#if !defined(AURORA_PLATFORM_WINDOWS)
+#ifndef AURORA_PLATFORM_WINDOWS
     if (base.empty()) {
         // 回退②：系统临时目录也不可用 → 退到 POSIX /tmp（最后兜底，正常开发/CI 不应命中）。
         base = ensure_base_dir(fs::path{"/tmp"});

@@ -162,14 +162,15 @@ auto Win32ImeBridge::position_candidate_window() -> void {
     cf.dwStyle = CFS_CANDIDATEPOS;
     cf.ptCurrentPos = pt;
     // rcArea 是候选窗可放置包围盒（部分 IME 只认它）：给插入点右下方一段余量。
-    cf.rcArea = {pt.x, pt.y, pt.x + 400, pt.y + 240};
+    cf.rcArea = {.left = pt.x, .top = pt.y, .right = pt.x + 400, .bottom = pt.y + 240};
     ImmSetCandidateWindow(himc, &cf);
     // CFS_EXCLUDE：preedit 由本应用自绘（带下划线的组合串），声明插入点附近排除 IME 自带绘制，
     // 避免两套预编辑串叠影。区域取插入点盒左右各留 4dp（覆盖下划线串所在行）。
     cf.dwStyle = CFS_EXCLUDE;
-    cf.rcArea = {static_cast<LONG>((box.origin.x - 4.0F) * scale), static_cast<LONG>(box.origin.y * scale),
-                 static_cast<LONG>((box.origin.x + box.size.width + 4.0F) * scale),
-                 static_cast<LONG>((box.origin.y + box.size.height) * scale)};
+    cf.rcArea = {.left = static_cast<LONG>((box.origin.x - 4.0F) * scale),
+                 .top = static_cast<LONG>(box.origin.y * scale),
+                 .right = static_cast<LONG>((box.origin.x + box.size.width + 4.0F) * scale),
+                 .bottom = static_cast<LONG>((box.origin.y + box.size.height) * scale)};
     ImmSetCandidateWindow(himc, &cf);
     ImmReleaseContext(hwnd_, himc);
 }

@@ -26,7 +26,7 @@ namespace aurora::storage {
 
 /// @brief 默认版本号（经 `const T*` 实参 ADL 可在用户命名空间覆盖）。门面 put<T>/get<T> 据此触发迁移钩子。
 template <typename T>
-constexpr auto storage_version(const T* /*tag*/) -> std::uint32_t {
+constexpr auto storage_version(const T * /*tag*/) -> std::uint32_t {
     return 1;
 }
 
@@ -36,18 +36,18 @@ constexpr auto storage_version(const T* /*tag*/) -> std::uint32_t {
 /// （≤15 字符，如 "ws"）——走 SSO 零堆分配，且跨版本/重构稳定（typeid mangled 名在移动
 /// 命名空间后会变，反会破坏持久化类型检查）。
 template <typename T>
-auto storage_type_name(const T* /*tag*/) -> const std::string & {
+auto storage_type_name(const T * /*tag*/) -> const std::string & {
     static const std::string NAME = typeid(T).name();  // 线程安全静态初始化，跨 TU 唯一
     return NAME;
 }
 
 /// @brief 默认迁移钩子：不迁移（原样返回）。旧版本记录反序列化前会经此钩子升级。
 template <typename T>
-auto migrate_storage(std::uint32_t /*old_version*/, const T* /*tag*/, Json j) -> Result<Json> {
+auto migrate_storage(std::uint32_t /*old_version*/, const T * /*tag*/, Json j) -> Result<Json> {
     return Result{std::move(j)};
 }
 template <typename T>
-auto migrate_storage(std::uint32_t /*old_version*/, const T* /*tag*/, StorageBytes b) -> Result<StorageBytes> {
+auto migrate_storage(std::uint32_t /*old_version*/, const T * /*tag*/, StorageBytes b) -> Result<StorageBytes> {
     return Result<StorageBytes>{std::move(b)};
 }
 

@@ -4,6 +4,7 @@
 #include <array>
 #include <ranges>
 #include <unordered_map>
+#include <utility>
 
 #include "aurora/core/log.h"
 #include "aurora/core/platform.h"
@@ -45,7 +46,7 @@ auto make_face_from_memory(std::vector<std::uint8_t> bytes) -> std::shared_ptr<F
         ff->face->charmap = (ff->face->charmaps != nullptr) ? *ff->face->charmaps : nullptr;
     }
     // 按 OS/2 style_flags 判定字重：bold 文件记 700，其余 400。供 resolve_faces 按字重选面。
-    ff->weight = ((ff->face->style_flags & FT_STYLE_FLAG_BOLD) != 0U) ? 700 : 400;
+    ff->weight = (std::cmp_not_equal(ff->face->style_flags & FT_STYLE_FLAG_BOLD, 0U)) ? 700 : 400;
     ff->id = g_next_id++;
     return ff;
 }
@@ -64,7 +65,7 @@ auto make_face_from_file(const std::string &path) -> std::shared_ptr<FontFace> {
     if (FT_Select_Charmap(ff->face, FT_ENCODING_UNICODE) != 0) {
         ff->face->charmap = (ff->face->charmaps != nullptr) ? *ff->face->charmaps : nullptr;
     }
-    ff->weight = ((ff->face->style_flags & FT_STYLE_FLAG_BOLD) != 0U) ? 700 : 400;
+    ff->weight = (std::cmp_not_equal(ff->face->style_flags & FT_STYLE_FLAG_BOLD, 0U)) ? 700 : 400;
     ff->id = g_next_id++;
     return ff;
 }

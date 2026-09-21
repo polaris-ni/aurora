@@ -268,8 +268,8 @@ AURORA_TEST_CASE(row_rtl_mirrors_child_order_and_start_end) {
     FixedCtx b;
     Flex cfg;
     cfg.rtl = true;
-    const auto layout = FlexLayouter::layout(cfg, parent_constraints(),
-                                             {fixed_item2(30.0F, 10.0F, a), fixed_item2(30.0F, 10.0F, b)});
+    const auto layout =
+        FlexLayouter::layout(cfg, parent_constraints(), {fixed_item2(30.0F, 10.0F, a), fixed_item2(30.0F, 10.0F, b)});
     AURORA_TEST_CHECK_NEAR(layout.size.width, 60.0F, 1e-4F);
     AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
     AURORA_TEST_CHECK_NEAR(layout.children[0].origin.x, 30.0F, 1e-4F);
@@ -283,8 +283,7 @@ AURORA_TEST_CASE(row_rtl_mirrors_child_order_and_start_end) {
     cfg2.main_axis_size = MainAxisSize::Max;
     cfg2.main_axis = MainAxisAlignment::End;
     cfg2.rtl = true;
-    const auto layout2 =
-        FlexLayouter::layout(cfg2, parent_constraints(), {fixed_item2(30.0F, 10.0F, c)});
+    const auto layout2 = FlexLayouter::layout(cfg2, parent_constraints(), {fixed_item2(30.0F, 10.0F, c)});
     AURORA_TEST_CHECK_NEAR(layout2.size.width, 300.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(layout2.children[0].origin.x, 0.0F, 1e-4F);
 }
@@ -297,8 +296,8 @@ AURORA_TEST_CASE(column_rtl_mirrors_cross_axis_start_end) {
     Flex cfg;
     cfg.direction = FlexDirection::Column;
     cfg.rtl = true;
-    const auto layout = FlexLayouter::layout(cfg, parent_constraints(),
-                                             {fixed_item2(30.0F, 10.0F, a), fixed_item2(100.0F, 10.0F, b)});
+    const auto layout =
+        FlexLayouter::layout(cfg, parent_constraints(), {fixed_item2(30.0F, 10.0F, a), fixed_item2(100.0F, 10.0F, b)});
     AURORA_TEST_CHECK_NEAR(layout.size.width, 100.0F, 1e-4F);
     AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
     AURORA_TEST_CHECK_NEAR(layout.children[0].origin.x, 70.0F, 1e-4F);
@@ -315,9 +314,9 @@ AURORA_TEST_CASE(baseline_aligns_mixed_sizes_on_common_line) {
     BaselineCtx large;
     Flex cfg;
     cfg.cross_axis = CrossAxisAlignment::Baseline;
-    const auto layout = FlexLayouter::layout(cfg, parent_constraints(),
-                                             {baseline_item(30.0F, 20.0F, 15.0F, small),
-                                              baseline_item(30.0F, 30.0F, 24.0F, large)});
+    const auto layout =
+        FlexLayouter::layout(cfg, parent_constraints(),
+                             {baseline_item(30.0F, 20.0F, 15.0F, small), baseline_item(30.0F, 30.0F, 24.0F, large)});
 
     AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
     AURORA_TEST_CHECK_NEAR(layout.size.height, 30.0F, 1e-4F);
@@ -339,14 +338,14 @@ AURORA_TEST_CASE(baseline_synthesizes_bottom_edge_for_items_without_baseline) {
     BaselineCtx icon;
     Flex cfg;
     cfg.cross_axis = CrossAxisAlignment::Baseline;
-    const auto layout = FlexLayouter::layout(cfg, parent_constraints(),
-                                             {baseline_item(30.0F, 20.0F, 15.0F, text),
-                                              baseline_item(20.0F, 40.0F, -1.0F, icon)});
+    const auto layout =
+        FlexLayouter::layout(cfg, parent_constraints(),
+                             {baseline_item(30.0F, 20.0F, 15.0F, text), baseline_item(20.0F, 40.0F, -1.0F, icon)});
 
     AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
     AURORA_TEST_CHECK_NEAR(layout.size.height, 45.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(layout.children[0].origin.y, 25.0F, 1e-4F);  // 40 - 15
-    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.y, 0.0F, 1e-4F);   // 40 - 40：合成基线贴容器底
+    AURORA_TEST_CHECK_NEAR(layout.children[1].origin.y, 0.0F, 1e-4F);  // 40 - 40：合成基线贴容器底
     AURORA_TEST_CHECK_NEAR(layout.children[1].origin.y + 40.0F, 40.0F, 1e-4F);
 }
 
@@ -357,9 +356,9 @@ AURORA_TEST_CASE(all_items_without_baseline_degrade_to_end_alignment) {
     BaselineCtx b;
     Flex baseline_cfg;
     baseline_cfg.cross_axis = CrossAxisAlignment::Baseline;
-    const auto degraded = FlexLayouter::layout(baseline_cfg, parent_constraints(),
-                                               {baseline_item(10.0F, 5.0F, -1.0F, a),
-                                                baseline_item(30.0F, 10.0F, -1.0F, b)});
+    const auto degraded =
+        FlexLayouter::layout(baseline_cfg, parent_constraints(),
+                             {baseline_item(10.0F, 5.0F, -1.0F, a), baseline_item(30.0F, 10.0F, -1.0F, b)});
 
     FixedCtx ca;
     FixedCtx cb;
@@ -381,9 +380,8 @@ AURORA_TEST_CASE(baseline_on_column_falls_back_to_start) {
     Flex cfg;
     cfg.direction = FlexDirection::Column;
     cfg.cross_axis = CrossAxisAlignment::Baseline;
-    const auto layout = FlexLayouter::layout(cfg, parent_constraints(),
-                                             {baseline_item(30.0F, 10.0F, 8.0F, a),
-                                              baseline_item(60.0F, 10.0F, 8.0F, b)});
+    const auto layout = FlexLayouter::layout(
+        cfg, parent_constraints(), {baseline_item(30.0F, 10.0F, 8.0F, a), baseline_item(60.0F, 10.0F, 8.0F, b)});
 
     AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
     AURORA_TEST_CHECK_NEAR(layout.size.width, 60.0F, 1e-4F);
@@ -400,9 +398,9 @@ AURORA_TEST_CASE(baseline_ignores_rtl_mirror_on_vertical_axis) {
     Flex cfg;
     cfg.cross_axis = CrossAxisAlignment::Baseline;
     cfg.rtl = true;
-    const auto layout = FlexLayouter::layout(cfg, parent_constraints(),
-                                             {baseline_item(30.0F, 20.0F, 15.0F, small),
-                                              baseline_item(30.0F, 30.0F, 24.0F, large)});
+    const auto layout =
+        FlexLayouter::layout(cfg, parent_constraints(),
+                             {baseline_item(30.0F, 20.0F, 15.0F, small), baseline_item(30.0F, 30.0F, 24.0F, large)});
 
     AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
     AURORA_TEST_CHECK_NEAR(layout.size.height, 30.0F, 1e-4F);
@@ -418,8 +416,8 @@ AURORA_TEST_CASE(baseline_clamps_out_of_range_baseline_into_item_box) {
     BaselineCtx odd;
     Flex cfg;
     cfg.cross_axis = CrossAxisAlignment::Baseline;
-    const auto layout = FlexLayouter::layout(cfg, parent_constraints(300.0F, 100.0F),
-                                             {baseline_item(30.0F, 60.0F, 999.0F, odd)});
+    const auto layout =
+        FlexLayouter::layout(cfg, parent_constraints(300.0F, 100.0F), {baseline_item(30.0F, 60.0F, 999.0F, odd)});
 
     AURORA_TEST_REQUIRE_EQ(layout.children.size(), 1U);
     AURORA_TEST_CHECK_NEAR(layout.size.height, 60.0F, 1e-4F);
@@ -434,13 +432,13 @@ AURORA_TEST_CASE(baseline_container_cross_clamps_into_parent_constraint) {
     BaselineCtx top_heavy;
     Flex cfg;
     cfg.cross_axis = CrossAxisAlignment::Baseline;
-    const auto layout = FlexLayouter::layout(cfg, parent_constraints(300.0F, 70.0F),
-                                             {baseline_item(30.0F, 70.0F, 70.0F, bottom_heavy),
-                                              baseline_item(30.0F, 70.0F, 0.0F, top_heavy)});
+    const auto layout = FlexLayouter::layout(
+        cfg, parent_constraints(300.0F, 70.0F),
+        {baseline_item(30.0F, 70.0F, 70.0F, bottom_heavy), baseline_item(30.0F, 70.0F, 0.0F, top_heavy)});
 
     AURORA_TEST_REQUIRE_EQ(layout.children.size(), 2U);
     AURORA_TEST_CHECK_NEAR(layout.size.height, 70.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.y, 0.0F, 1e-4F);   // 70 - 70
+    AURORA_TEST_CHECK_NEAR(layout.children[0].origin.y, 0.0F, 1e-4F);  // 70 - 70
     AURORA_TEST_CHECK_NEAR(layout.children[1].origin.y, 70.0F, 1e-4F);  // 70 - 0
     AURORA_TEST_CHECK_GE(layout.children[1].origin.y, 0.0F);
 }

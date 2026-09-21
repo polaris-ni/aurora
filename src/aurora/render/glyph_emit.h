@@ -25,9 +25,8 @@ namespace aurora::render {
 /// 即时拷贝/上传位图，不得缓存指针。`dx0/dy0` 为字形位图左上角的物理像素坐标（行盒顶
 /// 语义，与 `Painter::draw_text` 的原点换算一致）；`mode` 指示位图布局（Gray：width×rows
 /// 的 A8；Lcd：3×width×rows 的 RGB 子像素，GPU 路径不应接受）。
-using GlyphEmitSink =
-    std::function<void(const GlyphAtlas::Entry &entry, GlyphAtlas::Mode mode, int dx0, int dy0,
-                       std::uint64_t atlas_key)>;
+using GlyphEmitSink = std::function<void(const GlyphAtlas::Entry &entry, GlyphAtlas::Mode mode, int dx0, int dy0,
+                                         std::uint64_t atlas_key)>;
 
 /// @brief 逐字形发射一段文本（与 `FontEngine::draw_text` 同源实现）。
 ///
@@ -40,7 +39,7 @@ using GlyphEmitSink =
 /// @param origin_x/y 绘制原点（物理像素；行盒顶语义）
 /// @param sink       逐字形回调（含零位图字形——空格等，消费方自行跳过）
 /// @return false = 无可用字体面（调用方自行兜底；软件路径回退 BitmapFont）
-auto emit_text_glyphs(const std::string &text, const Font &f, const TextLayoutOpts &opts, float scale,
-                      TextAAMode aa, Color c, float origin_x, float origin_y, const GlyphEmitSink &sink) -> bool;
+auto emit_text_glyphs(const std::string &text, const Font &f, const TextLayoutOpts &opts, float scale, TextAAMode aa,
+                      Color c, float origin_x, float origin_y, const GlyphEmitSink &sink) -> bool;
 
 }  // namespace aurora::render

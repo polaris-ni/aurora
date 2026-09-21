@@ -13,12 +13,12 @@
 #include "aurora/core/types.h"
 #include "aurora/render/painter.h"
 #include "aurora/window/surface.h"
-#include "aurora/window/win32_window.h"
+#include "aurora/window/win32_host.h"
 
 namespace aurora {
 
 /**
- * @brief D3D11 表面（ARCHITECTURE.md §8.4 后端家族）：复用共享 `Win32Window` 宿主，像素经 D3D11 纹理-
+ * @brief D3D11 表面（ARCHITECTURE.md §8.4 后端家族）：复用共享 `Win32Host` 宿主，像素经 D3D11 纹理-
  * 增量上传 + GPU 缩放呈现。paint 管线不变（仍由 `Window::present_root` 驱动 CPU `Painter`），
  * 仅把「CPU RGBA8 帧缓冲 → 屏幕」替换为 GPU 合成，解决大窗口 GDI 上屏瓶颈。
  *
@@ -43,13 +43,13 @@ class D3D11Surface : public Surface {
     [[nodiscard]] auto scale_factor() const -> float override { return win_->scale_factor(); }
     [[nodiscard]] auto should_close() const -> bool override { return win_->should_close(); }
 
-    /// @brief 运行时更新悬停光标形状：与 `Win32Surface` 共用 `Win32Window` 宿主模型，
+    /// @brief 运行时更新悬停光标形状：与 `Win32Surface` 共用 `Win32Host` 宿主模型，
     /// 故复用同一份 `detail::set_win32_cursor`（`src/aurora/window/win32_cursor.h`）下发系统预置光标。
     /// @note 未编译验证：须 Windows + `AURORA_BACKEND_D3D11=ON` 构建后复查（本仓库的无头
     /// Linux 构建不含 D3D11 后端）。
     auto set_cursor(CursorShape shape) -> void override;
 
-    /// @brief 真实窗口截图（含非客户区/标题栏/边框）：与 `Win32Surface` 共用 `Win32Window` 宿主，
+    /// @brief 真实窗口截图（含非客户区/标题栏/边框）：与 `Win32Surface` 共用 `Win32Host` 宿主，
     /// 故复用共享 `detail::capture_window_by_hwnd`（`src/aurora/window/win32_capture.h`）走 PrintWindow 路径。
     /// DEBUG 下生效；Release（未开 `AURORA_ENABLE_DEBUG`）回落 unsupported 错误（零截图代码）。
     /// 未编译验证：须 Windows + `AURORA_BACKEND_D3D11=ON` 构建后复查（本仓库的无头
@@ -70,7 +70,7 @@ class D3D11Surface : public Surface {
     auto wait_events(double timeout_ms) -> void override { win_->wait_events(timeout_ms); }
     /// @brief 跨线程唤醒主循环（转发共享宿主；PostMessage 线程安全）。
     auto request_wake() -> void override { win_->request_wake(); }
-    /// @brief 与 Win32Surface 同源：宿主 `Win32Window` 的消息泵是线程级共享队列。
+    /// @brief 与 Win32Surface 同源：宿主 `Win32Host` 的消息泵是线程级共享队列。
     [[nodiscard]] auto pumps_thread_queue() const -> bool override { return true; }
     /// @brief 与 Win32Surface 同源：等待经由线程级消息通道，覆盖本进程任意窗口。
     [[nodiscard]] auto waits_thread_queue() const -> bool override { return true; }
@@ -121,16 +121,16 @@ class D3D11Surface : public Surface {
     [[nodiscard]] auto frame_count() const -> int override { return frame_; }
 
     /// @brief 宿主原生窗口句柄（测试/自检用；与 `Win32Surface::hwnd()` 同义、同宿主）。
-    /// 两路上屏共用 `Win32Window`，故句柄访问器必须两路都有——此前 D3D11 路缺该覆写，
+    /// 两路上屏共用 `Win32Host`，故句柄访问器必须两路都有——此前 D3D11 路缺该覆写，
     /// `native_handle()` 落到 `Surface` 基类默认实现（恒返回 `nullptr`），使
     /// `aurora::debug::surface_state()` 的 `has_native_window` 对 D3D11 后端**恒为 false**
     /// ——真实窗口后端却报「无原生窗口」。补齐后与 `Win32Surface` 一致。
     /// @note 未编译验证：须 Windows + `AURORA_BACKEND_D3D11=ON` 构建后复查（本仓库的无头
     /// Linux 构建不含 D3D11 后端）。实现与 `Win32Surface::native_handle()` 逐字同形（同一
-    /// `Win32Window::hwnd()`），故两路行为一致。
+    /// `Win32Host::hwnd()`），故两路行为一致。
     [[nodiscard]] auto hwnd() const -> void * { return win_->hwnd(); }
     [[nodiscard]] auto native_handle() const -> void * override { return win_->hwnd(); }
-    /// @brief 本窗口的无障碍桥（D13）：转发共享宿主 `Win32Window` 持有的唯一实例，
+    /// @brief 本窗口的无障碍桥（D13）：转发共享宿主 `Win32Host` 持有的唯一实例，
     /// 使 GDI 与 GPU 两路上屏共用同一份 id→Widget* 映射，不产生分裂。
     [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override {
         return win_->accessibility_provider();
@@ -164,7 +164,7 @@ class D3D11Surface : public Surface {
     /// 中执行（present_root 外，避开重入护栏）。
     auto try_recover_device() -> void;
 
-    std::unique_ptr<Win32Window> win_;  ///< 共享窗口宿主
+    std::unique_ptr<Win32Host> win_;  ///< 共享窗口宿主
     Painter painter_;  ///< CPU 帧缓冲（RGBA8，绘制目标）
 
     ID3D11Device *device_ = nullptr;
@@ -182,7 +182,7 @@ class D3D11Surface : public Surface {
     ID3D11BlendState *bs_ = nullptr;
 
     std::vector<Rect> dirty_;  ///< 本帧脏矩形（设备坐标），present 时消费。
-    int dev_w_ = 0, dev_h_ = 0;   ///< painter/源纹理设备尺寸（逻辑×scale）
+    int dev_w_ = 0, dev_h_ = 0;  ///< painter/源纹理设备尺寸（逻辑×scale）
     int swap_w_ = 0, swap_h_ = 0;  ///< 交换链后缓冲物理尺寸（ResizeBuffers 后更新）
     int frame_ = 0;
     bool ok_ = false;  ///< 设备初始化是否成功（失败则 present 直接报错，便于测试跳过）。

@@ -19,11 +19,11 @@ namespace aurora {
  * @note Rebuildable: no
  */
 enum class PluralCategory {
-    Zero,   ///< CLDR zero：如阿拉伯语 0
-    One,    ///< CLDR one：如英语 1、法语 0/1、俄语 1/21/101（非 11）
-    Two,    ///< CLDR two：如阿拉伯语 2（双数）
-    Few,    ///< CLDR few：如俄语 2-4（非 12-14）、阿拉伯语 3-10
-    Many,   ///< CLDR many：如俄语 0/5-20、阿拉伯语 11-99
+    Zero,  ///< CLDR zero：如阿拉伯语 0
+    One,  ///< CLDR one：如英语 1、法语 0/1、俄语 1/21/101（非 11）
+    Two,  ///< CLDR two：如阿拉伯语 2（双数）
+    Few,  ///< CLDR few：如俄语 2-4（非 12-14）、阿拉伯语 3-10
+    Many,  ///< CLDR many：如俄语 0/5-20、阿拉伯语 11-99
     Other,  ///< CLDR other：兜底类别，所有语言必备
 };
 
@@ -41,9 +41,7 @@ namespace detail {
 }
 
 /// @brief 中文 / 日语等：仅 other 一类（名词本身不随数变化）。
-[[nodiscard]] inline auto plural_category_other_only(double /*n*/) -> PluralCategory {
-    return PluralCategory::Other;
-}
+[[nodiscard]] inline auto plural_category_other_only(double /*n*/) -> PluralCategory { return PluralCategory::Other; }
 
 /// @brief 法语（CLDR fr）：one = 整数 0/1；many = 紧凑百万整数倍（i % 1e6 == 0 且 v=0）；
 ///       其余为 other。注：科学记数法大指数情形（e != 0..5）本自研实现不覆盖，
@@ -121,8 +119,7 @@ namespace detail {
     if (lang == "ar") {
         return detail::plural_category_ar(n);
     }
-    if (lang == "ru" || lang == "uk" || lang == "be" || lang == "sr" || lang == "hr" ||
-        lang == "bs" || lang == "sh") {
+    if (lang == "ru" || lang == "uk" || lang == "be" || lang == "sr" || lang == "hr" || lang == "bs" || lang == "sh") {
         return detail::plural_category_ru(n);
     }
     if (lang == "fr") {

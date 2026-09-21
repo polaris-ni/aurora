@@ -141,11 +141,11 @@ AURORA_TEST_CASE(keyframes_empty_clamp_and_duplicate_time_edges) {
 /// @brief TimelineInterval::local 的区间内映射与区间外夹取端点语义。
 AURORA_TEST_CASE(timeline_interval_local_clamps_outside) {
     const aurora::TimelineInterval iv{.begin = 0.25, .end = 0.75};
-    AURORA_TEST_CHECK_NEAR(iv.local(0.0), 0.0, 1e-12);    // t ≤ begin → 0（未开始）
+    AURORA_TEST_CHECK_NEAR(iv.local(0.0), 0.0, 1e-12);  // t ≤ begin → 0（未开始）
     AURORA_TEST_CHECK_NEAR(iv.local(0.25), 0.0, 1e-12);
-    AURORA_TEST_CHECK_NEAR(iv.local(0.5), 0.5, 1e-12);    // 区间中点 → 局部中点
+    AURORA_TEST_CHECK_NEAR(iv.local(0.5), 0.5, 1e-12);  // 区间中点 → 局部中点
     AURORA_TEST_CHECK_NEAR(iv.local(0.75), 1.0, 1e-12);
-    AURORA_TEST_CHECK_NEAR(iv.local(1.0), 1.0, 1e-12);    // t ≥ end → 1（已完成）
+    AURORA_TEST_CHECK_NEAR(iv.local(1.0), 1.0, 1e-12);  // t ≥ end → 1（已完成）
     AURORA_TEST_CHECK_TRUE(iv.contains(0.5));
     AURORA_TEST_CHECK_FALSE(iv.contains(0.1));
 
@@ -189,11 +189,11 @@ AURORA_TEST_CASE(timeline_parallel_anchor_and_gap) {
 AURORA_TEST_CASE(timeline_staggered_offsets) {
     const auto tl = aurora::TimelineSpec::staggered(0.2, 0.1, 3).build();
     AURORA_TEST_CHECK_EQ(tl.slot_count(), std::size_t{3});
-    AURORA_TEST_CHECK_NEAR(tl.duration(), 2 * (0.2 + 0.1) + 0.2, 1e-12);  // 0.8
+    AURORA_TEST_CHECK_NEAR(tl.duration(), (2 * (0.2 + 0.1)) + 0.2, 1e-12);  // 0.8
     // 总时长 0.8：叶子 i 起点 = i*0.3。
     for (int i = 0; i < 3; ++i) {
         AURORA_TEST_CHECK_NEAR(tl.interval(static_cast<std::size_t>(i)).begin, i * 0.3 / 0.8, 1e-12);
-        AURORA_TEST_CHECK_NEAR(tl.interval(static_cast<std::size_t>(i)).end, (i * 0.3 + 0.2) / 0.8, 1e-12);
+        AURORA_TEST_CHECK_NEAR(tl.interval(static_cast<std::size_t>(i)).end, ((i * 0.3) + 0.2) / 0.8, 1e-12);
     }
 
     // gap=0：等价 sequence（首尾相接）。
@@ -213,9 +213,9 @@ AURORA_TEST_CASE(timeline_nested_sequence_over_parallel) {
     AURORA_TEST_CHECK_NEAR(tl.duration(), 0.8, 1e-12);
     // 槽位深度优先序：0=首叶子，1/2=parallel 两叶子，3=尾叶子。
     AURORA_TEST_CHECK_NEAR(tl.interval(0).begin, 0.0, 1e-12);
-    AURORA_TEST_CHECK_NEAR(tl.interval(0).end, 0.25, 1e-12);   // 0.2/0.8
-    AURORA_TEST_CHECK_NEAR(tl.interval(1).begin, 0.25, 1e-12); // parallel 锚定 0.2s
-    AURORA_TEST_CHECK_NEAR(tl.interval(1).end, 0.25 + 0.3 / 0.8, 1e-12);
+    AURORA_TEST_CHECK_NEAR(tl.interval(0).end, 0.25, 1e-12);  // 0.2/0.8
+    AURORA_TEST_CHECK_NEAR(tl.interval(1).begin, 0.25, 1e-12);  // parallel 锚定 0.2s
+    AURORA_TEST_CHECK_NEAR(tl.interval(1).end, 0.25 + (0.3 / 0.8), 1e-12);
     AURORA_TEST_CHECK_NEAR(tl.interval(2).begin, 0.25, 1e-12);
     AURORA_TEST_CHECK_NEAR(tl.interval(2).end, 0.875, 1e-12);  // (0.2+0.5)/0.8
     AURORA_TEST_CHECK_NEAR(tl.interval(3).begin, 0.875, 1e-12);

@@ -9,7 +9,7 @@
 // 否则旋转/放大根本看不见（utest_modifier_transform.cpp 即依赖此行为）。因此正确的
 //  containment 不是去裁剪变换本身，而是：① 为变换元素预留足够空间（舞台）；
 // ② 用框架自带的 .clip() 把舞台裁成边界，任何超出都只会被裁在舞台内，
-// 绝不波及下方兄弟控件。下方 kStage 由缩放参数推导，改缩放上限也不会回归。
+// 绝不波及下方兄弟控件。下方 AURORA_STAGE 由缩放参数推导，改缩放上限也不会回归。
 #include "aurora/animation/animator.h"
 #include "aurora/app/application.h"
 #include "demo_common.h"
@@ -53,7 +53,7 @@ auto main() -> int {
     const au::Color kf_color = kf.value(0.5);
 
     // 缩放演示的几何参数：须与 scaler 上限一致，舞台尺寸由之推导，
-    // 使最大缩放（kBaseBox * kMaxScale）仍完整落在带 .clip() 的舞台内。
+    // 使最大缩放（AURORA_BASE_BOX * AURORA_MAX_SCALE）仍完整落在带 .clip() 的舞台内。
     constexpr float base_box = 80.0F;
     constexpr float max_scale = 1.4F;  // 与 scaler 上限一致
     constexpr float stage_size = (base_box * max_scale) + 8.0F;  // 留余量，最大缩放仍可见、不贴边

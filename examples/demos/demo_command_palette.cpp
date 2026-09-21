@@ -83,9 +83,10 @@ auto main() -> int {
 
     // ---- 三源接线 ----
     app.commands().bind_shortcuts(app.shortcuts());  // ① 默认快捷键
-    palette->set_commands(&app.commands());           // ③ 命令面板
-    app.shortcuts().add(au::KeyCombo{au::ModifierKey::Control, au::KeyCode::K},
-                        [palette]() -> void { palette->toggle(); }, au::ShortcutScope::Global, "Open command palette");
+    palette->set_commands(&app.commands());  // ③ 命令面板
+    app.shortcuts().add(
+        au::KeyCombo{au::ModifierKey::Control, au::KeyCode::K}, [palette]() -> void { palette->toggle(); },
+        au::ShortcutScope::Global, "Open command palette");
 
     // ② 菜单投影：把命令转成菜单项数据（真实应用交给 MenuBar；此处打印以示意同一真源）。
     std::string menu_preview = "Menu projection:";

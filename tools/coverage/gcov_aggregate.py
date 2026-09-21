@@ -79,7 +79,8 @@ def main():
     args = ap.parse_args()
 
     here = os.path.dirname(os.path.abspath(__file__))
-    src_root = os.path.normpath(args.src_root or os.path.dirname(os.path.dirname(here))).replace("\\", "/").rstrip("/") + "/"
+    src_root = os.path.normpath(args.src_root or os.path.dirname(os.path.dirname(here))).replace("\\", "/").rstrip(
+        "/") + "/"
 
     files = []
     for p in args.input:

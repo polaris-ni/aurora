@@ -42,17 +42,13 @@ constexpr std::uint8_t DIM_ALPHA = 89;
 inline auto draw_polyline(au::Painter &p) -> void {
     constexpr int size = 64;
     p.fill_rect(rect_f(0.0F, 0.0F, static_cast<float>(size), static_cast<float>(size)), au::Color::white());
-    p.stroke_polyline(std::vector<au::Point>{au::Point{.x = 6.0F, .y = 8.0F},
-                                             au::Point{.x = 30.0F, .y = 8.0F},
+    p.stroke_polyline(std::vector<au::Point>{au::Point{.x = 6.0F, .y = 8.0F}, au::Point{.x = 30.0F, .y = 8.0F},
                                              au::Point{.x = 30.0F, .y = 28.0F}},
                       4.0F, au::Color::red());
-    p.stroke_polyline(std::vector<au::Point>{au::Point{.x = 6.0F, .y = 40.0F},
-                                             au::Point{.x = 18.0F, .y = 52.0F},
-                                             au::Point{.x = 30.0F, .y = 40.0F},
-                                             au::Point{.x = 42.0F, .y = 52.0F}},
+    p.stroke_polyline(std::vector<au::Point>{au::Point{.x = 6.0F, .y = 40.0F}, au::Point{.x = 18.0F, .y = 52.0F},
+                                             au::Point{.x = 30.0F, .y = 40.0F}, au::Point{.x = 42.0F, .y = 52.0F}},
                       1.5F, au::Color::blue());
-    p.stroke_polyline(std::vector<au::Point>{au::Point{.x = 40.0F, .y = 8.0F},
-                                             au::Point{.x = 56.0F, .y = 8.0F},
+    p.stroke_polyline(std::vector<au::Point>{au::Point{.x = 40.0F, .y = 8.0F}, au::Point{.x = 56.0F, .y = 8.0F},
                                              au::Point{.x = 56.0F, .y = 24.0F}},
                       4.0F, au::Color{255, 0, 0, DIM_ALPHA});
 }
@@ -108,9 +104,8 @@ inline auto flip_rows_y(std::vector<std::uint8_t> &px, int w, int h) -> void {
 /// @tparam Sink 具备 `begin_frame(int,int,float)` / `end_frame()` / `backend()` /
 ///              `read_pixels(std::vector<std::uint8_t>&)` 的 GPU 后端（`WgpuRhi`、`GpuGlRhi`）
 /// @param bottom_up 读回行序自底向上（GL 帧缓冲原序）时为 true，归一到基线的自顶向下序
-[[nodiscard]] inline auto render_display_list(auto &sink, int w, int h,
-                                              const std::function<void(au::Painter &)> &draw, bool bottom_up)
-    -> au::Image {
+[[nodiscard]] inline auto render_display_list(auto &sink, int w, int h, const std::function<void(au::Painter &)> &draw,
+                                              bool bottom_up) -> au::Image {
     au::DisplayList dl;
     au::Painter p;
     p.begin(w, h);

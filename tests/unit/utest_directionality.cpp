@@ -30,7 +30,12 @@ struct FakeCtx {
 
 /// @brief 复原进程级单例（测试隔离：不污染后续用例）。
 struct ProcessGuard {
+    ProcessGuard() = default;
     ~ProcessGuard() { current_directionality() = Directionality{}; }
+    ProcessGuard(const ProcessGuard &) = delete;
+    auto operator=(const ProcessGuard &) -> ProcessGuard & = delete;
+    ProcessGuard(ProcessGuard &&) = delete;
+    auto operator=(ProcessGuard &&) -> ProcessGuard & = delete;
 };
 
 }  // namespace

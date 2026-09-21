@@ -560,9 +560,7 @@ auto WasapiCaptureBackend::stop() -> void {
     impl_->com_uninit();
 }
 
-auto WasapiCaptureBackend::failed() const -> bool {
-    return impl_->device_failed.load(std::memory_order_acquire);
-}
+auto WasapiCaptureBackend::failed() const -> bool { return impl_->device_failed.load(std::memory_order_acquire); }
 
 }  // namespace aurora
 

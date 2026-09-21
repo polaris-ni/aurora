@@ -2,7 +2,7 @@
 #include "aurora/core/platform.h"  // NOLINT
 
 // Windows CRT 家族（MSVC/clang-cl 与 MinGW 同走 ucrtbase，abort 行为控制一致）。
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
 #include <crtdbg.h>  // _set_abort_behavior / _CrtSetReportMode（关闭 Debug CRT abort 弹窗）
 #endif
 
@@ -310,7 +310,7 @@ auto run_selected(const std::vector<const TestCase*>& selected, const CliOptions
 }  // namespace
 
 auto main(int argc, char** argv) -> int {
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
     // Windows CRT（MSVC/clang-cl 与 MinGW 的 abort 同在 ucrtbase 实现）：abort() 默认带
     // _CALL_REPORTFAULT，以 fail-fast（0xC0000409，WER 事件类型 BEX64）终止——Debug CRT
     // 会弹「abort() has been called」模态对话框挂住无人值守运行；Release 下则触发 WER

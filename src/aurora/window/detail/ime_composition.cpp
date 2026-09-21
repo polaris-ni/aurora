@@ -44,8 +44,8 @@ namespace {
 
 /// @brief 该属性值是否属于「待转换目标段」。
 [[nodiscard]] auto is_target(std::uint8_t attr) -> bool {
-    return attr == static_cast<std::uint8_t>(Attr::kTargetConverted) ||
-           attr == static_cast<std::uint8_t>(Attr::kTargetNotConverted);
+    return attr == static_cast<std::uint8_t>(Attr::TargetConverted) ||
+           attr == static_cast<std::uint8_t>(Attr::TargetNotConverted);
 }
 
 }  // namespace
@@ -87,9 +87,8 @@ auto target_selection(std::u16string_view text, const std::vector<std::uint8_t> 
     }
     range.start = utf16_index_to_cp_index(text, first);
     range.end = utf16_index_to_cp_index(text, last);
-    if (range.end < range.start) {
-        range.end = range.start;  // 端点倒置（异常输入）退化为单点区间
-    }
+    range.end = std::max(range.end, range.start);  // 端点倒置（异常输入）退化为单点区间
+
     return range;
 }
 

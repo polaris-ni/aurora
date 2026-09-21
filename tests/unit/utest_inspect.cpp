@@ -30,14 +30,13 @@ auto layout_tree(Node &root, float width, float height) -> void {
 }
 
 [[nodiscard]] auto make_flat_column() -> Node {
-    return Node{Column(ColumnProps{
-        .children = {Text(TextProps{.content = "a"}), Text(TextProps{.content = "b"})}})};
+    return Node{Column(ColumnProps{.children = {Text(TextProps{.content = "a"}), Text(TextProps{.content = "b"})}})};
 }
 
 [[nodiscard]] auto make_nested_column() -> Node {
-    return Node{Column(ColumnProps{
-        .children = {Text(TextProps{.content = "a"}),
-                     Column(ColumnProps{.children = {Text(TextProps{.content = "nested"})}})}})};
+    return Node{
+        Column(ColumnProps{.children = {Text(TextProps{.content = "a"}),
+                                        Column(ColumnProps{.children = {Text(TextProps{.content = "nested"})}})}})};
 }
 
 /// @brief 把逻辑快照 JSON 按同一先序铺平，用于与 collect_widget_boxes 对账。
@@ -133,11 +132,11 @@ AURORA_TEST_CASE(diff_trees_empty_when_nothing_changed) {
 
 AURORA_TEST_CASE(diff_trees_reports_changed_props_in_inspector_path_format) {
     // 只改一个文本：补丁应当只有少数几条，且路径是 Inspector / REST 认得的 "/<索引路径>/<属性名>"。
-    Node before = Node{Column(ColumnProps{
-        .children = {Text(TextProps{.content = "before"}), Text(TextProps{.content = "same"})}})};
+    Node before = Node{
+        Column(ColumnProps{.children = {Text(TextProps{.content = "before"}), Text(TextProps{.content = "same"})}})};
     layout_tree(before, 200.0F, 200.0F);
-    Node after = Node{Column(ColumnProps{
-        .children = {Text(TextProps{.content = "after"}), Text(TextProps{.content = "same"})}})};
+    Node after = Node{
+        Column(ColumnProps{.children = {Text(TextProps{.content = "after"}), Text(TextProps{.content = "same"})}})};
     layout_tree(after, 200.0F, 200.0F);
 
     const std::vector<WidgetPatchOp> ops = diff_trees(before, after);
@@ -161,8 +160,8 @@ AURORA_TEST_CASE(diff_trees_tolerates_structural_difference_but_flags_it) {
     // 但调用方必须据此改走整树替换。
     Node before = Node{Column(ColumnProps{.children = {Text(TextProps{.content = "a"})}})};
     layout_tree(before, 200.0F, 200.0F);
-    Node after = Node{Column(ColumnProps{
-        .children = {Text(TextProps{.content = "a"}), Text(TextProps{.content = "b"})}})};
+    Node after =
+        Node{Column(ColumnProps{.children = {Text(TextProps{.content = "a"}), Text(TextProps{.content = "b"})}})};
     layout_tree(after, 200.0F, 200.0F);
 
     AURORA_TEST_CHECK_TRUE(trees_differ_structurally(before, after));

@@ -236,6 +236,8 @@ AURORA_TEST_CASE(scroll_dispatch_nearest_scrollable_ancestor_wins) {
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(outer, e1) == true);
     AURORA_TEST_CHECK_NEAR(outer.scroll_offset_y(), 0.0F, 1e-3F);
     // 内层 offset = 2 格 × step16 = 32（clamp 上限 300−100=200，未触及）。
+    // 测试已断言该子项确为 Scroll，dynamic_cast 会引入 RTTI 依赖
+    // NOLINTNEXTLINE(*-pro-type-static-cast-downcast)
     const Scroll &inner_ref = *static_cast<const Scroll *>(&outer.child(0).widget());
     AURORA_TEST_CHECK_NEAR(inner_ref.offset_y(), 32.0F, 1e-3F);
 

@@ -127,8 +127,8 @@ class BreakpointBuilder : public Widget {
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         // 档位宽度来源：MediaQuery 注入优先（真窗口/子树宽度），退化取父约束最大宽（无限视 0）。
         const MediaQuery *mq = media_query_of(ctx);
-        const float width = mq != nullptr ? mq->size.width
-                                          : (c.max.width != Size::infinity().width ? c.max.width : 0.0F);
+        const float width =
+            mq != nullptr ? mq->size.width : (c.max.width != Size::infinity().width ? c.max.width : 0.0F);
         const Breakpoint bp = resolve_breakpoint(width, medium_max_width, expanded_min_width);
 
         const BuilderFn &fn = builder.get();

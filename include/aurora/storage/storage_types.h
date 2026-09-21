@@ -65,8 +65,8 @@ struct FilesystemOptions {
 /// @brief `SqliteBackend` 构造选项（可选后端，需 `AURORA_ENABLE_STORAGE_SQLITE`）。
 struct SqliteOptions {
     std::filesystem::path path;  ///< 数据库文件路径；空 → preferences::default_config_dir()/"aurora_storage.db"
-    bool in_memory = false;      ///< 使用 `:memory:` 库（进程生命周期，不落盘）
-    bool wal = true;             ///< 文件库启用 WAL 日志模式（in_memory 时忽略）
+    bool in_memory = false;  ///< 使用 `:memory:` 库（进程生命周期，不落盘）
+    bool wal = true;  ///< 文件库启用 WAL 日志模式（in_memory 时忽略）
 };
 
 }  // namespace aurora::storage

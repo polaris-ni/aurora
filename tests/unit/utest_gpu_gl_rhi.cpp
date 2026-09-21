@@ -327,13 +327,13 @@ AURORA_TEST_CASE(gpu_gl_gradient_lut_semantics_and_batching) {
     AURORA_TEST_CHECK_EQ(lut.data[1], 0);
     AURORA_TEST_CHECK_EQ(lut.data[2], 0);
     AURORA_TEST_CHECK_EQ(lut.data[3], 255);
-    const std::size_t last = 255U * 4U;
+    const std::size_t last = static_cast<std::size_t>(255U) * 4U;
     AURORA_TEST_CHECK_EQ(lut.data[last + 0], 0);  // texel 255 = 尾色（蓝）
     AURORA_TEST_CHECK_EQ(lut.data[last + 1], 0);
     AURORA_TEST_CHECK_EQ(lut.data[last + 2], 255);
     AURORA_TEST_CHECK_EQ(lut.data[last + 3], 255);
-    AURORA_TEST_CHECK_NEAR(lut.data[128U * 4U + 0], 127.0F, 2.0F);  // 中点：红→蓝插值
-    AURORA_TEST_CHECK_NEAR(lut.data[128U * 4U + 2], 128.0F, 2.0F);
+    AURORA_TEST_CHECK_NEAR(lut.data[(128U * 4U) + 0], 127.0F, 2.0F);  // 中点：红→蓝插值
+    AURORA_TEST_CHECK_NEAR(lut.data[(128U * 4U) + 2], 128.0F, 2.0F);
 
     // 换色标（缓存未命中→第二次上传、批 key 变化→断批）；第三条命中缓存不再上传。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(64, 48, 1.0F));
@@ -385,7 +385,7 @@ AURORA_TEST_CASE(gpu_gl_gradient_lut_semantics_and_batching) {
     AURORA_TEST_CHECK_EQ(fake.uploads.size(), 3U);
     const auto &lut5 = fake.uploads.back();
     AURORA_TEST_CHECK_EQ(lut5.data[0], 255);              // t=0 → 首色（红）
-    AURORA_TEST_CHECK_EQ(lut5.data[100U * 4U + 2], 255);  // t≈0.39 无区间命中 → 尾色（蓝）
+    AURORA_TEST_CHECK_EQ(lut5.data[(100U * 4U) + 2], 255);  // t≈0.39 无区间命中 → 尾色（蓝）
 
     // 空色标：直接跳过（软件同契约），无绘制无上传。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(64, 48, 1.0F));
@@ -573,6 +573,8 @@ AURORA_TEST_CASE(gpu_gl_glyph_atlas_multipage_and_lru_eviction) {
     AURORA_TEST_CHECK_TRUE(rhi_obj.stats().draw_calls > 0U);
 }
 
+// 测试直接构造并逐字节校验 GL 缓冲内容，指针推进与下标是测试语义本身
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-bounds-constant-array-index)
 AURORA_TEST_CASE(gpu_gl_shadow_pipeline) {
     FakeGl fake;
     rhi::GpuGlRhi rhi_obj(fake.fn);
@@ -591,7 +593,7 @@ AURORA_TEST_CASE(gpu_gl_shadow_pipeline) {
     AURORA_TEST_CHECK_EQ(stats.skipped_cmds, 0U);
     AURORA_TEST_CHECK_EQ(fake.draw_calls, 1U);
     // quad 覆盖扩展区（expand = blur×2）：偏移后矩形 (12,13)-(112,63) 外扩 10 → (2,3)-(122,73)。
-    AURORA_TEST_REQUIRE(fake.last_vbo_data.size() == 4U * 20U);
+    AURORA_TEST_REQUIRE(fake.last_vbo_data.size() == static_cast<std::size_t>(4U) * 20U);
     float x = 0.0F;
     float y = 0.0F;
     std::memcpy(&x, fake.last_vbo_data.data(), sizeof(float));
@@ -610,7 +612,10 @@ AURORA_TEST_CASE(gpu_gl_shadow_pipeline) {
     rhi_obj.end_frame();
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 2U);
 }
+// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-bounds-constant-array-index)
 
+// 测试直接构造并逐字节校验 GL 缓冲内容，指针推进与下标是测试语义本身
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-bounds-constant-array-index)
 AURORA_TEST_CASE(gpu_gl_blur_region_pingpong) {
     FakeGl fake;
     rhi::GpuGlRhi rhi_obj(fake.fn);
@@ -637,7 +642,7 @@ AURORA_TEST_CASE(gpu_gl_blur_region_pingpong) {
     AURORA_TEST_CHECK_EQ(fake.draw_fbo_targets[1], temp_fbo);
     AURORA_TEST_CHECK_EQ(fake.draw_fbo_targets[2], msaa_fbo);
     // 效果 quad 覆盖换算后的区域矩形（逻辑 dp：20..80 × 20..60）。
-    AURORA_TEST_REQUIRE(fake.last_vbo_data.size() == 4U * 20U);
+    AURORA_TEST_REQUIRE(fake.last_vbo_data.size() == static_cast<std::size_t>(4U) * 20U);
     float x = 0.0F;
     float y = 0.0F;
     std::memcpy(&x, fake.last_vbo_data.data(), sizeof(float));
@@ -677,6 +682,7 @@ AURORA_TEST_CASE(gpu_gl_blur_region_pingpong) {
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 0U);
     AURORA_TEST_CHECK_EQ(fake.blits, 6);
 }
+// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-bounds-constant-array-index)
 
 AURORA_TEST_CASE(gpu_gl_blend_mask_region_pass) {
     FakeGl fake;
@@ -722,6 +728,8 @@ AURORA_TEST_CASE(gpu_gl_blend_mask_region_pass) {
     AURORA_TEST_CHECK_EQ(fake.blits, 5);  // 本帧仅上屏直 blit 1 次
 }
 
+// 测试直接构造并逐字节校验 GL 缓冲内容，指针推进与下标是测试语义本身
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-bounds-constant-array-index)
 AURORA_TEST_CASE(gpu_gl_composite_transform_quad) {
     FakeGl fake;
     rhi::GpuGlRhi rhi_obj(fake.fn);
@@ -743,7 +751,7 @@ AURORA_TEST_CASE(gpu_gl_composite_transform_quad) {
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().skipped_cmds, 0U);
     AURORA_TEST_CHECK_EQ(fake.uploads.size(), 1U);  // 内容键缓存首次上传
     // 顶点字节验证：20 字节/顶点（pos2f + uv2f + color4ub），四角顺序 (0,0)(w,0)(w,h)(0,h)。
-    AURORA_TEST_REQUIRE(fake.last_vbo_data.size() == 4U * 20U);
+    AURORA_TEST_REQUIRE(fake.last_vbo_data.size() == static_cast<std::size_t>(4U) * 20U);
     const float expect_x[4] = {5.0F, 25.0F, 25.0F, 5.0F};
     const float expect_y[4] = {7.0F, 7.0F, 17.0F, 17.0F};
     const float expect_u[4] = {0.0F, 1.0F, 1.0F, 0.0F};
@@ -795,6 +803,7 @@ AURORA_TEST_CASE(gpu_gl_composite_transform_quad) {
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 0U);
     AURORA_TEST_CHECK_EQ(fake.uploads.size(), 1U);
 }
+// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-bounds-constant-array-index)
 
 AURORA_TEST_CASE(gpu_gl_capabilities_bits) {
     // 未装载：能力位全 false（与软件回退语义一致）；流式契约整体拒绝。
@@ -916,7 +925,7 @@ AURORA_TEST_CASE(gpu_gl_stream_public_api_contract) {
     AURORA_TEST_CHECK_TRUE(fake.rgba_sub_uploads.back().data == px);
 
     // 跨距行（UNPACK_ROW_LENGTH 路径）：仅记录一次。
-    const std::size_t stride = static_cast<std::size_t>(8) * 4U + 8U;
+    const std::size_t stride = (static_cast<std::size_t>(8) * 4U) + 8U;
     const std::vector<std::uint8_t> strided(stride * 4U, 0x5A);
     rhi_obj.update_stream_image(id, strided.data(), stride, 0, 0, 8, 4);
     AURORA_TEST_CHECK_EQ(fake.rgba_sub_uploads.size(), 2U);
@@ -948,14 +957,14 @@ AURORA_TEST_CASE(gpu_gl_layer_cache_lifecycle_and_miss_epoch) {
     rhi::GpuGlRhi rhi_obj(fake.fn);
     AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
     rhi::RhiFrameSink &sink = rhi_obj;
-    constexpr std::uint64_t KEY = 7;
+    constexpr std::uint64_t key = 7;
 
     // 失效帧命令形态：BeginLayer（建常驻层 FBO）→ 子树重定向层 FBO → EndLayer → DrawLayer 回 MSAA。
-    auto make_layer_dl = [&KEY](DisplayList &dl) {
+    auto make_layer_dl = [&key](DisplayList& dl) {
         DrawCmd begin;
         begin.kind = CmdKind::BeginLayer;
         begin.bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 48.0F}};
-        begin.aux_key = KEY;
+        begin.aux_key = key;
         dl.push_cmd(begin);
         dl.push_cmd(make_fill(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 48.0F}},
                               Color{255, 0, 0, 255}));
@@ -964,7 +973,7 @@ AURORA_TEST_CASE(gpu_gl_layer_cache_lifecycle_and_miss_epoch) {
         dl.push_cmd(end);
         DrawCmd draw_layer;
         draw_layer.kind = CmdKind::DrawLayer;
-        draw_layer.aux_key = KEY;
+        draw_layer.aux_key = key;
         draw_layer.matrix_idx = dl.add_matrix(Matrix2D{});
         draw_layer.composite_scale = 1.0F;
         dl.push_cmd(draw_layer);

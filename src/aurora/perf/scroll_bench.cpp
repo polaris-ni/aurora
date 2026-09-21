@@ -281,13 +281,13 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
         if (!probe.valid()) {
             return 0.0F;
         }
-        constexpr float AURORA_HUGE_DELTA = 1.0e6F;
+        constexpr float aurora_huge_delta = 1.0e6F;
         const int saved_dir = dir;
         dir = 1;
-        dispatch_scroll(AURORA_HUGE_DELTA);  // 拉到底
+        dispatch_scroll(aurora_huge_delta);  // 拉到底
         const float extent = probe.offset();
         dir = -1;
-        dispatch_scroll(AURORA_HUGE_DELTA);  // 拉回顶，恢复采样起点
+        dispatch_scroll(aurora_huge_delta);  // 拉回顶，恢复采样起点
         dir = saved_dir;
         return extent;
     };

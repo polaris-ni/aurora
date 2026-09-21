@@ -99,13 +99,14 @@ class X11Surface final : public Surface {
 
     /// @brief XIM 桥的本端状态（真机验收探针的观测面：「本端与 IM 协商到什么」的物证）。
     struct ImeState {
-        bool im_open = false;         ///< XOpenIM 成功（无 XIM 服务器/未设 XMODIFIERS 时 false = 纯 keysym 路径）。
-        bool ic_created = false;      ///< XCreateIC 成功。
-        bool preedit_callbacks = false;  ///< 协商到 XIMPreeditCallbacks（组合事件可回推）；false = PreeditNothing 降级。
-        bool focused = false;         ///< 当前持有 X IM 焦点（XSetICFocus 已发且未 XUnsetICFocus）。
-        std::string preedit;          ///< 最近一次 preedit 回调的串（UTF-8；空 = 无组合）。
-        int draw_callbacks = 0;       ///< preedit draw 回调次数（含清空帧）。
-        int spot_updates = 0;         ///< XNSpotLocation 实际下发次数（去重后）。
+        bool im_open = false;  ///< XOpenIM 成功（无 XIM 服务器/未设 XMODIFIERS 时 false = 纯 keysym 路径）。
+        bool ic_created = false;  ///< XCreateIC 成功。
+        bool preedit_callbacks =
+            false;  ///< 协商到 XIMPreeditCallbacks（组合事件可回推）；false = PreeditNothing 降级。
+        bool focused = false;  ///< 当前持有 X IM 焦点（XSetICFocus 已发且未 XUnsetICFocus）。
+        std::string preedit;  ///< 最近一次 preedit 回调的串（UTF-8；空 = 无组合）。
+        int draw_callbacks = 0;  ///< preedit draw 回调次数（含清空帧）。
+        int spot_updates = 0;  ///< XNSpotLocation 实际下发次数（去重后）。
     };
 
     /// @brief 取 XIM 桥本端状态（探针逐项断言用；无 X 会话时全零）。

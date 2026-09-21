@@ -53,11 +53,7 @@ auto main() -> int {
     au::Text status_line{au::TextProps{.content = au::Reactive<au::LocalizedString>{status}}};
 
     au::Node root = au::Column{
-        GradientTitle{"PullToRefresh"},
-        gap(12),
-        std::move(status_line),
-        gap(8),
-        Card{au::Node{pull}},
+        GradientTitle{"PullToRefresh"}, gap(12), std::move(status_line), gap(8), Card{au::Node{pull}},
     };
 
     au::Scene scene{std::move(root)};

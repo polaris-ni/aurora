@@ -132,7 +132,7 @@ AURORA_TEST_CASE(text_input_entry_fires_on_changed) {
     TextInput ti;
     int fired = 0;
     std::string last;
-    ti.set_on_changed([&fired, &last](const std::string& v) -> void {
+    ti.set_on_changed([&fired, &last](const std::string &v) -> void {
         ++fired;
         last = v;
     });
@@ -160,7 +160,7 @@ AURORA_TEST_CASE(max_length_truncates_and_swallows_overflow) {
     ti.set_max_length(3);
     ti.on_focus_change(true);
     int fired = 0;
-    ti.set_on_changed([&fired](const std::string&) -> void { ++fired; });
+    ti.set_on_changed([&fired](const std::string &) -> void { ++fired; });
 
     TextInputEvent overflowed;
     overflowed.text = "abcd";
@@ -183,7 +183,7 @@ AURORA_TEST_CASE(read_only_and_disabled_swallow_text_input) {
     ro.set_read_only(true);
     ro.on_focus_change(true);
     int ro_fired = 0;
-    ro.set_on_changed([&ro_fired](const std::string&) -> void { ++ro_fired; });
+    ro.set_on_changed([&ro_fired](const std::string &) -> void { ++ro_fired; });
     TextInputEvent ro_event;
     ro_event.text = "x";
     ro.on_text_input(ro_event);
@@ -402,9 +402,7 @@ AURORA_TEST_CASE(rtl_caret_paints_at_right_edge) {
     // hinting 会使实际像素与精确 (255,0,255) 产生 1~数 LSB 偏差，故用宽松「类 magenta」判定
     // 而非精确相等，对齐项目既有像素测试的结构性检测约定（见 itest_font_pixel_snap）。
     auto paint_caret_min_x = [](TextInput &ti, const BuildContext &ctx) -> float {
-        auto magenta_like = [](const Color &c) -> bool {
-            return c.a > 180 && c.r > 180 && c.b > 180 && c.g < 80;
-        };
+        auto magenta_like = [](const Color &c) -> bool { return c.a > 180 && c.r > 180 && c.b > 180 && c.g < 80; };
         const Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F},
                           .size = Size{.width = ti.size().width, .height = ti.size().height}};
         Painter p;

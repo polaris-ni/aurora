@@ -19,7 +19,7 @@ namespace aurora::test_cases::utest_window_lifecycle {
 
 namespace {
 
-auto make_scene(std::string label) -> Scene { return Scene{Node{std::make_shared<Text>(std::move(label))}}; }
+auto make_scene(const std::string &label) -> Scene { return Scene{Node{std::make_shared<Text>(label)}}; }
 
 /// @brief 窗口选项：角色 / owner / 帧上限。
 ///

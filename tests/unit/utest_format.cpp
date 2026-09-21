@@ -12,10 +12,10 @@
 namespace aurora::test_cases::utest_format {
 
 using aurora::Currency;
-using aurora::Locale;
 using aurora::format_currency;
 using aurora::format_date;
 using aurora::format_number;
+using aurora::Locale;
 
 AURORA_TEST_CASE(format_number_grouping_and_decimal_separators) {
     // 整数分组：en/zh 逗号分组点小数，de 点分组逗号小数。
@@ -35,16 +35,12 @@ AURORA_TEST_CASE(format_number_grouping_and_decimal_separators) {
 
 AURORA_TEST_CASE(format_currency_usd_and_jpy) {
     // USD：en 前置 "$"，de 后置 " $"。
-    AURORA_TEST_CHECK_EQ(format_currency(1234.56, Currency::USD, Locale{.language = "en"}),
-                         std::string("$1,234.56"));
-    AURORA_TEST_CHECK_EQ(format_currency(1234.56, Currency::USD, Locale{.language = "de"}),
-                         std::string("1.234,56 $"));
+    AURORA_TEST_CHECK_EQ(format_currency(1234.56, Currency::USD, Locale{.language = "en"}), std::string("$1,234.56"));
+    AURORA_TEST_CHECK_EQ(format_currency(1234.56, Currency::USD, Locale{.language = "de"}), std::string("1.234,56 $"));
 
     // JPY：0 位小数；en 前置 "¥"（符号取货币自身 ¥，非 $），ja 前置 "¥"。
-    AURORA_TEST_CHECK_EQ(format_currency(1234.0, Currency::JPY, Locale{.language = "en"}),
-                         std::string("\u00A51,234"));
-    AURORA_TEST_CHECK_EQ(format_currency(1234.0, Currency::JPY, Locale{.language = "ja"}),
-                         std::string("\u00A51,234"));
+    AURORA_TEST_CHECK_EQ(format_currency(1234.0, Currency::JPY, Locale{.language = "en"}), std::string("\u00A51,234"));
+    AURORA_TEST_CHECK_EQ(format_currency(1234.0, Currency::JPY, Locale{.language = "ja"}), std::string("\u00A51,234"));
 
     // EUR：de 后置 " €"。
     AURORA_TEST_CHECK_EQ(format_currency(1234.56, Currency::EUR, Locale{.language = "de"}),
@@ -53,16 +49,12 @@ AURORA_TEST_CASE(format_currency_usd_and_jpy) {
 
 AURORA_TEST_CASE(format_date_by_locale) {
     // 德语日期：dd.MM.yyyy（Locale 完成判据之一）。
-    AURORA_TEST_CHECK_EQ(format_date(2025, 10, 25, Locale{.language = "de"}),
-                         std::string("25.10.2025"));
+    AURORA_TEST_CHECK_EQ(format_date(2025, 10, 25, Locale{.language = "de"}), std::string("25.10.2025"));
     // 英语：ISO 8601。
-    AURORA_TEST_CHECK_EQ(format_date(2025, 10, 25, Locale{.language = "en"}),
-                         std::string("2025-10-25"));
+    AURORA_TEST_CHECK_EQ(format_date(2025, 10, 25, Locale{.language = "en"}), std::string("2025-10-25"));
     // 中文 / 日语：年月日汉字模式。
-    AURORA_TEST_CHECK_EQ(format_date(2025, 10, 25, Locale{.language = "zh"}),
-                         std::string("2025年10月25日"));
-    AURORA_TEST_CHECK_EQ(format_date(2025, 1, 3, Locale{.language = "ja"}),
-                         std::string("2025年1月3日"));
+    AURORA_TEST_CHECK_EQ(format_date(2025, 10, 25, Locale{.language = "zh"}), std::string("2025年10月25日"));
+    AURORA_TEST_CHECK_EQ(format_date(2025, 1, 3, Locale{.language = "ja"}), std::string("2025年1月3日"));
 }
 
 }  // namespace aurora::test_cases::utest_format

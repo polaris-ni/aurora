@@ -143,7 +143,6 @@ auto scenarios() -> std::vector<Scenario> {
     };
 }
 
-
 }  // namespace
 
 AURORA_TEST_CASE(render_to_png_writes_decodable_output) {

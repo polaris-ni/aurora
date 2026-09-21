@@ -74,8 +74,8 @@ struct LibDbus {
     int (*bus_register)(Conn, Err *) = nullptr;
     Conn (*connection_open_private)(const char *, Err *) = nullptr;
     void (*connection_set_exit_on_disconnect)(Conn, int) = nullptr;
-    int (*connection_set_watch_functions)
-    (Conn, Fn_watch_add, Fn_watch_remove, Fn_watch_toggle, void *, Fn_free) = nullptr;
+    int (*connection_set_watch_functions)(Conn, Fn_watch_add, Fn_watch_remove, Fn_watch_toggle, void *,
+                                          Fn_free) = nullptr;
     int (*connection_add_filter)(Conn, Fn_filter, void *, Fn_free) = nullptr;
     int (*watch_get_unix_fd)(Watch) = nullptr;
     unsigned (*watch_get_flags)(Watch) = nullptr;
@@ -192,7 +192,7 @@ auto LibDbus::instance() -> const LibDbus & {
 // DBusMessageType = {INVALID 0, METHOD_CALL 1, ...}；DBusWatchFlags = {READABLE 1, WRITABLE 2}）。
 constexpr int mt_method_call = 1;
 constexpr int handler_more = 0;  ///< NOT_YET_HANDLED：交还给后续 filter/对象树
-constexpr int handler_ok = 1;    ///< HANDLED：本端已应答
+constexpr int handler_ok = 1;  ///< HANDLED：本端已应答
 constexpr int dispatch_remains = 0;  ///< 还有排队消息可派发（pump 的 drain 条件；空转期恒为 1 不可作循环条件）
 constexpr unsigned watch_readable = 1U;
 constexpr unsigned watch_writeable = 2U;
@@ -227,22 +227,16 @@ auto put_string(const LibDbus &L, Iter &it, char kind, const std::string &v) -> 
     L.iter_append_basic(&it, kind, &p);
 }
 
-auto put_int(const LibDbus &L, Iter &it, std::int32_t v) -> void {
-    L.iter_append_basic(&it, ty_int32, &v);
-}
+auto put_int(const LibDbus &L, Iter &it, std::int32_t v) -> void { L.iter_append_basic(&it, ty_int32, &v); }
 
-auto put_uint(const LibDbus &L, Iter &it, std::uint32_t v) -> void {
-    L.iter_append_basic(&it, ty_uint32, &v);
-}
+auto put_uint(const LibDbus &L, Iter &it, std::uint32_t v) -> void { L.iter_append_basic(&it, ty_uint32, &v); }
 
 auto put_bool(const LibDbus &L, Iter &it, bool v) -> void {
     const int raw = v ? 1 : 0;
     L.iter_append_basic(&it, ty_bool, &raw);
 }
 
-auto put_double(const LibDbus &L, Iter &it, double v) -> void {
-    L.iter_append_basic(&it, ty_double, &v);
-}
+auto put_double(const LibDbus &L, Iter &it, double v) -> void { L.iter_append_basic(&it, ty_double, &v); }
 
 /// @brief 追加 `(so)` 对象引用。
 auto put_so(const LibDbus &L, Iter &it, const AtspiRef &r) -> void {
@@ -408,14 +402,13 @@ auto a11y_bus_address(const LibDbus &L) -> const std::string & {
         if (session == nullptr) {
             const std::string why = (e.name() != nullptr) ? e.name() : "no error name";
             L.error_free(&e);
-            Diagnostics::warn("AtspiBridge: session bus unavailable [" + why +
-                                  "], no a11y bus lookup possible",
+            Diagnostics::warn("AtspiBridge: session bus unavailable [" + why + "], no a11y bus lookup possible",
                               "aurora.atspi", {});
             return std::string{};
         }
         L.error_free(&e);
-        Msg c = L.message_new_method_call(atspi::k_a11y_bus_service, atspi::k_a11y_bus_path,
-                                          atspi::k_a11y_bus_iface, "GetAddress");
+        Msg c = L.message_new_method_call(atspi::k_a11y_bus_service, atspi::k_a11y_bus_path, atspi::k_a11y_bus_iface,
+                                          "GetAddress");
         if (c == nullptr) {
             return std::string{};
         }
@@ -426,8 +419,7 @@ auto a11y_bus_address(const LibDbus &L) -> const std::string & {
             const std::string why = (qe.name() != nullptr) ? qe.name() : "no reply";
             L.error_free(&qe);
             L.message_unref(c);
-            Diagnostics::warn("AtspiBridge: org.a11y.Bus.GetAddress failed [" + why + "]",
-                              "aurora.atspi", {});
+            Diagnostics::warn("AtspiBridge: org.a11y.Bus.GetAddress failed [" + why + "]", "aurora.atspi", {});
             return std::string{};
         }
         L.error_free(&qe);
@@ -453,12 +445,12 @@ struct AtspiBridge::Impl {
     const LibDbus &L = LibDbus::instance();
     AtspiModel model;
     Conn conn = nullptr;
-    std::string unique_name;      ///< 本连接唯一总线名（":1.57"）
+    std::string unique_name;  ///< 本连接唯一总线名（":1.57"）
     bool provider_registered = false;
     bool active = false;
     bool dirty = true;
-    bool tearing_down = false;    ///< 根销毁门闩（UIA #8 同款：断开期间不再重建）
-    bool client_seen = false;     ///< 收到过外部方法调用 ⇒ 判定「有 AT 客户端在线」
+    bool tearing_down = false;  ///< 根销毁门闩（UIA #8 同款：断开期间不再重建）
+    bool client_seen = false;  ///< 收到过外部方法调用 ⇒ 判定「有 AT 客户端在线」
     Widget *root = nullptr;
     a11y::TreeSnapshot snap{};
     std::vector<Watch> watches;
@@ -508,8 +500,8 @@ struct AtspiBridge::Impl {
             return false;
         }
         L.connection_set_exit_on_disconnect(conn, 0);
-        if (L.connection_set_watch_functions(conn, &Impl::watch_added, &Impl::watch_removed,
-                                             &Impl::watch_toggled, this, nullptr) == 0) {
+        if (L.connection_set_watch_functions(conn, &Impl::watch_added, &Impl::watch_removed, &Impl::watch_toggled, this,
+                                             nullptr) == 0) {
             degraded("set_watch_functions", e);
             close_conn();
             return false;
@@ -522,8 +514,8 @@ struct AtspiBridge::Impl {
         model.env_mut().self_bus = unique_name;
 
         // Socket.Embed：plug = (本总线名, 本 app 根路径)；注册表回其根引用。
-        Msg c = L.message_new_method_call(atspi::k_registry_bus, atspi::k_registry_root_path,
-                                          atspi::k_iface_socket, "Embed");
+        Msg c = L.message_new_method_call(atspi::k_registry_bus, atspi::k_registry_root_path, atspi::k_iface_socket,
+                                          "Embed");
         if (c == nullptr) {
             degraded("message_new_method_call(Embed)", e);
             close_conn();
@@ -588,9 +580,8 @@ struct AtspiBridge::Impl {
             }
             AtspiBridge::WatchFd fd;
             fd.fd = L.watch_get_unix_fd(w);
-            fd.events = static_cast<short>(
-                ((flags & watch_readable) != 0U ? POLLIN : 0) |
-                ((flags & watch_writeable) != 0U ? POLLOUT : 0));
+            fd.events = static_cast<short>(((flags & watch_readable) != 0U ? POLLIN : 0) |
+                                           ((flags & watch_writeable) != 0U ? POLLOUT : 0));
             if (fd.fd >= 0) {
                 out.push_back(fd);
             }
@@ -805,8 +796,8 @@ struct AtspiBridge::Impl {
 
     // ---- 方法面：Accessible / Application / Component / Text / Action / Socket / Properties ----
 
-    [[nodiscard]] auto dispatch_node(Msg m, std::uint64_t id, const std::string &iface,
-                                     const std::string &member) -> bool {
+    [[nodiscard]] auto dispatch_node(Msg m, std::uint64_t id, const std::string &iface, const std::string &member)
+        -> bool {
         // 通用总线接口
         if (member == "Introspect" || iface == iface_introspect) {
             return reply_introspect(m, id);
@@ -1187,13 +1178,13 @@ struct AtspiBridge::Impl {
         if (!cur.take_string(iface)) {
             return error_reply(call, err_invalid_args, "expect s");
         }
-        static const std::vector<std::string> accessible_props{
-            "version", "Name", "Description", "Parent", "ChildCount", "Locale", "AccessibleId", "HelpText"};
-        static const std::vector<std::string> application_props{
-            "ToolkitName", "Version", "ToolkitVersion", "AtspiVersion", "InterfaceVersion", "Id"};
+        static const std::vector<std::string> accessible_props{"version",    "Name",   "Description",  "Parent",
+                                                               "ChildCount", "Locale", "AccessibleId", "HelpText"};
+        static const std::vector<std::string> application_props{"ToolkitName",  "Version",          "ToolkitVersion",
+                                                                "AtspiVersion", "InterfaceVersion", "Id"};
         static const std::vector<std::string> text_props{"version", "CharacterCount", "CaretOffset"};
-        static const std::vector<std::string> value_props{
-            "version", "MinimumValue", "MaximumValue", "MinimumIncrement", "CurrentValue", "Text"};
+        static const std::vector<std::string> value_props{"version",          "MinimumValue", "MaximumValue",
+                                                          "MinimumIncrement", "CurrentValue", "Text"};
         const std::vector<std::string> *props = nullptr;
         if (iface == atspi::k_iface_accessible) {
             props = &accessible_props;
@@ -1342,8 +1333,9 @@ struct AtspiBridge::Impl {
     // ---- Introspect ----
 
     [[nodiscard]] auto reply_introspect(Msg call, std::uint64_t id) -> bool {
-        std::string xml = "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\" "
-                          "\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node>\n";
+        std::string xml =
+            "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\" "
+            "\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node>\n";
         for (const std::string &i : model.interfaces(id)) {
             xml += "  <interface name=\"" + i + "\"/>\n";
         }
@@ -1375,9 +1367,8 @@ struct AtspiBridge::Impl {
     //    ⇒ 结构新增必须先 Cache.AddAccessible 再 children-changed:add。
 
     /// @brief 发一条对象事件类信号（minor/d1/d2/variant 语义见各调用点）。
-    auto emit_object_event(std::uint64_t id, const char *iface, const char *member,
-                           const std::string &minor, std::int32_t d1, std::int32_t d2,
-                           const AtspiPropValue &var) -> void {
+    auto emit_object_event(std::uint64_t id, const char *iface, const char *member, const std::string &minor,
+                           std::int32_t d1, std::int32_t d2, const AtspiPropValue &var) -> void {
         if (conn == nullptr) {
             return;
         }
@@ -1425,13 +1416,12 @@ struct AtspiBridge::Impl {
 
     /// @brief children-changed 一行：minor = "add"/"remove"，d1 = 子索引，
     /// variant = 子对象引用 `(so)`（客户端 `cache_process_children_changed` 按此更新缓存）。
-    auto emit_children_changed(std::uint64_t parent_id, const char *minor, std::int32_t index,
-                               const AtspiRef &child) -> void {
+    auto emit_children_changed(std::uint64_t parent_id, const char *minor, std::int32_t index, const AtspiRef &child)
+        -> void {
         AtspiPropValue v;
         v.kind = AtspiPropValue::Kind::Ref;
         v.ref = child;
-        emit_object_event(parent_id, atspi::k_iface_event_object, "ChildrenChanged", minor, index,
-                          0, v);
+        emit_object_event(parent_id, atspi::k_iface_event_object, "ChildrenChanged", minor, index, 0, v);
     }
 
     /// @brief Cache.AddAccessible：单行（体 = 完整行结构，无事件头三元组）。
@@ -1500,8 +1490,7 @@ struct AtspiBridge::Impl {
             if (model.exists(parent)) {
                 emit_children_changed(parent, "add", model.index_in_parent(id), model.ref_of(id));
             }
-            if (const auto *ns = model.node(id);
-                ns != nullptr && ns->node.state.focused) {
+            if (const auto *ns = model.node(id); ns != nullptr && ns->node.state.focused) {
                 emit_state_changed(id, atspi::state_focused, true);  // 新节点带焦：父链无旧比较源
             }
         }
@@ -1584,8 +1573,7 @@ struct AtspiBridge::Impl {
                 continue;  // 裁剪层从未投影 ⇒ 无缓存可撤
             }
             removed.push_back(RemovedInfo{
-                .ref = model.ref_of(id), .parent_id = model.parent(id),
-                .index = model.index_in_parent(id)});
+                .ref = model.ref_of(id), .parent_id = model.parent(id), .index = model.index_in_parent(id)});
         }
         model.sync(snap);
         if (conn != nullptr && !diff.empty()) {
@@ -1600,14 +1588,12 @@ struct AtspiBridge::Impl {
 // ============================================================================
 
 auto AtspiBridge::create(AtspiEnv env) -> std::unique_ptr<AtspiBridge> {
-    if (const char *off = std::getenv("NO_AT_BRIDGE");
-        off != nullptr && off[0] != '\0' && std::strcmp(off, "0") != 0) {
+    if (const char *off = std::getenv("NO_AT_BRIDGE"); off != nullptr && off[0] != '\0' && std::strcmp(off, "0") != 0) {
         return nullptr;  // GNOME 惯例显式免提
     }
     const auto &L = LibDbus::instance();
     if (!L.loaded) {
-        Diagnostics::warn("AtspiBridge: libdbus-1 unavailable, AT-SPI2 bridge disabled",
-                          "aurora.atspi", {});
+        Diagnostics::warn("AtspiBridge: libdbus-1 unavailable, AT-SPI2 bridge disabled", "aurora.atspi", {});
         return nullptr;
     }
     if (env.base_path.empty()) {
@@ -1624,9 +1610,7 @@ auto AtspiBridge::create(AtspiEnv env) -> std::unique_ptr<AtspiBridge> {
 
 AtspiBridge::AtspiBridge(std::unique_ptr<Impl> d) : d_(std::move(d)) {}
 
-AtspiBridge::~AtspiBridge() {
-    deactivate();
-}
+AtspiBridge::~AtspiBridge() { deactivate(); }
 
 auto AtspiBridge::activate() -> void {
     if (d_->active) {
@@ -1656,21 +1640,13 @@ auto AtspiBridge::deactivate() -> void {
     d_->active = false;
 }
 
-auto AtspiBridge::sync_if_dirty() -> void {
-    d_->sync_point();
-}
+auto AtspiBridge::sync_if_dirty() -> void { d_->sync_point(); }
 
-auto AtspiBridge::mark_dirty() -> void {
-    d_->dirty = true;
-}
+auto AtspiBridge::mark_dirty() -> void { d_->dirty = true; }
 
-[[nodiscard]] auto AtspiBridge::is_active() const -> bool {
-    return d_->active;
-}
+[[nodiscard]] auto AtspiBridge::is_active() const -> bool { return d_->active; }
 
-[[nodiscard]] auto AtspiBridge::name() const -> std::string {
-    return "atspi2-dbus";
-}
+[[nodiscard]] auto AtspiBridge::name() const -> std::string { return "atspi2-dbus"; }
 
 auto AtspiBridge::set_root(Widget *root) -> void {
     if (root == nullptr) {
@@ -1714,13 +1690,9 @@ auto AtspiBridge::on_widget_destroying(const Widget *w) -> void {
     }
 }
 
-auto AtspiBridge::poll_watches() const -> std::vector<WatchFd> {
-    return d_->poll_watches();
-}
+auto AtspiBridge::poll_watches() const -> std::vector<WatchFd> { return d_->poll_watches(); }
 
-auto AtspiBridge::pump() -> void {
-    d_->pump();
-}
+auto AtspiBridge::pump() -> void { d_->pump(); }
 
 auto AtspiBridge::set_window_origin(std::int32_t x, std::int32_t y) -> void {
     d_->model.env_mut().window_origin_x = x;

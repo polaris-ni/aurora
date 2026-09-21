@@ -57,7 +57,8 @@ class FocusManager {
 
     /**
      * @brief 沿 Tab 序移动到下一个/上一个可聚焦 widget。
-     * @param dir `Forward`/`Backward` 沿 Tab 序循环；`Up`/`Down`/`Left`/`Right` 按几何最近候选移动（无候选返回 false）。
+     * @param dir `Forward`/`Backward` 沿 Tab 序循环；`Up`/`Down`/`Left`/`Right` 按几何最近候选移动（无候选返回
+     * false）。
      * @return 是否成功移动焦点（无候选时返回 false）。
      */
     auto move_focus(FocusDirection dir = FocusDirection::Forward) -> bool;

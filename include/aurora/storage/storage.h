@@ -118,8 +118,7 @@ class Storage {
             if constexpr (StorageSerializable<T>) {
                 auto j = std::get<Json>(rec.value().payload);
                 if (rec.value().version < storage_version(static_cast<const T *>(nullptr))) {
-                    auto migrated =
-                        migrate_storage(rec.value().version, static_cast<const T *>(nullptr), std::move(j));
+                    auto migrated = migrate_storage(rec.value().version, static_cast<const T *>(nullptr), std::move(j));
                     if (!migrated) {
                         return Result<T>{migrated.error()};
                     }
@@ -162,7 +161,8 @@ class Storage {
         return task;
     }
 
-    // ---------- 响应式变更通知（v1；未设主线程投递器时可能在 worker 线程发射——`async_*` 的回调在 worker 线程经 `emit_change` 直接派发，见下方 `listener_mutex_`；设投递器后转主线程） ----------
+    // ---------- 响应式变更通知（v1；未设主线程投递器时可能在 worker 线程发射——`async_*` 的回调在 worker 线程经
+    // `emit_change` 直接派发，见下方 `listener_mutex_`；设投递器后转主线程） ----------
     [[nodiscard]] auto on_change(StorageChangeCallback cb) -> aurora::Subscription;
 
     // ---------- 可选进程级默认实例（对标 preferences::instance） ----------

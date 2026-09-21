@@ -15,7 +15,7 @@
 - 渲染内核：软件 `Painter`（ **无 `Renderer` 接口**）。
 - 后端：`Surface` 抽象 + `HeadlessSurface`（内存/离线 PNG）、`GlfwSurface`（OpenGL 3.x 兼容 profile，默认请求 3.3，CMake 开关）、
   `Win32Surface`（Win32/GDI，仅 `_WIN32`，零三方依赖）、`D3D11Surface`（Windows GPU 增量上屏偏置，CMake 开关）、
-  `WgpuSurface`（wgpu GPU 栅格上屏：帧级 DisplayList 经 `WgpuRhi` 在 Vulkan/D3D12/Metal/GLES 端光栅化，Win32/X11/Wayland 宿主，CMake 开关 `AURORA_BACKEND_GPU_WGPU`，需 Rust 工具链）、
+  `WgpuWin32Surface`（wgpu GPU 栅格上屏：帧级 DisplayList 经 `WgpuRhi` 在 Vulkan/D3D12/Metal/GLES 端光栅化，Win32/X11/Wayland 宿主，CMake 开关 `AURORA_BACKEND_GPU_WGPU`，需 Rust 工具链）、
   `X11Surface`（X11/Xlib，Linux 桌面，CMake 开关）、
   `WaylandSurface`（原生 Wayland：wl_shm+xdg-shell+xkbcommon+libwayland-cursor，Linux 桌面，CMake 开关）、
   `WasmSurface`（Emscripten/Canvas 2D，浏览器 rAF 驱动）、`MacOSSurface`（AppKit/CoreGraphics，骨架）。
@@ -36,7 +36,7 @@
 | `tests/`            | 测试 + CTest：单元测试 `tests/unit/utest_*.cpp`、集成测试 `tests/integration/itest_*.cpp`、公共 fixture `tests/support/`（含 `paths.h` / `test_helpers.h`）与 `tests/fixtures/`（如 `ai_compat/` 基准）、golden 基准 `tests/golden/`                          |
 | `third_party/`      | 三方库文件                                                                                                                                                                      |
 | `tools/`            | 工具链，按职责分子目录：`gen/`（三生成器 `gen_api`/`gen_error_codes`/`gen_debug_api`）、`servers/`（mcp / lsp / cli）、`bench/`（4 基准 + `bench_common.h`）、`check/`（校验与门禁脚本 + `perf_gates.json` + 观测脚本 `build_baseline.py`：解析 `.ninja_log` / ctest 日志输出构建与测试耗时基线，非门禁）、`verify/`（真机验收探针：证明无头 CI 无法证明的平台接线，按「平台 + 后端」条件构建且不进 CTest，见 `cmake/AuroraVerify.cmake`）、`coverage/`（GCC/Clang/LLVM 覆盖率聚合）、`include/`（共享头，含枚举 SSOT `known_enums.h` 与 LSP 三层 `lsp_*.h`）。API 生成落盘 `aurora_api.json`，CMake 聚合目标 `aurora_api_json`；详见 `cmake/AuroraTools.cmake` 与 `cmake/AuroraInstrumentation.cmake` |
-| `cmake/`            | CMake 模块（顶层 `CMakeLists.txt` 只做编排）：`AuroraFeatures`（feature 宏单一入口 `aurora_define_feature`）/`AuroraThirdParty`（三方构建）/`AuroraImageCodecs`（图片编解码）/`AuroraCcache`（编译缓存）/`AuroraSimd`（SIMD）/`AuroraBackends`（后端开关）/`AuroraTools`（工具）/`AuroraVerify`（真机验收探针）/`AuroraDemos`（示例）/`AuroraTests`（测试）/`AuroraInstrumentation`（插桩）/`AuroraInstall`（安装）/`AuroraUtils`（公共辅助函数：消费者目标统一配置）/`AuroraCheckTestRegistry`（测试注册表一致性校验），共 14 个；布局与职责详见 `codespec/BUILD_OPTIONS.md` §1.1 |
+| `cmake/`            | CMake 模块（顶层 `CMakeLists.txt` 只做编排）：`AuroraFeatures`（feature 宏单一入口 `aurora_define_feature`）/`AuroraThirdParty`（三方构建）/`AuroraImageCodecs`（图片编解码）/`AuroraCcache`（编译缓存）/`AuroraSimd`（SIMD）/`AuroraBackends`（后端开关）/`AuroraTools`（工具）/`AuroraVerify`（真机验收探针）/`AuroraDemos`（示例）/`AuroraTests`（测试）/`AuroraInstrumentation`（插桩）/`AuroraInstall`（安装）/`AuroraLint`（Clang-Tidy 门禁：`lint` / `lint-fix` 聚合目标）/`AuroraUtils`（公共辅助函数：消费者目标统一配置）/`AuroraCheckTestRegistry`（测试注册表一致性校验），共 15 个；布局与职责详见 `codespec/BUILD_OPTIONS.md` §1.1 |
 | `codespec/`         | **全部项目文档**（需求/架构/规范/指南/概念），见下方导航表                                                                                                                      |
 | `build/`            | 构建产物，CMake 生成，不纳入版本管理                                                                                                                                            |
 | `aurora_api.json`   | 由 `gen_api_tools` 生成的 API 描述数据（schema/类型/属性键），**非文档、不移动**                                                                                                |

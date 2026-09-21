@@ -336,8 +336,8 @@ AURORA_TEST_CASE(timeline_player_reverse_mirrors_and_interrupt_resume) {
     player.reverse();
     AURORA_TEST_CHECK_NEAR(player.progress(), progress_before_reverse, 1e-12);  // 进度保留
     player.tick(0.25);  // 倒退 0.5s → 主进度回 ~0.1
-    AURORA_TEST_CHECK_TRUE(player.status() == aurora::AnimationStatus::Reverse
-                           || player.status() == aurora::AnimationStatus::Dismissed);
+    AURORA_TEST_CHECK_TRUE(player.status() == aurora::AnimationStatus::Reverse ||
+                           player.status() == aurora::AnimationStatus::Dismissed);
     // 轨道 0 倒放中（< 10），轨道 1 未开始（0）。
     AURORA_TEST_CHECK_TRUE(a.get() < 10.0);
     AURORA_TEST_CHECK_NEAR(b.get(), 0.0, 1e-12);

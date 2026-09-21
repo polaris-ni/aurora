@@ -19,10 +19,10 @@ namespace aurora::test_cases::utest_sticky_header {
 
 namespace {
 
-constexpr Color kGreen{0, 255, 0, 255};
-constexpr Color kRed{255, 0, 0, 255};
-constexpr Color kBlue{0, 0, 255, 255};
-constexpr Color kYellow{255, 255, 0, 255};
+constexpr Color AURORA_GREEN{0, 255, 0, 255};
+constexpr Color AURORA_RED{255, 0, 0, 255};
+constexpr Color AURORA_BLUE{0, 0, 255, 255};
+constexpr Color AURORA_YELLOW{255, 255, 0, 255};
 
 /// 纯色哑控件：整盒填充给定颜色，自然高由构造给定、宽取约束上限。
 class ColorBox final : public Widget {
@@ -72,32 +72,28 @@ auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
-constexpr BuildContext kCtx;
+constexpr BuildContext AURORA_CTX;
 
-auto viewport(float h) -> Rect {
-    return Rect{.origin = Point{}, .size = Size{.width = 200.0F, .height = h}};
-}
+auto viewport(float h) -> Rect { return Rect{.origin = Point{}, .size = Size{.width = 200.0F, .height = h}}; }
 
 /// 用 Painter 起一帧并绘制 root，返回取色器（闭包内持有 Painter 生命期）。
 struct Canvas {
     Painter p;
     Canvas(int w, int h) { p.begin(w, h); }
 
-    auto pixel(int x, int y) -> Color { return p.get_pixel(x, y); }
+    [[nodiscard]] auto pixel(int x, int y) const -> Color { return p.get_pixel(x, y); }
 };
 
 /// 是否命中目标色（容 1dp AA 边界的宽差：色带内插值不影响整数填充）。
-auto same_color(const Color &a, const Color &b) -> bool {
-    return a.r == b.r && a.g == b.g && a.b == b.b;
-}
+auto same_color(const Color &a, const Color &b) -> bool { return a.r == b.r && a.g == b.g && a.b == b.b; }
 
 }  // namespace
 
 AURORA_TEST_CASE(sticky_hook_defaults_to_false_and_header_overrides) {
-    ColorBox plain(30.0F, kRed);
+    ColorBox plain(30.0F, AURORA_RED);
     AURORA_TEST_CHECK_FALSE(plain.is_sticky_header());
 
-    StickyHeader h{box(30.0F, kGreen)};
+    StickyHeader h{box(30.0F, AURORA_GREEN)};
     AURORA_TEST_CHECK_TRUE(h.is_sticky_header());
     AURORA_TEST_CHECK_EQ(std::string{h.type_name()}, std::string{"StickyHeader"});
 
@@ -117,67 +113,67 @@ AURORA_TEST_CASE(sticky_hook_defaults_to_false_and_header_overrides) {
 }
 
 AURORA_TEST_CASE(sticky_header_layout_spans_cross_axis_and_adopts_child_height) {
-    auto kid = std::make_shared<ColorBox>(30.0F, kGreen);
+    auto kid = std::make_shared<ColorBox>(30.0F, AURORA_GREEN);
     StickyHeader h{Node{kid}};
-    const Size s = h.layout(bounded(200.0F, 100.0F), kCtx);
+    const Size s = h.layout(bounded(200.0F, 100.0F), AURORA_CTX);
     AURORA_TEST_CHECK_NEAR(s.width, 200.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(s.height, 30.0F, 1e-4F);  // 主轴取子项自然高，不被父约束撑满
 
     // 无子项：退化为主轴缺省高（48）× 交叉轴撑满
     StickyHeader empty;
-    const Size e = empty.layout(Constraints{}, kCtx);
+    const Size e = empty.layout(Constraints{}, AURORA_CTX);
     AURORA_TEST_CHECK_NEAR(e.width, 320.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(e.height, 48.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(scroll_pins_scrolled_past_header_at_top) {
     auto column = std::make_shared<ColumnBox>();
-    column->add(header(40.0F, kGreen));  // 内容 0..40
-    column->add(box(200.0F, kRed));      // 40..240
-    column->add(header(40.0F, kBlue));   // 240..280
-    column->add(box(200.0F, kYellow));   // 280..480
+    column->add(header(40.0F, AURORA_GREEN));  // 内容 0..40
+    column->add(box(200.0F, AURORA_RED));  // 40..240
+    column->add(header(40.0F, AURORA_BLUE));  // 240..280
+    column->add(box(200.0F, AURORA_YELLOW));  // 280..480
     Scroll s;
     s.add(Node{column});
     LayoutEngine::layout(s, bounded(200.0F, 120.0F));  // 视口 120 → 可滚 360
 
     {
         Canvas c{200, 120};
-        s.paint(c.p, viewport(120.0F), kCtx);
-        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), kGreen));  // 未滚动：头部在自然位
-        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 80), kRed));
+        s.paint(c.p, viewport(120.0F), AURORA_CTX);
+        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), AURORA_GREEN));  // 未滚动：头部在自然位
+        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 80), AURORA_RED));
     }
 
     AURORA_TEST_CHECK_TRUE(s.set_offset(100.0F));
     {
         Canvas c{200, 120};
-        s.paint(c.p, viewport(120.0F), kCtx);
-        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), kGreen));  // 滚过头顶：钉驻顶部
-        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 80), kRed));    // 覆盖层不改其余内容
+        s.paint(c.p, viewport(120.0F), AURORA_CTX);
+        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), AURORA_GREEN));  // 滚过头顶：钉驻顶部
+        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 80), AURORA_RED));  // 覆盖层不改其余内容
     }
 
     AURORA_TEST_CHECK_TRUE(s.set_offset(260.0F));
     {
         Canvas c{200, 120};
-        s.paint(c.p, viewport(120.0F), kCtx);
-        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), kBlue));   // 第二个头部接管顶部
-        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 80), kYellow)); // 首个头部已整条顶出
+        s.paint(c.p, viewport(120.0F), AURORA_CTX);
+        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), AURORA_BLUE));  // 第二个头部接管顶部
+        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 80), AURORA_YELLOW));  // 首个头部已整条顶出
     }
 
     AURORA_TEST_CHECK_TRUE(s.set_offset(360.0F));  // 末端：最后一个头部延伸到底、无对手
     {
         Canvas c{200, 120};
-        s.paint(c.p, viewport(120.0F), kCtx);
-        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), kBlue));
-        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 100), kYellow));
+        s.paint(c.p, viewport(120.0F), AURORA_CTX);
+        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), AURORA_BLUE));
+        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 100), AURORA_YELLOW));
     }
 }
 
 AURORA_TEST_CASE(scroll_pushes_previous_header_out_while_next_arrives) {
     auto column = std::make_shared<ColumnBox>();
-    column->add(header(40.0F, kGreen));
-    column->add(box(200.0F, kRed));
-    column->add(header(40.0F, kBlue));
-    column->add(box(200.0F, kYellow));
+    column->add(header(40.0F, AURORA_GREEN));
+    column->add(box(200.0F, AURORA_RED));
+    column->add(header(40.0F, AURORA_BLUE));
+    column->add(box(200.0F, AURORA_YELLOW));
     Scroll s;
     s.add(Node{column});
     LayoutEngine::layout(s, bounded(200.0F, 120.0F));
@@ -185,24 +181,24 @@ AURORA_TEST_CASE(scroll_pushes_previous_header_out_while_next_arrives) {
     // 第二个头部视口顶部 = 240-220 = 20 < 首个头部高 40 → 首个被顶到 pin=-20，仅露出下沿 0..20
     AURORA_TEST_CHECK_TRUE(s.set_offset(220.0F));
     Canvas c{200, 120};
-    s.paint(c.p, viewport(120.0F), kCtx);
-    AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), kGreen));  // 顶出途中：绿仍占上部
-    AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 30), kBlue));   // 蓝在自身自然位（20..60）
-    AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 90), kYellow));
+    s.paint(c.p, viewport(120.0F), AURORA_CTX);
+    AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), AURORA_GREEN));  // 顶出途中：绿仍占上部
+    AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 30), AURORA_BLUE));  // 蓝在自身自然位（20..60）
+    AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 90), AURORA_YELLOW));
 }
 
 AURORA_TEST_CASE(scroll_without_header_has_no_overlay_cost) {
     auto column = std::make_shared<ColumnBox>();
-    column->add(box(40.0F, kGreen));
-    column->add(box(400.0F, kRed));
+    column->add(box(40.0F, AURORA_GREEN));
+    column->add(box(400.0F, AURORA_RED));
     Scroll s;
     s.add(Node{column});
     LayoutEngine::layout(s, bounded(200.0F, 120.0F));
     AURORA_TEST_CHECK_TRUE(s.set_offset(60.0F));
 
     Canvas c{200, 120};
-    s.paint(c.p, viewport(120.0F), kCtx);
-    AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), kRed));  // 无 sticky → 顶部即滚动内容
+    s.paint(c.p, viewport(120.0F), AURORA_CTX);
+    AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), AURORA_RED));  // 无 sticky → 顶部即滚动内容
 }
 
 AURORA_TEST_CASE(lazy_list_pins_sticky_rows_over_scrolled_content) {
@@ -210,12 +206,12 @@ AURORA_TEST_CASE(lazy_list_pins_sticky_rows_over_scrolled_content) {
         10,
         [](int index) -> Node {
             if (index == 0) {
-                return header(40.0F, kBlue);
+                return header(40.0F, AURORA_BLUE);
             }
             if (index == 5) {
-                return header(40.0F, kGreen);
+                return header(40.0F, AURORA_GREEN);
             }
-            return box(40.0F, kYellow);
+            return box(40.0F, AURORA_YELLOW);
         },
         40.0F);
     LayoutEngine::layout(*list, bounded(200.0F, 120.0F));  // 内容 400 → 可滚 280
@@ -224,18 +220,18 @@ AURORA_TEST_CASE(lazy_list_pins_sticky_rows_over_scrolled_content) {
     LayoutEngine::layout(*list, bounded(200.0F, 120.0F));
     {
         Canvas c{200, 120};
-        list->paint(c.p, viewport(120.0F), kCtx);
-        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), kBlue));    // 首个 sticky 压顶
-        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 80), kYellow));  // 覆盖层之外为普通行
+        list->paint(c.p, viewport(120.0F), AURORA_CTX);
+        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), AURORA_BLUE));  // 首个 sticky 压顶
+        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 80), AURORA_YELLOW));  // 覆盖层之外为普通行
     }
 
     list->set_scroll_offset(250.0F);  // 条目 5（y=-50）接管顶部，条目 0 整条被顶出
     LayoutEngine::layout(*list, bounded(200.0F, 120.0F));
     {
         Canvas c{200, 120};
-        list->paint(c.p, viewport(120.0F), kCtx);
-        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), kGreen));
-        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 80), kYellow));
+        list->paint(c.p, viewport(120.0F), AURORA_CTX);
+        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 10), AURORA_GREEN));
+        AURORA_TEST_CHECK_TRUE(same_color(c.pixel(10, 80), AURORA_YELLOW));
     }
 }
 

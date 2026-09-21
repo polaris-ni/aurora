@@ -15,7 +15,7 @@ namespace aurora::rhi {
 // ---- GL 类型别名（仅本头内 GLFn 签名使用；本库公共头不含任何 GL 原生头） ----
 // 供 `GpuGlRhi` 经函数表调用 GL 3.3 core 而无需 <GL/gl.h> / GLAD；值与原生 GL 类型逐一同宽。
 // ⚠️ 若消费者同时包含真实 GL 头并 `using namespace aurora::rhi`，别名可能与原生 typedef 冲突
-//（同名同宽，实际无害；但属已知边界，勿在本头之外扩散这些别名）。
+// （同名同宽，实际无害；但属已知边界，勿在本头之外扩散这些别名）。
 using GLenum_ = std::uint32_t;
 using GLboolean_ = std::uint8_t;
 using GLbitfield_ = std::uint32_t;
@@ -131,10 +131,10 @@ auto load_gl(void *(*proc)(const char *name)) -> GLFn;
 ///
 /// 命令覆盖（全部为 GPU 实路径，无跳过降级）：几何组（FillRect/ClearRect/DrawRect/
 /// DrawLine/RoundedBorder）、状态组（PushClip/PushClipRounded/PopClip/SetAlpha）、渐变组
-///（LinearGradient/RadialGradient，经 256×1 LUT 纹理采样，语义与软件 `sample_gradient`
+/// （LinearGradient/RadialGradient，经 256×1 LUT 纹理采样，语义与软件 `sample_gradient`
 /// 对齐）、图像组（DrawImage，PMA 纹理 + `Image::content_hash()` 摘要缓存；Composite，
 /// 仿射矩阵直烘四角顶点 + NEAREST 逐像素取样同软件）、文本（DrawText，多页 R8 字形图集
-///——满页开新页、页数封顶 LRU 淘汰，光栅化复用软件 `GlyphAtlas` 经字形发射桥同源发射）
+/// ——满页开新页、页数封顶 LRU 淘汰，光栅化复用软件 `GlyphAtlas` 经字形发射桥同源发射）
 /// 与效果组（Shadow 单批 SDF 距离衰减；BlurRegion 两遍分离 box blur 经 resolve/temp FBO
 /// ping-pong；BlendRegion/MaskRegion 单 pass 采样回写——三者区域物理像素换算与软件三原语同形）。
 /// 裁剪语义与软件路径对齐：矩形/圆角裁剪统一走 shader 内 SDF alpha（不 discard，
@@ -151,7 +151,7 @@ class GpuGlRhi final : public RhiBackend, public RhiFrameSink {
     /// @brief 帧级诊断计数（性能观测 / 测试断言）。
     struct FrameStats {
         std::uint32_t draw_calls = 0;  ///< flush 次数（= 批数）
-        std::uint32_t vertices = 0;    ///< 本帧提交顶点数
+        std::uint32_t vertices = 0;  ///< 本帧提交顶点数
         std::uint32_t skipped_cmds = 0;  ///< 保留字段：当前实现全部为 GPU 实路径、无跳过分支，恒为 0
     };
 

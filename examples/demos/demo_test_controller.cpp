@@ -69,8 +69,8 @@ auto run() -> int {
     auto counters = tc.find_by_text("clicks = 2");
     std::printf("counter matches 'clicks = 2': %s\n", counters.empty() ? "no" : "yes");
     const au::Result<void> visible = au::TestController::expect_visible(taps.at(0));
-    const au::Result<void> value_ok = au::TestController::expect_prop(
-        inputs.at(0), "value", au::Json(std::string{"Aurora"}));
+    const au::Result<void> value_ok =
+        au::TestController::expect_prop(inputs.at(0), "value", au::Json(std::string{"Aurora"}));
     std::printf("expect_visible(button): %s\n", visible.ok() ? "pass" : visible.error().message.c_str());
     std::printf("expect_prop(input, value='Aurora'): %s\n", value_ok.ok() ? "pass" : value_ok.error().message.c_str());
 

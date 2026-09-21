@@ -2,16 +2,15 @@
 
 // 完整 BuildContext 定义（explicit_text_direction 模板在 on_layout 内实例化，需用到
 // ctx.environment<Directionality>()，前向声明不足以编译）。
-#include "aurora/environment/build_context.h"
+#include <algorithm>
+#include <cmath>
 
 #include "aurora/app/clipboard.h"
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/directionality.h"
 #include "aurora/core/utf8.h"
+#include "aurora/environment/build_context.h"
 #include "aurora/event/keycode.h"
-#include <algorithm>
-#include <cmath>
-
 #include "aurora/render/bidi.h"
 #include "aurora/render/font_engine.h"
 
@@ -115,11 +114,11 @@ auto RichTextEdit::on_paint(Painter &p, const Rect &bounds, const BuildContext &
                 }
                 const float x0 = r.x + render::FontEngine::caret_x(r.text, k, r.font, ropts);
                 const float x1 = r.x + render::FontEngine::caret_x(r.text, k + 1, r.font, ropts);
-                const float xL = std::min(x0, x1);
-                const float xR = std::max(x0, x1);
-                if (xR > xL) {
-                    p.fill_rect(Rect{.origin = Point{.x = xL, .y = y + line_h - 2.0F},
-                                     .size = Size{.width = xR - xL, .height = 1.0F}},
+                const float x_l = std::min(x0, x1);
+                const float x_r = std::max(x0, x1);
+                if (x_r > x_l) {
+                    p.fill_rect(Rect{.origin = Point{.x = x_l, .y = y + line_h - 2.0F},
+                                     .size = Size{.width = x_r - x_l, .height = 1.0F}},
                                 r.color);
                 }
             }
@@ -150,10 +149,9 @@ auto RichTextEdit::on_pointer_event(MouseEvent &e) -> void {
             e.is_handled = true;
             return;
         }
-        const std::size_t line_idx =
-            static_cast<std::size_t>(std::max(0.0F, e.local_position.y) / line_h);
+        const std::size_t line_idx = static_cast<std::size_t>(std::max(0.0F, e.local_position.y) / line_h);
         // 命中测试用控件本地坐标（左缘为 0），与绘制侧 run 布局一致。
-        const Rect bounds{.origin = Point{0.0F, 0.0F}, .size = size()};
+        const Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = size()};
         if (line_idx >= lines_.size()) {
             caret_ = doc_.size();
             sel_start_ = sel_end_ = caret_;
@@ -293,9 +291,8 @@ auto RichTextEdit::handle_control_shortcut(KeyEvent &e, bool shift, std::size_t 
 auto RichTextEdit::handle_move_key(KeyEvent &e, bool shift, std::size_t n) -> bool {
     // 方向键（RTL：逻辑↔视觉镜像——RTL 下 ArrowLeft = 逻辑前进）。
     int dir = 0;
-    const bool rtl =
-        cached_direction_.value_or(aurora::render::detail::guess_paragraph_direction(plain_text())) ==
-        TextDirection::RTL;
+    const bool rtl = cached_direction_.value_or(aurora::render::detail::guess_paragraph_direction(plain_text())) ==
+                     TextDirection::RTL;
     if (e.key == static_cast<int>(KeyCode::ArrowLeft)) {
         dir = rtl ? 1 : -1;
     } else if (e.key == static_cast<int>(KeyCode::ArrowRight)) {
@@ -494,10 +491,10 @@ auto RichTextEdit::compute_line_runs(const Line &line, TextDirection base, const
         std::size_t len = 1U;
         std::uint32_t cp = b0;
         if ((b0 & 0x80U) != 0U) {
-            const std::size_t extra = ((b0 & 0xE0U) == 0xC0U) ? 1U
-                : ((b0 & 0xF0U) == 0xE0U)                     ? 2U
-                : ((b0 & 0xF8U) == 0xF0U)                     ? 3U
-                                                              : 0U;
+            const std::size_t extra = ((b0 & 0xE0U) == 0xC0U)   ? 1U
+                                      : ((b0 & 0xF0U) == 0xE0U) ? 2U
+                                      : ((b0 & 0xF8U) == 0xF0U) ? 3U
+                                                                : 0U;
             cp = static_cast<std::uint32_t>(b0 & static_cast<unsigned char>(0xFFU >> (extra + 1U)));
             len = 1U + extra;
             for (std::size_t q = 1U; q <= extra && p + q < s.size(); ++q) {
@@ -569,8 +566,7 @@ auto RichTextEdit::compute_line_runs(const Line &line, TextDirection base, const
     }
 
     // 视觉起点：LTR 左对齐（控件左缘）；RTL 整体右对齐（右缘 - 总宽）。
-    const float x0 = (base == TextDirection::RTL) ? bounds.origin.x + bounds.size.width - total_w
-                                                 : bounds.origin.x;
+    const float x0 = (base == TextDirection::RTL) ? bounds.origin.x + bounds.size.width - total_w : bounds.origin.x;
     float cursor = x0;
     for (const std::size_t idx : order) {
         if (idx < level_runs.size()) {
@@ -582,7 +578,7 @@ auto RichTextEdit::compute_line_runs(const Line &line, TextDirection base, const
 }
 
 auto RichTextEdit::caret_visual_x(const Line &line, TextDirection base, std::size_t caret_local,
-                                 const Rect &bounds) const -> float {
+                                  const Rect &bounds) const -> float {
     const auto runs = compute_line_runs(line, base, bounds);
     for (const auto &r : runs) {
         if (caret_local >= r.begin && caret_local <= r.end) {
@@ -680,11 +676,11 @@ auto RichTextEdit::paint_selection_highlight(Painter &p, const Rect &bounds) con
                         const render::TextLayoutOpts ropts{.direction = run_dir};
                         const float x0 = r.x + render::FontEngine::caret_x(r.text, k, r.font, ropts);
                         const float x1 = r.x + render::FontEngine::caret_x(r.text, k + 1, r.font, ropts);
-                        const float xL = std::min(x0, x1);
-                        const float xR = std::max(x0, x1);
-                        if (xR > xL) {
-                            p.fill_rect(Rect{.origin = Point{.x = xL, .y = y},
-                                             .size = Size{.width = xR - xL, .height = line_h}},
+                        const float x_l = std::min(x0, x1);
+                        const float x_r = std::max(x0, x1);
+                        if (x_r > x_l) {
+                            p.fill_rect(Rect{.origin = Point{.x = x_l, .y = y},
+                                             .size = Size{.width = x_r - x_l, .height = line_h}},
                                         sel_bg);
                         }
                     }

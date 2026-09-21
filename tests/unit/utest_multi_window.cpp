@@ -19,7 +19,7 @@ namespace aurora::test_cases::utest_multi_window {
 
 namespace {
 
-auto make_scene(std::string label) -> Scene { return Scene{Node{std::make_shared<Text>(std::move(label))}}; }
+auto make_scene(const std::string &label) -> Scene { return Scene{Node{std::make_shared<Text>(label)}}; }
 
 /// @brief 产出一个 Headless 窗口（多实例安全，无 OS 状态）。
 auto make_window(std::string title, int frames = -1) -> std::unique_ptr<Window> {
@@ -147,12 +147,12 @@ AURORA_TEST_CASE(closing_one_window_keeps_others_running) {
 
     auto wa = make_window("A");
     AURORA_TEST_REQUIRE_NOT_NULL(wa.get());
-    HeadlessSurface *sa = dynamic_cast<HeadlessSurface *>(&wa->surface());
+    auto *sa = dynamic_cast<HeadlessSurface *>(&wa->surface());
     Application app{make_scene("A"), std::move(wa), opts};
 
     auto wb = make_window("B");
     AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
-    HeadlessSurface *sb = dynamic_cast<HeadlessSurface *>(&wb->surface());
+    auto *sb = dynamic_cast<HeadlessSurface *>(&wb->surface());
     const WindowId id_b = app.open_window(std::move(wb), make_scene("B"));
     AURORA_TEST_REQUIRE_NOT_NULL(sa);
     AURORA_TEST_REQUIRE_NOT_NULL(sb);

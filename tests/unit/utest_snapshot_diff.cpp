@@ -33,9 +33,9 @@ namespace {
 }
 
 /// @brief 把第 (x, y) 个像素的 R 通道改为指定值，用于制造差异。
-auto set_px(Image &img, int x, int y, std::uint8_t v) -> void {
+auto set_px(Image& img, int x, int y, std::uint8_t v) -> void {
     const std::size_t idx =
-        (static_cast<std::size_t>(y) * static_cast<std::size_t>(img.width) + static_cast<std::size_t>(x)) * 4U;
+        ((static_cast<std::size_t>(y) * static_cast<std::size_t>(img.width)) + static_cast<std::size_t>(x)) * 4U;
     img.pixels[idx] = v;
 }
 }  // namespace
@@ -146,7 +146,7 @@ AURORA_TEST_CASE(cluster_size_mismatch_and_empty_images_return_no_regions) {
 
 AURORA_TEST_CASE(cluster_identical_images_have_no_regions) {
     Image baseline = make_image(16, 16, 7, 8, 9);
-    const Image current = baseline;
+    const Image& current = baseline;
     AURORA_TEST_CHECK_TRUE(cluster_diff_regions(baseline, current).empty());
 }
 
@@ -205,8 +205,8 @@ AURORA_TEST_CASE(cluster_separated_blocks_are_distinct_and_sorted_by_size) {
 AURORA_TEST_CASE(cluster_min_region_pixels_filters_small_regions) {
     Image baseline = make_image(32, 32, 0, 0, 0);
     Image current = baseline;
-    set_px(current, 0, 0, 255);                       // 1 点
-    for (int x = 24; x < 27; ++x) {                   // 3 点
+    set_px(current, 0, 0, 255);  // 1 点
+    for (int x = 24; x < 27; ++x) {  // 3 点
         set_px(current, x, 24, 255);
     }
 
@@ -281,15 +281,18 @@ namespace {
 /// @brief 构造一棵三层「假布局盒表」，无需真实控件即可测归因规则。
 [[nodiscard]] auto sample_boxes() -> std::vector<WidgetBox> {
     std::vector<WidgetBox> boxes;
-    boxes.push_back(WidgetBox{.path = "", .type = "Column",
-                              .bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                                             .size = Size{.width = 40.0F, .height = 40.0F}}});
-    boxes.push_back(WidgetBox{.path = "0", .type = "Text",
-                              .bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                                             .size = Size{.width = 16.0F, .height = 16.0F}}});
-    boxes.push_back(WidgetBox{.path = "1", .type = "Button",
-                              .bounds = Rect{.origin = Point{.x = 0.0F, .y = 16.0F},
-                                             .size = Size{.width = 16.0F, .height = 16.0F}}});
+    boxes.push_back(WidgetBox{
+        .path = "",
+        .type = "Column",
+        .bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 40.0F, .height = 40.0F}}});
+    boxes.push_back(WidgetBox{
+        .path = "0",
+        .type = "Text",
+        .bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 16.0F, .height = 16.0F}}});
+    boxes.push_back(WidgetBox{
+        .path = "1",
+        .type = "Button",
+        .bounds = Rect{.origin = Point{.x = 0.0F, .y = 16.0F}, .size = Size{.width = 16.0F, .height = 16.0F}}});
     return boxes;
 }
 }  // namespace
@@ -328,9 +331,10 @@ AURORA_TEST_CASE(attribute_root_widget_has_empty_path_but_counts_as_attributed) 
     // 陷阱回归：根控件的 `path` 按约定就是空串（可被 find_node / REST 解析）。
     // 用路径判空会把「已归因到根」误判成「未归因」，故判据必须看类型名。
     std::vector<WidgetBox> boxes;
-    boxes.push_back(WidgetBox{.path = "", .type = "Column",
-                              .bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                                             .size = Size{.width = 40.0F, .height = 40.0F}}});
+    boxes.push_back(WidgetBox{
+        .path = "",
+        .type = "Column",
+        .bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 40.0F, .height = 40.0F}}});
     std::vector<DiffRegion> regions;
     DiffRegion r;
     r.bounds = Rect{.origin = Point{.x = 4.0F, .y = 4.0F}, .size = Size{.width = 8.0F, .height = 8.0F}};
@@ -374,9 +378,10 @@ AURORA_TEST_CASE(attribute_area_ratio_and_partial_overlap_flag) {
     // 单一 Text（16×16 位于原点），区域 (8,8,16,16) 只有左上角 8×8 落在它里面 ⇒
     // 命中 Text、覆盖比 64/256，且区域明显溢出到控件之外 ⇒ partial_overlap 为真。
     std::vector<WidgetBox> boxes;
-    boxes.push_back(WidgetBox{.path = "0", .type = "Text",
-                              .bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                                             .size = Size{.width = 16.0F, .height = 16.0F}}});
+    boxes.push_back(WidgetBox{
+        .path = "0",
+        .type = "Text",
+        .bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 16.0F, .height = 16.0F}}});
     std::vector<DiffRegion> regions;
     DiffRegion r;
     r.bounds = Rect{.origin = Point{.x = 8.0F, .y = 8.0F}, .size = Size{.width = 16.0F, .height = 16.0F}};
@@ -399,9 +404,10 @@ AURORA_TEST_CASE(attribute_area_ratio_and_partial_overlap_flag) {
 AURORA_TEST_CASE(attribute_converts_widget_bounds_by_device_scale) {
     // Node 的 bounds 是 dp，区域是像素：同一块文本在 2x 渲染下覆盖两倍像素。
     std::vector<WidgetBox> boxes;
-    boxes.push_back(WidgetBox{.path = "0", .type = "Text",
-                              .bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                                             .size = Size{.width = 8.0F, .height = 8.0F}}});
+    boxes.push_back(
+        WidgetBox{.path = "0",
+                  .type = "Text",
+                  .bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 8.0F, .height = 8.0F}}});
     std::vector<DiffRegion> regions;
     DiffRegion r;
     r.bounds = Rect{.origin = Point{.x = 12.0F, .y = 12.0F}, .size = Size{.width = 4.0F, .height = 4.0F}};
@@ -415,8 +421,7 @@ AURORA_TEST_CASE(attribute_converts_widget_bounds_by_device_scale) {
 // ─────────────────────── SnapshotDiffReport ───────────────────────
 
 AURORA_TEST_CASE(report_size_mismatch_short_circuits_without_regions) {
-    const SnapshotDiffReport report =
-        build_snapshot_diff_report(make_image(4, 4, 1, 2, 3), make_image(4, 5, 1, 2, 3));
+    const SnapshotDiffReport report = build_snapshot_diff_report(make_image(4, 4, 1, 2, 3), make_image(4, 5, 1, 2, 3));
     AURORA_TEST_CHECK_TRUE(report.raw.size_mismatch);
     AURORA_TEST_CHECK_TRUE(report.regions.empty());
     AURORA_TEST_CHECK_TRUE(report.attributed.empty());
@@ -494,9 +499,10 @@ AURORA_TEST_CASE(report_text_marks_unattributed_regions) {
     // 只给一个位于原点的小控件，把差异放在右下角 —— 那里没有任何控件覆盖，
     // 报告必须诚实地标记为未归因，而不是硬凑一个「看起来最接近」的控件。
     std::vector<WidgetBox> boxes;
-    boxes.push_back(WidgetBox{.path = "0", .type = "Text",
-                              .bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                                             .size = Size{.width = 8.0F, .height = 8.0F}}});
+    boxes.push_back(
+        WidgetBox{.path = "0",
+                  .type = "Text",
+                  .bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 8.0F, .height = 8.0F}}});
     Image baseline = make_image(32, 32, 0, 0, 0);
     Image current = baseline;
     set_px(current, 30, 30, 255);

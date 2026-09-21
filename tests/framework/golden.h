@@ -122,8 +122,7 @@ inline auto compare_or_update(std::string_view base_name, const std::filesystem:
     std::string message = "pixel drift vs golden " + name + ": " + std::to_string(diff.pixel_diff_count) +
                           " px, max delta " + std::to_string(diff.max_color_delta);
     if (!within_budget) {
-        const std::vector<WidgetBox> boxes = (root != nullptr) ? collect_widget_boxes(*root)
-                                                              : std::vector<WidgetBox>{};
+        const std::vector<WidgetBox> boxes = (root != nullptr) ? collect_widget_boxes(*root) : std::vector<WidgetBox>{};
         message += "\n" + build_snapshot_diff_report(golden.value(), current.value(), boxes, tolerance).to_text();
     }
     AURORA_TEST_CHECK_MSG(within_budget, message);
@@ -159,18 +158,16 @@ inline auto compare_gpu_tolerance(std::string_view base_name, const Image &curre
 
     const SnapshotDiff diff = compare_snapshots(golden.value(), current, tolerance);
     const bool within_budget = diff.pixel_diff_count <= max_diff_pixels;
-    const std::string measured = "gpu drift vs software golden " + name + ": " +
-                                 std::to_string(diff.pixel_diff_count) + " px / budget " +
-                                 std::to_string(max_diff_pixels) + ", tol " + std::to_string(tolerance) +
-                                 ", max delta " + std::to_string(diff.max_color_delta);
+    const std::string measured = "gpu drift vs software golden " + name + ": " + std::to_string(diff.pixel_diff_count) +
+                                 " px / budget " + std::to_string(max_diff_pixels) + ", tol " +
+                                 std::to_string(tolerance) + ", max delta " + std::to_string(diff.max_color_delta);
     AURORA_TEST_TRACE(measured);
     if (within_budget) {
         return;
     }
     const std::vector<WidgetBox> boxes = (root != nullptr) ? collect_widget_boxes(*root) : std::vector<WidgetBox>{};
-    AURORA_TEST_CHECK_MSG(false,
-                          measured + "\n" +
-                              build_snapshot_diff_report(golden.value(), current, boxes, tolerance).to_text());
+    AURORA_TEST_CHECK_MSG(
+        false, measured + "\n" + build_snapshot_diff_report(golden.value(), current, boxes, tolerance).to_text());
 }
 
 }  // namespace aurora::testing::golden

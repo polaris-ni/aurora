@@ -16,7 +16,7 @@
 
 namespace aurora {
 
-// ---- 帧 sink 适配（口径同 Win32 WgpuSurface::Sink） ----
+// ---- 帧 sink 适配（口径同 Win32 WgpuWin32Surface::Sink） ----
 
 auto WgpuX11Surface::Sink::begin_frame(int width, int height, float scale) -> bool {
     // `Window::present_gpu_frame` 传逻辑 dp 尺寸；`RhiFrameSink` 契约要求设备像素。
@@ -110,9 +110,7 @@ auto WgpuX11Surface::data() const -> const std::uint8_t * {
 #endif
 }
 
-auto WgpuX11Surface::capture_window(const std::string &path) -> Result<bool> {
-    return host_->capture_window(path);
-}
+auto WgpuX11Surface::capture_window(const std::string &path) -> Result<bool> { return host_->capture_window(path); }
 
 }  // namespace aurora
 

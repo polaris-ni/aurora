@@ -23,7 +23,7 @@ namespace {
 class RecordingProvider final : public a11y::Provider {
   public:
     auto activate() -> void override {
-        active_ = true;
+        active = true;
         ++activate_calls;
         // D14/R9：激活即回填「读屏在线」（heuristic，见设计 §5.1）。
         current_accessibility_settings().screen_reader_active = true;
@@ -31,15 +31,15 @@ class RecordingProvider final : public a11y::Provider {
     }
     auto deactivate() -> void override {
         a11y::unregister_provider(*this);
-        active_ = false;
+        active = false;
         current_accessibility_settings().screen_reader_active = false;
     }
     auto sync_if_dirty() -> void override {
         ++sync_calls;
-        dirty_ = false;
+        dirty = false;
     }
-    auto mark_dirty() -> void override { dirty_ = true; }
-    [[nodiscard]] auto is_active() const -> bool override { return active_; }
+    auto mark_dirty() -> void override { dirty = true; }
+    [[nodiscard]] auto is_active() const -> bool override { return active; }
     [[nodiscard]] auto name() const -> std::string override { return "recording"; }
     auto on_event(const AccessibilityEvent &e) -> void override { events.push_back(e); }
     auto on_announcement(const std::string &t, const Widget *target) -> void override {
@@ -49,8 +49,8 @@ class RecordingProvider final : public a11y::Provider {
 
     int activate_calls = 0;
     int sync_calls = 0;
-    bool dirty_ = false;
-    bool active_ = false;
+    bool dirty = false;
+    bool active = false;
     std::vector<AccessibilityEvent> events;
     std::vector<std::pair<std::string, const Widget *>> announcements;
     /// @brief 收到的「控件正在销毁」通知序列（桥据此切断悬垂语义根）。
@@ -59,7 +59,7 @@ class RecordingProvider final : public a11y::Provider {
 
 class ProbeLeaf final : public LeafWidget {
   public:
-    [[nodiscard]] auto type_name() const -> const char *override { return "A11yProbeLeaf"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "A11yProbeLeaf"; }
 
   protected:
     auto on_layout(const Constraints & /*c*/, const BuildContext & /*ctx*/) -> Size override { return {}; }
@@ -108,15 +108,16 @@ AURORA_TEST_CASE(activation_backfills_screen_reader_active) {
 AURORA_TEST_CASE(broadcast_marks_dirty_and_forwards_event) {
     RecordingProvider p;
     p.activate();
-    p.dirty_ = false;
+    p.dirty = false;
 
     const auto widget = std::make_shared<ProbeLeaf>();
-    notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = widget.get()});
+    notify_accessibility_event(
+        AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = widget.get()});
 
     AURORA_TEST_REQUIRE_EQ(p.events.size(), std::size_t{1});
     AURORA_TEST_CHECK(p.events.front().kind == AccessibilityEventKind::ValueChanged);
     AURORA_TEST_CHECK_EQ(p.events.front().target, widget.get());
-    AURORA_TEST_CHECK_TRUE(p.dirty_);  // 拉取式：事件只置脏，不即时重建
+    AURORA_TEST_CHECK_TRUE(p.dirty);  // 拉取式：事件只置脏，不即时重建
 
     p.deactivate();
 }

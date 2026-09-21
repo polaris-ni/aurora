@@ -102,9 +102,8 @@ auto make_draw_image(Rect bounds, const Image &img, DisplayList &dl) -> DrawCmd 
 
 // 取设备像素（RGBA8，自上而下行序）某点颜色；越界返回全零。
 auto pixel_at(const std::vector<std::uint8_t> &px, int w, int x, int y) -> std::array<int, 4> {
-    const std::size_t idx = (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) +
-                             static_cast<std::size_t>(x)) *
-                            4U;
+    const std::size_t idx =
+        (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * 4U;
     if (px.size() < idx + 4U) {
         return {0, 0, 0, 0};
     }
@@ -261,7 +260,7 @@ AURORA_TEST_CASE(wgpu_compute_mip_downscale_sampling) {
             const auto c = pixel_at(px, 64, x, y);
             AURORA_TEST_CHECK(c[0] > 106 && c[0] < 134);  // r ≈ 120（远离端点 220/20）
             AURORA_TEST_CHECK(c[1] > 106 && c[1] < 134);  // g ≈ 120
-            AURORA_TEST_CHECK(c[2] > 6 && c[2] < 34);     // b ≈ 20
+            AURORA_TEST_CHECK(c[2] > 6 && c[2] < 34);  // b ≈ 20
             AURORA_TEST_CHECK_EQ(c[3], 255);
         }
     }
@@ -296,9 +295,9 @@ namespace {
 
 // 内容场（三帧共用、可解析重建）：64×64 底 (10,20,30) + [16,48)² 块 (200,100,50)。
 [[nodiscard]] auto field_at(int x, int y, int ch) -> int {
-    static constexpr int kColors[2][3] = {{10, 20, 30}, {200, 100, 50}};
+    static constexpr int AURORA_COLORS[2][3] = {{10, 20, 30}, {200, 100, 50}};
     const bool blk = x >= 16 && x < 48 && y >= 16 && y < 48;
-    return kColors[blk ? 1 : 0][ch];
+    return AURORA_COLORS[blk ? 1 : 0][ch];
 }
 
 }  // namespace
@@ -388,13 +387,13 @@ AURORA_TEST_CASE(wgpu_compute_region_effects_match_cpu_reference) {
     rhi_obj.end_frame();
     std::vector<std::uint8_t> px2;
     AURORA_TEST_REQUIRE(rhi_obj.read_pixels(px2));
-    static constexpr int kTint[3] = {255, 0, 255};
+    static constexpr int AURORA_TINT[3] = {255, 0, 255};
     for (int y = 8; y < 24; ++y) {
         for (int x = 8; x < 24; ++x) {
             const auto got = pixel_at(px2, 64, x, y);
             for (int ch = 0; ch < 3; ++ch) {
                 const double s = static_cast<double>(field_at(x, y, ch));
-                const double m = s * static_cast<double>(kTint[ch]) / 255.0;
+                const double m = s * static_cast<double>(AURORA_TINT[ch]) / 255.0;
                 const double o = std::clamp(s + 0.5 * (m - s), 0.0, 255.0);
                 AURORA_TEST_CHECK(std::abs(static_cast<double>(got[ch]) - o) <= 1.5);
             }
@@ -485,7 +484,7 @@ AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) {
     if (!rhi_obj.valid()) {
         AURORA_TEST_SKIP("无可用 wgpu adapter/device，装饰回放像素断言跳过");
     }
-    constexpr Color kContent{0, 160, 0, 255};
+    constexpr Color AURORA_CONTENT{0, 160, 0, 255};
     csd::TitleBarPaintState s;
     s.width = 160.0F;
     s.title_bar = true;
@@ -506,7 +505,7 @@ AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) {
     AURORA_TEST_REQUIRE(rhi_obj.begin_frame(160, 80, 1.0F));
     DisplayList content;
     content.push_cmd(make_fill(
-        Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 160.0F, .height = 80.0F}}, kContent));
+        Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 160.0F, .height = 80.0F}}, AURORA_CONTENT));
     content.replay(rhi_obj.backend());
     deco.replay(rhi_obj.backend());  // ← 帧尾追加回放：z 序在 app 内容之上
     rhi_obj.end_frame();
@@ -527,7 +526,8 @@ AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) {
     const auto ic = pixel_at(px, 160, static_cast<int>(icon_c.x), static_cast<int>(icon_c.y));
     AURORA_TEST_CHECK(ic[2] > 150 && ic[2] > ic[0] && ic[2] > ic[1]);
     // 装饰带以下：仍是 app 内容绿（装饰未越界涂抹）。
-    AURORA_TEST_CHECK_EQ(pixel_at(px, 160, 4, 60), (std::array<int, 4>{kContent.r, kContent.g, kContent.b, 255}));
+    AURORA_TEST_CHECK_EQ(pixel_at(px, 160, 4, 60),
+                         (std::array<int, 4>{AURORA_CONTENT.r, AURORA_CONTENT.g, AURORA_CONTENT.b, 255}));
 }
 
 }  // namespace aurora::test_cases::utest_wgpu_rhi
@@ -539,24 +539,14 @@ namespace aurora::test_cases::utest_wgpu_rhi {
 AURORA_TEST_CASE(wgpu_default_constructed_invalid) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启（需 Rust 工具链 + wgpu-native 源码构建），头与实现整体被宏剔除");
 }
-AURORA_TEST_CASE(wgpu_offscreen_frame_lifecycle_and_pixels) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
-}
-AURORA_TEST_CASE(wgpu_stream_image_and_native_import_contract) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
-}
-AURORA_TEST_CASE(wgpu_compute_mip_downscale_sampling) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
-}
+AURORA_TEST_CASE(wgpu_offscreen_frame_lifecycle_and_pixels) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启"); }
+AURORA_TEST_CASE(wgpu_stream_image_and_native_import_contract) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启"); }
+AURORA_TEST_CASE(wgpu_compute_mip_downscale_sampling) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启"); }
 AURORA_TEST_CASE(wgpu_compute_region_effects_match_cpu_reference) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
 }
-AURORA_TEST_CASE(wgpu_readback_toggle_and_multi_frame_submit) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
-}
-AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
-}
+AURORA_TEST_CASE(wgpu_readback_toggle_and_multi_frame_submit) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启"); }
+AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启"); }
 
 }  // namespace aurora::test_cases::utest_wgpu_rhi
 

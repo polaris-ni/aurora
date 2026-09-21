@@ -129,7 +129,7 @@ auto write_message(const au::Json &msg) -> void {
 
 struct InspectorSession {
     std::string host{"127.0.0.1"};
-    std::uint16_t port{aurora::tools::inspector::kDefaultPort};
+    std::uint16_t port{aurora::tools::inspector::AURORA_DEFAULT_PORT};
 };
 
 /// @brief 解析目标会话。解析失败返回空串原因（调用方据此回 isError）。

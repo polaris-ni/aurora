@@ -121,38 +121,32 @@ AURORA_TEST_CASE(format_plural_six_categories_arabic) {
     AURORA_TEST_CHECK_EQ(
         aurora::StringTable::format("{0, plural, zero=ZERO one=ONE two=TWO few=FEW many=MANY other=OTHER}", {"11"}, ar),
         std::string("MANY"));
-    AURORA_TEST_CHECK_EQ(
-        aurora::StringTable::format("{0, plural, zero=ZERO one=ONE two=TWO few=FEW many=MANY other=OTHER}", {"100"}, ar),
-        std::string("OTHER"));
+    AURORA_TEST_CHECK_EQ(aurora::StringTable::format(
+                             "{0, plural, zero=ZERO one=ONE two=TWO few=FEW many=MANY other=OTHER}", {"100"}, ar),
+                         std::string("OTHER"));
 }
 
 AURORA_TEST_CASE(format_plural_fallback_to_other_for_unlisted_category) {
     // 旧式仅 one=/other= 的模板：俄语 n=5 属 many（无 many 分支）→ 回退 other 分支。
     // 另以 n=21 验证 Locale 透传：俄语 21→One（英语 21→Other），故 ar 模板下结果必须随 ru 而非 en。
     const aurora::Locale ru{.language = "ru"};
-    AURORA_TEST_CHECK_EQ(
-        aurora::StringTable::format("{0, plural, one={0} item other={0} items}", {"5"}, ru),
-        std::string("5 items"));
-    AURORA_TEST_CHECK_EQ(
-        aurora::StringTable::format("{0, plural, one={0} item other={0} items}", {"1"}, ru),
-        std::string("1 item"));
-    AURORA_TEST_CHECK_EQ(
-        aurora::StringTable::format("{0, plural, one={0} item other={0} items}", {"21"}, ru),
-        std::string("21 item"));  // 若 Locale 未透传（走 en），此处会得到 "21 items"
+    AURORA_TEST_CHECK_EQ(aurora::StringTable::format("{0, plural, one={0} item other={0} items}", {"5"}, ru),
+                         std::string("5 items"));
+    AURORA_TEST_CHECK_EQ(aurora::StringTable::format("{0, plural, one={0} item other={0} items}", {"1"}, ru),
+                         std::string("1 item"));
+    AURORA_TEST_CHECK_EQ(aurora::StringTable::format("{0, plural, one={0} item other={0} items}", {"21"}, ru),
+                         std::string("21 item"));  // 若 Locale 未透传（走 en），此处会得到 "21 items"
 }
 
 AURORA_TEST_CASE(format_plural_french_many_branch_selected) {
     // 法语：n=1 → one 分支；n=1000000（百万整数倍）→ many 分支；n=2 → other 分支。
     const aurora::Locale fr{.language = "fr"};
-    AURORA_TEST_CHECK_EQ(
-        aurora::StringTable::format("{0, plural, one=ONE many=MANY other=OTHER}", {"1"}, fr),
-        std::string("ONE"));
-    AURORA_TEST_CHECK_EQ(
-        aurora::StringTable::format("{0, plural, one=ONE many=MANY other=OTHER}", {"1000000"}, fr),
-        std::string("MANY"));
-    AURORA_TEST_CHECK_EQ(
-        aurora::StringTable::format("{0, plural, one=ONE many=MANY other=OTHER}", {"2"}, fr),
-        std::string("OTHER"));
+    AURORA_TEST_CHECK_EQ(aurora::StringTable::format("{0, plural, one=ONE many=MANY other=OTHER}", {"1"}, fr),
+                         std::string("ONE"));
+    AURORA_TEST_CHECK_EQ(aurora::StringTable::format("{0, plural, one=ONE many=MANY other=OTHER}", {"1000000"}, fr),
+                         std::string("MANY"));
+    AURORA_TEST_CHECK_EQ(aurora::StringTable::format("{0, plural, one=ONE many=MANY other=OTHER}", {"2"}, fr),
+                         std::string("OTHER"));
 }
 
 AURORA_TEST_CASE(default_string_table_returns_stable_reference) {

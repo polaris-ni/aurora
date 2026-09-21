@@ -20,9 +20,9 @@ namespace aurora {
 /// @brief prompt 投影选项（specification/08-tooling.md §2.6）。
 struct UiPromptOptions {
     bool include_children_policy = true;  ///< 是否写 children 策略（none/single/multiple）
-    bool include_defaults = true;         ///< 是否写出缺省值 —— 能让 LLM 少写冗余属性
-    bool include_examples = false;        ///< 是否附控件自带的示例（体积敏感，默认关）
-    std::size_t max_types = 0;            ///< 类型上限，0 = 全部
+    bool include_defaults = true;  ///< 是否写出缺省值 —— 能让 LLM 少写冗余属性
+    bool include_examples = false;  ///< 是否附控件自带的示例（体积敏感，默认关）
+    std::size_t max_types = 0;  ///< 类型上限，0 = 全部
 };
 
 /// @brief 把若干控件的 schema 投影成一段紧凑、可供外部 LLM 直接消费的 prompt。
@@ -36,8 +36,8 @@ struct UiPromptOptions {
 ///
 /// @note Thread: main-thread only（读注册表）
 /// @note Side-effects: none
-[[nodiscard]] inline auto build_ui_prompt(const std::vector<std::string> &types,
-                                          const UiPromptOptions &opt = {}) -> std::string {
+[[nodiscard]] inline auto build_ui_prompt(const std::vector<std::string> &types, const UiPromptOptions &opt = {})
+    -> std::string {
     std::string out;
     out += "# Aurora UI tree\n\n";
     out += "Reply with a single JSON object shaped as:\n";
@@ -145,10 +145,10 @@ using GenerateUiFn = std::function<Json(const std::string &prompt, const std::ve
 
 /// @brief 自修复环中的一轮。
 struct UiRepairStep {
-    std::size_t attempt = 0;                 ///< 轮次（从 0 起）
-    Json generated;                          ///< 本轮产出的树
-    std::vector<ValidationError> errors;     ///< 校验结果（含 path / message / suggestion）
-    bool machine_fixed = false;              ///< 是否由库侧**确定性**修好（未消耗 LLM 往返）
+    std::size_t attempt = 0;  ///< 轮次（从 0 起）
+    Json generated;  ///< 本轮产出的树
+    std::vector<ValidationError> errors;  ///< 校验结果（含 path / message / suggestion）
+    bool machine_fixed = false;  ///< 是否由库侧**确定性**修好（未消耗 LLM 往返）
 
     [[nodiscard]] auto to_json() const -> Json {
         Json j = Json::object();
@@ -166,10 +166,10 @@ struct UiRepairStep {
 
 /// @brief 自修复环的结果。
 struct UiRepairResult {
-    bool ok = false;                      ///< 是否最终拿到一棵通过校验的树
-    Json tree;                            ///< 最终树（ok 为 false 时是最后一轮的产物）
-    std::vector<UiRepairStep> history;    ///< 逐轮记录，供 AI 自省「为什么没修好」
-    std::size_t attempts_used = 0;        ///< 实际用掉的轮次
+    bool ok = false;  ///< 是否最终拿到一棵通过校验的树
+    Json tree;  ///< 最终树（ok 为 false 时是最后一轮的产物）
+    std::vector<UiRepairStep> history;  ///< 逐轮记录，供 AI 自省「为什么没修好」
+    std::size_t attempts_used = 0;  ///< 实际用掉的轮次
 
     [[nodiscard]] auto to_json() const -> Json {
         Json j = Json::object();
@@ -312,9 +312,7 @@ namespace detail {
 ///
 /// @note Thread: main-thread only（读注册表）
 /// @note Side-effects: none
-[[nodiscard]] inline auto repair_ui_tree(const Json &tree) -> Json {
-    return detail::ui_repair_node(tree);
-}
+[[nodiscard]] inline auto repair_ui_tree(const Json &tree) -> Json { return detail::ui_repair_node(tree); }
 
 /// @brief NL→UI 的自修复环（specification/08-tooling.md §2.6）。
 ///
@@ -341,8 +339,8 @@ namespace detail {
 
         // ── 产出：有 LLM 且非首轮时带上上一轮的错误 ──
         if (llm != nullptr) {
-            const std::vector<ValidationError> previous = attempt == 0 ? std::vector<ValidationError>{}
-                                                                       : result.history.back().errors;
+            const std::vector<ValidationError> previous =
+                attempt == 0 ? std::vector<ValidationError>{} : result.history.back().errors;
             step.generated = llm(prompt, previous);
         } else {
             const auto r = generate_ui(description);

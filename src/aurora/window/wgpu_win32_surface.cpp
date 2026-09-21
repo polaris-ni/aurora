@@ -1,9 +1,9 @@
 // ============================================================
-// wgpu_surface.cpp — Win32 宿主 + WgpuRhi GPU 栅格上屏后端实现
-// 见 include/aurora/window/wgpu_surface.h 的设计说明（失败分层 / 帧 sink 适配）。
+// wgpu_win32_surface.cpp — Win32 宿主 + WgpuRhi GPU 栅格上屏后端实现
+// 见 include/aurora/window/wgpu_win32_surface.h 的设计说明（失败分层 / 帧 sink 适配）。
 // ============================================================
 
-#include "aurora/window/wgpu_surface.h"
+#include "aurora/window/wgpu_win32_surface.h"
 
 #if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WIN32)
 
@@ -29,7 +29,7 @@ namespace aurora {
 
 // ---- 帧 sink 适配 ----
 
-auto WgpuSurface::Sink::begin_frame(int width, int height, float scale) -> bool {
+auto WgpuWin32Surface::Sink::begin_frame(int width, int height, float scale) -> bool {
     // `Window::present_gpu_frame` 传逻辑 dp 尺寸；`RhiFrameSink` 契约要求设备像素。
     const float s = scale > 0.0F ? scale : 1.0F;
     const int dev_w = std::max(1, static_cast<int>(std::lround(static_cast<float>(width) * s)));
@@ -44,11 +44,12 @@ auto WgpuSurface::Sink::begin_frame(int width, int height, float scale) -> bool 
 
 // ---- 构造 / 析构 ----
 
-WgpuSurface::WgpuSurface(int width, int height, const std::string &title, const WindowStyleOptions &style, bool vsync)
+WgpuWin32Surface::WgpuWin32Surface(int width, int height, const std::string &title, const WindowStyleOptions &style,
+                                   bool vsync)
     : vsync_(vsync) {
-    win_ = std::make_unique<Win32Window>(width, height, title, style);
+    win_ = std::make_unique<Win32Host>(width, height, title, style);
     if (win_->hwnd() == nullptr) {
-        AURORA_LOG_ERROR("wgpu-surface", "Win32Window creation failed");
+        AURORA_LOG_ERROR("wgpu-surface", "Win32Host creation failed");
         return;
     }
     rhi::WgpuRhiOptions opts;
@@ -66,17 +67,17 @@ WgpuSurface::WgpuSurface(int width, int height, const std::string &title, const 
 }
 
 // 成员逆序析构：sink_/gpu_（wgpu surface 引用 HWND）先于 win_ 销毁，顺序正确。
-WgpuSurface::~WgpuSurface() = default;
+WgpuWin32Surface::~WgpuWin32Surface() = default;
 
 // ---- 能力与帧调度挂点 ----
 
-auto WgpuSurface::is_available() const -> bool {
+auto WgpuWin32Surface::is_available() const -> bool {
     return win_ != nullptr && win_->hwnd() != nullptr && gpu_ != nullptr && gpu_->valid();
 }
 
-auto WgpuSurface::gpu_backend() -> rhi::RhiFrameSink * { return sink_.get(); }
+auto WgpuWin32Surface::gpu_backend() -> rhi::RhiFrameSink * { return sink_.get(); }
 
-auto WgpuSurface::set_vsync(bool on) -> void {
+auto WgpuWin32Surface::set_vsync(bool on) -> void {
     // v1 口径：vsync 以构造期选项为准（swapchain 配置后不改）；运行期设置仅记录，
     // 下次窗口尺寸变化触发 swapchain 重配置时生效。
     vsync_ = on;
@@ -84,7 +85,7 @@ auto WgpuSurface::set_vsync(bool on) -> void {
 
 // ---- 帧生命周期 ----
 
-auto WgpuSurface::begin_frame(int width, int height) -> Result<bool> {
+auto WgpuWin32Surface::begin_frame(int width, int height) -> Result<bool> {
     const float s = scale_factor();
     // Painter 按 scale 把逻辑 dp 映射到物理像素：begin 传逻辑尺寸（与 Win32/D3D11 同源）。
     // GPU 模式下 Window 已先行 p.record(frame_dl)：底色 fill_rect 落入帧 DL（Glfw GPU 模式同构），
@@ -97,7 +98,7 @@ auto WgpuSurface::begin_frame(int width, int height) -> Result<bool> {
     return Result<bool>{true};
 }
 
-auto WgpuSurface::present() -> Result<bool> {
+auto WgpuWin32Surface::present() -> Result<bool> {
     if (gpu_frame_active_) {
         // GPU 帧：WgpuRhi::end_frame 已 wgpuSurfacePresent，无需二次上屏。
         gpu_frame_active_ = false;
@@ -110,7 +111,7 @@ auto WgpuSurface::present() -> Result<bool> {
     return Result<bool>{true};
 }
 
-auto WgpuSurface::present_gdi() -> void {
+auto WgpuWin32Surface::present_gdi() -> void {
     const int w = painter_.width();
     const int h = painter_.height();
     if (w <= 0 || h <= 0) {
@@ -138,7 +139,7 @@ auto WgpuSurface::present_gdi() -> void {
 
 // ---- 诊断与截图 ----
 
-auto WgpuSurface::data() const -> const std::uint8_t * {
+auto WgpuWin32Surface::data() const -> const std::uint8_t * {
 #ifdef AURORA_ENABLE_DEBUG
     // GPU 模式：CPU 侧无帧内容（v1 未接 swapchain 读回）→ nullptr，save_snapshot 明确
     // 报 unsupported，真实窗口画面用 capture_window（PrintWindow 可抓 GPU 上屏）。
@@ -151,7 +152,7 @@ auto WgpuSurface::data() const -> const std::uint8_t * {
 #endif
 }
 
-auto WgpuSurface::capture_window(const std::string &path) -> Result<bool> {
+auto WgpuWin32Surface::capture_window(const std::string &path) -> Result<bool> {
 #ifdef AURORA_ENABLE_DEBUG
     // 与 Win32/D3D11 同源：共享 PrintWindow(PW_RENDERFULLCONTENT) 路径，可抓 GPU swapchain 内容。
     return detail::capture_window_by_hwnd(static_cast<HWND>(native_handle()), path);
@@ -164,13 +165,13 @@ auto WgpuSurface::capture_window(const std::string &path) -> Result<bool> {
 
 // ---- 窗口行为（宿主转发）----
 
-auto WgpuSurface::set_cursor(CursorShape shape) -> void { detail::set_win32_cursor(shape); }
+auto WgpuWin32Surface::set_cursor(CursorShape shape) -> void { detail::set_win32_cursor(shape); }
 
-auto WgpuSurface::begin_window_move() -> void {
+auto WgpuWin32Surface::begin_window_move() -> void {
     PostMessageW(static_cast<HWND>(win_->hwnd()), WM_NCLBUTTONDOWN, HTCAPTION, 0);
 }
 
-auto WgpuSurface::begin_window_resize(WindowResizeEdge edge) -> void {
+auto WgpuWin32Surface::begin_window_resize(WindowResizeEdge edge) -> void {
     // 序对应 WindowResizeEdge 枚举值序（同 Win32Surface）。
     static constexpr std::array<int, 9> HT = {HTNOWHERE, HTTOP,      HTBOTTOM,     HTLEFT,       HTRIGHT,
                                               HTTOPLEFT, HTTOPRIGHT, HTBOTTOMLEFT, HTBOTTOMRIGHT};

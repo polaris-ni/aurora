@@ -31,11 +31,11 @@ namespace {
 // ---- 场景级容差带（Windows Vulkan 与 WSLg vGPU 双侧实测几乎同值——同一 WGSL 管线的确定性
 // 残差；预算取实测 ≈2.3× 余量。实测 tol 48 口径：polyline 139px / sector 109px / column 870px /
 // chart_bar 5437px；max delta ≤255 来自细笔画错位互补——是定位抖动而非色差）----
-constexpr int kGeometryTol = 48;                  // 单通道差 > tol 才算差异像素（golden 判据词汇）
-constexpr std::size_t kPolylineBudget = 320;      // 64×64 ≈ 8% 画布（描边周长占比较高）
-constexpr std::size_t kSectorBudget = 256;        // 64×64 曲线边界同理
-constexpr std::size_t kTextBudget = 2048;         // 240×120 字形边缘 AA 与次像素定位抖动
-constexpr std::size_t kChartBudget = 12800;       // 320×200 网格细线 + 小字号文本复合
+constexpr int AURORA_GEOMETRY_TOL = 48;  // 单通道差 > tol 才算差异像素（golden 判据词汇）
+constexpr std::size_t AURORA_POLYLINE_BUDGET = 320;  // 64×64 ≈ 8% 画布（描边周长占比较高）
+constexpr std::size_t AURORA_SECTOR_BUDGET = 256;  // 64×64 曲线边界同理
+constexpr std::size_t AURORA_TEXT_BUDGET = 2048;  // 240×120 字形边缘 AA 与次像素定位抖动
+constexpr std::size_t AURORA_CHART_BUDGET = 12800;  // 320×200 网格细线 + 小字号文本复合
 
 /// @brief 每例独立 adapter 装载口径：`WgpuRhi` 禁搬移，须逐例就地构造后查 `valid()`。
 [[nodiscard]] auto gpu_options() -> au::rhi::WgpuRhiOptions {
@@ -48,36 +48,36 @@ constexpr std::size_t kChartBudget = 12800;       // 320×200 网格细线 + 小
 
 }  // namespace
 
-#define ITEST_WGPU_GPU_OR_SKIP(gpu)                                                                            \
-    au::rhi::WgpuRhi gpu(gpu_options());                                                                       \
-    if (!gpu.valid()) {                                                                                        \
-        AURORA_TEST_SKIP("无可用 wgpu adapter/device（CI 或驱动缺失），GPU 容差 golden 跳过");                  \
+#define ITEST_WGPU_GPU_OR_SKIP(gpu)                                                            \
+    au::rhi::WgpuRhi gpu(gpu_options());                                                       \
+    if (!gpu.valid()) {                                                                        \
+        AURORA_TEST_SKIP("无可用 wgpu adapter/device（CI 或驱动缺失），GPU 容差 golden 跳过"); \
     }
 
 AURORA_TEST_CASE(gpu_polyline_within_tolerance_of_software_golden) {
     ITEST_WGPU_GPU_OR_SKIP(gpu);
     const auto current = scenes::render_display_list(gpu, 64, 64, scenes::draw_polyline, false);
-    golden::compare_gpu_tolerance("painter_polyline", current, kGeometryTol, kPolylineBudget);
+    golden::compare_gpu_tolerance("painter_polyline", current, AURORA_GEOMETRY_TOL, AURORA_POLYLINE_BUDGET);
 }
 
 AURORA_TEST_CASE(gpu_sector_within_tolerance_of_software_golden) {
     ITEST_WGPU_GPU_OR_SKIP(gpu);
     const auto current = scenes::render_display_list(gpu, 64, 64, scenes::draw_sector, false);
-    golden::compare_gpu_tolerance("painter_sector", current, kGeometryTol, kSectorBudget);
+    golden::compare_gpu_tolerance("painter_sector", current, AURORA_GEOMETRY_TOL, AURORA_SECTOR_BUDGET);
 }
 
 AURORA_TEST_CASE(gpu_text_column_within_tolerance_of_software_golden) {
     ITEST_WGPU_GPU_OR_SKIP(gpu);
     au::Node root = scenes::build_text_column();
     const auto current = scenes::render_tree(gpu, root, 240, 120, false);
-    golden::compare_gpu_tolerance("golden_basic_column", current, kGeometryTol, kTextBudget, &root);
+    golden::compare_gpu_tolerance("golden_basic_column", current, AURORA_GEOMETRY_TOL, AURORA_TEXT_BUDGET, &root);
 }
 
 AURORA_TEST_CASE(gpu_bar_chart_within_tolerance_of_software_golden) {
     ITEST_WGPU_GPU_OR_SKIP(gpu);
     au::Node root = scenes::build_bar_chart();
     const auto current = scenes::render_tree(gpu, root, 320, 200, false);
-    golden::compare_gpu_tolerance("chart_bar", current, kGeometryTol, kChartBudget, &root);
+    golden::compare_gpu_tolerance("chart_bar", current, AURORA_GEOMETRY_TOL, AURORA_CHART_BUDGET, &root);
 }
 
 }  // namespace aurora::test_cases::itest_wgpu_golden
@@ -89,9 +89,7 @@ namespace aurora::test_cases::itest_wgpu_golden {
 AURORA_TEST_CASE(gpu_polyline_within_tolerance_of_software_golden) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启，WgpuRhi 离屏通路整体被宏剔除");
 }
-AURORA_TEST_CASE(gpu_sector_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
-}
+AURORA_TEST_CASE(gpu_sector_within_tolerance_of_software_golden) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启"); }
 AURORA_TEST_CASE(gpu_text_column_within_tolerance_of_software_golden) {
     AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
 }

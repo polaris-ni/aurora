@@ -18,7 +18,7 @@ namespace aurora::test_cases::utest_window_shell {
 
 namespace {
 
-auto make_scene(std::string label) -> Scene { return Scene{Node{std::make_shared<Text>(std::move(label))}}; }
+auto make_scene(const std::string &label) -> Scene { return Scene{Node{std::make_shared<Text>(label)}}; }
 
 /// @brief 窗口选项：角色 / owner / 模态 / 帧上限（帧上限保证 `run()` 必然收敛）。
 auto make_opts(std::string title, WindowRole role = WindowRole::Main, WindowId owner = AURORA_INVALID_WINDOW_ID,

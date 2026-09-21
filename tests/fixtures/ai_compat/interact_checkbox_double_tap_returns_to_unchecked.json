@@ -1,22 +1,57 @@
 {
   "name": "checkbox double tap returns to unchecked",
   "note": "两次点击应回到初始态——区分「只做一次」与「每次都切换」的实现偏差。",
-  "viewport": { "width": 240, "height": 160 },
+  "viewport": {
+    "width": 240,
+    "height": 160
+  },
   "tree": {
     "type": "Column",
     "props": {},
     "children": [
-      { "type": "Checkbox", "props": { "checked": false } }
+      {
+        "type": "Checkbox",
+        "props": {
+          "checked": false
+        }
+      }
     ]
   },
   "steps": [
-    { "action": "settle" },
-    { "action": "tap", "target": { "type": "Checkbox", "index": 0 } },
-    { "action": "pump", "frames": 2 },
-    { "action": "tap", "target": { "type": "Checkbox", "index": 0 } },
-    { "action": "pump", "frames": 2 }
+    {
+      "action": "settle"
+    },
+    {
+      "action": "tap",
+      "target": {
+        "type": "Checkbox",
+        "index": 0
+      }
+    },
+    {
+      "action": "pump",
+      "frames": 2
+    },
+    {
+      "action": "tap",
+      "target": {
+        "type": "Checkbox",
+        "index": 0
+      }
+    },
+    {
+      "action": "pump",
+      "frames": 2
+    }
   ],
   "expect": [
-    { "target": { "type": "Checkbox", "index": 0 }, "prop": "checked", "value": false }
+    {
+      "target": {
+        "type": "Checkbox",
+        "index": 0
+      },
+      "prop": "checked",
+      "value": false
+    }
   ]
 }

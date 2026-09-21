@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/core/accessibility.h"
 #include "aurora/core/types.h"
 #include "aurora/i18n/format.h"
 #include "aurora/render/font_engine.h"
@@ -16,16 +17,15 @@
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/chart_common.h"
 #include "aurora/widget/widget.h"
-#include "aurora/core/accessibility.h"
 
 namespace aurora {
 
 /// @brief ScatterChart 属性（聚合；所有字段均有默认值）。
 struct ScatterChartProps {
     std::vector<ScatterSeries> series;  ///< 散点系列（显式 `ChartPoint` 坐标）
-    bool show_crosshair = true;         ///< 悬停时是否绘制十字准线（吸附最近点 x）
-    ChartAxisSpec axis_x;               ///< x 轴（Linear）
-    ChartAxisSpec axis_y;               ///< y 轴（Linear）
+    bool show_crosshair = true;  ///< 悬停时是否绘制十字准线（吸附最近点 x）
+    ChartAxisSpec axis_x;  ///< x 轴（Linear）
+    ChartAxisSpec axis_y;  ///< y 轴（Linear）
     ChartLegendSpec legend;
     EdgeInsets padding{8.0F, 8.0F, 8.0F, 8.0F};
 };
@@ -107,9 +107,7 @@ class ScatterChart : public LeafWidget, public ScatterChartProps {
     /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `ScatterChart`，
     ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
     /// @note Side-effects: pure
-    [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override {
-        return AccessibilityRole::Image;
-    }
+    [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override { return AccessibilityRole::Image; }
 
     [[nodiscard]] auto accessibility_label() const -> std::string override;
     [[nodiscard]] auto accessibility_value() const -> std::string override;
@@ -135,8 +133,7 @@ class ScatterChart : public LeafWidget, public ScatterChartProps {
     [[nodiscard]] auto scale_of(bool x_axis) const -> LinearScale;
     [[nodiscard]] auto compute_geometry(const Size &size, const Font &font) const -> Geometry;
     [[nodiscard]] auto legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t>;
-    [[nodiscard]] auto nearest_point(const Geometry &g, const Point &local) const
-        -> std::optional<std::pair<int, int>>;
+    [[nodiscard]] auto nearest_point(const Geometry &g, const Point &local) const -> std::optional<std::pair<int, int>>;
 
     Geometry geom_;
     ChartGrowIn grow_;
@@ -543,9 +540,9 @@ inline auto ScatterChart::on_paint(Painter &p, const Rect &bounds, const BuildCo
                         Point{.x = origin.x + plot.right(), .y = origin.y + hovered_px->y}, 1.0F, grid);
         }
         const float d = 12.0F;
-        const Rect ring{.origin = Point{.x = origin.x + hovered_px->x - (d * 0.5F),
-                                        .y = origin.y + hovered_px->y - (d * 0.5F)},
-                        .size = Size{.width = d, .height = d}};
+        const Rect ring{
+            .origin = Point{.x = origin.x + hovered_px->x - (d * 0.5F), .y = origin.y + hovered_px->y - (d * 0.5F)},
+            .size = Size{.width = d, .height = d}};
         p.draw_rounded_border(ring, d * 0.5F, 2.0F, theme.text);
 
         if (hovered_point_.has_value()) {
@@ -561,8 +558,7 @@ inline auto ScatterChart::on_paint(Painter &p, const Rect &bounds, const BuildCo
                 const float by = std::clamp(hovered_px->y - h - 4.0F, 0.0F, std::max(0.0F, bounds.size.height - h));
                 const Rect box{.origin = Point{.x = origin.x + bx, .y = origin.y + by},
                                .size = Size{.width = w, .height = h}};
-                p.fill_rounded_rect(box, 4.0F,
-                                    Color{theme.background.r, theme.background.g, theme.background.b, 242});
+                p.fill_rounded_rect(box, 4.0F, Color{theme.background.r, theme.background.g, theme.background.b, 242});
                 p.draw_rounded_border(box, 4.0F, 1.0F, grid);
                 const Rect text_box{.origin = Point{.x = origin.x + bx + 8.0F, .y = origin.y + by + 4.0F},
                                     .size = Size{.width = w - 16.0F, .height = line_h}};

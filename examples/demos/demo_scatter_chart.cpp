@@ -8,11 +8,12 @@ auto main() -> int {
 
     au::ScatterSeries a{};
     a.name = "A";
-    a.points = {{1.0, 2.0}, {2.5, 4.0}, {4.0, 3.0}, {5.5, 6.0}, {7.0, 5.0}};
+    a.points = {
+        {.x = 1.0, .y = 2.0}, {.x = 2.5, .y = 4.0}, {.x = 4.0, .y = 3.0}, {.x = 5.5, .y = 6.0}, {.x = 7.0, .y = 5.0}};
 
     au::ScatterSeries b{};
     b.name = "B";
-    b.points = {{1.5, 1.0}, {3.0, 2.5}, {5.0, 4.5}, {6.5, 3.5}};
+    b.points = {{.x = 1.5, .y = 1.0}, {.x = 3.0, .y = 2.5}, {.x = 5.0, .y = 4.5}, {.x = 6.5, .y = 3.5}};
     b.dot_radius = 5.0F;
 
     au::ScatterChart chart{au::ScatterChartProps{.series = {a, b}}};

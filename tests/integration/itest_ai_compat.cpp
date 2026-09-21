@@ -359,7 +359,6 @@ using ScriptError = std::string;
 }  // namespace
 
 AURORA_TEST_CASE(interact_fixtures_pass_testcontroller_scripts) {
-#ifdef AURORA_BACKEND_HEADLESS
     register_core_widgets();
 
     const std::filesystem::path dir = fixture_dir();
@@ -374,24 +373,16 @@ AURORA_TEST_CASE(interact_fixtures_pass_testcontroller_scripts) {
         const ScriptError err = run_interact_fixture(j);
         AURORA_TEST_CHECK_MSG(err.empty(), label + ": " + err);  // NOLINT(*-inefficient-string-concatenation)
     }
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
-#endif
 }
 
 AURORA_TEST_CASE(interact_fixtures_cover_at_least_three_scripts) {
-#ifdef AURORA_BACKEND_HEADLESS
     // 完成判据固化成用例：至少 3 个交互回归 fixture。
     const auto files = collect_fixtures(fixture_dir(), "interact_");
     AURORA_TEST_CHECK_MSG(files.size() >= 3U,
                           "interact fixtures count >= 3 (got " + std::to_string(files.size()) + ")");
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
-#endif
 }
 
 AURORA_TEST_CASE(interact_script_reports_missing_target) {
-#ifdef AURORA_BACKEND_HEADLESS
     register_core_widgets();
 
     // 反面用例：目标选不到时脚本必须报错，而不是「零断言通过」地静默变绿。
@@ -405,9 +396,6 @@ AURORA_TEST_CASE(interact_script_reports_missing_target) {
     AURORA_TEST_CHECK_MSG(!err.empty(), "missing target must be reported");
     AURORA_TEST_CHECK_MSG(err.find("target not found") != std::string::npos,
                           "error must name the cause (got: " + err + ")");
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
-#endif
 }
 
 #endif  // AURORA_BACKEND_HEADLESS

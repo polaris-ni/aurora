@@ -95,8 +95,7 @@ class ImageView : public Widget, public ImageViewProps {
     /// @param url    图片 URL（同时作为 `ImageCache` 缓存键）
     /// @param fetcher 显式 fetcher（可选；测试注入 mock 的入口）
     /// @return 持有加载中实例的 shared_ptr（回填经弱引用守卫，实例销毁后安全丢弃）
-    [[nodiscard]] static auto from_url(std::string url, ImageFetcher fetcher = {})
-        -> std::shared_ptr<ImageView> {
+    [[nodiscard]] static auto from_url(std::string url, ImageFetcher fetcher = {}) -> std::shared_ptr<ImageView> {
         auto w = std::make_shared<ImageView>();
         w->url_ = std::move(url);
         if (!fetcher) {

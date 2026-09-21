@@ -81,15 +81,15 @@ AURORA_TEST_CASE(glfw_surface_live_capture_window) {
 
     // 画一帧可辨识内容（底色 + 纯色块）并上屏两次：capture 走帧缓冲读回，须先有 present。
     AURORA_TEST_REQUIRE_TRUE(surface.begin_frame(160, 120).ok());
-    surface.painter().fill_rect(Rect{.origin = Point{.x = 20.0F, .y = 30.0F}, .size = Size{.width = 60.0F,
-                                                                                           .height = 40.0F}},
-                                Color{10, 20, 30, 255});
+    surface.painter().fill_rect(
+        Rect{.origin = Point{.x = 20.0F, .y = 30.0F}, .size = Size{.width = 60.0F, .height = 40.0F}},
+        Color{10, 20, 30, 255});
     AURORA_TEST_REQUIRE_TRUE(surface.present().ok());
     surface.poll_platform_events();
     AURORA_TEST_REQUIRE_TRUE(surface.begin_frame(160, 120).ok());
-    surface.painter().fill_rect(Rect{.origin = Point{.x = 20.0F, .y = 30.0F}, .size = Size{.width = 60.0F,
-                                                                                           .height = 40.0F}},
-                                Color{10, 20, 30, 255});
+    surface.painter().fill_rect(
+        Rect{.origin = Point{.x = 20.0F, .y = 30.0F}, .size = Size{.width = 60.0F, .height = 40.0F}},
+        Color{10, 20, 30, 255});
     AURORA_TEST_REQUIRE_TRUE(surface.present().ok());
 
     const std::string path = "aurora_live_glfw_capture.png";

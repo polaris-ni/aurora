@@ -5,8 +5,8 @@
 /// （各后端 .cpp 的映射表按该序索引，重排即破坏后端映射）
 
 #include <array>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <string_view>
 
 #include "aurora/window/cursor_map.h"
@@ -17,12 +17,13 @@ namespace aurora::test_cases::utest_cursor_map {
 namespace {
 
 /// @brief 全部 CursorShape 取值（按枚举取值序）；长度契约由 static_assert 对齐 AURORA_CURSOR_SHAPE_COUNT。
-constexpr std::array<CursorShape, AURORA_CURSOR_SHAPE_COUNT> ALL_SHAPES = {
-    CursorShape::Arrow,   CursorShape::IBeam,  CursorShape::PointingHand, CursorShape::ResizeNS,
-    CursorShape::ResizeEW, CursorShape::ResizeNWSE, CursorShape::ResizeNESW, CursorShape::Move,
+constexpr std::array<CursorShape, AURORA_CURSOR_SHAPE_COUNT> AURORA_ALL_SHAPES = {
+    CursorShape::Arrow,     CursorShape::IBeam,      CursorShape::PointingHand, CursorShape::ResizeNS,
+    CursorShape::ResizeEW,  CursorShape::ResizeNWSE, CursorShape::ResizeNESW,   CursorShape::Move,
     CursorShape::Crosshair, CursorShape::NotAllowed, CursorShape::Wait,
 };
-static_assert(std::size(ALL_SHAPES) == AURORA_CURSOR_SHAPE_COUNT, "ALL_SHAPES 漏填：新增 CursorShape 后须同步扩列");
+static_assert(std::size(AURORA_ALL_SHAPES) == AURORA_CURSOR_SHAPE_COUNT,
+              "ALL_SHAPES 漏填：新增 CursorShape 后须同步扩列");
 
 }  // namespace
 
@@ -62,11 +63,11 @@ AURORA_TEST_CASE(cursor_shape_rfc_names_map_all_shapes) {
 AURORA_TEST_CASE(cursor_shape_rfc_names_are_pairwise_unique_and_non_empty) {
     // 互异性：两个不同语义形状不得映射到同一主题名（否则 Wayland/浏览器上无法区分）。
     // 非空性：任何形状都不得产出空名（空名会让 wl_cursor_theme_get_cursor 静默失败）。
-    for (std::size_t i = 0; i < ALL_SHAPES.size(); ++i) {
-        const std::string_view a{cursor_rfc_name(ALL_SHAPES.at(i))};
+    for (std::size_t i = 0; i < AURORA_ALL_SHAPES.size(); ++i) {
+        const std::string_view a{cursor_rfc_name(AURORA_ALL_SHAPES.at(i))};
         AURORA_TEST_CHECK_FALSE(a.empty());
-        for (std::size_t j = i + 1; j < ALL_SHAPES.size(); ++j) {
-            const std::string_view b{cursor_rfc_name(ALL_SHAPES.at(j))};
+        for (std::size_t j = i + 1; j < AURORA_ALL_SHAPES.size(); ++j) {
+            const std::string_view b{cursor_rfc_name(AURORA_ALL_SHAPES.at(j))};
             AURORA_TEST_CHECK_STRNE(a, b);
         }
     }

@@ -36,7 +36,7 @@ auto wstr_to_utf8(const wchar_t *ws) -> std::string {
     return s;
 }
 
-} // namespace aurora::internal
+}  // namespace aurora::internal
 #endif
 
 // 跨平台纯逻辑：Unicode 码点 ↔ UTF-8（1~4 字节）。不依赖平台 API，非 AURORA_PLATFORM_WINDOWS 也可编译验证。
@@ -54,11 +54,11 @@ auto utf8_encode(std::uint32_t cp) -> std::string {
         return std::string(1, static_cast<char>(cp));
     }
     if (cp <= 0x7FF) {
-        const std::array b{ static_cast<char>(0xC0U | (cp >> 6U)), static_cast<char>(0x80U | (cp & 0x3FU)) };
-        return { b.data(), b.size() };
+        const std::array b{static_cast<char>(0xC0U | (cp >> 6U)), static_cast<char>(0x80U | (cp & 0x3FU))};
+        return {b.data(), b.size()};
     }
     if (cp >= 0xD800 && cp <= 0xDFFF) {
-        return {}; // UTF-16 代理区不是合法 Unicode 标量值，编码将产出非 UTF-8 字节序列，拒绝
+        return {};  // UTF-16 代理区不是合法 Unicode 标量值，编码将产出非 UTF-8 字节序列，拒绝
     }
     if (cp <= 0xFFFF) {
         const std::array b{
@@ -66,7 +66,7 @@ auto utf8_encode(std::uint32_t cp) -> std::string {
             static_cast<char>(0x80U | ((cp >> 6U) & 0x3FU)),
             static_cast<char>(0x80U | (cp & 0x3FU)),
         };
-        return { b.data(), b.size() };
+        return {b.data(), b.size()};
     }
     if (cp <= 0x10FFFF) {
         const std::array b{
@@ -75,7 +75,7 @@ auto utf8_encode(std::uint32_t cp) -> std::string {
             static_cast<char>(0x80U | ((cp >> 6U) & 0x3FU)),
             static_cast<char>(0x80U | (cp & 0x3FU)),
         };
-        return { b.data(), b.size() };
+        return {b.data(), b.size()};
     }
     return {};
 }
@@ -132,4 +132,4 @@ auto utf8_cp_slice(const std::string &s, std::size_t start, std::size_t count) -
     return s.substr(i, end - i);
 }
 
-} // namespace aurora
+}  // namespace aurora

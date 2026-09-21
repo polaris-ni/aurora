@@ -37,7 +37,7 @@ auto init_console() noexcept -> void {
 
 auto Logger::instance() -> Logger & {
     static Logger s;
-    init_console(); // 安全网：任何使用日志的消费者自动获得正确控制台代码页
+    init_console();  // 安全网：任何使用日志的消费者自动获得正确控制台代码页
     return s;
 }
 
@@ -67,13 +67,13 @@ auto Logger::log(std::string_view file, int line_no, LogLevel level, std::string
     std::ostringstream tid_oss;
     tid_oss << std::this_thread::get_id();
 
-    std::string out = "[" + log_timestamp() + "]" + "[" + std::string{ log_level_label(level) } + "]";
+    std::string out = "[" + log_timestamp() + "]" + "[" + std::string{log_level_label(level)} + "]";
     out += '[';
-    out += category.empty() ? std::string_view{ "-" } : category;
+    out += category.empty() ? std::string_view{"-"} : category;
     out += '@';
     out += tid_oss.str();
     out += ' ';
-    out += file.empty() ? std::string_view{ "-" } : file;
+    out += file.empty() ? std::string_view{"-"} : file;
     out += ':';
     out += internal::string_format("%d", line_no);
     out += ']';
@@ -108,8 +108,8 @@ auto Logger::default_sink() -> LogSink {
 auto Logger::default_raw_sink() -> LogSink {
     return [](std::string_view l) -> void {
         std::fprintf(stdout, "%.*s", static_cast<int>(l.size()), l.data());
-        std::fflush(stdout); // 保证 LSP/MCP 等 stdio 线协议逐条消息即时送达对端
+        std::fflush(stdout);  // 保证 LSP/MCP 等 stdio 线协议逐条消息即时送达对端
     };
 }
 
-} // namespace aurora
+}  // namespace aurora

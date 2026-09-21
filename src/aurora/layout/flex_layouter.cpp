@@ -75,18 +75,10 @@ struct FlexLayoutContext {
     }
 
   private:
-    [[nodiscard]] auto p_max_main() const -> float {
-        return main_axis == 0 ? parent.max.width : parent.max.height;
-    }
-    [[nodiscard]] auto p_min_main() const -> float {
-        return main_axis == 0 ? parent.min.width : parent.min.height;
-    }
-    [[nodiscard]] auto p_max_cross() const -> float {
-        return main_axis == 1 ? parent.max.width : parent.max.height;
-    }
-    [[nodiscard]] auto p_min_cross() const -> float {
-        return main_axis == 1 ? parent.min.width : parent.min.height;
-    }
+    [[nodiscard]] auto p_max_main() const -> float { return main_axis == 0 ? parent.max.width : parent.max.height; }
+    [[nodiscard]] auto p_min_main() const -> float { return main_axis == 0 ? parent.min.width : parent.min.height; }
+    [[nodiscard]] auto p_max_cross() const -> float { return main_axis == 1 ? parent.max.width : parent.max.height; }
+    [[nodiscard]] auto p_min_cross() const -> float { return main_axis == 1 ? parent.min.width : parent.min.height; }
 
   public:
     // 阶段一(A)+ (B) + 固定间距计入：先测量非 flex 子项，再按权重瓜分剩余主轴，最后把

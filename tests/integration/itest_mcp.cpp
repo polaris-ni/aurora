@@ -222,10 +222,10 @@ struct Simulation {
 }
 
 /// @brief 复刻 `simulate_interaction` 的消费路径。
-[[nodiscard]] auto simulate(const au::Json& tree, const std::string& action, const std::string& path,
-                            float dx = 0.0F, float dy = 0.0F, const std::string& text = {}) -> Simulation {
-    constexpr int AURORA_WIDTH = 800;
-    constexpr int AURORA_HEIGHT = 600;
+[[nodiscard]] auto simulate(const au::Json& tree, const std::string& action, const std::string& path, float dx = 0.0F,
+                            float dy = 0.0F, const std::string& text = {}) -> Simulation {
+    constexpr int width = 800;
+    constexpr int height = 600;
     Simulation out;
     auto widget = from_json(tree);
     if (!widget) {
@@ -236,7 +236,7 @@ struct Simulation {
     // from_json 只构树不布局，而 simulate_* 以目标「中心点」为指针位置：未布局时控件尺寸为零、
     // 中心退化为自身原点，落点就不再是目标的真实中心。故与工具一致，先布局一次确立几何；
     // 其产物仅用于几何，不回传（回传的是交互之后的那份）。
-    (void)au::render_to_logical_snapshot(root, AURORA_WIDTH, AURORA_HEIGHT);
+    (void)au::render_to_logical_snapshot(root, width, height);
     out.root = root;
 
     au::Node target = au::Inspector::find_node(root, path);
@@ -263,7 +263,7 @@ struct Simulation {
         return out;
     }
     out.props = au::Inspector::get_prop(target.widget());
-    out.snapshot = au::render_to_logical_snapshot(root, AURORA_WIDTH, AURORA_HEIGHT);
+    out.snapshot = au::render_to_logical_snapshot(root, width, height);
     return out;
 }
 
@@ -279,11 +279,10 @@ struct Simulation {
 
 AURORA_TEST_CASE(mcp_simulate_click_reports_target_state_change) {
     register_core_widgets();
-    const au::Json tree =
-        node_json("Column", au::Json::object(), au::Json::array({node_json("Checkbox")}));
+    const au::Json tree = node_json("Column", au::Json::object(), au::Json::array({node_json("Checkbox")}));
 
     const Simulation s = simulate(tree, "click", "0");
-    AURORA_TEST_CHECK_MSG(s.error.empty(), s.error.c_str());
+    AURORA_TEST_CHECK_MSG(s.error.empty(), s.error);
     // 「已派发」不等于「状态变了」：必须读回属性确认事件真的落到了该控件（Checkbox 在
     // Release 时翻转 checked）。
     AURORA_TEST_CHECK(prop_value(s, "checked") == true);
@@ -294,11 +293,10 @@ AURORA_TEST_CASE(mcp_simulate_click_reports_target_state_change) {
 
 AURORA_TEST_CASE(mcp_simulate_text_inserts_into_target) {
     register_core_widgets();
-    const au::Json tree =
-        node_json("Column", au::Json::object(), au::Json::array({node_json("TextInput")}));
+    const au::Json tree = node_json("Column", au::Json::object(), au::Json::array({node_json("TextInput")}));
 
     const Simulation s = simulate(tree, "text", "0", 0.0F, 0.0F, "hi");
-    AURORA_TEST_CHECK_MSG(s.error.empty(), s.error.c_str());
+    AURORA_TEST_CHECK_MSG(s.error.empty(), s.error);
     AURORA_TEST_CHECK(prop_value(s, "value") == "hi");
 }
 
@@ -310,7 +308,7 @@ AURORA_TEST_CASE(mcp_simulate_scroll_reaches_layout_backed_target) {
     const au::Json tree = node_json("Scroll", au::Json{{"step", 20.0}}, au::Json::array({content}));
 
     const Simulation s = simulate(tree, "scroll", "0", 0.0F, -24.0F);
-    AURORA_TEST_CHECK_MSG(s.error.empty(), s.error.c_str());
+    AURORA_TEST_CHECK_MSG(s.error.empty(), s.error);
     // 语义边界：滚动偏移不在这条通道的属性面上（Scroll 不序列化 offset；LazyList/GridView
     // 虽序列化 scroll_offset，但其子项由运行时 ItemBuilder 提供，静态 JSON 树给不出来），
     // 故此处断言的是「事件已派发到布局出的可命中目标」，偏移量本身须由 C++ 测试读回。
@@ -344,7 +342,7 @@ AURORA_TEST_CASE(mcp_simulate_scroll_depends_on_the_layout_pass) {
     // 工具路径（派发前布局一次）：几何成立后同一事件真正改变滚动偏移。
     {
         const Simulation s = simulate(tree, "scroll", "", 0.0F, -200.0F);
-        AURORA_TEST_CHECK_MSG(s.error.empty(), s.error.c_str());
+        AURORA_TEST_CHECK_MSG(s.error.empty(), s.error);
         au::Node target = au::Inspector::find_node(s.root, "");
         AURORA_TEST_REQUIRE(target);
         auto* scroll = dynamic_cast<au::Scroll*>(&target.widget());
@@ -355,8 +353,7 @@ AURORA_TEST_CASE(mcp_simulate_scroll_depends_on_the_layout_pass) {
 
 AURORA_TEST_CASE(mcp_simulate_reports_missing_path_hidden_target_and_unknown_action) {
     register_core_widgets();
-    const au::Json tree =
-        node_json("Column", au::Json::object(), au::Json::array({node_json("Checkbox")}));
+    const au::Json tree = node_json("Column", au::Json::object(), au::Json::array({node_json("Checkbox")}));
 
     // 路径不存在：定位失败，不改动任何控件、也不产生快照。
     {
@@ -367,9 +364,8 @@ AURORA_TEST_CASE(mcp_simulate_reports_missing_path_hidden_target_and_unknown_act
 
     // 目标存在但整个子树不参与命中（show=false）：派发前即失败，不改变状态。
     {
-        const au::Json hidden =
-            node_json("Column", au::Json::object(),
-                      au::Json::array({node_json("Checkbox", au::Json{{"show", false}})}));
+        const au::Json hidden = node_json("Column", au::Json::object(),
+                                          au::Json::array({node_json("Checkbox", au::Json{{"show", false}})}));
         const Simulation s = simulate(hidden, "click", "0");
         AURORA_TEST_CHECK(!s.error.empty());
     }
@@ -413,7 +409,7 @@ AURORA_TEST_CASE(mcp_list_commands_ranks_and_filters_like_the_palette) {
     commands.add(std::move(hidden));
 
     const au::Json envelope = commands.to_json();
-    const au::Json *items = au::tools::command_descriptors(envelope);
+    const au::Json* items = au::tools::command_descriptors(envelope);
     AURORA_TEST_REQUIRE_TRUE(items != nullptr);
     AURORA_TEST_CHECK_EQ(items->size(), std::size_t{3});
 
@@ -457,12 +453,12 @@ AURORA_TEST_CASE(mcp_invoke_command_reports_status_without_claiming_execution) {
     commands.add(std::move(gated));
 
     const au::Json envelope = commands.to_json();
-    const au::Json *items = au::tools::command_descriptors(envelope);
+    const au::Json* items = au::tools::command_descriptors(envelope);
     AURORA_TEST_REQUIRE_TRUE(items != nullptr);
 
     au::tools::CommandStatus status = au::tools::CommandStatus::NotFound;
 
-    const au::Json *found = au::tools::resolve_command(*items, "file.open", status);
+    const au::Json* found = au::tools::resolve_command(*items, "file.open", status);
     AURORA_TEST_REQUIRE_TRUE(found != nullptr);
     AURORA_TEST_CHECK_TRUE(status == au::tools::CommandStatus::Invocable);
     AURORA_TEST_CHECK_TRUE(au::tools::command_bool_field(*found, "invocable", false));
@@ -501,11 +497,11 @@ AURORA_TEST_CASE(mcp_command_descriptors_accepts_envelope_and_bare_array) {
     commands.add(std::move(one));
 
     const au::Json envelope = commands.to_json();
-    const au::Json *from_envelope = au::tools::command_descriptors(envelope);
+    const au::Json* from_envelope = au::tools::command_descriptors(envelope);
     AURORA_TEST_REQUIRE_TRUE(from_envelope != nullptr);
     AURORA_TEST_CHECK_EQ(from_envelope->size(), std::size_t{1});
 
-    const au::Json bare = envelope["commands"];
+    const au::Json& bare = envelope["commands"];
     AURORA_TEST_CHECK_TRUE(au::tools::command_descriptors(bare) != nullptr);
 
     // 形态不符：无 commands 键的对象 / 标量 → 不识别。

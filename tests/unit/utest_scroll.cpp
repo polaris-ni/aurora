@@ -56,10 +56,11 @@ class BandBox final : public Widget {
         const Color colors[4] = {Color{255, 0, 0, 255}, Color{0, 255, 0, 255}, Color{0, 0, 255, 255},
                                  Color{255, 255, 0, 255}};
         for (int i = 0; i < 4; ++i) {
-            p.fill_rect(Rect{.origin = Point{.x = bounds.origin.x,
-                                             .y = bounds.origin.y + (band * static_cast<float>(i))},
-                             .size = Size{.width = bounds.size.width, .height = band}},
-                        colors[i]);
+            p.fill_rect(
+                Rect{.origin = Point{.x = bounds.origin.x, .y = bounds.origin.y + (band * static_cast<float>(i))},
+                     .size = Size{.width = bounds.size.width, .height = band}},
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index): 条带序号循环取值，上界由条带数约束
+                colors[i]);
         }
     }
 
@@ -109,6 +110,8 @@ class ReduceMotionGuard final {
     ~ReduceMotionGuard() { set_accessibility_settings(saved_); }
     ReduceMotionGuard(const ReduceMotionGuard&) = delete;
     auto operator=(const ReduceMotionGuard&) -> ReduceMotionGuard& = delete;
+    ReduceMotionGuard(ReduceMotionGuard&&) = delete;
+    auto operator=(ReduceMotionGuard&&) -> ReduceMotionGuard& = delete;
 
   private:
     AccessibilitySettings saved_;
@@ -155,7 +158,7 @@ AURORA_TEST_CASE(set_offset_jump_composites_correct_content_band) {
     AURORA_TEST_CHECK_EQ(static_cast<int>(top.b), 0);
 
     AURORA_TEST_CHECK_TRUE(s.set_offset(300.0F));  // 跳到缓冲窗口之外（第 4 条带）
-    p.begin(100, 100);                             // 重新起帧
+    p.begin(100, 100);  // 重新起帧
     s.paint(p, view, ctx);
     const Color jumped = p.get_pixel(50, 50);  // 内容 y≈350 → 第 4 条带（黄）
     AURORA_TEST_CHECK_EQ(static_cast<int>(jumped.r), 255);
@@ -164,7 +167,7 @@ AURORA_TEST_CASE(set_offset_jump_composites_correct_content_band) {
 }
 
 AURORA_TEST_CASE(restore_key_restores_offset_on_first_scrollable_layout) {
-    auto &storage = ScrollStorage::instance();
+    auto& storage = ScrollStorage::instance();
     storage.clear_all();
 
     // 第一次「会话」：滚动后位置写入注册表。
@@ -200,7 +203,7 @@ AURORA_TEST_CASE(restore_key_restores_offset_on_first_scrollable_layout) {
 }
 
 AURORA_TEST_CASE(serialized_offset_round_trips_and_beats_restore_key) {
-    auto &storage = ScrollStorage::instance();
+    auto& storage = ScrollStorage::instance();
     storage.clear_all();
     storage.write("k", 250.0F);  // 注册表内已有记录
 
@@ -413,7 +416,7 @@ AURORA_TEST_CASE(reduce_motion_snaps_directly_without_intermediate_frames) {
 
     s.scroll_by(-120.0F);
     AURORA_TEST_CHECK_NEAR(s.offset_y(), 200.0F, 1e-4F);  // 直落端点：状态与走完一致
-    AURORA_TEST_CHECK_FALSE(s.is_gliding());              // 且不产生中间帧
+    AURORA_TEST_CHECK_FALSE(s.is_gliding());  // 且不产生中间帧
 
     s.scroll_to(0.0F);  // scroll_to 的 animate=true 同样短路
     AURORA_TEST_CHECK_NEAR(s.offset_y(), 0.0F, 1e-4F);

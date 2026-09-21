@@ -15,9 +15,13 @@
 #include "framework/aurora_test.h"
 
 #if defined(AURORA_PLATFORM_LINUX) && (defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))
+// 平台可用性开关，供下方 #if 使用，无 constexpr 等价物
+// NOLINTNEXTLINE(*-macro-usage)
 #define AURORA_ATSPI_BRIDGE_AVAILABLE 1
 #include "aurora/widget/widget.h"
 #else
+// 平台可用性开关，供下方 #if 使用，无 constexpr 等价物
+// NOLINTNEXTLINE(*-macro-usage)
 #define AURORA_ATSPI_BRIDGE_AVAILABLE 0
 #endif
 
@@ -30,7 +34,7 @@ namespace {
 /// @brief 最小可投影根：LeafWidget + 显式语义（is_control）让快照有活节点。
 class ProbeRoot final : public LeafWidget {
   public:
-    [[nodiscard]] auto type_name() const -> const char *override { return "ProbeRoot"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "ProbeRoot"; }
 
   protected:
     auto on_layout(const Constraints & /*c*/, const BuildContext & /*ctx*/) -> Size override {

@@ -193,7 +193,7 @@ freely, subject to the following restrictions:
 - **版本**：gfx-rs/wgpu-native v29 系列（依赖锁 wgpu-core 29.0.3，以 `third_party/wgpu-native/Cargo.lock` 为准）
 - **来源**：vendored 于 `third_party/wgpu-native/`（源码保持上游原样、不做本地修改）；
   WebGPU C 头 vendored 于 `third_party/wgpu-native/ffi/webgpu-headers/`
-- **用途**：`AURORA_BACKEND_GPU_WGPU=ON` 时提供 `WgpuRhi` GPU 栅格后端与 `WgpuSurface` 宿主上屏
+- **用途**：`AURORA_BACKEND_GPU_WGPU=ON` 时提供 `WgpuRhi` GPU 栅格后端与 `WgpuWin32Surface` 宿主上屏
   （Vulkan / D3D12 / Metal / GLES 统一 WGSL 管线），见 `codespec/BUILD_OPTIONS.md` §3.8
 - **集成方式**：仅开关开启时经 cargo 以 staticlib 源码构建、静态链入（Rust 依赖树不入库，
   首次构建由 cargo 在线自 crates.io 按 `Cargo.lock` 拉取；`target/` 构建树不入库）。

@@ -108,15 +108,13 @@ auto Widget::perform_accessibility_action(const AccessibilityActionRequest &req)
             return true;
         }
         case AccessibilityAction::ScrollIntoView:
-            // 无布局期几何写入能力（滚动由最近可滚动祖先承载）：留给容器覆写，基类不支持。
-            return false;
         case AccessibilityAction::Toggle:
         case AccessibilityAction::Value:
         case AccessibilityAction::Select:
-            // 语义强相关：必须控件显式覆写（Checkbox/Switch → Toggle、Slider → Value …）。
-            return false;
         case AccessibilityAction::None:
         default:
+            // ScrollIntoView：无布局期几何写入能力（滚动由最近可滚动祖先承载），基类不支持。
+            // Toggle / Value / Select：语义强相关，必须控件显式覆写（Checkbox/Switch → Toggle、Slider → Value …）。
             return false;
     }
 }

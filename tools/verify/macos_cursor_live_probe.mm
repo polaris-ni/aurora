@@ -125,7 +125,7 @@ auto main() -> int {
             rc = 6;
         } else {
             aurora::MacOSSurface surface(240, 160, "aurora-verify-i1-cursor-macos");
-            const int total = static_cast<int>(aurora::kCursorShapeCount);
+            const int total = static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT);
 
             emit(aurora_verify::pad_right("#", 3) + aurora_verify::pad_right("shape(rfc name)", 20) +
                  aurora_verify::pad_right("expect@NSCursor", 20) + aurora_verify::pad_right("readback@current", 20) +
@@ -151,8 +151,7 @@ auto main() -> int {
                 emit(aurora_verify::pad_right(aurora_verify::format_int(i), 3) +
                      aurora_verify::pad_right(aurora::cursor_rfc_name(shape), 20) +
                      aurora_verify::pad_right(aurora_verify::format_handle(raw_ptr(want)), 20) +
-                     aurora_verify::pad_right(aurora_verify::format_handle(raw_ptr(got)), 20) +
-                     (match ? "YES" : "no"));
+                     aurora_verify::pad_right(aurora_verify::format_handle(raw_ptr(got)), 20) + (match ? "YES" : "no"));
             }
 
             emit(std::string("命中 ") + aurora_verify::format_int(hits) + "/" + aurora_verify::format_int(total) +

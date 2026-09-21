@@ -19,9 +19,7 @@ namespace aurora::test_cases::utest_audio_alsa {
 namespace {
 
 /// 渲染回调：整块补零——在带真机的环境跑本测试也不出声。
-auto zero_render(float *out, int frames) -> void {
-    std::fill_n(out, static_cast<std::size_t>(frames) * 2U, 0.0F);
-}
+auto zero_render(float *out, int frames) -> void { std::fill_n(out, static_cast<std::size_t>(frames) * 2U, 0.0F); }
 
 auto noop_capture(const float * /*interleaved*/, int /*frames*/, int /*rate*/, int /*channels*/) -> void {}
 

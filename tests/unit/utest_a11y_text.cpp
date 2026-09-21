@@ -21,18 +21,18 @@ using aurora::a11y::TextUnit;
 using aurora::a11y::UtfOffsetMap;
 
 /// @brief ASCII 文本：UTF-8 偏移与 UTF-16 偏移逐位相等（映射退化为恒等）。
-constexpr std::string_view kAscii = "hello";
+constexpr std::string_view AURORA_ASCII = "hello";
 
 /// @brief 3 字节字符（CJK「中」）：1 个 UTF-16 单元、3 个 UTF-8 字节。
-constexpr std::string_view kCjk = "中文";
+constexpr std::string_view AURORA_CJK = "中文";
 
 /// @brief 非 BMP：emoji U+1F600 占 4 字节 UTF-8 / 2 个 UTF-16 单元。
-constexpr std::string_view kEmoji = "\xF0\x9F\x98\x80";
+constexpr std::string_view AURORA_EMOJI = "\xF0\x9F\x98\x80";
 
 }  // namespace
 
 AURORA_TEST_CASE(ascii_offsets_are_identity) {
-    const UtfOffsetMap map{kAscii};
+    const UtfOffsetMap map{AURORA_ASCII};
     AURORA_TEST_CHECK_EQ(map.utf8_length(), std::size_t{5});
     AURORA_TEST_CHECK_EQ(map.utf16_length(), std::size_t{5});
     for (std::size_t i = 0; i <= 5; ++i) {
@@ -42,7 +42,7 @@ AURORA_TEST_CASE(ascii_offsets_are_identity) {
 }
 
 AURORA_TEST_CASE(cjk_maps_bytes_to_single_utf16_unit) {
-    const UtfOffsetMap map{kCjk};
+    const UtfOffsetMap map{AURORA_CJK};
     AURORA_TEST_CHECK_EQ(map.utf8_length(), std::size_t{6});
     AURORA_TEST_CHECK_EQ(map.utf16_length(), std::size_t{2});
 
@@ -55,7 +55,7 @@ AURORA_TEST_CASE(cjk_maps_bytes_to_single_utf16_unit) {
 AURORA_TEST_CASE(emoji_low_surrogate_index_clamps_to_codepoint_start) {
     // G9：UIA MoveEndpointByUnit(Character) 会把端点落到代理对第二单元（utf16==1），
     // 该索引在 UTF-8 侧无码点起点 —— 必须夹紧回 0，绝不产生指向码点中部的偏移。
-    const UtfOffsetMap map{kEmoji};
+    const UtfOffsetMap map{AURORA_EMOJI};
     AURORA_TEST_CHECK_EQ(map.utf8_length(), std::size_t{4});
     AURORA_TEST_CHECK_EQ(map.utf16_length(), std::size_t{2});
 
@@ -66,7 +66,7 @@ AURORA_TEST_CASE(emoji_low_surrogate_index_clamps_to_codepoint_start) {
 }
 
 AURORA_TEST_CASE(advance_utf8_walks_codepoints_and_clamps) {
-    const UtfOffsetMap map{kCjk};
+    const UtfOffsetMap map{AURORA_CJK};
     AURORA_TEST_CHECK_EQ(map.advance_utf8(0, 1), std::size_t{3});
     AURORA_TEST_CHECK_EQ(map.advance_utf8(3, 1), std::size_t{6});
     AURORA_TEST_CHECK_EQ(map.advance_utf8(3, -1), std::size_t{0});
@@ -76,7 +76,7 @@ AURORA_TEST_CASE(advance_utf8_walks_codepoints_and_clamps) {
 }
 
 AURORA_TEST_CASE(advance_utf16_returns_utf8_after_clamping) {
-    const UtfOffsetMap map{kEmoji};
+    const UtfOffsetMap map{AURORA_EMOJI};
     AURORA_TEST_CHECK_EQ(map.advance_utf16(0, 1), std::size_t{0});  // 落到低代理 → 夹紧
     AURORA_TEST_CHECK_EQ(map.advance_utf16(0, 2), std::size_t{4});
     AURORA_TEST_CHECK_EQ(map.advance_utf16(2, -2), std::size_t{0});
@@ -84,14 +84,14 @@ AURORA_TEST_CASE(advance_utf16_returns_utf8_after_clamping) {
 }
 
 AURORA_TEST_CASE(utf8_utf16_roundtrip_preserves_text) {
-    const std::string mixed = std::string{"a"} + std::string{kCjk} + std::string{kEmoji} + "z";
+    const std::string mixed = std::string{"a"} + std::string{AURORA_CJK} + std::string{AURORA_EMOJI} + "z";
     const std::u16string wide = aurora::a11y::utf8_to_utf16(mixed);
     AURORA_TEST_CHECK_EQ(wide.size(), std::size_t{6});  // a 中 文 emoji(2) z
     AURORA_TEST_CHECK_STREQ(aurora::a11y::utf16_to_utf8(wide).c_str(), mixed.c_str());
 }
 
 AURORA_TEST_CASE(utf8_to_utf16_emits_surrogate_pair) {
-    const std::u16string wide = aurora::a11y::utf8_to_utf16(kEmoji);
+    const std::u16string wide = aurora::a11y::utf8_to_utf16(AURORA_EMOJI);
     AURORA_TEST_REQUIRE_EQ(wide.size(), std::size_t{2});
     AURORA_TEST_CHECK_EQ(static_cast<int>(wide[0]), 0xD83D);
     AURORA_TEST_CHECK_EQ(static_cast<int>(wide[1]), 0xDE00);
@@ -105,9 +105,9 @@ AURORA_TEST_CASE(utf16_to_utf8_replaces_lone_surrogates) {
 }
 
 AURORA_TEST_CASE(utf16_length_of_counts_surrogates_as_two) {
-    AURORA_TEST_CHECK_EQ(aurora::a11y::utf16_length_of(kAscii), std::size_t{5});
-    AURORA_TEST_CHECK_EQ(aurora::a11y::utf16_length_of(kCjk), std::size_t{2});
-    AURORA_TEST_CHECK_EQ(aurora::a11y::utf16_length_of(kEmoji), std::size_t{2});
+    AURORA_TEST_CHECK_EQ(aurora::a11y::utf16_length_of(AURORA_ASCII), std::size_t{5});
+    AURORA_TEST_CHECK_EQ(aurora::a11y::utf16_length_of(AURORA_CJK), std::size_t{2});
+    AURORA_TEST_CHECK_EQ(aurora::a11y::utf16_length_of(AURORA_EMOJI), std::size_t{2});
 }
 
 AURORA_TEST_CASE(expand_document_covers_whole_text) {
@@ -150,7 +150,7 @@ AURORA_TEST_CASE(expand_word_splits_on_ascii_punctuation_and_space) {
 }
 
 AURORA_TEST_CASE(expand_character_spans_one_codepoint) {
-    const std::string text = std::string{kCjk} + "z";
+    const std::string text = std::string{AURORA_CJK} + "z";
     {
         const auto [s, e] = aurora::a11y::expand_to_unit(text, 0, TextUnit::Character);
         AURORA_TEST_CHECK_EQ(s, std::size_t{0});

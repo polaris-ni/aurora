@@ -25,13 +25,13 @@ namespace aurora::test_cases::utest_title_bar_painter {
 
 namespace {
 
-constexpr Color kBase{10, 20, 30, 255};  ///< 画布底色：装饰未覆盖处必须仍是它
-constexpr Color kMacRed{0xFF, 0x5F, 0x57, 255};
-constexpr Color kMacYellow{0xFE, 0xBC, 0x2E, 255};
-constexpr Color kMacGreen{0x28, 0xC8, 0x40, 255};
+constexpr Color AURORA_BASE{10, 20, 30, 255};  ///< 画布底色：装饰未覆盖处必须仍是它
+constexpr Color AURORA_MAC_RED{0xFF, 0x5F, 0x57, 255};
+constexpr Color AURORA_MAC_YELLOW{0xFE, 0xBC, 0x2E, 255};
+constexpr Color AURORA_MAC_GREEN{0x28, 0xC8, 0x40, 255};
 
 [[nodiscard]] auto center_of(const Rect &r) -> Point {
-    return Point{r.origin.x + r.size.width * 0.5F, r.origin.y + r.size.height * 0.5F};
+    return Point{.x = r.origin.x + (r.size.width * 0.5F), .y = r.origin.y + (r.size.height * 0.5F)};
 }
 
 [[nodiscard]] auto px(const Painter &p, const Point &pt) -> Color {
@@ -52,14 +52,16 @@ constexpr Color kMacGreen{0x28, 0xC8, 0x40, 255};
 
 auto raster_direct(Painter &p, const csd::TitleBarPaintState &s) -> void {
     p.begin(400, 120);
-    p.fill_rect(Rect{Point{0.0F, 0.0F}, Size{400.0F, 120.0F}}, kBase);
+    p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 120.0F}},
+                AURORA_BASE);
     csd::paint_title_bar(p, s);
 }
 
 /// @brief 录制为 DisplayList 再回放进同一画布——GPU 宿主（WgpuWaylandSurface）走的就是这条。
 auto raster_recorded(Painter &p, const csd::TitleBarPaintState &s) -> void {
     p.begin(400, 120);
-    p.fill_rect(Rect{Point{0.0F, 0.0F}, Size{400.0F, 120.0F}}, kBase);
+    p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 120.0F}},
+                AURORA_BASE);
     DisplayList dl;
     p.record(dl);
     csd::paint_title_bar(p, s);
@@ -96,6 +98,7 @@ auto check_paths_bit_identical(const csd::TitleBarPaintState &s) -> void {
     const std::size_t n = static_cast<std::size_t>(direct.width()) * static_cast<std::size_t>(direct.height()) * 4U;
     std::size_t diff = 0;
     for (std::size_t i = 0; i < n; ++i) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 逐字节比较两帧缓冲，下标即字节偏移
         if (direct.data()[i] != replayed.data()[i]) {
             ++diff;
         }
@@ -126,7 +129,7 @@ AURORA_TEST_CASE(direct_raster_and_record_replay_are_bit_identical) {
 
 AURORA_TEST_CASE(gated_states_emit_no_pixels) {
     csd::TitleBarPaintState s = plain_state();
-    const Point mid_band{200.0F, s.style.height * 0.5F};
+    const Point mid_band{.x = 200.0F, .y = s.style.height * 0.5F};
 
     // 无 CSD 标题栏（合成器提供 SSD / 无边框策略）：整幅仍是底色 → GPU 宿主据此跳过回放。
     s.title_bar = false;
@@ -134,7 +137,7 @@ AURORA_TEST_CASE(gated_states_emit_no_pixels) {
     {
         Painter p;
         raster_direct(p, s);
-        AURORA_TEST_CHECK(px(p, mid_band) == kBase);
+        AURORA_TEST_CHECK(px(p, mid_band) == AURORA_BASE);
     }
 
     // 全屏默认隐藏标题栏；顶边悬停揭示后必须重新可见（覆盖层语义，不改窗口尺寸）。
@@ -144,7 +147,7 @@ AURORA_TEST_CASE(gated_states_emit_no_pixels) {
     {
         Painter p;
         raster_direct(p, s);
-        AURORA_TEST_CHECK(px(p, mid_band) == kBase);
+        AURORA_TEST_CHECK(px(p, mid_band) == AURORA_BASE);
     }
     s.fullscreen_bar_revealed = true;
     AURORA_TEST_CHECK_TRUE(s.paints_anything());
@@ -165,9 +168,9 @@ AURORA_TEST_CASE(adwaita_hover_paints_circle_tint_and_close_red) {
         raster_direct(p, s);
         const Color c = px(p, center_of(g.close));
         AURORA_TEST_CHECK(c != s.style.close_hover);
-        AURORA_TEST_CHECK(c != kBase);
+        AURORA_TEST_CHECK(c != AURORA_BASE);
         // 装饰只占顶部 height：其下仍是底色。
-        AURORA_TEST_CHECK(px(p, Point{40.0F, s.style.height + 4.0F}) == kBase);
+        AURORA_TEST_CHECK(px(p, Point{40.0F, s.style.height + 4.0F}) == AURORA_BASE);
         AURORA_TEST_CHECK(px(p, Point{40.0F, s.style.height * 0.5F}) == s.style.bg_active);
     }
     // 悬停关闭钮（序号 2）：圆底铺满为 close_hover 特征红。取圆心上方一点——圆心本身被
@@ -176,7 +179,7 @@ AURORA_TEST_CASE(adwaita_hover_paints_circle_tint_and_close_red) {
     {
         Painter p;
         raster_direct(p, s);
-        const Point above_centre{center_of(g.close).x, g.close.origin.y + 3.0F};
+        const Point above_centre{.x = center_of(g.close).x, .y = g.close.origin.y + 3.0F};
         AURORA_TEST_CHECK(px(p, above_centre) == s.style.close_hover);
     }
     // 悬停最小化钮（序号 0）：半透明白罩，既非底色也非红。
@@ -185,7 +188,7 @@ AURORA_TEST_CASE(adwaita_hover_paints_circle_tint_and_close_red) {
         Painter p;
         raster_direct(p, s);
         const Color c = px(p, center_of(g.minimize));
-        AURORA_TEST_CHECK(c != kBase);
+        AURORA_TEST_CHECK(c != AURORA_BASE);
         AURORA_TEST_CHECK(c != s.style.close_hover);
     }
 }
@@ -213,9 +216,9 @@ AURORA_TEST_CASE(mac_layout_shows_traffic_lights_without_hover) {
     Painter p;
     raster_direct(p, s);
     // 三枚圆点常显（macOS 视觉签名），不依赖悬停态。
-    AURORA_TEST_CHECK(px(p, center_of(g.close)) == kMacRed);
-    AURORA_TEST_CHECK(px(p, center_of(g.minimize)) == kMacYellow);
-    AURORA_TEST_CHECK(px(p, center_of(g.maximize)) == kMacGreen);
+    AURORA_TEST_CHECK(px(p, center_of(g.close)) == AURORA_MAC_RED);
+    AURORA_TEST_CHECK(px(p, center_of(g.minimize)) == AURORA_MAC_YELLOW);
+    AURORA_TEST_CHECK(px(p, center_of(g.maximize)) == AURORA_MAC_GREEN);
 }
 
 AURORA_TEST_CASE(inactive_palette_and_hidden_slots_leave_only_bg) {
@@ -230,7 +233,7 @@ AURORA_TEST_CASE(inactive_palette_and_hidden_slots_leave_only_bg) {
         Painter p;
         raster_direct(p, s);
         AURORA_TEST_CHECK(px(p, Point{40.0F, s.style.height * 0.5F}) == s.style.bg_inactive);
-        AURORA_TEST_CHECK(px(p, Point{40.0F, s.style.height + 4.0F}) == kBase);
+        AURORA_TEST_CHECK(px(p, Point{40.0F, s.style.height + 4.0F}) == AURORA_BASE);
     }
     // show_minimize=false：几何给空盒、绘制层跳过，该槽不留任何像素。
     // （隐藏按钮不占位，故取样点取「按最宽布局算出的原槽位」——右移补位的按钮不会落到那里。）

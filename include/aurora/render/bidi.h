@@ -40,8 +40,7 @@ namespace aurora::render::detail {
 /// @param base_level 段落基准层级（0 = LTR 基准，1 = RTL 基准）。
 /// @return 与 `text` 等长的层级数组；显式控制符占位为其所在 embedding 的层级
 ///         （调用方的重排/绘制按需跳过；Aurora 文本流通常不含控制符）。
-[[nodiscard]] auto uba_levels(const std::vector<char32_t> &text, std::uint8_t base_level)
-    -> std::vector<std::uint8_t>;
+[[nodiscard]] auto uba_levels(const std::vector<char32_t> &text, std::uint8_t base_level) -> std::vector<std::uint8_t>;
 
 /// @brief UBA L2 重排：给定每元素（如 run）的嵌入层级序列，返回视觉序（左→右）的
 ///        元素下标序列。同层级连续元素构成隐式 span；层叠反转自然保持 span 内部的

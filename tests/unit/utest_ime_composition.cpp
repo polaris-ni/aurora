@@ -41,8 +41,8 @@ auto u16(const std::vector<std::uint32_t> &cps) -> std::u16string {
     return out;
 }
 
-constexpr std::uint8_t kTarget = static_cast<std::uint8_t>(Attr::kTargetNotConverted);
-constexpr std::uint8_t kDone = static_cast<std::uint8_t>(Attr::kConverted);
+constexpr std::uint8_t AURORA_TARGET = static_cast<std::uint8_t>(Attr::TargetNotConverted);
+constexpr std::uint8_t AURORA_DONE = static_cast<std::uint8_t>(Attr::Converted);
 
 }  // namespace
 
@@ -84,17 +84,17 @@ AURORA_TEST_CASE(orphan_surrogate_becomes_replacement_char) {
 AURORA_TEST_CASE(target_selection_maps_attr_run) {
     // 「nihao 你好」式混合：目标段落在单元 1..2（码点 1..2）。
     const std::u16string s = u16({'a', 'b', 'c', 'd'});
-    const CpRange r = target_selection(s, {kDone, kTarget, kTarget, kDone});
+    const CpRange r = target_selection(s, {AURORA_DONE, AURORA_TARGET, AURORA_TARGET, AURORA_DONE});
     AURORA_TEST_CHECK_TRUE(r.has_selection());
     AURORA_TEST_CHECK_EQ(r.start, std::size_t(1));
     AURORA_TEST_CHECK_EQ(r.end, std::size_t(2));
 }
 
 AURORA_TEST_CASE(target_selection_accepts_both_target_attrs) {
-    // kTargetConverted（已转换待替换）与 kTargetNotConverted（待转换）同属目标段。
+    // TargetConverted（已转换待替换）与 TargetNotConverted（待转换）同属目标段。
     const std::u16string s = u16({'a', 'b'});
-    const CpRange r = target_selection(s, {static_cast<std::uint8_t>(Attr::kTargetConverted),
-                                           static_cast<std::uint8_t>(Attr::kInputError)});
+    const CpRange r = target_selection(
+        s, {static_cast<std::uint8_t>(Attr::TargetConverted), static_cast<std::uint8_t>(Attr::InputError)});
     AURORA_TEST_CHECK_TRUE(r.has_selection());
     AURORA_TEST_CHECK_EQ(r.start, std::size_t(0));
     AURORA_TEST_CHECK_EQ(r.end, std::size_t(0));
@@ -103,15 +103,15 @@ AURORA_TEST_CASE(target_selection_accepts_both_target_attrs) {
 AURORA_TEST_CASE(target_selection_without_target_has_no_range) {
     const std::u16string s = u16({'a', 'b', 'c'});
     AURORA_TEST_CHECK_FALSE(target_selection(s, {}).has_selection());
-    AURORA_TEST_CHECK_FALSE(target_selection(s, {kDone, kDone, kDone}).has_selection());
-    const CpRange none = target_selection(s, {kDone, kDone, kDone});
+    AURORA_TEST_CHECK_FALSE(target_selection(s, {AURORA_DONE, AURORA_DONE, AURORA_DONE}).has_selection());
+    const CpRange none = target_selection(s, {AURORA_DONE, AURORA_DONE, AURORA_DONE});
     AURORA_TEST_CHECK_EQ(none.end, TextCompositionEvent::AURORA_NO_SELECTION);
 }
 
 AURORA_TEST_CASE(target_selection_spanning_surrogate_pair_collapses_to_one_cp) {
     // 目标段覆盖 😀 的两个单元：起讫同属一个码点（含尾口径），不得产出区间倒置。
     const std::u16string s = u16({0x1F600U, 'x'});
-    const CpRange r = target_selection(s, {kTarget, kTarget, kDone});
+    const CpRange r = target_selection(s, {AURORA_TARGET, AURORA_TARGET, AURORA_DONE});
     AURORA_TEST_CHECK_TRUE(r.has_selection());
     AURORA_TEST_CHECK_EQ(r.start, std::size_t(0));
     AURORA_TEST_CHECK_EQ(r.end, std::size_t(0));
@@ -120,18 +120,18 @@ AURORA_TEST_CASE(target_selection_spanning_surrogate_pair_collapses_to_one_cp) {
 AURORA_TEST_CASE(target_selection_honours_shorter_or_longer_attr_array) {
     const std::u16string s = u16({'a', 'b', 'c'});
     // 缺尾（attrs 短于串）：按较短者生效，不越界读。
-    const CpRange short_run = target_selection(s, {kTarget});
+    const CpRange short_run = target_selection(s, {AURORA_TARGET});
     AURORA_TEST_CHECK_EQ(short_run.start, std::size_t(0));
     AURORA_TEST_CHECK_EQ(short_run.end, std::size_t(0));
     // 多余（attrs 长于串）：越界部分忽略。
-    const CpRange long_run = target_selection(s, {kDone, kTarget, kDone, kDone, kDone});
+    const CpRange long_run = target_selection(s, {AURORA_DONE, AURORA_TARGET, AURORA_DONE, AURORA_DONE, AURORA_DONE});
     AURORA_TEST_CHECK_EQ(long_run.start, std::size_t(1));
     AURORA_TEST_CHECK_EQ(long_run.end, std::size_t(1));
 }
 
 AURORA_TEST_CASE(empty_comp_means_composition_cancelled) {
     // 空组合串：preedit 空、光标 0、无选区（控件据此走 cancel 分支）。
-    const auto e = make_preedit_state(u16({}), 0, {kTarget});
+    const auto e = make_preedit_state(u16({}), 0, {AURORA_TARGET});
     AURORA_TEST_CHECK(e.preedit.empty());
     AURORA_TEST_CHECK_EQ(e.cursor_index, std::size_t(0));
     AURORA_TEST_CHECK_FALSE(e.has_preedit_selection());
@@ -140,7 +140,7 @@ AURORA_TEST_CASE(empty_comp_means_composition_cancelled) {
 AURORA_TEST_CASE(preedit_state_end_to_end_with_selection) {
     // 端到端：已转换段 + 待转换段，光标落在目标段起点。
     const std::u16string s = u16({0x4E00U, 0x4E8CU, 0x4E09U});  // 一二三
-    const auto e = make_preedit_state(s, 1, {kDone, kTarget, kTarget});
+    const auto e = make_preedit_state(s, 1, {AURORA_DONE, AURORA_TARGET, AURORA_TARGET});
     AURORA_TEST_CHECK_EQ(e.preedit, std::string("\xE4\xB8\x80\xE4\xBA\x8C\xE4\xB8\x89"));
     AURORA_TEST_CHECK_EQ(e.cursor_index, std::size_t(1));
     AURORA_TEST_CHECK_TRUE(e.has_preedit_selection());
@@ -152,7 +152,10 @@ AURORA_TEST_CASE(preedit_state_end_to_end_with_selection) {
 
 AURORA_TEST_CASE(utf8_byte_to_cp_index_passes_through_and_clamps) {
     // 「你a好」：你=字节 0..2，a=3，好=4..6，总 7 字节、3 码点。
-    constexpr std::string_view s = "\xE4\xBD\xA0" "a" "\xE5\xA5\xBD";
+    constexpr std::string_view s =
+        "\xE4\xBD\xA0"
+        "a"
+        "\xE5\xA5\xBD";
     AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 0), std::size_t(0));  // 「你」起点
     AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 3), std::size_t(1));  // a（ASCII）
     AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 4), std::size_t(2));  // 「好」起点

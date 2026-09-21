@@ -38,10 +38,10 @@ class Window;
 /// 成员函数声明处的默认实参（"default member initializer ... required before the
 /// end of its enclosing class"）。
 struct TestControllerConfig {
-    int width = 800;                    ///< 视口宽（逻辑像素）
-    int height = 600;                   ///< 视口高（逻辑像素）
+    int width = 800;  ///< 视口宽（逻辑像素）
+    int height = 600;  ///< 视口高（逻辑像素）
     double frame_seconds = 1.0 / 60.0;  ///< 每帧 dt（固定步长，不读真实时钟）
-    std::string png_path{};             ///< 非空时每次 present 写出 PNG（调试截图用）
+    std::string png_path{};  ///< 非空时每次 present 写出 PNG（调试截图用）
 };
 
 /// @brief 无头 widget 测试驱动：持一棵 widget 树，按帧推进并完成交互与断言。
@@ -70,7 +70,7 @@ class TestController {
     /// @brief 持有 root 并建立无头窗口（尺寸在首帧前即确立，避免整树被布局到 0×0 而白屏）。
     /// @param root 被测 widget 树的根（所有权转移给本控制器）。
     /// @param cfg  视口与帧参数；宽/高 <= 0 时回退到 800×600。
-    explicit TestController(Node root, TestControllerConfig cfg = TestControllerConfig{});
+    explicit TestController(Node root, const TestControllerConfig &cfg = TestControllerConfig{});
 
     TestController(const TestController &) = delete;
     auto operator=(const TestController &) -> TestController & = delete;
@@ -148,11 +148,9 @@ class TestController {
     /// @brief 断言属性值等于期望（值经 `Widget::serialize_props` 读出的 JSON 比对）。
     /// @note Json 字面量陷阱：`Json{"hello"}` 在 nlohmann 语义下是**数组** `["hello"]`，
     ///       字符串期望值须写成 `Json(std::string{"hello"})`（布尔用 `Json(true)`）。
-    [[nodiscard]] static auto expect_prop(const Widget &w, std::string_view key, const Json &expected)
-        -> Result<void>;
+    [[nodiscard]] static auto expect_prop(const Widget &w, std::string_view key, const Json &expected) -> Result<void>;
     /// @brief 断言属性值等于期望（节点重载）。
-    [[nodiscard]] static auto expect_prop(const Node &n, std::string_view key, const Json &expected)
-        -> Result<void>;
+    [[nodiscard]] static auto expect_prop(const Node &n, std::string_view key, const Json &expected) -> Result<void>;
 
   private:
     struct Impl;

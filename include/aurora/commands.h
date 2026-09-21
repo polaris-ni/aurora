@@ -28,15 +28,15 @@ namespace aurora {
  * @note Rebuildable: no
  */
 struct Command {
-    std::string id;                               ///< 唯一标识（如 "file.open"）
-    std::string title;                            ///< 显示文本（面板/菜单/帮助）
-    std::string icon;                             ///< 图标标识（与 `MenuItem::icon` 对齐）
-    std::string category;                         ///< 分组（菜单分组 / 面板次级信息）
-    std::function<void()> action;                 ///< 执行体；空 = 占位（不可调用）
-    std::optional<KeyCombo> default_binding;      ///< 默认快捷键（供 `bind_shortcuts` 投影）
+    std::string id;  ///< 唯一标识（如 "file.open"）
+    std::string title;  ///< 显示文本（面板/菜单/帮助）
+    std::string icon;  ///< 图标标识（与 `MenuItem::icon` 对齐）
+    std::string category;  ///< 分组（菜单分组 / 面板次级信息）
+    std::function<void()> action;  ///< 执行体；空 = 占位（不可调用）
+    std::optional<KeyCombo> default_binding;  ///< 默认快捷键（供 `bind_shortcuts` 投影）
     ShortcutScope scope = ShortcutScope::Global;  ///< 快捷键作用域（随 `default_binding`）
-    std::function<bool()> enabled;                ///< 启用谓词；空 = 恒启用
-    std::string when_label;                       ///< 启用条件的展示/序列化标签（不求值）
+    std::function<bool()> enabled;  ///< 启用谓词；空 = 恒启用
+    std::string when_label;  ///< 启用条件的展示/序列化标签（不求值）
 };
 
 /// @brief 命令名的模糊匹配得分（不区分大小写的子序列匹配）。
@@ -83,8 +83,7 @@ class CommandRegistry {
     [[nodiscard]] auto invoke(const std::string &id) const -> bool;
 
     /// @brief 模糊检索：按（得分降序, 标题升序）稳定排序；`only_enabled` 时过滤未启用者。
-    [[nodiscard]] auto search(const std::string &query, bool only_enabled = true) const
-        -> std::vector<const Command *>;
+    [[nodiscard]] auto search(const std::string &query, bool only_enabled = true) const -> std::vector<const Command *>;
 
     /// @brief 序列化信封：`{"commands":[{id,title,icon?,category?,when?,enabled,invocable,default_binding?}]}`。
     /// 可选字段仅在非空时输出；自描述信封可直接作为工具面入参。
@@ -104,12 +103,12 @@ class CommandRegistry {
     /// @brief 命令本身的启用判定（不含 `id` 查找）：覆盖开关 && 谓词。
     [[nodiscard]] auto enabled_of(const Command &cmd) const -> bool;
 
-    std::vector<Command> cmds_;                                ///< 注册序容器
-    std::unordered_map<std::string, std::size_t> index_;       ///< id → cmds_ 下标
+    std::vector<Command> cmds_;  ///< 注册序容器
+    std::unordered_map<std::string, std::size_t> index_;  ///< id → cmds_ 下标
     std::unordered_map<std::string, bool> enabled_overrides_;  ///< id → 覆盖开关
-    std::unordered_map<std::string, int> shortcut_of_;         ///< id → 快捷键绑定 id
-    ShortcutRegistry *shortcuts_ = nullptr;                    ///< bind_shortcuts 的目标（非拥有）
-    int next_reg_id_ = 1;                                      ///< add 的注册号自增源
+    std::unordered_map<std::string, int> shortcut_of_;  ///< id → 快捷键绑定 id
+    ShortcutRegistry *shortcuts_ = nullptr;  ///< bind_shortcuts 的目标（非拥有）
+    int next_reg_id_ = 1;  ///< add 的注册号自增源
 };
 
 }  // namespace aurora

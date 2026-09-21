@@ -6,7 +6,6 @@
 /// ScrollGlide 启动/重定向/tick 收敛与到点精确终止
 
 #include "aurora/widget/scroll_viewport.h"
-
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_scroll_viewport {

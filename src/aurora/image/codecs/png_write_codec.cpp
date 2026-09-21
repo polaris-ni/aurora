@@ -24,8 +24,6 @@ class PngWriteCodec : public ImageCodec {
 
 }  // namespace
 
-auto create_png_write_codec() -> std::shared_ptr<ImageCodec> {
-    return std::make_shared<PngWriteCodec>();
-}
+auto create_png_write_codec() -> std::shared_ptr<ImageCodec> { return std::make_shared<PngWriteCodec>(); }
 
 }  // namespace aurora::image

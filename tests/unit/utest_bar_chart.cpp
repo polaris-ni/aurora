@@ -5,6 +5,7 @@
 /// hover 命中几何（纯计算，同源 BandScale 反查）、on_point_tapped 触发、空数据与畸形输入降级，
 /// 以及像素 golden 基线（chart_bar.png，受 AURORA_GOLDEN_DIR / MAX_DIFF / MAX_PIXELS / UPDATE_GOLDEN 控制）
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
@@ -25,12 +26,14 @@
 
 namespace aurora::test_cases::utest_bar_chart {
 
+using aurora::testing::require_value;
+
 namespace golden = aurora::testing::golden;
 
 namespace {
 
-constexpr float WIDTH = 320.0F;
-constexpr float HEIGHT = 200.0F;
+constexpr float AURORA_WIDTH = 320.0F;
+constexpr float AURORA_HEIGHT = 200.0F;
 
 /// @brief 关掉轴与图例、清零留白：绘图区 = 整个控件，命中几何可精确预期。
 [[nodiscard]] auto bare_props() -> BarChartProps {
@@ -47,7 +50,7 @@ auto layout_only(Widget &w) -> void {
     constexpr BuildContext ctx;
     Constraints c;
     c.min = Size{.width = 0.0F, .height = 0.0F};
-    c.max = Size{.width = WIDTH, .height = HEIGHT};
+    c.max = Size{.width = AURORA_WIDTH, .height = AURORA_HEIGHT};
     w.layout(c, ctx);
 }
 
@@ -64,7 +67,6 @@ auto layout_only(Widget &w) -> void {
     e.local_position = Point{.x = x, .y = y};
     return e;
 }
-
 
 }  // namespace
 
@@ -90,12 +92,7 @@ AURORA_TEST_CASE(describe_static_lists_all_props_and_events) {
     AURORA_TEST_CHECK_FALSE(d.properties.empty());
 
     auto has = [&d](const std::string &key) -> bool {
-        for (const PropDescriptor &p : d.properties) {
-            if (p.name == key) {
-                return true;
-            }
-        }
-        return false;
+        return std::ranges::any_of(d.properties, [&key](const PropDescriptor &p) { return p.name == key; });
     };
     for (const auto &key : {"series", "categories", "stacked", "bar_width_ratio", "bar_corner_radius", "axis_x",
                             "axis_y", "legend", "padding", "width", "height", "show"}) {
@@ -174,15 +171,14 @@ AURORA_TEST_CASE(hover_maps_local_position_to_category) {
 
     MouseEvent e1 = move_at(120.0F, 100.0F);
     chart.on_pointer_event(e1);
-    const auto hit = chart.hovered_point();
-    AURORA_TEST_REQUIRE_TRUE(hit.has_value());
-    AURORA_TEST_CHECK_EQ(hit->second, 1);
-    AURORA_TEST_CHECK_EQ(hit->first, 0);
+    const auto hit = require_value(chart.hovered_point());
+    AURORA_TEST_CHECK_EQ(hit.second, 1);
+    AURORA_TEST_CHECK_EQ(hit.first, 0);
 
     MouseEvent e2 = move_at(280.0F, 100.0F);
     chart.on_pointer_event(e2);
-    AURORA_TEST_REQUIRE_TRUE(chart.hovered_point().has_value());
-    AURORA_TEST_CHECK_EQ(chart.hovered_point()->second, 3);
+    const auto hit2 = require_value(chart.hovered_point());
+    AURORA_TEST_CHECK_EQ(hit2.second, 3);
 
     // 移出绘图区（负坐标）→ 高亮清除
     MouseEvent e3 = move_at(-10.0F, 100.0F);
@@ -200,13 +196,13 @@ AURORA_TEST_CASE(hover_splits_grouped_series_by_bar_width) {
 
     MouseEvent in_first = move_at(100.0F, 100.0F);
     chart.on_pointer_event(in_first);
-    AURORA_TEST_REQUIRE_TRUE(chart.hovered_point().has_value());
-    AURORA_TEST_CHECK_EQ(chart.hovered_point()->first, 0);
+    const auto hit_first = require_value(chart.hovered_point());
+    AURORA_TEST_CHECK_EQ(hit_first.first, 0);
 
     MouseEvent in_second = move_at(130.0F, 100.0F);
     chart.on_pointer_event(in_second);
-    AURORA_TEST_REQUIRE_TRUE(chart.hovered_point().has_value());
-    AURORA_TEST_CHECK_EQ(chart.hovered_point()->first, 1);
+    const auto hit_second = require_value(chart.hovered_point());
+    AURORA_TEST_CHECK_EQ(hit_second.first, 1);
 }
 
 AURORA_TEST_CASE(release_fires_on_point_tapped) {
@@ -258,8 +254,9 @@ AURORA_TEST_CASE(golden_bar_chart_matches_baseline) {
     const std::filesystem::path current_path =
         std::filesystem::path(testing::isolation::temp_dir()) / "current_chart_bar.png";
 
-    AURORA_TEST_REQUIRE_TRUE(
-        render_to_png(root, static_cast<int>(WIDTH), static_cast<int>(HEIGHT), current_path.string().c_str()).ok());
+    AURORA_TEST_REQUIRE_TRUE(render_to_png(root, static_cast<int>(AURORA_WIDTH), static_cast<int>(AURORA_HEIGHT),
+                                           current_path.string().c_str())
+                                 .ok());
 
     // 传入 root 以启用归因：失败时报告会说清差异落在哪个控件的盒子里。
     golden::compare_or_update("chart_bar", current_path, &root);

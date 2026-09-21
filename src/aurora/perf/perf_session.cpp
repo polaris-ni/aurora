@@ -40,11 +40,12 @@ namespace {
         return sorted.back();
     }
     const double frac = pos - static_cast<double>(lo);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     return (sorted[lo] * (1.0 - frac)) + (sorted[hi] * frac);
 }
 
-} // namespace
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // PerfReport
@@ -68,14 +69,15 @@ auto PerfReport::to_json() const -> std::string {
     std::string out;
     out.reserve(1024 + (zones.size() * 96));
 
-    out += internal::string_format("{\"name\":\"%s\",\"frame_count\":%zu,\"total_ms\":%.3f,"
-                                   "\"avg_frame_ms\":%.3f,\"p50_ms\":%.3f,\"p95_ms\":%.3f,\"p99_ms\":%.3f,"
-                                   "\"best_ms\":%.3f,\"worst_ms\":%.3f,\"jitter_ms\":%.3f,"
-                                   "\"frame_budget_ms\":%.2f,\"over_budget_frames\":%zu,\"over_budget_ratio\":%.4f,"
-                                   "\"long_task_count\":%zu,\"full_redraw_frames\":%zu,\"avg_dirty_area_ratio\":%.4f,",
-                                   name.c_str(), frame_count, total_ms, avg_frame_ms, p50_ms, p95_ms, p99_ms, best_ms,
-                                   worst_ms, jitter_ms, frame_budget_ms, over_budget_frames, over_budget_ratio(),
-                                   long_task_count, full_redraw_frames, avg_dirty_area_ratio());
+    out += internal::string_format(
+        "{\"name\":\"%s\",\"frame_count\":%zu,\"total_ms\":%.3f,"
+        "\"avg_frame_ms\":%.3f,\"p50_ms\":%.3f,\"p95_ms\":%.3f,\"p99_ms\":%.3f,"
+        "\"best_ms\":%.3f,\"worst_ms\":%.3f,\"jitter_ms\":%.3f,"
+        "\"frame_budget_ms\":%.2f,\"over_budget_frames\":%zu,\"over_budget_ratio\":%.4f,"
+        "\"long_task_count\":%zu,\"full_redraw_frames\":%zu,\"avg_dirty_area_ratio\":%.4f,",
+        name.c_str(), frame_count, total_ms, avg_frame_ms, p50_ms, p95_ms, p99_ms, best_ms, worst_ms, jitter_ms,
+        frame_budget_ms, over_budget_frames, over_budget_ratio(), long_task_count, full_redraw_frames,
+        avg_dirty_area_ratio());
 
     out += "\"counters_sum\":";
     out += counters_sum.to_json();
@@ -150,8 +152,9 @@ auto PerfReport::to_markdown() const -> std::string {
 }
 
 auto PerfReport::csv_header() -> std::string {
-    return std::string("name,frame_count,avg_ms,p50_ms,p95_ms,p99_ms,best_ms,worst_ms,jitter_ms,"
-                       "over_budget_frames,long_task_count,full_redraw_frames,avg_dirty_area_ratio,") +
+    return std::string(
+               "name,frame_count,avg_ms,p50_ms,p95_ms,p99_ms,best_ms,worst_ms,jitter_ms,"
+               "over_budget_frames,long_task_count,full_redraw_frames,avg_dirty_area_ratio,") +
            std::string(RenderCounters::csv_header());
 }
 
@@ -274,4 +277,4 @@ auto PerfSession::clear() -> void {
     full_redraw_frames_ = 0;
 }
 
-} // namespace aurora
+}  // namespace aurora

@@ -10,7 +10,8 @@
 // - 事件翻译：Emscripten HTML5 API（emscripten_set_*_callback）翻译鼠标/键盘/触摸/resize。
 // - 线程模型：无 pthreads 构建下 ThreadPool 为 deferred 排空模式（见 thread_pool.h 类头），
 //   `present()` 帧尾 `pump()` 即宿主安全点——`au::async` / 协程续体随帧回写，不开线程不丢任务。
-// - 帧循环（规划中，未实现）：`wait_events` 当前为空实现（`{}`），WASM 下退化为忙轮询；拟接入 `emscripten_request_animation_frame_loop` 对齐浏览器 rAF/vsync，尚无关线。
+// - 帧循环（规划中，未实现）：`wait_events` 当前为空实现（`{}`），WASM 下退化为忙轮询；拟接入
+// `emscripten_request_animation_frame_loop` 对齐浏览器 rAF/vsync，尚无关线。
 // - 关闭语义：emscripten_set_beforeunload_callback 设置 should_close。
 
 #if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)

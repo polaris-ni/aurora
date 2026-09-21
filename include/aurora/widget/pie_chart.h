@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "aurora/core/accessibility.h"
 #include "aurora/core/types.h"
 #include "aurora/i18n/format.h"
 #include "aurora/render/font_engine.h"
@@ -15,17 +16,16 @@
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/chart_common.h"
 #include "aurora/widget/widget.h"
-#include "aurora/core/accessibility.h"
 
 namespace aurora {
 
 /// @brief PieChart 属性（聚合；所有字段均有默认值）。
 struct PieChartProps {
     std::vector<PieSection> sections;  ///< 扇区；占比 = value / Σvalue
-    float center_space_ratio = 0.0F;   ///< 内径 / 外径比；> 0 即 donut
-    float start_angle = -90.0F;        ///< 起始角（度，0 = +x 方向；-90 = 12 点钟）
+    float center_space_ratio = 0.0F;  ///< 内径 / 外径比；> 0 即 donut
+    float start_angle = -90.0F;  ///< 起始角（度，0 = +x 方向；-90 = 12 点钟）
     bool show_percentage_labels = false;  ///< 扇区内百分比文本
-    float section_gap = 2.0F;          ///< 扇区间隙（dp，按角度换算后两侧各让出一半）
+    float section_gap = 2.0F;  ///< 扇区间隙（dp，按角度换算后两侧各让出一半）
     ChartLegendSpec legend;
     EdgeInsets padding{8.0F, 8.0F, 8.0F, 8.0F};
 };
@@ -112,9 +112,7 @@ class PieChart : public LeafWidget, public PieChartProps {
     /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `PieChart`，
     ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
     /// @note Side-effects: pure
-    [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override {
-        return AccessibilityRole::Image;
-    }
+    [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override { return AccessibilityRole::Image; }
 
     [[nodiscard]] auto accessibility_label() const -> std::string override;
     [[nodiscard]] auto accessibility_value() const -> std::string override;
@@ -172,8 +170,8 @@ inline auto PieChart::compute_geometry(const Size &size, const Font &font) const
     }
     g.plot = Rect{.origin = Point{.x = left, .y = top},
                   .size = Size{.width = std::max(0.0F, right - left), .height = std::max(0.0F, bottom - top)}};
-    g.center = Point{.x = g.plot.origin.x + (g.plot.size.width * 0.5F),
-                     .y = g.plot.origin.y + (g.plot.size.height * 0.5F)};
+    g.center =
+        Point{.x = g.plot.origin.x + (g.plot.size.width * 0.5F), .y = g.plot.origin.y + (g.plot.size.height * 0.5F)};
     g.outer = std::min(g.plot.size.width, g.plot.size.height) * 0.5F;
     g.inner = g.outer * std::clamp(center_space_ratio, 0.0F, 0.95F);
 
@@ -444,8 +442,8 @@ inline auto PieChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
         }
         p.fill_sector(Point{.x = origin.x + g.center.x, .y = origin.y + g.center.y}, g.outer, g.inner, a0, a1, c);
         if (hovered_section_.has_value() && *hovered_section_ == static_cast<int>(i)) {
-            p.stroke_arc(Point{.x = origin.x + g.center.x, .y = origin.y + g.center.y},
-                         (g.outer + g.inner) * 0.5F, std::max(1.0F, g.outer - g.inner), a0, a1, theme.text);
+            p.stroke_arc(Point{.x = origin.x + g.center.x, .y = origin.y + g.center.y}, (g.outer + g.inner) * 0.5F,
+                         std::max(1.0F, g.outer - g.inner), a0, a1, theme.text);
         }
         if (show_percentage_labels && g.ratios[i] > 0.0F) {
             const float mid = (a0 + a1) * 0.5F;

@@ -617,7 +617,7 @@ auto selftest_tracing() -> bool {
     bool ok = true;
     // PROBE 嵌套 TRACE 会双展开 __COUNTER__，clang（C++20 模式）报 -Wc2y-extensions；
     // 唯一 id 生成依赖该内建，属刻意使用，定向压制。
-#if defined(__clang__)
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc2y-extensions"
 #endif
@@ -625,7 +625,7 @@ auto selftest_tracing() -> bool {
         AURORA_TEST_TRACE("inner context");
         AURORA_TEST_CHECK(false);
     } AURORA_TEST_CHECK(false);));
-#if defined(__clang__)
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif
     ok = expect(traced.failures.size() == 2, "traced case records two failures") && ok;

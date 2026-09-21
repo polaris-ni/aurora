@@ -5,8 +5,8 @@
 #include <optional>
 #include <string>
 
-#include "aurora/core/accessibility.h"
 #include "aurora/core/a11y_types.h"
+#include "aurora/core/accessibility.h"
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/binding.h"

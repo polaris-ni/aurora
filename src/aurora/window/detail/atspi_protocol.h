@@ -69,7 +69,7 @@ enum Role : std::uint32_t {
     role_application = 75,
     role_frame = 23,
     role_panel = 39,
-    role_push_button = 43,         ///< == BUTTON（上游为别名，值同为 43）
+    role_push_button = 43,  ///< == BUTTON（上游为别名，值同为 43）
     role_toggle_button = 62,
     role_check_box = 7,
     role_radio_button = 44,
@@ -127,7 +127,7 @@ enum CoordType : std::uint32_t {
 
 /// @brief 对象引用 (bus name, object path) 的中立值形态（D-Bus 签名 `(so)`）。
 struct AtspiRef {
-    std::string bus;   ///< 唯一总线名（":1.23"）；空 = 无
+    std::string bus;  ///< 唯一总线名（":1.23"）；空 = 无
     std::string path;  ///< 对象路径；`k_null_path` = 空引用
 
     [[nodiscard]] static auto null() -> AtspiRef { return {"", std::string{atspi::k_null_path}}; }
@@ -156,8 +156,8 @@ struct AtspiPropValue {
 
 /// @brief Action 接口的一行（GetActions 的 `(sss)` 三元组 + 本端动作位）。
 struct AtspiActionRow {
-    std::string name;        ///< 稳定英文名（"press" / "toggle" ...）
-    std::string localized;   ///< 本地化显示名（当前同名；i18n 接入后替换）
+    std::string name;  ///< 稳定英文名（"press" / "toggle" ...）
+    std::string localized;  ///< 本地化显示名（当前同名；i18n 接入后替换）
     std::string keybinding;  ///< 键绑定（Aurora 控件语义未导出 ⇒ 恒空）
     AccessibilityAction action = AccessibilityAction::None;
 };
@@ -166,7 +166,7 @@ struct AtspiActionRow {
 struct AtspiCacheRow {
     AtspiRef self;
     AtspiRef app;
-    AtspiRef parent;             ///< 无父 ⇒ null
+    AtspiRef parent;  ///< 无父 ⇒ null
     std::int32_t index_in_parent = -1;
     std::int32_t child_count = 0;
     std::vector<std::string> interfaces;  ///< 接口全名表
@@ -186,12 +186,12 @@ inline constexpr std::uint64_t k_atspi_frame_id = ~0ULL - 1ULL;
 /// 函数成员在 UI 线程同步调用（与桥同线程模型）。
 struct AtspiEnv {
     std::string base_path;  ///< 本窗口的应用根对象路径（每桥唯一，如 "/org/a11y/atspi/accessible/root"）
-    std::string app_name;   ///< 应用名（AT-SPI 桌面树里显示的 app Name）
+    std::string app_name;  ///< 应用名（AT-SPI 桌面树里显示的 app Name）
     std::string toolkit_name = "Aurora";
-    std::string toolkit_version;            ///< Aurora 库版本（构造期填）
-    std::string self_bus;                   ///< 本连接唯一总线名（桥连接后回填）
-    std::string window_title;               ///< FRAME 节点 Name
-    AtspiRef registry_root;                 ///< Embed 回包（父的父链终点）
+    std::string toolkit_version;  ///< Aurora 库版本（构造期填）
+    std::string self_bus;  ///< 本连接唯一总线名（桥连接后回填）
+    std::string window_title;  ///< FRAME 节点 Name
+    AtspiRef registry_root;  ///< Embed 回包（父的父链终点）
     std::function<AtspiRectI(const Rect &)> to_screen_px;  ///< 窗口本地 DIP → 物理屏幕 px
     std::function<AtspiRectI(const Rect &)> to_window_px;  ///< DIP → 窗口本地物理 px（WINDOW 系）
     std::int32_t window_origin_x = 0;  ///< 客户区原点的屏幕物理 px（点坐标反推 WINDOW/PARENT 系用）
@@ -242,8 +242,8 @@ class AtspiModel {
     [[nodiscard]] auto extents(std::uint64_t id, std::uint32_t coord) const -> AtspiRectI;
     [[nodiscard]] auto contains(std::uint64_t id, std::int32_t x, std::int32_t y, std::uint32_t coord) const -> bool;
     /// @brief 屏幕点命中（本子树内、先序**最深**且面积最小者）；未命中 = null 引用。
-    [[nodiscard]] auto accessible_at_point(std::uint64_t id, std::int32_t x, std::int32_t y,
-                                           std::uint32_t coord) const -> AtspiRef;
+    [[nodiscard]] auto accessible_at_point(std::uint64_t id, std::int32_t x, std::int32_t y, std::uint32_t coord) const
+        -> AtspiRef;
 
     // ---- org.a11y.atspi.Text（码点偏移）----
     [[nodiscard]] auto has_text(std::uint64_t id) const -> bool;
@@ -308,7 +308,7 @@ class AtspiModel {
     ///        保证「同 id ⇒ 同路径」不变式（消失 id 的路径随之丢弃，编号单调不复用）。
     std::unordered_map<std::uint64_t, std::string> by_path_id_cache_;
     std::uint64_t path_counter_ = 0;  ///< 已分配路径计数（单调，不复用 ⇒ 引用不串号）
-    std::int32_t app_id_ = -1;        ///< 注册表 Embed 后回填
+    std::int32_t app_id_ = -1;  ///< 注册表 Embed 后回填
 };
 
 // ============================================================================

@@ -20,7 +20,7 @@ namespace aurora::internal {
 #endif
 
 // 跨平台纯逻辑：Unicode 码点 ↔ UTF-8（1~4 字节，完整 Unicode 含辅助平面）。
-// 收口自 win32_window.cpp（to_utf8）、glfw_surface.cpp（utf8_from_codepoint）、
+// 收口自 win32_host.cpp（to_utf8）、glfw_surface.cpp（utf8_from_codepoint）、
 // widget/text.cpp、widget/text_input.h、render/font_engine.cpp 中重复的码点→UTF-8 实现（dup-1）。
 // 不进 aurora.h 公共导出，仅被内部/后端/单测 include。
 namespace aurora {
