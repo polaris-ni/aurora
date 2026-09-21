@@ -304,10 +304,11 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 2. 窗口销毁时 `disconnect_all()` 会先立**单向拆除门闩**再调 `UiaDisconnectProvider`：该 API 会**同步重入** provider 取属性（UIA 需为被丢弃的侦听者补发属性变更事件），门闩保证重入路径只读旧快照、绝不重建。
 
 `deactivate()` 与 `disconnect_all()` 等价且幂等，并在其中**从 `ProviderRegistry` 注销** —— 缺这一步，进程级事件广播会在已析构的桥上调用 `is_active()`（use-after-free）。
-
 **线程与降级。** 全 main-thread（in-proc provider 由 UIA core 在 UI 线程回调，桥激活时把套间初始化为 STA）；`UIAutomationCore.dll` 运行时 `LoadLibraryA` 动态加载，缺库或函数缺失即整桥降级 no-op + 一次 `Diagnostics::warn`，无链接期依赖。
 
 **Linux 桥差异（AT-SPI2）。** 无 `WM_GETOBJECT` 式「读屏在线才出现」的查询信号，故构造时机改为**首次语义树根注入时一次性尝试**（失败 = 永久降级，不再重试）；建树同步点由「入站查询」与「帧循环 dirty」双侧驱动——`pump()` 每轮开头 `sync_point()`（若脏），事件推送不依赖客户端恰好在做查询。D-Bus 传输 fd 经 `Provider` 侧 `poll_watches()` 并入 X11/Wayland 事件等待的 `poll`，fd 就绪由 `pump()` 读入并派发（单线程、无额外线程）。事件通道 = 快照 diff 的另一种消费：`sync_point()` 产 `TreeDiff` 后按上游 `atk-adaptor` 线格式发 D-Bus 信号广播（added/removed → Cache Add/RemoveAccessible + children-changed；Name/Value/Hint/State → property-/state-changed；焦点 → Event.Focus；播报 → Announcement 直发），与 Win32 UIA 桥 `queue_*` 系列同一「diff → 平台事件」消费范式。降级面 = 无会话总线 / `org.a11y.Bus` 不可达 / libdbus 缺失 / `NO_AT_BRIDGE=1`；线格式契约与申报空位见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.4。
+
+**Wasm 桥差异（ARIA 镜像）。** 第三个平台实现（`include/aurora/window/wasm_aria.h` + `src/aurora/window/wasm_aria.cpp`，门控 `AURORA_PLATFORM_WASM ∧ AURORA_BACKEND_WASM`，折算层同样是零平台头的 `detail/aria_protocol.{h,cpp}` + 无头单测 `utest_aria_protocol`），消费端不是 IPC 协议而是**浏览器原生 ARIA 支持**：快照折算成页面隐藏 DOM 镜像（clip 隐藏保进树、`role`/`aria-*`/`aria-activedescendant`/`aria-live`），读屏经无障碍引擎直接消费，故无 `sync_point` 应答面、也**无几何面**（申报）。激活为 D14 惰性激活的既定例外（浏览器无读屏探测信号，首根注入即激活）；同步与反向动作排水由桥**自持 rAF 蹦床**每拍执行（`live_bridges()` 成员性做悬垂守卫），不挂 `present()` 帧尾——静止页面没有脏帧就没有 present，读屏动作会被饿死。反向动作走 JS 写队列 + 帧尾轮询（刻意避开 `-sEXPORTED_FUNCTIONS`，保消费者零链接配置）。契约、载荷协议与 CDP 真机验收见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.5。
 
 ### 8.6 输入法桥接（platform IME bridge）
 

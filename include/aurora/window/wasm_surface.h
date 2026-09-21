@@ -19,12 +19,17 @@
 //   焦点（同桌面「新建即激活」）；`focus_window()` 切路由指针；`raise()` 无浏览器映射
 //   （canvas 层叠由 DOM 顺序决定）保持基类 no-op；`set_title` 写 `document.title` 为页面
 //   单值，多窗口下最后调用者生效（限制如实申报）。
+// - 无障碍（ARIA 镜像桥）：首帧 `set_accessibility_root` 即构造并激活 `WasmAriaBridge`
+//   （浏览器无读屏探测面，D14 惰性激活的既定例外，见 wasm_aria.h 申报）；镜像同步
+//   （D9 拉取式重投影）与读屏反向动作排水由桥**自持的 rAF 自驱拍**每帧执行——不经
+//   `present()` 帧尾，因静止页面没有脏帧就没有 present，反向通道会被饿死（见 wasm_aria.h）。
 
 #if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
 
+#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -32,6 +37,7 @@
 #include "aurora/core/thread_pool.h"
 #include "aurora/event/keycode.h"
 #include "aurora/window/surface.h"
+#include "aurora/window/wasm_aria.h"
 
 // EM_ASM 的 JS 片段以 `$0`/`$1` 作参数占位符（Emscripten 宏契约，见 em_asm.h）。
 // `-Wpedantic` 下 clang 在词法阶段即把这些 token 判为「标识符含 $」扩展并报
@@ -86,6 +92,8 @@ class WasmSurface : public Surface {
         emscripten_set_mousedown_callback(canvas_selector_.c_str(), nullptr, true, nullptr);
         emscripten_set_mouseup_callback(canvas_selector_.c_str(), nullptr, true, nullptr);
         emscripten_set_mousemove_callback(canvas_selector_.c_str(), nullptr, true, nullptr);
+        // 桥先于实例表清算：析构内 deactivate 会注销广播表并移除本页镜像容器（防孤儿树）。
+        aria_bridge_.reset();
         instances_.erase(this);
         if (focused_surface_ == this) {
             // 焦点窗口销毁：路由指针回落到任一存活实例（浏览器无「下一个激活窗口」概念，
@@ -170,6 +178,20 @@ class WasmSurface : public Surface {
     /// @brief WASM 下 no-op：浏览器 rAF 驱动帧循环，无需阻塞等待。
     auto wait_events(double /*timeout_ms*/) -> void override {}
 
+    /// @brief 本窗口的 ARIA 镜像桥（首帧根注入前为 nullptr —— 桥随 `present_root` 诞生）。
+    [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override {
+        return aria_bridge_.get();
+    }
+
+    /// @brief 语义树根注入（`Window::present_root` 每帧调用）：首次构造桥（容器 id 按
+    ///        canvas id 隔离，多窗口各挂各的镜像树），随后交由桥做幂等判定。
+    auto set_accessibility_root(Widget *root) -> void override {
+        if (aria_bridge_ == nullptr) {
+            aria_bridge_ = std::make_unique<WasmAriaBridge>("aurora-a11y-" + canvas_id_);
+        }
+        aria_bridge_->set_root(root);
+    }
+
   private:
     // 多窗口事件路由支撑（document/window 级单一分发器）：全局仅注册一次回调，
     // 键盘按 focused_surface_ 路由、resize 按实例集合广播。Wasm 为单线程 JS 环境，
@@ -181,6 +203,7 @@ class WasmSurface : public Surface {
 
     std::string canvas_id_;       ///< 裸 DOM id（getElementById 上屏用）。
     std::string canvas_selector_; ///< CSS 选择器形态（Emscripten 事件注册/querySelector 用）。
+    std::unique_ptr<WasmAriaBridge> aria_bridge_;  ///< ARIA 镜像桥（首帧根注入时构造；见 wasm_aria.h）
     Painter painter_;
     int w_ = 0;
     int h_ = 0;

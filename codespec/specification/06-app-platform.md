@@ -368,6 +368,20 @@ app.set_on_window_state([](au::WindowState s) {
 
 **拆除**：`on_widget_destroying` 对根置单向拆除门闩（pump 期查询只读旧快照），析构 = deactivate + 关连接，与 §6.3 两条硬不变量对齐。真实总线接线（含事件通道）由 `tools/verify/atspi_live_probe.cpp`（目标 `aurora_verify_atspi`）探针把关——外部 libatspi 客户端逐检查项比对（静态查询段 + 事件推送段），见 [`08-tooling.md`](08-tooling.md) §7.5；宿主生命周期面在 `utest_atspi_bridge` 的 `AURORA_LIVE_ATSPI=1` 选择加入用例中覆盖。
 
+### 6.5 Wasm 无障碍桥（ARIA 镜像）
+
+**形态：语义树 → 页面隐藏 DOM 镜像 → 浏览器原生 ARIA 支持消费。** 与前两桥「自研平台协议」不同，本桥不实现任何协议——把 `a11y::TreeSnapshot` 折算成 WAI-ARIA 1.2 镜像 DOM（role / `aria-*` / 文本内容），读屏经浏览器无障碍引擎（Chromium AX 树等）天然消费。分层与 §6.4 完全同构：中立折算层 `src/aurora/window/detail/aria_protocol.{h,cpp}`（零 Emscripten/平台头：role 映射、属性确定序、全量/ops/播报 JSON 全部在此，无头单测 `utest_aria_protocol` 全覆盖）+ 粘合桥 `include/aurora/window/wasm_aria.h` / `src/aurora/window/wasm_aria.cpp`（生命周期、镜像 DOM 应用与反向动作回灌，EM_JS/EM_ASM 独占此层）。编译门控 = `AURORA_PLATFORM_WASM ∧ AURORA_BACKEND_WASM`；桥类 `WasmAriaBridge` 实现 `a11y::Provider`，每窗口一实例，由 `WasmSurface::set_accessibility_root` 首帧构造。
+
+**镜像容器。** 每窗口一个隐藏 div `#aurora-a11y-<canvas_id>`（`position:absolute` + `clip-path:inset(50%)` 视觉隐藏但**保留在可访问性树中**——`display:none` 会整树出局），容器 `role=group`；镜像元素 DOM id = `aurora-a11y-<runtime_id>`（`aria-activedescendant` 的 IDREF 目标），`data-aurora-id` 属性供寻址与观测。焦点 = 容器 `aria-activedescendant` + 元素 `data-aurora-focused="1"`；播报 = 容器内懒建的 `[data-aurora-live]` 子元素（`aria-live=polite` + `aria-atomic`，同文本重播先清空再经 `setTimeout(0)` 回写）。**无几何面**（如实申报）：镜像元素不带画布坐标，读屏按 DOM 顺序导航，不支持「点按位置探测」。
+
+**激活（D14 惰性激活的既定例外）。** 浏览器没有 `WM_GETOBJECT`/总线订阅那样的「读屏在线」探测信号（navigator 无读屏 API），故**首个 `set_root` 注入即激活**并置 `screen_reader_active = true`（启发式申报）；D9 拉取式仍成立——只有 dirty（结构/字段事件、换根、动作回灌）才重投影并发载荷，静止页面零 DOM churn。多窗口下各桥独立镜像，`runtime_id` 进程内唯一 ⇒ 反向动作跨桥按 id 寻址。
+
+**载荷协议。** 首发全量 `{"els":[...],"focus":N,"rtl":b}`（els 先序表），续发增量 `{"ops":[remove|add|move|update...],"focus":N}`——段序固定 remove → add（新快照先序）→ move → update（去重、add 者不重发），`focus` 为**绝对值**（新快照获焦者 id，0 = 无）。元素属性确定序与 role 映射表由 `utest_aria_protocol` 逐位钉死。
+
+**自驱 rAF 拍与反向动作通道。** JS 侧在镜像元素挂 click/focus 监听，把 `(id, 动作位)` 写入页面级队列 `window.__auroraAriaQueue`；桥激活时自排一拍 `emscripten_request_animation_frame` 蹦床（`raf_tick`）：每拍 `sync_if_dirty → pump_actions → sync_if_dirty`（动作 `perform` 成功即补脏，回写的焦点/状态位**同拍收敛**）。**为何不挂 `present()` 帧尾**：静止页面没有脏帧就没有 present，反向通道会被饿死（CDP 真机验收实测坐实）；rAF 自驱保证任何帧序下动作延迟 ≤1 拍。蹦床先以 `live_bridges()` 成员性校验再解引用 userData（`Application::raf_owner_` 同语义的悬垂守卫），去激活/标签页隐藏时断链（隐藏页动作停摆与帧循环同语义，如实申报）。走**轮询队列**而非 `-sEXPORTED_FUNCTIONS` 导出，是为了零链接配置要求（消费者任何 Emscripten 设置下都成立；代价 = 动作下一拍生效 ≤16ms，读屏交互无感）。
+
+**真机验收**：`tools/verify/wasm_aria_live_probe.cpp`（目标 `aurora_verify_wasm_aria`，浏览器产物不进聚合 `aurora_verify`）——无头 Edge + CDP 取证 20 项：`Accessibility.getFullAXTree` 证角色/名进真实无障碍树；JS 点击镜像元素证 Invoke/Toggle 闭环；`aria-live` 区文本证播报；`MutationObserver` 证首帧后仅子树级增量（零容器整铺重放）；`aria-activedescendant` 证焦点回写。
+
 ---
 
 ## 7 定时任务

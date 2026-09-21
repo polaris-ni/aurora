@@ -1,13 +1,16 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/window/wasm_surface.h
+/// 目标单元: include/aurora/window/wasm_aria.h
 /// 测试说明: WASM 后端类型契约 skip 桩——头整体被
-/// AURORA_PLATFORM_WASM && AURORA_BACKEND_WASM 门控（含 <emscripten.h>），非 Emscripten 工具链无法编译
+/// AURORA_PLATFORM_WASM && AURORA_BACKEND_WASM 门控（含 <emscripten.h>），非 Emscripten 工具链无法编译；
+/// ARIA 桥的折算逻辑在平台中立层另有真值单测（utest_aria_protocol），此处只钉类型契约
 
 #include "aurora/core/platform.h"  // 守卫求值前必须先有平台宏（TU 自包含，不依赖 PCH 伞头带入）
 #if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)
 #include <type_traits>
 
 #include "aurora/window/wasm_surface.h"
+#include "aurora/window/wasm_aria.h"
 #endif
 
 #include "framework/aurora_test.h"
@@ -20,6 +23,10 @@ AURORA_TEST_CASE(wasm_surface_type_contract) {
     static_assert(!std::is_copy_constructible_v<aurora::WasmSurface>);
     static_assert(!std::is_move_constructible_v<aurora::WasmSurface>);
     AURORA_TEST_CHECK_TRUE(std::is_base_of_v<aurora::Surface, aurora::WasmSurface>);
+    // ARIA 桥类型契约：Provider 派生、不可拷贝（注册表持裸指针，身份唯一）。
+    static_assert(std::is_base_of_v<aurora::a11y::Provider, aurora::WasmAriaBridge>);
+    static_assert(!std::is_copy_constructible_v<aurora::WasmAriaBridge>);
+    AURORA_TEST_CHECK_TRUE(std::is_base_of_v<aurora::a11y::Provider, aurora::WasmAriaBridge>);
 #else
     AURORA_TEST_SKIP("WASM 后端仅在 AURORA_PLATFORM_WASM && AURORA_BACKEND_WASM（Emscripten 工具链）下编译");
 #endif

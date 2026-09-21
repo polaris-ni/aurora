@@ -205,6 +205,14 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         set_target_properties(aurora_verify_wasm_multiwin PROPERTIES SUFFIX ".html")
         target_link_options(aurora_verify_wasm_multiwin PRIVATE
                 "--shell-file=${_aurora_verify_dir}/wasm_multiwin_shell.html")
+        # ---- WASM ARIA 镜像桥（浏览器）：隐藏镜像容器进真实无障碍树（CDP
+        # `Accessibility.getFullAXTree` 可证角色/名称）、读屏反向动作经页面级队列帧尾
+        # 排水回灌控件、aria-live 播报、增量 ops（首帧全量后仅 applyOps）。同为浏览器
+        # 产物，不进聚合 `aurora_verify`（口径同上）。
+        aurora_add_verify_probe(aurora_verify_wasm_aria "${_aurora_verify_dir}/wasm_aria_live_probe.cpp")
+        set_target_properties(aurora_verify_wasm_aria PROPERTIES SUFFIX ".html")
+        target_link_options(aurora_verify_wasm_aria PRIVATE
+                "--shell-file=${_aurora_verify_dir}/wasm_aria_shell.html")
     endif ()
     if (_aurora_verify_targets)
         add_custom_target(aurora_verify DEPENDS ${_aurora_verify_targets})

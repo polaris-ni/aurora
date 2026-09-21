@@ -1,0 +1,23 @@
+<!doctype html>
+<!--
+  wasm_aria_shell.html — ARIA 镜像桥探针的 Emscripten 页面壳（--shell-file 注入）。
+
+  契约：提供单个 canvas `win-a`（探针 WasmOptions::canvas_id）；镜像容器
+  `#aurora-a11y-win-a` 由桥在首帧自动挂到 body 下，壳侧无需预建。
+  注意：{{{ SCRIPT }}} 由 Emscripten 展开为完整 <script> 标签，勿再包一层 <script>。
+-->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>aurora-wasm-aria</title>
+    <style>
+        body { margin: 0; background: #202024; }
+        canvas { display: block; width: 640px; height: 360px; margin: 10px auto; outline: 1px solid #444; }
+    </style>
+</head>
+<body>
+<canvas id="win-a" width="640" height="360" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<!-- {{{ SCRIPT }}} 由 Emscripten 展开为引入生成 JS 的 <script> 标签，勿再包一层 <script>。 -->
+{{{ SCRIPT }}}
+</body>
+</html>
