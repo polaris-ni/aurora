@@ -121,7 +121,7 @@
 
 **已知后端限制（多窗口）**
 
-- **Wasm**：鼠标事件按 canvas 元素注册（多窗口可用），但**键盘**与 **resize** 注册在 `document` / `window` 级——多窗口下只有最后注册的 Surface 能收到，故 Wasm 上的多窗口键盘输入尚不可用。修复需拆成「document 级单一分发器 + 按焦点 Surface 路由」，须在 Emscripten 工具链下真机验证，属后续专项。
+- **Wasm**：**已落地（多窗口事件路由）**——键盘/resize 走「document/window 级单一分发器」：键盘按当前焦点 Surface 路由（鼠标按下/`focus_window()`/新建窗口均接管路由，焦点窗口销毁回落到存活实例），resize 广播全部实例各自刷新 CSS 尺寸（经 `Window::size()` 帧环检测触发重排）。可打印字符键在 KeyDown 的 `KeyEvent` 之外**另发** `TextInputEvent`（`key` 名折算，与 X11 路同口径；`keyCode` 数字码与库 `KeyCode` 枚举错位，不得直填）。仍存的限制：`raise()` 无浏览器映射（canvas 层叠由 DOM 顺序决定，保持 no-op）；`set_title` 写页面级 `document.title`，多窗口下最后调用者生效。真机验收：`tools/verify/wasm_multiwin_live_probe.cpp`（无头 Edge CDP，七项判据：初始路由/双向切换/字符落字/Enter 提交/反向不污染/resize 广播/还原）。
 - **X11 / Wayland**：无全局窗口枚举能力，`raise` / `focus_window` 为尽力而为；等待通道是 per-surface 的，帧循环对这类后端施加 8ms 等待上限（见「统一帧循环」）。
 
 **跨窗通信**

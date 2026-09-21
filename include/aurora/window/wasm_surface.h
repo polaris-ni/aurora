@@ -13,7 +13,12 @@
 // - 帧循环：浏览器主线程不可阻塞，`Application::run()` 经 `emscripten_request_animation_frame_loop`
 //   把统一帧循环挂到 rAF/vsync（蹦床 `Application::raf_tick`，见 application.h）；本 Surface 的
 //   `wait_events` 因此无需实现（保持空体，rAF 模式下帧循环根本不调用它）。
-// - 关闭语义：emscripten_set_beforeunload_callback 设置 should_close。
+// - 关闭语义：window 级 beforeunload 回调（全局注册一次）置位页面级关闭请求，所有
+//   Surface 的 `should_close()` 同时为真——浏览器整页卸载即全部窗口关闭，语义天然一致。
+// - 多窗口路由（specification/06-app-platform.md §2.4 已知限制收口）：新建窗口即接管键盘
+//   焦点（同桌面「新建即激活」）；`focus_window()` 切路由指针；`raise()` 无浏览器映射
+//   （canvas 层叠由 DOM 顺序决定）保持基类 no-op；`set_title` 写 `document.title` 为页面
+//   单值，多窗口下最后调用者生效（限制如实申报）。
 
 #if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)
 
@@ -21,9 +26,11 @@
 #include <emscripten/html5.h>
 
 #include <string>
+#include <string_view>
 #include <unordered_set>
 
 #include "aurora/core/thread_pool.h"
+#include "aurora/event/keycode.h"
 #include "aurora/window/surface.h"
 
 // EM_ASM 的 JS 片段以 `$0`/`$1` 作参数占位符（Emscripten 宏契约，见 em_asm.h）。
@@ -59,10 +66,16 @@ class WasmSurface : public Surface {
         // 否则各 Surface 各自注册 document 级键盘回调会被后者覆盖，仅最后创建的窗口能收到。
         // 故全局仅注册一次，由全局回调按 focused_surface_ 路由键盘、按实例集合广播 resize。
         instances_.insert(this);
+        // 新建窗口即接管键盘焦点（同桌面平台「新建窗口被激活」语义）；首个窗口因此天然
+        // 有焦点，无需等第一次鼠标点击。
+        focused_surface_ = this;
         if (!global_handlers_registered_) {
             emscripten_set_keydown_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, true, &on_key_dispatch);
             emscripten_set_keyup_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, true, &on_key_dispatch);
             emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, true, &on_resize_dispatch);
+            // 页面卸载 → 置位关闭请求（返回 false = 不弹确认框，放行卸载）。整页关闭即全部
+            // 窗口关闭，故为页面级单标志、所有实例共享读取。
+            emscripten_set_beforeunload_callback(nullptr, &on_before_unload);
             global_handlers_registered_ = true;
         }
     }
@@ -75,7 +88,9 @@ class WasmSurface : public Surface {
         emscripten_set_mousemove_callback(canvas_selector_.c_str(), nullptr, true, nullptr);
         instances_.erase(this);
         if (focused_surface_ == this) {
-            focused_surface_ = nullptr;
+            // 焦点窗口销毁：路由指针回落到任一存活实例（浏览器无「下一个激活窗口」概念，
+            // 取集合首元素即确定性回落），空集则归 nullptr。
+            focused_surface_ = instances_.empty() ? nullptr : *instances_.begin();
         }
     }
 
@@ -132,7 +147,17 @@ class WasmSurface : public Surface {
     }
 
     [[nodiscard]] auto size() const -> Size override { return Size{static_cast<float>(w_), static_cast<float>(h_)}; }
-    [[nodiscard]] auto should_close() const -> bool override { return should_close_; }
+    [[nodiscard]] auto should_close() const -> bool override { return close_requested_; }
+
+    /// @brief 把键盘事件路由指针切到本窗口（页面级焦点无法用 JS 之外的方式抢占，路由即
+    ///        WASM 上「激活窗口」的忠实映射；鼠标按下同一效果）。
+    auto focus_window() -> void override { focused_surface_ = this; }
+
+    /// @brief 当前键盘路由目标的 canvas id（无焦点窗口时为空串）——多窗口路由的只读观测口，
+    ///        供真机探针/自动化断言「点击/ focus_window 后路由确实切换」。
+    [[nodiscard]] static auto focused_canvas_id() -> std::string {
+        return focused_surface_ != nullptr ? focused_surface_->canvas_id_ : std::string{};
+    }
     [[nodiscard]] auto data() const -> const std::uint8_t * override { return painter_.data(); }
     [[nodiscard]] auto frame_count() const -> int override { return frame_; }
     [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
@@ -152,6 +177,7 @@ class WasmSurface : public Surface {
     inline static std::unordered_set<WasmSurface *> instances_;
     inline static WasmSurface *focused_surface_ = nullptr;
     inline static bool global_handlers_registered_ = false;
+    inline static bool close_requested_ = false;  ///< beforeunload 置位；页面级=全部窗口关闭。
 
     std::string canvas_id_;       ///< 裸 DOM id（getElementById 上屏用）。
     std::string canvas_selector_; ///< CSS 选择器形态（Emscripten 事件注册/querySelector 用）。
@@ -159,7 +185,6 @@ class WasmSurface : public Surface {
     int w_ = 0;
     int h_ = 0;
     int frame_ = 0;
-    bool should_close_ = false;
     EventHandler event_handler_;
 
     // ---- Emscripten 事件回调 ----
@@ -183,13 +208,77 @@ class WasmSurface : public Surface {
         return EM_TRUE;
     }
 
-    // 把 Emscripten 键盘事件翻译为 Aurora KeyEvent 并派发到指定 Surface（focused_surface_ 或测试桩）。
+    // DOM `KeyboardEvent.key` 名 → 库 `KeyCode` 折算（specification/05-event-navigation.md §2.2）。
+    // 不可直接取 `keyCode`：那是 DOM 数字码（Enter=13），与 Aurora 自有稠密枚举（Enter=57）
+    // 完全错位——字母恰与 VK 同值掩盖了这一点，控制键在 WASM 上实则整条通道失效
+    // （Enter 提交/退格删除/方向键移光标全部打不动，多窗口探针实测坐实）。`key` 名是
+    // DOM 规范稳定值，按名折算才是正解。
+    static auto dom_key_to_code(const char *k) -> KeyCode {
+        using enum KeyCode;
+        const std::string_view s{k};
+        if (s.size() == 1) {
+            const char c = s[0];
+            if (c >= 'a' && c <= 'z') {
+                return static_cast<KeyCode>(static_cast<int>(A) + (c - 'a'));
+            }
+            if (c >= 'A' && c <= 'Z') {
+                return static_cast<KeyCode>(static_cast<int>(A) + (c - 'A'));
+            }
+            if (c >= '0' && c <= '9') {
+                return static_cast<KeyCode>(static_cast<int>(D0) + (c - '0'));
+            }
+            switch (c) {
+                case ' ': return Space;
+                case '-': return Minus;
+                case '=': return Equal;
+                case '[': return LeftBracket;
+                case ']': return RightBracket;
+                case '\\': return Backslash;
+                case ';': return Semicolon;
+                case '\'': return Quote;
+                case ',': return Comma;
+                case '.': return Period;
+                case '/': return Slash;
+                case '`': return Backquote;
+                default: break;
+            }
+        }
+        if (s == "Enter") { return Enter; }
+        if (s == "Tab") { return Tab; }
+        if (s == "Backspace") { return Backspace; }
+        if (s == "Delete") { return Delete; }
+        if (s == "Escape") { return Escape; }
+        if (s == "ArrowLeft") { return ArrowLeft; }
+        if (s == "ArrowRight") { return ArrowRight; }
+        if (s == "ArrowUp") { return ArrowUp; }
+        if (s == "ArrowDown") { return ArrowDown; }
+        if (s == "Home") { return Home; }
+        if (s == "End") { return End; }
+        if (s == "PageUp") { return PageUp; }
+        if (s == "PageDown") { return PageDown; }
+        if (s == "Shift") { return Shift; }
+        if (s == "Control") { return Control; }
+        if (s == "Alt") { return Alt; }
+        if (s == "Meta") { return Meta; }
+        if (s.size() >= 2 && s.size() <= 3 && s[0] == 'F' && s[1] >= '1' && s[1] <= '9') {
+            const int n = (s.size() == 2) ? (s[1] - '0') : (s[1] - '0') * 10 + (s[2] - '0');
+            if (n >= 1 && n <= 12) {
+                return static_cast<KeyCode>(static_cast<int>(F1) + (n - 1));
+            }
+        }
+        return Unknown;
+    }
+
+    // 把 Emscripten 键盘事件翻译为 Aurora 事件并派发到指定 Surface（focused_surface_ 或测试桩）。
+    // 折算口径与 X11 路一致：KeyDown 恒发 KeyEvent；`key` 串为单字符可打印（DOM 规范：字符键
+    // 给出该字符，控制键给出 "Enter"/"ArrowLeft" 等名字）时**另发** TextInputEvent 落字——
+    // 缺这一步则 WASM 上任何文本框都打不进字符（旧实现只发 KeyEvent）。
     static EM_BOOL dispatch_key_to(WasmSurface *target, int type, const EmscriptenKeyboardEvent *e) {
         if (!target || !target->event_handler_) {
             return EM_FALSE;
         }
         KeyEvent ev;
-        ev.key = static_cast<int>(e->keyCode);
+        ev.key = static_cast<int>(dom_key_to_code(e->key));
         ev.action = (type == EMSCRIPTEN_EVENT_KEYDOWN) ? KeyAction::Down : KeyAction::Up;
         if (e->shiftKey) {
             ev.modifiers = ev.modifiers | ModifierKey::Shift;
@@ -204,6 +293,14 @@ class WasmSurface : public Surface {
             ev.modifiers = ev.modifiers | ModifierKey::Meta;
         }
         target->event_handler_(ev);
+        if (type == EMSCRIPTEN_EVENT_KEYDOWN) {
+            const char c = e->key[0];
+            if (c != '\0' && e->key[1] == '\0' && static_cast<unsigned char>(c) >= 0x20 && c != 0x7F) {
+                TextInputEvent te;
+                te.text.assign(1, c);
+                target->event_handler_(te);
+            }
+        }
         return EM_TRUE;
     }
 
@@ -229,6 +326,12 @@ class WasmSurface : public Surface {
             s->update_css_size();
         }
         return EM_TRUE;
+    }
+
+    // 页面卸载回调：置位关闭请求后返回 nullptr（不弹离开确认框，放行卸载）。
+    static const char *on_before_unload(int /*type*/, const void * /*reserved*/, void * /*user_data*/) {
+        close_requested_ = true;
+        return nullptr;
     }
 };
 

@@ -1,0 +1,26 @@
+<!doctype html>
+<!--
+  wasm_multiwin_shell.html — 多窗口路由探针的 Emscripten 页面壳（--shell-file 注入）。
+
+  契约：提供两个 canvas——`win-a` / `win-b`（对应探针里两个 WasmOptions::canvas_id）。
+  CSS 宽度写成视口百分比（90%）：浏览器窗口 resize 时 `emscripten_get_element_css_size`
+  的返回值随之变化，这是 resize 广播链路（window resize → 分发器 → 各实例 update_css_size
+  → Window 尺寸变化重排）的可观测来源。
+  注意：{{{ SCRIPT }}} 由 Emscripten 展开为完整 <script> 标签，勿再包一层 <script>。
+-->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>aurora-wasm-multiwin</title>
+    <style>
+        body { margin: 0; background: #202024; }
+        canvas { display: block; width: 90%; height: 260px; margin: 10px auto; outline: 1px solid #444; }
+    </style>
+</head>
+<body>
+<canvas id="win-a" width="640" height="260" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<canvas id="win-b" width="640" height="260" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<!-- {{{ SCRIPT }}} 由 Emscripten 展开为引入生成 JS 的 <script> 标签，勿再包一层 <script>。 -->
+{{{ SCRIPT }}}
+</body>
+</html>

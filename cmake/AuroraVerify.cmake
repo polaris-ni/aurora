@@ -197,6 +197,14 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         # 默认 shell 的 #canvas 与上屏契约不符，present 会静默丢帧。
         target_link_options(aurora_verify_wasm_raf PRIVATE
                 "--shell-file=${_aurora_verify_dir}/wasm_raf_shell.html")
+        # ---- WASM 多窗口事件路由（浏览器）：document/window 级单分发器——键盘按焦点
+        # Surface 路由、resize 广播全部实例、构造即接管焦点；连带验收字符折算（KeyDown
+        # 另发 TextInputEvent）。同为浏览器产物，不进聚合 `aurora_verify`（口径同上）。
+        aurora_add_verify_probe(aurora_verify_wasm_multiwin
+                "${_aurora_verify_dir}/wasm_multiwin_live_probe.cpp")
+        set_target_properties(aurora_verify_wasm_multiwin PROPERTIES SUFFIX ".html")
+        target_link_options(aurora_verify_wasm_multiwin PRIVATE
+                "--shell-file=${_aurora_verify_dir}/wasm_multiwin_shell.html")
     endif ()
     if (_aurora_verify_targets)
         add_custom_target(aurora_verify DEPENDS ${_aurora_verify_targets})
