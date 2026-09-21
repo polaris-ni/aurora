@@ -1,0 +1,150 @@
+# clang-tidy configuration for project aurora
+
+# ⚠️ Checks 是单引号标量，其内部"#"不会被视为注释（clang-tidy 会把整段当成一个未知
+# 检查名并静默失效）。所有排除理由必须写成标量之外的 YAML 注释，即本处这种形式。
+#
+# 定向排除理由（与下方 Checks 列表中的 - 项一一对应）：
+# - cppcoreguidelines-pro-type-vararg：C 可变参数是既定设计。AURORA_LOG/trace/bench
+#   的 printf 风格接口刻意使用 __VA_ARGS__ 与 va_list（零开销格式化，避免为日志引入
+#   <format> 编译依赖），逐点抑制无意义。
+# - cppcoreguidelines-avoid-c-arrays / modernize-avoid-c-arrays /
+#   cppcoreguidelines-pro-bounds-array-to-pointer-decay：Aurora 内部一律以 std::span
+#   传递缓冲区，残余告警全部落在两类不可改的位置——测试夹具（const char *required[]、
+#   const std::uint8_t c[4] 等字面量表）与系统 API 边界（Win32 WideCharToMultiByte
+#   形参为 LPCWSTR，只能接受退化后的指针）。新增 C 数组由编码规范审查把关。
+# - readability-function-cognitive-complexity / readability-avoid-nested-conditional-operator：
+#   纯风格/主观阈值检查，无安全 auto-fix。残留告警全部落在测试代码（复杂 setup、
+#   嵌套三元构造断言数据），对库实现无信号价值；逐点抑制噪声过大，故配置层排除，
+#   库代码复杂度由 Code Review 把关。
+# - bugprone-exception-escape：main 隐式 noexcept。测试入口（AURORA_TEST 注册的
+#   runner）与 demo 入口刻意让异常向上传播到测试框架/运行环境以报告失败，逐点
+#   try/catch 或 NOLINT 噪声过大；库实现内部异常路径由 Result/Error 体系与
+#   Code Review 把关。
+# - modernize-use-trailing-return-type：与 codespec/CODING_STANDARDS.md §8.3 直接冲突。
+#   §8.3 明确「新增代码必须用语义化尾置返回类型，存量代码允许例外」；本项目为 C++20
+#   MSVC/clang 双工具链，存量函数（含大量模板/重载）机械翻成尾置返回类型会带来巨大 diff
+#   且 §8.3 已豁免存量，故配置层关闭，新增代码的尾置返回类型由 Code Review 把关。
+# - cppcoreguidelines-non-private-member-variables-in-classes：与本项目 POD 式 struct 约定冲突。
+#   Aurora 的公开数据载体（如 Rect/Size/Color/Metrics 等）刻意使用公开非静态成员，不提供
+#   getter/setter 是设计选择（见 §2 命名规范），此 Core Guidelines 偏好(c.9/c.12)不作强制。
+# - modernize-use-ranges：clang-tidy 22 对该检查的 fix-it 会为序列容器生成
+#   `v.erase(std::ranges::subrange(first, last))` 形式，但 std::vector::erase 不接受
+#   subrange 参数，产生无法编译的代码（实测 build 直接报 borrowed_subrange_t 非法）。
+#   该检查仅作风格建议、无安全 auto-fix，故配置层关闭，相关循环改写由人工按需处理。
+# - readability-convert-member-functions-to-static：clang-tidy 22 的 fix-it 在成员函数带
+#   [[nodiscard]] 等属性时会把 static 插到属性之前（生成 `static [[nodiscard]] auto ...`，
+#   属性落到 decl-specifiers 中间 → 直接编译失败）；且其「修复」会把公开成员函数改成 static，
+#   属未预期的 API 变更。关闭后相关函数保持原签名，是否改 static 由人工按需评估。
+# 注：hicpp-* 未在 Checks 中启用，故不需要对应的 -hicpp-* 排除项。
+Checks: '
+  -*,
+  bugprone-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  cppcoreguidelines-*,
+  clang-analyzer-*,
+  -readability-trailing-comma,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-avoid-do-while,
+  -bugprone-easily-swappable-parameters,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-avoid-c-arrays,
+  -modernize-avoid-c-arrays,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -readability-function-cognitive-complexity,
+  -readability-avoid-nested-conditional-operator,
+  -bugprone-exception-escape,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  -modernize-use-trailing-return-type,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -modernize-use-ranges,
+  -readability-convert-member-functions-to-static,
+'
+WarningsAsErrors: ''
+HeaderFilterRegex: '(include/aurora|src/aurora|/tests/|/tools/|/examples/)'
+FormatStyle: file
+ExtraArgs: [ '-std=c++20' ]
+CheckOptions:
+  # 类/结构体/联合体/枚举类型
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.UnionCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+
+  # 函数/方法
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.MethodCase
+    value: lower_case
+
+  # 局部变量/全局变量/参数
+  - key: readability-identifier-naming.LocalVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.ParameterCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantParameterCase
+    value: lower_case
+
+  # 非静态成员变量（尾部下划线）
+  - key: readability-identifier-naming.MemberCase
+    value: lower_case
+  - key: readability-identifier-naming.ProtectedMemberSuffix
+    value: '_'
+  - key: readability-identifier-naming.PrivateMemberSuffix
+    value: '_'
+
+  # 静态成员变量
+  - key: readability-identifier-naming.ClassStaticCase
+    value: lower_case
+  - key: readability-identifier-naming.ClassStaticProtectedMemberSuffix
+    value: '_'
+  - key: readability-identifier-naming.ClassStaticPrivateMemberSuffix
+    value: '_'
+
+  # 全局常量（AURORA_ 前缀 + 全大写）
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.GlobalConstantPrefix
+    value: 'AURORA_'
+
+  # 静态成员常量（全大写无前缀）
+  - key: readability-identifier-naming.StaticConstantCase
+    value: UPPER_CASE
+
+  # 局部常量（lower_case）
+  - key: readability-identifier-naming.LocalConstantCase
+    value: lower_case
+
+  # 枚举常量（CamelCase 无前缀）
+  - key: readability-identifier-naming.EnumConstantCase
+    value: CamelCase
+
+  # 类型别名/typedef
+  - key: readability-identifier-naming.TypeAliasCase
+    value: CamelCase
+  - key: readability-identifier-naming.TypedefCase
+    value: CamelCase
+
+  # 命名空间（lower_case）
+  - key: readability-identifier-naming.NamespaceCase
+    value: lower_case
+
+  # 模板参数（CamelCase）
+  - key: readability-identifier-naming.TemplateParameterCase
+    value: CamelCase
+
+  # 宏定义（AURORA_ 前缀 + 全大写）
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.MacroDefinitionPrefix
+    value: 'AURORA_'
