@@ -16,9 +16,16 @@
 // - 关闭语义：window 级 beforeunload 回调（全局注册一次）置位页面级关闭请求，所有
 //   Surface 的 `should_close()` 同时为真——浏览器整页卸载即全部窗口关闭，语义天然一致。
 // - 多窗口路由（specification/06-app-platform.md §2.4 已知限制收口）：新建窗口即接管键盘
-//   焦点（同桌面「新建即激活」）；`focus_window()` 切路由指针；`raise()` 无浏览器映射
-//   （canvas 层叠由 DOM 顺序决定）保持基类 no-op；`set_title` 写 `document.title` 为页面
-//   单值，多窗口下最后调用者生效（限制如实申报）。
+//   焦点（同桌面「新建即激活」）；`focus_window()` 切路由指针；`raise()` 经「把本 canvas 移到
+//   其父节点末子」实现——浏览器无 z 序 API，**DOM 顺序即层叠顺序**（末位在上）。
+// - 页面标题（同 §2.4）：`document.title` 是**页面单值**，而每窗口各有一份标题，故按桌面
+//   口径折算——「焦点窗口的标题即页面标题」：`set_title` 先落本窗口缓存，仅当自己是焦点
+//   窗口时才写 DOM；焦点易主（构造接管 / `focus_window()` / 鼠标按下 / 焦点窗口析构回落）
+//   即把新焦点窗口的缓存重播到 `document.title`。从未声明过标题的窗口不动页面标题
+//   （宿主自己的 `<title>` 不归库管），声明过空串则如实写空——「声明」与否才分水岭。
+//   ⚠️ 一处**如实申报的契约偏差**：基类 `focus_window()` 的桌面语义是「置顶 + 取键盘焦点」，
+//   WASM 只做后者。因为「置顶」在此只能靠改写宿主 DOM 顺序实现，隐式重排别人家的节点是
+//   越权行为（正常流下会让画布换位跳动），故层序变更只在宿主**显式**调 `raise()` 时发生。
 // - 无障碍（ARIA 镜像桥）：首帧 `set_accessibility_root` 即构造并激活 `WasmAriaBridge`
 //   （浏览器无读屏探测面，D14 惰性激活的既定例外，见 wasm_aria.h 申报）；镜像同步
 //   （D9 拉取式重投影）与读屏反向动作排水由桥**自持的 rAF 自驱拍**每帧执行——不经
@@ -73,8 +80,9 @@ class WasmSurface : public Surface {
         // 故全局仅注册一次，由全局回调按 focused_surface_ 路由键盘、按实例集合广播 resize。
         instances_.insert(this);
         // 新建窗口即接管键盘焦点（同桌面平台「新建窗口被激活」语义）；首个窗口因此天然
-        // 有焦点，无需等第一次鼠标点击。
-        focused_surface_ = this;
+        // 有焦点，无需等第一次鼠标点击。此刻本窗口尚无标题（工厂随后才 `set_title`），
+        // 故 take_focus 不会写 DOM，页面标题留到那次声明时由本窗口接管。
+        take_focus(this);
         if (!global_handlers_registered_) {
             emscripten_set_keydown_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, true, &on_key_dispatch);
             emscripten_set_keyup_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, nullptr, true, &on_key_dispatch);
@@ -97,8 +105,9 @@ class WasmSurface : public Surface {
         instances_.erase(this);
         if (focused_surface_ == this) {
             // 焦点窗口销毁：路由指针回落到任一存活实例（浏览器无「下一个激活窗口」概念，
-            // 取集合首元素即确定性回落），空集则归 nullptr。
-            focused_surface_ = instances_.empty() ? nullptr : *instances_.begin();
+            // 取集合首元素即确定性回落），空集则归 nullptr。回落即「焦点易主」，页面标题
+            // 须跟着新焦点窗口走——否则关闭一个改过标题的窗口后，标签页上挂着的是幽灵标题。
+            take_focus(instances_.empty() ? nullptr : *instances_.begin());
         }
     }
 
@@ -157,9 +166,30 @@ class WasmSurface : public Surface {
     [[nodiscard]] auto size() const -> Size override { return Size{static_cast<float>(w_), static_cast<float>(h_)}; }
     [[nodiscard]] auto should_close() const -> bool override { return close_requested_; }
 
-    /// @brief 把键盘事件路由指针切到本窗口（页面级焦点无法用 JS 之外的方式抢占，路由即
-    ///        WASM 上「激活窗口」的忠实映射；鼠标按下同一效果）。
-    auto focus_window() -> void override { focused_surface_ = this; }
+    /// @brief 把键盘事件路由指针切到本窗口并重播页面标题（页面级焦点无法用 JS 之外的方式
+    ///        抢占，路由即 WASM 上「激活窗口」的忠实映射；鼠标按下同一效果）。
+    /// @note 基类契约里的「置顶」一半在浏览器里**故意不做**：置顶只能靠改写宿主 DOM 顺序
+    ///       实现，隐式重排别人的节点属越权（正常流下画布会换位跳动），故需要层序提升请显式
+    ///       调 `raise()`。类头「页面标题」条同步申报此偏差。
+    auto focus_window() -> void override { take_focus(this); }
+
+    /// @brief 把本窗口提到页面层叠顶部——浏览器无 z 序 API，**DOM 顺序即层叠顺序**，
+    ///        故实现是把本 canvas 移到其父节点的末子位（末位压前位）。
+    /// @note 同一元素 `appendChild` 是**移动**而非重建：节点身份保留，故已注册的
+    ///       Emscripten 鼠标回调、Canvas 2D 上下文与 ARIA 镜像容器（挂在 body 上、按
+    ///       canvas id 索引）全部随迁不失效，无需重注册。
+    /// @note 不改变激活状态（与基类契约一致）：路由指针与 `document.title` 一律不动。
+    auto raise() -> void override {
+        EM_ASM(
+            {
+                const canvas = document.getElementById(UTF8ToString($0));
+                // 节点已不在文档里（宿主删了画布）⇒ 无从提升，静默返回。
+                if (canvas && canvas.parentNode) {
+                    canvas.parentNode.appendChild(canvas);
+                }
+            },
+            canvas_id_.c_str());
+    }
 
     /// @brief 当前键盘路由目标的 canvas id（无焦点窗口时为空串）——多窗口路由的只读观测口，
     ///        供真机探针/自动化断言「点击/ focus_window 后路由确实切换」。
@@ -171,9 +201,20 @@ class WasmSurface : public Surface {
     [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
 
     auto set_event_handler(const EventHandler &h) -> void override { event_handler_ = h; }
+
+    /// @brief 声明本窗口标题：**先落每窗口缓存**，仅当本窗口是焦点窗口时才写 `document.title`
+    ///        （页面标题是单值，多窗口下由焦点窗口代表——同桌面「活动窗口标题在标题栏」）。
+    /// @note 非焦点窗口改标题只更新缓存，等它下次成为焦点窗口时自动重播，无需宿主协调。
     auto set_title(const std::string &title) -> void override {
-        EM_ASM({ document.title = UTF8ToString($0); }, title.c_str());
+        title_ = title;
+        title_declared_ = true;  // 「声明过」才是分水岭：空串也是宿主的显式要求
+        if (focused_surface_ == this) {
+            publish_focused_title();
+        }
     }
+
+    /// @brief 本窗口缓存的标题（多窗口观测口：非焦点窗口的标题只活在这里，不上页面）。
+    [[nodiscard]] auto title() const -> const std::string & { return title_; }
 
     /// @brief WASM 下 no-op：浏览器 rAF 驱动帧循环，无需阻塞等待。
     auto wait_events(double /*timeout_ms*/) -> void override {}
@@ -201,8 +242,27 @@ class WasmSurface : public Surface {
     inline static bool global_handlers_registered_ = false;
     inline static bool close_requested_ = false;  ///< beforeunload 置位；页面级=全部窗口关闭。
 
+    /// @brief 焦点接管的两件事一起做完：路由指针 + 页面标题跟随。四处调用点（构造、
+    ///        `focus_window()`、鼠标按下、焦点窗口析构回落）共用，防漏其一。
+    static auto take_focus(WasmSurface *s) -> void {
+        focused_surface_ = s;
+        publish_focused_title();
+    }
+
+    /// @brief 把「焦点窗口的标题缓存」重播到 `document.title`（页面单值的唯一写入口）。
+    /// @note 无焦点窗口、或它从未声明标题 ⇒ **不动** DOM：页面标题可能是宿主自己写的，
+    ///       库无权清空；`set_title("")` 属显式声明，会如实写空串。
+    static auto publish_focused_title() -> void {
+        if (focused_surface_ == nullptr || !focused_surface_->title_declared_) {
+            return;
+        }
+        EM_ASM({ document.title = UTF8ToString($0); }, focused_surface_->title_.c_str());
+    }
+
     std::string canvas_id_;       ///< 裸 DOM id（getElementById 上屏用）。
     std::string canvas_selector_; ///< CSS 选择器形态（Emscripten 事件注册/querySelector 用）。
+    std::string title_;           ///< 本窗口标题缓存（页面标题由焦点窗口的这份代表）。
+    bool title_declared_ = false; ///< 宿主是否声明过标题（决定易主时要不要重播 DOM）。
     std::unique_ptr<WasmAriaBridge> aria_bridge_;  ///< ARIA 镜像桥（首帧根注入时构造；见 wasm_aria.h）
     Painter painter_;
     int w_ = 0;
@@ -223,9 +283,9 @@ class WasmSurface : public Surface {
         ev.action = (type == EMSCRIPTEN_EVENT_MOUSEDOWN) ? MouseAction::Press
                     : (type == EMSCRIPTEN_EVENT_MOUSEUP) ? MouseAction::Release
                                                          : MouseAction::Move;
-        // 多窗口：最近交互（按下）的 canvas 成为键盘/事件焦点。
+        // 多窗口：最近交互（按下）的 canvas 成为键盘/事件焦点，页面标题随之跟随。
         if (ev.action == MouseAction::Press) {
-            focused_surface_ = self;
+            take_focus(self);
         }
         self->event_handler_(ev);
         return EM_TRUE;

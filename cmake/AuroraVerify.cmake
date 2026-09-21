@@ -197,9 +197,12 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         # 默认 shell 的 #canvas 与上屏契约不符，present 会静默丢帧。
         target_link_options(aurora_verify_wasm_raf PRIVATE
                 "--shell-file=${_aurora_verify_dir}/wasm_raf_shell.html")
-        # ---- WASM 多窗口事件路由（浏览器）：document/window 级单分发器——键盘按焦点
+        # ---- WASM 多窗口（浏览器）：document/window 级单分发器——键盘按焦点
         # Surface 路由、resize 广播全部实例、构造即接管焦点；连带验收字符折算（KeyDown
-        # 另发 TextInputEvent）。同为浏览器产物，不进聚合 `aurora_verify`（口径同上）。
+        # 另发 TextInputEvent）、`raise()` 的 DOM 序真层叠（DOM 末位 + 交叠区
+        # elementFromPoint 双证）、`document.title` 的焦点窗口代表制（改名缓存/易主重播/
+        # 关窗无幽灵标题）。判据由随库的 CDP 驱动 `wasm_multiwin_cdp_drive.mjs` 派发
+        # （需真实浏览器 + 本地 http，故照旧不进聚合 `aurora_verify`，口径同上）。
         aurora_add_verify_probe(aurora_verify_wasm_multiwin
                 "${_aurora_verify_dir}/wasm_multiwin_live_probe.cpp")
         set_target_properties(aurora_verify_wasm_multiwin PROPERTIES SUFFIX ".html")

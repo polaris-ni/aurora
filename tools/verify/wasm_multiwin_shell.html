@@ -1,25 +1,49 @@
 <!doctype html>
 <!--
-  wasm_multiwin_shell.html — 多窗口路由探针的 Emscripten 页面壳（--shell-file 注入）。
+  wasm_multiwin_shell.html — 多窗口路由探针的页面壳（--shell-file 注入）。
 
-  契约：提供两个 canvas——`win-a` / `win-b`（对应探针里两个 WasmOptions::canvas_id）。
-  CSS 宽度写成视口百分比（90%）：浏览器窗口 resize 时 `emscripten_get_element_css_size`
-  的返回值随之变化，这是 resize 广播链路（window resize → 分发器 → 各实例 update_css_size
-  → Window 尺寸变化重排）的可观测来源。
+  契约：提供两个 canvas——`win-a` / `win-b`（对应探针里两个 WasmOptions::canvas_id），
+  并且**部分重叠**：
+   * 为什么不再是上下顺排——`raise()` 在浏览器里的实现是「把本 canvas 移到父节点末子」，
+     而 DOM 顺序只在**元素互相覆盖**时才表现为层叠差异（正常流下它只表现为换位跳动，
+     测不出「谁在上面」）。故这里改为绝对定位并让两画布交叠，探针据交叠中心做
+     `document.elementFromPoint`，把层叠判据落在真实命中上。
+   * 点击位仍各自独占：win-a 的输入框在其上部（视口 y≈60，win-b 从 y=200 起）、win-b 的
+     输入框在其上部（y≈240，正处交叠带内且初始为 win-b 在上），两窗的键入互不遮挡。
+   * CSS 宽度仍写成视口百分比（80vw）：浏览器窗口 resize 时 `emscripten_get_element_css_size`
+     的返回值随之变化，这是 resize 广播链路（window resize → 分发器 → 各实例 update_css_size
+     → Window 尺寸变化重排）的可观测来源。
+  页面另备两条与探针约定的通道（详见 wasm_multiwin_live_probe.cpp 头注释）：
+   * `window.__mwCmd`：自动化 → 探针的命令队列（raise/改名/关窗三类无 DOM 事件可派发）。
+   * `window.__mwState`：探针 → 自动化的状态串。`document.title` **不**再作观测通道——
+     它自身就是被测对象（焦点窗口的标题才有权写它），故壳里的初值 `mw-shell` 一旦变化
+     即由被测代码负责。
   注意：{{{ SCRIPT }}} 由 Emscripten 展开为完整 <script> 标签，勿再包一层 <script>。
 -->
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>aurora-wasm-multiwin</title>
+    <title>mw-shell</title>
     <style>
         body { margin: 0; background: #202024; }
-        canvas { display: block; width: 90%; height: 260px; margin: 10px auto; outline: 1px solid #444; }
+        canvas {
+            position: absolute;
+            width: 80vw;
+            height: 260px;
+            outline: 1px solid #444;
+            background: #2a2a30;
+        }
+        #win-a { left: 2vw; top: 20px; }
+        #win-b { left: 8vw; top: 200px; }
     </style>
 </head>
 <body>
 <canvas id="win-a" width="640" height="260" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
 <canvas id="win-b" width="640" height="260" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<script>
+    // 命令队列初值：探针每帧排空一次（未定义时探针按空队列处理，此处只是让页面侧可直接 push）。
+    window.__mwCmd = [];
+</script>
 <!-- {{{ SCRIPT }}} 由 Emscripten 展开为引入生成 JS 的 <script> 标签，勿再包一层 <script>。 -->
 {{{ SCRIPT }}}
 </body>

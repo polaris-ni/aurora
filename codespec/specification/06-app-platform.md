@@ -113,15 +113,20 @@
 
 | 能力 | 入口 | 后端映射 |
 |:---|:---|:---|
-| 提升 z 序 | `WindowHost::raise()` / `Surface::raise()` | Win32 `BringWindowToTop`；GLFW 以 `glfwShowWindow` 近似（无独立 API） |
-| 激活窗口 | `WindowHost::focus_window()` / `Surface::focus_window()` | Win32 `SetForegroundWindow` + `SetFocus`；GLFW `glfwFocusWindow` |
+| 提升 z 序 | `WindowHost::raise()` / `Surface::raise()` | Win32 `BringWindowToTop`；GLFW 以 `glfwShowWindow` 近似（无独立 API）；Wasm 见 §2.4「已落地（z 序与页面标题）」 |
+| 激活窗口 | `WindowHost::focus_window()` / `Surface::focus_window()` | Win32 `SetForegroundWindow` + `SetFocus`；GLFW `glfwFocusWindow`；Wasm 只取键盘路由、**不置顶**（申报偏差，见 §2.4） |
 | 所在显示器 | `Surface::display_id()` / `WindowHost::display_id()` | Win32 `MonitorFromWindow`（HMONITOR 句柄值，与 `app::Display::id` 同源）；未知 -1 |
 | 迁移到显示器 | `WindowHost::move_to_display(id)` | 转发既有 `app::move_window_to_display`（居中到目标工作区） |
 | DPI 变化 | `Surface::set_scale_change_handler()` → `WindowHost::on_scale_changed()` | Win32 `WM_DPICHANGED`（取 wParam 高位的建议 DPI）→ 更新 `scale` 并强制整帧重排重绘 |
 
 **已知后端限制（多窗口）**
 
-- **Wasm**：**已落地（多窗口事件路由）**——键盘/resize 走「document/window 级单一分发器」：键盘按当前焦点 Surface 路由（鼠标按下/`focus_window()`/新建窗口均接管路由，焦点窗口销毁回落到存活实例），resize 广播全部实例各自刷新 CSS 尺寸（经 `Window::size()` 帧环检测触发重排）。可打印字符键在 KeyDown 的 `KeyEvent` 之外**另发** `TextInputEvent`（`key` 名折算，与 X11 路同口径；`keyCode` 数字码与库 `KeyCode` 枚举错位，不得直填）。仍存的限制：`raise()` 无浏览器映射（canvas 层叠由 DOM 顺序决定，保持 no-op）；`set_title` 写页面级 `document.title`，多窗口下最后调用者生效。真机验收：`tools/verify/wasm_multiwin_live_probe.cpp`（无头 Edge CDP，七项判据：初始路由/双向切换/字符落字/Enter 提交/反向不污染/resize 广播/还原）。
+- **Wasm**：**已落地（多窗口事件路由）**——键盘/resize 走「document/window 级单一分发器」：键盘按当前焦点 Surface 路由（鼠标按下/`focus_window()`/新建窗口均接管路由，焦点窗口销毁回落到存活实例），resize 广播全部实例各自刷新 CSS 尺寸（经 `Window::size()` 帧环检测触发重排）。可打印字符键在 KeyDown 的 `KeyEvent` 之外**另发** `TextInputEvent`（`key` 名折算，与 X11 路同口径；`keyCode` 数字码与库 `KeyCode` 枚举错位，不得直填）。
+  - **已落地（z 序与页面标题）**：
+    - `raise()` = 把本 canvas `appendChild` 到其父节点末子位。浏览器没有 z 序 API，**DOM 顺序即层叠顺序**（同 `z-index` 下末位压前位），故移动节点就是置顶。同一元素 `appendChild` 是**移动**而非重建——节点身份保留，已注册的鼠标回调、Canvas 2D 上下文与按 canvas id 索引的 ARIA 镜像容器全部随迁不失效，无需重注册。不改变激活状态（与基类契约一致）。
+    - `document.title` 是**页面单值**而每窗口各有一份标题，故按桌面口径折算为「焦点窗口的标题即页面标题」：`set_title` 先写本窗口缓存（`title()` 为多窗口只读观测口），仅当自己是焦点窗口时才落 DOM；非焦点窗口改名只进缓存。焦点**易主即重播**缓存，接管点共四处（构造即接管、`focus_window()`、鼠标按下、焦点窗口析构回落），共用 `take_focus()` 收口以防漏其一。从未声明过标题的窗口**不动** DOM（页面标题可能归宿主），`set_title("")` 属显式声明则如实写空。
+    - ⚠️ **一处如实申报的契约偏差**：基类 `focus_window()` 的桌面语义是「置顶 + 取键盘焦点」，Wasm **只做后者**。「置顶」在此只能靠改写宿主 DOM 顺序实现，隐式重排别人家的节点属越权（正常流下画布会换位跳动），故层序变更只在宿主显式调 `raise()` 时发生。
+  - 真机验收：`tools/verify/wasm_multiwin_live_probe.cpp` + 页面壳 `wasm_multiwin_shell.html` + CDP 驱动 `tools/verify/wasm_multiwin_cdp_drive.mjs`（从仓库根 `node tools/verify/wasm_multiwin_cdp_drive.mjs`，起本地 http 服务承载 wasm（`file://` 拒绝流式编译）并派发真实点击/按键/`Browser.setWindowBounds`，十项判据全绿即退出码 0）：初始路由 / 双向切换 / 字符落字 / Enter 提交 / 反向不污染 / resize 广播 / 还原，加 z 序两判据（`raise` 前后 **DOM 末位**与**交叠区 `elementFromPoint` 命中者**双证同步——只看字符串可被 z-index 作弊，故两路都要变）与标题四判据（非焦点改名不上页 / `focus_window()` 易主重播 / `raise` 不改标题 / 关窗后标题 = 新焦点窗口缓存即无幽灵标题）。探针的三个观测通道分工即契约：`window.__mwState` 由 Wasm 每帧发布状态，`window.__mwCmd` 由驱动 JS 注入命令（`raise*`/`focus*`/`titleX:<t>`/`closeB`），`document.title` **只测不发**——它正是被测对象，探针自发布会让标题判据自证。
 - **X11 / Wayland**：无全局窗口枚举能力，`raise` / `focus_window` 为尽力而为；等待通道是 per-surface 的，帧循环对这类后端施加 8ms 等待上限（见「统一帧循环」）。
 
 **跨窗通信**
