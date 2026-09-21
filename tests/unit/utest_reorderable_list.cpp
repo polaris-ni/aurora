@@ -2,7 +2,8 @@
 /// 目标单元: include/aurora/widget/reorderable_list.h
 /// 测试说明: 覆盖可拖拽重排列表的数据与几何内核——数据改写正确性（前移/后移/边界/单项/空表）、
 ///           可变行高 y 累计表、内建滚动的夹取与滚轮语义、restore_key 恢复与写回、
-///           可见范围与命中索引换算，以及自绘滚动控件的缓存声明语义
+///           可见范围与命中索引换算、自绘滚动控件的缓存声明语义，以及键盘重排替代路径
+///           （方向键光标 + 抓取/落位/取消 + 滚入视口 + 读屏播报 + i18n 键 + 开关让路）
 /// 覆盖说明: 拖拽识别 / 让位 / 落位动画 / auto-scroll 见 C2 / C3 用例（同文件续写）
 
 #include <algorithm>
@@ -12,8 +13,12 @@
 #include <vector>
 
 #include "aurora/app/scroll_storage.h"
+#include "aurora/core/accessibility.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/event.h"
+#include "aurora/event/focus.h"
+#include "aurora/event/keycode.h"
+#include "aurora/i18n/string_table.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/widget/reorderable_list.h"
@@ -145,6 +150,61 @@ auto reset_storage() -> ScrollStorage & {
     storage.clear_all();
     return storage;
 }
+
+/// 播报记录守卫：安装无障碍事件处理器收集 `Announcement` 文本，用例结束还原（处理器是进程级单槽）。
+class ScopedAnnouncements {
+  public:
+    ScopedAnnouncements() : saved_(current_accessibility_event_handler()) {
+        set_accessibility_event_handler([this](const AccessibilityEvent &e) -> void {
+            if (e.kind == AccessibilityEventKind::Announcement) {
+                texts.push_back(e.announcement_text);
+            }
+        });
+    }
+    ~ScopedAnnouncements() { set_accessibility_event_handler(saved_); }
+    ScopedAnnouncements(const ScopedAnnouncements &) = delete;
+    auto operator=(const ScopedAnnouncements &) -> ScopedAnnouncements & = delete;
+    ScopedAnnouncements(ScopedAnnouncements &&) = delete;
+    auto operator=(ScopedAnnouncements &&) -> ScopedAnnouncements & = delete;
+
+    /// @brief 播报历史里是否出现过含 `needle` 的一条。
+    [[nodiscard]] auto contains(const std::string &needle) const -> bool {
+        return std::ranges::any_of(texts, [&](const std::string &t) { return t.find(needle) != std::string::npos; });
+    }
+
+    std::vector<std::string> texts;  ///< 按发生顺序收集的播报文本
+
+  private:
+    AccessibilityEventHandler saved_;
+};
+
+/// 键盘事件（走真实派发器：快捷键匹配 → 控件优先钩子 → 焦点路由）。
+auto send_key(ReorderableList<int> &list, FocusManager &fm, KeyCode key, KeyAction action = KeyAction::Down)
+    -> bool {
+    KeyEvent e;
+    e.key = static_cast<int>(key);
+    e.action = action;
+    return EventDispatcher::dispatch(list, e, fm);
+}
+
+/// 聚焦到列表本身并回到未布局状态：`set_root` 让方向键候选集可见，`set_focus` 触发控件的获焦初始化。
+auto focus_list(ReorderableList<int> &list, FocusManager &fm) -> void {
+    fm.set_root(&list);
+    fm.set_focus(&list);
+}
+
+/// 字符串表守卫：`default_string_table()` 是进程级单例且无删除接口，用例登记完必须整体还原
+/// （否则 `--shuffle` 下会污染同 TU 依赖英文字面量兜底的用例）。
+class ScopedStringTable {
+  public:
+    ScopedStringTable() : saved_(default_string_table()) {}
+    ~ScopedStringTable() { default_string_table() = saved_; }
+    ScopedStringTable(const ScopedStringTable &) = delete;
+    auto operator=(const ScopedStringTable &) -> ScopedStringTable & = delete;
+
+  private:
+    StringTable saved_;
+};
 
 }  // namespace
 
@@ -313,6 +373,7 @@ AURORA_TEST_CASE(descriptor_and_serialization_surface) {
     AURORA_TEST_CHECK_TRUE(has_prop("restore_key"));
     AURORA_TEST_CHECK_TRUE(has_prop("drag_handle"));
     AURORA_TEST_CHECK_TRUE(has_prop("auto_scroll_threshold"));
+    AURORA_TEST_CHECK_TRUE(has_prop("keyboard_reorder"));
 
     ReorderableList<int> list{make_items({0, 1}), make_builder({20.0F})};
     list.set_restore_key("k");
@@ -320,7 +381,12 @@ AURORA_TEST_CASE(descriptor_and_serialization_surface) {
     list.serialize_props(props);
     AURORA_TEST_CHECK_EQ(props["restore_key"].get<std::string>(), std::string{"k"});
     AURORA_TEST_CHECK_NEAR(props["gap"].get<float>(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_TRUE(props["keyboard_reorder"].get<bool>());  // 键盘路径默认开启
     AURORA_TEST_CHECK_TRUE(props.contains("note"));  // 运行时数据不序列化，只留 note
+    list.set_keyboard_reorder(false);
+    Json disabled = Json::object();
+    list.serialize_props(disabled);
+    AURORA_TEST_CHECK_FALSE(disabled["keyboard_reorder"].get<bool>());
     AURORA_TEST_CHECK_EQ(std::string{list.type_name()}, std::string{"ReorderableList"});
 }
 
@@ -675,6 +741,192 @@ AURORA_TEST_CASE(horizontal_drag_does_not_start_reorder) {
     MouseEvent release = mouse(MouseAction::Release, 180.0F, 12.0F);
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(list, release, nullptr));
     AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 1, 2});
+}
+
+AURORA_TEST_CASE(keyboard_cursor_moves_and_rolls_items_into_view) {
+    auto items = make_items({0, 1, 2, 3, 4});
+    ReorderableList<int> list{items, make_builder({40.0F})};
+    LayoutEngine::layout(list, bounded(100.0F, 100.0F));  // 视口 100 / 内容 200：需滚动才看得见后段
+    ScopedAnnouncements ann;
+    FocusManager fm;
+    focus_list(list, fm);
+
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), 0);  // 获焦即落到首项并播报
+    AURORA_TEST_CHECK_FALSE(list.is_keyboard_grabbed());
+    AURORA_TEST_CHECK_TRUE(ann.contains("Position 1 of 5"));
+
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowDown));
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), 1);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 0.0F, 1e-4F);  // 第 2 项本就在视口内
+
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowDown));
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), 2);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 20.0F, 1e-4F);  // 项 2 底边 120 > 100 → 滚 20
+    AURORA_TEST_CHECK_TRUE(ann.contains("Position 3 of 5"));
+
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::End));
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), 4);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 100.0F, 1e-4F);  // 到底：offset = 200 - 100
+
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Home));
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), 0);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 0.0F, 1e-4F);
+
+    // 纯浏览光标不改数据；滚动经 restore_key 写回的语义与滚轮一致（此处未设 key，只验偏移）。
+    AURORA_TEST_CHECK_EQ(items->get(), (std::vector<int>{0, 1, 2, 3, 4}));
+    AURORA_TEST_CHECK_TRUE(list.is_focused());
+}
+
+AURORA_TEST_CASE(keyboard_grab_move_drop_commits_the_reorder) {
+    auto items = make_items({0, 1, 2, 3, 4});
+    ReorderableList<int> list{items, make_builder({40.0F})};
+    std::vector<std::pair<int, int>> calls;
+    list.set_on_reorder([&calls](int from, int to) -> void { calls.emplace_back(from, to); });
+    LayoutEngine::layout(list, bounded(300.0F, 300.0F));  // 全项可见：排除滚动干扰
+    ScopedAnnouncements ann;
+    FocusManager fm;
+    focus_list(list, fm);
+
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowDown));
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowDown));
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), 2);
+
+    // 抓取：数据未动，只记录原始位。
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Space));
+    AURORA_TEST_CHECK_TRUE(list.is_keyboard_grabbed());
+    AURORA_TEST_CHECK_EQ(list.keyboard_grab_index(), 2);
+    AURORA_TEST_CHECK_EQ(items->get(), (std::vector<int>{0, 1, 2, 3, 4}));
+    AURORA_TEST_CHECK_TRUE(ann.contains("Item grabbed"));
+
+    // 挪到目标位后落位：与拖拽同一 `reorder` 插入位语义。
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowUp));
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), 1);
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Enter));
+    AURORA_TEST_CHECK_FALSE(list.is_keyboard_grabbed());
+    AURORA_TEST_CHECK_EQ(items->get(), (std::vector<int>{0, 2, 1, 3, 4}));
+    AURORA_TEST_REQUIRE_EQ(calls.size(), 1U);
+    AURORA_TEST_CHECK_EQ(calls[0].first, 2);
+    AURORA_TEST_CHECK_EQ(calls[0].second, 1);
+    AURORA_TEST_CHECK_TRUE(ann.contains("from position 3 to position 2"));
+
+    // 原位落位：清抓取态但不改数据、不回调。
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Space));
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Enter));
+    AURORA_TEST_CHECK_FALSE(list.is_keyboard_grabbed());
+    AURORA_TEST_CHECK_EQ(calls.size(), 1U);
+    AURORA_TEST_CHECK_EQ(items->get(), (std::vector<int>{0, 2, 1, 3, 4}));
+    AURORA_TEST_CHECK_TRUE(ann.contains("dropped at position 2"));
+}
+
+AURORA_TEST_CASE(keyboard_escape_and_focus_loss_cancel_the_grab) {
+    auto items = make_items({0, 1, 2});
+    ReorderableList<int> list{items, make_builder({40.0F})};
+    LayoutEngine::layout(list, bounded(300.0F, 300.0F));
+    ScopedAnnouncements ann;
+    FocusManager fm;
+    focus_list(list, fm);
+
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowDown));  // 光标 → 1
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Space));      // 抓取 1
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowDown));
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowDown));  // 末项夹取
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), 2);
+
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Escape));  // 取消：回原位，数据不变
+    AURORA_TEST_CHECK_FALSE(list.is_keyboard_grabbed());
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), 1);
+    AURORA_TEST_CHECK_EQ(items->get(), (std::vector<int>{0, 1, 2}));
+    AURORA_TEST_CHECK_TRUE(ann.contains("cancelled"));
+
+    // 未抓取时的 Esc 不认领（留给页面级返回）。
+    AURORA_TEST_CHECK_FALSE(send_key(list, fm, KeyCode::Escape));
+
+    // 失焦撤销未落位的抓取。
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Space));
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowUp));
+    fm.clear();
+    AURORA_TEST_CHECK_FALSE(list.is_keyboard_grabbed());
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), 1);
+    AURORA_TEST_CHECK_EQ(items->get(), (std::vector<int>{0, 1, 2}));
+    AURORA_TEST_CHECK_FALSE(list.is_focused());
+}
+
+AURORA_TEST_CASE(keyboard_path_yields_when_disabled_and_for_unclaimed_keys) {
+    auto items = make_items({0, 1, 2});
+    ReorderableList<int> list{items, make_builder({40.0F})};
+    LayoutEngine::layout(list, bounded(300.0F, 300.0F));
+    FocusManager fm;
+
+    // 关闭开关：不认领方向键，也不设光标（按键交回焦点导航 / 激活语义）。
+    list.set_keyboard_reorder(false);
+    AURORA_TEST_CHECK_FALSE(list.keyboard_reorder());
+    focus_list(list, fm);
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), -1);
+    AURORA_TEST_CHECK_FALSE(send_key(list, fm, KeyCode::ArrowDown));
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), -1);
+    AURORA_TEST_CHECK_EQ(items->get(), (std::vector<int>{0, 1, 2}));
+
+    // 重新开启：按键释放（KeyAction::Up）与本控件不认领的方向均不改状态。
+    list.set_keyboard_reorder(true);
+    AURORA_TEST_CHECK_FALSE(send_key(list, fm, KeyCode::ArrowDown, KeyAction::Up));
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), -1);
+    AURORA_TEST_CHECK_FALSE(send_key(list, fm, KeyCode::ArrowLeft));
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), -1);
+    AURORA_TEST_CHECK_FALSE(list.is_keyboard_grabbed());
+
+    // 未认领按键不被消费 → 由派发器回落焦点导航（此处无右侧候选，故最终返回 false）。
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowDown));
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), 0);
+
+    // 空表：键盘路径整体空转（无光标、无崩溃）。
+    ReorderableList<int> empty{make_items({}), make_builder({40.0F})};
+    LayoutEngine::layout(empty, bounded(300.0F, 300.0F));
+    FocusManager empty_fm;
+    empty_fm.set_root(&empty);
+    empty_fm.set_focus(&empty);
+    AURORA_TEST_CHECK_EQ(empty.keyboard_index(), -1);
+    AURORA_TEST_CHECK_FALSE(empty.set_keyboard_index(0));
+    AURORA_TEST_CHECK_FALSE(empty.grab_keyboard_item());
+    AURORA_TEST_CHECK_FALSE(empty.drop_keyboard_item());
+    AURORA_TEST_CHECK_FALSE(empty.cancel_keyboard_grab());
+}
+
+AURORA_TEST_CASE(keyboard_announcements_are_localizable_and_switch_off_mid_grab_cancels) {
+    ScopedStringTable table_guard;
+    auto &table = default_string_table();
+    // 控件在按键路径无 BuildContext，按「默认区域」解析；Locale{} 即该区域未设置时的槽位。
+    table.add(Locale{}, "aurora.reorder.position", "第 {0} 项 / 共 {1} 项");
+    table.add(Locale{}, "aurora.reorder.grabbed", "已抓取第 {0} 项 / 共 {1} 项");
+    table.add(Locale{}, "aurora.reorder.dropped", "自第 {0} 项移至第 {1} 项 / 共 {2} 项");
+    table.add(Locale{}, "aurora.reorder.cancelled", "已取消，回到第 {0} 项 / 共 {1} 项");
+
+    auto items = make_items({0, 1, 2});
+    ReorderableList<int> list{items, make_builder({40.0F})};
+    LayoutEngine::layout(list, bounded(300.0F, 300.0F));
+    ScopedAnnouncements ann;
+    FocusManager fm;
+    focus_list(list, fm);
+
+    AURORA_TEST_CHECK_TRUE(ann.contains("第 1 项 / 共 3 项"));
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowDown));
+    AURORA_TEST_CHECK_TRUE(ann.contains("第 2 项 / 共 3 项"));
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Space));
+    AURORA_TEST_CHECK_TRUE(ann.contains("已抓取第 2 项 / 共 3 项"));
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowUp));
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Enter));
+    AURORA_TEST_CHECK_EQ(items->get(), (std::vector<int>{1, 0, 2}));
+    AURORA_TEST_CHECK_TRUE(ann.contains("自第 2 项移至第 1 项 / 共 3 项"));
+
+    // 抓取中途关掉开关：撤销抓取（数据不变），键盘态清零。
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Space));
+    AURORA_TEST_CHECK_TRUE(list.is_keyboard_grabbed());
+    AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowDown));
+    list.set_keyboard_reorder(false);
+    AURORA_TEST_CHECK_FALSE(list.is_keyboard_grabbed());
+    AURORA_TEST_CHECK_EQ(list.keyboard_index(), -1);
+    AURORA_TEST_CHECK_EQ(items->get(), (std::vector<int>{1, 0, 2}));
+    AURORA_TEST_CHECK_TRUE(list.reorder(0, 2));  // 数据仍可程序化重排：仅键盘路径被关闭
+    AURORA_TEST_CHECK_EQ(items->get(), (std::vector<int>{0, 2, 1}));
 }
 
 }  // namespace aurora::test_cases::utest_reorderable_list

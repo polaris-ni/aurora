@@ -2,6 +2,7 @@
 /// 目标单元: include/aurora/widget/lazy_list.h
 /// 测试说明: 覆盖 LazyList——默认不变量、count/行高参数钳制与降级、按需构建仅可见窗口条目（实例复用）、
 /// cache_extent 窗口、滚动偏移钳制与 scroll_to_item、滚轮步进、滚出窗口回收重建、序列化与自描述、
+/// 反序列化回填标量属性（含非法值降级、显式偏移优先于 restore_key 恢复）、
 /// snap/paging 收位短滑动（逐帧推进至终点对齐）、reduce-motion 直落、offset_signal 发布、滚轮余量上冒
 
 #include <chrono>
@@ -11,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/app/scroll_storage.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/lazy_list.h"
@@ -241,6 +243,82 @@ AURORA_TEST_CASE(serialize_props_and_describe_metadata) {
     }
     AURORA_TEST_CHECK_TRUE(count_required);
     AURORA_TEST_CHECK_FALSE(d.invariants.empty());
+}
+
+AURORA_TEST_CASE(deserialize_props_restores_every_scalar) {
+    // 静态 JSON 回填属性（工厂重建路径）：几何/缓存/吸附逐项还原，二次序列化幂等。
+    Json props;
+    props["count"] = 100;
+    props["item_extent"] = 48.0F;
+    props["cache_extent"] = 300.0F;
+    props["scroll_offset"] = 240.0F;
+    props["restore_key"] = "demo.feed";
+    props["snap_extent"] = 240.0F;
+    props["snap_paging"] = false;
+    props["snap_alignment"] = "Center";
+
+    LazyList list;
+    list.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(list.count(), 100);
+    AURORA_TEST_CHECK_NEAR(list.content_height(), 4800.0F, 1e-3F);  // count × item_extent
+    AURORA_TEST_CHECK_NEAR(list.snap().extent, 240.0F, 1e-4F);
+    AURORA_TEST_CHECK_TRUE(list.snap().alignment == ScrollSnapAlignment::Center);
+    AURORA_TEST_CHECK_EQ(list.restore_key(), std::string{"demo.feed"});
+
+    Json again;
+    list.serialize_props(again);
+    for (const char *key : {"count", "item_extent", "cache_extent", "snap_extent", "restore_key"}) {
+        AURORA_TEST_CHECK_TRUE(again[key] == props[key]);
+    }
+}
+
+AURORA_TEST_CASE(deserialize_degrades_nonpositive_geometry) {
+    // 反序列化路径与构造器同一降级判据：非正行高回落 48、负项数归零（不把非法值直写进控件）。
+    Json props;
+    props["count"] = -5;
+    props["item_extent"] = 0.0F;
+    props["cache_extent"] = -10.0F;
+
+    LazyList list;
+    list.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(list.count(), 0);
+    AURORA_TEST_CHECK_NEAR(list.content_height(), 0.0F, 1e-4F);  // count 归零 → 无内容
+
+    Json out;
+    list.serialize_props(out);
+    AURORA_TEST_CHECK_NEAR(out["item_extent"].get<float>(), 48.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(out["cache_extent"].get<float>(), 0.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(deserialized_offset_wins_over_restore_key) {
+    // 树里写明的偏移是「声明的状态」，restore_key 的意义是「树没写时记住位置」⇒ 前者优先。
+    // 且重建实例在挂 builder 前不该有条目（虚拟化窗口在无 builder 时为空）。
+    auto &storage = ScrollStorage::instance();
+    storage.clear_all();
+    storage.write("demo.list", 900.0F);
+
+    Json props;
+    props["count"] = 100;
+    props["item_extent"] = 48.0F;
+    props["restore_key"] = "demo.list";
+    props["scroll_offset"] = 240.0F;
+
+    LazyList list;
+    list.deserialize_props(props);
+    LayoutEngine::layout(list, bounded(320.0F, 200.0F));
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 240.0F, 1e-3F);
+    AURORA_TEST_CHECK_EQ(list.live_item_count(), static_cast<std::size_t>(0));  // 无 builder：属性齐备、暂无条目
+
+    // 只声明 restore_key（无显式偏移）时，按键恢复照常生效。
+    Json keyed_only;
+    keyed_only["count"] = 100;
+    keyed_only["item_extent"] = 48.0F;
+    keyed_only["restore_key"] = "demo.list";
+    LazyList restored;
+    restored.deserialize_props(keyed_only);
+    LayoutEngine::layout(restored, bounded(320.0F, 200.0F));
+    AURORA_TEST_CHECK_NEAR(restored.scroll_offset(), 900.0F, 1e-3F);
+    storage.clear_all();
 }
 
 AURORA_TEST_CASE(snap_glide_advances_every_frame_until_row_boundary) {

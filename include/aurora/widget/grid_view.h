@@ -33,7 +33,7 @@ namespace aurora {
  * 与 `LazyList` 区分：`LazyList` 一维单列；`GridView` 一维索引映射到 (row,col) 二维布局，
  * 适合图库 / 数据卡片网格。当前为固定行高 + 等宽列模式；可变尺寸作为后续增强。
  * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
+ * @note Rebuildable: yes, via from_json（标量属性回填；条目须宿主经 `set_item_builder` 挂上）
  */
 class GridView : public Widget {
   public:
@@ -224,6 +224,16 @@ class GridView : public Widget {
         return {first, last};
     }
 
+    /// @brief 挂上 / 换掉单元格构建器（`LazyRow::set_item_builder` 同族）。
+    ///
+    /// `ItemBuilder` 是运行时回调、不参与序列化，故 `from_json` 重建出的网格「几何齐备而暂无条目」——
+    /// 本接口就是那句「由宿主回填」的落点。赋值后标布局脏，下一帧按当前窗口构建单元格。
+    auto set_item_builder(ItemBuilder builder) -> GridView & {
+        builder_ = std::move(builder);
+        mark_needs_layout();
+        return *this;
+    }
+
     auto on_scroll(ScrollEvent &e) -> void override {
         const float before = offset_;
         set_scroll_offset(offset_ - (e.delta_y * AURORA_SCROLL_STEP));
@@ -250,6 +260,49 @@ class GridView : public Widget {
         props["snap_extent"] = snap_.extent;
         props["snap_paging"] = snap_.paging;
         props["snap_alignment"] = snap_alignment_to_json(snap_.alignment);
+    }
+
+    /// @brief 从静态 JSON 回填标量属性。单元格内容仍持运行时 `ItemBuilder`（不可序列化），
+    ///        故重建出的是「几何与滚动状态齐备、暂无条目」的网格——宿主挂上 builder 即照常工作。
+    ///        非正值一律按 `Diagnostics::degraded` 降级，判据与构造器逐字一致。
+    auto deserialize_props(const Json &props) -> void override {
+        Widget::deserialize_props(props);
+        if (props.contains("count")) {
+            const int declared = props["count"].get<int>();
+            count_ = declared < 0 ? 0 : declared;
+        }
+        if (props.contains("columns")) {
+            const int declared = props["columns"].get<int>();
+            columns_ = declared > 0
+                           ? declared
+                           : (Diagnostics::degraded("layout", "GridView columns 非正已降级为 1"), 1);
+        }
+        if (props.contains("cell_extent")) {
+            const float declared = props["cell_extent"].get<float>();
+            cell_extent_ = declared > 0.0F
+                               ? declared
+                               : (Diagnostics::degraded("layout", "GridView cell_extent 非正已降级为 96"), 96.0F);
+        }
+        if (props.contains("cache_extent")) {
+            set_cache_extent(props["cache_extent"].get<float>());
+        }
+        if (props.contains("restore_key")) {
+            set_restore_key(props["restore_key"].get<std::string>());
+        }
+        if (props.contains("snap_extent")) {
+            snap_.extent = props["snap_extent"].get<float>();
+        }
+        if (props.contains("snap_paging")) {
+            snap_.paging = props["snap_paging"].get<bool>();
+        }
+        if (props.contains("snap_alignment")) {
+            snap_.alignment = json_to_snap_alignment(props["snap_alignment"]);
+        }
+        if (props.contains("scroll_offset")) {
+            // 显式偏移优先于 restore_key 恢复（见 maybe_restore_scroll）：记入 pending 待布局后应用。
+            pending_offset_ = props["scroll_offset"].get<float>();
+            scroll_restored_ = false;
+        }
     }
 
     auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
@@ -454,8 +507,20 @@ class GridView : public Widget {
     }
 
     /// @brief 首次可滚动布局时按 `restore_key` 恢复滚动位置；内容尚不可滚动则等待下一帧布局。
+    ///        经 `deserialize_props` 显式声明的 `scroll_offset`（`pending_offset_`）**优先于**按键
+    ///        恢复——前者是树里写明的状态，后者存在的意义正是「树没写时记住位置」（同 `Scroll` / `LazyRow`）。
     auto maybe_restore_scroll() -> void {
-        if (scroll_restored_ || restore_key_.empty() || max_scroll_offset() <= 0.0F) {
+        if (scroll_restored_ || max_scroll_offset() <= 0.0F) {
+            return;
+        }
+        if (pending_offset_.has_value()) {
+            scroll_restored_ = true;
+            const float explicit_offset = *pending_offset_;
+            pending_offset_.reset();
+            apply_restored_offset(explicit_offset);
+            return;
+        }
+        if (restore_key_.empty()) {
             return;
         }
         scroll_restored_ = true;
@@ -474,6 +539,7 @@ class GridView : public Widget {
     }
 
     std::string restore_key_;  ///< 滚动位置保存键（空 = 不参与恢复）
+    std::optional<float> pending_offset_;  ///< 显式反序列化的偏移（优先于 restore_key 恢复）
     bool scroll_restored_ = false;  ///< 是否已就位（恢复过一次 / 用户或外部程序化设置过）
     std::map<int, Node> live_;
     ScrollSnap snap_;  ///< snap/paging 吸附配置（默认关闭）

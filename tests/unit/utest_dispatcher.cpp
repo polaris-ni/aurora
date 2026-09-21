@@ -3,7 +3,7 @@
 /// 测试说明: 命中测试最深目标、鼠标冒泡与 stop-on-handled、本地坐标写入与 Press
 /// 焦点转移/空白清焦、指针捕获越界续发、悬停进出 diff、悬停光标解析
 /// （修饰链 > 虚钩子 > Clickable 缺省，变化才下发）、键盘
-/// Tab/激活快捷键与焦点路由（含激活键优先投递 on_key_event 的控件级 opt-in）、滚轮/文本/文件拖放路由、
+/// Tab/激活快捷键与焦点路由（含激活键 / 方向键优先投递 on_key_event 的控件级 opt-in）、滚轮/文本/文件拖放路由、
 /// 滚轮余量自最深可滚动者上冒给更浅祖先（嵌套滚动协调：内层到顶后外层下拉刷新接手）、
 /// TouchDispatcher 按指针 id 捕获与合成鼠标事件
 
@@ -33,6 +33,7 @@ class TestBox final : public LeafWidget {
     bool consume_keys = true;
     bool consume_drop = false;
     bool activation_keys_to_key_event = false;  ///< 覆写 wants_activation_keys() 的开关
+    bool navigation_keys_to_key_event = false;  ///< 覆写 wants_navigation_keys() 的开关
 
     int press_count = 0;
     int release_count = 0;
@@ -89,6 +90,8 @@ class TestBox final : public LeafWidget {
     auto activate() -> void override { ++activations; }
 
     [[nodiscard]] auto wants_activation_keys() const -> bool override { return activation_keys_to_key_event; }
+
+    [[nodiscard]] auto wants_navigation_keys() const -> bool override { return navigation_keys_to_key_event; }
 
     auto on_hover_change(bool entered) -> void override {
         ++hover_changes;
@@ -459,6 +462,45 @@ AURORA_TEST_CASE(key_dispatch_tab_navigation_and_activation_shortcuts) {
     no_focus_enter.key = static_cast<int>(KeyCode::Enter);
     AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, no_focus_enter, fm));
     AURORA_TEST_CHECK_EQ(tree.box1->activations, 2);
+}
+
+AURORA_TEST_CASE(arrow_keys_honour_the_navigation_keys_opt_in) {
+    auto tree = make_tree();
+    FocusManager fm;
+    fm.set_root(tree.row.get());
+    // 方向键导航按「最近一次绘制的绝对盒」取几何（本夹具不走绘制），经测试 seam 手工给出。
+    tree.box1->set_focus_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 40.0F, .height = 40.0F}});
+    tree.box2->set_focus_bounds(Rect{.origin = Point{.x = 40.0F, .y = 0.0F}, .size = Size{.width = 40.0F, .height = 40.0F}});
+    fm.set_focus(tree.box1.get());
+
+    auto press_right = []() -> KeyEvent {
+        KeyEvent e;
+        e.key = static_cast<int>(KeyCode::ArrowRight);
+        e.action = KeyAction::Down;
+        return e;
+    };
+
+    // 默认（未 opt-in）：方向键 = 几何焦点导航，焦点控件观察不到按键。
+    KeyEvent baseline = press_right();
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, baseline, fm));
+    AURORA_TEST_CHECK(fm.focused() == tree.box2.get());
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 0);
+
+    // opt-in 且消费：按键先到控件，焦点不动（列表内部光标 / 键盘重排依赖此路由）。
+    fm.set_focus(tree.box1.get());
+    tree.box1->navigation_keys_to_key_event = true;
+    tree.box1->consume_keys = true;
+    KeyEvent claimed = press_right();
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, claimed, fm));
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 1);
+    AURORA_TEST_CHECK(fm.focused() == tree.box1.get());
+
+    // opt-in 但不消费（控件不认领该方向）：回落几何焦点导航。
+    tree.box1->consume_keys = false;
+    KeyEvent unclaimed = press_right();
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, unclaimed, fm));
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 2);
+    AURORA_TEST_CHECK(fm.focused() == tree.box2.get());
 }
 
 AURORA_TEST_CASE(activation_keys_route_to_key_event_for_opt_in_widgets) {

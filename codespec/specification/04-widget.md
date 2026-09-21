@@ -241,7 +241,7 @@ au::Text("Welcome").font_size(24).bold();
 | `Row` / `Column` | `children`、`gap`、`flex`（含 `main_axis` / `cross_axis` / `main_axis_size`）。`cross_axis` 的 `Baseline` 取值仅对水平主轴（`Row`）有语义（`03-layout-render.md` §3.8）。`modifier` 属 `Widget` 基类，不在此列 |
 | `Stack` | 层叠，`children` 叠加 |
 | `Grid` | `columns`、`children` |
-| `Grid` 虚拟化版 `GridView` | `count`、`columns`、`cell_extent`、`cache_extent`、`scroll_offset`、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`（吸附三属性，见下「滚动增强契约」）；辅助 API `set_scroll_offset` / `scroll_to` / `set_snap` / `offset_signal` / `is_gliding` / `visible_row_range` / `live_item_count` |
+| `Grid` 虚拟化版 `GridView` | `count`、`columns`、`cell_extent`、`cache_extent`、`scroll_offset`、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`（吸附三属性，见下「滚动增强契约」）；辅助 API `set_scroll_offset` / `scroll_to` / `set_snap` / `offset_signal` / `is_gliding` / `visible_row_range` / `live_item_count` / `set_item_builder`（JSON 重建后挂单元格） |
 | `Scroll` | 可滚动容器，`child` 单子节点，`step` 滚动步长、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`；运行时偏移经序列化键 `offset` 可读回；程序化跳转 `set_offset(offset) -> bool`（纯夹取）、`scroll_to(offset, animate = true) -> bool`；滚动驱动动画原语 `offset_signal()`；观测点 `is_gliding()`（`widget/scroll.h`） |
 | `PullToRefresh` | 下拉刷新容器（`widget/pull_to_refresh.h`）：`threshold`（触发距离 64dp）、`max_pull`（橡皮筋上限 128dp）；回调 `on_refresh`；API `finish_refresh()` / `state()` / `pull_distance()` / `progress()` |
 | `StickyHeader` | 吸顶头部包装（`widget/sticky_header.h`），单子节点、无自有属性；正常参与布局，滚动经过视口顶部时由宿主以覆盖层钉驻 |
@@ -253,6 +253,8 @@ au::Text("Welcome").font_size(24).bold();
 | `BreakpointBuilder` | 响应式布局构建器（`widget/breakpoint_builder.h`）：按宽度断点（`medium_max_width` / `expanded_min_width`）切换 Compact / Medium / Expanded，经 `builder` 闭包重建子树；仅断点档位变化或闭包替换时重建 |
 
 `GridView` / `LazyList` / `LazyRow` 是虚拟化容器，仅实例化可见窗口加 `cache_extent` 缓冲内的子项，复杂度 O(可见单元数)。三者的 `on_paint` 内均含 `push_clip(bounds)` / `pop_clip()` 配对，被圆角裁剪容器包裹时不越界。
+
+**三者的 JSON 重建契约**：五个占位/容器控件（`LazyList` / `LazyRow` / `GridView` / `Skeleton` / `BottomNavBar`）都已接入 `register_core_widgets()`，`from_json` 可还原。差别在**条目**：`ItemBuilder` 是运行时回调、不入 JSON，故三个虚拟化容器重建后「标量属性齐备而暂无条目」，宿主须随后调 `set_item_builder(...)` 挂上构建器（赋值即标布局脏，下一帧按当前窗口建条目）；`Skeleton` 与 `BottomNavBar` 无回调成员，属性可完整往返。构造期默认工厂以占位入参建实例再回填属性，`ReorderableList<T>` 因条目由 `State<std::vector<T>>` 驱动而**不**注册（`Rebuildable: no`）。注册表与逐控件的可重建性标注见 `CONCEPTS.md` §1.1。
 
 **对齐原语**：容器与 `Stack` 的子项落点由 `widget/alignment.h` 统一提供——`enum class Alignment`（`TopLeft` / `TopCenter` / … / `BottomRight` 九宫格取值）配自由函数 `align_origin(Alignment, child_size, container_size) -> Point`（返回子项左上角相对容器的对齐落点）。该枚举同时被 `StackProps::align`、`Modifier::align(Alignment)`（`AlignNode`）与 flex 布局消费，是「子项在容器内如何对齐」的**单一类型来源**。
 
@@ -273,13 +275,13 @@ au::Text("Welcome").font_size(24).bold();
 
 | 控件 | 关键属性 |
 |:---|:---|
-| `LazyList` | `count`、`item_extent`（固定行高，默认 48dp）、`scroll_offset`、`cache_extent`（可见区外预取缓冲）、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`（`0` 表示无吸附）；辅助 API `set_scroll_offset` / `scroll_to_item` / `scroll_to` / `set_snap` / `offset_signal` / `is_gliding` / `visible_range` / `live_item_count` / `set_cache_extent` / `set_restore_key`；滚轮滚动经 `on_scroll` 覆写处理（`widget/lazy_list.h`） |
-| `LazyRow` | 主轴为水平；`item_count`、`item_extent`（子项固定宽度，默认 96）、`cache_extent`、`padding`、`restore_key`；辅助 API `scroll_offset` / `max_scroll_offset` / `set_scroll_offset`（仅标绘制脏——可见窗口在 `on_paint` 现算，与 `LazyList` 需标布局脏不同）；`set_padding` 与 `set_on_item_click`（`on_item_click` 事件，参数为索引）属本控件（`widget/lazy_row.h`） |
+| `LazyList` | `count`、`item_extent`（固定行高，默认 48dp）、`scroll_offset`、`cache_extent`（可见区外预取缓冲）、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`（`0` 表示无吸附）；辅助 API `set_scroll_offset` / `scroll_to_item` / `scroll_to` / `set_snap` / `offset_signal` / `is_gliding` / `visible_range` / `live_item_count` / `set_cache_extent` / `set_restore_key` / `set_item_builder`（JSON 重建后挂条目）；滚轮滚动经 `on_scroll` 覆写处理（`widget/lazy_list.h`） |
+| `LazyRow` | 主轴为水平；`item_count`、`item_extent`（子项固定宽度，默认 96）、`cache_extent`、`padding`、`restore_key`；辅助 API `scroll_offset` / `max_scroll_offset` / `set_scroll_offset`（仅标绘制脏——可见窗口在 `on_paint` 现算，与 `LazyList` 需标布局脏不同）/ `set_item_builder`（JSON 重建后挂条目）；`set_padding` 与 `set_on_item_click`（`on_item_click` 事件，参数为索引）属本控件（`widget/lazy_row.h`） |
 | `Repeater` | `items`（信号驱动），按模板渲染每个元素 |
 | `ListView` | `items`（行数据）、`multi_select`（多选模式）；回调 `on_select` / `on_remove`（`widget/data_widgets.h`） |
 | `DataTable` | `columns`（列描述）、`row_count`（只读）、`selected_row`（-1 = 无）、`sort_column`（-1 = 无）；回调 `on_sort` / `on_select` |
 | `TreeView` | 树形数据展示；`selected_row`（选中可见行，-1 = 无）；回调 `on_select` / `on_toggle` |
-| `ReorderableList<T>` | 可拖拽重排列表（全量实例化、可变行高、内建垂直滚动）：`gap`、`scroll_offset`、`restore_key`、`drag_handle`（是否限定右侧手柄带起拖）、`auto_scroll_threshold`；回调 `on_reorder(from, new_index)`；辅助 API `reorder` / `slot_for_center` / `item_top` / `drag_index` / `drop_slot` / `is_dragging` / `is_settling`（`widget/reorderable_list.h`） |
+| `ReorderableList<T>` | 可拖拽重排列表（全量实例化、可变行高、内建垂直滚动）：`gap`、`scroll_offset`、`restore_key`、`drag_handle`（是否限定右侧手柄带起拖）、`auto_scroll_threshold`、`keyboard_reorder`（键盘重排路径开关，默认 `true`）；回调 `on_reorder(from, new_index)`；辅助 API `reorder` / `slot_for_center` / `item_top` / `drag_index` / `drop_slot` / `is_dragging` / `is_settling`，键盘通道 `set_keyboard_reorder` / `set_keyboard_index` / `keyboard_index` / `is_keyboard_grabbed` / `keyboard_grab_index` / `grab_keyboard_item` / `drop_keyboard_item` / `cancel_keyboard_grab`（`widget/reorderable_list.h`） |
 
 **拖拽重排的数据契约与交互边界**：
 
@@ -287,7 +289,9 @@ au::Text("Welcome").font_size(24).bold();
 - **手柄带边界**：条目若自带点击（`Clickable` / `Button`），其 Press 被子项消费（冒泡 stop-on-handled），列表收不到按下事件 ⇒ 必须 `set_drag_handle(true)`：右侧 48dp 手柄带内命中链**不下降给子项**，由列表自己起拖；纯展示型条目（无点击）则整项可拖。
 - **让位是绘制期偏移**：跟手 1:1；其余条目按「移除被拖项后的目标序」在 `on_paint` 位移、`on_hit_test_chain` 同步补偿 —— `Node::bounds` 保持不动（几何权威在 Node，逐帧改会击穿子控件 Display List 缓存）。换位判定取相邻项中点并带 **±2dp 滞回**（防边界抖动）。
 - **落位动画**：松手后 spring 收敛到目标槽位（初速度按帧间差分估计），静止才提交数据；`reduce_motion` 下直接落位（同 `Dismissible` / `AnimationController` 的短路语义）。自驱动 `tick_gestures`，不使用 `Animator`。
-- **近边缘自动滚动**：被拖项进入视口上下 48dp（`auto_scroll_threshold`）带内时按侵入深度比例滚动；滚动量吃进跟手位移（被拖项**屏幕位置守恒**）。拖拽期间滚轮被吞（同轴冲突）。虚拟化列表的重排**不做**（`LazyList` 保持只读滚动）。键盘替代路径（可聚焦条目 + 升降位快捷键）尚未提供，记入后续增量。
+- **近边缘自动滚动**：被拖项进入视口上下 48dp（`auto_scroll_threshold`）带内时按侵入深度比例滚动；滚动量吃进跟手位移（被拖项**屏幕位置守恒**）。拖拽期间滚轮被吞（同轴冲突）。虚拟化列表的重排**不做**（`LazyList` 保持只读滚动）。
+- **键盘替代路径**（`keyboard_reorder`，默认开）：指针拖拽不是唯一取径，键盘操作者可经「移动光标 → 抓取 → 落位」完成同一次重排。获焦落在**首个可见项**（不是第 0 项，也不触发滚动——恢复滚动位置的控件获焦后位置不变），`↑` / `↓` 移光标、`Home` / `End` 跳首尾（越界自动 `scroll_to_item` 拉回可视），`Space` / `Enter` 抓取与落位（落位即走与拖拽同一条 `reorder(from, to)` 提交通道），`Esc` 取消。抓取项以「抬起态」重绘，光标环仅在该列表**持有焦点**时绘制（`inherit_theme(ctx).primary`，抓取时加粗）。鼠标拖拽进行中键盘路径整体让位（`drag_state_ != Idle`），两条通道不会互相踩。
+- **键盘路径的可访问性与可定制性**：光标移动 / 抓取 / 落位 / 取消四类节点各播报一次（`Widget::announce` → `AccessibilityEventKind::Announcement`，文案键 `aurora.reorder.position` / `.grabbed` / `.dropped` / `.dropped_in_place` / `.cancelled`，经 `default_string_table()` 解析、缺失时回落内置英文串，故宿主可整表替换）；落位项与原位相同时播报「未移动」而非静默。方向键之所以能到达列表，依赖 `Widget::wants_navigation_keys()`（默认 `false`）这一控件级 opt-in：见 `05-event-navigation.md` §4.2。`set_keyboard_reorder(false)` 关闭该路径（进行中的抓取同时清除），光标状态可经 `keyboard_index()` / `is_keyboard_grabbed()` / `keyboard_grab_index()` 观测，也可用 `set_keyboard_index(i)` 程序化设定。
 
 ### 3.5 结构与生命周期
 
@@ -310,8 +314,8 @@ au::Text("Welcome").font_size(24).bold();
 | `VideoPlayer` | 视频播放控件（`media/video_player.h`）；`fit`（`BoxFit` 枚举：Fill / Contain / Cover 等）、`show_controls`；回调 `on_tap` / `on_double_tap`；帧源经 `set_source` 注入 |
 | `VideoControls` | 视频播放控件叠层（`media/video_controls.h`），配 `VideoPlayer` 使用，单子容器 |
 | `Placeholder` | 通用降级占位盒（`widget/placeholder.h`），序列化键 `message` 说明文字（`au::Placeholder("…")` 或 `.set_message("…")` 构造，非聚合类型、无 initializer_list 构造） |
-| `Skeleton` | 骨架屏加载占位（shimmer 动画） |
-| `BottomNavBar` | `items`（每项含 icon 绘制器与 label）、`selected_index`、`on_select`；按项等分宽度布局 |
+| `Skeleton` | 骨架屏加载占位（shimmer 动画，`width` / `height` / `color` / `highlight` / `duration` 五属性全量序列化往返） |
+| `BottomNavBar` | `items`（每项含 icon 绘制器与 label）、`selected_index`、`bar_height`；回调 `on_select`；按项等分宽度布局（`selected_index` / `bar_height` 序列化往返，`items` 含绘制器故不入 JSON） |
 | `TitleBar` | 自绘标题栏 / CSD |
 | `ToolBar` / `MenuBar` / `TabBar` | 工具栏 / 菜单条 / 标签页 |
 | `TabBody` | 标签内容体（`widget/recipes.h`，`detail` 命名空间）：按 `selected` 索引显示对应页，随状态刷新；与 `TabBar` 配套使用 |

@@ -35,9 +35,11 @@
 
 ### 1.1 序列化工厂注册状态
 
-`LazyList` / `LazyRow` / `BottomNavBar` 已接入 `register_core_widgets()`（JSON 工厂名 `"LazyList"` / `"LazyRow"` / `"BottomNavBar"`，C++ 便利构造器 `ui::lazy_list(...)` / `ui::lazy_row(...)` / `ui::bottom_nav_bar(...)`）。
+`LazyList` / `LazyRow` / `GridView` / `BottomNavBar` / `Skeleton` 均已接入 `register_core_widgets()`（JSON 工厂名 `"LazyList"` / `"LazyRow"` / `"GridView"` / `"BottomNavBar"` / `"Skeleton"`，C++ 便利构造器 `ui::lazy_list(...)` / `ui::lazy_row(...)` / `ui::bottom_nav_bar(...)`）。
 
-`Skeleton` 与 `GridView` 已有头文件与类型，但**尚未接入序列化工厂**，因此暂不可经 JSON 反序列化还原（二者仍可正常构造与渲染）。
+其中 `Skeleton` / `BottomNavBar` 的属性由 `deserialize_props` 全量回填；`LazyList` / `LazyRow` / `GridView` 是**虚拟化条目容器**，JSON 只还原标量属性（`count` / `item_extent` / `columns` / `cell_extent` / `cache_extent` / `restore_key` / 吸附三件套 / `scroll_offset`），**条目工厂不在序列化范围内**：宿主须在 `from_json` 之后经 `set_item_builder(...)` 挂上条目构造器，控件才会产出可见条目（约定同 `Repeater`）。显式序列化的 `scroll_offset` 优先于 `restore_key` 的滚动位置恢复，避免两条恢复通道互相覆盖。
+
+`ReorderableList` 是模板控件且数据源为运行时 `State`，自描述声明 `Rebuildable: no`（工厂注册仅收录元数据）。
 
 `X11Surface` / `WaylandSurface` / `MacOSSurface` / `WasmSurface` 的 CMake 开关均已接入（`AURORA_BACKEND_X11` / `AURORA_BACKEND_WAYLAND` / `AURORA_BACKEND_MACOS` / `AURORA_BACKEND_WASM`，默认均 OFF）。后端能力差异与开关默认值见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md)。
 

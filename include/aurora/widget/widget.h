@@ -468,6 +468,16 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 默认 false，保持既有激活语义（按钮 / Checkbox / Switch 等不受影响）。
     [[nodiscard]] virtual auto wants_activation_keys() const -> bool { return false; }
 
+    /// @brief 方向键（↑/↓/←/→）是否优先投递给 `on_key_event`。
+    ///
+    /// 派发器对方向键的默认处理是**几何焦点导航**（`FocusManager::move_focus(Up/Down/Left/Right)`）：
+    /// 有候选即移动焦点并消费，焦点控件观察不到按键。自带方向键语义的复合控件（列表内部光标与
+    /// 键盘重排、树展开折叠、分页表格……）需覆写本钩子为 true：派发器先调 `on_key_event`，
+    /// 其消费（`is_handled`）即止；**未消费则回落焦点导航**，故控件只需处理自己认识的按键，
+    /// 其余按键行为保持不变。与 `wants_activation_keys()` 同一「控件优先、宿主兜底」约定。
+    /// 默认 false，保持既有焦点导航语义（文本框等的方向键路由不变）。
+    [[nodiscard]] virtual auto wants_navigation_keys() const -> bool { return false; }
+
     /// @brief 文本输入入口（焦点 widget 上调用）。默认标记为已消费。
     virtual auto on_text_input(TextInputEvent &e) -> void { e.is_handled = true; }
 

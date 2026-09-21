@@ -15,8 +15,12 @@
 #include "aurora/core/accessibility.h"
 #include "aurora/core/diagnostics.h"
 #include "aurora/event/gesture.h"
+#include "aurora/event/keycode.h"
+#include "aurora/i18n/localized_string.h"
+#include "aurora/i18n/string_table.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme_scope.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/scroll_viewport.h"
 #include "aurora/widget/widget.h"
@@ -37,6 +41,21 @@ namespace aurora {
  * 换位的直接几何；长列表请用 `LazyList`（虚拟化重排不做，见 `LAYOUT_PLAN`【裁决 15】）。
  *
  * 滚动位置可经 `set_restore_key()` 接入 `app::ScrollStorage`（与四个滚动控件同一契约）。
+ *
+ * **键盘替代路径（可访问性，specification/04-widget.md §3.4）**：指针拖拽不是唯一入口，本控件
+ * 默认可用键盘完成同样的换位——获焦即把光标落在**首个可见项**（不改滚动位置），`↑`/`↓`
+ * （及 `Home`/`End`）移动**光标**，`Space`/`Enter` 抓取 / 落位，`Esc` 取消并回到原位。两步式
+ * 「先抓取后移动」与 ARIA 拖放网格的读屏操作习惯一致（Google Sheets / Gmail 的 `Alt+↑↓`
+ * 换位同构），抓取期间光标项按抬升态绘制。每一步都经 `Widget::announce()` 向读屏播报位置与
+ * 结果（「位置 3 / 共 8 项」等）。
+ *
+ * 方向键能到达控件内部，依赖 `Widget::wants_navigation_keys()`：派发器默认把方向键用作几何
+ * 焦点导航，覆写该钩子后本控件先观察按键、未认领的按键仍回落焦点导航。整体开关是
+ * `set_keyboard_reorder(false)`（关闭后方向键 / 空格完全交回默认语义）。
+ *
+ * 播报文案走 i18n：键为 `aurora.reorder.position` / `.grabbed` / `.dropped` /
+ * `.dropped_in_place` / `.cancelled`（宿主可经 `default_string_table()` 登记译文模板，占位符
+ * 为 `{0}` 起的位置数字）；未登记时回退英文字面量，不会播报空串。
  *
  * @tparam T 列表项类型（须可拷贝）。
  * @note Thread: main-thread only
@@ -105,6 +124,14 @@ class ReorderableList : public Container {
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
+                    {.name = "keyboard_reorder",
+                     .type = "bool",
+                     .default_value = "true",
+                     .required = false,
+                     .note = "键盘重排替代路径开关（方向键移光标 + 空格抓取/落位 + Esc 取消）",
+                     .json_type = "boolean",
+                     .enum_values = {},
+                     .min_value = ""},
                 },
             .events = {"on_reorder"},
             .children_policy = "multiple",
@@ -129,6 +156,7 @@ class ReorderableList : public Container {
         props["restore_key"] = restore_key_;
         props["drag_handle"] = drag_handle_;
         props["auto_scroll_threshold"] = auto_scroll_threshold_;
+        props["keyboard_reorder"] = keyboard_reorder_;
         props["note"] = "ReorderableList items are runtime-state driven, not serialized";
     }
 
@@ -233,6 +261,7 @@ class ReorderableList : public Container {
         built_ = true;
         tops_.assign(children_.size(), 0.0F);
         heights_.assign(children_.size(), 0.0F);
+        clamp_keyboard_state_to_items();
     }
 
     // ---- 滚动 ----
@@ -365,6 +394,123 @@ class ReorderableList : public Container {
         return *this;
     }
 
+    /// @brief 键盘重排开启时认领方向键：派发器先把 ↑/↓/←/→ 投递给 `on_key_event`，
+    ///        本控件未认领的按键仍回落几何焦点导航（见 `Widget::wants_navigation_keys()`）。
+    [[nodiscard]] auto wants_navigation_keys() const -> bool override { return keyboard_reorder_; }
+
+    /// @brief 键盘重排开启时认领 Space / Enter（抓取 / 落位）；未认领则回落 `activate()`。
+    [[nodiscard]] auto wants_activation_keys() const -> bool override { return keyboard_reorder_; }
+
+    // ---- 键盘重排（可访问性替代路径）----
+
+    /// @brief 键盘重排路径总开关（默认开启）。关闭后方向键 / 空格 / Enter 交回派发器默认语义
+    ///        （几何焦点导航与 `activate()`），光标与抓取态一并清除。
+    auto set_keyboard_reorder(bool enabled) -> ReorderableList & {
+        keyboard_reorder_ = enabled;
+        if (!enabled) {
+            keyboard_grabbed_ = false;
+            keyboard_grab_from_ = -1;
+            keyboard_index_ = -1;
+            mark_needs_paint();
+        }
+        return *this;
+    }
+    [[nodiscard]] auto keyboard_reorder() const -> bool { return keyboard_reorder_; }
+
+    /// @brief 键盘光标所在项 index（-1 = 尚未定位；首次按方向键即落到首 / 末项）。
+    [[nodiscard]] auto keyboard_index() const -> int { return keyboard_index_; }
+    /// @brief 光标项是否处于「已抓取、未落位」态。
+    [[nodiscard]] auto is_keyboard_grabbed() const -> bool { return keyboard_grabbed_; }
+    /// @brief 抓取时的原始 index（-1 = 未抓取）。取消抓取即回到该位。
+    [[nodiscard]] auto keyboard_grab_index() const -> int { return keyboard_grab_from_; }
+
+    /// @brief 程序化移动键盘光标到第 `index` 项（夹取到 `[0, count-1)`，滚入视口并播报位置）。
+    ///        抓取态下即等价「把被拾起项挪到目标位」，提交仍由 `drop_keyboard_item()` 完成。
+    /// @return 光标是否实际变化。
+    auto set_keyboard_index(int index) -> bool {
+        const int n = static_cast<int>(children_.size());
+        if (n == 0) {
+            keyboard_index_ = -1;
+            return false;
+        }
+        const int clamped = std::clamp(index, 0, n - 1);
+        if (clamped == keyboard_index_) {
+            return false;
+        }
+        keyboard_index_ = clamped;
+        ensure_index_visible(clamped);
+        mark_needs_paint();
+        announce_position();
+        return true;
+    }
+
+    /// @brief 键盘抓取光标项（等价按下 Space / Enter）；已抓取或无光标时为 no-op。
+    /// @return 抓取态是否发生变化。
+    auto grab_keyboard_item() -> bool {
+        if (keyboard_grabbed_ || keyboard_index_ < 0) {
+            return false;
+        }
+        keyboard_grabbed_ = true;
+        keyboard_grab_from_ = keyboard_index_;
+        mark_needs_paint();
+        announce(announce_text("aurora.reorder.grabbed",
+                               {LocalizedString{std::to_string(keyboard_index_ + 1)},
+                                LocalizedString{std::to_string(item_count())}},
+                               "Position " + std::to_string(keyboard_index_ + 1) + " of " +
+                                   std::to_string(item_count()) + ". Item grabbed. Use arrow keys to move,"
+                                   " space to drop, escape to cancel."));
+        return true;
+    }
+
+    /// @brief 键盘落位：把抓取项移到光标位（`reorder` 的插入位语义）并提交数据；未抓取为 no-op。
+    /// @return 数据是否实际变化（原位落位返回 false，但抓取态已清除）。
+    auto drop_keyboard_item() -> bool {
+        if (!keyboard_grabbed_) {
+            return false;
+        }
+        const int from = keyboard_grab_from_;
+        const int to = keyboard_index_;
+        keyboard_grabbed_ = false;
+        keyboard_grab_from_ = -1;
+        mark_needs_paint();
+        const bool moved = reorder(from, to);
+        if (moved) {
+            announce(announce_text("aurora.reorder.dropped",
+                                   {LocalizedString{std::to_string(from + 1)},
+                                    LocalizedString{std::to_string(to + 1)},
+                                    LocalizedString{std::to_string(item_count())}},
+                                   "Item moved from position " + std::to_string(from + 1) + " to position " +
+                                       std::to_string(to + 1) + " of " + std::to_string(item_count()) + "."));
+        } else {
+            announce(announce_text("aurora.reorder.dropped_in_place",
+                                   {LocalizedString{std::to_string(to + 1)},
+                                    LocalizedString{std::to_string(item_count())}},
+                                   "Item dropped at position " + std::to_string(to + 1) + " of " +
+                                       std::to_string(item_count()) + "."));
+        }
+        return moved;
+    }
+
+    /// @brief 键盘取消：清除抓取态并把光标移回抓取前的位置（数据不变）；未抓取为 no-op。
+    /// @return 抓取态是否发生变化。
+    auto cancel_keyboard_grab() -> bool {
+        if (!keyboard_grabbed_) {
+            return false;
+        }
+        const int home = keyboard_grab_from_;
+        keyboard_grabbed_ = false;
+        keyboard_grab_from_ = -1;
+        keyboard_index_ = home;
+        ensure_index_visible(home);
+        mark_needs_paint();
+        announce(announce_text("aurora.reorder.cancelled",
+                               {LocalizedString{std::to_string(home + 1)},
+                                LocalizedString{std::to_string(item_count())}},
+                               "Reorder cancelled. Item returned to position " + std::to_string(home + 1) + " of " +
+                                   std::to_string(item_count()) + "."));
+        return true;
+    }
+
     /// @brief 纯逻辑：给定「被拖项中心的内容坐标 y」求插入位（含 ±2dp 滞回，不依赖手势状态）。
     ///
     /// 是拖拽换位与 auto-scroll 判定的同一份几何（`slot_from_center`），供几何单测与宿主预演。
@@ -447,15 +593,20 @@ class ReorderableList : public Container {
         // 溢出坐标会越界访问（同 LazyList / Scroll 的 push_clip 约定）。
         p.push_clip(bounds);
         const int dragged = is_dragging() || is_settling() ? drag_index_ : -1;
+        const int lifted = keyboard_lifted_index();
         for (int i = 0; i < static_cast<int>(children_.size()); ++i) {
-            if (i == dragged) {
-                continue;  // 被拖项最后绘制（视觉顶层）
+            if (i == dragged || i == lifted) {
+                continue;  // 被拖项 / 键盘抓取项最后绘制（视觉顶层）
             }
             paint_item(p, bounds, ctx, i);
+        }
+        if (lifted >= 0) {
+            paint_lifted_item(p, bounds, ctx, lifted);
         }
         if (dragged >= 0) {
             paint_dragged_item(p, bounds, ctx, dragged);
         }
+        paint_keyboard_cursor(p, bounds, ctx);
         p.pop_clip();
     }
 
@@ -501,6 +652,73 @@ class ReorderableList : public Container {
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Container::tick_gestures(now);  // 修饰链 + 子项 tick
         on_tick(now);
+    }
+
+    /// @brief 键盘重排按键入口：`↑`/`↓` 移光标（抓取态下即挪目标位）、`Home`/`End` 跳首末、
+    ///        `Space`/`Enter` 抓取 ⇄ 落位、`Esc` 取消。
+    ///
+    /// 与基类默认实现的关键差别：**未认领的按键不置 `is_handled`**，以便派发器把方向键回落给
+    /// 几何焦点导航、把 Enter/Space 回落给 `activate()`、把「未抓取时的 Esc」留给页面级返回。
+    /// 指针拖拽 / 落位动画期间整条键盘路径让路（两套换位通道不并存，避免数据被双写）。
+    auto on_key_event(KeyEvent &e) -> void override {
+        if (!keyboard_reorder_ || e.action != KeyAction::Down || children_.empty() || drag_state_ != DragState::Idle) {
+            return;
+        }
+        const int n = static_cast<int>(children_.size());
+        switch (static_cast<KeyCode>(e.key)) {
+        case KeyCode::ArrowUp:
+            move_keyboard_cursor(-1);
+            e.is_handled = true;
+            return;
+        case KeyCode::ArrowDown:
+            move_keyboard_cursor(1);
+            e.is_handled = true;
+            return;
+        case KeyCode::Home:
+            set_keyboard_index(0);
+            e.is_handled = true;
+            return;
+        case KeyCode::End:
+            set_keyboard_index(n - 1);
+            e.is_handled = true;
+            return;
+        case KeyCode::Space:
+        case KeyCode::Enter:
+            if (keyboard_grabbed_) {
+                drop_keyboard_item();
+            } else {
+                grab_keyboard_item();
+            }
+            e.is_handled = true;
+            return;
+        case KeyCode::Escape:
+            if (cancel_keyboard_grab()) {
+                e.is_handled = true;
+            }
+            return;
+        default:
+            return;  // 其余按键交回派发器默认语义
+        }
+    }
+
+    /// @brief 获焦：光标未定位时落到**首个可见项**（并播报位置，读屏一进列表即知当前项）；
+    ///        失焦：撤销未落位的抓取（数据未变，光标回原位）。
+    ///
+    /// 故意不落到 index 0：获焦不是滚动请求。若在此 `ensure_index_visible(0)`，一个已由
+    /// `restore_key` 恢复到中段的列表会在获焦瞬间被拽回顶部（`itest_reorder` 曾以此抓到回归）。
+    auto on_focus_change(bool focused) -> void override {
+        Container::on_focus_change(focused);
+        if (!focused) {
+            cancel_keyboard_grab();
+            return;
+        }
+        if (!keyboard_reorder_ || keyboard_index_ >= 0 || children_.empty()) {
+            return;
+        }
+        const int n = static_cast<int>(children_.size());
+        keyboard_index_ = std::clamp(visible_range().first, 0, n - 1);
+        mark_needs_paint();
+        announce_position();
     }
 
     auto on_pointer_event(MouseEvent &e) -> void override {
@@ -653,6 +871,101 @@ class ReorderableList : public Container {
     /// @brief 被拖项抬升（自绘阴影；不污染子项修饰链，裁决 16）。
     auto paint_drag_shadow(Painter &p, const Rect &global, const Rect & /*local*/) -> void {
         p.draw_shadow(global, 0.0F, 6.0F, 12.0F, Color(0, 0, 0, 70));
+    }
+
+    // ---- 键盘重排辅助 ----
+
+    /// @brief 键盘抓取项（抬升态绘制）；无抓取返回 -1。
+    [[nodiscard]] auto keyboard_lifted_index() const -> int {
+        return (keyboard_reorder_ && keyboard_grabbed_) ? keyboard_index_ : -1;
+    }
+
+    /// @brief 键盘抓取项：与拖拽项同一「阴影 + 顶层」抬升表达，让「已拾起」可被看见。
+    auto paint_lifted_item(Painter &p, const Rect &bounds, const BuildContext &ctx, int index) -> void {
+        const Rect local = item_rect(bounds, index);
+        const Rect global{.origin = bounds.origin + local.origin, .size = local.size};
+        paint_drag_shadow(p, global, local);
+        children_[static_cast<std::size_t>(index)].widget().paint(p, global, ctx);
+    }
+
+    /// @brief 键盘光标环：焦点在本控件（或仍持有抓取）时才画，主题主色描边。
+    auto paint_keyboard_cursor(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
+        if (!keyboard_reorder_ || keyboard_index_ < 0 || (!is_focused() && !keyboard_grabbed_)) {
+            return;
+        }
+        const Rect local = item_rect(bounds, keyboard_index_);
+        if (local.origin.y + local.size.height <= 0.0F || local.origin.y >= bounds.size.height) {
+            return;  // 光标项已滚出视口（正常路径下 `ensure_index_visible` 会先滚回来）
+        }
+        const Rect global{.origin = bounds.origin + local.origin, .size = local.size};
+        p.draw_rounded_border(global,
+                              AURORA_CURSOR_RING_RADIUS,
+                              keyboard_grabbed_ ? AURORA_CURSOR_GRABBED_THICKNESS : AURORA_CURSOR_THICKNESS,
+                              inherit_theme(ctx).primary);
+    }
+
+    /// @brief 相对移动光标；未定位时 `+1` 落到首项、`-1` 落到末项（与列表类控件的键盘习惯一致）。
+    auto move_keyboard_cursor(int delta) -> void {
+        const int n = static_cast<int>(children_.size());
+        if (n == 0) {
+            return;
+        }
+        set_keyboard_index(keyboard_index_ < 0 ? (delta >= 0 ? 0 : n - 1) : keyboard_index_ + delta);
+    }
+
+    /// @brief 把第 `index` 项滚入视口（贴边时各留一点余量由 clamp 处理）。
+    auto ensure_index_visible(int index) -> void {
+        if (index < 0 || static_cast<std::size_t>(index) >= tops_.size() || viewport_h_ <= 0.0F) {
+            return;
+        }
+        const float top = item_top(index);
+        const float bottom = top + item_height(index);
+        if (bottom > offset_ + viewport_h_) {
+            set_scroll_offset(bottom - viewport_h_);
+        } else if (top < offset_) {
+            set_scroll_offset(top);
+        }
+    }
+
+    /// @brief 播报光标位置（「位置 i / 共 n 项」）——读屏在纯浏览态也得到反馈。
+    auto announce_position() -> void {
+        if (keyboard_index_ < 0) {
+            return;
+        }
+        announce(announce_text("aurora.reorder.position",
+                               {LocalizedString{std::to_string(keyboard_index_ + 1)},
+                                LocalizedString{std::to_string(item_count())}},
+                               "Position " + std::to_string(keyboard_index_ + 1) + " of " +
+                                   std::to_string(item_count()) + "."));
+    }
+
+    /// @brief 播报文案解析：按 key 查 `default_string_table()`（宿主可登记译文模板），
+    ///        未登记时回退 `fallback` 英文字面量——绝不播报空串。
+    [[nodiscard]] static auto announce_text(const std::string &key, std::vector<LocalizedString> args,
+                                            const std::string &fallback) -> std::string {
+        LocalizedString s;
+        s.key = key;
+        s.args = std::move(args);
+        s.localize = true;
+        s.text = fallback;  // StringTable::resolve 查表失败即用 text 兜底
+        return s.resolve(&default_string_table(), Locale{});
+    }
+
+    /// @brief 数据长度变化后把光标夹回有效范围（保留「未定位」的 -1，不虚设光标）。
+    auto clamp_keyboard_state_to_items() -> void {
+        const int n = static_cast<int>(children_.size());
+        if (n == 0) {
+            keyboard_index_ = -1;
+            keyboard_grabbed_ = false;
+            keyboard_grab_from_ = -1;
+            return;
+        }
+        if (keyboard_index_ >= n) {
+            keyboard_index_ = n - 1;
+        }
+        if (keyboard_grab_from_ >= n) {
+            keyboard_grab_from_ = n - 1;
+        }
     }
 
     // ---- 拖拽状态机 ----
@@ -888,12 +1201,21 @@ class ReorderableList : public Container {
     double settle_t_ = 0.0;  ///< 落位动画已推进时间（秒）
     std::optional<std::chrono::steady_clock::time_point> last_tick_;  ///< 上一帧时间（求 dt）
 
+    // ---- 键盘重排态 ----
+    bool keyboard_reorder_ = true;  ///< 键盘替代路径开关（默认开启）
+    int keyboard_index_ = -1;  ///< 键盘光标项 index（-1 = 未定位）
+    bool keyboard_grabbed_ = false;  ///< 光标项是否已被键盘拾起
+    int keyboard_grab_from_ = -1;  ///< 拾起时的原始 index（取消即回位）
+
     static constexpr float AURORA_HYSTERESIS = 2.0F;  ///< 换位滞回（dp，跨中点 ±2dp 内不切换）
     static constexpr float AURORA_HANDLE_BAND = 48.0F;  ///< 手柄区域宽度（dp，`drag_handle` 模式）
     static constexpr float AURORA_AUTO_SCROLL_MAX_SPEED = 600.0F;  ///< auto-scroll 最大速度（dp/s）
     static constexpr float AURORA_SETTLE_EPSILON = 0.5F;  ///< 位移小于该值直接落位（不做动画）
     static constexpr float AURORA_ASSUMED_FPS = 60.0F;  ///< 帧间速度估计的采样率假设（Hz）
     static constexpr float AURORA_MAX_RELEASE_VELOCITY = 3000.0F;  ///< 松手初速度上界（dp/s）
+    static constexpr float AURORA_CURSOR_RING_RADIUS = 4.0F;  ///< 键盘光标环圆角（dp）
+    static constexpr float AURORA_CURSOR_THICKNESS = 2.0F;  ///< 键盘光标环线宽（dp）
+    static constexpr float AURORA_CURSOR_GRABBED_THICKNESS = 3.0F;  ///< 抓取态光标环线宽（dp，加粗以区分）
 };
 
 }  // namespace aurora

@@ -320,6 +320,8 @@ struct MergedModifiers {
 
 // ③ 快捷键匹配：Tab / 方向键 / Enter·Space 的全局快捷键。命中并消费返回 is_handled_ 结果；
 // 否则返回 nullopt，交由焦点路由把事件交给当前焦点控件（如文本框内部光标/选区）。
+// 方向键与激活键各有一个「控件优先」钩子（`Widget::wants_navigation_keys()` /
+// `wants_activation_keys()`）：覆写者先经 `on_key_event` 观察按键，未消费才回落全局语义。
 [[nodiscard]] auto match_shortcut(KeyEvent &e, FocusManager &fm, KeyCategory cat, const MergedModifiers &mods)
     -> std::optional<bool> {
     if (e.action != KeyAction::Down) {
@@ -347,6 +349,14 @@ struct MergedModifiers {
                     break;
                 default:
                     return std::nullopt;
+            }
+            // 控件优先：声明 `wants_navigation_keys()` 的复合控件（列表光标 / 键盘重排等）先观察方向键，
+            // 消费即止；未消费再回落几何焦点导航（与下方 Activate 分支的 wants_activation_keys 同构）。
+            if (Widget *focused = fm.focused(); focused != nullptr && focused->wants_navigation_keys()) {
+                focused->on_key_event(e);
+                if (e.is_handled) {
+                    return true;
+                }
             }
             if (fm.move_focus(dir)) {
                 e.is_handled = true;

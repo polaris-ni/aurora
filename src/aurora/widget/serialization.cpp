@@ -239,6 +239,18 @@ auto register_core_widgets() -> void {
     // 骨架屏：属性完整可序列化（尺寸/颜色/周期），可从静态 JSON 完整重建。
     reg_default<Skeleton>("Skeleton");
 
+    // 持运行时 `ItemBuilder` 的虚拟化控件：注册用**占位构造参数**（builder=nullptr）+ 回填标量属性，
+    // 重建出「几何/滚动状态齐备、条目待宿主挂 builder」的实例。
+    // ⚠️ 这里不能用 `reg_default<T>(name)`（零参）：`LazyList` / `LazyRow` 的默认构造不设
+    //    `relayout_boundary`，而虚拟化容器的视口尺寸由父约束决定、不依赖子节点——缺了它重建出的
+    //    列表会在父重算链上表现不同（带参构造才做这一步）。`GridView` 的默认构造委托带参构造，
+    //    故可零参注册，此处仍统一写占位参数以免误读。
+    reg_default<LazyList>("LazyList", 0, nullptr);
+    reg_default<LazyRow>("LazyRow", 0, nullptr);
+    reg_default<GridView>("GridView", 0, 1, nullptr, 96.0F);
+    // BottomNavBar 的图标绘制器与 `on_select` 回调属运行时接线；标量属性可回填。
+    reg_default<BottomNavBar>("BottomNavBar");
+
     // ---- 默认构造、无属性反序列化（Provider 系 / 运行时态控件）----
     // Provider 系：值（T）不参与序列化，构造占位后由 from_json 的 adopt_children 挂入真实子节点。
     reg_no_props<Provider<Theme>>("ThemeProvider", Theme{}, Node{});
@@ -248,16 +260,8 @@ auto register_core_widgets() -> void {
     // Timer 持运行时回调（TickBuilder），与 Repeater/Canvas 同理不可从静态 JSON 重建；
     // 但注册为已知类型以便 API 描述（gen_api_tools）收录其自描述元数据。
     reg_no_props<Timer>("Timer", std::chrono::seconds(1), [](const SignalView<int> &) -> Node { return Node{}; });
-    // LazyList / LazyRow 持运行时 ItemBuilder，注册供 API 描述收录。
-    reg_no_props<LazyList>("LazyList", 0, nullptr);
-    reg_no_props<LazyRow>("LazyRow", 0, nullptr);
-    // GridView同 LazyList：持运行时 ItemBuilder，条目不可从静态 JSON 重建；
-    // 注册为已知类型（标量属性 count/columns 等可序列化，重建后为空数据占位，条目由宿主回填）。
-    reg_no_props<GridView>("GridView");
     // BreakpointBuilder持运行时 builder 回调，注册供 API 描述收录。
     reg_no_props<BreakpointBuilder>("BreakpointBuilder");
-    // BottomNavBar 持运行时图标绘制器与回调，注册供 API 描述收录。
-    reg_no_props<BottomNavBar>("BottomNavBar");
     // Dismissible 持运行时手势 State 与消除回调，注册供 API 描述收录
     // （from_json 重建出默认行程的空占位，手势进度与回调不随序列化还原）。
     reg_no_props<Dismissible>("Dismissible", Node{}, DragAxis::Horizontal, SpringDescription{});

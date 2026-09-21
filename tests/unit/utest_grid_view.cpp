@@ -2,7 +2,8 @@
 /// 目标单元: include/aurora/widget/grid_view.h
 /// 测试说明: 覆盖 GridView——默认不变量、非法 count/列数/格高钳制降级、行数向上取整与内容高、
 /// 视口填充与单元格整形、按需构建仅可见行（含末行不满格）、滚动偏移钳制与滚轮步进、
-/// 单元格网格落位、序列化与自描述、snap/paging 逐帧收位、reduce-motion 直落、offset_signal 发布
+/// 单元格网格落位、序列化与自描述、反序列化回填标量属性（含非法值降级、显式偏移优先于按键恢复）、
+/// snap/paging 逐帧收位、reduce-motion 直落、offset_signal 发布
 ///
 /// 行窗口与偏移的换算按 `item_extent = 96` 的整行推进（滚轮步进 40 为控件内部常量）。
 
@@ -13,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/app/scroll_storage.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/grid_view.h"
@@ -270,6 +272,90 @@ AURORA_TEST_CASE(serialize_and_describe) {
     AURORA_TEST_CHECK_TRUE(columns_required);
     AURORA_TEST_CHECK_TRUE(columns_min_one);
     AURORA_TEST_CHECK_FALSE(d.invariants.empty());
+}
+
+AURORA_TEST_CASE(deserialize_props_restores_every_scalar) {
+    // 静态 JSON 回填属性（工厂重建路径）：几何/缓存/吸附逐项还原，二次序列化幂等。
+    Json props;
+    props["count"] = 30;
+    props["columns"] = 3;
+    props["cell_extent"] = 96.0F;
+    props["cache_extent"] = 300.0F;
+    props["scroll_offset"] = 192.0F;
+    props["restore_key"] = "demo.gallery";
+    props["snap_paging"] = true;
+    props["snap_alignment"] = "End";
+
+    GridView grid;
+    grid.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(grid.count(), 30);
+    AURORA_TEST_CHECK_EQ(grid.columns(), 3);
+    AURORA_TEST_CHECK_EQ(grid.row_count(), 10);
+    AURORA_TEST_CHECK_NEAR(grid.cell_extent(), 96.0F, 1e-4F);
+    AURORA_TEST_CHECK_TRUE(grid.snap().paging);
+    AURORA_TEST_CHECK_TRUE(grid.snap().alignment == ScrollSnapAlignment::End);
+    AURORA_TEST_CHECK_EQ(grid.restore_key(), std::string{"demo.gallery"});
+
+    Json again;
+    grid.serialize_props(again);
+    for (const char *key : {"count", "columns", "cell_extent", "cache_extent", "restore_key", "snap_paging"}) {
+        AURORA_TEST_CHECK_TRUE(again[key] == props[key]);
+    }
+}
+
+AURORA_TEST_CASE(deserialize_degrades_nonpositive_geometry) {
+    // 反序列化路径与构造器同一降级判据：非正列数回落 1、非正格高回落 96、负项数归零。
+    Json props;
+    props["count"] = -1;
+    props["columns"] = 0;
+    props["cell_extent"] = 0.0F;
+
+    GridView grid;
+    grid.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(grid.count(), 0);
+    AURORA_TEST_CHECK_EQ(grid.columns(), 1);
+    AURORA_TEST_CHECK_EQ(grid.row_count(), 0);
+
+    Json out;
+    grid.serialize_props(out);
+    AURORA_TEST_CHECK_NEAR(out["cell_extent"].get<float>(), 96.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(deserialized_offset_wins_over_restore_key) {
+    // 树里写明的偏移是「声明的状态」，restore_key 的意义是「树没写时记住位置」⇒ 前者优先。
+    auto &storage = ScrollStorage::instance();
+    storage.clear_all();
+    storage.write("demo.grid", 480.0F);
+
+    Json props;
+    props["count"] = 30;
+    props["columns"] = 3;
+    props["cell_extent"] = 96.0F;
+    props["restore_key"] = "demo.grid";
+    props["scroll_offset"] = 192.0F;
+
+    GridView grid;
+    grid.deserialize_props(props);
+    LayoutEngine::layout(grid, bounded(300.0F, 300.0F));  // 内容 960 / 视口 300 → [0, 660]
+    AURORA_TEST_CHECK_NEAR(grid.scroll_offset(), 192.0F, 1e-3F);
+    AURORA_TEST_CHECK_EQ(grid.live_item_count(), static_cast<std::size_t>(0));  // 无 builder：齐备但暂无条目
+
+    // 只声明 restore_key（无显式偏移）时，按键恢复照常生效；宿主随后挂 builder，窗口按恢复的偏移构建。
+    Json keyed_only;
+    keyed_only["count"] = 30;
+    keyed_only["columns"] = 3;
+    keyed_only["cell_extent"] = 96.0F;
+    keyed_only["restore_key"] = "demo.grid";
+    BuildRecorder rec;
+    GridView restored;
+    restored.deserialize_props(keyed_only);
+    restored.set_item_builder(rec.builder());
+    LayoutEngine::layout(restored, bounded(300.0F, 300.0F));
+    AURORA_TEST_CHECK_NEAR(restored.scroll_offset(), 480.0F, 1e-3F);
+    AURORA_TEST_CHECK_TRUE(restored.live_item_count() > 0U);
+    AURORA_TEST_CHECK_FALSE(rec.items.contains(0));  // 偏移 480：第 0 行早已滚出
+    AURORA_TEST_CHECK_TRUE(rec.items.contains(6));   // 行 2 起（含 cache_extent 缓冲）
+    storage.clear_all();
 }
 
 AURORA_TEST_CASE(snap_glide_advances_every_frame_until_row_boundary) {

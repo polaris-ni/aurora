@@ -1349,6 +1349,7 @@ auto main() -> int {
 - **落位与让位**：让位是**绘制期偏移**（`Node::bounds` 不动，命中链同步补偿），松手 spring 落位后才提交数据；`reduce_motion` 下直接落位。换位判定带 ±2dp 滞回。
 - **近边缘自动滚动**：被拖项进入视口上下 `auto_scroll_threshold`（默认 48dp）带内按比例滚动，且滚动量吃进跟手位移（被拖项屏幕位置守恒）；拖拽期间滚轮被吞。
 - **虚拟化列表不重排**：长列表请用 `LazyList`（只读滚动）；重排是全量实例化（适合 <500 项）。
+- **键盘也能排**（默认开启，无需接线）：Tab 焦点进列表（光标落在**首个可见项**，不改滚动位置），`↑`/`↓` 移光标、`Home`/`End` 跳首尾、`Space`/`Enter` 抓取与落位、`Esc` 取消；落位走同一条 `reorder` 通道，故 `on_reorder` 与数据改写和拖拽完全一致。四个节点（位置/抓取/落位/取消）各播报一次给读屏，文案可经 `default_string_table()` 的 `aurora.reorder.*` 键本地化。禁用或改开关用 `set_keyboard_reorder(false)`，观测点 `keyboard_index()` / `is_keyboard_grabbed()`。
 - **可编译样例**：`examples/demos/demo_reorderable_list.cpp`。
 
 ---

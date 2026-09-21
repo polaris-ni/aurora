@@ -106,7 +106,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 |:---|:---|
 | `static dispatch(Widget& root, MouseEvent&, FocusManager* = nullptr) -> bool` | 指针事件；委托进程内持久 `EventDispatcher` 单例，故同样保留跨事件指针捕获；`FocusManager*` 可选，非空时派发期暴露为「当前焦点管理器」 |
 | `dispatch_mouse(Widget& root, MouseEvent&, FocusManager* = nullptr) -> bool`（实体方法） | 带指针捕获的鼠标派发：Press 命中后缓存命中链，后续 Move/Release 即使命中失败也持续派发给按下时目标，直到 Release 解除捕获（`Application` 走此路径） |
-| `static dispatch(Widget& root, KeyEvent&, FocusManager&) -> bool` | 键盘事件；识别 Tab / Shift+Tab 并转为 `move_focus`；`root` 为统一重载签名而保留，键盘不经命中链 |
+| `static dispatch(Widget& root, KeyEvent&, FocusManager&) -> bool` | 键盘事件；识别 Tab / Shift+Tab 并转为 `move_focus`，方向键与激活键各有一个控件级 opt-in 前置投递（`wants_navigation_keys()` / `wants_activation_keys()`，见 §4.2）；`root` 为统一重载签名而保留，键盘不经命中链 |
 | `static dispatch(Widget& root, ScrollEvent&) -> bool` | 滚动事件：沿命中链**自最深向根**找 `wants_scroll()` 者逐个派发，余量经 `remaining_y` 上冒（§3.3） |
 | `static dispatch(Widget& root, FileDropEvent&) -> bool` | 文件拖放事件（不冒泡，仅交给命中目标） |
 | `static dispatch(Widget& root, TextInputEvent&, FocusManager&) -> bool` | 文本输入（只路由到焦点控件；无焦点返回 `false`） |
@@ -158,6 +158,8 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 `move_focus` 按 `tab_index` 稳定排序后循环取前 / 后一个；Tab / Shift+Tab 由 `dispatch(Widget&, KeyEvent&, FocusManager&)` 识别并转 `move_focus`。
 
 **激活键（Enter / Space）路由**：`Enter` 与 `Space` 归为「激活键」，默认由派发器直接调用焦点控件的 `activate()`（按钮等「按下即激活」语义），控件本身观察不到这两个按键。需要观察 Enter 的文本录入类控件（`TextInput` / `RichTextEdit`）覆写 `Widget::wants_activation_keys()` 返回 true：派发器先投递 `on_key_event`，其消费（`is_handled`）即止；未消费才回落 `activate()`。`TextInput::on_submit`（Enter 提交）即由此路径可达——若只依赖激活语义，Enter 会被在焦点路由前消费掉而永远到不了控件。
+
+**方向键（↑ / ↓ / ← / →）路由**：与激活键同构的「控件优先、宿主兜底」约定。方向键默认归 `FocusManager::move_focus(dir)` 做几何焦点导航，控件观察不到；覆写 `Widget::wants_navigation_keys()` 返回 true 的复合控件（如 `ReorderableList` 的键盘重排）先收到 `on_key_event`，消费即止、焦点不动，未消费才回落几何焦点导航。默认 `false`，故既有全部控件的方向键行为逐字节不变。两处谓词都只在**焦点控件**上探测，不经冒泡（键盘路由本就不冒泡）。
 
 ### 4.3 Press 焦点归属与点击失焦契约
 
@@ -356,14 +358,18 @@ player.attach(app.animator());
 
 ### 7.3 Router
 
-`Router`（`navigation/router.h`）是路由注册辅助类。当前未提供 `Router::with` 便捷工厂，请直接构造 `Router` 并登记命名路由。
+`Router`（`navigation/router.h`）是路由注册辅助类，支持三种等价建表写法：
 
 | 方法 | 说明 |
 |:---|:---|
-| `register_route(name, builder)` | 登记命名路由：`name` → 构建 `Route` 的工厂（`RouteBuilder`） |
+| `register_route(name, builder)` | 登记命名路由：`name` → 构建 `Route` 的工厂（`RouteBuilder`）；同名覆盖 |
+| `with(name, builder) const` | 便捷工厂：返回**新表** = 本表 + 这一条（本表不变，对标 `Environment::with`），供链式建表 |
+| `with({{name, builder}, ...}) const` | 便捷工厂：一次并入一批 `Entry`（`{name, builder}`），表形态写法 |
 | `has(name)` | 是否已登记该名称 |
 | `build(name)` | 按名称构建 `Route`；未登记返回 `nullopt` |
 | `build_root(name)` | 便捷：构建并取根节点 `Node`；未登记返回空 `Node` |
+
+`with` 每次调用复制整张表（`unordered_map` 浅拷贝，成本与路由条数成正比），适合「建一次、到处读」的 `const` 路由表；高频增量登记仍用 `register_route`。
 
 ### 7.4 Hero 共享元素转场
 

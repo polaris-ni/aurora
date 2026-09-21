@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/navigation/router.h
 /// 测试说明: 覆盖 Router 命名路由的登记/查询、按名构建（每次调用工厂产出全新树）、
-/// 未知路由的 nullopt/空 Node 降级与同名重登记覆盖
+/// 未知路由的 nullopt/空 Node 降级与同名重登记覆盖、`with` 便捷工厂（链式 / 表形态、源表不变）
 
 #include <memory>
 #include <string>
@@ -124,6 +124,52 @@ AURORA_TEST_CASE(router_build_preserves_route_payload) {
     AURORA_TEST_CHECK_TRUE(route.value().transition().kind == TransitionKind::Slide);
     AURORA_TEST_CHECK_NEAR(route.value().transition().duration_seconds, 0.4, 1e-4F);
     // NOLINTEND(bugprone-unchecked-optional-access)
+}
+
+AURORA_TEST_CASE(with_returns_a_new_table_and_leaves_the_source_untouched) {
+    // `with` 是「复制 + 追加」的对偶登记（对标 `Environment::with`）：源表不变 ⇒ 可安全派生多份路由表。
+    const Router base = Router{}.with("home", []() -> Route { return Route{Node{SolidBox{}}, "home"}; });
+    AURORA_TEST_CHECK_TRUE(base.has("home"));
+    AURORA_TEST_CHECK_FALSE(base.has("detail"));
+
+    const Router derived = base.with("detail", []() -> Route { return Route{Node{SolidBox{}}, "detail"}; });
+    AURORA_TEST_CHECK_TRUE(derived.has("home"));  // 继承源表
+    AURORA_TEST_CHECK_TRUE(derived.has("detail"));
+    AURORA_TEST_CHECK_FALSE(base.has("detail"));  // 源表不受影响
+}
+
+AURORA_TEST_CASE(with_chains_into_a_const_ready_table) {
+    // 链式建表：三条路由一次成表，且工厂照常「每次构建产出全新树」。
+    int built = 0;
+    const Router router = Router{}
+                              .with("home", [&built]() -> Route {
+                                  ++built;
+                                  return Route{Node{SolidBox{}}, "home"};
+                              })
+                              .with("detail", []() -> Route { return Route{Node{SolidBox{}}, "detail"}; })
+                              .with("settings", []() -> Route { return Route{Node{SolidBox{}}, "settings"}; });
+
+    AURORA_TEST_CHECK_EQ(router.build("home").has_value(), true);
+    AURORA_TEST_CHECK_EQ(router.build("home").has_value(), true);
+    AURORA_TEST_CHECK_EQ(router.build("ghost").has_value(), false);
+    AURORA_TEST_CHECK_EQ(built, 2);  // 两次 build 各起一次工厂
+
+    // build_root 走同一条路：未登记名给空 Node。
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(router.build_root("detail")));
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(router.build_root("ghost")));
+}
+
+AURORA_TEST_CASE(with_entry_list_registers_every_entry_and_last_wins) {
+    // 表形态一次性并入多条；同名沿用 register_route 的「后者覆盖」判据。
+    const Router router = Router{}.with({
+        Router::Entry{"home", []() -> Route { return Route{Node{SolidBox{}}, "home"}; }},
+        Router::Entry{"detail", []() -> Route { return Route{Node{SolidBox{}}, "A"}; }},
+        Router::Entry{"detail", []() -> Route { return Route{Node{SolidBox{}}, "B"}; }},
+    });
+
+    AURORA_TEST_CHECK_TRUE(router.has("home"));
+    AURORA_TEST_REQUIRE_TRUE(router.build("detail").has_value());
+    AURORA_TEST_CHECK_EQ(router.build("detail").value().name(), std::string{"B"});
 }
 
 }  // namespace aurora::test_cases::utest_router
