@@ -159,7 +159,13 @@ auto aria_element_of(const a11y::NodeSnapshot &n) -> AriaElement {
     }
 
     // 属性表：固定次序（同一段注释即单测断言序）。
-    if (!node.name.empty() && node.name != el.content) {
+    // 引用式关联（对标 `aria-labelledby`）：名字既已由镜像元素自身承载，就**不再**重复发
+    // `aria-label`——ARIA 规范里 labelledby 优先于 label，两处同发等于把选择权丢给读屏。
+    const bool labelled_by_ref = node.labelled_by_id != 0;
+    if (labelled_by_ref) {
+        push_attr(el, "aria-labelledby", "aurora-a11y-" + std::to_string(node.labelled_by_id));
+    }
+    if (!node.name.empty() && node.name != el.content && !labelled_by_ref) {
         push_attr(el, "aria-label", node.name);  // 正文已等于 name 时不再重复标注（防双读）
     }
     if (!node.hint.empty()) {

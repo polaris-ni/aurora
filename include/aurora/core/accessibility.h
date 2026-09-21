@@ -77,7 +77,7 @@ struct AccessibilityActionRequest {
 /// @note Side-effects: pure
 struct AccessibilityNode {
     AccessibilityRole role = AccessibilityRole::Generic;
-    std::string name;  ///< 可读标签（按 §4 Name 回退链求值：label → 文本内容 → 唯一文本子节点）
+    std::string name;  ///< 可读标签（按 §4 Name 回退链求值；声明了 `labelled_by` 时为目标节点的名字，优先级最高）
     std::string value;  ///< 当前值（如文本内容、复选状态）
     std::string hint;  ///< 用途补充提示（控件可选覆写 `accessibility_hint()`）
     /// 几何盒：**窗口本地 DIP**（原点为窗口客户区左上；与 `Widget::paint_bounds()` 同语义）。
@@ -93,6 +93,10 @@ struct AccessibilityNode {
     std::optional<int> level;  ///< 标题层级（OQ4；`accessibility_level()`）
     bool is_control = true;  ///< 是否进控制视图（UIA IsControlElement / macOS isAccessibilityElement）
     bool is_content = true;  ///< 是否进内容视图（UIA IsContentElement）
+    // ---- 引用式标签关联（对标 `aria-labelledby`；追加在末尾，既有聚合初始化零变化）----
+    std::string stable_key;  ///< 宿主经 `Widget::set_stable_key` 声明的跨重建稳定键（空 = 未设）
+    std::string labelled_by;  ///< 本节点名字来源的**键**（`Widget::set_labelled_by`；空 = 未声明）
+    std::uint64_t labelled_by_id = 0;  ///< 解析后的目标 `id`（0 = 未声明 / 未命中 / 目标无名 / 环上）；桥据此投影关系
 
     [[nodiscard]] auto has_action(AccessibilityAction a) const -> bool {
         return (static_cast<std::uint16_t>(actions) & static_cast<std::uint16_t>(a)) != 0;

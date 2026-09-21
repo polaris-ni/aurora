@@ -178,6 +178,8 @@ struct Visited {
     /// @brief 文本几何矩形计数（`ITextRangeProvider::GetBoundingRectangles` 经 TextPattern 取得；
     ///        -1 = 无 TextPattern；0 = 空（可能字体度量未就绪）；>=4 = 至少一个矩形，#7 盲区补断言）。
     long text_range_rects = -1;
+    /// @brief `UIA_LabeledByPropertyId` 解析出的目标元素之名（空 = 桥未投影该关系，#21 验收）。
+    std::string labeled_by_name;
 };
 
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
@@ -203,6 +205,14 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     static const auto checked = std::make_shared<aurora::State<bool>>(true);
     static const auto slider_value = std::make_shared<aurora::State<double>>(0.5);
 
+    // 引用式标签关联（#21 验收）：目标带 `stable_key`，引用者 `set_labelled_by` 指过去。
+    // 二者放进**纵向**列：`sibling_label_name` 的行内相邻判据（#1-C）在纵向下刻意不命中，
+    // 且引用者自身无内置标签 —— 故它的 UIA Name 只可能来自 labelled_by 的解析结果。
+    auto caption = std::make_shared<aurora::Text>(aurora::TextProps{.content = aurora::LocalizedString{"季度汇总"}});
+    caption->set_stable_key("probe-caption");
+    auto referrer = std::make_shared<aurora::Checkbox>(aurora::Reactive{checked});
+    referrer->set_labelled_by("probe-caption");
+
     // Checkbox / Slider 用 `Row { 文本兄弟, 控件 }` 包裹，使其具备「兄弟标签」，
     // 验收 #1-C 的 `sibling_label_name` 兜底（叶子控件标签常为兄弟而非子节点）。
     return aurora::Node{aurora::Column{
@@ -213,6 +223,8 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
                     aurora::Slider{aurora::Reactive{slider_value}}},
         aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "请输入"}},
         aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"订单总额"}}},
+        aurora::Node{std::move(caption)},
+        aurora::Node{std::move(referrer)},
     }};
 }
 
@@ -423,6 +435,24 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     return walker;
 }
 
+/// @brief 读「标注者」元素属性并取其 Name：`get_CurrentLabeledBy` 正是读屏播报「由 … 标注」
+///        所用的客户端入口（桥侧对应 `UIA_LabeledByPropertyId`，#21 验收）。
+[[nodiscard]] auto element_labeled_by_name(IUIAutomationElement *e) -> std::string {
+    if (e == nullptr) {
+        return {};
+    }
+    IUIAutomationElement *target = nullptr;
+    if (FAILED(e->get_CurrentLabeledBy(&target)) || target == nullptr) {
+        if (target != nullptr) {
+            target->Release();
+        }
+        return {};
+    }
+    std::string out = element_string(target, UIA_NamePropertyId);
+    target->Release();
+    return out;
+}
+
 /// @brief 先序采集一棵子树（含 `element` 自身）。深度与总量设上限，防桥递归缺陷导致失控。
 auto collect(IUIAutomationTreeWalker *walker, IUIAutomationElement *element, int depth, std::vector<Visited> &out,
              std::size_t cap) -> void {
@@ -442,6 +472,7 @@ auto collect(IUIAutomationTreeWalker *walker, IUIAutomationElement *element, int
     v.range = query_pattern(element, UIA_RangeValuePatternId, &v.hr_range);
     v.rect_ok = element_rect_ok(element);
     v.text_range_rects = text_range_rect_count(element);
+    v.labeled_by_name = element_labeled_by_name(element);
     out.push_back(std::move(v));
 
     IUIAutomationElement *child = nullptr;
@@ -545,7 +576,8 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
     emit(aurora_verify::pad_right("#", 4) + aurora_verify::pad_right("depth", 7) +
          aurora_verify::pad_right("controlType", 13) + aurora_verify::pad_right("name", 14) +
          aurora_verify::pad_right("framework", 10) + aurora_verify::pad_right("ctl", 5) +
-         aurora_verify::pad_right("cnt", 5) + aurora_verify::pad_right("patterns", 26));
+         aurora_verify::pad_right("cnt", 5) + aurora_verify::pad_right("patterns", 26) +
+         aurora_verify::pad_right("labeledBy", 14));
     for (std::size_t i = 0; i < nodes.size(); ++i) {
         const Visited &v = nodes[i];
         const std::string pats = patterns_of(v);
@@ -556,7 +588,8 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
              aurora_verify::pad_right(v.framework_id.empty() ? "(host)" : v.framework_id, 10) +
              aurora_verify::pad_right(v.is_control ? "y" : "n", 5) +
              aurora_verify::pad_right(v.is_content ? "y" : "n", 5) +
-             aurora_verify::pad_right(pats.empty() ? "(none)" : pats, 26));
+             aurora_verify::pad_right(pats.empty() ? "(none)" : pats, 26) +
+             aurora_verify::pad_right(v.labeled_by_name.empty() ? "(none)" : v.labeled_by_name, 14));
     }
     emit("summary: visited=" + aurora_verify::format_uint(nodes.size()));
 
@@ -646,6 +679,26 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
                 emit(std::string("~~  ") + exp.label + ": 无 TextPattern（#7；只读控件通常不暴露）");
             }
         }
+    }
+
+    // 引用式标签关联（#21）：桥须把语义树解析出的目标以 `UIA_LabeledByPropertyId` 投影，且
+    // 客户端经 `get_CurrentLabeledBy` 取回的元素其 Name 即目标之名。判据控件是列末的第二个
+    // Checkbox：它自身无任何标签来源（纵向排布不命中 #1-C 的行内相邻判据），故它的 Name 非空
+    // 本身就是「名字跟随引用」的证据，再叠一条关系可导航的显式断言。
+    const auto ref_it = std::ranges::find_if(nodes, [](const Visited &v) -> bool {
+        return v.framework_id == "Aurora" && v.control_type == static_cast<long long>(UIA_CheckBoxControlTypeId) &&
+               v.name == "季度汇总";
+    });
+    if (ref_it == nodes.end()) {
+        AURORA_LOG_ERROR("verify",
+                         std::string(label) + ": 无 Name 为「季度汇总」的元素 —— set_labelled_by 的名字未跟随目标 (#21)");
+        ++failures;
+    } else if (ref_it->labeled_by_name != "季度汇总") {
+        AURORA_LOG_ERROR("verify", std::string(label) + ": UIA_LabeledByPropertyId 未投影 (got \"" +
+                                       ref_it->labeled_by_name + "\", expected \"季度汇总\") (#21)");
+        ++failures;
+    } else {
+        emit("ok  labelled-by: Name 跟随目标，LabeledBy 关系可导航（get_CurrentLabeledBy）(#21)");
     }
 
     if (failures > 0) {

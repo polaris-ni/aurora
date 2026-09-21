@@ -1419,19 +1419,40 @@ class IconButton : public au::LeafWidget {
 };
 ```
 
-**名称回退链**（`a11y_tree.h` 的 `resolve_accessibility_name`，逐字与实现同序）：
+**名称回退链**（`a11y_tree.h`，与实现逐字同序）：
 
-1. `explicit_accessibility_label()`（即 `set_accessibility_label()` 的声明）非空 → 用它；
-2. `accessibility_label()` 覆写返回非空 → 用它（`Button` 取 label、`Text` 取内容…）；
-3. 角色是 `Text` / `TextInput` → 用控件文本（`accessibility_text()`），再退到 `accessibility_value()`；
-4. **兄弟标签关联**：同容器直接子节点中，与本控件**垂直重叠 + 水平相邻**（间隙 ≤ 12 DIP）且几何最近的
+1. **引用式标签关联**：`set_labelled_by(key)` 指向同树内 `set_stable_key(key)` 的控件 → 用**它的**名字
+   （对标 `aria-labelledby`；整树建完后由 `detail::apply_labelled_by_relations` 后置解析，见下）；
+2. `explicit_accessibility_label()`（即 `set_accessibility_label()` 的声明）非空 → 用它；
+3. `accessibility_label()` 覆写返回非空 → 用它（`Button` 取 label、`Text` 取内容…）；
+4. 角色是 `Text` / `TextInput` → 用控件文本（`accessibility_text()`），再退到 `accessibility_value()`；
+5. **兄弟标签关联**：同容器直接子节点中，与本控件**垂直重叠 + 水平相邻**（间隙 ≤ 12 DIP）且几何最近的
    `Text` / `RichText` / `Label` 兄弟，仅对 `Checkbox` / `Switch` / `Slider` 角色生效；
-5. 否则看**唯一文本子节点**：子树里恰有 1 个 `Text` / `RichText` / `Label` 子节点时取它的标签。
+6. 否则看**唯一文本子节点**：子树里恰有 1 个 `Text` / `RichText` / `Label` 子节点时取它的标签。
 
-> ⚠️ 第 4 条是**几何启发式**，两个方向都会漏：纵向堆叠（`Column { Slider, Text }`）不命中（判据要求同行），
+> ⚠️ 第 5 条是**几何启发式**，两个方向都会漏：纵向堆叠（`Column { Slider, Text }`）不命中（判据要求同行），
 > 未绘制/无父也不命中（宁可不念，也不猜错）。这正是 `set_accessibility_label()` 存在的理由——
-> 布局无关、结果确定。跨容器的**引用式**关联（对标 `aria-labelledby`，读屏名跟随被引用控件的文本变化）
-> 仍未提供：本库没有用户可设的稳定 id（`runtime_id` 进程内自增、不可序列化），要做须先立身份体系。
+> 布局无关、结果确定。
+
+标签文案在别处（标题、表头、相邻说明）、或名字要随它动态变化时，用**引用式关联**——它是第 1 优先级，
+压制显式声明与控件自带文案（与 ARIA 一致）：
+
+```cpp
+auto caption = std::make_shared<au::Text>(au::TextProps{.content = au::LocalizedString{"季度汇总"}});
+caption->set_stable_key("sum-caption");            // 对标 HTML `id`：宿主命名、跨重建不变
+
+auto agree = std::make_shared<au::Checkbox>(au::Reactive{checked});
+agree->set_labelled_by("sum-caption");             // 对标 `aria-labelledby`：名字是引用，非拷贝
+                                                   // ⇒ caption 文案变了，agree 的读屏名跟着变
+```
+
+要点：① 键是**跨重建**身份，`runtime_id()`（`AccessibilityNode::id`）不是——重建后 id 全变而键不变，
+所以引用只认键；② 引用方向任意（可指向树序更靠前的控件），链式（A→B→C）逐层解析，环与自引用在闭合处
+断掉；③ 未命中、目标自身无名 ⇒ **保留本控件原名**并降级申报一次，绝不念空；④ 同树重名取先序第一个；
+⑤ 三桥都吃这个解析结果：Windows 投 `UIA_LabeledByPropertyId`、浏览器投 `aria-labelledby`，Linux 名字
+照样跟随但 `GetRelationSet` 仍为空（关系对象待独立增量）；⑥ 跟随发生在下一次语义树投影，而投影是
+惰性的——若目标经 `set_accessibility_label()` 改名会即时上报 `NameChanged` 触发投影，若只改 `Text`
+自带文案则等下一次脏源（见 `01-core.md` §7.2 的动态性边界）。
 
 ### 37.3 描述状态与取值（自定义控件）
 

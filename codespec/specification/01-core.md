@@ -309,17 +309,26 @@ btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可�
 | `range` | `std::optional<AccessibilityRange>` |
 | `level` | `std::optional<int>`，标题层级（文档结构导航用） |
 | `is_control` / `is_content` | 裁剪结论：是否进入平台的「控件视图」/「内容视图」 |
+| `stable_key` | 宿主经 `Widget::set_stable_key()` 声明的**跨重建**稳定键（对标 HTML `id`；空 = 未设） |
+| `labelled_by` | 名字来源的**键**（`Widget::set_labelled_by()`，对标 `aria-labelledby`；空 = 未声明） |
+| `labelled_by_id` | 上述键在**本次投影内**解析出的目标 `id`（0 = 未声明 / 未命中 / 环上 / 目标无名）；三桥据此投影关系 |
 
 新增字段一律带默认成员初始化，且**追加在既有字段之后**——既有聚合初始化与序列化面零变化。
 
-**名称回退链（对标 ARIA accessible name computation）**：`explicit_accessibility_label()`（宿主经 `Widget::set_accessibility_label()` 声明，对标 `aria-label`）→ `accessibility_label()` 覆写（`Button` 取 label、`Text` 取内容…）→ （`Text` / `TextInput` 角色）控件文本 / 取值 → **兄弟标签关联** → **唯一文本子节点**之标签。求值实现在 `a11y_tree.h` 的 `detail::resolve_accessibility_name`，与上述顺序逐字一致。
+`id` 与 `stable_key` 是**两套身份**，各司其职、不可互替：`id = runtime_id()` 进程级自增、重建即变，是平台侧元素句柄（事件目标、缓存键）；`stable_key` 由宿主命名、跨重建不变，是**宿主持久引用**的唯一合法形式（`labelled_by` 只能引它，否则同名重排的树一对不上）。
+
+**名称回退链（对标 ARIA accessible name computation）**：**引用式标签关联**（宿主经 `Widget::set_labelled_by()` 声明，对标 `aria-labelledby`）→ `explicit_accessibility_label()`（宿主经 `Widget::set_accessibility_label()` 声明，对标 `aria-label`）→ `accessibility_label()` 覆写（`Button` 取 label、`Text` 取内容…）→ （`Text` / `TextInput` 角色）控件文本 / 取值 → **兄弟标签关联** → **唯一文本子节点**之标签。第 2–6 级求值实现在 `a11y_tree.h` 的 `detail::resolve_accessibility_name`，与上述顺序逐字一致；**引用式关联**一级**不在**该函数内求值（见下）。
 
 - **兄弟标签关联**（`detail::sibling_label_name`）是**几何启发式**：同容器直接子节点中取与本控件「垂直重叠 + 水平相邻（间隙 ≤ 12 DIP）」的最近文本兄弟，且只对 `Checkbox` / `Switch` / `Slider` 三种角色生效；未绘制、无父、纵向堆叠（`Column { Slider, Text }`）一律不命中——**宁可不念也不猜错**。
 - **唯一文本子节点**只在该子树恰有一个 `Text` / `RichText` / `Label` 子节点时生效（多个候选即弃权，避免把整段内容拼成名字）。
-- 标签来源（第 4 / 5 级读兄弟与子节点的那段文本）统一走 `detail::declared_label`，故「钩子覆写取到名的控件」与「显式声明取到名的控件」互为可用的标签来源，两条路同源。
+- 标签来源（兄弟级与子节点级各读一段文本）统一走 `detail::declared_label`，故「钩子覆写取到名的控件」与「显式声明取到名的控件」互为可用的标签来源，两条路同源。
 - `set_accessibility_label(std::string)` 返回 `Widget &`（可链式），键名 `accessibility_label` 随基类 props 往返（**未声明不写键**，空串语义是「撤除声明、回落回退链」而非「名字为空」）；同值重复设置不上报事件，值真变化上报 `NameChanged`。
+- **引用式标签关联**（`set_stable_key` + `set_labelled_by`，对标 HTML `id` + `aria-labelledby`）是回退链的**最高优先级**，也是唯一不在 `resolve_accessibility_name` 内求值的一级：引用可指向树序上**更靠前**的控件（先声明的标题），单趟递归建名时无从查起，故由 `detail::apply_labelled_by_relations` 在整棵节点树建完后做**两趟**后置解析（一趟收集键索引 + 一趟解析，成本 O(节点数)，无人声明时除空遍历外零成本）。生产路径唯一入口是 `build_accessibility_tree`，三桥（UIA / AT-SPI / ARIA）与 `a11y_diff::build_tree_snapshot` 共用其结果，故 `labelled_by_id` 与跟随后的 `name` 天然同值。
+- 引用的降级判据（每种原因**每进程提示一次**，经 `Diagnostics::degraded`，读屏在线时不逐帧刷屏）：① 键不在本次投影的树内（含目标 `show == false` 未入树）⇒ 保留自身名字、`labelled_by_id = 0`；② 目标自身无可读名字 ⇒ 同上（**宁念旧名也不念空**，且 ARIA 的 `aria-labelledby` 会压制 `aria-label`，投影空目标等于抹掉名字）；③ 链式引用（A→B→C）逐层展开，菱形引用经已解析集合去重、**环**（含自引用）在闭合处断掉，断环者不投影关系 ⇒ 三桥侧投影出的关系图始终无环；④ 同树多个控件共用一个 `stable_key` ⇒ 取先序第一个并提示一次。
+- `set_stable_key` / `set_labelled_by` 同样「未声明不写键」，键名 `stable_key` / `labelled_by` 随基类 props 往返（可过 `to_json` / `from_json`）；`set_stable_key` 不动名字故不上报事件，`set_labelled_by` 变化上报 `NameChanged`。名字跟随的失效面：目标改名 ⇒ 引用者的 `name` 随之变化，`TreeDiff` 对**两侧节点各报一次** `FieldChange::Name`（判据在 `utest_a11y_diff.referenced_label_rename_propagates_name_to_dependent`）。
+- **动态性的边界（如实申报）**：名字跟随发生在「下一次语义树投影」，而投影是拉取式惰性的（事件只 `mark_dirty()`）。`Text::content` 等控件自带文案的变化**不上报** a11y 事件，故若一帧内再无其他脏源，读屏读到的仍是旧名。要即时跟随，请用 `set_accessibility_label()` 改标签源（上报 `NameChanged`）或让目标随任一已接线事件（取值 / 焦点 / 结构变化）一起更新。
 
-**剩余缺口（如实申报）**：**引用式**标签关联（对标 `aria-labelledby`——读屏名跟随被引用控件的文本动态变化）尚未提供。阻碍是身份体系：本库控件的 `id` 只有 `runtime_id()`（进程级自增、不可序列化、重建即变），跨容器引用无法稳定表达也不能过 `to_json` / `from_json` 往返。要做须先引入用户可设的稳定键，属独立切片。
+**剩余缺口（如实申报）**：`set_labelled_by` 的**关系对象**只在 Windows UIA（`UIA_LabeledByPropertyId`，真机判据见 `tools/verify/win32_ua_live_probe.cpp` #21）与浏览器 ARIA（`aria-labelledby` IDREF）两桥投影；Linux AT-SPI 的 `GetRelationSet` 仍申报为空——其 `(ii)` 索引对须由 a11y 注册表分配的应用序号推出，属独立增量。名字本身在三桥一致（语义树内已解析完毕），故 Linux 读屏念到的仍是目标标签文案，缺的只是「由 … 标注」这条可导航关系。
 
 **事件通道（两条并列，互不覆盖）。** 事件处理器在 `accessibility.h` 内是**进程级单槽**（`current_accessibility_event_handler()`，宿主用）；桥另经 `detail::a11y_broadcast_hook` 独立接收同一批事件。两条通道**并列**而非链式：宿主处理器永远被调用，桥广播独立生效，安装顺序无关（历史上「保存旧处理器 + 链式包裹」会让先安装者失效）。另有第三条并列通道 `detail::a11y_widget_destroy_hook`：控件实例销毁前**带上其指针**广播一次，供桥判定「我缓存的根是不是没了」（语义树事件只能给出宿主容器，无法承载这一判定）。
 

@@ -77,6 +77,22 @@ auto variant_init_bstr(VARIANT &v, const std::string &utf8) -> void {
     v.bstrVal = bstr_from_utf8(utf8);  // 调用方负责 VariantClear
 }
 
+/// @brief 对象引用型属性值（`UIA_LabeledByPropertyId` 等）：VARIANT 自己持一份 COM 引用。
+/// @note `bridge_->provider_for()` 交还的是**缓存借用**（不增计数），故此处必须 AddRef：
+///       出参的那一份归 UIA 客户端，由其 `VariantClear` 释放。
+/// @note 元素引用属性必须用 **`VT_UNKNOWN`** 承载 `IRawElementProviderSimple*`（不是 `VT_DISPATCH`）：
+///       实测同一条 `UIA_LabeledByPropertyId` 在 `VT_DISPATCH` 下客户端 `get_CurrentLabeledBy`
+///       只拿回空元素（UIA 按 `IUnknown` 问回 provider，不走 Dispatch 路径），改 `VT_UNKNOWN` 后
+///       关系可导航 —— 判据见 `tools/verify/win32_ua_live_probe.cpp` 的 #21 验收项。
+auto variant_init_provider(VARIANT &v, IRawElementProviderSimple *p) -> void {
+    VariantInit(&v);
+    v.vt = VT_UNKNOWN;
+    v.punkVal = p;
+    if (p != nullptr) {
+        p->AddRef();
+    }
+}
+
 /// @brief 属性「不支持」的保留 VARIANT（G21）：必须是 UIA 保留值而非 VT_EMPTY。
 auto variant_not_supported(VARIANT &v) -> void {
     VariantInit(&v);
@@ -640,6 +656,16 @@ auto UiaNodeProvider::GetPropertyValue(PROPERTYID property_id, VARIANT *ret) -> 
         case UIA_NamePropertyId:
             variant_init_bstr(*ret, an.name);
             return S_OK;
+        case UIA_LabeledByPropertyId:
+            // 引用式标签关联（对标 ARIA `aria-labelledby`）：`labelled_by_id` 由语义树解析得出，
+            // 非 0 即代表「名字确实跟随该目标」（空名目标不投影，见 `apply_labelled_by_relations`）。
+            if (an.labelled_by_id != 0) {
+                if (auto *target = bridge_->provider_for(an.labelled_by_id); target != nullptr) {
+                    variant_init_provider(*ret, target);
+                    return S_OK;
+                }
+            }
+            break;
         case UIA_HelpTextPropertyId:
             variant_init_bstr(*ret, an.hint);
             return S_OK;

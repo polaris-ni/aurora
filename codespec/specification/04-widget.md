@@ -161,6 +161,8 @@ au::Text("Welcome").font_size(24).bold();
 | 钩子 | 默认 | 说明 |
 |:---|:---|:---|
 | `runtime_id() const -> std::uint64_t` | 基类构造时分配的进程级原子自增值（从 1 起） | 节点稳定身份；**非虚**，生命周期内恒定，直接进入 `AccessibilityNode::id` |
+| `stable_key()` / `set_stable_key(std::string)` | 空串（未设） | **非虚**，宿主命名的跨重建稳定键（对标 HTML `id`），入 `AccessibilityNode::stable_key`；`set_labelled_by` 只认它，不认 `runtime_id`。不动名字故不上报事件 |
+| `labelled_by_key()` / `set_labelled_by(std::string)` | 空串（未声明） | **非虚**，引用式标签关联（对标 `aria-labelledby`）：名字取同树内该键控件之名，Name 回退链最高优先级；变化上报 `NameChanged`。解析与降级判据见 [`01-core.md`](01-core.md) §7.2 |
 | `accessibility_role() const -> AccessibilityRole` | 走 `infer_accessibility_role(type_name())` 表 | 控件可覆写（如图表族五控件统一返回 `Image`） |
 | `accessibility_label() const -> std::string` | 空串 | 可访问名首选来源 |
 | `accessibility_value() const -> std::string` | 空串 | 平台 Value 属性来源 |

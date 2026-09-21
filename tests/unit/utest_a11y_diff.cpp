@@ -2,7 +2,8 @@
 /// 目标单元: include/aurora/widget/a11y_diff.h
 /// 测试说明: 语义树快照扁平化（先序 / parent_id / children_of）、diff 的 add/remove/move/
 ///           字段级 updated（Name/Value/Hint/Bounds/Range/Actions/State）与焦点位变化，
-///           以及 LCS 换序判定优先于 remove+add（读屏焦点稳定性）
+///           以及 LCS 换序判定优先于 remove+add（读屏焦点稳定性）；真实控件快照下的
+///           引用式标签失效（目标改名 ⇒ 引用者 Name 同步上报）
 
 #include <algorithm>
 #include <cstddef>
@@ -199,6 +200,36 @@ AURORA_TEST_CASE(focus_gain_is_reported_once_and_loss_is_not) {
     const TreeDiff loss = aurora::a11y::diff_snapshots(after, before);
     AURORA_TEST_CHECK_FALSE(loss.focused_id.has_value());  // 失焦不产 focused_id
     AURORA_TEST_CHECK_TRUE(has_field(loss, 2, FieldChange::State));
+}
+
+AURORA_TEST_CASE(referenced_label_rename_propagates_name_to_dependent) {
+    // 引用式标签关联的失效面：目标改名 ⇒ 引用者自身字段一字未动，但快照里它的 Name 变了，
+    // 必须照样报 `FieldChange::Name`（否则读屏继续念旧名）。全树重建 + 字段比对天然覆盖，
+    // 此用例把这条隐式契约钉成显式断言。
+    ProbeColumn root;
+    auto label = std::make_shared<ProbeLeaf>("Text");
+    label->set_accessibility_label("音量");
+    label->set_stable_key("vol-label");
+    auto box = std::make_shared<ProbeLeaf>("Checkbox");
+    box->set_labelled_by("vol-label");
+    root.add(Node{label});
+    root.add(Node{box});
+
+    const TreeSnapshot before = aurora::a11y::build_tree_snapshot(root);
+    const NodeSnapshot *dep = before.find(box->runtime_id());
+    AURORA_TEST_REQUIRE_NOT_NULL(dep);
+    AURORA_TEST_CHECK_EQ(dep->node.name, std::string{"音量"});
+    AURORA_TEST_CHECK_EQ(dep->node.labelled_by_id, label->runtime_id());
+
+    label->set_accessibility_label("音量（新）");
+    const TreeSnapshot after = aurora::a11y::build_tree_snapshot(root);
+
+    const TreeDiff d = aurora::a11y::diff_snapshots(before, after);
+    AURORA_TEST_CHECK_TRUE(has_field(d, label->runtime_id(), FieldChange::Name));
+    AURORA_TEST_CHECK_TRUE(has_field(d, box->runtime_id(), FieldChange::Name));
+    const NodeSnapshot *after_dep = after.find(box->runtime_id());
+    AURORA_TEST_REQUIRE_NOT_NULL(after_dep);
+    AURORA_TEST_CHECK_EQ(after_dep->node.name, std::string{"音量（新）"});
 }
 
 }  // namespace aurora::test_cases::utest_a11y_diff

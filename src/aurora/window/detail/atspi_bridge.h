@@ -18,6 +18,9 @@
 //    （G4）。**余下空位（申报）**：window:* 窗口态事件、Text 细粒度事件
 //    （text-changed/text-caret-moved）、Bounds/Range/Actions 变化（AT-SPI 无规范事件词汇，
 //    客户端重读恒取新值）、关系集与键绑定 —— 均不影响「可见性 + 浏览 + 操作」主链路。
+//    关系集一项补充口径：`set_labelled_by` 的**名字已在本库语义树内解析完毕**，故 Linux 下
+//    读屏念到的仍是目标标签文案（Name 跟随正确）；缺的只是 `GetRelationSet` 里那条
+//    `LABELLED_BY` 关系对象本身（其 `(ii)` 索引对须由注册表分配的应用序号推出，属独立增量）。
 
 #include "aurora/core/platform.h"
 

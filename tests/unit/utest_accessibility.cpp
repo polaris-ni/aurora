@@ -2,7 +2,9 @@
 /// 目标单元: include/aurora/core/accessibility.h + include/aurora/widget/a11y_tree.h + include/aurora/widget/widget.h
 /// 测试说明: 覆盖角色推断映射、默认动作集、位掩码判定、无障碍树构建计数、语义几何（布局累加 /
 ///           绘制优先）、name/value 自填与 hook 覆写优先级、Name 回退链各级（显式声明 /
-///           兄弟标签 / 唯一文本子节点）与显式名的 props 往返、NameChanged 上报（最小控件桩 + 真实控件驱动）
+///           兄弟标签 / 唯一文本子节点）与显式名的 props 往返、NameChanged 上报（最小控件桩 +
+///           真实控件驱动）、引用式标签关联（set_stable_key / set_labelled_by：前后向引用、
+///           链式与环、未命中与空目标名回落、优先级、跨重建稳定、props 往返与 NameChanged）
 
 #include <cstdint>
 #include <functional>
@@ -690,6 +692,256 @@ AURORA_TEST_CASE(explicit_label_change_raises_name_changed_once_per_diff) {
         AURORA_TEST_CHECK_EQ(e.kind, aurora::AccessibilityEventKind::NameChanged);
         AURORA_TEST_CHECK_EQ(e.target, &cb);
     }
+}
+
+// ---------------------------------------------------------------------------
+// 引用式标签关联（#21：`set_stable_key` + `set_labelled_by`，对标 `id` + `aria-labelledby`）
+//
+// 以下用例一律**不绘制**：兄弟标签启发式要求几何已落定（`paint_bounds()` 非空），未绘制时
+// 天然惰性，故此处读到的名字只可能来自「引用解析」或显式声明两条路——判据因此单一。
+// ---------------------------------------------------------------------------
+
+AURORA_TEST_CASE(labelled_by_names_leaf_from_referenced_text) {
+    auto label = ProbeLeaf{"Text"};
+    label.set_accessibility_label("音量");
+    label.set_stable_key("vol-label");
+    auto leaf = ProbeLeaf{"Checkbox"};
+    leaf.set_labelled_by("vol-label");
+
+    ProbeColumn column;
+    column.add(aurora::Node{std::move(label)});
+    column.add(aurora::Node{std::move(leaf)});
+
+    const auto tree = aurora::build_accessibility_tree(column);
+    AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
+    AURORA_TEST_CHECK_EQ(tree.children[0].stable_key, std::string{"vol-label"});
+    AURORA_TEST_CHECK_EQ(tree.children[1].labelled_by, std::string{"vol-label"});
+    AURORA_TEST_CHECK_EQ(tree.children[1].name, std::string{"音量"});
+    // 关系以解析后的目标 id 投影（三桥共用），0 = 未解析。
+    AURORA_TEST_CHECK_EQ(tree.children[1].labelled_by_id, tree.children[0].id);
+    AURORA_TEST_CHECK_TRUE(tree.children[0].labelled_by_id == 0);
+}
+
+AURORA_TEST_CASE(labelled_by_resolves_forward_and_backwards_references) {
+    // 两趟解析的关键证据：引用者排在目标**之前**（树序上向后引用）同样命中——
+    // 单趟递归建名做不到这点，故 `apply_labelled_by_relations` 必须在整树建成后跑。
+    auto leaf = ProbeLeaf{"Checkbox"};
+    leaf.set_labelled_by("vol-label");
+    auto label = ProbeLeaf{"Text"};
+    label.set_accessibility_label("音量");
+    label.set_stable_key("vol-label");
+
+    ProbeColumn column;
+    column.add(aurora::Node{std::move(leaf)});
+    column.add(aurora::Node{std::move(label)});
+
+    const auto tree = aurora::build_accessibility_tree(column);
+    AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
+    AURORA_TEST_CHECK_EQ(tree.children[0].name, std::string{"音量"});
+    AURORA_TEST_CHECK_EQ(tree.children[0].labelled_by_id, tree.children[1].id);
+}
+
+AURORA_TEST_CASE(labelled_by_beats_explicit_and_builtin_label) {
+    // 优先级：引用 > 宿主显式声明 > 控件自带文案（与 ARIA「labelledby 压制 label」一致）。
+    auto label = std::make_shared<ProbeLeaf>("Text");
+    label->set_accessibility_label("外部标题");
+    label->set_stable_key("hdr");
+
+    auto button = std::make_shared<aurora::Button>(std::string{"确定"});
+    button->set_accessibility_label("确认订单");
+    button->set_labelled_by("hdr");
+
+    ProbeColumn column;
+    column.add(aurora::Node{label});   // 左值入树 = 共享所有权（用例稍后仍要经句柄查自身状态）
+    column.add(aurora::Node{button});
+
+    const auto tree = aurora::build_accessibility_tree(column);
+    AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
+    AURORA_TEST_CHECK_EQ(tree.children[1].name, std::string{"外部标题"});
+    // 引用不改写控件自身：显式声明与自带文案原样保留，只在名字求值时被压制。
+    AURORA_TEST_CHECK_EQ(button->explicit_accessibility_label(), std::string{"确认订单"});
+    AURORA_TEST_CHECK_EQ(button->accessibility_label(), std::string{"确定"});
+    // 撤除显式声明后仍走引用（不被自带文案「确定」抢回）。
+    button->set_accessibility_label({});
+    AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(column).children[1].name, std::string{"外部标题"});
+}
+
+AURORA_TEST_CASE(labelled_by_chain_resolves_transitively) {
+    // A→B→C：中间节点自身也是引用者，其名字先解出，末节再跟随。
+    auto src = ProbeLeaf{"Text"};
+    src.set_accessibility_label("季度报表");
+    src.set_stable_key("k1");
+    auto mid = ProbeLeaf{"Image"};
+    mid.set_stable_key("k2");
+    mid.set_labelled_by("k1");
+    auto sink = ProbeLeaf{"Checkbox"};
+    sink.set_labelled_by("k2");
+
+    ProbeColumn column;
+    column.add(aurora::Node{std::move(src)});
+    column.add(aurora::Node{std::move(mid)});
+    column.add(aurora::Node{std::move(sink)});
+
+    const auto tree = aurora::build_accessibility_tree(column);
+    AURORA_TEST_REQUIRE_EQ(tree.children.size(), 3U);
+    AURORA_TEST_CHECK_EQ(tree.children[1].name, std::string{"季度报表"});
+    AURORA_TEST_CHECK_EQ(tree.children[2].name, std::string{"季度报表"});
+    // 关系投影指向**声明的那个目标**（非传递闭包终点）：读屏沿链一跳即得名字。
+    AURORA_TEST_CHECK_EQ(tree.children[2].labelled_by_id, tree.children[1].id);
+}
+
+AURORA_TEST_CASE(labelled_by_miss_keeps_own_name) {
+    // 未命中（键不存在）⇒ 保留自身名字、关系不投影（宁念旧名也不念空）。
+    auto label = ProbeLeaf{"Text"};
+    label.set_accessibility_label("自带名");
+    label.set_labelled_by("ghost-key");
+
+    const auto tree = aurora::build_accessibility_tree(label);
+    AURORA_TEST_CHECK_EQ(tree.name, std::string{"自带名"});
+    AURORA_TEST_CHECK_EQ(tree.labelled_by, std::string{"ghost-key"});
+    AURORA_TEST_CHECK_TRUE(tree.labelled_by_id == 0);
+}
+
+AURORA_TEST_CASE(labelled_by_empty_target_name_keeps_own) {
+    // 目标存在但自身无可读名字 ⇒ 不投影关系：三桥按目标取名，投影出去等于把名字换成空串。
+    auto src = ProbeLeaf{"Image"};
+    src.set_stable_key("mute");
+    auto sink = ProbeLeaf{"Checkbox"};
+    sink.set_accessibility_label("勾选协议");
+    sink.set_labelled_by("mute");
+
+    ProbeColumn column;
+    column.add(aurora::Node{std::move(src)});
+    column.add(aurora::Node{std::move(sink)});
+
+    const auto tree = aurora::build_accessibility_tree(column);
+    AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
+    AURORA_TEST_CHECK_TRUE(tree.children[0].name.empty());
+    AURORA_TEST_CHECK_EQ(tree.children[1].name, std::string{"勾选协议"});
+    AURORA_TEST_CHECK_TRUE(tree.children[1].labelled_by_id == 0);
+}
+
+AURORA_TEST_CASE(labelled_by_cycle_and_self_reference_break_safely) {
+    // 环（X⇄Y）与自引用：解析必须在有限步内收敛，断环者保留自身名且不投影关系。
+    auto x = ProbeLeaf{"Text"};
+    x.set_accessibility_label("名字X");
+    x.set_stable_key("kx");
+    x.set_labelled_by("ky");
+    auto y = ProbeLeaf{"Text"};
+    y.set_accessibility_label("名字Y");
+    y.set_stable_key("ky");
+    y.set_labelled_by("kx");
+    auto self = ProbeLeaf{"Text"};
+    self.set_accessibility_label("名字S");
+    self.set_stable_key("ks");
+    self.set_labelled_by("ks");
+
+    ProbeColumn column;
+    column.add(aurora::Node{std::move(x)});
+    column.add(aurora::Node{std::move(y)});
+    column.add(aurora::Node{std::move(self)});
+
+    const auto tree = aurora::build_accessibility_tree(column);
+    AURORA_TEST_REQUIRE_EQ(tree.children.size(), 3U);
+    // 先序者发起解析 ⇒ 闭合环的后一个（Y）被判为环上节点：保自身名、不投影。
+    AURORA_TEST_CHECK_EQ(tree.children[1].name, std::string{"名字Y"});
+    AURORA_TEST_CHECK_TRUE(tree.children[1].labelled_by_id == 0);
+    // X 的名字取 Y 的终名（Y 已确定不再变），关系合法投影。
+    AURORA_TEST_CHECK_EQ(tree.children[0].name, std::string{"名字Y"});
+    AURORA_TEST_CHECK_EQ(tree.children[0].labelled_by_id, tree.children[1].id);
+    // 自引用是同一条判据的退化情形。
+    AURORA_TEST_CHECK_EQ(tree.children[2].name, std::string{"名字S"});
+    AURORA_TEST_CHECK_TRUE(tree.children[2].labelled_by_id == 0);
+}
+
+AURORA_TEST_CASE(duplicate_stable_key_resolves_to_first_in_preorder) {
+    auto first = ProbeLeaf{"Text"};
+    first.set_accessibility_label("先声明者");
+    first.set_stable_key("dup");
+    auto second = ProbeLeaf{"Text"};
+    second.set_accessibility_label("后声明者");
+    second.set_stable_key("dup");
+    auto sink = ProbeLeaf{"Checkbox"};
+    sink.set_labelled_by("dup");
+
+    ProbeColumn column;
+    column.add(aurora::Node{std::move(first)});
+    column.add(aurora::Node{std::move(second)});
+    column.add(aurora::Node{std::move(sink)});
+
+    const auto tree = aurora::build_accessibility_tree(column);
+    AURORA_TEST_REQUIRE_EQ(tree.children.size(), 3U);
+    AURORA_TEST_CHECK_EQ(tree.children[2].name, std::string{"先声明者"});
+    AURORA_TEST_CHECK_EQ(tree.children[2].labelled_by_id, tree.children[0].id);
+}
+
+AURORA_TEST_CASE(labelled_by_survives_widget_tree_rebuild) {
+    // 稳定键的存在意义：重建后的控件 `runtime_id()` 全变，按键的引用必须照样命中。
+    // （lambda 内只用非致命断言：致命断言的失败出口按 `void` 用例函数设计。）
+    auto read = [] -> std::pair<std::string, std::uint64_t> {
+        auto label = ProbeLeaf{"Text"};
+        label.set_accessibility_label("音量");
+        label.set_stable_key("vol-label");
+        auto leaf = ProbeLeaf{"Checkbox"};
+        leaf.set_labelled_by("vol-label");
+        ProbeColumn column;
+        column.add(aurora::Node{std::move(label)});
+        column.add(aurora::Node{std::move(leaf)});
+        const auto tree = aurora::build_accessibility_tree(column);
+        if (tree.children.size() != 2) {
+            return {};
+        }
+        return {tree.children[1].name, tree.children[1].labelled_by_id};
+    };
+    const auto first = read();
+    const auto second = read();  // 全新控件对象、全新 runtime_id
+    AURORA_TEST_CHECK_EQ(first.first, std::string{"音量"});
+    AURORA_TEST_CHECK_EQ(second.first, std::string{"音量"});
+    AURORA_TEST_CHECK_TRUE(first.second != 0);
+    AURORA_TEST_CHECK_TRUE(first.second != second.second);  // 身份确实变了，名字却稳
+}
+
+AURORA_TEST_CASE(stable_key_and_labelled_by_round_trip_through_props) {
+    aurora::Checkbox src;
+    src.set_stable_key("notify-box");
+    src.set_labelled_by("notify-label");
+    aurora::Json props;
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["stable_key"].get<std::string>(), std::string{"notify-box"});
+    AURORA_TEST_CHECK_EQ(props["labelled_by"].get<std::string>(), std::string{"notify-label"});
+
+    aurora::Checkbox dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(dst.stable_key(), std::string{"notify-box"});
+    AURORA_TEST_CHECK_EQ(dst.labelled_by_key(), std::string{"notify-label"});
+
+    // 未声明不写键（同 `accessibility_label` 纪律）：空值落盘会被误读成「显式清空」。
+    aurora::Checkbox plain;
+    aurora::Json plain_props;
+    plain.serialize_props(plain_props);
+    AURORA_TEST_CHECK_FALSE(plain_props.contains("stable_key"));
+    AURORA_TEST_CHECK_FALSE(plain_props.contains("labelled_by"));
+}
+
+AURORA_TEST_CASE(labelled_by_change_raises_name_changed_idempotently) {
+    std::vector<aurora::AccessibilityEvent> events;
+    const ScopedEventHandler listen{&events};
+
+    aurora::Checkbox cb;
+    cb.set_labelled_by("vol-label");
+    cb.set_labelled_by("vol-label");  // 同值幂等
+    cb.set_labelled_by("vol-caption");
+    cb.set_labelled_by({});  // 撤除引用
+
+    AURORA_TEST_REQUIRE_EQ(events.size(), 3U);
+    for (const auto &e : events) {
+        AURORA_TEST_CHECK_EQ(e.kind, aurora::AccessibilityEventKind::NameChanged);
+        AURORA_TEST_CHECK_EQ(e.target, &cb);
+    }
+    // 键本身不引发播报：`set_stable_key` 只改标识，名字未动。
+    aurora::Slider slider;
+    slider.set_stable_key("vol");
+    AURORA_TEST_REQUIRE_EQ(events.size(), 3U);
 }
 
 }  // namespace aurora::test_cases::utest_accessibility

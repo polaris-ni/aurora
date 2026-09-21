@@ -15,13 +15,17 @@
 // 依赖方向：widget/ → core/（单向）。本头是 `core/accessibility.h` 的**下游**，反之不成立。
 // ============================================================================
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "aurora/core/accessibility.h"
+#include "aurora/core/diagnostics.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -45,7 +49,7 @@ namespace detail {
 
 /// @brief 控件「自带/声明的可读文本」：`explicit` 声明优先于 `accessibility_label()` 覆写。
 ///
-/// 既用作 Name 回退链的第一级，也用作**标签来源**（父级把子/兄弟节点的这段文本当名字读）。
+/// 既用作 Name 回退链的「显式声明」一级，也用作**标签来源**（父级把子/兄弟节点的这段文本当名字读）。
 /// 二者必须同源：只覆写钩子的控件（`Text` / `Button`）与只调 `set_accessibility_label()` 的
 /// 控件（叶子控件）都得能被对方引用。
 /// @note 虚钩子默认实现即返回显式声明值，故本函数对未覆写者恒等于 `accessibility_label()`；
@@ -57,7 +61,7 @@ namespace detail {
     return w.accessibility_label();
 }
 
-/// @brief 直接子节点中的「唯一文本子节点」文本（G24 Name 回退链第三级）。
+/// @brief 直接子节点中的「唯一文本子节点」文本（Name 回退链最后一级，G24）。
 ///
 /// 图标 + 文字按钮是常见形态：容器本身无 label，其唯一 `Text` 子节点即读屏应念的内容。
 /// 多个文本子节点时**不猜测**（避免把整段内容拼成名字），返回空串交由调用方回落。
@@ -84,11 +88,11 @@ namespace detail {
     return (text_children == 1) ? found : std::string{};
 }
 
-/// @brief 兄弟标签关联（G24 Name 回退链第四级；设计 §16.2 #1-C）。
+/// @brief 兄弟标签关联（Name 回退链的「兄弟」级，G24；设计 §16.2 #1-C）。
 ///
 /// CheckBox / Switch / Slider 是无内置文本的叶子控件，其可读标签通常是**同容器的兄弟**
-/// `Text` / `Label` / `RichText` 节点（如 `Row { Text("启用"), Checkbox() }`）。
-/// 第三级「唯一文本子节点」兜底只在标签是**子节点**时命中，对兄弟形态失效。
+/// `Text` / `Label` / `RichText` 节点（如 `Row { Text("启用"), Checkbox() }`）。「唯一文本子
+/// 节点」级兜底只在标签是**子节点**时命中，对兄弟形态失效。
 ///
 /// 启发式：在父容器的直接子节点中，找到与控件**垂直重叠**且**水平相邻**（间隙 ≈ 0，容差 12 DIP）
 /// 的文本兄弟，取几何最近者作为标签。仅对需要标签的控件角色生效，避免对 Button / Generic
@@ -157,15 +161,18 @@ namespace detail {
 /// @brief Name（可访问名）回退链（G24，对标 ARIA accessible name computation）。
 ///
 /// ```
-/// name = explicit_accessibility_label()              // 宿主显式声明（`set_accessibility_label`，最高优先级）
-///      ?: accessibility_label()                      // 控件自带文案（Button 的 label / Text 的内容…）
+/// name = labelled_by 所指控件的名字（引用式关联，`set_labelled_by`，最高优先级）  // ← 后置遍历覆盖
+///      ?: explicit_accessibility_label()              // 宿主显式声明（`set_accessibility_label`）
+///      ?: accessibility_label()                       // 控件自带文案（Button 的 label / Text 的内容…）
 ///      ?: 文本内容（Text / TextInput 的 value）       // 文本类控件的内容即名字
 ///      ?: 兄弟标签关联（最近且相邻的文本兄弟）          // CheckBox/Slider 等叶子控件（#1-C）
 ///      ?: 唯一 Text 子节点的文本                      // 图标 + 文字按钮
-///      ?: ""                                         // 装饰节点，交由 G23 裁剪忽略
+///      ?: ""                                          // 装饰节点，交由 G23 裁剪忽略
 /// ```
 /// @note 第三、四级只取**几何已绘制**的兄弟盒，未绘制时安全回落空串。
 /// @note 只对本控件求值，不含子节点递归（后两级是唯一例外，且只在恰好一个文本子节点时生效）。
+/// @note 最高优先级的引用式关联**不在**本函数内求值：引用可指向树序上更靠前的节点，单趟递归
+///       无从查起，故由 `apply_labelled_by_relations` 在整树建好后覆盖 `name`（见该函数说明）。
 [[nodiscard]] inline auto resolve_accessibility_name(const Widget &w, AccessibilityRole role) -> std::string {
     if (auto label = declared_label(w); !label.empty()) {
         return label;
@@ -183,6 +190,106 @@ namespace detail {
     return unique_text_child_name(w);
 }
 
+/// @brief 引用式标签关联（对标 `aria-labelledby`）：一次投影内的键索引与待解析表。
+///
+/// 为何是**后置遍历**而不是在 `resolve_accessibility_name` 里查：名回退链的求值只见到本控件
+/// （无根、无全树），而引用可指向树内任意位置的控件，包括**树序上更靠前**的（先声明的标题）——
+/// 单趟递归建树时目标尚未可知或已建完，两侧都要照顾就得两趟。此处自持一棵已建好的节点树，
+/// 一趟收集 + 一趟解析，成本 O(节点数)，与建树同阶。
+struct LabelRefIndex {
+    std::unordered_map<std::string, AccessibilityNode *> by_key;  ///< `stable_key` → 节点（先序者胜）
+    std::vector<AccessibilityNode *> pending;                     ///< 声明了 `labelled_by` 的节点
+};
+
+/// @brief 降级申报去重：同一原因的提示**每进程一次**，避免读屏在线时逐帧刷屏。
+/// @note Thread: main-thread only（无障碍全链如此，见 `AccessibilityNode` 的 `@note Thread`）
+inline auto report_label_ref_once(const std::string &reason) -> void {
+    static std::unordered_set<std::string> reported;  // NOLINT(concurrency-mt-unsafe)
+    if (reported.count(reason) != 0) {
+        return;
+    }
+    reported.insert(reason);
+    Diagnostics::degraded(reason, "accessibility_labelled_by", "a11y-labelled-by-degraded");
+}
+
+/// @brief 先序收集：建键索引、登记待解析引用，并对同键重名给出一次提示。
+inline auto collect_label_refs(AccessibilityNode &n, LabelRefIndex &idx) -> void {
+    if (!n.stable_key.empty()) {
+        if (const auto [at, inserted] = idx.by_key.emplace(n.stable_key, &n); !inserted) {
+            report_label_ref_once("同一棵语义树里有多个控件声明了相同 stable_key，引用式标签取先序第一个：" +
+                                  n.stable_key);
+        }
+    }
+    if (!n.labelled_by.empty()) {
+        idx.pending.push_back(&n);
+    }
+    for (AccessibilityNode &child : n.children) {
+        collect_label_refs(child, idx);
+    }
+}
+
+/// @brief 解析单个引用节点：先解目标自身（链式引用逐层展开），再让本节点的名字取目标之名。
+///
+/// @param n      待解析节点（`labelled_by` 非空）
+/// @param idx    键索引
+/// @param done   已解析集合：菱形引用（A→B、A→C、B→D、C→D）下每个节点至多解析一次，杜绝指数展开
+/// @param stack  当前解析链上的节点 id，用于**环**检测
+///
+/// 入栈在查表**之前**，故自引用（`A.labelled_by == A.stable_key`）与多节点环同走一条判据；
+/// 断环只惩罚「闭合环的那一个节点」（其关系不投影、名字保留自身），链上其余节点仍取目标终名，
+/// 因而在三桥侧投影出的关系图始终是**无环**的。
+inline auto resolve_label_ref(AccessibilityNode *n,
+                              const LabelRefIndex &idx,
+                              std::unordered_set<const AccessibilityNode *> &done,
+                              std::vector<std::uint64_t> &stack) -> void {
+    if (n == nullptr || n->labelled_by.empty() || done.count(n) != 0) {
+        return;
+    }
+    done.insert(n);
+    stack.push_back(n->id);
+    const auto it = idx.by_key.find(n->labelled_by);
+    if (it == idx.by_key.end()) {
+        // 未命中（键不存在 / 在子树外 / 该控件 `show == false` 未入树）：保留自身名字，关系不投影。
+        stack.pop_back();
+        report_label_ref_once("labelled_by 指向的 stable_key 不在本棵语义树内，已保留自身名字：" + n->labelled_by);
+        n->labelled_by_id = 0;
+        return;
+    }
+    AccessibilityNode *target = it->second;
+    if (std::find(stack.begin(), stack.end(), target->id) != stack.end()) {
+        stack.pop_back();
+        report_label_ref_once("labelled_by 引用链成环，已保留自身名字：" + n->labelled_by);
+        n->labelled_by_id = 0;
+        return;  // 环：目标已在本链上（含自引用），断环——保留自身名字，关系不投影
+    }
+    resolve_label_ref(target, idx, done, stack);  // 目标自身若也是引用者，先把它解析出来
+    stack.pop_back();
+    // 关系**只在名字真的跟随目标时**才投影：三桥都按 `labelled_by_id` 让平台自行取目标之名
+    // （ARIA 的 `aria-labelledby` 会压制 `aria-label`），目标名为空却投影等于把读屏的名字
+    // 换成空串。此时宁保留自身名字、不申报关系。
+    if (target->name.empty()) {
+        report_label_ref_once("labelled_by 指向的控件自身无可读名字，已保留自身名字：" + n->labelled_by);
+        n->labelled_by_id = 0;
+        return;
+    }
+    n->labelled_by_id = target->id;
+    n->name = target->name;
+}
+
+/// @brief 引用式标签关联的整树解析（`build_accessibility_tree` 末尾调用，三桥共用其结果）。
+inline auto apply_labelled_by_relations(AccessibilityNode &root) -> void {
+    LabelRefIndex idx;
+    collect_label_refs(root, idx);
+    if (idx.pending.empty()) {
+        return;  // 常态：无人声明引用 ⇒ 除一趟空遍历外零成本
+    }
+    std::unordered_set<const AccessibilityNode *> done;
+    for (AccessibilityNode *node : idx.pending) {
+        std::vector<std::uint64_t> stack;
+        resolve_label_ref(node, idx, done, stack);
+    }
+}
+
 /// @brief 递归构建单个节点：几何由 `layout_box` 累加，子节点累加各自 `Node` 局部原点。
 /// @param w 当前控件
 /// @param layout_box 当前控件按布局累加得到的候选全局盒（未绘制时采用）
@@ -191,6 +298,10 @@ namespace detail {
     -> AccessibilityNode {
     AccessibilityNode node;
     node.id = w.runtime_id();
+    // 稳定键与引用声明随节点入树：名字覆盖在整树建好后由 `apply_labelled_by_relations` 统一完成
+    // （引用可指向树序更靠前的节点，建树单趟无从解析）。
+    node.stable_key = w.stable_key();
+    node.labelled_by = w.labelled_by_key();
     node.role = w.accessibility_role();
     node.actions = default_actions(node.role);
     node.value = w.accessibility_value();
@@ -243,7 +354,7 @@ namespace detail {
         });
     }
 
-    // Name 回退链需在子节点之后求值（第三级要读子节点文本）。
+    // Name 回退链需在子节点之后求值（「唯一文本子节点」级要读子节点文本）。
     node.name = resolve_accessibility_name(w, node.role);
     apply_semantic_pruning(node, w.accessibility_is_semantic());
     return node;
@@ -262,14 +373,17 @@ namespace detail {
 /// 根节点未绘制时，其盒由 `root.size()`（布局结果）置于原点导出，故调用前应先完成一次布局
 /// （`root.layout(constraints, ctx)`）以获得真实尺寸。
 /// @note 不依赖 GUI 后端；name / value / hint 由 `Widget::accessibility_*()` 钩子自填。
+/// @note 引用式标签关联（`set_labelled_by`）在建树之后整树解析，故本入口的返回值即三桥看到的终值。
 [[nodiscard]] inline auto build_accessibility_tree(const Widget &root, const Rect &root_box) -> AccessibilityNode {
-    return detail::build_accessibility_node(root, root_box);
+    AccessibilityNode tree = detail::build_accessibility_node(root, root_box);
+    detail::apply_labelled_by_relations(tree);
+    return tree;
 }
 
 /// @brief 递归构建控件树的无障碍视图（根节点几何置于原点）。
 /// @note Side-effects: reads layout/state
 [[nodiscard]] inline auto build_accessibility_tree(const Widget &root) -> AccessibilityNode {
-    return detail::build_accessibility_node(root, Rect{.origin = Point{}, .size = root.size()});
+    return build_accessibility_tree(root, Rect{.origin = Point{}, .size = root.size()});
 }
 
 }  // namespace aurora

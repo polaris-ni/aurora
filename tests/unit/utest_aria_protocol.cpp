@@ -3,7 +3,8 @@
 /// 测试说明: Wasm/ARIA 平台桥的平台中立折算层 —— 角色映射全表（13 值逐一钉 WAI-ARIA 1.2
 ///           role 名）、动作名表与主点击动作优先级、属性折算（label 去重/checked/level/
 ///           range 数值格式/aria-hidden/tabindex/multiline 限定）、RFC 8259 最小集转义、
-///           全量与 ops 载荷结构（remove→add→move→update 确定序 + 绝对 focus）、播报载荷
+///           全量与 ops 载荷结构（remove→add→move→update 确定序 + 绝对 focus）、播报载荷、
+///           aria-labelledby IDREF 投影与 aria-label 互斥
 
 #include <cstdint>
 #include <optional>
@@ -161,6 +162,24 @@ AURORA_TEST_CASE(text_content_suppresses_redundant_label) {
     AURORA_TEST_CHECK(el.role == "textbox");
     AURORA_TEST_CHECK(el.content == "a@b.c");
     AURORA_TEST_CHECK(attr_of(el, "aria-label") == "邮箱");
+}
+
+AURORA_TEST_CASE(labelled_by_ref_projects_idref_and_suppresses_label) {
+    // 引用式标签关联（`set_labelled_by`）：投 `aria-labelledby` IDREF，且**不再**发 `aria-label`
+    // ——ARIA 里 labelledby 压制 label，两处同发等于把选择权丢给读屏实现。
+    NodeSnapshot n = node(11, 0, AccessibilityRole::Checkbox, "音量");
+    n.node.labelled_by = "vol-label";
+    n.node.labelled_by_id = 5;
+    AriaElement el = aria_element_of(n);
+    AURORA_TEST_CHECK(attr_of(el, "aria-labelledby") == "aurora-a11y-5");
+    AURORA_TEST_CHECK(attr_of(el, "aria-label").empty());
+    AURORA_TEST_CHECK(attr_keys(el) == "aria-labelledby data-aurora-id data-aurora-actions");
+
+    // 未解析出目标（id 为 0 ⇒ 树内未命中/环上/目标无名）⇒ 回落自身名的既有折算。
+    n.node.labelled_by_id = 0;
+    el = aria_element_of(n);
+    AURORA_TEST_CHECK(attr_of(el, "aria-labelledby").empty());
+    AURORA_TEST_CHECK(attr_of(el, "aria-label") == "音量");
 }
 
 AURORA_TEST_CASE(state_attrs_map_exactly) {

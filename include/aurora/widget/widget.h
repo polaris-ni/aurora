@@ -544,7 +544,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 默认返回 `explicit_label_`（未显式设置即空串）；需要自带语义的控件覆写返回可读文本
     /// （Button 取 label、Text 取显示文本…）。
     /// 覆写返回值**优先于**任何按角色推断的默认取值，但**低于**宿主经
-    /// `set_accessibility_label()` 显式声明的名字（回退链第一级，见 `a11y_tree.h`）。
+    /// `set_accessibility_label()` 显式声明的名字（回退链的「显式声明」一级，引用式关联优先级更高；
+    /// 见 `a11y_tree.h`）。
     /// @note Side-effects: reads state
     [[nodiscard]] virtual auto accessibility_label() const -> std::string { return explicit_label_; }
 
@@ -564,6 +565,48 @@ class Widget : public std::enable_shared_from_this<Widget> {
             return *this;  // 同值不重复上报（`present_root` 之外的每帧幂等调用亦安全）
         }
         explicit_label_ = std::move(label);
+        notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::NameChanged, .target = this});
+        return *this;
+    }
+
+    // ---- 稳定键与引用式标签关联（对标 ARIA `id` + `aria-labelledby`）----
+
+    /// @brief 用户可设的**跨重建稳定标识**（对标 HTML `id`）；未设置为空串。
+    ///
+    /// 与 `runtime_id()` 的分工：后者是进程级自增、构造时分配、**不可序列化**的运行时身份（语义树
+    /// 节点 id、三桥元素寻址都用它），页面重启 / `from_json` 重建后即变；本键由宿主命名，随 props
+    /// 往返，是「同一棵 saved 树里稳定指认某个控件」的唯一途径。
+    /// 当前消费者是 `set_labelled_by()`（引用式标签关联）；同树重名按先序取第一个并在投影路径提示一次。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto stable_key() const -> const std::string & { return stable_key_; }
+
+    /// @brief 设定稳定键（链式）。键内容不解析、不去空白，仅要求非空（空串 = 撤除）。
+    /// @note Side-effects: mutates state
+    auto set_stable_key(std::string key) -> Widget & {
+        stable_key_ = std::move(key);
+        return *this;
+    }
+
+    /// @brief 本控件声明的「名字来源键」（对标 `aria-labelledby`）；未声明为空串。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto labelled_by_key() const -> const std::string & { return labelled_by_; }
+
+    /// @brief 引用式标签关联：读本控件名字的控件应改读**同树内 `stable_key() == key` 的那个控件**的名字。
+    ///
+    /// 对标 ARIA `aria-labelledby`——名字是**动态引用**而非一次性拷贝：被引用控件改名后，本控件的
+    /// 读屏名在下一次语义树投影时自动跟随（`Name` 变化由既有 `TreeDiff::FieldChange::Name` 发出）。
+    /// 求值发生在 `build_accessibility_tree` 的后置遍历里（见 `widget/a11y_tree.h`），三条桥共用同一
+    /// 结果，故 UIA / AT-SPI / ARIA 读到的名字一致。
+    /// 语义要点：① **优先级最高**（压制 `set_accessibility_label` 与控件自带文案，与 ARIA 一致）；
+    /// ② 引用未命中（键不存在 / 子树外 / `show == false` 未入树）⇒ 保留本控件自身名字并降级申报一次，
+    /// **不**念空；③ 链式引用（A→B→C）逐层解析，**环**检测后断环保自身名；④ 目标名字为空时同样保留
+    /// 自身名。空串 = 撤除引用（回落 Name 回退链）。引用变化上报 `NameChanged`。
+    /// @note Side-effects: mutates state, notifies accessibility event channel
+    auto set_labelled_by(std::string key) -> Widget & {
+        if (labelled_by_ == key) {
+            return *this;  // 同值不重复上报（同 `set_accessibility_label` 的幂等纪律）
+        }
+        labelled_by_ = std::move(key);
         notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::NameChanged, .target = this});
         return *this;
     }
@@ -706,6 +749,13 @@ class Widget : public std::enable_shared_from_this<Widget> {
         if (!explicit_label_.empty()) {
             props["accessibility_label"] = explicit_label_;
         }
+        // 同一条「未设不写键」纪律：两键的空串语义都是「未声明」，写出空值会被误读为撤除指令。
+        if (!stable_key_.empty()) {
+            props["stable_key"] = stable_key_;
+        }
+        if (!labelled_by_.empty()) {
+            props["labelled_by"] = labelled_by_;
+        }
     }
 
     /// @brief 从 props JSON 反序列化自有属性（to_json/from_json 闭环）。
@@ -725,6 +775,12 @@ class Widget : public std::enable_shared_from_this<Widget> {
         }
         if (props.contains("accessibility_label")) {
             set_accessibility_label(props["accessibility_label"].get<std::string>());
+        }
+        if (props.contains("stable_key")) {
+            set_stable_key(props["stable_key"].get<std::string>());
+        }
+        if (props.contains("labelled_by")) {
+            set_labelled_by(props["labelled_by"].get<std::string>());
         }
     }
 
@@ -908,6 +964,10 @@ class Widget : public std::enable_shared_from_this<Widget> {
     bool is_focused_ = false;  ///< 当前是否持有焦点
     /// 宿主显式声明的读屏名（对标 ARIA `aria-label`）：Name 回退链最高优先级，空串 = 未声明。
     std::string explicit_label_;
+    /// 用户可设的跨重建稳定标识（对标 HTML `id`），空串 = 未设；见 `stable_key()`。
+    std::string stable_key_;
+    /// 引用式标签关联的目标键（对标 `aria-labelledby`），空串 = 未声明；见 `set_labelled_by()`。
+    std::string labelled_by_;
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
   private:
