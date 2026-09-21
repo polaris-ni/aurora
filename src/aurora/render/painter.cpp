@@ -764,7 +764,7 @@ auto Painter::draw_text(const Rect &r, const std::string &s, const Font &f, Colo
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
     AURORA_PROFILE_COUNT(draw_texts, 1);
-    // 委托给 FontEngine：真实字体渲染（Windows/GDI）或回退内置位图字体。
+    // 委托给 FontEngine：唯一字体内核为 FreeType（HarfBuzz 做 shaping），无 GDI 文本路径。
     // 原点换算为物理像素（FontEngine 以物理分辨率光栅字形并逐物理像素写入，不再乘 scale）。
     const float sc = scale_;
     const Rect pr{.origin = Point{.x = r.origin.x * sc, .y = r.origin.y * sc}, .size = r.size};

@@ -13,7 +13,7 @@ namespace aurora {
 /**
  * @brief 动作：类型化字符串标签 + 类型擦除载荷。
  *
- * Reducer 通过 `type` 区分动作，用 `payloadAs<T>()` 安全取回载荷。
+ * Reducer 通过 `type` 区分动作，用 `payload_as<T>()` 安全取回载荷。
  * 对应 specification/02-state.md §4 单向数据流（Redux 式 dispatch/reducer）。
  *
  * @code
@@ -36,7 +36,7 @@ struct Action {
     /// @brief 无载荷的动作（如 "increment"）。
     explicit Action(std::string t) : type(std::move(t)) {}
 
-    /// @brief 取回载荷；类型不匹配或为空时返回 nullptr。
+    /// @brief 载荷为空时返回 nullptr；类型由调用方保证匹配（本函数不做类型校验）。
     template <typename T>
     [[nodiscard]] auto payload_as() const -> const T * {
         if (!payload) {
@@ -61,7 +61,7 @@ using Reducer = std::function<S(const S &, const Action &)>;
  *   同时把新值写入内部 `State<S>`，使订阅本 store 的 `Effect` 触发定点刷新
  *   （与现有细粒度信号系统无缝衔接，widget 可像订阅 `State` 一样订阅 store）。
  * - `subscribe(Listener)`：注册状态变化监听（返回取消句柄）。
- * - `asSignal()`：暴露为 `State<S>` 信号视图，供 widget 属性直接绑定。
+ * - `as_signal()`：暴露为 `State<S>` 信号视图，供 widget 属性直接绑定。
  *
  * @tparam S 状态类型（须可拷贝/移动，且无悬空引用）。
  *

@@ -1,6 +1,6 @@
 # 核心基础层（core）
 
-> 覆盖 `include/aurora/core/`（30 个头文件）与根级 `todo.h`、`commands.h`。
+> 覆盖 `include/aurora/core/`（35 个头文件）与根级 `todo.h`、`commands.h`。
 > 本文件是错误、诊断、日志、异步底座与基础几何类型的**唯一权威**；错误码全量清单见 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)（生成物），编码层面的错误写法规则见 [`CODING_STANDARDS.md`](../CODING_STANDARDS.md) §1。
 
 ---
@@ -10,18 +10,18 @@
 | 关注点 | 头文件 |
 |:---|:---|
 | 几何与尺寸意图 | `types.h`、`dimension.h`、`transform.h`、`math.h` |
-| 颜色 | `color.h` |
+| 颜色 | `color.h`、`color_space.h` |
 | 错误与结果 | `result.h`、`error_codes.h`、`error_codes.gen.h`、`expected.h` |
 | 诊断与降级 | `diagnostics.h`、`strict_mode.h`、`aurora_assert.h` |
 | 日志 | `log.h`、`debug.h` |
 | 异步底座 | `thread_pool.h`、`thread.h` |
 | 时间与周期 | `time.h`、`duration.h`、`event_stream.h`、`file_watcher.h` |
-| 文本与编码 | `utf8.h`、`string_util.h` |
-| 平台与能力查询 | `platform.h`、`enums.h` |
-| 无障碍（a11y） | `accessibility.h`（语义树 / 事件 / 设置）、`a11y_types.h`（状态 / 取值域 / 选区值类型）、`a11y_provider.h`（桥抽象与注册表）、`a11y_diff.h`（快照与 diff）、`a11y_text.h`（UTF-8 ↔ UTF-16 偏移映射） |
-| 其他 | `immutable.h`、`image.h`、`font.h`、`literals.h`、`version.h` |
+| 文本与编码 | `utf8.h`、`string_util.h`、`directionality.h` |
+| 平台与能力查询 | `platform.h`、`enums.h`、`native_surface.h` |
+| 无障碍（a11y） | `accessibility.h`（角色 / 动作 / 节点 / 事件 / 设置等纯数据类型与指针级钩子）、`a11y_types.h`（状态 / 取值域 / 选区值类型）、`a11y_provider.h`（桥抽象与注册表）、`a11y_text.h`（UTF-8 ↔ UTF-16 偏移映射） |
+| 其他 | `image.h`、`font.h`、`literals.h`、`version.h` |
 
-根级头文件：`aurora.h`（唯一入口）、`aurora_fwd.h`（仅前向声明，供只需指针/引用的编译单元降低包含成本）、`aurora_pch.h`、`commands.h`、`todo.h`。（原根级 `test_helpers.h` 已迁至 `tests/support/test_helpers.h`，定位为仓库私有测试设施，退出公共 API 与 `aurora_api.json`。）
+根级头文件：`aurora.h`（唯一入口）、`aurora_fwd.h`（仅前向声明，供只需指针/引用的编译单元降低包含成本）、`aurora_pch.h`、`commands.h`、`todo.h`、`imperative.h`（命令式逃生舱：就地执行一段命令式代码块）。（原根级 `test_helpers.h` 已迁至 `tests/support/test_helpers.h`，定位为仓库私有测试设施，退出公共 API 与 `aurora_api.json`。）
 
 ---
 
@@ -33,14 +33,14 @@
 
 | 结构 | 字段 / 方法 |
 |:---|:---|
-| `Point` | `x`、`y`（`types.h:14`） |
-| `Size` | `width`、`height`；`Size::infinity()` 表示不限制（`types.h:29`） |
-| `Rect` | `origin: Point`、`size: Size`；`right() = x + w`，`bottom() = y + h`（`types.h:58`） |
-| `EdgeInsets` | `left` / `top` / `right` / `bottom`；`horizontal()` = 左右之和，`vertical()` = 上下之和（`types.h:87`） |
+| `Point` | `x`、`y`（`types.h`） |
+| `Size` | `width`、`height`；`Size::infinity()` 表示不限制（`types.h`） |
+| `Rect` | `origin: Point`、`size: Size`；`right() = x + w`，`bottom() = y + h`（`types.h`） |
+| `EdgeInsets` | `left` / `top` / `right` / `bottom`；`horizontal()` = 左右之和，`vertical()` = 上下之和（`types.h`） |
 
 ### 2.2 Length：尺寸意图
 
-`Length` 表达「控件想要的尺寸」，由 AI 直接写在 `width` / `height` 属性上（`types.h:108`）。
+`Length` 表达「控件想要的尺寸」，由 AI 直接写在 `width` / `height` 属性上（`types.h`）。
 
 ```cpp
 struct Length {
@@ -49,7 +49,7 @@ struct Length {
 };
 ```
 
-`LengthKind`（`types.h:98`）是**四个无参枚举值**，尺寸数值存放在 `Length::value` 中：
+`LengthKind`（`types.h`）是**四个无参枚举值**，尺寸数值存放在 `Length::value` 中：
 
 | 枚举值 | 语义 | 约束求解 |
 |:---|:---|:---|
@@ -62,7 +62,7 @@ struct Length {
 
 ### 2.3 强类型尺寸工厂
 
-定义于 `include/aurora/core/dimension.h`，全部工厂位于 `namespace aurora` 内（`dimension.h:5`）；`au` 是 `aurora` 的推荐别名，因此 `au::px(...)` 等写法直接可用。
+定义于 `include/aurora/core/dimension.h`，全部工厂位于 `namespace aurora` 内（`dimension.h`）；`au` 是 `aurora` 的推荐别名，因此 `au::px(...)` 等写法直接可用。
 
 | 工厂 | 等价 |
 |:---|:---|
@@ -92,7 +92,7 @@ struct Constraints {
 
 ### 3.1 Error
 
-`Error`（`core/result.h:25`）是结构化错误值，字段如下：
+`Error`（`core/result.h`）是结构化错误值，字段如下：
 
 `code`（冻结 slug）、`message`、`suggestion`、`docs`、`where`、`hint`、`code_enum`、`severity`、`category`、`auto_fixable`、`retryable`、`fix_category`、`fix_params`。
 
@@ -100,19 +100,19 @@ struct Constraints {
 
 ### 3.2 Result\<T\>
 
-`Result<T>`（`core/result.h:96`）是值语义的成功/失败二选一，构造 `Result(T value)` 与 `Result(Error err)` 均为隐式。
+`Result<T>`（`core/result.h`）是值语义的成功/失败二选一，构造 `Result(T value)` 与 `Result(Error err)` 均为隐式。
 
 | 成员 | 签名 |
 |:---|:---|
-| `ok()` | `[[nodiscard]] auto ok() const -> bool`（`result.h:101`） |
-| `operator bool` | `explicit operator bool() const`（无 `[[nodiscard]]`，`result.h:104`） |
-| `error()` | `[[nodiscard]] auto error() const -> const Error&`（`result.h:108`） |
-| `value()` | `const T&` 与 `T&` 两个重载（`result.h:106-107`） |
-| `unwrap()` | `[[nodiscard]] auto unwrap() const -> T`（`result.h:111`） |
+| `ok()` | `[[nodiscard]] auto ok() const -> bool`（`result.h`） |
+| `operator bool` | `explicit operator bool() const`（无 `[[nodiscard]]`，`result.h`） |
+| `error()` | `[[nodiscard]] auto error() const -> const Error&`（`result.h`） |
+| `value()` | `const T&` 与 `T&` 两个重载（`result.h`） |
+| `unwrap()` | `[[nodiscard]] auto unwrap() const -> T`（`result.h`） |
 
-`Result<void>` 为特化（`result.h:135`），提供 `ok()` / `error()` / `operator bool`，**不提供** `value()` 与 `unwrap()`。
+`Result<void>` 为特化（`result.h`），提供 `ok()` / `error()` / `operator bool`，**不提供** `value()` 与 `unwrap()`。
 
-`core/expected.h` 另有库自带的极简 `expected<T, E>` / `unexpected<E>`（C++23 `std::expected` 落地前的替身实现）：二态（持值或持错误），错误态经 `expected<T, E>{unexpected{err}}` 构造，提供 `operator bool` / `has_value()` / `value()` / `error()` / `value_or(def)`。公共 API 一律返回 `Result<T>`，`expected` 仅作其底层接口底座，新代码不应直接暴露它。
+`core/expected.h` 另有库自带的极简 `expected<T, E>` / `unexpected<E>`（C++23 `std::expected` 落地前的替身实现）：二态（持值或持错误），错误态经 `expected<T, E>{unexpected{err}}` 构造，提供 `explicit operator bool` / `has_value()` / `value()` / `error()` / `value_or(def)`（`value_or` 仅接受右值 `T&&`；`operator bool` 为 `explicit`）。公共 API 一律返回 `Result<T>`，`expected` 仅作其底层接口底座，新代码不应直接暴露它。
 
 **常见误写**：`Result` **没有** `is_ok()` 成员。判成功一律用 `ok()` 或 `if (r)`。
 
@@ -123,7 +123,7 @@ struct Constraints {
 ```cpp
 auto restored = au::serialization::from_json(json);
 if (!restored.ok()) {
-    au::Diagnostics::report(restored.error().message, "main.cpp:42", restored.error().code);
+    au::Diagnostics::report(restored.error().message, "main.cpp", restored.error().code);
     return;
 }
 auto widget = restored.value();
@@ -135,7 +135,7 @@ auto widget = restored.value();
 
 ### 4.1 Diagnostic
 
-`Diagnostic`（`core/diagnostics.h:41`）是库在「输入非法 / 部分代码缺失」时产出的结构化记录，而非崩溃或白屏。
+`Diagnostic`（`core/diagnostics.h`）是库在「输入非法 / 部分代码缺失」时产出的结构化记录，而非崩溃或白屏。
 
 | 字段 | 说明 |
 |:---|:---|
@@ -147,13 +147,13 @@ auto widget = restored.value();
 | `code_enum` | 与 `code` 对应的 `ErrorCode`（无码时 `GeneralUnknown`） |
 | `fix` | 可选结构化修复建议 `FixSuggestion` |
 
-`FixSuggestion`（`diagnostics.h:21`）含 `code`、`description` 与可选 `auto_fix` 回调，`has_auto_fix()` 判断是否可自动修复。
+`FixSuggestion`（`diagnostics.h`）含 `code`、`description` 与可选 `auto_fix` 回调，`has_auto_fix()` 判断是否可自动修复。
 
 `Diagnostic::to_json_line()` 输出 JSON 行，供工具链消费。`severity_str()` / `category_str()` 供遗留代码按字符串比较，新代码应直接用枚举比较（两个 `using` 别名已标记 `[[deprecated]]`）。
 
 ### 4.2 Diagnostics 收集器
 
-`Diagnostics`（`core/diagnostics.h:68`）是全局诊断收集器，单线程 UI 无需加锁。
+`Diagnostics`（`core/diagnostics.h`）是全局诊断收集器，单线程 UI 无需加锁。
 
 | 方法 | 说明 |
 |:---|:---|
@@ -165,22 +165,22 @@ auto widget = restored.value();
 | `get_last_diagnostics()` | 最近诊断环形缓冲（上限 `AURORA_RECENT_CAP` = 64） |
 | `explain_diagnostic(code)` | slug → 人类可读解释，两个重载（字符串 / `ErrorCode`） |
 | `collect_fixes()` | 收集最近诊断中携带的修复建议（不消费，同一 `code` 可能多次出现） |
-| `apply_fix(code)` | 按 `code` 执行一次自动修复，命中返回 `true`，两个重载（slug 字符串 / `ErrorCode`，`diagnostics.h:106,118`） |
+| `apply_fix(code)` | 按 `code` 执行一次自动修复，命中返回 `true`，两个重载（slug 字符串 / `ErrorCode`，`diagnostics.h`） |
 | `register_fix(code, fix)` | 注册错误码 → 修复策略映射 |
 | `auto_fix_all()` | 应用全部已注册的自动修复，返回成功修复数 |
 
 ### 4.3 严格模式
 
-`StrictMode`（`core/strict_mode.h:22`）取值 `Off`（默认）与 `On`。`On` 时 `Diagnostics::degraded` 升级为硬失败，用于 CI 把「降级渲染 / 深度超限」这类本应容忍的问题变为构建阻断。
+`StrictMode`（`core/strict_mode.h`）取值 `Off`（默认）与 `On`。`On` 时 `Diagnostics::degraded` 升级为硬失败，用于 CI 把「降级渲染 / 深度超限」这类本应容忍的问题变为构建阻断。
 
-- 推荐入口是 `Application` 上下文：`au::App().strict_mode(au::StrictMode::On).run(...)`；`Application` 另提供 `set_strict_mode()` / `strict_mode()`（`app/application.h:132,423`）。
+- 推荐入口是 `Application` 上下文：`au::App().strict_mode(au::StrictMode::On).run(...)`；`Application` 另提供 `set_strict_mode()` / `strict_mode()`（`app/application.h`）。
 - 无 App 上下文的场景（单元测试）用线程级全局开关 `aurora::set_strict_mode(m)` / `aurora::strict_mode()`；该状态是 `thread_local`，避免多线程竞争。
 - 硬失败经 `on_strict_failure(message)` 执行：先 `AURORA_LOG_FATAL`，再调用注入的 handler（若有），最后 `std::terminate()`。它**不依赖** `AURORA_ASSERT`，因此 Release / `NDEBUG` 构建同样被阻断。
 - 测试可注入 handler 拦截硬失败：`aurora::set_strict_failure_handler(h)`，传空恢复默认。
 
 ### 4.4 校验入口
 
-`au::validate(root, max_depth = 64) -> Result<bool>`（`app/validate.h:35`）把空子节点、深度超限、未知类型报告为结构化 `Error`。子节点合法性是**运行时校验**：容器统一接受任意 `Node`，无编译期白名单。
+`au::validate(root, max_depth = 64) -> Result<bool>`（`app/validate.h`）把空子节点、深度超限、未知类型报告为结构化 `Error`。子节点合法性是**运行时校验**：容器统一接受任意 `Node`，无编译期白名单。
 
 ---
 
@@ -188,7 +188,7 @@ auto widget = restored.value();
 
 ### 5.1 级别与格式
 
-`LogLevel`（`core/log.h:22`）取值 `Trace` / `Debug` / `Info` / `Warn` / `Error` / `Fatal`；短标签由 `log_level_label()` 映射为 `TRC` / `DBG` / `INF` / `WRN` / `ERR` / `FTL`。
+`LogLevel`（`core/log.h`）取值 `Trace` / `Debug` / `Info` / `Warn` / `Error` / `Fatal`；短标签由 `log_level_label()` 映射为 `TRC` / `DBG` / `INF` / `WRN` / `ERR` / `FTL`。
 
 统一行格式：
 
@@ -198,7 +198,7 @@ auto widget = restored.value();
 
 ### 5.2 Logger
 
-`Logger`（`core/log.h:91`）是单例，默认级别 `Info`，默认输出到 stderr，内部状态无锁（单线程 UI 假设）。
+`Logger`（`core/log.h`）是单例，默认级别 `Info`，默认输出到 stderr，内部状态无锁（单线程 UI 假设）。
 
 | 方法 | 说明 |
 |:---|:---|
@@ -214,7 +214,7 @@ auto widget = restored.value();
 
 ### 5.3 宏家族
 
-定义于 `core/log.h:171-193`。
+定义于 `core/log.h`。
 
 | 宏 | 级别 |
 |:---|:---|
@@ -238,11 +238,11 @@ auto widget = restored.value();
 
 ### 6.1 ThreadPool
 
-`ThreadPool`（`core/thread_pool.h:29`）是有界线程池，析构时 stop + join，无悬挂线程。
+`ThreadPool`（`core/thread_pool.h`）是有界线程池，析构时 stop + join，无悬挂线程。
 
 | 成员 | 说明 |
 |:---|:---|
-| `ThreadPool(worker_count = default_worker_count())` | 构造并启动 worker；传 0 回落默认值 |
+| `explicit ThreadPool(worker_count = default_worker_count())` | 构造并启动 worker；传 0 回落默认值 |
 | `default_worker_count()` | `hardware_concurrency()`，下限 2 |
 | `worker_count()` | 当前 worker 线程数 |
 | `pending_count()` | 当前排队未执行任务数（近似值，仅供诊断） |
@@ -256,7 +256,7 @@ auto widget = restored.value();
 
 禁止裸 `std::thread` 执行后台工作，也禁止在 `on_click` 等 UI 回调中直接阻塞。所有耗时操作经 `au::async` / `au::co_async` 提交到默认池（契约见 [`02-state.md`](02-state.md) §5）。
 
-`core/thread.h` 提供单线程 UI 契约的配套守卫：`MainThreadOnly<T>`（`thread.h:20`）包装一个值，debug 下断言读写均发生在构造它的线程，模板参数 `Check = false` 时为零开销特化（不存 owner 线程、不断言）；宏 `AURORA_MAIN_THREAD` 为函数标注「必须在主线程调用」（clang `annotate` 属性，供静态分析 / 文档工具识别；GCC 下为 no-op，运行期契约仍由 `MainThreadOnly` 兜底）。
+`core/thread.h` 提供单线程 UI 契约的配套守卫：`MainThreadOnly<T>`（`thread.h`）包装一个值，debug 下断言读写均发生在构造它的线程，模板参数 `Check = false` 时为零开销特化（不存 owner 线程、不断言）；宏 `AURORA_MAIN_THREAD` 为函数标注「必须在主线程调用」（clang `annotate` 属性，供静态分析 / 文档工具识别；GCC 下为 no-op，运行期契约仍由 `MainThreadOnly` 兜底）。
 
 ---
 
@@ -264,14 +264,13 @@ auto widget = restored.value();
 
 | 头文件 | 能力 |
 |:---|:---|
-| `color.h` | `Color` 结构（`color.h:10`）与具名颜色（`aurora::colors` 子命名空间） |
+| `color.h` | `Color` 结构（`color.h`）与具名颜色（`aurora::colors` 子命名空间） |
 | `time.h` / `duration.h` | 时间表示与时长 |
 | `event_stream.h` | 事件流 |
 | `file_watcher.h` | 文件监听 |
 | `utf8.h` / `string_util.h` | UTF-8 处理与字符串工具 |
-| `platform.h` | 平台能力查询（运行时查询，不靠 `#ifdef`） |
+| `platform.h` | 编译期平台 / 架构 / 能力宏探测（零运行时成本） |
 | `enums.h` | 跨模块共享枚举 |
-| `immutable.h` | 不可变包装 |
 | `image.h` / `font.h` | 图像与字体的基础类型（具体能力见 [`03-layout-render.md`](03-layout-render.md)） |
 | `version.h` | 库版本 |
 | `accessibility.h` | 无障碍基础（语义树 / 事件 / 设置；详见 §7.2） |
@@ -279,7 +278,7 @@ auto widget = restored.value();
 
 ### 7.1 au::TODO
 
-`au::TODO`（根级 `todo.h:23`）是占位回调，用于标记尚未实现的事件处理——编译通过，运行时触发时经 `Diagnostics::warn("TODO", what)` 输出警告。它是占位回调而非错误码。
+`au::TODO`（根级 `todo.h`）是占位回调，用于标记尚未实现的事件处理——编译通过，运行时触发时经 `Diagnostics::warn("TODO", what)` 输出警告。它是占位回调而非错误码。
 
 ```cpp
 auto btn = au::Button(au::ButtonProps{ .label = "OK" });
@@ -288,14 +287,13 @@ btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可�
 
 ### 7.2 无障碍基础（a11y）
 
-无障碍能力在 `core/` 内分四头，全部**平台中立**（不含任何平台头，不依赖 GUI 后端）：
+无障碍能力按**依赖方向**分居两层：`core/` 提供平台中立的**类型与指针级钩子**，需要遍历控件树的构建与快照逻辑落在 `widget/`（见 [`04-widget.md`](04-widget.md) §1）。以下四头全部**平台中立**（不含任何平台头，不依赖 GUI 后端）：
 
 | 头文件 | 内容 |
 |:---|:---|
-| `accessibility.h` | 语义树（`AccessibilityNode`）、角色（`AccessibilityRole`）、动作（`AccessibilityAction` / `AccessibilityActionRequest`）、事件（`AccessibilityEvent` / `AccessibilityEventKind`）、设置（`AccessibilitySettings`）、树构建与名称回退（`build_accessibility_tree` / `resolve_accessibility_name` / `unique_text_child_name` / `apply_semantic_pruning`） |
+| `accessibility.h` | 角色（`AccessibilityRole`）、动作（`AccessibilityAction` / `AccessibilityActionRequest`）、节点（`AccessibilityNode`）、事件（`AccessibilityEvent` / `AccessibilityEventKind`）、设置（`AccessibilitySettings`）、语义裁剪（`apply_semantic_pruning`）、角色推断与默认动作（`infer_accessibility_role` / `default_actions`）。**只以指针持有 `Widget`**（前置声明），树遍历入口见 `widget/a11y_tree.h` |
 | `a11y_types.h` | 纯值类型：`AccessibilityState`（13 位状态集）、`AccessibilityRange`（min/max/step/value）、`AccessibilityTextSelection`（UTF-8 字节半开区间）、`AccessibilityScrollRange` |
 | `a11y_provider.h` | 桥抽象 `a11y::Provider` + 进程级 `a11y::detail::ProviderRegistry`（注册 / 广播 / 注销） |
-| `a11y_diff.h` | `TreeSnapshot` / `NodeSnapshot` / `TreeDiff` / `build_tree_snapshot` / `diff_snapshots` |
 | `a11y_text.h` | `UtfOffsetMap`（UTF-8 ↔ UTF-16 偏移换算，代理对按码点起点夹取）、`utf8_to_utf16` / `utf16_to_utf8`、`TextUnit` / `expand_to_unit` |
 
 **语义树节点（`AccessibilityNode`）** 在既有 `role / name / value / hint / bounds / actions` 之外新增：
@@ -329,7 +327,7 @@ btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可�
 **需求陈述：**
 
 - UI 树通过 `std::shared_ptr<Widget>` 管理所有权，父子关系即「树内拥有」：拷贝即共享、移动即转移，整棵树随根 `Node` 析构而析构。AI 不需要手动 `delete`，也不必担心 use-after-free。
-- 禁止裸指针出现在公开 API 中。事件回调需要引用「触发者」时，用稳定标识 `Node::id()` 加查询，而非引用或指针。
+- 禁止**拥有语义**的裸指针进入公开 API；非拥有的观察指针 / 句柄（如 `Binding<T>::target()` 返回的 `State<T>*`）除外。事件回调需要引用「触发者」时，用稳定标识 `Node::id()` 加查询，而非引用或指针。
 - **例外**：Inspector / 调试内部句柄（如 `selected_widget()`、`set_surface_getter`）可返回裸 `Widget*` / `Surface*`，但必须配弱引用守卫（生命周期由树 `shared_ptr` 持有），且不得进入业务公开 API。
 
 ```cpp
@@ -364,7 +362,7 @@ auto node = au::find_node_by_path(root, path);  // widget/inspect.h，位于 aur
 **规则：**
 
 1. 任何组件在任何非法状态下都不崩溃。无 `source` 的 `ImageView` 渲染为带虚线框的占位符；非法 `font_size` 回退默认值并告警；负 `gap` 钳到 0 并告警。
-2. 降级渲染有统一视觉语言：边框 + 灰色背景 + 说明文字。可直接使用 `au::Placeholder`（`widget/placeholder.h:24`）作为通用降级占位盒，AI 通过快照即可识别「这个位置降级了」。
+2. 降级渲染有统一视觉语言：边框 + 灰色背景 + 说明文字。可直接使用 `au::Placeholder`（`widget/placeholder.h`）作为通用降级占位盒，AI 通过快照即可识别「这个位置降级了」。
 3. 所有降级产生结构化警告（§4.1），典型如：
 
 ```text
@@ -372,7 +370,7 @@ auto node = au::find_node_by_path(root, path);  // widget/inspect.h，位于 aur
   - Received: "" (empty string)
   - Fallback: placeholder rendered (200x150, dashed border)
   - Fix: provide a valid file path or URL
-  - Location: main.cpp:42
+  - Location: main.cpp
 ```
 
 4. 严格模式用于生产与 CI（§4.3）下，降级即致命失败。默认宽松语义由各组件内置降级：非法或缺失属性 → 渲染占位框 + 结构化警告。

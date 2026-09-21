@@ -16,7 +16,7 @@ namespace aurora {
  * 灰底、警示色边框、显示说明文字的盒子，使局部错误不致拖垮整棵 UI。
  *
  * @code
- *   auto fallback = au::Placeholder{ .message = "Button does not support serialization yet" };
+ *   auto fallback = au::Placeholder("Button does not support serialization yet");
  * @endcode
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json

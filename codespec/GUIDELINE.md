@@ -515,7 +515,7 @@ if (auto r = prefs.flush(); !r.ok()) { /* r.error() */ }
 ```
 
 - **单例粒度**：`instance(name)` 按名注册表，每个 `name` 唯一；首次调用按参数创建，后续忽略路径参数。
-- **并发安全**：实例内部 `std::shared_mutex` 保护读写；`flush` / `reload` 经跨平台文件锁（`<file>.lock`）+ 原子 `rename` 保证多进程安全。可多线程并发 `set` / `get` / `flush`。
+- **并发安全**：实例内部 `std::mutex` 保护（独占锁；不用 `std::shared_mutex`，因 MinGW-w64 winpthreads 的 rwlock 在并发写锁竞争下会触发 `__shared_mutex_pthread::lock()` 断言）。`flush` / `reload` 经跨平台文件锁（`<file>.lock`）+ 原子 `rename` 保证多进程安全。可多线程并发 `set` / `get` / `flush`。
 - 支持值类型：`bool` / 整数 / 浮点 / `std::string` / `std::vector` / JSON 对象。
 - `watch<T>` 返回 `std::shared_ptr<State<T>>`，可手动订阅；`binding<T>` 返回 `Binding<T>`（非拥有，须保持 `Preferences` 存活）。
 

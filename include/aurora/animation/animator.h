@@ -376,7 +376,7 @@ class TimelinePlayer {
     explicit TimelinePlayer(TimelineResolved spec);
 
     /// @brief 轨道绑定（类型安全）：槽位区间 + Tween → 目标 State。
-    /// 每槽位至多一轨，重复绑定同一槽位覆盖前值；越界槽位为无操作。
+    /// 同槽位且同目标才覆盖，否则按绑定序追加；越界槽位为无操作。
     /// @warning 目标 State 为非拥有引用，必须比本播放器存活更久（同 `AnimatedValue`）。
     template <typename T>
     auto track(std::size_t slot, Tween<T> tw, State<T> &target) -> void {

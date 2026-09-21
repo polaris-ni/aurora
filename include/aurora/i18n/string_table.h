@@ -18,11 +18,11 @@ namespace aurora {
  *
  * 模板语法：
  * - 位置占位：`{0}` `{1}` … 用 args[i] 替换。
- * - 简版复数：`{0, plural, one=1 项 other={0} 项}`，按 args[0] 数值选 `one`/`other`。
+ * - CLDR 六类复数：`{0, plural, zero=… one=… two=… few=… many=… other=…}`，按 `plural_category(args[0], loc)` 选分支（详见 plural.h）。
  *
  * 用法：
  * @code
- *   auto& t = defaultStringTable();
+ *   auto& t = default_string_table();
  *   t.add(Locale{"en"}, "greeting", "Hello {0}");
  *   t.add(Locale{"zh"}, "greeting", "你好 {0}");
  *   Text{ .content = LocalizedString::tr("greeting", {LocalizedString{"Aurora"}}) };

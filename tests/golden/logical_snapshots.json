@@ -1,5 +1,5 @@
 {
-  "_about": "Aurora logical-snapshot golden baseline (requirement #15). Do not hand-edit; regenerate with AURORA_UPDATE_GOLDEN=1 via aurora_test_runner --run=utest_golden_snapshots.",
+  "_about": "Aurora logical-snapshot golden baseline (requirement #15). Do not hand-edit; regenerate with AURORA_UPDATE_GOLDEN=1 via aurora_test_runner --run=utest_offscreen.",
   "scenarios": {
     "column_fixed": {
       "box": {

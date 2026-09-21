@@ -13,7 +13,7 @@ namespace aurora {
  * @brief 焦点移动方向（specification/05-event-navigation.md §4.1）。
  *
  * - `Forward` / `Backward`：沿 Tab 序前进 / 后退（对应 Tab / Shift+Tab）。
- * - `Up` / `Down` / `Left` / `Right`：方向性焦点移动（供后续布局感知导航扩展）。
+ * - `Up` / `Down` / `Left` / `Right`：方向性焦点移动（按几何最近候选移动；无候选返回 false）。
  */
 enum class FocusDirection : std::uint8_t { Forward, Backward, Up, Down, Left, Right };
 
@@ -57,7 +57,7 @@ class FocusManager {
 
     /**
      * @brief 沿 Tab 序移动到下一个/上一个可聚焦 widget。
-     * @param dir `Forward` 前进、`Backward` 后退；其余方向暂退化为 Forward。
+     * @param dir `Forward`/`Backward` 沿 Tab 序循环；`Up`/`Down`/`Left`/`Right` 按几何最近候选移动（无候选返回 false）。
      * @return 是否成功移动焦点（无候选时返回 false）。
      */
     auto move_focus(FocusDirection dir = FocusDirection::Forward) -> bool;

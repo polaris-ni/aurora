@@ -15,7 +15,7 @@ class StringTable;  // 前向声明：resolve 的定义在 string_table.h（避�
  *
  * - 非本地化：直接持文本（`text`）
  * - 本地化：以 `key` 查 `StringTable`，按 `Locale` 取模板并用 `args` 格式化
- *   （支持 `{0}`/`{1}` 占位与 `{n, plural, one=… other=…}` 简版复数）。
+ *   （支持 `{0}`/`{1}` 占位与 CLDR 六类复数 `zero`/`one`/`two`/`few`/`many`/`other` 完整分支，详见 plural.h）。
  * 提供从 `std::string_view` 的隐式构造，便于 AI 直接写 `Text{ .content = "Hi" }`。
  *
  * @note Thread: main-thread only

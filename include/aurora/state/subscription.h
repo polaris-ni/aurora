@@ -112,7 +112,7 @@ auto connect(SignalView<T> &src, F &&fn) -> Subscription {
  * `Store::subscribe` 的惰性取消句柄，析构自动取消。
  *
  * 与 `connect(SignalView&, F)` 不同：**不**立即应用当前状态，仅对后续 dispatch 回调
- * （如需首帧同步，请在 connect 后手动调用一次 `fn(store.state())`）。
+ * （如需首帧同步，请在 connect 后手动调用一次 `fn(store.get_state())`）。
  *
  * @tparam S 状态类型。
  * @tparam F 可调用 `(const S&) -> void`。

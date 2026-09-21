@@ -17,7 +17,7 @@
 | 检查面板与远程服务 | `widget/inspector_panel.h`、`inspector/inspector_server.h`、`inspector/inspector_api.h` |
 | 日志 | `core/log.h`（通道契约见 §9） |
 | 测试原语 | 根级 `test_helpers.h` |
-| 工具可执行文件 | `aurora_mcp`、`aurora_cli`、`aurora_lsp`、`gen_api_tools`、`ai_compat_test` |
+| 工具可执行文件 | `aurora_mcp`、`aurora_cli`、`aurora_lsp`、`gen_api_tools`（完整清单与生成器 / 校验器 / 基准见 §7.4；AI 兼容性验证见 `itest_ai_compat` 集成测试，`ctest -R itest_ai_compat`） |
 
 ---
 
@@ -33,24 +33,24 @@
 
 `children` 为空时不输出。**属性一律位于 `props` 子对象下**，因此补丁 path 形如 `/children/0/props/show`。
 
-`Json` 类型是 `nlohmann::json` 的别名，定义于 `widget/props_io.h:15`。
+`Json` 类型是 `nlohmann::json` 的别名，定义于 `widget/props_io.h`。
 
 部分控件的序列化 `type` 名与 C++ 类名不同（`Image` → `ImageView` / `ImageViewProps`）。
 
 ### 2.2 API
 
-本表函数除 `list_all_schemas` 外均位于 `aurora::serialization` 命名空间（**不是** `aurora`）。`list_all_schemas` 声明在 `serialization` 块之外，属 `aurora` 命名空间（`serialization.h:105`，与 `list_all_components` / `describe_component` / `search_components` 同区），调用写作 `au::list_all_schemas()`。
+本表函数除 `list_all_schemas` 外均位于 `aurora::serialization` 命名空间（**不是** `aurora`）。`list_all_schemas` 声明在 `serialization` 块之外，属 `aurora` 命名空间（`serialization.h`，与 `list_all_components` / `describe_component` / `search_components` 同区），调用写作 `au::list_all_schemas()`。
 
 | 函数 | 签名 | 位置 |
 |:---|:---|:---|
-| `to_json` | `[[nodiscard]] auto to_json(const Widget &w) -> Json` | `serialization.h:45` |
-| `from_json` | `[[nodiscard]] auto from_json(const Json &j) -> Result<std::shared_ptr<Widget>>` | `serialization.h:73` |
-| `diff` | `[[nodiscard]] auto diff(const Json &a, const Json &b) -> std::vector<JsonPatchOp>` | `serialization.h:79` |
-| `diff_into` | `auto diff_into(const Json &a, const Json &b, const std::string &path, std::vector<JsonPatchOp> &out) -> void` | `serialization.h:76` |
-| `apply_patch` | `auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void` | `serialization.h:83` |
-| `to_yaml` | `[[nodiscard]] auto to_yaml(const Widget &w) -> std::string` | `serialization.h:91` |
-| `component_schema` | `[[nodiscard]] auto component_schema(const std::string &name) -> Json` | `serialization.h:87` |
-| `list_all_schemas` | `[[nodiscard]] auto list_all_schemas() -> std::vector<Json>` | `serialization.h:105` |
+| `to_json` | `[[nodiscard]] auto to_json(const Widget &w) -> Json` | `serialization.h` |
+| `from_json` | `[[nodiscard]] auto from_json(const Json &j) -> Result<std::shared_ptr<Widget>>` | `serialization.h` |
+| `diff` | `[[nodiscard]] auto diff(const Json &a, const Json &b) -> std::vector<JsonPatchOp>` | `serialization.h` |
+| `diff_into` | `auto diff_into(const Json &a, const Json &b, const std::string &path, std::vector<JsonPatchOp> &out) -> void` | `serialization.h` |
+| `apply_patch` | `auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void` | `serialization.h` |
+| `to_yaml` | `[[nodiscard]] auto to_yaml(const Widget &w) -> std::string` | `serialization.h` |
+| `component_schema` | `[[nodiscard]] auto component_schema(const std::string &name) -> Json` | `serialization.h` |
+| `list_all_schemas` | `[[nodiscard]] auto list_all_schemas() -> std::vector<Json>` | `serialization.h` |
 
 `to_yaml` 有 `Widget` 与 `Json` 两个重载；**YAML 只有输出方向，无 `from_yaml`**。
 
@@ -70,16 +70,16 @@ au::serialization::apply_patch(json, patch);                  // 第一参数是
 
 ### 2.3 组件工厂注册表
 
-`serialization::WidgetRegistry`（`serialization.h:51`）:
+`serialization::WidgetRegistry`（`serialization.h`）:
 
 | 方法 | 签名 |
 |:---|:---|
-| `instance()` | 静态，返回 `WidgetRegistry&`（`serialization.h:53`） |
-| `register_factory(type, WidgetFactory)` | 注册工厂（`serialization.h:58`） |
-| `make(type, props)` | `[[nodiscard]] auto make(const std::string &type, const Json &props) const -> Result<std::shared_ptr<Widget>>`（`serialization.h:60`） |
-| `list_types()` | `[[nodiscard]] auto list_types() const -> std::vector<std::string>`（`serialization.h:63`） |
+| `instance()` | 静态，返回 `WidgetRegistry&`（`serialization.h`） |
+| `register_factory(type, WidgetFactory)` | 注册工厂（`serialization.h`） |
+| `make(type, props)` | `[[nodiscard]] auto make(const std::string &type, const Json &props) const -> Result<std::shared_ptr<Widget>>`（`serialization.h`） |
+| `list_types()` | `[[nodiscard]] auto list_types() const -> std::vector<std::string>`（`serialization.h`） |
 
-`WidgetFactory = std::function<Result<std::shared_ptr<Widget>>(const Json&)>`（`serialization.h:48`）。
+`WidgetFactory = std::function<Result<std::shared_ptr<Widget>>(const Json&)>`（`serialization.h`）。
 
 ### 2.4 差分补丁协议
 
@@ -111,12 +111,12 @@ struct JsonPatchOp {
 
 | 重载 | 位置 |
 |:---|:---|
-| `to_code(const Json &node, int indent = 0) -> std::string` | `codegen.h:297` |
-| `to_code(const Json &node, CodeStyle style, int indent = 0) -> std::string` | `codegen.h:342` |
-| `to_code(const Widget &w) -> std::string` | `codegen.h:357` |
+| `to_code(const Json &node, int indent = 0) -> std::string` | `codegen.h` |
+| `to_code(const Json &node, CodeStyle style, int indent = 0) -> std::string` | `codegen.h` |
+| `to_code(const Widget &w) -> std::string` | `codegen.h` |
 
 ```cpp
-enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   // codegen.h:19-23
+enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   // codegen.h
 ```
 
 | 枚举值 | 生成形态 |
@@ -198,7 +198,7 @@ Column#root { bounds:[0,0,640,480]; visible:true; listeners:[on_click] }
 
 `Node` 标识由 `Widget::set_id(std::string_view)` / `id()` 提供，`dump_tree_rich` 经 `#id` 渲染。
 
-`aurora::Inspector`（`inspector/inspector_api.h:25`，实现 `src/aurora/inspector/inspector_api.cpp`）是操作 UI 树的统一编程门面：全静态方法、仅主线程，各方法委托上表自由函数或组件注册表，无新增运行时开销。除树导出（`tree_text` / `tree_rich` / `tree_json` / `tree_json_full`）外，还提供：
+`aurora::Inspector`（`inspector/inspector_api.h`，实现 `src/aurora/inspector/inspector_api.cpp`）是操作 UI 树的统一编程门面：全静态方法、仅主线程，各方法委托上表自由函数或组件注册表，无新增运行时开销。除树导出（`tree_text` / `tree_rich` / `tree_json` / `tree_json_full`）外，还提供：
 
 | 能力 | 成员 | 说明 |
 |:---|:---|:---|
@@ -207,7 +207,7 @@ Column#root { bounds:[0,0,640,480]; visible:true; listeners:[on_click] }
 | 交互模拟 | `simulate_click(w)` / `simulate_scroll(w, dx, dy)` / `simulate_text_input(w, text)` | 合成事件经 `EventDispatcher` 走真实命中测试 + 冒泡派发；派发根与坐标原点均为 `w` 自身、指针取 `w` 中心，故不依赖控件在树中的绝对位置（无需先绘制，但目标须已布局——未布局时尺寸为零、中心退化为自身原点）。目标不可命中时返回 `GeneralNotSupported` 且不派发、不改状态 |
 | 组件发现 | `components()` / `component_schema(name)` | 已注册组件 schema 列表 / 单组件 schema |
 | 代码生成 | `to_code(root)` | UI 树 → 源码（转发 §2.5） |
-| 验证 | `validate(root) -> std::vector<Diagnostic>` | 整树验证（`inspector_api.h:94`） |
+| 验证 | `validate(root) -> std::vector<Diagnostic>` | 整树验证（`inspector_api.h`） |
 | 变化订阅 | `subscribe_changes(cb)` / `unsubscribe(id)` / `notify_changes(patch)` | `mark_needs_paint` / 布局标脏时向订阅者广播补丁，返回订阅 id |
 
 ---
@@ -362,16 +362,18 @@ stdio JSON-RPC 2.0。传输格式：`Content-Length: <N>\r\n\r\n<JSON-RPC 2.0 bo
 ### 7.2 CLI（`aurora_cli`）
 
 ```bash
-aurora components                         # 列出所有已注册组件类型
-aurora describe <name>                    # 输出单个组件的完整 schema（JSON）
-aurora search <keyword>                   # 按名称搜索组件
-aurora validate <tree.json>               # 校验 UI 树 JSON，输出诊断
-aurora snapshot <tree.json> [-w W] [-h H] # 输出逻辑快照 JSON
-aurora render <tree.json> [-w W] [-h H] [-o out.png]  # 离屏渲染为 PNG
-aurora preview <tree.json> [-w W] [-h H]  # 快速预览 UI（启动临时窗口；无显示后端回退无头渲染一帧退出）
-aurora to-code <tree.json> [--style fluent|step|di]   # UI 树 → C++ 代码
-aurora to-yaml <tree.json>                            # UI 树 → YAML 格式
-aurora schema                             # 输出完整 aurora_api.json
+aurora_cli components                         # 列出所有已注册组件类型
+aurora_cli describe <name>                    # 输出单个组件的完整 schema（JSON）
+aurora_cli search <keyword>                   # 按名称搜索组件
+aurora_cli validate <tree.json>               # 校验 UI 树 JSON，输出诊断
+aurora_cli snapshot <tree.json> [-w W] [-h H] # 输出逻辑快照 JSON
+aurora_cli render <tree.json> [-w W] [-h H] [-o out.png]  # 离屏渲染为 PNG
+aurora_cli preview <tree.json> [-w W] [-h H]  # 快速预览 UI（启动临时窗口；无显示后端回退无头渲染一帧退出）
+aurora_cli to-code <tree.json> [--style fluent|step|di]   # UI 树 → C++ 代码
+aurora_cli to-yaml <tree.json>                            # UI 树 → YAML 格式
+aurora_cli schema                             # 输出完整 aurora_api.json
+aurora_cli --help    (-h)                      # 显示用法帮助
+aurora_cli --version (-V)                      # 显示版本号
 ```
 
 退出码：成功 `0`，校验失败 `1`，用法错误 `2`。所有输出默认 JSON（机器可读）。
@@ -392,14 +394,35 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 
 **schema 来源**：库 live API（`describe_component` + `known_enums`），**不读取 `aurora_api.json` 文件**，始终与代码同步。
 
-### 7.4 生成器与校验工具
+### 7.4 工具可执行与自定义目标
+
+工具 target 分两类：**可执行**（`add_executable`，直接运行）与**自定义目标**（`add_custom_target`，经 `cmake --build build --target <name>` 触发）。全部定义见 `cmake/AuroraTools.cmake`。
+
+**可执行目标**
+
+| 目标 | 源 | 说明 |
+|:---|:---|:---|
+| `gen_error_codes` | `tools/gen/gen_error_codes.cpp` | 读 [`errors.toml`](../errors.toml) → 生成 `error_codes.gen.h`、[`ERROR_CATALOG.md`](../ERROR_CATALOG.md) 与 `aurora_api.json` 的 `error_codes` 段（**不链接 aurora**） |
+| `gen_api_tools` | `tools/gen/gen_api.cpp` | 反射公共 API 生成 `aurora_api.json`（schema / 类型 / 属性键 / 枚举），并保留既有 `error_codes` / `debug` 段 |
+| `gen_debug_api` | `tools/gen/gen_debug_api.cpp` | 读 [`debug_api.toml`](../debug_api.toml) → 合并 `aurora_api.json` 的 `debug` 段（**不链接 aurora**） |
+| `aurora_mcp` | `tools/servers/aurora_mcp.cpp` | MCP Server（stdio JSON-RPC 2.0），见 §7.1 |
+| `aurora_cli` | `tools/servers/aurora_cli.cpp` | CLI 工具链，见 §7.2 |
+| `aurora_lsp` | `tools/servers/aurora_lsp.cpp` | LSP 语言服务，见 §7.3 |
+| `bench_render` | `tools/bench/bench_render.cpp` | 渲染基准（HeadlessSurface + Painter 计时，非 CTest 断言） |
+| `bench_scroll` | `tools/bench/bench_scroll.cpp` | 滚动基准（确定性滚动序列，依赖 google_play 头） |
+| `bench_win32_present` | `tools/bench/bench_win32_present.cpp` | Win32 上屏诊断基准（无 Win32 后端时跳过） |
+| `bench_idle_cpu` | `tools/bench/bench_idle_cpu.cpp` | 空闲 CPU 基准（无 Win32 后端时跳过） |
+
+**自定义目标**
 
 | 目标 | 说明 |
 |:---|:---|
-| `gen_api_tools` | 生成 `aurora_api.json`（schema / 类型 / 属性键 / 枚举）。新增或删除 widget / 类型后须重跑 |
-| `generate_error_codes` | 读 [`errors.toml`](../errors.toml) → 生成 `error_codes.gen.h`、[`ERROR_CATALOG.md`](../ERROR_CATALOG.md) 与 `aurora_api.json` 的错误段 |
-| `gen_debug_api_json` | 读 [`debug_api.toml`](../debug_api.toml) → 更新 `aurora_api.json` 的 `"debug"` 段 |
-| `ai_compat_test` | AI 兼容性批量验证：遍历 `tests/fixtures/ai_compat/` 下的 JSON fixture（`valid_*` 期望通过、`error_*` 期望报错），无 LLM 调用 |
+| `generate_error_codes` | 触发 `gen_error_codes` 重跑（errors.toml 变更时） |
+| `aurora_api_json` | 运行 `gen_api_tools` 直写 `aurora_api.json`，随后 `gen_debug_api` 再合并 `debug` 段（单跑即得完整文件） |
+| `gen_debug_api_json` | 仅刷新 `aurora_api.json` 的 `debug` 段 |
+| `perf_gates` | 本机时间类门槛校验（`tools/check/check_perf_gates.ps1`，仅 Windows，不进 CI） |
+
+> AI 兼容性批量验证**不是** cmake 目标，而是 CTest 集成用例 `itest_ai_compat`（`tests/integration/itest_ai_compat.cpp`）：遍历 `tests/fixtures/ai_compat/` 下的 JSON fixture，无 LLM 调用；`valid_*` 期望通过、`error_*` 期望报错、`interact_*` 为「静态树 → TestController 交互 → 状态断言」回归脚本（`itest_ai_compat.cpp` 中段消费）。运行：`ctest -R itest_ai_compat`。
 
 ### 7.5 真机验收探针（`tools/verify/`）
 
@@ -636,7 +659,7 @@ int main() {
 三件套的 API 契约见 §7：
 
 - **MCP Server（`aurora_mcp`）**：stdio JSON-RPC 2.0，暴露 13 个 MCP tools。
-- **CLI（`aurora_cli`）**：子命令 `components` / `describe` / `search` / `validate` / `snapshot` / `render` / `preview` / `to-code` / `to-yaml` / `schema`。
+- **CLI（`aurora_cli`）**：子命令 `components` / `describe` / `search` / `validate` / `snapshot` / `render` / `preview` / `to-code` / `to-yaml` / `schema`，以及全局选项 `--help`（`-h`）/ `--version`（`-V`）。
 - **LSP（`aurora_lsp`）**：stdio JSON-RPC 2.0 语言服务，对声明式写法提供 completion / hover / diagnostics / codeAction 四件套，消费库 live API（`describe_component` + `known_enums`），无需读取 `aurora_api.json` 文件，始终与代码同步。
 
 **验收标准：** AI Agent 可仅凭工具链完成「发现控件 → 校验树 → 渲染快照 → 生成代码」全链路，无需读取源码。
@@ -657,5 +680,5 @@ int main() {
 
 - 这是**工具层**功能（CLI / MCP / InspectorPanel），不是库核心 API。
 - 与 #10 Inspector 集成：`to_code(dump_tree_json_full(root))` 可直接获取当前 UI 的代码表示。
-- 与 #17 CLI 集成：`aurora to-code tree.json --style fluent`。
+- 与 #17 CLI 集成：`aurora_cli to-code tree.json --style fluent`。
 - `InspectorPanel` 已支持导出代码：`export_code()` + 「Export Code」按钮 + `on_export_code` 回调，实现 Inspector → 代码闭环。

@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/core/a11y_diff.h
+/// 目标单元: include/aurora/widget/a11y_diff.h
 /// 测试说明: 语义树快照扁平化（先序 / parent_id / children_of）、diff 的 add/remove/move/
 ///           字段级 updated（Name/Value/Hint/Bounds/Range/Actions/State）与焦点位变化，
 ///           以及 LCS 换序判定优先于 remove+add（读屏焦点稳定性）
@@ -12,9 +12,9 @@
 #include <utility>
 #include <vector>
 
-#include "aurora/core/a11y_diff.h"
 #include "aurora/core/a11y_types.h"
 #include "aurora/core/accessibility.h"
+#include "aurora/widget/a11y_diff.h"
 #include "aurora/widget/widget.h"
 #include "framework/aurora_test.h"
 

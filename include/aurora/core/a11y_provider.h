@@ -6,7 +6,12 @@
 #include <vector>
 
 #include "aurora/core/accessibility.h"
-#include "aurora/core/a11y_diff.h"
+
+namespace aurora {
+/// @brief 控件基类（定义于 `widget/widget.h`）：本头仅以**指针**持有（桥的根指针 / 销毁通知 /
+/// 播报目标），不触碰任何成员，故前置声明即可。
+class Widget;
+}  // namespace aurora
 
 namespace aurora::a11y {
 

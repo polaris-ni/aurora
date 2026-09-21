@@ -125,7 +125,7 @@ auto invoke_safe(F &&f) {
  * 若 `d` 内任务未 `deliver`，则向 `then` 回调投递 `make_error(ErrorCode::RuntimeAsyncTimeout, ...)`（slug 为
  * `"async-timeout"`）。 与 `cancel` 同限制——无法中断任意 `fn`，仅丢弃/改道结果。
  *
- * 因 UI 为单线程，默认直接在主线程调用 `then` 回调（无内部跨线程派发）；
+ * 未安装主线程投递器时，`then` 回调在承接 worker 线程同步执行；安装 poster 后才保证回到主线程；
  * 真实事件循环可调用 `Task<T>::set_main_poster` 把回调投入主线程队列，避免跨线程访问 widget。
  * @note Thread: thread-safe with mutex
  * @note Side-effects: none

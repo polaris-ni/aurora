@@ -24,7 +24,7 @@
 #include <utility>
 #include <vector>
 
-#include "aurora/core/a11y_diff.h"
+#include "aurora/widget/a11y_diff.h"
 
 namespace aurora::detail {
 

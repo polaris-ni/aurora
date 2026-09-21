@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "aurora/core/a11y_types.h"
+#include "aurora/core/accessibility.h"
 #include "aurora/core/aurora_assert.h"
 #include "aurora/core/platform.h"  // NOLINT
 #include "aurora/core/strict_mode.h"
@@ -43,23 +44,16 @@ class Painter;  // 前向声明（render 模块定义于 render/painter.h）
 
 class Widget;  // 前向声明（HitNode 以 std::weak_ptr<Widget> 作为成员；Widget 在下方定义）
 
-// 无障碍枚举 / 请求结构：`widget.h` 与 `core/accessibility.h` 互相依赖后者反向包含前者，
-// 故此处只能前向声明（返回枚举 / 常量引用参数在声明点无需完整类型），默认实现定义在
-// `src/aurora/widget/widget.cpp`（该 TU 才包含 `core/accessibility.h`）。
-enum class AccessibilityRole : std::uint8_t;  // 定义见 core/accessibility.h
-struct AccessibilityActionRequest;            // 定义见 core/accessibility.h
-
 /// @brief 上报**焦点变化**到无障碍事件通道（`AccessibilityEventKind::FocusChanged`）。
 ///
-/// 定义在 `src/aurora/widget/widget.cpp`：该 TU 才包含 `core/accessibility.h`——后者反向包含
-/// `widget/widget.h`（语义树要用 `Widget::child_nodes()`），故 `widget.h` 只能前置声明，不能反向包含。
+/// 定义在 `src/aurora/widget/widget.cpp`（与无障碍事件通道实现同处一个 TU，头内只留声明）。
 /// @param target 焦点发生变化的控件
 /// @note Thread: main-thread only
 /// @note Side-effects: invokes accessibility event handler
 auto notify_accessibility_focus_changed(const Widget *target) -> void;
 
 /// @brief 上报**结构变化**到无障碍事件通道（`AccessibilityEventKind::StructureChanged`）。
-/// 定义位置与依赖同 `notify_accessibility_focus_changed`。
+/// 定义位置同 `notify_accessibility_focus_changed`。
 /// @param host 子节点发生增删/替换的容器（可为 nullptr：宿主未知时的合法取值，§4.6）
 /// @note Thread: main-thread only
 /// @note Side-effects: invokes accessibility event handler
@@ -69,7 +63,7 @@ auto notify_accessibility_structure_changed(const Widget *host) -> void;
 ///
 /// 与 `Widget::announce(text)` 的区别：本入口不绑定控件（`target` 可空），供 toast /
 /// 异步结果等无控件归属的临时文本使用；控件级播报用 `Widget::announce`。
-/// 定义位置与依赖同 `notify_accessibility_focus_changed`。
+/// 定义位置同 `notify_accessibility_focus_changed`。
 /// @param text 待朗读文本（UTF-8；空串不上报）
 /// @param target 关联控件（可为 nullptr）
 /// @note Thread: main-thread only
@@ -181,7 +175,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 命中链：返回根→最深命中的完整 widget 路径（`this` 起算，含自身与所有命中的祖先/后代）。
     /// 用于事件自底向上冒泡派发（specification/05-event-navigation.md §3）：派发器从链尾（最深）向链头（根）逐个调用，
-    /// 某节点写 `e.is_handled_ = true` 即停止。命中即止的 `hit_test` 保留供兼容/纯命中查询。
+    /// 某节点写 `e.is_handled = true` 即停止。命中即止的 `hit_test` 保留供兼容/纯命中查询。
     auto hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx) -> std::vector<HitNode>;
 
     /// @brief 挂载：注册响应式依赖并递归挂载子树（由 build 后一次性调用）。
@@ -359,7 +353,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @brief 指针事件入口（specification/05-event-navigation.md §3）：在命中目标上调用。
     /// 仅在「先按下、再抬起」且未达长按阈值、未拖拽构成一次完整点击时触发 activate / Clickable 回调；
     /// 悬停移动（Move）不触发点击，但有 `draggable`/`longPress` 修饰时驱动拖拽/长按计时。
-    /// `e.is_handled_` 仅在本控件自身消费事件（含 Clickable/Draggable/LongPress/ContextMenu 任一手势）时置位，
+    /// `e.is_handled` 仅在本控件自身消费事件（含 Clickable/Draggable/LongPress/ContextMenu 任一手势）时置位，
     /// 否则保持 false 交由派发器沿命中链向上冒泡给父级。
     virtual auto on_pointer_event(MouseEvent &e) -> void {
         const Modifier &mod = modifier.get();
@@ -493,7 +487,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 从未绘制过则返回零盒，平台侧按「无有效定位」处理（IMM32 用系统默认位置）。
     [[nodiscard]] virtual auto composition_caret_bounds() const -> Rect { return focus_bounds_; }
 
-    /// @brief 操作系统文件拖放落在本控件时触发；消费时置 `e.is_handled_` 阻止继续。
+    /// @brief 操作系统文件拖放落在本控件时触发；消费时置 `e.is_handled` 阻止继续。
     /// 默认不处理（交给命中目标自身）。
     virtual auto on_file_drop(FileDropEvent &e) -> void { (void)e; }
 

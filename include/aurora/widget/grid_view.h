@@ -69,7 +69,7 @@ class GridView : public Widget {
                      .min_value = "0"},
                     {.name = "columns",
                      .type = "int",
-                     .default_value = "2",
+                     .default_value = "1",
                      .required = true,
                      .note = "列数",
                      .json_type = "integer",

@@ -36,8 +36,8 @@ struct CoroShared<void> {
  * @code
  *   au::CoroTask<void> load() {
  *     au::Result<Data> r = co_await au::co_async([] { return fetch(); });
- *     if (r) store->set(r.value());
- *     else   Diagnostics::error(r.error().message);
+ *     if (r) store->dispatch(au::Action{"loaded", r.value()});
+ *     else   Diagnostics::report(r.error().message, {}, r.error().code);
  *   }
  *   au::launch(load());
  * @endcode
@@ -79,7 +79,7 @@ class CoroTask {
     /// @brief 协程是否已完成（含异常）。
     [[nodiscard]] auto is_done() const -> bool { return shared_->done.load(std::memory_order_acquire); }
 
-    /// @brief 协程返回值（仅非 void；未完成/异常时为错误 Result）。
+    /// @brief 协程返回值（仅非 void；异常时返回错误 Result；未完成前调用结果未定义）。
     [[nodiscard]] auto result() const -> Result<T> { return *shared_->result; }
 
   private:

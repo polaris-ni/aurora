@@ -127,7 +127,7 @@ class Painter {
     auto blend_rect(const Rect &r, Color c) -> void;
 
     /// @brief 绘制解码后的图像到目标矩形（RGBA8，alpha 混合，受裁剪约束）。
-    /// 图像按目标矩形尺寸做最近邻缩放（保持像素准确性；不追求平滑）。
+    /// 图像按目标矩形尺寸做 premultiplied-alpha 空间的双线性采样（四点插值，避免暗边/锯齿）。
     auto draw_image(const Image &img, const Rect &dest) -> void;
 
     /// @brief 线性渐变填充：在 area 内沿 (start→end) 方向插值 colors/stops 色标。

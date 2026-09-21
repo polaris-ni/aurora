@@ -52,7 +52,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 
 ### 4.1 范围
 
-**包含**：声明式组件、响应式状态、布局引擎、软件渲染、平台 Surface（Headless / Win32 / Glfw / X11 / Wayland / Wasm / macOS）、序列化、导航、动画、异步、定时任务（Scheduler / Timer）、环境注入、偏好与存储。
+**包含**：声明式组件、响应式状态、布局引擎、软件渲染、平台 Surface（Headless / Win32 / Glfw / X11 / Wayland / Wasm / macOS）、序列化、导航、动画、异步、定时任务（Scheduler / Timer）、环境注入、偏好与存储、无障碍（a11y，语义树 + 平台桥，见 `ARCHITECTURE.md` §8.5）、音频（audio，Web Audio 语义节点图 + 设备后端，见 `03-layout-render.md`）。
 
 **不包含**：3D、硬件加速渲染、原生控件嵌入、跨进程、复杂数据网格。
 
@@ -133,7 +133,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │                  Aurora AI Tooling Layer                      │
-│   aurora_mcp · aurora_lsp · aurora_cli · ai_compat_test      │
+│   aurora_mcp · aurora_lsp · aurora_cli · itest_ai_compat      │
 │   aurora_api.json · Recipe Search · Diff Patch · to_code()   │
 ├──────────────────────────────────────────────────────────────┤
 │                  Aurora Serialization Layer                   │
@@ -183,7 +183,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | [`03-layout-render.md`](specification/03-layout-render.md) | `layout/` + `render/` + `image/` + `media/`：布局协议、Flex / Grid 算法、Painter、字体引擎、Surface 与后端、音频图（Web Audio 语义节点图 + WASAPI 设备层）；需求 #11 / #20 |
 | [`04-widget.md`](specification/04-widget.md) | `widget/` + `ui/`：控件基类契约、自描述、控件清单、可定制性契约；需求 #7 / #22 |
 | [`05-event-navigation.md`](specification/05-event-navigation.md) | `event/` + `animation/` + `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈；需求 #8 |
-| [`06-app-platform.md`](specification/06-app-platform.md) | `app/` + `window/` + `platform/` + `preferences/` + `storage/` + `perf/` + `debug/`：应用驱动、多窗口容器（`WindowHost`）、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面；需求 #14 / #15 / #25 |
+| [`06-app-platform.md`](specification/06-app-platform.md) | `app/` + `window/`（平台 API 在 `window/platform.h`）+ `preferences/` + `storage/` + `perf/` + `debug/`：应用驱动、多窗口容器（`WindowHost`）、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面；需求 #14 / #15 / #25
 | [`07-environment-modifier.md`](specification/07-environment-modifier.md) | `environment/` + `theming/` + `i18n/` + `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier；需求 #12 |
 | [`08-tooling.md`](specification/08-tooling.md) | 序列化 / 代码生成 / YAML、控件树检查、Inspector 面板与远程服务、自描述发现、MCP / CLI / LSP、测试原语、日志通道；需求 #9 / #10 / #12 / #13 / #16 / #17 / #22 |
 
@@ -245,13 +245,12 @@ Button& setCaption(std::string s) { return text(std::move(s)); }
 
 如果不能，说明 API 设计还不够 AI-First。
 
-这个「一次通过」标准应当作为 Aurora 的**持续集成测试**——每次 API 变更后，用多个 LLM 做生成测试，通过率低于阈值就回滚变更。离线近似由 `ai_compat_test` 承担：遍历 `tests/fixtures/ai_compat/` 下的 JSON fixture（`valid_*` 期望通过、`error_*` 期望报错），无 LLM 调用。
+这个「一次通过」标准应当作为 Aurora 的**持续集成测试**——每次 API 变更后，用多个 LLM 做生成测试，通过率低于阈值就回滚变更。离线近似由 `itest_ai_compat`（`tests/integration/itest_ai_compat.cpp` 的集成用例）承担：遍历 `tests/fixtures/ai_compat/` 下的 JSON fixture（`valid_*` 期望通过、`error_*` 期望报错、`interact_*` 为交互回归脚本），无 LLM 调用，运行 `ctest -R itest_ai_compat`。
 
 ```bash
-./build/ai_compat_test
-# ✓ 9/10 generations compiled successfully
-# ✓ 8/10 matched expected structure
-# ✗ 1/10 used deprecated .setCaption() → FAIL (need better naming)
+ctest -R itest_ai_compat
+# ✓ valid_*/error_* fixture 管线全部通过
+# ✓ interact_* 交互脚本回归通过
 ```
 
 **这才是 AI-First 的真正含义：不是为 AI 加功能，而是让 AI 成为 API 设计的第一用户和持续测试者。**
@@ -301,4 +300,4 @@ Button& setCaption(std::string s) { return text(std::move(s)); }
 | 代码-文档同步 | `ctest -R check_code_doc_sync` | `check_code_doc_sync` |
 | 黄金文件 | `ctest -R golden`（确定性渲染基准） | golden 基准图 |
 
-「一次通过」终极检验（§11）由 `ai_compat_test` / `itest_ai_compat` 离线近似承担，不依赖在线 LLM。
+「一次通过」终极检验（§11）由 `itest_ai_compat`（`tests/integration/`，运行 `ctest -R itest_ai_compat`） 离线近似承担，不依赖在线 LLM。

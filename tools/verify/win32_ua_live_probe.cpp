@@ -78,6 +78,7 @@
 #include <vector>
 
 #include "aurora/state/state.h"
+#include "aurora/widget/a11y_tree.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/checkbox.h"
 #include "aurora/widget/containers.h"

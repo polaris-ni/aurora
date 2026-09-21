@@ -426,8 +426,8 @@ class Window {
     /// 整棵树含根 widget 自身无需手动包 `MediaQueryProvider` 即可读取设备上下文；
     /// 手动 `MediaQueryProvider` 仍按「最近祖先优先」覆盖此默认值。
     ///
-    /// 脏区域优化（specification/06-app-platform.md §3.2，默认开启）：脏追踪开启时按「绘制脏 / 布局脏 / 尺寸变化」
-    /// 三要素决策本帧——无任一脏且尺寸未变 → 整帧跳过（idle 零开销，上帧画面仍有效）；
+    /// 脏区域优化（specification/06-app-platform.md §3.2，默认开启）：脏追踪开启时按「绘制脏 / 布局脏 / 尺寸变化 / 根控件变化」
+    /// 四要素决策本帧——无任一脏、尺寸未变且根未变 → 整帧跳过（idle 零开销，上帧画面仍有效）；
     /// 仅绘制脏（如文本选区高亮、主题切换）→ 跳过整树 layout，复用已缓存 Node 几何直接 paint；
     /// 布局脏或尺寸变化 → layout + paint。脏来源：任一控件 `mark_needs_layout` → 布局脏 + 绘制脏；
     /// `mark_needs_paint`（含 `State` 变更）→ 仅绘制脏。二者经 `Widget::request_frame` 沿布局父链
@@ -633,7 +633,7 @@ class Window {
   private:
     std::unique_ptr<Surface> surface_;  ///< 组合的后端（不可知）
     std::string title_{"Aurora"};
-    Environment root_env_;  ///< 每帧重建的根 MediaQuery 注入环境（地址恒定）；present_root 注入。
+    Environment root_env_;  ///< 每帧原地更新注入值（对象本身不重建）的根 MediaQuery 注入环境（地址恒定）；present_root 注入。
     WindowState window_state_ = WindowState::Visible;  ///< 当前窗口可见性快照（由 Application 设置）。
     WindowMode window_mode_ = WindowMode::Normal;  ///< 当前窗口几何态快照（由 Application 设置）。
     DirtyRegionTracker dirty_;  ///< 绘制脏追踪器（specification/06-app-platform.md §3.2）。

@@ -1,12 +1,12 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/core/immutable.h
+/// 目标单元: include/aurora/state/immutable.h
 /// 测试说明: 覆盖 Immutable 只读穿透与 scope 标签、Mutable 读写穿透，以及「写入路径在类型层面被删除」的编译期契约
 
 #include <string>
 #include <type_traits>
 #include <utility>
 
-#include "aurora/core/immutable.h"
+#include "aurora/state/immutable.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_immutable {

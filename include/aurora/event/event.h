@@ -48,7 +48,7 @@ enum class ModifierKey : std::uint8_t {
 /**
  * @brief 输入事件基类。
  *
- * 持有 `is_handled_` 标志：响应链中某级消费事件后置 true，派发器据此停止冒泡（specification/05-event-navigation.md
+ * 持有 `is_handled` 标志：响应链中某级消费事件后置 true，派发器据此停止冒泡（specification/05-event-navigation.md
  * §2.1）。
  */
 struct Event {

@@ -152,7 +152,7 @@ class GpuGlRhi final : public RhiBackend, public RhiFrameSink {
     struct FrameStats {
         std::uint32_t draw_calls = 0;  ///< flush 次数（= 批数）
         std::uint32_t vertices = 0;    ///< 本帧提交顶点数
-        std::uint32_t skipped_cmds = 0;  ///< 遇到未实现命令而跳过的条数
+        std::uint32_t skipped_cmds = 0;  ///< 保留字段：当前实现全部为 GPU 实路径、无跳过分支，恒为 0
     };
 
     /// @brief 默认构造：不装载 GL（`valid()` 为 false），供占位与测试桩场景。

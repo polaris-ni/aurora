@@ -33,10 +33,10 @@
 | `include/`          | 公共 API 头（`include/aurora/aurora.h` 为唯一入口），声明与少量 header-only 控件                                                                                                |
 | `src/`              | 实现（`src/aurora/*.cpp`），非模板纯逻辑类实现放此，头只留声明                                                                                                                  |
 | `examples/`         | 示例：每个组件一个 `demo_<组件>.cpp` 位于 `examples/demos/`（1:1，CMake 自动 GLOB）；`examples/demos/demo_common.h` 含 `Card`/`BrandBadge`/`GradientTitle` 等demo使用的全局控件 |
-| `tests/`            | 测试 + CTest：单元测试 `tests/unit/utest_*.cpp`、集成测试 `tests/integration/itest_*.cpp`、公共 fixture `tests/common/`、golden 基准 `tests/golden/`                          |
+| `tests/`            | 测试 + CTest：单元测试 `tests/unit/utest_*.cpp`、集成测试 `tests/integration/itest_*.cpp`、公共 fixture `tests/support/`（含 `paths.h` / `test_helpers.h`）与 `tests/fixtures/`（如 `ai_compat/` 基准）、golden 基准 `tests/golden/`                          |
 | `third_party/`      | 三方库文件                                                                                                                                                                      |
 | `tools/`            | 工具链，按职责分子目录：`gen/`（三生成器 `gen_api`/`gen_error_codes`/`gen_debug_api`）、`servers/`（mcp / lsp / cli）、`bench/`（4 基准 + `bench_common.h`）、`check/`（校验与门禁脚本 + `perf_gates.json` + 观测脚本 `build_baseline.py`：解析 `.ninja_log` / ctest 日志输出构建与测试耗时基线，非门禁）、`verify/`（真机验收探针：证明无头 CI 无法证明的平台接线，按「平台 + 后端」条件构建且不进 CTest，见 `cmake/AuroraVerify.cmake`）、`coverage/`（GCC/Clang/LLVM 覆盖率聚合）、`include/`（共享头，含枚举 SSOT `known_enums.h` 与 LSP 三层 `lsp_*.h`）。API 生成落盘 `aurora_api.json`，CMake 聚合目标 `aurora_api_json`；详见 `cmake/AuroraTools.cmake` 与 `cmake/AuroraInstrumentation.cmake` |
-| `cmake/`            | CMake 模块（顶层 `CMakeLists.txt` 只做编排）：`AuroraFeatures`（feature 宏单一入口 `aurora_define_feature`）/`AuroraThirdParty`（三方构建）/`AuroraImageCodecs`（图片编解码）/`AuroraCcache`（编译缓存）/`AuroraSimd`（SIMD）/`AuroraBackends`（后端开关）/`AuroraTools`（工具）/`AuroraVerify`（真机验收探针）/`AuroraDemos`（示例）/`AuroraTests`（测试）/`AuroraInstrumentation`（插桩）/`AuroraInstall`（安装）/`AuroraUtils`（公共辅助函数：消费者目标统一配置），共 13 个；布局与职责详见 `codespec/BUILD_OPTIONS.md` §1.1 |
+| `cmake/`            | CMake 模块（顶层 `CMakeLists.txt` 只做编排）：`AuroraFeatures`（feature 宏单一入口 `aurora_define_feature`）/`AuroraThirdParty`（三方构建）/`AuroraImageCodecs`（图片编解码）/`AuroraCcache`（编译缓存）/`AuroraSimd`（SIMD）/`AuroraBackends`（后端开关）/`AuroraTools`（工具）/`AuroraVerify`（真机验收探针）/`AuroraDemos`（示例）/`AuroraTests`（测试）/`AuroraInstrumentation`（插桩）/`AuroraInstall`（安装）/`AuroraUtils`（公共辅助函数：消费者目标统一配置）/`AuroraCheckTestRegistry`（测试注册表一致性校验），共 14 个；布局与职责详见 `codespec/BUILD_OPTIONS.md` §1.1 |
 | `codespec/`         | **全部项目文档**（需求/架构/规范/指南/概念），见下方导航表                                                                                                                      |
 | `build/`            | 构建产物，CMake 生成，不纳入版本管理                                                                                                                                            |
 | `aurora_api.json`   | 由 `gen_api_tools` 生成的 API 描述数据（schema/类型/属性键），**非文档、不移动**                                                                                                |
@@ -129,6 +129,8 @@
 | `specification/06-app-platform.md` | `app/` `window/` `preferences/` `storage/` `perf/` `debug/`：应用驱动、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面 | #14 #15 |
 | `specification/07-environment-modifier.md` | `environment/` `theming/` `i18n/` `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier | #12 |
 | `specification/08-tooling.md` | 序列化 / 代码生成 / YAML、控件树检查、Inspector、自描述发现、MCP / CLI / LSP、测试原语、日志通道 | #9 #10 #12 #13 #16 #17 #22 |
+
+> **模块存在性提醒**：`a11y`（无障碍）与 `audio`（音频）是真实存在的模块，`a11y` 横跨 `core/`（类型 / 事件 / 桥抽象）与 `widget/`（语义树构建与快照，因需 `Widget` 完整定义；见 `ARCHITECTURE.md` §8.5），`audio` 归属 `media/`（音频图 API 恒编译，设备后端经 `AURORA_ENABLE_AUDIO` 编入，见 `BUILD_OPTIONS.md` §4）。本表按 `include/aurora/` 顶层模块域切分 spec 文档，二者未单列独立文件，但不可误认为不存在。
 
 **数据文件（`codespec/`，位置固定不可移动）**
 

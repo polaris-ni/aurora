@@ -15,8 +15,8 @@ class BuildContext;  ///< 前向声明：of(ctx) / media_query_of(ctx) 仅按 co
  * 与 `divider.h` 的 `Orientation{Horizontal,Vertical}`（分隔线方向）语义不同，独立枚举避免误用。
  */
 enum class ScreenOrientation : std::uint8_t {
-    Portrait,  ///< 竖屏：高 ≥ 宽
-    Landscape,  ///< 横屏：宽 > 高
+    Portrait,  ///< 竖屏：宽 < 高
+    Landscape,  ///< 横屏：宽 ≥ 高，正方形归入 Landscape
 };
 
 /**
@@ -76,7 +76,7 @@ struct MediaQuery {
     /// @brief 从 `Surface` 成型：读取尺寸与缩放因子；Win32 下经 `win32_media_query` 取真实屏幕/减弱动效。
     [[nodiscard]] static auto from_surface(const Surface &s) -> MediaQuery;
 
-    /// @brief 读取最近祖先 Provider 注入的 `MediaQuery`；无则诊断并返回进程级默认实例。
+    /// @brief 读取最近祖先 Provider 注入的 `MediaQuery`；无注入来源时静默返回进程级默认实例。
     [[nodiscard]] static auto of(const BuildContext &ctx) -> const MediaQuery &;
 };
 

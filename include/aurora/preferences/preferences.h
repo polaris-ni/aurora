@@ -33,9 +33,10 @@ namespace aurora::preferences {
  *   **不新增任何 UI widget 类型**。
  *
  * 并发安全（本次新增）：
- * - **线程安全**：实例内部以 `std::shared_mutex` 保护内存 JSON 与 State 注册表，
- *   读操作（`get`/`contains`/`keys`/`watch`）走共享锁，写操作（`set`/`remove`/`clear`/
- *   `flush`/`reload`）走独占锁，可在多线程下安全读写。
+ * - **线程安全**：实例内部以 `std::mutex` 保护内存 JSON 与 State 注册表，
+ *   读写操作（`get`/`contains`/`keys`/`watch`/`set`/`remove`/`clear`/`flush`/`reload`）
+ *   均走独占锁（不采用 `std::shared_mutex`：MinGW-w64 winpthreads 的 rwlock 在多线程并发
+ *   写锁竞争下会触发 libstdc++ 断言，见下方 `mutex_` 声明），可在多线程下安全读写。
  * - **进程安全**：`flush`/`reload` 期间对 `<file>.lock` 加跨平台 advisory 文件锁
  *   （Windows `LockFileEx` / POSIX `flock`），并采用「写临时文件 + 原子 `rename`」，
  *   避免多进程并发写导致半写损坏或互相覆盖。删除键采用**版本化 LWW + 墓碑（tombstone）+
@@ -51,7 +52,7 @@ namespace aurora::preferences {
  * contains/keys/remove/clear` 自动限定在该命名分组下，并以嵌套 JSON 对象持久化
  * （如 `{"ui":{"theme":"dark"}}`）；分组的 `remove`/`clear` 同样走墓碑可靠删除。详见 `Group`。
  *
- * @note Thread: thread-safe with mutex (std::shared_mutex for read/write)
+ * @note Thread: thread-safe with mutex (std::mutex, exclusive lock for read and write)
  * @note Side-effects: none (file I/O via flush/reload)
  * @note Rebuildable: yes, via from_json
  */

@@ -19,7 +19,7 @@ namespace rhi {
 
 /// @brief 软件 RHI 后端：把 `DisplayList` 命令**逐条转发**回 `Painter` 的对应原语。
 ///
-/// 它是 RHI 抽象的首个（也是当前唯一）实现，语义上等价于 D 轨抽取前的
+/// 它是 RHI 抽象的首个实现（当前另有 GPU 实现 `GpuGlRhi`，见 §8.7），语义上等价于 D 轨抽取前的
 /// `DisplayList::replay(Painter&)`：每条命令映射到同一个 `Painter` 原语调用、参数逐字段一致，
 /// 因此 **DC 像素输出逐位不变**（golden 回归红线）。存在的意义是给 `DisplayList` 一个
 /// 「后端无关的回放目标」，使 GPU 后端成为第二个平级消费者，而不必改动 `DisplayList`。

@@ -131,7 +131,7 @@ inline auto measure_rich_text(const std::vector<TextSpan> &spans, float max_widt
 /**
  * @brief 富文本控件（叶控件）：按 `TextSpan` 序列渲染带样式的文本。
  *
- * 文本经 `defaultStringTable` + 当前 `Locale` 解析（支持 i18n）。布局采用确定性贪心换行，
+ * 文本经 `default_string_table()` + 当前 `Locale` 解析（支持 i18n）。布局采用确定性贪心换行，
  * 整串宽度/高度由 `measureRichText` 决定；值来源支持 `Reactive<std::vector<TextSpan>>`。
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json

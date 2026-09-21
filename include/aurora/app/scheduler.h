@@ -41,7 +41,7 @@ class TimerHandle {
         }
     }
 
-    /// @brief 任务是否仍活跃（未取消且 Scheduler 尚持有该条目）。
+    /// @brief 任务是否仍活跃（未取消且句柄非空）。
     [[nodiscard]] auto active() const -> bool { return entry_ != nullptr && !entry_->cancelled; }
 
   private:

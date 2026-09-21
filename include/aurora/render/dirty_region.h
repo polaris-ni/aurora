@@ -24,10 +24,10 @@ class DirtyRegionTracker {
     /// 的误触发；提高上限只会增加局部重绘精度（结果像素与整帧重绘逐位一致），不影响正确性。
     static constexpr std::size_t AURORA_MAX_RECTS = 16;
 
-    /// @brief 取当前脏矩形列表上限。
+    /// @brief 取当前脏矩形列表上限（进程级全局，非实例级）。
     [[nodiscard]] static auto max_rects() -> std::size_t { return max_rects_; }
 
-    /// @brief 设置脏矩形列表上限（运行期可调；默认 `AURORA_MAX_RECTS`）。
+    /// @brief 设置脏矩形列表上限（进程级全局生效：改一处即影响所有 `DirtyRegionTracker` 实例；默认 `AURORA_MAX_RECTS`）。
     static auto set_max_rects(std::size_t n) -> void { max_rects_ = n; }
 
     /// @brief 标记一个脏矩形（与已有矩形重叠时合并为并集）。

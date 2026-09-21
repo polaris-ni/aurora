@@ -33,9 +33,10 @@
 | `cmake/AuroraTools.cmake` | 工具 / 基准可执行（`aurora_add_tool()` 统一样板）+ `AURORA_BUILD_INSPECTOR_SERVER` |
 | `cmake/AuroraVerify.cmake` | `AURORA_BUILD_VERIFY_TOOLS`：真机验收探针（`tools/verify/` 下按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**） |
 | `cmake/AuroraDemos.cmake` | 示例 demo 定义块（须在 `AuroraTools` 与 `AuroraTests` 之后 include，因其依赖 `aurora_inspector_server` 目标） |
-| `cmake/AuroraTests.cmake` | `AURORA_BUILD_TESTS` 注册式 runner（GLOB `tests/unit/*.cpp` 与 `tests/integration/*.cpp` → 单一 `aurora_test_runner`，`AURORA_TEST()` 自注册） |
+| `cmake/AuroraTests.cmake` | `AURORA_BUILD_TESTS` 注册式 runner（GLOB `tests/*.cpp`、`tests/unit/*.cpp` 与 `tests/integration/*.cpp` → 单一 `aurora_test_runner`，`AURORA_TEST()` 自注册） |
 | `cmake/AuroraInstrumentation.cmake` | `AURORA_ENABLE_COVERAGE` / `AURORA_ENABLE_ASAN` / `AURORA_ENABLE_PROFILING` / `AURORA_ENABLE_TRACING` / `AURORA_ENABLE_DEBUG` / `AURORA_ENABLE_TEST_HOOKS`（须在全部目标定义之后 include） |
 | `cmake/AuroraInstall.cmake` | 安装 + `find_package(Aurora)` 导出（须在后端开关之后 include） |
+| `cmake/AuroraCheckTestRegistry.cmake` | **遗留模块**：当前无 CMake `include()` 引用（`registry_integrity` 已改由 `AuroraTests.cmake` 直接注册 python 脚本 `check_test_registry.py`）；保留仅供手工 / 历史参考，不计入常规构建 |
 
 ---
 
@@ -47,7 +48,7 @@
 |:---|:---|:---|:---|
 | `AURORA_BUILD_DEMOS` | `ON` | **定义**（非默认构建）`examples/demos/` 下每组件一个的可运行窗口 demo 目标；均 `EXCLUDE_FROM_ALL`，按需构建 | 各 `demo_<组件>` 可执行文件 + 聚合目标 `demos` |
 | `AURORA_BUILD_TESTS` | `ON` | 编译 `tests/` 下全部用例并接入 CTest：`AURORA_TEST()` 注册、单一 runner 一次链接，逐条 `--run=<stem>` 隔离 | `aurora_test_runner` 可执行 + `enable_testing()` + `registry_integrity` 守护 |
-| `AURORA_TEST_SHARDS` | `1` | 测试 runner 分片数（非开关、为正整数缓存变量）：`1` 与单 runner 完全等价；`N>1` 按 Suite（文件 stem）MD5 稳定散列把用例源拆为 N 个 runner（各含唯一 main），CTest 用例名带分片号（`<stem>_s<k>`），`registry_integrity` 对各 runner `--list` 取并集比对 | N 个 `aurora_test_runner_s<k>` 可执行；是否默认开启待收束期链接耗时数据 |
+| `AURORA_TEST_SHARDS` | `1` | 测试 runner 分片数（非开关、为正整数缓存变量）：`1` 与单 runner 完全等价；`N>1` 按 Suite（文件 stem）MD5 稳定散列把用例源拆为 N 个 runner（各含唯一 main），CTest 用例名带分片号（`<stem>_s<k>`，其中 `k` 从 `0` 起取 `0..N-1`），`registry_integrity` 对各 runner `--list` 取并集比对 | N 个 `aurora_test_runner_s<k>`（`k` 取 `0..N-1`）可执行；是否默认开启待收束期链接耗时数据 |
 | `AURORA_BUILD_INSPECTOR_SERVER` | `OFF` | 编译 Inspector 远程 HTTP 服务器（跨平台：Windows 链 `ws2_32` / POSIX 链 `pthread`） | `aurora_inspector_server` 静态库 |
 | `AURORA_BUILD_VERIFY_TOOLS` | `OFF` | **定义**（非默认构建）`tools/verify/` 下的真机验收探针：按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**（会创建真实窗口、读取屏幕光标，非确定且干扰用户桌面） | 各 `aurora_verify_<平台>_cursor` 可执行文件 + 聚合目标 `aurora_verify` |
 ### 2.1 图像编解码开关（已迁出）
@@ -221,7 +222,7 @@ cmake -S . -B build -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_DISPLAY_LIS
 | `gen_debug_api`（`tools/gen/gen_debug_api.cpp`） | `codespec/debug_api.toml` | `debug`（仅声明 `aurora::debug` 公共自由函数） |
 
 ```powershell
-cmake --build build --target aurora_api_json        # gen_api_tools 直写 aurora_api.json
+cmake --build build --target aurora_api_json        # 先 gen_api_tools 直写 aurora_api.json，再 gen_debug_api 合并 debug 段（含 debug 段二次 merge）
 cmake --build build --target gen_debug_api_json     # 仅刷新 debug 段
 # error_codes 段由 gen_error_codes 在 errors.toml 变更时重跑
 ```
@@ -371,6 +372,7 @@ cmake -S . -B build-trace -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_TRACING=ON
 - **SLOPPINESS 各项**：`pch_defines` + `time_macros` 为 PCH 场景必需（缺省时命令行带 `-include cmake_pch.hxx` 的消费者 TU 直接被判 Uncacheable）；`include_file_mtime` / `include_file_ctime` 让头文件时间戳变化而内容不变时仍命中（preprocessor 模式按内容摘要，安全）。
 - **配置变量**：`AURORA_CCACHE_DIR`（缓存目录，默认系统默认）、`AURORA_CCACHE_MAXSIZE`（最大缓存，默认 `5G`）。二者同样经启动器注入构建期生效，仅在未设置 `AURORA_CCACHE_OPTIONS` 时作为 Aurora 默认值使用。注意：既有构建目录中已缓存的旧默认值（`2G`）不会自动更新，需显式 `-D` 覆盖。
 - **用户自定义选项 `AURORA_CCACHE_OPTIONS`**：字符串，原样透传为 ccache 命令行选项。一旦设置，**直接使用用户输入**，不再注入 Aurora 默认的 `CCACHE_*` 环境配置（用户自行承担完整配置责任，含 PCH 缓存所需的 `--sloppiness=...`）。未设置时使用 Aurora 默认配置。
+- **MSVC 豁免**：当检测到的编译器为 MSVC（`cl`）时，即便 `AURORA_ENABLE_CCACHE=ON`，ccache 也会整体被禁用（见 `cmake/AuroraCcache.cmake`）：ccache 对 MSVC 的 `/Yu + /FI + /Fp` PCH 旗标组合支持不完整，改写强制包含会丢失 PCH 边界匹配导致 C1010；且 VS 多配置生成器本就不实现 `<LANG>_COMPILER_LAUNCHER`（Ninja + cl 同样命中）。MSVC 下靠 PCH 提速（MSVC 上 PCH 为正收益），不接入 ccache。
 
 ```powershell
 cmake -S . -B build -DAURORA_ENABLE_CCACHE=OFF                                  # 禁用
@@ -460,7 +462,7 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `AT_SPI_BUS_ADDRESS` | D-Bus 地址串 | 无障碍总线地址显式直给（跳过 `org.a11y.Bus.GetAddress` 查询），用于非常规桌面 / 测试注入；置了但地址无效仍按降级处理 |
 | `AURORA_INSPECTOR_PORT` | 1–65535 | `aurora_mcp` 的 `live_*` 工具连接运行中应用的默认端口；缺省 `6280`（与 `InspectorServer::start()` 默认值一致）。单个工具调用可用 `session` 入参（`"6280"` 或 `"127.0.0.1:6280"`）覆盖。主机恒为回环，见 `specification/08-tooling.md` §5.4 |
 
-> CTest 默认 CWD = `build/`，故依赖相对路径的 golden 测试须从仓库根直接运行可执行文件（仓库 `cmake/AuroraTests.cmake` 已为依赖相对路径的测试显式设置 `WORKING_DIRECTORY` 为仓库根，故 `ctest` 下直接可跑）。
+> CTest 默认 CWD = `build/`，故依赖相对路径的 golden / fixture 测试以仓库根为基准：测试框架启动时统一把 cwd 切换到仓库根（`tests/framework/test_main.cpp` 的 `isolation::setup()`），故 `ctest` 下直接可跑，无需为各用例单独设置 `WORKING_DIRECTORY`（原 14 条 `WORKING_DIRECTORY` 白名单已移除）。
 
 ---
 

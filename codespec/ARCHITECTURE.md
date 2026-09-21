@@ -33,7 +33,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 └───────────────────────────────────────────┘
 ```
 
-- **依赖方向单向向下**：上层依赖下层，下层不感知上层（渲染核心不知道具体 widget）。
+- **依赖方向以向下为主，`core/` 为硬边界**：`core/`（基础层）的**公共头不依赖任何其他 aurora 模块**（只依赖自身与标准库）；其余层间以「上层依赖下层」为常态，确有必要时下层可反向引用上层（例：`render/offscreen.h` 的 `render_to_logical_snapshot` 需读取 widget 类型名与属性以产出逻辑快照；`window/` 的 `Surface` 家族需渲染类型）。该边界由门禁 `tools/check/check_core_layer_boundary.py` 守护（扫描 `include/aurora/core/**` 的 `#include`，任何指向上层的包含即失败）。`src/aurora/core/` 的实现**不在门禁范围**——其 2 处既知上层引用属叶子级、非传递性的元数据查阅：`diagnostics.cpp` 读 `widget/props_io.h` 以格式化属性值、`image.cpp` 委派 `image/image_codec.h` 解码。
 - **内核 / 适配分离**：平台差异收敛到 `Surface` 实现。
 - **命令流与执行分离**：`DisplayList` 是绘制命令的**唯一来源**，`rhi::RhiBackend` 是它的**回放目标抽象**（command sink）；软件 `Painter`（经 `rhi::SoftwareRhi`）与 GPU 后端是它的**平级消费者**。新增后端只实现 `RhiBackend`，不改动录制侧与 `DisplayList`。
 - **响应式与渲染解耦**：状态变更经 `State` / `Signal` 精确投递到受影响的 widget 子树，不经「整树 diff + 重建」；渲染核心只负责把 widget 树绘制到 `Surface`。
@@ -85,8 +85,8 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 | 模块 | 路径 | 主要头文件 |
 |:---|:---|:---|
-| 基础层 | `core/` | `types.h` `result.h`（`Result<T>` / `Error`） `log.h` `diagnostics.h` `color.h` `dimension.h` `image.h` `font.h` `expected.h` `immutable.h` `strict_mode.h` `event_stream.h` `accessibility.h` `a11y_types.h` `a11y_provider.h` `a11y_diff.h` `a11y_text.h` |
-| 响应式核心 | `state/` | `state.h` `computed.h` `effect.h` `binding.h` `store.h` `reactive.h` `signal_view.h` `async.h` `coroutine.h` `state_graph.h` `state_registry.h` |
+| 基础层 | `core/` | `types.h` `result.h`（`Result<T>` / `Error`） `log.h` `diagnostics.h` `color.h` `dimension.h` `image.h` `font.h` `expected.h` `strict_mode.h` `event_stream.h` `accessibility.h` `a11y_types.h` `a11y_provider.h` `a11y_text.h` |
+| 响应式核心 | `state/` | `state.h` `computed.h` `effect.h` `binding.h` `immutable.h`（`Immutable<T>` / `Mutable<T>` 作用域权限包装） `store.h` `reactive.h` `signal_view.h` `async.h` `coroutine.h` `state_graph.h` `state_registry.h` |
 
 ### 4.2 布局与渲染
 
@@ -111,8 +111,8 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 | 模块 | 路径 | 职责 |
 |:---|:---|:---|
-| 组件层 | `widget/`（59 个头） | `widget.h` `descriptor.h` `props_io.h` `containers.h` `text.h` `button.h` `image_widget.h` `checkbox.h` `switch.h` `slider.h` `canvas.h` `progress.h` `divider.h` `rich_text.h` `scroll.h` `stack.h` `grid.h` `spacer.h` `show.h` `repeater.h` `provider.h` `timer.h` `lifecycle.h` `text_span.h` `codegen.h` `inspect.h` `inspector_panel.h` `layout_query.h` `serialization.h` `yaml.h` `recipes.h` 等 |
-| 修饰节点 | `modifier/` | `modifier.h`（Padding / Background / Border / Clip / Opacity / SizeModifier / FlexWeight / Clickable / AlignNode / OffsetNode / Draggable / LongPress / TouchListener） |
+| 组件层 | `widget/`（75 个头） | `widget.h` `descriptor.h` `props_io.h` `a11y_tree.h` `a11y_diff.h` `containers.h` `text.h` `button.h` `image_widget.h` `checkbox.h` `switch.h` `slider.h` `canvas.h` `progress.h` `divider.h` `rich_text.h` `scroll.h` `stack.h` `grid.h` `spacer.h` `show.h` `repeater.h` `provider.h` `timer.h` `lifecycle.h` `text_span.h` `codegen.h` `inspect.h` `inspector_panel.h` `layout_query.h` `serialization.h` `yaml.h` `recipes.h` 等 |
+| 修饰节点 | `modifier/` | `modifier_base.h`（`ModifierNode` 基类）`modifier_layout.h`（Padding / PaddingEdges / FlexWeight / SizeModifier）`modifier_paint.h`（Background / GradientBackground / ShadowNode / BlendNode / ShaderMaskNode / CacheLayerNode / Border / Clip / ClipRounded / OpacityNode / BlurNode）`modifier_transform.h`（AlignNode / OffsetNode / TransformNode）`modifier_input.h`（CursorNode / Clickable / Draggable / LongPress / TouchListener / TooltipNode / ContextMenuNode） |
 | 控制流 | `widget/` | `show.h` `repeater.h` `provider.h` `timer.h` |
 | 序列化 | `widget/serialization.h` `widget/codegen.h` `widget/yaml.h` | 树 ⇄ JSON、差异补丁、树 ⇄ 源码、树 → YAML |
 
@@ -153,10 +153,10 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 **契约要点：**
 
-- **门面**：`put` / `get` / `remove` / `list` / `contains` / `clear`（value 为 `Json` 或原生 `StorageBytes`）；类型化 `put<T>` / `get<T>` 经 `StorageSerializable` ADL 定制点序列化；信封级 `put_record` / `get_record`；异步 `async_put` / `async_get` / `async_get_value` / `async_remove` / `async_list`（返回 `aurora::Task<T>`，把 IO 卸载出 UI 线程）；`on_change(cb)` 返回 `aurora::Subscription`；`transaction(body)`（跨记录原子，失败全回滚）；进程级 `default_instance()` 单例。
-- **后端抽象** `StorageBackend`：纯虚 `put_record` / `get_record` / `remove` / `list`（信封级），另有带默认实现的 `contains` / `clear` / `flush` / `close` 与默认 `transaction`（顺序 apply + 异常回滚）。`MemoryBackend` 以 `std::map` 全量快照实现回滚；`FilesystemBackend` 每记录一文件（原子写 `tmp` + `rename`）、目录级锁串行化事务；`SqliteBackend`（opt-in：`AURORA_ENABLE_STORAGE_SQLITE`，sqlite3 amalgamation 源码构建）单文件库或 `:memory:`，真事务 `BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK`（嵌套计深度加入同一事务）、二进制载荷 BLOB 内联（无 sidecar）、`contains`/`clear` 单语句化，C++ 侧递归互斥 + serialized  sqlite 双保险支撑 `async_*` 的 worker 线程触库。
+- **门面**：`put` / `get` / `remove` / `list` / `contains` / `clear`（value 为 `Json` 或原生 `StorageBytes`）；类型化 `put<T>` / `get<T>` 经 `StorageSerializable` ADL 定制点序列化；信封级 `put_record` / `get_record`；异步 `async_put` / `async_get` / `async_get_value` / `async_remove` / `async_list`（返回 `aurora::Task<T>`，把 IO 卸载出 UI 线程）；`on_change(cb)` 返回 `aurora::Subscription`；`transaction(body)`（默认实现为顺序执行 body、失败不回滚；`MemoryBackend` 覆写为快照回滚，`SqliteBackend`(opt-in) 走真事务 `BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK` 真实回滚）；进程级 `default_instance()` 单例。
+- **后端抽象** `StorageBackend`：纯虚 `put_record` / `get_record` / `remove` / `list`（信封级），另有带默认实现的 `contains` / `clear` / `flush` / `close` 与默认 `transaction`（顺序 apply + **无原子回滚**）。`MemoryBackend` 以 `std::map` 全量快照实现回滚；`FilesystemBackend` 每记录一文件（原子写 `tmp` + `rename`）、目录级锁串行化事务；`SqliteBackend`（opt-in：`AURORA_ENABLE_STORAGE_SQLITE`，sqlite3 amalgamation 源码构建）单文件库或 `:memory:`，真事务 `BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK`（嵌套计深度加入同一事务）、二进制载荷 BLOB 内联（无 sidecar）、`contains`/`clear` 单语句化，C++ 侧递归互斥 + serialized sqlite 双保险支撑 `async_*` 的 worker 线程触库。
 - **信封** `StorageRecord{ id, type, version, encoding, mtime, payload, blob_ref }`：版本号支撑乐观并发与迁移。`StorageChange{ op(Put|Remove|Clear|Batch), id }` 供 `on_change` 投递。
-- **错误模型**：统一经 `Result<T>`；后端 IO 失败返回 `Error` 而非抛异常；`get` 未命中返回「未找到」错误（区分于 `null` 值）；事务中途失败回滚并报告首个失败原因。
+- **错误模型**：统一经 `Result<T>`；后端 IO 失败返回 `Error` 而非抛异常；`get` 未命中返回「未找到」错误（区分于 `null` 值）；事务语义取决于后端：默认实现不回滚（失败仅报告首个原因），仅 `MemoryBackend` 在快照失败时整体回滚并报告首个失败原因。
 - **线程模型**：门面 API 主线程调用，`async_*` 经 `au::async` 卸载到 worker 线程；同步 `get` 直通后端（门面无内存缓存）。后端实现须线程安全。
 
 API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §9.2）。
@@ -286,7 +286,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 ### 8.5 无障碍桥接（platform accessibility bridge）
 
-**分层与所有权。** 无障碍能力分三层，公共头零平台污染：语义树（`core/accessibility.h` + `core/a11y_types.h`，平台中立值类型）→ 桥抽象（`core/a11y_provider.h` 的 `a11y::Provider` 接口 + 进程级 `ProviderRegistry`）→ 平台实现（Win32 = `src/aurora/window/detail/win32_ua.{h,cpp}`，随 `AURORA_BACKEND_WIN32` 编入；D3D11 复用同一桥，门控为「平台宏 ∧ 后端宏析取」，与 `win32_cursor.h` 同款；Linux = AT-SPI2 桥，拆「中立折算 `detail/atspi_protocol.{h,cpp}` + libdbus 传输 `detail/atspi_bridge.{h,cpp}`」两文件，门控为「Linux 平台 ∧（X11 ∨ Wayland）后端析取」，`dlopen("libdbus-1.so.3")` 运行时加载，折算层零 D-Bus 依赖故无头单测可全证其语义）。桥实例由 `Win32Window::Impl` **唯一持有**（`Win32Surface` / `D3D11Surface` / `WgpuSurface` 都转发同一实例），避免两份 `id → Widget*` 映射分裂。
+**分层与所有权。** 无障碍能力分三层，公共头零平台污染：语义树（纯值类型与节点 / 事件 / 设置留在 `core/a11y_types.h` 与 `core/accessibility.h`——`core/` 侧只以**指针**持 `Widget`；需要遍历控件树的构建器与快照落在 `widget/a11y_tree.h` 与 `widget/a11y_diff.h`，故 `core/` 不反向依赖任何模块，见 §2）→ 桥抽象（`core/a11y_provider.h` 的 `a11y::Provider` 接口 + 进程级 `ProviderRegistry`）→ 平台实现（Win32 = `src/aurora/window/detail/win32_ua.{h,cpp}`，随 `AURORA_BACKEND_WIN32` 编入；D3D11 复用同一桥，门控为「平台宏 ∧ 后端宏析取」，与 `win32_cursor.h` 同款；Linux = AT-SPI2 桥，拆「中立折算 `detail/atspi_protocol.{h,cpp}` + libdbus 传输 `detail/atspi_bridge.{h,cpp}`」两文件，门控为「Linux 平台 ∧（X11 ∨ Wayland）后端析取」，`dlopen("libdbus-1.so.3")` 运行时加载，折算层零 D-Bus 依赖故无头单测可全证其语义）。桥实例由 `Win32Window::Impl` **唯一持有**（`Win32Surface` / `D3D11Surface` / `WgpuSurface` 都转发同一实例），避免两份 `id → Widget*` 映射分裂。
 
 **Surface 扩展点（两处，均有默认空实现）。**
 
@@ -356,7 +356,7 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 ### 10.2 PerfOverlay
 
-右上角叠加面板，实时显示多行统计文本（FPS / avg / P99 / jitter / 掉帧数 / hitch 数 / idle 帧数）、FPS 颜色告警（绿 ≥ 55、黄 ≥ 30、红 < 30）与帧时间条形图（最近 128 帧，超预算帧标红）。经 `PerfOverlay::set_visible(false)` 关闭显示。
+右上角叠加面板，实时显示多行统计文本（FPS / avg / P99 / jitter / 掉帧数 / hitch 数 / idle 帧数）、FPS 颜色告警（绿 ≥ 55、黄 ≥ 30、红 < 30）与帧时间条形图（最多绘制最近 64 根柱，超预算帧标红；底层环形缓冲为 128 帧）。经 `PerfOverlay::set_visible(false)` 关闭显示。
 
 **分层 HUD 叠加层（推荐用法）**：`PerfOverlay` 既可作普通 `SingleChild` 包裹内容，也推荐作为**独立 HUD 叠加层**使用——经 `Application::set_overlay(...)` / `Window::set_overlay(...)` / `App::overlay(...)` 注入后，它**脱离 widget 树**，由 `Window::present_root` 在 tree paint 之后、present 之前合成到主缓冲：
 
@@ -425,7 +425,7 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 ### 12.2 类型模型
 
-`Error`（`core/result.h:25`）字段分两类受众：`code` / `code_enum` 供机器解析；`severity` / `category` / `auto_fixable` / `retryable` / `fix_category` / `fix_params` 供进程内策略判断；另有 `message` / `suggestion` / `docs` / `where` / `hint` 供人与 AI 阅读。所有表驱动元数据由 [`errors.toml`](errors.toml) 经生成器产出，经 `make_error` 自动填充，无需手填。
+`Error`（`core/result.h`）字段分两类受众：`code` / `code_enum` 供机器解析；`severity` / `category` / `auto_fixable` / `retryable` / `fix_category` / `fix_params` 供进程内策略判断；另有 `message` / `suggestion` / `docs` / `where` / `hint` 供人与 AI 阅读。所有表驱动元数据由 [`errors.toml`](errors.toml) 经生成器产出，经 `make_error` 自动填充，无需手填。
 
 `Result<T>` 成功持 `T`、失败持结构化 `Error`；`Result<void>` 特化用于只关心「是否出错」的接口（如 `flush` / `reload`），以 `bool` 标记成功态。
 
@@ -501,7 +501,7 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 ### 14.3 组织约定
 
 - **命名**：测试文件以 `utest`（单元，`tests/unit/`）/ `itest`（集成，`tests/integration/`）为**前缀**（非 `_test` 后缀），与源文件同名主体；每个测试 TU 包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`）内。
-- **运行**：`ctest -R <名>` 逐条拉起 `aurora_test_runner --run=<stem>`；从仓库根运行以保证相对路径解析；本地全量复跑推荐 `ctest --preset ninja-test`（`CMakePresets.json` testPresets，等价 `ctest -j` 配满核心）。并行模型为「CTest 进程隔离 + 框架用例边界资源虚拟化」（tmpdir / cwd / 单例 / 剪贴板注入，见 `tests/framework/isolation.h`），不使用 `RUN_SERIAL` 串行白名单。
+- **运行**：`ctest -R <名>` 逐条拉起 `aurora_test_runner --run=<stem>`；从仓库根运行以保证相对路径解析；本地全量复跑推荐 `ctest --preset ninja-test`（`CMakePresets.json` testPresets，等价固定 `ctest -j 16`）。并行模型为「CTest 进程隔离 + 框架用例边界资源虚拟化」（tmpdir / cwd / 单例 / 剪贴板注入，见 `tests/framework/isolation.h`），不使用 `RUN_SERIAL` 串行白名单。
 - **耗时观测**：`tools/check/build_baseline.py`（手动跑、非门禁）解析构建目录的 `.ninja_log` 与 ctest `LastTest.log`，输出编译边耗时分布 / top-N 慢边与测试串行耗时合计 / top-N 慢测（并行关键路径），`--json` 落基线供跨次对照。
 - **新增约束**：新增公共 API / widget / 核心逻辑须配套单测并接入 CTest。
 

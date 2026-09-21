@@ -1,6 +1,6 @@
 # 环境注入、主题与修饰符（environment / theming / i18n / modifier）
 
-> 覆盖 `include/aurora/environment/`（3 个头）、`theming/`（4 个头）、`i18n/`（3 个头）、`modifier/`（6 个头）。
+> 覆盖 `include/aurora/environment/`（3 个头）、`theming/`（4 个头）、`i18n/`（5 个头）、`modifier/`（6 个头）。
 > 本文件是环境依赖注入、媒体查询、主题与国际化、以及 `Modifier` 修饰系统的**唯一权威**。
 > 响应式属性见 [`02-state.md`](02-state.md) §2；控件的二层属性划分见 [`03-layout-render.md`](03-layout-render.md) §7.4。
 
@@ -24,7 +24,7 @@
 
 | 概念 | 说明 |
 |:---|:---|
-| `Environment` | 类型 → 值的不可变映射。`env.with<T>(value)` 返回注入了 `T=value` 的**新** `Environment`；`env.get<T>()` 读取 |
+| `Environment` | 类型 → 值的映射。**对外继承链不可变**：`env.with<T>(value)` 返回注入了 `T=value` 的**新** `Environment`（子级读取不改写父级）；根 `Environment` 另提供 `set_local<T>()` / `set<T>()` 原地写入（每帧刷新注入值时不必换对象）。`env.get<T>()` 读取 |
 | `BuildContext` | 每个组件渲染时拿到的上下文。`ctx.environment<T>()` 向上查找最近注入的 `T`，返回 `const T*`；未注入时返回 `nullptr`，调用方判空或回退默认 |
 | `Provider<T>` | 控件，在子树根注入 `T` |
 
@@ -56,9 +56,9 @@ au::Text("Hi").color(ctx.environment<au::Theme>() ? ctx.environment<au::Theme>()
 | `size` | 当前窗口 / 子树可用逻辑尺寸（dp） |
 | `scale_factor` | 设备像素比（由 `Window::present_root` 从 `Surface::scale_factor()` 注入到 `BuildContext::scale_factor`，是本地坐标缩放的**唯一权威来源**） |
 | `text_scale_factor` | 系统字体缩放（辅助功能） |
-| `orientation` | 由 `screen_size` 派生：`Portrait`（高 ≥ 宽）/ `Landscape`（宽 > 高）。枚举 `ScreenOrientation{Portrait, Landscape}`，与 `divider.h` 的 `Orientation` 语义不同，**不复用** |
+| `orientation` | 由 `size`（非 Win32）/ `screen_size`（Win32）派生：宽 ≥ 高判为 `Landscape`，正方形归入 `Landscape`。枚举 `ScreenOrientation{Portrait, Landscape}`，与 `divider.h` 的 `Orientation` 语义不同，**不复用** |
 | `screen_size` | 物理屏幕的逻辑尺寸（dp） |
-| `platform` | 编译期常量——Win32 下为 `Windows`，其余 `Unknown`（不做运行时 OS 探测）。枚举含 `Unknown/Windows/macOS/Linux/Web` |
+| `platform` | 编译期常量——Win32 下为 `Windows`，其余 `Unknown`（不做运行时 OS 探测）。枚举含 `Unknown/Windows/MacOs/Linux/Web` |
 | `device` | 编译期常量——Win32 下为 `Desktop`，其余 `Unknown`。枚举含 `Unknown/Desktop/Mobile/Tablet` |
 | `padding` | 安全区（刘海 / 状态栏）内边距（dp），默认 0 |
 | `prefer_reduced_motion` | 系统「减弱动效」偏好 |
@@ -78,13 +78,13 @@ au::Text("Hi").color(ctx.environment<au::Theme>() ? ctx.environment<au::Theme>()
 **读取 API**（`MediaQueryProvider` 是 `using` 别名，无法加静态 `of`，故提供自由函数）：
 
 - `media_query_of(const BuildContext&) -> const MediaQuery*`：向上查找最近注入的 `MediaQuery`；无 Provider 时返回 `nullptr`，调用方按需降级。
-- `MediaQuery::of(const BuildContext&) -> const MediaQuery&`：便捷封装，无 Provider 时诊断并返回默认实例。
+- `MediaQuery::of(const BuildContext&) -> const MediaQuery&`：便捷封装，无 Provider 时静默返回进程级默认实例。
 
 ### 3.2 自动注入
 
 `Window::present_root` 每帧自动以 `MediaQuery::from_surface(*surface)` 在**根 `BuildContext`** 注入 `MediaQuery`（存入稳定的 `Window::root_env_`，地址恒定，避免子树 Provider 持悬空父指针）。
 
-因此**无需手动包裹 `MediaQueryProvider`**，整棵树（含根 widget 自身）即可经 `media_query_of(ctx)` / `MediaQuery::of(ctx)` 读取设备上下文。`root_env_` 每帧重建以反映窗口 resize。`Application::run` 经同一 `present_root` 自动受益。手动 `MediaQueryProvider` 仍按「最近祖先优先」覆盖此默认值。
+因此**无需手动包裹 `MediaQueryProvider`**，整棵树（含根 widget 自身）即可经 `media_query_of(ctx)` / `MediaQuery::of(ctx)` 读取设备上下文。`root_env_` 每帧原地更新注入值（对象本身不重建）以反映窗口 resize。`Application::run` 经同一 `present_root` 自动受益。手动 `MediaQueryProvider` 仍按「最近祖先优先」覆盖此默认值。
 
 ### 3.3 LayoutBuilder
 
@@ -219,7 +219,7 @@ au::format_date(2025, 10, 25, Locale{"de"});                   // "25.10.2025"
 
 `Modifier` 用一组**正交、可组合**的修饰符表达内边距、背景、可点击、尺寸、边框、裁剪、对齐、偏移、拖拽等横切能力，替代继承爆炸。
 
-`Modifier` 是**不可变值**：每个方法返回新副本，可链式组合并赋值给任意组件的 `.modifier` 属性。
+`Modifier` 是**不可变值**（`.then()` 除外）：除 `.then()` 外每个方法返回新副本，可链式组合并赋值给任意组件的 `.modifier` 属性。
 
 ```cpp
 auto save_btn = au::Button(au::ButtonProps{ .label = "保存" });
@@ -234,7 +234,7 @@ save_btn.modifier = au::Modifier{}
 
 ### 7.2 工厂清单
 
-全部返回 `Modifier`，可链式：
+除 `.then()` 外全部返回 `Modifier`，可链式（`.then()` 为就地可变追加并返回 `Modifier&`）：
 
 | 工厂 | 作用 |
 |:---|:---|
@@ -250,17 +250,18 @@ save_btn.modifier = au::Modifier{}
 | `.offset(float dx, float dy)` | 绘制期平移（Transform 切片） |
 | `.rotate(float degrees)` | 绕内容中心旋转（Transform 切片，仿射矩阵） |
 | `.scale(float sx, float sy)` / `.scale(float s)` | 绕内容中心缩放（Transform 切片） |
-| `.transform(Matrix2D)` | 应用任意 2×3 仿射矩阵（Transform 切片，绕内容中心） |
+| `.transform(Matrix2D)` | 应用任意 2×3 仿射矩阵（Transform 切片，关于原点；绕内容中心请用 rotate/scale 或自行构造 from_*_about） |
 | `.expand(float weight = 1)` | 在 Flex 主轴占权重（产生 `FlexWeight` 节点） |
 | `.gradient_linear(from, to, angle_deg = 0)` / `.gradient_linear(colors, stops, angle_deg)` / `.gradient_radial(center, edge)` | 线性（双色/多色标）/ 径向渐变背景 |
 | `.shadow(offset_x = 0, offset_y = 2, blur = 4, color = 黑色 25%)` | 投影阴影（绘制于内容之下） |
 | `.blur(float radius)` | 内容模糊：子树绘制完成后对整个内容盒做高斯近似模糊 |
 | `.backdrop_filter(float radius)` | 背景滤镜（毛玻璃）：绘制内容前先模糊内容盒背后已绘像素，配合半透明 `background` |
-| `.blend_mode(...)` / `.shader_mask(...)` / `.cache_layer(...)` | 像素混合 / 渐变遮罩 / 离屏缓存（`BlendMode` / `ShaderMaskKind` 枚举见 `render/blend.h`；GPU 路径经常驻层纹理缓存，epoch 键控失效，见 `render/detail/gpu_layer.h`） |
+| `.blend_mode(...)` / `.shader_mask(...)` / `.cache_layer()` | 像素混合 / 渐变遮罩 / 离屏缓存（`BlendMode` / `ShaderMaskKind` 枚举见 `render/blend.h`；GPU 路径经常驻层纹理缓存，epoch 键控失效，见 `render/detail/gpu_layer.h`） |
 | `.draggable(...)` / `.long_press(...)` | 手势（单指，由 `Draggable` / `LongPress` 修饰节点驱动） |
-| `.touch(on_touch)` | 原始多点触摸流回调（`TouchListener` 节点，不消费命中） |
+| `.touch(on_touch)` | 原始多点触摸流回调（`TouchListener` 节点；当前实现中 Input 类节点一经命中即返回自身，拦截向子节点下探） |
 | `.tooltip(std::string, float delay_ms = 500)` / `.context_menu(std::vector<MenuItem>)` | 悬停提示气泡 / 右键上下文菜单 |
-| `.then(N node)` | 就地追加任意 `ModifierNode` |
+| `.cursor(CursorShape)` | 悬停光标形状（Input 切片，`CursorNode`） |
+| `.then(N node)` | 就地追加任意 `ModifierNode`（**可变**，直接 `push_back` 到 `*this` 并返回 `Modifier&`） |
 
 ### 7.3 四类切片与绘制顺序
 
@@ -270,10 +271,10 @@ save_btn.modifier = au::Modifier{}
 |:---|:---|:---|
 | `Layout` | `Padding` / `PaddingEdges` / `FlexWeight`（`.expand()` 产生的节点，无独立 `Expand` 节点）/ `SizeModifier` | `modifier/modifier_layout.h` |
 | `Paint` | `Background` / `GradientBackground` / `ShadowNode` / `BlendNode` / `ShaderMaskNode` / `CacheLayerNode` / `Border` / `Clip` / `ClipRounded` / `OpacityNode` / `BlurNode`（`.blur()` 与 `.backdrop_filter()` 共用，按标志位区分） | `modifier/modifier_paint.h` |
-| `Input` | `Clickable` / `Draggable` / `LongPress` / `TouchListener` / `TooltipNode` / `ContextMenuNode` | `modifier/modifier_input.h` |
+| `Input` | `Clickable` / `Draggable` / `LongPress` / `TouchListener` / `TooltipNode` / `ContextMenuNode` / `CursorNode` | `modifier/modifier_input.h` |
 | `Transform` | `AlignNode` / `OffsetNode` / `TransformNode`（`.rotate()` / `.scale()` / `.transform()` 共用，按构造参数区分） | `modifier/modifier_transform.h` |
 
-`Transform` 切片累积为单个 `Matrix2D`（绕内容中心构造），绘制时整树离屏合成、命中测试用逆矩阵映射本地坐标；`Opacity` 复用 `Painter::set_alpha`。
+`Transform` 切片累积为单个 `Matrix2D`（绕内容中心构造），绘制时累积的 `Matrix2D` 非恒等才走离屏合成（恒等走零离屏快速路径直接 paint_content）、命中测试用逆矩阵映射本地坐标；`Opacity` 复用 `Painter::set_alpha`。
 
 ### 7.4 三段式修饰绘制
 
@@ -297,7 +298,7 @@ save_btn.modifier = au::Modifier{}
 
 ### 8.1 #12 机器可读 API Schema
 
-**控件自描述侧的契约**：各控件提供**静态** `describe_static()`；虚 `describe()` 在基类 `Widget` 已有默认实现（返回 `{ .name = type_name() }`，`widget.h:401`），无需富描述的控件可省略 override，仅在需要补充 properties / events / `children_policy` 等元数据时覆写（与 [`04-widget.md`](04-widget.md) §2.1 的表述一致）。`component_schema()` / `list_all_schemas()` 消费 `describe()` 输出；`aurora_api.json` 自动包含增强字段。
+**控件自描述侧的契约**：各控件提供**静态** `describe_static()`；虚 `describe()` 在基类 `Widget` 已有默认实现（返回 `{ .name = type_name() }`，`widget.h`），无需富描述的控件可省略 override，仅在需要补充 properties / events / `children_policy` 等元数据时覆写（与 [`04-widget.md`](04-widget.md) §2.1 的表述一致）。`component_schema()` / `list_all_schemas()` 消费 `describe()` 输出；`aurora_api.json` 自动包含增强字段。
 
 ```cpp
 auto info = au::Button::describe_static();

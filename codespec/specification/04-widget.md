@@ -1,6 +1,6 @@
 # 控件（widget）
 
-> 覆盖 `include/aurora/widget/`（59 个头文件）、`include/aurora/ui/` 与根级 `todo.h`。
+> 覆盖 `include/aurora/widget/`（75 个头文件）、`include/aurora/ui/` 与根级 `todo.h`。
 > 本文件是控件清单、`Props` 约定、自描述契约与可定制性契约的**唯一权威**。
 > 绘制与文本内核见 [`03-layout-render.md`](03-layout-render.md) §8；序列化契约见 [`08-tooling.md`](08-tooling.md)；响应式属性见 [`02-state.md`](02-state.md) §2.2。
 
@@ -17,6 +17,7 @@
 | 输入与选择 | `button.h`、`checkbox.h`、`switch.h`、`slider.h`、`dropdown.h`、`radio_spin.h`、`segmented_control.h`、`pickers.h` |
 | 布局与滚动 | `grid.h`、`grid_view.h`、`lazy_list.h`、`lazy_row.h`、`scroll.h`、`spacer.h`、`divider.h`、`splitter.h`、`layout_builder.h`、`layout_query.h` |
 | 结构控制 | `show.h`、`repeater.h`、`lifecycle.h`、`timer.h`、`provider.h` |
+| 无障碍语义树 | `a11y_tree.h`（几何盒 / Name 回退链 / 递归节点与整树构建：`build_accessibility_tree`）、`a11y_diff.h`（`TreeSnapshot` / `NodeSnapshot` / `TreeDiff` / `build_tree_snapshot`）。二者需 `Widget` 完整定义，故归本层；纯类型与桥抽象留在 [`01-core.md`](01-core.md) §7.2 |
 | 容器与导航壳 | `drawer.h`、`tab_bar.h`、`menu_bar.h`、`toolbar.h`、`title_bar.h`、`dialog.h`、`popup.h`、`toast.h`、`expansion_panel.h`、`stepper.h`、`bottom_nav_bar.h` |
 | 绘制与占位 | `canvas.h`、`placeholder.h`、`skeleton.h`、`progress.h`、`image_widget.h`、`chip.h`、`form.h` |
 | 数据展示与跨域控件 | `data_widgets.h`（`DataTable`/`TreeView`/`ListView`）；另散布于 `media/video_player.h`、`media/video_controls.h`、`navigation/hero.h`、`app/perf_overlay.h` |
@@ -27,20 +28,20 @@
 
 ## 2 控件基类契约
 
-`Widget`（`widget/widget.h`）是所有控件的基类。继承层级 **≤ 2 层**：叶控件直接继承 `Widget`，多子容器继承 `Container`，单子容器继承 `SingleChild`。
+`Widget`（`widget/widget.h`）是所有控件的基类。继承层级 **≤ 3 层**：叶控件统一继承中间基类 `LeafWidget`（`Widget → LeafWidget → Xxx`，`LeafWidget` 定义于 `widget.h`），多子容器继承 `Container`，单子容器继承 `SingleChild`，两者均最终继承 `Widget`。
 
 ### 2.1 类型标识与自描述
 
 | 成员 | 签名 | 位置 |
 |:---|:---|:---|
-| `type_name()` | `[[nodiscard]] virtual auto type_name() const -> const char *` —— 纯虚 | `widget.h:397` |
-| `describe()` | `[[nodiscard]] virtual auto describe() const -> WidgetDescriptor` | `widget.h:403` |
-| `collect_signals(out)` | `virtual auto collect_signals(std::vector<SignalViewBase*>&) -> void` | `widget.h:146` |
-| `child_nodes()` | `[[nodiscard]] virtual auto child_nodes() const -> const std::vector<Node>&` | `widget.h:450` |
+| `type_name()` | `[[nodiscard]] virtual auto type_name() const -> const char *` —— 纯虚 | `widget.h` |
+| `describe()` | `[[nodiscard]] virtual auto describe() const -> WidgetDescriptor` | `widget.h` |
+| `collect_signals(out)` | `virtual auto collect_signals(std::vector<SignalViewBase*>&) -> void` | `widget.h` |
+| `child_nodes()` | `[[nodiscard]] virtual auto child_nodes() const -> const std::vector<Node>&` | `widget.h` |
 
 各具体控件另提供**静态** `describe_static()`（例如 `au::Button::describe_static()`，见 `button.h`），便于无需实例即可查询元数据。`describe_static()` 不是 `Widget` 的虚成员。
 
-**自描述结构**（`widget/descriptor.h:49`）：
+**自描述结构**（`widget/descriptor.h`）：
 
 ```cpp
 struct WidgetDescriptor {
@@ -55,7 +56,7 @@ struct WidgetDescriptor {
 };
 ```
 
-**属性元数据**（`descriptor.h:17`）：
+**属性元数据**（`descriptor.h`）：
 
 ```cpp
 struct PropDescriptor {
@@ -73,7 +74,7 @@ struct PropDescriptor {
 };
 ```
 
-**批量发现**：`serialization::component_schema(name) -> Json`（`widget/serialization.h:87`，属 `aurora::serialization`）与 `list_all_schemas() -> std::vector<Json>`（`serialization.h:105`，属 `aurora` 命名空间）。`aurora::Inspector` 门面（`inspector/inspector_api.h:25`）另提供静态 `Inspector::component_schema(std::string_view)`（`inspector_api.h:84`）。
+**批量发现**：`serialization::component_schema(name) -> Json`（`widget/serialization.h`，属 `aurora::serialization`）与 `list_all_schemas() -> std::vector<Json>`（`serialization.h`，属 `aurora` 命名空间）。`aurora::Inspector` 门面（`inspector/inspector_api.h`）另提供静态 `Inspector::component_schema(std::string_view)`（`inspector_api.h`）。
 
 `descriptor_to_json(...)` 把描述符序列化为 JSON（两个重载），供 `component_schema` 与 `gen_api` 消费。
 
@@ -87,9 +88,9 @@ auto info = au::Button::describe_static();
 
 ### 2.2 属性值验证
 
-`validate_prop<T>(json, desc) -> Result<T>`（`descriptor.h:81`）按 `PropDescriptor` 的约束校验 JSON 值，已特化 `Color` / `float` / `int` / `bool` / `LocalizedString` / `Length` / `EdgeInsets`。
+`validate_prop<T>(json, desc) -> Result<T>`（`descriptor.h`）按 `PropDescriptor` 的约束校验 JSON 值，已特化 `Color` / `float` / `int` / `bool` / `LocalizedString` / `Length` / `EdgeInsets`。
 
-`validate_or_default<T>(json, desc, fallback)`（`descriptor.h:241`）是反序列化侧的降级助手：校验非法时经 `Diagnostics::degraded` 上报并回退默认值；严格模式下 `degraded` 升级为硬失败。
+`validate_or_default<T>(json, desc, fallback)`（`descriptor.h`）是反序列化侧的降级助手：校验非法时经 `Diagnostics::degraded` 上报并回退默认值；严格模式下 `degraded` 升级为硬失败。
 
 约束串解析（`parse_constraint_float` / `parse_constraint_int`）在遇到坏串时**降级为跳过该约束**，绝不终止进程。
 
@@ -97,17 +98,17 @@ auto info = au::Button::describe_static();
 
 | 回调 | 签名 | 位置 |
 |:---|:---|:---|
-| `on_layout(const Constraints&, const BuildContext&) -> Size` | 纯虚 | `widget.h:460` |
-| `on_paint(Painter&, const Rect& bounds, const BuildContext&) -> void` | 纯虚 | `widget.h:463` |
-| `on_hit_test(const Point& local, const Rect& bounds, const BuildContext&) -> Widget*` | 默认返回 `nullptr`（叶控件无子可下探）；后代命中由 `on_hit_test_chain` 递归提供，容器覆写 | `widget.h:466` |
-| `on_mount(const BuildContext&) -> void` | 挂载后恰好一次 | `widget.h:482` |
-| `tick(time_point) -> void` | NVI 入口 | `widget.h:350` |
-| `tick_gestures(time_point) -> void` | 手势推进 | `widget.h:486` |
-| `on_scroll(ScrollEvent&) -> void` | 滚轮入口：默认按 `overflow_` 的内建滑窗夹取滚动并写 `remaining_y` 余量；真实滚动控件覆写（路由见 `05-event-navigation.md` §3.3） | `widget.h:445` |
-| `wants_scroll() -> bool` | 是否参与滚轮命中链路由。默认 = 声明了 `OverflowStrategy::Scroll`；`Scroll` / `LazyList` / `LazyRow` / `GridView` / `PullToRefresh` 覆写为 `true`，保证嵌套时**最深滚动者优先** | `widget.h:464` |
-| `is_sticky_header() -> bool` | 是否为吸顶头部（`StickyHeader` 覆写为 `true`），供滚动宿主在 blit 后以覆盖层按 pin 位重绘 | `widget.h:469` |
+| `on_layout(const Constraints&, const BuildContext&) -> Size` | 纯虚 | `widget.h` |
+| `on_paint(Painter&, const Rect& bounds, const BuildContext&) -> void` | 纯虚 | `widget.h` |
+| `on_hit_test(const Point& local, const Rect& bounds, const BuildContext&) -> Widget*` | 默认返回 `nullptr`（叶控件无子可下探）；后代命中由 `on_hit_test_chain` 递归提供，容器覆写 | `widget.h` |
+| `on_mount(const BuildContext&) -> void` | 挂载后恰好一次 | `widget.h` |
+| `tick(time_point) -> void` | 框架容器基类可覆写的公开入口（见下） | `widget.h` |
+| `tick_gestures(time_point) -> void` | 手势推进 | `widget.h` |
+| `on_scroll(ScrollEvent&) -> void` | 滚轮入口：默认按 `overflow_` 的内建滑窗夹取滚动并写 `remaining_y` 余量；真实滚动控件覆写（路由见 `05-event-navigation.md` §3.3） | `widget.h` |
+| `wants_scroll() -> bool` | 是否参与滚轮命中链路由。默认 = 声明了 `OverflowStrategy::Scroll`；`Scroll` / `LazyList` / `LazyRow` / `GridView` / `PullToRefresh` 覆写为 `true`，保证嵌套时**最深滚动者优先** | `widget.h` |
+| `is_sticky_header() -> bool` | 是否为吸顶头部（`StickyHeader` 覆写为 `true`），供滚动宿主在 blit 后以覆盖层按 pin 位重绘 | `widget.h` |
 
-**可见性约定**：布局 / 绘制 / 命中测试类内部虚回调 `on_layout` / `on_paint` / `on_hit_test` / `on_mount` / `tick_gestures` 位于 `protected` 区（`widget.h:457` 起）；指针事件入口 `on_pointer_event` 的两个重载（`MouseEvent`，`widget.h:288`；`TouchEvent`，`widget.h:345`）与 `on_hover_change` / `wants_click` 位于 **public 区**且为虚函数——派发器与外部工具直接调用，子类按需要覆写；`tick` 走 NVI（模板方法），不由子类直接覆盖。
+**可见性约定**：布局 / 绘制 / 命中测试类内部虚回调 `on_layout` / `on_paint` / `on_hit_test` / `on_mount` / `tick_gestures` 位于 `protected` 区（`widget.h` 起）；指针事件入口 `on_pointer_event` 的两个重载（`MouseEvent`，`widget.h`；`TouchEvent`，`widget.h`）与 `on_hover_change` / `wants_click` 位于 **public 区**且为虚函数——派发器与外部工具直接调用，子类按需要覆写；业务控件覆写 `tick_gestures` 以推进手势，框架容器基类（`Container` / `SingleChild`）可覆写公开 `tick` 以递归子树（见 `widget.h` / `widget.h`），而非经 NVI 模板方法。
 
 `on_paint` 收到的 `bounds` 是**全局坐标**（相对窗口客户区）；绘制原语必须基于 `bounds.origin` 计算。
 
@@ -115,17 +116,17 @@ auto info = au::Button::describe_static();
 
 | 成员 | 说明 | 位置 |
 |:---|:---|:---|
-| `mark_needs_layout()` | 标记需要重排 | `widget.h:182` |
-| `mark_needs_paint()` | 标记需要重绘 | `widget.h:223` |
-| `can_cache_display_list()` | 虚，返回是否允许缓存显示列表，默认 `true` | `widget.h:197` |
-| `request_frame(bool layout = false)` | 在不击穿祖先缓存的前提下请求重绘 / 重排 | `widget.h:630` |
-| `width(Length)` / `height(Length)` | 虚，返回 `Widget&` 以支持链式 | `widget.h:155,161` |
+| `mark_needs_layout()` | 标记需要重排 | `widget.h` |
+| `mark_needs_paint()` | 标记需要重绘 | `widget.h` |
+| `can_cache_display_list()` | 虚，返回是否允许缓存显示列表，默认 `true`（`overflow_ == OverflowStrategy::Scroll` 时为 `false`） | `widget.h` |
+| `request_frame(bool layout = false)` | 在不击穿祖先缓存的前提下请求重绘 / 重排 | `widget.h` |
+| `width(Length)` / `height(Length)` | 虚，返回 `Widget&` 以支持链式 | `widget.h` |
 
 > **自驱动动画**：在 `on_paint` 末尾调用 `mark_needs_paint()` 自调度下一帧的控件，必须覆写 `can_cache_display_list()` 返回 `false`，否则开启显示列表缓存后动画被冻结。
 
 ### 2.5 双模 API 与 Props 约定
 
-控件统一采用**继承式双模 API**：`class Xxx : public XxxProps`，`XxxProps` 的字段即控件自身的公有字段，不再用私有 `m_*` 重复声明同一属性。
+**部分控件**（布局 / 文本 / 图片 / 滚动 / 导航 / 图表 / 下拉刷新类）采用**继承式双模 API**：`class Xxx : public XxxProps`，`XxxProps` 的字段即控件自身的公有字段，不再用私有 `m_*` 重复声明同一属性。采用此模式的控件（共 16 个）：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text`（见各自头声明）；例外——`Checkbox` / `Switch` / `Slider` / `ProgressIndicator` / `Dropdown` / `RadioGroup` / `SpinBox` / `SegmentedControl` / `Chip` / `TextInput` 等仍使用私有 `*_` 成员 + setter，未采用双模。
 
 ```cpp
 // 形态一：*Props 具名聚合（推荐，可分块生成）
@@ -145,7 +146,7 @@ au::Text("Welcome").font_size(24).bold();
 - **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。指定初始化器**仅适用于 `*Props` 聚合结构**（如 `au::ButtonProps{ .label = ... }`）与 `Theme` 等纯数据聚合，其中字段顺序无关，遗漏字段回退默认值。
 - 初始化列表形式 `au::Column{ au::Text("A"), au::Text("B") }` 可用——`Column` / `Row` 接受 `std::initializer_list<Node>`。
 - 链式 setter 返回引用；作为子节点放入 `children` 时必须用 `std::move` 包裹（`Widget` 拷贝构造被删除，`Node` 仅移动派生对象）。
-- `Widget::defaults()` 不是虚成员；各控件提供静态 `defaults()`（如 `au::Button::defaults() -> ButtonProps`，见 `button.h:61`），返回该控件的默认 `Props`。
+- `Widget::defaults()` 不是虚成员；仅 `Button` 提供静态 `defaults()`（如 `au::Button::defaults() -> ButtonProps`，见 `button.h`），返回该控件的默认 `Props`；其余控件的默认属性来源待补。
 
 `Node(W&&)` 是非 explicit 转换构造函数，值类型控件可隐式转为 `Node`。仅在两分支类型不同的 `?:` 三元、或需要连续两次用户转换的场景才显式包 `Node{...}`。
 
@@ -153,7 +154,7 @@ au::Text("Welcome").font_size(24).bold();
 
 ### 2.6 无障碍虚钩子
 
-控件通过一组**虚钩子**自述无障碍语义；语义树构建（`core/accessibility.h` §7.2）与平台桥只读这些钩子，不探控件内部。全部为虚函数且**基类默认值即合法**——自定义控件零改动仍可被推断（`infer_accessibility_role(type_name())` 兜底）。
+控件通过一组**虚钩子**自述无障碍语义；语义树构建（`a11y_tree.h`，见 §1）与平台桥只读这些钩子，不探控件内部。全部为虚函数且**基类默认值即合法**——自定义控件零改动仍可被推断（`infer_accessibility_role(type_name())` 兜底）。
 
 **身份与角色**
 
@@ -205,12 +206,12 @@ au::Text("Welcome").font_size(24).bold();
 
 | 控件 | 关键属性 |
 |:---|:---|
-| `Text` | `content`、`font_size`、`color`、`bold()`、`italic()`、`family()`。支持指针拖选、键盘扩选与复制 |
+| `Text` | `content`、`font_size`、`color`、`bold()`、`family()`（注：斜体未实现——仅经 `font_style` 设置且当前降级为 `Normal`，见 `text.h`）。支持指针拖选、键盘扩选与复制 |
 | `RichText` / `TextSpan` | 富文本片段组合。`RichText` 接收 `Reactive<std::vector<TextSpan>>` |
 | `RichTextEdit` | 富文本编辑器（`widget/rich_text_edit.h`）；序列化键 `text`（纯文本内容），回调 `on_text_input` |
-| `TextInput` | `value`（`Reactive<std::string>`）、`placeholder`、`text_color`、`placeholder_color`、`background`、`focused_background`、`border_color`、`focused_border_color`（缺省跟随主题 primary）、`border_width`、`selection_color`、`max_length`（码点限长）、`read_only`、`obscure_text`；回调 `on_changed`（每次编辑）/`on_submit`（Enter） |
+| `TextInput` | 仅 `value`（**`std::string`**，非 `Reactive`）、`placeholder`、`font_size` 进 `TextInputProps`（`text_input.h`）；`text_color` / `placeholder_color` / `background` / `focused_background` / `border_color` / `focused_border_color` / `border_width` / `selection_color` 等颜色类为**私有字段 + `set_*` 链式**（非 Props，见 `text_input.h` 附近）。回调 `on_changed`（每次编辑）/`on_submit`（Enter） |
 
-`TextInput` 点击经 `FocusManager` 获焦；读当前文本用 `value()`（`text_input.h:509`），程序化改值用 `set_value()`；无 `.text()` 方法。
+`TextInput` 点击经 `FocusManager` 获焦；读当前文本用 `value()`（`text_input.h`），程序化改值用 `set_value()`；无 `.text()` 方法。
 
 ### 3.2 按钮与选择
 
@@ -249,10 +250,13 @@ au::Text("Welcome").font_size(24).bold();
 | `LayoutBuilder` | 按布局约束动态构建子树 |
 | `Drawer` / `ExpansionPanel` / `Stepper` | 折叠面板 / 展开面板 / 步骤条 |
 | `PageView` | 分页容器（`widget/drawer.h`）；`current`（当前页码）、`show_indicator`（圆点指示器）；回调 `on_page_change`；仅布局当前页 |
+| `BreakpointBuilder` | 响应式布局构建器（`widget/breakpoint_builder.h`）：按宽度断点（`medium_max_width` / `expanded_min_width`）切换 Compact / Medium / Expanded，经 `builder` 闭包重建子树；仅断点档位变化或闭包替换时重建 |
 
 `GridView` / `LazyList` / `LazyRow` 是虚拟化容器，仅实例化可见窗口加 `cache_extent` 缓冲内的子项，复杂度 O(可见单元数)。三者的 `on_paint` 内均含 `push_clip(bounds)` / `pop_clip()` 配对，被圆角裁剪容器包裹时不越界。
 
-`Scroll` 把内容录进**滑窗**离屏缓冲 `content_`（尺寸 = 视口高 ×(1 + 2 × `overscan`)，`buffer_origin_y_` 为缓冲锚点），滚动帧只做一次 blit。
+**对齐原语**：容器与 `Stack` 的子项落点由 `widget/alignment.h` 统一提供——`enum class Alignment`（`TopLeft` / `TopCenter` / … / `BottomRight` 九宫格取值）配自由函数 `align_origin(Alignment, child_size, container_size) -> Point`（返回子项左上角相对容器的对齐落点）。该枚举同时被 `StackProps::align`、`Modifier::align(Alignment)`（`AlignNode`）与 flex 布局消费，是「子项在容器内如何对齐」的**单一类型来源**。
+
+`Scroll` 把内容录进**滑窗**离屏缓冲 `content_`（尺寸 = 视口高 ×(1 + 2 × `overscan`)，`buffer_origin_y_` 为缓冲锚点）：短内容（`max_origin == 0`）滚动帧仅一次 blit 平移合成；长内容（`max_origin > 0`）在滚动帧按增量条带重录（`scrolling_` 触发重锚，`shift_pixels` memmove + 重绘新暴露带，见 `scroll.h`），非纯 blit。
 
 **滚动位置保存/恢复**：四个滚动控件（`Scroll` / `LazyList` / `LazyRow` / `GridView`）都有 `restore_key`（空 = 不参与）。控件在**首次可滚动布局**时按 `app::ScrollStorage` 恢复偏移（由 `deserialize_props` 显式给入的偏移优先），此后位置变化（滚轮 / 拖拽 / `set_scroll_offset`）即写回（仅内存，落盘由 App 决定）；恢复只生效一次，用户主动滚动不会再被回拉。契约与多窗口作用域隔离见 `06-app-platform.md` §9.3。
 
@@ -289,25 +293,28 @@ au::Text("Welcome").font_size(24).bold();
 
 | 控件 | 关键属性 |
 |:---|:---|
-| `Show` | `when`（bool 信号），为真才渲染子节点 |
+| `Show` | `visible`（bool 信号，序列化键亦为 `visible`；构造入参名 `condition`），为真才渲染子节点 |
 | `Lifecycle` | `on_mount`（挂载回调，可访问 `BuildContext`）、`on_unmount`（卸载 / 析构回调）。对齐 React `useEffect` 与 Flutter `initState` + `dispose`。`Node` 析构时清理，覆盖 `Repeater` 缩容与 `Navigator` pop |
 | `Timer` | 组件级定时器 |
 | `Provider` | 环境注入（详见 [`07-environment-modifier.md`](07-environment-modifier.md)） |
 | `Hero` | 共享元素转场包装（`navigation/hero.h`）；`tag`（跨页配对键），单子节点 |
 | `Canvas` | 自定义绘制回调，用于高频绘制场景 |
+| `Dismissible` | 滑动消除包装（`widget/dismissible.h`）：单子节点沿 `axis`（默认 Horizontal）拖拽至阈值后消除，对标 Flutter `Dismissible`；手势由每帧 `tick` 驱动 |
+| `CommandPalette` | 模态命令面板（`widget/command_palette.h`）：居中浮层，按关键字模糊检索并执行命令，依赖 `CommandRegistry`（未绑定时为空列表）；`open` / `close` 切换 |
 
 ### 3.6 图像、绘制与占位
 
 | 控件 | 说明 |
 |:---|:---|
-| `ImageView` | `bitmap`、`source`（源文件路径，用于序列化/占位，**不支持 URL 加载**）。解码经 `Image::load`（便捷静态 `from_file`，解码失败返回空图像占位盒）。**序列化类型名为 `Image`**。`width()` / `height()` 是 widget 级方法，不进 `Props` |
+| `ImageView` | `bitmap`、`source`（源文件路径，用于序列化/占位）。URL 源经注入的 `ImageFetcher`（`ImageFetcher` / `from_url` / `begin_load` / `ImageLoadState::Loading/Loaded/Failed` / `ImageCache`，见 `image_widget.h`）异步加载；未注入 fetcher 时降级为占位。**序列化类型名为 `Image`**。`width()` / `height()` 是 widget 级方法，不进 `Props` |
 | `VideoPlayer` | 视频播放控件（`media/video_player.h`）；`fit`（`BoxFit` 枚举：Fill / Contain / Cover 等）、`show_controls`；回调 `on_tap` / `on_double_tap`；帧源经 `set_source` 注入 |
 | `VideoControls` | 视频播放控件叠层（`media/video_controls.h`），配 `VideoPlayer` 使用，单子容器 |
-| `Placeholder` | 通用降级占位盒（`widget/placeholder.h:24`），`.message` 说明文字 |
+| `Placeholder` | 通用降级占位盒（`widget/placeholder.h`），序列化键 `message` 说明文字（`au::Placeholder("…")` 或 `.set_message("…")` 构造，非聚合类型、无 initializer_list 构造） |
 | `Skeleton` | 骨架屏加载占位（shimmer 动画） |
 | `BottomNavBar` | `items`（每项含 icon 绘制器与 label）、`selected_index`、`on_select`；按项等分宽度布局 |
 | `TitleBar` | 自绘标题栏 / CSD |
 | `ToolBar` / `MenuBar` / `TabBar` | 工具栏 / 菜单条 / 标签页 |
+| `TabBody` | 标签内容体（`widget/recipes.h`，`detail` 命名空间）：按 `selected` 索引显示对应页，随状态刷新；与 `TabBar` 配套使用 |
 | `StatusBar` | 底部状态栏（`widget/toolbar.h`）；`bar_height`（默认 24dp）、`gap`（区域间距），多子节点 |
 | `Dialog` / `Popup` / `ToastHost` | 对话框 / 弹出层 / 轻提示宿主（`ToastHost::show(text, duration_ms)` 投放） |
 | `ProgressDialog` | 模态进度对话框（`widget/drawer.h`）；`message`、`progress`（0..1，-1 = 不确定态）、`open`、`cancellable`；回调 `on_cancel` |
@@ -353,11 +360,11 @@ au::Text("Welcome").font_size(24).bold();
 
 ### 4.1 主题回退
 
-强调色（`active_color` / `accent_color` / `color` / `focused_border_color` 等）一律为 `std::optional<Color>`。未显式设置时，绘制期经 `inherit_theme(ctx).primary` 解析（`ThemeScope` 换肤即生效），且**未设置不序列化**——保留「跟随主题」语义，`to_json` / `from_json` 往返不丢失意图。
+强调色（`active_color` / `accent_color` / `focused_border_color` 等）一律为 `std::optional<Color>`。未显式设置时，绘制期经 `inherit_theme(ctx).primary` 解析（`ThemeScope` 换肤即生效），且**未设置不序列化**——保留「跟随主题」语义，`to_json` / `from_json` 往返不丢失意图。例外：`Button` 的 `color`（`ButtonProps::color`，`button.h`）是 **`Reactive<Color> = Color::blue()`**，**非** optional，默认即蓝底、不跟随主题，`on_paint` 直接 `resolve_background()`（见 `widgets_paint.cpp`）。
 
 ### 4.2 状态反馈与禁用态
 
-hover / 按下统一用 `Color::shaded(k)` 乘性调暗（hover ≈ ×0.90 / ×0.92，pressed ≈ ×0.78 / ×0.80），淡色底与选区用 `Color::with_alpha(a)`。所有交互控件提供 `set_enabled(bool)`：禁用态统一灰化绘制、**吞掉指针事件**（置 `e.handled = true` 不冒泡）且不改值。
+hover / 按下统一用 `Color::shaded(k)` 乘性调暗（hover ≈ ×0.90 / ×0.92，pressed ≈ ×0.78 / ×0.80），淡色底与选区用 `Color::with_alpha(a)`。按钮 / 输入 / 选择类控件（`Button` / `Checkbox` / `Switch` / `Slider` / `TextInput` / `Dropdown` / `RadioSpin` / `SegmentedControl`）提供 `set_enabled(bool)`：禁用态统一灰化绘制、**吞掉指针事件**（置 `e.handled = true` 不冒泡）且不改值。例外：`Chip` / `TabBar` / `ProgressIndicator` 无 `set_enabled` 方法，也无禁用态分支。
 
 ### 4.3 继承友好：protected 绘制分阶段钩子
 
@@ -431,7 +438,7 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 
 **关键约束：**
 
-- 组件继承层级 ≤ 2 层（叶控件继承 `Widget`；多子容器继承 `Container`，单子容器继承 `SingleChild`）。
+- 组件继承层级 ≤ 3 层（叶控件继承 `LeafWidget`，再由 `LeafWidget` 继承 `Widget`；多子容器继承 `Container`，单子容器继承 `SingleChild`）。
 - 用组合替代继承；横切能力由 `Modifier` 正交组合表达（见 [`07-environment-modifier.md`](07-environment-modifier.md)）。
 - 整棵 UI 树保存在一个 `Node` 中，`Node` 持有 `std::shared_ptr<Widget>`：拷贝即共享、移动即转移，整棵树可被复制 / 移动，析构由 `shared_ptr` 自动管理。
 - **几何权威在 `Node`**：`Node` 持有 `Rect bounds_`（原点 + 尺寸），是布局与命中测试的**唯一几何来源**。布局阶段由父节点经 `child.set_bounds(box)` 写入，`Window::present_root` 把窗口矩形写入根 `Node`。`Widget` **不持有任何几何缓存**。

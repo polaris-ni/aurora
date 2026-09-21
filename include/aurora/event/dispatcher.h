@@ -17,7 +17,7 @@ namespace aurora {
  * - `dispatch(MouseEvent)`：沿命中链自最深目标向根冒泡，逐级调用 `on_pointer_event`；
  *   任一控件设 `e.handled = true` 即终止冒泡；Press 时缓存命中链实现指针捕获。
  * - `dispatch(KeyEvent, FocusManager)`：Tab / Shift+Tab 触发焦点移动，否则只派发到焦点 widget（不冒泡）。
- * - `dispatch(ScrollEvent)`：派发到命中目标 widget 的 `onScroll`（不冒泡）。
+ * - `dispatch(ScrollEvent)`：沿命中链自最深向根找第一个 `wants_scroll()` 者派发（最近可滚动祖先；嵌套时最深滚动者优先）。
  * - `dispatch(TextInputEvent, FocusManager)`：派发到当前焦点 widget 的 `onTextInput`（不冒泡）。
  * - `dispatch(TextCompositionEvent, FocusManager)`：派发到当前焦点 widget 的 `onTextComposition`（不冒泡）。
  * - `dispatch(FileDropEvent)`：派发到命中目标 widget（不冒泡）。
@@ -38,9 +38,9 @@ class EventDispatcher {
         return root.hit_test(p, Rect{.origin = Point{}, .size = root.size()}, BuildContext{});
     }
 
-    /// @brief 同步派发指针事件到命中目标；返回是否命中（is_handled_ 由 widget 写入 e）。
+    /// @brief 同步派发指针事件到命中目标；返回是否命中（is_handled 由 widget 写入 e）。
     /// @param root 派发起点（根 widget）；命中测试与命中链均局限于该子树。
-    /// @param e    待派发的鼠标事件；沿命中链冒泡期间任一控件可写 `e.is_handled_ = true` 终止冒泡。
+    /// @param e    待派发的鼠标事件；沿命中链冒泡期间任一控件可写 `e.is_handled = true` 终止冒泡。
     /// @param fm 派发期间的当前焦点管理器（可选）；`request_focus()` 读取之，默认 nullptr 时焦点请求静默 no-op。
     /// @note 该静态入口委托进程内「持久」EventDispatcher 单例，因此同样保留跨事件指针捕获
     ///       （与 Application::mouse_ 行为一致）。这意味着即使调用方直接走静态 `dispatch`
@@ -54,14 +54,14 @@ class EventDispatcher {
     ///       也持续派发给同一目标，直到 Release 解除捕获。修复「拖选时光标移出窗口/重叠区后
     ///       释放事件丢失、选择卡住」以及「相邻控件重叠导致拖选被抢」的问题。
     /// @param root 派发起点（根 widget）；命中测试与指针捕获均局限于该子树。
-    /// @param e    待派发的鼠标事件；冒泡期间任一控件可写 `e.is_handled_ = true` 终止冒泡。
+    /// @param e    待派发的鼠标事件；冒泡期间任一控件可写 `e.is_handled = true` 终止冒泡。
     /// @param fm   派发期间的当前焦点管理器（可选）；Press 时据此转移/清除焦点，nullptr 则跳过焦点处理。
-    /// @return 是否命中到任意控件（是否「消费」由 `e.is_handled_` 表达）。
+    /// @return 是否命中到任意控件（是否「消费」由 `e.is_handled` 表达）。
     auto dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *fm = nullptr) -> bool;
 
     /// @brief 同步派发键盘事件；Tab/Shift+Tab 触发焦点移动，否则派发到焦点 widget。
     /// @param root 派发起点（根 widget）；键盘派发不经命中链，该形参未使用（仅为统一重载签名而保留）。
-    /// @param e    待派发的键盘事件；命中快捷键或控件消费时写 `e.is_handled_ = true`。
+    /// @param e    待派发的键盘事件；命中快捷键或控件消费时写 `e.is_handled = true`。
     /// @param fm 焦点管理器（提供焦点 widget 与 Tab 序导航）；无则丢弃键盘事件。
     /// @return 事件是否被处理（焦点移动或焦点 widget 消费）。
     static auto dispatch(Widget &root, KeyEvent &e, FocusManager &fm) -> bool;
@@ -74,17 +74,17 @@ class EventDispatcher {
     /// @return 是否命中到可滚动目标（或点命中目标）。
     static auto dispatch(Widget &root, ScrollEvent &e) -> bool;
 
-    /// @brief 同步派发文件拖放事件到命中目标；返回是否命中（is_handled_ 由 widget 写入 e）。
+    /// @brief 同步派发文件拖放事件到命中目标；返回是否命中（is_handled 由 widget 写入 e）。
     /// @param root 派发起点（根 widget）；在其子树内按落点坐标做命中测试。
     /// @param e    待派发的文件拖放事件（不冒泡，仅交给命中目标）。
-    /// @return 事件是否被目标控件消费（取 `e.is_handled_`）。
+    /// @return 事件是否被目标控件消费（取 `e.is_handled`）。
     static auto dispatch(Widget &root, FileDropEvent &e) -> bool;
 
     /// @brief 同步派发文本输入事件到焦点 widget；无焦点则返回 false。
     /// @param root 派发起点（根 widget）；文本输入只路由到焦点控件，不经命中链。
     /// @param e    待派发的文本输入事件（不冒泡）。
     /// @param fm   焦点管理器；其当前焦点 widget 为唯一接收者，无焦点则直接返回 false。
-    /// @return 事件是否被焦点控件消费（取 `e.is_handled_`）。
+    /// @return 事件是否被焦点控件消费（取 `e.is_handled`）。
     static auto dispatch(Widget &root, TextInputEvent &e, FocusManager &fm) -> bool;
 
     /// @brief 同步派发 IME 组合事件到焦点 widget；无焦点则返回 false。
@@ -92,7 +92,7 @@ class EventDispatcher {
     /// @param e    待派发的组合事件（不冒泡）。平台后端（TSF/IMM32、NSTextInputClient、
     ///             zwp_text_input_v3、浏览器 IME）把平台组合回调翻译成此事件后经本入口注入。
     /// @param fm   焦点管理器；其当前焦点 widget 为唯一接收者，无焦点则直接返回 false。
-    /// @return 事件是否被焦点控件消费（取 `e.is_handled_`）。
+    /// @return 事件是否被焦点控件消费（取 `e.is_handled`）。
     static auto dispatch(Widget &root, TextCompositionEvent &e, FocusManager &fm) -> bool;
 
     /// @brief 悬停光标下发钩子（光标形状 API）：悬停链变化导致解析出的光标形状改变时回调。
@@ -148,9 +148,9 @@ class TouchDispatcher {
     ///        每个触点同时：① 把完整 `TouchEvent` 交给命中链（原始流，`touch()` 修饰器 / `PinchRecognizer` 消费）；
     ///        ② 合成对应 `MouseEvent`（携带 `pointer_id`）驱动 `Draggable`/`LongPress`/`Clickable`。
     /// @param root 派发起点（根 widget）；按其子树做命中测试并建立指针捕获。
-    /// @param e    待派发的多点触控事件（`TouchEvent::points` 逐点处理，手势流冒泡可写 `is_handled_`）。
+    /// @param e    待派发的多点触控事件（`TouchEvent::points` 逐点处理，手势流冒泡可写 `is_handled`）。
     /// @param fm   派发期间的当前焦点管理器（可选）；触点首次按下时据此转移焦点，nullptr 则跳过。
-    /// @return 是否有任意触点命中（is_handled_ 由各 widget 写入 e）。
+    /// @return 是否有任意触点命中（is_handled 由各 widget 写入 e）。
     auto dispatch(Widget &root, TouchEvent &e, FocusManager *fm = nullptr) -> bool;
 
   private:

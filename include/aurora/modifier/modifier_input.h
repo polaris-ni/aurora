@@ -172,7 +172,8 @@ class LongPress : public ModifierNode {
 };
 
 /// @brief 原始多点触摸监听修饰（Input 切片）：每次 `TouchEvent` 派发到该 widget 时回调完整事件，
-///        供上层自定义并发交互（如多指手势、自定义转场），不消费命中、不影响布局。
+///        供上层自定义并发交互（如多指手势、自定义转场）。当前实现中 Input 类节点一经命中即返回自身，
+///        会拦截向子节点下探（含 TouchListener / Tooltip / Cursor）；不影响布局。
 class TouchListener : public ModifierNode {
   public:
     explicit TouchListener(std::function<void(const TouchEvent &)> on_touch) : on_touch_(std::move(on_touch)) {}

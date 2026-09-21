@@ -68,7 +68,7 @@ class PaddingEdges : public ModifierNode {
 
 /// @brief Flex 权重修饰：在 Row/Column 中按权重瓜分主轴剩余空间（对应 Expand / Flutter `Expanded`）。
 /// 权重 0 表示不扩展（仅占内容尺寸）。组合在 widget 的 `modifier` 上，与 flex 布局正交。
-/// 自身不改变子节点尺寸，仅作为父级 flex 分配的依据（由 `Modifier::flexWeight()` 读取）。
+/// 自身不改变子节点尺寸，仅作为父级 flex 分配的依据（由 `Modifier::flex_weight()` 读取）。
 class FlexWeight : public ModifierNode {
   public:
     explicit FlexWeight(float weight) : weight_(weight) {}
@@ -95,9 +95,9 @@ class SizeModifier : public ModifierNode {
     auto set_width(float w) -> void { w_ = w; }
     /// @brief 设置固定高度（-1 表示不约束，沿用子节点尺寸）。
     auto set_height(float h) -> void { h_ = h; }
-    /// @brief 沿主轴填充父级可用宽度（min=max=约束上限）。
+    /// @brief 沿对应轴（宽）填充父级可用宽度（min=max=约束上限）。
     auto set_fill_w(bool b) -> void { fill_w_ = b; }
-    /// @brief 沿主轴填充父级可用高度（min=max=约束上限）。
+    /// @brief 沿对应轴（高）填充父级可用高度（min=max=约束上限）。
     auto set_fill_h(bool b) -> void { fill_h_ = b; }
 
     [[nodiscard]] auto kind() const -> Kind override { return Kind::Layout; }

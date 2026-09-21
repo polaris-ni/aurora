@@ -43,9 +43,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include "aurora/core/a11y_diff.h"
 #include "aurora/core/a11y_provider.h"
 #include "aurora/core/a11y_text.h"
+#include "aurora/widget/a11y_diff.h"
+#include "aurora/widget/a11y_tree.h"
 
 namespace aurora::detail {
 

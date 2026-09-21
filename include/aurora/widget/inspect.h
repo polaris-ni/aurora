@@ -31,7 +31,7 @@ namespace aurora {
  * @brief 把控件树拍平成「布局盒表」（specification/03-layout-render.md §8.4）。
  *
  * 用途：`attribute_diff_regions` 需要知道每个控件的位置与类型，但它刻意只接受纯值数据
- * （`render/` 不得反向依赖 `widget/`）。本函数是二者的桥：把树降级为表。
+ * （不引入 `widget/` 的具体控件类型）。本函数是二者的桥：把树降级为表。
  *
  * **输出顺序即先序（pre-order）**，这一点是契约的一部分 —— 归因遇到交叠面积相同的候选时，
  * 取 DFS 序更靠后者（= 更深的后代）。因此不要对返回的 vector 重新排序。

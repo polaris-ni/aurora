@@ -28,14 +28,13 @@ struct BottomNavBarProps {
     int selected_index = 0;
     std::function<void(int)> on_select;
     float bar_height = 64.0F;
-    float selected_color = 0.0F;  ///< 占位：实际配色在 on_paint 内由 selected_index 决定
 };
 
 /**
  * @brief 底部导航栏（Material 风格）：等分宽度的若干 tab，选中态高亮。
  *
  * 自身为单控件（非容器），点击命中对应 tab 触发 `on_select(index)`。图标由
- * `BottomNavItem::icon_` 绘制器以 `Painter` 回调绘制，文案以 `Text` 节点绘制。
+ * `BottomNavItem::icon` 绘制器以 `Painter` 回调绘制，文案以 `Text` 节点绘制。
  * 选中态由 `selected_index` 驱动重绘，宿主通常以 `State<int>` 持有并重建页面。
  *
  * 采用继承式双模 API：`BottomNavBarProps` 字段即本控件公有字段。

@@ -3781,7 +3781,7 @@
           "type": "int"
         },
         {
-          "default": "2",
+          "default": "1",
           "json_type": "integer",
           "minimum": "1",
           "name": "columns",
@@ -3884,7 +3884,7 @@
           "type": "number"
         },
         "columns": {
-          "default": "2",
+          "default": "1",
           "description": "列数",
           "minimum": "1",
           "type": "integer"

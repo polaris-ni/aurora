@@ -15,7 +15,7 @@ namespace aurora {
  * - `> 0`：等待该毫秒数（帧节流剩余预算 / 距最近定时任务到期的时间）。
  *
  * @param has_dirty        有绘制脏/布局脏（下一帧需要渲染）。
- * @param anim_active      有运行中动画（下一帧需要 tick + 渲染）。
+ * @param anim_active      有运行中动画或本帧实际发生渲染（下一帧需要 tick + 渲染）。
  * @param next_deadline_ms Scheduler 最近到期任务的剩余毫秒；< 0 表示无定时任务。
  * @param frame_budget_ms  帧预算（1000/max_fps）；<= 0 表示不限帧率（活跃帧不节流）。
  * @param elapsed_ms       本帧已消耗毫秒（帧起点到决策点）。

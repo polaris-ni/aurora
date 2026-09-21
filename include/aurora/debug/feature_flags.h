@@ -1,6 +1,6 @@
 #pragma once
 
-// 编译期 feature 宏开关的运行时查询门面（specification/06-app-platform.md §11.2）。
+// 编译期 feature 宏开关的运行时查询门面（specification/06-app-platform.md §11）。
 //
 // 设计要点：
 // - **归一化镜像**：全部 AURORA_* feature 宏的取值只在 feature_flags.cpp 单点收口

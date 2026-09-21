@@ -759,7 +759,7 @@ class Scroll : public Container, public ScrollProps {
     std::unique_ptr<Painter> content_;  ///< 滑动窗口离屏缓冲（尺寸 = 视口宽 × 视口高×(1+2×overscan)，与滚动偏移无关）
     bool content_valid_ = false;  ///< 离屏缓冲是否需要整体重建（首建 / 内容尺寸变化 / 重锚点）
     std::uint64_t content_raster_gen_ = 0;  ///< 离屏缓冲栅格化时的光栅状态世代（AA 模式 / 默认字体变更须整块重录）
-    bool scrolling_ = false;  ///< 本帧是否由滚动驱动（=true 时仅 blit，不重录内容）
+    bool scrolling_ = false;  ///< 本帧是否由滚动驱动（=true 时走增量重锚路径：长内容按条带重录，见 :292 / :345-375）
     bool content_dirty_ = true;  ///< 内容子树自上次栅格化后是否变化（由 on_descendant_dirty 置位；首帧必重录）
     Rect dirty_band_{.origin = Point{.x = 0.0F, .y = 0.0F},
                      .size = Size{.width = 0.0F, .height = 0.0F}};  ///< 后代绘制标脏合并的脏带（缓冲局部坐标）

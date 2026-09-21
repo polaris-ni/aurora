@@ -18,8 +18,10 @@ function(aurora_add_tool _name _src)
     add_executable(${_name} ${_src})
     # 统一配置：链接 aurora + C++20 + 复用消费者 PCH + 告警标志（见 AuroraUtils.cmake）。
     aurora_setup_consumer_target(${_name})
-    # 共享头搜索路径：tools/include 下的 known_enums.h / jsonrpc_io.h / api_schema.h
-    # 等被多个工具复用，统一注入避免逐个目标手写。
+    # 共享头搜索路径：tools/include 下的 10 个跨工具复用头
+    #（api_json_merge.h / api_schema.h / code_style.h / command_listing.h / json_file.h /
+    #  known_enums.h / lsp_document.h / lsp_features.h / lsp_schema.h / toml_lines.h），
+    # 统一注入避免逐个目标手写。
     target_include_directories(${_name} PRIVATE "${CMAKE_SOURCE_DIR}/tools/include")
 endfunction()
 
@@ -179,7 +181,7 @@ aurora_add_tool(aurora_cli tools/servers/aurora_cli.cpp)
 aurora_add_tool(aurora_lsp tools/servers/aurora_lsp.cpp)
 
 # 注：原 tools/ai_compat_test（AI 兼容性批量验证可执行）已移除 —— 其 fixture 管线
-# （from_json → validate_ui → to_code）由 tests/unit/utest_ai_compat.cpp 完整覆盖，且后者
+# （from_json → validate_ui → to_code）由 tests/integration/itest_ai_compat.cpp（:75 起的多个 AURORA_TEST_CASE）完整覆盖，且后者
 # 改为目录遍历后是前者的超集（另含纯内存用例）。保留两份属重复实现。
 
 # 渲染基准：HeadlessSurface + Painter 多矩阵计时（非 CTest 断言，仅性能基线）。

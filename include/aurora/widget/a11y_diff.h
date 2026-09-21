@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "aurora/core/accessibility.h"
+#include "aurora/widget/a11y_tree.h"
 
 namespace aurora::a11y {
 

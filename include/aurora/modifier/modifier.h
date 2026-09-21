@@ -176,7 +176,7 @@ class Modifier {
         return cc;
     }
 
-    /// @brief 视觉偏移：把内容按 (dx,dy) 平移，不改变布局/命中。
+    /// @brief 视觉偏移：把内容按 (dx,dy) 平移，不改变布局尺寸；命中测试的平移量与绘制保持一致（命中区随 offset 移动）。
     [[nodiscard]] auto offset(float dx, float dy) const -> Modifier {
         Modifier cc = *this;
         cc.nodes_.push_back(std::make_shared<OffsetNode>(dx, dy));
@@ -229,7 +229,8 @@ class Modifier {
         return cc;
     }
 
-    /// @brief 原始多点触摸流：每次 `TouchEvent` 派发到该 widget 时回调完整事件（不消费命中）。
+    /// @brief 原始多点触摸流：每次 `TouchEvent` 派发到该 widget 时回调完整事件。
+    /// 当前实现中 Input 类节点一经命中即返回自身，会拦截向子节点下探（含 TouchListener / Tooltip / Cursor）。
     /// 用于上层自定义并发交互（多指手势、自定义转场等）。
     [[nodiscard]] auto touch(std::function<void(const TouchEvent &)> on_touch) const -> Modifier {
         Modifier cc = *this;
@@ -306,7 +307,7 @@ class Modifier {
         float w = 0.0F;
         for (const auto &n : nodes_) {
             if (n) {
-                w = n->flex_weight();  // 非 FlexWeight 返回 0，覆盖式取最后一个
+                w = n->flex_weight();  // 非 FlexWeight 返回 0，取首个正权重即返回
                 if (w > 0.0F) {
                     return w;
                 }

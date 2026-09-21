@@ -1,6 +1,6 @@
 # 布局与渲染（layout / render / image / media）
 
-> 覆盖 `include/aurora/layout/`、`render/`、`image/`、`media/`（`render/` 顶层 16 个头，另有 `render/detail/` 下 3 个头——`gamma_lut.h`、`paint_timing.h`、`painter_simd.h`——与 `render/rhi/` 下 2 个头——`rhi_backend.h`、`software_rhi.h`——合计 21）。
+> 覆盖 `include/aurora/layout/`、`render/`、`image/`、`media/`（`render/` 顶层 16 个头，另有 `render/detail/` 下 4 个头——`gamma_lut.h`、`gpu_layer.h`、`paint_timing.h`、`painter_simd.h`——与 `render/rhi/` 下 5 个头——`rhi_backend.h`、`software_rhi.h`、`gpu_gl_rhi.h`、`rhi_frame_sink.h`、`wgpu_rhi.h`——合计 25）。
 > 布局协议以 `src/aurora/layout/flex_layouter.cpp` 的 `FlexLayouter::layout` 与 `include/aurora/widget/grid.h` 的 `Grid::on_layout` **实现为准**。
 > 基础类型 `Point` / `Size` / `Rect` / `EdgeInsets` / `Length` / `Constraints` 定义见 [`01-core.md`](01-core.md) §2，本文只写其布局语义。
 
@@ -15,7 +15,7 @@
 | 离屏与快照 | `render/offscreen.h`、`window/surface.h`（`HeadlessSurface`） |
 | 增量渲染与缓存 | `render/dirty_region.h`、`render/snapshot_diff.h`、`render/image_cache.h`（职责见 §8.4） |
 | 显示列表 | `render/display_list.h`（唯一绘制指令源，见 §8.6） |
-| RHI 后端抽象 | `render/rhi/rhi_backend.h`、`render/rhi/software_rhi.h`（回放目标，见 §8.6） |
+| RHI 后端抽象 | `render/rhi/rhi_backend.h`、`render/rhi/software_rhi.h`、`render/rhi/gpu_gl_rhi.h`、`render/rhi/rhi_frame_sink.h`（回放目标，见 §8.6 / §8.7） |
 | 图像编解码 | `image/image_codec.h` |
 | 媒体播放 | `media/`（`video_player.h`、`video_controls.h`、`video_source.h`、`image_sequence_source.h`） |
 
@@ -70,6 +70,7 @@ struct Flex {
     CrossAxisAlignment cross_axis;   // Start | Center | End | Stretch
     float gap;                       // 相邻子项间距（像素），默认 0
     MainAxisSize main_axis_size;     // Min（默认）| Max
+    bool rtl = false;                // 书写方向镜像（RTL）；由 Row/Column 按 Directionality 注入，见 §3.7
 };
 ```
 
@@ -164,7 +165,7 @@ for i in 0..n:
 origin.main = container_main - (origin.main + size.main)
 ```
 
-反向一律使用 `FlexDirection` 的 `Reverse` 取值表达。
+反向一律使用 `FlexDirection` 的 `Reverse` 取值表达。注意 RTL 镜像（`Flex::rtl`，见 §3.1）是**另一套并存机制**：它由 Row/Column 按 `Directionality` 注入，在定位完成后对最终 rect 做整体水平镜像，不依赖 `Reverse` 取值，与 `Reverse` 可叠加生效（详见 `FlexLayouter::layout`）。
 
 ### 3.8 交叉轴对齐
 
@@ -175,6 +176,8 @@ origin.main = container_main - (origin.main + size.main)
 | `End` | `container_cross - size_i.cross` | `size_i.cross` |
 | `Stretch` | `0` | `container_cross`（强制拉伸填满） |
 | `Baseline` | `max_above - b_i` | `size_i.cross`（不拉伸） |
+
+> 注：上述 `cross_pos` 计算后还经 `std::max(cross_pos, 0.0F)` 下界钳制，结果为负时取 0（见 `FlexLayouter::cross_axis_align_pass`）。
 
 **`Stretch` 语义**：子项交叉轴尺寸被强制设为 `container_cross`，无论其内容尺寸。若 `container_cross` 由 `P_min_cross` 撑大（如父 `min.width = 80`），子项也被拉伸到该值；子项同时受自身 `width` / `height` 等显式约束夹取。
 
@@ -308,9 +311,9 @@ for col in 0..cols:
 - `Constraints`：父对子的尺寸约束；子必须 `constrain()` 回落到约束内。
 - `Length`：强类型尺寸。`Length::fixed(px)` / `wrap()` / `expand()` / `ratio(f)`，等价工厂 `au::px(v)` / `au::percent(f)` / `au::fill()` / `au::auto_length()`。
 - `EdgeInsets`：边距与内边距。
-- `Alignment`：`TopLeft` `TopCenter` `TopRight` `CenterLeft` `Center` `CenterRight` `BottomLeft` `BottomCenter` `BottomRight`（`widget/alignment.h:19`）。
+- `Alignment`：`TopLeft` `TopCenter` `TopRight` `CenterLeft` `Center` `CenterRight` `BottomLeft` `BottomCenter` `BottomRight`（`widget/alignment.h`）。
 - `Flex` / `FlexLayouter`：两遍求解（先宽后高），方向与对齐语义见 §3。
-- `LayoutEngine` / `LayoutBox`（`layout/layout_engine.h`、`layout/layout_box.h`）：静态布局入口。`LayoutEngine::layout(Widget& root, const Constraints&, const BuildContext& = {})` 驱动 `Widget::layout` 两阶段布局，结果写入各 widget 的 `bounds` / `size`；`LayoutEngine::layout_to_box(Node& root, const Constraints&, ...)` 布局后一次性产出 `LayoutBox` 树（每盒含 `rect` + 收到的 `constraints` + `children`），供命中测试、调试快照与无头渲染复用；`LayoutEngine::build_box(const Node&)` 仅从已布局的 `Node` 树收集几何，不施加约束。
+- `LayoutEngine` / `LayoutBox`（`layout/layout_engine.h`、`layout/layout_box.h`）：静态布局入口。`LayoutEngine::layout(Widget& root, const Constraints&, const BuildContext& = {})` 驱动 `Widget::layout` 两阶段布局，结果写入各 widget 的 `bounds` / `size`；`LayoutEngine::layout_to_box(Node& root, const Constraints&, ...)` 布局后一次性产出 `LayoutBox` 树（每盒含 `rect` + `children`；`constraints` 字段预留，当前不入盒），供命中测试、调试快照与无头渲染复用；`LayoutEngine::build_box(const Node&)` 仅从已布局的 `Node` 树收集几何，不施加约束。
 
 ```cpp
 au::Text a{ au::TextProps{ .content = "A" } };
@@ -349,7 +352,7 @@ au::Column{}
 | `TextAlign` | `Left` `Right` `Center` `Start` `End` `Justify` | `Text` / `RichText` 文本对齐。`Justify` 仅对多行文本的非末行按词均分铺满整行宽度；单行等同 `Left` |
 | `TextOverflow` | `Clip` `Ellipsis` `Fade` | 超出 `max_lines` 时的处理。`Fade` 在 `Painter` 不支持时降级为 `Clip` |
 | `FontWeight` | `Thin(100)` `ExtraLight(200)` `Light(300)` `Normal(400)` `Medium(500)` `SemiBold(600)` `Bold(700)` `ExtraBold(800)` `Black(900)` | 字重，数值即 Flutter 同名词重 |
-| `FontStyle` | `Normal` `Italic` | 字形风格。`Italic` 经 GDI `LOGFONT.lfItalic` 生效（Windows/GDI）；非 GDI 回退路径不倾斜 |
+| `FontStyle` | `Normal` `Italic` | 字形风格。`Italic` 经 FreeType `FT_Set_Transform` 仿斜（跨平台一致，见 §8.2） |
 | `TextDecoration` | `None` `Underline` `Overline` `LineThrough`（可按位 `\|` 组合） | 文本装饰线 |
 | `MainAxisSize` | 语义见 §3.1 / §3.5 | `Column` / `Row` 主轴尺寸策略 |
 | `MainAxisAlignment` | 取值见 §3.1，公式见 §3.6 | `Column` / `Row` 主轴对齐 |
@@ -372,7 +375,7 @@ au::Column{}
 
 ### 8.1 Painter
 
-`Painter`（`render/painter.h:31`）是**软件栅格**绘制内核，跨平台零依赖，不使用 GPU。
+`Painter`（`render/painter.h`）是**软件栅格**绘制内核，跨平台零依赖，不使用 GPU。
 
 **帧缓冲与状态**
 
@@ -436,7 +439,7 @@ au::Column{}
 
 **高 DPI**
 
-`set_scale(float)` / `scale()`：高 DPI 下把 dp 坐标几何放大到物理像素帧缓冲。像素级写入（`blend_pixel` / `draw_text`）直接落在物理像素，不再乘 scale。
+`set_scale(float)` / `scale()`：高 DPI 下把 dp 坐标几何放大到物理像素帧缓冲。像素级写入：`blend_pixel` 直接落在物理像素、不再乘 scale；`draw_text` 的**文本原点**仍先按 dp→物理像素换算（`origin × scale_`）再光栅，只有**字形位图本身**不再二次缩放（见 `Painter::draw_text`）。
 
 **显示列表**
 
@@ -462,7 +465,7 @@ au::Column{}
 
 **抗锯齿**：`enum class TextAAMode { Supersample, ClearType }` 加进程级 `set_text_aa_mode(mode)` / `text_aa_mode()`，默认 `Supersample`。`Supersample` 用 `FT_RENDER_MODE_NORMAL` 输出 A8 灰度覆盖度，与背景无关；`ClearType` 用 `FT_RENDER_MODE_LCD` 输出 3× 水平 RGB 子像素覆盖度，经 `Painter::blend_subpixel` 逐通道合成，**仅当文本不透明时启用**，半透明或字体不可用时自动回退 `Supersample`。
 
-**光栅状态世代**：`FontEngine::raster_generation()` 返回全局计数，`set_text_aa_mode` 与三个字体注入接口（换用不同字面同样改变字形光栅结果）在**值真正变化**时自增它。控件的 Display List 与离屏层缓存在录制/生成那一刻固化了 AA 模式与字面，而 `Widget::mark_needs_paint()` 只沿父链向上传播失效、不触及后代缓存——故控件必须把本世代纳入缓存命中条件（`Widget::paint` 已内置），否则切换后后代仍回放旧光栅，表现为「切换瞬间无变化、过一会儿才随无关失效零星生效」。字形图集键已含 AA 模式与 `px`，世代失效只触发重录、不产生脏条目。
+**光栅状态世代**：`FontEngine::raster_generation()` 返回全局计数。三个字体注入接口（`set_default_font` / `register_font` / `register_font_from_memory`，换用不同字面同样改变字形光栅结果）**无条件**自增它；`set_text_aa_mode` 仅在写入值真正变化时自增（同值写入短路返回）。控件的 Display List 与离屏层缓存在录制/生成那一刻固化了 AA 模式与字面，而 `Widget::mark_needs_paint()` 只沿父链向上传播失效、不触及后代缓存——故控件必须把本世代纳入缓存命中条件（`Widget::paint` 已内置），否则切换后后代仍回放旧光栅，表现为「切换瞬间无变化、过一会儿才随无关失效零星生效」。字形图集键已含 AA 模式与 `px`，世代失效只触发重录、不产生脏条目。
 
 **排版选项（`TextLayoutOpts`）**：`measure_width` / `caret_x` / `hit_test_char` / `draw_text` 均提供接受 `TextLayoutOpts` 的重载，携带 `letter_spacing`（相邻字形间间距，整串共 `n-1` 次）、`word_spacing`（词间距，仅空格后追加）、`italic`（经 FreeType `FT_Set_Transform` 仿斜）。统一 opts 保证度量、光标、命中、绘制四者完全一致。
 
@@ -535,7 +538,7 @@ au::Column{}
 - `render_to_image`：与 `render_to_png` 同源同结果，但不落盘，直接返回 RGBA8 内存图 —— 供需要在进程内二次消费像素的路径使用（如快照比对、MCP `compare_snapshot`）。`render_to_png` 现为其薄壳（渲染 + 写出）。
 - `render_to_logical_snapshot`：返回平台无关的**逻辑快照** JSON（结构树 + 盒模型），供 AI 在无头环境校验。
 
-`Scene::render_to_png(path, width, height)`（`app/scene.h:29`）与 `Application::render_to_png(path)`（`app/application.h:224`）是无头便捷封装。
+`Scene::render_to_png(path, width, height)`（`app/scene.h`）与 `Application::render_to_png(path)`（`app/application.h`）是无头便捷封装。
 
 **其余渲染支撑头**（`render/`，公开）：`dirty_region.h` 提供 `DirtyRegionTracker`——收集脏矩形并把重叠项合并为并集，条数超上限（默认 `16`，可经 `set_max_rects` 调整）即退化为整帧脏（`mark_all` / `is_full`），以 `rects()` / `merged_bounds()` 出结果，衔接 §8.3 `set_present_dirty` 的增量上屏；`snapshot_diff.h` 提供 `compare_snapshots(baseline, current, tolerance = 0) -> SnapshotDiff`——逐像素比对两张 RGBA8 快照，产出差异像素数、最大通道差、差异占比与差异可视化图，`SnapshotDiff::passed(max_ratio)` 按阈值判定通过，供 golden 回归与 `aurora-cli snapshot --compare` 使用；`image_cache.h` 提供 `ImageCache`——进程级单例（`instance()`）的按路径 LRU 解码缓存（`get` / `put` / `remove` / `clear`，字节上限 `set_max_bytes`，解码失败不缓存），`count()` / `hit_count()` 供诊断与性能覆盖层读取。
 
@@ -776,7 +779,7 @@ class RhiBackend {
 
 - 访问器：`play_button()` / `time_text()` / `mute_button()`。
 - 虚函数：`build_children()` 重建子控件布局。
-- 静态工具：`format_time(long long ms)`。
+- 类内私有辅助：`format_time(long long ms)`（声明于 `private:` 段，子类与外部均不可直接调用）。
 
 ### 9.4 音频图（media/audio.h）
 

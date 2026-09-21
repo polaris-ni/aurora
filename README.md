@@ -4,7 +4,7 @@
 渲染，不依赖 GPU；以编译型静态库交付。
 
 - 单一入口头：`#include "aurora/aurora.h"`，命名空间 `namespace aurora;`（推荐别名 `namespace au = aurora;`）
-- 当前版本：`1.0.0-alpha.1`（早期预览开发版，**尚不构成 API 稳定性承诺**）
+- 当前版本：`1.0.0-alpha.8`（早期预览开发版，**尚不构成 API 稳定性承诺**；事实源见 `CHANGELOG.json` 的 `currentVersion`）
 - 运行期版本常量：`AURORA_VERSION_STRING`（`include/aurora/core/version.h`）
 
 ## 特性总览

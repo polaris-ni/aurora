@@ -26,25 +26,25 @@
 
 ```cpp
 struct Event {
-    bool handled = false;   // 是否已被消费（停止冒泡）
+    bool is_handled = false;   // 是否已被消费（停止冒泡）
 };
 ```
 
-所有事件携带 `handled` 标志。组件处理方法接收**非 const** 事件引用，可写 `e.handled = true` 消费事件，阻止继续向上冒泡。
+所有事件携带 `is_handled` 标志。组件处理方法接收**非 const** 事件引用，可写 `e.is_handled = true` 消费事件，阻止继续向上冒泡。
 
 ### 2.2 具体事件
 
 | 事件 | 字段 | 位置 |
 |:---|:---|:---|
-| `MouseEvent` | `position`（全局窗口逻辑坐标，由 Surface 后端写入）、`local_position`（相对当前控件的本地坐标，由 `EventDispatcher` 写入）、`action`、`button` | `event.h:70` |
-| `KeyEvent` | `key`、`action`（`KeyAction::Down` / `Up`）、`modifiers` | `event.h:82` |
-| `ScrollEvent` | `position`、`delta_x`（右为正）、`delta_y`（**上为正**）、`remaining_y`（消费后未用尽的垂直余量，与 `delta_y` 同单位同号，默认 0） | `event.h:89` |
-| `TextInputEvent` | `text`（UTF-8 文本片段） | `event.h:103` |
-| `TextCompositionEvent` | `preedit`（UTF-8 预编辑串，空 = 组合结束/取消）、`cursor_index`（组合光标，**preedit 内码点下标**）、`sel_start` / `sel_end`（待转换选区，含尾；无选区时 `sel_end == AURORA_NO_SELECTION`）、`committed`（本次上屏文本，UTF-8） | `event.h:122` |
-| `FileDropEvent` | `position` 与拖放文件信息 | `event.h:137` |
-| `TouchEvent` | `TouchPoint{id, position, prev_position, active}` 集合 | `event.h:151` |
+| `MouseEvent` | `position`（全局窗口逻辑坐标，由 Surface 后端写入）、`local_position`（相对当前控件的本地坐标，由 `EventDispatcher` 写入）、`action`、`button` | `event.h` |
+| `KeyEvent` | `key`、`action`（`KeyAction::Down` / `Up`）、`modifiers` | `event.h` |
+| `ScrollEvent` | `position`、`delta_x`（右为正）、`delta_y`（**上为正**）、`remaining_y`（消费后未用尽的垂直余量，与 `delta_y` 同单位同号，默认 0） | `event.h` |
+| `TextInputEvent` | `text`（UTF-8 文本片段） | `event.h` |
+| `TextCompositionEvent` | `preedit`（UTF-8 预编辑串，空 = 组合结束/取消）、`cursor_index`（组合光标，**preedit 内码点下标**）、`sel_start` / `sel_end`（待转换选区，含尾；无选区时 `sel_end == AURORA_NO_SELECTION`）、`committed`（本次上屏文本，UTF-8） | `event.h` |
+| `FileDropEvent` | `position` 与拖放文件信息 | `event.h` |
+| `TouchEvent` | `TouchPoint{id, position, prev_position, is_active}` 集合 | `event.h` |
 
-枚举：`MouseButton{Left, Right, Middle}`、`MouseAction`（`event.h:20`）、`KeyAction{Down, Up}`、`ModifierKey`（`event.h:31）、`KeyCode`（`keycode.h:12`）。
+枚举：`MouseButton{Left, Right, Middle}`、`MouseAction`（`event.h`）、`KeyAction{Down, Up}`、`ModifierKey`（`event.h）、`KeyCode`（`keycode.h`）。
 
 **滚动方向约定**：`ScrollEvent::delta_y` 正方向为「向上滚动」（应露出上方内容、offset 减小）。所有滚动控件统一用 `offset_ - e.delta_y * step`；误用 `+` 会导致方向相反。
 
@@ -58,7 +58,7 @@ struct Event {
 void MyWidget::on_pointer_event(MouseEvent &e) {
     if (e.action == MouseAction::Press) {
         do_press();
-        e.handled = true;     // 命中即消费
+        e.is_handled = true;     // 命中即消费
     }
 }
 ```
@@ -73,12 +73,12 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 | 选区 | `sel_end` **含尾**；无待转换选区时 `sel_end == AURORA_NO_SELECTION`（`sel_end < sel_start` 时控件退化为单点选区，不报错） |
 | 结束/取消 | `preedit` 为空即组合结束或取消；`committed` 只在本次确有文本上屏时非空 |
 | 数据模型纯净 | **preedit 不进 `value()`**。`TextInput` / `RichTextEdit` 只在绘制与测量期把 preedit 插到光标处（`composed_text()`），故 `value()`、序列化与 golden 始终不含半截拼音 |
-| 路由 | 只派发给**当前焦点控件**，不冒泡、不经命中链（§3.1）；控件覆写 `on_text_composition`（`widget/widget.h:485`），默认实现直接消费 |
+| 路由 | 只派发给**当前焦点控件**，不冒泡、不经命中链（§3.1）；控件覆写 `on_text_composition`（`widget/widget.h`），默认实现直接消费 |
 | 失焦 | 失焦即取消未上屏的组合（平台惯例，避免 preedit 残留在旧控件里） |
 
 典型序列（微软拼音输入「你好」）：`preedit="nihao",cursor=5` → `preedit="你好",cursor=2,sel=[0,2)` → `preedit="",committed="你好"`。
 
-**候选窗定位**：输入法候选列表必须落在插入点旁，而非屏幕左上角。控件侧钩子为 `Widget::composition_caret_bounds()`（`widget/widget.h:494`，默认返回 `focus_bounds_`，即自身焦点框；文本控件覆写为 **preedit 光标处的零宽竖盒**），宿主经 `Surface::set_composition_caret_provider()`（`window/surface.h:362`）把它交给后端，桥内按 DPI 缩放换算成像素并 `ClientToScreen`。该盒坐标为**窗口逻辑 dp**。
+**候选窗定位**：输入法候选列表必须落在插入点旁，而非屏幕左上角。控件侧钩子为 `Widget::composition_caret_bounds()`（`widget/widget.h`，默认返回 `focus_bounds_`，即自身焦点框；文本控件覆写为 **preedit 光标处的零宽竖盒**），宿主经 `Surface::set_composition_caret_provider()`（`window/surface.h`）把它交给后端，桥内按 DPI 缩放换算成像素并 `ClientToScreen`。该盒坐标为**窗口逻辑 dp**。
 
 > ⚠️ `composition_caret_bounds()` 的返回值在**首帧绘制之后**才有效——`focus_bounds_` 由 `Widget::paint` 写入（控件无几何缓存，见 §2.3）。空树/未绘制时返回退化矩形，后端据此退化为「不移动候选窗」。
 
@@ -98,7 +98,7 @@ Win32 侧的取舍与实现细节（IMM32 而非 TSF、`WM_IME_*` 认领集、`W
 
 ### 3.1 EventDispatcher
 
-`EventDispatcher`（`event/dispatcher.h:31`）提供 **6 个静态 `dispatch(Widget &root, …)` 重载** + **1 个实例级鼠标入口**；所有派发入口首参均为派发起点根 widget `root`，命中测试与命中链局限于该子树：
+`EventDispatcher`（`event/dispatcher.h`）提供 **6 个静态 `dispatch(Widget &root, …)` 重载** + **1 个实例级鼠标入口**；所有派发入口首参均为派发起点根 widget `root`，命中测试与命中链局限于该子树：
 
 | 入口 | 说明 |
 |:---|:---|
@@ -108,11 +108,11 @@ Win32 侧的取舍与实现细节（IMM32 而非 TSF、`WM_IME_*` 认领集、`W
 | `static dispatch(Widget& root, ScrollEvent&) -> bool` | 滚动事件：沿命中链**自最深向根**找 `wants_scroll()` 者逐个派发，余量经 `remaining_y` 上冒（§3.3） |
 | `static dispatch(Widget& root, FileDropEvent&) -> bool` | 文件拖放事件（不冒泡，仅交给命中目标） |
 | `static dispatch(Widget& root, TextInputEvent&, FocusManager&) -> bool` | 文本输入（只路由到焦点控件；无焦点返回 `false`） |
-| `static dispatch(Widget& root, TextCompositionEvent&, FocusManager&) -> bool` | IME 组合态同步推送（`event/dispatcher.h:96`）：与文本输入同径——**只路由到当前焦点控件**的 `on_text_composition`，不经命中链、不冒泡（组合串属于正在输入的编辑器，上冒只会让容器误吞）；无焦点返回 `false` |
+| `static dispatch(Widget& root, TextCompositionEvent&, FocusManager&) -> bool` | IME 组合态同步推送（`event/dispatcher.h`）：与文本输入同径——**只路由到当前焦点控件**的 `on_text_composition`，不经命中链、不冒泡（组合串属于正在输入的编辑器，上冒只会让容器误吞）；无焦点返回 `false` |
 
 派发流程：先经 `Widget::hit_test` 找到最深命中的目标组件，再沿父链向上调用处理方法，直到 `handled` 为真或到达根。
 
-`TouchDispatcher`（`dispatcher.h:145`）处理触控路径：实体方法 `dispatch(Widget& root, TouchEvent&, FocusManager* = nullptr) -> bool`，按 `TouchPoint::id` 做指针捕获，原始多点流全链广播 + 合成 `MouseEvent` 手势流冒泡，焦点行为与鼠标路径一致。
+`TouchDispatcher`（`dispatcher.h`）处理触控路径：实体方法 `dispatch(Widget& root, TouchEvent&, FocusManager* = nullptr) -> bool`，按 `TouchPoint::id` 做指针捕获，原始多点流全链广播 + 合成 `MouseEvent` 手势流冒泡，焦点行为与鼠标路径一致。
 
 ### 3.2 命中测试
 
@@ -139,9 +139,11 @@ Win32 侧的取舍与实现细节（IMM32 而非 TSF、`WM_IME_*` 认领集、`W
 
 ### 4.1 FocusManager
 
-`FocusManager`（`event/focus.h:32`）持 `root_` 与 `focused_`，接口：`set_root(Widget*)`、`set_focus(Widget*, FocusDirection)`、`move_focus(FocusDirection)`、`focused()`。
+`FocusManager`（`event/focus.h`）持 `root_` 与 `focused_`，接口：`set_root(Widget*)`、`set_focus(Widget*, FocusDirection)`、`request_focus(Widget*)`、`has_focus(const Widget*)`、`clear()`、`move_focus(FocusDirection)`、`focused()`、`set_on_change(cb)`、`push_scope(Widget*)`、`pop_scope()`、`scope_depth()`。
 
-`FocusDirection`（`focus.h:17`）取值 `Forward` `Backward` `Up` `Down` `Left` `Right`。
+`FocusDirection`（`focus.h`）取值 `Forward` `Backward` `Up` `Down` `Left` `Right`。
+
+**焦点作用域栈（模态焦点陷阱）**：`push_scope(subtree)` 把 `move_focus` 的候选集限定在 `subtree` 子树内（Tab 循环不逃出，scope 内自然回卷），并自动把焦点移入子树内首个可聚焦控件（无候选则保持原焦点），同时快照压栈前的焦点供 `pop_scope` 恢复；`pop_scope()` 弹出栈顶作用域并恢复压入前焦点（已回收则清除焦点），空栈为 no-op。供模态弹层（Dialog / Popup / Drawer）打开时配对调用；可嵌套（多层弹层各自 push / pop，恢复顺序与压栈相反）。`scope_depth()` 返回当前作用域深度（0 = 无作用域，Tab 遍历整棵根树）。
 
 **焦点控件的生命周期契约**：`FocusManager` 以裸指针记录焦点控件，**不拥有**它；焦点控件常在自身被重建 / 回收后仍留在记录里（如输入框所在页面被 `push_replacement` 换掉）。故内部与 `HitNode` 同构地附带弱引用守卫（构造时探测是否由 `shared_ptr` 持有，栈 / 成员控件回退为裸指针）。`focused()` / `has_focus()` / `set_focus()` / `move_focus()` 一律经存活视图取用：焦点控件已被回收时 `focused()` 返回 `nullptr`，键盘与文本派发据此安全返回 `false`，**绝不对已释放内存做虚调用**。
 
@@ -177,7 +179,7 @@ Win32 侧的取舍与实现细节（IMM32 而非 TSF、`WM_IME_*` 认领集、`W
 |:---|:---|
 | `PinchRecognizer` | 双指捏合缩放；锁定两个 pointer id，跟踪 `initial_distance_` / `current_distance_` |
 | `RotationRecognizer` | 双指旋转；锁定两个 pointer id，跟踪 `initial_angle_` / `current_angle_` |
-| `DragRecognizer` | 单指拖动（pointer-agnostic）：超 `slop`（默认 8 逻辑 dp）起拖，按 pointer_id 锁定首按点（中途其他指插入不换锁），起拖瞬间按 \|dx\|\>\|dy\| 锁主轴（`DragAxis`）；`delta()` 仅输出锁定主轴分量。`on_mouse` / `on_touch` 双入口（触摸取首个活跃点，单指语义）；纯识别器，不接触动画、不持有 State |
+| `DragRecognizer` | 单指拖动（pointer-agnostic）：超 `slop`（默认 8 逻辑 dp）起拖，按 pointer_id 锁定首按点（中途其他指插入不换锁），起拖瞬间按 \|dx\|\>\|dy\| 锁主轴（`DragAxis`）；`delta()` 起拖后仅输出锁定主轴分量（未起拖或未锁轴时为原始位移）。`on_mouse` / `on_touch` 双入口（触摸取首个活跃点，单指语义）；纯识别器，不接触动画、不持有 State |
 
 `DragRecognizer` 的动画消费方 `DragToDismiss`（跟手 + spring 接管）见 §6.7。
 
@@ -187,9 +189,9 @@ Win32 侧的取舍与实现细节（IMM32 而非 TSF、`WM_IME_*` 认领集、`W
 
 | 类型 | 说明 | 位置 |
 |:---|:---|:---|
-| `DragData` | 拖拽载荷，含 `mime_type`（`"text/plain"`、`"aurora/widget"` 或自定义） | `drag_drop.h:16` |
-| `DragSession` | 一次拖拽会话，跟踪 `origin_` 与 `active_` | `drag_drop.h:39` |
-| `DropTargetCallbacks` | 放置目标回调集 | `drag_drop.h:77` |
+| `DragData` | 拖拽载荷，含 `mime_type`（`"text/plain"`、`"aurora/widget"` 或自定义） | `drag_drop.h` |
+| `DragSession` | 一次拖拽会话，跟踪 `origin_` 与 `active_` | `drag_drop.h` |
+| `DropTargetCallbacks` | 放置目标回调集 | `drag_drop.h` |
 
 ---
 
@@ -200,7 +202,7 @@ Win32 侧的取舍与实现细节（IMM32 而非 TSF、`WM_IME_*` 认领集、`W
 | 类型 | 说明 | 头文件 |
 |:---|:---|:---|
 | `AnimationController` | 驱动一条归一化进度（0→1）。`forward(from = -1)` 正向、`reverse()` 反向、`reset(t = 0)` 复位、`value()` 取进度。时长在构造 `AnimationController(duration_seconds, value)` 时确定，**无 `set_duration`** | `animator.h` |
-| `AnimationStatus` | 动画状态枚举 `Dismissed`（进度 0）/ `Forward`（正向播放中）/ `Reverse`（反向播放中）/ `Completed`（进度 1）。`AnimationController::status()` 与 `AnimatedValue::status()` 提供，配套 `is_dismissed()` / `is_completed()` / `is_animating()` | `animator.h` |
+| `AnimationStatus` | 动画状态枚举 `Dismissed`（进度 0）/ `Forward`（正向播放中）/ `Reverse`（反向播放中）/ `Completed`（进度 1）。`AnimationController::status()` 与 `AnimatedValue::status()` 均提供状态查询；其中 `is_completed()` 两者都有，而 `is_dismissed()` / `is_animating()` 仅属 `AnimationController`（`AnimatedValue` 只暴露 `status()` 与 `is_completed()`） | `animator.h` |
 | `Tween<T>` | 补间函数。`Tween<T>(a, b, curve)`，`value(t)` 按曲线在 a→b 间插值；支持 `int` / `float` / `Size` / `Point` / `Color` 等 | `timeline.h` |
 | `Keyframes<T>` | 关键帧序列。`Keyframes<T>(stops)`，每帧 `Stop{time, value}`，**插值严格线性**；`value(t)` 在分段间插值 | `timeline.h` |
 | `Curve` / `Curves` | 缓动曲线。`Curves::linear()` / `ease_in()` / `ease_out()` / `ease_in_out()` / `ease_in_out_cubic()` 等（无 `steps` 工厂） | `easing.h` |
@@ -292,7 +294,7 @@ player.attach(app.animator());
 - **reduce_motion**：主控制器短路直接落端点 → 全轨道一步到位，继承 `AnimationController` 的无障碍语义，编排层零特判；
 - **生命周期**：沿用 `AnimatedValue` 模式——载荷 `shared_ptr` 自持，`attach` 后句柄可离开作用域不悬垂；轨道目标 `State<T>` 为非拥有引用，必须比播放器存活更久；
 - **类型擦除边界**：轨道存储在播放器内部以 `shared_ptr<void>` + apply 函数擦除；公共 API（`track<T>`）全程类型安全，擦除不经接口泄漏；
-- **写序**：同帧多轨道按槽位序写入，无相互依赖的 State 间无顺序假设。
+- **写序**：同帧多轨道按绑定序写入，无相互依赖的 State 间无顺序假设。
 
 ### 6.7 手势驱动动画（DragToDismiss / Dismissible）
 
@@ -301,7 +303,7 @@ player.attach(app.animator());
 **`DragToDismiss`（`event/gesture.h`）**：拖动消除驱动器，内部持有 `DragRecognizer`。
 
 - **跟手 = 直接操作而非动画**：drag 期间 `progress` 逐事件写为「主轴位移 / `travel`（消除行程，逻辑 dp）」，1:1 映射；`reduce_motion` 不干预跟手（无障碍语义：直接操作保持 1:1 响应）。负方向夹取 0，超行程夹取 1。
-- **松手裁决**：`on_release()` 按 `progress ≥ threshold`（默认 0.5）判落点——≥ 阈值 spring 到 1，收敛后触发 `on_dismissed`；否则 spring 回 0（静默，不触发回调）。拖动速度（最近事件位移 / dt 估计，主轴分量）作 spring 初速度：方向与裁决一致保留、相反丢弃。
+- **松手裁决**：`on_release()` 按 `progress ≥ threshold`（默认 0.5）判落点——≥ 阈值 spring 到 1，收敛后触发 `on_dismissed`；否则 spring 回 0（静默，不触发回调）。拖动速度（最近事件位移 / 固定 60Hz 采样假设，主轴分量）作 spring 初速度：方向与裁决一致保留、相反丢弃。
 - **reduce_motion**：spring 阶段单帧直接落端点（与 `AnimationController::tick` 的短路语义同源）。
 - **帧推进**：spring 阶段由使用方每帧 `tick(dt)` 推进（`attach` 之外的独立路径）；跟手阶段 `tick` 为 no-op。
 
@@ -346,13 +348,20 @@ player.attach(app.animator());
 
 `RouteRegistry` 是轻量注册表：`std::map<std::string, std::function<Route(const std::string&)>>`。
 
-**栈深上限守卫**：默认上限 `AURORA_DEFAULT_MAX_NAV_DEPTH = 32`（`navigator.h:23`，`inline constexpr std::size_t`），可经 `set_max_depth` 调整；`push` / `restore` 超过上限时经 `Diagnostics` 降级拒绝，避免无限深栈导致栈溢出 / 渲染雪崩。
+**栈深上限守卫**：默认上限 `AURORA_DEFAULT_MAX_NAV_DEPTH = 32`（`navigator.h`，`inline constexpr std::size_t`），可经 `set_max_depth` 调整；`push` / `restore` 超过上限时经 `Diagnostics` 降级拒绝，避免无限深栈导致栈溢出 / 渲染雪崩。
 
 **深层链接无 query 参数语义**：不引入 route-args 机制，名称段即全部信息。
 
 ### 7.3 Router
 
-`Router`（`navigation/router.h`）是路由注册辅助类。当前未提供 `Router::with` 便捷工厂，请直接构造 `Navigator` 并 `push` / `pop` `Route`。
+`Router`（`navigation/router.h`）是路由注册辅助类。当前未提供 `Router::with` 便捷工厂，请直接构造 `Router` 并登记命名路由。
+
+| 方法 | 说明 |
+|:---|:---|
+| `register_route(name, builder)` | 登记命名路由：`name` → 构建 `Route` 的工厂（`RouteBuilder`） |
+| `has(name)` | 是否已登记该名称 |
+| `build(name)` | 按名称构建 `Route`；未登记返回 `nullopt` |
+| `build_root(name)` | 便捷：构建并取根节点 `Node`；未登记返回空 `Node` |
 
 ### 7.4 Hero 共享元素转场
 

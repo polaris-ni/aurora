@@ -3,7 +3,7 @@
 # ------------------------------------------------------------
 # tests/unit 与 tests/integration 下全部用例 TU 链入单一可执行 aurora_test_runner：
 #   - 全量构建从「每文件一个 exe、各自链接 libaurora」降为一次链接（极速构建的核心）；
-#   - 用例由框架静态注册，main 由框架唯一提供（tests/framework/main.cpp）；
+#   - 用例由框架静态注册，main 由框架唯一提供（tests/framework/test_main.cpp 的 main()）；
 #     测试文件禁止自定义 main()。
 #   - CTest 粒度：每条 add_test = runner --run=<stem>（文件级，进程隔离）。
 #
@@ -43,6 +43,10 @@ if (AURORA_BUILD_TESTS)
         # 校验 codespec 模块映射文档中的文件引用是否仍存在于仓库。
         add_test(NAME check_arch_module_map
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_arch_module_map.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 校验 core/（基础层）公共头未反向依赖任何其他 aurora 模块（ARCHITECTURE.md §2）。
+        add_test(NAME check_core_layer_boundary
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_core_layer_boundary.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
         # 生成物依赖型门禁：须先构建生成器才能跑（CI 必须排在 build 之后）。
         # ⚠️ Emscripten 交叉构建下不注册：二者要调用**宿主可执行**的生成器，而 wasm 产物的

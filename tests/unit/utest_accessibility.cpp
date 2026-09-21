@@ -16,6 +16,7 @@
 #include "aurora/environment/build_context.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/widget/a11y_tree.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/checkbox.h"
 #include "aurora/widget/progress.h"

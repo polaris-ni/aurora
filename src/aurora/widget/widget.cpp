@@ -19,7 +19,7 @@
 
 namespace aurora {
 
-// ---- 无障碍事件上抛（头文件中前置声明的定义点，避免 core/accessibility.h ↔ widget.h 循环包含）----
+// ---- 无障碍事件上抛（`widget.h` 中声明，定义点收在此 TU）----
 auto notify_accessibility_focus_changed(const Widget *target) -> void {
     notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::FocusChanged, .target = target});
 }

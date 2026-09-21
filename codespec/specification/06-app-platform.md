@@ -1,6 +1,6 @@
 # 应用、窗口与平台（app / window / platform / preferences / storage / perf）
 
-> 覆盖 `include/aurora/app/`（14 个头）、`window/`（17 个头）、`preferences/`、`storage/`、`perf/`、`debug/` 与后端 `Surface`（后端清单见 [`03-layout-render.md`](03-layout-render.md) §8.5）。
+> 覆盖 `include/aurora/app/`（20 个头）、`window/`（21 个头）、`preferences/`、`storage/`、`perf/`、`debug/` 与后端 `Surface`（后端清单见 [`03-layout-render.md`](03-layout-render.md) §8.5）。
 > 本文件是应用驱动、帧循环、窗口生命周期、定时任务、平台 Shell、持久化与性能观测的**唯一权威**。
 
 ---
@@ -17,7 +17,7 @@
 | 工具链集成 | `app/generate_ui.h`、`app/hot_reload.h` |
 | 窗口与后端 | `window/` |
 | 偏好持久化 | `preferences/preferences.h` |
-| 存储抽象 | `storage/`（6 个头） |
+| 存储抽象 | `storage/`（7 个头） |
 | 调试门面 | `debug/` |
 
 ---
@@ -177,7 +177,7 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 | 根变化（`Navigator` 切换页面、`run_demo` 换树） | 强制整体重绘，避免停留旧页面 |
 
 - `mark_needs_layout()` 置「布局脏 + 绘制脏」，`mark_needs_paint()` 仅置「绘制脏」。
-- `Widget::on_dirty` 是 `std::function<void(bool)>`（`true` = 含布局脏），经 `install_dirty_sink`（`on_subtree_dirty`）接线整棵树。
+- `Widget::on_dirty` 是控件**自身**挂载的 `std::function<void(bool)>` 回调（`true` = 含布局脏），用于直接持有某控件、单独观察其标脏的场景；它**不参与树级脏传播**。`install_dirty_sink` 仅在控件树**根节点**安装**单一** `on_subtree_dirty`（`void(Widget &, bool)`）汇聚点，而非逐节点整树接线。
 - `enable_dirty_tracking(bool)` 可关闭，回到每帧全量重绘的历史行为；`force_full_redraw()` 供动画 / 视频 / 定时器持续重绘或外部环境突变时强制下一帧全绘。
 - **首帧 `first_frame_ = true` 强制全绘**；重新挂载 / 根变化时自动 `mount` 接线响应式订阅，使 `State` 与修饰变更能标脏重绘。
 
@@ -467,7 +467,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 **桥的位置与生命周期**：`src/aurora/window/detail/win32_ime.h`（`detail::Win32ImeBridge`），由 `Win32Window::Impl` **随窗口构造**、与窗口一一对应（不像 §6.3 的无障碍桥那样惰性激活——IMM32 无查询代价，无输入法时 `WM_IME_*` 一条也不会投递）。`Win32Surface`（GDI）与 `D3D11Surface` 共用同一 `Win32Window` 宿主与同一份桥，故接一次覆盖两路后端。
 
-**两条通道**：桥经 `Hooks{emit, caret_bounds, scale_factor}` 三个回调与宿主对话——`emit` 复用窗口既有的事件单槽（`Impl::handler`，与鼠标/键盘同径，最终落到 `WindowHost::dispatch` → `EventDispatcher`），`caret_bounds` 由 `Surface::set_composition_caret_provider()` 注入（宿主侧查询当前焦点控件的 `composition_caret_bounds()`），`scale_factor` 供 dp→像素换算。`WndProc` 侧把 IME 单独分族：`handle_ime(msg, wp, lp)`（`win32_window.cpp:618`）认领 `WM_IME_STARTCOMPOSITION` / `WM_IME_COMPOSITION` / `WM_IME_ENDCOMPOSITION` / `WM_IME_CHAR` 与 `WM_KILLFOCUS`（失焦取消侧路径），桥返回 `std::nullopt` 表示不处理、回落 `DefWindowProc`。
+**两条通道**：桥经 `Hooks{emit, caret_bounds, scale_factor}` 三个回调与宿主对话——`emit` 复用窗口既有的事件单槽（`Impl::handler`，与鼠标/键盘同径，最终落到 `WindowHost::dispatch` → `EventDispatcher`），`caret_bounds` 由 `Surface::set_composition_caret_provider()` 注入（宿主侧查询当前焦点控件的 `composition_caret_bounds()`），`scale_factor` 供 dp→像素换算。`WndProc` 侧把 IME 单独分族：`handle_ime(msg, wp, lp)`（`win32_window.cpp`）认领 `WM_IME_STARTCOMPOSITION` / `WM_IME_COMPOSITION` / `WM_IME_ENDCOMPOSITION` / `WM_IME_CHAR` 与 `WM_KILLFOCUS`（失焦取消侧路径），桥返回 `std::nullopt` 表示不处理、回落 `DefWindowProc`。
 
 **三条实机才暴露的纪律**（无头 CI 无法验证，由 `tools/verify/win32_ime_live_probe.cpp` 自动段守住）：
 
@@ -489,7 +489,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 ### 9.1 Preferences
 
-`Preferences`（`preferences/preferences.h:65`）是键值持久化门面，类型化读写并带响应式绑定。
+`Preferences`（`preferences/preferences.h`）是键值持久化门面，类型化读写并带响应式绑定。
 
 | 成员 | 说明 |
 |:---|:---|
@@ -508,7 +508,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 ### 9.2 Storage
 
-`Storage`（`storage/storage.h:25`，命名空间 `aurora::storage`）是记录级存储抽象，支持 JSON 与二进制载荷、异步卸载与变更通知。
+`Storage`（`storage/storage.h`，命名空间 `aurora::storage`）是记录级存储抽象，支持 JSON 与二进制载荷、异步卸载与变更通知。
 
 **构造与默认实例**
 
@@ -595,7 +595,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 ## 11 调试门面（`aurora::debug`）
 
-`aurora::debug`（头 `include/aurora/debug/debug_backend.h`，经 `aurora.h` 单一入口暴露）为真实后端调试能力提供统一薄封装入口，不搬迁任何生产子系统引擎（Inspector / Diagnostics / perf 留原地）。其中**调试能力函数**门控 `AURORA_ENABLE_DEBUG`：Release 下不产出调试代码——`capture` 返回 disabled 错误、`surface_state` 返回 unavailable JSON；**输出目录 API**（`set_output_directory` / `output_directory` / `resolve_output_path`）与 **feature 宏运行时查询**（`feature_flags` / `feature_flags_json`）无调试内部依赖，不受该门控、始终可用（见下表与「门控与 ODR 安全」段）。
+`aurora::debug`（头 `include/aurora/debug/debug_backend.h`，经 `aurora.h` 单一入口暴露）为真实后端调试能力提供统一薄封装入口，不搬迁任何生产子系统引擎（Inspector / Diagnostics / perf 留原地）。其中**调试能力函数**门控 `AURORA_ENABLE_DEBUG`：Release 下不产出调试代码——`capture` 返回 disabled 错误、`surface_state` 返回 unavailable JSON；**输出目录 API**（`set_output_directory` / `output_directory` / `resolve_output_path`）与 **feature 宏运行时查询**（`feature_flags` / `feature_flags_json`，声明于独立头 `include/aurora/debug/feature_flags.h`，见下表）无调试内部依赖，不受该门控、始终可用（见下表与「门控与 ODR 安全」段）。
 
 | 能力 | 说明 |
 |:---|:---|
@@ -673,10 +673,10 @@ if (au::platform().is_mobile()) { /* 移动端适配 */ }
 
 | 方面 | 做法 |
 |:---|:---|
-| 事件循环 | 映射到浏览器 `requestAnimationFrame` 循环，而非自旋等待 |
-| 线程模型 | **规划中，未实现**：`au::async` 映射为 Web Worker + `postMessage`、在支持 `SharedArrayBuffer` + `Atomics`（需跨源隔离）时启用真正多线程，均为需求愿景，仓内无任何接线（无 Worker / pthread / SharedArrayBuffer 代码）。当前 `WasmSurface` 仅负责 `<canvas>` 呈现与 rAF 驱动；`ThreadPool` **未做 WASM 适配**——它无条件使用 `std::thread` 与 `std::thread::hardware_concurrency()`（`core/thread_pool.h`，无 `EMSCRIPTEN` 分支），在 Emscripten 下属依赖 pthread / 共享内存的**未验证路径**（非静默降级为单线程），待补平台分支或改为协程驱动 |
+| 事件循环 | **已知限制（待修复）**：`WasmSurface::wait_events` 当前为空实现（`{}`），WASM 后端**无任何 rAF 集成**（仓内无 `requestAnimationFrame` / `set_main_loop` 接线，也无 `emscripten_request_animation_frame_loop`）。宿主不主动驱动帧时，事件循环**退化为忙轮询（busy-poll）**，并非 rAF 驱动的免自旋行为。计划接入 `emscripten_request_animation_frame_loop` 对齐浏览器 rAF/vsync，尚无关线。 |
+| 线程模型 | **规划中，未实现**：`au::async` 映射为 Web Worker + `postMessage`、在支持 `SharedArrayBuffer` + `Atomics`（需跨源隔离）时启用真正多线程，均为需求愿景，仓内无任何接线（无 Worker / pthread / SharedArrayBuffer 代码）。当前 `WasmSurface` 仅负责 `<canvas>` 呈现，**尚无 rAF 驱动**（见「事件循环」行已知限制）；`ThreadPool` **未做 WASM 适配**——它无条件使用 `std::thread` 与 `std::thread::hardware_concurrency()`（`core/thread_pool.h`，无 `EMSCRIPTEN` 分支），在 Emscripten 下属依赖 pthread / 共享内存的**未验证路径**（非静默降级为单线程），待补平台分支或改为协程驱动 |
 | 渲染 | 渲染目标为 `<canvas>` 元素，内部自动选择 |
-| 限制 | 不支持高频指针直通路，自动降级为 `requestAnimationFrame` 轮询，并在 `au::platform().capabilities()` 中声明此限制 |
+| 限制 | 不支持高频指针直通路；当前**无 rAF 轮询降级**（见「事件循环」行已知限制），并在 `au::platform().capabilities()` 中声明此限制 |
 
 应用代码使用相同的 `au::async` / `co_await` API，无需 `#ifdef`。
 

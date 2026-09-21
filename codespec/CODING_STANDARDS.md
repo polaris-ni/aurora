@@ -203,7 +203,7 @@
 **同步流程（强制执行）**：
 
 - 新增公共类 / 结构体时，**必须**在类级别 Doxygen 注释中添加契约标注：
-  - `@note Thread: main-thread only` / `thread-safe` / `thread-safe with mutex` / `thread-safe with rwlock`
+  - `@note Thread: main-thread only` / `thread-safe` / `thread-safe with mutex` / `thread-safe with rwlock`——四者为**规范基值**。具体标注可在基值后追加括号限定（如 `thread-safe (pure value type)` / `thread-safe (pure function)`）；流水线 / 生产者-消费者类对象（如 `media/audio.h`、`render/rhi`）则以一句短自由文本说明各线程角色（如「采集线程 push；渲染线程拉取」），不要求退化为四个基值之一。
   - `@note Side-effects: pure` / `none` / `paints` / `mutates layout`
   - `@note Rebuildable: yes, via from_json` / `no`
 - 修改现有类的线程安全语义、副作用行为或序列化支持时，**必须**同步更新对应标注。
@@ -255,7 +255,7 @@
 **同步流程（强制执行）**：
 
 - 新增模板 / 概念 / 元编程代码时，**必须**确认属于「无法用普通函数表达」的场景。
-- 禁止引入 CRTP、模板基类、深层模板实例化（> 2 层嵌套）；**禁止在头文件中引入 `std::mutex` / `std::shared_mutex` / `std::lock_guard`**。
+- 禁止引入 CRTP、模板基类、深层模板实例化（> 2 层嵌套）。头文件**允许** `#include <mutex>` 并持有 `std::mutex`（及配套 `std::lock_guard`）：`preferences.h` / `app/application.h` / `core/thread_pool.h` / `state/async.h` / `render/image_cache.h` 等多个公共头已这样做，且 `preferences.h` 明确注释其选型——**不**用 `std::shared_mutex` 是因为 MinGW-w64 winpthreads 的 rwlock 在并发写锁竞争下会间歇性返回非零，触发 libstdc++ `__shared_mutex_pthread::lock()` 断言。**避免在头文件中使用 `std::shared_mutex`**（读写锁风险）；确需在头文件暴露 `shared_mutex` 类的场景，须按 §5.1 标注 `@note Thread: thread-safe with rwlock` 并说明选型理由。
 - 如确需引入，**必须**在代码注释中说明为何无法用普通函数替代。
 
 ### 6.4 二层属性划分（固有属性 + 正交 Modifier）
@@ -264,7 +264,7 @@
 - **正交修饰层**：跨切面、可叠加、可 `Reactive` 变化的通用装饰，挂在每个 `Widget::modifier`，作用于**任意**控件。
 - **重叠规则**：优先控件固有属性；`Modifier` 同类项保留用于「给任意控件套一层」的跨切面场景，绘制时 `Modifier` 在外、固有属性在内，可叠加。
 
-**为何保留 `Modifier`（AI 友好）**：装饰能力收敛于**单个 `Modifier` 类型**（约 20 个方法 + `Kind` 枚举可枚举），远少于纯包裹控件模型所需的十余个独立 widget 类型（`Padding` / `Container` / `DecoratedBox` / `GestureDetector` / `Align` / `Opacity` / `Transform` / `ClipRRect` / `SizedBox` / `Expanded`…）；扁平 `.modifier` 链比深层 `Container(GestureDetector(Opacity(...)))` 嵌套更不易生成错位；且与现有**扁平** `aurora_api.json` / `diff` / `apply_patch` 序列化模型天然契合。
+**为何保留 `Modifier`（AI 友好）**：装饰能力收敛于**单个 `Modifier` 类型**（约 44 个链式工厂 / 访问器、48 个重载，另有 `Kind` 枚举可枚举），远少于纯包裹控件模型所需的十余个独立 widget 类型（`Padding` / `Container` / `DecoratedBox` / `GestureDetector` / `Align` / `Opacity` / `Transform` / `ClipRRect` / `SizedBox` / `Expanded`…）；扁平 `.modifier` 链比深层 `Container(GestureDetector(Opacity(...)))` 嵌套更不易生成错位；且与现有**扁平** `aurora_api.json` / `diff` / `apply_patch` 序列化模型天然契合。
 
 ### 6.5 外观变更只标绘制（不重排）
 
@@ -375,7 +375,7 @@
 
 ### 8.3 尾置返回类型
 
-函数（成员函数、自由函数）统一使用尾置返回类型 `auto f(...) -> Ret`（lambda 与显然的短返回可省略）。尾置写法使参数列表首屏完整可见、复杂 / 模板返回类型更易对齐，利于 AI 生成与 diff 比对。
+函数（成员函数、自由函数）**新增代码必须**统一使用尾置返回类型 `auto f(...) -> Ret`（lambda 与显然的短返回可省略）；存量代码允许例外（已知前置返回类型集中在 `storage/storage.h`、`inspector/inspector_server.h`、`image/image_codec.h`、`app/hot_reload.h`、`app/system_tray.h`、`navigation/hero.h`）。尾置写法使参数列表首屏完整可见、复杂 / 模板返回类型更易对齐，利于 AI 生成与 diff 比对。
 
 ### 8.4 控制语句大括号不可省略
 
@@ -538,10 +538,10 @@ btn3.on_click = fn;
 
 - **相同语义在所有组件使用完全相同的名称**（`on_click` 在所有可点击控件同名同参），杜绝 `setCaption` / `setValue` / `size().x` 一类同义异名；属性设置器一律为「属性直接赋值」风格。
 - **命名与类型拼写规则**（属性用名词、事件 `on_` 前缀、布尔取 `show` / `enabled` 语义、杜绝缩写、名序与 React / Flutter 对齐、`XxxProps{...}` 具名聚合优先、强类型几何、常量前缀等）以 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §2 为唯一权威。
-- **扁平命名空间**：所有公共组件、类型、自由函数直接位于 `aurora`，禁止深层嵌套（`aurora::widgets::buttons::MaterialButton` 列为反模式）；变体通过属性区分而非类型区分。公共子命名空间仅 `colors`（具名颜色）与 `platform`（平台查询 API）；`render` / `detail` / `ui` / `preferences` 等为内部或辅助命名空间，**不属对外承诺稳定的公共 API 表面**。
+- **扁平命名空间**：所有公共组件、类型、自由函数直接位于 `aurora`，禁止深层嵌套（`aurora::widgets::buttons::MaterialButton` 列为反模式）；变体通过属性区分而非类型区分。对外承诺稳定的**公共子命名空间**为：`colors`（具名颜色常量）、`platform`（平台查询 API）、`debug`（`aurora::debug` 调试门面自由函数，受 §11.2 lint 校验）、`ui`（声明式工厂 `ui::`，用户面构造语法糖）、`storage`（数据存储门面 `aurora::storage`）、`image`（图像编解码）、`imperative`（imperative API）；其余如 `render` / `detail` / `preferences` 等为内部或辅助命名空间，**不属对外承诺稳定的公共 API 表面**。
 - 前缀与别名写法见 [`SPECIFICATIONS.md`](SPECIFICATIONS.md) §命名速查。
 
-**验收标准：** AI 在只见过组件名与属性名的情况下，能凭直觉拼出正确 API；`ai_compat_test` 不出现因「同义异名」导致的生成失败。
+**验收标准：** AI 在只见过组件名与属性名的情况下，能凭直觉拼出正确 API；`itest_ai_compat` 不出现因「同义异名」导致的生成失败。
 
 **自动化守护**：`tools/check/check_naming_conventions.py`（CTest 用例 `check_naming_conventions`）以 `aurora_api.json`（API SSOT）为数据源校验：控件/枚举类型 PascalCase、属性键 snake_case、事件名 snake_case 且 `on_` 前缀、`aurora::debug` 自由函数 snake_case；枚举值 PascalCase，`colors` 命名空间的 `AURORA_*` 常量（`core/color.h` 的 `constexpr Color`）按「常量前缀」惯例豁免。
 

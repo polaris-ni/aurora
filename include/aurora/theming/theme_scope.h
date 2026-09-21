@@ -14,7 +14,7 @@ namespace aurora {
  * @brief 主题作用域：为子树覆盖（或首次注入）主题（specification/07-environment-modifier.md §5.1 显式主题传递）。
  *
  * 语义等价于 `Provider<Theme>`，但提供领域化的名称与构造。子树内任意 widget
- * 经 `inheritTheme(ctx)` 读取最近祖先的 `ThemeScope` 注入值（最近祖先优先，
+ * 经 `inherit_theme(ctx)` 读取最近祖先的 `ThemeScope` 注入值（最近祖先优先，
  * 天然实现主题继承与局部覆盖）。
  *
  * @code
