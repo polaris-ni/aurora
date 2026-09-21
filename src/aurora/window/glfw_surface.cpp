@@ -24,13 +24,16 @@
 #include <GLFW/glfw3native.h>
 #endif
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <vector>
 
 #include "aurora/core/utf8.h"
 #include "aurora/core/log.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
+#include "aurora/render/png.h"
 #include "aurora/window/cursor_map.h"
 #include "aurora/window/win32_capture.h"
 #include "aurora/window/window_state.h"
@@ -808,14 +811,66 @@ auto GlfwSurface::request_wake() -> void { Impl::request_wake(); }
 auto GlfwSurface::capture_window(const std::string &path) -> Result<bool> {
 #if defined(AURORA_PLATFORM_WINDOWS) && defined(AURORA_ENABLE_DEBUG)
     // Windows 上 GLFW 窗口底层是 Win32 HWND，直接复用 PrintWindow 路径抓取含非客户区画面。
+    if (pimpl_ == nullptr || pimpl_->window == nullptr) {
+        return Result<bool>{make_error(ErrorCode::GeneralNotSupported, "capture_window: GLFW window not available")};
+    }
     const HWND hwnd = glfwGetWin32Window(pimpl_->window);
     return detail::capture_window_by_hwnd(hwnd, path);
 #elif defined(AURORA_ENABLE_DEBUG)
-    // 非 Windows 的 GLFW（X11/Wayland/Mac）真实窗口截图暂未实现，回落 unsupported。
-    (void)path;
-    return Result<bool>{
-        make_error(ErrorCode::GeneralNotSupported,
-                   "capture_window: not implemented for this GLFW platform (use native X11/Wayland backend)")};
+    // 非 Windows 的 GLFW（X11/Wayland/Mac）：GL 帧缓冲读回。swap 后 back buffer 内容按规范
+    // 未定义，故软件路径先重放一次 upload_and_draw（绘向 back buffer，不 swap，画面无感），
+    // 再 glFinish + glReadPixels 得到确定内容；GPU 路径走 GpuGlRhi::read_pixels 诊断读回。
+    if (pimpl_ == nullptr || pimpl_->window == nullptr) {
+        return Result<bool>{make_error(ErrorCode::GeneralNotSupported, "capture_window: GLFW window not available")};
+    }
+    if (pimpl_->frame == 0) {
+        return Result<bool>{make_error(ErrorCode::GeneralNotSupported, "capture_window: no frame presented yet")};
+    }
+    int w = 0;
+    int h = 0;
+    glfwGetFramebufferSize(pimpl_->window, &w, &h);
+    if (w <= 0 || h <= 0) {
+        return Result<bool>{make_error(ErrorCode::GeneralNotSupported, "capture_window: zero-size framebuffer")};
+    }
+    std::vector<std::uint8_t> gl_rows(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4);
+    // glfwGetCurrentContext 返回的是「当前上下文所属窗口」指针（GLFW ABI），据以还原。
+    GLFWwindow *prev = glfwGetCurrentContext();
+    glfwMakeContextCurrent(pimpl_->window);
+#ifdef AURORA_ENABLE_GLFW_GPU_GL
+    if (pimpl_->gpu != nullptr) {
+        const bool ok = pimpl_->gpu->read_pixels(gl_rows);
+        glfwMakeContextCurrent(prev);
+        if (!ok) {
+            return Result<bool>{make_error(ErrorCode::GeneralNotSupported, "capture_window: GPU readback failed")};
+        }
+        // read_pixels 以设备尺寸 resize；与当前 framebuffer 不一致 = 末帧后窗口已缩放，拒绝错位出图。
+        if (gl_rows.size() != static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U) {
+            return Result<bool>{make_error(ErrorCode::GeneralNotSupported,
+                                           "capture_window: framebuffer resized since last present")};
+        }
+    } else
+#endif
+    {
+        pimpl_->upload_and_draw();  // 重放上一帧 → back buffer 内容确定（不 swap，屏幕无变化）
+        glFinish();                 // 等待绘批落定后读回
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, gl_rows.data());
+        glfwMakeContextCurrent(prev);  // 还原调用方上下文，不劫持线程状态
+    }
+    // 垂直翻转：GL 帧缓冲自下而上 → PNG 自上而下。
+    const std::size_t row_bytes = static_cast<std::size_t>(w) * 4;
+    std::vector<std::uint8_t> rgba(gl_rows.size());
+    for (int y = 0; y < h; ++y) {
+        const std::size_t src = static_cast<std::size_t>(h - 1 - y) * row_bytes;
+        const std::size_t dst = static_cast<std::size_t>(y) * row_bytes;
+        std::copy(gl_rows.begin() + static_cast<std::ptrdiff_t>(src),
+                  gl_rows.begin() + static_cast<std::ptrdiff_t>(src + row_bytes),
+                  rgba.begin() + static_cast<std::ptrdiff_t>(dst));
+    }
+    if (write_png(path.c_str(), w, h, rgba.data())) {
+        return Result<bool>{true};
+    }
+    return Result<bool>{make_error(ErrorCode::GeneralNotSupported, "capture_window: write_png failed")};
 #else
     (void)path;
     return Result<bool>{

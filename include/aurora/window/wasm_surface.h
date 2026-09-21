@@ -8,6 +8,8 @@
 // - 上屏路径：软件 Painter RGBA 帧缓冲 → EM_ASM 拷贝到 Canvas 2D ImageData → putImageData。
 //   无需 WebGL；Canvas 2D 在浏览器中由 GPU 加速合成，性能足够 UI 场景。
 // - 事件翻译：Emscripten HTML5 API（emscripten_set_*_callback）翻译鼠标/键盘/触摸/resize。
+// - 线程模型：无 pthreads 构建下 ThreadPool 为 deferred 排空模式（见 thread_pool.h 类头），
+//   `present()` 帧尾 `pump()` 即宿主安全点——`au::async` / 协程续体随帧回写，不开线程不丢任务。
 // - 帧循环（规划中，未实现）：`wait_events` 当前为空实现（`{}`），WASM 下退化为忙轮询；拟接入 `emscripten_request_animation_frame_loop` 对齐浏览器 rAF/vsync，尚无关线。
 // - 关闭语义：emscripten_set_beforeunload_callback 设置 should_close。
 
@@ -19,6 +21,7 @@
 #include <string>
 #include <unordered_set>
 
+#include "aurora/core/thread_pool.h"
 #include "aurora/window/surface.h"
 
 // EM_ASM 的 JS 片段以 `$0`/`$1` 作参数占位符（Emscripten 宏契约，见 em_asm.h）。
@@ -109,6 +112,10 @@ class WasmSurface : public Surface {
             },
             src, w, h, canvas_id_.c_str());
         ++frame_;
+        // 帧尾排空延迟线程池：浏览器无 pthreads 时 `au::async` / 协程续体在 ThreadPool
+        // 队列中等待宿主泵（见 thread_pool.h 类头），此处即每帧的安全点。
+        // 预算 = 进入时已入队任务，续命任务留下帧，绝不饿死本帧。
+        ThreadPool::default_pool().pump();
         return true;
     }
 

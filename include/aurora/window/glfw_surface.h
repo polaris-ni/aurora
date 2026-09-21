@@ -120,8 +120,9 @@ class GlfwSurface : public Surface {
     /// @brief GPU 帧调度挂点：GPU 模式生效时返回 `GpuGlRhi`，否则 nullptr（软件路径/回退后）。
     /// 未编译 `AURORA_ENABLE_GLFW_GPU_GL` 时恒为 nullptr。
     [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink * override;
-    /// @brief 真实窗口截图（含非客户区）：Windows 下经 GLFW 原生 HWND 复用 PrintWindow 路径；
-    /// 其它平台/未开 DEBUG 回落 unsupported。
+    /// @brief 真实窗口截图：Windows 经 GLFW 原生 HWND 复用 PrintWindow 路径（含非客户区）；
+    /// 其它平台在 `AURORA_ENABLE_DEBUG` 下走 GL 帧缓冲读回（须在某次 present 之后调用，客户区画面、
+    /// framebuffer 尺寸）；未开 DEBUG 回落 unsupported。
     [[nodiscard]] auto capture_window(const std::string &path) -> Result<bool> override;
 
   private:

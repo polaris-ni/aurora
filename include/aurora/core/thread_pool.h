@@ -7,6 +7,8 @@
 #include <thread>
 #include <vector>
 
+#include "aurora/core/platform.h"  // AURORA_PLATFORM_WASM（禁裸平台宏，见 06-app-platform.md §12.1）
+
 namespace aurora {
 
 /**
@@ -17,6 +19,15 @@ namespace aurora {
  * 默认 `hardware_concurrency()`，下限 2），避免突发 `async` 调用的线程爆炸；
  * 析构时 `stop()` + `join()` 全部 worker，**无 detached 悬挂线程**，进程退出安全。
  *
+ * **Emscripten 无 pthreads 构建 = 延迟排空（deferred）模式**：浏览器默认单线程，
+ * `std::thread` 不可用。此时不启动任何 worker，任务只入队；由宿主在安全点调用
+ * `pump()` 在**当前线程**（即主线程）排空——`WasmSurface::present()` 已接帧尾排空，
+ * 故 `au::async` / 协程续体在浏览器下随帧回写，不开线程也不丢任务。以
+ * `-pthread`（`__EMSCRIPTEN_PTHREADS__`）构建时回到普通 worker 池语义。
+ * `force_deferred=true` 可在任意平台显式开延迟模式（供测试与单线程宿主复用）。
+ * 注意：deferred 下 `submit()` 的 `future.get()` 不可与 `pump()` 同线程互等（会自锁），
+ * 消费续体请用 `Task::then` / 协程或帧尾泵。
+ *
  * 用法：
  * @code
  *   au::ThreadPool::default_pool().execute([] { background_work(); });
@@ -24,10 +35,14 @@ namespace aurora {
  *   // fut.get() 取结果（异常经 future 传播）
  * @endcode
  *
- * 线程安全：所有公开方法可并发调用。
+ * 线程安全：所有公开方法可并发调用（deferred 模式下 `pump()` 只应被单一宿主线程调用）。
  */
 class ThreadPool {
   public:
+    /// @brief 编译期默认是否 deferred：仅「无 `std::thread` 能力」的构建为 true
+    ///        （现状即 Emscripten 未开 `-pthread`，见 platform.h `AURORA_CAP_THREADS`）。
+    static inline constexpr bool kCompileTimeDeferred = AURORA_CAP_THREADS == 0;
+
     /// @brief 默认 worker 数：`hardware_concurrency()`，下限 2（单核/查询失败时为 2）。
     [[nodiscard]] static auto default_worker_count() -> std::size_t {
         const unsigned hc = std::thread::hardware_concurrency();
@@ -37,8 +52,15 @@ class ThreadPool {
         return hc;
     }
 
-    /// @brief 构造并启动 `worker_count` 个 worker 线程。
-    explicit ThreadPool(std::size_t worker_count = default_worker_count()) {
+    /**
+     * @brief 构造：默认启动 `worker_count` 个 worker 线程；
+     *        deferred 模式（`kCompileTimeDeferred` 或显式 `force_deferred`）不启动线程。
+     */
+    explicit ThreadPool(std::size_t worker_count = default_worker_count(), bool force_deferred = false) {
+        deferred_ = kCompileTimeDeferred || force_deferred;
+        if (deferred_) {
+            return;
+        }
         if (worker_count == 0) {
             worker_count = default_worker_count();
         }
@@ -48,11 +70,17 @@ class ThreadPool {
         }
     }
 
-    /// @brief 停止并 join 全部 worker（RAII 安全，无悬挂线程）。
+    /// @brief 停止并 join 全部 worker（RAII 安全，无悬挂线程）。deferred 模式排空剩余队列。
     ~ThreadPool() {
         {
             std::scoped_lock lock(mutex_);
             stop_ = true;
+        }
+        if (deferred_) {
+            // 与 worker 池析构语义对齐：stop 前排空已入队任务（worker 亦是 drain-until-empty）。
+            while (drain_one()) {
+            }
+            return;
         }
         cv_.notify_all();
         for (std::thread &w : workers_) {
@@ -67,8 +95,35 @@ class ThreadPool {
     ThreadPool(ThreadPool &&) = delete;
     auto operator=(ThreadPool &&) -> ThreadPool & = delete;
 
-    /// @brief 当前 worker 线程数。
+    /// @brief 是否处于「任务只入队、由宿主 `pump()` 排空」的延迟模式。
+    [[nodiscard]] auto is_deferred() const -> bool { return deferred_; }
+
+    /// @brief 当前 worker 线程数（deferred 模式恒为 0）。
     [[nodiscard]] auto worker_count() const -> std::size_t { return workers_.size(); }
+
+    /**
+     * @brief 延迟模式专用：在**当前线程**执行至多「进入时已入队」的任务（新入队任务
+     *        留待下一次 `pump()`，避免自我续命的任务饿死宿主帧）。
+     * @return 实际执行的任务数；非 deferred 模式恒返回 0。
+     */
+    auto pump() -> std::size_t {
+        if (!deferred_) {
+            return 0;
+        }
+        std::size_t budget = 0;
+        {
+            std::scoped_lock lock(mutex_);
+            budget = queue_.size();
+        }
+        std::size_t ran = 0;
+        for (std::size_t i = 0; i < budget; ++i) {
+            if (!drain_one()) {
+                break;
+            }
+            ++ran;
+        }
+        return ran;
+    }
 
     /// @brief 当前排队未执行的任务数（近似值，仅供诊断）。
     [[nodiscard]] auto pending_count() const -> std::size_t {
@@ -131,6 +186,21 @@ class ThreadPool {
     }
 
   private:
+    /// @brief 取并执行队首任务；队列空返回 false。异常屏障与 `execute` 包裹一致。
+    auto drain_one() -> bool {
+        std::function<void()> job;
+        {
+            std::scoped_lock lock(mutex_);
+            if (queue_.empty()) {
+                return false;
+            }
+            job = std::move(queue_.front());
+            queue_.pop();
+        }
+        job();  // 任务自带 try/catch（execute 包裹），异常不外溢。
+        return true;
+    }
+
     auto worker_loop() -> void {
         for (;;) {
             std::function<void()> job;
@@ -152,6 +222,7 @@ class ThreadPool {
     std::queue<std::function<void()>> queue_;
     std::vector<std::thread> workers_;
     bool stop_ = false;
+    bool deferred_ = kCompileTimeDeferred;  ///< 延迟排空模式（见类头注释）
 };
 
 }  // namespace aurora

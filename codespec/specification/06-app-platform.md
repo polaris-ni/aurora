@@ -635,7 +635,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 | `feature_flags() -> FeatureFlags` / `feature_flags_json() -> Json` | 编译期 feature 宏开关运行时查询（始终可用，编译期常量快照）。强类型结构体字段 + JSON 导出（键 = 完整宏名）。C++ 侧宏镜像单点收口于 `src/aurora/debug/feature_flags.cpp`，应用代码零 `#ifdef`（需求 #14） |
 | `surface_state(const Surface&) -> Json` | `width` / `height` / `scale_factor` / `frame_count` / `clear_color` / `should_close` / `has_native_window` |
 
-**门控与 ODR 安全**：API 头**始终声明**，调试能力函数的 `.cpp` 体按 `AURORA_ENABLE_DEBUG` 裁切（例外：输出目录三函数的定义不裁切、无条件编译，与「始终可用」一致）；`Surface::save_snapshot` / `capture_window` 默认实现按运行时 `data()` 判空（宏无关），后端专属截图体门控。两函数在 `Surface` 上**始终声明**（vtable 槽稳定，属 `Surface` 契约）。Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用 `Win32Window` 宿主，经共享 `detail::capture_window_by_hwnd` 走 PrintWindow 路径）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写 `capture_window`；Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。
+**门控与 ODR 安全**：API 头**始终声明**，调试能力函数的 `.cpp` 体按 `AURORA_ENABLE_DEBUG` 裁切（例外：输出目录三函数的定义不裁切、无条件编译，与「始终可用」一致）；`Surface::save_snapshot` / `capture_window` 默认实现按运行时 `data()` 判空（宏无关），后端专属截图体门控。两函数在 `Surface` 上**始终声明**（vtable 槽稳定，属 `Surface` 契约）。Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用 `Win32Window` 宿主，经共享 `detail::capture_window_by_hwnd` 走 PrintWindow 路径）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写 `capture_window`（GLFW：Windows 经原生 HWND 走 PrintWindow 含非客户区；X11/Wayland/Mac 走 GL 帧缓冲读回——软件路径先重放上一帧再 `glReadPixels`，GPU 路径经 `GpuGlRhi::read_pixels`，得客户区 framebuffer 尺寸画面，须在某次 present 之后调用）；Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。
 
 `Surface` 另新增虚函数 `framebuffer_size()`（默认返回逻辑 `size()`）：`save_snapshot` 以它作 PNG 宽高；按 DPI 物理分辨率分配缓冲的后端须覆写返回物理像素，避免缩放比 ≠ 1 时 PNG 尺寸与像素数据错位。`native_handle()` 为 `const`（只读查询），**基类默认返回 `nullptr`**；真实窗口后端必须覆写为宿主原生句柄——Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用同一 `Win32Window` 宿主）**均**覆写为 `hwnd()`。上表 `surface_state()` 的 `has_native_window` 即由它非空判定，漏覆写会让真实窗口后端**恒报 false**（`D3D11Surface` 曾如此，2026-09-13 补齐），故由 `utest_native_surfaces` 的 `windows_family_native_handle_contract` 类型级守门。
 
@@ -704,7 +704,7 @@ if (au::platform().is_mobile()) { /* 移动端适配 */ }
 | 方面 | 做法 |
 |:---|:---|
 | 事件循环 | **已知限制（待修复）**：`WasmSurface::wait_events` 当前为空实现（`{}`），WASM 后端**无任何 rAF 集成**（仓内无 `requestAnimationFrame` / `set_main_loop` 接线，也无 `emscripten_request_animation_frame_loop`）。宿主不主动驱动帧时，事件循环**退化为忙轮询（busy-poll）**，并非 rAF 驱动的免自旋行为。计划接入 `emscripten_request_animation_frame_loop` 对齐浏览器 rAF/vsync，尚无关线。 |
-| 线程模型 | **规划中，未实现**：`au::async` 映射为 Web Worker + `postMessage`、在支持 `SharedArrayBuffer` + `Atomics`（需跨源隔离）时启用真正多线程，均为需求愿景，仓内无任何接线（无 Worker / pthread / SharedArrayBuffer 代码）。当前 `WasmSurface` 仅负责 `<canvas>` 呈现，**尚无 rAF 驱动**（见「事件循环」行已知限制）；`ThreadPool` **未做 WASM 适配**——它无条件使用 `std::thread` 与 `std::thread::hardware_concurrency()`（`core/thread_pool.h`，无 `EMSCRIPTEN` 分支），在 Emscripten 下属依赖 pthread / 共享内存的**未验证路径**（非静默降级为单线程），待补平台分支或改为协程驱动 |
+| 线程模型 | **已落地（deferred 排空）**：Emscripten 无 `-pthread` 构建（未定义 `__EMSCRIPTEN_PTHREADS__`）下 `ThreadPool` 自动进入延迟排空模式（`core/thread_pool.h`，见 [`01-core.md`](01-core.md) §6.1）——不创建任何 `std::thread`，`au::async` / 协程任务只入队，`WasmSurface::present()` 帧尾调用 `pump()` 在主线程排空，随帧回写不丢任务；以 `-pthread` + `SharedArrayBuffer`（需跨源隔离）构建时回到普通 worker 池语义。Web Worker + `postMessage` 的真并行执行仍为需求愿景、无接线。**已知限制（事件循环）**：`wait_events` 为空实现、无 rAF 接线（见「事件循环」行）；deferred 下 `future.get()` 与 `pump()` 同线程互等会自锁 |
 | 渲染 | 渲染目标为 `<canvas>` 元素，内部自动选择 |
 | 限制 | 不支持高频指针直通路；当前**无 rAF 轮询降级**（见「事件循环」行已知限制），并在 `au::platform().capabilities()` 中声明此限制 |
 

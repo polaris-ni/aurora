@@ -242,15 +242,19 @@ auto widget = restored.value();
 
 | 成员 | 说明 |
 |:---|:---|
-| `explicit ThreadPool(worker_count = default_worker_count())` | 构造并启动 worker；传 0 回落默认值 |
+| `explicit ThreadPool(worker_count = default_worker_count(), force_deferred = false)` | 构造并启动 worker；传 0 回落默认值；`force_deferred=true` 任意平台显式开延迟排空模式 |
 | `default_worker_count()` | `hardware_concurrency()`，下限 2 |
-| `worker_count()` | 当前 worker 线程数 |
+| `worker_count()` | 当前 worker 线程数（deferred 模式恒为 0） |
+| `is_deferred()` | 是否处于「任务只入队、由宿主 `pump()` 排空」的延迟模式 |
+| `pump() -> std::size_t` | 延迟模式专用：在**当前线程**执行至多「进入时已入队」的任务（新入队留待下次，防饿死宿主帧），返回实际执行数；非 deferred 恒 0 |
 | `pending_count()` | 当前排队未执行任务数（近似值，仅供诊断） |
 | `execute(std::function<void()>)` | fire-and-forget，异常在 worker 内被捕获，不向外传播 |
 | `submit(F&&) -> std::future<R>` | 提交并返回 future，异常经 future 传播 |
 | `default_pool()` | 进程级默认池（Meyers 单例），`au::async` 与协程均经它调度 |
 
 拷贝与移动均被删除。
+
+**延迟排空（deferred）模式**：`kCompileTimeDeferred` 仅在 Emscripten 且未启用 pthreads（`__EMSCRIPTEN_PTHREADS__` 未定义）时为 true——浏览器单线程下 `std::thread` 不可用，池不启动 worker，任务只入队，由宿主在安全点 `pump()` 于当前线程排空。`WasmSurface::present()` 已接帧尾排空（见 [`06-app-platform.md`](06-app-platform.md) §10 Web/WASM 表），故 `au::async` / 协程续体在浏览器下随帧回写、不开线程也不丢任务；以 `-pthread` 构建时回到普通 worker 池语义。注意：deferred 下 `submit()` 的 `future.get()` 不可与 `pump()` 同线程互等（会自锁），消费续体应经 `Task::then` / 协程或帧尾泵。deferred 池析构同样排空剩余队列，与 worker 池「drain-until-empty」语义对齐。
 
 ### 6.2 使用约定
 
