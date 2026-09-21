@@ -399,7 +399,7 @@
       "notes": [
         "验收口径：GDI 探针 aurora_verify_win32_ua 退出码 0（含 #1-C 兄弟标签、#3 离屏、#7 Text 几何）；D3D11 探针（build-d3d11，WIN32=ON D3D11=ON）GDI + GPU 两路上屏路径 ALL PASS——桥与 Win32Window 宿主共享，GPU 上屏不影响 a11y 投影；全量 ctest 292/292 全绿（build-mingw，g++ debug，16 并行）；五道文档门禁（codespec_xref/code_doc_sync/arch_module_map/naming_conventions/version_consistency）全绿。",
         "决策偏差（实现期裁定 #4-B）：用户选 B（按元素类型派生 RuntimeId 第三段）经核查为基于错误前提——NodeSnapshot::id 即稳定 Widget::runtime_id()，段 2–5 已用之；UiaAppendRuntimeId 值 3 是强制协议常量；派生会使同类型兄弟碰撞并破坏 UIA 缓存。故保留稳定 runtime id，未盲从 B，偏差记入设计稿 §16.2。",
-        "工具链坑：默认 CC/CXX=LLVM/clang 编不过 UIAutomationCore.h（interface 关键字），须显式 mingw64 g++（D:/Development/Environment/mingw64/bin/g++.exe）。ROADMAP 与 NVDA 手册均已注记。",
+        "工具链坑：默认 CC/CXX=LLVM/clang 编不过 UIAutomationCore.h（interface 关键字），须显式 mingw64 g++（路径随本机 MSYS2/MinGW 安装根而定，形如 <安装根>/mingw64/bin/g++.exe）。ROADMAP 与 NVDA 手册均已注记。",
         "其余 14 项裁定：#2-A 根保持 Pane；#3-A 离屏裁剪补偿 + IsOffscreen；#5-B RTL 桥内遍历反转 + 应用侧推送；#6-B 虚拟化 id 契约写入设计稿 §16.6；#8-B reset_teardown + set_root 换根复位；#10-A aurora_api.json 确认不动；#11-C 版本手动收口（本条目）；#12-A ROADMAP 已补；#13-B NVDA 手册产出；#14-B D3D11 探针已跑。"
       ]
     },

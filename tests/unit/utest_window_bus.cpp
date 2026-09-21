@@ -3,7 +3,6 @@
 /// 测试说明: 跨窗口事件总线（specification/06-app-platform.md §2.4）——按类型分发互不串扰、RAII 订阅
 /// 自动取消、按来源窗口过滤、回调内自取消/新增订阅的遍历安全、总线先于订阅句柄析构的生命周期安全。
 
-#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -85,9 +84,9 @@ AURORA_TEST_CASE(callback_may_unsubscribe_and_subscribe_safely) {
 
     // 订阅句柄需在回调外存活：用 shared_ptr<Subscription> 表达「回调内自取消」。
     auto sub1 = std::make_shared<Subscription>();
-    *sub1 = bus.on<OpenFile>([&bus, &first_hits, sub1](const OpenFile &, WindowId) -> void {
+    *sub1 = bus.on<OpenFile>([&first_hits, sub1](const OpenFile &, WindowId) -> void {
         ++first_hits;
-        (*sub1).reset();  // 回调内自取消：遍历须仍安全（内部先拷贝订阅列表）
+        (*sub1).reset();  // NOLINT 回调内自取消：遍历须仍安全（内部先拷贝订阅列表）
     });
     auto sub2 = bus.on<OpenFile>([&second_hits](const OpenFile &, WindowId) -> void { ++second_hits; });
 

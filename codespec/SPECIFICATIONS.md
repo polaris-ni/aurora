@@ -296,6 +296,7 @@ ctest -R itest_ai_compat
 | 命名一致性 | `ctest -R check_naming_conventions`（#2：类型 PascalCase、属性/事件/函数 snake_case、事件 `on_` 前缀） | `check_naming_conventions` |
 | 零原生平台宏 | `ctest -R check_platform_macros`（#14：预处理分支禁原生平台/架构宏，规范化宏密度仅报告） | `check_platform_macros` |
 | API token 预算 | `ctest -R check_api_budget`（#24：`aurora_api.json` 估算 token 数 ≤ 预算） | `check_api_budget` |
+| 无写死本机路径 | `ctest -R check_no_hardcoded_paths`（禁止盘符 / 用户主目录等本机专属绝对路径入库，外部路径须显式传入） | `check_no_hardcoded_paths` |
 | codespec 交叉引用 | `ctest -R check_codespec_xref` | `check_codespec_xref` |
 | 代码-文档同步 | `ctest -R check_code_doc_sync` | `check_code_doc_sync` |
 | 黄金文件 | `ctest -R golden`（确定性渲染基准） | golden 基准图 |

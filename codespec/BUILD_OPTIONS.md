@@ -262,7 +262,7 @@ cmake --build build
   [source.rsproxy-sparse]
   registry = "sparse+https://rsproxy.cn/index/"
   ```
-- **配置期探测**（任一缺项 `FATAL_ERROR`，不静默回退）：`cargo` / `rustc` 在 `PATH`（缺失提示按平台给出安装命令：Windows winget / Linux rustup）；host 三元组与 C++ 编译器 ABI 一致（MinGW 要求 `*-windows-gnu`、MSVC 要求 `*-windows-msvc`、Linux 要求 `*-linux-(gnu|musl)`，否则静态库 ABI 不兼容并给出修复命令）；`libclang` 共享库（wgpu-native 的 `build.rs` 经 bindgen 从 `webgpu.h` 生成 FFI 所必需，Windows 探测 LLVM/clang 安装目录注入 `LIBCLANG_PATH`，Linux 按 `llvm-*/lib/libclang.so*` 与发行版 `libclang-*.so*` 布局择最高版本）；`third_party/wgpu-native` 源文件完整。
+- **配置期探测**（任一缺项 `FATAL_ERROR`，不静默回退）：`cargo` / `rustc` 在 `PATH`（缺失提示按平台给出安装命令：Windows winget / Linux rustup）；host 三元组与 C++ 编译器 ABI 一致（MinGW 要求 `*-windows-gnu`、MSVC 要求 `*-windows-msvc`、Linux 要求 `*-linux-(gnu|musl)`，否则静态库 ABI 不兼容并给出修复命令）；`libclang` 共享库（wgpu-native 的 `build.rs` 经 bindgen 从 `webgpu.h` 生成 FFI 所必需。定位按「显式传入优先、自动探测兜底」四级：`-DAURORA_LIBCLANG_DIR=<目录>` → 环境变量 `LIBCLANG_PATH` → `PATH` 上的 `clang` 旁目录 → 平台通用默认位（Windows：LLVM 安装器写入的注册表键与 `%ProgramFiles%`；Linux：按 `llvm-*/lib/libclang.so*` 与发行版 `libclang-*.so*` 布局择最高版本）。**CMake 内禁止写死任何本机安装路径**（盘符 / 用户目录一律不得入库——换机即失效且污染他人构建）；显式传入项若不存在即 `FATAL_ERROR`，不静默回退）；`third_party/wgpu-native` 源文件完整。
 - **构建接线**：`add_custom_command` 执行 `cargo build --release --target <host 三元组>`（`DEPENDS` `src/*.rs` / `build.rs` / `Cargo.toml` / `Cargo.lock` 做增量），聚合为 `wgpu_native_build` 目标；以 `RUSTUP_TOOLCHAIN=<当前活动工具链完整 id>` 覆盖上游 `rust-toolchain.toml` 的钉版通道（避免 rustup 按宿主启发误装其它 toolchain）。
 - **链接面**：`wgpu_native` 静态库 + Rust `windows` crate / libc 族的系统库（Windows：`ws2_32` `userenv` `bcrypt` `advapi32` `oleaut32` `ntdll`；Linux：`dl` `pthread` `m`，Vulkan/Xlib 运行期 dlopen 加载，静态库侧无需 `libx11-dev`——X11 头/库仅 C++ 侧经 `AURORA_BACKEND_X11` 已链接）。`webgpu.h` / `wgpu.h` 仅给库内实现 TU（pimpl 隔离，公共头不外泄三方头）。
 - **运行期**：无可用 adapter / 驱动失败 → `WgpuRhi::valid()` false；`create_window(WgpuOptions)` 与 `renderer = GpuWgpu` 强制路由报 `renderer-unavailable`（不降级），`Auto` 偏好优先序不含 wgpu 路径，行为不变。
@@ -381,7 +381,7 @@ cmake -S . -B build-trace -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_TRACING=ON
 
 ```powershell
 cmake -S . -B build -DAURORA_ENABLE_CCACHE=OFF                                  # 禁用
-cmake -S . -B build -DAURORA_CCACHE_DIR=D:/ccache -DAURORA_CCACHE_MAXSIZE=10G   # 自定义（默认分支）
+cmake -S . -B build -DAURORA_CCACHE_DIR=<缓存目录> -DAURORA_CCACHE_MAXSIZE=10G   # 自定义（默认分支）
 cmake -S . -B build -DAURORA_CCACHE_OPTIONS="--max-size=5G --sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime"  # 完全接管配置
 ```
 
@@ -396,7 +396,7 @@ cmake -S . -B build -DAURORA_CCACHE_OPTIONS="--max-size=5G --sloppiness=pch_defi
 
 ```powershell
 cmake -S . -B build -DAURORA_ENABLE_LLD=OFF                                     # 回退 GNU ld
-cmake -S . -B build -DAURORA_LLD_DIR="D:/Development/Environment/LLVM/bin"      # 显式指定
+cmake -S . -B build -DAURORA_LLD_DIR="<LLVM 安装根>/bin"                        # 显式指定
 ```
 
 ### 4.5 `AURORA_ENABLE_CLANG_TIDY`

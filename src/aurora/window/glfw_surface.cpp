@@ -7,8 +7,10 @@
 #ifdef AURORA_PLATFORM_WINDOWS
 // Windows SDK 的 <GL/gl.h> 非自洽：函数声明使用的 WINGDIAPI/APIENTRY 由 windef.h 先行
 // 定义，缺 windows.h 时新版 SDK（10.0.26100）在 MSVC 下整片解析失败。
-#include <GL/gl.h>
+// clang-format off
 #include <windows.h>
+#include <GL/gl.h>
+// clang-format on
 #elif defined(AURORA_PLATFORM_MACOS)
 // macOS 无 <GL/gl.h>：GL 头位于 OpenGL.framework（GL 1.1 立即模式子集仍在，本文件仅用之）。
 // Apple 自 10.14 起将整个 OpenGL 标记 deprecated，须在包含前定义厂商宏消噪（宏名为厂商规定）。
@@ -701,7 +703,7 @@ auto GlfwSurface::Impl::on_char(GLFWwindow *w, unsigned int codepoint) -> void {
     self->handler(e);
 }
 
-auto GlfwSurface::Impl::on_window_size(GLFWwindow *w, int /*width*/, int /*height*/) -> void {
+auto GlfwSurface::Impl::on_window_size(GLFWwindow *w, int /*width*/, int /*height*/) -> void {  // NOLINT
     // 实际尺寸在 beginFrame 中读取并应用；此处仅确保事件被消费。
     (void)w;
 }

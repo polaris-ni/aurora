@@ -94,6 +94,12 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_api_budget
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_api_budget.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 禁止写死本机路径门禁（CODING_STANDARDS.md §10.5 第 10 条）：受版控文件不得出现
+        # 非系统盘盘符路径 / 用户主目录 / 盘符下的本机特征目录段；外部工具与库的位置一律
+        # 由使用者显式传入（-D<选项>=<目录> 或环境变量），自动探测兜底不得含盘符。
+        add_test(NAME check_no_hardcoded_paths
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_hardcoded_paths.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     endif ()
 
     # ---- 空源集 guard ----

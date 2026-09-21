@@ -497,6 +497,7 @@ BREAKING CHANGE: 自定义 Widget 的 on_paint 实现须改用全局坐标，
 7. **不提交无关文件**：仅纳入本次实际改动的业务文件；构建产物（`build*/`）与本地 AI 工具目录（`.codebuddy/` 等）已由 `.gitignore` 忽略，勿 `git add -A` 强行纳入。
 8. **提交前必跑 LINT 且零告警**：**每次提交代码前**必须跑一遍静态检查并确保**零告警**——`cmake --build build --target lint`（配置源为仓库根 `.clang-tidy`，扫描 `compile_commands.json` 中全部非 `third_party` 翻译单元，按 `(file, line, check)` 去重后凡存在 warning 及以上即以退出码 1 失败）。有告警先修；确需抑制时按 §5.2 写明**具体检查名 + 为何不能按建议修复**，不得用裸 `NOLINT` 掩盖。仅做格式化可用 `cmake --build build --target lint-fix` 就地应用 fix-it，但**须人工审阅 diff**，且与逻辑改动分开提交（见 §10.6）。选项、目标与运行器说明见 `BUILD_OPTIONS.md` §4.5。
 9. **提交前必跑排版校验**：排版校验与 lint 是两道独立门禁，`lint` 通过不代表排版合规。提交前必须 `cmake --build build --target format-check`（依据仓库根 `.clang-format` 校验全部非 `third_party` 源文件，任一文件存在差异即以退出码 1 失败）；需要归一整先用 `cmake --build build --target format` 就地重写（同样须人工审阅 diff）。运行器见 `tools/check/run_clang_format.py`。
+10. **仓库内禁止写死本机路径**：任何受版控文件都不得出现本机专属绝对路径——非系统盘盘符路径（`D:/...`；`C:` 为 Windows 系统盘，其 `Program Files` 等系统位不在此列）、用户主目录（`C:/Users/<name>`、`/home/<name>`、`/Users/<name>`）、以及盘符下的本机特征目录段（`.../Development/...`、`.../Projects/...`、`.../msys64/...`）。需要定位外部工具 / 库时一律**由使用者显式传入**：CMake 选项（`-DAURORA_LIBCLANG_DIR=<目录>`、`-DAURORA_LLD_DIR=<目录>`）或环境变量（`LIBCLANG_PATH`）；CMake 内的自动探测只作兜底，且**不得含盘符**——改用 `%ProgramFiles%`、LLVM 安装器写入的注册表键、`/usr/lib/llvm-*` 等相对量。守护：`check_no_hardcoded_paths`（CTest 用例）扫描全部受版控文本文件，命中即红灯；确属必要的例外须在匹配行或其上 2 行内写明 `HARDPATH_EXEMPT: <原因>`。
 
 > ⚠️ 排版门禁 2026-09-21 之前**完全缺失**：仓库内没有任何 clang-format 调用点，而配置（当时的 `PointerAlignment: Left`）与代码库实际写法（右对齐）长期背离，累积到 488/823 文件、约 1.5 万行不一致都未被发现。请勿移除该门禁——它的作用是让漂移在引入时暴露。
 

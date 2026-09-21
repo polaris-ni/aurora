@@ -185,20 +185,46 @@ if (AURORA_BACKEND_GPU_WGPU)
     endif ()
 
     # libclang 探测：wgpu-native 的 build.rs 经 bindgen 从 webgpu.h 生成 FFI 头，构建期硬
-    # 依赖 libclang 共享库。PATH 上找 clang 取同目录；再查 Windows 常见 LLVM 安装根。
+    # 依赖 libclang 共享库。
+    # ⚠️ 本文件**不得出现任何本机安装路径**（盘符 / 用户目录一律禁止写死——换机即失效、
+    # 且污染他人构建）。定位按「显式传入优先、自动探测兜底」四级：
+    #   1) -DAURORA_LIBCLANG_DIR=<目录>：显式旋钮（与 AURORA_LLD_DIR 同口径，推荐）
+    #   2) 环境变量 LIBCLANG_PATH：bindgen/LLVM 生态标准变量
+    #   3) PATH 上的 clang 可执行旁目录
+    #   4) 平台通用默认位（相对量，不含盘符）：Windows 查 LLVM 安装器写入的注册表键与
+    #      %ProgramFiles%；类 Unix 查 /usr/lib/llvm-*
+    set(AURORA_LIBCLANG_DIR "" CACHE PATH "libclang 所在目录提示（未在 PATH 上时显式指定）")
     set(_wgpu_libclang_dir "")
-    find_program(AURORA_CLANG_EXECUTABLE clang)
-    if (AURORA_CLANG_EXECUTABLE)
-        get_filename_component(_wgpu_libclang_dir "${AURORA_CLANG_EXECUTABLE}" DIRECTORY)
-    elseif (WIN32)
-        foreach (_cand "[HKEY_LOCAL_MACHINE\\SOFTWARE\\LLVM\\LLVM;]"
-                       "C:/Program Files/LLVM/bin" "D:/Development/Environment/LLVM/bin")
-            if (_cand AND EXISTS "${_cand}/libclang.dll")
-                set(_wgpu_libclang_dir "${_cand}")
-                break ()
-            endif ()
-        endforeach ()
-    elseif (UNIX)
+    set(_wgpu_libclang_explicit FALSE)
+    if (AURORA_LIBCLANG_DIR)
+        set(_wgpu_libclang_dir "${AURORA_LIBCLANG_DIR}")
+        set(_wgpu_libclang_explicit TRUE)
+    elseif (DEFINED ENV{LIBCLANG_PATH} AND NOT "$ENV{LIBCLANG_PATH}" STREQUAL "")
+        set(_wgpu_libclang_dir "$ENV{LIBCLANG_PATH}")
+        set(_wgpu_libclang_explicit TRUE)
+    endif ()
+    # 显式传入即按契约校验：路径写错时立刻失败，而不是等到 cargo/bindgen 阶段报无头绪的错。
+    if (_wgpu_libclang_explicit AND NOT EXISTS "${_wgpu_libclang_dir}")
+        aurora_error("AURORA_BACKEND_GPU_WGPU: the libclang directory '${_wgpu_libclang_dir}' does not exist"
+                " (passed via -DAURORA_LIBCLANG_DIR or the LIBCLANG_PATH environment variable).")
+    endif ()
+    if (NOT _wgpu_libclang_dir)
+        find_program(AURORA_CLANG_EXECUTABLE clang)
+        if (AURORA_CLANG_EXECUTABLE)
+            get_filename_component(_wgpu_libclang_dir "${AURORA_CLANG_EXECUTABLE}" DIRECTORY)
+        elseif (WIN32)
+            # 注册表键由 LLVM 官方安装器写入；ProgramFiles/ProgramW6432 双查覆盖 32 位 CMake
+            # 跑在 64 位系统时的变量差异。两者都是相对量，不含盘符。
+            foreach (_cand "[HKEY_LOCAL_MACHINE\\SOFTWARE\\LLVM\\LLVM;]"
+                    "$ENV{ProgramFiles}/LLVM/bin" "$ENV{ProgramW6432}/LLVM/bin")
+                if (_cand AND EXISTS "${_cand}/libclang.dll")
+                    set(_wgpu_libclang_dir "${_cand}")
+                    break ()
+                endif ()
+            endforeach ()
+        endif ()
+    endif ()
+    if (NOT _wgpu_libclang_dir AND UNIX)
         # Ubuntu/Debian 的 libclang 实际文件名为 libclang-XX.so(.1)，dev 包装为
         # /usr/lib/llvm-XX/lib/libclang.so 符号链接——多模式 GLOB 后按版本号取最高
         # （字典序会把 llvm-9 排在 llvm-19 前）。
@@ -224,8 +250,9 @@ if (AURORA_BACKEND_GPU_WGPU)
     endif ()
     if (NOT _wgpu_libclang_dir)
         aurora_error("AURORA_BACKEND_GPU_WGPU=ON but no libclang shared library was found (required by"
-                " wgpu-native's bindgen build script). Install LLVM/Clang and ensure clang/libclang"
-                " is on PATH, or set LIBCLANG_PATH manually.")
+                " wgpu-native's bindgen build script). Pass its directory explicitly:"
+                " -DAURORA_LIBCLANG_DIR=<LLVM bin 目录>（或设环境变量 LIBCLANG_PATH）；"
+                " 也可把 clang 加入 PATH 由本模块自动探测。")
     endif ()
 
     # cargo 构建：--target 显式指定 host 三元组，产物路径确定为 target/<triple>/release，
@@ -251,11 +278,11 @@ if (AURORA_BACKEND_GPU_WGPU)
     endif ()
     add_custom_command(OUTPUT "${_wgpu_out}"
             COMMAND "${CMAKE_COMMAND}" -E env ${_wgpu_env}
-                    "${AURORA_CARGO_EXECUTABLE}" build --release --target "${AURORA_RUST_HOST_TRIPLE}"
+            "${AURORA_CARGO_EXECUTABLE}" build --release --target "${AURORA_RUST_HOST_TRIPLE}"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_wgpu_artifact}" "${_wgpu_out}"
             DEPENDS "${_wgpu_src}/Cargo.toml" "${_wgpu_src}/Cargo.lock"
-                    "${_wgpu_src}/ffi/wgpu.h" "${_wgpu_src}/ffi/webgpu-headers/webgpu.h"
-                    ${_wgpu_rs_sources}
+            "${_wgpu_src}/ffi/wgpu.h" "${_wgpu_src}/ffi/webgpu-headers/webgpu.h"
+            ${_wgpu_rs_sources}
             WORKING_DIRECTORY "${_wgpu_src}"
             VERBATIM
             COMMENT "cargo build --release wgpu-native (${AURORA_RUST_HOST_TRIPLE})")
