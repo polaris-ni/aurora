@@ -43,6 +43,20 @@ namespace detail {
     return layout_box;
 }
 
+/// @brief 控件「自带/声明的可读文本」：`explicit` 声明优先于 `accessibility_label()` 覆写。
+///
+/// 既用作 Name 回退链的第一级，也用作**标签来源**（父级把子/兄弟节点的这段文本当名字读）。
+/// 二者必须同源：只覆写钩子的控件（`Text` / `Button`）与只调 `set_accessibility_label()` 的
+/// 控件（叶子控件）都得能被对方引用。
+/// @note 虚钩子默认实现即返回显式声明值，故本函数对未覆写者恒等于 `accessibility_label()`；
+///       差别只在**覆写了钩子**的控件上——此时宿主声明仍压制自带文案（宿主覆盖控件语义）。
+[[nodiscard]] inline auto declared_label(const Widget &w) -> std::string {
+    if (const auto &explicit_label = w.explicit_accessibility_label(); !explicit_label.empty()) {
+        return explicit_label;
+    }
+    return w.accessibility_label();
+}
+
 /// @brief 直接子节点中的「唯一文本子节点」文本（G24 Name 回退链第三级）。
 ///
 /// 图标 + 文字按钮是常见形态：容器本身无 label，其唯一 `Text` 子节点即读屏应念的内容。
@@ -64,7 +78,7 @@ namespace detail {
         }
         ++text_children;
         if (text_children == 1) {
-            found = child.accessibility_label();
+            found = declared_label(child);
         }
     });
     return (text_children == 1) ? found : std::string{};
@@ -110,7 +124,7 @@ namespace detail {
         if (name != "Text" && name != "RichText" && name != "Label") {
             return;
         }
-        const std::string label = sib.accessibility_label();
+        const std::string label = declared_label(sib);
         if (label.empty()) {
             return;
         }
@@ -143,15 +157,17 @@ namespace detail {
 /// @brief Name（可访问名）回退链（G24，对标 ARIA accessible name computation）。
 ///
 /// ```
-/// name = accessibility_label()                       // 显式标签优先
+/// name = explicit_accessibility_label()              // 宿主显式声明（`set_accessibility_label`，最高优先级）
+///      ?: accessibility_label()                      // 控件自带文案（Button 的 label / Text 的内容…）
 ///      ?: 文本内容（Text / TextInput 的 value）       // 文本类控件的内容即名字
-///      ?: 唯一 Text 子节点的文本                      // 图标 + 文字按钮
 ///      ?: 兄弟标签关联（最近且相邻的文本兄弟）          // CheckBox/Slider 等叶子控件（#1-C）
+///      ?: 唯一 Text 子节点的文本                      // 图标 + 文字按钮
 ///      ?: ""                                         // 装饰节点，交由 G23 裁剪忽略
 /// ```
-/// @note 只对本控件求值，不含子节点递归（回退链第三级是唯一例外，且只在恰好一个文本子节点时生效）。
+/// @note 第三、四级只取**几何已绘制**的兄弟盒，未绘制时安全回落空串。
+/// @note 只对本控件求值，不含子节点递归（后两级是唯一例外，且只在恰好一个文本子节点时生效）。
 [[nodiscard]] inline auto resolve_accessibility_name(const Widget &w, AccessibilityRole role) -> std::string {
-    if (auto label = w.accessibility_label(); !label.empty()) {
+    if (auto label = declared_label(w); !label.empty()) {
         return label;
     }
     if (role == AccessibilityRole::Text || role == AccessibilityRole::TextInput) {

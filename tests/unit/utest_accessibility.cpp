@@ -1,7 +1,8 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/core/accessibility.h
+/// 目标单元: include/aurora/core/accessibility.h + include/aurora/widget/a11y_tree.h + include/aurora/widget/widget.h
 /// 测试说明: 覆盖角色推断映射、默认动作集、位掩码判定、无障碍树构建计数、语义几何（布局累加 /
-///           绘制优先）、name/value 自填与 hook 覆写优先级（最小控件桩 + 真实控件驱动）
+///           绘制优先）、name/value 自填与 hook 覆写优先级、Name 回退链各级（显式声明 /
+///           兄弟标签 / 唯一文本子节点）与显式名的 props 往返、NameChanged 上报（最小控件桩 + 真实控件驱动）
 
 #include <cstdint>
 #include <functional>
@@ -78,6 +79,29 @@ class ProbeColumn final : public aurora::Container {
         }
         return aurora::Size{.width = AURORA_PROBE_ITEM.width, .height = y};
     }
+};
+
+/// @brief 横向排布的容器桩：子节点按 `kProbeItem` **水平相邻**落位（兄弟标签启发式要求同行且
+///        间隙 ≈ 0，ProbeColumn 的纵向落位刻意不命中，二者正好构成启发式的正反两向证据）。
+///        `type` 决定角色推断（默认 "Row" → Generic；传 "Slider" 等可充当需要标签的宿主）。
+class ProbeRow final : public aurora::Container {
+  public:
+    explicit ProbeRow(const char* type = "Row") : type_{type} {}
+
+    [[nodiscard]] auto type_name() const -> const char* override { return type_; }
+
+  protected:
+    auto on_layout(const aurora::Constraints& /*c*/, const aurora::BuildContext& /*ctx*/) -> aurora::Size override {
+        float x = 0.0F;
+        for (auto& child : children_) {
+            child.set_bounds(aurora::Rect{.origin = aurora::Point{.x = x, .y = 0.0F}, .size = kProbeItem});
+            x += kProbeItem.width;
+        }
+        return aurora::Size{.width = x, .height = kProbeItem.height};
+    }
+
+  private:
+    const char* type_;
 };
 
 /// @brief 无 `Node` 几何的虚拟化容器桩：子节点存在私有表中、只经 `for_each_child` 暴露
@@ -553,6 +577,119 @@ AURORA_TEST_CASE(text_input_edits_raise_value_changed) {
     AURORA_TEST_CHECK_EQ(events[0].kind, aurora::AccessibilityEventKind::FocusChanged);
     AURORA_TEST_CHECK_EQ(events[1].kind, aurora::AccessibilityEventKind::ValueChanged);
     AURORA_TEST_CHECK_EQ(events[1].target, &input);
+}
+
+AURORA_TEST_CASE(explicit_label_overrides_widget_builtin_name) {
+    aurora::Button button{std::string{"确定"}};
+    AURORA_TEST_CHECK_EQ(button.explicit_accessibility_label(), std::string{});
+
+    button.set_accessibility_label("确认订单");
+    AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(button).name, std::string{"确认订单"});
+    // 钩子本身不被改写：显式名在 Name 回退链第一级生效，控件自带文案保持原样。
+    AURORA_TEST_CHECK_EQ(button.accessibility_label(), std::string{"确定"});
+
+    // 空串 = 撤除声明 ⇒ 回落控件自带文案（不是「名字为空」）。
+    button.set_accessibility_label({});
+    AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(button).name, std::string{"确定"});
+}
+
+AURORA_TEST_CASE(explicit_label_names_leaf_without_builtin_label) {
+    // Checkbox 无内置文本，且未绘制 ⇒ 兄弟启发式与唯一子节点两级都取不到名（历史缺口）。
+    aurora::Checkbox cb;
+    AURORA_TEST_CHECK_TRUE(aurora::build_accessibility_tree(cb).name.empty());
+
+    cb.set_accessibility_label("同意条款");
+    const auto tree = aurora::build_accessibility_tree(cb);
+    AURORA_TEST_CHECK_EQ(tree.name, std::string{"同意条款"});
+    // 名字不改角色/取值/状态：显式名只是 Name 一列。
+    AURORA_TEST_CHECK_TRUE(tree.role == aurora::AccessibilityRole::Checkbox);
+    AURORA_TEST_CHECK_EQ(tree.value, std::string{"false"});
+}
+
+AURORA_TEST_CASE(sibling_text_label_hits_adjacent_leaf) {
+    // #1-C 的几何启发式此前只有真机探针覆盖，此处补无头断言：同行相邻的文本兄弟即叶子控件之名。
+    // 标签兄弟自己得有可读文本：显式声明经 `declared_label` 同样充当标签来源（与钩子覆写同源）。
+    auto label = ProbeLeaf{"Text"};
+    label.set_accessibility_label("启用通知");
+    ProbeRow row;
+    row.add(aurora::Node{std::move(label)});
+    row.add(aurora::Node{ProbeLeaf{"Checkbox"}});
+    aurora::LayoutEngine::layout(row, aurora::Constraints{.min = aurora::Size{},
+                                                          .max = aurora::Size{.width = 400.0F, .height = 400.0F}});
+    aurora::Painter painter;
+    painter.begin(256, 256);
+    row.paint(painter,
+              aurora::Rect{.origin = aurora::Point{}, .size = aurora::Size{.width = 200.0F, .height = 20.0F}},
+              aurora::BuildContext{});
+
+    const auto tree = aurora::build_accessibility_tree(row);
+    AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
+    AURORA_TEST_CHECK_EQ(tree.children[1].name, std::string{"启用通知"});
+}
+
+AURORA_TEST_CASE(sibling_label_misses_stacked_leaf) {
+    // 反向证据：纵向堆叠（`Column { Slider, Text }`，demo 常见形态）不被启发式命中——
+    // 该形态须由 `set_accessibility_label` 显式声明，此用例锁定「不猜」的边界。
+    ProbeColumn column;
+    column.add(aurora::Node{ProbeLeaf{"Slider"}});
+    auto label = ProbeLeaf{"Text"};
+    label.set_accessibility_label("音量");
+    column.add(aurora::Node{std::move(label)});
+    aurora::LayoutEngine::layout(column, aurora::Constraints{.min = aurora::Size{},
+                                                             .max = aurora::Size{.width = 400.0F, .height = 400.0F}});
+    aurora::Painter painter;
+    painter.begin(256, 256);
+    column.paint(painter,
+                 aurora::Rect{.origin = aurora::Point{}, .size = aurora::Size{.width = 100.0F, .height = 40.0F}},
+                 aurora::BuildContext{});
+
+    const auto tree = aurora::build_accessibility_tree(column);
+    AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
+    AURORA_TEST_CHECK_TRUE(tree.children[0].name.empty());
+}
+
+AURORA_TEST_CASE(unique_text_child_names_container_via_hook_override) {
+    // 回退链最后一级：唯一文本子节点。子节点走 `Text` 的**钩子覆写**取文（非显式声明路）。
+    ProbeRow box{"Slider"};
+    box.add(aurora::Node{aurora::Text{std::string{"音量"}}});
+    const auto tree = aurora::build_accessibility_tree(box);
+    AURORA_TEST_CHECK_EQ(tree.name, std::string{"音量"});
+}
+
+AURORA_TEST_CASE(explicit_label_round_trips_through_props) {
+    aurora::Checkbox src;
+    src.set_accessibility_label("静音");
+    aurora::Json props;
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(props["accessibility_label"].get<std::string>(), std::string{"静音"});
+
+    aurora::Checkbox dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(dst.explicit_accessibility_label(), std::string{"静音"});
+    AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(dst).name, std::string{"静音"});
+
+    // 未声明不写键：空值落盘会被误读成「显式清空名字」。
+    aurora::Checkbox plain;
+    aurora::Json plain_props;
+    plain.serialize_props(plain_props);
+    AURORA_TEST_CHECK_FALSE(plain_props.contains("accessibility_label"));
+}
+
+AURORA_TEST_CASE(explicit_label_change_raises_name_changed_once_per_diff) {
+    std::vector<aurora::AccessibilityEvent> events;
+    const ScopedEventHandler listen{&events};
+
+    aurora::Checkbox cb;
+    cb.set_accessibility_label("同意条款");
+    cb.set_accessibility_label("同意条款");  // 同值幂等：不得重复上报（读屏重念是噪声）
+    cb.set_accessibility_label("同意条款并继续");
+    cb.set_accessibility_label({});
+
+    AURORA_TEST_REQUIRE_EQ(events.size(), 3U);
+    for (const auto &e : events) {
+        AURORA_TEST_CHECK_EQ(e.kind, aurora::AccessibilityEventKind::NameChanged);
+        AURORA_TEST_CHECK_EQ(e.target, &cb);
+    }
 }
 
 }  // namespace aurora::test_cases::utest_accessibility

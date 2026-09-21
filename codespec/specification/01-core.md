@@ -312,7 +312,14 @@ btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可�
 
 新增字段一律带默认成员初始化，且**追加在既有字段之后**——既有聚合初始化与序列化面零变化。
 
-**名称回退链（对标 ARIA accessible name computation）**：`accessibility_label()` → （`Text` / `TextInput` 角色）控件文本 / 取值 → 唯一文本子节点之标签。最后一级只在一棵子树恰有一个 `Text` / `RichText` / `Label` 子节点时生效（多个候选即弃权，避免猜错）。**已知缺口**：`Checkbox` / `Slider` 无内建 label，而本库里它们的标签通常是**兄弟**节点而非子节点，故其可访问名可能为空——是否引入标签关联（`aria-labelledby` 式关系，或 `set_accessibility_label` 显式接口）留待设计裁决。
+**名称回退链（对标 ARIA accessible name computation）**：`explicit_accessibility_label()`（宿主经 `Widget::set_accessibility_label()` 声明，对标 `aria-label`）→ `accessibility_label()` 覆写（`Button` 取 label、`Text` 取内容…）→ （`Text` / `TextInput` 角色）控件文本 / 取值 → **兄弟标签关联** → **唯一文本子节点**之标签。求值实现在 `a11y_tree.h` 的 `detail::resolve_accessibility_name`，与上述顺序逐字一致。
+
+- **兄弟标签关联**（`detail::sibling_label_name`）是**几何启发式**：同容器直接子节点中取与本控件「垂直重叠 + 水平相邻（间隙 ≤ 12 DIP）」的最近文本兄弟，且只对 `Checkbox` / `Switch` / `Slider` 三种角色生效；未绘制、无父、纵向堆叠（`Column { Slider, Text }`）一律不命中——**宁可不念也不猜错**。
+- **唯一文本子节点**只在该子树恰有一个 `Text` / `RichText` / `Label` 子节点时生效（多个候选即弃权，避免把整段内容拼成名字）。
+- 标签来源（第 4 / 5 级读兄弟与子节点的那段文本）统一走 `detail::declared_label`，故「钩子覆写取到名的控件」与「显式声明取到名的控件」互为可用的标签来源，两条路同源。
+- `set_accessibility_label(std::string)` 返回 `Widget &`（可链式），键名 `accessibility_label` 随基类 props 往返（**未声明不写键**，空串语义是「撤除声明、回落回退链」而非「名字为空」）；同值重复设置不上报事件，值真变化上报 `NameChanged`。
+
+**剩余缺口（如实申报）**：**引用式**标签关联（对标 `aria-labelledby`——读屏名跟随被引用控件的文本动态变化）尚未提供。阻碍是身份体系：本库控件的 `id` 只有 `runtime_id()`（进程级自增、不可序列化、重建即变），跨容器引用无法稳定表达也不能过 `to_json` / `from_json` 往返。要做须先引入用户可设的稳定键，属独立切片。
 
 **事件通道（两条并列，互不覆盖）。** 事件处理器在 `accessibility.h` 内是**进程级单槽**（`current_accessibility_event_handler()`，宿主用）；桥另经 `detail::a11y_broadcast_hook` 独立接收同一批事件。两条通道**并列**而非链式：宿主处理器永远被调用，桥广播独立生效，安装顺序无关（历史上「保存旧处理器 + 链式包裹」会让先安装者失效）。另有第三条并列通道 `detail::a11y_widget_destroy_hook`：控件实例销毁前**带上其指针**广播一次，供桥判定「我缓存的根是不是没了」（语义树事件只能给出宿主容器，无法承载这一判定）。
 

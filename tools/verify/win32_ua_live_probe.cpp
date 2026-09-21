@@ -103,10 +103,9 @@ struct Expectation {
     /// @brief 是否要求 Non-empty Name。
     ///
     /// 只对**自带标签来源**的控件为真：Button（`ButtonProps::label`）、TextInput
-    /// （`placeholder`）、Text（内容文本）。为假者是本库的**已知设计缺口**——`Checkbox`
-    /// 与 `Slider` 是叶子控件、没有内建 label，而本库里标签通常是它们的**兄弟**节点而非
-    /// 子节点，G24 的「唯一文本子节点」兜底因此拿不到名字。是否补 `aria-labelledby` 式的
-    /// 标签关联（或 `set_accessibility_label`）属设计决策，探针只如实呈现、不作判负。
+    /// （`placeholder`）、Text（内容文本），以及宿主经 `set_accessibility_label()` 显式声明
+    /// 名的任意控件（回退链第一级）。`Checkbox` / `Slider` 无内建 label，其标签通常是**兄弟**
+    /// 节点而非子节点，故走下方 `sibling_expect` 的兄弟关联，或直接显式声明。
     bool require_name{};
     /// @brief 期望经「兄弟标签关联」解析出的 Name（#1-C 验收）；`nullptr` 表示不作此断言。
     ///

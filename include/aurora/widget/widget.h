@@ -531,10 +531,32 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 无障碍可读名称（语义树 `AccessibilityNode::name`）：屏幕阅读器对控件的播报名。
     ///
-    /// 默认空串；需要语义的控件覆写返回可读文本（Button 取 label、Text 取显示文本…）。
-    /// 覆写返回值**优先于**任何按角色推断的默认取值，宿主（App）可据此覆盖控件自带文案。
+    /// 默认返回 `explicit_label_`（未显式设置即空串）；需要自带语义的控件覆写返回可读文本
+    /// （Button 取 label、Text 取显示文本…）。
+    /// 覆写返回值**优先于**任何按角色推断的默认取值，但**低于**宿主经
+    /// `set_accessibility_label()` 显式声明的名字（回退链第一级，见 `a11y_tree.h`）。
+    /// @note Side-effects: reads state
+    [[nodiscard]] virtual auto accessibility_label() const -> std::string { return explicit_label_; }
+
+    /// @brief 宿主显式声明的读屏名（对标 ARIA `aria-label`）；未设置为空串。
     /// @note Side-effects: pure
-    [[nodiscard]] virtual auto accessibility_label() const -> std::string { return std::string{}; }
+    [[nodiscard]] auto explicit_accessibility_label() const -> const std::string & { return explicit_label_; }
+
+    /// @brief 声明读屏名：回退链的**最高优先级**来源，空串 = 撤除声明（回落既有回退链）。
+    ///
+    /// 用途：`Checkbox` / `Switch` / `Slider` 这类无内置文本的叶子控件，其标签在视觉上常是
+    /// **兄弟**节点，语义树按几何启发式关联（`sibling_label_name`）只在同行相邻时命中；
+    /// 本方法给出与布局无关的确定名字，免去了「为取个名字而子类化覆写钩子」。
+    /// 名字变化上报 `NameChanged` 事件 ⇒ 三桥在下一次投影发出 Name 属性变更。
+    /// @note Side-effects: mutates state, notifies accessibility event channel
+    auto set_accessibility_label(std::string label) -> Widget & {
+        if (explicit_label_ == label) {
+            return *this;  // 同值不重复上报（`present_root` 之外的每帧幂等调用亦安全）
+        }
+        explicit_label_ = std::move(label);
+        notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::NameChanged, .target = this});
+        return *this;
+    }
 
     /// @brief 无障碍当前值（语义树 `AccessibilityNode::value`）：可变量控件的现值文本。
     ///
@@ -670,6 +692,10 @@ class Widget : public std::enable_shared_from_this<Widget> {
         props["height"] = length_to_json(height_);
         props["show"] = show.get();
         props["overflow"] = overflow_strategy_to_json(overflow_);
+        // 未声明不输出：空串即「回落 Name 回退链」，写出空值会让结构快照误读为「名字已清空」。
+        if (!explicit_label_.empty()) {
+            props["accessibility_label"] = explicit_label_;
+        }
     }
 
     /// @brief 从 props JSON 反序列化自有属性（to_json/from_json 闭环）。
@@ -686,6 +712,9 @@ class Widget : public std::enable_shared_from_this<Widget> {
         }
         if (props.contains("overflow")) {
             overflow_strategy(json_to_overflow_strategy(props["overflow"]));
+        }
+        if (props.contains("accessibility_label")) {
+            set_accessibility_label(props["accessibility_label"].get<std::string>());
         }
     }
 
@@ -867,6 +896,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
     bool focusable_ = true;  ///< 是否可参与焦点序（specification/05-event-navigation.md §4）
     int tab_index_ = 0;  ///< Tab 序权重（越小越靠前）
     bool is_focused_ = false;  ///< 当前是否持有焦点
+    /// 宿主显式声明的读屏名（对标 ARIA `aria-label`）：Name 回退链最高优先级，空串 = 未声明。
+    std::string explicit_label_;
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
   private:

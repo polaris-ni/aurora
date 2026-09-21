@@ -1392,7 +1392,23 @@ app.run();          // 读屏（讲述人 / NVDA / Inspect.exe）此时已能读
 
 ### 37.2 补一个可访问名
 
-若控件的可见文字不是它的合适读法（或控件本身没有文字，如纯图形按钮），覆写 `accessibility_label()`：
+首选**声明式**接口 `set_accessibility_label()`——它与布局无关、可链式调用、随 props 序列化往返，
+适用于任何控件（尤其是没有内置文字的 `Checkbox` / `Switch` / `Slider` / 纯图形按钮）：
+
+```cpp
+au::Slider volume;
+volume.set_accessibility_label("音量");        // 读屏念「音量 60%」而非无名
+
+au::Column{
+    au::Text{"音量"},                          // 纵向堆叠的标签不会被自动关联
+    au::Slider{}.set_accessibility_label("音量"),   // ⇒ 在此显式声明
+};
+```
+
+空串 = **撤除**声明（回落下面的回退链），不是「把名字设为空」。同名重复设置不重复上报，
+名字真变化时上报 `AccessibilityEventKind::NameChanged`，三桥在下次投影发出 Name 属性变更。
+
+只有当**控件自带**的可读文本需要参与覆写（自定义控件、可见文字不是合适读法）时才子类化覆写钩子：
 
 ```cpp
 class IconButton : public au::LeafWidget {
@@ -1402,13 +1418,19 @@ class IconButton : public au::LeafWidget {
 };
 ```
 
-**名称回退链**（不覆写时的自动推导顺序）：
+**名称回退链**（`a11y_tree.h` 的 `resolve_accessibility_name`，逐字与实现同序）：
 
-1. `accessibility_label()` 返回非空 → 用它；
-2. 角色是 `Text` / `TextInput` → 用控件文本（`accessibility_text()`），再退到 `accessibility_value()`；
-3. 否则看**唯一文本子节点**：子树里恰有 1 个 `Text` / `RichText` / `Label` 子节点时取它的标签。
+1. `explicit_accessibility_label()`（即 `set_accessibility_label()` 的声明）非空 → 用它；
+2. `accessibility_label()` 覆写返回非空 → 用它（`Button` 取 label、`Text` 取内容…）；
+3. 角色是 `Text` / `TextInput` → 用控件文本（`accessibility_text()`），再退到 `accessibility_value()`；
+4. **兄弟标签关联**：同容器直接子节点中，与本控件**垂直重叠 + 水平相邻**（间隙 ≤ 12 DIP）且几何最近的
+   `Text` / `RichText` / `Label` 兄弟，仅对 `Checkbox` / `Switch` / `Slider` 角色生效；
+5. 否则看**唯一文本子节点**：子树里恰有 1 个 `Text` / `RichText` / `Label` 子节点时取它的标签。
 
-> ⚠️ **兄弟标签不被自动关联**。`au::Checkbox` 与 `au::Slider` 是叶子控件、没有内建 label；本库里它们的标签通常是**兄弟** `Text` 而不是子节点，第 3 条回退因此取不到。目前须显式覆写 `accessibility_label()`（子类化），或在设计上接受该控件无读屏名。是否引入 `aria-labelledby` 式的标签关联 API 尚未裁决。
+> ⚠️ 第 4 条是**几何启发式**，两个方向都会漏：纵向堆叠（`Column { Slider, Text }`）不命中（判据要求同行），
+> 未绘制/无父也不命中（宁可不念，也不猜错）。这正是 `set_accessibility_label()` 存在的理由——
+> 布局无关、结果确定。跨容器的**引用式**关联（对标 `aria-labelledby`，读屏名跟随被引用控件的文本变化）
+> 仍未提供：本库没有用户可设的稳定 id（`runtime_id` 进程内自增、不可序列化），要做须先立身份体系。
 
 ### 37.3 描述状态与取值（自定义控件）
 
