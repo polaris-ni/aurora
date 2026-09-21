@@ -101,7 +101,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "Placeholder");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool has_message = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (std::string{p.name} == "message") {
             has_message = true;
         }
@@ -110,7 +110,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
 
     // 无自有信号。
     Placeholder p;
-    std::vector<aurora::SignalViewBase*> out;
+    std::vector<aurora::SignalViewBase *> out;
     p.collect_signals(out);
     AURORA_TEST_CHECK_EQ(out.size(), 0U);
 }

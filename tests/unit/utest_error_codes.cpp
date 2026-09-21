@@ -35,7 +35,7 @@ AURORA_TEST_CASE(frozen_slugs_are_stable_contracts) {
 
 AURORA_TEST_CASE(table_entries_have_unique_nonempty_keys) {
     std::set<std::string_view> slugs;
-    for (const auto& entry : AURORA_ERROR_TABLE) {
+    for (const auto &entry : AURORA_ERROR_TABLE) {
         AURORA_TEST_CHECK_FALSE(entry.slug.empty());
         AURORA_TEST_CHECK_FALSE(entry.ident.empty());
         AURORA_TEST_CHECK_FALSE(entry.message_tpl.empty());
@@ -68,7 +68,7 @@ AURORA_TEST_CASE(category_and_severity_to_string_complete) {
 
 AURORA_TEST_CASE(lookup_helpers_match_table_entry) {
     constexpr auto code = ErrorCode::LayoutNullChild;
-    const auto& meta = AURORA_ERROR_TABLE.at(static_cast<std::size_t>(code));
+    const auto &meta = AURORA_ERROR_TABLE.at(static_cast<std::size_t>(code));
     AURORA_TEST_CHECK(aurora::slug(code) == meta.slug);
     AURORA_TEST_CHECK(aurora::category(code) == meta.category && meta.category == ErrorCategory::Layout);
     AURORA_TEST_CHECK(aurora::severity(code) == meta.severity && meta.severity == ErrorSeverity::Warning);

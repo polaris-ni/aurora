@@ -165,7 +165,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "Chip");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool has_on_delete = false;
-    for (const auto& e : d.events) {
+    for (const auto &e : d.events) {
         if (std::string{e} == "on_delete") {
             has_on_delete = true;
         }

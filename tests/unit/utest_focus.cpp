@@ -22,14 +22,14 @@ class FocusProbe final : public LeafWidget {
     int gained = 0;
     int lost = 0;
 
-    auto type_name() const -> const char* override { return "FocusProbe"; }
+    auto type_name() const -> const char * override { return "FocusProbe"; }
 
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         size_ = c.constrain(Size{.width = 10.0F, .height = 10.0F});
         return size_;
     }
 
-    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 
     auto on_focus_change(bool focused) -> void override {
         if (focused) {
@@ -43,14 +43,14 @@ class FocusProbe final : public LeafWidget {
 
 class FocusRow final : public Container {
   public:
-    auto type_name() const -> const char* override { return "FocusRow"; }
+    auto type_name() const -> const char * override { return "FocusRow"; }
 
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         size_ = c.constrain(Size{.width = 100.0F, .height = 100.0F});
         return size_;
     }
 
-    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 };
 
 /// 构造带 n 个探针子控件的根行；根自身不可聚焦，候选集恰为全部探针。
@@ -73,8 +73,8 @@ AURORA_TEST_CASE(set_focus_request_and_clear_notify) {
     auto [row, probes] = make_row(2);
     FocusManager fm;
     fm.set_root(row.get());
-    FocusProbe& a = *probes[0];
-    FocusProbe& b = *probes[1];
+    FocusProbe &a = *probes[0];
+    FocusProbe &b = *probes[1];
 
     AURORA_TEST_CHECK(fm.focused() == nullptr);
     AURORA_TEST_CHECK_FALSE(fm.has_focus(&a));
@@ -108,8 +108,8 @@ AURORA_TEST_CASE(on_change_callback_receives_old_and_new) {
     FocusManager fm;
     fm.set_root(row.get());
 
-    std::vector<std::pair<Widget*, Widget*>> transitions;
-    fm.set_on_change([&transitions](Widget* old_w, Widget* new_w) -> void { transitions.emplace_back(old_w, new_w); });
+    std::vector<std::pair<Widget *, Widget *>> transitions;
+    fm.set_on_change([&transitions](Widget *old_w, Widget *new_w) -> void { transitions.emplace_back(old_w, new_w); });
 
     fm.set_focus(probes[0].get());
     fm.set_focus(probes[1].get());
@@ -205,7 +205,7 @@ AURORA_TEST_CASE(directional_move_focus_uses_focus_bounds) {
 
 AURORA_TEST_CASE(widget_request_focus_uses_current_manager_slot) {
     auto [row, probes] = make_row(1);
-    FocusProbe& probe = *probes[0];
+    FocusProbe &probe = *probes[0];
 
     set_current_focus_manager(nullptr);
     AURORA_TEST_CHECK(current_focus_manager() == nullptr);

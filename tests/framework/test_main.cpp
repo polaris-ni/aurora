@@ -84,15 +84,15 @@ auto print_usage() -> void {
 ///
 /// std::from_chars 只接受指针区间，故此处是唯一一处指针算术。
 template <typename T>
-[[nodiscard]] auto parse_number(std::string_view text, T& destination, int base = 10) -> bool {
+[[nodiscard]] auto parse_number(std::string_view text, T &destination, int base = 10) -> bool {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): from_chars 需要 [first, last)
-    const std::pair<const char*, const char*> span{text.data(), text.data() + text.size()};
+    const std::pair<const char *, const char *> span{text.data(), text.data() + text.size()};
     const auto result = std::from_chars(span.first, span.second, destination, base);
     return result.ec == std::errc{} && result.ptr == span.second;
 }
 
-auto parse_cli(const std::span<char* const> args, CliOptions& options) -> bool {
-    for (const auto* raw : args.subspan(1)) {
+auto parse_cli(const std::span<char *const> args, CliOptions &options) -> bool {
+    for (const auto *raw : args.subspan(1)) {
         const std::string_view arg{raw};
         if (arg == "--help" || arg == "-h") {
             options.help = true;
@@ -145,15 +145,15 @@ auto parse_cli(const std::span<char* const> args, CliOptions& options) -> bool {
     return true;
 }
 
-auto print_list(const CliOptions& options) -> void {
-    const auto& registry = TestRegistry::instance();
+auto print_list(const CliOptions &options) -> void {
+    const auto &registry = TestRegistry::instance();
     if (options.list_format == "suites") {
-        for (const auto& suite : registry.suites()) {
+        for (const auto &suite : registry.suites()) {
             std::printf("%s\n", suite.c_str());
         }
         return;  // 仅打印，列出用例恒成功（退出码 0 由调用方给出）
     }
-    for (const auto* test_case : registry.cases()) {
+    for (const auto *test_case : registry.cases()) {
         std::printf("%s\n", test_case->full_name().c_str());
     }
 }
@@ -190,7 +190,7 @@ class ResultSink {
 /// 两层职责不重叠。
 class TimeoutWatchdog {
   public:
-    TimeoutWatchdog(int timeout_ms, const ResultSink& sink, std::string_view report_path) : sink_(&sink) {
+    TimeoutWatchdog(int timeout_ms, const ResultSink &sink, std::string_view report_path) : sink_(&sink) {
         if (timeout_ms <= 0) {
             return;  // 未启用
         }
@@ -217,10 +217,10 @@ class TimeoutWatchdog {
         });
     }
 
-    TimeoutWatchdog(const TimeoutWatchdog&) = delete;
-    auto operator=(const TimeoutWatchdog&) -> TimeoutWatchdog& = delete;
-    TimeoutWatchdog(TimeoutWatchdog&&) = delete;
-    auto operator=(TimeoutWatchdog&&) -> TimeoutWatchdog& = delete;
+    TimeoutWatchdog(const TimeoutWatchdog &) = delete;
+    auto operator=(const TimeoutWatchdog &) -> TimeoutWatchdog & = delete;
+    TimeoutWatchdog(TimeoutWatchdog &&) = delete;
+    auto operator=(TimeoutWatchdog &&) -> TimeoutWatchdog & = delete;
 
     ~TimeoutWatchdog() { stop(); }
 
@@ -241,11 +241,11 @@ class TimeoutWatchdog {
     std::condition_variable done_;
     std::thread worker_;
     bool stopped_ = false;
-    const ResultSink* sink_ = nullptr;
+    const ResultSink *sink_ = nullptr;
 };
 
 /// @brief 报告落盘（正常路径）；写失败返回退出码 2。
-auto emit_report(std::string_view path, const std::vector<CaseResult>& results, const RunSummary& summary) -> int {
+auto emit_report(std::string_view path, const std::vector<CaseResult> &results, const RunSummary &summary) -> int {
     if (path.empty()) {
         return static_cast<int>(ExitCode::AllPassed);
     }
@@ -257,7 +257,7 @@ auto emit_report(std::string_view path, const std::vector<CaseResult>& results, 
     return static_cast<int>(ExitCode::UsageOrNoMatch);
 }
 
-auto run_selected(const std::vector<const TestCase*>& selected, const CliOptions& options) -> int {
+auto run_selected(const std::vector<const TestCase *> &selected, const CliOptions &options) -> int {
     // 死亡测试子进程：安静重跑同一用例，只按「站点是否到达 / 语句是否致死」给退出码。
     const bool silent = aurora::testing::detail::death_child_mode();
     auto order = selected;
@@ -271,7 +271,7 @@ auto run_selected(const std::vector<const TestCase*>& selected, const CliOptions
 
     const int rounds = silent ? 1 : options.repeat;
     for (int round = 0; round < rounds; ++round) {
-        for (const auto* test_case : order) {
+        for (const auto *test_case : order) {
             if (!silent) {
                 std::printf("[ RUN      ] %s\n", test_case->full_name().c_str());
             }
@@ -309,7 +309,7 @@ auto run_selected(const std::vector<const TestCase*>& selected, const CliOptions
 
 }  // namespace
 
-auto main(int argc, char** argv) -> int {
+auto main(int argc, char **argv) -> int {
 #ifdef AURORA_PLATFORM_WINDOWS
     // Windows CRT（MSVC/clang-cl 与 MinGW 的 abort 同在 ucrtbase 实现）：abort() 默认带
     // _CALL_REPORTFAULT，以 fail-fast（0xC0000409，WER 事件类型 BEX64）终止——Debug CRT
@@ -322,7 +322,7 @@ auto main(int argc, char** argv) -> int {
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
     _set_abort_behavior(0, _CALL_REPORTFAULT);
 #endif
-    const std::span<char* const> args{argv, static_cast<std::size_t>(argc)};
+    const std::span<char *const> args{argv, static_cast<std::size_t>(argc)};
     if (argc > 0) {
         aurora::testing::detail::set_executable_path(*argv);  // argc > 0 已判，指针解引用而非下标
     }
@@ -354,7 +354,7 @@ auto main(int argc, char** argv) -> int {
             if (const auto current = std::current_exception()) {
                 try {
                     std::rethrow_exception(current);
-                } catch (const std::exception& error) {
+                } catch (const std::exception &error) {
                     std::fprintf(stderr, "terminate called after throwing an exception: %s\n", error.what());
                 } catch (...) {
                     std::fprintf(stderr, "terminate called after throwing a non-standard exception\n");
@@ -388,7 +388,7 @@ auto main(int argc, char** argv) -> int {
         return static_cast<int>(ExitCode::AllPassed);
     }
 
-    const auto& registry = TestRegistry::instance();
+    const auto &registry = TestRegistry::instance();
     const auto selected = aurora::testing::select_cases(registry.cases(), options.run_suite, options.name_filter);
     if (selected.empty()) {
         std::fprintf(stderr, "[test] no test case matched (run='%s', filter='%s')\n", options.run_suite.c_str(),

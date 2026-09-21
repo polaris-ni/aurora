@@ -33,7 +33,7 @@ namespace {
 }
 
 /// @brief 把第 (x, y) 个像素的 R 通道改为指定值，用于制造差异。
-auto set_px(Image& img, int x, int y, std::uint8_t v) -> void {
+auto set_px(Image &img, int x, int y, std::uint8_t v) -> void {
     const std::size_t idx =
         ((static_cast<std::size_t>(y) * static_cast<std::size_t>(img.width)) + static_cast<std::size_t>(x)) * 4U;
     img.pixels[idx] = v;
@@ -54,7 +54,7 @@ AURORA_TEST_CASE(size_mismatch_short_circuits) {
 
 AURORA_TEST_CASE(identical_images_have_no_diff) {
     const Image baseline = make_image(4, 4, 10, 20, 30);
-    const Image& current = baseline;
+    const Image &current = baseline;
 
     const SnapshotDiff diff = compare_snapshots(baseline, current);
     AURORA_TEST_CHECK_FALSE(diff.size_mismatch);
@@ -146,7 +146,7 @@ AURORA_TEST_CASE(cluster_size_mismatch_and_empty_images_return_no_regions) {
 
 AURORA_TEST_CASE(cluster_identical_images_have_no_regions) {
     Image baseline = make_image(16, 16, 7, 8, 9);
-    const Image& current = baseline;
+    const Image &current = baseline;
     AURORA_TEST_CHECK_TRUE(cluster_diff_regions(baseline, current).empty());
 }
 

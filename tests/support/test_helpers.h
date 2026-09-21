@@ -42,15 +42,15 @@ inline auto init_headless(int width, int height) -> TestEnv {
 }
 
 /// @brief 推进一帧：挂载 + 布局（等价于一次确定性 mount/layout，不依赖 GUI 后端）。
-inline auto pump(TestEnv& env) -> void {
+inline auto pump(TestEnv &env) -> void {
     env.focus.set_root(env.root_widget.get());
     (void)render_to_logical_snapshot(env.root, env.width, env.height);
 }
 
 /// @brief 计算 `target` 在 `root` 坐标系下的绝对包围盒（BFS 累加各层 origin）。
-[[nodiscard]] inline auto absolute_bounds(const Node& root, const Widget& target) -> std::optional<Rect> {
+[[nodiscard]] inline auto absolute_bounds(const Node &root, const Widget &target) -> std::optional<Rect> {
     std::optional<Rect> found;
-    std::function<void(const Node&, Point)> rec = [&](const Node& n, Point acc) -> void {
+    std::function<void(const Node &, Point)> rec = [&](const Node &n, Point acc) -> void {
         if (found) {
             return;
         }
@@ -59,7 +59,7 @@ inline auto pump(TestEnv& env) -> void {
             found = abs;
             return;
         }
-        for (const Node& c : n.widget().child_nodes()) {
+        for (const Node &c : n.widget().child_nodes()) {
             rec(c, acc + n.bounds().origin);
         }
     };
@@ -68,7 +68,7 @@ inline auto pump(TestEnv& env) -> void {
 }
 
 /// @brief 在 `target` 中心合成「按下+抬起」，触发其点击逻辑（如 `Button::on_click`）。
-inline auto tap(TestEnv& env, const Widget& target) -> void {
+inline auto tap(TestEnv &env, const Widget &target) -> void {
     const auto box = absolute_bounds(env.root, target);
     if (!box) {
         return;
@@ -87,7 +87,7 @@ inline auto tap(TestEnv& env, const Widget& target) -> void {
 }
 
 /// @brief 将一段文本逐字符喂给已聚焦的 `target`（典型用于 `TextInput`）。
-inline auto type_text(TestEnv& env, Widget& target, std::string_view text) -> void {
+inline auto type_text(TestEnv &env, Widget &target, std::string_view text) -> void {
     env.focus.set_focus(&target);
     for (const char c : text) {
         TextInputEvent e;
@@ -97,24 +97,24 @@ inline auto type_text(TestEnv& env, Widget& target, std::string_view text) -> vo
 }
 
 /// @brief 断言树中存在文本含 `needle` 的 `Text` / `TextInput`。
-inline auto expect_text(const Node& root, std::string_view needle) -> void {
+inline auto expect_text(const Node &root, std::string_view needle) -> void {
     bool found = false;
-    std::function<void(const Node&)> rec = [&](const Node& n) -> void {
+    std::function<void(const Node &)> rec = [&](const Node &n) -> void {
         if (found) {
             return;
         }
-        const Widget& w = n.widget();
+        const Widget &w = n.widget();
         std::string text;
         const std::string tn = w.type_name();
         if (tn == "Text") {
-            text = dynamic_cast<const Text&>(w).content.get().text;
+            text = dynamic_cast<const Text &>(w).content.get().text;
         } else if (tn == "TextInput") {
-            text = dynamic_cast<const TextInput&>(w).value();
+            text = dynamic_cast<const TextInput &>(w).value();
         }
         if (!text.empty() && text.find(std::string(needle)) != std::string::npos) {
             found = true;
         }
-        for (const Node& c : w.child_nodes()) {
+        for (const Node &c : w.child_nodes()) {
             rec(c);
         }
     };
@@ -123,10 +123,10 @@ inline auto expect_text(const Node& root, std::string_view needle) -> void {
 }
 
 /// @brief 断言树中存在指定 `type_name()` 的控件。
-inline auto expect_tree_contains(const Node& root, std::string_view type) -> void {
+inline auto expect_tree_contains(const Node &root, std::string_view type) -> void {
     const std::string want(type);
     bool found = false;
-    std::function<void(const Node&)> rec = [&](const Node& n) -> void {
+    std::function<void(const Node &)> rec = [&](const Node &n) -> void {
         if (found) {
             return;
         }
@@ -134,7 +134,7 @@ inline auto expect_tree_contains(const Node& root, std::string_view type) -> voi
             found = true;
             return;
         }
-        for (const Node& c : n.widget().child_nodes()) {
+        for (const Node &c : n.widget().child_nodes()) {
             rec(c);
         }
     };
@@ -143,14 +143,14 @@ inline auto expect_tree_contains(const Node& root, std::string_view type) -> voi
 }
 
 /// @brief 断言树中指定类型控件的数量。
-inline auto expect_count(const Node& root, std::string_view type, int expected) -> void {
+inline auto expect_count(const Node &root, std::string_view type, int expected) -> void {
     const std::string want(type);
     int count = 0;
-    std::function<void(const Node&)> rec = [&](const Node& n) -> void {
+    std::function<void(const Node &)> rec = [&](const Node &n) -> void {
         if (std::string(n.widget().type_name()) == want) {
             ++count;
         }
-        for (const Node& c : n.widget().child_nodes()) {
+        for (const Node &c : n.widget().child_nodes()) {
             rec(c);
         }
     };
@@ -159,7 +159,7 @@ inline auto expect_count(const Node& root, std::string_view type, int expected) 
 }
 
 /// @brief 断言某节点绝对包围盒与期望一致（容差 `tol` dp）。
-inline auto expect_bounds(const Node& node, const Rect& expected, float tol = 1.0F) -> void {
+inline auto expect_bounds(const Node &node, const Rect &expected, float tol = 1.0F) -> void {
     const Rect b = node.bounds();
     const bool ok =
         std::abs(b.origin.x - expected.origin.x) <= tol && std::abs(b.origin.y - expected.origin.y) <= tol &&
@@ -168,7 +168,7 @@ inline auto expect_bounds(const Node& node, const Rect& expected, float tol = 1.
 }
 
 /// @brief 断言某节点可见性。
-inline auto expect_visible(const Node& node, bool expected = true) -> void {
+inline auto expect_visible(const Node &node, bool expected = true) -> void {
     AURORA_TEST_CHECK_MSG(node.widget().show.get() == expected, "expected node visibility to match");
 }
 

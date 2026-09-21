@@ -36,10 +36,10 @@ class Fixture {
     Fixture() = default;
     virtual ~Fixture() = default;
 
-    Fixture(const Fixture&) = delete;
-    auto operator=(const Fixture&) -> Fixture& = delete;
-    Fixture(Fixture&&) = delete;
-    auto operator=(Fixture&&) -> Fixture& = delete;
+    Fixture(const Fixture &) = delete;
+    auto operator=(const Fixture &) -> Fixture & = delete;
+    Fixture(Fixture &&) = delete;
+    auto operator=(Fixture &&) -> Fixture & = delete;
 
   protected:
     /// @brief 用例体执行前的准备（派生类按需覆写）。
@@ -79,7 +79,7 @@ class CaseBase : public FixtureClass {
 ///
 /// `Args` 供值参数化用例透传取值；AURORA_TEST_F / 类型参数化用例默认构造。
 template <typename CaseClass, typename... Args>
-auto run_case_instance(Args&&... args) -> void {
+auto run_case_instance(Args &&...args) -> void {
     CaseClass instance{std::forward<Args>(args)...};
     instance.run();
 }

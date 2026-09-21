@@ -23,16 +23,16 @@ class SolidBox final : public LeafWidget {
   public:
     SolidBox() = default;
 
-    [[nodiscard]] auto type_name() const -> const char* override { return "SolidBox"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "SolidBox"; }
 
   protected:
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override { return c.constrain(c.max); }
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(c.max); }
 
-    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 };
 
 /// 按名称构建路由（根 SolidBox + 同名 Route），供 restore/open_uri 使用。
-auto named_route(const std::string& name) -> Route { return Route{Node{SolidBox{}}, name}; }
+auto named_route(const std::string &name) -> Route { return Route{Node{SolidBox{}}, name}; }
 
 }  // namespace
 
@@ -143,7 +143,7 @@ AURORA_TEST_CASE(navigator_path_export_and_restore) {
     AURORA_TEST_CHECK_STREQ(path[1], "detail");
     AURORA_TEST_CHECK_STREQ(path[2], "settings");
 
-    const std::function<Route(std::string)> build = [](const std::string& name) -> Route { return named_route(name); };
+    const std::function<Route(std::string)> build = [](const std::string &name) -> Route { return named_route(name); };
     nav.restore(std::vector<std::string>{"x", "y"}, build);
     AURORA_TEST_CHECK_EQ(nav.depth(), 2U);
     AURORA_TEST_CHECK_EQ(nav.current().name(), std::string{"y"});
@@ -157,7 +157,7 @@ AURORA_TEST_CASE(navigator_path_export_and_restore) {
 AURORA_TEST_CASE(navigator_restore_guards) {
     Navigator nav{named_route("home")};
     nav.push(named_route("detail"));
-    const std::function<Route(std::string)> build = [](const std::string& name) -> Route { return named_route(name); };
+    const std::function<Route(std::string)> build = [](const std::string &name) -> Route { return named_route(name); };
 
     // 超过 max_depth 的 restore 整体拒绝，原栈保留。
     nav.set_max_depth(1);
@@ -172,7 +172,7 @@ AURORA_TEST_CASE(navigator_restore_guards) {
 }
 
 AURORA_TEST_CASE(navigator_open_uri_split_and_registry) {
-    const std::function<Route(const std::string&)> build = [](const std::string& name) -> Route {
+    const std::function<Route(const std::string &)> build = [](const std::string &name) -> Route {
         return named_route(name);
     };
 
@@ -187,8 +187,8 @@ AURORA_TEST_CASE(navigator_open_uri_split_and_registry) {
 
     // 路由表缺失的名称段被跳过。
     RouteRegistry registry;
-    registry["home"] = [](const std::string& name) -> Route { return named_route(name); };
-    registry["detail"] = [](const std::string& name) -> Route { return named_route(name); };
+    registry["home"] = [](const std::string &name) -> Route { return named_route(name); };
+    registry["detail"] = [](const std::string &name) -> Route { return named_route(name); };
 
     Navigator nav2{named_route("home")};
     nav2.open_uri("home/ghost/detail", registry);

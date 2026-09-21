@@ -10,8 +10,8 @@ namespace aurora::test_cases::utest_modifier_transform {
 
 namespace {
 
-auto make_measure(float w, float h) -> std::function<Size(const Constraints&)> {
-    return [w, h](const Constraints&) -> Size { return Size{.width = w, .height = h}; };
+auto make_measure(float w, float h) -> std::function<Size(const Constraints &)> {
+    return [w, h](const Constraints &) -> Size { return Size{.width = w, .height = h}; };
 }
 
 auto constraints(float max_w, float max_h) -> Constraints {

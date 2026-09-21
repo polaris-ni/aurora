@@ -112,14 +112,14 @@ AURORA_TEST_CASE(connect_state_subscription_scopes_to_destruction) {
 
 AURORA_TEST_CASE(connect_store_receives_new_state_on_dispatch) {
     // connect(Store)：不做立即应用；每次 dispatch 产生新状态即回调一次；析构自动退订。
-    const auto reducer = [](const int& current, const Action& action) -> int {
-        const int* v = action.payload_as<int>();
+    const auto reducer = [](const int &current, const Action &action) -> int {
+        const int *v = action.payload_as<int>();
         return v != nullptr ? *v : current;
     };
     Store<int> store{0, reducer};
     std::vector<int> seen;
     {
-        const auto sub = connect(store, [&seen](const int& v) -> void { seen.push_back(v); });
+        const auto sub = connect(store, [&seen](const int &v) -> void { seen.push_back(v); });
         AURORA_TEST_CHECK_TRUE(seen.empty());  // 与 State 重载不同：不立即应用
 
         store.dispatch(Action{"set", 5});

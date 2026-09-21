@@ -21,7 +21,7 @@ namespace aurora::test_cases::itest_image_stb {
 namespace {
 
 /// @brief 在当前用例唯一临时目录写入文本/字节文件并返回路径字符串。
-auto write_temp_file(const std::string& name, const std::string& bytes) -> std::string {
+auto write_temp_file(const std::string &name, const std::string &bytes) -> std::string {
     const std::filesystem::path dir = aurora::testing::isolation::temp_dir();
     std::filesystem::create_directories(dir);
     const std::filesystem::path file = dir / name;
@@ -43,7 +43,7 @@ AURORA_TEST_CASE(stb_roundtrip_decodes_rendered_png) {
     // 成功加载真实 PNG：ok + 尺寸 > 0。
     const auto r = aurora::Image::load(png_path.string());
     AURORA_TEST_REQUIRE_TRUE(r.ok());
-    const aurora::Image& img = r.value();
+    const aurora::Image &img = r.value();
     AURORA_TEST_CHECK_TRUE(img.width > 0);
     AURORA_TEST_CHECK_TRUE(img.height > 0);
 

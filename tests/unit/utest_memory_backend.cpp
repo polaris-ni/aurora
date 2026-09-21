@@ -102,7 +102,7 @@ AURORA_TEST_CASE(list_returns_all_ids) {
 AURORA_TEST_CASE(contains_via_base_true_false) {
     // 经基类默认 contains：存在 → true；缺失 → false（将 NotFound 归一为布尔，而非错误）。
     aus::MemoryBackend be;
-    aus::StorageBackend& base = be;
+    aus::StorageBackend &base = be;
     AURORA_TEST_REQUIRE(be.put_record("hit", make_json_record("hit", aus::Json{{"v", 1}})));
 
     const auto hit = base.contains("hit");
@@ -117,7 +117,7 @@ AURORA_TEST_CASE(contains_via_base_true_false) {
 AURORA_TEST_CASE(clear_via_base_empties_store) {
     // 经基类默认 clear（transaction + 逐条 remove）：清空后 list 为空。
     aus::MemoryBackend be;
-    aus::StorageBackend& base = be;
+    aus::StorageBackend &base = be;
     AURORA_TEST_REQUIRE(be.put_record("a", make_json_record("a", aus::Json{{"v", 1}})));
     AURORA_TEST_REQUIRE(be.put_record("b", make_json_record("b", aus::Json{{"v", 2}})));
 
@@ -130,7 +130,7 @@ AURORA_TEST_CASE(clear_via_base_empties_store) {
 AURORA_TEST_CASE(transaction_commits_on_success) {
     // 事务成功：体内全部写入提交生效。
     aus::MemoryBackend be;
-    const auto r = be.transaction([](aus::StorageBackend& b) -> Result<void> {
+    const auto r = be.transaction([](aus::StorageBackend &b) -> Result<void> {
         auto r1 = b.put_record("t1", aus::StorageRecord{.id = "t1", .payload = aus::Json{{"v", 1}}});
         auto r2 = b.put_record("t2", aus::StorageRecord{.id = "t2", .payload = aus::Json{{"v", 2}}});
         if (!r1 || !r2) {
@@ -148,7 +148,7 @@ AURORA_TEST_CASE(transaction_rolls_back_on_failure) {
     aus::MemoryBackend be;
     AURORA_TEST_REQUIRE(be.put_record("keep", make_json_record("keep", aus::Json{{"v", 1}})));
 
-    const auto r = be.transaction([](aus::StorageBackend& b) -> Result<void> {
+    const auto r = be.transaction([](aus::StorageBackend &b) -> Result<void> {
         (void)b.put_record("txn", aus::StorageRecord{.id = "txn", .payload = aus::Json{{"v", 2}}});
         (void)b.remove("keep");
         return Result<void>{make_error(ErrorCode::GeneralUnknown, "abort on purpose")};
@@ -184,7 +184,7 @@ AURORA_TEST_CASE(binary_payload_roundtrip) {
 AURORA_TEST_CASE(flush_and_close_default_success) {
     // 内存后端未覆写 flush/close：走基类默认 no-op，恒返回成功。
     aus::MemoryBackend be;
-    aus::StorageBackend& base = be;
+    aus::StorageBackend &base = be;
     AURORA_TEST_CHECK(base.flush().ok());
     AURORA_TEST_CHECK(base.close().ok());
 }

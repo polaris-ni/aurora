@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/dimension.h
-/// 测试说明: 覆盖 Length 工厂（px/dp/percent/fill/auto_length）的 kind/value 契约、to_string 渲染、_dp/_px 字面量与裸标量隐式转换禁令
+/// 测试说明: 覆盖 Length 工厂（px/dp/percent/fill/auto_length）的 kind/value 契约、to_string 渲染、_dp/_px
+/// 字面量与裸标量隐式转换禁令
 
 #include <string>
 #include <type_traits>
@@ -78,8 +79,8 @@ AURORA_TEST_CASE(dp_px_literals_match_factories) {
     using aurora::literals::operator""_dp;  // using-declaration：仅引入具名字面量（库约定：TU 内显式引入）
     using aurora::literals::operator""_px;
 
-    static_assert((120_dp).kind == aurora::LengthKind::Fixed); // NOLINT(*-redundant-parentheses)
-    static_assert((120_dp).value == 120.0F); // NOLINT(*-redundant-parentheses)
+    static_assert((120_dp).kind == aurora::LengthKind::Fixed);  // NOLINT(*-redundant-parentheses)
+    static_assert((120_dp).value == 120.0F);  // NOLINT(*-redundant-parentheses)
     AURORA_TEST_CHECK((120_dp).kind == au::px(120.0F).kind);
     AURORA_TEST_CHECK_EQ((120_dp).value, au::px(120.0F).value);
     AURORA_TEST_CHECK_EQ((8_px).value, 8.0F);

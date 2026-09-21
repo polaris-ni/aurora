@@ -22,7 +22,7 @@ namespace ar = aurora::render;
 
 namespace {
 
-auto paint_gradient_bg(Painter& p, int w, int h) -> void {
+auto paint_gradient_bg(Painter &p, int w, int h) -> void {
     constexpr int bands = 24;
     const float bw = static_cast<float>(w) / bands;
     for (int i = 0; i < bands; ++i) {
@@ -42,7 +42,7 @@ auto render_one(ar::TextAAMode mode, int w, int h) -> std::vector<std::uint8_t> 
     p.draw_text(Rect{.origin = Point{.x = 20.0F, .y = (static_cast<float>(h) / 2) - 20.0F},
                      .size = Size{.width = static_cast<float>(w - 40), .height = 40.0F}},
                 std::string{"Animation"}, Font{.size_pt = 34.0F}, Color{255, 255, 255}, mode, ar::TextLayoutOpts{});
-    const std::uint8_t* buf = p.data();
+    const std::uint8_t *buf = p.data();
     // 测试助手：缓冲区间算术构造；范围构造保留圆括号（braced-init 会变 initializer_list）
     return std::vector(buf, buf + (static_cast<std::size_t>(w) * h * 4U));  // NOLINT
 }

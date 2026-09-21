@@ -29,13 +29,13 @@ struct DeathState {
     bool reached = false;  ///< 目标站点是否已被执行
 };
 
-[[nodiscard]] auto death_state() -> DeathState& {
+[[nodiscard]] auto death_state() -> DeathState & {
     static DeathState state;
     return state;
 }
 
 /// @brief 自身可执行文件路径（由 main 用 argv[0] 登记；CTest 以绝对路径调用）。
-[[nodiscard]] auto executable_slot() -> std::string& {
+[[nodiscard]] auto executable_slot() -> std::string & {
     static std::string path;
     return path;
 }
@@ -51,7 +51,7 @@ struct DeathState {
 }
 
 /// @brief 读取文本文件（读不到时返回空串）。
-[[nodiscard]] auto read_text(const std::string& path) -> std::string {
+[[nodiscard]] auto read_text(const std::string &path) -> std::string {
     std::ifstream input{path, std::ios::binary};
     if (!input) {
         return {};
@@ -79,10 +79,10 @@ struct DeathState {
 /// `std::system` 把命令交给 cmd，而 cmd 的引号剥离规则在多引号命令行上会把
 /// 「程序名 + 参数」整体当成一个命令名，报「不是内部或外部命令」。
 /// stderr 采集由子进程自己 freopen 完成，因此也不需要 shell 的重定向能力。
-[[nodiscard]] auto spawn_and_wait(const std::string& program, const std::vector<std::string>& args) -> int {
+[[nodiscard]] auto spawn_and_wait(const std::string &program, const std::vector<std::string> &args) -> int {
 #ifdef AURORA_PLATFORM_WINDOWS
     std::string line = '"' + program + '"';
-    for (const auto& argument : args) {
+    for (const auto &argument : args) {
         line += " \"" + argument + '"';
     }
     std::vector<char> command{line.begin(), line.end()};
@@ -103,10 +103,10 @@ struct DeathState {
     CloseHandle(process.hProcess);
     return static_cast<int>(code);
 #else
-    std::vector<char*> argv;
-    argv.push_back(const_cast<char*>(program.c_str()));
-    for (const auto& argument : args) {
-        argv.push_back(const_cast<char*>(argument.c_str()));
+    std::vector<char *> argv;
+    argv.push_back(const_cast<char *>(program.c_str()));
+    for (const auto &argument : args) {
+        argv.push_back(const_cast<char *>(argument.c_str()));
     }
     argv.push_back(nullptr);
 
@@ -133,7 +133,7 @@ struct DeathState {
 
 auto set_executable_path(std::string_view path) -> void { executable_slot() = std::string{path}; }
 
-auto executable_path() -> const std::string& { return executable_slot(); }
+auto executable_path() -> const std::string & { return executable_slot(); }
 
 auto death_site_not_reached() -> int { return 42; }
 
@@ -160,7 +160,7 @@ auto enter_death_child(std::uint64_t site_key) -> void { death_state().target = 
 auto death_child_mode() -> bool { return death_state().target != 0; }
 
 auto death_child_should_run(std::string_view file, int line) -> bool {
-    auto& state = death_state();
+    auto &state = death_state();
     if (state.target == 0 || state.target != death_site_key(file, line)) {
         return false;
     }
@@ -182,8 +182,8 @@ auto death_verdict_for(int status) -> DeathVerdict {
     return DeathVerdict::Died;
 }
 
-auto spawn_death_child(const char* file, int line, std::string* output) -> DeathVerdict {
-    const auto* context = current_context();
+auto spawn_death_child(const char *file, int line, std::string *output) -> DeathVerdict {
+    const auto *context = current_context();
     if (context == nullptr || context->subject().empty()) {
         // 死亡测试必须在用例内执行：子进程要重跑同一个用例，才会走到语句所在站点。
         *output = "death test used outside a running test case";

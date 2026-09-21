@@ -78,7 +78,7 @@ AURORA_TEST_CASE(tray_context_menu_roundtrip) {
     items.emplace_back("Quit");
     tray.set_context_menu(items);
 
-    const auto& stored = tray.context_menu_items();
+    const auto &stored = tray.context_menu_items();
     AURORA_TEST_REQUIRE_EQ(stored.size(), 3U);
     AURORA_TEST_CHECK_STREQ(stored[0].label, "Open");
     AURORA_TEST_CHECK_FALSE(stored[0].separator);

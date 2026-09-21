@@ -23,7 +23,7 @@ class MinimalSurface final : public Surface {
         size_ = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)};
         return Result<bool>{true};
     }
-    [[nodiscard]] auto painter() -> Painter& override { return painter_; }
+    [[nodiscard]] auto painter() -> Painter & override { return painter_; }
     [[nodiscard]] auto present() -> Result<bool> override { return Result<bool>{true}; }
     [[nodiscard]] auto size() const -> Size override { return size_; }
 

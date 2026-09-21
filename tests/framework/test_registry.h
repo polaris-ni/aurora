@@ -17,7 +17,7 @@ namespace aurora::testing {
 /// 仅改写指针），展开动作推迟到 `TestRegistry::finalize()`。
 struct FinalizeHook {
     void (*run)() = nullptr;  ///< 展开动作（运行期执行，可自由分配）
-    const FinalizeHook* next = nullptr;  ///< 钩子链表后继
+    const FinalizeHook *next = nullptr;  ///< 钩子链表后继
 };
 
 /// @brief 进程级用例注册表（静态注册的唯一落点）。
@@ -36,13 +36,13 @@ class TestRegistry {
     ///
     /// noexcept：注册表默认构造平凡无分配，供静态初始化期的 Registrar 安全调用
     /// （clang-tidy bugprone-throwing-static-initialization 要求整条调用链 noexcept）。
-    [[nodiscard]] static auto instance() noexcept -> TestRegistry&;
+    [[nodiscard]] static auto instance() noexcept -> TestRegistry &;
 
     /// @brief 尾插一个注册节点；不分配、不抛异常。
-    auto push(TestCase& node) noexcept -> void;
+    auto push(TestCase &node) noexcept -> void;
 
     /// @brief 尾挂一个延后展开钩子；不分配、不抛异常。
-    auto push_hook(FinalizeHook& hook) noexcept -> void;
+    auto push_hook(FinalizeHook &hook) noexcept -> void;
 
     /// @brief 执行全部展开钩子（幂等）。`main` 起手调用一次，之后注册表只读。
     auto finalize() -> void;
@@ -51,23 +51,23 @@ class TestRegistry {
     [[nodiscard]] auto finalized() const -> bool { return finalized_; }
 
     /// @brief 追加一个运行期展开的用例（普通用例体）。
-    auto add_dynamic(std::string_view suite, std::string case_name, TestBody body, const char* file, int line) -> void;
+    auto add_dynamic(std::string_view suite, std::string case_name, TestBody body, const char *file, int line) -> void;
 
     /// @brief 追加一个运行期展开的用例（参数化用例体 + 取值序号）。
     auto add_dynamic(std::string_view suite, std::string case_name, TestParamBody param_body, std::size_t param_index,
-                     const char* file, int line) -> void;
+                     const char *file, int line) -> void;
 
     /// @brief 全部已注册用例（静态注册在前、展开追加在后；运行期展开链表）。
-    [[nodiscard]] auto cases() const -> std::vector<const TestCase*>;
+    [[nodiscard]] auto cases() const -> std::vector<const TestCase *>;
 
     /// @brief 全部套件名（去重，按首次注册顺序）。
     [[nodiscard]] auto suites() const -> std::vector<std::string>;
 
   private:
-    TestCase* head_ = nullptr;
-    TestCase* tail_ = nullptr;
-    FinalizeHook* hook_head_ = nullptr;
-    FinalizeHook* hook_tail_ = nullptr;
+    TestCase *head_ = nullptr;
+    TestCase *tail_ = nullptr;
+    FinalizeHook *hook_head_ = nullptr;
+    FinalizeHook *hook_tail_ = nullptr;
     bool finalized_ = false;
     std::deque<TestCase> dynamic_;  ///< 展开用例的节点存储（deque 保证元素地址稳定）
     std::deque<std::string> names_;  ///< 展开用例的名字池（TestCase 只持 string_view）
@@ -78,7 +78,7 @@ namespace detail {
 /// @brief 静态注册器：构造即入链，无状态、不分配。
 class Registrar {
   public:
-    Registrar(std::string_view suite, std::string_view case_name, const char* file, int line, TestBody body) noexcept;
+    Registrar(std::string_view suite, std::string_view case_name, const char *file, int line, TestBody body) noexcept;
 
   private:
     TestCase node_;

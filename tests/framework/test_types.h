@@ -55,7 +55,7 @@ class TestContext {
     auto set_subject(std::string full_name) -> void { subject_ = std::move(full_name); }
 
     /// @brief 当前用例全名；非用例外执行期为空。
-    [[nodiscard]] auto subject() const -> const std::string& { return subject_; }
+    [[nodiscard]] auto subject() const -> const std::string & { return subject_; }
 
     /// @brief 弹出一层作用域追踪（追踪块离开作用域时）。
     auto pop_trace() -> void {
@@ -68,10 +68,10 @@ class TestContext {
     [[nodiscard]] auto failed() const -> bool { return !failures_.empty(); }
 
     /// @brief 全部失败记录。
-    [[nodiscard]] auto failures() const -> const std::vector<Failure>& { return failures_; }
+    [[nodiscard]] auto failures() const -> const std::vector<Failure> & { return failures_; }
 
     /// @brief 全部诊断笔记。
-    [[nodiscard]] auto notes() const -> const std::vector<std::string>& { return notes_; }
+    [[nodiscard]] auto notes() const -> const std::vector<std::string> & { return notes_; }
 
     /// @brief 追踪栈文本（外 → 内）；无追踪时返回空串。
     ///
@@ -81,7 +81,7 @@ class TestContext {
             return {};
         }
         std::string out = "\n  trace (outer → inner):";
-        for (const auto& note : trace_) {
+        for (const auto &note : trace_) {
             out += "\n    ";
             out += note;
         }
@@ -99,10 +99,10 @@ class TestContext {
 ///
 /// 采用 thread_local 而非进程级全局：并行度由 CTest 进程隔离承担（见计划 §3），
 /// 此处线程局部仅为将来「若启用线程级并行」预留语义正确性，无额外运行时成本。
-auto current_context_slot() -> TestContext*&;
+auto current_context_slot() -> TestContext *&;
 
 /// @brief 当前线程正在执行的用例上下文；无活动用例（如静态初始化期断言）时为空指针。
-[[nodiscard]] auto current_context() -> TestContext*;
+[[nodiscard]] auto current_context() -> TestContext *;
 
 /// @brief 用例函数体签名。
 using TestBody = void (*)();
@@ -122,12 +122,12 @@ using TestParamBody = void (*)(std::size_t index);
 struct TestCase {
     std::string_view suite;  ///< 套件名，恒等于测试文件 stem（计划 §3.3 第 3 条）
     std::string_view case_name;  ///< 用例名（文件内唯一）
-    const char* file = nullptr;  ///< 注册所在源文件
+    const char *file = nullptr;  ///< 注册所在源文件
     int line = 0;  ///< 注册所在行
     TestBody body = nullptr;  ///< 用例体（与 param_body 互斥）
     TestParamBody param_body = nullptr;  ///< 参数化用例体（与 body 互斥）
     std::size_t param_index = 0;  ///< 参数化用例的取值序号
-    const TestCase* next = nullptr;  ///< 注册链表后继（由 TestRegistry 维护）
+    const TestCase *next = nullptr;  ///< 注册链表后继（由 TestRegistry 维护）
 
     /// @brief 全名 `Suite.Case`；按需拼接（运行期调用，不参与静态初始化）。
     [[nodiscard]] auto full_name() const -> std::string;

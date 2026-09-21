@@ -49,10 +49,10 @@ auto use_supersample_aa() -> void { render::FontEngine::set_text_aa_mode(render:
 auto use_cleartype_aa() -> void { render::FontEngine::set_text_aa_mode(render::TextAAMode::ClearType); }
 
 /// 蓝色染色 = 选区高亮（高亮为半透明蓝色矩形）。
-auto is_blue(const Color& c) -> bool { return static_cast<int>(c.b) - static_cast<int>(c.r) > 30; }
+auto is_blue(const Color &c) -> bool { return static_cast<int>(c.b) - static_cast<int>(c.r) > 30; }
 
 /// 统计 [r] 盒内蓝色染色像素数。
-auto count_blue(const Painter& p, const Rect& r) -> int {
+auto count_blue(const Painter &p, const Rect &r) -> int {
     const int x0 = std::max(static_cast<int>(r.origin.x), 0);
     const int y0 = std::max(static_cast<int>(r.origin.y), 0);
     const int x1 = std::min(static_cast<int>(r.origin.x + r.size.width), p.width());
@@ -69,7 +69,7 @@ auto count_blue(const Painter& p, const Rect& r) -> int {
 }
 
 /// 近黑墨迹像素数（字形本体，阈值 40）。
-auto count_ink(const Painter& p) -> int {
+auto count_ink(const Painter &p) -> int {
     int n = 0;
     for (int y = 0; y < p.height(); ++y) {
         for (int x = 0; x < p.width(); ++x) {
@@ -83,7 +83,7 @@ auto count_ink(const Painter& p) -> int {
 }
 
 /// [y0,y1) 物理行带内最深墨迹的 x（-1 = 无墨迹）。
-auto max_ink_x(const Painter& p, int y0, int y1) -> int {
+auto max_ink_x(const Painter &p, int y0, int y1) -> int {
     int ink_max = -1;
     for (int y = std::max(y0, 0); y < std::min(y1, p.height()); ++y) {
         for (int x = 0; x < p.width(); ++x) {
@@ -97,12 +97,12 @@ auto max_ink_x(const Painter& p, int y0, int y1) -> int {
 }
 
 /// 全画布逐点命中扫描：定位 display_text 含 needle 的 Text 的可命中盒。
-auto find_text_box(Widget& root, int canvas_w, int canvas_h, const std::string& needle) -> Rect {
+auto find_text_box(Widget &root, int canvas_w, int canvas_h, const std::string &needle) -> Rect {
     Rect r{.origin = Point{.x = 1e9F, .y = 1e9F}, .size = Size{.width = -1e9F, .height = -1e9F}};
     for (int y = 0; y < canvas_h; ++y) {
         for (int x = 0; x < canvas_w; ++x) {
-            Widget* h = EventDispatcher::hit_test(root, Point{.x = static_cast<float>(x), .y = static_cast<float>(y)});
-            const auto* t = dynamic_cast<Text*>(h);
+            Widget *h = EventDispatcher::hit_test(root, Point{.x = static_cast<float>(x), .y = static_cast<float>(y)});
+            const auto *t = dynamic_cast<Text *>(h);
             if (t != nullptr && t->display_text().find(needle) != std::string::npos) {
                 r.origin.x = std::min(r.origin.x, static_cast<float>(x));
                 r.origin.y = std::min(r.origin.y, static_cast<float>(y));
@@ -118,12 +118,12 @@ auto find_text_box(Widget& root, int canvas_w, int canvas_h, const std::string& 
 using Sink = std::function<void(MouseAction, float, float)>;
 
 /// 含头含尾采样点：字符 idx 的右半 / 左半 x（据 caret_x 边界）。
-auto right_half(const std::string& s, std::size_t idx, const Font& f, const render::TextLayoutOpts& o) -> float {
+auto right_half(const std::string &s, std::size_t idx, const Font &f, const render::TextLayoutOpts &o) -> float {
     const float l = render::FontEngine::caret_x(s, idx, f, o);
     const float r = render::FontEngine::caret_x(s, idx + 1, f, o);
     return l + (0.75F * (r - l));
 }
-auto left_half(const std::string& s, std::size_t idx, const Font& f, const render::TextLayoutOpts& o) -> float {
+auto left_half(const std::string &s, std::size_t idx, const Font &f, const render::TextLayoutOpts &o) -> float {
     const float l = render::FontEngine::caret_x(s, idx, f, o);
     const float r = render::FontEngine::caret_x(s, idx + 1, f, o);
     return l + (0.25F * (r - l));
@@ -268,7 +268,7 @@ AURORA_TEST_CASE(neighbor_rows_unselected_and_uncolored_under_cleartype) {
     BuildContext lctx;
     col.layout(bounded(520.0F, 520.0F), lctx);
 
-    auto paint_all = [&](Painter& p) -> void {
+    auto paint_all = [&](Painter &p) -> void {
         p.begin(520, 520);
         p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 520, .height = 520}}, Color::white());
         col.paint(p, Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 520, .height = 520}}, lctx);
@@ -670,7 +670,7 @@ AURORA_TEST_CASE(scaled_display_last_line_tail_fully_highlighted) {
     const auto n_lines =
         static_cast<std::size_t>(std::lround((sz.height - 2.0F) / line_h));  // 行数为小正数，四舍五入口径沿用旧断言
 
-    auto paint_once = [&](Painter& p) -> void {
+    auto paint_once = [&](Painter &p) -> void {
         p.set_scale(k_scale);
         p.begin(static_cast<int>(sz.width), static_cast<int>(sz.height));
         p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = sz.width, .height = sz.height}},

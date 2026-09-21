@@ -34,7 +34,7 @@ class MinSurface final : public Surface {
         size_ = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
         return Result<bool>{true};
     }
-    auto painter() -> Painter& override { return painter_; }
+    auto painter() -> Painter & override { return painter_; }
     auto present() -> Result<bool> override {
         ++frames_;
         return Result<bool>{true};
@@ -98,7 +98,7 @@ auto run_benchmark(int widget_count, int frames) -> StatsSnapshot {
     });
     app.run();
 
-    const FrameStats& fs = FrameStats::instance();
+    const FrameStats &fs = FrameStats::instance();
     return StatsSnapshot{
         .avg_frame_ms = fs.avg_frame_ms(),
         .avg_layout_ms = fs.avg_layout_ms(),
@@ -120,7 +120,7 @@ AURORA_TEST_CASE(benchmark_matrix_completes_all_sizes) {
     for (std::size_t i = 0; i < k_sizes.size(); ++i) {
         const int n = k_sizes.at(i);
         snapshots.at(i) = run_benchmark(n, k_matrix_frames);
-        const StatsSnapshot& s = snapshots.at(i);
+        const StatsSnapshot &s = snapshots.at(i);
 
         AURORA_TEST_PRINTF("N=%-3d  avg=%.1fms layout=%.1fms paint=%.1fms fps=%.0f worst=%.1fms p99=%.1fms\n", n,
                            s.avg_frame_ms, s.avg_layout_ms, s.avg_paint_ms, s.fps, s.worst_frame_ms, s.p99);
@@ -142,7 +142,7 @@ AURORA_TEST_CASE(largest_scene_frame_time_median_within_budget) {
     constexpr int k_n = 500;
     constexpr int k_frames = 60;
     std::array<double, 3> samples{0.0, 0.0, 0.0};
-    for (double& ms : samples) {
+    for (double &ms : samples) {
         ms = run_benchmark(k_n, k_frames).avg_frame_ms;
     }
     std::ranges::sort(samples);

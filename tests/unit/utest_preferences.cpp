@@ -239,8 +239,8 @@ AURORA_TEST_CASE(singleton_same_name_returns_same_instance) {
     std::error_code ec;
     std::filesystem::create_directories(dir);
     const std::string name = "utest_singleton_cfg";
-    auto& first = prefs::Preferences::instance(name, dir);
-    auto& second = prefs::Preferences::instance(name, dir);
+    auto &first = prefs::Preferences::instance(name, dir);
+    auto &second = prefs::Preferences::instance(name, dir);
     AURORA_TEST_CHECK(&first == &second);
     AURORA_TEST_CHECK(first.is_persistent());
     AURORA_TEST_CHECK_EQ(first.file_path().filename(), std::filesystem::path{"utest_singleton_cfg.json"});
@@ -262,7 +262,7 @@ AURORA_TEST_CASE(concurrent_read_write_smoke) {
             }
         });
     }
-    for (auto& worker : workers) {
+    for (auto &worker : workers) {
         worker.join();
     }
     for (int t = 0; t < thread_count; ++t) {

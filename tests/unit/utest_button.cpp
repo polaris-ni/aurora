@@ -125,7 +125,7 @@ AURORA_TEST_CASE(button_describe_reports_metadata) {
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_click");
     bool has_label = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (std::string{p.name} == "label") {
             has_label = true;
         }

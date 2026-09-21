@@ -26,7 +26,7 @@ AURORA_TEST_CASE(result_value_state_and_bool_conversion) {
     AURORA_TEST_CHECK_EQ(r.value(), 43);
 
     // const 访问返回只读引用。
-    const Result<int>& view = r;
+    const Result<int> &view = r;
     AURORA_TEST_CHECK_EQ(view.value(), 43);
 }
 
@@ -51,7 +51,7 @@ AURORA_TEST_CASE(result_unwrap_value_or_throws_runtime_error) {
     bool threw = false;
     try {
         (void)bad.unwrap();
-    } catch (const std::runtime_error& e) {
+    } catch (const std::runtime_error &e) {
         threw = true;
         AURORA_TEST_CHECK_EQ(e.what(), bad.error().message);
     }

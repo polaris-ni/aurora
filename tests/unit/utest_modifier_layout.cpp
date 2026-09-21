@@ -16,8 +16,8 @@ struct FixedChild {
     float h = 0.0F;
     std::optional<Constraints> seen;
 
-    auto make_fn() -> std::function<Size(const Constraints&)> {
-        return [this](const Constraints& c) -> Size {
+    auto make_fn() -> std::function<Size(const Constraints &)> {
+        return [this](const Constraints &c) -> Size {
             seen = c;
             return Size{.width = w, .height = h};
         };

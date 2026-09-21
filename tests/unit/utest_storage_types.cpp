@@ -94,7 +94,7 @@ AURORA_TEST_CASE(storage_bytes_value_semantics) {
     const aus::StorageBytes bytes{std::byte{0x00}, std::byte{0xFF}};
     AURORA_TEST_CHECK_EQ(bytes.size(), std::size_t{2});
 
-    const aus::StorageBytes& copy = bytes;  // 值语义拷贝
+    const aus::StorageBytes &copy = bytes;  // 值语义拷贝
     AURORA_TEST_CHECK(copy == bytes);
 
     const aus::StorageBytes empty;
@@ -106,7 +106,7 @@ AURORA_TEST_CASE(storage_change_callback_receives_event) {
     aus::StorageChange sent{.op = aus::StorageChange::Operation::Remove, .id = "k1"};
     aus::StorageChange received{.op = aus::StorageChange::Operation::Put, .id = ""};
 
-    const aus::StorageChangeCallback cb = [&received](const aus::StorageChange& ch) -> void { received = ch; };
+    const aus::StorageChangeCallback cb = [&received](const aus::StorageChange &ch) -> void { received = ch; };
     cb(sent);
 
     AURORA_TEST_CHECK(received.op == aus::StorageChange::Operation::Remove);

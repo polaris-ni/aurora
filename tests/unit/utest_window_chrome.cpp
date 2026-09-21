@@ -27,7 +27,7 @@ class RecordingSurface final : public Surface {
     // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
 
     auto begin_frame(int /*width*/, int /*height*/) -> Result<bool> override { return Result<bool>{true}; }
-    auto painter() -> Painter& override { return painter_; }
+    auto painter() -> Painter & override { return painter_; }
     auto present() -> Result<bool> override { return Result<bool>{true}; }
     [[nodiscard]] auto size() const -> Size override { return Size{}; }
     [[nodiscard]] auto content_inset() const -> EdgeInsets override { return inset_val; }

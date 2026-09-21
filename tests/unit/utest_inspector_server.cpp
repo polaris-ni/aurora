@@ -46,7 +46,7 @@ namespace aurora::test_cases::utest_inspector_server {
 namespace {
 
 /// @brief 共享测试树：Column 根 + Text 子节点（静态存储期，供 worker 线程 root_getter 读取）。
-auto shared_tree() -> std::shared_ptr<Column>& {
+auto shared_tree() -> std::shared_ptr<Column> & {
     static std::shared_ptr<Column> tree = []() -> std::shared_ptr<aurora::Column> {
         auto col = std::make_shared<Column>();
         col->add(Node{std::make_shared<Text>("hello")});
@@ -71,18 +71,18 @@ struct WinsockSession {
         }
     }
     // 纯作用域 guard，禁止拷贝/移动（避免重复 WSACleanup）。
-    WinsockSession(const WinsockSession&) = delete;
-    auto operator=(const WinsockSession&) -> WinsockSession& = delete;
-    WinsockSession(WinsockSession&&) = delete;
-    auto operator=(WinsockSession&&) -> WinsockSession& = delete;
+    WinsockSession(const WinsockSession &) = delete;
+    auto operator=(const WinsockSession &) -> WinsockSession & = delete;
+    WinsockSession(WinsockSession &&) = delete;
+    auto operator=(WinsockSession &&) -> WinsockSession & = delete;
     bool started = false;
 };
 #endif
 
 /// @brief 发送全部字节；失败返回 false（对端断开/出错）。
-auto send_all(int sock, const std::string& data) -> bool {
+auto send_all(int sock, const std::string &data) -> bool {
     std::size_t left = data.size();
-    const char* p = data.data();
+    const char *p = data.data();
     while (left > 0) {
 #ifdef AURORA_PLATFORM_WINDOWS
         const int n = ::send(sock, p, static_cast<int>(left), 0);
@@ -102,7 +102,7 @@ auto send_all(int sock, const std::string& data) -> bool {
 
 /// @brief 对 127.0.0.1:port 发送原始 HTTP 请求并回收完整响应（服务端 Connection: close，
 /// 读到对端关闭即完整）。
-[[nodiscard]] auto http_roundtrip(std::uint16_t port, const std::string& request) -> std::string {
+[[nodiscard]] auto http_roundtrip(std::uint16_t port, const std::string &request) -> std::string {
 #ifdef AURORA_PLATFORM_WINDOWS
     const WinsockSession wsa;
 #endif
@@ -120,7 +120,7 @@ auto send_all(int sock, const std::string& data) -> bool {
     addr.sin_port = htons(port);
     // connect() 的 socket API 契约要求将 sockaddr_in 擦除为通用 sockaddr 指针，无类型安全替代。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    AURORA_TEST_REQUIRE_EQ(::connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
+    AURORA_TEST_REQUIRE_EQ(::connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)), 0);
     AURORA_TEST_REQUIRE_TRUE(send_all(sock, request));
 
     std::string response;
@@ -149,12 +149,12 @@ auto send_all(int sock, const std::string& data) -> bool {
 }
 
 /// @brief 带 Host 头的 GET 便捷封装。
-[[nodiscard]] auto http_get(std::uint16_t port, const std::string& target) -> std::string {
+[[nodiscard]] auto http_get(std::uint16_t port, const std::string &target) -> std::string {
     return http_roundtrip(port, "GET " + target + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
 }
 
 /// @brief 带 Host 头与 JSON body 的 POST 便捷封装。
-[[nodiscard]] auto http_post(std::uint16_t port, const std::string& target, const std::string& body) -> std::string {
+[[nodiscard]] auto http_post(std::uint16_t port, const std::string &target, const std::string &body) -> std::string {
     return http_roundtrip(port, "POST " + target + " HTTP/1.1\r\nHost: 127.0.0.1\r\n" +
                                     "Content-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) +
                                     "\r\n\r\n" + body);
@@ -167,21 +167,21 @@ auto send_all(int sock, const std::string& data) -> bool {
 /// 让目标控件自己把可观测状态作为属性发布出来——这正是本探针的用途。
 class ScrollProbe : public LeafWidget {
   public:
-    [[nodiscard]] auto type_name() const -> const char* override { return "ScrollProbe"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "ScrollProbe"; }
 
   protected:
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = 40.0F, .height = 40.0F});
     }
-    auto on_paint(Painter& p, const Rect& bounds, const BuildContext& /*ctx*/) -> void override {
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
         p.fill_rect(bounds, Color{180, 180, 180, 255});
     }
-    auto on_scroll(ScrollEvent& e) -> void override {
+    auto on_scroll(ScrollEvent &e) -> void override {
         ++scroll_hits_;
         last_delta_y_ = e.delta_y;
         e.is_handled = true;
     }
-    auto serialize_props(Json& props) const -> void override {
+    auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         props["scroll_hits"] = scroll_hits_;
         props["last_delta_y"] = last_delta_y_;
@@ -400,7 +400,7 @@ AURORA_TEST_CASE(debug_state_requires_surface_getter) {
     AURORA_TEST_CHECK_TRUE(without.find("400") != std::string::npos);
 
     // getter 装配后返回 null Surface：路由层区分回 500。
-    server.set_surface_getter([]() -> Surface* { return nullptr; });
+    server.set_surface_getter([]() -> Surface * { return nullptr; });
     const std::string with_null = http_get(server.port(), "/api/debug/state");
     AURORA_TEST_CHECK_TRUE(with_null.find("500") != std::string::npos);
     server.stop();

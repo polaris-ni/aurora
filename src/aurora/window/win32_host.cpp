@@ -1,7 +1,7 @@
 #include "aurora/window/win32_host.h"
 
-#include "aurora/window/detail/win32_ua.h"
 #include "aurora/window/detail/win32_ime.h"
+#include "aurora/window/detail/win32_ua.h"
 
 #ifdef AURORA_BACKEND_WIN32
 
@@ -306,16 +306,16 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
         DragAcceptFiles(hwnd, TRUE);  // 启用操作系统文件拖放（WM_DROPFILES）
         // IMM32 组合桥：桥自身只吃 WM_IME_*，无输入法时一条也不来，故随窗口直接构造。
         ime = std::make_unique<detail::Win32ImeBridge>(
-            hwnd, detail::Win32ImeBridge::Hooks{
-                      .emit = [this](Event &e) -> void {
-                          if (handler) {
-                              handler(e);
-                          }
-                      },
-                      .caret_bounds = [this]() -> Rect {
-                          return composition_caret_provider ? composition_caret_provider() : Rect{};
-                      },
-                      .scale_factor = [this]() -> float { return scale; }});
+            hwnd, detail::Win32ImeBridge::Hooks{.emit = [this](Event &e) -> void {
+                                                    if (handler) {
+                                                        handler(e);
+                                                    }
+                                                },
+                                                .caret_bounds = [this]() -> Rect {
+                                                    return composition_caret_provider ? composition_caret_provider()
+                                                                                      : Rect{};
+                                                },
+                                                .scale_factor = [this]() -> float { return scale; }});
     }
     size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // 逻辑 dp（布局用）
 }
@@ -627,8 +627,8 @@ auto Win32Host::Impl::handle_ime(UINT msg, WPARAM wp, LPARAM lp) const -> LRESUL
 
 auto Win32Host::accessibility_provider() const -> a11y::Provider * { return pimpl_->a11y.get(); }
 
-auto Win32Host::set_accessibility_hook(std::function<std::optional<std::intptr_t>(std::uintptr_t, std::intptr_t)> h)
-    const -> void {
+auto Win32Host::set_accessibility_hook(
+    std::function<std::optional<std::intptr_t>(std::uintptr_t, std::intptr_t)> h) const -> void {
     pimpl_->a11y_hook = std::move(h);
 }
 
@@ -876,7 +876,8 @@ auto Win32Host::display_id() const -> int {
         return -1;
     }
     // 与 `app::Display::id` 同源：`display_win32.cpp` 以 HMONITOR 句柄值作稳定 id。
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): HMONITOR 为不透明句柄，取其句柄值作稳定 id 是与 display_win32 的既定契约
+    // HMONITOR 为不透明句柄，取其句柄值是与 display_win32 的既定契约。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     return static_cast<int>(reinterpret_cast<std::intptr_t>(hmon));
 }
 

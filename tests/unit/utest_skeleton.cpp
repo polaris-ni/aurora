@@ -133,7 +133,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool has_duration = false;
     bool has_highlight = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (std::string{p.name} == "duration") {
             has_duration = true;
         }

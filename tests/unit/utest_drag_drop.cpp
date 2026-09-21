@@ -75,12 +75,12 @@ AURORA_TEST_CASE(drop_target_callbacks_fire_with_contract_arguments) {
     std::string dropped_mime;
     Point dropped_at{};
 
-    callbacks.on_drag_enter = [&enter_calls](const DragData& data) -> bool {
+    callbacks.on_drag_enter = [&enter_calls](const DragData &data) -> bool {
         ++enter_calls;
         return data.mime_type == "text/plain";  // 只接受文本
     };
     callbacks.on_drag_leave = [&leave_calls]() -> void { ++leave_calls; };
-    callbacks.on_drop = [&](const DragData& data, Point local_pos) -> void {
+    callbacks.on_drop = [&](const DragData &data, Point local_pos) -> void {
         ++drop_calls;
         dropped_mime = data.mime_type;
         dropped_at = local_pos;

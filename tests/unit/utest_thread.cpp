@@ -24,7 +24,7 @@ AURORA_TEST_CASE(main_thread_only_get_set_roundtrip) {
     AURORA_TEST_CHECK_EQ(guard.get(), 9);
 
     // const 访问返回只读引用。
-    const auto& view = guard;
+    const auto &view = guard;
     AURORA_TEST_CHECK_EQ(view.get(), 9);
 
     // 非平凡类型同样适用。
@@ -45,7 +45,7 @@ AURORA_TEST_CASE(zero_overhead_specialization_behaves_identically) {
     AURORA_TEST_CHECK_EQ(guard.get(), 3);
     guard.set(8);
     AURORA_TEST_CHECK_EQ(guard.get(), 8);
-    const auto& view = guard;
+    const auto &view = guard;
     AURORA_TEST_CHECK_EQ(view.get(), 8);
 
     // Check=false 不存储 owner 线程：不得大于开启检查的形态。

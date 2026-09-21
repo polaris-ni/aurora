@@ -22,21 +22,21 @@ namespace {
 class CapturedLogger {
   public:
     CapturedLogger() : level_{aurora::Logger::instance().level()}, enabled_{aurora::Logger::instance().is_enabled()} {
-        auto& logger = aurora::Logger::instance();
+        auto &logger = aurora::Logger::instance();
         logger.set_sink([this](std::string_view line) -> void { lines.emplace_back(line); });
         logger.set_raw_sink([this](std::string_view text) -> void { raw_lines.emplace_back(text); });
     }
     ~CapturedLogger() {
-        auto& logger = aurora::Logger::instance();
+        auto &logger = aurora::Logger::instance();
         logger.set_level(level_);
         logger.set_enabled(enabled_);
         logger.set_sink(nullptr);  // 恢复默认 stderr
         logger.set_raw_sink(nullptr);  // 恢复默认 stdout
     }
-    CapturedLogger(const CapturedLogger&) = delete;
-    auto operator=(const CapturedLogger&) -> CapturedLogger& = delete;
-    CapturedLogger(CapturedLogger&&) = delete;
-    auto operator=(CapturedLogger&&) -> CapturedLogger& = delete;
+    CapturedLogger(const CapturedLogger &) = delete;
+    auto operator=(const CapturedLogger &) -> CapturedLogger & = delete;
+    CapturedLogger(CapturedLogger &&) = delete;
+    auto operator=(CapturedLogger &&) -> CapturedLogger & = delete;
 
     std::vector<std::string> lines;  // NOLINT(*-non-private-member-variables-in-classes) 诊断日志行（含前缀与换行）
     std::vector<std::string> raw_lines;  // NOLINT(*-non-private-member-variables-in-classes) raw 功能输出（无前缀）
@@ -106,7 +106,7 @@ AURORA_TEST_CASE(log_line_format_prefix_module_and_newline) {
     CapturedLogger capture;
     AURORA_LOG_WARN("utest", "hello ", "world");
     AURORA_TEST_REQUIRE_EQ(capture.lines.size(), std::size_t{1});
-    const auto& line = capture.lines[0];
+    const auto &line = capture.lines[0];
     AURORA_TEST_CHECK(line.starts_with('['));  // [YYYY-MM-DD HH:MM:SS]
     AURORA_TEST_CHECK_THAT(line, m::has_substr("[WRN]"));
     AURORA_TEST_CHECK_THAT(line, m::has_substr("[utest@"));  // [category@threadId

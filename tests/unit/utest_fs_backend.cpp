@@ -64,15 +64,15 @@ namespace m = aurora::testing::matchers;
 }
 
 /// @brief mtime 的毫秒精度表示（落盘即毫秒，比较亦按毫秒）。
-[[nodiscard]] auto epoch_ms(const std::chrono::system_clock::time_point& tp) -> std::int64_t {
+[[nodiscard]] auto epoch_ms(const std::chrono::system_clock::time_point &tp) -> std::int64_t {
     return std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count();
 }
 
 /// @brief 列出目录下以指定后缀结尾的常规文件（用于定位信封/sidecar 而不依赖内部编码细节）。
-[[nodiscard]] auto files_with_suffix(const std::filesystem::path& dir, std::string_view suffix)
+[[nodiscard]] auto files_with_suffix(const std::filesystem::path &dir, std::string_view suffix)
     -> std::vector<std::filesystem::path> {
     std::vector<std::filesystem::path> out;
-    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+    for (const auto &entry : std::filesystem::directory_iterator(dir)) {
         if (entry.is_regular_file() && entry.path().filename().string().ends_with(suffix)) {
             out.push_back(entry.path());
         }

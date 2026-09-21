@@ -59,7 +59,7 @@ AURORA_TEST_CASE(tab_cycle_forward_and_backward) {
 
 AURORA_TEST_CASE(directional_nav_moves_by_geometry_horizontally) {
     // 3x1 水平排列：A(0,0) B(110,0) C(220,0)。
-    auto make_btn = [](const char* label, int tab, float x) -> Node {
+    auto make_btn = [](const char *label, int tab, float x) -> Node {
         Button b{label};
         b.set_focusable(true);
         b.set_tab_index(tab);

@@ -43,7 +43,7 @@ AURORA_TEST_CASE(facade_functions_return_unavailable_when_debug_off) {
     AURORA_TEST_CHECK_EQ(tree["available"], false);
     AURORA_TEST_CHECK_TRUE(tree.contains("reason"));
     const Json snapshots[4] = {perf_snapshot(), frame_phase_timeline(), why_trace(), diagnostics()};
-    for (const Json& j : snapshots) {
+    for (const Json &j : snapshots) {
         AURORA_TEST_CHECK_EQ(j["available"], false);
         AURORA_TEST_CHECK_TRUE(j.contains("reason"));
     }

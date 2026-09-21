@@ -31,18 +31,18 @@ constexpr float AURORA_CANVAS_H = 200.0F;
 // 确定性叶控件：固定尺寸、单次 fill_rect，录制行为完全可预测（每实例恰好 1 条 FillRect 命令）。
 class FillLeaf : public LeafWidget {
   public:
-    [[nodiscard]] auto type_name() const -> const char* override { return "FillLeaf"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "FillLeaf"; }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
         return WidgetDescriptor{.name = "FillLeaf", .children_policy = "none"};
     }
 
   protected:
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         // 叶控件固定边长：仅此函数使用，局部化以符合命名规范。
         const float side = 8.0F;
         return c.constrain(Size{.width = side, .height = side});
     }
-    auto on_paint(Painter& p, const Rect& b, const BuildContext& /*ctx*/) -> void override {
+    auto on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) -> void override {
         p.fill_rect(b, Color{120, 160, 200, 255});
     }
 };

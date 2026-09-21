@@ -489,3 +489,34 @@ jobs:
 
       - name: Lint (debug ON branch, fails on any warning+ finding)
         run: cmake --build build-lint-on --target lint
+
+  # ---------------------------------------------------------------------------
+  # 9. 排版门禁：clang-format 全量校验（first-party 源码，任一一处与根 .clang-format
+  # 不一致即失败）。
+  # 该门禁此前**完全缺失**——仓库里没有任何 clang-format 调用点，配置写的是 Left 而代码库
+  # 实际按右对齐书写（约 8.4 : 1），背离累积到 488/823 文件也没被发现。加这道门禁就是为了让
+  # 排版漂移在**引入的那一刻**暴露，而不是攒到需要一次性大改。
+  # 版本钉死 clang-format-22，与本地 proved 组合一致；依赖 AuroraFormat.cmake 提供的
+  # `format-check` 目标（需 configure 时 clang-format 在 PATH 上）。
+  # ---------------------------------------------------------------------------
+  fmt:
+    name: clang-format
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install clang-format-22
+        run: |
+          sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
+          echo "deb http://apt.llvm.org/ubuntu/ llvm-toolchain-ubuntu-$(lsb_release -cs) 22" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          sudo apt-get update -y
+          sudo apt-get install -y clang-format-22
+          sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
+
+      - name: Configure (clang-format target only)
+        run: cmake -S . -B build-fmt -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_CLANG_TIDY=OFF -DAURORA_ENABLE_CLANG_FORMAT=ON
+
+      - name: Check formatting (fails on any divergence)
+        run: cmake --build build-fmt --target format-check

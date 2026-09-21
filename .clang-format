@@ -9,8 +9,13 @@ ContinuationIndentWidth: 4
 # 行宽
 ColumnLimit: 120
 
-# 指针/引用对齐
-PointerAlignment: Left
+# 指针/引用对齐：Type *name / Type &name（星号贴变量名）
+# ⚠️ 全仓源码按右对齐书写（实测指针 1826 : 218、引用 4823 : 785，见 fmt-audit-2026-09-21），
+#    故这里必须是 Right。若改成 Left，全仓会翻出约 1.5 万行无谓差异。
+# ⚠️ DerivePointerAlignment 必须显式关掉：它由 BasedOnStyle: Google 带入 true，一旦生效就会
+#    「按每个文件里多数的写法推导」，PointerAlignment 退化成兜底值，格式化结果随内容漂移、不再幂等。
+PointerAlignment: Right
+DerivePointerAlignment: false
 
 # 头文件排序与分组
 SortIncludes: true

@@ -5,7 +5,7 @@
 // try/catch 包装
 auto main() -> int {
     au::Canvas gauge{
-        220, 120, [](au::Painter& p, const au::Rect& b) -> void {
+        220, 120, [](au::Painter &p, const au::Rect &b) -> void {
             constexpr float v = 0.7F;
             constexpr float pad = 12.0F;
             const au::Rect track{.origin = {.x = b.origin.x + pad, .y = b.origin.y + (b.size.height * 0.5F) - 8.0F},

@@ -44,11 +44,11 @@ namespace {
 }
 
 /// @brief 属性类型是否属于「不需要枚举登记」的基础 / 容器类型。
-auto is_primitive_type(const std::string& t) -> bool {
+auto is_primitive_type(const std::string &t) -> bool {
     static const std::vector<std::string> BASE = {"float",      "int",   "bool",   "string",
                                                   "double",     "Color", "Length", "LocalizedString",
                                                   "EdgeInsets", "Json",  "any",    "std::string"};
-    for (const auto& b : BASE) {
+    for (const auto &b : BASE) {
         if (t == b) {
             return true;
         }
@@ -57,8 +57,8 @@ auto is_primitive_type(const std::string& t) -> bool {
     return t.starts_with("vector") || t.find("std::") != std::string::npos;
 }
 
-auto has_value(const std::vector<std::string>& vals, const std::string& needle) -> bool {
-    return std::ranges::any_of(vals, [&needle](const std::string& v) -> bool { return v == needle; });
+auto has_value(const std::vector<std::string> &vals, const std::string &needle) -> bool {
+    return std::ranges::any_of(vals, [&needle](const std::string &v) -> bool { return v == needle; });
 }
 
 }  // namespace
@@ -71,10 +71,10 @@ AURORA_TEST_CASE(known_enum_members_compile_anchors) {
 AURORA_TEST_CASE(known_enums_registry_shape_is_valid) {
     const auto reg = aurora::tools::known_enums();
     AURORA_TEST_REQUIRE(reg.size() >= 19);
-    for (const auto& [name, vals] : reg) {
+    for (const auto &[name, vals] : reg) {
         AURORA_TEST_CHECK_MSG(!name.empty(), "enum registry key must not be empty");
         AURORA_TEST_CHECK_MSG(!vals.empty(), "enum registry value list must not be empty");
-        for (const auto& v : vals) {
+        for (const auto &v : vals) {
             AURORA_TEST_CHECK_MSG(!v.empty(), "enum registry member name must not be empty");
         }
     }
@@ -122,12 +122,12 @@ AURORA_TEST_CASE(known_enums_cover_all_enum_typed_props) {
 
     std::vector<std::string> uncovered;
     std::size_t checked = 0;
-    for (const auto& s : schemas) {
+    for (const auto &s : schemas) {
         if (!s.contains("prop_descriptors") || !s["prop_descriptors"].is_array()) {
             continue;
         }
         const std::string wtype = s.value("type", std::string{});
-        for (const auto& p : s["prop_descriptors"]) {
+        for (const auto &p : s["prop_descriptors"]) {
             if (!p.contains("type") || !p["type"].is_string()) {
                 continue;
             }

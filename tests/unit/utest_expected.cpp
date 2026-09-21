@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/expected.h
-/// 测试说明: unexpected 的构造与错误访问、expected 值态/错误态访问、拷贝/移动/自赋值语义、value_or 回退，以及以 aurora::Error 为错误类型的表驱动元数据
+/// 测试说明: unexpected 的构造与错误访问、expected 值态/错误态访问、拷贝/移动/自赋值语义、value_or 回退，以及以
+/// aurora::Error 为错误类型的表驱动元数据
 
 #include <string>
 #include <type_traits>
@@ -59,7 +60,7 @@ AURORA_TEST_CASE(expected_copy_semantics_independent_and_cross_state) {
 
     // 错误态拷贝。
     expected<int, Error> err_src{unexpected{make_error(ErrorCode::JsonParseError)}};
-    const auto& err_copy = err_src;
+    const auto &err_copy = err_src;
     AURORA_TEST_CHECK_FALSE(err_copy.has_value());
     AURORA_TEST_CHECK_STREQ(err_copy.error().code, "json-parse-error");
 
@@ -121,14 +122,14 @@ AURORA_TEST_CASE(expected_with_aurora_error_table_metadata) {
 AURORA_TEST_CASE(expected_self_assignment_preserves_state) {
     // 自赋值（经引用别名规避编译器自赋值告警）：值态保持不变。
     expected<std::string, Error> value_state{std::string{"stable"}};
-    auto& value_self = value_state;
+    auto &value_self = value_state;
     value_state = value_self;
     AURORA_TEST_CHECK_TRUE(value_state.has_value());
     AURORA_TEST_CHECK_THAT(value_state.value(), m::str_eq("stable"));
 
     // 自赋值：错误态保持不变。
     expected<int, Error> error_state{unexpected{make_error(ErrorCode::SurfaceLost)}};
-    auto& error_self = error_state;
+    auto &error_self = error_state;
     error_state = error_self;
     AURORA_TEST_CHECK_FALSE(error_state.has_value());
     AURORA_TEST_CHECK(error_state.error().code_enum == ErrorCode::SurfaceLost);

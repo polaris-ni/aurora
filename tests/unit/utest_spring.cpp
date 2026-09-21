@@ -39,8 +39,8 @@ AURORA_TEST_CASE(simulation_matches_endpoints_across_damping_regimes) {
     const aurora::SpringSimulation over_sim{over, 0.0, 1.0};
 
     AURORA_TEST_CHECK_EQ(under_sim.target(), 1.0);
-    const aurora::SpringSimulation* regimes[] = {&under_sim, &crit_sim, &over_sim};
-    for (const aurora::SpringSimulation* sim : regimes) {
+    const aurora::SpringSimulation *regimes[] = {&under_sim, &crit_sim, &over_sim};
+    for (const aurora::SpringSimulation *sim : regimes) {
         AURORA_TEST_TRACE("regime");
         AURORA_TEST_CHECK_NEAR(sim->value(0.0), 0.0, 1e-12);  // t=0 在起点
         AURORA_TEST_CHECK_NEAR(sim->value(-0.5), 0.0, 1e-12);  // 负时间同样返回起点

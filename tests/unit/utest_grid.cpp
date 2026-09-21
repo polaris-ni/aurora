@@ -46,7 +46,7 @@ AURORA_TEST_CASE(grid_places_row_major_with_per_column_width) {
     AURORA_TEST_CHECK_NEAR(s.width, 90.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(s.height, 60.0F, 1e-4F);
 
-    const auto& kids = grid.child_nodes();
+    const auto &kids = grid.child_nodes();
     AURORA_TEST_REQUIRE_EQ(kids.size(), 3U);
     // idx0 (r0,c0)：(0,0)；idx1 (r0,c1)：x=50+10=60；idx2 (r1,c0)：y=20+10=30。
     AURORA_TEST_CHECK_NEAR(kids[0].bounds().origin.x, 0.0F, 1e-4F);

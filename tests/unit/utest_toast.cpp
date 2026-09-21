@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/toast.h
-/// 测试说明: 覆盖 ToastHost 的 show 入队与同屏 3 条上限、tick 驱动过期出队与候补重新计时、clear/position 链式设置、position 序列化、负时长钳制及布局与离屏绘制冒烟
+/// 测试说明: 覆盖 ToastHost 的 show 入队与同屏 3 条上限、tick 驱动过期出队与候补重新计时、clear/position
+/// 链式设置、position 序列化、负时长钳制及布局与离屏绘制冒烟
 
 #include <chrono>
 #include <string>
@@ -85,7 +86,7 @@ AURORA_TEST_CASE(toast_queue_promotes_waiter_with_fresh_timer) {
     }
 
     const auto t0 = std::chrono::steady_clock::now();
-    host.tick(t0);                                   // 前 3 条开始计时
+    host.tick(t0);  // 前 3 条开始计时
     host.tick(t0 + std::chrono::milliseconds(150));  // 前 3 条过期
     AURORA_TEST_CHECK_EQ(host.pending_count(), 1U);
     AURORA_TEST_CHECK_EQ(host.visible_toasts()[0], std::string{"q3"});  // 候补顶上

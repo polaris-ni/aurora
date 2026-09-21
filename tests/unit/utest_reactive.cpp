@@ -92,7 +92,7 @@ AURORA_TEST_CASE(reactive_view_semantics_null_anchor_and_read_dispatch) {
     // 纯信号视图语义：订阅总是委托内部 State，anchor() 默认返回空（signal_view.h 文档契约）。
     Reactive<int> r{1};
     AURORA_TEST_CHECK(r.anchor() == nullptr);
-    SignalViewBase& base = r;
+    SignalViewBase &base = r;
     AURORA_TEST_CHECK(base.anchor() == nullptr);
 
     // 经基类 read() 虚派发到 get()：在 Effect 作用域内读取即登记依赖。

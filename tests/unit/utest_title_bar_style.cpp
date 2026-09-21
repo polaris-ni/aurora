@@ -56,7 +56,7 @@ AURORA_TEST_CASE(presets_keep_all_show_flags_enabled) {
     const TitleBarStyle dark = TitleBarStyle::adwaita_dark();
     const TitleBarStyle light = TitleBarStyle::adwaita_light();
     const TitleBarStyle windows = TitleBarStyle::windows_dark();
-    for (const TitleBarStyle* s : {&dark, &light, &windows}) {
+    for (const TitleBarStyle *s : {&dark, &light, &windows}) {
         AURORA_TEST_CHECK_TRUE(s->show_minimize);
         AURORA_TEST_CHECK_TRUE(s->show_maximize);
         AURORA_TEST_CHECK_TRUE(s->show_close);

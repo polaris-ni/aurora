@@ -2,7 +2,7 @@
 /// 目标单元: src/aurora/widget/widget.cpp（GPU 层缓存路径，specification/03 §8.7）
 /// 测试说明: 验证 cache_layer 控件在录制 Painter（GPU 帧 DL 同形）下的层命令失效矩阵：
 /// 首帧记 BeginLayer + 子树 + EndLayer + DrawLayer（子树重绘一次）；干净帧仅记 DrawLayer
-///（子树零重绘）；invalidate_paint_cache / 尺寸变化 / epoch 推进均触发重录；层录制经
+/// （子树零重绘）；invalidate_paint_cache / 尺寸变化 / epoch 推进均触发重录；层录制经
 /// SoftwareRhi 回放与直接绘制像素一致；DrawLayer 冷存储未命中 bump epoch（单帧自愈信号）。
 
 #include <cstdint>
@@ -180,9 +180,7 @@ AURORA_TEST_CASE(gpu_layer_invalidate_rerecords_and_replay_matches_direct) {
     constexpr BuildContext ctx;
     Painter direct;
     direct.begin(200, 200);
-    root2->paint(direct,
-                 Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                      .size = Size{.width = 200.0F, .height = 200.0F}},
+    root2->paint(direct, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 200.0F}},
                  ctx);
     AURORA_TEST_CHECK_MSG(direct.get_pixel(50, 10).r == 255, "software direct path shows red");
 }

@@ -18,11 +18,11 @@
 namespace aurora::testing::paths {
 
 /// @brief 仓库根绝对路径（从可执行文件位置向上定位；失败返回空串）。
-[[nodiscard]] inline auto repo_root() -> const std::string& { return isolation::repo_root(); }
+[[nodiscard]] inline auto repo_root() -> const std::string & { return isolation::repo_root(); }
 
 /// @brief 仓库根下的绝对路径；仓库根不可定位时原样返回相对路径（保持可运行）。
 [[nodiscard]] inline auto under_repo(std::string_view relative) -> std::string {
-    const auto& root = repo_root();
+    const auto &root = repo_root();
     if (root.empty()) {
         return std::string{relative};
     }

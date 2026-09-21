@@ -125,7 +125,7 @@ AURORA_TEST_CASE(computed_factory_deduces_value_type) {
     static_assert(std::is_same_v<decltype(shout), Computed<std::string>>);
     AURORA_TEST_CHECK_EQ(shout.get(), std::string{"a!"});
 
-    auto aliased = computed([&]() -> const int& { return n.get(); });
+    auto aliased = computed([&]() -> const int & { return n.get(); });
     static_assert(std::is_same_v<decltype(aliased), Computed<int>>);
     AURORA_TEST_CHECK_EQ(aliased.get(), 5);
 }

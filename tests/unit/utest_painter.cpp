@@ -18,7 +18,7 @@ namespace {
 }
 
 /// @brief 统计画布中「红色像素」（R 通道显著高于 G/B）的数量。
-[[nodiscard]] auto count_reddish(const Painter& p) -> int {
+[[nodiscard]] auto count_reddish(const Painter &p) -> int {
     int count = 0;
     for (int y = 0; y < p.height(); ++y) {
         for (int x = 0; x < p.width(); ++x) {
@@ -126,7 +126,7 @@ AURORA_TEST_CASE(text_respects_rect_clip_in_y) {
     // 回归守门：`blend_subpixel_span` 曾只按 X 裁剪、漏裁 Y —— 部分脏区帧的裁剪矩形不含
     // 文本所在行时，背景 fill_rect 被正确裁掉而文字仍逐行写出，同一字形每帧往上一帧墨迹上
     // 再混合，墨量累积致文字逐帧变粗发糙（「过一会儿开始锯齿」，约 1~2s 饱和）。
-    auto ink_in_rows = [](const Painter& p, int y0, int y1) -> int {
+    auto ink_in_rows = [](const Painter &p, int y0, int y1) -> int {
         int n = 0;
         for (int y = y0; y < y1; ++y) {
             for (int x = 0; x < p.width(); ++x) {

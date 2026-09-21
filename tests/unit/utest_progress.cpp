@@ -69,14 +69,14 @@ AURORA_TEST_CASE(binding_ctor_writes_back_to_upstream) {
 
 AURORA_TEST_CASE(collect_signals_reflects_binding) {
     ProgressIndicator solo;
-    std::vector<aurora::SignalViewBase*> solo_signals;
+    std::vector<aurora::SignalViewBase *> solo_signals;
     solo.collect_signals(solo_signals);
     AURORA_TEST_CHECK_EQ(solo_signals.size(), 1U);  // 仅内部 value
 
     State<double> upstream{0.0};
     Binding<double> binding{upstream};
     ProgressIndicator bound{binding};
-    std::vector<aurora::SignalViewBase*> bound_signals;
+    std::vector<aurora::SignalViewBase *> bound_signals;
     bound.collect_signals(bound_signals);
     AURORA_TEST_CHECK_EQ(bound_signals.size(), 2U);  // value + 上游 State
 }
@@ -142,7 +142,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     AURORA_TEST_CHECK_TRUE(!d.invariants.empty());  // 声明值域/厚度不变量
     bool has_value = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (std::string{p.name} == "value") {
             has_value = true;
         }

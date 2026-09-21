@@ -53,7 +53,7 @@ auto make_long_source() -> std::shared_ptr<aurora::ImageSequenceSource> {
 /// 暴露受保护成员与 tick_gestures 的测试子类。
 class ControlsHook final : public VideoControls {
   public:
-    explicit ControlsHook(VideoController* c) : VideoControls(c) {}
+    explicit ControlsHook(VideoController *c) : VideoControls(c) {}
     using VideoControls::mute_button;
     using VideoControls::play_button;
     using VideoControls::tick_gestures;
@@ -61,8 +61,8 @@ class ControlsHook final : public VideoControls {
 };
 
 /// 从叠层 Row 中取第 i 个子控件（结构契约：[Button, Slider, Text, Button, Slider]）。
-auto row_child(const VideoControls& c, size_t i) -> const aurora::Widget& {
-    const auto& row = dynamic_cast<const Row&>(c.child_nodes()[0].widget());
+auto row_child(const VideoControls &c, size_t i) -> const aurora::Widget & {
+    const auto &row = dynamic_cast<const Row &>(c.child_nodes()[0].widget());
     return row.child_nodes()[i].widget();
 }
 
@@ -82,11 +82,11 @@ AURORA_TEST_CASE(builds_row_with_five_children_in_order) {
     AURORA_TEST_REQUIRE_EQ(c.child_nodes().size(), 1U);
     AURORA_TEST_REQUIRE_EQ(c.child_nodes()[0].widget().child_nodes().size(), 5U);
     // 结构契约：[播放按钮, 进度条, 时间文本, 静音按钮, 音量条]。
-    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const Button*>(&row_child(c, 0)));
-    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const Slider*>(&row_child(c, 1)));
-    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const Text*>(&row_child(c, 2)));
-    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const Button*>(&row_child(c, 3)));
-    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const Slider*>(&row_child(c, 4)));
+    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const Button *>(&row_child(c, 0)));
+    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const Slider *>(&row_child(c, 1)));
+    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const Text *>(&row_child(c, 2)));
+    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const Button *>(&row_child(c, 3)));
+    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const Slider *>(&row_child(c, 4)));
 }
 
 AURORA_TEST_CASE(play_button_click_toggles_controller) {

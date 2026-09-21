@@ -53,7 +53,7 @@ AURORA_TEST_CASE(deferred_submit_resolves_via_pump) {
     bool threw = false;
     try {
         (void)bad.get();
-    } catch (const std::runtime_error& e) {
+    } catch (const std::runtime_error &e) {
         threw = true;
         AURORA_TEST_CHECK_STREQ(e.what(), "deferred fail");
     }
@@ -135,7 +135,7 @@ AURORA_TEST_CASE(submit_propagates_exceptions_through_future) {
     bool threw = false;
     try {
         (void)fut.get();
-    } catch (const std::runtime_error& e) {
+    } catch (const std::runtime_error &e) {
         threw = true;
         AURORA_TEST_CHECK_STREQ(e.what(), "task failed");
     }
@@ -190,7 +190,7 @@ AURORA_TEST_CASE(pending_count_reflects_queued_work) {
 
     // 放闸后全部任务完成，队列清空。
     release.set_value();
-    for (auto& f : running) {
+    for (auto &f : running) {
         AURORA_TEST_CHECK_EQ(f.wait_for(std::chrono::seconds{5}), std::future_status::ready);
     }
     AURORA_TEST_CHECK_EQ(pool.pending_count(), std::size_t{0});

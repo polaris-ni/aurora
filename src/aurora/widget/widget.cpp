@@ -12,8 +12,8 @@
 #include "aurora/event/focus.h"
 #include "aurora/modifier/modifier.h"
 #include "aurora/perf/counters.h"
-#include "aurora/render/detail/paint_timing.h"
 #include "aurora/render/detail/gpu_layer.h"
+#include "aurora/render/detail/paint_timing.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 
@@ -87,8 +87,8 @@ auto Widget::perform_accessibility_action(const AccessibilityActionRequest &req)
         case AccessibilityAction::ScrollRight: {
             // 滚动语义（G32）：把读屏的「上下左右滚一屏」翻译为滚轮同款增量派发。
             // 步长取视口尺寸的 80%（与常见读屏滚动手感一致），方向沿用 ScrollEvent 约定。
-            const bool vertical = (req.action == AccessibilityAction::ScrollUp ||
-                                   req.action == AccessibilityAction::ScrollDown);
+            const bool vertical =
+                (req.action == AccessibilityAction::ScrollUp || req.action == AccessibilityAction::ScrollDown);
             const float extent = vertical ? size_.height : size_.width;
             if (extent <= 0.0F) {
                 return false;
@@ -156,8 +156,8 @@ namespace {
 /// `NavigatorHost` 就漏过一次，导致其子树的脏标记无法上溯）。父链完整是脏标记上溯
 /// （`Widget::request_frame`）与布局/DL 缓存向上失效的共同前提。
 /// @note Thread: main-thread only（`thread_local` 仅为多渲染线程隔离，不做跨线程同步）
-thread_local Widget *t_layout_parent = nullptr; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-} // namespace
+thread_local Widget *t_layout_parent = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+}  // namespace
 
 static auto adjust_for_transform(const Modifier::TransformInfo &tf, Point local) -> Point {
     // tf.matrix 已绕「内容盒中心」构造（TransformNode::matrix），只需再平移到 widget
@@ -176,14 +176,14 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
         layout_parent_ = t_layout_parent;
     }
     struct LayoutParentScope {
-        Widget* saved;
-        explicit LayoutParentScope(Widget* self) : saved(t_layout_parent) { t_layout_parent = self; }
+        Widget *saved;
+        explicit LayoutParentScope(Widget *self) : saved(t_layout_parent) { t_layout_parent = self; }
         LayoutParentScope(const LayoutParentScope &) = delete;
         auto operator=(const LayoutParentScope &) -> LayoutParentScope & = delete;
         LayoutParentScope(LayoutParentScope &&) = delete;
         auto operator=(LayoutParentScope &&) -> LayoutParentScope & = delete;
         ~LayoutParentScope() { t_layout_parent = saved; }
-    } parent_scope{ this };
+    } parent_scope{this};
 
     if (!show.get()) {
         size_ = Size{.width = 0.0F, .height = 0.0F};
@@ -289,74 +289,79 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
     // Pass 1：阴影 + 背景毛玻璃（无裁剪，外扩可见）。
     for (const auto &mn : mod.nodes()) {
         switch (mn->paint_kind()) {
-        case ModifierNode::PaintKind::Blur: {
-            const auto *bl = dynamic_cast<BlurNode *>(mn.get());
-            if (bl->is_backdrop()) {
-                // 毛玻璃：绘内容前先模糊视觉盒背后的已绘像素。
-                p.blur_region(visual_box, bl->radius());
+            case ModifierNode::PaintKind::Blur: {
+                const auto *bl = dynamic_cast<BlurNode *>(mn.get());
+                if (bl->is_backdrop()) {
+                    // 毛玻璃：绘内容前先模糊视觉盒背后的已绘像素。
+                    p.blur_region(visual_box, bl->radius());
+                }
+                break;
             }
-            break;
-        }
-        case ModifierNode::PaintKind::Shadow: {
-            const auto *sh = dynamic_cast<ShadowNode *>(mn.get());
-            p.draw_shadow(visual_box, sh->offset_x(), sh->offset_y(), sh->blur(), sh->color());
-            break;
-        }
-        default: break;
+            case ModifierNode::PaintKind::Shadow: {
+                const auto *sh = dynamic_cast<ShadowNode *>(mn.get());
+                p.draw_shadow(visual_box, sh->offset_x(), sh->offset_y(), sh->blur(), sh->color());
+                break;
+            }
+            default:
+                break;
         }
     }
     // Pass 2：压裁剪（与既有裁剪栈取交集）。
     for (const auto &mn : mod.nodes()) {
         switch (mn->paint_kind()) {
-        case ModifierNode::PaintKind::ClipRounded: {
-            const auto *cr = dynamic_cast<ClipRounded *>(mn.get());
-            p.push_clip_rounded(visual_box, cr->radius());
-            break;
-        }
-        case ModifierNode::PaintKind::Clip: p.push_clip(visual_box); break;
-        default: break;
+            case ModifierNode::PaintKind::ClipRounded: {
+                const auto *cr = dynamic_cast<ClipRounded *>(mn.get());
+                p.push_clip_rounded(visual_box, cr->radius());
+                break;
+            }
+            case ModifierNode::PaintKind::Clip:
+                p.push_clip(visual_box);
+                break;
+            default:
+                break;
         }
     }
     // Pass 3：背景填充 / 渐变背景（圆角裁剪已生效）。
     for (const auto &mn : mod.nodes()) {
         switch (mn->paint_kind()) {
-        case ModifierNode::PaintKind::Background: {
-            const auto *bg = dynamic_cast<Background *>(mn.get());
-            if (bg->corner_radius() > 0.0F) {
-                p.push_clip_rounded(visual_box, bg->corner_radius());
-                p.fill_rect(visual_box, bg->color());
-                p.pop_clip();
-            } else {
-                p.fill_rect(visual_box, bg->color());
+            case ModifierNode::PaintKind::Background: {
+                const auto *bg = dynamic_cast<Background *>(mn.get());
+                if (bg->corner_radius() > 0.0F) {
+                    p.push_clip_rounded(visual_box, bg->corner_radius());
+                    p.fill_rect(visual_box, bg->color());
+                    p.pop_clip();
+                } else {
+                    p.fill_rect(visual_box, bg->color());
+                }
+                break;
             }
-            break;
-        }
-        case ModifierNode::PaintKind::GradientBackground: {
-            const auto *grad = dynamic_cast<GradientBackground *>(mn.get());
-            const auto &colors = grad->colors();
-            const auto &stops = grad->stops();
-            if (grad->type() == GradientBackground::Type::Linear) {
-                // 按角度计算 start/end（角度 0=左→右，90=上→下）
-                const float rad = grad->angle() * std::numbers::pi_v<float> / 180.0F;
-                const float cx = visual_box.origin.x + (visual_box.size.width * 0.5F);
-                const float cy = visual_box.origin.y + (visual_box.size.height * 0.5F);
-                const float half_diag = (visual_box.size.width + visual_box.size.height) * 0.5F;
-                const float dx = std::cos(rad) * half_diag;
-                const float dy = std::sin(rad) * half_diag;
-                p.draw_linear_gradient(visual_box, Point{ .x = cx - dx, .y = cy - dy },
-                                       Point{ .x = cx + dx, .y = cy + dy }, colors, stops);
-            } else {
-                // 径向：center 为盒中心，radius 为半对角线
-                const float cx = visual_box.origin.x + (visual_box.size.width * 0.5F);
-                const float cy = visual_box.origin.y + (visual_box.size.height * 0.5F);
-                const float r = std::sqrt((visual_box.size.width * visual_box.size.width) +
-                                          (visual_box.size.height * visual_box.size.height)) *
-                                0.5F;
-                p.draw_radial_gradient(visual_box, Point{ .x = cx, .y = cy }, r, colors, stops);
+            case ModifierNode::PaintKind::GradientBackground: {
+                const auto *grad = dynamic_cast<GradientBackground *>(mn.get());
+                const auto &colors = grad->colors();
+                const auto &stops = grad->stops();
+                if (grad->type() == GradientBackground::Type::Linear) {
+                    // 按角度计算 start/end（角度 0=左→右，90=上→下）
+                    const float rad = grad->angle() * std::numbers::pi_v<float> / 180.0F;
+                    const float cx = visual_box.origin.x + (visual_box.size.width * 0.5F);
+                    const float cy = visual_box.origin.y + (visual_box.size.height * 0.5F);
+                    const float half_diag = (visual_box.size.width + visual_box.size.height) * 0.5F;
+                    const float dx = std::cos(rad) * half_diag;
+                    const float dy = std::sin(rad) * half_diag;
+                    p.draw_linear_gradient(visual_box, Point{.x = cx - dx, .y = cy - dy},
+                                           Point{.x = cx + dx, .y = cy + dy}, colors, stops);
+                } else {
+                    // 径向：center 为盒中心，radius 为半对角线
+                    const float cx = visual_box.origin.x + (visual_box.size.width * 0.5F);
+                    const float cy = visual_box.origin.y + (visual_box.size.height * 0.5F);
+                    const float r = std::sqrt((visual_box.size.width * visual_box.size.width) +
+                                              (visual_box.size.height * visual_box.size.height)) *
+                                    0.5F;
+                    p.draw_radial_gradient(visual_box, Point{.x = cx, .y = cy}, r, colors, stops);
+                }
+                break;
             }
-            break;
-        }
-        default: break;
+            default:
+                break;
         }
     }
 
@@ -382,55 +387,60 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
     // 内容后修饰（Paint 切片）：边框绘制于内容之上 + 内容后效 + 弹出裁剪。
     for (const auto &mn : mod.nodes()) {
         switch (mn->paint_kind()) {
-        case ModifierNode::PaintKind::Blur: {
-            const auto *bl = dynamic_cast<BlurNode *>(mn.get());
-            if (!bl->is_backdrop()) {
-                // 内容模糊：内容（含背景/边框）绘制完成后模糊整个视觉盒。
-                p.blur_region(visual_box, bl->radius());
-            }
-            break;
-        }
-        case ModifierNode::PaintKind::Border: {
-            const auto *br = dynamic_cast<Border *>(mn.get());
-            const float bw = br->border_width();
-            const Color bc = br->border_color();
-            for (int i = 0; i < static_cast<int>(bw); ++i) {
-                const auto inset = static_cast<float>(i);
-                const float x0 = visual_box.origin.x + inset;
-                const float y0 = visual_box.origin.y + inset;
-                const float x1 = visual_box.right() - inset;
-                const float y1 = visual_box.bottom() - inset;
-                if (x1 <= x0 || y1 <= y0) {
-                    break;
+            case ModifierNode::PaintKind::Blur: {
+                const auto *bl = dynamic_cast<BlurNode *>(mn.get());
+                if (!bl->is_backdrop()) {
+                    // 内容模糊：内容（含背景/边框）绘制完成后模糊整个视觉盒。
+                    p.blur_region(visual_box, bl->radius());
                 }
-                const float w = x1 - x0;
-                const float h = y1 - y0;
-                p.fill_rect(Rect{.origin = Point{.x = x0, .y = y0}, .size = Size{.width = w, .height = 1.0F}},
-                            bc);  // 上边
-                p.fill_rect(Rect{.origin = Point{.x = x0, .y = y1 - 1.0F}, .size = Size{.width = w, .height = 1.0F}},
-                            bc);  // 下边
-                p.fill_rect(Rect{.origin = Point{.x = x0, .y = y0}, .size = Size{.width = 1.0F, .height = h}},
-                            bc);  // 左边
-                p.fill_rect(Rect{.origin = Point{.x = x1 - 1.0F, .y = y0}, .size = Size{.width = 1.0F, .height = h}},
-                            bc);  // 右边
+                break;
             }
-            break;
-        }
-        case ModifierNode::PaintKind::ClipRounded:
-        case ModifierNode::PaintKind::Clip: p.pop_clip(); break;
-        case ModifierNode::PaintKind::Blend: {
-            const auto *bn = dynamic_cast<BlendNode *>(mn.get());
-            // 内容混合：内容绘制完成后把视觉盒像素与 tint 按模式混合。
-            p.blend_region(visual_box, bn->mode(), bn->tint(), bn->strength());
-            break;
-        }
-        case ModifierNode::PaintKind::ShaderMask: {
-            const auto *sm = dynamic_cast<ShaderMaskNode *>(mn.get());
-            // 着色器遮罩：内容绘制完成后按渐变淡出视觉盒像素。
-            p.mask_region(visual_box, sm->mask_kind(), sm->strength());
-            break;
-        }
-        default: break;
+            case ModifierNode::PaintKind::Border: {
+                const auto *br = dynamic_cast<Border *>(mn.get());
+                const float bw = br->border_width();
+                const Color bc = br->border_color();
+                for (int i = 0; i < static_cast<int>(bw); ++i) {
+                    const auto inset = static_cast<float>(i);
+                    const float x0 = visual_box.origin.x + inset;
+                    const float y0 = visual_box.origin.y + inset;
+                    const float x1 = visual_box.right() - inset;
+                    const float y1 = visual_box.bottom() - inset;
+                    if (x1 <= x0 || y1 <= y0) {
+                        break;
+                    }
+                    const float w = x1 - x0;
+                    const float h = y1 - y0;
+                    p.fill_rect(Rect{.origin = Point{.x = x0, .y = y0}, .size = Size{.width = w, .height = 1.0F}},
+                                bc);  // 上边
+                    p.fill_rect(
+                        Rect{.origin = Point{.x = x0, .y = y1 - 1.0F}, .size = Size{.width = w, .height = 1.0F}},
+                        bc);  // 下边
+                    p.fill_rect(Rect{.origin = Point{.x = x0, .y = y0}, .size = Size{.width = 1.0F, .height = h}},
+                                bc);  // 左边
+                    p.fill_rect(
+                        Rect{.origin = Point{.x = x1 - 1.0F, .y = y0}, .size = Size{.width = 1.0F, .height = h}},
+                        bc);  // 右边
+                }
+                break;
+            }
+            case ModifierNode::PaintKind::ClipRounded:
+            case ModifierNode::PaintKind::Clip:
+                p.pop_clip();
+                break;
+            case ModifierNode::PaintKind::Blend: {
+                const auto *bn = dynamic_cast<BlendNode *>(mn.get());
+                // 内容混合：内容绘制完成后把视觉盒像素与 tint 按模式混合。
+                p.blend_region(visual_box, bn->mode(), bn->tint(), bn->strength());
+                break;
+            }
+            case ModifierNode::PaintKind::ShaderMask: {
+                const auto *sm = dynamic_cast<ShaderMaskNode *>(mn.get());
+                // 着色器遮罩：内容绘制完成后按渐变淡出视觉盒像素。
+                p.mask_region(visual_box, sm->mask_kind(), sm->strength());
+                break;
+            }
+            default:
+                break;
         }
     }
 
@@ -456,7 +466,7 @@ auto Widget::render_into(Painter &dst, const Rect &local, const BuildContext &ct
 
     if (tf.matrix.is_identity()) {
         // 恒等快速路径：与旧行为完全一致（零回归）。
-        paint_content(dst, local, Rect{ .origin = local.origin + tf.translation, .size = tf.content_size }, ctx);
+        paint_content(dst, local, Rect{.origin = local.origin + tf.translation, .size = tf.content_size}, ctx);
     } else {
         // 离屏合成：把整棵子树渲染到离屏缓冲，再按仿射矩阵合成回目标缓冲，
         // 旋转/缩放内容（含文本经重采样）正确；命中测试用逆矩阵映射配套。
@@ -487,10 +497,10 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
     if (!show.get()) {
         return;
     }
-    AURORA_PROFILE_COUNT(paint_nodes, 1); // 本帧真正参与 paint 遍历的节点数（DL 命中的子树不计）
-    detail::paint_timing().paint_nodes++; // [性能排查] 镜像到光栅计时累加器，供 glue 归因
-    paint_bounds_ = bounds;              // 记录绝对（窗口逻辑 dp）盒，供脏区裁剪绘制精确标记几何
-    focus_bounds_ = bounds;              // 同源同值：方向键焦点导航的几何基准（见 focus_bounds_）
+    AURORA_PROFILE_COUNT(paint_nodes, 1);  // 本帧真正参与 paint 遍历的节点数（DL 命中的子树不计）
+    detail::paint_timing().paint_nodes++;  // [性能排查] 镜像到光栅计时累加器，供 glue 归因
+    paint_bounds_ = bounds;  // 记录绝对（窗口逻辑 dp）盒，供脏区裁剪绘制精确标记几何
+    focus_bounds_ = bounds;  // 同源同值：方向键焦点导航的几何基准（见 focus_bounds_）
 
     const Modifier &mod = modifier.get();
     const bool cache = std::ranges::any_of(mod.nodes(), [](const std::shared_ptr<ModifierNode> &n) -> bool {
@@ -560,24 +570,24 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
         if (dl_valid_ && dl_raster_gen_ == raster_gen && bounds == last_paint_bounds_) {
             const double saved_alpha = p.global_alpha();
             AURORA_PROFILE_COUNT(dl_replays, 1);
-            detail::paint_timing().dl_replays++; // [性能排查] 镜像到光栅计时累加器，供 glue 归因
-            display_list_.replay(p);            // 命中：整棵子树命令直接回放，跳过 paint 遍历
+            detail::paint_timing().dl_replays++;  // [性能排查] 镜像到光栅计时累加器，供 glue 归因
+            display_list_.replay(p);  // 命中：整棵子树命令直接回放，跳过 paint 遍历
             p.set_alpha(saved_alpha);
             return;
         }
         const double saved_alpha = p.global_alpha();
         AURORA_PROFILE_COUNT(dl_records, 1);
-        detail::paint_timing().dl_records++;               // [性能排查] 镜像到光栅计时累加器，供 glue 归因
-        p.record(display_list_);                          // 进入录制（清空并压栈）
-        render_into(p, bounds, ctx);                       // 全部绘制录入 display_list_（含子树）
-        const bool was_dynamic = p.recording_is_dynamic(); // 在 stop() 前捕获
-        p.stop();                                          // 退出录制（恢复 Direct）
+        detail::paint_timing().dl_records++;  // [性能排查] 镜像到光栅计时累加器，供 glue 归因
+        p.record(display_list_);  // 进入录制（清空并压栈）
+        render_into(p, bounds, ctx);  // 全部绘制录入 display_list_（含子树）
+        const bool was_dynamic = p.recording_is_dynamic();  // 在 stop() 前捕获
+        p.stop();  // 退出录制（恢复 Direct）
         if (!was_dynamic) {
             dl_valid_ = true;
             dl_raster_gen_ = raster_gen;
             last_paint_bounds_ = bounds;
         }
-        display_list_.replay(p); // 立即回放（Direct）上屏
+        display_list_.replay(p);  // 立即回放（Direct）上屏
         p.set_alpha(saved_alpha);
         return;
     }
@@ -612,7 +622,7 @@ auto Widget::hit_test(const Point &local, const Rect &bounds, const BuildContext
             // local 是相对本 widget 原点的局部坐标，需与“内容矩形”（原点 0）比较；
             // 否则非原点控件（如纵向布局中的按钮）永远命中失败。
             if (content_box.contains(local_adj)) {
-                return this; // Clickable 拦截
+                return this;  // Clickable 拦截
             }
         }
     }
@@ -675,7 +685,7 @@ auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildC
 
 auto Widget::mount(const BuildContext &ctx) -> void {
     if (mounted_) {
-        return; // 幂等：已挂载则跳过，避免转场切换复用同一 widget 实例时重复订阅信号
+        return;  // 幂等：已挂载则跳过，避免转场切换复用同一 widget 实例时重复订阅信号
     }
     mounted_ = true;
     std::vector<SignalViewBase *> sigs;
@@ -705,7 +715,7 @@ auto Widget::request_focus() -> void {
 
 auto Widget::collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void {}
 
-auto Widget::describe() const -> WidgetDescriptor { return WidgetDescriptor{ .name = type_name() }; }
+auto Widget::describe() const -> WidgetDescriptor { return WidgetDescriptor{.name = type_name()}; }
 
 auto Container::collect_signals(std::vector<SignalViewBase *> &out) -> void {
     for (Node &child : children_) {
@@ -713,4 +723,4 @@ auto Container::collect_signals(std::vector<SignalViewBase *> &out) -> void {
     }
 }
 
-} // namespace aurora
+}  // namespace aurora

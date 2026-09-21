@@ -150,13 +150,13 @@ AURORA_TEST_CASE(touch_pinch_distance_and_angle) {
 AURORA_TEST_CASE(base_reference_shares_handled_flag) {
     // 派发器经由 Event& 写 is_handled 停止冒泡：基类引用与派生对象共享同一标志
     KeyEvent key;
-    Event& base = key;
+    Event &base = key;
     AURORA_TEST_CHECK_FALSE(base.is_handled);
     base.is_handled = true;
     AURORA_TEST_CHECK_TRUE(key.is_handled);
 
     MouseEvent mouse;
-    Event& mouse_base = mouse;
+    Event &mouse_base = mouse;
     mouse_base.is_handled = true;
     AURORA_TEST_CHECK_TRUE(mouse.is_handled);
 }

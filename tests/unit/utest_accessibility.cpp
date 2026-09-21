@@ -36,29 +36,29 @@ constexpr aurora::Size AURORA_PROBE_ITEM{.width = 100.0F, .height = 20.0F};
 /// @brief 最小叶控件桩：仅补齐抽象纯虚函数，用于纯逻辑的无障碍树构建（不触发布局/绘制）。
 class ProbeLeaf final : public aurora::LeafWidget {
   public:
-    explicit ProbeLeaf(const char* type) : type_{type} {}
+    explicit ProbeLeaf(const char *type) : type_{type} {}
 
-    [[nodiscard]] auto type_name() const -> const char* override { return type_; }
+    [[nodiscard]] auto type_name() const -> const char * override { return type_; }
 
   protected:
-    auto on_layout(const aurora::Constraints& /*c*/, const aurora::BuildContext& /*ctx*/) -> aurora::Size override {
+    auto on_layout(const aurora::Constraints & /*c*/, const aurora::BuildContext & /*ctx*/) -> aurora::Size override {
         return {};
     }
 
-    auto on_paint(aurora::Painter& /*p*/, const aurora::Rect& /*bounds*/, const aurora::BuildContext& /*ctx*/)
+    auto on_paint(aurora::Painter & /*p*/, const aurora::Rect & /*bounds*/, const aurora::BuildContext & /*ctx*/)
         -> void override {}
 
   private:
-    const char* type_;
+    const char *type_;
 };
 
 /// @brief 最小容器桩：type_name 固定为真实控件名 "Column"（角色推断应落到 Generic）。
 class ProbeContainer final : public aurora::Container {
   public:
-    [[nodiscard]] auto type_name() const -> const char* override { return "Column"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "Column"; }
 
   protected:
-    auto on_layout(const aurora::Constraints& /*c*/, const aurora::BuildContext& /*ctx*/) -> aurora::Size override {
+    auto on_layout(const aurora::Constraints & /*c*/, const aurora::BuildContext & /*ctx*/) -> aurora::Size override {
         return {};
     }
 };
@@ -67,12 +67,12 @@ class ProbeContainer final : public aurora::Container {
 ///        用于验证语义树几何沿子节点局部原点的逐级累加（不经任何绘制）。
 class ProbeColumn final : public aurora::Container {
   public:
-    [[nodiscard]] auto type_name() const -> const char* override { return "Column"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "Column"; }
 
   protected:
-    auto on_layout(const aurora::Constraints& /*c*/, const aurora::BuildContext& /*ctx*/) -> aurora::Size override {
+    auto on_layout(const aurora::Constraints & /*c*/, const aurora::BuildContext & /*ctx*/) -> aurora::Size override {
         float y = 0.0F;
-        for (auto& child : children_) {
+        for (auto &child : children_) {
             child.set_bounds(aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = y}, .size = AURORA_PROBE_ITEM});
             y += AURORA_PROBE_ITEM.height;
         }
@@ -86,16 +86,16 @@ class ProbeVirtualList final : public aurora::Widget {
   public:
     ProbeVirtualList() : item_{std::make_shared<ProbeLeaf>("Text")} {}
 
-    [[nodiscard]] auto type_name() const -> const char* override { return "LazyList"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "LazyList"; }
 
-    auto for_each_child(const std::function<void(const aurora::Widget&)>& fn) const -> void override { fn(*item_); }
+    auto for_each_child(const std::function<void(const aurora::Widget &)> &fn) const -> void override { fn(*item_); }
 
   protected:
-    auto on_layout(const aurora::Constraints& /*c*/, const aurora::BuildContext& /*ctx*/) -> aurora::Size override {
+    auto on_layout(const aurora::Constraints & /*c*/, const aurora::BuildContext & /*ctx*/) -> aurora::Size override {
         return aurora::Size{.width = 200.0F, .height = 300.0F};
     }
 
-    auto on_paint(aurora::Painter& /*p*/, const aurora::Rect& /*bounds*/, const aurora::BuildContext& /*ctx*/)
+    auto on_paint(aurora::Painter & /*p*/, const aurora::Rect & /*bounds*/, const aurora::BuildContext & /*ctx*/)
         -> void override {}
 
   private:
@@ -104,17 +104,17 @@ class ProbeVirtualList final : public aurora::Widget {
 
 class ProbeAnnotatedLeaf final : public aurora::LeafWidget {
   public:
-    [[nodiscard]] auto type_name() const -> const char* override { return "Button"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "Button"; }
     [[nodiscard]] auto accessibility_label() const -> std::string override { return "提交订单"; }
     [[nodiscard]] auto accessibility_value() const -> std::string override { return "已就绪"; }
     [[nodiscard]] auto accessibility_hint() const -> std::string override { return "回车提交"; }
 
   protected:
-    auto on_layout(const aurora::Constraints& /*c*/, const aurora::BuildContext& /*ctx*/) -> aurora::Size override {
+    auto on_layout(const aurora::Constraints & /*c*/, const aurora::BuildContext & /*ctx*/) -> aurora::Size override {
         return {};
     }
 
-    auto on_paint(aurora::Painter& /*p*/, const aurora::Rect& /*bounds*/, const aurora::BuildContext& /*ctx*/)
+    auto on_paint(aurora::Painter & /*p*/, const aurora::Rect & /*bounds*/, const aurora::BuildContext & /*ctx*/)
         -> void override {}
 };
 
@@ -124,10 +124,10 @@ class ScopedSettings final {
     ScopedSettings() : saved_{aurora::current_accessibility_settings()} {}
     ~ScopedSettings() { aurora::set_accessibility_settings(saved_); }
 
-    ScopedSettings(const ScopedSettings&) = delete;
-    auto operator=(const ScopedSettings&) -> ScopedSettings& = delete;
-    ScopedSettings(ScopedSettings&&) = delete;
-    auto operator=(ScopedSettings&&) -> ScopedSettings& = delete;
+    ScopedSettings(const ScopedSettings &) = delete;
+    auto operator=(const ScopedSettings &) -> ScopedSettings & = delete;
+    ScopedSettings(ScopedSettings &&) = delete;
+    auto operator=(ScopedSettings &&) -> ScopedSettings & = delete;
 
   private:
     aurora::AccessibilitySettings saved_;
@@ -139,16 +139,16 @@ class ScopedSettings final {
 /// 故回调期间指针必然有效（事件来源控件也活在同一作用域内）。
 class ScopedEventHandler final {
   public:
-    explicit ScopedEventHandler(std::vector<aurora::AccessibilityEvent>* out) {
+    explicit ScopedEventHandler(std::vector<aurora::AccessibilityEvent> *out) {
         aurora::set_accessibility_event_handler(
-            [out](const aurora::AccessibilityEvent& e) -> void { out->push_back(e); });
+            [out](const aurora::AccessibilityEvent &e) -> void { out->push_back(e); });
     }
     ~ScopedEventHandler() { aurora::set_accessibility_event_handler(nullptr); }
 
-    ScopedEventHandler(const ScopedEventHandler&) = delete;
-    auto operator=(const ScopedEventHandler&) -> ScopedEventHandler& = delete;
-    ScopedEventHandler(ScopedEventHandler&&) = delete;
-    auto operator=(ScopedEventHandler&&) -> ScopedEventHandler& = delete;
+    ScopedEventHandler(const ScopedEventHandler &) = delete;
+    auto operator=(const ScopedEventHandler &) -> ScopedEventHandler & = delete;
+    ScopedEventHandler(ScopedEventHandler &&) = delete;
+    auto operator=(ScopedEventHandler &&) -> ScopedEventHandler & = delete;
 };
 
 }  // namespace
@@ -258,13 +258,13 @@ AURORA_TEST_CASE(build_tree_maps_roles_and_default_actions) {
     AURORA_TEST_CHECK_EQ(tree.actions, aurora::AccessibilityAction::Focus);
     AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
 
-    const auto& button = tree.children[0];
+    const auto &button = tree.children[0];
     AURORA_TEST_CHECK_EQ(button.role, aurora::AccessibilityRole::Button);
     AURORA_TEST_CHECK(button.has_action(aurora::AccessibilityAction::Click));
     AURORA_TEST_CHECK(button.has_action(aurora::AccessibilityAction::Invoke));
     AURORA_TEST_CHECK(button.children.empty());
 
-    const auto& text = tree.children[1];
+    const auto &text = tree.children[1];
     AURORA_TEST_CHECK_EQ(text.role, aurora::AccessibilityRole::Text);
     AURORA_TEST_CHECK(text.has_action(aurora::AccessibilityAction::Focus));
     AURORA_TEST_CHECK_FALSE(text.has_action(aurora::AccessibilityAction::Click));
@@ -283,7 +283,7 @@ AURORA_TEST_CASE(build_tree_recurses_and_counts_nodes) {
     AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
 
     // 嵌套容器递归展开：内层 Column → Generic，其子 Header。
-    const auto& nested = tree.children[0];
+    const auto &nested = tree.children[0];
     AURORA_TEST_CHECK_EQ(nested.role, aurora::AccessibilityRole::Generic);
     AURORA_TEST_REQUIRE_EQ(nested.children.size(), 1U);
     AURORA_TEST_CHECK_EQ(nested.children[0].role, aurora::AccessibilityRole::Header);
@@ -425,7 +425,7 @@ AURORA_TEST_CASE(settings_default_is_neutral_and_font_scale_clamps_illegal) {
     const ScopedSettings guard;
     aurora::set_accessibility_settings(aurora::AccessibilitySettings{});
 
-    const auto& s = aurora::current_accessibility_settings();
+    const auto &s = aurora::current_accessibility_settings();
     AURORA_TEST_CHECK_FALSE(s.reduce_motion);
     AURORA_TEST_CHECK_FALSE(s.high_contrast);
     AURORA_TEST_CHECK_FALSE(s.screen_reader_active);

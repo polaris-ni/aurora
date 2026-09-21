@@ -3,7 +3,7 @@
 ///           + include/aurora/render/painter.h（GPU 层录制 API）+ include/aurora/render/rhi/software_rhi.h（层仿真）
 /// 测试说明: 覆盖 GPU 层缓存与原生表面契约的软件侧：层键分配唯一性与 epoch 代际单调；
 /// NativeSurfaceFrame 默认契约；Painter begin_layer/end_layer/draw_layer 仅录制生效
-///（Direct no-op）且命令字段完整（含嵌套）；RhiBackend 默认契约（能力位全 false /
+/// （Direct no-op）且命令字段完整（含嵌套）；RhiBackend 默认契约（能力位全 false /
 /// 流式接口 no-op）；SoftwareRhi 层捕获-离屏-存储-合成往返与直接绘制逐位一致、
 /// DrawLayer 未命中跳过 + bump epoch 自愈、共享层存储跨实例命中。
 
@@ -65,7 +65,7 @@ class LayerRecordingRhi final : public rhi::RhiBackend {
     }
 
     std::vector<Entry> entries;
-    DisplayList* list = nullptr;  // 测试助手：非 const（matrix_at 非只读接口）
+    DisplayList *list = nullptr;  // 测试助手：非 const（matrix_at 非只读接口）
 };
 
 }  // namespace
@@ -161,7 +161,7 @@ AURORA_TEST_CASE(rhi_backend_default_contract) {
     class MockRhi final : public rhi::RhiBackend {
       public:
         [[nodiscard]] auto name() const -> std::string_view override { return "mock"; }
-        auto submit(const DrawCmd& /*cmd*/, const rhi::CmdData& /*data*/) -> void override {}
+        auto submit(const DrawCmd & /*cmd*/, const rhi::CmdData & /*data*/) -> void override {}
     };
     MockRhi mock;
     const auto cap = mock.capabilities();
@@ -196,8 +196,8 @@ AURORA_TEST_CASE(software_rhi_layer_roundtrip_matches_direct) {
     AURORA_TEST_REQUIRE(direct.width() == recorded.width());
     const auto bytes = static_cast<std::size_t>(direct.width()) * static_cast<std::size_t>(direct.height()) * 4U;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 数据指针 + 字节数界定快照范围，对应 RHI 快照契约
-    AURORA_TEST_CHECK_TRUE(std::equal(direct.data(), direct.data() + static_cast<std::ptrdiff_t>(bytes),
-                                      recorded.data()));
+    AURORA_TEST_CHECK_TRUE(
+        std::equal(direct.data(), direct.data() + static_cast<std::ptrdiff_t>(bytes), recorded.data()));
 }
 
 AURORA_TEST_CASE(software_rhi_layer_miss_skips_and_bumps_epoch) {

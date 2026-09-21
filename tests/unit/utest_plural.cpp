@@ -16,7 +16,7 @@ using aurora::plural_category;
 using aurora::PluralCategory;
 
 // 把类别按整数比较，规避测试框架对 enum class 的字面值打印差异。
-static auto c(const std::string& lang, double n) -> int {
+static auto c(const std::string &lang, double n) -> int {
     return static_cast<int>(plural_category(n, Locale{.language = lang}));
 }
 static constexpr int AURORA_ZERO = static_cast<int>(PluralCategory::Zero);

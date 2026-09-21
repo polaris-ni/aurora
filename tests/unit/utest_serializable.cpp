@@ -30,11 +30,11 @@ struct Note {
     int priority = 0;
 };
 
-inline auto to_storage_json(const Note& n) -> aus::Json {
+inline auto to_storage_json(const Note &n) -> aus::Json {
     return aus::Json{{"title", n.title}, {"priority", n.priority}};
 }
 
-inline auto from_storage_json(Note& n, const aus::Json& j) -> Result<void> {
+inline auto from_storage_json(Note &n, const aus::Json &j) -> Result<void> {
     if (!j.contains("title")) {
         return Result<void>{make_error(ErrorCode::StorageRecordCorrupt, "note missing title")};
     }
@@ -54,7 +54,7 @@ struct Chunk {
     int size = 0;
 };
 
-inline auto to_storage_bytes(const Chunk& c) -> aus::StorageBytes {
+inline auto to_storage_bytes(const Chunk &c) -> aus::StorageBytes {
     aus::StorageBytes out;
     for (const char ch : c.tag) {
         out.push_back(static_cast<std::byte>(ch));
@@ -63,7 +63,7 @@ inline auto to_storage_bytes(const Chunk& c) -> aus::StorageBytes {
     return out;
 }
 
-inline auto from_storage_bytes(Chunk& c, const aus::StorageBytes& b) -> Result<void> {
+inline auto from_storage_bytes(Chunk &c, const aus::StorageBytes &b) -> Result<void> {
     if (b.empty()) {
         return Result<void>{make_error(ErrorCode::StorageRecordCorrupt, "chunk payload empty")};
     }
@@ -85,7 +85,7 @@ namespace versioned {
 struct Tag {};
 
 /// @brief 用户命名空间覆盖：带 `const Tag*` tag 实参（ADL 定制点约定）。
-inline auto storage_version(const Tag* /*tag*/) -> std::uint32_t { return 7; }
+inline auto storage_version(const Tag * /*tag*/) -> std::uint32_t { return 7; }
 
 }  // namespace versioned
 
@@ -101,9 +101,9 @@ struct NoDefaultCtor {
     std::string title;
 };
 
-inline auto to_storage_json(const NoDefaultCtor& n) -> aus::Json { return aus::Json{{"title", n.title}}; }
+inline auto to_storage_json(const NoDefaultCtor &n) -> aus::Json { return aus::Json{{"title", n.title}}; }
 
-inline auto from_storage_json(NoDefaultCtor& n, const aus::Json& j) -> Result<void> {
+inline auto from_storage_json(NoDefaultCtor &n, const aus::Json &j) -> Result<void> {
     n.title = j.value("title", "");
     return Result<void>{};
 }
@@ -119,7 +119,7 @@ static_assert(aus::StorageStorable<Chunk>, "Chunk 应满足门面存储概念");
 static_assert(!aus::StorageStorable<Plain>, "Plain 不可经门面存储");
 static_assert(!aus::StorageStorable<NoDefaultCtor>, "不可默认构造的类型不满足 StorageStorable");
 static_assert(aus::StorageSerializable<NoDefaultCtor>, "NoDefaultCtor 的 JSON 定制点仍成立");
-static_assert(aus::storage_version(static_cast<const Note*>(nullptr)) == 1, "默认版本号恒为 1");
+static_assert(aus::storage_version(static_cast<const Note *>(nullptr)) == 1, "默认版本号恒为 1");
 
 // ============================================================================
 // 测试专用分发器（仅本 TU 可见，不进库头文件）：在库命名空间内复现
@@ -134,7 +134,7 @@ namespace aurora::storage {
 template <typename T>
 auto utest_dispatch_storage_version() -> std::uint32_t {
     // 与门面同款调用：`const T*` 指针实参触发 ADL（零参模板在 GCC/MSVC 下不会查用户命名空间）。
-    return storage_version(static_cast<const T*>(nullptr));
+    return storage_version(static_cast<const T *>(nullptr));
 }
 }  // namespace aurora::storage
 
@@ -142,9 +142,9 @@ namespace aurora::test_cases::utest_serializable {
 
 AURORA_TEST_CASE(storage_version_defaults_to_one) {
     // 未覆盖时所有类型默认版本号 1（编译期常量，同时以运行期断言复核）。
-    static_assert(aus::storage_version(static_cast<const Plain*>(nullptr)) == 1);
-    AURORA_TEST_CHECK_EQ(aus::storage_version(static_cast<const Note*>(nullptr)), 1U);
-    AURORA_TEST_CHECK_EQ(aus::storage_version(static_cast<const Chunk*>(nullptr)), 1U);
+    static_assert(aus::storage_version(static_cast<const Plain *>(nullptr)) == 1);
+    AURORA_TEST_CHECK_EQ(aus::storage_version(static_cast<const Note *>(nullptr)), 1U);
+    AURORA_TEST_CHECK_EQ(aus::storage_version(static_cast<const Chunk *>(nullptr)), 1U);
 }
 
 AURORA_TEST_CASE(storage_version_user_override_wins_via_adl) {
@@ -158,16 +158,16 @@ AURORA_TEST_CASE(storage_version_user_override_wins_via_adl) {
 
 AURORA_TEST_CASE(storage_type_name_stable_and_distinct) {
     // 默认类型标签：同类型返回同一静态缓存引用（零分配比较），异类型标签不同，取值为 typeid 短名。
-    const auto& note_name = aus::storage_type_name(static_cast<const Note*>(nullptr));
-    const auto& note_name_again = aus::storage_type_name(static_cast<const Note*>(nullptr));
+    const auto &note_name = aus::storage_type_name(static_cast<const Note *>(nullptr));
+    const auto &note_name_again = aus::storage_type_name(static_cast<const Note *>(nullptr));
     AURORA_TEST_CHECK(&note_name == &note_name_again);  // 同一 static 缓存
     AURORA_TEST_CHECK(!note_name.empty());
     AURORA_TEST_CHECK_EQ(note_name, std::string(typeid(Note).name()));
 
-    const auto& chunk_name = aus::storage_type_name(static_cast<const Chunk*>(nullptr));
+    const auto &chunk_name = aus::storage_type_name(static_cast<const Chunk *>(nullptr));
     AURORA_TEST_CHECK_NE(note_name, chunk_name);
 
-    const auto& plain_name = aus::storage_type_name(static_cast<const Plain*>(nullptr));
+    const auto &plain_name = aus::storage_type_name(static_cast<const Plain *>(nullptr));
     AURORA_TEST_CHECK_NE(note_name, plain_name);
     AURORA_TEST_CHECK_NE(chunk_name, plain_name);
 }
@@ -175,12 +175,12 @@ AURORA_TEST_CASE(storage_type_name_stable_and_distinct) {
 AURORA_TEST_CASE(migrate_storage_default_is_identity) {
     // 默认迁移钩子对 JSON 与二进制两条线格式均恒等返回（不丢数据、不报错）。
     const aus::Json payload = aus::Json{{"k", 1}, {"s", "v"}};
-    const auto migrated_json = aus::migrate_storage(1, static_cast<const Note*>(nullptr), payload);
+    const auto migrated_json = aus::migrate_storage(1, static_cast<const Note *>(nullptr), payload);
     AURORA_TEST_REQUIRE(migrated_json.ok());
     AURORA_TEST_CHECK_EQ(migrated_json.value(), payload);
 
     const aus::StorageBytes bytes{std::byte{0x10}, std::byte{0x20}, std::byte{0x30}};
-    const auto migrated_bytes = aus::migrate_storage(1, static_cast<const Chunk*>(nullptr), bytes);
+    const auto migrated_bytes = aus::migrate_storage(1, static_cast<const Chunk *>(nullptr), bytes);
     AURORA_TEST_REQUIRE(migrated_bytes.ok());
     AURORA_TEST_CHECK(migrated_bytes.value() == bytes);
 }

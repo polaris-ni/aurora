@@ -19,7 +19,7 @@ using au::serialization::to_code;
 namespace {
 
 // 构造 { type, props, children } 结构快照（与 to_json 输出同构）。
-auto make_node(const std::string& type, const au::Json& props = au::Json::object(),
+auto make_node(const std::string &type, const au::Json &props = au::Json::object(),
                au::Json children = au::Json::array()) -> au::Json {
     au::Json node = au::Json::object();
     node["type"] = type;
@@ -28,7 +28,7 @@ auto make_node(const std::string& type, const au::Json& props = au::Json::object
     return node;
 }
 
-auto make_button(const std::string& label) -> au::Json { return make_node("Button", au::Json{{"label", label}}); }
+auto make_button(const std::string &label) -> au::Json { return make_node("Button", au::Json{{"label", label}}); }
 
 }  // namespace
 

@@ -886,7 +886,7 @@ constexpr auto to_string(ErrorSeverity s) -> std::string_view {
     return "error";
 }
 
-inline auto format_message(std::string_view tpl, const ErrorParams& params) -> std::string {
+inline auto format_message(std::string_view tpl, const ErrorParams &params) -> std::string {
     std::string out;
     out.reserve(tpl.size());
     for (std::size_t i = 0; i < tpl.size(); ++i) {

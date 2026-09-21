@@ -24,7 +24,7 @@ namespace {
 }
 
 /// @brief 统计画布中非透明像素数（用于判定文本是否真的落笔）。
-[[nodiscard]] auto count_opaque(const Painter& p) -> int {
+[[nodiscard]] auto count_opaque(const Painter &p) -> int {
     int count = 0;
     for (int y = 0; y < p.height(); ++y) {
         for (int x = 0; x < p.width(); ++x) {

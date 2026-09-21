@@ -26,7 +26,7 @@ AURORA_TEST_CASE(state_default_and_value_construction) {
 
     // get() 返回内部存储的引用：set 后旧引用观察到新值。
     State<std::string> str{std::string{"a"}};
-    const std::string& alias = str.get();
+    const std::string &alias = str.get();
     str.set(std::string{"b"});
     AURORA_TEST_CHECK_EQ(alias, std::string{"b"});
 }
@@ -75,7 +75,7 @@ AURORA_TEST_CASE(state_get_in_effect_scope_registers_and_dedups) {
 AURORA_TEST_CASE(state_const_get_still_registers_dependency) {
     // 经 const State& 读取同样登记依赖（get() const 内部去 const 订阅，接口约束使然）。
     auto owned = std::make_shared<State<int>>(5);
-    const State<int>& view = *owned;
+    const State<int> &view = *owned;
     int runs = 0;
     Effect e{[&]() -> void {
         ++runs;

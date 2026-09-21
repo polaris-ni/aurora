@@ -24,13 +24,13 @@ class FixedBox final : public Widget {
   public:
     FixedBox(float w, float h) : w_(w), h_(h) {}
 
-    [[nodiscard]] auto type_name() const -> const char* override { return "FixedBox"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "FixedBox"; }
 
   protected:
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = w_, .height = h_});
     }
-    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 
   private:
     float w_;
@@ -204,7 +204,7 @@ AURORA_TEST_CASE(programmatic_scroll_offset_clamps_and_shifts_window) {
 }
 
 AURORA_TEST_CASE(restore_key_restores_offset_and_writes_back) {
-    auto& storage = ScrollStorage::instance();
+    auto &storage = ScrollStorage::instance();
     storage.clear_all();
     storage.write("row.k", 192.0F);  // 模拟上一次会话留下的位置
 

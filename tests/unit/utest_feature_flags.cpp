@@ -20,12 +20,12 @@ namespace {
 
 /// 宏名 ↔ 结构体字段的对照表（键 = 完整宏名，值 = FeatureFlags 成员地址）。
 struct FlagKeyPair {
-    const char* key;
-    bool FeatureFlags::* field;
+    const char *key;
+    bool FeatureFlags::*field;
 };
 
 /// 全部 21 个归一化镜像字段（与 BUILD_OPTIONS.md 三层命名分组一一对应）。
-[[nodiscard]] auto flag_key_table() -> const std::vector<FlagKeyPair>& {
+[[nodiscard]] auto flag_key_table() -> const std::vector<FlagKeyPair> & {
     static const std::vector<FlagKeyPair> AURORA_FLAG_KEY_TABLE = {
         {.key = "AURORA_BACKEND_HEADLESS", .field = &FeatureFlags::backend_headless},
         {.key = "AURORA_BACKEND_WIN32", .field = &FeatureFlags::backend_win32},
@@ -85,7 +85,7 @@ AURORA_TEST_CASE(snapshot_matches_json_per_macro_key) {
     const FeatureFlags f = feature_flags();
     const Json j = f.to_json();
     AURORA_TEST_CHECK_TRUE(j.is_object());
-    for (const FlagKeyPair& pair : flag_key_table()) {
+    for (const FlagKeyPair &pair : flag_key_table()) {
         AURORA_TEST_CHECK_MSG(j.contains(pair.key), std::string("to_json 缺少宏键: ") + pair.key);
         AURORA_TEST_CHECK_EQ(j[pair.key], f.*(pair.field));
     }
@@ -112,7 +112,7 @@ AURORA_TEST_CASE(snapshot_is_stable_across_calls) {
     // 结果为编译期常量快照：与运行环境无关，重复调用取值恒定。
     const FeatureFlags first = feature_flags();
     const FeatureFlags second = feature_flags();
-    for (const FlagKeyPair& pair : flag_key_table()) {
+    for (const FlagKeyPair &pair : flag_key_table()) {
         AURORA_TEST_CHECK_EQ(second.*(pair.field), first.*(pair.field));
     }
 }

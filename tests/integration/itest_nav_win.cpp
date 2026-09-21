@@ -23,7 +23,7 @@ namespace aurora::test_cases::itest_nav_win {
 namespace {
 
 /// 构造一个带纯色背景的页面（Text + background 修饰），作为路由根。
-auto make_page(const std::string& label) -> Node {
+auto make_page(const std::string &label) -> Node {
     Text t{label};
     t.modifier.set(Modifier{}.background(Color::blue()));
     return Node{std::move(t)};

@@ -21,19 +21,19 @@ struct FixedCtx : aurora::LayoutCtxBase {
     float h = 0.0F;
 };
 
-auto fixed_measure(void* ctx, const Constraints& c) -> Size {
-    const auto* self = static_cast<FixedCtx*>(ctx);
+auto fixed_measure(void *ctx, const Constraints &c) -> Size {
+    const auto *self = static_cast<FixedCtx *>(ctx);
     return c.constrain(Size{.width = self->w, .height = self->h});
 }
 
 /// 独立上下文的固定项（同用例多个子项时每项一个 ctx）。
-auto fixed_item2(float w, float h, FixedCtx& ctx) -> FlexItem {
+auto fixed_item2(float w, float h, FixedCtx &ctx) -> FlexItem {
     ctx.w = w;
     ctx.h = h;
     return FlexItem::make(0.0F, &ctx, &fixed_measure);
 }
 
-auto flex_item(float weight, float w, float h, FixedCtx& ctx) -> FlexItem {
+auto flex_item(float weight, float w, float h, FixedCtx &ctx) -> FlexItem {
     ctx.w = w;
     ctx.h = h;
     return FlexItem::make(weight, &ctx, &fixed_measure);
@@ -50,13 +50,13 @@ struct BaselineCtx : aurora::LayoutCtxBase {
     float baseline = -1.0F;
 };
 
-auto baseline_measure(void* ctx, const Constraints& c) -> Size {
-    const auto* self = static_cast<BaselineCtx*>(ctx);
+auto baseline_measure(void *ctx, const Constraints &c) -> Size {
+    const auto *self = static_cast<BaselineCtx *>(ctx);
     return c.constrain(Size{.width = self->w, .height = self->h});
 }
 
-auto baseline_of(void* ctx, Size /*measured*/) -> std::optional<float> {
-    const auto* self = static_cast<BaselineCtx*>(ctx);
+auto baseline_of(void *ctx, Size /*measured*/) -> std::optional<float> {
+    const auto *self = static_cast<BaselineCtx *>(ctx);
     if (self->baseline < 0.0F) {
         return std::nullopt;
     }
@@ -64,7 +64,7 @@ auto baseline_of(void* ctx, Size /*measured*/) -> std::optional<float> {
 }
 
 /// 带基线通道的子项（baseline < 0 = 无基线，走 CSS 式合成基线 = 交叉轴底边）。
-auto baseline_item(float w, float h, float baseline, BaselineCtx& ctx) -> FlexItem {
+auto baseline_item(float w, float h, float baseline, BaselineCtx &ctx) -> FlexItem {
     ctx.w = w;
     ctx.h = h;
     ctx.baseline = baseline;

@@ -3,9 +3,9 @@
 /// 测试说明: GLFn 函数表完整性判定与 load_gl 空装载；GpuGlRhi 占位（未装载）契约；
 /// fake GL 驱动桩下的帧生命周期（begin 零基底 / 命令翻译批切分 / end 上屏 blit——resolve
 /// 懒执行 / read_pixels）；渐变 LUT 内容语义与缓存合批；图像 PMA 纹理与内容摘要缓存
-///（Image::content_hash + invalidate 契约）；文本字形图集（R8 子上传 / 槽位缓存 /
+/// （Image::content_hash + invalidate 契约）；文本字形图集（R8 子上传 / 槽位缓存 /
 /// Text-Solid 断批 / 空字形与空文本契约 / 多页架式 + 页数封顶 LRU 淘汰）；效果管线
-///（Shadow 单批同构 / BlurRegion ping-pong 双 pass / Blend-Mask 单 pass 直写 /
+/// （Shadow 单批同构 / BlurRegion ping-pong 双 pass / Blend-Mask 单 pass 直写 /
 /// Composite 仿射四角顶点 / 脏 resolve 跟踪）；初始化失败链（函数表缺项 / 版本不足 /
 /// 链接失败）→ valid()=false 软件回退契约。
 
@@ -344,8 +344,8 @@ AURORA_TEST_CASE(gpu_gl_gradient_lut_semantics_and_batching) {
     dl2.push_cmd(make_linear_grad(area, Point{.x = 0.0F, .y = 0.0F}, Point{.x = 64.0F, .y = 0.0F}, warm, full, dl2));
     dl2.replay(sink.backend());
     rhi_obj.end_frame();
-    AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 3U);   // warm→cool→warm 三段批
-    AURORA_TEST_CHECK_EQ(fake.uploads.size(), 2U);          // cool 未命中一次，warm 命中缓存
+    AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 3U);  // warm→cool→warm 三段批
+    AURORA_TEST_CHECK_EQ(fake.uploads.size(), 2U);  // cool 未命中一次，warm 命中缓存
 
     // 退化方向（start==end）→ 实心管线首色填充（软件 fill_rect 同形；不产生 LUT 上传）。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(64, 48, 1.0F));
@@ -384,7 +384,7 @@ AURORA_TEST_CASE(gpu_gl_gradient_lut_semantics_and_batching) {
     rhi_obj.end_frame();
     AURORA_TEST_CHECK_EQ(fake.uploads.size(), 3U);
     const auto &lut5 = fake.uploads.back();
-    AURORA_TEST_CHECK_EQ(lut5.data[0], 255);              // t=0 → 首色（红）
+    AURORA_TEST_CHECK_EQ(lut5.data[0], 255);  // t=0 → 首色（红）
     AURORA_TEST_CHECK_EQ(lut5.data[(100U * 4U) + 2], 255);  // t≈0.39 无区间命中 → 尾色（蓝）
 
     // 空色标：直接跳过（软件同契约），无绘制无上传。
@@ -441,13 +441,13 @@ AURORA_TEST_CASE(gpu_gl_image_tex_cache_and_batching) {
     AURORA_TEST_CHECK_EQ(up.data[7], 128);
 
     // 换内容 → 第二次上传 + PMA 混合批与渐变/实心批互斥（断批）。
-    //（拷贝携带旧摘要缓存，直接改写 pixels 后须 invalidate_content_hash——公共契约。）
+    // （拷贝携带旧摘要缓存，直接改写 pixels 后须 invalidate_content_hash——公共契约。）
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(64, 48, 1.0F));
     DisplayList dl2;
     Image other = img;
     other.pixels = {10, 20, 30, 255, 40, 50, 60, 255};
     other.invalidate_content_hash();
-    dl2.push_cmd(make_image_cmd(area, img, dl2));    // 缓存命中
+    dl2.push_cmd(make_image_cmd(area, img, dl2));  // 缓存命中
     dl2.push_cmd(make_image_cmd(area, other, dl2));  // 未命中
     dl2.push_cmd(make_fill(area, Color{0, 0, 0, 255}));  // Solid 管线断批
     dl2.replay(sink.backend());
@@ -493,8 +493,7 @@ AURORA_TEST_CASE(gpu_gl_glyph_atlas_text_pipeline) {
     for (const auto &up : fake.sub_uploads) {
         AURORA_TEST_CHECK_TRUE(up.width > 0);
         AURORA_TEST_CHECK_TRUE(up.height > 0);
-        AURORA_TEST_CHECK_EQ(up.data.size(),
-                             static_cast<std::size_t>(up.width) * static_cast<std::size_t>(up.height));
+        AURORA_TEST_CHECK_EQ(up.data.size(), static_cast<std::size_t>(up.width) * static_cast<std::size_t>(up.height));
     }
 
     // 第二帧：同文本命中 GPU 槽位缓存 → 零新上传；同管线同裁剪 → 单批。
@@ -510,7 +509,7 @@ AURORA_TEST_CASE(gpu_gl_glyph_atlas_text_pipeline) {
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(64, 48, 1.0F));
     DisplayList dl3;
     dl3.push_cmd(make_text_cmd(area, "Ag", font, dl3));  // 命中缓存
-    dl3.push_cmd(make_text_cmd(area, "B", font, dl3));   // 新字形（同管线同裁剪 → 同批）
+    dl3.push_cmd(make_text_cmd(area, "B", font, dl3));  // 新字形（同管线同裁剪 → 同批）
     dl3.push_cmd(make_fill(area, Color{0, 0, 0, 255}));  // Solid 管线断批
     dl3.replay(sink.backend());
     rhi_obj.end_frame();
@@ -548,7 +547,7 @@ AURORA_TEST_CASE(gpu_gl_glyph_atlas_multipage_and_lru_eviction) {
     const Font font;
 
     // 小页注入（默认 1024）：62 个字母数字字形远超 8 页 × 16² 容量，强制覆盖
-    //「满页开新页 → 页数封顶 LRU 淘汰」全路径（含淘汰前 flush）。
+    // 「满页开新页 → 页数封顶 LRU 淘汰」全路径（含淘汰前 flush）。
     rhi_obj.set_glyph_page_size(16);
     const std::string alnum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -558,8 +557,8 @@ AURORA_TEST_CASE(gpu_gl_glyph_atlas_multipage_and_lru_eviction) {
     dl.replay(sink.backend());
     rhi_obj.end_frame();
     const std::size_t first_uploads = fake.sub_uploads.size();
-    AURORA_TEST_CHECK_TRUE(first_uploads > 0U);   // 每个非空字形一次放置上传
-    AURORA_TEST_CHECK_TRUE(rhi_obj.valid());      // 翻页/淘汰链不判死后端
+    AURORA_TEST_CHECK_TRUE(first_uploads > 0U);  // 每个非空字形一次放置上传
+    AURORA_TEST_CHECK_TRUE(rhi_obj.valid());  // 翻页/淘汰链不判死后端
     AURORA_TEST_CHECK_TRUE(rhi_obj.stats().draw_calls > 0U);
 
     // 第二帧同文本：部分槽位已被 LRU 淘汰 → 重新放置上传（> 0）；后端仍可用。
@@ -960,14 +959,15 @@ AURORA_TEST_CASE(gpu_gl_layer_cache_lifecycle_and_miss_epoch) {
     constexpr std::uint64_t key = 7;
 
     // 失效帧命令形态：BeginLayer（建常驻层 FBO）→ 子树重定向层 FBO → EndLayer → DrawLayer 回 MSAA。
-    auto make_layer_dl = [&key](DisplayList& dl) {
+    auto make_layer_dl = [&key](DisplayList &dl) {
         DrawCmd begin;
         begin.kind = CmdKind::BeginLayer;
         begin.bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 48.0F}};
         begin.aux_key = key;
         dl.push_cmd(begin);
-        dl.push_cmd(make_fill(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 48.0F}},
-                              Color{255, 0, 0, 255}));
+        dl.push_cmd(
+            make_fill(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 48.0F}},
+                      Color{255, 0, 0, 255}));
         DrawCmd end;
         end.kind = CmdKind::EndLayer;
         dl.push_cmd(end);
@@ -987,11 +987,11 @@ AURORA_TEST_CASE(gpu_gl_layer_cache_lifecycle_and_miss_epoch) {
     rhi_obj.end_frame();
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().draw_calls, 2U);  // 层内 fill + DrawLayer 合成
     AURORA_TEST_CHECK_EQ(rhi_obj.stats().skipped_cmds, 0U);
-    AURORA_TEST_CHECK_EQ(fake.gen_fbo_ids.size(), 4U);     // 新建层 FBO（常驻）
+    AURORA_TEST_CHECK_EQ(fake.gen_fbo_ids.size(), 4U);  // 新建层 FBO（常驻）
     const auto layer_fbo = fake.gen_fbo_ids.back();
     AURORA_TEST_REQUIRE(fake.draw_fbo_targets.size() == 2U);
-    AURORA_TEST_CHECK_EQ(fake.draw_fbo_targets[0], layer_fbo);             // 子树重定向层 FBO
-    AURORA_TEST_CHECK_EQ(fake.draw_fbo_targets[1], fake.gen_fbo_ids[0]);   // 合成回 MSAA
+    AURORA_TEST_CHECK_EQ(fake.draw_fbo_targets[0], layer_fbo);  // 子树重定向层 FBO
+    AURORA_TEST_CHECK_EQ(fake.draw_fbo_targets[1], fake.gen_fbo_ids[0]);  // 合成回 MSAA
     AURORA_TEST_CHECK_EQ(static_cast<std::uint32_t>(fake.tex_min_filters.back()), AURORA_GL_FILTER_NEAREST);
 
     // 同键重录：层 FBO 复用（零新建），后端不判死。

@@ -27,7 +27,7 @@ auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
-auto count_of(const std::string& haystack, const std::string& needle) -> std::size_t {
+auto count_of(const std::string &haystack, const std::string &needle) -> std::size_t {
     std::size_t count = 0;
     std::size_t pos = 0;
     while ((pos = haystack.find(needle, pos)) != std::string::npos) {

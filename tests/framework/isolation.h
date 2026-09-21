@@ -33,9 +33,9 @@ auto begin_case() -> void;
 auto end_case() -> void;
 
 /// @brief 当前用例的临时目录（begin_case 之后有效；未启用时为空串）。
-[[nodiscard]] auto temp_dir() -> const std::string&;
+[[nodiscard]] auto temp_dir() -> const std::string &;
 
 /// @brief 仓库根绝对路径（从可执行文件位置向上定位；定位失败返回空串，cwd 保持不变）。
-[[nodiscard]] auto repo_root() -> const std::string&;
+[[nodiscard]] auto repo_root() -> const std::string &;
 
 }  // namespace aurora::testing::isolation

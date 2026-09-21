@@ -17,7 +17,7 @@ namespace m = aurora::testing::matchers;  // 匹配器工厂别名（禁止 usin
 
 /// @brief 复现 StateGraph::ptr_id 的指针标识（同为 os << const void*，平台格式一致），
 ///        用于把本用例创建的 State/Effect 与图节点/边按 id 关联。
-[[nodiscard]] auto id_of(const void* p) -> std::string {
+[[nodiscard]] auto id_of(const void *p) -> std::string {
     std::ostringstream os;
     os << p;
     return os.str();
@@ -25,11 +25,11 @@ namespace m = aurora::testing::matchers;  // 匹配器工厂别名（禁止 usin
 
 /// @brief State 节点 id 必须经 StateBase* 取得：State<T> 多继承（SignalView<T> 在前），
 ///        State<int>* 与注册表登记的 StateBase* 子对象地址数值不同，直接用 &s 会查不到节点/边。
-[[nodiscard]] auto state_id_of(aurora::StateBase& s) -> std::string { return id_of(static_cast<const void*>(&s)); }
+[[nodiscard]] auto state_id_of(aurora::StateBase &s) -> std::string { return id_of(static_cast<const void *>(&s)); }
 
-[[nodiscard]] auto find_node(const std::vector<StateGraph::Node>& nodes, const std::string& id)
-    -> const StateGraph::Node* {
-    for (const auto& n : nodes) {
+[[nodiscard]] auto find_node(const std::vector<StateGraph::Node> &nodes, const std::string &id)
+    -> const StateGraph::Node * {
+    for (const auto &n : nodes) {
         if (n.id == id) {
             return &n;
         }
@@ -37,19 +37,19 @@ namespace m = aurora::testing::matchers;  // 匹配器工厂别名（禁止 usin
     return nullptr;
 }
 
-[[nodiscard]] auto has_node(const std::vector<StateGraph::Node>& nodes, const std::string& id) -> bool {
+[[nodiscard]] auto has_node(const std::vector<StateGraph::Node> &nodes, const std::string &id) -> bool {
     return find_node(nodes, id) != nullptr;
 }
 
-[[nodiscard]] auto has_edge(const std::vector<StateGraph::Edge>& edges, const std::string& from, const std::string& to,
-                            const std::string& kind) -> bool {
+[[nodiscard]] auto has_edge(const std::vector<StateGraph::Edge> &edges, const std::string &from, const std::string &to,
+                            const std::string &kind) -> bool {
     return std::ranges::any_of(
-        edges, [&](const StateGraph::Edge& e) -> bool { return e.from == from && e.to == to && e.kind == kind; });
+        edges, [&](const StateGraph::Edge &e) -> bool { return e.from == from && e.to == to && e.kind == kind; });
 }
 
-[[nodiscard]] auto count_kind(const std::vector<StateGraph::Node>& nodes, const std::string& kind) -> std::size_t {
+[[nodiscard]] auto count_kind(const std::vector<StateGraph::Node> &nodes, const std::string &kind) -> std::size_t {
     std::size_t n = 0;
-    for (const auto& node : nodes) {
+    for (const auto &node : nodes) {
         if (node.kind == kind) {
             ++n;
         }
@@ -57,8 +57,8 @@ namespace m = aurora::testing::matchers;  // 匹配器工厂别名（禁止 usin
     return n;
 }
 
-[[nodiscard]] auto edge_references(const std::vector<StateGraph::Edge>& edges, const std::string& id) -> bool {
-    return std::ranges::any_of(edges, [&](const StateGraph::Edge& e) -> bool { return e.from == id || e.to == id; });
+[[nodiscard]] auto edge_references(const std::vector<StateGraph::Edge> &edges, const std::string &id) -> bool {
+    return std::ranges::any_of(edges, [&](const StateGraph::Edge &e) -> bool { return e.from == id || e.to == id; });
 }
 
 AURORA_TEST_CASE(live_state_appears_as_node_with_observes_edge) {
@@ -71,7 +71,7 @@ AURORA_TEST_CASE(live_state_appears_as_node_with_observes_edge) {
     const auto nodes = StateGraph::nodes();
     const auto edges = StateGraph::edges();
     AURORA_TEST_CHECK_EQ(count_kind(nodes, "state"), states_before + 1);
-    const auto* node = find_node(nodes, state_id_of(s));
+    const auto *node = find_node(nodes, state_id_of(s));
     AURORA_TEST_REQUIRE_NOT_NULL(node);
     AURORA_TEST_CHECK_STREQ(node->kind, "state");
     AURORA_TEST_CHECK_TRUE(has_edge(edges, state_id_of(s), id_of(&eff), "observes"));
@@ -86,7 +86,7 @@ AURORA_TEST_CASE(disposed_effect_drops_observes_edge) {
     AURORA_TEST_REQUIRE_TRUE(has_edge(StateGraph::edges(), state_id_of(s), effect_id, "observes"));
 
     eff.dispose();
-    for (const auto& e : StateGraph::edges()) {
+    for (const auto &e : StateGraph::edges()) {
         AURORA_TEST_CHECK_FALSE(e.to == effect_id);
     }
     AURORA_TEST_CHECK_NULL(find_node(StateGraph::nodes(), effect_id));
@@ -105,7 +105,7 @@ AURORA_TEST_CASE(stale_entries_are_skipped_after_destruction) {
         AURORA_TEST_REQUIRE_TRUE(has_node(StateGraph::nodes(), dead_state_id));
         AURORA_TEST_REQUIRE_TRUE(has_edge(StateGraph::edges(), dead_state_id, dead_effect_id, "observes"));
     }
-    for (const auto& n : StateGraph::nodes()) {
+    for (const auto &n : StateGraph::nodes()) {
         AURORA_TEST_CHECK_FALSE(n.id == dead_state_id);
     }
     AURORA_TEST_CHECK_FALSE(edge_references(StateGraph::edges(), dead_state_id));
@@ -127,7 +127,7 @@ AURORA_TEST_CASE(to_json_reports_nodes_and_edges_shape) {
     AURORA_TEST_REQUIRE_TRUE(j["edges"].is_array());
 
     bool saw_state_node = false;
-    for (const auto& item : j["nodes"]) {
+    for (const auto &item : j["nodes"]) {
         AURORA_TEST_REQUIRE(item.contains("id"));
         AURORA_TEST_REQUIRE(item.contains("kind"));
         if (item["id"].get<std::string>() == state_id) {
@@ -138,7 +138,7 @@ AURORA_TEST_CASE(to_json_reports_nodes_and_edges_shape) {
     AURORA_TEST_CHECK_TRUE(saw_state_node);
 
     bool saw_observes = false;
-    for (const auto& item : j["edges"]) {
+    for (const auto &item : j["edges"]) {
         AURORA_TEST_REQUIRE(item.contains("from"));
         AURORA_TEST_REQUIRE(item.contains("to"));
         AURORA_TEST_REQUIRE(item.contains("kind"));

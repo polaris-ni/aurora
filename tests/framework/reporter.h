@@ -21,8 +21,8 @@ namespace aurora::testing {
 /// @brief 写出报告；失败时把原因写入 `error` 并返回 false。
 ///
 /// `results` 允许是「尚未跑完的部分结果」（超时路径）。
-[[nodiscard]] auto write_report(std::string_view path, const std::vector<CaseResult>& results,
-                                const RunSummary& summary, std::string* error) -> bool;
+[[nodiscard]] auto write_report(std::string_view path, const std::vector<CaseResult> &results,
+                                const RunSummary &summary, std::string *error) -> bool;
 
 /// @brief 转义 XML 文本节点 / 属性里的控制字符与实体（供报告与调试使用）。
 [[nodiscard]] auto xml_escape(std::string_view text) -> std::string;

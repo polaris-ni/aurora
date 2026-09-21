@@ -15,7 +15,7 @@ namespace {
 
 /// @brief 写入口探测：类型是否有可调用的 set(int)（concept 体内为依赖表达式，缺失成员判 false）。
 template <typename W>
-concept writable_via_set = requires(W& w, int v) { w.set(v); };
+concept writable_via_set = requires(W &w, int v) { w.set(v); };
 
 }  // namespace
 
@@ -66,8 +66,8 @@ AURORA_TEST_CASE(write_path_shape_is_compile_time_enforced) {
     static_assert(!writable_via_set<aurora::Immutable<int>>, "Immutable 不得暴露写路径");
     static_assert(writable_via_set<aurora::Mutable<int>>, "Mutable 必须暴露写路径");
     // 读路径两侧都返回 const 引用（get 对 const 对象可用）。
-    static_assert(std::is_same_v<decltype(std::declval<const aurora::Immutable<int>&>().get()), const int&>);
-    static_assert(std::is_same_v<decltype(std::declval<const aurora::Mutable<int>&>().get()), const int&>);
+    static_assert(std::is_same_v<decltype(std::declval<const aurora::Immutable<int> &>().get()), const int &>);
+    static_assert(std::is_same_v<decltype(std::declval<const aurora::Mutable<int> &>().get()), const int &>);
     AURORA_TEST_CHECK(true);
 }
 

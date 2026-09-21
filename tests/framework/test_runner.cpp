@@ -12,7 +12,7 @@ namespace aurora::testing {
 namespace {
 
 /// @brief 状态标签（定宽，与 gtest 输出对齐以便人眼扫描）。
-[[nodiscard]] auto status_label(TestStatus status) -> const char* {
+[[nodiscard]] auto status_label(TestStatus status) -> const char * {
     switch (status) {
         case TestStatus::Passed:
             return "       OK ";
@@ -30,11 +30,11 @@ namespace {
 
 }  // namespace
 
-auto select_cases(const std::vector<const TestCase*>& cases, std::string_view suite_filter,
-                  std::string_view name_filter) -> std::vector<const TestCase*> {
-    std::vector<const TestCase*> selected;
+auto select_cases(const std::vector<const TestCase *> &cases, std::string_view suite_filter,
+                  std::string_view name_filter) -> std::vector<const TestCase *> {
+    std::vector<const TestCase *> selected;
     selected.reserve(cases.size());
-    for (const auto* test_case : cases) {
+    for (const auto *test_case : cases) {
         if (!suite_filter.empty() && test_case->suite != suite_filter) {
             continue;
         }
@@ -47,7 +47,7 @@ auto select_cases(const std::vector<const TestCase*>& cases, std::string_view su
     return selected;
 }
 
-auto run_case(const TestCase& test_case) -> CaseResult {
+auto run_case(const TestCase &test_case) -> CaseResult {
     CaseResult result;
     result.full_name = test_case.full_name();
     result.file = test_case.file;
@@ -66,13 +66,13 @@ auto run_case(const TestCase& test_case) -> CaseResult {
         } else {
             try {
                 test_case.run_body();  // 普通用例走 body，参数化用例走 param_body + 取值序号
-            } catch (const CaseSkipped& skipped) {
+            } catch (const CaseSkipped &skipped) {
                 result.status = TestStatus::Skipped;
                 result.skip_reason = skipped.reason();
-            } catch (const CaseAbort&) {
+            } catch (const CaseAbort &) {
                 // 失败明细已由断言内核（report + Severity::Fatal）登记进 context，此处仅定状态。
                 result.status = TestStatus::Failed;
-            } catch (const std::exception& ex) {
+            } catch (const std::exception &ex) {
                 context.add_failure(Failure{.file = std::string{test_case.file},
                                             .line = test_case.line,
                                             .message = std::string{"unexpected exception: "} + ex.what()});
@@ -95,25 +95,25 @@ auto run_case(const TestCase& test_case) -> CaseResult {
     return result;
 }
 
-auto print_case_result(const CaseResult& result, bool verbose) -> void {
+auto print_case_result(const CaseResult &result, bool verbose) -> void {
     std::printf("[%s] %s (%.2f ms)\n", status_label(result.status), result.full_name.c_str(), result.elapsed_ms);
-    for (const auto& failure : result.failures) {
+    for (const auto &failure : result.failures) {
         std::printf("  %s:%d: %s\n", failure.file.c_str(), failure.line, failure.message.c_str());
     }
     if (result.status == TestStatus::Skipped && !result.skip_reason.empty()) {
         std::printf("  skip reason: %s\n", result.skip_reason.c_str());
     }
     if (verbose) {
-        for (const auto& note : result.notes) {
+        for (const auto &note : result.notes) {
             std::printf("  note: %s\n", note.c_str());
         }
     }
 }
 
-auto summarize(const std::vector<CaseResult>& results) -> RunSummary {
+auto summarize(const std::vector<CaseResult> &results) -> RunSummary {
     RunSummary summary;
     summary.total = static_cast<int>(results.size());
-    for (const auto& result : results) {
+    for (const auto &result : results) {
         switch (result.status) {
             case TestStatus::Passed:
                 ++summary.passed;
@@ -130,11 +130,11 @@ auto summarize(const std::vector<CaseResult>& results) -> RunSummary {
     return summary;
 }
 
-auto exit_code_for(const RunSummary& summary) -> int {
+auto exit_code_for(const RunSummary &summary) -> int {
     return summary.failed > 0 ? static_cast<int>(ExitCode::HasFailures) : static_cast<int>(ExitCode::AllPassed);
 }
 
-auto print_summary(const RunSummary& summary) -> void {
+auto print_summary(const RunSummary &summary) -> void {
     std::printf("[==========] %d test case(s) ran (%.2f ms total)\n", summary.total, summary.elapsed_ms);
     std::printf("[  PASSED  ] %d case(s)\n", summary.passed);
     if (summary.failed > 0) {

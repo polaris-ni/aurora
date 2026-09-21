@@ -28,7 +28,7 @@ template <typename Pred>
 // pred 在轮询循环内可能被多次调用，不能按「一次性转发」用 std::forward（对带状态可调用体
 // 转成右值引用会误移动，破坏后续再次调用），刻意始终以左值形式反复调用，故抑制该告警。
 // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-auto wait_until(Pred&& pred, std::chrono::milliseconds budget = std::chrono::milliseconds{2000}) -> bool {
+auto wait_until(Pred &&pred, std::chrono::milliseconds budget = std::chrono::milliseconds{2000}) -> bool {
     const auto deadline = std::chrono::steady_clock::now() + budget;
     while (std::chrono::steady_clock::now() < deadline) {
         if (pred()) {
@@ -42,10 +42,10 @@ auto wait_until(Pred&& pred, std::chrono::milliseconds budget = std::chrono::mil
 /// @brief 用例退出（含 REQUIRE 中止）时把主线程投递器恢复为默认直调，避免污染同进程后续用例。
 struct MainPosterGuard {
     MainPosterGuard() = default;
-    MainPosterGuard(const MainPosterGuard&) = delete;
-    auto operator=(const MainPosterGuard&) -> MainPosterGuard& = delete;
-    MainPosterGuard(MainPosterGuard&&) = delete;
-    auto operator=(MainPosterGuard&&) -> MainPosterGuard& = delete;
+    MainPosterGuard(const MainPosterGuard &) = delete;
+    auto operator=(const MainPosterGuard &) -> MainPosterGuard & = delete;
+    MainPosterGuard(MainPosterGuard &&) = delete;
+    auto operator=(MainPosterGuard &&) -> MainPosterGuard & = delete;
     ~MainPosterGuard() { aurora::Task<int>::set_main_poster(nullptr); }
 };
 
@@ -55,7 +55,7 @@ AURORA_TEST_CASE(async_delivers_value_to_then) {
     AURORA_TEST_REQUIRE_THREADS();
     std::promise<Result<int>> box;
     auto task = async([]() -> int { return 40 + 2; });
-    task.then([&box](const Result<int>& r) -> void { box.set_value(r); });
+    task.then([&box](const Result<int> &r) -> void { box.set_value(r); });
 
     auto fut = box.get_future();
     AURORA_TEST_REQUIRE_EQ(fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
@@ -72,8 +72,8 @@ AURORA_TEST_CASE(async_accepts_result_returning_fn) {
     auto ok_task = async([]() -> Result<int> { return Result<int>{7}; });
     auto err_task = async(
         []() -> Result<int> { return Result<int>{make_error(ErrorCode::GeneralInvalidArgument, std::string{"bad"})}; });
-    ok_task.then([&ok_box](const Result<int>& r) -> void { ok_box.set_value(r); });
-    err_task.then([&err_box](const Result<int>& r) -> void { err_box.set_value(r); });
+    ok_task.then([&ok_box](const Result<int> &r) -> void { ok_box.set_value(r); });
+    err_task.then([&err_box](const Result<int> &r) -> void { err_box.set_value(r); });
 
     auto ok_fut = ok_box.get_future();
     AURORA_TEST_REQUIRE_EQ(ok_fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
@@ -94,7 +94,7 @@ AURORA_TEST_CASE(async_captures_fn_exception_as_error) {
     // fn 抛异常：invoke_safe 捕获并转为 runtime-async-exception 错误，不逃出 worker 线程。
     std::promise<Error> box;
     auto task = async([]() -> int { throw std::runtime_error{"boom"}; });
-    task.then([&box](const Result<int>& r) -> void {
+    task.then([&box](const Result<int> &r) -> void {
         if (!r.ok()) {
             box.set_value(r.error());
         }
@@ -131,7 +131,7 @@ AURORA_TEST_CASE(async_cancel_drops_result_and_silences_callback) {
 
     // 取消后注册回调：补投条件含「未取消」，回调永不触发。
     std::atomic<bool> called{false};
-    task.then([&called](const Result<int>&) -> void { called.store(true, std::memory_order_release); });
+    task.then([&called](const Result<int> &) -> void { called.store(true, std::memory_order_release); });
 
     release.set_value();
     AURORA_TEST_REQUIRE_EQ(finished_fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
@@ -151,7 +151,7 @@ AURORA_TEST_CASE(async_with_timeout_delivers_timeout_error) {
     task.with_timeout(std::chrono::milliseconds{100});
 
     std::promise<Error> err_box;
-    task.then([&err_box](const Result<int>& r) -> void {
+    task.then([&err_box](const Result<int> &r) -> void {
         if (!r.ok()) {
             err_box.set_value(r.error());
         }
@@ -185,7 +185,7 @@ AURORA_TEST_CASE(async_completed_before_timeout_delivers_value) {
     task.with_timeout(std::chrono::milliseconds{100});
 
     std::promise<Result<int>> box;
-    task.then([&box](const Result<int>& r) -> void { box.set_value(r); });
+    task.then([&box](const Result<int> &r) -> void { box.set_value(r); });
     release.set_value();
 
     auto fut = box.get_future();
@@ -225,7 +225,7 @@ AURORA_TEST_CASE(then_delivery_routes_through_main_poster) {
 
     std::atomic<bool> called{false};
     int got = -1;
-    task.then([&](const Result<int>& r) -> void {
+    task.then([&](const Result<int> &r) -> void {
         called.store(true, std::memory_order_release);
         got = r.ok() ? r.value() : -1;
     });
@@ -245,7 +245,7 @@ AURORA_TEST_CASE(then_delivery_routes_through_main_poster) {
         std::scoped_lock lock(queue_mutex);
         batch.swap(queued);
     }
-    for (std::function<void()>& fn : batch) {
+    for (std::function<void()> &fn : batch) {
         fn();
     }
     AURORA_TEST_CHECK_TRUE(called.load(std::memory_order_acquire));

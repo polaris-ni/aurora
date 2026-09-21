@@ -23,7 +23,7 @@ using au::ui::vbox;
 
 AURORA_TEST_CASE(dump_rich_shows_id_text_visible_and_bounds) {
     TestEnv env = init_headless(200, 100);
-    const Text* t = label(*env.root_widget, "Hi");
+    const Text *t = label(*env.root_widget, "Hi");
     (void)t;
     AURORA_TEST_CHECK_MSG(env.root_widget->child_count() >= 1, "root has one child");
     env.root_widget->child(0).set_id("title");

@@ -126,7 +126,7 @@ AURORA_TEST_CASE(slider_binding_writes_through_to_upstream) {
     AURORA_TEST_CHECK_NEAR(s.value(), 0.2, 1e-4);  // 上游 → 控件（读取穿透）
 
     // 信号收集：内部 value_ + 绑定目标。
-    std::vector<SignalViewBase*> out;
+    std::vector<SignalViewBase *> out;
     s.collect_signals(out);
     AURORA_TEST_REQUIRE_EQ(out.size(), 2U);
 }

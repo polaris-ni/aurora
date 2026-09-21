@@ -152,7 +152,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool has_complete = false;
     bool has_cancel = false;
-    for (const auto& e : d.events) {
+    for (const auto &e : d.events) {
         if (std::string{e} == "on_complete") {
             has_complete = true;
         }
@@ -164,7 +164,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_TRUE(has_cancel);
 
     bool has_step_count = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (std::string{p.name} == "step_count") {
             has_step_count = true;
         }

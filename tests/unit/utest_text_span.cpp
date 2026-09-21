@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/text_span.h
-/// 测试说明: 覆盖 TextSpan 片段——默认与样式构造不变量、序列组装与子片段拷贝、Font/Color 逐值相等语义（同样式合并的前提）与 i18n tr 元数据保留
+/// 测试说明: 覆盖 TextSpan 片段——默认与样式构造不变量、序列组装与子片段拷贝、Font/Color
+/// 逐值相等语义（同样式合并的前提）与 i18n tr 元数据保留
 
 #include <string>
 #include <vector>

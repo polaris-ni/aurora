@@ -158,9 +158,7 @@ class Button : public LeafWidget, public ButtonProps {
 
     /// @brief 悬停默认手型光标：按钮悬停 PointingHand；修饰链显式 `cursor(...)` 声明优先。
     /// @note Side-effects: pure
-    [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override {
-        return CursorShape::PointingHand;
-    }
+    [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return CursorShape::PointingHand; }
 
     /// @brief 运行时自描述（规格附录 B）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {

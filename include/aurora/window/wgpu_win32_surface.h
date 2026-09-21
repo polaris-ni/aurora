@@ -43,7 +43,7 @@ namespace aurora {
 class WgpuWin32Surface final : public Surface {
   public:
     WgpuWin32Surface(int width, int height, const std::string &title, const WindowStyleOptions &style,
-                bool vsync = true);
+                     bool vsync = true);
     ~WgpuWin32Surface() override;
 
     WgpuWin32Surface(const WgpuWin32Surface &) = delete;
@@ -157,17 +157,17 @@ class WgpuWin32Surface final : public Surface {
     /// @brief 软件回退上屏：RGBA Painter 缓冲 swizzle 到 BGRA 暂存后 `SetDIBitsToDevice`。
     auto present_gdi() -> void;
 
-    std::unique_ptr<Win32Host> win_;   ///< 共享窗口宿主（同 D3D11Surface 模式）
-    Painter painter_;                    ///< CPU 帧缓冲：软件回退路径的绘制目标（GPU 模式维护底色缓冲）
+    std::unique_ptr<Win32Host> win_;  ///< 共享窗口宿主（同 D3D11Surface 模式）
+    Painter painter_;  ///< CPU 帧缓冲：软件回退路径的绘制目标（GPU 模式维护底色缓冲）
     std::unique_ptr<rhi::WgpuRhi> gpu_;  ///< wgpu 后端（nullptr = 初始化失败，纯软件回退）
-    std::unique_ptr<Sink> sink_;         ///< 帧 sink 适配器（与 gpu_ 同生命周期）
-    std::vector<std::uint32_t> bgra_;    ///< 软件回退上屏的 BGRA swizzle 暂存
+    std::unique_ptr<Sink> sink_;  ///< 帧 sink 适配器（与 gpu_ 同生命周期）
+    std::vector<std::uint32_t> bgra_;  ///< 软件回退上屏的 BGRA swizzle 暂存
 
     bool vsync_ = true;
     bool gpu_frame_active_ = false;  ///< 本帧 sink.begin_frame 成功（present 时消费）
-    bool gpu_dead_ = false;          ///< 运行期 GPU 失效（sink.begin_frame 返回 false，永久软件回退）
-    int frame_ = 0;                  ///< 已呈现帧计数
-    int software_present_ = 0;       ///< GDI 软件路径上屏帧数（见 software_present_count()）
+    bool gpu_dead_ = false;  ///< 运行期 GPU 失效（sink.begin_frame 返回 false，永久软件回退）
+    int frame_ = 0;  ///< 已呈现帧计数
+    int software_present_ = 0;  ///< GDI 软件路径上屏帧数（见 software_present_count()）
 };
 
 }  // namespace aurora

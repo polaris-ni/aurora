@@ -158,8 +158,7 @@ class LazyList : public Widget {
     /// @brief 滚动到指定项（使其顶端对齐可视区顶端）。
     /// @param animate true = 经收位滑动过渡（reduce-motion 下自动直落端点）；false = 立即就位。
     auto scroll_to_item(int index, bool animate = false) -> void {
-        const float target =
-            static_cast<float>(std::clamp(index, 0, std::max(0, count_ - 1))) * item_extent_;
+        const float target = static_cast<float>(std::clamp(index, 0, std::max(0, count_ - 1))) * item_extent_;
         if (!animate || current_accessibility_settings().reduce_motion) {
             set_scroll_offset(target);
             return;
@@ -406,9 +405,8 @@ class LazyList : public Widget {
             needs_gesture_tick_ = false;  // 静止后摘除每帧计时，回到空闲节流
             return;
         }
-        const double dt = glide_last_.has_value()
-                              ? std::chrono::duration<double>(now - *glide_last_).count()
-                              : (1.0 / 60.0);
+        const double dt =
+            glide_last_.has_value() ? std::chrono::duration<double>(now - *glide_last_).count() : (1.0 / 60.0);
         glide_last_ = now;
         float v = glide_.tick(dt);
         // 布局可能在滑动中改变内容/视口尺寸：目标随动夹取，防滑出可滚范围。
@@ -512,8 +510,8 @@ class LazyList : public Widget {
     std::string restore_key_;  ///< 滚动位置保存键（空 = 不参与恢复）
     bool scroll_restored_ = false;  ///< 是否已就位（恢复过一次 / 用户或外部程序化设置过）
     std::map<int, Node> live_;  ///< 存活实例：index -> Node（按序遍历便于绘制）
-    ScrollSnap snap_;           ///< snap/paging 吸附配置（默认关闭）
-    ScrollGlide glide_;         ///< snap 收位 / scroll_to 的短滑动时序
+    ScrollSnap snap_;  ///< snap/paging 吸附配置（默认关闭）
+    ScrollGlide glide_;  ///< snap 收位 / scroll_to 的短滑动时序
     std::optional<std::chrono::steady_clock::time_point> glide_last_;  ///< 上一滑动帧时刻（墙钟差 = dt）
     std::shared_ptr<State<float>> offset_state_;  ///< 懒创建的偏移信号（滚动驱动动画原语，经 offset_signal 暴露）
     float published_offset_ = 0.0F;  ///< 最近一次发布的偏移值（镜像，避免回读 get() 误订阅）

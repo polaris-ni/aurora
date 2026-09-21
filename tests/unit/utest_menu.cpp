@@ -91,16 +91,16 @@ AURORA_TEST_CASE(nested_menu_tree_traversal) {
     window.children.push_back(file);
 
     // 递归统计：叶子数 / 分隔符数。
-    const std::function<int(const MenuItem&)> count_all = [&](const MenuItem& item) -> int {
+    const std::function<int(const MenuItem &)> count_all = [&](const MenuItem &item) -> int {
         int n = 1;
-        for (const auto& c : item.children) {
+        for (const auto &c : item.children) {
             n += count_all(c);
         }
         return n;
     };
-    const std::function<int(const MenuItem&)> count_separators = [&](const MenuItem& item) -> int {
+    const std::function<int(const MenuItem &)> count_separators = [&](const MenuItem &item) -> int {
         int n = item.separator ? 1 : 0;
-        for (const auto& c : item.children) {
+        for (const auto &c : item.children) {
             n += count_separators(c);
         }
         return n;

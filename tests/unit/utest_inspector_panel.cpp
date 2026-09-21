@@ -94,8 +94,8 @@ AURORA_TEST_CASE(inspector_panel_tree_click_selects_widget_and_updates_props) {
     AURORA_TEST_CHECK_NEAR(sz.width, 400.0F, 1e-3F);
 
     int select_hits = 0;
-    Widget* last_selected = nullptr;
-    panel.on_select_widget = [&](Widget* w) -> void {
+    Widget *last_selected = nullptr;
+    panel.on_select_widget = [&](Widget *w) -> void {
         ++select_hits;
         last_selected = w;
     };
@@ -112,10 +112,10 @@ AURORA_TEST_CASE(inspector_panel_tree_click_selects_widget_and_updates_props) {
     AURORA_TEST_CHECK_EQ(select_hits, 1);
 
     // 属性面板随选中更新：含 Button 的 label 属性行（值即按钮文字）。
-    const auto& rows = panel.current_props();
+    const auto &rows = panel.current_props();
     AURORA_TEST_CHECK_FALSE(rows.empty());
     bool has_label_ok = false;
-    for (const auto& kv : rows) {
+    for (const auto &kv : rows) {
         if (kv.first == "label" && kv.second == "OK") {
             has_label_ok = true;
         }
@@ -171,7 +171,7 @@ AURORA_TEST_CASE(inspector_panel_export_code_button_invokes_callback) {
 
     int export_hits = 0;
     std::string exported;
-    panel.on_export_code = [&](const std::string& code) -> void {
+    panel.on_export_code = [&](const std::string &code) -> void {
         ++export_hits;
         exported = code;
     };
@@ -281,7 +281,7 @@ AURORA_TEST_CASE(inspector_panel_get_and_set_widget_props) {
     AURORA_TEST_CHECK_NEAR(props["values"]["gap"].get<float>(), 8.0F, 1e-4F);
 
     // 单属性回写 → 读回一致；再恢复原值。
-    auto& col_ref = dynamic_cast<Column&>(root.widget());
+    auto &col_ref = dynamic_cast<Column &>(root.widget());
     set_widget_prop(root.widget(), "gap", Json(16.0F));
     AURORA_TEST_CHECK_NEAR(col_ref.gap, 16.0F, 1e-4F);
     set_widget_prop(root.widget(), "gap", Json(8.0F));

@@ -19,7 +19,7 @@ class DemoSurface : public au::Surface {
         size_ = au::Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
         return au::Result{true};
     }
-    auto painter() -> au::Painter& override { return painter_; }
+    auto painter() -> au::Painter & override { return painter_; }
     auto present() -> au::Result<bool> override {
         ++frames_;
         AURORA_LOG_INFO("demo", "[DemoSurface] present #", frames_);

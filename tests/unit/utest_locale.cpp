@@ -43,7 +43,7 @@ AURORA_TEST_CASE(region_change_retags_immediately) {
 AURORA_TEST_CASE(value_semantics_copy_is_independent) {
     // 纯值类型：拷贝独立，改动副本不影响原值。
     const aurora::Locale base{.language = "pt", .region = "BR"};
-    const aurora::Locale& copy = base;
+    const aurora::Locale &copy = base;
     AURORA_TEST_CHECK_EQ(copy.language, std::string("pt"));
     AURORA_TEST_CHECK_EQ(copy.region, std::string("BR"));
     AURORA_TEST_CHECK_EQ(copy.tag(), base.tag());

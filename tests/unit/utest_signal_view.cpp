@@ -17,20 +17,20 @@ class CountingView final : public SignalView<int> {
   public:
     explicit CountingView(int v) : value_(v) {}
 
-    auto get() const -> const int& override {
+    auto get() const -> const int & override {
         ++reads_;
         return value_;
     }
 
-    auto subscribe(Effect& e) -> void override { last_subscriber_ = &e; }
+    auto subscribe(Effect &e) -> void override { last_subscriber_ = &e; }
 
     [[nodiscard]] auto reads() const -> int { return reads_; }
-    [[nodiscard]] auto last_subscriber() const -> Effect* { return last_subscriber_; }
+    [[nodiscard]] auto last_subscriber() const -> Effect * { return last_subscriber_; }
 
   private:
     int value_;
     mutable int reads_ = 0;
-    Effect* last_subscriber_ = nullptr;
+    Effect *last_subscriber_ = nullptr;
 };
 }  // namespace
 
@@ -40,7 +40,7 @@ AURORA_TEST_CASE(signal_view_read_dispatches_to_get) {
     AURORA_TEST_CHECK_EQ(v.get(), 5);
     AURORA_TEST_CHECK_EQ(v.reads(), 1);
 
-    SignalViewBase& base = v;
+    SignalViewBase &base = v;
     base.read();
     AURORA_TEST_CHECK_EQ(v.reads(), 2);
 }
@@ -48,7 +48,7 @@ AURORA_TEST_CASE(signal_view_read_dispatches_to_get) {
 AURORA_TEST_CASE(signal_view_base_default_anchor_is_null) {
     // 未覆写 anchor() 的纯信号视图默认返回空锚点（如 Reactive 这类委托订阅的视图）。
     CountingView v{1};
-    SignalViewBase& base = v;
+    SignalViewBase &base = v;
     AURORA_TEST_CHECK(base.anchor() == nullptr);
     AURORA_TEST_CHECK(v.SignalView<int>::anchor() == nullptr);
 }
@@ -56,7 +56,7 @@ AURORA_TEST_CASE(signal_view_base_default_anchor_is_null) {
 AURORA_TEST_CASE(signal_view_subscribe_dispatches_through_base) {
     // subscribe 经 SignalViewBase 虚派发到具体实现。
     CountingView v{3};
-    SignalViewBase& base = v;
+    SignalViewBase &base = v;
     Effect e{[]() -> void {}};
     AURORA_TEST_CHECK(v.last_subscriber() == nullptr);
     base.subscribe(e);
@@ -67,10 +67,10 @@ AURORA_TEST_CASE(signal_view_contract_held_by_state) {
     // 库内类型满足契约：State<T> 可经 SignalView<T> / SignalViewBase 使用，read() 在
     // Effect 作用域内读取即登记依赖。
     State<int> s{5};
-    SignalView<int>& typed = s;
+    SignalView<int> &typed = s;
     AURORA_TEST_CHECK_EQ(typed.get(), 5);
 
-    SignalViewBase& base = s;
+    SignalViewBase &base = s;
     int runs = 0;
     Effect e{[&]() -> void {
         ++runs;

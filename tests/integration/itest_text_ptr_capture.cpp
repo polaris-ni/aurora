@@ -48,13 +48,13 @@ auto make_left_aligned_text() -> std::shared_ptr<Text> {
         TextProps{.content = LocalizedString{"默认14pt文本"}, .text_align = TextAlign::Left, .soft_wrap = true});
 }
 
-void layout_root(Widget& root, const float w, const float h) {
+void layout_root(Widget &root, const float w, const float h) {
     const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
     const BuildContext ctx;
     root.layout(c, ctx);
 }
 
-void paint_root(Widget& root, const float w, const float h) {
+void paint_root(Widget &root, const float w, const float h) {
     Painter p;
     p.begin(static_cast<int>(w), static_cast<int>(h));
     const BuildContext ctx;
@@ -62,19 +62,19 @@ void paint_root(Widget& root, const float w, const float h) {
 }
 
 /// 扫描各 Text（按显示文本）的可命中盒（哨兵初始化，避免默认 Rect 误判）。
-auto scan_texts(Widget& root) -> std::map<std::string, Rect> {
+auto scan_texts(Widget &root) -> std::map<std::string, Rect> {
     std::map<std::string, Rect> out;
     for (int y = 0; y < static_cast<int>(AURORA_H); ++y) {
         for (int x = 0; x < static_cast<int>(AURORA_W); ++x) {
-            Widget* h = EventDispatcher::hit_test(root, Point{.x = static_cast<float>(x), .y = static_cast<float>(y)});
-            const auto* t = dynamic_cast<Text*>(h);
+            Widget *h = EventDispatcher::hit_test(root, Point{.x = static_cast<float>(x), .y = static_cast<float>(y)});
+            const auto *t = dynamic_cast<Text *>(h);
             if (t == nullptr) {
                 continue;
             }
             const std::string key = t->display_text();
             const auto ins = out.emplace(
                 key, Rect{.origin = Point{.x = 1e9F, .y = 1e9F}, .size = Size{.width = -1e9F, .height = -1e9F}});
-            Rect& r = ins.first->second;
+            Rect &r = ins.first->second;
             r.origin.x = std::min(r.origin.x, static_cast<float>(x));
             r.origin.y = std::min(r.origin.y, static_cast<float>(y));
             r.size.width = std::max(r.size.width, static_cast<float>(x) - r.origin.x);
@@ -87,9 +87,9 @@ auto scan_texts(Widget& root) -> std::map<std::string, Rect> {
 /// 鼠标序列发射器：dispatch 闭包决定走实体实例（指针捕获域独立）还是静态持久单例。
 using Sink = std::function<void(MouseAction, float, float)>;
 
-auto press_at(Sink& s, float x, float y) -> void { s(MouseAction::Press, x, y); }
-auto move_to(Sink& s, float x, float y) -> void { s(MouseAction::Move, x, y); }
-auto release_at(Sink& s, float x, float y) -> void { s(MouseAction::Release, x, y); }
+auto press_at(Sink &s, float x, float y) -> void { s(MouseAction::Press, x, y); }
+auto move_to(Sink &s, float x, float y) -> void { s(MouseAction::Move, x, y); }
+auto release_at(Sink &s, float x, float y) -> void { s(MouseAction::Release, x, y); }
 
 }  // namespace
 
@@ -103,7 +103,7 @@ AURORA_TEST_CASE(rtl_drag_select_reaches_leftmost_char) {
     const auto boxes = scan_texts(col);
     const auto it = boxes.find("默认14pt文本");
     AURORA_TEST_REQUIRE_MSG(it != boxes.end(), "text hit box found by scanning");
-    const Rect& r = it->second;
+    const Rect &r = it->second;
 
     EventDispatcher ed;  // 实体派发器：独立指针捕获域
     FocusManager fm;
@@ -139,7 +139,7 @@ AURORA_TEST_CASE(release_outside_window_retains_selection) {
     const auto boxes = scan_texts(col);
     const auto it = boxes.find("默认14pt文本");
     AURORA_TEST_REQUIRE_MSG(it != boxes.end(), "text hit box found by scanning");
-    const Rect& r = it->second;
+    const Rect &r = it->second;
 
     EventDispatcher ed;
     FocusManager fm;
@@ -177,8 +177,8 @@ AURORA_TEST_CASE(adjacent_soft_wrap_texts_do_not_overlap) {
     const auto it_a = boxes.find("默认14pt文本");
     const auto it_b = boxes.find("Text控件");
     AURORA_TEST_REQUIRE_MSG(it_a != boxes.end() && it_b != boxes.end(), "both Text widgets are hittable");
-    const Rect& ra = it_a->second;
-    const Rect& rb = it_b->second;
+    const Rect &ra = it_a->second;
+    const Rect &rb = it_b->second;
     const bool overlap = rb.origin.x < ra.origin.x + ra.size.width && ra.origin.x < rb.origin.x + rb.size.width;
     AURORA_TEST_CHECK_MSG(!overlap, "two Text hit boxes do not overlap (second is selectable)");
 }
@@ -194,7 +194,7 @@ AURORA_TEST_CASE(static_dispatch_path_rtl_drag_reaches_leftmost_char) {
     const auto boxes = scan_texts(col);
     const auto it = boxes.find("默认14pt文本");
     AURORA_TEST_REQUIRE_MSG(it != boxes.end(), "text hit box found by scanning");
-    const Rect& r = it->second;
+    const Rect &r = it->second;
 
     FocusManager fm;
     fm.set_root(&col);

@@ -42,7 +42,7 @@ AURORA_TEST_CASE(factory_returns_new_modifier_chain_reusable) {
 AURORA_TEST_CASE(factory_padding_degrades_negative_to_zero) {
     const Modifier m = Modifier{}.padding(-3.0F);
     AURORA_TEST_REQUIRE_EQ(m.nodes().size(), 1U);
-    const auto* p = dynamic_cast<const Padding*>(m.nodes()[0].get());
+    const auto *p = dynamic_cast<const Padding *>(m.nodes()[0].get());
     AURORA_TEST_REQUIRE_NOT_NULL(p);
     AURORA_TEST_CHECK_NEAR(p->padding(), 0.0F, 0.0F);
 }
@@ -93,7 +93,7 @@ AURORA_TEST_CASE(transform_info_align_translates_to_child_origin) {
     Modifier m = Modifier{}.align(Alignment::Center);
     const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 80.0F}};
     AURORA_TEST_REQUIRE_EQ(m.nodes().size(), 1U);
-    (void)m.nodes()[0]->layout(c, [](const Constraints&) -> Size { return size_of(50.0F, 20.0F); });
+    (void)m.nodes()[0]->layout(c, [](const Constraints &) -> Size { return size_of(50.0F, 20.0F); });
 
     const auto info = m.transform(size_of(100.0F, 80.0F));
     // Center：((100-50)/2, (80-20)/2) = (25, 30)；content_size 收缩为子尺寸。
@@ -214,7 +214,7 @@ AURORA_TEST_CASE(context_menu_pipeline_open_items_and_position) {
 
 AURORA_TEST_CASE(on_pointer_event_reaches_touch_listener) {
     int seen = 0;
-    const Modifier m = Modifier{}.touch([&seen](const TouchEvent&) -> void { ++seen; });
+    const Modifier m = Modifier{}.touch([&seen](const TouchEvent &) -> void { ++seen; });
     TouchEvent e;
     m.on_pointer_event(e);
     m.on_pointer_event(e);

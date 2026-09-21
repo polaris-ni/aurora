@@ -100,7 +100,7 @@ struct Stage {
 };
 
 /// 统计 [r] 盒内「蓝色染色」像素数（b - r > 30，即选区高亮）。
-auto count_blue_in(const Painter& p, const Rect& r) -> int {
+auto count_blue_in(const Painter &p, const Rect &r) -> int {
     int x0 = std::max(static_cast<int>(std::floor(r.origin.x)), 0);
     int y0 = std::max(static_cast<int>(std::floor(r.origin.y)), 0);
     const int x1 = std::min(static_cast<int>(std::ceil(r.origin.x + r.size.width)), p.width());

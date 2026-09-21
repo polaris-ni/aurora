@@ -126,7 +126,7 @@ AURORA_TEST_CASE(push_model_callbacks_default_noop) {
     int frames = 0;
     int state_changes = 0;
     int audio_calls = 0;
-    s.set_frame_callback([&frames](const VideoFrame&) -> void { ++frames; });
+    s.set_frame_callback([&frames](const VideoFrame &) -> void { ++frames; });
     s.set_state_callback([&state_changes](bool) -> void { ++state_changes; });
     s.set_audio_callback([&audio_calls](std::span<const std::int16_t>, int, int) -> void { ++audio_calls; });
     AURORA_TEST_CHECK_EQ(frames, 0);

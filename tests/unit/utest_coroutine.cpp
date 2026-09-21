@@ -26,7 +26,7 @@ namespace {
 template <typename Pred>
 // pred 在轮询循环中被多次调用，转发（std::move/forward）会导致后续迭代使用已移动对象，故有意不转发。
 // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-auto wait_until(Pred&& pred, std::chrono::milliseconds budget = std::chrono::milliseconds{2000}) -> bool {
+auto wait_until(Pred &&pred, std::chrono::milliseconds budget = std::chrono::milliseconds{2000}) -> bool {
     const auto deadline = std::chrono::steady_clock::now() + budget;
     while (std::chrono::steady_clock::now() < deadline) {
         if (pred()) {
@@ -40,10 +40,10 @@ auto wait_until(Pred&& pred, std::chrono::milliseconds budget = std::chrono::mil
 /// @brief 用例退出（含 REQUIRE 中止）时把主线程投递器恢复为默认直调，避免污染同进程后续用例。
 struct MainPosterGuard {
     MainPosterGuard() = default;
-    MainPosterGuard(const MainPosterGuard&) = delete;
-    auto operator=(const MainPosterGuard&) -> MainPosterGuard& = delete;
-    MainPosterGuard(MainPosterGuard&&) = delete;
-    auto operator=(MainPosterGuard&&) -> MainPosterGuard& = delete;
+    MainPosterGuard(const MainPosterGuard &) = delete;
+    auto operator=(const MainPosterGuard &) -> MainPosterGuard & = delete;
+    MainPosterGuard(MainPosterGuard &&) = delete;
+    auto operator=(MainPosterGuard &&) -> MainPosterGuard & = delete;
     ~MainPosterGuard() { aurora::Task<int>::set_main_poster(nullptr); }
 };
 
@@ -192,7 +192,7 @@ AURORA_TEST_CASE(continuation_resumes_through_main_poster) {
         std::scoped_lock lock(queue_mutex);
         batch.swap(queued);
     }
-    for (std::function<void()>& fn : batch) {
+    for (std::function<void()> &fn : batch) {
         fn();
     }
 

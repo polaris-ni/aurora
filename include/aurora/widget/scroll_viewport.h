@@ -9,9 +9,9 @@ namespace aurora {
 
 /// @brief 吸附对齐方位：条目边沿与视口边沿的贴合方式（语义对齐 CSS scroll-snap-align）。
 enum class ScrollSnapAlignment : std::uint8_t {
-    Start,   ///< 条目前沿贴视口前沿（offset = k·extent）
+    Start,  ///< 条目前沿贴视口前沿（offset = k·extent）
     Center,  ///< 条目中心贴视口中心
-    End,     ///< 条目后沿贴视口后沿（offset = (k+1)·extent − viewport）
+    End,  ///< 条目后沿贴视口后沿（offset = (k+1)·extent − viewport）
 };
 
 /// @brief 滚动吸附配置（snap/paging）：收位目标吸附到 `extent` 的整数倍条目。
@@ -29,9 +29,7 @@ struct ScrollSnap {
     ScrollSnapAlignment alignment = ScrollSnapAlignment::Start;  ///< 对齐方位
 
     /// @brief 本配置是否生效（分页恒生效；否则须有正周期）。
-    [[nodiscard]] auto enabled(float viewport_h) const -> bool {
-        return paging ? viewport_h > 0.0F : extent > 0.0F;
-    }
+    [[nodiscard]] auto enabled(float viewport_h) const -> bool { return paging ? viewport_h > 0.0F : extent > 0.0F; }
 };
 
 /// @brief 收位滑动动画（snap 收位 / 程序化 scroll-to 的共用时序数学）。
@@ -42,11 +40,11 @@ struct ScrollSnap {
 struct ScrollGlide {
     [[nodiscard]] static constexpr auto default_duration_s() -> double { return 0.15; }
 
-    float from = 0.0F;             ///< 起点偏移
-    float to = 0.0F;               ///< 终点偏移
-    double elapsed_s = 0.0;        ///< 已累计时长
+    float from = 0.0F;  ///< 起点偏移
+    float to = 0.0F;  ///< 终点偏移
+    double elapsed_s = 0.0;  ///< 已累计时长
     double duration_s = default_duration_s();  ///< 总时长（可测调）
-    bool active = false;           ///< 是否滑动中
+    bool active = false;  ///< 是否滑动中
 
     /// @brief 启动/重定向：起点取当前值；目标等于当前值则不启动（保持既有态）。
     auto start(float current, float target) -> void {
@@ -133,21 +131,21 @@ struct ScrollViewport {
         }
         float candidate = 0.0F;
         switch (snap.alignment) {
-        case ScrollSnapAlignment::Start:
-            candidate = std::lround(offset / ext) * ext;
-            break;
-        case ScrollSnapAlignment::Center: {
-            // 条目 k 覆盖 [k·ext, (k+1)·ext)，其中心贴视口中心：offset = k·ext + ext/2 − viewport/2
-            const double k = std::lround((offset + (viewport_h / 2.0F) - (ext / 2.0F)) / ext);
-            candidate = static_cast<float>(k * ext) + (ext / 2.0F) - (viewport_h / 2.0F);
-            break;
-        }
-        case ScrollSnapAlignment::End: {
-            // 条目 k 的后沿 (k+1)·ext 贴视口后沿：offset = (k+1)·ext − viewport
-            const double k = std::lround((offset + viewport_h) / ext);
-            candidate = static_cast<float>(k * ext) - viewport_h;
-            break;
-        }
+            case ScrollSnapAlignment::Start:
+                candidate = std::lround(offset / ext) * ext;
+                break;
+            case ScrollSnapAlignment::Center: {
+                // 条目 k 覆盖 [k·ext, (k+1)·ext)，其中心贴视口中心：offset = k·ext + ext/2 − viewport/2
+                const double k = std::lround((offset + (viewport_h / 2.0F) - (ext / 2.0F)) / ext);
+                candidate = static_cast<float>(k * ext) + (ext / 2.0F) - (viewport_h / 2.0F);
+                break;
+            }
+            case ScrollSnapAlignment::End: {
+                // 条目 k 的后沿 (k+1)·ext 贴视口后沿：offset = (k+1)·ext − viewport
+                const double k = std::lround((offset + viewport_h) / ext);
+                candidate = static_cast<float>(k * ext) - viewport_h;
+                break;
+            }
         }
         // 越界条目（内容末尾不足一个周期）夹到 max_off——末端可达性优先于严格对齐。
         return std::clamp(candidate, 0.0F, max_off);

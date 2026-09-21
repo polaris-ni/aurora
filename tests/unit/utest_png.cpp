@@ -55,7 +55,7 @@ AURORA_TEST_CASE(ihdr_carries_big_endian_dimensions) {
     const auto encoded = detail::write_png_to_memory(pixels.data(), 3, 5);
     AURORA_TEST_REQUIRE_TRUE(encoded.ok());
 
-    const auto& bytes = encoded.value();
+    const auto &bytes = encoded.value();
     AURORA_TEST_REQUIRE_GE(bytes.size(), 26U);
     AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[12]), 'I');
     AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[13]), 'H');
@@ -79,7 +79,7 @@ AURORA_TEST_CASE(encoded_stream_ends_with_iend) {
     const auto encoded = detail::write_png_to_memory(pixels.data(), 2, 2);
     AURORA_TEST_REQUIRE_TRUE(encoded.ok());
 
-    const auto& bytes = encoded.value();
+    const auto &bytes = encoded.value();
     AURORA_TEST_REQUIRE_GE(bytes.size(), 12U);
     const std::size_t tail = bytes.size() - 12;  // 长度(4) + "IEND"(4) + CRC(4)
     AURORA_TEST_CHECK_EQ(static_cast<int>(bytes[tail + 4]), 'I');

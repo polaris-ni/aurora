@@ -107,7 +107,7 @@ AURORA_TEST_CASE(switch_binding_writes_through_to_upstream) {
     AURORA_TEST_CHECK_TRUE(s.value());  // 上游 → 控件（读取穿透）
 
     // 信号收集：内部 value_ + 绑定目标。
-    std::vector<SignalViewBase*> out;
+    std::vector<SignalViewBase *> out;
     s.collect_signals(out);
     AURORA_TEST_REQUIRE_EQ(out.size(), 2U);
 }
@@ -143,7 +143,7 @@ AURORA_TEST_CASE(switch_describe_reports_metadata) {
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_changed");
     bool has_checked = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (std::string{p.name} == "checked") {
             has_checked = true;
         }

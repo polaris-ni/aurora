@@ -135,7 +135,7 @@ AURORA_TEST_CASE(degenerate_inverse_degrades_to_identity) {
     AURORA_TEST_CHECK_TRUE(restored.is_identity());
 
     std::vector<std::string> codes;
-    for (const auto& diagnostic : aurora::Diagnostics::take()) {
+    for (const auto &diagnostic : aurora::Diagnostics::take()) {
         if (!diagnostic.code.empty()) {
             codes.push_back(diagnostic.code);
         }

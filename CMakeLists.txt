@@ -10,6 +10,8 @@
 #   cmake/AuroraDemos.cmake           — 示例 demo 目标（examples/demos/ 下每组件一个可运行窗口；须在 AuroraTools 之后 include）
 #   cmake/AuroraInstrumentation.cmake — 覆盖率/ASan 插桩（须在全部目标定义之后）
 #   cmake/AuroraInstall.cmake         — 安装 + find_package(Aurora) 导出
+#   cmake/AuroraLint.cmake            — clang-tidy 门禁（lint / lint-fix 聚合目标）
+#   cmake/AuroraFormat.cmake          — clang-format 门禁（format / format-check 聚合目标）
 # 全部 CMake 开关/宏/环境变量统一列于 codespec/BUILD_OPTIONS.md（唯一权威来源）。
 # 注意：include() 不创建新作用域，各模块内 option/目标定义与写在本文件时完全等价。
 # ============================================================
@@ -354,3 +356,6 @@ include(AuroraInstall)
 
 # ---- Clang-Tidy 门禁（按需 lint / lint-fix 聚合目标；须在全部目标定义之后 include）----
 include(AuroraLint)
+
+# ---- clang-format 门禁（按需 format / format-check 聚合目标；与目标定义无关，放最后亦可）----
+include(AuroraFormat)

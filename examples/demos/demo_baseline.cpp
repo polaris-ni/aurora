@@ -13,7 +13,7 @@ auto icon_box(float size) -> au::Node {
 }
 
 /// 带边框的对照行：便于目视基线是否共线（对齐方式由子行自行声明）。
-auto framed(const au::Node& child) -> au::Node {
+auto framed(const au::Node &child) -> au::Node {
     au::Row row;
     row.add(child);
     row.modifier.set(au::Modifier{}.background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));

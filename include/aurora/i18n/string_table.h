@@ -18,7 +18,8 @@ namespace aurora {
  *
  * 模板语法：
  * - 位置占位：`{0}` `{1}` … 用 args[i] 替换。
- * - CLDR 六类复数：`{0, plural, zero=… one=… two=… few=… many=… other=…}`，按 `plural_category(args[0], loc)` 选分支（详见 plural.h）。
+ * - CLDR 六类复数：`{0, plural, zero=… one=… two=… few=… many=… other=…}`，按 `plural_category(args[0], loc)`
+ * 选分支（详见 plural.h）。
  *
  * 用法：
  * @code
@@ -92,7 +93,7 @@ class StringTable {
 
     /// @brief 格式化模板：替换 `{i}` 占位与 `{n, plural, one=… other=…}` 复数块。
     [[nodiscard]] static auto format(const std::string &tmpl, const std::vector<std::string> &args,
-                                      const Locale &loc = Locale{}) -> std::string {
+                                     const Locale &loc = Locale{}) -> std::string {
         std::string out;
         out.reserve(tmpl.size());
         const std::size_t n = tmpl.size();
@@ -177,12 +178,18 @@ class StringTable {
     /// @brief 把复数类别映射到模板关键字串（zero/one/two/few/many/other）。
     static auto category_keyword(PluralCategory cat) -> const char * {
         switch (cat) {
-            case PluralCategory::Zero:  return "zero";
-            case PluralCategory::One:   return "one";
-            case PluralCategory::Two:   return "two";
-            case PluralCategory::Few:   return "few";
-            case PluralCategory::Many:  return "many";
-            case PluralCategory::Other: return "other";
+            case PluralCategory::Zero:
+                return "zero";
+            case PluralCategory::One:
+                return "one";
+            case PluralCategory::Two:
+                return "two";
+            case PluralCategory::Few:
+                return "few";
+            case PluralCategory::Many:
+                return "many";
+            case PluralCategory::Other:
+                return "other";
         }
         return "other";
     }

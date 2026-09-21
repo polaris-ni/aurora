@@ -31,7 +31,7 @@ struct CaseState {
     std::string saved_temp;  ///< 原始 TEMP
 };
 
-[[nodiscard]] auto case_state() -> CaseState& {
+[[nodiscard]] auto case_state() -> CaseState & {
     static CaseState state;
     return state;
 }
@@ -56,13 +56,13 @@ struct CaseState {
 #endif
 
 /// @brief 目录是否形如仓库根（codespec/ 与 CMakeLists.txt 同在，均为仓库根独有标志）。
-[[nodiscard]] auto looks_like_repo_root(const fs::path& dir) -> bool {
+[[nodiscard]] auto looks_like_repo_root(const fs::path &dir) -> bool {
     std::error_code ec;
     return fs::is_directory(dir / "codespec", ec) && !ec && fs::exists(dir / "CMakeLists.txt", ec);
 }
 
 /// @brief 读取环境变量（未设置返回空串）。定义在本文件后段，此处前向声明供仓库根定位使用。
-[[nodiscard]] auto get_env(const char* name) -> std::string;
+[[nodiscard]] auto get_env(const char *name) -> std::string;
 
 /// @brief 从可执行文件位置向上定位仓库根；失败回退从 cwd 向上找。
 ///
@@ -114,7 +114,7 @@ struct CaseState {
 }
 
 /// @brief 跨进程安全的进程内环境变量写入（TMPDIR/TMP/TEMP 三处同步接管）。
-auto set_env(const char* name, const std::string& value) -> void {
+auto set_env(const char *name, const std::string &value) -> void {
 #ifdef AURORA_PLATFORM_WINDOWS
     (void)_putenv_s(name, value.c_str());
 #else
@@ -123,24 +123,24 @@ auto set_env(const char* name, const std::string& value) -> void {
 }
 
 /// @brief 读取环境变量（未设置返回空串）。
-[[nodiscard]] auto get_env(const char* name) -> std::string {
+[[nodiscard]] auto get_env(const char *name) -> std::string {
 // MSVC CRT 家族：MSVC 与 clang-cl 共用同一套 CRT（均提供 _dupenv_s），故两者取同一分支。
 #if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
-    char* raw = nullptr;
+    char *raw = nullptr;
     std::size_t length = 0;
     (void)_dupenv_s(&raw, &length, name);  // 返回 malloc 副本：包进 unique_ptr（free 作 deleter）RAII 释放
     // deleter 类型显式写为 void(*)(void*)：&std::free 存在 nullptr_t 删除重载，须靠目标类型消歧。
-    const std::unique_ptr<char, void (*)(void*)> value{raw, std::free};
+    const std::unique_ptr<char, void (*)(void *)> value{raw, std::free};
     return value ? std::string{value.get()} : std::string{};
 #else
     // MinGW 等 CRT 不提供 _dupenv_s（MSVC 专有），getenv 在本框架的进程隔离模型下同样安全。
-    const char* value = std::getenv(name);
+    const char *value = std::getenv(name);
     return value == nullptr ? std::string{} : std::string{value};
 #endif
 }
 
 /// @brief 校验（必要时创建）一个可用基目录；不可用返回空路径。
-[[nodiscard]] auto ensure_base_dir(const fs::path& candidate) -> fs::path {
+[[nodiscard]] auto ensure_base_dir(const fs::path &candidate) -> fs::path {
     if (candidate.empty()) {
         return {};
     }
@@ -184,7 +184,7 @@ auto set_env(const char* name, const std::string& value) -> void {
         return {};
     }
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    auto& state = case_state();
+    auto &state = case_state();
     for (int attempt = 0; attempt < 64; ++attempt) {
         const fs::path candidate = base / ("aurora_test_" + std::to_string(stamp) + "_" + std::to_string(state.seq));
         ++state.seq;
@@ -199,7 +199,7 @@ auto set_env(const char* name, const std::string& value) -> void {
 }  // namespace
 
 auto setup() -> void {
-    const auto& root = repo_root();
+    const auto &root = repo_root();
     if (root.empty()) {
         return;
     }
@@ -213,7 +213,7 @@ auto setup() -> void {
 }
 
 auto begin_case() -> void {
-    auto& state = case_state();
+    auto &state = case_state();
     // 进程原始 TMP/TMPDIR/TEMP 只快照一次（首个用例前），供 end_case 还原——
     // 否则上一用例删除临时目录后，残留的 env 会让下一用例的 temp_directory_path
     // 解析到不存在的基目录，隔离机制自毁。
@@ -249,7 +249,7 @@ auto begin_case() -> void {
 }
 
 auto end_case() -> void {
-    auto& state = case_state();
+    auto &state = case_state();
     if (!state.temp_dir.empty()) {
         // 死亡测试子进程复用的是父进程目录，删除权归父进程 end_case；子进程自身
         // （即便走到 end_case，如 statement 未致死）不得删除，否则会误删父进程仍在用的目录。
@@ -266,9 +266,9 @@ auto end_case() -> void {
     set_env("TEMP", state.saved_temp);
 }
 
-auto temp_dir() -> const std::string& { return case_state().temp_dir; }
+auto temp_dir() -> const std::string & { return case_state().temp_dir; }
 
-auto repo_root() -> const std::string& {
+auto repo_root() -> const std::string & {
     // 函数内静态常量按 StaticConstantCase 要求 UPPER_CASE 命名（已是最近作用域，无需再外移）。
     static const std::string REPO_ROOT = locate_repo_root();
     return REPO_ROOT;

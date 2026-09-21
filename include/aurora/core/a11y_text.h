@@ -13,9 +13,9 @@ namespace aurora::a11y {
 /// @brief 文本单位（UIA `TextUnit` / AT-SPI2 文本边界的共享语义）。
 enum class TextUnit : std::uint8_t {
     Character,  ///< Unicode 码点
-    Word,       ///< 空白 / 标点启发式分词（零依赖；CJK 整段一词为已知退化，设计 §13 R6）
-    Line,       ///< `\n` 分界
-    Document,   ///< 全文
+    Word,  ///< 空白 / 标点启发式分词（零依赖；CJK 整段一词为已知退化，设计 §13 R6）
+    Line,  ///< `\n` 分界
+    Document,  ///< 全文
 };
 
 namespace detail {
@@ -94,7 +94,7 @@ class UtfOffsetMap {
             starts_.push_back(utf8);
             utf16_of_.push_back(utf16);
             utf16 += (cp > 0xFFFFU) ? 2U : 1U;  // 非 BMP：代理对占 2 个 UTF-16 单元
-            utf8 += (len == 0) ? 1 : len;       // len==0 仅越界时出现；兜底前进 1 防死循环
+            utf8 += (len == 0) ? 1 : len;  // len==0 仅越界时出现；兜底前进 1 防死循环
         }
         // 末尾哨兵：使「全文长度」这一端点可被映射（如选区终点 = 文末）。
         starts_.push_back(utf8);
@@ -102,9 +102,7 @@ class UtfOffsetMap {
     }
 
     [[nodiscard]] auto utf8_length() const -> std::size_t { return text_.size(); }
-    [[nodiscard]] auto utf16_length() const -> std::size_t {
-        return utf16_of_.empty() ? 0 : utf16_of_.back();
-    }
+    [[nodiscard]] auto utf16_length() const -> std::size_t { return utf16_of_.empty() ? 0 : utf16_of_.back(); }
 
     /// @brief UTF-16 偏移 → UTF-8 偏移（向下夹紧到码点起点，G9）。
     [[nodiscard]] auto to_utf8(std::size_t utf16_index) const -> std::size_t {
@@ -157,14 +155,15 @@ class UtfOffsetMap {
 
     /// @brief 按 UTF-16 单元前进/后退（UIA `MoveEndpointByUnit(Character)` 语义）。
     [[nodiscard]] auto advance_utf16(std::size_t utf16_index, int count) const -> std::size_t {
-        const std::size_t target =
-            (count < 0 && utf16_index < static_cast<std::size_t>(-count)) ? 0 : utf16_index + static_cast<std::size_t>(count);
+        const std::size_t target = (count < 0 && utf16_index < static_cast<std::size_t>(-count))
+                                       ? 0
+                                       : utf16_index + static_cast<std::size_t>(count);
         return to_utf8(target);
     }
 
   private:
     std::string_view text_;
-    std::vector<std::size_t> starts_;   ///< 各码点的 UTF-8 起点（含末尾哨兵）
+    std::vector<std::size_t> starts_;  ///< 各码点的 UTF-8 起点（含末尾哨兵）
     std::vector<std::size_t> utf16_of_;  ///< 各码点起点对应的 UTF-16 偏移（含末尾哨兵）
 };
 

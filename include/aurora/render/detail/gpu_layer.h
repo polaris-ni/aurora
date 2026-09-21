@@ -22,12 +22,8 @@ inline auto next_gpu_layer_key() -> std::uint64_t {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 inline std::atomic<std::uint64_t> g_gpu_layer_epoch{0};
 
-inline auto gpu_layer_epoch() -> std::uint64_t {
-    return g_gpu_layer_epoch.load(std::memory_order_relaxed);
-}
+inline auto gpu_layer_epoch() -> std::uint64_t { return g_gpu_layer_epoch.load(std::memory_order_relaxed); }
 
-inline auto bump_gpu_layer_epoch() -> void {
-    g_gpu_layer_epoch.fetch_add(1, std::memory_order_relaxed);
-}
+inline auto bump_gpu_layer_epoch() -> void { g_gpu_layer_epoch.fetch_add(1, std::memory_order_relaxed); }
 
 }  // namespace aurora::render::detail

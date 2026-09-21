@@ -68,8 +68,7 @@ namespace aurora {
         const std::vector<Node> &children = cur.node.widget().child_nodes();
         for (std::size_t i = children.size(); i > 0; --i) {
             // 逆序压入以保证正序弹出；路径在弹出时才用，故此处可直接格式化。
-            std::string child_path =
-                cur.path.empty() ? std::to_string(i - 1) : cur.path + "/" + std::to_string(i - 1);
+            std::string child_path = cur.path.empty() ? std::to_string(i - 1) : cur.path + "/" + std::to_string(i - 1);
             stack.push_back(Pending{.node = children[i - 1], .path = std::move(child_path)});
         }
     }
@@ -86,8 +85,8 @@ namespace aurora {
 /// 报告，调用方须整树替换。
 struct WidgetPatchOp {
     std::string op = "replace";  ///< 恒为 "replace"
-    std::string path;            ///< 如 "/1/content"（根属性为 "/content"）
-    Json value;                  ///< 新值
+    std::string path;  ///< 如 "/1/content"（根属性为 "/content"）
+    Json value;  ///< 新值
 
     [[nodiscard]] auto to_json() const -> Json {
         Json j = Json::object();
@@ -111,8 +110,7 @@ struct WidgetPatchOp {
 ///
 /// @note Thread: main-thread only（读 `serialize_props`）
 /// @note Side-effects: none
-[[nodiscard]] inline auto diff_trees(const Node &old_root, const Node &new_root)
-    -> std::vector<WidgetPatchOp> {
+[[nodiscard]] inline auto diff_trees(const Node &old_root, const Node &new_root) -> std::vector<WidgetPatchOp> {
     std::vector<WidgetPatchOp> out;
     if (!old_root || !new_root) {
         return out;
@@ -165,8 +163,7 @@ struct WidgetPatchOp {
         const std::vector<Node> &new_kids = cur.new_node.widget().child_nodes();
         const std::size_t count = old_kids.size() < new_kids.size() ? old_kids.size() : new_kids.size();
         for (std::size_t i = count; i-- > 0;) {
-            const std::string child_path =
-                cur.path.empty() ? std::to_string(i) : cur.path + "/" + std::to_string(i);
+            const std::string child_path = cur.path.empty() ? std::to_string(i) : cur.path + "/" + std::to_string(i);
             stack.push_back(Pending{.old_node = old_kids[i], .new_node = new_kids[i], .path = child_path});
         }
     }
@@ -188,8 +185,7 @@ struct WidgetPatchOp {
     }
     if (old_root.widget().type_name() != new_root.widget().type_name()) {
         // type_name() 返回 const char*，比较指针值无意义，按内容比。
-        if (std::string_view{old_root.widget().type_name()} !=
-            std::string_view{new_root.widget().type_name()}) {
+        if (std::string_view{old_root.widget().type_name()} != std::string_view{new_root.widget().type_name()}) {
             return true;
         }
     }

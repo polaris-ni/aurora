@@ -20,7 +20,7 @@ auto bounded(float w, float h) -> Constraints {
 }
 
 /// 多词长句：在 80~100px 约束宽度下必然折成多行。
-constexpr const char* AURORA_LONG_WORDS = "aaa bbb ccc ddd eee fff ggg hhh iii jjj";
+constexpr const char *AURORA_LONG_WORDS = "aaa bbb ccc ddd eee fff ggg hhh iii jjj";
 
 }  // namespace
 
@@ -68,7 +68,7 @@ AURORA_TEST_CASE(font_size_degrade_and_validate_props) {
     zero.font_size(0.0F);
     Text neg;
     neg.font_size(-2.5F);
-    for (const Text* t : {&zero, &neg}) {
+    for (const Text *t : {&zero, &neg}) {
         Json props;
         t->serialize_props(props);
         AURORA_TEST_CHECK_NEAR(props["font_size"].get<float>(), 14.0F, 1e-4F);
@@ -181,7 +181,7 @@ AURORA_TEST_CASE(describe_metadata_signals_and_resolved_text) {
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "Text");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool has_content = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (std::string{p.name} == "content") {
             has_content = true;
         }
@@ -190,7 +190,7 @@ AURORA_TEST_CASE(describe_metadata_signals_and_resolved_text) {
 
     // 自有信号：仅 content 一个。
     Text t("hi");
-    std::vector<aurora::SignalViewBase*> signals;
+    std::vector<aurora::SignalViewBase *> signals;
     t.collect_signals(signals);
     AURORA_TEST_CHECK_EQ(signals.size(), 1U);
 

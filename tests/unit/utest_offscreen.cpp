@@ -51,7 +51,7 @@ auto hfill_box(float h) -> Node {
 }
 
 struct Scenario {
-    const char* name;
+    const char *name;
     std::function<Node()> build;
 };
 
@@ -196,7 +196,7 @@ AURORA_TEST_CASE(logical_snapshot_children_stay_within_parent) {
 
     const float parent_w = snapshot["box"]["w"].get<float>();
     const float parent_h = snapshot["box"]["h"].get<float>();
-    for (const Json& child : snapshot["children"]) {
+    for (const Json &child : snapshot["children"]) {
         AURORA_TEST_TRACE(std::string{"child "} + child["type"].get<std::string>());
         AURORA_TEST_CHECK_LE(child["box"]["w"].get<float>(), parent_w + 0.001F);
         AURORA_TEST_CHECK_LE(child["box"]["h"].get<float>(), parent_h + 0.001F);
@@ -226,7 +226,7 @@ AURORA_TEST_CASE(logical_snapshots_match_golden_baseline) {
     }
 
     Json out = Json::object();
-    for (const Scenario& sc : scenarios()) {
+    for (const Scenario &sc : scenarios()) {
         AURORA_TEST_TRACE(std::string{"scenario "} + sc.name);
         Node root = sc.build();
         Json snap = render_to_logical_snapshot(root, view_w, view_h);

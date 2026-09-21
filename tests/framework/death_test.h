@@ -66,17 +66,17 @@ auto enter_death_child(std::uint64_t site_key) -> void;
 [[nodiscard]] auto death_verdict_for(int status) -> DeathVerdict;
 
 /// @brief 父进程侧：spawn 子进程执行同一用例，收集其 stderr，返回判定。
-[[nodiscard]] auto spawn_death_child(const char* file, int line, std::string* output) -> DeathVerdict;
+[[nodiscard]] auto spawn_death_child(const char *file, int line, std::string *output) -> DeathVerdict;
 
 /// @brief 登记自身可执行文件路径（main 用 argv[0] 调用；子进程据此组装命令行）。
 auto set_executable_path(std::string_view path) -> void;
 
 /// @brief 已登记的可执行文件路径（未登记时为空；隔离层据此定位仓库根）。
-[[nodiscard]] auto executable_path() -> const std::string&;
+[[nodiscard]] auto executable_path() -> const std::string &;
 
 /// @brief 期望描述（匹配器走 describe，字符串形态按原样引用）。
 template <typename Expectation>
-[[nodiscard]] auto death_expectation_text(const Expectation& expectation) -> std::string {
+[[nodiscard]] auto death_expectation_text(const Expectation &expectation) -> std::string {
     if constexpr (requires { expectation.describe(); }) {
         return expectation.describe();
     } else {
@@ -86,7 +86,7 @@ template <typename Expectation>
 
 /// @brief 期望判定（匹配器走 matches，字符串形态按子串查找）。
 template <typename Expectation>
-[[nodiscard]] auto death_expectation_matches(const Expectation& expectation, const std::string& output) -> bool {
+[[nodiscard]] auto death_expectation_matches(const Expectation &expectation, const std::string &output) -> bool {
     using Plain = std::remove_cv_t<Expectation>;
     if constexpr (std::is_convertible_v<Plain, std::string_view>) {
         // 空期望 = 只要求「致死」，不校验输出内容。
@@ -105,7 +105,7 @@ template <typename Expectation>
 ///
 /// 子进程模式里直接返回（嵌套死亡测试在子进程中被禁用，避免递归 spawn）。
 template <typename Expectation>
-auto check_death(const char* file, int line, std::string_view statement, const Expectation& expectation) -> void {
+auto check_death(const char *file, int line, std::string_view statement, const Expectation &expectation) -> void {
     if (death_child_mode()) {
         return;
     }

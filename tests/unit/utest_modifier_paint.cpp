@@ -10,7 +10,7 @@ namespace aurora::test_cases::utest_modifier_paint {
 
 namespace {
 
-auto passthrough(const Constraints& c) -> Size { return c.constrain(Size{.width = 42.0F, .height = 24.0F}); }
+auto passthrough(const Constraints &c) -> Size { return c.constrain(Size{.width = 42.0F, .height = 24.0F}); }
 
 auto constraints(float max_w = 100.0F, float max_h = 100.0F) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = max_w, .height = max_h}};

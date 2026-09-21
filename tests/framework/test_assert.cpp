@@ -16,13 +16,13 @@
 
 namespace aurora::testing {
 
-auto current_context_slot() -> TestContext*& {
+auto current_context_slot() -> TestContext *& {
     // 函数内 thread_local：既规避静态初始化顺序问题，也让「无活动用例」的状态可判定。
-    thread_local TestContext* slot = nullptr;
+    thread_local TestContext *slot = nullptr;
     return slot;
 }
 
-auto current_context() -> TestContext* { return current_context_slot(); }
+auto current_context() -> TestContext * { return current_context_slot(); }
 
 }  // namespace aurora::testing
 
@@ -31,21 +31,21 @@ namespace aurora::testing::detail {
 namespace {
 
 /// @brief 静态初始化期 / 用例外断言的失败计数（仅供 runner 启动自检读取）。
-auto orphan_failure_count() -> int& {
+auto orphan_failure_count() -> int & {
     static int count = 0;
     return count;
 }
 
 /// @brief 用例外断言的兜底报告：无上下文可归属，直接写诊断流并计数。
-auto report_orphan(const char* file, int line, const std::string& message) -> void {
+auto report_orphan(const char *file, int line, const std::string &message) -> void {
     std::fprintf(stderr, "[test] assertion outside any test case at %s:%d: %s\n", file, line, message.c_str());
     ++orphan_failure_count();
 }
 
 }  // namespace
 
-auto report(Severity severity, const char* file, int line, std::string message) -> void {
-    auto* context = current_context();
+auto report(Severity severity, const char *file, int line, std::string message) -> void {
+    auto *context = current_context();
     std::string aborted;
     if (context == nullptr) {
         report_orphan(file, line, message);
@@ -118,19 +118,19 @@ auto string_message(std::string_view lhs_text, std::string_view rhs_text, std::s
            quote(rhs_actual);
 }
 
-auto exception_text(const std::exception& error) -> std::string {
-    const auto& info = typeid(error);
+auto exception_text(const std::exception &error) -> std::string {
+    const auto &info = typeid(error);
     std::string name = info.name();
 #ifdef AURORA_TEST_HAVE_CXXABI
     int status = 0;
-    const std::unique_ptr<char, void (*)(void*)> demangled{abi::__cxa_demangle(info.name(), nullptr, nullptr, &status),
-                                                           std::free};
+    const std::unique_ptr<char, void (*)(void *)> demangled{abi::__cxa_demangle(info.name(), nullptr, nullptr, &status),
+                                                            std::free};
     if (demangled != nullptr && status == 0) {
         name = demangled.get();
     }
 #endif
     std::string text = "exception " + std::move(name);
-    const char* what = error.what();
+    const char *what = error.what();
     if (what != nullptr && *what != '\0') {
         text += " («" + std::string{what} + "»)";
     }
@@ -140,7 +140,7 @@ auto exception_text(const std::exception& error) -> std::string {
 // sink 语义：有上下文时把 `note` 直接 move 入追踪栈，无上下文即丢弃；改 const& 只会多一次拷贝。
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 TraceScope::TraceScope(std::string note) {
-    auto* context = current_context();
+    auto *context = current_context();
     if (context == nullptr) {
         return;  // 用例外（如静态初始化期）无上下文可归属：不挂载，析构亦不弹栈。
     }
@@ -150,7 +150,7 @@ TraceScope::TraceScope(std::string note) {
 
 TraceScope::~TraceScope() {
     if (attached_) {
-        if (auto* context = current_context(); context != nullptr) {
+        if (auto *context = current_context(); context != nullptr) {
             context->pop_trace();
         }
     }

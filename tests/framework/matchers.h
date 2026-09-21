@@ -36,12 +36,12 @@ class MatcherLike {
 
     /// @brief 判定（在使用点按值的类型实例化谓词）。
     template <typename T>
-    [[nodiscard]] auto matches(const T& value) const -> bool {
+    [[nodiscard]] auto matches(const T &value) const -> bool {
         return pred_(value);
     }
 
     /// @brief 期望描述（进入失败信息）。
-    [[nodiscard]] auto describe() const -> const std::string& { return description_; }
+    [[nodiscard]] auto describe() const -> const std::string & { return description_; }
 
   private:
     Pred pred_;
@@ -64,59 +64,59 @@ namespace matchers {
 
 /// @brief 与期望值相等（按值捕获期望副本）。
 template <typename Expected>
-[[nodiscard]] auto eq(const Expected& expected) {
-    return MatcherLike{[expected](const auto& value) -> bool { return value == expected; },
+[[nodiscard]] auto eq(const Expected &expected) {
+    return MatcherLike{[expected](const auto &value) -> bool { return value == expected; },
                        "equals " + print_value(expected)};
 }
 
 /// @brief 与期望值不等。
 template <typename Expected>
-[[nodiscard]] auto ne(const Expected& expected) {
-    return MatcherLike{[expected](const auto& value) -> bool { return value != expected; },
+[[nodiscard]] auto ne(const Expected &expected) {
+    return MatcherLike{[expected](const auto &value) -> bool { return value != expected; },
                        "not equals " + print_value(expected)};
 }
 
 /// @brief 严格小于 / 小于等于。
 template <typename Expected>
-[[nodiscard]] auto lt(const Expected& expected) {
-    return MatcherLike{[expected](const auto& value) -> bool { return value < expected; },
+[[nodiscard]] auto lt(const Expected &expected) {
+    return MatcherLike{[expected](const auto &value) -> bool { return value < expected; },
                        "is less than " + print_value(expected)};
 }
 
 template <typename Expected>
-[[nodiscard]] auto le(const Expected& expected) {
-    return MatcherLike{[expected](const auto& value) -> bool { return value <= expected; },
+[[nodiscard]] auto le(const Expected &expected) {
+    return MatcherLike{[expected](const auto &value) -> bool { return value <= expected; },
                        "is less than or equal to " + print_value(expected)};
 }
 
 /// @brief 严格大于 / 大于等于。
 template <typename Expected>
-[[nodiscard]] auto gt(const Expected& expected) {
-    return MatcherLike{[expected](const auto& value) -> bool { return value > expected; },
+[[nodiscard]] auto gt(const Expected &expected) {
+    return MatcherLike{[expected](const auto &value) -> bool { return value > expected; },
                        "is greater than " + print_value(expected)};
 }
 
 template <typename Expected>
-[[nodiscard]] auto ge(const Expected& expected) {
-    return MatcherLike{[expected](const auto& value) -> bool { return value >= expected; },
+[[nodiscard]] auto ge(const Expected &expected) {
+    return MatcherLike{[expected](const auto &value) -> bool { return value >= expected; },
                        "is greater than or equal to " + print_value(expected)};
 }
 
 /// @brief 字符串按内容相等（C 字符串 / std::string / string_view 皆可）。
 [[nodiscard]] inline auto str_eq(std::string_view expected) {
-    return MatcherLike{[expected](const auto& value) -> bool { return std::string_view{value} == expected; },
+    return MatcherLike{[expected](const auto &value) -> bool { return std::string_view{value} == expected; },
                        "equals (string content) " + detail::quote(expected)};
 }
 
 /// @brief 字符串按内容不等。
 [[nodiscard]] inline auto str_ne(std::string_view expected) {
-    return MatcherLike{[expected](const auto& value) -> bool { return std::string_view{value} != expected; },
+    return MatcherLike{[expected](const auto &value) -> bool { return std::string_view{value} != expected; },
                        "not equals (string content) " + detail::quote(expected)};
 }
 
 /// @brief 字符串按内容相等，忽略 ASCII 大小写。
 [[nodiscard]] inline auto str_case_eq(std::string_view expected) {
-    return MatcherLike{[expected](const auto& value) -> bool {
+    return MatcherLike{[expected](const auto &value) -> bool {
                            return detail::strings_equal(std::string_view{value}, expected, false);
                        },
                        "equals (case-insensitive) " + detail::quote(expected)};
@@ -124,8 +124,8 @@ template <typename Expected>
 
 /// @brief 容器含指定元素。
 template <typename Element>
-[[nodiscard]] auto contains(const Element& element) {
-    return MatcherLike{[element](const auto& container) -> bool {
+[[nodiscard]] auto contains(const Element &element) {
+    return MatcherLike{[element](const auto &container) -> bool {
                            using std::begin;
                            using std::end;
                            return std::find(begin(container), end(container), element) != end(container);
@@ -136,25 +136,25 @@ template <typename Element>
 /// @brief 字符串含指定子串。
 [[nodiscard]] inline auto has_substr(std::string_view needle) {
     return MatcherLike{
-        [needle](const auto& text) -> bool { return std::string_view{text}.find(needle) != std::string_view::npos; },
+        [needle](const auto &text) -> bool { return std::string_view{text}.find(needle) != std::string_view::npos; },
         "has substring " + detail::quote(needle)};
 }
 
 /// @brief 字符串以指定前缀开头。
 [[nodiscard]] inline auto starts_with(std::string_view prefix) {
-    return MatcherLike{[prefix](const auto& text) -> bool { return std::string_view{text}.starts_with(prefix); },
+    return MatcherLike{[prefix](const auto &text) -> bool { return std::string_view{text}.starts_with(prefix); },
                        "starts with " + detail::quote(prefix)};
 }
 
 /// @brief 字符串以指定后缀结尾。
 [[nodiscard]] inline auto ends_with(std::string_view suffix) {
-    return MatcherLike{[suffix](const auto& text) -> bool { return std::string_view{text}.ends_with(suffix); },
+    return MatcherLike{[suffix](const auto &text) -> bool { return std::string_view{text}.ends_with(suffix); },
                        "ends with " + detail::quote(suffix)};
 }
 
 /// @brief 容器大小等于 expected。
 [[nodiscard]] inline auto size_is(std::size_t expected) {
-    return MatcherLike{[expected](const auto& container) -> bool {
+    return MatcherLike{[expected](const auto &container) -> bool {
                            using std::begin;
                            using std::end;
                            return static_cast<std::size_t>(std::distance(begin(container), end(container))) == expected;
@@ -164,7 +164,7 @@ template <typename Element>
 
 /// @brief 容器为空。
 [[nodiscard]] inline auto is_empty() {
-    return MatcherLike{[](const auto& container) -> bool {
+    return MatcherLike{[](const auto &container) -> bool {
                            using std::begin;
                            using std::end;
                            return begin(container) == end(container);
@@ -174,8 +174,8 @@ template <typename Element>
 
 /// @brief 容器每个元素都满足子匹配器。
 template <typename Matcher>
-[[nodiscard]] auto each(const Matcher& matcher) {
-    return MatcherLike{[matcher](const auto& container) -> bool {
+[[nodiscard]] auto each(const Matcher &matcher) {
+    return MatcherLike{[matcher](const auto &container) -> bool {
                            using std::begin;
                            using std::end;
                            for (auto it = begin(container); it != end(container); ++it) {
@@ -191,21 +191,21 @@ template <typename Matcher>
 /// @brief 全部子匹配器都成立。
 template <typename... Matchers>
 [[nodiscard]] auto all_of(Matchers... matchers) {
-    return MatcherLike{[matchers...](const auto& value) -> bool { return (matchers.matches(value) && ...); },
+    return MatcherLike{[matchers...](const auto &value) -> bool { return (matchers.matches(value) && ...); },
                        join_descriptions(" and ", matchers.describe()...)};
 }
 
 /// @brief 任一子匹配器成立。
 template <typename... Matchers>
 [[nodiscard]] auto any_of(Matchers... matchers) {
-    return MatcherLike{[matchers...](const auto& value) -> bool { return (matchers.matches(value) || ...); },
+    return MatcherLike{[matchers...](const auto &value) -> bool { return (matchers.matches(value) || ...); },
                        join_descriptions(" or ", matchers.describe()...)};
 }
 
 /// @brief 子匹配器不成立。
 template <typename Matcher>
-[[nodiscard]] auto negated(const Matcher& matcher) {
-    return MatcherLike{[matcher](const auto& value) -> bool { return !matcher.matches(value); },
+[[nodiscard]] auto negated(const Matcher &matcher) {
+    return MatcherLike{[matcher](const auto &value) -> bool { return !matcher.matches(value); },
                        "not " + matcher.describe()};
 }
 
@@ -215,7 +215,7 @@ namespace detail {
 
 /// @brief `CHECK_THAT` 内核：不匹配时给出 Actual / Expected 两侧信息。
 template <typename T, typename Matcher>
-[[nodiscard]] auto match_that_message(const T& value, const Matcher& matcher, std::string_view text) -> std::string {
+[[nodiscard]] auto match_that_message(const T &value, const Matcher &matcher, std::string_view text) -> std::string {
     if (matcher.matches(value)) {
         return {};
     }

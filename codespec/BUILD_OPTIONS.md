@@ -37,6 +37,7 @@
 | `cmake/AuroraInstrumentation.cmake` | `AURORA_ENABLE_COVERAGE` / `AURORA_ENABLE_ASAN` / `AURORA_ENABLE_PROFILING` / `AURORA_ENABLE_TRACING` / `AURORA_ENABLE_DEBUG` / `AURORA_ENABLE_TEST_HOOKS`（须在全部目标定义之后 include） |
 | `cmake/AuroraInstall.cmake` | 安装 + `find_package(Aurora)` 导出（须在后端开关之后 include） |
 | `cmake/AuroraLint.cmake` | `AURORA_ENABLE_CLANG_TIDY`（`lint` / `lint-fix` 聚合目标，经 `tools/check/run_clang_tidy.py` 并行 lint 非 third_party 翻译单元；须在全部目标定义之后 include） |
+| `cmake/AuroraFormat.cmake` | `AURORA_ENABLE_CLANG_FORMAT`（`format` / `format-check` 聚合目标，经 `tools/check/run_clang_format.py` 并行校验 / 重写非 third_party 源文件；与目标定义无关，放最后 include 亦可） |
 | `cmake/AuroraCheckTestRegistry.cmake` | **遗留模块**：当前无 CMake `include()` 引用（`registry_integrity` 已改由 `AuroraTests.cmake` 直接注册 python 脚本 `check_test_registry.py`）；保留仅供手工 / 历史参考，不计入常规构建 |
 
 ---
@@ -284,6 +285,7 @@ cmake --build build
 | `AURORA_ENABLE_CCACHE` | `ON` | ccache 编译缓存（加速重复编译） | 设置 `CMAKE_C_COMPILER_LAUNCHER` 与 `CMAKE_CXX_COMPILER_LAUNCHER`（`cmake -E env` 前缀注入 ccache 配置环境变量，构建期生效）；支持 winget 安装路径自动检测；详见 §4.3 |
 | `AURORA_ENABLE_LLD` | `ON` | 链接器选择（lld 加速静态链接） | GNU/Clang 下 `find_program(ld.lld)` + `check_linker_flag` 探测通过则全局注入 `-fuse-ld=lld -B<lld 目录>`；失败静默回退 GNU ld；**不注入 feature 宏** |
 | `AURORA_ENABLE_CLANG_TIDY` | `ON` | Clang-Tidy 门禁（`lint` / `lint-fix` 聚合目标） | 需 `clang-tidy` 与 python 在 PATH；未开启时自动打开 `CMAKE_EXPORT_COMPILE_COMMANDS`。经 `tools/check/run_clang_tidy.py` 并行 lint **非 third_party** 翻译单元并按 `(file, line, check)` 去重；详见 §4.5 |
+| `AURORA_ENABLE_CLANG_FORMAT` | `ON` | clang-format 门禁（`format` / `format-check` 聚合目标） | 需 `clang-format` 与 python 在 PATH。经 `tools/check/run_clang_format.py` 并行处理 **非 third_party** 源文件（配置源为仓库根 `.clang-format`）；`--fix` 即 `format`，默认只读校验即 `format-check`；详见 §4.7 |
 | `AURORA_ENABLE_IMAGE_JPEG` | `OFF` | JPEG 图像解码能力（libjpeg-turbo 源码构建） | 注入 `AURORA_ENABLE_IMAGE_JPEG`（仅库内部，不 PUBLIC 传播）；详见 §4.6 |
 | `AURORA_ENABLE_IMAGE_WEBP` | `OFF` | WebP 图像解码能力（libwebp 源码构建） | 注入 `AURORA_ENABLE_IMAGE_WEBP`（同上） |
 | `AURORA_ENABLE_IMAGE_PNG` | `OFF` | PNG/GIF 图像解码能力（wuffs 源码构建） | 注入 `AURORA_ENABLE_IMAGE_PNG`（同上） |
@@ -431,6 +433,34 @@ python tools/check/run_clang_tidy.py --build-dir build --include 'src/'         
 > 历史注记：三者原名 `AURORA_BUILD_IMAGE_*`（`AURORA_BUILD_*` 组的「编译期能力开关」例外）；归入 `AURORA_ENABLE_*` 组后连同选项名一并改名，消除「组名与语义不符」的例外。见 §2.1。
 
 ---
+
+### 4.7 `AURORA_ENABLE_CLANG_FORMAT`
+
+| 项 | 值 |
+|:---|:---|
+| 默认值 | `ON`（找不到 `clang-format` 或 python 时自动降级：仅告警，不定义目标） |
+| 提供目标 | `format-check`（只读校验，任一非 third_party 源文件与 `.clang-format` 不一致即退出码 1）、`format`（就地重写） |
+| 配置来源 | 仓库根 `.clang-format`（`BasedOnStyle: Google` + 本仓覆盖项，含 `PointerAlignment: Right`、`DerivePointerAlignment: false`） |
+| 扫描范围 | `git ls-files` 中全部**非 `third_party/`、非 `build*/`** 的 `.cpp/.cc/.h/.hpp/.cxx`（无 git 时退化为文件系统遍历） |
+| 依赖 | `clang-format`（PATH）+ python（PATH）；**不需要** `compile_commands.json` |
+
+为何要有这道门禁：2026-09-21 之前仓库内**没有任何** clang-format 调用点，排版完全靠手，导致配置（当时的 `PointerAlignment: Left`）与代码库实际写法（右对齐，指针约 8.4 : 1）长期背离，累积到 488/823 文件、约 1.5 万行不一致且无人察觉。门禁的作用是让排版漂移在**引入的那一刻**暴露，而不是攒到需要一次性大改。
+
+为何要有独立 runner（而非直接 `clang-format --dry-run --Werror`）：
+
+1. 需要把范围限定在 first-party 源码——`third_party/` 自带各自的 `.clang-format`，不能被重写；
+2. 需要并行（823 文件级）；
+3. 需要稳定的「按文件 / 按总量」摘要供 CI 日志阅读，而不是几百段原始 diff；
+4. 需要固定**已知正确**的调用形态：clang-format 解析 `file` 风格时从**实参所在目录**向上查找，用相对路径的 `--assume-filename` 或在不同的 cwd 下运行，都会静默退回内建默认风格、得出方向相反的结论。runner 一律传绝对路径实参并把 cwd 钉在仓库根。
+
+```powershell
+cmake --build build --target format-check   # 只读校验，任一处不一致即失败
+cmake --build build --target format         # 就地重写，随后必须人工审阅 diff
+python tools/check/run_clang_format.py --include 'src/'                 # 只校验库代码
+python tools/check/run_clang_format.py --fix --include 'src/aurora/window/'   # 只重写某子树
+```
+
+**排版与 NOLINT 的耦合**：`ReflowComments: Always` 会重排注释，可能把 `NOLINTNEXTLINE` 的理由注释折到它与目标行之间，使抑制失效（该形态曾一次性造成 36 条告警）。因此**理由注释一律写在 `NOLINTNEXTLINE` 之前**，且写完改动后须再跑一次 `format-check` 确认幂等。
 
 ## 5 强制缓存变量（三方库源码构建内部）
 

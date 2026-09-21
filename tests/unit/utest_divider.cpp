@@ -107,7 +107,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     bool has_orientation = false;
     bool has_thickness = false;
     bool has_indent = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (std::string{p.name} == "orientation") {
             has_orientation = true;
         }

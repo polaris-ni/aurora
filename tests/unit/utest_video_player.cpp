@@ -56,7 +56,7 @@ class PlayerHook final : public VideoPlayer {
     int double_taps = 0;
     int ticks = 0;
 
-    [[nodiscard]] auto frame() const -> const Image& { return current_frame(); }
+    [[nodiscard]] auto frame() const -> const Image & { return current_frame(); }
 
     auto on_tap() -> void override {
         ++taps;
@@ -202,7 +202,7 @@ AURORA_TEST_CASE(show_controls_toggles_and_custom_controls) {
 
     // 整体替换控件叠层。
     auto custom = std::make_unique<aurora::Text>("ctrl");
-    auto* custom_ptr = custom.get();
+    auto *custom_ptr = custom.get();
     p.set_controls(std::move(custom));
     AURORA_TEST_REQUIRE_EQ(p.child_nodes().size(), 1U);
     AURORA_TEST_CHECK_EQ(&p.child_nodes()[0].widget(), custom_ptr);
@@ -244,7 +244,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "VideoPlayer");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "single");
     bool has_fit = false;
-    for (const auto& prop : d.properties) {
+    for (const auto &prop : d.properties) {
         if (std::string{prop.name} == "fit") {
             has_fit = true;
         }
@@ -284,7 +284,7 @@ AURORA_TEST_CASE(tap_and_double_tap_extension_points) {
 
 AURORA_TEST_CASE(collect_signals_reports_player_states) {
     VideoPlayer p(make_source());
-    std::vector<aurora::SignalViewBase*> out;
+    std::vector<aurora::SignalViewBase *> out;
     p.collect_signals(out);
     // 无子控件时恰为 4 个播放器状态信号。
     AURORA_TEST_CHECK_EQ(out.size(), 4U);

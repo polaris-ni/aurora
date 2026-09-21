@@ -37,7 +37,8 @@ class AlignNode : public ModifierNode {
     mutable Size child_size_{.width = 0.0F, .height = 0.0F};
 };
 
-/// @brief 偏移修饰（Transform 切片）：把内容按 (dx,dy) 视觉平移，不改变布局尺寸；命中测试的平移量与绘制保持一致（命中区随 offset 移动）。
+/// @brief 偏移修饰（Transform 切片）：把内容按 (dx,dy)
+/// 视觉平移，不改变布局尺寸；命中测试的平移量与绘制保持一致（命中区随 offset 移动）。
 class OffsetNode : public ModifierNode {
   public:
     OffsetNode(float dx, float dy) : dx_(dx), dy_(dy) {}
@@ -60,7 +61,8 @@ class OffsetNode : public ModifierNode {
     mutable Size child_size_{.width = 0.0F, .height = 0.0F};
 };
 
-/// @brief 仿射变换修饰（Transform 切片）：旋转 / 缩放绕内容盒中心作用；任意矩阵（Raw）按用户矩阵关于原点原样应用（如需绕中心请自行构造 from_*_about）。
+/// @brief 仿射变换修饰（Transform 切片）：旋转 /
+/// 缩放绕内容盒中心作用；任意矩阵（Raw）按用户矩阵关于原点原样应用（如需绕中心请自行构造 from_*_about）。
 /// 不改变布局尺寸，仅影响绘制期几何与命中测试（命中测试用逆矩阵映射指针）。
 class TransformNode : public ModifierNode {
   public:

@@ -43,12 +43,12 @@ auto load_api_json() -> au::Json {
 }
 
 // 把 JSON 段整理为 {widget类型集合} / {枚举名 -> 取值集合}。
-auto widget_types_in_json(const au::Json& api) -> std::set<std::string> {
+auto widget_types_in_json(const au::Json &api) -> std::set<std::string> {
     std::set<std::string> out;
     if (!api.contains("widgets") || !api["widgets"].is_array()) {
         return out;
     }
-    for (const auto& w : api["widgets"]) {
+    for (const auto &w : api["widgets"]) {
         if (w.contains("type") && w["type"].is_string()) {
             out.insert(w["type"].get<std::string>());
         }
@@ -56,17 +56,17 @@ auto widget_types_in_json(const au::Json& api) -> std::set<std::string> {
     return out;
 }
 
-auto enums_in_json(const au::Json& api) -> std::map<std::string, std::set<std::string>> {
+auto enums_in_json(const au::Json &api) -> std::map<std::string, std::set<std::string>> {
     std::map<std::string, std::set<std::string>> out;
     if (!api.contains("enums") || !api["enums"].is_array()) {
         return out;
     }
-    for (const auto& e : api["enums"]) {
+    for (const auto &e : api["enums"]) {
         if (!e.contains("name") || !e["name"].is_string() || !e.contains("values") || !e["values"].is_array()) {
             continue;
         }
         std::set<std::string> vals;
-        for (const auto& v : e["values"]) {
+        for (const auto &v : e["values"]) {
             if (v.is_string()) {
                 vals.insert(v.get<std::string>());
             }
@@ -81,15 +81,15 @@ auto enums_in_json(const au::Json& api) -> std::map<std::string, std::set<std::s
 AURORA_TEST_CASE(api_json_contains_all_toolchain_sections) {
     const au::Json api = load_api_json();
     // gen_api_tools 产出 9 段 + gen_error_codes 产出 error_codes 段。
-    const char* required[] = {"library", "language",     "include",        "alias", "widgets",
+    const char *required[] = {"library", "language",     "include",        "alias", "widgets",
                               "enums",   "layout_rules", "state_patterns", "debug", "error_codes"};
-    for (const char* key : required) {
+    for (const char *key : required) {
         const bool present = api.contains(key);
         AURORA_TEST_CHECK_MSG(present, std::string("aurora_api.json contains top-level section: ") + key);
         if (!present) {
             continue;
         }
-        const au::Json& v = api[key];
+        const au::Json &v = api[key];
         // 标量段非空字符串；容器段非空。
         if (v.is_string()) {
             AURORA_TEST_CHECK_MSG(!v.get<std::string>().empty(), std::string("section non-empty: ") + key);
@@ -101,13 +101,13 @@ AURORA_TEST_CASE(api_json_contains_all_toolchain_sections) {
 
 AURORA_TEST_CASE(api_json_scalar_sections_hold_expected_values) {
     const au::Json api = load_api_json();
-    const std::pair<const char*, const char*> pairs[] = {
+    const std::pair<const char *, const char *> pairs[] = {
         {"library", "aurora"},
         {"language", "c++20"},
         {"include", "aurora/aurora.h"},
         {"alias", "au"},
     };
-    for (const auto& p : pairs) {
+    for (const auto &p : pairs) {
         if (!api.contains(p.first) || !api[p.first].is_string()) {
             AURORA_TEST_CHECK_MSG(false, std::string("scalar section readable: ") + p.first);
             continue;
@@ -134,10 +134,10 @@ AURORA_TEST_CASE(api_json_widget_set_matches_widget_registry) {
     std::vector<std::string> stale_in_json;
     std::ranges::set_difference(in_registry, in_json, std::back_inserter(missing_in_json));
     std::ranges::set_difference(in_json, in_registry, std::back_inserter(stale_in_json));
-    for (const auto& t : missing_in_json) {
+    for (const auto &t : missing_in_json) {
         AURORA_TEST_TRACE("widget present in registry but missing from aurora_api.json: " + t);
     }
-    for (const auto& t : stale_in_json) {
+    for (const auto &t : stale_in_json) {
         AURORA_TEST_TRACE("widget stale in aurora_api.json but absent from registry: " + t);
     }
     AURORA_TEST_CHECK_MSG(missing_in_json.empty() && stale_in_json.empty(),
@@ -156,13 +156,13 @@ AURORA_TEST_CASE(api_json_enums_match_known_enums_registry) {
 
     // 类型名双向漂移。
     int drift = 0;
-    for (const auto& [name, vals] : expected) {
+    for (const auto &[name, vals] : expected) {
         if (!actual.contains(name)) {
             AURORA_TEST_TRACE("enum present in known_enums but missing from aurora_api.json: " + name);
             ++drift;
         }
     }
-    for (const auto& [name, vals] : actual) {
+    for (const auto &[name, vals] : actual) {
         if (!expected.contains(name)) {
             AURORA_TEST_TRACE("enum stale in aurora_api.json but absent from known_enums: " + name);
             ++drift;
@@ -174,12 +174,12 @@ AURORA_TEST_CASE(api_json_enums_match_known_enums_registry) {
 
     // 取值双向漂移（仅对共同类型名）。
     int value_drift = 0;
-    for (const auto& [name, vals] : expected) {
+    for (const auto &[name, vals] : expected) {
         const auto it = actual.find(name);
         if (it == actual.end()) {
             continue;
         }
-        for (const auto& v : vals) {
+        for (const auto &v : vals) {
             if (!it->second.contains(v)) {
                 std::string msg;
                 msg += "enum ";
@@ -190,7 +190,7 @@ AURORA_TEST_CASE(api_json_enums_match_known_enums_registry) {
                 ++value_drift;
             }
         }
-        for (const auto& v : it->second) {
+        for (const auto &v : it->second) {
             if (std::ranges::find(vals, v) == vals.end()) {
                 std::string msg;
                 msg += "enum ";

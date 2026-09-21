@@ -32,7 +32,7 @@ class ProbeCodec : public image::ImageCodec {
     }
 
     [[nodiscard]] auto decode(std::span<const std::uint8_t> data,
-                              [[maybe_unused]] const image::DecodeOptions& opt) const -> Result<Image> override {
+                              [[maybe_unused]] const image::DecodeOptions &opt) const -> Result<Image> override {
         // 真实编解码器在 decode 内也会校验魔数：注册表的兜底轮会尝试「未嗅探命中」的编解码器，
         // 若此处不校验，任何字节流都会被本 codec 吞下（测试需还原该契约）。
         if (!sniff(data)) {
@@ -45,7 +45,7 @@ class ProbeCodec : public image::ImageCodec {
         return img;
     }
 
-    [[nodiscard]] auto encode([[maybe_unused]] const Image& img, [[maybe_unused]] const image::EncodeOptions& opt) const
+    [[nodiscard]] auto encode([[maybe_unused]] const Image &img, [[maybe_unused]] const image::EncodeOptions &opt) const
         -> Result<std::vector<std::uint8_t>> override {
         return std::vector<std::uint8_t>{'A', 'U', 'R', 'P'};
     }

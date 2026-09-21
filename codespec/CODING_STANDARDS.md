@@ -381,7 +381,17 @@
 
 `if` / `for` / `while` / `do-while` 等控制语句，**即使受控体仅一行也必须使用 `{}` 包裹**，禁止「尾随单语句省略大括号」的写法。
 
-该约束由 `.clang-format` 机械强制——已设置 `AllowShortIfStatementsOnASingleLine: false` 与 `AllowShortLoopsOnASingleLine: false`，运行 `clang-format` 会自动补齐缺失大括号。此规则对 `switch` 的 `case` 标签（无受控体括号语义）不适用。
+该约束由 `.clang-format` 机械强制——`InsertBraces: true` 负责补齐缺失的大括号；`AllowShortIfStatementsOnASingleLine: WithoutElse`（无 `else` 分支时才允许压成单行）与 `AllowShortLoopsOnASingleLine: false` 控制短语句是否允许单行。此规则对 `switch` 的 `case` 标签（无受控体括号语义）不适用。
+
+### 8.5 指针 / 引用对齐：右对齐
+
+`*` 与 `&` **贴在变量名一侧**（`Type *name` / `Type &name`），由仓库根 `.clang-format` 的 `PointerAlignment: Right` 机械保证。
+
+理由：C++ 语法里 `*` 绑定的是声明符而非类型说明符，`int *a, b;` 中只有 `a` 是指针、`b` 是 `int`——右对齐让读法与语法事实一致；左对齐写法 `int* a, b;` 会造成「两个都是指针」的误读。此外全仓存量代码压倒性地采用右对齐（实测指针 1826 : 218、引用 4823 : 785），改为左对齐会翻出约 1.5 万行无谓差异。
+
+⚠️ `DerivePointerAlignment` **必须保持 `false`**：它由 `BasedOnStyle: Google` 带入 `true`，一旦生效就会「按每个文件里多数的写法推导」，`PointerAlignment` 退化成兜底值，格式化结果随内容漂移、不再幂等。
+
+⚠️ `clang-format` 会重排注释，可能把 `NOLINTNEXTLINE` 的理由注释折到它与目标行之间、使抑制失效。**理由注释一律写在 `NOLINTNEXTLINE` 之前**（参见 §10 的 NOLINT 约定）。
 
 ---
 
@@ -486,6 +496,9 @@ BREAKING CHANGE: 自定义 Widget 的 on_paint 实现须改用全局坐标，
 6. **与版本策略对齐**：`feat` → 升 MINOR；`fix` / `perf` / `docs` 等 → 升 PATCH；带 `!` 或 `BREAKING CHANGE:` → 升 MAJOR，并写迁移说明。
 7. **不提交无关文件**：仅纳入本次实际改动的业务文件；构建产物（`build*/`）与本地 AI 工具目录（`.codebuddy/` 等）已由 `.gitignore` 忽略，勿 `git add -A` 强行纳入。
 8. **提交前必跑 LINT 且零告警**：**每次提交代码前**必须跑一遍静态检查并确保**零告警**——`cmake --build build --target lint`（配置源为仓库根 `.clang-tidy`，扫描 `compile_commands.json` 中全部非 `third_party` 翻译单元，按 `(file, line, check)` 去重后凡存在 warning 及以上即以退出码 1 失败）。有告警先修；确需抑制时按 §5.2 写明**具体检查名 + 为何不能按建议修复**，不得用裸 `NOLINT` 掩盖。仅做格式化可用 `cmake --build build --target lint-fix` 就地应用 fix-it，但**须人工审阅 diff**，且与逻辑改动分开提交（见 §10.6）。选项、目标与运行器说明见 `BUILD_OPTIONS.md` §4.5。
+9. **提交前必跑排版校验**：排版校验与 lint 是两道独立门禁，`lint` 通过不代表排版合规。提交前必须 `cmake --build build --target format-check`（依据仓库根 `.clang-format` 校验全部非 `third_party` 源文件，任一文件存在差异即以退出码 1 失败）；需要归一整先用 `cmake --build build --target format` 就地重写（同样须人工审阅 diff）。运行器见 `tools/check/run_clang_format.py`。
+
+> ⚠️ 排版门禁 2026-09-21 之前**完全缺失**：仓库内没有任何 clang-format 调用点，而配置（当时的 `PointerAlignment: Left`）与代码库实际写法（右对齐）长期背离，累积到 488/823 文件、约 1.5 万行不一致都未被发现。请勿移除该门禁——它的作用是让漂移在引入时暴露。
 
 ### 10.6 禁止事项
 

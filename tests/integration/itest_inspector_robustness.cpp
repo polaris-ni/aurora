@@ -43,7 +43,7 @@ namespace aurora::test_cases::itest_inspector_robustness {
 namespace {
 
 /// @brief 共享测试树：Column 根 + Text 子节点（静态存储期，供 worker 线程 root_getter 读取）。
-auto shared_tree() -> std::shared_ptr<Column>& {
+auto shared_tree() -> std::shared_ptr<Column> & {
     static std::shared_ptr<Column> tree = []() -> std::shared_ptr<aurora::Column> {
         auto col = std::make_shared<Column>();
         col->add(Node{std::make_shared<Text>("hello")});
@@ -66,16 +66,16 @@ struct WinsockSession {
             WSACleanup();
         }
     }
-    WinsockSession(const WinsockSession&) = delete;
-    auto operator=(const WinsockSession&) -> WinsockSession& = delete;
-    WinsockSession(WinsockSession&&) = delete;
-    auto operator=(WinsockSession&&) -> WinsockSession& = delete;
+    WinsockSession(const WinsockSession &) = delete;
+    auto operator=(const WinsockSession &) -> WinsockSession & = delete;
+    WinsockSession(WinsockSession &&) = delete;
+    auto operator=(WinsockSession &&) -> WinsockSession & = delete;
     bool started = false;
 };
 #endif
 
 /// @brief 对 127.0.0.1:port 发送原始请求文本并回收完整响应（服务端 Connection: close）。
-auto http_raw(std::uint16_t port, const std::string& raw) -> std::string {
+auto http_raw(std::uint16_t port, const std::string &raw) -> std::string {
 #ifdef AURORA_PLATFORM_WINDOWS
     const WinsockSession wsa;
 #endif
@@ -99,7 +99,7 @@ auto http_raw(std::uint16_t port, const std::string& raw) -> std::string {
     addr.sin_port = htons(port);
     // Winsock connect() 形参类型是 sockaddr*，sockaddr_in 强转为通用 socket 地址属必要写法。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+    if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
         closesocket(sock);
         return {};
     }
@@ -122,7 +122,7 @@ auto http_raw(std::uint16_t port, const std::string& raw) -> std::string {
 }
 
 /// @brief 标准 HTTP 请求便捷封装。
-auto http_request(std::uint16_t port, const std::string& method, const std::string& path, const std::string& body)
+auto http_request(std::uint16_t port, const std::string &method, const std::string &path, const std::string &body)
     -> std::string {
     std::ostringstream req;
     req << method << " " << path << " HTTP/1.1\r\nHost: 127.0.0.1\r\n";
@@ -134,7 +134,7 @@ auto http_request(std::uint16_t port, const std::string& method, const std::stri
 }
 
 /// @brief "HTTP/1.1 400 Bad Request" → 400；解析失败返回 0（视为连接中断，必失败）。
-auto status_of(const std::string& resp) -> int {
+auto status_of(const std::string &resp) -> int {
     const auto sp1 = resp.find(' ');
     if (sp1 == std::string::npos) {
         return 0;
@@ -150,7 +150,7 @@ auto status_of(const std::string& resp) -> int {
     }
 }
 
-auto body_of(const std::string& resp) -> std::string {
+auto body_of(const std::string &resp) -> std::string {
     const auto hend = resp.find("\r\n\r\n");
     return (hend == std::string::npos) ? std::string{} : resp.substr(hend + 4);
 }
@@ -168,10 +168,10 @@ class ScopedServer {
             server_.stop();
         }
     }
-    ScopedServer(const ScopedServer&) = delete;
-    auto operator=(const ScopedServer&) -> ScopedServer& = delete;
-    ScopedServer(ScopedServer&&) = delete;
-    auto operator=(ScopedServer&&) -> ScopedServer& = delete;
+    ScopedServer(const ScopedServer &) = delete;
+    auto operator=(const ScopedServer &) -> ScopedServer & = delete;
+    ScopedServer(ScopedServer &&) = delete;
+    auto operator=(ScopedServer &&) -> ScopedServer & = delete;
 
     [[nodiscard]] auto port() const -> std::uint16_t { return server_.port(); }
 

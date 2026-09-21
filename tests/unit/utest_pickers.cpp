@@ -21,7 +21,7 @@ namespace aurora::test_cases::utest_pickers {
 namespace {
 
 /// 挂载并按给定上限布局，返回测得尺寸（无头环境：BuildContext + 约束）。
-auto laid_out(Widget& w, float max_w, float max_h) -> Size {
+auto laid_out(Widget &w, float max_w, float max_h) -> Size {
     BuildContext ctx;
     w.mount(ctx);
     const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = max_w, .height = max_h}};
@@ -29,7 +29,7 @@ auto laid_out(Widget& w, float max_w, float max_h) -> Size {
 }
 
 /// 合成一次按下事件并派发给控件。
-auto press(Widget& w, float x, float y) -> MouseEvent {
+auto press(Widget &w, float x, float y) -> MouseEvent {
     MouseEvent e;
     e.action = MouseAction::Press;
     e.local_position = Point{.x = x, .y = y};
@@ -87,7 +87,7 @@ AURORA_TEST_CASE(pickers_type_contract) {
     AURORA_TEST_CHECK_TRUE(tp.wants_click());
     AURORA_TEST_CHECK_TRUE(cp.wants_click());
 
-    std::vector<SignalViewBase*> out;
+    std::vector<SignalViewBase *> out;
     dp.collect_signals(out);
     tp.collect_signals(out);
     cp.collect_signals(out);

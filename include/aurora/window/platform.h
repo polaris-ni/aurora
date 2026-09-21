@@ -31,16 +31,11 @@ struct Platform {
         c.mobile = is_mobile();
         // `SurfaceKind` 所有枚举器无条件存在（见 `window.h` 稳定性契约），此处比较不再受
         // `AURORA_BACKEND_*` 宏影响；未编译的后端其标签只是运行期不会被产出，比较恒为 false。
-        c.multitouch = (surface == SurfaceKind::Win32 || surface == SurfaceKind::Glfw
-                        || surface == SurfaceKind::X11
-                        || surface == SurfaceKind::Wayland
-                        || surface == SurfaceKind::MacOS
-        );
-        c.high_frequency_pointer = (surface == SurfaceKind::Win32 || surface == SurfaceKind::Glfw
-                                    || surface == SurfaceKind::X11
-                                    || surface == SurfaceKind::Wayland
-                                    || surface == SurfaceKind::MacOS
-        );
+        c.multitouch = (surface == SurfaceKind::Win32 || surface == SurfaceKind::Glfw || surface == SurfaceKind::X11 ||
+                        surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
+        c.high_frequency_pointer =
+            (surface == SurfaceKind::Win32 || surface == SurfaceKind::Glfw || surface == SurfaceKind::X11 ||
+             surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
         return c;
     }
 };

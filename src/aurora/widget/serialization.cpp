@@ -25,12 +25,12 @@
 #include "aurora/widget/grid.h"
 #include "aurora/widget/grid_view.h"
 #include "aurora/widget/image_widget.h"
-#include "aurora/widget/line_chart.h"
-#include "aurora/widget/pie_chart.h"
 #include "aurora/widget/lazy_list.h"
 #include "aurora/widget/lazy_row.h"
+#include "aurora/widget/line_chart.h"
 #include "aurora/widget/menu_bar.h"
 #include "aurora/widget/pickers.h"
+#include "aurora/widget/pie_chart.h"
 #include "aurora/widget/placeholder.h"
 #include "aurora/widget/popup.h"
 #include "aurora/widget/progress.h"
@@ -43,10 +43,10 @@
 #include "aurora/widget/scroll.h"
 #include "aurora/widget/segmented_control.h"
 #include "aurora/widget/show.h"
-#include "aurora/widget/sparkline.h"
 #include "aurora/widget/skeleton.h"
 #include "aurora/widget/slider.h"
 #include "aurora/widget/spacer.h"
+#include "aurora/widget/sparkline.h"
 #include "aurora/widget/splitter.h"
 #include "aurora/widget/stack.h"
 #include "aurora/widget/stepper.h"
@@ -415,8 +415,8 @@ auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void {
 
 namespace {
 auto is_container_type(const std::string &t) -> bool {
-    return t == "Column" || t == "Row" || t == "Stack" || t == "Grid" || t == "Scroll" || t == "PullToRefresh"
-           || t == "StickyHeader";
+    return t == "Column" || t == "Row" || t == "Stack" || t == "Grid" || t == "Scroll" || t == "PullToRefresh" ||
+           t == "StickyHeader";
 }
 }  // namespace
 

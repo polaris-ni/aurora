@@ -35,7 +35,7 @@ class CaseAbort : public std::exception {
   public:
     explicit CaseAbort(std::string message) : message_(std::move(message)) {}
 
-    [[nodiscard]] auto what() const noexcept -> const char* override { return message_.c_str(); }
+    [[nodiscard]] auto what() const noexcept -> const char * override { return message_.c_str(); }
 
   private:
     std::string message_;
@@ -47,9 +47,9 @@ class CaseSkipped : public std::exception {
     explicit CaseSkipped(std::string reason) : reason_(std::move(reason)) {}
 
     /// @brief 跳过原因（原样进入报告）。
-    [[nodiscard]] auto reason() const -> const std::string& { return reason_; }
+    [[nodiscard]] auto reason() const -> const std::string & { return reason_; }
 
-    [[nodiscard]] auto what() const noexcept -> const char* override { return reason_.c_str(); }
+    [[nodiscard]] auto what() const noexcept -> const char * override { return reason_.c_str(); }
 
   private:
     std::string reason_;
@@ -67,7 +67,7 @@ enum class Severity : std::uint8_t {
 namespace detail {
 
 /// @brief 断言内核唯一出口：拼接追踪上下文、记账、按级别决定是否抛出。
-auto report(Severity severity, const char* file, int line, std::string message) -> void;
+auto report(Severity severity, const char *file, int line, std::string message) -> void;
 
 /// @brief 抛 CaseSkipped；当前用例立即终止并记为 Skipped。
 [[noreturn]] auto skip_case(std::string reason) -> void;
@@ -87,7 +87,7 @@ auto report(Severity severity, const char* file, int line, std::string message) 
 // 免去对 CHECK_EQ(size, 字面量) 这类混型用例的逐文件压制。非算术类型（指针/字符串/枚举）
 // 原样比较，行为不变。
 template <typename A, typename B, typename Op>
-[[nodiscard]] auto compare_values(const A& lhs, const B& rhs, Op op) -> bool {
+[[nodiscard]] auto compare_values(const A &lhs, const B &rhs, Op op) -> bool {
     if constexpr (std::is_arithmetic_v<A> && std::is_arithmetic_v<B>) {
         using Common = std::common_type_t<A, B>;
         return op(static_cast<Common>(lhs), static_cast<Common>(rhs));
@@ -97,54 +97,54 @@ template <typename A, typename B, typename Op>
 }
 
 template <typename A, typename B>
-[[nodiscard]] auto eq_message(const A& lhs, const B& rhs, std::string_view lhs_text, std::string_view rhs_text)
+[[nodiscard]] auto eq_message(const A &lhs, const B &rhs, std::string_view lhs_text, std::string_view rhs_text)
     -> std::string {
-    if (compare_values(lhs, rhs, [](const auto& l, const auto& r) { return l == r; })) {
+    if (compare_values(lhs, rhs, [](const auto &l, const auto &r) { return l == r; })) {
         return {};
     }
     return std::string{lhs_text} + " == " + std::string{rhs_text} + compare_detail(lhs, rhs);
 }
 
 template <typename A, typename B>
-[[nodiscard]] auto ne_message(const A& lhs, const B& rhs, std::string_view lhs_text, std::string_view rhs_text)
+[[nodiscard]] auto ne_message(const A &lhs, const B &rhs, std::string_view lhs_text, std::string_view rhs_text)
     -> std::string {
-    if (compare_values(lhs, rhs, [](const auto& l, const auto& r) { return l != r; })) {
+    if (compare_values(lhs, rhs, [](const auto &l, const auto &r) { return l != r; })) {
         return {};
     }
     return std::string{lhs_text} + " != " + std::string{rhs_text} + compare_detail(lhs, rhs);
 }
 
 template <typename A, typename B>
-[[nodiscard]] auto lt_message(const A& lhs, const B& rhs, std::string_view lhs_text, std::string_view rhs_text)
+[[nodiscard]] auto lt_message(const A &lhs, const B &rhs, std::string_view lhs_text, std::string_view rhs_text)
     -> std::string {
-    if (compare_values(lhs, rhs, [](const auto& l, const auto& r) { return l < r; })) {
+    if (compare_values(lhs, rhs, [](const auto &l, const auto &r) { return l < r; })) {
         return {};
     }
     return std::string{lhs_text} + " < " + std::string{rhs_text} + compare_detail(lhs, rhs);
 }
 
 template <typename A, typename B>
-[[nodiscard]] auto le_message(const A& lhs, const B& rhs, std::string_view lhs_text, std::string_view rhs_text)
+[[nodiscard]] auto le_message(const A &lhs, const B &rhs, std::string_view lhs_text, std::string_view rhs_text)
     -> std::string {
-    if (compare_values(lhs, rhs, [](const auto& l, const auto& r) { return l <= r; })) {
+    if (compare_values(lhs, rhs, [](const auto &l, const auto &r) { return l <= r; })) {
         return {};
     }
     return std::string{lhs_text} + " <= " + std::string{rhs_text} + compare_detail(lhs, rhs);
 }
 
 template <typename A, typename B>
-[[nodiscard]] auto gt_message(const A& lhs, const B& rhs, std::string_view lhs_text, std::string_view rhs_text)
+[[nodiscard]] auto gt_message(const A &lhs, const B &rhs, std::string_view lhs_text, std::string_view rhs_text)
     -> std::string {
-    if (compare_values(lhs, rhs, [](const auto& l, const auto& r) { return l > r; })) {
+    if (compare_values(lhs, rhs, [](const auto &l, const auto &r) { return l > r; })) {
         return {};
     }
     return std::string{lhs_text} + " > " + std::string{rhs_text} + compare_detail(lhs, rhs);
 }
 
 template <typename A, typename B>
-[[nodiscard]] auto ge_message(const A& lhs, const B& rhs, std::string_view lhs_text, std::string_view rhs_text)
+[[nodiscard]] auto ge_message(const A &lhs, const B &rhs, std::string_view lhs_text, std::string_view rhs_text)
     -> std::string {
-    if (compare_values(lhs, rhs, [](const auto& l, const auto& r) { return l >= r; })) {
+    if (compare_values(lhs, rhs, [](const auto &l, const auto &r) { return l >= r; })) {
         return {};
     }
     return std::string{lhs_text} + " >= " + std::string{rhs_text} + compare_detail(lhs, rhs);
@@ -152,7 +152,7 @@ template <typename A, typename B>
 
 /// @brief 浮点近似：对称差 `|a - b| <= eps`（提升为 double 后比较，避免混型截断）。
 template <typename A, typename B, typename E>
-[[nodiscard]] auto near_message(const A& lhs, const B& rhs, const E& eps, std::string_view lhs_text,
+[[nodiscard]] auto near_message(const A &lhs, const B &rhs, const E &eps, std::string_view lhs_text,
                                 std::string_view rhs_text) -> std::string {
     const auto delta = std::fabs(static_cast<double>(lhs) - static_cast<double>(rhs));
     if (delta <= static_cast<double>(eps)) {
@@ -170,14 +170,14 @@ template <typename A, typename B, typename E>
 ///       检查不可省：删掉后 `string_view(nullptr)` 会走 `strlen(nullptr)`（实测段错误）。
 ///       数组分支则相反：退化后取的是数组首地址，恒非空，比较既恒假又会触发告警。
 template <typename T>
-[[nodiscard]] auto string_view_of(const T& text) -> std::string_view {
+[[nodiscard]] auto string_view_of(const T &text) -> std::string_view {
     // 字符数组（字面量 "abc"、char 缓冲区）必须先分流：数组退化为指针后地址恒非空，
     // 再与 nullptr 比较会让 GCC 报 -Wnonnull-compare（该诊断依赖优化期推断，故仅
     // -O1 及以上出现）。数组天然非空，直接走视图构造即可 —— 与指针分支的非空路径
     // 同为 C 串语义（截断到首个 '\0'），行为不变。
     if constexpr (std::is_array_v<std::remove_reference_t<T>>) {  // NOLINT(*-branch-clone)
         return std::string_view{text};
-    } else if constexpr (std::is_same_v<std::decay_t<T>, const char*> || std::is_same_v<std::decay_t<T>, char*>) {
+    } else if constexpr (std::is_same_v<std::decay_t<T>, const char *> || std::is_same_v<std::decay_t<T>, char *>) {
         return text == nullptr ? std::string_view{} : std::string_view{text};
     } else {
         return std::string_view{text};
@@ -195,11 +195,11 @@ template <typename T>
 [[nodiscard]] inline auto always_true() -> bool { return true; }
 
 template <typename Fn>
-    requires std::is_invocable_v<Fn&>
-[[nodiscard]] auto no_throw_message(Fn&& body, std::string_view statement_text) -> std::string {
+    requires std::is_invocable_v<Fn &>
+[[nodiscard]] auto no_throw_message(Fn &&body, std::string_view statement_text) -> std::string {
     try {
         body();
-    } catch (const std::exception& error) {
+    } catch (const std::exception &error) {
         return std::string{statement_text} + " threw " + exception_text(error) + ", expected no exception";
     } catch (...) {
         return std::string{statement_text} + " threw a non-standard exception, expected no exception";
@@ -208,14 +208,14 @@ template <typename Fn>
 }
 
 template <typename Expected, typename Fn>
-    requires std::is_invocable_v<Fn&>
-[[nodiscard]] auto throws_message(Fn&& body, std::string_view statement_text, std::string_view expected_text)
+    requires std::is_invocable_v<Fn &>
+[[nodiscard]] auto throws_message(Fn &&body, std::string_view statement_text, std::string_view expected_text)
     -> std::string {
     try {
         body();
-    } catch (const Expected&) {
+    } catch (const Expected &) {
         return {};
-    } catch (const std::exception& error) {
+    } catch (const std::exception &error) {
         return std::string{statement_text} + " threw " + exception_text(error) + ", expected " +
                std::string{expected_text};
     } catch (...) {
@@ -225,8 +225,8 @@ template <typename Expected, typename Fn>
 }
 
 template <typename Fn>
-    requires std::is_invocable_v<Fn&>
-[[nodiscard]] auto any_throw_message(Fn&& body, std::string_view statement_text) -> std::string {
+    requires std::is_invocable_v<Fn &>
+[[nodiscard]] auto any_throw_message(Fn &&body, std::string_view statement_text) -> std::string {
     try {
         body();
     } catch (...) {
@@ -239,7 +239,7 @@ template <typename Fn>
 // ---- 指针空判定 ----
 
 template <typename T>
-[[nodiscard]] auto null_message(const T& pointer, std::string_view expression) -> std::string {
+[[nodiscard]] auto null_message(const T &pointer, std::string_view expression) -> std::string {
     if (pointer == nullptr) {
         return {};
     }
@@ -247,7 +247,7 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] auto not_null_message(const T& pointer, std::string_view expression) -> std::string {
+[[nodiscard]] auto not_null_message(const T &pointer, std::string_view expression) -> std::string {
     if (pointer != nullptr) {
         return {};
     }
@@ -258,10 +258,10 @@ template <typename T>
 class TraceScope {
   public:
     explicit TraceScope(std::string note);
-    TraceScope(const TraceScope&) = delete;
-    auto operator=(const TraceScope&) -> TraceScope& = delete;
-    TraceScope(TraceScope&&) = delete;
-    auto operator=(TraceScope&&) -> TraceScope& = delete;
+    TraceScope(const TraceScope &) = delete;
+    auto operator=(const TraceScope &) -> TraceScope & = delete;
+    TraceScope(TraceScope &&) = delete;
+    auto operator=(TraceScope &&) -> TraceScope & = delete;
     ~TraceScope();
 
   private:
@@ -340,7 +340,7 @@ namespace aurora::testing {
 /// 「已检查」，紧随其后的 `opt->` / `*opt` 会被误报。把「检查 + 取值」收进本函数后
 /// 调用点不再直接触碰 optional，误报消除；代价是此处需要一处具名抑制。
 template <typename T>
-[[nodiscard]] auto require_value(const std::optional<T>& opt) -> T {
+[[nodiscard]] auto require_value(const std::optional<T> &opt) -> T {
     AURORA_TEST_REQUIRE(opt.has_value());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access): 上一行 REQUIRE 已断言持有值，其宏展开对路径分析不透明
     return *opt;

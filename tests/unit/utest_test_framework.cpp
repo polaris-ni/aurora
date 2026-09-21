@@ -34,7 +34,7 @@ AURORA_TEST_CASE(suite_name_equals_file_stem) {
     // 套件名恒等于文件 stem，CTest 的 --run=<stem> 才能筛中本文件全部用例。
     const auto cases = testing::TestRegistry::instance().cases();
     bool found = false;
-    for (const auto* test_case : cases) {
+    for (const auto *test_case : cases) {
         if (test_case->suite != "utest_test_framework") {
             continue;
         }
@@ -47,7 +47,7 @@ AURORA_TEST_CASE(suite_name_equals_file_stem) {
 
 AURORA_TEST_CASE(registered_case_file_matches_this_file) {
     const auto cases = testing::TestRegistry::instance().cases();
-    for (const auto* test_case : cases) {
+    for (const auto *test_case : cases) {
         if (test_case->suite != "utest_test_framework") {
             continue;
         }
@@ -94,7 +94,7 @@ AURORA_TEST_CASE(assertion_family_smoke) {
     AURORA_TEST_CHECK_THROW(throw std::runtime_error{"boom"}, std::runtime_error);
     AURORA_TEST_CHECK_NO_THROW(static_cast<void>(computed));
     AURORA_TEST_CHECK_ANY_THROW(throw 1);
-    AURORA_TEST_CHECK_NULL(static_cast<const int*>(nullptr));
+    AURORA_TEST_CHECK_NULL(static_cast<const int *>(nullptr));
     AURORA_TEST_CHECK_NOT_NULL(&computed);
 
     // 容器与枚举实参可直接比较；实际值渲染见 value_print.h。
@@ -197,17 +197,17 @@ AURORA_TEST_CASE(death_test_detects_fatal_statement) {
 AURORA_TEST_CASE(isolation_temp_dir_wired_to_env) {
     // 每个用例开始时框架创建唯一临时目录并接管 TMPDIR/TMP/TEMP，
     // 偏好 / 存储类用例的临时文件写入因此彼此隔离（并行安全的关键一环）。
-    const auto& tmp = testing::isolation::temp_dir();
+    const auto &tmp = testing::isolation::temp_dir();
     AURORA_TEST_REQUIRE(!tmp.empty());
     AURORA_TEST_CHECK(std::filesystem::exists(tmp));
-    const char* env_tmpdir = std::getenv("TMPDIR");
+    const char *env_tmpdir = std::getenv("TMPDIR");
     AURORA_TEST_REQUIRE(env_tmpdir != nullptr);
     AURORA_TEST_CHECK(tmp == env_tmpdir);
 }
 
 AURORA_TEST_CASE(isolation_repo_root_resolves) {
     // cwd 已被统一切到仓库根；paths::under_repo 在其上给出绝对路径。
-    const auto& root = testing::paths::repo_root();
+    const auto &root = testing::paths::repo_root();
     AURORA_TEST_REQUIRE(!root.empty());
     AURORA_TEST_CHECK(std::filesystem::exists(std::filesystem::path{root} / "codespec"));
     AURORA_TEST_CHECK(std::filesystem::exists(testing::paths::under_repo("codespec")));

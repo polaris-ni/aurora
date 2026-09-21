@@ -15,7 +15,7 @@ class StubNode final : public ModifierNode {
   public:
     explicit StubNode(ModifierNode::Kind k) : kind_(k) {}
     [[nodiscard]] auto kind() const -> Kind override { return kind_; }
-    auto layout(const Constraints& c, const std::function<Size(const Constraints&)>& measure_child) const
+    auto layout(const Constraints &c, const std::function<Size(const Constraints &)> &measure_child) const
         -> Size override {
         return measure_child(c);
     }
@@ -68,7 +68,7 @@ AURORA_TEST_CASE(base_stub_passthrough_layout) {
     // 透明节点的 layout 契约：把约束原样交给子测量，返回其结果。
     const StubNode n(ModifierNode::Kind::Layout);
     const Constraints c{.min = Size{.width = 10.0F, .height = 20.0F}, .max = Size{.width = 30.0F, .height = 40.0F}};
-    const Size s = n.layout(c, [](const Constraints& inner) -> Size {
+    const Size s = n.layout(c, [](const Constraints &inner) -> Size {
         AURORA_TEST_CHECK_EQ(inner.min.width, 10.0F);
         AURORA_TEST_CHECK_EQ(inner.max.height, 40.0F);
         return Size{.width = 15.0F, .height = 25.0F};

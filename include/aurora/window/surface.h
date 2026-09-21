@@ -9,6 +9,7 @@
 #include <thread>
 #include <vector>
 
+#include "aurora/core/a11y_provider.h"  // Provider 完整定义（set_accessibility_rtl 默认实现需调用其虚方法）
 #include "aurora/core/enums.h"
 #include "aurora/core/result.h"
 #include "aurora/core/types.h"
@@ -17,7 +18,6 @@
 #include "aurora/render/png.h"
 #include "aurora/window/title_bar_style.h"
 #include "aurora/window/window_state.h"
-#include "aurora/core/a11y_provider.h"  // Provider 完整定义（set_accessibility_rtl 默认实现需调用其虚方法）
 
 namespace aurora {
 
@@ -502,13 +502,13 @@ class HeadlessSurface : public Surface {
     std::string png_path_;
     Size size_{.width = 0.0F, .height = 0.0F};
     int frame_ = 0;
-    bool should_close_ = false;       ///< 关闭请求（经 `set_should_close` 置位；见 `should_close()`）。
+    bool should_close_ = false;  ///< 关闭请求（经 `set_should_close` 置位；见 `should_close()`）。
     const Surface *owner_ = nullptr;  ///< 记录的 owner（多窗口测试观测点）。
-    bool enabled_ = true;             ///< 输入启用态（模态屏蔽 owner 的观测点）。
-    int raise_count_ = 0;             ///< `raise()` 调用次数。
-    int focus_count_ = 0;             ///< `focus_window()` 调用次数。
-    int display_id_ = -1;             ///< 设定值（模拟所在显示器）。
-    Point origin_{};                  ///< 模拟的屏幕位置（几何持久化测试观测点）。
+    bool enabled_ = true;  ///< 输入启用态（模态屏蔽 owner 的观测点）。
+    int raise_count_ = 0;  ///< `raise()` 调用次数。
+    int focus_count_ = 0;  ///< `focus_window()` 调用次数。
+    int display_id_ = -1;  ///< 设定值（模拟所在显示器）。
+    Point origin_{};  ///< 模拟的屏幕位置（几何持久化测试观测点）。
     std::vector<CursorShape> cursor_log_;  ///< 悬停光标下发序列（无头验收入口；见 set_cursor）。
 };
 #endif  // AURORA_BACKEND_HEADLESS

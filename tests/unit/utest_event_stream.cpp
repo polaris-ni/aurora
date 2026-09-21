@@ -17,7 +17,7 @@ namespace m = aurora::testing::matchers;
 AURORA_TEST_CASE(subscribe_and_emit_delivers_value) {
     aurora::EventStream<int> stream;
     int received = 0;
-    const auto sub = stream.subscribe([&received](const int& v) -> void { received = v; });
+    const auto sub = stream.subscribe([&received](const int &v) -> void { received = v; });
     AURORA_TEST_CHECK(static_cast<bool>(sub));
     stream.emit(5);
     AURORA_TEST_CHECK_EQ(received, 5);
@@ -26,8 +26,8 @@ AURORA_TEST_CASE(subscribe_and_emit_delivers_value) {
 AURORA_TEST_CASE(emit_reaches_all_subscribers_in_subscription_order) {
     aurora::EventStream<int> stream;
     std::vector<int> order;
-    const auto first = stream.subscribe([&order](const int& v) -> void { order.push_back(100 + v); });
-    const auto second = stream.subscribe([&order](const int& v) -> void { order.push_back(200 + v); });
+    const auto first = stream.subscribe([&order](const int &v) -> void { order.push_back(100 + v); });
+    const auto second = stream.subscribe([&order](const int &v) -> void { order.push_back(200 + v); });
     AURORA_TEST_CHECK(static_cast<bool>(first));
     AURORA_TEST_CHECK(static_cast<bool>(second));
 
@@ -42,7 +42,7 @@ AURORA_TEST_CASE(subscription_destructor_unsubscribes) {
     aurora::EventStream<int> stream;
     int calls = 0;
     {
-        auto sub = stream.subscribe([&calls](const int&) -> void { ++calls; });
+        auto sub = stream.subscribe([&calls](const int &) -> void { ++calls; });
         stream.emit(1);
         AURORA_TEST_CHECK_EQ(calls, 1);
     }
@@ -54,7 +54,7 @@ AURORA_TEST_CASE(subscription_destructor_unsubscribes) {
 AURORA_TEST_CASE(reset_unsubscribes_and_double_reset_safe) {
     aurora::EventStream<int> stream;
     int calls = 0;
-    auto sub = stream.subscribe([&calls](const int&) -> void { ++calls; });
+    auto sub = stream.subscribe([&calls](const int &) -> void { ++calls; });
     AURORA_TEST_CHECK(static_cast<bool>(sub));
     sub.reset();
     AURORA_TEST_CHECK_FALSE(static_cast<bool>(sub));
@@ -68,7 +68,7 @@ AURORA_TEST_CASE(reset_unsubscribes_and_double_reset_safe) {
 AURORA_TEST_CASE(subscription_move_semantics_transfer_ownership) {
     aurora::EventStream<int> stream;
     int calls = 0;
-    auto moved_from = stream.subscribe([&calls](const int&) -> void { ++calls; });
+    auto moved_from = stream.subscribe([&calls](const int &) -> void { ++calls; });
     auto moved_to = std::move(moved_from);
     // 本用例的断言目标就是「移动后源句柄失效」：对 moved-from 做只读的 bool 转换是刻意检查，
     // 非误用；改写将破坏被测语义（Subscription 移动后置空属实现契约）。
@@ -79,7 +79,7 @@ AURORA_TEST_CASE(subscription_move_semantics_transfer_ownership) {
     AURORA_TEST_CHECK_EQ(calls, 1);
 
     // 移动赋值：目标句柄先释放自己的原订阅，再接管新订阅。
-    auto other = stream.subscribe([&calls](const int&) -> void { calls += 10; });
+    auto other = stream.subscribe([&calls](const int &) -> void { calls += 10; });
     other = std::move(moved_to);
     stream.emit(2);
     AURORA_TEST_CHECK_EQ(calls, 2);  // +10 的订阅已随赋值释放，仅原订阅收到
@@ -95,7 +95,7 @@ AURORA_TEST_CASE(unsubscribe_unknown_id_is_noop) {
     AURORA_TEST_CHECK_NO_THROW(stream.unsubscribe(9999));
 
     int calls = 0;
-    auto sub = stream.subscribe([&calls](const int&) -> void { ++calls; });
+    auto sub = stream.subscribe([&calls](const int &) -> void { ++calls; });
     AURORA_TEST_CHECK(static_cast<bool>(sub));
     stream.emit(1);
     AURORA_TEST_CHECK_EQ(calls, 1);
@@ -105,8 +105,8 @@ AURORA_TEST_CASE(independent_streams_and_empty_emit) {
     aurora::EventStream<std::string> a;
     aurora::EventStream<std::string> b;
     std::vector<std::string> seen;
-    const auto sub_a = a.subscribe([&seen](const std::string& v) -> void { seen.push_back("a:" + v); });
-    const auto sub_b = b.subscribe([&seen](const std::string& v) -> void { seen.push_back("b:" + v); });
+    const auto sub_a = a.subscribe([&seen](const std::string &v) -> void { seen.push_back("a:" + v); });
+    const auto sub_b = b.subscribe([&seen](const std::string &v) -> void { seen.push_back("b:" + v); });
     AURORA_TEST_CHECK(static_cast<bool>(sub_a));
     AURORA_TEST_CHECK(static_cast<bool>(sub_b));
 

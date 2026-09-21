@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/widget/widget.h（perform_accessibility_action）、include/aurora/event/focus.h（resolve_focus_manager）
+/// 目标单元: include/aurora/widget/widget.h + include/aurora/event/focus.h
 /// 测试说明: 读屏动作通道的默认路由：Focus 经 resolve_focus_manager 落焦（G1，不依赖派发栈）、
 ///           Click/Invoke 走同口径命中测试 + press/release 两段派发、Scroll* 转滚轮增量（G32）、
 ///           语义强相关动作（Toggle/Value/Select）基类不支持；以及无焦点管理器时的降级
@@ -21,7 +21,7 @@ namespace {
 /// @brief 可聚焦叶控件桩：固定尺寸、可命中，记录收到的指针/滚动事件。
 class ActionProbe final : public LeafWidget {
   public:
-    [[nodiscard]] auto type_name() const -> const char *override { return "ActionProbe"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "ActionProbe"; }
 
     auto on_layout(const Constraints & /*c*/, const BuildContext & /*ctx*/) -> Size override {
         size_ = Size{.width = 100.0F, .height = 40.0F};
@@ -61,7 +61,7 @@ class ActionProbe final : public LeafWidget {
 /// @brief 零尺寸控件桩：几何退化 → 命中测试恒空、滚动量恒零（动作应被拒）。
 class ZeroProbe final : public LeafWidget {
   public:
-    [[nodiscard]] auto type_name() const -> const char *override { return "ZeroProbe"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "ZeroProbe"; }
 
   protected:
     auto on_layout(const Constraints & /*c*/, const BuildContext & /*ctx*/) -> Size override { return {}; }
@@ -71,9 +71,7 @@ class ZeroProbe final : public LeafWidget {
 /// @brief 派发期焦点管理器槽位的 RAII 复原（全局状态，必须还原）。
 class ScopedFocusManager final {
   public:
-    explicit ScopedFocusManager(FocusManager *fm) : saved_{current_focus_manager()} {
-        set_current_focus_manager(fm);
-    }
+    explicit ScopedFocusManager(FocusManager *fm) : saved_{current_focus_manager()} { set_current_focus_manager(fm); }
     ~ScopedFocusManager() { set_current_focus_manager(saved_); }
 
     ScopedFocusManager(const ScopedFocusManager &) = delete;

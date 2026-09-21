@@ -70,10 +70,10 @@ struct SuiteGroup {
     double elapsed_ms = 0.0;
 };
 
-[[nodiscard]] auto group_by_suite(const std::vector<CaseResult>& results) -> std::vector<SuiteGroup> {
+[[nodiscard]] auto group_by_suite(const std::vector<CaseResult> &results) -> std::vector<SuiteGroup> {
     std::vector<SuiteGroup> groups;
     for (std::size_t index = 0; index < results.size(); ++index) {
-        const auto& result = results[index];
+        const auto &result = results[index];
         const auto name = suite_of(result.full_name);
         auto group = std::ranges::find(groups, name, &SuiteGroup::suite);
         if (group == groups.end()) {
@@ -91,16 +91,16 @@ struct SuiteGroup {
     return groups;
 }
 
-auto write_xml(std::ostream& out, const std::vector<CaseResult>& results, const RunSummary& summary) -> void {
+auto write_xml(std::ostream &out, const std::vector<CaseResult> &results, const RunSummary &summary) -> void {
     out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     out << R"(<testsuites name="aurora" tests=")" << summary.total << "\" failures=\"" << summary.failed
         << "\" skipped=\"" << summary.skipped << "\" time=\"" << seconds(summary.elapsed_ms) << "\">\n";
-    for (const auto& group : group_by_suite(results)) {
+    for (const auto &group : group_by_suite(results)) {
         out << "  <testsuite name=\"" << xml_escape(group.suite) << "\" tests=\"" << group.indices.size()
             << "\" failures=\"" << group.failures << "\" skipped=\"" << group.skipped << "\" time=\""
             << seconds(group.elapsed_ms) << "\">\n";
         for (const auto index : group.indices) {
-            const auto& result = results[index];
+            const auto &result = results[index];
             out << "    <testcase classname=\"" << xml_escape(group.suite) << "\" name=\""
                 << xml_escape(case_of(result.full_name)) << "\" time=\"" << seconds(result.elapsed_ms) << "\"";
             if (result.status == TestStatus::Passed) {
@@ -111,7 +111,7 @@ auto write_xml(std::ostream& out, const std::vector<CaseResult>& results, const 
             if (result.status == TestStatus::Skipped) {
                 out << "      <skipped message=\"" << xml_escape(flatten(result.skip_reason)) << "\"/>\n";
             }
-            for (const auto& failure : result.failures) {
+            for (const auto &failure : result.failures) {
                 const auto location = failure.file + ':' + std::to_string(failure.line);
                 out << "      <failure message=\"" << xml_escape(flatten(failure.message))
                     << R"(" type="assertion" file=")" << xml_escape(failure.file) << "\" line=\"" << failure.line
@@ -124,7 +124,7 @@ auto write_xml(std::ostream& out, const std::vector<CaseResult>& results, const 
     out << "</testsuites>\n";
 }
 
-auto write_json(std::ostream& out, const std::vector<CaseResult>& results, const RunSummary& summary) -> void {
+auto write_json(std::ostream &out, const std::vector<CaseResult> &results, const RunSummary &summary) -> void {
     out << "{\n";
     out << "  \"name\": \"aurora\",\n";
     out << "  \"total\": " << summary.total << ",\n";
@@ -134,7 +134,7 @@ auto write_json(std::ostream& out, const std::vector<CaseResult>& results, const
     out << "  \"time_ms\": " << milliseconds(summary.elapsed_ms) << ",\n";
     out << "  \"cases\": [\n";
     for (std::size_t index = 0; index < results.size(); ++index) {
-        const auto& result = results[index];
+        const auto &result = results[index];
         out << "    {\n";
         out << R"(      "name": ")" << json_escape(result.full_name) << "\",\n";
         out << R"(      "status": ")" << status_text(result.status) << "\",\n";
@@ -146,7 +146,7 @@ auto write_json(std::ostream& out, const std::vector<CaseResult>& results, const
         }
         out << "      \"failures\": [";
         for (std::size_t slot = 0; slot < result.failures.size(); ++slot) {
-            const auto& failure = result.failures[slot];
+            const auto &failure = result.failures[slot];
             out << (slot == 0 ? "\n" : ",\n") << R"(        {"file": ")" << json_escape(failure.file)
                 << R"(", "line": )" << failure.line << R"(, "message": ")" << json_escape(failure.message) << "\"}";
         }
@@ -225,8 +225,8 @@ auto json_escape(std::string_view text) -> std::string {
     return out;
 }
 
-auto write_report(std::string_view path, const std::vector<CaseResult>& results, const RunSummary& summary,
-                  std::string* error) -> bool {
+auto write_report(std::string_view path, const std::vector<CaseResult> &results, const RunSummary &summary,
+                  std::string *error) -> bool {
     const std::filesystem::path target{path};
     const auto suffix = target.extension().string();
     std::ofstream out{target, std::ios::binary | std::ios::trunc};

@@ -126,7 +126,7 @@ AURORA_TEST_CASE(segmented_describe_and_roundtrip) {
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");
     bool has_selected = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (std::string{p.name} == "selected") {
             has_selected = true;
         }

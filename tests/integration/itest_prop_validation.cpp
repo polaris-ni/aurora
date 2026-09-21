@@ -156,7 +156,7 @@ AURORA_TEST_CASE(text_deserialize_reports_degraded_diagnostics) {
     const auto diags = Diagnostics::take();
     AURORA_TEST_CHECK_MSG(diags.size() >= static_cast<std::size_t>(3), "3 bad props must yield >= 3 diagnostics");
     bool found_font_size = false;
-    for (const auto& d : diags) {
+    for (const auto &d : diags) {
         if (d.message.find("font_size") != std::string::npos) {
             found_font_size = true;
         }

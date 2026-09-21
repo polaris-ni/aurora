@@ -62,7 +62,7 @@ class ScrollStorage {
         auto operator=(Scope &&) -> Scope & = delete;
 
       private:
-        std::string saved_;     ///< 被替换掉的前一个作用域（仅 `changed_` 为真时有效）
+        std::string saved_;  ///< 被替换掉的前一个作用域（仅 `changed_` 为真时有效）
         bool changed_ = false;  ///< 本次构造是否真正改变了作用域（未改变则析构无需恢复）
     };
 

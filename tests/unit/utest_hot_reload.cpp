@@ -15,7 +15,7 @@ namespace aurora::test_cases::utest_hot_reload {
 namespace {
 
 /// 可 from_json 重建的最小 Text 树。
-auto text_tree(const char* text_value) -> Json {
+auto text_tree(const char *text_value) -> Json {
     Json j;
     j["type"] = "Text";
     j["props"]["text"] = text_value;
@@ -23,7 +23,7 @@ auto text_tree(const char* text_value) -> Json {
 }
 
 /// 可 from_json 重建的最小 Button 树。
-auto button_tree(const char* label) -> Json {
+auto button_tree(const char *label) -> Json {
     Json j;
     j["type"] = "Button";
     j["props"]["label"] = label;

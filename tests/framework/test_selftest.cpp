@@ -41,7 +41,7 @@ struct SelftestCustom {
 /// @brief `ValuePrinter` 定制点生效验证：测试侧显式特化即接管该类型的实际值渲染。
 template <>
 struct ValuePrinter<SelftestCustom> {
-    static auto print(const SelftestCustom& value) -> std::string {
+    static auto print(const SelftestCustom &value) -> std::string {
         return "Custom{" + std::to_string(value.code) + "}";
     }
 };
@@ -54,30 +54,30 @@ using aurora::testing::print_value;
 [[nodiscard]] auto probe_suite() -> std::string_view { return "assertion_probe"; }
 
 /// @brief 探针共享的「是否执行到语句末尾」标记（致命断言须阻止其后的语句）。
-auto probe_reached() -> bool& {
+auto probe_reached() -> bool & {
     static bool value = false;
     return value;
 }
 
 /// @brief 探针共享的操作数副作用计数（验证「两侧各只求值一次」）。
-auto probe_operand() -> int& {
+auto probe_operand() -> int & {
     static int value = 0;
     return value;
 }
 
 /// @brief 指向静态 int 的指针：指针断言族的「非空」一侧（探针体是无捕获 lambda，故须函数提供）。
-[[nodiscard]] auto probe_live_pointer() -> int* {
+[[nodiscard]] auto probe_live_pointer() -> int * {
     static int storage = 7;
     return &storage;
 }
 
 /// @brief 两个内容相同、地址不同的静态字符数组：验证 STREQ 按内容而非按指针判定。
-[[nodiscard]] auto probe_text_a() -> char* {
+[[nodiscard]] auto probe_text_a() -> char * {
     static char storage[4] = {'a', 'b', 'c', '\0'};
     return storage;
 }
 
-[[nodiscard]] auto probe_text_b() -> char* {
+[[nodiscard]] auto probe_text_b() -> char * {
     static char storage[4] = {'a', 'b', 'c', '\0'};
     return storage;
 }
@@ -108,7 +108,7 @@ auto probe_operand() -> int& {
 }
 
 /// @brief 自检断言；违反时打印并返回 false（自检自身不得依赖被检设施）。
-auto expect(bool condition, const char* what) -> bool {
+auto expect(bool condition, const char *what) -> bool {
     if (condition) {
         std::printf("[selftest] ok: %s\n", what);
         return true;
@@ -118,24 +118,24 @@ auto expect(bool condition, const char* what) -> bool {
 }
 
 /// @brief 首条失败记录（无失败时返回空串）。
-[[nodiscard]] auto first_failure(const CaseResult& result) -> std::string {
+[[nodiscard]] auto first_failure(const CaseResult &result) -> std::string {
     return result.failures.empty() ? std::string{} : result.failures.front().message;
 }
 
 /// @brief 非致命断言的通过向：用例通过且零失败。
-auto expect_passes(TestBody body, const char* what) -> bool {
+auto expect_passes(TestBody body, const char *what) -> bool {
     const auto result = probe(body);
     return expect(result.status == TestStatus::Passed && result.failures.empty(), what);
 }
 
 /// @brief 断言的失败向：用例失败且恰好记录一条失败。
-auto expect_fails_once(TestBody body, const char* what) -> bool {
+auto expect_fails_once(TestBody body, const char *what) -> bool {
     const auto result = probe(body);
     return expect(result.status == TestStatus::Failed && result.failures.size() == 1, what);
 }
 
 /// @brief 断言的失败向 + 诊断文本含指定片段（验证「失败即打印实际值」）。
-auto expect_fails_with(TestBody body, std::string_view needle, const char* what) -> bool {
+auto expect_fails_with(TestBody body, std::string_view needle, const char *what) -> bool {
     const auto result = probe(body);
     const auto message = first_failure(result);
     return expect(
@@ -144,13 +144,13 @@ auto expect_fails_with(TestBody body, std::string_view needle, const char* what)
 }
 
 /// @brief 致命断言的通过向：用例通过，且其后的语句照常执行。
-auto expect_fatal_passes(TestBody body, const char* what) -> bool {
+auto expect_fatal_passes(TestBody body, const char *what) -> bool {
     const auto result = probe(body);
     return expect(result.status == TestStatus::Passed && probe_reached(), what);
 }
 
 /// @brief 致命断言的失败向：记一条失败，且其后的语句不得执行。
-auto expect_fatal_aborts(TestBody body, const char* what) -> bool {
+auto expect_fatal_aborts(TestBody body, const char *what) -> bool {
     const auto result = probe(body);
     return expect(result.status == TestStatus::Failed && result.failures.size() == 1 && !probe_reached(), what);
 }
@@ -175,7 +175,7 @@ struct LifecycleCounters {
     int teardown_seen_in_body = 0;
 };
 
-auto lifecycle_counters() -> LifecycleCounters& {
+auto lifecycle_counters() -> LifecycleCounters & {
     static LifecycleCounters counters;
     return counters;
 }
@@ -192,7 +192,7 @@ class LifecycleFixture : public Fixture {
 class LifecycleCase : public detail::CaseBase<LifecycleFixture> {
   protected:
     auto case_body() -> void override {
-        auto& counters = lifecycle_counters();
+        auto &counters = lifecycle_counters();
         ++counters.bodies;
         // 用例体执行期间尚不应看到清理动作。
         counters.teardown_seen_in_body = (counters.teardowns == 0) ? 1 : 0;
@@ -209,7 +209,7 @@ class AbortCase : public detail::CaseBase<LifecycleFixture> {
 class ParamFixture : public TestWithParam<int> {};
 
 /// @brief 记录参数化用例体实际看到的取值。
-auto observed_param() -> int& {
+auto observed_param() -> int & {
     static int value = 0;
     return value;
 }
@@ -232,7 +232,7 @@ auto param_probe_run_at(std::size_t index) -> void {
 /// @brief 展开产物的可读快照：指定套件下的用例名列表。
 [[nodiscard]] auto probe_case_names(std::string_view suite) -> std::vector<std::string> {
     std::vector<std::string> names;
-    for (const auto* test_case : TestRegistry::instance().cases()) {
+    for (const auto *test_case : TestRegistry::instance().cases()) {
         if (test_case->suite == suite) {
             names.emplace_back(test_case->case_name);
         }
@@ -284,7 +284,7 @@ auto selftest_organization() -> bool {
     // 展开出的用例可执行，且各按自己的序号取值。
     auto expanded = 0;
     auto values_ok = true;
-    for (const auto* test_case : TestRegistry::instance().cases()) {
+    for (const auto *test_case : TestRegistry::instance().cases()) {
         if (test_case->suite != probe_suite() || test_case->param_body == nullptr) {
             continue;
         }
@@ -355,15 +355,15 @@ auto selftest_execution() -> bool {
             make_probe(AURORA_TEST_PROBE(AURORA_TEST_CHECK(1 + 1 == 3))),
             make_probe(AURORA_TEST_PROBE(AURORA_TEST_SKIP("selftest demo skip"))),
     };
-    std::vector<const TestCase*> view;
+    std::vector<const TestCase *> view;
     view.reserve(synthetic.size());
-    for (const auto& test_case : synthetic) {
+    for (const auto &test_case : synthetic) {
         view.push_back(&test_case);
     }
 
     std::vector<CaseResult> results;
     results.reserve(view.size());
-    for (const auto* test_case : view) {
+    for (const auto *test_case : view) {
         results.push_back(run_case(*test_case));
     }
     const auto summary = summarize(results);
@@ -560,16 +560,16 @@ auto selftest_exception_assertions() -> bool {
 /// @brief 指针空判定族。
 auto selftest_pointer_assertions() -> bool {
     bool ok = true;
-    ok = expect_passes(AURORA_TEST_PROBE(AURORA_TEST_CHECK_NULL(static_cast<int*>(nullptr))), "CHECK_NULL pass") && ok;
+    ok = expect_passes(AURORA_TEST_PROBE(AURORA_TEST_CHECK_NULL(static_cast<int *>(nullptr))), "CHECK_NULL pass") && ok;
     ok = expect_fails_with(AURORA_TEST_PROBE(AURORA_TEST_CHECK_NULL(probe_live_pointer())), "is not null",
                            "CHECK_NULL fail wording") &&
          ok;
     ok =
         expect_passes(AURORA_TEST_PROBE(AURORA_TEST_CHECK_NOT_NULL(probe_live_pointer())), "CHECK_NOT_NULL pass") && ok;
-    ok = expect_fails_with(AURORA_TEST_PROBE(AURORA_TEST_CHECK_NOT_NULL(static_cast<int*>(nullptr))), "is null",
+    ok = expect_fails_with(AURORA_TEST_PROBE(AURORA_TEST_CHECK_NOT_NULL(static_cast<int *>(nullptr))), "is null",
                            "CHECK_NOT_NULL fail wording") &&
          ok;
-    ok = expect_fatal_aborts(AURORA_TEST_FATAL_PROBE(AURORA_TEST_REQUIRE_NOT_NULL(static_cast<int*>(nullptr))),
+    ok = expect_fatal_aborts(AURORA_TEST_FATAL_PROBE(AURORA_TEST_REQUIRE_NOT_NULL(static_cast<int *>(nullptr))),
                              "REQUIRE_NOT_NULL aborts the case") &&
          ok;
     return ok;
@@ -585,9 +585,9 @@ auto selftest_value_printing() -> bool {
     ok = expect(print_value(std::string{"ab\ncd"}) == R"("ab\ncd")", "std::string escapes newline") && ok;
     ok = expect(print_value(std::string_view{"xy"}) == "\"xy\"", "string_view prints quoted") && ok;
     ok = expect(print_value("lit") == "\"lit\"", "C string literal prints quoted") && ok;
-    const char* null_text = nullptr;
+    const char *null_text = nullptr;
     ok = expect(print_value(null_text) == "nullptr", "null C string prints nullptr") && ok;
-    const int* null_pointer = nullptr;
+    const int *null_pointer = nullptr;
     ok = expect(print_value(null_pointer) == "nullptr", "null pointer prints nullptr") && ok;
     // 枚举：密集枚举走 known_enums 反查给值名，稀疏枚举退回底层数值（避免张冠李戴）。
     ok = expect(print_value(aurora::TextAlign::Center) == "TextAlign::Center",
@@ -630,8 +630,8 @@ auto selftest_tracing() -> bool {
 #endif
     ok = expect(traced.failures.size() == 2, "traced case records two failures") && ok;
     if (traced.failures.size() == 2) {
-        const auto& inner = traced.failures[0].message;
-        const auto& outer = traced.failures[1].message;
+        const auto &inner = traced.failures[0].message;
+        const auto &outer = traced.failures[1].message;
         ok =
             expect(inner.find("outer context") != std::string::npos && inner.find("inner context") != std::string::npos,
                    "failure inside the block carries both trace levels") &&
@@ -657,7 +657,7 @@ auto selftest_tracing() -> bool {
 }
 
 /// @brief 读回文本文件（读不到时返回空串）。
-[[nodiscard]] auto read_back(const std::string& path) -> std::string {
+[[nodiscard]] auto read_back(const std::string &path) -> std::string {
     std::ifstream input{path, std::ios::binary};
     std::ostringstream buffer;
     buffer << input.rdbuf();

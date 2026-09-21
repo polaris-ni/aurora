@@ -17,10 +17,10 @@ namespace {
 /// RAII 恢复 headless 钩子与交互开关，避免污染同进程内后续用例。
 struct HookGuard {
     HookGuard() = default;
-    HookGuard(const HookGuard&) = delete;
-    auto operator=(const HookGuard&) -> HookGuard& = delete;
-    HookGuard(HookGuard&&) = delete;
-    auto operator=(HookGuard&&) -> HookGuard& = delete;
+    HookGuard(const HookGuard &) = delete;
+    auto operator=(const HookGuard &) -> HookGuard & = delete;
+    HookGuard(HookGuard &&) = delete;
+    auto operator=(HookGuard &&) -> HookGuard & = delete;
     ~HookGuard() {
         aurora::file_dialog::headless_open_result.clear();
         aurora::file_dialog::headless_save_result.clear();

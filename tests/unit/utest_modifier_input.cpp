@@ -119,7 +119,7 @@ AURORA_TEST_CASE(long_press_pointer_binding) {
 AURORA_TEST_CASE(touch_listener_delivers_raw_event) {
     int events = 0;
     int active = -1;
-    const TouchListener tl([&](const TouchEvent& e) -> void {
+    const TouchListener tl([&](const TouchEvent &e) -> void {
         ++events;
         active = e.active_count();
     });
@@ -199,7 +199,7 @@ AURORA_TEST_CASE(input_nodes_do_not_change_layout) {
     const Clickable c([]() -> void {});
     const Constraints cons{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 80.0F, .height = 40.0F}};
     const Size s = c.layout(
-        cons, [](const Constraints& cc) -> Size { return cc.constrain(Size{.width = 30.0F, .height = 20.0F}); });
+        cons, [](const Constraints &cc) -> Size { return cc.constrain(Size{.width = 30.0F, .height = 20.0F}); });
     AURORA_TEST_CHECK_NEAR(s.width, 30.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(s.height, 20.0F, 0.0F);
 }

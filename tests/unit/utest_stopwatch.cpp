@@ -15,7 +15,7 @@ namespace aurora::test_cases::utest_stopwatch {
 namespace {
 
 /// @brief 忙等直到秒表读数超过 min_ms，返回当时的读数（制造确定耗时，不依赖 sleep 精度）。
-auto busy_wait_ms(Stopwatch& sw, double min_ms) -> double {
+auto busy_wait_ms(Stopwatch &sw, double min_ms) -> double {
     double ms = 0.0;
     while (ms < min_ms) {
         ms = sw.elapsed_ms();

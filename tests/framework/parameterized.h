@@ -62,14 +62,14 @@ namespace detail {
 /// 槽位放这里而非 `TestWithParam` 内部，是为了让「展开器写入」与「fixture 读取」
 /// 必然指向同一对象：展开器只认 `FixtureClass`，fixture 只认 `Value`。
 template <typename Value>
-[[nodiscard]] auto param_slot() -> std::optional<Value>& {
+[[nodiscard]] auto param_slot() -> std::optional<Value> & {
     static std::optional<Value> storage;
     return storage;
 }
 
 /// @brief 写入当前取值（构造 fixture 前调用）。
 template <typename FixtureClass>
-auto set_current_param(const typename FixtureClass::ParamType& value) -> void {
+auto set_current_param(const typename FixtureClass::ParamType &value) -> void {
     param_slot<typename FixtureClass::ParamType>() = value;
 }
 
@@ -87,7 +87,7 @@ class TestWithParam : public Fixture {
     TestWithParam() : value_(detail::param_slot<Value>().value()) {}
 
     /// @brief 本用例的取值。
-    [[nodiscard]] auto param() const -> const Value& { return value_; }
+    [[nodiscard]] auto param() const -> const Value & { return value_; }
 
   private:
     Value value_;
@@ -98,7 +98,7 @@ namespace detail {
 /// @brief 默认名字生成器：返回空串表示「改用取值序号」。
 struct DefaultParamName {
     template <typename Value>
-    [[nodiscard]] auto operator()(const Value&) const -> std::string {
+    [[nodiscard]] auto operator()(const Value &) const -> std::string {
         return {};
     }
 };
@@ -107,21 +107,21 @@ struct DefaultParamName {
 template <typename Value>
 struct ParamInstantiation {
     std::string prefix;  ///< 实例化名
-    std::function<std::string(const Value&)> name_of;  ///< 名字生成器（可空）
+    std::function<std::string(const Value &)> name_of;  ///< 名字生成器（可空）
     std::size_t offset = 0;  ///< 扁平取值表中的起始下标
     std::size_t count = 0;  ///< 取值个数
 };
 
 /// @brief 某个 fixture 的扁平取值表（多实例化共享，用例体只带全局序号）。
 template <typename FixtureClass>
-[[nodiscard]] auto param_values() -> std::vector<typename FixtureClass::ParamType>& {
+[[nodiscard]] auto param_values() -> std::vector<typename FixtureClass::ParamType> & {
     static std::vector<typename FixtureClass::ParamType> values;
     return values;
 }
 
 /// @brief 按全局序号取值（生成的用例体使用）。
 template <typename FixtureClass>
-[[nodiscard]] auto param_at(std::size_t index) -> const typename FixtureClass::ParamType& {
+[[nodiscard]] auto param_at(std::size_t index) -> const typename FixtureClass::ParamType & {
     return param_values<FixtureClass>()[index];
 }
 
@@ -130,31 +130,31 @@ struct ParamFamily {
     std::string_view suite;  ///< 文件 stem（与静态用例同规则，保证 `--run=<stem>` 筛得中）
     std::string_view fixture;  ///< `#fixture_class` —— 与 INSTANTIATE 的挂接键
     std::string_view case_name;  ///< `#case_name`
-    const char* file = nullptr;  ///< TEST_P 所在源文件
+    const char *file = nullptr;  ///< TEST_P 所在源文件
     int line = 0;  ///< TEST_P 所在行
     TestParamBody run_at = nullptr;  ///< 按取值序号执行的用例体
-    const ParamFamily* next = nullptr;
+    const ParamFamily *next = nullptr;
 };
 
 /// @brief 用例族注册表（侵入式链表：静态初始化期只改指针，不分配）。
 class ParamFamilyRegistry {
   public:
-    [[nodiscard]] static auto instance() noexcept -> ParamFamilyRegistry&;
+    [[nodiscard]] static auto instance() noexcept -> ParamFamilyRegistry &;
 
-    auto push(ParamFamily& node) noexcept -> void;
+    auto push(ParamFamily &node) noexcept -> void;
 
     /// @brief 全部用例族（按登记顺序）。
-    [[nodiscard]] auto families() const -> std::vector<const ParamFamily*>;
+    [[nodiscard]] auto families() const -> std::vector<const ParamFamily *>;
 
   private:
-    ParamFamily* head_ = nullptr;
-    ParamFamily* tail_ = nullptr;
+    ParamFamily *head_ = nullptr;
+    ParamFamily *tail_ = nullptr;
 };
 
 /// @brief 用例族的静态登记器：构造即挂链，不分配、不抛异常。
 class ParamFamilyRegistrar {
   public:
-    ParamFamilyRegistrar(std::string_view suite, std::string_view fixture, std::string_view case_name, const char* file,
+    ParamFamilyRegistrar(std::string_view suite, std::string_view fixture, std::string_view case_name, const char *file,
                          int line, TestParamBody run_at) noexcept;
 
   private:
@@ -171,7 +171,7 @@ template <typename T>
 
 /// @brief 用例名末段：名字生成器给出的名字优先，否则退回本次实例化内的序号。
 template <typename Value, typename Values>
-[[nodiscard]] auto param_case_suffix(const ParamInstantiation<Value>& inst, const Values& values,
+[[nodiscard]] auto param_case_suffix(const ParamInstantiation<Value> &inst, const Values &values,
                                      std::size_t global_index) -> std::string {
     if (inst.name_of) {
         const auto generated = inst.name_of(values[global_index]);
@@ -184,10 +184,10 @@ template <typename Value, typename Values>
 
 /// @brief 展开某次实例化下的全部用例族：每个「族 × 取值」生成一条可执行用例。
 template <typename FixtureClass, typename Value>
-auto expand_param_families(std::string_view fixture_key, const ParamInstantiation<Value>& inst) -> void {
-    const auto& values = param_values<FixtureClass>();
+auto expand_param_families(std::string_view fixture_key, const ParamInstantiation<Value> &inst) -> void {
+    const auto &values = param_values<FixtureClass>();
     auto matched = std::size_t{0};
-    for (const auto* family : ParamFamilyRegistry::instance().families()) {
+    for (const auto *family : ParamFamilyRegistry::instance().families()) {
         if (family->fixture != fixture_key) {
             continue;
         }
@@ -210,16 +210,16 @@ auto expand_param_families(std::string_view fixture_key, const ParamInstantiatio
 
 /// @brief 登记一次实例化：写入扁平取值表，随后展开该 fixture 的全部用例族。
 template <typename FixtureClass, typename Range, typename Gen>
-auto register_instantiation(std::string_view instantiation, std::string_view fixture_key, const Range& range,
+auto register_instantiation(std::string_view instantiation, std::string_view fixture_key, const Range &range,
                             Gen generator) -> void {
     using Value = typename FixtureClass::ParamType;
-    auto& values = param_values<FixtureClass>();
+    auto &values = param_values<FixtureClass>();
 
     ParamInstantiation<Value> inst;
     inst.prefix = std::string{instantiation};
-    inst.name_of = [generator](const Value& value) -> std::string { return generator(value); };
+    inst.name_of = [generator](const Value &value) -> std::string { return generator(value); };
     inst.offset = values.size();
-    for (const auto& item : range) {
+    for (const auto &item : range) {
         values.push_back(static_cast<Value>(item));
         ++inst.count;
     }
@@ -228,7 +228,7 @@ auto register_instantiation(std::string_view instantiation, std::string_view fix
 
 /// @brief 类型参数化：为一个类型清单逐项注册用例（BodyHolder 形如 `template <typename> class`）。
 template <typename List, template <typename> class BodyHolder, std::size_t... Is>
-auto register_typed_cases_impl(std::string_view suite, std::string_view case_name, const char* file, int line,
+auto register_typed_cases_impl(std::string_view suite, std::string_view case_name, const char *file, int line,
                                std::index_sequence<Is...>) -> void {
     (TestRegistry::instance().add_dynamic(
          suite, std::string{case_name} + "/" + short_type_name<std::tuple_element_t<Is, typename List::Tuple>>(),
@@ -237,7 +237,7 @@ auto register_typed_cases_impl(std::string_view suite, std::string_view case_nam
 }
 
 template <typename List, template <typename> class BodyHolder>
-auto register_typed_cases(std::string_view suite, std::string_view case_name, const char* file, int line) -> void {
+auto register_typed_cases(std::string_view suite, std::string_view case_name, const char *file, int line) -> void {
     register_typed_cases_impl<List, BodyHolder>(suite, case_name, file, line,
                                                 std::make_index_sequence<std::tuple_size_v<typename List::Tuple>>{});
 }
@@ -254,7 +254,7 @@ template <typename... Values>
 
 /// @brief 取值表（容器 / 区间形态）。
 template <typename Range>
-[[nodiscard]] auto values_in(const Range& range) -> std::vector<std::decay_t<decltype(*std::begin(range))>> {
+[[nodiscard]] auto values_in(const Range &range) -> std::vector<std::decay_t<decltype(*std::begin(range))>> {
     using Value = std::decay_t<decltype(*std::begin(range))>;
     return std::vector<Value>{std::begin(range), std::end(range)};
 }

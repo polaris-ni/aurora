@@ -31,10 +31,10 @@ class QuietLogger {
         aurora::Logger::instance().set_enabled(enabled_);
         aurora::Logger::instance().set_sink(nullptr);  // 恢复默认 stderr
     }
-    QuietLogger(const QuietLogger&) = delete;
-    auto operator=(const QuietLogger&) -> QuietLogger& = delete;
-    QuietLogger(QuietLogger&&) = delete;
-    auto operator=(QuietLogger&&) -> QuietLogger& = delete;
+    QuietLogger(const QuietLogger &) = delete;
+    auto operator=(const QuietLogger &) -> QuietLogger & = delete;
+    QuietLogger(QuietLogger &&) = delete;
+    auto operator=(QuietLogger &&) -> QuietLogger & = delete;
 
   private:
     aurora::LogLevel level_;
@@ -46,7 +46,7 @@ class QuietLogger {
 /// 回调若捕获栈局部变量，用例结束后被后续用例的 auto_fix_all / apply_fix 执行即为 UB
 /// （悬垂写栈地址可能被新用例复用）。全文件修复回调一律命中文件级静态槽位计数器，
 /// 各用例只对自己槽位做增量断言。
-static auto fix_hits(std::size_t slot) -> std::size_t& {
+static auto fix_hits(std::size_t slot) -> std::size_t & {
     static std::array<std::size_t, 3> hits{};
     return hits.at(slot);
 }
@@ -75,7 +75,7 @@ AURORA_TEST_CASE(report_maps_frozen_slug_to_table_metadata) {
     Diagnostics::warn("depth problem", "widget-x", "nav-depth-exceeded");
     const auto taken = Diagnostics::take();
     AURORA_TEST_REQUIRE_EQ(taken.size(), std::size_t{1});
-    const auto& d = taken[0];
+    const auto &d = taken[0];
     AURORA_TEST_CHECK_STREQ(d.code, "nav-depth-exceeded");
     AURORA_TEST_CHECK(d.code_enum == ErrorCode::NavDepthExceeded);
     AURORA_TEST_CHECK(d.severity == ErrorSeverity::Error);
@@ -151,7 +151,7 @@ AURORA_TEST_CASE(fix_suggestion_collected_and_applied_by_slug) {
     // collect_fixes 读取 recent_（take 不清空），可能含其他用例残留：按本用例唯一 code 过滤断言。
     const auto fixes = Diagnostics::collect_fixes();
     bool found = false;
-    for (const auto& f : fixes) {
+    for (const auto &f : fixes) {
         if (f.code == "utest-fix-depth") {
             found = true;
             AURORA_TEST_CHECK_STREQ(f.description, "reduce nesting depth");

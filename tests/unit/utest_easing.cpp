@@ -45,7 +45,7 @@ AURORA_TEST_CASE(transform_clamps_input_and_output) {
 
 /// @brief 全部命名曲线工厂的曲线在端点处精确命中 0 与 1。
 AURORA_TEST_CASE(named_curves_hit_exact_endpoints) {
-    const std::vector<std::pair<const char*, aurora::Curve>> all = {
+    const std::vector<std::pair<const char *, aurora::Curve>> all = {
         {"linear", aurora::Curves::linear()},
         {"ease_in", aurora::Curves::ease_in()},
         {"ease_out", aurora::Curves::ease_out()},
@@ -61,7 +61,7 @@ AURORA_TEST_CASE(named_curves_hit_exact_endpoints) {
         {"ease_in_out_cubic", aurora::Curves::ease_in_out_cubic()},
         {"bounce_out", aurora::Curves::bounce_out()},
     };
-    for (const auto& entry : all) {
+    for (const auto &entry : all) {
         AURORA_TEST_TRACE(entry.first);
         AURORA_TEST_CHECK_NEAR(entry.second.transform(0.0), 0.0, 1e-9);
         AURORA_TEST_CHECK_NEAR(entry.second.transform(1.0), 1.0, 1e-9);
@@ -102,13 +102,13 @@ AURORA_TEST_CASE(polynomial_curves_match_closed_form) {
 
 /// @brief in_out 家族关于中点对称（f(t)+f(1-t)=1）、中点值 0.5 且采样单调不减。
 AURORA_TEST_CASE(in_out_curves_are_symmetric_and_monotonic) {
-    const std::vector<std::pair<const char*, aurora::Curve>> in_out_family = {
+    const std::vector<std::pair<const char *, aurora::Curve>> in_out_family = {
         {"ease_in_out", aurora::Curves::ease_in_out()},
         {"ease_in_out_sine", aurora::Curves::ease_in_out_sine()},
         {"ease_in_out_quad", aurora::Curves::ease_in_out_quad()},
         {"ease_in_out_cubic", aurora::Curves::ease_in_out_cubic()},
     };
-    for (const auto& entry : in_out_family) {
+    for (const auto &entry : in_out_family) {
         AURORA_TEST_TRACE(entry.first);
         AURORA_TEST_CHECK_NEAR(entry.second.transform(0.5), 0.5, 1e-9);
         for (int i = 0; i <= 5; ++i) {

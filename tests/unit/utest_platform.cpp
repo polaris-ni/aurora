@@ -59,9 +59,9 @@ AURORA_TEST_CASE(exactly_one_arch_macro_defined) {
 AURORA_TEST_CASE(bit_width_matches_pointer_size_and_arch) {
     // 契约：AURORA_BIT_64 / AURORA_BIT_32 恰好一个置 1，且与指针宽度、64/32 位架构族一致。
 #ifdef AURORA_BIT_64
-    AURORA_TEST_CHECK_EQ(sizeof(void*), 8U);
+    AURORA_TEST_CHECK_EQ(sizeof(void *), 8U);
 #elif defined(AURORA_BIT_32)
-    AURORA_TEST_CHECK_EQ(sizeof(void*), 4U);
+    AURORA_TEST_CHECK_EQ(sizeof(void *), 4U);
 #else
     AURORA_TEST_FAIL("AURORA_BIT_64 / AURORA_BIT_32 必须恰好定义一个");
 #endif
@@ -71,7 +71,7 @@ AURORA_TEST_CASE(bit_width_matches_pointer_size_and_arch) {
 #elif defined(AURORA_ARCH_X86) || defined(AURORA_ARCH_ARM32)
     constexpr bool arch_is_64 = false;
 #else
-    constexpr bool arch_is_64 = (sizeof(void*) == 8U);  // WASM 等未知架构：按指针宽度对齐
+    constexpr bool arch_is_64 = (sizeof(void *) == 8U);  // WASM 等未知架构：按指针宽度对齐
 #endif
 
 #ifdef AURORA_BIT_64

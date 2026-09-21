@@ -93,7 +93,7 @@ auto init_console() noexcept -> void;
 class Logger {
   public:
     /// @brief 取得全局唯一实例。
-    static auto instance() -> Logger&;
+    static auto instance() -> Logger &;
 
     /// @brief 设置最低输出级别（低于此级别的日志被丢弃）。
     auto set_level(LogLevel level) noexcept -> void;
@@ -149,7 +149,7 @@ namespace detail {
  * 供 `AURORA_LOG_*` 宏的可变参数形态使用；单参数时退化为原样输出（与旧单 `msg` 行为一致）。
  */
 template <typename... Args>
-[[nodiscard]] auto log_concat(Args&&... args) -> std::string {
+[[nodiscard]] auto log_concat(Args &&...args) -> std::string {
     std::ostringstream oss;
     (oss << ... << std::forward<Args>(args));
     return std::move(oss).str();

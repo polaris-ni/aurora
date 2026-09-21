@@ -64,7 +64,7 @@ auto text_column(bool cache_layer) -> std::shared_ptr<Column> {
 }
 
 /// 把容器子树绘制进离屏画布并返回像素校验和（同一实例连续绘制可观察缓存是否命中）。
-auto paint_hash(Widget& w) -> std::uint64_t {
+auto paint_hash(Widget &w) -> std::uint64_t {
     Painter p;
     p.begin(AURORA_CACHE_W, AURORA_CACHE_H);
     // 白底 + 不透明黑字：满足 ClearType 生效条件（c.a == 255）。
@@ -79,7 +79,7 @@ auto paint_hash(Widget& w) -> std::uint64_t {
              .size = Size{.width = static_cast<float>(AURORA_CACHE_W), .height = static_cast<float>(AURORA_CACHE_H)}},
         ctx);
     std::uint64_t h = 0xcbf29ce484222325ULL;
-    const std::uint8_t* d = p.data();
+    const std::uint8_t *d = p.data();
     constexpr std::size_t n = static_cast<std::size_t>(AURORA_CACHE_W) * static_cast<std::size_t>(AURORA_CACHE_H) * 4U;
     for (std::size_t i = 0; i < n; ++i) {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 对像素缓冲做字节级哈希，下标即字节偏移
@@ -94,10 +94,10 @@ class AaModeRestore {
   public:
     AaModeRestore() : saved_(render::FontEngine::text_aa_mode()) {}
     ~AaModeRestore() { render::FontEngine::set_text_aa_mode(saved_); }
-    AaModeRestore(const AaModeRestore&) = delete;
-    auto operator=(const AaModeRestore&) -> AaModeRestore& = delete;
-    AaModeRestore(AaModeRestore&&) = delete;
-    auto operator=(AaModeRestore&&) -> AaModeRestore& = delete;
+    AaModeRestore(const AaModeRestore &) = delete;
+    auto operator=(const AaModeRestore &) -> AaModeRestore & = delete;
+    AaModeRestore(AaModeRestore &&) = delete;
+    auto operator=(AaModeRestore &&) -> AaModeRestore & = delete;
 
   private:
     render::TextAAMode saved_;
@@ -192,8 +192,8 @@ AURORA_TEST_CASE(cross_axis_stretch_expands_child) {
 }
 
 /// @brief 判定诊断列表中是否含「Column + Baseline」降级提示（消息以 Column 开头、where 为 layout）。
-auto has_column_baseline_notice(const std::vector<Diagnostic>& diags) -> bool {
-    return std::ranges::any_of(diags, [](const auto& d) {
+auto has_column_baseline_notice(const std::vector<Diagnostic> &diags) -> bool {
+    return std::ranges::any_of(diags, [](const auto &d) {
         return std::string{d.where} == "layout" && std::string{d.message}.starts_with("Column");
     });
 }
@@ -332,7 +332,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "Column");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "multiple");
     bool has_gap = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (std::string{p.name} == "gap") {
             has_gap = true;
         }

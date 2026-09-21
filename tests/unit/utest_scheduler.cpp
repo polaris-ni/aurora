@@ -172,14 +172,14 @@ AURORA_TEST_CASE(callback_may_register_new_tasks_during_fire) {
 AURORA_TEST_CASE(thread_local_current_instance_roundtrip) {
     // 用例前后复位，避免污染同进程内其它用例。
     Scheduler::set_current(nullptr);
-    AURORA_TEST_CHECK_EQ(Scheduler::current(), static_cast<Scheduler*>(nullptr));
+    AURORA_TEST_CHECK_EQ(Scheduler::current(), static_cast<Scheduler *>(nullptr));
 
     Scheduler sched;
     Scheduler::set_current(&sched);
     AURORA_TEST_CHECK_EQ(Scheduler::current(), &sched);
 
     Scheduler::set_current(nullptr);
-    AURORA_TEST_CHECK_EQ(Scheduler::current(), static_cast<Scheduler*>(nullptr));
+    AURORA_TEST_CHECK_EQ(Scheduler::current(), static_cast<Scheduler *>(nullptr));
 }
 
 }  // namespace aurora::test_cases::utest_scheduler

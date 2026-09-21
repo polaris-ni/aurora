@@ -27,13 +27,13 @@ class FixedBox final : public Widget {
   public:
     FixedBox(float w, float h) : w_(w), h_(h) {}
 
-    [[nodiscard]] auto type_name() const -> const char* override { return "FixedBox"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "FixedBox"; }
 
   protected:
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = w_, .height = h_});
     }
-    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 
   private:
     float w_;
@@ -60,13 +60,13 @@ struct BuildRecorder {
 };
 
 /// @brief 假想帧钟：单调递增，令自驱动的收位滑动逐帧可测（不依赖墙钟抖动）。
-auto frame_clock() -> std::chrono::steady_clock::time_point& {
+auto frame_clock() -> std::chrono::steady_clock::time_point & {
     static std::chrono::steady_clock::time_point now = std::chrono::steady_clock::time_point{};
     return now;
 }
 
 /// @brief 推进 n 帧（每帧 16ms），驱动 snap 收位 / scroll_to 短滑动。
-auto pump(GridView& grid, int frames) -> void {
+auto pump(GridView &grid, int frames) -> void {
     for (int i = 0; i < frames; ++i) {
         frame_clock() += std::chrono::milliseconds(16);
         grid.tick(frame_clock());
@@ -74,10 +74,10 @@ auto pump(GridView& grid, int frames) -> void {
 }
 
 /// @brief 等滑动走完：滑满时长 150ms + 余量。
-auto settle(GridView& grid) -> void { pump(grid, 16); }
+auto settle(GridView &grid) -> void { pump(grid, 16); }
 
 /// @brief 滚轮事件入口（step 为控件内部常量 40，故 1 单位 = 40dp）。
-auto wheel(GridView& grid, float delta_y) -> ScrollEvent {
+auto wheel(GridView &grid, float delta_y) -> ScrollEvent {
     ScrollEvent e;
     e.delta_y = delta_y;
     grid.on_scroll(e);
@@ -93,10 +93,10 @@ class ReduceMotionGuard final {
         set_accessibility_settings(s);
     }
     ~ReduceMotionGuard() { set_accessibility_settings(saved_); }
-    ReduceMotionGuard(const ReduceMotionGuard&) = delete;
-    auto operator=(const ReduceMotionGuard&) -> ReduceMotionGuard& = delete;
-    ReduceMotionGuard(ReduceMotionGuard&&) = delete;
-    auto operator=(ReduceMotionGuard&&) -> ReduceMotionGuard& = delete;
+    ReduceMotionGuard(const ReduceMotionGuard &) = delete;
+    auto operator=(const ReduceMotionGuard &) -> ReduceMotionGuard & = delete;
+    ReduceMotionGuard(ReduceMotionGuard &&) = delete;
+    auto operator=(ReduceMotionGuard &&) -> ReduceMotionGuard & = delete;
 
   private:
     AccessibilitySettings saved_;
@@ -261,7 +261,7 @@ AURORA_TEST_CASE(serialize_and_describe) {
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool columns_required = false;
     bool columns_min_one = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (p.name == "columns") {
             columns_required = p.required;
             columns_min_one = (p.min_value == "1");
@@ -331,7 +331,7 @@ AURORA_TEST_CASE(offset_signal_follows_programmatic_and_glide_frames) {
     GridView grid{30, 3, {}, 96.0F};
     LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
 
-    SignalView<float>& offset = grid.offset_signal();  // 懒创建：初值取当前偏移
+    SignalView<float> &offset = grid.offset_signal();  // 懒创建：初值取当前偏移
     AURORA_TEST_CHECK_NEAR(offset.get(), 0.0F, 1e-4F);
 
     grid.set_scroll_offset(100.0F);

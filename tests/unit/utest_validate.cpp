@@ -17,9 +17,9 @@ namespace {
 
 /// 未注册进 WidgetRegistry 的自定义控件（类型名拼写错误/未注册场景的替身）。
 struct UnregisteredWidget final : Widget {
-    [[nodiscard]] auto type_name() const -> const char* override { return "AuroraTestUnregisteredWidget"; }
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override { return c.max; }
-    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
+    [[nodiscard]] auto type_name() const -> const char * override { return "AuroraTestUnregisteredWidget"; }
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.max; }
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 };
 
 }  // namespace

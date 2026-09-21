@@ -20,13 +20,13 @@ class PaintCounter : public au::LeafWidget {
   public:
     int paint_calls = 0;
 
-    [[nodiscard]] auto type_name() const -> const char* override { return "PaintCounter"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "PaintCounter"; }
 
   protected:
-    auto on_layout(const au::Constraints& /*c*/, const au::BuildContext& /*ctx*/) -> au::Size override {
+    auto on_layout(const au::Constraints & /*c*/, const au::BuildContext & /*ctx*/) -> au::Size override {
         return au::Size{.width = 50.0F, .height = 50.0F};
     }
-    auto on_paint(au::Painter& /*p*/, const au::Rect& /*bounds*/, const au::BuildContext& /*ctx*/) -> void override {
+    auto on_paint(au::Painter & /*p*/, const au::Rect & /*bounds*/, const au::BuildContext & /*ctx*/) -> void override {
         ++paint_calls;
     }
 };
@@ -48,10 +48,10 @@ class ClippedColumn : public au::Column {
   public:
     using Column::Column;
 
-    [[nodiscard]] auto type_name() const -> const char* override { return "ClippedColumn"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "ClippedColumn"; }
 
   protected:
-    auto on_paint(au::Painter& p, const au::Rect& b, const au::BuildContext& ctx) -> void override {
+    auto on_paint(au::Painter &p, const au::Rect &b, const au::BuildContext &ctx) -> void override {
         p.push_clip(b);
         au::Column::on_paint(p, b, ctx);
         p.pop_clip();

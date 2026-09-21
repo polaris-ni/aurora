@@ -29,7 +29,7 @@ using au::Size;
 
 /// 带间距/斜体时「度量 ↔ 光标 ↔ 命中」一一对应：caret_x 严格递增，且
 /// caret_x(i) 处 hit_test_char 应回到 i（含末位，x==边界时命中逻辑返回 i）。
-void check_consistency(const std::string& name, const std::string& s, const ar::TextLayoutOpts& opts) {
+void check_consistency(const std::string &name, const std::string &s, const ar::TextLayoutOpts &opts) {
     (void)ar::FontEngine::instance();
     const Font f{.size_pt = 18.0F};
     const std::size_t n = s.size();  // 用例文本均为纯 ASCII：字节数即码点数
@@ -49,7 +49,7 @@ void check_consistency(const std::string& name, const std::string& s, const ar::
 }
 
 /// 将整行文本渲染为像素缓冲（副本），用于对比斜体是否真的倾斜。
-auto render_text_buf(const std::string& s, const ar::TextLayoutOpts& opts) -> std::vector<std::uint8_t> {
+auto render_text_buf(const std::string &s, const ar::TextLayoutOpts &opts) -> std::vector<std::uint8_t> {
     ar::FontEngine::set_text_aa_mode(ar::TextAAMode::Supersample);
     Painter p;
     constexpr int w = 240;
@@ -62,7 +62,7 @@ auto render_text_buf(const std::string& s, const ar::TextLayoutOpts& opts) -> st
     p.draw_text(Rect{.origin = Point{.x = 4, .y = 4},
                      .size = Size{.width = static_cast<float>(w - 8), .height = static_cast<float>(h - 8)}},
                 s, f, Color::black(), ar::TextAAMode::Supersample, opts);
-    const std::uint8_t* d = p.data();
+    const std::uint8_t *d = p.data();
     constexpr std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U;
     // 像素缓冲拷贝按 [d, d+n) 指针区间构造 vector：指针运算属必要写法；
     // 且按手册保留显式 vector 类型（避免 braced-init 与 initializer_list 构造的匹配歧义类陷阱）。

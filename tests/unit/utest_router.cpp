@@ -20,12 +20,12 @@ class SolidBox final : public LeafWidget {
   public:
     SolidBox() = default;
 
-    [[nodiscard]] auto type_name() const -> const char* override { return "SolidBox"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "SolidBox"; }
 
   protected:
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override { return c.constrain(c.max); }
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(c.max); }
 
-    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 };
 
 }  // namespace

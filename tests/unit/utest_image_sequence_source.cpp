@@ -30,12 +30,12 @@ auto make_2x2_bmp() -> std::vector<std::uint8_t> {
     };
 }
 
-auto write_temp_file(const std::string& file_name, const std::vector<std::uint8_t>& bytes) -> std::filesystem::path {
+auto write_temp_file(const std::string &file_name, const std::vector<std::uint8_t> &bytes) -> std::filesystem::path {
     const auto dir = std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_image_sequence";
     std::filesystem::create_directories(dir);
     const auto file = dir / file_name;
     std::ofstream out{file, std::ios::binary};
-    out.write(reinterpret_cast<const char*>(bytes.data()),  // NOLINT(*-pro-type-reinterpret-cast)
+    out.write(reinterpret_cast<const char *>(bytes.data()),  // NOLINT(*-pro-type-reinterpret-cast)
               static_cast<std::streamsize>(bytes.size()));
     return file;
 }
@@ -190,9 +190,9 @@ AURORA_TEST_CASE(open_semicolon_separated_paths_load_all) {
         std::ofstream o1{f1, std::ios::binary};
         std::ofstream o2{f2, std::ios::binary};
         const auto bmp = make_2x2_bmp();
-        o1.write(reinterpret_cast<const char*>(bmp.data()),  // NOLINT(*-pro-type-reinterpret-cast)
+        o1.write(reinterpret_cast<const char *>(bmp.data()),  // NOLINT(*-pro-type-reinterpret-cast)
                  static_cast<std::streamsize>(bmp.size()));
-        o2.write(reinterpret_cast<const char*>(bmp.data()),  // NOLINT(*-pro-type-reinterpret-cast)
+        o2.write(reinterpret_cast<const char *>(bmp.data()),  // NOLINT(*-pro-type-reinterpret-cast)
                  static_cast<std::streamsize>(bmp.size()));
     }
     ImageSequenceSource s;

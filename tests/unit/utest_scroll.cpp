@@ -25,13 +25,13 @@ class FixedBox final : public Widget {
   public:
     FixedBox(float w, float h) : w_(w), h_(h) {}
 
-    [[nodiscard]] auto type_name() const -> const char* override { return "FixedBox"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "FixedBox"; }
 
   protected:
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = w_, .height = h_});
     }
-    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 
   private:
     float w_;
@@ -45,13 +45,13 @@ class BandBox final : public Widget {
   public:
     BandBox(float w, float h) : w_(w), h_(h) {}
 
-    [[nodiscard]] auto type_name() const -> const char* override { return "BandBox"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "BandBox"; }
 
   protected:
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = w_, .height = h_});
     }
-    auto on_paint(Painter& p, const Rect& bounds, const BuildContext& /*ctx*/) -> void override {
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
         const float band = bounds.size.height / 4.0F;
         const Color colors[4] = {Color{255, 0, 0, 255}, Color{0, 255, 0, 255}, Color{0, 0, 255, 255},
                                  Color{255, 255, 0, 255}};
@@ -73,8 +73,8 @@ auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
-auto find_prop(const WidgetDescriptor& d, const char* name) -> const PropDescriptor* {
-    for (const auto& p : d.properties) {
+auto find_prop(const WidgetDescriptor &d, const char *name) -> const PropDescriptor * {
+    for (const auto &p : d.properties) {
         if (p.name == name) {
             return &p;
         }
@@ -83,13 +83,13 @@ auto find_prop(const WidgetDescriptor& d, const char* name) -> const PropDescrip
 }
 
 /// @brief 假想帧钟：单调递增，令自驱动的收位滑动逐帧可测（不依赖墙钟抖动）。
-auto frame_clock() -> std::chrono::steady_clock::time_point& {
+auto frame_clock() -> std::chrono::steady_clock::time_point & {
     static std::chrono::steady_clock::time_point now = std::chrono::steady_clock::time_point{};
     return now;
 }
 
 /// @brief 推进 n 帧（每帧 16ms），驱动 snap 收位 / scroll_to 短滑动。
-auto pump(Scroll& s, int frames) -> void {
+auto pump(Scroll &s, int frames) -> void {
     for (int i = 0; i < frames; ++i) {
         frame_clock() += std::chrono::milliseconds(16);
         s.tick(frame_clock());
@@ -97,7 +97,7 @@ auto pump(Scroll& s, int frames) -> void {
 }
 
 /// @brief 等滑动走完：滑满时长 150ms + 余量。
-auto settle(Scroll& s) -> void { pump(s, 16); }
+auto settle(Scroll &s) -> void { pump(s, 16); }
 
 /// @brief reduce-motion 守卫：作用域内开启，离开时复原进程级设置（单例，测试须自清）。
 class ReduceMotionGuard final {
@@ -108,10 +108,10 @@ class ReduceMotionGuard final {
         set_accessibility_settings(s);
     }
     ~ReduceMotionGuard() { set_accessibility_settings(saved_); }
-    ReduceMotionGuard(const ReduceMotionGuard&) = delete;
-    auto operator=(const ReduceMotionGuard&) -> ReduceMotionGuard& = delete;
-    ReduceMotionGuard(ReduceMotionGuard&&) = delete;
-    auto operator=(ReduceMotionGuard&&) -> ReduceMotionGuard& = delete;
+    ReduceMotionGuard(const ReduceMotionGuard &) = delete;
+    auto operator=(const ReduceMotionGuard &) -> ReduceMotionGuard & = delete;
+    ReduceMotionGuard(ReduceMotionGuard &&) = delete;
+    auto operator=(ReduceMotionGuard &&) -> ReduceMotionGuard & = delete;
 
   private:
     AccessibilitySettings saved_;
@@ -167,7 +167,7 @@ AURORA_TEST_CASE(set_offset_jump_composites_correct_content_band) {
 }
 
 AURORA_TEST_CASE(restore_key_restores_offset_on_first_scrollable_layout) {
-    auto& storage = ScrollStorage::instance();
+    auto &storage = ScrollStorage::instance();
     storage.clear_all();
 
     // 第一次「会话」：滚动后位置写入注册表。
@@ -203,7 +203,7 @@ AURORA_TEST_CASE(restore_key_restores_offset_on_first_scrollable_layout) {
 }
 
 AURORA_TEST_CASE(serialized_offset_round_trips_and_beats_restore_key) {
-    auto& storage = ScrollStorage::instance();
+    auto &storage = ScrollStorage::instance();
     storage.clear_all();
     storage.write("k", 250.0F);  // 注册表内已有记录
 
@@ -242,7 +242,7 @@ AURORA_TEST_CASE(default_scroll_invariants) {
     const auto d = Scroll::describe_static();
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "Scroll");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "single");
-    const PropDescriptor* step = find_prop(d, "step");
+    const PropDescriptor *step = find_prop(d, "step");
     AURORA_TEST_REQUIRE_NOT_NULL(step);
     AURORA_TEST_CHECK_EQ(std::string{step->type}, "float");
     AURORA_TEST_CHECK_EQ(std::string{step->default_value}, "16.0");
@@ -447,7 +447,7 @@ AURORA_TEST_CASE(offset_signal_publishes_every_scroll_channel) {
     Scroll s{ScrollProps{.child = box(300.0F, 800.0F), .step = 1.0F}};
     LayoutEngine::layout(s, bounded(300.0F, 200.0F));
 
-    SignalView<float>& offset = s.offset_signal();  // 懒创建：初值取当前偏移
+    SignalView<float> &offset = s.offset_signal();  // 懒创建：初值取当前偏移
     AURORA_TEST_CHECK_NEAR(offset.get(), 0.0F, 1e-4F);
 
     s.set_offset(80.0F);
@@ -464,14 +464,14 @@ AURORA_TEST_CASE(offset_signal_publishes_every_scroll_channel) {
 
 AURORA_TEST_CASE(snap_properties_describe_and_round_trip) {
     const auto d = Scroll::describe_static();
-    const PropDescriptor* ext = find_prop(d, "snap_extent");
+    const PropDescriptor *ext = find_prop(d, "snap_extent");
     AURORA_TEST_REQUIRE_NOT_NULL(ext);
     AURORA_TEST_CHECK_EQ(std::string{ext->type}, "float");
     AURORA_TEST_CHECK_EQ(std::string{ext->default_value}, "0.0");
-    const PropDescriptor* paging = find_prop(d, "snap_paging");
+    const PropDescriptor *paging = find_prop(d, "snap_paging");
     AURORA_TEST_REQUIRE_NOT_NULL(paging);
     AURORA_TEST_CHECK_EQ(std::string{paging->type}, "bool");
-    const PropDescriptor* align = find_prop(d, "snap_alignment");
+    const PropDescriptor *align = find_prop(d, "snap_alignment");
     AURORA_TEST_REQUIRE_NOT_NULL(align);
     AURORA_TEST_CHECK_EQ(std::string{align->type}, "ScrollSnapAlignment");
     AURORA_TEST_CHECK_EQ(align->enum_values.size(), 3U);

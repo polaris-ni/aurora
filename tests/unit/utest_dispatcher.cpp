@@ -50,17 +50,17 @@ class TestBox final : public LeafWidget {
 
     using Widget::on_pointer_event;  // 保持基类 TouchEvent 重载可见
 
-    auto type_name() const -> const char* override { return "TestBox"; }
+    auto type_name() const -> const char * override { return "TestBox"; }
 
-    auto on_layout(const Constraints& c, [[maybe_unused]] const BuildContext& ctx) -> Size override {
+    auto on_layout(const Constraints &c, [[maybe_unused]] const BuildContext &ctx) -> Size override {
         size_ = c.constrain(Size{.width = box_width, .height = box_height});
         return size_;
     }
 
-    auto on_paint([[maybe_unused]] Painter& p, [[maybe_unused]] const Rect& bounds,
-                  [[maybe_unused]] const BuildContext& ctx) -> void override {}
+    auto on_paint([[maybe_unused]] Painter &p, [[maybe_unused]] const Rect &bounds,
+                  [[maybe_unused]] const BuildContext &ctx) -> void override {}
 
-    auto on_pointer_event(MouseEvent& e) -> void override {
+    auto on_pointer_event(MouseEvent &e) -> void override {
         switch (e.action) {
             case MouseAction::Press:
                 ++press_count;
@@ -79,7 +79,7 @@ class TestBox final : public LeafWidget {
         }
     }
 
-    auto on_key_event(KeyEvent& e) -> void override {
+    auto on_key_event(KeyEvent &e) -> void override {
         ++key_count;
         if (consume_keys) {
             e.is_handled = true;
@@ -95,22 +95,22 @@ class TestBox final : public LeafWidget {
         Widget::on_hover_change(entered);
     }
 
-    auto on_scroll(ScrollEvent& e) -> void override {
+    auto on_scroll(ScrollEvent &e) -> void override {
         ++scroll_count;
         Widget::on_scroll(e);  // 默认消费
     }
 
-    auto on_text_input(TextInputEvent& e) -> void override {
+    auto on_text_input(TextInputEvent &e) -> void override {
         ++text_count;
         Widget::on_text_input(e);  // 默认消费
     }
 
-    auto on_text_composition(TextCompositionEvent& e) -> void override {
+    auto on_text_composition(TextCompositionEvent &e) -> void override {
         ++composition_count;
         Widget::on_text_composition(e);  // 默认消费
     }
 
-    auto on_file_drop(FileDropEvent& e) -> void override {
+    auto on_file_drop(FileDropEvent &e) -> void override {
         ++drop_count;
         if (consume_drop) {
             e.is_handled = true;
@@ -132,12 +132,12 @@ class TestRow final : public Container {
 
     using Widget::on_pointer_event;
 
-    auto type_name() const -> const char* override { return "TestRow"; }
+    auto type_name() const -> const char * override { return "TestRow"; }
 
-    auto on_layout(const Constraints& c, const BuildContext& ctx) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         float x = 0.0F;
         float max_height = 0.0F;
-        for (Node& ch : children_) {
+        for (Node &ch : children_) {
             const Size cs = ch.widget().layout(Constraints{.min = Size{}, .max = c.max}, ctx);
             ch.set_bounds(Rect{.origin = Point{.x = x, .y = 0.0F}, .size = cs});
             x += cs.width;
@@ -147,10 +147,10 @@ class TestRow final : public Container {
         return size_;
     }
 
-    auto on_paint([[maybe_unused]] Painter& p, [[maybe_unused]] const Rect& bounds,
-                  [[maybe_unused]] const BuildContext& ctx) -> void override {}
+    auto on_paint([[maybe_unused]] Painter &p, [[maybe_unused]] const Rect &bounds,
+                  [[maybe_unused]] const BuildContext &ctx) -> void override {}
 
-    auto on_pointer_event(MouseEvent& e) -> void override {
+    auto on_pointer_event(MouseEvent &e) -> void override {
         ++pointer_events;
         last_local = e.local_position;
         if (consume_pointer) {
@@ -158,17 +158,17 @@ class TestRow final : public Container {
         }
     }
 
-    auto on_scroll(ScrollEvent& e) -> void override {
+    auto on_scroll(ScrollEvent &e) -> void override {
         ++scroll_count;
         Widget::on_scroll(e);
     }
 
-    auto on_text_input(TextInputEvent& e) -> void override {
+    auto on_text_input(TextInputEvent &e) -> void override {
         ++text_count;
         Widget::on_text_input(e);
     }
 
-    auto on_text_composition(TextCompositionEvent& e) -> void override {
+    auto on_text_composition(TextCompositionEvent &e) -> void override {
         ++composition_count;
         Widget::on_text_composition(e);
     }
@@ -214,10 +214,10 @@ auto make_nested_scroll_tree() -> NestedScrollTree {
 AURORA_TEST_CASE(hit_test_finds_deepest_and_misses_blank) {
     const auto tree = make_tree();
 
-    const auto* left = EventDispatcher::hit_test(*tree.row, Point{.x = 20.0F, .y = 20.0F});
+    const auto *left = EventDispatcher::hit_test(*tree.row, Point{.x = 20.0F, .y = 20.0F});
     AURORA_TEST_CHECK(left == tree.box1.get());
 
-    const auto* right = EventDispatcher::hit_test(*tree.row, Point{.x = 60.0F, .y = 20.0F});
+    const auto *right = EventDispatcher::hit_test(*tree.row, Point{.x = 60.0F, .y = 20.0F});
     AURORA_TEST_CHECK(right == tree.box2.get());
 
     // 根矩形外的空白：无命中

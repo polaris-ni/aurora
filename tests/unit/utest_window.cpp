@@ -47,7 +47,7 @@ class RecordingSurface final : public Surface {
         begin_h = height;
         return Result<bool>{true};
     }
-    auto painter() -> Painter& override { return painter_; }
+    auto painter() -> Painter & override { return painter_; }
     auto present() -> Result<bool> override {
         ++present_count;
         return Result<bool>{true};
@@ -55,7 +55,7 @@ class RecordingSurface final : public Surface {
     [[nodiscard]] auto size() const -> Size override { return size_val; }
     [[nodiscard]] auto should_close() const -> bool override { return close_requested; }
     auto poll_platform_events() -> void override { ++pump_count; }
-    auto set_title(const std::string& title) -> void override { last_title = title; }
+    auto set_title(const std::string &title) -> void override { last_title = title; }
     [[nodiscard]] auto content_inset() const -> EdgeInsets override { return inset_val; }
     auto close() -> void override { close_called = true; }
     auto minimize() -> void override { minimize_called = true; }
@@ -63,8 +63,8 @@ class RecordingSurface final : public Surface {
     auto set_fullscreen(bool on) -> void override { fullscreen_last = on ? 1 : 0; }
     auto begin_window_move() -> void override { begin_move_called = true; }
     auto begin_window_resize(WindowResizeEdge edge) -> void override { resize_last = edge; }
-    auto set_title_bar_style(const TitleBarStyle& style) -> void override { style_last = style; }
-    auto set_title_bar_icon(const std::shared_ptr<Image>& icon) -> void override { icon_last = icon; }
+    auto set_title_bar_style(const TitleBarStyle &style) -> void override { style_last = style; }
+    auto set_title_bar_icon(const std::shared_ptr<Image> &icon) -> void override { icon_last = icon; }
 
   private:
     Painter painter_;
@@ -76,7 +76,7 @@ class CountingRhi final : public rhi::RhiBackend {
     int submits = 0;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes) 测试替身记录成员
 
     [[nodiscard]] auto name() const -> std::string_view override { return "gpu-stub"; }
-    auto submit(const DrawCmd& /*cmd*/, const rhi::CmdData& /*data*/) -> void override { ++submits; }
+    auto submit(const DrawCmd & /*cmd*/, const rhi::CmdData & /*data*/) -> void override { ++submits; }
 };
 
 /// @brief 计数型 GPU 帧调度桩：`begin_frame` 可切换成败，以覆盖「GPU 生效」与「永久回退」两分支。
@@ -87,7 +87,7 @@ class CountingSink final : public rhi::RhiFrameSink {
     bool begin_ok = true;  // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
 
     [[nodiscard]] auto name() const -> std::string_view override { return "gpu-stub"; }
-    [[nodiscard]] auto backend() -> rhi::RhiBackend& override { return rhi_; }
+    [[nodiscard]] auto backend() -> rhi::RhiBackend & override { return rhi_; }
     [[nodiscard]] auto begin_frame(int /*device_width*/, int /*device_height*/, float /*scale*/) -> bool override {
         ++begin_calls;
         return begin_ok;
@@ -116,13 +116,13 @@ class GpuStubSurface final : public Surface {
         painter_.begin(width, height);
         return Result<bool>{true};
     }
-    [[nodiscard]] auto painter() -> Painter& override { return painter_; }
+    [[nodiscard]] auto painter() -> Painter & override { return painter_; }
     [[nodiscard]] auto present() -> Result<bool> override {
         ++present_count;
         return Result<bool>{true};
     }
     [[nodiscard]] auto size() const -> Size override { return Size{.width = 320.0F, .height = 240.0F}; }
-    [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink* override { return &sink; }
+    [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink * override { return &sink; }
 
     /// @brief 触发系统重绘请求：真实后端在 WM_PAINT / Wayland configure 同址调用本回调。
     auto fire_present_request() -> void {
@@ -138,7 +138,7 @@ class GpuStubSurface final : public Surface {
 /// @brief 会真正产出绘制命令的根：`Spacer` 自身无绘制，帧 DL 会为空，无法区分命令去向。
 class FilledSpacer final : public Spacer {
   protected:
-    auto on_paint(Painter& p, const Rect& bounds, const BuildContext& /*ctx*/) -> void override {
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
         p.fill_rect(bounds, Color{0x11U, 0x22U, 0x33U, 0xFFU});
     }
 };
@@ -173,7 +173,7 @@ AURORA_TEST_CASE(window_options_defaults) {
 
 AURORA_TEST_CASE(window_title_defaults_and_forwards_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface& surf = *stub;
+    RecordingSurface &surf = *stub;
     Window w{std::move(stub)};
     AURORA_TEST_CHECK_EQ(w.title(), std::string{"Aurora"});
     w.set_title("Hello");
@@ -184,7 +184,7 @@ AURORA_TEST_CASE(window_title_defaults_and_forwards_to_surface) {
 
 AURORA_TEST_CASE(window_size_and_content_inset_delegate_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface& surf = *stub;
+    RecordingSurface &surf = *stub;
     Window w{std::move(stub)};
     const Size sz = w.size();
     AURORA_TEST_CHECK_NEAR(sz.width, 320.0F, 1e-4F);
@@ -203,7 +203,7 @@ AURORA_TEST_CASE(window_size_and_content_inset_delegate_to_surface) {
 
 AURORA_TEST_CASE(window_frame_lifecycle_delegates_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface& surf = *stub;
+    RecordingSurface &surf = *stub;
     Window w{std::move(stub)};
     // begin_frame 以窗口逻辑尺寸（取整）启动后端帧。
     const auto bf = w.begin_frame();
@@ -220,7 +220,7 @@ AURORA_TEST_CASE(window_frame_lifecycle_delegates_to_surface) {
 
 AURORA_TEST_CASE(window_control_actions_forward_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface& surf = *stub;
+    RecordingSurface &surf = *stub;
     Window w{std::move(stub)};
     w.minimize();
     w.toggle_maximize();
@@ -245,7 +245,7 @@ AURORA_TEST_CASE(window_control_actions_forward_to_surface) {
 
 AURORA_TEST_CASE(window_title_bar_style_and_icon_forward_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface& surf = *stub;
+    RecordingSurface &surf = *stub;
     Window w{std::move(stub)};
     TitleBarStyle style;
     style.height = 42.0F;
@@ -299,7 +299,7 @@ AURORA_TEST_CASE(window_overlay_slot_roundtrip) {
 
 AURORA_TEST_CASE(window_run_executes_on_frame_exactly_max_frames_times) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface& surf = *stub;
+    RecordingSurface &surf = *stub;
     Window w{std::move(stub)};
     int frames = 0;
     // max_frames>0 有限循环：每帧 pump 事件 + 调 on_frame，到量即止（无头确定性驱动）。
@@ -317,13 +317,13 @@ AURORA_TEST_CASE(create_window_rejects_null_surface) {
 
 AURORA_TEST_CASE(system_redraw_with_gpu_sink_re_renders_instead_of_bare_present) {
     auto stub = std::make_unique<GpuStubSurface>();
-    GpuStubSurface& surf = *stub;
+    GpuStubSurface &surf = *stub;
     Window w{std::move(stub)};
     Node page = FilledSpacer{};
 
     // 首帧走 GPU 通道：录帧 DL → sink.begin_frame → replay → sink.end_frame → present。
     AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
-    CountingSink& sink = surf.sink;
+    CountingSink &sink = surf.sink;
     AURORA_TEST_CHECK_EQ(sink.begin_calls, 1);
     AURORA_TEST_CHECK_EQ(sink.end_calls, 1);
     AURORA_TEST_CHECK_GT(sink.rhi_submits(), 0);  // 命令确实进了 GPU 消费面
@@ -346,7 +346,7 @@ AURORA_TEST_CASE(system_redraw_with_gpu_sink_re_renders_instead_of_bare_present)
 
 AURORA_TEST_CASE(system_redraw_after_gpu_fallback_keeps_bare_present) {
     auto stub = std::make_unique<GpuStubSurface>();
-    GpuStubSurface& surf = *stub;
+    GpuStubSurface &surf = *stub;
     surf.sink.begin_ok = false;  // 首帧即判定 GPU 失效 → Window 永久回退软件路径
     Window w{std::move(stub)};
     Node page = FilledSpacer{};

@@ -30,7 +30,7 @@ static auto build_clock() -> au::Node {
     auto clock_str = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"clock: --:--:--"});
     return au::Timer(
         1s,
-        [clock_str](const au::SignalView<int>&) -> au::Text {
+        [clock_str](const au::SignalView<int> &) -> au::Text {
             return au::Text{au::TextProps{.content = au::Reactive{clock_str}}};
         },
         [clock_str](int) -> void { clock_str->set(au::LocalizedString{"clock: " + now_string()}); });
@@ -41,7 +41,7 @@ static auto build_countdown() -> au::Node {
     auto cd = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"countdown: 10"});
     return au::Timer(
         1s,
-        [cd](const au::SignalView<int>&) -> au::Text { return au::Text{au::TextProps{.content = au::Reactive{cd}}}; },
+        [cd](const au::SignalView<int> &) -> au::Text { return au::Text{au::TextProps{.content = au::Reactive{cd}}}; },
         [cd](int n) -> void {
             const int left = 10 - n;
             cd->set(au::LocalizedString{left > 0 ? "countdown: " + std::to_string(left) : "countdown: done"});
@@ -53,7 +53,7 @@ static auto build_auto_reveal() -> au::Node {
     auto shown = std::make_shared<au::State<bool>>(false);
     return au::Timer(
         2s,
-        [shown](const au::SignalView<int>&) -> au::Show {
+        [shown](const au::SignalView<int> &) -> au::Show {
             return au::Show(shown, au::Text{au::LocalizedString{"auto-revealed after 2s!"}});
         },
         [shown](int) -> void { shown->set(true); });

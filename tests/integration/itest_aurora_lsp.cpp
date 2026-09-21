@@ -52,7 +52,7 @@ auto make_schema() -> Schema {
 }
 
 // 在 text 中定位 sub 的 (line,col)，单/多行通用。
-auto find_pos(const std::string& text, const std::string& sub) -> std::pair<size_t, size_t> {
+auto find_pos(const std::string &text, const std::string &sub) -> std::pair<size_t, size_t> {
     const auto p = text.find(sub);
     if (p == std::string::npos) {
         return {0, 0};
@@ -78,7 +78,7 @@ AURORA_TEST_CASE(lsp_completes_widget_types_after_au_scope) {
     const Document d = analyze(doc);
     const auto items = completions(doc, d, schema, 0, 4);  // 光标在 au:: 之后
     bool has_button = false;
-    for (const auto& it : items) {
+    for (const auto &it : items) {
         if (it.label == "Button" && it.kind == "Class") {
             has_button = true;
         }
@@ -94,7 +94,7 @@ AURORA_TEST_CASE(lsp_completes_block_props_and_excludes_used) {
     const Document d = analyze(doc);
     const auto items = completions(doc, d, schema, l, c);
     bool has_label = false;
-    for (const auto& it : items) {
+    for (const auto &it : items) {
         if (it.label == "label" && it.kind == "Property") {
             has_label = true;
         }
@@ -108,7 +108,7 @@ AURORA_TEST_CASE(lsp_completes_block_props_and_excludes_used) {
     const Document d2 = analyze(doc2);
     const auto items2 = completions(doc2, d2, schema, l2, c2);
     bool has_used_again = false;
-    for (const auto& it : items2) {
+    for (const auto &it : items2) {
         if (it.label == "label") {
             has_used_again = true;
         }
@@ -149,7 +149,7 @@ AURORA_TEST_CASE(lsp_diagnostics_reports_unknown_type_and_prop) {
     const Document d1 = analyze(doc1);
     const auto diags1 = diagnostics(d1, schema);
     bool found_type = false;
-    for (const auto& dg : diags1) {
+    for (const auto &dg : diags1) {
         if (dg.message.find("Frobnicate") != std::string::npos) {
             found_type = true;
         }
@@ -161,7 +161,7 @@ AURORA_TEST_CASE(lsp_diagnostics_reports_unknown_type_and_prop) {
     const Document d2 = analyze(doc2);
     const auto diags2 = diagnostics(d2, schema);
     bool found_prop = false;
-    for (const auto& dg : diags2) {
+    for (const auto &dg : diags2) {
         if (dg.message.find("bogus") != std::string::npos) {
             found_prop = true;
         }
@@ -177,7 +177,7 @@ AURORA_TEST_CASE(lsp_diagnostics_reports_missing_required_and_bad_enum) {
     const Document d3 = analyze(doc3);
     const auto diags3 = diagnostics(d3, schema);
     bool found_req = false;
-    for (const auto& dg : diags3) {
+    for (const auto &dg : diags3) {
         if (dg.severity == Diagnostic::Severity::Warning && dg.message.find("enabled") != std::string::npos) {
             found_req = true;
         }
@@ -188,7 +188,7 @@ AURORA_TEST_CASE(lsp_diagnostics_reports_missing_required_and_bad_enum) {
     const std::string doc4 = "au::Alignment::Sideways";
     const auto diags4 = validate_enum_values(doc4, schema);
     bool found_enum = false;
-    for (const auto& dg : diags4) {
+    for (const auto &dg : diags4) {
         if (dg.message.find("Sideways") != std::string::npos) {
             found_enum = true;
         }

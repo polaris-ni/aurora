@@ -35,11 +35,11 @@ class BgSurface final : public au::Surface {
         painter_.fill_rect(au::Rect{.origin = au::Point{.x = 0.0F, .y = 0.0F}, .size = size_}, AURORA_BG);
         return au::Result<bool>{true};
     }
-    [[nodiscard]] auto painter() -> au::Painter& override { return painter_; }
+    [[nodiscard]] auto painter() -> au::Painter & override { return painter_; }
     [[nodiscard]] auto present() -> au::Result<bool> override { return au::Result<bool>{true}; }
     [[nodiscard]] auto size() const -> au::Size override { return size_; }
     [[nodiscard]] auto clear_color() const -> Color override { return AURORA_BG; }
-    [[nodiscard]] auto data() const -> const std::uint8_t* override { return painter_.data(); }
+    [[nodiscard]] auto data() const -> const std::uint8_t * override { return painter_.data(); }
 
   private:
     au::Painter painter_;
@@ -47,7 +47,7 @@ class BgSurface final : public au::Surface {
     bool begun_ = false;
 };
 
-auto copy_pixels(const std::uint8_t* src, const size_t n) -> std::vector<std::uint8_t> {
+auto copy_pixels(const std::uint8_t *src, const size_t n) -> std::vector<std::uint8_t> {
     std::vector<std::uint8_t> out(n);
     if (src != nullptr) {
         std::memcpy(out.data(), src, n);
@@ -73,7 +73,7 @@ AURORA_TEST_CASE(bare_text_partial_repaint_repatches_clear_color) {
     au::Window win{std::move(surface)};
 
     AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 1：首帧整帧铺底 + 绘树
-    auto const& s = dynamic_cast<BgSurface&>(win.surface());
+    auto const &s = dynamic_cast<BgSurface &>(win.surface());
     constexpr size_t n = static_cast<size_t>(w) * static_cast<size_t>(h) * 4U;
 
     // 脏源须为「小于全窗」的子控件几何，走部分裁剪路径而非退化为全窗裁剪。

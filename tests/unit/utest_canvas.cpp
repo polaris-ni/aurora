@@ -24,7 +24,7 @@ auto bounded(float w, float h) -> Constraints {
 }
 
 auto no_paint() -> Canvas::PaintFn {
-    return [](Painter&, const Rect&) -> void {};
+    return [](Painter &, const Rect &) -> void {};
 }
 
 }  // namespace
@@ -74,7 +74,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(d.children_policy, std::string{"none"});
 
     bool has_on_paint = false;
-    for (const auto& ev : d.events) {
+    for (const auto &ev : d.events) {
         if (ev == "on_paint") {
             has_on_paint = true;
         }
@@ -83,7 +83,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
 
     bool has_width = false;
     bool has_show = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (p.name == "width") {
             has_width = true;
         }
@@ -96,7 +96,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
 
     // 无响应式信号。
     Canvas c;
-    std::vector<SignalViewBase*> out;
+    std::vector<SignalViewBase *> out;
     c.collect_signals(out);
     AURORA_TEST_CHECK_EQ(out.size(), 0U);
 }
@@ -128,7 +128,7 @@ AURORA_TEST_CASE(paint_callback_receives_bounds_and_rasterizes) {
     // 无头渲染：回调收到的 bounds 即布局盒；填充红色后逐像素验证落盘 PNG。
     bool invoked = false;
     Rect seen{};
-    Node root{std::make_shared<Canvas>(80.0F, 60.0F, [&invoked, &seen](Painter& p, const Rect& b) -> void {
+    Node root{std::make_shared<Canvas>(80.0F, 60.0F, [&invoked, &seen](Painter &p, const Rect &b) -> void {
         invoked = true;
         seen = b;
         p.fill_rect(b, Color::red());

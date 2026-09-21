@@ -18,12 +18,12 @@ class SolidBox final : public LeafWidget {
   public:
     SolidBox() = default;
 
-    [[nodiscard]] auto type_name() const -> const char* override { return "SolidBox"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "SolidBox"; }
 
   protected:
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override { return c.constrain(c.max); }
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(c.max); }
 
-    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 };
 
 }  // namespace
@@ -64,7 +64,7 @@ AURORA_TEST_CASE(route_custom_transition_stored) {
 
 AURORA_TEST_CASE(route_copy_shares_root_widget) {
     const Route src{Node{SolidBox{}}, "src"};
-    const Route& copy{src};  // Node 内部为 shared_ptr：拷贝共享同一棵 widget 树。
+    const Route &copy{src};  // Node 内部为 shared_ptr：拷贝共享同一棵 widget 树。
 
     AURORA_TEST_CHECK_FALSE(copy.empty());
     AURORA_TEST_CHECK_EQ(&copy.root().widget(), &src.root().widget());
@@ -87,7 +87,7 @@ AURORA_TEST_CASE(route_root_mutable_access) {
     Route r{Node{SolidBox{}}, "home"};
     r.root().set_id("page-root");
 
-    const Route& view = r;
+    const Route &view = r;
     AURORA_TEST_CHECK_EQ(view.root().id(), std::string_view{"page-root"});
 }
 

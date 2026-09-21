@@ -50,7 +50,7 @@ AURORA_TEST_CASE(helpers_assert_text_count_tree_and_visibility) {
 AURORA_TEST_CASE(helpers_tap_triggers_button_on_click) {
     TestEnv env = init_headless(200, 100);
     bool clicked = false;
-    const Button* b = button(*env.root_widget, "Hit", {}, [&clicked]() -> void { clicked = true; });
+    const Button *b = button(*env.root_widget, "Hit", {}, [&clicked]() -> void { clicked = true; });
     pump(env);
     tap(env, *b);
     AURORA_TEST_CHECK_MSG(clicked, "tap synthesized press+release triggered on_click");
@@ -58,7 +58,7 @@ AURORA_TEST_CASE(helpers_tap_triggers_button_on_click) {
 
 AURORA_TEST_CASE(helpers_type_text_updates_text_input_value) {
     TestEnv env = init_headless(200, 100);
-    TextInput* in = input(*env.root_widget, "");
+    TextInput *in = input(*env.root_widget, "");
     pump(env);
     type_text(env, *in, "abc");
     AURORA_TEST_CHECK_MSG(in->value() == "abc", "type_text updated TextInput value");
@@ -77,7 +77,7 @@ AURORA_TEST_CASE(helpers_expect_bounds_matches_laid_out_node) {
 
 AURORA_TEST_CASE(helpers_absolute_bounds_locates_widget_in_tree) {
     TestEnv env = init_headless(200, 100);
-    const Button* b = button(*env.root_widget, "Find me");
+    const Button *b = button(*env.root_widget, "Find me");
     pump(env);
 
     const auto box = absolute_bounds(env.root, *b);

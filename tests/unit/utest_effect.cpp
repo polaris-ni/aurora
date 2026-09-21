@@ -28,8 +28,8 @@ AURORA_TEST_CASE(effect_constructor_defers_first_run) {
 AURORA_TEST_CASE(effect_current_tracks_active_scope_with_nested_restore) {
     // current()：作用域外为空；run 期间指向该 Effect；嵌套 run 内层替换、结束恢复外层、最外层结束恢复空。
     AURORA_TEST_CHECK(Effect::current() == nullptr);
-    Effect* seen_outer = nullptr;
-    Effect* seen_inner = nullptr;
+    Effect *seen_outer = nullptr;
+    Effect *seen_inner = nullptr;
     Effect outer{[&]() -> void {
         seen_outer = Effect::current();
         Effect inner{[&]() -> void { seen_inner = Effect::current(); }};

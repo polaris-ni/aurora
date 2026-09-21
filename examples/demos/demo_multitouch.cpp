@@ -28,7 +28,7 @@ auto main() -> int {
     au::Button t;
     t.label.set(au::LocalizedString{"Raw stream listener (multi-touch; watch console)"});
     t.modifier.set(
-        au::Modifier{}.size(320.0F, 80.0F).background(pal::AURORA_SURFACE).touch([](const au::TouchEvent& e) -> void {
+        au::Modifier{}.size(320.0F, 80.0F).background(pal::AURORA_SURFACE).touch([](const au::TouchEvent &e) -> void {
             AURORA_LOG_INFO("demo", "[multitouch] points=", e.points.size(), " active=", e.active_count());
         }));
 

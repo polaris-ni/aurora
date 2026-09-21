@@ -48,8 +48,7 @@ class Modifier {
     [[nodiscard]] auto nodes() const -> const std::vector<std::shared_ptr<ModifierNode>> & { return nodes_; }
 
     [[nodiscard]] auto padding(float p) const -> Modifier {
-        const float clamped =
-            p < 0.0F ? (Diagnostics::degraded("layout", "Modifier::padding degrade to 0"), 0.0F) : p;
+        const float clamped = p < 0.0F ? (Diagnostics::degraded("layout", "Modifier::padding degrade to 0"), 0.0F) : p;
         Modifier c = *this;
         c.nodes_.push_back(std::make_shared<Padding>(clamped));
         return c;

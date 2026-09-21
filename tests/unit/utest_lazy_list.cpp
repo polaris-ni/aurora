@@ -25,13 +25,13 @@ class FixedBox final : public Widget {
   public:
     FixedBox(float w, float h) : w_(w), h_(h) {}
 
-    [[nodiscard]] auto type_name() const -> const char* override { return "FixedBox"; }
+    [[nodiscard]] auto type_name() const -> const char * override { return "FixedBox"; }
 
   protected:
-    auto on_layout(const Constraints& c, const BuildContext& /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = w_, .height = h_});
     }
-    auto on_paint(Painter& /*p*/, const Rect& /*bounds*/, const BuildContext& /*ctx*/) -> void override {}
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 
   private:
     float w_;
@@ -58,13 +58,13 @@ struct BuildRecorder {
 };
 
 /// @brief 假想帧钟：单调递增，令自驱动的收位滑动逐帧可测（不依赖墙钟抖动）。
-auto frame_clock() -> std::chrono::steady_clock::time_point& {
+auto frame_clock() -> std::chrono::steady_clock::time_point & {
     static std::chrono::steady_clock::time_point now = std::chrono::steady_clock::time_point{};
     return now;
 }
 
 /// @brief 推进 n 帧（每帧 16ms），驱动 snap 收位 / scroll-to 短滑动。
-auto pump(LazyList& list, int frames) -> void {
+auto pump(LazyList &list, int frames) -> void {
     for (int i = 0; i < frames; ++i) {
         frame_clock() += std::chrono::milliseconds(16);
         list.tick(frame_clock());
@@ -72,10 +72,10 @@ auto pump(LazyList& list, int frames) -> void {
 }
 
 /// @brief 等滑动走完：滑满时长 150ms + 余量。
-auto settle(LazyList& list) -> void { pump(list, 16); }
+auto settle(LazyList &list) -> void { pump(list, 16); }
 
 /// @brief 滚轮事件入口（step 为控件内部常量 40，故 1 单位 = 40dp）。
-auto wheel(LazyList& list, float delta_y) -> ScrollEvent {
+auto wheel(LazyList &list, float delta_y) -> ScrollEvent {
     ScrollEvent e;
     e.delta_y = delta_y;
     list.on_scroll(e);
@@ -91,10 +91,10 @@ class ReduceMotionGuard final {
         set_accessibility_settings(s);
     }
     ~ReduceMotionGuard() { set_accessibility_settings(saved_); }
-    ReduceMotionGuard(const ReduceMotionGuard&) = delete;
-    auto operator=(const ReduceMotionGuard&) -> ReduceMotionGuard& = delete;
-    ReduceMotionGuard(ReduceMotionGuard&&) = delete;
-    auto operator=(ReduceMotionGuard&&) -> ReduceMotionGuard& = delete;
+    ReduceMotionGuard(const ReduceMotionGuard &) = delete;
+    auto operator=(const ReduceMotionGuard &) -> ReduceMotionGuard & = delete;
+    ReduceMotionGuard(ReduceMotionGuard &&) = delete;
+    auto operator=(ReduceMotionGuard &&) -> ReduceMotionGuard & = delete;
 
   private:
     AccessibilitySettings saved_;
@@ -234,7 +234,7 @@ AURORA_TEST_CASE(serialize_props_and_describe_metadata) {
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "LazyList");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
     bool count_required = false;
-    for (const auto& p : d.properties) {
+    for (const auto &p : d.properties) {
         if (p.name == "count") {
             count_required = p.required;
         }
@@ -333,7 +333,7 @@ AURORA_TEST_CASE(offset_signal_follows_wheel_glide_and_programmatic) {
     LazyList list{100, {}, 48.0F};
     LayoutEngine::layout(list, bounded(300.0F, 400.0F));
 
-    SignalView<float>& offset = list.offset_signal();  // 懒创建：初值取当前偏移
+    SignalView<float> &offset = list.offset_signal();  // 懒创建：初值取当前偏移
     AURORA_TEST_CHECK_NEAR(offset.get(), 0.0F, 1e-4F);
 
     list.set_scroll_offset(100.0F);

@@ -50,24 +50,24 @@ AURORA_TEST_CASE(form_layout_rows_and_fixed_label_width) {
         {FormRow{.label = "Name", .field = Node{Text{"Ada"}}}, FormRow{.label = "Age", .field = Node{Text{"36"}}}});
     // 下行目标类型已由配方树结构（Column）锁定，dynamic_cast 徒增 RTTI 依赖且掩盖测试意图。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
-    auto& col = static_cast<Column&>(form.widget());
+    auto &col = static_cast<Column &>(form.widget());
     AURORA_TEST_REQUIRE_EQ(col.child_count(), 2U);  // 每个表单行一个 Row
 
     // 行子节点类型为 Row（form_layout 逐行构建 Row）。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
-    auto& row0 = static_cast<Row&>(col.child(0).widget());
+    auto &row0 = static_cast<Row &>(col.child(0).widget());
     AURORA_TEST_REQUIRE_EQ(row0.child_count(), 2U);  // 标签 + 字段
     AURORA_TEST_CHECK_EQ(std::string{row0.child(0).widget().type_name()}, "Text");
     AURORA_TEST_CHECK_EQ(std::string{row0.child(1).widget().type_name()}, "Text");
     // 同上：第二行仍是 Row。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
-    auto& row1 = static_cast<Row&>(col.child(1).widget());
+    auto &row1 = static_cast<Row &>(col.child(1).widget());
     AURORA_TEST_CHECK_EQ(row1.child_count(), 2U);
 
     // 标签列为固定宽（Widget::width 强类型意图），默认 label_width = 120
     // Row 首子节点已由上文 type_name 断言锁定为 Text。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
-    auto& label0 = static_cast<Text&>(row0.child(0).widget());
+    auto &label0 = static_cast<Text &>(row0.child(0).widget());
     AURORA_TEST_CHECK_EQ(label0.width_spec().kind, LengthKind::Fixed);
     AURORA_TEST_CHECK_NEAR(label0.width_spec().value, 120.0F, 1e-3F);
     // 行带内边距修饰（Modifier{}.padding(4)）
@@ -77,8 +77,8 @@ AURORA_TEST_CASE(form_layout_rows_and_fixed_label_width) {
     auto form2 = form_layout({FormRow{.label = "Name", .field = Node{Text{"Ada"}}}}, 90.0F);
     // 下行链 Column→Row→Text 由 form_layout 树结构锁定，dynamic_cast 徒增 RTTI 依赖。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-static-cast-downcast)
-    auto& label2 =
-        static_cast<Text&>(static_cast<Row&>(static_cast<Column&>(form2.widget()).child(0).widget()).child(0).widget());
+    auto &label2 = static_cast<Text &>(
+        static_cast<Row &>(static_cast<Column &>(form2.widget()).child(0).widget()).child(0).widget());
     // NOLINTEND(cppcoreguidelines-pro-type-static-cast-downcast)
     AURORA_TEST_CHECK_NEAR(label2.width_spec().value, 90.0F, 1e-3F);
     LayoutEngine::layout(form2.widget(), bounded(400.0F, 600.0F));
@@ -89,7 +89,7 @@ AURORA_TEST_CASE(toolbar_fills_width_sidebar_fixed_width) {
     auto bar = toolbar({Node{Button{"A"}}, Node{Button{"B"}}});
     // toolbar 返回 Row（type_name 断言见上一用例），无需 dynamic_cast。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
-    auto& bar_row = static_cast<Row&>(bar.widget());
+    auto &bar_row = static_cast<Row &>(bar.widget());
     // 工具栏修饰链：fill_max_width + background + padding
     AURORA_TEST_CHECK_EQ(bar_row.modifier.get().nodes().size(), 3U);
     LayoutEngine::layout(bar.widget(), bounded(480.0F, 600.0F));
@@ -112,13 +112,13 @@ AURORA_TEST_CASE(list_view_wraps_column_in_scroll) {
     auto list = list_view({Node{Text{"1"}}, Node{Text{"2"}}, Node{Text{"3"}}});
     // list_view 契约返回 Scroll（type_name 断言见 compose 用例），下行类型已由结构锁定。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
-    auto& scroll = static_cast<Scroll&>(list.widget());
+    auto &scroll = static_cast<Scroll &>(list.widget());
     AURORA_TEST_REQUIRE_EQ(scroll.child_count(), 1U);  // Scroll 包裹 Column
     AURORA_TEST_CHECK_NEAR(scroll.step, 16.0F, 1e-3F);  // 配方约定的滚轮步长
 
     // ScrollProps::child 成员与 Container::child(i) 同名，取容器访问须限定基类；内层为 Column。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
-    auto& inner = static_cast<Column&>(scroll.Container::child(0).widget());
+    auto &inner = static_cast<Column &>(scroll.Container::child(0).widget());
     AURORA_TEST_CHECK_EQ(inner.child_count(), 3U);
     AURORA_TEST_CHECK_EQ(std::string{inner.child(0).widget().type_name()}, "Text");
 }
@@ -133,7 +133,7 @@ AURORA_TEST_CASE(tab_view_switches_page_on_tab_activate) {
                           TabPage{.title = "B", .content = Node{std::move(page_b)}}});
     // tab_view 契约：Column[Row(标签按钮), TabBody]，下行类型由结构锁定（type_name 断言在下）。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
-    auto& col = static_cast<Column&>(tabs.widget());
+    auto &col = static_cast<Column &>(tabs.widget());
     AURORA_TEST_REQUIRE_EQ(col.child_count(), 2U);  // 标签按钮行 + 内容体
     AURORA_TEST_CHECK_EQ(std::string{col.child(0).widget().type_name()}, "Row");
     AURORA_TEST_CHECK_EQ(std::string{col.child(1).widget().type_name()}, "TabBody");
@@ -141,14 +141,14 @@ AURORA_TEST_CASE(tab_view_switches_page_on_tab_activate) {
     // 标签按钮标题与页序一致，on_click 已接线到内部 State
     // 首子节点 type_name 已断言为 Row。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
-    auto& btn_row = static_cast<Row&>(col.child(0).widget());
+    auto &btn_row = static_cast<Row &>(col.child(0).widget());
     AURORA_TEST_REQUIRE_EQ(btn_row.child_count(), 2U);
     // 标签行子节点由 tab_view 构建为 Button。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
-    auto& btn_a = static_cast<Button&>(btn_row.child(0).widget());
+    auto &btn_a = static_cast<Button &>(btn_row.child(0).widget());
     // 同上，第二枚标签按钮。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
-    auto& btn_b = static_cast<Button&>(btn_row.child(1).widget());
+    auto &btn_b = static_cast<Button &>(btn_row.child(1).widget());
     AURORA_TEST_CHECK_EQ(btn_a.label.get().text, std::string{"A"});
     AURORA_TEST_CHECK_EQ(btn_b.label.get().text, std::string{"B"});
 

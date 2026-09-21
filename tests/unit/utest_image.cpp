@@ -96,13 +96,13 @@ namespace {
 }
 
 /// @brief 在用例唯一临时目录下建独立子目录并写入字节文件（用例结束由调用方 remove_all）。
-[[nodiscard]] auto write_temp_file(const std::string& dir_name, const std::string& file_name,
-                                   const std::vector<std::uint8_t>& bytes) -> std::filesystem::path {
+[[nodiscard]] auto write_temp_file(const std::string &dir_name, const std::string &file_name,
+                                   const std::vector<std::uint8_t> &bytes) -> std::filesystem::path {
     const auto dir = std::filesystem::path{aurora::testing::isolation::temp_dir()} / dir_name;
     std::filesystem::create_directories(dir);
     const auto file = dir / file_name;
     std::ofstream out{file, std::ios::binary};
-    out.write(reinterpret_cast<const char*>(bytes.data()),  // NOLINT(*-pro-type-reinterpret-cast)
+    out.write(reinterpret_cast<const char *>(bytes.data()),  // NOLINT(*-pro-type-reinterpret-cast)
               static_cast<std::streamsize>(bytes.size()));
     return file;
 }
@@ -134,7 +134,7 @@ AURORA_TEST_CASE(load_bmp_roundtrip_decodes_rgba8) {
     const auto result = aurora::Image::load(file.string());
     AURORA_TEST_REQUIRE(result.ok());
 
-    const auto& image = result.value();
+    const auto &image = result.value();
     AURORA_TEST_CHECK_EQ(image.width, 2);
     AURORA_TEST_CHECK_EQ(image.height, 2);
     AURORA_TEST_CHECK_EQ(image.pixels.size(), 16U);  // 2*2*4

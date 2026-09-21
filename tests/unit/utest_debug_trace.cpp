@@ -66,7 +66,7 @@ AURORA_TEST_CASE(record_and_query_roundtrip) {
     AURORA_TEST_CHECK_EQ(after["total_recorded"], base_total + 3);
 
     // entries 最新在前：最后记录的 Column 排首位；字段逐项核对。
-    const Json& entries = after["entries"];
+    const Json &entries = after["entries"];
     AURORA_TEST_REQUIRE_EQ(entries.size(), base_entries + 3U);
     AURORA_TEST_CHECK_EQ(entries[0]["kind"], "layout");
     AURORA_TEST_CHECK_EQ(entries[0]["type"], "Column");
@@ -96,7 +96,7 @@ AURORA_TEST_CASE(why_trace_limit_keeps_newest_first) {
     // limit=2：只取最近 2 条，仍最新在前。
     const Json limited = why_trace(2);
     AURORA_TEST_CHECK_EQ(limited["count"], base_count + 3);  // count 不受 limit 影响
-    const Json& entries = limited["entries"];
+    const Json &entries = limited["entries"];
     AURORA_TEST_REQUIRE_EQ(entries.size(), 2U);
     AURORA_TEST_CHECK_EQ(entries[0]["type"], "C");
     AURORA_TEST_CHECK_EQ(entries[0]["frame"], 203);

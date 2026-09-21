@@ -808,8 +808,7 @@ class TextInput : public LeafWidget {
                 tx = right_tx;
             }
         }
-        const float ty =
-            box.origin.y + padding_.top + ((box.size.height - padding_.top - padding_.bottom - th) * 0.5F);
+        const float ty = box.origin.y + padding_.top + ((box.size.height - padding_.top - padding_.bottom - th) * 0.5F);
         const size_t ci = composed_index(caret_) + preedit_cursor_;
         const float cx = tx + render::FontEngine::caret_x(shown, ci, f, opts);
         return Rect{.origin = Point{.x = cx, .y = ty}, .size = Size{.width = 0.0F, .height = th}};
@@ -922,9 +921,9 @@ class TextInput : public LeafWidget {
         if (is_focused() && !empty && !disabled) {
             const size_t ci = composed_index(caret_) + preedit_cursor_;
             const float cx = tx + render::FontEngine::caret_x(shown, ci, f, layout_opts());
-            p.fill_rect(
-                Rect{.origin = Point{.x = cx, .y = ty}, .size = Size{.width = is_composing() ? 2.0F : 1.5F, .height = th}},
-                cursor_color_);
+            p.fill_rect(Rect{.origin = Point{.x = cx, .y = ty},
+                             .size = Size{.width = is_composing() ? 2.0F : 1.5F, .height = th}},
+                        cursor_color_);
         }
     }
 

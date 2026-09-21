@@ -45,7 +45,7 @@ template <typename T, typename = void>
 struct IsStreamable : std::false_type {};
 
 template <typename T>
-struct IsStreamable<T, std::void_t<decltype(std::declval<std::ostream&>() << std::declval<const T&>())>>
+struct IsStreamable<T, std::void_t<decltype(std::declval<std::ostream &>() << std::declval<const T &>())>>
     : std::true_type {};
 
 /// @brief 类型是否可迭代（容器分支的准入条件；C 数组另走专属分支）。
@@ -54,7 +54,7 @@ struct IsIterable : std::false_type {};
 
 template <typename T>
 struct IsIterable<
-    T, std::void_t<decltype(std::begin(std::declval<const T&>())), decltype(std::end(std::declval<const T&>()))>>
+    T, std::void_t<decltype(std::begin(std::declval<const T &>())), decltype(std::end(std::declval<const T &>()))>>
     : std::true_type {};
 
 template <typename T>
@@ -88,11 +88,11 @@ template <typename E>
 
 /// @brief 字节序列渲染：十六进制 + 总长，超出阈值截断（整段像素数据会淹没报告）。
 template <typename C>
-[[nodiscard]] auto byte_dump(const C& bytes) -> std::string;
+[[nodiscard]] auto byte_dump(const C &bytes) -> std::string;
 
 /// @brief 流式渲染（`operator<<` 可用时）。
 template <typename T>
-[[nodiscard]] auto via_stream(const T& value) -> std::string;
+[[nodiscard]] auto via_stream(const T &value) -> std::string;
 
 /// @brief 浮点渲染：给到可精确回读的位数，避免「诊断信息自身丢精度」。
 template <typename T>
@@ -101,22 +101,22 @@ template <typename T>
 
 /// @brief 通用分支：所有未被显式特化的类型走这里。
 template <typename T>
-[[nodiscard]] auto generic_print(const T& value) -> std::string;
+[[nodiscard]] auto generic_print(const T &value) -> std::string;
 
 /// @brief 异常诊断：解释 `std::exception` 派生类的运行时类型与 `what()`。
-[[nodiscard]] auto exception_text(const std::exception& error) -> std::string;
+[[nodiscard]] auto exception_text(const std::exception &error) -> std::string;
 
 }  // namespace detail
 
 /// @brief 值打印定制点：显式特化本模板即可为自有类型接管失败信息里的实际值。
 template <typename T>
 struct ValuePrinter {
-    static auto print(const T& value) -> std::string { return detail::generic_print(value); }
+    static auto print(const T &value) -> std::string { return detail::generic_print(value); }
 };
 
 /// @brief 主入口：把任意值渲染为诊断文本（经 `ValuePrinter`，故特化对元素级递归同样生效）。
 template <typename T>
-[[nodiscard]] auto print_value(const T& value) -> std::string {
+[[nodiscard]] auto print_value(const T &value) -> std::string {
     return ValuePrinter<std::remove_cv_t<T>>::print(value);
 }
 
@@ -124,12 +124,12 @@ namespace detail {
 
 /// @brief 两个操作数的对比诊断尾注。
 template <typename A, typename B>
-[[nodiscard]] auto compare_detail(const A& lhs, const B& rhs) -> std::string {
+[[nodiscard]] auto compare_detail(const A &lhs, const B &rhs) -> std::string {
     return "\n    Which is: " + print_value(lhs) + " vs " + print_value(rhs);
 }
 
 template <typename T>
-[[nodiscard]] auto via_stream(const T& value) -> std::string {
+[[nodiscard]] auto via_stream(const T &value) -> std::string {
     std::ostringstream out;
     out << value;
     return out.str();
@@ -172,12 +172,12 @@ template <typename E>
 }
 
 template <typename C>
-[[nodiscard]] auto byte_dump(const C& bytes) -> std::string {
+[[nodiscard]] auto byte_dump(const C &bytes) -> std::string {
     constexpr std::size_t max_bytes = 32;
     std::ostringstream out;
     out << "<" << std::distance(std::begin(bytes), std::end(bytes)) << " bytes:";
     std::size_t index = 0;
-    for (const auto& byte : bytes) {
+    for (const auto &byte : bytes) {
         if (index++ == max_bytes) {
             out << " ...";
             break;
@@ -190,7 +190,7 @@ template <typename C>
 }
 
 template <typename T>
-[[nodiscard]] auto generic_print(const T& value) -> std::string {
+[[nodiscard]] auto generic_print(const T &value) -> std::string {
     using Plain = std::remove_cv_t<T>;
 
     if constexpr (std::is_same_v<Plain, bool>) {
@@ -198,7 +198,7 @@ template <typename T>
     } else if constexpr (std::is_array_v<Plain>) {
         using Element = std::remove_cv_t<std::remove_extent_t<Plain>>;
         if constexpr (std::is_same_v<Element, char>) {
-            return quote(std::string_view{static_cast<const char*>(value)});
+            return quote(std::string_view{static_cast<const char *>(value)});
         } else {
             return byte_dump(value);
         }
@@ -226,7 +226,7 @@ template <typename T>
             return "nullptr";
         }
         std::ostringstream out;
-        out << static_cast<const void*>(value);
+        out << static_cast<const void *>(value);
         return out.str();
     } else if constexpr (requires {
                              value.has_value();
@@ -241,7 +241,7 @@ template <typename T>
         std::string out = "(";
         std::size_t index = 0;
         std::apply([&out, &index](
-                       const auto&... item) -> auto { ((out += (index++ == 0 ? "" : ", ") + print_value(item)), ...); },
+                       const auto &...item) -> auto { ((out += (index++ == 0 ? "" : ", ") + print_value(item)), ...); },
                    value);
         out += ')';
         return out;
@@ -256,7 +256,7 @@ template <typename T>
         } else {
             std::string out = "{ ";
             std::size_t index = 0;
-            for (const auto& item : value) {
+            for (const auto &item : value) {
                 out += (index++ == 0 ? "" : ", ") + print_value(item);
             }
             out += (index == 0 ? "}" : " }");
