@@ -16,6 +16,7 @@
 #include "aurora/app/window_host.h"
 #include "aurora/commands.h"
 #include "aurora/core/log.h"
+#include "aurora/core/platform.h"
 #include "aurora/core/strict_mode.h"
 #include "aurora/core/thread.h"
 #include "aurora/core/types.h"
@@ -26,6 +27,13 @@
 #include "aurora/widget/widget.h"
 #include "aurora/window/window.h"
 #include "aurora/window/window_state.h"
+
+#ifdef AURORA_PLATFORM_WASM
+// 浏览器 rAF 帧循环接线（specification/06-app-platform.md §10 Web/WASM「事件循环」行）：
+// 主线程不可阻塞，帧体经 emscripten_request_animation_frame_loop 回调按 vsync 驱动。
+#include <emscripten/emscripten.h>
+#include <emscripten/html5.h>
+#endif
 
 namespace aurora {
 
@@ -94,6 +102,17 @@ class Application {
     Application(Scene scene, std::unique_ptr<Window> window, const WindowOptions &opts = {}) : opts_(opts) {
         adopt_window_metrics(window);
         (void)register_host(std::move(scene), std::move(window), opts);
+    }
+
+    /// @brief 析构：WASM 构建下摘除 rAF 循环所有权——蹦床检出 `raf_owner_` 不匹配即自行终止，
+    ///        不会解引用已析构实例（浏览器单线程，检查与使用之间无窗口期）。其他平台为保持
+    ///        原隐式析构行为；本析构仅为 rAF 守卫存在（`raf_tick` 是类析构后仍会被调度的唯一回调）。
+    ~Application() {
+#ifdef AURORA_PLATFORM_WASM
+        if (raf_owner_ == this) {
+            raf_owner_ = nullptr;
+        }
+#endif
     }
 
     // ---- 多窗口（specification/06-app-platform.md §2.4）----
@@ -275,6 +294,12 @@ class Application {
     /// （`WindowOptions::max_fps`）节流；完全空闲时阻塞等待事件或最近定时任务到期（静态界面 CPU
     /// 趋近 0）；`power_saving=false` 退回旧忙轮询。同时安装主线程投递器：`au::async` 的 then
     /// 回调经队列回投主线程，并 `request_wake` 唤醒睡眠中的帧循环（无运行循环时行为不变）。
+    ///
+    /// **WASM（浏览器）构建**：主线程不可阻塞，`run()` 仅注册 rAF 回调即返回——步骤 1–7 由
+    /// `raf_tick` 每个 vsync 帧执行一次（帧节拍由浏览器承担，不调 `wait_once`），退出条件
+    /// （`should_exit` / `max_frames` 预算）满足时执行收尾原语并停止循环；rAF 不可用时
+    /// （非浏览器宿主）回退同步循环并 ERROR 日志申报。`Application` 实体须活过所有 rAF 回调
+    /// （`au::App().run()` 路径已按页面生命周期堆持；手工栈对象须自行保证，见 `raf_owner_` 守卫）。
     AURORA_MAIN_THREAD auto run() -> void {
         if (!has_renderable_window()) {
             AURORA_LOG_WARN(
@@ -283,47 +308,24 @@ class Application {
                 "produced by au::create_window(XxxOptions)) or Application(Scene, unique_ptr<Surface>).");
             return;
         }
-        const StrictMode prev_strict = aurora::strict_mode();
-        aurora::set_strict_mode(strict_);
-        auto last = std::chrono::steady_clock::now();
-        Scheduler::set_current(&sched_);
-        // 跨线程回投：后台线程的 then 回调入队 + 唤醒睡眠中的主循环，
-        // 下一帧开头在主线程排水执行（兼具线程安全与不丢唤醒）。多窗口下须唤醒**全部**窗口的
-        // 等待通道——任一窗口睡在自己的 Surface 上都可能延迟回投的执行。
-        Task<bool>::set_main_poster([this](std::function<void()> fn) -> void {
-            {
-                std::scoped_lock lk(posted_mutex_);
-                posted_.push_back(std::move(fn));
-            }
-            request_wake_all();
-        });
-        int n = 0;
+        loop_begin();
+#ifdef AURORA_PLATFORM_WASM
+        // 宿主有 requestAnimationFrame 才移交帧环（裸 Node 等无 DOM 宿主没有——loop 变体在本
+        // Emscripten 版本返回 void 且无失败码，可用性只能前置探测，不能事后判）。
+        if (MAIN_THREAD_EM_ASM_INT(({ return typeof requestAnimationFrame === "function" ? 1 : 0; })) != 0) {
+            emscripten_request_animation_frame_loop(&Application::raf_tick, this);
+            return;  // 帧循环移交浏览器事件环；收尾在末帧 raf_tick 内完成
+        }
+        AURORA_LOG_ERROR("app", "run(): requestAnimationFrame unavailable; falling back to blocking loop");
+#endif
         while (!should_exit()) {
-            const auto now = std::chrono::steady_clock::now();
-            const double dt = std::chrono::duration<double>(now - last).count();
-            last = now;
-            drain_posted();
-            pump_all_once();
-            if (on_frame_) {
-                on_frame_();
-            }
-            tick_all();
-            anim_.tick(dt);
-            sched_.tick(dt);  // 定时任务随帧推进（在 present 前触发，当帧 UI 即可刷新）
-            render_all(dt);
-            reap_closed();  // 帧末收割：不在事件派发栈内销毁宿主，避免回调打到半死对象
-            ++n;
-            if (opts_.max_frames > 0 && n >= opts_.max_frames) {
+            const auto frame_start = step_frame();
+            if (!frame_budget_left()) {
                 break;
             }
-            wait_once(now);
+            wait_once(frame_start);
         }
-        // 卸载投递器并排尽残留（仍在主线程）：退出后回到「无 poster 直接调用」的默认行为。
-        Task<bool>::set_main_poster(nullptr);
-        drain_posted();
-        Scheduler::set_current(nullptr);
-        Animator::set_current(nullptr);
-        aurora::set_strict_mode(prev_strict);
+        loop_end();
     }
 
     /// @brief 渲染当前场景到 PNG。运行期同样套用严格模式（specification/01-core.md §4.3 / CI 门禁），
@@ -462,6 +464,96 @@ class Application {
         }
     }
 
+    // ---- 帧循环驱动原语（同步 while 与 WASM rAF 回调共用；`run()` 文档注释为帧序契约）----
+
+    /// @brief 循环起手：严格模式、Scheduler 当前指针、主线程回投器、时间基准与帧计数复位。
+    auto loop_begin() -> void {
+        prev_strict_ = aurora::strict_mode();
+        aurora::set_strict_mode(strict_);
+        loop_last_ = std::chrono::steady_clock::now();
+        loop_frames_ = 0;
+        Scheduler::set_current(&sched_);
+        // 跨线程回投：后台线程的 then 回调入队 + 唤醒睡眠中的主循环，
+        // 下一帧开头在主线程排水执行（兼具线程安全与不丢唤醒）。多窗口下须唤醒**全部**窗口的
+        // 等待通道——任一窗口睡在自己的 Surface 上都可能延迟回投的执行。
+        Task<bool>::set_main_poster([this](std::function<void()> fn) -> void {
+            {
+                std::scoped_lock lk(posted_mutex_);
+                posted_.push_back(std::move(fn));
+            }
+            request_wake_all();
+        });
+#ifdef AURORA_PLATFORM_WASM
+        raf_owner_ = this;  // rAF 蹦床守卫：只有持有循环的应用实例可被推进
+#endif
+    }
+
+    /// @brief 推进恰好一帧（步骤 1–7），返回「帧起始时刻」供 `wait_once` 做帧预算核算。
+    auto step_frame() -> std::chrono::steady_clock::time_point {
+        const auto now = std::chrono::steady_clock::now();
+        const double dt = std::chrono::duration<double>(now - loop_last_).count();
+        loop_last_ = now;
+        drain_posted();
+        pump_all_once();
+        if (on_frame_) {
+            on_frame_();
+        }
+        tick_all();
+        anim_.tick(dt);
+        sched_.tick(dt);  // 定时任务随帧推进（在 present 前触发，当帧 UI 即可刷新）
+        render_all(dt);
+        reap_closed();   // 帧末收割：不在事件派发栈内销毁宿主，避免回调打到半死对象
+        ++loop_frames_;
+        return now;
+    }
+
+    /// @brief `max_frames` 帧预算是否仍有剩余（`<= 0` = 不限帧）。
+    [[nodiscard]] auto frame_budget_left() const -> bool {
+        return opts_.max_frames <= 0 || loop_frames_ < opts_.max_frames;
+    }
+
+    /// @brief 循环收尾：卸载回投器并排尽残留（仍在主线程）、清当前指针、还原严格模式。
+    ///        rAF 末帧同样走此处，退出后回到「无 poster 直接调用」的默认行为。
+    auto loop_end() -> void {
+#ifdef AURORA_PLATFORM_WASM
+        if (raf_owner_ == this) {
+            raf_owner_ = nullptr;
+        }
+#endif
+        Task<bool>::set_main_poster(nullptr);
+        drain_posted();
+        Scheduler::set_current(nullptr);
+        Animator::set_current(nullptr);
+        aurora::set_strict_mode(prev_strict_);
+    }
+
+#ifdef AURORA_PLATFORM_WASM
+    /// @brief rAF 蹦床（`emscripten_request_animation_frame_loop` 回调）：每个 vsync 推进
+    ///        一帧；返回 `true` = 继续（loop 变体内部自动续排下一拍），退出条件满足时走
+    ///        `loop_end` 收尾并返回 `false` 终止循环。
+    /// 先比对 `raf_owner_` 再解引用 `user_data`：对象析构（见 `~Application`）或循环已收尾时
+    /// owner 即空，蹦床不再触碰可能已释放的实例——浏览器单线程，check-then-use 天然无竞态。
+    static auto raf_tick(double /*time*/, void *user_data) -> bool {
+        auto *self = static_cast<Application *>(user_data);
+        if (raf_owner_ != self) {
+            return false;  // 实例已析构/循环已收尾：不触碰 user_data，本拍即终止
+        }
+        self->step_frame();
+        if (!self->should_exit() && self->frame_budget_left()) {
+            return true;  // 续订下一拍（随 vsync 回调）
+        }
+        self->loop_end();
+        return false;
+    }
+
+    /// @brief 当前持有 rAF 循环的实例（无 = nullptr）。仅 WASM 构建存在，析构守卫与蹦床共用。
+    inline static Application *raf_owner_ = nullptr;
+#endif
+
+    StrictMode prev_strict_ = StrictMode::Off;  ///< 循环期保存的线程级严格模式（收尾还原）。
+    std::chrono::steady_clock::time_point loop_last_{};  ///< 上一帧起始时刻（帧 dt 基准）。
+    int loop_frames_ = 0;  ///< 本轮循环已推进帧数（`max_frames` 预算计数）。
+
     StrictMode strict_ = StrictMode::Off;  ///< 严格模式（run() 期间套用到线程级开关）
     int width_ = 0;  ///< 主窗口逻辑宽（无 Window 时取构造参数，供 render_to_png）。
     int height_ = 0;  ///< 主窗口逻辑高（同上）。
@@ -572,25 +664,9 @@ class App {
         opts.size = size_;
         opts.max_frames = max_frames_;
         if (custom_surface_) {
-            Application app{std::move(scene), std::move(custom_surface_), opts};
-            if (on_frame_) {
-                app.set_on_frame(on_frame_);
-            }
-            app.set_strict_mode(strict_);
-            if (overlay_) {
-                app.set_overlay(std::move(overlay_));
-            }
-            app.run();
+            launch(std::move(scene), std::move(custom_surface_), opts);
         } else if (custom_window_) {
-            Application app{std::move(scene), std::move(custom_window_), opts};
-            if (on_frame_) {
-                app.set_on_frame(on_frame_);
-            }
-            app.set_strict_mode(strict_);
-            if (overlay_) {
-                app.set_overlay(std::move(overlay_));
-            }
-            app.run();
+            launch(std::move(scene), std::move(custom_window_), opts);
         } else {
             auto kind = auto_detect_surface();
             std::unique_ptr<Window> window;
@@ -647,19 +723,40 @@ class App {
                 default:
                     break;
             }
-            Application app{std::move(scene), std::move(window), opts};
-            if (on_frame_) {
-                app.set_on_frame(on_frame_);
-            }
-            app.set_strict_mode(strict_);
-            if (overlay_) {
-                app.set_overlay(std::move(overlay_));
-            }
-            app.run();
+            launch(std::move(scene), std::move(window), opts);
         }
     }
 
   private:
+    /**
+     * @brief 统一的「构造 → 接线 → 跑帧循环」出口（三个后端分支共用）。
+     *
+     * 浏览器（WASM）下 `Application::run()` 注册 rAF 回调后即返回：若 `Application` 是栈对象，
+     * `launch` 返回即析构，rAF 回调捕获的 `this` 随之悬空。故该路径把实例交给函数级
+     * `static std::unique_ptr` 持有**至页面生命周期结束**（Emscripten 程序的常规语义：
+     * main 返回后堆对象继续服务帧回调，进程即浏览器标签页，关闭即整体回收），不做释放。
+     * 非浏览器路径保持栈对象语义，零变化。
+     */
+    template <typename... Args>
+    auto launch(Args &&...args) -> void {
+#ifdef AURORA_PLATFORM_WASM
+        static std::unique_ptr<Application> keep_alive;
+        // 重复 run() 时旧实例析构：~Application 清空 raf_owner_ 守卫 → 旧 rAF 回调下一拍自停，无悬空。
+        keep_alive = std::make_unique<Application>(std::forward<Args>(args)...);
+        Application &app = *keep_alive;
+#else
+        Application app{std::forward<Args>(args)...};
+#endif
+        if (on_frame_) {
+            app.set_on_frame(on_frame_);
+        }
+        app.set_strict_mode(strict_);
+        if (overlay_) {
+            app.set_overlay(std::move(overlay_));
+        }
+        app.run();
+    }
+
     Node view_;
     std::string title_{"Aurora"};
     Size size_{.width = 800.0F, .height = 600.0F};

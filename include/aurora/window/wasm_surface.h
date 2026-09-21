@@ -10,8 +10,9 @@
 // - 事件翻译：Emscripten HTML5 API（emscripten_set_*_callback）翻译鼠标/键盘/触摸/resize。
 // - 线程模型：无 pthreads 构建下 ThreadPool 为 deferred 排空模式（见 thread_pool.h 类头），
 //   `present()` 帧尾 `pump()` 即宿主安全点——`au::async` / 协程续体随帧回写，不开线程不丢任务。
-// - 帧循环（规划中，未实现）：`wait_events` 当前为空实现（`{}`），WASM 下退化为忙轮询；拟接入
-// `emscripten_request_animation_frame_loop` 对齐浏览器 rAF/vsync，尚无关线。
+// - 帧循环：浏览器主线程不可阻塞，`Application::run()` 经 `emscripten_request_animation_frame_loop`
+//   把统一帧循环挂到 rAF/vsync（蹦床 `Application::raf_tick`，见 application.h）；本 Surface 的
+//   `wait_events` 因此无需实现（保持空体，rAF 模式下帧循环根本不调用它）。
 // - 关闭语义：emscripten_set_beforeunload_callback 设置 should_close。
 
 #if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)
@@ -39,11 +40,21 @@ namespace aurora {
 
 class WasmSurface : public Surface {
   public:
-    WasmSurface(int w, int h, const char *canvas_id = "#canvas") : canvas_id_(canvas_id), w_(w), h_(h) {
+    WasmSurface(int w, int h, const char *canvas_id = "#canvas") : w_(w), h_(h) {
+        // 入参统一按 DOM id 理解（可带 '#' 前缀，两种写法等价）。派生两种形态分开使用：
+        // `present()` 上屏走 getElementById（须裸 id），事件注册/尺寸查询走 Emscripten 的
+        // querySelector（须 CSS 选择器）——同一字符串两用必坏一边（裸 id 不是合法选择器，
+        // 注册静默失败；带 '#' 又查不到元素），历史默认值 "#canvas" 正踩中此坑。
+        std::string id = canvas_id;
+        if (!id.empty() && id.front() == '#') {
+            id.erase(0, 1);
+        }
+        canvas_id_ = id;
+        canvas_selector_ = "#" + id;
         // 鼠标事件按 canvas 元素注册（多窗口各 canvas 独立，天然可用）。
-        emscripten_set_mousedown_callback(canvas_id_.c_str(), this, true, &on_mouse);
-        emscripten_set_mouseup_callback(canvas_id_.c_str(), this, true, &on_mouse);
-        emscripten_set_mousemove_callback(canvas_id_.c_str(), this, true, &on_mouse);
+        emscripten_set_mousedown_callback(canvas_selector_.c_str(), this, true, &on_mouse);
+        emscripten_set_mouseup_callback(canvas_selector_.c_str(), this, true, &on_mouse);
+        emscripten_set_mousemove_callback(canvas_selector_.c_str(), this, true, &on_mouse);
         // 键盘 / resize 注册在 document / window 级：多窗口下必须「单一分发器 + 按焦点路由」，
         // 否则各 Surface 各自注册 document 级键盘回调会被后者覆盖，仅最后创建的窗口能收到。
         // 故全局仅注册一次，由全局回调按 focused_surface_ 路由键盘、按实例集合广播 resize。
@@ -59,9 +70,9 @@ class WasmSurface : public Surface {
     ~WasmSurface() override {
         // 仅注销本 canvas 的鼠标回调；document/window 级全局分发器常驻（进程生命周期内
         // 有效，实例清空后遍历自然跳过，无副作用）。
-        emscripten_set_mousedown_callback(canvas_id_.c_str(), nullptr, true, nullptr);
-        emscripten_set_mouseup_callback(canvas_id_.c_str(), nullptr, true, nullptr);
-        emscripten_set_mousemove_callback(canvas_id_.c_str(), nullptr, true, nullptr);
+        emscripten_set_mousedown_callback(canvas_selector_.c_str(), nullptr, true, nullptr);
+        emscripten_set_mouseup_callback(canvas_selector_.c_str(), nullptr, true, nullptr);
+        emscripten_set_mousemove_callback(canvas_selector_.c_str(), nullptr, true, nullptr);
         instances_.erase(this);
         if (focused_surface_ == this) {
             focused_surface_ = nullptr;
@@ -142,7 +153,8 @@ class WasmSurface : public Surface {
     inline static WasmSurface *focused_surface_ = nullptr;
     inline static bool global_handlers_registered_ = false;
 
-    std::string canvas_id_;
+    std::string canvas_id_;       ///< 裸 DOM id（getElementById 上屏用）。
+    std::string canvas_selector_; ///< CSS 选择器形态（Emscripten 事件注册/querySelector 用）。
     Painter painter_;
     int w_ = 0;
     int h_ = 0;
@@ -203,7 +215,7 @@ class WasmSurface : public Surface {
     // 查询本 canvas 当前 CSS 尺寸并更新（window resize 时各实例自行刷新）。
     auto update_css_size() -> void {
         double css_w = 0, css_h = 0;
-        emscripten_get_element_css_size(canvas_id_.c_str(), &css_w, &css_h);
+        emscripten_get_element_css_size(canvas_selector_.c_str(), &css_w, &css_h);
         if (css_w > 0 && css_h > 0) {
             w_ = static_cast<int>(css_w);
             h_ = static_cast<int>(css_h);

@@ -703,10 +703,10 @@ if (au::platform().is_mobile()) { /* 移动端适配 */ }
 
 | 方面 | 做法 |
 |:---|:---|
-| 事件循环 | **已知限制（待修复）**：`WasmSurface::wait_events` 当前为空实现（`{}`），WASM 后端**无任何 rAF 集成**（仓内无 `requestAnimationFrame` / `set_main_loop` 接线，也无 `emscripten_request_animation_frame_loop`）。宿主不主动驱动帧时，事件循环**退化为忙轮询（busy-poll）**，并非 rAF 驱动的免自旋行为。计划接入 `emscripten_request_animation_frame_loop` 对齐浏览器 rAF/vsync，尚无关线。 |
-| 线程模型 | **已落地（deferred 排空）**：Emscripten 无 `-pthread` 构建（未定义 `__EMSCRIPTEN_PTHREADS__`）下 `ThreadPool` 自动进入延迟排空模式（`core/thread_pool.h`，见 [`01-core.md`](01-core.md) §6.1）——不创建任何 `std::thread`，`au::async` / 协程任务只入队，`WasmSurface::present()` 帧尾调用 `pump()` 在主线程排空，随帧回写不丢任务；以 `-pthread` + `SharedArrayBuffer`（需跨源隔离）构建时回到普通 worker 池语义。Web Worker + `postMessage` 的真并行执行仍为需求愿景、无接线。**已知限制（事件循环）**：`wait_events` 为空实现、无 rAF 接线（见「事件循环」行）；deferred 下 `future.get()` 与 `pump()` 同线程互等会自锁 |
-| 渲染 | 渲染目标为 `<canvas>` 元素，内部自动选择 |
-| 限制 | 不支持高频指针直通路；当前**无 rAF 轮询降级**（见「事件循环」行已知限制），并在 `au::platform().capabilities()` 中声明此限制 |
+| 事件循环 | **已落地（rAF 驱动）**：浏览器主线程不可阻塞，`Application::run()` 在 WASM 构建下不进入同步 while——经 `emscripten_request_animation_frame_loop` 把统一帧循环挂到 rAF/vsync（蹦床 `Application::raf_tick` 每拍执行帧序步骤 1–7，不调 `wait_once`，帧节拍由浏览器承担），`run()` 注册完即返回。生命周期三件套：① `App::run()` 的 `launch` 助手在 WASM 下把 `Application` 交函数级 `static unique_ptr` **堆持至页面生命周期**（main 返回后栈对象必悬空）；② `inline static raf_owner_` 守卫——蹦床先比对 owner 再触碰 `user_data`，实例析构（`~Application` 摘除 owner）即令旧回调下一拍自停；③ 宿主无 `requestAnimationFrame`（如裸 Node）时探测回退同步阻塞循环并 ERROR 申报。`WasmSurface::wait_events` 保持空体（rAF 模式帧循环不调它）。真机验收：`tools/verify/wasm_raf_live_probe.cpp`（渲染/点击/async 续体三项，页面壳 `wasm_raf_shell.html` 提供 `<canvas id="aurora-canvas">`）。**注意**：rAF 模式下 main 立即返回，帧回调引用到的应用侧状态必须活在堆上（`shared_ptr`/`static`），引用捕获 main 局部变量即悬空栈写。 |
+| 线程模型 | **已落地（deferred 排空）**：Emscripten 无 `-pthread` 构建（未定义 `__EMSCRIPTEN_PTHREADS__`）下 `ThreadPool` 自动进入延迟排空模式（`core/thread_pool.h`，见 [`01-core.md`](01-core.md) §6.1）——不创建任何 `std::thread`，`au::async` / 协程任务只入队，`WasmSurface::present()` 帧尾调用 `pump()` 在主线程排空，随帧回写不丢任务；以 `-pthread` + `SharedArrayBuffer`（需跨源隔离）构建时回到普通 worker 池语义。Web Worker + `postMessage` 的真并行执行仍为需求愿景、无接线。deferred 下 `future.get()` 与 `pump()` 同线程互等会自锁 |
+| 渲染 | 渲染目标为 `<canvas>` 元素，内部自动选择。canvas 定位入参统一按 DOM id 理解（`"x"` 与 `"#x"` 等价）：上屏 `getElementById` 用裸 id，事件注册/尺寸查询用 CSS 选择器形态——Emscripten HTML5 事件目标经 `querySelector` 解析，裸 id 不带 `#` 会**静默注册失败** |
+| 限制 | 不支持高频指针直通路；`capabilities()` 声明此限制 |
 
 应用代码使用相同的 `au::async` / `co_await` API，无需 `#ifdef`。
 

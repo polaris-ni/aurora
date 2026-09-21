@@ -186,6 +186,18 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         target_include_directories(aurora_verify_alsa_audio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
         list(APPEND _aurora_verify_targets aurora_verify_alsa_audio)
     endif ()
+    # ---- WASM rAF 帧循环（浏览器）：Application::run() 经 requestAnimationFrame 真实驱动帧环，
+    # 一次验收渲染上屏 / DOM 事件 / deferred 线程池帧尾排空三条接线（期望项见源文件头注释）。
+    # 产物为 .html+.js+.wasm，须经 HTTP 静态服务器打开（emrun 最省事）；有意**不进**聚合
+    # `aurora_verify`——该目标面向本机直接运行的探针，浏览器产物不满足该语义。
+    if (EMSCRIPTEN AND AURORA_BACKEND_WASM)
+        aurora_add_verify_probe(aurora_verify_wasm_raf "${_aurora_verify_dir}/wasm_raf_live_probe.cpp")
+        set_target_properties(aurora_verify_wasm_raf PROPERTIES SUFFIX ".html")
+        # 页面壳提供 <canvas id="aurora-canvas">（WasmOptions::canvas_id 默认值）；
+        # 默认 shell 的 #canvas 与上屏契约不符，present 会静默丢帧。
+        target_link_options(aurora_verify_wasm_raf PRIVATE
+                "--shell-file=${_aurora_verify_dir}/wasm_raf_shell.html")
+    endif ()
     if (_aurora_verify_targets)
         add_custom_target(aurora_verify DEPENDS ${_aurora_verify_targets})
         aurora_log("Verify probes enabled: ${_aurora_verify_targets} (build all with --target aurora_verify)")
