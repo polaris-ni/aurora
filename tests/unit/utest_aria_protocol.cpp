@@ -7,6 +7,7 @@
 ///           aria-labelledby IDREF 投影与 aria-label 互斥
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -237,7 +238,8 @@ AURORA_TEST_CASE(range_number_formatting) {
     n.node.range = AccessibilityRange{.min = 0.0, .max = 1.0, .step = 0.0, .value = 0.25};
     el = aria_element_of(n);
     AURORA_TEST_CHECK(attr_of(el, "aria-valuenow") == "0.25");  // 定点去尾零
-    n.node.range = AccessibilityRange{.min = 0.0, .max = 1.0, .step = 0.0, .value = 0.0 / 0.0};
+    n.node.range =
+        AccessibilityRange{.min = 0.0, .max = 1.0, .step = 0.0, .value = std::numeric_limits<double>::quiet_NaN()};
     el = aria_element_of(n);
     AURORA_TEST_CHECK(attr_of(el, "aria-valuenow") == "0");  // 非有限回落 0（宁缺位不错位）
 }

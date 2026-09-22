@@ -420,7 +420,7 @@ python tools/check/run_clang_tidy.py --build-dir build --include 'src/'         
 
 **NOLINT 纪律**：凡用 `NOLINT` / `NOLINTNEXTLINE` 抑制告警，须遵守 `CODING_STANDARDS.md` §5.2——写明具体检查名（禁止裸 `NOLINT` 的新增使用），并紧邻注释说明「为何不能按建议修复」。
 
-**门禁覆盖范围 = 该 build 目录的编译库**：`lint` 扫的是 `--build-dir` 下 `compile_commands.json` 里的 TU，因此只覆盖**该次 configure 实际定义的翻译单元**。浏览器专属件（`EMSCRIPTEN` 门后的 `wasm_*` 实现与 `aurora_verify_wasm_*` 探针）、以及按平台/后端条件定义的真机探针，都不在 Windows/Linux native db 内，`lint` 绿灯不等于它们干净。⚠️ 也别拿 `build-wasm/compile_commands.json` 硬跑 tidy 当门禁：该 db 不带 Emscripten sysroot，clang-tidy 会以 `'emscripten.h' file not found` 开路并把 `EM_JS` 当普通函数名报「命名不合规」，告警面全是假象。这类 TU 的正确把关路径是真机/浏览器探针（§2.4）与 WASM 构建本身。
+**门禁覆盖范围 = 该 build 目录的编译库**：`lint` 扫的是 `--build-dir` 下 `compile_commands.json` 里的 TU，因此只覆盖**该次 configure 实际定义的翻译单元**。浏览器专属件（`EMSCRIPTEN` 门后的 `wasm_*` 实现与 `aurora_verify_wasm_*` 探针）、以及按平台/后端条件定义的真机探针，都不在 Windows/Linux native db 内，`lint` 绿灯不等于它们干净。⚠️ 也别拿 wasm 构建目录（`build-wasm` 之类，随本机而异、不入库）下的 `compile_commands.json` 硬跑 tidy 当门禁：该 db 不带 Emscripten sysroot，clang-tidy 会以 `'emscripten.h' file not found` 开路并把 `EM_JS` 当普通函数名报「命名不合规」，告警面全是假象。这类 TU 的正确把关路径是真机/浏览器探针（§2.4）与 WASM 构建本身。
 
 ### 4.6 `AURORA_ENABLE_IMAGE_*`（图像编解码能力）
 
