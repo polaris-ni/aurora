@@ -356,7 +356,9 @@ AURORA_TEST_CASE(buffer_source_one_shot_and_loop) {
 }
 
 AURORA_TEST_CASE(buffer_source_start_scheduling_and_errors) {
-    AudioContext ctx;
+    // 本用例断言的是「块级起播算术」，必须恒静默：默认设备后端（WASAPI/ALSA）一旦启动成功，
+    // 其回调线程会与手工 `render_block` 并发消费同一个 source，起播块位随负载漂移。
+    AudioContext ctx{std::make_unique<FakeAudioDevice>(AURORA_AUDIO_RATE, 2, /*fail_start=*/true)};
     auto src = ctx.create_buffer_source();
     // 非法缓冲
     auto bad = src->set_buffer(

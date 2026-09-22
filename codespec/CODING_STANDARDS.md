@@ -169,6 +169,14 @@
 - **尽量传 `root`**（已完成布局的控件树根）：`compare_or_update` 只在失败时才顺带做差异归因，把 `SnapshotDiffReport::to_text()` 附进断言消息 —— 给出差异区域的位置与归因到的控件路径，而不是只有一句「N px, max delta M」。通过路径上零额外开销。
 - 历史原因：这三者曾在 7 个测试文件里各抄一份，导致任何 golden 基础设施的改进都要改 7 处。收敛后已全部迁移，新增用例不得再复制。
 
+### 3.6 设备后端在单测里必须显式桩化
+
+单测不得让 `AudioContext` 走默认设备工厂（`create_default_device_backend()`）：默认构造在有声卡的机器上会拉起 WASAPI/ALSA 回调线程，与用例里手工 `render_block` **并发消费同一节点图**，块级时序断言随之漂移——并行 ctest 偶发红灯，单机直跑却次次通过。静默与否不应由 CI 机器有没有声卡决定。
+
+- 凡涉及逐块渲染、时钟推进、起播/延迟块位的断言，一律注入 fail-start 桩令上下文静默：`AudioContext ctx{std::make_unique<aurora::testing::FakeAudioDevice>(rate, channels, /*fail_start=*/true)};`（桩在 `tests/support/fake_audio.h`，`utest_audio.cpp` 的 `SilentRig` 即此形态）。
+- 只测拓扑校验 / 非法参数路径的用例同样显式注入，别把「碰巧没声卡」当成通过条件。
+- 确需真实设备的验证不进单测：放 `tools/verify/` 真机探针（条件构建、不进 CTest），见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §2.4 的 `aurora_verify_*`。
+
 ## 4 元数据与可观测
 
 - **错误可机读**：`Error::to_json()` 输出结构化错误（`code` / `message` / `suggestion` / `docs` / `where`），供 AI 解析。
