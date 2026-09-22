@@ -473,7 +473,7 @@ jobs:
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
           # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
-          echo "deb http://apt.llvm.org/ubuntu/ llvm-toolchain-ubuntu-$(lsb_release -cs) 22" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
           sudo apt-get install -y clang-tidy-22
           sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
@@ -510,7 +510,7 @@ jobs:
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
           # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
-          echo "deb http://apt.llvm.org/ubuntu/ llvm-toolchain-ubuntu-$(lsb_release -cs) 22" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
           sudo apt-get install -y clang-format-22
           sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
