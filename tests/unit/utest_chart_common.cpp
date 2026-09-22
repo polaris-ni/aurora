@@ -15,6 +15,8 @@
 
 namespace aurora::test_cases::utest_chart_common {
 
+using aurora::testing::require_value;
+
 namespace {
 
 [[nodiscard]] auto is_near(double a, double b, double eps = 1e-9) -> bool { return std::abs(a - b) <= eps; }
@@ -136,7 +138,7 @@ AURORA_TEST_CASE(json_roundtrip_series_array) {
     AURORA_TEST_CHECK_TRUE(back[0].name == "A");
     AURORA_TEST_CHECK_TRUE(back[0].values == src[0].values);
     AURORA_TEST_REQUIRE_TRUE(back[0].color.has_value());
-    AURORA_TEST_CHECK_TRUE(*back[0].color == Color{10, 20, 30, 255});
+    AURORA_TEST_CHECK_TRUE(require_value(back[0].color) == Color{10, 20, 30, 255});
     AURORA_TEST_CHECK_FALSE(back[1].color.has_value());
 }
 
@@ -175,7 +177,7 @@ AURORA_TEST_CASE(json_roundtrip_axis_and_legend) {
     AURORA_TEST_CHECK_TRUE(axis_back.label == "Y");
     AURORA_TEST_CHECK_EQ(axis_back.tick_count, 4);
     AURORA_TEST_REQUIRE_TRUE(axis_back.min.has_value());
-    AURORA_TEST_CHECK_TRUE(is_near(*axis_back.min, -1.0));
+    AURORA_TEST_CHECK_TRUE(is_near(require_value(axis_back.min), -1.0));
     AURORA_TEST_CHECK_FALSE(axis_back.max.has_value());
     AURORA_TEST_CHECK_FALSE(axis_back.show_grid_lines);
 

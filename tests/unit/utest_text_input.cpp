@@ -19,6 +19,8 @@
 
 namespace aurora::test_cases::utest_text_input {
 
+using aurora::testing::require_value;
+
 namespace {
 
 auto bounded(float w, float h) -> Constraints {
@@ -458,7 +460,7 @@ AURORA_TEST_CASE(direction_prop_serialization_roundtrip) {
     TextInput dst;
     dst.deserialize_props(props);
     AURORA_TEST_REQUIRE_TRUE(dst.direction().has_value());
-    AURORA_TEST_CHECK_TRUE(*dst.direction() == TextDirection::RTL);
+    AURORA_TEST_CHECK_TRUE(require_value(dst.direction()) == TextDirection::RTL);
 
     Json defaults;
     TextInput def;

@@ -32,7 +32,9 @@ auto silent_ctx() -> std::shared_ptr<AudioContext> {
 }
 
 auto const_pcm(int frames, std::int16_t v = 8192) -> std::vector<std::int16_t> {
-    return std::vector<std::int16_t>(static_cast<std::size_t>(frames) * 2U, v);
+    // 花括号形式会先匹配 initializer_list 构造（size_t→int16_t 窄化为硬错误），fill 构造须具名走圆括号。
+    const std::vector<std::int16_t> pcm(static_cast<std::size_t>(frames) * 2U, v);
+    return pcm;
 }
 
 auto render_block(AudioContext &ctx, int frames) -> std::vector<float> {

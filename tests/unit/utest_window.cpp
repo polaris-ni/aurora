@@ -17,6 +17,8 @@
 
 namespace aurora::test_cases::utest_window {
 
+using aurora::testing::require_value;
+
 namespace {
 
 /// @brief 记录型 Surface 桩：纯内存实现，记录 Window 转发的调用与参数。
@@ -232,7 +234,7 @@ AURORA_TEST_CASE(window_control_actions_forward_to_surface) {
     AURORA_TEST_CHECK_EQ(surf.fullscreen_last, 1);
     AURORA_TEST_CHECK_TRUE(surf.begin_move_called);
     AURORA_TEST_REQUIRE_TRUE(surf.resize_last.has_value());
-    AURORA_TEST_CHECK_EQ(*surf.resize_last, WindowResizeEdge::BottomRight);
+    AURORA_TEST_CHECK_EQ(require_value(surf.resize_last), WindowResizeEdge::BottomRight);
     w.set_fullscreen(false);
     AURORA_TEST_CHECK_EQ(surf.fullscreen_last, 0);
     // 关闭流：close() 转发，后端置关闭请求后 should_close() 为真。

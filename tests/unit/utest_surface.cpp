@@ -14,6 +14,8 @@
 
 namespace aurora::test_cases::utest_surface {
 
+using aurora::testing::require_value;
+
 namespace {
 
 /// @brief 最小测试桩：仅实现 4 个纯虚接口，其余全部走 Surface 默认实现。
@@ -223,7 +225,7 @@ AURORA_TEST_CASE(headless_surface_records_cursor_sequence) {
     AURORA_TEST_CHECK_EQ(surface.cursor_log().at(1), CursorShape::PointingHand);
     AURORA_TEST_CHECK_EQ(surface.cursor_log().at(2), CursorShape::Arrow);
     AURORA_TEST_REQUIRE_TRUE(surface.last_cursor().has_value());
-    AURORA_TEST_CHECK_EQ(*surface.last_cursor(), CursorShape::Arrow);
+    AURORA_TEST_CHECK_EQ(require_value(surface.last_cursor()), CursorShape::Arrow);
 
     // 重复下发同一形状照常记录（去重发生在派发器，不在此层；见 utest_dispatcher）。
     surface.set_cursor(CursorShape::Arrow);

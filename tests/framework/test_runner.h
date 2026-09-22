@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,7 +31,10 @@ struct RunSummary {
 };
 
 /// @brief 退出码协议（CI 据此区分「失败」与「超时 / 用法错误」）。
-enum class ExitCode {
+///
+/// 底层类型显式为 `std::uint8_t`：取值 0–3 即协议全集（`test_selftest.cpp` 逐条
+/// static_assert 钉住），从不作为整型参与算术；窄化只是把「这是一张码表」写进类型。
+enum class ExitCode : std::uint8_t {
     AllPassed = 0,  ///< 全部通过（Skipped 不计失败）
     HasFailures = 1,  ///< 至少一个用例失败
     UsageOrNoMatch = 2,  ///< CLI 参数错误，或筛选用例集合为空
@@ -47,6 +51,10 @@ class ContextGuard {
     }
     ContextGuard(const ContextGuard &) = delete;
     auto operator=(const ContextGuard &) -> ContextGuard & = delete;
+    /// @brief 禁移动：析构即把 `previous_` 写回上下文槽，移动会留下两个持有同一
+    ///        `previous_` 的守卫，后析构者把槽写成早已失效的旧值（嵌套用例上下文错乱）。
+    ContextGuard(ContextGuard &&) = delete;
+    auto operator=(ContextGuard &&) -> ContextGuard & = delete;
     ~ContextGuard() { current_context_slot() = previous_; }
 
   private:

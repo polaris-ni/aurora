@@ -12,6 +12,8 @@
 
 namespace aurora::test_cases::utest_string_table {
 
+using aurora::testing::require_value;
+
 AURORA_TEST_CASE(add_and_lookup_per_locale) {
     // 按 Locale tag 存取：zh 与 zh-CN 是不同条目，互不干扰。
     aurora::StringTable table;
@@ -20,9 +22,9 @@ AURORA_TEST_CASE(add_and_lookup_per_locale) {
     table.add(en, "greeting", "Hello");
     table.add(zh_cn, "greeting", "你好");
     AURORA_TEST_REQUIRE(table.lookup("greeting", en).has_value());
-    AURORA_TEST_CHECK_EQ(*table.lookup("greeting", en), std::string("Hello"));
+    AURORA_TEST_CHECK_EQ(require_value(table.lookup("greeting", en)), std::string("Hello"));
     AURORA_TEST_REQUIRE(table.lookup("greeting", zh_cn).has_value());
-    AURORA_TEST_CHECK_EQ(*table.lookup("greeting", zh_cn), std::string("你好"));
+    AURORA_TEST_CHECK_EQ(require_value(table.lookup("greeting", zh_cn)), std::string("你好"));
 }
 
 AURORA_TEST_CASE(lookup_falls_back_to_default_locale) {
@@ -32,12 +34,12 @@ AURORA_TEST_CASE(lookup_falls_back_to_default_locale) {
     const aurora::Locale zh{.language = "zh"};
     table.add(en, "hi", "Hello");
     AURORA_TEST_REQUIRE(table.lookup("hi", zh).has_value());
-    AURORA_TEST_CHECK_EQ(*table.lookup("hi", zh), std::string("Hello"));  // 默认区域为 en
+    AURORA_TEST_CHECK_EQ(require_value(table.lookup("hi", zh)), std::string("Hello"));  // 默认区域为 en
     table.set_default_locale(zh);
     table.add(zh, "hi", "你好");
     const aurora::Locale fr{.language = "fr"};
     AURORA_TEST_REQUIRE(table.lookup("hi", fr).has_value());
-    AURORA_TEST_CHECK_EQ(*table.lookup("hi", fr), std::string("你好"));  // 默认区域改为 zh
+    AURORA_TEST_CHECK_EQ(require_value(table.lookup("hi", fr)), std::string("你好"));  // 默认区域改为 zh
     AURORA_TEST_CHECK_FALSE(table.lookup("absent", fr).has_value());
 }
 
@@ -48,7 +50,7 @@ AURORA_TEST_CASE(add_overwrites_existing_template) {
     table.add(en, "k", "old");
     table.add(en, "k", "new");
     AURORA_TEST_REQUIRE(table.lookup("k", en).has_value());
-    AURORA_TEST_CHECK_EQ(*table.lookup("k", en), std::string("new"));
+    AURORA_TEST_CHECK_EQ(require_value(table.lookup("k", en)), std::string("new"));
 }
 
 AURORA_TEST_CASE(format_replaces_positional_placeholders) {

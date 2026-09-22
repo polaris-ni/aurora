@@ -132,8 +132,7 @@ auto display_containing(Point p) -> Display {
 
 #else
 
-namespace aurora {
-namespace app {
+namespace aurora::app {
 
 auto list_displays() -> std::vector<Display> { return {primary_display()}; }
 
@@ -141,18 +140,17 @@ auto primary_display() -> Display {
     Display d;
     d.id = -1;
     d.name = "default";
-    d.bounds = Rect{Point{0.0F, 0.0F}, Size{1920.0F, 1080.0F}};
-    d.work_area = Rect{Point{0.0F, 0.0F}, Size{1920.0F, 1080.0F}};
+    d.bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 1920.0F, .height = 1080.0F}};
+    d.work_area = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 1920.0F, .height = 1080.0F}};
     d.scale_factor = 1.0F;
     d.is_primary = true;
     return d;
 }
 
-auto move_window_to_display(Window &, int) -> void {}
+auto move_window_to_display(Window & /*win*/, int /*display_id*/) -> void {}
 
-auto display_containing(Point) -> Display { return primary_display(); }
+auto display_containing(Point /*p*/) -> Display { return primary_display(); }
 
-}  // namespace app
-}  // namespace aurora
+}  // namespace aurora::app
 
 #endif

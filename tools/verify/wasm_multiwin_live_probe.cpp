@@ -168,6 +168,9 @@ auto cached_title(au::Window *w) -> std::string {
     if (w == nullptr) {
         return "-";
     }
+    // 基类 `Surface` 无标题读取口（只有 `set_title`），缓存只在 `WasmSurface` 侧；本探针为
+    // WASM 专属构建，surface() 的实际类型由此文件的 `create_window(WasmOptions)` 唯一确定。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
     return static_cast<au::WasmSurface &>(w->surface()).title();
 }
 
@@ -200,12 +203,12 @@ auto apply_command(Obs &o, const std::string &cmd) -> void {
     }
     constexpr std::string_view prefix_a{"titleA:"};
     constexpr std::string_view prefix_b{"titleB:"};
-    if (cmd.rfind(prefix_a, 0) == 0) {
+    if (cmd.starts_with(prefix_a)) {
         if (o.wa != nullptr) {
             o.wa->set_title(cmd.substr(prefix_a.size()));
             o.note = "titleA";
         }
-    } else if (cmd.rfind(prefix_b, 0) == 0) {
+    } else if (cmd.starts_with(prefix_b)) {
         if (o.wb != nullptr) {
             o.wb->set_title(cmd.substr(prefix_b.size()));
             o.note = "titleB";

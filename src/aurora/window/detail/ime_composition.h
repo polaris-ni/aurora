@@ -28,7 +28,7 @@ namespace aurora::ime {
 /// 本地声明而非取 SDK 宏：MinGW 的 `<imm.h>` 对这批常量覆盖不全，且各平台 SDK 命名不一，
 /// 折算层只依赖**数值语义**。`TargetConverted` / `TargetNotConverted` 两段即
 /// 「输入法当前高亮待选的转换段」，映射到 `TextCompositionEvent::sel_start` / `sel_end`。
-enum Attr : std::uint8_t {
+enum class Attr : std::uint8_t {
     TargetConverted = 1,  ///< 已转换且仍是目标段（候选替换区）
     Converted = 2,  ///< 已转换、非目标段
     TargetNotConverted = 3,  ///< 未转换且是目标段（待按拼音转换区）

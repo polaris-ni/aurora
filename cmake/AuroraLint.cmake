@@ -15,6 +15,10 @@
 # ⚠️ 依赖 CMAKE_EXPORT_COMPILE_COMMANDS（clang-tidy -p 需要编译数据库）。未显式指定时
 #    本模块会自动打开——它只影响生成期产物，不改变任何编译结果。
 #
+# ⚠️ Emscripten 配置下自动附加 --emscripten：em++ 写的编译库需先重写成 native clang-tidy
+#    可消费的形态（wasm 三元组 + sysroot、弃 PCH），否则浏览器专属 TU 一律编译不过、
+#    门禁静默报 0 告警。覆盖面的口径差异见 codespec/BUILD_OPTIONS.md §4.5。
+#
 # ⚠️ 本模块须在 tools 目录可访问时 include（脚本路径基于 CMAKE_SOURCE_DIR，与目标无关，
 #    故放在最后 include 亦可安全 return() 跳过）。
 # ============================================================
@@ -47,13 +51,22 @@ if (NOT CMAKE_EXPORT_COMPILE_COMMANDS)
     set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif ()
 
+# Emscripten 配置下，本目录的编译库由 em++ 驱动写出（三元组/垫片宏/PCH 都在驱动内部注入），
+# clang-tidy 不能直接消费：加 --emscripten 让 runner 先把它重写成 native 可跑的形态。
+# 这样 `cmake --build build-wasm --target lint` 才真的覆盖浏览器专属 TU 与
+# `#ifdef AURORA_BACKEND_WASM` 分支——否则 wasm 侧的 lint 目标会扫到一批编译不过的 TU 而报 0 告警。
+set(_lint_args "")
+if (EMSCRIPTEN)
+    list(APPEND _lint_args --emscripten)
+endif ()
+
 add_custom_target(lint
-        COMMAND ${PYTHON3_EXE} "${_lint_script}" --build-dir "${CMAKE_BINARY_DIR}"
+        COMMAND ${PYTHON3_EXE} "${_lint_script}" --build-dir "${CMAKE_BINARY_DIR}" ${_lint_args}
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Clang-Tidy: linting non-third_party TUs (deduplicated; fails on any finding)")
 
 add_custom_target(lint-fix
-        COMMAND ${PYTHON3_EXE} "${_lint_script}" --build-dir "${CMAKE_BINARY_DIR}" --fix
+        COMMAND ${PYTHON3_EXE} "${_lint_script}" --build-dir "${CMAKE_BINARY_DIR}" ${_lint_args} --fix
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Clang-Tidy: applying fix-its in place (review the diff before committing)")
 

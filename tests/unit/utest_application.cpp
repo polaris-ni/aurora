@@ -16,6 +16,8 @@
 
 namespace aurora::test_cases::utest_application {
 
+using aurora::testing::require_value;
+
 namespace {
 
 auto make_scene() -> Scene { return Scene{Node{std::make_shared<Text>("hi")}}; }
@@ -208,7 +210,7 @@ AURORA_TEST_CASE(application_wires_hover_cursor_to_surface) {
     // 1) 无任何光标声明 → 首次解析为 Arrow 并下发（cursor_emitted_ 初值 false）。
     move_to(100.0F, 40.0F);
     AURORA_TEST_REQUIRE_TRUE(probe->last_cursor().has_value());
-    AURORA_TEST_CHECK_EQ(*probe->last_cursor(), CursorShape::Arrow);
+    AURORA_TEST_CHECK_EQ(require_value(probe->last_cursor()), CursorShape::Arrow);
 
     // 2) 同形状重复移动 → 派发器按 current_cursor_ 去重，不再下发。
     move_to(110.0F, 40.0F);
@@ -218,12 +220,12 @@ AURORA_TEST_CASE(application_wires_hover_cursor_to_surface) {
     root->modifier = Modifier{}.cursor(CursorShape::Crosshair);
     move_to(120.0F, 40.0F);
     AURORA_TEST_REQUIRE_EQ(probe->cursor_log().size(), std::size_t{2});
-    AURORA_TEST_CHECK_EQ(*probe->last_cursor(), CursorShape::Crosshair);
+    AURORA_TEST_CHECK_EQ(require_value(probe->last_cursor()), CursorShape::Crosshair);
 
     // 4) 移出根矩形（链空）→ 回落 Arrow，再次变化即下发。
     move_to(500.0F, 500.0F);
     AURORA_TEST_REQUIRE_EQ(probe->cursor_log().size(), std::size_t{3});
-    AURORA_TEST_CHECK_EQ(*probe->last_cursor(), CursorShape::Arrow);
+    AURORA_TEST_CHECK_EQ(require_value(probe->last_cursor()), CursorShape::Arrow);
 #else
     AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
 #endif

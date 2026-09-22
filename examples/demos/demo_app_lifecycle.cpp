@@ -77,7 +77,17 @@ auto main() -> int {
     opts.size = au::Size{.width = 520.0F, .height = 440.0F};
     opts.title = "App Lifecycle · Aurora Demo";
     auto win_res = au::create_native_window(opts);
+#ifdef AURORA_PLATFORM_WASM
+    // ⚠️ rAF 契约（`Application::run`）：浏览器下注册帧环后即返回、main 随即结束——栈实例当场
+    // 析构会让帧环蹦床与进程级主线程回投器捕获的 `this` 悬空。与 `au::App().run` 的 launch 同法
+    // 按页面生命周期堆持；非浏览器路径保持栈对象语义。
+    static std::unique_ptr<au::Application> keep_alive;
+    keep_alive =
+        std::make_unique<au::Application>(std::move(scene), win_res ? std::move(win_res.value()) : nullptr, opts);
+    au::Application &app = *keep_alive;
+#else
     au::Application app{std::move(scene), win_res ? std::move(win_res.value()) : nullptr, opts};
+#endif
 
     // 窗口级生命周期：隐藏/被遮挡时暂停动画，可见时恢复。
     app.set_on_window_state([paused](au::WindowState s) -> void { paused->set(s != au::WindowState::Visible); });

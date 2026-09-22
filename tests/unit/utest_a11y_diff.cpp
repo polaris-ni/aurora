@@ -27,6 +27,7 @@ using aurora::a11y::FieldChange;
 using aurora::a11y::NodeSnapshot;
 using aurora::a11y::TreeDiff;
 using aurora::a11y::TreeSnapshot;
+using aurora::testing::require_value;
 
 /// @brief 纯数据构造一个快照节点（不依赖控件，专测 diff 这一纯函数）。
 [[nodiscard]] auto node(std::uint64_t id, std::uint64_t parent_id, std::string name) -> NodeSnapshot {
@@ -195,7 +196,7 @@ AURORA_TEST_CASE(focus_gain_is_reported_once_and_loss_is_not) {
 
     const TreeDiff gain = aurora::a11y::diff_snapshots(before, after);
     AURORA_TEST_REQUIRE_TRUE(gain.focused_id.has_value());
-    AURORA_TEST_CHECK_EQ(*gain.focused_id, std::uint64_t{2});
+    AURORA_TEST_CHECK_EQ(require_value(gain.focused_id), std::uint64_t{2});
 
     const TreeDiff loss = aurora::a11y::diff_snapshots(after, before);
     AURORA_TEST_CHECK_FALSE(loss.focused_id.has_value());  // 失焦不产 focused_id

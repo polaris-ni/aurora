@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -42,9 +43,14 @@ constexpr int AURORA_RATE = 48000;
 constexpr double AURORA_TONE_HZ = 440.0;
 constexpr int AURORA_TONE_SECONDS = 1;
 
-std::unique_ptr<au::AudioContext> g_ctx;
-au::WebAudioDeviceBackend *g_dev = nullptr;  ///< 裸指针：所有权已交给 g_ctx，生命周期随其存活
-std::shared_ptr<au::AudioBufferSourceNode> g_src;
+/// 探针观测态：设备协商产物 + 观测口集中一处，经 `emscripten_set_interval` 的 userData 递给
+/// 回调——定时器回调是 C 函数指针（无捕获能力），又须活到 main 之后，故实例由 main 的函数级
+/// static 持有一次，不再散落为文件作用域全局量。
+struct Probe {
+    std::unique_ptr<au::AudioContext> ctx;
+    au::WebAudioDeviceBackend *dev = nullptr;  ///< 裸指针：所有权已交给 ctx，生命周期随其存活
+    std::shared_ptr<au::AudioBufferSourceNode> src;
+};
 
 /// 每拍把观测状态写进 `window.__auState`（驱动侧唯一读取面）。
 /// EM_JS 形参为具名 C/C++ 参数（无 `$` 占位符），不触发 -Wdollar-in-identifier-extension。
@@ -53,15 +59,17 @@ std::shared_ptr<au::AudioBufferSourceNode> g_src;
 EM_JS(void, publish_state_js, (const char *base), { window.__auState = UTF8ToString(base); });
 // clang-format on
 
-auto publish_tick(void * /*user_data*/) -> void {
-    if (g_ctx == nullptr || g_dev == nullptr) {
+auto publish_tick(void *user_data) -> void {
+    auto *probe = static_cast<Probe *>(user_data);
+    if (probe == nullptr || probe->ctx == nullptr || probe->dev == nullptr) {
         return;
     }
-    const double consumed = static_cast<double>(g_dev->consumed_frames()) / static_cast<double>(AURORA_RATE);
+    const double consumed = static_cast<double>(probe->dev->consumed_frames()) / static_cast<double>(AURORA_RATE);
     char buf[320];
     std::snprintf(buf, sizeof(buf), "silent=%d state=%d rate=%d ch=%d consumed=%.3f underrun=%d ctime=%.3f playing=%d",
-                  g_ctx->silent() ? 1 : 0, g_dev->context_state(), g_ctx->sample_rate(), g_ctx->channel_count(),
-                  consumed, g_dev->underruns(), g_ctx->current_time(), g_src != nullptr && !g_src->finished() ? 1 : 0);
+                  probe->ctx->silent() ? 1 : 0, au::WebAudioDeviceBackend::context_state(), probe->ctx->sample_rate(),
+                  probe->ctx->channel_count(), consumed, probe->dev->underruns(), probe->ctx->current_time(),
+                  probe->src != nullptr && !probe->src->finished() ? 1 : 0);
     publish_state_js(buf);
 }
 
@@ -71,10 +79,10 @@ auto make_tone_buffer() -> std::shared_ptr<const au::AudioBuffer> {
     buffer->channels = 2;
     buffer->samples.assign(static_cast<std::size_t>(AURORA_RATE) * AURORA_TONE_SECONDS * 2U, 0.0F);
     for (std::size_t frame = 0; frame < static_cast<std::size_t>(AURORA_RATE) * AURORA_TONE_SECONDS; ++frame) {
-        const float s = static_cast<float>(std::sin(2.0 * 3.14159265358979309 * AURORA_TONE_HZ *
-                                                    static_cast<double>(frame) / static_cast<double>(AURORA_RATE)));
+        const auto s = static_cast<float>(std::sin(2.0 * std::numbers::pi * AURORA_TONE_HZ *
+                                                   static_cast<double>(frame) / static_cast<double>(AURORA_RATE)));
         buffer->samples[frame * 2U] = s;
-        buffer->samples[frame * 2U + 1U] = s;
+        buffer->samples[(frame * 2U) + 1U] = s;
     }
     return buffer;
 }
@@ -85,21 +93,23 @@ auto make_tone_buffer() -> std::shared_ptr<const au::AudioBuffer> {
 
 int main() {
 #ifdef AURORA_ENABLE_AUDIO_WEBAUDIO
+    // 观测态须活过 main（定时器回调在 main 返回后继续跑），故走函数级 static 而非栈对象。
+    static Probe probe;
     // 后端由探针自造并注入：AudioContext 接走所有权，裸指针留作观测口（生命周期随 ctx）。
     auto backend = std::make_unique<au::WebAudioDeviceBackend>();
-    g_dev = backend.get();
-    g_ctx = std::make_unique<au::AudioContext>(std::move(backend));
-    g_src = g_ctx->create_buffer_source();
-    static_cast<void>(g_src->set_buffer(make_tone_buffer()));
-    g_src->set_loop(true);
-    static_cast<void>(g_ctx->connect(g_src, g_ctx->destination()));
-    static_cast<void>(g_src->start(0.0));
+    probe.dev = backend.get();
+    probe.ctx = std::make_unique<au::AudioContext>(std::move(backend));
+    probe.src = probe.ctx->create_buffer_source();
+    static_cast<void>(probe.src->set_buffer(make_tone_buffer()));
+    probe.src->set_loop(true);
+    static_cast<void>(probe.ctx->connect(probe.src, probe.ctx->destination()));
+    static_cast<void>(probe.src->start(0.0));
     // 主线程定间隔发布状态（音频侧另有后端自己的排空定时器，二者互不相干）。
     // 本探针不跑帧循环，生命周期全悬在这两个定时器上：main 返回前推一枚 runtime
     // keepalive，免得 Emscripten 在 main 退出后收尾时把它们连根拔掉。
     emscripten_runtime_keepalive_push();
-    emscripten_set_interval(&publish_tick, 100.0, nullptr);
-    publish_tick(nullptr);
+    emscripten_set_interval(&publish_tick, 100.0, &probe);
+    publish_tick(&probe);
     return 0;
 #else
     return 0;

@@ -250,8 +250,13 @@ FilesystemBackend::FilesystemBackend(FilesystemOptions opts) : opts_(std::move(o
         ::close(fd);
         return false;
     }
+    // POSIX 的锁句柄是 int fd，而成员 lock_（声明于公共头 fs_backend.h）是不透明
+    // std::shared_ptr<void> 载体，与 Win32 分支承载 HANDLE 同型；改载体类型属公共 API
+    // 变更，故此处沿用 fd→void* 交接，关闭义务交给类型擦除的删除器。
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast, performance-no-int-to-ptr)
     lock_ = std::shared_ptr<void>(reinterpret_cast<void *>(static_cast<intptr_t>(fd)),
                                   [](void *p) { ::close(static_cast<int>(reinterpret_cast<intptr_t>(p))); });
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast, performance-no-int-to-ptr)
     return true;
 #endif
 }

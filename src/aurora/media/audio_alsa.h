@@ -33,6 +33,11 @@ class AlsaDeviceBackend final : public AudioDeviceBackend {
     ~AlsaDeviceBackend() override;
     AlsaDeviceBackend(const AlsaDeviceBackend &) = delete;
     auto operator=(const AlsaDeviceBackend &) -> AlsaDeviceBackend & = delete;
+    /// @brief 设备线程在 start() 起即捕获 Impl 地址，且「析构必 join 线程」是本后端的
+    ///        收尾契约；移动会把 Impl 转给新主人而线程照旧跑，源对象沦为不再 join 的
+    ///        空壳。后端恒以 unique_ptr<AudioDeviceBackend> 就地持有，无移动需求。
+    AlsaDeviceBackend(AlsaDeviceBackend &&) = delete;
+    auto operator=(AlsaDeviceBackend &&) -> AlsaDeviceBackend & = delete;
 
     /// @brief 输出格式（恒 48000/2 float32：图渲染契约稳定，设备差异由 ALSA
     ///        插件层重采样吸收，端点重开后契约不变）。
@@ -62,6 +67,9 @@ class AlsaCaptureBackend final : public AudioCaptureBackend {
     ~AlsaCaptureBackend() override;
     AlsaCaptureBackend(const AlsaCaptureBackend &) = delete;
     auto operator=(const AlsaCaptureBackend &) -> AlsaCaptureBackend & = delete;
+    /// @brief 同渲染端：采集线程捕获 Impl 地址，移动会留下不再 join 的空壳源对象。
+    AlsaCaptureBackend(AlsaCaptureBackend &&) = delete;
+    auto operator=(AlsaCaptureBackend &&) -> AlsaCaptureBackend & = delete;
 
     /// @brief 启动采集线程（dlopen libasound + 打开捕获端点 + 格式协商）；失败返回 false。
     auto start(CaptureFn on_pcm) -> bool override;

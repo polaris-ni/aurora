@@ -21,6 +21,8 @@
 
 namespace aurora::test_cases::utest_sparkline {
 
+using aurora::testing::require_value;
+
 namespace golden = aurora::testing::golden;
 
 namespace {
@@ -80,7 +82,7 @@ AURORA_TEST_CASE(props_roundtrip_and_factory) {
     dst.deserialize_props(props);
     AURORA_TEST_CHECK_TRUE(dst.values == std::vector<double>{1.0, 3.0, 2.0, 5.0});
     AURORA_TEST_REQUIRE_TRUE(dst.color.has_value());
-    AURORA_TEST_CHECK_TRUE(*dst.color == Color{10, 20, 30, 255});
+    AURORA_TEST_CHECK_TRUE(require_value(dst.color) == Color{10, 20, 30, 255});
     AURORA_TEST_CHECK_FALSE(dst.show_end_dot);
 
     // 未设色 ⇒ 不输出 color 键（保留「按色板取色」语义）

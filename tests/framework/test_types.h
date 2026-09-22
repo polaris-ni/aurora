@@ -115,7 +115,8 @@ using TestParamBody = void (*)(std::size_t index);
 /// ⚠️ 注册发生在静态初始化期，故本结构刻意**不使用任何动态分配**：suite / case_name
 /// 为指向字面量（静态存储期）的 string_view，节点间以侵入式 next 指针串联。
 /// 由此 Registrar 构造恒为 noexcept，静态初始化期不可能抛异常
-/// （clang-tidy bugprone-throwing-static-initialization）。
+/// （clang-tidy bugprone-throwing-static-initialization）。注册宏里的字面量→string_view
+/// 一律走 `literal_view`，理由见其注释。
 ///
 /// `body` 与 `param_body` **二选一**：普通用例、fixture 用例与类型参数化用例走 `body`
 /// （展开在编译期即确定），值参数化用例走 `param_body`（取值序号在展开时才确定）。
@@ -144,12 +145,29 @@ struct TestCase {
     }
 };
 
+/// @brief 由字符串字面量取 `string_view`：长度编译期已知，恒 noexcept 且**不做 strlen**。
+///
+/// ⚠️ 静态注册期（`AURORA_TEST*` 宏）交给 `TestCase::suite / case_name` 的字面量必须经本函数
+/// 转换，勿依赖 `const char*` → `string_view` 的隐式转换。原因：libc++（Emscripten 工具链）的
+/// `basic_string_view(const char*)` **没有** noexcept 规格（实现走 `__char_traits_length_checked`，
+/// 硬化模式下可抛 `length_error`），于是隐式转换会被 clang-tidy
+/// `bugprone-throwing-static-initialization` 判为「静态初始化期可能抛出」——而该期抛出即 terminate，
+/// 与本框架「注册恒不抛、零分配」的契约（见 `TestCase` 注释）直接冲突。libstdc++ / MSVC STL 的该
+/// 构造带 noexcept 故不报，故这是**跨标准库的真实差异**，不是门禁口径的假告警。
+/// 本模板从字面量数组推导长度，落到标准规定为 noexcept 的 `(ptr, len)` 重载：契约真正成立，
+/// 且全局构造期少一次 strlen。
+template <std::size_t N>
+[[nodiscard]] constexpr auto literal_view(const char (&literal)[N]) noexcept -> std::string_view {
+    return std::string_view{literal, N - 1};
+}
+
 /// @brief 从源路径推导套件名（去目录与扩展名）。
 ///
 /// 例：`D:\\repo\\tests\\unit\\utest_color.cpp` → `utest_color`；POSIX 分隔符同样处理。
 /// constexpr：注册期无运行时开销，且允许编译期断言套件名推导正确。
 /// constexpr + noexcept：注册期在静态初始化期执行，整条调用链不得抛
-/// （clang-tidy bugprone-throwing-static-initialization）。
+/// （clang-tidy bugprone-throwing-static-initialization）。**实参须是 `literal_view(...)`
+/// 而非裸 `__FILE__`**，否则字面量→`string_view` 的隐式转换在 libc++ 下仍是可能抛出的构造。
 [[nodiscard]] constexpr auto suite_from_path(std::string_view path) noexcept -> std::string_view {
     const auto sep = path.find_last_of("/\\");
     const auto begin = (sep == std::string_view::npos) ? 0 : sep + 1;

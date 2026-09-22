@@ -132,7 +132,7 @@ AURORA_TEST_CASE(props_roundtrip_including_series_array) {
     AURORA_TEST_CHECK_TRUE(dst.series[0].name == "A");
     AURORA_TEST_CHECK_TRUE(dst.series[0].values == std::vector<double>{1.0, 2.0, 3.0});
     AURORA_TEST_REQUIRE_TRUE(dst.series[0].color.has_value());
-    AURORA_TEST_CHECK_TRUE(*dst.series[0].color == Color{10, 20, 30, 255});
+    AURORA_TEST_CHECK_TRUE(require_value(dst.series[0].color) == Color{10, 20, 30, 255});
     AURORA_TEST_CHECK_FALSE(dst.series[1].color.has_value());
     AURORA_TEST_CHECK_TRUE(dst.categories == std::vector<std::string>{"Mon", "Tue", "Wed"});
     AURORA_TEST_CHECK_TRUE(dst.stacked);

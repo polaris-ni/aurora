@@ -64,7 +64,13 @@
 #endif
 
 // clang-format off
+// `WIN32_LEAN_AND_MEAN` 把 `ole2.h` 从 `windows.h` 的包含链里摘掉了，而 MIDL 生成的
+// `UIAutomationCore.h` 直接用 `interface` 关键字（`#define interface __STRUCT__` 来自
+// `combaseapi.h`，由 `ole2.h` 拉入）。缺它时 GCC 靠自身头链侥幸通过，clang 前端（clang-tidy）
+// 则在 40+ 处 `typedef interface …` 上报「unknown type name」并中止分析——该 TU 从此不产出任何
+// 告警，门禁的「0 条」是覆盖塌了而非干净。显式补齐依赖，两种前端同一条包含链。
 #include <windows.h>
+#include <ole2.h>
 #include <uiautomation.h>
 // clang-format on
 

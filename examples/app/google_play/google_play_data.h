@@ -1,11 +1,14 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <random>
+#include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -286,22 +289,59 @@ inline auto make_banner(Color a, Color b, int idx) -> Image {
 }
 
 using CatalogPtr = std::shared_ptr<const std::vector<AppItem>>;
+
+namespace detail {
+
+/// @brief 调色板表。constexpr 而非函数级 static：常量初始化，头文件里不留动态初始化守卫。
+inline constexpr std::array<std::pair<Color, Color>, 8> AURORA_PAL = {
+    std::pair<Color, Color>{Color{0x1A, 0x73, 0xE8, 0xFF}, Color{0x34, 0xA8, 0x53, 0xFF}},  // 蓝-绿
+    std::pair<Color, Color>{Color{0xEA, 0x43, 0x35, 0xFF}, Color{0xFB, 0xBC, 0x04, 0xFF}},  // 红-黄
+    std::pair<Color, Color>{Color{0x42, 0x85, 0xF4, 0xFF}, Color{0x1A, 0x73, 0xE8, 0xFF}},  // 蓝-蓝
+    std::pair<Color, Color>{Color{0x34, 0xA8, 0x53, 0xFF}, Color{0xFB, 0xBC, 0x04, 0xFF}},  // 绿-黄
+    std::pair<Color, Color>{Color{0x9C, 0x27, 0xB0, 0xFF}, Color{0xEA, 0x43, 0x35, 0xFF}},  // 紫-红
+    std::pair<Color, Color>{Color{0x00, 0x96, 0x88, 0xFF}, Color{0x42, 0x85, 0xF4, 0xFF}},  // 青-蓝
+    std::pair<Color, Color>{Color{0xFB, 0xBC, 0x04, 0xFF}, Color{0xEA, 0x43, 0x35, 0xFF}},  // 黄-红
+    std::pair<Color, Color>{Color{0x5F, 0x63, 0x68, 0xFF}, Color{0x42, 0x85, 0xF4, 0xFF}},  // 灰-蓝
+};
+
+/// @brief 合成条目名的词库位（`category` 仅作可读性锚点，取用按 `AURORA_NAME_PARTS` 下标）。
+struct CategoryParts {
+    std::string_view category;  ///< 顶层类目名
+    std::span<const std::string_view> parts;  ///< 该类目可用的名称部件
+};
+
+inline constexpr std::array<std::string_view, 12> AURORA_NAME_APPS = {
+    "Chat", "Photo", "Note", "Maps", "Mail", "Clock", "Weather", "Wallet", "Scanner", "Browser", "Calendar", "Music"};
+inline constexpr std::array<std::string_view, 10> AURORA_NAME_GAMES = {"Quest", "Blast",  "Puzzle", "Racer", "Empire",
+                                                                       "Dash",  "Heroes", "Galaxy", "Ninja", "Tower"};
+inline constexpr std::array<std::string_view, 8> AURORA_NAME_MOVIES = {"Horizon", "Legacy", "Shadow", "Spark",
+                                                                       "Voyage",  "Echo",   "Rally",  "Storm"};
+inline constexpr std::array<std::string_view, 8> AURORA_NAME_BOOKS = {"Saga",  "Chronicle", "Tales", "Manual",
+                                                                      "Prose", "Atlas",     "Verse", "Codex"};
+
+/// @brief 类目 → 词库，顺序须与 `default_local_catalog` 的 `cat_list` 一致（按下标取用）。
+inline constexpr std::array<CategoryParts, 4> AURORA_NAME_PARTS = {{{.category = "apps", .parts = AURORA_NAME_APPS},
+                                                                    {.category = "games", .parts = AURORA_NAME_GAMES},
+                                                                    {.category = "movies", .parts = AURORA_NAME_MOVIES},
+                                                                    {.category = "books", .parts = AURORA_NAME_BOOKS}}};
+
+inline constexpr std::array<std::string_view, 8> AURORA_DEVS = {"Aurora Labs", "Nimbus", "Pixel Forge", "BlueStack",
+                                                                "Orbit Inc",   "Quasar", "Vertex",      "Lumen"};
+inline constexpr std::array<std::string_view, 8> AURORA_USERS = {"Alex",   "Sam",   "Li Lei", "Han Mei",
+                                                                 "Jordan", "Priya", "Tom",    "Xiao Lin"};
+inline constexpr std::array<std::string_view, 6> AURORA_TEXTS = {
+    "Very useful, beautiful interface!",   "A few minor bugs, but overall good.",
+    "Must-have app, highly recommended.",  "Occasionally slow to load, hope to optimize.",
+    "Rich features, beyond expectations.", "Comfortable design, smooth experience."};
+
+}  // namespace detail
+
 /// @brief 数据 HOOK：仓库底层数据源。返回目录（含程序化 Image）。
 /// 默认实现本地确定性合成，绝不联网；可经 PlayRepository::set_data_hook 替换。
 using DataHook = std::function<CatalogPtr(const DataRequest &)>;
 
 inline auto palette_of(int seed) -> std::pair<Color, Color> {
-    static const std::vector<std::pair<Color, Color>> PAL = {
-        {{0x1A, 0x73, 0xE8, 0xFF}, {0x34, 0xA8, 0x53, 0xFF}},  // 蓝-绿
-        {{0xEA, 0x43, 0x35, 0xFF}, {0xFB, 0xBC, 0x04, 0xFF}},  // 红-黄
-        {{0x42, 0x85, 0xF4, 0xFF}, {0x1A, 0x73, 0xE8, 0xFF}},  // 蓝-蓝
-        {{0x34, 0xA8, 0x53, 0xFF}, {0xFB, 0xBC, 0x04, 0xFF}},  // 绿-黄
-        {{0x9C, 0x27, 0xB0, 0xFF}, {0xEA, 0x43, 0x35, 0xFF}},  // 紫-红
-        {{0x00, 0x96, 0x88, 0xFF}, {0x42, 0x85, 0xF4, 0xFF}},  // 青-蓝
-        {{0xFB, 0xBC, 0x04, 0xFF}, {0xEA, 0x43, 0x35, 0xFF}},  // 黄-红
-        {{0x5F, 0x63, 0x68, 0xFF}, {0x42, 0x85, 0xF4, 0xFF}},  // 灰-蓝
-    };
-    return PAL[static_cast<size_t>(seed) % PAL.size()];
+    return detail::AURORA_PAL.at(static_cast<size_t>(seed) % detail::AURORA_PAL.size());
 }
 
 inline auto subcategories_of(const std::string &cat) -> std::vector<std::string> {
@@ -321,32 +361,22 @@ inline auto subcategories_of(const std::string &cat) -> std::vector<std::string>
 }
 
 inline auto default_local_catalog() -> CatalogPtr {
-    static const std::vector<std::pair<std::string, std::vector<std::string>>> NAME_PARTS = {
-        {"apps",
-         {"Chat", "Photo", "Note", "Maps", "Mail", "Clock", "Weather", "Wallet", "Scanner", "Browser", "Calendar",
-          "Music"}},
-        {"games", {"Quest", "Blast", "Puzzle", "Racer", "Empire", "Dash", "Heroes", "Galaxy", "Ninja", "Tower"}},
-        {"movies", {"Horizon", "Legacy", "Shadow", "Spark", "Voyage", "Echo", "Rally", "Storm"}},
-        {"books", {"Saga", "Chronicle", "Tales", "Manual", "Prose", "Atlas", "Verse", "Codex"}},
-    };
-    static const std::vector<std::string> DEVS = {"Aurora Labs", "Nimbus", "Pixel Forge", "BlueStack",
-                                                  "Orbit Inc",   "Quasar", "Vertex",      "Lumen"};
-
     // NOLINTNEXTLINE(bugprone-random-generator-seed) 固定种子：demo 目录数据需确定性可复现
     std::mt19937 rng(20260802U);
     auto cat_list = std::vector<std::string>{"apps", "games", "movies", "books"};
     std::vector<AppItem> items;
     int n = 0;
     for (const auto &cat : cat_list) {
-        const auto &parts = NAME_PARTS[static_cast<size_t>(std::ranges::find(cat_list, cat) - cat_list.begin())].second;
+        const auto idx = static_cast<size_t>(std::ranges::find(cat_list, cat) - cat_list.begin());
+        const auto &parts = detail::AURORA_NAME_PARTS.at(idx).parts;
         const auto subs = subcategories_of(cat);
         constexpr int per_cat = 48;
         for (int i = 0; i < per_cat; ++i) {
             AppItem a;
-            const int part = static_cast<int>(rng() % parts.size());
+            const auto part = rng() % parts.size();
             a.id = cat.substr(0, 1) + std::to_string(n);
-            a.name = parts[part] + " " + std::to_string(1 + (i / parts.size()));
-            a.developer = DEVS[static_cast<size_t>(rng() % DEVS.size())];
+            a.name = std::string{parts[part]} + " " + std::to_string(1 + (i / parts.size()));
+            a.developer = std::string{detail::AURORA_DEVS.at(static_cast<size_t>(rng() % detail::AURORA_DEVS.size()))};
             a.category = cat;
             a.subcategory = subs[static_cast<size_t>(rng() % subs.size())];
             a.rating = 3.4F + (static_cast<float>(rng() % 160) / 100.0F);  // 3.4..5.0
@@ -460,18 +490,12 @@ class PlayRepository {
     [[nodiscard]] auto reviews(const std::string &id) const -> std::vector<Review> {
         std::vector<Review> out;
         std::mt19937 rng(std::hash<std::string>{}(id));
-        static const std::vector<std::string> USERS = {"Alex",   "Sam",   "Li Lei", "Han Mei",
-                                                       "Jordan", "Priya", "Tom",    "Xiao Lin"};
-        static const std::vector<std::string> TEXTS = {
-            "Very useful, beautiful interface!",   "A few minor bugs, but overall good.",
-            "Must-have app, highly recommended.",  "Occasionally slow to load, hope to optimize.",
-            "Rich features, beyond expectations.", "Comfortable design, smooth experience."};
         const int k = 3 + static_cast<int>(rng() % 3);
         for (int i = 0; i < k; ++i) {
             Review r;
-            r.user = USERS[static_cast<size_t>(rng() % USERS.size())];
+            r.user = std::string{detail::AURORA_USERS.at(static_cast<size_t>(rng() % detail::AURORA_USERS.size()))};
             r.rating = 3.0F + (static_cast<float>(rng() % 20) / 10.0F);
-            r.text = TEXTS[static_cast<size_t>(rng() % TEXTS.size())];
+            r.text = std::string{detail::AURORA_TEXTS.at(static_cast<size_t>(rng() % detail::AURORA_TEXTS.size()))};
             r.date = "2026-0" + std::to_string(1 + (rng() % 7)) + "-0" + std::to_string(1 + (rng() % 8));
             out.push_back(std::move(r));
         }
@@ -496,6 +520,10 @@ class PlayRepository {
 
 /// @brief 全局单例（demo / 测试使用）。
 inline auto repository() -> PlayRepository & {
+    // Meyers 单例：惰性构造正是语义（`PlayRepository` 持数据 hook 与缓存，非常量类型）。
+    // `repository()` 为 inline 函数，其函数级 static 跨 TU 折叠成同一对象，无头文件多副本之虞，
+    // 且静态局部量初始化自 C++11 起线程安全——故刻意保留动态初始化。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static PlayRepository repo;
     return repo;
 }

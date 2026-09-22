@@ -41,7 +41,9 @@ struct Rig {
 };
 
 auto const_pcm(int frames, std::int16_t v) -> std::vector<std::int16_t> {
-    return std::vector<std::int16_t>(static_cast<std::size_t>(frames) * 2, v);
+    // 花括号形式会先匹配 initializer_list 构造（size_t→int16_t 窄化为硬错误），fill 构造须具名走圆括号。
+    const std::vector<std::int16_t> pcm(static_cast<std::size_t>(frames) * 2, v);
+    return pcm;
 }
 
 auto pcm_value(std::int16_t v) -> float { return static_cast<float>(v) / 32768.0F; }

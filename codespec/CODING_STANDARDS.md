@@ -233,6 +233,13 @@
 
 ⚠️ 抑制的作用位置只认**物理行**，而 `.clang-format`（`ColumnLimit: 120`）会折行：`NOLINTNEXTLINE` 下方那条语句一旦被排成多行，告警所在行就不再是它指向的那一行，抑制静默失效（实测两处：环形 PCM 的 `pro-bounds-pointer-arithmetic`、COM 出参的 `pro-type-reinterpret-cast`）。故凡**可能被折行**的语句一律用 `NOLINTBEGIN(...)` / `NOLINTEND(...)` 成对覆盖整段，`NOLINTNEXTLINE` 只留给确定单行的语句；理由注释的位置约束见 §8.5 末尾与 `BUILD_OPTIONS.md` §4.7。
 
+⚠️ 同上成因的两条补充约束（本轮 wasm 口径收口时实测）：
+
+1. **指令与代码之间不得插入任何行**——包括折到下一行的理由文字。`NOLINTNEXTLINE` 只看紧邻的下一物理行，理由若排在它下面，它罩住的就是注释而非代码（静默 no-op）。要写多行理由就把理由整段放在指令**之前**，或直接改用区间式。
+2. **`NOLINT` 令牌只能出现在真指令里**——任何注释文本中出现的 `NOLINTBEGIN(` / `NOLINTEND(` 字样都会被解析成指令。未配对的 `NOLINTBEGIN` 不是告警而是 `clang-tidy-nolint` **硬错误**，直接中断该翻译单元的整轮分析（表现为「该 TU 零告警」的假干净）。指代他处的既有豁免区间时写「区间式豁免」，勿抄令牌。
+
+判因纪律：告警**跨标准库 / 跨目标三元组**出现差异时，先按真实差异处理，不得为凑门禁口径而放宽配置。已实测的三类真实差异——libc++ 的 `basic_string_view(const char *)` 构造非 `noexcept`（静态初始化期即触发 `bugprone-throwing-static-initialization`，框架侧以 `literal_view` 免掉该构造）、wasm32 的 `long` 为 32 位（`long long` → `difference_type` 是真·窄化）、Emscripten libc++ 的 `std::span` 无 `.at()`。
+
 抑制属于显式契约决策，随代码评审、随文档同步。
 
 ---

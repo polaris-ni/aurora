@@ -420,7 +420,19 @@ python tools/check/run_clang_tidy.py --build-dir build --include 'src/'         
 
 **NOLINT 纪律**：凡用 `NOLINT` / `NOLINTNEXTLINE` 抑制告警，须遵守 `CODING_STANDARDS.md` §5.2——写明具体检查名（禁止裸 `NOLINT` 的新增使用），并紧邻注释说明「为何不能按建议修复」。
 
-**门禁覆盖范围 = 该 build 目录的编译库**：`lint` 扫的是 `--build-dir` 下 `compile_commands.json` 里的 TU，因此只覆盖**该次 configure 实际定义的翻译单元**。浏览器专属件（`EMSCRIPTEN` 门后的 `wasm_*` 实现与 `aurora_verify_wasm_*` 探针）、以及按平台/后端条件定义的真机探针，都不在 Windows/Linux native db 内，`lint` 绿灯不等于它们干净。⚠️ 也别拿 wasm 构建目录（`build-wasm` 之类，随本机而异、不入库）下的 `compile_commands.json` 硬跑 tidy 当门禁：该 db 不带 Emscripten sysroot，clang-tidy 会以 `'emscripten.h' file not found` 开路并把 `EM_JS` 当普通函数名报「命名不合规」，告警面全是假象。这类 TU 的正确把关路径是真机/浏览器探针（§2.4）与 WASM 构建本身。
+**门禁覆盖范围 = 该 build 目录的编译库**：`lint` 扫的是 `--build-dir` 下 `compile_commands.json` 里的 TU，因此只覆盖**该次 configure 实际定义的翻译单元**。浏览器专属件（`EMSCRIPTEN` 门后的 `wasm_*` 实现与 `aurora_verify_wasm_*` 探针）、以及按平台/后端条件定义的真机探针，都不在 Windows/Linux native db 内，`lint` 绿灯不等于它们干净。
+
+**浏览器口径用 `--emscripten`**：`build-wasm` 之类的 db 直接喂给 clang-tidy 不可用——`em++` 是驱动包装器，其真实 argv 里的 wasm 三元组、`__EMSCRIPTEN__`、`include/compat` 之类的垫片目录都由驱动内部注入，且 PCH 由 emsdk 自带 clang 生成（本机 clang-tidy 版本稍差即判 `invalid or out-of-date precompiled header`）。故 `run_clang_tidy.py --build-dir <wasm_db 目录> --emscripten` 先把编译库重写成 native clang-tidy 可消费的形态（换三元组、指 sysroot、弃 PCH、补驱动宏）落到 `<build-dir>/tidy_emscripten/`，再走同一套并行/去重/汇总流程，两种口径的计数因此可比：
+
+```powershell
+python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏览器 TU + #ifdef AURORA_BACKEND_WASM 分支
+```
+
+两条口径各自的把关面：native 遍覆盖 host 后端与 `#else` 分支，wasm 遍覆盖 `AURORA_PLATFORM_*` 的另一侧（POSIX 派发分支、Web Audio 后端、`wasm_*` 探针）与 libc++ 差异面；CI 只跑 native，wasm 遍由本地或后续 CI job 补跑，`lint` 绿灯不构成后者通过的证据。
+
+**「0 告警」不等于「跑到了」**：TU 编译失败时 clang-tidy 不产出任何带 `[check]` 的诊断，静默下来就是一轮绿灯。故本脚本对**前端 `error:`（含 `fatal error:`、`unable to handle compilation`）与超时**单独记账并以退出码 1 失败，`--emscripten` 重写还会校验条数守恒与 include 目录存在性，任一不满足直接以退出码 2 拒跑。反例实测：用 `shlex.split(posix=True)` 拆 Windows 编译库里的 `command`，会把反斜杠一律当转义符吃掉——盘符与目录粘连、分隔符丢失，路径全废，整轮 TU 编译不过，而门禁显示 0 告警。
+
+**`HeaderFilterRegex` 的路径分隔符缺口（已知，待决策）**：现值为 `(include/aurora|src/aurora|/tests/|/tools/|/examples/)`，只认正斜杠；而编译库里的头文件路径常是「正斜杠根 + 反斜杠段」的混合形态，某一段的分隔符与正则不符，该段之后的头文件告警就被过滤掉。实测后果：同一份 `tests/framework` 下的头文件，收口前 native 遍报 0 条、wasm 遍报十余条（两条口径拼出的路径形态不同，穿过过滤的能力也就不同），因此**当前 native 门禁的有效覆盖面主要是主文件诊断**；把正则改为分隔符无关会一次性放出 `include/aurora` 下的存量头文件告警，属独立专项。
 
 ### 4.6 `AURORA_ENABLE_IMAGE_*`（图像编解码能力）
 

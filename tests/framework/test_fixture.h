@@ -42,11 +42,18 @@ class Fixture {
     auto operator=(Fixture &&) -> Fixture & = delete;
 
   protected:
+    // 豁免口径（区间式：紧邻下一物理行的 NOLINTNEXTLINE 罩不住带理由的整段说明）：
+    // `SetUp`/`TearDown` 刻意保持 GoogleTest 拼写。本框架的用例语法整体对齐 gtest
+    // （`AURORA_TEST_F` 之名、`SetUp/TearDown` 之钩子），为的是既有 gtest 夹具可零改写迁移，
+    // 也让 AI 按最主流的既有习惯生成夹具而不误造 `on_setup` 之类同义词（见 CONCEPTS.md 跨框架映射）。
+    // 改名会波及全部既有夹具且无收益，故此处按「命名规范让位于迁移契约」豁免。
+    // NOLINTBEGIN(readability-identifier-naming)
     /// @brief 用例体执行前的准备（派生类按需覆写）。
     virtual auto SetUp() -> void {}
 
     /// @brief 用例体执行后的清理（含用例抛出的路径，保证恰好执行一次）。
     virtual auto TearDown() -> void {}
+    // NOLINTEND(readability-identifier-naming)
 };
 
 namespace detail {
@@ -103,7 +110,8 @@ auto run_case_instance(Args &&...args) -> void {
         ::aurora::testing::detail::run_case_instance<aurora_test_fixture_##fixture_class##_##case_name>();  \
     }                                                                                                       \
     const ::aurora::testing::detail::Registrar aurora_test_fixture_registrar_##fixture_class##_##case_name{ \
-        ::aurora::testing::suite_from_path(__FILE__), #fixture_class "_" #case_name, __FILE__, __LINE__,    \
+        ::aurora::testing::suite_from_path(::aurora::testing::literal_view(__FILE__)),                      \
+        ::aurora::testing::literal_view(#fixture_class "_" #case_name), __FILE__, __LINE__,                 \
         &aurora_test_fixture_run_##fixture_class##_##case_name};                                            \
     }                                                                                                       \
     auto aurora_test_fixture_##fixture_class##_##case_name::case_body() -> void

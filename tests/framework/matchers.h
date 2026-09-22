@@ -55,7 +55,8 @@ class MatcherLike {
 }
 
 template <typename... Rest>
-[[nodiscard]] auto join_descriptions(std::string_view separator, std::string_view first, Rest... rest) -> std::string {
+[[nodiscard]] auto join_descriptions(std::string_view separator, std::string_view first, const Rest &...rest)
+    -> std::string {
     return std::string{first} + std::string{separator} + join_descriptions(separator, rest...);
 }
 

@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -129,13 +130,20 @@ inline constexpr std::size_t AURORA_MAX_RESPONSE_BODY = 4U * 1024U * 1024U;  // 
     timeval tv{};
     tv.tv_sec = 5;
     tv.tv_usec = 0;
+    // BSD socket 边界：`optval` 形参在 POSIX 是 `const void *`、Winsock 是 `const char *`，
+    // 二者都只认按字节传参，`timeval` 结构体地址是唯一过界方式。
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&tv), sizeof(tv));
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char *>(&tv), sizeof(tv));
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);  // 恒定连回环，不经 DNS
+    // 同上：`sockaddr_in` 是 `sockaddr` 的 AF_INET 具体形态，前导字段布局由协议族约定保证，
+    // POSIX 的连接口只收通用 `sockaddr *`。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     if (::connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
         detail::close_socket(sock);
         return finish(HttpResponse{.error = "connect() failed on 127.0.0.1:" + std::to_string(port)});
@@ -156,10 +164,11 @@ inline constexpr std::size_t AURORA_MAX_RESPONSE_BODY = 4U * 1024U * 1024U;  // 
     request += "\r\n";
     request += std::string(body);
 
-    const char *data = request.data();
     std::size_t sent_total = 0;
     while (sent_total < request.size()) {
-        const auto n = ::send(sock, data + sent_total, static_cast<int>(request.size() - sent_total), 0);
+        // 剩余待发包成 span 切片：区间长度由 subspan 自身携带，免裸指针偏移。
+        const auto remaining = std::span<const char>(request).subspan(sent_total);
+        const auto n = ::send(sock, remaining.data(), static_cast<int>(remaining.size()), 0);
         if (n <= 0) {
             detail::close_socket(sock);
             return finish(HttpResponse{.error = "send() failed"});

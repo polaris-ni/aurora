@@ -265,7 +265,7 @@ auto Preferences::default_config_dir() -> std::filesystem::path {
         return {local};
     }
 #else
-    if (const char *home = std::getenv("HOME"); home && *home) {
+    if (const char *home = std::getenv("HOME"); (home != nullptr) && ((*home) != 0)) {
         return std::filesystem::path(home) / ".config";
     }
 #endif
@@ -559,7 +559,7 @@ auto Preferences::flush() -> Result<void> {
     const auto pid = static_cast<unsigned long>(::GetCurrentProcessId());
     auto tmp = std::filesystem::path(std::wstring(file_.wstring()) + L"." + std::to_wstring(pid) + L".tmp");
 #else
-    const unsigned long pid = static_cast<unsigned long>(::getpid());
+    const auto pid = static_cast<unsigned long>(::getpid());
     auto tmp = std::filesystem::path(std::string(file_.string()) + "." + std::to_string(pid) + ".tmp");
 #endif
     {

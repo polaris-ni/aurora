@@ -344,7 +344,7 @@ auto WasmAriaBridge::pump_actions() -> void {
             break;
         }
         const int action = aria_js_pop_action();
-        const std::uint64_t id = static_cast<std::uint64_t>(raw);
+        const auto id = static_cast<std::uint64_t>(raw);
         // 跨窗口寻址：runtime_id 进程内唯一，遍历存活桥找持有该 id 的活快照即可。
         for (WasmAriaBridge *bridge : live_bridges()) {
             Widget *w = bridge->widget_of_id(id);
@@ -405,9 +405,12 @@ auto WasmAriaBridge::widget_of_id(const std::uint64_t id) const -> Widget * {
     if (n == nullptr) {
         return nullptr;
     }
-    // 快照的 widget 是主线程同帧活指针（读屏点击经帧尾排水回到此处，事件环内无并发）；
-    // perform 为非 const 回调 ⇒ const_cast 是桥边界的既定脱锥（AT-SPI2 桥同款）。
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-const-cast): 快照按 const 视图存 widget，而
+    // perform_accessibility_action 是非 const 回调，桥边界取回活指针必须脱锥——AT-SPI2 /
+    // UIA 两桥同款做法。安全性由时序保证：动作在帧尾排水处派发，事件环内无并发，快照里的
+    // widget 就是主线程当帧还活着的同一对象。
     return const_cast<Widget *>(n->widget);
+    // NOLINTEND(cppcoreguidelines-pro-type-const-cast)
 }
 
 auto WasmAriaBridge::raf_tick(double /*time*/, void *user_data) -> bool {

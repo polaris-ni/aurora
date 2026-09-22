@@ -10,6 +10,8 @@
 
 namespace aurora::test_cases::utest_window_chrome {
 
+using aurora::testing::require_value;
+
 namespace {
 
 /// @brief 记录型 Surface 桩：只记录 chrome 转发调用，不触任何平台 API。
@@ -79,7 +81,7 @@ AURORA_TEST_CASE(chrome_forwards_move_and_resize_edge) {
     chrome.begin_resize(WindowResizeEdge::Left);
     AURORA_TEST_CHECK_TRUE(surf.begin_move_called);
     AURORA_TEST_REQUIRE_TRUE(surf.resize_last.has_value());
-    AURORA_TEST_CHECK_EQ(*surf.resize_last, WindowResizeEdge::Left);
+    AURORA_TEST_CHECK_EQ(require_value(surf.resize_last), WindowResizeEdge::Left);
 }
 
 AURORA_TEST_CASE(chrome_forwards_minimize_maximize_fullscreen) {
@@ -127,7 +129,7 @@ AURORA_TEST_CASE(chrome_is_copyable_value_semantics) {
     AURORA_TEST_CHECK_TRUE(surf.close_called);
     copy.begin_resize(WindowResizeEdge::BottomRight);
     AURORA_TEST_REQUIRE_TRUE(surf.resize_last.has_value());
-    AURORA_TEST_CHECK_EQ(*surf.resize_last, WindowResizeEdge::BottomRight);
+    AURORA_TEST_CHECK_EQ(require_value(surf.resize_last), WindowResizeEdge::BottomRight);
 }
 
 }  // namespace aurora::test_cases::utest_window_chrome

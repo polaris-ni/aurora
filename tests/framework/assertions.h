@@ -196,6 +196,9 @@ template <typename T>
 
 template <typename Fn>
     requires std::is_invocable_v<Fn &>
+// 约束按 `Fn &` 判定可调用性，调用点必须同为左值；转发成 `Fn &&` 会出现
+// 「约束通过而调用不合法」的情形，故此处刻意不 std::forward。
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 [[nodiscard]] auto no_throw_message(Fn &&body, std::string_view statement_text) -> std::string {
     try {
         body();
@@ -209,6 +212,8 @@ template <typename Fn>
 
 template <typename Expected, typename Fn>
     requires std::is_invocable_v<Fn &>
+// 同上：约束与调用点同为 lvalue 口径，转发会制造「约束通过但 xvalue 不可调用」的组合。
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 [[nodiscard]] auto throws_message(Fn &&body, std::string_view statement_text, std::string_view expected_text)
     -> std::string {
     try {
@@ -226,6 +231,8 @@ template <typename Expected, typename Fn>
 
 template <typename Fn>
     requires std::is_invocable_v<Fn &>
+// 同上：约束与调用点同为 lvalue 口径。
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 [[nodiscard]] auto any_throw_message(Fn &&body, std::string_view statement_text) -> std::string {
     try {
         body();
@@ -276,20 +283,21 @@ class TraceScope {
 // ---------------------------------------------------------------------------
 
 /// @brief 标识符拼接（两级间接：`##` 会阻止操作数先展开，`__COUNTER__` 需先取值得到真实计数）。
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage) 拼接与 __COUNTER__ 唯一名只能由预处理器完成，无函数等价物
 #define AURORA_TEST_CAT_(a, b) AURORA_TEST_CAT_I_(a, b)  // NOLINT(*-identifier-naming)
 #define AURORA_TEST_CAT_I_(a, b) a##b  // NOLINT(*-identifier-naming)
 #define AURORA_TEST_UNIQUE_(prefix) AURORA_TEST_CAT_(aurora_test_##prefix, __COUNTER__)  // NOLINT(*-identifier-naming)
 
 /// clang 把 `__COUNTER__` 归为 C2y 扩展并逐点告警（GCC / MSVC 不报），就地把该告警关掉；
 /// 非 clang 编译器下展开为空。
-#if defined(AURORA_COMPILER_CLANG)
-#define AURORA_TEST_NO_C2Y_ _Pragma("clang diagnostic ignored \"-Wc2y-extensions\"")
+#ifdef AURORA_COMPILER_CLANG
+#define AURORA_TEST_NO_C2Y _Pragma("clang diagnostic ignored \"-Wc2y-extensions\"")
 #else
-#define AURORA_TEST_NO_C2Y_  // NOLINT(*-identifier-naming)
+#define AURORA_TEST_NO_C2Y
 #endif
 
 /// @brief 记账原语：`diagnostic` 非空即为失败，严重级别由外层宏决定。
-// NOLINTNEXTLINE(*-identifier-naming)
+// NOLINTNEXTLINE(*-identifier-naming,cppcoreguidelines-macro-usage) 需就地取 __FILE__/__LINE__，函数拿不到调用点位置
 #define AURORA_TEST_REPORT_(severity, diagnostic)                                                                 \
     do {                                                                                                          \
         const std::string aurora_test_diagnostic = (diagnostic);                                                  \
@@ -298,14 +306,14 @@ class TraceScope {
         }                                                                                                         \
     } while (false)
 
-// NOLINTNEXTLINE(*-identifier-naming)
+// NOLINTNEXTLINE(*-identifier-naming,cppcoreguidelines-macro-usage) 同上：转发到 REPORT_ 前保住调用点位置
 #define AURORA_TEST_CHECK_REPORT_(diagnostic) AURORA_TEST_REPORT_(::aurora::testing::Severity::NonFatal, diagnostic)
-// NOLINTNEXTLINE(*-identifier-naming)
+// NOLINTNEXTLINE(*-identifier-naming,cppcoreguidelines-macro-usage) 同上：致命分支同样需要调用点位置
 #define AURORA_TEST_REQUIRE_REPORT_(diagnostic) AURORA_TEST_REPORT_(::aurora::testing::Severity::Fatal, diagnostic)
 
 /// @brief 语句包装：把「语句」包成可调用体交给异常判定内核执行（内核需亲自捕获抛出），
 /// 内层 `if (always_true())` 既保证语句只执行一次，也吞掉不可达代码等告警。
-/// // NOLINTNEXTLINE(*-identifier-naming)
+// NOLINTNEXTLINE(*-identifier-naming,cppcoreguidelines-macro-usage) 把任意「语句」原地包成体，只有宏能做到
 #define AURORA_TEST_STATEMENT_(stmt)                    \
     [&]() -> void {                                     \
         if (::aurora::testing::detail::always_true()) { \
@@ -469,14 +477,17 @@ template <typename T>
 // ---- 无条件失败 / 跳过 / 追踪 ----
 
 /// @brief 无条件记一次非致命失败（用于断言族无法表达的复杂判定）。
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage) 须就地取 __FILE__/__LINE__，与断言族同为宏入口
 #define AURORA_TEST_FAIL(message) \
     ::aurora::testing::detail::report(::aurora::testing::Severity::NonFatal, __FILE__, __LINE__, (message))
 
 /// @brief 无条件终止本用例并记为失败。
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage) 同上：调用点位置是失败记录的一部分
 #define AURORA_TEST_FAIL_FATAL(message) \
     ::aurora::testing::detail::report(::aurora::testing::Severity::Fatal, __FILE__, __LINE__, (message))
 
 /// @brief 无条件跳过本用例。用于后端 / 平台 feature 宏未开启的 `#else` 分支。
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage) 用例侧书写面统一为 AURORA_TEST_* 宏入口，不因个别可降级为函数而破例
 #define AURORA_TEST_SKIP(reason) ::aurora::testing::detail::skip_case((reason))
 
 // ---- 平台能力守卫（能力缺失时跳过，而非伪装失败）----
@@ -490,13 +501,17 @@ template <typename T>
 //   （`__EMSCRIPTEN_PTHREADS__` 仅由 `-pthread` 定义，实测）。
 // 子进程：Emscripten 运行时没有 fork/exec（`CreateProcess` 同理），跨进程语义用例
 //   （多进程偏好一致性等）无法在 wasm 内等价构造。
+// 豁免口径与 `include/aurora/core/platform.h` 的能力宏段同款（该段对同一检查做了区间豁免）：
+// 本段的判据必须在**预处理期**可见（`#if` 只能吃宏，constexpr 变量参与不了条件编译），
+// 且展开形态按能力二选一，函数化会直接失去跳过语义。
+// NOLINTBEGIN(*-macro-usage)
 #if AURORA_CAP_THREADS
 #define AURORA_TEST_HAS_THREADS 1
 #else
 #define AURORA_TEST_HAS_THREADS 0
 #endif
 
-#if defined(AURORA_PLATFORM_WASM)
+#ifdef AURORA_PLATFORM_WASM
 #define AURORA_TEST_HAS_SUBPROCESS 0
 #else
 #define AURORA_TEST_HAS_SUBPROCESS 1
@@ -515,7 +530,9 @@ template <typename T>
 #else
 #define AURORA_TEST_REQUIRE_SUBPROCESS() AURORA_TEST_SKIP("跨进程用例需 fork/exec 派发子进程，Emscripten 运行时不可用")
 #endif
+// NOLINTEND(*-macro-usage)
 
 /// @brief 作用域追踪：本作用域内的所有失败都附带这条上下文（对标 SCOPED_TRACE）。
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage) 需就地声明带 __COUNTER__ 唯一名的局部对象，函数无法给出声明位置
 #define AURORA_TEST_TRACE(message) \
-    AURORA_TEST_NO_C2Y_ const ::aurora::testing::detail::TraceScope AURORA_TEST_UNIQUE_(trace_scope_) { (message) }
+    AURORA_TEST_NO_C2Y const ::aurora::testing::detail::TraceScope AURORA_TEST_UNIQUE_(trace_scope_) { (message) }

@@ -49,7 +49,7 @@ static auto publish_frame_count(int frames) -> void {
     last_published = frames;
     const std::string title = "aurora-wasm-raf frames = " + std::to_string(frames);
     // EM_ASM 的 `$0` 占位符含 `$` 标识符扩展（-Wpedantic 下告警），属 Emscripten 惯例写法。
-#if defined(__clang__)
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
 #endif
@@ -57,7 +57,7 @@ static auto publish_frame_count(int frames) -> void {
     // clang-format off
     EM_ASM({ document.title = UTF8ToString($0); }, title.c_str());
     // clang-format on
-#if defined(__clang__)
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif
 }

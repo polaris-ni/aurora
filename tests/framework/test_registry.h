@@ -107,10 +107,11 @@ class FinalizeRegistrar {
 /// @endcode
 /// 全名为 `<文件 stem>.my_case`；套件名由 __FILE__ 推导、恒等于测试文件 stem，
 /// 不可自定义 —— 这样 CTest 的 `--run=<stem>` 一定能筛中该文件下全部用例。
-#define AURORA_TEST_CASE(case_name)                                                                                   \
-    static auto aurora_test_body_##case_name() -> void;                                                               \
-    namespace {                                                                                                       \
-    const ::aurora::testing::detail::Registrar aurora_test_registrar_##case_name{                                     \
-        ::aurora::testing::suite_from_path(__FILE__), #case_name, __FILE__, __LINE__, &aurora_test_body_##case_name}; \
-    }                                                                                                                 \
+#define AURORA_TEST_CASE(case_name)                                                                      \
+    static auto aurora_test_body_##case_name() -> void;                                                  \
+    namespace {                                                                                          \
+    const ::aurora::testing::detail::Registrar aurora_test_registrar_##case_name{                        \
+        ::aurora::testing::suite_from_path(::aurora::testing::literal_view(__FILE__)),                   \
+        ::aurora::testing::literal_view(#case_name), __FILE__, __LINE__, &aurora_test_body_##case_name}; \
+    }                                                                                                    \
     static auto aurora_test_body_##case_name() -> void

@@ -63,7 +63,10 @@ namespace detail {
 /// 必然指向同一对象：展开器只认 `FixtureClass`，fixture 只认 `Value`。
 template <typename Value>
 [[nodiscard]] auto param_slot() -> std::optional<Value> & {
-    static std::optional<Value> storage;
+    // 内联函数的函数级 static 在全程序只有一个实体（[basic.stc.static]/3），既不存在
+    // 「每个 TU 一份」的重复，也不在加载期动态初始化——首次调用时才构造，正是本框架
+    // 依赖的惰性语义，故 bugprone-dynamic-static-initializers 的顾虑在此不成立。
+    static std::optional<Value> storage;  // NOLINT(bugprone-dynamic-static-initializers)
     return storage;
 }
 
@@ -71,6 +74,23 @@ template <typename Value>
 template <typename FixtureClass>
 auto set_current_param(const typename FixtureClass::ParamType &value) -> void {
     param_slot<typename FixtureClass::ParamType>() = value;
+}
+
+/// @brief 读取当次取值（`TestWithParam` 构造期使用）。
+///
+/// 为什么绕这一道，而不是在构造初始化列表直接写 `param_slot<Value>().value()`：
+/// 展开器写入槽位与 fixture 读取槽位分属**两个函数**，跨函数的调用次序不在
+/// `bugprone-unchecked-optional-access` 的路径分析能力内，`.value()` 一律按「未检查」上报；
+/// 把 `has_value()` 判定与取值收进同一个函数，支配关系对分析可见，无需任何抑制。
+/// 空槽位只可能来自绕过 `AURORA_TEST_P` shim 的直接构造（框架用法错误），此处与
+/// `optional::value()` 同源地抛 `bad_optional_access`，让 runner 判该用例失败，而非静默取默认值。
+template <typename Value>
+[[nodiscard]] auto current_param() -> const Value & {
+    const auto &slot = param_slot<Value>();
+    if (!slot.has_value()) {
+        throw std::bad_optional_access{};
+    }
+    return *slot;
 }
 
 }  // namespace detail
@@ -84,7 +104,7 @@ class TestWithParam : public Fixture {
   public:
     using ParamType = Value;  ///< 供框架推导取值表类型
 
-    TestWithParam() : value_(detail::param_slot<Value>().value()) {}
+    TestWithParam() : value_(detail::current_param<Value>()) {}
 
     /// @brief 本用例的取值。
     [[nodiscard]] auto param() const -> const Value & { return value_; }
@@ -98,8 +118,8 @@ namespace detail {
 /// @brief 默认名字生成器：返回空串表示「改用取值序号」。
 struct DefaultParamName {
     template <typename Value>
-    [[nodiscard]] auto operator()(const Value &) const -> std::string {
-        return {};
+    [[nodiscard]] auto operator()(const Value & /*value*/) const -> std::string {
+        return {};  // 默认生成器恒返回空串：名字由「取值序号」兜底，形参刻意不使用
     }
 };
 
@@ -115,13 +135,14 @@ struct ParamInstantiation {
 /// @brief 某个 fixture 的扁平取值表（多实例化共享，用例体只带全局序号）。
 template <typename FixtureClass>
 [[nodiscard]] auto param_values() -> std::vector<typename FixtureClass::ParamType> & {
-    static std::vector<typename FixtureClass::ParamType> values;
+    // 同 param_slot：函数级 static 只有一个实体且惰性构造，加载期动态初始化的顾虑不成立。
+    static std::vector<typename FixtureClass::ParamType> values;  // NOLINT(bugprone-dynamic-static-initializers)
     return values;
 }
 
 /// @brief 按全局序号取值（生成的用例体使用）。
 template <typename FixtureClass>
-[[nodiscard]] auto param_at(std::size_t index) -> const typename FixtureClass::ParamType & {
+[[nodiscard]] auto param_at(std::size_t index) -> const FixtureClass::ParamType & {
     return param_values<FixtureClass>()[index];
 }
 
@@ -212,7 +233,7 @@ auto expand_param_families(std::string_view fixture_key, const ParamInstantiatio
 template <typename FixtureClass, typename Range, typename Gen>
 auto register_instantiation(std::string_view instantiation, std::string_view fixture_key, const Range &range,
                             Gen generator) -> void {
-    using Value = typename FixtureClass::ParamType;
+    using Value = FixtureClass::ParamType;  // 别名声明右端是纯类型上下文，typename 可省
     auto &values = param_values<FixtureClass>();
 
     ParamInstantiation<Value> inst;
@@ -229,7 +250,7 @@ auto register_instantiation(std::string_view instantiation, std::string_view fix
 /// @brief 类型参数化：为一个类型清单逐项注册用例（BodyHolder 形如 `template <typename> class`）。
 template <typename List, template <typename> class BodyHolder, std::size_t... Is>
 auto register_typed_cases_impl(std::string_view suite, std::string_view case_name, const char *file, int line,
-                               std::index_sequence<Is...>) -> void {
+                               std::index_sequence<Is...> /*seq*/) -> void {
     (TestRegistry::instance().add_dynamic(
          suite, std::string{case_name} + "/" + short_type_name<std::tuple_element_t<Is, typename List::Tuple>>(),
          &BodyHolder<std::tuple_element_t<Is, typename List::Tuple>>::body, file, line),
@@ -282,7 +303,11 @@ template <typename Range>
         ::aurora::testing::detail::run_case_instance<aurora_test_param_##fixture_class##_##case_name>();       \
     }                                                                                                          \
     const ::aurora::testing::detail::ParamFamilyRegistrar aurora_test_param_reg_##fixture_class##_##case_name{ \
-        ::aurora::testing::suite_from_path(__FILE__),        #fixture_class, #case_name, __FILE__, __LINE__,   \
+        ::aurora::testing::suite_from_path(::aurora::testing::literal_view(__FILE__)),                         \
+        ::aurora::testing::literal_view(#fixture_class),                                                       \
+        ::aurora::testing::literal_view(#case_name),                                                           \
+        __FILE__,                                                                                              \
+        __LINE__,                                                                                              \
         &aurora_test_param_run_##fixture_class##_##case_name};                                                 \
     }                                                                                                          \
     auto aurora_test_param_##fixture_class##_##case_name::case_body() -> void
@@ -290,9 +315,17 @@ template <typename Range>
 /// @brief 实例化一个值参数化 fixture（对标 `INSTANTIATE_TEST_SUITE_P`）。
 ///
 /// 第三实参须是单一表达式（`values_of(...)` / `values_in(container)` / 具名容器）。
+//
+// 豁免口径（区间式：紧邻下一物理行的 NOLINTNEXTLINE 罩不住下面带理由的说明与跨行 `#define`）：
+// 这里的可变参数不是「参数太多」的偷懒，而是**可选实参补默认值**——第三实参省略时须填入
+// `DefaultParamName{}`，而函数签名无法在调用点替一个类型无关的默认对象占位；同时宏必须能在
+// 使用点用 `##` 拼出「每个实例化一个」的唯一静态注册对象名，模板函数拿不到 `__FILE__` 之外
+// 的调用点标识。两者都要求原位展开。
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
 #define AURORA_INSTANTIATE_TEST_SUITE_P(instantiation, fixture_class, ...)         \
     AURORA_INSTANTIATE_TEST_SUITE_P_GEN(instantiation, fixture_class, __VA_ARGS__, \
                                         ::aurora::testing::detail::DefaultParamName{})
+// NOLINTEND(cppcoreguidelines-macro-usage)
 
 /// @brief 带名字生成器的实例化：生成器须能以 `std::string(const ParamType&)` 调用。
 #define AURORA_INSTANTIATE_TEST_SUITE_P_GEN(instantiation, fixture_class, values, generator)                          \
@@ -316,6 +349,12 @@ template <typename Range>
 /// `suite_name` 须是「以单个类型为模板参数、派生自 `aurora::testing::Fixture`」的类模板；
 /// 生成的用例体是该 fixture 派生类的成员函数，故其 protected 成员直接可见。
 /// ⚠️ fixture 是本类的**依赖基**，故体内引用其成员须写 `this->member_`。
+//
+// 豁免口径：`suite_name` 是**模板名**，只能以 `suite_name<...>` 形态出现——加了括号就成了
+// 括号表达式而非 template-name（[temp.names]/1），`CaseBase<(suite_name)<TestType>>` 直接编译失败。
+// 故 `bugprone-macro-parentheses` 对本宏内所有 `suite_name` 用法都不成立（区间式：告警点在宏体
+// 中段，紧邻式 NOLINTNEXTLINE 也够不着）。
+// NOLINTBEGIN(bugprone-macro-parentheses)
 #define AURORA_TYPED_TEST(suite_name, case_name)                                                                    \
     template <typename TestType>                                                                                    \
     class aurora_typed_case_##suite_name##_##case_name                                                              \
@@ -334,10 +373,12 @@ template <typename Range>
     auto aurora_typed_expand_##suite_name##_##case_name() -> void {                                                 \
         ::aurora::testing::detail::register_typed_cases<aurora_typed_list_##suite_name,                             \
                                                         aurora_typed_holder_##suite_name##_##case_name>(            \
-            ::aurora::testing::suite_from_path(__FILE__), #case_name, __FILE__, __LINE__);                          \
+            ::aurora::testing::suite_from_path(::aurora::testing::literal_view(__FILE__)),                          \
+            ::aurora::testing::literal_view(#case_name), __FILE__, __LINE__);                                       \
     }                                                                                                               \
     const ::aurora::testing::detail::FinalizeRegistrar aurora_typed_hook_##suite_name##_##case_name{                \
         &aurora_typed_expand_##suite_name##_##case_name};                                                           \
     }                                                                                                               \
     template <typename TestType>                                                                                    \
     auto aurora_typed_case_##suite_name##_##case_name<TestType>::case_body() -> void
+// NOLINTEND(bugprone-macro-parentheses)

@@ -21,6 +21,11 @@ class WasapiDeviceBackend final : public AudioDeviceBackend {
     ~WasapiDeviceBackend() override;
     WasapiDeviceBackend(const WasapiDeviceBackend &) = delete;
     auto operator=(const WasapiDeviceBackend &) -> WasapiDeviceBackend & = delete;
+    /// @brief 设备线程在 start() 起即捕获 Impl 地址，且「析构必 join 线程」是本后端的
+    ///        收尾契约；移动会把 Impl 转给新主人而线程照旧跑，源对象沦为不再 join 的
+    ///        空壳。后端恒以 unique_ptr<AudioDeviceBackend> 就地持有，无移动需求。
+    WasapiDeviceBackend(WasapiDeviceBackend &&) = delete;
+    auto operator=(WasapiDeviceBackend &&) -> WasapiDeviceBackend & = delete;
 
     /// @brief 输出格式（恒 48000/2 float32：图渲染契约稳定，与实际设备差异经
     ///        WASAPI AUTOCONVERTPCM 引擎侧转换吸收，重路由后契约不变）。
@@ -48,6 +53,9 @@ class WasapiCaptureBackend final : public AudioCaptureBackend {
     ~WasapiCaptureBackend() override;
     WasapiCaptureBackend(const WasapiCaptureBackend &) = delete;
     auto operator=(const WasapiCaptureBackend &) -> WasapiCaptureBackend & = delete;
+    /// @brief 同渲染端：采集线程捕获 Impl 地址，移动会留下不再 join 的空壳源对象。
+    WasapiCaptureBackend(WasapiCaptureBackend &&) = delete;
+    auto operator=(WasapiCaptureBackend &&) -> WasapiCaptureBackend & = delete;
 
     /// @brief 启动采集线程（COM + 默认捕获端点 + event-driven）；失败返回 false。
     auto start(CaptureFn on_pcm) -> bool override;

@@ -62,7 +62,7 @@ auto publish_title(const std::string &title) -> void {
     }
     last = title;
     // EM_ASM 的 `$0` 占位符含 `$` 标识符扩展（-Wpedantic 下告警），属 Emscripten 惯例写法。
-#if defined(__clang__)
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
 #endif
@@ -70,7 +70,7 @@ auto publish_title(const std::string &title) -> void {
     // clang-format off
     EM_ASM({ document.title = UTF8ToString($0); }, title.c_str());
     // clang-format on
-#if defined(__clang__)
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif
 }
@@ -84,6 +84,9 @@ auto main() -> int {
     // ---- 控件树：叶节点先建 Node 取裸指针（Node 以 shared_ptr 持 widget，拷贝同实例），
     //      回调再经指针闭包——点击「确定」同时改按钮标签与输入框值，令一次反向动作携带
     //      两处状态变更，供 ②（回调执行）与 ④（增量 ops）同源取证。
+    // 下行目标类型由紧邻上一行构造的控件锁定（Button/TextInput/Checkbox/Slider 各自建 Node），
+    // dynamic_cast 徒增 RTTI 依赖且把「构造即已知」的确定性换成运行期查找。
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-static-cast-downcast)
     au::Node btn_node{au::Button{au::ButtonProps{.label = au::LocalizedString{"确定"}}}};
     auto *btn = static_cast<au::Button *>(&btn_node.widget());
     au::Node ann_node{au::Button{au::ButtonProps{.label = au::LocalizedString{"播报"}}}};
@@ -94,6 +97,7 @@ auto main() -> int {
     auto *cb = static_cast<au::Checkbox *>(&cb_node.widget());
     au::Node slider_node{au::Slider{au::Reactive<double>{25.0}}};
     auto *slider = static_cast<au::Slider *>(&slider_node.widget());
+    // NOLINTEND(cppcoreguidelines-pro-type-static-cast-downcast)
 
     btn->set_on_click([obs, btn, entry]() -> void {
         ++obs->clicks;

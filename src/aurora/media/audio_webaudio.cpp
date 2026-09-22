@@ -76,6 +76,7 @@ constexpr double AURORA_WA_PUMP_INTERVAL_MS = 20.0;  // 排空定时器周期（
 constexpr int AURORA_WA_PROCESSOR_BLOCK = 2048;  // ScriptProcessorNode 块长（浏览器固定取值）
 constexpr int AURORA_WA_MAX_CATCH_UP_FRAMES = 4096;  // 单拍至多渲染这么多帧（UI 长任务后不过补）
 constexpr int AURORA_WA_RESUME_RETRY_TICKS = 50;  // 20ms × 50 ⇒ 自动播放闸门每秒至多重试一次
+constexpr int AURORA_WA_GRAPH_CHANNELS = 2;  // 图侧声道契约恒定（多声道由浏览器上混，见 wa_open 注）
 
 [[maybe_unused]] auto wa_target_frames(int rate) -> int {
     // 目标水位 ≈ 85ms，且不低于 2 个块长：JS 每次取走整块，水位须恒 ≥ 2 块，
@@ -269,20 +270,22 @@ auto WebAudioDeviceBackend::pump(void *user_data) -> void {
 }
 
 WebAudioDeviceBackend::WebAudioDeviceBackend() {
-    constexpr int AURORA_GRAPH_CHANNELS = 2;  // 图侧声道契约恒定（多声道由浏览器上混，见 wa_open 注）
     int rate = 0;
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast): EM_JS 形参只收整型，与 JS 侧
+    // 交接的是 wasm 线性内存地址，指针必须落成 intptr_t
     const bool usable = wa_available() != 0 && wa_open(reinterpret_cast<intptr_t>(&rate)) == 0;
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
     if (!usable) {
         // 不可用（无 AudioContext / 创建被拒）：format() 给处理格式，start() 恒 false。
-        impl_ = std::make_unique<Impl>(4 * AURORA_WA_PROCESSOR_BLOCK, AURORA_GRAPH_CHANNELS);
+        impl_ = std::make_unique<Impl>(4 * AURORA_WA_PROCESSOR_BLOCK, AURORA_WA_GRAPH_CHANNELS);
         return;
     }
     const int negotiated_rate = rate > 0 ? rate : 48000;
-    impl_ = std::make_unique<Impl>(wa_ring_capacity(negotiated_rate), AURORA_GRAPH_CHANNELS);
-    impl_->format = AudioDeviceFormat{.sample_rate = negotiated_rate, .channels = AURORA_GRAPH_CHANNELS};
+    impl_ = std::make_unique<Impl>(wa_ring_capacity(negotiated_rate), AURORA_WA_GRAPH_CHANNELS);
+    impl_->format = AudioDeviceFormat{.sample_rate = negotiated_rate, .channels = AURORA_WA_GRAPH_CHANNELS};
     impl_->target_frames = wa_target_frames(negotiated_rate);
     impl_->scratch.assign(
-        static_cast<std::size_t>(AURORA_WA_MAX_CATCH_UP_FRAMES) * static_cast<std::size_t>(AURORA_GRAPH_CHANNELS),
+        static_cast<std::size_t>(AURORA_WA_MAX_CATCH_UP_FRAMES) * static_cast<std::size_t>(AURORA_WA_GRAPH_CHANNELS),
         0.0F);
 }
 
@@ -295,11 +298,14 @@ auto WebAudioDeviceBackend::start(RenderFn render_block) -> bool {
         return false;  // 已启动，或构造期协商失败（无上下文 ⇒ 静默降级）
     }
     impl_->render = std::move(render_block);
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast): 零导出符号的跨语言边界只传
+    // 地址——JS 侧按 intptr_t 建 HEAP 视图，故环的四个 wasm 内存指针必须落成整型
     const int rc = wa_attach_processor(reinterpret_cast<intptr_t>(impl_->ring.data()),
                                        reinterpret_cast<intptr_t>(impl_->ring.writer_position()),
                                        reinterpret_cast<intptr_t>(impl_->ring.reader_position()),
                                        reinterpret_cast<intptr_t>(impl_->ring.underrun_counter()),
                                        impl_->ring.capacity_frames(), impl_->format.channels);
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
     if (rc != 0) {
         wa_teardown();
         impl_->render = nullptr;
@@ -357,7 +363,8 @@ auto WebAudioCaptureBackend::stop() -> void {}
 
 namespace aurora {
 
-WebAudioDeviceBackend::WebAudioDeviceBackend() : impl_(std::make_unique<Impl>(4 * AURORA_WA_PROCESSOR_BLOCK, 2)) {}
+WebAudioDeviceBackend::WebAudioDeviceBackend()
+    : impl_(std::make_unique<Impl>(4 * AURORA_WA_PROCESSOR_BLOCK, AURORA_WA_GRAPH_CHANNELS)) {}
 
 WebAudioDeviceBackend::~WebAudioDeviceBackend() = default;
 

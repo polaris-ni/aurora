@@ -22,6 +22,8 @@
 
 namespace aurora::test_cases::utest_pie_chart {
 
+using aurora::testing::require_value;
+
 namespace golden = aurora::testing::golden;
 
 namespace {
@@ -131,12 +133,12 @@ AURORA_TEST_CASE(polar_hit_maps_angle_to_section) {
     MouseEvent in_a = move_at(160.0F, 40.0F);  // 正上方（12 点）
     chart.on_pointer_event(in_a);
     AURORA_TEST_REQUIRE_TRUE(chart.hovered_section().has_value());
-    AURORA_TEST_CHECK_EQ(*chart.hovered_section(), 0);
+    AURORA_TEST_CHECK_EQ(require_value(chart.hovered_section()), 0);
 
     MouseEvent in_b = move_at(104.0F, 44.0F);  // 相对角 315°（左上）
     chart.on_pointer_event(in_b);
     AURORA_TEST_REQUIRE_TRUE(chart.hovered_section().has_value());
-    AURORA_TEST_CHECK_EQ(*chart.hovered_section(), 1);
+    AURORA_TEST_CHECK_EQ(require_value(chart.hovered_section()), 1);
 
     MouseEvent outside = move_at(2.0F, 2.0F);  // 半径之外
     chart.on_pointer_event(outside);

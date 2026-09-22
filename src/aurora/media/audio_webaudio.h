@@ -52,6 +52,12 @@ class WebAudioDeviceBackend final : public AudioDeviceBackend {
     ~WebAudioDeviceBackend() override;
     WebAudioDeviceBackend(const WebAudioDeviceBackend &) = delete;
     auto operator=(const WebAudioDeviceBackend &) -> WebAudioDeviceBackend & = delete;
+    /// @brief 排空定时器（emscripten_set_interval）与 render 回调都挂在 Impl 上：移动只
+    ///        转走 unique_ptr，定时器照旧在册，而源对象此后的 stop() 因 impl_ 已空直接
+    ///        no-op——「同线程 ⇒ stop 返回即无回调」的收尾契约即被打破。后端由 AudioContext
+    ///        以 unique_ptr<AudioDeviceBackend> 就地持有，无移动需求。
+    WebAudioDeviceBackend(WebAudioDeviceBackend &&) = delete;
+    auto operator=(WebAudioDeviceBackend &&) -> WebAudioDeviceBackend & = delete;
 
     /// @brief 输出格式（采样率取浏览器协商的 `ctx.sampleRate`，声道恒 2 = 图侧契约——
     ///        多声道输出设备由浏览器自动上混；协商不可得时为处理格式 48000/2）。
@@ -86,6 +92,12 @@ class WebAudioCaptureBackend final : public AudioCaptureBackend {
   public:
     WebAudioCaptureBackend() = default;
     ~WebAudioCaptureBackend() override = default;
+    /// @brief 虽是无状态桩，仍与 Alsa/Wasapi 采集端同口径：后端只以
+    ///        unique_ptr<AudioCaptureBackend> 就地持有，复制/移动一律封死。
+    WebAudioCaptureBackend(const WebAudioCaptureBackend &) = delete;
+    auto operator=(const WebAudioCaptureBackend &) -> WebAudioCaptureBackend & = delete;
+    WebAudioCaptureBackend(WebAudioCaptureBackend &&) = delete;
+    auto operator=(WebAudioCaptureBackend &&) -> WebAudioCaptureBackend & = delete;
 
     auto start(CaptureFn on_pcm) -> bool override;
     auto stop() -> void override;

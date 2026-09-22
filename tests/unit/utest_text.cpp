@@ -13,6 +13,8 @@
 
 namespace aurora::test_cases::utest_text {
 
+using aurora::testing::require_value;
+
 namespace {
 
 auto bounded(float w, float h) -> Constraints {
@@ -210,7 +212,7 @@ AURORA_TEST_CASE(text_direction_serialize_and_unset_omitted) {
     Text back;
     back.deserialize_props(props);
     AURORA_TEST_CHECK_TRUE(back.direction.has_value());
-    AURORA_TEST_CHECK_TRUE(*back.direction == TextDirection::RTL);
+    AURORA_TEST_CHECK_TRUE(require_value(back.direction) == TextDirection::RTL);
 
     Text inherit("inherit");
     Json plain;

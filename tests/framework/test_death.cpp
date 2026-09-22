@@ -103,10 +103,19 @@ struct DeathState {
     CloseHandle(process.hProcess);
     return static_cast<int>(code);
 #else
-    std::vector<char *> argv;
-    argv.push_back(const_cast<char *>(program.c_str()));
+    // execv 的签名是遗留的 `char *const argv[]`（它不改写内容），传只读字符串就得去 const。
+    // 与其 const_cast，不如把参数整体拷进本函数持有的可写缓冲：拷贝在 fork 前完成，
+    // 子进程 exec 之前无人改写这些字节，「参数不被修改」由类型本身保证。
+    std::vector<std::string> storage;
+    storage.reserve(args.size() + 1);
+    storage.push_back(program);
     for (const auto &argument : args) {
-        argv.push_back(const_cast<char *>(argument.c_str()));
+        storage.push_back(argument);
+    }
+    std::vector<char *> argv;
+    argv.reserve(storage.size() + 1);
+    for (auto &held : storage) {  // storage 此后不再增长，故 data() 指针稳定
+        argv.push_back(held.data());
     }
     argv.push_back(nullptr);
 

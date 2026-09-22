@@ -204,11 +204,17 @@ AURORA_TEST_CASE(hud_overlay_composite_path) {
     // 首轮：无叠加层基线，确认仍能正常渲染。
     auto &fs = FrameStats::instance();
     fs.reset();
+    // 静态引用即进程级投递器 main_poster()：loop_begin 向其存入 [this] lambda，仅 WASM 浏览器分支
+    // 会带着栈地址提前返回 run()（不经 loop_end 清空）。本用例只跑无头宿主：无 requestAnimationFrame
+    // → 同步循环在 run() 返回前已清空该静态；浏览器分支下蹦床由 raf_owner_ 析构守卫拦截（见 ~Application），
+    // 残留引用被下一次 loop_begin 覆盖且本进程无人再调用 post_to_main，悬空指针永不解引用。
+    // NOLINTBEGIN(clang-analyzer-core.StackAddressEscape): 上述生命周期证明——地址滞留静态变量但永不解引用
     run_app(60, build_scene(), [](Application &app) -> void {
         if (app.window() != nullptr) {
             app.window()->force_full_redraw();
         }
     });
+    // NOLINTEND(clang-analyzer-core.StackAddressEscape)
     AURORA_TEST_CHECK_MSG(fs.total_frames() > 0, "baseline run without overlay renders frames");
 
     // 次轮：注入 HUD 叠加层（PerfOverlay），验证 present_root 的 composite 路径不崩溃且帧统计正常。

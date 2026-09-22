@@ -30,7 +30,10 @@
 namespace aurora::testing::detail {
 
 /// @brief 子进程判定结果。
-enum class DeathVerdict {
+///
+/// 显式窄化到 `std::uint8_t`：该枚举只在父/子进程内部判定流转、从不跨 ABI 边界，
+/// 三个取值即全部协议；给出底层类型也让「值域有多窄」一眼可读。
+enum class DeathVerdict : std::uint8_t {
     Died,  ///< 进程异常终止（死亡测试通过的前提）
     Survived,  ///< 站点已到达但 statement 正常返回
     SiteMissed,  ///< 站点未被执行（statement 不该无条件致死，或被条件挡住）
@@ -145,7 +148,13 @@ auto check_death(const char *file, int line, std::string_view statement, const E
 /// ⚠️ Emscripten（wasm）下整条断言退化为 AURORA_TEST_SKIP：死亡测试依赖「重跑自身子进程」，
 ///    而 wasm 运行时没有 fork/exec（spawn_death_child 的 fork 直接失败），子进程无从派发，
 ///    硬跑只会恒定报 SiteMissed。跨编译下如实跳过，交由原生 job 守护。
-#if defined(AURORA_PLATFORM_WASM)
+//
+// 豁免口径（区间式：紧邻下一物理行的 NOLINTNEXTLINE 罩不住下面两个跨行的 `#define`）：
+// `statement` 必须原样嵌入子进程分支的 lambda 调用位、`__FILE__/__LINE__` 必须在**调用点**
+// 取到、可选匹配器经 `__VA_ARGS__` 转发——三者都是「在原位展开」才成立的语义，
+// 改成 constexpr 模板函数即失去捕获能力（且 wasm 分支要整体替换成 skip 桩）。
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+#ifdef AURORA_PLATFORM_WASM
 #define AURORA_TEST_CHECK_DEATH(statement, ...) \
     AURORA_TEST_SKIP("死亡测试需 fork/exec 重跑自身进程，Emscripten 下不可用")
 #else
@@ -159,3 +168,4 @@ auto check_death(const char *file, int line, std::string_view statement, const E
         ::aurora::testing::detail::check_death(__FILE__, __LINE__, #statement, (__VA_ARGS__));   \
     } while (false)
 #endif
+// NOLINTEND(cppcoreguidelines-macro-usage)

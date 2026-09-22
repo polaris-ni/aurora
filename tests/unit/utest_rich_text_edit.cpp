@@ -21,6 +21,8 @@
 
 namespace aurora::test_cases::utest_rich_text_edit {
 
+using aurora::testing::require_value;
+
 namespace {
 
 auto bounded(float w, float h) -> Constraints {
@@ -228,7 +230,7 @@ AURORA_TEST_CASE(rtl_direction_api_roundtrip_and_unset_omitted) {
     RichTextEdit rtl;
     rtl.set_direction(TextDirection::RTL);
     AURORA_TEST_CHECK_TRUE(rtl.direction().has_value());
-    AURORA_TEST_CHECK_TRUE(*rtl.direction() == TextDirection::RTL);
+    AURORA_TEST_CHECK_TRUE(require_value(rtl.direction()) == TextDirection::RTL);
 
     Json props;
     rtl.serialize_props(props);
@@ -237,7 +239,7 @@ AURORA_TEST_CASE(rtl_direction_api_roundtrip_and_unset_omitted) {
     RichTextEdit back;
     back.deserialize_props(props);
     AURORA_TEST_CHECK_TRUE(back.direction().has_value());
-    AURORA_TEST_CHECK_TRUE(*back.direction() == TextDirection::RTL);
+    AURORA_TEST_CHECK_TRUE(require_value(back.direction()) == TextDirection::RTL);
 
     // 继承语义（未显式设置）不落盘——与 Text/TextInput 一致。
     RichTextEdit inherit;

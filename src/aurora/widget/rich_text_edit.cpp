@@ -16,6 +16,18 @@
 
 namespace aurora {
 
+namespace {
+
+/// @brief 文档下标 → 迭代器偏移量（`std::vector<StyledChar>::difference_type`）。
+///
+/// 下标做 `begin() + idx` 时必须落到本类型上，不能借 `long long` 中转：wasm32 的
+/// difference_type 是 32 位 `long`，`long long` 偏移会在加法内部被静默截断。窄到本
+/// 类型的值域完整：caret_ / sel_start_ / sel_end_ 恒在 [0, doc_.size()] 内取值，而
+/// vector 的长度上界即 difference_type 的最大值。
+using DocOffset = std::vector<StyledChar>::difference_type;
+
+}  // namespace
+
 auto RichTextEdit::describe_static() -> WidgetDescriptor {
     return WidgetDescriptor{
         .name = "RichTextEdit",
@@ -348,7 +360,7 @@ auto RichTextEdit::handle_text_key(KeyEvent &e, std::size_t n) -> bool {
         } else if (caret_ > 0) {
             const auto old_doc = doc_;
             const auto old_caret = caret_;
-            doc_.erase(doc_.begin() + static_cast<long long>(caret_) - 1);
+            doc_.erase(doc_.begin() + static_cast<DocOffset>(caret_) - 1);
             --caret_;
             sel_start_ = sel_end_ = caret_;
             push_undo(UndoSnapshot{.description = "backspace", .doc = old_doc, .caret = old_caret});
@@ -363,7 +375,7 @@ auto RichTextEdit::handle_text_key(KeyEvent &e, std::size_t n) -> bool {
         } else if (caret_ < n) {
             const auto old_doc = doc_;
             const auto old_caret = caret_;
-            doc_.erase(doc_.begin() + static_cast<long long>(caret_));
+            doc_.erase(doc_.begin() + static_cast<DocOffset>(caret_));
             push_undo(UndoSnapshot{.description = "delete", .doc = old_doc, .caret = old_caret});
         }
         mark_needs_paint();
@@ -625,7 +637,7 @@ auto RichTextEdit::do_insert(const std::string &text) -> void {
     proto.underline = cur_underline_;
     for (const char ch : text) {
         proto.ch = ch;
-        doc_.insert(doc_.begin() + static_cast<long long>(caret_), proto);
+        doc_.insert(doc_.begin() + static_cast<DocOffset>(caret_), proto);
         ++caret_;
     }
     sel_start_ = sel_end_ = caret_;
@@ -645,7 +657,7 @@ auto RichTextEdit::do_delete_selection() -> void {
 auto RichTextEdit::do_delete_selection_no_undo() -> void {
     const auto a = std::min(sel_start_, sel_end_);
     const auto b = std::max(sel_start_, sel_end_);
-    doc_.erase(doc_.begin() + static_cast<long long>(a), doc_.begin() + static_cast<long long>(b));
+    doc_.erase(doc_.begin() + static_cast<DocOffset>(a), doc_.begin() + static_cast<DocOffset>(b));
     caret_ = a;
     sel_start_ = sel_end_ = a;
 }
