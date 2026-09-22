@@ -11,7 +11,7 @@
 
 | 前缀 | 类别 | 语义 | 是否向库注入 feature 宏 |
 |:---|:---|:---|:---|
-| `AURORA_BUILD_*` | 构建产物开关 | 是否**构建**某个额外交付物（demos / tests / Inspector 服务器） | 否（例外：`AURORA_BUILD_INSPECTOR_SERVER`（§2.4）的开关名同时作为编译宏注入——与后端组「开关名 = 宏名」同惯例） |
+| `AURORA_BUILD_*` | 构建产物开关 | 是否**构建**某个额外交付物（demos / tests / Inspector 服务器） | 否（例外：`AURORA_BUILD_INSPECTOR_SERVER`（§2.3）的开关名同时作为编译宏注入——与后端组「开关名 = 宏名」同惯例） |
 | `AURORA_BACKEND_*` | 内置后端开关 | 每个**内置 `Surface` 图形后端**一个开关；**开关名 = PUBLIC feature 宏名** | 是（`#ifdef` 剪裁 + PUBLIC 传播给消费者） |
 | `AURORA_ENABLE_*` | 插桩 / 分析 / 能力开关 | 是否注入编译 / 链接期分析工具（覆盖率 / 内存检测 / 调试 / 性能插桩）或开启构建加速 / 内部能力（lld / ccache / SIMD / DEBUG / 测试注入点 / 内置音频设备后端） | 多数否；`PROFILING` / `TRACING` 与架构级优化三开关及 `DEBUG` / `TEST_HOOKS` / `AUDIO` / `AUDIO_WASAPI` / `AUDIO_ALSA` 注入 PUBLIC 宏，`SIMD` / `IMAGE_*` 注入内部宏，`LLD` / `CCACHE` 不注入宏 |
 
@@ -53,21 +53,17 @@
 | `AURORA_TEST_SHARDS` | `1` | 测试 runner 分片数（非开关、为正整数缓存变量）：`1` 与单 runner 完全等价；`N>1` 按 Suite（文件 stem）MD5 稳定散列把用例源拆为 N 个 runner（各含唯一 main），CTest 用例名带分片号（`<stem>_s<k>`，其中 `k` 从 `0` 起取 `0..N-1`），`registry_integrity` 对各 runner `--list` 取并集比对 | N 个 `aurora_test_runner_s<k>`（`k` 取 `0..N-1`）可执行；是否默认开启待收束期链接耗时数据 |
 | `AURORA_BUILD_INSPECTOR_SERVER` | `OFF` | 编译 Inspector 远程 HTTP 服务器（跨平台：Windows 链 `ws2_32` / POSIX 链 `pthread`） | `aurora_inspector_server` 静态库 |
 | `AURORA_BUILD_VERIFY_TOOLS` | `OFF` | **定义**（非默认构建）`tools/verify/` 下的真机验收探针：按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**（会创建真实窗口、读取屏幕光标，非确定且干扰用户桌面） | 各 `aurora_verify_<平台>_cursor` 可执行文件 + 聚合目标 `aurora_verify` |
-### 2.1 图像编解码开关（已迁出）
-
-图像编解码开关原名 `AURORA_BUILD_IMAGE_*`，实为「编译期能力开关」而非「交付物开关」，已归入 `AURORA_ENABLE_*` 命名组并连同选项名一并改名为 `AURORA_ENABLE_IMAGE_*`——详见 §4.6。
-
-### 2.2 demo 构建方式
+### 2.1 demo 构建方式
 
 demo 不进默认构建（`EXCLUDE_FROM_ALL`）：日常 `cmake --build build` 只建库 / 工具 / 测试；单个 demo 按名构建（`cmake --build build --target demo_lazy_list`），全部 demo 用聚合目标（`cmake --build build --target demos`）。关闭 `AURORA_BUILD_DEMOS` 则连目标都不定义。
 
-### 2.3 预编译头（PCH）
+### 2.2 预编译头（PCH）
 
 - **库自身**：`include/aurora/aurora_pch.h` 收录标准库 + `nlohmann/json.hpp`（不含 aurora 自有头，保证库开发时命中率），`aurora` 库 PRIVATE 编译一份。**GCC（MinGW）下同样强制关闭**：实测 122MB 的库 gch 每库 TU 全量加载 + ccache 全文 hash，且 gch 字节参与缓存 key（头文件一变全部库 TU 失效）；关闭后全量重编 155.4s → 68s（库侧），冷构建省约 1 分钟。MSVC/Clang 不变。
 - **消费者**：MSVC/Clang 下 `aurora_consumer_pch` 锚定目标把 `aurora.h` 伞头整体预编译一份，全部 demo / 测试 / 工具经 `target_precompile_headers(REUSE_FROM aurora_consumer_pch)` 复用（aurora 头变更本就触发消费者重编，不增加失效面）。**GCC（MinGW）下消费者 PCH 强制关闭**：实测 296MB 的 .gch 从未被消费者命中（生成/消费侧编译器设置失配，`-Winvalid-pch` 拒用），却仍要每 TU 全量探测加载（GCC）+ 全文 hash（ccache），每 TU ≈ 600MB 纯亏损 I/O，净收益为负；消费者改走伞头文本编译 + ccache 缓存。
 - 覆盖率 / ASan 开启时 PCH 全部自动关闭（与 GCC 判定共用同一门控变量）。
 
-### 2.4 `AURORA_BUILD_INSPECTOR_SERVER`
+### 2.3 `AURORA_BUILD_INSPECTOR_SERVER`
 
 | 属性 | 值 |
 |:---|:---|
@@ -85,7 +81,7 @@ demo 不进默认构建（`EXCLUDE_FROM_ALL`）：日常 `cmake --build build` �
 cmake -S . -B build -DAURORA_BUILD_INSPECTOR_SERVER=ON
 ```
 
-### 2.5 `AURORA_BUILD_VERIFY_TOOLS`（真机验收探针）
+### 2.4 `AURORA_BUILD_VERIFY_TOOLS`（真机验收探针）
 
 | 属性 | 值 |
 |:---|:---|
@@ -430,8 +426,6 @@ python tools/check/run_clang_tidy.py --build-dir build --include 'src/'         
 | 编译期行为 | `ON` 时对应 third_party 源码（libjpeg-turbo / libwebp / wuffs）编为 OBJECT 库链入 aurora，codec 编译单元以 `#ifdef` 剪裁参与编译；`OFF` 时该格式解码路径不参与编译，消费者需自行提供解码后像素 |
 | 运行时影响 | 关闭仅损失解码能力、不改变像素输出；能力查询走 `aurora::debug::feature_flags()`（§11.2 调试门面） |
 
-> 历史注记：三者原名 `AURORA_BUILD_IMAGE_*`（`AURORA_BUILD_*` 组的「编译期能力开关」例外）；归入 `AURORA_ENABLE_*` 组后连同选项名一并改名，消除「组名与语义不符」的例外。见 §2.1。
-
 ---
 
 ### 4.7 `AURORA_ENABLE_CLANG_FORMAT`
@@ -444,12 +438,12 @@ python tools/check/run_clang_tidy.py --build-dir build --include 'src/'         
 | 扫描范围 | `git ls-files` 中全部**非 `third_party/`、非 `build*/`** 的 `.cpp/.cc/.h/.hpp/.cxx`（无 git 时退化为文件系统遍历） |
 | 依赖 | `clang-format`（PATH）+ python（PATH）；**不需要** `compile_commands.json` |
 
-为何要有这道门禁：2026-09-21 之前仓库内**没有任何** clang-format 调用点，排版完全靠手，导致配置（当时的 `PointerAlignment: Left`）与代码库实际写法（右对齐，指针约 8.4 : 1）长期背离，累积到 488/823 文件、约 1.5 万行不一致且无人察觉。门禁的作用是让排版漂移在**引入的那一刻**暴露，而不是攒到需要一次性大改。
+为何要有这道门禁：门禁的作用是让排版漂移在**引入的那一刻**暴露，而不是攒到需要一次性大改。
 
 为何要有独立 runner（而非直接 `clang-format --dry-run --Werror`）：
 
 1. 需要把范围限定在 first-party 源码——`third_party/` 自带各自的 `.clang-format`，不能被重写；
-2. 需要并行（823 文件级）；
+2. 需要并行（千文件级）；
 3. 需要稳定的「按文件 / 按总量」摘要供 CI 日志阅读，而不是几百段原始 diff；
 4. 需要固定**已知正确**的调用形态：clang-format 解析 `file` 风格时从**实参所在目录**向上查找，用相对路径的 `--assume-filename` 或在不同的 cwd 下运行，都会静默退回内建默认风格、得出方向相反的结论。runner 一律传绝对路径实参并把 cwd 钉在仓库根。
 
