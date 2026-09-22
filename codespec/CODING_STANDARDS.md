@@ -93,6 +93,10 @@
   花括号初始化列表——不会被预处理器切裂成多余宏参数，可直接内联。风格上仍建议较长或复用的实参先提为
   命名变量，保持断言行一眼可读。
 - 后端 / 平台专属用例在 feature 宏未开启的 `#else` 分支以 `AURORA_TEST_SKIP(原因)` 注册 skip 桩（计入 Skipped，不算失败、不伪造通过）。
+  ⚠️ `#if / #else` 写在**用例体内**，`AURORA_TEST_CASE(<名>)` 的声明本身必须无条件可见——`registry_integrity`
+  拿「静态扫源码得到的用例名字面量」与 `runner --list` 逐条比对，被预处理摘掉的声明在另一种构建里必然单边
+  失踪（要么「源码有、注册无」红灯，要么整类用例在某平台静默不跑）。需要整文件不参与某平台编译时，把
+  include 与辅助函数包进 `#ifndef`，用例声明照旧留在外面、体内只 `AURORA_TEST_SKIP`（见 `tests/unit/utest_x11_surface.cpp`）。
 - **平台能力守卫**：用例依赖的平台能力缺失时，在用例体首行写 `AURORA_TEST_REQUIRE_THREADS()` /
   `AURORA_TEST_REQUIRE_SUBPROCESS()`（能力具备时展开为 `static_cast<void>(0)`，缺失时即 `AURORA_TEST_SKIP`）。
   目前唯一触发场景是 Emscripten：未开 `-pthread` 时无 `std::thread`（`-pthread` 会让产物要求

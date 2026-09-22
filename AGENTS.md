@@ -86,7 +86,8 @@
   值参数化用 `AURORA_TEST_P` + `AURORA_INSTANTIATE_TEST_SUITE_P`，类型参数化用 `AURORA_TYPED_TEST_SUITE` +
   `AURORA_TYPED_TEST`（参数化用例名带 `<prefix>` 与取值/类型段，套件名仍是文件 stem）；
   **测试文件禁止自定义 `main()`**（`main` 由 `tests/framework/test_main.cpp` 唯一提供）。后端/平台专属用例在 feature 宏未开启的
-  `#else` 分支用 `AURORA_TEST_SKIP(原因)` 注册 skip 桩（计入 Skipped，不算失败）。
+  `#else` 分支用 `AURORA_TEST_SKIP(原因)` 注册 skip 桩（计入 Skipped，不算失败）——但 `#if` 只能写在**用例体内**，
+  `AURORA_TEST_CASE` 声明须无条件可见，否则 `registry_integrity` 的源码/注册表逐条比对必然单边失踪（见 `CODING_STANDARDS.md` §3）。
   参数化用例在 runner 起手的 `TestRegistry::finalize()` 统一展开，`--list` / `--run` 即全集——**自读注册表的守护脚本须先 finalize**。
   runner CLI：`--list`（配 `--format=cases|suites`）/ `--run=<suite>` / `--filter=<子串>` / `--verbose` /
   `--report=<path>`（JUnit XML 或 JSON）/ `--shuffle[=<seed>]` / `--repeat=<n>` / `--timeout=<ms>` /

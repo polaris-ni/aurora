@@ -120,6 +120,8 @@ if (AURORA_BUILD_TESTS)
     # runner 目标统一配置（分片共享）：链接 aurora + C++20 + 消费者 PCH + 告警；
     # tests/ 供框架头解析，examples/app/google_play 供 google_play_data/ui 数据层测试；
     # tools/include 复用 known_enums.h 等 SSOT，tests/support 为测试公共设施；
+    # tools/servers 供 header-only 的工具侧客户端（inspector_client.h）被真代码单测——
+    # 复制一份最小客户端只会测到副本，测不到那个「超时选项按平台不同形」的回归位。
     # src/ 让**零平台依赖**的内部折算单元（如 window/detail/ime_composition.h）可被无头单测
     # 直接断言——平台专属实现仍在后端宏门控内，测试包含不到也不会引 <windows.h>。
     function(_aurora_configure_runner tgt)
@@ -128,6 +130,7 @@ if (AURORA_BUILD_TESTS)
                 "${CMAKE_CURRENT_SOURCE_DIR}/examples/app/google_play")
         target_include_directories(${tgt} PRIVATE
                 "${CMAKE_SOURCE_DIR}/tools/include"
+                "${CMAKE_SOURCE_DIR}/tools/servers"
                 "${CMAKE_SOURCE_DIR}/src"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/support")

@@ -16,8 +16,9 @@
 #include <string_view>
 
 #ifdef _WIN32
+// `WIN32_LEAN_AND_MEAN` 是 Windows SDK 约定的宏名，改名即失效（它由 `windows.h` 一侧按名探测）。
 #ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming) SDK 规定名，不可按命名表改
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -63,7 +64,8 @@ inline constexpr SocketHandle AURORA_INVALID_SOCKET = -1;
 inline auto close_socket(SocketHandle s) -> void { ::close(s); }
 #endif
 
-inline constexpr std::size_t AURORA_MAX_RESPONSE_BODY = 4U * 1024U * 1024U;  // 4 MiB
+// 首操作数即目标宽度：乘法在 64 位里完成，不产生「32 位算完再隐式加宽」的中间形态。
+inline constexpr std::size_t AURORA_MAX_RESPONSE_BODY = std::size_t{4} * 1024 * 1024;  // 4 MiB
 
 }  // namespace detail
 
@@ -127,15 +129,33 @@ inline constexpr std::size_t AURORA_MAX_RESPONSE_BODY = 4U * 1024U * 1024U;  // 
 #endif
 
     // 收发超时：挂死的工具不该无限等下去。
-    timeval tv{};
-    tv.tv_sec = 5;
-    tv.tv_usec = 0;
+    //
+    // ⚠️ 该选项在两个平台上**不同形**，不存在可移植的同一份字节：Winsock 的 `SO_RCVTIMEO` /
+    // `SO_SNDTIMEO` 收的是 `DWORD` **毫秒数**，POSIX 收的是 `struct timeval`。把 `timeval`
+    // 递给 Winsock，它只把前 4 字节当 DWORD 读，于是 `tv_sec = 5` 在 Windows 上实际生效成
+    // **5 毫秒**（`tv_usec` 那 4 字节被丢弃）——而本客户端的主要使用面恰恰是 Windows，慢于
+    // 5ms 的响应会被 `WSAETIMEDOUT` 掐掉、退化成「empty response」。故按平台各给其形态。
+    constexpr int io_timeout_ms = 5000;
+#ifdef _WIN32
+    const DWORD io_timeout = io_timeout_ms;
+#else
+    timeval io_timeout{};
+    io_timeout.tv_sec = io_timeout_ms / 1000;
+    io_timeout.tv_usec = (io_timeout_ms % 1000) * 1000;
+#endif
     // BSD socket 边界：`optval` 形参在 POSIX 是 `const void *`、Winsock 是 `const char *`，
-    // 二者都只认按字节传参，`timeval` 结构体地址是唯一过界方式。
+    // 二者都只认按字节传参，取超时变量的地址按平台形态过界是唯一方式。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&tv), sizeof(tv));
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char *>(&tv), sizeof(tv));
+    const int rcv_rc = ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&io_timeout),
+                                    static_cast<int>(sizeof(io_timeout)));
+    const int snd_rc = ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char *>(&io_timeout),
+                                    static_cast<int>(sizeof(io_timeout)));
     // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (rcv_rc != 0 || snd_rc != 0) {
+        // 设不上超时就不在无界等待上继续走：那正是本段代码要防的事故形态，宁可显式失败。
+        detail::close_socket(sock);
+        return finish(HttpResponse{.error = "setsockopt(SO_RCVTIMEO/SO_SNDTIMEO) failed"});
+    }
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
