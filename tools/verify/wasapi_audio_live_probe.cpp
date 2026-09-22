@@ -29,6 +29,8 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <numbers>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -40,16 +42,21 @@ namespace {
 
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
-int failures = 0;
+/// 失败计数器：以函数局部 static 经访问器暴露，避免 namespace 作用域全局可变变量
+/// （探针为单进程一次性工具，计数器只需进程内累计，语义与原全局版一致）。
+auto failure_counter() -> int & {
+    static int failures = 0;
+    return failures;
+}
 
 auto check(bool ok, const std::string &label) -> void {
     emit(std::string("[") + (ok ? "PASS" : "FAIL") + "] " + label);
     if (!ok) {
-        failures++;
+        failure_counter()++;
     }
 }
 
-constexpr double AURORA_PI = 3.14159265358979323846;
+constexpr double AURORA_PI = std::numbers::pi_v<double>;
 
 /// 生成正弦缓冲（float32 交错 stereo）。
 auto sine_buffer(int sample_rate, double seconds, double freq, float amp) -> aurora::AudioBuffer {
@@ -62,7 +69,7 @@ auto sine_buffer(int sample_rate, double seconds, double freq, float amp) -> aur
         const float v =
             amp * static_cast<float>(std::sin(2.0 * AURORA_PI * freq * static_cast<double>(i) / sample_rate));
         buf.samples[static_cast<std::size_t>(i) * 2U] = v;
-        buf.samples[static_cast<std::size_t>(i) * 2U + 1U] = v;
+        buf.samples[(static_cast<std::size_t>(i) * 2U) + 1U] = v;
     }
     return buf;
 }
@@ -74,7 +81,7 @@ auto sine_pcm(int sample_rate, int frames, double freq, std::int16_t amp) -> std
         const auto v = static_cast<std::int16_t>(
             static_cast<double>(amp) * std::sin(2.0 * AURORA_PI * freq * static_cast<double>(i) / sample_rate));
         pcm[static_cast<std::size_t>(i) * 2U] = v;
-        pcm[static_cast<std::size_t>(i) * 2U + 1U] = v;
+        pcm[(static_cast<std::size_t>(i) * 2U) + 1U] = v;
     }
     return pcm;
 }
@@ -84,7 +91,8 @@ auto sleep_ms(int ms) -> void { std::this_thread::sleep_for(std::chrono::millise
 }  // namespace
 
 auto main(int argc, char **argv) -> int {
-    const bool interactive = argc > 1 && std::string(argv[1]) == "--interactive";
+    const std::span<char *const> args{argv, static_cast<std::size_t>(argc)};
+    const bool interactive = args.size() > 1 && std::string{args[1]} == "--interactive";
 
     emit("== Aurora WASAPI audio live probe ==");
     emit("auto segment: activation / format / clock / buffer source / stream / suspend-resume / capture port");
@@ -191,11 +199,11 @@ auto main(int argc, char **argv) -> int {
             buf.samples.resize(static_cast<std::size_t>(frames) * 2U);
             double phase = 0.0;
             for (int i = 0; i < frames; ++i) {
-                const double f = 200.0 + 1800.0 * static_cast<double>(i) / frames;
+                const double f = 200.0 + ((1800.0 * static_cast<double>(i)) / frames);
                 phase += 2.0 * AURORA_PI * f / 48000.0;
                 const float v = 0.5F * static_cast<float>(std::sin(phase));
                 buf.samples[static_cast<std::size_t>(i) * 2U] = v;
-                buf.samples[static_cast<std::size_t>(i) * 2U + 1U] = v;
+                buf.samples[(static_cast<std::size_t>(i) * 2U) + 1U] = v;
             }
             static_cast<void>(src->set_buffer(std::make_shared<const aurora::AudioBuffer>(std::move(buf))));
             static_cast<void>(src->start());
@@ -239,6 +247,8 @@ auto main(int argc, char **argv) -> int {
     }
 
     static_cast<void>(ctx->close());
-    emit(failures == 0 ? "result: ALL PASS (exit 0)" : "result: " + std::to_string(failures) + " FAILURE(S) (exit 1)");
-    return failures == 0 ? 0 : 1;
+    const int total_failures = failure_counter();
+    emit(total_failures == 0 ? "result: ALL PASS (exit 0)"
+                             : "result: " + std::to_string(total_failures) + " FAILURE(S) (exit 1)");
+    return total_failures == 0 ? 0 : 1;
 }

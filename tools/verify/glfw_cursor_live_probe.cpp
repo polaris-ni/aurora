@@ -37,7 +37,7 @@
 #include "aurora/core/log.h"
 #include "aurora/core/platform.h"
 
-#if !defined(AURORA_BACKEND_GLFW)
+#ifndef AURORA_BACKEND_GLFW
 #error "AURORA_BACKEND_GLFW must be enabled"
 #endif
 
@@ -47,13 +47,17 @@
 // 可让 glfw3.h 不去 `#include <GL/gl.h>`——既是语义上的正确（无 GL 依赖），也顺带让本探针
 // 在**没装 GL 开发包**（如只装了 GLFW 头）的环境里也能编译。必须在 glfw3.h 之前定义。
 #ifndef GLFW_INCLUDE_NONE
+// GLFW_INCLUDE_NONE 是 GLFW 规定的宏名（必须在包含 glfw3.h 前定义），不可加 AURORA_ 前缀或改名，只能就地豁免。
+// NOLINTNEXTLINE(readability-identifier-naming)
 #define GLFW_INCLUDE_NONE
 #endif
 #include <GLFW/glfw3.h>
 
 #include <array>
 #include <iostream>
+#include <span>
 #include <string>
+#include <string_view>
 
 #include "aurora/window/cursor_map.h"
 #include "verify_print.h"
@@ -181,8 +185,10 @@ auto human_expectation(aurora::CursorShape shape) -> const char * {
 
 auto main(int argc, char **argv) -> int {
     bool interactive = false;
-    for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--interactive") {
+    // 以 span 视图遍历命令行参数（argc 可为 0，故 subspan 起点取 0/1 二者之一，避免越界抛异常）
+    const std::span<char *const> args{argv, static_cast<std::size_t>(argc)};
+    for (const auto *raw : args.subspan(args.size() > 1U ? 1U : 0U)) {
+        if (std::string_view{raw} == "--interactive") {
             interactive = true;
         }
     }
@@ -215,8 +221,8 @@ auto main(int argc, char **argv) -> int {
     bool create_failed = false;
     const auto handle_for_id = [&](int id) -> GLFWcursor * {
         for (int k = 0; k < pool_size; ++k) {
-            if (pool_ids[static_cast<std::size_t>(k)] == id) {
-                return pool_handles[static_cast<std::size_t>(k)];
+            if (pool_ids.at(static_cast<std::size_t>(k)) == id) {
+                return pool_handles.at(static_cast<std::size_t>(k));
             }
         }
         GLFWcursor *created = glfwCreateStandardCursor(id);
@@ -224,8 +230,8 @@ auto main(int argc, char **argv) -> int {
             create_failed = true;
             return nullptr;
         }
-        pool_ids[static_cast<std::size_t>(pool_size)] = id;
-        pool_handles[static_cast<std::size_t>(pool_size)] = created;
+        pool_ids.at(static_cast<std::size_t>(pool_size)) = id;
+        pool_handles.at(static_cast<std::size_t>(pool_size)) = created;
         ++pool_size;
         return created;
     };
@@ -235,7 +241,7 @@ auto main(int argc, char **argv) -> int {
     for (int i = 0; i < total; ++i) {
         const auto shape = static_cast<aurora::CursorShape>(i);
         const int id = mirrored_standard_cursor(shape);
-        handles[static_cast<std::size_t>(i)] = (id < 0) ? handle_for_id(GLFW_ARROW_CURSOR) : handle_for_id(id);
+        handles.at(static_cast<std::size_t>(i)) = (id < 0) ? handle_for_id(GLFW_ARROW_CURSOR) : handle_for_id(id);
     }
 
     const GLFWcursor *arrow_handle = handles[static_cast<std::size_t>(aurora::CursorShape::Arrow)];
@@ -258,16 +264,16 @@ auto main(int argc, char **argv) -> int {
     for (int i = 0; i < total; ++i) {
         const auto shape = static_cast<aurora::CursorShape>(i);
         const int id = mirrored_standard_cursor(shape);
-        const GLFWcursor *handle = handles[static_cast<std::size_t>(i)];
+        const GLFWcursor *handle = handles.at(static_cast<std::size_t>(i));
         bool already_seen = false;
         for (int k = 0; k < distinct_actual; ++k) {
-            if (seen[static_cast<std::size_t>(k)] == handle) {
+            if (seen.at(static_cast<std::size_t>(k)) == handle) {
                 already_seen = true;
                 break;
             }
         }
         if (!already_seen) {
-            seen[static_cast<std::size_t>(distinct_actual)] = handle;
+            seen.at(static_cast<std::size_t>(distinct_actual)) = handle;
             ++distinct_actual;
         }
 
@@ -304,7 +310,7 @@ auto main(int argc, char **argv) -> int {
         auto_ok = false;
     }
     for (int k = 0; k < pool_size; ++k) {
-        if (pool_handles[static_cast<std::size_t>(k)] == nullptr) {
+        if (pool_handles.at(static_cast<std::size_t>(k)) == nullptr) {
             AURORA_LOG_ERROR("verify", "Mismatch: a standard cursor handle failed to be created");
             auto_ok = false;
         }
@@ -330,7 +336,7 @@ auto main(int argc, char **argv) -> int {
         int rejected = 0;
         for (int i = 0; i < total; ++i) {
             const auto shape = static_cast<aurora::CursorShape>(i);
-            glfwSetCursor(window, handles[static_cast<std::size_t>(i)]);
+            glfwSetCursor(window, handles.at(static_cast<std::size_t>(i)));
             glfwFocusWindow(window);
             glfwPollEvents();
 
@@ -357,7 +363,7 @@ auto main(int argc, char **argv) -> int {
     }
 
     for (int k = 0; k < pool_size; ++k) {
-        glfwDestroyCursor(pool_handles[static_cast<std::size_t>(k)]);
+        glfwDestroyCursor(pool_handles.at(static_cast<std::size_t>(k)));
     }
     glfwDestroyWindow(window);
     glfwTerminate();

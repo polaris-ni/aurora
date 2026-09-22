@@ -16,6 +16,8 @@
 #ifdef AURORA_ENABLE_AUDIO_WASAPI
 
 #ifndef WIN32_LEAN_AND_MEAN
+// Windows SDK 规定的宏名，无法冠 AURORA_ 前缀满足命名表，只能就地豁免
+// NOLINTNEXTLINE(readability-identifier-naming)
 #define WIN32_LEAN_AND_MEAN
 #endif
 #ifndef NOMINMAX
@@ -50,8 +52,10 @@ auto is_float_format(const WAVEFORMATEX *f) -> bool {
         return true;
     }
     if (f->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
+        // Win32 约定：WAVE_FORMAT_EXTENSIBLE 的格式块前导即 WAVEFORMATEX，向下强转读子格式是唯一取法
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         const auto *ext = reinterpret_cast<const WAVEFORMATEXTENSIBLE *>(f);
-        return IsEqualGUID(ext->SubFormat, AURORA_AUDIO_WASAPI_IEEE_FLOAT_SUB_FORMAT);
+        return IsEqualGUID(ext->SubFormat, AURORA_AUDIO_WASAPI_IEEE_FLOAT_SUB_FORMAT) != 0;
     }
     return false;
 }
@@ -127,6 +131,12 @@ struct WasapiDeviceBackend::Impl {
 
     Impl() = default;
     ~Impl() { teardown_all(); }
+    // pimpl 持有 COM 接口指针 / 事件句柄 / 设备线程的所有权，拷贝或移动即两份对象争着
+    // Release/CloseHandle/join，按 Rule of Five 显式禁用（thread/atomic 本已隐式禁用，此处显式化）。
+    Impl(const Impl &) = delete;
+    auto operator=(const Impl &) -> Impl & = delete;
+    Impl(Impl &&) = delete;
+    auto operator=(Impl &&) -> Impl & = delete;
 
     auto init_com() -> bool {
         const HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -148,11 +158,14 @@ struct WasapiDeviceBackend::Impl {
         if (enumerator != nullptr) {
             return true;
         }
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast): Win32 COM 边界——CoCreateInstance
+        // 出参只接受 void**，接口指针地址只能 reinterpret 传递
         if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
                                     reinterpret_cast<void **>(&enumerator))) ||
             enumerator == nullptr) {
             return false;
         }
+        // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
         notify = new DeviceNotifyClient(reroute);
         enumerator->RegisterEndpointNotificationCallback(notify);
         return true;
@@ -193,10 +206,13 @@ struct WasapiDeviceBackend::Impl {
         if (FAILED(client->GetBufferSize(&buffer_frames)) || buffer_frames == 0) {
             return false;
         }
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast): Win32 COM 边界——GetService
+        // 出参只接受 void**，接口指针地址只能 reinterpret 传递
         if (FAILED(client->GetService(__uuidof(IAudioRenderClient), reinterpret_cast<void **>(&render_client))) ||
             render_client == nullptr) {
             return false;
         }
+        // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
         // 预滚：一次性取满缓冲再空还，重置引擎写指针。
         BYTE *p = nullptr;
         if (SUCCEEDED(render_client->GetBuffer(buffer_frames, &p)) && p != nullptr) {
@@ -214,10 +230,13 @@ struct WasapiDeviceBackend::Impl {
         if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device)) || device == nullptr) {
             return false;
         }
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast): Win32 COM 边界——Activate
+        // 出参只接受 void**，接口指针地址只能 reinterpret 传递
         if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void **>(&client))) ||
             client == nullptr) {
             return false;
         }
+        // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
         return init_client();
     }
 
@@ -265,6 +284,8 @@ struct WasapiDeviceBackend::Impl {
         if (FAILED(render_client->GetBuffer(avail, &p)) || p == nullptr) {
             return false;
         }
+        // 渲染回调契约为 float32 交织缓冲，引擎给的 BYTE* 只能 reinterpret 为 float*（确定单行，用 NEXTLINE）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         render(reinterpret_cast<float *>(p), static_cast<int>(avail));
         return SUCCEEDED(render_client->ReleaseBuffer(avail, 0));
     }
@@ -379,6 +400,12 @@ struct WasapiCaptureBackend::Impl {
 
     Impl() = default;
     ~Impl() { teardown_all(); }
+    // pimpl 持有 COM 接口指针 / 事件句柄 / 采集线程的所有权，拷贝或移动即两份对象争着
+    // Release/CloseHandle/join，按 Rule of Five 显式禁用（thread/atomic 本已隐式禁用，此处显式化）。
+    Impl(const Impl &) = delete;
+    auto operator=(const Impl &) -> Impl & = delete;
+    Impl(Impl &&) = delete;
+    auto operator=(Impl &&) -> Impl & = delete;
 
     auto init_com() -> bool {
         const HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -398,6 +425,8 @@ struct WasapiCaptureBackend::Impl {
 
     /// 激活默认捕获端点（shared 引擎混合格式恒 float32；非 float 视为不可用）。
     auto activate() -> bool {
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast): Win32 COM 边界——CoCreateInstance/
+        // Activate/GetService 出参只接受 void**，接口指针地址只能 reinterpret 传递
         if (enumerator == nullptr &&
             FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
                                     reinterpret_cast<void **>(&enumerator)))) {
@@ -434,6 +463,7 @@ struct WasapiCaptureBackend::Impl {
             capture_client == nullptr) {
             return false;
         }
+        // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
         return SUCCEEDED(client->Start());
     }
 
@@ -472,12 +502,15 @@ struct WasapiCaptureBackend::Impl {
             if (FAILED(capture_client->GetBuffer(&p, &frames, &flags, nullptr, nullptr))) {
                 return false;
             }
+            // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast): Win32 采集缓冲是字节指针，
+            // 混合格式恒 float32，只能 reinterpret 为 const float* 交给回调
             if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0) {
-                silent_.assign(static_cast<std::size_t>(frames) * static_cast<std::size_t>(channels), 0.0F);
-                capture(silent_.data(), static_cast<int>(frames), static_cast<int>(rate), channels);
+                silent.assign(static_cast<std::size_t>(frames) * static_cast<std::size_t>(channels), 0.0F);
+                capture(silent.data(), static_cast<int>(frames), static_cast<int>(rate), channels);
             } else if (p != nullptr) {
                 capture(reinterpret_cast<const float *>(p), static_cast<int>(frames), static_cast<int>(rate), channels);
             }
+            // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
             if (FAILED(capture_client->ReleaseBuffer(frames))) {
                 return false;
             }
@@ -507,7 +540,7 @@ struct WasapiCaptureBackend::Impl {
         }
     }
 
-    std::vector<float> silent_;  // SILENT 包补零暂存（采集线程私有）
+    std::vector<float> silent;  // SILENT 包补零暂存（采集线程私有；struct 公有成员不带 `_` 后缀，见命名表）
 };
 
 WasapiCaptureBackend::WasapiCaptureBackend() : impl_(std::make_unique<Impl>()) {}

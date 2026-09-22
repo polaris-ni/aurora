@@ -45,7 +45,7 @@
 #include "aurora/core/log.h"
 #include "aurora/core/platform.h"
 
-#if !defined(AURORA_PLATFORM_WINDOWS)
+#ifndef AURORA_PLATFORM_WINDOWS
 #error "aurora_verify_win32_ime can only be built on Windows (AURORA_PLATFORM_WINDOWS)"
 #endif
 
@@ -67,7 +67,9 @@
 
 #include <cstddef>
 #include <memory>
+#include <span>
 #include <string>
+#include <string_view>
 
 #include "aurora/app/application.h"
 #include "aurora/app/scene.h"
@@ -82,9 +84,10 @@ namespace {
 
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
-int failures = 0;
-
-auto check(bool ok, const std::string &label) -> void {
+/// @brief 逐项判据：打印 PASS/FAIL 并累加失败数。
+/// @param failures 失败计数——由 `main` 持有、经 `run_automated` 逐层显式传入（探针单次运行，
+///                 计数生命周期即 `main` 的作用域，不留命名空间级可变成量）。
+auto check(bool ok, const std::string &label, int &failures) -> void {
     emit(std::string("[") + (ok ? "PASS" : "FAIL") + "] " + label);
     if (!ok) {
         ++failures;
@@ -100,8 +103,11 @@ auto skip(const std::string &label) -> void { emit("[SKIP] " + label); }
         return {};
     }
     std::u16string out(static_cast<std::size_t>(wide), u'\0');
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast): Win32 边界——MultiByteToWideChar 的出参
+    // 形参类型固定为 LPWSTR（wchar_t*），UTF-16 缓冲只能按指针重新解释传入（wchar_t 与 char16_t 皆 16 位）
     MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), reinterpret_cast<LPWSTR>(out.data()),
                         wide);
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
     return out;
 }
 
@@ -192,7 +198,8 @@ auto enable_and_report_ime(HIMC himc) -> void {
 }
 
 /// @brief 自动段：合成一整套 IMM32 组合序列并逐项断言控件侧读回的契约口径。
-auto run_automated(HWND hwnd, const aurora::TextInput &input, const char *focused_type) -> void {
+/// @param failures 失败计数，由 `main` 持有并在此累加（判据流程与顺序保持原样）。
+auto run_automated(HWND hwnd, const aurora::TextInput &input, const char *focused_type, int &failures) -> void {
     // 焦点：VK_TAB + WM_CHAR 经真实消息路径落焦（组合事件只派发给焦点控件）。
     emit(std::string("focused widget = ") + (focused_type != nullptr ? focused_type : "(none)"));
     if (input.value() != "a") {
@@ -209,12 +216,12 @@ auto run_automated(HWND hwnd, const aurora::TextInput &input, const char *focuse
     SendMessageW(hwnd, WM_IME_STARTCOMPOSITION, 0, 0);
     SendMessageW(hwnd, WM_IME_CHAR, static_cast<WPARAM>('b'), 0);
     SendMessageW(hwnd, WM_CHAR, static_cast<WPARAM>('c'), 0);
-    check(input.value() == "a", "组合期：WM_IME_CHAR 与残余 WM_CHAR 均被吞（无上屏重复）");
+    check(input.value() == "a", "组合期：WM_IME_CHAR 与残余 WM_CHAR 均被吞（无上屏重复）", failures);
 
     // ---- ② 组合结束即恢复收字（抑制窗口有界，不会永久吞键）----
     SendMessageW(hwnd, WM_IME_ENDCOMPOSITION, 0, 0);
     SendMessageW(hwnd, WM_CHAR, static_cast<WPARAM>('d'), 0);
-    check(input.value() == "ad", "ENDCOMPOSITION 后普通 WM_CHAR 恢复上屏（value=\"ad\"）");
+    check(input.value() == "ad", "ENDCOMPOSITION 后普通 WM_CHAR 恢复上屏（value=\"ad\"）", failures);
 
     // ---- ③ preedit / 上屏链路：需往 IME 上下文注入组合串，环境相关（见下方说明）----
     HIMC himc = ImmGetContext(hwnd);
@@ -232,13 +239,13 @@ auto run_automated(HWND hwnd, const aurora::TextInput &input, const char *focuse
         return;
     }
     SendMessageW(hwnd, WM_IME_COMPOSITION, 0, static_cast<LPARAM>(GCS_COMPSTR | GCS_CURSORPOS));
-    check(input.is_composing(), "组合期：TextInput 进入组合态（preedit 可见）");
-    check(input.preedit() == "你好", "组合期：preedit 为 UTF-8「你好」（GCS_COMPSTR 读回）");
+    check(input.is_composing(), "组合期：TextInput 进入组合态（preedit 可见）", failures);
+    check(input.preedit() == "你好", "组合期：preedit 为 UTF-8「你好」（GCS_COMPSTR 读回）", failures);
     // 「你好」皆 BMP：UTF-16 单元下标 1 == 码点下标 1（非 BMP 的夹紧由单测覆盖）。
-    check(input.composition_cursor() == 1, "组合期：光标折算为码点下标 1");
-    check(input.value() == "ad", "组合期：value() 不含 preedit（数据模型保持干净）");
+    check(input.composition_cursor() == 1, "组合期：光标折算为码点下标 1", failures);
+    check(input.value() == "ad", "组合期：value() 不含 preedit（数据模型保持干净）", failures);
     report_caret("composing", input.composition_caret_bounds());
-    check(input.composition_caret_bounds().size.height > 0.0F, "候选窗定位盒有高度（几何链路通）");
+    check(input.composition_caret_bounds().size.height > 0.0F, "候选窗定位盒有高度（几何链路通）", failures);
 
     // ---- ④ 上屏：GCS_RESULTSTR 单通道落字，preedit 撤下 ----
     // 真实 IME 上屏时组合串已随结果清空，故先清 `GCS_COMPSTR` 再送结果。
@@ -247,8 +254,8 @@ auto run_automated(HWND hwnd, const aurora::TextInput &input, const char *focuse
         skip("GCS_RESULTSTR 注入被拒 ⇒ 上屏断言交由 --interactive 人工段（选字后应得 \"ad你好\"）");
     } else {
         SendMessageW(hwnd, WM_IME_COMPOSITION, 0, static_cast<LPARAM>(GCS_RESULTSTR | GCS_COMPSTR | GCS_CURSORPOS));
-        check(input.value() == "ad你好", "上屏：committed 文本经组合事件单通道落入 value");
-        check(!input.is_composing(), "上屏：preedit 清空（无残留下划线）");
+        check(input.value() == "ad你好", "上屏：committed 文本经组合事件单通道落入 value", failures);
+        check(!input.is_composing(), "上屏：preedit 清空（无残留下划线）", failures);
     }
 
     // ---- ⑤ 失焦取消：桥向 IME 发 CPS_CANCEL。取消由 IME 侧执行、环境相关 ⇒ 只呈现不判负 ----
@@ -268,7 +275,9 @@ auto run_automated(HWND hwnd, const aurora::TextInput &input, const char *focuse
 }  // namespace
 
 auto main(int argc, char **argv) -> int {
-    const bool interactive = argc > 1 && std::string(argv[1]) == "--interactive";
+    // 以 span 视图取 argv[1]（argc 可为 0，故先校验元素个数再下标）
+    const std::span<char *const> args{argv, static_cast<std::size_t>(argc)};
+    const bool interactive = args.size() > 1U && std::string_view{args[1]} == "--interactive";
     emit("==== Win32 IMM32 输入法桥 真机验收 ====");
 
     const ProbeUi ui = build_ui();
@@ -298,12 +307,13 @@ auto main(int argc, char **argv) -> int {
     PostMessageW(hwnd, WM_CHAR, static_cast<WPARAM>('a'), 0);
 
     int frame = 0;
+    int failures = 0;  // 自动段判据计数：main 持有，经 on_frame 回调显式传给 run_automated
     std::string last_line;
     app.set_on_frame([&]() -> void {
         ++frame;
         if (frame == 3) {
             aurora::Widget *focused = app.focus().focused();
-            run_automated(hwnd, *ui.input, focused != nullptr ? focused->type_name() : nullptr);
+            run_automated(hwnd, *ui.input, focused != nullptr ? focused->type_name() : nullptr, failures);
             if (!interactive) {
                 app.quit();
             } else {

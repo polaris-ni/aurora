@@ -902,15 +902,15 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
 // ---------------------------------------------------------------------------
 void InspectorServer::Impl::handle_client(SOCKET client) {
     // 读取请求数据（简单实现：一次 recv 足够处理小请求）
-    constexpr int AURORA_BUF_SIZE = 8192;
-    char buf[AURORA_BUF_SIZE];
+    constexpr int buf_size = 8192;
+    char buf[buf_size];
     std::string request;
     int total = 0;
 
     // 先读取头部
-    while (total < AURORA_BUF_SIZE - 1) {
+    while (total < buf_size - 1) {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 套接字接收按字节推进指针是有意设计
-        const int n = recv(client, buf + total, AURORA_BUF_SIZE - 1 - total, 0);
+        const int n = recv(client, buf + total, buf_size - 1 - total, 0);
         if (n <= 0) {
             break;
         }
@@ -979,7 +979,7 @@ void InspectorServer::Impl::handle_client(SOCKET client) {
     // 上限保护：content_length 来自请求头（不可信输入）。无上限时一个本地进程即可用
     // "Content-Length: 2000000000" 触发 body_buf 巨量分配——分配失败抛出的 bad_alloc
     // 在 worker 线程未被捕获会 std::terminate 整个应用；即便成功也构成内存耗尽 DoS。
-    constexpr int AURORA_MAX_BODY_BYTES = 4 * 1024 * 1024;  // 4MiB，远超任何合法 Inspector 请求
+    constexpr int max_body_bytes = 4 * 1024 * 1024;  // 4MiB，远超任何合法 Inspector 请求
     int content_length = 0;
     {
         const std::string cl_value = header_value(request, "Content-Length");
@@ -991,7 +991,7 @@ void InspectorServer::Impl::handle_client(SOCKET client) {
             }
         }
     }
-    if (content_length < 0 || content_length > AURORA_MAX_BODY_BYTES) {
+    if (content_length < 0 || content_length > max_body_bytes) {
         AURORA_LOG_WARN("inspector", "Rejecting oversized request body: ", content_length);
         const std::string resp = error_response(413, "Payload Too Large");
         send_all(client, resp);

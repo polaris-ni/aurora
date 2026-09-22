@@ -382,6 +382,9 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
     if (window == nullptr && want_gpu) {
         // core profile 创建失败（驱动过老/远程桌面/虚拟机等）：降级软件模式重建窗口，不整体失败。
         AURORA_LOG_INFO("gpu-gl", "core-profile window creation failed; retrying with software compat profile");
+        // 本行在 AURORA_ENABLE_GLFW_GPU_GL 关闭的配置下看似死存储（其后续唯一读点在 #ifdef 内），
+        // 但它是降级路径对 want_gpu 的如实更新：GPU_GL 开启时该读点决定要不要装载 GL 函数表，删不得。
+        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 死存储只在 GPU_GL=OFF 配置下成立，开启后读点要用它
         want_gpu = false;
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
         window = glfwCreateWindow(static_cast<int>(cfg.size.width), static_cast<int>(cfg.size.height),

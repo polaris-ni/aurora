@@ -66,17 +66,17 @@
 #include "aurora/core/log.h"
 #include "aurora/core/platform.h"
 
-#if !defined(AURORA_PLATFORM_WINDOWS)
+#ifndef AURORA_PLATFORM_WINDOWS
 #error "aurora_verify_win32_cursor can only be built on Windows (AURORA_PLATFORM_WINDOWS)"
 #endif
 
-#if defined(AURORA_BACKEND_WIN32)
+#ifdef AURORA_BACKEND_WIN32
 #include "aurora/window/win32_surface.h"
 #endif
-#if defined(AURORA_BACKEND_D3D11)
+#ifdef AURORA_BACKEND_D3D11
 #include "aurora/window/d3d11_surface.h"
 #endif
-#if defined(AURORA_BACKEND_GPU_WGPU)
+#ifdef AURORA_BACKEND_GPU_WGPU
 #include "aurora/window/wgpu_win32_surface.h"
 #endif
 #if !defined(AURORA_BACKEND_WIN32) && !defined(AURORA_BACKEND_D3D11)
@@ -96,8 +96,12 @@
 // 此处再显式包含一次以取用窗口/GDI 符号（重复包含由 include guard 消解）。
 #include <windows.h>
 
+#include <array>
+#include <cstddef>
 #include <iostream>
+#include <span>
 #include <string>
+#include <string_view>
 
 #include "aurora/window/cursor_map.h"
 #include "verify_print.h"
@@ -219,7 +223,7 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title, b
     // 「按唯一标题查找」兜底：探针入参是 `aurora::Surface&`，任何**自定义** Surface 后端
     // 都可能不覆写 native_handle()（基类默认返回 nullptr），有兜底才能对这类后端给出
     // 可判定的结果，而不是一律报「拿不到 HWND」。
-    auto hwnd = static_cast<HWND>(surface.native_handle());
+    auto *hwnd = static_cast<HWND>(surface.native_handle());
     if (hwnd == nullptr) {
         hwnd = FindWindowA(nullptr, title);
     }
@@ -261,9 +265,11 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title, b
     constexpr int margin = 40;
     const int sw = GetSystemMetrics(SM_CXSCREEN);
     const int sh = GetSystemMetrics(SM_CYSCREEN);
-    const int spot_x[] = {(sw - fw) / 2, margin, sw - fw - margin, margin, sw - fw - margin};
-    const int spot_y[] = {(sh - fh) / 2, margin, margin, sh - fh - margin, sh - fh - margin};
-    constexpr int spot_count = static_cast<int>(std::size(spot_x));
+    // 「屏幕中心 + 四角内侧」共 5 个候选落点（数组长度即候选数，编译期常量）
+    constexpr std::size_t spot_total = 5U;
+    const std::array<int, spot_total> spot_x{(sw - fw) / 2, margin, sw - fw - margin, margin, sw - fw - margin};
+    const std::array<int, spot_total> spot_y{(sh - fh) / 2, margin, margin, sh - fh - margin, sh - fh - margin};
+    constexpr int spot_count = static_cast<int>(spot_total);
 
     POINT saved{};
     const bool have_saved = GetCursorPos(&saved) != FALSE;
@@ -277,7 +283,10 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title, b
     for (int attempt = 0; attempt < spot_count * 2 && !over; ++attempt) {
         const int s = attempt / 2;
         last_spot = s;
-        SetWindowPos(hwnd, HWND_TOPMOST, spot_x[s], spot_y[s], fw, fh, SWP_SHOWWINDOW);
+        // 下标可证在界内（attempt < spot_count * 2 ⇒ s ≤ spot_count - 1），用 .at() 只是让越界
+        // 显式化为异常而非 UB，正常路径不会抛。
+        SetWindowPos(hwnd, HWND_TOPMOST, spot_x.at(static_cast<std::size_t>(s)), spot_y.at(static_cast<std::size_t>(s)),
+                     fw, fh, SWP_SHOWWINDOW);
         SetForegroundWindow(hwnd);
         UpdateWindow(hwnd);
         center = client_center();
@@ -446,8 +455,10 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title, b
 
 auto main(int argc, char **argv) -> int {
     bool interactive = false;
-    for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--interactive") {
+    // 以 span 视图遍历命令行参数（argc 可为 0，故 subspan 起点取 0/1 二者之一）
+    const std::span<char *const> args{argv, static_cast<std::size_t>(argc)};
+    for (const auto *raw : args.subspan(args.size() > 1U ? 1U : 0U)) {
+        if (std::string_view{raw} == "--interactive") {
             interactive = true;
         }
     }
@@ -461,14 +472,14 @@ auto main(int argc, char **argv) -> int {
         }
     };
 
-#if defined(AURORA_BACKEND_WIN32)
+#ifdef AURORA_BACKEND_WIN32
     {
         const char *title = "aurora-verify-i1-cursor-gdi";
         aurora::Win32Surface surface(360, 240, title, aurora::WindowStyleOptions{});
         worse_of(run_sweep(surface, "Win32Surface(GDI)", title, interactive));
     }
 #endif
-#if defined(AURORA_BACKEND_D3D11)
+#ifdef AURORA_BACKEND_D3D11
     {
         const char *title = "aurora-verify-i1-cursor-d3d11";
         aurora::D3D11Surface surface(360, 240, title, aurora::WindowStyleOptions{});
