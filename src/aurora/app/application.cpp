@@ -331,6 +331,12 @@ auto Application::wait_once(const std::chrono::steady_clock::time_point &frame_s
             wait_ms = w;
         }
     }
+    // 超时看守并入唤醒决策：deferred 构建下 `with_timeout` 是登记式到期项（无后台线程可睡），
+    // 到点只能由帧尾扫描触发——若不参与最小值，空闲深睡会睡过期限，超时形同虚设。
+    const double guard_ms = detail::next_timeout_deadline_ms(std::chrono::steady_clock::now());
+    if (guard_ms >= 0.0) {
+        wait_ms = wait_ms < 0.0 ? guard_ms : std::min(wait_ms, guard_ms);
+    }
     if (wait_ms == 0.0) {
         return;
     }

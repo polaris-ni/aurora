@@ -6,7 +6,7 @@
 //   ① 渲染：Canvas 2D 上屏（脏区重绘随帧可见）；
 //   ② 事件：DOM pointer 事件 → on_click → 响应式 State → 下一帧文本更新；
 //   ③ 异步：`au::async().then()` 续体——后台任务经 ThreadPool **deferred 模式**在
-//      `WasmSurface::present()` 帧尾 `pump()` 执行，回投经主线程投递器在下一帧排水。
+//      `Application::step_frame()` 帧尾 `pump()` 执行，回投经主线程投递器在下一帧排水。
 //
 // 无头 CI 无法证明以上任何一条（需要真实 requestAnimationFrame / Canvas / DOM 事件），
 // 故本探针不进 CTest，按需人工触发。

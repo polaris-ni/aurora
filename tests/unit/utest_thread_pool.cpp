@@ -3,16 +3,22 @@
 /// 测试说明: 线程池的默认 worker 数下限、构造线程数与零回退、submit 经 future 返回值/传播异常、void 任务与 execute
 /// 完成通知、execute 吞异常保 worker 存活、pending_count 排队观测、default_pool 进程级单例（全部用 future +
 /// 充裕超时等待，不做时序假设）；deferred 延迟排空模式（force_deferred，Emscripten 无 pthreads 的编译期形态）：
-/// 入队不执行、pump 帧尾排空、预算不含重入队任务、异常吞掉、析构排空、非 deferred 池 pump 恒 0
+/// 入队不执行、pump 帧尾排空、预算不含重入队任务、异常吞掉、析构排空、非 deferred 池 pump 恒 0；
+/// deferred 构建另证宿主泵接线：`Application::step_frame()` 帧尾在**空闲帧**（无 present）也排空 default_pool
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <future>
+#include <memory>
 #include <stdexcept>
 #include <thread>
 #include <vector>
 
+#include "aurora/app/application.h"
 #include "aurora/core/thread_pool.h"
+#include "aurora/widget/text.h"
+#include "aurora/window/surface.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_thread_pool {
@@ -203,6 +209,34 @@ AURORA_TEST_CASE(default_pool_is_process_wide_singleton) {
     auto fut = aurora::ThreadPool::default_pool().submit([]() -> int { return 40 + 2; });
     AURORA_TEST_CHECK_EQ(fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
     AURORA_TEST_CHECK_EQ(fut.get(), 42);
+}
+
+AURORA_TEST_CASE(frame_loop_drains_deferred_default_pool) {
+#if AURORA_CAP_THREADS == 0 && defined(AURORA_BACKEND_HEADLESS)
+    // 无 pthreads 构建（浏览器 / 裸 Node）的宿主排空点回归位：`Application::step_frame()`
+    // 帧尾（步骤 7）泵 default_pool。刻意用静态场景——首帧后无脏区即整段跳过 present，
+    // 若排空点仍挂在上屏路径（旧接线）则任务在此饿死，本例即红。
+    aurora::WindowOptions o;
+    o.title = "drain";
+    o.size = aurora::Size{.width = 120.0F, .height = 80.0F};
+    o.max_frames = 3;
+    o.power_saving = false;  // 无 OS 等待通道：忙轮询，帧数确定
+    aurora::HeadlessOptions h;
+    static_cast<aurora::WindowOptions &>(h) = o;
+    auto window = aurora::create_window(h);
+    AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(window));
+
+    std::atomic<std::size_t> ran{0};
+    aurora::Application app{aurora::Scene{aurora::Node{std::make_shared<aurora::Text>("idle")}},
+                            std::move(window.value()), o};
+    aurora::ThreadPool::default_pool().execute([&ran]() -> void { ran.fetch_add(1, std::memory_order_release); });
+    app.run();
+
+    AURORA_TEST_CHECK_GE(ran.load(std::memory_order_acquire), std::size_t{1});
+#else
+    AURORA_TEST_SKIP("deferred 宿主泵仅在「无 pthreads 且 Headless 后端在位」的构建成立"
+                     "（native 有 worker 线程，无需帧尾代泵）");
+#endif
 }
 
 }  // namespace aurora::test_cases::utest_thread_pool

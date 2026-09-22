@@ -21,9 +21,11 @@ namespace aurora {
  *
  * **Emscripten 无 pthreads 构建 = 延迟排空（deferred）模式**：浏览器默认单线程，
  * `std::thread` 不可用。此时不启动任何 worker，任务只入队；由宿主在安全点调用
- * `pump()` 在**当前线程**（即主线程）排空——`WasmSurface::present()` 已接帧尾排空，
- * 故 `au::async` / 协程续体在浏览器下随帧回写，不开线程也不丢任务。以
- * `-pthread`（`__EMSCRIPTEN_PTHREADS__`）构建时回到普通 worker 池语义。
+ * `pump()` 在**当前线程**（即主线程）排空——`Application::step_frame()` 已在帧尾接好这一拍
+ * （步骤 7，见 `app/application.h`），故 `au::async` / 协程续体在浏览器下随帧回写，不开线程
+ * 也不丢任务。排空点刻意**不放在上屏路径**：空闲帧被脏区决策整段跳过就没有 `present()`，
+ * 续体会被饿死。以 `-pthread`（`__EMSCRIPTEN_PTHREADS__`，构建开关
+ * `AURORA_ENABLE_WASM_PTHREADS`）构建时回到普通 worker 池语义。
  * `force_deferred=true` 可在任意平台显式开延迟模式（供测试与单线程宿主复用）。
  * 注意：deferred 下 `submit()` 的 `future.get()` 不可与 `pump()` 同线程互等（会自锁），
  * 消费续体请用 `Task::then` / 协程或帧尾泵。

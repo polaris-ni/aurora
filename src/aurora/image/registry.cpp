@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 
+#include "aurora/core/platform.h"  // AURORA_CAP_THREADS（无线程能力构建的惰性解码分支）
 #include "aurora/image/image_codec.h"
 #include "codecs/codecs_internal.h"
 
@@ -318,8 +319,15 @@ auto ImageCodecRegistry::decode_async(const ImageSource &src, const DecodeOption
         *data = src.memory;
     }
     auto codecs = impl_->codecs;
-    return std::async(std::launch::async,
-                      [codecs, data, opt]() -> Result<Image> { return decode_bytes(codecs, *data, opt); });
+    auto job = [codecs, data, opt]() -> Result<Image> { return decode_bytes(codecs, *data, opt); };
+#if AURORA_CAP_THREADS == 0
+    // 无线程能力构建（Emscripten 未开 `-pthread`）：`std::async(launch::async)` 不是「解码失败」
+    // 而是起线程即抛 `std::system_error`——异步承诺在此平台本就不成立。改交惰性 future：
+    // 不抛、提交时零开销，首次 `get()`/`wait()` 在调用线程就地解出（单线程宿主的如实语义）。
+    return std::async(std::launch::deferred, std::move(job));
+#else
+    return std::async(std::launch::async, std::move(job));
+#endif
 }
 
 auto ImageCodecRegistry::registered() const -> std::vector<std::string> {

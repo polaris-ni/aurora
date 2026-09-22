@@ -68,6 +68,32 @@ if (EMSCRIPTEN)
     aurora_log("Emscripten: C++ exceptions enabled (-fexceptions; runtime abort-on-throw otherwise)")
 endif ()
 
+# ---- WASM 真并行（`-pthread`；默认 OFF）——须先于 include(AuroraThirdParty) ----
+# 浏览器多线程是**编译期能力**而非运行期试探：`-pthread` 定义 `__EMSCRIPTEN_PTHREADS__`，
+# `AURORA_CAP_THREADS` 随之翻 1，`ThreadPool` 从「任务只入队、宿主帧尾 pump 排空」回到真 worker 池。
+# 代价由**宿主页面**承担：产物要求 SharedArrayBuffer，页面必须跨源隔离
+# （`Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp`），
+# 否则 wasm 实例化即失败（裸 Node 无此约束）。故默认 OFF——宁用单线程 deferred 排空（不丢任务），
+# 也不给「没配头的服务器」换回一个打不开的产物。
+# 为什么在全局标志而非 `target_compile_options(aurora PUBLIC)`：`-pthread` 是**整个链接闭包**的
+# 约束，`add_subdirectory(third_party/*)` 在建立子目录时对 `CMAKE_*_FLAGS` 取快照，晚注入会漏掉
+# freetype/harfbuzz 的 `.o`，链接期报 `wasm-ld: --shared-memory is disallowed by harfbuzz.cc.o`
+# （未带 atomics/bulk-memory 特性，实测）。与 `-fexceptions` 同处、同「编译 + 链接同参」口径。
+# 与 LLD/CCACHE 同口径：纯构建标志，**不注入 feature 宏**（能力宏由 `-pthread` 自己定义），
+# 故不出现在 `debug::feature_flags` 镜像里；运行期查询走 `ThreadPool::default_pool().is_deferred()`。
+option(AURORA_ENABLE_WASM_PTHREADS
+        "Build WASM with -pthread (real ThreadPool workers; host page must be crossOriginIsolated)" OFF)
+if (AURORA_ENABLE_WASM_PTHREADS)
+    if (NOT EMSCRIPTEN)
+        message(FATAL_ERROR "AURORA_ENABLE_WASM_PTHREADS is only meaningful with the Emscripten toolchain;"
+                " configure with the `wasm` preset (or emcmake cmake) or drop the option.")
+    endif ()
+    string(APPEND CMAKE_C_FLAGS " -pthread")
+    string(APPEND CMAKE_CXX_FLAGS " -pthread")
+    string(APPEND CMAKE_EXE_LINKER_FLAGS " -pthread")
+    aurora_log("WASM pthreads enabled (ThreadPool = real worker pool; host page must send COOP/COEP)")
+endif ()
+
 # 导出 compile_commands.json 供 clangd / IDE 索引（不影响构建结果）。
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 

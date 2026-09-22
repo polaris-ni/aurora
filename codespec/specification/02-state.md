@@ -151,11 +151,11 @@ au::Button(au::ButtonProps{ .label = "+1" })
 | 成员 | 签名 / 说明 |
 |:---|:---|
 | `then(DoneFn cb)` | 注册完成回调，`DoneFn = std::function<void(const Result<T>&)>`，返回 `Task&` 以便链式（`async.h`） |
-| `with_timeout(d)` | 超过 `d` 未完成则向 `then` 回调投递 `async-timeout` 错误（`async.h`） |
+| `with_timeout(d)` | 超过 `d` 未完成则向 `then` 回调投递 `async-timeout` 错误（`async.h`）。两条实现路径按线程池模式分流、语义一致：worker 池下看守是**睡 `d` 的后台池任务**；deferred（无 pthreads）下无线程可睡，只登记到期时刻，由 `Application::step_frame()` 帧尾扫描触发，等待中的宿主循环经该期限并入唤醒决策 |
 | `cancel()` | 取消结果投递（`async.h`） |
 | `set_main_poster(poster)` | 静态，安装跨线程投递器（`async.h`） |
 
-**`then` 的回调默认在承载 `fn` 的线程池 worker 线程上同步执行**（未安装主线程投递器时直接调用 `fn`，供 headless / 测试）；安装 `Task::set_main_poster`（或 `au::async` 的主线程投递器）后，回调才经投递器回到 UI（主）线程执行，此时方可直接更新 UI。安装者与帧循环唤醒的联动契约见 [`06-app-platform.md`](06-app-platform.md)。
+**`then` 的回调默认在承载 `fn` 的线程池 worker 线程上同步执行**（未安装主线程投递器时直接调用 `fn`，供 headless / 测试；deferred 构建下「承载线程」就是宿主泵任务的线程，即 UI 主线程）；安装 `Task::set_main_poster`（或 `au::async` 的主线程投递器）后，回调才经投递器回到 UI（主）线程执行，此时方可直接更新 UI。安装者与帧循环唤醒的联动契约见 [`06-app-platform.md`](06-app-platform.md)。
 
 ```cpp
 auto task = au::async([] { return fetch_from_network(); });
@@ -166,7 +166,7 @@ task.with_timeout(std::chrono::seconds(5))
     });
 ```
 
-**限制**：`with_timeout` 与 `cancel()` 都**无法中断任意 `fn`**，只丢弃或改道结果。
+**限制**：`with_timeout` 与 `cancel()` 都**无法中断任意 `fn`**，只丢弃或改道结果。deferred 构建另有两点如实口径：① 超时精度为**一帧**（到期只能由帧尾扫描发现，非墙钟即时）；② 任务本身也是排队执行，故期限到点而任务尚未跑完是常态——此时改道获胜，任务事后跑完不再二次回调（`delivered` 单点裁决）。
 
 ### 5.2 协程路径
 

@@ -280,6 +280,7 @@ cmake --build build
 | `AURORA_ENABLE_SIMD` | `ON` | 光栅内核 SIMD 双实现（SSE2 基线 + AVX2 运行时分发） | 注入 `AURORA_ENABLE_SIMD`（仅库内部，不 PUBLIC 传播）；详见 §4.2 |
 | `AURORA_ENABLE_CCACHE` | `ON` | ccache 编译缓存（加速重复编译） | 设置 `CMAKE_C_COMPILER_LAUNCHER` 与 `CMAKE_CXX_COMPILER_LAUNCHER`（`cmake -E env` 前缀注入 ccache 配置环境变量，构建期生效）；支持 winget 安装路径自动检测；详见 §4.3 |
 | `AURORA_ENABLE_LLD` | `ON` | 链接器选择（lld 加速静态链接） | GNU/Clang 下 `find_program(ld.lld)` + `check_linker_flag` 探测通过则全局注入 `-fuse-ld=lld -B<lld 目录>`；失败静默回退 GNU ld；**不注入 feature 宏** |
+| `AURORA_ENABLE_WASM_PTHREADS` | `OFF` | WASM 真并行（`-pthread`）：`__EMSCRIPTEN_PTHREADS__` 与 `AURORA_CAP_THREADS` 同翻 1，`ThreadPool` 从「任务只入队、帧尾 `pump()` 排空」回到普通 worker 池。**代价在宿主页面**：产物要求 SharedArrayBuffer，须跨源隔离（`COOP: same-origin` + `COEP: require-corp`）方可实例化（裸 Node 无此约束），非 Emscripten 开启 FATAL。故默认关闭——无隔离头的站点宁用单线程 deferred 排空也不换回打不开的产物 | 全局追加 `-pthread` 到 `CMAKE_C_FLAGS` / `CMAKE_CXX_FLAGS` / `CMAKE_EXE_LINKER_FLAGS`（**编译 + 链接同参，且须先于 `add_subdirectory(third_party/*)` 的标志快照**——`-pthread` 是整个链接闭包的约束，漏掉 freetype/harfbuzz 的 `.o` 时链接报 `wasm-ld: --shared-memory is disallowed by harfbuzz.cc.o`，实测；故本体位于根 `CMakeLists.txt` 而非 `AuroraBackends.cmake`）。**不注入 feature 宏**，不出现在 `debug::feature_flags` 镜像，运行期查询用 `ThreadPool::default_pool().is_deferred()` |
 | `AURORA_ENABLE_CLANG_TIDY` | `ON` | Clang-Tidy 门禁（`lint` / `lint-fix` 聚合目标） | 需 `clang-tidy` 与 python 在 PATH；未开启时自动打开 `CMAKE_EXPORT_COMPILE_COMMANDS`。经 `tools/check/run_clang_tidy.py` 并行 lint **非 third_party** 翻译单元并按 `(file, line, check)` 去重；详见 §4.5 |
 | `AURORA_ENABLE_CLANG_FORMAT` | `ON` | clang-format 门禁（`format` / `format-check` 聚合目标） | 需 `clang-format` 与 python 在 PATH。经 `tools/check/run_clang_format.py` 并行处理 **非 third_party** 源文件（配置源为仓库根 `.clang-format`）；`--fix` 即 `format`，默认只读校验即 `format-check`；详见 §4.7 |
 | `AURORA_ENABLE_IMAGE_JPEG` | `OFF` | JPEG 图像解码能力（libjpeg-turbo 源码构建） | 注入 `AURORA_ENABLE_IMAGE_JPEG`（仅库内部，不 PUBLIC 传播）；详见 §4.6 |
@@ -300,6 +301,7 @@ cmake --build build
 - **MinGW GCC 两项特例**：(1) `-O0 --coverage` 组合会击穿 COFF 目标文件默认段数上限（大 TU 汇编报 "file too big"），故追加 `-Wa,-mbig-obj`；(2) `-O0 --coverage` 下对带 `target("sse4.1")/target("avx2")` 属性的函数（`painter_simd.inl` SIMD 栅格内核）生成崩溃代码（box blur AVX2 路径运行时 `0xC0000005`，`-O3` 与标量路径均正常），故对 `painter.cpp`（该内核唯一 TU）以源文件级 `-O1` 覆盖，gcov 行映射完整、SIMD 实现行不豁免出统计。
 - 覆盖率需覆盖测试目标（大量 widget 是 header-only，仅在测试编译单元中被编译，否则覆盖率严重偏低）。
 - 插桩构建（`-O0` 全量插桩）退出前写 profile 较慢：关闭窗口后进程可能需数秒至十余秒才退出，属正常现象。
+- **`AURORA_ENABLE_WASM_PTHREADS` 的注入位置在根 `CMakeLists.txt`**（与 `-fexceptions`、ASan 的 CRT 前置决策同处），而非 `AuroraBackends.cmake`：`add_subdirectory(third_party/*)` 建立子目录时对 `CMAKE_C_FLAGS` / `CMAKE_CXX_FLAGS` 取**快照**，而 `AuroraBackends.cmake` 晚于它 include——在那里追加只会让库自身带上 `-pthread`，freetype/harfbuzz 的 `.o` 缺 atomics/bulk-memory 特性，链接期报 `wasm-ld: --shared-memory is disallowed by harfbuzz.cc.o`（实测）。同因，标志也不能只挂在 `aurora` 目标的 `PUBLIC` 选项上。
 
 覆盖率摘要用法（GCC 与 Clang 工具链相同命令）：
 
@@ -649,6 +651,7 @@ cmake --build build
 -D AURORA_BACKEND_WAYLAND=ON|OFF    # 原生 Wayland（Linux 桌面，默认 OFF）
 -D AURORA_BACKEND_MACOS=ON|OFF      # macOS（默认 OFF）
 -D AURORA_BACKEND_WASM=ON|OFF       # WebAssembly（默认 OFF）
+-D AURORA_ENABLE_WASM_PTHREADS=ON|OFF   # WASM -pthread 真并行线程池（默认 OFF；仅 Emscripten；纯构建标志不注 feature 宏；宿主页面须 COOP/COEP，见 §4）
 -D AURORA_ENABLE_AUDIO=ON|OFF       # 内置音频设备后端（默认 OFF；图 API 恒编译，关闭=静默模式）
 -D AURORA_ENABLE_AUDIO_WASAPI=ON|OFF   # WASAPI 音频（依赖 ENABLE_AUDIO=ON；Win 默认 ON，否则 OFF）
 -D AURORA_ENABLE_AUDIO_ALSA=ON|OFF   # ALSA 音频（依赖 ENABLE_AUDIO=ON；Linux 默认 ON，否则 OFF；dlopen 零构建依赖）

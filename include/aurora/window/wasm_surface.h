@@ -9,7 +9,10 @@
 //   无需 WebGL；Canvas 2D 在浏览器中由 GPU 加速合成，性能足够 UI 场景。
 // - 事件翻译：Emscripten HTML5 API（emscripten_set_*_callback）翻译鼠标/键盘/触摸/resize。
 // - 线程模型：无 pthreads 构建下 ThreadPool 为 deferred 排空模式（见 thread_pool.h 类头），
-//   `present()` 帧尾 `pump()` 即宿主安全点——`au::async` / 协程续体随帧回写，不开线程不丢任务。
+//   排空点是 `Application::step_frame()` 的帧尾（步骤 7）而非本 Surface 的 `present()`——
+//   空闲帧被脏区决策跳过就没有 present，挂在这儿会饿死 `au::async` / 协程续体（同下方 ARIA 条）。
+//   以 `-pthread` 构建（`AURORA_ENABLE_WASM_PTHREADS`）则回到普通 worker 池真并行，但浏览器要求
+//   宿主页面先跨源隔离（`crossOriginIsolated`），故该构建选项默认关闭、服务器头由宿主自担。
 // - 帧循环：浏览器主线程不可阻塞，`Application::run()` 经 `emscripten_request_animation_frame_loop`
 //   把统一帧循环挂到 rAF/vsync（蹦床 `Application::raf_tick`，见 application.h）；本 Surface 的
 //   `wait_events` 因此无需实现（保持空体，rAF 模式下帧循环根本不调用它）。
@@ -41,7 +44,6 @@
 #include <string_view>
 #include <unordered_set>
 
-#include "aurora/core/thread_pool.h"
 #include "aurora/event/keycode.h"
 #include "aurora/window/surface.h"
 #include "aurora/window/wasm_aria.h"
@@ -156,10 +158,6 @@ class WasmSurface : public Surface {
             },
             src, w, h, canvas_id_.c_str());
         ++frame_;
-        // 帧尾排空延迟线程池：浏览器无 pthreads 时 `au::async` / 协程续体在 ThreadPool
-        // 队列中等待宿主泵（见 thread_pool.h 类头），此处即每帧的安全点。
-        // 预算 = 进入时已入队任务，续命任务留下帧，绝不饿死本帧。
-        ThreadPool::default_pool().pump();
         return true;
     }
 

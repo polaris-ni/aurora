@@ -152,12 +152,13 @@
 **统一帧循环**（`Application::run`，不再委托 `Window::run`）：
 
 ```
-drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/sched tick → 逐宿主 render_frame → reap_closed → wait_once
+drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/sched tick → 逐宿主 render_frame → reap_closed → pump_deferred_work → wait_once
 ```
 
 - **pump 一次还是 N 次**：由 `Surface::pumps_thread_queue()` 决定。Win32（`PeekMessage(nullptr,…)`）与 GLFW（`glfwPollEvents()`）是线程/进程级共享队列，一次 pump 即抽干全部窗口消息并按 HWND 路由，故每帧只 pump 一次；X11/Wayland/Wasm 为 per-surface 队列，逐个 pump。
-- **等待聚合**：每帧只等待一次，取各宿主 `decide_wait` 的**最小正值**（任一为 `0` 则不等待；全为「无限」才无限等待）。优先交由 `waits_thread_queue()==true` 的后端（Win32/GLFW）执行；无此类后端时（X11/Wayland）封顶 8ms 轮询，避免其余窗口饥饿。
+- **等待聚合**：每帧只等待一次，取各宿主 `decide_wait` 与最近超时看守期限的**最小正值**（任一为 `0` 则不等待；全为「无限」才无限等待）。优先交由 `waits_thread_queue()==true` 的后端（Win32/GLFW）执行；无此类后端时（X11/Wayland）封顶 8ms 轮询，避免其余窗口饥饿。
 - **回收时机**：`reap_closed()` 在**帧末**执行（不在事件派发栈内销毁宿主），并保留最后一个宿主，使 `scene()`/`window()` 等访问器在 `run()` 结束后仍可用。
+- **帧尾兜底推进 `pump_deferred_work()`**（`reap_closed` 之后、`wait_once` 之前）：排空 deferred `ThreadPool` 队列 + 扫描 `with_timeout` 到期看守。**两步同挂帧循环而非上屏路径**是刻意的——空闲帧被脏区决策整段跳过就没有 `present()`，挂那里等于把续体与超时一起饿死（同 WASM ARIA 桥自驱拍的教训）。有后台线程的构建下二者恒为空操作。
 - **跨线程回投**：`Task::set_main_poster` 唤醒**全部**窗口的等待通道，避免回投工作只唤醒其中一个窗口而延迟执行。
 
 **帧统计归属**：单窗口刻意保留写入进程级单例 `FrameStats::instance()`（既有 `PerfOverlay`、基准工具与性能集成测试直读之，行为零变化）；登记第二个窗口起，各宿主切到自有实例（`WindowHost::own_frame_stats()`）。`PerfOverlay` 经 `Application::set_overlay` 自动绑定到主窗口统计，其他窗口的叠加层请显式 `bind_frame_stats(&host->frame_stats())`。
@@ -723,7 +724,7 @@ if (au::platform().is_mobile()) { /* 移动端适配 */ }
 | 方面 | 做法 |
 |:---|:---|
 | 事件循环 | **已落地（rAF 驱动）**：浏览器主线程不可阻塞，`Application::run()` 在 WASM 构建下不进入同步 while——经 `emscripten_request_animation_frame_loop` 把统一帧循环挂到 rAF/vsync（蹦床 `Application::raf_tick` 每拍执行帧序步骤 1–7，不调 `wait_once`，帧节拍由浏览器承担），`run()` 注册完即返回。生命周期三件套：① `App::run()` 的 `launch` 助手在 WASM 下把 `Application` 交函数级 `static unique_ptr` **堆持至页面生命周期**（main 返回后栈对象必悬空）；② `inline static raf_owner_` 守卫——蹦床先比对 owner 再触碰 `user_data`，实例析构（`~Application` 摘除 owner）即令旧回调下一拍自停；③ 宿主无 `requestAnimationFrame`（如裸 Node）时探测回退同步阻塞循环并 ERROR 申报。`WasmSurface::wait_events` 保持空体（rAF 模式帧循环不调它）。真机验收：`tools/verify/wasm_raf_live_probe.cpp`（渲染/点击/async 续体三项，页面壳 `wasm_raf_shell.html` 提供 `<canvas id="aurora-canvas">`）。**注意**：rAF 模式下 main 立即返回，帧回调引用到的应用侧状态必须活在堆上（`shared_ptr`/`static`），引用捕获 main 局部变量即悬空栈写。 |
-| 线程模型 | **已落地（deferred 排空）**：Emscripten 无 `-pthread` 构建（未定义 `__EMSCRIPTEN_PTHREADS__`）下 `ThreadPool` 自动进入延迟排空模式（`core/thread_pool.h`，见 [`01-core.md`](01-core.md) §6.1）——不创建任何 `std::thread`，`au::async` / 协程任务只入队，`WasmSurface::present()` 帧尾调用 `pump()` 在主线程排空，随帧回写不丢任务；以 `-pthread` + `SharedArrayBuffer`（需跨源隔离）构建时回到普通 worker 池语义。Web Worker + `postMessage` 的真并行执行仍为需求愿景、无接线。deferred 下 `future.get()` 与 `pump()` 同线程互等会自锁 |
+| 线程模型 | **已落地（deferred 排空 + 可选真并行）**：Emscripten 无 `-pthread` 构建（未定义 `__EMSCRIPTEN_PTHREADS__`，即 `AURORA_CAP_THREADS == 0`）下 `ThreadPool` 自动进入延迟排空模式（`core/thread_pool.h`，见 [`01-core.md`](01-core.md) §6.1）——不创建任何 `std::thread`，`au::async` / 协程任务只入队，由 `Application::step_frame()` **帧尾**（步骤 7，见 §2.4）调用 `pump()` 在主线程排空，随帧回写不丢任务；排空点不在 `present()`，故空闲跳帧帧也照排。真并行口径经构建开关 `AURORA_ENABLE_WASM_PTHREADS`（默认 OFF）：开 `-pthread` 后 `__EMSCRIPTEN_PTHREADS__` 与 `AURORA_CAP_THREADS` 同翻，回到普通 worker 池语义——代价是产物要求 SharedArrayBuffer，**宿主页面必须跨源隔离**（COOP `same-origin` + COEP `require-corp`），否则 wasm 实例化即失败（裸 Node 无此约束），故默认关闭。Web Worker + `postMessage` 的无共享内存并行执行仍为需求愿景、无接线。deferred 下 `future.get()` 与 `pump()` 同线程互等会自锁 |
 | 渲染 | 渲染目标为 `<canvas>` 元素，内部自动选择。canvas 定位入参统一按 DOM id 理解（`"x"` 与 `"#x"` 等价）：上屏 `getElementById` 用裸 id，事件注册/尺寸查询用 CSS 选择器形态——Emscripten HTML5 事件目标经 `querySelector` 解析，裸 id 不带 `#` 会**静默注册失败** |
 | 音频设备后端 | **已落地（Web Audio 推式环）**：浏览器对位后端经 `AURORA_ENABLE_AUDIO_WEBAUDIO` 编入。与桌面的根本差异是**无设备线程**——JS 调不进 wasm，故 C++ 在主线程每 20ms 把图渲染成帧推入线性内存定长环、JS 按头尾地址消费（零链接标志、零导出符号）；协商采样率取 `ctx.sampleRate`，声道契约恒 stereo 由浏览器上混。**自动播放闸门**：`start()` 返回 true 只表示设备在收样，**不等于出声**——未手势时上下文 `suspended`、图时钟如实冻结，有用户交互后由排空拍限速 `resume()` 开闸（真机四判据由 `tools/verify/wasm_audio_cdp_drive.mjs` 派发）。采集（`getUserMedia` 异步权限流）首切片未接线 ⇒ `create_microphone_source()` 显式报错不静默降级。契约与延迟/欠载口径全文见 [`03-layout-render.md`](03-layout-render.md) §9.4 |
 | 限制 | 不支持高频指针直通路；`capabilities()` 声明此限制 |

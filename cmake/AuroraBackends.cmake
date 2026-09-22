@@ -420,6 +420,11 @@ if (AURORA_BACKEND_WASM)
     aurora_define_feature(AURORA_BACKEND_WASM EXPORT)
     aurora_log("WASM backend enabled (Emscripten).")
 endif ()
+# 注：浏览器真并行开关 `AURORA_ENABLE_WASM_PTHREADS` **不在本文件**——它要在全局
+# `CMAKE_CXX_FLAGS` 上追加 `-pthread`，而 `add_subdirectory(third_party/*)` 在建立子目录时
+# 对变量取快照，晚于本文件（`:313` vs `:150`）注入将漏掉 freetype/harfbuzz 的 `.o`，
+# 链接期实测报 `wasm-ld: --shared-memory is disallowed by harfbuzz.cc.o`。
+# 故本体与 `-fexceptions` 同处根 `CMakeLists.txt` 顶部（先于三方目标）。
 
 # ---- 音频（图模型 API 恒编译；内置设备后端 opt-in，默认 OFF） ----
 # media/audio.h 的 AudioContext 图 API 始终编译（对齐 RHI 先例：契约恒在，能力运行期查询）；

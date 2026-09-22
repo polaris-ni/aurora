@@ -288,14 +288,17 @@ class Application {
     ///   4. `anim_.tick(dt)` / `sched_.tick(dt)` —— **应用级共享**，每帧只推进一次；
     ///   5. 逐宿主 `render_frame(dt)` —— 各窗口独立脏区决策与上屏；
     ///   6. `reap_closed()` —— 帧末统一回收已关闭窗口（不在迭代中销毁宿主）；
-    ///   7. `wait_once()` —— 取各宿主等待时长的**最小值**后只等待一次。
+    ///   7. `pump_deferred_work()` —— 帧尾兜底推进「无后台线程」的工作：排空 deferred 线程池队列、
+    ///      扫描 `with_timeout` 到期看守。**必须挂在这里而非上屏路径**：空闲帧被脏区决策整段跳过
+    ///      就没有 `present()`，挂上去等于饿死（同 `wasm_aria` 自驱拍的教训）；
+    ///   8. `wait_once()` —— 取各宿主等待时长与最近看守期限的**最小值**后只等待一次。
     ///
     /// 事件驱动帧节流：命令行末经 `compute_wait_timeout` 决策下次唤醒——有脏区/动画时按帧预算
     /// （`WindowOptions::max_fps`）节流；完全空闲时阻塞等待事件或最近定时任务到期（静态界面 CPU
     /// 趋近 0）；`power_saving=false` 退回旧忙轮询。同时安装主线程投递器：`au::async` 的 then
     /// 回调经队列回投主线程，并 `request_wake` 唤醒睡眠中的帧循环（无运行循环时行为不变）。
     ///
-    /// **WASM（浏览器）构建**：主线程不可阻塞，`run()` 仅注册 rAF 回调即返回——步骤 1–7 由
+    /// **WASM（浏览器）构建**：主线程不可阻塞，`run()` 仅注册 rAF 回调即返回——步骤 1–8 由
     /// `raf_tick` 每个 vsync 帧执行一次（帧节拍由浏览器承担，不调 `wait_once`），退出条件
     /// （`should_exit` / `max_frames` 预算）满足时执行收尾原语并停止循环；rAF 不可用时
     /// （非浏览器宿主）回退同步循环并 ERROR 日志申报。`Application` 实体须活过所有 rAF 回调
@@ -488,7 +491,7 @@ class Application {
 #endif
     }
 
-    /// @brief 推进恰好一帧（步骤 1–7），返回「帧起始时刻」供 `wait_once` 做帧预算核算。
+    /// @brief 推进恰好一帧（步骤 1–8），返回「帧起始时刻」供 `wait_once` 做帧预算核算。
     auto step_frame() -> std::chrono::steady_clock::time_point {
         const auto now = std::chrono::steady_clock::now();
         const double dt = std::chrono::duration<double>(now - loop_last_).count();
@@ -503,8 +506,20 @@ class Application {
         sched_.tick(dt);  // 定时任务随帧推进（在 present 前触发，当帧 UI 即可刷新）
         render_all(dt);
         reap_closed();   // 帧末收割：不在事件派发栈内销毁宿主，避免回调打到半死对象
+        pump_deferred_work();
         ++loop_frames_;
         return now;
+    }
+
+    /// @brief 步骤 7：帧尾推进「无后台线程」的 deferred 工作——线程池排空 + 超时看守扫描。
+    ///
+    /// 两步同处一个安全点，因为二者是同一约束的两半：deferred 池（无 pthreads 构建，或宿主显式
+    /// `force_deferred`）下任务只在被泵时才跑，`with_timeout` 也因此不能是睡在任务里的看守。
+    /// 排空在前、扫描在后：本帧来得及跑完的任务先出结果，看守只对确实没跑完的改道。
+    /// 非 deferred 构建下 `pump()` 立即返回 0、看守表恒空，本步等价 no-op（不为浏览器单开分支）。
+    auto pump_deferred_work() -> void {
+        static_cast<void>(ThreadPool::default_pool().pump());  // 预算 = 进入时已入队任务，续命任务留下帧
+        static_cast<void>(detail::sweep_due_timeouts(std::chrono::steady_clock::now()));
     }
 
     /// @brief `max_frames` 帧预算是否仍有剩余（`<= 0` = 不限帧）。

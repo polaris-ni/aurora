@@ -169,7 +169,8 @@ AURORA_TEST_CASE(static_image_degrades_to_single_frame_animation) {
 }
 
 AURORA_TEST_CASE(decode_async_resolves_to_same_result) {
-    AURORA_TEST_REQUIRE_THREADS();
+    // 不要求线程能力：无 pthreads 构建下 decode_async 退化为惰性 future（同一结果、同一 API），
+    // 正是该退化分支的回归位——故此例在 WASM 也须真跑而不是 skip。
     const Image src = make_image(3, 3, 0x20);
     const auto encoded = image::ImageCodecRegistry::instance().encode(src, image::EncodeOptions{});
     AURORA_TEST_REQUIRE_TRUE(encoded.ok());

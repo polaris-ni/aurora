@@ -195,6 +195,9 @@ class ImageCodecRegistry {
         -> Result<bool>;
 
     /// @brief 异步解码：后台线程执行，返回 future（结果仍为 Result<Image>）。
+    /// @note 无线程能力构建（Emscripten 未开 `-pthread`，见 `AURORA_CAP_THREADS`）下没有后台线程，
+    ///       返回**惰性** future：提交零开销、不抛异常，首次 `get()`/`wait()` 在调用线程就地解码。
+    ///       调用方若靠 `wait_for(0)` 轮询实现非阻塞，需知此平台下首次轮询即为同步解码。
     [[nodiscard]] auto decode_async(const ImageSource &src, const DecodeOptions &opt = {}) const
         -> std::future<Result<Image>>;
 

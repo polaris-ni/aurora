@@ -9,6 +9,7 @@
 #include <optional>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "aurora/core/result.h"
 #include "aurora/core/thread_pool.h"
@@ -48,6 +49,93 @@ inline auto post_to_main(std::function<void()> fn) -> void {
         poster(std::move(fn));
     } else {
         fn();  // 无事件循环：直接调用（测试 / 无头场景）
+    }
+}
+
+/// @brief 超时看守登记项：到期时刻 + 触发动作（类型擦除，动作自持对应 `AsyncState`）。
+struct TimeoutGuard {
+    std::chrono::steady_clock::time_point deadline;
+    std::function<void()> expire;
+};
+
+// 看守登记表（进程级单例存储）：**仅** deferred 线程池构建使用——有 worker 时看守是
+// 一个睡在后台线程上的池任务，无需主线程扫描。见 `Task<T>::with_timeout`。
+inline auto timeout_guards_mutex() -> auto & {
+    static std::mutex m;
+    return m;
+}
+inline auto timeout_guards() -> std::vector<TimeoutGuard> & {
+    static std::vector<TimeoutGuard> v;
+    return v;
+}
+
+/// @brief 登记一个到期看守（`with_timeout` 的 deferred 分支）。条目活到自己到期为止：
+/// 任务提前完成时它照常到期，只是触发时对 `delivered` 短路成 no-op，故表长上界 = 窗口 `d`。
+inline auto register_timeout_guard(std::chrono::steady_clock::time_point deadline, std::function<void()> expire)
+    -> void {
+    std::scoped_lock lock(timeout_guards_mutex());
+    timeout_guards().push_back(TimeoutGuard{deadline, std::move(expire)});
+}
+
+/// @brief 最近登记的到期时刻距 `now` 的毫秒数；表空返回 `-1`（= 无看守，不参与唤醒决策）。
+[[nodiscard]] inline auto next_timeout_deadline_ms(std::chrono::steady_clock::time_point now) -> double {
+    std::scoped_lock lock(timeout_guards_mutex());
+    double nearest = -1.0;
+    for (const auto &g : timeout_guards()) {
+        const double ms = std::chrono::duration<double, std::milli>(g.deadline - now).count();
+        if (nearest < 0.0 || ms < nearest) {
+            nearest = ms < 0.0 ? 0.0 : ms;  // 已到期：钳 0，催本帧立即扫描
+        }
+    }
+    return nearest;
+}
+
+/**
+ * @brief 帧尾扫描：摘出全部到期看守并在锁外逐个触发。
+ * @return 本轮触发的看守数。
+ *
+ * 必须由宿主在**主线程安全点**每帧调用（`Application::step_frame()` 帧尾），且与
+ * `ThreadPool::pump()` 同处一帧——deferred 构建下这是超时唯一能生效的地方：主线程不睡
+ * 在看守任务里，也不会被看守任务阻塞。锁外触发是因为 `expire` 会回投主线程并可能登记新项。
+ */
+inline auto sweep_due_timeouts(std::chrono::steady_clock::time_point now) -> std::size_t {
+    std::vector<TimeoutGuard> due;
+    {
+        std::scoped_lock lock(timeout_guards_mutex());
+        auto &guards = timeout_guards();
+        for (auto it = guards.begin(); it != guards.end();) {  // NOLINT(*-loop-convert)：erase 返回后继
+            if (it->deadline <= now) {
+                due.push_back(std::move(*it));
+                it = guards.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    for (auto &g : due) {
+        g.expire();
+    }
+    return due.size();
+}
+
+/// @brief 让超时生效：结果仍未投递且未取消时，写入 `async-timeout` 错误并经主线程投递器回调。
+template <typename T>
+auto expire_timeout(const std::shared_ptr<AsyncState<T>> &state) -> void {
+    std::function<void(const Result<T> &)> to_call;
+    std::optional<Result<T>> err;
+    {
+        std::scoped_lock<std::mutex> lock(state->mutex);
+        if (state->delivered || state->cancelled) {
+            return;  // 已完成或已取消，超时无效
+        }
+        state->delivered = true;
+        state->result = make_error(ErrorCode::RuntimeAsyncTimeout, "async task timed out");
+        err = state->result;
+        to_call = state->on_done;
+    }
+    if (to_call && err) {
+        auto r = std::move(*err);
+        post_to_main([to_call, r]() mutable -> void { to_call(r); });
     }
 }
 
@@ -121,7 +209,8 @@ auto invoke_safe(F &&f) {
  * 取消语义：`cancel()` 标记任务为已取消，后台线程仍会执行完毕（无法中断任意函数），
  * 但 `then` 回调不会被调用。适用于「不再关心结果」的场景。
  *
- * 超时语义：`with_timeout(d)` 注册一个超时看守（经线程池提交，非 detached）；
+ * 超时语义：`with_timeout(d)` 注册一个超时看守（worker 池下是一个后台池任务，deferred 池下是
+ * 一张到期登记表，由宿主帧尾扫描触发——见 `Task<T>::with_timeout`）；
  * 若 `d` 内任务未 `deliver`，则向 `then` 回调投递 `make_error(ErrorCode::RuntimeAsyncTimeout, ...)`（slug 为
  * `"async-timeout"`）。 与 `cancel` 同限制——无法中断任意 `fn`，仅丢弃/改道结果。
  *
@@ -173,28 +262,24 @@ class Task {
     [[nodiscard]] auto is_cancelled() const -> bool { return state_->cancelled.load(std::memory_order_acquire); }
 
     /// @brief 注册超时：超过 `d` 任务仍未回写，则向 `then` 回调投递 `async-timeout` 错误。
-    /// 返回自身以便链式。仅 opt-in 时占用一个池任务（非 detached 线程）。
+    /// 返回自身以便链式。
+    ///
+    /// 两条实现路径按线程池模式分流，语义一致（到点改道结果、不中断 `fn`）：
+    /// - worker 池：看守是一个睡 `d` 的后台池任务（原有形态），到点自行投递，经主线程投递器回投。
+    /// - **deferred 池**：无后台线程可睡——睡在池任务里等于睡在主线程泵上，且看守排在被看守
+    ///   任务之后（同队 FIFO），永远不可能先跑。故只登记到期时刻，由帧尾 `sweep_due_timeouts`
+    ///   扫描触发；等待中的宿主循环经 `next_timeout_deadline_ms` 把期限并入唤醒决策，不深睡过头。
     template <typename Rep, typename Period>
     auto with_timeout(std::chrono::duration<Rep, Period> d) -> Task & {
         auto state = state_;
-        ThreadPool::default_pool().execute([state, d]() -> void {
+        auto expire = [state]() -> void { detail::expire_timeout(state); };
+        if (ThreadPool::default_pool().is_deferred()) {
+            detail::register_timeout_guard(std::chrono::steady_clock::now() + d, std::move(expire));
+            return *this;
+        }
+        ThreadPool::default_pool().execute([expire = std::move(expire), d]() -> void {
             std::this_thread::sleep_for(d);
-            std::function<void(const Result<T> &)> to_call;
-            std::optional<Result<T>> err;
-            {
-                std::scoped_lock<std::mutex> lock(state->mutex);
-                if (state->delivered || state->cancelled) {
-                    return;  // 已完成或已取消，超时无效
-                }
-                state->delivered = true;
-                state->result = make_error(ErrorCode::RuntimeAsyncTimeout, "async task timed out");
-                err = state->result;
-                to_call = state->on_done;
-            }
-            if (to_call && err) {
-                auto r = std::move(*err);
-                detail::post_to_main([to_call, r]() mutable -> void { to_call(r); });
-            }
+            expire();
         });
         return *this;
     }
