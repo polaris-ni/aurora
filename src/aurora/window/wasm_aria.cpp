@@ -23,6 +23,8 @@ namespace {
 // EM_JS 形参为具名 C/C++ 参数（无 `$` 占位符），不触发 -Wdollar-in-identifier-extension。
 // 页面级共享 JS 库：容器/镜像元素的建-改-删与反向动作队列。只定义一次（boot 幂等），
 // 各 EM_JS 薄壳按容器 id 调库方法 —— 多窗口各持独立镜像容器，互不串树。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(void, aria_js_boot, (), {
     if (window.auroraAriaLib) {
         return;
@@ -195,23 +197,38 @@ EM_JS(void, aria_js_boot, (), {
         },
     };
 });
+// clang-format on
 
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(void, aria_js_apply_full, (const char *cid, const char *json), {
     window.auroraAriaLib.applyFull(UTF8ToString(cid), JSON.parse(UTF8ToString(json)));
 });
+// clang-format on
 
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(void, aria_js_apply_ops, (const char *cid, const char *json), {
     window.auroraAriaLib.applyOps(UTF8ToString(cid), JSON.parse(UTF8ToString(json)));
 });
+// clang-format on
 
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(void, aria_js_announce, (const char *cid, const char *json), {
     window.auroraAriaLib.announce(UTF8ToString(cid), JSON.parse(UTF8ToString(json)));
 });
+// clang-format on
 
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(void, aria_js_clear, (const char *cid), { window.auroraAriaLib.clear(UTF8ToString(cid)); });
+// clang-format on
 
 // 反向动作队列排水：id 以 double 承载（runtime_id 为进程内小计数器，< 2^53 恒精确）；
 // -1 = 队列空。动作位在 pop_id 时弹出并存于 __auroraAriaCur，随后 pop_action 取回。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(double, aria_js_pop_id, (), {
     const q = window.__auroraAriaQueue;
     if (!q || !q.length) {
@@ -221,10 +238,14 @@ EM_JS(double, aria_js_pop_id, (), {
     window.__auroraAriaCur = p;
     return p[0];
 });
+// clang-format on
 
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(int, aria_js_pop_action, (), {
     return window.__auroraAriaCur ? window.__auroraAriaCur[1] : 0;
 });
+// clang-format on
 
 }  // namespace
 
@@ -411,8 +432,7 @@ auto WasmAriaBridge::rebuild_and_apply() -> void {
     a11y::TreeSnapshot fresh = a11y::build_tree_snapshot(*root_);
     if (!has_snapshot_) {
         const std::vector<detail::AriaElement> tree = detail::aria_tree_of(fresh);
-        const std::string json =
-            detail::aria_full_json(tree, detail::focus_id_of(fresh), rtl_);
+        const std::string json = detail::aria_full_json(tree, detail::focus_id_of(fresh), rtl_);
         aria_js_apply_full(container_id_.c_str(), json.c_str());
     } else {
         const a11y::TreeDiff diff = a11y::diff_snapshots(snapshot_, fresh);

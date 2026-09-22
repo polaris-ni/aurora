@@ -37,7 +37,7 @@ namespace aurora::detail {
 
 /// @brief 一条折算后的 ARIA 属性（键为规范全名，含 `data-aurora-*` 自有扩展位）。
 struct AriaAttr {
-    std::string key;    ///< 属性名（如 "aria-label"、"tabindex"）
+    std::string key;  ///< 属性名（如 "aria-label"、"tabindex"）
     std::string value;  ///< 属性值（一律字符串形态，与 DOM setAttribute 对齐）
 };
 
@@ -46,12 +46,12 @@ struct AriaAttr {
 /// `role` 与 `attrs` 分开是为了让 JSON 面稳定：role 恒存在（可空串 = 不设），
 /// 其余属性按固定次序进 `attrs`（表驱动单测逐位断言的前提）。
 struct AriaElement {
-    std::uint64_t id = 0;       ///< 稳定身份（`Widget::runtime_id()`）
+    std::uint64_t id = 0;  ///< 稳定身份（`Widget::runtime_id()`）
     std::uint64_t parent_id = 0;  ///< 父节点 id（0 = 根，直接挂容器）
-    std::string dom_id;         ///< DOM id（`"aurora-a11y-" + id`，IDREF 用）
-    std::string role;           ///< WAI-ARIA role（空串 = 不写 role 属性）
+    std::string dom_id;  ///< DOM id（`"aurora-a11y-" + id`，IDREF 用）
+    std::string role;  ///< WAI-ARIA role（空串 = 不写 role 属性）
     std::vector<AriaAttr> attrs;  ///< aria-*/tabindex/data-aurora-*（确定序）
-    std::string content;        ///< 文本内容（Text/TextInput 的 value；其余为空）
+    std::string content;  ///< 文本内容（Text/TextInput 的 value；其余为空）
     std::vector<std::uint64_t> child_ids;  ///< 子 id（先序，同快照 `children_of`）
     std::uint16_t click_action = 0;  ///< 镜像元素被点击时回灌的动作位（0 = 不监听）
 };
@@ -82,8 +82,7 @@ struct AriaElement {
 
 /// @brief 全量载荷（首次应用 / 容器重建）：`{"els":[E…],"focus":N,"rtl":b}`。
 /// @param focus 当前聚焦节点 id（0 = 无）
-[[nodiscard]] auto aria_full_json(const std::vector<AriaElement> &tree, std::uint64_t focus, bool rtl)
-    -> std::string;
+[[nodiscard]] auto aria_full_json(const std::vector<AriaElement> &tree, std::uint64_t focus, bool rtl) -> std::string;
 
 /// @brief 增量载荷：`{"ops":[{"op":"remove","id":N}|{"op":"add","el":E}|
 ///        {"op":"update","el":E}|{"op":"move","id":N,"parent":M,"index":K},…],

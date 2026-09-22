@@ -459,6 +459,17 @@ python tools/check/run_clang_format.py --fix --include 'src/aurora/window/'   # 
 
 **排版与 NOLINT 的耦合**：`ReflowComments: Always` 会重排注释，可能把 `NOLINTNEXTLINE` 的理由注释折到它与目标行之间，使抑制失效（该形态曾一次性造成 36 条告警）。因此**理由注释一律写在 `NOLINTNEXTLINE` 之前**，且写完改动后须再跑一次 `format-check` 确认幂等。
 
+**排版与 `EM_JS` / `EM_ASM` 的耦合**：Emscripten 的 `EM_JS` / `EM_ASM` / `MAIN_THREAD_EM_ASM_*` 宏体是 **JavaScript**，而 clang-format 一律按 C++ 解析，会做出三类**破坏语义**的重排：`===` 拆成 `== =`、箭头 `=>` 拆成 `= >`、以及把 `EM_JS` 第三个宏实参（形参列表）的外层括号吃掉（`(const char *x)` → `const char *x`，宏参数数目随即错位）。这些改动**排版门禁查不出、构建期才炸**（WASM 侧报 `expected ';' after top level declarator` 之类），故所有 JS 宏块必须整块排除在排版之外：
+
+```cpp
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
+EM_JS(int, wa_available, (), { return typeof AudioContext === 'undefined' ? 0 : 1; });
+// clang-format on
+```
+
+⚠️ 指令必须**裸写**：clang-format 22 把带尾注的 `// clang-format off  (理由)` 当成普通注释、保护**不生效**（实测静默损坏），理由注释另起一行放在指令上方即可（该处在保护体外，可被正常重排）。落点见 `src/aurora/media/audio_webaudio.cpp`、`src/aurora/window/wasm_aria.cpp`、`include/aurora/window/wasm_surface.h`、`include/aurora/app/application.h` 与 `tools/verify/wasm_*_live_probe.cpp`；新增任何触达 DOM 的 JS 宏时同样处理，并在 `format` 之后核对 JS 块与改前逐字一致。
+
 ## 5 强制缓存变量（三方库源码构建内部）
 
 FreeType 与 HarfBuzz 均从仓库内置源码（`third_party/freetype`、`third_party/harfbuzz`）经 `add_subdirectory` 编入 `aurora` 静态库（断网可构建、版本确定）。`CMakeLists.txt` 先 `add_subdirectory(third_party/freetype)` 后 `add_subdirectory(third_party/harfbuzz)`——harfbuzz 在 `if (TARGET freetype)` 时自动开启 `HB_HAVE_FREETYPE`（提供 `hb-ft.h` 并链接 freetype）。aurora 直接 `target_link_libraries(aurora PUBLIC freetype harfbuzz)`，文本 shaping 由 HarfBuzz（`hb_shape` + `hb_ft_font`）完成，故 FreeType 自身保持 `FT_DISABLE_HARFBUZZ=ON`（standalone，避免别名耦合）。

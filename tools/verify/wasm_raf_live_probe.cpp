@@ -53,7 +53,10 @@ static auto publish_frame_count(int frames) -> void {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
 #endif
+    // EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+    // clang-format off
     EM_ASM({ document.title = UTF8ToString($0); }, title.c_str());
+    // clang-format on
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
@@ -80,15 +83,14 @@ auto main() -> int {
     //    无 sleep——deferred 模式下任务本就跑在主线程，模拟耗时只会卡帧。
     auto async_status = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"async = pending"});
     au::async([]() -> std::string {
-            int acc = 0;
-            for (int i = 0; i < 1000; ++i) {
-                acc += i;
-            }
-            return acc == 499500 ? "done" : "mismatch";
-        })
-        .then([async_status](const au::Result<std::string> &r) -> void {
-            async_status->set(au::LocalizedString{r ? "async = " + r.value() : "async = error"});
-        });
+        int acc = 0;
+        for (int i = 0; i < 1000; ++i) {
+            acc += i;
+        }
+        return acc == 499500 ? "done" : "mismatch";
+    }).then([async_status](const au::Result<std::string> &r) -> void {
+        async_status->set(au::LocalizedString{r ? "async = " + r.value() : "async = error"});
+    });
 
     au::Node root = au::Column{
         au::Text{au::LocalizedString{"Aurora WASM rAF live probe"}},

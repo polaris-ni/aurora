@@ -690,8 +690,8 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
                v.name == "季度汇总";
     });
     if (ref_it == nodes.end()) {
-        AURORA_LOG_ERROR("verify",
-                         std::string(label) + ": 无 Name 为「季度汇总」的元素 —— set_labelled_by 的名字未跟随目标 (#21)");
+        AURORA_LOG_ERROR(
+            "verify", std::string(label) + ": 无 Name 为「季度汇总」的元素 —— set_labelled_by 的名字未跟随目标 (#21)");
         ++failures;
     } else if (ref_it->labeled_by_name != "季度汇总") {
         AURORA_LOG_ERROR("verify", std::string(label) + ": UIA_LabeledByPropertyId 未投影 (got \"" +

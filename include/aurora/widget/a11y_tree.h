@@ -198,7 +198,7 @@ namespace detail {
 /// 一趟收集 + 一趟解析，成本 O(节点数)，与建树同阶。
 struct LabelRefIndex {
     std::unordered_map<std::string, AccessibilityNode *> by_key;  ///< `stable_key` → 节点（先序者胜）
-    std::vector<AccessibilityNode *> pending;                     ///< 声明了 `labelled_by` 的节点
+    std::vector<AccessibilityNode *> pending;  ///< 声明了 `labelled_by` 的节点
 };
 
 /// @brief 降级申报去重：同一原因的提示**每进程一次**，避免读屏在线时逐帧刷屏。
@@ -238,10 +238,9 @@ inline auto collect_label_refs(AccessibilityNode &n, LabelRefIndex &idx) -> void
 /// 入栈在查表**之前**，故自引用（`A.labelled_by == A.stable_key`）与多节点环同走一条判据；
 /// 断环只惩罚「闭合环的那一个节点」（其关系不投影、名字保留自身），链上其余节点仍取目标终名，
 /// 因而在三桥侧投影出的关系图始终是**无环**的。
-inline auto resolve_label_ref(AccessibilityNode *n,
-                              const LabelRefIndex &idx,
-                              std::unordered_set<const AccessibilityNode *> &done,
-                              std::vector<std::uint64_t> &stack) -> void {
+inline auto resolve_label_ref(AccessibilityNode *n, const LabelRefIndex &idx,
+                              std::unordered_set<const AccessibilityNode *> &done, std::vector<std::uint64_t> &stack)
+    -> void {
     if (n == nullptr || n->labelled_by.empty() || done.count(n) != 0) {
         return;
     }

@@ -273,9 +273,8 @@ class GridView : public Widget {
         }
         if (props.contains("columns")) {
             const int declared = props["columns"].get<int>();
-            columns_ = declared > 0
-                           ? declared
-                           : (Diagnostics::degraded("layout", "GridView columns 非正已降级为 1"), 1);
+            columns_ =
+                declared > 0 ? declared : (Diagnostics::degraded("layout", "GridView columns 非正已降级为 1"), 1);
         }
         if (props.contains("cell_extent")) {
             const float declared = props["cell_extent"].get<float>();

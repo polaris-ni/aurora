@@ -83,27 +83,27 @@ class ProbeColumn final : public aurora::Container {
     }
 };
 
-/// @brief 横向排布的容器桩：子节点按 `kProbeItem` **水平相邻**落位（兄弟标签启发式要求同行且
+/// @brief 横向排布的容器桩：子节点按 `AURORA_PROBE_ITEM` **水平相邻**落位（兄弟标签启发式要求同行且
 ///        间隙 ≈ 0，ProbeColumn 的纵向落位刻意不命中，二者正好构成启发式的正反两向证据）。
 ///        `type` 决定角色推断（默认 "Row" → Generic；传 "Slider" 等可充当需要标签的宿主）。
 class ProbeRow final : public aurora::Container {
   public:
-    explicit ProbeRow(const char* type = "Row") : type_{type} {}
+    explicit ProbeRow(const char *type = "Row") : type_{type} {}
 
-    [[nodiscard]] auto type_name() const -> const char* override { return type_; }
+    [[nodiscard]] auto type_name() const -> const char * override { return type_; }
 
   protected:
-    auto on_layout(const aurora::Constraints& /*c*/, const aurora::BuildContext& /*ctx*/) -> aurora::Size override {
+    auto on_layout(const aurora::Constraints & /*c*/, const aurora::BuildContext & /*ctx*/) -> aurora::Size override {
         float x = 0.0F;
-        for (auto& child : children_) {
-            child.set_bounds(aurora::Rect{.origin = aurora::Point{.x = x, .y = 0.0F}, .size = kProbeItem});
-            x += kProbeItem.width;
+        for (auto &child : children_) {
+            child.set_bounds(aurora::Rect{.origin = aurora::Point{.x = x, .y = 0.0F}, .size = AURORA_PROBE_ITEM});
+            x += AURORA_PROBE_ITEM.width;
         }
-        return aurora::Size{.width = x, .height = kProbeItem.height};
+        return aurora::Size{.width = x, .height = AURORA_PROBE_ITEM.height};
     }
 
   private:
-    const char* type_;
+    const char *type_;
 };
 
 /// @brief 无 `Node` 几何的虚拟化容器桩：子节点存在私有表中、只经 `for_each_child` 暴露
@@ -616,12 +616,11 @@ AURORA_TEST_CASE(sibling_text_label_hits_adjacent_leaf) {
     ProbeRow row;
     row.add(aurora::Node{std::move(label)});
     row.add(aurora::Node{ProbeLeaf{"Checkbox"}});
-    aurora::LayoutEngine::layout(row, aurora::Constraints{.min = aurora::Size{},
-                                                          .max = aurora::Size{.width = 400.0F, .height = 400.0F}});
+    aurora::LayoutEngine::layout(
+        row, aurora::Constraints{.min = aurora::Size{}, .max = aurora::Size{.width = 400.0F, .height = 400.0F}});
     aurora::Painter painter;
     painter.begin(256, 256);
-    row.paint(painter,
-              aurora::Rect{.origin = aurora::Point{}, .size = aurora::Size{.width = 200.0F, .height = 20.0F}},
+    row.paint(painter, aurora::Rect{.origin = aurora::Point{}, .size = aurora::Size{.width = 200.0F, .height = 20.0F}},
               aurora::BuildContext{});
 
     const auto tree = aurora::build_accessibility_tree(row);
@@ -637,8 +636,8 @@ AURORA_TEST_CASE(sibling_label_misses_stacked_leaf) {
     auto label = ProbeLeaf{"Text"};
     label.set_accessibility_label("音量");
     column.add(aurora::Node{std::move(label)});
-    aurora::LayoutEngine::layout(column, aurora::Constraints{.min = aurora::Size{},
-                                                             .max = aurora::Size{.width = 400.0F, .height = 400.0F}});
+    aurora::LayoutEngine::layout(
+        column, aurora::Constraints{.min = aurora::Size{}, .max = aurora::Size{.width = 400.0F, .height = 400.0F}});
     aurora::Painter painter;
     painter.begin(256, 256);
     column.paint(painter,
@@ -752,7 +751,7 @@ AURORA_TEST_CASE(labelled_by_beats_explicit_and_builtin_label) {
     button->set_labelled_by("hdr");
 
     ProbeColumn column;
-    column.add(aurora::Node{label});   // 左值入树 = 共享所有权（用例稍后仍要经句柄查自身状态）
+    column.add(aurora::Node{label});  // 左值入树 = 共享所有权（用例稍后仍要经句柄查自身状态）
     column.add(aurora::Node{button});
 
     const auto tree = aurora::build_accessibility_tree(column);

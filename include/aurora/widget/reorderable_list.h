@@ -453,12 +453,12 @@ class ReorderableList : public Container {
         keyboard_grabbed_ = true;
         keyboard_grab_from_ = keyboard_index_;
         mark_needs_paint();
-        announce(announce_text("aurora.reorder.grabbed",
-                               {LocalizedString{std::to_string(keyboard_index_ + 1)},
-                                LocalizedString{std::to_string(item_count())}},
-                               "Position " + std::to_string(keyboard_index_ + 1) + " of " +
-                                   std::to_string(item_count()) + ". Item grabbed. Use arrow keys to move,"
-                                   " space to drop, escape to cancel."));
+        announce(announce_text(
+            "aurora.reorder.grabbed",
+            {LocalizedString{std::to_string(keyboard_index_ + 1)}, LocalizedString{std::to_string(item_count())}},
+            "Position " + std::to_string(keyboard_index_ + 1) + " of " + std::to_string(item_count()) +
+                ". Item grabbed. Use arrow keys to move,"
+                " space to drop, escape to cancel."));
         return true;
     }
 
@@ -476,17 +476,15 @@ class ReorderableList : public Container {
         const bool moved = reorder(from, to);
         if (moved) {
             announce(announce_text("aurora.reorder.dropped",
-                                   {LocalizedString{std::to_string(from + 1)},
-                                    LocalizedString{std::to_string(to + 1)},
+                                   {LocalizedString{std::to_string(from + 1)}, LocalizedString{std::to_string(to + 1)},
                                     LocalizedString{std::to_string(item_count())}},
                                    "Item moved from position " + std::to_string(from + 1) + " to position " +
                                        std::to_string(to + 1) + " of " + std::to_string(item_count()) + "."));
         } else {
-            announce(announce_text("aurora.reorder.dropped_in_place",
-                                   {LocalizedString{std::to_string(to + 1)},
-                                    LocalizedString{std::to_string(item_count())}},
-                                   "Item dropped at position " + std::to_string(to + 1) + " of " +
-                                       std::to_string(item_count()) + "."));
+            announce(announce_text(
+                "aurora.reorder.dropped_in_place",
+                {LocalizedString{std::to_string(to + 1)}, LocalizedString{std::to_string(item_count())}},
+                "Item dropped at position " + std::to_string(to + 1) + " of " + std::to_string(item_count()) + "."));
         }
         return moved;
     }
@@ -503,11 +501,11 @@ class ReorderableList : public Container {
         keyboard_index_ = home;
         ensure_index_visible(home);
         mark_needs_paint();
-        announce(announce_text("aurora.reorder.cancelled",
-                               {LocalizedString{std::to_string(home + 1)},
-                                LocalizedString{std::to_string(item_count())}},
-                               "Reorder cancelled. Item returned to position " + std::to_string(home + 1) + " of " +
-                                   std::to_string(item_count()) + "."));
+        announce(
+            announce_text("aurora.reorder.cancelled",
+                          {LocalizedString{std::to_string(home + 1)}, LocalizedString{std::to_string(item_count())}},
+                          "Reorder cancelled. Item returned to position " + std::to_string(home + 1) + " of " +
+                              std::to_string(item_count()) + "."));
         return true;
     }
 
@@ -666,38 +664,38 @@ class ReorderableList : public Container {
         }
         const int n = static_cast<int>(children_.size());
         switch (static_cast<KeyCode>(e.key)) {
-        case KeyCode::ArrowUp:
-            move_keyboard_cursor(-1);
-            e.is_handled = true;
-            return;
-        case KeyCode::ArrowDown:
-            move_keyboard_cursor(1);
-            e.is_handled = true;
-            return;
-        case KeyCode::Home:
-            set_keyboard_index(0);
-            e.is_handled = true;
-            return;
-        case KeyCode::End:
-            set_keyboard_index(n - 1);
-            e.is_handled = true;
-            return;
-        case KeyCode::Space:
-        case KeyCode::Enter:
-            if (keyboard_grabbed_) {
-                drop_keyboard_item();
-            } else {
-                grab_keyboard_item();
-            }
-            e.is_handled = true;
-            return;
-        case KeyCode::Escape:
-            if (cancel_keyboard_grab()) {
+            case KeyCode::ArrowUp:
+                move_keyboard_cursor(-1);
                 e.is_handled = true;
-            }
-            return;
-        default:
-            return;  // 其余按键交回派发器默认语义
+                return;
+            case KeyCode::ArrowDown:
+                move_keyboard_cursor(1);
+                e.is_handled = true;
+                return;
+            case KeyCode::Home:
+                set_keyboard_index(0);
+                e.is_handled = true;
+                return;
+            case KeyCode::End:
+                set_keyboard_index(n - 1);
+                e.is_handled = true;
+                return;
+            case KeyCode::Space:
+            case KeyCode::Enter:
+                if (keyboard_grabbed_) {
+                    drop_keyboard_item();
+                } else {
+                    grab_keyboard_item();
+                }
+                e.is_handled = true;
+                return;
+            case KeyCode::Escape:
+                if (cancel_keyboard_grab()) {
+                    e.is_handled = true;
+                }
+                return;
+            default:
+                return;  // 其余按键交回派发器默认语义
         }
     }
 
@@ -898,8 +896,7 @@ class ReorderableList : public Container {
             return;  // 光标项已滚出视口（正常路径下 `ensure_index_visible` 会先滚回来）
         }
         const Rect global{.origin = bounds.origin + local.origin, .size = local.size};
-        p.draw_rounded_border(global,
-                              AURORA_CURSOR_RING_RADIUS,
+        p.draw_rounded_border(global, AURORA_CURSOR_RING_RADIUS,
                               keyboard_grabbed_ ? AURORA_CURSOR_GRABBED_THICKNESS : AURORA_CURSOR_THICKNESS,
                               inherit_theme(ctx).primary);
     }
@@ -932,11 +929,10 @@ class ReorderableList : public Container {
         if (keyboard_index_ < 0) {
             return;
         }
-        announce(announce_text("aurora.reorder.position",
-                               {LocalizedString{std::to_string(keyboard_index_ + 1)},
-                                LocalizedString{std::to_string(item_count())}},
-                               "Position " + std::to_string(keyboard_index_ + 1) + " of " +
-                                   std::to_string(item_count()) + "."));
+        announce(announce_text(
+            "aurora.reorder.position",
+            {LocalizedString{std::to_string(keyboard_index_ + 1)}, LocalizedString{std::to_string(item_count())}},
+            "Position " + std::to_string(keyboard_index_ + 1) + " of " + std::to_string(item_count()) + "."));
     }
 
     /// @brief 播报文案解析：按 key 查 `default_string_table()`（宿主可登记译文模板），

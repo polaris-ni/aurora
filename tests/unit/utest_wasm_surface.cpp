@@ -9,8 +9,8 @@
 #if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)
 #include <type_traits>
 
-#include "aurora/window/wasm_surface.h"
 #include "aurora/window/wasm_aria.h"
+#include "aurora/window/wasm_surface.h"
 #endif
 
 #include "framework/aurora_test.h"

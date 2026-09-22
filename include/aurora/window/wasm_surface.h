@@ -134,6 +134,8 @@ class WasmSurface : public Surface {
         // 3. 将 WASM 内存 src 拷贝到 ImageData.data（Uint8ClampedArray）
         // 4. putImageData 到 canvas
         // 注意：Painter 输出 RGBA，Canvas ImageData 也是 RGBA，无需 swizzle。
+        // EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+        // clang-format off
         EM_ASM(
             {
                 const canvas = document.getElementById(UTF8ToString($3));
@@ -157,6 +159,7 @@ class WasmSurface : public Surface {
                 ctx.putImageData(img, 0, 0);
             },
             src, w, h, canvas_id_.c_str());
+        // clang-format on
         ++frame_;
         return true;
     }
@@ -178,6 +181,8 @@ class WasmSurface : public Surface {
     ///       canvas id 索引）全部随迁不失效，无需重注册。
     /// @note 不改变激活状态（与基类契约一致）：路由指针与 `document.title` 一律不动。
     auto raise() -> void override {
+        // EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+        // clang-format off
         EM_ASM(
             {
                 const canvas = document.getElementById(UTF8ToString($0));
@@ -187,6 +192,7 @@ class WasmSurface : public Surface {
                 }
             },
             canvas_id_.c_str());
+        // clang-format on
     }
 
     /// @brief 当前键盘路由目标的 canvas id（无焦点窗口时为空串）——多窗口路由的只读观测口，
@@ -218,9 +224,7 @@ class WasmSurface : public Surface {
     auto wait_events(double /*timeout_ms*/) -> void override {}
 
     /// @brief 本窗口的 ARIA 镜像桥（首帧根注入前为 nullptr —— 桥随 `present_root` 诞生）。
-    [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override {
-        return aria_bridge_.get();
-    }
+    [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override { return aria_bridge_.get(); }
 
     /// @brief 语义树根注入（`Window::present_root` 每帧调用）：首次构造桥（容器 id 按
     ///        canvas id 隔离，多窗口各挂各的镜像树），随后交由桥做幂等判定。
@@ -254,13 +258,16 @@ class WasmSurface : public Surface {
         if (focused_surface_ == nullptr || !focused_surface_->title_declared_) {
             return;
         }
+        // EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+        // clang-format off
         EM_ASM({ document.title = UTF8ToString($0); }, focused_surface_->title_.c_str());
+        // clang-format on
     }
 
-    std::string canvas_id_;       ///< 裸 DOM id（getElementById 上屏用）。
-    std::string canvas_selector_; ///< CSS 选择器形态（Emscripten 事件注册/querySelector 用）。
-    std::string title_;           ///< 本窗口标题缓存（页面标题由焦点窗口的这份代表）。
-    bool title_declared_ = false; ///< 宿主是否声明过标题（决定易主时要不要重播 DOM）。
+    std::string canvas_id_;  ///< 裸 DOM id（getElementById 上屏用）。
+    std::string canvas_selector_;  ///< CSS 选择器形态（Emscripten 事件注册/querySelector 用）。
+    std::string title_;  ///< 本窗口标题缓存（页面标题由焦点窗口的这份代表）。
+    bool title_declared_ = false;  ///< 宿主是否声明过标题（决定易主时要不要重播 DOM）。
     std::unique_ptr<WasmAriaBridge> aria_bridge_;  ///< ARIA 镜像桥（首帧根注入时构造；见 wasm_aria.h）
     Painter painter_;
     int w_ = 0;
@@ -309,38 +316,85 @@ class WasmSurface : public Surface {
                 return static_cast<KeyCode>(static_cast<int>(D0) + (c - '0'));
             }
             switch (c) {
-                case ' ': return Space;
-                case '-': return Minus;
-                case '=': return Equal;
-                case '[': return LeftBracket;
-                case ']': return RightBracket;
-                case '\\': return Backslash;
-                case ';': return Semicolon;
-                case '\'': return Quote;
-                case ',': return Comma;
-                case '.': return Period;
-                case '/': return Slash;
-                case '`': return Backquote;
-                default: break;
+                case ' ':
+                    return Space;
+                case '-':
+                    return Minus;
+                case '=':
+                    return Equal;
+                case '[':
+                    return LeftBracket;
+                case ']':
+                    return RightBracket;
+                case '\\':
+                    return Backslash;
+                case ';':
+                    return Semicolon;
+                case '\'':
+                    return Quote;
+                case ',':
+                    return Comma;
+                case '.':
+                    return Period;
+                case '/':
+                    return Slash;
+                case '`':
+                    return Backquote;
+                default:
+                    break;
             }
         }
-        if (s == "Enter") { return Enter; }
-        if (s == "Tab") { return Tab; }
-        if (s == "Backspace") { return Backspace; }
-        if (s == "Delete") { return Delete; }
-        if (s == "Escape") { return Escape; }
-        if (s == "ArrowLeft") { return ArrowLeft; }
-        if (s == "ArrowRight") { return ArrowRight; }
-        if (s == "ArrowUp") { return ArrowUp; }
-        if (s == "ArrowDown") { return ArrowDown; }
-        if (s == "Home") { return Home; }
-        if (s == "End") { return End; }
-        if (s == "PageUp") { return PageUp; }
-        if (s == "PageDown") { return PageDown; }
-        if (s == "Shift") { return Shift; }
-        if (s == "Control") { return Control; }
-        if (s == "Alt") { return Alt; }
-        if (s == "Meta") { return Meta; }
+        if (s == "Enter") {
+            return Enter;
+        }
+        if (s == "Tab") {
+            return Tab;
+        }
+        if (s == "Backspace") {
+            return Backspace;
+        }
+        if (s == "Delete") {
+            return Delete;
+        }
+        if (s == "Escape") {
+            return Escape;
+        }
+        if (s == "ArrowLeft") {
+            return ArrowLeft;
+        }
+        if (s == "ArrowRight") {
+            return ArrowRight;
+        }
+        if (s == "ArrowUp") {
+            return ArrowUp;
+        }
+        if (s == "ArrowDown") {
+            return ArrowDown;
+        }
+        if (s == "Home") {
+            return Home;
+        }
+        if (s == "End") {
+            return End;
+        }
+        if (s == "PageUp") {
+            return PageUp;
+        }
+        if (s == "PageDown") {
+            return PageDown;
+        }
+        if (s == "Shift") {
+            return Shift;
+        }
+        if (s == "Control") {
+            return Control;
+        }
+        if (s == "Alt") {
+            return Alt;
+        }
+        if (s == "Meta") {
+            return Meta;
+        }
         if (s.size() >= 2 && s.size() <= 3 && s[0] == 'F' && s[1] >= '1' && s[1] <= '9') {
             const int n = (s.size() == 2) ? (s[1] - '0') : (s[1] - '0') * 10 + (s[2] - '0');
             if (n >= 1 && n <= 12) {

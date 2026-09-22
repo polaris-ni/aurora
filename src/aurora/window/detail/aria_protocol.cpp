@@ -40,8 +40,7 @@ auto push_attr(AriaElement &el, std::string_view key, const std::string &value) 
 }
 
 /// @brief 快照内构造带 `child_ids` 的完整元素（add/update 载荷与全量共用）。
-[[nodiscard]] auto make_element(const a11y::TreeSnapshot &snap, const a11y::NodeSnapshot &n)
-    -> AriaElement {
+[[nodiscard]] auto make_element(const a11y::TreeSnapshot &snap, const a11y::NodeSnapshot &n) -> AriaElement {
     AriaElement el = aria_element_of(n);
     const auto it = snap.children_of.find(n.id);
     if (it != snap.children_of.end()) {
@@ -152,8 +151,7 @@ auto aria_element_of(const a11y::NodeSnapshot &n) -> AriaElement {
 
     // 内容规则：Text/TextInput 以元素正文承载 value（缺 value 回落 name，与 Name
     // 回退链同口径）；其余角色正文恒空（信息全在属性面）。
-    const bool text_bearing =
-        node.role == AccessibilityRole::Text || node.role == AccessibilityRole::TextInput;
+    const bool text_bearing = node.role == AccessibilityRole::Text || node.role == AccessibilityRole::TextInput;
     if (text_bearing) {
         el.content = node.value.empty() ? node.name : node.value;
     }
@@ -222,13 +220,27 @@ auto aria_json_escape(const std::string_view s) -> std::string {
     for (const char ch : s) {
         const auto c = static_cast<unsigned char>(ch);
         switch (c) {
-            case '"': out += R"(\")"; break;
-            case '\\': out += R"(\\)"; break;
-            case '\b': out += R"(\b)"; break;
-            case '\f': out += R"(\f)"; break;
-            case '\n': out += R"(\n)"; break;
-            case '\r': out += R"(\r)"; break;
-            case '\t': out += R"(\t)"; break;
+            case '"':
+                out += R"(\")";
+                break;
+            case '\\':
+                out += R"(\\)";
+                break;
+            case '\b':
+                out += R"(\b)";
+                break;
+            case '\f':
+                out += R"(\f)";
+                break;
+            case '\n':
+                out += R"(\n)";
+                break;
+            case '\r':
+                out += R"(\r)";
+                break;
+            case '\t':
+                out += R"(\t)";
+                break;
             default: {
                 if (c < 0x20U || c == 0x7FU) {
                     static constexpr char hex[] = "0123456789abcdef";
@@ -255,8 +267,7 @@ auto aria_element_json(const AriaElement &el) -> std::string {
         if (i > 0) {
             out += ',';
         }
-        out += R"([")" + aria_json_escape(el.attrs[i].key) + R"(",")" +
-               aria_json_escape(el.attrs[i].value) + "\"]";
+        out += R"([")" + aria_json_escape(el.attrs[i].key) + R"(",")" + aria_json_escape(el.attrs[i].value) + "\"]";
     }
     out += R"(],"content":")" + aria_json_escape(el.content) + R"(","children":[)";
     for (std::size_t i = 0; i < el.child_ids.size(); ++i) {
@@ -269,8 +280,7 @@ auto aria_element_json(const AriaElement &el) -> std::string {
     return out;
 }
 
-auto aria_full_json(const std::vector<AriaElement> &tree, const std::uint64_t focus, const bool rtl)
-    -> std::string {
+auto aria_full_json(const std::vector<AriaElement> &tree, const std::uint64_t focus, const bool rtl) -> std::string {
     std::string out;
     append_els_json(out, tree);
     out += R"("focus":)" + std::to_string(focus);
@@ -279,8 +289,8 @@ auto aria_full_json(const std::vector<AriaElement> &tree, const std::uint64_t fo
     return out;
 }
 
-auto aria_ops_json(const a11y::TreeSnapshot &old_, const a11y::TreeSnapshot &new_,
-                   const a11y::TreeDiff &diff) -> std::string {
+auto aria_ops_json(const a11y::TreeSnapshot &old_, const a11y::TreeSnapshot &new_, const a11y::TreeDiff &diff)
+    -> std::string {
     std::string out = R"({"ops":[)";
     bool first = true;
     const auto sep = [&out, &first]() -> void {
@@ -312,8 +322,7 @@ auto aria_ops_json(const a11y::TreeSnapshot &old_, const a11y::TreeSnapshot &new
                 ++index;
             }
         }
-        out += R"({"op":"add","index":)" + std::to_string(index) + R"(,"el":)" +
-               aria_element_json(el) + "}";
+        out += R"({"op":"add","index":)" + std::to_string(index) + R"(,"el":)" + aria_element_json(el) + "}";
     }
 
     // 3) move：detached → 插入新父第 index 位（新快照口径的最终位，先删后插幂等）。
@@ -332,8 +341,8 @@ auto aria_ops_json(const a11y::TreeSnapshot &old_, const a11y::TreeSnapshot &new
                 ++index;
             }
         }
-        out += R"({"op":"move","id":)" + std::to_string(id) + R"(,"parent":)" +
-               std::to_string(n->parent_id) + R"(,"index":)" + std::to_string(index) + "}";
+        out += R"({"op":"move","id":)" + std::to_string(id) + R"(,"parent":)" + std::to_string(n->parent_id) +
+               R"(,"index":)" + std::to_string(index) + "}";
     }
 
     // 4) update：字段变化去重（add 者随 "add" 载荷整面首发，天然排除；move 者仍可能
@@ -366,8 +375,7 @@ auto focus_id_of(const a11y::TreeSnapshot &snap) -> std::uint64_t {
 }
 
 auto aria_announce_json(const std::string &text, const std::uint64_t target_id) -> std::string {
-    return R"({"text":")" + aria_json_escape(text) + R"(","target":)" + std::to_string(target_id) +
-           "}";
+    return R"({"text":")" + aria_json_escape(text) + R"(","target":)" + std::to_string(target_id) + "}";
 }
 
 }  // namespace aurora::detail

@@ -275,7 +275,7 @@ template <typename Ctx>
 enum class AccessibilityEventKind : std::uint8_t {
     FocusChanged,  ///< 焦点转移（获焦 / 失焦均上报，一次聚焦变更一条）
     ValueChanged,  ///< 可取值的控件取值变化（Checkbox / Switch / Slider / TextInput …）
-    NameChanged,   ///< 可访问名变化（`Widget::set_accessibility_label`）：读屏应重念该控件
+    NameChanged,  ///< 可访问名变化（`Widget::set_accessibility_label`）：读屏应重念该控件
     StructureChanged,  ///< 子树结构变化（子节点增删 / 替换）
     Announcement,  ///< 动态播报 / Live Region：请立即朗读 `announcement_text`（G4）
 };

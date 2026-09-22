@@ -22,8 +22,6 @@ namespace aurora::test_cases::utest_aria_protocol {
 using aurora::a11y::NodeSnapshot;
 using aurora::a11y::TreeSnapshot;
 // TEST-R9：测试禁 using-directive，折算层符号逐名引入。
-using aurora::detail::AriaAttr;
-using aurora::detail::AriaElement;
 using aurora::detail::aria_actions_text;
 using aurora::detail::aria_announce_json;
 using aurora::detail::aria_element_of;
@@ -33,13 +31,15 @@ using aurora::detail::aria_ops_json;
 using aurora::detail::aria_primary_click_action;
 using aurora::detail::aria_role_of;
 using aurora::detail::aria_tree_of;
+using aurora::detail::AriaAttr;
+using aurora::detail::AriaElement;
 using aurora::detail::focus_id_of;
 
 namespace {
 
 /// @brief 纯数据构造快照节点（widget 恒空：折算层不触碰活指针，纯快照即可全覆盖）。
-[[nodiscard]] auto node(std::uint64_t id, std::uint64_t parent_id, AccessibilityRole role,
-                        std::string name) -> NodeSnapshot {
+[[nodiscard]] auto node(std::uint64_t id, std::uint64_t parent_id, AccessibilityRole role, std::string name)
+    -> NodeSnapshot {
     NodeSnapshot n;
     n.id = id;
     n.parent_id = parent_id;
@@ -231,23 +231,21 @@ AURORA_TEST_CASE(range_number_formatting) {
     NodeSnapshot n = node(20, 0, AccessibilityRole::Slider, "音量");
     n.node.range = AccessibilityRange{.min = 0.0, .max = 100.0, .step = 1.0, .value = 42.0};
     AriaElement el = aria_element_of(n);
-    AURORA_TEST_CHECK(attr_of(el, "aria-valuemin") == "0");      // 整数值不留小数尾巴
+    AURORA_TEST_CHECK(attr_of(el, "aria-valuemin") == "0");  // 整数值不留小数尾巴
     AURORA_TEST_CHECK(attr_of(el, "aria-valuemax") == "100");
     AURORA_TEST_CHECK(attr_of(el, "aria-valuenow") == "42");
     n.node.range = AccessibilityRange{.min = 0.0, .max = 1.0, .step = 0.0, .value = 0.25};
     el = aria_element_of(n);
-    AURORA_TEST_CHECK(attr_of(el, "aria-valuenow") == "0.25");   // 定点去尾零
+    AURORA_TEST_CHECK(attr_of(el, "aria-valuenow") == "0.25");  // 定点去尾零
     n.node.range = AccessibilityRange{.min = 0.0, .max = 1.0, .step = 0.0, .value = 0.0 / 0.0};
     el = aria_element_of(n);
-    AURORA_TEST_CHECK(attr_of(el, "aria-valuenow") == "0");      // 非有限回落 0（宁缺位不错位）
+    AURORA_TEST_CHECK(attr_of(el, "aria-valuenow") == "0");  // 非有限回落 0（宁缺位不错位）
 }
 
 AURORA_TEST_CASE(json_escape_minimal_set) {
-    AURORA_TEST_CHECK(aria_json_escape(R"(he said "hi" c:\dir)") ==
-                      R"(he said \"hi\" c:\\dir)");
+    AURORA_TEST_CHECK(aria_json_escape(R"(he said "hi" c:\dir)") == R"(he said \"hi\" c:\\dir)");
     AURORA_TEST_CHECK(aria_json_escape("a\nb\tc\rd") == R"(a\nb\tc\rd)");
-    AURORA_TEST_CHECK(aria_json_escape(std::string{"\x01\x1f\x7f", 3}) ==
-                      R"(\u0001\u001f\u007f)");                                    // 控制字符与 DEL
+    AURORA_TEST_CHECK(aria_json_escape(std::string{"\x01\x1f\x7f", 3}) == R"(\u0001\u001f\u007f)");  // 控制字符与 DEL
     AURORA_TEST_CHECK(aria_json_escape("中文 ✅") == "中文 ✅");  // UTF-8 原样透传（JSON 允许）
 }
 
@@ -323,8 +321,7 @@ AURORA_TEST_CASE(ops_json_move_update_can_coexist) {
 }
 
 AURORA_TEST_CASE(announce_json_payload) {
-    AURORA_TEST_CHECK(aria_announce_json(R"(it's "fine")", 0) ==
-                      R"({"text":"it's \"fine\"","target":0})");
+    AURORA_TEST_CHECK(aria_announce_json(R"(it's "fine")", 0) == R"({"text":"it's \"fine\"","target":0})");
     AURORA_TEST_CHECK(aria_announce_json("已保存", 77) == R"({"text":"已保存","target":77})");
 }
 

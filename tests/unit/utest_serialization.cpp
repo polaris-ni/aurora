@@ -107,11 +107,9 @@ AURORA_TEST_CASE(rebuilt_grid_renders_after_host_attaches_builder) {
     AURORA_TEST_REQUIRE_MSG(gv != nullptr, "rebuilt widget is a GridView");
     AURORA_TEST_CHECK_EQ(gv->live_item_count(), static_cast<std::size_t>(0));  // 挂前无条目
 
-    gv->set_item_builder([](int /*index*/) -> Node {
-        return Node{std::make_shared<Skeleton>(Size{.width = 30.0F, .height = 30.0F})};
-    });
-    Constraints viewport{.min = Size{.width = 0.0F, .height = 0.0F},
-                         .max = Size{.width = 200.0F, .height = 40.0F}};
+    gv->set_item_builder(
+        [](int /*index*/) -> Node { return Node{std::make_shared<Skeleton>(Size{.width = 30.0F, .height = 30.0F})}; });
+    Constraints viewport{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 200.0F, .height = 40.0F}};
     LayoutEngine::layout(*gv, viewport);
     AURORA_TEST_CHECK_EQ(gv->live_item_count(), static_cast<std::size_t>(4));  // 首行 4 格
 }

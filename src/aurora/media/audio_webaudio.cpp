@@ -110,11 +110,16 @@ namespace {
 // ---- 宿主接线（零链接标志：跨边界只传 wasm 内存地址，不导出任何 wasm 符号） ----
 
 // 宿主是否有 AudioContext（裸 Node 无 ⇒ 静默降级，保 WASM 侧 ctest 口径不变）。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(int, wa_available, (), { return typeof AudioContext === 'undefined' ? 0 : 1; });
+// clang-format on
 
 // 建上下文并把协商采样率写到给定 int32 地址。返回 0 = 成功。
 // 声道**不随设备**：图侧契约恒 stereo（`AudioDeviceFormat` 首切片约定），多声道输出
 // 由浏览器在 connect(destination) 时自动上混——与 WASAPI/ALSA「设备差异不外露」同口径。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(int, wa_open, (intptr_t out_rate), {
     try {
         const ctx = new AudioContext();
@@ -125,9 +130,12 @@ EM_JS(int, wa_open, (intptr_t out_rate), {
         return -1;
     }
 });
+// clang-format on
 
 /// 建 ScriptProcessor 消费链：JS 回调按 head/tail 两个 int32 地址从 wasm 环取帧；
 /// 环空则补零并累加欠载计数。**不导出 wasm 函数**——这是本后端零链接标志的关键。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(int, wa_attach_processor,
       (intptr_t data_ptr, intptr_t head_ptr, intptr_t tail_ptr, intptr_t underrun_ptr, int capacity_frames,
        int channels), {
@@ -164,8 +172,11 @@ EM_JS(int, wa_attach_processor,
               return -1;
           }
       });
+// clang-format on
 
 // 上下文状态：-1 无实例，0 suspended（待用户手势），1 running，2 其他（closed 等）。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(int, wa_state, (), {
     const w = globalThis.__auroraWa;
     if (!w || !w.ctx) {
@@ -174,8 +185,11 @@ EM_JS(int, wa_state, (), {
     const s = w.ctx.state;
     return s === 'running' ? 1 : (s === 'suspended' ? 0 : 2);
 });
+// clang-format on
 
 // 请求解除自动播放闸门；无手势时浏览器 reject，故吞掉 promise 免脏控制台。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(int, wa_resume, (), {
     const w = globalThis.__auroraWa;
     if (!w || !w.ctx) {
@@ -191,8 +205,11 @@ EM_JS(int, wa_resume, (), {
     }
     return 0;
 });
+// clang-format on
 
 // 拆链并关闭上下文（`__auroraWa` 一并清除，防下次实例读到别人的节点）。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(void, wa_teardown, (), {
     const w = globalThis.__auroraWa;
     if (w) {
@@ -208,6 +225,7 @@ EM_JS(void, wa_teardown, (), {
         delete globalThis.__auroraWa;
     }
 });
+// clang-format on
 
 constexpr int kWaRingCapacity(int rate) {
     // 环容量 ≈ 0.5s（48k 立体声 ⇒ 192 KB 线性内存），下限 4 块。取 0.5s 而非更小：
@@ -264,13 +282,9 @@ WebAudioDeviceBackend::WebAudioDeviceBackend() {
                           0.0F);
 }
 
-WebAudioDeviceBackend::~WebAudioDeviceBackend() {
-    stop();
-}
+WebAudioDeviceBackend::~WebAudioDeviceBackend() { stop(); }
 
-auto WebAudioDeviceBackend::format() const -> AudioDeviceFormat {
-    return impl_->format;
-}
+auto WebAudioDeviceBackend::format() const -> AudioDeviceFormat { return impl_->format; }
 
 auto WebAudioDeviceBackend::start(RenderFn render_block) -> bool {
     if (impl_->pumping || wa_state() == -1) {
@@ -310,9 +324,7 @@ auto WebAudioDeviceBackend::stop() -> void {
     wa_teardown();
 }
 
-auto WebAudioDeviceBackend::context_state() -> int {
-    return wa_state();
-}
+auto WebAudioDeviceBackend::context_state() -> int { return wa_state(); }
 
 auto WebAudioDeviceBackend::retry_resume() -> bool {
     if (wa_state() != 0) {
@@ -322,9 +334,7 @@ auto WebAudioDeviceBackend::retry_resume() -> bool {
     return true;
 }
 
-auto WebAudioDeviceBackend::underruns() const -> int {
-    return impl_->ring.underruns();
-}
+auto WebAudioDeviceBackend::underruns() const -> int { return impl_->ring.underruns(); }
 
 auto WebAudioDeviceBackend::consumed_frames() const -> long long {
     impl_->ring.sync_reader();  // 顺带吸收对端推进（const 观测口兼记账，见头文件说明）
@@ -351,9 +361,7 @@ auto WebAudioDeviceBackend::format() const -> AudioDeviceFormat {
     return AudioDeviceFormat{};  // 处理格式（图在静默模式下按此运转）
 }
 
-auto WebAudioDeviceBackend::start(RenderFn /*render_block*/) -> bool {
-    return false;
-}
+auto WebAudioDeviceBackend::start(RenderFn /*render_block*/) -> bool { return false; }
 
 auto WebAudioDeviceBackend::stop() -> void {}
 
@@ -361,21 +369,13 @@ auto WebAudioDeviceBackend::context_state() -> int {
     return -1;  // 无上下文（更无闸门可言）
 }
 
-auto WebAudioDeviceBackend::retry_resume() -> bool {
-    return false;
-}
+auto WebAudioDeviceBackend::retry_resume() -> bool { return false; }
 
-auto WebAudioDeviceBackend::underruns() const -> int {
-    return 0;
-}
+auto WebAudioDeviceBackend::underruns() const -> int { return 0; }
 
-auto WebAudioDeviceBackend::consumed_frames() const -> long long {
-    return 0;
-}
+auto WebAudioDeviceBackend::consumed_frames() const -> long long { return 0; }
 
-auto WebAudioCaptureBackend::start(CaptureFn /*on_pcm*/) -> bool {
-    return false;
-}
+auto WebAudioCaptureBackend::start(CaptureFn /*on_pcm*/) -> bool { return false; }
 
 auto WebAudioCaptureBackend::stop() -> void {}
 

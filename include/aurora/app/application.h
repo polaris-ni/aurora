@@ -315,10 +315,13 @@ class Application {
 #ifdef AURORA_PLATFORM_WASM
         // 宿主有 requestAnimationFrame 才移交帧环（裸 Node 等无 DOM 宿主没有——loop 变体在本
         // Emscripten 版本返回 void 且无失败码，可用性只能前置探测，不能事后判）。
+        // EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+        // clang-format off
         if (MAIN_THREAD_EM_ASM_INT(({ return typeof requestAnimationFrame === "function" ? 1 : 0; })) != 0) {
             emscripten_request_animation_frame_loop(&Application::raf_tick, this);
             return;  // 帧循环移交浏览器事件环；收尾在末帧 raf_tick 内完成
         }
+        // clang-format on
         AURORA_LOG_ERROR("app", "run(): requestAnimationFrame unavailable; falling back to blocking loop");
 #endif
         while (!should_exit()) {
@@ -505,7 +508,7 @@ class Application {
         anim_.tick(dt);
         sched_.tick(dt);  // 定时任务随帧推进（在 present 前触发，当帧 UI 即可刷新）
         render_all(dt);
-        reap_closed();   // 帧末收割：不在事件派发栈内销毁宿主，避免回调打到半死对象
+        reap_closed();  // 帧末收割：不在事件派发栈内销毁宿主，避免回调打到半死对象
         pump_deferred_work();
         ++loop_frames_;
         return now;

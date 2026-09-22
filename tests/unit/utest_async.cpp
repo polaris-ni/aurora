@@ -56,10 +56,10 @@ struct MainPosterGuard {
 ///        后续任何帧尾扫描都会打到本用例的栈上对象。以「远超期限的 now」扫一趟即全清。
 struct TimeoutGuardsDrain {
     TimeoutGuardsDrain() = default;
-    TimeoutGuardsDrain(const TimeoutGuardsDrain&) = delete;
-    auto operator=(const TimeoutGuardsDrain&) -> TimeoutGuardsDrain& = delete;
-    TimeoutGuardsDrain(TimeoutGuardsDrain&&) = delete;
-    auto operator=(TimeoutGuardsDrain&&) -> TimeoutGuardsDrain& = delete;
+    TimeoutGuardsDrain(const TimeoutGuardsDrain &) = delete;
+    auto operator=(const TimeoutGuardsDrain &) -> TimeoutGuardsDrain & = delete;
+    TimeoutGuardsDrain(TimeoutGuardsDrain &&) = delete;
+    auto operator=(TimeoutGuardsDrain &&) -> TimeoutGuardsDrain & = delete;
     ~TimeoutGuardsDrain() {
         aurora::detail::sweep_due_timeouts(std::chrono::steady_clock::now() + std::chrono::hours{1});
     }
@@ -220,12 +220,10 @@ AURORA_TEST_CASE(timeout_guard_sweep_fires_only_due_entries) {
     auto due_flag = std::make_shared<std::atomic<bool>>(false);
     auto far_flag = std::make_shared<std::atomic<bool>>(false);
     const auto now = std::chrono::steady_clock::now();
-    detail::register_timeout_guard(now - std::chrono::milliseconds{1}, [due_flag]() -> void {
-        due_flag->store(true, std::memory_order_release);
-    });
-    detail::register_timeout_guard(now + std::chrono::seconds{600}, [far_flag]() -> void {
-        far_flag->store(true, std::memory_order_release);
-    });
+    detail::register_timeout_guard(now - std::chrono::milliseconds{1},
+                                   [due_flag]() -> void { due_flag->store(true, std::memory_order_release); });
+    detail::register_timeout_guard(now + std::chrono::seconds{600},
+                                   [far_flag]() -> void { far_flag->store(true, std::memory_order_release); });
 
     AURORA_TEST_CHECK_EQ(detail::sweep_due_timeouts(now), std::size_t{1});
     AURORA_TEST_CHECK_TRUE(due_flag->load(std::memory_order_acquire));
@@ -249,7 +247,7 @@ AURORA_TEST_CASE(timeout_guard_deadline_reports_none_and_clamps_past) {
     detail::register_timeout_guard(now + std::chrono::milliseconds{200}, noop);
     AURORA_TEST_CHECK_EQ(detail::sweep_due_timeouts(now), std::size_t{1});  // 只摘已过期的那条
     const double nearest = detail::next_timeout_deadline_ms(now);
-    AURORA_TEST_CHECK_GE(nearest, 40.0);   // 最小堆语义取最早：50ms 那条仍在表
+    AURORA_TEST_CHECK_GE(nearest, 40.0);  // 最小堆语义取最早：50ms 那条仍在表
     AURORA_TEST_CHECK_LE(nearest, 50.0);
 }
 
@@ -287,8 +285,9 @@ AURORA_TEST_CASE(deferred_with_timeout_fires_at_frame_tail_sweep) {
     AURORA_TEST_CHECK_EQ(ThreadPool::default_pool().pump(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(calls.load(std::memory_order_acquire), 1);
 #else
-    AURORA_TEST_SKIP("deferred 超时路径仅在无 pthreads 构建成立（native 看守是 worker 任务，"
-                     "见 async_with_timeout_delivers_timeout_error）");
+    AURORA_TEST_SKIP(
+        "deferred 超时路径仅在无 pthreads 构建成立（native 看守是 worker 任务，"
+        "见 async_with_timeout_delivers_timeout_error）");
 #endif
 }
 

@@ -393,6 +393,10 @@
 
 ⚠️ `clang-format` 会重排注释，可能把 `NOLINTNEXTLINE` 的理由注释折到它与目标行之间、使抑制失效。**理由注释一律写在 `NOLINTNEXTLINE` 之前**（参见 §10 的 NOLINT 约定）。
 
+### 8.6 JS 互操作宏体整块排除排版
+
+`EM_JS` / `EM_ASM` / `MAIN_THREAD_EM_ASM_*` 的宏体是 JavaScript，clang-format 按 C++ 解析会把 `===` 拆成 `== =`、`=>` 拆成 `= >`、并吃掉 `EM_JS` 形参列表的外层括号——排版门禁全绿、WASM 构建才炸。因此**每一处 JS 宏块都用 `// clang-format off` … `// clang-format on` 整块包住**，指令必须裸写（带尾注的 `// clang-format off (理由)` 不生效），理由写在指令上一行。机制细节与实测落点见 `BUILD_OPTIONS.md` §4.7。
+
 ---
 
 ## 9 内部工具层约定

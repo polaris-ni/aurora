@@ -469,8 +469,10 @@ AURORA_TEST_CASE(arrow_keys_honour_the_navigation_keys_opt_in) {
     FocusManager fm;
     fm.set_root(tree.row.get());
     // 方向键导航按「最近一次绘制的绝对盒」取几何（本夹具不走绘制），经测试 seam 手工给出。
-    tree.box1->set_focus_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 40.0F, .height = 40.0F}});
-    tree.box2->set_focus_bounds(Rect{.origin = Point{.x = 40.0F, .y = 0.0F}, .size = Size{.width = 40.0F, .height = 40.0F}});
+    tree.box1->set_focus_bounds(
+        Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 40.0F, .height = 40.0F}});
+    tree.box2->set_focus_bounds(
+        Rect{.origin = Point{.x = 40.0F, .y = 0.0F}, .size = Size{.width = 40.0F, .height = 40.0F}});
     fm.set_focus(tree.box1.get());
 
     auto press_right = []() -> KeyEvent {

@@ -49,7 +49,7 @@ namespace {
 /// @brief 探针观测聚合：仅主线程（浏览器单线程事件环）读写，无需加锁。
 /// ⚠️ 帧回调引用态必须堆持（shared_ptr）——rAF 模式 main 注册后即返回，捕获栈变量即悬空。
 struct Obs {
-    int clicks = 0;   ///< 「确定」按钮经无障碍动作通道被执行次数（② Invoke 闭环）。
+    int clicks = 0;  ///< 「确定」按钮经无障碍动作通道被执行次数（② Invoke 闭环）。
     int announces = 0;  ///< 播报按钮触发次数（③ 通道路过证明）。
     bool cb_checked = false;  ///< Checkbox 现值（on_changed 回写，② Toggle 闭环）。
     std::string entry_value;  ///< TextInput 现值（点击联动 clk-N）。
@@ -66,7 +66,10 @@ auto publish_title(const std::string &title) -> void {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
 #endif
+    // EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+    // clang-format off
     EM_ASM({ document.title = UTF8ToString($0); }, title.c_str());
+    // clang-format on
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
@@ -131,9 +134,9 @@ auto main() -> int {
 
     // 每帧发布观测标题；桥的 sync/pump 由 present() 帧尾自动执行，探针不触碰。
     app_keep_alive->set_on_frame([obs]() -> void {
-        publish_title("aria c=" + std::to_string(obs->clicks)                        //
-                      + " a=" + std::to_string(obs->announces)                       //
-                      + " cb=" + (obs->cb_checked ? "1" : "0")                       //
+        publish_title("aria c=" + std::to_string(obs->clicks)  //
+                      + " a=" + std::to_string(obs->announces)  //
+                      + " cb=" + (obs->cb_checked ? "1" : "0")  //
                       + " ev=" + (obs->entry_value.empty() ? "-" : obs->entry_value));
     });
     app_keep_alive->run();

@@ -91,12 +91,12 @@ class WasmAriaBridge final : public a11y::Provider {
     static auto raf_tick(double /*time*/, void *user_data) -> bool;
 
     std::string container_id_;
-    Widget *root_ = nullptr;             ///< 非拥有裸根（生命周期由宿主 `present_root` 喂入/切断）
-    a11y::TreeSnapshot snapshot_;        ///< 活快照（DOM 镜像与之同构；widget 指针仅本帧内有效）
-    bool has_snapshot_ = false;          ///< false = 下次同步走全量载荷
-    bool dirty_ = true;                  ///< 拉取式脏位（D9）
-    bool active_ = false;                ///< 生命周期闩（activate/deactivate 幂等）
-    bool raf_pending_ = false;           ///< 已排一拍未落（防双链；落拍/出局时复位）
+    Widget *root_ = nullptr;  ///< 非拥有裸根（生命周期由宿主 `present_root` 喂入/切断）
+    a11y::TreeSnapshot snapshot_;  ///< 活快照（DOM 镜像与之同构；widget 指针仅本帧内有效）
+    bool has_snapshot_ = false;  ///< false = 下次同步走全量载荷
+    bool dirty_ = true;  ///< 拉取式脏位（D9）
+    bool active_ = false;  ///< 生命周期闩（activate/deactivate 幂等）
+    bool raf_pending_ = false;  ///< 已排一拍未落（防双链；落拍/出局时复位）
     bool rtl_ = false;
 };
 

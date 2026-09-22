@@ -51,9 +51,7 @@ auto read_out(aurora::detail::WebAudioRing &ring, int frames, std::vector<float>
     return n;
 }
 
-auto zero_render(float *out, int frames) -> void {
-    std::fill_n(out, static_cast<std::size_t>(frames) * kCh, 0.0F);
-}
+auto zero_render(float *out, int frames) -> void { std::fill_n(out, static_cast<std::size_t>(frames) * kCh, 0.0F); }
 
 }  // namespace
 

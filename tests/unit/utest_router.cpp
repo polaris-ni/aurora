@@ -142,10 +142,11 @@ AURORA_TEST_CASE(with_chains_into_a_const_ready_table) {
     // 链式建表：三条路由一次成表，且工厂照常「每次构建产出全新树」。
     int built = 0;
     const Router router = Router{}
-                              .with("home", [&built]() -> Route {
-                                  ++built;
-                                  return Route{Node{SolidBox{}}, "home"};
-                              })
+                              .with("home",
+                                    [&built]() -> Route {
+                                        ++built;
+                                        return Route{Node{SolidBox{}}, "home"};
+                                    })
                               .with("detail", []() -> Route { return Route{Node{SolidBox{}}, "detail"}; })
                               .with("settings", []() -> Route { return Route{Node{SolidBox{}}, "settings"}; });
 

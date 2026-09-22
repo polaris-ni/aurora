@@ -354,7 +354,7 @@ AURORA_TEST_CASE(deserialized_offset_wins_over_restore_key) {
     AURORA_TEST_CHECK_NEAR(restored.scroll_offset(), 480.0F, 1e-3F);
     AURORA_TEST_CHECK_TRUE(restored.live_item_count() > 0U);
     AURORA_TEST_CHECK_FALSE(rec.items.contains(0));  // 偏移 480：第 0 行早已滚出
-    AURORA_TEST_CHECK_TRUE(rec.items.contains(6));   // 行 2 起（含 cache_extent 缓冲）
+    AURORA_TEST_CHECK_TRUE(rec.items.contains(6));  // 行 2 起（含 cache_extent 缓冲）
     storage.clear_all();
 }
 

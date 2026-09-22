@@ -78,13 +78,13 @@ namespace {
 struct Obs {
     std::string a_text;  ///< win-a 输入框当前值（TextInputEvent 通道）。
     std::string b_text;
-    int a_sub = 0;       ///< Enter 提交次数（KeyEvent 通道）。
+    int a_sub = 0;  ///< Enter 提交次数（KeyEvent 通道）。
     int b_sub = 0;
     au::Application *app = nullptr;  ///< 关窗命令的执行者（`close_window` 按 id 请求）。
     au::Window *wa = nullptr;
     au::Window *wb = nullptr;  ///< 帧末 reap 真死后由存活判定置空。
     au::WindowId id_b = au::AURORA_INVALID_WINDOW_ID;  ///< win-b 的宿主 id（0 = 未开窗）。
-    std::string note;          ///< 最近一条命令的执行回执，便于排障。
+    std::string note;  ///< 最近一条命令的执行回执，便于排障。
 };
 
 // 页面侧数据搬运一律走 EM_JS：**不**用 `emscripten/val.h`——embind/emval 在本代 Emscripten
@@ -95,12 +95,17 @@ struct Obs {
 // 分析，`''` 会被判为「空字符常量」而报 -Winvalid-pp-token。
 
 /// @brief 命令队列当前长度（`window.__mwCmd`，未定义即空）。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(int, cmd_count_js, (), {
     const q = window.__mwCmd;
     return q && q.length ? q.length : 0;
 });
+// clang-format on
 
 /// @brief 把第 idx 条命令以 UTF-8 落进 wasm 内存（NUL 结尾；超出容量即截断）。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(void, cmd_at_js, (char *dst, int cap, int idx), {
     const s = String((window.__mwCmd || [])[idx] || "");
     const enc = new TextEncoder().encode(s);
@@ -110,9 +115,13 @@ EM_JS(void, cmd_at_js, (char *dst, int cap, int idx), {
     }
     HEAPU8[dst + n] = 0;
 });
+// clang-format on
 
 /// @brief 排空命令队列（命令只执行一次）。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(void, cmd_clear_js, (), { window.__mwCmd = []; });
+// clang-format on
 
 auto cmd_count() -> int { return cmd_count_js(); }
 
@@ -127,6 +136,8 @@ auto cmd_clear() -> void { cmd_clear_js(); }
 /// @brief 把状态串发布到 `window.__mwState`，并由 JS 侧就地补齐三条 DOM 观测。
 /// @note DOM 三段（`order=` 层叠序 / `zTop=` 交叠命中者 / `dt=` 页面标题）必须在 JS 里读，
 ///       C++ 侧没有 DOM；`dt=` 只是给排障看的镜像，判据仍以自动化直读 `document.title` 为准。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
 EM_JS(void, publish_state_js, (const char *base), {
     const a = document.getElementById("win-a");
     const b = document.getElementById("win-b");
@@ -148,6 +159,7 @@ EM_JS(void, publish_state_js, (const char *base), {
     }
     window.__mwState = UTF8ToString(base) + " order=" + order + " zTop=" + zTop + " dt=" + document.title;
 });
+// clang-format on
 
 auto publish_state(const std::string &state) -> void { publish_state_js(state.c_str()); }
 
@@ -211,11 +223,13 @@ auto main() -> int {
 
     // 两窗口各一个 TextInput：on_changed 证字符折算（④），on_submit 证控制键（① KeyEvent 路）。
     au::TextInput ta;
-    ta.set_on_changed([obs](const std::string &v) -> void { obs->a_text = v; })
-        .set_on_submit([obs](const std::string &) -> void { ++obs->a_sub; });
+    ta.set_on_changed([obs](const std::string &v) -> void {
+          obs->a_text = v;
+      }).set_on_submit([obs](const std::string &) -> void { ++obs->a_sub; });
     au::TextInput tb;
-    tb.set_on_changed([obs](const std::string &v) -> void { obs->b_text = v; })
-        .set_on_submit([obs](const std::string &) -> void { ++obs->b_sub; });
+    tb.set_on_changed([obs](const std::string &v) -> void {
+          obs->b_text = v;
+      }).set_on_submit([obs](const std::string &) -> void { ++obs->b_sub; });
 
     au::Node root_a = au::Column{
         au::Text{au::LocalizedString{"window A (canvas win-a)"}},
@@ -273,13 +287,13 @@ auto main() -> int {
             const au::Size sb = obs->wb->size();
             state += " B[" + obs->b_text + "/" + std::to_string(obs->b_sub) + "]";
             state += " szB=" + std::to_string(static_cast<int>(sb.width)) + "x"  //
-                   + std::to_string(static_cast<int>(sb.height));
+                     + std::to_string(static_cast<int>(sb.height));
             state += " tb=" + cached_title(obs->wb);
         } else {
             state += " B[closed]";
         }
         state += " szA=" + std::to_string(static_cast<int>(sa.width)) + "x"  //
-               + std::to_string(static_cast<int>(sa.height));
+                 + std::to_string(static_cast<int>(sa.height));
         state += " ta=" + cached_title(obs->wa);
         state += " cmd=" + obs->note;
         publish_state(state);
