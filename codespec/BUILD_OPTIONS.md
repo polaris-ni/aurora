@@ -13,7 +13,7 @@
 |:---|:---|:---|:---|
 | `AURORA_BUILD_*` | 构建产物开关 | 是否**构建**某个额外交付物（demos / tests / Inspector 服务器） | 否（例外：`AURORA_BUILD_INSPECTOR_SERVER`（§2.3）的开关名同时作为编译宏注入——与后端组「开关名 = 宏名」同惯例） |
 | `AURORA_BACKEND_*` | 内置后端开关 | 每个**内置 `Surface` 图形后端**一个开关；**开关名 = PUBLIC feature 宏名** | 是（`#ifdef` 剪裁 + PUBLIC 传播给消费者） |
-| `AURORA_ENABLE_*` | 插桩 / 分析 / 能力开关 | 是否注入编译 / 链接期分析工具（覆盖率 / 内存检测 / 调试 / 性能插桩）或开启构建加速 / 内部能力（lld / ccache / SIMD / DEBUG / 测试注入点 / 内置音频设备后端） | 多数否；`PROFILING` / `TRACING` 与架构级优化三开关及 `DEBUG` / `TEST_HOOKS` / `AUDIO` / `AUDIO_WASAPI` / `AUDIO_ALSA` 注入 PUBLIC 宏，`SIMD` / `IMAGE_*` 注入内部宏，`LLD` / `CCACHE` 不注入宏 |
+| `AURORA_ENABLE_*` | 插桩 / 分析 / 能力开关 | 是否注入编译 / 链接期分析工具（覆盖率 / 内存检测 / 调试 / 性能插桩）或开启构建加速 / 内部能力（lld / ccache / SIMD / DEBUG / 测试注入点 / 内置音频设备后端） | 多数否；`PROFILING` / `TRACING` 与架构级优化三开关及 `DEBUG` / `TEST_HOOKS` / `AUDIO` / `AUDIO_WASAPI` / `AUDIO_ALSA` / `AUDIO_WEBAUDIO` 注入 PUBLIC 宏，`SIMD` / `IMAGE_*` 注入内部宏，`LLD` / `CCACHE` 不注入宏 |
 
 > `Win32/GDI` 后端仅在 `_WIN32` 下编译，无需额外开关，已由 `AURORA_BACKEND_WIN32` 的内置默认值覆盖。
 
@@ -26,7 +26,7 @@
 | `cmake/AuroraFeatures.cmake` | **feature 宏单一入口** `aurora_define_feature(<宏> [SCOPE] [TARGET] [RAW] [EXPORT])`：定义注入 + `AURORA_FEATURE_DEFINES` 导出登记二合一；全部 feature 宏调用点（后端 / 优化 / SIMD / PROFILING / TRACING / DEBUG / 编解码）经它声明。运行时查询入口 `aurora::debug::feature_flags()`（`include/aurora/debug/feature_flags.h`） |
 | `cmake/AuroraThirdParty.cmake` | FreeType / HarfBuzz 源码构建 |
 | `cmake/AuroraUtils.cmake` | 消费者目标统一配置辅助（`aurora_setup_consumer_target`，demo / 测试 / 工具复用链接 / PCH / C++20 / 告警 / MinGW `-Wa,-mbig-obj`） |
-| `cmake/AuroraBackends.cmake` | 全部 `AURORA_BACKEND_*` Surface 图形后端剪裁开关 + 音频设备后端开关（`AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA`，ENABLE 组）+ 存储 SQLite 后端开关（`AURORA_ENABLE_STORAGE_SQLITE`，ENABLE 组）+ 架构级优化宏（`AURORA_ENABLE_LAYOUT_CACHE` 等） |
+| `cmake/AuroraBackends.cmake` | 全部 `AURORA_BACKEND_*` Surface 图形后端剪裁开关 + 音频设备后端开关（`AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_WEBAUDIO`，ENABLE 组）+ 存储 SQLite 后端开关（`AURORA_ENABLE_STORAGE_SQLITE`，ENABLE 组）+ 架构级优化宏（`AURORA_ENABLE_LAYOUT_CACHE` 等） |
 | `cmake/AuroraImageCodecs.cmake` | `AURORA_ENABLE_IMAGE_JPEG` / `AURORA_ENABLE_IMAGE_WEBP` / `AURORA_ENABLE_IMAGE_PNG`（编译期能力开关） |
 | `cmake/AuroraSimd.cmake` | `AURORA_ENABLE_SIMD`（光栅内核 SIMD 双实现，内部宏，不 PUBLIC 传播） |
 | `cmake/AuroraCcache.cmake` | `AURORA_ENABLE_CCACHE`（ccache 编译缓存启动器） |
@@ -90,7 +90,7 @@ cmake -S . -B build -DAURORA_BUILD_INSPECTOR_SERVER=ON
 | 说明 | 定义 `tools/verify/` 下的**真机验收探针**可执行目标。这类探针证明的是「无头 CI 无法证明」的平台接线能力（典型：光标形状的各后端 `Surface::set_cursor` 是否真的改变了屏幕上显示的光标；输入法桥的 `WM_IME_*` 是否真的落到焦点控件） |
 | 传播宏 | 无（纯交付物开关，不向库代码注入宏） |
 | 模块 | `cmake/AuroraVerify.cmake` |
-| 产物 | 按条件定义：`aurora_verify_x11_cursor`（`AURORA_BACKEND_X11`）/ `aurora_verify_wayland_cursor`（`AURORA_BACKEND_WAYLAND`）/ `aurora_verify_win32_cursor`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`）/ `aurora_verify_macos_cursor`（`APPLE` 且开 `AURORA_BACKEND_MACOS`，需 ObjC++）/ `aurora_verify_glfw_cursor`（`AURORA_BACKEND_GLFW`）/ `aurora_verify_glfw_gpu_features`（`AURORA_BACKEND_GLFW` 且开 `AURORA_ENABLE_GLFW_GPU_GL`）/ `aurora_verify_win32_ua`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，另链 `oleacc`）/ `aurora_verify_win32_ime`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，`imm32` 已随库 PUBLIC 链接）/ `aurora_verify_x11_ime`（`LINUX` 且开 `AURORA_BACKEND_X11`，XIM 协商/焦点宣告/XTEST 落键）/ `aurora_verify_wayland_ime`（`LINUX` 且开 `AURORA_BACKEND_WAYLAND`，门 `AURORA_HAVE_WL_TEXT_INPUT`）/ `aurora_verify_win32_wgpu`（`WIN32` 且开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_WIN32`，§3.8）/ `aurora_verify_x11_wgpu`（开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_X11`，§3.8，XGetImage 截图物证，需 `AURORA_ENABLE_DEBUG` 开启）/ `aurora_verify_wayland_wgpu`（开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_WAYLAND`，§3.8）/ `aurora_verify_wasapi_audio`（`WIN32` 且开 `AURORA_ENABLE_AUDIO_WASAPI`）/ `aurora_verify_alsa_audio`（`LINUX` 且开 `AURORA_ENABLE_AUDIO_ALSA`）；聚合目标 `aurora_verify` |
+| 产物 | 按条件定义：`aurora_verify_x11_cursor`（`AURORA_BACKEND_X11`）/ `aurora_verify_wayland_cursor`（`AURORA_BACKEND_WAYLAND`）/ `aurora_verify_win32_cursor`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`）/ `aurora_verify_macos_cursor`（`APPLE` 且开 `AURORA_BACKEND_MACOS`，需 ObjC++）/ `aurora_verify_glfw_cursor`（`AURORA_BACKEND_GLFW`）/ `aurora_verify_glfw_gpu_features`（`AURORA_BACKEND_GLFW` 且开 `AURORA_ENABLE_GLFW_GPU_GL`）/ `aurora_verify_win32_ua`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，另链 `oleacc`）/ `aurora_verify_win32_ime`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，`imm32` 已随库 PUBLIC 链接）/ `aurora_verify_x11_ime`（`LINUX` 且开 `AURORA_BACKEND_X11`，XIM 协商/焦点宣告/XTEST 落键）/ `aurora_verify_wayland_ime`（`LINUX` 且开 `AURORA_BACKEND_WAYLAND`，门 `AURORA_HAVE_WL_TEXT_INPUT`）/ `aurora_verify_win32_wgpu`（`WIN32` 且开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_WIN32`，§3.8）/ `aurora_verify_x11_wgpu`（开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_X11`，§3.8，XGetImage 截图物证，需 `AURORA_ENABLE_DEBUG` 开启）/ `aurora_verify_wayland_wgpu`（开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_WAYLAND`，§3.8）/ `aurora_verify_wasapi_audio`（`WIN32` 且开 `AURORA_ENABLE_AUDIO_WASAPI`）/ `aurora_verify_alsa_audio`（`LINUX` 且开 `AURORA_ENABLE_AUDIO_ALSA`）；聚合目标 `aurora_verify`。**浏览器**产物另按 `EMSCRIPTEN` + `AURORA_BACKEND_WASM` 定义 `aurora_verify_wasm_raf` / `aurora_verify_wasm_multiwin` / `aurora_verify_wasm_aria` / `aurora_verify_wasm_audio`（末者另需 `AURORA_ENABLE_AUDIO_WEBAUDIO`）——它们是 `.html+.js+.wasm` 三件套、须走本地 http 由无头 Edge 打开，判据由随库的 `tools/verify/wasm_*_cdp_drive.mjs` 派发，**有意不进**聚合目标（该目标面向本机直接运行的探针） |
 
 三点与其它"产物开关"不同的地方：
 
@@ -112,7 +112,7 @@ cmake --build build-verify --target aurora_verify_x11_cursor
 
 ## 3 `AURORA_BACKEND_*`：后端开关（= feature 宏）
 
-每个内置 `Surface` 图形后端一个开关；GPU 栅格后端 `AURORA_BACKEND_GPU_WGPU`（wgpu，§3.8）亦归此组。而 `AURORA_ENABLE_GLFW_GPU_GL` 是既有 GLFW 后端之上的 GPU 栅格模式增强、非独立后端，内置音频设备后端（`AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA`）为能力开关，二者均归 `AURORA_ENABLE_*` 组（§4）。**开关名与 PUBLIC 编译宏名完全相同**，宏以 `target_compile_definitions(aurora PUBLIC …)` 传播给所有消费者；库代码用 `#ifdef AURORA_BACKEND_XXX` 做代码剪裁。关闭某后端后，对应实现类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端。自定义注入路径（自定义 `Surface` / 自定义 `AudioDeviceBackend`）始终可用，故「只用自定义 backend」可不编译任何内置后端。
+每个内置 `Surface` 图形后端一个开关；GPU 栅格后端 `AURORA_BACKEND_GPU_WGPU`（wgpu，§3.8）亦归此组。而 `AURORA_ENABLE_GLFW_GPU_GL` 是既有 GLFW 后端之上的 GPU 栅格模式增强、非独立后端，内置音频设备后端（`AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_WEBAUDIO`）为能力开关，二者均归 `AURORA_ENABLE_*` 组（§4）。**开关名与 PUBLIC 编译宏名完全相同**，宏以 `target_compile_definitions(aurora PUBLIC …)` 传播给所有消费者；库代码用 `#ifdef AURORA_BACKEND_XXX` 做代码剪裁。关闭某后端后，对应实现类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端。自定义注入路径（自定义 `Surface` / 自定义 `AudioDeviceBackend`）始终可用，故「只用自定义 backend」可不编译任何内置后端。
 
 | 选项 | 默认值 | 含义 | 传播宏 | 额外链接 |
 |:---|:---|:---|:---|:---|
@@ -285,9 +285,10 @@ cmake --build build
 | `AURORA_ENABLE_IMAGE_JPEG` | `OFF` | JPEG 图像解码能力（libjpeg-turbo 源码构建） | 注入 `AURORA_ENABLE_IMAGE_JPEG`（仅库内部，不 PUBLIC 传播）；详见 §4.6 |
 | `AURORA_ENABLE_IMAGE_WEBP` | `OFF` | WebP 图像解码能力（libwebp 源码构建） | 注入 `AURORA_ENABLE_IMAGE_WEBP`（同上） |
 | `AURORA_ENABLE_IMAGE_PNG` | `OFF` | PNG/GIF 图像解码能力（wuffs 源码构建） | 注入 `AURORA_ENABLE_IMAGE_PNG`（同上） |
-| `AURORA_ENABLE_AUDIO` | `OFF` | 内置音频设备后端（`media/audio.h` 的 `AudioContext` 图 API **恒编译**——对齐 RHI 先例：契约常在、能力经 `feature_flags().audio` 运行期查询；本开关只决定是否编入内置设备后端。未启用或设备初始化失败 → `AudioContext` 静默模式：图照常运转、样本消费后丢弃，`device_state()==Silent`，对齐 GPU 通道回退语义）。后端明细见下两行 | 注入 `AURORA_ENABLE_AUDIO`（PUBLIC 传播，经 `aurora_define_feature` 注册） |
+| `AURORA_ENABLE_AUDIO` | `OFF` | 内置音频设备后端（`media/audio.h` 的 `AudioContext` 图 API **恒编译**——对齐 RHI 先例：契约常在、能力经 `feature_flags().audio` 运行期查询；本开关只决定是否编入内置设备后端。未启用或设备初始化失败 → `AudioContext` 静默模式：图照常运转、样本消费后丢弃，`device_state()==Silent`，对齐 GPU 通道回退语义）。后端明细见下三行 | 注入 `AURORA_ENABLE_AUDIO`（PUBLIC 传播，经 `aurora_define_feature` 注册） |
 | `AURORA_ENABLE_AUDIO_WASAPI` | `AURORA_ENABLE_AUDIO=ON` 时 Windows `ON`，否则 `OFF` | WASAPI 音频设备后端（shared mode event-driven；`AudioContext` 的 Windows 内置默认设备。**前置依赖 `AURORA_ENABLE_AUDIO=ON`**，未开启音频时本开关不生效；非 Windows 开启 FATAL） | 注入 `AURORA_ENABLE_AUDIO_WASAPI`（PUBLIC 传播，经 `aurora_define_feature` 注册；额外链接 `ole32`——COM：MMDevice + IAudioClient，仅 Windows） |
 | `AURORA_ENABLE_AUDIO_ALSA` | `AURORA_ENABLE_AUDIO=ON` 时 Linux `ON`，否则 `OFF` | ALSA 音频设备后端（Linux 对位后端：`"default"` 端点 + 简单参数 API，设备线程 avail/writei 驱动，XRUN/挂起自愈、断连退避重开）。**运行时绑定 `dlopen("libasound.so.2")`——零构建期依赖**（不需 libasound dev 包、不链 libasound；库缺失仅运行期 `start` 返回 false → 静默降级）。**前置依赖 `AURORA_ENABLE_AUDIO=ON`**；非 Linux 开启 FATAL | 注入 `AURORA_ENABLE_AUDIO_ALSA`（PUBLIC 传播，经 `aurora_define_feature` 注册；另链 `${CMAKE_DL_LIBS}`——glibc < 2.34 需 `-ldl`，之后为空） |
+| `AURORA_ENABLE_AUDIO_WEBAUDIO` | `AURORA_ENABLE_AUDIO=ON` 时 Emscripten `ON`，否则 `OFF` | Web Audio 音频设备后端（浏览器对位后端：`AudioContext` + `ScriptProcessorNode` 消费链 + 主线程定间隔**推式环**缓冲，`src/aurora/media/audio_webaudio.cpp`）。与桌面后端的根本差异是**没有设备线程**——JS 侧回调调不进 wasm，故 C++ 每 20ms 把图渲染成帧推入线性内存环、JS 按头尾两个 int32 地址消费；跨边界只传地址，**零链接标志、零导出符号**（`EXPORT_KEEPALIVE` 默认 0 时 JS 调不到 wasm 函数，`embind` 又是 port）。另有自动播放闸门：`start()` 返回 true 只表示「设备在收样」，**不等于出声**，需用户手势后由排空拍限速 `resume()` 开闸；端到端延迟约 60–150ms，欠载补零并计数。采集（`getUserMedia`）首切片**未接线** → `WebAudioCaptureBackend` 恒 disabled 桩。**前置依赖 `AURORA_ENABLE_AUDIO=ON`**；非 Emscripten 开启 FATAL | 注入 `AURORA_ENABLE_AUDIO_WEBAUDIO`（PUBLIC 传播，经 `aurora_define_feature` 注册；`feature_flags().enable_audio_webaudio` 运行期可查） |
 | `AURORA_ENABLE_STORAGE_SQLITE` | `OFF` | 存储层 `SqliteBackend` 后端（记录仓储第三后端：真事务 BEGIN IMMEDIATE/COMMIT/ROLLBACK、二进制载荷 BLOB 内联无 sidecar、`contains`/`clear` 单语句化）。存储门面与 Memory/Filesystem 两后端**恒编译**；本开关只决定是否编入 SQLite 后端与 `Storage::create(SqliteOptions)` 重载。sqlite3 以 amalgamation 源码入库 `third_party/sqlite/`（3.53.4，Public Domain），关闭时链接产物完全不含该组件 | 注入 `AURORA_ENABLE_STORAGE_SQLITE`（PUBLIC 传播，经 `aurora_define_feature` 注册；独立静态目标 `aurora_sqlite3` 编入 `sqlite3.c`，定义 `SQLITE_THREADSAFE=1` / `SQLITE_OMIT_LOAD_EXTENSION`，非 Win 另链 `dl`/`pthread`） |
 | `AURORA_ENABLE_GLFW_GPU_GL` | `OFF` | GLFW 的 GPU OpenGL 3.3 core 栅格能力（`GpuGlRhi`：DisplayList 批渲染 + MSAA）。**非独立 `Surface` 后端**——仅为 `GlfwSurface` 的 GPU 栅格模式增强：无 `SurfaceKind`、硬依赖 `AURORA_BACKEND_GLFW`、GL 上下文与呈现由 GLFW 后端承担；未开 `AURORA_BACKEND_GLFW` 配置期 FATAL，GPU 初始化失败运行期自动回退软件纹理上传路径，`Surface::gpu_backend()` 非空时 `name()` 恒为 `"gpu-gl"`。细节见 §3.1 | 注入 `AURORA_ENABLE_GLFW_GPU_GL`（仅库内部，不 PUBLIC 传播；`GpuGlRhi` 类恒编译进库，宏只控制 `GlfwSurface` 是否接线 GPU 模式） |
 
@@ -651,6 +652,7 @@ cmake --build build
 -D AURORA_ENABLE_AUDIO=ON|OFF       # 内置音频设备后端（默认 OFF；图 API 恒编译，关闭=静默模式）
 -D AURORA_ENABLE_AUDIO_WASAPI=ON|OFF   # WASAPI 音频（依赖 ENABLE_AUDIO=ON；Win 默认 ON，否则 OFF）
 -D AURORA_ENABLE_AUDIO_ALSA=ON|OFF   # ALSA 音频（依赖 ENABLE_AUDIO=ON；Linux 默认 ON，否则 OFF；dlopen 零构建依赖）
+-D AURORA_ENABLE_AUDIO_WEBAUDIO=ON|OFF   # Web Audio 音频（依赖 ENABLE_AUDIO=ON；Emscripten 默认 ON，否则 OFF；推式环零导出）
 -D AURORA_ENABLE_STORAGE_SQLITE=ON|OFF   # SQLite 存储后端（默认 OFF；存储门面与 Memory/Filesystem 恒编译）
 
 # 架构级优化（= feature 宏，PUBLIC 传播，默认均 ON）

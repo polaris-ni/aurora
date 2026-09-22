@@ -73,10 +73,15 @@ enum class AudioDeviceState {
 
 /// @brief 音频设备后端接口（**设备层薄**：真实后端与测试桩共用同一出口契约）。
 ///
-/// 真实后端（WASAPI/CoreAudio/…）在 start() 内自起设备线程并周期性回调 render_block；
+/// 真实后端（WASAPI/ALSA/…）在 start() 内自起设备线程并周期性回调 render_block；
 /// 测试桩不起线程、由测试手动触发，保证确定性。
+/// **浏览器例外**（如实申报）：Web Audio 的音频渲染线程在 JS 侧、调不进 wasm，故
+/// `WebAudioDeviceBackend` 由**主线程**（= UI 线程）的定间隔回调驱动 render_block，
+/// 采样经推式环缓冲交给 JS 消费——「render_block 发生在设备线程」在此不成立，
+/// 详见 src/aurora/media/audio_webaudio.h 文件头。
 ///
 /// @note Thread: start/stop 由 AudioContext 所属线程调用；render_block 回调发生在设备线程
+///       （Web Audio 后端：浏览器主线程）
 /// @note Side-effects: none
 /// @note Rebuildable: no
 class AudioDeviceBackend {
@@ -539,6 +544,10 @@ class AudioRecordingDestinationNode final : public AudioNode {
 /// - suspend 冻结采样时钟并输出静音；close 终止（后续操作返回 audio-context-closed）。
 /// - 无内置后端编译（AURORA_ENABLE_AUDIO 关）或设备初始化失败 → 静默模式：
 ///   图照常运转、样本消费后丢弃，device_state() 报 Silent。
+/// - 浏览器（Web Audio 后端）另有一道**自动播放闸门**：`device_state()` 报 Active 只
+///   表示设备存在且在收样，**不等于已出声**——上下文在用户首次交互前保持 suspended，
+///   后端每秒限速重试解锁，一次点击/按键即开声（`WebAudioDeviceBackend::context_state()`
+///   为该闸门的只读观测口，库内部）。
 ///
 /// @note Thread: 图变更/参数为 UI 线程；render_block 为单渲染线程（设备线程或宿主手动驱动）
 /// @note Side-effects: 设备后端线程生命周期；静默模式零系统副作用

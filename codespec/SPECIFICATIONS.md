@@ -180,7 +180,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 |:---|:---|
 | [`01-core.md`](specification/01-core.md) | 基础层 `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池、`au::TODO`；需求 #18 / #19 / #21 / #23 |
 | [`02-state.md`](specification/02-state.md) | 响应式 `state/`：信号原语、订阅生命周期、`Store`、异步与协程、依赖图与撤销；需求 #6 / #19 |
-| [`03-layout-render.md`](specification/03-layout-render.md) | `layout/` + `render/` + `image/` + `media/`：布局协议、Flex / Grid 算法、Painter、字体引擎、Surface 与后端、音频图（Web Audio 语义节点图 + WASAPI 设备层）；需求 #11 / #20 |
+| [`03-layout-render.md`](specification/03-layout-render.md) | `layout/` + `render/` + `image/` + `media/`：布局协议、Flex / Grid 算法、Painter、字体引擎、Surface 与后端、音频图（Web Audio 语义节点图 + WASAPI / ALSA / Web Audio 三端设备层）；需求 #11 / #20 |
 | [`04-widget.md`](specification/04-widget.md) | `widget/` + `ui/`：控件基类契约、自描述、控件清单、可定制性契约；需求 #7 / #22 |
 | [`05-event-navigation.md`](specification/05-event-navigation.md) | `event/` + `animation/` + `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈；需求 #8 |
 | [`06-app-platform.md`](specification/06-app-platform.md) | `app/` + `window/`（平台 API 在 `window/platform.h`）+ `preferences/` + `storage/` + `perf/` + `debug/`：应用驱动、多窗口容器（`WindowHost`）、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面；需求 #14 / #15 / #25

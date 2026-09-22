@@ -461,6 +461,25 @@ if (AURORA_ENABLE_AUDIO)
         target_link_libraries(aurora PUBLIC ${CMAKE_DL_LIBS})
         aurora_log("ALSA audio backend enabled (runtime-bound libasound, zero build dependency)")
     endif ()
+    # 浏览器对位后端：Web Audio（第三足——Windows WASAPI / Linux ALSA / 浏览器 Web Audio）。
+    # 零链接标志、零导出符号：C++ 主线程定间隔把图渲染成帧推入线性内存环，JS 经
+    # HEAPF32/HEAP32 视图按地址消费（详见 src/aurora/media/audio_webaudio.h）。
+    # 无 -pthread 时 AudioContext 不存在（裸 Node），故 wasm 侧测试仍走静默降级。
+    if (EMSCRIPTEN)
+        option(AURORA_ENABLE_AUDIO_WEBAUDIO
+                "Build Web Audio backend (browser AudioContext, main-thread push ring)" ON)
+    else ()
+        option(AURORA_ENABLE_AUDIO_WEBAUDIO
+                "Build Web Audio backend (browser AudioContext, main-thread push ring)" OFF)
+    endif ()
+    if (AURORA_ENABLE_AUDIO_WEBAUDIO)
+        if (NOT EMSCRIPTEN)
+            aurora_error("AURORA_ENABLE_AUDIO_WEBAUDIO is only supported on Emscripten;"
+                    " disable it or turn off AURORA_ENABLE_AUDIO on other platforms.")
+        endif ()
+        aurora_define_feature(AURORA_ENABLE_AUDIO_WEBAUDIO EXPORT)
+        aurora_log("Web Audio backend enabled (AudioContext + main-thread push ring)")
+    endif ()
 endif ()
 
 # ---- 存储 SQLite 后端（记录仓储第三后端，opt-in，默认 OFF） ----

@@ -31,7 +31,7 @@
 | 18 | **Result / Error（错误）** | `Result<T>` `Error` | `core/result.h` `core/error_codes.h` |
 | 19 | **Lifecycle / Window（生命周期）** | `Lifecycle`（控件挂载 / 卸载副作用） `WindowState`（Visible / Occluded / Hidden） `WindowMode`（Normal / Maximized / Minimized / FullScreen） | `widget/lifecycle.h` `window/window_state.h` |
 | 20 | **Command（命令）** | `Command`（id / title / icon / category / action / default_binding / scope / enabled 谓词 / when_label 标签）`CommandRegistry`（注册 / 解绑 / 启停 / 调用 / 模糊检索 / 序列化信封 / 快捷键与菜单投影）`command_fuzzy_score`（子序列打分）`CommandPalette`（模态面板：搜索框 + 结果列表 + Esc/↑/↓/Enter 键位 + 焦点陷阱） | `commands.h` `widget/command_palette.h` |
-| 21 | **Audio（音频）** | `AudioContext`（Web Audio 语义节点图：源 / 增益 / 声像 / 分析 / 录音 / 设备）+ `AudioNode` 家族（`AudioDestinationNode` / `AudioStreamSourceNode` / `GainNode` / `PannerNode` / `AnalyserNode` / `AudioBufferSourceNode` / `AudioRecordingDestinationNode` / `AudioMicrophoneSourceNode`）；设备后端 `AudioDeviceBackend` / `AudioCaptureBackend`（WASAPI / ALSA，经 `AURORA_ENABLE_AUDIO_*` 开关裁剪） | `media/audio.h` |
+| 21 | **Audio（音频）** | `AudioContext`（Web Audio 语义节点图：源 / 增益 / 声像 / 分析 / 录音 / 设备）+ `AudioNode` 家族（`AudioDestinationNode` / `AudioStreamSourceNode` / `GainNode` / `PannerNode` / `AnalyserNode` / `AudioBufferSourceNode` / `AudioRecordingDestinationNode` / `AudioMicrophoneSourceNode`）；设备后端 `AudioDeviceBackend` / `AudioCaptureBackend`（WASAPI / ALSA / Web Audio，经 `AURORA_ENABLE_AUDIO_*` 开关裁剪） | `media/audio.h` |
 
 ### 1.1 序列化工厂注册状态
 

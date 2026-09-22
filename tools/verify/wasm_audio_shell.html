@@ -1,0 +1,26 @@
+<!doctype html>
+<!--
+  wasm_audio_shell.html — Web Audio 探针的 Emscripten 页面壳（--shell-file 注入）。
+
+  契约：提供一个显眼的 `#gesture` 方块，CDP 驱动对它派发**真实**鼠标事件来解除浏览器
+  自动播放闸门（`AudioContext` 的 resume 要求瞬时用户激活，程序化 `ctx.resume()` 在无
+  手势时被 reject——这正是判据 ②/③ 要证的闸门本身，故闸门必须由真事件打开）。
+  页面不放 canvas：本探针只验音频链路，与渲染通路无关。
+  注意：{{{ SCRIPT }}} 由 Emscripten 展开为完整 <script> 标签，勿再包一层 <script>。
+-->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>aurora-wasm-audio</title>
+    <style>
+        body { margin: 0; background: #202024; color: #ddd; font: 14px system-ui, sans-serif; }
+        #gesture { width: 240px; height: 120px; margin: 24px; background: #3b6; border-radius: 8px;
+                   display: flex; align-items: center; justify-content: center; user-select: none; }
+    </style>
+</head>
+<body>
+<div id="gesture">click to unlock audio</div>
+<!-- {{{ SCRIPT }}} 由 Emscripten 展开为引入生成 JS 的 <script> 标签，勿再包一层 <script>。 -->
+{{{ SCRIPT }}}
+</body>
+</html>

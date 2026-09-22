@@ -177,7 +177,7 @@ EM_JS(void, aria_js_boot, (), {
         announce: function (cid, p) {
             const l = this.live(cid);
             // 同文本重复不触发重读：先清空、下一宏任务回写（polite 队列容忍此间隙）。
-            l.textContent = '';
+            l.textContent = "";
             if (p.target) {
                 l.setAttribute('data-aurora-target', String(p.target));
             } else {

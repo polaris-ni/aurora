@@ -216,6 +216,20 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         set_target_properties(aurora_verify_wasm_aria PROPERTIES SUFFIX ".html")
         target_link_options(aurora_verify_wasm_aria PRIVATE
                 "--shell-file=${_aurora_verify_dir}/wasm_aria_shell.html")
+        # ---- WASM Web Audio 设备后端（浏览器）：真机验收「推式环形缓冲 + 主线程定泵」
+        # 这套零导出接线的四条判据——① 自动播放闸门（未手势：state=0、消费恒 0、图时钟冻结），
+        # ② 手势开闸后消费按墙钟推进（≈sample_rate×秒，容差 ±15%）且稳态零欠载，
+        # ③ 设备时钟与图时钟同轨（差 ≤0.3s），④ 主线程长任务饿死后欠载计数上升且能自愈续播。
+        # 另以 AnalyserNode RMS 证明确有信号抵达 destination（无音频设备的 headless 唯一可测口径）。
+        # 探针直连库内部头（`src/aurora/media/audio_webaudio.h` 的观察口不进公共 API，
+        # 口径同 WASAPI/ALSA 探针），故需 src 包含目录。判据由 `wasm_audio_cdp_drive.mjs` 派发。
+        if (AURORA_ENABLE_AUDIO_WEBAUDIO)
+            aurora_add_verify_probe(aurora_verify_wasm_audio "${_aurora_verify_dir}/wasm_audio_live_probe.cpp")
+            set_target_properties(aurora_verify_wasm_audio PROPERTIES SUFFIX ".html")
+            target_include_directories(aurora_verify_wasm_audio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+            target_link_options(aurora_verify_wasm_audio PRIVATE
+                    "--shell-file=${_aurora_verify_dir}/wasm_audio_shell.html")
+        endif ()
     endif ()
     if (_aurora_verify_targets)
         add_custom_target(aurora_verify DEPENDS ${_aurora_verify_targets})

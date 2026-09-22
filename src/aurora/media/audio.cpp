@@ -23,6 +23,7 @@
 
 #include "audio_alsa.h"
 #include "audio_wasapi.h"
+#include "audio_webaudio.h"
 #include "aurora/core/log.h"
 
 namespace aurora {
@@ -834,22 +835,26 @@ auto AudioRecordingDestinationNode::save_wav(const std::string &path) const -> R
 
 namespace {
 
-// 默认设备后端工厂：Linux 开启 AURORA_ENABLE_AUDIO_ALSA 时构造 AlsaDeviceBackend，
-// 其余平台构造 WasapiDeviceBackend——两者宏关闭时 .cpp 体均为 disabled 桩
-// （start 恒 false），AudioContext 随即静默降级；真实实现见 audio_alsa.cpp /
-// audio_wasapi.cpp。
+// 默认设备后端工厂：浏览器走 Web Audio（AudioContext + 主线程推样），Linux 开启
+// AURORA_ENABLE_AUDIO_ALSA 时构造 AlsaDeviceBackend，其余平台构造 WasapiDeviceBackend
+// ——三者宏关闭时 .cpp 体均为 disabled 桩（start 恒 false），AudioContext 随即静默
+// 降级；真实实现见 audio_webaudio.cpp / audio_alsa.cpp / audio_wasapi.cpp。
 auto create_default_device_backend() -> std::unique_ptr<AudioDeviceBackend> {
-#ifdef AURORA_ENABLE_AUDIO_ALSA
+#if defined(AURORA_PLATFORM_WASM)
+    return std::make_unique<WebAudioDeviceBackend>();
+#elif defined(AURORA_ENABLE_AUDIO_ALSA)
     return std::make_unique<AlsaDeviceBackend>();
 #else
     return std::make_unique<WasapiDeviceBackend>();
 #endif
 }
 
-// 默认采集后端工厂：与设备后端同口径（ALSA/WASAPI 按宏择路）——disabled 桩
+// 默认采集后端工厂：与设备后端同口径（WebAudio/ALSA/WASAPI 按平台择路）——disabled 桩
 // start 恒 false → create_microphone_source 显式报错，录制不静默降级。
 [[maybe_unused]] auto create_default_capture_backend() -> std::unique_ptr<AudioCaptureBackend> {
-#ifdef AURORA_ENABLE_AUDIO_ALSA
+#if defined(AURORA_PLATFORM_WASM)
+    return std::make_unique<WebAudioCaptureBackend>();  // 采集未接线（见 audio_webaudio.h 申报）
+#elif defined(AURORA_ENABLE_AUDIO_ALSA)
     return std::make_unique<AlsaCaptureBackend>();
 #else
     return std::make_unique<WasapiCaptureBackend>();
