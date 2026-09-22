@@ -7,7 +7,7 @@
 #    失效且污染他人构建；需要定位外部工具/库时一律由使用者显式传入
 #    （-D<选项>=<目录> 或环境变量），自动探测只作为兜底且不得含盘符。"
 #
-# Why a gate: 2026-09-22 found `D:/Development/Environment/LLVM/bin` hardcoded in
+# Why a gate: 2026-09-22 found `D:/Development/Environment/LLVM/bin` hardcoded in  HARDPATH_EXEMPT: example cited in rationale, not a path present in the repo
 # cmake/AuroraBackends.cmake (plus the same本机 path in CHANGELOG.json and a doc
 # example). A path that is not passed in is a path that only builds on one machine.
 #
@@ -21,7 +21,7 @@
 #      (C: is the Windows system drive; other drive letters are machine-specific).
 #      tests/ is exempt: 盘符本身就是若干用例的被测对象（去盘符逻辑），且夹具里的
 #      "C:/work" 之类是字符串值而非构建配置。
-#   3) [blocking] Machine-specific directory segment under a drive — e.g.
+#   3) [blocking] Machine-specific directory segment under a drive — e.g.  HARDPATH_EXEMPT: example path patterns documented for rule 3
 #      `C:/Development/...`, `D:/Projects/...`, `.../msys64/...`.
 #
 # Exemption: a line containing "HARDPATH_EXEMPT" (case-insensitive) on the matched
