@@ -102,21 +102,21 @@ auto aria_actions_text(const AccessibilityAction actions) -> std::string {
         std::string_view name;
     };
     // 确定序（表驱动单测逐字断言的依据）。
-    static constexpr Row rows[] = {
-        {A::Focus, "focus"},
-        {A::Click, "click"},
-        {A::Invoke, "invoke"},
-        {A::Toggle, "toggle"},
-        {A::Select, "select"},
-        {A::Value, "value"},
-        {A::ScrollUp, "scroll-up"},
-        {A::ScrollDown, "scroll-down"},
-        {A::ScrollLeft, "scroll-left"},
-        {A::ScrollRight, "scroll-right"},
-        {A::ScrollIntoView, "scroll-into-view"},
+    static constexpr Row AURORA_ROWS[] = {
+        {.bit = A::Focus, .name = "focus"},
+        {.bit = A::Click, .name = "click"},
+        {.bit = A::Invoke, .name = "invoke"},
+        {.bit = A::Toggle, .name = "toggle"},
+        {.bit = A::Select, .name = "select"},
+        {.bit = A::Value, .name = "value"},
+        {.bit = A::ScrollUp, .name = "scroll-up"},
+        {.bit = A::ScrollDown, .name = "scroll-down"},
+        {.bit = A::ScrollLeft, .name = "scroll-left"},
+        {.bit = A::ScrollRight, .name = "scroll-right"},
+        {.bit = A::ScrollIntoView, .name = "scroll-into-view"},
     };
     std::string out;
-    for (const Row &r : rows) {
+    for (const Row &r : AURORA_ROWS) {
         if ((static_cast<std::uint16_t>(actions) & static_cast<std::uint16_t>(r.bit)) != 0) {
             if (!out.empty()) {
                 out += ' ';
@@ -131,8 +131,8 @@ auto aria_primary_click_action(const AccessibilityNode &n) -> std::uint16_t {
     // 镜像元素一次点击只回灌一个动作（DOM click 无「哪个动作」的表达面），
     // 按读屏主路径优先：激活类 > 切换类 > 点击类 > 选择 > 取值 > 聚焦。
     using A = AccessibilityAction;
-    static constexpr A order[] = {A::Invoke, A::Toggle, A::Click, A::Select, A::Value, A::Focus};
-    for (const A a : order) {
+    static constexpr A AURORA_ORDER[] = {A::Invoke, A::Toggle, A::Click, A::Select, A::Value, A::Focus};
+    for (const A a : AURORA_ORDER) {
         if (n.has_action(a)) {
             return static_cast<std::uint16_t>(a);
         }
@@ -243,10 +243,10 @@ auto aria_json_escape(const std::string_view s) -> std::string {
                 break;
             default: {
                 if (c < 0x20U || c == 0x7FU) {
-                    static constexpr char hex[] = "0123456789abcdef";
+                    static constexpr std::string_view AURORA_HEX = "0123456789abcdef";
                     out += R"(\u00)";
-                    out += hex[(c >> 4U) & 0x0FU];
-                    out += hex[c & 0x0FU];
+                    out += AURORA_HEX.at((c >> 4U) & 0x0FU);
+                    out += AURORA_HEX.at(c & 0x0FU);
                 } else {
                     out += ch;  // UTF-8 多字节原样透传（JSON 允许）
                 }
@@ -289,6 +289,8 @@ auto aria_full_json(const std::vector<AriaElement> &tree, const std::uint64_t fo
     return out;
 }
 
+// `new_` 与 `old_` 成对：`new` 是 C++ 关键字，无法照 lower_case 正名，故命名检查就地豁免。
+// NOLINTNEXTLINE(readability-identifier-naming)
 auto aria_ops_json(const a11y::TreeSnapshot &old_, const a11y::TreeSnapshot &new_, const a11y::TreeDiff &diff)
     -> std::string {
     std::string out = R"({"ops":[)";

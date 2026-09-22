@@ -47,11 +47,14 @@ auto WebAudioRing::write(const float *interleaved, int frames) -> int {
     }
     const int stride = channels_;
     const int first = std::min(n, capacity_frames_ - writer_);  // 环至多断成两段（回绕处）
-    std::copy_n(interleaved, first * stride, data_.begin() + static_cast<std::ptrdiff_t>(writer_) * stride);
+    // 环形写入按「帧 × 声道」做偏移，裸指针/迭代器算术是本结构的既有形态（数据直接来自 wasm 线性内存）。
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    std::copy_n(interleaved, first * stride, data_.begin() + (static_cast<std::ptrdiff_t>(writer_) * stride));
     if (n > first) {
-        std::copy_n(interleaved + static_cast<std::size_t>(first) * stride,
+        std::copy_n(interleaved + (static_cast<std::size_t>(first) * stride),
                     static_cast<std::size_t>(n - first) * stride, data_.begin());
     }
+    // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     writer_ = (writer_ + n) % capacity_frames_;
     return n;
 }
@@ -69,15 +72,15 @@ namespace aurora {
 // 环水位与拍频——延迟与抗饿之间的折中，取值理由见各常量注释与头文件第 4 条。
 namespace {
 
-constexpr double kWaPumpIntervalMs = 20.0;  // 排空定时器周期（浏览器主线程）
-constexpr int kWaProcessorBlock = 2048;  // ScriptProcessorNode 块长（浏览器固定取值）
-constexpr int kWaMaxCatchUpFrames = 4096;  // 单拍至多渲染这么多帧（UI 长任务后不过补）
-constexpr int kWaResumeRetryTicks = 50;  // 20ms × 50 ⇒ 自动播放闸门每秒至多重试一次
+constexpr double AURORA_WA_PUMP_INTERVAL_MS = 20.0;  // 排空定时器周期（浏览器主线程）
+constexpr int AURORA_WA_PROCESSOR_BLOCK = 2048;  // ScriptProcessorNode 块长（浏览器固定取值）
+constexpr int AURORA_WA_MAX_CATCH_UP_FRAMES = 4096;  // 单拍至多渲染这么多帧（UI 长任务后不过补）
+constexpr int AURORA_WA_RESUME_RETRY_TICKS = 50;  // 20ms × 50 ⇒ 自动播放闸门每秒至多重试一次
 
 [[maybe_unused]] auto wa_target_frames(int rate) -> int {
     // 目标水位 ≈ 85ms，且不低于 2 个块长：JS 每次取走整块，水位须恒 ≥ 2 块，
     // 才容得下一整块时长（≈43ms）的排空拍迟到。
-    return std::max(rate * 85 / 1000, 2 * kWaProcessorBlock);
+    return std::max(rate * 85 / 1000, 2 * AURORA_WA_PROCESSOR_BLOCK);
 }
 
 }  // namespace
@@ -87,8 +90,8 @@ struct WebAudioDeviceBackend::Impl {
 
     detail::WebAudioRing ring;
     AudioDeviceFormat format{};
-    RenderFn render{};
-    std::vector<float> scratch;  // 单拍渲染缓冲（交错；容量 = kWaMaxCatchUpFrames × 声道）
+    RenderFn render;  // std::function 默认构造即空，无需 `{}`
+    std::vector<float> scratch;  // 单拍渲染缓冲（交错；容量 = AURORA_WA_MAX_CATCH_UP_FRAMES × 声道）
     int target_frames = 0;
     int retry_ticks = 0;  // resume 限速计数
     bool pumping = false;  // 排空定时器在册
@@ -227,10 +230,10 @@ EM_JS(void, wa_teardown, (), {
 });
 // clang-format on
 
-constexpr int kWaRingCapacity(int rate) {
+constexpr int wa_ring_capacity(int rate) {
     // 环容量 ≈ 0.5s（48k 立体声 ⇒ 192 KB 线性内存），下限 4 块。取 0.5s 而非更小：
     // 水位维持在 ~85ms，余量是给主线程抖动与节流回补的，不是常态延迟。
-    return std::max(4 * kWaProcessorBlock, rate / 2);
+    return std::max(4 * AURORA_WA_PROCESSOR_BLOCK, rate / 2);
 }
 
 }  // namespace
@@ -241,7 +244,7 @@ auto WebAudioDeviceBackend::pump(void *user_data) -> void {
     if (state != 1) {
         // 上下文未跑（自动播放闸门 / 浏览器挂起）⇒ **不渲染**：图时钟如实冻结，免得
         // current_time() 领先于实际出声。限速重试 resume，用户一有交互即自动开声。
-        if (state == 0 && ++impl->retry_ticks >= kWaResumeRetryTicks) {
+        if (state == 0 && ++impl->retry_ticks >= AURORA_WA_RESUME_RETRY_TICKS) {
             impl->retry_ticks = 0;
             wa_resume();
         }
@@ -253,8 +256,8 @@ auto WebAudioDeviceBackend::pump(void *user_data) -> void {
     if (need <= 0) {
         return;
     }
-    need = std::min(need, kWaMaxCatchUpFrames);
-    const int chunk = std::min(need, kWaProcessorBlock);
+    need = std::min(need, AURORA_WA_MAX_CATCH_UP_FRAMES);
+    const int chunk = std::min(need, AURORA_WA_PROCESSOR_BLOCK);
     for (int left = need; left > 0; left -= chunk) {
         const int frames = std::min(left, chunk);
         impl->render(impl->scratch.data(), frames);
@@ -266,20 +269,21 @@ auto WebAudioDeviceBackend::pump(void *user_data) -> void {
 }
 
 WebAudioDeviceBackend::WebAudioDeviceBackend() {
-    constexpr int kGraphChannels = 2;  // 图侧声道契约恒定（多声道由浏览器上混，见 wa_open 注）
+    constexpr int AURORA_GRAPH_CHANNELS = 2;  // 图侧声道契约恒定（多声道由浏览器上混，见 wa_open 注）
     int rate = 0;
     const bool usable = wa_available() != 0 && wa_open(reinterpret_cast<intptr_t>(&rate)) == 0;
     if (!usable) {
         // 不可用（无 AudioContext / 创建被拒）：format() 给处理格式，start() 恒 false。
-        impl_ = std::make_unique<Impl>(4 * kWaProcessorBlock, kGraphChannels);
+        impl_ = std::make_unique<Impl>(4 * AURORA_WA_PROCESSOR_BLOCK, AURORA_GRAPH_CHANNELS);
         return;
     }
     const int negotiated_rate = rate > 0 ? rate : 48000;
-    impl_ = std::make_unique<Impl>(kWaRingCapacity(negotiated_rate), kGraphChannels);
-    impl_->format = AudioDeviceFormat{.sample_rate = negotiated_rate, .channels = kGraphChannels};
+    impl_ = std::make_unique<Impl>(wa_ring_capacity(negotiated_rate), AURORA_GRAPH_CHANNELS);
+    impl_->format = AudioDeviceFormat{.sample_rate = negotiated_rate, .channels = AURORA_GRAPH_CHANNELS};
     impl_->target_frames = wa_target_frames(negotiated_rate);
-    impl_->scratch.assign(static_cast<std::size_t>(kWaMaxCatchUpFrames) * static_cast<std::size_t>(kGraphChannels),
-                          0.0F);
+    impl_->scratch.assign(
+        static_cast<std::size_t>(AURORA_WA_MAX_CATCH_UP_FRAMES) * static_cast<std::size_t>(AURORA_GRAPH_CHANNELS),
+        0.0F);
 }
 
 WebAudioDeviceBackend::~WebAudioDeviceBackend() { stop(); }
@@ -302,7 +306,7 @@ auto WebAudioDeviceBackend::start(RenderFn render_block) -> bool {
         return false;
     }
     // `emscripten_set_interval` 返回句柄（0 = 失败），`clear` 按句柄注销——不是按函数指针。
-    impl_->timer_id = emscripten_set_interval(&WebAudioDeviceBackend::pump, kWaPumpIntervalMs, impl_.get());
+    impl_->timer_id = emscripten_set_interval(&WebAudioDeviceBackend::pump, AURORA_WA_PUMP_INTERVAL_MS, impl_.get());
     if (impl_->timer_id == 0) {
         wa_teardown();
         impl_->render = nullptr;
@@ -353,7 +357,7 @@ auto WebAudioCaptureBackend::stop() -> void {}
 
 namespace aurora {
 
-WebAudioDeviceBackend::WebAudioDeviceBackend() : impl_(std::make_unique<Impl>(4 * kWaProcessorBlock, 2)) {}
+WebAudioDeviceBackend::WebAudioDeviceBackend() : impl_(std::make_unique<Impl>(4 * AURORA_WA_PROCESSOR_BLOCK, 2)) {}
 
 WebAudioDeviceBackend::~WebAudioDeviceBackend() = default;
 

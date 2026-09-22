@@ -163,14 +163,17 @@ AURORA_TEST_CASE(with_chains_into_a_const_ready_table) {
 AURORA_TEST_CASE(with_entry_list_registers_every_entry_and_last_wins) {
     // 表形态一次性并入多条；同名沿用 register_route 的「后者覆盖」判据。
     const Router router = Router{}.with({
-        Router::Entry{"home", []() -> Route { return Route{Node{SolidBox{}}, "home"}; }},
-        Router::Entry{"detail", []() -> Route { return Route{Node{SolidBox{}}, "A"}; }},
-        Router::Entry{"detail", []() -> Route { return Route{Node{SolidBox{}}, "B"}; }},
+        Router::Entry{.name = "home", .builder = []() -> Route { return Route{Node{SolidBox{}}, "home"}; }},
+        Router::Entry{.name = "detail", .builder = []() -> Route { return Route{Node{SolidBox{}}, "A"}; }},
+        Router::Entry{.name = "detail", .builder = []() -> Route { return Route{Node{SolidBox{}}, "B"}; }},
     });
 
     AURORA_TEST_CHECK_TRUE(router.has("home"));
-    AURORA_TEST_REQUIRE_TRUE(router.build("detail").has_value());
-    AURORA_TEST_CHECK_EQ(router.build("detail").value().name(), std::string{"B"});
+    // 只 build 一次并留住 optional：另起一次 `build(...).value()` 属未检查访问（前一条断言不覆盖它）。
+    const auto detail = router.build("detail");
+    AURORA_TEST_REQUIRE_TRUE(detail.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): 上一行 REQUIRE 已断言持有值，其宏展开对路径分析不透明
+    AURORA_TEST_CHECK_EQ(detail.value().name(), std::string{"B"});
 }
 
 }  // namespace aurora::test_cases::utest_router

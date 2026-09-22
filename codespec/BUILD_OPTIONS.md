@@ -420,6 +420,8 @@ python tools/check/run_clang_tidy.py --build-dir build --include 'src/'         
 
 **NOLINT 纪律**：凡用 `NOLINT` / `NOLINTNEXTLINE` 抑制告警，须遵守 `CODING_STANDARDS.md` §5.2——写明具体检查名（禁止裸 `NOLINT` 的新增使用），并紧邻注释说明「为何不能按建议修复」。
 
+**门禁覆盖范围 = 该 build 目录的编译库**：`lint` 扫的是 `--build-dir` 下 `compile_commands.json` 里的 TU，因此只覆盖**该次 configure 实际定义的翻译单元**。浏览器专属件（`EMSCRIPTEN` 门后的 `wasm_*` 实现与 `aurora_verify_wasm_*` 探针）、以及按平台/后端条件定义的真机探针，都不在 Windows/Linux native db 内，`lint` 绿灯不等于它们干净。⚠️ 也别拿 `build-wasm/compile_commands.json` 硬跑 tidy 当门禁：该 db 不带 Emscripten sysroot，clang-tidy 会以 `'emscripten.h' file not found` 开路并把 `EM_JS` 当普通函数名报「命名不合规」，告警面全是假象。这类 TU 的正确把关路径是真机/浏览器探针（§2.4）与 WASM 构建本身。
+
 ### 4.6 `AURORA_ENABLE_IMAGE_*`（图像编解码能力）
 
 | 项 | 值 |
@@ -458,6 +460,8 @@ python tools/check/run_clang_format.py --fix --include 'src/aurora/window/'   # 
 ```
 
 **排版与 NOLINT 的耦合**：`ReflowComments: Always` 会重排注释，可能把 `NOLINTNEXTLINE` 的理由注释折到它与目标行之间，使抑制失效（该形态曾一次性造成 36 条告警）。因此**理由注释一律写在 `NOLINTNEXTLINE` 之前**，且写完改动后须再跑一次 `format-check` 确认幂等。
+
+同一方向还有反过来的一刀：抑制只认**物理行**，而 `ColumnLimit: 120` 会把长语句折行——`NOLINTNEXTLINE` 下方那条语句一旦变成多行，告警所在行就不再是它指向的行，抑制同样静默失效（实测 `cppcoreguidelines-pro-bounds-pointer-arithmetic` 与 `pro-type-reinterpret-cast` 各一处）。故**可能被折行的语句用 `NOLINTBEGIN/NOLINTEND` 覆盖整段**，`NOLINTNEXTLINE` 只留给确定单行的语句；判据以「重跑目标 tidy 归零」为准，别只看写了 NOLINT 就以为已豁免。
 
 **排版与 `EM_JS` / `EM_ASM` 的耦合**：Emscripten 的 `EM_JS` / `EM_ASM` / `MAIN_THREAD_EM_ASM_*` 宏体是 **JavaScript**，而 clang-format 一律按 C++ 解析，会做出三类**破坏语义**的重排：`===` 拆成 `== =`、箭头 `=>` 拆成 `= >`、以及把 `EM_JS` 第三个宏实参（形参列表）的外层括号吃掉（`(const char *x)` → `const char *x`，宏参数数目随即错位）。这些改动**排版门禁查不出、构建期才炸**（WASM 侧报 `expected ';' after top level declarator` 之类），故所有 JS 宏块必须整块排除在排版之外：
 

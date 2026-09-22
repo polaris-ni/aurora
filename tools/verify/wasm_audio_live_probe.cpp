@@ -38,9 +38,9 @@ namespace {
 
 #ifdef AURORA_ENABLE_AUDIO_WEBAUDIO
 
-constexpr int kRate = 48000;
-constexpr double kToneHz = 440.0;
-constexpr int kToneSeconds = 1;
+constexpr int AURORA_RATE = 48000;
+constexpr double AURORA_TONE_HZ = 440.0;
+constexpr int AURORA_TONE_SECONDS = 1;
 
 std::unique_ptr<au::AudioContext> g_ctx;
 au::WebAudioDeviceBackend *g_dev = nullptr;  ///< 裸指针：所有权已交给 g_ctx，生命周期随其存活
@@ -57,7 +57,7 @@ auto publish_tick(void * /*user_data*/) -> void {
     if (g_ctx == nullptr || g_dev == nullptr) {
         return;
     }
-    const double consumed = static_cast<double>(g_dev->consumed_frames()) / static_cast<double>(kRate);
+    const double consumed = static_cast<double>(g_dev->consumed_frames()) / static_cast<double>(AURORA_RATE);
     char buf[320];
     std::snprintf(buf, sizeof(buf), "silent=%d state=%d rate=%d ch=%d consumed=%.3f underrun=%d ctime=%.3f playing=%d",
                   g_ctx->silent() ? 1 : 0, g_dev->context_state(), g_ctx->sample_rate(), g_ctx->channel_count(),
@@ -67,12 +67,12 @@ auto publish_tick(void * /*user_data*/) -> void {
 
 auto make_tone_buffer() -> std::shared_ptr<const au::AudioBuffer> {
     auto buffer = std::make_shared<au::AudioBuffer>();
-    buffer->sample_rate = kRate;
+    buffer->sample_rate = AURORA_RATE;
     buffer->channels = 2;
-    buffer->samples.assign(static_cast<std::size_t>(kRate) * kToneSeconds * 2U, 0.0F);
-    for (std::size_t frame = 0; frame < static_cast<std::size_t>(kRate) * kToneSeconds; ++frame) {
-        const float s = static_cast<float>(
-            std::sin(2.0 * 3.14159265358979309 * kToneHz * static_cast<double>(frame) / static_cast<double>(kRate)));
+    buffer->samples.assign(static_cast<std::size_t>(AURORA_RATE) * AURORA_TONE_SECONDS * 2U, 0.0F);
+    for (std::size_t frame = 0; frame < static_cast<std::size_t>(AURORA_RATE) * AURORA_TONE_SECONDS; ++frame) {
+        const float s = static_cast<float>(std::sin(2.0 * 3.14159265358979309 * AURORA_TONE_HZ *
+                                                    static_cast<double>(frame) / static_cast<double>(AURORA_RATE)));
         buffer->samples[frame * 2U] = s;
         buffer->samples[frame * 2U + 1U] = s;
     }

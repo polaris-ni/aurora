@@ -223,6 +223,8 @@
 1. 写明具体检查名（禁止裸 `NOLINT` 的新增使用）；
 2. 紧邻注释说明「为何不能按建议修复」。
 
+⚠️ 抑制的作用位置只认**物理行**，而 `.clang-format`（`ColumnLimit: 120`）会折行：`NOLINTNEXTLINE` 下方那条语句一旦被排成多行，告警所在行就不再是它指向的那一行，抑制静默失效（实测两处：环形 PCM 的 `pro-bounds-pointer-arithmetic`、COM 出参的 `pro-type-reinterpret-cast`）。故凡**可能被折行**的语句一律用 `NOLINTBEGIN(...)` / `NOLINTEND(...)` 成对覆盖整段，`NOLINTNEXTLINE` 只留给确定单行的语句；理由注释的位置约束见 §8.5 末尾与 `BUILD_OPTIONS.md` §4.7。
+
 抑制属于显式契约决策，随代码评审、随文档同步。
 
 ---

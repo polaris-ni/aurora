@@ -42,14 +42,14 @@
 #include "aurora/core/log.h"
 #include "aurora/core/platform.h"
 
-#if !defined(AURORA_PLATFORM_WINDOWS)
+#ifndef AURORA_PLATFORM_WINDOWS
 #error "aurora_verify_win32_ua can only be built on Windows (AURORA_PLATFORM_WINDOWS)"
 #endif
 
-#if defined(AURORA_BACKEND_WIN32)
+#ifdef AURORA_BACKEND_WIN32
 #include "aurora/window/win32_surface.h"
 #endif
-#if defined(AURORA_BACKEND_D3D11)
+#ifdef AURORA_BACKEND_D3D11
 #include "aurora/window/d3d11_surface.h"
 #endif
 #if !defined(AURORA_BACKEND_WIN32) && !defined(AURORA_BACKEND_D3D11)
@@ -202,15 +202,15 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
 ///
 /// 存活要求：State 必须由 shared_ptr 持有且被 Node 树间接引用，否则控件在探针运行期即析构。
 [[nodiscard]] auto build_probe_column() -> aurora::Node {
-    static const auto checked = std::make_shared<aurora::State<bool>>(true);
-    static const auto slider_value = std::make_shared<aurora::State<double>>(0.5);
+    static const auto CHECKED = std::make_shared<aurora::State<bool>>(true);
+    static const auto SLIDER_VALUE = std::make_shared<aurora::State<double>>(0.5);
 
     // 引用式标签关联（#21 验收）：目标带 `stable_key`，引用者 `set_labelled_by` 指过去。
     // 二者放进**纵向**列：`sibling_label_name` 的行内相邻判据（#1-C）在纵向下刻意不命中，
     // 且引用者自身无内置标签 —— 故它的 UIA Name 只可能来自 labelled_by 的解析结果。
     auto caption = std::make_shared<aurora::Text>(aurora::TextProps{.content = aurora::LocalizedString{"季度汇总"}});
     caption->set_stable_key("probe-caption");
-    auto referrer = std::make_shared<aurora::Checkbox>(aurora::Reactive{checked});
+    auto referrer = std::make_shared<aurora::Checkbox>(aurora::Reactive{CHECKED});
     referrer->set_labelled_by("probe-caption");
 
     // Checkbox / Slider 用 `Row { 文本兄弟, 控件 }` 包裹，使其具备「兄弟标签」，
@@ -218,9 +218,9 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     return aurora::Node{aurora::Column{
         aurora::Button{aurora::ButtonProps{.label = aurora::LocalizedString{"确定"}}},
         aurora::Row{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"启用自动更新"}}},
-                    aurora::Checkbox{aurora::Reactive{checked}}},
+                    aurora::Checkbox{aurora::Reactive{CHECKED}}},
         aurora::Row{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"音量"}}},
-                    aurora::Slider{aurora::Reactive{slider_value}}},
+                    aurora::Slider{aurora::Reactive{SLIDER_VALUE}}},
         aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "请输入"}},
         aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"订单总额"}}},
         aurora::Node{std::move(caption)},
@@ -240,12 +240,15 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
         (void)CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     }
     IUIAutomation *automation = nullptr;
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast): Win32 UIA/COM 边界——CoCreateInstance
+    // 的出参只接受 void**，接口指针只能 reinterpret 传递
     HRESULT hr = CoCreateInstance(CLSID_CUIAutomation8, nullptr, CLSCTX_INPROC_SERVER, IID_IUIAutomation,
                                   reinterpret_cast<void **>(&automation));
     if (FAILED(hr)) {
         hr = CoCreateInstance(CLSID_CUIAutomation, nullptr, CLSCTX_INPROC_SERVER, IID_IUIAutomation,
                               reinterpret_cast<void **>(&automation));
     }
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
     if (FAILED(hr)) {
         return nullptr;
     }
@@ -261,6 +264,8 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     return element;
 }
 
+// NOLINTBEGIN(cppcoreguidelines-pro-type-union-access): Win32 UIA/COM 边界——VARIANT 属性值只能是联合体，
+// 按 vt 判别后读联合体成员是唯一取法
 /// @brief 读字符串属性；不支持（VT_UNKNOWN「reserved not supported」/ VT_EMPTY）时返回空串。
 [[nodiscard]] auto element_string(IUIAutomationElement *e, PROPERTYID id) -> std::string {
     if (e == nullptr) {
@@ -308,6 +313,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     (void)VariantClear(&v);
     return ok;
 }
+// NOLINTEND(cppcoreguidelines-pro-type-union-access)
 
 /// @brief 取 pattern：`GetCurrentPattern`（读屏取 pattern 的同款调用）。
 /// @param hr 出参：调用返回码（`S_OK` 表示可用，`E_FAIL`/`UIA_E_NOTSUPPORTED` 表示不支持）。
@@ -343,6 +349,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
 ///
 /// 与读屏同款入口（COM 客户端取属性）；非空即桥的 `get_BoundingRectangle` 生效，离屏/出窗元素
 /// 应返回空矩形（本探针的控件均可见，故应恒为非空）。
+// NOLINTBEGIN(cppcoreguidelines-pro-type-union-access): Win32 UIA/COM 边界——VARIANT 矩形属性只能读联合体 parray 成员
 [[nodiscard]] auto element_rect_ok(IUIAutomationElement *e) -> bool {
     if (e == nullptr) {
         return false;
@@ -365,6 +372,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     VariantClear(&v);
     return ok;
 }
+// NOLINTEND(cppcoreguidelines-pro-type-union-access)
 
 /// @brief 文本几何矩形计数（#7 盲区补断言）：经 `ITextPattern::GetVisibleRanges` →
 ///        `ITextRangeProvider::GetBoundingRectangles` 取得逐字符盒。
@@ -379,7 +387,9 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
         return -1;
     }
     IUIAutomationTextPattern *tp = nullptr;
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast): Win32 COM 边界——QueryInterface 出参只接受 void**
     const HRESULT hr = p->QueryInterface(IID_IUIAutomationTextPattern, reinterpret_cast<void **>(&tp));
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
     p->Release();
     if (FAILED(hr) || tp == nullptr) {
         return -1;
@@ -730,7 +740,7 @@ auto run_backend(const char *label, const char *title, MakeWindow make_window) -
 auto main() -> int {
     int rc = 0;
 
-#if defined(AURORA_BACKEND_WIN32)
+#ifdef AURORA_BACKEND_WIN32
     rc = std::max(rc,
                   run_backend("Win32Surface/GDI", "Aurora UIA verify (GDI)", []() -> std::unique_ptr<aurora::Window> {
                       auto res = aurora::create_native_window(aurora::WindowOptions{
@@ -741,7 +751,7 @@ auto main() -> int {
     emit("Win32Surface/GDI: SKIPPED (AURORA_BACKEND_WIN32 off)");
 #endif
 
-#if defined(AURORA_BACKEND_D3D11)
+#ifdef AURORA_BACKEND_D3D11
     rc = std::max(rc,
                   run_backend("D3D11Surface/GPU", "Aurora UIA verify (D3D11)", []() -> std::unique_ptr<aurora::Window> {
                       auto res = aurora::create_native_window(

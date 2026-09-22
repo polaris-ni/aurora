@@ -200,6 +200,9 @@ class ScopedStringTable {
     ~ScopedStringTable() { default_string_table() = saved_; }
     ScopedStringTable(const ScopedStringTable &) = delete;
     auto operator=(const ScopedStringTable &) -> ScopedStringTable & = delete;
+    // 守卫对象移动即「两份 saved_ 争着还原同一单例」，故移动一并禁用（Rule of Five 的另一半）。
+    ScopedStringTable(ScopedStringTable &&) = delete;
+    auto operator=(ScopedStringTable &&) -> ScopedStringTable & = delete;
 
   private:
     StringTable saved_;
