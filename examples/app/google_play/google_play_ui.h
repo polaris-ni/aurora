@@ -1296,6 +1296,8 @@ class BodyView : public au::Container {
             auto chip = std::make_shared<FilterChip>();
             chip->label = s;
             chip->selected = s == sub;
+            // 回调转入 std::function（on_tap / Canvas 绘制回调），本检查对可调用对象一律判「不应抛出」。
+            // NOLINTNEXTLINE(bugprone-exception-escape)
             chip->on_tap = [this, s]() -> void { subcat_->set(s); };
             chip->dark = dark_;
             row->add(au::Node{chip});
@@ -1556,8 +1558,11 @@ class DetailPage : public au::Container {
             au::Modifier{}.expand().padding(au::EdgeInsets{.left = 0.0F, .top = 12.0F, .right = 0.0F, .bottom = 0.0F});
         info->add(text_node(app.name, 20.0F, 700, th.text));
         info->add(text_node(app.developer, 14.0F, 400, th.text_secondary));
+        // Canvas 的绘制回调转入 std::function，本检查对可调用对象一律判「不应抛出」。
+        // NOLINTBEGIN(bugprone-exception-escape)
         auto stars = std::make_shared<au::Canvas>(
             110.0F, 16.0F, [app](au::Painter &p, const au::Rect &b) -> void { paint_stars(p, b, app.rating); });
+        // NOLINTEND(bugprone-exception-escape)
         info->add(au::Node{stars});
 
         auto btn = std::make_shared<au::Button>("Install");
@@ -1593,8 +1598,11 @@ class DetailPage : public au::Container {
         auto right = std::make_shared<au::Column>();
         right->modifier =
             au::Modifier{}.expand().padding(au::EdgeInsets{.left = 0.0F, .top = 12.0F, .right = 0.0F, .bottom = 0.0F});
+        // Canvas 的绘制回调转入 std::function，本检查对可调用对象一律判「不应抛出」。
+        // NOLINTBEGIN(bugprone-exception-escape)
         right->add(au::Node{std::make_shared<au::Canvas>(
             120.0F, 16.0F, [app](au::Painter &p, const au::Rect &b) -> void { paint_stars(p, b, app.rating); })});
+        // NOLINTEND(bugprone-exception-escape)
         right->add(text_node(app.downloads + " downloads", 12.0F, 400, th.text_secondary));
         rating_card->add(au::Node{right});
         col->add(au::Node{rating_card});
@@ -1670,8 +1678,11 @@ class DetailPage : public au::Container {
                                  .padding(au::EdgeInsets{.left = 10.0F, .top = 12.0F, .right = 10.0F, .bottom = 12.0F});
             auto head = std::make_shared<au::Row>();
             head->add(text_node(rv.user, 14.0F, 600, th.text));
+            // Canvas 的绘制回调转入 std::function，本检查对可调用对象一律判「不应抛出」。
+            // NOLINTBEGIN(bugprone-exception-escape)
             auto rating = std::make_shared<au::Canvas>(
                 90.0F, 16.0F, [rv](au::Painter &p, const au::Rect &b) -> void { paint_stars(p, b, rv.rating); });
+            // NOLINTEND(bugprone-exception-escape)
             head->add(au::Node{rating});
             card->add(au::Node{head});
             card->add(text_node(rv.text, 13.0F, 400, th.text_secondary, 0));

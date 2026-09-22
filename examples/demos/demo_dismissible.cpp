@@ -13,8 +13,9 @@
 #include "aurora/widget/dismissible.h"
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     auto make_card = [](const std::string &label, au::Color tint, bool custom_cb) -> au::Node {
         au::Text title{label};
@@ -22,8 +23,12 @@ auto main() -> int {
         auto dis = std::make_shared<au::Dismissible>(au::Node{std::move(title)});
         if (custom_cb) {
             // 自定义回调接管默认摘除：这里只记录（真实场景多为删除数据后重建子树）。
+            // 回调转入 std::function（on_dismissed），本检查对可调用对象一律判「不应抛出」；
+            // 体内只走日志通道，其格式化分配即唯一抛出面。
+            // NOLINTBEGIN(bugprone-exception-escape)
             dis->on_dismissed(
                 [label]() -> void { AURORA_LOG_INFO("demo", "[demo_dismissible] custom dismissed: ", label); });
+            // NOLINTEND(bugprone-exception-escape)
         }
         return au::Node{dis};
     };

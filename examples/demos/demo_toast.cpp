@@ -1,8 +1,9 @@
 // ToastHost 通知 demo：点击按钮弹出自动消失的通知（3 秒），可连发排队。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     au::Button notify_btn{au::ButtonProps{.label = "Show notification"}};
     au::Button clear_btn{au::ButtonProps{.label = "Clear"}};

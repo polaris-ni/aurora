@@ -1109,6 +1109,9 @@ auto InspectorServer::set_window_tree_getter(std::function<Node(std::uint32_t)> 
     impl_->window_tree_getter = std::move(getter);
 }
 
+// 析构只做关停：stop() 的残余抛出面是日志格式化的分配与 worker 线程 join 的资源错误。析构期无调用方
+// 可回报，在此 try/catch 即把关停失败静默吞掉，故不包装——抛出走到 terminate，是关停失败最重的信号。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 InspectorServer::~InspectorServer() { stop(); }
 
 auto InspectorServer::start(uint16_t port) const -> bool {

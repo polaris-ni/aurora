@@ -30,6 +30,13 @@ Exit codes:
        (a TU that fails to compile emits **no** `[check]` diagnostics, so "0 findings" would be
        a coverage collapse rather than a clean bill — hence it is a hard failure, not a pass)
     2  usage / environment error (no compile database, clang-tidy missing, broken rewrite)
+
+Measuring a check that `.clang-tidy` currently excludes (取数用，不是门禁跑法):
+    复制 .clang-tidy、删掉对应的 `  -<check>,` 一行，再 `--config <副本>` 全量跑。读结果前记两点：
+    ① 输出的条数是**净新增**——已写 `NOLINT(<check>)` 的点位被 clang-tidy 自行消化、不进 JSON，
+    故「开启该 check 的总成本 = 净新增 + 存量抑制数」，只看 JSON 会低估；
+    ② `--config` 走 `--config-file=`，**整体替换**仓库配置（`CheckOptions` / `HeaderFilterRegex`
+    必须原样带上），否则量出来的是另一套口径。副本放构建目录即可，勿往 tools/check/ 堆一次性脚本。
 """
 
 from __future__ import annotations

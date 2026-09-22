@@ -161,11 +161,13 @@ auto Storage::async_put(const std::string &id, const Json &value) const -> Task<
     rec.mtime = now_tp();
     auto *be = backend_.get();
     const std::string &idc = id;
-    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 误报：转入 std::function 的 lambda
     // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     auto task = async([be, idc, rec]() -> Result<void> { return be->put_record(idc, rec); });
-    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 误报：转入 std::function 的 lambda
     // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     task.then([this, idc](const Result<void> &r) -> void {
         if (r.ok()) {
             emit_change({.op = StorageChange::Operation::Put, .id = idc});
@@ -177,8 +179,9 @@ auto Storage::async_put(const std::string &id, const Json &value) const -> Task<
 auto Storage::async_get(const std::string &id) const -> Task<Json> {
     auto *be = backend_.get();
     const std::string &idc = id;
-    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 误报：转入 std::function 的 lambda
     // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     return async([be, idc]() -> Result<Json> {
         auto rec = be->get_record(idc);
         if (!rec) {
@@ -202,11 +205,13 @@ auto Storage::async_put(const std::string &id, const StorageBytes &value) const 
     rec.mtime = now_tp();
     auto *be = backend_.get();
     const std::string &idc = id;
-    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 误报：转入 std::function 的 lambda
     // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     auto task = async([be, idc, rec]() -> Result<void> { return be->put_record(idc, rec); });
-    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 误报：转入 std::function 的 lambda
     // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     task.then([this, idc](const Result<void> &r) -> void {
         if (r.ok()) {
             emit_change({.op = StorageChange::Operation::Put, .id = idc});
@@ -218,8 +223,9 @@ auto Storage::async_put(const std::string &id, const StorageBytes &value) const 
 auto Storage::async_get_value(const std::string &id) const -> Task<StorageValue> {
     auto *be = backend_.get();
     const std::string &idc = id;
-    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 误报：转入 std::function 的 lambda
     // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     return async([be, idc]() -> Result<StorageValue> {
         auto rec = be->get_record(idc);
         if (!rec) {
@@ -232,11 +238,13 @@ auto Storage::async_get_value(const std::string &id) const -> Task<StorageValue>
 auto Storage::async_remove(const std::string &id) const -> Task<void> {
     auto *be = backend_.get();
     const std::string &idc = id;
-    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 误报：转入 std::function 的 lambda
     // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     auto task = async([be, idc]() -> Result<void> { return be->remove(idc); });
-    // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+    // 误报：转入 std::function 的 lambda
     // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     task.then([this, idc](const Result<void> &r) -> void {
         if (r.ok()) {
             emit_change({.op = StorageChange::Operation::Remove, .id = idc});

@@ -48,8 +48,9 @@ auto button(const char *label, std::function<void()> on_click) -> au::Node {
 
 }  // namespace
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     // 文件模式持久化：本 demo 的 key 只落在自己的配置文件里。
     au::preferences::Preferences &prefs = au::preferences::Preferences::instance_at(

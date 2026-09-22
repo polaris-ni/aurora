@@ -42,7 +42,7 @@ class Fixture {
     auto operator=(Fixture &&) -> Fixture & = delete;
 
   protected:
-    // 豁免口径（区间式：紧邻下一物理行的 NOLINTNEXTLINE 罩不住带理由的整段说明）：
+    // 豁免口径（区间式：紧邻式豁免罩不住带理由的整段说明）：
     // `SetUp`/`TearDown` 刻意保持 GoogleTest 拼写。本框架的用例语法整体对齐 gtest
     // （`AURORA_TEST_F` 之名、`SetUp/TearDown` 之钩子），为的是既有 gtest 夹具可零改写迁移，
     // 也让 AI 按最主流的既有习惯生成夹具而不误造 `on_setup` 之类同义词（见 CONCEPTS.md 跨框架映射）。

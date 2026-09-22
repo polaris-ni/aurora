@@ -235,12 +235,14 @@
 1. 写明具体检查名（禁止裸 `NOLINT` 的新增使用）；
 2. 紧邻注释说明「为何不能按建议修复」。
 
-⚠️ 抑制的作用位置只认**物理行**，而 `.clang-format`（`ColumnLimit: 120`）会折行：`NOLINTNEXTLINE` 下方那条语句一旦被排成多行，告警所在行就不再是它指向的那一行，抑制静默失效（实测两处：环形 PCM 的 `pro-bounds-pointer-arithmetic`、COM 出参的 `pro-type-reinterpret-cast`）。故凡**可能被折行**的语句一律用 `NOLINTBEGIN(...)` / `NOLINTEND(...)` 成对覆盖整段，`NOLINTNEXTLINE` 只留给确定单行的语句；理由注释的位置约束见 §8.5 末尾与 `BUILD_OPTIONS.md` §4.7。
+豁免只在**物理行**上生效，而 `.clang-format`（`ColumnLimit: 120`）会折行，于是两类写法会让抑制**静默失效**（所点名的 check 处于关闭态时，clang-tidy 不给任何提示；一旦开启，告警直接漏出）：
 
-⚠️ 同上成因的两条补充约束（本轮 wasm 口径收口时实测）：
+1. **理由写在指令同一行**（本仓的主要成因）：`// NOLINTNEXTLINE(check) 一长段理由……` 超过 120 列时，clang-format 把折下来的后半段排成指令的**下一物理行**，而 `NOLINTNEXTLINE` 只管紧邻的那一行——它罩住的是注释，代码行无人豁免。理由一律整段写在指令**之前**。
+2. **被豁免的语句本身排成多行**：告警落在第 2、3 行时同样落空。凡可能被折行的语句一律改用 `NOLINTBEGIN(...)` / `NOLINTEND(...)` 成对覆盖整段，`NOLINTNEXTLINE` 只留给确定单行的语句（本条早期实测两处：环形 PCM 的 `pro-bounds-pointer-arithmetic`、COM 出参的 `pro-type-reinterpret-cast`）。
 
-1. **指令与代码之间不得插入任何行**——包括折到下一行的理由文字。`NOLINTNEXTLINE` 只看紧邻的下一物理行，理由若排在它下面，它罩住的就是注释而非代码（静默 no-op）。要写多行理由就把理由整段放在指令**之前**，或直接改用区间式。
-2. **`NOLINT` 令牌只能出现在真指令里**——任何注释文本中出现的 `NOLINTBEGIN(` / `NOLINTEND(` 字样都会被解析成指令。未配对的 `NOLINTBEGIN` 不是告警而是 `clang-tidy-nolint` **硬错误**，直接中断该翻译单元的整轮分析（表现为「该 TU 零告警」的假干净）。指代他处的既有豁免区间时写「区间式豁免」，勿抄令牌。
+⚠️ 同族还有一条硬失败：**`NOLINT` 令牌只能出现在真指令里**——注释文本里出现的 `NOLINTBEGIN(` / `NOLINTEND(` 字样同样被解析成指令，未配对的 `NOLINTBEGIN` 不是告警而是 `clang-tidy-nolint` **硬错误**，直接中断该翻译单元的整轮分析（表现为「该 TU 零告警」的假干净）；裸令牌（不带括号列表）则会对下一物理行形成一次全量豁免。指代他处的既有豁免时写「紧邻式豁免」/「区间式豁免」，勿抄令牌。
+
+以上三类排版由 CTest 门禁 `check_nolint_layout`（`tools/check/check_nolint_layout.py`）常驻把关——它只看注释行的排布，补的正是 clang-tidy 看不见的那一段。实测第 1 类在本仓一次成型 **234 处、涉及 98 个文件**，其中 194 处恰好落在真实告警行上，已全部改写为「理由前置 + 指令紧贴代码」（只动注释行，代码行零改动）。理由注释的位置约束另见 §8.5 末尾与 `BUILD_OPTIONS.md` §4.7。
 
 判因纪律：告警**跨标准库 / 跨目标三元组**出现差异时，先按真实差异处理，不得为凑门禁口径而放宽配置。已实测的三类真实差异——libc++ 的 `basic_string_view(const char *)` 构造非 `noexcept`（静态初始化期即触发 `bugprone-throwing-static-initialization`，框架侧以 `literal_view` 免掉该构造）、wasm32 的 `long` 为 32 位（`long long` → `difference_type` 是真·窄化）、Emscripten libc++ 的 `std::span` 无 `.at()`。
 

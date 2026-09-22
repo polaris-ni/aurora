@@ -639,6 +639,8 @@ auto run() -> void {
 
 }  // namespace aurora::bench
 
+// 入口不吞异常：基准程序的失败即未捕获异常 → terminate，与各 demo 入口同口径（场景数值自报，无需 try/catch）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     aurora::bench::run();
     return 0;

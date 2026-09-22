@@ -1,8 +1,9 @@
 // Button 控件 demo：点击按钮触发 on_click 回调，修改共享 State 并实时刷新计数显示。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     auto counter = std::make_shared<au::State<int>>(0);
     // 计数显示与计数器共享同一响应式 State：点击事件里更新它，每帧重绘即反映最新值，

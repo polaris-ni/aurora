@@ -411,13 +411,14 @@ class TitleBar : public Widget {
                                          }
                                      }});
 
-        out.push_back(  // NOLINTNEXTLINE(*-use-trailing-return-type)
-            TitleBarAction{.label = is_fs ? "退出全屏" : "全屏", .on_click = [this] {
-                               if (const WindowChrome *c = env_ != nullptr ? env_->get<WindowChrome>() : nullptr) {
-                                   const WindowMode *m = env_ != nullptr ? env_->get<WindowMode>() : nullptr;
-                                   c->set_fullscreen(m == nullptr || *m != WindowMode::FullScreen);
-                               }
-                           }});
+        // NOLINTNEXTLINE(*-use-trailing-return-type)
+        out.push_back(TitleBarAction{.label = is_fs ? "退出全屏" : "全屏", .on_click = [this] {
+                                         if (const WindowChrome *c =
+                                                 env_ != nullptr ? env_->get<WindowChrome>() : nullptr) {
+                                             const WindowMode *m = env_ != nullptr ? env_->get<WindowMode>() : nullptr;
+                                             c->set_fullscreen(m == nullptr || *m != WindowMode::FullScreen);
+                                         }
+                                     }});
         // NOLINTNEXTLINE(*-use-trailing-return-type)
         out.push_back(TitleBarAction{.label = "关闭", .on_click = [this] {
                                          if (const WindowChrome *c =

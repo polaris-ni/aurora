@@ -128,10 +128,9 @@ auto gen_debug_json(const std::vector<DebugEntry> &entries) -> nlohmann::json {
 
 }  // namespace
 
-// NOLINTNEXTLINE(bugprone-exception-escape) — main errors are printed via err() then return; static analysis is
-// conservative about upstream parse_toml / merge_api_json_section
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
-// try/catch 包装
+// main 的错误经 err() 打印后以返回码体现，静态分析对上游 parse_toml / merge_api_json_section 偏保守；
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做 try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
     // NOLINTBEGIN(*-pro-bounds-pointer-arithmetic)
     const std::string toml = (argc > 1) ? argv[1] : "codespec/debug_api.toml";

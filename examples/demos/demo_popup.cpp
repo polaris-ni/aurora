@@ -1,8 +1,9 @@
 // Popup / OverlayHost 控件 demo：点击按钮在锚点弹出浮层，点击外部自动关闭。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     auto popup = std::make_shared<au::Popup>(au::Node{au::Column{
         au::Text{"Popup content"},

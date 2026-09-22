@@ -279,8 +279,8 @@ auto PageView::on_layout(const Constraints &c, const BuildContext &ctx) -> Size 
     // 仅布局当前页
     const int cur = current_.get();
     if (cur >= 0 && std::cmp_less(cur, children_.size())) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         Node &page = children_[static_cast<std::size_t>(cur)];
         const Constraints pc{.min = Size{.width = self.width, .height = self.height},
                              .max = Size{.width = self.width, .height = self.height}};
@@ -293,8 +293,8 @@ auto PageView::on_layout(const Constraints &c, const BuildContext &ctx) -> Size 
 auto PageView::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
     const int cur = current_.get();
     if (cur >= 0 && std::cmp_less(cur, children_.size())) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         children_[static_cast<std::size_t>(cur)].widget().paint(p, bounds, ctx);
     }
     // 指示器圆点（底部居中；简化为小方块）
@@ -317,8 +317,8 @@ auto PageView::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx)
 auto PageView::on_hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * {
     const int cur = current_.get();
     if (cur >= 0 && std::cmp_less(cur, children_.size())) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         Node &page = children_[static_cast<std::size_t>(cur)];
         const Rect cb = page.bounds();
         if (cb.contains(local)) {

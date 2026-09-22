@@ -1,8 +1,9 @@
 // 滚动吸附 demo：Scroll 整页翻页（ScrollSnap::page）+ LazyList 条目吸附（set_snap）。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     // ① 分页：每页高 = 视口高，滚轮落点后短滑动收敛到整页边界（reduce-motion 下直落）。
     constexpr float aurora_page_height = 180.0F;

@@ -1,8 +1,9 @@
 // Provider 控件 demo：ThemeProvider / LocaleProvider / MediaQueryProvider 三件套。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     auto light = au::Theme::light();
     auto zh = au::Locale{.language = "zh", .region = "CN"};

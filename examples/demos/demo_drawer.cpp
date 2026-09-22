@@ -1,8 +1,9 @@
 // Drawer / ProgressDialog / PageView 控件 demo：抽屉侧栏 + 进度弹窗 + 翻页容器。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     // PageView：三页可滑动翻页（左右拖拽超过 1/4 宽切页）
     std::vector<au::Node> pages;

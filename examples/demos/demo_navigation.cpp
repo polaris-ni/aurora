@@ -1,8 +1,9 @@
 // 导航 demo：Route / Navigator / Router。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     au::Route home{au::Column{GradientTitle{"Home"}, gap(8), au::Text{au::LocalizedString{"This is the home page"}}},
                    "home"};

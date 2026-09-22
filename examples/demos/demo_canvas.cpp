@@ -1,8 +1,9 @@
 // Canvas 控件 demo：自定义绘制回调（仪表条）。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     au::Canvas gauge{
         220, 120, [](au::Painter &p, const au::Rect &b) -> void {

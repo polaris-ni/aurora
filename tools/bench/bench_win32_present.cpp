@@ -154,11 +154,11 @@ auto main() -> int {
             bench_row("dibA_swizzle_only", time_ms(
                                                [&]() -> void {
                                                    for (std::size_t i = 0; i < n; ++i) {
-                                                       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                                                        // 基准测量热路径：.at() 的边界检查开销会影响计时
+                                                       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                                                        const std::uint32_t px = src[i];
-                                                       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                                                        // 基准测量热路径：.at() 的边界检查开销会影响计时
+                                                       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                                                        dst_a[i] = (px & 0xFF00FF00U) | ((px & 0xFFU) << 16U) |
                                                                   ((px >> 16U) & 0xFFU);
                                                    }
@@ -183,8 +183,9 @@ auto main() -> int {
             bi_b.hdr.biPlanes = 1;
             bi_b.hdr.biBitCount = 32;
             bi_b.hdr.biCompression = BI_BITFIELDS;
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 基准测量热路径：.at()
             // 的边界检查开销会影响计时
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             bi_b.masks[0] = 0x000000FFU;
             bi_b.masks[1] = 0x0000FF00U;  // NOLINT
             bi_b.masks[2] = 0x00FF0000U;  // NOLINT

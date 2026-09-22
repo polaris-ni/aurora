@@ -393,8 +393,8 @@ auto RichTextEdit::handle_text_key(KeyEvent &e, std::size_t n) -> bool {
 
 auto RichTextEdit::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     props["text"] = plain_text();
     // 仅显式设置时序列化方向（继承环境语义不落盘）。
     if (direction_.has_value()) {
@@ -405,11 +405,11 @@ auto RichTextEdit::serialize_props(Json &props) const -> void {
 auto RichTextEdit::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("text")) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         if (props["text"].is_string()) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             const std::string t = props["text"].get<std::string>();
             doc_.clear();
             for (const char ch : t) {
@@ -459,8 +459,8 @@ auto RichTextEdit::pos_from_line_col(size_t line_idx, size_t col) const -> size_
         if (li == line_idx) {
             return std::min(offset + col, doc_.size());
         }
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         offset += lines_[li].chars.size() + 1;  // +1 for '\n'
     }
     return doc_.size();

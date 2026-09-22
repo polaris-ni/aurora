@@ -100,6 +100,12 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_no_hardcoded_paths
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_hardcoded_paths.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # clang-tidy 豁免指令排版门禁（CODING_STANDARDS.md §5.2 规则 1/2）：紧邻式豁免与目标代码
+        # 之间不得插入注释行或空行——clang-format 在 120 列折断指令后的理由，会让豁免静默失效；
+        # 注释散文里也不得抄 NOLINT 令牌（它会被解析成对下一物理行的全量豁免）。
+        add_test(NAME check_nolint_layout
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_nolint_layout.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     endif ()
 
     # ---- 空源集 guard ----

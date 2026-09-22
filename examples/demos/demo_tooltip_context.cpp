@@ -1,8 +1,9 @@
 // Tooltip / ContextMenu / blur 修饰扩展 demo：悬停提示 + 右键菜单 + 毛玻璃。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     // Tooltip：悬停 500ms 显示提示
     au::Text hover_me{"Hover me 500ms for tooltip"};

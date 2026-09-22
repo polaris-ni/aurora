@@ -49,7 +49,7 @@ class TintedVideoPlayer : public aurora::VideoPlayer {
 }  // namespace
 
 // 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做 try/catch 包装。
-// 理由必须写在 NOLINTNEXTLINE **之前**：夹在它与目标行之间会被 clang-format 折行，导致抑制失效。
+// 理由必须写在紧邻式豁免指令 **之前**：夹在它与目标行之间会被 clang-format 折行，导致抑制失效。
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     const auto src = std::make_shared<aurora::ImageSequenceSource>(make_frames(48), 24.0);  // 2 秒 @ 24fps

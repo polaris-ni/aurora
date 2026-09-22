@@ -1,8 +1,9 @@
 // RadioGroup / SpinBox 控件 demo：互斥单选组 + 数字调节框。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     au::RadioGroup size_group{std::vector<std::string>{"Small", "Medium", "Large"}, 1};
     size_group.set_on_change([](int i) -> void { AURORA_LOG_INFO("demo", "Selected: ", i); });

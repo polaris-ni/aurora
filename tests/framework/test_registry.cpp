@@ -14,6 +14,10 @@ auto TestCase::full_name() const -> std::string {
     return result;
 }
 
+// 这里刻意声明 noexcept：本函数由静态初始化期的 Registrar 调用（见 test_registry.h 的说明），那条
+// 路径抛出同样直接 terminate，标 noexcept 只是把既有事实写成契约。告警指的就是函数内 static 的惰性
+// 构造——成员的两个 std::deque 默认构造标准未规定 noexcept，唯一抛出面是 bad_alloc，届时 fail-fast 正是注册表要的。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto TestRegistry::instance() noexcept -> TestRegistry & {
     static TestRegistry registry;
     return registry;

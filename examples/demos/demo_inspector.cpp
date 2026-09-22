@@ -1,8 +1,9 @@
 // InspectorPanel demo：左侧 Widget 树浏览器，右侧属性面板，中间分隔条可拖拽。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     // 构建一个示例 UI 树供 Inspector 检视
     auto target_tree = []() -> au::Node {

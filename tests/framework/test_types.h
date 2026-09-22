@@ -168,6 +168,11 @@ template <std::size_t N>
 /// constexpr + noexcept：注册期在静态初始化期执行，整条调用链不得抛
 /// （clang-tidy bugprone-throwing-static-initialization）。**实参须是 `literal_view(...)`
 /// 而非裸 `__FILE__`**，否则字面量→`string_view` 的隐式转换在 libc++ 下仍是可能抛出的构造。
+// 本函数标 `noexcept` 是注册期契约（静态初始化整条链不得抛），而体内三个 `string_view` 成员
+// （`find_last_of` / `rfind` / `substr`）在 libc++ 的 constexpr 实现里没有 noexcept 规格，分析器
+// 据此保守判定可抛；libstdc++ / MSVC STL 侧不报（与上条 `literal_view` 同一跨标准库差异面）。
+// 三者实值均不分配、不抛，故用区间式豁免覆盖整条声明，不拆开上方的文档注释。
+// NOLINTBEGIN(bugprone-exception-escape)
 [[nodiscard]] constexpr auto suite_from_path(std::string_view path) noexcept -> std::string_view {
     const auto sep = path.find_last_of("/\\");
     const auto begin = (sep == std::string_view::npos) ? 0 : sep + 1;
@@ -177,5 +182,6 @@ template <std::size_t N>
     }
     return path.substr(begin, end - begin);
 }
+// NOLINTEND(bugprone-exception-escape)
 
 }  // namespace aurora::testing

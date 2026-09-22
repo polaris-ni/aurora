@@ -91,6 +91,7 @@ auto make_tone_buffer() -> std::shared_ptr<const au::AudioBuffer> {
 
 }  // namespace
 
+// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸（浏览器下即未捕获异常，不吞失败）
 int main() {
 #ifdef AURORA_ENABLE_AUDIO_WEBAUDIO
     // 观测态须活过 main（定时器回调在 main 返回后继续跑），故走函数级 static 而非栈对象。

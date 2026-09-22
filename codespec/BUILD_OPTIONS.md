@@ -418,7 +418,11 @@ python tools/check/run_clang_tidy.py --build-dir build --json-out findings.json 
 python tools/check/run_clang_tidy.py --build-dir build --include 'src/'          # 只 lint 库代码
 ```
 
-**NOLINT 纪律**：凡用 `NOLINT` / `NOLINTNEXTLINE` 抑制告警，须遵守 `CODING_STANDARDS.md` §5.2——写明具体检查名（禁止裸 `NOLINT` 的新增使用），并紧邻注释说明「为何不能按建议修复」。
+**NOLINT 纪律**：凡用 `NOLINT` / `NOLINTNEXTLINE` 抑制告警，须遵守 `CODING_STANDARDS.md` §5.2——写明具体检查名（禁止裸 `NOLINT` 的新增使用），并紧邻注释说明「为何不能按建议修复」。抑制只在物理行上生效，排错位即静默失效，故该纪律由 CTest 用例 `check_nolint_layout` 常驻把关（clang-tidy 自身查不出这一类）。
+
+**排除项的取舍判据 = 实测规模**：`Checks` 里每一条 `-check-name,` 之前都写了它的实测条数与结论，量法见下面的「如何量一个当前被排除的检查」。已开启 / 保持关闭不由口味决定：`bugprone-exception-escape` 曾因「逐点噪声过大」整体排除，2026-09-22 量得残留仅 22 条后**改为开启**并逐点处置；`cppcoreguidelines-pro-bounds-avoid-unchecked-container-access` 同法量得残留 2050 条且与本库两处刻意设计冲突，**保持关闭**。
+
+**如何量一个当前被排除的检查**：`run_clang_tidy.py --config <去掉该排除项的配置> --include <范围> --json-out <结果>`，读 JSON 的 `by_check`。三点须知（脚本 docstring 同步记有一份）：① `--config` 是**整体替换**而非叠加，临时配置须把 `Checks` 全串抄过来再删那一行排除项，否则等于只跑一条检查、数出来的规模毫无意义；② 结果里的条数是**净新增**——代码里已写的豁免会被静默消费，所以「开启的总代价 = 净新增 + 既有豁免数」，只看净新增会低估；③ 量之前先确认豁免排版有效（`check_nolint_layout` 绿），否则失效豁免既不消费告警、也不出现在任何计数里，会把「已有人判过因」的代码读成「无人管过的存量」。
 
 **门禁覆盖范围 = 该 build 目录的编译库**：`lint` 扫的是 `--build-dir` 下 `compile_commands.json` 里的 TU，因此只覆盖**该次 configure 实际定义的翻译单元**。浏览器专属件（`EMSCRIPTEN` 门后的 `wasm_*` 实现与 `aurora_verify_wasm_*` 探针）、以及按平台/后端条件定义的真机探针，都不在 Windows/Linux native db 内，`lint` 绿灯不等于它们干净。
 
@@ -434,7 +438,7 @@ python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏
 
 **「0 告警」不等于「跑到了」**：TU 编译失败时 clang-tidy 不产出任何带 `[check]` 的诊断，静默下来就是一轮绿灯。故本脚本对**前端 `error:`（含 `fatal error:`、`unable to handle compilation`）与超时**单独记账并以退出码 1 失败，`--emscripten` 重写还会校验条数守恒与 include 目录存在性，任一不满足直接以退出码 2 拒跑。反例实测：用 `shlex.split(posix=True)` 拆 Windows 编译库里的 `command`，会把反斜杠一律当转义符吃掉——盘符与目录粘连、分隔符丢失，路径全废，整轮 TU 编译不过，而门禁显示 0 告警。
 
-**`HeaderFilterRegex` 的路径分隔符缺口（已知，待决策）**：现值为 `(include/aurora|src/aurora|/tests/|/tools/|/examples/)`，只认正斜杠；而编译库里的头文件路径常是「正斜杠根 + 反斜杠段」的混合形态，某一段的分隔符与正则不符，该段之后的头文件告警就被过滤掉。实测后果：同一份 `tests/framework` 下的头文件，收口前 native 遍报 0 条、wasm 遍报十余条（两条口径拼出的路径形态不同，穿过过滤的能力也就不同），因此**当前 native 门禁的有效覆盖面主要是主文件诊断**；把正则改为分隔符无关会一次性放出 `include/aurora` 下的存量头文件告警，属独立专项。
+**`HeaderFilterRegex` 的路径分隔符缺口（已知，2026-09-22 定为「暂缓」）**：现值为 `(include/aurora|src/aurora|/tests/|/tools/|/examples/)`，只认正斜杠；而编译库里的头文件路径常是「正斜杠根 + 反斜杠段」的混合形态，某一段的分隔符与正则不符，该段之后的头文件告警就被过滤掉。实测后果：同一份 `tests/framework` 下的头文件，收口前 native 遍报 0 条、wasm 遍报十余条（两条口径拼出的路径形态不同，穿过过滤的能力也就不同），因此**当前 native 门禁的有效覆盖面主要是主文件诊断**。把正则改为分隔符无关的代价已量过：一次放出 **417 条告警 / 64 文件**（多为同一头文件被多个 TU 重复上报）。暂缓的理由：现状门禁说的仍是真话（0 告警 = 被扫到的部分确实干净），只是覆盖面比字面声称的窄，而这一窄法已在本节写明；真要扩面应作为独立切片、配「按文件 + check 逐条列名并注明原因」的存量豁免名单推进，而不是把 417 条一次性摊进 NOLINT。
 
 ### 4.6 `AURORA_ENABLE_IMAGE_*`（图像编解码能力）
 

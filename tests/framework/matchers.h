@@ -174,8 +174,13 @@ template <typename Element>
 }
 
 /// @brief 容器每个元素都满足子匹配器。
+// 可抛两面：`describe()` 拼串有分配，子匹配器 `matches()` 是模板形参、无 noexcept 规格可证。
+// 断言设施自身抛出属框架错误，按口径交给 runner 在用例体外层捕获报告，不在这里吞。本条
+// native 门禁看不见——头文件路径的分隔符穿不过 `HeaderFilterRegex`（覆盖面缺口，见
+// BUILD_OPTIONS §4.5），浏览器口径才报。
 template <typename Matcher>
 [[nodiscard]] auto each(const Matcher &matcher) {
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     return MatcherLike{[matcher](const auto &container) -> bool {
                            using std::begin;
                            using std::end;
@@ -204,8 +209,12 @@ template <typename... Matchers>
 }
 
 /// @brief 子匹配器不成立。
+// 与 `each` 同因：`describe()` 拼串有分配、子匹配器 `matches()` 无 noexcept 规格可证；抛出即
+// 框架自身出错，由 runner 在用例体外层捕获报告。同属 native 门禁被 `HeaderFilterRegex` 分隔符
+// 缺口滤掉的那一类（见 BUILD_OPTIONS §4.5）。
 template <typename Matcher>
 [[nodiscard]] auto negated(const Matcher &matcher) {
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     return MatcherLike{[matcher](const auto &value) -> bool { return !matcher.matches(value); },
                        "not " + matcher.describe()};
 }

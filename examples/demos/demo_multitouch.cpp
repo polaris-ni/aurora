@@ -4,8 +4,9 @@
 #include "aurora/event/event.h"
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     // 两个可拖拽方块：每根手指独立路由到各自命中的控件，互不干扰。
     au::Button a;

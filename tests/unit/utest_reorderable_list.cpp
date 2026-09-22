@@ -131,6 +131,9 @@ class ClickBox final : public Widget {
 /// 行高表驱动的条目构造器：第 i 项高度 = heights[i]（越界用最后一项）。
 /// @param clickable 条目是否自带点击（消费指针事件）——真实列表的常见形态。
 auto make_builder(const std::vector<float> &heights, bool clickable = false) -> ReorderableList<int>::ItemBuilder {
+    // 返回的条目构造器转入 std::function（ItemBuilder），本检查对可调用对象一律判「不应抛出」；
+    // 构造器体内只建控件，抛出即宿主/用例失败，不在回调层面捕获。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     return [heights, clickable](const int &, int index) -> Node {
         const std::size_t i = std::min(static_cast<std::size_t>(index), heights.size() - 1);
         if (clickable) {
@@ -197,6 +200,8 @@ auto focus_list(ReorderableList<int> &list, FocusManager &fm) -> void {
 class ScopedStringTable {
   public:
     ScopedStringTable() : saved_(default_string_table()) {}
+    // 还原只是一张字符串表赋值，唯一抛出面是 bad_alloc；守卫析构期抛出会盖掉真正的用例失败，故不捕获。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     ~ScopedStringTable() { default_string_table() = saved_; }
     ScopedStringTable(const ScopedStringTable &) = delete;
     auto operator=(const ScopedStringTable &) -> ScopedStringTable & = delete;

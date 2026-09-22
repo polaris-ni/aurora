@@ -16,10 +16,29 @@
 #   纯风格/主观阈值检查，无安全 auto-fix。残留告警全部落在测试代码（复杂 setup、
 #   嵌套三元构造断言数据），对库实现无信号价值；逐点抑制噪声过大，故配置层排除，
 #   库代码复杂度由 Code Review 把关。
-# - bugprone-exception-escape：main 隐式 noexcept。测试入口（AURORA_TEST 注册的
-#   runner）与 demo 入口刻意让异常向上传播到测试框架/运行环境以报告失败，逐点
-#   try/catch 或 NOLINT 噪声过大；库实现内部异常路径由 Result/Error 体系与
-#   Code Review 把关。
+# - bugprone-exception-escape：已开启（2026-09-22 判因收口，此前曾整体排除）。开启依据是实测规模：
+#   去掉排除项全量跑，净新增 113 条；其中 91 条落在「已写却因排版错位而失效」的豁免行上（见
+#   CODING_STANDARDS.md §5.2 与 check_nolint_layout 门禁），排版修复后真实残留仅 22 条，已全部
+#   逐点处置并写明理由（库侧 3 处析构关停 + 2 处转入 std::function 的命令回调、测试框架入口与
+#   RAII 守卫 6 处、示例/探针回调与入口 11 处）。此前「逐点噪声过大故整体排除」的理由已被该实测
+#   推翻——噪声早已写在代码里，整体排除只让这些豁免变成死标记。价值面：析构 / noexcept 函数 /
+#   静态初始化链上的抛出即 terminate，属本库明确要拦的崩溃类。
+#   ⚠️ 本检查有一条系统性假告警面须知悉：**任何转入 std::function 的可调用对象一律判为「不应抛出」**
+#   （std::function::operator() 无 noexcept 规格，分析器无法证明其不抛），故回调密集的新增代码常需
+#   一枚带理由的豁免；处置口径见上述 22 处的紧邻注释。
+#   ⚠️ 开启后两条口径的条数并不相同：浏览器口径另报 5 条，native 遍一条也看不见。其中 2 条落在
+#   tests/framework 的头文件上，是 HeaderFilterRegex 只认正斜杠的覆盖面缺口把它滤掉了（把正则改成
+#   分隔符无关后 native 同样报，实测过，故**不是** libc++ 差异）；另 3 条分属真实跨标准库差异
+#   （Node::~Node 的销毁上报链、suite_from_path 内的 constexpr string_view 成员）与浏览器专属 TU
+#   的入口（wasm 音频探针）。5 条按同一判因纪律逐点处置完毕，两口径各自复验 0 findings。
+# - cppcoreguidelines-pro-bounds-avoid-unchecked-container-access：保持关闭（2026-09-22 实测判因）。
+#   去掉排除项全量跑，修复排版错位后净新增仍达 2050 条（其中 tests 1703、库侧 src/include 273，散在
+#   数十文件），逐点抑制不成比例。更关键的是它与本项目两处刻意设计冲突：① 热路径按裸下标访问并
+#   以 `// NOLINT(...)` 记录契约（bidi 重排、音频环形 PCM、GPU 顶点/索引装配等处均依赖不抛的
+#   operator[]，改 .at() 即引入抛出路径与额外边界检查）；② 内部缓冲区传递统一用 std::span，其
+#   视图切分本身就以指针算术/下标表达。仓内已存在 225 处点名该检查的豁免，保留在代码里作为「何时
+#   需要显式声明不抛」的自文档，一旦将来要开启该检查即以它们为基线。越界防护由既有
+#   pro-bounds-* 与 clang-analyzer 面 + 测试承担，不靠本检查。
 # - modernize-use-trailing-return-type：与 codespec/CODING_STANDARDS.md §8.3 直接冲突。
 #   §8.3 明确「新增代码必须用语义化尾置返回类型，存量代码允许例外」；本项目为 C++20
 #   MSVC/clang 双工具链，存量函数（含大量模板/重载）机械翻成尾置返回类型会带来巨大 diff
@@ -57,7 +76,6 @@ Checks: '
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
   -readability-function-cognitive-complexity,
   -readability-avoid-nested-conditional-operator,
-  -bugprone-exception-escape,
   -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
   -modernize-use-trailing-return-type,
   -cppcoreguidelines-non-private-member-variables-in-classes,

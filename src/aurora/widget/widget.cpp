@@ -121,6 +121,11 @@ auto Widget::perform_accessibility_action(const AccessibilityActionRequest &req)
 
 // Node 析构：子节点销毁时清空其缓存的布局父指针，避免向上失效传播解引用悬垂指针
 // （见 node.h 中 Node 类注释）。需完整 Widget，故定义于此而非头文件。
+// 抛出面在销毁上报链：`notify_accessibility_*` 最终经 `std::function` 回调进宿主注册的桥，
+// 无法证明不抛。析构抛出即 terminate，但在这一层 try/catch 只会把宿主钩子自身的失败静默吞
+// 掉（销毁路径已无调用方可报告），故按现状豁免。两条口径的不对称来自标准库实现差异：同一个
+// TU，native（libstdc++）遍不报、浏览器（libc++）遍报。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 Node::~Node() {
     if (widget_ == nullptr) {
         return;

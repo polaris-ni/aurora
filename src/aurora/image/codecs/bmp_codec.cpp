@@ -13,8 +13,8 @@ class BmpCodec : public ImageCodec {
     [[nodiscard]] auto can_decode() const -> bool override { return true; }
 
     [[nodiscard]] auto sniff(std::span<const std::uint8_t> h) const -> bool override {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         return h.size() >= 2 && h[0] == 'B' && h[1] == 'M';
     }
 

@@ -17,8 +17,9 @@ static auto demo_coro() -> au::CoroTask<void> {
     co_return;
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     // 共享状态：Text 经 Reactive 订阅，后台回调写回时自动触发刷新（否则只拍静态快照）。
     auto status = std::make_shared<au::State<au::LocalizedString>>("running…");

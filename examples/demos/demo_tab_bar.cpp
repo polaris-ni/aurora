@@ -1,8 +1,9 @@
 // TabBar 控件 demo：三个选项卡切换内容，第三个可关闭。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     std::vector<au::Tab> tabs;
     tabs.push_back(au::Tab{.label = "Home", .content = au::Node{au::Text{"Home content"}}, .closable = false});

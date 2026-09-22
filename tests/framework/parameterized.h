@@ -316,7 +316,7 @@ template <typename Range>
 ///
 /// 第三实参须是单一表达式（`values_of(...)` / `values_in(container)` / 具名容器）。
 //
-// 豁免口径（区间式：紧邻下一物理行的 NOLINTNEXTLINE 罩不住下面带理由的说明与跨行 `#define`）：
+// 豁免口径（区间式：紧邻式豁免罩不住下面带理由的说明与跨行 `#define`）：
 // 这里的可变参数不是「参数太多」的偷懒，而是**可选实参补默认值**——第三实参省略时须填入
 // `DefaultParamName{}`，而函数签名无法在调用点替一个类型无关的默认对象占位；同时宏必须能在
 // 使用点用 `##` 拼出「每个实例化一个」的唯一静态注册对象名，模板函数拿不到 `__FILE__` 之外
@@ -353,7 +353,7 @@ template <typename Range>
 // 豁免口径：`suite_name` 是**模板名**，只能以 `suite_name<...>` 形态出现——加了括号就成了
 // 括号表达式而非 template-name（[temp.names]/1），`CaseBase<(suite_name)<TestType>>` 直接编译失败。
 // 故 `bugprone-macro-parentheses` 对本宏内所有 `suite_name` 用法都不成立（区间式：告警点在宏体
-// 中段，紧邻式 NOLINTNEXTLINE 也够不着）。
+// 中段，紧邻式豁免也够不着）。
 // NOLINTBEGIN(bugprone-macro-parentheses)
 #define AURORA_TYPED_TEST(suite_name, case_name)                                                                    \
     template <typename TestType>                                                                                    \

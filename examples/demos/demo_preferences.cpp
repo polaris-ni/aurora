@@ -10,8 +10,9 @@
 #include "aurora/preferences/preferences.h"
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     try {
         const auto dir = std::filesystem::temp_directory_path() / "aurora_prefs_demo";

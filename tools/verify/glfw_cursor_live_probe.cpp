@@ -183,6 +183,9 @@ auto human_expectation(aurora::CursorShape shape) -> const char * {
 
 }  // namespace
 
+// 入口不吞异常：探针的失败以未捕获异常 → 非零退出码/terminate 呈现，与 examples/ 下各 demo 入口同口径
+// （逐项判据与退出码约定见本文件头注释，捕获反而会把它压成 0）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
     bool interactive = false;
     // 以 span 视图遍历命令行参数（argc 可为 0，故 subspan 起点取 0/1 二者之一，避免越界抛异常）

@@ -31,6 +31,10 @@ ScrollStorage::Scope::Scope(std::string_view scope) {
     changed_ = true;
 }
 
+// 析构体只做「把保存的作用域串移动回单例」：std::string 的移动赋值按标准在分配器
+// is_always_equal（std::allocator 即如此）时为 noexcept。告警来自 instance() 的函数内
+// static 惰性构造可能 bad_alloc——而 Scope 构造已经调用过它，析构期不会再触发初始化。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 ScrollStorage::Scope::~Scope() {
     if (changed_) {
         instance().scope_ = std::move(saved_);

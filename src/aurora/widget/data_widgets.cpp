@@ -54,14 +54,14 @@ auto DataTable::on_pointer_event(MouseEvent &e) -> void {
     if (e.local_position.y < AURORA_HEADER_HEIGHT) {
         float x = 0.0F;
         for (std::size_t i = 0; i < columns_.size(); ++i) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             if (e.local_position.x >= x && e.local_position.x < x + columns_[i].width) {
                 sort_by(static_cast<int>(i));
                 break;
             }
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             x += columns_[i].width;
         }
         e.is_handled = true;
@@ -80,28 +80,28 @@ auto DataTable::serialize_props(Json &props) const -> void {
     Json cols = Json::array();
     for (const auto &c : columns_) {
         Json jc;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         jc["label"] = c.label;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         jc["width"] = c.width;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         jc["sortable"] = c.sortable;
         cols.push_back(jc);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     props["columns"] = cols;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     props["row_count"] = static_cast<int>(rows_.size());
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     props["selected_row"] = selected_row_.get();
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     props["sort_column"] = sort_column_;
 }
 
@@ -123,8 +123,8 @@ auto DataTable::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*
     float x = bounds.origin.x;
     for (const auto &col : columns_) {
         std::string label = col.label;
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         if (sort_column_ >= 0 && &col == &columns_[static_cast<std::size_t>(sort_column_)]) {
             label += sort_order_ == SortOrder::Ascending ? " ^" : " v";
         }
@@ -149,12 +149,12 @@ auto DataTable::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*
         float cx = bounds.origin.x;
         for (std::size_t ci = 0; ci < columns_.size(); ++ci) {
             p.draw_text(Rect{.origin = Point{.x = cx + 8.0F, .y = ry + 6.0F},
-                             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                              // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+                             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                              .size = Size{.width = columns_[ci].width - 12.0F, .height = AURORA_ROW_HEIGHT - 10.0F}},
                         cell(r, ci), f, Color(30, 30, 35, 255));
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             cx += columns_[ci].width;
         }
     }
@@ -197,11 +197,11 @@ auto TreeView::on_pointer_event(MouseEvent &e) -> void {
 
 auto TreeView::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     props["selected_row"] = selected_.get();
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     props["visible_count"] = static_cast<int>(visible_count());
 }
 
@@ -286,23 +286,23 @@ auto ListView::serialize_props(Json &props) const -> void {
     for (const auto &s : items_) {
         items.push_back(s);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     props["items"] = items;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     props["multi_select"] = multi_;
 }
 
 auto ListView::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("items")) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         if (props["items"].is_array()) {
             items_.clear();
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             for (const auto &s : props["items"]) {
                 if (s.is_string()) {
                     items_.push_back(s.get<std::string>());
@@ -315,11 +315,11 @@ auto ListView::deserialize_props(const Json &props) -> void {
         }
     }
     if (props.contains("multi_select")) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         if (props["multi_select"].is_boolean()) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             multi_ = props["multi_select"].get<bool>();
         } else {
             Diagnostics::degraded("multi_select expects boolean", type_name(), "invalid-prop-value");
@@ -344,8 +344,8 @@ auto ListView::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*c
         }
         p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + 10.0F, .y = y + 5.0F},
                          .size = Size{.width = bounds.size.width - 16.0F, .height = AURORA_ROW_HEIGHT - 8.0F}},
-                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                     items_[i], f, Color(30, 30, 35, 255));
     }
 }

@@ -20,8 +20,9 @@ static auto todo_reducer(const std::vector<Todo> &s, const au::Action &a) -> std
     return s;
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     auto todos = au::make_store<std::vector<Todo>>(std::vector{Todo{.id = 1, .title = "Explore widgets", .done = false},
                                                                Todo{.id = 2, .title = "Try theming", .done = true}},

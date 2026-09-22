@@ -743,6 +743,8 @@ auto run_backend(const char *label, const char *title, MakeWindow make_window) -
 
 }  // namespace
 
+// 入口不吞异常：探针的失败以未捕获异常 → 非零退出码/terminate 呈现（捕获反而把它压成 0），与 demo 入口同口径。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     int rc = 0;
 

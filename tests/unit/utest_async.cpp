@@ -60,6 +60,9 @@ struct TimeoutGuardsDrain {
     auto operator=(const TimeoutGuardsDrain &) -> TimeoutGuardsDrain & = delete;
     TimeoutGuardsDrain(TimeoutGuardsDrain &&) = delete;
     auto operator=(TimeoutGuardsDrain &&) -> TimeoutGuardsDrain & = delete;
+    // 守卫析构只做一件事：把残留看守全部推到期，触发的是本用例自己注册的续体（断言计数，不抛）。
+    // sweep 内残余的抛出面只有向量分配一类 bad_alloc，测试期不做二次报告。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     ~TimeoutGuardsDrain() {
         aurora::detail::sweep_due_timeouts(std::chrono::steady_clock::now() + std::chrono::hours{1});
     }

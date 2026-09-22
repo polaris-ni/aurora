@@ -404,7 +404,7 @@ class ShapeCache {
         unsigned int ng = 0;
         const hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(buf, &ng);
         const hb_glyph_position_t *poss = hb_buffer_get_glyph_positions(buf, &ng);
-        // HarfBuzz 返回 C 风格数组，此处是三方 C API 的必经指针遍历；用 NOLINT 块收口。
+        // HarfBuzz 返回 C 风格数组，此处是三方 C API 的必经指针遍历；用区间式豁免收口。
         // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         seg.reserve(ng);
         for (unsigned int j = 0; j < ng; ++j) {

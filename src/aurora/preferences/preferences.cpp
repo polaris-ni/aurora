@@ -29,8 +29,8 @@ auto to_json_map(const std::unordered_map<std::string, double> &m) -> Json {
     Json out = Json::object();
     for (const auto &kv : m) {
         if (kv.second != 0.0) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             out[kv.first] = kv.second;
         }
     }
@@ -136,24 +136,24 @@ auto split_meta(const Json &whole, Json &data, std::unordered_map<std::string, d
     }
     data = whole;
     data.erase(AURORA_PREFERENCE_META_KEY);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     const Json meta = (whole.contains(AURORA_PREFERENCE_META_KEY) && whole[AURORA_PREFERENCE_META_KEY].is_object())
-                          // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                           // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+                          // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                           ? whole[AURORA_PREFERENCE_META_KEY]
                           : Json::object();
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     cleared_at = meta.contains("cleared_at") && meta["cleared_at"].is_number() ? meta["cleared_at"].get<double>() : 0.0;
     if (meta.contains("versions")) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         versions = from_json_map(meta["versions"]);
     }
     if (meta.contains("tombstones")) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         tombstones = from_json_map(meta["tombstones"]);
     }
 }
@@ -192,14 +192,16 @@ auto resolve_set(Json &root, const std::string &composite, Json value) -> void {
             *cur = Json::object();
         }
         if (dot == std::string_view::npos) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 此处依赖 json operator[]
+            // 此处依赖 json operator[]
             // 的插入语义（建键），不可改为 .at()
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             (*cur)[seg] = std::move(value);
             return;
         }
         if (!cur->contains(seg) || !cur->at(seg).is_object()) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 此处依赖 json operator[]
+            // 此处依赖 json operator[]
             // 的插入语义（建键），不可改为 .at()
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             (*cur)[seg] = Json::object();
         }
         cur = &cur->at(seg);
@@ -538,19 +540,19 @@ auto Preferences::flush() -> Result<void> {
     // 序列化：用户数据 + meta（versions / tombstones / cleared_at）。
     Json out = root_;
     Json meta = Json::object();
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     meta["versions"] = to_json_map(versions_);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     meta["tombstones"] = to_json_map(tombstones_);
     if (cleared_at_ > 0.0) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         meta["cleared_at"] = cleared_at_;
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     out[AURORA_PREFERENCE_META_KEY] = meta;
     const std::string content = out.dump(2);  // 人类可读、UTF-8（无 BOM）
 

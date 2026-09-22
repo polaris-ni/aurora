@@ -220,8 +220,13 @@ auto CommandRegistry::bind_shortcuts(ShortcutRegistry &sr) -> void {
             continue;
         }
         const std::string cid = cmd.id;  // 按值捕获，避免悬垂
+        // 该回调转入 std::function（ShortcutRegistry::add 形参），而本检查对任何可调用对象一律判为
+        // 「不应抛出」（std::function::operator() 无 noexcept 规格，无法证明其不抛）。invoke 以 bool
+        // 在带内回报成败，异常只可能来自宿主注册的 action——本库不在派发边界吞宿主异常。
+        // NOLINTBEGIN(bugprone-exception-escape)
         const int bound =
             sr.add(*cmd.default_binding, [this, cid]() -> void { (void)this->invoke(cid); }, cmd.scope, cmd.title);
+        // NOLINTEND(bugprone-exception-escape)
         shortcut_of_.emplace(cid, bound);
     }
 }
@@ -238,6 +243,8 @@ auto CommandRegistry::to_menu_items() const -> std::vector<MenuItem> {
             item.shortcut_text = cmd.default_binding->to_string();
         }
         const std::string cid = cmd.id;
+        // 同 bind_shortcuts：转入 std::function 的回调被本检查判为「不应抛出」，宿主 action 的异常不在此吞。
+        // NOLINTNEXTLINE(bugprone-exception-escape)
         item.on_click = [this, cid]() -> void { (void)this->invoke(cid); };
         out.push_back(std::move(item));
     }

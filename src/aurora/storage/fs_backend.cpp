@@ -269,20 +269,20 @@ auto FilesystemBackend::put_record(const std::string &id, const StorageRecord &r
     const auto json_path = root_ / (enc + ".json");
 
     Json env = Json::object();
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     env["id"] = rec.id.empty() ? id : rec.id;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     env["type"] = rec.type;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     env["version"] = rec.version;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     env["encoding"] = (rec.encoding == StorageEncoding::Binary) ? "binary" : "json";
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     env["mtime"] = mtime_to_ms(rec.mtime);
 
     if (rec.encoding == StorageEncoding::Binary) {
@@ -293,12 +293,12 @@ auto FilesystemBackend::put_record(const std::string &id, const StorageRecord &r
             return Result<void>{
                 make_error(ErrorCode::StorageIoError, "Failed to write binary sidecar: " + ec.message())};
         }
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         env["blob_ref"] = enc + ".bin";
     } else {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         env["payload"] = std::get<Json>(rec.payload);
         // 记录由 Binary 改写为 Json 时清理旧 sidecar：残留的 <id>.bin 既是磁盘泄漏，
         // 也让已删除的二进制载荷继续躺在盘上（泄露面）。删除失败不阻断主流程。
@@ -377,8 +377,8 @@ auto FilesystemBackend::get_record(const std::string &id) -> Result<StorageRecor
         }
         std::vector<std::byte> bytes(content.size());
         for (std::size_t i = 0; i < content.size(); ++i) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             bytes[i] = static_cast<std::byte>(content[i]);
         }
         rec.payload = std::move(bytes);
@@ -388,8 +388,8 @@ auto FilesystemBackend::get_record(const std::string &id) -> Result<StorageRecor
             return Result<StorageRecord>{
                 make_error(ErrorCode::StorageRecordCorrupt, "JSON record missing payload: " + id)};
         }
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         rec.payload = env["payload"];
     }
     return Result<StorageRecord>{std::move(rec)};

@@ -1,8 +1,9 @@
 // Scroll 控件 demo：可滚动区域（滚轮滚动）。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     std::vector<au::Node> lines;
     for (int i = 0; i < 40; ++i) {

@@ -1,8 +1,9 @@
 // Text 控件 demo：字号、字重、颜色、LocalizedString、字距/词距、斜体、两端对齐(Justify)。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     const au::LocalizedString k_para =
         "The quick brown fox jumps over the lazy dog while a silent river flows "

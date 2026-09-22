@@ -1,8 +1,9 @@
 // Form / FormField 表单验证 demo：姓名必填 + 邮箱格式校验，提交时统一验证。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     // 共享 TextInput 实例：value_provider 直接读控件当前文本（TextInput::value()）。
     auto name_input = std::make_shared<au::TextInput>();

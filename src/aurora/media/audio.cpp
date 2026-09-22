@@ -886,6 +886,9 @@ AudioContext::AudioContext(std::unique_ptr<AudioDeviceBackend> device_backend,
     }
 }
 
+// 析构兜底关上下文：close() 的成败一律以 Result 在带内回报、自身不抛，残余抛出面是设备线程 join 与
+// 日志分配一类资源失败。析构期无调用方可回报，try/catch 即静默丢错，故按显式取舍保留不包装。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 AudioContext::~AudioContext() {
     if (!closed_.load(std::memory_order_acquire)) {
         close();

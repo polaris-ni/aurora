@@ -309,6 +309,9 @@ auto run_selected(const std::vector<const TestCase *> &selected, const CliOption
 
 }  // namespace
 
+// 入口不吞异常：用例体外逃的异常即「测试框架自身有缺陷」的信号，让它穿过 main 走 terminate/非零退出，
+// 与 examples/ 下各 demo 入口同口径（框架对**用例体**的异常另有捕获，不在此路径）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
 #ifdef AURORA_PLATFORM_WINDOWS
     // Windows CRT（MSVC/clang-cl 与 MinGW 的 abort 同在 ucrtbase 实现）：abort() 默认带

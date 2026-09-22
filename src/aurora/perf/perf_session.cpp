@@ -40,8 +40,8 @@ namespace {
         return sorted.back();
     }
     const double frac = pos - static_cast<double>(lo);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     return (sorted[lo] * (1.0 - frac)) + (sorted[hi] * frac);
 }
 

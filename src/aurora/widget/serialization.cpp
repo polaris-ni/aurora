@@ -134,8 +134,9 @@ template <class T, class... CtorArgs>
 auto reg_no_props(const char *name, CtorArgs... ctor_args) -> void {
     auto captured = std::make_tuple(std::move(ctor_args)...);
     WidgetRegistry::instance().register_factory(
-        // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+        // 误报：转入 std::function 的 lambda
         // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
+        // NOLINTNEXTLINE(bugprone-exception-escape)
         name, [captured = std::move(captured)](const Json & /*props*/) -> Result<std::shared_ptr<Widget>> {
             auto w = std::apply(
                 []<class... Args>(Args &&...a) -> std::shared_ptr<T> {  // NOLINT

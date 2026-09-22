@@ -281,8 +281,8 @@ auto VideoPlayer::on_layout(const Constraints &c, const BuildContext &ctx) -> Si
     const Size s = c.constrain(Size{.width = w, .height = h});
 
     if (!children_.empty()) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         Node &ctl = children_[0];
         ctl.widget().show.set(show_controls_);
         if (show_controls_) {
@@ -329,8 +329,8 @@ auto VideoPlayer::tick_gestures(std::chrono::steady_clock::time_point now) -> vo
 }
 
 auto VideoPlayer::on_pointer_event(MouseEvent &e) -> void {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     const bool on_controls = !children_.empty() && children_[0].bounds().contains(e.local_position);
     switch (e.action) {
         case MouseAction::Press:
@@ -386,28 +386,28 @@ auto VideoPlayer::paint_frame(Painter &p, const Rect &bounds) const -> void { dr
 
 auto VideoPlayer::serialize_props(Json &props) const -> void {
     Container::serialize_props(props);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     props["fit"] = box_fit_to_json(fit_);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     props["show_controls"] = show_controls_;
 }
 
 auto VideoPlayer::deserialize_props(const Json &props) -> void {
     Container::deserialize_props(props);
     if (props.contains("fit")) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         fit_ = json_to_box_fit(props["fit"]);
     }
     if (props.contains("show_controls")) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         show_controls_ = props["show_controls"].get<bool>();
         if (!children_.empty()) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             children_[0].widget().show.set(show_controls_);
         }
     }

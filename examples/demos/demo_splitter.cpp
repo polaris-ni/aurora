@@ -1,8 +1,9 @@
 // Splitter 控件 demo：左右分栏可拖拽调整比例（拖动中间分隔条）。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     auto splitter = au::HSplitter(au::Node{au::Column{au::Text{"Sidebar"}, au::Text{"Drag divider to adjust"}}},
                                   au::Node{au::Column{au::Text{"Main content area"}}}, 0.3F);

@@ -1,8 +1,9 @@
 // ImageView 控件 demo：Image::load（内置 BMP 解码，失败降级占位）。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     auto img_res = au::Image::load("test.bmp");
     au::Node hero = img_res ? au::Node{au::ImageView{img_res.value()}}

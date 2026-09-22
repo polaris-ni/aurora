@@ -65,6 +65,7 @@ static auto build_root() -> au::Node {
     };
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int { return run_demo(build_root(), "Timer · Aurora Demo", 520.0F, 440.0F); }

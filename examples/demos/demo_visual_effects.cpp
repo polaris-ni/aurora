@@ -1,8 +1,9 @@
 // 视觉修饰 demo：blend_mode（像素混合）/ shader_mask（渐变淡出）/ cache_layer（离屏缓存）。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     au::Text blend{au::LocalizedString{"blend_mode: Multiply + blue tint"}};
     blend.modifier.set(au::Modifier{}

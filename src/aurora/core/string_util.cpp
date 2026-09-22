@@ -6,7 +6,7 @@
 
 namespace aurora::internal {
 
-// 故意保留 printf 风格 C 可变参实现（见 string_util.h 声明处的 NOLINT 说明）。
+// 故意保留 printf 风格 C 可变参实现（见 string_util.h 声明处的豁免说明）。
 // NOLINTNEXTLINE(*-avoid-variadic-functions)
 auto string_format(const char *fmt, ...) -> std::string {
     if (fmt == nullptr) {

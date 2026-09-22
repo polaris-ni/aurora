@@ -86,11 +86,13 @@ struct FlexLayoutContext {
     auto measure_pass() -> void {
         const size_t n = items.size();
         for (size_t i = 0; i < n; ++i) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 基准测量热路径：.at()
             // 的边界检查开销会影响计时
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             if (items[i].flex > 0.0F && main_finite) {
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+                // 基准测量热路径：.at()
                 // 的边界检查开销会影响计时
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 total_flex += items[i].flex;  // 延后到阶段一(B)
                 continue;
             }
@@ -100,11 +102,13 @@ struct FlexLayoutContext {
             const float remaining = main_finite ? std::max(0.0F, parent_max_main - used_main) : inf;
             set_main(cc.max, remaining);
             set_cross(cc.max, parent_max_cross);
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 基准测量热路径：.at()
             // 的边界检查开销会影响计时
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             const Size s = items[i].do_measure(cc);
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 基准测量热路径：.at()
             // 的边界检查开销会影响计时
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             sizes[i] = s;
             used_main += get_main(s);
             max_cross = std::max(max_cross, get_cross(s));
@@ -116,24 +120,28 @@ struct FlexLayoutContext {
             const float total_gap = (n > 1) ? static_cast<float>(n - 1) * gap : 0.0F;
             const float free = std::max(0.0F, parent_max_main - used_main - total_gap);
             for (size_t i = 0; i < n; ++i) {
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+                // 基准测量热路径：.at()
                 // 的边界检查开销会影响计时
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 if (items[i].flex <= 0.0F) {
                     continue;
                 }
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+                // 基准测量热路径：.at()
                 // 的边界检查开销会影响计时
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 const float alloc = free * items[i].flex / total_flex;
                 Constraints cc;
                 set_main(cc.min, 0.0F);
                 set_cross(cc.min, parent_min_cross);
                 set_main(cc.max, std::max(0.0F, alloc));
                 set_cross(cc.max, parent_max_cross);
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+                // 基准测量热路径：.at()
                 // 的边界检查开销会影响计时
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 const Size s = items[i].do_measure(cc);
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+                // 基准测量热路径：.at()
                 // 的边界检查开销会影响计时
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 sizes[i] = s;
                 used_main += get_main(s);
                 max_cross = std::max(max_cross, get_cross(s));
@@ -234,8 +242,9 @@ struct FlexLayoutContext {
             if (i > 0) {
                 pos += gap;  // 相邻子项间的固定间距（首个子项前不加）
             }
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 基准测量热路径：.at()
             // 的边界检查开销会影响计时
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             Size s = sizes[i];
             float cross_size = get_cross(s);
             // 非 Baseline 模式下 baselines[i] 为 nullopt ⇒ 取 cross_size（该分支不使用此值）。
@@ -272,8 +281,9 @@ struct FlexLayoutContext {
                 origin = Point{.x = cross_pos, .y = pos};
                 rsize = Size{.width = cross_size, .height = s.height};
             }
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+            // 基准测量热路径：.at()
             // 的边界检查开销会影响计时
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             rects[i] = Rect{.origin = origin, .size = rsize};
             pos += get_main(s) + between;
         }

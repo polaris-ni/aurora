@@ -22,8 +22,9 @@ auto framed(const au::Node &child) -> au::Node {
 
 }  // namespace
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     // ① 不同字号：小字号的布局盒整体下移，使首行基线与大字号共线。
     au::Row mixed;

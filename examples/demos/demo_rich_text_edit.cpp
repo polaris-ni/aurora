@@ -1,8 +1,9 @@
 // RichTextEdit 控件 demo：可编辑富文本，支持粗体/斜体/下划线/撤销重做。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     au::UndoStack undo_stack;
 

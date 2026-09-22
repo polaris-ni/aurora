@@ -1,8 +1,9 @@
 // Slider 控件 demo：连续值 [0,1]，拖拽设置，配合 State 实时反映。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     auto val = std::make_shared<au::State<double>>(0.5);
     auto label = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"Value 0.50"});

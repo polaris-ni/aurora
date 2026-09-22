@@ -297,6 +297,7 @@ ctest -R itest_ai_compat
 | 零原生平台宏 | `ctest -R check_platform_macros`（#14：预处理分支禁原生平台/架构宏，规范化宏密度仅报告） | `check_platform_macros` |
 | API token 预算 | `ctest -R check_api_budget`（#24：`aurora_api.json` 估算 token 数 ≤ 预算） | `check_api_budget` |
 | 无写死本机路径 | `ctest -R check_no_hardcoded_paths`（禁止盘符 / 用户主目录等本机专属绝对路径入库，外部路径须显式传入） | `check_no_hardcoded_paths` |
+| 豁免指令排版 | `ctest -R check_nolint_layout`（clang-tidy 豁免只在物理行生效：理由夹在指令与代码之间、被豁免语句折行、注释散文抄裸令牌，三类均静默失效，见 `CODING_STANDARDS.md` §5.2） | `check_nolint_layout` |
 | codespec 交叉引用 | `ctest -R check_codespec_xref` | `check_codespec_xref` |
 | 代码-文档同步 | `ctest -R check_code_doc_sync` | `check_code_doc_sync` |
 | 黄金文件 | `ctest -R golden`（确定性渲染基准） | golden 基准图 |

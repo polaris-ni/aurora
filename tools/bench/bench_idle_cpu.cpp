@@ -97,8 +97,9 @@ auto run_scenario(bool force_redraw_each_frame, int duration_ms) -> RunResult {
 #endif  // AURORA_BACKEND_WIN32
 }  // namespace
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
 #ifndef AURORA_BACKEND_WIN32
     AURORA_LOG_RAW("bench", "bench_idle_cpu: no Win32 backend, skip\n");

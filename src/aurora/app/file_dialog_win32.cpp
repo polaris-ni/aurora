@@ -70,8 +70,8 @@ void apply_filters(IFileDialog *dlg, const std::vector<Filter> &filters) {
             if (i != 0U) {
                 joined += L';';
             }
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             joined += aurora::internal::utf8_to_wstr(f.extensions[i]);
         }
         specs.push_back(joined);

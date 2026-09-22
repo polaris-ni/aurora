@@ -1,8 +1,9 @@
 // ExpansionPanel 折叠面板 demo：点击标题头展开/收起内容。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     au::ExpansionPanel details{"Details",
                                au::Node{au::Column{

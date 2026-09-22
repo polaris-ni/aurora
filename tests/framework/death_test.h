@@ -149,7 +149,7 @@ auto check_death(const char *file, int line, std::string_view statement, const E
 ///    而 wasm 运行时没有 fork/exec（spawn_death_child 的 fork 直接失败），子进程无从派发，
 ///    硬跑只会恒定报 SiteMissed。跨编译下如实跳过，交由原生 job 守护。
 //
-// 豁免口径（区间式：紧邻下一物理行的 NOLINTNEXTLINE 罩不住下面两个跨行的 `#define`）：
+// 豁免口径（区间式：紧邻式豁免罩不住下面两个跨行的 `#define`）：
 // `statement` 必须原样嵌入子进程分支的 lambda 调用位、`__FILE__/__LINE__` 必须在**调用点**
 // 取到、可选匹配器经 `__VA_ARGS__` 转发——三者都是「在原位展开」才成立的语义，
 // 改成 constexpr 模板函数即失去捕获能力（且 wasm 分支要整体替换成 skip 桩）。

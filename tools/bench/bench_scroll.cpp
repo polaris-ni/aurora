@@ -131,8 +131,9 @@ auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &
 [[nodiscard]] auto arg_value(const std::vector<std::string_view> &args, int i, std::string_view fallback)
     -> std::string {
     const auto next = static_cast<std::size_t>(i) + 1U;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+    // 基准测量热路径：.at()
     // 的边界检查开销会影响计时
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     return (next < args.size()) ? std::string{args[next]} : std::string{fallback};
 }
 
@@ -205,8 +206,9 @@ auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &
         std::ranges::sort(sorted);
         const double lo = sorted.front();
         const double hi = sorted.back();
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+        // 基准测量热路径：.at()
         // 的边界检查开销会影响计时
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         const double mid = sorted[sorted.size() / 2];
         note = "> best-of-" + std::to_string(n) + ": p99 across runs " + std::to_string(lo) + " / " +
                std::to_string(mid) + " / " + std::to_string(hi) +
@@ -232,8 +234,9 @@ auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-comple
     ScrollBenchHarness::Config cfg;
 
     for (int i = 1; i < argc; ++i) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 基准测量热路径：.at()
+        // 基准测量热路径：.at()
         // 的边界检查开销会影响计时
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         const std::string a{args[static_cast<std::size_t>(i)]};
         if (a == "--scene") {
             scene = arg_value(args, i, "all");

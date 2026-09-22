@@ -110,8 +110,8 @@ auto InspectorPanel::refresh() -> void {
 
 auto InspectorPanel::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     props["ratio"] = ratio_;
 }
 
@@ -258,8 +258,8 @@ auto InspectorPanel::on_paint(Painter &p, const Rect &bounds, const BuildContext
                         Color{248, 248, 252});
         }
 
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         const auto &[key, val] = prop_rows_[i];
         // 属性名
         p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + props_x + AURORA_PROP_INDENT, .y = ry + 4.0F},
@@ -401,8 +401,8 @@ auto InspectorPanel::rebuild_tree() -> void {
     const auto root_children = target_root_.widget().child_nodes();
     // 根节点自身
     widget_map_.push_back(const_cast<Widget *>(&target_root_.widget()));  // NOLINT
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     build_map(tree_items_[0].children, root_children);
 }
 
@@ -419,8 +419,8 @@ auto InspectorPanel::update_props_panel() -> void {
     // 按 describe 的属性顺序排列
     for (const auto &pd : desc.properties) {
         const std::string val_str =
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             values.contains(pd.name) ? aurora_infer_value_string(values[pd.name]) : pd.default_value;
         prop_rows_.emplace_back(pd.name, val_str);
     }
@@ -442,8 +442,8 @@ auto InspectorPanel::handle_tree_click(int local_y) -> void {
 
     // 查找对应 Widget
     if (std::cmp_less(row, widget_map_.size())) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         selected_widget_ = widget_map_[static_cast<std::size_t>(row)];
         update_props_panel();
         mark_needs_paint();
@@ -572,8 +572,8 @@ auto InspectorPanel::widget_for_row(int row) const -> Widget * {
     if (row < 0 || static_cast<std::size_t>(row) >= widget_map_.size()) {
         return nullptr;
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     return widget_map_[static_cast<std::size_t>(row)];
 }
 

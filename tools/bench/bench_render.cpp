@@ -81,8 +81,9 @@ auto build_scroll_tree() -> aurora::Node {
 
 }  // namespace
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     const std::vector<std::pair<int, int>> bases = {{1280, 720}, {1920, 1080}, {2560, 1440}};
     const std::vector scales = {1.0F, 1.5F, 2.0F};

@@ -31,6 +31,8 @@ class ScopedTempDir {
         fs::remove_all(path_, ec);  // 兜底清残留
         fs::create_directories(path_);
     }
+    // 走 error_code 出参重载，按标准契约不经异常报告失败（该重载未标 noexcept，故分析器保守判定）。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     ~ScopedTempDir() {
         std::error_code ec;
         fs::remove_all(path_, ec);  // 清理失败不影响用例结果

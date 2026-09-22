@@ -1,8 +1,9 @@
 // Spacer 控件 demo：吸收剩余空间，把相邻控件推向两端。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     au::Column top{
         au::Text{au::LocalizedString{"Top"}},

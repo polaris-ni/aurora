@@ -1,8 +1,9 @@
 // Sparkline 控件 demo（图表控件族切片 4）：最薄图表——无轴 / 无网格 / 无图例 / 无交互，用于卡片内趋势缩览。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     au::Sparkline up{au::SparklineProps{.values = {4.0, 6.0, 3.0, 8.0, 5.0, 9.0, 7.0, 11.0}, .line_width = 2.0F}};
     up.set_color(pal::AURORA_OK);

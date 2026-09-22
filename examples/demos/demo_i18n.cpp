@@ -1,8 +1,9 @@
 // 国际化 demo：Locale / LocaleProvider / LocalizedString::tr。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     const auto zh = au::Locale{.language = "zh", .region = "CN"};
     const au::LocalizedString greeting = au::LocalizedString::tr("hello_user", {"Ada"});

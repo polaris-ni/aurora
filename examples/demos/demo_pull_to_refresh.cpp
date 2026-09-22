@@ -15,8 +15,9 @@
 #include "aurora/widget/pull_to_refresh.h"
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     auto status = std::make_shared<au::State<au::LocalizedString>>(
         au::LocalizedString{"拖拽或滚轮上滚到列表顶部继续下拉 → 松手刷新"});

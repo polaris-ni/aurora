@@ -1,8 +1,9 @@
 // Stack 控件 demo：多层从 (0,0) 叠加，可用 Alignment 对齐。
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     au::Node bottom =
         au::Stack{au::Text{au::LocalizedString{"Bottom text"}}, au::Text{au::LocalizedString{"Top overlay text"}}};

@@ -12,8 +12,9 @@
 #include "aurora/navigation/route.h"
 #include "demo_common.h"
 
-// NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
+// 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     au::Animator anim;
     auto host = std::make_shared<au::NavigatorHost>(anim);
@@ -38,12 +39,14 @@ auto main() -> int {
     // 控制页：按钮通过 open_uri 深层跳转（重建整栈）。
     auto make_controls = [host, registry]() -> au::Node {
         auto jump = au::Button{"Open home/detail/settings (deep link)"};
-        // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+        // 误报：转入 std::function 的 lambda
         // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
+        // NOLINTNEXTLINE(bugprone-exception-escape)
         jump.set_on_click([host, registry]() -> void { host->open_uri("home/detail/settings", registry); });
         auto reset = au::Button{"Open home (deep link)"};
-        // NOLINTNEXTLINE(bugprone-exception-escape) 误报：转入 std::function 的 lambda
+        // 误报：转入 std::function 的 lambda
         // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
+        // NOLINTNEXTLINE(bugprone-exception-escape)
         reset.set_on_click([host, registry]() -> void { host->open_uri("home", registry); });
         return au::Column{au::ColumnProps{.children = {std::move(jump), gap(12.0F), std::move(reset)}}};
     };
