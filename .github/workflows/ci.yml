@@ -16,12 +16,17 @@
 #   4. asan        — AURORA_ENABLE_ASAN=ON（AddressSanitizer + UBSan）跑全量 ctest。
 #   5. coverage    — AURORA_ENABLE_COVERAGE=ON 的 `coverage` 聚合目标（内含 ctest + gcov 摘要）。
 #   6. wasm        — emcmake + AURORA_BACKEND_WASM=ON，构建库与测试 runner 并跑 ctest
-#                    （Emscripten 无线程/子进程的能力用例以 SKIP 计入，见 tests/framework/assertions.h）。
+#                    （Emscripten 无线程/子进程的能力用例以 SKIP 计入，见 tests/framework/assertions.h）；
+#                    并跑**浏览器口径 clang-tidy**（`lint` 目标在 Emscripten 配置下自动加
+#                    --emscripten，见 job 8 与 BUILD_OPTIONS.md §4.5）——这是 EMSCRIPTEN 门后
+#                    那批 TU 唯一的静态检查面。
 #  7. install     — cmake --install + 工作流内联最小消费端端到端验证
 #                    （find_package(Aurora) + 静态链接 + feature 宏导出一致性）。
 #  8. lint        — clang-tidy 双 Pass（DEBUG ON / OFF 各一份编译数据库，去重后全量 0 finding 才通过）；
 #                    纯静态分析，仅 ubuntu-latest 单跑（与平台无关，且 windows/macos runner 默认无 clang-tidy）。
 #                    依赖 AuroraLint.cmake 提供的 `lint` 目标（configure 时 clang-tidy 须在 PATH）。
+#                    ⚠️ 本 job 的口径是 **native**：EMSCRIPTEN 门后的 TU 不在这两份编译库里，
+#                    其静态检查由 job 6（wasm）在同一份 wasm 编译库上跑浏览器口径 lint 补齐。
 #
 # 编译缓存（ccache-action）：core（Linux/macOS/MinGW）、backends（Linux/macOS）、
 #   toggles、asan、coverage、install 各 job 接入，key 按 job/矩阵名分桶；
@@ -367,7 +372,9 @@ jobs:
   wasm:
     name: wasm (emscripten)
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # 120 → 180：本 job 末尾新增了浏览器口径 lint（本机 16 并行实测 13 min / 503 TU，
+    # runner 只有 4 vCPU ⇒ 按核数线性外推约 50 min），加上 emsdk 全量构建与 ctest 需留余量。
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7
 
@@ -375,6 +382,19 @@ jobs:
         uses: emscripten-core/setup-emsdk@v16
         with:
           version: latest
+
+      # ⚠️ 安装必须在 Configure **之前**：AuroraLint.cmake 在 configure 阶段 find_program(clang-tidy)，
+      #    找不到就直接 return——`lint` 目标根本不会被定义，届时本 job 末尾的构建只会报
+      #    "no rule to make target 'lint'"。与 job 8 同款钉版本 22：不同 clang 大版本的检查集会
+      #    漂移，口径必须可比。（安装块与 job 8 重复——GitHub Actions 的 workflow 不支持 YAML 锚点复用。）
+      - name: Install clang-tidy-22
+        run: |
+          sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          sudo apt-get update -y
+          sudo apt-get install -y clang-tidy-22
+          sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
 
       - name: Configure (emcmake)
         run: emcmake cmake -S . -B build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF
@@ -385,6 +405,14 @@ jobs:
       # ctest 经 CMAKE_CROSSCOMPILING_EMULATOR（Emscripten.cmake 设为 node）驱动 .js runner。
       - name: Test (ctest)
         run: ctest --test-dir build-wasm --output-on-failure -j"$(nproc)"
+
+      # 浏览器口径的 clang-tidy：native lint job（job 8）看不到 `EMSCRIPTEN` 门后的 TU——
+      # wasm_* 实现、POSIX 派发分支、Web Audio 后端与 wasm 探针都不在那两份编译库里，
+      # lint job 绿灯不构成这些代码被检查过的证据。AuroraLint 在 Emscripten 配置下给 `lint`
+      # 目标自动附加 --emscripten（先把 em++ 写的编译库重写成 native clang-tidy 可消费的
+      # 形态：换三元组、指 sysroot、弃 PCH），故这里直接复用本次 configure 的产物。
+      - name: Lint (emscripten db, fails on any warning+ finding)
+        run: cmake --build build-wasm --target lint
 
   # ---------------------------------------------------------------------------
   # 7. 安装 + find_package 消费端端到端验证

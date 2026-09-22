@@ -428,7 +428,9 @@ python tools/check/run_clang_tidy.py --build-dir build --include 'src/'         
 python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏览器 TU + #ifdef AURORA_BACKEND_WASM 分支
 ```
 
-两条口径各自的把关面：native 遍覆盖 host 后端与 `#else` 分支，wasm 遍覆盖 `AURORA_PLATFORM_*` 的另一侧（POSIX 派发分支、Web Audio 后端、`wasm_*` 探针）与 libc++ 差异面；CI 只跑 native，wasm 遍由本地或后续 CI job 补跑，`lint` 绿灯不构成后者通过的证据。
+两条口径各自的把关面：native 遍覆盖 host 后端与 `#else` 分支，wasm 遍覆盖 `AURORA_PLATFORM_*` 的另一侧（POSIX 派发分支、Web Audio 后端、`wasm_*` 探针）与 libc++ 差异面。CI 两侧都跑：`lint` 作业做 native 双 Pass（DEBUG ON/OFF 各一份编译库），`wasm` 作业在 ctest 之后对同一份 wasm 编译库跑 `--emscripten` 口径；二者互不替代——任一绿灯都不构成另一条通过的证据。
+
+⚠️ CI 里 **clang-tidy 的安装步骤必须排在该作业的 configure 之前**：`AuroraLint.cmake` 在 configure 阶段 `find_program(clang-tidy)`，找不到即 `return()`——`lint` / `lint-fix` 目标根本不会被定义，把安装排在 configure 之后只会让末尾那步报 `no rule to make target 'lint'`。本地同理：换目录重新 configure 时先确认 `clang-tidy` 已在 `PATH`。
 
 **「0 告警」不等于「跑到了」**：TU 编译失败时 clang-tidy 不产出任何带 `[check]` 的诊断，静默下来就是一轮绿灯。故本脚本对**前端 `error:`（含 `fatal error:`、`unable to handle compilation`）与超时**单独记账并以退出码 1 失败，`--emscripten` 重写还会校验条数守恒与 include 目录存在性，任一不满足直接以退出码 2 拒跑。反例实测：用 `shlex.split(posix=True)` 拆 Windows 编译库里的 `command`，会把反斜杠一律当转义符吃掉——盘符与目录粘连、分隔符丢失，路径全废，整轮 TU 编译不过，而门禁显示 0 告警。
 
