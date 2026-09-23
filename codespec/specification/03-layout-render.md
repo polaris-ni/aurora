@@ -524,6 +524,21 @@ au::Column{}
 > 由 `--interactive` 人工目视段负责。各探针的验收范围与退出码语义见其源文件头注释；
 > 真机验收须在对应平台手工执行（探针不进 CTest）。
 
+> **窗口可见性策略（`WindowVisibility`）**：定义在 `include/aurora/window/surface.h`（与
+> `WindowStyleOptions` 同处，故四个轻量后端头不必反向包含 `window.h`），三档语义：
+>
+> | 档位 | 语义 | 各宿主落地 |
+> |:---|:---|:---|
+> | `Normal` | 正常显示并激活（默认，行为与既往一致） | Win32 `ShowWindow(SW_SHOW)`；GLFW 默认 hint；X11 / Wayland 映射（map）窗口 |
+> | `NoActivate` | 显示但不激活：不抢焦点、不打断用户当前前台窗口 | Win32 `ShowWindow(SW_SHOWNA)`；GLFW `GLFW_VISIBLE=TRUE` + `GLFW_FOCUS_ON_SHOW=FALSE`；**X11 / Wayland 无对应请求**（聚焦由 WM / 合成器策略决定，Aurora 从不主动 `XSetInputFocus`），故与 `Normal` 同路 |
+> | `Hidden` | 不显示：窗口不进入用户视野，但渲染与像素读回照常工作 | Win32 `ShowWindow(SW_HIDE)`（窗口本就以无 `WS_VISIBLE` 的 `WS_OVERLAPPEDWINDOW` 创建）；GLFW `GLFW_VISIBLE=FALSE`；X11 不调 `XMapWindow`；Wayland `present()` 不 attach / commit 缓冲（构造期那次「无缓冲 commit 宣告表面存在」必须保留——xdg-shell 要求先收 configure 才能 attach） |
+>
+> 枚举器显式赋值且**无条件出现**，不随 `AURORA_BACKEND_*` 宏裁剪（稳定性契约同 `SurfaceKind`）。
+> `MacOSSurface`（骨架）与 `WasmSurface`（无窗口可见性概念，浏览器自管）不落地。E2E 驱动内核
+> 的 `WindowSpec::visibility` 默认 `Hidden`（见 [`08-tooling.md`](08-tooling.md) §8.2），与公共
+> `WindowOptions::visibility` 的默认 `Normal` 刻意不同；各宿主参数由建窗时下发（而非「先可见后
+> 隐藏」），避免一帧闪烁。
+
 ### 8.4 离屏渲染与快照
 
 定义于 `render/offscreen.h`，与 `HeadlessSurface` 解耦。

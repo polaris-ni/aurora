@@ -33,7 +33,7 @@
 | `cmake/AuroraTools.cmake` | 工具 / 基准可执行（`aurora_add_tool()` 统一样板）+ `AURORA_BUILD_INSPECTOR_SERVER` |
 | `cmake/AuroraVerify.cmake` | `AURORA_BUILD_VERIFY_TOOLS`：真机验收探针（`tools/verify/` 下按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**） |
 | `cmake/AuroraDemos.cmake` | 示例 demo 定义块（须在 `AuroraTools` 与 `AuroraTests` 之后 include，因其依赖 `aurora_inspector_server` 目标） |
-| `cmake/AuroraTests.cmake` | `AURORA_BUILD_TESTS` 注册式 runner（GLOB `tests/*.cpp`、`tests/unit/*.cpp` 与 `tests/integration/*.cpp` → 单一 `aurora_test_runner`，`AURORA_TEST()` 自注册） |
+| `cmake/AuroraTests.cmake` | `AURORA_BUILD_TESTS` 注册式 runner（GLOB `tests/*.cpp`、`tests/unit/*.cpp`、`tests/integration/*.cpp` 与 `tests/e2e/*.cpp`（受 `AURORA_BUILD_E2E` 门控，Emscripten 下排除）→ 单一 `aurora_test_runner`，`AURORA_TEST()` 自注册） |
 | `cmake/AuroraInstrumentation.cmake` | `AURORA_ENABLE_COVERAGE` / `AURORA_ENABLE_ASAN` / `AURORA_ENABLE_PROFILING` / `AURORA_ENABLE_TRACING` / `AURORA_ENABLE_DEBUG` / `AURORA_ENABLE_TEST_HOOKS`（须在全部目标定义之后 include） |
 | `cmake/AuroraInstall.cmake` | 安装 + `find_package(Aurora)` 导出（须在后端开关之后 include） |
 | `cmake/AuroraLint.cmake` | `AURORA_ENABLE_CLANG_TIDY`（`lint` / `lint-fix` 聚合目标，经 `tools/check/run_clang_tidy.py` 并行 lint 非 third_party 翻译单元，另可按 `AURORA_LINT_SHARD` 分片；须在全部目标定义之后 include） |
@@ -51,6 +51,8 @@
 | `AURORA_BUILD_DEMOS` | `ON` | **定义**（非默认构建）`examples/demos/` 下每组件一个的可运行窗口 demo 目标；均 `EXCLUDE_FROM_ALL`，按需构建 | 各 `demo_<组件>` 可执行文件 + 聚合目标 `demos` |
 | `AURORA_BUILD_TESTS` | `ON` | 编译 `tests/` 下全部用例并接入 CTest：`AURORA_TEST()` 注册、单一 runner 一次链接，逐条 `--run=<stem>` 隔离 | `aurora_test_runner` 可执行 + `enable_testing()` + `registry_integrity` 守护 |
 | `AURORA_TEST_SHARDS` | `1` | 测试 runner 分片数（非开关、为正整数缓存变量）：`1` 与单 runner 完全等价；`N>1` 按 Suite（文件 stem）MD5 稳定散列把用例源拆为 N 个 runner（各含唯一 main），CTest 用例名带分片号（`<stem>_s<k>`，其中 `k` 从 `0` 起取 `0..N-1`），`registry_integrity` 对各 runner `--list` 取并集比对 | N 个 `aurora_test_runner_s<k>`（`k` 取 `0..N-1`）可执行；是否默认开启待收束期链接耗时数据 |
+| `AURORA_BUILD_E2E` | `ON` | 编译 `tests/e2e/`（`etest_` 前缀）下的**真实后端端到端**用例：建真实窗口 + 走上屏链路 + 读回像素断言。Emscripten 交叉构建下强制不纳入（wasm 产物无宿主窗口 / 显示），且须与 `registry_integrity` 的 `--tests-dir` 保持同口径 | `tests/e2e/*.cpp` 并入 `aurora_test_runner`；CTest 侧对 `etest_` 用例额外打 `LABELS e2e`（供 `ctest -L e2e` 分层编排） |
+| `AURORA_E2E_TIMEOUT_MS` | `60000` | E2E 用例的看门狗超时（非开关、为正整数字符串缓存变量）：按 stem 前缀 `etest_` 以 `--timeout=<ms>` 注入。runner 默认不设限，而真实窗口事件循环一旦挂起没有兜底，故须显式设限——到点先写报告再以退出码 3 结束 | 无（仅改变 `etest_` 用例的 CTest 命令行） |
 | `AURORA_BUILD_INSPECTOR_SERVER` | `OFF` | 编译 Inspector 远程 HTTP 服务器（跨平台：Windows 链 `ws2_32` / POSIX 链 `pthread`） | `aurora_inspector_server` 静态库 |
 | `AURORA_BUILD_VERIFY_TOOLS` | `OFF` | **定义**（非默认构建）`tools/verify/` 下的真机验收探针：按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**（会创建真实窗口、读取屏幕光标，非确定且干扰用户桌面） | 各 `aurora_verify_<平台>_cursor` 可执行文件 + 聚合目标 `aurora_verify` |
 ### 2.1 demo 构建方式
@@ -116,7 +118,7 @@ cmake --build build-verify --target aurora_verify_x11_cursor
 
 | 选项 | 默认值 | 含义 | 传播宏 | 额外链接 |
 |:---|:---|:---|:---|:---|
-| `AURORA_BACKEND_HEADLESS` | `ON` | 无头内存 / PNG 后端（`HeadlessSurface`，离线渲染 / 测试） | `AURORA_BACKEND_HEADLESS` | — |
+| `AURORA_BACKEND_HEADLESS` | `ON` | 无头内存 / PNG 后端（`HeadlessSurface`，离线渲染 / 测试）。⚠️ 关掉它只保证**库与工具**可构建（`AURORA_BUILD_TESTS=OFF`）：测试套件以无头后端为默认绘制目标，18 个测试 TU 直接引用 `HeadlessSurface`，故 `AURORA_BUILD_TESTS=ON` × `AURORA_BACKEND_HEADLESS=OFF` 不是受支持的组合（既存缺口） | `AURORA_BACKEND_HEADLESS` | — |
 | `AURORA_BACKEND_WIN32` | Windows `ON`，否则 `OFF` | Win32/GDI 后端（`Win32Surface` + `Win32Host` 共享宿主） | `AURORA_BACKEND_WIN32` | `user32` `gdi32` `shell32` `ole32` `uuid` `imm32`（仅 `_WIN32`；`imm32` 供输入法组合桥） |
 | `AURORA_BACKEND_D3D11` | `OFF` | D3D11 GPU 增量上屏后端（`D3D11Surface`） | `AURORA_BACKEND_D3D11` | `d3d11` `dxgi` `d3dcompiler`（仅 `_WIN32`） |
 | `AURORA_BACKEND_GPU_WGPU` | `OFF` | wgpu GPU 栅格后端（`WgpuRhi`；真窗口帧路径 `WgpuWin32Surface` / `WgpuX11Surface` / `WgpuWaylandSurface` 另与宿主 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` ∨ `AURORA_BACKEND_WAYLAND` 合取），源码经 cargo 构建，需 Rust 工具链 + libclang，配置期缺项 FATAL，见 §3.8 | `AURORA_BACKEND_GPU_WGPU` | `wgpu_native` 静态库 + `ws2_32` `userenv` `bcrypt` `advapi32` `oleaut32` `ntdll`(Windows)/`dl` `pthread` `m`(Linux) |
@@ -575,6 +577,7 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `AURORA_REPO_ROOT` | 目录路径 | 测试框架仓库根定位的显式锚点（`tests/framework/isolation.cpp`）。缺省先按可执行文件位置、再按 cwd 逐级上溯找 `codespec/`+`CMakeLists.txt`；runner 构建 / 安装于仓库外（如 WSL home 目录构建 `/mnt/c` 源码仓）时上溯必然落空，用本变量指向仓库根即可，值须形如仓库根，否则忽略回落自动查找 |
 | `AURORA_LIVE_X11` / `AURORA_LIVE_WAYLAND` | 非空（如 `1`） | 后端**真机**单测用例的显式选择加入开关（`utest_x11_surface` / `utest_wayland_surface`）：未置时该用例走 `AURORA_TEST_SKIP` 桩，置了才连接真实 X server / 合成器并创建真实窗口断言端到端接线。默认关闭的原因与探针同源——需要桌面会话、非确定且会动用户屏幕，不进无头 CTest |
 | `AURORA_LIVE_ATSPI` | 非空（如 `1`） | Linux AT-SPI2 桥**真机**单测用例（`utest_atspi_bridge.live_embed_handshake_and_teardown`）的选择加入开关：置了才连真实会话总线走完整 dlopen + `Socket.Embed` 握手；未置走 `AURORA_TEST_SKIP` 桩。外部客户端视角（libatspi 逐检查项比对）由探针 `aurora_verify_atspi` 把关，见 `specification/08-tooling.md` §7.5 |
+| `AURORA_E2E_EXPECT` | 逗号分隔的后端短名（如 `win32,glfw`） | E2E（`etest_`）用例的**期望后端集**：由编排方声明「在本运行环境里这些后端**必须**可用」。声明了却在建窗或读回时不可用 → 判**失败**（环境或构建配置漂移，必须修）；未声明而不可用 → 走 `AURORA_TEST_SKIP`。未设置即空集，本地开发一律跳过、行为与普通 skip 桩无异。短名取自 `e2e::backend_name()`（`auto` / `headless` / `win32` / `d3d11` / `glfw` / `x11` / `wayland` / `wgpu`），大小写与首尾空白不敏感。注意期望集的语义是「期望**可读回**」而非「期望能建窗」：建窗成功但 `Surface::data()` 为 `nullptr`（如该后端的读回受 `AURORA_ENABLE_DEBUG` 门控而本构建未生效）同样计入不可用。CI 作业须声明**非空**期望集，否则该作业对 E2E 零覆盖 |
 | `NO_AT_BRIDGE` | 非 `0` 即生效 | GNOME 惯例的显式免提开关：置位后 Linux AT-SPI2 桥 `create()` 恒返回 `nullptr`，不碰 libdbus / 总线，无障碍路径整体退出 |
 | `AT_SPI_BUS_ADDRESS` | D-Bus 地址串 | 无障碍总线地址显式直给（跳过 `org.a11y.Bus.GetAddress` 查询），用于非常规桌面 / 测试注入；置了但地址无效仍按降级处理 |
 | `AURORA_INSPECTOR_PORT` | 1–65535 | `aurora_mcp` 的 `live_*` 工具连接运行中应用的默认端口；缺省 `6280`（与 `InspectorServer::start()` 默认值一致）。单个工具调用可用 `session` 入参（`"6280"` 或 `"127.0.0.1:6280"`）覆盖。主机恒为回环，见 `specification/08-tooling.md` §5.4 |
@@ -703,6 +706,8 @@ cmake --build build
 -D AURORA_BUILD_DEMOS=ON|OFF                  # demos（默认 ON）
 -D AURORA_BUILD_TESTS=ON|OFF                  # CTest（默认 ON）
 -D AURORA_TEST_SHARDS=<N>                     # 测试 runner 分片数（默认 1 = 单 runner）
+-D AURORA_BUILD_E2E=ON|OFF                    # 真实后端 E2E 用例 tests/e2e/（默认 ON；Emscripten 强制排除）
+-D AURORA_E2E_TIMEOUT_MS=<ms>                 # etest_ 用例看门狗超时（默认 60000）
 -D AURORA_BUILD_INSPECTOR_SERVER=ON|OFF       # Inspector HTTP 服务器（默认 OFF）
 -D AURORA_BUILD_VERIFY_TOOLS=ON|OFF           # 真机验收探针 tools/verify/（默认 OFF，EXCLUDE_FROM_ALL）
 
@@ -752,4 +757,5 @@ cmake -S app -B app/build -DAurora_DIR="<PREFIX>/lib/cmake/Aurora"
 
 # 运行时（测试）
 AURORA_GOLDEN_DIR=<dir> AURORA_UPDATE_GOLDEN=1 ./build/aurora_test_runner --run=utest_offscreen
+AURORA_E2E_EXPECT=win32,glfw ./build/aurora_test_runner --run=etest_smoke_render   # 声明本环境期望可用的后端
 ```

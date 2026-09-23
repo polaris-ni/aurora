@@ -61,6 +61,17 @@ enum class WindowResizeEdge : std::uint8_t {
     BottomRight,  ///< 右下角
 };
 
+/// @brief 窗口可见性策略（生命周期选项，非 `WindowStyleOptions`）。
+///
+/// 与样式选项分家的理由：样式描述「窗口长什么样」，可见性描述「窗口是否进入用户视野」，
+/// 后者是会话/生命周期语义——隐藏窗口仍需可渲染、可读回像素、可接收框架合成输入。
+/// 枚举器显式赋值且无条件出现，不随 `AURORA_BACKEND_*` 宏裁剪（稳定性契约同 `SurfaceKind`）。
+enum class WindowVisibility : std::uint8_t {
+    Normal = 0,  ///< 正常显示并激活（默认，行为与既往完全一致）
+    NoActivate = 1,  ///< 显示但不激活：不抢焦点、不打断用户当前前台窗口
+    Hidden = 2,  ///< 不显示：窗口不进入用户视野，但渲染与像素读回照常工作
+};
+
 struct WindowStyleOptions {
     bool always_on_top = false;  ///< 置顶（始终浮在普通窗口之上）
     bool frameless = false;  ///< 无边框（无标题栏/边框；自行实现拖拽/关闭）。等价于 DecorationPolicy::Frameless。
@@ -406,6 +417,7 @@ class Surface {
  * @brief 无头表面：在内存 `Painter` 帧缓冲上绘制，`present()` 时可写 PNG（specification/03-layout-render.md §8.4）。
  *
  * 用于无窗口系统的单元测试与无头校验；不依赖 GLFW/SDL/OpenGL。
+ * 窗口可见性策略（WindowVisibility）不在此落地：无 OS 窗口。
  * 仅当 `AURORA_BACKEND_HEADLESS` 定义（默认 ON，可由 CMake `AURORA_BACKEND_HEADLESS=OFF` 剪裁）时提供。
  */
 class HeadlessSurface : public Surface {

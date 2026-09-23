@@ -199,7 +199,8 @@ struct Win32Host::Impl {
     inline static HBRUSH bg_brush = nullptr;  ///< 浅色背景擦除刷（消除最大化黑屏），注册时创建一次。
     static constexpr auto AURORA_CLASS_NAME = "AuroraWin32Surface";
 
-    Impl(int w, int h, const std::string &title, const WindowStyleOptions &style);
+    Impl(int w, int h, const std::string &title, const WindowStyleOptions &style,
+         WindowVisibility visibility = WindowVisibility::Normal);
     ~Impl();
     Impl(const Impl &) = delete;
     auto operator=(const Impl &) -> Impl & = delete;
@@ -249,7 +250,8 @@ struct Win32Host::Impl {
 };
 
 // ---- Impl 构造：窗口创建 + DPI 适配 + 类注册 + 显示 ----
-Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleOptions &style)
+Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleOptions &style,
+                      WindowVisibility visibility)
     : scale(dpi_scale()),  // 创建时主显示器 DPI
       style(style) {
     enable_dpi_awareness();
@@ -301,7 +303,19 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
         if (style.always_on_top) {
             SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
         }
-        ShowWindow(hwnd, SW_SHOW);
+        // 可见性策略：构造期一次定档，避免「先可见后隐藏」造成的一帧闪烁。
+        // 窗口本就以无 WS_VISIBLE 的 WS_OVERLAPPEDWINDOW 创建，Hidden 档显式隐藏以固化语义。
+        switch (visibility) {
+            case WindowVisibility::NoActivate:
+                ShowWindow(hwnd, SW_SHOWNA);  // 显示但不激活：不抢焦点
+                break;
+            case WindowVisibility::Hidden:
+                ShowWindow(hwnd, SW_HIDE);  // 不显示：窗口不进入用户视野
+                break;
+            case WindowVisibility::Normal:
+                ShowWindow(hwnd, SW_SHOW);
+                break;
+        }
         UpdateWindow(hwnd);
         DragAcceptFiles(hwnd, TRUE);  // 启用操作系统文件拖放（WM_DROPFILES）
         // IMM32 组合桥：桥自身只吃 WM_IME_*，无输入法时一条也不来，故随窗口直接构造。
@@ -772,8 +786,9 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 }
 
 // ===== Win32Host 公共 API：全部委托给 pimpl_ =====
-Win32Host::Win32Host(int w, int h, const std::string &title, const WindowStyleOptions &style)
-    : pimpl_(std::make_unique<Impl>(w, h, title, style)) {}
+Win32Host::Win32Host(int w, int h, const std::string &title, const WindowStyleOptions &style,
+                     WindowVisibility visibility)
+    : pimpl_(std::make_unique<Impl>(w, h, title, style, visibility)) {}
 
 Win32Host::~Win32Host() = default;
 

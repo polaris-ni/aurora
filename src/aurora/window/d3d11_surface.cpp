@@ -100,8 +100,9 @@ auto make_blend_desc() -> D3D11_BLEND_DESC {
 
 }  // namespace
 
-D3D11Surface::D3D11Surface(int width, int height, const std::string &title, const WindowStyleOptions &style) {
-    win_ = std::make_unique<Win32Host>(width, height, title, style);
+D3D11Surface::D3D11Surface(int width, int height, const std::string &title, const WindowStyleOptions &style,
+                           WindowVisibility visibility) {
+    win_ = std::make_unique<Win32Host>(width, height, title, style, visibility);
     if (win_->hwnd() == nullptr) {
         AURORA_LOG_ERROR("d3d11", "Win32Host creation failed");
         return;

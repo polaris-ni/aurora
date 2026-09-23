@@ -140,6 +140,9 @@ struct WindowOptions {
                                ///< 供持续重绘场景 opt-out（与 `enable_dirty_tracking(false)` 语义配套）。
     RendererPreference renderer = RendererPreference::Auto;  ///< 上屏后端偏好。
 
+    /// @brief 窗口可见性策略（默认 `Normal` = 行为不变）。
+    WindowVisibility visibility = WindowVisibility::Normal;
+
     /// @brief 窗口角色（多窗口生命周期语义，见 `WindowRole`；默认 `Main` 保证单窗口用法行为不变）。
     WindowRole role = WindowRole::Main;
 

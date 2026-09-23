@@ -13,6 +13,7 @@
 
 namespace aurora {
 
+// 窗口可见性策略（WindowVisibility）不在此落地：本后端为 AppKit/CoreGraphics 骨架，无窗口壳。
 class MacOSSurface : public Surface {
   public:
     MacOSSurface(int w, int h, const std::string &title);

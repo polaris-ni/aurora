@@ -36,8 +36,8 @@
 - **API 描述可机读**：`gen_api_tools` 输出 `aurora_api.json`，含类型 / 属性键 / 枚举，供 LSP 与文档生成器消费。
 - **零平台魔法**：示例不依赖特定平台 GUI 事件循环；`HeadlessSurface` 可离线渲染 PNG，便于测试与 AI 复现。
 - **源—示例—测试 1:1 映射**：每个公共源文件（widget / 子系统头）原则上对应一个 `demo_*.cpp`（`examples/demos/`）与一个 `utest_*.cpp`（`tests/unit/`）。允许少量「复杂场景」demo / test（跨控件集成、端到端流程）作为例外，但须明确标注其跨源性质（跨控件集成用例放 `tests/integration/`，以 `itest_` 前缀命名）。所有 demo 收敛到 `examples/demos/`（CMake 仅 GLOB 该目录，新增组件 demo 放到此处即自动纳入构建，无需改 CMake）。测试头部「目标单元」与单元头之间的严格 1:1 声明约束由 §3.2 `TEST-R3` 界定。
-- **文件夹区分**：demo 与 test 以目录区分——示例在 `examples/`，测试在 `tests/`（单元 `tests/unit/`、集成 `tests/integration/`）；二者不混放。
-- **test 文件前缀**：测试文件统一以 `utest`（单元）/ `itest`（集成）为前缀（`utest_xxx.cpp` / `itest_xxx.cpp`），与示例的 `demo` 前缀风格一致；每个测试 TU 的用例包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`）内。聚合多个不相关控件的「catch-all」测试文件视为反模式，应拆为各 `utest_<控件>.cpp`（正式编号见 §3.2 `TEST-R10`）。
+- **文件夹区分**：demo 与 test 以目录区分——示例在 `examples/`，测试在 `tests/`（单元 `tests/unit/`、集成 `tests/integration/`、真实后端端到端 `tests/e2e/`）；二者不混放。
+- **test 文件前缀**：测试文件统一以 `utest`（单元）/ `itest`（集成）/ `etest`（真实后端端到端）为前缀（`utest_xxx.cpp` / `itest_xxx.cpp` / `etest_xxx.cpp`），与示例的 `demo` 前缀风格一致；每个测试 TU 的用例包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`，端到端用例为 `etest_<名>`）内。聚合多个不相关控件的「catch-all」测试文件视为反模式，应拆为各 `utest_<控件>.cpp`（正式编号见 §3.2 `TEST-R10`）。
 
 ### 3.1 注册式测试 runner
 
@@ -138,7 +138,7 @@
 | `TEST-R5` | 公共头覆盖 | 每个公共单元头须被某测试显式声明为目标单元，或在该测试中直接 `#include`、其符号在 `tests/` 全树被引用 | 是 |
 | `TEST-R6` | 注册完整性 | `runner --list` 输出的**用例级**集合必须与测试源中注册的用例集合一致；含「`TEST_P` 漏 `INSTANTIATE` → 用例静默不运行」检测 | 是（CTest `registry_integrity`，由 `tools/check/check_test_registry.py` 承担） |
 | `TEST-R7` | 并行安全 | 测试体系禁止新增 `RUN_SERIAL`（CMake 编排与测试源一并扫描）；并行模型为 CTest 进程隔离 + 框架用例边界资源虚拟化，申请串行须登记脚本内 `TEST_R7_WHITELIST` 并注明根因 | 是 |
-| `TEST-R8` | 命名纪律 | 目录定类型 + 前缀强制——`tests/unit/` 一律 `utest_`、`tests/integration/` 一律 `itest_`，测试 TU 不得放在两目录之外；**Suite 强制等于文件 stem、不可自定义**（`__FILE__` 推导，自定义套件宏禁止） | 是 |
+| `TEST-R8` | 命名纪律 | 目录定类型 + 前缀强制——`tests/unit/` 一律 `utest_`、`tests/integration/` 一律 `itest_`、`tests/e2e/` 一律 `etest_`；`tests/` 下的子目录须落在已知类型目录（`unit` / `integration` / `e2e`）或设施目录（`framework` / `support` / `fixtures` / `golden`）白名单内，测试 TU 不得游离在外；**Suite 强制等于文件 stem、不可自定义**（`__FILE__` 推导，自定义套件宏禁止） | 是 |
 | `TEST-R9` | 禁止 using-directive | 测试代码禁止 `using namespace`（函数体内亦然）；using 声明 / 命名空间别名须置于使用点之前的作用域内 | 是（脚本） |
 | `TEST-R10` | 禁止 catch-all（跨域） | 单个测试跨 ≥3 个模块域视为 catch-all；因被测主模块自身依赖面广（如测 `Widget` 必带 layout/render/event/navigation）的跨域**不视为违规、不强行拆分**，基线 **20**、只看增量，趋势由守门脚本输出、不在本文档硬编码以免随重构漂移 | 否（趋势指标） |
 

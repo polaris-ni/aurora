@@ -28,7 +28,8 @@ namespace aurora {
  */
 class D3D11Surface : public Surface {
   public:
-    D3D11Surface(int width, int height, const std::string &title, const WindowStyleOptions &style);
+    D3D11Surface(int width, int height, const std::string &title, const WindowStyleOptions &style,
+                 WindowVisibility visibility = WindowVisibility::Normal);
     ~D3D11Surface() override;
 
     D3D11Surface(const D3D11Surface &) = delete;

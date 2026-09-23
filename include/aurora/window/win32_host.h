@@ -37,8 +37,9 @@ class Win32Host {
     using WindowModeHandler = std::function<void(WindowMode)>;
     using PresentRequest = std::function<void()>;
 
-    /// @brief 创建原生窗口（带高级样式）。
-    Win32Host(int w, int h, const std::string &title, const WindowStyleOptions &style);
+    /// @brief 创建原生窗口（带高级样式与可见性策略）。
+    Win32Host(int w, int h, const std::string &title, const WindowStyleOptions &style,
+              WindowVisibility visibility = WindowVisibility::Normal);
     ~Win32Host();
 
     Win32Host(const Win32Host &) = delete;

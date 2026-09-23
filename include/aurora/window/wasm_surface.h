@@ -60,6 +60,7 @@
 
 namespace aurora {
 
+// 窗口可见性策略（WindowVisibility）不在此落地：浏览器 canvas 无窗口可见性概念。
 class WasmSurface : public Surface {
   public:
     WasmSurface(int w, int h, const char *canvas_id = "#canvas") : w_(w), h_(h) {

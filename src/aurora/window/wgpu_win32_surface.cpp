@@ -45,9 +45,9 @@ auto WgpuWin32Surface::Sink::begin_frame(int width, int height, float scale) -> 
 // ---- 构造 / 析构 ----
 
 WgpuWin32Surface::WgpuWin32Surface(int width, int height, const std::string &title, const WindowStyleOptions &style,
-                                   bool vsync)
+                                   bool vsync, WindowVisibility visibility)
     : vsync_(vsync) {
-    win_ = std::make_unique<Win32Host>(width, height, title, style);
+    win_ = std::make_unique<Win32Host>(width, height, title, style, visibility);
     if (win_->hwnd() == nullptr) {
         AURORA_LOG_ERROR("wgpu-surface", "Win32Host creation failed");
         return;

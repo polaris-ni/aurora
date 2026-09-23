@@ -25,6 +25,8 @@
 #include "aurora/render/font_engine.h"
 #include "bench_common.h"
 
+#ifdef AURORA_BACKEND_HEADLESS
+
 namespace {
 
 // Create a fixed-size Headless window (set scale before begin_frame; physical buffer = logical x scale).
@@ -219,6 +221,7 @@ auto main() -> int {
                        aurora::bench::time_ms(
                            [&]() -> void {
                                ++flip;
+                               // NOLINTNEXTLINE(*-signed-bitwise)
                                probe->set_background((flip & 1) != 0 ? aurora::Color{220, 60, 60, 255}
                                                                      : aurora::Color{60, 60, 220, 255});
                                (void)win.present_root(root);
@@ -288,3 +291,14 @@ auto main() -> int {
     AURORA_LOG_RAW("bench", "\n", aurora::bench::AURORA_BENCH_DISCLAIMER, "\n");
     return 0;
 }
+
+#else  // !AURORA_BACKEND_HEADLESS
+
+// 无头后端未编译：本基准的唯一绘制目标是 `HeadlessSurface`，无替代实现——跳过并如实说明，
+// 不编译失败（基准的判据本身也无从成立）。
+auto main() -> int {
+    AURORA_LOG_RAW("bench", "bench_render: skipped (AURORA_BACKEND_HEADLESS 未开启，无绘制目标)\n");
+    return 0;
+}
+
+#endif  // AURORA_BACKEND_HEADLESS

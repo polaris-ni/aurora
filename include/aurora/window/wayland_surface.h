@@ -43,7 +43,8 @@ namespace aurora {
 class WaylandSurface final : public Surface {
   public:
     WaylandSurface(int w, int h, const std::string &title) : WaylandSurface(w, h, title, WindowStyleOptions{}) {}
-    WaylandSurface(int w, int h, const std::string &title, const WindowStyleOptions &style);
+    WaylandSurface(int w, int h, const std::string &title, const WindowStyleOptions &style,
+                   WindowVisibility visibility = WindowVisibility::Normal);
     ~WaylandSurface() override;
 
     WaylandSurface(const WaylandSurface &) = delete;

@@ -43,7 +43,7 @@ namespace aurora {
 class WgpuWin32Surface final : public Surface {
   public:
     WgpuWin32Surface(int width, int height, const std::string &title, const WindowStyleOptions &style,
-                     bool vsync = true);
+                     bool vsync = true, WindowVisibility visibility = WindowVisibility::Normal);
     ~WgpuWin32Surface() override;
 
     WgpuWin32Surface(const WgpuWin32Surface &) = delete;

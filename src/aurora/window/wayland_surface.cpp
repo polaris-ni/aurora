@@ -119,6 +119,7 @@ struct WaylandSurface::Impl {
     bool close_requested = false;
     bool active = true;
     bool minimized = false;
+    WindowVisibility visibility = WindowVisibility::Normal;  ///< 构造期定档的可见性策略。
     WindowState state = WindowState::Visible;
     WindowMode mode = WindowMode::Normal;
     Surface::EventHandler handler;
@@ -1187,10 +1188,12 @@ auto WaylandSurface::Impl::ti_on_delete(std::uint32_t before_length, std::uint32
 // WaylandSurface：构造/析构与 Surface 接口实现
 // =============================================================================
 
-WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const WindowStyleOptions &style)
+WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const WindowStyleOptions &style,
+                               WindowVisibility visibility)
     : impl_(std::make_unique<Impl>()) {
     Impl &d = *impl_;
     d.self = this;
+    d.visibility = visibility;
     d.dpy = wl_display_connect(nullptr);
     if (d.dpy == nullptr) {
         AURORA_LOG_WARN("window",
@@ -1517,13 +1520,19 @@ auto WaylandSurface::present() -> Result<bool> {
                 wl_surface_damage_buffer(d.surface, x0, y0, x1 - x0, y1 - y0);
             }
         }
-        if (d.compositor_version >= 3U) {
-            wl_surface_set_buffer_scale(d.surface, d.scale);
+        // 可见性：Hidden 档跳过 attach + commit——表面永不进入合成器视野；帧缓冲仍照常
+        // swizzle/更新，data() 读回不受影响。构造期那次「无缓冲 commit 宣告表面存在」必须保留
+        // （xdg-shell 要求先收 configure 才能 attach），故只在此处拦截。
+        // NoActivate 在 xdg-shell 无对应请求，与 Normal 同路。
+        if (d.visibility != WindowVisibility::Hidden) {
+            if (d.compositor_version >= 3U) {
+                wl_surface_set_buffer_scale(d.surface, d.scale);
+            }
+            wl_surface_attach(d.surface, slot->buf, 0, 0);
+            slot->busy = true;
+            wl_surface_commit(d.surface);
+            wl_display_flush(d.dpy);
         }
-        wl_surface_attach(d.surface, slot->buf, 0, 0);
-        slot->busy = true;
-        wl_surface_commit(d.surface);
-        wl_display_flush(d.dpy);
     }
     // 脏区一次性消费：下一帧未重新设置则回到全量（安全兜底）。
     d.present_dirty.clear();

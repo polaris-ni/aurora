@@ -33,7 +33,7 @@
 | `include/`          | 公共 API 头（`include/aurora/aurora.h` 为唯一入口），声明与少量 header-only 控件                                                                                                |
 | `src/`              | 实现（`src/aurora/*.cpp`），非模板纯逻辑类实现放此，头只留声明                                                                                                                  |
 | `examples/`         | 示例：每个组件一个 `demo_<组件>.cpp` 位于 `examples/demos/`（1:1，CMake 自动 GLOB）；`examples/demos/demo_common.h` 含 `Card`/`BrandBadge`/`GradientTitle` 等demo使用的全局控件 |
-| `tests/`            | 测试 + CTest：单元测试 `tests/unit/utest_*.cpp`、集成测试 `tests/integration/itest_*.cpp`、公共 fixture `tests/support/`（含 `paths.h` / `test_helpers.h`）与 `tests/fixtures/`（如 `ai_compat/` 基准）、golden 基准 `tests/golden/`                          |
+| `tests/`            | 测试 + CTest：单元测试 `tests/unit/utest_*.cpp`、集成测试 `tests/integration/itest_*.cpp`、真实后端端到端 `tests/e2e/etest_*.cpp`（受 `AURORA_BUILD_E2E` 门控，Emscripten 下排除）、公共 fixture `tests/support/`（含 `paths.h` / `test_helpers.h`）与 `tests/fixtures/`（如 `ai_compat/` 基准）、golden 基准 `tests/golden/`                          |
 | `third_party/`      | 三方库文件                                                                                                                                                                      |
 | `tools/`            | 工具链，按职责分子目录：`gen/`（三生成器 `gen_api`/`gen_error_codes`/`gen_debug_api`）、`servers/`（mcp / lsp / cli）、`bench/`（4 基准 + `bench_common.h`）、`check/`（校验与门禁脚本 + `perf_gates.json` + 观测脚本 `build_baseline.py`：解析 `.ninja_log` / ctest 日志输出构建与测试耗时基线，非门禁）、`verify/`（真机验收探针：证明无头 CI 无法证明的平台接线，按「平台 + 后端」条件构建且不进 CTest，见 `cmake/AuroraVerify.cmake`）、`coverage/`（GCC/Clang/LLVM 覆盖率聚合）、`include/`（共享头，含枚举 SSOT `known_enums.h` 与 LSP 三层 `lsp_*.h`）。API 生成落盘 `aurora_api.json`，CMake 聚合目标 `aurora_api_json`；详见 `cmake/AuroraTools.cmake` 与 `cmake/AuroraInstrumentation.cmake` |
 | `cmake/`            | CMake 模块（顶层 `CMakeLists.txt` 只做编排）：`AuroraFeatures`（feature 宏单一入口 `aurora_define_feature`）/`AuroraThirdParty`（三方构建）/`AuroraImageCodecs`（图片编解码）/`AuroraCcache`（编译缓存）/`AuroraSimd`（SIMD）/`AuroraBackends`（后端开关）/`AuroraTools`（工具）/`AuroraVerify`（真机验收探针）/`AuroraDemos`（示例）/`AuroraTests`（测试）/`AuroraInstrumentation`（插桩）/`AuroraInstall`（安装）/`AuroraLint`（Clang-Tidy 门禁：`lint` / `lint-fix` 聚合目标）/`AuroraFormat`（clang-format 门禁：`format` / `format-check` 聚合目标）/`AuroraUtils`（公共辅助函数：消费者目标统一配置）/`AuroraCheckTestRegistry`（测试注册表一致性校验），共 16 个；布局与职责详见 `codespec/BUILD_OPTIONS.md` §1.1 |
@@ -77,7 +77,7 @@
   ctest --preset ninja-test   # 等价 ctest --test-dir build --output-on-failure -j 16
   ```
 - **测试/示例组织约定**（详见 `CODING_STANDARDS.md` §3 与 §6.2 默认参数章节）：每个公共源文件对应一个 `demo_*.cpp`（`examples/demos/`
-  ）与一个 `utest_*.cpp`（`tests/unit/`），二者用文件夹区分；测试文件以 `utest`（单元）/ `itest`（集成）为前缀（非 `_test` 后缀），
+  ）与一个 `utest_*.cpp`（`tests/unit/`），二者用文件夹区分；测试文件以 `utest`（单元）/ `itest`（集成）/ `etest`（真实后端端到端，`tests/e2e/`）为前缀（非 `_test` 后缀），
   每个测试 TU 包裹在 `namespace aurora::test_cases::utest_<名>` 内。框架位于 `tests/framework/`，入口头
   `tests/framework/aurora_test.h`（仓库私有设施，不进 `include/`、不进 `aurora_api.json`）。
   用例经 `AURORA_TEST_CASE(<Case>)` 宏静态注册，全名 `<文件 stem>.<Case>` —— **套件名恒等于测试文件 stem、不可自定义**，

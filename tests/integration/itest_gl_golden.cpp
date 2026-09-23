@@ -9,6 +9,13 @@
 ///           取得：`GpuGlRhi` 的 MSAA/resolve 帧缓冲自持且不触默认帧缓冲，故窗口不参与渲染。
 ///           `AURORA_BACKEND_GLFW` / `AURORA_ENABLE_GLFW_GPU_GL` 未开启，或无显示环境 / GL 3.3
 ///           core 装载失败时按惯例落 skip 桩。
+///
+///           不经 E2E 内核（`e2e::Session`）的理由：本 TU 验的是 **RHI 离屏重放**，不建 aurora
+///           `Window`、不推进 `present_root`，读回走 `RhiFrameSink::read_pixels`（离屏 FBO），
+///           而内核的窗口面读回基底是 `Surface::data()`——两者是不同层的读回通道。此处的
+///           `HiddenGlContext` 只充当 `glfwGetProcAddress` 的 current 上下文提供者，不驱动任何
+///           帧；与 wgpu 侧共用 `support/gpu_golden_scenes.h` 的场景与帧装配、共用
+///           `golden::compare_gpu_tolerance` 判据，已是单源。
 
 #include <cstddef>
 

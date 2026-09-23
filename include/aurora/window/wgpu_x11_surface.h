@@ -44,7 +44,8 @@ namespace aurora {
 ///   本类 present() 委托 `X11Surface::present()`（XPutImage 软件上屏）。
 class WgpuX11Surface final : public Surface {
   public:
-    WgpuX11Surface(int width, int height, const std::string &title, const WindowStyleOptions &style, bool vsync = true);
+    WgpuX11Surface(int width, int height, const std::string &title, const WindowStyleOptions &style, bool vsync = true,
+                   WindowVisibility visibility = WindowVisibility::Normal);
     ~WgpuX11Surface() override;
 
     WgpuX11Surface(const WgpuX11Surface &) = delete;

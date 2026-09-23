@@ -11,6 +11,11 @@
 ///           的用例，把「自绘 CSD 装饰回放进 GPU 帧」锁成逐帧递增的确定断言。宿主类型按
 ///           编译口径别名切换（与工厂择一序 Win32 → X11 → Wayland 同序）。
 ///           依赖桌面会话（HWND/X Display/Wayland compositor）+ wgpu adapter，任一缺失 SKIP。
+///
+///           `WgpuOptions` 一例的建窗与帧推进统一经 E2E 内核（`e2e::Session`）；三个「宿主选项 +
+///           `RendererPreference::GpuWgpu`」路由用例保持直接调工厂——内核的 `WindowSpec` 描述的是
+///           **目标后端**，不描述「宿主选项 × 渲染器偏好」这一组合，强行并入会把内核的规格面
+///           撑成宿主矩阵，与内核「只回答用哪个后端」的定位相悖。
 
 #include <chrono>
 #include <memory>
@@ -27,6 +32,7 @@ namespace au = aurora;
 #include "aurora/aurora.h"
 #include "aurora/window/native_surfaces.h"
 #include "aurora/window/window.h"
+#include "e2e/harness.h"
 
 namespace aurora::test_cases::itest_wgpu_present {
 
@@ -47,15 +53,16 @@ using HostOptions = au::WaylandOptions;
 #endif
 
 AURORA_TEST_CASE(wgpu_win32_surface_present_frames_and_no_fallback) {
-    au::WgpuOptions opts;
-    opts.size = au::Size{.width = 320.0F, .height = 240.0F};
-    opts.title = "itest_wgpu_present";
-    auto created = au::create_window(opts);
-    if (!created) {
+    e2e::WindowSpec spec;
+    spec.backend = e2e::Backend::Wgpu;
+    spec.width = 320;
+    spec.height = 240;
+    spec.title = "itest_wgpu_present";
+    auto session = e2e::open(spec);
+    if (!session.ok()) {
         AURORA_TEST_SKIP("开窗失败（无桌面会话或无 wgpu adapter），GPU 上屏链路无实例可验");
     }
-    auto win = std::move(created.value());
-    auto &surface = win->surface();
+    auto &surface = session.surface();
 
     auto *sink = surface.gpu_backend();
     AURORA_TEST_REQUIRE(sink != nullptr);
@@ -64,23 +71,23 @@ AURORA_TEST_CASE(wgpu_win32_surface_present_frames_and_no_fallback) {
     auto *ws = dynamic_cast<HostWgpuSurface *>(&surface);
     AURORA_TEST_REQUIRE(ws != nullptr);
 
-    au::Node page = au::Text{au::TextProps{.content = au::LocalizedString{"Wgpu Aa 01"}}};
+    session.mount(au::Text{au::TextProps{.content = au::LocalizedString{"Wgpu Aa 01"}}});
     // 开窗后的首批 map/configure/expose 事件会触发宿主「同步重绘」（present_request_ → 对缓存
     // 根再渲染一帧），属真实窗口语义而非回退；先短 settle 泵掉该突发，保持下方逐帧帧数口径为
     // 精确相等。该路径若绕过 GPU 帧通道直接 present()，软件缓冲上屏即白闪——故此处一并断言
     // 软件上屏帧数为 0（各宿主 software_present_count 的口径）。
     for (int k = 0; k < 5; ++k) {
-        surface.poll_platform_events();
+        session.pump_events();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
     AURORA_TEST_CHECK_EQ(ws->software_present_count(), 0);
     const int base = surface.frame_count();
     for (int i = 1; i <= 3; ++i) {
-        win->force_full_redraw();  // 绕过 idle 跳帧：逐帧走完整 GPU begin→replay→end→present
-        const auto r = win->present_root(page);
+        session.window().force_full_redraw();  // 绕过 idle 跳帧：逐帧走完整 GPU begin→replay→end→present
+        const auto r = session.present();
         AURORA_TEST_CHECK(static_cast<bool>(r));
         AURORA_TEST_CHECK_EQ(surface.frame_count(), base + i);
-        surface.poll_platform_events();
+        session.pump_events();
     }
     // 全程无运行期失效（sink.begin_frame 恒成功 → 不触发永久软件回退）。
     AURORA_TEST_CHECK_TRUE(ws->gpu_active());

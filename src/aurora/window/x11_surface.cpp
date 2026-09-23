@@ -177,6 +177,7 @@ struct X11Surface::Impl {
     bool close_requested = false;
     bool active = true;
     bool minimized = false;
+    WindowVisibility visibility = WindowVisibility::Normal;  ///< 构造期定档的可见性策略。
     WindowState state = WindowState::Visible;
     WindowMode mode = WindowMode::Normal;
     EventHandler handler;
@@ -477,9 +478,11 @@ auto X11Surface::Impl::ime_update_spot() -> void {
     }
 }
 
-X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyleOptions &style)
+X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyleOptions &style,
+                       WindowVisibility visibility)
     : impl_(std::make_unique<Impl>()) {
     Impl &d = *impl_;
+    d.visibility = visibility;
     // XIM 依赖进程 locale（一次性）：否则 Xutf8LookupString 退化为 latin1，CJK 输入失效。
     static bool locale_done = false;
     if (!locale_done) {
@@ -589,7 +592,11 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
     d.gshift = mask_shift(vis->green_mask, 8);
     d.bshift = mask_shift(vis->blue_mask, 0);
     d.gc = XCreateGC(d.dpy, d.win, 0, nullptr);
-    XMapWindow(d.dpy, d.win);
+    // 可见性：Hidden 档不映射窗口——表面仍可渲染、data() 仍可读回，窗口不进入用户视野。
+    // NoActivate 在 X11 下无对应请求（聚焦由 WM 策略决定，Aurora 从不主动 XSetInputFocus），故与 Normal 同路。
+    if (visibility != WindowVisibility::Hidden) {
+        XMapWindow(d.dpy, d.win);
+    }
     XFlush(d.dpy);
     d.ime_setup();
     d.size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // NOLINT(*-narrowing-conversions)

@@ -498,6 +498,28 @@ mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effec
 | `aurora::testing::write_report` | 结果报告：`.xml` → JUnit XML，其余 JSON；超时路径同样落盘已完成部分（`tests/framework/reporter.h`） |
 | `aurora_test_runner` | 唯一 `main`（`tests/framework/test_main.cpp`），测试 TU 禁止自定义 `main()`；起手执行 `TestRegistry::finalize()` 统一展开参数化用例，故 `--list` / `--run` 即展开后全集；`--report` / `--shuffle` / `--repeat` / `--timeout`（看门狗，退出码 3）见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §7.1 |
 
+### 8.2 真实后端 E2E 驱动内核（`tools/include/e2e/harness.h`）
+
+真实后端端到端测试（`tests/e2e/` 下 `etest_` 用例，受 `AURORA_BUILD_E2E` 门控）的**框架无关**驱动
+内核。它不是新增开发，而是**既有真实后端测试代码的抽取与统一**：建窗 / 帧推进 / 像素读回在仓库内
+只有这一份实现，不得出现第二套容差常量或第二套 skip 约定。
+
+| 项 | 约定 |
+|:---|:---|
+| 位置与依赖 | `tools/include/e2e/harness.h`，**只依赖 aurora 公共头**，不含任何 `AURORA_TEST_*` 宏——故 `tests/`（`etest_` 用例）与 `tools/verify/`（真机验收探针）可共用同一份实现 |
+| 分层 | 场景层（`examples/demos/scenes/` 下 header-only 场景头，与 demo 同源）→ 进程内驱动内核（本头）→ 进程外客户端（`InspectorServer` REST，见 §5） |
+| 后端标识 | `e2e::Backend` 枚举器**无条件出现**（不随 `AURORA_BACKEND_*` 裁剪）：未编译的后端请求得到明确的「不可用 + 原因」，而非编译失败。`backend_compiled()` 是纯编译期事实，`open()` 的运行期失败以 `ok()` / `reason()` 如实上报 |
+| 建窗 | `e2e::open(WindowSpec)` 经类型安全的 `create_window(XxxOptions)` 工厂；**不静默降级**——请求的后端未编译或初始化失败即失败。「跳过还是失败」是测试侧策略，落在 `tests/e2e/e2e_expect.h`（`AURORA_E2E_EXPECT` 期望集），内核不裁决 |
+| 窗口可见性 | `WindowSpec::visibility` 默认 `Hidden`（与公共 `WindowOptions::visibility` 的默认 `Normal` 刻意不同）：E2E 默认不把窗口推入用户视野；三档语义与各宿主落地见 [`specification/03-layout-render.md`](03-layout-render.md) §8.3 与 [`specification/06-app-platform.md`](06-app-platform.md) §3.3 |
+| 帧推进 | 帧序复用 `TestController` 已验证的既有序列（泵平台事件 → `Widget::tick` 手势计时 → `Animator::tick` → `Scheduler::tick` → `Window::present_root`）：内核自持 `Animator` / `Scheduler` 并经其 `set_current` 挂为进程内当前实例，使 mount 期注册的动画与定时任务可被逐帧推进。**不新增任何公共单帧 API**（`Application::step_frame()` 保持 `private`） |
+| 收敛与超时 | `pump_until_settled(max_frames)` 以「`Window::is_idle_frame()` 且无运行中动画」收敛；预算内未收敛返回 `RuntimeAsyncTimeout`，消息含已推进帧数、最后脏区状态、idle 帧状态与活跃动画数（可直接作为失败原因） |
+| 像素读回 | `capture_frame(const Surface &)` = `Surface::data()` + `Surface::framebuffer_size()` 组合，返回帧缓冲**物理像素**的 RGBA 帧；**未新增 `Surface` 公共读回虚方法**。`data()` 为 `nullptr`（后端未覆写读回，或该后端的读回受 `AURORA_ENABLE_DEBUG` 门控且未生效）时返回 `GeneralNotSupported`，消息沿用 `save_snapshot` 既有的 "framebuffer capture unavailable"；不返回空帧、不伪造内容 |
+| 查询面 | `collect_preorder` / `find_by_key` / `find_by_type` / `find_by_text` / `read_prop` 全部建立在**公共自描述通道**上（`Node::id()` / `Widget::type_name()` / `Widget::serialize_props` / `Widget::child_nodes()`），**不依赖 `TestController`**——后者整头受 `AURORA_BACKEND_HEADLESS` 门控，若查询面依赖它，「关掉无头后端但开真实后端」的构建里 E2E 恰好失去查询能力 |
+| 输入注入 | `tap` / `drag` / `scroll` / `enter_text` 经 `Inspector::simulate_*` 走真实命中测试与冒泡派发（目标式语义），而非直接改控件状态；注入成功后登记「下一帧全量重绘」，模拟真实平台输入事件唤醒帧循环 |
+| 生命周期 | `Session` 以 RAII 兜底窗口生命周期：用例中途断言失败、抛出异常或提前 return 时析构即关闭窗口并回收宿主，不残留幽灵窗口；该保证不依赖用例显式调用清理函数，也不依赖测试框架的断言宏 |
+
+内核自测在 `tests/unit/utest_e2e_harness.cpp`（以 `HeadlessSurface` 为后端运行，不依赖真实显示环境）。
+
 ---
 
 ## 9 日志通道

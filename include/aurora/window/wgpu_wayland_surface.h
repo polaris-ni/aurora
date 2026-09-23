@@ -54,7 +54,7 @@ namespace aurora {
 class WgpuWaylandSurface final : public Surface {
   public:
     WgpuWaylandSurface(int width, int height, const std::string &title, const WindowStyleOptions &style,
-                       bool vsync = true);
+                       bool vsync = true, WindowVisibility visibility = WindowVisibility::Normal);
     ~WgpuWaylandSurface() override;
 
     WgpuWaylandSurface(const WgpuWaylandSurface &) = delete;

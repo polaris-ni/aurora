@@ -247,6 +247,27 @@ compute_wait_timeout(has_dirty, anim_active, next_deadline_ms, frame_budget_ms, 
 
 `D3D11Surface` 支持 device-lost 恢复（present 报 `DXGI_ERROR_DEVICE_REMOVED` / `RESET` → 下次 `poll_platform_events` 重建 device / swapchain + 全量重渲染）、`set_vsync(bool)` 与 `paces_frames()`（`D3D11Options.vsync` 默认 `true`）。
 
+### 3.6 窗口可见性策略
+
+`WindowVisibility{ Normal, NoActivate, Hidden }` 是**生命周期选项**（非 `WindowStyleOptions`：样式描述
+「窗口长什么样」，可见性描述「窗口是否进入用户视野」），经 `WindowOptions::visibility` 在建窗时下发，
+默认 `Normal`（行为与既往完全一致）。
+
+| 档位 | 语义 | 典型用途 |
+|:---|:---|:---|
+| `Normal` | 正常显示并激活 | 普通应用窗口（默认） |
+| `NoActivate` | 显示但不激活：不抢焦点、不打断用户当前前台窗口 | 通知 / 悬浮提示 / 辅助面板 |
+| `Hidden` | 不显示：窗口不进入用户视野，但渲染与像素读回照常工作 | 无人值守自动化（E2E）、预热与后台渲染 |
+
+关键契约：**隐藏窗口仍可渲染、可读回像素、可接收框架合成输入**——`Hidden` 只切断「进入用户视野」
+这一步，不切断绘制与上屏管线。枚举定义在 `include/aurora/window/surface.h`，枚举器显式赋值且无条件
+出现（不随 `AURORA_BACKEND_*` 裁剪，稳定性契约同 `SurfaceKind`）；各宿主的具体映射（`SW_SHOWNA` /
+`SW_HIDE` / `GLFW_VISIBLE` / X11 是否 `XMapWindow` / Wayland 是否 attach-commit）见
+[`03-layout-render.md`](03-layout-render.md) §8.3。
+
+参数在**建窗时**下发而非「先可见后隐藏」，避免一帧闪烁；`NoActivate` 在 X11 / Wayland 无对应请求
+（聚焦由 WM / 合成器策略决定，Aurora 从不主动 `XSetInputFocus`），与 `Normal` 同路。
+
 ---
 
 ## 4 App 流式构建器

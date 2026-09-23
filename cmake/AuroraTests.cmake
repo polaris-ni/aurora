@@ -1,7 +1,8 @@
 # ============================================================
 # AuroraTests.cmake — 注册式测试 runner（CTest）
 # ------------------------------------------------------------
-# tests/unit 与 tests/integration 下全部用例 TU 链入单一可执行 aurora_test_runner：
+# tests/unit、tests/integration 与 tests/e2e（真实后端端到端，受 AURORA_BUILD_E2E 门控）
+# 下全部用例 TU 链入单一可执行 aurora_test_runner：
 #   - 全量构建从「每文件一个 exe、各自链接 libaurora」降为一次链接（极速构建的核心）；
 #   - 用例由框架静态注册，main 由框架唯一提供（tests/framework/test_main.cpp 的 main()）；
 #     测试文件禁止自定义 main()。
@@ -23,6 +24,9 @@
 # ============================================================
 
 option(AURORA_BUILD_TESTS "Build Aurora tests" ON)
+# 真实后端端到端用例（tests/e2e/，etest_ 前缀）：建真实窗口 + 走上屏链路，需要显示环境，
+# 故独立开关便于无显示环境整体退避；Emscripten 交叉构建下另行强制不纳入（见下方 GLOB）。
+option(AURORA_BUILD_E2E "Build Aurora end-to-end (real backend) tests" ON)
 if (AURORA_BUILD_TESTS)
     enable_testing()
     # 框架源（registry / runner / main）恒参与构建；用例源可为空（重写中间态）。
@@ -32,6 +36,16 @@ if (AURORA_BUILD_TESTS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/*.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/*.cpp")
+    # 真实后端端到端用例（tests/e2e/）。Emscripten 交叉构建下不纳入：wasm 产物没有宿主
+    # 窗口与显示（WASM E2E 走 opt-in 的真实浏览器 + CDP 通道）。此处口径必须与下方
+    # registry_integrity 的 --tests-dir 完全一致，否则该配置会扫到未注册的 stem 而误红。
+    if (AURORA_BUILD_E2E AND NOT EMSCRIPTEN)
+        file(GLOB AURORA_TEST_E2E_SOURCES CONFIGURE_DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/*.cpp")
+    else ()
+        set(AURORA_TEST_E2E_SOURCES "")
+    endif ()
+    list(APPEND AURORA_TEST_CASE_SOURCES ${AURORA_TEST_E2E_SOURCES})
     set(AURORA_TEST_SOURCES ${AURORA_TEST_FRAMEWORK_SOURCES} ${AURORA_TEST_CASE_SOURCES})
 
     # ---- 静态校验 / 门禁脚本（tools/check/*.py）注册为 CTest 用例 ----
@@ -123,8 +137,15 @@ if (AURORA_BUILD_TESTS)
         message(FATAL_ERROR "AURORA_TEST_SHARDS must be a positive integer (got '${AURORA_TEST_SHARDS}')")
     endif ()
 
+    # E2E 用例的看门狗超时（ms）。runner 默认 timeout_ms=0 即不设限，而真实窗口事件循环
+    # 一旦挂起就没有兜底（不设 CTest TIMEOUT 属性先例），故由下方两条 add_test 注册循环
+    # 按 stem 前缀 etest_ 显式注入 --timeout；到点 runner 先写报告再以退出码 3 结束。
+    set(AURORA_E2E_TIMEOUT_MS "60000" CACHE STRING
+            "Watchdog timeout (ms) injected via --timeout for etest_ (real backend) cases")
+
     # runner 目标统一配置（分片共享）：链接 aurora + C++20 + 消费者 PCH + 告警；
-    # tests/ 供框架头解析，examples/app/google_play 供 google_play_data/ui 数据层测试；
+    # tests/ 供框架头解析，examples/app/google_play 供 google_play_data/ui 数据层测试，
+    # examples/demos 供 E2E 用例包含与 demo 同源的场景头（scenes/*.h）；
     # tools/include 复用 known_enums.h 等 SSOT，tests/support 为测试公共设施；
     # tools/servers 供 header-only 的工具侧客户端（inspector_client.h）被真代码单测——
     # 复制一份最小客户端只会测到副本，测不到那个「超时选项按平台不同形」的回归位。
@@ -133,7 +154,8 @@ if (AURORA_BUILD_TESTS)
     function(_aurora_configure_runner tgt)
         aurora_setup_consumer_target(${tgt}
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-                "${CMAKE_CURRENT_SOURCE_DIR}/examples/app/google_play")
+                "${CMAKE_CURRENT_SOURCE_DIR}/examples/app/google_play"
+                "${CMAKE_CURRENT_SOURCE_DIR}/examples/demos")
         target_include_directories(${tgt} PRIVATE
                 "${CMAKE_SOURCE_DIR}/tools/include"
                 "${CMAKE_SOURCE_DIR}/tools/servers"
@@ -189,9 +211,17 @@ if (AURORA_BUILD_TESTS)
         list(APPEND _runner_targets aurora_test_runner)
 
         # CTest 注册：每条用例 = runner --run=<stem>（进程隔离，文件级粒度）。
+        # E2E（etest_）用例额外注入看门狗超时与 LABELS e2e：真实窗口事件循环挂起时 runner
+        # 默认不设限，须显式设限；标签供 `ctest -L e2e` 按层独立编排。
         foreach (tst ${AURORA_TEST_CASE_SOURCES})
             get_filename_component(tname ${tst} NAME_WE)
-            add_test(NAME ${tname} COMMAND aurora_test_runner --run=${tname})
+            if (tname MATCHES "^etest_")
+                add_test(NAME ${tname} COMMAND aurora_test_runner --run=${tname}
+                        --timeout=${AURORA_E2E_TIMEOUT_MS})
+                set_tests_properties(${tname} PROPERTIES LABELS "e2e")
+            else ()
+                add_test(NAME ${tname} COMMAND aurora_test_runner --run=${tname})
+            endif ()
         endforeach ()
     else ()
         # 桶分配：stem → MD5 前 8 位 % N（稳定散列，与 GLOB 顺序无关）。
@@ -214,8 +244,16 @@ if (AURORA_BUILD_TESTS)
             _aurora_configure_runner(${_tgt})
             list(APPEND _runner_targets ${_tgt})
             # CTest 用例名带分片号（<stem>_s<k>）：文件级粒度下 stem 全局唯一，编号仅为可读性。
+            # etest_ 的超时与 LABELS 注入与单 runner 分支同口径（分片下 etest_ 会被散列到
+            # 不同 runner，故按层编排须用 `ctest -L e2e`，不能按 runner 挑）。
             foreach (tname ${_shard_stems_${k}})
-                add_test(NAME ${tname}_s${k} COMMAND ${_tgt} --run=${tname})
+                if (tname MATCHES "^etest_")
+                    add_test(NAME ${tname}_s${k} COMMAND ${_tgt} --run=${tname}
+                            --timeout=${AURORA_E2E_TIMEOUT_MS})
+                    set_tests_properties(${tname}_s${k} PROPERTIES LABELS "e2e")
+                else ()
+                    add_test(NAME ${tname}_s${k} COMMAND ${_tgt} --run=${tname})
+                endif ()
             endforeach ()
         endforeach ()
         aurora_log("Tests: sharded runners = ${AURORA_TEST_SHARDS}")
@@ -243,6 +281,11 @@ if (AURORA_BUILD_TESTS)
         list(APPEND _registry_cmd
                 --tests-dir "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
                 --tests-dir "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration")
+        # tests/e2e 与上方 GLOB 同口径：Emscripten / AURORA_BUILD_E2E=OFF 下不纳入，
+        # 否则脚本会扫到未进 runner 的 stem 而误报「suite contributes zero cases」。
+        if (AURORA_BUILD_E2E AND NOT EMSCRIPTEN)
+            list(APPEND _registry_cmd --tests-dir "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e")
+        endif ()
         add_test(NAME registry_integrity ${_registry_cmd}
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     endif ()

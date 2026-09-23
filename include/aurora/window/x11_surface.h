@@ -35,7 +35,8 @@ namespace aurora {
 class X11Surface final : public Surface {
   public:
     X11Surface(int w, int h, const std::string &title) : X11Surface(w, h, title, WindowStyleOptions{}) {}
-    X11Surface(int w, int h, const std::string &title, const WindowStyleOptions &style);
+    X11Surface(int w, int h, const std::string &title, const WindowStyleOptions &style,
+               WindowVisibility visibility = WindowVisibility::Normal);
     ~X11Surface() override;
 
     X11Surface(const X11Surface &) = delete;

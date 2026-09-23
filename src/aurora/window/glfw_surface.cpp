@@ -376,6 +376,19 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
     // GPU 模式请求 core profile（GLSL 管线需要；软件模式维持兼容剖面走 1.1 立即模式）。
     glfwWindowHint(GLFW_OPENGL_PROFILE, want_gpu ? GLFW_OPENGL_CORE_PROFILE : GLFW_OPENGL_COMPAT_PROFILE);
     glfwWindowHint(GLFW_RESIZABLE, cfg.resizable ? GLFW_TRUE : GLFW_FALSE);
+    // 可见性策略：构造期 hint 定档（在 glfwCreateWindow 之前生效，GPU core profile 失败后的
+    // 重建沿用同一 hint，无需重复设置）。Normal 档不设任何 hint，保持 GLFW 默认行为不变。
+    switch (cfg.visibility) {
+        case WindowVisibility::Hidden:
+            glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);  // 不显示：窗口不进入用户视野
+            break;
+        case WindowVisibility::NoActivate:
+            glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
+            glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);  // 可见但不抢焦点
+            break;
+        case WindowVisibility::Normal:
+            break;
+    }
 
     window = glfwCreateWindow(static_cast<int>(cfg.size.width), static_cast<int>(cfg.size.height), cfg.title.c_str(),
                               nullptr, nullptr);

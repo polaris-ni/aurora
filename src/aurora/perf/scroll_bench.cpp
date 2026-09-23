@@ -216,6 +216,11 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
         return res;  // 非法输入：scrollable_found = false，调用方经 trustworthy() 识别
     }
 
+#ifndef AURORA_BACKEND_HEADLESS
+    // 无头后端未编译：本 harness 唯一的绘制目标是 `HeadlessSurface`，无替代实现。
+    // 返回未采样结果（`scrollable_found = false`，调用方经 `trustworthy()` 识别），不编译失败。
+    return res;
+#else
     const float scale = cfg.scale > 0.0F ? cfg.scale : 1.0F;
     auto surface = std::make_unique<HeadlessSurface>(std::string{}, viewport);
     surface->painter().set_scale(scale);
@@ -373,6 +378,7 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
     // 采样后复测行程：与采样前不一致说明内容几何在采样期间还在变（典型：骨架屏中途退场）。
     res.max_offset_end = measure_extent();
     return res;
+#endif  // AURORA_BACKEND_HEADLESS
 }
 
 }  // namespace aurora

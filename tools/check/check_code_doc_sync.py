@@ -16,8 +16,9 @@
 #   TEST-R7 并行安全：测试体系禁止新增 RUN_SERIAL（CMake 编排与测试源一并扫描），
 #           申请串行须列入 TEST_R7_WHITELIST 并注明根因（并行模型 = 进程隔离 + 资源虚拟化）；
 #   TEST-R8 命名纪律：目录定类型 + 前缀强制——tests/unit/ 一律 utest_、tests/integration/
-#           一律 itest_；测试 TU 不得放在两目录之外；禁止自定义套件宏（AURORA_TEST_NAMED 等，
-#           Suite 恒等于文件 stem，见 §3.1）；
+#           一律 itest_、tests/e2e/ 一律 etest_；tests/ 下的子目录必须落在已知类型目录或设施
+#           目录白名单内（否则测试 TU 会逃逸类型判定）；禁止自定义套件宏（AURORA_TEST_NAMED
+#           等，Suite 恒等于文件 stem，见 §3.1）；
 #   TEST-R9 测试 TU 禁止 using-directive（与 clang-tidy google-build-using-namespace 同口径）。
 #   （TEST-R3 一一对应 / TEST-R10 跨域 catch-all 趋势不纳入硬门禁：靠评审与审计，见 §3.2；
 #     TEST-R6 注册完整性由 tools/check/check_test_registry.py 的 registry_integrity 用例守门。）
@@ -54,6 +55,12 @@ WHITELIST = {}
 # 并行模型 = CTest 进程隔离 + 框架用例边界资源虚拟化（见 CODING_STANDARDS.md §3.1），
 # 新增 RUN_SERIAL 属于违规；确因外部资源无法虚拟化而需要串行的，先在此登记根因。
 TEST_R7_WHITELIST = {}
+
+# ---- TEST-R8 目录白名单：目录定类型 + 强制前缀 -----------------------------
+# 类型目录：其中的 *.cpp 一律是测试 TU，且必须带对应前缀（Suite 恒等于文件 stem）。
+TEST_TYPE_DIRS = (("unit", "utest_"), ("integration", "itest_"), ("e2e", "etest_"))
+# 设施目录：框架 / 支撑 / 基准 / 夹具，非类型目录，不受前缀约束。
+TEST_FACILITY_DIRS = ("framework", "support", "fixtures", "golden")
 
 # TEST-R10 趋势基线：跨 ≥3 模块域的测试文件（catch-all 反模式）允许存量上限。
 CATCH_ALL_BASELINE = 20
@@ -416,11 +423,11 @@ def check_test_naming(repo, problems):
 
     Suite == file stem is enforced by the framework (derived from __FILE__), so the
     static check targets the ways that contract used to be (or could be) broken:
-    wrongly named/prefaced files, test TUs outside tests/unit|integration, and
+    wrongly named/prefaced files, test TUs outside the known type directories, and
     custom-suite macros that would bypass the stem binding.
     """
     forbidden_macros = re.compile(r"\bAURORA_TEST_NAMED\b|\bAURORA_TEST_SUITE\b")
-    for kind, prefix in (("unit", "utest_"), ("integration", "itest_")):
+    for kind, prefix in TEST_TYPE_DIRS:
         base = os.path.join(repo, "tests", kind)
         if not os.path.isdir(base):
             continue
@@ -435,11 +442,22 @@ def check_test_naming(repo, problems):
             for lineno, line in enumerate(code.splitlines(), start=1):
                 if forbidden_macros.search(line):
                     problems.append(("TEST-R8", rel, lineno, "自定义套件宏被禁止：Suite 恒等于文件 stem（__FILE__ 推导）"))
-    # 测试 TU 只能在 tests/unit 与 tests/integration（框架/支撑目录豁免）。
+    # 目录纪律（反向判定）：tests/ 下只允许已知类型目录与设施目录。旧判定只认深度 2 的
+    # tests/<file>.cpp，未来任意 tests/<任意目录>/ 都会逃逸「目录定类型」约束。
+    type_dirs = [kind for kind, _ in TEST_TYPE_DIRS]
+    tests_root = os.path.join(repo, "tests")
+    if os.path.isdir(tests_root):
+        known = set(type_dirs) | set(TEST_FACILITY_DIRS)
+        for name in sorted(os.listdir(tests_root)):
+            if os.path.isdir(os.path.join(tests_root, name)) and name not in known:
+                problems.append(("TEST-R8", f"tests/{name}", 1,
+                                 "tests/ 子目录须为已知类型目录（" + "/".join(type_dirs) +
+                                 "）或设施目录（" + "/".join(TEST_FACILITY_DIRS) + "）（目录定类型）"))
+    # 类型目录之外的游离测试 TU（含 tests/ 根下的裸 .cpp）。
     for rel in _iter_tests_tree(repo, (".cpp",)):
         parts = rel.split("/")
         if len(parts) == 2 and parts[0] == "tests":  # tests/<file>.cpp —— 游离在类型目录之外
-            problems.append(("TEST-R8", rel, 1, "测试 TU 须位于 tests/unit/ 或 tests/integration/（目录定类型）"))
+            problems.append(("TEST-R8", rel, 1, "测试 TU 须位于已知类型目录内（目录定类型）"))
 
 
 def check_using_directive(repo, problems):

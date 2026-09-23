@@ -36,8 +36,9 @@ namespace aurora {
 class Win32Surface final : public Surface {
   public:
     Win32Surface(int w, int h, const std::string &title) : Win32Surface(w, h, title, WindowStyleOptions{}) {}
-    Win32Surface(int w, int h, const std::string &title, const WindowStyleOptions &style)
-        : win_(std::make_unique<Win32Host>(w, h, title, style)) {}
+    Win32Surface(int w, int h, const std::string &title, const WindowStyleOptions &style,
+                 WindowVisibility visibility = WindowVisibility::Normal)
+        : win_(std::make_unique<Win32Host>(w, h, title, style, visibility)) {}
     ~Win32Surface() override { release_dib(); }
 
     Win32Surface(const Win32Surface &) = delete;

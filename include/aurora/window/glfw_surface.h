@@ -54,6 +54,9 @@ class GlfwSurface : public Surface {
         int gl_minor = 3;
         bool resizable = true;
         RenderMode render_mode = RenderMode::SoftwareTexture;  ///< 渲染模式（默认软件上传）。
+        /// @brief 窗口可见性策略（默认 `Normal` = 行为不变）：构造期经 GLFW window hint 定档，
+        /// 避免「先可见后隐藏」造成的一帧闪烁。
+        WindowVisibility visibility = WindowVisibility::Normal;
     };
 
     explicit GlfwSurface(const Config &cfg);
