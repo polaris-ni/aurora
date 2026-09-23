@@ -17,6 +17,10 @@
 #
 # ⚠️ 依赖 tools/check/run_clang_format.py。脚本内的 third_party 排除 + 绝对路径调用形态
 #    是正确性的一部分，勿在外层自行传文件列表绕过。
+# ⚠️ 可执行文件由 aurora_find_clang_format 选出并显式传给脚本（--clang-format），不靠脚本自己
+#    在 PATH 上撞运气：本仓 `.clang-format` 用了 v20+ 才认的枚举取值（`BinPackParameters: BinPack`），
+#    发行版旧版会 `error: invalid boolean` 后整条命令失败；与生成链（AuroraTools 的
+#    generate_error_codes）取同一个判据，两处不会落在不同版本上。
 # ============================================================
 
 option(AURORA_ENABLE_CLANG_FORMAT "Provide the 'format' / 'format-check' aggregate targets (clang-format)" ON)
@@ -25,11 +29,13 @@ if (NOT AURORA_ENABLE_CLANG_FORMAT)
     return ()
 endif ()
 
-find_program(AURORA_CLANG_FORMAT_EXE NAMES clang-format)
+aurora_find_clang_format(AURORA_CLANG_FORMAT_BIN)
 find_program(PYTHON3_EXE NAMES python3 python)
 
-if (NOT AURORA_CLANG_FORMAT_EXE)
-    aurora_warn("AURORA_ENABLE_CLANG_FORMAT=ON but clang-format was not found on PATH; 'format' targets skipped.")
+if (NOT AURORA_CLANG_FORMAT_BIN)
+    aurora_warn("AURORA_ENABLE_CLANG_FORMAT=ON but no clang-format on PATH parses the repo .clang-format "
+                "(probed: ${AURORA_CLANG_FORMAT_CANDIDATES}); 'format' targets skipped. "
+                "Install clang-format >= 20, or point AURORA_CLANG_FORMAT_CANDIDATES at one.")
     return ()
 endif ()
 if (NOT PYTHON3_EXE)
@@ -44,13 +50,13 @@ if (NOT EXISTS "${_format_script}")
 endif ()
 
 add_custom_target(format-check
-        COMMAND ${PYTHON3_EXE} "${_format_script}" --jobs 8
+        COMMAND ${PYTHON3_EXE} "${_format_script}" --jobs 8 --clang-format "${AURORA_CLANG_FORMAT_BIN}"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "clang-format: verifying first-party sources against .clang-format (fails on any divergence)")
 
 add_custom_target(format
-        COMMAND ${PYTHON3_EXE} "${_format_script}" --fix --jobs 8
+        COMMAND ${PYTHON3_EXE} "${_format_script}" --fix --jobs 8 --clang-format "${AURORA_CLANG_FORMAT_BIN}"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "clang-format: rewriting first-party sources in place (review 'git diff' before committing)")
 
-aurora_log("clang-format: 'format' / 'format-check' targets available (${AURORA_CLANG_FORMAT_EXE})")
+aurora_log("clang-format: 'format' / 'format-check' targets available (${AURORA_CLANG_FORMAT_BIN})")

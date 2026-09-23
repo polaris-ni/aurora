@@ -16,7 +16,14 @@ back to the built-in default style and produces conclusions that point the
 opposite way. Hence: absolute path arguments + cwd pinned to the repository root.
 
 Usage:
-    run_clang_format.py [--fix] [--jobs N] [--include REGEX]
+    run_clang_format.py [--fix] [--jobs N] [--include REGEX] [--clang-format PATH]
+
+--clang-format lets the caller pin the executable instead of gambling on PATH. cmake passes
+the binary it already validated (cmake/AuroraUtils.cmake: aurora_find_clang_format probes
+candidates with `--dump-config --style=file` and rejects any build that cannot parse this
+repo's .clang-format). That rejection is not hypothetical — the config uses enum values
+newer than distro packages (`BinPackParameters: BinPack`), and an old clang-format exits 1
+with `error: invalid boolean`, which would look like a repo-wide style failure.
 
 Exit codes:
     0  every checked file already conforms (or --fix finished)
@@ -129,6 +136,9 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4, help="parallel clang-format processes")
     parser.add_argument("--include", default=None, help="restrict to paths matching this regex")
     parser.add_argument("--show", type=int, default=40, help="max offending files to list")
+    parser.add_argument("--clang-format", default=None,
+                        help="clang-format executable to use (default: first of clang-format / "
+                             "clang-format.exe on PATH); callers pin it after validating the config")
     args = parser.parse_args()
 
     root = find_root()
@@ -137,10 +147,18 @@ def main() -> int:
     cf = None
     from shutil import which as _which
 
-    for candidate in ("clang-format", "clang-format.exe"):
-        cf = _which(candidate)
-        if cf:
-            break
+    if args.clang_format:
+        # Explicit path from the build system: trust it verbatim (a plain name like
+        # "clang-format-22" still resolves through PATH).
+        cf = args.clang_format if os.path.isabs(args.clang_format) else _which(args.clang_format)
+        if not cf:
+            sys.stderr.write("error: --clang-format %r not found\n" % args.clang_format)
+            return 2
+    else:
+        for candidate in ("clang-format", "clang-format.exe"):
+            cf = _which(candidate)
+            if cf:
+                break
     if not cf:
         sys.stderr.write("error: clang-format not found on PATH\n")
         return 2

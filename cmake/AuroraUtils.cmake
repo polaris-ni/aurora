@@ -1,5 +1,5 @@
 # ============================================================
-# AuroraUtils.cmake — 公共辅助函数（消费者目标统一配置）
+# AuroraUtils.cmake — 公共辅助函数（消费者目标统一配置 + 工具链定位）
 # ------------------------------------------------------------
 # aurora_setup_consumer_target(<tgt> [extra private include dirs...])
 # 统一处理所有「消费 aurora 库」的可执行目标（demo/测试/工具）的样板：
@@ -11,6 +11,9 @@
 #   - 可选额外 PRIVATE include 目录（ARGN）
 # NOMINMAX 由顶层全局 add_compile_definitions 提供（第三方库同样需要），此处不再重复。
 # 调用方须在本文件 include 之后、且 aurora_consumer_pch 锚点目标已定义之后调用。
+#
+# aurora_find_clang_format(<out_var>)
+# 定位「真能读懂本仓 .clang-format」的 clang-format（生成链与排版门禁共用同一判据，见函数上方注释）。
 # ============================================================
 
 function(aurora_setup_consumer_target _tgt)
@@ -60,4 +63,53 @@ function(aurora_setup_consumer_target _tgt)
                 -static-libgcc -static-libstdc++
                 -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
     endif ()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# aurora_find_clang_format(<out_var>)
+#   按 AURORA_CLANG_FORMAT_CANDIDATES 的顺序挑出**第一个能读懂本仓 `.clang-format`** 的
+#   clang-format，绝对路径写入 <out_var>；一个都不行则写空串（不 FATAL_ERROR）。
+#
+# 为什么要「试跑一遍」而不是 find_program 了事：本仓配置用了新于发行版的选项取值——
+# `.clang-format` 的 `BinPackParameters: BinPack`（枚举，v20+ 才认）在旧版里是布尔，
+# 于是 Ubuntu runner 上的发行版 clang-format 直接
+# `.clang-format:46:20: error: invalid boolean` / `Error reading ...: Invalid argument`
+# 并以退出码 1 结束（2026-09-23 CI run 35839746160 实测：凡是跑 `generate_error_codes`
+# 的作业全红，Windows / macOS / 装了 clang-format-22 的 format 作业全绿）。
+# `find_program` 只看「存在」，看不出「能不能用」，故此处以 `--dump-config --style=file`
+# 真跑一遍：读得懂配置才收——配置坏了/版本过旧都会以非零退出码暴露，判据是行为而非版本号，
+# 不必随 clang 主版本升级改代码。
+#
+# 判别力本机已实测（v22.1.2）：同一份 `--dump-config --style=file` 在仓库根返回 0（说明 v22 认
+# `BinPackParameters: BinPack`），换到一份放了非法取值的 `.clang-format`（`IndentWidth: abc`）的
+# 临时目录即返回 1 并打印 `error: invalid number`——配置读不懂就会非零退出，故该探针筛得住版本。
+#
+# 生成链（AuroraTools 的 generate_error_codes）与排版门禁（AuroraFormat 的 format/format-check）
+# 共用本函数，两处因此必然落在同一个可执行文件上——避免「生成时按 A 版本折行、门禁按 B 版本
+# 判红」这类口径漂移。
+# ---------------------------------------------------------------------------
+set(AURORA_CLANG_FORMAT_CANDIDATES "clang-format-22;clang-format-21;clang-format-20;clang-format"
+        CACHE STRING "clang-format executables to probe, in order (first one that parses .clang-format wins)")
+
+function(aurora_find_clang_format _out)
+    set(_picked "")
+    foreach(_cand IN LISTS AURORA_CLANG_FORMAT_CANDIDATES)
+        unset(_exe)
+        find_program(_exe NAMES "${_cand}")
+        if (NOT _exe)
+            continue()
+        endif ()
+        # cwd 必须是仓库根：`--style=file` 从工作目录逐级上溯找 .clang-format。
+        execute_process(COMMAND "${_exe}" --dump-config --style=file
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                RESULT_VARIABLE _rc
+                OUTPUT_QUIET ERROR_QUIET)
+        if (_rc EQUAL 0)
+            set(_picked "${_exe}")
+            break()
+        endif ()
+        message(STATUS "clang-format: '${_cand}' cannot parse the repo .clang-format (exit ${_rc}) -- skipped, "
+                       "try the next candidate")
+    endforeach()
+    set(${_out} "${_picked}" PARENT_SCOPE)
 endfunction()

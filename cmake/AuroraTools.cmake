@@ -108,16 +108,23 @@ endif ()
 # 按 ColumnLimit 折成相邻字面量，生成器自己写出的是单行超长形态——于是「重新生成」这一步本身
 # 就把仓库弄红（实测：内容一字未改，仅重新生成即让 format-check 报 99 行 diff，而 HEAD 里的
 # 版本本就是「生成 + 格式化」的产物）。故生成命令后紧跟 -style=file -i，让生成与门禁同口径。
-# clang-format 不在 PATH 时仅告警跳过：不静默放行，format 作业会抓到。
-find_program(AURORA_CLANG_FORMAT_EXE NAMES clang-format)
+# ⚠️ 这一步**必须**用 aurora_find_clang_format 而不是裸 find_program：发行版 clang-format 读不懂
+# 本仓 `.clang-format`（`BinPackParameters: BinPack` 是 v20+ 的枚举取值），会
+# `error: invalid boolean` + 退出码 1，把**依赖该生成物的每一个作业**（native / wasm / 各 toggles /
+# install / coverage / asan）一起拖红——2026-09-23 CI run 35839746160 实测即是此形：Windows / macOS /
+# 装了 clang-format-22 的 format 作业全绿，其余 ubuntu 与 Emscripten 作业全红，且都红在这一条上。
+# 判不到可用版本时**告警跳过而不中断构建**：仓库内已提交的 gen.h 本就是格式化后的形态，
+# 缺工具只是「本次生成未折行」，format 门禁会抓到真漂移，不该由它决定编译成败。
+aurora_find_clang_format(_gen_error_codes_cf)
 set(_gen_error_codes_fmt_cmds "")
-if (AURORA_CLANG_FORMAT_EXE)
+if (_gen_error_codes_cf)
     set(_gen_error_codes_fmt_cmds
-            COMMAND ${AURORA_CLANG_FORMAT_EXE} -style=file -i
+            COMMAND "${_gen_error_codes_cf}" -style=file -i
             "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h")
 else ()
-    aurora_warn("clang-format not found on PATH: generate_error_codes will emit a non-conforming "
-                "error_codes.gen.h (format-check will flag it).")
+    aurora_warn("no clang-format on PATH can parse the repo .clang-format (candidates: "
+                "${AURORA_CLANG_FORMAT_CANDIDATES}): generate_error_codes will emit an unfolded "
+                "error_codes.gen.h. Install clang-format >= 20, or the format-check gate will flag it.")
 endif ()
 add_custom_command(
         OUTPUT ${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h
