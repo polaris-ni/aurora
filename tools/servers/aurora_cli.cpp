@@ -20,7 +20,9 @@
 //
 // Exit codes: 0 on success, 1 on validation failure, 2 on usage error.
 
+#include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -73,15 +75,32 @@ struct CliOptions {
     std::string file;
 };
 
+/// @brief 把一个命令行十进制参数解析为 int。
+///
+/// 不能直接把 `std::strtol` 的返回值赋给 int：它返回 `long`，而在 LP64（Linux / macOS）上 `long`
+/// 是 64 位，超出 int 区间时的窄化是**实现定义**的（`-w 5000000000` 会绕回成别的数）；Windows 上
+/// `long` 与 `int` 同宽，所以本机看不出任何异常。这里显式夹到 int 两端——越界给出边界值，
+/// 让下游的尺寸校验面对的仍是一个说得通的数，而不是回绕后的假小值。
+[[nodiscard]] auto parse_int_arg(const char *text) -> int {
+    const long raw = std::strtol(text, nullptr, 10);
+    if (raw > static_cast<long>(std::numeric_limits<int>::max())) {
+        return std::numeric_limits<int>::max();
+    }
+    if (raw < static_cast<long>(std::numeric_limits<int>::min())) {
+        return std::numeric_limits<int>::min();
+    }
+    return static_cast<int>(raw);
+}
+
 // NOLINTBEGIN(*-pro-bounds-pointer-arithmetic)
 [[nodiscard]] auto parse_options(int argc, char *argv[], int start) -> CliOptions {
     CliOptions opts;
     for (int i = start; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "-w" && i + 1 < argc) {
-            opts.width = std::strtol(argv[++i], nullptr, 10);
+            opts.width = parse_int_arg(argv[++i]);
         } else if (arg == "-h" && i + 1 < argc) {
-            opts.height = std::strtol(argv[++i], nullptr, 10);
+            opts.height = parse_int_arg(argv[++i]);
         } else if (arg == "-o" && i + 1 < argc) {
             opts.output = argv[++i];
         } else if (arg == "--style" && i + 1 < argc) {

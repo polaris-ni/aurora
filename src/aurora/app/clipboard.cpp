@@ -75,6 +75,10 @@ struct ScopedSigpipeIgnore {
     }
     ScopedSigpipeIgnore(const ScopedSigpipeIgnore &) = delete;
     ScopedSigpipeIgnore &operator=(const ScopedSigpipeIgnore &) = delete;
+    // 移动同样禁掉：这个守卫的语义就是「构造时接管信号处置、析构时还原」，搬到别处即还原时机错位。
+    // 上一行删掉拷贝后移动本就不会隐式生成，此处补齐是把它写进声明（五法则自查要求显式表态）。
+    ScopedSigpipeIgnore(ScopedSigpipeIgnore &&) = delete;
+    ScopedSigpipeIgnore &operator=(ScopedSigpipeIgnore &&) = delete;
 };
 
 /// @brief 执行命令并向其 stdin 写入数据（用于 xclip/pbcopy 写入剪贴板）。

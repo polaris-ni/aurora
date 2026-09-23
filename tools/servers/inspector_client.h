@@ -141,7 +141,9 @@ inline constexpr std::size_t AURORA_MAX_RESPONSE_BODY = std::size_t{4} * 1024 * 
 #else
     timeval io_timeout{};
     io_timeout.tv_sec = io_timeout_ms / 1000;
-    io_timeout.tv_usec = (io_timeout_ms % 1000) * 1000;
+    // 微秒字段（`__suseconds_t`，POSIX 上是 long）：先把操作数抬到该字段类型再乘，别让乘法在 int
+    // 域里算完再隐式拓宽——Windows 侧走上面 DWORD 分支，这条只在 Linux / macOS 上编译。
+    io_timeout.tv_usec = static_cast<decltype(io_timeout.tv_usec)>(io_timeout_ms % 1000) * 1000;
 #endif
     // BSD socket 边界：`optval` 形参在 POSIX 是 `const void *`、Winsock 是 `const char *`，
     // 二者都只认按字节传参，取超时变量的地址按平台形态过界是唯一方式。

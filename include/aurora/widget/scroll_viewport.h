@@ -138,13 +138,17 @@ struct ScrollViewport {
                 break;
             case ScrollSnapAlignment::Center: {
                 // 条目 k 覆盖 [k·ext, (k+1)·ext)，其中心贴视口中心：offset = k·ext + ext/2 − viewport/2
-                const double k = std::lround((offset + (viewport_h / 2.0F) - (ext / 2.0F)) / ext);
+                // 取整用 round 而非 lround：后者返回 long，在 LP64（Linux / macOS）上宽于 double 的
+                // 53 位尾数，赋给 double 属真窄化（Windows 上 long 与 int 同宽才看不出来）。两者同为
+                // 「半数远离零取整」，此处 k 只当整数条目号用，数值一字不动。
+                const double k = std::round((offset + (viewport_h / 2.0F) - (ext / 2.0F)) / ext);
                 candidate = static_cast<float>(k * ext) + (ext / 2.0F) - (viewport_h / 2.0F);
                 break;
             }
             case ScrollSnapAlignment::End: {
                 // 条目 k 的后沿 (k+1)·ext 贴视口后沿：offset = (k+1)·ext − viewport
-                const double k = std::lround((offset + viewport_h) / ext);
+                // 同上：round 而非 lround，避免 long → double 的 LP64 窄化。
+                const double k = std::round((offset + viewport_h) / ext);
                 candidate = static_cast<float>(k * ext) - viewport_h;
                 break;
             }
