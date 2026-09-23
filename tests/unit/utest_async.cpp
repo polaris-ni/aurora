@@ -266,6 +266,24 @@ AURORA_TEST_CASE(timeout_guard_expire_is_noop_once_delivered) {
     AURORA_TEST_CHECK_TRUE(state->result->ok());  // 已投递的胜利结果不被超时改写
 }
 
+AURORA_TEST_CASE(then_replays_result_delivered_before_callback) {
+    // `then()` 的补投分支：结果在 `on_done` 仍为空时就已 delivered，之后注册的回调必须拿到
+    // 那次结果，否则永久悬空。用「超时先于 then 到期」造出该状态（正是它的现实来源之一），
+    // 不依赖线程池时序，故无 pthreads 构建同样真跑。取 `Result<void>` 实例化：存储层的
+    // `async_remove` 走的就是这一形态。
+    auto state = std::make_shared<detail::AsyncState<void>>();
+    detail::expire_timeout(state);  // delivered 置位、结果写入 async-timeout、当时无回调
+    Task<void> task{state};
+    std::atomic<int> calls{0};
+    task.then([&calls](const Result<void> &r) -> void {
+        calls.fetch_add(1, std::memory_order_acq_rel);
+        // 未装主线程投递器 ⇒ post_to_main 同线程直调，断言在本用例线程执行。
+        AURORA_TEST_CHECK_FALSE(r.ok());
+        AURORA_TEST_CHECK_STREQ(r.error().code, "async-timeout");
+    });
+    AURORA_TEST_CHECK_EQ(calls.load(std::memory_order_acquire), 1);  // 补投恰一次
+}
+
 AURORA_TEST_CASE(deferred_with_timeout_fires_at_frame_tail_sweep) {
 #if AURORA_CAP_THREADS == 0
     // 无 pthreads 构建（浏览器 / 裸 Node）：任务只入队，看守也不能是睡在任务里的线程，

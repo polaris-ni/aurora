@@ -235,22 +235,26 @@ class Task {
 
     /// @brief 注册完成回调（结果经主线程投递器回调）。返回自身以便链式。
     auto then(DoneFn cb) -> Task & {
-        std::function<void(const Result<T> &)> replay_cb;
-        std::optional<Result<T>> replay_r;
-        bool has_replay = false;
+        // 待投递闭包：空 = 无需补投。用 `std::function<void()>` 而非「回调 + std::optional<结果>」
+        // 两件局部量，是为了让结果的拷贝发生在锁内、且不再经 optional→optional 的那次中转——
+        // libstdc++ 的 `_Optional_payload`（union 载荷 + 独立 engaged 标志）会让路径敏感的
+        // clang-analyzer 在锁内那次赋值处丢失对 payload 的跟踪，随后 `std::move(*replay_r)`
+        // 即被判成「隐式构造里给 ok_ 赋了未初始化值」（Linux 口径 unique_findings 里的一条；
+        // Windows 侧因 MSVC STL 的实现形态不同而不可见）。补投值本就只在这一处用，闭包是它
+        // 最短的载体。
+        std::function<void()> replay;
         {
             std::scoped_lock<std::mutex> lock(state_->mutex);
             state_->on_done = std::move(cb);
             // 若结果此前已 deliver（成功/超时/取消）但当时 on_done 为空，则补投到新回调。
             if (state_->delivered && !state_->cancelled && state_->result.has_value()) {
-                replay_cb = state_->on_done;
-                replay_r = state_->result;
-                has_replay = true;
+                DoneFn to_call = state_->on_done;
+                Result<T> r = *state_->result;  // 锁内取副本：出锁后 state_ 可被其他线程继续改写
+                replay = [to_call, r]() mutable -> void { to_call(r); };
             }
         }
-        if (has_replay) {
-            auto r = std::move(*replay_r);
-            detail::post_to_main([replay_cb, r]() mutable -> void { replay_cb(r); });
+        if (replay) {
+            detail::post_to_main(std::move(replay));
         } else {
             try_deliver();
         }
