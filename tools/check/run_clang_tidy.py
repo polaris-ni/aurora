@@ -31,6 +31,18 @@ Exit codes:
        a coverage collapse rather than a clean bill — hence it is a hard failure, not a pass)
     2  usage / environment error (no compile database, clang-tidy missing, broken rewrite)
 
+Why `--shard=i/n` (分片跑法，CI 门禁用它):
+  单遍 clang-tidy 在 4 核 CI runner 上实测 498 TU / 5172s（86 分钟），而 native 门禁要跑
+  DEBUG=OFF 与 DEBUG=ON 两遍——串行就是 3 小时量级，runner 侧再快也快不过核数。分片把同一份
+  已排序 TU 清单按 `tus[i::n]` 切成 n 份、每份一个 job 并跑，墙钟随 n 近线性下降而**总核时不变**
+  （门禁买的是覆盖面，不是把活儿砍掉）。
+  ⚠️ 切分必须在 `sorted()` 之后做，且分片号只进 JSON/日志、不参与任何筛选语义：清单一旦随
+  新增文件移位，「这轮少了哪几条」就无从比对。两两不相交的是 **TU 清单**，不是告警清单——头文件
+  告警会在每个包含它的 TU 里重复上报，故同一条可能出现在多个分片的 `lint-findings.json` 里；
+  聚合时并联各片 `findings` 后须再按 (文件, 行, check) 去重一次，片内计数也绝不能当全量读。
+  判「全绿」必须 n 个分片全绿，任一片红即整门红——缺片等于缺覆盖面。
+  `--print-tus` 只打印本片 TU 清单便退出，用于离线核验上面那条前提（各片两两不相交、并集 = 全量）。
+
 Measuring a check that `.clang-tidy` currently excludes (取数用，不是门禁跑法):
     复制 .clang-tidy、删掉对应的 `  -<check>,` 一行，再 `--config <副本>` 全量跑。读结果前记两点：
     ① 输出的条数是**净新增**——已写 `NOLINT(<check>)` 的点位被 clang-tidy 自行消化、不进 JSON，
@@ -280,6 +292,29 @@ def load_tus(compile_db: str, include: re.Pattern,
     return sorted(out)
 
 
+def parse_shard(spec: str) -> tuple[int, int]:
+    """把 `--shard` 的 `i/n` 解析成 (片号, 片数)，非法即 argparse 报错退出。
+
+    参数写错的后果是「某片 TU 谁都没跑」，而缺片在门禁日志里长得和「都跑过且干净」一样，
+    故此处宁可在解析阶段硬失败，也不允许 i>=n 或 n<1 静默通过。
+    """
+    def fail(msg: str) -> None:
+        raise argparse.ArgumentTypeError(f"--shard expects '<index>/<total>': {msg}")
+
+    parts = spec.split("/")
+    if len(parts) != 2:
+        fail(f"got {spec!r}")
+    try:
+        idx, total = (int(p) for p in parts)
+    except ValueError:
+        fail(f"non-integer in {spec!r}")
+    if total < 1:
+        fail(f"total must be >= 1, got {total}")
+    if not 0 <= idx < total:
+        fail(f"index must be in [0, {total}), got {idx}")
+    return idx, total
+
+
 def is_auto_generated(path: str) -> bool:
     """判断源文件是否为自动生成（首部若干行标注 AUTO-GENERATED）。
 
@@ -327,6 +362,11 @@ def main() -> int:
                          "使浏览器专属 TU 与 #ifdef AURORA_BACKEND_WASM 分支进入覆盖面")
     ap.add_argument("--jobs", type=int, default=0,
                     help="parallel clang-tidy processes (0 = CPU count)")
+    ap.add_argument("--shard", type=parse_shard, default=None, metavar="I/N",
+                    help="只跑第 I 片（共 N 片）：对已排序的 TU 清单取 [I::N]。"
+                         "CI 门禁用它把一遍的全量 TU 并到多个 job 上，缩短墙钟而不减覆盖面")
+    ap.add_argument("--print-tus", action="store_true",
+                    help="打印本片选中的 TU 清单后退出 0（核验分片互斥性与并集完整性，不跑 tidy）")
     ap.add_argument("--checks", default=None,
                     help="override the Checks: list from .clang-tidy")
     ap.add_argument("--config", default=None,
@@ -349,7 +389,9 @@ def main() -> int:
         print(f"error: no compile_commands.json in {a.build_dir!r}.\n"
               f"Configure with -DCMAKE_EXPORT_COMPILE_COMMANDS=ON.", file=sys.stderr)
         return 2
-    if which("clang-tidy") is None:
+    if which("clang-tidy") is None and not a.print_tus:
+        # `--print-tus` 只求清单，不动 tidy：核验分片切分时机器上未必装了工具链，
+        # 而这类核验恰恰需要在门禁同源的编译库上做。
         print("error: clang-tidy not found on PATH.", file=sys.stderr)
         return 2
 
@@ -370,6 +412,22 @@ def main() -> int:
     if not tus:
         print("error: no translation units selected.", file=sys.stderr)
         return 2
+    shard_desc = ""
+    tu_total = len(tus)  # 切分前的全量条数：分片产物据此自证「这片是全量的哪一份」
+    if a.shard:
+        idx, total = a.shard
+        # 切分只在 sorted 清单上做一次 `tus[idx::total]`：顺序唯一确定「谁归哪片」，故同一份
+        # 编译库上重复取片稳定、各片两两不相交、并集恰为全量。切片数取模而非按目录分组，是为了
+        # 让相邻同目录（往往同样重）的 TU 摊到不同片上，而不是全压在同一片里。
+        tus = tus[idx::total]
+        shard_desc = f" [shard {idx}/{total}]"
+        # 空片是环境错误不是「本片干净」：CI 矩阵若把片数调到超过 TU 数，缺片必须红。
+        if not tus:
+            print(f"error: shard {idx}/{total} selected 0 of the translation units.", file=sys.stderr)
+            return 2
+    if a.print_tus:
+        print("\n".join(tus))
+        return 0
 
     jobs = a.jobs or (os.cpu_count() or 4)
     # 门禁只对本仓库源码负责。`.clang-tidy` 的 HeaderFilterRegex 能滤掉绝大多数头文件告警，
@@ -377,9 +435,14 @@ def main() -> int:
     # 绕过该过滤——观测到 MSVC STL 的 `xfilesystem_abi.h` 即属此类。系统头既不可修、又会随
     # 工具链升级漂移，故在计数前按「是否位于仓库根之下」再过滤一次。
     repo_root = norm(os.path.abspath(".")) + "/"
-    print(f"[lint] clang-tidy over {len(tus)} translation units, {jobs} parallel{mode}")
+    print(f"[lint] clang-tidy over {len(tus)} translation units, {jobs} parallel{mode}{shard_desc}")
 
     findings: dict[tuple[str, str, str], str] = {}
+    # 每条告警的**首发 TU**：头文件告警会在每个包含它的 TU 里重复上报，去重后只剩一条，
+    # 于是「谁把它拉进分析的」这个判因必需的信息就丢了——`clang-analyzer` 一类只有沿某条
+    # 具体调用路径才会命中的检查尤其如此（复现只能从某个 TU 起手）。ex.map 按输入顺序产出，
+    # 而输入是 sorted() 的 TU 清单，故「首发」= 报出它的最小路径 TU，跨轮次确定可比。
+    found_by: dict[tuple[str, str, str], str] = {}
     by_area: Counter[str] = Counter()
     timeouts: list[str] = []
     # 编译失败（前端 error，无 [check] 标签）单独记账：这类 TU 一条告警都不会产出，
@@ -408,6 +471,8 @@ def main() -> int:
                     continue  # 仓库外（系统头 / 工具链头）诊断不计入门禁
                 # keyed by (file, line, check): a header diagnostic is re-emitted in
                 # every including TU, so later occurrences just refresh the message.
+                if (np_, line_no, check) not in found_by:
+                    found_by[(np_, line_no, check)] = norm(tu)
                 findings[(np_, line_no, check)] = (sev, msg)
                 try:
                     rel = os.path.relpath(np_).replace("\\", "/")
@@ -450,12 +515,17 @@ def main() -> int:
 
     if a.json_out:
         payload = {
+            # 分片跑法下这份 JSON 只是**其中一片**：tu_count / unique_findings 都是片内计数，
+            # 直接当全量读会低估。shard 字段把口径写进产物，聚合脚本据此判断「n 片齐了没」。
+            "shard": list(a.shard) if a.shard else None,
             "tu_count": len(tus),
+            "tu_total": tu_total,
             "unique_findings": len(findings),
             "broken_tus": sorted([[f, m] for f, m in broken.items()]),
             "by_check": by_check.most_common(),
             "by_file": by_file.most_common(),
-            "findings": sorted([list(k) + [v[0], v[1]] for k, v in findings.items()]),
+            # 每条 = [文件, 行, check, severity, 消息, 首发 TU]
+            "findings": sorted([list(k) + [v[0], v[1], found_by[k]] for k, v in findings.items()]),
         }
         with open(a.json_out, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=1)

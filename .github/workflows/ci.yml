@@ -16,20 +16,30 @@
 #   4. asan        — AURORA_ENABLE_ASAN=ON（AddressSanitizer + UBSan）跑全量 ctest。
 #   5. coverage    — AURORA_ENABLE_COVERAGE=ON 的 `coverage` 聚合目标（内含 ctest + gcov 摘要）。
 #   6. wasm        — emcmake + AURORA_BACKEND_WASM=ON，构建库与测试 runner 并跑 ctest
-#                    （Emscripten 无线程/子进程的能力用例以 SKIP 计入，见 tests/framework/assertions.h）；
-#                    并跑**浏览器口径 clang-tidy**（`lint` 目标在 Emscripten 配置下自动加
-#                    --emscripten，见 job 8 与 BUILD_OPTIONS.md §4.5）——这是 EMSCRIPTEN 门后
-#                    那批 TU 唯一的静态检查面；与 job 8 同为**必过**门禁，清单仍作 artifact 落盘。
+#                    （Emscripten 无线程/子进程的能力用例以 SKIP 计入，见 tests/framework/assertions.h）。
+#                    浏览器口径 clang-tidy 原本挂在末步，2026-09-23 拆到 8w（单遍 69.7 分钟，
+#                    占本作业 79.4 分钟的 88%，卡着整个 run 的墙钟）。
 #  7. install     — cmake --install + 工作流内联最小消费端端到端验证
 #                    （find_package(Aurora) + 静态链接 + feature 宏导出一致性）。
-#  8. lint        — clang-tidy 双 Pass（DEBUG ON / OFF 各一份编译数据库，去重后统计）；
-#                    纯静态分析，仅 ubuntu-latest 单跑（与平台无关，且 windows/macos runner 默认无 clang-tidy）。
-#                    依赖 AuroraLint.cmake 提供的 `lint` 目标（configure 时 clang-tidy 须在 PATH）。
+#  8. lint        — clang-tidy 门禁，矩阵 = pass(DEBUG OFF / ON 两份编译数据库) × shard(TU 清单
+#                    分片，现 4 片) 共 8 个作业，去重后 0 finding 才通过。纯静态分析，仅
+#                    ubuntu-latest 单跑（与平台无关，且 windows/macos runner 默认无 clang-tidy）。
+#                    依赖 AuroraLint.cmake 提供的 `lint` 目标与 AURORA_LINT_SHARD 分片开关。
+#                    为什么摊成矩阵：runner 只有 4 vCPU，单遍 498 TU 实测 86 分钟，两遍串跑
+#                    3 小时量级、必超时；分片只改排布不减覆盖面，总核时不变而墙钟 ~25 分钟。
 #                    现为 **必过**（2026-09-23 收回 report-only：三份清单的 unique_findings 已各自
 #                    量到 0）；findings artifact 照旧上传——「不报」与「跑到了」是两件事，判因要看清单。
 #                    该门禁为何一度 report-only、以及本机 0 与 CI 数百条为何不矛盾，见 job 8 顶部注释。
-#                    ⚠️ 本 job 的口径是 **native**：EMSCRIPTEN 门后的 TU 不在这两份编译库里，
-#                    其静态检查由 job 6（wasm）在同一份 wasm 编译库上跑浏览器口径 lint 补齐。
+#                    ⚠️ 判据是「8 个作业全绿」：任一片红即整门红，缺片等于缺覆盖面。
+#                    ⚠️ 本矩阵的口径是 **native**：EMSCRIPTEN 门后的 TU 不在这两份编译库里，
+#                    其静态检查由 8w 在同一份 wasm 编译库上跑浏览器口径 lint 补齐。
+#  8w. lint-wasm  — 浏览器口径 clang-tidy（`lint` 目标在 Emscripten 配置下自动加 --emscripten，
+#                    见 job 8 与 BUILD_OPTIONS.md §4.5）：4 个分片作业，只 configure 不构建。
+#                    这是 EMSCRIPTEN 门后那批 TU 唯一的静态检查面，与 job 8 同为**必过**门禁，
+#                    清单仍逐片作 artifact 落盘。
+#   9. fmt         — clang-format-22 排版门禁（`format-check` 聚合目标，任一文件与
+#                    `.clang-format` 有差异即红）。版本同样钉 22：不同 clang 大版本的格式化规则
+#                    会漂移，本机与 CI 必须量同一套。
 #
 # 编译缓存（ccache-action）：core（Linux/macOS/MinGW）、backends（Linux/macOS）、
 #   toggles、asan、coverage、install 各 job 接入，key 按 job/矩阵名分桶；
@@ -375,9 +385,9 @@ jobs:
   wasm:
     name: wasm (emscripten)
     runs-on: ubuntu-latest
-    # 120 → 180：本 job 末尾新增了浏览器口径 lint（本机 16 并行实测 13 min / 503 TU，
-    # runner 只有 4 vCPU ⇒ 按核数线性外推约 50 min），加上 emsdk 全量构建与 ctest 需留余量。
-    timeout-minutes: 180
+    # 曾为浏览器口径 lint 从 120 抬到 180；那道 lint 现已拆到作业 8w 分片跑（单遍 69.7 分钟，
+    # 占本作业 79.4 分钟里的绝大部分），本作业回到「configure + 构建 + ctest」，120 分钟有余。
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
 
@@ -385,19 +395,6 @@ jobs:
         uses: emscripten-core/setup-emsdk@v16
         with:
           version: latest
-
-      # ⚠️ 安装必须在 Configure **之前**：AuroraLint.cmake 在 configure 阶段 find_program(clang-tidy)，
-      #    找不到就直接 return——`lint` 目标根本不会被定义，届时本 job 末尾的构建只会报
-      #    "no rule to make target 'lint'"。与 job 8 同款钉版本 22：不同 clang 大版本的检查集会
-      #    漂移，口径必须可比。（安装块与 job 8 重复——GitHub Actions 的 workflow 不支持 YAML 锚点复用。）
-      - name: Install clang-tidy-22
-        run: |
-          sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
-          # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
-          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
-          sudo apt-get update -y
-          sudo apt-get install -y clang-tidy-22
-          sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
 
       - name: Configure (emcmake)
         run: emcmake cmake -S . -B build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF
@@ -409,23 +406,9 @@ jobs:
       - name: Test (ctest)
         run: ctest --test-dir build-wasm --output-on-failure -j"$(nproc)"
 
-      # 浏览器口径的 clang-tidy：native lint job（job 8）看不到 `EMSCRIPTEN` 门后的 TU——
-      # wasm_* 实现、POSIX 派发分支、Web Audio 后端与 wasm 探针都不在那两份编译库里，
-      # lint job 绿灯不构成这些代码被检查过的证据。AuroraLint 在 Emscripten 配置下给 `lint`
-      # 目标自动附加 --emscripten（先把 em++ 写的编译库重写成 native clang-tidy 可消费的
-      # 形态：换三元组、指 sysroot、弃 PCH），故这里直接复用本次 configure 的产物。
-      # 必过（2026-09-23 收回 report-only，条件见 job 8 顶部注释）。清单仍必须作为 artifact 落盘——
-      # 本作业首次真检查 420 个 TU 即放出 470 条，「不报」与「跑到了」是两件事，判因靠清单。
-      - name: Lint (emscripten db)
-        run: cmake --build build-wasm --target lint
-
-      - name: Upload tidy findings (emscripten db)
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: tidy-findings-wasm
-          path: build-wasm/lint-findings.json
-          if-no-files-found: warn
+      # 浏览器口径的 clang-tidy **不在本作业**：见作业 8w。留在这里的理由写下来免得有人再搬回——
+      # 本作业要 emsdk 全量构建 + ctest，lint 单遍又是 70 分钟量级，两件事的失败原因毫无关系，
+      # 合并只会让「测试红」与「排版红」共用一个 3 小时墙钟。拆出去后各片只 configure 不构建。
 
   # ---------------------------------------------------------------------------
   # 7. 安装 + find_package 消费端端到端验证
@@ -502,19 +485,44 @@ jobs:
   # 双 Pass：分别强制 -DAURORA_ENABLE_DEBUG=OFF / =ON，各自独立编译数据库，
   # 以覆盖 #if（debug-ON）与 #else（debug-OFF）两分支——
   # AURORA_ENABLE_DEBUG=AUTO 是 generator expression，单配置只分析一分支，门禁天然盲一半。
+  #
+  # 为什么要摊成矩阵（2026-09-23）：这两遍原本在**同一个 job 里串跑**，而 runner 只有 4 vCPU——
+  # 单遍实测 498 TU / 5172s = 86 分钟（run 35844126045 的 86.9 分钟只跑完 DEBUG=OFF 那遍），
+  # 两遍串跑就是 3 小时量级，`timeout-minutes: 240` 根本不够，红灯是必然、不是偶发。
+  # runner 侧的并行度早已开满核数，所以**唯一还能动的量是把 TU 分到多个作业**：
+  # pass(2) × shard(4) = 8 个作业，每片约 125 TU ≈ 22 分钟，整门墙钟 86 → ~25 分钟。
+  # ⚠️ 分片只改排布、不减覆盖面：总核时与原来一模一样（该跑的 TU 一个不少）。
+  # ⚠️ 判据随矩阵改写为「8 个作业全绿」：任一片红即整门红；`fail-fast: false` 让其余片继续跑完，
+  # 好让一次 push 就看到整张告警面，而不是修一片再看一片。缺片（作业被跳过或没配出来）等于
+  # 缺覆盖面，故每片的 lint-findings.json 自带 `shard` / `tu_total` 字段供聚合核对。
+  # 改片数须同时动两处：下面的 `shard: [0, 1, 2, 3]` 与 `total: [4]`（矩阵表达式取不到某维度
+  # 的取值列表，job name 里又用不了 `env`，只能把总数单列成一个取值维度当引用点）。
+  # 两处不一致的后果不对称，都响：列表比 total 长 → 越界片在 configure 期 FATAL_ERROR；
+  # 列表比 total 短 → 那几片**没人跑**，门禁只剩部分覆盖面。后者只能靠本注释与每片 JSON 里的
+  # `tu_total` 自述字段核对，加聚合作业不值当（多一个作业、多一处会红的无关依赖）。
   # ---------------------------------------------------------------------------
   lint:
-    name: clang-tidy (dual-pass)
+    name: clang-tidy (DEBUG=${{ matrix.pass.debug }}, shard ${{ matrix.shard }}/${{ matrix.total }})
     runs-on: ubuntu-latest
-    # 90 → 240：本 job 实打实跑两遍（单遍在 runner 上实测 elapsed 3515s）。清零前 DEBUG=ON 那遍
-    # 会被前一遍失败短路，240 是按「两遍都跑满」给的余量；清零后这个余量仍是必要的（末轮 TU 编译
-    # 失败即整遍红，两遍串跑就是 2 小时量级）。
-    timeout-minutes: 240
+    # 240 → 40：每片 ~125 TU ≈ 22 分钟 tidy，加 apt 安装与 configure ≈ 3 分钟；40 分钟是两倍余量。
+    # 余量必须留：本轮 TU 编译失败即整片红，慢起来没有上限。
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        pass:
+          - label: debug-off
+            debug: "OFF"
+          - label: debug-on
+            debug: "ON"
+        shard: [0, 1, 2, 3]
+        # 单值维度：只为给 `--shard=i/n` 的 n 一个 yaml 内的引用点（见上方注释）。
+        total: [4]
     steps:
       - uses: actions/checkout@v7
 
-      # ── 本 job 为**必过**门禁（2026-09-23 收回此前的 report-only）────────────────────
-      # 收回条件已满足：三份清单（本作业 DEBUG=OFF / DEBUG=ON 两遍 + job 6 浏览器口径一遍）的
+      # ── 本作业为**必过**门禁（2026-09-23 收回此前的 report-only）────────────────────
+      # 收回条件已满足：三份清单（本矩阵 DEBUG=OFF / DEBUG=ON 两遍 + 作业 8w 浏览器口径一遍）的
       # unique_findings 均为 0。findings artifact 照旧上传——「不报」与「跑到了」是两件事。
       # 它为何一度 report-only：该门禁自引入起**从未绿过**——早期红在装不上 clang-tidy-22（apt 404），
       # 修好后红在存量告警（native 上一轮 501 条 / 当时 422 条）。一个永远红的必过位不等于
@@ -540,32 +548,85 @@ jobs:
           sudo apt-get install -y clang-tidy-22
           sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
 
-      - name: Configure (debug OFF, export compile_commands.json)
-        run: cmake -S . -B build-lint-off -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF
+      # AURORA_LINT_SHARD 只在 configure 期烧进 `lint` 目标的命令行（见 AuroraLint.cmake），
+      # 且格式非法 / 索引越界会当场 FATAL_ERROR——分片配错的症状是「某片没人跑」，必须早响。
+      - name: Configure (debug ${{ matrix.pass.debug }}, export compile_commands.json)
+        run: cmake -S . -B build-lint -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=${{ matrix.pass.debug }} -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }}
 
-      - name: Lint (debug OFF branch)
-        run: cmake --build build-lint-off --target lint
+      - name: Lint (shard ${{ matrix.shard }}/${{ matrix.total }})
+        run: cmake --build build-lint --target lint
 
-      - name: Upload tidy findings (debug OFF)
+      - name: Upload tidy findings
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: tidy-findings-debug-off
-          path: build-lint-off/lint-findings.json
+          name: tidy-findings-${{ matrix.pass.label }}-shard${{ matrix.shard }}
+          path: build-lint/lint-findings.json
           if-no-files-found: warn
 
-      - name: Configure (debug ON, export compile_commands.json)
-        run: cmake -S . -B build-lint-on -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=ON
+  # ---------------------------------------------------------------------------
+  # 8w. 浏览器口径 clang-tidy：Emscripten 编译库上的同一道门禁，同样按 TU 分片。
+  # 为什么非要有这一遍：native 门禁（作业 8）的两份编译库里根本没有 `EMSCRIPTEN` 门后的
+  # TU —— wasm_* 实现、Web Audio 后端、wasm 探针，以及各文件里 `#ifdef AURORA_BACKEND_WASM`
+  # 包住的分支都不参与分析。作业 8 全绿不构成这些代码被检查过的证据。
+  # AuroraLint 在 Emscripten 配置下自动给 `lint` 附加 --emscripten：runner 先把 em++ 写的
+  # 编译库重写成 native clang-tidy 能消费的形态（换 wasm 三元组、指 sysroot、弃 PCH、补驱动宏），
+  # 再走同一套并行 / 去重 / 汇总流程——两种口径的产物因此可比。
+  # 为什么从作业 6 拆出来（2026-09-23）：这一遍在 4 核 runner 上实测单遍 69.7 分钟，而作业 6
+  # 总共 79.4 分钟——lint 一步占了 88%，整个 workflow run 的墙钟被它卡住。拆成矩阵后
+  # 作业 6 回到 ~10 分钟，本作业每片 ~20 分钟，与作业 8 同量级、并行跑。
+  # ⚠️ 本作业**只 configure 不构建**：`lint` 目标只要 compile_commands.json + sysroot，
+  #    不链库。这与作业 8 一直以来的跑法一致，且成立的前提是仓库内所有生成物
+  #    （error_codes.gen.h / aurora_api.json）都落在源码树并已提交——若日后新增
+  #    「构建目录里生成、又被 TU include」的头，分片作业会因找不到文件而报 broken_tus，
+  #    届时要么把生成物提交进源码树，要么在本作业补一步 configure 期生成目标。
+  # ---------------------------------------------------------------------------
+  lint-wasm:
+    name: clang-tidy (wasm, shard ${{ matrix.shard }}/${{ matrix.total }})
+    runs-on: ubuntu-latest
+    # 40：单片 ~17 分钟 tidy + emsdk/apt/configure ~4 分钟，留一倍余量。
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+        # 单值维度：给 `--shard=i/n` 的 n 一个引用点（同作业 8，改片数须与 shard 列表同步）。
+        total: [4]
+    steps:
+      - uses: actions/checkout@v7
 
-      - name: Lint (debug ON branch)
-        run: cmake --build build-lint-on --target lint
+      - name: Setup Emscripten
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: latest
 
-      - name: Upload tidy findings (debug ON)
+      # ⚠️ 安装必须在 Configure **之前**：AuroraLint.cmake 在 configure 阶段 find_program(clang-tidy)，
+      #    找不到就直接 return——`lint` 目标根本不会被定义，届时构建只会报
+      #    "no rule to make target 'lint'"。与作业 8 同款钉版本 22：不同 clang 大版本的检查集会
+      #    漂移，两种口径的清单必须可比。（安装块与作业 8 重复——workflow 不支持 YAML 锚点复用。）
+      - name: Install clang-tidy-22
+        run: |
+          sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          sudo apt-get update -y
+          sudo apt-get install -y clang-tidy-22
+          sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
+
+      # configure 开关与作业 6 **逐项相同**（含 CMAKE_BUILD_TYPE=Release 与 AURORA_BUILD_TESTS=ON）：
+      # 换开关等于换覆盖面，本作业的历史清单（首轮 420 TU / 470 条）就不可比了。
+      - name: Configure (emcmake, export compile_commands.json)
+        run: emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }}
+
+      - name: Lint (shard ${{ matrix.shard }}/${{ matrix.total }})
+        run: cmake --build build-wasm-lint --target lint
+
+      - name: Upload tidy findings
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: tidy-findings-debug-on
-          path: build-lint-on/lint-findings.json
+          name: tidy-findings-wasm-shard${{ matrix.shard }}
+          path: build-wasm-lint/lint-findings.json
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------

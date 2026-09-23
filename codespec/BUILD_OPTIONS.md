@@ -36,7 +36,7 @@
 | `cmake/AuroraTests.cmake` | `AURORA_BUILD_TESTS` 注册式 runner（GLOB `tests/*.cpp`、`tests/unit/*.cpp` 与 `tests/integration/*.cpp` → 单一 `aurora_test_runner`，`AURORA_TEST()` 自注册） |
 | `cmake/AuroraInstrumentation.cmake` | `AURORA_ENABLE_COVERAGE` / `AURORA_ENABLE_ASAN` / `AURORA_ENABLE_PROFILING` / `AURORA_ENABLE_TRACING` / `AURORA_ENABLE_DEBUG` / `AURORA_ENABLE_TEST_HOOKS`（须在全部目标定义之后 include） |
 | `cmake/AuroraInstall.cmake` | 安装 + `find_package(Aurora)` 导出（须在后端开关之后 include） |
-| `cmake/AuroraLint.cmake` | `AURORA_ENABLE_CLANG_TIDY`（`lint` / `lint-fix` 聚合目标，经 `tools/check/run_clang_tidy.py` 并行 lint 非 third_party 翻译单元；须在全部目标定义之后 include） |
+| `cmake/AuroraLint.cmake` | `AURORA_ENABLE_CLANG_TIDY`（`lint` / `lint-fix` 聚合目标，经 `tools/check/run_clang_tidy.py` 并行 lint 非 third_party 翻译单元，另可按 `AURORA_LINT_SHARD` 分片；须在全部目标定义之后 include） |
 | `cmake/AuroraFormat.cmake` | `AURORA_ENABLE_CLANG_FORMAT`（`format` / `format-check` 聚合目标，经 `tools/check/run_clang_format.py` 并行校验 / 重写非 third_party 源文件；与目标定义无关，放最后 include 亦可） |
 | `cmake/AuroraCheckTestRegistry.cmake` | **遗留模块**：当前无 CMake `include()` 引用（`registry_integrity` 已改由 `AuroraTests.cmake` 直接注册 python 脚本 `check_test_registry.py`）；保留仅供手工 / 历史参考，不计入常规构建 |
 
@@ -282,6 +282,7 @@ cmake --build build
 | `AURORA_ENABLE_LLD` | `ON` | 链接器选择（lld 加速静态链接） | GNU/Clang 下 `find_program(ld.lld)` + `check_linker_flag` 探测通过则全局注入 `-fuse-ld=lld -B<lld 目录>`；失败静默回退 GNU ld；**不注入 feature 宏** |
 | `AURORA_ENABLE_WASM_PTHREADS` | `OFF` | WASM 真并行（`-pthread`）：`__EMSCRIPTEN_PTHREADS__` 与 `AURORA_CAP_THREADS` 同翻 1，`ThreadPool` 从「任务只入队、帧尾 `pump()` 排空」回到普通 worker 池。**代价在宿主页面**：产物要求 SharedArrayBuffer，须跨源隔离（`COOP: same-origin` + `COEP: require-corp`）方可实例化（裸 Node 无此约束），非 Emscripten 开启 FATAL。故默认关闭——无隔离头的站点宁用单线程 deferred 排空也不换回打不开的产物 | 全局追加 `-pthread` 到 `CMAKE_C_FLAGS` / `CMAKE_CXX_FLAGS` / `CMAKE_EXE_LINKER_FLAGS`（**编译 + 链接同参，且须先于 `add_subdirectory(third_party/*)` 的标志快照**——`-pthread` 是整个链接闭包的约束，漏掉 freetype/harfbuzz 的 `.o` 时链接报 `wasm-ld: --shared-memory is disallowed by harfbuzz.cc.o`，实测；故本体位于根 `CMakeLists.txt` 而非 `AuroraBackends.cmake`）。**不注入 feature 宏**，不出现在 `debug::feature_flags` 镜像，运行期查询用 `ThreadPool::default_pool().is_deferred()` |
 | `AURORA_ENABLE_CLANG_TIDY` | `ON` | Clang-Tidy 门禁（`lint` / `lint-fix` 聚合目标） | 需 `clang-tidy` 与 python 在 PATH；未开启时自动打开 `CMAKE_EXPORT_COMPILE_COMMANDS`。经 `tools/check/run_clang_tidy.py` 并行 lint **非 third_party** 翻译单元并按 `(file, line, check)` 去重；详见 §4.5 |
+| `AURORA_LINT_SHARD` | 空（= 一遍跑全量） | Clang-Tidy 门禁的 TU 分片（非开关、形如 `<i>/<n>` 的字符串缓存变量，与 `AURORA_TEST_SHARDS` 同族）：`lint` / `lint-fix` 只跑已排序 TU 清单的第 i 片（`tus[i::n]`），供 CI 把一遍摊成多个作业并跑 | 校验在 configure 期：格式非法或 `i >= n` 直接 `FATAL_ERROR`；片内选中 0 个 TU 由 runner 以退出码 2 拒跑。只改排布不改覆盖面，也不改「任一片红即整门红」的判据；详见 §4.5「墙钟与分片」 |
 | `AURORA_ENABLE_CLANG_FORMAT` | `ON` | clang-format 门禁（`format` / `format-check` 聚合目标） | 需读得懂本仓 `.clang-format` 的 clang-format（≥ v20，由 `AURORA_CLANG_FORMAT_CANDIDATES` 试跑探测）与 python 在 PATH。经 `tools/check/run_clang_format.py` 并行处理 **非 third_party** 源文件（配置源为仓库根 `.clang-format`）；`--fix` 即 `format`，默认只读校验即 `format-check`；详见 §4.7 |
 | `AURORA_ENABLE_IMAGE_JPEG` | `OFF` | JPEG 图像解码能力（libjpeg-turbo 源码构建） | 注入 `AURORA_ENABLE_IMAGE_JPEG`（仅库内部，不 PUBLIC 传播）；详见 §4.6 |
 | `AURORA_ENABLE_IMAGE_WEBP` | `OFF` | WebP 图像解码能力（libwebp 源码构建） | 注入 `AURORA_ENABLE_IMAGE_WEBP`（同上） |
@@ -407,7 +408,8 @@ cmake -S . -B build -DAURORA_LLD_DIR="<LLVM 安装根>/bin"                     
 | 配置来源 | 仓库根 `.clang-tidy`（`Checks` / `CheckOptions` / `HeaderFilterRegex`） |
 | 扫描范围 | `compile_commands.json` 中全部**非 `third_party/`** 翻译单元，另有具名排除（见下「排除名单」） |
 | 去重 | 按 `(file, line, check)` 去重——头文件诊断会在每个包含它的 TU 中重复上报，原始条数不可直接用作门禁计数 |
-| 结构化清单 | `lint` / `lint-fix` 始终把完整清单写到该构建目录的 `lint-findings.json`（`tu_count` / `unique_findings` / `broken_tus` / `by_check` / `by_file` / `findings`）：门禁 stdout 只印 top-N 文件表，尾数不在其中，判因与存量清点必须以这份 JSON 为准 |
+| 结构化清单 | `lint` / `lint-fix` 始终把完整清单写到该构建目录的 `lint-findings.json`（`shard` / `tu_count` / `tu_total` / `unique_findings` / `broken_tus` / `by_check` / `by_file` / `findings`）：门禁 stdout 只印 top-N 文件表，尾数不在其中，判因与存量清点必须以这份 JSON 为准。`findings` 每条为 `[文件, 行, check, severity, 消息, 首发 TU]`——头文件告警按 `(file, line, check)` 去重后只剩一条，「谁把它拉进分析的」这个判因起点靠第 6 位留下（`clang-analyzer` 一类只在某条具体调用路径上才命中的检查尤其需要）；`ex.map` 按 sorted 清单顺序产出，故「首发」跨轮次确定可比 |
+| 分片 | `AURORA_LINT_SHARD=<i>/<n>`（默认空 = 一遍跑全量）：把已排序的 TU 清单切成 n 份、本目录只跑第 i 份，供 CI 矩阵并跑多个作业。只改排布、不减覆盖面，也**不改判据**（任一片红即整门红）。详见下「墙钟与分片」 |
 | 依赖 | `clang-tidy`（PATH）+ python（PATH）+ `CMAKE_EXPORT_COMPILE_COMMANDS`（未开启时本模块自动打开） |
 
 为何不用 `CMAKE_CXX_CLANG_TIDY` 随构建执行：该变量必须在目标定义**之前**设置才生效，与本项目「模块在最后 include」的编排冲突；且会让每次编译额外跑一遍 clang-tidy，日常开发构建被拖慢一个数量级。
@@ -417,7 +419,12 @@ cmake --build build --target lint        # 全量 lint，有告警则失败；�
 cmake --build build --target lint-fix    # 就地应用 fix-it，随后必须人工审阅 diff
 python tools/check/run_clang_tidy.py --build-dir build --json-out findings.json  # 结构化清单
 python tools/check/run_clang_tidy.py --build-dir build --include 'src/'          # 只 lint 库代码
+python tools/check/run_clang_tidy.py --build-dir build --shard 0/4 --print-tus   # 看第 0 片跑哪些 TU（不跑 tidy）
+cmake -S . -B build-shard0 -DAURORA_LINT_SHARD=0/4 ...                           # 本目录的 lint 目标只跑第 0 片
 ```
+
+**墙钟与分片（`--shard=i/n`）**：门禁的墙钟 = TU 数 × 单 TU 分析成本 ÷ 并行度，而 CI runner 只有 4 vCPU，并行度已经开满核数——native 一遍 498 TU 实测 `elapsed 5172s`（86 分钟，run 35844126045 的 86.9 分钟连 DEBUG=ON 那遍都没跑到），两道 pass 串在一个作业里就是 3 小时量级。剩下的唯一变量是**把 TU 摊到多个作业**：`-DAURORA_LINT_SHARD=i/n` 让本目录的 `lint` 目标只跑第 i 片，CI 因此按 pass(2) × shard(4) = 8 个作业并跑，每片 ~125 TU ≈ 22 分钟，整门墙钟 86 → ~25 分钟，而**总核时分毫未变**。
+三点约束：① 切分只在 `load_tus()` 的 `sorted()` 结果上做 `tus[i::n]`，清单顺序唯一确定「谁归哪片」，同一份编译库重复取片稳定，且相邻同目录（往往同样重）的 TU 被摊到不同片上；② 分片**不减覆盖面也不改判据**——任一片红即整门红，缺片等于缺覆盖面，故格式非法 / 索引越界在 configure 期 `FATAL_ERROR`，片内选中 0 个 TU 在 runner 期以退出码 2 拒跑，两层都不许「跑到了但没活儿」被读成「跑过且干净」；③ 每片 JSON 自带 `shard` 与 `tu_total`（切分前的全量条数）自述「本片是全量的哪一份」，`--print-tus` 则只打印本片清单便退出，用来离线核验互斥性与并集完整性（本机实测：504 TU → 4 片各 126，两两不相交、并集恰等于全量）。
 
 **排除名单（脚本的 `DEFAULT_EXCLUDE`）**：`third_party/` 之外只点名一条——`tests/support/fake_gl.h`（GL 驱动桩：56 条告警里 48 条 `readability-named-parameter`、5 条指针算术。桩不读参数、签名须逐字对齐 `GLFn` 函数表，「按本仓规范改名」即失真）。逐文件点名而非目录通配：新增排除必须显式登记，杜绝整目录被静默放行。判据是「哪种手段留下的盲点小」，不是「看着像不像三方代码」——整文件排除会让该文件此后的手写代码一并脱离检查，故仅当告警类别没有更窄的豁免手段时才用它。反例已量过：`src/aurora/render/gpu/gl_core.h`（49 条）与 `src/aurora/window/detail/atspi_protocol.h`（74 条）曾进同一候选名单，但它们的告警几乎全是 `readability-identifier-naming`，而该检查有**按类别**的 `*IgnoredRegexp`（clang-tidy 22 实测：与 `EnumConstantCase` 同配时，命中正则的枚举常量不再上报，未命中的照常上报），所以这两份留在覆盖面内、由命名豁免处置。两种取舍都能复证：把 `HeaderFilterRegex` 换成分隔符无关的配置、只跑包含这三份头的 TU，桩一条也不上报（被排除），另两份分别报回 74 / 49 条（在覆盖面内）。
 
@@ -435,7 +442,7 @@ python tools/check/run_clang_tidy.py --build-dir build --include 'src/'         
 python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏览器 TU + #ifdef AURORA_BACKEND_WASM 分支
 ```
 
-两条口径各自的把关面：native 遍覆盖 host 后端与 `#else` 分支，wasm 遍覆盖 `AURORA_PLATFORM_*` 的另一侧（POSIX 派发分支、Web Audio 后端、`wasm_*` 探针）与 libc++ 差异面。CI 两侧都跑：`lint` 作业做 native 双 Pass（DEBUG ON/OFF 各一份编译库），`wasm` 作业在 ctest 之后对同一份 wasm 编译库跑 `--emscripten` 口径；二者互不替代——任一绿灯都不构成另一条通过的证据。
+两条口径各自的把关面：native 遍覆盖 host 后端与 `#else` 分支，wasm 遍覆盖 `AURORA_PLATFORM_*` 的另一侧（POSIX 派发分支、Web Audio 后端、`wasm_*` 探针）与 libc++ 差异面。CI 两条都跑，且各自是一道独立的必过位：`lint` 作业（8）做 native 双 Pass（DEBUG ON/OFF 各一份编译库），`lint-wasm` 作业（8w）对同一套 configure 产物跑 `--emscripten` 口径；二者互不替代——任一绿灯都不构成另一条通过的证据。浏览器口径原本挂在 `wasm` 作业的末步，2026-09-23 拆出：单遍实测 69.7 分钟，占该作业 79.4 分钟的 88%，整条 workflow 的墙钟被一个静态检查步骤卡住；拆成 8w 的分片矩阵后 `wasm` 作业回到 ~10 分钟（configure + 构建 + ctest），两条 lint 门禁并行同量级。
 
 ⚠️ 本机跑 native 遍还有一层与 CI 不同：门禁口径的 native 遍在 **Linux runner** 上跑，而本机在 Windows 上跑，于是 `AURORA_PLATFORM_LINUX` 独享的 `#if` 分支不进分析（`bugprone-dynamic-static-initializers` 那类「随编译目标而变的命中分支」同一根因的另一面，见 `CODING_STANDARDS.md` §5.2）。已核过其规模：库与测试里的 Linux-only 文件（x11 / wayland / wgpu 表面、atspi 桥）在 CI 默认开关下整文件即空 TU，真正只有 Linux 才分析的代码是 `clipboard.cpp` / `font_discovery.cpp` 等文件里约百行量级的平台分支。该项属**已申报的残余盲区**，CI 首跑即为其真机测量；转红时按处置阶梯清理，不回退门禁语义。
 
@@ -445,7 +452,7 @@ python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏
 
 **`HeaderFilterRegex` 的路径分隔符缺口（2026-09-22 记为「暂缓」，2026-09-23 已扩面收口）**：现值为 `(include[/\\]aurora|src[/\\]aurora|[/\\]tests[/\\]|[/\\]tools[/\\]|[/\\]examples[/\\])`，**分隔符无关**。缺口本身：旧值只认正斜杠，而编译库里的头文件路径常是「正斜杠根 + 反斜杠段」的混合形态，某一段的分隔符与正则不符，该段之后的头文件告警就被过滤掉。实测后果（扩面前）：同一份 `tests/framework` 下的头文件，收口前 native 遍报 0 条、wasm 遍报十余条（两条口径拼出的路径形态不同，穿过过滤的能力也就不同），因此**本机 native 门禁的有效覆盖面主要是主文件诊断**——本机那句「两口径 0 findings」证明的面比字面窄。缺口在 Linux runner 上不存在（路径全正斜杠）：2026-09-22 的 CI 首跑因此放出 native 422 条 / wasm 470 条，与本机 0 并不矛盾，是同一份代码在两张覆盖面下的两个数。扩面的一次性代价本机也量过：**417 条 / 64 文件**（多为同一头文件被多个 TU 重复上报），其中 `readability-identifier-naming` 163 条（global constant 76、enum constant 47）、`readability-named-parameter` 50 条。这批存量已按下面的处置阶梯逐项清到 0（改名 / `CheckOptions` 按类别豁免 / 带理由的逐点与区间式 `NOLINT`），两条口径复验各自 **0 findings**，本机与 CI 自此量的是同一张覆盖面。
 
-**CI 语义：三道 lint 均为必过门禁**（2026-09-23 收回 report-only）。`clang-tidy (dual-pass)` 作业的两遍（DEBUG OFF / ON 各一份编译库）与 `wasm` 作业的浏览器口径遍，任一 `unique_findings` 非 0 即让该作业红；三份 `lint-findings.json` 仍以 `tidy-findings-debug-off` / `tidy-findings-debug-on` / `tidy-findings-wasm` 三个产物名落盘——**「不报」与「跑到了」是两件事**，判因与回归定位都要看清单。为什么曾经 report-only：该门禁自引入起从未绿过——先红在装不上 clang-tidy-22（apt 404），修好后红在上述分隔符缺口兑现的存量；一个永远红的必过位不等于门禁，只是把红灯常态化、让每个 PR 背一个与自身无关的失败。收回条件（三份清单的 `unique_findings` 均为 0）已于本轮达成。**日后在此转红按同一阶梯清理，不得再次回退 report-only。** 存量按覆盖面代价从小到大处置：① `.clang-tidy` 的 `CheckOptions`（命名类占大头，`*IgnoredRegexp` 按类别精确豁免，不牺牲文件其余检查）；② 逐点 `NOLINT` + 原因（受 §4.5「NOLINT 纪律」与 `check_nolint_layout` 约束）；③ 整文件排除（永久盲点，只给桩/替身这类本就不受本仓风格约束的文件）。
+**CI 语义：三道 lint 均为必过门禁**（2026-09-23 收回 report-only；同日把两条 native pass 与浏览器口径那一遍都摊成分片矩阵）。三道 = `lint` 作业的 DEBUG=OFF 遍、DEBUG=ON 遍，与 `lint-wasm` 作业的浏览器口径遍；每道各 4 片，**整门绿 = 12 个作业全绿**，任一片 `unique_findings` 非 0（或有 TU 编译失败）即让该片红、进而让整门红。十二份 `lint-findings.json` 以 `tidy-findings-{debug-off,debug-on}-shard{0..3}` / `tidy-findings-wasm-shard{0..3}` 逐片落盘——**「不报」与「跑到了」是两件事**，判因与回归定位都要看清单，而分片后清单是互补的：读单片只是全量的 1/n，聚合时按 `shard` / `tu_total` 核对片数齐没齐。为什么曾经 report-only：该门禁自引入起从未绿过——先红在装不上 clang-tidy-22（apt 404），修好后红在上述分隔符缺口兑现的存量；一个永远红的必过位不等于门禁，只是把红灯常态化、让每个 PR 背一个与自身无关的失败。收回条件（三份清单的 `unique_findings` 均为 0）已于本轮达成。**日后在此转红按同一阶梯清理，不得再次回退 report-only。** 存量按覆盖面代价从小到大处置：① `.clang-tidy` 的 `CheckOptions`（命名类占大头，`*IgnoredRegexp` 按类别精确豁免，不牺牲文件其余检查）；② 逐点 `NOLINT` + 原因（受 §4.5「NOLINT 纪律」与 `check_nolint_layout` 约束）；③ 整文件排除（永久盲点，只给桩/替身这类本就不受本仓风格约束的文件）。
 
 ### 4.6 `AURORA_ENABLE_IMAGE_*`（图像编解码能力）
 
@@ -734,6 +741,7 @@ cmake --build build
 -D AURORA_ENABLE_CCACHE=ON|OFF           # ccache 编译缓存（默认 ON）
 -D AURORA_ENABLE_LLD=ON|OFF              # lld 链接器（默认 ON）
 -D AURORA_ENABLE_CLANG_TIDY=ON|OFF       # lint / lint-fix 目标（默认 ON）
+-D AURORA_LINT_SHARD=0/4                 # TU 分片（默认空 = 全量一遍；CI 矩阵用，见 §4.5）
 
 # 静态检查
 cmake --build build --target lint        # 全量 lint（非 third_party，去重后计数）
