@@ -103,13 +103,17 @@ function(aurora_find_clang_format _out)
         execute_process(COMMAND "${_exe}" --dump-config --style=file
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
                 RESULT_VARIABLE _rc
-                OUTPUT_QUIET ERROR_QUIET)
+                OUTPUT_VARIABLE _probe_out
+                ERROR_VARIABLE _probe_err)
         if (_rc EQUAL 0)
             set(_picked "${_exe}")
             break()
         endif ()
-        message(STATUS "clang-format: '${_cand}' cannot parse the repo .clang-format (exit ${_rc}) -- skipped, "
-                       "try the next candidate")
+        # 把工具自己报的第一行带出来：只给退出码时，「版本读不懂配置」与「二进制压根跑不起来
+        # （缺共享库 / 不是 clang-format）」在日志里长得一模一样，无法判因。
+        string(STRIP "${_probe_err}${_probe_out}" _probe_msg)
+        string(REGEX MATCH "[^\r\n]+" _probe_msg "${_probe_msg}")
+        message(STATUS "clang-format: '${_cand}' rejected (exit ${_rc}) ${_probe_msg} -- try the next candidate")
     endforeach()
     set(${_out} "${_picked}" PARENT_SCOPE)
 endfunction()
