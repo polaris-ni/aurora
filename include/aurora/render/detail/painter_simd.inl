@@ -7,7 +7,7 @@
 #include "aurora/core/platform.h"
 #include "aurora/render/detail/painter_simd.h"
 
-#if defined(AURORA_COMPILER_MSVC)
+#ifdef AURORA_COMPILER_MSVC
 // MSVC x64 基线已含 SSE2，_mm256_* 无需 /arch:AVX2 即可编译（指令照发，运行时经
 // g_simd_level 分发保证只在 AVX2 机器执行）；MSVC 不校验 intrinsic 的 target feature，
 // 故 target 属性留空即可。
@@ -21,7 +21,7 @@
 #define AURORA_AVX2_TARGET __attribute__((target("avx2")))
 // SSE2 路径用到 SSE4.1 内置（cvtepu8_epi32 / min_epi32 / max_epi32），须显式开 target。
 #define AURORA_SSE41_TARGET __attribute__((target("sse4.1")))
-#if defined(AURORA_COMPILER_CLANG_CL)
+#ifdef AURORA_COMPILER_CLANG_CL
 #define AURORA_NOINLINE __declspec(noinline)
 #else
 #define AURORA_NOINLINE __attribute__((noinline))
@@ -38,31 +38,26 @@
 
 namespace aurora::detail {
 
-// 【性能豁免说明】本文件整体抑制以下检查，仅限此 SIMD 光栅内核：
-// - pro-bounds-pointer-arithmetic：SSE/AVX 按 4 字节像素步进是技术本质（px + i*4），
-//   区域边界已由调用方的裁剪交集保证（shrink_to_clips 与 set_pixel 逐字一致）；
-// - narrowing-conversions（含 bugprone-*）：浮点运算序列必须与标量黄金参考逐位一致
-//   （golden 测试逐位比对），添加显式转换会改变取整/运算顺序，属语义风险而非风格问题；
-// - readability-math-missing-parentheses：括号不改写运算结果，但会破坏与标量参考
-//   的逐位镜像公式排版对照；
-// - avoid-c-arrays / pro-type-reinterpret-cast / pro-bounds-constant-array-index /
-//   avoid-unchecked-container-access：`alignas(32) int iarr[8]` 对齐暂存、
-//   `_mm256_storeu_si256(reinterpret_cast<__m256i*>(px))` 向量装载、C 数组变址
-//   均为 SIMD 惯用法；
-// - isolate-declaration / avoid-nested-conditional-operator / use-auto：同一行声明
-//   8 个通道变量、按通道三元链在 SIMD 代码里成对出现，拆开反而破坏镜像对照。
+// 【性能豁免说明】本文件自下一行起按区间豁免，仅限此 SIMD 光栅内核；名单是「删掉本区间后
+// clang-tidy 实测报出的检查集」（盲点记录见 codespec/CODING_STANDARDS.md §5.2）：
+// - *-pro-bounds-*：SSE/AVX 按 4 字节像素步进是技术本质（px + i*4），区域边界已由调用方的
+//   裁剪交集保证（shrink_to_clips 与 set_pixel 逐字一致），C 数组按 lane 变址同属此形制；
+// - *-pro-type-*：`_mm256_storeu_si256(reinterpret_cast<__m256i *>(px))` 一类向量装载、
+//   alignas(32) 暂存数组与 lane 指针的往返，是 SIMD 内建函数签名的唯一写法；
+// - *-narrowing-*：浮点运算序列必须与标量黄金参考逐位一致（golden 测试逐位比对），添加显式
+//   转换会改变取整/运算顺序，属语义风险而非风格问题；
+// - *-isolate-declaration / *-use-auto：同一行声明 8 个通道变量在 SIMD 代码里成对出现，拆开
+//   反而破坏与标量参考的镜像排版对照；显式写出 float / __m128i 是自文档，改 auto 丢信息。
+// 收口时另有两类告警是直接改码消除而非豁免：math-missing-parentheses（补括号 130 处）与
+// uppercase-literal-suffix（字面量后缀改大写 22 处，与全仓其余代码同口径）。
 // 逐像素越界访问本身已收敛到 gamma_lut.h 的唯一可信点（srgb_to_linear / linear_to_srgb_lut）。
-// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-narrowing-conversions,
-// bugprone-narrowing-conversions, readability-math-missing-parentheses, cppcoreguidelines-avoid-c-arrays,
-// modernize-avoid-c-arrays, cppcoreguidelines-pro-type-reinterpret-cast,
-// cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
-// readability-isolate-declaration, readability-avoid-nested-conditional-operator, modernize-use-auto)
+// NOLINTBEGIN(*-pro-bounds-*, *-pro-type-*, *-narrowing-*, *-isolate-declaration, *-use-auto)
 
 // ---------------- 标量黄金参考 ----------------
 inline auto blend_srgb_over_region_scalar(std::uint8_t *px, std::uint8_t sr, std::uint8_t sg, std::uint8_t sb, float ar,
                                           float ag, float ab, int n) -> void {
     for (int i = 0; i < n; ++i) {
-        std::uint8_t *p = px + static_cast<std::size_t>(i) * 4u;
+        std::uint8_t *p = px + (static_cast<std::size_t>(i) * 4U);
         p[0] = blend_srgb_over(p[0], sr, ar);
         p[1] = blend_srgb_over(p[1], sg, ag);
         p[2] = blend_srgb_over(p[2], sb, ab);
@@ -73,10 +68,10 @@ inline auto blend_srgb_over_region_scalar(std::uint8_t *px, std::uint8_t sr, std
 inline auto blend_linear_region_scalar(std::uint8_t *px, std::uint8_t sr, std::uint8_t sg, std::uint8_t sb, float fa,
                                        float finv, int n) -> void {
     for (int i = 0; i < n; ++i) {
-        std::uint8_t *p = px + static_cast<std::size_t>(i) * 4u;
-        p[0] = static_cast<std::uint8_t>(p[0] * finv + sr * fa);
-        p[1] = static_cast<std::uint8_t>(p[1] * finv + sg * fa);
-        p[2] = static_cast<std::uint8_t>(p[2] * finv + sb * fa);
+        std::uint8_t *p = px + (static_cast<std::size_t>(i) * 4U);
+        p[0] = static_cast<std::uint8_t>((p[0] * finv) + (sr * fa));
+        p[1] = static_cast<std::uint8_t>((p[1] * finv) + (sg * fa));
+        p[2] = static_cast<std::uint8_t>((p[2] * finv) + (sb * fa));
         p[3] = 255;
     }
 }
@@ -86,20 +81,20 @@ inline auto blend_linear_region_scalar(std::uint8_t *px, std::uint8_t sr, std::u
 // 结果 = acc[c]/n 正整数截断）。SIMD 路径须与此逐位一致。
 inline auto blur_region_scalar(std::uint8_t *pixels, int full_width, int x0, int y0, int rw, int rh, int r) -> void {
     std::vector<std::uint8_t> tmp(static_cast<std::size_t>(rw) * rh * 4);
-    const int n = 2 * r + 1;
+    const int n = (2 * r) + 1;
     // 第一遍：水平模糊（帧缓冲 → tmp）
     for (int y = 0; y < rh; ++y) {
         for (int x = 0; x < rw; ++x) {
             int acc[4] = {0, 0, 0, 0};
             for (int k = -r; k <= r; ++k) {
                 const int sx = std::clamp(x + k, 0, rw - 1);
-                const std::size_t src = (static_cast<std::size_t>(y0 + y) * full_width + (x0 + sx)) * 4;
+                const std::size_t src = ((static_cast<std::size_t>(y0 + y) * full_width) + (x0 + sx)) * 4;
                 acc[0] += pixels[src];
                 acc[1] += pixels[src + 1];
                 acc[2] += pixels[src + 2];
                 acc[3] += pixels[src + 3];
             }
-            const std::size_t dst = (static_cast<std::size_t>(y) * rw + x) * 4;
+            const std::size_t dst = ((static_cast<std::size_t>(y) * rw) + x) * 4;
             tmp[dst] = static_cast<std::uint8_t>(acc[0] / n);
             tmp[dst + 1] = static_cast<std::uint8_t>(acc[1] / n);
             tmp[dst + 2] = static_cast<std::uint8_t>(acc[2] / n);
@@ -112,13 +107,13 @@ inline auto blur_region_scalar(std::uint8_t *pixels, int full_width, int x0, int
             int acc[4] = {0, 0, 0, 0};
             for (int k = -r; k <= r; ++k) {
                 const int sy = std::clamp(y + k, 0, rh - 1);
-                const std::size_t src = (static_cast<std::size_t>(sy) * rw + x) * 4;
+                const std::size_t src = ((static_cast<std::size_t>(sy) * rw) + x) * 4;
                 acc[0] += tmp[src];
                 acc[1] += tmp[src + 1];
                 acc[2] += tmp[src + 2];
                 acc[3] += tmp[src + 3];
             }
-            const std::size_t dst = (static_cast<std::size_t>(y0 + y) * full_width + (x0 + x)) * 4;
+            const std::size_t dst = ((static_cast<std::size_t>(y0 + y) * full_width) + (x0 + x)) * 4;
             pixels[dst] = static_cast<std::uint8_t>(acc[0] / n);
             pixels[dst + 1] = static_cast<std::uint8_t>(acc[1] / n);
             pixels[dst + 2] = static_cast<std::uint8_t>(acc[2] / n);
@@ -138,13 +133,13 @@ inline auto gradient_linear_scanline_scalar(std::uint8_t *row, int x0, int n, fl
     (void)dy;  // 线性扫描线中 dy 已折叠进 py（调用方逐行预计算），此处不使用。
     for (int k = 0; k < n; ++k) {
         const float x = static_cast<float>(x0 + k);
-        const float px = (x - sx) * dx + py;
+        const float px = ((x - sx) * dx) + py;
         float t = px * inv_len_sq;
         t = std::max(0.0F, std::min(1.0F, t));
         const float frac = (range > 0.0F) ? (t - stop0) / range : 0.0F;
-        std::uint8_t *p = row + static_cast<std::size_t>(k) * 4u;
+        std::uint8_t *p = row + (static_cast<std::size_t>(k) * 4U);
         for (int c = 0; c < 3; ++c) {
-            const float val = static_cast<float>(c0[c]) + static_cast<float>(c1[c] - c0[c]) * frac;
+            const float val = static_cast<float>(c0[c]) + (static_cast<float>(c1[c] - c0[c]) * frac);
             int iv = static_cast<int>(val);
             if (iv < 0) {
                 iv = 0;
@@ -164,13 +159,13 @@ inline auto gradient_radial_scanline_scalar(std::uint8_t *row, int x0, int n, fl
     for (int k = 0; k < n; ++k) {
         const float x = static_cast<float>(x0 + k);
         const float px = x - cx;
-        const float dist = std::sqrt(px * px + py);
+        const float dist = std::sqrt((px * px) + py);
         float t = dist * inv_r;
         t = std::max(0.0F, std::min(1.0F, t));
         const float frac = (range > 0.0F) ? (t - stop0) / range : 0.0F;
-        std::uint8_t *p = row + static_cast<std::size_t>(k) * 4u;
+        std::uint8_t *p = row + (static_cast<std::size_t>(k) * 4U);
         for (int c = 0; c < 3; ++c) {
-            const float val = static_cast<float>(c0[c]) + static_cast<float>(c1[c] - c0[c]) * frac;
+            const float val = static_cast<float>(c0[c]) + (static_cast<float>(c1[c] - c0[c]) * frac);
             int iv = static_cast<int>(val);
             if (iv < 0) {
                 iv = 0;
@@ -184,14 +179,14 @@ inline auto gradient_radial_scanline_scalar(std::uint8_t *row, int x0, int n, fl
     return n;
 }
 
-#if defined(AURORA_ENABLE_SIMD)
+#ifdef AURORA_ENABLE_SIMD
 
 // 单像素伽马混合：v = dst_lin*inv + src_lin*alpha，结果转 sRGB。
 // 标量参考：blend_srgb_over(dst, src, alpha) = linear_to_srgb(srgb_to_linear(src)*alpha + srgb_to_linear(dst)*inv)
 // SIMD 逐通道 c：alpha = a[c]，src = s[c]；dv = g_gamma_tables.srgb_to_linear[d[c]]，
 // dsf = g_gamma_tables.srgb_to_linear[s[c]]。
 
-#if defined(AURORA_SIMD_X86)
+#ifdef AURORA_SIMD_X86
 inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blend_srgb_over_region_sse2(std::uint8_t *px, std::uint8_t sr,
                                                                             std::uint8_t sg, std::uint8_t sb, float ar,
                                                                             float ag, float ab, int n) -> void {
@@ -199,16 +194,16 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blend_srgb_over_region_sse2(std:
     const float ds_g = srgb_to_linear(sg);
     const float ds_b = srgb_to_linear(sb);
     const __m128 v4095 = _mm_set1_ps(static_cast<float>(AURORA_LINEAR_TO_SRGB_SIZE - 1));
-    const __m128 v05 = _mm_set1_ps(0.5f);
+    const __m128 v05 = _mm_set1_ps(0.5F);
     const __m128i v0 = _mm_setzero_si128();
     const __m128i v4095i = _mm_set1_epi32(AURORA_LINEAR_TO_SRGB_SIZE - 1);
 
     int i = 0;
     for (; i + 4 <= n; i += 4) {
-        std::uint8_t *base = px + static_cast<std::size_t>(i) * 4u;
+        std::uint8_t *base = px + (static_cast<std::size_t>(i) * 4U);
         for (int c = 0; c < 3; ++c) {
-            const std::uint8_t d0 = base[0 * 4 + c], d1 = base[1 * 4 + c];
-            const std::uint8_t d2 = base[2 * 4 + c], d3 = base[3 * 4 + c];
+            const std::uint8_t d0 = base[(0 * 4) + c], d1 = base[(1 * 4) + c];
+            const std::uint8_t d2 = base[(2 * 4) + c], d3 = base[(3 * 4) + c];
             const float dl0 = srgb_to_linear(d0);
             const float dl1 = srgb_to_linear(d1);
             const float dl2 = srgb_to_linear(d2);
@@ -224,18 +219,18 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blend_srgb_over_region_sse2(std:
             idx = _mm_min_epi32(idx, v4095i);
             alignas(16) int iarr[4];
             _mm_storeu_si128(reinterpret_cast<__m128i *>(iarr), idx);
-            base[0 * 4 + c] = linear_to_srgb_lut(iarr[0]);
-            base[1 * 4 + c] = linear_to_srgb_lut(iarr[1]);
-            base[2 * 4 + c] = linear_to_srgb_lut(iarr[2]);
-            base[3 * 4 + c] = linear_to_srgb_lut(iarr[3]);
+            base[(0 * 4) + c] = linear_to_srgb_lut(iarr[0]);
+            base[(1 * 4) + c] = linear_to_srgb_lut(iarr[1]);
+            base[(2 * 4) + c] = linear_to_srgb_lut(iarr[2]);
+            base[(3 * 4) + c] = linear_to_srgb_lut(iarr[3]);
         }
-        base[0 * 4 + 3] = 255;
-        base[1 * 4 + 3] = 255;
-        base[2 * 4 + 3] = 255;
-        base[3 * 4 + 3] = 255;
+        base[(0 * 4) + 3] = 255;
+        base[(1 * 4) + 3] = 255;
+        base[(2 * 4) + 3] = 255;
+        base[(3 * 4) + 3] = 255;
     }
     if (i < n) {
-        blend_srgb_over_region_scalar(px + static_cast<std::size_t>(i) * 4u, sr, sg, sb, ar, ag, ab, n - i);
+        blend_srgb_over_region_scalar(px + (static_cast<std::size_t>(i) * 4U), sr, sg, sb, ar, ag, ab, n - i);
     }
 }
 
@@ -249,10 +244,10 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blend_linear_region_sse2(std::ui
 
     int i = 0;
     for (; i + 4 <= n; i += 4) {
-        std::uint8_t *base = px + static_cast<std::size_t>(i) * 4u;
+        std::uint8_t *base = px + (static_cast<std::size_t>(i) * 4U);
         for (int c = 0; c < 3; ++c) {
-            const std::uint8_t d0 = base[0 * 4 + c], d1 = base[1 * 4 + c];
-            const std::uint8_t d2 = base[2 * 4 + c], d3 = base[3 * 4 + c];
+            const std::uint8_t d0 = base[(0 * 4) + c], d1 = base[(1 * 4) + c];
+            const std::uint8_t d2 = base[(2 * 4) + c], d3 = base[(3 * 4) + c];
             const __m128i db = _mm_setr_epi8(static_cast<char>(d0), static_cast<char>(d1), static_cast<char>(d2),
                                              static_cast<char>(d3), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
             const __m128 df = _mm_cvtepi32_ps(_mm_cvtepu8_epi32(db));
@@ -263,18 +258,18 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blend_linear_region_sse2(std::ui
             o = _mm_min_epi32(o, v255i);
             alignas(16) int iarr[4];
             _mm_storeu_si128(reinterpret_cast<__m128i *>(iarr), o);
-            base[0 * 4 + c] = static_cast<std::uint8_t>(iarr[0]);
-            base[1 * 4 + c] = static_cast<std::uint8_t>(iarr[1]);
-            base[2 * 4 + c] = static_cast<std::uint8_t>(iarr[2]);
-            base[3 * 4 + c] = static_cast<std::uint8_t>(iarr[3]);
+            base[(0 * 4) + c] = static_cast<std::uint8_t>(iarr[0]);
+            base[(1 * 4) + c] = static_cast<std::uint8_t>(iarr[1]);
+            base[(2 * 4) + c] = static_cast<std::uint8_t>(iarr[2]);
+            base[(3 * 4) + c] = static_cast<std::uint8_t>(iarr[3]);
         }
-        base[0 * 4 + 3] = 255;
-        base[1 * 4 + 3] = 255;
-        base[2 * 4 + 3] = 255;
-        base[3 * 4 + 3] = 255;
+        base[(0 * 4) + 3] = 255;
+        base[(1 * 4) + 3] = 255;
+        base[(2 * 4) + 3] = 255;
+        base[(3 * 4) + 3] = 255;
     }
     if (i < n) {
-        blend_linear_region_scalar(px + static_cast<std::size_t>(i) * 4u, sr, sg, sb, fa, finv, n - i);
+        blend_linear_region_scalar(px + (static_cast<std::size_t>(i) * 4U), sr, sg, sb, fa, finv, n - i);
     }
 }
 
@@ -309,7 +304,7 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_linear_scanline_sse2(st
         __m128 t = _mm_mul_ps(vpx, vinv);
         t = _mm_max_ps(vzero, _mm_min_ps(vone, t));
         __m128 frac = (range > 0.0F) ? _mm_div_ps(_mm_sub_ps(t, vstop0), vrange) : vzero;
-        std::uint8_t *base = row + static_cast<std::size_t>(i) * 4u;
+        std::uint8_t *base = row + (static_cast<std::size_t>(i) * 4U);
         for (int c = 0; c < 3; ++c) {
             const __m128 val = _mm_add_ps(vc0[c], _mm_mul_ps(vdiff[c], frac));
             __m128i iv = _mm_cvttps_epi32(val);
@@ -317,18 +312,18 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_linear_scanline_sse2(st
             iv = _mm_min_epi32(iv, vi255);
             alignas(16) int iarr[4];
             _mm_storeu_si128(reinterpret_cast<__m128i *>(iarr), iv);
-            base[0 * 4 + c] = static_cast<std::uint8_t>(iarr[0]);
-            base[1 * 4 + c] = static_cast<std::uint8_t>(iarr[1]);
-            base[2 * 4 + c] = static_cast<std::uint8_t>(iarr[2]);
-            base[3 * 4 + c] = static_cast<std::uint8_t>(iarr[3]);
+            base[(0 * 4) + c] = static_cast<std::uint8_t>(iarr[0]);
+            base[(1 * 4) + c] = static_cast<std::uint8_t>(iarr[1]);
+            base[(2 * 4) + c] = static_cast<std::uint8_t>(iarr[2]);
+            base[(3 * 4) + c] = static_cast<std::uint8_t>(iarr[3]);
         }
-        base[0 * 4 + 3] = 255;
-        base[1 * 4 + 3] = 255;
-        base[2 * 4 + 3] = 255;
-        base[3 * 4 + 3] = 255;
+        base[(0 * 4) + 3] = 255;
+        base[(1 * 4) + 3] = 255;
+        base[(2 * 4) + 3] = 255;
+        base[(3 * 4) + 3] = 255;
     }
     if (i < n) {
-        gradient_linear_scanline_scalar(row + static_cast<std::size_t>(i) * 4u, x0 + i, n - i, sx, py, dx, dy,
+        gradient_linear_scanline_scalar(row + (static_cast<std::size_t>(i) * 4U), x0 + i, n - i, sx, py, dx, dy,
                                         inv_len_sq, c0, c1, stop0, range);
     }
     return i;
@@ -362,7 +357,7 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_radial_scanline_sse2(st
         __m128 t = _mm_mul_ps(vdist, vinv_r);
         t = _mm_max_ps(vzero, _mm_min_ps(vone, t));
         __m128 frac = (range > 0.0F) ? _mm_div_ps(_mm_sub_ps(t, vstop0), vrange) : vzero;
-        std::uint8_t *base = row + static_cast<std::size_t>(i) * 4u;
+        std::uint8_t *base = row + (static_cast<std::size_t>(i) * 4U);
         for (int c = 0; c < 3; ++c) {
             const __m128 val = _mm_add_ps(vc0[c], _mm_mul_ps(vdiff[c], frac));
             __m128i iv = _mm_cvttps_epi32(val);
@@ -370,18 +365,18 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_radial_scanline_sse2(st
             iv = _mm_min_epi32(iv, vi255);
             alignas(16) int iarr[4];
             _mm_storeu_si128(reinterpret_cast<__m128i *>(iarr), iv);
-            base[0 * 4 + c] = static_cast<std::uint8_t>(iarr[0]);
-            base[1 * 4 + c] = static_cast<std::uint8_t>(iarr[1]);
-            base[2 * 4 + c] = static_cast<std::uint8_t>(iarr[2]);
-            base[3 * 4 + c] = static_cast<std::uint8_t>(iarr[3]);
+            base[(0 * 4) + c] = static_cast<std::uint8_t>(iarr[0]);
+            base[(1 * 4) + c] = static_cast<std::uint8_t>(iarr[1]);
+            base[(2 * 4) + c] = static_cast<std::uint8_t>(iarr[2]);
+            base[(3 * 4) + c] = static_cast<std::uint8_t>(iarr[3]);
         }
-        base[0 * 4 + 3] = 255;
-        base[1 * 4 + 3] = 255;
-        base[2 * 4 + 3] = 255;
-        base[3 * 4 + 3] = 255;
+        base[(0 * 4) + 3] = 255;
+        base[(1 * 4) + 3] = 255;
+        base[(2 * 4) + 3] = 255;
+        base[(3 * 4) + 3] = 255;
     }
     if (i < n) {
-        gradient_radial_scanline_scalar(row + static_cast<std::size_t>(i) * 4u, x0 + i, n - i, cx, py, inv_r, c0, c1,
+        gradient_radial_scanline_scalar(row + (static_cast<std::size_t>(i) * 4U), x0 + i, n - i, cx, py, inv_r, c0, c1,
                                         stop0, range);
     }
     return i;
@@ -393,7 +388,7 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_radial_scanline_sse2(st
 // 无需 /arch:AVX2 即可编译，运行时经 g_simd_level 分发保证只在 AVX2 机器上执行）。
 #if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG) || defined(AURORA_COMPILER_MSVC) || \
     defined(AURORA_COMPILER_CLANG_CL)
-#if defined(AURORA_SIMD_X86)
+#ifdef AURORA_SIMD_X86
 AURORA_AVX2_TARGET AURORA_NOINLINE inline auto blend_srgb_over_region_avx2(std::uint8_t *px, std::uint8_t sr,
                                                                            std::uint8_t sg, std::uint8_t sb, float ar,
                                                                            float ag, float ab, int n) -> void {
@@ -401,18 +396,18 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto blend_srgb_over_region_avx2(std::
     const float ds_g = srgb_to_linear(sg);
     const float ds_b = srgb_to_linear(sb);
     const __m256 v4095 = _mm256_set1_ps(static_cast<float>(AURORA_LINEAR_TO_SRGB_SIZE - 1));
-    const __m256 v05 = _mm256_set1_ps(0.5f);
+    const __m256 v05 = _mm256_set1_ps(0.5F);
     const __m256i v0 = _mm256_setzero_si256();
     const __m256i v4095i = _mm256_set1_epi32(AURORA_LINEAR_TO_SRGB_SIZE - 1);
 
     int i = 0;
     for (; i + 8 <= n; i += 8) {
-        std::uint8_t *base = px + static_cast<std::size_t>(i) * 4u;
+        std::uint8_t *base = px + (static_cast<std::size_t>(i) * 4U);
         for (int c = 0; c < 3; ++c) {
-            const std::uint8_t d0 = base[0 * 4 + c], d1 = base[1 * 4 + c];
-            const std::uint8_t d2 = base[2 * 4 + c], d3 = base[3 * 4 + c];
-            const std::uint8_t d4 = base[4 * 4 + c], d5 = base[5 * 4 + c];
-            const std::uint8_t d6 = base[6 * 4 + c], d7 = base[7 * 4 + c];
+            const std::uint8_t d0 = base[(0 * 4) + c], d1 = base[(1 * 4) + c];
+            const std::uint8_t d2 = base[(2 * 4) + c], d3 = base[(3 * 4) + c];
+            const std::uint8_t d4 = base[(4 * 4) + c], d5 = base[(5 * 4) + c];
+            const std::uint8_t d6 = base[(6 * 4) + c], d7 = base[(7 * 4) + c];
             const float dl0 = srgb_to_linear(d0), dl1 = srgb_to_linear(d1);
             const float dl2 = srgb_to_linear(d2), dl3 = srgb_to_linear(d3);
             const float dl4 = srgb_to_linear(d4), dl5 = srgb_to_linear(d5);
@@ -428,21 +423,21 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto blend_srgb_over_region_avx2(std::
             idx = _mm256_min_epi32(idx, v4095i);
             alignas(32) int iarr[8];
             _mm256_storeu_si256(reinterpret_cast<__m256i *>(iarr), idx);
-            base[0 * 4 + c] = linear_to_srgb_lut(iarr[0]);
-            base[1 * 4 + c] = linear_to_srgb_lut(iarr[1]);
-            base[2 * 4 + c] = linear_to_srgb_lut(iarr[2]);
-            base[3 * 4 + c] = linear_to_srgb_lut(iarr[3]);
-            base[4 * 4 + c] = linear_to_srgb_lut(iarr[4]);
-            base[5 * 4 + c] = linear_to_srgb_lut(iarr[5]);
-            base[6 * 4 + c] = linear_to_srgb_lut(iarr[6]);
-            base[7 * 4 + c] = linear_to_srgb_lut(iarr[7]);
+            base[(0 * 4) + c] = linear_to_srgb_lut(iarr[0]);
+            base[(1 * 4) + c] = linear_to_srgb_lut(iarr[1]);
+            base[(2 * 4) + c] = linear_to_srgb_lut(iarr[2]);
+            base[(3 * 4) + c] = linear_to_srgb_lut(iarr[3]);
+            base[(4 * 4) + c] = linear_to_srgb_lut(iarr[4]);
+            base[(5 * 4) + c] = linear_to_srgb_lut(iarr[5]);
+            base[(6 * 4) + c] = linear_to_srgb_lut(iarr[6]);
+            base[(7 * 4) + c] = linear_to_srgb_lut(iarr[7]);
         }
         for (int k = 0; k < 8; ++k) {
-            base[k * 4 + 3] = 255;
+            base[(k * 4) + 3] = 255;
         }
     }
     if (i < n) {
-        blend_srgb_over_region_scalar(px + static_cast<std::size_t>(i) * 4u, sr, sg, sb, ar, ag, ab, n - i);
+        blend_srgb_over_region_scalar(px + (static_cast<std::size_t>(i) * 4U), sr, sg, sb, ar, ag, ab, n - i);
     }
 }
 
@@ -456,12 +451,12 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto blend_linear_region_avx2(std::uin
 
     int i = 0;
     for (; i + 8 <= n; i += 8) {
-        std::uint8_t *base = px + static_cast<std::size_t>(i) * 4u;
+        std::uint8_t *base = px + (static_cast<std::size_t>(i) * 4U);
         for (int c = 0; c < 3; ++c) {
-            const std::uint8_t d0 = base[0 * 4 + c], d1 = base[1 * 4 + c];
-            const std::uint8_t d2 = base[2 * 4 + c], d3 = base[3 * 4 + c];
-            const std::uint8_t d4 = base[4 * 4 + c], d5 = base[5 * 4 + c];
-            const std::uint8_t d6 = base[6 * 4 + c], d7 = base[7 * 4 + c];
+            const std::uint8_t d0 = base[(0 * 4) + c], d1 = base[(1 * 4) + c];
+            const std::uint8_t d2 = base[(2 * 4) + c], d3 = base[(3 * 4) + c];
+            const std::uint8_t d4 = base[(4 * 4) + c], d5 = base[(5 * 4) + c];
+            const std::uint8_t d6 = base[(6 * 4) + c], d7 = base[(7 * 4) + c];
             // 8 字节无符号扩展为 8 个 float：分两组 128 位（d0..d3 与 d4..d7）各自做
             // SSE4.1 零扩展，再用 _mm256_set_m128i 拼成 8 路（低 128 位 d0..d3，高 128 位 d4..d7）。
             const __m128i lo4 =
@@ -479,21 +474,21 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto blend_linear_region_avx2(std::uin
             o = _mm256_min_epi32(o, v255i);
             alignas(32) int iarr[8];
             _mm256_storeu_si256(reinterpret_cast<__m256i *>(iarr), o);
-            base[0 * 4 + c] = static_cast<std::uint8_t>(iarr[0]);
-            base[1 * 4 + c] = static_cast<std::uint8_t>(iarr[1]);
-            base[2 * 4 + c] = static_cast<std::uint8_t>(iarr[2]);
-            base[3 * 4 + c] = static_cast<std::uint8_t>(iarr[3]);
-            base[4 * 4 + c] = static_cast<std::uint8_t>(iarr[4]);
-            base[5 * 4 + c] = static_cast<std::uint8_t>(iarr[5]);
-            base[6 * 4 + c] = static_cast<std::uint8_t>(iarr[6]);
-            base[7 * 4 + c] = static_cast<std::uint8_t>(iarr[7]);
+            base[(0 * 4) + c] = static_cast<std::uint8_t>(iarr[0]);
+            base[(1 * 4) + c] = static_cast<std::uint8_t>(iarr[1]);
+            base[(2 * 4) + c] = static_cast<std::uint8_t>(iarr[2]);
+            base[(3 * 4) + c] = static_cast<std::uint8_t>(iarr[3]);
+            base[(4 * 4) + c] = static_cast<std::uint8_t>(iarr[4]);
+            base[(5 * 4) + c] = static_cast<std::uint8_t>(iarr[5]);
+            base[(6 * 4) + c] = static_cast<std::uint8_t>(iarr[6]);
+            base[(7 * 4) + c] = static_cast<std::uint8_t>(iarr[7]);
         }
         for (int k = 0; k < 8; ++k) {
-            base[k * 4 + 3] = 255;
+            base[(k * 4) + 3] = 255;
         }
     }
     if (i < n) {
-        blend_linear_region_scalar(px + static_cast<std::size_t>(i) * 4u, sr, sg, sb, fa, finv, n - i);
+        blend_linear_region_scalar(px + (static_cast<std::size_t>(i) * 4U), sr, sg, sb, fa, finv, n - i);
     }
 }
 // 渐变扫描线 AVX2 实现（WS-4）：镜像标量浮点序列，8 像素一组。
@@ -528,7 +523,7 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_linear_scanline_avx2(std
         __m256 t = _mm256_mul_ps(vpx, vinv);
         t = _mm256_max_ps(vzero, _mm256_min_ps(vone, t));
         __m256 frac = (range > 0.0F) ? _mm256_div_ps(_mm256_sub_ps(t, vstop0), vrange) : vzero;
-        std::uint8_t *base = row + static_cast<std::size_t>(i) * 4u;
+        std::uint8_t *base = row + (static_cast<std::size_t>(i) * 4U);
         for (int c = 0; c < 3; ++c) {
             const __m256 val = _mm256_add_ps(vc0[c], _mm256_mul_ps(vdiff[c], frac));
             __m256i iv = _mm256_cvttps_epi32(val);
@@ -536,21 +531,21 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_linear_scanline_avx2(std
             iv = _mm256_min_epi32(iv, vi255);
             alignas(32) int iarr[8];
             _mm256_storeu_si256(reinterpret_cast<__m256i *>(iarr), iv);
-            base[0 * 4 + c] = static_cast<std::uint8_t>(iarr[0]);
-            base[1 * 4 + c] = static_cast<std::uint8_t>(iarr[1]);
-            base[2 * 4 + c] = static_cast<std::uint8_t>(iarr[2]);
-            base[3 * 4 + c] = static_cast<std::uint8_t>(iarr[3]);
-            base[4 * 4 + c] = static_cast<std::uint8_t>(iarr[4]);
-            base[5 * 4 + c] = static_cast<std::uint8_t>(iarr[5]);
-            base[6 * 4 + c] = static_cast<std::uint8_t>(iarr[6]);
-            base[7 * 4 + c] = static_cast<std::uint8_t>(iarr[7]);
+            base[(0 * 4) + c] = static_cast<std::uint8_t>(iarr[0]);
+            base[(1 * 4) + c] = static_cast<std::uint8_t>(iarr[1]);
+            base[(2 * 4) + c] = static_cast<std::uint8_t>(iarr[2]);
+            base[(3 * 4) + c] = static_cast<std::uint8_t>(iarr[3]);
+            base[(4 * 4) + c] = static_cast<std::uint8_t>(iarr[4]);
+            base[(5 * 4) + c] = static_cast<std::uint8_t>(iarr[5]);
+            base[(6 * 4) + c] = static_cast<std::uint8_t>(iarr[6]);
+            base[(7 * 4) + c] = static_cast<std::uint8_t>(iarr[7]);
         }
         for (int k = 0; k < 8; ++k) {
-            base[k * 4 + 3] = 255;
+            base[(k * 4) + 3] = 255;
         }
     }
     if (i < n) {
-        gradient_linear_scanline_scalar(row + static_cast<std::size_t>(i) * 4u, x0 + i, n - i, sx, py, dx, dy,
+        gradient_linear_scanline_scalar(row + (static_cast<std::size_t>(i) * 4U), x0 + i, n - i, sx, py, dx, dy,
                                         inv_len_sq, c0, c1, stop0, range);
     }
     return i;
@@ -586,7 +581,7 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_radial_scanline_avx2(std
         __m256 t = _mm256_mul_ps(vdist, vinv_r);
         t = _mm256_max_ps(vzero, _mm256_min_ps(vone, t));
         __m256 frac = (range > 0.0F) ? _mm256_div_ps(_mm256_sub_ps(t, vstop0), vrange) : vzero;
-        std::uint8_t *base = row + static_cast<std::size_t>(i) * 4u;
+        std::uint8_t *base = row + (static_cast<std::size_t>(i) * 4U);
         for (int c = 0; c < 3; ++c) {
             const __m256 val = _mm256_add_ps(vc0[c], _mm256_mul_ps(vdiff[c], frac));
             __m256i iv = _mm256_cvttps_epi32(val);
@@ -594,21 +589,21 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_radial_scanline_avx2(std
             iv = _mm256_min_epi32(iv, vi255);
             alignas(32) int iarr[8];
             _mm256_storeu_si256(reinterpret_cast<__m256i *>(iarr), iv);
-            base[0 * 4 + c] = static_cast<std::uint8_t>(iarr[0]);
-            base[1 * 4 + c] = static_cast<std::uint8_t>(iarr[1]);
-            base[2 * 4 + c] = static_cast<std::uint8_t>(iarr[2]);
-            base[3 * 4 + c] = static_cast<std::uint8_t>(iarr[3]);
-            base[4 * 4 + c] = static_cast<std::uint8_t>(iarr[4]);
-            base[5 * 4 + c] = static_cast<std::uint8_t>(iarr[5]);
-            base[6 * 4 + c] = static_cast<std::uint8_t>(iarr[6]);
-            base[7 * 4 + c] = static_cast<std::uint8_t>(iarr[7]);
+            base[(0 * 4) + c] = static_cast<std::uint8_t>(iarr[0]);
+            base[(1 * 4) + c] = static_cast<std::uint8_t>(iarr[1]);
+            base[(2 * 4) + c] = static_cast<std::uint8_t>(iarr[2]);
+            base[(3 * 4) + c] = static_cast<std::uint8_t>(iarr[3]);
+            base[(4 * 4) + c] = static_cast<std::uint8_t>(iarr[4]);
+            base[(5 * 4) + c] = static_cast<std::uint8_t>(iarr[5]);
+            base[(6 * 4) + c] = static_cast<std::uint8_t>(iarr[6]);
+            base[(7 * 4) + c] = static_cast<std::uint8_t>(iarr[7]);
         }
         for (int k = 0; k < 8; ++k) {
-            base[k * 4 + 3] = 255;
+            base[(k * 4) + 3] = 255;
         }
     }
     if (i < n) {
-        gradient_radial_scanline_scalar(row + static_cast<std::size_t>(i) * 4u, x0 + i, n - i, cx, py, inv_r, c0, c1,
+        gradient_radial_scanline_scalar(row + (static_cast<std::size_t>(i) * 4U), x0 + i, n - i, cx, py, inv_r, c0, c1,
                                         stop0, range);
     }
     return i;
@@ -625,7 +620,7 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_radial_scanline_avx2(std
 // 整数加法结合律保证与标量全窗求和逐位一致；最终 /n 用标量整数除法，杜绝浮点误差。
 // 累加器为每通道 4 路 int32（水平/垂直遍 stride 不同，故 src/dst 步长独立传入）。
 
-#if defined(AURORA_SIMD_X86)
+#ifdef AURORA_SIMD_X86
 inline AURORA_SSE41_TARGET auto blur_load4(const std::uint8_t *p) -> __m128i {
     // 4 字节 RGBA → 4 路 int32（每通道一路）；cvtepu8 按字节解包，与端序无关。
     return _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*reinterpret_cast<const int *>(p)));
@@ -637,11 +632,11 @@ inline AURORA_SSE41_TARGET auto blur_load4(const std::uint8_t *p) -> __m128i {
 inline AURORA_SSE41_TARGET AURORA_NOINLINE auto box_blur_line_sse2(std::uint8_t *dst, int dst_step,
                                                                    const std::uint8_t *src, int src_step, int n, int r)
     -> void {
-    const int denom = 2 * r + 1;
+    const int denom = (2 * r) + 1;
     alignas(16) int seed[4] = {0, 0, 0, 0};
     for (int k = -r; k <= r; ++k) {
         const int idx = std::clamp(k, 0, n - 1);
-        const std::uint8_t *p = src + static_cast<std::size_t>(idx) * src_step;
+        const std::uint8_t *p = src + (static_cast<std::size_t>(idx) * src_step);
         seed[0] += p[0];
         seed[1] += p[1];
         seed[2] += p[2];
@@ -659,13 +654,13 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto box_blur_line_sse2(std::uint8_t 
     for (int x = 1; x < n; ++x) {
         const int ridx = std::clamp(x + r, 0, n - 1);
         const int lidx = std::clamp(x - 1 - r, 0, n - 1);
-        __m128i rv = blur_load4(src + static_cast<std::size_t>(ridx) * src_step);
-        __m128i lv = blur_load4(src + static_cast<std::size_t>(lidx) * src_step);
+        __m128i rv = blur_load4(src + (static_cast<std::size_t>(ridx) * src_step));
+        __m128i lv = blur_load4(src + (static_cast<std::size_t>(lidx) * src_step));
         acc = _mm_sub_epi32(acc, lv);
         acc = _mm_add_epi32(acc, rv);
         alignas(16) int s[4];
         _mm_storeu_si128(reinterpret_cast<__m128i *>(s), acc);
-        std::uint8_t *d = dst + static_cast<std::size_t>(x) * dst_step;
+        std::uint8_t *d = dst + (static_cast<std::size_t>(x) * dst_step);
         d[0] = static_cast<std::uint8_t>(s[0] / denom);
         d[1] = static_cast<std::uint8_t>(s[1] / denom);
         d[2] = static_cast<std::uint8_t>(s[2] / denom);
@@ -680,14 +675,14 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blur_region_sse2(std::uint8_t *p
     const int tmp_stride = rw * 4;
     // 第一遍：水平（帧缓冲 → tmp）。同行像素紧邻，线内步长均为 4。
     for (int y = 0; y < rh; ++y) {
-        std::uint8_t *dst = tmp.data() + static_cast<std::size_t>(y) * tmp_stride;
-        const std::uint8_t *src = pixels + (static_cast<std::size_t>(y0 + y) * full_width + x0) * 4;
+        std::uint8_t *dst = tmp.data() + (static_cast<std::size_t>(y) * tmp_stride);
+        const std::uint8_t *src = pixels + (((static_cast<std::size_t>(y0 + y) * full_width) + x0) * 4);
         box_blur_line_sse2(dst, 4, src, 4, rw, r);
     }
     // 第二遍：垂直（tmp → 帧缓冲）。线内步长 = 行步长（tmp 行宽 rw*4 / 帧缓冲行宽 full_width*4）。
     for (int x = 0; x < rw; ++x) {
-        std::uint8_t *dst = pixels + (static_cast<std::size_t>(y0) * full_width + (x0 + x)) * 4;
-        const std::uint8_t *src = tmp.data() + static_cast<std::size_t>(x) * 4;
+        std::uint8_t *dst = pixels + (((static_cast<std::size_t>(y0) * full_width) + (x0 + x)) * 4);
+        const std::uint8_t *src = tmp.data() + (static_cast<std::size_t>(x) * 4);
         box_blur_line_sse2(dst, fb_stride, src, tmp_stride, rh, r);
     }
 }
@@ -695,7 +690,7 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blur_region_sse2(std::uint8_t *p
 
 #if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG) || defined(AURORA_COMPILER_MSVC) || \
     defined(AURORA_COMPILER_CLANG_CL)
-#if defined(AURORA_SIMD_X86)
+#ifdef AURORA_SIMD_X86
 inline AURORA_AVX2_TARGET auto blur_load4_avx2(const std::uint8_t *p) -> __m256i {
     // 低 128 位装 4 通道，高 128 位置零（单线模式，仅用低 4 路）。
     const __m128i lo = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*reinterpret_cast<const int *>(p)));
@@ -705,11 +700,11 @@ inline AURORA_AVX2_TARGET auto blur_load4_avx2(const std::uint8_t *p) -> __m256i
 inline AURORA_AVX2_TARGET AURORA_NOINLINE auto box_blur_line_avx2(std::uint8_t *dst, int dst_step,
                                                                   const std::uint8_t *src, int src_step, int n, int r)
     -> void {
-    const int denom = 2 * r + 1;
+    const int denom = (2 * r) + 1;
     alignas(32) int seed[8] = {0};
     for (int k = -r; k <= r; ++k) {
         const int idx = std::clamp(k, 0, n - 1);
-        const std::uint8_t *p = src + static_cast<std::size_t>(idx) * src_step;
+        const std::uint8_t *p = src + (static_cast<std::size_t>(idx) * src_step);
         seed[0] += p[0];
         seed[1] += p[1];
         seed[2] += p[2];
@@ -720,14 +715,14 @@ inline AURORA_AVX2_TARGET AURORA_NOINLINE auto box_blur_line_avx2(std::uint8_t *
         if (x > 0) {
             const int ridx = std::clamp(x + r, 0, n - 1);
             const int lidx = std::clamp(x - 1 - r, 0, n - 1);
-            __m256i rv = blur_load4_avx2(src + static_cast<std::size_t>(ridx) * src_step);
-            __m256i lv = blur_load4_avx2(src + static_cast<std::size_t>(lidx) * src_step);
+            __m256i rv = blur_load4_avx2(src + (static_cast<std::size_t>(ridx) * src_step));
+            __m256i lv = blur_load4_avx2(src + (static_cast<std::size_t>(lidx) * src_step));
             acc = _mm256_sub_epi32(acc, lv);
             acc = _mm256_add_epi32(acc, rv);
         }
         alignas(32) int s[8];
         _mm256_storeu_si256(reinterpret_cast<__m256i *>(s), acc);
-        std::uint8_t *d = dst + static_cast<std::size_t>(x) * dst_step;
+        std::uint8_t *d = dst + (static_cast<std::size_t>(x) * dst_step);
         d[0] = static_cast<std::uint8_t>(s[0] / denom);
         d[1] = static_cast<std::uint8_t>(s[1] / denom);
         d[2] = static_cast<std::uint8_t>(s[2] / denom);
@@ -742,14 +737,14 @@ inline AURORA_AVX2_TARGET AURORA_NOINLINE auto blur_region_avx2(std::uint8_t *pi
     const int tmp_stride = rw * 4;
     // 第一遍：水平（帧缓冲 → tmp）。线内步长均为 4。
     for (int y = 0; y < rh; ++y) {
-        std::uint8_t *dst = tmp.data() + static_cast<std::size_t>(y) * tmp_stride;
-        const std::uint8_t *src = pixels + (static_cast<std::size_t>(y0 + y) * full_width + x0) * 4;
+        std::uint8_t *dst = tmp.data() + (static_cast<std::size_t>(y) * tmp_stride);
+        const std::uint8_t *src = pixels + (((static_cast<std::size_t>(y0 + y) * full_width) + x0) * 4);
         box_blur_line_avx2(dst, 4, src, 4, rw, r);
     }
     // 第二遍：垂直（tmp → 帧缓冲）。线内步长 = 行步长。
     for (int x = 0; x < rw; ++x) {
-        std::uint8_t *dst = pixels + (static_cast<std::size_t>(y0) * full_width + (x0 + x)) * 4;
-        const std::uint8_t *src = tmp.data() + static_cast<std::size_t>(x) * 4;
+        std::uint8_t *dst = pixels + (((static_cast<std::size_t>(y0) * full_width) + (x0 + x)) * 4);
+        const std::uint8_t *src = tmp.data() + (static_cast<std::size_t>(x) * 4);
         box_blur_line_avx2(dst, fb_stride, src, tmp_stride, rh, r);
     }
 }
@@ -800,8 +795,4 @@ inline auto ensure_simd_init() noexcept -> void {
 #endif  // AURORA_ENABLE_SIMD
 
 }  // namespace aurora::detail
-// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-narrowing-conversions,
-// bugprone-narrowing-conversions, readability-math-missing-parentheses, cppcoreguidelines-avoid-c-arrays,
-// modernize-avoid-c-arrays, cppcoreguidelines-pro-type-reinterpret-cast,
-// cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
-// readability-isolate-declaration, readability-avoid-nested-conditional-operator, modernize-use-auto)
+// NOLINTEND(*-pro-bounds-*, *-pro-type-*, *-narrowing-*, *-isolate-declaration, *-use-auto)

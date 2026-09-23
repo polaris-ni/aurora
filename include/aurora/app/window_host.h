@@ -54,6 +54,10 @@ class WindowHost {
     auto operator=(const WindowHost &) -> WindowHost & = delete;
     WindowHost(WindowHost &&) = delete;
     auto operator=(WindowHost &&) -> WindowHost & = delete;
+    /// @brief 析构：显式 default 补齐五法则声明（四个拷贝/移动件已 delete，析构本为隐式）。
+    /// 成员均为自洽 RAII，释放顺序仍由声明序保证（见 `window_`/`scene_` 注释）；
+    /// 后端回调解绑不在此做——仍须先显式 `teardown()`（见其注释）。
+    ~WindowHost() = default;
 
     // ---- 身份 ----
 

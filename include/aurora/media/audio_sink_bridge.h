@@ -55,8 +55,12 @@ class AudioSinkGraphBridge final : public AudioSink {
         static_cast<void>(ctx_->disconnect(gain_, ctx_->destination()));
     }
 
+    // 五法则（CODING_STANDARDS.md §5.1）：桥自持 stream_/gain_ 两条图边并在析构时断边，
+    // 拷贝/移动会造成重复断边或旁落的边；调用方只经 shared_ptr/栈对象使用它。
     AudioSinkGraphBridge(const AudioSinkGraphBridge &) = delete;
     auto operator=(const AudioSinkGraphBridge &) -> AudioSinkGraphBridge & = delete;
+    AudioSinkGraphBridge(AudioSinkGraphBridge &&) = delete;
+    auto operator=(AudioSinkGraphBridge &&) -> AudioSinkGraphBridge & = delete;
 
     /// @brief 写入一包 16-bit PCM（AudioSink 契约）：推入图内推流环。
     ///        图未接好或上下文关闭时丢弃样本（不报错——桥为兜底路径）。

@@ -32,16 +32,16 @@ auto init_gamma_tables() -> void;
 inline auto srgb_to_linear(std::uint8_t v) -> float {
     // 索引类型 uint8_t 的取值域 [0,255] 与表长 256 完全一致，运行期越界不可能发生。
     // 这里是全仓 LUT 直查的**唯一可信点**：调用方一律走本函数，不再各自直接下标。
-    return g_gamma_tables.srgb_to_linear[v];  // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index,
-                                              // cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // NOLINTNEXTLINE(*-pro-bounds-*)
+    return g_gamma_tables.srgb_to_linear[v];
 }
 
 inline auto linear_to_srgb(float v) -> std::uint8_t {
     const int idx = std::clamp(static_cast<int>(std::lroundf(v * static_cast<float>(AURORA_LINEAR_TO_SRGB_SIZE - 1))),
                                0, AURORA_LINEAR_TO_SRGB_SIZE - 1);
     // idx 已被 clamp 夹取到 [0, SIZE-1]，无需运行期检查。
-    return g_gamma_tables.linear_to_srgb[idx];  // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index,
-                                                // cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // NOLINTNEXTLINE(*-pro-bounds-*)
+    return g_gamma_tables.linear_to_srgb[idx];
 }
 
 /// @brief 按整型索引取 sRGB 表值（SIMD 端专用：cvtt 截断 + min/max 夹取后取表）。
@@ -50,8 +50,8 @@ inline auto linear_to_srgb(float v) -> std::uint8_t {
 inline auto linear_to_srgb_lut(int idx) -> std::uint8_t {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-do-while, readability-simplify-boolean-expr)
     AURORA_ASSERT(idx >= 0 && idx < AURORA_LINEAR_TO_SRGB_SIZE, "sRGB LUT index out of range");
-    return g_gamma_tables.linear_to_srgb[idx];  // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index,
-                                                // cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    // NOLINTNEXTLINE(*-pro-bounds-*)
+    return g_gamma_tables.linear_to_srgb[idx];
 }
 
 // Gamma-correct source-over（单像素黄金参考）：颜色在线性光空间混合，结果转回 sRGB。

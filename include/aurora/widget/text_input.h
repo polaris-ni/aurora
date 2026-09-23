@@ -234,7 +234,7 @@ class TextInput : public LeafWidget {
         const std::size_t b = std::max(b0, b1);
         sel_start_ = a;
         if (b <= a) {
-            sel_end_ = NO_SEL;
+            sel_end_ = AURORA_NO_SEL;
             caret_ = a;
         } else {
             sel_end_ = b - 1U;  // 含尾模型
@@ -291,7 +291,7 @@ class TextInput : public LeafWidget {
         const std::size_t caret_cp = byte_to_cp(value_.get(), std::min(a + utf8.size(), value_.get().size()));
         caret_ = caret_cp;
         sel_start_ = caret_cp;
-        sel_end_ = NO_SEL;
+        sel_end_ = AURORA_NO_SEL;
         mark_needs_layout();
         mark_needs_paint();
         if (on_changed_) {
@@ -580,7 +580,7 @@ class TextInput : public LeafWidget {
             const size_t ch = render::FontEngine::hit_test_char_inclusive(v, lx, f, opts);
             caret_ = render::FontEngine::hit_test_char(v, lx, f, opts);
             sel_start_ = ch;  // 锚点（含入字符）
-            sel_end_ = NO_SEL;  // 尚未形成选区，待拖拽
+            sel_end_ = AURORA_NO_SEL;  // 尚未形成选区，待拖拽
             selecting_ = true;
             request_focus();
             mark_needs_paint();
@@ -612,7 +612,7 @@ class TextInput : public LeafWidget {
                 sel_start_ = 0;
                 sel_end_ = n - 1;  // 含尾：最后一个字符下标
             } else {
-                sel_end_ = NO_SEL;
+                sel_end_ = AURORA_NO_SEL;
             }
             caret_ = n;
             mark_needs_paint();
@@ -647,7 +647,7 @@ class TextInput : public LeafWidget {
             }
             std::string clip = Clipboard::get_text();
             if (!clip.empty()) {
-                if (sel_end_ != NO_SEL) {
+                if (sel_end_ != AURORA_NO_SEL) {
                     delete_selection();
                 }
                 if (max_length_ > 0) {
@@ -666,7 +666,7 @@ class TextInput : public LeafWidget {
                 value_ = pv;
                 caret_ += cp_count(clip);
                 sel_start_ = caret_;
-                sel_end_ = NO_SEL;
+                sel_end_ = AURORA_NO_SEL;
                 notify_changed();
                 mark_needs_paint();
             }
@@ -695,14 +695,14 @@ class TextInput : public LeafWidget {
         if (dir != 0) {
             if (shift) {
                 // 含头含尾：以当前 caret 作为含入锚点，按方向扩展选区。
-                if (sel_end_ == NO_SEL) {
+                if (sel_end_ == AURORA_NO_SEL) {
                     sel_start_ = caret_;
                     sel_end_ = caret_;  // 先建立 1-char 选区锚点
                 }
                 const auto nc = static_cast<long long>(caret_) + dir;
                 caret_ = static_cast<size_t>(std::clamp(nc, 0LL, static_cast<long long>(n)));
                 if (dir > 0) {
-                    sel_end_ = (caret_ == 0) ? NO_SEL : caret_ - 1;  // 含尾最后字符 = caret-1
+                    sel_end_ = (caret_ == 0) ? AURORA_NO_SEL : caret_ - 1;  // 含尾最后字符 = caret-1
                 } else {
                     sel_end_ = caret_;  // 含尾 = 新 caret 处的字符
                 }
@@ -710,7 +710,7 @@ class TextInput : public LeafWidget {
                 const auto nc = static_cast<long long>(caret_) + dir;
                 caret_ = static_cast<size_t>(std::clamp(nc, 0LL, static_cast<long long>(n)));
                 sel_start_ = caret_;
-                sel_end_ = NO_SEL;  // 无选区
+                sel_end_ = AURORA_NO_SEL;  // 无选区
             }
             mark_needs_paint();
             e.is_handled = true;
@@ -722,7 +722,7 @@ class TextInput : public LeafWidget {
                 e.is_handled = true;
                 return;
             }
-            if (sel_end_ != NO_SEL) {
+            if (sel_end_ != AURORA_NO_SEL) {
                 delete_selection();
             } else {
                 delete_before_caret();
@@ -776,8 +776,8 @@ class TextInput : public LeafWidget {
         const size_t pn = cp_count(preedit_);
         preedit_cursor_ = std::min(e.cursor_index, pn);
         preedit_sel_start_ = std::min(e.sel_start, pn);
-        preedit_sel_end_ = e.has_preedit_selection() ? std::min(e.sel_end, pn) : NO_SEL;
-        if (preedit_sel_end_ != NO_SEL && preedit_sel_end_ < preedit_sel_start_) {
+        preedit_sel_end_ = e.has_preedit_selection() ? std::min(e.sel_end, pn) : AURORA_NO_SEL;
+        if (preedit_sel_end_ != AURORA_NO_SEL && preedit_sel_end_ < preedit_sel_start_) {
             preedit_sel_end_ = preedit_sel_start_;  // 端点倒置时退化为单点选区
         }
         mark_needs_paint();
@@ -804,9 +804,8 @@ class TextInput : public LeafWidget {
         if (cached_direction_ == TextDirection::RTL) {
             const float text_w = render::FontEngine::measure_width(shown, f, opts);
             const float right_tx = box.origin.x + (box.size.width - padding_.right - text_w);
-            if (right_tx > tx) {
-                tx = right_tx;
-            }
+            // tx 作 std::max 首参：右锚点为 NaN 时返回 tx，与原 `>` 判据同语义。
+            tx = std::max(tx, right_tx);
         }
         const float ty = box.origin.y + padding_.top + ((box.size.height - padding_.top - padding_.bottom - th) * 0.5F);
         const size_t ci = composed_index(caret_) + preedit_cursor_;
@@ -826,8 +825,8 @@ class TextInput : public LeafWidget {
     /// @brief 当前文本值（只读，供测试 / 外部读取）。
     [[nodiscard]] auto value() const -> std::string { return value_.get(); }
 
-    /// @brief 是否有活动选区（无选区时 sel_end_ == NO_SEL）。
-    [[nodiscard]] auto has_selection() const -> bool { return sel_end_ != NO_SEL; }
+    /// @brief 是否有活动选区（无选区时 sel_end_ == AURORA_NO_SEL）。
+    [[nodiscard]] auto has_selection() const -> bool { return sel_end_ != AURORA_NO_SEL; }
 
     /// @brief 当前选中的文本（含头含尾：返回 [min, max] 区间内的全部字符）。无选区返回空。
     [[nodiscard]] auto selected_text() const -> std::string {
@@ -889,16 +888,15 @@ class TextInput : public LeafWidget {
         if (cached_direction_ == TextDirection::RTL) {
             const float right_tx = bounds.origin.x + (bounds.size.width - padding_.right - text_w);
             // 文本未超宽才右对齐；超宽回退左对齐，避免文本溢出到控件右侧之外。
-            if (right_tx > tx) {
-                tx = right_tx;
-            }
+            // tx 作 std::max 首参：右锚点为 NaN 时返回 tx，与原 `>` 判据同语义。
+            tx = std::max(tx, right_tx);
         }
         const float ty =
             bounds.origin.y + padding_.top + ((bounds.size.height - padding_.top - padding_.bottom - th) * 0.5F);
 
         // 选区高亮（含头含尾模型）：无选区不画；端点字符（含行尾/行首）始终计入。
         // 组合期间 `shown` 含 preedit，故下标须经 `composed_index` 映射，否则高亮整体错位。
-        if (!empty && sel_end_ != NO_SEL) {
+        if (!empty && sel_end_ != AURORA_NO_SEL) {
             const size_t a = composed_index(std::min(sel_start_, sel_end_));
             const size_t b = composed_index(std::max(sel_start_, sel_end_));
             const render::TextLayoutOpts opts = layout_opts();
@@ -980,7 +978,7 @@ class TextInput : public LeafWidget {
         if (text.empty()) {
             return;
         }
-        if (sel_end_ != NO_SEL) {
+        if (sel_end_ != AURORA_NO_SEL) {
             delete_selection();  // 选区替换
         }
         std::string ins = text;
@@ -1002,7 +1000,7 @@ class TextInput : public LeafWidget {
         value_ = v;
         caret_ += cp_count(ins);
         sel_start_ = caret_;
-        sel_end_ = NO_SEL;
+        sel_end_ = AURORA_NO_SEL;
         notify_changed();
         mark_needs_paint();
     }
@@ -1033,7 +1031,7 @@ class TextInput : public LeafWidget {
         const float pw = render::FontEngine::measure_width(preedit_, f);
 
         // ① preedit 内选区（输入法高亮「待转换片段」）
-        if (preedit_sel_end_ != NO_SEL) {
+        if (preedit_sel_end_ != AURORA_NO_SEL) {
             const size_t a = std::min(preedit_sel_start_, preedit_sel_end_);
             const size_t b = std::max(preedit_sel_start_, preedit_sel_end_);
             const float sx0 = px0 + render::FontEngine::caret_x(preedit_, a, f, opts);
@@ -1055,7 +1053,7 @@ class TextInput : public LeafWidget {
         preedit_.clear();
         preedit_cursor_ = 0;
         preedit_sel_start_ = 0;
-        preedit_sel_end_ = NO_SEL;
+        preedit_sel_end_ = AURORA_NO_SEL;
         mark_needs_paint();
     }
 
@@ -1100,18 +1098,18 @@ class TextInput : public LeafWidget {
     std::function<void(const std::string &)> on_submit_;  ///< Enter 提交触发
 
     // 文字选区状态（含头含尾模型，与 Text 一致：sel_start_/sel_end_ 为「被选中字符的码点下标」；
-    // 无选区时 sel_end_ == NO_SEL。caret_ 为编辑光标位置（caret 下标，介于字符之间）。UTF-8 安全）
+    // 无选区时 sel_end_ == AURORA_NO_SEL。caret_ 为编辑光标位置（caret 下标，介于字符之间）。UTF-8 安全）
     size_t sel_start_ = 0;
-    size_t sel_end_ = NO_SEL;
+    size_t sel_end_ = AURORA_NO_SEL;
     size_t caret_ = 0;
     bool selecting_ = false;
-    static constexpr size_t NO_SEL = static_cast<size_t>(-1);
+    static constexpr size_t AURORA_NO_SEL = static_cast<size_t>(-1);
 
     // IME 组合态：preedit 不进 value_（数据模型保持纯净），仅在绘制/测量期插入 caret_ 处。
     std::string preedit_;  ///< 预编辑串（UTF-8）；空 = 无组合
     size_t preedit_cursor_ = 0;  ///< 组合光标在 preedit 内的码点下标
     size_t preedit_sel_start_ = 0;  ///< preedit 内选区起点（码点下标）
-    size_t preedit_sel_end_ = NO_SEL;  ///< preedit 内选区终点（含尾）；NO_SEL = 无
+    size_t preedit_sel_end_ = AURORA_NO_SEL;  ///< preedit 内选区终点（含尾）；AURORA_NO_SEL = 无
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
     // UTF-8 码点原语已收口到 aurora::utf8_cp_*（见 core/utf8.h，dup-1）；此处委托，避免重复实现。
@@ -1162,7 +1160,7 @@ class TextInput : public LeafWidget {
         value_ = v;
         caret_ = a;
         sel_start_ = a;
-        sel_end_ = NO_SEL;  // 删除后无选区
+        sel_end_ = AURORA_NO_SEL;  // 删除后无选区
     }
     auto delete_before_caret() -> void {
         if (caret_ == 0) {
@@ -1185,7 +1183,7 @@ class TextInput : public LeafWidget {
         value_ = v;
         --caret_;
         sel_start_ = caret_;
-        sel_end_ = NO_SEL;  // 退格后无选区
+        sel_end_ = AURORA_NO_SEL;  // 退格后无选区
     }
 };
 

@@ -43,7 +43,7 @@ class ThreadPool {
   public:
     /// @brief 编译期默认是否 deferred：仅「无 `std::thread` 能力」的构建为 true
     ///        （现状即 Emscripten 未开 `-pthread`，见 platform.h `AURORA_CAP_THREADS`）。
-    static inline constexpr bool AURORA_COMPILE_TIME_DEFERRED = AURORA_CAP_THREADS == 0;
+    static constexpr bool AURORA_COMPILE_TIME_DEFERRED = AURORA_CAP_THREADS == 0;
 
     /// @brief 默认 worker 数：`hardware_concurrency()`，下限 2（单核/查询失败时为 2）。
     [[nodiscard]] static auto default_worker_count() -> std::size_t {
@@ -58,8 +58,8 @@ class ThreadPool {
      * @brief 构造：默认启动 `worker_count` 个 worker 线程；
      *        deferred 模式（`AURORA_COMPILE_TIME_DEFERRED` 或显式 `force_deferred`）不启动线程。
      */
-    explicit ThreadPool(std::size_t worker_count = default_worker_count(), bool force_deferred = false) {
-        deferred_ = AURORA_COMPILE_TIME_DEFERRED || force_deferred;
+    explicit ThreadPool(std::size_t worker_count = default_worker_count(), bool force_deferred = false)
+        : deferred_(AURORA_COMPILE_TIME_DEFERRED || force_deferred) {
         if (deferred_) {
             return;
         }
@@ -73,6 +73,10 @@ class ThreadPool {
     }
 
     /// @brief 停止并 join 全部 worker（RAII 安全，无悬挂线程）。deferred 模式排空剩余队列。
+    // 豁免 bugprone-exception-escape：析构会加锁 / notify / join 并销毁 std::function 任务，这些
+    // 皆无 noexcept 规格——即 .clang-tidy 记录在案的 std::function 假告警面。析构期无调用方可回报，
+    // 就地吞掉只会静默丢错；同一份代码在 native 口径不报（口径差异见 CODING_STANDARDS.md §5.2）。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     ~ThreadPool() {
         {
             std::scoped_lock lock(mutex_);
@@ -183,6 +187,9 @@ class ThreadPool {
      * 跨 TU 单实例（C++17 inline 语义）；程序退出时静态析构 join 全部 worker。
      */
     [[nodiscard]] static auto default_pool() -> ThreadPool & {
+        // 惰性构造的函数内 static：首次调用才建，跨 TU 初始化顺序问题在此不存在（本检查的担心面）。
+        // 仅浏览器口径命中——native 遍同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。
+        // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
         static ThreadPool instance(default_worker_count());
         return instance;
     }

@@ -52,6 +52,10 @@ class Effect {
         current_ = this;
         // RAII 守卫：fn 抛出时也必须恢复 current_，否则全局指针悬垂于本 Effect——
         // 析构后任何 State/Computed::get() 都会向死对象订阅、set() 时解引用已析构对象（UB）。
+        // 豁免 cppcoreguidelines-special-member-functions：按 RAII 守卫惯例，作用域守卫不应拷贝/移动
+        // （拷贝两个持有同一 prev 的副本会互相覆写 current_），生命周期由析构独占、恢复 prev 即其唯一
+        // 职责；补四件套反而诱导误用，此处刻意只写析构。
+        // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
         struct CurrentGuard {
             Effect *prev;
             ~CurrentGuard() { current_ = prev; }

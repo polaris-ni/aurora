@@ -101,7 +101,7 @@ AURORA_TEST_CASE(out_of_gamut_components_are_clamped) {
 AURORA_TEST_CASE(golden_colorspace_convention_is_srgb) {
     // SSOT 约定锚点：golden 基准唯一色彩空间恒为 sRGB（逐位确定性红线）。
     // utest_offscreen 的 golden 注记（colorspace 字段）与本断言共同守卫该约定。
-    AURORA_TEST_CHECK_TRUE(GOLDEN_COLORSPACE == ColorSpace::SRGB);
+    AURORA_TEST_CHECK_TRUE(AURORA_GOLDEN_COLORSPACE == ColorSpace::SRGB);
 }
 
 }  // namespace aurora::test_cases::utest_color_space

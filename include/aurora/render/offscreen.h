@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
+#include <span>
 
 #include "aurora/core/types.h"
 #include "aurora/environment/build_context.h"
@@ -53,7 +55,9 @@ namespace aurora {
     out.width = width;
     out.height = height;
     const std::size_t bytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
-    out.pixels.assign(painter.data(), painter.data() + bytes);
+    // 帧缓冲是 Painter 持有的字节窗口：以 std::span(ptr, count) 表达该区间，免写裸指针加法（语义等价）。
+    const std::span<const std::uint8_t> framebuffer{painter.data(), bytes};
+    out.pixels.assign(framebuffer.begin(), framebuffer.end());
     return out;
 }
 

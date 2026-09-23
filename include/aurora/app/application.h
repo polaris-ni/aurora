@@ -16,7 +16,7 @@
 #include "aurora/app/window_host.h"
 #include "aurora/commands.h"
 #include "aurora/core/log.h"
-#include "aurora/core/platform.h"
+#include "aurora/core/platform.h"  // NOLINT
 #include "aurora/core/strict_mode.h"
 #include "aurora/core/thread.h"
 #include "aurora/core/types.h"
@@ -114,6 +114,14 @@ class Application {
         }
 #endif
     }
+
+    // 禁复制/移动**早已是既成事实**（成员含 `std::vector<std::unique_ptr<WindowHost>>` 故不可复制，
+    // 且用户声明析构会抑制隐式移动），本处只是把隐式结果写成显式契约，不改变任何可编译性。
+    // 实例持有原生窗口与 rAF 所有权，语义上也不该被搬走——「一个应用一个实例」。
+    Application(const Application &) = delete;
+    Application(Application &&) = delete;
+    auto operator=(const Application &) -> Application & = delete;
+    auto operator=(Application &&) -> Application & = delete;
 
     // ---- 多窗口（specification/06-app-platform.md §2.4）----
 
@@ -569,7 +577,7 @@ class Application {
 #endif
 
     StrictMode prev_strict_ = StrictMode::Off;  ///< 循环期保存的线程级严格模式（收尾还原）。
-    std::chrono::steady_clock::time_point loop_last_{};  ///< 上一帧起始时刻（帧 dt 基准）。
+    std::chrono::steady_clock::time_point loop_last_;  ///< 上一帧起始时刻（帧 dt 基准；默认即 epoch 零点）。
     int loop_frames_ = 0;  ///< 本轮循环已推进帧数（`max_frames` 预算计数）。
 
     StrictMode strict_ = StrictMode::Off;  ///< 严格模式（run() 期间套用到线程级开关）

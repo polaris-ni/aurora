@@ -92,13 +92,13 @@ auto TimelinePlayer::bind_track(std::size_t slot, Track t) -> void {
         return;  // 越界槽位：无操作（防御式，同 interval() 的全区间哨兵）
     }
     // 槽位区间+目标做轨道身份：覆盖同槽位同目标的旧绑定，其余按绑定序追加（确定写序）。
-    for (auto &existing : m_->tracks_) {
+    for (auto &existing : m_->tracks) {
         if (existing.interval == t.interval && existing.target == t.target) {
             existing = std::move(t);
             return;
         }
     }
-    m_->tracks_.push_back(std::move(t));
+    m_->tracks.push_back(std::move(t));
 }
 
 auto TimelinePlayer::apply_all(const std::vector<Track> &tracks, double master_t) -> void {
@@ -112,34 +112,34 @@ auto TimelinePlayer::apply_all(const std::vector<Track> &tracks, double master_t
 }
 
 auto TimelinePlayer::forward(double from) -> void {
-    m_->master_.forward(from);
+    m_->master.forward(from);
     if (from == 0.0) {
         // 起播瞬间：全部轨道统一初始化到 begin 值（消除「未播轨道保持旧值」）。
-        apply_all(m_->tracks_, m_->master_.value());
+        apply_all(m_->tracks, m_->master.value());
     }
 }
 
-auto TimelinePlayer::reverse() -> void { m_->master_.reverse(); }
+auto TimelinePlayer::reverse() -> void { m_->master.reverse(); }
 
-auto TimelinePlayer::stop() -> void { m_->master_.stop(); }
+auto TimelinePlayer::stop() -> void { m_->master.stop(); }
 
-auto TimelinePlayer::progress() const -> double { return m_->master_.value(); }
+auto TimelinePlayer::progress() const -> double { return m_->master.value(); }
 
-auto TimelinePlayer::status() const -> AnimationStatus { return m_->master_.status(); }
+auto TimelinePlayer::status() const -> AnimationStatus { return m_->master.status(); }
 
-auto TimelinePlayer::is_completed() const -> bool { return m_->master_.is_completed(); }
+auto TimelinePlayer::is_completed() const -> bool { return m_->master.is_completed(); }
 
-auto TimelinePlayer::is_animating() const -> bool { return m_->master_.is_animating(); }
+auto TimelinePlayer::is_animating() const -> bool { return m_->master.is_animating(); }
 
 auto TimelinePlayer::on_completed(std::function<void()> cb) -> void { m_->on_completed = std::move(cb); }
 
 auto TimelinePlayer::attach(Animator &a) -> void {
-    a.drive(m_->master_);
+    a.drive(m_->master);
     const auto p = m_;  // binding 持载荷副本：句柄析构后帧循环仍安全驱动（同 AnimatedValue）
     a.add_binding([p]() -> void {
-        if (p->master_.dirty()) {
-            apply_all(p->tracks_, p->master_.value());
-            if (p->master_.is_completed() && !p->fired_completed) {
+        if (p->master.dirty()) {
+            apply_all(p->tracks, p->master.value());
+            if (p->master.is_completed() && !p->fired_completed) {
                 p->fired_completed = true;
                 if (p->on_completed) {
                     p->on_completed();
@@ -150,17 +150,17 @@ auto TimelinePlayer::attach(Animator &a) -> void {
 }
 
 auto TimelinePlayer::tick(double dt_seconds) -> void {
-    m_->master_.tick(dt_seconds);
-    if (m_->master_.dirty()) {
-        apply_all(m_->tracks_, m_->master_.value());
-        if (m_->master_.is_completed() && !m_->fired_completed) {
+    m_->master.tick(dt_seconds);
+    if (m_->master.dirty()) {
+        apply_all(m_->tracks, m_->master.value());
+        if (m_->master.is_completed() && !m_->fired_completed) {
             m_->fired_completed = true;
             if (m_->on_completed) {
                 m_->on_completed();
             }
         }
     }
-    m_->master_.clear_dirty();
+    m_->master.clear_dirty();
 }
 
 }  // namespace aurora

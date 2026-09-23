@@ -43,6 +43,14 @@ class WasmAriaBridge final : public a11y::Provider {
     explicit WasmAriaBridge(std::string container_id);
     ~WasmAriaBridge() override;
 
+    // 禁复制/移动：桥自持镜像容器 DOM 与桥广播表的一条注册边，副本会形成「两处登记一棵树」的
+    // 孤儿镜像。实例由 `WasmSurface` 经 `unique_ptr` 独占持有，从不按值转移，故显式写出契约
+    // （补齐四件套即满足五法则自查项，CODING_STANDARDS.md §5.1）。
+    WasmAriaBridge(const WasmAriaBridge &) = delete;
+    WasmAriaBridge(WasmAriaBridge &&) = delete;
+    auto operator=(const WasmAriaBridge &) -> WasmAriaBridge & = delete;
+    auto operator=(WasmAriaBridge &&) -> WasmAriaBridge & = delete;
+
     /// @brief 激活：注册进桥广播表、置 `screen_reader_active`、请求首帧全量应用。
     ///
     /// WASM 无外部激活信号，本方法由**首个 `set_root`** 调用（见文件头 D14 例外申报）。

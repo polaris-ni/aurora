@@ -381,6 +381,13 @@ class DragToDismiss {
             fire_dismissed_if_needed();
             return;
         }
+        if (!spring_.has_value()) {
+            // 不变量兜底：animating_ 置真与 spring_ 建模拟同在 on_release 完成，正常路径不可达此处；
+            // 若状态被破坏（如外部误置 animating_），按「静止」收敛并保留当前 progress，
+            // 而非解引用空 optional（未定义行为）。不弹 on_dismissed：未飞出即不触发飞出回调。
+            animating_ = false;
+            return;
+        }
         spring_t_ += dt_seconds;
         const double v = spring_->value(spring_t_);
         progress_.set(std::clamp(v, 0.0, 1.0));

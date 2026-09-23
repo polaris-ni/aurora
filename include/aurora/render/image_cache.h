@@ -24,6 +24,9 @@ class ImageCache {
   public:
     /// @brief 进程级单例。
     [[nodiscard]] static auto instance() -> ImageCache & {
+        // 惰性构造的函数内 static：首次调用才建，跨 TU 初始化顺序问题在此不存在（本检查的担心面）。
+        // 仅浏览器口径命中——native 遍同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。
+        // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
         static ImageCache cache;
         return cache;
     }

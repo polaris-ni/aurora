@@ -57,6 +57,10 @@ namespace validators {
         if (v.empty()) {
             return {};  // 空值交给 required 检查
         }
+        // 样式正则刻意做成函数内 static **缓存**：提到调用点即每次校验重编一次正则（真性能缺陷），
+        // 改成 constexpr 又不可能。惰性构造与跨 TU 初始化顺序无关（本检查的担心面），且仅浏览器
+        // 口径命中——native 遍同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。
+        // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
         static const std::regex PATTERN{R"(^[^@\s]+@[^@\s]+\.[^@\s]+$)"};
         return std::regex_match(v, PATTERN) ? std::string{} : msg;
     };
@@ -64,6 +68,10 @@ namespace validators {
 
 /// @brief 自定义正则。
 [[nodiscard]] inline auto matches(const std::string &pattern_str, std::string message = "Invalid format") -> Validator {
+    // 验证器 lambda 体内构造 std::regex（非法样式即抛 std::regex_error），转入 Validator（std::function）
+    // 后被本检查一律判「不应抛出」——其 operator() 无 noexcept 规格，即 .clang-tidy 记录在案的系统性
+    // 假告警面。样式由宿主在装配期传入，抛出沿栈交给调用验证器的宿主代码，本库不做异常捕获。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     return [pattern_str, msg = std::move(message)](const std::string &v) -> std::string {
         if (v.empty()) {
             return {};
@@ -119,6 +127,11 @@ namespace validators {
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
  */
+// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 value_provider_ / validator_，而其拷贝与 operator()
+// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
+// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
+// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class FormField : public SingleChild {
   public:
     FormField() = default;

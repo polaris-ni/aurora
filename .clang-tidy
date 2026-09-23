@@ -83,7 +83,11 @@ Checks: '
   -readability-convert-member-functions-to-static,
 '
 WarningsAsErrors: ''
-HeaderFilterRegex: '(include/aurora|src/aurora|/tests/|/tools/|/examples/)'
+# 头文件过滤必须**分隔符无关**：原值只认正斜杠，而 Windows 编译库里的头文件路径常是「正斜杠根 +
+# 反斜杠段」的混合形态，某一段与正则不符即把该段之后的头文件诊断整片滤掉——本机 native 因此长期
+# 报 0，而 Linux runner（全正斜杠）同一份代码报 422 条（wasm 口径 470）。两个数都是真话，只是
+# 覆盖面不同；把正则改为 [/\\] 后本机与 CI 同面，头文件存量在本机即可复现与处置。
+HeaderFilterRegex: '(include[/\\]aurora|src[/\\]aurora|[/\\]tests[/\\]|[/\\]tools[/\\]|[/\\]examples[/\\])'
 FormatStyle: file
 ExtraArgs: [ '-std=c++20' ]
 CheckOptions:
@@ -103,11 +107,22 @@ CheckOptions:
   - key: readability-identifier-naming.MethodCase
     value: lower_case
 
-  # 局部变量/全局变量/参数
+  # 局部变量
   - key: readability-identifier-naming.LocalVariableCase
     value: lower_case
+
+  # 全局变量
+  # ⚠️ clang-tidy 22 把「类内 `static inline`（含 thread_local）数据成员」也归入 GlobalVariable 类
+  # （实测探针：`struct K { static inline bool enabled_; }` 报的是 global variable，而非
+  # ClassStatic/Member）。本仓这类成员一律按成员惯例以 `_` 收尾，故给 GlobalVariable 加
+  # 「以 `_` 结尾者豁免」。注意 IgnoredRegexp 是**整串匹配**语义（`_$` 无效，`.*_` 才生效，均已实测），
+  # 且只放宽「大小写风格」这一维：`otherCamel` 这类真全局仍照常告警（同一探针的负例验证过）。
   - key: readability-identifier-naming.GlobalVariableCase
     value: lower_case
+  - key: readability-identifier-naming.GlobalVariableIgnoredRegexp
+    value: '.*_'
+
+  # 形参
   - key: readability-identifier-naming.ParameterCase
     value: lower_case
   - key: readability-identifier-naming.ConstantParameterCase

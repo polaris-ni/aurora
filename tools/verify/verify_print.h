@@ -29,6 +29,10 @@ inline auto pad_right(std::string text, std::size_t width) -> std::string {
 /// @brief 句柄 / 指针 → `0x` + 16 位零填充十六进制（32/64 位下宽度一致，便于逐行比对）。
 inline auto format_handle(const void *handle) -> std::string {
     std::ostringstream oss;
+    // 豁免 cppcoreguidelines-pro-type-reinterpret-cast：指针→std::uintptr_t 是标准背书的整值转换
+    // （仅显示用途）；std::bit_cast 要求两侧等宽，而 sizeof(void*) == sizeof(uintptr_t) 并非标准
+    // 保证（不等时 bit_cast 为 UB，reinterpret_cast 仍良定义），跨平台探针不宜替换。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     oss << "0x" << std::hex << std::setw(16) << std::setfill('0') << reinterpret_cast<std::uintptr_t>(handle);
     return oss.str();
 }

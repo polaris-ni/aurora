@@ -644,7 +644,7 @@ struct AtspiBridge::Impl {
         }
         std::optional<std::uint64_t> id;
         if (path == model.env().base_path) {
-            id = k_atspi_app_id;
+            id = AURORA_ATSPI_APP_ID;
         } else {
             id = model.id_of_path(path);
         }
@@ -878,7 +878,7 @@ struct AtspiBridge::Impl {
         }
 
         // Application（仅 App 根）
-        if (id == k_atspi_app_id && iface == atspi::k_iface_application) {
+        if (id == AURORA_ATSPI_APP_ID && iface == atspi::k_iface_application) {
             if (member == "GetLocale") {
                 return reply_s(m, "C");
             }
@@ -887,7 +887,7 @@ struct AtspiBridge::Impl {
             }
         }
         // Socket（仅 App 根）
-        if (id == k_atspi_app_id && iface == atspi::k_iface_socket) {
+        if (id == AURORA_ATSPI_APP_ID && iface == atspi::k_iface_socket) {
             if (member == "Embedded") {
                 return reply_so(m, model.env().registry_root);
             }
@@ -1669,7 +1669,7 @@ auto AtspiBridge::on_announcement(const std::string &text, const Widget *target)
     if (d_->dirty) {
         d_->sync_point();  // 目标可能刚入树：先投影再寻址
     }
-    std::uint64_t id = k_atspi_frame_id;
+    std::uint64_t id = AURORA_ATSPI_FRAME_ID;
     if (target != nullptr) {
         const std::uint64_t rid = target->runtime_id();
         if (d_->model.exists(rid)) {
@@ -1706,7 +1706,7 @@ auto AtspiBridge::set_window_title(std::string title) -> void {
     // FRAME 是合成节点、不在根树快照里 ⇒ 宿主驱动的名字变化无 diff 事件源，此处直发
     // （上游同形：gtk_window 标题 → notify::title → property-change:accessible-name）。
     if (changed && d_->conn != nullptr && d_->active) {
-        d_->emit_property_change(k_atspi_frame_id, "accessible-name");
+        d_->emit_property_change(AURORA_ATSPI_FRAME_ID, "accessible-name");
         d_->L.connection_flush(d_->conn);
     }
 }

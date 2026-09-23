@@ -359,6 +359,10 @@ class Surface {
     /// 零宽竖盒）。后端自行 `× scale_factor` + `ClientToScreen` 折算物理屏幕像素。
     /// 返回零盒 = 无有效定位，后端退化为系统默认位置（候选窗贴在鼠标/窗口角落，仍可用）。
     /// @note Thread: main-thread only
+    // 豁免 performance-unnecessary-value-param：本函数是虚接口且为既定扩展点契约（codespec/ARCHITECTURE.md
+    // 「Surface 扩展点」条目，Win32/D3D11/X11/Wayland/wgpu 各后端均有同签名 override），基类单边改
+    // const 引用会切断多态；各 override 以按值形参 + std::move 入成员存储，按值即设计意图。
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     virtual auto set_composition_caret_provider(std::function<Rect()> /*provider*/) -> void {}
 
     /// @brief GPU 帧调度挂点：后端提供 GPU 栅格（`rhi::RhiFrameSink`）时返回其指针，默认 nullptr。

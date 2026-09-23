@@ -78,7 +78,7 @@ class Preferences {
 
     /// @brief 文件模式（默认 Options）：显式指定配置存储的 JSON 文件路径，构造即加载（文件不存在则为空对象）。
     /// @param file 配置文件的完整路径；可位于任意位置（含子目录，目录会自动创建）。
-    explicit Preferences(std::filesystem::path file) : file_(std::move(file)), opts_(Options{}) { load_from_file(); }
+    explicit Preferences(std::filesystem::path file) : file_(std::move(file)) { load_from_file(); }
 
     /// @brief 文件模式：显式指定配置存储的 JSON 文件路径与选项，构造即加载（文件不存在则为空对象）。
     /// @param file 配置文件的完整路径；可位于任意位置（含子目录，目录会自动创建）。
@@ -288,6 +288,10 @@ class Preferences {
     template <typename T>
     [[nodiscard]] auto get_impl(const std::string &scope, const std::string &key, T fallback) const -> T;
     template <typename T>
+    // 豁免 performance-unnecessary-value-param：告警仅对 std::vector<int> 这类「转 Json 时本就要逐元素
+    // 复制」的实例化成立；同一模板体对 T=std::string/Json 等实例靠按值形参 + Json(std::move(value))
+    // 完成移动转换，改 const 引用反而把这些高频实例化退化成深拷贝。单一签名的私有模板按最受益形态取形参。
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     auto set_impl(const std::string &scope, const std::string &key, T value) -> void;
     template <typename T>
     [[nodiscard]] auto watch_impl(const std::string &scope, const std::string &key, T fallback)

@@ -37,6 +37,10 @@ constexpr auto storage_version(const T * /*tag*/) -> std::uint32_t {
 /// 命名空间后会变，反会破坏持久化类型检查）。
 template <typename T>
 auto storage_type_name(const T * /*tag*/) -> const std::string & {
+    // 惰性构造的函数内 static（typeid 名要运行期才拿得到，无法常量初始化）：模板每个实例各建一份、
+    // 首建时刻与跨 TU 静态初始化顺序无关（本检查的担心面）。仅浏览器口径命中——native 遍同一份
+    // 代码不报（CODING_STANDARDS.md §5.2 的口径差异）。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static const std::string NAME = typeid(T).name();  // 线程安全静态初始化，跨 TU 唯一
     return NAME;
 }

@@ -34,12 +34,20 @@ class Subscription {
     /// @brief 由取消句柄构造；空句柄表示"未订阅/已释放"。
     explicit Subscription(std::function<void()> cancel) : cancel_(std::move(cancel)) {}
 
+    // 豁免 bugprone-exception-escape：`reset()` 会销毁并调用取消句柄（std::function），其析构与
+    // operator() 皆无 noexcept 规格——即本检查记录在案的 std::function 假告警面。宿主回调实抛时，
+    // 析构期无调用方可回报，就地吞掉只会静默丢错（CODING_STANDARDS.md §2 生命周期回调条目）。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     ~Subscription() { reset(); }
 
     Subscription(const Subscription &) = delete;
     auto operator=(const Subscription &) -> Subscription & = delete;
 
     Subscription(Subscription &&o) noexcept : cancel_(std::move(o.cancel_)) { o.cancel_ = nullptr; }
+    // 同族豁免：移动赋值先 `reset()` 旧句柄，故继承上面那条 std::function 假告警面；`noexcept` 是
+    // 既定契约（控件经 `Node{widget}` 搬移依赖移动不抛），不为迁就告警改签名。真抛出即 terminate，
+    // 与析构期抛出同形，本库不为此新增吞错路径。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     auto operator=(Subscription &&o) noexcept -> Subscription & {
         if (this != &o) {
             reset();

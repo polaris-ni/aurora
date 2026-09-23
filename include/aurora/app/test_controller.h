@@ -41,7 +41,7 @@ struct TestControllerConfig {
     int width = 800;  ///< 视口宽（逻辑像素）
     int height = 600;  ///< 视口高（逻辑像素）
     double frame_seconds = 1.0 / 60.0;  ///< 每帧 dt（固定步长，不读真实时钟）
-    std::string png_path{};  ///< 非空时每次 present 写出 PNG（调试截图用）
+    std::string png_path;  ///< 非空时每次 present 写出 PNG（调试截图用）
 };
 
 /// @brief 无头 widget 测试驱动：持一棵 widget 树，按帧推进并完成交互与断言。
@@ -74,8 +74,8 @@ class TestController {
 
     TestController(const TestController &) = delete;
     auto operator=(const TestController &) -> TestController & = delete;
-    TestController(TestController &&) noexcept;
-    auto operator=(TestController &&) noexcept -> TestController &;
+    TestController(TestController &&other) noexcept;
+    auto operator=(TestController &&other) noexcept -> TestController &;
     ~TestController();
 
     // ── 帧驱动 ──

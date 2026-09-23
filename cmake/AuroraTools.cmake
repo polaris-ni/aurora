@@ -104,6 +104,21 @@ endif ()
 # --build --clean-first）会先删掉它，gen_error_codes 再按「文件缺失=首次生成」从空对象重建，
 # 其余段全部丢失、API 守门全红。列 gen.h/catalog 为输出即可（二者可由 errors.toml 完整再生）；
 # api 文件的 merge 在命令执行时照常进行，完整重建走 aurora_api_json 目标。
+# 生成物必须再过一遍 clang-format：`.gen.h` 里的长 hint 由 clang-format 的 BreakStringLiterals
+# 按 ColumnLimit 折成相邻字面量，生成器自己写出的是单行超长形态——于是「重新生成」这一步本身
+# 就把仓库弄红（实测：内容一字未改，仅重新生成即让 format-check 报 99 行 diff，而 HEAD 里的
+# 版本本就是「生成 + 格式化」的产物）。故生成命令后紧跟 -style=file -i，让生成与门禁同口径。
+# clang-format 不在 PATH 时仅告警跳过：不静默放行，format 作业会抓到。
+find_program(AURORA_CLANG_FORMAT_EXE NAMES clang-format)
+set(_gen_error_codes_fmt_cmds "")
+if (AURORA_CLANG_FORMAT_EXE)
+    set(_gen_error_codes_fmt_cmds
+            COMMAND ${AURORA_CLANG_FORMAT_EXE} -style=file -i
+            "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h")
+else ()
+    aurora_warn("clang-format not found on PATH: generate_error_codes will emit a non-conforming "
+                "error_codes.gen.h (format-check will flag it).")
+endif ()
 add_custom_command(
         OUTPUT ${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h
         ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md
@@ -112,6 +127,7 @@ add_custom_command(
         "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h"
         "${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md"
         "${CMAKE_SOURCE_DIR}/aurora_api.json"
+        ${_gen_error_codes_fmt_cmds}
         DEPENDS "${_gen_error_codes_exe}" ${CMAKE_SOURCE_DIR}/codespec/errors.toml
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Regenerating error_codes.gen.h / ERROR_CATALOG.md / aurora_api.json from errors.toml"

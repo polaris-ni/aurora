@@ -6,6 +6,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "aurora/core/accessibility.h"
@@ -27,7 +28,7 @@ struct PieChartProps {
     bool show_percentage_labels = false;  ///< 扇区内百分比文本
     float section_gap = 2.0F;  ///< 扇区间隙（dp，按角度换算后两侧各让出一半）
     ChartLegendSpec legend;
-    EdgeInsets padding{8.0F, 8.0F, 8.0F, 8.0F};
+    EdgeInsets padding{.left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};
 };
 
 /**
@@ -177,6 +178,8 @@ inline auto PieChart::compute_geometry(const Size &size, const Font &font) const
 
     if (legend.visible && !sections.empty()) {
         float cursor_x = g.plot.origin.x;
+        // Right（含未知位置）沿用绘图区顶部，即下面 else 分支不再重复赋同一值——
+        // 重复赋值会让本初值在三条互斥分支下都永不被读（死存储）。
         float cursor_y = g.plot.origin.y;
         if (legend.position == LegendPosition::Top) {
             cursor_y = padding.top;
@@ -184,7 +187,6 @@ inline auto PieChart::compute_geometry(const Size &size, const Font &font) const
             cursor_y = size.height - padding.bottom - line_h;
         } else {
             cursor_x = g.plot.right() + 8.0F;
-            cursor_y = g.plot.origin.y;
         }
         for (const PieSection &s : sections) {
             const float name_w = render::FontEngine::measure_width(s.name, font);
@@ -238,16 +240,16 @@ inline auto PieChart::section_hit(const Geometry &g, const Point &local) const -
     if (r < g.inner || r > g.outer) {
         return std::nullopt;
     }
-    constexpr float TWO_PI = 6.28318530717958647692F;
-    constexpr float DEG = 0.01745329251994329577F;
-    float ang = std::atan2(dy, dx) - (start_angle * DEG);
-    ang = std::fmod(ang, TWO_PI);
+    constexpr float two_pi = 6.28318530717958647692F;
+    constexpr float deg = 0.01745329251994329577F;
+    float ang = std::atan2(dy, dx) - (start_angle * deg);
+    ang = std::fmod(ang, two_pi);
     if (ang < 0.0F) {
-        ang += TWO_PI;
+        ang += two_pi;
     }
     float cursor = 0.0F;
     for (std::size_t i = 0; i < g.ratios.size(); ++i) {
-        const float sweep = static_cast<float>(g.ratios[i]) * TWO_PI;
+        const float sweep = static_cast<float>(g.ratios[i]) * two_pi;
         if (sweep <= 0.0F) {
             continue;
         }
@@ -290,7 +292,7 @@ inline auto PieChart::accessibility_value() const -> std::string {
         static_cast<std::size_t>(*hovered_section_) >= sections.size()) {
         return std::string{};
     }
-    const std::size_t i = static_cast<std::size_t>(*hovered_section_);
+    const auto i = static_cast<std::size_t>(*hovered_section_);
     return sections[i].name + ": " + std::to_string(sections[i].value);
 }
 
@@ -334,7 +336,7 @@ inline auto PieChart::describe_static() -> WidgetDescriptor {
                  .min_value = "0"},
                 {.name = "legend",
                  .type = "Json",
-                 .default_value = "{\"visible\":true,\"position\":\"Top\"}",
+                 .default_value = R"({"visible":true,"position":"Top"})",
                  .required = false,
                  .note = "图例规格：{visible,position:Top|Bottom|Right}",
                  .json_type = "object"},
@@ -418,17 +420,17 @@ inline auto PieChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
     const Color grid = Color{theme.text.r, theme.text.g, theme.text.b, 31};
     const Color axis = Color{theme.text.r, theme.text.g, theme.text.b, 160};
 
-    constexpr float TWO_PI = 6.28318530717958647692F;
-    constexpr float DEG = 0.01745329251994329577F;
+    constexpr float two_pi = 6.28318530717958647692F;
+    constexpr float deg = 0.01745329251994329577F;
     if (g.outer <= 0.0F || g.ratios.empty()) {
         return;
     }
     // 间隙按外半径换算成角度，两侧各让出一半
     const float gap_rad = g.outer > 0.0F ? (section_gap / g.outer) : 0.0F;
-    const float grow_t = static_cast<float>(grow_.progress());  // grow-in：扇形按 t 展开总角度
-    float cursor = start_angle * DEG;
+    const auto grow_t = static_cast<float>(grow_.progress());  // grow-in：扇形按 t 展开总角度
+    float cursor = start_angle * deg;
     for (std::size_t i = 0; i < g.ratios.size(); ++i) {
-        const float sweep = static_cast<float>(g.ratios[i]) * TWO_PI * grow_t;
+        const float sweep = static_cast<float>(g.ratios[i]) * two_pi * grow_t;
         if (sweep <= gap_rad) {
             cursor += sweep;
             continue;
@@ -441,7 +443,7 @@ inline auto PieChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
             c.a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.a) * 0.35F));
         }
         p.fill_sector(Point{.x = origin.x + g.center.x, .y = origin.y + g.center.y}, g.outer, g.inner, a0, a1, c);
-        if (hovered_section_.has_value() && *hovered_section_ == static_cast<int>(i)) {
+        if (hovered_section_.has_value() && std::cmp_equal(*hovered_section_, i)) {
             p.stroke_arc(Point{.x = origin.x + g.center.x, .y = origin.y + g.center.y}, (g.outer + g.inner) * 0.5F,
                          std::max(1.0F, g.outer - g.inner), a0, a1, theme.text);
         }
@@ -483,11 +485,11 @@ inline auto PieChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
     // ---- 悬停值框 ----
     if (hovered_section_.has_value() && *hovered_section_ >= 0 &&
         static_cast<std::size_t>(*hovered_section_) < sections.size()) {
-        const std::size_t i = static_cast<std::size_t>(*hovered_section_);
+        const auto i = static_cast<std::size_t>(*hovered_section_);
         const std::string text = sections[i].name + ": " + std::to_string(sections[i].value);
         const float w = render::FontEngine::measure_width(text, font) + 16.0F;
         const float h = line_h + 8.0F;
-        const float bx = std::clamp(g.center.x + g.outer * 0.5F, 0.0F, std::max(0.0F, bounds.size.width - w));
+        const float bx = std::clamp(g.center.x + (g.outer * 0.5F), 0.0F, std::max(0.0F, bounds.size.width - w));
         const float by = std::clamp(g.center.y - g.outer - h - 4.0F, 0.0F, std::max(0.0F, bounds.size.height - h));
         const Rect box{.origin = Point{.x = origin.x + bx, .y = origin.y + by}, .size = Size{.width = w, .height = h}};
         p.fill_rounded_rect(box, 4.0F, Color{theme.background.r, theme.background.g, theme.background.b, 242});

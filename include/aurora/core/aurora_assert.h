@@ -4,6 +4,11 @@
 
 #include <cstdlib>
 
+// 契约宏族刻意保持宏形态，constexpr 函数无法满足：① AURORA_ASSERT 依赖 NDEBUG 在
+// 预处理期整体改名裁切（Release 下条件不求值、零开销），函数做不到按构建配置切换存在性；
+// ② AURORA_CHECK 须经 AURORA_LOG_FATAL 就地取调用点 AURORA_FILE_NAME/__LINE__，
+// 函数拿不到调用位置；③ 常开 fail-fast（abort）语义见下方文档注释与 CODING_STANDARDS.md §1。
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
 /**
  * @brief 硬检查（常开，对标 Chromium `CHECK` / Rust `assert!`）：条件不满足时写 FATAL 日志
  *        并 `std::abort()`，**所有构建配置（含 Release/NDEBUG）均生效**。
@@ -34,3 +39,4 @@
 #else
 #define AURORA_ASSERT(cond, msg) ((void)0)
 #endif
+// NOLINTEND(cppcoreguidelines-macro-usage)

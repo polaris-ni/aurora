@@ -31,7 +31,7 @@ struct LineChartProps {
     ChartAxisSpec axis_x;  ///< 类目轴
     ChartAxisSpec axis_y;  ///< 数值轴（Linear）
     ChartLegendSpec legend;
-    EdgeInsets padding{8.0F, 8.0F, 8.0F, 8.0F};
+    EdgeInsets padding{.left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};
 };
 
 /**
@@ -84,12 +84,12 @@ class LineChart : public LeafWidget, public LineChartProps {
         return *this;
     }
     auto set_axis_x(ChartAxisSpec a) -> LineChart & {
-        axis_x = a;
+        axis_x = std::move(a);
         mark_needs_layout();
         return *this;
     }
     auto set_axis_y(ChartAxisSpec a) -> LineChart & {
-        axis_y = a;
+        axis_y = std::move(a);
         mark_needs_layout();
         return *this;
     }
@@ -152,7 +152,7 @@ class LineChart : public LeafWidget, public LineChartProps {
   private:
     struct Geometry {
         Rect plot{};
-        LinearScale y_scale{};
+        LinearScale y_scale;
         std::vector<std::string> cats;
         std::size_t point_count = 0;
         std::vector<Rect> legend_rects;  ///< 图例项命中区（局部坐标）
@@ -295,6 +295,8 @@ inline auto LineChart::compute_geometry(const Size &size, const Font &font) cons
     // 图例项命中区（与绘制同一套游标推进规则）
     if (legend.visible && !series.empty()) {
         float cursor_x = g.plot.origin.x;
+        // Right（含未知位置）沿用绘图区顶部，即下面 else 分支不再重复赋同一值——
+        // 重复赋值会让本初值在三条互斥分支下都永不被读（死存储）。
         float cursor_y = g.plot.origin.y;
         if (legend.position == LegendPosition::Top) {
             cursor_y = padding.top;
@@ -302,7 +304,6 @@ inline auto LineChart::compute_geometry(const Size &size, const Font &font) cons
             cursor_y = size.height - padding.bottom - line_h;
         } else {
             cursor_x = g.plot.right() + 8.0F;
-            cursor_y = g.plot.origin.y;
         }
         for (const ChartSeries &s : series) {
             const float name_w = render::FontEngine::measure_width(s.name, font);
@@ -465,7 +466,7 @@ inline auto LineChart::describe_static() -> WidgetDescriptor {
                  .json_type = "object"},
                 {.name = "legend",
                  .type = "Json",
-                 .default_value = "{\"visible\":true,\"position\":\"Top\"}",
+                 .default_value = R"({"visible":true,"position":"Top"})",
                  .required = false,
                  .note = "图例规格：{visible,position:Top|Bottom|Right}",
                  .json_type = "object"},
@@ -580,8 +581,8 @@ inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildConte
             const float px = point_x(g, i);
             const float py = g.y_scale.to_px(series_value(k, i), plot.bottom(), plot.origin.y);
             pts.push_back(Point{.x = origin.x + px, .y = origin.y + py});
-            if (hovered_point_.has_value() && hovered_point_->first == static_cast<int>(k) &&
-                hovered_point_->second == static_cast<int>(i)) {
+            if (hovered_point_.has_value() && std::cmp_equal(hovered_point_->first, k) &&
+                std::cmp_equal(hovered_point_->second, i)) {
                 hovered_px = Point{.x = px, .y = py};
             }
         }
@@ -590,7 +591,7 @@ inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildConte
         std::size_t dot_count = pts.size();
         if (grow_t < 1.0 && pts.size() >= 2) {
             const float span = static_cast<float>(pts.size() - 1) * static_cast<float>(grow_t);
-            const std::size_t whole = static_cast<std::size_t>(std::floor(span));
+            const auto whole = static_cast<std::size_t>(std::floor(span));
             const float frac = span - static_cast<float>(whole);
             const std::size_t keep = std::min(whole + 1U, pts.size());
             drawn.assign(pts.begin(), pts.begin() + static_cast<std::ptrdiff_t>(keep));

@@ -126,6 +126,10 @@ template <typename Expected>
 /// @brief 容器含指定元素。
 template <typename Element>
 [[nodiscard]] auto contains(const Element &element) {
+    // 与 `each`/`negated` 同因：谓词 lambda 转入 MatcherLike 的 std::function 后即落入 .clang-tidy
+    // 记录的系统性假告警面（「任何转入 std::function 的可调用对象一律判『不应抛出』」，operator() 无
+    // noexcept 规格）；捕获拷贝与 print_value 拼串的抛出属框架错误，由 runner 在用例体外层捕获报告。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     return MatcherLike{[element](const auto &container) -> bool {
                            using std::begin;
                            using std::end;

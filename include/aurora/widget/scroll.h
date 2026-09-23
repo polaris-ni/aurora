@@ -671,6 +671,10 @@ class Scroll : public Container, public ScrollProps {
                 continue;  // 已整条离开视口（其位置由顶出它的后继占据）
             }
             // paint 本身是非虚 public 入口（含修饰链/缓存），绘制期可安全可变更节点。
+            // 缓存里的 const Node* 源自 const 遍历链（`child_nodes()` 给出 const 视图），节点本体始终是
+            // `children_` 持有的活对象、本帧内不销毁；回非 const 只为调用非 const 的 paint，并不改常量
+            // 对象。无损替代需把整条遍历链改成非 const（收益为负），故按既定写法豁免。
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
             const_cast<Node *>(s.node)->widget().paint(
                 p,
                 Rect{.origin = Point{.x = bounds.origin.x, .y = bounds.origin.y + pin_y},

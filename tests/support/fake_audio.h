@@ -20,7 +20,7 @@ namespace aurora::testing {
 class FakeAudioDevice final : public AudioDeviceBackend {
   public:
     explicit FakeAudioDevice(int sample_rate = 48000, int channels = 2, bool fail_start = false)
-        : format_{sample_rate, channels}, fail_start_(fail_start) {}
+        : format_{.sample_rate = sample_rate, .channels = channels}, fail_start_(fail_start) {}
 
     [[nodiscard]] auto format() const -> AudioDeviceFormat override { return format_; }
     auto start(RenderFn render_block) -> bool override {

@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "aurora/i18n/locale.h"
@@ -17,6 +18,9 @@ namespace aurora {
  * @note Side-effects: none
  * @note Rebuildable: no
  */
+// 公共 API 枚举：仅作 format_currency 的按值形参，不落在任何结构体/容器字段里。
+// 底层类型是公共 API 形态的一部分，本库按语义选型而非体积取向，改窄仅省 3 字节。
+// NOLINTNEXTLINE(performance-enum-size)
 enum class Currency {
     USD,  ///< 美元（符号 $，默认 2 位小数）
     EUR,  ///< 欧元（符号 €，默认 2 位小数）
@@ -36,12 +40,13 @@ struct NumberSymbols {
 
 [[nodiscard]] inline auto number_symbols(const std::string &lang) -> NumberSymbols {
     if (lang == "de" || lang == "ru") {
-        return NumberSymbols{'.', ',', 3};  // 德语 / 俄语：点分组、逗号小数
+        return NumberSymbols{.group = '.', .decimal = ',', .group_size = 3};  // 德语 / 俄语：点分组、逗号小数
     }
     if (lang == "fr") {
-        return NumberSymbols{' ', ',', 3};  // 法语：空格分组（CLDR 真实用窄 NBSP U+202F）、逗号小数
+        // 法语：空格分组（CLDR 真实用窄 NBSP U+202F）、逗号小数
+        return NumberSymbols{.group = ' ', .decimal = ',', .group_size = 3};
     }
-    return NumberSymbols{',', '.', 3};  // en / zh / ja / 其它：逗号分组、点小数
+    return NumberSymbols{.group = ',', .decimal = '.', .group_size = 3};  // en / zh / ja / 其它：逗号分组、点小数
 }
 
 struct CurrencyInfo {
@@ -52,17 +57,17 @@ struct CurrencyInfo {
 [[nodiscard]] inline auto currency_info(Currency c) -> CurrencyInfo {
     switch (c) {
         case Currency::USD:
-            return {"$", 2};
+            return CurrencyInfo{.symbol = "$", .default_fraction_digits = 2};
         case Currency::EUR:
-            return {"\u20AC", 2};  // €
+            return CurrencyInfo{.symbol = "\u20AC", .default_fraction_digits = 2};  // €
         case Currency::JPY:
-            return {"\u00A5", 0};  // ¥
+            return CurrencyInfo{.symbol = "\u00A5", .default_fraction_digits = 0};  // ¥
         case Currency::CNY:
-            return {"\u00A5", 2};  // ¥
+            return CurrencyInfo{.symbol = "\u00A5", .default_fraction_digits = 2};  // ¥
         case Currency::GBP:
-            return {"\u00A3", 2};  // £
+            return CurrencyInfo{.symbol = "\u00A3", .default_fraction_digits = 2};  // £
     }
-    return {"$", 2};
+    return CurrencyInfo{.symbol = "$", .default_fraction_digits = 2};
 }
 
 /// @brief 货币符号位：en/zh/ja/ko 前置，其余（de/fr/ru…）后置（带前导空格）。
@@ -91,19 +96,22 @@ struct CurrencyInfo {
 
     double intf = 0.0;
     const double frac = std::modf(a, &intf);
-    long long ip = static_cast<long long>(intf);
+    auto ip = static_cast<long long>(intf);
 
     std::string frac_str;
     if (fraction_digits > 0) {
         const double scale = std::pow(10.0, fraction_digits);
-        long long fpart = static_cast<long long>(std::round(frac * scale));
+        auto fpart = static_cast<long long>(std::round(frac * scale));
         if (fpart >= static_cast<long long>(scale)) {  // 四舍五入进位到整数
             ++ip;
             fpart = 0;
         }
         frac_str = std::to_string(fpart);
-        while (static_cast<int>(frac_str.size()) < fraction_digits) {
-            frac_str = "0" + frac_str;
+        // 左补零到 fraction_digits 位：size() 无符号、fraction_digits 有符号，用 std::cmp_less 做数学术语比较；
+        // 本分支内 fraction_digits > 0，转无符号亦等价。
+        while (std::cmp_less(frac_str.size(), fraction_digits)) {
+            // 首字符插入用 insert，避免 `"0" + frac_str` 每轮整串复制。
+            frac_str.insert(frac_str.begin(), '0');
         }
     }
 

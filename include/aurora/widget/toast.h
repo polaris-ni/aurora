@@ -32,6 +32,10 @@ enum class ToastPosition : std::uint8_t {
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
  */
+// 本行隐式生成的拷贝/移动构造逐成员复制 std::deque<Entry>（每条通知含 std::string），容器与字符串
+// 拷贝即可能 bad_alloc，被本检查判「不应抛出」；该隐式特成员按 [except.spec] 本就 potentially-throwing，
+// 抛出沿栈交给复制方 —— 与 std::function 同族的系统性假告警面（见 .clang-tidy 记录）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class ToastHost : public SingleChild {
   public:
     ToastHost() = default;

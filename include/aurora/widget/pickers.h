@@ -64,6 +64,11 @@ struct TimeOfDay {
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
  */
+// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_change_，而其拷贝与 operator()
+// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
+// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
+// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class DatePicker : public Widget {
   public:
     DatePicker() = default;
@@ -304,6 +309,11 @@ class DatePicker : public Widget {
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
  */
+// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_change_，而其拷贝与 operator()
+// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
+// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
+// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TimePicker : public Widget {
   public:
     TimePicker() = default;
@@ -450,6 +460,11 @@ class TimePicker : public Widget {
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
  */
+// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_change_，而其拷贝与 operator()
+// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
+// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
+// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class ColorPicker : public Widget {
   public:
     ColorPicker() { selected_.set(default_palette()[0]); }
@@ -495,6 +510,10 @@ class ColorPicker : public Widget {
 
     /// @brief 默认 16 色板。
     [[nodiscard]] static auto default_palette() -> const std::vector<Color> & {
+        // 惰性构造的函数内 static 色板：16 个 `Color` 运行时构造，常量初始化不可能（Color 非
+        // literal 聚合），而首建时刻与跨 TU 静态初始化顺序无关（本检查的担心面）。仅浏览器口径
+        // 命中——native 遍同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。
+        // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
         static const std::vector AURORA_PALETTE = {
             Color(0, 0, 0, 255),     Color(96, 96, 96, 255),  Color(160, 160, 160, 255), Color(255, 255, 255, 255),
             Color(220, 53, 69, 255), Color(255, 128, 0, 255), Color(255, 200, 0, 255),   Color(40, 167, 69, 255),

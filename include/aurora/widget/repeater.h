@@ -102,6 +102,11 @@ class Repeater : public Container {
         if (!items_ || !builder_) {
             return;
         }
+        // 本检查把 `items_->get()` 读成「智能指针上多余的 get()」：此处的 `get()` 属于 `State`（值
+        // 读取口，返回 `const std::vector<T> &`），不是 `shared_ptr::get()`——按建议删掉就成
+        // `items_.size()`，编译不过。仅浏览器口径命中——native 遍同一份代码不报
+        // （CODING_STANDARDS.md §5.2 的口径差异）。
+        // NOLINTNEXTLINE(readability-redundant-smartptr-get)
         const std::size_t n = items_->get().size();
         if (built_ && n == child_count_) {
             return;

@@ -58,6 +58,10 @@ namespace detail {
 ///       `SplitterOrientation`（两者取值集同名）。要正确输出必须按 `prop_descriptors[].type`
 ///       分派（需把属性声明类型透传进 emit_prop_value），故此处刻意不登记，避免猜错类型。
 [[nodiscard]] inline auto enum_type_for_key(const std::string &key) -> std::string {
+    // 惰性构造的函数内 static 表：首次调用才建，跨 TU 初始化顺序问题在此不存在（本检查的担心面）。
+    // 表本身是函数级只读常量，改不成 constexpr（值来自初始化列表）。仅浏览器口径命中——native 遍
+    // 同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static const std::unordered_map<std::string, std::string> M = {
         {"text_align", "TextAlign"},
         {"text_overflow", "TextOverflow"},

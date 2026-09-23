@@ -18,6 +18,9 @@ namespace aurora {
  * @note Side-effects: none
  * @note Rebuildable: no
  */
+// 公共 API 枚举：plural_category 的返回值，仅作 switch/临时量，不落在结构体或容器字段里。
+// 底层类型是公共 API 形态的一部分，本库按语义选型而非体积取向，改窄仅省 3 字节。
+// NOLINTNEXTLINE(performance-enum-size)
 enum class PluralCategory {
     Zero,  ///< CLDR zero：如阿拉伯语 0
     One,  ///< CLDR one：如英语 1、法语 0/1、俄语 1/21/101（非 11）
@@ -32,7 +35,7 @@ namespace detail {
 /// @brief 英语 / 德语 / 及其它未知语言的回退规则：仅 one(=1 整数) 与 other。
 [[nodiscard]] inline auto plural_category_en(double n) -> PluralCategory {
     const double a = n < 0.0 ? -n : n;
-    const long long i = static_cast<long long>(std::trunc(a));
+    const auto i = static_cast<long long>(std::trunc(a));
     const bool has_fraction = (a != static_cast<double>(i));
     if (!has_fraction && i == 1) {
         return PluralCategory::One;
@@ -48,7 +51,7 @@ namespace detail {
 ///       调用方通常传入归一化后的普通计数值，不影响日常 UI 计数。
 [[nodiscard]] inline auto plural_category_fr(double n) -> PluralCategory {
     const double a = n < 0.0 ? -n : n;
-    const long long i = static_cast<long long>(std::trunc(a));
+    const auto i = static_cast<long long>(std::trunc(a));
     if (i == 0 || i == 1) {
         return PluralCategory::One;
     }
@@ -61,7 +64,7 @@ namespace detail {
 /// @brief 俄语及同族（ru/uk/be/sr/hr/bs/sh）：CLDR 规则表驱动。
 [[nodiscard]] inline auto plural_category_ru(double n) -> PluralCategory {
     const double a = n < 0.0 ? -n : n;
-    const long long i = static_cast<long long>(std::trunc(a));
+    const auto i = static_cast<long long>(std::trunc(a));
     const bool has_fraction = (a != static_cast<double>(i));
     if (!has_fraction) {
         const long long mod10 = i % 10;
@@ -69,7 +72,9 @@ namespace detail {
         if (mod10 == 1 && mod100 != 11) {
             return PluralCategory::One;  // 1, 21, 31, 101 …（非 11）
         }
-        if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) {
+        // CLDR few：末位 2-4 且末两位不落在 12-14。德摩根改写：!(mod100>=12 && mod100<=14) ⇔
+        // mod100<12 || mod100>14（mod100 已取非负模、值域 [0,99]，真值表逐点等价）。
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
             return PluralCategory::Few;  // 2-4, 22-24, 102 …
         }
         return PluralCategory::Many;  // 0, 5-9, 11-14, 20, 25-29 …

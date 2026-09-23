@@ -2,9 +2,10 @@
 # ============================================================================
 # check_nolint_layout.py - clang-tidy NOLINT 指令排版门禁
 # ----------------------------------------------------------------------------
-# Spec: codespec/CODING_STANDARDS.md §5.2（NOLINT 抑制规则）规则 1、规则 2
+# Spec: codespec/CODING_STANDARDS.md §5.2（NOLINT 抑制规则）编号列表第 1—3 条
 #   规则 1：指令与代码之间不得插入任何行——包括折到下一行的理由文字。
 #   规则 2：NOLINT 令牌只能出现在真指令里，散文里抄令牌会形成意外豁免。
+#   规则 3：指令的 (check 列表) 必须在同一物理行内闭合，跨行即被读成空列表。
 #
 # 为什么需要独立门禁（clang-tidy 自己**不会**报）：
 #   NOLINTNEXTLINE 的作用范围严格等于「指令所在物理行 + 1」，它不看语义、不做跨行合并。
@@ -21,6 +22,15 @@
 #      全量意外豁免（规则 2）。
 #   3) [blocking] NOLINTNEXTLINE / NOLINTBEGIN / NOLINTEND 挂在有代码的行尾 → 指令实际
 #      作用于下一行，作者意图几乎必然是本行（同属规则 1 的错位形态）。
+#   4) [blocking] 指令的 `(check 列表)` 跨物理行书写 → clang-tidy 解析成**空列表**，于是
+#      区间/该行豁免从「只列出表中检查」静默放大为「豁免全部检查」。实测（2026-09-23，
+#      探针见 §5.2 的复验记录）：同一张表跨行写时连未列出的
+#      readability-identifier-naming 也失踪，单行写才只豁免列出的几项；本仓曾因此让 4 个
+#      大区间（painter.cpp / painter_simd.inl / system_tray_win32.cpp / win32_ua.cpp，最大
+#      跨 2000 行）覆盖的 TU 呈「零告警假象」，改对名单后浮出 795 条存量。
+#      修法不许动 .clang-format：CommentPragmas 与 ReflowComments 两条路都实测过，都会把
+#      无关文件的注释缩进改掉（分别 5 与 15 个文件非合规），故改为「名单单行 + 通配压缩到
+#      120 列内」——通配是**按名匹配**（`*-zzz-*` 形制的负例实测不误豁免），不会退化成空表。
 #
 # 不在本门禁范围内的两件事：
 #   * 裸 `// NOLINT`（无 check 列表）：§5.2 规则 1 只禁**新增**，仓内既有若干属存量，
@@ -43,10 +53,13 @@ import sys
 
 EXEMPT_TOKEN = "LAYOUT_EXEMPT"
 SCAN_DIRS = ("include", "src", "tests", "tools", "examples")
-SCAN_EXTS = (".h", ".hpp", ".cpp", ".cc", ".cxx")
+# `.inl` 一并扫描：它同样进 clang-tidy（经宿主 TU 展开）与豁免体系，漏扫会留下规则 3 的盲区。
+SCAN_EXTS = (".h", ".hpp", ".cpp", ".cc", ".cxx", ".inl")
 
 # NOLINT / NOLINTNEXTLINE / NOLINTBEGIN / NOLINTEND，随后是否带 (check 列表)
 TOKEN_RE = re.compile(r"NOLINT(?:NEXTLINE|BEGIN|END)?(\s*\([^)]*\))?")
+# 规则 3 用：只定位「指令后紧跟的开括号」，再在同一物理行内找闭括号——找不到即为跨行写法。
+OPEN_PAREN_RE = re.compile(r"NOLINT(?:NEXTLINE|BEGIN|END|FIX-MESSAGE|FIX)?\s*\(")
 # 指令之前只允许的「注释符号」——`///`、`//`、`*`、空白。越过它出现散文即规则 2 的范畴。
 COMMENT_PUNCT_RE = re.compile(r"^[/*\s]*")
 
@@ -82,6 +95,13 @@ def check_file(rel, lines, violations, stats):
         stats["directives"] += len(toks)
         if is_exempt(lines, i):
             continue
+        # --- 规则 3：`(check 列表)` 必须在本物理行内闭合 ---
+        for m in OPEN_PAREN_RE.finditer(line):
+            if ")" not in line[m.end():]:
+                violations.append(
+                    f"{rel}:{i + 1}: [规则3] {m.group(0).strip()} 的检查表未在本行闭合（跨行写法）——"
+                    "clang-tidy 会解析成空列表，等于豁免**全部**检查；把整张表收拢到同一物理行")
+                break
         comment_only = is_comment_line(line)
         body = comment_punct_end(line) if comment_only else None
 

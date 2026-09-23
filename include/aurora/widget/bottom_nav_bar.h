@@ -191,7 +191,7 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
     }
 
 // clang 无 "-Wdangling-pointer" 告警组（实测报 -Wunknown-warning-option），故压制只在 GCC 下展开。
-#if defined(AURORA_COMPILER_GCC)
+#ifdef AURORA_COMPILER_GCC
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdangling-pointer"
 #endif
@@ -203,7 +203,7 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
         (void)ctx;
         return std::vector{HitNode{this, weak_from_this(), bounds.origin}};
     }
-#if defined(AURORA_COMPILER_GCC)
+#ifdef AURORA_COMPILER_GCC
 #pragma GCC diagnostic pop
 #endif
 };

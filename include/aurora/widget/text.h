@@ -211,7 +211,7 @@ class Text : public LeafWidget, public TextProps {
     /// @brief 失焦时取消选区。
     auto on_focus_change(bool focused) -> void override {
         if (!focused) {
-            sel_end_ = NO_SEL;  // 标记无选区（含头含尾模型下，起点=终点表示 1 字符而非无选区）
+            sel_end_ = AURORA_NO_SEL;  // 标记无选区（含头含尾模型下，起点=终点表示 1 字符而非无选区）
             sel_start_ = caret_;
             selecting_ = false;
             mark_needs_paint();
@@ -229,7 +229,7 @@ class Text : public LeafWidget, public TextProps {
         const size_t b = std::max(sel_start_, sel_end_);
         return {a, b + 1};
     }
-    [[nodiscard]] auto has_selection() const -> bool { return sel_end_ != NO_SEL; }
+    [[nodiscard]] auto has_selection() const -> bool { return sel_end_ != AURORA_NO_SEL; }
     [[nodiscard]] auto display_text() const -> const std::string & { return display_text_; }
 
   protected:
@@ -239,10 +239,11 @@ class Text : public LeafWidget, public TextProps {
 
   private:
     /// @brief 无选区哨兵：sel_end_ 取此值时表示当前没有选区。
-    static constexpr size_t NO_SEL = static_cast<size_t>(-1);
+    /// （命名带 `AURORA_` 前缀：类内 `static constexpr` 走全局常量口径，见 `.clang-tidy`。）
+    static constexpr size_t AURORA_NO_SEL = static_cast<size_t>(-1);
 
     size_t sel_start_ = 0;  ///< 选区起点（含入的码点下标：该字符被选中）
-    size_t sel_end_ = NO_SEL;  ///< 选区终点（含入的码点下标；= NO_SEL 表示无选区）
+    size_t sel_end_ = AURORA_NO_SEL;  ///< 选区终点（含入的码点下标；= AURORA_NO_SEL 表示无选区）
     size_t caret_ = 0;  ///< 光标（caret 位置，0..码点数；用于键盘导航）
     bool selecting_ = false;  ///< 是否正在拖选
     std::string display_text_;  ///< 最近一次绘制所用显示文本（命中测试/选区使用）

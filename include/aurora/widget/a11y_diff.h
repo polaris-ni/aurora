@@ -24,6 +24,10 @@ struct NodeSnapshot {
 
 /// @brief 一次语义树投影的完整快照（D9）。
 /// @note Thread: main-thread only
+// 本行隐式生成的拷贝/移动构造逐成员复制 vector 与两张 unordered_map（容器拷贝即可能 bad_alloc），
+// 被本检查判「不应抛出」；该隐式特成员按 [except.spec] 本就是 potentially-throwing。快照按值
+// 返回/比对是本子系统的正常路径，抛出沿栈交给平台桥调用方 —— 与 std::function 同族的假告警面。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TreeSnapshot {
     std::vector<NodeSnapshot> flat;  ///< 先序扁平表
     std::unordered_map<std::uint64_t, std::size_t> by_id;  ///< id → flat 下标
@@ -155,6 +159,9 @@ inline auto flatten_snapshot(const Widget &w, const AccessibilityNode &n, std::u
 /// 纯函数、无平台依赖 —— 表驱动单测全覆盖。
 /// @note Thread: main-thread only
 /// @note Side-effects: pure
+// `new_` 与 `old_` 成对：`new` 是 C++ 关键字，无法照 lower_case 正名，故命名检查就地豁免
+// （同 aria_protocol.h 的 `diff_aria_snapshots`，两处的快照对比是同一条链）。
+// NOLINTNEXTLINE(readability-identifier-naming)
 [[nodiscard]] inline auto diff_snapshots(const TreeSnapshot &old_, const TreeSnapshot &new_) -> TreeDiff {
     TreeDiff diff;
 

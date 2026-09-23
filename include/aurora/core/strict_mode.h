@@ -29,8 +29,10 @@ inline thread_local auto tl_strict_mode = StrictMode::Off;
 /// @brief 严格模式失败处理器（可注入，便于测试拦截真实致命失败）。
 /// 生产默认（handler 为空）直接 `std::terminate()`；测试可注入抛异常或记录的处理器。
 using StrictFailureHandler = std::function<void(std::string_view)>;
+// 另豁免 dynamic-static：初值 `nullptr` 是常量置位，测试注入走下方 `set_strict_failure_handler`，
+// 不存在依赖其它 TU 初始化完成的问题。仅浏览器口径命中——native 遍同一份代码不报（§5.2 口径差异）。
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-inline StrictFailureHandler g_strict_failure_handler = nullptr;
+inline StrictFailureHandler g_strict_failure_handler = nullptr;  // NOLINT(bugprone-dynamic-static-initializers)
 }  // namespace detail
 
 [[nodiscard]] inline auto strict_mode() -> StrictMode { return detail::tl_strict_mode; }

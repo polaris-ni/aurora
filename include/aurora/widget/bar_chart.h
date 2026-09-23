@@ -31,7 +31,8 @@ struct BarChartProps {
     ChartAxisSpec axis_x;  ///< 类目轴（Band）
     ChartAxisSpec axis_y;  ///< 数值轴（Linear）
     ChartLegendSpec legend;  ///< 图例
-    EdgeInsets padding{8.0F, 8.0F, 8.0F, 8.0F};  ///< 图内留白（轴标签 / 值框避让区，D12）
+    EdgeInsets padding{
+        .left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};  ///< 图内留白（轴标签 / 值框避让区，D12）
 };
 
 /**
@@ -98,12 +99,12 @@ class BarChart : public LeafWidget, public BarChartProps {
         return *this;
     }
     auto set_axis_x(ChartAxisSpec a) -> BarChart & {
-        axis_x = a;
+        axis_x = std::move(a);
         mark_needs_layout();
         return *this;
     }
     auto set_axis_y(ChartAxisSpec a) -> BarChart & {
-        axis_y = a;
+        axis_y = std::move(a);
         mark_needs_layout();
         return *this;
     }
@@ -168,7 +169,7 @@ class BarChart : public LeafWidget, public BarChartProps {
     /// @brief 布局期算定的绘图几何（局部坐标，原点 0）：渲染与命中反查共用同一份（D6）。
     struct Geometry {
         Rect plot{};  ///< 柱体绘制区（不含轴留白）
-        LinearScale y_scale{};  ///< 数值轴
+        LinearScale y_scale;  ///< 数值轴
         BandScale x_band{0};  ///< 类目轴
         std::vector<std::string> cats;
         float band_w = 0.0F;  ///< 单类目带宽
@@ -336,6 +337,8 @@ inline auto BarChart::compute_geometry(const Size &size, const Font &font) const
     // 图例项命中区（与绘制同一套游标推进规则；命中优先于数据区）
     if (legend.visible && !series.empty()) {
         float cursor_x = g.plot.origin.x;
+        // Right（含未知位置）沿用绘图区顶部，即下面 else 分支不再重复赋同一值——
+        // 重复赋值会让本初值在三条互斥分支下都永不被读（死存储）。
         float cursor_y = g.plot.origin.y;
         if (legend.position == LegendPosition::Top) {
             cursor_y = padding.top;
@@ -343,7 +346,6 @@ inline auto BarChart::compute_geometry(const Size &size, const Font &font) const
             cursor_y = size.height - padding.bottom - line_h;
         } else {
             cursor_x = g.plot.right() + 8.0F;
-            cursor_y = g.plot.origin.y;
         }
         for (const ChartSeries &s : series) {
             const float name_w = render::FontEngine::measure_width(s.name, font);
@@ -529,7 +531,7 @@ inline auto BarChart::describe_static() -> WidgetDescriptor {
                  .json_type = "object"},
                 {.name = "legend",
                  .type = "Json",
-                 .default_value = "{\"visible\":true,\"position\":\"Top\"}",
+                 .default_value = R"({"visible":true,"position":"Top"})",
                  .required = false,
                  .note = "图例规格：{visible,position:Top|Bottom|Right}",
                  .json_type = "object"},
@@ -696,8 +698,8 @@ inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
             } else {
                 p.fill_rect(grect(bar), c);
             }
-            if (hovered_point_.has_value() && hovered_point_->first == static_cast<int>(i) &&
-                hovered_point_->second == static_cast<int>(j)) {
+            if (hovered_point_.has_value() && std::cmp_equal(hovered_point_->first, i) &&
+                std::cmp_equal(hovered_point_->second, j)) {
                 hovered_bar = bar;
             }
         }
@@ -776,7 +778,7 @@ inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
         p.draw_rounded_border(grect(*hovered_bar), 2.0F, 2.0F, theme.text);
         if (hovered_point_.has_value()) {
             const auto [si, ci] = *hovered_point_;
-            if (si >= 0 && static_cast<std::size_t>(si) < n_series) {
+            if (si >= 0 && std::cmp_less(si, n_series)) {
                 const std::string text =
                     series[static_cast<std::size_t>(si)].name + ": " +
                     std::to_string(series_value(static_cast<std::size_t>(si), static_cast<std::size_t>(ci)));

@@ -128,21 +128,23 @@ class Animator {
     }
 
     /// @brief 绑定 (控制器 + 补间) → 目标 State：每帧把插值写入 State。
+    /// `tw` 按值收参：调用方普遍传临时量（`Tween<double>{0, 1, curve}`），且闭包必须持有副本
+    /// 才能活到后续帧。初始化捕获把形制直接搬进闭包，省掉「形参拷贝 + 捕获拷贝」中的第二次。
     template <typename T>
     auto bind(AnimationController &c, Tween<T> tw, State<T> &target) -> void {
         drive(c);
-        on_tick_.push_back(Binding{&c, [&c, tw, &target]() -> auto {
+        on_tick_.push_back(Binding{&c, [&c, tw = std::move(tw), &target]() -> auto {
                                        if (c.dirty()) {
                                            target.set(tw.value(c.value()));
                                        }
                                    }});
     }
 
-    /// @brief 绑定 (控制器 + 关键帧) → 目标 State。
+    /// @brief 绑定 (控制器 + 关键帧) → 目标 State。`kf` 的按值收参与初始化捕获同上。
     template <typename T>
     auto bind(AnimationController &c, Keyframes<T> kf, State<T> &target) -> void {
         drive(c);
-        on_tick_.push_back(Binding{&c, [&c, kf, &target]() -> auto {
+        on_tick_.push_back(Binding{&c, [&c, kf = std::move(kf), &target]() -> auto {
                                        if (c.dirty()) {
                                            target.set(kf.value(c.value()));
                                        }
@@ -160,7 +162,7 @@ class Animator {
     std::vector<Binding> on_tick_;
 
     /// @brief 当前运行实例槽位（由 `Application::run()` 起止设置；无运行时为 nullptr）。
-    static Animator *current_;
+    static Animator *current_;  // NOLINT
 };
 
 /**
@@ -434,10 +436,10 @@ class TimelinePlayer {
 
     /// 驱动载荷：句柄按值拷贝共享同一份（同 `AnimatedValue`），attach 后帧循环持副本不悬垂。
     struct Payload {
-        explicit Payload(TimelineResolved s) : spec(std::move(s)), master_(spec.duration()) {}
+        explicit Payload(TimelineResolved s) : spec(std::move(s)), master(spec.duration()) {}
         TimelineResolved spec;
-        AnimationController master_;  ///< 拥有的主控制器
-        std::vector<Track> tracks_;
+        AnimationController master;  ///< 拥有的主控制器
+        std::vector<Track> tracks;
         std::function<void()> on_completed;
         bool fired_completed = false;
     };

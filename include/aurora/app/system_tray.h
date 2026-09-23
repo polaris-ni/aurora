@@ -22,8 +22,8 @@ class SystemTray {
     explicit SystemTray(std::string title, const std::string &icon_path = "");
     SystemTray(const SystemTray &) = delete;
     auto operator=(const SystemTray &) -> SystemTray & = delete;
-    SystemTray(SystemTray &&) noexcept;
-    auto operator=(SystemTray &&) noexcept -> SystemTray &;
+    SystemTray(SystemTray &&other) noexcept;
+    auto operator=(SystemTray &&other) noexcept -> SystemTray &;
     ~SystemTray();
 
     /// @brief 更新悬浮提示文字（同时刷新托盘图标 tip）。

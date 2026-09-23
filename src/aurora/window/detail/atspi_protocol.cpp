@@ -346,17 +346,18 @@ auto AtspiModel::sync(const a11y::TreeSnapshot &snap) -> void {
     old_paths.swap(by_path_id_cache_);
     // 注：old_paths 用成员缓存中转（见 header 的 by_path_id_cache_）——保留「同 id ⇒ 同路径」
     // 的跨帧不变式；消失 id 的路径直接丢弃（编号单调，不复用）。
-    order_.push_back(LiveNode{.id = k_atspi_app_id, .parent_id = 0, .path = env_.base_path});
-    order_.push_back(LiveNode{.id = k_atspi_frame_id, .parent_id = k_atspi_app_id, .path = env_.base_path + "/frame"});
-    kids_[k_atspi_app_id].push_back(k_atspi_frame_id);
+    order_.push_back(LiveNode{.id = AURORA_ATSPI_APP_ID, .parent_id = 0, .path = env_.base_path});
+    order_.push_back(
+        LiveNode{.id = AURORA_ATSPI_FRAME_ID, .parent_id = AURORA_ATSPI_APP_ID, .path = env_.base_path + "/frame"});
+    kids_[AURORA_ATSPI_APP_ID].push_back(AURORA_ATSPI_FRAME_ID);
 
     // 先序重建存活表：裁剪节点（!is_control && !is_content）不入表，其子挂到最近存活祖先。
     std::unordered_map<std::uint64_t, std::uint64_t> eff_parent;  // 原父 id → 有效父 id
-    eff_parent[0] = k_atspi_frame_id;  // 快照根挂 Frame 下
+    eff_parent[0] = AURORA_ATSPI_FRAME_ID;  // 快照根挂 Frame 下
     for (const a11y::NodeSnapshot &ns : snap.flat) {
         const bool keep = ns.node.is_control || ns.node.is_content;
         const auto it = eff_parent.find(ns.parent_id);
-        const std::uint64_t parent = (it != eff_parent.end()) ? it->second : k_atspi_frame_id;
+        const std::uint64_t parent = (it != eff_parent.end()) ? it->second : AURORA_ATSPI_FRAME_ID;
         if (!keep) {
             eff_parent[ns.id] = parent;  // 后续子节点上挂
             continue;
@@ -401,7 +402,7 @@ auto AtspiModel::live(std::uint64_t id) const -> const LiveNode * {
 auto AtspiModel::exists(std::uint64_t id) const -> bool { return live(id) != nullptr; }
 
 auto AtspiModel::node(std::uint64_t id) const -> const a11y::NodeSnapshot * {
-    if (snap_ == nullptr || id == k_atspi_app_id || id == k_atspi_frame_id) {
+    if (snap_ == nullptr || id == AURORA_ATSPI_APP_ID || id == AURORA_ATSPI_FRAME_ID) {
         return nullptr;
     }
     return snap_->find(id);
@@ -413,10 +414,10 @@ auto AtspiModel::widget_of(std::uint64_t id) const -> Widget * {
 }
 
 auto AtspiModel::name(std::uint64_t id) const -> std::string {
-    if (id == k_atspi_app_id) {
+    if (id == AURORA_ATSPI_APP_ID) {
         return env_.app_name;
     }
-    if (id == k_atspi_frame_id) {
+    if (id == AURORA_ATSPI_FRAME_ID) {
         return env_.window_title;
     }
     const a11y::NodeSnapshot *n = node(id);
@@ -438,10 +439,10 @@ auto AtspiModel::accessible_id(std::uint64_t id) const -> std::string {
 }
 
 auto AtspiModel::role(std::uint64_t id) const -> std::uint32_t {
-    if (id == k_atspi_app_id) {
+    if (id == AURORA_ATSPI_APP_ID) {
         return atspi::role_application;
     }
-    if (id == k_atspi_frame_id) {
+    if (id == AURORA_ATSPI_FRAME_ID) {
         return atspi::role_frame;
     }
     const a11y::NodeSnapshot *n = node(id);
@@ -452,10 +453,10 @@ auto AtspiModel::role(std::uint64_t id) const -> std::uint32_t {
 auto AtspiModel::role_name(std::uint64_t id) const -> std::string { return atspi_role_name(role(id)); }
 
 auto AtspiModel::states(std::uint64_t id) const -> std::vector<std::uint32_t> {
-    if (id == k_atspi_app_id) {
+    if (id == AURORA_ATSPI_APP_ID) {
         return {atspi::state_enabled, atspi::state_sensitive};
     }
-    if (id == k_atspi_frame_id) {
+    if (id == AURORA_ATSPI_FRAME_ID) {
         return {atspi::state_active, atspi::state_enabled, atspi::state_sensitive, atspi::state_showing,
                 atspi::state_visible};
     }
@@ -467,10 +468,10 @@ auto AtspiModel::states(std::uint64_t id) const -> std::vector<std::uint32_t> {
 }
 
 auto AtspiModel::interfaces(std::uint64_t id) const -> std::vector<std::string> {
-    if (id == k_atspi_app_id) {
+    if (id == AURORA_ATSPI_APP_ID) {
         return {atspi::k_iface_accessible, atspi::k_iface_application, atspi::k_iface_socket};
     }
-    if (id == k_atspi_frame_id) {
+    if (id == AURORA_ATSPI_FRAME_ID) {
         return {atspi::k_iface_accessible, atspi::k_iface_component};
     }
     const a11y::NodeSnapshot *n = node(id);
@@ -520,7 +521,7 @@ auto AtspiModel::ref_of(std::uint64_t id) const -> AtspiRef {
     return AtspiRef{.bus = env_.self_bus, .path = path_of_id(id)};
 }
 
-auto AtspiModel::application() const -> AtspiRef { return ref_of(k_atspi_app_id); }
+auto AtspiModel::application() const -> AtspiRef { return ref_of(AURORA_ATSPI_APP_ID); }
 
 auto AtspiModel::parent_ref(std::uint64_t id) const -> AtspiRef {
     const std::uint64_t p = parent(id);
@@ -655,7 +656,7 @@ auto AtspiModel::do_action(std::uint64_t id, std::int32_t index) const -> bool {
 }
 
 auto AtspiModel::extents(std::uint64_t id, std::uint32_t coord) const -> AtspiRectI {
-    if (id == k_atspi_frame_id) {
+    if (id == AURORA_ATSPI_FRAME_ID) {
         const a11y::NodeSnapshot *root = ((snap_ != nullptr) && !snap_->flat.empty()) ? snap_->flat.data() : nullptr;
         if (root == nullptr) {
             return {};
@@ -693,7 +694,7 @@ auto AtspiModel::accessible_at_point(std::uint64_t id, std::int32_t x, std::int3
         sub.insert(sub.end(), kids.begin(), kids.end());
     }
     for (unsigned long long lid : std::views::reverse(sub)) {
-        if (lid == k_atspi_app_id) {
+        if (lid == AURORA_ATSPI_APP_ID) {
             continue;
         }
         const AtspiRectI r = extents(lid, atspi::coord_screen);
@@ -739,7 +740,7 @@ auto AtspiModel::prop_get(std::uint64_t id, const std::string &iface, const std:
         v.ref = (target == 0) ? env_.registry_root : ref_of(target);
         return v;
     };
-    if (iface == atspi::k_iface_application && id == k_atspi_app_id) {
+    if (iface == atspi::k_iface_application && id == AURORA_ATSPI_APP_ID) {
         if (prop == "ToolkitName") {
             return str(env_.toolkit_name);
         }
@@ -846,7 +847,7 @@ auto AtspiModel::prop_get(std::uint64_t id, const std::string &iface, const std:
 
 auto AtspiModel::prop_set(std::uint64_t id, const std::string &iface, const std::string &prop, const AtspiPropValue &v)
     -> bool {
-    if (iface == atspi::k_iface_application && prop == "Id" && id == k_atspi_app_id &&
+    if (iface == atspi::k_iface_application && prop == "Id" && id == AURORA_ATSPI_APP_ID &&
         v.kind == AtspiPropValue::Kind::I32) {
         app_id_ = v.i32;  // 注册表 Embed 握手回填
         return true;
@@ -874,7 +875,7 @@ auto AtspiModel::cache_rows() const -> std::vector<AtspiCacheRow> {
         r.role = role(l.id);
         r.description = description(l.id);
         r.states = states(l.id);
-        if (l.id == k_atspi_app_id) {
+        if (l.id == AURORA_ATSPI_APP_ID) {
             r.parent = AtspiRef::null();  // Cache.xml：application 角色 → null 引用
             r.index_in_parent = -1;
         }

@@ -22,7 +22,7 @@ enum class ColorSpace : std::uint8_t {
 
 /// @brief golden 基准唯一色彩空间（软件参考路径 SSOT，逐位确定性红线；重构约束）。
 /// utest_offscreen 的 golden 注记（`colorspace` 字段）与本常量共同守卫该约定。
-inline constexpr ColorSpace GOLDEN_COLORSPACE = ColorSpace::SRGB;
+inline constexpr ColorSpace AURORA_GOLDEN_COLORSPACE = ColorSpace::SRGB;
 
 /// @brief sRGB 传递曲线解码（8bit → 线性光 [0,1]）。Display P3 与 sRGB 共用此曲线。
 [[nodiscard]] inline auto srgb_transfer_decode(const std::uint8_t v) noexcept -> float {
@@ -41,14 +41,14 @@ inline constexpr ColorSpace GOLDEN_COLORSPACE = ColorSpace::SRGB;
 }
 
 /// @brief 线性光 sRGB → 线性光 Display P3（D65，行主序 3x3；列和均为 1 → 灰阶恒等）。
-inline constexpr float SRGB_TO_P3_LINEAR[3][3] = {
+inline constexpr float AURORA_SRGB_TO_P3_LINEAR[3][3] = {
     {0.8224621F, 0.1775380F, 0.0000000F},
     {0.0331941F, 0.9668058F, 0.0000000F},
     {0.0170827F, 0.0723974F, 0.9105199F},
 };
 
 /// @brief 线性光 Display P3 → 线性光 sRGB（上矩阵的逆；往返误差 < 1e-5 线性量级）。
-inline constexpr float P3_TO_SRGB_LINEAR[3][3] = {
+inline constexpr float AURORA_P3_TO_SRGB_LINEAR[3][3] = {
     {1.2249402F, -0.2249402F, 0.0000000F},
     {-0.0420570F, 1.0420570F, 0.0000000F},
     {-0.0196376F, -0.0786361F, 1.0982737F},
@@ -73,7 +73,7 @@ inline auto transform_linear(float (&rgb)[3], const float (&m)[3][3]) -> void {
 /// 转换链：8bit → 传递曲线解码 → 3x3 线性矩阵（P3↔sRGB，D65）→ 传递曲线编码。
 /// 宽色域（P3）超出 sRGB 色域的分量夹取到 [0,1]（8bit 目标的固有约束）。
 /// 验收：往返转换 ≤ ±3 LSB（饱和原色附近矩阵行相消 + P3 侧 8bit 量化放大，见 utest_color_space）；
-/// sRGB golden 基准路径不经过本转换（GOLDEN_COLORSPACE 恒为 sRGB），逐位确定性不受影响。
+/// sRGB golden 基准路径不经过本转换（AURORA_GOLDEN_COLORSPACE 恒为 sRGB），逐位确定性不受影响。
 /// @note Thread: thread-safe
 /// @note Side-effects: pure
 [[nodiscard]] inline auto convert_color(const Color &c, const ColorSpace from, const ColorSpace to) -> Color {
@@ -82,9 +82,9 @@ inline auto transform_linear(float (&rgb)[3], const float (&m)[3][3]) -> void {
     }
     float rgb[3] = {srgb_transfer_decode(c.r), srgb_transfer_decode(c.g), srgb_transfer_decode(c.b)};
     if (from == ColorSpace::SRGB && to == ColorSpace::DisplayP3) {
-        detail::transform_linear(rgb, SRGB_TO_P3_LINEAR);
+        detail::transform_linear(rgb, AURORA_SRGB_TO_P3_LINEAR);
     } else {
-        detail::transform_linear(rgb, P3_TO_SRGB_LINEAR);
+        detail::transform_linear(rgb, AURORA_P3_TO_SRGB_LINEAR);
     }
     return Color{srgb_transfer_encode(rgb[0]), srgb_transfer_encode(rgb[1]), srgb_transfer_encode(rgb[2]), c.a};
 }

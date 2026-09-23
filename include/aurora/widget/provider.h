@@ -42,6 +42,10 @@ inline auto provider_type_name<MediaQuery>() -> const char * {
  * @tparam T 要向下注入的值类型（如 Theme / Locale）。
  */
 template <typename T>
+// 本行隐式生成的拷贝/移动构造复制响应式持有 Reactive<T>（其拷贝即分配值存储与订阅），被本检查判
+// 「不应抛出」；该隐式特成员按 [except.spec] 本就是 potentially-throwing，抛出（bad_alloc）沿栈交给
+// 构造方。本类刻意依赖隐式拷贝/移动（CODING_STANDARDS.md §5.1），故不补 = delete 而逐点豁免。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class Provider : public SingleChild {
   public:
     /// @brief 用静态值注入（按值构造响应式持有）。

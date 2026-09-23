@@ -21,6 +21,10 @@ namespace detail {
  * 用 inline 变量而非函数内 static，避免热路径每次取时间戳都要检查线程安全初始化
  * 的 guard variable。仅供 `Stopwatch::now_ms()` 使用，不作为公共 API。
  */
+// 动态初始化是**设计本身**：原点要在进程启动时锁定，`std::chrono::steady_clock::now()` 无常量形态；
+// 它只被 `now_ms()` 读取，不参与其它 TU 的初始化，故本检查担心的跨 TU 顺序问题在此不存在。仅浏览器
+// 口径命中——native 遍同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。
+// NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
 inline const std::chrono::steady_clock::time_point AURORA_PERF_EPOCH = std::chrono::steady_clock::now();
 
 }  // namespace detail

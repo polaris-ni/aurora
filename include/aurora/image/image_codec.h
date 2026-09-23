@@ -56,7 +56,7 @@ struct ImageSource {
         Memory,
     };
     Kind kind = Kind::File;
-    std::filesystem::path path{};
+    std::filesystem::path path;  ///< 默认构造即空路径，无需再写 `{}`（冗余成员初始化）。
     std::vector<std::uint8_t> memory;
 
     [[nodiscard]] static auto from_file(std::filesystem::path p) -> ImageSource {

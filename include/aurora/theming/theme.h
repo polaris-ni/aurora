@@ -56,6 +56,10 @@ struct TokenValue {
  * @note Side-effects: none
  * @note Rebuildable: yes, via from_json
  */
+// 豁免 bugprone-exception-escape：Theme 随控件回调网被值拷贝（Provider/StyleProps 转发链上的
+// std::function 深拷贝触发 .clang-tidy 已记录的系统性假告警面——「转入 std::function 的可调用对象
+// 一律判『不应抛出』」），据此对隐式特殊成员误报。抛出仅可能为令牌表/字体分配的 bad_alloc，由顶层兜底。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct Theme {
     Color background = Color::white();
     Color primary = Color::blue();

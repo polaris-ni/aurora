@@ -51,7 +51,13 @@
 namespace aurora::detail {
 
 class Win32UiaBridge;
+// 豁免 cppcoreguidelines-virtual-class-destructor：以下两型是 UIA provider 接口实现（IUnknown 系，
+// 类体定义见 win32_ua.cpp），protected + virtual 析构是 COM 官方接口形态的刻意镜像——外部不得经
+// 接口指针直接 delete，生命周期由 AddRef/Release 引用计数驱动（末次 Release 自毁），
+// 检查建议的「公有化析构/去 virtual」会破坏 COM 契约。
+// NOLINTNEXTLINE(cppcoreguidelines-virtual-class-destructor)
 class UiaNodeProvider;
+// NOLINTNEXTLINE(cppcoreguidelines-virtual-class-destructor)
 class UiaTextRangeProvider;
 
 /// @brief 动态加载的 UIA 扁平 API（D15：无链接期依赖，缺库降级 no-op）。

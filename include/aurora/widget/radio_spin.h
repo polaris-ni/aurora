@@ -34,6 +34,11 @@ namespace aurora {
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
  */
+// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_change_，而其拷贝与 operator()
+// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
+// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
+// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class RadioGroup : public Widget {
   public:
     RadioGroup() = default;
@@ -395,6 +400,11 @@ class RadioGroup : public Widget {
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
  */
+// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_change_，而其拷贝与 operator()
+// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
+// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
+// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class SpinBox : public Widget {
   public:
     SpinBox() = default;
@@ -619,7 +629,7 @@ class SpinBox : public Widget {
             return;
         }
         if (e.action == MouseAction::Press) {
-            const float arrow_x = size_.width - ARROW_ZONE;
+            const float arrow_x = size_.width - AURORA_ARROW_ZONE;
             if (e.local_position.x >= arrow_x) {
                 if (e.local_position.y < size_.height * 0.5F) {
                     increment();
@@ -719,7 +729,7 @@ class SpinBox : public Widget {
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(Size{.width = 120.0F, .height = BOX_HEIGHT});
+        return c.constrain(Size{.width = 120.0F, .height = AURORA_BOX_HEIGHT});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
@@ -756,19 +766,21 @@ class SpinBox : public Widget {
         f.size_pt = font_size_;
         const Rect text_box{
             .origin = Point{.x = bounds.origin.x + 8.0F, .y = bounds.origin.y + 8.0F},
-            .size = Size{.width = bounds.size.width - ARROW_ZONE - 12.0F, .height = bounds.size.height - 16.0F}};
+            .size = Size{.width = bounds.size.width - AURORA_ARROW_ZONE - 12.0F, .height = bounds.size.height - 16.0F}};
         p.draw_text(text_box, display_text(), f, text);
     }
 
     /// @brief 继承扩展点：绘制上下箭头区。
     virtual auto paint_arrows(Painter &p, const Rect &bounds, Color arrow) -> void {
-        const float ax = bounds.origin.x + bounds.size.width - ARROW_ZONE;
+        const float ax = bounds.origin.x + bounds.size.width - AURORA_ARROW_ZONE;
         Font sf;
         sf.size_pt = 9.0F;
-        const Rect up_box{.origin = Point{.x = ax + 6.0F, .y = bounds.origin.y + 2.0F},
-                          .size = Size{.width = ARROW_ZONE - 8.0F, .height = (bounds.size.height * 0.5F) - 2.0F}};
-        const Rect dn_box{.origin = Point{.x = ax + 6.0F, .y = bounds.origin.y + (bounds.size.height * 0.5F)},
-                          .size = Size{.width = ARROW_ZONE - 8.0F, .height = (bounds.size.height * 0.5F) - 2.0F}};
+        const Rect up_box{
+            .origin = Point{.x = ax + 6.0F, .y = bounds.origin.y + 2.0F},
+            .size = Size{.width = AURORA_ARROW_ZONE - 8.0F, .height = (bounds.size.height * 0.5F) - 2.0F}};
+        const Rect dn_box{
+            .origin = Point{.x = ax + 6.0F, .y = bounds.origin.y + (bounds.size.height * 0.5F)},
+            .size = Size{.width = AURORA_ARROW_ZONE - 8.0F, .height = (bounds.size.height * 0.5F) - 2.0F}};
         p.draw_text(up_box, "^", sf, arrow);
         p.draw_text(dn_box, "v", sf, arrow);
     }
@@ -777,8 +789,8 @@ class SpinBox : public Widget {
         return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local) ? this : nullptr;
     }
 
-    static constexpr float BOX_HEIGHT = 30.0F;  ///< 输入框高度(dp)
-    static constexpr float ARROW_ZONE = 22.0F;  ///< 箭头区宽度(dp)
+    static constexpr float AURORA_BOX_HEIGHT = 30.0F;  ///< 输入框高度(dp)
+    static constexpr float AURORA_ARROW_ZONE = 22.0F;  ///< 箭头区宽度(dp)
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     State<double> value_{0.0};

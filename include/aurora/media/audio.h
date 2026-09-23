@@ -64,6 +64,9 @@ struct AudioRenderContext {
 };
 
 /// @brief 设备通道状态：Active = 设备线程在拉取；Silent = 静默模式（无设备/初始化失败）。
+// 公共 API 枚举：device_state() 的返回值、silent() 的判据，不落在结构体/容器字段里。
+// 底层类型是公共 API 形态的一部分，本库按语义选型而非体积取向，改窄仅省 3 字节。
+// NOLINTNEXTLINE(performance-enum-size)
 enum class AudioDeviceState {
     Active,
     Silent,
@@ -89,7 +92,16 @@ class AudioDeviceBackend {
     /// 渲染块回调：设备线程周期性调用（interleaved，AudioContext::channel_count() 声道）。
     using RenderFn = std::function<void(float *interleaved, int frames)>;
 
+    // 五法则（CODING_STANDARDS.md §5.1）：后端只经 unique_ptr 注入 AudioContext，从不按值转移所有权；
+    // 显式禁用拷贝/移动，与各具体后端（Wasapi / Alsa / WebAudio / Fake）的声明一致。
+    // 默认构造须显式保留：一旦声明拷贝/移动构造，隐式默认构造即消失，而后端派生类普遍 `X() = default`。
+    AudioDeviceBackend() = default;
     virtual ~AudioDeviceBackend() = default;
+    AudioDeviceBackend(const AudioDeviceBackend &) = delete;
+    auto operator=(const AudioDeviceBackend &) -> AudioDeviceBackend & = delete;
+    AudioDeviceBackend(AudioDeviceBackend &&) = delete;
+    auto operator=(AudioDeviceBackend &&) -> AudioDeviceBackend & = delete;
+
     /// @brief 设备输出格式（图按此格式渲染）。
     [[nodiscard]] virtual auto format() const -> AudioDeviceFormat = 0;
     /// @brief 启动设备；返回 false = 初始化失败（AudioContext 进入静默模式）。
@@ -99,6 +111,9 @@ class AudioDeviceBackend {
 };
 
 /// @brief 推流源重采样质量档位（默认 Linear；Sinc 为窗口 sinc 内核，流式语义见节点说明）。
+// 公共 API 枚举：set_src_quality()/src_quality() 的形参与返回值，存储侧为 atomic<int>（跨线程块级读取），
+// 底层类型不进入任何结构体布局；改窄属纯体积取向且会动摇公共签名（口径 B 类）。
+// NOLINTNEXTLINE(performance-enum-size)
 enum class SrcQuality {
     Linear,  ///< 线性插值（默认，零前瞻延迟）
     Sinc,  ///< 窗口 sinc（32-tap Blackman 窗核 + 相位量化表；保留窗历史约 16 帧）
@@ -118,7 +133,16 @@ class AudioCaptureBackend {
     /// 采集回调：采集线程周期性调用（交错 float32，设备原生采样率/声道）。
     using CaptureFn = std::function<void(const float *interleaved, int frames, int rate, int channels)>;
 
+    // 五法则（CODING_STANDARDS.md §5.1）：采集后端只经 unique_ptr 持有（context 或麦克风节点），
+    // 从不按值转移所有权；显式禁用拷贝/移动，与各具体后端的声明一致。
+    // 默认构造须显式保留：一旦声明拷贝/移动构造，隐式默认构造即消失，而后端派生类普遍 `X() = default`。
+    AudioCaptureBackend() = default;
     virtual ~AudioCaptureBackend() = default;
+    AudioCaptureBackend(const AudioCaptureBackend &) = delete;
+    auto operator=(const AudioCaptureBackend &) -> AudioCaptureBackend & = delete;
+    AudioCaptureBackend(AudioCaptureBackend &&) = delete;
+    auto operator=(AudioCaptureBackend &&) -> AudioCaptureBackend & = delete;
+
     /// @brief 启动采集；返回 false = 设备不可用/权限拒绝（调用方转为显式错误）。
     virtual auto start(CaptureFn on_pcm) -> bool = 0;
     /// @brief 停止采集（须等待采集线程退出后返回）。
@@ -197,7 +221,9 @@ class AudioParam {
   private:
     friend class AudioContext;
 
-    enum class EventKind { Set, LinearRamp, ExponentialRamp, SetTarget };
+    // 私有枚举且作为 Event 结构体字段存储（事件链按值装在 vector 里，UI/渲染两端频繁拷贝）：
+    // 值域仅 0..3，收窄底层类型无损语义，也与仓内其它「按字段存储的枚举」(TextUnit : std::uint8_t) 一致。
+    enum class EventKind : std::uint8_t { Set, LinearRamp, ExponentialRamp, SetTarget };
     struct Event {
         EventKind kind{};
         double time = 0.0;  ///< 生效/终止时刻（秒）
@@ -216,11 +242,11 @@ class AudioParam {
     [[nodiscard]] auto evaluate_at(const EventList &events, double t) const -> float;
     /// COW 快照读取：拷贝指针即持有旧链生命期，锁外求值安全。
     [[nodiscard]] auto events_snapshot() const -> std::shared_ptr<const EventList> {
-        std::lock_guard<std::mutex> lock(events_mutex_);
+        std::scoped_lock lock(events_mutex_);
         return events_;
     }
     auto set_events(std::shared_ptr<const EventList> next) -> void {
-        std::lock_guard<std::mutex> lock(events_mutex_);
+        std::scoped_lock lock(events_mutex_);
         events_ = std::move(next);
     }
 
@@ -246,8 +272,12 @@ class AudioContext;
 class AudioNode {
   public:
     virtual ~AudioNode() = default;
+    // 五法则（CODING_STANDARDS.md §5.1）：节点持 ctx 引用 + 输入/输出总线，生命周期归 AudioContext，
+    // 只经 shared_ptr 流转；拷贝早已显式禁用，移动同样无意为默认（派生节点因本类而隐式不可移动）。
     AudioNode(const AudioNode &) = delete;
     auto operator=(const AudioNode &) -> AudioNode & = delete;
+    AudioNode(AudioNode &&) = delete;
+    auto operator=(AudioNode &&) -> AudioNode & = delete;
 
     /// @brief 输出声道数（首切片恒 2）。
     [[nodiscard]] auto channel_count() const -> int { return channels_; }
@@ -491,6 +521,12 @@ class AnalyserNode final : public AudioNode {
 class AudioMicrophoneSourceNode final : public AudioStreamSourceNode {
   public:
     ~AudioMicrophoneSourceNode() override;
+    // 五法则（CODING_STANDARDS.md §5.1）：持采集后端 unique_ptr（先停采集再释放环），
+    // 拷贝/移动会双重停机或丢所有权，故一律显式禁用；节点只经 shared_ptr 由 context 持有。
+    AudioMicrophoneSourceNode(const AudioMicrophoneSourceNode &) = delete;
+    auto operator=(const AudioMicrophoneSourceNode &) -> AudioMicrophoneSourceNode & = delete;
+    AudioMicrophoneSourceNode(AudioMicrophoneSourceNode &&) = delete;
+    auto operator=(AudioMicrophoneSourceNode &&) -> AudioMicrophoneSourceNode & = delete;
 
   private:
     friend class AudioContext;
@@ -560,8 +596,12 @@ class AudioContext {
     explicit AudioContext(std::unique_ptr<AudioDeviceBackend> device_backend = nullptr,
                           std::unique_ptr<AudioCaptureBackend> capture_backend = nullptr);
     ~AudioContext();
+    // 五法则（CODING_STANDARDS.md §5.1）：context 是节点/拓扑/设备线程的唯一属主（持两个后端
+    // unique_ptr 与原子时钟），移动会令全部节点的 ctx_ 引用悬垂，故拷贝与移动皆显式禁用。
     AudioContext(const AudioContext &) = delete;
     auto operator=(const AudioContext &) -> AudioContext & = delete;
+    AudioContext(AudioContext &&) = delete;
+    auto operator=(AudioContext &&) -> AudioContext & = delete;
 
     // ---- 拓扑 ----
     /// @brief 连接 src → dst（校验归属/重复/禁环；DAG）。
@@ -624,7 +664,8 @@ class AudioContext {
     friend class AudioNode;
 
     struct GraphCommand {
-        enum class Kind { Connect, Disconnect };
+        // 私有枚举且作为命令结构体字段存储（命令环按值承载）：值域仅 0..1，收窄无损语义。
+        enum class Kind : std::uint8_t { Connect, Disconnect };
         Kind kind{};
         std::shared_ptr<AudioNode> src;
         std::shared_ptr<AudioNode> dst;

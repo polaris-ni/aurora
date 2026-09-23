@@ -65,7 +65,13 @@
  */
 
 // ─────────────────────────── AURORA_PLATFORM_*：平台家族 ───────────────────────────
-// NOLINTBEGIN(*-macro-usage)
+// 本段（平台家族 / CPU 架构 / 位宽 / 编译器 / 能力）的宏全部必须在**预处理期可求值**：库内与消费者
+// 的 `#if defined(AURORA_PLATFORM_UNIX)`、`#ifdef AURORA_ARCH_WASM` 分派，以及「未命中即未定义」的
+// 三态语义，都依赖 `#define` 本身；改成 enum/constexpr 后宏从预处理器消失，整条后端/平台剪裁链恒假。
+// 故 macro-usage（别用宏定义常量）与 macro-to-enum（宏常量改 enum）对本文件恒为假阳性。
+// 采区间式且覆盖整段而非逐点：命中的 `#define` 随编译目标而变（Windows 取 ARCH_X64、Linux 取
+// PLATFORM_UNIX 首支、浏览器取 ARCH_WASM），逐点豁免会随口径漂移——本机 0 条的分支换个目标就冒出来。
+// NOLINTBEGIN(*-macro-usage, *-macro-to-enum)
 #ifdef _WIN32
 #define AURORA_PLATFORM_WINDOWS 1U
 #elif defined(__APPLE__) && defined(__MACH__)
@@ -128,12 +134,12 @@
 //          其次 MSVC；最后 GCC（MinGW 属 GCC 家族，另行用 MINGW 标记）。
 #ifdef __clang__
 #define AURORA_COMPILER_CLANG 1
-#if defined(__apple_build_version__)
+#ifdef __apple_build_version__
 #define AURORA_COMPILER_APPLE_CLANG 1
 #elif defined(_MSC_VER)
 #define AURORA_COMPILER_CLANG_CL 1
 #endif
-#if defined(__EMSCRIPTEN__)
+#ifdef __EMSCRIPTEN__
 #define AURORA_COMPILER_EMSCRIPTEN 1
 #endif
 #elif defined(_MSC_VER)
@@ -151,10 +157,15 @@
 //   （`__EMSCRIPTEN_PTHREADS__` 仅由 `-pthread` 定义，实测），该组合取 0；其余目标一律取 1。
 //   判据是**编译期能力**而非运行期试探：开 `-pthread` 会让 wasm 产物要求 SharedArrayBuffer + COOP/COEP，
 //   属产品级取舍，由构建方决定后在此如实反映。
+// AURORA_CAP_THREADS 参与多处预处理 `#if` 条件（如 src/aurora/image/registry.cpp 与
+// tests/framework/assertions.h 的 `#if AURORA_CAP_THREADS`），必须保持宏形态在预处理期可见；
+// 改 enum/constexpr 会让这些 `#if` 见到未定义宏而恒假。恒定义且取值 0/1 是文档化契约
+// （utest_platform 以 static_assert 把关），不适用 macro-to-enum 收敛。
+// （此处原有逐段区间式豁免，现由文件上方覆盖整段的区间式豁免统一承担，不再嵌套。）
 #if defined(AURORA_PLATFORM_WASM) && !defined(__EMSCRIPTEN_PTHREADS__)
 #define AURORA_CAP_THREADS 0
 #else
 #define AURORA_CAP_THREADS 1
 #endif
 
-// NOLINTEND(*-macro-usage)
+// NOLINTEND(*-macro-usage, *-macro-to-enum)

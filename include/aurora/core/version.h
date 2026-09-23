@@ -14,6 +14,13 @@
 // 直接包含本头而未走 CMake 构建时回退到内置默认值（与仓库当前版本一致）。
 // ============================================================================
 
+// 版本宏族必须在预处理期可见，constexpr 常量无法满足：① 消费者以
+// `#if AURORA_VERSION_MAJOR >= N` 做编译期版本分支；② 本头自身用
+// `#if AURORA_HAS_VERSION_SUFFIX` 拼接版本串、以 `AURORA_VERSION_STR`（#x 字符串化）
+// 把数值分量并入字面量，均是只有宏能承担的预处理期操作；③ 各分量以
+// `#ifndef` 守卫接受 CMake 编译定义注入、缺省时回退内置默认值，constexpr 定义
+// 无法被构建系统条件覆盖（路径见文件头注释与 BUILD_OPTIONS.md）。
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
 #ifndef AURORA_VERSION_MAJOR
 #define AURORA_VERSION_MAJOR 1
 #endif
@@ -49,3 +56,4 @@
 #else
 #define AURORA_VERSION_STRING AURORA_VERSION_NUMERIC
 #endif
+// NOLINTEND(cppcoreguidelines-macro-usage)

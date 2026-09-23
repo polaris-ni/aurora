@@ -73,6 +73,10 @@ class StateBase {  // NOLINT(cppcoreguidelines-special-member-functions)
  * @note Rebuildable: no
  */
 template <typename T>
+// 豁免 bugprone-exception-escape：State 嵌于控件/Effect 回调网（std::function 转发链）中，触发
+// .clang-tidy 已记录的系统性假告警面——「任何转入 std::function 的可调用对象一律判『不应抛出』」
+// （operator() 无 noexcept 规格），据此对隐式特殊成员误报。抛出仅可能为 bad_alloc，由顶层兜底。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class State : public SignalView<T>, public StateBase, public std::enable_shared_from_this<State<T>> {
   public:
     explicit State(T v = T{}) : value_(std::move(v)) {}

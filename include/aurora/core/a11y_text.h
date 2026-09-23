@@ -146,7 +146,7 @@ class UtfOffsetMap {
             }
             return starts_.at(idx);
         }
-        const std::size_t back = static_cast<std::size_t>(-count);
+        const auto back = static_cast<std::size_t>(-count);
         if (idx <= back) {
             return 0;
         }
@@ -155,9 +155,9 @@ class UtfOffsetMap {
 
     /// @brief 按 UTF-16 单元前进/后退（UIA `MoveEndpointByUnit(Character)` 语义）。
     [[nodiscard]] auto advance_utf16(std::size_t utf16_index, int count) const -> std::size_t {
-        const std::size_t target = (count < 0 && utf16_index < static_cast<std::size_t>(-count))
-                                       ? 0
-                                       : utf16_index + static_cast<std::size_t>(count);
+        // utf16_index 无符号、count 有符号：用 std::cmp_less 做术语比较（本分支内 -count > 0，无溢出语义差）。
+        const std::size_t target =
+            (count < 0 && std::cmp_less(utf16_index, -count)) ? 0 : utf16_index + static_cast<std::size_t>(count);
         return to_utf8(target);
     }
 
@@ -262,9 +262,7 @@ class UtfOffsetMap {
 /// @brief 把 `index` 所在位置按 `unit` 展开为 `[start, end)`（UTF-8 字节偏移）。
 [[nodiscard]] inline auto expand_to_unit(std::string_view text, std::size_t index, TextUnit unit)
     -> std::pair<std::size_t, std::size_t> {
-    if (index > text.size()) {
-        index = text.size();
-    }
+    index = std::min(index, text.size());  // 越界索引夹紧到串尾
     switch (unit) {
         case TextUnit::Document:
             return {0, text.size()};

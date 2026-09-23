@@ -218,9 +218,9 @@ struct DiffRegion {
     for (std::size_t y = 0; y < uh; ++y) {
         const std::size_t row = (y / static_cast<std::size_t>(tile)) * utx;  // 注意：这里是**网格行**，不是像素行
         for (std::size_t x = 0; x < uw; ++x) {
-            const std::size_t t = row + x / static_cast<std::size_t>(tile);
+            const std::size_t t = row + (x / static_cast<std::size_t>(tile));
             ++tile_total[t];
-            const std::size_t off = (y * uw + x) * 4U;
+            const std::size_t off = ((y * uw) + x) * 4U;
             if (detail::snapshot_pixel_delta(baseline, current, off) > tolerance) {
                 ++tile_diff[t];
             }
@@ -239,7 +239,7 @@ struct DiffRegion {
 
     for (int ty = 0; ty < tiles_y; ++ty) {
         for (int tx = 0; tx < tiles_x; ++tx) {
-            const auto t = static_cast<std::size_t>(ty) * utx + static_cast<std::size_t>(tx);
+            const auto t = (static_cast<std::size_t>(ty) * utx) + static_cast<std::size_t>(tx);
             const auto effective =
                 tile_total[t] > 0 ? static_cast<double>(tile_diff[t]) / static_cast<double>(tile_total[t]) : 0.0;
             if (tile_diff[t] == 0 || effective <= opt.tile_dirty_ratio) {
@@ -291,12 +291,12 @@ struct DiffRegion {
     for (std::size_t y = 0; y < uh; ++y) {
         const std::size_t row = (y / static_cast<std::size_t>(tile)) * utx;  // 网格行，同第一遍
         for (std::size_t x = 0; x < uw; ++x) {
-            const std::size_t off = (y * uw + x) * 4U;
+            const std::size_t off = ((y * uw) + x) * 4U;
             const int delta = detail::snapshot_pixel_delta(baseline, current, off);
             if (delta <= tolerance) {
                 continue;
             }
-            const std::size_t t = row + x / static_cast<std::size_t>(tile);
+            const std::size_t t = row + (x / static_cast<std::size_t>(tile));
             if (!dirty[t]) {
                 continue;  // 干净格里的孤立差异像素不归属任何区域（可由 min_region_pixels 另行拾取）
             }
@@ -398,7 +398,7 @@ struct RegionAttribution {
 [[nodiscard]] inline auto attribute_diff_regions(const std::vector<DiffRegion> &regions,
                                                  std::span<const WidgetBox> boxes, float pixels_per_unit = 1.0F)
     -> std::vector<RegionAttribution> {
-    constexpr std::size_t AURORA_NONE = static_cast<std::size_t>(-1);
+    constexpr auto no_hit = static_cast<std::size_t>(-1);  // std::size_t 哨兵：未命中任何控件
     const double scale = pixels_per_unit > 0.0F ? static_cast<double>(pixels_per_unit) : 1.0;
 
     std::vector<RegionAttribution> out;
@@ -408,7 +408,7 @@ struct RegionAttribution {
         a.region = r;
 
         double best_overlap = 0.0;
-        std::size_t best = AURORA_NONE;
+        std::size_t best = no_hit;
         for (std::size_t i = 0; i < boxes.size(); ++i) {
             const Rect device{.origin = Point{.x = static_cast<float>(boxes[i].bounds.origin.x * scale),
                                               .y = static_cast<float>(boxes[i].bounds.origin.y * scale)},
@@ -422,7 +422,7 @@ struct RegionAttribution {
             }
         }
 
-        if (best == AURORA_NONE) {
+        if (best == no_hit) {
             out.push_back(a);
             continue;
         }

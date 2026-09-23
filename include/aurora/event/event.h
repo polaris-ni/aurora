@@ -120,7 +120,7 @@ struct TextInputEvent : Event {
  * 用于输入法高亮「待转换的拼音片段」；无区间时 `sel_end == AURORA_NO_SELECTION`。
  */
 struct TextCompositionEvent : Event {
-    /// @brief preedit 内「无选区」哨兵（与 `TextInput::NO_SEL` 同语义，独立定义以免跨头依赖）。
+    /// @brief preedit 内「无选区」哨兵（与 `TextInput::AURORA_NO_SEL` 同语义，独立定义以免跨头依赖）。
     static constexpr std::size_t AURORA_NO_SELECTION = static_cast<std::size_t>(-1);
 
     std::string preedit;  ///< 预编辑串（UTF-8）；空串 = 组合结束 / 取消

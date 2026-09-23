@@ -56,6 +56,10 @@ namespace detail {
     }
 
     // 含 YAML 特殊字符
+    // 惰性构造的函数内 static：字符串字面量构造 `std::string` 需分配，常量初始化不可能；而首建
+    // 时刻与跨 TU 静态初始化顺序无关（本检查的担心面）。仅浏览器口径命中——native 遍同一份代码
+    // 不报（CODING_STANDARDS.md §5.2 的口径差异）。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static const std::string SPECIAL = ":#{}[],&*?|-<>=!%@`\\\"";
     for (const char c : s) {
         if (SPECIAL.find(c) != std::string::npos) {

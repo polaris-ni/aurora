@@ -163,6 +163,10 @@ template <typename... Args>
 #define AURORA_FILE_NAME __FILE__
 #endif
 
+// 日志宏族刻意保持宏形态：须经 __VA_ARGS__ 把任意数量参数零开销转发给 log_concat，并就地取
+// AURORA_FILE_NAME/__LINE__ 记录调用点位置——constexpr 可变参模板函数拿不到调用点位置，
+// 也无法承接 AURORA_LOG_RAW 直写 stdout（默认 sink 为 raw 通道）的线协议字节面。
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
 /// @brief 记录一条日志（自动附加 file:line）；消息支持任意数量的类型安全可变参数。
 #define AURORA_LOG(level, category, ...)                                              \
     ::aurora::Logger::instance().log(AURORA_FILE_NAME, __LINE__, (level), (category), \
@@ -193,6 +197,7 @@ template <typename... Args>
  */
 #define AURORA_LOG_RAW(category, ...) \
     ::aurora::Logger::instance().raw((category), ::aurora::detail::log_concat(__VA_ARGS__))
+// NOLINTEND(cppcoreguidelines-macro-usage)
 
 // ---------------------------------------------------------------------------
 // printf 风格 → 日志桥接（宏形式，保留调用点的 file:line 归属；全局可用）
@@ -203,7 +208,7 @@ template <typename... Args>
 // 仅作 printf → 日志的兼容桥接，新代码请直接用 `AURORA_LOG_*` / `AURORA_LOG_RAW`。
 // clang 对 `fmt, ##__VA_ARGS__` 的逗号吞并逐 TU 报 -Wgnu-zero-variadic-macro-arguments；
 // 零实参调用是本桥接的刻意设计（GCC 对该 GNU 扩展静默），此处定向压制。
-#if defined(__clang__)
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
 #endif
@@ -226,6 +231,6 @@ template <typename... Args>
             _aurora_sv.remove_suffix(1);                                                        \
         AURORA_LOG_ERROR("test", _aurora_sv);                                                   \
     } while (0)
-#if defined(__clang__)
+#ifdef __clang__
 #pragma clang diagnostic pop
 #endif

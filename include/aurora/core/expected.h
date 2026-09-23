@@ -12,6 +12,14 @@ namespace aurora {
  * @brief 携带错误值的包装（参考 std::unexpected，C++23 前本库自带实现）。
  * @tparam E 错误类型（本库为 aurora::Error）。
  */
+// 以下两个类型是 `std::expected` / `std::unexpected` 的本库镜像（C++23 前的自带实现），两类豁免
+// 就此区间点名，其余检查不受影响：
+//   · `readability-identifier-naming`：类名小写、存储成员带尾下划线，都是刻意与标准同名同形，
+//     改成 PascalCase 反而让人误以为这是另一套类型；
+//   · `cppcoreguidelines-pro-type-union-access`：二态存储本就靠手工 union 实现（placement new、
+//     显式析构、按 tag 分支赋值/移动）。换成 `std::variant` 即把「不额外抛、tag 就是 `has_value_`」
+//     这两条契约换掉，且镜像语义（错误态取值 = 常开拦截后 UB）需要精确控制访问路径。
+// NOLINTBEGIN(cppcoreguidelines-pro-type-union-access, readability-identifier-naming)
 template <typename E>
 class unexpected {
   public:
@@ -40,8 +48,10 @@ class expected {
   public:
     explicit expected(const T &v) : has_value_(true) { ::new (&value_) T(v); }
     explicit expected(T &&v) : has_value_(true) { ::new (&value_) T(std::move(v)); }
-    explicit expected(const unexpected<E> &u) : has_value_(false) { ::new (&error_) E(u.error()); }
-    explicit expected(unexpected<E> &&u) : has_value_(false) { ::new (&error_) E(std::move(u.error())); }
+    // `has_value_` 的类内默认初值已是 false，错误态构造不再重复写；取错误载荷走 `&&` 重载，
+    // 明确「从实参整体移动」而非只对其成员_cast。
+    explicit expected(const unexpected<E> &u) { ::new (&error_) E(u.error()); }
+    explicit expected(unexpected<E> &&u) { ::new (&error_) E(std::move(u).error()); }
 
     expected(const expected &o) : has_value_(o.has_value_) {
         if (o.has_value_) {
@@ -141,5 +151,6 @@ class expected {
         E error_;
     };
 };
+// NOLINTEND(cppcoreguidelines-pro-type-union-access, readability-identifier-naming)
 
 }  // namespace aurora

@@ -19,14 +19,15 @@
 #                    （Emscripten 无线程/子进程的能力用例以 SKIP 计入，见 tests/framework/assertions.h）；
 #                    并跑**浏览器口径 clang-tidy**（`lint` 目标在 Emscripten 配置下自动加
 #                    --emscripten，见 job 8 与 BUILD_OPTIONS.md §4.5）——这是 EMSCRIPTEN 门后
-#                    那批 TU 唯一的静态检查面；与 job 8 同为 report-only，清单作 artifact 落盘。
+#                    那批 TU 唯一的静态检查面；与 job 8 同为**必过**门禁，清单仍作 artifact 落盘。
 #  7. install     — cmake --install + 工作流内联最小消费端端到端验证
 #                    （find_package(Aurora) + 静态链接 + feature 宏导出一致性）。
 #  8. lint        — clang-tidy 双 Pass（DEBUG ON / OFF 各一份编译数据库，去重后统计）；
 #                    纯静态分析，仅 ubuntu-latest 单跑（与平台无关，且 windows/macos runner 默认无 clang-tidy）。
 #                    依赖 AuroraLint.cmake 提供的 `lint` 目标（configure 时 clang-tidy 须在 PATH）。
-#                    ⚠️ 现为 **report-only**（两遍均 continue-on-error + 上传 findings artifact）：
-#                    该门禁自引入起从未绿过，红在存量而非本轮回归；收回必过语义的条件见 job 8 顶部注释。
+#                    现为 **必过**（2026-09-23 收回 report-only：三份清单的 unique_findings 已各自
+#                    量到 0）；findings artifact 照旧上传——「不报」与「跑到了」是两件事，判因要看清单。
+#                    该门禁为何一度 report-only、以及本机 0 与 CI 数百条为何不矛盾，见 job 8 顶部注释。
 #                    ⚠️ 本 job 的口径是 **native**：EMSCRIPTEN 门后的 TU 不在这两份编译库里，
 #                    其静态检查由 job 6（wasm）在同一份 wasm 编译库上跑浏览器口径 lint 补齐。
 #
@@ -413,10 +414,9 @@ jobs:
       # lint job 绿灯不构成这些代码被检查过的证据。AuroraLint 在 Emscripten 配置下给 `lint`
       # 目标自动附加 --emscripten（先把 em++ 写的编译库重写成 native clang-tidy 可消费的
       # 形态：换三元组、指 sysroot、弃 PCH），故这里直接复用本次 configure 的产物。
-      # ⚠️ report-only：存量清零前不判失败，理由与收回条件见 job 8 顶部注释；清单必须作为
-      #    artifact 落盘——「不阻塞」不等于「看不见」，本作业首次真检查 420 个 TU 即放出 470 条。
-      - name: Lint (emscripten db, report-only until backlog cleared)
-        continue-on-error: true
+      # 必过（2026-09-23 收回 report-only，条件见 job 8 顶部注释）。清单仍必须作为 artifact 落盘——
+      # 本作业首次真检查 420 个 TU 即放出 470 条，「不报」与「跑到了」是两件事，判因靠清单。
+      - name: Lint (emscripten db)
         run: cmake --build build-wasm --target lint
 
       - name: Upload tidy findings (emscripten db)
@@ -506,24 +506,31 @@ jobs:
   lint:
     name: clang-tidy (dual-pass)
     runs-on: ubuntu-latest
-    # 90 → 240：改为 report-only 后 DEBUG=ON 那遍**不再被前一遍的失败短路**，本 job 从
-    # 「跑一遍就退」变成实打实跑两遍（单遍在 runner 上实测 elapsed 3515s）。
+    # 90 → 240：本 job 实打实跑两遍（单遍在 runner 上实测 elapsed 3515s）。清零前 DEBUG=ON 那遍
+    # 会被前一遍失败短路，240 是按「两遍都跑满」给的余量；清零后这个余量仍是必要的（末轮 TU 编译
+    # 失败即整遍红，两遍串跑就是 2 小时量级）。
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v7
 
-      # ── 本 job 现为 report-only（两遍都 continue-on-error）────────────────────────
-      # 为什么：这道门禁自引入起**从未绿过**——早期红在装不上 clang-tidy-22（apt 404），
-      # 修好后红在存量告警（native 上一轮 501 条 / 本轮 422 条）。一个永远红的必过位不等于
-      # 门禁，只是把红灯常态化、并让所有 PR 背一个与自身无关的失败。故先解阻塞，用 artifact 追清单。
-      # 为什么本机 0 而 CI 数百条：`.clang-tidy` 的 `HeaderFilterRegex` 只认正斜杠，Windows
+      # ── 本 job 为**必过**门禁（2026-09-23 收回此前的 report-only）────────────────────
+      # 收回条件已满足：三份清单（本作业 DEBUG=OFF / DEBUG=ON 两遍 + job 6 浏览器口径一遍）的
+      # unique_findings 均为 0。findings artifact 照旧上传——「不报」与「跑到了」是两件事。
+      # 它为何一度 report-only：该门禁自引入起**从未绿过**——早期红在装不上 clang-tidy-22（apt 404），
+      # 修好后红在存量告警（native 上一轮 501 条 / 当时 422 条）。一个永远红的必过位不等于
+      # 门禁，只是把红灯常态化、并让所有 PR 背一个与自身无关的失败。故当时先解阻塞，用 artifact 追清单。
+      # 当时本机 0 而 CI 数百条并不矛盾：`.clang-tidy` 的 `HeaderFilterRegex` 只认正斜杠，Windows
       # 本机编译库里的头文件路径是「正斜杠根 + 反斜杠段」的混合形态、被过滤掉，Linux 上则
       # 全部穿过——本机「两口径 0 findings」证明的面比字面窄（详见 codespec/BUILD_OPTIONS.md §4.5）。
-      # 收回条件（把它改回必过）：三份清单（本作业两遍 + job 6 浏览器口径一遍）的
-      # unique_findings 均为 0。处置手段按「覆盖面代价」排序，优先前者：① `.clang-tidy` 的
-      # CheckOptions（命名类占大头，`*IgnoredRegexp` 按类别精确豁免，不牺牲文件其余检查）；
-      # ② 逐点 NOLINT + 原因；③ 整文件排除（永久盲点，只给桩/替身这类「本就不受本仓风格约束」
-      # 的文件，当前仅 tests/support/fake_gl.h 一例）。
+      # 该缺口现已改写为分隔符无关，本机与 CI 量的是同一张覆盖面；存量也按「覆盖面代价」排序清到
+      # 0，代价小者优先：① `.clang-tidy` 的 CheckOptions（命名类占大头，`*IgnoredRegexp` 按类别
+      # 精确豁免，不牺牲文件其余检查）；② 逐点 NOLINT + 原因；③ 整文件排除（永久盲点，只给
+      # 桩/替身这类「本就不受本仓风格约束」的文件，当前仅 tests/support/fake_gl.h 一例）。
+      # ⚠️ 仍留一条本机盲区，如实申报而非掩盖：本机 native 遍在 Windows 上跑，`AURORA_PLATFORM_LINUX`
+      # 独享的 `#if` 分支不进分析。已核过其规模——库与测试里的 Linux-only 文件（x11/wayland/wgpu
+      # 表面与 atspi 桥）在 CI 默认开关下整文件即空 TU，真正未被本机覆盖的只有 clipboard.cpp /
+      # font_discovery.cpp 等文件里约百行量级的平台分支。若日后在此转红，按上面同一阶梯处置，
+      # **不得**回退 report-only。
       - name: Install clang-tidy-22
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
@@ -536,8 +543,7 @@ jobs:
       - name: Configure (debug OFF, export compile_commands.json)
         run: cmake -S . -B build-lint-off -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF
 
-      - name: Lint (debug OFF branch, report-only until backlog cleared)
-        continue-on-error: true
+      - name: Lint (debug OFF branch)
         run: cmake --build build-lint-off --target lint
 
       - name: Upload tidy findings (debug OFF)
@@ -551,8 +557,7 @@ jobs:
       - name: Configure (debug ON, export compile_commands.json)
         run: cmake -S . -B build-lint-on -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=ON
 
-      - name: Lint (debug ON branch, report-only until backlog cleared)
-        continue-on-error: true
+      - name: Lint (debug ON branch)
         run: cmake --build build-lint-on --target lint
 
       - name: Upload tidy findings (debug ON)

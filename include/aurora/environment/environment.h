@@ -19,6 +19,11 @@ namespace aurora {
  * @note Side-effects: none
  * @note Rebuildable: no
  */
+// 豁免 bugprone-exception-escape：.clang-tidy 已记录本检查的系统性假告警面——任何转入 std::function
+// 的可调用对象一律判「不应抛出」（std::function::operator() 无 noexcept 规格，分析器无法证明其不抛），
+// 本类沿控件回调拷贝/转发链被误判到隐式特殊成员上。其拷贝仅可能因 map_/any/共享父链分配抛 bad_alloc，
+// 属进程级内存耗尽异常，由顶层统一兜底，非本类需就地吞掉的抛出面。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class Environment {
   public:
     Environment() = default;

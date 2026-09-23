@@ -24,7 +24,7 @@
 - **顺序容错**：多参数构造优先用 `XxxProps{...}` 具名聚合（如 `ColumnProps{ .children = ... }`），避免位置参数顺序错误。
 - **强类型几何**：`Length` / `Color` / `Size` / `Point` 为强类型；禁止 `Length(int)` 隐式转换（裸整数编译失败）。已采纳用户字面量 `au::literals`（`100_dp`、`16_ms`、`0xRRGGBB_rgb`），`px(100)` 与 `100_dp` 互补；**禁止头文件全局 `using`**，字面量只在 TU 内按需引入（示例代码用 `using namespace au::literals;`，测试代码按 §3.1 用 using 声明 / 命名空间别名引入，不得用 using-directive）。
 - **所有权清晰**：资源所有权用 `unique_ptr` / `shared_ptr` 明确；跨边界传递用 `std::move`；`Binding<T>` 为非拥有引用（上游生命周期须更长）。
-- **成员变量命名**：`struct` 成员与类 `public` 成员用**裸名**（无前缀、无后缀，如 `Color::r`、`DragData::mime_type`）；类的 `protected` / `private` 非静态成员统一**尾部下划线**后缀（如 `children_`、`value_`、`on_close_`）；**全仓禁止 `m_` 前缀**。`static` 常量按本条「常量命名」走 `UPPER_CASE`（如 `NO_SEL`）；`static` 可变成员、`static` `protected`/`private` 成员规则与普通成员一致（尾部下划线）。
+- **成员变量命名**：`struct` 成员与类 `public` 成员用**裸名**（无前缀、无后缀，如 `Color::r`、`DragData::mime_type`）；类的 `protected` / `private` 非静态成员统一**尾部下划线**后缀（如 `children_`、`value_`、`on_close_`）；**全仓禁止 `m_` 前缀**。`static` 常量按下一条「常量命名」走 `AURORA_` 前缀 + `UPPER_CASE`（如 `AURORA_NO_SEL`）；`static` 可变成员、`static` `protected`/`private` 成员规则与普通成员一致（尾部下划线）。
 - **常量命名**：命名空间 / 文件级与类内 `static constexpr` 常量统一 `AURORA_` 前缀 + `UPPER_CASE` 全大写下划线（如 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`）；禁止 `k` 前缀 CamelCase。**豁免**：镜像外部标准 API 枚举值的常量按官方名原样保留（`AURORA_` 前缀会破坏与外部文档 / 官方头的逐名对照），前提是收敛在专属命名空间内隔离作用域——现有两例：`colors` 命名空间的色板常量（`core/color.h`）与 `rhi::gl` 命名空间的 GL 枚举镜像（`src/aurora/render/gpu/gl_core.h`，如 `TEXTURE_2D` / `RGBA8`，值逐一取自 GL 官方规范）。`FALSE_` / `TRUE_` 的尾部下划线为规避平台宏碰撞的例外，不作为成员命名惯例。
 - **生命周期回调强类型**：`au::Lifecycle` 的 `on_mount` / `on_unmount`、窗口级 `WindowState` / `WindowMode` 的 `set_on_*` 回调均为具名 `std::function` 强类型（`MountCb = std::function<void(const BuildContext&)>`、`UnmountCb = std::function<void()>`，`WindowStateHandler` / `WindowModeHandler` 同理）；枚举取值穷尽且按「可见性 / 几何态」正交划分（`WindowState` 不并入 `Maximized`），AI 无需猜测「是否还有隐藏状态」。回调均可空（无副作用时不传），且不走异常捕获（与主线程事件回调一致）。
 
@@ -239,12 +239,17 @@
 
 1. **理由写在指令同一行**（本仓的主要成因）：`// NOLINTNEXTLINE(check) 一长段理由……` 超过 120 列时，clang-format 把折下来的后半段排成指令的**下一物理行**，而 `NOLINTNEXTLINE` 只管紧邻的那一行——它罩住的是注释，代码行无人豁免。理由一律整段写在指令**之前**。
 2. **被豁免的语句本身排成多行**：告警落在第 2、3 行时同样落空。凡可能被折行的语句一律改用 `NOLINTBEGIN(...)` / `NOLINTEND(...)` 成对覆盖整段，`NOLINTNEXTLINE` 只留给确定单行的语句（本条早期实测两处：环形 PCM 的 `pro-bounds-pointer-arithmetic`、COM 出参的 `pro-type-reinterpret-cast`）。
+3. **检查清单写成多物理行**（比前两条更危险的一类）：`NOLINTBEGIN(a, b,` 折到下一行 `c)` 时，clang-tidy 22 只解析指令所在物理行的括号，跨行括号被读成**空列表**，而空列表的语义是「豁免一切」——整段区间内**所有**检查一律不报。`NOLINTEND(` 与代码行尾的 `NOLINT(` 同形同因。前两条是豁免落空、告警漏出（门禁看得见），这一条是超额豁免、把真实存量一并吞掉（只有把名单改对后复跑才暴露）。名单必须**单行写完**；超过 120 列时按下列顺序收敛：① 删掉 `.clang-tidy` 里本已关闭的检查名；② 改用通配压缩（`*-pro-bounds-*` 一类——通配是**按名匹配**，实测不会退化成豁免一切，且不匹配的通配也不会误豁免）；③ 把理由整段移到指令之前，只留名单。区间名单一律写成「删掉该区间后 clang-tidy 实测报出的检查集」，不得顺手抄大桶。
 
 ⚠️ 同族还有一条硬失败：**`NOLINT` 令牌只能出现在真指令里**——注释文本里出现的 `NOLINTBEGIN(` / `NOLINTEND(` 字样同样被解析成指令，未配对的 `NOLINTBEGIN` 不是告警而是 `clang-tidy-nolint` **硬错误**，直接中断该翻译单元的整轮分析（表现为「该 TU 零告警」的假干净）；裸令牌（不带括号列表）则会对下一物理行形成一次全量豁免。指代他处的既有豁免时写「紧邻式豁免」/「区间式豁免」，勿抄令牌。
 
-以上三类排版由 CTest 门禁 `check_nolint_layout`（`tools/check/check_nolint_layout.py`）常驻把关——它只看注释行的排布，补的正是 clang-tidy 看不见的那一段。实测第 1 类在本仓一次成型 **234 处、涉及 98 个文件**，其中 194 处恰好落在真实告警行上，已全部改写为「理由前置 + 指令紧贴代码」（只动注释行，代码行零改动）。理由注释的位置约束另见 §8.5 末尾与 `BUILD_OPTIONS.md` §4.7。
+以上四类排版由 CTest 门禁 `check_nolint_layout`（`tools/check/check_nolint_layout.py`）常驻把关——脚本内把违规标为 **规则 1**（上方第 1、2 条：指令与代码之间插入任何行）、**规则 2**（⚠️ 段：散文抄令牌）、**规则 3**（上方第 3 条：清单跨行）。它只看注释行的排布与括号是否在本行闭合，补的正是 clang-tidy 看不见的那一段。实测第 1 类在本仓一次成型 **234 处、涉及 98 个文件**，其中 194 处恰好落在真实告警行上，已全部改写为「理由前置 + 指令紧贴代码」（只动注释行，代码行零改动）。第 3 类实测成型 **4 段大区间**（`painter.cpp`、`painter_simd.inl`、`win32_ua.cpp`、`system_tray_win32.cpp`，合计覆盖约 5 000 行），把名单改对后复跑浮出 **795 条从未被报告的告警**：其中 363 条直接改码消除（补括号 130 + 字面量后缀改大写 233，与全仓其余代码同口径），余下才按实测集合收进区间名单。理由注释的位置约束另见 §8.5 末尾与 `BUILD_OPTIONS.md` §4.7。
 
-判因纪律：告警**跨标准库 / 跨目标三元组**出现差异时，先按真实差异处理，不得为凑门禁口径而放宽配置。已实测的三类真实差异——libc++ 的 `basic_string_view(const char *)` 构造非 `noexcept`（静态初始化期即触发 `bugprone-throwing-static-initialization`，框架侧以 `literal_view` 免掉该构造）、wasm32 的 `long` 为 32 位（`long long` → `difference_type` 是真·窄化）、Emscripten libc++ 的 `std::span` 无 `.at()`。
+判因纪律：告警**跨标准库 / 跨目标三元组**出现差异时，先按真实差异处理，不得为凑门禁口径而放宽配置。已实测的四类真实差异——libc++ 的 `basic_string_view(const char *)` 构造非 `noexcept`（静态初始化期即触发 `bugprone-throwing-static-initialization`，框架侧以 `literal_view` 免掉该构造）、wasm32 的 `long` 为 32 位（`long long` → `difference_type` 是真·窄化）、Emscripten libc++ 的 `std::span` 无 `.at()`、`bugprone-dynamic-static-initializers` **只在浏览器口径命中**（该检查的判据是「初始化能否常量完成」，结论随标准库的 `constexpr` 覆盖面而变：`include/` 下同一批函数内 `static` 在 native 遍 0 条、`--emscripten` 遍 16 条。A/B 复验取单一 TU `tests/unit/utest_image_cache.cpp`、同一份 `.clang-tidy`，分别喂 native 与浏览器两份编译库，前者静默、后者报 `render/image_cache.h:27`）。第四条按逐点豁免处置：函数内 `static` 本就靠惰性构造规避跨 TU 初始化顺序，正是该检查担心面的反面。
+
+「**仅浏览器口径命中**」是一个可复用的族名，不止上面一条：同检查、同头文件，native 遍 0 条而 `--emscripten` 遍命中的还有 `bugprone-unchecked-optional-access`（`state/coroutine.h` 的 `*optional` 解引用——libc++ `std::optional` 的内部形态不同，检查的数据流结论随之不同）、`readability-redundant-smartptr-get`（`State` 的值读取口被误读成 `shared_ptr::get()`）、`bugprone-exception-escape`（`std::function` 假告警面在 libc++ 侧才走通调用图）。凡归入本族者，处置口径统一：**判据本身没变、代码也没错，差异只在两条口径的分析深度**，故逐点豁免并写明「native 遍同一份代码不报」，不改配置、不为凑口径改码。
+
+⚠️ 同族另一条口径陷阱：**命中的预处理分支随编译目标而变**，与豁免粒度的关系更隐蔽。`core/platform.h` 的 `macro-to-enum` 即为一例——Windows 命中 `AURORA_ARCH_X64`、Linux 命中 `AURORA_PLATFORM_UNIX` 首支、浏览器命中 `AURORA_ARCH_WASM`，同一段代码三条口径各报各的分支，故「本机 0 条」不代表 CI 0 条。这类豁免一律用**区间式覆盖整段宏定义**而非逐点写，否则逐点名单会随口径漂移成「此处清干净、彼处又冒出来」。
 
 抑制属于显式契约决策，随代码评审、随文档同步。
 

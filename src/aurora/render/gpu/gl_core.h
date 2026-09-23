@@ -14,6 +14,13 @@
 namespace aurora::rhi::gl {
 
 // 基础类型常量
+//
+// 本区常量逐字镜像 OpenGL 官方规范名（`TEXTURE_2D` / `RGBA8` / `COLOR_BUFFER_BIT`…），值与
+// 规范一一对应。`GlobalConstantPrefix: AURORA_` 在此必然告警：加前缀即破坏与官方头/官方文档的
+// 逐名对照，而 `CODING_STANDARDS.md` §2「常量命名」已明文豁免此类镜像（前提正是「收敛在专属
+// 命名空间内隔离作用域」，本区即 `aurora::rhi::gl`）。clang-tidy 的命名豁免不能按命名空间限定，
+// 全局放宽又会放过本仓自写的无前缀常量，故按区间逐点豁免。
+// NOLINTBEGIN(readability-identifier-naming)
 constexpr GLenum_ FALSE_ = 0;
 constexpr GLenum_ TRUE_ = 1;
 constexpr GLenum_ POINTS = 0x0000;
@@ -75,5 +82,6 @@ constexpr GLenum_ FRAMEBUFFER_COMPLETE = 0x8CD5;
 constexpr GLenum_ VERSION = 0x1F02;
 constexpr GLenum_ EXTENSIONS = 0x1F03;
 constexpr GLenum_ NO_ERROR = 0;
+// NOLINTEND(readability-identifier-naming)
 
 }  // namespace aurora::rhi::gl

@@ -34,6 +34,13 @@ namespace aurora::detail {
 
 namespace atspi {
 
+// 本 namespace 是 AT-SPI2 协议事实的镜像层：接口全名、角色/状态/坐标序号全部逐字取自上游
+// （`atspi-constants.h` 与 `xml/*.xml`，核对记录见本文件头）。名字形态即上游形态的小写化
+// （`ATSPI_ROLE_PUSH_BUTTON` → `role_push_button`，`org.a11y.atspi.Accessible` → `k_iface_accessible`），
+// 目的是让「本仓这一行」与「上游那一名」可肉眼逐条对照——改成本仓的 CamelCase / `AURORA_` 前缀
+// 就丢掉这层对照，而序号才是协议真正关心的东西。属 CODING_STANDARDS.md §2 的官方名镜像豁免面；
+// 命名豁免不能按命名空间限定，故整区逐点豁免（区内只有协议常量与枚举，无其它手写逻辑）。
+// NOLINTBEGIN(readability-identifier-naming)
 /// @brief 接口全名。`GetInterfaces` 返回值与 `Properties.Get` 的 iface 参数都用全名
 ///        （libatspi `_atspi_accessible_is_a` 以全名比对，注册表自身同样返回全名）。
 inline constexpr const char *k_iface_accessible = "org.a11y.atspi.Accessible";
@@ -65,6 +72,10 @@ inline constexpr const char *k_a11y_bus_path = "/org/a11y/bus";
 inline constexpr const char *k_a11y_bus_iface = "org.a11y.Bus";
 
 /// @brief AtspiRole 序号（本桥用到的子集；其余以序号注释回查 upstream 枚举）。
+// 本枚举是上游 at-spi2-core `atspi-constants.h` AtspiRole C 常量与 D-Bus 线协议值域（签名 `u`）的
+// 逐字镜像：底层类型必须保持 std::uint32_t（对齐线协议 u32），且刻意保持 unscoped 以便与上游常量
+// 直接互转——属 CODING_STANDARDS.md §2 的官方名镜像豁免面，改 scoped/缩底层类型都会破坏协议对照。
+// NOLINTNEXTLINE(cppcoreguidelines-use-enum-class,performance-enum-size)
 enum Role : std::uint32_t {
     role_application = 75,
     role_frame = 23,
@@ -92,6 +103,9 @@ enum Role : std::uint32_t {
 };
 
 /// @brief AtspiStateType 序号（本桥用到的子集）。
+// 同 Role：上游 AtspiStateType 常量与 D-Bus 线协议值域（签名 `u`）的逐字镜像，底层类型须保持
+// std::uint32_t、刻意 unscoped 以便与上游常量直接互转——官方名镜像豁免（CODING_STANDARDS.md §2）。
+// NOLINTNEXTLINE(cppcoreguidelines-use-enum-class,performance-enum-size)
 enum State : std::uint32_t {
     state_active = 1,
     state_checked = 4,
@@ -117,11 +131,16 @@ enum State : std::uint32_t {
 };
 
 /// @brief AtspiCoordType（Component/Text 几何坐标系参数）。
+// 同 Role：上游 AtspiCoordType 常量与 D-Bus 线协议值域（签名 `u`）的逐字镜像，底层类型须保持
+// std::uint32_t、刻意 unscoped 以便与上游常量直接互转——官方名镜像豁免（CODING_STANDARDS.md §2）。
+// NOLINTNEXTLINE(cppcoreguidelines-use-enum-class,performance-enum-size)
 enum CoordType : std::uint32_t {
     coord_screen = 0,
     coord_window = 1,
     coord_parent = 2,
 };
+
+// NOLINTEND(readability-identifier-naming)
 
 }  // namespace atspi
 
@@ -130,7 +149,7 @@ struct AtspiRef {
     std::string bus;  ///< 唯一总线名（":1.23"）；空 = 无
     std::string path;  ///< 对象路径；`k_null_path` = 空引用
 
-    [[nodiscard]] static auto null() -> AtspiRef { return {"", std::string{atspi::k_null_path}}; }
+    [[nodiscard]] static auto null() -> AtspiRef { return {.bus = "", .path = std::string{atspi::k_null_path}}; }
     [[nodiscard]] auto is_null() const -> bool { return bus.empty(); }
 };
 
@@ -177,8 +196,8 @@ struct AtspiCacheRow {
 };
 
 /// @brief 折算层的语义树节点保留 id（合成 App/Frame 两个非控件节点）。
-inline constexpr std::uint64_t k_atspi_app_id = ~0ULL;
-inline constexpr std::uint64_t k_atspi_frame_id = ~0ULL - 1ULL;
+inline constexpr std::uint64_t AURORA_ATSPI_APP_ID = ~0ULL;
+inline constexpr std::uint64_t AURORA_ATSPI_FRAME_ID = ~0ULL - 1ULL;
 
 /// @brief 宿主注入的环境量（几何换算、动作执行、标题等**平台事实**）。
 ///

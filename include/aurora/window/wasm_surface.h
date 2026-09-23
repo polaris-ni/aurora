@@ -42,7 +42,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <unordered_set>
+#include <vector>  // instances_ 用有序容器：广播/回落都须确定（见该类字段注释）
 
 #include "aurora/event/keycode.h"
 #include "aurora/window/surface.h"
@@ -80,7 +80,7 @@ class WasmSurface : public Surface {
         // 键盘 / resize 注册在 document / window 级：多窗口下必须「单一分发器 + 按焦点路由」，
         // 否则各 Surface 各自注册 document 级键盘回调会被后者覆盖，仅最后创建的窗口能收到。
         // 故全局仅注册一次，由全局回调按 focused_surface_ 路由键盘、按实例集合广播 resize。
-        instances_.insert(this);
+        instances_.push_back(this);
         // 新建窗口即接管键盘焦点（同桌面平台「新建窗口被激活」语义）；首个窗口因此天然
         // 有焦点，无需等第一次鼠标点击。此刻本窗口尚无标题（工厂随后才 `set_title`），
         // 故 take_focus 不会写 DOM，页面标题留到那次声明时由本窗口接管。
@@ -104,14 +104,23 @@ class WasmSurface : public Surface {
         emscripten_set_mousemove_callback(canvas_selector_.c_str(), nullptr, true, nullptr);
         // 桥先于实例表清算：析构内 deactivate 会注销广播表并移除本页镜像容器（防孤儿树）。
         aria_bridge_.reset();
-        instances_.erase(this);
+        std::erase(instances_, this);
         if (focused_surface_ == this) {
             // 焦点窗口销毁：路由指针回落到任一存活实例（浏览器无「下一个激活窗口」概念，
-            // 取集合首元素即确定性回落），空集则归 nullptr。回落即「焦点易主」，页面标题
+            // 取集合首元素即「最早创建的存活窗口」——`instances_` 是插入有序的 vector，故该
+            // 回落对同一操作序列恒确定），空集则归 nullptr。回落即「焦点易主」，页面标题
             // 须跟着新焦点窗口走——否则关闭一个改过标题的窗口后，标签页上挂着的是幽灵标题。
-            take_focus(instances_.empty() ? nullptr : *instances_.begin());
+            take_focus(instances_.empty() ? nullptr : instances_.front());
         }
     }
+
+    // 禁复制/移动**早已是既成事实**（成员 `aria_bridge_` 为 unique_ptr 故不可复制，声明析构又抑制了
+    // 隐式移动），本处只是把隐式结果写成显式契约；实例持有 canvas 与全局分发器注册的所有权，
+    // 语义上也不该被搬走。补齐四件套即满足五法则自查项（CODING_STANDARDS.md §5.1）。
+    WasmSurface(const WasmSurface &) = delete;
+    WasmSurface(WasmSurface &&) = delete;
+    auto operator=(const WasmSurface &) -> WasmSurface & = delete;
+    auto operator=(WasmSurface &&) -> WasmSurface & = delete;
 
     [[nodiscard]] auto begin_frame(int w, int h) -> Result<bool> override {
         painter_.begin(w, h);
@@ -164,7 +173,9 @@ class WasmSurface : public Surface {
         return true;
     }
 
-    [[nodiscard]] auto size() const -> Size override { return Size{static_cast<float>(w_), static_cast<float>(h_)}; }
+    [[nodiscard]] auto size() const -> Size override {
+        return Size{.width = static_cast<float>(w_), .height = static_cast<float>(h_)};
+    }
     [[nodiscard]] auto should_close() const -> bool override { return close_requested_; }
 
     /// @brief 把键盘事件路由指针切到本窗口并重播页面标题（页面级焦点无法用 JS 之外的方式
@@ -239,7 +250,15 @@ class WasmSurface : public Surface {
     // 多窗口事件路由支撑（document/window 级单一分发器）：全局仅注册一次回调，
     // 键盘按 focused_surface_ 路由、resize 按实例集合广播。Wasm 为单线程 JS 环境，
     // 实例集合与焦点指针的读写均发生在主线程事件回调内，无需加锁。
-    inline static std::unordered_set<WasmSurface *> instances_;
+    // 集合用 `std::vector` 而非 `unordered_set`：两处遍历都要求**确定顺序**——resize 广播
+    // 的刷新次序、焦点窗口销毁后的回落目标（见析构内注释）。指针集合在哈希容器里的遍历
+    // 序随哈希布局变化，会让同一操作序列在不同构建/不同插入历史下落到不同窗口
+    // （`bugprone-nondeterministic-pointer-iteration-order` 命中的正是这一点）。
+    // 增删按指针身份、量级为窗口数（个位数），线性查找的成本可忽略。
+    // 函数内/类内 static 惰性构造：首次调用才建、线程安全，本检查担心的跨 TU 初始化顺序在此不存在。
+    // 仅浏览器口径命中——native 遍同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
+    inline static std::vector<WasmSurface *> instances_;
     inline static WasmSurface *focused_surface_ = nullptr;
     inline static bool global_handlers_registered_ = false;
     inline static bool close_requested_ = false;  ///< beforeunload 置位；页面级=全部窗口关闭。
@@ -283,7 +302,7 @@ class WasmSurface : public Surface {
         }
         MouseEvent ev;
         // EmscriptenMouseEvent 字段为驼峰（html5.h 现行 ABI；snake_case 旧拼写已随 SDK 移除）。
-        ev.position = Point{static_cast<float>(e->targetX), static_cast<float>(e->targetY)};
+        ev.position = Point{.x = static_cast<float>(e->targetX), .y = static_cast<float>(e->targetY)};
         ev.button = (e->button == 2) ? MouseButton::Right : (e->button == 1) ? MouseButton::Middle : MouseButton::Left;
         ev.action = (type == EMSCRIPTEN_EVENT_MOUSEDOWN) ? MouseAction::Press
                     : (type == EMSCRIPTEN_EVENT_MOUSEUP) ? MouseAction::Release
@@ -396,7 +415,7 @@ class WasmSurface : public Surface {
             return Meta;
         }
         if (s.size() >= 2 && s.size() <= 3 && s[0] == 'F' && s[1] >= '1' && s[1] <= '9') {
-            const int n = (s.size() == 2) ? (s[1] - '0') : (s[1] - '0') * 10 + (s[2] - '0');
+            const int n = (s.size() == 2) ? (s[1] - '0') : ((s[1] - '0') * 10) + (s[2] - '0');
             if (n >= 1 && n <= 12) {
                 return static_cast<KeyCode>(static_cast<int>(F1) + (n - 1));
             }
@@ -409,7 +428,7 @@ class WasmSurface : public Surface {
     // 给出该字符，控制键给出 "Enter"/"ArrowLeft" 等名字）时**另发** TextInputEvent 落字——
     // 缺这一步则 WASM 上任何文本框都打不进字符（旧实现只发 KeyEvent）。
     static EM_BOOL dispatch_key_to(WasmSurface *target, int type, const EmscriptenKeyboardEvent *e) {
-        if (!target || !target->event_handler_) {
+        if (target == nullptr || !target->event_handler_) {
             return EM_FALSE;
         }
         KeyEvent ev;
@@ -446,7 +465,8 @@ class WasmSurface : public Surface {
 
     // 查询本 canvas 当前 CSS 尺寸并更新（window resize 时各实例自行刷新）。
     auto update_css_size() -> void {
-        double css_w = 0, css_h = 0;
+        double css_w = 0.0;
+        double css_h = 0.0;
         emscripten_get_element_css_size(canvas_selector_.c_str(), &css_w, &css_h);
         if (css_w > 0 && css_h > 0) {
             w_ = static_cast<int>(css_w);

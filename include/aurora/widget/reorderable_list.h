@@ -214,6 +214,11 @@ class ReorderableList : public Container {
         if (!items_) {
             return false;
         }
+        // 本检查把 `items_->get()` 读成「智能指针上多余的 get()」：此处的 `get()` 属于 `State`（值
+        // 读取口，返回 `const std::vector<T> &`），不是 `shared_ptr::get()`——按建议删掉就成
+        // `items_.size()`，编译不过。仅浏览器口径命中——native 遍同一份代码不报
+        // （CODING_STANDARDS.md §5.2 的口径差异）。
+        // NOLINTNEXTLINE(readability-redundant-smartptr-get)
         const int n = static_cast<int>(items_->get().size());
         if (from < 0 || from >= n) {
             return false;
@@ -987,7 +992,7 @@ class ReorderableList : public Container {
 
     /// @brief 超过 slop 起拖：锁定被拖项、建压缩序几何、初始化插入位。
     auto begin_drag() -> void {
-        if (press_index_ < 0 || press_index_ >= static_cast<int>(heights_.size())) {
+        if (press_index_ < 0 || std::cmp_greater_equal(press_index_, heights_.size())) {
             return;
         }
         if (drag_.axis() != DragAxis::Vertical) {

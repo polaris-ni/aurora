@@ -33,6 +33,11 @@ enum class SortOrder : std::uint8_t { None, Ascending, Descending };
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
  */
+// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_sort_ / on_select_，而其拷贝与 operator()
+// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
+// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
+// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class DataTable : public Widget {
   public:
     DataTable() = default;
@@ -159,6 +164,11 @@ struct TreeItem {
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
  */
+// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_select_ / on_toggle_，而其拷贝与 operator()
+// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
+// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
+// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TreeView : public Widget {
   public:
     TreeView() = default;

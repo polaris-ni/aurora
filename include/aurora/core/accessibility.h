@@ -249,9 +249,7 @@ struct AccessibilitySettings {
 }
 
 /// @brief 设置进程级无障碍设置；单例被(destructor)静态对象持有，测试须自行复原。
-inline auto set_accessibility_settings(AccessibilitySettings s) -> void {
-    current_accessibility_settings() = std::move(s);
-}
+inline auto set_accessibility_settings(AccessibilitySettings s) -> void { current_accessibility_settings() = s; }
 
 /// @brief 读取**生效**设置：上下文注入优先，缺失回落进程级默认值。
 ///
@@ -344,7 +342,7 @@ inline auto set_a11y_widget_destroy_hook(AccessibilityWidgetDestroyHook h) -> vo
 }  // namespace detail
 
 /// @brief 上报一条无障碍事件（无处理器时为空操作，不改变控件状态）。
-inline auto notify_accessibility_event(AccessibilityEvent e) -> void {
+inline auto notify_accessibility_event(const AccessibilityEvent &e) -> void {
     if (const auto &handler = current_accessibility_event_handler()) {
         handler(e);
     }

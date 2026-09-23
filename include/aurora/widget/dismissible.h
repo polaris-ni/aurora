@@ -107,18 +107,18 @@ class Dismissible : public SingleChild {
             return;
         }
         // 位移 + 渐隐（progress 1 → 0.5 透明度）：paint 期平移，不动布局盒。
-        const float shift = static_cast<float>(progress * travel_distance);
+        const auto shift = static_cast<float>(progress * travel_distance);
         const Rect shifted{.origin = Point{.x = bounds.origin.x + (dtd_axis_ == DragAxis::Horizontal ? shift : 0.0F),
                                            .y = bounds.origin.y + (dtd_axis_ == DragAxis::Vertical ? shift : 0.0F)},
                            .size = bounds.size};
-        const float alpha = static_cast<float>(1.0 - (0.5 * progress));
+        const auto alpha = static_cast<float>(1.0 - (0.5 * progress));
         const double prev_alpha = p.global_alpha();
         p.set_alpha(prev_alpha * alpha);
         child_.widget().paint(p, shifted, ctx);
         p.set_alpha(prev_alpha);  // Painter 无栈：手动还原（见 set_alpha 契约）
     }
 
-    auto on_pointer_event(MouseEvent &e) -> void {
+    auto on_pointer_event(MouseEvent &e) -> void override {
         const bool was_dragging = dtd_.is_dragging();  // Release 会先结束识别，须先采样
         dtd_.on_mouse(e);
         if (e.action == MouseAction::Release && was_dragging) {
@@ -131,7 +131,7 @@ class Dismissible : public SingleChild {
         }
     }
 
-    auto on_pointer_event(TouchEvent &e) -> void {
+    auto on_pointer_event(TouchEvent &e) -> void override {
         dtd_.on_touch(e);
         SingleChild::on_pointer_event(e);  // 修饰链照常
     }

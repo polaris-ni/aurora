@@ -1,8 +1,10 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <utility>
@@ -77,6 +79,9 @@ struct ChartAxisSpec {
 };
 
 /// @brief 图例位置。
+// 公共 API 枚举（specification/04-widget.md 记录为数据层类型，且随 JSON 按名序列化）：
+// 底层类型属 API 形态的一部分，本库按语义选型而非体积取向，改窄只让 ChartLegendSpec 少 6 字节。
+// NOLINTNEXTLINE(performance-enum-size)
 enum class LegendPosition {
     Top,
     Bottom,
@@ -170,10 +175,10 @@ class LinearScale {
         }
         const double power = std::floor(std::log10(raw_step));
         const double error = raw_step / std::pow(10.0, power);  // ∈ [1, 10)
-        const double mult = (error >= std::sqrt(50.0))   ? 10.0
-                            : (error >= std::sqrt(10.0)) ? 5.0
-                            : (error >= std::sqrt(2.0))  ? 2.0
-                                                         : 1.0;
+        const double mult = (error >= std::sqrt(50.0))                 ? 10.0
+                            : (error >= std::sqrt(10.0))               ? 5.0
+                            : (error >= std::numbers::sqrt2_v<double>) ? 2.0
+                                                                       : 1.0;
         return mult * std::pow(10.0, power);
     }
 
@@ -232,7 +237,7 @@ class BandScale {
 
 /// @brief 内置系列色板（Material 风格 8 色；索引超界取模）。
 [[nodiscard]] inline auto chart_palette(std::size_t index) -> Color {
-    constexpr Color PALETTE[8] = {
+    constexpr std::array<Color, 8> palette = {
         Color{66, 133, 244, 255},  // blue
         Color{219, 68, 55, 255},  // red
         Color{244, 180, 0, 255},  // yellow
@@ -242,7 +247,8 @@ class BandScale {
         Color{0, 172, 193, 255},  // cyan
         Color{124, 179, 66, 255},  // light green
     };
-    return PALETTE[index % 8U];
+    // 取模后下标恒 < size()，越界分支不可达：at() 只是把「界内」写成可检查形式，不引入抛出路径。
+    return palette.at(index % palette.size());
 }
 
 /// @brief 系列取色优先级（D14）：显式 color > `Theme` 命名令牌 `chart.palette.<i%8>` > 内置色板。
@@ -597,6 +603,11 @@ class ChartGrowIn {
     ///
     /// 绑定建立在 `on_mount`（入树之后，此后不再移动），故此处若已登记则先摘除再转移进度值——
     /// 绝不让 `Animator` 持有已失效的控制器 / 目标地址（`Animator::drive` 存裸指针，UAF 风险）。
+    // 豁免 bugprone-exception-escape：本构造读写 State<double>（进订阅者通知链，回调经
+    // std::function 转发），触发 .clang-tidy 已记录的系统性假告警面——「任何转入 std::function
+    // 的可调用对象一律判『不应抛出』」（operator() 无 noexcept 规格）。抛出仅可能为 bad_alloc，
+    // 由顶层兜底；noexcept 是既定契约（控件经 Node{widget} 入树，容器搬移依赖移动不抛），不改签名。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     ChartGrowIn(ChartGrowIn &&other) noexcept : progress_{other.progress_.get()} {
         if (other.bound_) {
             if (Animator *a = Animator::current()) {

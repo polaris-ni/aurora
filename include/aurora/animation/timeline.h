@@ -32,7 +32,7 @@ inline auto lerp(const Color &a, const Color &b, double t) -> Color {
     // 通道先提升 double 再插值：若直接调通用模板 lerp<uint8_t>，浮点结果会在模板内
     // 先截断回 uint8_t（127.5 → 127），外层 lround 的四舍五入就永远轮不到。
     auto mix = [t](uint8_t x, uint8_t y) {
-        return static_cast<uint8_t>(std::lround(static_cast<double>(x) + (static_cast<double>(y) - x) * t));
+        return static_cast<uint8_t>(std::lround(static_cast<double>(x) + ((static_cast<double>(y) - x) * t)));
     };
     return Color{mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b), mix(a.a, b.a)};
 }
@@ -67,8 +67,9 @@ class Tween {
     /// @brief 计算归一化进度 t 处的插值结果。
     [[nodiscard]] auto value(double t) const -> T { return lerp(begin_, end_, curve_.transform(t)); }
 
-    auto begin() const -> const T & { return begin_; }
-    auto end() const -> const T & { return end_; }
+    /// @brief 区间端点访问（与 `curve()` 同为纯取值，故一律 `[[nodiscard]]`）。
+    [[nodiscard]] auto begin() const -> const T & { return begin_; }
+    [[nodiscard]] auto end() const -> const T & { return end_; }
     [[nodiscard]] auto curve() const -> const Curve & { return curve_; }
     auto set_begin(T v) -> void { begin_ = std::move(v); }
     auto set_end(T v) -> void { end_ = std::move(v); }
@@ -224,13 +225,13 @@ class TimelineSpec {
 
     /// @brief 追加叶子段（时长秒，非正值夹取 1e-6）。
     auto add(double duration_s) -> TimelineSpec & {
-        children_.push_back(Leaf{.duration = max_duration(duration_s)});
+        children_.emplace_back(Leaf{.duration = max_duration(duration_s)});
         return *this;
     }
 
     /// @brief 追加子组（嵌套；子组区间随父组规则展开）。
     auto add(TimelineSpec sub) -> TimelineSpec & {
-        children_.push_back(std::move(sub));
+        children_.emplace_back(std::move(sub));
         return *this;
     }
 
@@ -272,7 +273,7 @@ class TimelineSpec {
         if (count_ <= 0) {
             return 0.0;
         }
-        return static_cast<double>(count_ - 1) * (item_ + gap_) + item_;
+        return (static_cast<double>(count_ - 1) * (item_ + gap_)) + item_;
     }
 
     [[nodiscard]] static auto child_duration(const std::variant<Leaf, TimelineSpec> &c) -> double {
@@ -311,7 +312,7 @@ class TimelineSpec {
             }
             case Kind::Staggered: {
                 for (int i = 0; i < count_; ++i) {
-                    const double start = offset_s + static_cast<double>(i) * (item_ + gap_);
+                    const double start = offset_s + (static_cast<double>(i) * (item_ + gap_));
                     out.push_back(norm_interval(start, item_, total_s));
                 }
                 break;
@@ -373,7 +374,7 @@ inline auto TimelineSpec::build() const -> TimelineResolved {
     std::vector<TimelineInterval> out;
     out.reserve(children_.size());
     flatten(0.0, total, out);
-    return TimelineResolved(std::move(out), total);
+    return {std::move(out), total};
 }
 
 }  // namespace aurora

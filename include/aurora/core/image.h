@@ -57,8 +57,13 @@ struct Image {
     // ---- 内部缓存（勿直接读写）----
     // content_hash 惰性求值状态；声明在 pixels 之后，保持既有
     // `Image{.width=…, .height=…, .pixels=…}` 聚合初始化兼容（未列字段取默认值）。
+    // 尾部 `_` 是「勿直接读写」的内部缓存标记，但 `Image` 是聚合体——成员必须公开，
+    // 否则 `Image{.pixels=…}` 这类既有初始化写法即失效（POD 数据载体约定，见
+    // CODING_STANDARDS.md §2 与 .clang-tidy 对 non-private-member 的定向排除）。
+    // NOLINTBEGIN(readability-identifier-naming)
     mutable std::uint64_t content_hash_ = 0;
     mutable bool content_hash_valid_ = false;
+    // NOLINTEND(readability-identifier-naming)
 };
 
 }  // namespace aurora

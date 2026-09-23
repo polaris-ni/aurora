@@ -92,6 +92,9 @@ struct AriaElement {
 /// 让 JS 侧「先腾空、再挂新、后复位、终改面」的单趟应用无位置歧义。
 /// `focus` 为**绝对值**（新快照中 `state.focused` 为真者 id，0 = 无）——焦点是
 /// 镜像面最需要保持正确的属性，宁每帧重设也不依赖增量的相对语义。
+// `new_` 与 `old_` 成对：`new` 是 C++ 关键字，无法照 lower_case 正名，故命名检查就地豁免
+// （定义侧同法，见 aria_protocol.cpp）。
+// NOLINTNEXTLINE(readability-identifier-naming)
 [[nodiscard]] auto aria_ops_json(const a11y::TreeSnapshot &old_, const a11y::TreeSnapshot &new_,
                                  const a11y::TreeDiff &diff) -> std::string;
 

@@ -112,8 +112,8 @@ namespace detail {
     if (wb.size.width <= 0.0F || wb.size.height <= 0.0F) {
         return std::string{};  // 几何缺失：不安全关联
     }
-    const Point wc{wb.origin.x + wb.size.width * 0.5F, wb.origin.y + wb.size.height * 0.5F};
-    constexpr float AURORA_TOL = 12.0F;
+    const Point wc{.x = wb.origin.x + (wb.size.width * 0.5F), .y = wb.origin.y + (wb.size.height * 0.5F)};
+    constexpr float tol = 12.0F;
     std::string best;
     double best_score = std::numeric_limits<double>::infinity();
     parent->for_each_child([&](const Widget &sib) -> void {
@@ -137,16 +137,16 @@ namespace detail {
             return;
         }
         // 垂直重叠（带容差）：标签与控件应在同一行。
-        const bool v_overlap = (sb.origin.y + sb.size.height) >= (wb.origin.y - AURORA_TOL) &&
-                               sb.origin.y <= (wb.origin.y + wb.size.height + AURORA_TOL);
+        const bool v_overlap = (sb.origin.y + sb.size.height) >= (wb.origin.y - tol) &&
+                               sb.origin.y <= (wb.origin.y + wb.size.height + tol);
         if (!v_overlap) {
             return;
         }
-        const Point sc{sb.origin.x + sb.size.width * 0.5F, sb.origin.y + sb.size.height * 0.5F};
+        const Point sc{.x = sb.origin.x + (sb.size.width * 0.5F), .y = sb.origin.y + (sb.size.height * 0.5F)};
         // 水平相邻：标签在左（gap = 控件左 − 标签右）或在右（gap = 标签左 − 控件右）。
         const double gap = (sc.x <= wc.x) ? (wb.origin.x - (sb.origin.x + sb.size.width))
                                           : (sb.origin.x - (wb.origin.x + wb.size.width));
-        if (gap < -AURORA_TOL || gap > AURORA_TOL) {
+        if (gap < -tol || gap > tol) {
             return;  // 非相邻（间隙过大或重叠过多）
         }
         const double score = std::abs(gap) + std::abs(sc.y - wc.y);
@@ -183,7 +183,7 @@ namespace detail {
         }
         return w.accessibility_value();
     }
-    const std::string sib = sibling_label_name(w, Rect{});
+    std::string sib = sibling_label_name(w, Rect{});
     if (!sib.empty()) {
         return sib;
     }
@@ -204,8 +204,12 @@ struct LabelRefIndex {
 /// @brief 降级申报去重：同一原因的提示**每进程一次**，避免读屏在线时逐帧刷屏。
 /// @note Thread: main-thread only（无障碍全链如此，见 `AccessibilityNode` 的 `@note Thread`）
 inline auto report_label_ref_once(const std::string &reason) -> void {
+    // 惰性构造的函数内 static 去重集：其语义就是「每进程一次」，首建时刻必须晚于任何调用点，
+    // 与跨 TU 静态初始化顺序无关（本检查的担心面）。仅浏览器口径命中——native 遍同一份代码不报
+    // （CODING_STANDARDS.md §5.2 的口径差异）。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static std::unordered_set<std::string> reported;  // NOLINT(concurrency-mt-unsafe)
-    if (reported.count(reason) != 0) {
+    if (reported.contains(reason)) {
         return;
     }
     reported.insert(reason);
@@ -241,7 +245,7 @@ inline auto collect_label_refs(AccessibilityNode &n, LabelRefIndex &idx) -> void
 inline auto resolve_label_ref(AccessibilityNode *n, const LabelRefIndex &idx,
                               std::unordered_set<const AccessibilityNode *> &done, std::vector<std::uint64_t> &stack)
     -> void {
-    if (n == nullptr || n->labelled_by.empty() || done.count(n) != 0) {
+    if (n == nullptr || n->labelled_by.empty() || done.contains(n)) {
         return;
     }
     done.insert(n);

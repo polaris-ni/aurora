@@ -39,8 +39,8 @@ using aurora::detail::AtspiEnv;
 using aurora::detail::AtspiModel;
 using aurora::detail::AtspiPropValue;
 using aurora::detail::AtspiRef;
-using aurora::detail::k_atspi_app_id;
-using aurora::detail::k_atspi_frame_id;
+using aurora::detail::AURORA_ATSPI_APP_ID;
+using aurora::detail::AURORA_ATSPI_FRAME_ID;
 using aurora::detail::atspi::coord_screen;
 using aurora::detail::atspi::coord_window;
 using aurora::detail::atspi::k_iface_accessible;
@@ -325,21 +325,21 @@ AURORA_TEST_CASE(model_synthesizes_app_and_frame) {
     AtspiModel model{test_env()};
     model.sync(snap);
 
-    AURORA_TEST_CHECK_TRUE(model.exists(k_atspi_app_id));
-    AURORA_TEST_CHECK_TRUE(model.exists(k_atspi_frame_id));
-    AURORA_TEST_CHECK_EQ(model.role(k_atspi_app_id), std::uint32_t{75});  // APPLICATION
-    AURORA_TEST_CHECK_EQ(model.role(k_atspi_frame_id), std::uint32_t{23});  // FRAME
-    AURORA_TEST_CHECK_STREQ(model.name(k_atspi_app_id).c_str(), "probe-app");
-    AURORA_TEST_CHECK_STREQ(model.name(k_atspi_frame_id).c_str(), "Probe Window");
-    AURORA_TEST_CHECK_EQ(model.child_count(k_atspi_app_id), std::int32_t{1});
-    AURORA_TEST_CHECK_EQ(model.child_at(k_atspi_app_id, 0).value_or(0), k_atspi_frame_id);
-    AURORA_TEST_CHECK_EQ(model.parent(k_atspi_frame_id), k_atspi_app_id);
+    AURORA_TEST_CHECK_TRUE(model.exists(AURORA_ATSPI_APP_ID));
+    AURORA_TEST_CHECK_TRUE(model.exists(AURORA_ATSPI_FRAME_ID));
+    AURORA_TEST_CHECK_EQ(model.role(AURORA_ATSPI_APP_ID), std::uint32_t{75});  // APPLICATION
+    AURORA_TEST_CHECK_EQ(model.role(AURORA_ATSPI_FRAME_ID), std::uint32_t{23});  // FRAME
+    AURORA_TEST_CHECK_STREQ(model.name(AURORA_ATSPI_APP_ID).c_str(), "probe-app");
+    AURORA_TEST_CHECK_STREQ(model.name(AURORA_ATSPI_FRAME_ID).c_str(), "Probe Window");
+    AURORA_TEST_CHECK_EQ(model.child_count(AURORA_ATSPI_APP_ID), std::int32_t{1});
+    AURORA_TEST_CHECK_EQ(model.child_at(AURORA_ATSPI_APP_ID, 0).value_or(0), AURORA_ATSPI_FRAME_ID);
+    AURORA_TEST_CHECK_EQ(model.parent(AURORA_ATSPI_FRAME_ID), AURORA_ATSPI_APP_ID);
     // 快照根（parent_id=0）挂 Frame 下；Frame 的父 = 注册表根。
-    AURORA_TEST_CHECK_EQ(model.parent(10), k_atspi_frame_id);
-    AURORA_TEST_CHECK_STREQ(model.parent_ref(k_atspi_app_id).bus.c_str(), ":1.1");
-    AURORA_TEST_CHECK_STREQ(model.path_of_id(k_atspi_app_id).c_str(), "/org/a11y/atspi/accessible/root");
+    AURORA_TEST_CHECK_EQ(model.parent(10), AURORA_ATSPI_FRAME_ID);
+    AURORA_TEST_CHECK_STREQ(model.parent_ref(AURORA_ATSPI_APP_ID).bus.c_str(), ":1.1");
+    AURORA_TEST_CHECK_STREQ(model.path_of_id(AURORA_ATSPI_APP_ID).c_str(), "/org/a11y/atspi/accessible/root");
     AURORA_TEST_CHECK_EQ(model.index_in_parent(10), std::int32_t{0});
-    AURORA_TEST_CHECK_EQ(model.index_in_parent(k_atspi_app_id), std::int32_t{-1});
+    AURORA_TEST_CHECK_EQ(model.index_in_parent(AURORA_ATSPI_APP_ID), std::int32_t{-1});
     // 未知路径 ⇒ 无 id；未知 id ⇒ null 路径 + defunct 状态。
     AURORA_TEST_CHECK_FALSE(model.id_of_path("/no/such/path").has_value());
     AURORA_TEST_CHECK_EQ(model.id_of_path("/org/a11y/atspi/accessible/root/1").value_or(0), std::uint64_t{10});
@@ -497,23 +497,24 @@ AURORA_TEST_CASE(model_properties_get_set) {
     model.sync(snap);
 
     // Application 接口只认 App 根。
-    const auto tk = model.prop_get(k_atspi_app_id, k_iface_application, "ToolkitName");
+    const auto tk = model.prop_get(AURORA_ATSPI_APP_ID, k_iface_application, "ToolkitName");
     AURORA_TEST_CHECK_TRUE(tk.kind == AtspiPropValue::Kind::Str);
     AURORA_TEST_CHECK_STREQ(tk.str.c_str(), "Aurora");
     AURORA_TEST_CHECK_TRUE(model.prop_get(11, k_iface_application, "ToolkitName").kind == AtspiPropValue::Kind::None);
 
-    AURORA_TEST_CHECK_TRUE(model.prop_get(k_atspi_app_id, k_iface_application, "Id").kind == AtspiPropValue::Kind::I32);
-    AURORA_TEST_CHECK_EQ(model.prop_get(k_atspi_app_id, k_iface_application, "Id").i32, std::int32_t{-1});
+    AURORA_TEST_CHECK_TRUE(model.prop_get(AURORA_ATSPI_APP_ID, k_iface_application, "Id").kind ==
+                           AtspiPropValue::Kind::I32);
+    AURORA_TEST_CHECK_EQ(model.prop_get(AURORA_ATSPI_APP_ID, k_iface_application, "Id").i32, std::int32_t{-1});
     AtspiPropValue id_v;
     id_v.kind = AtspiPropValue::Kind::I32;
     id_v.i32 = 77;
-    AURORA_TEST_CHECK_TRUE(model.prop_set(k_atspi_app_id, k_iface_application, "Id", id_v));
+    AURORA_TEST_CHECK_TRUE(model.prop_set(AURORA_ATSPI_APP_ID, k_iface_application, "Id", id_v));
     AURORA_TEST_CHECK_EQ(model.app_id(), std::int32_t{77});
-    AURORA_TEST_CHECK_EQ(model.prop_get(k_atspi_app_id, k_iface_application, "Id").i32, std::int32_t{77});
+    AURORA_TEST_CHECK_EQ(model.prop_get(AURORA_ATSPI_APP_ID, k_iface_application, "Id").i32, std::int32_t{77});
     // 非 App 节点 / 非 I32 的 Set 拒绝（桥回 InvalidArgs）。
     AURORA_TEST_CHECK_FALSE(model.prop_set(11, k_iface_application, "Id", id_v));
     id_v.kind = AtspiPropValue::Kind::Str;
-    AURORA_TEST_CHECK_FALSE(model.prop_set(k_atspi_app_id, k_iface_application, "Id", id_v));
+    AURORA_TEST_CHECK_FALSE(model.prop_set(AURORA_ATSPI_APP_ID, k_iface_application, "Id", id_v));
 
     AURORA_TEST_CHECK_STREQ(model.prop_get(11, k_iface_accessible, "Name").str.c_str(), "ok");
     AURORA_TEST_CHECK_EQ(model.prop_get(11, k_iface_accessible, "ChildCount").i32, std::int32_t{0});

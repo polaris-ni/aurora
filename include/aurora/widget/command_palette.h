@@ -229,7 +229,7 @@ class CommandPalette : public Container {
         if (e.action == MouseAction::Press) {
             selected_ = static_cast<std::size_t>(row);
             mark_needs_paint();
-        } else if (e.action == MouseAction::Release && static_cast<std::size_t>(row) == selected_) {
+        } else if (e.action == MouseAction::Release && std::cmp_equal(row, selected_)) {
             (void)execute_selected();
         }
     }

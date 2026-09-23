@@ -389,7 +389,7 @@ auto Text::on_pointer_event(MouseEvent &e) -> void {
     if (e.action == MouseAction::Press) {
         caret_ = line_cp_start_[li] + raw_caret;
         sel_start_ = cp;  // 锚点（含入字符）
-        sel_end_ = NO_SEL;  // 尚未形成选区，待拖拽
+        sel_end_ = AURORA_NO_SEL;  // 尚未形成选区，待拖拽
         selecting_ = true;
         request_focus();
         mark_needs_paint();
@@ -413,7 +413,7 @@ auto Text::on_key_event(KeyEvent &e) -> void {
 
     if (ctrl && e.key == static_cast<int>(KeyCode::A)) {
         sel_start_ = 0;
-        sel_end_ = (n == 0) ? NO_SEL : n - 1;  // 含尾：末字符下标 n-1
+        sel_end_ = (n == 0) ? AURORA_NO_SEL : n - 1;  // 含尾：末字符下标 n-1
         caret_ = n;
         mark_needs_paint();
         e.is_handled = true;
@@ -448,7 +448,7 @@ auto Text::on_key_event(KeyEvent &e) -> void {
             sel_start_ = caret_;  // 锚点 = 当前 caret
             const auto nc = static_cast<long long>(caret_) + dir;
             caret_ = static_cast<size_t>(std::clamp(nc, 0LL, static_cast<long long>(n)));
-            sel_end_ = NO_SEL;  // 收起选区
+            sel_end_ = AURORA_NO_SEL;  // 收起选区
         }
         mark_needs_paint();
         e.is_handled = true;

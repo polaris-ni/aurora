@@ -34,6 +34,9 @@ using ImageFetcher = std::function<Task<std::vector<std::uint8_t>>(std::string_v
 
 /// @brief 进程级默认 fetcher（读写口；`Environment` 注入 `ImageFetcher` 优先于此值）。
 inline auto default_image_fetcher() -> ImageFetcher & {
+    // 惰性构造的函数内 static：单例读写口，首建时刻与跨 TU 静态初始化顺序无关（本检查的担心面）。
+    // 仅浏览器口径命中——native 遍同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static ImageFetcher f;  // NOLINT(misc-use-anonymous-namespace) 单例读写口
     return f;
 }
@@ -102,7 +105,7 @@ class ImageView : public Widget, public ImageViewProps {
             fetcher = default_image_fetcher();
         }
         if (fetcher) {
-            w->begin_load(std::move(fetcher));
+            w->begin_load(fetcher);  // 形参 const 引用：此处无需转移，调用即完成取用
         }
         return w;
     }
@@ -230,7 +233,9 @@ class ImageView : public Widget, public ImageViewProps {
     }
 
     /// @brief 启动异步加载：缓存命中直读；否则 fetcher（worker）→ 解码 → 回填（主线程）。
-    auto begin_load(ImageFetcher fetcher) -> void {
+    /// @note 形参按 const 引用：本函数只调用 `fetcher(url_)`（`operator()` 为 const），
+    ///       而注入路径（`on_mount` 里的 `begin_load(*injected)`）每次都拷一遍 std::function。
+    auto begin_load(const ImageFetcher &fetcher) -> void {
         if (url_.empty() || loading_) {
             return;
         }

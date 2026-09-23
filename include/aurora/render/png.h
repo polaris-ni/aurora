@@ -31,8 +31,8 @@ namespace detail {
         idat.push_back(static_cast<std::uint8_t>(nlen32 & 0xFFU));
         idat.push_back(static_cast<std::uint8_t>((nlen32 >> 8U) & 0xFFU));
         for (std::size_t i = 0; i < chunk; ++i) {
-            idat.push_back(raw[off + i]);  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic,
-                                           // cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // NOLINTNEXTLINE(*-pro-bounds-*)
+            idat.push_back(raw[off + i]);
         }
         off += chunk;
     }

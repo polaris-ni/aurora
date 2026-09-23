@@ -317,6 +317,9 @@ auto enable_dpi_awareness() -> void;
  * @note Thread: main-thread only
  * @note Side-effects: none
  */
+// 成员按生命周期/语义分组排布（Surface 注入 → 帧统计/HUD painter → 脏区标志），重排虽可消除
+// 填充字节，但会改动构造/析构顺序且收益仅 32 字节填充，不作优化目标（见 ARCHITECTURE.md §8.4）。
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 class Window {
   public:
     explicit Window(std::unique_ptr<Surface> surface) : surface_(std::move(surface)) {}

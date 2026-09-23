@@ -29,10 +29,7 @@
 //     各 provider 是 COM 引用计数对象，只能经 QueryInterface/Release 取得与释放（IUnknown
 //     契约禁止按值拷贝/移动），且析构遵循 COM 惯例为 protected virtual —— 五法则与
 //     「公开非虚析构」在此均不适用。
-// NOLINTBEGIN(cppcoreguidelines-pro-type-union-access, cppcoreguidelines-pro-type-reinterpret-cast,
-// cppcoreguidelines-pro-type-static-cast-downcast, cppcoreguidelines-pro-type-const-cast,
-// cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-special-member-functions,
-// cppcoreguidelines-virtual-class-destructor)
+// NOLINTBEGIN(*-pro-bounds-*, *-pro-type-*, *-special-member-functions, *-virtual-class-destructor)
 
 namespace aurora::detail {
 
@@ -1608,6 +1605,11 @@ auto UiaTextProvider::get_DocumentRange(ITextRangeProvider **ret) -> HRESULT {
 
 Win32UiaBridge::Win32UiaBridge(HWND hwnd) : hwnd_(hwnd) {}
 
+// 告警面是「分析器无法证明不抛」的三类边界：纯虚 `uninstall_hook()`、函数指针
+// `UiaApi::disconnect_provider` 与 COM `Release()`。实现侧只做 `vector<Provider *>` 的 erase、
+// POD 赋值与引用计数递减，无分配、无抛出路径。析构期 try/catch 只会把拆链失败静默吞掉，
+// 与仓内既有 3 处析构关停豁免同口径，故此处显式取舍而非包一层 catch。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 Win32UiaBridge::~Win32UiaBridge() {
     // 走 `disconnect_all()`：它同时负责**从进程级注册表注销**（`unregister_provider`）。
     // 缺了这一步，注册表会留下指向已析构桥的悬垂指针 —— 之后任何一条无障碍事件广播都会
@@ -2200,9 +2202,6 @@ auto Win32UiaBridge::emit_pending() -> void {
 
 }  // namespace aurora::detail
 
-// NOLINTEND(cppcoreguidelines-pro-type-union-access, cppcoreguidelines-pro-type-reinterpret-cast,
-// cppcoreguidelines-pro-type-static-cast-downcast, cppcoreguidelines-pro-type-const-cast,
-// cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-special-member-functions,
-// cppcoreguidelines-virtual-class-destructor)
+// NOLINTEND(*-pro-bounds-*, *-pro-type-*, *-special-member-functions, *-virtual-class-destructor)
 
 #endif  // AURORA_PLATFORM_WINDOWS && (AURORA_BACKEND_WIN32 || AURORA_BACKEND_D3D11)

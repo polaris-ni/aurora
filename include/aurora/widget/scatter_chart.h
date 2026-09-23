@@ -27,7 +27,7 @@ struct ScatterChartProps {
     ChartAxisSpec axis_x;  ///< x 轴（Linear）
     ChartAxisSpec axis_y;  ///< y 轴（Linear）
     ChartLegendSpec legend;
-    EdgeInsets padding{8.0F, 8.0F, 8.0F, 8.0F};
+    EdgeInsets padding{.left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};
 };
 
 /**
@@ -58,12 +58,12 @@ class ScatterChart : public LeafWidget, public ScatterChartProps {
         return *this;
     }
     auto set_axis_x(ChartAxisSpec a) -> ScatterChart & {
-        axis_x = a;
+        axis_x = std::move(a);
         mark_needs_layout();
         return *this;
     }
     auto set_axis_y(ChartAxisSpec a) -> ScatterChart & {
-        axis_y = a;
+        axis_y = std::move(a);
         mark_needs_layout();
         return *this;
     }
@@ -124,8 +124,8 @@ class ScatterChart : public LeafWidget, public ScatterChartProps {
   private:
     struct Geometry {
         Rect plot{};
-        LinearScale x_scale{};
-        LinearScale y_scale{};
+        LinearScale x_scale;
+        LinearScale y_scale;
         std::vector<Rect> legend_rects;
     };
 
@@ -225,6 +225,8 @@ inline auto ScatterChart::compute_geometry(const Size &size, const Font &font) c
 
     if (legend.visible && !series.empty()) {
         float cursor_x = g.plot.origin.x;
+        // Right（含未知位置）沿用绘图区顶部，即下面 else 分支不再重复赋同一值——
+        // 重复赋值会让本初值在三条互斥分支下都永不被读（死存储）。
         float cursor_y = g.plot.origin.y;
         if (legend.position == LegendPosition::Top) {
             cursor_y = padding.top;
@@ -232,7 +234,6 @@ inline auto ScatterChart::compute_geometry(const Size &size, const Font &font) c
             cursor_y = size.height - padding.bottom - line_h;
         } else {
             cursor_x = g.plot.right() + 8.0F;
-            cursor_y = g.plot.origin.y;
         }
         for (const ScatterSeries &s : series) {
             const float name_w = render::FontEngine::measure_width(s.name, font);
@@ -378,7 +379,7 @@ inline auto ScatterChart::describe_static() -> WidgetDescriptor {
                  .json_type = "object"},
                 {.name = "legend",
                  .type = "Json",
-                 .default_value = "{\"visible\":true,\"position\":\"Top\"}",
+                 .default_value = R"({"visible":true,"position":"Top"})",
                  .required = false,
                  .note = "图例规格：{visible,position:Top|Bottom|Right}",
                  .json_type = "object"},
@@ -490,7 +491,7 @@ inline auto ScatterChart::on_paint(Painter &p, const Rect &bounds, const BuildCo
     }
 
     std::optional<Point> hovered_px;
-    const float grow_t = static_cast<float>(grow_.progress());  // grow-in：点半径 0 → 1
+    const auto grow_t = static_cast<float>(grow_.progress());  // grow-in：点半径 0 → 1
     for (std::size_t k = 0; k < series.size(); ++k) {
         const bool dimmed = legend_hover_.has_value() && (*legend_hover_ != k);
         Color c = resolve_series_color(k, series[k].color, theme);
@@ -508,8 +509,8 @@ inline auto ScatterChart::on_paint(Painter &p, const Rect &bounds, const BuildCo
             const Rect dot{.origin = Point{.x = origin.x + px - radius, .y = origin.y + py - radius},
                            .size = Size{.width = radius * 2.0F, .height = radius * 2.0F}};
             p.fill_rounded_rect(dot, radius, c);
-            if (hovered_point_.has_value() && hovered_point_->first == static_cast<int>(k) &&
-                hovered_point_->second == static_cast<int>(i)) {
+            if (hovered_point_.has_value() && std::cmp_equal(hovered_point_->first, k) &&
+                std::cmp_equal(hovered_point_->second, i)) {
                 hovered_px = Point{.x = px, .y = py};
             }
         }

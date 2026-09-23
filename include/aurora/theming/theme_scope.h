@@ -25,6 +25,10 @@ namespace aurora {
  * @note Side-effects: none
  * @note Rebuildable: yes, via from_json
  */
+// 豁免 bugprone-exception-escape：本控件继承 Provider<Theme>，其构造/拷贝链持有 std::function 回调，
+// 触发 .clang-tidy 已记录的系统性假告警面——「任何转入 std::function 的可调用对象一律判『不应抛出』」
+// （operator() 无 noexcept 规格）。抛出仅可能为 bad_alloc，回调实抛由上层帧循环 try/catch 兜底。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class ThemeScope : public Provider<Theme> {
   public:
     using Provider<Theme>::Provider;  ///< 复用 Provider<Theme>(Theme, Node/Widget) 构造

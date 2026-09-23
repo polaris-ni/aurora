@@ -132,7 +132,9 @@ struct ScrollViewport {
         float candidate = 0.0F;
         switch (snap.alignment) {
             case ScrollSnapAlignment::Start:
-                candidate = std::lround(offset / ext) * ext;
+                // lround 得整条目号，转 float 属真窄化（long 32 位 > float 24 位尾数）——显式写出来，
+                // 乘法仍在 float 域做，数值与原式一字不动。
+                candidate = static_cast<float>(std::lround(offset / ext)) * ext;
                 break;
             case ScrollSnapAlignment::Center: {
                 // 条目 k 覆盖 [k·ext, (k+1)·ext)，其中心贴视口中心：offset = k·ext + ext/2 − viewport/2

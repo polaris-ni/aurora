@@ -34,6 +34,9 @@ inline auto main_poster_mutex() -> auto & {
     return m;
 }
 inline auto main_poster() -> auto & {
+    // 惰性构造的函数内 static：首次调用才建，跨 TU 初始化顺序问题在此不存在（本检查的担心面）。
+    // 仅浏览器口径命中——native 遍同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static std::function<void(std::function<void()>)> p;
     return p;
 }
@@ -74,7 +77,7 @@ inline auto timeout_guards() -> std::vector<TimeoutGuard> & {
 inline auto register_timeout_guard(std::chrono::steady_clock::time_point deadline, std::function<void()> expire)
     -> void {
     std::scoped_lock lock(timeout_guards_mutex());
-    timeout_guards().push_back(TimeoutGuard{deadline, std::move(expire)});
+    timeout_guards().push_back(TimeoutGuard{.deadline = deadline, .expire = std::move(expire)});
 }
 
 /// @brief 最近登记的到期时刻距 `now` 的毫秒数；表空返回 `-1`（= 无看守，不参与唤醒决策）。
@@ -165,10 +168,14 @@ auto take_for_delivery(AsyncState<T> &st, std::function<void(const Result<T> &)>
 // 萃取 fn 的返回类型：若为 Result<U> 则任务值为 U，否则为 Raw。
 template <typename R>
 struct TaskValueOf {
+    // 类型萃取的成员名 `X::type` 是标准库既定形态（与 std traits 组合时按此名查找），非本库命名自由度。
+    // NOLINTNEXTLINE(readability-identifier-naming)
     using type = R;
 };
 template <typename U>
 struct TaskValueOf<Result<U>> {
+    // 同上：`trait::type` 由惯例固定。
+    // NOLINTNEXTLINE(readability-identifier-naming)
     using type = U;
 };
 template <typename R>

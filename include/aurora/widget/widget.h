@@ -1235,7 +1235,7 @@ class LeafWidget : public Widget {
     }
 
 // clang 无 "-Wdangling-pointer" 告警组（实测报 -Wunknown-warning-option），故压制只在 GCC 下展开。
-#if defined(AURORA_COMPILER_GCC)
+#ifdef AURORA_COMPILER_GCC
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdangling-pointer"
 #endif
@@ -1251,7 +1251,7 @@ class LeafWidget : public Widget {
                    ? std::vector{HitNode{this, weak_from_this(), bounds.origin}}
                    : std::vector<HitNode>{};
     }
-#if defined(AURORA_COMPILER_GCC)
+#ifdef AURORA_COMPILER_GCC
 #pragma GCC diagnostic pop
 #endif
 };

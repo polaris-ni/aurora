@@ -45,6 +45,10 @@ using WidgetFactory = std::function<Result<std::shared_ptr<Widget>>(const Json &
 class WidgetRegistry {
   public:
     [[nodiscard]] static auto instance() -> WidgetRegistry & {
+        // 惰性构造的函数内 static：注册表由 `register_factory` 在运行期填充，本就不能常量初始化，
+        // 且首建时刻与跨 TU 静态初始化顺序无关（本检查的担心面在此不存在）。仅浏览器口径命中
+        // ——native 遍同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。
+        // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
         static WidgetRegistry reg;
         return reg;
     }

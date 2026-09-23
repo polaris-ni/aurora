@@ -165,25 +165,28 @@ void SystemTray::on_activate(std::function<void()> cb) { on_activate_cb_ = std::
 void SystemTray::set_context_menu(std::vector<MenuItem> items) { context_menu_items_ = std::move(items); }
 
 #ifdef AURORA_PLATFORM_WINDOWS
-// NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-pointer-arithmetic,
-// cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-pro-type-union-access,
-// performance-no-int-to-ptr): Win32 Shell_NotifyIcon/HMENU 句柄与字节搬运不可避免
+// 【豁免说明】Win32 托盘接线：句柄/字符串按字节搬运，且须以 reinterpret_cast 在 WCHAR 与
+// char、LPARAM 与指针之间往返，C 数组变址与联合体赋值同样是 API 形状所定 —— 逐点抑制不成
+// 比例，故按区间豁免。名单 = 去掉本区间后 clang-tidy 实测报出的检查集（通配写法已用探针
+// 验证为「按名匹配」，不会退化成豁免一切，盲点记录见 codespec/CODING_STANDARDS.md §5.2）。
+// NOLINTBEGIN(*-pro-bounds-*, *-pro-type-*, performance-no-int-to-ptr)
 
 auto SystemTray::Impl::create_window() -> bool {
-    static constexpr const wchar_t *k_class = L"AuroraSystemTrayClass";
+    static constexpr const wchar_t *AURORA_TRAY_CLASS = L"AuroraSystemTrayClass";
     static bool registered = false;
     if (!registered) {
         WNDCLASSEXW wc{};
         wc.cbSize = sizeof(wc);
         wc.lpfnWndProc = &SystemTray::Impl::wnd_proc;
         wc.hInstance = GetModuleHandleW(nullptr);
-        wc.lpszClassName = k_class;
+        wc.lpszClassName = AURORA_TRAY_CLASS;
         if (RegisterClassExW(&wc) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
             AURORA_LOG_WARN("system_tray", "RegisterClassExW failed");
         }
         registered = true;
     }
-    hwnd = CreateWindowExW(0, k_class, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), this);
+    hwnd = CreateWindowExW(0, AURORA_TRAY_CLASS, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr),
+                           this);
     if (hwnd == nullptr) {
         AURORA_LOG_WARN("system_tray", "CreateWindowExW(HWND_MESSAGE) failed");
         return false;
@@ -317,7 +320,7 @@ LRESULT CALLBACK SystemTray::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPAR
         }
         return 0;
     }
-    if ((impl != nullptr) && (impl->taskbar_created != 0u) && msg == impl->taskbar_created) {
+    if ((impl != nullptr) && (impl->taskbar_created != 0U) && msg == impl->taskbar_created) {
         impl->add_icon();  // 资源管理器重启后重新添加图标
         return 0;
     }
@@ -402,9 +405,7 @@ void SystemTray::Impl::show_context_menu() const {
     }
 }
 
-#endif  // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-pointer-arithmetic,
-        // cppcoreguidelines-pro-bounds-constant-array-index, cppcoreguidelines-pro-type-union-access,
-        // performance-no-int-to-ptr)
-        // AURORA_PLATFORM_WINDOWS
+#endif  // AURORA_PLATFORM_WINDOWS
+// NOLINTEND(*-pro-bounds-*, *-pro-type-*, performance-no-int-to-ptr)
 
 }  // namespace aurora

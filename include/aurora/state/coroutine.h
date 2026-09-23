@@ -49,7 +49,9 @@ struct CoroShared<void> {
 template <typename T>
 class CoroTask {
   public:
-    // NOLINTNEXTLINE(*-special-member-functions)
+    // `promise_type` 是 `std::coroutine_traits` 固定查找的类型名（改名即协程语法失效），非本库命名自由度；
+    // 协程钩子三件套亦由协议规定，故与 special-member-functions 一并就地豁免。
+    // NOLINTNEXTLINE(*-special-member-functions,readability-identifier-naming)
     struct promise_type {
         std::shared_ptr<detail::CoroShared<T>> shared = std::make_shared<detail::CoroShared<T>>();
 
@@ -80,6 +82,12 @@ class CoroTask {
     [[nodiscard]] auto is_done() const -> bool { return shared_->done.load(std::memory_order_acquire); }
 
     /// @brief 协程返回值（仅非 void；异常时返回错误 Result；未完成前调用结果未定义）。
+    // 豁免本检查：契约要求先 `is_done()`。`return_value` 与 `unhandled_exception` 是协程收尾的必经
+    // 两条路径、都写入 `result`，而 `done` 只在 `~promise_type` 置位——故 `done` 为真时 `result`
+    // 必有值。要改成运行期分支需新增「未完成」公共错误码（现无契合项，属 API 扩张），且不改本检查
+    // 建议的形态；调用方违约即文档化的未定义行为。同一份代码 native 遍不报（口径差异见
+    // CODING_STANDARDS.md §5.2）。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     [[nodiscard]] auto result() const -> Result<T> { return *shared_->result; }
 
   private:
@@ -93,7 +101,7 @@ class CoroTask {
 template <>
 class CoroTask<void> {
   public:
-    struct promise_type {  // NOLINT(*-special-member-functions)
+    struct promise_type {  // NOLINT(*-special-member-functions,readability-identifier-naming) 同上：协程固定类型名
         std::shared_ptr<detail::CoroShared<void>> shared = std::make_shared<detail::CoroShared<void>>();
 
         [[nodiscard]] auto get_return_object() const -> CoroTask { return CoroTask{shared}; }
@@ -152,6 +160,11 @@ struct CoAwaitable {
         });
     }
 
+    // 豁免本检查：`value_` 由 `await_suspend` 投入线程池的任务写入，且写入先于同一任务内的
+    // `handle.resume()`——续体只可能经那条 resume 前进，故 `await_resume` 取用时必有值。分析器看
+    // 不到这条跨线程 happens-before，只能按「可能为空」报；在此加分支等于把协程契约撕成运行期
+    // 判断，无对应错误码可用。同一份代码 native 遍不报（口径差异见 CODING_STANDARDS.md §5.2）。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto await_resume() -> Result<ValueT> { return std::move(*value_); }
 
   private:

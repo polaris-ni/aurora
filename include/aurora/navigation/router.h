@@ -27,6 +27,11 @@ namespace aurora {
  * au::Router router; router.register_route("home", home_route);
  * ```
  */
+// 豁免 bugprone-exception-escape：本表值即 std::function<RouteBuilder>，拷贝 routes_ 触发 .clang-tidy
+// 已记录的系统性假告警面——「任何转入 std::function 的可调用对象一律判『不应抛出』」（std::function::
+// operator() 无 noexcept 规格，分析器无法证明其不抛），据此误判隐式特殊成员。抛出仅可能为 bad_alloc，
+// 由顶层统一兜底，非本类需就地吞掉的抛出面。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class Router {
   public:
     /// @brief 按名称构建 `Route` 的工厂。

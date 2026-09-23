@@ -35,7 +35,7 @@ struct Directionality {
 /// @brief 设置进程级方向性（标记 host_set=true）。
 inline auto set_directionality(Directionality d) -> void {
     d.host_set = true;
-    current_directionality() = std::move(d);
+    current_directionality() = d;
 }
 
 /// @brief 显式方向来源（nullopt = 无显式来源，shaping 保持按内容 guess）。

@@ -50,7 +50,8 @@ class HotReload {
 
     /// @brief 保留项 —— 现已按树路径匹配，故本设置不再参与匹配。
     /// @deprecated 仅为兼容保留；`id` 不经 JSON 往返，按 id 保留状态在热重载下无法成立。
-    void set_state_key([[maybe_unused]] std::string key) {}
+    /// @note 形参取 const 引用：本接口是空实现（仅兼容占位），不消费 key，按值传 std::string 徒增一次拷贝。
+    void set_state_key([[maybe_unused]] const std::string &key) {}
 
     /// @brief 检查文件时间戳；如有更新则从 JSON 重建树。
     /// @return 新根节点（共享指针所有权），无变化或重建失败返回 nullptr。

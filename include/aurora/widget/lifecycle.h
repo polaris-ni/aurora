@@ -48,6 +48,10 @@ class Lifecycle : public SingleChild {
     Lifecycle(Node child, MountCb on_mount, UnmountCb on_unmount = {})
         : SingleChild(std::move(child)), on_mount_(std::move(on_mount)), on_unmount_(std::move(on_unmount)) {}
 
+    // 豁免 bugprone-exception-escape：析构调用用户的 `on_unmount_`（std::function），其 operator()
+    // 无 noexcept 规格——即 .clang-tidy 记录在案的系统性假告警面。控件销毁期无调用方可回报，本库
+    // 回调路径刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     ~Lifecycle() override {
         if (on_unmount_) {
             on_unmount_();

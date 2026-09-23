@@ -85,7 +85,7 @@ struct UiPromptOptions {
                 first = false;
                 out += it.key();
                 if (opt.include_defaults) {
-                    Json v = it.value();
+                    const Json &v = it.value();
                     out += "=" + (v.is_string() ? v.get<std::string>() : v.dump());
                 }
             }
@@ -189,6 +189,11 @@ namespace detail {
 
 /// @brief 已注册类型集合（小写 → 原名），供模糊匹配使用。
 [[nodiscard]] inline auto ui_registered_types() -> const std::vector<std::string> & {
+    // 函数内静态缓存不是对外常量，按 UPPER_CASE 改名反而误导，故就地豁免
+    // （clang-tidy 22 未提供 `StaticConstantLocalVariableCase` 选项，配置口走不通，已实测）。
+    // 同一条声明另豁免 dynamic-static：惰性构造的函数内 static 与跨 TU 初始化顺序无关（本检查的
+    // 担心面），且仅浏览器口径命中——native 遍同一份代码不报（CODING_STANDARDS.md §5.2）。
+    // NOLINTNEXTLINE(readability-identifier-naming, bugprone-dynamic-static-initializers)
     static const std::vector<std::string> types = aurora::list_all_components();
     return types;
 }
@@ -325,6 +330,10 @@ namespace detail {
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: 调用注入的 `llm`（可能联网，由注入方承担）
+// 豁免 performance-unnecessary-value-param：该签名（含 `GenerateUiFn llm = {}` 按值形参）已作为
+// API 契约记录于 codespec/specification/08-tooling.md §2.6 的类型表，形参按值是既定 API；
+// 注入方常以临时 lambda 实传，按值接形参即其设计意图，改 const 引用属破坏契约的签名调整。
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 [[nodiscard]] inline auto generate_ui_repair(const std::string &description, GenerateUiFn llm = {},
                                              std::size_t max_attempts = 3) -> UiRepairResult {
     UiRepairResult result;

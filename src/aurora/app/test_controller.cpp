@@ -157,8 +157,8 @@ struct TestController::Impl {
 
 TestController::TestController(Node root, const Config &cfg) : impl_(std::make_unique<Impl>(std::move(root), cfg)) {}
 
-TestController::TestController(TestController &&) noexcept = default;
-auto TestController::operator=(TestController &&) noexcept -> TestController & = default;
+TestController::TestController(TestController &&other) noexcept = default;
+auto TestController::operator=(TestController &&other) noexcept -> TestController & = default;
 TestController::~TestController() = default;
 
 // ---------------------------------------------------------------------------

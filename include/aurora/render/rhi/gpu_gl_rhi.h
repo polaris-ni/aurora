@@ -16,6 +16,12 @@ namespace aurora::rhi {
 // 供 `GpuGlRhi` 经函数表调用 GL 3.3 core 而无需 <GL/gl.h> / GLAD；值与原生 GL 类型逐一同宽。
 // ⚠️ 若消费者同时包含真实 GL 头并 `using namespace aurora::rhi`，别名可能与原生 typedef 冲突
 // （同名同宽，实际无害；但属已知边界，勿在本头之外扩散这些别名）。
+//
+// 本区别名（`GLenum_` / `GLuint_`…）按 `TypeAliasCase: CamelCase` 必然告警：名字逐字取自 GL
+// 官方 typedef（`GLenum`），尾下划线正是为规避与 `<GL/gl.h>` 同名 typedef 的碰撞而加——改名或
+// 去下划线都会丢掉「与原生类型一一对应」这层可读性，且属 CODING_STANDARDS.md §2 的官方名镜像
+// 豁免面。命名豁免无法按命名空间限定，故按区间逐点豁免。
+// NOLINTBEGIN(readability-identifier-naming)
 using GLenum_ = std::uint32_t;
 using GLboolean_ = std::uint8_t;
 using GLbitfield_ = std::uint32_t;
@@ -26,6 +32,7 @@ using GLsizeiptr_ = std::ptrdiff_t;
 using GLfloat_ = float;
 using GLchar_ = char;
 using GLubyte_ = std::uint8_t;
+// NOLINTEND(readability-identifier-naming)
 
 /// @brief GL 3.3 core 函数表：经加载器逐个 `GetProcAddress` 装载，签名与 GL 官方原型同宽。
 ///
