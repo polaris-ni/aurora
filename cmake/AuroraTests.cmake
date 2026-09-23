@@ -143,8 +143,12 @@ if (AURORA_BUILD_TESTS)
         # 库侧差异，聚合后收敛到 runner 一处：
         #   shcore — dpi_awareness 用例（GetDpiForWindow 等）高 DPI 回归；inspector — 检视 server pimpl 实现；
         #   -ffp-contract=off — 标量黄金参考禁 FMA 收缩（目标级应用：仅禁收缩，语义安全）。
+        # ws2_32 必须挂在 runner 自己身上，不能借 `aurora_inspector_server` 传导：该目标只在
+        # AURORA_BUILD_INSPECTOR_SERVER=ON 时存在，而 utest_inspector_client 测的是 header-only 的
+        # tools/servers/inspector_client.h——它直接调 Winsock（socket/bind/accept/select…），与那个开关无关。
+        # 开关默认 OFF（CI 的 core 各作业即是），届时链接面上没有任何地方引入 ws2_32。
         if (WIN32)
-            target_link_libraries(${tgt} PRIVATE shcore)
+            target_link_libraries(${tgt} PRIVATE shcore ws2_32)
         endif ()
         if (TARGET aurora_inspector_server)
             target_link_libraries(${tgt} PRIVATE aurora_inspector_server)
