@@ -60,8 +60,12 @@ if (EMSCRIPTEN)
     list(APPEND _lint_args --emscripten)
 endif ()
 
+# `lint` 始终把结构化清单写到本目录的 lint-findings.json（tu_count / unique_findings /
+# broken_tus / by_check / by_file / findings）。门禁 stdout 只有 top-N 文件表，CI 上据此
+# 判因必然漏掉尾数；有了这份 JSON，聚合产物才能作为「按文件 + check 逐条列名」的依据。
 add_custom_target(lint
         COMMAND ${PYTHON3_EXE} "${_lint_script}" --build-dir "${CMAKE_BINARY_DIR}" ${_lint_args}
+                --json-out "${CMAKE_BINARY_DIR}/lint-findings.json"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Clang-Tidy: linting non-third_party TUs (deduplicated; fails on any finding)")
 

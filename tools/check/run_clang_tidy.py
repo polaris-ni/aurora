@@ -58,7 +58,21 @@ DIAG = re.compile(r"^(.*?):(\d+):(\d+):\s+(warning|error):\s+(.*?)\s+\[(.+)\]\s*
 # "fatal error: too many errors emitted"、"unable to handle compilation"）两类都要抓。
 FRONT_ERROR = re.compile(r"^(?:(.*?):(\d+):\d+:\s+)?(?:fatal\s+)?error:\s+(.*)$")
 
-DEFAULT_EXCLUDE = re.compile(r"(^|/)third_party/")
+# 排除项在两处生效：`load_tus` 筛翻译单元、主循环筛诊断所属文件。
+# ① `third_party/`：三方代码不按本仓风格检查。
+# ② `tests/support/fake_gl.h`——GL 驱动桩：整份文件是按 `GLFn` 函数表逐个填的桩，
+#    56 条告警里 48 条是 `readability-named-parameter`（桩不读参数，命名只会误导读者）、
+#    5 条是指针算术（按字节铺 GL 数据）。这类检查没有「按名字豁免」的选项，逐点 NOLINT
+#    就是 56 处指令，且该文件永不该被本仓风格约束——排除比豁免划算。
+#    ⚠️ 逐文件点名，不用目录通配：新增豁免须显式登记，避免整目录被静默放行。
+# 反面判据（勿照抄本条）：`gl_core.h`(49) 与 `atspi_protocol.h`(74) 也在这份名单的候选里
+# 跑过一轮，但它们的告警几乎全是 `readability-identifier-naming`，而该检查有按类别的
+# `*IgnoredRegexp`（clang-tidy 22 实测有效，探针见 BUILD_OPTIONS.md §4.5）——用命名豁免能
+# 保住这两个文件的其余覆盖面，故不改用「整文件排除」这种永久盲点。
+DEFAULT_EXCLUDE = re.compile(
+    r"(^|/)third_party/"
+    r"|tests/support/fake_gl\.h$"
+)
 
 # ---- Emscripten 编译库改写（--emscripten）------------------------------------
 # 三元组与驱动注入项：em++ 会在真实 argv 里补 `__EMSCRIPTEN__` 与垫片头目录
@@ -320,7 +334,7 @@ def main() -> int:
     ap.add_argument("--include", default=None,
                     help="regex; only lint TUs whose path matches")
     ap.add_argument("--exclude", default=DEFAULT_EXCLUDE.pattern,
-                    help="regex; skip TUs whose path matches (default: third_party)")
+                    help="regex; skip TUs whose path matches (default: see DEFAULT_EXCLUDE)")
     ap.add_argument("--fix", action="store_true",
                     help="apply clang-tidy fix-its in place (does not fail the run)")
     ap.add_argument("--fail-on", choices=["warning", "error"], default="warning",

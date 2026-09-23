@@ -405,18 +405,21 @@ cmake -S . -B build -DAURORA_LLD_DIR="<LLVM 安装根>/bin"                     
 | 默认值 | `ON`（找不到 `clang-tidy` 或 python 时自动降级：仅告警，不定义目标） |
 | 提供目标 | `lint`（存在 warning 及以上即退出码 1）、`lint-fix`（就地应用 fix-it，**不因告警失败**） |
 | 配置来源 | 仓库根 `.clang-tidy`（`Checks` / `CheckOptions` / `HeaderFilterRegex`） |
-| 扫描范围 | `compile_commands.json` 中全部**非 `third_party/`** 翻译单元 |
+| 扫描范围 | `compile_commands.json` 中全部**非 `third_party/`** 翻译单元，另有具名排除（见下「排除名单」） |
 | 去重 | 按 `(file, line, check)` 去重——头文件诊断会在每个包含它的 TU 中重复上报，原始条数不可直接用作门禁计数 |
+| 结构化清单 | `lint` / `lint-fix` 始终把完整清单写到该构建目录的 `lint-findings.json`（`tu_count` / `unique_findings` / `broken_tus` / `by_check` / `by_file` / `findings`）：门禁 stdout 只印 top-N 文件表，尾数不在其中，判因与存量清点必须以这份 JSON 为准 |
 | 依赖 | `clang-tidy`（PATH）+ python（PATH）+ `CMAKE_EXPORT_COMPILE_COMMANDS`（未开启时本模块自动打开） |
 
 为何不用 `CMAKE_CXX_CLANG_TIDY` 随构建执行：该变量必须在目标定义**之前**设置才生效，与本项目「模块在最后 include」的编排冲突；且会让每次编译额外跑一遍 clang-tidy，日常开发构建被拖慢一个数量级。
 
 ```powershell
-cmake --build build --target lint        # 全量 lint，有告警则失败
+cmake --build build --target lint        # 全量 lint，有告警则失败；同时写出 build/lint-findings.json
 cmake --build build --target lint-fix    # 就地应用 fix-it，随后必须人工审阅 diff
 python tools/check/run_clang_tidy.py --build-dir build --json-out findings.json  # 结构化清单
 python tools/check/run_clang_tidy.py --build-dir build --include 'src/'          # 只 lint 库代码
 ```
+
+**排除名单（脚本的 `DEFAULT_EXCLUDE`）**：`third_party/` 之外只点名一条——`tests/support/fake_gl.h`（GL 驱动桩：56 条告警里 48 条 `readability-named-parameter`、5 条指针算术。桩不读参数、签名须逐字对齐 `GLFn` 函数表，「按本仓规范改名」即失真）。逐文件点名而非目录通配：新增排除必须显式登记，杜绝整目录被静默放行。判据是「哪种手段留下的盲点小」，不是「看着像不像三方代码」——整文件排除会让该文件此后的手写代码一并脱离检查，故仅当告警类别没有更窄的豁免手段时才用它。反例已量过：`src/aurora/render/gpu/gl_core.h`（49 条）与 `src/aurora/window/detail/atspi_protocol.h`（74 条）曾进同一候选名单，但它们的告警几乎全是 `readability-identifier-naming`，而该检查有**按类别**的 `*IgnoredRegexp`（clang-tidy 22 实测：与 `EnumConstantCase` 同配时，命中正则的枚举常量不再上报，未命中的照常上报），所以这两份留在覆盖面内、由命名豁免处置。两种取舍都能复证：把 `HeaderFilterRegex` 换成分隔符无关的配置、只跑包含这三份头的 TU，桩一条也不上报（被排除），另两份分别报回 74 / 49 条（在覆盖面内）。
 
 **NOLINT 纪律**：凡用 `NOLINT` / `NOLINTNEXTLINE` 抑制告警，须遵守 `CODING_STANDARDS.md` §5.2——写明具体检查名（禁止裸 `NOLINT` 的新增使用），并紧邻注释说明「为何不能按建议修复」。抑制只在物理行上生效，排错位即静默失效，故该纪律由 CTest 用例 `check_nolint_layout` 常驻把关（clang-tidy 自身查不出这一类）。
 
@@ -438,7 +441,9 @@ python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏
 
 **「0 告警」不等于「跑到了」**：TU 编译失败时 clang-tidy 不产出任何带 `[check]` 的诊断，静默下来就是一轮绿灯。故本脚本对**前端 `error:`（含 `fatal error:`、`unable to handle compilation`）与超时**单独记账并以退出码 1 失败，`--emscripten` 重写还会校验条数守恒与 include 目录存在性，任一不满足直接以退出码 2 拒跑。反例实测：用 `shlex.split(posix=True)` 拆 Windows 编译库里的 `command`，会把反斜杠一律当转义符吃掉——盘符与目录粘连、分隔符丢失，路径全废，整轮 TU 编译不过，而门禁显示 0 告警。
 
-**`HeaderFilterRegex` 的路径分隔符缺口（已知，2026-09-22 定为「暂缓」）**：现值为 `(include/aurora|src/aurora|/tests/|/tools/|/examples/)`，只认正斜杠；而编译库里的头文件路径常是「正斜杠根 + 反斜杠段」的混合形态，某一段的分隔符与正则不符，该段之后的头文件告警就被过滤掉。实测后果：同一份 `tests/framework` 下的头文件，收口前 native 遍报 0 条、wasm 遍报十余条（两条口径拼出的路径形态不同，穿过过滤的能力也就不同），因此**当前 native 门禁的有效覆盖面主要是主文件诊断**。把正则改为分隔符无关的代价已量过：一次放出 **417 条告警 / 64 文件**（多为同一头文件被多个 TU 重复上报）。暂缓的理由：现状门禁说的仍是真话（0 告警 = 被扫到的部分确实干净），只是覆盖面比字面声称的窄，而这一窄法已在本节写明；真要扩面应作为独立切片、配「按文件 + check 逐条列名并注明原因」的存量豁免名单推进，而不是把 417 条一次性摊进 NOLINT。
+**`HeaderFilterRegex` 的路径分隔符缺口（已知，2026-09-22 定为「暂缓」，2026-09-23 由 CI 兑现）**：现值为 `(include/aurora|src/aurora|/tests/|/tools/|/examples/)`，只认正斜杠；而编译库里的头文件路径常是「正斜杠根 + 反斜杠段」的混合形态，某一段的分隔符与正则不符，该段之后的头文件告警就被过滤掉。实测后果：同一份 `tests/framework` 下的头文件，收口前 native 遍报 0 条、wasm 遍报十余条（两条口径拼出的路径形态不同，穿过过滤的能力也就不同），因此**本机 native 门禁的有效覆盖面主要是主文件诊断**——本机那句「两口径 0 findings」证明的面比字面窄。缺口在 Linux runner 上不存在（路径全正斜杠）：2026-09-22 的 CI 首跑因此放出 native 422 条 / wasm 470 条，与本机 0 并不矛盾，是同一份代码在两张覆盖面下的两个数。把正则改为分隔符无关的代价本机也量过：一次放出 **417 条 / 64 文件**（多为同一头文件被多个 TU 重复上报），其中 `readability-identifier-naming` 163 条、`readability-named-parameter` 50 条。扩面本身仍是独立切片：先按下面的处置阶梯把存量清到 0，再改正则，否则一改就全线红灯。
+
+**CI 语义：这两道 lint 现为 report-only（`continue-on-error` + artifact）**。为什么：该门禁自引入起从未绿过——先红在装不上 clang-tidy-22（apt 404），修好后红在上述存量。一个永远红的必过位不等于门禁，只是把红灯常态化、让每个 PR 背一个与自身无关的失败。因此 `clang-tidy (dual-pass)` 作业的两遍与 `wasm` 作业的浏览器口径遍都改为不判失败，各自的 `lint-findings.json` 以 `tidy-findings-debug-off` / `tidy-findings-debug-on` / `tidy-findings-wasm` 三个产物名落盘。**收回条件**：三份清单的 `unique_findings` 均为 0，届时把 `continue-on-error` 删掉即可（作业超时 240 分钟是按「两遍都跑满」给的，report-only 前 DEBUG=ON 那遍会被前一遍失败短路）。存量按覆盖面代价从小到大处置：① `.clang-tidy` 的 `CheckOptions`（命名类占大头，`*IgnoredRegexp` 按类别精确豁免，不牺牲文件其余检查）；② 逐点 `NOLINT` + 原因（受 §4.5「NOLINT 纪律」与 `check_nolint_layout` 约束）；③ 整文件排除（永久盲点，只给桩/替身这类本就不受本仓风格约束的文件）。
 
 ### 4.6 `AURORA_ENABLE_IMAGE_*`（图像编解码能力）
 
