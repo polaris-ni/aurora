@@ -16,10 +16,10 @@ namespace aurora::test_cases::utest_cli {
 
 namespace au = aurora;
 namespace cli = aurora::cli;
-using aurora::testing::cli_fixture::Tokens;
 using aurora::testing::cli_fixture::spec;
 using aurora::testing::cli_fixture::strict_spec;
 using aurora::testing::cli_fixture::text_of;
+using aurora::testing::cli_fixture::Tokens;
 
 /// @brief 用主样例树解析（program_name 留空 → 回落 root.name）。
 [[nodiscard]] auto run(const std::vector<std::string> &tokens) -> au::Result<cli::Invocation> {
@@ -30,8 +30,7 @@ using aurora::testing::cli_fixture::text_of;
 [[nodiscard]] auto code_of(const au::Error &error) -> au::ErrorCode { return error.code_enum; }
 
 AURORA_TEST_CASE(long_option_accepts_space_and_equals_forms) {
-    for (const std::vector<std::string> &tokens :
-         {Tokens{"--width", "1024"}, Tokens{"--width=1024"}}) {
+    for (const std::vector<std::string> &tokens : {Tokens{"--width", "1024"}, Tokens{"--width=1024"}}) {
         const auto parsed = run(tokens);
         AURORA_TEST_REQUIRE(parsed);
         AURORA_TEST_CHECK_EQ(parsed.value().arguments.get<int>("width").unwrap(), 1024);
@@ -39,8 +38,7 @@ AURORA_TEST_CASE(long_option_accepts_space_and_equals_forms) {
 }
 
 AURORA_TEST_CASE(short_option_accepts_space_attached_and_equals_value) {
-    for (const std::vector<std::string> &tokens :
-         {Tokens{"-w", "1024"}, Tokens{"-w1024"}, Tokens{"-w=1024"}}) {
+    for (const std::vector<std::string> &tokens : {Tokens{"-w", "1024"}, Tokens{"-w1024"}, Tokens{"-w=1024"}}) {
         const auto parsed = run(tokens);
         AURORA_TEST_REQUIRE(parsed);
         AURORA_TEST_CHECK_EQ(parsed.value().arguments.get<int>("width").unwrap(), 1024);
@@ -362,9 +360,10 @@ AURORA_TEST_CASE(log_level_accepts_full_and_short_words_case_insensitively) {
         std::string_view token;
         au::LogLevel level;
     };
-    for (const Case &c : {Case{.token = "TRACE", .level = au::LogLevel::Trace}, Case{.token = "trc", .level = au::LogLevel::Trace},
-                          Case{.token = "Warning", .level = au::LogLevel::Warn}, Case{.token = "wrn", .level = au::LogLevel::Warn},
-                          Case{.token = "fatal", .level = au::LogLevel::Fatal}}) {
+    for (const Case &c :
+         {Case{.token = "TRACE", .level = au::LogLevel::Trace}, Case{.token = "trc", .level = au::LogLevel::Trace},
+          Case{.token = "Warning", .level = au::LogLevel::Warn}, Case{.token = "wrn", .level = au::LogLevel::Warn},
+          Case{.token = "fatal", .level = au::LogLevel::Fatal}}) {
         const auto parsed = run(Tokens{"--level", c.token});
         AURORA_TEST_REQUIRE(parsed);
         const auto level = parsed.value().arguments.get<au::LogLevel>("level");
@@ -381,9 +380,9 @@ AURORA_TEST_CASE(duration_units_scale_to_milliseconds) {
         std::string_view token;
         std::int64_t ms;
     };
-    for (const Case &c : {Case{.token = "500", .ms = 500}, Case{.token = "250ms", .ms = 250}, Case{.token = "5s", .ms = 5000},
-                          Case{.token = "2m", .ms = 120000},
-                          Case{.token = "1h", .ms = 3600000}, Case{.token = "1d", .ms = 86400000}}) {
+    for (const Case &c :
+         {Case{.token = "500", .ms = 500}, Case{.token = "250ms", .ms = 250}, Case{.token = "5s", .ms = 5000},
+          Case{.token = "2m", .ms = 120000}, Case{.token = "1h", .ms = 3600000}, Case{.token = "1d", .ms = 86400000}}) {
         const auto parsed = run(Tokens{"--timeout", c.token});
         AURORA_TEST_REQUIRE(parsed);
         AURORA_TEST_CHECK_EQ(parsed.value().arguments.value("timeout").unwrap().as_duration_ms().unwrap(), c.ms);
@@ -496,6 +495,47 @@ AURORA_TEST_CASE(error_payload_carries_slug_and_machine_fields) {
     AURORA_TEST_CHECK_EQ(error.code, "cli-choice-invalid");
     AURORA_TEST_CHECK(error.category == au::ErrorCategory::Validation);
     AURORA_TEST_CHECK_THAT(error.to_json(), au::testing::matchers::has_substr("cli-choice-invalid"));
+}
+
+AURORA_TEST_CASE(named_value_accessors_cover_the_public_entry_directly) {
+    // `as<T>()` 只是按 T 派发到具名 `as_*`，所以经 `get<T>()` 的既有用例从没**直接**调用过这些公共出口。
+    // 此处逐个直调，并钉住 args.h 头注释的三条跨读规则（无损加宽可取 / 非整与类型不符 invalid-value /
+    // 窄化越界 range-violated），使「将来把 get<T> 改成绕过 as_*」这类重构不再是静默变更。
+    const auto parsed = run(Tokens{"--width", "12", "--scale", "1.5", "--output", "shot.png", "--margin", "25%",
+                                   "--tint", "#ff0000", "--level", "debug", "--verbose", "--timeout", "2s"});
+    AURORA_TEST_REQUIRE(parsed);
+    const auto &args = parsed.value().arguments;
+
+    const auto width = args.value("width").unwrap();
+    AURORA_TEST_CHECK_EQ(width.as_int64().unwrap(), 12);
+    AURORA_TEST_CHECK_EQ(width.as_int().unwrap(), 12);
+    AURORA_TEST_CHECK_NEAR(width.as_double().unwrap(), 12.0, 0.0001);  // Int → double 属无损加宽
+
+    const auto scale = args.value("scale").unwrap();
+    AURORA_TEST_CHECK_NEAR(scale.as_double().unwrap(), 1.5, 0.0001);
+    AURORA_TEST_CHECK(code_of(scale.as_int().error()) == au::ErrorCode::CliInvalidValue);  // 非整 double 不收
+
+    AURORA_TEST_CHECK(args.value("verbose").unwrap().as_bool().unwrap());
+    AURORA_TEST_CHECK_EQ(args.value("output").unwrap().as_string().unwrap(), "shot.png");
+    const auto margin = args.value("margin").unwrap().as_length().unwrap();
+    AURORA_TEST_CHECK(margin.kind == au::LengthKind::Fraction);
+    AURORA_TEST_CHECK_NEAR(margin.value, 0.25F, 0.0001);
+    AURORA_TEST_CHECK(args.value("tint").unwrap().as_color().unwrap() == au::Color{255, 0, 0});
+    AURORA_TEST_CHECK(args.value("level").unwrap().as_log_level().unwrap() == au::LogLevel::Debug);
+    AURORA_TEST_CHECK_EQ(args.value("timeout").unwrap().as_duration_ms().unwrap(), 2000);
+
+    // 类型不符一律 cli-invalid-value（字符串读成整数、double 超出 int64 可表示范围）；
+    // 只有 int64 → int32 的窄化越界才是 cli-range-violated。
+    AURORA_TEST_CHECK(code_of(args.value("output").unwrap().as_int64().error()) == au::ErrorCode::CliInvalidValue);
+    const auto huge = run(Tokens{"--scale", "1e300"});
+    AURORA_TEST_REQUIRE(huge);
+    AURORA_TEST_CHECK(code_of(huge.value().arguments.value("scale").unwrap().as_int64().error()) ==
+                      au::ErrorCode::CliInvalidValue);
+    const auto wide_ms = run(Tokens{"--timeout", "4000000000s"});  // 4e12 ms：int64 放得下，int32 放不下
+    AURORA_TEST_REQUIRE(wide_ms);
+    const auto timeout = wide_ms.value().arguments.value("timeout").unwrap();
+    AURORA_TEST_CHECK_EQ(timeout.as_int64().unwrap(), 4000000000000);
+    AURORA_TEST_CHECK(code_of(timeout.as_int().error()) == au::ErrorCode::CliRangeViolated);
 }
 
 }  // namespace aurora::test_cases::utest_cli
