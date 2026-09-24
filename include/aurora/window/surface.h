@@ -325,7 +325,8 @@ class Surface {
             "capture_window: not supported on this backend (only Win32/X11/GLFW provide OS window capture)")};
     }
 
-    /// @brief 已呈现帧数（诊断/测试用；默认 0）。
+    /// @brief 已呈现帧数（诊断/测试用）：真实后端在各自 `present()` 上屏后自增，
+    /// 逐帧出帧即逐帧计数，与系统几何变化触发的同步重渲染无关；未覆写的后端恒 0。
     [[nodiscard]] virtual auto frame_count() const -> int { return 0; }
 
     /// @brief 原生窗口句柄（平台相关；Headless/未知后端返回 nullptr）。

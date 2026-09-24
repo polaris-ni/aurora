@@ -106,7 +106,8 @@ class Win32Surface final : public Surface {
     auto set_composition_caret_provider(std::function<Rect()> provider) -> void override {
         win_->set_composition_caret_provider(std::move(provider));
     }
-    /// @brief 已呈现次数（测试/自检用）：验证 WM_SIZE/WM_PAINT 触发了同步重渲染。
+    /// @brief 宿主同步重渲染次数（测试/自检用）：验证 WM_SIZE/WM_PAINT 触发了同步重渲染。
+    /// 与 `frame_count()` 是两回事——本计数只在系统几何变化触发的同步重渲分支自增，帧循环上屏不计。
     [[nodiscard]] auto present_count() const -> int { return win_->present_count(); }
 
     [[nodiscard]] auto begin_frame(int width, int height) -> Result<bool> override;
@@ -131,8 +132,8 @@ class Win32Surface final : public Surface {
     /// 覆写基类默认（unsupported）；DEBUG 下调用共享 `detail::capture_window_by_hwnd`，
     /// Release（未开 `AURORA_ENABLE_DEBUG`）回落 unsupported 错误（零截图代码）。
     [[nodiscard]] auto capture_window(const std::string &path) -> Result<bool> override;
-    /// @brief 已呈现帧数：复用宿主 `present_count()`，供 `surface_state` 暴露 present 计数。
-    [[nodiscard]] auto frame_count() const -> int override { return present_count(); }
+    /// @brief 已呈现帧数：每次 `present()` 真正上屏自增（与其他后端同一口径，供 `surface_state` 暴露）。
+    [[nodiscard]] auto frame_count() const -> int override { return presented_frames_; }
     /// @brief begin_frame 铺的浅色底色（与 begin_frame 内 fill_rect 同色）：供脏区裁剪重绘重铺底色。
     [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
     [[nodiscard]] auto size() const -> Size override { return win_->size(); }
@@ -185,6 +186,7 @@ class Win32Surface final : public Surface {
 
     std::unique_ptr<Win32Host> win_;
     Painter painter_;
+    int presented_frames_ = 0;  ///< 已上屏帧数（见 frame_count()）。
     std::vector<Rect> present_dirty_;  ///< 本帧增量上屏脏区（设备坐标；空=全量 blit）。
     // 常驻上屏资源：BGRA（GDI 原生序）DIB section，present 时 swizzle+BitBlt。
     HDC mem_dc_ = nullptr;  ///< 内存 DC（DIB 选入其中，BitBlt 源）。
