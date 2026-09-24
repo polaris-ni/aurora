@@ -40,7 +40,10 @@ auto print_usage() -> void {
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char *argv[]) -> int {
+    // argv 指针算术：工具入口的参数收集，与 aurora_cli.cpp 同口径豁免（Es.49 边界例外）。
+    // NOLINTBEGIN(*-pro-bounds-pointer-arithmetic)
     const std::vector<std::string> args(argv + (argc > 0 ? 1 : 0), argv + argc);
+    // NOLINTEND(*-pro-bounds-pointer-arithmetic)
 
     if (args.empty()) {
         print_usage();
@@ -56,7 +59,7 @@ auto main(int argc, char *argv[]) -> int {
         for (const auto &entry : aurora::demo_scenes::scene_registry()) {
             AURORA_LOG_RAW("scene_tool", entry.id, " | ", std::to_string(static_cast<int>(entry.width)), "x",
                            std::to_string(static_cast<int>(entry.height)), " | ",
-                           entry.title[0] != '\0' ? entry.title : "(no demo twin)", "\n");
+                           *entry.title != '\0' ? entry.title : "(no demo twin)", "\n");
         }
         return 0;
     }
@@ -85,7 +88,11 @@ auto main(int argc, char *argv[]) -> int {
         }
 
         aurora::Scene scene{entry->build()};
-        const auto r = scene.render_to_png(args[2].c_str(), static_cast<int>(width), static_cast<int>(height));
+        // 基线底色对齐真实后端 Surface::clear_color()（{245,245,247,255}）：窗口渲染前由 Surface
+        // 清屏，无头渲染默认不清（零初始化透明黑）——E2E golden 把无头基线与真实窗口读回帧
+        // 做像素比对，底色必须同口径，否则控件未覆盖区域两侧不一致。
+        const auto r = scene.render_to_png(args[2].c_str(), static_cast<int>(width), static_cast<int>(height),
+                                           aurora::Color{245, 245, 247, 255});
         if (!r) {
             AURORA_LOG_RAW("scene_tool", "render failed: ", r.error().message, "\n");
             return 1;

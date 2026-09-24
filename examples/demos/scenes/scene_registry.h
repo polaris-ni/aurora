@@ -31,13 +31,17 @@ struct SceneEntry {
 
 /// @brief 全部可用场景（随 scenes/ 下场景头增长）；顺序即枚举顺序，稳定可依赖。
 [[nodiscard]] inline auto scene_registry() -> const std::vector<SceneEntry> & {
-    static const std::vector<SceneEntry> kRegistry = {
-        {"solid_rect", build_solid_rect, 320.0F, 200.0F, ""},
-        {"column", build_column, 560.0F, 560.0F, "Column · Aurora Demo"},
-        {"scroll", build_scroll, 520.0F, 420.0F, "Scroll · Aurora Demo"},
-        {"dismissible", build_dismissible, 520.0F, 420.0F, "Dismissible · Aurora Demo"},
+    static const std::vector<SceneEntry> REGISTRY = {
+        {.id = "solid_rect", .build = build_solid_rect, .width = 320.0F, .height = 200.0F, .title = ""},
+        {.id = "column", .build = build_column, .width = 560.0F, .height = 560.0F, .title = "Column · Aurora Demo"},
+        {.id = "scroll", .build = build_scroll, .width = 520.0F, .height = 420.0F, .title = "Scroll · Aurora Demo"},
+        {.id = "dismissible",
+         .build = build_dismissible,
+         .width = 520.0F,
+         .height = 420.0F,
+         .title = "Dismissible · Aurora Demo"},
     };
-    return kRegistry;
+    return REGISTRY;
 }
 
 }  // namespace aurora::demo_scenes
