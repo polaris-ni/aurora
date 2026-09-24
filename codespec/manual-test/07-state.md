@@ -234,10 +234,10 @@
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| TC-STATE-001 | | | | | | | |
-| TC-STATE-002 | | | | | | | |
-| TC-STATE-003 | | | | | | | |
-| TC-STATE-004 | | | | | | | |
-| TC-STATE-005 | | | | | | | |
-| TC-STATE-006 | | | | | | | |
-| TC-STATE-007 | | | | | | | |
+| TC-STATE-001 | 2026-09-24 | Qoder Agent | PASS | | 三载体经 `cmake --build build --target demo_state demo_async demo_provider`（Ninja 满核）均构建成功；`demo_state` 标题栏 `State · Aurora Demo`，`err.txt` 恰 1 行 `INF` 且消息为 `[run_demo] window shown: State · Aurora Demo`，`out.txt` 0 行，点 X 关窗退出码 0 且 `err.txt` 无 `ERR`/`FTL`；`demo_provider` 标题 `Provider · Aurora Demo`，`err.txt` 同为恰 1 行 `INF` 的对应 window shown | | 真实建窗，经 Windows Graphics Capture 截屏读标题栏；时间戳/线程 id/行号只核对格式与出现 |
+| TC-STATE-002 | 2026-09-24 | Qoder Agent | PASS | | 首屏 `count = 3`；点击 `State +1` 1 次后仍 `count = 3`，累计 5 次后仍 `count = 3`；`Store size = 2` 在点击 `Store add` 前后均为 2 | | 点击类结论先做对照实验自证手段有效：同会话下 `demo_checkbox` 首行由 `Unchecked` 变 `Checked` 且勾选框变蓝底，随后才执行本用例。锁屏会话期间的首轮作废（`click` 返回 `blocked_before_pointer_input`，勾选框不翻转），解锁后重跑取此结果 |
+| TC-STATE-003 | 2026-09-24 | Qoder Agent | PASS | | 启动后连拍首帧读到 `running…`（初始态捕获成功），等待后同一行显示 `result = done`；`err.txt` 含 `INF` 级 `[run_demo] window shown: Async · Aurora Demo`，窗口打开约 5 秒内无 `ERR`/`FTL` | | 与 TC-STATE-002 对照：该载体属性由共享 `State` 构造，故后台写回刷新；判据取自截图文本而非肉眼一瞥 |
+| TC-STATE-004 | 2026-09-24 | Qoder Agent | PASS | | `err.txt` 中分类 `coro` 恰 1 行，级别 `INF`、消息 `computed = 42`、位置字段指向 `examples/demos/demo_async.cpp`；关窗后退出码 0 | | 走成功分支（42 = 21 * 2）而非失败分支；行号属可变部分，只核对文件路径 |
+| TC-STATE-005 | 2026-09-24 | Qoder Agent | PASS | | 单批连拍 7 帧跨到翻转瞬间：第 3 帧（截图 revision `1790247308927`）末行仍 `running…`，第 4 帧（`1790247309219`）已 `result = done`；相邻两帧除该行文本外，标题渐变带、两行说明文字、卡片边框与背景区域一致，未出现空白帧、白闪或重影 | | 局限如实记录：采样间隔约 290ms（WGC 截图本身约 190ms + 每步 100ms 睡眠），窄于此间隔的单帧闪烁无法排除；判定基于跨翻转相邻帧的像素一致性，非人眼注视 |
+| TC-STATE-006 | 2026-09-24 | Qoder Agent | PASS | | 内容区自上而下四项齐全：渐变标题、Provider 说明行、品牌徽标、scale 说明行，无空白占位或缺项；scale 行逐字为 `scale = 2.0 (from MediaQuery)`；`err.txt` 无 `ERR`/`FTL` | | 三层 `MediaQueryProvider`/`LocaleProvider`/`ThemeProvider` 嵌套未破坏子树渲染 |
+| TC-STATE-007 | 2026-09-24 | Qoder Agent | PASS | | `demo_async` 在状态行已变 `result = done` 后点 X，退出码 0，`err.txt` 末尾仅那 1 行 `INF` 的 window shown，无崩溃/异常输出；`demo_state` 同法退出码 0、末尾同样干净；`tasklist` 确认无 `demo_async.exe`/`demo_state.exe` 残留 | | 关窗取退出码走真实 X 按钮；残留检查作为「无悬挂线程」的补充证据 |
