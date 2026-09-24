@@ -724,6 +724,38 @@ CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI �
   深度/总量封顶逐层 `Release`；MinGW 的 `uiautomation.h` 是 stub（常量为 `#define`、无
   `UIA_PROPERTY_ID` 类型别名），接口形参按 int 收敛。
 
+**OS 级输入注入通道层**（`tests/e2e/etest_os_input.cpp`，真机增强层）：交互流往返层证明「框架内
+模拟输入走通命中与派发」，本层证明「**真实 OS 输入** → 窗口过程 → Aurora 事件管线」整段接线
+（前半段是模拟注入覆盖不到的）。内核通道在 `tools/include/e2e/os_input.h`，与 harness 同纪律
+（只依赖公共头、无测试框架宏）。要点与实测口径：
+
+- 平台通道三分：Windows `SendInput`（全局注入——移动真实光标后投递给光标所在窗口，最接近真人
+  操作的全链路）与 `PostMessage`（定向投递——不经光标/焦点系统直达窗口过程，管线接线可单独取证；
+  文本走逐字符 `WM_CHAR`，与 `aurora_verify_win32_ime_live` 探针同款）；Linux XTest（经 X 服务器
+  合成真实输入事件，`dlopen` libX11/libXtst 免构建依赖，与 `aurora_verify_x11_ime_live` 探针同款；
+  键盘焦点铺垫用 `XSetInputFocus`——无窗口管理器时点击不自动夺焦，等价 WM 的 click-to-focus）；
+  WASM 经 CDP `Input.dispatch*` 由浏览器外部驱动（`tools/verify/wasm_input_cdp_drive.mjs`，真实
+  浏览器 opt-in）。覆盖面与 a11y 通道同口径：win32/d3d11 共用 Win32Host 输入管线（以 win32 为
+  代表）、x11；GLFW 不暴露原生句柄（`native_handle()` 为基类空实现）、Wayland 无 XTest 等价物、
+  macOS 通道未实现，均为已知缺口。
+- **opt-in 门控**：环境变量 `AURORA_E2E_OS_INPUT`（置 `1`/`on`/`yes`/`true` 方启用，大小写不敏感）。
+  未置位时用例为 skip 桩，在默认 `ctest` 中天然不参与并行。SendInput 是全局注入、无法定向窗口，
+  多窗口并存必然串台——既有模型「进程隔离 + 资源虚拟化」隔离的是资源，全局输入是无法虚拟化的
+  **共享设备**，故该用例组须以独立 ctest 调用按 stem 独占执行（`ctest -L e2e -R etest_os_input`），
+  **不使用 `RUN_SERIAL` 属性**（TEST-R7 禁止）。
+- **no_interactive_desktop 拒绝语义**：锁定屏幕/安全桌面/服务会话等非交互桌面（Windows 侧
+  `OpenInputDesktop` 打不开输入桌面）与无 X 显示（`DISPLAY` 未设）环境下，注入通道以明确原因
+  skip，不静默失败、不挂起、不误判通过（`os_input.h` 的 `interactive_desktop()`）。
+- **窗口策略固定 `Normal`**：OS 输入投递到完全隐藏的窗口在 Win32 上语义不成立（SendInput 投给
+  光标所在窗口，隐藏窗口不在命中路径）——本层用例不得改用 `Hidden` 档。
+- 断言形态与交互流层一致：注入后断言**控件状态**（共享 `State` / 语义快照）与**渲染像素**
+  （注入前后帧在控件区域有差异）；坐标换算为「语义盒（窗口绝对 dp）中心 × `scale_factor` =
+  客户区物理像素」，与宿主 `on_mouse` 的 px/scale 换算互逆。
+- 库层接线修复（harness）：`Session` 由此改以 `WindowHost` 持有窗口并 `attach_surface()` 接上
+  派发通道——此前 harness 直接持有裸 `Window`，surface 的 event handler 无人设置，真实 OS 输入
+  经窗口过程上抛后**派发落空**（进程内模拟注入 `Inspector::simulate_*` 不经该通道，故既有测试
+  全部无感）。渲染仍走 `Session::present_root` 原路径，既有用例行为零变更。
+
 ---
 
 ## 9 日志通道

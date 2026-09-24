@@ -270,7 +270,8 @@ AURORA_TEST_P(A11yBackends, platform_bridge_projects_semantics) {
     if (!e2e::atspi_client_available()) {
         AURORA_TEST_SKIP("python3-gi/Atspi client unavailable on this environment");
     }
-    e2e::Session session = assemble_a11y_session(backend);
+    au::Node root = build_a11y_column();
+    e2e::Session session = assemble_a11y_session(backend, root);
 
     // 库按设计永久降级：无 org.a11y.Bus 时桥缺席 → 合法 skip（环境能力，非缺陷）。
     if (session.surface().accessibility_provider() == nullptr) {

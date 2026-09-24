@@ -36,6 +36,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/app/window_host.h"
 #include "aurora/aurora.h"
 #include "aurora/inspector/inspector_api.h"
 #include "aurora/widget/a11y_diff.h"
@@ -319,6 +320,12 @@ inline constexpr std::string_view AURORA_TEXT_PROP_KEYS[] = {"content", "text", 
     return Result<Frame>{std::move(frame)};
 }
 
+/// @brief 进程内递增的宿主窗口标识（`Application` 分配器的 harness 等价物；主线程专用）。
+[[nodiscard]] inline auto next_host_window_id() -> WindowId {
+    static WindowId next_id = 0;  // 可变 static 局部量按普通局部名小写（UPPER_CASE 仅约束常量）
+    return ++next_id;
+}
+
 /// @brief 一帧推进所需的两个驱动器（`Animator` + `Scheduler`）。
 ///
 /// 单列为一个结构并以 `unique_ptr` 持有，是为了让 `Session` 保持可移动（默认移动语义）：
@@ -340,8 +347,13 @@ class Session {
   public:
     Session() = default;
     ~Session() {
-        // 撤销本会话对进程内「当前驱动器」的登记，避免析构后残留悬垂指针（同 `TestController::Impl`）。
-        // 仅在登记确实指向自己时撤销：多会话并存时不误清他者。
+        // 先解绑捕获 `this` 的后端回调（`attach_surface` 接线的派发/状态通道），再由成员析构
+        // 按 WindowHost 声明序回收窗口与 UI 树；随后撤销本会话对进程内「当前驱动器」的登记，
+        // 避免析构后残留悬垂指针（同 `TestController::Impl`）。仅在登记确实指向自己时撤销：
+        // 多会话并存时不误清他者。
+        if (host_ != nullptr) {
+            host_->teardown();
+        }
         if (drivers_ != nullptr) {
             if (Animator::current() == &drivers_->animator) {
                 Animator::set_current(nullptr);
@@ -388,7 +400,16 @@ class Session {
     // ---- 根控件 ----
 
     /// @brief 挂载根控件（`Node` 按值拷贝，与调用方共享同一 widget）。
-    auto mount(Node root) -> void { root_ = std::move(root); }
+    ///
+    /// 宿主已在建窗时创建（持空场景），此处把根同步进场景：`Scene` 拷贝赋值是**就地替换**
+    /// `scene_.root()` 成员内容，构造期 `focus_.set_root(&scene_.root())` 登记的地址恒定有效，
+    /// 重复挂载同样成立。
+    auto mount(Node root) -> void {
+        root_ = std::move(root);
+        if (host_ != nullptr) {
+            host_->scene() = Scene{root_};
+        }
+    }
     /// @brief 已挂载的根控件（未挂载时为空 `Node`）。
     [[nodiscard]] auto root() -> Node & { return root_; }
     /// @brief 已挂载的根控件（const 视图）。
@@ -562,13 +583,17 @@ class Session {
   private:
     friend auto open(const WindowSpec &spec) -> Session;
 
-    /// @brief 采纳工厂结果：成功则持有窗口，失败则记录错误消息（不静默降级）。
+    /// @brief 采纳工厂结果：成功则以 `WindowHost` 持有窗口（宿主经 `attach_surface` 接上
+    /// 派发/状态通道——**真实 OS 输入经 Window 过程上抛后由宿主派发进控件树**，这也是
+    /// OS 级输入注入通道的管线前提），失败则记录错误消息（不静默降级）。
     auto adopt(Result<std::unique_ptr<Window>> created) -> void {
         if (!created) {
             reason_ = created.error().message;
             return;
         }
-        window_ = std::move(created.value());
+        host_ = std::make_unique<WindowHost>(next_host_window_id(), Scene{Node{}}, std::move(created.value()));
+        host_->attach_surface();
+        window_ = host_->window();  // 非拥有别名：既有窗口/表面访问面保持原签名
     }
 
     /// @brief 首帧前把本会话的驱动器挂为进程内当前实例（`Animator::current()` 是 mount 期注册点）。
@@ -618,7 +643,8 @@ class Session {
         return Result<void>{};
     }
 
-    std::unique_ptr<Window> window_;
+    std::unique_ptr<WindowHost> host_;  ///< 窗口宿主：派发/焦点/状态通道的运行期权威（独占窗口）
+    Window *window_ = nullptr;  ///< 非拥有别名（指向 `host_->window()`），保持既有窗口访问面
     std::string reason_;
     Backend backend_ = Backend::Auto;
     Node root_;
@@ -710,7 +736,12 @@ class Session {
         }
     } catch (const std::exception &ex) {
         // 建窗中途抛出（无显示环境 / 驱动初始化失败）等同「后端不可用」，翻译为原因交给用例层。
-        session.window_.reset();
+        // 宿主已创建（adopt 成功后到 mount 前异常）也一并回收：teardown 解绑回调，析构关窗。
+        if (session.host_ != nullptr) {
+            session.host_->teardown();
+            session.host_.reset();
+        }
+        session.window_ = nullptr;
         session.reason_ = std::string{"window creation failed: "} + ex.what();
     }
     return session;
