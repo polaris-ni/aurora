@@ -582,6 +582,17 @@ mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effec
 
 内核自测在 `tests/unit/utest_e2e_harness.cpp`（以 `HeadlessSurface` 为后端运行，不依赖真实显示环境）。
 
+场景库与组件 demo **同源**：被 E2E 引用的组件在 `examples/demos/scenes/` 下建 header-only 场景头
+（`scene_<组件>.h`，inline 构建函数返回根 `Node`），对应 `demo_<组件>.cpp` 退化为「薄 `main()` +
+`run_demo(...)`」，人类可见的 demo 行为（尺寸 / 标题 / 渲染结果）逐字节不变；**未被引用的 demo 零改动**，
+全量抽取（所有 demo 薄 `main()` 化）留作后续增量。使用 `Application` 装配的 demo 只抽 UI 构建，
+装配留在其 `main()` 内，E2E 用例以同一构建函数取根节点经内核自行驱动。场景枚举由场景库自带：
+`examples/demos/scenes/scene_registry.h` 注册表头 + `examples/demos/scene_tool.cpp` 小工具（`--list` 列场景 /
+`--render` 以 HeadlessSurface 软件路径渲染 PNG——后者同时是 golden 基线的软件 SSOT 渲染器），
+**不占用 runner 的 `--list`**（用例/套件面与场景面是不同 CLI 面）。进入 golden 用例集的场景须满足
+确定性渲染契约：不依赖墙钟时间、不依赖随机数（或固定种子）、动画在捕获前推进到静止态；
+含文本场景（demo 房风含 GradientTitle 与标签）须按字体依赖单列更大的差异像素预算。
+
 ---
 
 ## 9 日志通道
