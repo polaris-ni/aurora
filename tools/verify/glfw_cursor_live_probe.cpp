@@ -55,11 +55,11 @@
 
 #include <array>
 #include <iostream>
-#include <span>
 #include <string>
 #include <string_view>
 
 #include "aurora/window/cursor_map.h"
+#include "verify_args.h"
 #include "verify_print.h"
 
 namespace {
@@ -187,14 +187,11 @@ auto human_expectation(aurora::CursorShape shape) -> const char * {
 // （逐项判据与退出码约定见本文件头注释，捕获反而会把它压成 0）。
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
-    bool interactive = false;
-    // 以 span 视图遍历命令行参数（argc 可为 0，故 subspan 起点取 0/1 二者之一，避免越界抛异常）
-    const std::span<char *const> args{argv, static_cast<std::size_t>(argc)};
-    for (const auto *raw : args.subspan(args.size() > 1U ? 1U : 0U)) {
-        if (std::string_view{raw} == "--interactive") {
-            interactive = true;
-        }
+    const auto cli = aurora_verify::parse_interactive("GLFW cursor shape live probe", argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
     }
+    const bool interactive = cli.arguments->flag("interactive");
 
     if (glfwInit() != GLFW_TRUE) {
         AURORA_LOG_ERROR("verify", "glfwInit failed (no display / no driver)");

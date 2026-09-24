@@ -99,11 +99,11 @@
 #include <array>
 #include <cstddef>
 #include <iostream>
-#include <span>
 #include <string>
 #include <string_view>
 
 #include "aurora/window/cursor_map.h"
+#include "verify_args.h"
 #include "verify_print.h"
 
 namespace {
@@ -456,14 +456,11 @@ auto run_sweep(aurora::Surface &surface, const char *label, const char *title, b
 // 入口不吞异常：探针的失败以未捕获异常 → 非零退出码/terminate 呈现（捕获反而把它压成 0），与 demo 入口同口径。
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
-    bool interactive = false;
-    // 以 span 视图遍历命令行参数（argc 可为 0，故 subspan 起点取 0/1 二者之一）
-    const std::span<char *const> args{argv, static_cast<std::size_t>(argc)};
-    for (const auto *raw : args.subspan(args.size() > 1U ? 1U : 0U)) {
-        if (std::string_view{raw} == "--interactive") {
-            interactive = true;
-        }
+    const auto cli = aurora_verify::parse_interactive("Win32 / GDI / D3D11 cursor shape live probe", argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
     }
+    const bool interactive = cli.arguments->flag("interactive");
 
     aurora::init_console();  // Windows 控制台切 UTF-8，避免中文/表格错行
 

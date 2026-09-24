@@ -34,6 +34,7 @@
 
 #include "aurora/aurora.h"
 #include "aurora/window/native_surfaces.h"
+#include "verify_args.h"
 
 #ifdef AURORA_BACKEND_GPU_WGPU
 #include "aurora/render/rhi/wgpu_rhi.h"
@@ -130,12 +131,11 @@ auto sample(const std::vector<std::uint8_t> &px, int canvas_w, int x, int y) -> 
 }  // namespace
 
 auto main(int argc, char **argv) -> int {
-    bool interactive = false;
-    for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--interactive") {
-            interactive = true;
-        }
+    const auto cli = aurora_verify::parse_interactive("Win32 + wgpu present live probe", argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
     }
+    const bool interactive = cli.arguments->flag("interactive");
 
     emit("== aurora verify: Win32 wgpu GPU raster (host window + offscreen streams) ==");
 

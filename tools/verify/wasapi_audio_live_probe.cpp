@@ -30,13 +30,13 @@
 #include <iostream>
 #include <memory>
 #include <numbers>
-#include <span>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "aurora/aurora.h"
 #include "aurora/media/audio_wasapi.h"  // 库内部头（探针经 src include 直连，见 AuroraVerify.cmake）
+#include "verify_args.h"
 
 namespace {
 
@@ -93,8 +93,11 @@ auto sleep_ms(int ms) -> void { std::this_thread::sleep_for(std::chrono::millise
 // 入口不吞异常：探针的失败以未捕获异常 → 非零退出码/terminate 呈现（捕获反而把它压成 0），与 demo 入口同口径。
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
-    const std::span<char *const> args{argv, static_cast<std::size_t>(argc)};
-    const bool interactive = args.size() > 1 && std::string{args[1]} == "--interactive";
+    const auto cli = aurora_verify::parse_interactive("WASAPI audio live probe", argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
+    }
+    const bool interactive = cli.arguments->flag("interactive");
 
     emit("== Aurora WASAPI audio live probe ==");
     emit("auto segment: activation / format / clock / buffer source / stream / suspend-resume / capture port");

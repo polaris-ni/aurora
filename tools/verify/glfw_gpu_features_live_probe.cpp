@@ -25,6 +25,7 @@
 
 #include "aurora/aurora.h"
 #include "aurora/render/rhi/gpu_gl_rhi.h"
+#include "verify_args.h"
 
 namespace {
 
@@ -106,12 +107,11 @@ class GridBox final : public aurora::LeafWidget {
 }  // namespace
 
 auto main(int argc, char **argv) -> int {
-    bool interactive = false;
-    for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--interactive") {
-            interactive = true;
-        }
+    const auto cli = aurora_verify::parse_interactive("GLFW GPU feature live probe", argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
     }
+    const bool interactive = cli.arguments->flag("interactive");
 
     emit("== aurora verify: GLFW GPU features (stream texture + layer cache) ==");
 

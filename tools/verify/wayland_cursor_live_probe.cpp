@@ -71,6 +71,7 @@
 #include "aurora/core/platform.h"
 #include "aurora/window/cursor_map.h"
 #include "aurora/window/native_surfaces.h"
+#include "verify_args.h"
 #include "verify_print.h"
 
 namespace {
@@ -98,12 +99,11 @@ void nap_ms(long ms) {
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_WAYLAND)
 
 auto main(int argc, char **argv) -> int {
-    bool interactive = false;
-    for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--interactive") {
-            interactive = true;
-        }
+    const auto cli = aurora_verify::parse_interactive("Wayland client-side cursor live probe", argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
     }
+    const bool interactive = cli.arguments->flag("interactive");
     if (const char *wdpy = std::getenv("WAYLAND_DISPLAY"); wdpy == nullptr || *wdpy == '\0') {
         emit("[SKIP] 无 WAYLAND_DISPLAY 环境变量（无 Wayland 合成器），Wayland 光标探针无法运行");
         return 2;

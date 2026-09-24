@@ -113,6 +113,7 @@
 #include "aurora/widget/text_input.h"
 #include "aurora/window/surface.h"
 #include "aurora/window/window.h"
+#include "verify_args.h"
 #include "verify_print.h"
 
 namespace {
@@ -439,22 +440,36 @@ auto nap_pump(aurora::Window &window, int frames, double ms) -> void {
 }  // namespace
 
 auto main(int argc, char **argv) -> int {
-    bool want_x11 = false;
-    bool want_wayland = false;
+    // 命令行面即声明表：--x11 / --wayland 选宿主，--interactive[=秒] 进人工驻留段。
+    const auto spec = aurora::cli::CommandSpec{
+        .name = "aurora_verify_atspi",
+        .about = "AT-SPI2 semantic tree live probe",
+        .options = {aurora::cli::OptionSchema{.long_name = "x11",
+                                              .kind = aurora::cli::ValueKind::Bool,
+                                              .arity = aurora::cli::Arity::flag(),
+                                              .help = "Force the X11/XWayland path (unset WAYLAND_DISPLAY)"},
+                    aurora::cli::OptionSchema{.long_name = "wayland",
+                                              .kind = aurora::cli::ValueKind::Bool,
+                                              .arity = aurora::cli::Arity::flag(),
+                                              .help = "Require the Wayland path (fail if WAYLAND_DISPLAY is unset)"},
+                    aurora::cli::OptionSchema{.long_name = "interactive",
+                                              .kind = aurora::cli::ValueKind::Int,
+                                              .arity = aurora::cli::Arity::optional_one(),
+                                              .help = "Stay alive for manual inspection (Accerciser / Orca)",
+                                              .value_hint = "SECONDS",
+                                              .default_text = "30",
+                                              .minimum = 1}}};
+    const auto cli = aurora_verify::parse_command_line(spec, argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
+    }
+    const bool want_x11 = cli.arguments->flag("x11");
+    const bool want_wayland = cli.arguments->flag("wayland");
+    // 驻留只在**显式**给出 --interactive 时生效（默认值 30 是写给帮助看的，不代表要驻留）。
     int keep_seconds = 0;
-    for (int i = 1; i < argc; ++i) {
-        const std::string a = argv[i];
-        if (a == "--x11") {
-            want_x11 = true;
-        } else if (a == "--wayland") {
-            want_wayland = true;
-        } else if (a.rfind("--interactive", 0) == 0) {
-            const auto eq = a.find('=');
-            keep_seconds = eq == std::string::npos ? 30 : std::atoi(a.c_str() + eq + 1);
-            if (keep_seconds < 1) {
-                keep_seconds = 1;
-            }
-        }
+    if (cli.arguments->explicitly_given("interactive")) {
+        const auto seconds = cli.arguments->get<int>("interactive");
+        keep_seconds = seconds.ok() ? seconds.value() : 30;
     }
     if (want_x11) {
         ::unsetenv("WAYLAND_DISPLAY");  // 工厂运行期选择：清掉 Wayland 环境即回 X11/XWayland 路
@@ -558,7 +573,7 @@ auto main(int argc, char **argv) -> int {
             emit(std::string("dbg ") + tag + ": data=[" + s + "] rendered=" + std::to_string(probe.list->item_count()));
         };
         pump_ms(800);  // 让客户端进入 GLib 事件环并挂好 grab_focus 定时器
-        window->set_title(std::string{AURORA_FRAME_TITLE} + " v2");  // FRAME property-change:accessible-name
+        window->set_title(std::string{AURORA_AT_SPI_FRAME_TITLE} + " v2");  // FRAME property-change:accessible-name
         pump_ms(500);
         probe.entry->set_value("abcd");  // entry property-change:accessible-value
         pump_ms(500);

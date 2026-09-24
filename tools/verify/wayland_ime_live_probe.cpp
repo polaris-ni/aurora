@@ -67,6 +67,7 @@
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
 #include "aurora/window/wayland_surface.h"
+#include "verify_args.h"
 #include "verify_print.h"
 
 namespace {
@@ -112,12 +113,11 @@ auto pump_until(aurora::WaylandSurface &surface, const std::function<bool()> &do
 }  // namespace
 
 auto main(int argc, char **argv) -> int {
-    bool interactive = false;
-    for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--interactive") {
-            interactive = true;
-        }
+    const auto cli = aurora_verify::parse_interactive("Wayland text-input-v3 IME bridge live probe", argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
     }
+    const bool interactive = cli.arguments->flag("interactive");
     emit("==== Wayland text-input-unstable-v3 输入法桥 真机验收 ====");
     if (const char *wdpy = std::getenv("WAYLAND_DISPLAY"); wdpy == nullptr || *wdpy == '\0') {
         emit("[ENV] 无 WAYLAND_DISPLAY（无 Wayland 会话），探针无从运行");

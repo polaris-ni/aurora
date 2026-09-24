@@ -67,7 +67,6 @@
 
 #include <cstddef>
 #include <memory>
-#include <span>
 #include <string>
 #include <string_view>
 
@@ -78,6 +77,7 @@
 #include "aurora/widget/text_input.h"
 #include "aurora/window/surface.h"
 #include "aurora/window/window.h"
+#include "verify_args.h"
 #include "verify_print.h"
 
 namespace {
@@ -277,9 +277,11 @@ auto run_automated(HWND hwnd, const aurora::TextInput &input, const char *focuse
 // 入口不吞异常：探针的失败以未捕获异常 → 非零退出码/terminate 呈现（捕获反而把它压成 0），与 demo 入口同口径。
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
-    // 以 span 视图取 argv[1]（argc 可为 0，故先校验元素个数再下标）
-    const std::span<char *const> args{argv, static_cast<std::size_t>(argc)};
-    const bool interactive = args.size() > 1U && std::string_view{args[1]} == "--interactive";
+    const auto cli = aurora_verify::parse_interactive("Win32 IMM32 IME bridge live probe", argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
+    }
+    const bool interactive = cli.arguments->flag("interactive");
     emit("==== Win32 IMM32 输入法桥 真机验收 ====");
 
     const ProbeUi ui = build_ui();
