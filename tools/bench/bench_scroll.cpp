@@ -11,19 +11,16 @@
 // - Output goes to stdout via AURORA_LOG_RAW (project hard rule #8: program product output uses the
 //   raw channel).
 //
-// Usage:
-//   bench_scroll [--scene google_play|synthetic|lazy|grid|all] [--frames N] [--warmup N]
-//                [--delta DP] [--scale X] [--fling] [--repeat N] [--format md|json|csv]
+// Usage: run `bench_scroll --help`; the whole option set lives in the declaration table below.
 #include <algorithm>
-#include <cstdlib>
 #include <functional>
-#include <limits>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include "aurora/aurora.h"
+#include "aurora/cli/args.h"
+#include "aurora/cli/command.h"
 #include "aurora/widget/chip.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/grid_view.h"
@@ -126,43 +123,6 @@ auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &
     }
 }
 
-/// @brief Fetch the next argument value, returning a default when missing (never throws; tool
-/// tolerates faults first).
-[[nodiscard]] auto arg_value(const std::vector<std::string_view> &args, int i, std::string_view fallback)
-    -> std::string {
-    const auto next = static_cast<std::size_t>(i) + 1U;
-    // 基准测量热路径：.at()
-    // 的边界检查开销会影响计时
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    return (next < args.size()) ? std::string{args[next]} : std::string{fallback};
-}
-
-/// @brief Safely parse an integer argument (never throws; only the whole string being consumed is
-/// accepted).
-[[nodiscard]] auto parse_int(const std::string &s, int fallback) -> int {
-    char *end = nullptr;
-    const long v = std::strtol(s.c_str(), &end, 10);
-    if (end == nullptr || *end != '\0') {
-        return fallback;
-    }
-    if (v < static_cast<long>(std::numeric_limits<int>::min()) ||
-        v > static_cast<long>(std::numeric_limits<int>::max())) {
-        return fallback;
-    }
-    return static_cast<int>(v);
-}
-
-/// @brief Safely parse a float argument (never throws; only the whole string being consumed is
-/// accepted).
-[[nodiscard]] auto parse_float(const std::string &s, float fallback) -> float {
-    char *end = nullptr;
-    const double v = std::strtod(s.c_str(), &end);
-    if (end == nullptr || *end != '\0') {
-        return fallback;
-    }
-    return static_cast<float>(v);
-}
-
 /// @brief Repeat sampling and take the best (the lowest p99).
 ///
 /// **Why take min instead of average**: measured on 300 frames at the same config, `avg`/`p50`
@@ -219,69 +179,123 @@ auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &
     return {std::move(best), std::move(note)};
 }
 
+/// @brief Command-line declaration table: parsing, derived `--help` and range checks all come
+/// from this single schema (`aurora::cli`).
+[[nodiscard]] auto build_spec() -> const aurora::cli::CommandSpec & {
+    using aurora::cli::Arity;
+    using aurora::cli::OptionSchema;
+    using aurora::cli::ValueKind;
+
+    static const aurora::cli::CommandSpec ROOT_SPEC = [] {
+        aurora::cli::CommandSpec root;
+        root.name = "bench_scroll";
+        root.about = "Aurora scroll rendering benchmark (L5 harness, headless surface)";
+        root.options = {
+            OptionSchema{
+                .long_name = "scene",
+                .kind = ValueKind::Enum,
+                .help = "Scene to sample; `all` runs every scene",
+                .value_hint = "SCENE",
+                .default_text = "all",
+                .choices = {"google_play", "synthetic", "lazy", "grid", "all"},
+            },
+            OptionSchema{
+                .long_name = "format",
+                .kind = ValueKind::Enum,
+                .help = "Report format",
+                .value_hint = "FMT",
+                .default_text = "md",
+                .choices = {"md", "json", "csv"},
+            },
+            OptionSchema{
+                .long_name = "frames",
+                .kind = ValueKind::Int,
+                .help = "Frames per sample",
+                .default_text = "300",
+                .minimum = 1,
+            },
+            OptionSchema{
+                .long_name = "warmup",
+                .kind = ValueKind::Int,
+                .help = "Warmup frames discarded before sampling",
+                .default_text = "30",
+                .minimum = 0,
+            },
+            OptionSchema{
+                .long_name = "delta",
+                .kind = ValueKind::Double,
+                .help = "Scroll distance per frame, in logical dp",
+                .value_hint = "DP",
+                .default_text = "12.0",
+                .minimum = 0,
+            },
+            OptionSchema{
+                .long_name = "scale",
+                .kind = ValueKind::Double,
+                .help = "Device pixel ratio",
+                .default_text = "1.0",
+                .minimum = 0.01,
+            },
+            OptionSchema{
+                .long_name = "repeat",
+                .kind = ValueKind::Int,
+                .help = "In-process repetitions, take the lowest p99",
+                .default_text = "1",
+                .minimum = 1,
+            },
+            OptionSchema{
+                .long_name = "fling",
+                .kind = ValueKind::Bool,
+                .arity = Arity::flag(),
+                .help = "Drive the scroll by fling inertia instead of uniform stepping",
+            },
+        };
+        root.epilog =
+            R"(Scenes:
+  lazy / grid are L5-C isolated scenes: they use LazyList / GridView directly as roots to
+             measure their self-driven scroll paths (not via the outer Scroll offscreen buffer)
+Sampling:
+  --repeat N repeats inside one process and keeps the lowest p99, which is conservative (it can
+             only over-report). Counter readings are deterministic, so one shot suffices; only
+             timings need repetition. For strict sampling take separate processes instead:
+               for i in 1 2 3; do bench_scroll --scene google_play --format csv; done
+Defaults: --delta 12 dp per frame ~ 720 dp/s at 60fps, over 300 frames after 30 warmup frames.
+Exit codes: 0 = report written, 2 = usage error or an untrustworthy reading (see the note above).)";
+        return root;
+    }();
+    return ROOT_SPEC;
+}
+
 }  // namespace
 
 auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-complexity,bugprone-exception-escape)
-    std::vector<std::string_view> args;
-    args.reserve(static_cast<std::size_t>(argc));
-    for (int i = 0; i < argc; ++i) {
-        args.emplace_back(argv[i]);  // NOLINT(*-pro-bounds-pointer-arithmetic)
-    }
-
-    std::string scene = "all";
-    std::string format = "md";
-    int repeat = 1;
-    ScrollBenchHarness::Config cfg;
-
-    for (int i = 1; i < argc; ++i) {
-        // 基准测量热路径：.at()
-        // 的边界检查开销会影响计时
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        const std::string a{args[static_cast<std::size_t>(i)]};
-        if (a == "--scene") {
-            scene = arg_value(args, i, "all");
-            ++i;
-        } else if (a == "--format") {
-            format = arg_value(args, i, "md");
-            ++i;
-        } else if (a == "--frames") {
-            cfg.frames = parse_int(arg_value(args, i, "300"), 300);
-            ++i;
-        } else if (a == "--warmup") {
-            cfg.warmup_frames = parse_int(arg_value(args, i, "30"), 30);
-            ++i;
-        } else if (a == "--delta") {
-            cfg.delta_per_frame = parse_float(arg_value(args, i, "12.0"), 12.0F);
-            ++i;
-        } else if (a == "--scale") {
-            cfg.scale = parse_float(arg_value(args, i, "1.0"), 1.0F);
-            ++i;
-        } else if (a == "--repeat") {
-            repeat = parse_int(arg_value(args, i, "1"), 1);
-            ++i;
-        } else if (a == "--fling") {
-            cfg.fling = true;
-        } else if (a == "--help" || a == "-h") {
-            AURORA_LOG_RAW(
-                "bench",
-                "usage: bench_scroll [--scene google_play|synthetic|lazy|grid|all] [--frames N] [--warmup N]\n"
-                "                    [--delta DP] [--scale X] [--fling] [--repeat N]\n"
-                "                    [--format md|json|csv]\n"
-                "\n"
-                "  --scene    google_play / synthetic / lazy / grid / all (default all)\n"
-                "              lazy / grid are L5-C isolated scenes: use LazyList / GridView\n"
-                "              directly as roots to measure their self-driven scroll paths\n"
-                "              (not via the outer Scroll offscreen buffer)\n"
-                "  --delta DP   scroll distance per frame, in logical dp (default 12 ~ 720 dp/s @60fps)\n"
-                "  --repeat N   repeat N times in the same process, take the lowest p99 (conservative,\n"
-                "              only over-reports)\n"
-                "              for strict sampling, call it multiple times in separate processes:\n"
-                "                 for i in 1 2 3; do bench_scroll --scene X --format csv; done\n"
-                "              counter readings are deterministic, one shot suffices; only timings need\n"
-                "              repetition.\n");
-            return 0;
+    const auto parsed = aurora::cli::parse(build_spec(), argc, argv);
+    if (!parsed) {
+        std::string detail = parsed.error().message;
+        if (!parsed.error().suggestion.empty()) {
+            detail += " — " + parsed.error().suggestion;
         }
+        AURORA_LOG_ERROR("bench", detail);
+        return 2;
     }
+    const aurora::cli::Invocation &invocation = parsed.value();
+    if (invocation.outcome != aurora::cli::ParseOutcome::Ok) {
+        AURORA_LOG_RAW("bench", invocation.display_text);  // --help / --version come from the schema
+        return 0;
+    }
+
+    // Every option declares a default_text, so each read below is guaranteed by the schema
+    // (a value that fails its kind or range already returned as a usage error above).
+    const aurora::cli::Arguments &cli_args = invocation.arguments;
+    const std::string scene = cli_args.get<std::string>("scene").value();
+    const std::string format = cli_args.get<std::string>("format").value();
+    const int repeat = cli_args.get<int>("repeat").value();
+    ScrollBenchHarness::Config cfg;
+    cfg.frames = cli_args.get<int>("frames").value();
+    cfg.warmup_frames = cli_args.get<int>("warmup").value();
+    cfg.delta_per_frame = static_cast<float>(cli_args.get<double>("delta").value());
+    cfg.scale = static_cast<float>(cli_args.get<double>("scale").value());
+    cfg.fling = cli_args.flag("fling");
 
     constexpr Size viewport{.width = 1100.0F,
                             .height = 760.0F};  // agreed convention: matches the demo_google_play window

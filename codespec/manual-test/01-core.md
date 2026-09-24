@@ -29,7 +29,7 @@
 
 | 约束 | 落地方式 |
 |:---|:---|
-| 不新增公共 API | 只调用既有 `aurora/core/*.h` 声明 |
+| 不新增公共 API | 只调用既有 `aurora/core/*.h` 与 `aurora/cli/*.h` 声明（命令行经 `cli` 的 `CommandSpec` 声明表解析，见载体内 `build_spec()`） |
 | 不引入 GUI 依赖 | 不链接窗口与后端的使用路径，`main` 中不创建窗口 |
 | 判定可复现 | 所有观测量为确定性文本与退出码，不含随机数与真实时钟 |
 | 与单元测试不重叠 | 载体**只演示、不断言**，不输出 PASS/FAIL；判定由人工对照输出完成 |
@@ -263,10 +263,10 @@
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
 | TC-CORE-001 | 2026-09-24 | Qoder Agent | PASS | | 平台宏 `AURORA_PLATFORM_WINDOWS`、架构宏 `AURORA_ARCH_X64` 各恰 1 行，指针宽度 `8 字节` | | MinGW/GCC + Ninja，本机 x64 |
-| TC-CORE-002 | 2026-09-24 | Qoder Agent | PASS | | `out.txt` 无任何级别标签；`err.txt` 首行 `[2026-09-24 11:07:28][INF][core-demo@0xb4 demo_core.cpp:131] > …`；级别取值仅 `INF/WRN/ERR/FTL`；两次运行仅时间戳与线程 id 不同，其余逐行一致 | | 步骤 3 原文「四组方括号」与格式串自相矛盾，已订正为「三组方括号承载四要素」，观测与新措辞一致 |
+| TC-CORE-002 | 2026-09-24 | Qoder Agent | PASS | | `out.txt` 无任何级别标签；`err.txt` 首行 `[2026-09-24 14:30:41][INF][core-demo@0xb0 demo_core.cpp:101] > …`；级别取值仅 `INF/WRN/ERR/FTL`；两次运行仅时间戳与线程 id 不同，其余逐行一致 | | 步骤 3 原文「四组方括号」与格式串自相矛盾，已订正为「三组方括号承载四要素」，观测与新措辞一致；行号随载体命令行段改写而位移（131 → 101） |
 | TC-CORE-003 | 2026-09-24 | Qoder Agent | PASS | | `out_trace.txt` 与 `out_fatal.txt` 均 25 行且 `diff` 无差异；`err` 为 8 行 / 1 行 | | stdout 唯一方括号是载体自印的 `[stderr 分界]` 业务文本，非日志前缀 |
 | TC-CORE-004 | 2026-09-24 | Qoder Agent | PASS | | 行数 `8/7/6/5/3/1`、首行级别 `TRC/DBG/INF/WRN/ERR/FTL`，六次退出码均 0、stdout 均 25 行 | | 各文件级别标签集合均无低于阈值者；`error`/`fatal` 两档各降 2 行系诊断日志桥接 `WRN`/`ERR` 被滤，属预期 |
-| TC-CORE-005 | 2026-09-24 | Qoder Agent | PASS | | 退出码 2、`out.txt` 0 字节、`err.txt` 恰 1 行 `[ERR] … 无法识别的日志级别: bogus` | | 对照 `--help` 退出码为 0（10 行 usage 走 stdout） |
+| TC-CORE-005 | 2026-09-24 | Qoder Agent | PASS | | 退出码 2、`out.txt` 0 字节、`err.txt` 恰 1 行 `[ERR] … Value 'bogus' is not a valid log-level for option '--level'` | | 载体命令行已改由 `aurora::cli` 声明表承担（`demo_core.cpp` 的 `build_spec()`），故拒绝文案来自库派生而非本地串；`--help` 对照退出码 0、14 行 usage 走 stdout、stderr 0 行 |
 | TC-CORE-006 | 2026-09-24 | Qoder Agent | PASS | | `diagnostics` 两行均在 stderr、消息体单行 JSON；首条无 `code` 且 `severity=warning category=general`，次条 `code=general-invalid-argument severity=error`；`环形缓冲内诊断条数: 2` 及两行明细一致 | | `ERROR_CATALOG.md` 第 9 行该码 severity 确为 `error`，级别由表驱动 |
 | TC-CORE-007 | 2026-09-24 | Qoder Agent | PASS | | 退出码 0；`explain_diagnostic` 段完整（两已知码 + 一未知码）；末行为结束行；提示行在第 17 行 | | 降级后流程确实推进到进程正常退出 |
 | TC-CORE-008 | 2026-09-24 | Qoder Agent | PASS | | 两条已知码提示与 `ERROR_CATALOG.md` 第 8/9 行 hint 逐字一致；`no-such-code` 返回兜底文案并指路清单，其后仍有结束行 | | |

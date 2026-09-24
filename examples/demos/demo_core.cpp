@@ -21,6 +21,8 @@
 #include <string_view>
 #include <utility>
 
+#include "aurora/cli/args.h"
+#include "aurora/cli/command.h"
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/log.h"
 #include "aurora/core/platform.h"
@@ -91,37 +93,6 @@ auto demo_platform() -> void {
 // ---------------------------------------------------------------------------
 // 日志级别：阈值过滤
 // ---------------------------------------------------------------------------
-
-/// @brief 解析级别名；无法识别时返回 false 且不修改 out。
-/// @note 刻意用顺序判定而非常量查表：级别名到枚举的对应关系在此处即唯一权威，
-/// 少一张需与本函数同步维护的表。
-[[nodiscard]] auto parse_level(std::string_view name, au::LogLevel &out) -> bool {
-    if (name == "trace") {
-        out = au::LogLevel::Trace;
-        return true;
-    }
-    if (name == "debug") {
-        out = au::LogLevel::Debug;
-        return true;
-    }
-    if (name == "info") {
-        out = au::LogLevel::Info;
-        return true;
-    }
-    if (name == "warn") {
-        out = au::LogLevel::Warn;
-        return true;
-    }
-    if (name == "error") {
-        out = au::LogLevel::Error;
-        return true;
-    }
-    if (name == "fatal") {
-        out = au::LogLevel::Fatal;
-        return true;
-    }
-    return false;
-}
 
 /// @brief 按声明顺序发出 6 个级别的日志，供人工核对阈值截断位置。
 auto emit_all_levels() -> void {
@@ -216,56 +187,37 @@ auto demo_strict_mode() -> void {
 // 命令行
 // ---------------------------------------------------------------------------
 
-/// @brief 命令行选项。
-struct Options {
-    au::LogLevel level = au::LogLevel::Info;
-    bool strict = false;
-    bool show_help = false;
-};
-
-/// @brief 解析命令行；返回 false 表示用法错误（调用方以退出码 2 结束）。
-[[nodiscard]] auto parse_args(int argc, char **argv, Options &out) -> bool {
-    constexpr std::string_view level_prefix = "--level=";
-    // 入口参数是 C 风格 argc/argv，按下标取值属本文件的既定边界，不做越界传播；
-    // 口径与 tools/servers/aurora_cli.cpp 的入口一致。
-    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    for (int i = 1; i < argc; ++i) {
-        const std::string_view arg{argv[i]};
-        if (arg == "--help" || arg == "-h") {
-            out.show_help = true;
-            return true;
-        }
-        if (arg == "--strict") {
-            out.strict = true;
-            continue;
-        }
-        if (arg.starts_with(level_prefix)) {
-            const auto name = arg.substr(level_prefix.size());
-            if (!parse_level(name, out.level)) {
-                AURORA_LOG_ERROR("core-demo", "无法识别的日志级别: ", name);
-                return false;
-            }
-            continue;
-        }
-        AURORA_LOG_ERROR("core-demo", "无法识别的参数: ", arg);
-        return false;
-    }
-    // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    return true;
-}
-
-/// @brief 用法说明。
-auto print_usage() -> void {
-    emit("demo_core — core 模块人工验收载体（纯控制台，无 GUI 依赖）");
-    emit("");
-    emit("用法: demo_core [选项]");
-    emit("  --level=<trace|debug|info|warn|error|fatal>  日志级别阈值（缺省 info）");
-    emit("  --strict                                     追加严格模式演示");
-    emit("  --help, -h                                   显示本帮助");
-    emit("");
-    emit("观测要点：诊断日志在 stderr（带时间戳/级别/分类前缀），功能输出在本程序 stdout");
-    emit("（无前缀）。建议分别重定向后用两个文件对照，例如：");
-    emit("  demo_core --level=debug 1> out.txt 2> err.txt");
+/// @brief 载体命令行声明表：解析、`--help` 文本与用法行全部由它派生（`aurora::cli`）。
+/// @note `--level` 取 `ValueKind::LogLevel`，故「级别名 → 枚举」的权威是库内字面量表
+/// （specification/09-cli.md §5），本文件不再自建一份需要同步维护的查表。
+[[nodiscard]] auto build_spec() -> const au::cli::CommandSpec & {
+    static const au::cli::CommandSpec ROOT_SPEC = [] {
+        au::cli::CommandSpec root;
+        root.name = "demo_core";
+        root.about = "core 模块人工验收载体（纯控制台，无 GUI 依赖）";
+        root.options = {
+            au::cli::OptionSchema{
+                .long_name = "level",
+                .kind = au::cli::ValueKind::LogLevel,
+                .help = "日志级别阈值（缺省 info）",
+                .value_hint = "LEVEL",
+                .default_text = "info",
+            },
+            au::cli::OptionSchema{
+                .long_name = "strict",
+                .kind = au::cli::ValueKind::Bool,
+                .arity = au::cli::Arity::flag(),
+                .help = "追加严格模式演示",
+            },
+        };
+        root.epilog =
+            R"(观测要点：诊断日志在 stderr（带时间戳/级别/分类前缀），功能输出在本程序 stdout
+（无前缀）。建议分别重定向后用两个文件对照，例如：
+  demo_core --level=debug 1> out.txt 2> err.txt
+退出码：0 = 正常结束或 --help，2 = 用法错误。)";
+        return root;
+    }();
+    return ROOT_SPEC;
 }
 
 }  // namespace
@@ -275,20 +227,25 @@ auto print_usage() -> void {
 auto main(int argc, char **argv) -> int {
     au::init_console();  // 最早设置 UTF-8 控制台代码页，避免中文乱码
 
-    Options options;
-    if (!parse_args(argc, argv, options)) {
+    const auto parsed = au::cli::parse(build_spec(), argc, argv);
+    if (!parsed) {
+        AURORA_LOG_ERROR("core-demo", parsed.error().message);
         return 2;
     }
-    if (options.show_help) {
-        print_usage();
+    const au::cli::Invocation &invocation = parsed.value();
+    if (invocation.outcome != au::cli::ParseOutcome::Ok) {
+        AURORA_LOG_RAW("core-demo", invocation.display_text);  // --help 已由声明表渲染
         return 0;
     }
+    // 声明表带 default_text 且 kind 为 LogLevel，故该值必然存在且必然可读（不变量，无需判错）。
+    const auto level = invocation.arguments.get<au::LogLevel>("level").value();
+    const bool strict = invocation.arguments.flag("strict");
 
     demo_platform();
-    demo_log_level(options.level);
+    demo_log_level(level);
     demo_diagnostics();
     demo_error_explain();
-    if (options.strict) {
+    if (strict) {
         demo_strict_mode();
     }
 

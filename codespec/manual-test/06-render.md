@@ -189,7 +189,7 @@
 | 测试目的 | 确认全部载体可构建，且 `aurora_cli` 的离屏渲染管线能把 UI 树栅格化为可正常打开的 PNG |
 | 前置条件 | 位于仓库根目录；`build/` 已完成 CMake 配置；本机工具链可用；当前目录可写 |
 | 依赖用例 | 无 |
-| 操作步骤 | 1. 构建载体：`cmake --build build --target aurora_cli demo_canvas demo_text demo_radio_spin demo_line_chart demo_visual_effects demo_tooltip_context demo_text_input demo_scroll demo_glfw_surface demo_gpu`（纯执行，无预期结果）<br>2. 按 §1.2 的清单在 build/ 下创建树描述文件 render_probe.json（纯执行，无预期结果）<br>3. 运行 `./build/aurora_cli.exe` render build/render_probe.json -w 420 -h 160 -o build/render_probe.png<br>4. 用任意看图工具打开 build/render_probe.png 并放大观察 |
+| 操作步骤 | 1. 构建载体：`cmake --build build --target aurora_cli demo_canvas demo_text demo_radio_spin demo_line_chart demo_visual_effects demo_tooltip_context demo_text_input demo_scroll demo_glfw_surface demo_gpu`（纯执行，无预期结果）<br>2. 按 §1.2 的清单在 build/ 下创建树描述文件 render_probe.json（纯执行，无预期结果）<br>3. 运行 `./build/aurora_cli.exe` render build/render_probe.json -w 420 -H 160 -o build/render_probe.png<br>4. 用任意看图工具打开 build/render_probe.png 并放大观察 |
 | 预期结果 | 3. 构建全部成功无报错；命令 stdout 输出单行 JSON 摘要，其中 "ok" 为 true、"width" 为 420、"height" 为 160<br>4. PNG 正常打开，为 420×160 浅灰底图，自上而下可见三行深色文本（英文 14pt、中文 20pt、日文与阿拉伯文 20pt），无整块黑/白空洞，文字无叠影错位 |
 
 ### 2.2 矢量抗锯齿边缘
@@ -309,7 +309,7 @@
 | 测试目的 | 验证同一棵 UI 树经离屏渲染（PNG）与真实窗口呈现的内容一致：颜色、内容与相对布局不因呈现路径漂移 |
 | 前置条件 | `aurora_cli` 已构建成功；build/render_probe.json 与 TC-RENDER-001 产出的 build/render_probe.png 已保留 |
 | 依赖用例 | TC-RENDER-001 |
-| 操作步骤 | 1. 用看图工具打开 build/render_probe.png 备查（纯执行，无预期结果）<br>2. 运行 `./build/aurora_cli.exe` preview build/render_probe.json -w 420 -h 160，打开标题为 Aurora Preview 的窗口，观察后关闭<br>3. 逐项对照窗口观感与 PNG：背景色、三行文本的内容与顺序、相对字号与行距 |
+| 操作步骤 | 1. 用看图工具打开 build/render_probe.png 备查（纯执行，无预期结果）<br>2. 运行 `./build/aurora_cli.exe` preview build/render_probe.json -w 420 -H 160，打开标题为 Aurora Preview 的窗口，观察后关闭<br>3. 逐项对照窗口观感与 PNG：背景色、三行文本的内容与顺序、相对字号与行距 |
 | 预期结果 | 2. 窗口正常打开并显示同一棵树；关闭窗口后进程正常退出，stdout 打印 "ok" 为 true 的 JSON<br>3. 两者背景同为浅灰、文本内容与顺序相同、相对字号与行距一致；仅允许边缘抗锯齿约 1px 以内的采样差 |
 
 #### TC-RENDER-012 跨后端观感一致

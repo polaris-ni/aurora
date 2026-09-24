@@ -366,22 +366,28 @@ stdio JSON-RPC 2.0。传输格式：`Content-Length: <N>\r\n\r\n<JSON-RPC 2.0 bo
 
 ### 7.2 CLI（`aurora_cli`）
 
+命令面是**一棵 `aurora::cli::CommandSpec` 声明表**（`tools/servers/aurora_cli.cpp` 的 `build_spec()`），由
+[`09-cli.md`](09-cli.md) 的 `aurora::cli::parse` 消费：解析、每层 `--help`、usage 行与 `schema_json` 全部由同一份声明派生。
+`-w W` / `-H H` / `-o out.png` / `--style` 是**按子命令声明**的局部选项（cobra 式「选项属于当前命令」），尺寸取值域
+`[1, 8192]`，越界即 `cli-range-violated`（退出码 `2`）。
+
 ```bash
 aurora_cli components                         # 列出所有已注册组件类型
 aurora_cli describe <name>                    # 输出单个组件的完整 schema（JSON）
 aurora_cli search <keyword>                   # 按名称搜索组件
 aurora_cli validate <tree.json>               # 校验 UI 树 JSON，输出诊断
-aurora_cli snapshot <tree.json> [-w W] [-h H] # 输出逻辑快照 JSON
-aurora_cli render <tree.json> [-w W] [-h H] [-o out.png]  # 离屏渲染为 PNG
-aurora_cli preview <tree.json> [-w W] [-h H]  # 快速预览 UI（启动临时窗口；无显示后端回退无头渲染一帧退出）
+aurora_cli snapshot <tree.json> [-w W] [-H H] # 输出逻辑快照 JSON
+aurora_cli render <tree.json> [-w W] [-H H] [-o out.png]  # 离屏渲染为 PNG
+aurora_cli preview <tree.json> [-w W] [-H H]  # 快速预览 UI（启动临时窗口；无显示后端回退无头渲染一帧退出）
 aurora_cli to-code <tree.json> [--style fluent|step|di]   # UI 树 → C++ 代码
 aurora_cli to-yaml <tree.json>                            # UI 树 → YAML 格式
-aurora_cli schema                             # 输出完整 aurora_api.json
-aurora_cli --help    (-h)                      # 显示用法帮助
+aurora_cli schema                             # 输出运行时重建的 API 骨架（非仓库内 aurora_api.json）
+aurora_cli --help    (-h)                      # 显示用法帮助（每一层都可用，如 `render --help`）
 aurora_cli --version (-V)                      # 显示版本号
 ```
 
-退出码：成功 `0`，校验失败 `1`，用法错误 `2`。所有输出默认 JSON（机器可读）。
+退出码：成功 `0`，校验失败 `1`，用法错误 `2`（含缺子命令、未知子命令、未知选项、取值越界）。所有输出默认 JSON（机器可读）。
+`-h` 因内建 help 占用不可用作高度短名，故高度为 `-H`。
 
 ### 7.3 LSP（`aurora_lsp`）
 

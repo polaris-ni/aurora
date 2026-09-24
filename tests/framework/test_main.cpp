@@ -15,12 +15,13 @@
 #include <exception>
 #include <mutex>
 #include <random>
-#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
 
+#include "aurora/cli/args.h"
+#include "aurora/cli/command.h"
 #include "aurora_test.h"
 #include "death_test.h"
 #include "isolation.h"
@@ -40,7 +41,6 @@ struct CliOptions {
     bool list = false;  ///< --list：只列出用例，不执行
     bool verbose = false;  ///< --verbose：输出诊断笔记
     bool selftest = false;  ///< --selftest：跑框架内建自检
-    bool help = false;  ///< --help / -h
     std::string list_format{"cases"};  ///< --format=cases|suites
     std::string run_suite;  ///< --run=<suite>：只跑指定套件
     std::string name_filter;  ///< --filter=<substr>：全名子串过滤
@@ -53,31 +53,8 @@ struct CliOptions {
     int timeout_ms = 0;  ///< --timeout=<ms>：单轮总时限，0 表示不设
 };
 
-auto print_usage() -> void {
-    std::printf(
-        "aurora_test_runner - Aurora test framework runner\n"
-        "\n"
-        "Usage:\n"
-        "  aurora_test_runner [options]\n"
-        "\n"
-        "Options:\n"
-        "  --run=<suite>       run cases of the given suite (suite == test file stem)\n"
-        "  --filter=<substr>   filter cases by substring of `Suite.Case`\n"
-        "  --list              list registered cases and exit\n"
-        "  --format=<fmt>      with --list: cases (default) | suites\n"
-        "  --verbose           also print per-case diagnostic notes\n"
-        "  --report=<path>     write results: .xml -> JUnit XML, otherwise JSON\n"
-        "  --shuffle[=<seed>]  randomize case order (exposes order dependencies)\n"
-        "  --repeat=<n>        run the selected cases n times (leaks state?)\n"
-        "  --timeout=<ms>      overall deadline; partial results are still reported\n"
-        "  --selftest          run the built-in framework self-test\n"
-        "  -h, --help          show this help\n"
-        "\n"
-        "Exit codes:\n"
-        "  0  all passed\n"
-        "  1  at least one case failed\n"
-        "  2  CLI error, no case matched the filter, or report could not be written\n"
-        "  3  overall timeout hit (watchdog; partial results flushed to --report)\n");
+auto print_help(const aurora::cli::CommandSpec &spec) -> void {
+    std::printf("%s", aurora::cli::help_text(spec).c_str());
 }
 
 /// @brief 数值参数解析（非数字 / 残留字符 / 越界均视为用法错误）。
@@ -91,58 +68,135 @@ template <typename T>
     return result.ec == std::errc{} && result.ptr == span.second;
 }
 
-auto parse_cli(const std::span<char *const> args, CliOptions &options) -> bool {
-    for (const auto *raw : args.subspan(1)) {
-        const std::string_view arg{raw};
-        if (arg == "--help" || arg == "-h") {
-            options.help = true;
-        } else if (arg == "--list") {
-            options.list = true;
-        } else if (arg == "--verbose") {
-            options.verbose = true;
-        } else if (arg == "--selftest") {
-            options.selftest = true;
-        } else if (arg == "--shuffle") {
-            options.shuffle = true;
-            options.shuffle_seed = 0;
-        } else if (arg.starts_with("--shuffle=")) {
-            options.shuffle = true;
-            if (!parse_number(arg.substr(10), options.shuffle_seed)) {
-                std::fprintf(stderr, "[test] bad --shuffle seed: %s\n", raw);
-                return false;
-            }
-        } else if (arg.starts_with("--run=")) {
-            options.run_suite = std::string{arg.substr(6)};
-        } else if (arg.starts_with("--filter=")) {
-            options.name_filter = std::string{arg.substr(9)};
-        } else if (arg.starts_with("--format=")) {
-            options.list_format = std::string{arg.substr(9)};
-        } else if (arg.starts_with("--report=")) {
-            options.report_path = std::string{arg.substr(9)};
-        } else if (arg.starts_with("--death-child=")) {
-            options.death_child = std::string{arg.substr(14)};
-        } else if (arg.starts_with("--death-capture=")) {
-            options.death_capture = std::string{arg.substr(16)};
-        } else if (arg.starts_with("--repeat=")) {
-            if (!parse_number(arg.substr(9), options.repeat) || options.repeat < 1) {
-                std::fprintf(stderr, "[test] bad --repeat: %s\n", raw);
-                return false;
-            }
-        } else if (arg.starts_with("--timeout=")) {
-            if (!parse_number(arg.substr(10), options.timeout_ms) || options.timeout_ms < 0) {
-                std::fprintf(stderr, "[test] bad --timeout: %s\n", raw);
-                return false;
-            }
-        } else {
-            std::fprintf(stderr, "[test] unknown argument: %s\n", raw);
-            return false;
-        }
+/// @brief 命令声明表：runner 的全部旗标集中于此，`--help` 与取值域校验由 aurora::cli 派生。
+[[nodiscard]] auto build_spec() -> aurora::cli::CommandSpec {
+    using aurora::cli::Arity;
+    using aurora::cli::OptionSchema;
+    using aurora::cli::ValueKind;
+    return aurora::cli::CommandSpec{
+        .name = "aurora_test_runner",
+        .about = "aurora_test_runner - Aurora test framework runner",
+        .options =
+            {
+                OptionSchema{
+                    .long_name = "run",
+                    .kind = ValueKind::String,
+                    .help = "Run cases of the given suite (suite == test file stem)",
+                    .value_hint = "SUITE",
+                },
+                OptionSchema{
+                    .long_name = "filter",
+                    .kind = ValueKind::String,
+                    .help = "Filter cases by substring of `Suite.Case`",
+                    .value_hint = "SUBSTR",
+                },
+                OptionSchema{
+                    .long_name = "list",
+                    .kind = ValueKind::Bool,
+                    .arity = Arity::flag(),
+                    .help = "List registered cases and exit",
+                },
+                OptionSchema{
+                    .long_name = "format",
+                    .kind = ValueKind::Enum,
+                    .help = "With --list: output shape",
+                    .value_hint = "FMT",
+                    .default_text = "cases",
+                    .choices = {"cases", "suites"},
+                },
+                OptionSchema{
+                    .long_name = "verbose",
+                    .kind = ValueKind::Bool,
+                    .arity = Arity::flag(),
+                    .help = "Also print per-case diagnostic notes",
+                },
+                OptionSchema{
+                    .long_name = "report",
+                    .kind = ValueKind::String,
+                    .help = "Write results: .xml -> JUnit XML, otherwise JSON",
+                    .value_hint = "PATH",
+                },
+                OptionSchema{
+                    // optional_one：`--shuffle` 裸给即随机播种（seed=0），`--shuffle=7` 定种可复现。
+                    .long_name = "shuffle",
+                    .kind = ValueKind::Int,
+                    .arity = Arity::optional_one(),
+                    .help = "Randomize case order (exposes order dependencies)",
+                    .value_hint = "SEED",
+                    .minimum = 0,
+                },
+                OptionSchema{
+                    .long_name = "repeat",
+                    .kind = ValueKind::Int,
+                    .help = "Run the selected cases n times (leaks state?)",
+                    .value_hint = "N",
+                    .default_text = "1",
+                    .minimum = 1,
+                },
+                OptionSchema{
+                    .long_name = "timeout",
+                    .kind = ValueKind::Int,
+                    .help = "Overall deadline in ms; partial results are still reported",
+                    .value_hint = "MS",
+                    .default_text = "0",
+                    .minimum = 0,
+                },
+                OptionSchema{
+                    .long_name = "selftest",
+                    .kind = ValueKind::Bool,
+                    .arity = Arity::flag(),
+                    .help = "Run the built-in framework self-test",
+                },
+                OptionSchema{
+                    .long_name = "death-child",
+                    .kind = ValueKind::String,
+                    .help = "Internal: this process is a death-test child (hex site key)",
+                    .value_hint = "KEY",
+                    .hidden = true,
+                },
+                OptionSchema{
+                    .long_name = "death-capture",
+                    .kind = ValueKind::String,
+                    .help = "Internal: child redirects its stderr into this file",
+                    .value_hint = "FILE",
+                    .hidden = true,
+                },
+            },
+        .epilog =
+            "Exit codes:\n"
+            "  0  all passed\n"
+            "  1  at least one case failed\n"
+            "  2  CLI error, no case matched the filter, or report could not be written\n"
+            "  3  overall timeout hit (watchdog; partial results flushed to --report)",
+    };
+}
+
+/// @brief 已声明选项 → CliOptions：未给出的字符串槽留空，数值槽回落声明表默认值。
+auto apply_options(const aurora::cli::Arguments &given, CliOptions &options) -> void {
+    using aurora::cli::Arguments;
+    const auto text = [&given](const char *name) -> std::string {
+        const auto value = given.get<std::string>(name);
+        return value.ok() ? value.value() : std::string{};
+    };
+    const auto number = [&given](const char *name, int fallback) -> int {
+        const auto value = given.get<int>(name);
+        return value.ok() ? value.value() : fallback;
+    };
+    options.list = given.flag("list");
+    options.verbose = given.flag("verbose");
+    options.selftest = given.flag("selftest");
+    options.list_format = text("format");
+    options.run_suite = text("run");
+    options.name_filter = text("filter");
+    options.report_path = text("report");
+    options.death_child = text("death-child");
+    options.death_capture = text("death-capture");
+    options.repeat = number("repeat", options.repeat);
+    options.timeout_ms = number("timeout", options.timeout_ms);
+    options.shuffle = given.explicitly_given("shuffle");
+    if (const auto seed = given.get<std::int64_t>("shuffle"); seed.ok()) {
+        options.shuffle_seed = static_cast<std::uint64_t>(seed.value());
     }
-    if (options.list_format != "cases" && options.list_format != "suites") {
-        std::fprintf(stderr, "[test] unknown --format: %s (expected cases|suites)\n", options.list_format.c_str());
-        return false;
-    }
-    return true;
 }
 
 auto print_list(const CliOptions &options) -> void {
@@ -325,22 +379,25 @@ auto main(int argc, char **argv) -> int {
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
     _set_abort_behavior(0, _CALL_REPORTFAULT);
 #endif
-    const std::span<char *const> args{argv, static_cast<std::size_t>(argc)};
     if (argc > 0) {
         aurora::testing::detail::set_executable_path(*argv);  // argc > 0 已判，指针解引用而非下标
     }
     // 统一 cwd → 仓库根（可定位时）：相对路径（--report、用例内 golden/fixtures）以仓库根为基准。
     // 须在解析 CLI 之前完成，使所有相对路径解释一致；死亡测试子进程重跑 main 时同样生效。
     aurora::testing::isolation::setup();
-    CliOptions options;
-    if (!parse_cli(args, options)) {
-        print_usage();
+    const auto spec = build_spec();
+    const auto parsed = aurora::cli::parse(spec, argc, argv);
+    if (!parsed) {
+        std::fprintf(stderr, "[test] %s\n", parsed.error().message.c_str());
+        print_help(spec);
         return static_cast<int>(ExitCode::UsageOrNoMatch);
     }
-    if (options.help) {
-        print_usage();
+    if (parsed.value().outcome == aurora::cli::ParseOutcome::Help) {
+        std::printf("%s", parsed.value().display_text.c_str());
         return static_cast<int>(ExitCode::AllPassed);
     }
+    CliOptions options;
+    apply_options(parsed.value().arguments, options);
     if (!options.death_child.empty()) {
         std::uint64_t key = 0;
         if (!parse_number(options.death_child, key, 16) || key == 0) {

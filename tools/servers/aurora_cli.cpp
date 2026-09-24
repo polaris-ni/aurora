@@ -3,20 +3,14 @@
 // aurora — Aurora CLI toolchain (spec #17).
 //
 // Provides subcommands for component discovery, UI-tree validation, offscreen rendering, code generation, etc.
-// All output defaults to JSON (machine-readable); --format text gives human-readable output.
+// All output defaults to JSON (machine-readable).
+//
+// The whole command surface lives in one `aurora::cli::CommandSpec` declaration table (`build_spec()`): the
+// parser, the per-level `--help` text, the usage line and `schema_json` all derive from that single source.
 //
 // Usage:
-//   aurora components                                    list all registered component types
-//   aurora describe <name>                               print the full schema of a single component
-//   aurora search <keyword>                              search components by name
-//   aurora validate <tree.json>                          validate a UI-tree JSON
-//   aurora snapshot <tree.json> [-w W] [-h H]            print a logical snapshot JSON
-//   aurora render <tree.json> [-w W] [-h H] [-o out.png] render offscreen to PNG
-//   aurora preview <tree.json> [-w W] [-h H]             quick UI preview (opens a temporary window; falls back to a
-//   single headless frame then exits when no display backend is available) aurora to-code <tree.json> [--style
-//   fluent|step|di]  UI tree -> C++ code aurora to-yaml <tree.json>                           UI tree -> YAML format
-//   aurora schema                                        print the runtime API skeleton (widgets + enums)
-//   aurora --help                                        help information
+//   aurora_cli <command> [options]        run `aurora_cli --help` (or `-h`) for the command list,
+//                                         and `aurora_cli <command> --help` for one command's options.
 //
 // `schema` prints the API skeleton rebuilt at runtime from the live registry (library / language / include /
 // alias + widgets + enums), which is not the committed aurora_api.json. The full file is only produced by the
@@ -25,15 +19,15 @@
 //
 // Exit codes: 0 on success, 1 on validation failure, 2 on usage error.
 
-#include <cstdlib>
-#include <cstring>
-#include <limits>
+#include <cstddef>
 #include <string>
 #include <vector>
 
 #include "api_schema.h"
 #include "aurora/app/validate.h"
 #include "aurora/aurora.h"
+#include "aurora/cli/args.h"
+#include "aurora/cli/command.h"
 #include "aurora/render/offscreen.h"
 #include "aurora/widget/codegen.h"
 #include "aurora/widget/yaml.h"
@@ -48,30 +42,7 @@ namespace {
 
 // read_json_file / parse_code_style / build_api_skeleton are provided by shared headers under tools/include.
 
-auto print_usage() -> void {
-    AURORA_LOG_RAW(
-        "cli", "Aurora CLI v" AURORA_VERSION_STRING
-               " -- AI-first GUI toolchain\n\n"
-               "Usage: aurora_cli <command> [options]\n\n"
-               "Commands:\n"
-               "  components                                     list all registered component types\n"
-               "  describe <name>                                print the full schema of a single component (JSON)\n"
-               "  search <keyword>                               search components by name\n"
-               "  validate <tree.json>                           validate a UI-tree JSON and print diagnostics\n"
-               "  snapshot <tree.json> [-w W] [-h H]             print a logical snapshot JSON\n"
-               "  render <tree.json> [-w W] [-h H] [-o out.png]  render offscreen to PNG\n"
-               "  preview <tree.json> [-w W] [-h H]              quick UI preview "
-               "(opens a temporary window; falls back to a single headless frame then exits when no display backend is "
-               "available)\n"
-               "  to-code <tree.json> [--style fluent|step|di]   UI tree -> C++ code\n"
-               "  to-yaml <tree.json>                            UI tree -> YAML format\n"
-               "  schema                                         print the runtime API skeleton (widgets + enums)\n"
-               "  --help, -h                                     show this help\n"
-               "  --version, -V                                  show version\n\n"
-               "Exit codes: 0 on success, 1 on validation failure, 2 on usage error\n");
-}
-
-/// Parse the -w / -h / -o / --style options.
+/// @brief 渲染尺寸 / 输出路径 / 代码风格等按子命令复用的选项声明。
 struct CliOptions {
     int width = 800;
     int height = 600;
@@ -80,43 +51,135 @@ struct CliOptions {
     std::string file;
 };
 
-/// @brief 把一个命令行十进制参数解析为 int。
-///
-/// 不能直接把 `std::strtol` 的返回值赋给 int：它返回 `long`，而在 LP64（Linux / macOS）上 `long`
-/// 是 64 位，超出 int 区间时的窄化是**实现定义**的（`-w 5000000000` 会绕回成别的数）；Windows 上
-/// `long` 与 `int` 同宽，所以本机看不出任何异常。这里显式夹到 int 两端——越界给出边界值，
-/// 让下游的尺寸校验面对的仍是一个说得通的数，而不是回绕后的假小值。
-[[nodiscard]] auto parse_int_arg(const char *text) -> int {
-    const long raw = std::strtol(text, nullptr, 10);
-    if (raw > static_cast<long>(std::numeric_limits<int>::max())) {
-        return std::numeric_limits<int>::max();
-    }
-    if (raw < static_cast<long>(std::numeric_limits<int>::min())) {
-        return std::numeric_limits<int>::min();
-    }
-    return static_cast<int>(raw);
+namespace cli = aurora::cli;
+
+[[nodiscard]] auto width_option() -> cli::OptionSchema {
+    return cli::OptionSchema{
+        .long_name = "width",
+        .short_name = 'w',
+        .kind = cli::ValueKind::Int,
+        .help = "Viewport width in logical pixels",
+        .value_hint = "PX",
+        .default_text = "800",
+        .minimum = 1,
+        .maximum = 8192,
+    };
 }
 
-// NOLINTBEGIN(*-pro-bounds-pointer-arithmetic)
-[[nodiscard]] auto parse_options(int argc, char *argv[], int start) -> CliOptions {
+/// @brief 高度用 `-H`：`-h` 是 `aurora::cli` 内建 help 短名，声明即 `cli-spec-invalid`。
+[[nodiscard]] auto height_option() -> cli::OptionSchema {
+    return cli::OptionSchema{
+        .long_name = "height",
+        .short_name = 'H',
+        .kind = cli::ValueKind::Int,
+        .help = "Viewport height in logical pixels",
+        .value_hint = "PX",
+        .default_text = "600",
+        .minimum = 1,
+        .maximum = 8192,
+    };
+}
+
+[[nodiscard]] auto output_option() -> cli::OptionSchema {
+    return cli::OptionSchema{
+        .long_name = "output",
+        .short_name = 'o',
+        .kind = cli::ValueKind::String,
+        .help = "Output PNG path",
+        .value_hint = "FILE",
+        .default_text = "aurora_render.png",
+    };
+}
+
+[[nodiscard]] auto style_option() -> cli::OptionSchema {
+    return cli::OptionSchema{
+        .long_name = "style",
+        .kind = cli::ValueKind::Enum,
+        .help = "Generated code style",
+        .value_hint = "STYLE",
+        .default_text = "fluent",
+        .choices = {"fluent", "step", "di"},
+    };
+}
+
+[[nodiscard]] auto positional(std::string name, std::string help) -> cli::PositionalSchema {
+    return cli::PositionalSchema{.name = std::move(name), .help = std::move(help)};
+}
+
+[[nodiscard]] auto leaf(std::string name, std::string about, std::vector<cli::OptionSchema> options = {},
+                        std::vector<cli::PositionalSchema> positionals = {}) -> cli::CommandSpec {
+    return cli::CommandSpec{
+        .name = std::move(name),
+        .about = std::move(about),
+        .options = std::move(options),
+        .positionals = std::move(positionals),
+    };
+}
+
+/// @brief 唯一的命令声明源：10 个子命令 + 内建 `--help` / `--version`。
+[[nodiscard]] auto build_spec() -> cli::CommandSpec {
+    const std::string tree_help = "Path to the UI-tree JSON file";
+    return cli::CommandSpec{
+        .name = "aurora_cli",
+        .about = "Aurora CLI toolchain -- AI-first GUI toolkit; all output is JSON unless stated otherwise",
+        .description =
+            "Subcommands cover component discovery, UI-tree validation, offscreen rendering and code "
+            "generation. Options are per-command: `aurora_cli render --help` lists only what render accepts.",
+        .subcommands =
+            {
+                leaf("components", "List all registered component types"),
+                leaf("describe", "Print the full schema of a single component", {},
+                     {positional("name", "Component type name, e.g. Button")}),
+                leaf("search", "Search components by name substring", {},
+                     {positional("keyword", "Case-sensitive substring matched against type names")}),
+                leaf("validate", "Validate a UI-tree JSON and print diagnostics", {},
+                     {positional("tree.json", tree_help)}),
+                leaf("snapshot", "Print a logical snapshot JSON", {width_option(), height_option()},
+                     {positional("tree.json", tree_help)}),
+                leaf("render", "Render offscreen to PNG", {width_option(), height_option(), output_option()},
+                     {positional("tree.json", tree_help)}),
+                leaf("preview",
+                     "Quick UI preview (opens a temporary window; falls back to a single headless frame then "
+                     "exits when no display backend is available)",
+                     {width_option(), height_option()}, {positional("tree.json", tree_help)}),
+                leaf("to-code", "UI tree -> C++ code", {style_option()}, {positional("tree.json", tree_help)}),
+                leaf("to-yaml", "UI tree -> YAML format", {}, {positional("tree.json", tree_help)}),
+                leaf("schema", "Print the runtime API skeleton (widgets + enums)"),
+            },
+        .version = AURORA_VERSION_STRING,
+        .epilog =
+            "Exit codes: 0 on success, 1 on validation failure, 2 on usage error.\n"
+            "`schema` reflects the live registry; the committed aurora_api.json is produced by gen_api_tools.",
+        .subcommand_required = true,
+    };
+}
+
+/// @brief 必填位置参数的原文：叶命令均声明为 `exactly_one()`，故成功解析即可读。
+[[nodiscard]] auto positional_text(const cli::Arguments &args, std::size_t index) -> std::string {
+    const auto value = args.positional(index);
+    return value.ok() ? value.value().raw_text() : std::string{};
+}
+
+[[nodiscard]] auto int_option(const cli::Arguments &args, const char *name, int fallback) -> int {
+    const auto value = args.get<int>(name);
+    return value.ok() ? value.value() : fallback;
+}
+
+[[nodiscard]] auto text_option(const cli::Arguments &args, const char *name, const char *fallback) -> std::string {
+    const auto value = args.get<std::string>(name);
+    return value.ok() ? value.value() : std::string{fallback};
+}
+
+/// @brief 把叶命令的声明值收进 CliOptions（tree.json 恒为位置参数 0）。
+[[nodiscard]] auto cli_options(const cli::Arguments &args) -> CliOptions {
     CliOptions opts;
-    for (int i = start; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "-w" && i + 1 < argc) {
-            opts.width = parse_int_arg(argv[++i]);
-        } else if (arg == "-h" && i + 1 < argc) {
-            opts.height = parse_int_arg(argv[++i]);
-        } else if (arg == "-o" && i + 1 < argc) {
-            opts.output = argv[++i];
-        } else if (arg == "--style" && i + 1 < argc) {
-            opts.style = argv[++i];
-        } else if (opts.file.empty() && arg.at(0) != '-') {
-            opts.file = arg;
-        }
-    }
+    opts.file = positional_text(args, 0);
+    opts.width = int_option(args, "width", opts.width);
+    opts.height = int_option(args, "height", opts.height);
+    opts.output = text_option(args, "output", opts.output.c_str());
+    opts.style = text_option(args, "style", opts.style.c_str());
     return opts;
 }
-// NOLINTEND(*-pro-bounds-pointer-arithmetic)
 
 // ---------- subcommand implementations ----------
 
@@ -317,64 +380,60 @@ auto main(int argc, char *argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                                             // main（terminate 即失败路径），CLI 不包装 try/catch
     au::serialization::register_core_widgets();
 
-    // NOLINTBEGIN(*-pro-bounds-pointer-arithmetic)
-    if (argc < 2 || std::strcmp(argv[1], "--help") == 0 || std::strcmp(argv[1], "-h") == 0) {
-        print_usage();
-        return argc < 2 ? 2 : 0;
+    const auto spec = build_spec();
+    const auto parsed = cli::parse(spec, argc, argv);
+    if (!parsed) {
+        std::string detail = parsed.error().message;  // 用法错误：回显 token + 命令名
+        if (!parsed.error().suggestion.empty()) {
+            detail += " — " + parsed.error().suggestion;  // 如 "Did you mean --width?"
+        }
+        AURORA_LOG_ERROR("cli", detail);
+        AURORA_LOG_ERROR("cli", "Run 'aurora_cli --help' for the command list.");
+        return 2;  // 用法错误
     }
-    if (std::strcmp(argv[1], "--version") == 0 || std::strcmp(argv[1], "-V") == 0) {
-        AURORA_LOG_RAW("cli", AURORA_VERSION_STRING, "\n");
+
+    const cli::Invocation &invocation = parsed.value();
+    if (invocation.outcome != cli::ParseOutcome::Ok) {
+        AURORA_LOG_RAW("cli", invocation.display_text);  // --help / --version 是一等结局
         return 0;
     }
 
-    std::string cmd = argv[1];
+    const cli::CommandSpec *const leaf_command = invocation.arguments.matched_command();
+    const std::string cmd = (leaf_command == nullptr) ? std::string{} : leaf_command->name;
+    const CliOptions opts = cli_options(invocation.arguments);
 
     if (cmd == "components") {
         return cmd_components();
     }
     if (cmd == "describe") {
-        if (argc < 3) {
-            AURORA_LOG_ERROR("cli", "Error: describe requires <name>");
-            return 2;
-        }
-        return cmd_describe(argv[2]);
+        return cmd_describe(positional_text(invocation.arguments, 0));
     }
     if (cmd == "search") {
-        if (argc < 3) {
-            AURORA_LOG_ERROR("cli", "Error: search requires <keyword>");
-            return 2;
-        }
-        return cmd_search(argv[2]);
+        return cmd_search(positional_text(invocation.arguments, 0));
     }
     if (cmd == "validate") {
-        if (argc < 3) {
-            AURORA_LOG_ERROR("cli", "Error: validate requires <tree.json>");
-            return 2;
-        }
-        return cmd_validate(argv[2]);
+        return cmd_validate(positional_text(invocation.arguments, 0));
     }
     if (cmd == "snapshot") {
-        return cmd_snapshot(parse_options(argc, argv, 2));
+        return cmd_snapshot(opts);
     }
     if (cmd == "render") {
-        return cmd_render(parse_options(argc, argv, 2));
+        return cmd_render(opts);
     }
     if (cmd == "preview") {
-        return cmd_preview(parse_options(argc, argv, 2));
+        return cmd_preview(opts);
     }
     if (cmd == "to-code") {
-        return cmd_to_code(parse_options(argc, argv, 2));
+        return cmd_to_code(opts);
     }
     if (cmd == "to-yaml") {
-        return cmd_to_yaml(parse_options(argc, argv, 2));
+        return cmd_to_yaml(opts);
     }
     if (cmd == "schema") {
         return cmd_schema();
     }
 
-    // NOLINTEND(*-pro-bounds-pointer-arithmetic)
-
     AURORA_LOG_ERROR("cli", "Error: unknown command '", cmd, "'");
-    print_usage();
+    AURORA_LOG_RAW("cli", cli::help_text(spec, {spec.name}));
     return 2;
 }
