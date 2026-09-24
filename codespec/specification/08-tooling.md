@@ -580,7 +580,7 @@ mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effec
 | 建窗 | `e2e::open(WindowSpec)` 经类型安全的 `create_window(XxxOptions)` 工厂；**不静默降级**——请求的后端未编译或初始化失败即失败。「跳过还是失败」是测试侧策略，落在 `tests/e2e/e2e_expect.h`（`AURORA_E2E_EXPECT` 期望集），内核不裁决 |
 | 窗口可见性 | `WindowSpec::visibility` 默认 `Hidden`（与公共 `WindowOptions::visibility` 的默认 `Normal` 刻意不同）：E2E 默认不把窗口推入用户视野；三档语义与各宿主落地见 [`specification/03-layout-render.md`](03-layout-render.md) §8.3 与 [`specification/06-app-platform.md`](06-app-platform.md) §3.3 |
 | 帧推进 | 帧序复用 `TestController` 已验证的既有序列（泵平台事件 → `Widget::tick` 手势计时 → `Animator::tick` → `Scheduler::tick` → `Window::present_root`）：内核自持 `Animator` / `Scheduler` 并经其 `set_current` 挂为进程内当前实例，使 mount 期注册的动画与定时任务可被逐帧推进。**不新增任何公共单帧 API**（`Application::step_frame()` 保持 `private`） |
-| 收敛与超时 | `pump_until_settled(max_frames)` 以「`Window::is_idle_frame()` 且无运行中动画」收敛；预算内未收敛返回 `RuntimeAsyncTimeout`，消息含已推进帧数、最后脏区状态、idle 帧状态与活跃动画数（可直接作为失败原因） |
+| 收敛与超时 | `pump_until_settled(max_frames)` 以「`Window::is_idle_frame()` 且无运行中动画」收敛；预算内未收敛返回 `RuntimeAsyncTimeout`，消息含已推进帧数、最后脏区状态、idle 帧状态与活跃动画数（可直接作为失败原因）。注意：**自驱动手势滑动**（`Scroll` 收位滑动等，不占 `Animator`）不在此判据覆盖内，其收敛协议见下文交互流往返层 |
 | 像素读回 | `capture_frame(const Surface &)` = `Surface::data()` + `Surface::framebuffer_size()` 组合，返回帧缓冲**物理像素**的 RGBA 帧；**未新增 `Surface` 公共读回虚方法**。`data()` 为 `nullptr`（后端未覆写读回，或该后端的读回受 `AURORA_ENABLE_DEBUG` 门控且未生效）时返回 `GeneralNotSupported`，消息沿用 `save_snapshot` 既有的 "framebuffer capture unavailable"；不返回空帧、不伪造内容 |
 | 查询面 | `collect_preorder` / `find_by_key` / `find_by_type` / `find_by_text` / `read_prop` 全部建立在**公共自描述通道**上（`Node::id()` / `Widget::type_name()` / `Widget::serialize_props` / `Widget::child_nodes()`），**不依赖 `TestController`**——后者整头受 `AURORA_BACKEND_HEADLESS` 门控，若查询面依赖它，「关掉无头后端但开真实后端」的构建里 E2E 恰好失去查询能力 |
 | 输入注入 | `tap` / `drag` / `scroll` / `enter_text` 经 `Inspector::simulate_*` 走真实命中测试与冒泡派发（目标式语义），而非直接改控件状态；注入成功后登记「下一帧全量重绘」，模拟真实平台输入事件唤醒帧循环 |
@@ -643,15 +643,50 @@ CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI �
   `run_demo`「鼠标派发必须携带 FocusManager」纪律），以窗口坐标合成平台事件走 命中测试 → 焦点 →
   键盘/文本路由 的完整链路，与目标式注入互补；目标式注入的焦点上下文由 `Inspector` 内部解析（无当前
   `FocusManager` 时以目标为根就地构建），两条通道都依赖控件聚焦后的自身状态（`is_focused()`）成立。
-- 交互触发动画（点击回调启动 `Scroll` 收位滑动）以「注入后立即处于滑动中 + `pump_until_settled` 收敛后
-  偏移与像素到位」双向断言。实测约束：滑动按**真实时钟**推进（dt 取 `steady_clock` 实测间隔），而泵帧
-  无节流——同一帧预算对应的墙钟时长随机器性能浮动（轻量后端单帧 < 0.15 ms 时 600 帧不足 0.15 s 的
-  滑动时长），收敛须分轮推进直至滑动结束，总帧数仍设上界。
+- 交互触发动画（点击回调启动 `Scroll` 收位滑动）以「注入后立即处于滑动中 + 滑动归假后偏移与像素
+  到位」双向断言。实测约束有二：滑动按**真实时钟**推进（dt 取 `steady_clock` 实测间隔），泵帧无节流，
+  帧数上界只防死循环（成功路径的泵帧数受滑动墙钟时长自然约束）；且滑动是**自驱动 tick 不占
+  `Animator`**（同 Dismissible/ReorderableList 模式），`pump_until_settled` 的「idle 帧 + 无 Animator
+  动画」判据会在缓动尾段的**浮点驻停区间**提前返回——eased 距端点不足 1 ulp 时偏移已停在 `to` 上而
+  `elapsed` 未走满 duration，偏移不再变化 → 不再标脏 → idle 帧被判收敛，而 `glide_.active` 仍为 true
+  （泵帧快于约 0.5 ms/帧的机器上尾段必落入驻停区间，曾致 CI win32/llvm 双红）。滑动收敛须以
+  `is_gliding()` 归假为主判据、`pump` 逐帧推进，收敛后再推帧 flush 终帧渲染。
 - 场景装配教训（写成对后续用例的约束）：行交叉轴默认拉伸会改变控件几何（`Switch` 被行撑高后滑块直径
   随之变大、盖住按自然尺寸推算的采样点），采样点依赖的几何须用 `Modifier::size` 显式钉住；
   `ScrollEvent::delta_y` 正方向为**向上**滚动（offset 减小），注入负值才是向下滚。
 - 后端矩阵与 skip/失败记账语义同冒烟层（`AURORA_E2E_EXPECT` 期望集）；后端矩阵套件的 fixture 类名在
   注册表中按类名串合并，多个 `etest_` 文件不得共用同名 fixture 类，否则实例矩阵相互叠加导致用例双跑。
+
+**多窗口与生命周期层**（`tests/e2e/etest_multi_window.cpp`）：真实窗口语义中「多实例」侧的可观测
+行为——同进程多会话并存、程序化 resize、`present_root` 脏区裁剪语义、`WindowVisibility` 档位并存
+（与 `utest_multi_window` / `utest_window_lifecycle` 的抽象层断言互补，E2E 只断言真实窗口下可观测的
+行为）。要点与实测口径：
+
+- 双窗独立性：两窗各自 `present` 后帧尺寸等比且中心色独立命中；各自经 `Surface::set_event_handler`
+  接线独立 `FocusManager` 后合成窗口事件互不串台；应用内焦点互不干扰（获焦只改变本窗聚焦控件的
+  聚焦背景）。
+- 帧等比率口径：读回帧与逻辑尺寸的**等比率**（纵横比一致，容差 0.02）是跨后端不变量；「物理 =
+  逻辑 × scale」**不是**——GLFW 软件路径读回帧为逻辑尺寸，Win32 家族为物理尺寸。断言不得绑定绝对
+  物理像素，`scale_factor()` 逐窗动态读取（同进程首个 Win32 窗 scale 恒 1.0、第二个起为系统真实
+  缩放），DPI 缩放环境下的采样点按帧/逻辑尺寸比例映射。
+- 生命周期：关闭一窗不影响另一窗继续渲染读回；RAII 兜底经异常路径验证（中途 throw 后 `Session`
+  析构关窗、不残留幽灵窗口）；同规格重建与连续开关循环成功（资源不泄漏的可移植运行时证据；OS 层
+  枚举窗口数不可移植，不做）。
+- resize：程序化 `Surface::set_size` 后整树重排重绘收敛、帧尺寸随动且保持等比，连续多轮 resize 每轮
+  收敛。**已知库层缺口**（skip 桩记录在案，修复后解除）：GLFW 路径 `set_size` 不传导——尺寸回调
+  空实现、尺寸缓存仅在 `begin_frame` 刷新，而 `set_size` 后无脏登记 → present 判 idle 跳帧 →
+  `begin_frame` 不执行，形成 idle 死锁（hidden 与 NoActivate 均复现）；X11/Wayland 未 override
+  `set_size`（虚默认空实现）。
+- 脏区语义（`present_root` partial-clip 路径）：树状态已变但无脏登记时 idle 跳帧（`frame_count` 不增、
+  `has_pending_dirty()` 为假）；手动 `mark_dirty` 局部矩形后仅裁剪区重绘、**裁剪外保留上帧像素**（与
+  「整屏刷底色」实现可区分——后者会画出已变的新色）；随后补标另一侧再验证增量覆盖。
+- 可见性档位：`NoActivate` 与 `Hidden` 四窗并存各自渲染读回正常、帧计数独立；NoActivate 的 OS 前台
+  行为已在内核探针验证（Windows 前台锁定策略下无人值守断言不可移植），此处只断言并存可用与渲染
+  正确。
+- 已知口径（多会话动画驱动器）：`Animator::set_current` 是进程级登记，每个会话首次 `ensure_drivers`
+  都会挂自己的驱动器（最近 open 者为当前实例），mount 期之后的运行期动画注册落当时的当前实例、
+  `pump` 只推进本会话自己的 `Animator`——多会话交错推进时跨会话动画推进无保证。多窗用例因此只用
+  静态场景，交互动画推进语义由交互流往返层覆盖。
 
 ---
 

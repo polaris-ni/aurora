@@ -266,7 +266,7 @@ AURORA_TEST_P(InteractionBackends, interaction_round_trip) {
     const float dx = 0.3F * slider_w;
     AURORA_TEST_REQUIRE(static_cast<bool>(session.drag(*scene.slider, au::Point{.x = dx, .y = 0.0F})));
     // Slider 值映射：local_x → (local_x - 4dp 内缩) / 轨道宽；按下点即控件中心。
-    const double expected_value = 100.0 * ((0.5F * slider_w + dx - 4.0F) / (slider_w - 8.0F));
+    const double expected_value = 100.0 * (((0.5F * slider_w) + dx - 4.0F) / (slider_w - 8.0F));
     AURORA_TEST_CHECK_NEAR(scene.slider->value(), expected_value, 1e-3);
     AURORA_TEST_REQUIRE(static_cast<bool>(session.pump(2)));
     const e2e::Frame after_drag = read_checked(session);
@@ -286,8 +286,8 @@ AURORA_TEST_P(InteractionBackends, interaction_round_trip) {
 
     // ---- 文本输入（最后执行：聚焦不被后续指针交互清除）----
     AURORA_TEST_REQUIRE(static_cast<bool>(session.enter_text(*scene.input, "hi")));
-    AURORA_TEST_CHECK_MSG(scene.input->value() == "hi", "文本输入落到目标控件 (value=\"" + scene.input->value() +
-                                                            "\", 期望 \"hi\")");
+    AURORA_TEST_CHECK_MSG(scene.input->value() == "hi",
+                          "文本输入落到目标控件 (value=\"" + scene.input->value() + "\", 期望 \"hi\")");
     AURORA_TEST_REQUIRE(static_cast<bool>(session.pump(2)));
     expect_pixel(read_checked(session), spec, inp.origin.x + inp.size.width - 8.0F,
                  inp.origin.y + (inp.size.height * 0.5F), AURORA_INPUT_FOCUSED, "文本输入后聚焦背景(右侧无文本区)");
@@ -358,15 +358,15 @@ AURORA_TEST_P(InteractionBackends, focus_and_keyboard_routing_via_window_dispatc
     back.key = static_cast<int>(au::KeyCode::Backspace);
     back.action = au::KeyAction::Down;
     route(back);
-    AURORA_TEST_CHECK_MSG(scene.input->value() == "a", "退格键经焦点路由到达目标控件 (value=\"" +
-                                                            scene.input->value() + "\", 期望 \"a\")");
+    AURORA_TEST_CHECK_MSG(scene.input->value() == "a",
+                          "退格键经焦点路由到达目标控件 (value=\"" + scene.input->value() + "\", 期望 \"a\")");
 
     // ---- 文本路由：TextInputEvent 追加到焦点控件（"a" → "acd"）----
     au::TextInputEvent ti;
     ti.text = "cd";
     route(ti);
-    AURORA_TEST_CHECK_MSG(scene.input->value() == "acd", "文本片段追加到焦点控件 (value=\"" + scene.input->value() +
-                                                             "\", 期望 \"acd\")");
+    AURORA_TEST_CHECK_MSG(scene.input->value() == "acd",
+                          "文本片段追加到焦点控件 (value=\"" + scene.input->value() + "\", 期望 \"acd\")");
 }
 
 // ============================================================
@@ -398,15 +398,20 @@ AURORA_TEST_P(InteractionBackends, animation_converges_after_interaction) {
     AURORA_TEST_CHECK_TRUE(scene.scroller->is_gliding());
 
     // ---- 收敛：滑动结束后偏移到位、像素达到稳定态 ----
-    // 收位滑动按真实时钟推进（dt 取 steady_clock 实测间隔），而泵帧无节流——同一帧预算对应的
-    // 墙钟时长随机器性能浮动（轻量后端单帧 < 0.15ms 时 600 帧墙钟不足 0.15s 滑动时长），
-    // 故分轮推进直至滑动结束，总帧数仍有上界。
-    auto settled = session.pump_until_settled(600);
-    for (int round = 0; round < 10 && !settled; ++round) {
-        settled = session.pump_until_settled(600);
+    // 收位滑动按真实时钟推进（dt 取 steady_clock 实测间隔）且自驱动 tick 不占 Animator，故
+    // pump_until_settled 的「idle 帧 + 无 Animator 动画」判据在滑动尾段会提前返回：u→1 之前
+    // 存在浮点驻停区间——eased 距端点不足 1 ulp 时偏移已停在 to 上而 elapsed 未走满 duration，
+    // 偏移不再变化 → 不再标脏 → idle 帧即被判收敛，而 glide_.active 仍为 true（泵帧快于约
+    // 0.5ms/帧的机器上尾段必落入驻停区间）。故以 is_gliding() 归假为收敛主判据，用 pump 逐帧
+    // 推进直至终点（dt 为墙钟差，成功路径的泵帧数受滑动时长自然约束，上界仅防死循环），再推
+    // 两帧 flush 抵达帧的渲染。
+    int frames = 0;
+    while (scene.scroller->is_gliding() && frames < 20000) {
+        AURORA_TEST_REQUIRE(static_cast<bool>(session.pump(1)));
+        ++frames;
     }
-    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(settled), "收位滑动未在帧预算内收敛");
-    AURORA_TEST_CHECK_FALSE(scene.scroller->is_gliding());
+    AURORA_TEST_REQUIRE_MSG(!scene.scroller->is_gliding(), "收位滑动未在帧预算内收敛");
+    AURORA_TEST_REQUIRE(static_cast<bool>(session.pump(2)));
     AURORA_TEST_CHECK_NEAR(scene.scroller->offset_y(), target_offset, 0.5F);
     expect_pixel(read_checked(session), spec, scb.origin.x + (scb.size.width * 0.5F),
                  scb.origin.y + (scb.size.height * 0.5F), AURORA_BLOCK_2, "动画收敛后视口内容(块 2)");
