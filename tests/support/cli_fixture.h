@@ -36,6 +36,8 @@ struct Tokens : std::vector<std::string> {
 
 /// @brief 宽松的主样例树：裸跑根命令即可成功，便于单点测试各语法分支。
 [[nodiscard]] inline auto spec() -> const CommandSpec & {
+    // 单例地址即契约：Invocation 借用声明表，不可改为按值返回。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static const CommandSpec SPEC = [] {
         CommandSpec root;
         root.name = "aurora-render";
@@ -212,6 +214,7 @@ struct Tokens : std::vector<std::string> {
 
 /// @brief 严格树：必填项 + 强制子命令，用于验证「缺什么」类错误码。
 [[nodiscard]] inline auto strict_spec() -> const CommandSpec & {
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static const CommandSpec STRICT_SPEC = [] {
         CommandSpec root;
         root.name = "strict";
