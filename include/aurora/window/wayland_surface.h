@@ -61,6 +61,8 @@ class WaylandSurface final : public Surface {
     /// Release（未开 `AURORA_ENABLE_DEBUG`）回落基类默认值 nullptr，使 `save_snapshot` 返回 disabled。
     [[nodiscard]] auto data() const -> const std::uint8_t * override;
     [[nodiscard]] auto size() const -> Size override;
+    /// @brief 已呈现帧数：每次 `present()` 真正 attach+commit 上屏自增（Hidden 档不 commit 故不计）。
+    [[nodiscard]] auto frame_count() const -> int override;
     /// @brief begin_frame 铺的浅色底色（与 begin_frame 内 fill_rect 同色）：供脏区裁剪重绘重铺底色。
     [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
     /// @brief 像素密度：wl_output scale（整数缩放），多屏取窗口所在输出。

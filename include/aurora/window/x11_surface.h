@@ -56,6 +56,8 @@ class X11Surface final : public Surface {
     /// 覆写基类默认（unsupported）；Release（未开 `AURORA_ENABLE_DEBUG`）回落 unsupported 错误。
     [[nodiscard]] auto capture_window(const std::string &path) -> Result<bool> override;
     [[nodiscard]] auto size() const -> Size override;
+    /// @brief 已呈现帧数：每次 `present()` 真正 `XPutImage` 上屏自增（与 Win32 同口径）。
+    [[nodiscard]] auto frame_count() const -> int override;
     /// @brief begin_frame 铺的浅色底色（与 begin_frame 内 fill_rect 同色）：供脏区裁剪重绘重铺底色。
     [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
     /// @brief 像素密度：解析 X 资源 `Xft.dpi`（dpi/96），无声明时 1.0。

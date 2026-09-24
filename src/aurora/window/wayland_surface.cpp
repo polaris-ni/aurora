@@ -104,6 +104,7 @@ struct WaylandSurface::Impl {
 
     Painter painter;
     std::vector<Rect> present_dirty;  ///< 本帧增量 damage 脏区（设备坐标；空=全量）。
+    int presented = 0;  ///< 已上屏帧数（见 `WaylandSurface::frame_count()`）。
     /// @brief 本帧 attach 因 configure 打断而丢弃，需在下次事件泵补一帧（见 present() 内注释）。
     bool present_stale = false;
     Size size{0.0F, 0.0F};  ///< 逻辑 dp（Wayland 表面坐标即逻辑坐标）。
@@ -1531,6 +1532,7 @@ auto WaylandSurface::present() -> Result<bool> {
             wl_surface_attach(d.surface, slot->buf, 0, 0);
             slot->busy = true;
             wl_surface_commit(d.surface);
+            ++d.presented;  // 只计真正提交给合成器的帧
             wl_display_flush(d.dpy);
         }
     }
@@ -1540,6 +1542,8 @@ auto WaylandSurface::present() -> Result<bool> {
 }
 
 auto WaylandSurface::size() const -> Size { return impl_->size; }
+
+auto WaylandSurface::frame_count() const -> int { return impl_->presented; }
 
 auto WaylandSurface::scale_factor() const -> float { return static_cast<float>(impl_->scale); }
 

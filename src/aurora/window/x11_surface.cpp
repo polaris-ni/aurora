@@ -172,6 +172,7 @@ struct X11Surface::Impl {
 
     Painter painter;
     std::vector<Rect> present_dirty;  ///< 本帧增量上屏脏区（设备坐标；空=全量）。
+    int presented = 0;  ///< 已上屏帧数（见 `X11Surface::frame_count()`）。
     Size size{.width = 0.0F, .height = 0.0F};  ///< 逻辑 dp（布局用）。
     float scale = 1.0F;
     bool close_requested = false;
@@ -831,6 +832,7 @@ auto X11Surface::present() -> Result<bool> {
         const int w = d.painter.width();
         const int h = d.painter.height();
         if (d.ensure_image(w, h)) {
+            ++d.presented;  // 只计缓冲就绪并走完 XPutImage 上屏的帧
             // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
             const auto *src = reinterpret_cast<const std::uint32_t *>(d.painter.data());
             if (d.present_dirty.empty()) {
@@ -868,6 +870,8 @@ auto X11Surface::present() -> Result<bool> {
 }
 
 auto X11Surface::size() const -> Size { return impl_->size; }
+
+auto X11Surface::frame_count() const -> int { return impl_->presented; }
 
 auto X11Surface::scale_factor() const -> float { return impl_->scale; }
 
