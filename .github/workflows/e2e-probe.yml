@@ -1,31 +1,35 @@
 # ---------------------------------------------------------------------------
-# E2E 能力探针（临时工作流）
+# E2E 能力探针（手动触发）
 #
-# 目的：实测三类 GitHub Actions runner 上的「真实建窗 + 像素读回」能力，为 E2E 测试
+# 实测三类 GitHub Actions runner 上的「真实建窗 + 像素读回」能力，为 E2E 测试
 # 的 CI 口径（期望集 AURORA_E2E_EXPECT 与默认执行范围）提供事实依据。现有 backends
 # 作业在 ctest 下无显示环境（create_native_window 回退 HeadlessSurface），从未验证过
 # 真实建窗路径；本工作流用 etest_smoke_render（真实窗口 + 上屏链路 + Surface::data()
 # 读回）逐平台探明「可建窗 / 可读回 / 失败原因」。
 #
-# 平台 × 后端矩阵（0.1 事实核查范围）：
+# 已实测结论（run 35952944058 / 35955165622，结论已收进
+# codespec/specification/08-tooling.md §8.2「CI 能力边界」）：
+#   windows-latest : Win32 ✓（64ms）、D3D11 ✓（14ms）；GLFW ✗——VM 无 OpenGL 3.3，
+#                    WGL 通用驱动无法建 GPU 上下文
+#   ubuntu-latest  : X11 ✓（35ms）、GLFW ✓（1245ms，llvmpipe 软件 GL；GLFW 源码构建
+#                    需补 wayland-scanner 等 Wayland 依赖）
+#   macos-latest   : GLFW ✗——无人值守会话无窗口系统
+#
+# 平台 × 后端矩阵（沿用实测口径）：
 #   windows-latest : Win32（GDI）+ D3D11 + GLFW，Hidden 档
 #   ubuntu-latest  : X11 + GLFW（xvfb-run 虚拟显示）
-#   macos-latest   : GLFW（macOS runner 自带 GUI 会话，验证无人值守下能否建窗）
+#   macos-latest   : GLFW（macOS runner 无人值守会话，验证结果供回归对照）
 #
 # 构建配置显式 -DAURORA_ENABLE_DEBUG=ON：Surface::data() 读回在 Win32 家族 / X11 /
 # Wayland / wgpu 回退帧 / GLFW-GPU 上受该宏门控（Release AUTO 不注入即不可读回，
 # 本地已实测），探针验证的是「环境能力」而非门控极性，故强制开启。
 #
-# 触发：push 且仅当本文件变更（避免拖累常规推送）。实测结论回填 spec 后本文件
-# 移除或转为 workflow_dispatch 手动触发（opt-in），不作为常驻门禁。
+# 触发：仅 workflow_dispatch 手动触发（能力结论有漂移怀疑时复测），不作为常驻门禁。
 # ---------------------------------------------------------------------------
 
 name: e2e-probe
 
 on:
-  push:
-    branches: ["**"]
-    paths: [".github/workflows/e2e-probe.yml"]
   workflow_dispatch:
 
 permissions:

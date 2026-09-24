@@ -582,6 +582,17 @@ mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effec
 
 内核自测在 `tests/unit/utest_e2e_harness.cpp`（以 `HeadlessSurface` 为后端运行，不依赖真实显示环境）。
 
+**CI 能力边界（GitHub Actions 三平台实测）**：真实建窗 + 像素读回的能力因 runner 环境而异，
+E2E 的 CI 期望集（`AURORA_E2E_EXPECT`）须按平台声明：`windows-latest` 上 Win32 与 D3D11 可用，
+GLFW 不可用（VM 无 OpenGL 3.3，WGL 通用驱动无法建 GPU 上下文）；`ubuntu-latest` + `xvfb-run` 上
+X11 与 GLFW 可用（llvmpipe 软件 GL 可建 3.3 上下文；GLFW 源码构建需 `wayland-scanner` 等
+Wayland 依赖）；`macos-latest` 无人值守会话无窗口系统，全部后端不可用（期望集留空 = 全部
+skipped by policy，编译与注册面仍被覆盖）。Wayland（CI 无 compositor）与 wgpu（默认不编译）不进
+CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI 的 E2E 步骤必须以
+`AURORA_ENABLE_DEBUG=ON` 或 Debug 配置构建（部分后端读回受该宏门控，宏未注入时读回一律按
+「能力不可用」记账）；期望集内环境不可用即 FAIL_FATAL 红灯，因此期望集声明的是「该环境必须
+可跑」的最小集，宁可留空也不声明未实测的后端。
+
 场景库与组件 demo **同源**：被 E2E 引用的组件在 `examples/demos/scenes/` 下建 header-only 场景头
 （`scene_<组件>.h`，inline 构建函数返回根 `Node`），对应 `demo_<组件>.cpp` 退化为「薄 `main()` +
 `run_demo(...)`」，人类可见的 demo 行为（尺寸 / 标题 / 渲染结果）逐字节不变；**未被引用的 demo 零改动**，
