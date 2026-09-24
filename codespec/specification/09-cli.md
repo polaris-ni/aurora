@@ -234,6 +234,9 @@ git 式：**选项属于当前所在命令**。
 | `parse` 返回 `Error` | `2` |
 | 应用自身逻辑失败 | `1` |
 
+例外：`tools/verify/` 真机验收探针的用法错误退 `64`（sysexits `EX_USAGE`）而非 `2`——那批探针头注释里的
+`2` 已固定表示「环境不可用」，复用会让脚本分不开「旗标写错」与「本机没环境」。理由与实测见 §10.1。
+
 ---
 
 ## 7 派生视图
@@ -332,12 +335,22 @@ parse(root, int argc, const char *const *argv)   // 程序名取 argv[0] 的 bas
 | `examples/demos/demo_core.cpp` | `--level` 用 `ValueKind::LogLevel` 直取 `au::LogLevel`，`--strict` 用 flag |
 | `tests/framework/test_main.cpp` | runner 全部旗标（`--run=` / `--filter=` / `--shuffle[=<seed>]` / `--selftest` / 死亡测试内部旗标 `hidden`）|
 | `examples/demos/demo_cli.cpp` | 本模块自身的示例载体（`validate` → `parse` → 取值 → 错误回显）|
+| `tools/verify/*_live_probe.cpp`（14 处探针） | 经共用入口 `tools/verify/verify_args.h` 的 `aurora_verify::parse_interactive()`，各探针只声明 `--interactive` 与自身专属旗标 |
 
 `aurora_lsp` / `aurora_mcp` 只走 stdio 线协议、不消费 argv，故无需接入。两处**故意不接入**：
 `gen_error_codes` 与 `gen_debug_api` 是错误码 / debug 门面头自身的生产者，按「先有生成物才链得上库」的
 鸡生蛋约束刻意不链接 `aurora`（见 [`08-tooling.md`](08-tooling.md) §7.4），其入口保持手写 argv 读取。
-`tools/verify/` 下的真机验收探针（`[--interactive]`）随平台条件构建、不进 CTest，本机无法编译验证，
-接入属后续跟进项；改动前须按各探针所属平台实机复验。
+
+探针侧的共用入口 `tools/verify/verify_args.h`（header-only，不入库、不入 `aurora_api.json`）把「帮助 / 版本 /
+用法错误」三类出口统一在一处：`--help` 与 `--version` 打印后退 `0`，未知或非法旗标按 `cli-*` 口径报
+`消息 — 建议` + `Run with --help for the accepted flags.` 后退 `64`，只有真正拿到 `Arguments` 才进入探针主体。
+
+探针侧用法错误**刻意不复用**工具链惯用的 `2`：14 份探针头注释的退出码表里 `2` 早已表示
+「环境不可用」（无 DISPLAY / 无合成器 / 建窗失败），复用会让脚本分不开「旗标写错」与「本机没环境」
+（前者是人的失误、后者应记 SKIP），故取 sysexits 的 `EX_USAGE = 64`，与各探针既有的 0/1/3/4/5/6/7 全不重叠。
+工具链侧（`aurora_cli` / 测试 runner / `bench_scroll`）仍按 §6.3 的 `0/1/2` 约定，实测 `--bogus` 退 `2`。
+相比替换前的手写循环，行为差异是**拼错的旗标不再被静默忽略**。⚠️ `tools/verify/` 随平台条件构建
+（`AURORA_BUILD_VERIFY_TOOLS` 默认 OFF）且**不进 CTest**，无头 CI 无法守住它，改动前须按各探针所属平台实机复验。
 
 接入的副作用是**短名让位**：`-h` / `-V` 为内建 help / version 保留，故 `aurora_cli` 的高度短名由 `-h` 改为
 `-H`（长名 `--height` 不变），相关人工用例已同步（[`manual-test/06-render.md`](../manual-test/06-render.md)）。
