@@ -53,8 +53,8 @@ constexpr au::Color AURORA_WIN_RED = au::Color{220, 80, 80, 255};
 constexpr au::Color AURORA_WIN_BLUE = au::Color{80, 110, 220, 255};
 constexpr au::Color AURORA_WIN_GREEN = au::Color{90, 180, 100, 255};
 constexpr au::Color AURORA_WIN_YELLOW = au::Color{225, 200, 80, 255};
-constexpr au::Color AURORA_PROBE_STALE = au::Color{255, 120, 120, 255};   // 探针初色（帧 1）
-constexpr au::Color AURORA_PROBE_FRESH = au::Color{120, 200, 120, 255};   // 探针新色（重绘后）
+constexpr au::Color AURORA_PROBE_STALE = au::Color{255, 120, 120, 255};  // 探针初色（帧 1）
+constexpr au::Color AURORA_PROBE_FRESH = au::Color{120, 200, 120, 255};  // 探针新色（重绘后）
 constexpr au::Color AURORA_INPUT_FOCUSED = au::Color{255, 248, 220, 255};
 
 /// @brief 后端矩阵取值表：全部真实窗口后端（语义与 etest_smoke_render 一致，Headless 不在表内）。
@@ -109,15 +109,14 @@ auto expect_pixel(const e2e::Frame &frame, float logical_w, float logical_h, flo
         return static_cast<int>(
             std::lround(logical * static_cast<double>(frame_extent) / static_cast<double>(logical_extent)));
     };
-    const au::Color actual =
-        e2e::pixel_at(frame, map(logical_x, frame.width, static_cast<int>(logical_w)),
-                      map(logical_y, frame.height, static_cast<int>(logical_h)));
-    const std::string detail = what + ": 采样(" + std::to_string(map(logical_x, frame.width, static_cast<int>(logical_w))) +
-                               "," + std::to_string(map(logical_y, frame.height, static_cast<int>(logical_h))) +
-                               ") 实际=(" + std::to_string(actual.r) + "," + std::to_string(actual.g) + "," +
-                               std::to_string(actual.b) + "," + std::to_string(actual.a) + ") 期望=(" +
-                               std::to_string(expected.r) + "," + std::to_string(expected.g) + "," +
-                               std::to_string(expected.b) + "," + std::to_string(expected.a) + ")";
+    const au::Color actual = e2e::pixel_at(frame, map(logical_x, frame.width, static_cast<int>(logical_w)),
+                                           map(logical_y, frame.height, static_cast<int>(logical_h)));
+    const std::string detail =
+        what + ": sample(" + std::to_string(map(logical_x, frame.width, static_cast<int>(logical_w))) + "," +
+        std::to_string(map(logical_y, frame.height, static_cast<int>(logical_h))) + ") actual=(" +
+        std::to_string(actual.r) + "," + std::to_string(actual.g) + "," + std::to_string(actual.b) + "," +
+        std::to_string(actual.a) + ") expected=(" + std::to_string(expected.r) + "," + std::to_string(expected.g) +
+        "," + std::to_string(expected.b) + "," + std::to_string(expected.a) + ")";
     AURORA_TEST_CHECK_MSG(color_near(actual, expected, tol), detail);
 }
 
@@ -136,8 +135,8 @@ auto expect_frame_ratio(const e2e::Session &session, const std::string &what) ->
     AURORA_TEST_CHECK_MSG(std::fabs(sx - sy) <= 0.02,
                           what + ": 帧与逻辑尺寸不等比 (帧 " + std::to_string(frame.width) + "x" +
                               std::to_string(frame.height) + ", 逻辑 " + std::to_string(static_cast<int>(sz.width)) +
-                              "x" + std::to_string(static_cast<int>(sz.height)) + ", scale=" +
-                              std::to_string(session.surface().scale_factor()) + ")");
+                              "x" + std::to_string(static_cast<int>(sz.height)) +
+                              ", scale=" + std::to_string(session.surface().scale_factor()) + ")");
 }
 
 /// @brief 建窗规格（tag 进标题便于真机上区分窗口）。
@@ -185,8 +184,7 @@ struct TwinScene {
 
 /// @brief 窗口事件路由接线：计数器 + 独立 FocusManager，对齐 demo_common.h run_demo 纪律
 /// （鼠标/键盘/文本派发必须携带 FocusManager）。
-[[nodiscard]] auto make_route(au::Node &root, au::FocusManager &fm, int &counter)
-    -> std::function<void(au::Event &)> {
+[[nodiscard]] auto make_route(au::Node &root, au::FocusManager &fm, int &counter) -> std::function<void(au::Event &)> {
     fm.set_root(&root.widget());
     return [&root, &fm, &counter](au::Event &e) -> void {
         ++counter;
@@ -376,10 +374,11 @@ AURORA_TEST_P(MultiWindowBackends, resize_relayout_converges) {
     }
 #endif
     if (backend == e2e::Backend::Glfw) {
-        AURORA_TEST_SKIP("set_size does not propagate: surface size cache updates only in begin_frame, "
-                         "which idle frames skip (library-level gap, recorded)");
+        AURORA_TEST_SKIP(
+            "set_size does not propagate: surface size cache updates only in begin_frame, "
+            "which idle frames skip (library-level gap, recorded)");
     }
-#if !defined(_WIN32)
+#ifndef _WIN32
     if (backend == e2e::Backend::Wgpu) {
         AURORA_TEST_SKIP("wgpu host on this platform has no set_size override");
     }
@@ -407,11 +406,10 @@ AURORA_TEST_P(MultiWindowBackends, resize_relayout_converges) {
     session.surface().set_size(au::Size{.width = 320.0F, .height = 240.0F});
     AURORA_TEST_REQUIRE_MSG(static_cast<bool>(session.pump_until_settled()), "放大 resize 未收敛");
     const e2e::Frame enlarged_frame = read_checked(session);
-    AURORA_TEST_CHECK_MSG(
-        enlarged_frame.width != initial_frame.width || enlarged_frame.height != initial_frame.height,
-        "放大 resize 后帧尺寸应随动 (前 " + std::to_string(initial_frame.width) + "x" +
-            std::to_string(initial_frame.height) + ", 后 " + std::to_string(enlarged_frame.width) + "x" +
-            std::to_string(enlarged_frame.height) + ")");
+    AURORA_TEST_CHECK_MSG(enlarged_frame.width != initial_frame.width || enlarged_frame.height != initial_frame.height,
+                          "放大 resize 后帧尺寸应随动 (前 " + std::to_string(initial_frame.width) + "x" +
+                              std::to_string(initial_frame.height) + ", 后 " + std::to_string(enlarged_frame.width) +
+                              "x" + std::to_string(enlarged_frame.height) + ")");
     expect_frame_ratio(session, "放大后帧等比");
     const au::Size enlarged_logical = session.window().size();
     expect_pixel(enlarged_frame, enlarged_logical.width, enlarged_logical.height, 60.0F, 80.0F, AURORA_WIN_RED,
@@ -429,11 +427,10 @@ AURORA_TEST_P(MultiWindowBackends, resize_relayout_converges) {
         AURORA_TEST_REQUIRE_MSG(static_cast<bool>(session.pump_until_settled()),
                                 "第 " + std::to_string(i) + " 轮 resize 未收敛");
         const e2e::Frame round_frame = read_checked(session);
-        AURORA_TEST_CHECK_MSG(
-            round_frame.width != prev_frame.width || round_frame.height != prev_frame.height,
-            "第 " + std::to_string(i) + " 轮 resize 后帧尺寸应随动 (前 " + std::to_string(prev_frame.width) + "x" +
-                std::to_string(prev_frame.height) + ", 后 " + std::to_string(round_frame.width) + "x" +
-                std::to_string(round_frame.height) + ")");
+        AURORA_TEST_CHECK_MSG(round_frame.width != prev_frame.width || round_frame.height != prev_frame.height,
+                              "第 " + std::to_string(i) + " 轮 resize 后帧尺寸应随动 (前 " +
+                                  std::to_string(prev_frame.width) + "x" + std::to_string(prev_frame.height) + ", 后 " +
+                                  std::to_string(round_frame.width) + "x" + std::to_string(round_frame.height) + ")");
         expect_frame_ratio(session, "第 " + std::to_string(i) + " 轮 resize 帧等比");
         prev_frame = round_frame;
     }
@@ -466,13 +463,13 @@ AURORA_TEST_P(MultiWindowBackends, partial_dirty_preserves_previous_pixels) {
     AURORA_TEST_REQUIRE(static_cast<bool>(session.pump(1)));
     AURORA_TEST_CHECK_MSG(session.is_idle_frame(), "无脏登记时应 idle 跳帧");
     AURORA_TEST_CHECK_MSG(session.frame_count() == frames_after_first,
-                          "idle 跳帧不应产生新呈现帧 (before=" + std::to_string(frames_after_first) + ", after=" +
-                              std::to_string(session.frame_count()) + ")");
+                          "idle 跳帧不应产生新呈现帧 (before=" + std::to_string(frames_after_first) +
+                              ", after=" + std::to_string(session.frame_count()) + ")");
 
     // ---- 只标脏右半：仅裁剪区重绘（新色），裁剪外保留上帧像素（旧色）----
     // 探针 fill 已是新色：若实现整屏刷底色/整屏重绘，左半也会被画成新色；正确实现下
     // 裁剪外沿用上帧（window.h partial-clip 路径：跳过 begin_frame 保留上帧缓冲）。
-    const float half_w = spec.width * 0.5F;
+    const float half_w = static_cast<float>(spec.width) * 0.5F;
     session.window().mark_dirty(au::Rect{.origin = au::Point{.x = half_w, .y = 0.0F},
                                          .size = au::Size{.width = half_w, .height = static_cast<float>(spec.height)}});
     AURORA_TEST_CHECK_TRUE(session.has_pending_dirty());
@@ -528,8 +525,8 @@ AURORA_TEST_P(MultiWindowBackends, visibility_modes_coexist) {
     const int frames_na_b = na_b.frame_count();
     AURORA_TEST_REQUIRE(static_cast<bool>(na_a.pump(1)));
     AURORA_TEST_CHECK_MSG(na_a.frame_count() >= frames_na_a,
-                          "NoActivate A 帧计数应推进或持平 (before=" + std::to_string(frames_na_a) + ", after=" +
-                              std::to_string(na_a.frame_count()) + ")");
+                          "NoActivate A 帧计数应推进或持平 (before=" + std::to_string(frames_na_a) +
+                              ", after=" + std::to_string(na_a.frame_count()) + ")");
     AURORA_TEST_CHECK_MSG(na_b.frame_count() == frames_na_b,
                           "NoActivate B 帧计数不应被 A 的推进改变 (before=" + std::to_string(frames_na_b) +
                               ", after=" + std::to_string(na_b.frame_count()) + ")");
