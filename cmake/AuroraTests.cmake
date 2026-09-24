@@ -175,7 +175,9 @@ if (AURORA_BUILD_TESTS)
         # tools/servers/inspector_client.h——它直接调 Winsock（socket/bind/accept/select…），与那个开关无关。
         # 开关默认 OFF（CI 的 core 各作业即是），届时链接面上没有任何地方引入 ws2_32。
         if (WIN32)
-            target_link_libraries(${tgt} PRIVATE shcore ws2_32)
+            # oleacc —— E2E 平台语义通道（tools/include/e2e/uia_client.h）与探针
+            # aurora_verify_win32_ua 同一依赖口径（IID_IUIAutomation 等 COM 符号面）。
+            target_link_libraries(${tgt} PRIVATE shcore ws2_32 oleacc)
         endif ()
         if (TARGET aurora_inspector_server)
             target_link_libraries(${tgt} PRIVATE aurora_inspector_server)

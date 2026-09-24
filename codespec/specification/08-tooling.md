@@ -583,6 +583,7 @@ mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effec
 | 收敛与超时 | `pump_until_settled(max_frames)` 以「`Window::is_idle_frame()` 且无运行中动画」收敛；预算内未收敛返回 `RuntimeAsyncTimeout`，消息含已推进帧数、最后脏区状态、idle 帧状态与活跃动画数（可直接作为失败原因）。注意：**自驱动手势滑动**（`Scroll` 收位滑动等，不占 `Animator`）不在此判据覆盖内，其收敛协议见下文交互流往返层 |
 | 像素读回 | `capture_frame(const Surface &)` = `Surface::data()` + `Surface::framebuffer_size()` 组合，返回帧缓冲**物理像素**的 RGBA 帧；**未新增 `Surface` 公共读回虚方法**。`data()` 为 `nullptr`（后端未覆写读回，或该后端的读回受 `AURORA_ENABLE_DEBUG` 门控且未生效）时返回 `GeneralNotSupported`，消息沿用 `save_snapshot` 既有的 "framebuffer capture unavailable"；不返回空帧、不伪造内容 |
 | 查询面 | `collect_preorder` / `find_by_key` / `find_by_type` / `find_by_text` / `read_prop` 全部建立在**公共自描述通道**上（`Node::id()` / `Widget::type_name()` / `Widget::serialize_props` / `Widget::child_nodes()`），**不依赖 `TestController`**——后者整头受 `AURORA_BACKEND_HEADLESS` 门控，若查询面依赖它，「关掉无头后端但开真实后端」的构建里 E2E 恰好失去查询能力 |
+| 语义快照 | `Session::semantic_snapshot()` 返回统一语义快照（`a11y::TreeSnapshot`：先序扁平 + `parent_id` + `by_id`，形状与 `widget/a11y_diff.h` 一致），`find_semantic_node()` 按角色（可选名称）先序取首个命中、`semantic_role_name()` 供报告可读名。快照与平台桥**同源**（同一 `build_accessibility_tree`，含 Name 回退链与 labelled_by 解析）——对快照成立的断言，平台桥投影也应成立；未建窗 / 未挂根返回 `GeneralInvalidArgument`，与 `read_pixels` 漏检口径一致 |
 | 输入注入 | `tap` / `drag` / `scroll` / `enter_text` 经 `Inspector::simulate_*` 走真实命中测试与冒泡派发（目标式语义），而非直接改控件状态；注入成功后登记「下一帧全量重绘」，模拟真实平台输入事件唤醒帧循环 |
 | 生命周期 | `Session` 以 RAII 兜底窗口生命周期：用例中途断言失败、抛出异常或提前 return 时析构即关闭窗口并回收宿主，不残留幽灵窗口；该保证不依赖用例显式调用清理函数，也不依赖测试框架的断言宏 |
 
@@ -667,8 +668,9 @@ CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI �
   聚焦背景）。
 - 帧等比率口径：读回帧与逻辑尺寸的**等比率**（纵横比一致，容差 0.02）是跨后端不变量；「物理 =
   逻辑 × scale」**不是**——GLFW 软件路径读回帧为逻辑尺寸，Win32 家族为物理尺寸。断言不得绑定绝对
-  物理像素，`scale_factor()` 逐窗动态读取（同进程首个 Win32 窗 scale 恒 1.0、第二个起为系统真实
-  缩放），DPI 缩放环境下的采样点按帧/逻辑尺寸比例映射。
+  物理像素，`scale_factor()` 逐窗动态读取（Win32 的 scale 成员在 DPI 感知启用前初始化——进程首窗
+  恒 1.0、后续窗口为系统真实缩放，属已知库层缺口，见下文 resize 条），DPI 缩放环境下的采样点按
+  帧/逻辑尺寸比例映射。
 - 生命周期：关闭一窗不影响另一窗继续渲染读回；RAII 兜底经异常路径验证（中途 throw 后 `Session`
   析构关窗、不残留幽灵窗口）；同规格重建与连续开关循环成功（资源不泄漏的可移植运行时证据；OS 层
   枚举窗口数不可移植，不做）。
@@ -677,6 +679,14 @@ CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI �
   空实现、尺寸缓存仅在 `begin_frame` 刷新，而 `set_size` 后无脏登记 → present 判 idle 跳帧 →
   `begin_frame` 不执行，形成 idle 死锁（hidden 与 NoActivate 均复现）；X11/Wayland 未 override
   `set_size`（虚默认空实现）。
+- resize 的 Win32 几何口径：`Win32Host::set_size` 已与构造路径同换算（逻辑 × scale → `AdjustWindowRectEx`
+  非客户区补偿 → `SetWindowPos`），保证客户区尺寸 == 请求逻辑尺寸——此前逻辑值被直接当外框尺寸传
+  下去，客户区被 chrome 挤占（标题栏随 DPI 放大尤甚，150% 显示器上客户区逻辑高度可比请求值缩水近半）。
+  遗留缺口（守卫 skip 记录在案）：`Win32Host` 的 scale 成员在成员初始化列表取值、早于构造体内的
+  `enable_dpi_awareness()`——进程首窗 scale 恒 1.0，而 `WM_SIZE` 的逻辑换算用实时 `dpi_scale()`（感知
+  生效后为系统真实缩放），≠100% DPI 显示器上帧/逻辑/scale 三方记账发散，resize 用例以三方一致性守卫
+  skip；100% DPI 环境（含 CI）三方恒 1.0 不受影响。修复须连带评估首窗 scale 语义变更对坐标换算面
+  （鼠标 / IME / a11y 投影矩形）的影响，独立成题。
 - 脏区语义（`present_root` partial-clip 路径）：树状态已变但无脏登记时 idle 跳帧（`frame_count` 不增、
   `has_pending_dirty()` 为假）；手动 `mark_dirty` 局部矩形后仅裁剪区重绘、**裁剪外保留上帧像素**（与
   「整屏刷底色」实现可区分——后者会画出已变的新色）；随后补标另一侧再验证增量覆盖。
@@ -687,6 +697,32 @@ CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI �
   都会挂自己的驱动器（最近 open 者为当前实例），mount 期之后的运行期动画注册落当时的当前实例、
   `pump` 只推进本会话自己的 `Animator`——多会话交错推进时跨会话动画推进无保证。多窗用例因此只用
   静态场景，交互动画推进语义由交互流往返层覆盖。
+
+**无障碍语义通道层**（`tests/e2e/etest_a11y_semantics.cpp`）：像素冒烟证明「画得出」，本层证明
+「说得出」——控件树的无障碍语义经真实窗口上屏链路**到达平台**。六后端矩阵 × 两用例，与矩阵套件
+通用纪律（fixture 类名唯一、`AURORA_E2E_EXPECT` 记账）一致。要点与实测口径：
+
+- 统一期望表：进程内快照与平台通道投影**共用同一张期望表**（同源语义树，断言同词汇）。五类控件
+  覆盖三类动作面（Invoke / Toggle / Value）与两条名称回退链（显式 label、兄弟标签）。
+- 用例一 `semantic_snapshot_matches_widgets`（全矩阵）：像素通道与语义快照断言**并列独立记账**——
+  读回不可用按期望集口径记账，不推翻语义断言、也不被语义断言掩盖。语义面锁 角色 / 名称回退链 /
+  动作位（Invoke|Click|Focus、Toggle、Value）/ 几何非空 / 状态位（checked）/ 值域投影。
+- 用例二 `platform_bridge_projects_semantics`（按平台选通道）：真实平台查询端到端——Windows 经
+  UIA 客户端直连（`tools/include/e2e/uia_client.h`：`CoCreateInstance(CUIAutomation8)` →
+  `ElementFromHandle` 内部即 `WM_GETOBJECT` → 控件视图遍历器先序下钻，与读屏完全同径），只比对
+  `FrameworkId=="Aurora"` 的库自有投影（排除系统在同一层合成的非客户区元素）；Linux 经 AT-SPI
+  子进程客户端（`tools/include/e2e/atspi_client.h`：python3-gi 枚举桌面树找 FRAME==窗口标题，
+  输出 `NODE|role|name` 行；客户端可用性以 python3-gi 探测，无会话总线是合法永久降级）；
+  macOS AX 通道未实现（已知缺口，skip 桩）。通道内的角色/名称/pattern/几何断言与快照用例同表。
+- 库层修复回写（`WM_GETOBJECT` 激活回归）：`win32_host.cpp` 的根请求比较此前写作
+  `std::cmp_not_equal(static_cast<DWORD>(lParam), UiaRootObjectId)`——混合符号安全比较按**数学值**
+  判等，`0xFFFFFFE7` 与 `-25` 永不命中，内置桥无法经 `WM_GETOBJECT` 激活（真机探针时代的
+  「两侧都截断到 DWORD」惯例被后续类型安全改写静默破坏；当时无 etest 覆盖故未发现）。恢复两侧
+  截断比较（UIA 协议本身即 `(DWORD)lParam == (DWORD)id`）后，UIA 返回完整 Aurora 投影。
+- 平台客户端实现口径：`uia_client.h` / `atspi_client.h` 位于 `tools/include/e2e/`，与探针、etest
+  共用；UIA 侧属性读取走 `GetCurrentPropertyValueEx(..., TRUE)`（不因属性缺失抛错）、树遍历按
+  深度/总量封顶逐层 `Release`；MinGW 的 `uiautomation.h` 是 stub（常量为 `#define`、无
+  `UIA_PROPERTY_ID` 类型别名），接口形参按 int 收敛。
 
 ---
 

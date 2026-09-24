@@ -615,7 +615,10 @@ auto Win32Host::Impl::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<L
         }
     }
     constexpr LONG uia_root_object_id = -25;
-    if (std::cmp_not_equal(static_cast<DWORD>(lp), uia_root_object_id)) {
+    // UIA 根请求的 lParam = UiaRootObjectId(-25)：按 Win32 惯例两侧都截断到 DWORD 比较。
+    // 不可用混合符号的安全比较（cmp_not_equal 按数学值判等，0xFFFFFFE7 与 -25 永不命中，
+    // 曾致内置桥无法经 WM_GETOBJECT 激活）；UIA 协议本身就是 (DWORD)lParam == (DWORD)id。
+    if (static_cast<DWORD>(lp) != static_cast<DWORD>(uia_root_object_id)) {
         return std::nullopt;  // 非 UIA 根请求：交 DefWindowProc（MSAA 兜底）
     }
     if (hwnd == nullptr) {
@@ -925,8 +928,18 @@ auto Win32Host::set_size(Size s) const -> void {
     if (pimpl_->hwnd == nullptr) {
         return;
     }
-    SetWindowPos(pimpl_->hwnd, nullptr, 0, 0, static_cast<int>(std::lround(s.width)),
-                 static_cast<int>(std::lround(s.height)), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    // 逻辑 dp → 物理客户区 → 物理外框：× scale 换算后做非客户区补偿（与构造路径同一
+    // 口径），保证 set_size 后客户区尺寸 == 请求的逻辑尺寸。若把逻辑值直接当外框尺寸
+    // 传 SetWindowPos，客户区会被 chrome 挤占（标题栏随 DPI 放大时尤甚），几何漂移。
+    const auto win_style = static_cast<DWORD>(GetWindowLongPtrA(pimpl_->hwnd, GWL_STYLE));
+    const auto ex_style = static_cast<DWORD>(GetWindowLongPtrA(pimpl_->hwnd, GWL_EXSTYLE));
+    RECT rect{.left = 0,
+              .top = 0,
+              .right = static_cast<int>(std::lround(s.width * pimpl_->scale)),
+              .bottom = static_cast<int>(std::lround(s.height * pimpl_->scale))};
+    AdjustWindowRectEx(&rect, win_style, GetMenu(pimpl_->hwnd) != nullptr ? TRUE : FALSE, ex_style);
+    SetWindowPos(pimpl_->hwnd, nullptr, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 }  // namespace aurora

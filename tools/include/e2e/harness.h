@@ -38,6 +38,7 @@
 
 #include "aurora/aurora.h"
 #include "aurora/inspector/inspector_api.h"
+#include "aurora/widget/a11y_diff.h"
 #include "aurora/widget/node.h"
 #include "aurora/widget/widget.h"
 
@@ -235,6 +236,66 @@ inline constexpr std::string_view AURORA_TEXT_PROP_KEYS[] = {"content", "text", 
         }
     }
     return hits;
+}
+
+// ============================================================
+// 语义快照查询面（无障碍断言）
+// ------------------------------------------------------------
+// 统一语义形状即公共头 `widget/a11y_diff.h` 的 `TreeSnapshot`：节点携带角色 / 名称 /
+// 几何 / 状态 / 取值域 / 可执行动作，与三平台桥（UIA / AT-SPI / Wasm ARIA）投影同源
+// （同一 `build_accessibility_tree`，含 Name 回退链与 labelled_by 解析）。用例侧断言
+// 代码据此跨平台复用：同一张期望表既可对进程内快照断言，也可对平台通道投影
+// （`uia_client.h` / `atspi_client.h`）断言——通道只负责「平台确实收到了」。
+// ============================================================
+
+/// @brief 角色的稳定短名（失败消息可读；与 `backend_name` 同族）。
+[[nodiscard]] constexpr auto semantic_role_name(AccessibilityRole role) -> const char * {
+    switch (role) {
+        case AccessibilityRole::Generic:
+            return "generic";
+        case AccessibilityRole::Button:
+            return "button";
+        case AccessibilityRole::Text:
+            return "text";
+        case AccessibilityRole::TextInput:
+            return "text_input";
+        case AccessibilityRole::Checkbox:
+            return "checkbox";
+        case AccessibilityRole::Switch:
+            return "switch";
+        case AccessibilityRole::Slider:
+            return "slider";
+        case AccessibilityRole::Image:
+            return "image";
+        case AccessibilityRole::List:
+            return "list";
+        case AccessibilityRole::ListItem:
+            return "list_item";
+        case AccessibilityRole::Header:
+            return "header";
+        case AccessibilityRole::Progress:
+            return "progress";
+        case AccessibilityRole::Dialog:
+            return "dialog";
+    }
+    return "unknown";
+}
+
+/// @brief 按角色（可加名字过滤）先序查首个语义节点；未命中返回 nullptr。
+///
+/// 名字为空表示不限；命中顺序即先序，与平台侧「读屏首个命中」直觉一致。
+[[nodiscard]] inline auto find_semantic_node(const a11y::TreeSnapshot &snapshot, AccessibilityRole role,
+                                             std::string_view name = {}) -> const a11y::NodeSnapshot * {
+    for (const a11y::NodeSnapshot &node : snapshot.flat) {
+        if (node.node.role != role) {
+            continue;
+        }
+        if (!name.empty() && node.node.name != name) {
+            continue;
+        }
+        return &node;
+    }
+    return nullptr;
 }
 
 /// @brief 读回一帧像素：基底是 `Surface::data()` + `Surface::framebuffer_size()` 组合。
@@ -477,6 +538,25 @@ class Session {
                            std::string{"read_pixels: session has no window (backend unavailable: "} + reason_ + ")")};
         }
         return capture_frame(window_->surface());
+    }
+
+    /// @brief 投影当前已挂载控件树的统一语义快照（进程内无障碍断言面）。
+    ///
+    /// 与平台桥投影同源（同一 `build_accessibility_tree`，含 Name 回退链与 labelled_by
+    /// 解析），故用例期望只需写一份：对快照成立的断言，平台通道投影也应成立。
+    /// 前置：根已挂载且已 present 过至少一帧（几何优先取绘制盒）；未建窗或未挂根
+    /// 返回 `GeneralInvalidArgument`，与 `read_pixels` 的漏检口径一致。
+    [[nodiscard]] auto semantic_snapshot() const -> Result<a11y::TreeSnapshot> {
+        if (window_ == nullptr) {
+            return Result<a11y::TreeSnapshot>{make_error(
+                ErrorCode::GeneralInvalidArgument,
+                std::string{"semantic_snapshot: session has no window (backend unavailable: "} + reason_ + ")")};
+        }
+        if (!root_) {
+            return Result<a11y::TreeSnapshot>{
+                make_error(ErrorCode::GeneralInvalidArgument, "semantic_snapshot: no root mounted")};
+        }
+        return Result<a11y::TreeSnapshot>{a11y::build_tree_snapshot(root_.widget())};
     }
 
   private:
