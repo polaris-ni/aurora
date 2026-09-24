@@ -1,5 +1,7 @@
 #include "aurora/app/window_host.h"
 
+#include <algorithm>
+
 #include "aurora/app/display.h"
 #include "aurora/app/scroll_storage.h"
 #include "aurora/window/frame_pacing.h"
@@ -159,7 +161,9 @@ auto WindowHost::render_frame(double dt) -> Result<bool> {
     Result<bool> r = window_->present_root(scene_.root_node());
     // present_root 返回 Result<bool>：idle 跳过亦为 true（内部未做任何渲染）。
     if (window_->is_idle_frame()) {
-        active_stats_->record_idle();
+        // 传入本帧墙钟间隔：idle 帧同样消耗了一段等待时间，「距上次实际渲染已过去多久」
+        // 要靠它累加（`FrameStats::is_stale()` 的判据）。
+        active_stats_->record_idle(dt);
     } else {
         active_stats_->record(dt);
     }
@@ -174,7 +178,15 @@ auto WindowHost::decide_wait(double frame_budget_ms, bool anim_active, double ne
     // 活跃信号：运行中动画，或本帧实际渲染了（非 idle）——后者覆盖「每帧在 on_frame 里标脏」
     // 类模式（脏已被同帧 present 消费，仅看脏会误判空闲而深睡）；真正空闲帧不受影响。
     const bool active = anim_active || !window_->is_idle_frame();
-    return compute_wait_timeout(window_->has_pending_dirty(), active, next_deadline_ms, frame_budget_ms, elapsed_ms,
+    // HUD 刷新并入「非渲染唤醒」截止时间，取二者最早。不并入的后果：整树无脏时下面的空闲
+    // 分支会睡到下一个定时器（无定时器即 `<0` 无限深睡），叠加层再也醒不过来、HUD 永远停在
+    // 最后一帧的读数上。 `<0` 表示「无此唤醒源」，不参与最小比较。
+    double deadline_ms = next_deadline_ms;
+    const double hud_due_ms = window_->hud_refresh_due_ms();
+    if (hud_due_ms >= 0.0) {
+        deadline_ms = deadline_ms < 0.0 ? hud_due_ms : std::min(deadline_ms, hud_due_ms);
+    }
+    return compute_wait_timeout(window_->has_pending_dirty(), active, deadline_ms, frame_budget_ms, elapsed_ms,
                                 window_->surface().paces_frames());
 }
 

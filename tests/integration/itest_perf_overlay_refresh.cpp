@@ -3,8 +3,10 @@
 /// 测试说明: 回归 PerfOverlay 被 DisplayList 缓存冻结（HUD 面板静止在「采样中」/全零）：
 ///           机制断言 PerfOverlay 禁 DL 缓存；行为断言在 headless 帧循环下两个时间点抓取
 ///           整帧像素，叠加层实时刷新则两帧像素必显著不同（被 DL 冻结则 diff=0）。
+///           另覆盖「界面完全静止时叠加层仍须按刷新周期重绘」——否则读数永久停在最后一帧。
 /// 覆盖说明: 两阶段以不同均值的合成 dt 驱动 FrameStats 滑动窗口（统计差异确定性成立，
 ///           不依赖墙钟节奏）；每阶段保留 >500ms 墙钟跨度仅为触发 HUD 2Hz 刷新节流。
+///           静止用例同理：跨越两个刷新周期后断言像素有变化。
 
 #include <chrono>
 #include <cmath>
@@ -130,6 +132,58 @@ AURORA_TEST_CASE(overlay_refreshes_live_not_frozen) {
     AURORA_TEST_CHECK_MSG(diff > 500,
                           "PerfOverlay should refresh live: two-frame pixel diff should be significant "
                           "(>500B). If 0, frozen at first frame by DL");
+}
+
+AURORA_TEST_CASE(idle_window_refreshes_overlay_instead_of_freezing) {
+    // 场景：界面完全静止（无脏区、无动画）而叠加层仍可见。旧行为下空闲决策在 HUD 合成段之前
+    // 整帧 return，叠加层再也得不到重绘 ⇒ 屏幕上的读数永久停在最后一帧（「FPS 卡在 400+」类
+    // 现象的另一半成因）。本用例锁定「空闲期仍会为 HUD 出帧」。
+    FrameStats::instance().reset();
+
+    Scene scene{Node{std::make_shared<Column>()}};
+    WindowOptions opts;
+    opts.size = Size{.width = 1100.0F, .height = 760.0F};
+    auto win_res = create_window(HeadlessOptions{opts});
+    AURORA_TEST_REQUIRE(static_cast<bool>(win_res));
+    Application app{std::move(scene), std::move(win_res.value()), opts};
+
+    auto ov = std::make_shared<PerfOverlay>();
+    app.set_overlay(ov);
+
+    Window *win = app.window();
+    AURORA_TEST_REQUIRE_NOT_NULL(win);
+    Node &root = app.scene().root_node();
+
+    // 预热：驱动出一份「活跃」稳定读数（window_size ≥ 2、未陈旧）。
+    drive_frames(*win, root, 0, 30, 0.016);
+    AURORA_TEST_CHECK_FALSE(FrameStats::instance().is_stale());
+    std::vector<std::uint8_t> snap_active;
+    capture_surface(win->surface(), snap_active);
+
+    // 静置：**不再标脏**（真实空闲循环），只泵帧并像 `WindowHost::render_frame` 那样喂 idle 时长。
+    // 跨度取 1.2s —— 覆盖刷新周期（500ms）两个整轮，确保「陈旧标注」那一版 HUD 确实被画出来。
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1200);
+    auto last = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() < deadline) {
+        (void)win->present_root(root);
+        const auto now = std::chrono::steady_clock::now();
+        FrameStats::instance().record_idle(std::chrono::duration<double>(now - last).count());
+        last = now;
+        std::this_thread::sleep_for(std::chrono::milliseconds(8));
+    }
+
+    AURORA_TEST_CHECK_TRUE(FrameStats::instance().is_stale());
+    std::vector<std::uint8_t> snap_idle;
+    capture_surface(win->surface(), snap_idle);
+    const long diff = pixel_diff(snap_active, snap_idle);
+    AURORA_TEST_PRINTF("[overlay] idle-phase pixel diff=%ld bytes (>0 proves the HUD was refreshed while idle)\n",
+                       diff);
+
+    // 行为断言：静止期画面确实变了（HUD 重绘过）。旧行为下差异恒为 0（HUD 冻结在最后一次
+    // 活跃帧的读数上）。差异来自第一行：追加 stale 标注 + 由绿转灰。
+    AURORA_TEST_CHECK_MSG(diff > 0,
+                          "overlay must still refresh while the window is idle: pixel content should "
+                          "change once the FPS reading goes stale");
 }
 
 }  // namespace aurora::test_cases::itest_perf_overlay_refresh

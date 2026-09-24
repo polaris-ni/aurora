@@ -48,7 +48,22 @@ class Inspector {
     static auto get_state(std::string_view path, const Node &root) -> Json;
 
     /// @brief 按索引路径定位节点。
+    /// @note 只沿 `child_nodes()` 下降 ⇒ 到不了虚拟化容器（`NavigatorHost` / `LazyList` 等
+    /// `child_nodes()` 恒空者）的子树；返回的 `Node` 是副本。HTTP / MCP 等按路径寻址的入口
+    /// 应改用 `find_widget`。
     static auto find_node(const Node &root, std::string_view path) -> Node;
+
+    /// @brief 按索引路径定位控件（空路径即根自身）；越界或非法路径返回 `nullptr`。
+    ///
+    /// 与 `find_node` 的差别：① 返回裸 `Widget *`，下降全程走统一遍历
+    /// （`child_nodes()`，为空时回退 `for_each_child`），因此**能寻址虚拟化容器的子树**；
+    /// ② 不构造任何 `Node` 副本，故不会因副本析构清掉兄弟节点的 `layout_parent_`。
+    ///
+    /// 与 `tree_json_full` 的枚举口径一致 —— 按路径寻址的入口须与本函数同源，否则
+    /// 同一路径在树快照与单控件查询下会指向不同控件。
+    ///
+    /// @return 命中控件指针（生命周期由树持有的 shared_ptr 保证）；非法路径或越界返回 `nullptr`。
+    static auto find_widget(Widget &root, std::string_view path) -> Widget *;
 
     // ── 属性读写 ──
 

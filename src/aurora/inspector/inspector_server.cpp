@@ -638,12 +638,15 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         }
 
         if (method == "GET") {
-            // 整个 remainder 作为树路径
-            Node target = Inspector::find_node(root, remainder);
-            if (!target) {
+            // 整个 remainder 作为树路径。
+            // 寻址必须走 `find_widget`（统一遍历：`child_nodes()`，空则回退 `for_each_child`），
+            // 与 `/api/tree` 的枚举口径同源；否则虚拟化容器（NavigatorHost / LazyList 等）的
+            // 子树在树快照里看得见、按路径却取不到（两者取了不同遍历源）。
+            Widget *target = Inspector::find_widget(root.widget(), remainder);
+            if (target == nullptr) {
                 return error_response(404, "Widget not found at path: " + remainder);
             }
-            nlohmann::json props = Inspector::get_prop(target.widget());
+            nlohmann::json props = Inspector::get_prop(*target);
             return json_response(200, "OK", props);
         }
 
@@ -661,8 +664,8 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
                 }
                 tree_path += segments[i];
             }
-            Node target = Inspector::find_node(root, tree_path);
-            if (!target) {
+            Widget *target = Inspector::find_widget(root.widget(), tree_path);
+            if (target == nullptr) {
                 return error_response(404, "Widget not found at path: " + tree_path);
             }
 
@@ -673,7 +676,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             } catch (const nlohmann::json::parse_error &e) {
                 return error_response(400, std::string("Invalid JSON body: ") + e.what());
             }
-            auto result = Inspector::set_prop(target.widget(), prop_name, value);
+            auto result = Inspector::set_prop(*target, prop_name, value);
             if (!result) {
                 return error_response(400, "Failed to set property: " + result.error().message);
             }
@@ -718,7 +721,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         }
         // 字段类型一律前置显式校验：nlohmann 的 value()/get() 遇类型不符会抛 type_error，
         // 任其逃逸只会变成 500，调用方拿不到「哪个字段错了」。
-        // `path` 必须存在且为字符串；空串表示树根本身（与 `find_node_by_path` 的空路径语义一致）。
+        // `path` 必须存在且为字符串；空串表示树根本身（与 `Inspector::find_widget` 的空路径语义一致）。
         const auto path_it = payload.find("path");
         if (path_it == payload.end() || !path_it->is_string()) {
             return error_response(
@@ -752,19 +755,21 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
                 if (!root) {
                     return Json{{"ok", false}, {"status", 500}, {"error", "Widget tree root is null"}};
                 }
-                Node target = Inspector::find_node(root, widget_path);
-                if (!target) {
+                // 寻址与 `/api/tree` 的枚举同源（`find_widget` 走统一遍历），否则虚拟化容器
+                // 下「树里能看到」与「能点到」会不一致。
+                Widget *target = Inspector::find_widget(root.widget(), widget_path);
+                if (target == nullptr) {
                     return Json{{"ok", false}, {"status", 404}, {"error", "Widget not found at path: " + widget_path}};
                 }
                 std::string failure;
                 if (action == "click") {
-                    const Result<void> r = Inspector::simulate_click(target.widget());
+                    const Result<void> r = Inspector::simulate_click(*target);
                     failure = r ? std::string{} : r.error().message;
                 } else if (action == "scroll") {
-                    const Result<void> r = Inspector::simulate_scroll(target.widget(), dx, dy);
+                    const Result<void> r = Inspector::simulate_scroll(*target, dx, dy);
                     failure = r ? std::string{} : r.error().message;
                 } else {
-                    const Result<void> r = Inspector::simulate_text_input(target.widget(), text);
+                    const Result<void> r = Inspector::simulate_text_input(*target, text);
                     failure = r ? std::string{} : r.error().message;
                 }
                 if (!failure.empty()) {

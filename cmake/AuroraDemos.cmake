@@ -37,10 +37,15 @@ else ()
     aurora_log("Aurora demos disabled (set AURORA_BUILD_DEMOS=ON to define them)")
 endif ()
 
-# demo_google_play 接入 InspectorServer 远程检视：主文件已保证本模块在 include(AuroraTools) 之后引入，
+# 接入 InspectorServer 远程检视的 demo：主文件已保证本模块在 include(AuroraTools) 之后引入，
 # 此时 aurora_inspector_server 目标（AURORA_BUILD_INSPECTOR_SERVER=ON 时定义，跨平台）已存在。
 # 其 PUBLIC 导出的 AURORA_BUILD_INSPECTOR_SERVER 宏随链接注入 demo，启用 demo 内 HTTP 远程检视代码；
 # Release / 未开选项时该目标不存在 → 跳过，demo 内 InspectorServer 分支整编译剔除，零链接依赖。
-if (AURORA_BUILD_DEMOS AND TARGET demo_google_play AND TARGET aurora_inspector_server)
-    target_link_libraries(demo_google_play PRIVATE aurora_inspector_server)
-endif ()
+#   * demo_google_play      应用级演示：检视 Navigator 驱动的真实界面；
+#   * demo_inspector_server 人工测试载体：根树为扁平表单、索引路径稳定，供 /api/* 逐端点验证。
+set(AURORA_INSPECTOR_DEMOS demo_google_play demo_inspector_server)
+foreach (inspector_demo IN LISTS AURORA_INSPECTOR_DEMOS)
+    if (AURORA_BUILD_DEMOS AND TARGET ${inspector_demo} AND TARGET aurora_inspector_server)
+        target_link_libraries(${inspector_demo} PRIVATE aurora_inspector_server)
+    endif ()
+endforeach ()

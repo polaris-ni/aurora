@@ -2,15 +2,18 @@
 /// 目标单元: include/aurora/inspector/inspector_api.h
 /// 测试说明: 覆盖 Inspector 统一门面——树查询四件套（text/rich/json/json_full）、widget_info
 /// 与属性读写（get_prop_value 未命中返回 null、set_prop 容忍未知键）、apply_patch 路径补丁
-/// 与非数组错误、query/find_node/get_state 定位、validate 错误→Diagnostic 映射、组件发现、
-/// to_code、变化订阅生命周期、simulate_* 交互模拟（点击计数 / 获焦、文本落字、滚动偏移等
-/// 状态变化与不可命中时的错误返回）。
+/// 与非数组错误、query/find_node/get_state 定位、find_widget 的控件级寻址（空路径为根、
+/// 非法段与越界拒绝，以及在虚拟化根下与树快照的枚举同源）、validate 错误→Diagnostic 映射、
+/// 组件发现、to_code、变化订阅生命周期、simulate_* 交互模拟（点击计数 / 获焦、文本落字、
+/// 滚动偏移等状态变化与不可命中时的错误返回）。
 
 #include <memory>
 #include <string>
 
+#include "aurora/animation/animator.h"
 #include "aurora/inspector/inspector_api.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/navigation/navigator_host.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/scroll.h"
@@ -51,6 +54,28 @@ auto box(float w, float h) -> Node { return Node{std::make_shared<FixedBox>(w, h
 
 auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
+
+/// @brief 逐节点比对「JSON 快照在路径 P 处的 type」与「`find_widget(root, P)` 命中的控件类型」。
+///
+/// 「枚举端与寻址端同源」是本模块的核心不变量：两处若取不同遍历源（一处 `child_nodes()`、
+/// 一处 `for_each_child`），同一路径在树快照与单控件查询下会指向不同控件——`a11y_diff.h`
+/// 对同款不变量亦有告警。返回实际比对到的节点数，供调用方断言遍历确实走满（而非中途空转
+/// 也让测试通过）。
+auto cross_check_enum_and_address(Widget &root, const Json &node_json, const std::string &path) -> std::size_t {
+    Widget *w = Inspector::find_widget(root, path);
+    AURORA_TEST_CHECK_TRUE(w != nullptr);
+    if (w == nullptr) {
+        return 0;
+    }
+    AURORA_TEST_CHECK_EQ(node_json["type"], Json(w->type_name()));
+    std::size_t visited = 1;
+    const Json &children = node_json["children"];
+    for (std::size_t i = 0; i < children.size(); ++i) {
+        const std::string child_path = path.empty() ? std::to_string(i) : path + "/" + std::to_string(i);
+        visited += cross_check_enum_and_address(root, children[i], child_path);
+    }
+    return visited;
 }
 
 }  // namespace
@@ -152,6 +177,53 @@ AURORA_TEST_CASE(query_and_find_node_by_path) {
     AURORA_TEST_CHECK_TRUE(static_cast<bool>(child));
     AURORA_TEST_CHECK_EQ(child.widget().type_name(), std::string_view{"Text"});
     AURORA_TEST_CHECK_FALSE(static_cast<bool>(Inspector::find_node(root, "9")));
+}
+
+AURORA_TEST_CASE(find_widget_by_path_resolves_and_rejects_invalid) {
+    Node root = make_tree();
+    Widget &w = root.widget();
+
+    // 空路径即根自身；层级路径逐段下降。
+    AURORA_TEST_CHECK_EQ(Inspector::find_widget(w, ""), &w);
+    Widget *child = Inspector::find_widget(w, "0");
+    AURORA_TEST_REQUIRE_TRUE(child != nullptr);
+    AURORA_TEST_CHECK_EQ(child->type_name(), std::string_view{"Text"});
+
+    // 非法路径段不得被当成下标 0：否则一个 typo（"abc"）会静默命中根的首个子节点，
+    // 调用方拿到的控件与请求的路径毫无关系。
+    AURORA_TEST_CHECK_TRUE(Inspector::find_widget(w, "abc") == nullptr);
+    AURORA_TEST_CHECK_TRUE(Inspector::find_widget(w, "0/x") == nullptr);
+    // 越界：本层与中间层分别返回 nullptr。
+    AURORA_TEST_CHECK_TRUE(Inspector::find_widget(w, "9") == nullptr);
+    AURORA_TEST_CHECK_TRUE(Inspector::find_widget(w, "0/0") == nullptr);
+}
+
+AURORA_TEST_CASE(find_widget_and_tree_json_full_reach_virtualized_root) {
+    // `NavigatorHost` 把当前页存在 `Node` 之外的私有成员里，按约定**不覆写** `child_nodes()`
+    // （故无可交出的 `Node`；见 `a11y_tree.h` 的同款兜底说明）。于是「枚举」与「寻址」都必须
+    // 走统一遍历（`child_nodes()` 为空则回退 `for_each_child`），否则页面在树快照里看不见、
+    // 按路径也取不到 —— 这正是新增 `find_widget` 的理由。
+    Animator anim;
+    auto host = std::make_shared<NavigatorHost>(anim);
+    host->push(Route{make_tree(), "home"});
+    Node root{host};  // 供门面的 `Node` 入口使用；host 为树根，本无 `layout_parent_` 可被清
+
+    const Json tree = Inspector::tree_json_full(root);
+    AURORA_TEST_CHECK_EQ(tree["type"], "NavigatorHost");
+    // 旧口径（只沿 `child_nodes()`）此处恒为 0 —— 断言为 1 即锁定「子树可见」。
+    AURORA_TEST_REQUIRE_EQ(tree["children"].size(), 1U);
+
+    // 页面被 `Provider<std::shared_ptr<HeroRegistry>>` 包裹，故树形为
+    // NavigatorHost → Provider → Column → Text（`rebuild_display` 的统一包装层）。
+    AURORA_TEST_CHECK_EQ(tree["children"][0]["children"][0]["type"], "Column");
+    AURORA_TEST_CHECK_EQ(tree["children"][0]["children"][0]["children"][0]["type"], "Text");
+
+    // 旧入口只沿 `child_nodes()` 下降，在虚拟化容器下必然断链 —— 与上一行形成对照。
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(Inspector::find_node(root, "0")));
+
+    // 同源不变量：快照里每个节点的路径都能被 `find_widget` 命中，且指向同一类型。
+    const std::size_t visited = cross_check_enum_and_address(*host, tree, "");
+    AURORA_TEST_CHECK_EQ(visited, 4U);  // NavigatorHost / Provider / Column / Text
 }
 
 AURORA_TEST_CASE(get_state_walks_json_tree) {

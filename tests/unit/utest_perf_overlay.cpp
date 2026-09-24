@@ -1,8 +1,9 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/app/perf_overlay.h
 /// 测试说明: 覆盖 FrameStats 滑动窗口统计（fps/avg/worst/百分位/jitter、掉帧/hitch/idle、
-/// 分阶段计时、唤醒观测、非正 dt 忽略）与 PerfOverlay 开关语义、统计行文本的
-/// 采样中/就绪语义、fps 告警色阈值、布局填充与自描述
+/// 分阶段计时、唤醒观测、非正 dt 忽略）、停帧陈旧语义（is_stale / stale_duration_ms 的
+/// 累加·清零·越阈，及 `fps()` 保持末值不归零）与 PerfOverlay 开关语义、统计行文本的
+/// 采样中/就绪/陈旧标注语义、fps 告警色阈值、布局填充与自描述
 
 #include <string>
 
@@ -86,6 +87,74 @@ AURORA_TEST_CASE(frame_stats_ignores_nonpositive_dt) {
     AURORA_TEST_CHECK_EQ(s.window_size(), std::size_t{0});
     AURORA_TEST_CHECK_EQ(s.total_frames(), std::size_t{0});
     AURORA_TEST_CHECK_NEAR(s.fps(), 0.0, 1e-4);
+}
+
+AURORA_TEST_CASE(frame_stats_staleness_marks_stopped_rendering) {
+    auto &s = FrameStats::instance();
+    s.reset();
+
+    // 初始：无空闲累计，不算陈旧。
+    AURORA_TEST_CHECK_FALSE(s.is_stale());
+    AURORA_TEST_CHECK_NEAR(s.stale_duration_ms(), 0.0, 1e-9);
+
+    // 带 dt 的 record_idle 才累加空闲时长；不带 dt 的兼容路径只计计数器。
+    s.record_idle();
+    AURORA_TEST_CHECK_EQ(s.idle_frame_count(), std::size_t{1});
+    AURORA_TEST_CHECK_FALSE(s.is_stale());
+
+    s.record(1.0 / 60.0);
+    s.record(1.0 / 60.0);
+    const double fps_when_active = s.fps();
+    AURORA_TEST_CHECK_FALSE(s.is_stale());
+
+    // 低于阈值的空闲：动画中偶发跳过的单帧不该被判成停帧（否则 HUD 数字无谓闪烁）。
+    s.record_idle(0.2);
+    AURORA_TEST_CHECK_FALSE(s.is_stale());
+    AURORA_TEST_CHECK_NEAR(s.stale_duration_ms(), 200.0, 1e-6);
+
+    // 越阈（累计 0.6s ≥ AURORA_FPS_STALE_MS）→ 陈旧；关键：fps() **保持末值**不归零
+    // （归零会丢掉「上次活跃帧率」这一排障信息），空闲帧也不进环形缓冲。
+    s.record_idle(0.4);
+    AURORA_TEST_CHECK_TRUE(s.is_stale());
+    AURORA_TEST_CHECK_NEAR(s.stale_duration_ms(), 600.0, 1e-6);
+    AURORA_TEST_CHECK_NEAR(s.fps(), fps_when_active, 1e-9);
+    AURORA_TEST_CHECK_EQ(s.window_size(), std::size_t{2});
+
+    // 再次渲染 → 立刻恢复新鲜、空闲累计清零。
+    s.record(1.0 / 60.0);
+    AURORA_TEST_CHECK_FALSE(s.is_stale());
+    AURORA_TEST_CHECK_NEAR(s.stale_duration_ms(), 0.0, 1e-9);
+
+    // dt 偏大的「慢帧」不是停帧：超 idle 阈值只影响帧时间窗口，本帧毕竟渲染过了。
+    s.record(0.5);
+    AURORA_TEST_CHECK_FALSE(s.is_stale());
+
+    // reset 连同陈旧状态一并清零。
+    s.record_idle(1.0);
+    AURORA_TEST_CHECK_TRUE(s.is_stale());
+    s.reset();
+    AURORA_TEST_CHECK_FALSE(s.is_stale());
+    AURORA_TEST_CHECK_NEAR(s.stale_duration_ms(), 0.0, 1e-9);
+}
+
+AURORA_TEST_CASE(perf_overlay_stats_line1_annotates_stale_fps) {
+    auto &s = FrameStats::instance();
+    s.reset();
+    s.record(1.0 / 60.0);
+    s.record(1.0 / 60.0);
+
+    // 活跃期不带 stale 标注，且仍以 FPS 开头（既有解析口径不变）。
+    const std::string active_line = PerfOverlay::stats_line1(s);
+    AURORA_TEST_CHECK_TRUE(active_line.rfind("FPS 60.0", 0) == 0);
+    AURORA_TEST_CHECK_TRUE(active_line.find("stale") == std::string::npos);
+
+    // 停帧后：数值保留（不换成 0 / —），追加空闲时长标注。
+    s.record_idle(1.2);
+    const std::string stale_line = PerfOverlay::stats_line1(s);
+    AURORA_TEST_CHECK_TRUE(stale_line.rfind("FPS 60.0", 0) == 0);
+    AURORA_TEST_CHECK_TRUE(stale_line.find("stale 1.2s") != std::string::npos);
+
+    s.reset();
 }
 
 AURORA_TEST_CASE(frame_stats_phase_averages) {

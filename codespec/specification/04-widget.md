@@ -331,7 +331,7 @@ au::Text("Welcome").font_size(24).bold();
 | 控件 / 设施 | 说明 |
 |:---|:---|
 | `InspectorPanel` | 左右分栏 Widget 树浏览器 + 属性编辑器（详见 [`08-tooling.md`](08-tooling.md)） |
-| `PerfOverlay` | 帧率 / 性能 HUD（`app/perf_overlay.h`）；`visible`、`show_counters`；每帧从 `FrameStats` 重读，故 `can_cache_display_list()` 为 `false` |
+| `PerfOverlay` | 帧率 / 性能 HUD（`app/perf_overlay.h`）；`visible`、`show_counters`；每帧从 `FrameStats` 重读，故 `can_cache_display_list()` 为 `false`；读数陈旧（`FrameStats::is_stale()`）时第一行灰化并追加 `stale <空闲秒数>` |
 | `inspect.h` | 控件树检查函数集 |
 | `recipes.h` | 高频组合配方 |
 

@@ -2,12 +2,15 @@
 /// 目标单元: include/aurora/window/window.h
 /// 测试说明: 覆盖 Window 纯逻辑路径——WindowOptions/HeadlessOptions 默认值不变量、
 /// 标题/尺寸/装饰内边距与帧生命周期向 Surface 的转发、程序化窗口控制、
-/// 脏追踪开关语义、HUD 叠加层槽位、run 帧数上限与空 Surface 工厂拒绝；
+/// 脏追踪开关语义、HUD 叠加层槽位与「空闲期 HUD-only 刷新帧」调度、
+/// run 帧数上限与空 Surface 工厂拒绝；
 /// 另以计数型 RhiFrameSink 桩锁定「系统重绘请求在 GPU 帧路径下重渲染而非裸 present」
 
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 
 #include "aurora/render/rhi/rhi_backend.h"
 #include "aurora/render/rhi/rhi_frame_sink.h"
@@ -47,6 +50,9 @@ class RecordingSurface final : public Surface {
     auto begin_frame(int width, int height) -> Result<bool> override {
         begin_w = width;
         begin_h = height;
+        // 与真实软件后端一致地真正启动离屏缓冲：`present_root` 的绘制/合成会落进这个 Painter，
+        // 桩若只记参数不 begin，缓冲恒 0×0 而让所有绘制静默失效（测试看不出差异但毫无覆盖力）。
+        painter_.begin(width, height);
         return Result<bool>{true};
     }
     auto painter() -> Painter & override { return painter_; }
@@ -297,6 +303,80 @@ AURORA_TEST_CASE(window_overlay_slot_roundtrip) {
     // nullptr 关闭叠加层。
     w.set_overlay(nullptr);
     AURORA_TEST_CHECK_TRUE(w.overlay() == nullptr);
+}
+
+AURORA_TEST_CASE(window_idle_hud_refresh_presents_without_repainting_tree) {
+    auto stub = std::make_unique<RecordingSurface>();
+    RecordingSurface &surf = *stub;
+    Window w{std::move(stub)};
+    Node page = FilledSpacer{};
+    // 叠加层用裸 Spacer：本用例只验证「空闲期是否为叠加层出帧」的调度与上屏，
+    // 叠加层画了什么无关（HUD 内容刷新已有 itest_perf_overlay_refresh 覆盖）。
+    w.set_overlay(std::make_shared<Spacer>());
+
+    // 刚注入、尚未渲染过 → 立即到期，否则「空闲中 set_overlay」会永不显示。
+    AURORA_TEST_CHECK_TRUE(w.hud_refresh_pending());
+    AURORA_TEST_CHECK_NEAR(w.hud_refresh_due_ms(), 0.0, 1e-9);
+
+    // 首帧：完整渲染 + 合成 HUD。
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_CHECK_FALSE(w.is_idle_frame());
+    AURORA_TEST_CHECK_EQ(surf.present_count, 1);
+    // 刚渲染 → 叠加层未到期，下一帧应整帧跳过（不上屏）。
+    AURORA_TEST_CHECK_FALSE(w.hud_refresh_pending());
+    AURORA_TEST_CHECK_GT(w.hud_refresh_due_ms(), 0.0);
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_CHECK_TRUE(w.is_idle_frame());
+    AURORA_TEST_CHECK_EQ(surf.present_count, 1);
+
+    // 睡过一个刷新周期：整树仍无脏，但叠加层到期 ⇒ 必须仅为此上屏一次
+    // （否则帧循环深睡下去，HUD 永久停在最后一帧的读数上）。
+    std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long>(Window::AURORA_HUD_REFRESH_MS) + 60));
+    AURORA_TEST_CHECK_TRUE(w.hud_refresh_pending());
+    AURORA_TEST_CHECK_NEAR(w.hud_refresh_due_ms(), 0.0, 1e-9);
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    // 关键不变量：仍是 idle 帧（没有渲染树 ⇒ 不计入 FPS / 帧时间），但确实上屏了一次。
+    AURORA_TEST_CHECK_TRUE(w.is_idle_frame());
+    AURORA_TEST_CHECK_EQ(surf.present_count, 2);
+    // 上屏后回到未到期态，下一帧重新整帧跳过。
+    AURORA_TEST_CHECK_FALSE(w.hud_refresh_pending());
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_CHECK_EQ(surf.present_count, 2);
+
+    // 空闲中注入叠加层：同样应触发一次 HUD-only 上屏（不是等下一次树脏）。
+    w.set_overlay(std::make_shared<Spacer>());
+    AURORA_TEST_CHECK_NEAR(w.hud_refresh_due_ms(), 0.0, 1e-9);
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_CHECK_EQ(surf.present_count, 3);
+
+    // 卸下叠加层：不再为 HUD 唤醒（`<0` = 无此唤醒源，帧调度不参与最小截止时间比较）。
+    w.set_overlay(nullptr);
+    AURORA_TEST_CHECK_FALSE(w.hud_refresh_pending());
+    AURORA_TEST_CHECK_NEAR(w.hud_refresh_due_ms(), -1.0, 1e-9);
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_CHECK_EQ(surf.present_count, 3);
+}
+
+AURORA_TEST_CASE(window_gpu_path_does_not_take_hud_only_shortcut) {
+    // GPU 帧路径下软件缓冲只有底色（控件像素在 GPU 侧）：裸 present 会闪一屏空白，
+    // 故 HUD 到期也必须走完整重渲染（帧 DL 录制 + replay），不得抄软件路径的近道。
+    auto stub = std::make_unique<GpuStubSurface>();
+    GpuStubSurface &surf = *stub;
+    Window w{std::move(stub)};
+    Node page = FilledSpacer{};
+    w.set_overlay(std::make_shared<Spacer>());
+
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_CHECK_EQ(surf.sink.begin_calls, 1);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long>(Window::AURORA_HUD_REFRESH_MS) + 60));
+    AURORA_TEST_CHECK_TRUE(w.hud_refresh_pending());
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    // 完整重渲染：GPU 帧调度再次 begin/end，且本帧不算 idle。
+    AURORA_TEST_CHECK_FALSE(w.is_idle_frame());
+    AURORA_TEST_CHECK_EQ(surf.sink.begin_calls, 2);
+    AURORA_TEST_CHECK_EQ(surf.sink.end_calls, 2);
+    AURORA_TEST_CHECK_EQ(surf.present_count, 2);
 }
 
 AURORA_TEST_CASE(window_run_executes_on_frame_exactly_max_frames_times) {

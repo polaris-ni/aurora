@@ -920,23 +920,27 @@ struct InspectorSession {
         // 其结果仅用于确立几何，不回传（回传的是交互之后的那份）。
         (void)render_to_logical_snapshot(root, width, height);
 
-        aurora::Node target = aurora::Inspector::find_node(root, path);
-        if (!target) {
+        // 寻址用 `find_widget`（而非 `find_node`）：① 与树枚举（`tree_json_full`）同源，
+        // 同一路径在快照与单控件查询下指向同一控件；② 下降全程不构造 `Node` 副本——本工具是
+        // 「先交互再快照」的流程，`Node` 副本析构会无条件清掉兄弟节点的 `layout_parent_`，
+        // 破坏脏传播（`from_json` 构造的树虽不含虚拟化容器，这条副作用与树形无关）。
+        aurora::Widget *target = aurora::Inspector::find_widget(root.widget(), path);
+        if (target == nullptr) {
             return au::Json{{"content", text_content("Error: widget not found at path '" + path + "'")},
                             {"isError", true}};
         }
 
         std::string failure;
         if (action == "click") {
-            const aurora::Result<void> r = aurora::Inspector::simulate_click(target.widget());
+            const aurora::Result<void> r = aurora::Inspector::simulate_click(*target);
             failure = r ? std::string{} : r.error().message;
         } else if (action == "scroll") {
             const aurora::Result<void> r =
-                aurora::Inspector::simulate_scroll(target.widget(), args.value("dx", 0.0F), args.value("dy", 0.0F));
+                aurora::Inspector::simulate_scroll(*target, args.value("dx", 0.0F), args.value("dy", 0.0F));
             failure = r ? std::string{} : r.error().message;
         } else {
             const aurora::Result<void> r =
-                aurora::Inspector::simulate_text_input(target.widget(), args.value("text", std::string("")));
+                aurora::Inspector::simulate_text_input(*target, args.value("text", std::string("")));
             failure = r ? std::string{} : r.error().message;
         }
         if (!failure.empty()) {
@@ -946,7 +950,7 @@ struct InspectorSession {
         au::Json out = au::Json::object();
         out["action"] = action;
         out["path"] = path;
-        out["target"] = aurora::Inspector::get_prop(target.widget());
+        out["target"] = aurora::Inspector::get_prop(*target);
         out["snapshot"] = render_to_logical_snapshot(root, width, height);
         return au::Json{{"content", json_content(out)}};
     }

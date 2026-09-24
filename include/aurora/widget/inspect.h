@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -19,7 +20,8 @@ namespace aurora {
 /**
  * @brief 运行时可观测（specification/08-tooling.md §3）：树转储 / 结构查询 / 状态探查。
  *
- * 全部复用 `Widget::child_nodes()` 与 `serialization::to_json`，不引入额外状态。
+ * 全部复用 `for_each_child_unified`（`Widget::child_nodes()`，为空时回退 `Widget::for_each_child`）
+ * 与 `serialization::to_json`，不引入额外状态。
  * 单线程 UI 假设；均为 `inline`（头文件即可用，无需链接实现）。
  *
  * @note Thread: main-thread only
@@ -398,31 +400,28 @@ struct WidgetPatchOp {
     return items;
 }
 
-/// @brief 含属性的完整 JSON 快照：每个节点含 { type, props, children }。
-/// 扩展 dump_tree_json，增加 serialize_props 输出的属性对象。
-[[nodiscard]] inline auto dump_tree_json_full(const Node &root) -> Json {
-    Json j = Json::object();
-    j["type"] = root.widget().type_name();
-    Json props = Json::object();
-    root.widget().serialize_props(props);
-    j["props"] = props;
-    Json children = Json::array();
-    for (const Node &child : root.widget().child_nodes()) {
-        children.push_back(dump_tree_json_full(child));
+/// @brief 统一子节点枚举：优先 `child_nodes()`，为空时回退 `for_each_child`。
+///
+/// 虚拟化列表 / 导航栈（`NavigatorHost` 等）把子节点存在 `Node` 之外的私有表中，按约定
+/// **不覆写** `child_nodes()`（因而没有可返回的 `Node`，也没有可交给后代的局部盒）；
+/// 只经 `for_each_child` 暴露子树——口径与 `a11y_tree.h` 的同款兜底一致。
+///
+/// 树的**枚举**与**寻址**必须共用本函数：两处若取不同遍历源，同一路径会指向不同控件
+/// （`a11y_diff.h` 对该不变量的告警同理）。
+inline auto for_each_child_unified(const Widget &w, const std::function<void(const Widget &)> &fn) -> void {
+    const std::vector<Node> &nodes = w.child_nodes();
+    if (!nodes.empty()) {
+        for (const Node &child : nodes) {
+            fn(child.widget());
+        }
+        return;
     }
-    j["children"] = children;
-    return j;
+    w.for_each_child(fn);
 }
 
-/// @brief 按树路径定位节点（路径为子节点索引序列，如 "0/2/1"）。
-/// 根节点为空路径或 ""。每段为子节点在 child_nodes() 中的下标。
-/// 路径无效返回空 Node（bool 转换返回 false）。
-/// @note 返回的 Node 内部 shared_ptr<Widget> 指向同一 widget 实例，但 Node 本身是副本。
-[[nodiscard]] inline auto find_node_by_path(const Node &root, std::string_view path) -> Node {
-    if (path.empty()) {
-        return root;
-    }
-    // 收集路径段
+/// @brief 解析索引路径（如 "0/2/1"）为下标序列；含非法段返回 `std::nullopt`。
+/// 空路径由调用方先行处理（语义为根自身），不入此函数。
+[[nodiscard]] inline auto parse_path_indices(std::string_view path) -> std::optional<std::vector<std::size_t>> {
     std::vector<std::size_t> indices;
     std::size_t i = 0;
     while (i < path.size()) {
@@ -433,7 +432,7 @@ struct WidgetPatchOp {
             try {
                 indices.push_back(std::stoul(seg));
             } catch (...) {
-                return Node{};  // 无效路径段返回空 Node
+                return std::nullopt;  // 无效路径段（非数字 / 溢出）
             }
         }
         if (slash == std::string_view::npos) {
@@ -441,6 +440,46 @@ struct WidgetPatchOp {
         }
         i = slash + 1;
     }
+    return indices;
+}
+
+/// @brief 含属性的完整 JSON 快照：每个节点含 { type, props, children }。
+/// 扩展 dump_tree_json，增加 serialize_props 输出的属性对象。
+/// 子节点枚举走 `for_each_child_unified`，故虚拟化容器的子树同样可见。
+[[nodiscard]] inline auto dump_tree_json_full(const Widget &w) -> Json {
+    Json j = Json::object();
+    j["type"] = w.type_name();
+    Json props = Json::object();
+    w.serialize_props(props);
+    j["props"] = props;
+    Json children = Json::array();
+    for_each_child_unified(
+        w, [&children](const Widget &child) -> void { children.push_back(dump_tree_json_full(child)); });
+    j["children"] = children;
+    return j;
+}
+
+/// @brief 同上，`Node` 入口（等价于取其 widget 后走 `Widget` 重载）。
+/// 保留本重载以兼容既有调用方（inspector / InspectorPanel / debug 门面）。
+[[nodiscard]] inline auto dump_tree_json_full(const Node &root) -> Json { return dump_tree_json_full(root.widget()); }
+
+/// @brief 按树路径定位节点（路径为子节点索引序列，如 "0/2/1"）。
+/// 根节点为空路径或 ""。每段为子节点在 child_nodes() 中的下标。
+/// 路径无效返回空 Node（bool 转换返回 false）。
+/// @note 返回的 Node 内部 shared_ptr<Widget> 指向同一 widget 实例，但 Node 本身是副本。
+/// @note 只沿 `child_nodes()` 下降 ⇒ **无法跨越虚拟化容器**（`child_nodes()` 恒空者）的子树；
+/// 且下降途中会拷出各层 `child_nodes()`，副本析构会清掉兄弟节点的 `layout_parent_`。
+/// 需要寻址虚拟化子树、或不想引入该副作用时改用 `find_widget_by_path`。
+[[nodiscard]] inline auto find_node_by_path(const Node &root, std::string_view path) -> Node {
+    if (path.empty()) {
+        return root;
+    }
+    // 收集路径段（与 find_widget_by_path 共用同一解析器，避免路径格式在两处漂移）
+    const auto parsed = parse_path_indices(path);
+    if (!parsed) {
+        return Node{};  // 无效路径段返回空 Node
+    }
+    const std::vector<std::size_t> &indices = *parsed;
     // 沿索引路径下降，每层保存 children 副本以保持 Node 存活
     // 使用 pairs 保存 (children 副本, 当前选中索引)
     struct Layer {
@@ -467,6 +506,44 @@ struct WidgetPatchOp {
         layers.push_back(Layer{.children = std::move(children), .idx = indices[d]});
     }
     return layers.back().children[layers.back().idx];
+}
+
+/// @brief 按树路径定位 Widget（路径为子节点索引序列，如 "0/2/1"；空路径为根自身）。
+///
+/// 与 `find_node_by_path` 的分工：本函数返回裸 `Widget *`，下降全程只经
+/// `for_each_child_unified`，因此能寻址到虚拟化容器（`NavigatorHost` / `LazyList` /
+/// `TransitionLayer` 等）的子树——这些容器按约定不覆写 `child_nodes()`，没有可交出的
+/// `Node`，`find_node_by_path` 在它们下面必然断链。**枚举端与寻址端必须都走本函数的同一
+/// 访问器**，否则同一路径在 `/api/tree` 与 `/api/widget/{path}` 会指向不同控件。
+///
+/// 下降途中一律不构造 `Node` 副本，这是必须的：`Node` 析构会**无条件**把子控件的
+/// `layout_parent_` 置空（见 `widget.cpp` 的 `~Node`），若像 `find_node_by_path` 那样把某一层
+/// 的 `child_nodes()` 拷进临时容器、再随容器销毁，该层**兄弟节点**的布局父指针会被一并
+/// 打掉，后续 relayout 的脏传播随之断裂。本函数只持有指针，不产生任何 `Node` 生命周期。
+///
+/// @return 命中控件的指针（生命周期由树持有的 shared_ptr 保证）；路径非法或越界返回 nullptr。
+[[nodiscard]] inline auto find_widget_by_path(Widget &root, std::string_view path) -> Widget * {
+    if (path.empty()) {
+        return &root;  // 空路径即根自身
+    }
+    const auto parsed = parse_path_indices(path);
+    if (!parsed) {
+        return nullptr;  // 无效路径段（非数字 / 溢出）
+    }
+    Widget *cur = &root;
+    for (const std::size_t idx : *parsed) {
+        // 遍历 API 只暴露 const 子视图，控件本身来自非 const 的树根；此处只读不写，
+        // 与 `event/focus.cpp`、`perf/scroll_bench.cpp` 的同类转换一致。
+        std::vector<Widget *> kids;
+        for_each_child_unified(*cur, [&kids](const Widget &child) -> void {
+            kids.push_back(const_cast<Widget *>(&child));  // NOLINT(cppcoreguidelines-pro-type-const-cast)
+        });
+        if (idx >= kids.size()) {
+            return nullptr;  // 越界
+        }
+        cur = kids[idx];
+    }
+    return cur;
 }
 
 /// @brief 获取 Widget 的当前属性快照（describe 元数据 + serialize_props 合并）。

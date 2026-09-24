@@ -248,6 +248,26 @@ AURORA_TEST_CASE(host_hit_test_delegates_to_current_page) {
     AURORA_TEST_CHECK_NULL(miss);
 }
 
+AURORA_TEST_CASE(host_hit_test_chain_delegates_to_current_page) {
+    Animator anim;
+    NavigatorHost host(anim);
+    auto page = std::make_shared<SolidBox>(Color{255, 0, 0});
+    host.push(Route{Node{page}, "home"});
+
+    BuildContext ctx;
+    const Rect box = full_rect(100.0F, 50.0F);
+
+    // 事件派发走命中链（EventDispatcher::dispatch_mouse → Widget::hit_test_chain）：链须自宿主
+    // 起、到页控件为止，否则按下会被判为「点击空白」，页面内交互全部失效。
+    const auto chain = host.hit_test_chain(Point{.x = 50.0F, .y = 25.0F}, box, ctx);
+    AURORA_TEST_CHECK_FALSE(chain.empty());
+    AURORA_TEST_CHECK_EQ(chain.front().ptr, static_cast<Widget *>(&host));
+    AURORA_TEST_CHECK_EQ(chain.back().ptr, page.get());
+
+    // 页外坐标（叶控件判定越界）：链为空，派发器据此走「点击空白」分支。
+    AURORA_TEST_CHECK_TRUE(host.hit_test_chain(Point{.x = 150.0F, .y = 25.0F}, box, ctx).empty());
+}
+
 AURORA_TEST_CASE(host_destructor_detaches_from_animator) {
     Animator anim;
     {

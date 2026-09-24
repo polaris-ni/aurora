@@ -36,14 +36,19 @@ class FrameStats {
         return stats;
     }
 
-    /// @brief 记录一帧耗时（秒）。
+    /// @brief 记录一帧耗时（秒）。**调用方仅在「本帧确实渲染了」时调用**（见 `WindowHost::render_frame`）。
     ///
     /// 若 dt 对应的毫秒值超过 AURORA_IDLE_THRESHOLD_MS，视为 idle 段：
     /// 按帧预算折算跳过帧数，仅递增 idle/total 计数器，不记入环形缓冲区。
+    ///
+    /// 无论走哪个分支都清空空闲累计（`idle_ms_`）：本帧渲染过了，`fps()` 即恢复「新鲜」。
+    /// 注意 dt 偏大**不等于**应用空闲——它多半是「本帧本身很慢」（长任务、最小化后还原）：
+    /// 那是掉帧/hitch 的语义，不是停帧。
     auto record(double dt_seconds) -> void {
         if (dt_seconds <= 0.0) {
             return;
         }
+        idle_ms_ = 0.0;
         const double dt_ms = dt_seconds * 1000.0;
         // Idle 检测：帧间隔远超阈值 → 视为 idle 段（仅计计数器，不记入帧时间窗口）
         if (dt_ms > AURORA_IDLE_THRESHOLD_MS) {
@@ -77,19 +82,51 @@ class FrameStats {
         }
     }
 
-    /// @brief 记录 idle 跳帧（仅递增计数器，不影响帧时间统计）。
-    auto record_idle() -> void {
+    /// @brief 记录一次 idle 跳帧（不影响帧时间窗口，只计计数器并累加空闲时长）。
+    ///
+    /// @param dt_seconds 本帧的墙钟间隔（秒）。帧循环在 idle 帧上同样消耗了一段等待时间，
+    ///        这段时长就是「距上一次实际渲染已过去多久」的增量；不传则只计计数器，
+    ///        `stale_duration_ms()` 不增长（老调用点的零成本兼容路径）。
+    auto record_idle(double dt_seconds = 0.0) -> void {
         ++idle_frames_;
         ++total_frames_;
+        if (dt_seconds > 0.0) {
+            idle_ms_ += dt_seconds * 1000.0;
+        }
     }
 
     /// @brief 滑动窗口平均 FPS（无数据返回 0）。
+    ///
+    /// 该值是**窗口内已记录帧**的均值，不做时间衰减：渲染一旦停止，环形缓冲不再有新样本，
+    /// 返回值便停留在最后一次活跃 burst 上。调用方须用 `is_stale()` 判断它是否还代表当前帧率
+    /// （HUD 显示「421.0 FPS」而实际已停帧数秒，是误导而非信息）。
     [[nodiscard]] auto fps() const -> double {
         if (count_ == 0) {
             return 0.0;
         }
         return sum_ > 0.0 ? static_cast<double>(count_) / sum_ : 0.0;
     }
+
+    /// @brief 窗口内 FPS 是否已陈旧：距最近一次**实际渲染**的帧已累计空闲 ≥ AURORA_FPS_STALE_MS。
+    ///
+    /// 判据基于空闲**时长**而非帧数——空闲段里帧循环可能以任意间隔被唤醒（事件、定时器、
+    /// HUD 刷新），用帧数衡量会把「一帧都没有」误判成「刚过了几帧」。
+    [[nodiscard]] auto is_stale() const -> bool { return idle_ms_ >= AURORA_FPS_STALE_MS; }
+
+    /// @brief 空闲累计时长（毫秒）：自最近一次实际渲染的帧起累计的无帧时长。
+    ///
+    /// 供 HUD 展示「421.0 FPS（stale 3.2s）」这类带上下文的读数——归零会丢掉「上次活跃帧率」
+    /// 这一排障信息。
+    [[nodiscard]] auto stale_duration_ms() const -> double { return idle_ms_; }
+
+    /// @brief FPS 陈旧判定阈值（毫秒）：累计空闲达到此值后 `is_stale()` 为 true。
+    ///
+    /// 取值的两个约束：**下界**须明显大于一帧预算，否则动画中偶发跳过的单帧就会被判成停帧、
+    /// HUD 数字无谓地闪烁；**上界**须接近 HUD 刷新周期，否则明显停帧后还会继续报告「新鲜」的
+    /// 旧值。本值与 `Window::AURORA_HUD_REFRESH_MS`（HUD 叠加层刷新周期）同量级——两者是
+    /// **独立的策略**：前者是「多久算停帧」，后者是「多久重绘一次叠加层」，取值接近只是
+    /// 因为同一个开发者可感知的时间尺度约在 0.5 秒量级。
+    static constexpr double AURORA_FPS_STALE_MS = 500.0;
 
     /// @brief 滑动窗口平均帧时间（毫秒）。
     [[nodiscard]] auto avg_frame_ms() const -> double {
@@ -252,6 +289,7 @@ class FrameStats {
         dropped_ = 0;
         hitch_ = 0;
         idle_frames_ = 0;
+        idle_ms_ = 0.0;
         frame_budget_ms_ = 16.67;
         layout_ms_.fill(0.0);
         paint_ms_.fill(0.0);
@@ -280,6 +318,7 @@ class FrameStats {
     std::size_t dropped_ = 0;  ///< 累计掉帧数
     std::size_t hitch_ = 0;  ///< 累计 hitch 数
     std::size_t idle_frames_ = 0;  ///< 累计 idle 跳过帧数
+    double idle_ms_ = 0.0;  ///< 距最近一次实际渲染帧的累计空闲时长（毫秒）；`record` 清零、`record_idle` 累加
     double frame_budget_ms_ = 16.67;  ///< 帧预算目标
 
     static constexpr double AURORA_IDLE_THRESHOLD_MS = 100.0;  ///< idle 检测阈值（毫秒）
@@ -389,8 +428,14 @@ class PerfOverlay : public SingleChild {
         if (s.window_size() < 2) {
             return "FPS — (采样中) | P99 — | jitter —";
         }
-        return aurora::internal::string_format("FPS %.1f (avg %.1f) | P99 %.1fms | jitter %.1fms", s.fps(),
-                                               s.avg_frame_ms(), s.percentile_ms(0.99), s.jitter_ms());
+        std::string line = aurora::internal::string_format("FPS %.1f (avg %.1f) | P99 %.1fms | jitter %.1fms", s.fps(),
+                                                           s.avg_frame_ms(), s.percentile_ms(0.99), s.jitter_ms());
+        // 已停帧：数值仍取窗口内最后一次活跃 burst 的均值（不归零，保留排障信息），
+        // 但追加空闲时长标注，避免把冻结值当成本刻帧率读。
+        if (s.is_stale()) {
+            line += aurora::internal::string_format(" | stale %.1fs", s.stale_duration_ms() / 1000.0);
+        }
+        return line;
     }
 
     /// @brief 第二行统计文本：dropped + hitch + idle（数据源：进程级单例）。
@@ -515,12 +560,14 @@ class PerfOverlay : public SingleChild {
                 text, f, color);
         };
 
-        // 第一行：FPS + P99 + jitter（颜色告警）
-        draw_line(stats_line1(), fps_color(s.fps()));
+        // 第一行：FPS + P99 + jitter（颜色告警；已停帧时灰化——冻结值不再代表当前帧率，
+        // 继续按「绿 = 流畅」上色会给出与事实相反的观感）。统计行一律显式传 `s`：
+        // 无参重载读的是进程级单例，多窗口下会与本面板 `bound_stats_` 不一致。
+        draw_line(stats_line1(s), s.is_stale() ? Color(140, 140, 140, 255) : fps_color(s.fps()));
         // 第二行：dropped + hitch + idle（浅灰文本）
-        draw_line(stats_line2(), Color(200, 200, 200, 255));
+        draw_line(stats_line2(s), Color(200, 200, 200, 255));
         // 第三行：唤醒频率 + 睡眠占比（事件驱动帧循环观测）
-        draw_line(stats_line3(), Color(200, 200, 200, 255));
+        draw_line(stats_line3(s), Color(200, 200, 200, 255));
         if (show_counters_) {
             // 第四 / 五行：渲染计数器与脏区效率
             draw_line(stats_line4(), counters_color());

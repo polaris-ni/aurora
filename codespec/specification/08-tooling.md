@@ -181,7 +181,8 @@ UI 树 dump 统一以 `widget/inspect.h` 内的**自由函数**提供，**不提
 | `dump_tree_rich(root, depth = 0, tree_chars = true)` | 富格式树，含 `#id` / bounds / visible / text / style / listeners，以 `├─ └─ │` 连接 |
 | `dump_tree_json*` / `dump_tree_json_full(root) -> Json` | JSON 快照；`dump_tree_json_full` 含属性（每节点 type / props / children） |
 | `widget_tree_to_items(root) -> std::vector<TreeItem>` | Widget 树 → TreeItem 树（供 `TreeView` 消费） |
-| `find_node_by_path(root, path) -> Node` | 按索引路径定位节点（如 `"0/2/1"`） |
+| `find_node_by_path(root, path) -> Node` | 按索引路径定位节点（如 `"0/2/1"`）。只沿 `child_nodes()` 下降 ⇒ 到不了虚拟化容器的子树 |
+| `find_widget_by_path(root, path) -> Widget *` | 同上，但返回裸控件指针、下降全程走**统一子节点遍历** ⇒ 可跨越虚拟化容器；越界或非法路径段返回 `nullptr` |
 | `get_widget_props(w) -> Json` | 获取 Widget 属性快照（`describe` + `serialize_props`） |
 | `set_widget_prop(w, key, value)` | 单属性回写（经 `deserialize_props`） |
 | `collect_widget_boxes(root) -> std::vector<WidgetBox>` | 把控件树拍平成「布局盒表」（`{path, type, bounds}`）。**输出顺序即先序**，是差异归因 tie-break 依赖的契约 |
@@ -198,11 +199,15 @@ Column#root { bounds:[0,0,640,480]; visible:true; listeners:[on_click] }
 
 `Node` 标识由 `Widget::set_id(std::string_view)` / `id()` 提供，`dump_tree_rich` 经 `#id` 渲染。
 
+**子节点枚举与路径寻址必须同源。** 虚拟化容器（`NavigatorHost`、`LazyList`、`GridView`、`TransitionLayer` 等）把子节点存在 `Node` 之外的私有表中，按约定**不覆写** `child_nodes()` —— 它们没有可交出的 `Node`，只经 `for_each_child` 暴露子树（`widget/a11y_tree.h` 采用同款兜底）。因此树快照的枚举（`dump_tree_json_full`）与按路径的寻址统一走 `for_each_child_unified`：`child_nodes()` 非空则用其一，为空则回退 `for_each_child`。两处若取不同遍历源，同一路径在树快照与单控件查询下会指向不同控件 —— 这是本模块的核心不变量，新增遍历相关能力时须一并遵守。
+
+`find_node_by_path` 只沿 `child_nodes()` 下降，故**到不了**这类容器的子树；且它会把某一层的 `child_nodes()` 拷进临时容器，副本析构会清掉该层**兄弟节点**的 `layout_parent_`，脏标记传播随之断裂。需要跨越虚拟化容器、或不想引入该副作用（如 HTTP / MCP 这类按路径寻址的入口）时，用 `find_widget_by_path`。
+
 `aurora::Inspector`（`inspector/inspector_api.h`，实现 `src/aurora/inspector/inspector_api.cpp`）是操作 UI 树的统一编程门面：全静态方法、仅主线程，各方法委托上表自由函数或组件注册表，无新增运行时开销。除树导出（`tree_text` / `tree_rich` / `tree_json` / `tree_json_full`）外，还提供：
 
 | 能力 | 成员 | 说明 |
 |:---|:---|:---|
-| 节点查询 | `query(type, root)` / `get_state(path, root)` / `find_node(root, path)` / `widget_info(w)` | 按类型名检索、按路径取状态片段、按索引路径定位节点、Widget 完整信息 |
+| 节点查询 | `query(type, root)` / `get_state(path, root)` / `find_node(root, path)` / `find_widget(root, path)` / `widget_info(w)` | 按类型名检索、按路径取状态片段、按索引路径定位节点（`find_node` 返回 `Node` 副本、只走 `child_nodes()`；`find_widget` 返回裸指针、走统一遍历，可跨越虚拟化容器，两条路径的取舍见 §3）、Widget 完整信息 |
 | 属性读写 | `get_prop(w)` / `get_prop_value(w, key)` / `set_prop(w, key, val)` / `apply_patch(root, patch)` | 单属性回写返回 `Result<void>`；`apply_patch` 把 JSON Patch 逐条经 `set_prop` 应用到树 |
 | 交互模拟 | `simulate_click(w)` / `simulate_scroll(w, dx, dy)` / `simulate_text_input(w, text)` | 合成事件经 `EventDispatcher` 走真实命中测试 + 冒泡派发；派发根与坐标原点均为 `w` 自身、指针取 `w` 中心，故不依赖控件在树中的绝对位置（无需先绘制，但目标须已布局——未布局时尺寸为零、中心退化为自身原点）。目标不可命中时返回 `GeneralNotSupported` 且不派发、不改状态 |
 | 组件发现 | `components()` / `component_schema(name)` | 已注册组件 schema 列表 / 单组件 schema |
@@ -423,6 +428,63 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 | `perf_gates` | 本机时间类门槛校验（`tools/check/check_perf_gates.ps1`，仅 Windows，不进 CI） |
 
 > AI 兼容性批量验证**不是** cmake 目标，而是 CTest 集成用例 `itest_ai_compat`（`tests/integration/itest_ai_compat.cpp`）：遍历 `tests/fixtures/ai_compat/` 下的 JSON fixture，无 LLM 调用；`valid_*` 期望通过、`error_*` 期望报错、`interact_*` 为「静态树 → TestController 交互 → 状态断言」回归脚本（`itest_ai_compat.cpp` 中段消费）。运行：`ctest -R itest_ai_compat`。
+
+#### 7.4.1 空闲 / 叠加层刷新实测基线与复现
+
+空闲期分两种场景，必须分别度量：**无叠加层**（事件驱动深睡）与**叠加层可见**（每 500 ms 一帧）。所有 CPU 占比均为**占单核百分比**（进程 CPU 时间 ÷ 墙钟时间 × 100），非整机百分比；采样窗口跳过启动与首帧构图，只取稳态区间。两类场景的设计语义（停帧陈旧口径、脏决策三态、HUD 刷新周期）见 [`ARCHITECTURE.md`](../ARCHITECTURE.md) §10.1 / §10.2 / §10.4。
+
+载具与配置：
+
+| 项 | 无叠加层 | 叠加层可见 |
+|:---|:---|:---|
+| 载具 | `bench_idle_cpu` | `examples/app/google_play/demo_google_play.cpp` |
+| 后端 | Win32 软件渲染（`AURORA_BACKEND_WIN32`） | 同左 |
+| 构建 | `build/` | `build-inspector/`（调试开启 + Inspector 服务开启） |
+| 帧率上限 | 默认（60） | `opts.max_fps = 60` |
+| 观测窗口 | 3 s | 静止 6 s 采样窗口 |
+
+**无叠加层：事件驱动深睡**（基准自带判定，人工用例见 [`../manual-test/17-perf.md`](../manual-test/17-perf.md) TC-PERF-006）：
+
+| 观测 | 值 | 判定 |
+|:---|:---|:---|
+| 空闲 CPU 占比 | 0.5% | PASS（门槛 < 5%） |
+| 空闲「渲染帧率」 | 0.3 fps | 几乎不出帧，符合预期 |
+| 空闲唤醒频率 | 4.3 / 秒 | 事件驱动，非轮询 |
+
+- 门槛与判定由 `bench_idle_cpu` 自身给出（空闲 < 5%；旧实现忙轮询时该值会顶到约 100%）。活跃场景同次实测为 CPU 6.7%、帧率 35.8（被夹在 60 附近），PASS。
+- 该场景**未挂叠加层** ⇒ 不触发 HUD-only 帧（态 ②），因而空闲帧语义的改动对它无影响；改动后已实测复验通过。
+
+**叠加层可见：每 500 ms 一帧**（人工用例见 [`../manual-test/17-perf.md](../manual-test/17-perf.md) TC-PERF-008）：
+
+| 观测 | 值 |
+|:---|:---|
+| 稳态 CPU（静止 6 s 采样窗口） | **3.4%**（占单核） |
+| `idle` 计数逐秒增量 | `2, 2, 2, 16, 2, 2, 19, 2, 2, 2` |
+| `(stale)` 标记出现率 | 6 / 11 个打印秒 |
+| 静止期 FPS 取值 | 保持末值（如 39.499）而非归零 |
+| 空闲 1.2 s 的叠加层重绘像素差 | 18716 字节 |
+
+- 增量基线恒为 **+2 / 秒**，与 500 ms 叠加层刷新周期一致 ⇒ 空闲唤醒确实由叠加层驱动，且**没有**退化成「一帧都不出」。
+- 增量为 16 / 19 的两秒是轮播动画在推进（动画期内本就应出帧），不属于空闲异常。
+- 若叠加层唤醒退化成忙轮询，该 CPU 值会顶到约 100%；实测 3.4% 说明唤醒是按截止时间等待的。
+- 像素差来自集成用例 `tests/integration/itest_perf_overlay_refresh.cpp` 的空闲场景：1.2 s 内只推进帧循环、不强制全量重绘，断言叠加层像素确实发生变化。
+
+**复现步骤**
+
+无叠加层（基准自带判定，一条命令即可）：
+
+1. 构建基准：`cmake --build build --target bench_idle_cpu`。
+2. 直接运行该基准，读它打印的两行结果与 PASS / FAIL：空闲场景要求 CPU 占比 < 5%，活跃场景要求帧率被夹在 60 附近。
+
+叠加层可见（基准族未覆盖此场景，需自建观测）：
+
+1. 构建调试开启 + Inspector 服务开启的构建目录，得到载具 `demo_google_play`。
+2. 以分离进程方式启动载具，并把标准输出重定向到文件（载具的帧率摘要行经 `AURORA_LOG_RAW` 输出，即标准输出；标准错误恒为空）。
+3. 间隔数秒两次采样该进程的 CPU 时间，跳过启动阶段，按上方口径计算占比。
+4. 结束进程后读回输出文件：统计 `idle` 计数的逐秒增量与 `(stale)` 出现的行数。
+5. 确认该载具进程已退出，避免占用目标导致下一次重编报占用错误。
+
+> 上述数字为单次实测（Windows / Win32 软件后端），与机型、构建配置强相关；引用时必须连同口径一起复述。**尚未纳入 CI 门禁**：时间类门槛历史上只作本地趋势对照（见 `tools/check/perf_gates.json` 的 `source` 字段），若要新增门槛，需先固定载具、采样窗口与判定阈值。另：叠加层空闲场景此前只有自动化用例覆盖，人工用例 TC-PERF-008 已补齐。
 
 ### 7.5 真机验收探针（`tools/verify/`）
 

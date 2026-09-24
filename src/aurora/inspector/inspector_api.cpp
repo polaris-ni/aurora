@@ -37,6 +37,8 @@ auto Inspector::get_state(std::string_view path, const Node &root) -> Json { ret
 
 auto Inspector::find_node(const Node &root, std::string_view path) -> Node { return find_node_by_path(root, path); }
 
+auto Inspector::find_widget(Widget &root, std::string_view path) -> Widget * { return find_widget_by_path(root, path); }
+
 // ---------------------------------------------------------------------------
 // 属性读写
 // ---------------------------------------------------------------------------

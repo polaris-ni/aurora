@@ -188,6 +188,17 @@ class NavigatorHost : public Widget {
         return nullptr;
     }
 
+    /// @brief 命中链同样委派给展示子树（同 `SingleChild` 的写法）。
+    ///
+    /// 事件派发走的是**命中链**而非 `on_hit_test`：`EventDispatcher::dispatch_mouse`
+    /// 取 `Widget::hit_test_chain`，而链的后代部分只经 `on_hit_test_chain` 收集，基类默认
+    /// 返回空。若只覆写 `on_hit_test`（那不是这条路径的入口），链恒为空 ⇒ 每次按下都被判为
+    /// 「点击空白」（清焦点并 return false），页面内的点击/悬停/拖拽/滚轮全部到不了，导航点击失效。
+    auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
+        -> std::vector<HitNode> override {
+        return display_ ? display_.widget().hit_test_chain(local, bounds, ctx) : std::vector<HitNode>{};
+    }
+
     auto on_mount(const BuildContext &ctx) -> void override {
         host_ctx_ = ctx;
         host_mounted_ = true;

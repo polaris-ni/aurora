@@ -15,8 +15,13 @@
 //   aurora preview <tree.json> [-w W] [-h H]             quick UI preview (opens a temporary window; falls back to a
 //   single headless frame then exits when no display backend is available) aurora to-code <tree.json> [--style
 //   fluent|step|di]  UI tree -> C++ code aurora to-yaml <tree.json>                           UI tree -> YAML format
-//   aurora schema                                        print the full aurora_api.json
+//   aurora schema                                        print the runtime API skeleton (widgets + enums)
 //   aurora --help                                        help information
+//
+// `schema` prints the API skeleton rebuilt at runtime from the live registry (library / language / include /
+// alias + widgets + enums), which is not the committed aurora_api.json. The full file is only produced by the
+// build-time generators: layout_rules / state_patterns come from gen_api_tools, error_codes from
+// gen_error_codes and debug from gen_debug_api.
 //
 // Exit codes: 0 on success, 1 on validation failure, 2 on usage error.
 
@@ -60,7 +65,7 @@ auto print_usage() -> void {
                "available)\n"
                "  to-code <tree.json> [--style fluent|step|di]   UI tree -> C++ code\n"
                "  to-yaml <tree.json>                            UI tree -> YAML format\n"
-               "  schema                                         print the full aurora_api.json\n"
+               "  schema                                         print the runtime API skeleton (widgets + enums)\n"
                "  --help, -h                                     show this help\n"
                "  --version, -V                                  show version\n\n"
                "Exit codes: 0 on success, 1 on validation failure, 2 on usage error\n");

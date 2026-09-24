@@ -42,7 +42,7 @@
 |:---|:---|
 | `run()` | 启动帧循环：pump → 派发 → `tick`（动画 / 定时任务推进）→ `present_root` |
 | `set_on_frame(cb)` | 注入每帧自定义逻辑，在 `present_root` 之前调用 |
-| `set_overlay(shared_ptr<Widget>)` | 注入独立于控件树的 HUD 叠加层（典型 `PerfOverlay`），由 `Window::present_root` 在 tree paint 之后、present 之前合成。叠加层渲染到独立离屏缓冲、以约 2Hz 重绘自身，不触发整树重绘 |
+| `set_overlay(shared_ptr<Widget>)` | 注入独立于控件树的 HUD 叠加层（典型 `PerfOverlay`），由 `Window::present_root` 在 tree paint 之后、present 之前合成。叠加层渲染到独立离屏缓冲、按 `Window::AURORA_HUD_REFRESH_MS`（500ms）重绘自身，不触发整树重绘；**且叠加层可见时帧循环在空闲期也按时唤醒**（仅刷 HUD、不重排不重绘树），读数不会停在上一次活跃时的值上 |
 | `dispatch_*` / `tick` / `render_to_png(path)` | 程序化派发与离屏渲染 |
 | `window_state()` / `window_mode()` | 响应式 `State<WindowState>&` / `State<WindowMode>&`（在 `Effect` 内读取自动订阅刷新） |
 | `set_on_window_state(cb)` / `set_on_window_mode(cb)` | 命令式回调 |
@@ -177,12 +177,14 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 
 | 情况 | 行为 |
 |:---|:---|
-| 四者全否 | **整帧跳过**（idle 零开销，上帧画面仍有效，返回 `true` 不重绘） |
+| 四者全否且 HUD 叠加层未到期 | **整帧跳过**（idle 零开销，上帧画面仍有效，返回 `true` 不重绘） |
+| 四者全否但 HUD 叠加层到期（软件路径） | **HUD-only 帧**：不重排不重绘树，只把新 HUD 合成到保留的主缓冲再全量上屏；仍记 idle（见下） |
 | 仅绘制脏（文本选区高亮、主题切换、局部 `State` 文本变更） | **跳过整树 `layout`**，复用已缓存 `Node` 几何直接 `paint` |
 | 布局脏或尺寸变化 | `layout + paint` |
 | 根变化（`Navigator` 切换页面、`run_demo` 换树） | 强制整体重绘，避免停留旧页面 |
 
 - `mark_needs_layout()` 置「布局脏 + 绘制脏」，`mark_needs_paint()` 仅置「绘制脏」。
+- **HUD-only 帧是「整帧跳过」的唯一例外**：叠加层可见且到期时，帧循环唤醒一帧只刷 HUD，否则脏决策会在 HUD 合成段之前直接 `return`，屏幕上的读数永久停在最后一次活跃帧上（详见 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) §10.2）。该帧**仍记 idle**（未渲染树 ⇒ 不进 FPS / 帧时间统计，避免 HUD 用自己的刷新抬高它自己显示的帧率），并由 `WindowHost::decide_wait` 把 `Window::hud_refresh_due_ms()` 并入唤醒截止时间，使其固定在约 2Hz 而非退化成忙轮询。GPU 帧路径的软件缓冲只有底色（控件像素在 GPU 侧），裸 `present()` 会上屏一屏空白，故该路径标全脏、退回完整重渲染。
 - `Widget::on_dirty` 是控件**自身**挂载的 `std::function<void(bool)>` 回调（`true` = 含布局脏），用于直接持有某控件、单独观察其标脏的场景；它**不参与树级脏传播**。`install_dirty_sink` 仅在控件树**根节点**安装**单一** `on_subtree_dirty`（`void(Widget &, bool)`）汇聚点，而非逐节点整树接线。
 - `enable_dirty_tracking(bool)` 可关闭，回到每帧全量重绘的历史行为；`force_full_redraw()` 供动画 / 视频 / 定时器持续重绘或外部环境突变时强制下一帧全绘。
 - **首帧 `first_frame_ = true` 强制全绘**；重新挂载 / 根变化时自动 `mount` 接线响应式订阅，使 `State` 与修饰变更能标脏重绘。
@@ -221,7 +223,7 @@ compute_wait_timeout(has_dirty, anim_active, next_deadline_ms, frame_budget_ms, 
 
 **跨线程回投**：`Application::run` 安装 `Task::set_main_poster`；`au::async` 的 `then` 回调入队 + `request_wake()` 唤醒主循环，下一帧开头主线程排水执行。单线程 UI 不变；无运行循环时在完成线程直接调用。
 
-**`FrameStats` 观测**：`record_wait(double)`、`wakeup_count()`、`wakeups_per_sec()`、`sleep_ratio()`。
+**`FrameStats` 观测**：`record_wait(double)`、`wakeup_count()`、`wakeups_per_sec()`、`sleep_ratio()`。停帧状态：`record_idle(double dt)`（累加空闲时长）、`is_stale()` / `stale_duration_ms()`（详见 `ARCHITECTURE.md` §10.1 的停帧陈旧语义）。
 
 ### 3.4 Win32 上屏与系统重绘
 
@@ -656,7 +658,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 | `perf/trace_writer.h` | 轨迹写出 |
 | `app/perf_overlay.h` | 屏幕性能叠加层（`PerfOverlay`，经 `Application::set_overlay` 注入） |
 
-`FrameStats`（`app/perf_overlay.h`）的读数为**方法**：`fps()` / `avg_frame_ms()` / `worst_frame_ms()` / `jitter_ms()` / `percentile_ms(p)`（`p ∈ [0,1]`，任意百分位帧时间）/ `dropped_frame_count()` / `dropped_frame_ratio()` / `hitch_count()` / `idle_frame_count()` / `total_frames()` / `frame_budget_ms()`，以及 `layout` / `paint` / `present` 三相位环形缓冲（`avg_layout_ms()` / `avg_paint_ms()` / `avg_present_ms()`）。
+`FrameStats`（`app/perf_overlay.h`）的读数为**方法**：`fps()` / `avg_frame_ms()` / `worst_frame_ms()` / `jitter_ms()` / `percentile_ms(p)`（`p ∈ [0,1]`，任意百分位帧时间）/ `dropped_frame_count()` / `dropped_frame_ratio()` / `hitch_count()` / `idle_frame_count()` / `total_frames()` / `frame_budget_ms()` / `is_stale()` / `stale_duration_ms()`（后两者为停帧陈旧语义，见 `ARCHITECTURE.md` §10.1），以及 `layout` / `paint` / `present` 三相位环形缓冲（`avg_layout_ms()` / `avg_paint_ms()` / `avg_present_ms()`）。
 
 `aurora::debug::perf_snapshot()`（§11.2）把上述方法映射为 **JSON 键**输出——键名与方法名不同：`p50_ms` = `percentile_ms(0.5)`、`p99_ms` = `percentile_ms(0.99)`、`dropped_frames` = `dropped_frame_count()`、`dropped_ratio` = `dropped_frame_ratio()`、`hitches` = `hitch_count()`、`idle_frames` = `idle_frame_count()`，另含 `fps` / `avg_frame_ms` / `worst_frame_ms` / `jitter_ms` / `total_frames` / `frame_budget_ms` 同名键与 `perf_log` 子对象。引用读数时勿把 JSON 键当成 C++ 成员。
 

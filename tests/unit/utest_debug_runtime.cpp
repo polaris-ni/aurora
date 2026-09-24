@@ -83,9 +83,14 @@ AURORA_TEST_CASE(perf_snapshot_exposes_frame_stats_keys) {
     AURORA_TEST_CHECK_TRUE(j.contains("worst_frame_ms"));
     AURORA_TEST_CHECK_TRUE(j.contains("total_frames"));
     AURORA_TEST_CHECK_TRUE(j.contains("frame_budget_ms"));
+    // 停帧陈旧语义随 FrameStats 一同聚合：远程读取方须能判断 fps 是否已冻结（ARCHITECTURE.md §10.1）。
+    AURORA_TEST_CHECK_TRUE(j.contains("stale"));
+    AURORA_TEST_CHECK_TRUE(j.contains("stale_ms"));
     AURORA_TEST_CHECK_TRUE(j.contains("perf_log"));
     AURORA_TEST_CHECK_TRUE(j["fps"].is_number());
     AURORA_TEST_CHECK_TRUE(j["total_frames"].is_number());
+    AURORA_TEST_CHECK_TRUE(j["stale"].is_boolean());
+    AURORA_TEST_CHECK_TRUE(j["stale_ms"].is_number());
 }
 
 AURORA_TEST_CASE(frame_phase_timeline_respects_limit) {

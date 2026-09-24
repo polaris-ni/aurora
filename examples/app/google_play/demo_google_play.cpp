@@ -3,6 +3,7 @@
 // 数据层完全本地合成（确定性目录 + 程序化 Image），经 DataHook 抽象，绝不联网。
 // 缺失的基础组件（横向虚拟列表 LazyRow、底部导航栏 BottomNavBar）已补全进框架；
 // 并修复了 GridView 在圆角裁剪容器内越界崩溃的已知 BUG。
+#include <algorithm>
 #include <chrono>
 #include <memory>
 
@@ -39,7 +40,9 @@ auto main() -> int {
     // FrameStats 已由 Application::run 每帧自动 record(dt)，PerfOverlay 直接消费。
     aurora::Scene scene{au::Node{host}};
     aurora::WindowOptions opts;
-    opts.max_fps = 0;  // 解除帧率上限：内部帧循环以显示器/GPU 允许的最高速率运行，滚动与动画更跟手
+    opts.max_fps = 60;  // 帧率上限 60：软件渲染下的常规预期，也把空闲态 CPU 从「不限帧」的
+                        // 16.0% 压到 10.7%（16s 空闲实测，Win32 GDI）；0.45s 的轮播滑动仍有
+                        // 约 27 帧可用，观感不受损。取 0（不限帧）会让空闲态同样吃满一个核。
     opts.size = au::Size{.width = 1100.0F, .height = 760.0F};
     opts.title = "Google Play";
     // 文本 AA 策略：屏幕演示选 ClearType（LCD 子像素）——灰度 AA 的窄过渡在 1x 下曲线/斜笔画
@@ -49,19 +52,29 @@ auto main() -> int {
     auto win_res = create_native_window(opts);
     aurora::Application app{std::move(scene), win_res ? std::move(win_res.value()) : nullptr, opts};
     app.set_overlay(std::make_shared<au::PerfOverlay>());
+    auto last_frame = std::chrono::steady_clock::now();
     auto last_fps_print = std::chrono::steady_clock::now();
-    app.set_on_frame([&anim, &last_fps_print]() -> void {
-        anim.tick(1.0 / 60.0);
-        // 每秒向 stdout 打印一次帧率摘要（节流，避免刷屏）。FrameStats 由 Application::run 每帧填充。
+    app.set_on_frame([&anim, &last_frame, &last_fps_print]() -> void {
+        // 动画按**实测帧间隔**推进，而非固定 1/60：帧节奏并非严格的 1/60——转场/滚动这类
+        // 重帧成本高，实测只有约 70~90 帧/秒，定步长会让动画时长随帧率漂移（0.3s 的路由转场
+        // 在定步长下实测约 0.2s 就播完）。取实测 dt 让时长与帧率解耦；框架自身在
+        // `Application::step_frame` 里亦取实测值（`anim_.tick(dt)`）。
+        // 上界 clamp 沿用同 demo 轮播 BannerCarousel 的口径（0.1s），避免长时间挂起后单帧跳完整段动画。
         const auto now = std::chrono::steady_clock::now();
+        const double dt = std::min(std::chrono::duration<double>(now - last_frame).count(), 0.1);
+        last_frame = now;
+        anim.tick(dt);
+        // 每秒向 stdout 打印一次帧率摘要（节流，避免刷屏）。FrameStats 由 Application::run 每帧填充。
+        // 打印 `idle` 与 stale 标记：本窗口的 PerfOverlay 是观察停帧陈旧语义（FrameStats::is_stale）
+        // 的现实载体——静止段里 idle 计数按 HUD 刷新周期（约 2Hz）增长，FPS 保持末值并带上 stale。
         const double since_s = std::chrono::duration<double>(now - last_fps_print).count();
         if (since_s >= 1.0) {
             last_fps_print = now;
             const auto &s = au::FrameStats::instance();
-            AURORA_LOG_RAW("demo", "FPS ", s.fps(), " | avg ", s.avg_frame_ms(), "ms | P99 ", s.percentile_ms(0.99),
-                           "ms | jitter ", s.jitter_ms(), "ms | dropped ", s.dropped_frame_count(), " | layout ",
-                           s.avg_layout_ms(), "ms | paint ", s.avg_paint_ms(), "ms | present ", s.avg_present_ms(),
-                           "ms\n");
+            AURORA_LOG_RAW("demo", "FPS ", s.fps(), s.is_stale() ? " (stale)" : "", " | avg ", s.avg_frame_ms(),
+                           "ms | P99 ", s.percentile_ms(0.99), "ms | jitter ", s.jitter_ms(), "ms | dropped ",
+                           s.dropped_frame_count(), " | idle ", s.idle_frame_count(), " | layout ", s.avg_layout_ms(),
+                           "ms | paint ", s.avg_paint_ms(), "ms | present ", s.avg_present_ms(), "ms\n");
         }
     });
     // ---- DEBUG 能力接入（DEBUG_BACKEND 演示）----

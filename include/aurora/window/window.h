@@ -438,6 +438,11 @@ class Window {
     /// 布局脏或尺寸变化 → layout + paint。脏来源：任一控件 `mark_needs_layout` → 布局脏 + 绘制脏；
     /// `mark_needs_paint`（含 `State` 变更）→ 仅绘制脏。二者经 `Widget::request_frame` 沿布局父链
     /// 上溯到根，由本窗口安装在根上的唯一汇聚点接收（见 `install_dirty_sink`）。
+    ///
+    /// **跳过的唯一例外是 HUD 叠加层到期**（`hud_refresh_pending()`）：整树无脏时若叠加层到期，
+    /// 软件路径下走「HUD-only 帧」——不重排不重绘树，只把新 HUD 合成到保留的主缓冲再全量上屏，
+    /// 且该帧仍记 idle（不污染 FPS 统计）；GPU 路径因软件缓冲只有底色而退回完整重渲染。
+    /// 没有这条例外，帧循环会在脏决策处直接 return，叠加层永远得不到重绘。
     [[nodiscard]] auto present_root(Node &root) -> Result<bool> {
         cached_root_ = root;  // 缓存当前根，供 resize/WM_PAINT 同步重渲染回调使用
         wire_present_request_once();
@@ -531,9 +536,13 @@ class Window {
 
     /// @brief 设置 HUD 叠加层（分层 HUDA）。
     ///
-    /// 叠加层（典型为 `PerfOverlay`）独立于 widget 树渲染到离屏缓冲，仅以 ~2Hz 重绘自身，
-    /// 不再触发整树重绘；每帧在 tree paint 之后、present 之前合成到主缓冲。app 树仅在其自身
-    /// 脏时重绘，叠加层的刷新开销被隔离在离屏缓冲内（~1–2ms）。传入 `nullptr` 关闭叠加层。
+    /// 叠加层（典型为 `PerfOverlay`）独立于 widget 树渲染到离屏缓冲，仅按 `AURORA_HUD_REFRESH_MS`
+    /// 重绘自身，不再触发整树重绘；每帧在 tree paint 之后、present 之前合成到主缓冲。app 树仅在
+    /// 其自身脏时重绘，叠加层的刷新开销被隔离在离屏缓冲内（~1–2ms）。传入 `nullptr` 关闭叠加层。
+    ///
+    /// **空闲期语义**：叠加层可见时帧循环不会深睡——到期即唤醒一帧只刷 HUD（见 `present_root`
+    /// 的 HUD-only 例外与 `hud_refresh_due_ms()`），故读数不会停在上一次活跃时的值上；
+    /// 卸下叠加层后本窗口恢复正常的事件驱动深睡。
     ///
     /// 与「把 PerfOverlay 作为根控件包裹内容」的旧用法互斥：二者取其一。启用叠加层后，
     /// 根 widget 树即 `Scene` 的真实内容，`PerfOverlay` 等不应再出现在树内。
@@ -544,6 +553,32 @@ class Window {
         hud_rendered_ = false;  // 强制下一帧重绘 HUD 缓冲（含开关/首次设置）
     }
     [[nodiscard]] auto overlay() const -> const std::shared_ptr<Widget> & { return overlay_; }
+
+    /// @brief HUD 叠加层刷新周期（毫秒）：叠加层内容（FPS 等实时读数）按该周期重绘离屏缓冲。
+    ///
+    /// 该周期同时决定**空闲期的唤醒节奏**：整树无脏时帧循环只为此周期醒来一次，
+    /// 见 `hud_refresh_due_ms()`。
+    static constexpr double AURORA_HUD_REFRESH_MS = 500.0;
+
+    /// @brief 叠加层是否已到期需重绘（无叠加层恒 false）。
+    [[nodiscard]] auto hud_refresh_pending() const -> bool {
+        return overlay_ && (!hud_rendered_ || elapsed_since_hud_refresh_ms() >= AURORA_HUD_REFRESH_MS);
+    }
+
+    /// @brief 距下一次 HUD 刷新到期的毫秒数：`0` = 已到期；`<0` = 无叠加层（本帧无须为它唤醒）。
+    ///
+    /// 供帧调度并入「非渲染唤醒」截止时间。**不并入的后果**：整树无脏时帧循环会睡到下一个
+    /// 定时器到期（无定时器即无限等待），叠加层再也得不到重绘，HUD 永久停在最后一帧的读数上。
+    [[nodiscard]] auto hud_refresh_due_ms() const -> double {
+        if (!overlay_) {
+            return -1.0;
+        }
+        if (!hud_rendered_) {
+            return 0.0;  // 尚未渲染过（首帧 / 刚 set_overlay）→ 立即到期
+        }
+        const double since_ms = elapsed_since_hud_refresh_ms();
+        return since_ms >= AURORA_HUD_REFRESH_MS ? 0.0 : AURORA_HUD_REFRESH_MS - since_ms;
+    }
 
     /// @brief 脏区域追踪器（供性能覆盖层/测试观测）。
     [[nodiscard]] auto dirty_tracker() -> DirtyRegionTracker & { return dirty_; }
@@ -689,10 +724,16 @@ class Window {
     std::unique_ptr<Painter> hud_painter_;  ///< 叠加层离屏缓冲（逻辑窗口尺寸 × 窗口 scale）。
     float hud_scale_ = 0.0F;  ///< 离屏缓冲的 scale（与窗口不一致时重建）。
     bool hud_rendered_ = false;  ///< 离屏缓冲是否已渲染过（首帧/开关变更须重建）。
-    std::chrono::steady_clock::time_point hud_last_refresh_;  ///< 上次 HUD 离屏重绘时刻（2Hz 节流）。
+    std::chrono::steady_clock::time_point
+        hud_last_refresh_;  ///< 上次 HUD 离屏重绘时刻（按 AURORA_HUD_REFRESH_MS 节流）。
 
-    /// @brief 重绘 HUD 离屏缓冲（仅 ~2Hz 调用，隔离叠加层刷新开销于树重绘之外）。
-    /// 缓冲尺寸 = 逻辑窗口尺寸（scale 同窗口）；每帧 composite 前若距上次 ≥500ms 才调用。
+    /// @brief 距上次 HUD 离屏重绘的毫秒数（`hud_rendered_` 为 false 时该值无意义，勿单独使用）。
+    [[nodiscard]] auto elapsed_since_hud_refresh_ms() const -> double {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - hud_last_refresh_).count();
+    }
+
+    /// @brief 重绘 HUD 离屏缓冲（仅按 AURORA_HUD_REFRESH_MS 调用，隔离叠加层刷新开销于树重绘之外）。
+    /// 缓冲尺寸 = 逻辑窗口尺寸（scale 同窗口）；每帧 composite 前若已到期才调用。
     auto render_hud(const BuildContext &ctx) -> void {
         const Size sz = size();
         const float s = surface_->scale_factor();
@@ -748,7 +789,7 @@ class Window {
     }
 
     /// @brief 脏追踪决策：计算 FramePlan；若本帧可跳过则返回跳过结果。
-    [[nodiscard]] auto evaluate_dirty_plan(const Node &root, bool root_changed, FramePlan &plan)
+    [[nodiscard]] auto evaluate_dirty_plan(Node &root, bool root_changed, FramePlan &plan)
         -> std::optional<Result<bool>> {
         const bool size_changed = size().width != last_size_.width || size().height != last_size_.height;
         if (root_changed) {
@@ -758,13 +799,26 @@ class Window {
         }
         // 无绘制脏、无布局脏、尺寸未变、根未变 → 整帧跳过（上帧画面仍有效）
         if (!first_frame_ && dirty_.is_empty() && !layout_dirty_ && !size_changed) {
-            if (!system_redraw_) {
+            // 软件路径下帧缓冲保留上一帧像素（本帧不重跑 `begin_frame`），故「只刷 HUD」可行：
+            // 把到期的叠加层重新合成到既有画面再全量上屏即可，不重排、不重绘整树。
+            // GPU 路径的软件缓冲只有底色（控件像素在 GPU 侧），裸 present 会计上屏一屏空白，
+            // 故该路径只能标全脏、退回下方完整渲染决策（含帧级 DL 录制与回放）。
+            const bool software_buffer_valid = surface_->gpu_backend() == nullptr || gpu_fallback_;
+            const bool hud_due = hud_refresh_pending();
+            if (software_buffer_valid && hud_due) {
+                // 注意仍算 idle 帧：本帧没有渲染树，不能计入 FPS / 帧时间（否则 HUD 会用自己的
+                // 刷新去抬高它自己显示的帧率）。`decide_wait` 侧另由 `hud_refresh_due_ms()` 保证
+                // 这个「空闲」不会退化成无限深睡。
+                idle_frame_ = true;
+                return present_hud_only(root);
+            }
+            // 既无系统重绘请求、叠加层也没到期 → 真的无事可做，整帧跳过。
+            if (!system_redraw_ && !hud_due) {
                 idle_frame_ = true;  // 标记 idle 帧：无脏区、未做任何渲染
                 return Result<bool>{true};
             }
-            // 系统要求重绘时不能只跳过：帧缓冲内容仍有效，但窗口表面已被 OS 置为
-            // 无效（最小化还原后为类背景刷底色）——须重新上屏，否则白屏。
-            if (surface_->gpu_backend() != nullptr && !gpu_fallback_) {
+            // 走到这里：系统要求重绘，或叠加层到期但软件缓冲不可复用。二者都需重新上屏。
+            if (!software_buffer_valid) {
                 // GPU 帧路径下 `present()` 上屏的是软件缓冲——而 GPU 模式 Painter 帧缓冲只铺
                 // 底色、从无控件像素，直接 present 等于闪一屏空白。故标全脏落回下方正常渲染
                 // 决策（本帧不再 idle），走完整的「重录帧 DL → replay → sink.end_frame」；
@@ -965,20 +1019,35 @@ class Window {
     /// @brief 若启用 HUD 叠加层，按需重绘并合成到主缓冲；返回是否发生了 HUD 刷新。
     [[nodiscard]] auto compose_hud_maybe(Painter &p, const BuildContext &ctx) -> bool {
         // ---- 分层 HUD 叠加层 ----
-        // 叠加层独立于 widget 树，仅以 ~2Hz 重绘离屏缓冲；每帧（full / partial 均）合成到主缓冲。
-        // 面板为不透明，故叠在「保留自上一帧」的主缓冲之上不会产生重影；app 树仅在自身脏时重绘，
-        // 叠加层刷新开销被隔离在离屏缓冲内（~1–2ms），不再触发整树重绘。
+        // 叠加层独立于 widget 树，仅按 AURORA_HUD_REFRESH_MS 重绘离屏缓冲；每帧（full / partial 均）
+        // 合成到主缓冲。面板为不透明，故叠在「保留自上一帧」的主缓冲之上不会产生重影；app 树仅在
+        // 自身脏时重绘，叠加层刷新开销被隔离在离屏缓冲内（~1–2ms），不触发整树重绘。
         bool hud_refreshed = false;
         if (overlay_) {
-            const auto now = std::chrono::steady_clock::now();
-            const double since_ms = std::chrono::duration<double, std::milli>(now - hud_last_refresh_).count();
-            if (!hud_rendered_ || since_ms >= 500.0) {
+            if (hud_refresh_pending()) {
                 render_hud(ctx);
                 hud_refreshed = true;
             }
             p.composite(*hud_painter_, Matrix2D::from_translate(0.0F, 0.0F));
         }
         return hud_refreshed;
+    }
+
+    /// @brief HUD-only 帧上屏：整树无脏但叠加层已到期。不重排、不重绘树，只把新 HUD 合成到
+    /// 「保留自上一帧」的软件缓冲并全量上屏。
+    ///
+    /// 前置条件（由 `evaluate_dirty_plan` 的调用点保证）：叠加层存在且到期、软件缓冲有效
+    /// （`Surface::gpu_backend() == nullptr || gpu_fallback_`）；调用方负责把 `idle_frame_` 置 true。
+    ///
+    /// 刻意不走 `finish_present`：那条路径无条件 `record_phases`，而本帧没有 layout/paint，
+    /// 记零会把相位均值拖向 0（相位环形缓冲的样本域是「绘制帧」，idle 帧不进这个域）。
+    [[nodiscard]] auto present_hud_only(Node &root) -> Result<bool> {
+        const BuildContext ctx = prepare_context(root, false);
+        Painter &p = surface_->painter();
+        (void)compose_hud_maybe(p, ctx);  // 调用点已保证处于到期态，此处必然发生离屏重绘
+        // 空脏向量 = 全量上传：HUD 像素可能落在 app 脏区之外，仅增量上传会让新 HUD 滞留在主缓冲。
+        surface_->set_present_dirty({});
+        return present();
     }
 
     /// @brief 上屏并记录阶段耗时；返回 present 结果。

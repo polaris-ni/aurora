@@ -112,6 +112,13 @@ auto perf_snapshot() -> Json {
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     j["total_frames"] = fs.total_frames();
+    // 停帧陈旧标志 + 空闲时长：远程读取方（Inspector / MCP）据此判断 `fps` 是否还代表当前帧率。
+    // 没有这两个字段，消费方只能看到一个冻结但「看起来正常」的帧率（见 ARCHITECTURE.md §10.1）。
+    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    j["stale"] = fs.is_stale();
+    j["stale_ms"] = fs.stale_duration_ms();
+    // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     j["frame_budget_ms"] = fs.frame_budget_ms();
