@@ -37,15 +37,14 @@
 
 namespace aurora::cli {
 
-struct CommandSpec;    // 声明在 command.h；此处仅按指针引用
-struct OptionSchema;   // 声明在 command.h
+struct CommandSpec;  // 声明在 command.h；此处仅按指针引用
+struct OptionSchema;  // 声明在 command.h
 
 namespace detail {
 /// @brief 字面量转换的唯一出口（实现见 src/aurora/cli/args.cpp，内部头 literals.h 声明）。
 ///        以友元类形式存在，避免把 `Value` 的构造器开放为公共 API。
 class LiteralFactory;
 }  // namespace detail
-
 
 // ---------------------------------------------------------------- 值类型
 
@@ -56,12 +55,12 @@ class LiteralFactory;
  */
 enum class ValueKind : std::uint8_t {
     Bool = 0,  ///< flag：出现即 true，不消耗后续 token
-    Int,       ///< 十进制整数（可带正负号），内部存 std::int64_t
-    Double,    ///< 十进制浮点，内部存 double
-    String,    ///< 原样字符串
-    Enum,      ///< 词表字符串（须填 `OptionSchema::choices`），内部存 std::string
-    Length,    ///< 尺寸意图：`123` / `123px` / `25%` / `fill` / `auto`
-    Color,     ///< 颜色：`#rgb` / `#rrggbb` / `#rrggbbaa` / `rgb(r,g,b)` / `rgba(r,g,b,a)`
+    Int,  ///< 十进制整数（可带正负号），内部存 std::int64_t
+    Double,  ///< 十进制浮点，内部存 double
+    String,  ///< 原样字符串
+    Enum,  ///< 词表字符串（须填 `OptionSchema::choices`），内部存 std::string
+    Length,  ///< 尺寸意图：`123` / `123px` / `25%` / `fill` / `auto`
+    Color,  ///< 颜色：`#rgb` / `#rrggbb` / `#rrggbbaa` / `rgb(r,g,b)` / `rgba(r,g,b,a)`
     LogLevel,  ///< 日志级别：trace|debug|info|warn|error|fatal（大小写不敏感，另收 TRC/DBG/…）
     Duration,  ///< 时长：`500`（缺省毫秒）/ `250ms` / `5s` / `2m` / `1h` / `1d`，内部存毫秒
 };
@@ -92,12 +91,8 @@ struct Arity {
     [[nodiscard]] static constexpr auto exactly_one() noexcept -> Arity { return {.min = 1, .max = 1}; }
     [[nodiscard]] static constexpr auto optional_one() noexcept -> Arity { return {.min = 0, .max = 1}; }
     [[nodiscard]] static constexpr auto flag() noexcept -> Arity { return {.min = 0, .max = 0}; }
-    [[nodiscard]] static constexpr auto at_least_one() noexcept -> Arity {
-        return {.min = 1, .max = AURORA_UNBOUNDED};
-    }
-    [[nodiscard]] static constexpr auto zero_or_more() noexcept -> Arity {
-        return {.min = 0, .max = AURORA_UNBOUNDED};
-    }
+    [[nodiscard]] static constexpr auto at_least_one() noexcept -> Arity { return {.min = 1, .max = AURORA_UNBOUNDED}; }
+    [[nodiscard]] static constexpr auto zero_or_more() noexcept -> Arity { return {.min = 0, .max = AURORA_UNBOUNDED}; }
     [[nodiscard]] static constexpr auto exactly(int n) noexcept -> Arity { return {.min = n, .max = n}; }
     [[nodiscard]] static constexpr auto at_most(int n) noexcept -> Arity { return {.min = 0, .max = n}; }
 
@@ -282,7 +277,7 @@ class Arguments {
 /// @brief 一次调用的结局：Ok 走业务，Help/Version 只需打印 `display_text`。
 enum class ParseOutcome : std::uint8_t {
     Ok = 0,
-    Help,     ///< 命中 `--help` / `-h`（任意层级）
+    Help,  ///< 命中 `--help` / `-h`（任意层级）
     Version,  ///< 命中声明了 `version` 的那一层命令的 `--version` / `-V`
 };
 

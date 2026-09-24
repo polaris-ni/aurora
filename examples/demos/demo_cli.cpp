@@ -63,55 +63,92 @@ auto emit(Args &&...args) -> void {
         root.epilog = "Exit codes: 0 = ok/help/version, 2 = usage error, 1 = business failure.";
         root.options = {
             cli::OptionSchema{
-                .long_name = "output", .short_name = 'o', .kind = cli::ValueKind::String, .help = "Output image path",
-                .value_hint = "FILE", .default_text = "out.png",
+                .long_name = "output",
+                .short_name = 'o',
+                .kind = cli::ValueKind::String,
+                .help = "Output image path",
+                .value_hint = "FILE",
+                .default_text = "out.png",
             },
             cli::OptionSchema{
-                .long_name = "width", .short_name = 'w', .kind = cli::ValueKind::Int, .help = "Canvas width in px",
-                .default_text = "800", .minimum = 1, .maximum = 8192,
+                .long_name = "width",
+                .short_name = 'w',
+                .kind = cli::ValueKind::Int,
+                .help = "Canvas width in px",
+                .default_text = "800",
+                .minimum = 1,
+                .maximum = 8192,
             },
             cli::OptionSchema{
-                .long_name = "verbose", .short_name = 'v', .kind = cli::ValueKind::Bool, .arity = cli::Arity::flag(),
+                .long_name = "verbose",
+                .short_name = 'v',
+                .kind = cli::ValueKind::Bool,
+                .arity = cli::Arity::flag(),
                 .help = "Repeat for more detail",
             },
             cli::OptionSchema{
-                .long_name = "level", .kind = cli::ValueKind::LogLevel, .help = "Log verbosity",
+                .long_name = "level",
+                .kind = cli::ValueKind::LogLevel,
+                .help = "Log verbosity",
                 .default_text = "info",
             },
             cli::OptionSchema{
-                .long_name = "margin", .kind = cli::ValueKind::Length, .help = "Outer margin", .default_text = "0",
+                .long_name = "margin",
+                .kind = cli::ValueKind::Length,
+                .help = "Outer margin",
+                .default_text = "0",
             },
             cli::OptionSchema{
-                .long_name = "tint", .kind = cli::ValueKind::Color, .help = "Overlay tint", .default_text = "#000",
+                .long_name = "tint",
+                .kind = cli::ValueKind::Color,
+                .help = "Overlay tint",
+                .default_text = "#000",
             },
             cli::OptionSchema{
-                .long_name = "timeout", .kind = cli::ValueKind::Duration, .help = "Give up after",
+                .long_name = "timeout",
+                .kind = cli::ValueKind::Duration,
+                .help = "Give up after",
                 .default_text = "30s",
             },
             cli::OptionSchema{
-                .long_name = "mode", .kind = cli::ValueKind::Enum, .help = "Quality/speed trade-off",
-                .default_text = "balanced", .choices = {"fast", "balanced", "quality"},
+                .long_name = "mode",
+                .kind = cli::ValueKind::Enum,
+                .help = "Quality/speed trade-off",
+                .default_text = "balanced",
+                .choices = {"fast", "balanced", "quality"},
             },
             cli::OptionSchema{
-                .long_name = "tag", .kind = cli::ValueKind::String, .arity = cli::Arity::at_least_one(),
+                .long_name = "tag",
+                .kind = cli::ValueKind::String,
+                .arity = cli::Arity::at_least_one(),
                 .help = "Attach a tag (repeatable)",
             },
             cli::OptionSchema{
-                .long_name = "force", .kind = cli::ValueKind::Bool, .arity = cli::Arity::flag(),
-                .help = "Overwrite output", .conflicts_with = {"dry-run"},
+                .long_name = "force",
+                .kind = cli::ValueKind::Bool,
+                .arity = cli::Arity::flag(),
+                .help = "Overwrite output",
+                .conflicts_with = {"dry-run"},
             },
             cli::OptionSchema{
-                .long_name = "dry-run", .kind = cli::ValueKind::Bool, .arity = cli::Arity::flag(),
-                .help = "Print only", .conflicts_with = {"force"},
+                .long_name = "dry-run",
+                .kind = cli::ValueKind::Bool,
+                .arity = cli::Arity::flag(),
+                .help = "Print only",
+                .conflicts_with = {"force"},
             },
             cli::OptionSchema{
-                .long_name = "dump-schema", .kind = cli::ValueKind::Bool, .arity = cli::Arity::flag(),
+                .long_name = "dump-schema",
+                .kind = cli::ValueKind::Bool,
+                .arity = cli::Arity::flag(),
                 .help = "Print schema_json() before the summary",
             },
         };
         root.positionals = {
             cli::PositionalSchema{
-                .name = "SCENE", .kind = cli::ValueKind::String, .arity = cli::Arity::zero_or_more(),
+                .name = "SCENE",
+                .kind = cli::ValueKind::String,
+                .arity = cli::Arity::zero_or_more(),
                 .help = "Scenes to render",
             },
         };
@@ -121,12 +158,19 @@ auto emit(Args &&...args) -> void {
         render.about = "Render one scene interactively";
         render.options = {
             cli::OptionSchema{
-                .long_name = "fps", .kind = cli::ValueKind::Int, .help = "Target frame rate", .default_text = "60",
-                .minimum = 1, .maximum = 240,
+                .long_name = "fps",
+                .kind = cli::ValueKind::Int,
+                .help = "Target frame rate",
+                .default_text = "60",
+                .minimum = 1,
+                .maximum = 240,
             },
             cli::OptionSchema{
-                .long_name = "mode", .kind = cli::ValueKind::Enum, .help = "Leaf mode (shadows root)",
-                .default_text = "png", .choices = {"png", "webp"},
+                .long_name = "mode",
+                .kind = cli::ValueKind::Enum,
+                .help = "Leaf mode (shadows root)",
+                .default_text = "png",
+                .choices = {"png", "webp"},
             },
         };
         render.positionals = {
@@ -155,8 +199,8 @@ auto report_option(const cli::Arguments &args, const cli::OptionSchema &option) 
         }
         joined += '"' + value.raw_text() + '"';
     }
-    emit("  --", option.long_name, " [", cli::to_string(option.kind), "] = ", joined, " (",
-         std::to_string(many.size()), " 次", args.explicitly_given(option.long_name) ? "" : ", 默认值", ')');
+    emit("  --", option.long_name, " [", cli::to_string(option.kind), "] = ", joined, " (", std::to_string(many.size()),
+         " 次", args.explicitly_given(option.long_name) ? "" : ", 默认值", ')');
 }
 
 /// @brief 强类型出口：证明字面量真的变成了 Length / Color / LogLevel / Duration，而非字符串。
@@ -180,12 +224,12 @@ auto report_strong_types(const cli::Arguments &args) -> void {
         return "?";
     };
 
-    emit("  margin : ", margin ? std::string{kind_of(margin.value().kind)} + "(" + std::to_string(margin.value().value) + ")"
-                               : std::string{"<unread-as-Length>"});
-    emit("  tint   : ",
-         tint ? "rgba(" + std::to_string(tint.value().r) + "," + std::to_string(tint.value().g) + "," +
-                    std::to_string(tint.value().b) + "," + std::to_string(tint.value().a) + ")"
-              : std::string{"<unread-as-Color>"});
+    emit("  margin : ",
+         margin ? std::string{kind_of(margin.value().kind)} + "(" + std::to_string(margin.value().value) + ")"
+                : std::string{"<unread-as-Length>"});
+    emit("  tint   : ", tint ? "rgba(" + std::to_string(tint.value().r) + "," + std::to_string(tint.value().g) + "," +
+                                   std::to_string(tint.value().b) + "," + std::to_string(tint.value().a) + ")"
+                             : std::string{"<unread-as-Color>"});
     emit("  level  : ", level ? std::string{au::log_level_label(level.value())} : std::string{"<unread-as-LogLevel>"});
     emit("  timeout: ", timeout ? std::to_string(timeout.value()) + "ms" : std::string{"<unread-as-Duration>"});
 }

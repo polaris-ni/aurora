@@ -106,8 +106,7 @@ template <typename T>
 }
 
 /// @brief 候选里最相近者（编辑距离 ≤ 2）；无则空串。
-[[nodiscard]] auto closest_candidate(std::string_view needle, const std::vector<std::string> &haystack)
-    -> std::string {
+[[nodiscard]] auto closest_candidate(std::string_view needle, const std::vector<std::string> &haystack) -> std::string {
     std::string best;
     int best_distance = 3;
     for (const auto &candidate : haystack) {
@@ -120,9 +119,7 @@ template <typename T>
     return best;
 }
 
-[[nodiscard]] auto display_long(std::string_view long_name) -> std::string {
-    return "--" + std::string{long_name};
-}
+[[nodiscard]] auto display_long(std::string_view long_name) -> std::string { return "--" + std::string{long_name}; }
 
 [[nodiscard]] auto join_comma(const std::vector<std::string> &items) -> std::string {
     std::string out;
@@ -336,8 +333,7 @@ using ValueRaw = Value::Raw;
 
 namespace detail {
 
-auto convert_literal(ValueKind kind, std::string_view token, std::string_view option_display)
-    -> Result<Value> {
+auto convert_literal(ValueKind kind, std::string_view token, std::string_view option_display) -> Result<Value> {
     const std::string literal{token};
     switch (kind) {
         case ValueKind::Bool: {
@@ -394,10 +390,9 @@ auto convert_literal(ValueKind kind, std::string_view token, std::string_view op
 }
 
 auto invalid_literal(std::string_view option_display, ValueKind kind, std::string_view token) -> Error {
-    return make_error(ErrorCode::CliInvalidValue,
-                      ErrorParams{{"option", std::string{option_display}},
-                                  {"kind", std::string{to_string(kind)}},
-                                  {"value", std::string{token}}});
+    return make_error(ErrorCode::CliInvalidValue, ErrorParams{{"option", std::string{option_display}},
+                                                              {"kind", std::string{to_string(kind)}},
+                                                              {"value", std::string{token}}});
 }
 
 auto is_numeric_kind(ValueKind kind) noexcept -> bool {
@@ -456,8 +451,8 @@ class Parser {
         Invocation invocation;
         invocation.outcome = early_.value_or(ParseOutcome::Ok);
         invocation.display_text = std::move(early_text_);
-        invocation.arguments = Arguments{std::move(slots), std::move(positionals), std::move(rest_), chain(),
-                                         matched(), program_};
+        invocation.arguments =
+            Arguments{std::move(slots), std::move(positionals), std::move(rest_), chain(), matched(), program_};
         return invocation;
     }
 
@@ -609,9 +604,8 @@ class Parser {
                     }
                 }
                 const std::string guess = closest_candidate(std::string_view{&letter, 1}, candidates);
-                auto error = make_error(ErrorCode::CliUnknownOption,
-                                        ErrorParams{{"option", std::string{'-', letter}},
-                                                    {"command", command_display()}});
+                auto error = make_error(ErrorCode::CliUnknownOption, ErrorParams{{"option", std::string{'-', letter}},
+                                                                                 {"command", command_display()}});
                 if (!guess.empty()) {
                     error.suggestion = "Did you mean -" + guess + "?";
                 }
@@ -673,18 +667,16 @@ class Parser {
             return std::nullopt;  // min==0 的变长项允许「出现但无值」
         }
         if (already_taken == 0) {
-            return make_error(ErrorCode::CliMissingValue,
-                              ErrorParams{{"option", display_long(spec.long_name)}});
+            return make_error(ErrorCode::CliMissingValue, ErrorParams{{"option", display_long(spec.long_name)}});
         }
         return arity_error(spec, already_taken);
     }
 
     [[nodiscard]] auto arity_error(const OptionSchema &spec, int actual) -> std::optional<Error> {
-        return make_error(ErrorCode::CliArityViolated,
-                          ErrorParams{{"option", display_long(spec.long_name)},
-                                      {"min", std::to_string(spec.arity.min)},
-                                      {"max", spec.arity.max_text()},
-                                      {"actual", std::to_string(actual)}});
+        return make_error(ErrorCode::CliArityViolated, ErrorParams{{"option", display_long(spec.long_name)},
+                                                                   {"min", std::to_string(spec.arity.min)},
+                                                                   {"max", spec.arity.max_text()},
+                                                                   {"actual", std::to_string(actual)}});
     }
 
     /// @brief 下一个可作值的 token；被选项样式占据或耗尽时返回 nullopt。
@@ -776,11 +768,10 @@ class Parser {
                     candidates.push_back(child.name);
                 }
                 const std::string guess = closest_candidate(token, candidates);
-                auto error = make_error(ErrorCode::CliUnknownSubcommand,
-                                        ErrorParams{{"subcommand", std::string{token}},
-                                                    {"command", command_display()}});
-                error.suggestion = guess.empty() ? ("Available: " + join_comma(candidates))
-                                                 : ("Did you mean " + guess + "?");
+                auto error = make_error(ErrorCode::CliUnknownSubcommand, ErrorParams{{"subcommand", std::string{token}},
+                                                                                     {"command", command_display()}});
+                error.suggestion =
+                    guess.empty() ? ("Available: " + join_comma(candidates)) : ("Did you mean " + guess + "?");
                 return error;
             }
             return make_error(ErrorCode::CliTooManyPositionals,
@@ -803,10 +794,9 @@ class Parser {
         }
         auto converted = detail::convert_literal(slot->kind, token, slot->name);
         if (!converted) {
-            return make_error(ErrorCode::CliInvalidValue,
-                              ErrorParams{{"option", slot->name},
-                                          {"kind", std::string{to_string(slot->kind)}},
-                                          {"value", std::string{token}}});
+            return make_error(ErrorCode::CliInvalidValue, ErrorParams{{"option", slot->name},
+                                                                      {"kind", std::string{to_string(slot->kind)}},
+                                                                      {"value", std::string{token}}});
         }
         if (!slot->choices.empty() &&
             std::find(slot->choices.begin(), slot->choices.end(), token) == slot->choices.end()) {
@@ -860,8 +850,7 @@ class Parser {
                 continue;  // 非法默认值由 validate 负责报错，解析期静默跳过
             }
             if (slot == level.slots.end()) {
-                level.slots.push_back(
-                    Arguments::Slot{.spec = &option, .values = {converted.value()}});
+                level.slots.push_back(Arguments::Slot{.spec = &option, .values = {converted.value()}});
             } else {
                 slot->values = {converted.value()};
                 slot->given = false;
@@ -872,10 +861,9 @@ class Parser {
     auto materialize_positional_defaults(Level &level) -> void {
         std::size_t flat = 0;
         for (const auto &slot : level.spec->positionals) {
-            const std::size_t width =
-                (slot.arity.max == Arity::AURORA_UNBOUNDED)
-                    ? static_cast<std::size_t>(std::max(slot.arity.min, 0))
-                    : static_cast<std::size_t>(slot.arity.max);
+            const std::size_t width = (slot.arity.max == Arity::AURORA_UNBOUNDED)
+                                          ? static_cast<std::size_t>(std::max(slot.arity.min, 0))
+                                          : static_cast<std::size_t>(slot.arity.max);
             for (std::size_t k = 0; k < width; ++k, ++flat) {
                 if (flat < level.positional_cursor || slot.default_text.empty()) {
                     continue;
@@ -902,9 +890,9 @@ class Parser {
                 if (slot != level.slots.end() && slot->given) {
                     continue;
                 }
-                pending(make_error(ErrorCode::CliMissingRequired,
-                                   ErrorParams{{"option", display_long(option.long_name)},
-                                               {"command", command_display()}}));
+                pending(make_error(
+                    ErrorCode::CliMissingRequired,
+                    ErrorParams{{"option", display_long(option.long_name)}, {"command", command_display()}}));
                 return;
             }
             if (spec.subcommand_required && levels_.size() == 1) {
@@ -913,10 +901,9 @@ class Parser {
             }
             std::size_t flat = 0;
             for (const auto &slot : spec.positionals) {
-                const std::size_t width =
-                    (slot.arity.max == Arity::AURORA_UNBOUNDED)
-                        ? static_cast<std::size_t>(std::max(slot.arity.min, 0))
-                        : static_cast<std::size_t>(slot.arity.max);
+                const std::size_t width = (slot.arity.max == Arity::AURORA_UNBOUNDED)
+                                              ? static_cast<std::size_t>(std::max(slot.arity.min, 0))
+                                              : static_cast<std::size_t>(slot.arity.max);
                 for (std::size_t k = 0; k < width; ++k, ++flat) {
                     if (flat >= level.positional_cursor && slot.arity.min > 0 && slot.default_text.empty()) {
                         pending(make_error(ErrorCode::CliMissingRequired,
@@ -937,8 +924,9 @@ class Parser {
         std::vector<Arguments::Slot> merged;
         for (auto &level : levels_ | std::views::reverse) {  // 叶优先
             for (auto &slot : level.slots) {
-                const auto hit = std::find_if(merged.begin(), merged.end(),
-                                              [&](const Arguments::Slot &s) { return s.spec->long_name == slot.spec->long_name; });
+                const auto hit = std::find_if(merged.begin(), merged.end(), [&](const Arguments::Slot &s) {
+                    return s.spec->long_name == slot.spec->long_name;
+                });
                 if (hit == merged.end()) {
                     merged.push_back(std::move(slot));
                 } else if (!hit->given && slot.given) {
@@ -1084,11 +1072,10 @@ auto Arguments::value(std::string_view long_name) const -> Result<Value> {
                           ErrorParams{{"option", display_long(long_name)}, {"command", command_display()}});
     }
     if (slot->values.size() > 1U) {
-        return make_error(ErrorCode::CliArityViolated,
-                          ErrorParams{{"option", display_long(long_name)},
-                                      {"min", std::to_string(slot->spec->arity.min)},
-                                      {"max", slot->spec->arity.max_text()},
-                                      {"actual", std::to_string(slot->values.size())}});
+        return make_error(ErrorCode::CliArityViolated, ErrorParams{{"option", display_long(long_name)},
+                                                                   {"min", std::to_string(slot->spec->arity.min)},
+                                                                   {"max", slot->spec->arity.max_text()},
+                                                                   {"actual", std::to_string(slot->values.size())}});
     }
     return slot->values.front();
 }
@@ -1116,9 +1103,9 @@ auto Arguments::explicitly_given(std::string_view long_name) const -> bool {
 
 auto Arguments::positional(std::size_t index) const -> Result<Value> {
     if (index >= positionals_.size()) {
-        return make_error(ErrorCode::CliMissingRequired,
-                          ErrorParams{{"option", "positional[" + std::to_string(index) + "]"},
-                                      {"command", command_display()}});
+        return make_error(
+            ErrorCode::CliMissingRequired,
+            ErrorParams{{"option", "positional[" + std::to_string(index) + "]"}, {"command", command_display()}});
     }
     return positionals_[index];
 }
@@ -1138,11 +1125,9 @@ auto Arguments::command_display() const -> std::string {
 
 namespace {
 /// @brief 全部取值种类，顺序与 `ValueKind` 的声明顺序一致。
-constexpr std::array<ValueKind, 9> AURORA_ALL_VALUE_KINDS{ValueKind::Bool,    ValueKind::Int,
-                                                          ValueKind::Double,  ValueKind::String,
-                                                          ValueKind::Enum,    ValueKind::Length,
-                                                          ValueKind::Color,   ValueKind::LogLevel,
-                                                          ValueKind::Duration};
+constexpr std::array<ValueKind, 9> AURORA_ALL_VALUE_KINDS{ValueKind::Bool,   ValueKind::Int,      ValueKind::Double,
+                                                          ValueKind::String, ValueKind::Enum,     ValueKind::Length,
+                                                          ValueKind::Color,  ValueKind::LogLevel, ValueKind::Duration};
 }  // namespace
 
 auto all_value_kinds() -> std::vector<ValueKind> {

@@ -25,9 +25,8 @@ namespace {
     if (name.empty() || name.front() == '-') {
         return false;
     }
-    return std::none_of(name.begin(), name.end(), [](char c) {
-        return c == ' ' || c == '=' || c == '\t' || c == '\n';
-    });
+    return std::none_of(name.begin(), name.end(),
+                        [](char c) { return c == ' ' || c == '=' || c == '\t' || c == '\n'; });
 }
 
 /// @brief 内建长名：声明表里出现即视为冲突（`--help` / `--version` 由库注入）。
@@ -64,8 +63,7 @@ struct HelpEntry {
         out += "    ";
     }
     out += "--" + option.long_name;
-    const auto placeholder =
-        option.arity.help_placeholder(default_value_hint(option));
+    const auto placeholder = option.arity.help_placeholder(default_value_hint(option));
     if (!placeholder.empty()) {
         out += ' ';
         out += placeholder;
@@ -129,11 +127,12 @@ struct HelpEntry {
 }
 
 /// @brief 按声明顺序归组（组名首次出现定序），内建 Help 组固定排在最后。
-[[nodiscard]] auto group_entries(std::vector<HelpEntry> entries) -> std::vector<std::pair<std::string, std::vector<HelpEntry>>> {
+[[nodiscard]] auto group_entries(std::vector<HelpEntry> entries)
+    -> std::vector<std::pair<std::string, std::vector<HelpEntry>>> {
     std::vector<std::pair<std::string, std::vector<HelpEntry>>> groups;
     for (auto &entry : entries) {
-        const auto hit = std::find_if(groups.begin(), groups.end(),
-                                      [&](const auto &pair) { return pair.first == entry.group; });
+        const auto hit =
+            std::find_if(groups.begin(), groups.end(), [&](const auto &pair) { return pair.first == entry.group; });
         if (hit == groups.end()) {
             groups.emplace_back(entry.group, std::vector<HelpEntry>{});
             groups.back().second.push_back(std::move(entry));
@@ -141,8 +140,7 @@ struct HelpEntry {
             hit->second.push_back(std::move(entry));
         }
     }
-    std::stable_partition(groups.begin(), groups.end(),
-                          [](const auto &pair) { return pair.first != "Help"; });
+    std::stable_partition(groups.begin(), groups.end(), [](const auto &pair) { return pair.first != "Help"; });
     return groups;
 }
 
@@ -175,8 +173,7 @@ struct HelpEntry {
     }
     auto converted = detail::convert_literal(kind, literal, owner);
     if (!converted) {
-        return spec_invalid(owner + ": default value '" + literal + "' is not a valid " +
-                            std::string{to_string(kind)});
+        return spec_invalid(owner + ": default value '" + literal + "' is not a valid " + std::string{to_string(kind)});
     }
     if (!choices.empty() && std::find(choices.begin(), choices.end(), literal) == choices.end()) {
         return spec_invalid(owner + ": default value '" + literal + "' is not in the choices list");
@@ -227,7 +224,8 @@ struct HelpEntry {
             }
             short_names.push_back(short_name);
         }
-        if (option.arity.min < 0 || (option.arity.max != Arity::AURORA_UNBOUNDED && option.arity.max < option.arity.min)) {
+        if (option.arity.min < 0 ||
+            (option.arity.max != Arity::AURORA_UNBOUNDED && option.arity.max < option.arity.min)) {
             return spec_invalid(owner + ": arity must satisfy 0 <= min <= max");
         }
         if (option.kind == ValueKind::Bool) {
@@ -240,8 +238,8 @@ struct HelpEntry {
         if (option.kind == ValueKind::Enum && option.choices.empty()) {
             return spec_invalid(owner + ": an Enum option must list its choices");
         }
-        if (auto error = check_default(owner, option.kind, option.default_text, option.choices, option.minimum,
-                                       option.maximum);
+        if (auto error =
+                check_default(owner, option.kind, option.default_text, option.choices, option.minimum, option.maximum);
             error) {
             return error;
         }
@@ -258,7 +256,8 @@ struct HelpEntry {
     std::vector<std::string> positional_names;
     for (std::size_t i = 0; i < spec.positionals.size(); ++i) {
         const auto &slot = spec.positionals[i];
-        const std::string owner = slot.name.empty() ? ("positional[" + std::to_string(i) + "]") : ("<" + slot.name + ">");
+        const std::string owner =
+            slot.name.empty() ? ("positional[" + std::to_string(i) + "]") : ("<" + slot.name + ">");
         if (slot.name.empty() || slot.name.front() == '-') {
             return spec_invalid(owner + ": positional name must be non-empty and must not start with '-'");
         }
@@ -399,7 +398,8 @@ auto count_commands(const CommandSpec &spec) -> int {
     Json out = Json::object();
     out["name"] = spec.name;
     out["about"] = spec.about;
-    out["usage"] = usage_line(spec, spec.name.empty() ? std::vector<std::string>{} : std::vector<std::string>{spec.name});
+    out["usage"] =
+        usage_line(spec, spec.name.empty() ? std::vector<std::string>{} : std::vector<std::string>{spec.name});
     if (!spec.version.empty()) {
         out["version"] = spec.version;
     }
@@ -519,12 +519,12 @@ auto help_text(const CommandSpec &spec, const std::vector<std::string> &path) ->
         if (option.hidden) {
             continue;
         }
-        entries.push_back(HelpEntry{
-            .group = group_of(option), .names = names_column(option), .detail = detail_column(option)});
+        entries.push_back(
+            HelpEntry{.group = group_of(option), .names = names_column(option), .detail = detail_column(option)});
     }
     const auto help_builtin = builtin_help_option();
-    entries.push_back(HelpEntry{
-        .group = "Help", .names = names_column(help_builtin), .detail = detail_column(help_builtin)});
+    entries.push_back(
+        HelpEntry{.group = "Help", .names = names_column(help_builtin), .detail = detail_column(help_builtin)});
     if (!spec.version.empty()) {
         const auto version_builtin = builtin_version_option();
         entries.push_back(HelpEntry{
@@ -576,8 +576,8 @@ auto version_text(const CommandSpec &spec, std::string_view program_name) -> std
     if (spec.version.empty()) {
         return {};
     }
-    std::string out = program_name.empty() ? (spec.name.empty() ? std::string{"program"} : spec.name)
-                                           : std::string{program_name};
+    std::string out =
+        program_name.empty() ? (spec.name.empty() ? std::string{"program"} : spec.name) : std::string{program_name};
     out += " ";
     out += spec.version;
     out += "\n";

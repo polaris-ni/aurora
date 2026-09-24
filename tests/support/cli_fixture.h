@@ -45,63 +45,109 @@ struct Tokens : std::vector<std::string> {
         root.epilog = "Report issues at the project tracker.";
         root.options = {
             OptionSchema{
-                .long_name = "output", .short_name = 'o', .kind = ValueKind::String, .help = "Output image path",
-                .value_hint = "FILE", .default_text = "out.png",
+                .long_name = "output",
+                .short_name = 'o',
+                .kind = ValueKind::String,
+                .help = "Output image path",
+                .value_hint = "FILE",
+                .default_text = "out.png",
             },
             OptionSchema{
-                .long_name = "width", .short_name = 'w', .kind = ValueKind::Int, .help = "Canvas width in px",
-                .default_text = "800", .minimum = 1, .maximum = 8192,
+                .long_name = "width",
+                .short_name = 'w',
+                .kind = ValueKind::Int,
+                .help = "Canvas width in px",
+                .default_text = "800",
+                .minimum = 1,
+                .maximum = 8192,
             },
             OptionSchema{
-                .long_name = "scale", .short_name = 's', .kind = ValueKind::Double, .help = "Scale factor",
+                .long_name = "scale",
+                .short_name = 's',
+                .kind = ValueKind::Double,
+                .help = "Scale factor",
                 .default_text = "1",
             },
             OptionSchema{
-                .long_name = "verbose", .short_name = 'v', .kind = ValueKind::Bool, .arity = Arity::flag(),
+                .long_name = "verbose",
+                .short_name = 'v',
+                .kind = ValueKind::Bool,
+                .arity = Arity::flag(),
                 .help = "Repeat for more detail",
             },
             OptionSchema{
-                .long_name = "force", .short_name = 'f', .kind = ValueKind::Bool, .arity = Arity::flag(),
-                .help = "Overwrite output", .conflicts_with = {"dry-run"},
+                .long_name = "force",
+                .short_name = 'f',
+                .kind = ValueKind::Bool,
+                .arity = Arity::flag(),
+                .help = "Overwrite output",
+                .conflicts_with = {"dry-run"},
             },
             OptionSchema{
-                .long_name = "dry-run", .kind = ValueKind::Bool, .arity = Arity::flag(), .help = "Print only",
+                .long_name = "dry-run",
+                .kind = ValueKind::Bool,
+                .arity = Arity::flag(),
+                .help = "Print only",
                 .conflicts_with = {"force"},
             },
             OptionSchema{
-                .long_name = "level", .kind = ValueKind::LogLevel, .help = "Log verbosity",
-                .default_text = "info", .group = "Diagnostics",
+                .long_name = "level",
+                .kind = ValueKind::LogLevel,
+                .help = "Log verbosity",
+                .default_text = "info",
+                .group = "Diagnostics",
             },
             OptionSchema{
-                .long_name = "mode", .kind = ValueKind::Enum, .help = "Quality/speed trade-off",
-                .default_text = "balanced", .choices = {"fast", "balanced", "quality"}, .group = "Diagnostics",
+                .long_name = "mode",
+                .kind = ValueKind::Enum,
+                .help = "Quality/speed trade-off",
+                .default_text = "balanced",
+                .choices = {"fast", "balanced", "quality"},
+                .group = "Diagnostics",
             },
             OptionSchema{
-                .long_name = "margin", .kind = ValueKind::Length, .help = "Outer margin", .default_text = "0",
+                .long_name = "margin",
+                .kind = ValueKind::Length,
+                .help = "Outer margin",
+                .default_text = "0",
             },
             OptionSchema{
-                .long_name = "tint", .kind = ValueKind::Color, .help = "Overlay tint", .default_text = "#fff",
+                .long_name = "tint",
+                .kind = ValueKind::Color,
+                .help = "Overlay tint",
+                .default_text = "#fff",
             },
             OptionSchema{
-                .long_name = "timeout", .kind = ValueKind::Duration, .help = "Give up after",
+                .long_name = "timeout",
+                .kind = ValueKind::Duration,
+                .help = "Give up after",
                 .default_text = "30s",
             },
             OptionSchema{
-                .long_name = "tag", .kind = ValueKind::String, .arity = Arity::at_least_one(),
+                .long_name = "tag",
+                .kind = ValueKind::String,
+                .arity = Arity::at_least_one(),
                 .help = "Attach a tag (repeatable)",
             },
             OptionSchema{
-                .long_name = "format", .kind = ValueKind::Enum, .help = "Root output format",
-                .default_text = "text", .choices = {"text", "json"},
+                .long_name = "format",
+                .kind = ValueKind::Enum,
+                .help = "Root output format",
+                .default_text = "text",
+                .choices = {"text", "json"},
             },
             OptionSchema{
-                .long_name = "trace-file", .kind = ValueKind::String, .help = "Hidden diagnostics path",
+                .long_name = "trace-file",
+                .kind = ValueKind::String,
+                .help = "Hidden diagnostics path",
                 .hidden = true,
             },
         };
         root.positionals = {
             PositionalSchema{
-                .name = "SCENE", .kind = ValueKind::String, .arity = Arity::zero_or_more(),
+                .name = "SCENE",
+                .kind = ValueKind::String,
+                .arity = Arity::zero_or_more(),
                 .help = "Scenes to render",
             },
         };
@@ -111,22 +157,35 @@ struct Tokens : std::vector<std::string> {
         render.about = "Render one scene interactively";
         render.options = {
             OptionSchema{
-                .long_name = "watch", .short_name = 'w', .kind = ValueKind::Bool, .arity = Arity::flag(),
+                .long_name = "watch",
+                .short_name = 'w',
+                .kind = ValueKind::Bool,
+                .arity = Arity::flag(),
                 .help = "Re-render on change",
             },
             OptionSchema{
-                .long_name = "fps", .kind = ValueKind::Int, .help = "Target frame rate", .default_text = "60",
-                .minimum = 1, .maximum = 240,
+                .long_name = "fps",
+                .kind = ValueKind::Int,
+                .help = "Target frame rate",
+                .default_text = "60",
+                .minimum = 1,
+                .maximum = 240,
             },
             OptionSchema{
-                .long_name = "format", .kind = ValueKind::Enum, .help = "Leaf output format",
-                .default_text = "png", .choices = {"png", "webp"},
+                .long_name = "format",
+                .kind = ValueKind::Enum,
+                .help = "Leaf output format",
+                .default_text = "png",
+                .choices = {"png", "webp"},
             },
         };
         render.positionals = {
             PositionalSchema{.name = "SRC", .kind = ValueKind::String, .help = "Source scene"},
             PositionalSchema{
-                .name = "DST", .kind = ValueKind::String, .arity = Arity::optional_one(), .help = "Target image",
+                .name = "DST",
+                .kind = ValueKind::String,
+                .arity = Arity::optional_one(),
+                .help = "Target image",
             },
         };
 
@@ -135,8 +194,13 @@ struct Tokens : std::vector<std::string> {
         serve.about = "Serve the gallery over HTTP";
         serve.options = {
             OptionSchema{
-                .long_name = "port", .short_name = 'p', .kind = ValueKind::Int, .help = "Listen port",
-                .default_text = "8080", .minimum = 1, .maximum = 65535,
+                .long_name = "port",
+                .short_name = 'p',
+                .kind = ValueKind::Int,
+                .help = "Listen port",
+                .default_text = "8080",
+                .minimum = 1,
+                .maximum = 65535,
             },
         };
 
@@ -155,7 +219,10 @@ struct Tokens : std::vector<std::string> {
         root.subcommand_required = true;
         root.options = {
             OptionSchema{
-                .long_name = "token", .kind = ValueKind::String, .help = "Auth token", .required = true,
+                .long_name = "token",
+                .kind = ValueKind::String,
+                .help = "Auth token",
+                .required = true,
             },
         };
 
@@ -164,7 +231,10 @@ struct Tokens : std::vector<std::string> {
         deploy.about = "Deploy the build";
         deploy.positionals = {
             PositionalSchema{
-                .name = "ENV", .kind = ValueKind::Enum, .help = "Target environment", .choices = {"dev", "prod"},
+                .name = "ENV",
+                .kind = ValueKind::Enum,
+                .help = "Target environment",
+                .choices = {"dev", "prod"},
             },
         };
         root.subcommands = {deploy};

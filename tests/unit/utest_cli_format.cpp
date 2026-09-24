@@ -136,10 +136,8 @@ AURORA_TEST_CASE(validate_rejects_malformed_long_names) {
 }
 
 AURORA_TEST_CASE(validate_reserves_short_h_and_duplicate_shorts) {
-    expect_invalid(
-        minimal({OptionSchema{.long_name = "helpless", .short_name = 'h', .kind = ValueKind::String}}));
-    expect_invalid(
-        minimal({OptionSchema{.long_name = "verbose", .short_name = 'V', .kind = ValueKind::String}}));
+    expect_invalid(minimal({OptionSchema{.long_name = "helpless", .short_name = 'h', .kind = ValueKind::String}}));
+    expect_invalid(minimal({OptionSchema{.long_name = "verbose", .short_name = 'V', .kind = ValueKind::String}}));
     expect_invalid(minimal({OptionSchema{.long_name = "one", .short_name = 'o', .kind = ValueKind::String},
                             OptionSchema{.long_name = "two", .short_name = 'o', .kind = ValueKind::String}}));
     expect_valid(minimal({OptionSchema{.long_name = "one", .short_name = 'o', .kind = ValueKind::String},
@@ -150,35 +148,33 @@ AURORA_TEST_CASE(validate_reserves_short_h_and_duplicate_shorts) {
 AURORA_TEST_CASE(validate_requires_consistent_arity_per_kind) {
     // Bool 必须是零值 arity（flag），非 Bool 必须至少吞一个值
     expect_invalid(minimal({OptionSchema{.long_name = "flag", .kind = ValueKind::Bool}}));
-    expect_invalid(minimal({OptionSchema{
-        .long_name = "list", .kind = ValueKind::String, .arity = Arity::zero_or_more()}}));
-    expect_invalid(minimal({OptionSchema{.long_name = "wide", .kind = ValueKind::Int, .arity = Arity{.min = 5, .max = 2}}}));
-    expect_valid(minimal({OptionSchema{
-        .long_name = "flag", .kind = ValueKind::Bool, .arity = Arity::flag()}}));
-    expect_valid(minimal({OptionSchema{
-        .long_name = "list", .kind = ValueKind::String, .arity = Arity::at_least_one()}}));
+    expect_invalid(
+        minimal({OptionSchema{.long_name = "list", .kind = ValueKind::String, .arity = Arity::zero_or_more()}}));
+    expect_invalid(
+        minimal({OptionSchema{.long_name = "wide", .kind = ValueKind::Int, .arity = Arity{.min = 5, .max = 2}}}));
+    expect_valid(minimal({OptionSchema{.long_name = "flag", .kind = ValueKind::Bool, .arity = Arity::flag()}}));
+    expect_valid(
+        minimal({OptionSchema{.long_name = "list", .kind = ValueKind::String, .arity = Arity::at_least_one()}}));
 }
 
 AURORA_TEST_CASE(validate_requires_enum_choices_and_consistent_defaults) {
     expect_invalid(minimal({OptionSchema{.long_name = "mode", .kind = ValueKind::Enum}}));  // Enum 无取值域
 
     // 默认值不在取值域内 → 声明自相矛盾
-    expect_invalid(minimal({OptionSchema{.long_name = "mode", .kind = ValueKind::Enum, .default_text = "b",
-                                         .choices = {"a"}}}));
-    expect_valid(minimal({OptionSchema{.long_name = "mode", .kind = ValueKind::Enum, .default_text = "a",
-                                       .choices = {"a", "b"}}}));
+    expect_invalid(
+        minimal({OptionSchema{.long_name = "mode", .kind = ValueKind::Enum, .default_text = "b", .choices = {"a"}}}));
+    expect_valid(minimal(
+        {OptionSchema{.long_name = "mode", .kind = ValueKind::Enum, .default_text = "a", .choices = {"a", "b"}}}));
     expect_invalid(minimal({OptionSchema{.long_name = "width", .kind = ValueKind::Int, .default_text = "wide"}}));
-    expect_invalid(minimal({OptionSchema{
-        .long_name = "width", .kind = ValueKind::Int, .default_text = "99", .maximum = 10}}));
+    expect_invalid(
+        minimal({OptionSchema{.long_name = "width", .kind = ValueKind::Int, .default_text = "99", .maximum = 10}}));
     expect_valid(minimal({OptionSchema{
         .long_name = "width", .kind = ValueKind::Int, .default_text = "9", .minimum = 1, .maximum = 10}}));
 }
 
 AURORA_TEST_CASE(validate_requires_conflicts_to_point_at_real_options) {
-    expect_invalid(minimal({OptionSchema{
-        .long_name = "a", .kind = ValueKind::String, .conflicts_with = {"ghost"}}}));
-    expect_invalid(minimal({OptionSchema{
-        .long_name = "a", .kind = ValueKind::String, .conflicts_with = {"a"}}}));
+    expect_invalid(minimal({OptionSchema{.long_name = "a", .kind = ValueKind::String, .conflicts_with = {"ghost"}}}));
+    expect_invalid(minimal({OptionSchema{.long_name = "a", .kind = ValueKind::String, .conflicts_with = {"a"}}}));
     expect_valid(minimal({OptionSchema{.long_name = "a", .kind = ValueKind::String, .conflicts_with = {"b"}},
                           OptionSchema{.long_name = "b", .kind = ValueKind::String, .conflicts_with = {"a"}}}));
 }
@@ -190,13 +186,13 @@ AURORA_TEST_CASE(validate_constrains_positional_declarations) {
                                 PositionalSchema{.name = "A", .kind = ValueKind::String}}));  // 重名
     expect_invalid(minimal({OptionSchema{.long_name = "A", .kind = ValueKind::String}},
                            {PositionalSchema{.name = "A", .kind = ValueKind::String}}));  // 与选项长名冲突
-    expect_invalid(minimal({}, {PositionalSchema{.name = "TAIL", .kind = ValueKind::String,
-                                                 .arity = Arity::zero_or_more()},
-                                PositionalSchema{.name = "AFTER", .kind = ValueKind::String}}));  // 变长非末位
-    expect_invalid(minimal({}, {PositionalSchema{
-        .name = "N", .kind = ValueKind::Int, .default_text = "x"}}));  // 默认值字面量不合法
-    expect_valid(minimal({}, {PositionalSchema{.name = "TAIL", .kind = ValueKind::String,
-                                               .arity = Arity::zero_or_more()}}));
+    expect_invalid(
+        minimal({}, {PositionalSchema{.name = "TAIL", .kind = ValueKind::String, .arity = Arity::zero_or_more()},
+                     PositionalSchema{.name = "AFTER", .kind = ValueKind::String}}));  // 变长非末位
+    expect_invalid(minimal(
+        {}, {PositionalSchema{.name = "N", .kind = ValueKind::Int, .default_text = "x"}}));  // 默认值字面量不合法
+    expect_valid(
+        minimal({}, {PositionalSchema{.name = "TAIL", .kind = ValueKind::String, .arity = Arity::zero_or_more()}}));
 }
 
 AURORA_TEST_CASE(validate_checks_subcommand_declarations_recursively) {
@@ -239,8 +235,7 @@ AURORA_TEST_CASE(spec_invalid_error_carries_the_reason) {
 // ------------------------------------------------------------ 派生文本
 
 AURORA_TEST_CASE(usage_line_renders_chain_options_positionals_and_commands) {
-    AURORA_TEST_CHECK_EQ(cli::usage_line(spec()),
-                         "usage: aurora-render [OPTIONS] <SCENE>... [COMMAND] [-- ARGS...]");
+    AURORA_TEST_CHECK_EQ(cli::usage_line(spec()), "usage: aurora-render [OPTIONS] <SCENE>... [COMMAND] [-- ARGS...]");
     const auto *const render = spec().find_subcommand("render");
     AURORA_TEST_REQUIRE(render != nullptr);
     AURORA_TEST_CHECK_EQ(cli::usage_line(*render, {"aurora-render", "render"}),
@@ -289,7 +284,10 @@ AURORA_TEST_CASE(help_text_marks_required_and_keeps_declaration_order) {
 
 AURORA_TEST_CASE(help_text_renders_bounds_without_decimal_noise) {
     const auto root = minimal({OptionSchema{
-        .long_name = "ratio", .kind = ValueKind::Double, .help = "Fractional and integral bounds", .minimum = 0.25,
+        .long_name = "ratio",
+        .kind = ValueKind::Double,
+        .help = "Fractional and integral bounds",
+        .minimum = 0.25,
         .maximum = 4,
     }});
     const auto text = cli::help_text(root);
@@ -378,8 +376,7 @@ AURORA_TEST_CASE(cli_texts_match_golden_baseline) {
     if (!regen) {
         std::ifstream in(path);
         AURORA_TEST_REQUIRE_MSG(
-            in.good(),
-            "golden baseline cli_snapshots.json must exist (run with AURORA_UPDATE_GOLDEN=1 to create)");
+            in.good(), "golden baseline cli_snapshots.json must exist (run with AURORA_UPDATE_GOLDEN=1 to create)");
         in >> baseline;
         AURORA_TEST_REQUIRE_TRUE(baseline.contains("texts"));
     }
