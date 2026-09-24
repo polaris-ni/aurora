@@ -86,6 +86,11 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_code_doc_sync
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_code_doc_sync.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 人工测试用例（codespec/manual-test/*.md）解析契约守护：六字段名/顺序/取值域、
+        # 编号升序、依赖拓扑可解、预期结果与步骤同号映射、执行记录表列格式与判定一致性。
+        add_test(NAME check_manual_test_format
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_manual_test_format.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
         # 版本一致性门禁（CHANGELOG.currentVersion 必须等于库版本；描述性口径不符仅告警）。
         add_test(NAME check_version_consistency
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_version_consistency.py"

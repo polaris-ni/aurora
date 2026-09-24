@@ -300,6 +300,7 @@ ctest -R itest_ai_compat
 | 豁免指令排版 | `ctest -R check_nolint_layout`（clang-tidy 豁免只在物理行生效：理由夹在指令与代码之间、被豁免语句折行、注释散文抄裸令牌，三类均静默失效，见 `CODING_STANDARDS.md` §5.2） | `check_nolint_layout` |
 | codespec 交叉引用 | `ctest -R check_codespec_xref` | `check_codespec_xref` |
 | 代码-文档同步 | `ctest -R check_code_doc_sync` | `check_code_doc_sync` |
+| 人工用例格式契约 | `ctest -R check_manual_test_format`（`codespec/manual-test/*.md` 的六字段名/顺序/取值域、编号升序、依赖拓扑可解、步骤-预期同号映射、执行记录表列格式） | `check_manual_test_format` |
 | 黄金文件 | `ctest -R golden`（确定性渲染基准） | golden 基准图 |
 
 「一次通过」终极检验（§11）由 `itest_ai_compat`（`tests/integration/`，运行 `ctest -R itest_ai_compat`） 离线近似承担，不依赖在线 LLM。
