@@ -35,6 +35,8 @@
 #include "aurora/app/ui_prompt.h"
 #include "aurora/app/validate.h"
 #include "aurora/app/validate_ui.h"
+#include "aurora/cli/args.h"
+#include "aurora/cli/command.h"
 #include "aurora/commands.h"
 #include "aurora/core/a11y_provider.h"  // 鍏叡鏃犻殰纰嶆ˉ鎶借薄 + 鍏叡閽╁瓙锛坰et_accessibility_*_hook锛?9锛?#10;#include "aurora/core/accessibility.h"
 #include "aurora/core/aurora_assert.h"

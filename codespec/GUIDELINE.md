@@ -5,7 +5,7 @@
 >
 > **片段约定**：本文所有片段统一使用 `au::` 前缀。复制任意单段时，请确保该别名（或 `using namespace aurora;`）已在所处编译单元声明，否则 `au::Xxx` 编译失败。
 >
-> API 契约见 `specification/` 八份子系统文档；架构见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；状态选择见 [`CONCEPTS.md`](CONCEPTS.md) §2；常见坑见本文 §26；运行时调试见本文 §27。
+> API 契约见 `specification/` 九份子系统文档；架构见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；状态选择见 [`CONCEPTS.md`](CONCEPTS.md) §2；常见坑见本文 §26；运行时调试见本文 §27。
 
 ---
 
@@ -1746,5 +1746,113 @@ auto sub = store.on_change([](const StorageChange &ch) { /* ch.op / ch.id */ });
 - **事务语义随后端**：SQLite 是真事务（BEGIN IMMEDIATE/COMMIT/ROLLBACK，嵌套并入外层）；Filesystem 顺序执行尽力而为，单条失败不撤销已完成的写。
 - **类型化与迁移**：实现 `to_storage_json` / `from_storage_json`（或二进制版）的 `StorageStorable` 类型可直接 `put<T>` / `get<T>`，`version` 落后时自动走 `migrate_storage`。
 - **异步**：`async_put` / `async_get` / `async_list` 等经 worker 线程卸载，返回 `Task<T>`。
+
+---
+
+## 41 命令行参数解析（cli）
+
+`au::cli` 是声明表驱动的 argv 解析器：唯一的输入是一棵 `CommandSpec`，解析产出强类型取值，`--help` / `usage` /
+`schema_json` 全部从同一份声明派生。零异常——一切失败经 `Result` + `cli-*` 错误码返回。
+
+```cpp
+#include <string>
+#include "aurora/aurora.h"
+
+namespace au = aurora;
+
+auto build_spec() -> const au::cli::CommandSpec & {
+    static const au::cli::CommandSpec ROOT = [] {
+        au::cli::CommandSpec root;
+        root.name = "gallery";
+        root.about = "Aurora gallery tool";
+        root.version = "1.0.0";  // 非空 -> 该层自动支持 --version
+        root.options = {
+            au::cli::OptionSchema{
+                .long_name = "width", .short_name = 'w', .kind = au::cli::ValueKind::Int,
+                .help = "Canvas width in px", .default_text = "800", .minimum = 1, .maximum = 8192,
+            },
+            au::cli::OptionSchema{
+                .long_name = "tint", .kind = au::cli::ValueKind::Color,
+                .help = "Overlay tint", .default_text = "#fff",
+            },
+            au::cli::OptionSchema{
+                .long_name = "dry-run", .kind = au::cli::ValueKind::Bool, .arity = au::cli::Arity::flag(),
+                .help = "Print only",
+            },
+        };
+        root.positionals = {
+            au::cli::PositionalSchema{
+                .name = "SCENE", .kind = au::cli::ValueKind::String,
+                .arity = au::cli::Arity::zero_or_more(), .help = "Scenes to render",
+            },
+        };
+        return root;
+    }();
+    return ROOT;
+}
+
+auto main(int argc, char **argv) -> int {
+    const au::cli::CommandSpec &root = build_spec();
+    if (const auto checked = au::cli::validate(root); !checked) {
+        AURORA_LOG_ERROR("gallery", "spec: ", checked.error().message);
+        return 1;  // 声明表自身的错误，先于任何 argv 解析
+    }
+    const auto parsed = au::cli::parse(root, argc, argv);  // 程序名取 argv[0] 的 basename
+    if (!parsed) {
+        std::string detail = parsed.error().message;  // 用法错误：回显 token + 命令名
+        if (!parsed.error().suggestion.empty()) {
+            detail += " — " + parsed.error().suggestion;  // 如 "Did you mean --width?"
+        }
+        AURORA_LOG_ERROR("gallery", detail);
+        return 2;  // 用法错误
+    }
+    const au::cli::Invocation &invocation = parsed.value();
+    if (invocation.outcome != au::cli::ParseOutcome::Ok) {
+        AURORA_LOG_RAW("gallery", invocation.display_text);  // --help / --version 已预渲染
+        return 0;
+    }
+    const au::cli::Arguments &args = invocation.arguments;
+    const auto width = args.get<int>("width");
+    if (!width) {
+        AURORA_LOG_ERROR("gallery", width.error().message);
+        return 1;
+    }
+    AURORA_LOG_RAW("gallery", "scenes=", std::to_string(args.positionals().size()),
+                   " width=", std::to_string(width.value()), " tint=", args.value("tint").unwrap().raw_text(),
+                   " dry=", args.flag("dry-run") ? "1" : "0", "\n");
+    return 0;
+}
+```
+
+同一份声明直接取项目强类型，不必先取字符串再手工 parse：
+
+```cpp
+const auto margin = args.get<au::Length>("margin");      // "25%"  -> Length{Fraction, 0.25}
+const auto level  = args.get<au::LogLevel>("level");     // "wrn"  -> LogLevel::Warn
+const auto ms     = args.get<std::int64_t>("timeout");   // "2s"   -> 2000（Duration 以毫秒计）
+const auto tint   = args.get<au::Color>("tint");         // "#f00" -> Color
+if (tint) paint(tint.value());                           // 失败只可能是跨类读取，错误在 Result 上可见
+```
+
+取值处有三个易混出口，语义各不重叠：
+
+```cpp
+args.count("verbose");            // -vv -> 2；默认值不计
+args.explicitly_given("width");   // 区分「用户真写过」与「回落 default_text」
+args.values("tag");               // 可重复选项的全部值——此处勿用 value()，多值即 cli-arity-violated
+args.rest();                      // `--` 之后的原始 token，未经任何转换
+```
+
+要点：
+- **生命周期**：`Invocation` / `Arguments` 以指针借用声明表，不拷贝 `CommandSpec`，故声明表必须活得更久（全局 /
+  `static` / 同作用域栈对象）。
+- **`--help` 优先于报错**：必填项缺失时用户仍拿到说明书（`outcome == Help`），不会被 `cli-missing-required` 顶回去。
+- **语法边界可枚举**：`--name=v` / `-w80` / `-w 80` / `-vf` 集群 / `--` 终止符成立；**前缀缩写不支持**，未知形态一律
+  `cli-unknown-option`（`suggestion` 给 `Did you mean --width?`）。
+- **变长选项是贪心 span**（`--tag a b c` 吞到下一个 `-` 为止），所以位置参数要写在它前面，或放到 `--` 之后。
+- **退出码约定**属调用方：`0` 成功或说明书、`2` 用法错误、`1` 应用自身失败。
+
+完整载体（含子命令树、互斥、`--dump-schema`）见 `examples/demos/demo_cli.cpp`；契约见
+[`specification/09-cli.md`](specification/09-cli.md)。
 
 ---

@@ -100,7 +100,7 @@
 
 ## 4. 文档导航表（codespec/）
 
-`codespec/` 共 **14 份手写文档 + 1 份生成物**（`ERROR_CATALOG.md`），外加 2 份生成源数据（`errors.toml` / `debug_api.toml`）。
+`codespec/` 共 **15 份手写文档 + 1 份生成物**（`ERROR_CATALOG.md`），外加 2 份生成源数据（`errors.toml` / `debug_api.toml`）。
 各文档的章节号统一为纯数字点分层级（`1` / `1.1` / `1.1.1`）；需求编号 `#1–#29` 是独立的需求标识体系，与章节号并存。
 
 **顶层文档（6 份，均为自包含正文，非外链索引）**
@@ -118,7 +118,7 @@
 > 代码注释中的 `架构 §N` / `规格 §N` 引用与测试头部「目标单元」路径由 CTest `check_code_doc_sync` 守护。
 > 两套守护只拦增量，存量豁免以白名单形式内置于脚本并注明原因。
 
-**子系统规格（8 份，按 `include/aurora/` 模块域切分）**
+**子系统规格（9 份，按 `include/aurora/` 模块域切分）**
 
 | 文件 | 覆盖 | 需求 |
 |:---|:---|:---|
@@ -130,6 +130,7 @@
 | `specification/06-app-platform.md` | `app/` `window/` `preferences/` `storage/` `perf/` `debug/`：应用驱动、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面 | #14 #15 |
 | `specification/07-environment-modifier.md` | `environment/` `theming/` `i18n/` `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier | #12 |
 | `specification/08-tooling.md` | 序列化 / 代码生成 / YAML、控件树检查、Inspector、自描述发现、MCP / CLI / LSP、测试原语、日志通道 | #9 #10 #12 #13 #16 #17 #22 |
+| `specification/09-cli.md` | `cli/`：argv 语法、声明表与静态校验、字面量强类型、`cli-*` 错误码、usage / help / schema 派生视图 | #17 |
 
 > **模块存在性提醒**：`a11y`（无障碍）与 `audio`（音频）是真实存在的模块，`a11y` 横跨 `core/`（类型 / 事件 / 桥抽象）与 `widget/`（语义树构建与快照，因需 `Widget` 完整定义；见 `ARCHITECTURE.md` §8.5），`audio` 归属 `media/`（音频图 API 恒编译，设备后端经 `AURORA_ENABLE_AUDIO` 编入，见 `BUILD_OPTIONS.md` §4）。本表按 `include/aurora/` 顶层模块域切分 spec 文档，二者未单列独立文件，但不可误认为不存在。
 
@@ -150,7 +151,7 @@
 - **编码规范 & 提交规范** → `CODING_STANDARDS.md`
 - **使用指南** → `GUIDELINE.md`
 - **编译选项/宏/环境变量** → `BUILD_OPTIONS.md`
-- **各子系统 API 契约** → `specification/01`–`08`
+- **各子系统 API 契约** → `specification/01`–`09`
 - **数据存储抽象层** → `specification/06-app-platform.md` §9.2 + `ARCHITECTURE.md` §4.8
 - **总入口** → 根 `AGENTS.md`
 

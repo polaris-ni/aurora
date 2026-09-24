@@ -146,6 +146,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 | 检查器 | `inspector/` | `inspector_server.h` `inspector_api.h` |
 | 工厂语法糖 | `ui/` | 声明式工厂函数（见 [`specification/04-widget.md`](specification/04-widget.md) §5） |
 | 入口 | `aurora.h` | 聚合 include + `namespace au` 别名提示 |
+| 命令行解析 | `cli/` | `args.h`（`ValueKind` `Arity` `Value` `Arguments` `Invocation` `parse`） `command.h`（`CommandSpec` `OptionSchema` `PositionalSchema` `validate` `usage_line` `help_text` `schema_json`）；契约见 [`specification/09-cli.md`](specification/09-cli.md) |
 
 ### 4.8 数据存储抽象层（Storage）
 

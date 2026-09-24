@@ -669,3 +669,137 @@ fix_category = "resource_error"
 retryable = true
 message = "Audio recording failed: {reason}"
 hint = "Check the output path and permissions; capture device availability is reported separately as audio-device-unavailable"
+
+# ---- CLI argument parsing (aurora::cli, specification/09-cli.md §6) ----
+
+[[error]]
+enum = "CliSpecInvalid"
+slug = "cli-spec-invalid"
+category = "validation"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Invalid command spec: {reason}"
+hint = "Fix the CommandSpec/OptionSchema declaration: names must be non-empty and unique, enum kinds must list choices"
+
+[[error]]
+enum = "CliUnknownOption"
+slug = "cli-unknown-option"
+category = "validation"
+severity = "error"
+auto_fixable = true
+fix_category = "invalid_value"
+retryable = false
+message = "Unknown option '{option}' for command '{command}'"
+hint = "Check the spelling, or run with --help to list the options accepted by this command"
+
+[[error]]
+enum = "CliUnknownSubcommand"
+slug = "cli-unknown-subcommand"
+category = "validation"
+severity = "error"
+auto_fixable = true
+fix_category = "unknown_widget"
+retryable = false
+message = "Unknown subcommand '{subcommand}' for command '{command}'"
+hint = "Pick one of the subcommands listed in --help for this command"
+
+[[error]]
+enum = "CliMissingSubcommand"
+slug = "cli-missing-subcommand"
+category = "validation"
+severity = "error"
+auto_fixable = false
+fix_category = "missing_prop"
+retryable = false
+message = "Command '{command}' requires a subcommand"
+hint = "Pass one of the subcommands listed in --help before any options"
+
+[[error]]
+enum = "CliMissingValue"
+slug = "cli-missing-value"
+category = "validation"
+severity = "error"
+auto_fixable = false
+fix_category = "missing_prop"
+retryable = false
+message = "Option '{option}' requires a value"
+hint = "Pass the value inline as --name=value or as a following token; flags that take no value must be declared Bool with arity 0"
+
+[[error]]
+enum = "CliInvalidValue"
+slug = "cli-invalid-value"
+category = "validation"
+severity = "error"
+auto_fixable = true
+fix_category = "type_error"
+retryable = false
+message = "Value '{value}' is not a valid {kind} for option '{option}'"
+hint = "Check the literal syntax expected by the declared kind (see the value hint in --help)"
+
+[[error]]
+enum = "CliChoiceInvalid"
+slug = "cli-choice-invalid"
+category = "validation"
+severity = "error"
+auto_fixable = true
+fix_category = "invalid_value"
+retryable = false
+message = "Value '{value}' is not one of the allowed choices for option '{option}'"
+hint = "Choices are listed in the option's help entry; matching is case-sensitive"
+
+[[error]]
+enum = "CliRangeViolated"
+slug = "cli-range-violated"
+category = "validation"
+severity = "error"
+auto_fixable = true
+fix_category = "invalid_value"
+retryable = false
+message = "Value '{value}' for option '{option}' is outside [{min}, {max}]"
+hint = "Clamp or widen the bound declared on the option"
+
+[[error]]
+enum = "CliArityViolated"
+slug = "cli-arity-violated"
+category = "validation"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Option '{option}' expects between {min} and {max} values, got {actual}"
+hint = "Adjust the number of repetitions/tokens, or relax the declared arity"
+
+[[error]]
+enum = "CliMissingRequired"
+slug = "cli-missing-required"
+category = "validation"
+severity = "error"
+auto_fixable = false
+fix_category = "missing_prop"
+retryable = false
+message = "Required option '{option}' is missing for command '{command}'"
+hint = "Pass the option, or declare a default_value so it becomes optional"
+
+[[error]]
+enum = "CliTooManyPositionals"
+slug = "cli-too-many-positionals"
+category = "validation"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Too many positional arguments for command '{command}': unexpected extra '{value}'"
+hint = "Declare the extra slot in the positional schema, or pass it after '--' to treat it as trailing input"
+
+[[error]]
+enum = "CliConflictViolated"
+slug = "cli-conflict-violated"
+category = "validation"
+severity = "error"
+auto_fixable = false
+fix_category = "layout_conflict"
+retryable = false
+message = "Options '{option}' and '{conflict}' cannot be used together"
+hint = "Drop one of the mutually exclusive options; the conflict group is declared on the option schema"

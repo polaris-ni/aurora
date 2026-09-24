@@ -4,7 +4,7 @@
 > **设计内核**：声明式、响应式、概念可枚举
 > **版本说明**：本文档为设计规格（文档自身无版本号）。库发布版本见 `CHANGELOG.json`（`currentVersion`）；文档与实现冲突时以**代码运行时**为准并回填本文档。
 >
-> 本文件是**总纲与索引**：定位、设计原则、范围、约束、29 条特性清单与文档导航。各主题的详细契约见 `specification/` 八份子系统文档与五份顶层文档。
+> 本文件是**总纲与索引**：定位、设计原则、范围、约束、29 条特性清单与文档导航。各主题的详细契约见 `specification/` 九份子系统文档与五份顶层文档。
 
 ---
 
@@ -97,7 +97,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | 14 | 零 `#ifdef` 跨平台 + 插件式平台扩展 | AI 无需处理平台分支 | [`06-app-platform.md`](specification/06-app-platform.md) §12.1 |
 | 15 | 跨平台一致行为 + 黄金文件验证 | AI 无需考虑平台差异 | [`06-app-platform.md`](specification/06-app-platform.md) §12.2 |
 | 16 | 示例驱动文档（Recipe 形式） | AI 从示例高效学习 | [`08-tooling.md`](specification/08-tooling.md) §10.5 |
-| 17 | LSP / MCP Server / CLI 工具链 | AI Agent 直接集成 | [`08-tooling.md`](specification/08-tooling.md) §10.6 |
+| 17 | LSP / MCP Server / CLI 工具链 | AI Agent 直接集成 | [`08-tooling.md`](specification/08-tooling.md) §10.6、[`09-cli.md`](specification/09-cli.md) §10.1（argv 解析底座） |
 | 18 | 安全的内存与所有权模型 | AI 生成无内存错误的代码 | [`01-core.md`](specification/01-core.md) §8.1 |
 | 19 | 结构化异步与并发模型 | AI 轻松处理耗时操作 | [`01-core.md`](specification/01-core.md) §8.2、[`02-state.md`](specification/02-state.md) §7.2 |
 | 20 | 布局系统的代数一致性 | AI 可推理尺寸和位置 | [`03-layout-render.md`](specification/03-layout-render.md) §10.2 |
@@ -186,6 +186,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | [`06-app-platform.md`](specification/06-app-platform.md) | `app/` + `window/`（平台 API 在 `window/platform.h`）+ `preferences/` + `storage/` + `perf/` + `debug/`：应用驱动、多窗口容器（`WindowHost`）、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面；需求 #14 / #15 / #25
 | [`07-environment-modifier.md`](specification/07-environment-modifier.md) | `environment/` + `theming/` + `i18n/` + `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier；需求 #12 |
 | [`08-tooling.md`](specification/08-tooling.md) | 序列化 / 代码生成 / YAML、控件树检查、Inspector 面板与远程服务、自描述发现、MCP / CLI / LSP、测试原语、日志通道；需求 #9 / #10 / #12 / #13 / #16 / #17 / #22 |
+| [`09-cli.md`](specification/09-cli.md) | `cli/`：argv → 强类型值的声明表驱动解析（GNU/POSIX 语法全集、`cli-*` 错误码、usage / help / schema 派生视图），工具链与 demo 的共用底座；需求 #17 |
 
 ### 8.2 顶层文档（`codespec/`）
 

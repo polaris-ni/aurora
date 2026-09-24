@@ -80,7 +80,7 @@ NOTE_RE = re.compile(r"///\s*测试说明\s*[:：]\s*(.+)")
 INCLUDE_RE = re.compile(r'#\s*include\s+"(aurora/([A-Za-z0-9_]+)/([A-Za-z0-9_.\-]+)\.h)"')
 MAP_TOKEN_RE = re.compile(r"(?:include/aurora/)?([a-z_]+)/([a-z0-9_.\-]+)\.(h|cpp)")
 MODULE_DOMAINS = {
-    "animation", "app", "core", "debug", "environment", "event", "i18n", "image",
+    "animation", "app", "cli", "core", "debug", "environment", "event", "i18n", "image",
     "inspector", "layout", "media", "modifier", "navigation", "perf", "preferences",
     "render", "state", "storage", "theming", "ui", "widget", "window",
 }
