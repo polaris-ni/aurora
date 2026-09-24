@@ -88,7 +88,7 @@ enum class Backend : std::uint8_t {
 /// 不可用原因，本函数只是让调用方在**建窗之前**就能区分「本构建没有」与「环境不可用」。
 [[nodiscard]] constexpr auto backend_compiled(Backend backend) -> bool {
     switch (backend) {
-        case Backend::Auto: // NOLINT(*-branch-clone)
+        case Backend::Auto:  // NOLINT(*-branch-clone)
             return true;
 #ifdef AURORA_BACKEND_HEADLESS
         case Backend::Headless:

@@ -3,7 +3,8 @@
 /// 测试说明: E2E 驱动内核的自测——后端选择与 feature 宏门控的一致性、不可用后端与未建窗会话的
 ///           错误形状、帧推进的收敛与超时诊断、像素读回在无缓冲时的错误码。除 `Auto` 一例外全部
 ///           以 Headless 后端运行，不依赖真实显示环境（`Auto` 例用默认的 `Hidden` 档，即使本机
-///           有显示也不把窗口推入用户视野）。
+///           有显示也不把窗口推入用户视野）；自动检测落到浏览器画布后端时该例如实跳过
+///           （需 DOM 宿主，node 驱动下无从建窗）。
 
 #include <cstddef>
 #include <string>
@@ -216,6 +217,15 @@ AURORA_TEST_CASE(auto_session_fallback_judgment_matches_entity) {
     // `Auto` 走 `create_native_window`：真实后端可用则建真实窗口，否则回退内存帧缓冲。
     // 断言「回退判定与窗口实体一致」——判为回退 ⟺ 未拿到原生句柄；不假设本机是否有显示。
     // 默认 `Hidden` 档，即使本机有显示也不把窗口推入用户视野。
+    //
+    // 唯一跑不了这一条的是浏览器画布后端（`WasmSurface`）：它的事件注册直接触达 `document`，
+    // 在 node 驱动下（Emscripten 无 DOM）构造即抛 JS 异常，而 JS 异常不是 C++ 异常——内核的
+    // catch 兜不住。内核的 `Backend` 枚举里本就没有浏览器画布成员（浏览器口径的驱动不属本内核
+    // 范围），故这里按运行期探测如实跳过，而不是把该后端悄悄算作「回退」。
+    if (au::auto_detect_surface() == au::SurfaceKind::Wasm) {
+        AURORA_TEST_SKIP("自动检测结果是浏览器画布后端：需 DOM 宿主，node 驱动下无从建窗");
+    }
+
     e2e::WindowSpec spec;
     spec.backend = e2e::Backend::Auto;
     spec.width = 64;
