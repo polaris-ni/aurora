@@ -73,9 +73,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # 编译依赖与 backends 矩阵 linux 项同口径（Wayland 头不在 0.1 探针范围）
+      # 编译依赖与 backends 矩阵 linux 项同口径：GLFW 源码构建会探测 Wayland 头
+      # （runner 预装环境已含），缺 wayland-scanner 会在 configure 期报错，故一并装
       - name: Install deps
-        run: sudo apt-get update -y && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libgl1-mesa-dev
+        run: sudo apt-get update -y && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DAURORA_ENABLE_DEBUG=ON -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_GLFW=ON
