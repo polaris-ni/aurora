@@ -7,8 +7,7 @@
 # 真实建窗路径；本工作流用 etest_smoke_render（真实窗口 + 上屏链路 + Surface::data()
 # 读回）逐平台探明「可建窗 / 可读回 / 失败原因」。
 #
-# 已实测结论（run 35952944058 / 35955165622，结论已收进
-# codespec/specification/08-tooling.md §8.2「CI 能力边界」）：
+# 已实测结论（已收进 codespec/specification/08-tooling.md §8.2「CI 能力边界」）：
 #   windows-latest : Win32 ✓（64ms）、D3D11 ✓（14ms）；GLFW ✗——VM 无 OpenGL 3.3，
 #                    WGL 通用驱动无法建 GPU 上下文
 #   ubuntu-latest  : X11 ✓（35ms）、GLFW ✓（1245ms，llvmpipe 软件 GL；GLFW 源码构建

@@ -110,10 +110,19 @@ struct SceneGoldenBudget {
 };
 
 inline constexpr SceneGoldenBudget AURORA_SCENE_BUDGETS[] = {
-    {"solid_rect", 64, "纯绘制叶控件（纯色轴对齐矩形，无文本）", false},
-    {"column", 30000, "容器型（Column 布局 + 卡片 + 渐变标题 + 文本）", false},
-    {"scroll", 30000, "滚动容器（列表视口裁剪 + 文本，物理域离屏缓冲）", true},
-    {"dismissible", 30000, "含 Application 手势链路（滑动关闭 + 文本）", false},
+    {.id = "solid_rect", .budget = 64, .shape = "纯绘制叶控件（纯色轴对齐矩形，无文本）", .requires_scale_one = false},
+    {.id = "column",
+     .budget = 30000,
+     .shape = "容器型（Column 布局 + 卡片 + 渐变标题 + 文本）",
+     .requires_scale_one = false},
+    {.id = "scroll",
+     .budget = 30000,
+     .shape = "滚动容器（列表视口裁剪 + 文本，物理域离屏缓冲）",
+     .requires_scale_one = true},
+    {.id = "dismissible",
+     .budget = 30000,
+     .shape = "含 Application 手势链路（滑动关闭 + 文本）",
+     .requires_scale_one = false},
 };
 
 /// @brief 查场景预算与形态申报。
@@ -123,9 +132,10 @@ inline constexpr SceneGoldenBudget AURORA_SCENE_BUDGETS[] = {
             return entry;
         }
     }
-    // 注册表内场景必在预算表中（两表同源维护，registry 校验兜底）；不可达路径给保守值。
-    static const SceneGoldenBudget fallback{"", 0, "", true};
-    return fallback;
+    // 注册表内场景必在预算表中（两表同源维护，registry 校验兜底）；不可达路径给保守值
+    // （requires_scale_one=true：未知场景在缩放环境下按不适用处理）。
+    static const SceneGoldenBudget FALLBACK{.id = "", .budget = 0, .shape = "", .requires_scale_one = true};
+    return FALLBACK;
 }
 
 /// @brief golden 矩阵取值：场景 × 后端。场景元数据指向注册表静态表（地址稳定，值拷贝安全）。
@@ -157,13 +167,12 @@ auto append_metrics_line(const std::string &case_name, const GoldenCase &value, 
     if (!out) {
         return;
     }
-    out << "{\"suite\":\"etest_smoke_render\",\"case\":\"" << case_name << "\",\"scene\":\"" << value.scene->id
-        << "\",\"backend\":\"" << e2e::backend_name(value.backend) << "\",\"frame\":" << frame.width << "x"
-        << frame.height << ",\"baseline\":" << baseline.width << "x" << baseline.height
-        << ",\"diff_pixels\":" << diff.pixel_diff_count << ",\"max_delta\":" << diff.max_color_delta
-        << ",\"tol\":" << AURORA_E2E_GOLDEN_TOL << ",\"budget\":" << budget
-        << ",\"within_budget\":" << (diff.pixel_diff_count <= budget ? "true" : "false") << ",\"fail_png\":\""
-        << fail_png << "\"}\n";
+    out << R"({"suite":"etest_smoke_render","case":")" << case_name << R"(","scene":")" << value.scene->id
+        << R"(","backend":")" << e2e::backend_name(value.backend) << R"(","frame":)" << frame.width << "x"
+        << frame.height << R"(,"baseline":)" << baseline.width << "x" << baseline.height << R"(,"diff_pixels":)"
+        << diff.pixel_diff_count << R"(,"max_delta":)" << diff.max_color_delta << R"(,"tol":)" << AURORA_E2E_GOLDEN_TOL
+        << R"(,"budget":)" << budget << R"(,"within_budget":)" << (diff.pixel_diff_count <= budget ? "true" : "false")
+        << R"(,"fail_png":")" << fail_png << R"("})" << '\n';
 }
 
 /// @brief 失败产物落盘（3.6）：比对超预算时把实际帧 PNG 写入 `build/e2e-failures/`，返回路径。
@@ -330,7 +339,7 @@ AURORA_INSTANTIATE_TEST_SUITE_P_GEN(real_windows, RealWindowBackends, smoke_back
     std::vector<GoldenCase> values;
     for (const au::demo_scenes::SceneEntry &scene : au::demo_scenes::scene_registry()) {
         for (const e2e::Backend backend : smoke_backend_values()) {
-            values.push_back(GoldenCase{&scene, backend});
+            values.push_back(GoldenCase{.scene = &scene, .backend = backend});
         }
     }
     return values;
