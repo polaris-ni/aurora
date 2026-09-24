@@ -604,6 +604,27 @@ CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI �
 确定性渲染契约：不依赖墙钟时间、不依赖随机数（或固定种子）、动画在捕获前推进到静止态；
 含文本场景（demo 房风含 GradientTitle 与标签）须按字体依赖单列更大的差异像素预算。
 
+**golden 容差层**（`tests/e2e/etest_smoke_render.cpp` 第二用例组，场景 × 后端矩阵展开）：
+
+- 基线：`scene_tool --render` 生成的软件 SSOT PNG（`tests/golden/e2e_<场景>.png`，scale=1）。软件读回
+  路径（Win32/GDI、GLFW-软件、X11）与基线同一条 Painter 链路，漂移恒 0；预算只为 GPU 路径的跨驱动
+  AA 差异买单。
+- 背景口径：基线渲染与真实窗口上屏必须同底色——`render_to_image` / `render_to_png` /
+  `Scene::render_to_png` 提供 `std::optional<Color> background` 默认参（默认不填 = 零初始化透明黑，
+  行为不变），`scene_tool --render` 传 `Surface::clear_color()` 同款 `{245,245,247,255}`。
+- 判据单源：`golden::compare_gpu_tolerance`（差异像素数 ≤ 场景预算 + 单通道容差 tol=48，失败消息含
+  差异区域与控件归因）。预算**按场景级申报**（`SceneGoldenBudget`：预算 + 覆盖形态 + `requires_scale_one`），
+  不读全局旋钮 `AURORA_GOLDEN_MAX_*`；预算为保守初版，依 CI metrics 校准收紧。
+- DPI 口径分两层：**帧尺寸维度**——读回帧是帧缓冲物理像素，帧尺寸 ≠ 请求逻辑尺寸即环境缩放生效，
+  逐位比对不适用，记 SKIP；**内容域维度**——帧尺寸一致也可能不等：经物理域离屏缓冲的控件（如
+  Scroll 滑动窗口按 `ctx.scale_factor` 高清录制、composite 下采样回逻辑缓冲）在 scale ≠ 1 环境下
+  字形光栅与 scale=1 基线不同，此类场景以 `requires_scale_one` 申报，surface scale ≠ 1 时记 SKIP
+  （CI 100% DPI 环境全跑保证门禁有效性，本地高 DPI 环境诚实跳过）。
+- 度量 artifact：`AURORA_E2E_METRICS_FILE` 置定时逐用例追加 JSONL（差异像素数 / 最大单通道差 /
+  帧与基线尺寸 / 预算与判定 / 失败帧 PNG 路径），供 CI 上传与容差校准；未置不写、写失败不影响用例。
+- 失败落盘：比对超预算时把实际帧 PNG 写 `build/e2e-failures/`（预判用 `compare_snapshots`，判据仍以
+  `compare_gpu_tolerance` 单源）。
+
 ---
 
 ## 9 日志通道

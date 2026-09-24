@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 
 #include "aurora/render/offscreen.h"
@@ -27,8 +28,10 @@ class Scene {
     [[nodiscard]] auto root_node() -> Node & { return root_; }
 
     /// @brief 无头渲染为 PNG（specification/03-layout-render.md §8.4）。
-    [[nodiscard]] auto render_to_png(const char *path, int width, int height) -> Result<bool> {
-        return aurora::render_to_png(root_, width, height, path);
+    /// @param background 可选底色：与真实窗口比对时传 `Surface::clear_color()` 同款（见 offscreen.h）。
+    [[nodiscard]] auto render_to_png(const char *path, int width, int height,
+                                     std::optional<Color> background = std::nullopt) -> Result<bool> {
+        return aurora::render_to_png(root_, width, height, path, background);
     }
 
     /// @brief 结构快照（JSON）：用于 golden 比对（specification/06-app-platform.md §12.2，跨平台稳定）。

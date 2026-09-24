@@ -544,16 +544,19 @@ au::Column{}
 定义于 `render/offscreen.h`，与 `HeadlessSurface` 解耦。
 
 ```cpp
-[[nodiscard]] auto render_to_png(Node &root, int width, int height, const char *path) -> Result<bool>;
-[[nodiscard]] auto render_to_image(Node &root, int width, int height) -> Image;
+[[nodiscard]] auto render_to_png(Node &root, int width, int height, const char *path,
+                                 std::optional<Color> background = std::nullopt) -> Result<bool>;
+[[nodiscard]] auto render_to_image(Node &root, int width, int height,
+                                   std::optional<Color> background = std::nullopt) -> Image;
 [[nodiscard]] auto render_to_logical_snapshot(Node &root, int width, int height) -> Json;
 ```
 
 - `render_to_png`：`root` 为 `Node&`，内部自行 `mount`，调用方无需预挂载；`width` / `height` 为画布逻辑尺寸。
 - `render_to_image`：与 `render_to_png` 同源同结果，但不落盘，直接返回 RGBA8 内存图 —— 供需要在进程内二次消费像素的路径使用（如快照比对、MCP `compare_snapshot`）。`render_to_png` 现为其薄壳（渲染 + 写出）。
 - `render_to_logical_snapshot`：返回平台无关的**逻辑快照** JSON（结构树 + 盒模型），供 AI 在无头环境校验。
+- `background`（可选底色，默认不填 = 行为不变）：begin 后对全画布 `fill_rect` 铺底色，用于对齐真实后端的清屏口径——无头渲染的 Painter 画布零初始化为透明黑，而真实窗口 present 前由 `Surface::clear_color()` 清屏（默认 `{245,245,247,255}`），两条路径的像素比对必须同底色，否则控件未覆盖区域产生系统性假差异（E2E golden 基线即经此参数与窗口清屏对齐，见 [`specification/08-tooling.md`](08-tooling.md) §8.2）。
 
-`Scene::render_to_png(path, width, height)`（`app/scene.h`）与 `Application::render_to_png(path)`（`app/application.h`）是无头便捷封装。
+`Scene::render_to_png(path, width, height, background = std::nullopt)`（`app/scene.h`）与 `Application::render_to_png(path)`（`app/application.h`）是无头便捷封装，前者透传底色参数。
 
 **其余渲染支撑头**（`render/`，公开）：`dirty_region.h` 提供 `DirtyRegionTracker`——收集脏矩形并把重叠项合并为并集，条数超上限（默认 `16`，可经 `set_max_rects` 调整）即退化为整帧脏（`mark_all` / `is_full`），以 `rects()` / `merged_bounds()` 出结果，衔接 §8.3 `set_present_dirty` 的增量上屏；`snapshot_diff.h` 提供 `compare_snapshots(baseline, current, tolerance = 0) -> SnapshotDiff`——逐像素比对两张 RGBA8 快照，产出差异像素数、最大通道差、差异占比与差异可视化图，`SnapshotDiff::passed(max_ratio)` 按阈值判定通过，供 golden 回归与 `aurora-cli snapshot --compare` 使用；`image_cache.h` 提供 `ImageCache`——进程级单例（`instance()`）的按路径 LRU 解码缓存（`get` / `put` / `remove` / `clear`，字节上限 `set_max_bytes`，解码失败不缓存），`count()` / `hit_count()` 供诊断与性能覆盖层读取。
 

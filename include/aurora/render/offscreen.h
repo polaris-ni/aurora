@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
 
 #include "aurora/core/types.h"
@@ -30,9 +31,14 @@ namespace aurora {
  * @param width 画布宽（逻辑像素 = 设备像素）
  * @param height 画布高
  * @param path  输出 PNG 路径
+ * @param background 可选：paint 前的全画布底色。真实窗口渲染前由 Surface 清屏
+ *        （`Surface::clear_color()`，真实后端为浅色 `{245,245,247,255}`），无头渲染
+ *        默认不清（帧缓冲零初始化为透明黑）——把无头产物与真实窗口读回帧做像素比对
+ *        时（E2E golden），须传与窗口一致的底色，否则控件未覆盖区域两侧口径不同。
  * @return 成功返回 true，失败返回带信息的 Error。
  */
-[[nodiscard]] inline auto render_to_image(Node &root, int width, int height) -> Image {
+[[nodiscard]] inline auto render_to_image(Node &root, int width, int height,
+                                          std::optional<Color> background = std::nullopt) -> Image {
     constexpr BuildContext ctx;  // 根环境（树内 Provider 注入子树环境）
 
     root->mount(ctx);
@@ -44,6 +50,11 @@ namespace aurora {
 
     Painter painter;
     painter.begin(width, height);
+    if (background.has_value()) {
+        painter.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                               .size = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)}},
+                          background.value());
+    }
     root->paint(painter,
                 Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
                      .size = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)}},
@@ -61,8 +72,9 @@ namespace aurora {
     return out;
 }
 
-[[nodiscard]] inline auto render_to_png(Node &root, int width, int height, const char *path) -> Result<bool> {
-    const Image image = render_to_image(root, width, height);
+[[nodiscard]] inline auto render_to_png(Node &root, int width, int height, const char *path,
+                                        std::optional<Color> background = std::nullopt) -> Result<bool> {
+    const Image image = render_to_image(root, width, height, background);
     return write_png(path, width, height, image.pixels.data());
 }
 
