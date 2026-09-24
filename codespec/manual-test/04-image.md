@@ -16,7 +16,7 @@
 
 > `include/aurora/core/image.h` 是**图像数据结构**（`Image`：width / height / RGBA8 像素），归 core 模块，不在本模块范围内；但其 `Image::load` 委托本模块的 `ImageCodecRegistry` 统一调度，因此本模块的可观测行为会经 `ImageView` 落到窗口上。
 
-**实测启用的编解码后端**（取自 `ImageCodecRegistry` 构造与本次构建的 `build/CMakeCache.txt`）：
+**实测启用的编解码后端**（取自 `ImageCodecRegistry` 构造与本次构建的 CMakeCache 缓存值，构建产物不入库）：
 
 | 编解码器（注册名） | 格式 | 解码 | 编码 | 接入条件 |
 |:---|:---|:---:|:---:|:---|
