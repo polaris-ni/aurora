@@ -620,7 +620,8 @@ CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI �
   行为不变），`scene_tool --render` 传 `Surface::clear_color()` 同款 `{245,245,247,255}`。
 - 判据单源：`golden::compare_gpu_tolerance`（差异像素数 ≤ 场景预算 + 单通道容差 tol=48，失败消息含
   差异区域与控件归因）。预算**按场景级申报**（`SceneGoldenBudget`：预算 + 覆盖形态 + `requires_scale_one`），
-  不读全局旋钮 `AURORA_GOLDEN_MAX_*`；预算为保守初版，依 CI metrics 校准收紧。
+  不读全局旋钮 `AURORA_GOLDEN_MAX_*`；预算为防御值——CI 探针实测默认矩阵全部后端（含 D3D11 增量上屏
+  偏置路径）与基线同一条 Painter 软件栅格链路、漂移恒 0，收紧或放宽须以新的实测证据为准。
 - DPI 口径分两层：**帧尺寸维度**——读回帧是帧缓冲物理像素，帧尺寸 ≠ 请求逻辑尺寸即环境缩放生效，
   逐位比对不适用，记 SKIP；**内容域维度**——帧尺寸一致也可能不等：经物理域离屏缓冲的控件（如
   Scroll 滑动窗口按 `ctx.scale_factor` 高清录制、composite 下采样回逻辑缓冲）在 scale ≠ 1 环境下

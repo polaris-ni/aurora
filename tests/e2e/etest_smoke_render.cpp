@@ -94,11 +94,12 @@ constexpr int AURORA_E2E_GOLDEN_TOL = 48;
 
 /// @brief 场景级差异像素预算：写在场景旁而非全局旋钮（不读 `AURORA_GOLDEN_MAX_*`）。
 ///
-/// 预算为保守初版，待 CI metrics artifact 实测量级后校准收紧（软件读回路径与基线同一条
-/// Painter 链路、漂移恒 0，预算只为 GPU 路径的跨驱动 AA 差异买单）：
-///   - `solid_rect`：纯色轴对齐矩形无 AA 斜边，实测 0 漂移；留少量余量防上屏偏移取整。
-///   - 其余场景均含文本（见 scene_registry 注释）——字形边缘 AA 与次像素定位是跨驱动漂移
-///     主因，先给宽松预算。
+/// 预算为防御值（CI 探针实测：默认矩阵全部后端与基线同一条 Painter 软件栅格链路——含 D3D11
+/// 的增量上屏偏置路径——漂移恒 0，dismissible 仅有 max delta 2 的取整噪声），为未来后端漂移买单，
+/// 收紧或放宽须以新的实测证据为准：
+///   - `solid_rect`：纯色轴对齐矩形无 AA 斜边；余量只防上屏偏移取整。
+///   - 其余场景均含文本（见 scene_registry 注释）——字形边缘 AA 是潜在漂移主因，防御预算
+///     按画布面积量级单列。
 /// `requires_scale_one`：场景含物理域离屏缓冲等重采样路径（如 Scroll 滑动窗口按
 /// `ctx.scale_factor` 高清录制、composite 下采样回逻辑缓冲），scale != 1 环境下字形光栅与
 /// scale=1 基线不同（见文件头「内容域维度」说明），此类环境记 SKIP 而非计入预算。
@@ -112,15 +113,15 @@ struct SceneGoldenBudget {
 inline constexpr SceneGoldenBudget AURORA_SCENE_BUDGETS[] = {
     {.id = "solid_rect", .budget = 64, .shape = "纯绘制叶控件（纯色轴对齐矩形，无文本）", .requires_scale_one = false},
     {.id = "column",
-     .budget = 30000,
+     .budget = 4096,
      .shape = "容器型（Column 布局 + 卡片 + 渐变标题 + 文本）",
      .requires_scale_one = false},
     {.id = "scroll",
-     .budget = 30000,
+     .budget = 4096,
      .shape = "滚动容器（列表视口裁剪 + 文本，物理域离屏缓冲）",
      .requires_scale_one = true},
     {.id = "dismissible",
-     .budget = 30000,
+     .budget = 4096,
      .shape = "含 Application 手势链路（滑动关闭 + 文本）",
      .requires_scale_one = false},
 };
