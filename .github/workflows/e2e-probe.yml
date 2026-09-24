@@ -37,7 +37,7 @@ concurrency:
 
 jobs:
   probe-windows:
-    name: probe (windows: win32+d3d11+glfw)
+    name: probe-windows (win32 + d3d11 + glfw)
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
@@ -67,7 +67,7 @@ jobs:
         run: ./build/aurora_test_runner.exe --run=etest_smoke_render --verbose
 
   probe-linux:
-    name: probe (ubuntu+xvfb: x11+glfw)
+    name: probe-linux (ubuntu-xvfb, x11 + glfw)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -90,7 +90,7 @@ jobs:
         run: xvfb-run -a ./build/aurora_test_runner --run=etest_smoke_render --verbose
 
   probe-macos:
-    name: probe (macos: glfw)
+    name: probe-macos (glfw)
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
