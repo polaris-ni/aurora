@@ -24,6 +24,10 @@
 #include "aurora/widget/checkbox.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text_input.h"
+// X11Surface 取 native_display 需要完整类型；aurora.h 不含后端头，且本类仅在
+// `AURORA_PLATFORM_LINUX && AURORA_BACKEND_X11` 下声明（头内自门控，pimpl 不含 Xlib，
+// 无条件 include 安全）——后端关闭的配置下用例体走编译期 skip 桩，不触达该类型。
+#include "aurora/window/x11_surface.h"
 #include "e2e/harness.h"
 #include "e2e/os_input.h"
 #include "e2e_expect.h"
@@ -34,8 +38,10 @@ namespace au = aurora;
 namespace aurora::test_cases::etest_os_input {
 
 // helper 仅在注入通道编译的目标平台上有定义意义（其余平台全部用例走 skip 桩，
-// 未使用的匿名命名空间符号会触发 unused-function 告警）。
-#if defined(AURORA_PLATFORM_WINDOWS) || (defined(AURORA_PLATFORM_UNIX) && !defined(AURORA_PLATFORM_MACOS))
+// 未使用的匿名命名空间符号会触发 unused-function 告警）。X11 侧以 AURORA_BACKEND_X11
+// 收窄：后端关闭的 Linux 配置下 xtest 用例是编译期 skip 桩，不引用任何 helper。
+#if defined(AURORA_PLATFORM_WINDOWS) || \
+    (defined(AURORA_PLATFORM_UNIX) && !defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_X11))
 namespace {
 
 constexpr std::string_view AURORA_OS_FRAME_TITLE = "aurora_e2e_os_input";
@@ -105,10 +111,10 @@ auto require_os_input_policy() -> void {
     }
     const auto x0 = std::max(0, static_cast<int>(std::floor(bounds_dp.origin.x * scale)) - 1);
     const auto y0 = std::max(0, static_cast<int>(std::floor(bounds_dp.origin.y * scale)) - 1);
-    const auto x1 = std::min(before.width,
-                             static_cast<int>(std::ceil((bounds_dp.origin.x * scale) + (bounds_dp.size.width * scale))) + 1);
-    const auto y1 = std::min(before.height,
-                             static_cast<int>(std::ceil((bounds_dp.origin.y * scale) + (bounds_dp.size.height * scale))) + 1);
+    const auto x1 = std::min(
+        before.width, static_cast<int>(std::ceil((bounds_dp.origin.x * scale) + (bounds_dp.size.width * scale))) + 1);
+    const auto y1 = std::min(
+        before.height, static_cast<int>(std::ceil((bounds_dp.origin.y * scale) + (bounds_dp.size.height * scale))) + 1);
     for (int y = y0; y < y1; ++y) {
         for (int x = x0; x < x1; ++x) {
             if (e2e::pixel_at(before, x, y) != e2e::pixel_at(after, x, y)) {
@@ -120,13 +126,19 @@ auto require_os_input_policy() -> void {
 }
 
 /// @brief 注入后取新快照中的语义节点（同一角色重新查找；布局不受注入影响，按名复核）。
-[[nodiscard]] auto snapshot_node(const e2e::Session &session, AccessibilityRole role) -> const au::a11y::NodeSnapshot * {
+[[nodiscard]] auto snapshot_node(const e2e::Session &session, AccessibilityRole role)
+    -> const au::a11y::NodeSnapshot * {
     const auto snapshot = session.semantic_snapshot();
     AURORA_TEST_REQUIRE_TRUE(snapshot.ok());
     return e2e::find_semantic_node(snapshot.value(), role);
 }
 
 }  // namespace
+#endif  // helper 平台门控（Windows / UNIX 非 macOS 且 X11 后端）
+
+// ⚠️ 三个 AURORA_TEST_CASE 须无条件可见（AGENTS.md §5 测试纪律：#if 只能写在用例体内），
+// 平台/后端差异全部收进用例体的 skip 桩分支——整体包裹会让 macOS 等不满足门控的平台
+// 注册表单边失踪（registry_integrity 红灯 + --run 筛空 exit 2）。
 
 // 用例一：SendInput 全局注入（真实光标移动 + 点击）→ Checkbox 翻转 + 像素变化。
 // 全链路：OS 输入流 → 命中本窗口 → 窗口过程 → Aurora 事件管线。d3d11/wgpu 共用
@@ -210,12 +222,11 @@ AURORA_TEST_CASE(postmessage_reaches_window_procedure) {
 
 // 用例三：XTest 经 X 服务器合成真实输入（指针移动 + 按键）→ 与真实鼠标/键盘完全同径。
 // 焦点铺垫用 XSetInputFocus（无窗口管理器时点击不自动夺焦；等价 WM click-to-focus）。
+// X11Surface 的 static_cast 是编译期构造，须与头内声明门控（AURORA_BACKEND_X11）同款
+// 收窄——后端关闭的配置（如默认 Linux 构建）下类型不存在，走编译期 skip 桩。
 AURORA_TEST_CASE(xtest_server_input_reaches_window) {
-#if defined(AURORA_PLATFORM_UNIX) && !defined(AURORA_PLATFORM_MACOS)
+#if defined(AURORA_PLATFORM_UNIX) && !defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_X11)
     require_os_input_policy();
-    if (!e2e::backend_compiled(e2e::Backend::X11)) {
-        AURORA_TEST_SKIP("backend 'x11' not compiled into this build");
-    }
     if (!e2e::xtest_available()) {
         AURORA_TEST_SKIP("XTEST unavailable (libX11/libXtst dlopen failed or symbols missing)");
     }
@@ -229,7 +240,8 @@ AURORA_TEST_CASE(xtest_server_input_reaches_window) {
     const auto *input = e2e::find_semantic_node(snapshot.value(), AccessibilityRole::TextInput);
     AURORA_TEST_REQUIRE_TRUE(input != nullptr);
     const float scale = session.surface().scale_factor();
-    void *display = static_cast<au::X11Surface &>(session.surface()).native_display();  // NOLINT(*-pro-type-static-cast-downcast)
+    void *display =
+        static_cast<au::X11Surface &>(session.surface()).native_display();  // NOLINT(*-pro-type-static-cast-downcast)
     void *xid = session.surface().native_handle();
     AURORA_TEST_REQUIRE_TRUE(display != nullptr);
     AURORA_TEST_REQUIRE_TRUE(xid != nullptr);
@@ -256,11 +268,11 @@ AURORA_TEST_CASE(xtest_server_input_reaches_window) {
     AURORA_TEST_REQUIRE_TRUE(typed_text.ok());
     AURORA_TEST_REQUIRE_TRUE(session.pump_until_settled().ok());
     AURORA_TEST_CHECK_TRUE(*ui.typed == "a");
+#elif defined(AURORA_PLATFORM_UNIX) && !defined(AURORA_PLATFORM_MACOS)
+    AURORA_TEST_SKIP("backend 'x11' not compiled into this build (AURORA_BACKEND_X11 off)");
 #else
     AURORA_TEST_SKIP("本平台无 XTest 通道（Linux 专属；Windows 走 SendInput/PostMessage，macOS 为已知缺口）");
 #endif
 }
-
-#endif  // helper 平台门控（Windows / UNIX 非 macOS）
 
 }  // namespace aurora::test_cases::etest_os_input

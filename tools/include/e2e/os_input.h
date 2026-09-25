@@ -91,8 +91,9 @@ struct DesktopInteraction {
     if (desk == nullptr) {
         return DesktopInteraction{
             .interactive = false,
-            .reason = "cannot open the input desktop (locked screen / secure desktop / service session); "
-                      "OS-level input injection would be silently dropped or misdelivered"};
+            .reason =
+                "cannot open the input desktop (locked screen / secure desktop / service session); "
+                "OS-level input injection would be silently dropped or misdelivered"};
     }
     CloseDesktop(desk);
     return DesktopInteraction{.interactive = true, .reason = ""};
@@ -163,7 +164,8 @@ struct DesktopInteraction {
     }
     const auto lp = MAKELPARAM(static_cast<SHORT>(client_px.x), static_cast<SHORT>(client_px.y));
     if (PostMessageW(target, WM_LBUTTONDOWN, MK_LBUTTON, lp) == 0) {
-        return Result<void>{make_error(ErrorCode::GeneralNotSupported, "post_click: PostMessage(WM_LBUTTONDOWN) failed")};
+        return Result<void>{
+            make_error(ErrorCode::GeneralNotSupported, "post_click: PostMessage(WM_LBUTTONDOWN) failed")};
     }
     if (PostMessageW(target, WM_LBUTTONUP, 0, lp) == 0) {
         return Result<void>{make_error(ErrorCode::GeneralNotSupported, "post_click: PostMessage(WM_LBUTTONUP) failed")};
@@ -281,9 +283,7 @@ struct X11Api {
 }  // namespace detail
 
 /// @brief XTest 通道是否可用（libX11/libXtst 可 dlopen 且符号齐全）。
-[[nodiscard]] inline auto xtest_available() -> bool {
-    return detail::x11_api().ok();
-}
+[[nodiscard]] inline auto xtest_available() -> bool { return detail::x11_api().ok(); }
 
 /// @brief XTest 注入左键点击：先把指针移到目标（窗口本地物理像素 → 根坐标），再按下/抬起。
 ///
@@ -294,8 +294,9 @@ struct X11Api {
 [[nodiscard]] inline auto xtest_click(void *display, void *xid, Point local_px) -> Result<void> {
     const detail::X11Api &api = detail::x11_api();
     if (!api.ok() || display == nullptr || xid == nullptr) {
-        return Result<void>{make_error(ErrorCode::GeneralNotSupported,
-                                       "xtest_click: XTEST unavailable (libX11/libXtst dlopen failed) or null handles")};
+        return Result<void>{
+            make_error(ErrorCode::GeneralNotSupported,
+                       "xtest_click: XTEST unavailable (libX11/libXtst dlopen failed) or null handles")};
     }
     auto *dpy = static_cast<detail::XDisplay *>(display);
     const auto win = static_cast<detail::XWindow>(reinterpret_cast<std::uintptr_t>(xid));
@@ -318,8 +319,8 @@ struct X11Api {
 [[nodiscard]] inline auto xtest_focus_window(void *display, void *xid) -> Result<void> {
     const detail::X11Api &api = detail::x11_api();
     if (!api.ok() || display == nullptr || xid == nullptr) {
-        return Result<void>{make_error(ErrorCode::GeneralNotSupported,
-                                       "xtest_focus_window: XTEST unavailable or null handles")};
+        return Result<void>{
+            make_error(ErrorCode::GeneralNotSupported, "xtest_focus_window: XTEST unavailable or null handles")};
     }
     auto *dpy = static_cast<detail::XDisplay *>(display);
     const auto win = static_cast<detail::XWindow>(reinterpret_cast<std::uintptr_t>(xid));
@@ -332,7 +333,8 @@ struct X11Api {
 [[nodiscard]] inline auto xtest_text(void *display, std::string_view text) -> Result<void> {
     const detail::X11Api &api = detail::x11_api();
     if (!api.ok() || display == nullptr) {
-        return Result<void>{make_error(ErrorCode::GeneralNotSupported, "xtest_text: XTEST unavailable or null display")};
+        return Result<void>{
+            make_error(ErrorCode::GeneralNotSupported, "xtest_text: XTEST unavailable or null display")};
     }
     auto *dpy = static_cast<detail::XDisplay *>(display);
     for (const char c : text) {

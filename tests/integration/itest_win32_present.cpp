@@ -31,9 +31,9 @@ AURORA_TEST_CASE(frame_count_counts_every_presented_frame) {
     for (int i = 1; i <= 3; ++i) {
         const auto bf = surf->begin_frame(320, 240);
         AURORA_TEST_CHECK(bf.ok());
-        surf->painter().fill_rect(au::Rect{.origin = au::Point{.x = 10.0F, .y = 10.0F},
-                                           .size = au::Size{.width = 100.0F, .height = 100.0F}},
-                                  au::Color{255, 0, 0, 255});
+        surf->painter().fill_rect(
+            au::Rect{.origin = au::Point{.x = 10.0F, .y = 10.0F}, .size = au::Size{.width = 100.0F, .height = 100.0F}},
+            au::Color{255, 0, 0, 255});
         const auto pr = surf->present();
         AURORA_TEST_CHECK(pr.ok());
         // 每帧几何未变、无系统重绘，仍必须计一帧（缺陷回归点：曾转发宿主同步重渲染计数而恒 0）。
