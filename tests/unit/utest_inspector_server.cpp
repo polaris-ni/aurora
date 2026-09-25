@@ -3,8 +3,8 @@
 /// 测试说明: 覆盖 InspectorServer 生命周期与 HTTP 基本路径——初始停机态、start(0) 随机端口
 /// 启停、重复 start 失败、stop 幂等、析构收编 worker、/api/tree 与 /api/components 的
 /// 请求-响应、404/405/400/403 错误请求、/api/debug/state 的 surface getter 装配错误路径，
-/// 以及 /api/input/{click,scroll,text} 交互模拟（派发到目标控件、请求体校验、目标定位失败与
-/// 派发失败的错误映射）。
+/// 以及 /api/input/{click,scroll,drag,text} 交互模拟（派发到目标控件、请求体校验、目标定位
+/// 失败与派发失败的错误映射）和 /api/find 的 key/type/text 定位（路径与寻址端点同口径）。
 /// 端口一律用 0（系统分配临时端口，无冲突）；无文件句柄副作用。客户端为本 TU 内最小
 /// 回环 socket 实现，随用例关闭清理。
 /// AURORA_BUILD_INSPECTOR_SERVER=OFF 时整文件降级为 skip 桩。
@@ -21,6 +21,7 @@
 
 #include "aurora/event/event.h"  // ScrollEvent
 #include "aurora/inspector/inspector_server.h"
+#include "aurora/widget/button.h"
 #include "aurora/widget/checkbox.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
@@ -192,7 +193,56 @@ class ScrollProbe : public LeafWidget {
     float last_delta_y_ = 0.0F;
 };
 
-/// @brief 交互模拟用例的树：Column[ Checkbox(0) / TextInput(1) / ScrollProbe(2) ]。
+/// @brief 拖拽探针：把 `on_pointer_event` 的 Press/Move/Release 命中次数与 Move 相对 Press
+/// 的位移经序列化属性外显。
+///
+/// `Inspector::simulate_drag` 派发 Press（中心）→ Move（中心+delta）→ Release（终点），
+/// 据此确认合成拖拽的三段事件确实落到目标控件且位移与请求一致。
+class DragProbe : public LeafWidget {
+  public:
+    [[nodiscard]] auto type_name() const -> const char * override { return "DragProbe"; }
+
+  protected:
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+        return c.constrain(Size{.width = 40.0F, .height = 40.0F});
+    }
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+        p.fill_rect(bounds, Color{120, 120, 120, 255});
+    }
+    auto on_pointer_event(MouseEvent &e) -> void override {
+        if (e.action == MouseAction::Press) {
+            ++press_hits_;
+            press_x_ = e.position.x;
+            press_y_ = e.position.y;
+        } else if (e.action == MouseAction::Move) {
+            ++move_hits_;
+            move_dx_ = e.position.x - press_x_;
+            move_dy_ = e.position.y - press_y_;
+        } else if (e.action == MouseAction::Release) {
+            ++release_hits_;
+        }
+        e.is_handled = true;
+    }
+    auto serialize_props(Json &props) const -> void override {
+        Widget::serialize_props(props);
+        props["press_hits"] = press_hits_;
+        props["move_hits"] = move_hits_;
+        props["release_hits"] = release_hits_;
+        props["move_dx"] = move_dx_;
+        props["move_dy"] = move_dy_;
+    }
+
+  private:
+    int press_hits_ = 0;
+    int move_hits_ = 0;
+    int release_hits_ = 0;
+    float press_x_ = 0.0F;
+    float press_y_ = 0.0F;
+    float move_dx_ = 0.0F;
+    float move_dy_ = 0.0F;
+};
+
+/// @brief 交互模拟用例的树：Column[ Checkbox(0) / TextInput(1) / ScrollProbe(2) / DragProbe(3) ]。
 ///
 /// 逐用例自建而非复用静态共享树：模拟会改控件状态，静态树会让状态在用例间泄漏
 /// （`--repeat` 下尤其明显）。`root` 由 shared_ptr 持有，供 HTTP 工作线程经
@@ -202,6 +252,7 @@ struct InputTree {
     std::shared_ptr<Checkbox> checkbox;
     std::shared_ptr<TextInput> input;
     std::shared_ptr<ScrollProbe> scroller;
+    std::shared_ptr<DragProbe> dragger;
 
     /// @brief 供 InspectorServer 使用的取值函数（按值返回 Node 副本即共享底层控件）。
     [[nodiscard]] auto getter() const -> std::function<Node()> {
@@ -219,15 +270,60 @@ struct InputTree {
     auto checkbox = std::make_shared<Checkbox>();
     auto input = std::make_shared<TextInput>();
     auto scroller = std::make_shared<ScrollProbe>();
+    auto dragger = std::make_shared<DragProbe>();
     auto col = std::make_shared<Column>();
     col->add(Node{checkbox});
     col->add(Node{input});
     col->add(Node{scroller});
+    col->add(Node{dragger});
     return InputTree{
         .root = std::make_shared<Node>(Node{col}),
         .checkbox = checkbox,
         .input = input,
         .scroller = scroller,
+        .dragger = dragger,
+    };
+}
+// NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
+
+/// @brief /api/find 用例的树：Column[ Button"确定"(0, id=ok) / TextInput(1) /
+///         Column[ Button"取消"(0, id=cancel) ] (2) ]——覆盖嵌套路径与多命中。
+///
+/// 逐用例自建（find 虽只读，但保持「每用例一棵树」的套件约定）。id 经外层 Node
+/// `set_id` 后再入列，容器存储的 Node 副本携带该标识。
+struct FindTree {
+    std::shared_ptr<Node> root;
+    std::shared_ptr<Button> ok;
+    std::shared_ptr<TextInput> input;
+    std::shared_ptr<Button> cancel;
+
+    [[nodiscard]] auto getter() const -> std::function<Node()> {
+        const std::shared_ptr<Node> held = root;
+        return [held]() -> Node { return *held; };
+    }
+};
+
+// 分析器同 make_input_tree 的误报与豁免理由（共享控件 + 聚合返回），就地豁免。
+// NOLINTBEGIN(clang-analyzer-cplusplus.NewDeleteLeaks)
+[[nodiscard]] auto make_find_tree() -> FindTree {
+    auto ok_button = std::make_shared<Button>("确定");
+    auto input = std::make_shared<TextInput>();
+    auto cancel_button = std::make_shared<Button>("取消");
+    auto inner = std::make_shared<Column>();
+    Node cancel_node{cancel_button};
+    cancel_node.set_id("cancel");
+    inner->add(cancel_node);  // add 只收 const 引用（拷贝入列），std::move 无效
+    auto col = std::make_shared<Column>();
+    Node ok_node{ok_button};
+    ok_node.set_id("ok");
+    col->add(ok_node);
+    col->add(Node{input});
+    col->add(Node{inner});
+    return FindTree{
+        .root = std::make_shared<Node>(Node{col}),
+        .ok = ok_button,
+        .input = input,
+        .cancel = cancel_button,
     };
 }
 // NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -553,6 +649,104 @@ AURORA_TEST_CASE(input_endpoint_maps_missing_target_and_simulate_failure) {
     const std::string failed = http_post(port, "/api/input/text", R"({"path":"1","text":"x"})");
     AURORA_TEST_CHECK_TRUE(failed.find("400") != std::string::npos);
     AURORA_TEST_CHECK_TRUE(http_get(port, "/api/widget/1").find("\"value\":\"\"") != std::string::npos);
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(input_drag_dispatches_press_move_release_to_target) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    InputTree tree = make_input_tree();
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    const std::string resp = http_post(server.port(), "/api/input/drag", R"({"path":"3","dx":30,"dy":-10})");
+    AURORA_TEST_CHECK_TRUE(resp.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("\"action\":\"drag\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("\"widget_path\":\"3\"") != std::string::npos);
+
+    // 探针把三段事件的命中次数与 Move 相对 Press 的位移序列化外显，据此确认合成拖拽
+    // （Press → Move → Release）确实落到目标控件且位移与请求一致。
+    const std::string props = http_get(server.port(), "/api/widget/3");
+    AURORA_TEST_CHECK_MSG(props.find("\"press_hits\":1") != std::string::npos, "drag press reached the target widget");
+    AURORA_TEST_CHECK_MSG(props.find("\"move_hits\":1") != std::string::npos, "drag move reached the target widget");
+    AURORA_TEST_CHECK_MSG(props.find("\"release_hits\":1") != std::string::npos,
+                          "drag release reached the target widget");
+    AURORA_TEST_CHECK_TRUE(props.find("\"move_dx\":30.0") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(props.find("\"move_dy\":-10.0") != std::string::npos);
+
+    // 拖拽增量类型不符 → 400（与 scroll 同一校验口径）。
+    AURORA_TEST_CHECK_TRUE(http_post(server.port(), "/api/input/drag", R"({"path":"3","dx":"abc"})").find("400") !=
+                           std::string::npos);
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(find_endpoint_locates_by_type_key_text_and_combination) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    FindTree tree = make_find_tree();
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    const std::uint16_t port = server.port();
+
+    // 按 type：两个 Button（先序：根下 0 在嵌套 2/0 之前），返回索引路径数组。
+    const std::string by_type = http_get(port, "/api/find?type=Button");
+    AURORA_TEST_CHECK_TRUE(by_type.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(by_type.find("\"count\":2") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(by_type.find("\"path\":\"0\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(by_type.find("\"path\":\"2/0\"") != std::string::npos);
+
+    // 按 key（Node::set_id 标识）。
+    const std::string by_key = http_get(port, "/api/find?key=cancel");
+    AURORA_TEST_CHECK_TRUE(by_key.find("\"count\":1") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(by_key.find("\"path\":\"2/0\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(by_key.find("\"id\":\"cancel\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?key=nope").find("\"count\":0") != std::string::npos);
+
+    // 按 text（文本类属性启发式：Button 序列化 label）。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?text=确定").find("\"path\":\"0\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?text=取消").find("\"path\":\"2/0\"") != std::string::npos);
+
+    // 多参数 AND 语义。
+    const std::string combined = http_get(port, "/api/find?type=Button&text=取消");
+    AURORA_TEST_CHECK_TRUE(combined.find("\"count\":1") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(combined.find("\"path\":\"2/0\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?type=Button&key=ok").find("\"path\":\"0\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?type=TextInput&text=确定").find("\"count\":0") !=
+                           std::string::npos);
+
+    // 根自身可命中（路径空串）；嵌套 Column 同样命中（路径 "2"）。
+    const std::string root_hit = http_get(port, "/api/find?type=Column");
+    AURORA_TEST_CHECK_TRUE(root_hit.find("\"count\":2") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(root_hit.find("\"path\":\"\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(root_hit.find("\"path\":\"2\"") != std::string::npos);
+
+    // 返回路径与寻址端点同口径：拿 find 给出的路径可直接读属性。
+    const std::string props = http_get(port, "/api/widget/2/0");
+    AURORA_TEST_CHECK_MSG(props.find("\"label\":\"取消\"") != std::string::npos,
+                          "find's index path must be addressable by /api/widget/{path}");
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(find_endpoint_rejects_malformed_requests) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    FindTree tree = make_find_tree();
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    const std::uint16_t port = server.port();
+
+    // 无任何参数 → 400。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find").find("400") != std::string::npos);
+    // 空值参数视同未提供 → 400。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?key=").find("400") != std::string::npos);
+    // 方法不符 → 405。
+    AURORA_TEST_CHECK_TRUE(http_post(port, "/api/find?type=Button", "{}").find("405") != std::string::npos);
     server.stop();
 #endif
 }

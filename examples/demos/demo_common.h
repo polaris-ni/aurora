@@ -25,6 +25,16 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/window/window.h"
 
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+// 远程检视 opt-in（随链接注入的 feature 宏裁切）：AURORA_BUILD_INSPECTOR_SERVER=ON 时
+// demo 目标链接 aurora_inspector_server，run_demo 可经环境变量选择启动 InspectorServer。
+#include <cstdint>
+#include <cstdlib>
+#include <memory>
+
+#include "aurora/inspector/inspector_server.h"
+#endif
+
 namespace au = aurora;
 
 // ---------------------------------------------------------------------------
@@ -200,6 +210,28 @@ inline auto run_demo(au::Node root, const std::string &title, float w, float h) 
     }
 
     auto win = std::move(win_res.value());
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+    // 远程检视 opt-in：设置 AURORA_INSPECTOR_PORT 环境变量即随 demo 启动 InspectorServer，
+    // 供 aurora_e2e_client / aurora_mcp 经回环 REST 驱动本窗口；未设置则不启动（demo 默认安静）。
+    // 端口解析与客户端侧同口径：值须全串十进制 1..65535，脏值回落默认 6280（BUILD_OPTIONS.md §5）。
+    std::unique_ptr<au::InspectorServer> inspector;
+    if (const char *port_env = std::getenv("AURORA_INSPECTOR_PORT"); port_env != nullptr && *port_env != '\0') {
+        std::uint16_t port = 6280;  // 与 InspectorServer::start() 默认值一致
+        char *end = nullptr;
+        const long long parsed = std::strtoll(port_env, &end, 10);
+        if (end != nullptr && *end == '\0' && parsed >= 1 && parsed <= 65535) {
+            port = static_cast<std::uint16_t>(parsed);
+        }
+        inspector = std::make_unique<au::InspectorServer>([&root]() -> au::Node { return au::Node{root}; });
+        inspector->set_surface_getter([&win]() -> au::Surface * { return &win->surface(); });
+        if (inspector->start(port)) {
+            AURORA_LOG_INFO("demo", "[run_demo] inspector server listening on 127.0.0.1:", port);
+        } else {
+            AURORA_LOG_ERROR("demo", "[run_demo] inspector server failed to start on port ", port);
+            inspector.reset();
+        }
+    }
+#endif
     win->surface().set_event_handler([&](au::Event &e) -> void {
         auto &wd = root.widget();
         // 鼠标派发必须携带 FocusManager：否则点击 Text/TextInput 时 request_focus() 静默 no-op，

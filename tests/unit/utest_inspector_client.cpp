@@ -22,7 +22,15 @@
 
 #ifndef AURORA_PLATFORM_WASM
 
+#include "e2e/inspector_driver.h"  // tools/include/e2e：header-only 能力层（本文件扩展的被测面）
 #include "inspector_client.h"  // tools/servers（该目录经 AuroraTests.cmake 加入 runner 的 include 路径）
+
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+#include "aurora/inspector/inspector_server.h"
+#include "aurora/widget/containers.h"  // Column（握手用最小树）
+#include "aurora/widget/text.h"
+#include "aurora/window/surface.h"  // HeadlessSurface（无桌面端到端）
+#endif
 
 #ifdef AURORA_PLATFORM_WINDOWS
 #include <winsock2.h>
@@ -137,6 +145,16 @@ auto serve_after(SocketHandle listener, std::chrono::milliseconds delay) -> void
     close_handle(peer);
 }
 
+/// @brief 环境变量写入的两侧平台拼写（写空串即删除语义由 _putenv_s/setenv 各自处理，
+///        端口解析对空串本就按「未声明」裁决，无需真删）。
+auto set_env_var(const char *name, const std::string &value) -> void {
+#ifdef AURORA_PLATFORM_WINDOWS
+    ::_putenv_s(name, value.c_str());
+#else
+    ::setenv(name, value.c_str(), 1);
+#endif
+}
+
 }  // namespace
 
 #endif  // AURORA_PLATFORM_WASM
@@ -193,6 +211,121 @@ AURORA_TEST_CASE(io_timeout_survives_a_slow_response) {
     AURORA_TEST_CHECK_TRUE(response.ok());
     AURORA_TEST_CHECK_EQ(response.status, 200);
     AURORA_TEST_CHECK_EQ(response.body, std::string("ok"));
+#endif
+}
+
+// 端口解析三级链（客户端侧约定）：显式入参 > AURORA_INSPECTOR_PORT > 默认 6280；
+// 环境变量脏值（非数字 / 越界 / 尾随杂物 / 空串）一律按「未声明」回落默认。
+AURORA_TEST_CASE(resolve_port_prefers_argument_then_env_then_default) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("浏览器运行时无 BSD socket 语义，本客户端不参与 wasm 构建");
+#else
+    using aurora::tools::e2e::resolve_port;
+    const char *env_name = aurora::tools::inspector::AURORA_PORT_ENV.data();
+    const auto default_port = aurora::tools::inspector::AURORA_DEFAULT_PORT;
+
+    // 显式入参最高优先：环境变量即便声明了也不看。
+    set_env_var(env_name, "7777");
+    AURORA_TEST_CHECK_EQ(resolve_port(std::uint16_t{5000}), std::uint16_t{5000});
+
+    // 无入参：环境变量次之（合法值生效）。
+    AURORA_TEST_CHECK_EQ(resolve_port(std::nullopt), std::uint16_t{7777});
+
+    // 脏值按未声明处理：半途而废的声明不该被静默截断成合法端口。
+    set_env_var(env_name, "abc");
+    AURORA_TEST_CHECK_EQ(resolve_port(std::nullopt), default_port);
+    set_env_var(env_name, "0");
+    AURORA_TEST_CHECK_EQ(resolve_port(std::nullopt), default_port);
+    set_env_var(env_name, "70000");
+    AURORA_TEST_CHECK_EQ(resolve_port(std::nullopt), default_port);
+    set_env_var(env_name, "6280 ");
+    AURORA_TEST_CHECK_EQ(resolve_port(std::nullopt), default_port);
+
+    // 空串 / 未声明 → 默认 6280。
+    set_env_var(env_name, "");
+    AURORA_TEST_CHECK_EQ(resolve_port(std::nullopt), default_port);
+#endif
+}
+
+// 「服务不在」必须落在 TransportError（status 恒 0、无 body、error 指明 connect 失败），
+// 不得伪装成空树或空结果——这是驱动方区分「环境未就绪」与「被测界面为空」的判据。
+AURORA_TEST_CASE(transport_error_distinguishable_when_server_down) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("浏览器运行时无 BSD socket 语义，本客户端不参与 wasm 构建");
+#else
+    // 先开监听拿一个系统分配的端口号再立刻关掉：同一时刻几乎不可能有人抢注，
+    // 由此得到「肯定没人监听」的回环端口。
+#ifdef AURORA_PLATFORM_WINDOWS
+    const WinsockSession wsa;  // 裸 socket 调用需进程级 WSA 初始化（http_request 自带，此处不经过它）
+    AURORA_TEST_REQUIRE(wsa.started);
+#endif
+    std::uint16_t port = 0;
+    const SocketHandle listener = open_loopback_listener(port);
+    AURORA_TEST_REQUIRE(listener != AURORA_INVALID_SOCKET);
+    close_handle(listener);
+    AURORA_TEST_REQUIRE_NE(port, std::uint16_t{0});
+
+    const auto call = aurora::tools::e2e::get_tree("127.0.0.1", port);
+    AURORA_TEST_CHECK_TRUE(call.kind == aurora::tools::e2e::CallResult::Kind::TransportError);
+    AURORA_TEST_CHECK_EQ(call.status, 0);
+    AURORA_TEST_CHECK_TRUE(call.body.empty());
+    AURORA_TEST_CHECK_NE(call.error.find("connect() failed"), std::string::npos);
+#endif
+}
+
+// 端到端握手：HeadlessSurface（内存后端，无桌面依赖）+ InspectorServer::start(0) 临时端口，
+// 经能力层走一遍 树查询 → 定位 → 注入 → 抓帧 → 停机后可区分 的完整链路。
+AURORA_TEST_CASE(end_to_end_handshake_headless_server) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("浏览器运行时无 BSD socket 语义，本客户端不参与 wasm 构建");
+#elif !defined(AURORA_BUILD_INSPECTOR_SERVER)
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER=OFF：InspectorServer 未编入，端到端握手无从谈起");
+#else
+    namespace e2e = aurora::tools::e2e;
+
+    auto tree = std::make_shared<aurora::Column>();
+    tree->add(aurora::Node{std::make_shared<aurora::Text>("e2e client handshake")});
+    aurora::InspectorServer server([tree]() -> aurora::Node { return aurora::Node{tree}; });
+    auto surface = std::make_shared<aurora::HeadlessSurface>("", aurora::Size{.width = 320.0F, .height = 200.0F});
+    server.set_surface_getter([surface]() -> aurora::Surface * { return surface.get(); });
+    // 先出一帧：抓帧端点读的是帧缓冲，未 begin_frame 的 Surface 无数据可读。
+    AURORA_TEST_REQUIRE(surface->begin_frame(320, 200).ok());
+    surface->painter().fill_rect(
+        aurora::Rect{.origin = {.x = 0.0F, .y = 0.0F}, .size = {.width = 320.0F, .height = 200.0F}},
+        aurora::Color{245, 245, 247, 255});
+    AURORA_TEST_REQUIRE(surface->present().ok());
+    AURORA_TEST_REQUIRE(server.start(0));
+    const std::uint16_t port = server.port();
+    AURORA_TEST_REQUIRE_NE(port, std::uint16_t{0});
+
+    const std::string host = "127.0.0.1";
+
+    // 树查询：OK 且返回的是我们的树（而非空结果 / 错误形状）。
+    const auto got_tree = e2e::get_tree(host, port);
+    AURORA_TEST_CHECK_TRUE(got_tree.ok());
+    AURORA_TEST_CHECK_NE(got_tree.body.find("Column"), std::string::npos);
+
+    // 定位：type=Column 恰命中根（count=1）。
+    const auto found = e2e::find(host, port, "", "Column", "");
+    AURORA_TEST_CHECK_TRUE(found.ok());
+    AURORA_TEST_CHECK_NE(found.body.find("\"count\":1"), std::string::npos);
+
+    // 属性读取与输入注入（simulate_* 进程内直派，Headless 下可用）。
+    const auto widget = e2e::get_widget(host, port, "0");
+    AURORA_TEST_CHECK_TRUE(widget.ok());
+    const auto tapped = e2e::tap(host, port, "0");
+    AURORA_TEST_CHECK_TRUE(tapped.ok());
+
+    // 抓帧：body 即 PNG 字节（魔数 \x89PNG）。
+    const auto png = e2e::snapshot(host, port, "fb");
+    AURORA_TEST_CHECK_TRUE(png.ok());
+    AURORA_TEST_CHECK_TRUE(png.body.size() >= 4 && png.body[0] == '\x89' && png.body[1] == 'P' && png.body[2] == 'N' &&
+                           png.body[3] == 'G');
+
+    // 停机后同端口：落回 TransportError（可区分），而非空结果或挂死。
+    server.stop();
+    const auto after_stop = e2e::get_tree(host, port);
+    AURORA_TEST_CHECK_TRUE(after_stop.kind == e2e::CallResult::Kind::TransportError);
 #endif
 }
 

@@ -41,11 +41,12 @@ endif ()
 # 此时 aurora_inspector_server 目标（AURORA_BUILD_INSPECTOR_SERVER=ON 时定义，跨平台）已存在。
 # 其 PUBLIC 导出的 AURORA_BUILD_INSPECTOR_SERVER 宏随链接注入 demo，启用 demo 内 HTTP 远程检视代码；
 # Release / 未开选项时该目标不存在 → 跳过，demo 内 InspectorServer 分支整编译剔除，零链接依赖。
-#   * demo_google_play      应用级演示：检视 Navigator 驱动的真实界面；
-#   * demo_inspector_server 人工测试载体：根树为扁平表单、索引路径稳定，供 /api/* 逐端点验证。
-set(AURORA_INSPECTOR_DEMOS demo_google_play demo_inspector_server)
-foreach (inspector_demo IN LISTS AURORA_INSPECTOR_DEMOS)
-    if (AURORA_BUILD_DEMOS AND TARGET ${inspector_demo} AND TARGET aurora_inspector_server)
+# hook 覆盖**全部** demo（E2E 驱动任意 demo 的前提）：run_demo 为所有 demo 共用的启动器，
+# 其 opt-in 启动块要求同一宏口径——只给个别 demo 链接会让共享头在不同 demo 下编译出不同形态。
+# 运行期是否启动由环境变量 AURORA_INSPECTOR_PORT 决定（demo_common.h run_demo），未设置不启动。
+if (AURORA_BUILD_DEMOS AND TARGET aurora_inspector_server)
+    foreach (inspector_demo_src ${AURORA_DEMO_SOURCES})
+        get_filename_component(inspector_demo ${inspector_demo_src} NAME_WE)
         target_link_libraries(${inspector_demo} PRIVATE aurora_inspector_server)
-    endif ()
-endforeach ()
+    endforeach ()
+endif ()

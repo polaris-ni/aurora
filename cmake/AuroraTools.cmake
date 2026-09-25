@@ -203,6 +203,25 @@ aurora_add_tool(aurora_cli tools/servers/aurora_cli.cpp)
 # LSP 语言服务：stdio JSON-RPC 2.0，提供 completion/hover/diagnostics/codeAction。
 aurora_add_tool(aurora_lsp tools/servers/aurora_lsp.cpp)
 
+# 进程外 E2E 客户端 CLI：经本机 InspectorServer REST 驱动运行中的应用
+# （查树 / 按 key-type-text 定位 / 注入输入含拖拽 / 抓帧 PNG）。
+# 能力层 tools/include/e2e/inspector_driver.h 为 header-only——与 aurora_mcp 的 live_* 工具族
+# 同款：只依赖裸 HTTP 客户端头（tools/servers/inspector_client.h），不依赖服务端实现
+# （应用侧是否起 InspectorServer 由应用自己 opt-in）。
+# EXCLUDE_FROM_ALL：按需构建（cmake --build build --target aurora_e2e_client），不进默认构建；
+# Emscripten 下无 BSD socket 语义（与 utest_inspector_client 同口径），不定义。
+if (NOT EMSCRIPTEN)
+    aurora_add_tool(aurora_e2e_client tools/e2e/e2e_client.cpp)
+    # 能力层 include "inspector_client.h"（tools/servers/，aurora_add_tool 未注入该路径）。
+    target_include_directories(aurora_e2e_client PRIVATE "${CMAKE_SOURCE_DIR}/tools/servers")
+    # 传输层直调 Winsock（inspector_client.h），与 aurora_mcp 同款：客户端只需要 socket 库，
+    # 不依赖 AURORA_BUILD_INSPECTOR_SERVER（应用侧是否起 InspectorServer 由应用自己 opt-in）。
+    if (WIN32)
+        target_link_libraries(aurora_e2e_client PRIVATE ws2_32)
+    endif ()
+    set_target_properties(aurora_e2e_client PROPERTIES EXCLUDE_FROM_ALL ON)
+endif ()
+
 # 注：原 tools/ai_compat_test（AI 兼容性批量验证可执行）已移除 —— 其 fixture 管线
 # （from_json → validate_ui → to_code）由 tests/integration/itest_ai_compat.cpp（:75 起的多个 AURORA_TEST_CASE）完整覆盖，且后者
 # 改为目录遍历后是前者的超集（另含纯内存用例）。保留两份属重复实现。

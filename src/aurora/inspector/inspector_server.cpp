@@ -287,6 +287,10 @@ static auto query_param(const std::string &path, std::string_view key) -> std::s
     return {};
 }
 
+// 文本类属性键（/api/find 的 text 匹配用；与 TestController::find_by_text / E2E harness
+// 的启发式同源——各控件的文本属性名不统一，逐键比对字符串值，命中其一即算）。
+constexpr std::string_view AURORA_TEXT_PROP_KEYS[] = {"content", "text", "label", "value", "hint", "placeholder"};
+
 // 可靠发送：send 可能部分写入（响应体超过套接字缓冲时必然发生，如 snapshot PNG），
 // 循环写满为止；对端断开 / 出错返回 false。
 static auto send_all(SOCKET client, const std::string &data) -> bool {
@@ -690,10 +694,10 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         return error_response(405, "Method not allowed for /api/widget");
     }
 
-    // POST /api/input/{click|scroll|text} — 交互模拟（合成事件经 EventDispatcher 真实派发）
+    // POST /api/input/{click|scroll|drag|text} — 交互模拟（合成事件经 EventDispatcher 真实派发）
     //
-    // 请求体为 JSON 对象：`path`（索引路径，如 "0/1"）必填；`scroll` 另取 `dx`/`dy`
-    // （数值，缺省 0），`text` 另取 `text`（字符串）。
+    // 请求体为 JSON 对象：`path`（索引路径，如 "0/1"）必填；`scroll`/`drag` 另取 `dx`/`dy`
+    // （数值，缺省 0；drag 为目标中心起算的拖拽位移），`text` 另取 `text`（字符串）。
     //
     // 派发必须落在主线程：`Inspector::simulate_*` 为 main-thread only，且会写控件状态与
     // 派发期的焦点槽。故与调试端点同走 `marshal_get`（无事件循环时直接执行，测试 / 无头
@@ -707,7 +711,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             return error_response(405, "Method not allowed for /api/input");
         }
         const std::string action = route.substr(std::string("/api/input/").size());
-        if (action != "click" && action != "scroll" && action != "text") {
+        if (action != "click" && action != "scroll" && action != "drag" && action != "text") {
             return error_response(404, "Unknown input action: " + action);
         }
         nlohmann::json payload;
@@ -731,7 +735,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         float dx = 0.0F;
         float dy = 0.0F;
         std::string text;
-        if (action == "scroll") {
+        if (action == "scroll" || action == "drag") {
             for (const char *key : {"dx", "dy"}) {
                 if (payload.contains(key) && !payload[key].is_number()) {
                     return error_response(400, std::string("'") + key + "' must be a number");
@@ -768,6 +772,9 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
                 } else if (action == "scroll") {
                     const Result<void> r = Inspector::simulate_scroll(*target, dx, dy);
                     failure = r ? std::string{} : r.error().message;
+                } else if (action == "drag") {
+                    const Result<void> r = Inspector::simulate_drag(*target, dx, dy);
+                    failure = r ? std::string{} : r.error().message;
                 } else {
                     const Result<void> r = Inspector::simulate_text_input(*target, text);
                     failure = r ? std::string{} : r.error().message;
@@ -788,6 +795,98 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             return json_response(200, "OK", ok);
         } catch (const std::exception &e) {
             return error_response(500, std::string("simulate failed: ") + e.what());
+        }
+    }
+
+    // GET /api/find?key=&type=&text= — 按 key / type / text 定位控件（返回索引路径）
+    //
+    // 返回的 `path` 与 `/api/widget/{path}`、`/api/input/*` 同一寻址口径（`find_widget_by_path`
+    // 的索引路径，根为空串），可直接喂给寻址端点。至少给一个参数；多参数为 AND 语义。
+    //
+    // 遍历走 `Widget::child_nodes()` 的**原存储 const 引用**（迭代式前序，不构造任何 `Node`
+    // 副本——临时 `Node` 析构会把子控件的 `layout_parent_` 置空，活树上不可接受）；标准容器
+    // 的 `for_each_child` 与 `child_nodes()` 同序，路径索引天然兼容。虚拟化容器（不覆写
+    // `child_nodes()`）的子树不可见——与 `find_node_by_path` 同限：宁可少报、不可错报。
+    //
+    // 三类匹配语义与进程内查询面同源：key 比对 `Node::set_id` 标识（find_by_key）、type
+    // 比对 `Widget::type_name()`（find_by_type）、text 比对文本类属性启发式（find_by_text，
+    // 键表见 AURORA_TEXT_PROP_KEYS）。零命中不是错误：200 + 空 matches，由调用方裁决。
+    if (route == "/api/find") {
+        if (method != "GET") {
+            return error_response(405, "Method not allowed for /api/find");
+        }
+        const std::string want_key = query_param(path, "key");
+        const std::string want_type = query_param(path, "type");
+        const std::string want_text = query_param(path, "text");
+        if (want_key.empty() && want_type.empty() && want_text.empty()) {
+            return error_response(400, "At least one of 'key', 'type', 'text' is required");
+        }
+        try {
+            const Json outcome = marshal_get<Json>([&]() -> Json {
+                std::scoped_lock lock(tree_mutex);
+                Node root = root_getter();
+                if (!root) {
+                    return Json{{"error", "Widget tree root is null"}};
+                }
+                // 文本启发式：serialize_props 一次，逐键比对字符串值（与 find_by_text 同源）。
+                const auto text_matches = [&](const Widget &w) -> bool {
+                    Json props = Json::object();
+                    w.serialize_props(props);
+                    for (const std::string_view key : AURORA_TEXT_PROP_KEYS) {
+                        const auto it = props.find(std::string{key});
+                        if (it != props.end() && it->is_string() && it->get<std::string>() == want_text) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                Json matches = Json::array();
+                struct Frame {
+                    const Node *node;
+                    std::string path;
+                };
+                std::vector<Frame> stack;
+                stack.push_back(Frame{.node = &root, .path = std::string{}});
+                while (!stack.empty()) {
+                    const Frame frame = stack.back();
+                    stack.pop_back();
+                    const Widget &w = frame.node->widget();
+                    bool hit = true;  // 多参数 AND：全部命中才算
+                    if (!want_key.empty() && frame.node->id() != want_key) {
+                        hit = false;
+                    }
+                    if (hit && !want_type.empty() && std::string_view{w.type_name()} != want_type) {
+                        hit = false;
+                    }
+                    if (hit && !want_text.empty() && !text_matches(w)) {
+                        hit = false;
+                    }
+                    if (hit) {
+                        Json m = Json::object();
+                        m["path"] = frame.path;
+                        m["type"] = w.type_name();
+                        m["id"] = std::string{frame.node->id()};
+                        matches.push_back(std::move(m));
+                    }
+                    // 子节点按索引逆序入栈，弹出顺序即先序；路径索引与 child_nodes() 下标一致
+                    const std::vector<Node> &kids = w.child_nodes();
+                    for (std::size_t i = kids.size(); i-- > 0;) {
+                        std::string child_path =
+                            frame.path.empty() ? std::to_string(i) : frame.path + "/" + std::to_string(i);
+                        stack.push_back(Frame{.node = &kids[i], .path = std::move(child_path)});
+                    }
+                }
+                return matches;
+            });
+            if (!outcome.is_array()) {
+                return error_response(500, outcome.value("error", std::string("find failed")));
+            }
+            nlohmann::json ok = nlohmann::json::object();
+            ok["matches"] = outcome;
+            ok["count"] = outcome.size();
+            return json_response(200, "OK", ok);
+        } catch (const std::exception &e) {
+            return error_response(500, std::string("find failed: ") + e.what());
         }
     }
 
