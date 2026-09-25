@@ -53,9 +53,7 @@ constexpr std::string_view AURORA_USAGE =
     "port: --port > AURORA_INSPECTOR_PORT > 6280 (client-side resolution)\n";
 
 /// @brief 功能输出统一走 raw 通道（stdout、无前缀、不过级别过滤）。
-auto emit(std::string_view text) -> void {
-    AURORA_LOG_RAW("e2e", text);
-}
+auto emit(std::string_view text) -> void { AURORA_LOG_RAW("e2e", text); }
 
 /// @brief 结果行按类别加前缀；调用方据此分类（成功时 body 原样透传不加前缀）。
 auto emit_failure(const CallResult &call) -> void {
@@ -159,8 +157,8 @@ auto main(int argc, char *argv[]) -> int {
             return 2;
         }
         const std::optional<float> parsed = parse_float(args[arg_index + 1]);
-        if (!parsed.has_value() || *parsed < 1.0F || *parsed > 65535.0F
-            || *parsed != static_cast<float>(static_cast<std::uint16_t>(*parsed))) {
+        if (!parsed.has_value() || *parsed < 1.0F || *parsed > 65535.0F ||
+            *parsed != static_cast<float>(static_cast<std::uint16_t>(*parsed))) {
             emit("[usage] --port expects an integer in 1..65535, got '" + args[arg_index + 1] + "'\n");
             return 2;
         }
@@ -182,9 +180,9 @@ auto main(int argc, char *argv[]) -> int {
     if (command == "tree" || command == "get" || command == "find") {
         CallResult call{.kind = CallResult::Kind::TransportError};
         if (command == "tree") {
-            const std::uint32_t window = rest.empty() || parse_float(rest[0]) == std::nullopt
-                                             ? 0
-                                             : static_cast<std::uint32_t>(*parse_float(rest[0]));
+            // 只 parse 一次并先判 has_value 再解引用，杜绝双重求值与未检查的 optional 访问。
+            const std::optional<float> window_arg = rest.empty() ? std::nullopt : parse_float(rest[0]);
+            const std::uint32_t window = window_arg.has_value() ? static_cast<std::uint32_t>(*window_arg) : 0;
             call = aurora::tools::e2e::get_tree(host, port, window);
         } else if (command == "get") {
             if (rest.size() != 1) {

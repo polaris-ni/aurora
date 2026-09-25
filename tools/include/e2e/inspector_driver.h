@@ -38,13 +38,13 @@ namespace aurora::tools::e2e {
 /// @brief 一次 REST 调用的归一结果。
 struct CallResult {
     enum class Kind : std::uint8_t {
-        Ok,              ///< 2xx
-        HttpError,       ///< 服务端回了 4xx/5xx（语义错误，详情在 body JSON 的 "error" 字段）
+        Ok,  ///< 2xx
+        HttpError,  ///< 服务端回了 4xx/5xx（语义错误，详情在 body JSON 的 "error" 字段）
         TransportError,  ///< 未获得 HTTP 响应：连不上（服务未启动）/ 超时 / 非回环拒单
     };
     Kind kind = Kind::TransportError;
-    int status = 0;     ///< HTTP 状态码（TransportError 时恒 0）
-    std::string body;   ///< 响应体（`snapshot` 为 PNG 字节，其余为 JSON 文本）
+    int status = 0;  ///< HTTP 状态码（TransportError 时恒 0）
+    std::string body;  ///< 响应体（`snapshot` 为 PNG 字节，其余为 JSON 文本）
     std::string error;  ///< TransportError 时的传输层原因；其余为空
 
     [[nodiscard]] auto ok() const -> bool { return kind == Kind::Ok; }

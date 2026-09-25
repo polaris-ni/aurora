@@ -316,11 +316,20 @@ AURORA_TEST_CASE(end_to_end_handshake_headless_server) {
     const auto tapped = e2e::tap(host, port, "0");
     AURORA_TEST_CHECK_TRUE(tapped.ok());
 
-    // 抓帧：body 即 PNG 字节（魔数 \x89PNG）。
-    const auto png = e2e::snapshot(host, port, "fb");
-    AURORA_TEST_CHECK_TRUE(png.ok());
-    AURORA_TEST_CHECK_TRUE(png.body.size() >= 4 && png.body[0] == '\x89' && png.body[1] == 'P' && png.body[2] == 'N' &&
-                           png.body[3] == 'G');
+    // 抓帧：body 即 PNG 字节（魔数 \x89PNG）。服务器端 debug::capture 受 AURORA_ENABLE_DEBUG
+    // 门控（经 aurora 目标 PUBLIC 导出，此处 #ifdef 与库行为严格同步）：宏未生效的构建
+    // （如 Release 下 DEBUG=AUTO→OFF）按设计返回 500「not enabled」，故按构建态分支断言。
+#ifdef AURORA_ENABLE_DEBUG
+    const auto snap = e2e::snapshot(host, port, "fb");
+    AURORA_TEST_CHECK_TRUE(snap.ok());
+    AURORA_TEST_CHECK_TRUE(snap.body.size() >= 4 && snap.body[0] == '\x89' && snap.body[1] == 'P' &&
+                           snap.body[2] == 'N' && snap.body[3] == 'G');
+#else
+    const auto snap = e2e::snapshot(host, port, "fb");
+    AURORA_TEST_CHECK_TRUE(!snap.ok());
+    AURORA_TEST_CHECK_TRUE(snap.kind == e2e::CallResult::Kind::HttpError);
+    AURORA_TEST_CHECK_NE(snap.body.find("AURORA_ENABLE_DEBUG not enabled"), std::string::npos);
+#endif
 
     // 停机后同端口：落回 TransportError（可区分），而非空结果或挂死。
     server.stop();

@@ -299,6 +299,8 @@ struct X11Api {
                        "xtest_click: XTEST unavailable (libX11/libXtst dlopen failed) or null handles")};
     }
     auto *dpy = static_cast<detail::XDisplay *>(display);
+    // XID 经 native_handle() 契约以全宽装入 void*，取回整数必须 reinterpret_cast（XWindow 为 unsigned long）。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     const auto win = static_cast<detail::XWindow>(reinterpret_cast<std::uintptr_t>(xid));
     int root_x = 0;
     int root_y = 0;
@@ -323,6 +325,7 @@ struct X11Api {
             make_error(ErrorCode::GeneralNotSupported, "xtest_focus_window: XTEST unavailable or null handles")};
     }
     auto *dpy = static_cast<detail::XDisplay *>(display);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): 同上，XID 装入 void* 契约的取回路径
     const auto win = static_cast<detail::XWindow>(reinterpret_cast<std::uintptr_t>(xid));
     api.set_input_focus(dpy, win, 1 /*RevertToParent*/, 0UL /*CurrentTime*/);
     api.flush(dpy);

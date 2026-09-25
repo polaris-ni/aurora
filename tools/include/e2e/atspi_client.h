@@ -67,9 +67,12 @@ struct AtspiSemanticNode {
 
 /// @brief 本环境是否有 AT-SPI python3-gi 客户端（子进程探测，不建窗、不触桥）。
 [[nodiscard]] inline auto atspi_client_available() -> bool {
+    // NOLINTBEGIN(bugprone-command-processor, concurrency-mt-unsafe): 本工具的职责就是派发
+    // 子进程命令探测 python3-gi 可用性；一次性探测、非并发路径。
     return std::system(
                "python3 -c \"import gi; gi.require_version('Atspi', '2.0'); "
-               "from gi.repository import Atspi\"") == 0;  // NOLINT(concurrency-mt-unsafe)
+               "from gi.repository import Atspi\"") == 0;
+    // NOLINTEND(bugprone-command-processor, concurrency-mt-unsafe)
 }
 
 /// @brief 客户端脚本：枚举桌面树找 app "Aurora" 下名为 FRAME_TITLE 的 FRAME，先序输出。
@@ -207,7 +210,7 @@ print('DONE', flush=True)
     std::istringstream stream(output);
     std::string line;
     while (std::getline(stream, line)) {
-        if (line.rfind("NODE|", 0) != 0) {
+        if (!line.starts_with("NODE|")) {
             continue;
         }
         const auto first = line.find('|');
