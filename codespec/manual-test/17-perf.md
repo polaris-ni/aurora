@@ -37,7 +37,8 @@
 
 `bench_render` 的输出为 Markdown 表格并经 `AURORA_LOG_RAW` 写到 **stdout**，因此可直接重定向为文件留档与逐行比较。
 
-**关于门槛的分工**：`tools/check/perf_gates.json` 中共有 G-1 至 G-8 八项门槛，其中时间类（G-1 至 G-4）**不进 CI**，仅用于本地趋势对照（该文件自身声明了这一点）；计数类（G-5 至 G-8）已锁定在 CTest 的滚动回归段。因此本模块的人工用例覆盖时间类门槛的对照，计数类只做「是否已由自动化守护」的确认。
+**关于门槛的分工**（2026-09-25 实测回填，原文「G-1 至 G-8 八项 + 计数类已锁定 CTest」与现状不符）：`tools/check/perf_gates.json` 现有 **10 项门槛，全部为时间类**——G-1 至 G-4（滚动 p99 / 最差帧 / 抖动 / 长任务，`counted: true`）、G-9 至 G-11（帧阶段 layout / paint / present 峰值，`counted: false`，仅记录不判红灯）、G-12 至 G-14（`text_cjk_12lines` / `linear_gradient_full` / `radial_gradient_full` 三场景 @1080p，`counted: true`）。门槛由 `tools/check/check_perf_gates.ps1` 消费（CMake 自定义目标 `perf_gates`），**不进 CI**，仅用于本地趋势对照（该文件 `source` 字段自陈）。
+该文件的 `note` 字段另称「计数类 G-5~G-8 由 `tests/unit/utest_scroll.cpp` 的 scroll_regression 段锁定进 CTest」——**经 TC-PERF-007 实测不成立**：JSON 内从无 G-5 至 G-8 条目，该测试文件内亦无此段（同一失实说法另见 `tools/bench/bench_render.cpp` 的收尾输出与该文件注释、`tests/integration/itest_perf_display_list.cpp` 头部注释）。故本模块的人工用例只覆盖时间类门槛的对照（TC-PERF-005 与 TC-PERF-002 至 TC-PERF-004），**不再把计数类列为「已自动化守护」**。
 
 ### 1.3 执行环境
 
@@ -141,7 +142,7 @@
 | 各绘制原语的相对开销 | 判断的是「哪些原语贵、贵多少」的排序是否符合直觉 |
 | 滚动帧时间分布 | p99 与最差帧是否落在门槛内、抖动是否可接受 |
 | 空闲 CPU 占用 | 「不动时是否安静」是体感指标，程序能测数值但判定标准来自使用预期 |
-| 门槛分工的确认 | 确认时间类门槛不进 CI、计数类已由自动化守护，避免重复投入 |
+| 门槛分工的确认 | 确认时间类门槛不进 CI、门槛文件自身的声明与仓库现状一致，避免重复投入 |
 
 **不纳入人工测试的头及其理由**：
 
@@ -154,7 +155,7 @@
 | `perf_session.h` | 会话的多轮汇总与统计为确定性数值处理；其**结果解读**由 TC-PERF-002 至 TC-PERF-005 覆盖 | `utest_perf_session` |
 | `trace_writer.h` | 轨迹序列化为确定性 | `utest_trace_writer` |
 | `scroll_bench.h` | 滚动基准场景的构造为确定性；其**指标与门槛对照**由 TC-PERF-005 覆盖 | `utest_scroll_bench` `utest_scroll` |
-| `tools/bench/*` 的计数类门槛（G-5 至 G-8） | 已由 CTest 的滚动回归段守护（需 `PROFILING=ON`），人工重复执行无增益 | `utest_scroll` 滚动回归段 |
+| `tools/bench/*` 的计数类读数 | 计数指标（`draw_calls` / `dirty_rect_count` / 缓存命中率等）的算术与阈值判定属确定性逻辑，已由单测覆盖；`perf_gates.json` 现无计数类门槛条目，也就无从「重复执行」（见 §1.2 的实测说明） | `utest_counters` `utest_scroll_bench` `itest_perf_display_list` |
 
 ## 2 用例清单
 
@@ -168,8 +169,8 @@
 | 测试目的 | 确认为数众多的基准可构建运行，且耗时类基准的输出为可直接留档的表格 |
 | 前置条件 | 位于仓库根目录；`build/` 已完成 CMake 配置；本机工具链可用；后台无占用 CPU 的任务 |
 | 依赖用例 | 无 |
-| 操作步骤 | 1. 构建基准：`cmake --build build --target bench_render bench_scroll bench_idle_cpu bench_win32_present`（纯执行，无预期结果）<br>2. 运行 `./build/bench_render.exe 1> render_baseline.md 2> err.txt`（纯执行，无预期结果）<br>3. 记录退出码<br>4. 检查 `render_baseline.md` 的表头与列数<br>5. 检查表格的行数与「场景 × 尺寸 × 缩放」的组合数是否一致<br>6. 查看 `err.txt` |
-| 预期结果 | 3. 退出码为 0<br>4. 表头为 `| scene | size (logical) | scale | device | ms/frame |`，共 5 列<br>5. 数据行为 117 行（13 个场景 × 3 档逻辑尺寸 × 3 档缩放），加表头与分隔行共 119 行<br>6. `err.txt` 为空（该基准的表格输出走 stdout） |
+| 操作步骤 | 1. 构建基准：`cmake --build build --target bench_render bench_scroll bench_idle_cpu bench_win32_present`（纯执行，无预期结果）<br>2. 运行 `./build/bench_render.exe 1> render_baseline.md 2> err.txt`（纯执行，无预期结果）<br>3. 记录退出码<br>4. 检查 `render_baseline.md` 的表头与列数<br>5. 检查场景矩阵的行数与「场景 × 尺寸 × 缩放」的组合数是否一致<br>6. 查看 `err.txt` |
+| 预期结果 | 3. 退出码为 0<br>4. 表头五列依次为 `scene`、`size (logical)`、`scale`、`device`、`ms/frame`（列间以竖线分隔）<br>5. 场景矩阵数据行为 117 行（13 个场景 × 3 档逻辑尺寸 × 3 档缩放）。矩阵之后基准**刻意追加**一段滚动读数与指引说明（见 `tools/bench/bench_render.cpp` 收尾输出），故文件总行数大于 119（实测 173 行）——判定只看矩阵数据行数与列数，不比对总行数<br>6. `err.txt` 为空（该基准的表格输出走 stdout） |
 
 ### 2.2 绘制开销的数量级关系
 
@@ -232,7 +233,7 @@
 
 ### 2.4 门槛分工
 
-#### TC-PERF-007 门槛分工明确且计数类已由自动化守护
+#### TC-PERF-007 门槛分工明确且声明与仓库现状一致
 
 | 项目 | 内容 |
 |:---|:---|
@@ -240,8 +241,8 @@
 | 测试目的 | 确认门槛体系的分工边界清晰，避免人工重复执行已自动化的部分 |
 | 前置条件 | `tools/check/perf_gates.json` 可读；`tests/unit/utest_scroll.cpp` 可读 |
 | 依赖用例 | TC-PERF-001 |
-| 操作步骤 | 1. 读取 `tools/check/perf_gates.json`，清点全部门槛条目及其 `counted` 字段取值（纯执行，无预期结果）<br>2. 清点其中时间类门槛（p99、最差帧、抖动、长任务）与计数类门槛（滚动计数类指标）各占几项<br>3. 读取该文件顶部的 `source` 与 `note` 字段<br>4. 在 `tests/unit/utest_scroll.cpp` 中查找滚动回归段（纯执行，无预期结果）<br>5. 核对计数类门槛是否确实由该测试守护 |
-| 预期结果 | 2. 共 8 项门槛；G-1 至 G-4 为时间类，G-5 至 G-8 为计数类<br>3. `source` 字段明确声明时间类门槛受机器负载影响、不进 CI、仅用于本地趋势对照；`note` 字段标明计数类已锁定在 CTest 的滚动回归段（需 `PROFILING=ON`）<br>5. `utest_scroll.cpp` 中存在滚动回归段并断言计数类指标，即计数类门槛**确已自动化**；人工只需覆盖时间类对照（TC-PERF-005）与数量级合理性（TC-PERF-002 至 TC-PERF-004），不重复执行计数类判定 |
+| 操作步骤 | 1. 读取 `tools/check/perf_gates.json`，清点全部门槛条目及其 `counted` 字段取值（纯执行，无预期结果）<br>2. 按指标口径给条目分类（滚动时间类、帧阶段类、绘制场景类、计数类），并清点 `counted` 为 true 与 false 各占几项<br>3. 读取该文件顶部的 `source` 与 `note` 字段，逐句核验其所述能否在仓库内查到对应实物（JSON 条目、测试代码）<br>4. 在 `tests/unit/utest_scroll.cpp` 中查找 `note` 所称的滚动回归段（纯执行，无预期结果）<br>5. 全仓检索 `G-5` 至 `G-8` 与 `scroll_regression`，核对计数类门槛是否真的由自动化守护 |
+| 预期结果 | 2. 门槛条目全为时间类：G-1 至 G-4 为滚动时间类、G-9 至 G-11 为帧阶段类、G-12 至 G-14 为绘制场景类；`counted` 为 true 的 7 项（G-1 至 G-4、G-12 至 G-14）、false 的 3 项（G-9 至 G-11，仅记录）；**不存在计数类门槛条目**<br>3. `source` 声明时间类受机器负载影响、不进 CI、仅用于本地趋势对照；`note` 的每一句须在仓库内可核验——**不得声称并不存在的自动化**<br>5. `note` 所称「计数类 G-5 至 G-8 已锁定在 CTest 的滚动回归段」须成立，即 JSON 内确有 G-5 至 G-8 条目**且**某测试确有滚动回归的计数断言，两者缺一即 FAIL。分工边界本身可澄清：人工侧只覆盖时间类对照（TC-PERF-005）与数量级合理性（TC-PERF-002 至 TC-PERF-004），不重复执行计数类判定 |
 
 ### 2.5 叠加层可见的空闲
 
@@ -260,11 +261,11 @@
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| TC-PERF-001 | | | | | | | |
-| TC-PERF-002 | | | | | | | |
-| TC-PERF-003 | | | | | | | |
-| TC-PERF-004 | | | | | | | |
-| TC-PERF-005 | | | | | | | |
-| TC-PERF-006 | | | | | | | |
-| TC-PERF-007 | | | | | | | |
-| TC-PERF-008 | | | | | | | |
+| TC-PERF-001 | 2026-09-25 | Qoder Agent | PASS | | rc=0；表头五列依次为 scene、size (logical)、scale、device、ms/frame；场景矩阵数据行恰 117 行；err.txt 为 0 字节；文件总行数 173（矩阵之后为基准刻意追加的滚动读数与指引段） | | 原预期 5 写作「117 数据行加表头与分隔行共 119 行」，按文件总行数判定，与 `bench_render.cpp` 收尾段冲突，已按代码回填该条为「只判矩阵行数与列数」；负载前后两次运行矩阵行数与列数均一致 |
+| TC-PERF-002 | 2026-09-25 | Qoder Agent | PASS | | 逻辑尺寸 1280x720 档：scale 1.0 时 tree_full_redraw 6.687 ms 对 tree_dirty_one_chip 0.034 ms，比值 196.7；scale 2.0 时 14.973 对 0.083，比值 180.4。两轮比值均在两个数量级附近，未出现「缩放一高脏区优势即消失」 | | 首轮带后台负载时读得 167.1 倍，量级不变；§2.2 的参照值随负载波动，按 §1.7 第 3 条逐轮登记 |
+| TC-PERF-003 | 2026-09-25 | Qoder Agent | PASS | | fill_alpha_full 由 scale 1.0 的 1.406 ms 增至 1.5 的 3.141 ms，比值 2.23，与物理像素数比值 2.25 相称；tree_full_redraw 由 6.687 增至 10.499，比值 1.57，略低于像素增长 | | 首轮在后台负载下读得 4.02 倍，恰贴该条「超过 4 倍即 FAIL」的线；按 §1.7 第 2 条在关负载后复跑得 2.23，故不以单次结果定论。文档内 1.566→3.790 的参照值同轮已随实测更新，未逐条改文 |
+| TC-PERF-004 | 2026-09-25 | Qoder Agent | PASS | | scale 1.0 档 fill_opaque_full 0.087 ms 对 fill_alpha_full 1.406 ms（16.2 倍，半透明逐像素混合属预期）；hit_test_x1000 0.026 ms，低于一次全屏不透明填充且为全表最快项之一 | | 命中测试不构成滚动瓶颈的结论与 TC-PERF-005 的滚动实测（p99 小于 1 ms）相互印证 |
+| TC-PERF-005 | 2026-09-25 | Qoder Agent | PASS | | 按 JSON 口径（scene 为 google_play、repeat 为 3）起三个独立 `bench_scroll --scene google_play --format csv --frames 300` 进程：p99 依次 0.994 / 0.899 / 0.951 ms（best-of 0.899，G-1 阈 16.67）、worst 依次 1.242 / 1.000 / 1.568 ms（最大 1.568，G-2 阈 33.3）、jitter 依次 0.080 / 0.067 / 0.087 ms（G-3 阈 2.0）、long_task_count 三轮均为 0（G-4 阈 3），三行 trustworthy 字段均为 1 | | 测量时机器负载：Windows 本机、会话锁屏、无编译与浏览器任务，时间类门槛仅本地趋势对照。随记：G-12 至 G-14 三项绘制场景门槛按同轮 bench_render 实测 1.693 / 3.001 / 3.34 ms，对 3.0 / 8.0 / 8.0 全通过，不属本用例步骤；lazy_list 与 grid 两个隔离场景 p99 约 39~44 ms，属大尺寸重场景，不在 G-1 的 google_play 口径内 |
+| TC-PERF-006 | 2026-09-25 | Qoder Agent | PASS | | idle 段输出 cpu 0.5%、render fps 0.3、wakeup/s 3.7 并自报 PASS 行；active 段 cpu 1.6%、fps 35.6 夹在 max_fps 60 之下 | | 与 `specification/08-tooling.md` §7.4.1 的无叠加层基线（0.5% / 0.3 fps / 4.3 wakes）同量级，唤醒次数由 4.3 降至 3.7 属负载波动 |
+| TC-PERF-007 | 2026-09-25 | Qoder Agent | FAIL | 5 | 步骤 2 与现状一致：JSON 共 10 项门槛且全为时间类（G-1 至 G-4 滚动、G-9 至 G-11 帧阶段且 counted 为 false、G-12 至 G-14 绘制场景），counted 为 true 的 7 项、false 的 3 项。步骤 5 不成立：JSON 内无 G-5 至 G-8 条目，`tests/unit/utest_scroll.cpp` 无 scroll_regression 段、也无 PROFILING 门控的计数断言（该文件用例为 set_offset、restore_key、序列化等纯行为断言），全仓检索 G-5 至 G-8 与 scroll_regression 仅命中三处复述该说法的散文（perf_gates.json 的 note、bench_render.cpp 第 276 行注释与第 288 行收尾输出、itest_perf_display_list.cpp 第 7 行注释） | | 缺陷性质是「声明失实」而非「门槛缺失」：计数类既无门槛条目也无 CTest 守护。`git log -S G-5` 显示该串自该文件引入起只出现在 note 里，从无对应条目。待门槛维护者二选一：补 scroll_regression 计数回归段，或改掉三处 note 与注释。本轮按人工用例不改代码的边界，只回写本文 §1.2、§1.8、§2.4 三处口径，上述三处原文未动 |
+| TC-PERF-008 | 2026-09-25 | Qoder Agent | PASS | | 以分离进程起 `build-inspector/demo_google_play.exe`（stdout 重定向，InspectorServer 在 127.0.0.1 端口 6280 起监听，stderr 恒为 2 行 INFO）。静止 20 秒内按 2 秒间隔采 10 次进程 CPU 时间：剔除含快照编码的 3 个窗口后，其余 7 窗占单核比依次为 3.09%、0.76%、0%、1.55%、0.77%、0%、1.55%，均值约 1.1%，含快照编码的窗最高 7.85%，远未接近忙轮询的约 100%。stdout 得 22 行 FPS 摘要：idle 相邻增量有 15 个恰为 2，其余 6 个为 7、14、16、13、25、26（轮播动画推进，按预期不判 FAIL）；22 行中 11 行带 (stale) 后缀，且这些行的 FPS 与上一行逐字相同（37.3512 连续三行、35.9163 连续三行、33.711 连续三行），FPS 未归零 | | 全程不依赖鼠标与前台（本机会话锁屏，`SendInput` 通道不可用），观测改由进程外 E2E 客户端取证：`tree` 读到 54 节点活树；`get 0/0/1` 读出 Scroll 的 offset 与 step；`text 0/0/0/2/1 aurora` 注入后 `get` 实读 value 为 aurora（真实状态变更）；`tap`、`scroll`、`snapshot` 端点均返回 ok。间隔 1.2 秒的两张 framebuffer 快照做像素差分：右上角 HUD 面板区（x 652 至 1092、y 8 至 158）变化 5929 像素，轮播以外的下半屏（y 285 至 760）变化恰 0 像素，即叠加层在按周期重绘而主内容未整树重绘，与 §7.4.1 的叠加层可见基线（stale 6/11、增量含 16 与 19）同形态。两项顺带观察：被 `tap` 的 FilterChip 在 descriptor 中 property_names 为空，其点击效果无法经 `get` 读出；`scroll 0/0/1 0 400` 返回 ok 但 offset 前后均 0.0——均属 E2E 输入通道的待查观察，不影响本用例判据 |
