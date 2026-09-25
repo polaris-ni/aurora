@@ -806,7 +806,17 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
   **不使用 `RUN_SERIAL` 属性**（TEST-R7 禁止）。
 - **no_interactive_desktop 拒绝语义**：锁定屏幕/安全桌面/服务会话等非交互桌面（Windows 侧
   `OpenInputDesktop` 打不开输入桌面）与无 X 显示（`DISPLAY` 未设）环境下，注入通道以明确原因
-  skip，不静默失败、不挂起、不误判通过（`os_input.h` 的 `interactive_desktop()`）。
+  skip，不静默失败、不挂起、不误判通过（`os_input.h` 的 `interactive_desktop()`）。实测该探测
+  覆盖不到全部锁屏形态，须与下条落点守卫两道门互补。
+- **SendInput 落点守卫**（`os_input.h` 的 `sendinput_landing_check`）：全局注入投给光标所在窗口，
+  故注入前先 best-effort 抬升目标（`BringWindowToTop` → `SetForegroundWindow`，仍被盖时升
+  `TOPMOST`），再用 `WindowFromPoint` 复核屏幕落点命中的**根窗口**仍是目标；不过即带原因拒绝，
+  用例侧记 skip 而非把环境竞争误判成管线故障。原因分两型：落点在目标矩形之内而被别的窗口盖住
+  （环境竞争，文案带盖住者的窗口类名）／落点落在目标矩形之外（坐标换算故障，须查库不得跳环境）。
+  实测本机锁屏态：`OpenInputDesktop` 仍放行（输入桌面名仍是 `Default`），而全屏
+  `LockScreenBackstopFrame` 盖住一切，`SendInput` 不报错而是被静默吞掉（旁路守卫的对照实验里
+  同坐标的 Checkbox 纹丝不动）——这类环境由落点守卫兜底；同坐标的 `post_click` 用例照常通过，
+  正是「坐标没错、投递没到」的判别对照。守卫的放行分支须在真实可交互桌面（未锁屏）上取证。
 - **窗口策略固定 `Normal`**：OS 输入投递到完全隐藏的窗口在 Win32 上语义不成立（SendInput 投给
   光标所在窗口，隐藏窗口不在命中路径）——本层用例不得改用 `Hidden` 档。
 - 断言形态与交互流层一致：注入后断言**控件状态**（共享 `State` / 语义快照）与**渲染像素**

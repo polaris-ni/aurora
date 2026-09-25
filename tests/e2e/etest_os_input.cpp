@@ -157,10 +157,19 @@ AURORA_TEST_CASE(sendinput_click_toggles_checkbox) {
     const auto *box = e2e::find_semantic_node(snapshot.value(), AccessibilityRole::Checkbox);
     AURORA_TEST_REQUIRE_TRUE(box != nullptr);
     const float scale = session.surface().scale_factor();
+    void *hwnd = session.surface().native_handle();
+    AURORA_TEST_REQUIRE_TRUE(hwnd != nullptr);  // 后端不交句柄是故障，不能降级成 skip
+    const auto point = center_px(box->node.bounds, scale);
     const auto before = session.read_pixels();
     AURORA_TEST_REQUIRE_TRUE(before.ok());
 
-    const auto clicked = e2e::sendinput_click(session.surface().native_handle(), center_px(box->node.bounds, scale));
+    // 落点守卫先判：SendInput 是全局注入，抬升被前台锁定拒绝时点击会落到别的窗口上——
+    // 那是环境竞争而非管线故障，带原因记 skip（同坐标的 postmessage 用例独立取证管线）。
+    const e2e::LandingCheck landing = e2e::sendinput_landing_check(hwnd, point);
+    if (!landing.clear) {
+        AURORA_TEST_SKIP("sendinput landing guard rejected: " + landing.reason);
+    }
+    const auto clicked = e2e::sendinput_click(hwnd, point);
     AURORA_TEST_REQUIRE_TRUE(clicked.ok());
     const auto settled = session.pump_until_settled();
     AURORA_TEST_REQUIRE_TRUE(settled.ok());

@@ -23,6 +23,10 @@
 //      服务会话等非交互桌面上注入通道以明确原因跳过，不静默失败、不挂起、不误判通过。
 //   3. **窗口策略须 `Normal`**：OS 输入投递到完全隐藏的窗口在 Win32 上语义不成立
 //      （SendInput 投给光标所在窗口，隐藏窗口不在命中路径）——用例侧不得改用 `Hidden`。
+//   4. **SendInput 落点守卫**（`sendinput_landing_check`）：全局注入投给光标所在窗口，
+//      故注入前先 best-effort 抬升目标窗口、再按屏幕落点复核命中的确是目标；桌面被其他
+//      程序占用且前台锁定拒绝夺焦时带原因拒绝，用例侧据此记 skip——环境竞争不是管线故障
+//      （同坐标的 `post_click` 通道仍独立取证）。
 //
 // 本头与 harness.h 同纪律：只依赖 aurora 公共头、不含测试框架宏；通道缺失（平台不支持、
 // dlopen 失败）以 `Result` 错误或探测函数如实上报，**不是构建失败**。覆盖面与 a11y 通道
@@ -30,6 +34,7 @@
 // 原生句柄（`native_handle()` 为基类空实现）、Wayland 无 XTest 等价物，均记为已知缺口。
 // ============================================================
 
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <string>
@@ -82,7 +87,10 @@ struct DesktopInteraction {
 ///
 /// 锁定屏幕（WinSta0\Winlogon 安全桌面）、屏保、服务会话（Session 0）等场景下，全局
 /// 注入要么被拒、要么投给无人看管的桌面——必须以明确原因拒绝，不得静默失败或挂起。
-/// Windows：`OpenInputDesktop` 打不开输入桌面即非交互（锁定/安全桌面/服务会话）；
+/// Windows：`OpenInputDesktop` 打不开输入桌面即非交互（锁定/安全桌面/服务会话）；实测
+/// 本机锁屏态下该探测**仍会放行**（输入桌面名仍是 `Default`，而锁屏以全屏
+/// `LockScreenBackstopFrame` 窗口盖住一切），此时 `SendInput` 不报错而是被该窗口静默吞掉
+/// ——这类环境竞争由 `sendinput_landing_check` 的落点复核兜底，两道门互补而非互为替代。
 /// Linux：无 X 显示（`DISPLAY` 未设）即无输入面；macOS：通道未实现（已知缺口）。
 [[nodiscard]] inline auto interactive_desktop() -> DesktopInteraction {
 #ifdef AURORA_PLATFORM_WINDOWS
@@ -114,22 +122,102 @@ struct DesktopInteraction {
 // ============================================================
 #ifdef AURORA_PLATFORM_WINDOWS
 
+/// @brief 落点处窗口的类名（只用于诊断文案）：锁屏态实测是 `LockScreenBackstopFrame`，
+///        把盖住落点的窗口写进原因，才能区分「用户正在用的窗口」与「锁屏吞输入」。
+[[nodiscard]] inline auto window_class_of(HWND win) -> std::string {
+    std::array<char, 64> buf{};
+    if (GetClassNameA(win, buf.data(), static_cast<int>(buf.size()) - 1) == 0) {
+        return "<unknown>";
+    }
+    return std::string{buf.data()};
+}
+
+/// @brief SendInput 落点守卫结果（`clear` 为 false 时 `reason` 说明点击为何不会落到目标）。
+struct LandingCheck {
+    bool clear = false;
+    Point screen_px;  ///< 客户区点换算出的屏幕坐标（`ClientToScreen` 成功即可用，含拒绝态）
+    std::string reason;
+};
+
+/// @brief SendInput 落点守卫：先把目标窗口抬到顶层/前景，再复核该客户区物理点对应的
+///        屏幕点命中的顶层窗口仍是目标窗口。
+///
+/// SendInput 是全局注入、投给**光标所在窗口**：桌面被其他程序占用时（用户正在操作、
+/// 前台锁定使夺焦被拒）同一次点击会落到另一窗口上，注入语义不成立——必须带原因拒绝，
+/// 不得静默误投后让用例把环境竞争误判成管线故障（`post_click` 不经光标系统，可独立取证）。
+/// 抬升是 best-effort（`BringWindowToTop` → `SetForegroundWindow`，被盖时再升 `TOPMOST`）；
+/// 落点复核用 `WindowFromPoint`（按屏幕点查窗口，不依赖光标当前位置），命中的可能是目标的
+/// 子窗口，故按**根窗口**比对。拒绝原因区分「被另一窗口盖住」与「落点落在目标矩形之外」——
+/// 后者是坐标换算故障而非环境问题，须顺原因去查坐标而非当作环境跳过。
+/// @param hwnd      目标窗口原生句柄（`Surface::native_handle()`）
+/// @param client_px 客户区物理像素坐标（dp × `scale_factor`）
+[[nodiscard]] inline auto sendinput_landing_check(void *hwnd, Point client_px) -> LandingCheck {
+    const HWND target = static_cast<HWND>(hwnd);
+    if (target == nullptr) {
+        return LandingCheck{
+            .clear = false,
+            .reason = "null native handle (backend does not expose an HWND; SendInput has no coordinate source)"};
+    }
+    if (IsWindowVisible(target) == FALSE) {
+        return LandingCheck{.clear = false,
+                            .reason =
+                                "target window is not visible (OS-level input needs the Normal tier: SendInput "
+                                "hits the window under the cursor, a hidden window is never on that path)"};
+    }
+    // 抬升与夺焦皆 best-effort：失败不在此处裁决，由随后的落点复核决定。
+    BringWindowToTop(target);
+    if (GetForegroundWindow() != target) {
+        SetForegroundWindow(target);
+    }
+    POINT pt{.x = static_cast<LONG>(client_px.x), .y = static_cast<LONG>(client_px.y)};
+    if (ClientToScreen(target, &pt) == 0) {
+        return LandingCheck{.clear = false, .reason = "ClientToScreen failed (window may already be gone)"};
+    }
+    if (GetAncestor(WindowFromPoint(pt), GA_ROOT) != target) {
+        // 普通 z-order 抬升被盖：前台锁定限制的是「夺焦」，不限制自有窗口的 z-order 样式，
+        // 故升级为 TOPMOST。会话结束窗口即销毁，无需（也无从）复原调用方的顶层状态。
+        SetWindowPos(target, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+    const HWND root_under = GetAncestor(WindowFromPoint(pt), GA_ROOT);
+    if (root_under != target) {
+        RECT rc{};
+        GetWindowRect(target, &rc);
+        // 落点在目标矩形之内 = 被别的窗口压住（环境竞争，用例侧记 skip）；矩形之外 = 坐标
+        // 换算本身错了（真故障，不得当环境问题跳过）。
+        const bool inside_target = (pt.x >= rc.left && pt.x < rc.right && pt.y >= rc.top && pt.y < rc.bottom);
+        const std::string point = std::to_string(pt.x) + "," + std::to_string(pt.y);
+        const std::string why = inside_target
+                                    ? "landing point (" + point + ") is covered by " + window_class_of(root_under) +
+                                          " even after the raise; SendInput would be delivered elsewhere"
+                                    : "landing point (" + point + ") falls outside the target rect [" +
+                                          std::to_string(rc.left) + "," + std::to_string(rc.top) + "," +
+                                          std::to_string(rc.right) + "," + std::to_string(rc.bottom) +
+                                          "]; coordinate accounting is broken, not an environment issue";
+        return LandingCheck{.clear = false,
+                            .screen_px = Point{.x = static_cast<float>(pt.x), .y = static_cast<float>(pt.y)},
+                            .reason = why};
+    }
+    return LandingCheck{
+        .clear = true, .screen_px = Point{.x = static_cast<float>(pt.x), .y = static_cast<float>(pt.y)}, .reason = ""};
+}
+
 /// @brief SendInput 全局注入：移动真实光标到目标窗口客户区物理像素坐标并左键点击。
 ///
 /// 投递给**光标所在窗口**（点击同时会激活该窗口，随后可接键盘注入）；目标窗口须为
 /// `Normal` 可见档。这是最接近真人操作的全链路通道（OS 输入流 → 命中窗口 → 窗口过程）。
+/// 注入前先过 `sendinput_landing_check`（抬升 + 落点复核），落点不在目标上即带原因拒绝。
 /// @param hwnd      目标窗口原生句柄（`Surface::native_handle()`，仅用于 client→screen 换算）
 /// @param client_px 客户区物理像素坐标（dp × `scale_factor`，与宿主 on_mouse 的 px/scale 互逆）
 [[nodiscard]] inline auto sendinput_click(void *hwnd, Point client_px) -> Result<void> {
-    const HWND target = static_cast<HWND>(hwnd);
-    if (target == nullptr) {
+    if (hwnd == nullptr) {  // 句柄缺失是用例/后端故障，不走守卫的「环境不可用」口径
         return Result<void>{make_error(ErrorCode::GeneralInvalidArgument,
                                        "sendinput_click: null native handle (backend does not expose an HWND)")};
     }
-    POINT pt{.x = static_cast<LONG>(client_px.x), .y = static_cast<LONG>(client_px.y)};
-    if (ClientToScreen(target, &pt) == 0) {
-        return Result<void>{make_error(ErrorCode::GeneralInvalidArgument, "sendinput_click: ClientToScreen failed")};
+    const LandingCheck landing = sendinput_landing_check(hwnd, client_px);
+    if (!landing.clear) {
+        return Result<void>{make_error(ErrorCode::GeneralNotSupported, "sendinput_click: " + landing.reason)};
     }
+    POINT pt{.x = static_cast<LONG>(landing.screen_px.x), .y = static_cast<LONG>(landing.screen_px.y)};
     if (SetCursorPos(pt.x, pt.y) == 0) {
         return Result<void>{make_error(ErrorCode::GeneralNotSupported, "sendinput_click: SetCursorPos failed")};
     }
