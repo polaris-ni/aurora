@@ -209,7 +209,7 @@ Column#root { bounds:[0,0,640,480]; visible:true; listeners:[on_click] }
 |:---|:---|:---|
 | 节点查询 | `query(type, root)` / `get_state(path, root)` / `find_node(root, path)` / `find_widget(root, path)` / `widget_info(w)` | 按类型名检索、按路径取状态片段、按索引路径定位节点（`find_node` 返回 `Node` 副本、只走 `child_nodes()`；`find_widget` 返回裸指针、走统一遍历，可跨越虚拟化容器，两条路径的取舍见 §3）、Widget 完整信息 |
 | 属性读写 | `get_prop(w)` / `get_prop_value(w, key)` / `set_prop(w, key, val)` / `apply_patch(root, patch)` | 单属性回写返回 `Result<void>`；`apply_patch` 把 JSON Patch 逐条经 `set_prop` 应用到树 |
-| 交互模拟 | `simulate_click(w)` / `simulate_scroll(w, dx, dy)` / `simulate_text_input(w, text)` | 合成事件经 `EventDispatcher` 走真实命中测试 + 冒泡派发；派发根与坐标原点均为 `w` 自身、指针取 `w` 中心，故不依赖控件在树中的绝对位置（无需先绘制，但目标须已布局——未布局时尺寸为零、中心退化为自身原点）。目标不可命中时返回 `GeneralNotSupported` 且不派发、不改状态 |
+| 交互模拟 | `simulate_click(w)` / `simulate_drag(w, dx, dy)` / `simulate_scroll(w, dx, dy)` / `simulate_text_input(w, text)` | 合成事件经 `EventDispatcher` 走真实命中测试 + 冒泡派发；派发根与坐标原点均为 `w` 自身、指针取 `w` 中心，故不依赖控件在树中的绝对位置（无需先绘制，但目标须已布局——未布局时尺寸为零、中心退化为自身原点）。`drag` 派发 Press（中心）→ Move（中心+delta）→ Release（终点）。目标不可命中时返回 `GeneralNotSupported` 且不派发、不改状态 |
 | 组件发现 | `components()` / `component_schema(name)` | 已注册组件 schema 列表 / 单组件 schema |
 | 代码生成 | `to_code(root)` | UI 树 → 源码（转发 §2.5） |
 | 验证 | `validate(root) -> std::vector<Diagnostic>` | 整树验证（`inspector_api.h`） |
@@ -269,7 +269,8 @@ server.stop();        // 停止并 join 工作线程
 | GET | `/api/components` | 全部已注册组件 schema 列表 |
 | GET | `/api/yaml` | 当前 widget 树的 YAML 格式字符串 |
 | POST | `/api/to_code` | UI 树 → C++ 代码。请求体可含 `style` 参数：`0`=Fluent、`1`=StepByStep、`2`=DesignatedInit；`style` 存在但非整数返回 400，越界整数回退 Fluent |
-| POST | `/api/input/{click\|scroll\|text}` | 交互模拟：以 `path` 命中的控件为派发根与坐标原点（指针取该控件中心）合成事件，经 `EventDispatcher` 走真实命中测试 + 冒泡派发。请求体须为对象且 `path` 为字符串（空串=树根）；`scroll` 另取数值 `dx`/`dy`（缺省 0），`text` 另取字符串 `text`。经主线程 marshal 执行，成功返回 `{status:"ok", action, widget_path}`；路径不存在 404、目标存在但不可派发 400、字段类型不符 400、方法非 POST 405 |
+| POST | `/api/input/{click\|scroll\|drag\|text}` | 交互模拟：以 `path` 命中的控件为派发根与坐标原点（指针取该控件中心）合成事件，经 `EventDispatcher` 走真实命中测试 + 冒泡派发。请求体须为对象且 `path` 为字符串（空串=树根）；`scroll`/`drag` 另取数值 `dx`/`dy`（缺省 0；drag 为目标中心起算的拖拽位移），`text` 另取字符串 `text`。经主线程 marshal 执行，成功返回 `{status:"ok", action, widget_path}`；路径不存在 404、目标存在但不可派发 400、字段类型不符 400、方法非 POST 405 |
+| GET | `/api/find` | 按 key/type/text 定位控件：`?key=<Node::set_id 标识>&type=<type_name>&text=<文本>`，至少给一个参数（否则 400），多参数 AND。返回 `{matches:[{path, type, id}], count}`——`path` 为索引路径（根为空串），与 `/api/widget/{path}`、`/api/input/*` 同口径，可直接喂给寻址端点；`text` 比对文本类属性启发式（`content\|text\|label\|value\|hint\|placeholder`，与 `TestController::find_by_text` 同源）。遍历走 `child_nodes()` 原存储 const 引用（不构造 `Node` 副本，活树安全）；虚拟化容器（不覆写 `child_nodes()`）的子树不可见（与 `find_node_by_path` 同限：宁可少报、不可错报）。零命中回 200 + 空 `matches`（非错误，由调用方裁决）；方法非 GET 回 405 |
 
 > `/api/input/*` 为「目标式」语义：落点取目标控件中心，故目标须已布局（未布局时尺寸为零、中心退化为自身原点）。失败（路径不存在 / 不可派发 / 参数不符）一律在派发前返回，**不改变任何控件状态**。滚动只派发事件，偏移量不在响应里（控件虽各自序列化 `offset` / `scroll_offset`，但响应体不回传），需要读回偏移请读控件属性或写 C++ 测试。
 
@@ -307,10 +308,49 @@ server.stop();        // 停止并 join 工作线程
   主机**恒被 pin 到回环**：客户端不做 DNS，只认 `127.0.0.1` / `localhost` / `::1`，且一律连到 `127.0.0.1`。
 - HTTP 客户端只落在 `tools/servers/inspector_client.h`（**不进 `include/` / `src/`**），故不改变核心的零依赖承诺。
 - 前提：应用需自己 opt-in 启动 `InspectorServer`（CMake 开关 `AURORA_BUILD_INSPECTOR_SERVER`）；
-  未启动时 `live_*` 返回传输层错误（连不上）而非空结果。
+  未启动时 `live_*` 返回传输层错误（连不上）而非空结果。`demo_common.h` 的 `run_demo` 已内置
+  该 opt-in（见 §5.5）。
 
 `InspectorServer::start(0)` 可由系统分配临时端口（`port()` 读回实际值），但 MCP 侧不做端口扫描
 —— 需要临时端口时请自行经 `session` 入参或环境变量告知。
+
+### 5.5 进程外 E2E 客户端（aurora_e2e_client）
+
+CI 步骤、探针与人工终端共用的最小驱动入口：经本机 `InspectorServer` 的 §5.1 REST 面查树、
+定位、注入输入、抓帧。目标 `aurora_e2e_client`（`tools/e2e/e2e_client.cpp`）为
+**EXCLUDE_FROM_ALL**（按需 `cmake --build build --target aurora_e2e_client`），Emscripten 下不定义
+（浏览器运行时无 BSD socket 语义，与 §8.2 内核同口径）。
+
+三层分工（均不进 `include/` / `src/`，不改核心零依赖承诺）：
+
+| 层 | 位置 | 职责 |
+|:---|:---|:---|
+| 裸传输 | `tools/servers/inspector_client.h` | 一次 HTTP 请求（回环 pin、超时、4MiB 上限），§5.4 共用 |
+| 能力层 | `tools/include/e2e/inspector_driver.h` | header-only：按端点命名的调用 + 失败二分（见下）；**不解析 JSON**，body 原样上交 |
+| CLI | `tools/e2e/e2e_client.cpp` | argv 解析、输出与退出码（0 成功 / 1 请求失败 / 2 用法错误） |
+
+CLI 命令：`tree [window]`、`find key=<k> type=<t> text=<x>`（k=v 任意组合，AND）、
+`get <path>`、`tap <path>`、`drag <path> <dx> <dy>`、`scroll <path> <dx> <dy>`、
+`text <path> <string>`、`snapshot [fb|win] [-o <file.png>]`。树查询类成功时响应 JSON 原样透传
+stdout（`AURORA_LOG_RAW`，无前缀）；失败行以 `[transport-error]` / `[http-error]` / `[usage]`
+为前缀，供脚本按行分类。
+
+**失败二分**（§5.1 语义错误与「服务不在」的可区分判据）：`CallResult::Kind::TransportError`
+表示未获得 HTTP 响应（connect 拒绝 / 超时 / 非回环拒单），`status` 恒 0、无 body——调用方
+绝不该把它解释成空树；`Kind::HttpError` 表示服务端回了 4xx/5xx，详情在 body JSON 的
+`error` 字段。
+
+**端口解析（客户端侧约定）**：`--port` 入参 > 环境变量 `AURORA_INSPECTOR_PORT` > 默认 `6280`；
+环境变量值须全串十进制 1..65535，脏值按未声明回落默认。`InspectorServer` 本身不读环境变量，
+解析发生在客户端——外部驱动者不必与被测应用共享端口常量。参数字符串按原始 UTF-8 字节直通
+（服务端 query 解析无 URL 解码），含 `&` / `=` / 空格的定位值在当前协议下不可用。
+
+**demo 侧 opt-in**（驱动任意 demo 的路径）：`AURORA_BUILD_INSPECTOR_SERVER=ON` 时**全部** demo
+目标链接 `aurora_inspector_server`（构建期宏统一注入——`run_demo` 为所有 demo 共用启动器，
+只给个别 demo 链接会让共享头在不同 demo 下编译出不同形态）；运行期设置 `AURORA_INSPECTOR_PORT`
+即随 demo 启动 `InspectorServer`（root getter 捕 demo 树、surface getter 捕窗口 Surface），
+未设置不启动、demo 默认安静。注意 demo 目标是 EXCLUDE_FROM_ALL：驱动某个 demo 前须先按名
+或经聚合目标 `demos` 构建它。
 
 ---
 
@@ -505,6 +545,8 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 
 各探针的验收范围、逐项期望与退出码语义写在对应源文件头注释内（`tools/verify/*.cpp|.mm`）；真机验收须在**对应平台**手工执行。
 
+**探针与 E2E 驱动内核（§8.2）的分工**：探针手写的「建窗 / 帧推进 / 像素读回」与内核能力**行为重叠**时，建窗升级为经内核 `e2e::open`（统一 RAII 与失败翻译），探针只保留平台专属判据、断言与退出码；手写段本身即判据本体的保持原样。已升级：`win32_wgpu` / `x11_wgpu`（建窗经 `e2e::open(Backend::Wgpu)`，`WindowSpec` 显式 `Normal` 可见性保持探针窗口可见；WgpuRhi 离屏直驱段是探针核心目的——验证 wgpu 光栅化路径本身，且其读回基底是 RHI 离屏 FBO 而非内核的 `Surface::data()`，保留手写）、`glfw_gpu_features`（建窗经 `open(Backend::Glfw, gpu=true)`；`max_fps=0` 不再显式设置——该字段只作用于 `Application::run` 帧预算，不影响直驱 `present_root` 循环）、`win32_cursor`（Win32/D3D11/Wgpu 三路宿主建窗统一经内核，设备不可用判定由 `open` 失败翻译 + 具体类型 `is_available()` 承担）。保持原样（逐项裁定）：`wayland_wgpu`——内核 `WindowSpec` 无法表达「`WaylandOptions` + `RendererPreference::GpuWgpu` 直达」宿主路由组合；`glfw_cursor`——窗口是裸 `GLFWwindow`，建窗方式与映射镜像同为判据本体（验证 GLFW 环境能力而非 aurora 接线）；`win32_ime`——走正规 `Application` 路径（真实消息泵与焦点序是判据前提），内核 `Session` 无 `Application` 语义；`win32_ua`——建窗带 `RendererPreference::GpuD3D11` 路由，内核无法表达；`wasm_*`——内核 `Backend` 枚举无 Wasm 后端；`wasapi_audio` / `alsa_audio` / `wasm_audio` 为纯音频设备探针、`macos_cursor` 无 aurora 建窗段，天然无重叠；`x11_cursor` / `wayland_cursor` / `x11_ime` / `wayland_ime` / `atspi` 的手写建窗仅为具体类型 `Surface` 的 2–3 行构造（探针自带的不可用判定与降级语义与之等价，平台判据——XFIXES 读回 / 提交事实读回 / IME 状态机 / DBus 协议面——才是本体），经内核建窗后仍须向下转型回具体类型，无行为收益。
+
 **由后台进程执行时的物理前提**（不是软件缺陷，探针按退出码如实申报而非假通过）：凡判据落在「屏幕上真实显示的指针/光标」上的探针（`aurora_verify_win32_cursor`，以及各探针的 `--interactive` 人工段），要求**已解锁且处于活动状态的交互桌面**——探针会把被测窗口置顶（`HWND_TOPMOST`）并依次试摆「屏幕中心 → 四角内侧」共 5 个落点（同处置顶带内他人窗口可长期压住中心点，`SetForegroundWindow` 又受前台锁约束），多次不中才以退出码 3 报出「期望落点 / 实际指针位置 / 该点上的窗口类名 / 试过的落点数」现场证据后终止（远程桌面会话隔离、锁屏时的 `LockScreenBackstopFrame` 同理）。纯逻辑/句柄类判据（如 GLFW 探针自动段：`glfwCreateStandardCursor` 句柄互异计数）不受此约束，可在任意会话内跑通。
 
 **读回屏幕光标前必须真正派发平台事件**（探针侧时序约束，非库缺陷）：`Surface::wait_events` 只等待、不派发（Win32 侧派发在 `poll_platform_events` 的 `PeekMessage`/`DispatchMessage`），而 `GetCursorInfo` 读回的共享光标随 WM_SETCURSOR 走完 wndproc 才刷新——只 wait 不 poll 会让读回恒停在上一手的值，本线程 `GetCursor()` 却逐形状命中，极易误判成「本会话读不回」。故 Win32 探针每形状按时序「1px 位移 → 派发 → `set_cursor` → 立刻读回（不再派发，避免 DefWindowProc 用窗口类光标覆盖）」执行；实测（2026-09-20，Windows 11 + MinGW 构建）`Win32Surface` / `D3D11Surface` / `WgpuWin32Surface` 三路各 11/11 读回命中且两两互异。
@@ -599,6 +641,25 @@ CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI �
 `AURORA_ENABLE_DEBUG=ON` 或 Debug 配置构建（部分后端读回受该宏门控，宏未注入时读回一律按
 「能力不可用」记账）；期望集内环境不可用即 FAIL_FATAL 红灯，因此期望集声明的是「该环境必须
 可跑」的最小集，宁可留空也不声明未实测的后端。
+
+**CI 作业口径**：期望集在 [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) 中以
+矩阵字段 `e2e-expect` 逐作业声明并注入 `AURORA_E2E_EXPECT`，判据是「该作业**实际编译**出的真实
+后端 ∩ 该环境**实测可用**」的交集，逐作业如下：
+
+| 作业（ci.yml） | 后端编译面 | 期望集 | 理由 |
+|:---|:---|:---|:---|
+| core 的 linux ×3 与 windows Release ×2（`windows-msvc` / `windows-mingw`） | 纯 Headless（X11/GLFW/D3D11 等默认 OFF） | 空 | 无真实后端编译进来，E2E 全部 skipped by policy（编译与注册面由内核自测覆盖）；空集是声明的事实而非疏漏 |
+| core 的 windows Debug ×2（`windows-msvc-debug` / `windows-llvm`） | Win32 默认编译，Debug 下 DEBUG 宏生效 | `win32` | Win32 读回受 `AURORA_ENABLE_DEBUG` 门控——Release 型作业（DEBUG=AUTO→OFF）若声明期望必误红，win32 的 E2E 运行覆盖由 Debug 型作业承担 |
+| core / backends 的 macos | MacOS/GLFW 编译 | 空 | 无人值守会话无窗口系统（探针实测），全部 skipped by policy |
+| backends `linux-x11-wayland-glfw` | X11+GLFW+Wayland + 显式 `-DAURORA_ENABLE_DEBUG=ON` | `x11,glfw` | Release 作业须显式 DEBUG=ON 使 X11 读回可用；xvfb + llvmpipe 实测可建 GLX 3.3 上下文（GLFW 可跑）；Wayland 无 compositor 不期望 |
+| backends `windows-d3d11-glfw` | D3D11+GLFW + 显式 DEBUG=ON（Win32 随平台默认编译） | `win32,d3d11` | DEBUG=ON 使 Win32 读回可用；D3D11 读回无条件可用；GLFW 在该 runner 无 GL 环境实测不可建窗，不期望 |
+| toggles `headless-off` | `-DAURORA_BACKEND_HEADLESS=OFF -DAURORA_BUILD_TESTS=OFF` | —（跳过 Test 步骤） | 测试套件依赖 HeadlessSurface（内核自测基底与读回回退路径），该配置的验收口径 = 库与工具**构建绿**（bench / 工厂降级路径均有 `#ifdef` 门控回退） |
+| asan / coverage | 纯 Headless 默认面 | —（ctest 带 `-LE e2e` 排除） | 无真实后端可跑、全 skip 无信息量，排除以省 ctest 时间；coverage 聚合目标内置的 ctest 同口径排除 |
+
+另三条边界结论：wgpu（`AURORA_BACKEND_GPU_WGPU`，需 Rust 工具链与真机 GPU）不进任何 CI 默认作业，
+由真机探针（§7.5）与本地会话 opt-in；wasm 作业的 E2E 在 CMake 层即排除（`AURORA_BUILD_E2E` 在
+Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_package` / 静态链接 / feature 宏导出
+一致性，不构建 tests，故无 E2E 面。
 
 场景库与组件 demo **同源**：被 E2E 引用的组件在 `examples/demos/scenes/` 下建 header-only 场景头
 （`scene_<组件>.h`，inline 构建函数返回根 `Node`），对应 `demo_<组件>.cpp` 退化为「薄 `main()` +

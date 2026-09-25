@@ -5,7 +5,8 @@
 // 驱动（WSLg vGPU / 原生 Vulkan）上的接线——无头 CI 无法证明的部分。
 //
 // 自动段（无需人工）：
-//   1. 宿主装配：create_window(WgpuOptions) 真实开窗；surface 动态类型 WgpuX11Surface；
+//   1. 宿主装配：建窗经 E2E 内核 `e2e::open(Backend::Wgpu)` 真实开窗（RAII 会话持有）；
+//      surface 动态类型 WgpuX11Surface；
 //      gpu_backend() 非空且 name == "gpu-wgpu"；is_available() / gpu_active() 初值为真。
 //   2. 能力与契约：capabilities().gpu == true、native_surface_import == false（v29 C API
 //      口径：仅契约位，不兑现）；import_native_surface 空帧恒返回 0（warn-once，不崩溃）。
@@ -37,6 +38,7 @@
 
 #include "aurora/aurora.h"
 #include "aurora/window/native_surfaces.h"
+#include "e2e/harness.h"  // E2E 驱动内核：建窗统一经 e2e::open（RAII + 失败翻译），本探针只留平台判据
 #include "verify_args.h"
 
 #ifdef AURORA_BACKEND_GPU_WGPU
@@ -152,16 +154,22 @@ auto main(int argc, char **argv) -> int {
         return 2;
     }
 
-    // ---- 宿主装配：真实窗口 + gpu-wgpu 帧调度挂点 ----
-    aurora::WgpuOptions opts;
-    opts.size = aurora::Size{.width = 560.0F, .height = 420.0F};
-    opts.title = "aurora-verify-x11-wgpu";
-    auto created = aurora::create_window(opts);
-    if (!created.ok()) {
-        AURORA_LOG_ERROR("verify", "create_window(Wgpu) failed (X 连接失败 / 无 adapter / device init)");
+    // ---- 宿主装配：真实窗口 + gpu-wgpu 帧调度挂点（建窗经 E2E 内核 e2e::open）----
+    // WgpuOptions 的宿主按 Win32 → X11 → Wayland 编译期择一，本探针注册条件含
+    // AURORA_BACKEND_X11，故 X11 宿主可靠成立；visibility 显式 Normal 保持既有可见行为。
+    aurora::e2e::WindowSpec spec;
+    spec.backend = aurora::e2e::Backend::Wgpu;
+    spec.width = 560;
+    spec.height = 420;
+    spec.title = "aurora-verify-x11-wgpu";
+    spec.visibility = aurora::WindowVisibility::Normal;
+    auto session = aurora::e2e::open(spec);
+    if (!session.ok()) {
+        AURORA_LOG_ERROR("verify",
+                         "open(Wgpu) failed: " + session.reason() + " (X 连接失败 / 无 adapter / device init)");
         return 2;
     }
-    auto &win = *created.value();
+    auto &win = session.window();
 
     auto *ws = dynamic_cast<aurora::WgpuX11Surface *>(&win.surface());
     check(ws != nullptr, "surface 动态类型为 WgpuX11Surface");

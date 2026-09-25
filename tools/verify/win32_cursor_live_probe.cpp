@@ -102,7 +102,9 @@
 #include <string>
 #include <string_view>
 
+#include "aurora/widget/containers.h"  // Column（内核会话的最小真实树占位）
 #include "aurora/window/cursor_map.h"
+#include "e2e/harness.h"  // E2E 驱动内核：三路宿主建窗统一经 e2e::open（RAII + 失败翻译），本探针只留平台判据
 #include "verify_args.h"
 #include "verify_print.h"
 
@@ -473,19 +475,45 @@ auto main(int argc, char **argv) -> int {
 
 #ifdef AURORA_BACKEND_WIN32
     {
+        // 建窗经 E2E 内核 e2e::open：Win32Options 与旧手写 Win32Surface(size,title,style) 等价
+        // （WindowOptions::style 默认即 WindowStyleOptions{}）；visibility 显式 Normal 保持既有
+        // 可见行为（内核 E2E 用例默认 Hidden，而本探针的光标读回需要真实显示的窗口）。
         const char *title = "aurora-verify-i1-cursor-gdi";
-        aurora::Win32Surface surface(360, 240, title, aurora::WindowStyleOptions{});
-        worse_of(run_sweep(surface, "Win32Surface(GDI)", title, interactive));
+        aurora::e2e::WindowSpec spec;
+        spec.backend = aurora::e2e::Backend::Win32;
+        spec.width = 360;
+        spec.height = 240;
+        spec.title = title;
+        spec.visibility = aurora::WindowVisibility::Normal;
+        auto session = aurora::e2e::open(spec);
+        if (!session.ok()) {
+            AURORA_LOG_WARN("verify", "Win32Surface(GDI): open failed: " + session.reason());
+        } else {
+            // 最小真实控件树占位：内核会话的事件派发要求已挂载且根节点带 widget（空 Node{} 的
+            // widget 指针为空，命中测试会解引用空指针）——本探针只泵平台事件不渲染，
+            // 空列布局零尺寸、指针落点不命中，派发即无操作。
+            session.mount(aurora::Node{aurora::Column{}});
+            worse_of(run_sweep(session.surface(), "Win32Surface(GDI)", title, interactive));
+        }
     }
 #endif
 #ifdef AURORA_BACKEND_D3D11
     {
         const char *title = "aurora-verify-i1-cursor-d3d11";
-        aurora::D3D11Surface surface(360, 240, title, aurora::WindowStyleOptions{});
-        if (!surface.is_available()) {
+        aurora::e2e::WindowSpec spec;
+        spec.backend = aurora::e2e::Backend::D3D11;
+        spec.width = 360;
+        spec.height = 240;
+        spec.title = title;
+        spec.visibility = aurora::WindowVisibility::Normal;
+        auto session = aurora::e2e::open(spec);
+        if (!session.ok()) {
+            AURORA_LOG_WARN("verify", "D3D11Surface(GPU): open failed: " + session.reason());
+        } else if (!static_cast<aurora::D3D11Surface &>(session.surface()).is_available()) {
             AURORA_LOG_WARN("verify", "D3D11Surface device unavailable (no adapter); skipping this path");
         } else {
-            worse_of(run_sweep(surface, "D3D11Surface(GPU)", title, interactive));
+            session.mount(aurora::Node{aurora::Column{}});  // 最小真实树占位，理由同 GDI 路
+            worse_of(run_sweep(session.surface(), "D3D11Surface(GPU)", title, interactive));
         }
     }
 #endif
@@ -495,12 +523,21 @@ auto main(int argc, char **argv) -> int {
         // WgpuWin32Surface 的 Win32 宿主路：光标下发与 GDI 走同一份 `detail::set_win32_cursor`，
         // 但它是**独立调用点**（`WgpuWin32Surface::set_cursor`），故单独跑一遍而非由前两路代证。
         const char *title = "aurora-verify-i1-cursor-wgpu";
-        aurora::WgpuWin32Surface surface(360, 240, title, aurora::WindowStyleOptions{});
-        if (!surface.is_available()) {
+        aurora::e2e::WindowSpec spec;
+        spec.backend = aurora::e2e::Backend::Wgpu;
+        spec.width = 360;
+        spec.height = 240;
+        spec.title = title;
+        spec.visibility = aurora::WindowVisibility::Normal;
+        auto session = aurora::e2e::open(spec);
+        if (!session.ok()) {
+            AURORA_LOG_WARN("verify", "WgpuWin32Surface(GPU): open failed: " + session.reason());
+        } else if (!static_cast<aurora::WgpuWin32Surface &>(session.surface()).is_available()) {
             AURORA_LOG_WARN("verify",
                             "WgpuWin32Surface device unavailable (no adapter / wgpu lib); skipping this path");
         } else {
-            worse_of(run_sweep(surface, "WgpuWin32Surface(GPU)", title, interactive));
+            session.mount(aurora::Node{aurora::Column{}});  // 最小真实树占位，理由同 GDI 路
+            worse_of(run_sweep(session.surface(), "WgpuWin32Surface(GPU)", title, interactive));
         }
     }
 #endif

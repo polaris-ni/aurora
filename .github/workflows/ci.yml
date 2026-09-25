@@ -83,31 +83,42 @@ jobs:
             build-type: Release
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
             build-demos: true
+            # E2E 期望集 = 作业实际编译的真实后端（见 08-tooling §8.2「CI 作业口径」）。
+            # core 的 linux 默认后端面是纯 Headless（X11/GLFW 默认 OFF），无真实后端可期望。
+            e2e-expect: ""
           - name: linux-gcc-debug
             os: ubuntu-latest
             build-type: Debug
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+            e2e-expect: ""
           # linux 原生 clang：弥补 gcc 单编译器盲区（模板实例化 / 两阶段名字查找 / ODR 诊断更严格）
           - name: linux-clang-release
             os: ubuntu-latest
             build-type: Release
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
             apt-pkgs: clang
+            e2e-expect: ""
           - name: windows-msvc
             os: windows-latest
             build-type: Release
             cmake-flags: "" # 默认 Visual Studio 生成器（多配置）
+            # Release 下 AURORA_ENABLE_DEBUG=AUTO→OFF，Win32 读回被门控（期望必误红）；
+            # win32 的 E2E 运行覆盖由 Debug 型作业（windows-msvc-debug / windows-llvm）承担
+            e2e-expect: ""
           # MSVC 的 AUTO=ON 分支：Debug 下 DEBUG/PROFILING 宏生效，类布局与 Release 不同，
           # 须独立构建并跑全量 ctest（此前 MSVC 仅覆盖 Release）
           - name: windows-msvc-debug
             os: windows-latest
             build-type: Debug
             cmake-flags: "" # 默认 Visual Studio 生成器（多配置）
+            # Debug 下 DEBUG 宏生效，Win32 读回可用（Hidden 档真实建窗 + 像素读回）
+            e2e-expect: "win32"
           - name: windows-mingw
             os: windows-latest
             build-type: Release
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
             mingw: true
+            e2e-expect: "" # Release 同 windows-msvc；win32 运行覆盖在 Debug 型作业
           # clang-cl（x86_64-pc-windows-msvc，MSVC 运行时 + lld-link）：与 msvc/mingw 并列的
           # Windows 第三编译器；覆盖 SIMD target 属性、__builtin_cpu_supports 回退 __cpuid、
           # 静态链接门禁从「Clang+WIN32」收窄为 MINGW。Debug 下 AUTO 宏生效（类布局与 Release 不同）。
@@ -116,10 +127,13 @@ jobs:
             build-type: Debug
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DAURORA_ENABLE_LLD=ON
             build-demos: true
+            e2e-expect: "win32"
           - name: macos-clang
             os: macos-latest
             build-type: Release
             cmake-flags: -G Ninja
+            # 无人值守会话无窗口系统（探针实测，见 08-tooling §8.2），E2E 全部 skipped by policy
+            e2e-expect: ""
 
     steps:
       - uses: actions/checkout@v7
@@ -179,6 +193,8 @@ jobs:
           # cp1252 console codepage that cannot encode CJK; several tools/check/*.py scripts print
           # Chinese. PEP 540 UTF-8 mode forces UTF-8 stdio so they don't raise UnicodeEncodeError.
           PYTHONUTF8: 1
+          # E2E 期望集 = 作业实际编译的真实后端（矩阵字段逐作业声明，见 08-tooling §8.2）
+          AURORA_E2E_EXPECT: ${{ matrix.e2e-expect }}
         # bash 显式指定（Windows 默认 pwsh）：统一用 nproc 取核数并行（本地实测 9 倍提速）。
         shell: bash
         run: |
@@ -202,13 +218,22 @@ jobs:
           - name: linux-x11-wayland-glfw
             os: ubuntu-latest
             apt-deps: libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev
-            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON
+            # Release 作业默认 DEBUG=AUTO→OFF，X11 读回被门控——显式 ON 使 etest_x11 真实运行
+            # （期望集口径见 08-tooling §8.2「CI 作业口径」；Wayland 无人值守无合成器，不期望）。
+            # GLFW 期望 xvfb + mesa(llvmpipe) 提供 GLX 3.3 兼容上下文。
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_DEBUG=ON
+            e2e-expect: "x11,glfw"
           - name: windows-d3d11-glfw
             os: windows-latest
-            cmake-flags: -DAURORA_BACKEND_D3D11=ON -DAURORA_BACKEND_GLFW=ON
+            # 同上：DEBUG=ON 使 Win32 读回可用（D3D11 读回无条件可用）；GLFW 在无 GL 环境的
+            # runner 上建窗失败（Task 0 实测），不期望
+            cmake-flags: -DAURORA_BACKEND_D3D11=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_DEBUG=ON
+            e2e-expect: "win32,d3d11"
           - name: macos-appkit-glfw
             os: macos-latest
             cmake-flags: -G Ninja -DAURORA_BACKEND_MACOS=ON -DAURORA_BACKEND_GLFW=ON
+            # 无人值守会话无窗口系统（探针实测，见 08-tooling §8.2），E2E 全部 skipped by policy
+            e2e-expect: ""
 
     steps:
       - uses: actions/checkout@v7
@@ -242,6 +267,8 @@ jobs:
       - name: Test
         env:
           PYTHONUTF8: 1
+          # E2E 期望集 = 作业实际编译的真实后端（矩阵字段逐作业声明，见 08-tooling §8.2）
+          AURORA_E2E_EXPECT: ${{ matrix.e2e-expect }}
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
@@ -265,18 +292,29 @@ jobs:
           # 架构级优化三开关全关：layout 缓存 / 遮挡剔除 / Display List 退化路径
           - name: optimizations-off
             cmake-flags: -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_OCCLUSION_CULLING=OFF -DAURORA_ENABLE_DISPLAY_LIST=OFF
+            run-tests: true
           # SIMD 关：仅编译标量黄金路径（utest_simd_parity 比对基准）
           - name: simd-off
             cmake-flags: -DAURORA_ENABLE_SIMD=OFF
+            run-tests: true
           # 图像编解码（libjpeg-turbo / libwebp / wuffs）+ Inspector HTTP 服务器
           - name: codecs-inspector-on
             cmake-flags: -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON
+            run-tests: true
           # 插桩强制开（TRACING 隐含 PROFILING）：AURORA_PROFILE_* 宏活跃分支 + DEBUG=ON
           - name: profiling-tracing-debug-on
             cmake-flags: -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON -DAURORA_ENABLE_DEBUG=ON
+            run-tests: true
           # DEBUG 强制关：调试 API 调用点必须可编译、运行返回 disabled
           - name: debug-off
             cmake-flags: -DAURORA_ENABLE_DEBUG=OFF
+            run-tests: true
+          # HEADLESS 关闭：库与工具（bench/工厂降级路径均有 #ifdef 门控回退）不依赖
+          # HeadlessSurface 仍可构建。测试套件依赖 HeadlessSurface（E2E harness 基底），
+          # 该配置不支持跑测试 → AURORA_BUILD_TESTS=OFF 且跳过 Test 步骤，验收口径 = 构建绿
+          - name: headless-off
+            cmake-flags: -DAURORA_BACKEND_HEADLESS=OFF -DAURORA_BUILD_TESTS=OFF
+            run-tests: false
 
     steps:
       - uses: actions/checkout@v7
@@ -298,9 +336,15 @@ jobs:
       # headless ubuntu 无 X display、无剪贴板工具：装 xvfb + xclip/xsel 并用 xvfb-run 包裹
       # ctest，让依赖系统剪贴板的用例真正执行而非「剪贴板不可用」永久 SKIP。
       - name: Install virtual display + clipboard tools
+        if: matrix.run-tests
         run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel
 
       - name: Test (under virtual X display)
+        if: matrix.run-tests
+        env:
+          # toggles 只验证 feature 宏极性，编译面是纯 Headless——期望集显式声明为空
+          # （「零覆盖」是声明的事实而非疏漏，口径见 08-tooling §8.2「CI 作业口径」）
+          AURORA_E2E_EXPECT: ""
         run: xvfb-run -a ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
 
   # ---------------------------------------------------------------------------
@@ -336,7 +380,11 @@ jobs:
         run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel
 
       - name: Test (under virtual X display)
-        run: xvfb-run -a ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
+        # -LE e2e：本作业是纯 Headless 默认后端面（X11/GLFW 默认 OFF），E2E 无真实后端可跑、
+        # 全部 skipped by policy，排除以省 ctest 时间；且真实图形栈与 ASan 的交互未评估，
+        # 归后续增量（口径见 08-tooling §8.2「CI 作业口径」）。内核自测 utest_e2e_harness
+        # 只用 HeadlessSurface，随全量用例照常执行。
+        run: xvfb-run -a ctest --test-dir build --output-on-failure -C Release -LE e2e -j "$(nproc)"
 
   # ---------------------------------------------------------------------------
   # 5. 行覆盖率：coverage 聚合目标自带 ctest + gcov 终端摘要

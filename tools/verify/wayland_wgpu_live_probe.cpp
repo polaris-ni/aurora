@@ -8,6 +8,11 @@
 //   1. 宿主装配：create_window(WaylandOptions)+GpuWgpu 真实开窗（直达 Wayland 宿主，
 //      不经 WgpuOptions 编译期择一）；surface 动态类型 WgpuWaylandSurface；gpu_backend()
 //      非空且 name == "gpu-wgpu"；is_available() / gpu_active() 初值为真。
+//      ⚠️ 建窗不经 E2E 内核（保持手写）：内核 `WindowSpec` 只描述
+//      目标后端（`Backend::Wgpu` → WgpuOptions 编译期择一 Win32→X11→Wayland），无法表达
+//      「WaylandOptions + RendererPreference::GpuWgpu 直达」这一宿主路由组合（与既有集成
+//      测试收敛时的同一裁决）；WgpuRhi 离屏直驱段亦非内核能力（内核读回基底是
+//      `Surface::data()`，不是 RHI 离屏 FBO），故本探针的手写段全部为判据本体。
 //   2. 能力与契约：capabilities().gpu == true、native_surface_import == false（v29 C API
 //      口径：仅契约位，不兑现）；import_native_surface 空帧恒返回 0（warn-once，不崩溃）。
 //   3. 流式纹理逐版本像素（离屏直驱）：同一 stream_key 红→同版本重绘→蓝，中心像素经

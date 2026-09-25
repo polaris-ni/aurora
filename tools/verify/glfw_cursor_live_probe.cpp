@@ -19,6 +19,11 @@
 //      `glfwSetCursor` 到窗口上，在控制台提示「此刻鼠标指针应是什么形状」，由人把鼠标移入
 //      窗口目视比对后按 y/n。全部确认为 y → 退出码 0；否则 7。
 //
+//   ⚠️ 建窗不经 E2E 内核（保持手写，有意为之）：本探针的窗口是裸 `GLFWwindow`（仅承载
+//      人工段 `glfwSetCursor` 的展示），建窗方式与 ①的映射镜像同为判据本体——探针验证的
+//      是「GLFW 环境能否按后端映射物化标准光标」这一平台事实，而非 aurora 窗口接线；经
+//      内核 `e2e::open` 建窗反而引入无关的 GL 上下文与 aurora 宿主语义，改变被测对象。
+//
 // 构建（方式 ① CMake 目标，推荐）：
 //   cmake -S . -B build-verify -DAURORA_BACKEND_GLFW=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
 //   cmake --build build-verify --target aurora_verify_glfw_cursor

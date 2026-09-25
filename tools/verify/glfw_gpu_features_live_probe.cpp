@@ -6,6 +6,7 @@
 // 自动段（无需人工）：
 //   1. 能力位核对：gpu 通道存在且 name == "gpu-gl"；capabilities().gpu == true；
 //      native_surface_import == false（GL 3.3 契约口径：仅契约位，不兑现）。
+//      建窗经 E2E 内核 `e2e::open(Backend::Glfw, gpu=true)`（RAII 会话持有）。
 //   2. 契约核对：import_native_surface 空帧恒返回 0（warn-once，不崩溃）。
 //   3. 流式纹理逐版本像素：同一 stream_key 连续两版本（红→蓝）经 DrawImage 命令回放，
 //      read_pixels 读回中心像素应逐版本变化——证明真实 glTexSubImage2D 上传 + 采样生效。
@@ -25,6 +26,7 @@
 
 #include "aurora/aurora.h"
 #include "aurora/render/rhi/gpu_gl_rhi.h"
+#include "e2e/harness.h"  // E2E 驱动内核：建窗统一经 e2e::open（RAII + 失败翻译），本探针只留平台判据
 #include "verify_args.h"
 
 namespace {
@@ -115,19 +117,24 @@ auto main(int argc, char **argv) -> int {
 
     emit("== aurora verify: GLFW GPU features (stream texture + layer cache) ==");
 
-    // ---- 窗口与 GPU 通道 ----
-    aurora::GlfwOptions opts;
-    opts.size = aurora::Size{.width = 560.0F, .height = 420.0F};
-    opts.title = "aurora-verify-glfw-gpu-features";
-    opts.resizable = false;
-    opts.gpu = true;
-    opts.max_fps = 0;
-    auto created = aurora::create_window(opts);
-    if (!created.ok()) {
-        AURORA_LOG_ERROR("verify", "create_window failed (no display / GLFW init failed)");
+    // ---- 窗口与 GPU 通道（建窗经 E2E 内核 e2e::open）----
+    // WindowSpec 与旧手写 GlfwOptions 的差异：resizable=false 由内核对 GLFW 统一设置；
+    // max_fps=0 不再显式设置（内核 WindowSpec 无该字段）——max_fps 只作用于 Application::run
+    // 的帧预算统计，不影响本探针的直驱 present_root 循环与 RHI 离屏段。visibility 显式
+    // Normal 保持既有可见行为（内核 E2E 用例默认 Hidden）。
+    aurora::e2e::WindowSpec spec;
+    spec.backend = aurora::e2e::Backend::Glfw;
+    spec.width = 560;
+    spec.height = 420;
+    spec.title = "aurora-verify-glfw-gpu-features";
+    spec.gpu = true;
+    spec.visibility = aurora::WindowVisibility::Normal;
+    auto session = aurora::e2e::open(spec);
+    if (!session.ok()) {
+        AURORA_LOG_ERROR("verify", "open(Glfw, gpu) failed: " + session.reason() + " (no display / GLFW init failed)");
         return 2;
     }
-    auto &win = *created.value();
+    auto &win = session.window();
 
     auto *sink = win.surface().gpu_backend();
     if (sink == nullptr) {
