@@ -38,6 +38,8 @@
 - **源—示例—测试 1:1 映射**：每个公共源文件（widget / 子系统头）原则上对应一个 `demo_*.cpp`（`examples/demos/`）与一个 `utest_*.cpp`（`tests/unit/`）。允许少量「复杂场景」demo / test（跨控件集成、端到端流程）作为例外，但须明确标注其跨源性质（跨控件集成用例放 `tests/integration/`，以 `itest_` 前缀命名）。所有 demo 收敛到 `examples/demos/`（CMake 仅 GLOB 该目录，新增组件 demo 放到此处即自动纳入构建，无需改 CMake）。测试头部「目标单元」与单元头之间的严格 1:1 声明约束由 §3.2 `TEST-R3` 界定。
 - **文件夹区分**：demo 与 test 以目录区分——示例在 `examples/`，测试在 `tests/`（单元 `tests/unit/`、集成 `tests/integration/`、真实后端端到端 `tests/e2e/`）；二者不混放。
 - **test 文件前缀**：测试文件统一以 `utest`（单元）/ `itest`（集成）/ `etest`（真实后端端到端）为前缀（`utest_xxx.cpp` / `itest_xxx.cpp` / `etest_xxx.cpp`），与示例的 `demo` 前缀风格一致；每个测试 TU 的用例包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`，端到端用例为 `etest_<名>`）内。聚合多个不相关控件的「catch-all」测试文件视为反模式，应拆为各 `utest_<控件>.cpp`（正式编号见 §3.2 `TEST-R10`）。
+- **`itest_` 与 `etest_` 的归属判据**：需要真实 OS 窗口 + 真实上屏链路（真实建窗 / 帧推进 / 像素读回）的用例放 `tests/e2e/`（`etest_`，受 `AURORA_BUILD_E2E` 门控）；其余跨控件 / 子系统集成——含经离屏后端（`HeadlessSurface`、`WgpuRhi` 离屏模式）验证渲染的——一律放 `tests/integration/`（`itest_`）。判据是**是否依赖真实窗口系统**，不是「测试是否重要」。
+- **E2E 场景纪律**：被 E2E 引用的组件 UI 在 `examples/demos/scenes/` 下建 header-only 场景头，与 `demo_<组件>.cpp` **同源**（单一来源），**禁止**在测试里复制 demo 布局代码（复制品会随 demo 演进静默漂移）；进入 golden 用例集的场景须满足确定性渲染契约：不依赖墙钟时间、不依赖随机数（或固定种子）、动画在捕获前推进到静止态（契约细节见 `specification/08-tooling.md` §8.2）。
 
 ### 3.1 注册式测试 runner
 

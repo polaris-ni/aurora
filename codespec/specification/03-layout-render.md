@@ -597,6 +597,8 @@ au::Column{}
 
 判据沿用历史语义（差异像素数 <= `AURORA_GOLDEN_MAX_PIXELS`、单通道差 > `AURORA_GOLDEN_MAX_DIFF` 才算差异像素），故本次收敛**不改变任何 golden 的通过结论**。`AURORA_GOLDEN_MAX_DIFF/PIXELS` 是软件逐位红线的**显式放松开关**，仅 `compare_or_update` 族读取——GPU 容差层的场景级容差带与之刻意隔离，防一视同仁设值连带静默放松软件侧判据（见 §8.8 测试段）。
 
+真实后端 E2E 的 golden 判据同源同构：**软件 SSOT 基线 + 场景级容差带**（基线为 `scene_tool --render` 生成的软件 PNG，判据词汇与 `compare_gpu_tolerance` 一致、互不共享常量），并加两条 E2E 特有约束：**尺寸一致性前置断言**——读回帧与基线尺寸不同（DPI 缩放等环境因素）即先失败、不进入像素比对；**度量与失败帧落盘**——逐用例经 `AURORA_E2E_METRICS_FILE` 追加 JSONL 度量行（差异像素数 / 最大单通道差 / 帧与基线尺寸 / 容差与预算及判定 / 失败帧 PNG 路径），失败帧落盘供人工复核。完整契约见 [`08-tooling.md`](08-tooling.md) §8.2。
+
 ### 8.5 后端与工厂
 
 `SurfaceKind{Headless, Win32, Glfw, D3D11, X11, Wayland, MacOS, Wasm}` 现仅为**类型标签**（只用于 `auto_detect_surface()` 返回类型与 `Platform::surface` 字段），不再用于构造选择。枚举器无条件全部出现且数值固定（见 `window.h`），不随 `AURORA_BACKEND_*` 宏开关增减，以保证序列化与 ABI 兼容：未编译的后端其标签仍存在，只是运行期不会被 `auto_detect_surface()` 产出、对应 `create_window` 重载不可用。

@@ -602,7 +602,7 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `--report=<path>` | 结果报告落盘：扩展名 `.xml` → JUnit XML，其余 → JSON；超时同样写入（已完成的部分结果） |
 | `--shuffle[=<seed>]` | 打乱用例顺序（暴露顺序依赖）；带种子可复现 |
 | `--repeat=<n>` | 把选中集合跑 n 轮（暴露状态泄漏；报告里用例名带 `#轮次`） |
-| `--timeout=<ms>` | 本轮总时限。看门狗到点先写报告、再以退出码 `3` 结束（协作式：进程内无法强杀死循环线程，进程级强杀由 CTest 的 `TIMEOUT` 属性承担） |
+| `--timeout=<ms>` | 本轮总时限。看门狗到点先写报告、再以退出码 `3` 结束（协作式：进程内无法强杀死循环线程）；CTest 侧不设 `TIMEOUT` 属性，etest_ 用例的进程级兜底即由 `AURORA_E2E_TIMEOUT_MS` 注入的本参数承担 |
 | `--selftest` | 执行框架内建自检（synthetic 用例，不消费注册表） |
 | `-h` / `--help` | 显示帮助 |
 
