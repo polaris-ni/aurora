@@ -160,7 +160,7 @@
 | 前置条件 | 位于仓库根目录；`build/` 已完成 CMake 配置；本机工具链与显示器可用 |
 | 依赖用例 | 无 |
 | 操作步骤 | 1. 构建载体：`cmake --build build --target demo_env`（纯执行，无预期结果）<br>2. 运行：`./build/demo_env.exe`（纯执行，无预期结果）<br>3. 查看窗口标题栏文字<br>4. 查看客户区顶部渐变横幅及其中的大号标题文字<br>5. 查看横幅下方的说明行文字<br>6. 查看说明行下方读数框（白底细边框矩形）内的文字 |
-| 预期结果 | 3. 标题为 `Environment · Aurora Demo`<br>4. 渐变横幅自蓝至紫，标题文字为 `Environment`<br>5. 说明行内容为 `MediaQueryProvider injects scale factor`（初始逻辑宽度 520 下行尾被右缘裁切属文本布局常态，完整形态见 TC-ENVIRONMENT-002 步骤 5）<br>6. 读数框内文字恰为 `scale_factor = 2.000000`（注入值 2.0 的六位小数形态） |
+| 预期结果 | 3. 标题为 `Environment · Aurora Demo`<br>4. 渐变横幅自蓝经紫过渡至品红（左端蓝、右端品红），标题文字为 `Environment`<br>5. 说明行内容为 `MediaQueryProvider injects scale factor`，在初始逻辑宽度 520 下即已完整显示、行尾不被右缘裁切<br>6. 读数框内文字恰为 `scale_factor = 2.000000`（注入值 2.0 的六位小数形态） |
 
 ### 2.2 注入值在窗口几何变化下的稳定性
 
@@ -173,7 +173,7 @@
 | 前置条件 | 载体 `demo_env` 已构建成功；显示器可用 |
 | 依赖用例 | TC-ENVIRONMENT-001 |
 | 操作步骤 | 1. 启动载体并确认读数框可见（纯执行，无预期结果）<br>2. 拖拽窗口右边框，把窗口宽度从约 520 增大到约 900 后释放鼠标<br>3. 查看读数框内文字<br>4. 继续把窗口宽度拖回约 520，查看读数框内文字<br>5. 在宽度约 900 时查看说明行全文 |
-| 预期结果 | 2. 布局随拖拽实时重排：渐变横幅与读数框随宽度伸展，无残影、黑块或错位<br>3. 仍为 `scale_factor = 2.000000`<br>4. 仍为 `scale_factor = 2.000000`<br>5. 说明行完整显示 `MediaQueryProvider injects scale factor`，不再被右缘裁切 |
+| 预期结果 | 2. 布局随拖拽实时重排：渐变横幅随宽度伸展，读数框保持其固有尺寸（`EnvReadout::on_layout` 固定约束 300×64 逻辑，宽度不随窗口变化），无残影、黑块或错位<br>3. 仍为 `scale_factor = 2.000000`<br>4. 仍为 `scale_factor = 2.000000`<br>5. 说明行仍完整显示 `MediaQueryProvider injects scale factor`，起终点位置与加宽前一致（重排不截断、不移动该文本行） |
 
 #### TC-ENVIRONMENT-003 最大化与还原后读数恒定
 
@@ -232,16 +232,16 @@
 | 前置条件 | 位于仓库根目录；`build/` 已完成 CMake 配置；`codespec/BUILD_OPTIONS.md` 可读 |
 | 依赖用例 | TC-ENVIRONMENT-001 |
 | 操作步骤 | 1. 打开构建目录中的 CMake 缓存文件 `CMakeCache.txt`（纯执行，无预期结果）<br>2. 逐项检索 `AURORA_BACKEND_*` 各开关取值<br>3. 检索 `AURORA_ENABLE_DEBUG` 取值<br>4. 对照 `codespec/BUILD_OPTIONS.md` 的开关清单核对缓存中的开关集合<br>5. 与 TC-ENVIRONMENT-001 的运行表现互证 |
-| 预期结果 | 2. 本机实测：`AURORA_BACKEND_WIN32=ON`、`AURORA_BACKEND_HEADLESS=ON`，`AURORA_BACKEND_D3D11` 与 GLFW、X11、Wayland、MacOS、Wasm、GPU 诸后端均为 OFF——与载体实际弹出原生窗口（而非 headless PNG）一致<br>3. `AURORA_ENABLE_DEBUG=ON`（本机实测取值；人工核对以实际缓存为准，取值与清单语义矛盾则 FAIL）<br>4. 缓存中出现的每个 `AURORA_*` 开关均能在清单中找到对应条目，无清单外开关<br>5. TC-ENVIRONMENT-001 首屏为真实窗口，与本例步骤 2 的后端取值自洽 |
+| 预期结果 | 2. 本机实测：`AURORA_BACKEND_WIN32=ON`、`AURORA_BACKEND_HEADLESS=ON`，`AURORA_BACKEND_D3D11` 与 GLFW、X11、Wayland、MacOS、Wasm、GPU 诸后端均为 OFF——与载体实际弹出原生窗口（而非 headless PNG）一致<br>3. `AURORA_ENABLE_DEBUG=ON`（本机实测取值；人工核对以实际缓存为准，取值与清单语义矛盾则 FAIL）<br>4. 缓存中出现的每个**由 `cmake/` 下 `option()` 声明的** `AURORA_*` 开关均能在清单中找到对应条目，无清单外开关；缓存里另有的工具链探测项（`FILEPATH` / `INTERNAL`）与版本串等非开关条目不计入本判据<br>5. TC-ENVIRONMENT-001 首屏为真实窗口，与本例步骤 2 的后端取值自洽 |
 
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| TC-ENVIRONMENT-001 | | | | | | | |
-| TC-ENVIRONMENT-002 | | | | | | | |
-| TC-ENVIRONMENT-003 | | | | | | | |
-| TC-ENVIRONMENT-004 | | | | | | | |
-| TC-ENVIRONMENT-005 | | | | | | | |
-| TC-ENVIRONMENT-006 | | | | | | | |
-| TC-ENVIRONMENT-007 | | | | | | | |
+| TC-ENVIRONMENT-001 | 2026-09-26 | Qoder Agent | PASS | | `cmake --build build --target demo_env` 报 no work to do（目标存在且已是最新）；标题 `Environment · Aurora Demo`，客户区 780×570 物理（144 DPI 下即 520×380 逻辑）；渐变横幅占行 21..112、x 21..760，左端 RGB (37,99,235) 蓝、中段 (140,84,192) 紫、右端 (236,72,153) 品红，白色标题文字 `Environment`；说明行墨迹占行 140..161、x 24..558，2 倍放大裁剪图目视为完整的 `MediaQueryProvider injects scale factor`；读数框灰边框宽 450 物理像素，其内文字目视恰为 `scale_factor = 2.000000`；stdout 0 行、stderr 恰 1 行 INF，关窗退出码 0 | | 原预期4 写「自蓝至紫」（实测右端为品红）、原预期5 断言「行尾被右缘裁切」（实测 520 宽度下说明行墨迹止于 x=558 而客户区宽 780，从未裁切），均已按运行时行为改写；Inspector 树同步显示该 Text 节点 `max_lines=0`、`content` 为完整字符串 |
+| TC-ENVIRONMENT-002 | 2026-09-26 | Qoder Agent | PASS | | 窗口矩形 802×626 加宽到 1382×626（客户区 780→1360 物理，即 520→906 逻辑）：横幅 x 端点由 760 伸展至 1340，读数框灰边框在两种宽度下均长 450 px 且起点同为 x=21（不随宽度伸展），加宽态纯黑像素共 1853 个、最长连续黑段仅 12 px 且落在说明行字形内（无黑块）；读数文本带（行 229..252、x 42..388）逐字节与加宽前一致，复原后仍一致；按原窗口矩形精确复原后整窗逐像素差 0 px（无残影）；退出码 0 | | 原预期2 断言「读数框随宽度伸展」与载体实现不符（`EnvReadout::on_layout` 固定约束 300×64 逻辑），已改写为「保持固有尺寸」；复原必须按窗口矩形原值下发 `SetWindowPos`——按客户区目标反算会因该窗口左右 11 px、上下 45/11 px 的非对称边框而留下 11 px 尺寸差，被误读成 18385 px 残影 |
+| TC-ENVIRONMENT-003 | 2026-09-26 | Qoder Agent | PASS | | 最大化后客户区 3840×2054 恰为工作区、进程存活、无崩溃；说明行与读数文本带仍落在与 520 宽度完全相同的坐标（140..161 与 229..252），读数文本逐字节一致，读数框位于说明行下方（229 > 161）；横幅 x 端点伸展至 3820，读数框边框仍 450 px；还原后客户区回到 780×570，与最大化前整窗逐像素差 0 px，读数文本带仍逐字节一致；退出码 0 | | 最大化/还原以 `ShowWindow(SW_MAXIMIZE / SW_RESTORE)` 等价触发（本机为锁屏会话，标题栏点击不可投递，判据见 10-window 记录表备注），其余判据均为像素与坐标实测 |
+| TC-ENVIRONMENT-004 | 2026-09-26 | Qoder Agent | SKIP | | 本机仅一块显示器 `\\.\DISPLAY1`（3840×2160 @144 DPI），`EnumDisplayMonitors` 枚举得到的缩放比例集合为 [1.5]，无第二块不同缩放比例的显示器可供拖动 | | 按 §1.3 与 §1.7 的显式约定记 SKIP，步骤 1..4 未执行 |
+| TC-ENVIRONMENT-005 | 2026-09-26 | Qoder Agent | PASS | | 两实例（pid 25680 与 27664）标题同为 `Environment · Aurora Demo`、客户区均 780×570，按 pid 枚举窗口恰两扇；两者读数文本带逐字节相同；关闭其中一扇后该进程退出码 0、另一扇窗口仍在且其读数文本带与关闭前逐字节相同；再关第二扇退出码 0 | | 注入链按窗口树各持一份、非进程级单例；两进程无共享内存，读数一致只能来自各自的 `MediaQueryProvider` |
+| TC-ENVIRONMENT-006 | 2026-09-26 | Qoder Agent | PASS | | `./build/demo_env.exe 1> out.txt 2> err.txt` 关窗退出码 0；`out.txt` 0 行；`err.txt` 恰 1 行 `[2026-09-26 15:00:44][INF][demo@0x1fc demo_common.h:250] > [run_demo] window shown: Environment · Aurora Demo(close window to exit)`，级别 INF、消息文本与整体格式与预期一致 | | 时间戳、线程 id 与行号按可变部分只核格式；另在带 InspectorServer 的 `build-inspector/` 同名副本上复跑，其 stderr 为 4 行且全为 INF（多出监听日志），不改变判定 |
+| TC-ENVIRONMENT-007 | 2026-09-26 | Qoder Agent | PASS | | `CMakeCache.txt` 内 `AURORA_*` 条目 49 个 = 34 个 `BOOL` 开关 + 15 个非开关（`PATH` / `STRING` / `FILEPATH` / `INTERNAL`）；`AURORA_BACKEND_WIN32=ON`、`AURORA_BACKEND_HEADLESS=ON`，D3D11、GLFW、GPU_WGPU、MACOS、WASM、WAYLAND、X11 全 OFF，与 TC-001 弹出真实 Win32 窗口自洽；`AURORA_ENABLE_DEBUG` 为 `STRING=ON`；34 个开关中 33 个能在 `BUILD_OPTIONS.md` §3/§4 清单中找到，唯一例外 `AURORA_BACKEND_GPU_GL` 在 `cmake/` 与全部 `CMakeLists.txt`（扫描 334 个构建文件）中均无声明，属本机缓存的历史残留而非现存开关 | | 原预期4 未区分「已声明开关」与「工具链探测/缓存残留项」，且按 `KEY:TYPE=VALUE` 整行做子串比对会得出「38 项全部缺失」的错误结论（必须先剥除 `:TYPE` 后缀），已改写判据；清单内 `AURORA_ENABLE_AUDIO_WASAPI/ALSA/WEBAUDIO` 未进本机缓存（平台门控），`AURORA_BACKEND_XXX` 是文档里的占位示例 |
