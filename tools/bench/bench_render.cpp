@@ -271,10 +271,11 @@ auto main() -> int {
     }
 
     // 14) scroll scene: reuse aurora::ScrollBenchHarness to run a deterministic scroll sequence,
-    // producing p99 / jitter / full_redraw_frames and RenderCounters baselines. Time-based gates are
-    // affected by environment jitter and excluded from CTest; local trend comparison is in
-    // tools/check/check_perf_gates.ps1. Counter-based gates are locked into CTest by
-    // tests/unit/utest_scroll.cpp (scroll_regression section) (build-prof).
+    // producing p99 / jitter / full_redraw_frames and RenderCounters baselines. Time-based gates
+    // (G-1~G-4, G-9~G-14) are affected by environment jitter and excluded from CTest; local trend
+    // comparison is in tools/check/check_perf_gates.ps1. Counter-based gates G-5~G-8 are locked
+    // into CTest by tests/unit/utest_scroll.cpp (scroll_regression_counter_gates), which reads the
+    // thresholds from tools/check/perf_gates.json (needs PROFILING=ON, else it registers a skip).
     {
         aurora::ScrollBenchHarness::Config cfg;
         cfg.name = "bench_render-scroll";
@@ -283,9 +284,9 @@ auto main() -> int {
         AURORA_LOG_RAW("bench", "\n## scroll scenario (aurora::ScrollBenchHarness, 1100x760 dp, 300 frames)\n\n");
         AURORA_LOG_RAW("bench", r.to_markdown(), "\n");
         AURORA_LOG_RAW("bench",
-                       "> time-based gates (G-1~G-14) are affected by environment jitter and excluded from "
+                       "> time-based gates (G-1~G-4, G-9~G-14) are affected by environment jitter and excluded from "
                        "CTest; local trend comparison see "
-                       "tools/check/check_perf_gates.ps1.\n");
+                       "tools/check/check_perf_gates.ps1. Counter-based gates G-5~G-8 are asserted in CTest.\n");
     }
 
     AURORA_LOG_RAW("bench", "\n", aurora::bench::AURORA_BENCH_DISCLAIMER, "\n");

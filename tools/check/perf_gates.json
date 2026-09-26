@@ -1,6 +1,6 @@
 {
   "source": "Local time-class gates -- affected by machine load / compiler / background processes; not in CI, only for local trend comparison.",
-  "note": "Time-class gates are not in CTest; counter-class G-5~G-8 are locked into CTest by tests/unit/utest_scroll.cpp (scroll_regression section) (PROFILING=ON).",
+  "note": "Time-class gates are not in CTest. Counter-class G-5~G-8 are locked into CTest by tests/unit/utest_scroll.cpp (case scroll_regression_counter_gates), which reads these thresholds by gate id -- a missing entry fails the case instead of silently asserting nothing. Those four gates need AURORA_ENABLE_PROFILING=ON (otherwise RenderCounters is compiled out and the case registers as a skip stub); CI job profiling-tracing-debug-on runs them. Readings are per-frame maxima over 60 sampled frames of a fixed deterministic scene: Scroll(300x200 viewport) wrapping a Column of 40 plain 300x40 FixedBox rows. G-8 tracks dirty_rect_count, NOT dirty_area_ratio: a scrolling frame legitimately dirties the whole viewport, so the ratio sits at exactly 1.0 on every frame and any threshold there is either vacuous or always red.",
   "scene": "google_play",
   "repeat": 3,
   "gates": [
@@ -26,6 +26,30 @@
       "id": "G-4",
       "metric": "long tasks / 300",
       "threshold": 3,
+      "counted": true
+    },
+    {
+      "id": "G-5",
+      "metric": "scroll layout_nodes (per-frame max)",
+      "threshold": 0,
+      "counted": true
+    },
+    {
+      "id": "G-6",
+      "metric": "scroll dl_records (per-frame max)",
+      "threshold": 6,
+      "counted": true
+    },
+    {
+      "id": "G-7",
+      "metric": "scroll full_redraw frames / 60",
+      "threshold": 0,
+      "counted": true
+    },
+    {
+      "id": "G-8",
+      "metric": "scroll dirty_rect_count (per-frame max)",
+      "threshold": 2,
       "counted": true
     },
     {

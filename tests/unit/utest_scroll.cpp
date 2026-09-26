@@ -4,17 +4,27 @@
 /// scroll_by 方向与 step 乘子、偏移钳制、程序化 set_offset 的夹取与语义（越窗跳转仍取到正确内容带）、
 /// 无子项退化、初始化列表取首项、step 序列化往返、滚轮余量回传（嵌套滚动协调）、
 /// snap/paging 收位短滑动（含 Center 对齐与半页回弹）、reduce-motion 直落端点、
-/// scroll_to 的即时/动画/夹取语义、offset_signal 随各通道发布、snap 三属性自描述与序列化往返
+/// scroll_to 的即时/动画/夹取语义、offset_signal 随各通道发布、snap 三属性自描述与序列化往返，
+/// 以及 scroll_regression 段（计数类门槛 G-5 至 G-8，阈值取自 tools/check/perf_gates.json，
+/// 仅在 AURORA_ENABLE_PROFILING=ON 时生效，否则注册为 skip）
 
 #include <chrono>
+#include <cstddef>
+#include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include "aurora/app/scroll_storage.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/perf/counters.h"
+#include "aurora/perf/scroll_bench.h"
+#include "aurora/widget/containers.h"
 #include "aurora/widget/scroll.h"
 #include "framework/aurora_test.h"
+#include "paths.h"
 
 namespace aurora::test_cases::utest_scroll {
 
@@ -116,6 +126,50 @@ class ReduceMotionGuard final {
   private:
     AccessibilitySettings saved_;
 };
+
+/// @brief scroll_regression 的固定内容树：Scroll 套 40 行 300x40 哑控件（内容 1600dp、视口 200dp = 8 屏）。
+///
+/// 刻意用节点数已知的浅树：计数门槛要的是「整树重排 / 整帧重绘一旦发生就跳变明显」的形状，
+/// 不是逼真视觉。40 个内容节点下，逐帧重排会把 `layout_nodes` 从个位推到 40 以上。
+auto make_regression_tree() -> Node {
+    std::vector<Node> rows;
+    rows.reserve(40);
+    for (int i = 0; i < 40; ++i) {
+        rows.emplace_back(box(300.0F, 40.0F));
+    }
+    auto col = std::make_shared<Column>(ColumnProps{.children = std::move(rows)});
+    ScrollProps props;
+    props.child = Node{std::move(col)};
+    return Node{std::make_shared<Scroll>(props)};
+}
+
+/// @brief 取 `tools/check/perf_gates.json` 中指定 id 的门槛阈值。
+///
+/// 该文件是「有哪些门槛、门槛多少」的唯一登记处，本段不重复声明数值；缺条目即致命失败，
+/// 否则登记册被删空后断言会静默变成空转。
+auto gate_threshold(const char *id) -> double {
+    const std::string path = aurora::testing::paths::under_repo("tools/check/perf_gates.json");
+    std::ifstream in(path, std::ios::binary);
+    AURORA_TEST_REQUIRE_MSG(in.good(), "perf_gates.json must be readable: " + path);
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    Json cfg = Json{};
+    try {
+        cfg = Json::parse(ss.str());
+    } catch (...) {
+        cfg = Json{};
+    }
+    AURORA_TEST_REQUIRE_MSG(cfg.contains("gates") && cfg["gates"].is_array(),
+                            std::string{"perf_gates.json must carry a gates array: "} + path);
+    for (const auto &g : cfg["gates"]) {
+        if (g.contains("id") && g["id"].get<std::string>() == id) {
+            AURORA_TEST_REQUIRE_MSG(g.contains("threshold"), std::string{"gate "} + id + " has no threshold");
+            return g["threshold"].get<double>();
+        }
+    }
+    AURORA_TEST_REQUIRE_MSG(false, std::string{"gate "} + id + " is not declared in perf_gates.json");
+    return 0.0;
+}
 
 }  // namespace
 
@@ -500,6 +554,56 @@ AURORA_TEST_CASE(snap_properties_describe_and_round_trip) {
     AURORA_TEST_CHECK_NEAR(dst.offset_y(), 50.0F, 1e-4F);  // step 亦随序列化恢复为 1
     settle(dst);
     AURORA_TEST_CHECK_NEAR(dst.offset_y(), 80.0F, 1e-4F);
+}
+
+// ---- scroll_regression 段：计数类门槛 G-5 至 G-8 ----
+//
+// 分工：时间类门槛（G-1 至 G-4）随机器负载漂移，只作本地趋势对照、不进 CI；计数类在
+// Headless 下**逐帧可复现**，因此锁定在这里。阈值不在本文件复写，一律经 `gate_threshold()`
+// 从 `tools/check/perf_gates.json` 读取——登记册是唯一权威来源，删条目即红灯，杜绝
+// 「门槛悄悄蒸发而断言还在假装通过」。
+AURORA_TEST_CASE(scroll_regression_counter_gates) {
+    // 埋点宏在 AURORA_ENABLE_PROFILING 关闭时展开为空操作，读数恒为 0——此时比对阈值会
+    // 「假通过」，故显式 skip。CI 由 profiling-tracing-debug-on 作业（PROFILING=ON）实跑本段。
+    if (!profiling_enabled()) {
+        AURORA_TEST_SKIP("RenderCounters compiled out: needs -DAURORA_ENABLE_PROFILING=ON");
+    }
+
+    ScrollBenchHarness::Config cfg;
+    cfg.frames = 60;
+    cfg.warmup_frames = 5;
+    cfg.settle_ms = 0.0;  // 静态树无首屏瞬态可等：关掉落定，帧数与计数完全确定
+    cfg.name = "scroll_regression";
+    const ScrollBenchHarness::Result r =
+        ScrollBenchHarness::run(make_regression_tree(), Size{.width = 300.0F, .height = 200.0F}, cfg);
+
+    // 先验伪再看数：读数不成立时门槛断言毫无意义，直接致命失败而非静默比对。
+    AURORA_TEST_REQUIRE_TRUE(r.trustworthy());
+    AURORA_TEST_REQUIRE_EQ(r.report.frame_count, std::size_t{60});
+    // 再证明「这 60 帧真的在画」：若场景因故空转，四项计数会全部归零而门槛照样绿灯，
+    // 那正是门槛类断言最隐蔽的失效形态。绘制原语计数不归零是本段的生效前提。
+    const auto &peak = r.counters_max();
+    AURORA_TEST_REQUIRE_GT(peak.paint_nodes, std::uint32_t{0});
+    AURORA_TEST_REQUIRE_GT(peak.draw_calls, std::uint32_t{0});
+    AURORA_TEST_REQUIRE_GT(peak.pixels_filled, std::uint64_t{0});
+
+    const auto layout_max = static_cast<double>(peak.layout_nodes);
+    const auto dl_records_max = static_cast<double>(peak.dl_records);
+    const auto full_redraw_frames = static_cast<double>(r.full_redraw_frames());
+    const auto dirty_rects_max = static_cast<double>(peak.dirty_rect_count);
+    AURORA_TEST_PRINTF(
+        "scroll_regression G-5..G-8 readings: layout_nodes_max=%.0f dl_records_max=%.0f "
+        "full_redraw_frames=%.0f dirty_rect_count_max=%.0f | max=%s\n",
+        layout_max, dl_records_max, full_redraw_frames, dirty_rects_max, peak.to_json().c_str());
+
+    // G-5：滚动不得逐帧重排——整树 41 个节点，一旦逐帧重排读数就从 0 跳到 41。
+    AURORA_TEST_CHECK_LE(layout_max, gate_threshold("G-5"));
+    // G-6：DisplayList 应回放既有列表，而非逐帧把子树重录一遍。
+    AURORA_TEST_CHECK_LE(dl_records_max, gate_threshold("G-6"));
+    // G-7：60 个采样帧里退化为整帧重绘的帧数。
+    AURORA_TEST_CHECK_LE(full_redraw_frames, gate_threshold("G-7"));
+    // G-8：一帧的脏区应合并成少数几块，而不是每个可见行一块。
+    AURORA_TEST_CHECK_LE(dirty_rects_max, gate_threshold("G-8"));
 }
 
 }  // namespace aurora::test_cases::utest_scroll
