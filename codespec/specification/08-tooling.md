@@ -209,7 +209,7 @@ Column#root { bounds:[0,0,640,480]; visible:true; listeners:[on_click] }
 |:---|:---|:---|
 | 节点查询 | `query(type, root)` / `get_state(path, root)` / `find_node(root, path)` / `find_widget(root, path)` / `widget_info(w)` | 按类型名检索、按路径取状态片段、按索引路径定位节点（`find_node` 返回 `Node` 副本、只走 `child_nodes()`；`find_widget` 返回裸指针、走统一遍历，可跨越虚拟化容器，两条路径的取舍见 §3）、Widget 完整信息 |
 | 属性读写 | `get_prop(w)` / `get_prop_value(w, key)` / `set_prop(w, key, val)` / `apply_patch(root, patch)` | 单属性回写返回 `Result<void>`；`apply_patch` 把 JSON Patch 逐条经 `set_prop` 应用到树 |
-| 交互模拟 | `simulate_click(w)` / `simulate_drag(w, dx, dy)` / `simulate_scroll(w, dx, dy)` / `simulate_text_input(w, text)` | 合成事件经 `EventDispatcher` 走真实命中测试 + 冒泡派发；派发根与坐标原点均为 `w` 自身、指针取 `w` 中心，故不依赖控件在树中的绝对位置（无需先绘制，但目标须已布局——未布局时尺寸为零、中心退化为自身原点）。`drag` 派发 Press（中心）→ Move（中心+delta）→ Release（终点）。目标不可命中时返回 `GeneralNotSupported` 且不派发、不改状态 |
+| 交互模拟 | `simulate_click(w)` / `simulate_drag(w, dx, dy)` / `simulate_scroll(w, dx, dy)` / `simulate_text_input(w, text)` / `simulate_pointer(w, position, action)` | 合成事件经 `EventDispatcher` 走真实命中测试 + 冒泡派发。前四者为**目标式**：派发根与坐标原点均为 `w` 自身、指针取 `w` 中心，故不依赖控件在树中的绝对位置（无需先绘制，但目标须已布局——未布局时尺寸为零、中心退化为自身原点）。`drag` 派发 Press（中心）→ Move（中心+delta）→ Release（终点）。目标不可命中时返回 `GeneralNotSupported` 且不派发、不改状态。<br>`simulate_pointer` 为**坐标式单步**：在 `w` 本地坐标系给定点派发单个 `MouseEvent`（仅 `Press`/`Move`/`Release`，其余动作返回 `GeneralNotSupported`），且只对 `Press` 预先做命中校验——`Move`/`Release` 放行，因为真实拖拽正是靠派发器的 `pointer_capture_`（Press 时缓存的命中链）把后续 Move 继续投给按下的控件。用途：拖拽带不在控件中心时（`Splitter` 分隔条、滚动条滑块、Slider 轨道任意位）逐步合成连续拖拽 |
 | 组件发现 | `components()` / `component_schema(name)` | 已注册组件 schema 列表 / 单组件 schema |
 | 代码生成 | `to_code(root)` | UI 树 → 源码（转发 §2.5） |
 | 验证 | `validate(root) -> std::vector<Diagnostic>` | 整树验证（`inspector_api.h`） |
@@ -269,10 +269,10 @@ server.stop();        // 停止并 join 工作线程
 | GET | `/api/components` | 全部已注册组件 schema 列表 |
 | GET | `/api/yaml` | 当前 widget 树的 YAML 格式字符串 |
 | POST | `/api/to_code` | UI 树 → C++ 代码。请求体可含 `style` 参数：`0`=Fluent、`1`=StepByStep、`2`=DesignatedInit；`style` 存在但非整数返回 400，越界整数回退 Fluent |
-| POST | `/api/input/{click\|scroll\|drag\|text}` | 交互模拟：以 `path` 命中的控件为派发根与坐标原点（指针取该控件中心）合成事件，经 `EventDispatcher` 走真实命中测试 + 冒泡派发。请求体须为对象且 `path` 为字符串（空串=树根）；`scroll`/`drag` 另取数值 `dx`/`dy`（缺省 0；drag 为目标中心起算的拖拽位移），`text` 另取字符串 `text`。经主线程 marshal 执行，成功返回 `{status:"ok", action, widget_path}`；路径不存在 404、目标存在但不可派发 400、字段类型不符 400、方法非 POST 405 |
+| POST | `/api/input/{click\|scroll\|drag\|text\|pointer}` | 交互模拟：以 `path` 命中的控件为派发根与坐标原点合成事件，经 `EventDispatcher` 走真实命中测试 + 冒泡派发。请求体须为对象且 `path` 为字符串（空串=树根）；`scroll`/`drag` 另取数值 `dx`/`dy`（缺省 0；drag 为目标中心起算的拖拽位移），`text` 另取字符串 `text`，`pointer` 另取字符串 `phase`（`press`\|`move`\|`release`，必填）与可选数值 `x`/`y`（控件本地 dp，缺省为该控件中心）——单步派发一个指针动作，供调用方自行合成跨子区域的连续拖拽。前四种为**目标式**（指针取控件中心），`pointer` 为**坐标式**。经主线程 marshal 执行，成功返回 `{status:"ok", action, widget_path}`；路径不存在 404、目标存在但不可派发 400、字段类型不符 400、方法非 POST 405 |
 | GET | `/api/find` | 按 key/type/text 定位控件：`?key=<Node::set_id 标识>&type=<type_name>&text=<文本>`，至少给一个参数（否则 400），多参数 AND。返回 `{matches:[{path, type, id}], count}`——`path` 为索引路径（根为空串），与 `/api/widget/{path}`、`/api/input/*` 同口径，可直接喂给寻址端点；`text` 比对文本类属性启发式（`content\|text\|label\|value\|hint\|placeholder`，与 `TestController::find_by_text` 同源）。遍历走 `child_nodes()` 原存储 const 引用（不构造 `Node` 副本，活树安全）；虚拟化容器（不覆写 `child_nodes()`）的子树不可见（与 `find_node_by_path` 同限：宁可少报、不可错报）。零命中回 200 + 空 `matches`（非错误，由调用方裁决）；方法非 GET 回 405 |
 
-> `/api/input/*` 为「目标式」语义：落点取目标控件中心，故目标须已布局（未布局时尺寸为零、中心退化为自身原点）。失败（路径不存在 / 不可派发 / 参数不符）一律在派发前返回，**不改变任何控件状态**。滚动只派发事件，偏移量不在响应里（控件虽各自序列化 `offset` / `scroll_offset`，但响应体不回传），需要读回偏移请读控件属性或写 C++ 测试。
+> `/api/input/*` 中 `click`/`scroll`/`drag`/`text` 为「目标式」语义：落点取目标控件中心，故目标须已布局（未布局时尺寸为零、中心退化为自身原点）。`pointer` 是唯一的「坐标式」通道：落点由请求体 `x`/`y` 给定（控件本地 dp），一次只派发一个指针动作，逐步调用即可合成跨子区域的连续拖拽——派发器在 Press 时缓存命中链为 `pointer_capture_`，故后续 `move` 仍会投给被按住的控件，与真实指针一致。失败（路径不存在 / 不可派发 / 参数不符）一律在派发前返回，**不改变任何控件状态**。滚动只派发事件，偏移量不在响应里（控件虽各自序列化 `offset` / `scroll_offset`，但响应体不回传），需要读回偏移请读控件属性或写 C++ 测试。
 
 ### 5.2 调试端点
 

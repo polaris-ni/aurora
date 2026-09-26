@@ -204,6 +204,31 @@ auto Inspector::simulate_drag(Widget &w, float dx, float dy) -> Result<void> {
     return Result<void>{};
 }
 
+auto Inspector::simulate_pointer(Widget &w, const Point &position, MouseAction action) -> Result<void> {
+    if (action != MouseAction::Press && action != MouseAction::Move && action != MouseAction::Release) {
+        return make_error(ErrorCode::GeneralNotSupported,
+                          "simulate_pointer: only Press / Move / Release are supported");
+    }
+    SimFocusContext focus;
+    FocusManager *fm = focus.resolve(w);
+
+    // 只有 Press 需要前置命中：与 simulate_click 同口径，避免「按下落空却已改掉焦点/捕获」。
+    // Move / Release 不校验——真实指针的拖拽正是靠派发器的指针捕获把事件持续送给按下时的目标，
+    // 光标越出分隔条/轨道仍是有效拖拽，此处若按实时命中筛掉就合成不出连续拖拽。
+    const Rect root_rect{.origin = Point{}, .size = w.size()};
+    if (action == MouseAction::Press && w.hit_test_chain(position, root_rect, BuildContext{}).empty()) {
+        return make_error(ErrorCode::GeneralNotSupported,
+                          "simulate_pointer: no hit-testable area at the given position");
+    }
+
+    MouseEvent e;
+    e.action = action;
+    e.button = MouseButton::Left;
+    e.position = position;
+    EventDispatcher::dispatch(w, e, fm);
+    return Result<void>{};
+}
+
 auto Inspector::simulate_text_input(Widget &w, std::string_view text) -> Result<void> {
     if (text.empty()) {
         return Result<void>{};  // 空片段无副作用，直接视为完成

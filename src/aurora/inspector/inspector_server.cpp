@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -694,10 +695,13 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         return error_response(405, "Method not allowed for /api/widget");
     }
 
-    // POST /api/input/{click|scroll|drag|text} — 交互模拟（合成事件经 EventDispatcher 真实派发）
+    // POST /api/input/{click|scroll|drag|text|pointer} — 交互模拟（合成事件经 EventDispatcher 真实派发）
     //
     // 请求体为 JSON 对象：`path`（索引路径，如 "0/1"）必填；`scroll`/`drag` 另取 `dx`/`dy`
-    // （数值，缺省 0；drag 为目标中心起算的拖拽位移），`text` 另取 `text`（字符串）。
+    // （数值，缺省 0；drag 为目标中心起算的拖拽位移），`text` 另取 `text`（字符串），
+    // `pointer` 另取 `phase`（`press`/`move`/`release`）与可选的 `x`/`y`（数值，目标局部坐标，
+    // 缺省即控件中心）——单步、按坐标的指针动作，用于按下点不在控件中心的目标（分隔条、滑块）
+    // 以及调用方自行合成的连续拖拽。
     //
     // 派发必须落在主线程：`Inspector::simulate_*` 为 main-thread only，且会写控件状态与
     // 派发期的焦点槽。故与调试端点同走 `marshal_get`（无事件循环时直接执行，测试 / 无头
@@ -711,7 +715,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             return error_response(405, "Method not allowed for /api/input");
         }
         const std::string action = route.substr(std::string("/api/input/").size());
-        if (action != "click" && action != "scroll" && action != "drag" && action != "text") {
+        if (action != "click" && action != "scroll" && action != "drag" && action != "text" && action != "pointer") {
             return error_response(404, "Unknown input action: " + action);
         }
         nlohmann::json payload;
@@ -735,6 +739,32 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         float dx = 0.0F;
         float dy = 0.0F;
         std::string text;
+        // `/api/input/pointer` 的额外字段：`phase`（press|move|release）与按坐标 `x`/`y`
+        // （相对目标控件顶点；缺省即控件中心）。
+        std::string phase;
+        std::optional<float> px;
+        std::optional<float> py;
+        if (action == "pointer") {
+            const auto phase_it = payload.find("phase");
+            if (phase_it == payload.end() || !phase_it->is_string()) {
+                return error_response(400, "Missing or invalid 'phase' (press | move | release)");
+            }
+            phase = phase_it->get<std::string>();
+            if (phase != "press" && phase != "move" && phase != "release") {
+                return error_response(400, "Unknown pointer phase: " + phase);
+            }
+            for (const char *key : {"x", "y"}) {
+                if (payload.contains(key) && !payload[key].is_number()) {
+                    return error_response(400, std::string("'") + key + "' must be a number");
+                }
+            }
+            if (payload.contains("x")) {
+                px = payload["x"].get<float>();
+            }
+            if (payload.contains("y")) {
+                py = payload["y"].get<float>();
+            }
+        }
         if (action == "scroll" || action == "drag") {
             for (const char *key : {"dx", "dy"}) {
                 if (payload.contains(key) && !payload[key].is_number()) {
@@ -774,6 +804,14 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
                     failure = r ? std::string{} : r.error().message;
                 } else if (action == "drag") {
                     const Result<void> r = Inspector::simulate_drag(*target, dx, dy);
+                    failure = r ? std::string{} : r.error().message;
+                } else if (action == "pointer") {
+                    const Size sz = target->size();
+                    const MouseAction m_action = phase == "press"  ? MouseAction::Press
+                                                 : phase == "move" ? MouseAction::Move
+                                                                   : MouseAction::Release;
+                    const Point pos{.x = px.value_or(sz.width * 0.5F), .y = py.value_or(sz.height * 0.5F)};
+                    const Result<void> r = Inspector::simulate_pointer(*target, pos, m_action);
                     failure = r ? std::string{} : r.error().message;
                 } else {
                     const Result<void> r = Inspector::simulate_text_input(*target, text);

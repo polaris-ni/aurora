@@ -8,6 +8,7 @@
 
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/result.h"
+#include "aurora/event/event.h"
 #include "aurora/widget/props_io.h"
 
 namespace aurora {
@@ -114,6 +115,18 @@ class Inspector {
     ///       需要跨控件拖拽时以共同祖先为目标自行合成事件。
     /// @note Side-effects: 触发 Press/Move/Release 对应的手势响应（如 Text 建立选区、Slider 改值）。
     static auto simulate_drag(Widget &w, float dx, float dy) -> Result<void>;
+
+    /// @brief 模拟单步指针动作：以给定点为指针位置，派发一个 Press / Move / Release。
+    /// @param w       派发根（坐标即相对该控件顶点）。
+    /// @param position 指针位置（`w` 的局部坐标，逻辑单位）。
+    /// @param action  `Press` / `Move` / `Release` 之一；其余动作返回 `GeneralNotSupported`。
+    /// @return 已派发返回空 Result；`Press` 落点无命中目标返回 `GeneralNotSupported`（不派发、不改状态）。
+    /// @note 与 `simulate_drag` 的「目标式」语义互补：本函数按**坐标**寻址，可落在控件的任一子区域
+    ///       （Splitter 的分隔条、Scrollbar 的滑块、Slider 的某个刻度），也可由调用方分多次调用
+    ///       合成连续拖拽——派发器自带指针捕获，Press 之后的 Move/Release 会持续送达按下时的目标，
+    ///       因此中间步可让指针越出分隔条而拖拽不中断。
+    /// @note Side-effects: 等价于真实指针的单步输入，会触发命中回调与焦点转移（仅 Press）。
+    static auto simulate_pointer(Widget &w, const Point &position, MouseAction action) -> Result<void>;
 
     /// @brief 模拟文本输入：把控件置为焦点后向其派发文本输入事件。
     /// @param w    目标控件（须实现 `on_text_input`，如 TextInput / RichTextEdit）。
