@@ -20,6 +20,12 @@ auto main() -> int {
     aurora::Animator anim;
     auto host = std::make_shared<aurora::NavigatorHost>(anim);
 
+    // 转场参数：首页点击跳转与启动自播共用同一条 0.6s 淡变，保证正/反向两侧都可观察 Hero 飞行。
+    aurora::RouteTransition fade;
+    fade.animated = true;
+    fade.kind = aurora::TransitionKind::Fade;
+    fade.duration_seconds = 0.6;
+
     // 详情页：Hero("logo") 更大（绿），返回按钮 pop。
     auto make_detail = [host]() -> aurora::Node {
         aurora::Text lbl{"Aurora"};
@@ -31,21 +37,18 @@ auto main() -> int {
     };
 
     // 首页：Hero("logo") 较小（品红），按钮 push 到详情页。
-    auto make_home = [host, make_detail]() -> aurora::Node {
+    auto make_home = [host, make_detail, fade]() -> aurora::Node {
         aurora::Text lbl{"Aurora"};
         lbl.modifier.set(aurora::Modifier{}.background(pal::AURORA_ACCENT).size(64.0F, 48.0F));
         aurora::Hero logo{"logo", aurora::Node{std::move(lbl)}};
         auto btn = aurora::Button{"Go to detail"};
-        btn.set_on_click([host, make_detail]() -> void { host->push(aurora::Route{make_detail(), "detail"}); });
+        btn.set_on_click([host, make_detail, fade]() -> void {
+            host->push(aurora::Route{make_detail(), "detail", fade});
+        });
         return aurora::Column{aurora::ColumnProps{.children = {std::move(logo), gap(12.0F), std::move(btn)}}};
     };
 
     host->push(aurora::Route{make_home(), "home"});
-
-    aurora::RouteTransition fade;
-    fade.animated = true;
-    fade.kind = aurora::TransitionKind::Fade;
-    fade.duration_seconds = 0.6;
     host->push(aurora::Route{make_detail(), "detail", fade});  // 启动即播放共享元素转场
 
     aurora::Scene scene{aurora::Node{host}};

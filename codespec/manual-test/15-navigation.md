@@ -218,9 +218,9 @@
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| TC-NAVIGATION-001 | | | | | | | |
-| TC-NAVIGATION-002 | | | | | | | |
-| TC-NAVIGATION-003 | | | | | | | |
-| TC-NAVIGATION-004 | | | | | | | |
-| TC-NAVIGATION-005 | | | | | | | |
-| TC-NAVIGATION-006 | | | | | | | |
+| TC-NAVIGATION-001 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：窗口标题 `Navigation · Aurora Demo`，stderr 中 `[run_demo] window shown` 恰 1 行 INF；步骤 5：`demo_navigator` stderr 为 0 行、stdout 为 0 行 | | 本次构建开启 `AURORA_BUILD_INSPECTOR_SERVER=ON`，`demo_navigation` 因此另有 3 行 InspectorServer INF；默认（OFF）构建即恰 1 行，不判为偏差 |
+| TC-NAVIGATION-002 | 2026-09-26 | Qoder Agent | FAIL | 4 | 步骤 2：经 Inspector 读树得 `Navigator depth = 2`、`current route = about`；步骤 3：与源码「以 home 构造、随后 push(about)」自洽；步骤 4：标题区显示的是演示用渐变标题 `Navigation`，界面上不存在任何页面标题，`About` 未出现 | | 载体按 §1.2 定位为静态读数：控件树共 8 节点，`Navigator` / `NavigatorHost` 均为 0，about 页从未装配上屏；预期 4 与载体口径不符，属用例前提问题而非库缺陷，建议改预期或让载体经 `NavigatorHost` 呈现当前页 |
+| TC-NAVIGATION-003 | 2026-09-26 | Qoder Agent | PASS | | 步骤 2：Inspector 读数 `Router has 'home' = true`；步骤 4：与源码 `register_route("home", ...)` 登记状态一致 | | 取值来自 `/api/tree` 的 `Text.text` 字段，非截图判读；未登记名称不在本载体展示范围内 |
+| TC-NAVIGATION-004 | 2026-09-26 | Qoder Agent | PASS | | 步骤 4：点击后 16 帧连拍（跨度 1.96s，间隔约 120ms）中蓝按钮带数由 2 在 +112ms 与 +248ms 之间一次变为 0，其余 14 帧稳定，未出现 `Detail`/`Home` 中间页；步骤 5：终帧页面文本为 `Settings`，与 URI 末段对应 | | 步骤 2 的初始页实为控制页（两个深链按钮）而非 `Home`——载体启动即 `push` 控制页；首轮点击界面无任何反应，根因是 `NavigatorHost` 非动画换页不发失效请求（新页要等窗口 resize 才上屏），实测中修复并提交 aa01726 后复跑通过 |
+| TC-NAVIGATION-005 | 2026-09-26 | Qoder Agent | PASS | | 步骤 4：点击 `Go to detail` 后色块尺寸按 63x47 → 65x49 → 67x51 → 69x53 → 87x65 → 105x63 → 127x95 → 137x103 → 145x109 → 151x113 → 159x119 px 单调插值，块心像素由品红 (122,33,77) 经灰调 (116,85,96) 过渡到绿调 (8,85,37)，无跳位；步骤 5：终态 159x119 px（≈160x120dp）、均色 (21,162,73) 即详情页绿色，全程任一帧只检出一个彩块 | | 载体首页按钮原 `push` 未带 `RouteTransition`，点击为硬切、无飞行过程，实测中为其补 0.6s 淡变后复跑；两页 Hero 均在 Column 原点，位移分量为 0，故「移动」只体现为尺寸插值；包围盒按 2px 步长采样，读数比真值小 1px |
+| TC-NAVIGATION-006 | 2026-09-26 | Qoder Agent | PASS | | 步骤 2：点击 `Back` 后色块按 159x119 → 157x117 → 153x115 → 141x107 → 137x103 → 119x87 → 105x79 → 91x69 → 83x61 → 75x57 → 69x53 → 67x51 → 65x49 → 63x47 px 单调收缩，与正向为同一梯级的反序，路径重合；步骤 3：结束后回到首页（`Aurora` 色块 + `Go to detail` 按钮）；步骤 4：色块 63x47 px（≈64x48dp）、均色 (227,69,147) 即首页品红，详情页元素无残留 | | 反向时长由 `pop()` 固定 0.3s、正向取载体 `RouteTransition` 的 0.6s，实测墙钟约 270ms 与 250ms；中途彩度低于阈值的帧已用彩度门槛 8 复检确认为交叉淡变的中间色而非空帧，仅 PrintWindow 偶发整帧空白（块心读到页面底色）且下一帧即恢复 |
