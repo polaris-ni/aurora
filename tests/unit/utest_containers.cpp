@@ -3,7 +3,8 @@
 /// 测试说明: 覆盖 Column/Row 容器级行为——初始化列表构造与所有权、gap 落位、
 /// MainAxisSize::Max 撑满、MainAxisAlignment::End 收尾对齐、CrossAxisAlignment::Stretch
 /// 拉伸子项交叉轴、CrossAxisAlignment::Baseline 基线对齐（Text/Button 混排、Modifier 内边距换算、
-/// Column 回退 Start 并一次性降级提示）、负 gap 校验、属性序列化往返，以及容器子树绘制缓存
+/// Column 回退 Start 并一次性降级提示）、部分指定 Flex 字面量不翻转容器主轴、负 gap 校验、
+/// 属性序列化往返，以及容器子树绘制缓存
 /// （Display List / cache_layer）随全局光栅状态（AA 模式）世代失效
 
 #include <algorithm>
@@ -143,6 +144,34 @@ AURORA_TEST_CASE(row_gap_places_children_horizontally) {
     LayoutEngine::layout(row, bounded(300.0F, 100.0F));
     AURORA_TEST_CHECK_NEAR(row.child_nodes()[0].bounds().origin.x, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(row.child_nodes()[1].bounds().origin.x, 48.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(partial_flex_literal_cannot_flip_container_axis) {
+    // `Flex{.main_axis = X}` 这类部分指定初始化会把未写出的成员打回默认值 direction=Row，
+    // 曾让 Column 走横向布局（demo_column 面板内 "AB" 并排）。主轴归属控件类型，不随传入 Flex 漂移。
+    Column col{ColumnProps{.children = {box(100.0F, 20.0F), box(100.0F, 20.0F)},
+                           .flex =
+                               Flex{.main_axis = MainAxisAlignment::Center, .cross_axis = CrossAxisAlignment::Center}}};
+    LayoutEngine::layout(col, bounded(200.0F, 200.0F));
+    AURORA_TEST_CHECK_TRUE(col.flex.direction == FlexDirection::Column);
+    AURORA_TEST_CHECK_NEAR(col.child_nodes()[1].bounds().origin.y, 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(col.child_nodes()[1].bounds().origin.x, 0.0F, 1e-4F);
+
+    Row row{RowProps{.children = {box(40.0F, 20.0F), box(60.0F, 20.0F)},
+                     .flex = Flex{.direction = FlexDirection::Column, .main_axis = MainAxisAlignment::Center}}};
+    LayoutEngine::layout(row, bounded(300.0F, 100.0F));
+    AURORA_TEST_CHECK_TRUE(row.flex.direction == FlexDirection::Row);
+    AURORA_TEST_CHECK_NEAR(row.child_nodes()[1].bounds().origin.x, 40.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(row.child_nodes()[1].bounds().origin.y, 0.0F, 1e-4F);
+
+    // 纠轴向只针对「异轴」取值：本轴家族的 Reverse 是有效配置，必须原样保留。
+    Column rev_col{ColumnProps{.children = {box(100.0F, 20.0F), box(100.0F, 20.0F)},
+                               .flex = Flex{.direction = FlexDirection::RowReverse}}};
+    LayoutEngine::layout(rev_col, bounded(200.0F, 200.0F));
+    AURORA_TEST_CHECK_TRUE(rev_col.flex.direction == FlexDirection::ColumnReverse);
+    // 纵向反序：首项落底（容器高 40 - 子项高 20）。
+    AURORA_TEST_CHECK_NEAR(rev_col.child_nodes()[0].bounds().origin.y, 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rev_col.child_nodes()[1].bounds().origin.y, 0.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(column_main_axis_size_max_fills_height) {

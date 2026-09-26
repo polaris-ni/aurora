@@ -121,6 +121,12 @@ max_cross = max(max_cross, size_i.cross)
 
 `alloc_i` 是 flex 子项的 **`max` 约束**，子项可返回 `≤ alloc_i` 的值；若子项内容大于 `alloc_i`，则被 clamp 到 `alloc_i`。
 
+`Spacer` 即按本阶段分配：它把 `expand` 语义落成自身修饰链上的 `Modifier::expand(1.0)` 权重（权重不进 props 序列化，故由构造与 `deserialize_props` 同步维护），因此分配量是**扣除全部兄弟（含其后的）基准尺寸**后的剩余空间——`Top / Spacer / Bottom` 三段不会把末位子项挤出容器。父级主轴无限（如 `Scroll` 的内容轴）时本阶段不执行，`Spacer` 取 0。
+
+### 3.4.1 容器轴向归属
+
+`Flex::direction` 不在 `Column` / `Row` 的可配置面里：轴向由控件类型固定（`Column` 恒纵向、`Row` 恒横向），既不序列化也不进自描述。经 `ColumnProps{ .flex = Flex{...} }` 传入的字面量常是部分指定（如 `Flex{.main_axis = Center}`），未写出的 `direction` 会落到 `Flex` 的默认值 `Row`，构造时按容器自身轴向归一，避免 `Column` 被静默换成横向布局器；本轴家族的 `Reverse` 取值仍生效（`Column` 收 `RowReverse` 归一为 `ColumnReverse`）。反向排布的通用语义见 §3.7。
+
 ### 3.5 容器尺寸
 
 ```text
@@ -178,6 +184,8 @@ origin.main = container_main - (origin.main + size.main)
 | `Baseline` | `max_above - b_i` | `size_i.cross`（不拉伸） |
 
 > 注：上述 `cross_pos` 计算后还经 `std::max(cross_pos, 0.0F)` 下界钳制，结果为负时取 0（见 `FlexLayouter::cross_axis_align_pass`）。
+
+> **`Center` / `End` 的可达性（实测结论）**：§2.3 的约束传递把 `cc.min.cross = parent.min.cross`，故**显式定尺寸容器**（如 `Modifier::size(280, 80)` 的 `Row`）内的子项交叉轴尺寸被父 min 撑到 `container_cross`，此时 `cross_pos = (container_cross - size_i.cross) / 2 = 0`——公式仍成立，但 `Center` / `End` 与 `Start` 的**视觉结果相同**（内容在自身拉伸盒内按默认基线绘制）。要让交叉轴居中真正可见，须给子项自身显式交叉轴尺寸（`Modifier::size` / `height`）或改用 `Baseline`。该行为是设计使然，不是派发缺陷。
 
 **`Stretch` 语义**：子项交叉轴尺寸被强制设为 `container_cross`，无论其内容尺寸。若 `container_cross` 由 `P_min_cross` 撑大（如父 `min.width = 80`），子项也被拉伸到该值；子项同时受自身 `width` / `height` 等显式约束夹取。
 

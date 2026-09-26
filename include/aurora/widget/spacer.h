@@ -11,15 +11,15 @@ namespace aurora {
  * 在 `Column`/`Row` 中吸收主轴方向的全部剩余自由空间，用于把相邻 widget 推到两端。
  * 自身无绘制。需要「无剩余空间时退化为 0 尺寸」时用 `Spacer(false)`。
  *
- * 注意：expand=true 布局时占据测到它那一刻父级给出的主轴 max（不扣除其后兄弟），
- * 因此放在主轴 `MainAxisSize::Min` 容器中会迫使容器膨胀到父级 max——
- * 请配合 `MainAxisSize::Max` 或父约束强制尺寸使用。
+ * 剩余空间按 flex 权重在布局阶段二分配，因此会先扣除 Spacer 之后各兄弟的基准尺寸——
+ * `Top / Spacer / Bottom` 三段里 Bottom 仍占住自己的高度，不会被推出容器。
+ * 父级主轴为无限（如 `Scroll` 内容轴）时无「剩余」可言，Spacer 退化为 0。
  * @note Thread: main-thread only
  * @note Rebuildable: yes, via from_json
  */
 class Spacer : public Widget {
   public:
-    explicit Spacer(bool expand = true) : expand_(expand) {}
+    explicit Spacer(bool expand = true) : expand_(expand) { apply_expand(); }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "Spacer"; }
 
@@ -72,6 +72,7 @@ class Spacer : public Widget {
         Widget::deserialize_props(props);
         if (props.contains("expand")) {
             expand_ = props["expand"].get<bool>();
+            apply_expand();
         }
     }
 
@@ -87,6 +88,12 @@ class Spacer : public Widget {
     auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 
   private:
+    /// @brief 把 expand 落到自身修饰链：FlexLayouter 按子项 `Modifier::flex_weight` 在阶段二分配剩余空间，
+    /// 从而先扣除 Spacer 之后兄弟的基准尺寸；权重不进 props 序列化，故须随 expand 同步维护。
+    auto apply_expand() -> void {
+        modifier.set(expand_ ? Modifier().expand(1.0F) : Modifier());
+    }
+
     bool expand_ = false;
 };
 

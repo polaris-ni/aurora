@@ -69,6 +69,10 @@ class Column : public Container, public ColumnProps {
     explicit Column(ColumnProps props) {
         children_ = std::move(props.children);
         flex = props.flex;
+        // 轴向归属控件类型：部分指定的 `Flex{.main_axis = X}` 会把 direction 打回默认值 Row，令 Column 横向排布。
+        // 只纠轴向、保留 Reverse 取值（反向布局的既有表达入口，见 specification/03-layout-render.md §3.7）。
+        flex.direction =
+            props.flex.direction == FlexDirection::RowReverse ? FlexDirection::ColumnReverse : FlexDirection::Column;
         gap = props.gap;
     }
     /// @brief 便捷构造：扁平罗列子项（Column{ a, b }），免写 Node{} 与 Props 包裹。
@@ -252,6 +256,9 @@ class Row : public Container, public RowProps {
     explicit Row(RowProps props) {
         children_ = std::move(props.children);
         flex = props.flex;
+        // 与 Column 对称：轴向归属控件类型，Reverse 取值保留。
+        flex.direction =
+            props.flex.direction == FlexDirection::ColumnReverse ? FlexDirection::RowReverse : FlexDirection::Row;
         gap = props.gap;
     }
     /// @brief 便捷构造：扁平罗列子项（Row{ a, b }），免写 Node{} 与 Props 包裹。
