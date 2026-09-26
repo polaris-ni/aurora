@@ -24,7 +24,10 @@ auto VideoControls::format_time(long long ms) -> std::string {
     return oss.str();
 }
 
-VideoControls::VideoControls(VideoController *controller) : controller_(controller) { VideoControls::build_children(); }
+VideoControls::VideoControls(VideoController *controller) : controller_(controller) {
+    needs_gesture_tick_ = true;
+    VideoControls::build_children();
+}
 
 auto VideoControls::build_children() -> void {
     auto play = std::make_unique<Button>("Play");

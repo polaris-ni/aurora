@@ -254,13 +254,19 @@ inline auto run_demo(au::Node root, const std::string &title, float w, float h) 
     // 故决策只看 has_pending_dirty；输入事件随时打断等待，交互延迟不变。
     win->run([&]() -> void {
         const auto t0 = std::chrono::steady_clock::now();
+        // 每帧先驱动根的子树计时：长按阈值、甩动惯性、播放时钟等一切挂在 `Widget::tick` 上的
+        // 每帧逻辑都依赖这一跳（`Application` 路径由 `tick_all` 做同样的事；`Window::run` 不持有
+        // 根控件，故只能在帧回调里补）。缺这一跳则 demo 里的动画类控件恒停在首帧。
+        root.widget().tick(t0);
         // 注意：不可在此手调 begin_frame——present_root 内部按需 begin，
         // 部分脏区帧会刻意跳过 begin 以保留上帧像素；外层多调一次会把缓冲刷成底色，
         // 造成脏区外全白（如拖选文字时白屏）。
         (void)win->present_root(root);
         const double elapsed_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-        win->set_next_wait(au::compute_wait_timeout(win->has_pending_dirty(), /*anim_active=*/false,
+        // `anim_active` 取「本帧实际发生了渲染」：自驱动控件（视频/甩动）在 tick 里标脏 → 下一帧
+        // 仍需按 60Fps 节拍续跑；真正空闲的静态 demo 仍走无限深睡，idle CPU 不因此上升。
+        win->set_next_wait(au::compute_wait_timeout(win->has_pending_dirty(), /*anim_active=*/!win->is_idle_frame(),
                                                     /*next_deadline_ms=*/-1.0, /*frame_budget_ms=*/1000.0 / 60.0,
                                                     elapsed_ms, win->surface().paces_frames()));
     });

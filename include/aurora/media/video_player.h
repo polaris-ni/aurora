@@ -33,8 +33,10 @@ class AudioSinkGraphBridge;
 /// @note Rebuildable: yes, via from_json
 class VideoPlayer : public Container, public VideoController {
   public:
-    VideoPlayer() = default;
-    explicit VideoPlayer(std::shared_ptr<VideoSource> src) : source_(std::move(src)) {}
+    // 播放时钟走 Widget::tick → tick_gestures，而 Widget::tick 在 needs_gesture_tick_ 为假时
+    // 直接早退：不开此门则 play() 之后 on_playback_tick 永不运行，画面停在第 0 帧。
+    VideoPlayer() { needs_gesture_tick_ = true; }
+    explicit VideoPlayer(std::shared_ptr<VideoSource> src) : source_(std::move(src)) { needs_gesture_tick_ = true; }
 
     /// @brief 设置 / 获取解码源。
     auto set_source(std::shared_ptr<VideoSource> src) -> void;

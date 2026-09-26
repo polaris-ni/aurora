@@ -171,6 +171,8 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 
 帧循环由 **`Application::run()` 统一驱动**（多窗口语义见 §2.4）：每帧 pump 事件 → 集中派发 → `tick` → 逐窗口 `present_root`（脏区决策）→ `present()`。`Window::run(on_frame, max_frames)` **保留**供单窗口低阶调用方（自拼帧循环、测试、demo 直驱）使用；多窗口请走 `Application::run`。所有构建、事件、重绘都在 UI 线程（单线程 UI，见 [`01-core.md`](01-core.md) §8.1）。
 
+> ⚠ **`Window::run` 不含「逐宿主 tick」这一步**：`Widget::tick`（长按阈值、甩动惯性、`VideoPlayer` 播放时钟等一切每帧计时）只在 `Application::run` 的帧序里被驱动。低阶自拼循环若承载这类控件，须在 `on_frame` 回调内自行 `root.widget().tick(now)`，并把帧等待的 `anim_active` 取作「本帧实际发生了渲染」（`!Window::is_idle_frame()`），否则控件恒停在首帧、且首帧后即陷入无限深睡。`examples/demos/demo_common.h` 的 `run_demo` 已按此接线。
+
 ### 3.2 脏区追踪（默认开启）
 
 `Window::present_root` 按「绘制脏 `DirtyRegionTracker` / 布局脏 `layout_dirty_` / 尺寸变化 / 根变化」四要素决策本帧：

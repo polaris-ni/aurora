@@ -19,7 +19,9 @@ namespace aurora {
 /// @note Rebuildable: yes, via from_json
 class VideoControls : public Container {
   public:
-    VideoControls() = default;
+    // 播放/暂停文案与时间读数在 tick_gestures 里刷新，须开 needs_gesture_tick_，
+    // 否则 Widget::tick 早退、叠层永远停在初始的「Play / 0:00」。
+    VideoControls() { needs_gesture_tick_ = true; }
     explicit VideoControls(VideoController *controller);
 
     [[nodiscard]] auto type_name() const -> const char * override { return "VideoControls"; }

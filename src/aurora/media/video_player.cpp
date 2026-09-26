@@ -57,6 +57,9 @@ auto VideoPlayer::play() -> void {
     if (source_) {
         source_->play();
     }
+    // 起播自带一次重绘请求：帧循环靠「本帧有渲染」维持节拍，而静止画面在起播前是空闲深睡的——
+    // 不踢这一帧则 `on_playback_tick` 要等到下一次无关失效（点击/resize）才第一次跑。
+    mark_needs_paint();
 }
 
 auto VideoPlayer::pause() -> void {

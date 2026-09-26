@@ -801,6 +801,19 @@ class RhiBackend {
 
 **信号**：`playing_signal()` / `progress_signal()` / `volume_signal()` / `muted_signal()` 返回对应 `Reactive<...>*`。
 
+**播放时钟接线（两处必备门，缺一即画面恒停）**：
+
+1. `VideoPlayer` 与 `VideoControls` 在构造期打开 `needs_gesture_tick_`——`Widget::tick` 在该门为假时
+   直接早退，不开则 `play()` 之后 `on_playback_tick` 永不运行（画面停在当前帧、控制条读数停在 `0:00`）。
+2. `play()` 自带一次重绘请求（`mark_needs_paint`）——事件驱动帧循环靠「本帧实际发生了渲染」维持节拍，
+   静止画面处于空闲深睡，不踢这一帧则起播要等下一次无关失效（点击 / resize）才第一次推进。
+
+逐帧链：`tick → tick_gestures → on_playback_tick → on_frame → mark_needs_paint →（下一帧）`；
+播完自停（`position_fraction()==1.0` 且不再 playing）后链自然断开，回到空闲等待。
+**循环播放不在库内**：`VideoPlayer` 无 `loop` 属性（音频侧 `Clip::set_loop` 才有），需要循环由消费者覆盖
+`on_playback_tick`，在「playing → 自停」这一跳上 `seek(0)` + `play()`（`examples/demos/demo_video_player.cpp`
+即该写法，故该载体可在 2 秒源上持续观察）。
+
 ### 9.3 VideoControls
 
 `VideoControls`（`media/video_controls.h`）是默认控制条，可子类化换肤或重排。

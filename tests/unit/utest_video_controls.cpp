@@ -2,7 +2,7 @@
 /// 目标单元: include/aurora/media/video_controls.h
 /// 测试说明: 覆盖 VideoControls 控件叠层——构造建立 Row 子控件结构（播放/进度/时间/静音/音量）、
 /// 按钮点击经 VideoController 操纵播放器、tick_gestures 刷新时间文本与按钮文案、
-/// 无控制器降级构造、自描述与属性序列化
+/// 公开 tick 入口对叠层读数的驱动、无控制器降级构造、自描述与属性序列化
 
 #include <chrono>
 #include <memory>
@@ -133,6 +133,18 @@ AURORA_TEST_CASE(tick_updates_time_text_from_controller) {
     player.seek_fraction(0.0);
     c.tick_gestures(t_ms(0));
     AURORA_TEST_CHECK_EQ(c.time_text()->content.get().text, "0:00 / 1:00");
+}
+
+AURORA_TEST_CASE(public_tick_entry_refreshes_readouts) {
+    VideoPlayer player(make_long_source());  // 60s
+    ControlsHook c(&player);
+    player.seek_fraction(0.5);  // 30s
+    player.toggle_play();
+    c.tick(t_ms(0));
+    // 回归点：`Widget::tick` 在 `needs_gesture_tick_` 为假时直接早退，叠层便永远停在初始
+    // 「Play / 0:00 / 0:00」读数上——既有用例直调受保护 `tick_gestures`，掩盖了这个门。
+    AURORA_TEST_CHECK_TRUE(c.play_button()->label.get() == LocalizedString{"Pause"});
+    AURORA_TEST_CHECK_EQ(c.time_text()->content.get().text, "0:30 / 1:00");
 }
 
 AURORA_TEST_CASE(constructs_without_controller_no_crash) {
