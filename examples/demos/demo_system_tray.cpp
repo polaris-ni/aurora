@@ -96,6 +96,14 @@ auto main() -> int {
     app.scene().root_node() = std::move(root);
     app.focus().set_root(&app.scene().root());
 
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+    // 无人值守取证通道：首行气泡回显文本走 `/api/tree` 读（根在 `run()` 前一次性回填，故闭包
+    // 直接引用稳定根即可）。未设 AURORA_INSPECTOR_PORT 时不启动，err.txt 的 `[tray]` 行不变。
+    auto inspector = start_demo_inspector(
+        [&app]() -> au::Node { return au::Node{app.scene().root_node()}; },
+        [&app]() -> au::Surface * { return app.window() != nullptr ? &app.window()->surface() : nullptr; });
+#endif
+
     AURORA_LOG_INFO("demo", "[tray] window shown; look for the icon in the notification area");
     app.run();
     return 0;

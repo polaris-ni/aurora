@@ -30,6 +30,7 @@
 // demo 目标链接 aurora_inspector_server，run_demo 可经环境变量选择启动 InspectorServer。
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <memory>
 
 #include "aurora/inspector/inspector_server.h"
@@ -177,6 +178,50 @@ class GradientTitle : public au::LeafWidget {
 };
 
 // ---------------------------------------------------------------------------
+// 远程检视 opt-in（同一口径供「不经 run_demo」的载体复用）
+// ---------------------------------------------------------------------------
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+/// @brief 设了 `AURORA_INSPECTOR_PORT` 即在回环端口起 InspectorServer，未设/起不来返回 nullptr。
+/// @param get_root   取当前 UI 树根（HTTP 工作线程内调用，实现方须自证安全——稳定根最安全）。
+/// @param get_surface 可选，取后端 Surface（`/api/debug/*` 与截图端点需要）。
+/// @param get_windows 可选，枚举窗口 id（多窗口载体用，注册后 `/api/windows` 与 `?window=` 可用）。
+/// @param get_window_root 可选，按窗口 id 取该窗树根（无效 id 返回空 Node）。
+/// @note 端口解析与客户端侧同口径：值须全串十进制 1..65535，脏值回落默认 6280（BUILD_OPTIONS.md §5）。
+inline auto start_demo_inspector(std::function<au::Node()> get_root,
+                                 std::function<au::Surface *()> get_surface = nullptr,
+                                 std::function<std::vector<std::uint32_t>()> get_windows = nullptr,
+                                 std::function<au::Node(std::uint32_t)> get_window_root = nullptr)
+    -> std::unique_ptr<au::InspectorServer> {
+    const char *port_env = std::getenv("AURORA_INSPECTOR_PORT");
+    if (port_env == nullptr || *port_env == '\0') {
+        return nullptr;  // 未 opt-in：demo 默认安静
+    }
+    std::uint16_t port = 6280;  // 与 InspectorServer::start() 默认值一致
+    char *end = nullptr;
+    const long long parsed = std::strtoll(port_env, &end, 10);
+    if (end != nullptr && *end == '\0' && parsed >= 1 && parsed <= 65535) {
+        port = static_cast<std::uint16_t>(parsed);
+    }
+    auto server = std::make_unique<au::InspectorServer>(std::move(get_root));
+    if (get_surface) {
+        server->set_surface_getter(std::move(get_surface));
+    }
+    if (get_windows) {
+        server->set_window_ids_getter(std::move(get_windows));
+    }
+    if (get_window_root) {
+        server->set_window_tree_getter(std::move(get_window_root));
+    }
+    if (!server->start(port)) {
+        AURORA_LOG_ERROR("demo", "[demo] inspector server failed to start on port ", port);
+        return nullptr;
+    }
+    AURORA_LOG_INFO("demo", "[demo] inspector server listening on 127.0.0.1:", port);
+    return server;
+}
+#endif
+
+// ---------------------------------------------------------------------------
 // 统一窗口启动器：构建 UI 树并打开真实平台窗口（事件经 EventDispatcher 派发）。
 // 后端由 create_native_window 按平台自动选择（Win32/X11/Cocoa/GLFW）；无真实后端或窗口
 // 创建失败则回退无头 PNG 渲染，保证各 demo 均可编译可验证。
@@ -213,24 +258,9 @@ inline auto run_demo(au::Node root, const std::string &title, float w, float h) 
 #ifdef AURORA_BUILD_INSPECTOR_SERVER
     // 远程检视 opt-in：设置 AURORA_INSPECTOR_PORT 环境变量即随 demo 启动 InspectorServer，
     // 供 aurora_e2e_client / aurora_mcp 经回环 REST 驱动本窗口；未设置则不启动（demo 默认安静）。
-    // 端口解析与客户端侧同口径：值须全串十进制 1..65535，脏值回落默认 6280（BUILD_OPTIONS.md §5）。
-    std::unique_ptr<au::InspectorServer> inspector;
-    if (const char *port_env = std::getenv("AURORA_INSPECTOR_PORT"); port_env != nullptr && *port_env != '\0') {
-        std::uint16_t port = 6280;  // 与 InspectorServer::start() 默认值一致
-        char *end = nullptr;
-        const long long parsed = std::strtoll(port_env, &end, 10);
-        if (end != nullptr && *end == '\0' && parsed >= 1 && parsed <= 65535) {
-            port = static_cast<std::uint16_t>(parsed);
-        }
-        inspector = std::make_unique<au::InspectorServer>([&root]() -> au::Node { return au::Node{root}; });
-        inspector->set_surface_getter([&win]() -> au::Surface * { return &win->surface(); });
-        if (inspector->start(port)) {
-            AURORA_LOG_INFO("demo", "[run_demo] inspector server listening on 127.0.0.1:", port);
-        } else {
-            AURORA_LOG_ERROR("demo", "[run_demo] inspector server failed to start on port ", port);
-            inspector.reset();
-        }
-    }
+    // 端口解析与回调接线统一走 `start_demo_inspector`（自建 Application 的载体同源复用）。
+    auto inspector = start_demo_inspector([&root]() -> au::Node { return au::Node{root}; },
+                                          [&win]() -> au::Surface * { return &win->surface(); });
 #endif
     win->surface().set_event_handler([&](au::Event &e) -> void {
         auto &wd = root.widget();

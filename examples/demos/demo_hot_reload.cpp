@@ -6,7 +6,9 @@
 // ui.json 不存在时本程序自动写入一份默认内容，载体自包含、不依赖外部夹具。
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <utility>
 
 #include "demo_common.h"
 
@@ -77,21 +79,40 @@ auto main() -> int {
     }
     au::Application app{au::Scene{au::Column{}}, std::move(win_res.value()), opts};
 
-    // 首帧前同步一次：窗口一出现就是 ui.json 描述的内容。
+    // 每帧轮询：文件内容变化即重建整棵树。try_sync 返回 nullptr 表示「无变化」或「解析失败」，
+    // 后者刻意不抛错、旧树保持不动 —— 这也是本载体的一个观察点。
+    // 重建同时把新根快照进互斥保护的小句柄，供 InspectorServer 在 HTTP 工作线程读取
+    // （本载体每轮替换根，故不能像稳定根载体那样直接闭包引用）。
+    std::mutex tree_mtx;
+    au::Node tree_snapshot;
+    auto publish = [&app, &tree_mtx, &tree_snapshot](std::shared_ptr<au::Widget> tree) -> void {
+        apply_tree(app, std::move(tree));
+        const std::scoped_lock lock{tree_mtx};
+        tree_snapshot = au::Node{app.scene().root_node()};
+    };
     if (auto first = reloader.try_sync()) {
-        apply_tree(app, std::move(first));
+        publish(std::move(first));
     } else {
         AURORA_LOG_ERROR("demo", "[hot_reload] initial load failed -- check ", ui_path, " syntax");
     }
 
-    // 每帧轮询：文件内容变化即重建整棵树。try_sync 返回 nullptr 表示「无变化」或「解析失败」，
-    // 后者刻意不抛错、旧树保持不动 —— 这也是本载体的一个观察点。
-    app.set_on_frame([&app, &reloader]() -> void {
+    app.set_on_frame([&app, &reloader, &publish]() -> void {
         if (auto tree = reloader.try_sync()) {
-            apply_tree(app, std::move(tree));
+            publish(std::move(tree));
             AURORA_LOG_INFO("demo", "[hot_reload] tree rebuilt from ", AURORA_UI_FILE);
         }
     });
+
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+    // 无人值守取证通道：读窗口内 `Text` / `TextInput` 的实时内容走 `/api/tree`，与本载体的
+    // 帧回调同源；未设 AURORA_INSPECTOR_PORT 时不启动，日志基线（TC-APP-007 行数）不受影响。
+    auto inspector = start_demo_inspector(
+        [&tree_mtx, &tree_snapshot]() -> au::Node {
+            const std::scoped_lock lock{tree_mtx};
+            return au::Node{tree_snapshot};
+        },
+        [&app]() -> au::Surface * { return app.window() != nullptr ? &app.window()->surface() : nullptr; });
+#endif
 
     app.run();
     return 0;
