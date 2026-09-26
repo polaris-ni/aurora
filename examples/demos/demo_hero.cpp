@@ -42,9 +42,8 @@ auto main() -> int {
         lbl.modifier.set(aurora::Modifier{}.background(pal::AURORA_ACCENT).size(64.0F, 48.0F));
         aurora::Hero logo{"logo", aurora::Node{std::move(lbl)}};
         auto btn = aurora::Button{"Go to detail"};
-        btn.set_on_click([host, make_detail, fade]() -> void {
-            host->push(aurora::Route{make_detail(), "detail", fade});
-        });
+        btn.set_on_click(
+            [host, make_detail, fade]() -> void { host->push(aurora::Route{make_detail(), "detail", fade}); });
         return aurora::Column{aurora::ColumnProps{.children = {std::move(logo), gap(12.0F), std::move(btn)}}};
     };
 

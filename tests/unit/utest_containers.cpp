@@ -149,9 +149,9 @@ AURORA_TEST_CASE(row_gap_places_children_horizontally) {
 AURORA_TEST_CASE(partial_flex_literal_cannot_flip_container_axis) {
     // `Flex{.main_axis = X}` 这类部分指定初始化会把未写出的成员打回默认值 direction=Row，
     // 曾让 Column 走横向布局（demo_column 面板内 "AB" 并排）。主轴归属控件类型，不随传入 Flex 漂移。
-    Column col{ColumnProps{.children = {box(100.0F, 20.0F), box(100.0F, 20.0F)},
-                           .flex =
-                               Flex{.main_axis = MainAxisAlignment::Center, .cross_axis = CrossAxisAlignment::Center}}};
+    Column col{
+        ColumnProps{.children = {box(100.0F, 20.0F), box(100.0F, 20.0F)},
+                    .flex = Flex{.main_axis = MainAxisAlignment::Center, .cross_axis = CrossAxisAlignment::Center}}};
     LayoutEngine::layout(col, bounded(200.0F, 200.0F));
     AURORA_TEST_CHECK_TRUE(col.flex.direction == FlexDirection::Column);
     AURORA_TEST_CHECK_NEAR(col.child_nodes()[1].bounds().origin.y, 20.0F, 1e-4F);

@@ -90,9 +90,7 @@ class Spacer : public Widget {
   private:
     /// @brief 把 expand 落到自身修饰链：FlexLayouter 按子项 `Modifier::flex_weight` 在阶段二分配剩余空间，
     /// 从而先扣除 Spacer 之后兄弟的基准尺寸；权重不进 props 序列化，故须随 expand 同步维护。
-    auto apply_expand() -> void {
-        modifier.set(expand_ ? Modifier().expand(1.0F) : Modifier());
-    }
+    auto apply_expand() -> void { modifier.set(expand_ ? Modifier().expand(1.0F) : Modifier()); }
 
     bool expand_ = false;
 };

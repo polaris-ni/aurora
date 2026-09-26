@@ -86,8 +86,8 @@ AURORA_TEST_CASE(spacer_between_two_siblings_keeps_both_inside) {
     AURORA_TEST_CHECK_NEAR(col.child_nodes()[0].bounds().origin.y, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(col.child_nodes()[1].bounds().size.height, 144.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(col.child_nodes()[2].bounds().origin.y, 172.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(col.child_nodes()[2].bounds().origin.y + col.child_nodes()[2].bounds().size.height,
-                           200.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(col.child_nodes()[2].bounds().origin.y + col.child_nodes()[2].bounds().size.height, 200.0F,
+                           1e-4F);
 }
 
 AURORA_TEST_CASE(spacer_describe_and_serialize_roundtrip) {
