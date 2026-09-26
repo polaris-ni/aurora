@@ -351,7 +351,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_PROFILING=OFF
 cmake -S . -B build-trace -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_TRACING=ON
 ```
 
-> **门槛配置约定**：**时间类**硬门槛（帧时间、P99、长任务）在 `Release + PROFILING=OFF` 下测量，避免插桩污染读数；**计数类**硬门槛（`RenderCounters` 各字段、脏区面积比、full-redraw 帧数）在 `Release + PROFILING=ON` 下测量——计数器在宏关闭时恒为 0，无法作为门槛。
+> **门槛配置约定**：**时间类**硬门槛（帧时间、P99、长任务）在 `Release + PROFILING=OFF` 下测量，避免插桩污染读数；**计数类**硬门槛（`RenderCounters` 各字段、脏区面积比、full-redraw 帧数）在 `Release + PROFILING=ON` 下测量——计数器在宏关闭时恒为 0，无法作为门槛。计数类门槛现由 `tests/unit/utest_scroll.cpp` 的用例 `scroll_regression_counter_gates` 实断言：阈值只登记在 `tools/check/perf_gates.json`（G-5 至 G-8），用例按 `id` 读取，`PROFILING=ON` 时逐项对照、否则注册 skip 桩。
 > 两者互不冲突：计数是确定性的（与机器无关），可作为 CI 回归锚点；时间是环境相关的，只做趋势对比。测量配方见 [`GUIDELINE.md`](GUIDELINE.md) §14。
 
 ### 4.2 `AURORA_ENABLE_SIMD`
