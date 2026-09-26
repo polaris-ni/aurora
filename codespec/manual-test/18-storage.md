@@ -150,11 +150,11 @@
 | 项目 | 内容 |
 |:---|:---|
 | 用例编号 | TC-STORAGE-001 |
-| 测试目的 | 确认载体可构建启动，并显示两个带位置键的独立列表与三个操作按钮 |
+| 测试目的 | 确认载体可构建启动，并显示两个带位置键的独立列表与两个操作按钮 |
 | 前置条件 | 位于仓库根目录；`build/` 已完成 CMake 配置；本机工具链可用 |
 | 依赖用例 | 无 |
 | 操作步骤 | 1. 构建载体：`cmake --build build --target demo_scroll_restore`（纯执行，无预期结果）<br>2. 启动 `./build/demo_scroll_restore.exe 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>3. 查看窗口内是否出现两个列表区域及其各自的行内容<br>4. 清点窗口内可点击的操作按钮及其文本<br>5. 查看 `err.txt` 的内容与行数 |
-| 预期结果 | 3. 出现左右两个独立列表区域，各自显示带行号的行内容，滚动条位于顶部（首次运行时位置为初始值）<br>4. 三个按钮：`save now`、`reset left`，以及另一个与右侧列表相关的操作按钮（以窗口实际文本为准）<br>5. 恰 1 行 `INF` 级 `[run_demo] window shown: Scroll restore · Aurora Demo`，无 `ERR` / `FTL` 级日志 |
+| 预期结果 | 3. 出现左右两个独立列表区域，各自显示带行号的行内容，滚动条位于顶部（首次运行时位置为初始值）<br>4. 恰两个按钮，文本为 `reset left` 与 `save now`——右侧列表没有专属按钮，它的位置只靠 `save now` 保存（与 §1.2 对载体的描述一致）<br>5. 恰 1 行 `INF` 级 `[run_demo] window shown: Scroll restore · Aurora Demo`，无 `ERR` / `FTL` 级日志 |
 
 ### 2.2 跨进程持久化
 
@@ -190,8 +190,8 @@
 | 测试目的 | 验证按键清除位置是彻底删除，重启后不会复活 |
 | 前置条件 | 载体 `demo_scroll_restore` 已构建成功；左侧列表已有已保存的位置（TC-STORAGE-003 之后） |
 | 依赖用例 | TC-STORAGE-001, TC-STORAGE-003 |
-| 操作步骤 | 1. 启动 `./build/demo_scroll_restore.exe`，确认左侧列表恢复到了上次的位置（纯执行，无预期结果）<br>2. 点击 `reset left` 按钮（纯执行，无预期结果）<br>3. 在平台配置目录下读取 `demo_scroll_restore.json`，检查其内容变化<br>4. 关闭窗口后重新启动程序（纯执行，无预期结果）<br>5. 读取左侧列表当前的首行行号，并与右侧列表的位置对照 |
-| 预期结果 | 3. 文件中该键的记录**已被移除**（而非被改写为 0）<br>5. 左侧列表回到顶部（初始位置），说明该键确已删除且未被复活；右侧列表仍恢复到自己的上次位置（未被连坐清除），即两个键的清除操作互不影响 |
+| 操作步骤 | 1. 启动 `./build/demo_scroll_restore.exe`，确认左侧列表恢复到了上次的位置（纯执行，无预期结果）<br>2. 点击 `reset left` 按钮（纯执行，无预期结果）<br>3. 立刻在平台配置目录下读取 `demo_scroll_restore.json`，记录该键是否还在<br>4. 点击 `save now` 触发一次落盘，再次读取该文件<br>5. 关闭窗口后重新启动程序（纯执行，无预期结果）<br>6. 读取左侧列表当前的位置，并与右侧列表的位置对照 |
+| 预期结果 | 3. 该键**仍在文件里**且值等于清除前的位置——`clear` 只登记待落盘墓碑，落盘时机归 App 的 `flush`，而载体的 `reset left` 不做 flush，故此刻文件未动<br>4. 文件中该键的记录**已被移除**（而非被改写为 0），并在 `__aurora_preference_meta__.tombstones` 下留下该键的墓碑；右侧列表的键不受影响<br>6. 左侧列表回到顶部（初始位置），说明该键确已删除且未被复活；右侧列表仍恢复到自己的上次位置（未被连坐清除），即两个键的清除操作互不影响 |
 
 ### 2.4 异常输入
 
@@ -210,8 +210,8 @@
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| TC-STORAGE-001 | | | | | | | |
-| TC-STORAGE-002 | | | | | | | |
-| TC-STORAGE-003 | | | | | | | |
-| TC-STORAGE-004 | | | | | | | |
-| TC-STORAGE-005 | | | | | | | |
+| TC-STORAGE-001 | 2026-09-26 | Qoder Agent | PASS | | 客户区 640×430 逻辑（144 DPI 下 960×645 物理）；控件树里 LazyList 两个，restore_key 分别为 `demo.left` 与 `demo.right`，清空配置文件后两者 scroll_offset 均为 0.0，各自 realised 出带行号的行（`item 0` 起）；按钮恰两个，文本 `reset left` 与 `save now`；stderr 恰 1 行 INF `[run_demo] window shown: Scroll restore · Aurora Demo`，无 ERR / FTL | | 原预期结果 4 写作「三个按钮，另有第三个与右侧列表相关的按钮（以窗口实际文本为准）」，与本文 §1.2「两个按钮」自相矛盾且「以实际文本为准」不可判定，已按实测改为两个并点名文本；控件状态与滚动量经带 InspectorServer 的 `build-inspector/` 同名副本读取，stderr 基线另用文档指定的 `build/demo_scroll_restore.exe` 复核（后者恰 1 行） |
+| TC-STORAGE-002 | 2026-09-26 | Qoder Agent | PASS | | 删掉残留文件后启动，左列表向下滚 4 格，scroll_offset 读到 160.0；点 `save now` 后**进程仍在运行**时文件即已生成，内容为合法 JSON，含 `scroll_positions.demo.left` 等于 160.0（非初始值 0），另只有 `__aurora_preference_meta__` 一项元数据，无无关内容 | | 落盘由按钮回调里的 sync 加 flush 完成，不是退出时补写；退出后再读文件内容与之一致 |
+| TC-STORAGE-003 | 2026-09-26 | Qoder Agent | PASS | | 重启后读到左 160.0、右 0.0，左侧确实回到上次位置；把右列表滚到 360.0 后 `save now` 并关窗，文件里两个键并列为 160.0 与 360.0；再次启动读到左 160.0、右 360.0，两个位置各自独立恢复，既没被并成同一个值也没有谁停在顶部 | | 位置读数取控件的 `scroll_offset` 属性（精确值，零偏差）；dump 里的 realised 行含未上屏的预生成行，不据以判「首行行号」 |
+| TC-STORAGE-004 | 2026-09-26 | Qoder Agent | PASS | | 点 `reset left` 后左列表 offset 立刻归 0、右侧仍 360.0，但此刻文件里左键记录还在（值仍是 160.0）；再点 `save now` 后文件里 `scroll_positions.demo.left` 被移除而非改写为 0，并在 `__aurora_preference_meta__.tombstones` 下留下该键墓碑，右端 360.0 原样在；关窗重启后左 0.0、右 360.0 | | 原步骤 3 在读文件前不含任何落盘动作，而 `ScrollStorage::clear` 的契约是「登记墓碑、下次 sync 写穿」，按原顺序判定必然与预期冲突，故把落盘一步补进步骤 4；这是文档与契约的不一致，不是产品缺陷 |
+| TC-STORAGE-005 | 2026-09-26 | Qoder Agent | PASS | | 把文件内容换成单个 `{` 后启动：窗口正常出现，两个列表都停在 0.0（备份里右端原为 360.0，说明损坏内容没被当作位置读出来），进程存活且退出码 0，无异常对话框、无卡死；stderr 仅 1 行 INF，无 ERR / FTL；再换成 `{}` 启动同样正常、同样停在初始位置 | | 解析失败被包成 `PrefsParseFailed` 错误返回值而非日志行，故 err.txt 里没有任何读取失败提示，符合预期结果 5「若输出提示则不得为 FTL」的限定；执行完已把备份写回 |
