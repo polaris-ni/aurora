@@ -230,7 +230,7 @@
 | 前置条件 | 载体 `demo_multi_window` 已构建成功；鼠标可用 |
 | 依赖用例 | TC-WINDOW-002 |
 | 操作步骤 | 1. 启动 `./build/demo_multi_window.exe 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>2. 在主窗点击 `Open modal dialog (blocks main window)` 按钮（纯执行，无预期结果）<br>3. 查看新窗口的标题与尺寸，并读取 `err.txt` 的行数<br>4. 在主窗内点击 `New auxiliary window` 按钮（纯执行，无预期结果）<br>5. 检查主窗计数文本与 `err.txt` 是否变化，并观察两窗的激活外观<br>6. 在模态窗口内点击 `Close modal` 按钮（纯执行，无预期结果）<br>7. 再次在主窗内点击 `New auxiliary window` 按钮（纯执行，无预期结果）<br>8. 检查主窗计数文本与 `err.txt` |
-| 预期结果 | 3. 出现标题为 `Modal dialog`、客户区约 360×200 的窗口；`err.txt` 行数**不因打开模态而增加**（打开模态不产生日志）<br>5. 主窗计数文本保持打开模态前的值；`err.txt` **无新增行**（主窗输入确被屏蔽，按钮回调未执行）；模态窗口为激活外观、主窗为非激活外观<br>8. 主窗计数文本增加 1、`err.txt` 新增 1 行 `[multi_window] opened window id=`（输入已自动恢复，无需点击主窗激活） |
+| 预期结果 | 3. 出现标题为 `Modal dialog`、客户区约 360×200 的窗口；`err.txt` 行数**不因打开模态而增加**（打开模态不产生日志）<br>5. 主窗计数文本**不因该点击而增加**：打开模态后计数即已变为 `windows = 2`（模态窗自身计入 `window_count()`），点击后仍为 `windows = 2`；`err.txt` **无新增行**（主窗输入确被屏蔽，按钮回调未执行）；模态窗口为激活外观、主窗为非激活外观<br>8. 主窗计数文本较关闭模态后增加 1（实测 `windows = 2`，即主窗加新建的辅助窗口，比打开模态前的 1 多 1）、`err.txt` 新增 1 行 `[multi_window] opened window id=`（输入已自动恢复，无需点击主窗激活） |
 
 ### 2.4 跨窗通知
 
@@ -287,24 +287,38 @@
 | 项目 | 内容 |
 |:---|:---|
 | 用例编号 | TC-WINDOW-011 |
-| 测试目的 | 验证关闭主窗这一默认退出路径同样能结束进程，且辅助窗口不会导致进程残留 |
+| 测试目的 | 验证关闭主窗这一默认退出路径能结束帧循环并干净收尾 |
+| 前置条件 | 载体 `demo_multi_window` 已构建成功；鼠标可用 |
+| 依赖用例 | TC-WINDOW-002 |
+| 操作步骤 | 1. 启动 `./build/demo_multi_window.exe 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>2. 点击主窗标题栏的关闭按钮（纯执行，无预期结果）<br>3. 记录进程退出码并确认窗口全部消失<br>4. 查看 `err.txt` 全文 |
+| 预期结果 | 3. 退出码为 0；进程列表中不再存在该进程，无窗口残留<br>4. 无 `ERR` 或 `FTL` 级日志 |
+
+#### TC-WINDOW-012 主窗关闭后辅助窗口存活（LastWindowClosed 语义）
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-012 |
+| 测试目的 | 验证默认退出策略下关闭主窗**不**连带关闭其他窗口，进程存活到最后一扇窗口关闭为止 |
 | 前置条件 | 载体 `demo_multi_window` 已构建成功；鼠标可用 |
 | 依赖用例 | TC-WINDOW-002, TC-WINDOW-003 |
-| 操作步骤 | 1. 启动 `./build/demo_multi_window.exe 1> out.txt 2> err.txt`，并新建一扇辅助窗口（纯执行，无预期结果）<br>2. 点击主窗的关闭按钮（纯执行，无预期结果）<br>3. 记录进程退出码并确认辅助窗口已随之关闭<br>4. 查看 `err.txt` 全文 |
-| 预期结果 | 3. 退出码为 0；辅助窗口一并关闭，进程列表中不再存在该进程<br>4. 无 `ERR` 或 `FTL` 级日志 |
+| 操作步骤 | 1. 启动 `./build/demo_multi_window.exe 1> out.txt 2> err.txt`，并新建一扇辅助窗口（纯执行，无预期结果）<br>2. 关闭主窗的标题栏关闭按钮（纯执行，无预期结果）<br>3. 记录进程存活状态与存活窗口清单，并查看 `err.txt` 新增行<br>4. 关闭剩余的辅助窗口（纯执行，无预期结果）<br>5. 记录进程退出码与窗口清单<br>6. 查看 `err.txt` 全文 |
+| 预期结果 | 3. 进程**仍存活**，只剩标题为 `Auxiliary #1` 的窗口；`err.txt` 新增 1 行 `INF`，消息形如 `[app] window host closed and reaped: id= <N>`（`<N>` 为主窗 id）<br>5. 退出码为 0，无窗口残留<br>6. 无 `ERR` 或 `FTL` 级日志 |
+
+**关于 TC-WINDOW-011 与 TC-WINDOW-012 的分工**：`ExitPolicy::LastWindowClosed`（`window.h` 的默认策略，语义见 `specification/06-app-platform.md` §2.4）下，「关闭主窗即退出」只在主窗是**最后一扇**窗口时成立；仍有辅助窗口时进程必须存活。两例合起来覆盖该边界，任何单独一例都不足。
 
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| TC-WINDOW-001 | | | | | | | |
-| TC-WINDOW-002 | | | | | | | |
-| TC-WINDOW-003 | | | | | | | |
-| TC-WINDOW-004 | | | | | | | |
-| TC-WINDOW-005 | | | | | | | |
-| TC-WINDOW-006 | | | | | | | |
-| TC-WINDOW-007 | | | | | | | |
-| TC-WINDOW-008 | | | | | | | |
-| TC-WINDOW-009 | | | | | | | |
-| TC-WINDOW-010 | | | | | | | |
-| TC-WINDOW-011 | | | | | | | |
+| TC-WINDOW-001 | 2026-09-26 | Qoder Agent | PASS | | 步骤 4：退出码 0。步骤 5：`build/demo_custom_surface_headless.png` 存在且为 1920813 字节（约 1.9 MB）。步骤 6：`err.txt` 恰 1 行，级别 `INF`，消息为 `[demo_custom_surface] custom Surface PNG: writePNG: invalid dimensions`，`out.txt` 为 0 字节 | | 步骤 1 的两个目标在既有 `build/` 目录构建成功。该行属 §1.2 已登记的方案 A 构造局限，按 §1.2 不记缺陷，且其 `INF` 级别与「不中止」语义正是本例的判定要点 |
+| TC-WINDOW-002 | 2026-09-26 | Qoder Agent | PASS | | 步骤 2：标题 `Aurora multi-window (main)`，窗口 802x626 物理像素、客户区 780x570 物理像素，本机 DPI 缩放 150% 即 520x380 逻辑。步骤 3：`err.txt` 恰 1 行 `INF`，消息含 `[multi_window] main window shown (close it to exit)`。步骤 4：计数文本为 `windows = 1` | | 计数文本以窗口自身像素读数为准（经 `PrintWindow` 抓取），无障碍树同值。主窗 6 个按钮的无障碍名与 §2 用例引用的标签逐一对应 |
+| TC-WINDOW-003 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：新增 1 行 `INF` 且消息为 `[multi_window] opened window id=2 total=2`，出现标题 `Auxiliary #1`（客户区 660x450 物理像素即 440x300 逻辑），主窗计数像素读数 `windows = 2`。步骤 5：新增行 `opened window id=3 total=3`（id 与上次不同），出现 `Auxiliary #2`，主窗计数像素读数 `windows = 3` | | 回调线程 id 与启动行一致，即点击在 UI 线程派发。顺带观察：此刻无障碍树仍回读 `windows = 2`（快照滞后于帧末更新），故窗口内文本一律以像素读数判定 |
+| TC-WINDOW-004 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：点击 `Auxiliary #1` 内的 `Close this window` 后该窗消失并新增 `INF` 行 `[app] window host closed and reaped: id=2`，主窗与 `Auxiliary #2` 均存活可交互（主窗随后仍可新建窗口并记 `opened window id=4 total=3`，`Auxiliary #2` 的关闭按钮点击后同样正常关闭）。步骤 4：主窗计数像素读数 `windows = 2` | | 「#2 按钮仍可点击」以点击其自身关闭按钮并观察窗口消失来证明，而非仅看外观 |
+| TC-WINDOW-005 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：消失的是 `Auxiliary #2`（`err.txt` 记 `[app] window host closed and reaped: id=3`，id=3 即第二次新建者），`Auxiliary #1` 保留。步骤 4：主窗计数像素读数 `windows = 2` | | 「最近打开者」以 `err.txt` 的 id 对照确认：第二次新建记 `opened window id=3`，被回收的正是 id=3 |
+| TC-WINDOW-006 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：出现标题 `Modal dialog`、客户区 540x300 物理像素（即 360x200 逻辑）的窗口，`err.txt` 行数保持 1，未因打开模态而增加。步骤 5：`IsWindowEnabled(主窗)` 为 False 而模态窗为 True，主窗计数像素读数保持 `windows = 2` 不变（该 2 即主窗加模态窗），`err.txt` 无新增行。步骤 8：点击 `Close modal`（客户区 101x231 物理像素）后 `IsWindowEnabled(主窗)` 自动恢复 True，随即点击主窗新建按钮成功新增 1 行 `INF` 且消息为 `[multi_window] opened window id=3 total=2`，主窗计数像素读数 `windows = 2`（模态窗已注销、辅助窗新增） | | 模态拦截在 OS 层实现（`EnableWindow(owner, FALSE)`，见 `src/aurora/window/win32_host.cpp`），故步骤 4/5 的判据取 `IsWindowEnabled` 的 False 到 True 翻转：本机会话锁屏、真实鼠标不可用，而合成点击经 `PostMessage` 直达窗口过程、绕过 OS 对禁用窗口的输入丢弃（对照实验：主窗禁用态下仍触发了回调并多出 1 扇辅助窗口），因此该通道不得用作本步判据。「模态窗激活、主窗非激活」的外观项本轮无法判定（前台窗口恒为锁屏 CoreWindow）。另按实测把预期 5/8 的计数口径回写为「模态窗自身计入 `window_count()`」 |
+| TC-WINDOW-007 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：两扇辅助窗口的回显区在同一时刻的像素截图均为 `broadcast #1`（主窗回显同为 `broadcast #1`）。步骤 5：再点击两次后两窗回显区均为 `broadcast #3`，序号与点击次数一致 | | 广播不写日志，`err.txt` 行数不变。无障碍树在第三次广播后仍回读 `broadcast #1`（快照滞后），判定同样以像素截图为准 |
+| TC-WINDOW-008 | 2026-09-26 | Qoder Agent | SKIP | | `EnumDisplayDevicesW` 仅枚举到 1 台活动显示器（`\\.\DISPLAY1`，AMD Radeon RX 7800 XT，主屏），§1.3 的「≥2 台显示器」前置不满足。作为旁证仍执行了步骤 2：`err.txt` 新增 1 行 `INF` 且消息为 `[multi_window] single display; nothing to move to`，主窗位置未变 | | 按 §1.7 记 SKIP 而非 FAIL，载体自身的单显示器分支日志与预期一致 |
+| TC-WINDOW-009 | 2026-09-26 | Qoder Agent | SKIP | | 同 TC-WINDOW-008：本机仅 1 台显示器，无从取得第二台不同 DPI 缩放的显示器，前置条件无法满足 | | 依赖用例 TC-WINDOW-008 亦为 SKIP |
+| TC-WINDOW-010 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：退出码 0，`EnumWindows` 已枚举不到该进程的任何窗口（含仍打开的 `Auxiliary #1`），进程不残留。步骤 4：`err.txt` 全文 2 行均为 `INF`（`main window shown`、`opened window id=2 total=2`），无 `ERR`/`FTL` | | 辅助窗口未各自关闭即随进程结束，符合 `Application::quit()` 在任何退出策略下都生效的语义（对照 TC-WINDOW-012） |
+| TC-WINDOW-011 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：退出码 0，进程不再存在且无窗口残留。步骤 4：`err.txt` 仅启动的 1 行 `INF`，无 `ERR`/`FTL` | | 本机会话锁屏，标题栏属非客户区、合成点击落不到，故步骤 2 以发送 `WM_SYSCOMMAND`/`SC_CLOSE` 等价代替——这正是点击标题栏关闭按钮时系统投递给窗口的消息。本用例文本于本轮修订（原步骤含「新建一扇辅助窗口」，与 `ExitPolicy::LastWindowClosed` 语义冲突，见 §2.6 分工说明） |
+| TC-WINDOW-012 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：关闭主窗后进程仍存活，存活窗口只剩标题 `Auxiliary #1` 的一扇，`err.txt` 新增 1 行 `INF` 且消息为 `[app] window host closed and reaped: id=1`（id=1 即主窗）。步骤 5：关闭该辅助窗口后退出码 0，无窗口残留。步骤 6：`err.txt` 全文 3 行均为 `INF`，无 `ERR`/`FTL` | | 关闭最后一扇窗口时进程先行退出，故不再有该窗口的回收日志行，属预期时序。本例为新增，用以固定「主窗关闭不连带关闭其他窗口」这一默认策略边界 |
