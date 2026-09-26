@@ -732,6 +732,48 @@ AURORA_TEST_CASE(find_endpoint_locates_by_type_key_text_and_combination) {
 #endif
 }
 
+// query 值的百分号解码：HTTP 客户端对空格 / 非 ASCII 一律按 `%XX` 编码，服务端不解码就永远
+// 匹配不上这些值（真实场景：`/api/find?text=New%20auxiliary%20window` 定位多窗口载体的按钮）。
+AURORA_TEST_CASE(find_endpoint_percent_decodes_query_values) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    FindTree tree = make_find_tree();
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    const std::uint16_t port = server.port();
+
+    // 中文标签的 UTF-8 逐字节编码形态（"确定" / "取消"）。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?text=%E7%A1%AE%E5%AE%9A").find("\"path\":\"0\"") !=
+                           std::string::npos);
+    // 十六进制大小写等价。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?text=%e7%a1%ae%e5%ae%9a").find("\"count\":1") !=
+                           std::string::npos);
+    // key 走同一取值通道，同样解码（"ok" = %6F%6B）。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?key=%6F%6B").find("\"path\":\"0\"") != std::string::npos);
+    // 编码值与 tree 里的字面量不等价时不得命中（解码把 %20 还原成空格，匹配的是 "确定" 而非 "确定 "）。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?text=%E7%A1%AE%E5%AE%9A%21").find("\"count\":0") !=
+                           std::string::npos);
+    // 宽松解码：畸形百分号按字面量保留，不升级成 500。
+    const std::string malformed = http_get(port, "/api/find?text=%zz");
+    AURORA_TEST_CHECK_TRUE(malformed.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(malformed.find("\"count\":0") != std::string::npos);
+    server.stop();
+
+    // 含空格的 label：未解码时 "%20" 是字面量，任何带空格标签都定位不到。
+    auto save = std::make_shared<Button>("Save all files");
+    auto row = std::make_shared<Column>();
+    row->add(Node{save});
+    auto space_root = std::make_shared<Node>(Node{row});
+    InspectorServer space_server([held = space_root]() -> Node { return *held; });
+    AURORA_TEST_REQUIRE_TRUE(space_server.start(0));
+    const std::uint16_t space_port = space_server.port();
+    AURORA_TEST_CHECK_TRUE(http_get(space_port, "/api/find?text=Save%20all%20files").find("\"count\":1") !=
+                           std::string::npos);
+    space_server.stop();
+#endif
+}
+
 AURORA_TEST_CASE(find_endpoint_rejects_malformed_requests) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");

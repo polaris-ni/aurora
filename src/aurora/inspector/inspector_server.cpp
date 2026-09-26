@@ -264,7 +264,43 @@ static auto strip_query(const std::string &path) -> std::string {
     return (q == std::string::npos) ? path : path.substr(0, q);
 }
 
-// 解析单个查询参数值（如 query_param("/p?x=10&y=20", "x") → "10"）。
+// 百分号解码（RFC 3986 的 query 值形态）：`%XX` 还原为对应字节，十六进制大小写均可；`%` 后
+// 不足两位十六进制时按字面量保留（宽松解析，畸形请求不该升级成 500）。`+` 保持字面量——
+// 「+ 表空格」是 application/x-www-form-urlencoded 的另一套约定，本服务不做该假设。
+static auto percent_decode(std::string_view s) -> std::string {
+    auto hex = [](char c) -> int {
+        if (c >= '0' && c <= '9') {
+            return c - '0';
+        }
+        if (c >= 'A' && c <= 'F') {
+            return c - 'A' + 10;
+        }
+        if (c >= 'a' && c <= 'f') {
+            return c - 'a' + 10;
+        }
+        return -1;
+    };
+    std::string out;
+    out.reserve(s.size());
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        if (s[i] != '%' || i + 2 >= s.size()) {
+            out += s[i];
+            continue;
+        }
+        const int hi = hex(s[i + 1]);
+        const int lo = hex(s[i + 2]);
+        if (hi < 0 || lo < 0) {
+            out += s[i];
+            continue;
+        }
+        out += static_cast<char>((hi << 4) | lo);
+        i += 2;
+    }
+    return out;
+}
+
+// 解析单个查询参数值（如 query_param("/p?x=10&y=20", "x") → "10"）。值经百分号解码：HTTP 客户端
+// 必须对空格、`&`、非 ASCII（如中文标签）做百分号编码，服务端不解码就永远匹配不上这些值。
 static auto query_param(const std::string &path, std::string_view key) -> std::string {
     const auto q = path.find('?');
     if (q == std::string::npos) {
@@ -281,7 +317,7 @@ static auto query_param(const std::string &path, std::string_view key) -> std::s
         const std::string pair = query.substr(start, end - start);
         const auto eq = pair.find('=');
         if (eq != std::string::npos && pair.substr(0, eq) == k) {
-            return pair.substr(eq + 1);
+            return percent_decode(pair.substr(eq + 1));
         }
         start = end + 1;
     }
