@@ -2,7 +2,7 @@
 /// 目标单元: src/aurora/widget/serialization.cpp
 /// 测试说明: WidgetRegistry 工厂注册——Skeleton 属性往返（从静态 JSON 完整重建）、
 ///           虚拟化/回调控件（GridView / LazyList / BottomNavBar）登记即回填标量属性、
-///           重建后经 set_item_builder 挂条目即出内容、
+///           重建后经 set_item_builder 挂条目即出内容、TextInput 声明属性随 from_json 回填、
 ///           to_json/from_json 基本往返与未知类型拒绝
 
 #include <memory>
@@ -16,6 +16,7 @@
 #include "aurora/widget/lazy_list.h"
 #include "aurora/widget/serialization.h"
 #include "aurora/widget/skeleton.h"
+#include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_serialization {
@@ -150,6 +151,26 @@ AURORA_TEST_CASE(barchart_rebuilds_nested_series_array) {
     AURORA_TEST_CHECK_TRUE(chart->categories == std::vector<std::string>{"Mon", "Tue", "Wed"});
     AURORA_TEST_CHECK_TRUE(chart->stacked);
     AURORA_TEST_CHECK_TRUE(chart->legend.position == LegendPosition::Right);
+}
+
+AURORA_TEST_CASE(textinput_rebuilds_declared_props_from_json) {
+    // TextInput 曾因登记在「无属性反序列化」组里，JSON 声明的 placeholder / value 到不了实例
+    // （热重载载体 ui.json 写了占位符却整段丢弃），to_json → from_json 也不再是自反。
+    auto src = std::make_shared<TextInput>();
+    src->set_placeholder("Type here first, then edit ui.json").set_value("Aurora");
+
+    const Json j = to_json(*src);
+    AURORA_TEST_REQUIRE_TRUE(j["props"].contains("placeholder"));
+    AURORA_TEST_CHECK_EQ(j["props"]["placeholder"].get<std::string>(), "Type here first, then edit ui.json");
+
+    const auto rebuilt = from_json(j);
+    AURORA_TEST_REQUIRE_MSG(rebuilt.ok(), "TextInput from_json succeeds");
+    const auto *input = dynamic_cast<const TextInput *>(rebuilt.value().get());
+    AURORA_TEST_REQUIRE_MSG(input != nullptr, "rebuilt widget is a TextInput");
+    AURORA_TEST_CHECK_EQ(input->value(), "Aurora");
+    // 占位符无公开 getter，以重建实例再序列化出的属性面为判据（与 /api/tree 同源）。
+    AURORA_TEST_CHECK_EQ(to_json(*rebuilt.value())["props"]["placeholder"].get<std::string>(),
+                         "Type here first, then edit ui.json");
 }
 
 }  // namespace aurora::test_cases::utest_serialization

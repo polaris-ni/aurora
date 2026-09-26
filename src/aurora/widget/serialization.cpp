@@ -175,6 +175,9 @@ auto reg_error(const char *name, ErrorCode code, std::string msg) -> void {
 auto register_core_widgets() -> void {
     // ---- 默认构造 + 属性反序列化（绝大多数库控件）----
     reg_default<Text>("Text");
+    // TextInput 的标量属性（占位符、字号、配色、`value` 等）全部可 JSON 往返；焦点、选区、
+    // IME 组合串属运行态，本就不在序列化面内，故无需像 Provider 系那样整类丢弃属性。
+    reg_default<TextInput>("TextInput");
     reg_default<Button>("Button");
     reg_default<Column>("Column");
     reg_default<Row>("Row");
@@ -257,7 +260,6 @@ auto register_core_widgets() -> void {
     reg_no_props<Provider<Theme>>("ThemeProvider", Theme{}, Node{});
     reg_no_props<Provider<Locale>>("LocaleProvider", Locale{}, Node{});
     reg_no_props<Provider<MediaQuery>>("MediaQueryProvider", MediaQuery{}, Node{});
-    reg_no_props<TextInput>("TextInput");
     // Timer 持运行时回调（TickBuilder），与 Repeater/Canvas 同理不可从静态 JSON 重建；
     // 但注册为已知类型以便 API 描述（gen_api_tools）收录其自描述元数据。
     reg_no_props<Timer>("Timer", std::chrono::seconds(1), [](const SignalView<int> &) -> Node { return Node{}; });
