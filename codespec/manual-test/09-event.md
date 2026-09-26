@@ -41,7 +41,15 @@
 | 终端 | 支持 UTF-8 输出 |
 | 分离输出 | 诊断日志写 stderr；判定前须重定向 |
 | 指针 | 真实鼠标（触摸板亦可，但拖拽类用例建议用鼠标） |
-| 触摸屏 | **仅 TC-EVENT-005 需要**；无多点触控硬件时该用例记 `SKIP` |
+| 触摸屏 | **仅 TC-EVENT-006 需要**；无多点触控硬件时该用例记 `SKIP` |
+
+**无人值守执行时的输入通道与观测口径**（实测环境为锁定的会话，真实鼠标 / 键盘不可用）：
+
+| 通道 | 能驱动什么 | 不能证明什么 |
+|:---|:---|:---|
+| 窗口消息（`PostMessage` 的 move / down / up / wheel / key） | 点击、滚轮、拖拽——消息直达 `Win32Host` 的 wndproc → `on_mouse` → `EventDispatcher`，与物理输入共用同一条派发链 | 不经系统输入队列与 OS 捕获（`SetCapture`），故高频点击的 OS 侧合并 / 丢弃、以及「越出窗口仍被系统送回 Move」须另由代码走读佐证；修饰键位取自 `GetAsyncKeyState`，故 `Shift+Tab` 一类组合无法用投递键构造 |
+| 进程内注入（`build/aurora_e2e_client.exe --port <n>` 的 `tap` / `drag` / `scroll` / `text`，载体须以 `AURORA_INSPECTOR_PORT` 启动且构建时开 `AURORA_BUILD_INSPECTOR_SERVER`） | 以目标控件中心为原点的一次完整 按下→移动→松开 序列，可跨控件边界派发 | 一次调用只含**一个** Move，不产出连续拖动；注入后需等 ≥2 s 让只绘帧落地 |
+| 像素（`PrintWindow` 抓帧） | 控件底色 / 文本带的位置与差异计数 | 焦点落点——`Button` 无焦点可视化，焦点态也未随属性或日志外泄（见 TC-EVENT-007） |
 
 ### 1.4 用例编号规则
 
@@ -231,10 +239,10 @@
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| TC-EVENT-001 | | | | | | | |
-| TC-EVENT-002 | | | | | | | |
-| TC-EVENT-003 | | | | | | | |
-| TC-EVENT-004 | | | | | | | |
-| TC-EVENT-005 | | | | | | | |
-| TC-EVENT-006 | | | | | | | |
-| TC-EVENT-007 | | | | | | | |
+| TC-EVENT-001 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：标题 `Event · Aurora Demo`（客户区 780×570 物理像素）；步骤 4：`err.txt` 恰 1 行 `INF` 级 `[run_demo] window shown: Event · Aurora Demo(close window to exit)`，无点击 / 拖拽日志；步骤 5：退出码 0，`ERR`+`FTL` 0 行；步骤 6：`demo_multitouch` 标题 `Multi-Touch · Aurora Demo`（客户区 930×690），同为恰 1 行 `INF` 级 window shown，退出码 0 | | 客户区像素为 150% DPI 下的物理值，对应 520×380 与 620×460 dp；两载体均按 §1.3 的窗口消息通道执行 |
+| TC-EVENT-002 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：单击方块中心（客户区 px 254,202）后 `clicked` 行新增恰 1，整行为 `INF`+分类 `demo`+`[event] clicked (MouseEvent dispatched to this widget)`，源位置标注 `demo_event.cpp:15`；步骤 5：改击方块右侧空白 (528,202) 与方块下方空白（卡片内、掩码盒外）各一次，新增均 0；步骤 6：控件树读出 `KeyCode::Enter = 38`，与 `keycode.h` 隐式序号推导（Unknown=0，A–Z=1..26，D0–D9=27..36，Escape=37，Enter=38）一致 | | 方块与卡片位置由帧内底色掩码求得（方块包络 21,130..488,274，卡片 2,30..777,566）；另以进程内注入 `tap path=0/2` 做通道对照，同样新增恰 1 行且无重复 |
+| TC-EVENT-003 | 2026-09-26 | Qoder Agent | PASS | | 步骤 2/3：在 A 中心 (141,185) 按住左键右移 150px（12 步投递）→ 新增 24 条 `[drag] A`、0 条 B，即拖动过程中持续产出而非按下/松开各一条；步骤 4/5：在 B 中心 (391,220) 重复同样拖动 → 新增 24 条全部 `[drag] B`、0 条 A | | 两个拖拽盒位置按修饰底色掩码包络确定（A 22,60..260,310；B 272,130..510,310），每投递一个 Move 得 2 条回调日志 |
+| TC-EVENT-004 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：按住 A 后分 8 步把坐标移到 B 盒内（x 141→391）→ 区间新增 16 条全部 `[drag] A`，未切换为 B；步骤 5：继续按住并把坐标移出客户区 4 个位置 (1252,185)、(1252,946)、(-200,-300)、(70,-100) → 再新增 8 条仍全为 A，说明指针已在控件与客户区之外仍持续收到 Move；步骤 6：松开左键后再移动 3 次 → 新增 0 条 | | 本通道证明的是框架侧捕获语义（事件按按下时命中的控件路由，不按当前位置重命中）；宿主在按下时调用 `SetCapture`（`src/aurora/window/win32_host.cpp:367`）保证 OS 真把越界 Move 送回，属代码走读佐证，不由投递消息证明 |
+| TC-EVENT-005 | 2026-09-26 | Qoder Agent | PASS | | 步骤 2/3：以 200ms 节拍连发 20 次 down/up，实测用时 4.02 秒（4.97 次/秒，符合约每秒 5 次）→ `clicked` 新增 20 行；步骤 4：重复派发 0 次、丢失 0 次（丢失率 0% ≤ 10%）；对照轮把节奏加倍（20 次 / 2.02 秒 = 9.9 次/秒）→ 新增仍为 20，重复 0 | | 锁屏会话下真实鼠标不可用（`SendInput` 被静默丢弃），故按 §1.3 的窗口消息通道连发：它覆盖派发与去重路径，但不经系统输入队列，OS 侧的按键合并与丢弃不在本用例证明范围内 |
+| TC-EVENT-006 | 2026-09-26 | Qoder Agent | SKIP | | 本机 `GetSystemMetrics(SM_DIGITIZER) = 0`（无数字化器 / 触摸屏），`SM_MAXIMUMTOUCHES = 10` 只是系统对指针设备的虚拟报告，无法产生真实两指并发流；用例未开始执行 | | 按 §1.3「无多点触控硬件时记 SKIP」处置；`touch()` 修饰器与 `TouchEvent` 的触点计数语义已有合成事件单测覆盖（`tests/unit/utest_event.cpp`、`tests/unit/utest_dispatcher.cpp`、`tests/unit/utest_gesture.cpp`），本用例只补真机多指这一层 |
+| TC-EVENT-007 | 2026-09-26 | Qoder Agent | BLOCKED | | 步骤 2：`VK_TAB` 经窗口消息可投递（后续 Enter/Space 的激活分支确被执行），但焦点落点在三种通道上均无外显——① 像素：Tab ×4 后逐帧与首帧差异 0 像素；② 行为：Enter/Space 激活只换来一帧整窗重绘（差异 239450 像素）随后回落 0，三个控件取样色恒 (0,0,255)，无焦点框也无按下态残留；③ 状态：`/api/widget` 返回的 17 项属性无焦点位，stderr 亦无焦点变更日志（仅 4 行启动日志）；步骤 5：`Shift+Tab` 无法构造——修饰键位取自 `GetAsyncKeyState`，锁定会话下注入 Shift 后异步态仍为 0x0000 | | 前置条件「键盘可用」在投递层成立，但**本载体无可聚焦观测量**，故记 BLOCKED 而非 FAIL。由此暴露两项可观测性缺口已列入模块发现：`Button` 无焦点可视化（无 focus ring、无键盘激活外显），且焦点态未经 HTTP 属性 / 日志 / a11y 端点外泄，人工侧无法判断遍历顺序与完整性 |
