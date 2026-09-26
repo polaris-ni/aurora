@@ -248,6 +248,9 @@ class NavigatorHost : public Widget {
         if (host_mounted_ && display_) {
             display_.widget().mount(host_ctx_);  // 幂等：已挂载的页不会重复订阅信号
         }
+        // 换页自带布局级失效：动画路径由 begin_transition 标脏，而 open_uri 与未开转场的 push 只走到
+        // 这里——不标脏则新页要等下一次无关失效（窗口 resize、别的控件标脏）才上屏，表现为「点了没反应」。
+        mark_needs_layout();
     }
 
     Animator &anim_;

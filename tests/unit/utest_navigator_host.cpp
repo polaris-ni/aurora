@@ -2,7 +2,7 @@
 /// 目标单元: include/aurora/navigation/navigator_host.h
 /// 测试说明: 覆盖 NavigatorHost 与 Navigator 的挂接——页面栈透传、非动画 push 的直绘展示、
 /// 动画 push/pop/replace 的 TransitionLayer 合成与 Animator tick 进度推进、绘制完成丢弃旧页、
-/// open_uri 无转场重建、自描述/信号收集/Hero 注册表、命中代理与析构时从 Animator 摘除
+/// open_uri 无转场重建、非动画换页的布局级标脏、自描述/信号收集/Hero 注册表、命中代理与析构时从 Animator 摘除
 
 #include <functional>
 #include <memory>
@@ -211,6 +211,28 @@ AURORA_TEST_CASE(host_open_uri_replaces_stack_without_transition) {
     const std::vector<std::string> types = display_types(host);
     AURORA_TEST_REQUIRE_EQ(types.size(), 1U);
     AURORA_TEST_CHECK_EQ(types[0], std::string{"Provider"});
+}
+
+AURORA_TEST_CASE(host_unanimated_page_swap_marks_layout_dirty) {
+    Animator anim;
+    NavigatorHost host(anim);
+    host.push(Route{solid_page(Color{255, 0, 0}), "home"});
+    BuildContext ctx;
+    host.mount(ctx);
+
+    std::vector<bool> flags;
+    host.on_dirty = [&flags](bool layout) -> void { flags.push_back(layout); };
+
+    const std::function<Route(const std::string &)> build = [](const std::string &name) -> Route {
+        return Route{solid_page(Color{0, 160, 0}), name};
+    };
+    host.open_uri("alpha", build);
+    host.push(Route{solid_page(Color{0, 0, 255}), "beta"});  // 未开转场
+
+    // 非动画换页须各自发出一次「含布局脏」的重绘请求：只标绘脏会命中布局缓存、留旧页几何。
+    AURORA_TEST_REQUIRE_EQ(flags.size(), 2U);
+    AURORA_TEST_CHECK_TRUE(flags[0]);
+    AURORA_TEST_CHECK_TRUE(flags[1]);
 }
 
 AURORA_TEST_CASE(host_self_description_and_signals) {

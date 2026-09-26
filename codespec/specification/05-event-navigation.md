@@ -379,6 +379,7 @@ player.attach(app.animator());
 
 - **常态零开销**：仅当 `tag` 处于 morphing 时跳过自绘，由 `NavigatorHost` 经 `Provider<HeroRegistry>` 注入的注册表驱动。
 - `NavigatorHost` 持有注册表并在转场期注入子树环境。
+- **换页自带布局级标脏**：`NavigatorHost` 每次重建展示层（`push` / `pop` / `pop_to_root` / `push_replacement` / `open_uri`）都发一次含布局脏的重绘请求，非动画路径（未带 `RouteTransition` 的 `push`、`open_uri` 深链）同样自标脏；消费者无需再经 `set_on_route_changed` 手工请求重绘。
 - **配对缺失**（仅旧页或仅新页有该 tag）时退化为普通淡入淡出。
 
 ```cpp
