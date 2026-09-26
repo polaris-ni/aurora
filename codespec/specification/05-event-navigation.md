@@ -124,6 +124,8 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **可滚动容器自动进入命中链**：`Widget::hit_test_chain` 在「无命中的后代、自身不可点击」时仍会把 `wants_scroll()` 为真且命中点落在内容盒内的控件自身纳入链尾——内容全非可点击时滚动容器也必须在链内，否则滚轮落空。容器**无需**再覆写 `on_hit_test` 返回 `this`。
 
+**自带拖拽区的容器必须把自身显式入链**：基类 `Widget::hit_test_chain`（`src/aurora/widget/widget.cpp`）只在「后代链非空 / `wants_click()` / `wants_scroll()` / 带 Input 修饰」之一成立时才把控件自身追加进链尾。因此靠 `on_pointer_event` 自绘拖拽带、又不 `wants_click()` 的容器（典型为 `Splitter` 的分隔条）若在其拖拽带上返回**空**后代链，就会整条链为空，被派发器判为「点在空白处」而根本不投递 Press——拖拽在任何后端都失效，且与 `on_hit_test`（点命中）口径不一致而难以察觉。此类控件须在拖拽带内返回 `std::vector{HitNode{this, weak_from_this(), bounds.origin}}`，并在带内无交互后代的空白点同样自入链，否则拖拽过程中指针一旦越出拖拽带，后续 Move 会因链空被丢弃。契约由 `utest_splitter` 的 `hit_chain_at_divider_includes_splitter` 与 `divider_drag_via_dispatcher_updates_ratio_and_clamps` 守护。
+
 ### 3.3 嵌套滚动协调（滚轮余量上冒）
 
 `dispatch(Widget&, ScrollEvent&)`（`event/dispatcher.cpp`）把滚轮判给**最近可滚动祖先**，并在内层吃到端点后把余量交给外层：

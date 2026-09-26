@@ -319,7 +319,11 @@ class Splitter : public Widget {
         const float pos_on_axis = horizontal ? local.x : local.y;
         const float start = first_extent();
         if (pos_on_axis >= start && pos_on_axis <= start + handle_size_) {
-            return {};  // 分隔条即自身（基类组装时前置 this）
+            // 分隔条即自身：必须把自身作为最深命中节点返回。基类只在「后代链非空 / wants_click /
+            // wants_scroll / 有 Input 修饰」之一成立时才把自身入链，而本控件四项皆非——返回空链
+            // 等于把自己排除在派发之外，`dispatch_mouse` 会把落在分隔条上的 Press 当作「点击空白」
+            // 直接放弃，拖拽分隔条这条主路径便永不触发（与 `on_hit_test` 返回 this 的口径相悖）。
+            return std::vector<HitNode>{HitNode{this, weak_from_this(), bounds.origin}};
         }
         for (Node *child : {&first_, &second_}) {
             if (!*child) {
@@ -336,7 +340,11 @@ class Splitter : public Widget {
                 }
             }
         }
-        return {};
+        // 两栏内的空白点（无可交互后代）仍归属本控件：与 on_hit_test 的兜底同口径，
+        // 否则拖拽中途光标越过分隔条落入某一栏时，Move 会因链空而被派发器丢弃。
+        return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local)
+                   ? std::vector<HitNode>{HitNode{this, weak_from_this(), bounds.origin}}
+                   : std::vector<HitNode>{};
     }
 
     auto on_mount(const BuildContext &ctx) -> void override {
