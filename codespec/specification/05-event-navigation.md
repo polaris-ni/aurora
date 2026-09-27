@@ -161,7 +161,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **激活键（Enter / Space）路由**：`Enter` 与 `Space` 归为「激活键」，默认由派发器直接调用焦点控件的 `activate()`（按钮等「按下即激活」语义），控件本身观察不到这两个按键。需要观察 Enter 的文本录入类控件（`TextInput` / `RichTextEdit`）覆写 `Widget::wants_activation_keys()` 返回 true：派发器先投递 `on_key_event`，其消费（`is_handled`）即止；未消费才回落 `activate()`。`TextInput::on_submit`（Enter 提交）即由此路径可达——若只依赖激活语义，Enter 会被在焦点路由前消费掉而永远到不了控件。
 
-**方向键（↑ / ↓ / ← / →）路由**：与激活键同构的「控件优先、宿主兜底」约定。方向键默认归 `FocusManager::move_focus(dir)` 做几何焦点导航，控件观察不到；覆写 `Widget::wants_navigation_keys()` 返回 true 的复合控件（如 `ReorderableList` 的键盘重排）先收到 `on_key_event`，消费即止、焦点不动，未消费才回落几何焦点导航。默认 `false`，故既有全部控件的方向键行为逐字节不变。两处谓词都只在**焦点控件**上探测，不经冒泡（键盘路由本就不冒泡）。
+**方向键（↑ / ↓ / ← / →）路由**：与激活键同构的「控件优先、宿主兜底」约定。方向键默认归 `FocusManager::move_focus(dir)` 做几何焦点导航，控件观察不到；覆写 `Widget::wants_navigation_keys()` 返回 true 的控件先收到 `on_key_event`，消费即止、焦点不动，未消费才回落几何焦点导航。认领方向键的两类控件：文本录入类（`TextInput` 的 ←/→ 移光标与 Shift 扩选、`RichTextEdit` 的 ←/→/Home/End）与键盘重排类（`ReorderableList`）。**文本录入控件必须在此认领**：单行输入框左右键若落到几何焦点导航，`move_focus(Left/Right)` 一旦命中候选就把焦点移走，此后所有按键（含退格）都发给新焦点控件，输入框当场失焦且再也无法用键盘编辑——这正是无人认领时的错误形态。未被认领的方向（如单行框的 ↑/↓）仍走焦点导航，默认 `false` 对既有非文本控件逐字节不变。两处谓词都只在**焦点控件**上探测，不经冒泡（键盘路由本就不冒泡）。
 
 ### 4.3 Press 焦点归属与点击失焦契约
 

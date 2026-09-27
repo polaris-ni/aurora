@@ -475,7 +475,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 键盘重排、树展开折叠、分页表格……）需覆写本钩子为 true：派发器先调 `on_key_event`，
     /// 其消费（`is_handled`）即止；**未消费则回落焦点导航**，故控件只需处理自己认识的按键，
     /// 其余按键行为保持不变。与 `wants_activation_keys()` 同一「控件优先、宿主兜底」约定。
-    /// 默认 false，保持既有焦点导航语义（文本框等的方向键路由不变）。
+    /// 默认 false，保持既有焦点导航语义（按钮 / 复选框 / 滚动容器等不受影响）；
+    /// 文本录入控件（`TextInput` / `RichTextEdit`）覆写为 true，否则方向键会被焦点导航吃掉、光标无法移动。
     [[nodiscard]] virtual auto wants_navigation_keys() const -> bool { return false; }
 
     /// @brief 文本输入入口（焦点 widget 上调用）。默认标记为已消费。

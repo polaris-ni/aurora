@@ -252,6 +252,12 @@ class RichTextEdit : public LeafWidget {
     /// @note Side-effects: pure
     [[nodiscard]] auto wants_activation_keys() const -> bool override { return true; }
 
+    /// @brief 方向键优先经 `on_key_event` 投递（←/→ 光标与选区扩展依赖它，而非几何焦点导航）。
+    ///
+    /// 未认领的方向（↑/↓）仍回落焦点导航，见 `Widget::wants_navigation_keys()`。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto wants_navigation_keys() const -> bool override { return true; }
+
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
 
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }

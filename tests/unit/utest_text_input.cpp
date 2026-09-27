@@ -2,7 +2,8 @@
 /// 目标单元: include/aurora/widget/text_input.h
 /// 测试说明: 覆盖 TextInput——Props 构造与链式 setter、只读/限长/禁用状态、布局尺寸与字号关系、
 /// 经公开文本输入入口验证 on_changed 回调与截断/吞输入行为、IME 组合输入（preedit 显示 /
-/// 上屏落字 / 限长 / 失焦取消 / 参与测量）、序列化往返与默认键省略
+/// 上屏落字 / 限长 / 失焦取消 / 参与测量）、Shift+方向键扩选的字符数与退格删选区、
+/// 序列化往返与默认键省略
 
 #include <cstddef>
 #include <memory>
@@ -394,6 +395,69 @@ AURORA_TEST_CASE(rtl_arrow_keys_invert_logical_direction) {
     ltr.on_key_event(right);
     ltr.on_text_input(ins);
     AURORA_TEST_CHECK_EQ(ltr.value(), std::string{"abX"});
+}
+
+/// Shift+方向键扩选：每次恰纳入一个字符，退格一次删掉整段选区。
+/// caret 是插入点而非字符下标，左扩锚点取 caret 前一个字符；曾因把 caret 本身当下标而当锚点，
+/// 使「文本中部」的一次 Shift+← 高亮并删除两个字符（末尾态因下标越界被 clamp 掩盖，看不出问题）。
+AURORA_TEST_CASE(shift_arrow_selects_exactly_one_char_per_press) {
+    auto focused_field = [](const std::string &seed) -> TextInput {
+        TextInput ti;
+        ti.on_focus_change(true);
+        TextInputEvent e;
+        e.text = seed;
+        ti.on_text_input(e);
+        ti.mount(BuildContext{});
+        ti.layout(bounded(300.0F, 60.0F), BuildContext{});
+        return ti;
+    };
+    auto press = [](KeyCode code, ModifierKey mods) -> KeyEvent {
+        KeyEvent k;
+        k.key = static_cast<int>(code);
+        k.action = KeyAction::Down;
+        k.modifiers = mods;
+        return k;
+    };
+
+    // 末尾态：一次 Shift+← 选中最后一个字符（与修复前一致，守回归）。
+    TextInput tail = focused_field("abc");
+    KeyEvent one = press(KeyCode::ArrowLeft, ModifierKey::Shift);
+    tail.on_key_event(one);
+    AURORA_TEST_CHECK_EQ(tail.selected_text(), std::string{"c"});
+    KeyEvent two = press(KeyCode::ArrowLeft, ModifierKey::Shift);
+    tail.on_key_event(two);
+    AURORA_TEST_CHECK_EQ(tail.selected_text(), std::string{"bc"});
+
+    // 文本中部（caret=3，右邻 'd'）：一次 Shift+← 只应选中 'c'。
+    TextInput mid = focused_field("abcd");
+    KeyEvent left_mid = press(KeyCode::ArrowLeft, ModifierKey::None);
+    mid.on_key_event(left_mid);  // 先退到插入点 3（非选区态）
+    AURORA_TEST_CHECK_FALSE(mid.has_selection());
+    KeyEvent l1 = press(KeyCode::ArrowLeft, ModifierKey::Shift);
+    mid.on_key_event(l1);
+    AURORA_TEST_CHECK_TRUE(mid.has_selection());
+    AURORA_TEST_CHECK_EQ(mid.selected_text(), std::string{"c"});
+    KeyEvent l2 = press(KeyCode::ArrowLeft, ModifierKey::Shift);
+    mid.on_key_event(l2);
+    AURORA_TEST_CHECK_EQ(mid.selected_text(), std::string{"bc"});
+
+    // 退格一次删掉整段选区，光标停在删除位置。
+    KeyEvent back = press(KeyCode::Backspace, ModifierKey::None);
+    mid.on_key_event(back);
+    AURORA_TEST_CHECK_EQ(mid.value(), std::string{"ad"});
+    AURORA_TEST_CHECK_FALSE(mid.has_selection());
+    TextInputEvent ins;
+    ins.text = "X";
+    mid.on_text_input(ins);
+    AURORA_TEST_CHECK_EQ(mid.value(), std::string{"aXd"});  // caret=1
+
+    // 右扩同样一次一个字符。
+    TextInput right = focused_field("abcd");
+    KeyEvent rl = press(KeyCode::ArrowLeft, ModifierKey::None);
+    right.on_key_event(rl);  // caret=3
+    KeyEvent r1 = press(KeyCode::ArrowRight, ModifierKey::Shift);
+    right.on_key_event(r1);
+    AURORA_TEST_CHECK_EQ(right.selected_text(), std::string{"d"});
 }
 
 AURORA_TEST_CASE(rtl_caret_paints_at_right_edge) {

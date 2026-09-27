@@ -319,6 +319,12 @@ class TextInput : public LeafWidget {
     /// @note Side-effects: pure
     [[nodiscard]] auto wants_activation_keys() const -> bool override { return true; }
 
+    /// @brief 方向键优先经 `on_key_event` 投递（←/→ 光标移动与 Shift 扩选依赖它，而非几何焦点导航）。
+    ///
+    /// 单行输入框不认领 ↑/↓，二者仍回落焦点导航（Tab 序同样可用），见 `Widget::wants_navigation_keys()`。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto wants_navigation_keys() const -> bool override { return true; }
+
     /// @brief 运行时自描述（规格附录 B）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
@@ -694,10 +700,11 @@ class TextInput : public LeafWidget {
         }
         if (dir != 0) {
             if (shift) {
-                // 含头含尾：以当前 caret 作为含入锚点，按方向扩展选区。
+                // 含头含尾：锚点取「本次新纳入的那个字符」——右扩是 caret 处的字符，左扩是 caret
+                // 前一个（caret 是插入点而非字符下标，直接拿它当左扩锚点会多选一个字符）。
                 if (sel_end_ == AURORA_NO_SEL) {
-                    sel_start_ = caret_;
-                    sel_end_ = caret_;  // 先建立 1-char 选区锚点
+                    sel_start_ = (dir > 0) ? caret_ : (caret_ == 0 ? 0 : caret_ - 1);
+                    sel_end_ = sel_start_;  // 先建立 1-char 选区锚点
                 }
                 const auto nc = static_cast<long long>(caret_) + dir;
                 caret_ = static_cast<size_t>(std::clamp(nc, 0LL, static_cast<long long>(n)));
