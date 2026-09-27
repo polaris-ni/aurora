@@ -1,12 +1,14 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/app/system_tray.h
 /// 测试说明: 覆盖 SystemTray 共用的 MenuItem 声明式菜单数据模型（默认值、分隔符、
-/// 子菜单谓词、点击回调计数）与托盘配置纯逻辑（右键菜单存取、气泡正文记录、移动语义）；
+/// 子菜单谓词、点击回调计数）与托盘配置纯逻辑（右键菜单存取、气泡正文记录、移动语义），
+/// 并锁定托盘回调 lParam 两种编码（版本 4 打包 / 旧版整值）的分类规则；
 /// Windows 下 SystemTray 构造即注册真实托盘图标，实例级用例以 SKIP 桩跳过
 
 #include <string>
 #include <vector>
 
+#include "aurora/app/detail/tray_events.h"
 #include "aurora/app/system_tray.h"
 #include "aurora/core/platform.h"
 #include "framework/aurora_test.h"
@@ -120,6 +122,60 @@ AURORA_TEST_CASE(tray_move_preserves_state) {
     SystemTray moved(std::move(tray));
     AURORA_TEST_CHECK_STREQ(moved.last_balloon_message(), "msg");
 #endif
+}
+
+AURORA_TEST_CASE(tray_callback_classifies_version4_events_by_loword_only) {
+    using aurora::internal::classify_tray_callback;
+    using aurora::internal::k_tray_icon_id;
+    using aurora::internal::k_tray_nin_balloonuserclick;
+    using aurora::internal::k_tray_nin_keyselect;
+    using aurora::internal::k_tray_nin_select;
+    using aurora::internal::k_tray_wm_contextmenu;
+    using aurora::internal::k_tray_wm_lbuttonup;
+    using aurora::internal::k_tray_wm_rbuttonup;
+
+    // 版本 4：高字是 uID、低字是事件（实测一次左键连发 POPUPOPEN/DOWN/UP/NIN_SELECT 四条）。
+    auto ev = classify_tray_callback(k_tray_nin_select, k_tray_icon_id, true);
+    AURORA_TEST_CHECK_TRUE(ev.activate);
+    AURORA_TEST_CHECK_FALSE(ev.context_menu);
+    AURORA_TEST_CHECK_TRUE(classify_tray_callback(k_tray_nin_keyselect, k_tray_icon_id, true).activate);
+    AURORA_TEST_CHECK_TRUE(classify_tray_callback(k_tray_nin_balloonuserclick, k_tray_icon_id, true).activate);
+
+    // 同一次点击附带的裸鼠标消息必须忽略，否则 on_activate 每次点击触发两遍。
+    ev = classify_tray_callback(k_tray_wm_lbuttonup, k_tray_icon_id, true);
+    AURORA_TEST_CHECK_FALSE(ev.activate);
+    AURORA_TEST_CHECK_FALSE(ev.context_menu);
+
+    // 菜单只认 WM_CONTEXTMENU：右键的 WM_RBUTTONUP 是它前一条重复投递。
+    ev = classify_tray_callback(k_tray_wm_contextmenu, k_tray_icon_id, true);
+    AURORA_TEST_CHECK_TRUE(ev.context_menu);
+    AURORA_TEST_CHECK_FALSE(ev.activate);
+    AURORA_TEST_CHECK_FALSE(classify_tray_callback(k_tray_wm_rbuttonup, k_tray_icon_id, true).context_menu);
+
+    // 别的图标（uID 不符）不归本库管。
+    AURORA_TEST_CHECK_FALSE(classify_tray_callback(k_tray_nin_select, k_tray_icon_id + 1, true).activate);
+}
+
+AURORA_TEST_CASE(tray_callback_classifies_legacy_whole_lparam_and_ignores_noise) {
+    using aurora::internal::classify_tray_callback;
+    using aurora::internal::k_tray_wm_contextmenu;
+    using aurora::internal::k_tray_wm_lbuttondblclk;
+    using aurora::internal::k_tray_wm_lbuttonup;
+    using aurora::internal::k_tray_wm_rbuttonup;
+
+    // NIM_SETVERSION 失败即回落旧编码：整个 lParam 就是鼠标消息，高字恒 0。
+    AURORA_TEST_CHECK_TRUE(classify_tray_callback(k_tray_wm_lbuttonup, 0, false).activate);
+    AURORA_TEST_CHECK_TRUE(classify_tray_callback(k_tray_wm_lbuttondblclk, 0, false).activate);
+    AURORA_TEST_CHECK_TRUE(classify_tray_callback(k_tray_wm_rbuttonup, 0, false).context_menu);
+    AURORA_TEST_CHECK_TRUE(classify_tray_callback(k_tray_wm_contextmenu, 0, false).context_menu);
+
+    // 无关消息既不激活也不弹菜单（NIN_POPUPOPEN / NIN_BALLOONHIDE / WM_MOUSEMOVE）。
+    auto ev = classify_tray_callback(0x0406, 0, false);
+    AURORA_TEST_CHECK_FALSE(ev.activate);
+    AURORA_TEST_CHECK_FALSE(ev.context_menu);
+    ev = classify_tray_callback(0x0200, 0, true);
+    AURORA_TEST_CHECK_FALSE(ev.activate);
+    AURORA_TEST_CHECK_FALSE(ev.context_menu);
 }
 
 }  // namespace aurora::test_cases::utest_system_tray

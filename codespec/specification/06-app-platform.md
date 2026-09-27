@@ -492,6 +492,8 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 `SystemTray`（`app/system_tray.h`）在 Win32 经 `Shell_NotifyIcon` + 隐藏消息窗口实现，支持图标、气泡与激活回调 `on_activate`；非 Win32 为 no-op（仅记录 `last_balloon_message`）。
 
+**回调 `lParam` 有两种编码，按注册版本解读**：图标以 `NIM_SETVERSION` 升到 `NOTIFYICON_VERSION_4` 后，回调消息的 `lParam` 是打包值——低 16 位才是事件（鼠标消息或 `NIN_*`），高 16 位是图标的 `uID`；未升级时 `lParam` 是整值事件。故 `on_activate` 与上下文菜单的触发判定必须先取版本再取位段（`src/aurora/app/detail/tray_events.h` 的 `classify_tray_callback`），按整值比较鼠标消息会让两条路径在真实 shell 下静默失效。一次真实左键对应 4 条回调（`NIN_POPUPOPEN`、`WM_LBUTTONDOWN`、`WM_LBUTTONUP`、`NIN_SELECT`），故版本 4 分支只认 `NIN_*` 三个事件、且须排除 `uID` 不匹配的回调，否则一次单击会重复触发。
+
 ### 8.4 菜单、快捷键、命令与显示
 
 | 头文件 | 能力 |
