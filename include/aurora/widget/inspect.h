@@ -443,15 +443,20 @@ inline auto for_each_child_unified(const Widget &w, const std::function<void(con
     return indices;
 }
 
-/// @brief 含属性的完整 JSON 快照：每个节点含 { type, props, children }。
+/// @brief 含属性的完整 JSON 快照：每个节点含 { type, props, children }，持有焦点者另有 { focused: true }。
 /// 扩展 dump_tree_json，增加 serialize_props 输出的属性对象。
 /// 子节点枚举走 `for_each_child_unified`，故虚拟化容器的子树同样可见。
+/// `focused` 只在为真时出现（无焦点的节点不增键），使焦点遍历顺序可被外部读端直接观察——
+/// 控件本身未必有焦点可视化（如 `Button`），无此键时人工侧只能靠猜。
 [[nodiscard]] inline auto dump_tree_json_full(const Widget &w) -> Json {
     Json j = Json::object();
     j["type"] = w.type_name();
     Json props = Json::object();
     w.serialize_props(props);
     j["props"] = props;
+    if (w.is_focused()) {
+        j["focused"] = true;
+    }
     Json children = Json::array();
     for_each_child_unified(
         w, [&children](const Widget &child) -> void { children.push_back(dump_tree_json_full(child)); });

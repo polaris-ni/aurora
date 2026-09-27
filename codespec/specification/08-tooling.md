@@ -179,7 +179,7 @@ UI 树 dump 统一以 `widget/inspect.h` 内的**自由函数**提供，**不提
 |:---|:---|
 | `dump_tree(root)` | 人类可读缩进树 |
 | `dump_tree_rich(root, depth = 0, tree_chars = true)` | 富格式树，含 `#id` / bounds / visible / text / style / listeners，以 `├─ └─ │` 连接 |
-| `dump_tree_json*` / `dump_tree_json_full(root) -> Json` | JSON 快照；`dump_tree_json_full` 含属性（每节点 type / props / children） |
+| `dump_tree_json*` / `dump_tree_json_full(root) -> Json` | JSON 快照；`dump_tree_json_full` 含属性（每节点 type / props / children），持有焦点者另有 `focused: true`（只在为真时出现，无焦点节点不增键） |
 | `widget_tree_to_items(root) -> std::vector<TreeItem>` | Widget 树 → TreeItem 树（供 `TreeView` 消费） |
 | `find_node_by_path(root, path) -> Node` | 按索引路径定位节点（如 `"0/2/1"`）。只沿 `child_nodes()` 下降 ⇒ 到不了虚拟化容器的子树 |
 | `find_widget_by_path(root, path) -> Widget *` | 同上，但返回裸控件指针、下降全程走**统一子节点遍历** ⇒ 可跨越虚拟化容器；越界或非法路径段返回 `nullptr` |

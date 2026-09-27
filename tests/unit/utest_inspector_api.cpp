@@ -1,7 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/inspector/inspector_api.h
 /// 测试说明: 覆盖 Inspector 统一门面——树查询四件套（text/rich/json/json_full）、widget_info
-/// 与属性读写（get_prop_value 未命中返回 null、set_prop 容忍未知键）、apply_patch 路径补丁
+/// 与属性读写（get_prop_value 未命中返回 null、set_prop 容忍未知键）、tree_json_full 的焦点标记
+/// （仅持焦节点带 focused=true）、apply_patch 路径补丁
 /// 与非数组错误、query/find_node/get_state 定位、find_widget 的控件级寻址（空路径为根、
 /// 非法段与越界拒绝，以及在虚拟化根下与树快照的枚举同源）、validate 错误→Diagnostic 映射、
 /// 组件发现、to_code、变化订阅生命周期、simulate_* 交互模拟（点击计数 / 获焦、文本落字、
@@ -11,6 +12,7 @@
 #include <string>
 
 #include "aurora/animation/animator.h"
+#include "aurora/event/focus.h"
 #include "aurora/inspector/inspector_api.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/navigation/navigator_host.h"
@@ -108,6 +110,35 @@ AURORA_TEST_CASE(tree_json_full_includes_props) {
     AURORA_TEST_CHECK_EQ(j["children"][0]["type"], "Text");
     // 完整快照携带序列化属性：Text 的 content 键为文本内容。
     AURORA_TEST_CHECK_EQ(j["children"][0]["props"]["content"], "hi");
+}
+
+AURORA_TEST_CASE(tree_json_full_marks_the_focused_node) {
+    // 焦点遍历的可观测性：快照里只有持焦节点带 focused=true，且随焦点移动而转移。
+    // 无此键时（Button 等无焦点可视化的控件）人工侧无法判断 Tab 落在谁身上。
+    auto a = std::make_shared<TextInput>();
+    auto b = std::make_shared<TextInput>();
+    auto col = std::make_shared<Column>();
+    col->add(Node{a});
+    col->add(Node{b});
+    LayoutEngine::layout(*col, bounded(300.0F, 120.0F));
+
+    FocusManager fm;
+    fm.set_root(col.get());
+    const Node root{col};
+    AURORA_TEST_CHECK_FALSE(Inspector::tree_json_full(root).contains("focused"));
+
+    fm.set_focus(a.get());
+    const Json first = Inspector::tree_json_full(root);
+    AURORA_TEST_CHECK_TRUE(first["children"][0].contains("focused"));
+    AURORA_TEST_CHECK_FALSE(first["children"][1].contains("focused"));
+
+    fm.set_focus(b.get());
+    const Json second = Inspector::tree_json_full(root);
+    AURORA_TEST_CHECK_FALSE(second["children"][0].contains("focused"));
+    AURORA_TEST_CHECK_TRUE(second["children"][1].contains("focused"));
+
+    fm.clear();
+    AURORA_TEST_CHECK_FALSE(Inspector::tree_json_full(root)["children"][1].contains("focused"));
 }
 
 AURORA_TEST_CASE(widget_info_and_prop_reads) {
