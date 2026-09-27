@@ -274,6 +274,10 @@ inline auto run_demo(au::Node root, const std::string &title, float w, float h) 
             au::EventDispatcher::dispatch(wd, *se);
         } else if (auto *te = dynamic_cast<au::TextInputEvent *>(&e)) {
             au::EventDispatcher::dispatch(wd, *te, fm);
+        } else if (auto *ce = dynamic_cast<au::TextCompositionEvent *>(&e)) {
+            // IME 组合事件（CJK）：缺这一支则中文输入法的 preedit 与上屏全被丢弃，
+            // 控件里既不下划线预编辑串也不落字（键被输入法吃掉，界面无任何反应）。
+            au::EventDispatcher::dispatch(wd, *ce, fm);
         }
     });
 

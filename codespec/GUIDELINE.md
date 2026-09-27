@@ -1632,6 +1632,8 @@ field.on_changed([](const std::string &s) -> void { /* 只收到已上屏文本 
 
 `TextInput` / `RichTextEdit` 已内置：preedit 下划线 + 待转换选区高亮、组合光标落在候选插入点、preedit 参与宽度测量（组合中的中文会撑开输入框，不被裁切）、失焦自动取消未上屏的组合。**应用侧一行都不用写。**
 
+⚠️ 「零接线」的前提是事件已抵达控件：`Application`（`WindowHost::dispatch`）与 `run_demo` 两个内置载体都转发了 `TextCompositionEvent`，**自行手写 `set_event_handler` 分发的载体必须补上这一支**——只认 `MouseEvent` / `KeyEvent` / `TextInputEvent` 的派发链会把组合事件静默丢掉，外在表现与「输入法失效」无异（真机排查见 `manual-test/11-widget.md` TC-WIDGET-013）。
+
 ### 39.2 自定义文本控件：两个钩子
 
 ```cpp
