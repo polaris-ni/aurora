@@ -88,6 +88,19 @@ struct InspectorServer::Impl {
     void accept_loop();
     void handle_client(SOCKET client);
 
+    /// @brief 把「取当前树根 → 遍历 → 组装 HTTP 响应」整段派发到主线程执行。
+    ///
+    /// 树是活的：present/重排/回收（如 ReorderableList 的 lazy row）会在帧内增删节点。
+    /// worker 线程直接下树读取即与改树并发，读到已释放节点（`0xFEEEFEEE` 毒值）触发
+    /// 访问违例（0xC0000005）——与帧循环的快慢、请求是否"只读"无关。
+    /// `tree_mutex` 也一并移进主线程闭包：它的职责是串行化并发 inspector 请求对同一棵树的
+    /// 访问，只有与遍历同线程持锁才成立；而 `root_getter()` 自身要复制根 `shared_ptr`，
+    /// 同样必须在主线程调用。
+    ///
+    /// 无事件循环（测试/无头）时经 `marshal_get` 的回退在当前线程直执行，语义不变。
+    /// 根为空时统一回 500，`fn` 只在根有效时被调用。
+    auto on_tree(const std::function<std::string(Node &)> &fn) -> std::string;
+
     // HTTP 路由：返回完整 HTTP 响应字符串
     auto route_request(const std::string &method, const std::string &path, const std::string &body) -> std::string;
 
@@ -256,6 +269,17 @@ static auto marshal_get(std::function<T()> fn) -> T {
         }
     });
     return f.get();
+}
+
+auto InspectorServer::Impl::on_tree(const std::function<std::string(Node &)> &fn) -> std::string {
+    return marshal_get<std::string>([&]() -> std::string {
+        std::scoped_lock lock(tree_mutex);
+        Node root = root_getter();
+        if (!root) {
+            return error_response(500, "Widget tree root is null");
+        }
+        return fn(root);
+    });
 }
 
 // 从 path（可能含 ? 查询串）提取路由段（'?' 之前部分）。
@@ -508,14 +532,9 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         if (method != "GET") {
             return error_response(405, "Method not allowed for /api/debug/tree");
         }
-        std::scoped_lock lock(tree_mutex);
-        Node root = root_getter();
-        if (!root) {
-            return error_response(500, "Widget tree root is null");
-        }
         try {
-            auto j = marshal_get<nlohmann::json>([&]() -> Json { return aurora::debug::widget_tree(root); });
-            return json_response(200, "OK", j);
+            return on_tree(
+                [](Node &root) -> std::string { return json_response(200, "OK", aurora::debug::widget_tree(root)); });
         } catch (const std::exception &e) {
             return error_response(500, std::string("widget_tree failed: ") + e.what());
         }
@@ -526,11 +545,6 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         if (method != "GET") {
             return error_response(405, "Method not allowed for /api/debug/pick");
         }
-        std::scoped_lock lock(tree_mutex);
-        Node root = root_getter();
-        if (!root) {
-            return error_response(500, "Widget tree root is null");
-        }
         float x = 0.0F;
         float y = 0.0F;
         try {
@@ -540,7 +554,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             return error_response(400, "pick requires numeric x and y query params");
         }
         try {
-            auto res = marshal_get<aurora::debug::DebugPickResult>([&]() -> aurora::debug::DebugPickResult {
+            return on_tree([&](Node &root) -> std::string {
                 // root_bounds：优先用 Surface 尺寸，否则用根控件尺寸
                 aurora::Rect root_bounds{
                     .origin = aurora::Point{.x = 0.0F, .y = 0.0F},
@@ -552,21 +566,22 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
                     }
                 }
                 constexpr aurora::BuildContext ctx;
-                return aurora::debug::widget_picker(root.widget(), root_bounds, ctx, aurora::Point{.x = x, .y = y});
+                const auto res =
+                    aurora::debug::widget_picker(root.widget(), root_bounds, ctx, aurora::Point{.x = x, .y = y});
+                nlohmann::json j;
+                j["hit"] = res.hit;
+                j["chain"] = nlohmann::json::array();
+                for (const auto &n : res.chain) {
+                    nlohmann::json node;
+                    node["type_name"] = n.type_name;
+                    node["bounds"] = nlohmann::json{{"x", n.bounds.origin.x},
+                                                    {"y", n.bounds.origin.y},
+                                                    {"w", n.bounds.size.width},
+                                                    {"h", n.bounds.size.height}};
+                    j["chain"].push_back(std::move(node));
+                }
+                return json_response(200, "OK", j);
             });
-            nlohmann::json j;
-            j["hit"] = res.hit;
-            j["chain"] = nlohmann::json::array();
-            for (const auto &n : res.chain) {
-                nlohmann::json node;
-                node["type_name"] = n.type_name;
-                node["bounds"] = nlohmann::json{{"x", n.bounds.origin.x},
-                                                {"y", n.bounds.origin.y},
-                                                {"w", n.bounds.size.width},
-                                                {"h", n.bounds.size.height}};
-                j["chain"].push_back(std::move(node));
-            }
-            return json_response(200, "OK", j);
         } catch (const std::exception &e) {
             return error_response(500, std::string("pick failed: ") + e.what());
         }
@@ -637,6 +652,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             bool found = false;
             try {
                 auto tree = marshal_get<nlohmann::json>([&]() -> nlohmann::json {
+                    std::scoped_lock lock(tree_mutex);
                     Node root = window_tree_getter(wid);
                     if (!root) {
                         return nlohmann::json{};  // 标记窗口不存在
@@ -653,13 +669,8 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             }
         }
         // 回退：主窗口（构造时注入的 root_getter），向后兼容既有 /api/tree。
-        std::scoped_lock lock(tree_mutex);
-        Node root = root_getter();
-        if (!root) {
-            return error_response(500, "Widget tree root is null");
-        }
-        nlohmann::json tree = Inspector::tree_json_full(root);
-        return json_response(200, "OK", tree);
+        return on_tree(
+            [](Node &root) -> std::string { return json_response(200, "OK", Inspector::tree_json_full(root)); });
     }
 
     // GET /api/widget/{path} — 单 widget 属性
@@ -672,50 +683,46 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             return error_response(400, "Widget path is empty");
         }
 
-        std::scoped_lock lock(tree_mutex);
-        Node root = root_getter();
-        if (!root) {
-            return error_response(500, "Widget tree root is null");
+        if (method != "GET" && method != "PUT") {
+            return error_response(405, "Method not allowed for /api/widget");
         }
-
-        if (method == "GET") {
-            // 整个 remainder 作为树路径。
-            // 寻址必须走 `find_widget`（统一遍历：`child_nodes()`，空则回退 `for_each_child`），
-            // 与 `/api/tree` 的枚举口径同源；否则虚拟化容器（NavigatorHost / LazyList 等）的
-            // 子树在树快照里看得见、按路径却取不到（两者取了不同遍历源）。
-            Widget *target = Inspector::find_widget(root.widget(), remainder);
-            if (target == nullptr) {
-                return error_response(404, "Widget not found at path: " + remainder);
-            }
-            nlohmann::json props = Inspector::get_prop(*target);
-            return json_response(200, "OK", props);
+        // GET：整个 remainder 作为树路径；PUT：最后一段是属性名，前面是树路径。
+        const bool is_put = method == "PUT";
+        if (is_put && segments.size() < 2) {
+            return error_response(400, "PUT requires /api/widget/{tree_path}/{prop_name}");
         }
-
-        if (method == "PUT") {
-            // 最后一段是属性名，前面是树路径
-            if (segments.size() < 2) {
-                return error_response(400, "PUT requires /api/widget/{tree_path}/{prop_name}");
-            }
-            const std::string &prop_name = segments.back();
-            // 树路径 = 除最后一段外的所有段
-            std::string tree_path;
+        const std::string prop_name = is_put ? segments.back() : std::string{};
+        std::string tree_path = remainder;
+        if (is_put) {
+            tree_path.clear();
             for (std::size_t i = 0; i + 1 < segments.size(); ++i) {
                 if (i > 0) {
                     tree_path += '/';
                 }
                 tree_path += segments[i];
             }
-            Widget *target = Inspector::find_widget(root.widget(), tree_path);
-            if (target == nullptr) {
-                return error_response(404, "Widget not found at path: " + tree_path);
-            }
-
-            // 解析 body 为 JSON value
-            nlohmann::json value;
+        }
+        // body 解析与树无关，先做掉：类型错误回 400，不必把成因带进主线程闭包。
+        nlohmann::json value;
+        if (is_put) {
             try {
                 value = nlohmann::json::parse(body);
             } catch (const nlohmann::json::parse_error &e) {
                 return error_response(400, std::string("Invalid JSON body: ") + e.what());
+            }
+        }
+
+        return on_tree([&](Node &root) -> std::string {
+            // 寻址必须走 `find_widget`（统一遍历：`child_nodes()`，空则回退 `for_each_child`），
+            // 与 `/api/tree` 的枚举口径同源；否则虚拟化容器（NavigatorHost / LazyList 等）的
+            // 子树在树快照里看得见、按路径却取不到（两者取了不同遍历源）。
+            Widget *target = Inspector::find_widget(root.widget(), tree_path);
+            if (target == nullptr) {
+                return error_response(404, "Widget not found at path: " + tree_path);
+            }
+            if (!is_put) {
+                nlohmann::json props = Inspector::get_prop(*target);
+                return json_response(200, "OK", props);
             }
             auto result = Inspector::set_prop(*target, prop_name, value);
             if (!result) {
@@ -726,9 +733,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             ok["widget_path"] = tree_path;
             ok["property"] = prop_name;
             return json_response(200, "OK", ok);
-        }
-
-        return error_response(405, "Method not allowed for /api/widget");
+        });
     }
 
     // POST /api/input/{click|scroll|drag|text|pointer} — 交互模拟（合成事件经 EventDispatcher 真实派发）
@@ -988,19 +993,16 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             return error_response(400, "Request body must be a JSON array of {path, value}");
         }
         try {
-            std::scoped_lock lock(tree_mutex);
-            Node root = root_getter();
-            if (!root) {
-                return error_response(500, "Widget tree root is null");
-            }
-            const auto result = Inspector::apply_patch(root, payload);
-            if (!result) {
-                return error_response(400, std::string("patch rejected: ") + result.error().message);
-            }
-            nlohmann::json ok = nlohmann::json::object();
-            ok["status"] = "ok";
-            ok["ops"] = payload.size();
-            return json_response(200, "OK", ok);
+            return on_tree([&](Node &root) -> std::string {
+                const auto result = Inspector::apply_patch(root, payload);
+                if (!result) {
+                    return error_response(400, std::string("patch rejected: ") + result.error().message);
+                }
+                nlohmann::json ok = nlohmann::json::object();
+                ok["status"] = "ok";
+                ok["ops"] = payload.size();
+                return json_response(200, "OK", ok);
+            });
         } catch (const std::exception &e) {
             return error_response(500, std::string("patch failed: ") + e.what());
         }
@@ -1024,14 +1026,11 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         if (method != "GET") {
             return error_response(405, "Method not allowed for /api/yaml");
         }
-        std::scoped_lock lock(tree_mutex);
-        Node root = root_getter();
-        if (!root) {
-            return error_response(500, "Widget tree root is null");
-        }
-        Json tree = Inspector::tree_json_full(root);
-        std::string yaml = aurora::serialization::to_yaml(tree);
-        return make_response(200, "OK", "text/yaml", yaml);
+        return on_tree([](Node &root) -> std::string {
+            const Json tree = Inspector::tree_json_full(root);
+            const std::string yaml = aurora::serialization::to_yaml(tree);
+            return make_response(200, "OK", "text/yaml", yaml);
+        });
     }
 
     // POST /api/to_code — UI 树 → C++ 代码

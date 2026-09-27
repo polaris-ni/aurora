@@ -260,6 +260,8 @@ server.stop();        // 停止并 join 工作线程
 
 ### 5.1 REST 端点
 
+凡触碰活动 widget 树的端点（`/api/tree`、`/api/widget/*`、`/api/patch`、`/api/yaml`、`/api/find`、`/api/input/*`、`/api/debug/{tree,pick}`）一律经主线程 marshal 执行，树端点由 `InspectorServer::Impl::on_tree` 统一派发：树在帧内会被增删（重排、虚拟化行回收），accept worker 线程直接下树遍历即与改树并发并读到已释放节点（宿主表现为 `0xC0000005`）。`tree_mutex` 与遍历在同一闭包内持取，只负责串行化并发 inspector 请求；`root_getter` 本身复制根 `shared_ptr`，同样必须在主线程调用；根为空统一回 500。
+
 | 方法 | 路径 | 说明 |
 |:---|:---|:---|
 | GET | `/api/tree` | 完整 widget 树 JSON；`?window=<id>` 取指定窗口树（需 `set_window_tree_getter`），无效 id 回 404、未注册 getter 时带 `window` 参数回 400 |

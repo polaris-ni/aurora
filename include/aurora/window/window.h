@@ -3,9 +3,12 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "aurora/app/perf_overlay.h"
 #include "aurora/core/a11y_provider.h"
@@ -25,6 +28,7 @@
 #include "aurora/render/display_list.h"
 #include "aurora/render/painter.h"
 #include "aurora/render/rhi/rhi_frame_sink.h"
+#include "aurora/state/async.h"
 #include "aurora/widget/widget.h"
 #include "aurora/window/surface.h"
 #include "aurora/window/window_chrome.h"
@@ -650,8 +654,52 @@ class Window {
      * （测试/自拼帧循环）行为不变。等待时长记入 `FrameStats`（wakeups / sleep ratio）。
      */
     AURORA_MAIN_THREAD auto run(const std::function<void()> &on_frame, int max_frames = -1) -> void {
+        // 本循环就是这条线程的主线程事件循环：给后台线程（InspectorServer 的 worker）装上回投器，
+        // 使其对 widget 树的读取排在帧与帧之间执行。缺此安装时 `inspector` 的 marshal 会退回
+        // 「在当前线程直读」，与 present/重排并发改树相撞即触发访问违例（0xC0000005）。
+        struct RunQueue {
+            std::mutex mutex;
+            std::vector<std::function<void()>> tasks;
+            bool running = true;
+        };
+        auto queue = std::make_shared<RunQueue>();
+        Surface *const surf = surface_.get();
+        auto drain = [queue]() -> void {
+            std::vector<std::function<void()>> batch;
+            {
+                std::scoped_lock lk(queue->mutex);
+                batch.swap(queue->tasks);
+            }
+            for (auto &task : batch) {
+                if (task) {
+                    task();
+                }
+            }
+        };
+        std::function<void(std::function<void()>)> prev_poster;
+        {
+            std::scoped_lock lk(aurora::detail::main_poster_mutex());
+            prev_poster = aurora::detail::main_poster();
+            aurora::detail::main_poster() = [queue, surf](std::function<void()> fn) -> void {
+                std::function<void()> inline_fn;
+                {
+                    std::scoped_lock lk2(queue->mutex);
+                    if (queue->running) {
+                        queue->tasks.push_back(std::move(fn));
+                    } else {
+                        inline_fn = std::move(fn);  // 循环已退出：无人排水，就地执行（与无回投器时同义）
+                    }
+                }
+                if (inline_fn) {
+                    inline_fn();
+                } else {
+                    surf->request_wake();  // 唤醒睡在 wait_events 的循环，即刻排水
+                }
+            };
+        }
         int n = 0;
         while (!should_close()) {
+            drain();
             pump_events();
             if (on_frame) {
                 on_frame();
@@ -668,6 +716,11 @@ class Window {
                 const auto t1 = std::chrono::steady_clock::now();
                 FrameStats::instance().record_wait(std::chrono::duration<double, std::milli>(t1 - t0).count());
             }
+        }
+        {
+            std::scoped_lock lk(aurora::detail::main_poster_mutex());
+            aurora::detail::main_poster() = std::move(prev_poster);  // 交还给外层循环（可能为 nullptr）
+            queue->running = false;
         }
     }
 

@@ -5,14 +5,21 @@
 /// 请求-响应、404/405/400/403 错误请求、/api/debug/state 的 surface getter 装配错误路径，
 /// 以及 /api/input/{click,scroll,drag,text} 交互模拟（派发到目标控件、请求体校验、目标定位
 /// 失败与派发失败的错误映射）和 /api/find 的 key/type/text 定位（路径与寻址端点同口径）。
+/// 树端点的线程落点同样在此覆盖：装上传递器后必须换到主线程下树，无传递器时回退内联执行。
 /// 端口一律用 0（系统分配临时端口，无冲突）；无文件句柄副作用。客户端为本 TU 内最小
 /// 回环 socket 实现，随用例关闭清理。
 /// AURORA_BUILD_INSPECTOR_SERVER=OFF 时整文件降级为 skip 桩。
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "aurora/core/platform.h"
 #include "framework/aurora_test.h"
@@ -21,6 +28,7 @@
 
 #include "aurora/event/event.h"  // ScrollEvent
 #include "aurora/inspector/inspector_server.h"
+#include "aurora/state/async.h"  // detail::main_poster（跨线程投递器，marshal 的落点）
 #include "aurora/widget/button.h"
 #include "aurora/widget/checkbox.h"
 #include "aurora/widget/containers.h"
@@ -36,6 +44,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/time.h>  // SO_RCVTIMEO 的 timeval
 #include <unistd.h>
 #endif
 
@@ -58,6 +67,60 @@ auto shared_tree() -> std::shared_ptr<Column> & {
 
 /// @brief root_getter：每次请求返回共享树的 Node 副本。
 auto tree_getter() -> Node { return Node{shared_tree()}; }
+
+/// @brief `recording_tree_getter` 的调用线程流水。
+auto getter_threads() -> std::vector<std::thread::id> & {
+    static std::vector<std::thread::id> threads;
+    return threads;
+}
+
+/// @brief 记录每次调用线程的 root_getter（配合 `QueuedPoster` 证明树访问确实换了线程）。
+auto recording_tree_getter() -> Node {
+    getter_threads().push_back(std::this_thread::get_id());
+    return tree_getter();
+}
+
+/// @brief 「只入队、由用例主线程排水」的跨线程投递器：装上它，`marshal_get` 才真的换线程执行。
+/// 析构时复原原投递器，避免污染同进程内的其它用例。
+struct QueuedPoster {
+    QueuedPoster() {
+        std::scoped_lock lock(aurora::detail::main_poster_mutex());
+        previous = aurora::detail::main_poster();
+        aurora::detail::main_poster() = [this](std::function<void()> fn) -> void {
+            {
+                std::scoped_lock task_lock(mutex);
+                tasks.push_back(std::move(fn));
+            }
+            cv.notify_all();
+        };
+    }
+    ~QueuedPoster() {
+        std::scoped_lock lock(aurora::detail::main_poster_mutex());
+        aurora::detail::main_poster() = previous;
+    }
+    QueuedPoster(const QueuedPoster &) = delete;
+    auto operator=(const QueuedPoster &) -> QueuedPoster & = delete;
+
+    /// @brief 在当前线程执行一个排队任务；`timeout_ms` 内无任务返回 false（调用方据此判失败）。
+    auto drain_one(int timeout_ms = 5000) -> bool {
+        std::function<void()> task;
+        {
+            std::unique_lock lock(mutex);
+            if (!cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] { return !tasks.empty(); })) {
+                return false;
+            }
+            task = std::move(tasks.front());
+            tasks.pop_front();
+        }
+        task();
+        return true;
+    }
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::deque<std::function<void()>> tasks;
+    std::function<void(std::function<void()>)> previous;
+};
 
 #ifdef AURORA_PLATFORM_WINDOWS
 /// @brief Winsock 会话（引用计数式启停，随作用域清理）。
@@ -102,8 +165,9 @@ auto send_all(int sock, const std::string &data) -> bool {
 }
 
 /// @brief 对 127.0.0.1:port 发送原始 HTTP 请求并回收完整响应（服务端 Connection: close，
-/// 读到对端关闭即完整）。
-[[nodiscard]] auto http_roundtrip(std::uint16_t port, const std::string &request) -> std::string {
+/// 读到对端关闭即完整）。`recv_timeout_ms > 0` 时给接收加超时，超时按空响应失败。
+[[nodiscard]] auto http_roundtrip(std::uint16_t port, const std::string &request, int recv_timeout_ms = 0)
+    -> std::string {
 #ifdef AURORA_PLATFORM_WINDOWS
     const WinsockSession wsa;
 #endif
@@ -122,6 +186,19 @@ auto send_all(int sock, const std::string &data) -> bool {
     // connect() 的 socket API 契约要求将 sockaddr_in 擦除为通用 sockaddr 指针，无类型安全替代。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     AURORA_TEST_REQUIRE_EQ(::connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)), 0);
+
+    if (recv_timeout_ms > 0) {
+#ifdef AURORA_PLATFORM_WINDOWS
+        const DWORD timeout = static_cast<DWORD>(recv_timeout_ms);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        static_cast<void>(::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeout),
+                                       static_cast<int>(sizeof(timeout))));
+#else
+        const timeval timeout{.tv_sec = recv_timeout_ms / 1000, .tv_usec = (recv_timeout_ms % 1000) * 1000};
+        static_cast<void>(
+            ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeout), sizeof(timeout)));
+#endif
+    }
     AURORA_TEST_REQUIRE_TRUE(send_all(sock, request));
 
     std::string response;
@@ -152,6 +229,11 @@ auto send_all(int sock, const std::string &data) -> bool {
 /// @brief 带 Host 头的 GET 便捷封装。
 [[nodiscard]] auto http_get(std::uint16_t port, const std::string &target) -> std::string {
     return http_roundtrip(port, "GET " + target + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+}
+
+/// @brief 带接收超时的 GET：供非用例主线程调用 —— 服务端不回响应时自行退出，不把 runner 挂死。
+[[nodiscard]] auto http_get_timed(std::uint16_t port, const std::string &target, int timeout_ms) -> std::string {
+    return http_roundtrip(port, "GET " + target + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", timeout_ms);
 }
 
 /// @brief 带 Host 头与 JSON body 的 POST 便捷封装。
@@ -874,6 +956,68 @@ AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
 
     // 复原共享树，避免污染同进程内的其它用例。
     static_cast<void>(http_post(server.port(), "/api/patch", R"([{"path":"/0/content","value":"hello"}])"));
+    server.stop();
+#endif
+}
+
+/// 目标：触碰活动树的端点必须经 `main_poster` 换到主线程执行，不得在 accept worker 线程下树。
+/// 回归的缺陷：真机拖拽 ReorderableList 时轮询 `/api/tree`，宿主在 0xC0000005 崩溃
+/// （栈：`route_request → Inspector::tree_json_full → dump_tree_json_full`，无 marshal 帧）——
+/// 帧内在增删节点，worker 线程读到已释放节点。用例靠「线程流水」判定：`root_getter` 记录的调用
+/// 线程必须全等于排水线程，且排水线程就是用例主线程；修复前这些调用发生在 worker 线程，必红。
+AURORA_TEST_CASE(tree_routes_marshal_tree_traversal_to_the_poster_thread) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    QueuedPoster poster;
+    getter_threads().clear();
+    InspectorServer server(recording_tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    const std::uint16_t port = server.port();
+
+    // 客户端另起线程：主线程若不排水，服务端就永远等不到树读取落点，客户端只会超时返回。
+    std::vector<std::string> responses;
+    std::exception_ptr client_error;
+    std::thread client([&]() -> void {
+        try {
+            responses.push_back(http_get_timed(port, "/api/tree", 8000));
+            responses.push_back(http_get_timed(port, "/api/widget/0", 8000));
+            responses.push_back(http_get_timed(port, "/api/yaml", 8000));
+        } catch (...) {
+            client_error = std::current_exception();
+        }
+    });
+    // 三个端点各一次树访问 → 各一次 marshal。任一次排水超时即说明该端点没走投递器。
+    bool drained = true;
+    for (int i = 0; i < 3; ++i) {
+        drained = poster.drain_one(8000) && drained;
+    }
+    client.join();
+    server.stop();
+
+    AURORA_TEST_REQUIRE_TRUE(drained);
+    AURORA_TEST_REQUIRE_TRUE(client_error == nullptr);
+    AURORA_TEST_REQUIRE_EQ(responses.size(), 3U);
+    for (const auto &resp : responses) {
+        AURORA_TEST_CHECK_TRUE(resp.find("200") != std::string::npos);
+    }
+    AURORA_TEST_REQUIRE_EQ(getter_threads().size(), 3U);
+    for (const auto &id : getter_threads()) {
+        AURORA_TEST_CHECK_TRUE(id == std::this_thread::get_id());
+    }
+#endif
+}
+
+/// 目标：无投递器（无事件循环）时树端点仍可同步服务——marshal 的回退分支不得变成硬依赖。
+AURORA_TEST_CASE(tree_routes_work_without_a_poster_inline) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+#else
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/tree").find("Column") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/widget/0").find("200") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/yaml").find("200") != std::string::npos);
     server.stop();
 #endif
 }
