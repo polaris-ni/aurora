@@ -29,9 +29,9 @@ using au::Widget;
 
 constexpr float AURORA_CANVAS_W = 400.0F;
 constexpr float AURORA_CANVAS_H = 300.0F;
-constexpr float AURORA_BOX_X = 60.0F;   ///< 被测盒原点：离画布边缘足够远，环带完整可见
+constexpr float AURORA_BOX_X = 60.0F;  ///< 被测盒原点：离画布边缘足够远，环带完整可见
 constexpr float AURORA_BOX_Y = 80.0F;
-constexpr float AURORA_RING_GAP = 2.0F;       ///< 与 widget.cpp 的环几何常量一致
+constexpr float AURORA_RING_GAP = 2.0F;  ///< 与 widget.cpp 的环几何常量一致
 constexpr float AURORA_RING_THICKNESS = 2.0F;
 
 /// 主题 primary 为蓝色系；选区/环等蓝色染色的共同特征是蓝通道显著占优。
@@ -52,9 +52,9 @@ auto paint_on_white(W &w, Painter &p, bool focused) -> Rect {
         fm.set_focus(&w);
     }
     p.begin(static_cast<int>(AURORA_CANVAS_W), static_cast<int>(AURORA_CANVAS_H));
-    p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0},
-                     .size = Size{.width = AURORA_CANVAS_W, .height = AURORA_CANVAS_H}},
-                Color::white());
+    p.fill_rect(
+        Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = AURORA_CANVAS_W, .height = AURORA_CANVAS_H}},
+        Color::white());
     const Rect box{.origin = Point{.x = AURORA_BOX_X, .y = AURORA_BOX_Y}, .size = w.size()};
     w.paint(p, box, ctx);
     return box;

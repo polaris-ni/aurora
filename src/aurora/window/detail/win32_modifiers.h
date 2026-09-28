@@ -43,7 +43,7 @@ namespace aurora::detail {
 /// @note Thread: main-thread only（消息泵线程）
 /// @note Side-effects: stateful（`apply` / `seed` / `clear` 改内部状态，`get` 纯读）
 class ModifierKeyTracker {
-public:
+  public:
     /// @brief 按一条键盘消息翻转对应修饰位。
     /// @param vk 消息 `wParam` 的虚拟键码
     /// @param down true = 按下（`WM_KEYDOWN` / `WM_SYSKEYDOWN`），false = 抬起
@@ -95,7 +95,7 @@ public:
         }
     }
 
-private:
+  private:
     ModifierKey state_ = ModifierKey::None;
 };
 
