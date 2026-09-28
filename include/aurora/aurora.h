@@ -38,7 +38,8 @@
 #include "aurora/cli/args.h"
 #include "aurora/cli/command.h"
 #include "aurora/commands.h"
-#include "aurora/core/a11y_provider.h"  // 鍏叡鏃犻殰纰嶆ˉ鎶借薄 + 鍏叡閽╁瓙锛坰et_accessibility_*_hook锛?9锛?#10;#include "aurora/core/accessibility.h"
+#include "aurora/core/a11y_provider.h"  // 公共无障碍桥抽象 + 公共钩子（set_accessibility_*_hook；#9）
+#include "aurora/core/accessibility.h"
 #include "aurora/core/aurora_assert.h"
 #include "aurora/core/color.h"
 #include "aurora/core/debug.h"
