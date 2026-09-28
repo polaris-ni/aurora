@@ -422,7 +422,11 @@ auto Text::on_key_event(KeyEvent &e) -> void {
     if (ctrl && e.key == static_cast<int>(KeyCode::C)) {
         const std::string t = selected_text();
         if (!t.empty()) {
-            Clipboard::set_text(t);
+            // 控件层拿不到 Result 的下游消费者，失败只能就地记诊断留痕。
+            if (const auto copied = Clipboard::set_text(t); !copied) {
+                Diagnostics::warn("Text Ctrl+C copy failed: " + copied.error().message, "Text::on_key_event",
+                                  copied.error().code);
+            }
             e.is_handled = true;
         }
         return;

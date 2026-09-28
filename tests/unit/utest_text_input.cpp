@@ -3,14 +3,19 @@
 /// 测试说明: 覆盖 TextInput——Props 构造与链式 setter、只读/限长/禁用状态、布局尺寸与字号关系、
 /// 经公开文本输入入口验证 on_changed 回调与截断/吞输入行为、IME 组合输入（preedit 显示 /
 /// 上屏落字 / 限长 / 失焦取消 / 参与测量）、Shift+方向键扩选的字符数与退格删选区、
-/// Home/End 跳端点与扩选（含经派发器送达焦点控件）、序列化往返与默认键省略
+/// Home/End 跳端点与扩选（含经派发器送达焦点控件）、序列化往返与默认键省略、
+/// Ctrl+X 在剪贴板写入失败时不删选区且留诊断
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <string>
 
+#include "aurora/app/clipboard.h"
+#include "aurora/core/diagnostics.h"
 #include "aurora/core/directionality.h"
 #include "aurora/core/log.h"
+#include "aurora/core/platform.h"
 #include "aurora/environment/environment.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
@@ -723,6 +728,55 @@ AURORA_TEST_CASE(bidi_control_chars_do_not_shift_visible_width) {
     for (const auto &[pi, ci] : pairs) {
         AURORA_TEST_CHECK_NEAR(FontEngine::caret_x(plain, pi, f), FontEngine::caret_x(with_ctrl, ci, f), 0.01F);
     }
+}
+
+AURORA_TEST_CASE(cut_keeps_text_when_clipboard_write_fails) {
+#ifdef AURORA_PLATFORM_WINDOWS
+    // 回归：Ctrl+X 的「删选区」必须以「复制成功」为前提。剪切 = 复制 + 删除，复制没成却照删，
+    // 用户既没把内容交出去又丢了原文，是净损失；改签名前这条路径静默返回，无从设防。
+    // 这里用「非法 UTF-8 在 EmptyClipboard 之前就被 MB_ERR_INVALID_CHARS 拒掉」做确定性失败入路，
+    // 故本用例全程不会改动真实系统剪贴板的内容（也不必装 memory 后端——装了反而永不失败）。
+    (void)Clipboard::remove_test_backend();
+
+    const std::string junk{"keep\xF0\x28\x8C\x28me"};
+    auto field = std::make_shared<TextInput>();
+    field->set_value(junk);
+
+    FocusManager fm;
+    fm.set_root(field.get());
+    KeyEvent tab;
+    tab.action = KeyAction::Down;
+    tab.key = static_cast<int>(KeyCode::Tab);
+    AURORA_TEST_REQUIRE_TRUE(EventDispatcher::dispatch(*field, tab, fm));
+
+    (void)Diagnostics::take();  // 排空他人在途诊断，下面的断言只看本用例产出
+
+    KeyEvent select_all;
+    select_all.action = KeyAction::Down;
+    select_all.key = static_cast<int>(KeyCode::A);
+    select_all.modifiers = ModifierKey::Control;
+    AURORA_TEST_REQUIRE_TRUE(EventDispatcher::dispatch(*field, select_all, fm));
+    AURORA_TEST_REQUIRE_MSG(field->has_selection(), "selection established (sanity)");
+
+    KeyEvent cut;
+    cut.action = KeyAction::Down;
+    cut.key = static_cast<int>(KeyCode::X);
+    cut.modifiers = ModifierKey::Control;
+    AURORA_TEST_REQUIRE_TRUE(EventDispatcher::dispatch(*field, cut, fm));
+
+    AURORA_TEST_CHECK_EQ(field->value(), junk);  // 原文一字未丢
+    AURORA_TEST_CHECK(field->has_selection());  // 选区留在原地等用户重试
+
+    const auto diags = Diagnostics::take();
+    const bool traced = std::ranges::any_of(diags, [](const Diagnostic &d) {
+        return d.code == "clipboard-write-failed" && d.where == "TextInput::on_key_event";
+    });
+    AURORA_TEST_CHECK_MSG(traced, "failed cut surfaced as a machine-readable diagnostic");
+#else
+    AURORA_TEST_SKIP(
+        "the deterministic clipboard-write failure (invalid UTF-8 rejected before OpenClipboard) is Windows-specific; "
+        "xsel/xclip/pbcopy accept arbitrary bytes, so this path cannot fail deterministically elsewhere");
+#endif
 }
 
 }  // namespace aurora::test_cases::utest_text_input

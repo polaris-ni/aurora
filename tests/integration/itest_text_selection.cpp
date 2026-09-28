@@ -652,7 +652,9 @@ AURORA_TEST_CASE(dispatcher_click_focus_enables_ctrl_c_copy) {
     AURORA_TEST_CHECK_MSG(ke.is_handled, "Ctrl+C consumed by focused text");
 
     if (clipboard_backend_injected) {
-        AURORA_TEST_CHECK_MSG(Clipboard::get_text() == src, "full drag-selection copied to clipboard");
+        const auto copied = Clipboard::get_text();
+        AURORA_TEST_REQUIRE_MSG(copied.ok(), "clipboard read through the memory backend succeeds");
+        AURORA_TEST_CHECK_MSG(copied.value() == src, "full drag-selection copied to clipboard");
         (void)Clipboard::remove_test_backend();
     } else {
         AURORA_TEST_TRACE(

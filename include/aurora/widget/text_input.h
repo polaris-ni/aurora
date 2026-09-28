@@ -6,6 +6,7 @@
 
 #include "aurora/app/clipboard.h"
 #include "aurora/core/accessibility.h"
+#include "aurora/core/diagnostics.h"
 #include "aurora/core/directionality.h"
 #include "aurora/core/types.h"
 #include "aurora/core/utf8.h"
@@ -627,7 +628,12 @@ class TextInput : public LeafWidget {
         }
         if (ctrl && e.key == static_cast<int>(KeyCode::C)) {
             const std::string t = selected_text();
-            Clipboard::set_text(t.empty() ? v : t);
+            // 复制失败是「用户按了复制却没复制上」，控件层无法补救，但必须留痕：Result 只到调用方，
+            // 而这条路径的调用方就是控件自己。
+            if (const auto copied = Clipboard::set_text(t.empty() ? v : t); !copied) {
+                Diagnostics::warn("TextInput Ctrl+C copy failed: " + copied.error().message, "TextInput::on_key_event",
+                                  copied.error().code);
+            }
             e.is_handled = true;
             return;
         }
@@ -635,8 +641,13 @@ class TextInput : public LeafWidget {
         if (ctrl && e.key == static_cast<int>(KeyCode::X)) {
             const std::string t = selected_text();
             if (!t.empty()) {
-                Clipboard::set_text(t);
-                if (!read_only_) {
+                const auto copied = Clipboard::set_text(t);
+                if (!copied) {
+                    Diagnostics::warn("TextInput Ctrl+X copy failed: " + copied.error().message,
+                                      "TextInput::on_key_event", copied.error().code);
+                }
+                // 复制没成就不删：剪切删了便无处可粘，宁可让选区留在原地等用户重试。
+                if (!read_only_ && copied) {
                     delete_selection();
                     notify_changed();
                     mark_needs_paint();
@@ -651,7 +662,14 @@ class TextInput : public LeafWidget {
                 e.is_handled = true;
                 return;
             }
-            std::string clip = Clipboard::get_text();
+            // 「剪贴板里没有文本」与「剪贴板读不出来」从此可分：前者 Ok("") 静默不插入，后者留痕。
+            std::string clip;
+            if (const auto fetched = Clipboard::get_text(); fetched) {
+                clip = fetched.value();
+            } else {
+                Diagnostics::warn("TextInput Ctrl+V read failed: " + fetched.error().message, "TextInput::on_key_event",
+                                  fetched.error().code);
+            }
             if (!clip.empty()) {
                 if (sel_end_ != AURORA_NO_SEL) {
                     delete_selection();

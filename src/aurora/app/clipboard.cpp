@@ -4,10 +4,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include "aurora/core/image.h"
-#include "aurora/core/log.h"
 #include "aurora/core/platform.h"
+#include "aurora/core/result.h"
 
 #ifdef AURORA_PLATFORM_WINDOWS
 #define WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming): Windows SDK 宏，不可改名
@@ -55,6 +56,16 @@ struct TestBackend {
 }  // namespace
 #endif
 
+#ifdef AURORA_PLATFORM_WINDOWS
+namespace {
+/// @brief 把 Win32 LastError 折进失败 detail：同一句「OpenClipboard 失败」在「别的线程正持有
+/// 剪贴板」（可重试）与「当前会话没有桌面」（不可重试）两种成因下对策不同，留下码值才有诊断价值。
+[[nodiscard]] auto win_detail(const char *what) -> std::string {
+    return std::string(what) + ", GetLastError=" + std::to_string(GetLastError());
+}
+}  // namespace
+#endif
+
 #if (defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)) || defined(AURORA_PLATFORM_MACOS)
 namespace {
 
@@ -62,7 +73,8 @@ namespace {
 /// xclip/xsel/pbcopy 外壳进程中转。当这些工具缺失（或没有 X display）时子进程会立即退出，
 /// 导致后续 fwrite/pclose 向已关闭的管道写数据触发 SIGPIPE 直接杀死本进程（headless CI 等
 /// 无剪贴板环境常见，且 ASan 下因执行更慢更易命中风写竞态）。置 SIG_IGN 后写操作返回 EPIPE
-/// （fwrite 截断、pclose 返回非零），调用方据此判定剪贴板不可用并降级，而非崩溃。作用域结束即
+/// （fwrite 截断、pclose 返回非零），调用方据此把「剪贴板不可用」折成 ClipboardAccessFailed 报给
+/// 调用方，而非崩溃。作用域结束即
 /// 恢复原处置，不影响进程其余部分。
 struct ScopedSigpipeIgnore {
     using Handler = void (*)(int);
@@ -82,28 +94,32 @@ struct ScopedSigpipeIgnore {
 };
 
 /// @brief 执行命令并向其 stdin 写入数据（用于 xclip/pbcopy 写入剪贴板）。
-/// @return 命令是否成功执行。
-auto pipe_to_command(const std::string &cmd, const std::string &data) -> bool {
+/// @return 命令退出码为 0 时 Ok；否则 ClipboardAccessFailed，detail 指明是 popen 起不来还是退出码非零。
+auto pipe_to_command(const std::string &cmd, const std::string &data) -> Result<bool> {
     // Linux/macOS 无标准剪贴板 API，必须借 xclip/xsel/pbcopy 外壳；命令为硬编码常量、无外部输入拼接，无命令注入风险。
     const ScopedSigpipeIgnore ignore_sigpipe;  // 防缺失/无显示的工具导致 SIGPIPE 杀死进程
     FILE *pipe = popen(cmd.c_str(), "w");  // NOLINT(bugprone-command-processor)
     if (pipe == nullptr) {
-        return false;
+        return make_error(ErrorCode::ClipboardAccessFailed, ErrorParams{{"detail", "popen(" + cmd + ") failed"}});
     }
     if (!data.empty()) {
         std::fwrite(data.data(), 1, data.size(), pipe);
     }
     const int ret = pclose(pipe);
-    return ret == 0;
+    if (ret != 0) {
+        return make_error(ErrorCode::ClipboardAccessFailed,
+                          ErrorParams{{"detail", cmd + " exited with code " + std::to_string(ret)}});
+    }
+    return Result<bool>{true};
 }
 
 /// @brief 执行命令并读取其 stdout（用于 xsel/pbpaste 读取剪贴板）。
-/// @return 命令输出内容（UTF-8）。
-auto read_from_command(const std::string &cmd) -> std::string {
+/// @return Ok(命令输出，UTF-8；空输出 = 剪贴板确实为空)；起不来或退出码非零为 ClipboardAccessFailed。
+auto read_from_command(const std::string &cmd) -> Result<std::string> {
     // 读取 pbpaste/xsel -o/xclip -o 输出为硬编码，无外部输入拼接，无命令注入风险
     FILE *pipe = popen(cmd.c_str(), "r");  // NOLINT(bugprone-command-processor)
     if (pipe == nullptr) {
-        return {};
+        return make_error(ErrorCode::ClipboardAccessFailed, ErrorParams{{"detail", "popen(" + cmd + ") failed"}});
     }
     std::string result;
     std::array<char, 4096> buf{};
@@ -111,70 +127,92 @@ auto read_from_command(const std::string &cmd) -> std::string {
         result += s;
     }
     const int ret = pclose(pipe);
-    return (ret == 0) ? result : std::string{};
+    if (ret != 0) {
+        return make_error(ErrorCode::ClipboardAccessFailed,
+                          ErrorParams{{"detail", cmd + " exited with code " + std::to_string(ret)}});
+    }
+    return result;
 }
 }  // namespace
 #endif
 
-auto Clipboard::set_text(const std::string &text) -> void {
+auto Clipboard::set_text(const std::string &text) -> Result<bool> {
 #ifdef AURORA_CLIPBOARD_TEST_BACKEND
     {
         auto &backend = test_backend();
         const std::scoped_lock lock{backend.mutex};
         if (backend.active) {
             backend.text = text;
-            return;
+            return Result<bool>{true};
         }
     }
 #endif
 #ifdef AURORA_PLATFORM_WINDOWS
     if (text.empty()) {
-        return;
+        return Result<bool>{true};  // 契约：空串 no-op，不触碰剪贴板、保留既有内容
+    }
+    // 先转码再开剪贴板：MB_ERR_INVALID_CHARS 让非法 UTF-8 在**动任何既有内容之前**就被拒，
+    // 失败的那次写入不会把用户原本复制的东西清掉。（默认宽松模式下非法字节会被替换成 U+FFFD，
+    // 等于把乱码悄悄塞进剪贴板——那正是本次改签名要消灭的静默失败。）
+    const int wchar_len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.c_str(), -1, nullptr, 0);
+    if (wchar_len <= 0) {
+        return make_error(ErrorCode::ClipboardWriteFailed,
+                          ErrorParams{{"detail", win_detail("MultiByteToWideChar(CP_UTF8) rejected the payload")}});
     }
     if (OpenClipboard(nullptr) == 0) {
-        AURORA_LOG_WARN("clipboard", "OpenClipboard failed");
-        return;
+        return make_error(ErrorCode::ClipboardAccessFailed, ErrorParams{{"detail", win_detail("OpenClipboard")}});
     }
     EmptyClipboard();
-    const int wchar_len = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-    if (wchar_len > 0) {
-        if (const HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(wchar_len) * sizeof(wchar_t))) {
-            if (auto *p = static_cast<wchar_t *>(GlobalLock(h))) {
-                MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, p, wchar_len);
-                GlobalUnlock(h);
-                SetClipboardData(CF_UNICODETEXT, h);
-            } else {
-                GlobalFree(h);
-            }
-        }
+    const HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(wchar_len) * sizeof(wchar_t));
+    if (h == nullptr) {
+        CloseClipboard();
+        return make_error(ErrorCode::ClipboardWriteFailed, ErrorParams{{"detail", win_detail("GlobalAlloc")}});
+    }
+    auto *p = static_cast<wchar_t *>(GlobalLock(h));
+    if (p == nullptr) {
+        GlobalFree(h);  // 句柄尚未交给剪贴板，归本进程释放
+        CloseClipboard();
+        return make_error(ErrorCode::ClipboardWriteFailed, ErrorParams{{"detail", win_detail("GlobalLock")}});
+    }
+    MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, p, wchar_len);
+    GlobalUnlock(h);
+    if (SetClipboardData(CF_UNICODETEXT, h) == nullptr) {
+        GlobalFree(h);  // 提交失败时所有权未转移，漏掉即每次失败积一块
+        CloseClipboard();
+        return make_error(ErrorCode::ClipboardWriteFailed,
+                          ErrorParams{{"detail", win_detail("SetClipboardData(CF_UNICODETEXT)")}});
     }
     CloseClipboard();
+    return Result<bool>{true};
 #elif defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
     if (text.empty()) {
-        return;
+        return Result<bool>{true};  // 契约：空串 no-op，保留既有内容
     }
     // 优先 xsel：xsel 写入后 fork 守护进程持有 X selection 并立即返回，不会阻塞调用方；
     // 回退 xclip。注意 xclip 复制后前台常驻（等待 selection 被读取才退出），在 headless
     // 无剪贴板管理器的环境（CI）下 pclose 会永久等待 → 测试挂死，故不作为首选。
-    if (!pipe_to_command("xsel --clipboard --input 2>/dev/null", text)) {
-        if (!pipe_to_command("xclip -selection clipboard 2>/dev/null", text)) {
-            AURORA_LOG_WARN("clipboard", "set_text: xclip/xsel not available");
-        }
+    auto primary = pipe_to_command("xsel --clipboard --input 2>/dev/null", text);
+    if (primary) {
+        return primary;
     }
+    auto fallback = pipe_to_command("xclip -selection clipboard 2>/dev/null", text);
+    if (fallback) {
+        return fallback;
+    }
+    return make_error(ErrorCode::ClipboardAccessFailed,
+                      ErrorParams{{"detail", primary.error().message + "; " + fallback.error().message}});
 #elif defined(AURORA_PLATFORM_MACOS)
     if (text.empty()) {
-        return;
+        return Result<bool>{true};  // 契约：空串 no-op，保留既有内容
     }
-    if (!pipe_to_command("pbcopy", text)) {
-        AURORA_LOG_WARN("clipboard", "set_text: pbcopy failed");
-    }
+    return pipe_to_command("pbcopy", text);
 #else
     (void)text;
-    AURORA_LOG_DEBUG("clipboard", "set_text no-op on this platform");
+    return make_error(ErrorCode::GeneralNotSupported, "set_text: this platform has no clipboard implementation");
 #endif
 }
 
-auto Clipboard::get_text() -> std::string {
+auto Clipboard::get_text() -> Result<std::string> {
 #ifdef AURORA_CLIPBOARD_TEST_BACKEND
     {
         auto &backend = test_backend();
@@ -186,38 +224,47 @@ auto Clipboard::get_text() -> std::string {
 #endif
 #ifdef AURORA_PLATFORM_WINDOWS
     if (OpenClipboard(nullptr) == 0) {
-        AURORA_LOG_WARN("clipboard", "OpenClipboard failed (get_text)");
-        return {};
+        return make_error(ErrorCode::ClipboardAccessFailed,
+                          ErrorParams{{"detail", win_detail("OpenClipboard (get_text)")}});
     }
     std::string result;
     if (const HANDLE h = GetClipboardData(CF_UNICODETEXT)) {
-        if (const auto *w = static_cast<const wchar_t *>(GlobalLock(h))) {
-            const int len = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
-            if (len > 0) {
-                result.resize(static_cast<size_t>(len) - 1);
-                WideCharToMultiByte(CP_UTF8, 0, w, -1, result.data(), len, nullptr, nullptr);
-            }
-            GlobalUnlock(h);
+        const auto *w = static_cast<const wchar_t *>(GlobalLock(h));
+        if (w == nullptr) {
+            CloseClipboard();
+            return make_error(ErrorCode::ClipboardAccessFailed,
+                              ErrorParams{{"detail", win_detail("GlobalLock (get_text)")}});
         }
-    }
+        const int len = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+        if (len > 0) {
+            result.resize(static_cast<size_t>(len) - 1);
+            WideCharToMultiByte(CP_UTF8, 0, w, -1, result.data(), len, nullptr, nullptr);
+        }
+        GlobalUnlock(h);
+    }  // 无 CF_UNICODETEXT = 剪贴板可读但没有文本，Ok("") 而非失败
     CloseClipboard();
     return result;
 #elif defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
-    // xclip 输出可能含尾随换行；xsel --clipboard 更干净
-    auto r = read_from_command("xsel --clipboard --output 2>/dev/null");
-    if (r.empty()) {
-        r = read_from_command("xclip -selection clipboard -o 2>/dev/null");
+    // xclip 输出可能含尾随换行；xsel --clipboard 更干净。xsel 成功即以其结果为准（空输出
+    // = 剪贴板确实没有文本），只有它本身起不来/非零退出才回退 xclip。
+    auto primary = read_from_command("xsel --clipboard --output 2>/dev/null");
+    if (primary) {
+        return primary;
     }
-    return r;
+    auto fallback = read_from_command("xclip -selection clipboard -o 2>/dev/null");
+    if (fallback) {
+        return fallback;
+    }
+    return make_error(ErrorCode::ClipboardAccessFailed,
+                      ErrorParams{{"detail", primary.error().message + "; " + fallback.error().message}});
 #elif defined(AURORA_PLATFORM_MACOS)
     return read_from_command("pbpaste");
 #else
-    AURORA_LOG_DEBUG("clipboard", "get_text no-op on this platform");
-    return {};
+    return make_error(ErrorCode::GeneralNotSupported, "get_text: this platform has no clipboard implementation");
 #endif
 }
 
-auto Clipboard::set_image(const Image &img) -> void {
+auto Clipboard::set_image(const Image &img) -> Result<bool> {
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast): Win32
     // HGLOBAL 字节搬运不可避免
 #ifdef AURORA_CLIPBOARD_TEST_BACKEND
@@ -226,14 +273,14 @@ auto Clipboard::set_image(const Image &img) -> void {
         const std::scoped_lock lock{backend.mutex};
         if (backend.active) {
             backend.image = img;
-            return;
+            return Result<bool>{true};
         }
     }
 #endif
 
 #ifdef AURORA_PLATFORM_WINDOWS
     if (img.width <= 0 || img.height <= 0 || img.pixels.empty()) {
-        return;  // 空图像早退（不清除已有内容）
+        return Result<bool>{true};  // 空图像早退（不清除已有内容）
     }
     // 剪贴板载荷上限 + 64 位尺寸算术：stride*h 用 32 位在 w/h ≥ 2^15 量级时回绕，
     // 分配出过小的堆块，后续逐像素拷贝即越界写。同时校验像素缓冲与维度一致，
@@ -241,12 +288,11 @@ auto Clipboard::set_image(const Image &img) -> void {
     constexpr std::int64_t k_max_clipboard_dim = 16384;
     if (img.width > k_max_clipboard_dim || img.height > k_max_clipboard_dim ||
         img.pixels.size() != static_cast<std::size_t>(img.width) * static_cast<std::size_t>(img.height) * 4U) {
-        AURORA_LOG_WARN("clipboard", "set_image: image too large or pixel buffer size mismatch");
-        return;  // 早退，不清除已有内容
+        return make_error(ErrorCode::GeneralInvalidArgument,
+                          "set_image: image too large or pixel buffer size mismatch");  // 早退，不清除已有内容
     }
     if (OpenClipboard(nullptr) == 0) {
-        AURORA_LOG_WARN("clipboard", "OpenClipboard failed (set_image)");
-        return;
+        return make_error(ErrorCode::ClipboardAccessFailed, ErrorParams{{"detail", win_detail("OpenClipboard")}});
     }
     EmptyClipboard();
     const int w = img.width;
@@ -256,13 +302,13 @@ auto Clipboard::set_image(const Image &img) -> void {
     const HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(dib_size64));
     if (hg == nullptr) {
         CloseClipboard();
-        return;
+        return make_error(ErrorCode::ClipboardWriteFailed, ErrorParams{{"detail", win_detail("GlobalAlloc")}});
     }
     auto *p = static_cast<std::uint8_t *>(GlobalLock(hg));
     if (p == nullptr) {
         GlobalFree(hg);
         CloseClipboard();
-        return;
+        return make_error(ErrorCode::ClipboardWriteFailed, ErrorParams{{"detail", win_detail("GlobalLock")}});
     }
     auto *bi = reinterpret_cast<BITMAPINFOHEADER *>(p);
     std::memset(bi, 0, sizeof(BITMAPINFOHEADER));
@@ -286,15 +332,21 @@ auto Clipboard::set_image(const Image &img) -> void {
         }
     }
     GlobalUnlock(hg);
-    SetClipboardData(CF_DIB, hg);
+    if (SetClipboardData(CF_DIB, hg) == nullptr) {
+        GlobalFree(hg);  // 提交失败时所有权未转移，漏掉即每次失败积一块
+        CloseClipboard();
+        return make_error(ErrorCode::ClipboardWriteFailed,
+                          ErrorParams{{"detail", win_detail("SetClipboardData(CF_DIB)")}});
+    }
     CloseClipboard();
+    return Result<bool>{true};
 #else
     (void)img;
-    AURORA_LOG_DEBUG("clipboard", "set_image no-op on this platform");
+    return make_error(ErrorCode::GeneralNotSupported, "set_image: this platform has no clipboard implementation");
 #endif
 }  // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 
-auto Clipboard::get_image() -> Image {
+auto Clipboard::get_image() -> Result<Image> {
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast): Win32
     // HGLOBAL 字节搬运不可避免
 #ifdef AURORA_CLIPBOARD_TEST_BACKEND
@@ -309,22 +361,24 @@ auto Clipboard::get_image() -> Image {
 #ifdef AURORA_PLATFORM_WINDOWS
     Image out;
     if (OpenClipboard(nullptr) == 0) {
-        AURORA_LOG_WARN("clipboard", "OpenClipboard failed (get_image)");
-        return out;
+        return make_error(ErrorCode::ClipboardAccessFailed,
+                          ErrorParams{{"detail", win_detail("OpenClipboard (get_image)")}});
     }
     if (IsClipboardFormatAvailable(CF_DIB) == 0) {
         CloseClipboard();
-        return out;
+        return out;  // 没有 CF_DIB 格式 = 剪贴板确实无图像，Ok(空 Image) 而非失败
     }
     const HANDLE hg = GetClipboardData(CF_DIB);
     if (hg == nullptr) {
         CloseClipboard();
-        return out;
+        return make_error(ErrorCode::ClipboardAccessFailed,
+                          ErrorParams{{"detail", "CF_DIB is advertised but GetClipboardData returned null"}});
     }
     const auto *p = static_cast<const std::uint8_t *>(GlobalLock(hg));
     if (p == nullptr) {
         CloseClipboard();
-        return out;
+        return make_error(ErrorCode::ClipboardAccessFailed,
+                          ErrorParams{{"detail", win_detail("GlobalLock (get_image)")}});
     }
     // 剪贴板是跨进程信道：同一桌面上的任意进程都能放入任意 CF_DIB 字节块，故头部字段
     // （biWidth/biHeight/biBitCount/biSize/biClrUsed）全部是不可信输入，必须逐项校验后
@@ -333,7 +387,8 @@ auto Clipboard::get_image() -> Image {
     if (avail < sizeof(BITMAPINFOHEADER)) {
         GlobalUnlock(hg);
         CloseClipboard();
-        return out;
+        return make_error(ErrorCode::ClipboardAccessFailed,
+                          ErrorParams{{"detail", "CF_DIB block is smaller than its BITMAPINFOHEADER"}});
     }
     const auto *bi = reinterpret_cast<const BITMAPINFOHEADER *>(p);
     const int w = bi->biWidth;
@@ -344,7 +399,8 @@ auto Clipboard::get_image() -> Image {
     if (w <= 0 || hgt <= 0 || (bpp != 24 && bpp != 32)) {
         GlobalUnlock(hg);
         CloseClipboard();
-        return out;
+        return make_error(ErrorCode::ClipboardAccessFailed,
+                          ErrorParams{{"detail", "malformed CF_DIB header (non-positive size or unsupported bpp)"}});
     }
     // 全部用 64 位算术：biSize/biClrUsed 可被构造成 0xFFFFFFF0 之类，32 位下会回绕，
     // 使 off/src_stride 变成看似合法的小值而绕过下面的容量检查。
@@ -356,7 +412,8 @@ auto Clipboard::get_image() -> Image {
         src_stride * static_cast<std::uint64_t>(hgt) > static_cast<std::uint64_t>(avail) - off) {
         GlobalUnlock(hg);
         CloseClipboard();
-        return out;
+        return make_error(ErrorCode::ClipboardAccessFailed,
+                          ErrorParams{{"detail", "CF_DIB pixel area does not fit its block (rejected as malformed)"}});
     }
     out.width = w;
     out.height = hgt;
@@ -391,8 +448,7 @@ auto Clipboard::get_image() -> Image {
     CloseClipboard();
     return out;
 #else
-    AURORA_LOG_DEBUG("clipboard", "get_image no-op on this platform");
-    return Image{};
+    return make_error(ErrorCode::GeneralNotSupported, "get_image: this platform has no clipboard implementation");
 #endif
 }  // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 

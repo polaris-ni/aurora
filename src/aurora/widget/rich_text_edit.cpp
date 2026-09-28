@@ -274,21 +274,38 @@ auto RichTextEdit::handle_control_shortcut(KeyEvent &e, bool shift, std::size_t 
         case KeyCode::C: {
             const std::string t = selected_text();
             if (!t.empty()) {
-                Clipboard::set_text(t);
+                if (const auto copied = Clipboard::set_text(t); !copied) {
+                    Diagnostics::warn("RichTextEdit Ctrl+C copy failed: " + copied.error().message,
+                                      "RichTextEdit::on_key_event", copied.error().code);
+                }
             }
             return true;
         }
         case KeyCode::X: {
             const std::string t = selected_text();
             if (!t.empty()) {
-                Clipboard::set_text(t);
-                do_delete_selection();
-                mark_needs_paint();
+                const auto copied = Clipboard::set_text(t);
+                if (!copied) {
+                    Diagnostics::warn("RichTextEdit Ctrl+X copy failed: " + copied.error().message,
+                                      "RichTextEdit::on_key_event", copied.error().code);
+                }
+                // 复制没成就不删：剪切删了便无处可粘，宁可让选区留在原地等用户重试。
+                if (copied) {
+                    do_delete_selection();
+                    mark_needs_paint();
+                }
             }
             return true;
         }
         case KeyCode::V: {
-            const std::string clip = Clipboard::get_text();
+            // 可读但无文本 = Ok("")（静默不插入）；读不出来 = Err（记诊断），两者从此可分。
+            std::string clip;
+            if (const auto fetched = Clipboard::get_text(); fetched) {
+                clip = fetched.value();
+            } else {
+                Diagnostics::warn("RichTextEdit Ctrl+V read failed: " + fetched.error().message,
+                                  "RichTextEdit::on_key_event", fetched.error().code);
+            }
             if (!clip.empty()) {
                 do_insert(clip);
                 mark_needs_paint();

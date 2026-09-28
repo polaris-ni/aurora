@@ -221,10 +221,10 @@ AURORA_TEST_CASE(clipboard_test_backend_roundtrip) {
         AURORA_TEST_SKIP("test hooks disabled (AURORA_ENABLE_DEBUG / AURORA_ENABLE_TEST_HOOKS off)");
     }
     aurora::Clipboard::set_text("aurora-clipboard-roundtrip");
-    AURORA_TEST_CHECK_EQ(aurora::Clipboard::get_text(), "aurora-clipboard-roundtrip");
+    AURORA_TEST_CHECK_EQ(aurora::Clipboard::get_text().value(), "aurora-clipboard-roundtrip");
 
     aurora::Clipboard::reset_test_backend();
-    AURORA_TEST_CHECK(aurora::Clipboard::get_text().empty());
+    AURORA_TEST_CHECK(aurora::Clipboard::get_text().value().empty());
 
     aurora::Image image;
     image.width = 1;
@@ -232,9 +232,10 @@ AURORA_TEST_CASE(clipboard_test_backend_roundtrip) {
     image.pixels = {10U, 20U, 30U, 255U};
     aurora::Clipboard::set_image(image);
     const auto restored = aurora::Clipboard::get_image();
-    AURORA_TEST_CHECK_EQ(restored.width, 1);
-    AURORA_TEST_CHECK_EQ(restored.height, 1);
-    AURORA_TEST_CHECK(restored.pixels == image.pixels);
+    AURORA_TEST_REQUIRE(restored.ok());
+    AURORA_TEST_CHECK_EQ(restored.value().width, 1);
+    AURORA_TEST_CHECK_EQ(restored.value().height, 1);
+    AURORA_TEST_CHECK(restored.value().pixels == image.pixels);
 
     AURORA_TEST_REQUIRE(aurora::Clipboard::remove_test_backend());
     AURORA_TEST_CHECK(!aurora::Clipboard::remove_test_backend());  // 无后端可再卸
