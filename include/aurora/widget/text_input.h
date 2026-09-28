@@ -724,6 +724,31 @@ class TextInput : public LeafWidget {
             return;
         }
 
+        if (e.key == static_cast<int>(KeyCode::Home) || e.key == static_cast<int>(KeyCode::End)) {
+            // 单行框无「行首/行尾」之别 → Home/End 即文本两端；与方向键共用含头含尾选区模型。
+            const bool to_head = e.key == static_cast<int>(KeyCode::Home);
+            const size_t prev = caret_;
+            const size_t target = to_head ? 0U : n;
+            if (!shift) {
+                caret_ = target;
+                sel_start_ = caret_;
+                sel_end_ = AURORA_NO_SEL;
+            } else {
+                const bool had_sel = has_selection();
+                if (!had_sel) {
+                    // 首次扩选的锚点 = 本次新纳入的第一个字符：Home 向左跨过 caret-1，End 向右跨过 caret
+                    sel_start_ = to_head ? (prev == 0U ? 0U : prev - 1U) : prev;
+                }
+                caret_ = target;
+                // 空文本、或光标本已在端点且原无选区 → 没有字符被纳入，留空选区而非 1 字符假选区
+                const bool empty_extend = (n == 0U) || (!had_sel && prev == target);
+                sel_end_ = empty_extend ? AURORA_NO_SEL : (to_head ? 0U : n - 1U);
+            }
+            mark_needs_paint();
+            e.is_handled = true;
+            return;
+        }
+
         if (e.key == static_cast<int>(KeyCode::Backspace)) {
             if (read_only_) {
                 e.is_handled = true;

@@ -3,7 +3,7 @@
 /// 测试说明: 覆盖 TextInput——Props 构造与链式 setter、只读/限长/禁用状态、布局尺寸与字号关系、
 /// 经公开文本输入入口验证 on_changed 回调与截断/吞输入行为、IME 组合输入（preedit 显示 /
 /// 上屏落字 / 限长 / 失焦取消 / 参与测量）、Shift+方向键扩选的字符数与退格删选区、
-/// 序列化往返与默认键省略
+/// Home/End 跳端点与扩选（含经派发器送达焦点控件）、序列化往返与默认键省略
 
 #include <cstddef>
 #include <memory>
@@ -458,6 +458,132 @@ AURORA_TEST_CASE(shift_arrow_selects_exactly_one_char_per_press) {
     KeyEvent r1 = press(KeyCode::ArrowRight, ModifierKey::Shift);
     right.on_key_event(r1);
     AURORA_TEST_CHECK_EQ(right.selected_text(), std::string{"d"});
+}
+
+/// Home/End 在单行框上即「文本两端」（无行首/行尾之别）：非 Shift 跳光标并清选区，
+/// Shift 走与方向键同款的含头含尾扩选；光标本就在端点时扩选为空，不留 1 字符假选区。
+/// 曾经的缺陷：`on_key_event` 无 Home/End 分支 → 按键被丢弃成 no-op（TC-WIDGET-012 记录残项）。
+AURORA_TEST_CASE(home_end_move_caret_and_extend_selection) {
+    auto focused_field = [](const std::string &seed) -> TextInput {
+        TextInput ti;
+        ti.on_focus_change(true);
+        TextInputEvent e;
+        e.text = seed;
+        ti.on_text_input(e);
+        return ti;
+    };
+    auto press = [](KeyCode code, ModifierKey mods) -> KeyEvent {
+        KeyEvent k;
+        k.key = static_cast<int>(code);
+        k.action = KeyAction::Down;
+        k.modifiers = mods;
+        return k;
+    };
+    auto type = [](TextInput &ti, const std::string &s) -> void {
+        TextInputEvent e;
+        e.text = s;
+        ti.on_text_input(e);
+    };
+
+    // 非 Shift：只挪光标、清选区——落点用「插入字符的位置」反证。
+    TextInput jump = focused_field("abc");  // 种子输入后 caret=3
+    KeyEvent home = press(KeyCode::Home, ModifierKey::None);
+    jump.on_key_event(home);
+    AURORA_TEST_CHECK_FALSE(jump.has_selection());
+    type(jump, "X");
+    AURORA_TEST_CHECK_EQ(jump.value(), std::string{"Xabc"});  // caret=0
+    KeyEvent end = press(KeyCode::End, ModifierKey::None);
+    jump.on_key_event(end);
+    type(jump, "!");
+    AURORA_TEST_CHECK_EQ(jump.value(), std::string{"Xabc!"});  // caret=n
+
+    // 文本中部：Shift+Home 纳入光标左侧全部（caret=2 → 字符 0..1）。
+    TextInput head = focused_field("abcd");
+    KeyEvent left = press(KeyCode::ArrowLeft, ModifierKey::None);
+    head.on_key_event(left);
+    head.on_key_event(left);  // caret=2
+    KeyEvent sh_home = press(KeyCode::Home, ModifierKey::Shift);
+    head.on_key_event(sh_home);
+    AURORA_TEST_CHECK_TRUE(head.has_selection());
+    AURORA_TEST_CHECK_EQ(head.selected_text(), std::string{"ab"});
+    // 退格一次删掉整段扩选，光标停在 0
+    KeyEvent back = press(KeyCode::Backspace, ModifierKey::None);
+    head.on_key_event(back);
+    AURORA_TEST_CHECK_EQ(head.value(), std::string{"cd"});
+    AURORA_TEST_CHECK_FALSE(head.has_selection());
+    type(head, "Z");
+    AURORA_TEST_CHECK_EQ(head.value(), std::string{"Zcd"});  // caret=0
+
+    // Shift+End 纳入光标右侧全部（caret=1 → 字符 1..3）。
+    TextInput tail = focused_field("abcd");
+    tail.on_key_event(home);  // caret=0
+    KeyEvent right1 = press(KeyCode::ArrowRight, ModifierKey::None);
+    tail.on_key_event(right1);  // caret=1
+    KeyEvent sh_end = press(KeyCode::End, ModifierKey::Shift);
+    tail.on_key_event(sh_end);
+    AURORA_TEST_CHECK_EQ(tail.selected_text(), std::string{"bcd"});
+
+    // 已在端点：扩选范围为空，不得伪造 1 字符选区。
+    TextInput at_head = focused_field("abc");
+    at_head.on_key_event(home);
+    at_head.on_key_event(sh_home);
+    AURORA_TEST_CHECK_FALSE(at_head.has_selection());
+    TextInput at_tail = focused_field("abc");  // 种子输入后 caret 已在尾
+    at_tail.on_key_event(sh_end);
+    AURORA_TEST_CHECK_FALSE(at_tail.has_selection());
+
+    // 空文本：两个端点重合，任何 Shift 组合都不越界取下标。
+    TextInput empty;
+    empty.on_focus_change(true);
+    empty.on_key_event(sh_home);
+    AURORA_TEST_CHECK_FALSE(empty.has_selection());
+    empty.on_key_event(sh_end);
+    AURORA_TEST_CHECK_FALSE(empty.has_selection());
+
+    // UTF-8 安全：按码点计数整段选中/删除。
+    TextInput utf = focused_field("中文测试");
+    utf.on_key_event(home);
+    utf.on_key_event(sh_end);
+    AURORA_TEST_CHECK_EQ(utf.selected_text(), std::string{"中文测试"});
+    utf.on_key_event(back);
+    AURORA_TEST_CHECK_FALSE(utf.has_selection());
+    AURORA_TEST_CHECK_EQ(utf.value(), std::string{});
+}
+
+/// Home/End 须经事件派发器交到焦点控件：既不能被全局快捷键（Tab/方向键/激活键）吞掉，
+/// 也不得触发焦点导航——否则「光标不动」的表象与真实缺陷同源（TC-WIDGET-012 残项）。
+AURORA_TEST_CASE(home_end_reach_focused_widget_via_dispatcher) {
+    auto field = std::make_shared<TextInput>();
+    field->set_value("hello");
+    FocusManager fm;
+    fm.set_root(field.get());
+
+    KeyEvent tab;
+    tab.key = static_cast<int>(KeyCode::Tab);
+    tab.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*field, tab, fm));
+    AURORA_TEST_CHECK_TRUE(fm.focused() == field.get());
+
+    KeyEvent end;
+    end.key = static_cast<int>(KeyCode::End);
+    end.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*field, end, fm));
+    AURORA_TEST_CHECK_TRUE(fm.focused() == field.get());  // 焦点未被端点键挪走
+
+    TextInputEvent ins;
+    ins.text = "!";
+    field->on_text_input(ins);
+    AURORA_TEST_CHECK_EQ(field->value(), std::string{"hello!"});
+
+    KeyEvent home;
+    home.key = static_cast<int>(KeyCode::Home);
+    home.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*field, home, fm));
+
+    TextInputEvent pre;
+    pre.text = "»";
+    field->on_text_input(pre);
+    AURORA_TEST_CHECK_EQ(field->value(), std::string{"»hello!"});
 }
 
 AURORA_TEST_CASE(rtl_caret_paints_at_right_edge) {
