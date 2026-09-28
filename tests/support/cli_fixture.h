@@ -248,15 +248,15 @@ struct Tokens : std::vector<std::string> {
     return STRICT_SPEC;
 }
 
-/**
- * @brief 内建让位 / 关闭与调用方自标 `early_view` 的样例树。
- *
- * 三条契约只在这棵树上成立，故与主样例树分开（主树的 golden 快照因此不受影响）：
- *   * `-h` 被 `height` 占用、`-V` 被 `verify` 占用 → 内建 help/version 降级为仅长名；
- *   * 调用方自己声明 `--help`（标 `EarlyView::Help`）即顶掉内建，走的是同一条短路通道；
- *   * `--dump-schema` 标 `EarlyView::Schema` → 展示通道不再只归 help/version 独占；
- *   * 子命令 `bare` 关掉全部内建且无自有选项 → usage 里连 `[OPTIONS]` 都不该出现。
- */
+///
+/// @brief 内建让位 / 关闭与调用方自标 `early_view` 的样例树。
+///
+/// 三条契约只在这棵树上成立，故与主样例树分开（主树的 golden 快照因此不受影响）：
+/// * `-h` 被 `height` 占用、`-V` 被 `verify` 占用 → 内建 help/version 降级为仅长名；
+/// * 调用方自己声明 `--help`（标 `EarlyView::Help`）即顶掉内建，走的是同一条短路通道；
+/// * `--dump-schema` 标 `EarlyView::Schema` → 展示通道不再只归 help/version 独占；
+/// * 子命令 `bare` 关掉全部内建且无自有选项 → usage 里连 `[OPTIONS]` 都不该出现。
+///
 [[nodiscard]] inline auto displacement_spec() -> const CommandSpec & {
     // 单例地址即契约：Invocation 借用声明表，不可改为按值返回。
     // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)

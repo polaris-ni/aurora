@@ -124,12 +124,12 @@ AURORA_TEST_CASE(remove_test_backend_reports_state_transitions) {
     AURORA_TEST_CHECK_EQ(Clipboard::get_text().value(), std::string{});
 }
 
-/// 写入载荷非法时必须以机器可读的失败返回——这正是本 API 从 `void` 改成 `Result` 的动机：
-/// 改前这里只有一行 stderr WARN 且乱码照上屏，改后调用方能按 code 分支。
-/// 本用例只读不写系统剪贴板：非破坏性靠「非法载荷在 OpenClipboard 之前即被拒」保证，
-/// 前后读数一致用来坐实它确实没动过剪贴板。该坐实步骤按环境让路：系统剪贴板可能被别的
-/// 进程暂占（此时 `get_text` 返回 ClipboardAccessFailed），那是本 API 的正常失败语义、
-/// 不是被测缺陷，故读数不可得时跳过坐实而非判红——写失败的断言与剪贴板是否可读无关。
+// 写入载荷非法时必须以机器可读的失败返回——这正是本 API 从 `void` 改成 `Result` 的动机：
+// 改前这里只有一行 stderr WARN 且乱码照上屏，改后调用方能按 code 分支。
+// 本用例只读不写系统剪贴板：非破坏性靠「非法载荷在 OpenClipboard 之前即被拒」保证，
+// 前后读数一致用来坐实它确实没动过剪贴板。该坐实步骤按环境让路：系统剪贴板可能被别的
+// 进程暂占（此时 `get_text` 返回 ClipboardAccessFailed），那是本 API 的正常失败语义、
+// 不是被测缺陷，故读数不可得时跳过坐实而非判红——写失败的断言与剪贴板是否可读无关。
 AURORA_TEST_CASE(invalid_utf8_payload_surfaces_write_error) {
 #ifdef AURORA_PLATFORM_WINDOWS
     (void)Clipboard::remove_test_backend();  // 走平台路径
@@ -156,7 +156,7 @@ AURORA_TEST_CASE(invalid_utf8_payload_surfaces_write_error) {
 #endif
 }
 
-/// 调用方参数错误与平台能力缺失都必须以 code 区分开，而不是静默 no-op。
+// 调用方参数错误与平台能力缺失都必须以 code 区分开，而不是静默 no-op。
 AURORA_TEST_CASE(bad_image_argument_is_not_silent) {
     (void)Clipboard::remove_test_backend();  // 走平台路径
 

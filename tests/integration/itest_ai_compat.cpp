@@ -1,3 +1,4 @@
+/// @file itest_ai_compat.cpp
 /// 测试类型: integration
 /// 目标单元: include/aurora/app/validate_ui.h
 /// 测试说明: AI 兼容性管线——JSON fixture 目录遍历（valid_*.json 必须通过

@@ -12,14 +12,14 @@ namespace aurora::test_cases::utest_duration {
 
 namespace au = aurora;
 
-/// @brief 默认构造为零时长。
+// @brief 默认构造为零时长。
 AURORA_TEST_CASE(default_ctor_is_zero) {
     constexpr aurora::Duration d{};
     static_assert(d.seconds == 0.0);
     AURORA_TEST_CHECK_EQ(d.seconds, 0.0);
 }
 
-/// @brief 单参构造为 explicit（秒），禁止 double 隐式收窄成时长。
+// @brief 单参构造为 explicit（秒），禁止 double 隐式收窄成时长。
 AURORA_TEST_CASE(explicit_ctor_takes_seconds) {
     constexpr aurora::Duration d{1.5};
     static_assert(d.seconds == 1.5);
@@ -29,7 +29,7 @@ AURORA_TEST_CASE(explicit_ctor_takes_seconds) {
     AURORA_TEST_CHECK_EQ(d.seconds, 1.5);
 }
 
-/// @brief from_seconds 原样保存；from_ms 除以 1000（250ms == 0.25s 精确可表示）。
+// @brief from_seconds 原样保存；from_ms 除以 1000（250ms == 0.25s 精确可表示）。
 AURORA_TEST_CASE(from_seconds_and_from_ms_conversions) {
     constexpr auto s = aurora::Duration::from_seconds(1.5);
     static_assert(s.seconds == 1.5);
@@ -42,7 +42,7 @@ AURORA_TEST_CASE(from_seconds_and_from_ms_conversions) {
     AURORA_TEST_CHECK_EQ(aurora::Duration::from_ms(0.0).seconds, 0.0);
 }
 
-/// @brief to_chrono 返回 std::chrono::duration<double>，秒数保持一致。
+// @brief to_chrono 返回 std::chrono::duration<double>，秒数保持一致。
 AURORA_TEST_CASE(to_chrono_preserves_seconds) {
     static_assert(std::is_same_v<decltype(aurora::Duration{}.to_chrono()), std::chrono::duration<double>>);
     constexpr auto d = aurora::Duration::from_seconds(2.5);
@@ -51,7 +51,7 @@ AURORA_TEST_CASE(to_chrono_preserves_seconds) {
     AURORA_TEST_CHECK_NEAR(aurora::Duration::from_ms(250.0).to_chrono().count(), 0.25, 1e-12);
 }
 
-/// @brief 相等比较按秒值逐位判断（== / != 互为否定）。
+// @brief 相等比较按秒值逐位判断（== / != 互为否定）。
 AURORA_TEST_CASE(equality_compares_seconds) {
     constexpr auto a = aurora::Duration::from_seconds(1.0);
     constexpr auto b = aurora::Duration{1.0};
@@ -64,7 +64,7 @@ AURORA_TEST_CASE(equality_compares_seconds) {
     AURORA_TEST_CHECK_FALSE(a != b);
 }
 
-/// @brief _ms 字面量映射为秒（250_ms == 0.25s），constexpr 可用于编译期断言。
+// @brief _ms 字面量映射为秒（250_ms == 0.25s），constexpr 可用于编译期断言。
 AURORA_TEST_CASE(ms_literal_maps_to_seconds) {
     using aurora::literals::operator""_ms;  // using-declaration：仅引入具名字面量（库约定：TU 内显式引入）
 
@@ -74,7 +74,7 @@ AURORA_TEST_CASE(ms_literal_maps_to_seconds) {
     AURORA_TEST_CHECK_NEAR((12.5_ms).seconds, aurora::Duration::from_ms(12.5).seconds, 1e-12);  // long double 重载
 }
 
-/// @brief 边界：负时长与大值原样保存（当前契约对取值范围无前置条件校验）。
+// @brief 边界：负时长与大值原样保存（当前契约对取值范围无前置条件校验）。
 AURORA_TEST_CASE(negative_and_large_values_are_preserved) {
     constexpr auto neg = aurora::Duration{-1.5};
     static_assert(neg.seconds == -1.5);

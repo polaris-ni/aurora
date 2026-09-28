@@ -233,9 +233,9 @@ AURORA_TEST_CASE(scrolling_recycles_and_rebuilds_window) {
     AURORA_TEST_CHECK_NEAR(rec.items.at(24)->paint_bounds().size.height, 48.0F, 1e-4F);
 }
 
-/// 绘制盒与命中盒必须同源：虚拟化条目的可见位置与点击落点解析出的条目一致。
-/// 对齐偏移（行高整数倍）与非对齐偏移（滚轮 40dp 步进的自然落点）都要成，
-/// 否则「看得见的那一行」与「点中的那一行」会错开若干行（TC-WIDGET-008 的断言）。
+// 绘制盒与命中盒必须同源：虚拟化条目的可见位置与点击落点解析出的条目一致。
+// 对齐偏移（行高整数倍）与非对齐偏移（滚轮 40dp 步进的自然落点）都要成，
+// 否则「看得见的那一行」与「点中的那一行」会错开若干行（TC-WIDGET-008 的断言）。
 AURORA_TEST_CASE(hit_test_shares_paint_origin_across_offsets) {
     BuildRecorder rec;
     LazyList list{100, rec.clickable_builder(), 48.0F};

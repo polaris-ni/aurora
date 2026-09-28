@@ -1,3 +1,4 @@
+/// @file utest_json.cpp
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/json.h
 /// 测试说明: 覆盖自研 JSON 库的语法合规矩阵（合法 / 非法字面量与结构）、边界语义（前导 BOM、内嵌 NUL、

@@ -155,9 +155,9 @@ AURORA_TEST_CASE(yaml_nested_structure_and_indent) {
     AURORA_TEST_CHECK_MSG(padded.find("  name: Aurora") == 0, "indent shifts top-level lines");
 }
 
-/// 发射器的层级契约：非空容器一律另起块、空容器只在值位置内联。
-/// 逐行整体比对（而非 `find` 子串）——子串断言对「缩进少一级」这类结构劣化是盲的，
-/// 而那正是内联 flow 形态（`props: {content: a}`）抹掉层级的故障形态。
+// 发射器的层级契约：非空容器一律另起块、空容器只在值位置内联。
+// 逐行整体比对（而非 `find` 子串）——子串断言对「缩进少一级」这类结构劣化是盲的，
+// 而那正是内联 flow 形态（`props: {content: a}`）抹掉层级的故障形态。
 AURORA_TEST_CASE(yaml_block_form_exact_lines) {
     Json leaf = Json::object();
     leaf["type"] = "Text";

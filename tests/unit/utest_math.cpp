@@ -13,7 +13,7 @@ namespace aurora::test_cases::utest_math {
 
 namespace au = aurora;
 
-/// @brief saturate 把任意值夹到 [0, 1]，端点取值保持不变。
+// saturate 把任意值夹到 [0, 1]，端点取值保持不变。
 AURORA_TEST_CASE(saturate_clamps_into_unit_interval) {
     static_assert(au::saturate(0.5F) == 0.5F);
     static_assert(au::saturate(0.0F) == 0.0F);
@@ -25,7 +25,7 @@ AURORA_TEST_CASE(saturate_clamps_into_unit_interval) {
     AURORA_TEST_CHECK_EQ(au::saturate(1.75F), 1.0F);
 }
 
-/// @brief saturate_u8 先 clamp 到 [0, 255] 再截断转 uint8_t（非四舍五入）。
+// saturate_u8 先 clamp 到 [0, 255] 再截断转 uint8_t（非四舍五入）。
 AURORA_TEST_CASE(saturate_u8_clamps_and_truncates) {
     static_assert(au::saturate_u8(128.0F) == 128);
     static_assert(au::saturate_u8(0.0F) == 0);
@@ -39,7 +39,7 @@ AURORA_TEST_CASE(saturate_u8_clamps_and_truncates) {
     AURORA_TEST_CHECK_EQ(au::saturate_u8(-1.0F), 0);
 }
 
-/// @brief 浮点极值：±inf 被夹到端点；NaN 因比较恒假而原样穿透（与 std::clamp 等价的设计结果）。
+// 浮点极值：±inf 被夹到端点；NaN 因比较恒假而原样穿透（与 std::clamp 等价的设计结果）。
 AURORA_TEST_CASE(saturate_handles_float_extremes) {
     constexpr auto inf = std::numeric_limits<float>::infinity();
     static_assert(au::saturate(inf) == 1.0F);
@@ -53,7 +53,7 @@ AURORA_TEST_CASE(saturate_handles_float_extremes) {
     AURORA_TEST_CHECK(std::isnan(au::saturate(nan)));  // NaN 穿透：两个比较均为 false，返回原值
 }
 
-/// @brief 与手写 std::clamp 的「逐位等价」契约在典型值网格上成立。
+// 与手写 std::clamp 的「逐位等价」契约在典型值网格上成立。
 AURORA_TEST_CASE(matches_hand_written_clamp_semantics) {
     for (const float x : {-1.0F, 0.0F, 0.25F, 0.75F, 1.0F, 2.0F}) {
         AURORA_TEST_CHECK_EQ(au::saturate(x), std::clamp(x, 0.0F, 1.0F));

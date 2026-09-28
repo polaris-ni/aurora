@@ -1,3 +1,4 @@
+/// @file utest_win32_modifiers.cpp
 /// 测试类型: unit
 /// 目标单元: src/aurora/window/detail/win32_modifiers.h
 /// 测试说明: Win32 宿主修饰键跟踪器 —— 位翻转随消息推进、左右与通用码归并、失焦清空、激活

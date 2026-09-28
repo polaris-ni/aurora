@@ -10,7 +10,7 @@
 
 namespace aurora::test_cases::utest_animator {
 
-/// @brief 默认构造：进度 0、Dismissed、非动画；时长下限夹取为 1e-6；带初值构造不改变状态。
+// @brief 默认构造：进度 0、Dismissed、非动画；时长下限夹取为 1e-6；带初值构造不改变状态。
 AURORA_TEST_CASE(controller_initial_state_and_duration_clamp) {
     const aurora::AnimationController c{0.3};
     AURORA_TEST_CHECK_NEAR(c.duration(), 0.3, 1e-12);
@@ -30,7 +30,7 @@ AURORA_TEST_CASE(controller_initial_state_and_duration_clamp) {
     AURORA_TEST_CHECK_TRUE(mid.status() == aurora::AnimationStatus::Dismissed);
 }
 
-/// @brief forward 起步后 tick 按比例推进，到 1 钳制为 Completed；可从中间 restart；零时长一步完成。
+// @brief forward 起步后 tick 按比例推进，到 1 钳制为 Completed；可从中间 restart；零时长一步完成。
 AURORA_TEST_CASE(controller_forward_ticks_to_completed) {
     aurora::AnimationController c{1.0};
     c.forward();
@@ -72,7 +72,7 @@ AURORA_TEST_CASE(controller_forward_ticks_to_completed) {
     AURORA_TEST_CHECK_NEAR(z.value(), 1.0, 1e-12);
 }
 
-/// @brief stop 冻结进度并把 <1 记为 Dismissed；reverse 反向推进到 0 记 Dismissed；reset 复位并夹取。
+// @brief stop 冻结进度并把 <1 记为 Dismissed；reverse 反向推进到 0 记 Dismissed；reset 复位并夹取。
 AURORA_TEST_CASE(controller_reverse_reset_stop_semantics) {
     aurora::AnimationController c{1.0};
     c.forward();
@@ -111,7 +111,7 @@ AURORA_TEST_CASE(controller_reverse_reset_stop_semantics) {
     AURORA_TEST_CHECK_TRUE(c.status() == aurora::AnimationStatus::Dismissed);
 }
 
-/// @brief Animator 推进所有已登记控制器（未播放者不动），帧末统一清 dirty，has_active 反映运行态。
+// @brief Animator 推进所有已登记控制器（未播放者不动），帧末统一清 dirty，has_active 反映运行态。
 AURORA_TEST_CASE(animator_drives_controllers_and_clears_dirty) {
     aurora::AnimationController a{1.0};
     aurora::AnimationController b{1.0};
@@ -133,7 +133,7 @@ AURORA_TEST_CASE(animator_drives_controllers_and_clears_dirty) {
     AURORA_TEST_CHECK_FALSE(animator.has_active());
 }
 
-/// @brief bind/add_binding 仅在控制器 dirty 的帧写目标 State；空闲帧跳过写回。
+// @brief bind/add_binding 仅在控制器 dirty 的帧写目标 State；空闲帧跳过写回。
 AURORA_TEST_CASE(animator_bindings_write_only_on_dirty_frames) {
     aurora::State<double> target{0.0};
     aurora::AnimationController c{1.0};
@@ -173,7 +173,7 @@ AURORA_TEST_CASE(animator_bindings_write_only_on_dirty_frames) {
     AURORA_TEST_CHECK_EQ(dirty_seen, 2);
 }
 
-/// @brief remove 注销控制器及其绑定：不再推进也不再写 State；注销未登记控制器为无操作。
+// @brief remove 注销控制器及其绑定：不再推进也不再写 State；注销未登记控制器为无操作。
 AURORA_TEST_CASE(animator_remove_detaches_controller_and_bindings) {
     aurora::State<double> s{0.0};
     aurora::AnimationController c{1.0};
@@ -191,7 +191,7 @@ AURORA_TEST_CASE(animator_remove_detaches_controller_and_bindings) {
     AURORA_TEST_CHECK_NO_THROW(animator.remove(stranger));  // 未登记过 → 无操作
 }
 
-/// @brief AnimatedValue 自驱 tick：插值写回 State，Completed 回调恰好触发一次；句柄可拷贝共享载荷。
+// @brief AnimatedValue 自驱 tick：插值写回 State，Completed 回调恰好触发一次；句柄可拷贝共享载荷。
 AURORA_TEST_CASE(animated_value_self_tick_fires_completed_once) {
     aurora::State<double> s{0.0};
     aurora::AnimatedValue<double> av{s, aurora::Tween<double>{0.0, 1.0}, 1.0};
@@ -224,7 +224,7 @@ AURORA_TEST_CASE(animated_value_self_tick_fires_completed_once) {
     AURORA_TEST_CHECK_NEAR(snapshot.progress(), 1.0, 1e-12);
 }
 
-/// @brief animate 工厂创建即起步（可自驱或 attach 到 Animator），TweenAnimation 自持状态独立推进。
+// @brief animate 工厂创建即起步（可自驱或 attach 到 Animator），TweenAnimation 自持状态独立推进。
 AURORA_TEST_CASE(animate_factory_and_tween_animation_drive_state) {
     // 无 Animator：返回即 forward(0)，手动 tick 自驱。
     aurora::State<double> s{-1.0};

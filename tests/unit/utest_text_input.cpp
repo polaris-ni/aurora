@@ -402,9 +402,9 @@ AURORA_TEST_CASE(rtl_arrow_keys_invert_logical_direction) {
     AURORA_TEST_CHECK_EQ(ltr.value(), std::string{"abX"});
 }
 
-/// Shift+方向键扩选：每次恰纳入一个字符，退格一次删掉整段选区。
-/// caret 是插入点而非字符下标，左扩锚点取 caret 前一个字符；曾因把 caret 本身当下标而当锚点，
-/// 使「文本中部」的一次 Shift+← 高亮并删除两个字符（末尾态因下标越界被 clamp 掩盖，看不出问题）。
+// Shift+方向键扩选：每次恰纳入一个字符，退格一次删掉整段选区。
+// caret 是插入点而非字符下标，左扩锚点取 caret 前一个字符；曾因把 caret 本身当下标而当锚点，
+// 使「文本中部」的一次 Shift+← 高亮并删除两个字符（末尾态因下标越界被 clamp 掩盖，看不出问题）。
 AURORA_TEST_CASE(shift_arrow_selects_exactly_one_char_per_press) {
     auto focused_field = [](const std::string &seed) -> TextInput {
         TextInput ti;
@@ -465,9 +465,9 @@ AURORA_TEST_CASE(shift_arrow_selects_exactly_one_char_per_press) {
     AURORA_TEST_CHECK_EQ(right.selected_text(), std::string{"d"});
 }
 
-/// Home/End 在单行框上即「文本两端」（无行首/行尾之别）：非 Shift 跳光标并清选区，
-/// Shift 走与方向键同款的含头含尾扩选；光标本就在端点时扩选为空，不留 1 字符假选区。
-/// 曾经的缺陷：`on_key_event` 无 Home/End 分支 → 按键被丢弃成 no-op（TC-WIDGET-012 记录残项）。
+// Home/End 在单行框上即「文本两端」（无行首/行尾之别）：非 Shift 跳光标并清选区，
+// Shift 走与方向键同款的含头含尾扩选；光标本就在端点时扩选为空，不留 1 字符假选区。
+// 曾经的缺陷：`on_key_event` 无 Home/End 分支 → 按键被丢弃成 no-op（TC-WIDGET-012 记录残项）。
 AURORA_TEST_CASE(home_end_move_caret_and_extend_selection) {
     auto focused_field = [](const std::string &seed) -> TextInput {
         TextInput ti;
@@ -555,8 +555,8 @@ AURORA_TEST_CASE(home_end_move_caret_and_extend_selection) {
     AURORA_TEST_CHECK_EQ(utf.value(), std::string{});
 }
 
-/// Home/End 须经事件派发器交到焦点控件：既不能被全局快捷键（Tab/方向键/激活键）吞掉，
-/// 也不得触发焦点导航——否则「光标不动」的表象与真实缺陷同源（TC-WIDGET-012 残项）。
+// Home/End 须经事件派发器交到焦点控件：既不能被全局快捷键（Tab/方向键/激活键）吞掉，
+// 也不得触发焦点导航——否则「光标不动」的表象与真实缺陷同源（TC-WIDGET-012 残项）。
 AURORA_TEST_CASE(home_end_reach_focused_widget_via_dispatcher) {
     auto field = std::make_shared<TextInput>();
     field->set_value("hello");

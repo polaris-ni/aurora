@@ -1,3 +1,4 @@
+/// @file utest_win32_ua_marshal.cpp
 /// 测试类型: unit
 /// 目标单元: src/aurora/window/detail/win32_ua.cpp
 /// 测试说明: #53 —— UIA provider 的主线程回投内核。证明「跨线程读/动确实换到主人线程执行」、
@@ -108,7 +109,7 @@ struct QueuedPoster {
 
 }  // namespace
 
-/// 目标：非主人线程的回投必须在主人线程执行，结果按值带回调用线程。
+// 目标：非主人线程的回投必须在主人线程执行，结果按值带回调用线程。
 AURORA_TEST_CASE(cross_thread_eval_runs_on_the_owner_thread) {
     detail::Win32UiaBridge bridge(nullptr);
     QueuedPoster poster;
@@ -131,7 +132,7 @@ AURORA_TEST_CASE(cross_thread_eval_runs_on_the_owner_thread) {
     AURORA_TEST_CHECK_EQ(returned, 7);
 }
 
-/// 目标：主人线程自己调回投口时就地执行、零入队（宿主接线与 `UiaDisconnectProvider` 重入不受代价）。
+// 目标：主人线程自己调回投口时就地执行、零入队（宿主接线与 `UiaDisconnectProvider` 重入不受代价）。
 AURORA_TEST_CASE(owner_thread_eval_runs_inline_without_queuing) {
     detail::Win32UiaBridge bridge(nullptr);
     QueuedPoster poster;
@@ -149,7 +150,7 @@ AURORA_TEST_CASE(owner_thread_eval_runs_inline_without_queuing) {
     AURORA_TEST_CHECK_TRUE(poster.pending() == 0U);  // 一次都没入队，故不需要帧循环
 }
 
-/// 目标：进程级回投器未安装（无头 / 单测）→ 与 `post_to_main` 同语义，就地执行。
+// 目标：进程级回投器未安装（无头 / 单测）→ 与 `post_to_main` 同语义，就地执行。
 AURORA_TEST_CASE(missing_poster_falls_back_to_inline_execution) {
     detail::Win32UiaBridge bridge(nullptr);
     const std::thread::id owner = std::this_thread::get_id();
@@ -172,7 +173,7 @@ AURORA_TEST_CASE(missing_poster_falls_back_to_inline_execution) {
     AURORA_TEST_CHECK_TRUE(ran_on == worker);  // 无排水方：只能在调用线程就地跑
 }
 
-/// 目标：超时预算内没排空即降级为零值；**且**晚到的队列项不得补做（用户以为没发生的事不能事后发生）。
+// 目标：超时预算内没排空即降级为零值；**且**晚到的队列项不得补做（用户以为没发生的事不能事后发生）。
 AURORA_TEST_CASE(timeout_returns_zero_value_and_drops_the_late_task) {
     detail::Win32UiaBridge bridge(nullptr);
     QueuedPoster poster;
@@ -195,7 +196,7 @@ AURORA_TEST_CASE(timeout_returns_zero_value_and_drops_the_late_task) {
     AURORA_TEST_CHECK_FALSE(ran.load());  // 放弃闸必须拦住补做
 }
 
-/// 目标：桥先于在途队列项析构时，存活闸拦住闭包（这是 #53 唯一的 use-after-free 通道）。
+// 目标：桥先于在途队列项析构时，存活闸拦住闭包（这是 #53 唯一的 use-after-free 通道）。
 AURORA_TEST_CASE(bridge_destruction_drops_a_still_queued_task) {
     QueuedPoster poster;
     auto bridge = std::make_unique<detail::Win32UiaBridge>(nullptr);
@@ -218,7 +219,7 @@ AURORA_TEST_CASE(bridge_destruction_drops_a_still_queued_task) {
     AURORA_TEST_CHECK_EQ(returned, 0);
 }
 
-/// 目标：provider 侧的快照副本读与导航读都经回投，跨线程拿到的只是副本。
+// 目标：provider 侧的快照副本读与导航读都经回投，跨线程拿到的只是副本。
 AURORA_TEST_CASE(provider_reads_project_through_the_marshal) {
     detail::Win32UiaBridge bridge(nullptr);
     bridge.activate();
@@ -271,32 +272,32 @@ AURORA_TEST_CASE(provider_reads_project_through_the_marshal) {
 
 #else
 
-/// 目标：非主人线程的回投必须在主人线程执行，结果按值带回调用线程。
+// 目标：非主人线程的回投必须在主人线程执行，结果按值带回调用线程。
 AURORA_TEST_CASE(cross_thread_eval_runs_on_the_owner_thread) {
     AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 未开启（非 Windows 平台），UIA 桥 TU 整体被宏剔除");
 }
 
-/// 目标：主人线程自己调回投口时就地执行、零入队。
+// 目标：主人线程自己调回投口时就地执行、零入队。
 AURORA_TEST_CASE(owner_thread_eval_runs_inline_without_queuing) {
     AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 未开启（非 Windows 平台），UIA 桥 TU 整体被宏剔除");
 }
 
-/// 目标：进程级回投器未安装 → 与 `post_to_main` 同语义，就地执行。
+// 目标：进程级回投器未安装 → 与 `post_to_main` 同语义，就地执行。
 AURORA_TEST_CASE(missing_poster_falls_back_to_inline_execution) {
     AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 未开启（非 Windows 平台），UIA 桥 TU 整体被宏剔除");
 }
 
-/// 目标：超时预算内没排空即降级为零值，且晚到的队列项不得补做。
+// 目标：超时预算内没排空即降级为零值，且晚到的队列项不得补做。
 AURORA_TEST_CASE(timeout_returns_zero_value_and_drops_the_late_task) {
     AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 未开启（非 Windows 平台），UIA 桥 TU 整体被宏剔除");
 }
 
-/// 目标：桥先于在途队列项析构时，存活闸拦住闭包。
+// 目标：桥先于在途队列项析构时，存活闸拦住闭包。
 AURORA_TEST_CASE(bridge_destruction_drops_a_still_queued_task) {
     AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 未开启（非 Windows 平台），UIA 桥 TU 整体被宏剔除");
 }
 
-/// 目标：provider 侧的快照副本读与导航读都经回投。
+// 目标：provider 侧的快照副本读与导航读都经回投。
 AURORA_TEST_CASE(provider_reads_project_through_the_marshal) {
     AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 未开启（非 Windows 平台），UIA 桥 TU 整体被宏剔除");
 }

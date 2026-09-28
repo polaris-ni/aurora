@@ -13,7 +13,7 @@ namespace aurora::test_cases::utest_easing {
 
 namespace m = aurora::testing::matchers;
 
-/// @brief 默认构造即 Linear 曲线：transform 为恒等映射。
+// @brief 默认构造即 Linear 曲线：transform 为恒等映射。
 AURORA_TEST_CASE(default_curve_is_linear) {
     const aurora::Curve c;
     AURORA_TEST_CHECK_TRUE(c.kind() == aurora::CurveKind::Linear);
@@ -23,7 +23,7 @@ AURORA_TEST_CASE(default_curve_is_linear) {
     AURORA_TEST_CHECK_NEAR(c.transform(1.0), 1.0, 1e-12);
 }
 
-/// @brief transform 把输入夹入 [0,1]，并把（自定义曲线的）输出也夹入 [0,1]。
+// @brief transform 把输入夹入 [0,1]，并把（自定义曲线的）输出也夹入 [0,1]。
 AURORA_TEST_CASE(transform_clamps_input_and_output) {
     const aurora::Curve linear;
     AURORA_TEST_CHECK_NEAR(linear.transform(-0.5), 0.0, 1e-12);  // 输入下界夹取
@@ -43,7 +43,7 @@ AURORA_TEST_CASE(transform_clamps_input_and_output) {
     AURORA_TEST_CHECK_THAT(results, m::each(m::all_of(m::ge(0.0), m::le(1.0))));
 }
 
-/// @brief 全部命名曲线工厂的曲线在端点处精确命中 0 与 1。
+// @brief 全部命名曲线工厂的曲线在端点处精确命中 0 与 1。
 AURORA_TEST_CASE(named_curves_hit_exact_endpoints) {
     const std::vector<std::pair<const char *, aurora::Curve>> all = {
         {"linear", aurora::Curves::linear()},
@@ -68,7 +68,7 @@ AURORA_TEST_CASE(named_curves_hit_exact_endpoints) {
     }
 }
 
-/// @brief 多项式/正弦命名曲线在中点处的值与闭式公式一致，工厂 kind 标注正确。
+// @brief 多项式/正弦命名曲线在中点处的值与闭式公式一致，工厂 kind 标注正确。
 AURORA_TEST_CASE(polynomial_curves_match_closed_form) {
     AURORA_TEST_CHECK_TRUE(aurora::Curves::linear().kind() == aurora::CurveKind::Linear);
     AURORA_TEST_CHECK_TRUE(aurora::Curves::ease_in().kind() == aurora::CurveKind::EaseIn);
@@ -100,7 +100,7 @@ AURORA_TEST_CASE(polynomial_curves_match_closed_form) {
     AURORA_TEST_CHECK_NEAR(in_out_sine.transform(0.5), 0.5, 1e-9);
 }
 
-/// @brief in_out 家族关于中点对称（f(t)+f(1-t)=1）、中点值 0.5 且采样单调不减。
+// @brief in_out 家族关于中点对称（f(t)+f(1-t)=1）、中点值 0.5 且采样单调不减。
 AURORA_TEST_CASE(in_out_curves_are_symmetric_and_monotonic) {
     const std::vector<std::pair<const char *, aurora::Curve>> in_out_family = {
         {"ease_in_out", aurora::Curves::ease_in_out()},
@@ -124,7 +124,7 @@ AURORA_TEST_CASE(in_out_curves_are_symmetric_and_monotonic) {
     }
 }
 
-/// @brief BounceOut 在各段反弹谷底/边界处的值与经典分段公式一致（非单调）。
+// @brief BounceOut 在各段反弹谷底/边界处的值与经典分段公式一致（非单调）。
 AURORA_TEST_CASE(bounce_out_hits_known_bounce_valleys) {
     const aurora::Curve bounce = aurora::Curves::bounce_out();
     AURORA_TEST_CHECK_NEAR(bounce.transform(0.0), 0.0, 1e-12);
@@ -137,7 +137,7 @@ AURORA_TEST_CASE(bounce_out_hits_known_bounce_valleys) {
     AURORA_TEST_CHECK_NEAR(bounce.transform(1.0), 1.0, 1e-12);
 }
 
-/// @brief 自定义曲线按函数求值且 kind 为 Custom；指定 Custom 却无函数时回退线性。
+// @brief 自定义曲线按函数求值且 kind 为 Custom；指定 Custom 却无函数时回退线性。
 AURORA_TEST_CASE(custom_curve_applies_function_with_linear_fallback) {
     const aurora::Curve stepped{[](double t) -> double { return t < 0.5 ? 0.0 : 1.0; }};
     AURORA_TEST_CHECK_TRUE(stepped.kind() == aurora::CurveKind::Custom);

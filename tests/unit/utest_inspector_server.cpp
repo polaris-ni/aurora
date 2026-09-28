@@ -964,11 +964,11 @@ AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
 #endif
 }
 
-/// 目标：触碰活动树的端点必须经 `main_poster` 换到主线程执行，不得在 accept worker 线程下树。
-/// 回归的缺陷：真机拖拽 ReorderableList 时轮询 `/api/tree`，宿主在 0xC0000005 崩溃
-/// （栈：`route_request → Inspector::tree_json_full → dump_tree_json_full`，无 marshal 帧）——
-/// 帧内在增删节点，worker 线程读到已释放节点。用例靠「线程流水」判定：`root_getter` 记录的调用
-/// 线程必须全等于排水线程，且排水线程就是用例主线程；修复前这些调用发生在 worker 线程，必红。
+// 目标：触碰活动树的端点必须经 `main_poster` 换到主线程执行，不得在 accept worker 线程下树。
+// 回归的缺陷：真机拖拽 ReorderableList 时轮询 `/api/tree`，宿主在 0xC0000005 崩溃
+// （栈：`route_request → Inspector::tree_json_full → dump_tree_json_full`，无 marshal 帧）——
+// 帧内在增删节点，worker 线程读到已释放节点。用例靠「线程流水」判定：`root_getter` 记录的调用
+// 线程必须全等于排水线程，且排水线程就是用例主线程；修复前这些调用发生在 worker 线程，必红。
 AURORA_TEST_CASE(tree_routes_marshal_tree_traversal_to_the_poster_thread) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
@@ -1012,7 +1012,7 @@ AURORA_TEST_CASE(tree_routes_marshal_tree_traversal_to_the_poster_thread) {
 #endif
 }
 
-/// 目标：无投递器（无事件循环）时树端点仍可同步服务——marshal 的回退分支不得变成硬依赖。
+// 目标：无投递器（无事件循环）时树端点仍可同步服务——marshal 的回退分支不得变成硬依赖。
 AURORA_TEST_CASE(tree_routes_work_without_a_poster_inline) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");

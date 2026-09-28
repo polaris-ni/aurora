@@ -161,13 +161,13 @@ template <std::size_t N>
     return std::string_view{literal, N - 1};
 }
 
-/// @brief 从源路径推导套件名（去目录与扩展名）。
-///
-/// 例：`D:\\repo\\tests\\unit\\utest_color.cpp` → `utest_color`；POSIX 分隔符同样处理。
-/// constexpr：注册期无运行时开销，且允许编译期断言套件名推导正确。
-/// constexpr + noexcept：注册期在静态初始化期执行，整条调用链不得抛
-/// （clang-tidy bugprone-throwing-static-initialization）。**实参须是 `literal_view(...)`
-/// 而非裸 `__FILE__`**，否则字面量→`string_view` 的隐式转换在 libc++ 下仍是可能抛出的构造。
+// @brief 从源路径推导套件名（去目录与扩展名）。
+//
+// 例：`D:\\repo\\tests\\unit\\utest_color.cpp` → `utest_color`；POSIX 分隔符同样处理。
+// constexpr：注册期无运行时开销，且允许编译期断言套件名推导正确。
+// constexpr + noexcept：注册期在静态初始化期执行，整条调用链不得抛
+// （clang-tidy bugprone-throwing-static-initialization）。**实参须是 `literal_view(...)`
+// 而非裸 `__FILE__`**，否则字面量→`string_view` 的隐式转换在 libc++ 下仍是可能抛出的构造。
 // 本函数标 `noexcept` 是注册期契约（静态初始化整条链不得抛），而体内三个 `string_view` 成员
 // （`find_last_of` / `rfind` / `substr`）在 libc++ 的 constexpr 实现里没有 noexcept 规格，分析器
 // 据此保守判定可抛；libstdc++ / MSVC STL 侧不报（与上条 `literal_view` 同一跨标准库差异面）。

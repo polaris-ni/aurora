@@ -531,9 +531,9 @@ AURORA_TEST_CASE(arrow_keys_honour_the_navigation_keys_opt_in) {
     AURORA_TEST_CHECK(fm.focused() == tree.box2.get());
 }
 
-/// 方向键在真实文本框上的路由：←/→ 归光标，未被认领的 ↑/↓ 才回落几何焦点导航。
-/// 这一条守住的正是「opt-in 谓词默认 false 时，文本框方向键被焦点导航吃掉」的缺陷：
-/// 焦点会移到左侧兄弟，此后所有按键（含退格）都落到别的控件上，输入框失能。
+// 方向键在真实文本框上的路由：←/→ 归光标，未被认领的 ↑/↓ 才回落几何焦点导航。
+// 这一条守住的正是「opt-in 谓词默认 false 时，文本框方向键被焦点导航吃掉」的缺陷：
+// 焦点会移到左侧兄弟，此后所有按键（含退格）都落到别的控件上，输入框失能。
 AURORA_TEST_CASE(direction_keys_reach_a_focused_text_input_before_focus_navigation) {
     auto tree = make_field_tree();
     FocusManager fm;

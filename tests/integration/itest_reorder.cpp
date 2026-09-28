@@ -1,3 +1,4 @@
+/// @file itest_reorder.cpp
 /// 测试类型: integration
 /// 目标单元: include/aurora/widget/reorderable_list.h
 /// 测试说明: 端到端验收拖拽重排——TestController 合成真实指针序列（Press→Move→Release）经命中

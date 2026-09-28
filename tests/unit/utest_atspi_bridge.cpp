@@ -1,3 +1,4 @@
+/// @file utest_atspi_bridge.cpp
 /// 测试类型: unit
 /// 目标单元: src/aurora/window/detail/atspi_bridge.cpp
 /// 测试说明: AT-SPI2 桥的宿主侧生命周期面 —— `NO_AT_BRIDGE=1` 显式免提（全平台可跑）；

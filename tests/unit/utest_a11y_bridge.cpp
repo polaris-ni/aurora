@@ -201,10 +201,10 @@ AURORA_TEST_CASE(range_defaults_are_unit_interval) {
     AURORA_TEST_CHECK_NEAR(r.value, 0.0, 1e-9);
 }
 
-/// @brief 语义根销毁必须被桥感知：桥缓存的根是裸指针，宿主「先拆 UI 树、后拆窗口」是常规顺序，
-///        若根没了而桥不知情，窗口存活期间的平台查询会拿悬垂根重建语义树（实机 SIGSEGV）。
-///        通道出自 `Node::~Node()` 的单源上报，与结构事件同源但**独立**（结构事件只能给出宿主
-///        容器，无法承载「是不是我的根没了」这一判定）。本用例锁死该通知的到达与载荷正确性。
+// @brief 语义根销毁必须被桥感知：桥缓存的根是裸指针，宿主「先拆 UI 树、后拆窗口」是常规顺序，
+//        若根没了而桥不知情，窗口存活期间的平台查询会拿悬垂根重建语义树（实机 SIGSEGV）。
+//        通道出自 `Node::~Node()` 的单源上报，与结构事件同源但**独立**（结构事件只能给出宿主
+//        容器，无法承载「是不是我的根没了」这一判定）。本用例锁死该通知的到达与载荷正确性。
 AURORA_TEST_CASE(root_widget_destruction_is_broadcast_to_providers) {
     const AccessibilitySettings saved = save_settings();
     RecordingProvider provider;
