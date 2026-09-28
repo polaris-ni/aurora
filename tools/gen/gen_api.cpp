@@ -22,7 +22,8 @@
 namespace {
 // Known enums (compile-time constants, not obtainable by pure runtime reflection).
 // Single source of truth: tools/include/known_enums.h — shared by gen_api / aurora_mcp / aurora_cli / aurora_lsp;
-// values must match the real enum members in include/aurora/** verbatim (guarded by tests/unit/utest_known_enums.cpp).
+// values must match the real enum members in include/aurora/** verbatim (guarded by
+// tests/integration/itest_known_enums.cpp).
 auto known_enums() -> std::map<std::string, std::vector<std::string>> { return aurora::tools::known_enums(); }
 
 /// @brief 命令行声明表：唯一的输出路径既写又读（就地合并），`-` 与缺省均为「输出到 stdout」。

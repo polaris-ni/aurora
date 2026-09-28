@@ -528,6 +528,39 @@ message = "JSON parse failed"
 hint = "Check JSON syntax (quotes/commas/brackets) and whether field types match the Schema"
 
 [[error]]
+enum = "JsonDepthExceeded"
+slug = "json-depth-exceeded"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "JSON nesting depth exceeds the limit of {max} (line {line}, column {column})"
+hint = "Reduce the nesting depth or raise ParseOptions::max_depth"
+
+[[error]]
+enum = "JsonTypeMismatch"
+slug = "json-type-mismatch"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "type_error"
+retryable = false
+message = "JSON type mismatch: expected {expected}, got {actual}"
+hint = "Check the value type or use the tolerant as_or(key, fallback) reader"
+
+[[error]]
+enum = "JsonValueNotSerializable"
+slug = "json-value-not-serializable"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Value cannot be serialized to JSON: {detail}"
+hint = "JSON has no textual form for NaN/Inf; replace the value or drop it"
+
+[[error]]
 enum = "StorageBackendUnavailable"
 slug = "storage-backend-unavailable"
 category = "io"
