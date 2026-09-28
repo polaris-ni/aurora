@@ -85,7 +85,8 @@ auto recording_tree_getter() -> Node {
 struct QueuedPoster {
     QueuedPoster() {
         std::scoped_lock lock(aurora::detail::main_poster_mutex());
-        previous = aurora::detail::main_poster();
+        // 刻意在持锁后才读：早读会拿到随后被别的安装者换掉的投递器（初始化列表在加锁前求值）。
+        previous = aurora::detail::main_poster();  // NOLINT(cppcoreguidelines-prefer-member-initializer)
         aurora::detail::main_poster() = [this](std::function<void()> fn) -> void {
             {
                 std::scoped_lock task_lock(mutex);
@@ -100,6 +101,9 @@ struct QueuedPoster {
     }
     QueuedPoster(const QueuedPoster &) = delete;
     auto operator=(const QueuedPoster &) -> QueuedPoster & = delete;
+    // 移动同样禁止：析构时按 `previous` 复原安装点，移动后的壳对象会留下悬空的安装/复原配对。
+    QueuedPoster(QueuedPoster &&) = delete;
+    auto operator=(QueuedPoster &&) -> QueuedPoster & = delete;
 
     /// @brief 在当前线程执行一个排队任务；`timeout_ms` 内无任务返回 false（调用方据此判失败）。
     auto drain_one(int timeout_ms = 5000) -> bool {
@@ -189,7 +193,7 @@ auto send_all(int sock, const std::string &data) -> bool {
 
     if (recv_timeout_ms > 0) {
 #ifdef AURORA_PLATFORM_WINDOWS
-        const DWORD timeout = static_cast<DWORD>(recv_timeout_ms);
+        const auto timeout = static_cast<DWORD>(recv_timeout_ms);
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         static_cast<void>(::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeout),
                                        static_cast<int>(sizeof(timeout))));
