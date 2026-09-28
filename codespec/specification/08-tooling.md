@@ -54,6 +54,15 @@
 
 `to_yaml` 有 `Widget` 与 `Json` 两个重载；**YAML 只有输出方向，无 `from_yaml`**。
 
+**发射契约**（`widget/yaml.h`，逐条由 `tests/unit/utest_yaml.cpp` 的 `yaml_block_form_exact_lines` 等用例锁定）：
+
+1. **缩进**：固定 2 空格一级，无 Tab、无行尾空格；顶层不缩进。
+2. **嵌套容器一律块形态**：对象/数组作为**键的值**时，先写 `key:` 再换行，子块整体下沉一级缩进。把嵌套映射内联在 `key:` 同一行（`props: {width: 100}`）抹掉了层级，产出的不是合法 YAML——这是曾经的缺陷形态，勿回归。
+3. **空容器只在值位置内联**：`key: {}` / `key: []`；标量与空容器之外不存在内联形态。非空容器任何时候都走块形态。
+4. **列表项**：每项 `- ` 起一行，行首缩进为父级 + 1。项本身是容器时，其块首行由 `- ` 前缀接管（`- ` 恰占两列，与一级缩进同宽），其余行天然对齐在同一列，故只需削掉子块首行的前导空格。嵌套数组因此形如 `- - 1`。
+5. **标量形态**：`null` / `true` / `false` 小写；整数原样；浮点数保证带小数点或指数位（`2` → `2.0`），NaN/无穷用 `.nan` / `.inf` / `-.inf`。
+6. **字符串按需加引号**：空串、YAML 保留字/布尔字面量（`yes`/`on`/`~` 等大小写变体）、可被整体解析为数字的串、含 YAML 特殊字符、首尾带空白的串，一律双引号包裹并转义 `" \ \n \r \t`；其余裸写。键名走同一判定。
+
 ```cpp
 au::Json json = au::serialization::to_json(my_tree);          // 返回 au::Json（非 std::string）
 auto restored = au::serialization::from_json(json);           // 返回 Result，使用前判 ok()
@@ -123,17 +132,39 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 |:---|:---|
 | `Fluent`（默认） | 扁平容器 + `au::Type(au::TypeProps{ … })` 叶形式（多子容器直接罗列子项） |
 | `StepByStep` | `auto w = au::Type(au::TypeProps{}); w.prop = val;` 分步赋值形式 |
-| `DesignatedInit` | 统一 `au::TypeProps{ .prop = val, .children = { … } }` 指定初始化器形式（仅 `*Props` 聚合支持） |
+| `DesignatedInit` | 统一 `au::Type(au::TypeProps{ .子节点槽, .prop = val })` 指定初始化器形式（仅 `*Props` 聚合支持） |
 
-`emit_props` 按 **JSON 值形态 + 键名**分派（`codegen.h` 的 `emit_prop_value` / `enum_type_for_key`），覆盖基础属性类型：`bool` / `int` / `float` / `double` / `string` / `LocalizedString`（以字符串形态命中 string 分支）/ `Color` / `Length` / `EdgeInsets` / 枚举（经 `enum_type_for_key` 登记表，另含 `font_weight`、`text_decoration` 专用分支）。
+**风格能力表**（三种风格共享同一条属性发射管线，差别只在「能否承载某一类落点」）：
 
-枚举登记表**同时覆盖 `to_json` 真实产出的属性名**（`alignment`、`overflow`、`side`、`position`、`decoration`、`text_align`、`font_style`、`main_axis_*`、`cross_axis_alignment` 等），因此真实 UI 树的这些属性可还原为 `Enum::Value` 表达式而非裸字符串。两点例外与一处现状：
+| 属性类别 | Fluent / DesignatedInit | StepByStep |
+|:---|:---|:---|
+| `*Props` 聚合的顶层同名成员（16 个公开继承的类型） | ✅ 进指定初始化器 | ✅ `w.key = 值` |
+| 基类属性（`width`/`height`/`show`/非 Text 的 `overflow`/a11y 三键） | ❌ 聚合无同名成员，一律省略 | ✅ 链式 setter / 公有成员 / `set_*()` |
+| 嵌套路径（`font.size_pt`、`flex.main_axis`） | ❌ GCC 的 C++ 指定初始化器不支持嵌套设计符 | ✅ `w.font.size_pt = 14.0f;` |
+| setter-only 落点（`TextInput` 样式组、`Stack.fit`、`TitleBar.height`…） | ❌ protected 字段不能在类外赋值 | ✅ `w.set_corner_radius(4.0f);` |
+| 改名成员（`Text` 的 `color` → `text_color`） | ✅ 按登记的落点发射 | ✅ 同左 |
 
-- `fit` 与 `orientation` **无法按键名消歧**（`fit` 在 `Stack` 上是 `StackFit`、在 `VideoPlayer` 上是 `BoxFit`；`orientation` 在 `Divider` 上是 `Orientation`、在 `Splitter` 上是 `SplitterOrientation`，取值集还完全同名）。登记表刻意不收录二者，它们仍输出字符串字面量；要正确还原须把 `prop_descriptors[].type` 透传进 `emit_prop_value` 按声明类型分派。
-- `Image` / `FlexWeight` / `Flex` / `Json` 这 4 类**暂无专用分派分支**：其序列化形态若未命中任何基础分支，`emit_prop_value` 产出 `/* unknown */`，`emit_props` 随即**静默跳过该属性**——既不报错也不告警，生成的代码中该属性直接缺失。
-- 登记表按「键名」而非「类型」工作，故新增枚举属性时必须同步登记真实键名，否则该属性静默退化为字符串（`tests/integration/itest_to_code.cpp` 的 `codegen_enum_keys_emit_enum_expressions` / `codegen_ambiguous_enum_keys_stay_as_strings` 两例守护此点）。
+### 2.5.1 发射管线：一切落点须可核对
+
+`emit_props` 的每个键都要先经 **「类型自描述 + 落点登记表」** 换算成真实写入路径，才决定发射还是省略：
+
+1. **取值形态分派**（`emit_prop_value`）：`bool` / `int` / `float` / `double` / `string` / `LocalizedString`（字符串形态命中 string 分支）/ `Color`（`[r,g,b,a]`）/ `Length`（`["px",N]`、`["percent",N]`、`{"value","unit"}` 旧格式、`"auto"`/`"fill"`，以及 `describe` 的 `default_props` 里那种**裸数字**——按 px 语义包成 `au::px(N)`，因为 `Length` 不可由 `float` 隐式转换）/ `EdgeInsets` / 枚举（含 `font_weight`、`text_decoration` 专用分支）。产物一律 `au::` 限定，使代码在任意命名空间可编译。
+2. **枚举还原优先走自描述**（`descriptor_enum_expression`）：`prop_descriptors[].type` 给 C++ 枚举类型名、`prop_descriptors[].enum` 给合法取值名，取值按列表**忽略大小写规范化**（`"center"` → `au::TextAlign::Center`）。这消掉了旧登记表的两类错误：同名键跨类型的歧义（`fit`/`orientation`）与大小写不符声明的取值（`au::Orientation::horizontal`）。列表里没有该取值时保留原样输出，交由产物编译体检暴露。取值名不是合法标识符时（`FontWeight` 的 `"400"`，落点 `Font::weight` 本就是 int）不拼枚举项名。自描述未给取值集的类型仍回落 `enum_type_for_key` 键名登记表。
+3. **声明序**：指定初始化器必须按 `*Props` 的成员**声明序**书写（乱序 GCC 直接报 `designator order … does not match declaration order`），而快照 JSON 的键是字典序，故发射前按 `prop_descriptors` 的下标稳定排序；子节点槽排最前。StepByStep 无此约束，但沿用同一顺序便于两风格逐行对照。
+4. **落点换算**：`prop_target` 登记表给出「键 → 成员路径 / 嵌套路径 / setter 名」，未登记时默认为同名成员；基类键走 `base_target`。`no_write_path` 显式登记「确认无写入通道」的键（`Scroll.offset`/`LazyRow.offset` 是运行态、`Image.image_width`/`image_height` 是解码派生值、`Skeleton.width`/`height` 需成对的 `set_size()`），`is_base_key` 则处理**同名遮蔽**：`Text` 的 `overflow`、`Skeleton` 的 `width`/`height`、`TitleBar` 的 `height` 都是控件自己的键（`serialize_props` 覆写了基类写入），不得按基类 `Length`/`OverflowStrategy` 发射。
+
+### 2.5.2 能力边界：宁缺不伪
+
+写不出合法 C++ 的属性/子节点**一律省略并在 stderr 告警**（`AURORA_LOG_WARN("codegen", …)`），既不产出编译不过的语句，也不静默丢语义：
+
+- **类型没有通用构造入口**（`is_bespoke_ctor`，21 项）：位置参数构造（`Badge(count, child)`、`Drawer(content, panel, side, width)`、`Splitter`、`TabBar`、`PageView`、`Show`、`Timer`、`VideoPlayer`…）、类模板需实参（`Provider`/`Repeater`/`ReorderableList` 及其三个 `*Provider` 别名）、不在 `aurora` 命名空间下（`BreakpointBuilder`）、或子项本就惰性构建（`LazyRow`，`children_policy = "virtual"`）。对它们只生成空构造，**告警丢弃子节点**——硬编位置参数实参等于臆造 API。
+- **连空构造都不存在**（`is_unconstructible`，8 项：`BreakpointBuilder`/`Hero`/`LocaleProvider`/`MediaQueryProvider`/`Provider`/`ReorderableList`/`Repeater`/`ThemeProvider`）：产物按真实类型名发射 `au::T{}` 并告警点名「须手工补构造实参」，不改写成别的控件（替换比报错更难发现）。
+- **字段为 protected 且未登记 setter** 的类型（`Slider`/`Checkbox`/`Chip`/`Popup`…）：StepByStep 省略该属性并告警。全量类型体检（73 类型 × `default_props` 的 550 条属性）中，StepByStep 发射 342 条、告警省略 208 条；把 208 条补齐需要逐类型登记真实 setter，属可选增强，不影响产物可编译性。
+- **取值形态无法还原**（如枚举属性给了数字、或命中 `Image`/`FlexWeight`/`Flex`/`Json` 这 4 类无专用分支的形态）：告警省略，不再静默。
 
 多子扁平容器（`Column` / `Row` / `Stack` / `Grid` / `Scroll` / `Card`）走免 `Props` 包裹的罗列形式。
+
+**产物可编译性的验证口径**：`tests/integration/itest_to_code.cpp`（26 例）锁形态；「73 类型 × 3 风格」全量矩阵与真实 UI 树 fixture（`tests/fixtures/ai_compat/`）逐条 `g++ -fsyntax-only` 体检锁可编译性——当前矩阵为 fluent 65/73、di 65/73、step 65/73，缺的 8 项恰是上述 `is_unconstructible` 名单；真实 fixture 的 11 棵树 × 3 风格产物 33/33 全通过。矩阵须按**每类型一座独立 TU**编译：把 73 份产物拼进单座大 TU（省时但）会被 GCC 的级联报错污染——一处失败即波及后续命名空间，实测把 65/73 误报成 50/73、18/73，归属不可信。
 
 ```cpp
 std::string code = au::serialization::to_code(json, au::serialization::CodeStyle::Fluent);
