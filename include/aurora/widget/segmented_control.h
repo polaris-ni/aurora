@@ -16,83 +16,115 @@
 
 namespace aurora {
 
-/**
- * @brief 分段控件。
- *
- * `SegmentedControl<T>{segments, selected, on_change}` — 互斥分段选择。
- *
- * 可定制性（对标 SwiftUI `Picker(.segmented)`、Flutter `SegmentedButton`）：
- * - `active_color`（选中段填充）未显式设置时跟随主题 `Theme::primary`；
- * - 文本色 / 选中文本色 / 边框色 / 字号 / 圆角均可配；
- * - 悬停段淡色反馈；禁用（`set_enabled(false)`）灰化并忽略点击。
- *
- * 继承扩展点（protected 虚函数）：`paint_segment`（单个分段）。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 分段控件。
+///
+/// `SegmentedControl<T>{segments, selected, on_change}` — 互斥分段选择。
+///
+/// 可定制性（对标 SwiftUI `Picker(.segmented)`、Flutter `SegmentedButton`）：
+/// - `active_color`（选中段填充）未显式设置时跟随主题 `Theme::primary`；
+/// - 文本色 / 选中文本色 / 边框色 / 字号 / 圆角均可配；
+/// - 悬停段淡色反馈；禁用（`set_enabled(false)`）灰化并忽略点击。
+///
+/// 继承扩展点（protected 虚函数）：`paint_segment`（单个分段）。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
+///
 class SegmentedControl : public LeafWidget {
   public:
     SegmentedControl() = default;
+    /// @brief 以分段文本列表与初始选中序号构造。
+    /// @param segments 各分段显示文本。
+    /// @param selected 初始选中序号（0 起，默认 0）。
     explicit SegmentedControl(std::vector<std::string> segments, int selected = 0)
         : segments_(std::move(segments)), selected_(selected) {}
 
+    /// @brief 类型标识。
+    /// @return 类型名字符串 "SegmentedControl"。
     [[nodiscard]] auto type_name() const -> const char * override { return "SegmentedControl"; }
+    /// @brief 分段文本列表。
+    /// @return 只读引用，构造后经 JSON 反序列化可能已更新。
     [[nodiscard]] auto segments() const -> const std::vector<std::string> & { return segments_; }
+    /// @brief 当前选中序号。
+    /// @return 选中的分段下标（0 起）。
     [[nodiscard]] auto selected() const -> int { return selected_; }
+    /// @brief 设置选中段（链式）。
+    /// @param i 目标分段序号（0 起）。
+    /// @return *this（链式调用）。
     auto set_selected(int i) -> SegmentedControl & {
         selected_ = i;
         mark_needs_paint();
         return *this;
     }
+    /// @brief 设置选择变化回调（链式）。
+    /// @param cb 新选中序号的回调。
+    /// @return *this（链式调用）。
     auto set_on_change(std::function<void(int)> cb) -> SegmentedControl & {
         on_change_ = std::move(cb);
         return *this;
     }
 
     /// @brief 设置选中段填充色（链式）。不调用则跟随主题 `Theme::primary`。
+    /// @param c 填充颜色。
+    /// @return *this（链式调用）。
     auto set_active_color(Color c) -> SegmentedControl & {
         active_color_ = c;
         mark_needs_paint();
         return *this;
     }
     /// @brief 设置未选中段文本色（链式）。
+    /// @param c 文本颜色。
+    /// @return *this（链式调用）。
     auto set_text_color(Color c) -> SegmentedControl & {
         text_color_ = c;
         mark_needs_paint();
         return *this;
     }
     /// @brief 设置选中段文本色（链式）。
+    /// @param c 选中文本颜色。
+    /// @return *this（链式调用）。
     auto set_selected_text_color(Color c) -> SegmentedControl & {
         selected_text_color_ = c;
         mark_needs_paint();
         return *this;
     }
     /// @brief 设置外框边框色（链式）。
+    /// @param c 边框颜色。
+    /// @return *this（链式调用）。
     auto set_border_color(Color c) -> SegmentedControl & {
         border_color_ = c;
         mark_needs_paint();
         return *this;
     }
     /// @brief 设置字号 pt（链式）。
+    /// @param s 字号（pt）；非正数回退为 14。
+    /// @return *this（链式调用）。
     auto set_font_size(float s) -> SegmentedControl & {
         font_size_ = s > 0.0F ? s : 14.0F;
         mark_needs_layout();
         return *this;
     }
     /// @brief 设置外框圆角半径 dp（链式；0 = 直角）。
+    /// @param r 圆角半径（dp）；负数取 0。
+    /// @return *this（链式调用）。
     auto set_corner_radius(float r) -> SegmentedControl & {
         corner_radius_ = r >= 0.0F ? r : 0.0F;
         mark_needs_paint();
         return *this;
     }
     /// @brief 设置是否启用（链式）；禁用态灰化绘制并忽略点击。
+    /// @param v 启用为 true。
+    /// @return *this（链式调用）。
     auto set_enabled(bool v) -> SegmentedControl & {
         enabled_ = v;
         mark_needs_paint();
         return *this;
     }
+    /// @brief 是否启用交互。
+    /// @return 启用为 true（默认）。
     [[nodiscard]] auto enabled() const -> bool { return enabled_; }
 
+    /// @brief 静态描述符：选中序号与各可配颜色/字号/圆角/启用属性，事件 on_change。
+    /// @return SegmentedControl 的组件描述符。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "SegmentedControl",
@@ -176,10 +208,16 @@ class SegmentedControl : public LeafWidget {
             .examples = {R"(au::SegmentedControl({"Day", "Week", "Month"}, 0))"},
         };
     }
+    /// @brief 实例描述符。
+    /// @return 转发 describe_static()。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    /// @brief 收集信号视图；本控件无外露信号（on_change 为回调）。
+    /// @param out 输出容器（未使用）。
+    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
 
+    /// @brief 左键按下时按各段实测宽度定位命中段：切换选中并触发 on_change；禁用态吞掉事件不切换。
+    /// @param e 鼠标事件（读取局部坐标与动作，回写 is_handled）。
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (!enabled_) {
             e.is_handled = true;  // 禁用态吞掉点击（不冒泡），不切换
@@ -206,6 +244,8 @@ class SegmentedControl : public LeafWidget {
         }
     }
 
+    /// @brief 序列化选中序号、分段列表与各可配样式属性；先链入基类通用属性。
+    /// @param props 输出 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         props["selected"] = selected_;
@@ -225,6 +265,8 @@ class SegmentedControl : public LeafWidget {
         props["enabled"] = enabled_;
     }
 
+    /// @brief 从 JSON 恢复选中序号、分段列表与各样式属性；缺失键保持当前值，先链入基类。
+    /// @param props 输入 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("selected")) {
@@ -270,6 +312,10 @@ class SegmentedControl : public LeafWidget {
         return c.constrain(Size{.width = total_w, .height = seg_h});
     }
 
+    /// @brief 绘制分段条：显式色优先、否则跟随主题 primary，禁用态灰化；圆角裁剪内逐段绘制并补外框。
+    /// @param p 绘制器。
+    /// @param bounds 本控件的全局矩形。
+    /// @param ctx 构建上下文（用于解析主题色）。
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         const Font f{.size_pt = font_size_};
         // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
@@ -306,19 +352,31 @@ class SegmentedControl : public LeafWidget {
     }
 
     /// @brief 继承扩展点：绘制单个分段（选中填充强调色，未选中透明）。
+    /// @param p 绘制器。
+    /// @param index 分段下标。
+    /// @param seg 分段矩形（全局坐标）。
+    /// @param selected 该段是否选中。
+    /// @param f 文本字体。
+    /// @param accent 选中段的填充色。
+    /// @param text 未选中段文本色。
+    /// @param sel_text 选中段文本色。
     virtual auto paint_segment(Painter &p, size_t index, const Rect &seg, bool selected, const Font &f, Color accent,
                                Color text, Color sel_text) -> void {
         if (selected) {
             p.fill_rect(seg, accent);
         }
+        // 绘制分段文本：左右各 12dp、上方 6dp 内缩，颜色按选中态取 sel_text / text。
         p.draw_text(Rect{.origin = Point{.x = seg.origin.x + 12.0F, .y = seg.origin.y + 6.0F},
                          .size = Size{.width = seg.size.width - 24.0F, .height = seg.size.height}},
                     segments_[index], f, selected ? sel_text : text);
     }
 
-    // NOLINTBEGIN(*-non-private-member-variables-in-classes)
+    /// @brief 分段绘制数据成员区起点；紧邻下方为区间式豁免起点，抑制成员可见性命名告警。
+    /// NOLINTBEGIN(*-non-private-member-variables-in-classes)
     std::vector<std::string> segments_;
+    /// @brief 当前选中段序号（0 起）。
     int selected_ = 0;
+    /// @brief 选中变化回调（可空；调用时传入新序号）。
     std::function<void(int)> on_change_;
     std::optional<Color> active_color_;  ///< 选中段填充色；空 = 跟随主题 primary
     Color text_color_ = Color::black();  ///< 未选中段文本色

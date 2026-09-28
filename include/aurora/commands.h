@@ -13,20 +13,18 @@
 
 namespace aurora {
 
-/**
- * @brief 一条命令：可执行动作的一等公民描述。
- *
- * 命令是**快捷键、菜单项、命令面板三者的共同数据源**——三者均为它的投影，避免同一动作
- * 在多处重复定义（对标 VSCode Command、Qt `QAction`、WPF `ICommand`/`RoutedCommand`、
- * Flutter `Intent`+`Actions`）。
- *
- * 启用条件采用「谓词实判 + 标签描述」两段式：`enabled` 承担运行期正确性（空 = 恒启用），
- * `when_label` 仅作展示与序列化标签（**不参与求值**，也不解析任何条件 DSL）。
- *
- * @note Thread: main-thread only
- * @note Side-effects: none（`action` 由注册表在 `invoke` 时调用）
- * @note Rebuildable: no
- */
+/// @brief 一条命令：可执行动作的一等公民描述。
+///
+/// 命令是**快捷键、菜单项、命令面板三者的共同数据源**——三者均为它的投影，避免同一动作
+/// 在多处重复定义（对标 VSCode Command、Qt `QAction`、WPF `ICommand`/`RoutedCommand`、
+/// Flutter `Intent`+`Actions`）。
+///
+/// 启用条件采用「谓词实判 + 标签描述」两段式：`enabled` 承担运行期正确性（空 = 恒启用），
+/// `when_label` 仅作展示与序列化标签（**不参与求值**，也不解析任何条件 DSL）。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: none（`action` 由注册表在 `invoke` 时调用）
+/// @note Rebuildable: no
 struct Command {
     std::string id;  ///< 唯一标识（如 "file.open"）
     std::string title;  ///< 显示文本（面板/菜单/帮助）
@@ -40,63 +38,91 @@ struct Command {
 };
 
 /// @brief 命令名的模糊匹配得分（不区分大小写的子序列匹配）。
+/// @param query 查询词；空串匹配全部。
+/// @param text  被匹配文本（通常为命令标题）。
 /// @return -1 = 不匹配；空 `query` = 0（匹配全部）；否则得分越大越优（有效匹配恒 ≥ 0）。
 [[nodiscard]] auto command_fuzzy_score(const std::string &query, const std::string &text) -> int;
 
-/**
- * @brief 命令注册表：命令的唯一真源（注册 / 启停 / 调用 / 检索 / 投影）。
- *
- * 快捷键与菜单是它的两个投影（`bind_shortcuts` / `to_menu_items`），命令面板是第三个消费方；
- * 三者共用同一 `invoke(id)` 出口，故启用条件与空动作判定单点生效。
- *
- * @note Thread: main-thread only
- * @note Side-effects: `invoke` / `bind_shortcuts` 有副作用
- * @note Rebuildable: no
- */
+/// @brief 命令注册表：命令的唯一真源（注册 / 启停 / 调用 / 检索 / 投影）。
+///
+/// 快捷键与菜单是它的两个投影（`bind_shortcuts` / `to_menu_items`），命令面板是第三个消费方；
+/// 三者共用同一 `invoke(id)` 出口，故启用条件与空动作判定单点生效。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: `invoke` / `bind_shortcuts` 有副作用
+/// @note Rebuildable: no
 class CommandRegistry {
   public:
     /// @brief 注册命令，返回注册号；同 `id` 重复注册**覆盖**旧定义并保持注册序。
     /// 空 `id` 视为非法，返回 -1 且不入表。
+    /// @param cmd 命令定义（按值移入）。
+    /// @return 本次注册号（自增分配）；`cmd.id` 为空时返回 -1。
     auto add(Command cmd) -> int;
 
     /// @brief 按 `id` 解绑，并连带撤销其快捷键绑定（若已 `bind_shortcuts`）；返回是否命中。
+    /// @param id 待移除命令的唯一标识。
+    /// @return 命中并移除返回 `true`；未命中返回 `false`。
     auto remove(const std::string &id) -> bool;
 
+    /// @brief 清空全部命令，并连带撤销其快捷键绑定与覆盖开关。
     auto clear() -> void;
 
+    /// @brief 已注册命令数。
+    /// @return 命令总数。
     [[nodiscard]] auto count() const -> std::size_t { return cmds_.size(); }
+
+    /// @brief 是否已注册某 `id`。
+    /// @param id 命令唯一标识。
+    /// @return 命中返回 `true`。
     [[nodiscard]] auto contains(const std::string &id) const -> bool { return find(id) != nullptr; }
 
     /// @brief 按 `id` 查找；未命中返回 nullptr。
+    /// @param id 命令唯一标识。
+    /// @return 指向表内命令的只读指针；未命中为 `nullptr`。
     [[nodiscard]] auto find(const std::string &id) const -> const Command *;
 
     /// @brief 全部命令（注册序）。
+    /// @return 命令值的拷贝列表。
     [[nodiscard]] auto all() const -> std::vector<Command> { return cmds_; }
 
     /// @brief 当前是否启用 = 覆盖开关（若有）&& 谓词求值（无谓词 = 恒真）。未命中 `id` = false。
+    /// @param id 命令唯一标识。
+    /// @return 该命令当前是否处于可用状态。
     [[nodiscard]] auto is_enabled(const std::string &id) const -> bool;
 
     /// @brief 设置覆盖开关（叠加在谓词之上）；返回是否命中。用于临时禁用某命令而不改谓词。
+    /// @param id 命令唯一标识。
+    /// @param on 覆盖开关取值。
+    /// @return 命中返回 `true`；未命中不记录覆盖值并返回 `false`。
     auto set_enabled(const std::string &id, bool on) -> bool;
 
     /// @brief 求值启用条件后执行 `action`。返回是否真的执行（未命中 / 未启用 / 无 action = false）。
+    /// @param id 待执行命令的唯一标识。
+    /// @return 真正调用了 `action` 时为 `true`。
     [[nodiscard]] auto invoke(const std::string &id) const -> bool;
 
     /// @brief 模糊检索：按（得分降序, 标题升序）稳定排序；`only_enabled` 时过滤未启用者。
+    /// @param query        模糊查询词。
+    /// @param only_enabled 为真时仅返回当前启用的命令。
+    /// @return 命中命令的只读指针列表（不拥有所有权）。
     [[nodiscard]] auto search(const std::string &query, bool only_enabled = true) const -> std::vector<const Command *>;
 
     /// @brief 序列化信封：`{"commands":[{id,title,icon?,category?,when?,enabled,invocable,default_binding?}]}`。
     /// 可选字段仅在非空时输出；自描述信封可直接作为工具面入参。
+    /// @return JSON 对象信封。
     [[nodiscard]] auto to_json() const -> Json;
 
     /// @brief 投影 1：把各命令的 `default_binding` 注册进快捷键表，动作即 `invoke(id)`。
     /// 幂等——重复调用先移除上次产生的绑定再重建；并记住 `sr` 供命令面板复用。
+    /// @param sr 目标快捷键表；生命周期须覆盖绑定存续期。
     auto bind_shortcuts(ShortcutRegistry &sr) -> void;
 
     /// @brief 投影 2：生成菜单项（`label←title`、`icon`、`enabled`、`shortcut_text`、`on_click←invoke`）。
+    /// @return 菜单项列表（注册序，值拷贝）。
     [[nodiscard]] auto to_menu_items() const -> std::vector<MenuItem>;
 
     /// @brief `bind_shortcuts` 的目标（未绑定 = nullptr）。
+    /// @return 已绑定的快捷键表指针（非拥有）；未绑定为 `nullptr`。
     [[nodiscard]] auto shortcuts() const -> ShortcutRegistry * { return shortcuts_; }
 
   private:

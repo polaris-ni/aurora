@@ -26,19 +26,19 @@ struct UiPromptOptions {
 };
 
 /// @brief 把若干控件的 schema 投影成一段紧凑、可供外部 LLM 直接消费的 prompt。
-///
 /// **红线**：本库**不发起任何网络请求**。这里只产出「喂给 LLM 的文字」，调用 LLM 的是外部 Agent。
 /// 之所以要做投影而不是让 Agent 自己去读 `aurora_api.json` / `get_schema`：全量 schema 体积过大，
 /// 直接塞进上下文既贵又容易被截断。
 ///
 /// @param types 需要的类型名；未知类型跳过
+/// @param opt 投影选项（体积/详细度开关）；缺省 `UiPromptOptions{}`
 /// @return markdown 文本；无可用类型时返回空串
 ///
 /// @note Thread: main-thread only（读注册表）
 /// @note Side-effects: none
 [[nodiscard]] inline auto build_ui_prompt(const std::vector<std::string> &types, const UiPromptOptions &opt = {})
     -> std::string {
-    std::string out;
+    std::string out;  // 累积的 prompt 文本缓冲
     out += "# Aurora UI tree\n\n";
     out += "Reply with a single JSON object shaped as:\n";
     out += "{\"node\":{\"type\":\"<Type>\",\"props\":{...},\"children\":[...]}}\n\n";
@@ -46,7 +46,7 @@ struct UiPromptOptions {
     out += "`props` keys must match the names given; omit optional props you do not need.\n\n";
 
     const std::vector<std::string> registered_types = aurora::list_all_components();
-    std::size_t emitted = 0;
+    std::size_t emitted = 0;  // 已投影的类型数（用于 max_types 截断与空结果判定）
     for (const std::string &type : types) {
         if (opt.max_types > 0 && emitted >= opt.max_types) {
             break;
@@ -104,9 +104,10 @@ struct UiPromptOptions {
 }
 
 /// @brief 按自然语言描述**收敛**出相关类型子集，再投影为 prompt。
-///
 /// 先用 `generate_ui` 的关键词匹配探测描述里提到了哪些控件，再补上几乎总会用到的布局与文本类型。
 /// 这样 prompt 只带「这次可能用到的」类型，而不是 70 个全量。
+/// @param description 自然语言描述（用于关键词探测相关控件）
+/// @return 收敛类型子集的 prompt 投影（内部走 `build_ui_prompt`）
 [[nodiscard]] inline auto ui_prompt_for(const std::string &description) -> std::string {
     std::vector<std::string> types;
     auto remember = [&types](const std::string &t) -> void {
@@ -138,9 +139,10 @@ struct UiPromptOptions {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// @brief 外部 LLM 生成函数：`(prompt, 上一轮错误) -> UI 树 JSON`。
-///
 /// 约定：返回的对象形如 `{"node": {...}}` 或直接的节点对象；返回 null 表示放弃。
 /// **本库从不自己调用它** —— 是否联网、用哪个模型，完全由注入方决定。
+/// @param prompt 由 schema 投影出的提示文本
+/// @param errors 上一轮校验错误（首轮为空）
 using GenerateUiFn = std::function<Json(const std::string &prompt, const std::vector<ValidationError> &errors)>;
 
 /// @brief 自修复环中的一轮。
@@ -150,6 +152,8 @@ struct UiRepairStep {
     std::vector<ValidationError> errors;  ///< 校验结果（含 path / message / suggestion）
     bool machine_fixed = false;  ///< 是否由库侧**确定性**修好（未消耗 LLM 往返）
 
+    /// @brief 把本轮步骤序列化为 JSON（attempt / generated / machine_fixed / errors）。
+    /// @return JSON 对象；errors 逐项经 `ValidationError::to_json` 转换。
     [[nodiscard]] auto to_json() const -> Json {
         Json j = Json::object();
         j["attempt"] = attempt;
@@ -171,6 +175,8 @@ struct UiRepairResult {
     std::vector<UiRepairStep> history;  ///< 逐轮记录，供 AI 自省「为什么没修好」
     std::size_t attempts_used = 0;  ///< 实际用掉的轮次
 
+    /// @brief 把整个自修复环结果序列化为 JSON（ok / tree / attempts_used / history）。
+    /// @return JSON 对象；history 逐轮经 `UiRepairStep::to_json` 转换。
     [[nodiscard]] auto to_json() const -> Json {
         Json j = Json::object();
         j["ok"] = ok;
@@ -188,6 +194,7 @@ struct UiRepairResult {
 namespace detail {
 
 /// @brief 已注册类型集合（小写 → 原名），供模糊匹配使用。
+/// @return 进程内静态缓存的类型原名列表引用（首次调用时由注册表构造）。
 [[nodiscard]] inline auto ui_registered_types() -> const std::vector<std::string> & {
     // 函数内静态缓存不是对外常量，按 UPPER_CASE 改名反而误导，故就地豁免
     // （clang-tidy 22 未提供 `StaticConstantLocalVariableCase` 选项，配置口走不通，已实测）。
@@ -199,10 +206,11 @@ namespace detail {
 }
 
 /// @brief 类型是否已注册。
-///
 /// ⚠️ 不能用 `describe_component(name).contains("type")` 判断 —— `component_schema` 会**无条件**写入
 /// `w["type"] = name`，未注册类型同样返回一个带 `type` 的对象（只是没有 `default_props`）。
 /// 只有拿注册表成员表来判才准。
+/// @param type 待判定的类型名（精确匹配注册表原名）
+/// @return 已注册为 true；未注册为 false
 [[nodiscard]] inline auto ui_is_registered(const std::string &type) -> bool {
     const std::vector<std::string> &types = ui_registered_types();
     return std::find(types.begin(), types.end(), type) != types.end();
@@ -210,6 +218,8 @@ namespace detail {
 
 /// @brief 大小写不敏感的**最佳**类型名修正：先精确（忽略大小写），再取唯一的子串命中。
 /// 多个子串命中时返回空串 —— 宁可交给 LLM 重来，也不瞎猜。
+/// @param name 待修正的类型名
+/// @return 匹配到的注册类型原名；无命中或多义命中为空串
 [[nodiscard]] inline auto ui_resolve_type(const std::string &name) -> std::string {
     auto lower = [](std::string s) -> std::string {
         for (char &c : s) {
@@ -235,6 +245,8 @@ namespace detail {
 }
 
 /// @brief 递归机修：修正未知类型、补齐缺省属性、按 children 策略裁剪子节点。
+/// @param node 待修复的节点 JSON（非对象输入原样返回）
+/// @return 修复后的节点 JSON（递归处理全部子节点）
 [[nodiscard]] inline auto ui_repair_node(const Json &node) -> Json {
     if (!node.is_object()) {
         return node;
@@ -308,11 +320,11 @@ namespace detail {
 }  // namespace detail
 
 /// @brief 确定性机修（specification/08-tooling.md §2.6）：**不调用 LLM**，把明显可修的问题修掉。
-///
 /// 覆盖三类：未知类型（模糊匹配到唯一已注册类型）、缺失属性（按 `default_props` 回填）、
 /// children 策略违规（声明 none 却带子节点则丢弃）。修不了的（如结构错误、类型彻底无法辨认）
 /// 原样保留，交给 `generate_ui_repair` 的重试环让 LLM 重来。
 ///
+/// @param tree 待修复的 UI 树 JSON
 /// @return 修复后的树（总是返回合法 JSON；不代表一定通过 `validate_ui_tree`）
 ///
 /// @note Thread: main-thread only（读注册表）
@@ -320,23 +332,23 @@ namespace detail {
 [[nodiscard]] inline auto repair_ui_tree(const Json &tree) -> Json { return detail::ui_repair_node(tree); }
 
 /// @brief NL→UI 的自修复环（specification/08-tooling.md §2.6）。
-///
 /// 流程（每轮）：机修 → 校验 → 通过即止；否则若注入了 LLM，把**错误列表**拼进 prompt 再生成一轮。
 /// 机修优先的意义：能确定性修好的不必浪费一次 LLM 往返（既省钱也降低抖动）。
 ///
 /// @param description   自然语言描述
 /// @param llm           外部注入的生成函数；**为空时只用关键词生成 + 机修**，仍然自洽可测
 /// @param max_attempts  轮次上限（>=1）
+/// @return 自修复环结果：ok / 最终树 / 逐轮 history / 实际轮次
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: 调用注入的 `llm`（可能联网，由注入方承担）
-// 豁免 performance-unnecessary-value-param：该签名（含 `GenerateUiFn llm = {}` 按值形参）已作为
-// API 契约记录于 codespec/specification/08-tooling.md §2.6 的类型表，形参按值是既定 API；
-// 注入方常以临时 lambda 实传，按值接形参即其设计意图，改 const 引用属破坏契约的签名调整。
-// NOLINTNEXTLINE(performance-unnecessary-value-param)
+/// 豁免 performance-unnecessary-value-param：该签名（含 `GenerateUiFn llm = {}` 按值形参）已作为
+/// API 契约记录于 codespec/specification/08-tooling.md §2.6 的类型表，形参按值是既定 API；
+/// 注入方常以临时 lambda 实传，按值接形参即其设计意图，改 const 引用属破坏契约的签名调整。
+/// NOLINTNEXTLINE(performance-unnecessary-value-param)
 [[nodiscard]] inline auto generate_ui_repair(const std::string &description, GenerateUiFn llm = {},
                                              std::size_t max_attempts = 3) -> UiRepairResult {
-    UiRepairResult result;
+    UiRepairResult result;  // 逐轮累积的自修复结果（history / attempts_used / tree）
     if (max_attempts == 0) {
         max_attempts = 1;
     }

@@ -9,21 +9,17 @@ namespace aurora {
 class Surface;  ///< 前向声明：from_surface 仅按 const 引用取尺寸/缩放因子。
 class BuildContext;  ///< 前向声明：of(ctx) / media_query_of(ctx) 仅按 const 引用读取环境链。
 
-/**
- * @brief 屏幕方向（屏幕逻辑尺寸派生）。
- *
- * 与 `divider.h` 的 `Orientation{Horizontal,Vertical}`（分隔线方向）语义不同，独立枚举避免误用。
- */
+/// @brief 屏幕方向（屏幕逻辑尺寸派生）。
+///
+/// 与 `divider.h` 的 `Orientation{Horizontal,Vertical}`（分隔线方向）语义不同，独立枚举避免误用。
 enum class ScreenOrientation : std::uint8_t {
     Portrait,  ///< 竖屏：宽 < 高
     Landscape,  ///< 横屏：宽 ≥ 高，正方形归入 Landscape
 };
 
-/**
- * @brief 运行平台（编译期常量为主）。
- *
- * Win32 后端下为 `Windows`；Headless/GLFW 等返回 `Unknown`。本期不做运行时 OS 探测。
- */
+/// @brief 运行平台（编译期常量为主）。
+///
+/// Win32 后端下为 `Windows`；Headless/GLFW 等返回 `Unknown`。本期不做运行时 OS 探测。
 enum class PlatformKind : std::uint8_t {
     Unknown,  ///< 未知 / 非 Windows 后端（Headless/GLFW）
     Windows,  ///< Win32/GDI 后端
@@ -32,11 +28,9 @@ enum class PlatformKind : std::uint8_t {
     Web,
 };
 
-/**
- * @brief 设备形态（编译期常量为主）。
- *
- * Win32 后端下为 `Desktop`；其余返回 `Unknown`。
- */
+/// @brief 设备形态（编译期常量为主）。
+///
+/// Win32 后端下为 `Desktop`；其余返回 `Unknown`。
 enum class DeviceKind : std::uint8_t {
     Unknown,  ///< 未知 / 非桌面后端
     Desktop,  ///< 桌面（Win32）
@@ -44,17 +38,15 @@ enum class DeviceKind : std::uint8_t {
     Tablet,
 };
 
-/**
- * @brief 媒体查询：当前子树可见的响应式环境上下文（specification/07-environment-modifier.md §3.1 MediaQuery）。
- *
- * 经 `Provider<MediaQuery>` 沿「Environment 注入链」向下传播，子树经
- * `media_query_of(ctx)` / `MediaQuery::of(ctx)` 读取「最近祖先 Provider」生效的值。
- * 新增字段均保留默认值（向后兼容）；未注入 Provider 时读回默认实例。
- *
- * @note Thread: thread-safe (pure value type)
- * @note Side-effects: none
- * @note Rebuildable: no
- */
+/// @brief 媒体查询：当前子树可见的响应式环境上下文（specification/07-environment-modifier.md §3.1 MediaQuery）。
+///
+/// 经 `Provider<MediaQuery>` 沿「Environment 注入链」向下传播，子树经
+/// `media_query_of(ctx)` / `MediaQuery::of(ctx)` 读取「最近祖先 Provider」生效的值。
+/// 新增字段均保留默认值（向后兼容）；未注入 Provider 时读回默认实例。
+///
+/// @note Thread: thread-safe (pure value type)
+/// @note Side-effects: none
+/// @note Rebuildable: no
 struct MediaQuery {
     Size size{};  ///< 当前窗口/子树可用逻辑尺寸（dp）。
     float scale_factor = 1.0F;  ///< 设备像素比（dp → device px）。
@@ -67,6 +59,8 @@ struct MediaQuery {
     bool prefer_reduced_motion = false;  ///< 系统「减弱动效」偏好。
 
     /// @brief 便捷构造：仅给定缩放因子（保留其余默认），用于轻量注入。
+    /// @param scale 设备像素比（dp → device px）。
+    /// @return 仅 `scale_factor` 被置为 `scale`、其余字段为默认值的实例。
     [[nodiscard]] static auto of(float scale) -> MediaQuery {
         MediaQuery mq;
         mq.scale_factor = scale;
@@ -74,13 +68,19 @@ struct MediaQuery {
     }
 
     /// @brief 从 `Surface` 成型：读取尺寸与缩放因子；Win32 下经 `win32_media_query` 取真实屏幕/减弱动效。
+    /// @param s 源 Surface（提供尺寸、缩放因子与 CSD 装饰内边距）。
+    /// @return 据表面事实成型的 MediaQuery（非 Win32 下 platform/device 为 Unknown）。
     [[nodiscard]] static auto from_surface(const Surface &s) -> MediaQuery;
 
     /// @brief 读取最近祖先 Provider 注入的 `MediaQuery`；无注入来源时静默返回进程级默认实例。
+    /// @param ctx 构建上下文（沿其环境注入链向上查找最近的 `MediaQuery` Provider）。
+    /// @return 生效实例的引用；无 Provider 时为进程级默认实例（全默认值）。
     [[nodiscard]] static auto of(const BuildContext &ctx) -> const MediaQuery &;
 };
 
 /// @brief 读取最近祖先 Provider 注入的 `MediaQuery`；无 Provider 时返回 `nullptr`（调用方按需降级）。
+/// @param ctx 构建上下文（沿其环境注入链向上查找）。
+/// @return 生效实例指针；链上无 `MediaQuery` Provider 时为 nullptr。
 [[nodiscard]] auto media_query_of(const BuildContext &ctx) -> const MediaQuery *;
 
 }  // namespace aurora

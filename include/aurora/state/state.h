@@ -18,7 +18,8 @@ class StateGraph;  // 前向声明（state_graph.h 提供状态依赖图，speci
 /// @note Rebuildable: no
 class StateBase {  // NOLINT(cppcoreguidelines-special-member-functions)
   public:
-    // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
+    /// @brief 虚析构（default）：保证经基类指针正确销毁派生状态源，本身不持有额外资源。
+    /// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
     virtual ~StateBase() = default;
 
   protected:
@@ -26,6 +27,7 @@ class StateBase {  // NOLINT(cppcoreguidelines-special-member-functions)
 
     /// @brief 生命周期锚点：供观察边 Connection 以 weak_ptr 引用，使 State 先于
     ///        Effect 析构时也不会留下悬垂观察者。
+    /// @return 本状态的锚点 shared_ptr（构造时经 make_anchor 生成，生命周期内不变）。
     [[nodiscard]] virtual auto anchor() const -> AnchorPtr { return anchor_; }
 
     auto notify() -> void {
@@ -60,27 +62,28 @@ class StateBase {  // NOLINT(cppcoreguidelines-special-member-functions)
     friend class StateGraph;
 };
 
-/**
- * @brief 细粒度信号状态源（参考 SolidJS signals / Compose mutableStateOf）。
- *
- * - get()：返回值；若在 Effect 作用域内调用，自动把本 State 登记为依赖。
- * - set()：写值并通知所有依赖的 Effect 重跑（定点刷新）。
- *
- * @tparam T 值的类型。
- *
- * @note Thread: main-thread only
- * @note Side-effects: none
- * @note Rebuildable: no
- */
+/// @brief 细粒度信号状态源（参考 SolidJS signals / Compose mutableStateOf）。
+///
+/// - get()：返回值；若在 Effect 作用域内调用，自动把本 State 登记为依赖。
+/// - set()：写值并通知所有依赖的 Effect 重跑（定点刷新）。
+///
+/// 豁免 bugprone-exception-escape：State 嵌于控件/Effect 回调网（std::function 转发链）中，触发
+/// .clang-tidy 已记录的系统性假告警面——「任何转入 std::function 的可调用对象一律判『不应抛出』」
+/// （operator() 无 noexcept 规格），据此对隐式特殊成员误报。抛出仅可能为 bad_alloc，由顶层兜底。
+/// @tparam T 值的类型。
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: no
+/// NOLINTNEXTLINE(bugprone-exception-escape)
 template <typename T>
-// 豁免 bugprone-exception-escape：State 嵌于控件/Effect 回调网（std::function 转发链）中，触发
-// .clang-tidy 已记录的系统性假告警面——「任何转入 std::function 的可调用对象一律判『不应抛出』」
-// （operator() 无 noexcept 规格），据此对隐式特殊成员误报。抛出仅可能为 bad_alloc，由顶层兜底。
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class State : public SignalView<T>, public StateBase, public std::enable_shared_from_this<State<T>> {
   public:
+    /// @brief 以初值构造状态源；不传参时按 `T{}` 值初始化。
+    /// @param v 初始值（移入）。
     explicit State(T v = T{}) : value_(std::move(v)) {}
 
+    /// @brief 读取当前值；若处于 Effect 作用域内则顺带登记本 State 为依赖。
+    /// @return 当前值的只读引用。
     [[nodiscard]] auto get() const -> const T & override {
         if (Effect::current() != nullptr) {
             // 接口约束：get() 为 const 而 subscribe() 为非 const（SignalViewBase），
@@ -91,13 +94,19 @@ class State : public SignalView<T>, public StateBase, public std::enable_shared_
         return value_;
     }
 
+    /// @brief 写入新值并通知所有依赖本 State 的 Effect 重跑（定点刷新）。
+    /// @param v 新值（移入）；随后经 `notify()` 遍历观察者表。
     auto set(T v) -> void {
         value_ = std::move(v);
         notify();
     }
 
+    /// @brief 暴露生命周期锚点（转发基类 `StateBase::anchor()`）。
+    /// @return 指向本 State 的 weak_ptr 锚点，供观察边 Connection 做存活探测。
     [[nodiscard]] auto anchor() const -> AnchorPtr override { return StateBase::anchor(); }
 
+    /// @brief 订阅 Effect：去重登记观察边，并惰性摘除已析构 Effect 的失效连接。
+    /// @param e 待登记的 Effect；`Effect::run()` 每帧重跑会重复调用，靠去重防累加。
     auto subscribe(Effect &e) -> void override {
         // 去重 + 惰性摘除失效边：Effect::run() 每帧重跑会重新登记依赖，若不过滤
         // 同一 Effect 会在 observers_ 中无限累加（动画场景必现）。同时清理已析构
@@ -121,6 +130,7 @@ class State : public SignalView<T>, public StateBase, public std::enable_shared_
     }
 
     /// @brief 返回自身的 shared_ptr 包装（便于传递给子组件做状态提升）。
+    /// @return 持有本 State 的 `std::shared_ptr`（来自 enable_shared_from_this）。
     /// @note 调用者须确保 State 由 shared_ptr 管理（否则行为未定义）。
     /// @note Thread: main-thread only
     /// @note Side-effects: none

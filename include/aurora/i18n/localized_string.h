@@ -10,18 +10,16 @@ namespace aurora {
 
 class StringTable;  // 前向声明：resolve 的定义在 string_table.h（避免循环包含）
 
-/**
- * @brief 可本地化字符串（i18n 运行时，specification/07-environment-modifier.md §6 国际化）。
- *
- * - 非本地化：直接持文本（`text`）
- * - 本地化：以 `key` 查 `StringTable`，按 `Locale` 取模板并用 `args` 格式化
- *   （支持 `{0}`/`{1}` 占位与 CLDR 六类复数 `zero`/`one`/`two`/`few`/`many`/`other` 完整分支，详见 plural.h）。
- * 提供从 `std::string_view` 的隐式构造，便于 AI 直接写 `Text{ .content = "Hi" }`。
- *
- * @note Thread: main-thread only
- * @note Side-effects: none
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 可本地化字符串（i18n 运行时，specification/07-environment-modifier.md §6 国际化）。
+///
+/// - 非本地化：直接持文本（`text`）
+/// - 本地化：以 `key` 查 `StringTable`，按 `Locale` 取模板并用 `args` 格式化
+/// （支持 `{0}`/`{1}` 占位与 CLDR 六类复数 `zero`/`one`/`two`/`few`/`many`/`other` 完整分支，详见 plural.h）。
+/// 提供从 `std::string_view` 的隐式构造，便于 AI 直接写 `Text{ .content = "Hi" }`。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: yes, via from_json
 struct LocalizedString {
     std::string text;  ///< 字面文本（非本地化值 / 本地化查表失败时的回退）
     std::string key;  ///< 本地化键（localize 为 true 时使用）
@@ -29,11 +27,20 @@ struct LocalizedString {
     bool localize = false;  ///< 是否走查表解析
 
     LocalizedString() = default;
+    /// @brief 由 C 串构造非本地化字面值。
+    /// @param t 文本内容（拷入 text）。
     LocalizedString(const char *t) : text(t) {}
+    /// @brief 由 std::string 构造非本地化字面值。
+    /// @param t 文本内容（移入 text）。
     LocalizedString(std::string t) : text(std::move(t)) {}
+    /// @brief 由 std::string_view 构造非本地化字面值。
+    /// @param t 文本内容（拷贝为 std::string 存入 text）。
     LocalizedString(std::string_view t) : text(std::string(t)) {}
 
     /// @brief 构造一个待本地化的字符串（按 key 查表 + 格式化 args）。
+    /// @param key 本地化键（查 StringTable 用）。
+    /// @param a 模板参数列表（可继续嵌套 tr 形成本地化参数），默认为空。
+    /// @return localize 为 true、text 为空的实例（text 仅作查表失败时的回退）。
     static auto tr(std::string key, std::vector<LocalizedString> a = {}) -> LocalizedString {
         LocalizedString s;
         s.key = std::move(key);
@@ -42,12 +49,21 @@ struct LocalizedString {
         return s;
     }
 
+    /// @brief 取字面文本的 C 串指针。
+    /// @return text.c_str()；注意不是 resolve 之后的显示文本。
     [[nodiscard]] auto c_str() const -> const char * { return text.c_str(); }
 
+    /// @brief 相等性比较：仅比较 text 与 key 两字段（不含 args 与 localize）。
+    /// @param o 待比较的另一实例。
+    /// @return text 与 key 均相等时为 true。
     auto operator==(const LocalizedString &o) const -> bool { return text == o.text && key == o.key; }
 
     /// @brief 解析为最终显示字符串：localize 且表中有条目 → 格式化模板；否则回退 `text`。
     /// `args` 递归解析（支持嵌套本地化参数）。
+    ///
+    /// @param table 字符串表；nullptr 时直接回退 text（定义见 string_table.h）。
+    /// @param loc 查表与复数判定使用的区域设置。
+    /// @return 格式化后的显示字符串。
     [[nodiscard]] auto resolve(const StringTable *table, const Locale &loc) const -> std::string;
 };
 

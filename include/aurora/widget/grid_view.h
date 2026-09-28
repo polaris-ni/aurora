@@ -23,25 +23,30 @@
 
 namespace aurora {
 
-/**
- * @brief 二维虚拟网格：纵向滚动 + 固定列数 + 固定单元格高度，
- * 仅实例化可见行内的单元格。
- *
- * 对标 Flutter `GridView`（`SliverGridDelegateWithFixedCrossAxisCount`）、
- * Qt `QListView`+`setIconSize`、WPF `UniformGrid`+虚拟化。
- *
- * 与 `LazyList` 区分：`LazyList` 一维单列；`GridView` 一维索引映射到 (row,col) 二维布局，
- * 适合图库 / 数据卡片网格。当前为固定行高 + 等宽列模式；可变尺寸作为后续增强。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json（标量属性回填；条目须宿主经 `set_item_builder` 挂上）
- */
+/// @brief 二维虚拟网格：纵向滚动 + 固定列数 + 固定单元格高度，
+/// 仅实例化可见行内的单元格。
+///
+/// 对标 Flutter `GridView`（`SliverGridDelegateWithFixedCrossAxisCount`）、
+/// Qt `QListView`+`setIconSize`、WPF `UniformGrid`+虚拟化。
+///
+/// 与 `LazyList` 区分：`LazyList` 一维单列；`GridView` 一维索引映射到 (row,col) 二维布局，
+/// 适合图库 / 数据卡片网格。当前为固定行高 + 等宽列模式；可变尺寸作为后续增强。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json（标量属性回填；条目须宿主经 `set_item_builder` 挂上）
 class GridView : public Widget {
   public:
+    /// @brief 单元格构建器：按一维索引产出节点（运行时回调，不参与序列化）。
+    /// @param index 传入的一维条目索引。
     using ItemBuilder = std::function<Node(int index)>;
 
     /// @brief 默认构造：空数据、1 列占位（保持既有默认行为，避免 0 列除零）。
     /// 重建路径（serialization 工厂）使用此构造——条目由宿主经运行时 builder 回填。
     GridView() : GridView(0, 1, nullptr) {}
+    /// @brief 按条目数/列数/单元构建器构造；非法数值降级为默认并记录诊断。
+    /// @param count 条目总数，负数按 0 处理。
+    /// @param columns 列数，非正数降级为 1（避免除零）。
+    /// @param builder 单元格构建器，可为空（由宿主运行时回填）。
+    /// @param cell_extent 单元格基准边长（像素），非正数降级为 96。
     GridView(int count, int columns, ItemBuilder builder, float cell_extent = 96.0F)
         : count_(count < 0 ? 0 : count),
           columns_(columns > 0 ? columns : (Diagnostics::degraded("layout", "GridView columns 非正已降级为 1"), 1)),
@@ -52,8 +57,12 @@ class GridView : public Widget {
         set_relayout_boundary(true);  // 视口尺寸由父约束决定、不依赖子节点（虚拟化）
     }
 
+    /// @brief 类型名字符串 "GridView"。
+    /// @return 静态字符串常量，指向类型名。
     [[nodiscard]] auto type_name() const -> const char * override { return "GridView"; }
 
+    /// @brief 静态属性描述符：count/columns/cell_extent/滚动与吸附等标量属性声明。
+    /// @return 名为 "GridView"、子策略为 none 的完整描述符。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "GridView",
@@ -138,37 +147,62 @@ class GridView : public Widget {
             .examples = {"au::GridView(1000, 3, [](int i){ return au::Text(std::to_string(i)); }, 96.0F)"},
         };
     }
+
+    /// @brief 运行时自描述：转发到静态描述符。
+    /// @return 与 `describe_static()` 相同的描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    /// @brief 无信号依赖：滚动偏移与存活实例均为运行时内部状态（信号经 `offset_signal` 单独索取）。
+    /// @param out 信号输出向量；本控件不向其写入任何信号。
+    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
 
+    /// @brief 总项数。
+    /// @return 构造/反序列化设定的条目总数。
     [[nodiscard]] auto count() const -> int { return count_; }
+    /// @brief 列数。
+    /// @return 固定列数（构造时已保证 >= 1）。
     [[nodiscard]] auto columns() const -> int { return columns_; }
+    /// @brief 当前滚动偏移（dp，内容上移为正）。
+    /// @return 内部偏移量 offset_。
     [[nodiscard]] auto scroll_offset() const -> float { return offset_; }
+    /// @brief 单元格高度。
+    /// @return 固定行高 cell_extent_（dp）。
     [[nodiscard]] auto cell_extent() const -> float { return cell_extent_; }
+    /// @brief 存活（已实例化）单元格数。
+    /// @return 当前可见窗口（含缓冲）内构建出的节点数量。
     [[nodiscard]] auto live_item_count() const -> std::size_t { return live_.size(); }
 
     /// @brief 总行数。
+    /// @return 按列数向上取整的行数（count 为 0 时是 0）。
     [[nodiscard]] auto row_count() const -> int { return (count_ + columns_ - 1) / columns_; }
     /// @brief 总内容高度。
+    /// @return 行数 × 单元格高度（dp）。
     [[nodiscard]] auto content_height() const -> float { return static_cast<float>(row_count()) * cell_extent_; }
     /// @brief 最大滚动偏移。
+    /// @return 内容高 - 视口高（不小于 0）；尚未布局时视口高为 0，等于内容高。
     [[nodiscard]] auto max_scroll_offset() const -> float {
         return std::max(0.0F, content_height() - viewport_height_);
     }
 
     /// @brief 设置滚动偏移（钳制到内容范围；外部跳转语义，会作废进行中的收位滑动）。
+    /// @param offset 期望偏移（dp）；越界部分被钳制。
     auto set_scroll_offset(float offset) -> void { apply_offset(offset, /*cancel_glide=*/true); }
 
     /// @brief snap/paging 吸附（默认关闭，须显式配置）：每次滚轮收位后经短滑动吸附到行对齐点。
     ///        `ScrollSnap::page()` 以视口高为一页；reduce-motion 下直落端点。
+    /// @return 吸附配置的常量引用。
     [[nodiscard]] auto snap() const -> const ScrollSnap & { return snap_; }
+    /// @brief 替换吸附配置（链式）。
+    /// @param snap 新的 ScrollSnap（extent/paging/alignment 等）。
+    /// @return 自身引用，便于链式调用。
     auto set_snap(ScrollSnap snap) -> GridView & {
         snap_ = snap;
         return *this;
     }
 
     /// @brief 程序化滚动到指定偏移（吸附点对齐由 `snap` 或调用方决定；本接口只做夹取）。
+    /// @param offset 目标偏移（dp）；先钳制到 `[0, max_scroll_offset()]`。
+    /// @param animate 是否经短滑动过渡；false 或 reduce-motion 时直落目标。
     /// @return 目标与当前偏移不同（即发生了移动或启动滑动）时为 true。
     auto scroll_to(float offset, bool animate = true) -> bool {
         const float target = std::clamp(offset, 0.0F, max_scroll_offset());
@@ -187,11 +221,13 @@ class GridView : public Widget {
     }
 
     /// @brief 是否正在收位滑动（测试/外部控制器观测点）。
+    /// @return 短滑动时序仍处于活跃状态时为 true。
     [[nodiscard]] auto is_gliding() const -> bool { return glide_.active; }
 
     /// @brief 滚动偏移只读信号（滚动驱动动画原语）：宿主以纯函数派生视差/进度/淡入淡出。
     ///        懒创建；偏移每次变化（滚轮/滑动帧/程序化）写入。
     /// @note Side-effects: reads state (registers reactive dependency in Effect scope)
+    /// @return 偏移信号视图引用（进程内共享的 `State<float>`）。
     [[nodiscard]] auto offset_signal() -> SignalView<float> & {
         if (!offset_state_) {
             offset_state_ = std::make_shared<State<float>>(offset_);
@@ -201,18 +237,26 @@ class GridView : public Widget {
     }
 
     /// @brief 滚动位置保存键（空 = 不参与恢复；控件重建后据 `app::ScrollStorage` 恢复偏移）。
+    /// @return 保存键的常量引用。
     [[nodiscard]] auto restore_key() const -> const std::string & { return restore_key_; }
+    /// @brief 设置滚动位置保存键（链式）。
+    /// @param key 保存键；空串表示不参与恢复。
+    /// @return 自身引用，便于链式调用。
     auto set_restore_key(std::string key) -> GridView & {
         restore_key_ = std::move(key);
         return *this;
     }
 
+    /// @brief 设置视口外预取缓冲（链式；负值夹为 0）。
+    /// @param extent 缓冲长度（dp）。
+    /// @return 自身引用，便于链式调用。
     auto set_cache_extent(float extent) -> GridView & {
         cache_extent_ = extent < 0.0F ? 0.0F : extent;
         return *this;
     }
 
     /// @brief 当前可见行范围 [first_row, last_row)（含 cache_extent 缓冲）。
+    /// @return 首/末行半开区间；无数据或单元格高/视口高非法时为 {0, 0}。
     [[nodiscard]] auto visible_row_range() const -> std::pair<int, int> {
         if (count_ == 0 || cell_extent_ <= 0.0F || viewport_height_ <= 0.0F) {
             return {0, 0};
@@ -228,12 +272,16 @@ class GridView : public Widget {
     ///
     /// `ItemBuilder` 是运行时回调、不参与序列化，故 `from_json` 重建出的网格「几何齐备而暂无条目」——
     /// 本接口就是那句「由宿主回填」的落点。赋值后标布局脏，下一帧按当前窗口构建单元格。
+    /// @param builder 单元格构建器（按一维索引产出节点）。
+    /// @return 自身引用，便于链式调用。
     auto set_item_builder(ItemBuilder builder) -> GridView & {
         builder_ = std::move(builder);
-        mark_needs_layout();
+        mark_needs_layout();  // 条目集合变化影响行窗口，须重布局
         return *this;
     }
 
+    /// @brief 滚轮滚动：按 `delta_y × 40dp` 步进偏移，余量回传外层，snap 开启时启动收位滑动。
+    /// @param e 滚动事件；置 `is_handled`，`remaining_y` 为端点夹掉后未消费的余量。
     auto on_scroll(ScrollEvent &e) -> void override {
         const float before = offset_;
         set_scroll_offset(offset_ - (e.delta_y * AURORA_SCROLL_STEP));
@@ -247,10 +295,13 @@ class GridView : public Widget {
     }
 
     /// @brief 真实滚动控件：滚轮派发时本控件是可滚动目标（最深优先）。
+    /// @return 恒为 true。
     [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
 
+    /// @brief 序列化：通用属性 + 几何/滚动标量 + snap 三字段。
+    /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
-        Widget::serialize_props(props);
+        Widget::serialize_props(props);  // 先由基类写入通用属性（width/height/show 等）
         props["count"] = count_;
         props["columns"] = columns_;
         props["cell_extent"] = cell_extent_;
@@ -265,8 +316,9 @@ class GridView : public Widget {
     /// @brief 从静态 JSON 回填标量属性。单元格内容仍持运行时 `ItemBuilder`（不可序列化），
     ///        故重建出的是「几何与滚动状态齐备、暂无条目」的网格——宿主挂上 builder 即照常工作。
     ///        非正值一律按 `Diagnostics::degraded` 降级，判据与构造器逐字一致。
+    /// @param props 源 JSON 对象；仅读取存在的键，缺失键保持当前值。
     auto deserialize_props(const Json &props) -> void override {
-        Widget::deserialize_props(props);
+        Widget::deserialize_props(props);  // 先由基类恢复通用属性
         if (props.contains("count")) {
             const int declared = props["count"].get<int>();
             count_ = declared < 0 ? 0 : declared;
@@ -304,6 +356,8 @@ class GridView : public Widget {
         }
     }
 
+    /// @brief 遍历存活单元格的子控件（供快照/树遍历设施使用）。
+    /// @param fn 对每个存活子控件的回调。
     auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
         for (const auto &val : live_ | std::views::values) {
             fn(val.widget());
@@ -411,6 +465,7 @@ class GridView : public Widget {
     /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Scroll/LazyList 模式）。
     ///        本控件偏移参与子布局，每滑动帧经 apply_offset 标布局脏，
     ///        由虚拟化行窗口保证开销仅与可见行相关。
+    /// @param now 本帧时刻（单调时钟），透传给存活子项 tick 并折算收位滑动的帧间隔。
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Widget::tick_gestures(now);
         for (auto &val : live_ | std::views::values) {
@@ -440,6 +495,8 @@ class GridView : public Widget {
     static constexpr float AURORA_SCROLL_STEP = 40.0F;
 
     /// @brief 偏移落位的统一实现：夹取 → 赋值 → 写回/发布 → 标脏。
+    /// @param offset 期望落位的滚动偏移（像素）；先夹取到 [0, max_scroll_offset()]，
+    ///        夹取后与当前偏移相同则直接返回，不写回/发布/标脏。
     /// @param cancel_glide 收位滑动帧须传 `false`——公开入口的「外部程序化跳转作废滑动」语义
     ///        若作用于滑动自身，snap 收位只会推进一帧便冻结在中途。
     auto apply_offset(float offset, bool cancel_glide) -> void {

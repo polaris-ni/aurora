@@ -11,64 +11,83 @@
 
 namespace aurora {
 
-/**
- * @brief 按注入值类型 `T` 决定序列化 `type` 名，使不同 Provider 可被分别反序列化。
- * 对已知类型特化；默认返回通用 `"Provider"`（兜底）。
- */
+/// @brief 按注入值类型 `T` 决定序列化 `type` 名，使不同 Provider 可被分别反序列化。
+/// 对已知类型特化；默认返回通用 `"Provider"`（兜底）。
+/// @tparam T 注入值类型。
+/// @return 序列化用的 `type` 名字符串。
 template <typename T>
 auto provider_type_name() -> const char * {
     return "Provider";
 }
+/// @brief `Theme` 特化：返回主题 Provider 的类型名。
+/// @return "ThemeProvider"。
 template <>
 inline auto provider_type_name<Theme>() -> const char * {
     return "ThemeProvider";
 }
+/// @brief `Locale` 特化：返回区域设置 Provider 的类型名。
+/// @return "LocaleProvider"。
 template <>
 inline auto provider_type_name<Locale>() -> const char * {
     return "LocaleProvider";
 }
+/// @brief `MediaQuery` 特化：返回设备度量 Provider 的类型名。
+/// @return "MediaQueryProvider"。
 template <>
 inline auto provider_type_name<MediaQuery>() -> const char * {
     return "MediaQueryProvider";
 }
 
-/**
- * @brief 环境注入器（参考 Flutter InheritedWidget / SwiftUI Environment）。
- *
- * 把值 `T` 注入环境，子树经 `BuildContext::environment<T>()` 取到最近祖先的 Provider。
- * 注意：实作放在 widget 模块以避免 environment→widget 的循环依赖；环境机制
- * （Environment/BuildContext）本身在 environment 模块。
- *
- * @tparam T 要向下注入的值类型（如 Theme / Locale）。
- */
+/// @brief 环境注入器（参考 Flutter InheritedWidget / SwiftUI Environment）。
+/// @tparam T 要向下注入的值类型（如 Theme / Locale）。
+/// 把值 `T` 注入环境，子树经 `BuildContext::environment<T>()` 取到最近祖先的 Provider。
+/// 注意：实作放在 widget 模块以避免 environment→widget 的循环依赖；环境机制
+/// （Environment/BuildContext）本身在 environment 模块。
+/// 本行隐式生成的拷贝/移动构造复制响应式持有 Reactive<T>（其拷贝即分配值存储与订阅），被本检查判
+/// 「不应抛出」；该隐式特成员按 [except.spec] 本就是 potentially-throwing，抛出（bad_alloc）沿栈交给
+/// 构造方。本类刻意依赖隐式拷贝/移动（CODING_STANDARDS.md §5.1），故不补 = delete 而逐点豁免。
+/// NOLINTNEXTLINE(bugprone-exception-escape)
 template <typename T>
-// 本行隐式生成的拷贝/移动构造复制响应式持有 Reactive<T>（其拷贝即分配值存储与订阅），被本检查判
-// 「不应抛出」；该隐式特成员按 [except.spec] 本就是 potentially-throwing，抛出（bad_alloc）沿栈交给
-// 构造方。本类刻意依赖隐式拷贝/移动（CODING_STANDARDS.md §5.1），故不补 = delete 而逐点豁免。
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class Provider : public SingleChild {
   public:
     /// @brief 用静态值注入（按值构造响应式持有）。
+    /// @param value 注入的值。
+    /// @param child 子节点。
     Provider(T value, Node child) : SingleChild(std::move(child)), value_(std::move(value)) {}
 
+    /// @brief 用静态值注入并接受具体 widget 引用（隐式转 Node 挂接）。
+    /// @tparam W 子 widget 的具体类型。
+    /// @param value 注入的值。
+    /// @param child 转发给 SingleChild 的子 widget 引用。
     template <typename W>
         requires std::derived_from<W, Widget>
     Provider(T value, W &&child) : SingleChild(Node{std::forward<W>(child)}), value_(std::move(value)) {}
 
     /// @brief 用共享 `State<T>` 注入：外部 State 变化时子树自动重渲染（运行时换肤/换区域）。
+    /// @param state 共享状态指针。
+    /// @param child 子节点。
     explicit Provider(std::shared_ptr<State<T>> state, Node child)
         : SingleChild(std::move(child)), value_(std::move(state)) {}
 
+    /// @brief 用共享 `State<T>` 注入并接受具体 widget 引用（运行时换肤/换区域）。
+    /// @tparam W 子 widget 的具体类型。
+    /// @param state 共享状态指针。
+    /// @param child 转发给 SingleChild 的子 widget 引用。
     template <typename W>
         requires std::derived_from<W, Widget>
     explicit Provider(std::shared_ptr<State<T>> state, W &&child)
         : SingleChild(Node{std::forward<W>(child)}), value_(std::move(state)) {}
 
+    /// @brief 收集本控件的可订阅信号。
+    /// @param out 输出容器；追加响应式持有 value_ 的视图指针。
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&value_); }
 
+    /// @brief 控件类型名：按注入值类型 `T` 映射（见 provider_type_name）。
+    /// @return "ThemeProvider"/"LocaleProvider"/"MediaQueryProvider"，其余类型返回通用 "Provider"。
     [[nodiscard]] auto type_name() const -> const char * override { return provider_type_name<T>(); }
 
-    /// @brief 运行时自描述（规格附录 B）。
+    /// @brief 运行时自描述（规格附录 B）：名称取 provider_type_name<T>()，属性键含 width/height/show。
+    /// @return 描述符：single 子策略与 Provider 构造示例。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = std::string(provider_type_name<T>()),
@@ -83,12 +102,16 @@ class Provider : public SingleChild {
             .examples = {"au::Provider<Theme>(theme, child)"},
         };
     }
+    /// @brief 实例侧描述入口：转发静态描述。
+    /// @return 与 describe_static() 相同的 WidgetDescriptor。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 当前注入值（读取响应式持有，自动登记依赖）。
+    /// @return 注入值 `T` 的当前值引用。
     [[nodiscard]] auto value() const -> const T & { return value_.get(); }
 
     /// @brief 运行时改写注入值（触发子树刷新）。
+    /// @param v 新的注入值。
     auto set_value(T v) -> void { value_ = std::move(v); }
 
   protected:

@@ -17,14 +17,16 @@
 
 namespace aurora::storage {
 
-/// @brief 定制点 ADL 约定：三个定制点均以 `const T*` 指针作**首/实参**触发 ADL——
-///        零参模板（`storage_version<T>()`）依赖「显式模板实参参与 ADL」这条 GCC/MSVC
-///        均未实现的标准冷门规则，会静默回退默认实现。指针实参 + 用户命名空间内的
-///        非模板同名函数是全编译器一致的可靠姿势。
-///        覆写示例（置于 T 所在命名空间）：
-///        `inline auto storage_version(const MyType*) -> std::uint32_t { return 2; }`
+// 定制点 ADL 约定：三个定制点均以 `const T*` 指针作**首/实参**触发 ADL——
+// 零参模板（`storage_version<T>()`）依赖「显式模板实参参与 ADL」这条 GCC/MSVC
+// 均未实现的标准冷门规则，会静默回退默认实现。指针实参 + 用户命名空间内的
+// 非模板同名函数是全编译器一致的可靠姿势。
+// 覆写示例（置于 T 所在命名空间）：
+// `inline auto storage_version(const MyType*) -> std::uint32_t { return 2; }`
 
-/// @brief 默认版本号（经 `const T*` 实参 ADL 可在用户命名空间覆盖）。门面 put<T>/get<T> 据此触发迁移钩子。
+/// @brief 类型 T 的持久化版本号默认实现：恒为 1。门面 put\<T\>/get\<T\> 据它与记录版本差触发迁移钩子。
+/// @tparam T 待持久化类型（ADL 标签指针的指向类型）。
+/// @return 版本号 1（用户命名空间可覆写为当前版本）。
 template <typename T>
 constexpr auto storage_version(const T * /*tag*/) -> std::uint32_t {
     return 1;
@@ -35,6 +37,8 @@ constexpr auto storage_version(const T * /*tag*/) -> std::uint32_t {
 /// 字符串，长命名空间名会堆分配）。覆写者仍可按值返回 `std::string`；推荐返回短标签
 /// （≤15 字符，如 "ws"）——走 SSO 零堆分配，且跨版本/重构稳定（typeid mangled 名在移动
 /// 命名空间后会变，反会破坏持久化类型检查）。
+/// @tparam T 待持久化类型（typeid 的指向类型）。
+/// @return T 的类型标签字符串常量引用（进程内缓存，地址稳定）。
 template <typename T>
 auto storage_type_name(const T * /*tag*/) -> const std::string & {
     // 惰性构造的函数内 static（typeid 名要运行期才拿得到，无法常量初始化）：模板每个实例各建一份、
@@ -45,17 +49,26 @@ auto storage_type_name(const T * /*tag*/) -> const std::string & {
     return NAME;
 }
 
-/// @brief 默认迁移钩子：不迁移（原样返回）。旧版本记录反序列化前会经此钩子升级。
+/// @brief 默认迁移钩子（JSON 线）：不迁移（原样返回）。旧版本记录反序列化前会经此钩子升级。
+/// @tparam T 待持久化类型（ADL 标签指针的指向类型）。
+/// @param j 按旧版本反序列化的 JSON（old_version 未命名，默认实现忽略）。
+/// @return 升格后的 JSON（默认实现原样透传）。
 template <typename T>
 auto migrate_storage(std::uint32_t /*old_version*/, const T * /*tag*/, json::Value j) -> Result<json::Value> {
     return Result{std::move(j)};
 }
+
+/// @brief 默认迁移钩子（二进制线）：不迁移（原样返回）。与 JSON 重载同语义。
+/// @tparam T 待持久化类型（ADL 标签指针的指向类型）。
+/// @param b 按旧版本读出的原始字节（old_version 未命名，默认实现忽略）。
+/// @return 升格后的字节（默认实现原样透传）。
 template <typename T>
 auto migrate_storage(std::uint32_t /*old_version*/, const T * /*tag*/, StorageBytes b) -> Result<StorageBytes> {
     return Result<StorageBytes>{std::move(b)};
 }
 
 /// @brief 类型 T 可经 JSON 持久化的充要条件（默认线格式）。
+/// @tparam T 待判定类型。
 template <typename T>
 concept StorageSerializable = requires(const T &t, T &out, const json::Value &j) {
     { to_storage_json(t) } -> std::convertible_to<json::Value>;
@@ -63,13 +76,15 @@ concept StorageSerializable = requires(const T &t, T &out, const json::Value &j)
 };
 
 /// @brief 类型 T 可经原生二进制持久化的充要条件（绕过 JSON，对标 Hive/Realm）。
+/// @tparam T 待判定类型。
 template <typename T>
 concept StorageBinarySerializable = requires(const T &t, T &out, const StorageBytes &b) {
     { to_storage_bytes(t) } -> std::convertible_to<StorageBytes>;
     { from_storage_bytes(out, b) } -> std::convertible_to<Result<void>>;
 };
 
-/// @brief 门面 put<T>/get<T> 接受的充要条件：满足 JSON 或二进制任一 + 可默认构造。
+/// @brief 门面 put\<T\>/get\<T\> 接受的充要条件：满足 JSON 或二进制任一 + 可默认构造。
+/// @tparam T 待判定类型。
 template <typename T>
 concept StorageStorable = (StorageSerializable<T> || StorageBinarySerializable<T>) && std::default_initializable<T>;
 

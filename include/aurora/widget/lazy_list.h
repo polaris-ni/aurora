@@ -23,29 +23,34 @@
 
 namespace aurora {
 
-/**
- * @brief 虚拟滚动列表（specification/04-widget.md §3.4）：仅实例化可见区域 + 预取缓冲区的子项。
- *
- * 与 `Repeater` 区分：`Repeater` 展开全部子项（适合 <100 项），`LazyList`
- * 仅构建可见窗口内的子项（适合 1000+ 项），滚出窗口的实例被回收。
- *
- * 当前实现为固定行高模式（`item_extent`），可精确计算可见范围与总内容高度；
- * 可变行高模式作为后续增强。
- *
- * 对标 Flutter `ListView.builder`、Qt `QListView`+delegate、WPF `VirtualizingStackPanel`。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json（标量属性回填；条目须宿主经 `set_item_builder` 挂上）
- */
-// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 builder_，而其拷贝与 operator()
-// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
-// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
-// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
-// NOLINTNEXTLINE(bugprone-exception-escape)
+/// @brief 虚拟滚动列表（specification/04-widget.md §3.4）：仅实例化可见区域 + 预取缓冲区的子项。
+///
+/// 与 `Repeater` 区分：`Repeater` 展开全部子项（适合 <100 项），`LazyList`
+/// 仅构建可见窗口内的子项（适合 1000+ 项），滚出窗口的实例被回收。
+///
+/// 当前实现为固定行高模式（`item_extent`），可精确计算可见范围与总内容高度；
+/// 可变行高模式作为后续增强。
+///
+/// 对标 Flutter `ListView.builder`、Qt `QListView`+delegate、WPF `VirtualizingStackPanel`。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json（标量属性回填；条目须宿主经 `set_item_builder` 挂上）
+/// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 builder_，而其拷贝与 operator()
+/// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
+/// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
+/// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+/// NOLINTNEXTLINE(bugprone-exception-escape)
 class LazyList : public Widget {
   public:
+    /// @brief 条目构建器类型：按下标产出条目控件句柄。
+    /// @param index 条目序号（0..count-1）。
     using ItemBuilder = std::function<Node(int index)>;
 
+    /// @brief 默认构造：0 项、无 builder、默认行高 48。
     LazyList() = default;
+    /// @brief 带参构造：固定行数与行高；非正行高降级为 48 并记 degraded。
+    /// @param count 总项数（负值按 0 处理）。
+    /// @param builder 条目构建器（移动接管）。
+    /// @param item_extent 固定行高(dp)，默认 48。
     LazyList(int count, ItemBuilder builder, float item_extent = 48.0F)
         : count_(count < 0 ? 0 : count), builder_(std::move(builder)),
           item_extent_(item_extent > 0.0F
@@ -54,8 +59,12 @@ class LazyList : public Widget {
         set_relayout_boundary(true);  // 视口尺寸由父约束决定、不依赖子节点（虚拟化）
     }
 
+    /// @brief 类型名 "LazyList"。
+    /// @return 类型名常量串。
     [[nodiscard]] auto type_name() const -> const char * override { return "LazyList"; }
 
+    /// @brief 静态描述符：count/item_extent/scroll_offset/cache_extent/restore_key 与吸附属性元数据。
+    /// @return 本控件类型的 WidgetDescriptor。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "LazyList",
@@ -132,35 +141,51 @@ class LazyList : public Widget {
             .examples = {"au::LazyList(10000, [](int i){ return au::Text(std::to_string(i)); }, 48.0F)"},
         };
     }
+    /// @brief 实例描述符：转发 describe_static()。
+    /// @return 本控件的 WidgetDescriptor。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    /// @brief 信号收集：本控件无内建 SignalView，保持输出为空。
+    /// @param out 信号视图累加表。
+    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
 
     /// @brief 总项数。
+    /// @return 条目总数（构造/反序列化后恒 ≥0）。
     [[nodiscard]] auto count() const -> int { return count_; }
 
     /// @brief 当前滚动偏移（dp，向下为正）。
+    /// @return 实时偏移，已钳制在 [0, max_scroll_offset()]。
     [[nodiscard]] auto scroll_offset() const -> float { return offset_; }
 
     /// @brief 设置滚动偏移（钳制到内容范围；外部跳转语义，会作废进行中的收位滑动）。
+    /// @param offset 目标偏移(dp)，越界按内容范围夹取。
     auto set_scroll_offset(float offset) -> void { apply_offset(offset, /*cancel_glide=*/true); }
 
     /// @brief snap/paging 吸附（默认关闭，须显式配置）：每次滚轮收位后经短滑动吸附到条目对齐点。
     ///        `ScrollSnap::page()` 以视口高为一页；reduce-motion 下直落端点。
+    /// @return 吸附配置（引用，宿主可只读检视）。
     [[nodiscard]] auto snap() const -> const ScrollSnap & { return snap_; }
+    /// @brief 设置吸附配置（链式）。
+    /// @param snap 吸附配置（拷贝接管）。
+    /// @return *this（链式）。
     auto set_snap(ScrollSnap snap) -> LazyList & {
         snap_ = snap;
         return *this;
     }
 
     /// @brief 滚动位置保存键（空 = 不参与恢复；控件重建后据 `app::ScrollStorage` 恢复偏移）。
+    /// @return 保存键常量引用。
     [[nodiscard]] auto restore_key() const -> const std::string & { return restore_key_; }
+    /// @brief 设置滚动位置保存键（链式）。
+    /// @param key 保存键（移动接管；空串关闭恢复）。
+    /// @return *this（链式）。
     auto set_restore_key(std::string key) -> LazyList & {
         restore_key_ = std::move(key);
         return *this;
     }
 
     /// @brief 滚动到指定项（使其顶端对齐可视区顶端）。
+    /// @param index 目标项下标（越界按 [0, count-1] 夹取）。
     /// @param animate true = 经收位滑动过渡（reduce-motion 下自动直落端点）；false = 立即就位。
     auto scroll_to_item(int index, bool animate = false) -> void {
         const float target = static_cast<float>(std::clamp(index, 0, std::max(0, count_ - 1))) * item_extent_;
@@ -175,6 +200,8 @@ class LazyList : public Widget {
     }
 
     /// @brief 程序化滚动到指定偏移（snap 对齐点由调用方决定；本接口只做夹取）。
+    /// @param offset 目标偏移(dp)，夹取到 [0, max_scroll_offset()]。
+    /// @param animate true = 经收位滑动过渡（reduce-motion 下直落）；false = 立即就位。
     /// @return 目标与当前偏移不同（即发生了移动或启动滑动）时为 true。
     auto scroll_to(float offset, bool animate = true) -> bool {
         const float target = std::clamp(offset, 0.0F, max_scroll_offset());
@@ -193,11 +220,13 @@ class LazyList : public Widget {
     }
 
     /// @brief 是否正在收位滑动（测试/外部控制器观测点）。
+    /// @return 滑动进行中为 true。
     [[nodiscard]] auto is_gliding() const -> bool { return glide_.active; }
 
     /// @brief 滚动偏移只读信号（滚动驱动动画原语）：宿主以纯函数派生视差/进度/淡入淡出。
     ///        懒创建；偏移每次变化（滚轮/滑动帧/程序化）写入。
     /// @note Side-effects: reads state (registers reactive dependency in Effect scope)
+    /// @return 偏移信号视图引用（懒创建后恒有效）。
     [[nodiscard]] auto offset_signal() -> SignalView<float> & {
         if (!offset_state_) {
             offset_state_ = std::make_shared<State<float>>(offset_);
@@ -207,14 +236,17 @@ class LazyList : public Widget {
     }
 
     /// @brief 最大滚动偏移（内容高 - 视口高，不小于 0）。
+    /// @return max(0, content_height() - 视口高)，单位 dp。
     [[nodiscard]] auto max_scroll_offset() const -> float {
         return std::max(0.0F, content_height() - viewport_height_);
     }
 
     /// @brief 总内容高度。
+    /// @return count × item_extent，单位 dp。
     [[nodiscard]] auto content_height() const -> float { return static_cast<float>(count_) * item_extent_; }
 
     /// @brief 当前可见范围 [first, last)（含 cache_extent 缓冲）。
+    /// @return 半开区间；无可视项（空表/零行高/零视口）时为 (0, 0)。
     [[nodiscard]] auto visible_range() const -> std::pair<int, int> {
         if (count_ == 0 || item_extent_ <= 0.0F || viewport_height_ <= 0.0F) {
             return {0, 0};
@@ -227,9 +259,12 @@ class LazyList : public Widget {
     }
 
     /// @brief 当前存活（已实例化）的子项数（测试观测点：应远小于 count）。
+    /// @return live_ 表大小。
     [[nodiscard]] auto live_item_count() const -> std::size_t { return live_.size(); }
 
     /// @brief 设置预取缓冲区高度（链式）。
+    /// @param extent 缓冲(dp)，负值按 0 处理。
+    /// @return *this（链式）。
     auto set_cache_extent(float extent) -> LazyList & {
         cache_extent_ = extent < 0.0F ? 0.0F : extent;
         return *this;
@@ -240,6 +275,8 @@ class LazyList : public Widget {
     /// `ItemBuilder` 是运行时回调、不参与序列化，故 `from_json` 重建出的列表「属性齐备而暂无条目」——
     /// 本接口就是那句「由宿主回填」的落点：宿主要么在此挂 builder，要么直接以带参构造建表。
     /// 赋值后标布局脏，下一帧按当前窗口构建条目。
+    /// @param builder 新条目构建器（移动接管）。
+    /// @return *this（链式）。
     auto set_item_builder(ItemBuilder builder) -> LazyList & {
         builder_ = std::move(builder);
         mark_needs_layout();
@@ -247,6 +284,7 @@ class LazyList : public Widget {
     }
 
     /// @brief 滚轮滚动。
+    /// @param e 滚轮事件（读 delta_y，写 is_handled/remaining_y）。
     auto on_scroll(ScrollEvent &e) -> void override {
         const float before = offset_;
         set_scroll_offset(offset_ - (e.delta_y * AURORA_SCROLL_STEP));
@@ -260,9 +298,13 @@ class LazyList : public Widget {
     }
 
     /// @brief 真实滚动控件：滚轮派发时本控件是可滚动目标（最深优先）。
+    /// @return 恒为 true。
     [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
 
+    /// @brief 序列化标量属性（行数/行高/偏移/缓冲/保存键/吸附）。
+    /// @param props 目标 JSON 对象（基类通用属性先写入）。
     auto serialize_props(Json &props) const -> void override {
+        // 先链入基类通用属性。
         Widget::serialize_props(props);
         props["count"] = count_;
         props["item_extent"] = item_extent_;
@@ -278,6 +320,7 @@ class LazyList : public Widget {
     ///        故重建出的是「属性齐备、暂无条目」的列表——宿主挂上 builder 即照常工作。
     ///        非正值一律按 `Diagnostics::degraded` 降级，判据与构造器逐字一致（避免
     ///        「构造路径夹取、反序列化路径直写」的双标）。
+    /// @param props 源 JSON 对象（仅回填存在的标量属性）。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("count")) {
@@ -312,6 +355,8 @@ class LazyList : public Widget {
         }
     }
 
+    /// @brief 遍历当前存活子项（滚出窗口的实例已回收，不在遍历范围）。
+    /// @param fn 对每个存活子控件调用一次。
     auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
         for (const auto &val : live_ | std::views::values) {
             fn(val.widget());
@@ -367,6 +412,9 @@ class LazyList : public Widget {
 
     /// @brief 吸顶覆盖层：把窗口内「已滚过头顶」的 sticky 项按 pin 位压顶绘制于视口顶部，
     ///        后到的头部把先前的向上顶出（与 Scroll 的覆盖层同一语义，虚拟化下只看窗口内项）。
+    /// @param p 绘制器（转发给被钉驻项的 paint）。
+    /// @param bounds 本控件绘制区域（钉驻矩形以此为基准偏移）。
+    /// @param ctx 构建上下文（转发给被钉驻项）。
     /// @note 须在滚动位绘制**之后**调用，钉驻头部才能压在内容之上。
     auto paint_sticky_overlay(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
         std::vector<Node *> stickies;  // index 升序（live_ 为有序 map）
@@ -450,6 +498,7 @@ class LazyList : public Widget {
     /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Scroll/Dismissible 模式）。
     ///        与 Scroll 的差异：本控件偏移参与子布局，每滑动帧经 apply_offset 标布局脏，
     ///        由虚拟化窗口重建保证开销仅与可见项数相关。
+    /// @param now 本次 tick 的墙钟时刻（推进滑动步进与子控件节拍）。
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Widget::tick_gestures(now);
         for (auto &kv : live_ | std::views::values) {
@@ -493,6 +542,8 @@ class LazyList : public Widget {
     }
 
     /// @brief 偏移落位的统一实现：夹取 → 赋值 → 写回/发布 → 标脏。
+    /// @param offset 期望落位的滚动偏移（像素）；先夹取到 [0, max_scroll_offset()]，
+    ///        夹取后与当前偏移相同则直接返回，不写回/发布/标脏。
     /// @param cancel_glide 收位滑动帧须传 `false`——公开入口的「外部程序化跳转作废滑动」语义
     ///        若作用于滑动自身，snap 收位只会推进一帧便冻结在中途。
     auto apply_offset(float offset, bool cancel_glide) -> void {

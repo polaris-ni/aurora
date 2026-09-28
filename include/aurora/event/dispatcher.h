@@ -9,26 +9,24 @@
 
 namespace aurora {
 
-/**
- * @brief 事件派发器：命中测试 + 同步派发（specification/05-event-navigation.md §3）。
- *
- * - `hit_test`：在根树上找到最深可命中 widget（含 `Clickable` 修饰拦截），
- *   并返回「最深目标 → 根」的完整命中链（供冒泡派发复用）。
- * - `dispatch(MouseEvent)`：沿命中链自最深目标向根冒泡，逐级调用 `on_pointer_event`；
- *   任一控件设 `e.handled = true` 即终止冒泡；Press 时缓存命中链实现指针捕获。
- * - `dispatch(KeyEvent, FocusManager)`：Tab / Shift+Tab 触发焦点移动，否则只派发到焦点 widget（不冒泡）。
- * - `dispatch(ScrollEvent)`：沿命中链自最深向根找第一个 `wants_scroll()`
- * 者派发（最近可滚动祖先；嵌套时最深滚动者优先）。
- * - `dispatch(TextInputEvent, FocusManager)`：派发到当前焦点 widget 的 `onTextInput`（不冒泡）。
- * - `dispatch(TextCompositionEvent, FocusManager)`：派发到当前焦点 widget 的 `onTextComposition`（不冒泡）。
- * - `dispatch(FileDropEvent)`：派发到命中目标 widget（不冒泡）。
- *
- * 冒泡并不依赖 widget 父链指针：`hit_test_chain` 在命中时已把整条祖先链一并返回，
- * `deliver_chain` 直接沿该链自最深（链尾）向根（链头）派发并 stop-on-handled。
- * 触摸事件为「原始多点流全链广播 + 合成手势流冒泡」双路径。事件回调内写 `State` 触发 ARCHITECTURE.md §5.1 定点刷新。
- * @note Thread: main-thread only
- * @note Side-effects: none
- */
+/// @brief 事件派发器：命中测试 + 同步派发（specification/05-event-navigation.md §3）。
+///
+/// - `hit_test`：在根树上找到最深可命中 widget（含 `Clickable` 修饰拦截），
+/// 并返回「最深目标 → 根」的完整命中链（供冒泡派发复用）。
+/// - `dispatch(MouseEvent)`：沿命中链自最深目标向根冒泡，逐级调用 `on_pointer_event`；
+/// 任一控件设 `e.handled = true` 即终止冒泡；Press 时缓存命中链实现指针捕获。
+/// - `dispatch(KeyEvent, FocusManager)`：Tab / Shift+Tab 触发焦点移动，否则只派发到焦点 widget（不冒泡）。
+/// - `dispatch(ScrollEvent)`：沿命中链自最深向根找第一个 `wants_scroll()`
+/// 者派发（最近可滚动祖先；嵌套时最深滚动者优先）。
+/// - `dispatch(TextInputEvent, FocusManager)`：派发到当前焦点 widget 的 `onTextInput`（不冒泡）。
+/// - `dispatch(TextCompositionEvent, FocusManager)`：派发到当前焦点 widget 的 `onTextComposition`（不冒泡）。
+/// - `dispatch(FileDropEvent)`：派发到命中目标 widget（不冒泡）。
+///
+/// 冒泡并不依赖 widget 父链指针：`hit_test_chain` 在命中时已把整条祖先链一并返回，
+/// `deliver_chain` 直接沿该链自最深（链尾）向根（链头）派发并 stop-on-handled。
+/// 触摸事件为「原始多点流全链广播 + 合成手势流冒泡」双路径。事件回调内写 `State` 触发 ARCHITECTURE.md §5.1 定点刷新。
+/// @note Thread: main-thread only
+/// @note Side-effects: none
 class EventDispatcher {
   public:
     /// @brief 命中测试：返回根树下坐标 p 处最深可命中的 widget；无则 nullptr。
@@ -43,6 +41,7 @@ class EventDispatcher {
     /// @param root 派发起点（根 widget）；命中测试与命中链均局限于该子树。
     /// @param e    待派发的鼠标事件；沿命中链冒泡期间任一控件可写 `e.is_handled = true` 终止冒泡。
     /// @param fm 派发期间的当前焦点管理器（可选）；`request_focus()` 读取之，默认 nullptr 时焦点请求静默 no-op。
+    /// @return 是否命中到任意控件（是否「消费」由 `e.is_handled` 表达）。
     /// @note 该静态入口委托进程内「持久」EventDispatcher 单例，因此同样保留跨事件指针捕获
     ///       （与 Application::mouse_ 行为一致）。这意味着即使调用方直接走静态 `dispatch`
     ///       （如 `run_demo` 调用 `EventDispatcher::dispatch`），按下后的拖选/拖拽在光标越过
@@ -97,11 +96,12 @@ class EventDispatcher {
     static auto dispatch(Widget &root, TextCompositionEvent &e, FocusManager &fm) -> bool;
 
     /// @brief 悬停光标下发钩子（光标形状 API）：悬停链变化导致解析出的光标形状改变时回调。
-    ///
     /// 由 `Application` 接线到 `Surface::set_cursor`（宿主可替换为自定义光标管理）。
     /// 解析规则（自命中链最深者向根回溯，第一个命中者生效，链空/无声明 → `CursorShape::Arrow`）：
     /// 修饰链 `Modifier::cursor(...)` > `Widget::cursor_shape()` 虚钩子 > 含 Clickable 修饰 → PointingHand。
     using CursorHandler = std::function<void(CursorShape shape)>;
+    /// @brief 安装（或清除）悬停光标下发回调；空回调即停止向宿主下发光标形状。
+    /// @param h 光标形状回调，移入存储；此后解析出的悬停形状变化时调用它。
     auto set_cursor_handler(CursorHandler h) -> void { cursor_handler_ = std::move(h); }
 
   private:
@@ -134,7 +134,6 @@ class EventDispatcher {
 };
 
 /// @brief 多点触控派发器（按指针 ID 做命中链捕获）。
-///
 /// 与 `EventDispatcher`（无状态、每次重新命中测试）不同，本类持有按 pointer id 缓存的命中链，
 /// 以支持「单指持发 + 多指并发」：某指针按下时对其做命中测试并缓存整条命中链（指针捕获），
 /// 活跃期所有该指针事件复用该链（即使手指移出初始控件仍路由到它），抬起即清除。

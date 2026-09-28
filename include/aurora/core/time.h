@@ -7,12 +7,11 @@
 
 namespace aurora {
 
-/**
- * @brief 当前时间戳（specification/01-core.md §7）。
- *
- * 返回系统时钟的毫秒级时间戳，用于日志 / 快照标注。**注意**：视图渲染的实时逻辑
- * 仍应从 `State`/`Signal` 显式传入时间，避免视图直接读可变全局时钟（见 `debug::check_render_purity`）。
- */
+/// @brief 当前时间戳（specification/01-core.md §7）。
+///
+/// 返回系统时钟的毫秒级时间戳，用于日志 / 快照标注。**注意**：视图渲染的实时逻辑
+/// 仍应从 `State`/`Signal` 显式传入时间，避免视图直接读可变全局时钟（见 `debug::check_render_purity`）。
+/// @return 自 Unix epoch 起的系统时钟毫秒级时间戳。
 [[nodiscard]] inline auto current_timestamp() -> std::uint64_t {
 #ifdef AURORA_ENABLE_DEBUG
     // 渲染纯度守卫：声明式 UI 的渲染应是纯函数（同输入同输出）。

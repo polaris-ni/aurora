@@ -6,10 +6,10 @@
 
 #include "aurora/core/color.h"
 
+/// @brief Aurora 根命名空间：库的全部公共类型与自由函数均在此命名空间下（推荐别名 `au`）。
 namespace aurora {
 
 /// @brief 色彩空间标注。
-///
 /// golden 基准的 SSOT 是软件参考路径，其色彩空间恒为 sRGB（逐位确定性红线，见 ROADMAP）；
 /// Display P3 仅作为**标注 + 转换入口**存在：宽色域内容以 P3 标注，输出到 sRGB 目标
 /// （软件 Painter / 8bit 像素缓冲）时经本头文件的矩阵转换，验收为 ±1 LSB 容差单测。
@@ -25,6 +25,8 @@ enum class ColorSpace : std::uint8_t {
 inline constexpr ColorSpace AURORA_GOLDEN_COLORSPACE = ColorSpace::SRGB;
 
 /// @brief sRGB 传递曲线解码（8bit → 线性光 [0,1]）。Display P3 与 sRGB 共用此曲线。
+/// @param v 8bit 通道值（0-255）。
+/// @return 该通道的线性光强度（[0,1]）。
 [[nodiscard]] inline auto srgb_transfer_decode(const std::uint8_t v) noexcept -> float {
     const float c = static_cast<float>(v) / 255.0F;
     if (c <= 0.04045F) {
@@ -34,29 +36,34 @@ inline constexpr ColorSpace AURORA_GOLDEN_COLORSPACE = ColorSpace::SRGB;
 }
 
 /// @brief sRGB 传递曲线编码（线性光 [0,1] → 8bit，四舍五入）。越界值夹取到 [0,255]。
+/// @param linear 线性光强度（越界时先夹取到 [0,1]）。
+/// @return 编码后的 8bit 通道值（0-255）。
 [[nodiscard]] inline auto srgb_transfer_encode(const float linear) noexcept -> std::uint8_t {
     const float c = std::clamp(linear, 0.0F, 1.0F);
     const float e = (c <= 0.0031308F) ? (12.92F * c) : ((1.055F * std::pow(c, 1.0F / 2.4F)) - 0.055F);
     return static_cast<std::uint8_t>(std::lround(e * 255.0F));
 }
 
-/// @brief 线性光 sRGB → 线性光 Display P3（D65，行主序 3x3；列和均为 1 → 灰阶恒等）。
+// 线性光 sRGB → 线性光 Display P3（D65，行主序 3x3；列和均为 1 → 灰阶恒等）。
 inline constexpr float AURORA_SRGB_TO_P3_LINEAR[3][3] = {
     {0.8224621F, 0.1775380F, 0.0000000F},
     {0.0331941F, 0.9668058F, 0.0000000F},
     {0.0170827F, 0.0723974F, 0.9105199F},
 };
 
-/// @brief 线性光 Display P3 → 线性光 sRGB（上矩阵的逆；往返误差 < 1e-5 线性量级）。
+// 线性光 Display P3 → 线性光 sRGB（上矩阵的逆；往返误差 < 1e-5 线性量级）。
 inline constexpr float AURORA_P3_TO_SRGB_LINEAR[3][3] = {
     {1.2249402F, -0.2249402F, 0.0000000F},
     {-0.0420570F, 1.0420570F, 0.0000000F},
     {-0.0196376F, -0.0786361F, 1.0982737F},
 };
 
+/// @brief 实现细节命名空间：色彩空间转换的内部矩阵运算，不属公共 API 面。
 namespace detail {
 
 /// @brief 线性 RGB 经 3x3 矩阵变换（行主序），逐分量夹取到 [0,1]（宽色域 → 窄色域裁剪）。
+/// @param rgb 输入兼输出：三个线性光分量，原地写入变换结果。
+/// @param m 行主序 3x3 变换矩阵。
 inline auto transform_linear(float (&rgb)[3], const float (&m)[3][3]) -> void {
     const float r = rgb[0];
     const float g = rgb[1];
@@ -69,13 +76,16 @@ inline auto transform_linear(float (&rgb)[3], const float (&m)[3][3]) -> void {
 }  // namespace detail
 
 /// @brief 色彩空间转换：8bit RGBA，以线性光为桥梁，alpha 保留，同空间原样返回。
-///
 /// 转换链：8bit → 传递曲线解码 → 3x3 线性矩阵（P3↔sRGB，D65）→ 传递曲线编码。
 /// 宽色域（P3）超出 sRGB 色域的分量夹取到 [0,1]（8bit 目标的固有约束）。
 /// 验收：往返转换 ≤ ±3 LSB（饱和原色附近矩阵行相消 + P3 侧 8bit 量化放大，见 utest_color_space）；
 /// sRGB golden 基准路径不经过本转换（AURORA_GOLDEN_COLORSPACE 恒为 sRGB），逐位确定性不受影响。
 /// @note Thread: thread-safe
 /// @note Side-effects: pure
+/// @param c 待转换的 8bit RGBA 颜色（alpha 原样保留）。
+/// @param from 源色彩空间。
+/// @param to 目标色彩空间（与 from 相同时原样返回）。
+/// @return 转换并重新量化到 8bit 的颜色。
 [[nodiscard]] inline auto convert_color(const Color &c, const ColorSpace from, const ColorSpace to) -> Color {
     if (from == to) {
         return c;
@@ -90,11 +100,15 @@ inline auto transform_linear(float (&rgb)[3], const float (&m)[3][3]) -> void {
 }
 
 /// @brief sRGB → Display P3 便捷封装。
+/// @param c 待转换的 sRGB 颜色。
+/// @return 以 Display P3 标注的等价颜色。
 [[nodiscard]] inline auto srgb_to_display_p3(const Color &c) -> Color {
     return convert_color(c, ColorSpace::SRGB, ColorSpace::DisplayP3);
 }
 
 /// @brief Display P3 → sRGB 便捷封装（输出到软件 Painter / 8bit 缓冲的标准路径）。
+/// @param c 待转换的 Display P3 颜色。
+/// @return 转换到 sRGB 后的颜色（超域分量已夹取）。
 [[nodiscard]] inline auto display_p3_to_srgb(const Color &c) -> Color {
     return convert_color(c, ColorSpace::DisplayP3, ColorSpace::SRGB);
 }

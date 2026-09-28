@@ -24,25 +24,24 @@
 
 namespace aurora {
 
-/**
- * @brief 命令面板：模态居中浮层，按关键字模糊检索并执行命令。
- *
- * 视觉沿用库既有模态范式（对照 `Dialog`）：半透明遮罩 + 居中圆角卡片；顶部搜索框、中部结果列表
- * （当前项高亮）、底部选中命令的快捷键提示。输入即时过滤，结果按（得分降序, 标题升序）排序。
- *
- * **键位与焦点**：面板打开时把焦点作用域压到自身（`FocusManager::push_scope`），子树内唯一的
- * 可聚焦控件是搜索框——由此左右方向键仍落到搜索框做光标移动，而上下方向键不会引发焦点跳转。
- * 由于派发器把 Enter/Space 归为「激活键」并在焦点路由前消费，面板按下述分工接管：
- * 搜索框的 `on_submit` 承担 Enter（执行选中项），Esc/↑/↓ 经打开期临时注册的快捷键绑定接管
- * （依赖 `CommandRegistry` 已 `bind_shortcuts`；未绑定时这几键不可用，面板以 WARN 提示）。
- * Space 只经文本输入落字，不会触发执行。
- *
- * @note Thread: main-thread only
- * @note Side-effects: paints; `open`/`close` 修改焦点作用域与快捷键表
- * @note Rebuildable: no（依赖外部 `CommandRegistry` 数据源）
- */
+/// @brief 命令面板：模态居中浮层，按关键字模糊检索并执行命令。
+///
+/// 视觉沿用库既有模态范式（对照 `Dialog`）：半透明遮罩 + 居中圆角卡片；顶部搜索框、中部结果列表
+/// （当前项高亮）、底部选中命令的快捷键提示。输入即时过滤，结果按（得分降序, 标题升序）排序。
+///
+/// **键位与焦点**：面板打开时把焦点作用域压到自身（`FocusManager::push_scope`），子树内唯一的
+/// 可聚焦控件是搜索框——由此左右方向键仍落到搜索框做光标移动，而上下方向键不会引发焦点跳转。
+/// 由于派发器把 Enter/Space 归为「激活键」并在焦点路由前消费，面板按下述分工接管：
+/// 搜索框的 `on_submit` 承担 Enter（执行选中项），Esc/↑/↓ 经打开期临时注册的快捷键绑定接管
+/// （依赖 `CommandRegistry` 已 `bind_shortcuts`；未绑定时这几键不可用，面板以 WARN 提示）。
+/// Space 只经文本输入落字，不会触发执行。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: paints; `open`/`close` 修改焦点作用域与快捷键表
+/// @note Rebuildable: no（依赖外部 `CommandRegistry` 数据源）
 class CommandPalette : public Container {
   public:
+    /// @brief 构造面板并内置搜索框（输入即过滤、Enter 执行选中项）。
     /// @param commands 命令注册表（非拥有，须比面板长寿）；可为 nullptr，此时面板为空列表。
     explicit CommandPalette(CommandRegistry *commands = nullptr) : commands_(commands) {
         auto field = std::make_shared<TextInput>();
@@ -59,9 +58,13 @@ class CommandPalette : public Container {
         set_focusable(false);  // 面板本身不参与焦点序：子树内仅搜索框可聚焦（见类注释）
     }
 
+    /// @brief 类型名字符串 "CommandPalette"。
+    /// @return 静态字符串常量，指向类型名。
     [[nodiscard]] auto type_name() const -> const char * override { return "CommandPalette"; }
 
     /// @brief 运行时自描述（规格附录 B）。
+    /// @return 名为 "CommandPalette" 的静态描述符（open / max_results 两属性，事件 on_execute / on_close，
+    ///         子节点策略 none）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "CommandPalette",
@@ -87,9 +90,13 @@ class CommandPalette : public Container {
             .examples = {R"(auto palette = au::CommandPalette(&app.commands()); palette.open();)"},
         };
     }
+
+    /// @brief 运行时自描述（规格附录 B）。
+    /// @return 名为 "CommandPalette" 的完整描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 后置注入命令注册表；打开中调用会重建键位绑定。
+    /// @param commands 新的命令注册表（非拥有）；替换当前数据源并重筛结果。
     auto set_commands(CommandRegistry *commands) -> void {
         if (open_) {
             remove_key_bindings();
@@ -103,16 +110,19 @@ class CommandPalette : public Container {
     }
 
     /// @brief 结果列表上限（超出部分截断）；默认 50。
+    /// @param n 最大结果条数；0 按 1 处理。
     auto set_max_results(std::size_t n) -> void {
         max_results_ = n == 0 ? 1 : n;
         rebuild_results();
-        mark_needs_layout();
+        mark_needs_layout();  // 列表高度随上限变化
     }
 
     /// @brief 执行回调：在 `invoke` 之后触发，参数为命令 id（宿主可接管副作用）。
+    /// @param cb 以命令 id 为参的回调；覆盖既有值。
     auto set_on_execute(std::function<void(const std::string &)> cb) -> void { on_execute_ = std::move(cb); }
 
     /// @brief 关闭回调：Esc、点击遮罩、执行后均触发。
+    /// @param cb 无参回调；覆盖既有值，传空 `std::function` 即取消回调。
     auto set_on_close(std::function<void()> cb) -> void { on_close_ = std::move(cb); }
 
     /// @brief 打开面板：压入焦点作用域、清空查询、重建结果并安装键位绑定（已打开时为 no-op）。
@@ -123,13 +133,13 @@ class CommandPalette : public Container {
         if (field_raw_ != nullptr) {
             field_raw_->set_value("");
         }
-        query_.clear();
+        query_.clear();  // 重开时从空查询开始
         selected_ = 0;
-        rebuild_results();
+        rebuild_results();  // 按空查询重建全量结果列表
         if (current_focus_manager() != nullptr) {
             current_focus_manager()->push_scope(this);  // 焦点自动移入子树内首个可聚焦控件（搜索框）
         }
-        install_key_bindings();
+        install_key_bindings();  // 注册打开期 Esc/↑/↓ 临时键位
         if (commands_ == nullptr) {
             AURORA_LOG_WARN("widget", "CommandPalette opened without a CommandRegistry: no commands to show.");
         } else if (commands_->shortcuts() == nullptr) {
@@ -138,8 +148,8 @@ class CommandPalette : public Container {
                             "Call CommandRegistry::bind_shortcuts() first.");
         }
         open_ = true;
-        mark_needs_layout();
-        mark_needs_paint();
+        mark_needs_layout();  // 打开后面板从 0 尺寸变为全屏遮罩
+        mark_needs_paint();  // 遮罩与卡片立即参与绘制
     }
 
     /// @brief 关闭面板：卸载键位绑定、弹出焦点作用域并触发关闭回调（未打开时为 no-op）。
@@ -159,6 +169,7 @@ class CommandPalette : public Container {
         }
     }
 
+    /// @brief 开/关切换：按当前可见性调用 `close()` 或 `open()`。
     auto toggle() -> void {
         if (open_) {
             close();
@@ -167,15 +178,24 @@ class CommandPalette : public Container {
         }
     }
 
+    /// @brief 面板当前是否打开。
+    /// @return 打开状态。
     [[nodiscard]] auto is_open() const -> bool { return open_; }
+    /// @brief 当前查询串。
+    /// @return 搜索框最新文本的副本。
     [[nodiscard]] auto query() const -> std::string { return query_; }
 
     /// @brief 当前过滤结果（按得分排序；`rebuild_results` 之后稳定）。
+    /// @return 指向内部结果表的 const 引用，元素为注册表持有的命令指针（非拥有，受 `max_results_` 截断）；
+    ///         未绑定注册表时为空表。
     [[nodiscard]] auto results() const -> const std::vector<const Command *> & { return results_; }
 
+    /// @brief 当前高亮项在结果表中的下标。
+    /// @return 下标（0 起）；结果表为空时为 0，有效性须结合 `results().size()` 判定。
     [[nodiscard]] auto selected_index() const -> std::size_t { return selected_; }
 
     /// @brief 当前选中命令的 id；无结果时为空串。
+    /// @return 高亮项的 `Command::id`；下标越界（含无结果）时为空串。
     [[nodiscard]] auto selected_id() const -> std::string {
         if (selected_ >= results_.size()) {
             return {};
@@ -184,6 +204,7 @@ class CommandPalette : public Container {
     }
 
     /// @brief 执行当前选中项并关闭面板；返回命令是否真的被执行（未选中/未启用/无 action = false）。
+    /// @return 注册表 `invoke` 实际执行了命令的 action 时为 true。
     auto execute_selected() -> bool {
         if (selected_ >= results_.size()) {
             return false;
@@ -198,6 +219,7 @@ class CommandPalette : public Container {
     }
 
     /// @brief 移动选中项（±1，越界环绕）；无结果时为 no-op。
+    /// @param delta 移动步数（通常为 ±1）。
     auto move_selection(int delta) -> void {
         if (results_.empty()) {
             return;
@@ -210,9 +232,11 @@ class CommandPalette : public Container {
             next = 0;
         }
         selected_ = static_cast<std::size_t>(next);
-        mark_needs_paint();
+        mark_needs_paint();  // 高亮行变化只影响绘制
     }
 
+    /// @brief 模态指针处理：打开时吞掉全部事件；遮罩按下关闭，结果行按下选中、原地松开执行。
+    /// @param e 鼠标事件；打开时恒置 `is_handled`。
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (!open_) {
             return;
@@ -331,6 +355,10 @@ class CommandPalette : public Container {
     }
 
     /// @brief 模态命中：打开时本控件占满命中（吞掉点击，点击遮罩即关闭）；关闭时不占位。
+    /// @param local 命中点（当前实现未使用）。
+    /// @param bounds 本控件绘制区域（当前实现未使用）。
+    /// @param ctx 构建上下文（当前实现未使用）。
+    /// @return 打开时返回本控件（占满整条命中链）；关闭时返回 nullptr。
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * override {
         (void)local;
         (void)bounds;

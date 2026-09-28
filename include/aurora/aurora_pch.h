@@ -1,14 +1,15 @@
-// aurora_pch.h — 预编译头（BUILD_OPTIONS.md §2.3 增量编译）。
-//
-// 收录原则：只纳入「稳定且不常变更」的重型头——标准库 + vendored 三方
-// （nlohmann/json.hpp 单头 2.5 万行，是全库最大的单次解析成本）；
-// **不纳入任何 aurora 自有头**：widget/render 等头高频变更，纳入会使每次
-// 库内头编辑都击穿 PCH（PCH 重建 + 全部 TU 重编），命中率归零。
-//
-// 消费方式：aurora 静态库 PRIVATE 编译本 PCH（仅一份 .gch）；消费者（demo/测试/
-// 工具）不用本文件，而是复用含 aurora.h 伞头的共享 PCH（aurora_consumer_pch 目标，
-// 经 target_precompile_headers(REUSE_FROM aurora_consumer_pch)），同样全局仅一份
-// （见 CMakeLists.txt 与 cmake/ 各模块）。
+/// @brief 预编译头：只收录稳定、重型的标准库与 vendored 三方头（BUILD_OPTIONS.md §2.3 增量编译）。
+/// @file aurora_pch.h
+///
+/// 收录原则：只纳入「稳定且不常变更」的重型头——标准库 + vendored 三方
+/// （nlohmann/json.hpp 单头 2.5 万行，是全库最大的单次解析成本）；
+/// **不纳入任何 aurora 自有头**：widget/render 等头高频变更，纳入会使每次
+/// 库内头编辑都击穿 PCH（PCH 重建 + 全部 TU 重编），命中率归零。
+///
+/// 消费方式：aurora 静态库 PRIVATE 编译本 PCH（仅一份 .gch）；消费者（demo/测试/
+/// 工具）不用本文件，而是复用含 aurora.h 伞头的共享 PCH（aurora_consumer_pch 目标，
+/// 经 target_precompile_headers(REUSE_FROM aurora_consumer_pch)），同样全局仅一份
+/// （见 CMakeLists.txt 与 cmake/ 各模块）。
 #pragma once
 
 // 本头仅含 C++ 内容（标准库 + vendored 三方单头）。aurora 目标在接入原生 Wayland

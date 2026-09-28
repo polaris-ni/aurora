@@ -7,16 +7,14 @@
 
 namespace aurora {
 
-/**
- * @brief 脏区域追踪器（specification/06-app-platform.md §3.2）：收集脏矩形并合并重叠区域。
- *
- * 帧循环协议：状态变更经 `mark(rect)` / `mark_all()` 标记脏区；渲染前
- * 经 `is_empty()` 判断可否跳帧（无脏区 = 上帧画面仍有效，跳过整帧重绘）；
- * 渲染后 `clear()`。矩形合并策略：新增矩形与已有矩形重叠/相邻时取并集，
- * 控制脏区列表规模（上限 `AURORA_MAX_RECTS`，超限退化为整帧脏）。
- *
- * 对标 Qt 脏区域优化、WPF 渲染树脏标记、Flutter `RepaintBoundary` 语义。
- */
+/// @brief 脏区域追踪器（specification/06-app-platform.md §3.2）：收集脏矩形并合并重叠区域。
+///
+/// 帧循环协议：状态变更经 `mark(rect)` / `mark_all()` 标记脏区；渲染前
+/// 经 `is_empty()` 判断可否跳帧（无脏区 = 上帧画面仍有效，跳过整帧重绘）；
+/// 渲染后 `clear()`。矩形合并策略：新增矩形与已有矩形重叠/相邻时取并集，
+/// 控制脏区列表规模（上限 `AURORA_MAX_RECTS`，超限退化为整帧脏）。
+///
+/// 对标 Qt 脏区域优化、WPF 渲染树脏标记、Flutter `RepaintBoundary` 语义。
 class DirtyRegionTracker {
   public:
     /// @brief 脏矩形列表上限（默认 16）：超过则合并为整帧脏（避免碎片化开销超过收益）。
@@ -25,13 +23,16 @@ class DirtyRegionTracker {
     static constexpr std::size_t AURORA_MAX_RECTS = 16;
 
     /// @brief 取当前脏矩形列表上限（进程级全局，非实例级）。
+    /// @return 当前生效的脏矩形列表上限；未调用 `set_max_rects` 时为 `AURORA_MAX_RECTS`。
     [[nodiscard]] static auto max_rects() -> std::size_t { return max_rects_; }
 
     /// @brief 设置脏矩形列表上限（进程级全局生效：改一处即影响所有 `DirtyRegionTracker` 实例；默认
     /// `AURORA_MAX_RECTS`）。
+    /// @param n 新的脏矩形列表上限；超过此数量时合并为整帧脏。
     static auto set_max_rects(std::size_t n) -> void { max_rects_ = n; }
 
     /// @brief 标记一个脏矩形（与已有矩形重叠时合并为并集）。
+    /// @param r 待标记的脏矩形；宽高 <= 0 将被忽略。
     auto mark(const Rect &r) -> void {
         if (is_full_) {
             return;  // 已整帧脏，无需再记录
@@ -68,15 +69,19 @@ class DirtyRegionTracker {
     }
 
     /// @brief 是否无任何脏区（可跳帧）。
+    /// @return true = 无脏区，本帧可跳过上帧画面仍有效；false = 至少一处脏矩形或整帧脏。
     [[nodiscard]] auto is_empty() const -> bool { return !is_full_ && rects_.empty(); }
 
     /// @brief 是否整帧脏。
+    /// @return true = 已被 `mark_all` 或超限合并置为整帧脏（本帧需整帧重绘）；false = 仅局部脏或无脏。
     [[nodiscard]] auto is_full() const -> bool { return is_full_; }
 
     /// @brief 当前脏矩形列表（整帧脏时为空列表——以 `is_full()` 判定）。
+    /// @return 内部脏矩形向量常量引用；整帧脏时为空。
     [[nodiscard]] auto rects() const -> const std::vector<Rect> & { return rects_; }
 
     /// @brief 所有脏矩形的包围盒（空时返回零矩形）。
+    /// @return 覆盖全部脏矩形的最小 `Rect`；无脏时为零矩形（不做整帧脏判定，整帧脏场景请用 `is_full`）。
     [[nodiscard]] auto merged_bounds() const -> Rect {
         if (rects_.empty()) {
             return Rect{};

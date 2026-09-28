@@ -33,10 +33,9 @@ class Widget;
 class Window;
 
 /// @brief 测试驱动配置（构造时定形，运行期不可变以保证用例确定性）。
-///
 /// 定义在类外（而非嵌套）：嵌套类带默认成员初始化器时，其聚合体不能作为外层
-/// 成员函数声明处的默认实参（"default member initializer ... required before the
-/// end of its enclosing class"）。
+/// 成员函数声明处的默认实参（编译器诊断 default member initializer … required before
+/// the end of its enclosing class）。
 struct TestControllerConfig {
     int width = 800;  ///< 视口宽（逻辑像素）
     int height = 600;  ///< 视口高（逻辑像素）
@@ -45,7 +44,6 @@ struct TestControllerConfig {
 };
 
 /// @brief 无头 widget 测试驱动：持一棵 widget 树，按帧推进并完成交互与断言。
-///
 /// 典型用法：
 /// @code
 ///   auto ok = Node{Button{"OK"}};
@@ -72,10 +70,19 @@ class TestController {
     /// @param cfg  视口与帧参数；宽/高 <= 0 时回退到 800×600。
     explicit TestController(Node root, const TestControllerConfig &cfg = TestControllerConfig{});
 
+    /// @brief 禁止拷贝（内部持有 Surface / Window 等唯一所有权资源）。
     TestController(const TestController &) = delete;
+    /// @brief 禁止拷贝赋值（内部持有 Surface / Window 等唯一所有权资源）。
+    /// @return 恒不返回（已 delete）。
     auto operator=(const TestController &) -> TestController & = delete;
+    /// @brief 移动构造：默认成员逐一移动，转移实现体（内部窗口 / 动画器 / 调度器）所有权。
+    /// @param other 移动源（移动后其 impl_ 为空）。
     TestController(TestController &&other) noexcept;
+    /// @brief 移动赋值：默认成员逐一移动，自身实现体先析构再接管来源。
+    /// @param other 移动源。
+    /// @return 移动赋值后的自身引用。
     auto operator=(TestController &&other) noexcept -> TestController &;
+    /// @brief 析构：释放实现体（连带内部无头窗口与 Surface）。
     ~TestController();
 
     // ── 帧驱动 ──
@@ -92,31 +99,46 @@ class TestController {
     [[nodiscard]] auto pump_and_settle(int max_frames = 60) -> int;
 
     /// @brief 改变视口尺寸：改 Surface 尺寸并强制下一帧全量重排重绘。
+    /// @param width 新视口宽（逻辑像素）。
+    /// @param height 新视口高（逻辑像素）。
+    /// @return 成功为空 Result；宽/高 <= 0 返回 `GeneralInvalidArgument`。
     /// @note 宽/高 <= 0 时不改动，返回 `GeneralInvalidArgument`。
     [[nodiscard]] auto set_viewport(int width, int height) -> Result<void>;
 
     /// @brief 已呈现帧数（`HeadlessSurface::frame_count()`；idle 跳帧不计数）。
+    /// @return 累计呈现帧数。
     [[nodiscard]] auto frame_count() const -> int;
 
     /// @brief 根节点（几何权威在 Node：`bounds()`）。
+    /// @return 被测树的根节点引用。
     [[nodiscard]] auto root_node() -> Node &;
     /// @brief 根 widget（事件派发根）。
+    /// @return 根节点所共享 widget 实例的引用。
     [[nodiscard]] auto root() -> Widget &;
 
     /// @brief 内部哑窗口（脏区帧语义；供需要 `Window` 的高级断言使用）。
+    /// @return 内部无头窗口引用。
     [[nodiscard]] auto window() -> Window &;
     /// @brief 内部动画管理器（用户注册的 `AnimationController` 经它每帧推进）。
+    /// @return 内部 Animator 引用。
     [[nodiscard]] auto animator() -> Animator &;
     /// @brief 内部定时任务调度器（`Timer` 控件 / `set_timeout` 按帧 dt 推进）。
+    /// @return 内部 Scheduler 引用。
     [[nodiscard]] auto scheduler() -> Scheduler &;
 
     // ── 查找（树前序遍历；返回全部命中，顺序＝先序）──
 
     /// @brief 按节点标识查找（`Node::set_id` 设置的 key）。
+    /// @param id 节点标识。
+    /// @return 命中节点列表（树前序；无命中为空）。
     [[nodiscard]] auto find_by_key(std::string_view id) const -> std::vector<Node>;
     /// @brief 按控件类型名查找（`Widget::type_name()`）。
+    /// @param type 控件类型名。
+    /// @return 命中节点列表（树前序；无命中为空）。
     [[nodiscard]] auto find_by_type(std::string_view type) const -> std::vector<Node>;
     /// @brief 按文本内容查找：逐个比对文本类属性 `content|text|label|value|hint|placeholder`。
+    /// @param text 期望精确匹配的文本值。
+    /// @return 命中节点列表（树前序；同一节点命中一个键即计入一次）。
     /// @note 启发式匹配——各控件的文本属性名不统一；需精确语义时用 `expect_prop` 断言具体具名属性。
     [[nodiscard]] auto find_by_text(std::string_view text) const -> std::vector<Node>;
 
@@ -127,34 +149,60 @@ class TestController {
     // 紧随其后的 pump 会被判为 idle 跳过、像素停留在交互前（实测结论，见 utest）。
 
     /// @brief 点击目标：Press + Release（中心）。
+    /// @param w 目标 widget。
+    /// @return 透传 `Inspector::simulate_click` 的结果；成功时内部登记下一帧全量重绘。
     [[nodiscard]] auto tap(Widget &w) -> Result<void>;
     /// @brief 点击目标节点（内部拷一份 `Node` 共享同一 widget，故可接受 const 实参）。
+    /// @param n 目标节点。
+    /// @return 节点为空返回 `GeneralInvalidArgument`；否则同 `Widget` 重载。
     [[nodiscard]] auto tap(const Node &n) -> Result<void>;
     /// @brief 拖拽目标：Press（中心）→ Move（中心 + delta）→ Release。
+    /// @param w 目标 widget。
+    /// @param delta 拖拽位移。
+    /// @return 透传 `Inspector::simulate_drag` 的结果；成功时内部登记下一帧全量重绘。
     [[nodiscard]] auto drag(Widget &w, const Point &delta) -> Result<void>;
     /// @brief 拖拽目标节点。
+    /// @param n 目标节点。
+    /// @param delta 拖拽位移。
+    /// @return 节点为空返回 `GeneralInvalidArgument`；否则同 `Widget` 重载。
     [[nodiscard]] auto drag(const Node &n, const Point &delta) -> Result<void>;
     /// @brief 文本输入：置焦后向目标派发 `TextInputEvent`。
+    /// @param w 目标 widget。
+    /// @param text 输入的文本。
+    /// @return 透传 `Inspector::simulate_text_input` 的结果；成功时内部登记下一帧全量重绘。
     [[nodiscard]] auto enter_text(Widget &w, std::string_view text) -> Result<void>;
     /// @brief 文本输入（节点重载）。
+    /// @param n 目标节点。
+    /// @param text 输入的文本。
+    /// @return 节点为空返回 `GeneralInvalidArgument`；否则同 `Widget` 重载。
     [[nodiscard]] auto enter_text(const Node &n, std::string_view text) -> Result<void>;
 
     // ── 断言（失败返回带信息的 Error，便于调用方包装为测试失败原因）──
 
     /// @brief 断言节点可见：`show` 属性为真且已参与布局/绘制（非空几何）。
+    /// @param n 被断言节点。
+    /// @return 可见为空 Result；不可见或节点为空返回 `ValidationFailed` 错误。
     /// @note 判定依据最近一次帧的几何，故须先 pump 至少一帧。
     [[nodiscard]] static auto expect_visible(const Node &n) -> Result<void>;
 
     /// @brief 断言属性值等于期望（值经 `Widget::serialize_props` 读出的 JSON 比对）。
+    /// @param w 目标 widget。
+    /// @param key 属性名（取自控件自描述）。
+    /// @param expected 期望值（JSON）。
+    /// @return 相等为空 Result；不等返回 `WidgetInvalidProp` 错误（附实际值描述）。
     /// @note Json 字面量陷阱：`Json{"hello"}` 在 nlohmann 语义下是**数组** `["hello"]`，
     ///       字符串期望值须写成 `Json(std::string{"hello"})`（布尔用 `Json(true)`）。
     [[nodiscard]] static auto expect_prop(const Widget &w, std::string_view key, const Json &expected) -> Result<void>;
     /// @brief 断言属性值等于期望（节点重载）。
+    /// @param n 目标节点。
+    /// @param key 属性名（取自控件自描述）。
+    /// @param expected 期望值（JSON）。
+    /// @return 节点为空返回 `ValidationFailed`；否则同 `Widget` 重载。
     [[nodiscard]] static auto expect_prop(const Node &n, std::string_view key, const Json &expected) -> Result<void>;
 
   private:
     struct Impl;
-    std::unique_ptr<Impl> impl_;
+    std::unique_ptr<Impl> impl_;  ///< 内部实现体（无头 Surface / Window / Animator / Scheduler 与配置）
 };
 
 }  // namespace aurora

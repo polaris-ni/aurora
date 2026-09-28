@@ -7,20 +7,18 @@
 
 namespace aurora {
 
-/**
- * @brief CLDR 复数类别（cardinal，基数）。
- *
- * 六类与 CLDR（Unicode 通用 locale 数据仓库）定义一致：每个语言至少含 `Other`，
- * 其余类别仅在该语言确有不同措辞时才出现（如阿拉伯语六类齐全、英语仅 one/other）。
- * 类别名只是「一组数字的标签」，不携带语义——具体数字映射到哪一类由 `plural_category` 决定。
- *
- * @note Thread: thread-safe (pure function)
- * @note Side-effects: none
- * @note Rebuildable: no
- */
-// 公共 API 枚举：plural_category 的返回值，仅作 switch/临时量，不落在结构体或容器字段里。
-// 底层类型是公共 API 形态的一部分，本库按语义选型而非体积取向，改窄仅省 3 字节。
-// NOLINTNEXTLINE(performance-enum-size)
+/// @brief CLDR 复数类别（cardinal，基数）。
+///
+/// 六类与 CLDR（Unicode 通用 locale 数据仓库）定义一致：每个语言至少含 `Other`，
+/// 其余类别仅在该语言确有不同措辞时才出现（如阿拉伯语六类齐全、英语仅 one/other）。
+/// 类别名只是「一组数字的标签」，不携带语义——具体数字映射到哪一类由 `plural_category` 决定。
+///
+/// @note Thread: thread-safe (pure function)
+/// @note Side-effects: none
+/// @note Rebuildable: no
+/// @note 豁免 performance-enum-size：公共 API 枚举，作 plural_category 的返回值，仅作 switch/临时量，
+/// 不落在结构体或容器字段里；底层类型是公共 API 形态的一部分，本库按语义选型而非体积取向，改窄仅省 3 字节。
+/// NOLINTNEXTLINE(performance-enum-size)
 enum class PluralCategory {
     Zero,  ///< CLDR zero：如阿拉伯语 0
     One,  ///< CLDR one：如英语 1、法语 0/1、俄语 1/21/101（非 11）
@@ -33,6 +31,8 @@ enum class PluralCategory {
 namespace detail {
 
 /// @brief 英语 / 德语 / 及其它未知语言的回退规则：仅 one(=1 整数) 与 other。
+/// @param n 计数值（取绝对值后判定，符号不参与分类）。
+/// @return 无小数部分且整数为 1 时 One，其余 Other。
 [[nodiscard]] inline auto plural_category_en(double n) -> PluralCategory {
     const double a = n < 0.0 ? -n : n;
     const auto i = static_cast<long long>(std::trunc(a));
@@ -44,11 +44,14 @@ namespace detail {
 }
 
 /// @brief 中文 / 日语等：仅 other 一类（名词本身不随数变化）。
+/// @return 恒为 Other。
 [[nodiscard]] inline auto plural_category_other_only(double /*n*/) -> PluralCategory { return PluralCategory::Other; }
 
 /// @brief 法语（CLDR fr）：one = 整数 0/1；many = 紧凑百万整数倍（i % 1e6 == 0 且 v=0）；
 ///       其余为 other。注：科学记数法大指数情形（e != 0..5）本自研实现不覆盖，
 ///       调用方通常传入归一化后的普通计数值，不影响日常 UI 计数。
+/// @param n 计数值（取绝对值后判定）。
+/// @return 整数部分 0/1 → One；非零的整百万整数倍 → Many；其余 Other。
 [[nodiscard]] inline auto plural_category_fr(double n) -> PluralCategory {
     const double a = n < 0.0 ? -n : n;
     const auto i = static_cast<long long>(std::trunc(a));
@@ -62,6 +65,8 @@ namespace detail {
 }
 
 /// @brief 俄语及同族（ru/uk/be/sr/hr/bs/sh）：CLDR 规则表驱动。
+/// @param n 计数值（取绝对值后判定）。
+/// @return 整数：末位 1 且末两位非 11 → One；末位 2-4 且末两位不落在 12-14 → Few；其余整数 → Many。带小数 → Other。
 [[nodiscard]] inline auto plural_category_ru(double n) -> PluralCategory {
     const double a = n < 0.0 ? -n : n;
     const auto i = static_cast<long long>(std::trunc(a));
@@ -83,6 +88,8 @@ namespace detail {
 }
 
 /// @brief 阿拉伯语（CLDR ar）：六类齐全，全部基于 n 的整数关系。
+/// @param n 计数值（取绝对值后判定）。
+/// @return 0→Zero、1→One、2→Two；末两位落在 3-10→Few、11-99→Many；其余（含小数）→Other。
 [[nodiscard]] inline auto plural_category_ar(double n) -> PluralCategory {
     const double a = n < 0.0 ? -n : n;
     if (a == 0.0) {
@@ -106,19 +113,17 @@ namespace detail {
 
 }  // namespace detail
 
-/**
- * @brief 按 CLDR 基数规则把数值 n 映射到复数类别，规则表由 `loc.language` 选择。
- *
- * 未知语言回退英语规则（`one`=`n==1`、`other`=其余），与既有 `num==1` 二元行为向后兼容。
- *
- * @param n   计数值（非负计数语义；负值取绝对值后判定，避免符号干扰分类）。
- * @param loc 区域设置；仅使用 `loc.language`（基础语言子标签，如 "en"/"ar"/"zh"）。
- * @return 对应的 CLDR 复数类别。
- *
- * @note Thread: thread-safe (pure function)
- * @note Side-effects: none
- * @note Rebuildable: no
- */
+/// @brief 按 CLDR 基数规则把数值 n 映射到复数类别，规则表由 `loc.language` 选择。
+///
+/// 未知语言回退英语规则（`one`=`n==1`、`other`=其余），与既有 `num==1` 二元行为向后兼容。
+///
+/// @param n   计数值（非负计数语义；负值取绝对值后判定，避免符号干扰分类）。
+/// @param loc 区域设置；仅使用 `loc.language`（基础语言子标签，如 "en"/"ar"/"zh"）。
+/// @return 对应的 CLDR 复数类别。
+///
+/// @note Thread: thread-safe (pure function)
+/// @note Side-effects: none
+/// @note Rebuildable: no
 [[nodiscard]] inline auto plural_category(double n, const Locale &loc) -> PluralCategory {
     const std::string &lang = loc.language;
     if (lang == "ar") {

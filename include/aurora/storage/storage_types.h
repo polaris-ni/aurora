@@ -36,7 +36,7 @@ using StorageValue = std::variant<json::Value, StorageBytes>;
 struct StorageRecord {
     std::string id;  ///< 记录主键
     std::string type;  ///< ""/"__raw__" = 无类型（裸 value）；否则为 StorageSerializable 的类型标签
-    std::uint32_t version = 1;
+    std::uint32_t version = 1;  ///< 落盘时的类型版本号；读取时小于 storage_version<T> 当前值则先经 migrate_storage 升版
     StorageEncoding encoding = StorageEncoding::Json;  ///< 载荷线格式
     std::chrono::system_clock::time_point mtime;  ///< 最后写入时间；缺失/未知 = epoch（非 optional，省 8B/记录）
     StorageValue payload;  ///< 用户实际 value（Json 或原生二进制）
@@ -45,8 +45,9 @@ struct StorageRecord {
 
 /// @brief 变更通知事件（始终在主线程发射，便于 UI 订阅）。
 struct StorageChange {
+    /// @brief 变更事件类型（Batch = 事务提交后的汇总通知）。
     enum class Operation : std::uint8_t { Put, Remove, Clear, Batch };
-    Operation op;
+    Operation op;  ///< 本次变更的类型
     std::string id;  ///< Put/Remove：受影响的 id；Clear/Batch：空
 };
 

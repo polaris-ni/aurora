@@ -17,35 +17,62 @@
 
 namespace aurora {
 
-/**
- * @brief D3D11 表面（ARCHITECTURE.md §8.4 后端家族）：复用共享 `Win32Host` 宿主，像素经 D3D11 纹理-
- * 增量上传 + GPU 缩放呈现。paint 管线不变（仍由 `Window::present_root` 驱动 CPU `Painter`），
- * 仅把「CPU RGBA8 帧缓冲 → 屏幕」替换为 GPU 合成，解决大窗口 GDI 上屏瓶颈。
- *
- * - 增量上屏：脏矩形（逻辑坐标 × scale 转设备坐标）经 `UpdateSubresource` 仅更新变化区；
- *   首帧/整帧脏全量上传。GPU 以全屏三角形 + 线性采样器做任意比例缩放。
- * - device-lost 恢复桩预留（`on_device_lost`），单线程（UI 线程）使用 device/context。
- */
+/// @brief D3D11 表面（ARCHITECTURE.md §8.4 后端家族）：复用共享 `Win32Host` 宿主，像素经 D3D11 纹理-
+/// 增量上传 + GPU 缩放呈现。paint 管线不变（仍由 `Window::present_root` 驱动 CPU `Painter`），
+/// 仅把「CPU RGBA8 帧缓冲 → 屏幕」替换为 GPU 合成，解决大窗口 GDI 上屏瓶颈。
+///
+/// - 增量上屏：脏矩形（逻辑坐标 × scale 转设备坐标）经 `UpdateSubresource` 仅更新变化区；
+/// 首帧/整帧脏全量上传。GPU 以全屏三角形 + 线性采样器做任意比例缩放。
+/// - device-lost 恢复桩预留（`on_device_lost`），单线程（UI 线程）使用 device/context。
+///
 class D3D11Surface : public Surface {
   public:
+    /// @brief 构造：经共享 `Win32Host` 创建窗口并初始化 D3D11 device/交换链（失败不抛异常，见 `is_available()`）。
+    /// @param width 窗口初始宽度（逻辑像素）。
+    /// @param height 窗口初始高度（逻辑像素）。
+    /// @param title 窗口标题（UTF-8）。
+    /// @param style 窗口样式选项（标题栏/边框等）。
+    /// @param visibility 初始可见性（Normal/Hidden 等）。
     D3D11Surface(int width, int height, const std::string &title, const WindowStyleOptions &style,
                  WindowVisibility visibility = WindowVisibility::Normal);
+    /// @brief 析构：释放全部 D3D11 资源，窗口本体由宿主析构销毁。
     ~D3D11Surface() override;
 
+    /// @brief 禁用拷贝构造：持有唯一 D3D11 device/交换链资源，拷贝会产生双重所有者。
     D3D11Surface(const D3D11Surface &) = delete;
+    /// @brief 禁用拷贝赋值：同拷贝构造，唯一 GPU 资源不可复制。
+    /// @return 已删除重载，不存在实际返回路径。
     auto operator=(const D3D11Surface &) -> D3D11Surface & = delete;
+    /// @brief 禁用移动构造：宿主回调持有本对象地址，移动会使消息路由失效。
     D3D11Surface(D3D11Surface &&) = delete;
+    /// @brief 禁用移动赋值：同移动构造，对象地址必须稳定。
+    /// @return 已删除重载，不存在实际返回路径。
     auto operator=(D3D11Surface &&) -> D3D11Surface & = delete;
 
+    /// @brief 开始一帧：按 DPI 缩放对齐 Painter 物理缓冲、预填不透明底色，并尽力同步交换链尺寸。
+    /// @param width 窗口逻辑宽（dp；Painter 内部 ×scale 映射物理像素）。
+    /// @param height 窗口逻辑高（dp）。
+    /// @return 恒返回 true（缓冲重建无失败路径；交换链重建失败留待 present 报错）。
     [[nodiscard]] auto begin_frame(int width, int height) -> Result<bool> override;
+    /// @brief 取软件绘制器：Painter 持有本帧 RGBA 缓冲，供上层组件 CPU 绘制。
+    /// @return 内部 Painter 的引用（生命周期与本对象一致）。
     [[nodiscard]] auto painter() -> Painter & override { return painter_; }
+    /// @brief 上屏当前帧：脏区（设备坐标）经 `UpdateSubresource` 增量上传后 GPU 合成 Present。
+    /// @return 成功返回 true；设备不可用或上传/Present 失败返回错误 Result。
     [[nodiscard]] auto present() -> Result<bool> override;
+    /// @brief 窗口当前逻辑尺寸（转发共享宿主）。
+    /// @return 窗口尺寸（设备无关像素）。
     [[nodiscard]] auto size() const -> Size override { return win_->size(); }
+    /// @brief 窗口当前 DPI 缩放因子（转发共享宿主）。
+    /// @return 缩放因子，1.0 表示无缩放。
     [[nodiscard]] auto scale_factor() const -> float override { return win_->scale_factor(); }
+    /// @brief 是否已收到关闭窗口请求（转发共享宿主；WM_CLOSE/WM_DESTROY 置位）。
+    /// @return 收到关闭请求为 true，主循环据此退出。
     [[nodiscard]] auto should_close() const -> bool override { return win_->should_close(); }
 
     /// @brief 运行时更新悬停光标形状：与 `Win32Surface` 共用 `Win32Host` 宿主模型，
     /// 故复用同一份 `detail::set_win32_cursor`（`src/aurora/window/win32_cursor.h`）下发系统预置光标。
+    /// @param shape 光标语义形状，经共享映射表转为系统预置光标。
     /// @note 未编译验证：须 Windows + `AURORA_BACKEND_D3D11=ON` 构建后复查（本仓库的无头
     /// Linux 构建不含 D3D11 后端）。
     auto set_cursor(CursorShape shape) -> void override;
@@ -55,70 +82,103 @@ class D3D11Surface : public Surface {
     /// DEBUG 下生效；Release（未开 `AURORA_ENABLE_DEBUG`）回落 unsupported 错误（零截图代码）。
     /// 未编译验证：须 Windows + `AURORA_BACKEND_D3D11=ON` 构建后复查（本仓库的无头
     /// Linux 构建不含 D3D11 后端）。
+    /// @param path 输出 PNG 文件路径。
+    /// @return 抓取并写盘成功返回 true；失败或 Release 下返回错误 Result。
     [[nodiscard]] auto capture_window(const std::string &path) -> Result<bool> override;
 
+    /// @brief 抽取并派发本线程消息队列中的窗口消息（转发共享宿主）。
     auto poll_platform_events() -> void override;
+    /// @brief 事件处理器：Win32 消息翻译为 aurora `Event` 后上抛（转发共享宿主）。
+    /// @param h 事件回调，接收翻译后的归一化事件。
     auto set_event_handler(const EventHandler &h) -> void override { win_->set_event_handler(h); }
+    /// @brief 注册窗口可见性状态上报句柄（最小化/被遮挡/前台激活；转发共享宿主）。
+    /// @param h 可见性状态回调，参数为计算后的窗口可见态。
     auto set_window_state_handler(WindowStateHandler h) -> void override {
         win_->set_window_state_handler(std::move(h));
     }
+    /// @brief 注册窗口几何态上报句柄（Normal/Maximized/Minimized/FullScreen；转发共享宿主）。
+    /// @param h 几何态回调，参数为计算后的窗口模式。
     auto set_window_mode_handler(WindowModeHandler h) -> void override { win_->set_window_mode_handler(std::move(h)); }
+    /// @brief 同步重渲染请求：转发宿主并本地留存（device-lost 恢复后触发全量重渲染）。
+    /// @param h 重渲染请求回调，宿主在系统几何变化时同步调用。
     auto set_present_request(PresentRequest h) -> void override {
         present_request_ = h;  // 本地留存：device-lost 恢复后触发全量重渲染
         win_->set_present_request(std::move(h));
     }
     /// @brief 阻塞等待消息或超时（转发共享宿主）。
+    /// @param timeout_ms 最长等待毫秒数；负值表示无限等待，0 表示立即返回。
     auto wait_events(double timeout_ms) -> void override { win_->wait_events(timeout_ms); }
     /// @brief 跨线程唤醒主循环（转发共享宿主；PostMessage 线程安全）。
     auto request_wake() -> void override { win_->request_wake(); }
     /// @brief 与 Win32Surface 同源：宿主 `Win32Host` 的消息泵是线程级共享队列。
+    /// @return 恒为 true：Win32 消息泵一次即抽干线程级队列。
     [[nodiscard]] auto pumps_thread_queue() const -> bool override { return true; }
     /// @brief 与 Win32Surface 同源：等待经由线程级消息通道，覆盖本进程任意窗口。
+    /// @return 恒为 true：Win32 等待对线程任意窗口消息均唤醒。
     [[nodiscard]] auto waits_thread_queue() const -> bool override { return true; }
     /// @brief 与 Win32Surface 同源：经共享宿主建立 OS 层 owner 关系。
+    /// @param owner 父窗口 Surface；nullptr 表示解除 owner 关系。
     auto set_owner(const Surface *owner) -> void override {
         win_->set_owner(owner != nullptr ? owner->native_handle() : nullptr);
     }
     /// @brief 与 Win32Surface 同源：模态窗口屏蔽 owner 输入。
+    /// @param on true 恢复输入，false 禁用输入。
     auto set_enabled(bool on) -> void override { win_->set_enabled(on); }
     /// @brief 与 Win32Surface 同源：提升 z 序。
     auto raise() -> void override { win_->raise(); }
     /// @brief 与 Win32Surface 同源：激活窗口。
     auto focus_window() -> void override { win_->focus_window(); }
     /// @brief 与 Win32Surface 同源：所在显示器 id。
+    /// @return 窗口所在显示器的稳定标识。
     [[nodiscard]] auto display_id() const -> int override { return win_->display_id(); }
     /// @brief 与 Win32Surface 同源：窗口屏幕位置。
+    /// @return 窗口左上角的屏幕物理像素坐标。
     [[nodiscard]] auto position() const -> Point override { return win_->position(); }
     /// @brief 与 Win32Surface 同源：程序化移动窗口。
+    /// @param p 目标左上角屏幕坐标（物理像素）。
     auto set_position(Point p) -> void override { win_->set_position(p); }
     /// @brief 与 Win32Surface 同源：程序化设置外框尺寸。
+    /// @param s 目标外框尺寸（物理像素）。
     auto set_size(Size s) -> void override { win_->set_size(s); }
     /// @brief 与 Win32Surface 同源：DPI 缩放变化回调。
+    /// @param h 缩放变化回调，参数为变化后的缩放因子。
     auto set_scale_change_handler(ScaleChangeHandler h) -> void override {
         win_->set_scale_change_handler(std::move(h));
     }
     /// @brief vsync 开启且设备可用时，`Present(1,0)` 阻塞到 vblank 自带帧节拍；
     /// 帧调度据此在活跃帧跳过 CPU 端 sleep 节流，避免双重限速。
+    /// @return vsync 开启且设备可用时为 true（GPU 端自带帧节拍）。
     [[nodiscard]] auto paces_frames() const -> bool override { return ok_ && vsync_; }
     /// @brief 启用/关闭垂直同步（默认开；关闭后 `Present(0,0)` 不等 vblank，交还 CPU 节流）。
+    /// @param on true 启用 vsync，false 关闭。
     auto set_vsync(bool on) -> void { vsync_ = on; }
+    /// @brief 当前 vsync 开关状态。
+    /// @return 开启为 true。
     [[nodiscard]] auto vsync() const -> bool { return vsync_; }
     /// @brief 运行时更新窗口标题（转发给共享宿主）。
+    /// @param title 新窗口标题（UTF-8）。
     auto set_title(const std::string &title) -> void override { win_->set_title(title); }
 
     /// @brief 接收本帧脏矩形（设备坐标）；present 时仅增量上传这些区域，空向量 = 全量上传。
+    /// @param device_rects 本帧脏矩形列表（设备坐标）。
     auto set_present_dirty(const std::vector<Rect> &device_rects) -> void override { dirty_ = device_rects; }
     /// @brief 增量裁剪帧底色：与 begin_frame 预填的背景色一致（不透明），
     /// 使脏区裁剪重绘时裁剪内零基底被重铺为同一底色，避免圆角按钮悬停时
     /// 裁剪矩形四角露出透明黑（视觉上表现为阴影与圆角不匹配）。
+    /// @return 底色 RGBA（245,245,245,255，不透明）。
     [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 245, 255}; }
 
+    /// @brief 当前帧像素（设备像素缓冲，RGBA）：直接暴露 CPU Painter 缓冲供抓帧比对。
+    /// @return 帧缓冲 RGBA 首指针。
     [[nodiscard]] auto data() const -> const std::uint8_t * override { return painter_.data(); }
     /// @brief 帧缓冲物理像素尺寸：D3D11 painter 按 DPI 物理分辨率（dev_w_/dev_h_ = 逻辑×scale）分配，
     /// 故返回 painter 缓冲像素尺寸，而非逻辑 `size()`（缩放比≠1 时避免 PNG 宽高与像素数据错位）。
+    /// @return Painter 帧缓冲的物理像素尺寸。
     [[nodiscard]] auto framebuffer_size() const -> Size override {
         return Size{.width = static_cast<float>(painter_.width()), .height = static_cast<float>(painter_.height())};
     }
+    /// @brief 已呈现帧数：每次 `present()` 真正 Present 上屏自增（与 Win32/X11 同口径）。
+    /// @return 迄今真正上屏的帧数。
     [[nodiscard]] auto frame_count() const -> int override { return frame_; }
 
     /// @brief 宿主原生窗口句柄（测试/自检用；与 `Win32Surface::hwnd()` 同义、同宿主）。
@@ -130,22 +190,27 @@ class D3D11Surface : public Surface {
     /// Linux 构建不含 D3D11 后端）。实现与 `Win32Surface::native_handle()` 逐字同形（同一
     /// `Win32Host::hwnd()`），故两路行为一致。
     [[nodiscard]] auto hwnd() const -> void * { return win_->hwnd(); }
+    /// @brief 表层统一原生句柄：与 `hwnd()` 同源，返回窗口 HWND（以 `void *` 承载）。
     [[nodiscard]] auto native_handle() const -> void * override { return win_->hwnd(); }
     /// @brief 本窗口的无障碍桥（D13）：转发共享宿主 `Win32Host` 持有的唯一实例，
     /// 使 GDI 与 GPU 两路上屏共用同一份 id→Widget* 映射，不产生分裂。
+    /// @return 宿主持有的桥指针（宿主拥有生命周期，调用方不得释放）。
     [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override {
         return win_->accessibility_provider();
     }
 
     /// @brief 注入语义树根（转发共享宿主；桥未构造时由宿主记下）。
+    /// @param root 语义树根控件指针。
     auto set_accessibility_root(Widget *root) -> void override { win_->set_accessibility_root(root); }
 
     /// @brief 注入 IME 候选窗定位查询（转发共享宿主，GDI/GPU 两路同一桥）。
+    /// @param provider 返回光标屏幕矩形（设备坐标）的回调，供候选窗贴附定位。
     auto set_composition_caret_provider(std::function<Rect()> provider) -> void override {
         win_->set_composition_caret_provider(std::move(provider));
     }
 
     /// @brief 设备是否可用（无适配器时为 false，测试应跳过）。
+    /// @return D3D11 device/交换链初始化成功为 true。
     [[nodiscard]] auto is_available() const -> bool { return ok_; }
     /// @brief 测试 seam：模拟 device-lost（置不可用 + 重建标志），
     /// 下次 `poll_platform_events` 走恢复路径（重建设备 + 全量重渲染）。
@@ -183,8 +248,10 @@ class D3D11Surface : public Surface {
     ID3D11BlendState *bs_ = nullptr;
 
     std::vector<Rect> dirty_;  ///< 本帧脏矩形（设备坐标），present 时消费。
-    int dev_w_ = 0, dev_h_ = 0;  ///< painter/源纹理设备尺寸（逻辑×scale）
-    int swap_w_ = 0, swap_h_ = 0;  ///< 交换链后缓冲物理尺寸（ResizeBuffers 后更新）
+    int dev_w_ = 0;  ///< painter/源纹理设备宽度（逻辑×scale）
+    int dev_h_ = 0;  ///< painter/源纹理设备高度（逻辑×scale）
+    int swap_w_ = 0;  ///< 交换链后缓冲物理宽度（ResizeBuffers 后更新）
+    int swap_h_ = 0;  ///< 交换链后缓冲物理高度（ResizeBuffers 后更新）
     int frame_ = 0;
     bool ok_ = false;  ///< 设备初始化是否成功（失败则 present 直接报错，便于测试跳过）。
     bool vsync_ = true;  ///< 垂直同步（Present 第一参数 1/0）。

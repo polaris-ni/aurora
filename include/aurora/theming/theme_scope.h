@@ -10,50 +10,55 @@
 
 namespace aurora {
 
-/**
- * @brief 主题作用域：为子树覆盖（或首次注入）主题（specification/07-environment-modifier.md §5.1 显式主题传递）。
- *
- * 语义等价于 `Provider<Theme>`，但提供领域化的名称与构造。子树内任意 widget
- * 经 `inherit_theme(ctx)` 读取最近祖先的 `ThemeScope` 注入值（最近祖先优先，
- * 天然实现主题继承与局部覆盖）。
- *
- * @code
- *   ThemeScope{ Theme::dark(), Column{ .children = { Text{"Hello"} } } };
- * @endcode
- *
- * @note Thread: main-thread only
- * @note Side-effects: none
- * @note Rebuildable: yes, via from_json
- */
-// 豁免 bugprone-exception-escape：本控件继承 Provider<Theme>，其构造/拷贝链持有 std::function 回调，
-// 触发 .clang-tidy 已记录的系统性假告警面——「任何转入 std::function 的可调用对象一律判『不应抛出』」
-// （operator() 无 noexcept 规格）。抛出仅可能为 bad_alloc，回调实抛由上层帧循环 try/catch 兜底。
-// NOLINTNEXTLINE(bugprone-exception-escape)
+/// @brief 主题作用域：为子树覆盖（或首次注入）主题（specification/07-environment-modifier.md §5.1 显式主题传递）。
+///
+/// 语义等价于 `Provider<Theme>`，但提供领域化的名称与构造。子树内任意 widget
+/// 经 `inherit_theme(ctx)` 读取最近祖先的 `ThemeScope` 注入值（最近祖先优先，
+/// 天然实现主题继承与局部覆盖）。
+///
+/// @code
+/// ThemeScope{ Theme::dark(), Column{ .children = { Text{"Hello"} } } };
+/// @endcode
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: yes, via from_json
+/// @note bugprone-exception-escape 豁免：本控件继承 Provider<Theme>，其构造/拷贝链持有 std::function 回调，
+///       触发 .clang-tidy 已记录的系统性假告警面——「任何转入 std::function 的可调用对象一律判『不应抛出』」
+///       （operator() 无 noexcept 规格）。抛出仅可能为 bad_alloc，回调实抛由上层帧循环 try/catch 兜底。
+///       NOLINTNEXTLINE(bugprone-exception-escape)
 class ThemeScope : public Provider<Theme> {
   public:
     using Provider<Theme>::Provider;  ///< 复用 Provider<Theme>(Theme, Node/Widget) 构造
 
     /// @brief 运行时换肤：用共享 `State<Theme>` 注入，主题变化自动重渲染子树。
+    /// @param theme 共享主题状态（值变化时子树自动重渲染）。
+    /// @param child 挂载的子节点（移交所有权）。
     explicit ThemeScope(std::shared_ptr<State<Theme>> theme, Node child)
         : Provider<Theme>(std::move(theme), std::move(child)) {}
 
+    /// @brief 运行时换肤（任意 Widget 子节点版）：与 Node 版等价，子节点经完美转发收为 Node。
+    /// @tparam W 子节点控件类型（须派生自 Widget）。
+    /// @param theme 共享主题状态（值变化时子树自动重渲染）。
+    /// @param child 挂载的子节点（右值引用，转发给基类构造）。
     template <typename W>
         requires std::derived_from<W, Widget>
     explicit ThemeScope(std::shared_ptr<State<Theme>> theme, W &&child)
         : Provider(std::move(theme), std::forward<W>(child)) {}
 
+    /// @brief 控件类型名。
+    /// @return 恒为 "ThemeScope"。
     [[nodiscard]] auto type_name() const -> const char * override { return "ThemeScope"; }
 };
 
-/**
- * @brief 读取最近祖先 `ThemeScope` 注入的主题（specification/07-environment-modifier.md §5.1 显式主题传递）。
- *
- * 在 widget 的 `on_paint`/`on_layout` 中调用以获取当前主题令牌（颜色、字体），
- * 从而让绘制随主题变化。无注入主题时返回默认浅色主题，保证永不崩溃。
- *
- * @param ctx 当前构建上下文（由 layout/paint 传入）。
- * @return 最近祖先注入的 Theme；未注入则 `Theme::light()`。
- */
+/// @brief 读取最近祖先 `ThemeScope` 注入的主题（specification/07-environment-modifier.md §5.1 显式主题传递）。
+///
+/// 在 widget 的 `on_paint`/`on_layout` 中调用以获取当前主题令牌（颜色、字体），
+/// 从而让绘制随主题变化。无注入主题时返回默认浅色主题，保证永不崩溃。
+///
+/// @param ctx 当前构建上下文（由 layout/paint 传入）。
+/// @return 最近祖先注入的 Theme；未注入则 `Theme::light()`。
+///
 [[nodiscard]] inline auto inherit_theme(const BuildContext &ctx) -> Theme {
     const auto *t = ctx.environment<Theme>();
     return t != nullptr ? *t : Theme::light();

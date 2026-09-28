@@ -15,35 +15,35 @@
 #include "aurora/widget/text_input.h"
 #include "aurora/widget/widget.h"
 
+/// @brief 运行时可观测（specification/08-tooling.md §3）：树转储 / 结构查询 / 状态探查。
+///
+/// 全部复用 `for_each_child_unified`（`Widget::child_nodes()`，为空时回退 `Widget::for_each_child`）
+/// 与 `serialization::to_json`，不引入额外状态。
+/// 单线程 UI 假设；均为 `inline`（头文件即可用，无需链接实现）。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: no
+///
 namespace aurora {
 
-/**
- * @brief 运行时可观测（specification/08-tooling.md §3）：树转储 / 结构查询 / 状态探查。
- *
- * 全部复用 `for_each_child_unified`（`Widget::child_nodes()`，为空时回退 `Widget::for_each_child`）
- * 与 `serialization::to_json`，不引入额外状态。
- * 单线程 UI 假设；均为 `inline`（头文件即可用，无需链接实现）。
- *
- * @note Thread: main-thread only
- * @note Side-effects: none
- * @note Rebuildable: no
- */
-
-/**
- * @brief 把控件树拍平成「布局盒表」（specification/03-layout-render.md §8.4）。
- *
- * 用途：`attribute_diff_regions` 需要知道每个控件的位置与类型，但它刻意只接受纯值数据
- * （不引入 `widget/` 的具体控件类型）。本函数是二者的桥：把树降级为表。
- *
- * **输出顺序即先序（pre-order）**，这一点是契约的一部分 —— 归因遇到交叠面积相同的候选时，
- * 取 DFS 序更靠后者（= 更深的后代）。因此不要对返回的 vector 重新排序。
- *
- * `path` 与 `find_node_by_path` / `PUT /api/widget/{path}` 同格式：根为空串，第 i 个子节点为
- * `"i"`，孙节点为 `"i/j"` —— 即归因结果可直接回喂去改那个控件的属性。
- *
- * @note Thread: main-thread only（读 `child_nodes()` 与 `bounds()`）
- * @note Side-effects: none
- */
+/// @brief 把控件树拍平成「布局盒表」（specification/03-layout-render.md §8.4）。
+///
+/// 用途：`attribute_diff_regions` 需要知道每个控件的位置与类型，但它刻意只接受纯值数据
+/// （不引入 `widget/` 的具体控件类型）。本函数是二者的桥：把树降级为表。
+///
+/// **输出顺序即先序（pre-order）**，这一点是契约的一部分 —— 归因遇到交叠面积相同的候选时，
+/// 取 DFS 序更靠后者（= 更深的后代）。因此不要对返回的 vector 重新排序。
+///
+/// `path` 与 `find_node_by_path` / `PUT /api/widget/{path}` 同格式：根为空串，第 i 个子节点为
+/// `"i"`，孙节点为 `"i/j"` —— 即归因结果可直接回喂去改那个控件的属性。
+///
+/// @param root 控件树根；为空 Node 时返回空表。
+/// @return 先序布局盒表（每行一条 `{ path, type, bounds }`）。
+///
+/// @note Thread: main-thread only（读 `child_nodes()` 与 `bounds()`）
+/// @note Side-effects: none
+///
 [[nodiscard]] inline auto collect_widget_boxes(const Node &root) -> std::vector<WidgetBox> {
     std::vector<WidgetBox> out;
     if (!root) {
@@ -90,6 +90,8 @@ struct WidgetPatchOp {
     std::string path;  ///< 如 "/1/content"（根属性为 "/content"）
     Json value;  ///< 新值
 
+    /// @brief 把三字段序列化为 `{op, path, value}` JSON 对象（HTTP 层 / 落盘用的线格式）。
+    /// @return 新建的 JSON 对象；不修改本结构。
     [[nodiscard]] auto to_json() const -> Json {
         Json j = Json::object();
         j["op"] = op;
@@ -108,6 +110,8 @@ struct WidgetPatchOp {
 /// 由 `trees_differ_structurally` 如实报告；此时补丁仍然给出（对可比较的子树），
 /// 但调用方必须自行决定是否整树替换。
 ///
+/// @param old_root 旧树根；任一根为空时不产出补丁（返回空列表）。
+/// @param new_root 新树根；与旧树按同下标逐子比对，子数不同时只比对方有的部分。
 /// @return 补丁操作列表（按树的先序）。两树都为空时返回空列表。
 ///
 /// @note Thread: main-thread only（读 `serialize_props`）
@@ -176,6 +180,10 @@ struct WidgetPatchOp {
 ///
 /// 结构性差异无法用属性补丁表达 —— `diff_trees` 覆盖不到，调用方须整树替换。
 ///
+/// @param old_root 旧树根（可与 new_root 同时为空，视为无差异）。
+/// @param new_root 新树根。
+/// @return 存在类型变更或同层子节点数变更时为 true；两树空状态一致且逐层同构时为 false。
+///
 /// @note Thread: main-thread only
 /// @note Side-effects: none
 [[nodiscard]] inline auto trees_differ_structurally(const Node &old_root, const Node &new_root) -> bool {
@@ -205,6 +213,9 @@ struct WidgetPatchOp {
 }
 
 /// @brief 人类可读的缩进树（每行一个 widget 的 type_name）。
+/// @param root 树根（须为有效节点；子节点按 `child_nodes()` 顺序递归，故虚拟化容器的子树不入此表）。
+/// @param depth 递归深度（内部用；外部传 0），每层补两个空格缩进。
+/// @return 整棵树的缩进文本，每个节点一行、以 `\n` 结尾。
 [[nodiscard]] inline auto dump_tree(const Node &root, int depth = 0) -> std::string {
     std::string out;
     for (int i = 0; i < depth; ++i) {
@@ -219,6 +230,11 @@ struct WidgetPatchOp {
 }
 
 /// @brief 生成单个节点的富文本标签（供 dump_tree_rich 使用）。
+/// @param n 待格式化的节点：取 type_name、`#id`（空 id 则省略）、bounds、`show` 可见位，
+///           Text/TextInput 另取正文文本，样式段从 `serialize_props` 挑 background_color/color/
+///           text_color/corner_radius/font_size/padding（键缺失即不输出），listeners 取
+///           `describe().events`。
+/// @return 单行 `type[#id] { bounds: [...]; visible: ...; text: "..."; style: {...}; listeners: [...] }`。
 [[nodiscard]] inline auto node_label_for_dump(const Node &n) -> std::string {
     const Widget &w = n.widget();
     const std::string tn = w.type_name();
@@ -262,6 +278,10 @@ struct WidgetPatchOp {
            text + "\"; style: {" + style + "}; listeners: [" + listeners + "] }";
 }
 
+/// @brief 本行前的树形连接符（供 dump_tree_rich 使用）。
+/// @param tree_chars 为 false 时输出纯空格风格（返回空串，缩进由前缀承担）。
+/// @param is_last 是否为其父的最后一个子节点。
+/// @return 末子 `└─ `、非末子 `├─ `；tree_chars 关闭时为空串。
 [[nodiscard]] inline auto tree_branch(bool tree_chars, bool is_last) -> std::string_view {
     if (!tree_chars) {
         return "";
@@ -269,6 +289,10 @@ struct WidgetPatchOp {
     return is_last ? "└─ " : "├─ ";
 }
 
+/// @brief 传给其子行的缩进前缀增量（供 dump_tree_rich 使用）。
+/// @param tree_chars 为 false 时固定两个空格（无竖线）。
+/// @param is_last 父节点是否为末子：末子之下不再续画竖线。
+/// @return 末子下 `"   "`、非末子下 `"│  "`；tree_chars 关闭时为 `"  "`。
 [[nodiscard]] inline auto tree_child_indent(bool tree_chars, bool is_last) -> std::string_view {
     if (!tree_chars) {
         return "  ";
@@ -289,6 +313,7 @@ struct WidgetPatchOp {
 /// @param root 根节点（建议在 `render_to_logical_snapshot` / `test::pump` 之后调用，bounds 方为非空）。
 /// @param depth 缩进深度（内部递归用，外部调用传 0）。
 /// @param tree_chars 是否使用 `├─ └─ │` 树形连接符（false 则使用纯空格缩进）。
+/// @return 整棵树的文本：首行为根，其余每行一个节点，行内无换行。
 [[nodiscard]] inline auto dump_tree_rich(const Node &root, int depth = 0, bool tree_chars = true) -> std::string {
     (void)depth;
     std::string out;
@@ -307,6 +332,8 @@ struct WidgetPatchOp {
 }
 
 /// @brief 结构化树（JSON）：每个节点含 `type` 与 `children`。
+/// @param root 树根；只经 `child_nodes()` 下降，故虚拟化容器的子树不入 JSON。
+/// @return `{type, children}` 对象；叶子节点 `children` 为空数组。
 [[nodiscard]] inline auto dump_tree_json(const Node &root) -> Json {
     Json j = Json::object();
     j["type"] = root.widget().type_name();
@@ -319,6 +346,9 @@ struct WidgetPatchOp {
 }
 
 /// @brief 按 type_name 精确匹配，返回子树中所有命中的节点（浅拷贝 shared_ptr）。
+/// @param type 与 `Widget::type_name()` 逐字符比对的类型名（区分大小写，不做前缀/通配）。
+/// @param root 检索起点；自身也参与匹配（即命中含 root）。
+/// @return 先序命中的节点表；无命中为空表。
 [[nodiscard]] inline auto query(std::string_view type, const Node &root) -> std::vector<Node> {
     std::vector<Node> out;
     std::function<void(const Node &)> walk = [&](const Node &n) -> void {
@@ -333,10 +363,17 @@ struct WidgetPatchOp {
     return out;
 }
 
+/// @brief 判断字符串是否全为 ASCII 数字（路径段据此区分「数组下标」与「对象键」）。
+/// @param s 待判定的路径段；空串按 all_of 语义视为 true。
+/// @return 每个字符都是数字时为 true。
 [[nodiscard]] inline auto is_digits_only(std::string_view s) -> bool {
     return std::ranges::all_of(s, [](char ch) -> bool { return std::isdigit(static_cast<unsigned char>(ch)) != 0; });
 }
 
+/// @brief 沿 JSON 树下降一个路径段（纯数字段按下标走数组，其余按键走对象）。
+/// @param cur 当前节点指针的引用：成功时改指向命中的子节点，失败时保持原值。
+/// @param key 单个路径段（不含 `/`）。
+/// @return 可下降为 true；段与容器类型不符、键缺失或下标越界为 false（cur 不变）。
 [[nodiscard]] inline auto advance_json_pointer(Json *&cur, std::string_view key) -> bool {
     if (is_digits_only(key)) {
         const std::size_t idx = std::stoul(std::string(key));
@@ -355,6 +392,9 @@ struct WidgetPatchOp {
 
 /// @brief 沿 dump_tree_json 产出的 JSON 树，按 `/` 路径（支持对象键与数组下标）取状态片段。
 /// 例：`get_state("children/0/type", root)` 返回根的第一个子节点的 type。未命中返回空 Json。
+/// @param path 以 `/` 分隔的键/下标序列；空段被跳过，全空路径取到整棵树。
+/// @param root 树根；每次调用都会先做一次 dump_tree_json（不经 `for_each_child_unified`）。
+/// @return 命中片段的**拷贝**（局部 JSON 树不能返回引用）；路径不可达时为空 Json。
 [[nodiscard]] inline auto get_state(std::string_view path, const Node &root) -> Json {
     Json tree = dump_tree_json(root);
     Json *cur = &tree;
@@ -383,6 +423,8 @@ struct WidgetPatchOp {
 
 /// @brief 将 Widget 树递归转换为 TreeItem 树（供 TreeView 消费）。
 /// 每个节点的 label 为 widget 的 type_name()，根节点默认展开。
+/// @param root 树根；子节点只经 `child_nodes()` 枚举。
+/// @return 仅含一个元素（根 TreeItem），其 `children` 递归展开；子项按后序装配以保证下标稳定。
 [[nodiscard]] inline auto widget_tree_to_items(const Node &root) -> std::vector<TreeItem> {
     std::vector<TreeItem> items;
     std::function<void(const Node &, bool)> walk = [&](const Node &n, bool expand) -> void {
@@ -408,6 +450,10 @@ struct WidgetPatchOp {
 ///
 /// 树的**枚举**与**寻址**必须共用本函数：两处若取不同遍历源，同一路径会指向不同控件
 /// （`a11y_diff.h` 对该不变量的告警同理）。
+///
+/// @param w 被枚举的控件。
+/// @param fn 对每个子控件调用一次；收到的引用来自 `child_nodes()` 的 `Node::widget()` 或
+///           `for_each_child` 的实参，不宜跨调用保存。
 inline auto for_each_child_unified(const Widget &w, const std::function<void(const Widget &)> &fn) -> void {
     const std::vector<Node> &nodes = w.child_nodes();
     if (!nodes.empty()) {
@@ -421,6 +467,8 @@ inline auto for_each_child_unified(const Widget &w, const std::function<void(con
 
 /// @brief 解析索引路径（如 "0/2/1"）为下标序列；含非法段返回 `std::nullopt`。
 /// 空路径由调用方先行处理（语义为根自身），不入此函数。
+/// @param path 以 `/` 分隔的十进制下标序列；连续分隔符形成的空段被跳过。
+/// @return 逐段下标；某段非数字或溢出（`std::stoul` 抛异常）时为 `std::nullopt`。
 [[nodiscard]] inline auto parse_path_indices(std::string_view path) -> std::optional<std::vector<std::size_t>> {
     std::vector<std::size_t> indices;
     std::size_t i = 0;
@@ -448,6 +496,9 @@ inline auto for_each_child_unified(const Widget &w, const std::function<void(con
 /// 子节点枚举走 `for_each_child_unified`，故虚拟化容器的子树同样可见。
 /// `focused` 只在为真时出现（无焦点的节点不增键），使焦点遍历顺序可被外部读端直接观察——
 /// 控件本身未必有焦点可视化（如 `Button`），无此键时人工侧只能靠猜。
+///
+/// @param w 当前控件；属性取 `serialize_props` 的实际输出，焦点取 `is_focused()`。
+/// @return `{type, props, children}` 对象，`w` 持焦时另含 `focused: true`。
 [[nodiscard]] inline auto dump_tree_json_full(const Widget &w) -> Json {
     Json j = Json::object();
     j["type"] = w.type_name();
@@ -466,11 +517,16 @@ inline auto for_each_child_unified(const Widget &w, const std::function<void(con
 
 /// @brief 同上，`Node` 入口（等价于取其 widget 后走 `Widget` 重载）。
 /// 保留本重载以兼容既有调用方（inspector / InspectorPanel / debug 门面）。
+/// @param root 根节点；只取其 `widget()`，不复制 Node，故无 `~Node` 清布局父指针的副作用。
+/// @return 与 `dump_tree_json_full(root.widget())` 同构的完整 JSON 快照。
 [[nodiscard]] inline auto dump_tree_json_full(const Node &root) -> Json { return dump_tree_json_full(root.widget()); }
 
 /// @brief 按树路径定位节点（路径为子节点索引序列，如 "0/2/1"）。
 /// 根节点为空路径或 ""。每段为子节点在 child_nodes() 中的下标。
 /// 路径无效返回空 Node（bool 转换返回 false）。
+/// @param root 路径的起点节点；空路径直接返回它本身。
+/// @param path 以 `/` 分隔的子下标序列（如 "0/2/1"），每段为该层 `child_nodes()` 中的下标；空串即根。
+/// @return 命中节点的 `Node` 副本（其 shared_ptr 与树中指向同一控件）；段非数字或越界时为空 `Node`。
 /// @note 返回的 Node 内部 shared_ptr<Widget> 指向同一 widget 实例，但 Node 本身是副本。
 /// @note 只沿 `child_nodes()` 下降 ⇒ **无法跨越虚拟化容器**（`child_nodes()` 恒空者）的子树；
 /// 且下降途中会拷出各层 `child_nodes()`，副本析构会清掉兄弟节点的 `layout_parent_`。
@@ -485,13 +541,13 @@ inline auto for_each_child_unified(const Widget &w, const std::function<void(con
         return Node{};  // 无效路径段返回空 Node
     }
     const std::vector<std::size_t> &indices = *parsed;
-    // 沿索引路径下降，每层保存 children 副本以保持 Node 存活
-    // 使用 pairs 保存 (children 副本, 当前选中索引)
+    // 下降中的一层快照：本层 children 的副本 + 路径在该层选中的下标。
+    // 逐层持有副本是为了让中途取出的 Node 在下一层取数前不被析构（见函数文档的 @note 说明）。
     struct Layer {
-        std::vector<Node> children;
-        std::size_t idx;
+        std::vector<Node> children;  // 本层子节点副本（拷贝只为续命，不改树）
+        std::size_t idx;  // 路径在本层选中的子下标
     };
-    std::vector<Layer> layers;
+    std::vector<Layer> layers;  // 自根到叶的逐层记录，末项即命中节点所在层
     layers.reserve(indices.size());  // 预分配避免重分配失效
     // 初始层：根的子节点
     {
@@ -526,6 +582,8 @@ inline auto for_each_child_unified(const Widget &w, const std::function<void(con
 /// 的 `child_nodes()` 拷进临时容器、再随容器销毁，该层**兄弟节点**的布局父指针会被一并
 /// 打掉，后续 relayout 的脏传播随之断裂。本函数只持有指针，不产生任何 `Node` 生命周期。
 ///
+/// @param root 寻址起点（非 const：返回的指针指向活树中的控件，可用于属性回写）。
+/// @param path 索引序列路径；段数与该层子控件数（`for_each_child_unified` 口径）逐层比对。
 /// @return 命中控件的指针（生命周期由树持有的 shared_ptr 保证）；路径非法或越界返回 nullptr。
 [[nodiscard]] inline auto find_widget_by_path(Widget &root, std::string_view path) -> Widget * {
     if (path.empty()) {
@@ -553,6 +611,8 @@ inline auto for_each_child_unified(const Widget &w, const std::function<void(con
 
 /// @brief 获取 Widget 的当前属性快照（describe 元数据 + serialize_props 合并）。
 /// 返回 JSON 对象含 "descriptor"（WidgetDescriptor 摘要）与 "values"（当前属性值）。
+/// @param w 目标控件；元数据取其 `describe()`（只列 name 与属性名），值取其 `serialize_props()`。
+/// @return `{descriptor: {name, property_names}, values: {...}}` 对象。
 [[nodiscard]] inline auto get_widget_props(const Widget &w) -> Json {
     Json result = Json::object();
     // 描述元数据
@@ -573,6 +633,10 @@ inline auto for_each_child_unified(const Widget &w, const std::function<void(con
 }
 
 /// @brief 单属性回写：构造仅含目标键的 JSON 对象，经 deserialize_props 写回。
+/// @param w 目标控件（须非 const：回写会改其状态并可能标脏重绘）。
+/// @param key 属性名；控件的 `deserialize_props` 不认得的键会被整体忽略（不报错）。
+/// @param value 新值；应与 `serialize_props` 产出的同名键同型，已知键的类型不符时
+///              由该控件的 `get<T>` 行为决定后果。
 inline void set_widget_prop(Widget &w, std::string_view key, const Json &value) {
     Json props = Json::object();
     props[std::string(key)] = value;

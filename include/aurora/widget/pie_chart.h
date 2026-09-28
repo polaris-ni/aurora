@@ -27,30 +27,38 @@ struct PieChartProps {
     float start_angle = -90.0F;  ///< 起始角（度，0 = +x 方向；-90 = 12 点钟）
     bool show_percentage_labels = false;  ///< 扇区内百分比文本
     float section_gap = 2.0F;  ///< 扇区间隙（dp，按角度换算后两侧各让出一半）
-    ChartLegendSpec legend;
-    EdgeInsets padding{.left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};
+    ChartLegendSpec legend;  ///< 图例规格（可见性与位置）
+    EdgeInsets padding{.left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};  ///< 图内留白（dp）
 };
 
-/**
- * @brief 饼图 / 环图控件（叶控件，切片 5；契约见 specification/04-widget.md §3.8）。
- *
- * 扇区经 `fill_sector` 绘制（`center_space_ratio > 0` 即环图），间隙以角度让位实现（非描边）。
- * 命中使用**极坐标**判定：先按半径落在 `[inner, outer]`，再按角度定位扇区（与渲染同源）。
- *
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 饼图 / 环图控件（叶控件，切片 5；契约见 specification/04-widget.md §3.8）。
+///
+/// 扇区经 `fill_sector` 绘制（`center_space_ratio > 0` 即环图），间隙以角度让位实现（非描边）。
+/// 命中使用**极坐标**判定：先按半径落在 `[inner, outer]`，再按角度定位扇区（与渲染同源）。
+///
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
 class PieChart : public LeafWidget, public PieChartProps {
   public:
+    /// @brief 默认构造：全部属性取 PieChartProps 默认值（无扇区、饼图形态）。
     PieChart() = default;
+    /// @brief 以属性聚合构造（移动存入基类子对象）。
+    /// @param props 饼图属性（扇区、中心比、起始角、图例、留白等）。
     explicit PieChart(PieChartProps props) : PieChartProps(std::move(props)) {}
 
+    /// @brief 属性聚合的默认值（工厂便捷入口）。
+    /// @return 默认构造的 PieChartProps。
     [[nodiscard]] static auto defaults() -> PieChartProps { return PieChartProps{}; }
 
     /// @brief 点击（抬起）命中扇区时触发：`(扇区索引)`。旁挂，不进序列化面。
-    // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
+    /// @param section_idx 回调收到的扇区索引（0 基）。
+    /// @return 回调函数对象；缺省未挂接（空 std::function）。
+    /// NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
     std::function<void(int section_idx)> on_section_tapped;
 
+    /// @brief 替换扇区列表（占比随 value/Σvalue 变化）并重播 grow-in 动画。
+    /// @param s 新扇区列表。
+    /// @return PieChart 引用（链式调用）。
     auto set_sections(std::vector<PieSection> s) -> PieChart & {
         sections = std::move(s);
         mark_needs_layout();
@@ -58,47 +66,80 @@ class PieChart : public LeafWidget, public PieChartProps {
         grow_.replay();
         return *this;
     }
+    /// @brief 设置内径/外径比（> 0 即环图形态）。
+    /// @param r 比值；夹取到 [0, 0.95]。
+    /// @return PieChart 引用（链式调用）。
     auto set_center_space_ratio(float r) -> PieChart & {
         center_space_ratio = std::clamp(r, 0.0F, 0.95F);
         mark_needs_paint();
         return *this;
     }
+    /// @brief 设置起始角。
+    /// @param deg 角度（0 = +x 方向；-90 = 12 点钟起）。
+    /// @return PieChart 引用（链式调用）。
     auto set_start_angle(float deg) -> PieChart & {
         start_angle = deg;
         mark_needs_paint();
         return *this;
     }
+    /// @brief 开关扇区内百分比文本。
+    /// @param v 是否绘制百分比文本。
+    /// @return PieChart 引用（链式调用）。
     auto set_show_percentage_labels(bool v) -> PieChart & {
         show_percentage_labels = v;
         mark_needs_paint();
         return *this;
     }
+    /// @brief 设置图例规格（可见性 / Top|Bottom|Right 位置）。
+    /// @param l 图例规格。
+    /// @return PieChart 引用（链式调用）。
     auto set_legend(ChartLegendSpec l) -> PieChart & {
         legend = l;
         mark_needs_layout();
         return *this;
     }
+    /// @brief 设置图内留白。
+    /// @param p 四边留白（dp）。
+    /// @return PieChart 引用（链式调用）。
     auto set_padding(const EdgeInsets &p) -> PieChart & {
         padding = p;
         mark_needs_layout();
         return *this;
     }
 
+    /// @brief 控件类型名（Inspector / 序列化路由用）。
+    /// @return 静态字符串字面量 "PieChart"，生命周期同程序。
     [[nodiscard]] auto type_name() const -> const char * override { return "PieChart"; }
 
+    /// @brief 静态自描述表：Inspector 用的属性/事件/不变量/示例元数据。
+    /// @return WidgetDescriptor，含 width/height/show 公共属性与 on_section_tapped 事件。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
+    /// @brief 实例级自描述：转发静态描述表。
+    /// @return 与 describe_static() 相同的 WidgetDescriptor（属性/事件/不变量/示例）。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 收集本控件的响应式信号到构建面。
+    /// @param out 输出收集向量（追加 grow_ 动画进度信号的基类指针）。
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&grow_.signal()); }
 
     /// @brief 动画期间不缓存 Display List（内容每帧变化）。
+    /// @return grow_ 动画进行中为 false，可缓存时为 true。
     [[nodiscard]] auto can_cache_display_list() const -> bool override { return !grow_.animating(); }
 
+    /// @brief 序列化扇区/中心比/起始角/百分比开关/间隙/图例/留白，先经基类写公共属性。
+    /// @param props 输出目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override;
+    /// @brief 从属性 JSON 回填扇区/中心比/起始角/百分比开关/间隙/图例/留白：先经基类回填公共属性，类型不符
+    ///        的键跳过，center_space_ratio 夹取 [0,0.95]、section_gap 下限 0，完成后请求重排重绘。
+    /// @param props 输入 JSON 对象。
     auto deserialize_props(const Json &props) -> void override;
 
+    /// @brief 声明接收点击事件（扇区轻触回调依赖）。
+    /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
+    /// @brief 悬停态变化：离开时清空扇区/图例悬停并重绘。
+    /// @param entered 指针进入为 true，离开为 false。
     auto on_hover_change(bool entered) -> void override {
         hover_ = entered;
         if (!entered && (hovered_section_.has_value() || legend_hover_.has_value())) {
@@ -108,45 +149,73 @@ class PieChart : public LeafWidget, public PieChartProps {
         }
     }
 
+    /// @brief 鼠标事件：Move 先图例后扇区更新悬停态（仅状态变化才重绘）；Release 命中扇区且回调已挂则触发
+    ///        on_section_tapped。
+    /// @param e 指针事件。
     auto on_pointer_event(MouseEvent &e) -> void override;
 
     /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `PieChart`，
     ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
+    /// @return 恒为 AccessibilityRole::Image。
     /// @note Side-effects: pure
     [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override { return AccessibilityRole::Image; }
 
+    /// @brief 无障碍标签：控件名与扇区数。
+    /// @return "PieChart, N sections" 文本。
     [[nodiscard]] auto accessibility_label() const -> std::string override;
+    /// @brief 无障碍值文本：悬停扇区的名称与原始值。
+    /// @return 悬停且索引合法时为 "name: value"，无悬停或索引越界为空串。
     [[nodiscard]] auto accessibility_value() const -> std::string override;
 
     /// @brief 当前悬停的扇区索引；无悬停为空。
+    /// @return hovered_section_ 的快照（nullopt = 无悬停）。
     [[nodiscard]] auto hovered_section() const -> std::optional<int> { return hovered_section_; }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override;
+    /// @brief 绘制扇区、图例与悬停值框：扇区按 grow-in 进度展开总角、间隙以角度让位；图例悬停时非悬停扇区
+    ///        减淡、悬停扇区描边、百分比文本夹在控件内；绘图区退化（外半径非正或无占比）时不绘制。
+    /// @param p 绘制器
+    /// @param bounds 绘制边界
+    /// @param ctx 构建上下文（取主题色/字体）
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override;
     /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态，D11）。
-    auto on_mount(const BuildContext & /*ctx*/) -> void override { grow_.mount(); }
+    /// @param ctx 构建上下文（本实现未使用）。
+    auto on_mount([[maybe_unused]] const BuildContext &ctx) -> void override { grow_.mount(); }
 
   private:
     struct Geometry {
-        Rect plot{};
-        Point center{};
-        float outer = 0.0F;
-        float inner = 0.0F;
-        std::vector<double> ratios;
-        std::vector<Rect> legend_rects;
+        Rect plot{};  ///< 绘图区矩形（留白与图例占位扣除后的可用区）
+        Point center{};  ///< 饼/环图圆心（控件坐标）
+        float outer = 0.0F;  ///< 外半径（绘图区宽高较小者之半）
+        float inner = 0.0F;  ///< 内半径（外半径 × center_space_ratio，夹取 [0,0.95]）
+        std::vector<double> ratios;  ///< 各扇区归一化占比（value / Σvalue）
+        std::vector<Rect> legend_rects;  ///< 各图例项的命中矩形（与扇区序对齐）
     };
 
+    /// @brief 依尺寸与字体计算几何（含按图例位置扣减绘图区与图例排布）。
+    /// @param size 当前布局尺寸
+    /// @param font 主题字体（量取图例文本宽高）
+    /// @return Geometry 快照（on_layout 时存入 geom_）
     [[nodiscard]] auto compute_geometry(const Size &size, const Font &font) const -> Geometry;
+    /// @brief 极坐标扇区命中判定（与渲染同源）。
+    /// @param g 几何快照
+    /// @param local 本地坐标
+    /// @return 命中扇区索引；半径落环外/环内或角度无扇区时为 nullopt
     [[nodiscard]] auto section_hit(const Geometry &g, const Point &local) const -> std::optional<int>;
+    /// @brief 图例项矩形命中判定。
+    /// @param g 几何快照
+    /// @param local 本地坐标
+    /// @return 命中图例项序号，无命中为 nullopt
     [[nodiscard]] auto legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t>;
 
-    Geometry geom_;
-    ChartGrowIn grow_;
-    std::optional<int> hovered_section_;
-    std::optional<std::size_t> legend_hover_;
+    Geometry geom_;  ///< 当前几何（每次 on_layout 重算）
+    ChartGrowIn grow_;  ///< grow-in 动画器（on_mount 接入帧循环）
+    std::optional<int> hovered_section_;  ///< 当前悬停扇区（nullopt = 无）
+    std::optional<std::size_t> legend_hover_;  ///< 当前悬停图例项（nullopt = 无）
 };
 
+// 绘图区先按留白内缩、再按图例位置扣掉一条图例带；圆心取绘图区中心，外半径取宽高较小者之半。
 inline auto PieChart::compute_geometry(const Size &size, const Font &font) const -> Geometry {
     Geometry g;
     g.ratios = pie_section_ratios(sections);
@@ -206,6 +275,10 @@ inline auto PieChart::compute_geometry(const Size &size, const Font &font) const
     return g;
 }
 
+/// @brief 布局：按约束定尺寸（非有限约束回退 240×200），并重算 geom_。
+/// @param c 父级约束
+/// @param ctx 构建上下文（继承主题字体）
+/// @return 本帧控件尺寸（宽高均夹到非负）
 inline auto PieChart::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
     Size s = c.constrain(Size{.width = c.max.width, .height = c.max.height});
     if (!std::isfinite(c.max.width)) {
@@ -220,6 +293,7 @@ inline auto PieChart::on_layout(const Constraints &c, const BuildContext &ctx) -
     return s;
 }
 
+// 顺序扫描 legend_rects，首个包含该点的矩形即命中。
 inline auto PieChart::legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t> {
     for (std::size_t i = 0; i < g.legend_rects.size(); ++i) {
         const Rect &r = g.legend_rects[i];
@@ -230,6 +304,7 @@ inline auto PieChart::legend_hit(const Geometry &g, const Point &local) const ->
     return std::nullopt;
 }
 
+// 半径先落在 [inner, outer]，再按相对 start_angle 归一化后的角扫描扇区。
 inline auto PieChart::section_hit(const Geometry &g, const Point &local) const -> std::optional<int> {
     if (g.outer <= 0.0F || g.ratios.empty()) {
         return std::nullopt;
@@ -261,6 +336,7 @@ inline auto PieChart::section_hit(const Geometry &g, const Point &local) const -
     return std::nullopt;
 }
 
+// Move/Release 以外的动作回落基类处理。
 inline auto PieChart::on_pointer_event(MouseEvent &e) -> void {
     if (e.action == MouseAction::Move) {
         const auto legend = legend_hit(geom_, e.local_position);
@@ -283,10 +359,12 @@ inline auto PieChart::on_pointer_event(MouseEvent &e) -> void {
     Widget::on_pointer_event(e);
 }
 
+// 文本为控件名与 sections.size() 的拼接。
 inline auto PieChart::accessibility_label() const -> std::string {
     return "PieChart, " + std::to_string(sections.size()) + " sections";
 }
 
+// 索引由悬停事件写入，读回时仍校验负值与越界；值取扇区的原始 value 而非占比。
 inline auto PieChart::accessibility_value() const -> std::string {
     if (!hovered_section_.has_value() || *hovered_section_ < 0 ||
         static_cast<std::size_t>(*hovered_section_) >= sections.size()) {
@@ -296,6 +374,7 @@ inline auto PieChart::accessibility_value() const -> std::string {
     return sections[i].name + ": " + std::to_string(sections[i].value);
 }
 
+// 属性表与 PieChartProps 字段一一对应，另附基类的 width/height/show。
 inline auto PieChart::describe_static() -> WidgetDescriptor {
     return WidgetDescriptor{
         .name = "PieChart",
@@ -373,6 +452,7 @@ inline auto PieChart::describe_static() -> WidgetDescriptor {
     };
 }
 
+// 键集与 describe_static 的属性表一致。
 inline auto PieChart::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
     props["sections"] = pie_section_vector_to_json(sections);
@@ -384,6 +464,7 @@ inline auto PieChart::serialize_props(Json &props) const -> void {
     props["padding"] = edge_insets_to_json(padding);
 }
 
+// 键名与 serialize_props 对称；sections/legend/padding 交由转换函数直接覆盖。
 inline auto PieChart::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("sections")) {
@@ -411,6 +492,7 @@ inline auto PieChart::deserialize_props(const Json &props) -> void {
     mark_needs_paint();
 }
 
+// 绘制顺序：扇区与扇内百分比标签 → 图例色块与名称 → 悬停值框（居中偏上并夹进控件边界）。
 inline auto PieChart::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
     const Theme theme = inherit_theme(ctx);
     const Font &font = theme.font;

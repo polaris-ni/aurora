@@ -1,16 +1,14 @@
 #pragma once
 
-/**
- * @file aurora_fwd.h
- * @brief 前向声明头（可选、不破坏现有 API）。
- *
- * 与 `aurora.h`（单一包含入口，拉入全部抽象层）互补：当某翻译单元只需以
- * 指针/引用形式提及下列重量级门面类型、而不需要其完整定义时，可仅包含本头，
- * 以降低单 TU 的瞬时包含成本。需要完整 API 时仍应 `#include "aurora/aurora.h"`。
- *
- * 本头**不**前向声明值类型（Color/Rect/KeyCode/枚举等，按值使用时需完整定义）
- * 与模板（Provider<T>/Signal<T> 等，需完整模板头）；它们由各模块头提供。
- */
+/// @brief 前向声明头（可选、不破坏现有 API）。
+/// @file aurora_fwd.h
+///
+/// 与 `aurora.h`（单一包含入口，拉入全部抽象层）互补：当某翻译单元只需以
+/// 指针/引用形式提及下列重量级门面类型、而不需要其完整定义时，可仅包含本头，
+/// 以降低单 TU 的瞬时包含成本。需要完整 API 时仍应 `#include "aurora/aurora.h"`。
+///
+/// 本头**不**前向声明值类型（Color/Rect/KeyCode/枚举等，按值使用时需完整定义）
+/// 与模板（Provider\<T\>/Signal\<T\> 等，需完整模板头）；它们由各模块头提供。
 namespace aurora {
 
 class Surface;  ///< 抽象渲染后端（Headless/GLFW/Win32/X11/Wayland/...）

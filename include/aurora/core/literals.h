@@ -1,5 +1,7 @@
 #pragma once
 
+/// @brief 用户定义字面量统一入口（需求 #4）：聚合各领域头中 `aurora::literals` 命名空间下的 UDL。
+/// @file
 // core/literals.h
 //
 // 用户定义字面量（需求 #4）统一收敛入口。

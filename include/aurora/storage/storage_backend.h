@@ -29,26 +29,38 @@ class StorageBackend {
     auto operator=(StorageBackend &&) -> StorageBackend & = delete;
 
     /// @brief 写入/覆写一条记录信封（id 不存在则创建，存在则整体替换）。
+    /// @param id 记录主键。
+    /// @param rec 完整信封（encoding/payload/mtime 等以其为准）。
+    /// @return 成功返回空值；IO/序列化失败返回对应 ErrorCode。
     [[nodiscard]] virtual auto put_record(const std::string &id, const StorageRecord &rec) -> Result<void> = 0;
 
     /// @brief 读取一条记录信封；不存在返回 ErrorCode::StorageRecordNotFound。
+    /// @param id 记录主键。
+    /// @return 成功携带 StorageRecord；不存在/损坏返回错误。
     [[nodiscard]] virtual auto get_record(const std::string &id) -> Result<StorageRecord> = 0;
 
     /// @brief 删除一条记录；不存在视为成功（幂等）。
+    /// @param id 记录主键。
+    /// @return 成功返回空值；仅 IO 失败才报错。
     [[nodiscard]] virtual auto remove(const std::string &id) -> Result<void> = 0;
 
     /// @brief 列出全部记录 id（顺序不保证）。
+    /// @return 成功携带 id 列表；IO/查询失败返回错误。
     [[nodiscard]] virtual auto list() -> Result<std::vector<std::string>> = 0;
 
     /// @brief 跨记录事务/批量原子。默认实现：顺序执行 body（尽力而为，无原子回滚）。
     ///        支持真事务的后端（SqliteBackend）应覆写为 BEGIN/COMMIT/ROLLBACK；
     ///        MemoryBackend 覆写为快照回滚。不覆写事务的后端（如 FilesystemBackend）
     ///        仅获得顺序执行语义——单条失败不会自动撤销已完成的写，属已知限制。
+    /// @param body 事务体：在当前后端上执行一串操作，返回首个错误或成功。
+    /// @return body 的结果；覆写实现可在 body 失败时回滚并透传其错误。
     [[nodiscard]] virtual auto transaction(const std::function<Result<void>(StorageBackend &)> &body) -> Result<void> {
         return body(*this);
     }
 
     /// @brief 是否存在某 id；默认经 get_record 实现。
+    /// @param id 记录主键。
+    /// @return 存在为 true；不存在为 false；其他 IO 错误返回错误。
     [[nodiscard]] virtual auto contains(const std::string &id) -> Result<bool> {
         auto r = get_record(id);
         if (r) {
@@ -61,6 +73,7 @@ class StorageBackend {
     }
 
     /// @brief 清空全部记录；经 transaction + remove 实现（后端可覆写为单语句）。
+    /// @return 成功返回空值；任一 remove 失败则中止并返回该错误。
     [[nodiscard]] virtual auto clear() -> Result<void> {
         return transaction([this](StorageBackend &) -> Result<void> {
             auto ids = list();
@@ -77,9 +90,11 @@ class StorageBackend {
     }
 
     /// @brief 主动落盘（缓冲型后端覆写；默认 no-op）。
+    /// @return 成功返回空值；刷盘 IO 失败返回错误。
     virtual auto flush() -> Result<void> { return Result<void>{}; }
 
     /// @brief 关闭并释放资源（默认 no-op）。
+    /// @return 成功返回空值；关闭 IO 失败返回错误。
     virtual auto close() -> Result<void> { return Result<void>{}; }
 };
 

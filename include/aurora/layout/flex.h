@@ -4,9 +4,7 @@
 
 namespace aurora {
 
-/**
- * @brief 弹性布局方向（对应架构 §4.2 / Flutter Flex）。
- */
+/// @brief 弹性布局方向（对应架构 §4.2 / Flutter Flex）。
 enum class FlexDirection : std::uint8_t {
     Row,
     Column,
@@ -14,15 +12,13 @@ enum class FlexDirection : std::uint8_t {
     ColumnReverse,
 };
 
-/**
- * @brief 弹性布局参数：挂载在 Row/Column 上即可启用 Flutter 式 flex 布局。
- *
- * 与 widget 的 modifier 正交：本结构描述"子项如何排布"，modifier 描述"自身如何修饰"。
- */
+/// @brief 弹性布局参数：挂载在 Row/Column 上即可启用 Flutter 式 flex 布局。
+///
+/// 与 widget 的 modifier 正交：本结构描述"子项如何排布"，modifier 描述"自身如何修饰"。
 struct Flex {
-    FlexDirection direction = FlexDirection::Row;
-    MainAxisAlignment main_axis = MainAxisAlignment::Start;
-    CrossAxisAlignment cross_axis = CrossAxisAlignment::Start;
+    FlexDirection direction = FlexDirection::Row;  ///< 主轴方向（横向/纵向及其反序），默认 Row
+    MainAxisAlignment main_axis = MainAxisAlignment::Start;  ///< 子项沿主轴的对齐策略，默认 Start
+    CrossAxisAlignment cross_axis = CrossAxisAlignment::Start;  ///< 子项沿交叉轴的对齐策略，默认 Start
     /// @brief 相邻子项间的固定间距（像素）。等价于 Flutter 的 `spacing`：
     /// 无论主轴对齐方式如何，相邻子项间至少插入 `gap`；剩余空间仍由 `main_axis` 分配。
     /// 默认 0（不插入额外间距）。

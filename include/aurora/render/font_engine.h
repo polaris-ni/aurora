@@ -13,41 +13,22 @@
 #include "aurora/render/painter.h"
 #include "aurora/render/text_aa_mode.h"
 
+/// @brief 渲染域命名空间：字体引擎门面与文本排版选项。
 namespace aurora::render {
 
-/**
- * @brief 文本抗锯齿策略（FreeType 驱动，跨平台一致）。
- *
- * - `Supersample`：灰度 AA——`FT_RENDER_MODE_NORMAL` 输出 A8 覆盖度，盒式合成。
- *   颜色安全、背景无关，对半透明文本与任意背景均正确。
- * - `ClearType`：屏幕最佳——`FT_RENDER_MODE_LCD` 输出 3× 水平 RGB 子像素覆盖度，
- *   由 `Painter::blend_subpixel` 逐通道合成，得到真·子像素锐利文本（非灰度降级）。
- *   仅当文本不透明（`c.a == 255`）时使用，否则自动回退 `Supersample`。
- *   跨机一致（字体由引擎内置打包），不依赖系统 ClearType 调谐。
- */
-/**
- * @brief 字体引擎（单例）：提供「真实字体渲染」的度量与绘制（specification/03-layout-render.md §8.2）。
- *
- * 设计目标：widget/布局层只依赖本接口的抽象语义，不关心字形解码来源。
- *
- * 实现策略：以 FreeType 作为唯一字体内核（经 CMake FetchContent 编入静态库），
- * 跨平台一致、确定性。内置 Noto Sans（OFL）作为全平台默认字体（引擎首次使用时自动
- * 注册，含 Headless），确保跨机文本渲染逐位确定；缺字按候选 FT_Face 链回退（含系统
- * CJK 字体），避免豆腐块。`set_default_font` / `register_font` / `register_font_from_memory`
- * 可注入私有字体。无任何可用字体文件时回退到内置 `BitmapFont`（零依赖位图字体），
- * 保证 headless 渲染始终可输出文本。
- *
- * 文本选中相关原语 `caret_x` / `hit_test_char` 以「码点」为索引单位（UTF-8 安全），
- * 供 Text/TextInput 精确落光标与命中测试，无需 widget 自行计算布局。
- */
+// 文本抗锯齿策略 `TextAAMode`（定义于 text_aa_mode.h，经 set_text_aa_mode 设为进程级默认）：
+// - `Supersample`：灰度 AA——`FT_RENDER_MODE_NORMAL` 输出 A8 覆盖度，盒式合成。
+//   颜色安全、背景无关，对半透明文本与任意背景均正确。
+// - `ClearType`：屏幕最佳——`FT_RENDER_MODE_LCD` 输出 3× 水平 RGB 子像素覆盖度，
+//   由 `Painter::blend_subpixel` 逐通道合成，得到真·子像素锐利文本（非灰度降级）。
+//   仅当文本不透明（`c.a == 255`）时使用，否则自动回退 `Supersample`。
+//   跨机一致（字体由引擎内置打包），不依赖系统 ClearType 调谐。
 
-/**
- * @brief 文本布局附加选项：在「字体度量」之外影响测量与绘制的排版属性。
- *
- * 由 `Text` 的 `letter_spacing` / `word_spacing` / `font_style=Italic` 提供，使
- * `measure_width` / `caret_x` / `hit_test_char` / `draw_text` 在「有间距 / 斜体」时
- * 保持完全一致（度量、光标、命中、像素一一对应），避免布局与绘制错位。
- */
+/// @brief 文本布局附加选项：在「字体度量」之外影响测量与绘制的排版属性。
+///
+/// 由 `Text` 的 `letter_spacing` / `word_spacing` / `font_style=Italic` 提供，使
+/// `measure_width` / `caret_x` / `hit_test_char` / `draw_text` 在「有间距 / 斜体」时
+/// 保持完全一致（度量、光标、命中、像素一一对应），避免布局与绘制错位。
 struct TextLayoutOpts {
     float letter_spacing = 0.0F;  ///< 字形间额外间距（逻辑 dp），加在每对相邻字形之间
     float word_spacing = 0.0F;  ///< 词间额外间距（逻辑 dp），加在每个空格之后
@@ -59,17 +40,18 @@ struct TextLayoutOpts {
     ///        混排 UBA 多 run 视觉重排、BitmapFont 兜底路径不支持 RTL。
     std::optional<TextDirection> direction = std::nullopt;
 
+    /// @brief 逐字段相等比较：四个排版属性全同才相等。
+    /// @param o 待比较的另一组布局选项。
+    /// @return 两选项的 letter_spacing / word_spacing / italic / direction 是否全部相等。
     auto operator==(const TextLayoutOpts &o) const -> bool {
         return letter_spacing == o.letter_spacing && word_spacing == o.word_spacing && italic == o.italic &&
                direction == o.direction;
     }
 };
 
-/**
- * @brief 文本 shaping 缓存统计快照。
- *
- * 缓存是真实优化（非 `AURORA_ENABLE_PROFILING` 门控），故统计始终可用。`命中率 = hits / (hits + misses)`。
- */
+/// @brief 文本 shaping 缓存统计快照。
+///
+/// 缓存是真实优化（非 `AURORA_ENABLE_PROFILING` 门控），故统计始终可用。`命中率 = hits / (hits + misses)`。
 struct ShapeCacheStats {
     std::uint64_t hits = 0;  ///< 命中次数（跳过 hb_shape）
     std::uint64_t misses = 0;  ///< 未命中次数（触发 hb_shape）
@@ -77,24 +59,49 @@ struct ShapeCacheStats {
     std::size_t bytes = 0;  ///< 当前估算占用字节数
 };
 
+/// @brief 字体引擎（单例）：提供「真实字体渲染」的度量与绘制（specification/03-layout-render.md §8.2）。
+///
+/// 设计目标：widget/布局层只依赖本接口的抽象语义，不关心字形解码来源。
+///
+/// 实现策略：以 FreeType 作为唯一字体内核（经 CMake FetchContent 编入静态库），
+/// 跨平台一致、确定性。内置 Noto Sans（OFL）作为全平台默认字体（引擎首次使用时自动
+/// 注册，含 Headless），确保跨机文本渲染逐位确定；缺字按候选 FT_Face 链回退（含系统
+/// CJK 字体），避免豆腐块。`set_default_font` / `register_font` / `register_font_from_memory`
+/// 可注入私有字体。无任何可用字体文件时回退到内置 `BitmapFont`（零依赖位图字体），
+/// 保证 headless 渲染始终可输出文本。
+///
+/// 文本选中相关原语 `caret_x` / `hit_test_char` 以「码点」为索引单位（UTF-8 安全），
+/// 供 Text/TextInput 精确落光标与命中测试，无需 widget 自行计算布局。
 class FontEngine {
   public:
     /// @brief 进程级单例。
+    /// @return 全进程唯一的 FontEngine 实例引用（首次调用时构造）。
     static auto instance() -> FontEngine &;
 
+    /// @brief 单例类型禁止复制构造：实例仅经 `instance()` 获取，地址须稳定。
     FontEngine(const FontEngine &) = delete;
+    /// @brief 单例类型禁止移动构造：实例地址须稳定。
     FontEngine(FontEngine &&) = delete;
+    /// @brief 单例类型禁止复制赋值。
+    /// @return 不存在：函数已 delete，不产生可求值的返回引用。
     auto operator=(const FontEngine &) -> FontEngine & = delete;
+    /// @brief 单例类型禁止移动赋值。
+    /// @return 不存在：函数已 delete，不产生可求值的返回引用。
     auto operator=(FontEngine &&) -> FontEngine & = delete;
 
     /// @brief 加载默认字体文件（经 FreeType 加载并覆盖默认链；family 为空表示默认）。
+    /// @param ttf_path 字体文件路径。
     static auto set_default_font(const std::string &ttf_path) -> void;
 
     /// @brief 注册 family→ttf_path 的私有字体文件（family 为空表示默认 sans-serif）。
+    /// @param family 字体族名；空串落入默认 sans-serif 槽。
+    /// @param ttf_path 该族对应的字体文件路径。
     static auto register_font(const std::string &family, const std::string &ttf_path) -> void;
 
     /// @brief 注册内存字体（family 为空表示默认 sans-serif）。用于打包内置/私有 TTF 字节，
     ///        例如引擎内置的 Noto Sans 即经此注册，避免运行时依赖字体文件路径。
+    /// @param family 字体族名；空串落入默认 sans-serif 槽。
+    /// @param ttf_bytes 完整 TTF 文件字节；注册后由引擎持有其生命周期。
     static auto register_font_from_memory(const std::string &family, const std::vector<std::uint8_t> &ttf_bytes)
         -> void;
 
@@ -102,9 +109,11 @@ class FontEngine {
     ///
     /// 会自增 `raster_generation()`：控件缓存（Display List / 离屏层）在录制时固化了光栅
     /// 结果，须以该世代失效，否则切换后仍回放旧光栅。
+    /// @param mode 新的文本抗锯齿策略。
     static auto set_text_aa_mode(TextAAMode mode) -> void;
 
     /// @brief 取得当前文本抗锯齿策略。
+    /// @return 进程级当前生效的 `TextAAMode`。
     [[nodiscard]] static auto text_aa_mode() -> TextAAMode;
 
     /// @brief 光栅状态世代：凡「全局影响字形光栅结果」的设置变更（`set_text_aa_mode`、
@@ -115,12 +124,20 @@ class FontEngine {
     /// 只沿父链向上传播失效、**不会**失效后代缓存——若不以本世代校验，切换 AA 模式后
     /// 后代仍回放旧光栅，表现为「切换瞬间无变化，过一会儿才随无关失效零星生效」。
     /// 控件把本世代纳入缓存命中条件即可 O(1) 感知全局光栅状态变化，无需整树遍历。
+    /// @return 单调自增的光栅状态世代计数。
     [[nodiscard]] static auto raster_generation() -> std::uint64_t;
 
     /// @brief 测量字符串宽度（设备像素，含字距/kerning）。
+    /// @param text 待测量的 UTF-8 文本。
+    /// @param f 字体描述（族名/字号/字重）。
+    /// @return 整串宽度，单位与绘制帧缓冲一致。
     [[nodiscard]] static auto measure_width(const std::string &text, const Font &f) -> float;
 
     /// @brief 测量字符串宽度（含 `opts` 的间距/斜体）。无间距且非斜体时与上方等价。
+    /// @param text 待测量的 UTF-8 文本。
+    /// @param f 字体描述。
+    /// @param opts 排版附加选项（字距/词间距/斜体/方向）。
+    /// @return 整串宽度（同 `measure_width` 口径）。
     [[nodiscard]] static auto measure_width(const std::string &text, const Font &f, const TextLayoutOpts &opts)
         -> float;
 
@@ -129,6 +146,11 @@ class FontEngine {
     ///        取整到整像素，同一字形在不同像素尺寸下的 advance 不成比例，96dp 测量
     ///        （measure_width）与物理光栅实绘宽度可差数 dp 且在行尾累计；选区高亮/命中需与
     ///        实绘像素对齐时用本函数。scale=1（96 DPI，含 Headless 测试）退化为 measure_width。
+    /// @param text 待测量的 UTF-8 文本。
+    /// @param f 字体描述。
+    /// @param opts 排版附加选项。
+    /// @param scale 绘制所用帧缓冲像素比（dp→物理）。
+    /// @return 折算回逻辑 dp 的实显宽度。
     [[nodiscard]] static auto display_width(const std::string &text, const Font &f, const TextLayoutOpts &opts,
                                             float scale) -> float;
 
@@ -136,10 +158,18 @@ class FontEngine {
     ///        前缀推进后折算回 dp，与 draw_text 的 pen 推进逐字符同源（同 px、同 hinting
     ///        advance、同 kerning/间距语义），逐字符精确（而非整行线性近似）；选区高亮/命中
     ///        需与实绘像素对齐时用本函数。scale=1 退化为 `caret_x`（两者同源逐位相等）。
+    /// @param text 待定位的 UTF-8 文本。
+    /// @param char_index 光标码点下标（0..码点数）。
+    /// @param f 字体描述。
+    /// @param opts 排版附加选项。
+    /// @param scale 绘制所用帧缓冲像素比（dp→物理）。
+    /// @return 前 `char_index` 个码点的前缀推进宽度（逻辑 dp）。
     [[nodiscard]] static auto display_caret_x(const std::string &text, std::size_t char_index, const Font &f,
                                               const TextLayoutOpts &opts, float scale) -> float;
 
     /// @brief 测量单行高度（设备像素，ascent+descent）。
+    /// @param f 字体描述。
+    /// @return 单行行盒高度。
     [[nodiscard]] static auto measure_height(const Font &f) -> float;
 
     /// @brief 测量单行基线上沿（单位与 `measure_height` 完全一致）：行盒顶 → 首行基线。
@@ -149,43 +179,90 @@ class FontEngine {
     /// （`floor(origin_y + ascent + 0.5)`，见 emit_text_glyphs_core）——需要与实绘首行逐位
     /// 一致的调用方自行 snap。无可用字体面时回退 `BitmapFont::measure_ascent`（同一
     /// `pixel_size` 口径），恒有 `0 <= measure_ascent <= measure_height`。
+    /// @param f 字体描述。
+    /// @return 行盒顶到首行基线的距离（与 `measure_height` 完全同单位）。
     [[nodiscard]] static auto measure_ascent(const Font &f) -> float;
 
     /// @brief 选中原语：第 `char_index` 个码点之前的基线 x（码点索引，UTF-8 安全）。
+    /// @param text 待定位的 UTF-8 文本。
+    /// @param char_index 光标码点下标（0..码点数）。
+    /// @param f 字体描述。
+    /// @return 该码点处的光标 x（与 `measure_width` 同口径）。
     [[nodiscard]] static auto caret_x(const std::string &text, std::size_t char_index, const Font &f) -> float;
 
     /// @brief 选中原语（含 `opts` 的间距/斜体）：第 `char_index` 个码点之前的基线 x。
+    /// @param text 待定位的 UTF-8 文本。
+    /// @param char_index 光标码点下标（0..码点数）。
+    /// @param f 字体描述。
+    /// @param opts 排版附加选项。
+    /// @return 该码点处的光标 x（与带 opts 的 `measure_width` 同口径）。
     [[nodiscard]] static auto caret_x(const std::string &text, std::size_t char_index, const Font &f,
                                       const TextLayoutOpts &opts) -> float;
 
     /// @brief 选中原语：给定点击 x，返回最近的光标码点下标（0..码点数）。
+    /// @param text 被点击的 UTF-8 文本。
+    /// @param x 点击位置的水平坐标（与 `measure_width` 同口径）。
+    /// @param f 字体描述。
+    /// @return 距点击位置最近的光标码点下标。
     [[nodiscard]] static auto hit_test_char(const std::string &text, float x, const Font &f) -> std::size_t;
 
     /// @brief 选中原语（含 `opts` 的间距/斜体）：给定点击 x，返回最近的光标码点下标。
+    /// @param text 被点击的 UTF-8 文本。
+    /// @param x 点击位置的水平坐标。
+    /// @param f 字体描述。
+    /// @param opts 排版附加选项。
+    /// @return 距点击位置最近的光标码点下标。
     [[nodiscard]] static auto hit_test_char(const std::string &text, float x, const Font &f, const TextLayoutOpts &opts)
         -> std::size_t;
 
     /// @brief 命中测试（含头含尾）：给定点击 x，返回「被点击字符」的码点下标——
     ///        点击落在某字符的任意位置（含右半）均计入该字符。消除 `hit_test_char`
     ///        （按中点返回下一光标）在选区端点造成的 off-by-one 漏选（行首/行尾字符未高亮）。
+    /// @param text 被点击的 UTF-8 文本。
+    /// @param x 点击位置的水平坐标（与 `measure_width` 同口径）。
+    /// @param f 字体描述。
+    /// @return 命中字符的码点下标（0..码点数-1；空文本返回 0；点击越过末字符右缘仍计末字符；
+    ///         RTL 下点击视觉左缘之外命中逻辑末字符）。
     [[nodiscard]] static auto hit_test_char_inclusive(const std::string &text, float x, const Font &f) -> std::size_t;
 
     /// @brief 命中测试（含头含尾，含 `opts` 的间距/斜体）。
+    /// @param text 被点击的 UTF-8 文本。
+    /// @param x 点击位置的水平坐标。
+    /// @param f 字体描述。
+    /// @param opts 排版附加选项（字距/词间距/斜体/方向）。
+    /// @return 命中字符的码点下标（0..码点数-1；空文本返回 0；越过末字符右缘仍计末字符）。
     [[nodiscard]] static auto hit_test_char_inclusive(const std::string &text, float x, const Font &f,
                                                       const TextLayoutOpts &opts) -> std::size_t;
 
     /// @brief 实显命中测试（caret 语义，同 `hit_test_char`）：字符边界取 `display_caret_x`，
     ///        与缩放屏实绘字形位置逐字符对齐；scale=1 时与 `hit_test_char` 完全等价。
+    /// @param text 被点击的 UTF-8 文本。
+    /// @param x 点击位置的水平坐标（逻辑 dp）。
+    /// @param f 字体描述。
+    /// @param opts 排版附加选项。
+    /// @param scale 绘制所用帧缓冲像素比（dp→物理）；无字体面或 scale=1 时退化为 `hit_test_char`。
+    /// @return 距点击位置最近的光标码点下标（0..码点数）。
     [[nodiscard]] static auto display_hit_test_char(const std::string &text, float x, const Font &f,
                                                     const TextLayoutOpts &opts, float scale) -> std::size_t;
 
     /// @brief 实显命中测试（含头含尾语义，同 `hit_test_char_inclusive`）：字符边界取
     ///        `display_caret_x`；scale=1 时与 `hit_test_char_inclusive` 完全等价。
+    /// @param text 被点击的 UTF-8 文本。
+    /// @param x 点击位置的水平坐标（逻辑 dp）。
+    /// @param f 字体描述。
+    /// @param opts 排版附加选项。
+    /// @param scale 绘制所用帧缓冲像素比（dp→物理）；无字体面或 scale=1 时退化为 `hit_test_char_inclusive`。
+    /// @return 命中字符的码点下标（0..码点数-1；行尾右侧命中末字符）。
     [[nodiscard]] static auto display_hit_test_char_inclusive(const std::string &text, float x, const Font &f,
                                                               const TextLayoutOpts &opts, float scale) -> std::size_t;
 
     /// @brief 绘制文本：把字形以 `c` 着色、按覆盖度 alpha 混合进 Painter 帧缓冲。
     ///        具体抗锯齿策略由 `text_aa_mode()` 决定（见 `TextAAMode`）。
+    /// @param p 目标 Painter（字形逐像素混合进其帧缓冲，越界部分被裁剪）。
+    /// @param r 摆放区域（仅读 `origin`：整串文本首行左上原点）。
+    /// @param text 待绘制的 UTF-8 文本。
+    /// @param f 字体描述。
+    /// @param c 着色颜色（alpha 参与混合）。
     static auto draw_text(Painter &p, const Rect &r, const std::string &text, const Font &f, Color c) -> void;
 
     /// @brief 绘制文本（**显式覆盖抗锯齿策略**）：用于多变/非均匀/渐变背景下避免 ClearType 的
@@ -193,18 +270,38 @@ class FontEngine {
     ///        `Supersample` 灰度 AA 背景无关、颜色安全，无红/蓝羽化。
     ///        `ClearType` 等价于默认路径（屏幕最佳）。
     ///        其余失败兜底（半透明、字体不可用）回退 `Supersample`。
+    /// @param p 目标 Painter。
+    /// @param r 摆放区域（仅读 `origin`）。
+    /// @param text 待绘制的 UTF-8 文本。
+    /// @param f 字体描述。
+    /// @param c 着色颜色（半透明时 `ClearType` 自动回退灰度 AA）。
+    /// @param aa_mode 显式抗锯齿策略。
     static auto draw_text(Painter &p, const Rect &r, const std::string &text, const Font &f, Color c,
                           TextAAMode aa_mode) -> void;
 
     /// @brief 绘制文本（按进程级 AA 策略，含 `opts` 的间距/斜体）。
+    /// @param p 目标 Painter。
+    /// @param r 摆放区域（仅读 `origin`）。
+    /// @param text 待绘制的 UTF-8 文本。
+    /// @param f 字体描述。
+    /// @param c 着色颜色。
+    /// @param opts 排版附加选项（字距/词间距/斜体/方向）。
     static auto draw_text(Painter &p, const Rect &r, const std::string &text, const Font &f, Color c,
                           const TextLayoutOpts &opts) -> void;
 
     /// @brief 绘制文本（**显式覆盖 AA 策略**，含 `opts` 的间距/斜体）。
+    /// @param p 目标 Painter。
+    /// @param r 摆放区域（仅读 `origin`）。
+    /// @param text 待绘制的 UTF-8 文本。
+    /// @param f 字体描述。
+    /// @param c 着色颜色。
+    /// @param aa_mode 显式抗锯齿策略。
+    /// @param opts 排版附加选项。
     static auto draw_text(Painter &p, const Rect &r, const std::string &text, const Font &f, Color c,
                           TextAAMode aa_mode, const TextLayoutOpts &opts) -> void;
 
     /// @brief 文本 shaping 缓存统计：命中率 = hits/(hits+misses) 。
+    /// @return 当前缓存的统计快照（命中/未命中次数、条目数、估算字节占用）。
     [[nodiscard]] static auto shape_cache_stats() -> ShapeCacheStats;
 
     /// @brief 清空 shaping 缓存（字体注册 / 变更后调用，避免陈旧字形序列）。

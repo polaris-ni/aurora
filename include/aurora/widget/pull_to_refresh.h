@@ -29,37 +29,41 @@ enum class PullToRefreshState : std::uint8_t {
 
 /// @brief PullToRefresh 属性（聚合，继承式双模 API：字段即控件公有成员）。
 struct PullToRefreshProps {
-    Node child;
+    Node child;  ///< 被包裹的滚动子树
     float threshold = 64.0F;  ///< 触发刷新的下拉距离（dp，超过后松手触发）
     float max_pull = 128.0F;  ///< 橡皮筋下拉上限（dp）
 };
 
-/**
- * @brief 下拉刷新容器（specification/04-widget.md）：包住一个滚动子树，顶部继续下拉时
- * 积累下拉距离，越过阈值松手触发 `on_refresh` 回调，`finish_refresh()` 收拢回弹。
- *
- * 两条输入通道（均要求滚动子树已在顶部）：
- * - **拖拽**：`DragRecognizer` 垂直锁定主轴后 0.45 系数橡皮筋映射（远端渐硬）；
- * - **滚轮余量**：嵌套滚动协调下，子级把到顶后未消费的量经 `ScrollEvent::remaining_y`
- *   上冒给本容器（本容器在命中链上位于子滚动控件更浅层）。
- *
- * 指示器以**覆盖层**绘制在视口顶部（不动布局盒、不推挤内容，spec §6.5「动画不改布局」），
- * 回弹/收拢走共享 `ScrollGlide` 短滑动时序（自驱动 tick，不占 `Animator`）；
- * reduce-motion 下直落端点、不产生中间帧（对齐 `AnimationController::tick` 短路语义）。
- *
- * 对标 Flutter `RefreshIndicator`、Material 3 pull-to-refresh、iOS UIRefreshControl。
- *
- * @note Thread: main-thread only
- * @note Rebuildable: yes（阈值可序列化；`on_refresh` 回调属运行时接线，重建后须重挂）
- */
+/// @brief 下拉刷新容器（specification/04-widget.md）：包住一个滚动子树，顶部继续下拉时
+/// 积累下拉距离，越过阈值松手触发 `on_refresh` 回调，`finish_refresh()` 收拢回弹。
+///
+/// 两条输入通道（均要求滚动子树已在顶部）：
+/// - **拖拽**：`DragRecognizer` 垂直锁定主轴后 0.45 系数橡皮筋映射（远端渐硬）；
+/// - **滚轮余量**：嵌套滚动协调下，子级把到顶后未消费的量经 `ScrollEvent::remaining_y`
+/// 上冒给本容器（本容器在命中链上位于子滚动控件更浅层）。
+///
+/// 指示器以**覆盖层**绘制在视口顶部（不动布局盒、不推挤内容，spec §6.5「动画不改布局」），
+/// 回弹/收拢走共享 `ScrollGlide` 短滑动时序（自驱动 tick，不占 `Animator`）；
+/// reduce-motion 下直落端点、不产生中间帧（对齐 `AnimationController::tick` 短路语义）。
+///
+/// 对标 Flutter `RefreshIndicator`、Material 3 pull-to-refresh、iOS UIRefreshControl。
+///
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes（阈值可序列化；`on_refresh` 回调属运行时接线，重建后须重挂）
 class PullToRefresh : public SingleChild, public PullToRefreshProps {
   public:
+    /// @brief 默认构造：空子树、缺省阈值（64dp）与下拉上限（128dp）。
+    /// 重建路径（serialization 工厂）使用此构造——子树与回调由宿主回填。
     PullToRefresh() = default;
+    /// @brief 以下拉目标子树构造。
+    /// @param child 被包裹的滚动子树（空节点时保持无子）。
     explicit PullToRefresh(Node child) {
         if (child) {
             child_ = std::move(child);
         }
     }
+    /// @brief 以属性聚合构造（子树 + 阈值/上限一次配齐）。
+    /// @param props PullToRefresh 属性（child/threshold/max_pull）。
     explicit PullToRefresh(PullToRefreshProps props) {
         if (props.child) {
             child_ = std::move(props.child);
@@ -68,8 +72,12 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
         max_pull = props.max_pull;
     }
 
+    /// @brief 类型名字符串 "PullToRefresh"。
+    /// @return 静态字符串常量，指向类型名。
     [[nodiscard]] auto type_name() const -> const char * override { return "PullToRefresh"; }
 
+    /// @brief 静态属性描述符：threshold/max_pull 标量属性与 on_refresh 事件声明。
+    /// @return 名为 "PullToRefresh"、子策略为 single 的完整描述符。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "PullToRefresh",
@@ -91,11 +99,17 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
             .examples = {"au::PullToRefresh(au::Scroll{...}) /* 顶部下拉触发刷新 */"},
         };
     }
+    /// @brief 运行时自描述（规格附录 B）。
+    /// @return 与 `describe_static()` 相同的描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    /// @brief 无信号依赖：下拉距离与状态机均为运行时内部状态。
+    /// @param out 信号输出向量；本控件不向其写入任何信号。
+    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
 
     /// @brief 注册刷新回调（松手越过阈值时触发一次；回调内异步取数，完成后调 `finish_refresh`）。
+    /// @param cb 无参刷新回调；覆盖既有值。
+    /// @return 自身引用，便于链式调用。
     auto on_refresh(std::function<void()> cb) -> PullToRefresh & {
         on_refresh_ = std::move(cb);
         return *this;
@@ -110,21 +124,30 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
         begin_setback_glide(0.0F);
     }
 
+    /// @brief 当前状态机三态。
+    /// @return Idle / Pulling / Refreshing 之一。
     [[nodiscard]] auto state() const -> PullToRefreshState { return state_; }
     /// @brief 当前下拉距离（dp，覆盖层高度；测试/联动观测点）。
+    /// @return 橡皮筋映射后的下拉量 pull_。
     [[nodiscard]] auto pull_distance() const -> float { return pull_; }
     /// @brief 触发进度（pull/threshold，可 >1；绑定指示器旋转角度/透明度用）。
+    /// @return 下拉距离与阈值之比；阈值非正时为 0。
     [[nodiscard]] auto progress() const -> float { return threshold > 0.0F ? pull_ / threshold : 0.0F; }
     /// @brief 是否正在回弹滑动（测试观测点）。
+    /// @return 短滑动时序仍处于活跃状态时为 true。
     [[nodiscard]] auto is_gliding() const -> bool { return glide_.active; }
 
+    /// @brief 序列化：通用属性 + threshold/max_pull（回调不序列化）。
+    /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
-        Widget::serialize_props(props);
+        Widget::serialize_props(props);  // 先由基类写入通用属性（width/height/show 等）
         props["threshold"] = threshold;
         props["max_pull"] = max_pull;
     }
+    /// @brief 反序列化：恢复通用属性与 threshold/max_pull（缺失键保持当前值）。
+    /// @param props 源 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
-        Widget::deserialize_props(props);
+        Widget::deserialize_props(props);  // 先由基类恢复通用属性
         if (props.contains("threshold")) {
             threshold = props["threshold"].get<float>();
         }
@@ -137,6 +160,7 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     ///        `delta_y` 再交给本容器（`remaining_y` 每跳重置，不作为入口信号）。
     ///        仅吃「向上滚且子树已在顶部」的量——门控不通过时按原样回传 `remaining_y`
     ///        继续上冒（派发器把「未写余量」视为全量消费，静默 return 会吞掉事件）。
+    /// @param e 滚动事件；消费时置 `is_handled` 并清零 `remaining_y`，否则原量回传。
     auto on_scroll(ScrollEvent &e) -> void override {
         if (state_ == PullToRefreshState::Refreshing || e.delta_y <= 0.0F || !child_at_top()) {
             e.remaining_y = e.delta_y;  // 本容器不接：原量交还更浅层可滚动祖先
@@ -158,12 +182,16 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     }
 
     /// @brief 本容器参与滚动派发（仅消费子级余量）。
+    /// @return 恒为 true：滚轮派发时本控件是可滚动目标。
     [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
 
   protected:
     /// @brief 视口透传布局：子树取本容器盒尺寸（滚动子树自管内滚偏移）。
+    /// @param c 父级传入的布局约束。
+    /// @param ctx 构建上下文（透传给子树）。
+    /// @return 夹取后的容器尺寸（子树占满）。
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        Size self = c.max;
+        Size self = c.max;  // 默认吃满父约束上限（视口透传）
         if (!c.max.is_finite()) {
             self = Size{.width = 320.0F, .height = 480.0F};
         }
@@ -175,6 +203,9 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
         return c.constrain(self);
     }
 
+    /// @brief 指针拖拽通道：垂直下拉手势经橡皮筋映射为下拉距离；劫持期内吞掉事件，
+    ///        松手按阈值裁决（触发刷新或回弹归零）；未劫持时修饰链照常下发子树。
+    /// @param e 鼠标事件；劫持/刷新期置 `is_handled`。
     auto on_pointer_event(MouseEvent &e) -> void override {
         drag_.on_mouse(e);
         if (e.action == MouseAction::Press && child_at_top()) {
@@ -213,13 +244,19 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
         }
     }
 
+    /// @brief 触摸通道：喂给拖拽识别器后原样下发子树（劫持裁决在 mouse 重载，逻辑同款）。
+    /// @param e 触摸事件。
     auto on_pointer_event(TouchEvent &e) -> void override {
         drag_.on_touch(e);
-        SingleChild::on_pointer_event(e);  // 修饰链照常
+        SingleChild::on_pointer_event(e);  // 修饰链照常下发子树
     }
 
+    /// @brief 子树之上叠加顶部下拉指示器带：半透明底 + 按进度扫过的弧线 spinner，刷新中附提示文案。
+    /// @param p 目标画笔。
+    /// @param bounds 本容器的绘制矩形（相对坐标系）。
+    /// @param ctx 构建上下文（取主题色）。
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        SingleChild::on_paint(p, bounds, ctx);
+        SingleChild::on_paint(p, bounds, ctx);  // 先绘制滚动子树（内容层）
         if (pull_ <= 0.4F) {
             return;
         }
@@ -244,8 +281,9 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     }
 
     /// @brief 回弹/旋转逐帧推进（自驱动 tick，同 Scroll/Dismissible 模式）。
+    /// @param now 当前帧时刻（墙钟，用于计算帧间隔 dt）。
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
-        SingleChild::tick_gestures(now);
+        SingleChild::tick_gestures(now);  // 先驱动子级手势
         const double dt =
             last_tick_.has_value() ? std::chrono::duration<double>(now - *last_tick_).count() : (1.0 / 60.0);
         last_tick_ = now;

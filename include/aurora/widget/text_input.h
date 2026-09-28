@@ -27,121 +27,162 @@ struct TextInputProps {
     float font_size = 14.0F;  ///< 字号（点）
 };
 
-/**
- * @brief 文本输入框（叶控件）：绘制边框 + 文本（值或占位）+ 光标。
- *
- * - 点击经 `FocusManager::request_focus` 获焦（触发 `on_focus_change` 重绘聚焦态）。
- * - 聚焦后接收 `onTextInput` 追加字符、`onKeyEvent` 退格（Delete/Backspace）。
- * - 值为 `Reactive<std::string>`，变化触发重绘；headless 下静态渲染当前文本/占位。
- * - 焦点全局协调由 `FocusManager` 负责（Tab 序、焦点派发），见 `aurora/event/focus.h`。
- *
- * 可定制性（对标 Qt QLineEdit / Flutter TextField）：
- * - 颜色：文本/占位/背景/聚焦背景/边框/聚焦边框（缺省跟随主题 primary）/选区高亮；
- * - 行为：`max_length` 限长（码点计数）、`read_only` 只读（可选可复制不可编辑）、
- *   `obscure_text` 密码掩码显示；
- * - 回调：`on_changed`（每次编辑）与 `on_submit`（Enter 提交）。
- *
- * 继承扩展点（protected 虚函数）：`paint_frame`（背景+边框）；内部状态（选区/光标）
- * 为 protected，子类可直接复用。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 文本输入框（叶控件）：绘制边框 + 文本（值或占位）+ 光标。
+///
+/// - 点击经 `FocusManager::request_focus` 获焦（触发 `on_focus_change` 重绘聚焦态）。
+/// - 聚焦后接收 `onTextInput` 追加字符、`onKeyEvent` 退格（Delete/Backspace）。
+/// - 值为 `Reactive<std::string>`，变化触发重绘；headless 下静态渲染当前文本/占位。
+/// - 焦点全局协调由 `FocusManager` 负责（Tab 序、焦点派发），见 `aurora/event/focus.h`。
+///
+/// 可定制性（对标 Qt QLineEdit / Flutter TextField）：
+/// - 颜色：文本/占位/背景/聚焦背景/边框/聚焦边框（缺省跟随主题 primary）/选区高亮；
+/// - 行为：`max_length` 限长（码点计数）、`read_only` 只读（可选可复制不可编辑）、
+/// `obscure_text` 密码掩码显示；
+/// - 回调：`on_changed`（每次编辑）与 `on_submit`（Enter 提交）。
+///
+/// 继承扩展点（protected 虚函数）：`paint_frame`（背景+边框）；内部状态（选区/光标）
+/// 为 protected，子类可直接复用。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
+///
 class TextInput : public LeafWidget {
   public:
+    /// @brief 默认构造：空文本、无占位提示，字号 14pt / 内边距 12dp / 内置默认配色。
     TextInput() = default;
+    /// @brief 以属性聚合构造：仅设占位提示、字号与初始文本，其余属性保持默认。
+    /// @param props 属性聚合：`placeholder` 空值占位提示，`font_size` 字号（点），
+    ///        `value` 写入 reactive 值 `value_`。
     explicit TextInput(const TextInputProps &props) : placeholder_(props.placeholder), font_size_(props.font_size) {
         value_ = props.value;
     }
 
     /// @brief 设置初始值（链式）。
+    /// @param v 新文本（UTF-8），整体替换 `value_` 并发出 `ValueChanged` 无障碍事件。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_value(const std::string &v) -> TextInput & {
         value_ = v;
         notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
         return *this;
     }
     /// @brief 设置占位提示（链式）。
+    /// @param p 空值时显示的占位文本（也充当无障碍名称）。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_placeholder(const std::string &p) -> TextInput & {
         placeholder_ = p;
         return *this;
     }
     /// @brief 设置字号（链式）。
+    /// @param s 字号（点）；非正时绘制/测量按 14pt 兜底。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto font_size(float s) -> TextInput & {
         font_size_ = s;
         return *this;
     }
     /// @brief 设置圆角半径（链式）。
+    /// @param r 圆角半径（dp）；> 0 时背景与边框改画圆角。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_corner_radius(float r) -> TextInput & {
         corner_radius_ = r;
         return *this;
     }
     /// @brief 设置内边距（链式）。
+    /// @param e 文本与边框之间的内边距。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_padding(EdgeInsets e) -> TextInput & {
         padding_ = e;
         return *this;
     }
     /// @brief 设置光标颜色（链式）。
+    /// @param c 聚焦时光标竖条的填充色。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_cursor_color(Color c) -> TextInput & {
         cursor_color_ = c;
         return *this;
     }
     /// @brief 设置是否启用（链式）；禁用态降级绘制并忽略输入。
+    /// @param v false = 禁用：忽略指针/键盘输入，无障碍状态并入只读。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_enabled(bool v) -> TextInput & {
         enabled_ = v;
         return *this;
     }
 
     /// @brief 设置文本颜色（链式）。
+    /// @param c 非空且非占位态的文本绘制色。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_text_color(Color c) -> TextInput & {
         text_color_ = c;
         return *this;
     }
     /// @brief 设置占位提示颜色（链式）。
+    /// @param c 空值态占位文本的绘制色。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_placeholder_color(Color c) -> TextInput & {
         placeholder_color_ = c;
         return *this;
     }
     /// @brief 设置背景色（链式）。
+    /// @param c 常态（未聚焦、未禁用）背景色。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_background(Color c) -> TextInput & {
         background_ = c;
         return *this;
     }
     /// @brief 设置聚焦态背景色（链式）。
+    /// @param c 获焦时替换 `background_` 绘制的背景色。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_focused_background(Color c) -> TextInput & {
         focused_background_ = c;
         return *this;
     }
     /// @brief 设置边框色（链式）。
+    /// @param c 常态边框描边色。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_border_color(Color c) -> TextInput & {
         border_color_ = c;
         return *this;
     }
     /// @brief 设置聚焦态边框色（链式）。不调用则跟随主题 `Theme::primary`。
+    /// @param c 获焦时边框色；同时聚焦态线宽至少加粗到 1.5dp（Fluent 式聚焦提示）。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_focused_border_color(Color c) -> TextInput & {
         focused_border_color_ = c;
         return *this;
     }
     /// @brief 设置边框线宽 dp（链式；0 = 不描边）。
+    /// @param w 线宽（dp）；负值回退为 1，0 表示只填背景不描边。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_border_width(float w) -> TextInput & {
         border_width_ = w >= 0.0F ? w : 1.0F;
         return *this;
     }
     /// @brief 设置选区高亮色（链式）。
+    /// @param c 选区底色矩形填充色（含头含尾模型下覆盖端点字符）。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_selection_color(Color c) -> TextInput & {
         selection_color_ = c;
         return *this;
     }
     /// @brief 设置最大长度（链式；码点计数，0 = 不限）。超出部分的输入/粘贴被截断。
+    /// @param n 码点数上限；键盘输入、粘贴与无障碍替换共用同一截断口径。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_max_length(std::size_t n) -> TextInput & {
         max_length_ = n;
         return *this;
     }
     /// @brief 设置只读（链式）；只读态可选择/复制但不可编辑（对标 Qt QLineEdit::readOnly）。
+    /// @param v true = 只读：键盘/粘贴/无障碍编辑被忽略，光标与选区仍可移动。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_read_only(bool v) -> TextInput & {
         read_only_ = v;
         return *this;
     }
+    /// @brief 是否处于只读态。
+    /// @return true = 只读（可选择/复制，不可编辑）。
     [[nodiscard]] auto read_only() const -> bool { return read_only_; }
     /// @brief 设置密码掩码显示（链式）；显示为 •，值不变（对标 Flutter obscureText）。
+    /// @param v true = 掩码显示（命中/选区按逐字符对应的掩码串定位）。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_obscure_text(bool v) -> TextInput & {
         obscure_ = v;
         return *this;
@@ -149,51 +190,68 @@ class TextInput : public LeafWidget {
     /// @brief 设置书写方向（链式）。nullopt = 继承环境（`Directionality` 注入/进程级），
     ///        与 Text::direction 语义一致。RTL 时光标/命中走逻辑↔视觉镜像（逻辑首字符在右缘）、
     ///        方向键反转（ArrowLeft = 逻辑前进）。
+    /// @param d 显式方向；设置后置脏重绘。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_direction(std::optional<TextDirection> d) -> TextInput & {
         direction_ = d;
         mark_needs_paint();
         return *this;
     }
     /// @brief 显式方向（nullopt = 继承环境）。
+    /// @return 设置的显式方向；生效方向（含环境继承结果）见布局期缓存的 `cached_direction_`。
     [[nodiscard]] auto direction() const -> std::optional<TextDirection> { return direction_; }
     /// @brief 设置变化回调（链式）；每次用户编辑（输入/退格/剪切/粘贴）后触发。
+    /// @param cb 回调，收参为编辑后的最新文本（UTF-8）。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_on_changed(std::function<void(const std::string &)> cb) -> TextInput & {
         on_changed_ = std::move(cb);
         return *this;
     }
     /// @brief 设置提交回调（链式）；Enter 键触发。
+    /// @param cb 回调，收参为提交时的当前文本（UTF-8）。
+    /// @return 本控件引用（`*this`），支持链式调用。
     auto set_on_submit(std::function<void(const std::string &)> cb) -> TextInput & {
         on_submit_ = std::move(cb);
         return *this;
     }
 
+    /// @brief 登记响应式信号：文本值 `value_` 变化经信号驱动重绘。
+    /// @param out 输出参数：追加本控件依赖的信号视图指针。
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&value_); }
+    /// @brief 类型名（注册 / 诊断 / Inspector 通道）。
+    /// @return "TextInput"。
     [[nodiscard]] auto type_name() const -> const char * override { return "TextInput"; }
 
     /// @brief 首行基线（内容盒顶 → 基线）：与 `on_paint` 的文本原点 `ty` 同源——
     ///        上内边距 + 文本在左右内边距之内的垂直居中偏移 + 有效字体 ascent。
-    [[nodiscard]] auto baseline_distance(const BuildContext & /*ctx*/) const -> std::optional<float> override {
+    /// @param ctx 构建上下文（未使用；签名与协议保持一致）。
+    /// @return 按当前盒尺寸与字体度量算出的基线距离（恒有值）。
+    [[nodiscard]] auto baseline_distance([[maybe_unused]] const BuildContext &ctx) const
+        -> std::optional<float> override {
         const float fs = font_size_ > 0.0F ? font_size_ : 14.0F;
         const Font f{.size_pt = fs};
         const float th = render::FontEngine::measure_height(f);
         return padding_.top + ((size().height - padding_.top - padding_.bottom - th) * 0.5F) +
-               render::FontEngine::measure_ascent(f);
+               render::FontEngine::measure_ascent(f);  // 末项加真实字体 ascent，得到内容盒顶 → 基线距离。
     }
 
     /// @brief 无障碍名称：无宿主覆写时以占位提示充当（编辑框的屏幕阅读器惯例）。
+    /// @return 占位提示文本（UTF-8；未设置占位时为空串）。
     /// @note Side-effects: pure
     [[nodiscard]] auto accessibility_label() const -> std::string override { return placeholder_; }
 
     /// @brief 无障碍值：取当前编辑内容（`value()`）。
+    /// @return 当前文本；组合态含光标处的 preedit（与绘制显示一致）。
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_value() const -> std::string override { return composed_text(value_.get()); }
 
     // ---- 无障碍语义（切片 1/2）：状态 + TextPattern 支撑的四组文本钩子 + Value 动作 ----
 
     /// @brief 无障碍状态：只读（含禁用）、密码掩码（读屏不得逐字朗出）、单行。
+    /// @return 基类通用状态叠加输入框特有字段后的结果（multiline 恒 false）。
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_state() const -> AccessibilityState override {
-        AccessibilityState s = Widget::accessibility_state();
+        AccessibilityState s = Widget::accessibility_state();  // 先取基类通用状态，再覆写输入框特有字段。
         s.read_only = read_only_ || !enabled_;
         s.disabled = !enabled_;
         s.password = obscure_;
@@ -203,15 +261,17 @@ class TextInput : public LeafWidget {
 
     /// @brief 无障碍文本全文（UTF-8）：`value_` 本体，**不含**组合期 preedit
     ///        （组合中文本属未确定态，读屏读 value 即可）。
+    /// @return 全文的 UTF-8 视图（空文本时为空串）。
     /// @note 返回视图指向 `value_` 的存量字符串：控件存活期间有效。
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_text() const -> std::string_view override { return value_.get(); }
 
     /// @brief 无障碍选区：内部「含头含尾码点下标」模型 → UTF-8 字节半开区间 `[start, end)`。
+    /// @return 选区字节区间；无选区时 start == end（光标位置），恒有值。
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_selection() const -> std::optional<AccessibilityTextSelection> override {
         const std::string &v = value_.get();
-        AccessibilityTextSelection sel;
+        AccessibilityTextSelection sel;  // 待填的 UTF-8 字节半开区间；无选区时两端重合于光标。
         if (has_selection()) {
             const std::size_t a = std::min(sel_start_, sel_end_);
             const std::size_t b = std::max(sel_start_, sel_end_) + 1U;  // 含尾 → 半开
@@ -226,6 +286,8 @@ class TextInput : public LeafWidget {
     }
 
     /// @brief 设置选区（UTF-8 字节半开区间 → 内部码点模型）；只读态仍允许移动光标/选区。
+    /// @param start 半开区间起点（UTF-8 字节偏移，越界夹紧到文本尾）。
+    /// @param end 半开区间终点（等于 start = 清空选区、光标落位）。
     /// @note Side-effects: mutates selection state
     auto accessibility_set_selection(std::size_t start, std::size_t end) -> void override {
         const std::string &v = value_.get();
@@ -247,6 +309,8 @@ class TextInput : public LeafWidget {
 
     /// @brief 单字符盒（**窗口本地 DIP**）：经 `FontEngine::caret_x` 取该字符左右边界。
     ///
+    /// @param utf8_index 字符起点的 UTF-8 字节偏移（越界返回 nullopt）。
+    /// @return 该字符的矩形盒；无字体度量（Headless）或未布局（零尺寸盒）时为 nullopt。
     /// @note 无字体度量时（Headless 不加载字体，G10）返回 nullopt —— 契约是「不崩溃」，
     ///       几何断言只能靠真机探针（`tools/verify/win32_ua_live_probe`）。
     /// @note Side-effects: reads layout/state
@@ -274,6 +338,9 @@ class TextInput : public LeafWidget {
 
     /// @brief 替换文本（UTF-8 字节半开区间）：读屏编辑动作（`ITextRangeProvider` / AT-SPI2
     ///        `EditableText`）的落点；只读 / 禁用时 no-op。
+    /// @param start 替换区间起点（UTF-8 字节偏移，越界夹紧）。
+    /// @param end 替换区间终点（半开；小于 start 时按 start 收敛）。
+    /// @param utf8 新文本（UTF-8）；超过 `max_length` 剩余额度按码点截断。
     /// @note Side-effects: mutates state（写回 `value_`，触发 `on_changed` 与 ValueChanged 事件）
     auto accessibility_replace_text(std::size_t start, std::size_t end, std::string_view utf8) -> void override {
         if (read_only_ || !enabled_) {
@@ -303,6 +370,8 @@ class TextInput : public LeafWidget {
 
     /// @brief 读屏 Value 动作：整值替换（与 `IValueProvider::SetValue` 同语义）；
     ///        Focus 走基类（另把光标置于文末）。
+    /// @param req 动作请求；`Value` 时取 `req.text` 作为新值。
+    /// @return true = 动作已被本控件消费；false = 转交基类处理。
     /// @note Side-effects: mutates state
     auto perform_accessibility_action(const AccessibilityActionRequest &req) -> bool override {
         if (req.action == AccessibilityAction::Value) {
@@ -313,20 +382,24 @@ class TextInput : public LeafWidget {
     }
 
     /// @brief 悬停默认文本光标：输入框悬停 IBeam；修饰链显式 `cursor(...)` 声明优先。
+    /// @return 恒为 `CursorShape::IBeam`。
     /// @note Side-effects: pure
     [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return CursorShape::IBeam; }
 
     /// @brief Enter 优先经 `on_key_event` 投递（提交回调 `on_submit` 依赖它，而非激活语义）。
+    /// @return 恒为 true。
     /// @note Side-effects: pure
     [[nodiscard]] auto wants_activation_keys() const -> bool override { return true; }
 
     /// @brief 方向键优先经 `on_key_event` 投递（←/→ 光标移动与 Shift 扩选依赖它，而非几何焦点导航）。
     ///
     /// 单行输入框不认领 ↑/↓，二者仍回落焦点导航（Tab 序同样可用），见 `Widget::wants_navigation_keys()`。
+    /// @return 恒为 true（仅 ←/→ 被认领）。
     /// @note Side-effects: pure
     [[nodiscard]] auto wants_navigation_keys() const -> bool override { return true; }
 
     /// @brief 运行时自描述（规格附录 B）。
+    /// @return 属性表（与链式 setter 同名同缺省）、事件表与示例齐备的 `WidgetDescriptor`。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "TextInput",
@@ -472,10 +545,16 @@ class TextInput : public LeafWidget {
             .examples = {"au::TextInput().set_placeholder(\"Enter name\")"},
         };
     }
+    /// @brief 实例侧自描述：直接转发静态 `describe_static()`（属性表与实例状态无关）。
+    /// @return 与 `describe_static()` 相同的描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 序列化属性：导出文本/占位/字号/圆角/内边距/光标与各状态色等输入框字段；
+    ///        聚焦边框色与方向仅在显式设置时写出（保留「跟随主题 / 继承环境」语义），
+    ///        max_length / read_only / obscure_text 仅在生效时写出。
+    /// @param props 目标 JSON 对象（基类先写通用布局字段）。
     auto serialize_props(Json &props) const -> void override {
-        Widget::serialize_props(props);
+        Widget::serialize_props(props);  // 先由基类写入通用布局字段（width/height/show 等）。
         props["value"] = value_.get();
         props["placeholder"] = placeholder_;
         props["font_size"] = font_size_;
@@ -508,6 +587,9 @@ class TextInput : public LeafWidget {
         }
     }
 
+    /// @brief 反序列化属性（Factory `from_json` 重建通道）：键与 `serialize_props` 同名，
+    ///        缺键保持当前值（「未设置 = 跟随主题/继承环境」语义得以保留）。
+    /// @param props 外部传入的属性 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("value")) {
@@ -569,6 +651,10 @@ class TextInput : public LeafWidget {
         }
     }
 
+    /// @brief 指针交互：Press 定位光标/选区锚点并请求焦点，Move 拖拽扩选（含头含尾），
+    ///        Release 结束拖拽；命中测试与实绘同源（掩码态按逐字符对应的掩码串定位）。
+    ///        禁用态不响应任何指针交互；基类的 activate/长按计时行为保留。
+    /// @param e 鼠标事件（本地坐标；消费时置 `is_handled`）。
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (!enabled_) {
             return;  // 禁用态不响应任何指针交互
@@ -604,6 +690,10 @@ class TextInput : public LeafWidget {
         }
     }
 
+    /// @brief 键盘编辑派发：Ctrl+A/C/X/V 全选/复制/剪切/粘贴（只读降级），Enter 提交，
+    ///        ←/→/Home/End 移动与 Shift 扩选（RTL 下方向键按视觉方向反转），Backspace 删除；
+    ///        非 Down、未聚焦或禁用态直接放行。
+    /// @param e 键盘事件（消费时置 `is_handled`）。
     auto on_key_event(KeyEvent &e) -> void override {  // NOLINT
         if (!enabled_ || !is_focused() || e.action != KeyAction::Down) {
             return;
@@ -784,6 +874,7 @@ class TextInput : public LeafWidget {
     }
 
     /// @brief 焦点变更：失焦即取消未上屏的组合（平台 IME 惯例，避免 preedit 残留在失焦控件里）。
+    /// @param focused true = 获焦；false = 失焦（触发组合取消）。
     auto on_focus_change(bool focused) -> void override {
         Widget::on_focus_change(focused);
         if (!focused) {
@@ -793,8 +884,11 @@ class TextInput : public LeafWidget {
 
     /// @brief 关闭基类统一焦点环：本控件已自带 Fluent 式聚焦边框（`paint_frame` 的主题色加粗
     ///        边框），再叠一环会出现双环。见 specification/05-event-navigation.md §4.4。
+    /// @return 恒为 false。
     [[nodiscard]] auto wants_focus_ring() const -> bool override { return false; }
 
+    /// @brief 字符输入：启用且聚焦时走统一插入路径 `insert_at_caret`（选区替换 + 限长）。
+    /// @param e 输入事件（禁用/未聚焦放行；只读态吞掉不落字；落字即消费）。
     auto on_text_input(TextInputEvent &e) -> void override {
         if (!enabled_ || !is_focused()) {
             return;
@@ -803,7 +897,7 @@ class TextInput : public LeafWidget {
             e.is_handled = true;  // 只读态吞掉输入不落字
             return;
         }
-        insert_at_caret(e.text);
+        insert_at_caret(e.text);  // 与 IME 上屏共用插入路径：选区替换 + 限长截断。
         e.is_handled = true;
     }
 
@@ -814,6 +908,7 @@ class TextInput : public LeafWidget {
     ///
     /// 典型序列（拼音输入法）：`preedit="nihao"` → `preedit="你好",cursor=2` →
     /// `preedit="",committed="你好"`（落字）。
+    /// @param e 组合事件：`committed` 上屏文本、`preedit` 未上屏串及其光标/选区下标。
     auto on_text_composition(TextCompositionEvent &e) -> void override {
         // 与 `on_text_input` 完全同构：禁用/未聚焦 → 不消费；只读 → 消费但不落地。
         if (!enabled_ || !is_focused()) {
@@ -843,6 +938,7 @@ class TextInput : public LeafWidget {
     /// 与 `on_paint` 用同一套算式（字体解析、RTL 右对齐锚、垂直居中、`composed_index` 映射），
     /// 使候选窗落在带下划线的组合串末端而非控件角落。未经绘制遍历（`focus_bounds` 为零盒）时
     /// 原样返回零盒，平台侧退化为系统默认位置。
+    /// @return 候选窗锚点盒：preedit 光标处零宽、高度为文本行高的绝对窗口 DIP 矩形。
     [[nodiscard]] auto composition_caret_bounds() const -> Rect override {
         const Rect box = focus_bounds();
         if (box.size.width <= 0.0F || box.size.height <= 0.0F) {
@@ -868,21 +964,27 @@ class TextInput : public LeafWidget {
     }
 
     /// @brief 当前预编辑串（组合中的未上屏文本）；无组合时为空串。
+    /// @return preedit 的 UTF-8 副本（不进 `value_`，仅绘制/测量期可见）。
     [[nodiscard]] auto preedit() const -> std::string { return preedit_; }
 
     /// @brief 是否处于组合态（preedit 非空）。
+    /// @return true = 组合中（有未上屏文本）。
     [[nodiscard]] auto is_composing() const -> bool { return !preedit_.empty(); }
 
     /// @brief 组合光标在 preedit 内的码点下标（候选插入点）。
+    /// @return 下标（更新时已夹紧到 preedit 码点数）。
     [[nodiscard]] auto composition_cursor() const -> std::size_t { return preedit_cursor_; }
 
     /// @brief 当前文本值（只读，供测试 / 外部读取）。
+    /// @return `value_` 的 UTF-8 副本（不含 preedit）。
     [[nodiscard]] auto value() const -> std::string { return value_.get(); }
 
     /// @brief 是否有活动选区（无选区时 sel_end_ == AURORA_NO_SEL）。
+    /// @return true = 存在含头含尾选区；false = 仅光标（无字符被选中）。
     [[nodiscard]] auto has_selection() const -> bool { return sel_end_ != AURORA_NO_SEL; }
 
     /// @brief 当前选中的文本（含头含尾：返回 [min, max] 区间内的全部字符）。无选区返回空。
+    /// @return 选区内字符拼接的 UTF-8 串；无选区为空串。
     [[nodiscard]] auto selected_text() const -> std::string {
         if (!has_selection()) {
             return {};
@@ -897,6 +999,7 @@ class TextInput : public LeafWidget {
 
     /// @brief 生效布局选项：direction 取缓存方向（布局期解析），nullopt 时保持默认
     ///        （FontEngine 按内容 guess）——默认行为与接入前逐位一致。
+    /// @return 布局选项聚合：`direction` 置为 `cached_direction_`（nullopt = 按内容猜测），其余字段保持默认。
     [[nodiscard]] auto layout_opts() const -> render::TextLayoutOpts {
         render::TextLayoutOpts opts;
         opts.direction = cached_direction_;
@@ -980,6 +1083,9 @@ class TextInput : public LeafWidget {
     }
 
     /// @brief 绘制背景 + 边框（聚焦/禁用态切换；聚焦边框缺省跟随主题 primary）。子类可覆盖。
+    /// @param p 绘制器：发出背景填充与边框描边。
+    /// @param bounds 控件盒（窗口逻辑 dp）：填充与描边均画在此盒上。
+    /// @param ctx 构建上下文：聚焦且未显式设置边框色时，从中取 `Theme::primary` 作缺省色。
     virtual auto paint_frame(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
         const bool disabled = !enabled_;
         const Color bg = [&] {  // NOLINT
@@ -1011,6 +1117,7 @@ class TextInput : public LeafWidget {
     }
 
     /// @brief 实显文本：掩码态返回等长 • 串（逐码点一一对应），否则返回原值。
+    /// @return 掩码态为逐码点一个 •（每字符 3 字节）的显示串；非掩码态为 `value_` 的副本。
     [[nodiscard]] auto display_value() const -> std::string {
         if (!obscure_) {
             return value_.get();
@@ -1028,6 +1135,8 @@ class TextInput : public LeafWidget {
     ///
     /// 普通文本输入与 IME 上屏（`TextCompositionEvent::committed`）共用此路径，保证限长/选区
     /// 语义一致。`text` 为空时为空操作。
+    /// @param text 待插入文本（UTF-8）：先替换现有选区；超出 `max_length_` 剩余额度时按码点截断，
+    ///        截断后为空则不落字。
     auto insert_at_caret(const std::string &text) -> void {
         if (text.empty()) {
             return;
@@ -1062,6 +1171,9 @@ class TextInput : public LeafWidget {
     /// @brief 组合显示串：把 preedit 插到 `base` 的光标处（`base` 可为掩码后的显示值）。
     ///
     /// 绘制与测量一律走此串，故 preedit 与既有文本共用一套 `caret_x` 度量，天然支持中文混排。
+    /// @param base 底衬显示文本（可为 `value_`、掩码后的显示值或占位串）。
+    /// @return 把 preedit 插入 `base` 第 `caret_` 个码点处得到的串（`caret_` 越界夹紧到串尾）；
+    ///         `preedit_` 为空时原样返回 `base`。
     [[nodiscard]] auto composed_text(const std::string &base) const -> std::string {
         if (preedit_.empty()) {
             return base;
@@ -1072,13 +1184,23 @@ class TextInput : public LeafWidget {
     }
 
     /// @brief `base` 的码点下标 `i` 在 `composed_text(base)` 中的对应下标（preedit 插在 caret_ 处）。
+    /// @param i `base` 内的码点下标。
+    /// @return 组合显示串中的对应下标：组合中且 `i >= caret_` 时后移 preedit 的码点数，否则原样返回。
     [[nodiscard]] auto composed_index(size_t i) const -> size_t {
         return preedit_.empty() ? i : i + (i >= caret_ ? cp_count(preedit_) : 0U);
     }
 
-    /// @brief 组合态绘制：preedit 选区高亮 + 下划线（候选串底衬）。返回 preedit 占用的宽度。
+    /// @brief 组合态绘制：preedit 选区高亮 + 下划线（候选串底衬）。仅 `is_composing()` 时调用。
     ///
-    /// `x0` 为 preedit 起始 x；`f` 为当前字体；`opts` 为布局选项（含生效方向）。仅 `is_composing()` 时调用。
+    /// 高亮与下划线均以 `caret_x(shown, caret_)` 定 preedit 起点，与主文本共用度量口径。
+    /// @param p 绘制器：填充 preedit 内选区高亮与整段下划线。
+    /// @param shown 含 preedit 的显示串（`composed_text` 的产物），用于光标定位度量。
+    /// @param x0 文本原点 x（绝对坐标，已含内边距与 RTL 右对齐偏移）。
+    /// @param ty 文本原点 y，高亮矩形以此为顶。
+    /// @param th 文本行高：高亮高度与下划线纵位（`ty + th - 1`）的计算基准。
+    /// @param f 当前字体。
+    /// @param opts 布局选项（含生效方向）。
+    /// @return preedit 的宽度（即所画下划线段的宽度）。
     auto paint_composition(Painter &p, const std::string &shown, float x0, float ty, float th, const Font &f,
                            const render::TextLayoutOpts &opts) const -> float {
         const float px0 = x0 + render::FontEngine::caret_x(shown, caret_, f, opts);
@@ -1173,6 +1295,9 @@ class TextInput : public LeafWidget {
         return utf8_cp_slice(s, start, count);
     }
     /// @brief 码点下标 → UTF-8 字节偏移（越界夹紧到串尾；无障碍文本钩子的换算原语）。
+    /// @param s UTF-8 串。
+    /// @param cp_index 目标码点下标（从 0 计；超出码点总数时停在串尾）。
+    /// @return 该码点首字节的字节偏移；`cp_index` 为 0 或 `s` 为空时为 0，越界时为 `s.size()`。
     [[nodiscard]] static auto cp_to_byte(const std::string &s, size_t cp_index) -> size_t {
         size_t i = 0;
         size_t cp = 0;
@@ -1183,6 +1308,9 @@ class TextInput : public LeafWidget {
         return i;
     }
     /// @brief UTF-8 字节偏移 → 码点下标（越界夹紧到串尾）。
+    /// @param s UTF-8 串。
+    /// @param byte_index 目标字节偏移；落在某码点内部时归属到其后首个码点边界，越界时按串尾计。
+    /// @return 对应的码点下标（串尾偏移返回码点总数）。
     [[nodiscard]] static auto byte_to_cp(const std::string &s, size_t byte_index) -> size_t {
         size_t i = 0;
         size_t cp = 0;

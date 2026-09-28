@@ -14,29 +14,22 @@
 
 namespace aurora {
 
-/**
- * @brief 无头渲染（不依赖窗口系统）。
- *
- * 把「布局 + 绘制 + 写出 PNG / 逻辑快照」从 `HeadlessSurface` 头文件（window/surface.h）
- * 拆分到本文件，使渲染工具与具体 `Surface` 实现解耦（specification/03-layout-render.md §8.4）。
- * 真实窗口 Surface 见 `aurora/window/native_surfaces.h`。
- */
+// Aurora 无头渲染（不依赖窗口系统）。
+//
+// 把「布局 + 绘制 + 写出 PNG / 逻辑快照」从 `HeadlessSurface` 头文件（window/surface.h）
+// 拆分到本文件，使渲染工具与具体 `Surface` 实现解耦（specification/03-layout-render.md §8.4）。
+// 真实窗口 Surface 见 `aurora/window/native_surfaces.h`。
 
-/**
- * @brief 无头渲染：布局 + 绘制 + 写出 PNG。
- *
- * 流程：mount（注册响应式依赖）→ layout（两阶段测量）→ paint（软件栅格）→ PNG。
- *
- * @param root  根 widget（已构建的树）
- * @param width 画布宽（逻辑像素 = 设备像素）
- * @param height 画布高
- * @param path  输出 PNG 路径
- * @param background 可选：paint 前的全画布底色。真实窗口渲染前由 Surface 清屏
- *        （`Surface::clear_color()`，真实后端为浅色 `{245,245,247,255}`），无头渲染
- *        默认不清（帧缓冲零初始化为透明黑）——把无头产物与真实窗口读回帧做像素比对
- *        时（E2E golden），须传与窗口一致的底色，否则控件未覆盖区域两侧口径不同。
- * @return 成功返回 true，失败返回带信息的 Error。
- */
+/// @brief 无头渲染：布局 + 绘制并返回 RGBA 位图（不写出 PNG；调用方可继续编码或比较）。
+/// @param root  根 widget（已构建的树）
+/// @param width 画布宽（逻辑像素 = 设备像素）
+/// @param height 画布高
+/// @param background 可选：paint 前的全画布底色。真实窗口渲染前由 Surface 清屏
+/// （`Surface::clear_color()`，真实后端为浅色 `{245,245,247,255}`），无头渲染
+/// 默认不清（帧缓冲零初始化为透明黑）——把无头产物与真实窗口读回帧做像素比对
+/// 时（E2E golden），须传与窗口一致的底色，否则控件未覆盖区域两侧口径不同。
+/// @return 画布尺寸与帧缓冲一致的 `Image`（RGBA8 直色像素字节）。
+/// @note 流程：mount（注册响应式依赖）→ layout（两阶段测量）→ paint（软件栅格）→ 拷贝帧缓冲。
 [[nodiscard]] inline auto render_to_image(Node &root, int width, int height,
                                           std::optional<Color> background = std::nullopt) -> Image {
     constexpr BuildContext ctx;  // 根环境（树内 Provider 注入子树环境）
@@ -59,6 +52,7 @@ namespace aurora {
                 Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
                      .size = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)}},
                 ctx);
+
     root.set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
                          .size = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)}});
 
@@ -68,28 +62,33 @@ namespace aurora {
     const std::size_t bytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
     // 帧缓冲是 Painter 持有的字节窗口：以 std::span(ptr, count) 表达该区间，免写裸指针加法（语义等价）。
     const std::span<const std::uint8_t> framebuffer{painter.data(), bytes};
+
     out.pixels.assign(framebuffer.begin(), framebuffer.end());
     return out;
 }
 
+/// @brief 无头渲染并写出 PNG：布局 + 绘制 + 编码为 PNG 文件。
+/// @param root  根 widget（已构建的树）
+/// @param width 画布宽（逻辑像素 = 设备像素）
+/// @param height 画布高
+/// @param path  输出 PNG 路径
+/// @param background 可选：paint 前的全画布底色；语义同 `render_to_image`。
+/// @return 成功返回 `Ok(true)`；写盘失败返回带信息的 `Error`。
 [[nodiscard]] inline auto render_to_png(Node &root, int width, int height, const char *path,
                                         std::optional<Color> background = std::nullopt) -> Result<bool> {
     const Image image = render_to_image(root, width, height, background);
     return write_png(path, width, height, image.pixels.data());
 }
 
-/**
- * @brief 逻辑快照：布局后输出**平台无关**的 JSON 树。
- *
- * 每个节点形如 `{"type":..., "box":{"x","y","w","h"}, "children":[...]}`，
- * 不含任何像素位图，AI 可在无头环境验证 UI 结构与布局盒模型。
- * 布局是纯函数（mount → layout），故同输入必得同输出（确定性）。
- *
- * @param root  根 widget（已构建的树）
- * @param width 视口宽（逻辑像素）
- * @param height 视口高
- * @return 逻辑快照 JSON。
- */
+/// @brief 逻辑快照：布局后输出**平台无关**的 JSON 树。
+///
+/// 每个节点形如 `{"type":..., "box":{"x","y","w","h"}, "children":[...]}`，
+/// 不含任何像素位图，AI 可在无头环境验证 UI 结构与布局盒模型。
+/// 布局是纯函数（mount → layout），故同输入必得同输出（确定性）。
+/// @param root  根 widget（已构建的树）
+/// @param width 视口宽（逻辑像素）
+/// @param height 视口高
+/// @return 逻辑快照 JSON。
 [[nodiscard]] inline auto render_to_logical_snapshot(Node &root, int width, int height) -> Json {
     BuildContext ctx;
     root->mount(ctx);

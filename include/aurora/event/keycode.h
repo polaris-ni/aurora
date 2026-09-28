@@ -1,112 +1,118 @@
 #pragma once
 
+/// @brief 平台无关逻辑键码模块：`KeyCode` 枚举与键名查询 `key_name`。
+/// @file keycode.h
+
 namespace aurora {
 
-/**
- * @brief 平台无关的逻辑键码（specification/05-event-navigation.md §2.2）。
- *
- * widget/事件层只认 `KeyCode`，不依赖任何平台键值。具体平台（如 GLFW）在各自的
- * 后端中把原生键码翻译成 `KeyCode`（见 `window/glfw_surface.h` 的 `fromGlfwKey`），
- * 从而保持 `event` 模块平台无关。新增键位时在此追加枚举值即可。
- */
+/// @brief 平台无关的逻辑键码（specification/05-event-navigation.md §2.2）。
+///
+/// widget/事件层只认 `KeyCode`，不依赖任何平台键值。具体平台（如 GLFW）在各自的
+/// 后端中把原生键码翻译成 `KeyCode`（见 `window/glfw_surface.h` 的 `fromGlfwKey`），
+/// 从而保持 `event` 模块平台无关。新增键位时在此追加枚举值即可。
+/// 语义为「物理键位 + 功能键」：A–Z / D0–9 不区分大小写与 shift 态（大小写由文本
+/// 输入事件区分）；Shift/Control/Alt/Meta 将左右两侧合并为单一逻辑键；
+/// 标点键按美式（US）物理布局命名；未能识别的原生键一律落到 `Unknown`。
 enum class KeyCode : int {  // NOLINT(*-enum-size)
-    Unknown = 0,
+    Unknown = 0,  ///< 未映射键占位值：后端映射表未收录的原生键（如 GLFW/X11 映射的 default 分支）给出此项。
 
     // 字母 A-Z
-    A,
-    B,
-    C,
-    D,
-    E,
-    F,
-    G,
-    H,
-    I,
-    J,
-    K,
-    L,
-    M,
-    N,
-    O,
-    P,
-    Q,
-    R,
-    S,
-    T,
-    U,
-    V,
-    W,
-    X,
-    Y,
-    Z,
+    A,  ///< 字母键 A（物理键位，大小写共用同一键码）。
+    B,  ///< 字母键 B（物理键位，大小写共用同一键码）。
+    C,  ///< 字母键 C（物理键位，大小写共用同一键码）。
+    D,  ///< 字母键 D（物理键位，大小写共用同一键码）。
+    E,  ///< 字母键 E（物理键位，大小写共用同一键码）。
+    F,  ///< 字母键 F（物理键位，大小写共用同一键码）。
+    G,  ///< 字母键 G（物理键位，大小写共用同一键码）。
+    H,  ///< 字母键 H（物理键位，大小写共用同一键码）。
+    I,  ///< 字母键 I（物理键位，大小写共用同一键码）。
+    J,  ///< 字母键 J（物理键位，大小写共用同一键码）。
+    K,  ///< 字母键 K（物理键位，大小写共用同一键码）。
+    L,  ///< 字母键 L（物理键位，大小写共用同一键码）。
+    M,  ///< 字母键 M（物理键位，大小写共用同一键码）。
+    N,  ///< 字母键 N（物理键位，大小写共用同一键码）。
+    O,  ///< 字母键 O（物理键位，大小写共用同一键码）。
+    P,  ///< 字母键 P（物理键位，大小写共用同一键码）。
+    Q,  ///< 字母键 Q（物理键位，大小写共用同一键码）。
+    R,  ///< 字母键 R（物理键位，大小写共用同一键码）。
+    S,  ///< 字母键 S（物理键位，大小写共用同一键码）。
+    T,  ///< 字母键 T（物理键位，大小写共用同一键码）。
+    U,  ///< 字母键 U（物理键位，大小写共用同一键码）。
+    V,  ///< 字母键 V（物理键位，大小写共用同一键码）。
+    W,  ///< 字母键 W（物理键位，大小写共用同一键码）。
+    X,  ///< 字母键 X（物理键位，大小写共用同一键码）。
+    Y,  ///< 字母键 Y（物理键位，大小写共用同一键码）。
+    Z,  ///< 字母键 Z（物理键位，大小写共用同一键码）。
 
     // 数字 0-9
-    D0,
-    D1,
-    D2,
-    D3,
-    D4,
-    D5,
-    D6,
-    D7,
-    D8,
-    D9,
+    D0,  ///< 主键盘数字行 0（数字小键盘的 KP_0-9 键未建模，映射到 Unknown）。
+    D1,  ///< 主键盘数字行 1（数字小键盘的对应键未建模）。
+    D2,  ///< 主键盘数字行 2（数字小键盘的对应键未建模）。
+    D3,  ///< 主键盘数字行 3（数字小键盘的对应键未建模）。
+    D4,  ///< 主键盘数字行 4（数字小键盘的对应键未建模）。
+    D5,  ///< 主键盘数字行 5（数字小键盘的对应键未建模）。
+    D6,  ///< 主键盘数字行 6（数字小键盘的对应键未建模）。
+    D7,  ///< 主键盘数字行 7（数字小键盘的对应键未建模）。
+    D8,  ///< 主键盘数字行 8（数字小键盘的对应键未建模）。
+    D9,  ///< 主键盘数字行 9（数字小键盘的对应键未建模）。
 
     // 功能键
-    Escape,
-    Enter,
-    Tab,
-    Backspace,
-    Delete,
-    Space,
+    Escape,  ///< Esc 取消/退出键。
+    Enter,  ///< 回车键；X11/Wayland 侧 KP_Enter 并入本键，Win32 小键盘回车同发 VK_RETURN（GLFW 仅映射主回车）。
+    Tab,  ///< Tab 制表键（焦点移动的主要物理来源）。
+    Backspace,  ///< 退格键（删除光标前字符）。
+    Delete,  ///< 删除键（删除光标后字符，向前删除）。
+    Space,  ///< 空格键。
 
     // 方向键
-    ArrowLeft,
-    ArrowRight,
-    ArrowUp,
-    ArrowDown,
+    ArrowLeft,  ///< 左方向键。
+    ArrowRight,  ///< 右方向键。
+    ArrowUp,  ///< 上方向键。
+    ArrowDown,  ///< 下方向键。
 
     // 修饰键
-    Shift,
-    Control,
-    Alt,
-    Meta,
+    Shift,  ///< Shift 修饰键（左右两侧合并，不区分左/右 Shift）。
+    Control,  ///< Ctrl 修饰键（左右两侧合并）。
+    Alt,  ///< Alt 修饰键（左右两侧合并；Linux 侧 Super_L/Super_R 归 Meta 而非本键）。
+    Meta,  ///< 系统修饰键：Windows 键、Linux Super、macOS Cmd（左右两侧合并）。
 
     // 编辑/导航
-    Home,
-    End,
-    PageUp,
-    PageDown,
+    Home,  ///< Home 行首/文首导航键。
+    End,  ///< End 行尾/文末导航键。
+    PageUp,  ///< PageUp 上翻页键（X11 keysym 名为 Prior）。
+    PageDown,  ///< PageDown 下翻页键（X11 keysym 名为 Next）。
 
     // 标点（美式布局）
-    Minus,
-    Equal,
-    LeftBracket,
-    RightBracket,
-    Backslash,
-    Semicolon,
-    Quote,
-    Comma,
-    Period,
-    Slash,
-    Backquote,
+    Minus,  ///< 减号/连字符键 -。
+    Equal,  ///< 等号键 =。
+    LeftBracket,  ///< 左方括号键 [。
+    RightBracket,  ///< 右方括号键 ]。
+    Backslash,  ///< 反斜杠键 \。
+    Semicolon,  ///< 分号键 ;。
+    Quote,  ///< 单引号键 '（美式布局回车右侧，GLFW 称 APOSTROPHE）。
+    Comma,  ///< 逗号键 ,。
+    Period,  ///< 句号键 .。
+    Slash,  ///< 斜杠键 /。
+    Backquote,  ///< 反引号键 `（美式布局主数字行左上方，GLFW 称 GRAVE_ACCENT）。
 
     // 功能键 F1-F12
-    F1,
-    F2,
-    F3,
-    F4,
-    F5,
-    F6,
-    F7,
-    F8,
-    F9,
-    F10,
-    F11,
-    F12,
+    F1,  ///< 顶部功能键 F1。
+    F2,  ///< 顶部功能键 F2。
+    F3,  ///< 顶部功能键 F3。
+    F4,  ///< 顶部功能键 F4。
+    F5,  ///< 顶部功能键 F5。
+    F6,  ///< 顶部功能键 F6。
+    F7,  ///< 顶部功能键 F7。
+    F8,  ///< 顶部功能键 F8。
+    F9,  ///< 顶部功能键 F9。
+    F10,  ///< 顶部功能键 F10。
+    F11,  ///< 顶部功能键 F11。
+    F12,  ///< 顶部功能键 F12。
 };
 
-/// @brief 返回键码的可读名称（用于调试/日志）；未知键返回 "Unknown"。
+/// @brief 返回键码的可读名称（用于调试/日志）。
+/// @param [in] k 待查询的逻辑键码。
+/// @return 键名静态字符串字面量（如 "Enter"、"ArrowLeft"）；枚举未覆盖的取值返回 "Unknown"。
 [[nodiscard]] inline auto key_name(KeyCode k) -> const char * {
     switch (k) {
         case KeyCode::Unknown:

@@ -13,22 +13,27 @@
 
 namespace aurora {
 
-/**
- * @brief 水平工具栏：子控件水平排列 + 背景/底部分隔线。
- *
- * 子控件从左到右排列（垂直居中）；超出宽度的子项被裁剪（溢出菜单为后续增强）。
- * 对标 Qt `QToolBar`、WPF `ToolBar`。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 水平工具栏：子控件水平排列 + 背景/底部分隔线。
+/// 子控件从左到右排列（垂直居中）；超出宽度的子项被裁剪（溢出菜单为后续增强）。
+/// 对标 Qt `QToolBar`、WPF `ToolBar`。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
 class ToolBar : public Container {
   public:
     ToolBar() = default;
+    /// @brief 以子节点列表构造工具栏。
+    /// @param children 初始子节点集合。
     explicit ToolBar(std::vector<Node> children) { children_ = std::move(children); }
+    /// @brief 以初始化列表构造工具栏。
+    /// @param kids 初始子节点集合。
     ToolBar(std::initializer_list<Node> kids) { set_children(kids); }
 
+    /// @brief 控件类型名，供 Inspector 与序列化辨识。
+    /// @return 字符串字面量 "ToolBar"。
     [[nodiscard]] auto type_name() const -> const char * override { return "ToolBar"; }
 
+    /// @brief 静态自描述：属性键与示例子节点。
+    /// @return 本控件的 WidgetDescriptor 描述表。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "ToolBar",
@@ -65,23 +70,34 @@ class ToolBar : public Container {
             .examples = {"au::ToolBar{ btn1, btn2, au::Divider{} }"},
         };
     }
+    /// @brief 实例自描述：委托 describe_static()。
+    /// @return 本控件的 WidgetDescriptor 描述表。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 本控件无对外可订阅信号，不登记任何项。
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
 
     /// @brief 设置栏高（链式）。
+    /// @param h 栏高(dp)；非正值回退默认 40.0。
+    /// @return *this，便于链式调用。
     auto set_bar_height(float h) -> ToolBar & {
         bar_height_ = h > 0.0F ? h : 40.0F;
         return *this;
     }
+    /// @brief 当前栏高。
+    /// @return bar_height_ 的即时值(dp)。
     [[nodiscard]] auto bar_height() const -> float { return bar_height_; }
 
     /// @brief 设置子项间距（链式）。
+    /// @param g 间距(dp)；负值按 0 处理。
+    /// @return *this，便于链式调用。
     auto set_gap(float g) -> ToolBar & {
         gap_ = g < 0.0F ? 0.0F : g;
         return *this;
     }
 
+    /// @brief 序列化栏高、间距与内边距到 props。
+    /// @param props 输出 JSON 对象，先写入基类属性再补充本控件字段。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         props["bar_height"] = bar_height_;
@@ -89,6 +105,8 @@ class ToolBar : public Container {
         props["padding"] = padding_;
     }
 
+    /// @brief 从 JSON 恢复可序列化字段；缺省键保留现值。
+    /// @param props 序列化时写入的属性对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("bar_height")) {
@@ -134,22 +152,27 @@ class ToolBar : public Container {
     float padding_ = 6.0F;
 };
 
-/**
- * @brief 底部状态栏：多区域水平排列（左对齐 + 尾项右对齐）。
- *
- * 常规子项从左向右排列；最后一个子项右对齐（常放版本号/坐标等）。
- * 对标 Qt `QStatusBar`、WPF `StatusBar`。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 底部状态栏：多区域水平排列（左对齐 + 尾项右对齐）。
+/// 常规子项从左向右排列；最后一个子项右对齐（常放版本号/坐标等）。
+/// 对标 Qt `QStatusBar`、WPF `StatusBar`。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
 class StatusBar : public Container {
   public:
     StatusBar() = default;
+    /// @brief 以子节点列表构造状态栏。
+    /// @param children 初始子节点集合。
     explicit StatusBar(std::vector<Node> children) { children_ = std::move(children); }
+    /// @brief 以初始化列表构造状态栏。
+    /// @param kids 初始子节点集合。
     StatusBar(std::initializer_list<Node> kids) { set_children(kids); }
 
+    /// @brief 控件类型名，供 Inspector 与序列化辨识。
+    /// @return 字符串字面量 "StatusBar"。
     [[nodiscard]] auto type_name() const -> const char * override { return "StatusBar"; }
 
+    /// @brief 静态自描述：属性键与示例子节点。
+    /// @return 本控件的 WidgetDescriptor 描述表。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "StatusBar",
@@ -178,23 +201,34 @@ class StatusBar : public Container {
             .examples = {R"(au::StatusBar{ au::Text("Ready"), au::Text("Ln 1, Col 1") })"},
         };
     }
+    /// @brief 实例自描述：委托 describe_static()。
+    /// @return 本控件的 WidgetDescriptor 描述表。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 本控件无对外可订阅信号，不登记任何项。
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
 
     /// @brief 设置栏高（链式）。
+    /// @param h 栏高(dp)；非正值回退默认 24.0。
+    /// @return *this，便于链式调用。
     auto set_bar_height(float h) -> StatusBar & {
         bar_height_ = h > 0.0F ? h : 24.0F;
         return *this;
     }
+    /// @brief 当前栏高。
+    /// @return bar_height_ 的即时值(dp)。
     [[nodiscard]] auto bar_height() const -> float { return bar_height_; }
 
+    /// @brief 序列化栏高与区域间距到 props。
+    /// @param props 输出 JSON 对象，先写入基类属性再补充本控件字段。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         props["bar_height"] = bar_height_;
         props["gap"] = gap_;
     }
 
+    /// @brief 从 JSON 恢复可序列化字段；缺省键保留现值。
+    /// @param props 序列化时写入的属性对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("bar_height")) {

@@ -1,17 +1,16 @@
 #pragma once
 
-/**
- * @file perf_log.h
- * @brief 性能日志导出：定期输出帧统计摘要，支持 JSON/CSV 快照。
- *
- * 数据源两路：
- * - `FrameStats`（滑动窗口帧时间，**不受 `AURORA_ENABLE_PROFILING` 影响，始终可用**）；
- * - `RenderCounters`（当帧确定性计数，仅在 `AURORA_ENABLE_PROFILING` 开启时非零）。
- *
- * 通道分工遵循项目硬规则第 8 条：
- * - `on_frame_end()` 的周期摘要属**诊断**，走 `AURORA_LOG_INFO`（stderr，可被级别过滤）；
- * - `dump_json()` / `dump_csv()` 属**程序产品**输出，走 `AURORA_LOG_RAW`（stdout，无前缀）。
- */
+/// @brief 性能日志导出：定期输出帧统计摘要，支持 JSON/CSV 快照。
+/// @file perf_log.h
+///
+/// 数据源两路：
+/// - `FrameStats`（滑动窗口帧时间，**不受 `AURORA_ENABLE_PROFILING` 影响，始终可用**）；
+/// - `RenderCounters`（当帧确定性计数，仅在 `AURORA_ENABLE_PROFILING` 开启时非零）。
+///
+/// 通道分工遵循项目硬规则第 8 条：
+/// - `on_frame_end()` 的周期摘要属**诊断**，走 `AURORA_LOG_INFO`（stderr，可被级别过滤）；
+/// - `dump_json()` / `dump_csv()` 属**程序产品**输出，走 `AURORA_LOG_RAW`（stdout，无前缀）。
+///
 
 #include <string>
 
@@ -21,29 +20,33 @@ namespace aurora {
 class PerfLog {
   public:
     /// @brief 启用定期日志输出（每 interval_frames 帧输出一次）。
+    /// @param interval_frames 摘要输出周期（帧数），同时重置内部计数从零开始累计。
     static auto enable(int interval_frames = 300) -> void;
 
     /// @brief 禁用定期日志输出。
     static auto disable() -> void;
 
     /// @brief 是否已启用。
+    /// @return 定期日志输出当前是否处于启用状态。
     [[nodiscard]] static auto enabled() -> bool;
 
     /// @brief 帧结束时调用（由帧循环消费），每 interval_frames 帧自动输出日志。
     static auto on_frame_end() -> void;
 
-    /**
-     * @brief 生成 JSON 格式快照。
-     *
-     * 顶层为 `FrameStats` 指标，`counters` 子对象为当帧 `RenderCounters`，
-     * `profiling` 标记本次构建是否开启细粒度插桩（关闭时 counters 恒为 0）。
-     */
+    /// @brief 生成 JSON 格式快照。
+    ///
+    /// 顶层为 `FrameStats` 指标，`counters` 子对象为当帧 `RenderCounters`，
+    /// `profiling` 标记本次构建是否开启细粒度插桩（关闭时 counters 恒为 0）。
+    ///
+    /// @return 单行 JSON 对象文本（不含换行；需带换行输出请用 `dump_json()`）。
     [[nodiscard]] static auto snapshot_json() -> std::string;
 
     /// @brief 生成 CSV 格式快照（含表头注释行 + 单数据行，尾部为计数器列）。
+    /// @return `#` 注释表头行 + 换行 + 帧指标与计数器拼接的数据行。
     [[nodiscard]] static auto snapshot_csv() -> std::string;
 
     /// @brief CSV 表头（不含注释前缀，与 `snapshot_csv()` 的数据行严格对应）。
+    /// @return 逗号分隔列名串：帧指标列在前、`RenderCounters` 列追加在后。
     [[nodiscard]] static auto csv_header() -> std::string;
 
     /// @brief 经 `AURORA_LOG_RAW` 输出 JSON 快照（带换行），供脚本消费。

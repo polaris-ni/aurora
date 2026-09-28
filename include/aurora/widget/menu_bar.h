@@ -22,24 +22,29 @@ struct Menu {
     std::vector<MenuItem> items;  ///< 下拉菜单项
 };
 
-/**
- * @brief 声明式菜单栏：自绘跨平台实现。
- *
- * 顶部一行顶级菜单，点击展开下拉；点击菜单项触发回调并收起；
- * 点击其他区域收起。自绘实现对 Headless/GLFW/Win32 全部可用；
- * Win32 原生 HMENU 映射作为后续增强（当前统一自绘保证行为一致）。
- *
- * 对标 Qt `QMenuBar`/`QMenu`、WPF `Menu`/`MenuItem`。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 声明式菜单栏：自绘跨平台实现。
+///
+/// 顶部一行顶级菜单，点击展开下拉；点击菜单项触发回调并收起；
+/// 点击其他区域收起。自绘实现对 Headless/GLFW/Win32 全部可用；
+/// Win32 原生 HMENU 映射作为后续增强（当前统一自绘保证行为一致）。
+///
+/// 对标 Qt `QMenuBar`/`QMenu`、WPF `Menu`/`MenuItem`。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
+///
 class MenuBar : public Widget {
   public:
     MenuBar() = default;
+    /// @brief 构造：以给定顶级菜单列表初始化菜单栏。
+    /// @param menus 顶级菜单列表（标题 + 下拉菜单项），移动存入 menus_；列表顺序即菜单栏从左到右的排布序。
     explicit MenuBar(std::vector<Menu> menus) : menus_(std::move(menus)) {}
 
+    /// @brief 控件类型名。
+    /// @return 静态字符串 "MenuBar"。
     [[nodiscard]] auto type_name() const -> const char * override { return "MenuBar"; }
 
+    /// @brief 运行时自描述：声明 bar_height / open_menu 属性键与示例。
+    /// @return 属性键、示例组成的静态描述符（子策略 none，下拉为覆盖绘制）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "MenuBar",
@@ -65,15 +70,25 @@ class MenuBar : public Widget {
             .examples = {R"(au::MenuBar({ {"File", {au::MenuItem{"Open", fn}}} }))"},
         };
     }
+    /// @brief 实例自描述：复用 describe_static（菜单内容为运行时状态，不入描述符）。
+    /// @return 本控件的 WidgetDescriptor。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 菜单栏不持有细粒度信号：菜单表与展开序号经命令式接口改动并直接标记重绘/重排。
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
 
+    /// @brief 顶级菜单数量。
+    /// @return 已注册菜单表的长度。
     [[nodiscard]] auto menu_count() const -> std::size_t { return menus_.size(); }
+    /// @brief 当前展开的顶级菜单序号。
+    /// @return 展开态为其下标，无展开时为 -1。
     [[nodiscard]] auto open_menu() const -> int { return open_; }
+    /// @brief 是否存在展开的下拉。
+    /// @return open_ >= 0 时为 true。
     [[nodiscard]] auto is_open() const -> bool { return open_ >= 0; }
 
     /// @brief 展开指定顶级菜单（越界忽略；-1 收起）。
+    /// @param index [in] 顶级菜单序号；-1 收起；越界（< -1 或 >= menu_count()）时忽略不改状态。
     auto open(int index) -> void {
         if (index >= -1 && std::cmp_less(index, menus_.size())) {
             open_ = index;
@@ -85,19 +100,25 @@ class MenuBar : public Widget {
     auto close() -> void { open(-1); }
 
     /// @brief 追加顶级菜单。
+    /// @param menu [in] 待追加的菜单（移动存入菜单表），追加后标记重排。
     auto add_menu(Menu menu) -> void {
         menus_.push_back(std::move(menu));
         mark_needs_layout();
     }
 
     /// @brief 设置菜单栏高度（链式）。
+    /// @param h [in] 高度 dp；非正值回退默认 28.0。
+    /// @return 引用自身，便于链式调用。
     auto set_bar_height(float h) -> MenuBar & {
         bar_height_ = h > 0.0F ? h : 28.0F;
         return *this;
     }
+    /// @brief 当前菜单栏高度。
+    /// @return 高度 dp（默认 28.0）。
     [[nodiscard]] auto bar_height() const -> float { return bar_height_; }
 
     /// @brief 点击交互：栏上点击展开/切换；下拉内点击触发菜单项；其他区域收起。
+    /// @param e [in] 鼠标事件；仅消费 Press（命中后置 is_handled），非 Press 转交基类。
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (e.action != MouseAction::Press) {
             Widget::on_pointer_event(e);
@@ -145,9 +166,13 @@ class MenuBar : public Widget {
         Widget::on_pointer_event(e);
     }
 
+    /// @brief 菜单栏需要点击命中：展开/收起与菜单项触发均依赖鼠标 Press 链路。
+    /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
     /// @brief 当前展开下拉的全局盒（局部坐标，相对本控件原点）。
+    /// @return 未展开时为空 Rect；展开时 x 累加前序标题宽度、y 从栏底起，宽固定 180dp、
+    ///         高 = 菜单项数 * 26dp（等分行命中即按此高度换算序号）。
     [[nodiscard]] auto dropdown_bounds() const -> Rect {
         if (!is_open()) {
             return Rect{};
@@ -162,6 +187,8 @@ class MenuBar : public Widget {
                     .size = Size{.width = AURORA_DROPDOWN_WIDTH, .height = h}};
     }
 
+    /// @brief 序列化栏高与顶级菜单标题列表（菜单项回调不可序列化，仅保留标题）。
+    /// @param props [out] 写入的属性 JSON 对象（先叠加基类属性）。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         props["bar_height"] = bar_height_;

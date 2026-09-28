@@ -34,14 +34,17 @@ class RhiFrameSink {
     auto operator=(RhiFrameSink &&) -> RhiFrameSink & = delete;
 
     /// @brief 后端标识（诊断与自检用；如 `"gpu-gl"`）。
+    /// @return 后端名称的只读字符串视图（生命周期由静态字面量或实现常驻）。
     [[nodiscard]] virtual auto name() const -> std::string_view = 0;
 
     /// @brief 命令消费面：同一后端对象作为 `RhiBackend` 的视图（`DisplayList::replay` 入口）。
     /// 帧调度与命令消费同源——实现类同时继承两接口时通常返回 `*this`。
+    /// @return 当前 sink 关联的 `RhiBackend` 引用（对象生命周期与本 sink 一致）。
     [[nodiscard]] virtual auto backend() -> RhiBackend & = 0;
 
     /// @brief 开始一帧：确保帧缓冲/视口按目标尺寸就绪并重置零基底与状态（见类注释语义约定）。
-    /// @param device_width / device_height 呈现目标的设备像素尺寸（framebuffer 级）。
+    /// @param device_width 呈现目标的设备像素宽度（framebuffer 级）。
+    /// @param device_height 呈现目标的设备像素高度（framebuffer 级）。
     /// @param scale 设备像素 / 逻辑 dp 比例（命令坐标均为逻辑 dp，GPU 端按比例映射）。
     /// @return false = 后端不可用，调用方须回退软件路径。
     [[nodiscard]] virtual auto begin_frame(int device_width, int device_height, float scale) -> bool = 0;

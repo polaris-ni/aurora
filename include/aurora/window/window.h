@@ -135,13 +135,14 @@ enum class RendererPreference : std::uint8_t {
 /// @brief 跨所有后端共享的窗口选项。
 struct WindowOptions {
     Size size{.width = 800.0F, .height = 600.0F};  ///< 逻辑尺寸（设备无关像素）。
-    std::string title{"Aurora"};
+    std::string title{"Aurora"};  ///< 窗口标题（经 Surface::set_title 下发后端）。
     int max_frames = -1;  ///< Application::run 上限；-1 表示跑到 `should_close`。
     WindowStyleOptions style{};  ///< 高级样式（置顶/无边框/尺寸限制，见 surface.h）。
-    // 帧调度配置
-    int max_fps = 60;  ///< 活跃帧（有脏区/动画）帧率上限；0 = 不限帧率（旧行为）。
-    bool power_saving = true;  ///< 省电模式：idle 时阻塞等待事件（默认开）；false = 忙轮询旧行为，
-                               ///< 供持续重绘场景 opt-out（与 `enable_dirty_tracking(false)` 语义配套）。
+    /// @brief 帧调度配置：活跃帧（有脏区/动画）帧率上限；0 = 不限帧率（旧行为）。
+    int max_fps = 60;
+    /// @brief 省电模式：idle 时阻塞等待事件（默认开）；false = 忙轮询旧行为，
+    /// 供持续重绘场景 opt-out（与 `enable_dirty_tracking(false)` 语义配套）。
+    bool power_saving = true;
     RendererPreference renderer = RendererPreference::Auto;  ///< 上屏后端偏好。
 
     /// @brief 窗口可见性策略（默认 `Normal` = 行为不变）。
@@ -186,22 +187,24 @@ struct Win32Options : WindowOptions {};
 /// 仅当 `AURORA_BACKEND_D3D11` 定义（由 CMake `AURORA_BACKEND_D3D11=ON` 开启）时可用。
 #ifdef AURORA_BACKEND_D3D11
 struct D3D11Options : WindowOptions {
-    bool vsync = true;  ///< 垂直同步：true = `Present(1,0)` 阻塞到 vblank（后端自带帧节拍）；
-                        ///< false = `Present(0,0)` 不等 vblank，交还 CPU 端帧预算节流。
+    /// @brief 垂直同步：true = `Present(1,0)` 阻塞到 vblank（后端自带帧节拍）；
+    /// false = `Present(0,0)` 不等 vblank，交还 CPU 端帧预算节流。
+    bool vsync = true;
 };
 #endif
 
+#if defined(AURORA_BACKEND_GPU_WGPU) && \
+    (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))
 /// @brief wgpu GPU 栅格后端专属选项（宿主：Win32 / X11 / Wayland）。
 /// 仅当 `AURORA_BACKEND_GPU_WGPU` 且任一宿主宏（`AURORA_BACKEND_WIN32`/`AURORA_BACKEND_X11`/
 /// `AURORA_BACKEND_WAYLAND`）定义时可用。Linux 上 X11/Wayland 宏可并开：本选项的专属工厂
 /// 按 Win32 → X11 → Wayland 编译期择一（X11 与 Wayland 并开时取 X11，经 XWayland 亦可跑）；
 /// 要直达 Wayland 宿主请用 `create_window(WaylandOptions)` + `RendererPreference::GpuWgpu`，
 /// 或 `create_native_window` 的 `GpuWgpu` 运行期会话选择。
-#if defined(AURORA_BACKEND_GPU_WGPU) && \
-    (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))
 struct WgpuOptions : WindowOptions {
-    bool vsync = true;  ///< 垂直同步（wgpu FIFO）：true = present 阻塞到 vblank（后端自带帧节拍）；
-                        ///< false = immediate 提交，交还 CPU 端帧预算节流。
+    /// @brief 垂直同步（wgpu FIFO）：true = present 阻塞到 vblank（后端自带帧节拍）；
+    /// false = immediate 提交，交还 CPU 端帧预算节流。
+    bool vsync = true;
 };
 #endif
 
@@ -212,9 +215,10 @@ struct GlfwOptions : WindowOptions {
     int gl_major = 3;  ///< OpenGL 主版本。
     int gl_minor = 3;  ///< OpenGL 次版本。
     bool resizable = true;  ///< 窗口是否可缩放。
-    bool gpu = false;  ///< GPU 栅格模式：帧级 DisplayList 经 OpenGL 3.3 core 批渲染，消除每帧
-                       ///< 全屏像素上传（需 `AURORA_ENABLE_GLFW_GPU_GL` 编译进库；窗口创建或后端
-                       ///< 初始化失败自动回退软件纹理路径，诊断日志说明原因）。
+    /// @brief GPU 栅格模式：帧级 DisplayList 经 OpenGL 3.3 core 批渲染，消除每帧全屏像素上传
+    /// （需 `AURORA_ENABLE_GLFW_GPU_GL` 编译进库；窗口创建或后端初始化失败自动回退软件纹理路径，
+    /// 诊断日志说明原因）。
+    bool gpu = false;
 };
 #endif
 
@@ -245,15 +249,21 @@ struct WasmOptions : WindowOptions {
 #endif
 
 /// @brief Headless 专属工厂（接受 `HeadlessOptions`，含 PNG 路径）。
+/// @param opts Headless 选项（通用字段 + png_path）。
+/// @return 成功返回窗口所有权；后端不可用时返回 Error。
 [[nodiscard]] auto create_window(const HeadlessOptions &opts) -> Result<std::unique_ptr<Window>>;
 
 #ifdef AURORA_BACKEND_WIN32
 /// @brief Win32 专属工厂（接受 `Win32Options`）。仅 `AURORA_BACKEND_WIN32` 构建可用。
+/// @param opts Win32 选项（通用窗口字段）。
+/// @return 成功返回窗口所有权；窗口创建失败返回 Error。
 [[nodiscard]] auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>>;
 #endif
 
 #ifdef AURORA_BACKEND_D3D11
 /// @brief D3D11 专属工厂（接受 `D3D11Options`）。仅 `AURORA_BACKEND_D3D11` 构建可用。
+/// @param opts D3D11 选项（通用字段 + vsync）。
+/// @return 成功返回窗口所有权；设备/交换链创建失败返回 Error（不静默降级）。
 [[nodiscard]] auto create_window(const D3D11Options &opts) -> Result<std::unique_ptr<Window>>;
 #endif
 
@@ -261,37 +271,52 @@ struct WasmOptions : WindowOptions {
     (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))
 /// @brief wgpu GPU 栅格专属工厂（接受 `WgpuOptions`；Win32/X11/Wayland 宿主编译期择一，
 /// 口径见 `WgpuOptions` 注）。仅 `AURORA_BACKEND_GPU_WGPU` + 对应宿主宏开启时可用。
+/// @param opts wgpu 选项（通用字段 + vsync）。
+/// @return 成功返回窗口所有权；GPU 宿主不可用时返回 Error（不降级）。
 [[nodiscard]] auto create_window(const WgpuOptions &opts) -> Result<std::unique_ptr<Window>>;
 #endif
 
 #ifdef AURORA_BACKEND_GLFW
 /// @brief Glfw 专属工厂（接受 `GlfwOptions`，含 OpenGL 版本/可缩放）。仅 `AURORA_BACKEND_GLFW` 构建可用。
+/// @param opts Glfw 选项（通用字段 + OpenGL 版本/可缩放/GPU 栅格开关）。
+/// @return 成功返回窗口所有权；GLFW 初始化或窗口创建失败返回 Error。
 [[nodiscard]] auto create_window(const GlfwOptions &opts) -> Result<std::unique_ptr<Window>>;
 #endif
 
 #ifdef AURORA_BACKEND_X11
 /// @brief X11 专属工厂（接受 `X11Options`）。仅 `AURORA_BACKEND_X11` 构建（Linux 桌面）可用。
+/// @param opts X11 选项（通用窗口字段）。
+/// @return 成功返回窗口所有权；X11 显示连接失败返回 Error。
 [[nodiscard]] auto create_window(const X11Options &opts) -> Result<std::unique_ptr<Window>>;
 #endif
 
 #ifdef AURORA_BACKEND_WAYLAND
 /// @brief Wayland 专属工厂（接受 `WaylandOptions`）。仅 `AURORA_BACKEND_WAYLAND` 构建（Linux 桌面）可用。
+/// @param opts Wayland 选项（通用窗口字段）。
+/// @return 成功返回窗口所有权；无 WAYLAND_DISPLAY/连接失败返回 Error（不崩溃，见 `WaylandSurface::is_available`）。
 [[nodiscard]] auto create_window(const WaylandOptions &opts) -> Result<std::unique_ptr<Window>>;
 #endif
 
 #ifdef AURORA_BACKEND_MACOS
 /// @brief macOS 专属工厂（接受 `MacOSOptions`）。仅 `AURORA_BACKEND_MACOS` 构建（Apple）可用。
+/// @param opts macOS 选项（通用窗口字段）。
+/// @return 成功返回窗口所有权；Cocoa 窗口创建失败返回 Error。
 [[nodiscard]] auto create_window(const MacOSOptions &opts) -> Result<std::unique_ptr<Window>>;
 #endif
 
 #ifdef AURORA_BACKEND_WASM
 /// @brief WASM 专属工厂（接受 `WasmOptions`，含 canvas id）。仅 `AURORA_BACKEND_WASM` 构建（Emscripten）可用。
+/// @param opts WASM 选项（通用字段 + canvas_id）。
+/// @return 成功返回窗口所有权；canvas 绑定失败返回 Error。
 [[nodiscard]] auto create_window(const WasmOptions &opts) -> Result<std::unique_ptr<Window>>;
 #endif
 
 /// @brief 自定义 Surface 注入（稳定入口，不随 backend 数量增长）：注入已构造的 `unique_ptr<Surface>`。
 /// 空 surface 返回 Error（不崩溃）。这是「扩展点收口于 `Surface` 子类 + `create_window` 工厂」的唯一入口，
 /// `Application`/`App` 只认 `unique_ptr<Window>` 或 `unique_ptr<Surface>`，不随 backend 增加构造函数。
+/// @param surface 已构造的后端（转移所有权；nullptr 返回 Error）。
+/// @param opts 通用窗口选项（尺寸/标题/样式等）。
+/// @return 成功返回窗口所有权；surface 为空时返回 Error。
 [[nodiscard]] auto create_window(std::unique_ptr<Surface> surface, const WindowOptions &opts = {})
     -> Result<std::unique_ptr<Window>>;
 
@@ -299,6 +324,8 @@ struct WasmOptions : WindowOptions {
 /// （Windows → Win32，Linux → X11，macOS → Cocoa，否则 GLFW）；无任何真实显示后端时回退
 /// Headless（内存帧缓冲）。供 demo/工具等「开窗即可、不关心平台」的消费者使用；
 /// 需要后端专属选项（如 `D3D11Options.vsync`）时仍应走类型安全的 `create_window(XxxOptions)`。
+/// @param opts 通用窗口选项。
+/// @return 成功返回窗口所有权；所选后端创建失败返回 Error。
 [[nodiscard]] auto create_native_window(const WindowOptions &opts = {}) -> Result<std::unique_ptr<Window>>;
 
 /// @brief 在创建任何窗口前启用进程级高 DPI 感知（规范入口）。
@@ -309,40 +336,52 @@ auto enable_dpi_awareness() -> void;
 /// @brief 运行期统一检测当前平台可用 Surface 种类（与 CMake 编译期宏一致）。
 /// 策略：按编译期后端可用性优先原生 Wayland/X11（Linux 双后端构建时按会话类型选择），
 /// 其次 MacOS/Wasm/Win32/Glfw，最后 Headless 兜底（与 window_factory.cpp 同序）。
+/// @return 当前构建内最佳可用后端的 `SurfaceKind` 标签。
 [[nodiscard]] auto auto_detect_surface() -> SurfaceKind;
 
-/**
- * @brief 窗口：组合一个 `Surface` 后端（Headless/Glfw/Win32），提供 pumps 事件、
- * present 根 widget、尺寸/标题管理与帧循环（ARCHITECTURE.md §8.4 后端家族）。
- *
- * 设计要点（AI-first / 概念可枚举）：
- * - 后端不可知：构造时注入 `Surface`（由 `create_window` 工厂决定具体实现），
- *   `Window` 不关心绘制/事件如何落地（headless 内存 PNG / Glfw OpenGL / Win32 GDI）。
- * - 单一职责：`Window` 只负责「事件上抛 + 像素 present」；根 widget 的布局/绘制
- *   由 `present_root` 调用方（如 `Application::run`）驱动，不在此处耦合渲染循环。
- * - 无头友好：`HeadlessSurface` 下 `run()` 退化为单次 present，便于测试/截屏。
- * @note Thread: main-thread only
- * @note Side-effects: none
- */
-// 成员按生命周期/语义分组排布（Surface 注入 → 帧统计/HUD painter → 脏区标志），重排虽可消除
-// 填充字节，但会改动构造/析构顺序且收益仅 32 字节填充，不作优化目标（见 ARCHITECTURE.md §8.4）。
-// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
+/// @brief 窗口：组合一个 `Surface` 后端（Headless/Glfw/Win32），提供 pumps 事件、
+/// present 根 widget、尺寸/标题管理与帧循环（ARCHITECTURE.md §8.4 后端家族）。
+///
+/// 设计要点（AI-first / 概念可枚举）：
+/// - 后端不可知：构造时注入 `Surface`（由 `create_window` 工厂决定具体实现），
+/// `Window` 不关心绘制/事件如何落地（headless 内存 PNG / Glfw OpenGL / Win32 GDI）。
+/// - 单一职责：`Window` 只负责「事件上抛 + 像素 present」；根 widget 的布局/绘制
+/// 由 `present_root` 调用方（如 `Application::run`）驱动，不在此处耦合渲染循环。
+/// - 无头友好：`HeadlessSurface` 下 `run()` 退化为单次 present，便于测试/截屏。
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// 成员按生命周期/语义分组排布（Surface 注入 → 帧统计/HUD painter → 脏区标志），重排虽可消除
+/// 填充字节，但会改动构造/析构顺序且收益仅 32 字节填充，不作优化目标（见 ARCHITECTURE.md §8.4）。
+/// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 class Window {
   public:
+    /// @brief 组合注入的 Surface 后端构造窗口（所有权转移给本窗口）。
+    /// @param surface 已构造的后端 Surface（移动入 `surface_`）。
     explicit Window(std::unique_ptr<Surface> surface) : surface_(std::move(surface)) {}
 
+    /// @brief 组合的后端 Surface（可变引用）。
+    /// @return `*surface_`。
     [[nodiscard]] auto surface() -> Surface & { return *surface_; }
+    /// @brief 组合的后端 Surface（只读引用）。
+    /// @return `*surface_` 的 const 引用。
     [[nodiscard]] auto surface() const -> const Surface & { return *surface_; }
 
     /// @brief 设置 RTL 标志（#5：应用侧按自身方向决策推送；默认转发到 Surface）。
+    /// @param rtl true 右到左排版，false 左到右。
     auto set_accessibility_rtl(bool rtl) -> void {
         if (surface_) {
             surface_->set_accessibility_rtl(rtl);
         }
     }
 
+    /// @brief 窗口逻辑尺寸（透传 `Surface::size`）。
+    /// @return 当前后端表面尺寸。
     [[nodiscard]] auto size() const -> Size { return surface_->size(); }
+    /// @brief 当前窗口标题缓存。
+    /// @return 标题字符串引用（与最近一次 set_title 一致）。
     [[nodiscard]] auto title() const -> const std::string & { return title_; }
+    /// @brief 设置窗口标题（缓存并下发后端；Win32 经 SetWindowText 生效）。
+    /// @param t 新标题（移动入缓存）。
     auto set_title(std::string t) -> void {
         title_ = std::move(t);
         if (surface_) {
@@ -350,22 +389,27 @@ class Window {
         }
     }
     /// @brief 运行期更新 CSD 自绘标题栏样式（透传后端；不支持的后端为空实现）。
+    /// @param style 新标题栏样式。
     auto set_title_bar_style(const TitleBarStyle &style) const -> void {
         if (surface_) {
             surface_->set_title_bar_style(style);
         }
     }
     /// @brief 运行期更新 CSD 标题栏图标（shared_ptr 共享像素避免深拷贝；透传后端）。
+    /// @param icon 图标图像（共享所有权；nullptr 清除）。
     auto set_title_bar_icon(const std::shared_ptr<Image> &icon) const -> void {
         if (surface_) {
             surface_->set_title_bar_icon(icon);
         }
     }
 
+    /// @brief 平台是否已请求关闭窗口（透传 `Surface::should_close`）。
+    /// @return 收到关闭请求时 true。
     [[nodiscard]] auto should_close() const -> bool { return surface_->should_close(); }
 
     /// @brief 装饰预留给应用内容的安全区内边距（逻辑 dp），等价于 `surface().content_inset()`。
     /// 应用可据其将根布局下沉，避开 CSD 标题栏/边框（对齐 Flutter `MediaQuery.padding` 安全区）。
+    /// @return 各边内缩距离（透传 `Surface::content_inset`）。
     [[nodiscard]] auto content_inset() const -> EdgeInsets { return surface_->content_inset(); }
     /// @brief 程序化关闭窗口（等效于用户点 ×）。
     auto close() const -> void {
@@ -386,6 +430,7 @@ class Window {
         }
     }
     /// @brief 程序化设置全屏。
+    /// @param on true 进入全屏，false 退出全屏。
     auto set_fullscreen(bool on) const -> void {
         if (surface_) {
             surface_->set_fullscreen(on);
@@ -398,6 +443,7 @@ class Window {
         }
     }
     /// @brief 控件发起窗口边缘缩放。
+    /// @param edge 被拖拽的窗口边/角。
     auto begin_window_resize(WindowResizeEdge edge) const -> void {
         if (surface_) {
             surface_->begin_window_resize(edge);
@@ -406,12 +452,16 @@ class Window {
 
     /// @brief 设置当前窗口可见性状态快照（由 `Application` 在状态变化时调用）。
     /// 该快照每帧经 `present_root` 注入根 `BuildContext`，子树可 `ctx.env->get<WindowState>()` 读取。
+    /// @param s 新的可见性状态快照。
     auto set_window_state(WindowState s) -> void { window_state_ = s; }
     /// @brief 当前窗口可见性状态快照。
+    /// @return 最近一次 set_window_state 的取值。
     [[nodiscard]] auto window_state() const -> WindowState { return window_state_; }
     /// @brief 当前窗口几何态快照（供几何持久化读取）。
+    /// @return 最近一次 set_window_mode 的取值。
     [[nodiscard]] auto window_mode() const -> WindowMode { return window_mode_; }
     /// @brief 设置当前窗口几何态快照（由 `Application` 在状态变化时调用）。
+    /// @param m 新的几何态快照。
     auto set_window_mode(WindowMode m) -> void { window_mode_ = m; }
 
     /// @brief pump 平台事件（→ 经 Surface::set_event_handler 上抛给 Application
@@ -422,11 +472,13 @@ class Window {
     /// ⚠️ 使用 `present_root` 驱动帧循环时**不得**再手调本函数：present_root 内部按需 begin，
     /// 部分脏区帧会刻意跳过 begin 以保留上帧像素；外层多调会把缓冲刷成底色，
     /// 导致脏区外全白。本函数仅供自行拼装 begin→paint→present 的低阶调用方使用。
+    /// @return 后端 begin_frame 的分配结果。
     [[nodiscard]] auto begin_frame() const -> Result<bool> {
         return surface_->begin_frame(static_cast<int>(size().width), static_cast<int>(size().height));
     }
 
     /// @brief 提交当前帧（swap / 保存 PNG）。
+    /// @return 后端 present 结果。
     [[nodiscard]] auto present() const -> Result<bool> { return surface_->present(); }
 
     /// @brief 渲染并 present 整个 widget 树（供 `Application::run` 每帧调用）。
@@ -447,6 +499,8 @@ class Window {
     /// 软件路径下走「HUD-only 帧」——不重排不重绘树，只把新 HUD 合成到保留的主缓冲再全量上屏，
     /// 且该帧仍记 idle（不污染 FPS 统计）；GPU 路径因软件缓冲只有底色而退回完整重渲染。
     /// 没有这条例外，帧循环会在脏决策处直接 return，叠加层永远得不到重绘。
+    /// @param root 要渲染的 widget 树根。
+    /// @return 整帧渲染并上屏成功 true；begin/present 失败时 false 及错误信息。
     [[nodiscard]] auto present_root(Node &root) -> Result<bool> {
         cached_root_ = root;  // 缓存当前根，供 resize/WM_PAINT 同步重渲染回调使用
         wire_present_request_once();
@@ -518,24 +572,29 @@ class Window {
 
     /// @brief 启用/关闭脏区域追踪（默认开启：idle 跳帧 + layout/paint 分离；
     /// 关闭时每帧全量重绘，与历史行为一致，供需要持续重绘的场景 opt-out）。
+    /// @param on true 启用脏追踪，false 关闭（每帧全量重绘）。
     auto enable_dirty_tracking(bool on) -> void {
         dirty_tracking_ = on;
         first_frame_ = true;  // 重新启用后首帧强制全绘
         layout_dirty_ = true;  // 重新启用后首帧强制重排
         dirty_.clear();
     }
+    /// @brief 脏区域追踪开关当前值。
+    /// @return 启用中为 true。
     [[nodiscard]] auto dirty_tracking_enabled() const -> bool { return dirty_tracking_; }
 
     /// @brief 本次 present_root 是否为 idle 跳过帧（无脏区、未渲染）。
+    /// @return 最近一次帧循环被整帧跳过时 true。
     [[nodiscard]] auto is_idle_frame() const -> bool { return idle_frame_; }
 
     /// @brief 手动标记脏矩形（窗口逻辑坐标）。
+    /// @param r 脏矩形（逻辑 dp，经追踪器并入既有脏集合）。
     auto mark_dirty(const Rect &r) -> void { dirty_.mark(r); }
 
     /// @brief 强制下一帧全量重排重绘（测试 seam / 外部环境变化、动画/视频持续重绘时调用）。
     auto force_full_redraw() -> void {
         layout_dirty_ = true;
-        dirty_.mark_all();
+        dirty_.mark_all();  // 全窗标脏：下一帧无视增量矩形，整个视口从零基底重合成。
     }
 
     /// @brief 设置 HUD 叠加层（分层 HUDA）。
@@ -552,10 +611,13 @@ class Window {
     /// 根 widget 树即 `Scene` 的真实内容，`PerfOverlay` 等不应再出现在树内。
     ///
     /// @note Thread: main-thread only
+    /// @param overlay 叠加层 widget（典型 `PerfOverlay`）；nullptr 卸下叠加层。
     auto set_overlay(std::shared_ptr<Widget> overlay) -> void {
         overlay_ = std::move(overlay);
         hud_rendered_ = false;  // 强制下一帧重绘 HUD 缓冲（含开关/首次设置）
     }
+    /// @brief 当前 HUD 叠加层。
+    /// @return 叠加层 shared_ptr 引用（空 = 无叠加层）。
     [[nodiscard]] auto overlay() const -> const std::shared_ptr<Widget> & { return overlay_; }
 
     /// @brief HUD 叠加层刷新周期（毫秒）：叠加层内容（FPS 等实时读数）按该周期重绘离屏缓冲。
@@ -565,6 +627,7 @@ class Window {
     static constexpr double AURORA_HUD_REFRESH_MS = 500.0;
 
     /// @brief 叠加层是否已到期需重绘（无叠加层恒 false）。
+    /// @return 到期需要离屏重绘时 true。
     [[nodiscard]] auto hud_refresh_pending() const -> bool {
         return overlay_ && (!hud_rendered_ || elapsed_since_hud_refresh_ms() >= AURORA_HUD_REFRESH_MS);
     }
@@ -573,6 +636,7 @@ class Window {
     ///
     /// 供帧调度并入「非渲染唤醒」截止时间。**不并入的后果**：整树无脏时帧循环会睡到下一个
     /// 定时器到期（无定时器即无限等待），叠加层再也得不到重绘，HUD 永久停在最后一帧的读数上。
+    /// @return `0` 已到期；`-1` 无叠加层；其余为距到期毫秒数。
     [[nodiscard]] auto hud_refresh_due_ms() const -> double {
         if (!overlay_) {
             return -1.0;
@@ -585,10 +649,12 @@ class Window {
     }
 
     /// @brief 脏区域追踪器（供性能覆盖层/测试观测）。
+    /// @return 追踪器可变引用（观测/手动标脏入口）。
     [[nodiscard]] auto dirty_tracker() -> DirtyRegionTracker & { return dirty_; }
 
     /// @brief 下一帧是否有待处理的脏（绘制脏/布局脏/首帧未绘），供帧调度决策取值
     /// 脏追踪关闭时视为永远有脏（每帧全绘，仅受帧预算节流）
+    /// @return 存在待处理脏（或关闭脏追踪）时 true。
     [[nodiscard]] auto has_pending_dirty() const -> bool {
         if (!dirty_tracking_) {
             return true;
@@ -599,6 +665,7 @@ class Window {
     /// @brief 设置本帧末尾的等待请求（由 `Application::run` 每帧经 `compute_wait_timeout`
     /// 决策后写入；`Window::run` 在 on_frame 之后消费）。语义同 `Surface::wait_events`：
     /// `<0` 无限等待 / `0` 不等（默认，未设置则保持旧忙轮询行为）/ `>0` 等待毫秒数。
+    /// @param timeout_ms 本帧末尾的等待毫秒数（语义同上，一次性消费）。
     auto set_next_wait(double timeout_ms) -> void { next_wait_ms_ = timeout_ms; }
 
     /// @brief 绑定本窗口的帧统计实例（多窗口：每窗口独立统计，`FrameStats::instance()`
@@ -607,9 +674,11 @@ class Window {
     /// 默认绑定进程级单例 `FrameStats::instance()`——未显式绑定时行为与历史完全一致，
     /// 故既有的 `PerfOverlay` / 基准工具 / 性能集成测试零改动仍可工作。
     /// @note Thread: main-thread only
+    /// @param s 本窗口专属的帧统计实例（非持有，生命周期须覆盖本窗口）。
     auto set_frame_stats(FrameStats &s) -> void { stats_ = &s; }
 
     /// @brief 本窗口当前绑定的帧统计实例（默认 `FrameStats::instance()`）。
+    /// @return 已绑定的统计实例引用。
     [[nodiscard]] auto frame_stats() const -> FrameStats & { return *stats_; }
 
   private:
@@ -642,17 +711,18 @@ class Window {
     }
 
   public:
-    /**
-     * @brief 运行帧循环：pump 事件 → 调 on_frame 回调（渲染根）→ 按需阻塞等待，直到
-     * should_close 或达到 max_frames（<0 表示无限，直到关闭）。on_frame 由 `Application` 注入
-     * （调用 `present_root`，其内部负责 present），保持 `Window` 与渲染循环解耦；
-     * `Window::run` 不再额外 present，避免每帧重复提交。
-     *
-     * 事件驱动帧循环：on_frame 末尾经 `set_next_wait` 写入本帧
-     * 等待决策，循环在帧末 `Surface::wait_events` 阻塞到事件/超时，取代忙轮询；
-     * 等待请求一次性消费（未重新设置则不等），直调 `Window::run` 的低阶调用方
-     * （测试/自拼帧循环）行为不变。等待时长记入 `FrameStats`（wakeups / sleep ratio）。
-     */
+    /// @brief 运行帧循环：pump 事件 → 调 on_frame 回调（渲染根）→ 按需阻塞等待。
+    /// 直到 should_close 或达到 max_frames（<0 表示无限，直到关闭）。on_frame 由 `Application` 注入
+    /// （调用 `present_root`，其内部负责 present），保持 `Window` 与渲染循环解耦；
+    /// `Window::run` 不再额外 present，避免每帧重复提交。
+    ///
+    /// 事件驱动帧循环：on_frame 末尾经 `set_next_wait` 写入本帧
+    /// 等待决策，循环在帧末 `Surface::wait_events` 阻塞到事件/超时，取代忙轮询；
+    /// 等待请求一次性消费（未重新设置则不等），直调 `Window::run` 的低阶调用方
+    /// （测试/自拼帧循环）行为不变。等待时长记入 `FrameStats`（wakeups / sleep ratio）。
+    ///
+    /// @param on_frame 每帧调用的渲染回调（由宿主注入，内部完成 present）；为空对象时该帧跳过渲染。
+    /// @param max_frames 帧数预算：> 0 时跑满该帧数退出，≤ 0（默认 -1）表示不限，直到窗口请求关闭。
     AURORA_MAIN_THREAD auto run(const std::function<void()> &on_frame, int max_frames = -1) -> void {
         // 本循环就是这条线程的主线程事件循环：给后台线程（InspectorServer 的 worker）装上回投器，
         // 使其对 widget 树的读取排在帧与帧之间执行。缺此安装时 `inspector` 的 marshal 会退回
@@ -734,10 +804,9 @@ class Window {
     DirtyRegionTracker dirty_;  ///< 绘制脏追踪器（specification/06-app-platform.md §3.2）。
     bool dirty_tracking_ = true;  ///< 脏追踪开关（默认开启：idle 跳帧 + layout/paint 分离）。
     bool layout_dirty_ = true;  ///< 布局脏：尺寸/结构/约束变化或 mark_needs_layout 触发，下一帧需重排。
-    std::vector<std::weak_ptr<Widget>>
-        dirty_boundaries_;  ///< 脏 relayout boundary 集合（局部重排用，避免整树重排）。
-                            ///< 以 weak_ptr 持有：boundary widget 可能在两次帧之间被销毁
-                            ///< （如滚动列表回收 lazy row），裸指针会悬垂导致 use-after-free。
+    std::vector<std::weak_ptr<Widget>> dirty_boundaries_;  ///< 脏 relayout boundary 集合（局部重排用，避免整树重排）。
+    // 以 weak_ptr 持有：boundary widget 可能在两次帧之间被销毁
+    // （如滚动列表回收 lazy row），裸指针会悬垂导致 use-after-free。
 
     /// @brief 已安装脏汇聚点的根控件（见 install_dirty_sink）。以 weak_ptr 持有并按被控对象
     /// 指针比对：根控件被销毁后新根即使复用同一地址也会因 lock() 失败而正确重装。
@@ -842,6 +911,10 @@ class Window {
     }
 
     /// @brief 脏追踪决策：计算 FramePlan；若本帧可跳过则返回跳过结果。
+    /// @param root 当前帧根节点（用于 last_root_ 记录与全绘后更新）。
+    /// @param root_changed 根指针是否较上帧变化（导航切换需整体重绘）。
+    /// @param plan 出参：本帧渲染计划（不跳过时填充）。
+    /// @return 可跳帧时返回该帧结果（含 HUD-only/系统兜底上屏）；否则 nullopt 继续完整渲染。
     [[nodiscard]] auto evaluate_dirty_plan(Node &root, bool root_changed, FramePlan &plan)
         -> std::optional<Result<bool>> {
         const bool size_changed = size().width != last_size_.width || size().height != last_size_.height;
@@ -928,6 +1001,8 @@ class Window {
     }
 
     /// @brief 按帧计划启动新帧：仅非裁剪帧才调用 begin_frame（裁剪帧保留上帧像素）。
+    /// @param plan 帧计划（clip_logical 非空 = 裁剪帧）。
+    /// @return 全量帧返回后端 begin_frame 结果；裁剪帧直接成功（不清缓冲）。
     [[nodiscard]] auto begin_frame_for_plan(const FramePlan &plan) const -> Result<bool> {
         const bool partial_clip = plan.clip_logical.size.width > 0.0F && plan.clip_logical.size.height > 0.0F;
         // 全量重绘标记：无裁剪帧 = 整个视口从零基底重新合成。
@@ -939,6 +1014,9 @@ class Window {
     }
 
     /// @brief 构建根 BuildContext 并挂载/安装脏汇聚点（如需要）。
+    /// @param root 当前根节点（挂载与脏汇聚安装对象）。
+    /// @param root_changed 根是否变化（变化则重新 mount 接线订阅）。
+    /// @return 根 BuildContext（env 指向地址恒定的 `root_env_`）。
     [[nodiscard]] auto prepare_context(Node &root, bool root_changed) -> BuildContext {
         root_env_.set<MediaQuery>(MediaQuery::from_surface(*surface_));
         // 注入窗口级生命周期快照：子树可 ctx.env->get<WindowState>() / ctx.env->get<WindowMode>() 读取。
@@ -968,6 +1046,8 @@ class Window {
     }
 
     /// @brief 对单个脏 relayout boundary 执行局部重排（含 StrictMode 校验）。
+    /// @param w boundary 控件本体。
+    /// @param ctx 布局上下文（约束传递与子树可见性）。
     static auto relayout_boundary_widget(Widget &w, const BuildContext &ctx) -> void {
         const Size before = w.size();
         w.layout(w.cached_constraints(), ctx);
@@ -985,6 +1065,10 @@ class Window {
     }
 
     /// @brief 布局整棵子树或仅脏 boundary 子树；返回 layout 耗时（ms）。
+    /// @param root 根节点（整树重排入口）。
+    /// @param plan 帧计划（do_layout / whole_tree_relayout 决策）。
+    /// @param ctx 布局上下文。
+    /// @return 本帧 layout 阶段耗时（毫秒）。
     [[nodiscard]] auto run_layout(Node &root, const FramePlan &plan, const BuildContext &ctx) -> double {
         // 布局整棵子树：LayoutBuilder 等依赖 layout 阶段构建子节点（约束不变则复用缓存），
         // 也是 T8 根 MediaQuery 注入对子树可见的前提。
@@ -1019,6 +1103,11 @@ class Window {
     }
 
     /// @brief 绘制 widget 树（全量或脏区裁剪）；返回 paint 耗时（ms）。
+    /// @param p 主缓冲 Painter。
+    /// @param root 根节点。
+    /// @param ctx 绘制上下文。
+    /// @param plan 帧计划（clip_logical 决定裁剪重绘路径）。
+    /// @return 本帧 paint 阶段耗时（毫秒）。
     [[nodiscard]] auto run_paint(Painter &p, Node &root, const BuildContext &ctx, const FramePlan &plan) const
         -> double {
         const auto t_paint_start = std::chrono::steady_clock::now();
@@ -1070,6 +1159,9 @@ class Window {
     }
 
     /// @brief 若启用 HUD 叠加层，按需重绘并合成到主缓冲；返回是否发生了 HUD 刷新。
+    /// @param p 主缓冲 Painter（合成目标）。
+    /// @param ctx 叠加层绘制所需上下文。
+    /// @return 本帧发生 HUD 离屏重绘时 true。
     [[nodiscard]] auto compose_hud_maybe(Painter &p, const BuildContext &ctx) -> bool {
         // ---- 分层 HUD 叠加层 ----
         // 叠加层独立于 widget 树，仅按 AURORA_HUD_REFRESH_MS 重绘离屏缓冲；每帧（full / partial 均）
@@ -1094,6 +1186,8 @@ class Window {
     ///
     /// 刻意不走 `finish_present`：那条路径无条件 `record_phases`，而本帧没有 layout/paint，
     /// 记零会把相位均值拖向 0（相位环形缓冲的样本域是「绘制帧」，idle 帧不进这个域）。
+    /// @param root 当前根（仅用于构建上下文，不重排/重绘树）。
+    /// @return 全量上屏结果。
     [[nodiscard]] auto present_hud_only(Node &root) -> Result<bool> {
         const BuildContext ctx = prepare_context(root, false);
         Painter &p = surface_->painter();
@@ -1104,10 +1198,15 @@ class Window {
     }
 
     /// @brief 上屏并记录阶段耗时；返回 present 结果。
+    /// @param plan 帧计划（dirty_dev 提供增量上传脏矩形）。
+    /// @param hud_refreshed 本帧叠加层是否刷新（刷新时强制全量上传）。
+    /// @param layout_ms layout 阶段耗时（毫秒，记入统计）。
+    /// @param paint_ms paint 阶段耗时（毫秒，记入统计）。
+    /// @return present 结果（相位耗时已写入 `stats_`）。
     [[nodiscard]] auto finish_present(const FramePlan &plan, bool hud_refreshed, double layout_ms,
                                       double paint_ms) const -> Result<bool> {
         const auto t_present_start = std::chrono::steady_clock::now();
-        Result<bool> result{true};
+        Result<bool> result{true};  // 本帧结果初值：块内由 present() 覆写为真实上屏结果。
         {
             AURORA_PROFILE_SCOPE("Window::present");
             // 把本帧脏矩形交给后端（空向量 = 全量上传）；增量上屏后端据此仅更新变化区。
@@ -1127,6 +1226,13 @@ class Window {
     /// 随后走与软件路径相同的 finish_present（GLFW GPU 模式下 present 即 swapBuffers）。
     /// `begin_frame` 失败（初始化失败/上下文丢失）：本帧已录命令回退软件栅格化（底色 FillRect
     /// 已在 DL 内，replay 即完整帧），此后本 Window 生命周期永久走软件路径，不做逐帧软硬混合。
+    /// @param sink GPU 帧接收器（begin/end 生命周期驱动者）。
+    /// @param frame_dl 本帧录制的帧级 DisplayList。
+    /// @param plan 帧计划（GPU 帧恒全量，clip 已清空）。
+    /// @param hud_refreshed 叠加层是否刷新（透传 finish_present 决定上传策略）。
+    /// @param layout_ms layout 阶段耗时（毫秒）。
+    /// @param paint_ms paint 阶段耗时（毫秒）。
+    /// @return GPU 帧上屏结果；begin_frame 失败时已回退软件栅格并正常上屏。
     [[nodiscard]] auto present_gpu_frame(rhi::RhiFrameSink &sink, const DisplayList &frame_dl, const FramePlan &plan,
                                          bool hud_refreshed, double layout_ms, double paint_ms) -> Result<bool> {
         const Size sz = size();
@@ -1136,8 +1242,8 @@ class Window {
             frame_dl.replay(surface_->painter());
             return finish_present(plan, hud_refreshed, layout_ms, paint_ms);
         }
-        frame_dl.replay(sink.backend());
-        sink.end_frame();
+        frame_dl.replay(sink.backend());  // 帧命令回放进 GPU 后端栅格化。
+        sink.end_frame();  // 收口 GPU 帧：提交并驱动上屏。
         return finish_present(plan, hud_refreshed, layout_ms, paint_ms);
     }
 };

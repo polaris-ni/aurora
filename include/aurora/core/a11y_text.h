@@ -21,6 +21,8 @@ enum class TextUnit : std::uint8_t {
 namespace detail {
 
 /// @brief UTF-8 序列长度（首字节决定；非法首字节按 1 处理，与解码退化一致）。
+/// @param c 序列首字节。
+/// @return 该字节起始序列的预期长度 1~4；无法识别的首字节按 1。
 [[nodiscard]] inline auto seq_len(unsigned char c) -> std::size_t {
     if ((c & 0xE0U) == 0xC0U) {
         return 2;
@@ -35,6 +37,9 @@ namespace detail {
 }
 
 /// @brief 解码 `text[i]` 起的单个码点（非法序列按单字节返回，永不越界）。
+/// @param text 待解码的 UTF-8 文本。
+/// @param i 起始字节下标；越界时返回 {0, 0}。
+/// @return （码点值, 序列长度）；序列在串内被截断时按单字节 (c, 1) 退化返回。
 [[nodiscard]] inline auto decode_cp(std::string_view text, std::size_t i) -> std::pair<std::uint32_t, std::size_t> {
     if (i >= text.size()) {
         return {0, 0};
@@ -68,7 +73,6 @@ namespace detail {
 }  // namespace detail
 
 /// @brief UTF-8 ↔ UTF-16 偏移映射（A4 / §7.4）。
-///
 /// UIA 文本偏移的单位是 **UTF-16 code unit**，而 Aurora 内部（含 `Widget::accessibility_text()`
 /// 等钩子）一律 **UTF-8 字节偏移**；换算只存在于平台桥边界，且由本表一次性 O(n) 构建。
 ///
@@ -79,16 +83,20 @@ namespace detail {
 /// @note Side-effects: pure
 class UtfOffsetMap {
   public:
+    /// @brief 默认构造：空映射（长度为 0 的文本）。
     UtfOffsetMap() = default;
+    /// @brief 以给定文本构造映射（内部调用 `build`，O(n) 一次）。
+    /// @param text 参与映射的 UTF-8 文本。
     explicit UtfOffsetMap(std::string_view text) { build(text); }
 
     /// @brief 按文本重建映射（O(n) 一次；文本变化时须重建）。
+    /// @param text 新的 UTF-8 文本（仅存视图，不持有）。
     auto build(std::string_view text) -> void {
         text_ = text;
-        starts_.clear();
-        utf16_of_.clear();
-        std::size_t utf8 = 0;
-        std::size_t utf16 = 0;
+        starts_.clear();  // 清空旧码点起点表
+        utf16_of_.clear();  // 清空旧 UTF-16 偏移表
+        std::size_t utf8 = 0;  // UTF-8 字节扫描游标
+        std::size_t utf16 = 0;  // 累计 UTF-16 单元数
         while (utf8 < text.size()) {
             const auto [cp, len] = detail::decode_cp(text, utf8);
             starts_.push_back(utf8);
@@ -96,15 +104,20 @@ class UtfOffsetMap {
             utf16 += (cp > 0xFFFFU) ? 2U : 1U;  // 非 BMP：代理对占 2 个 UTF-16 单元
             utf8 += (len == 0) ? 1 : len;  // len==0 仅越界时出现；兜底前进 1 防死循环
         }
-        // 末尾哨兵：使「全文长度」这一端点可被映射（如选区终点 = 文末）。
-        starts_.push_back(utf8);
-        utf16_of_.push_back(utf16);
+        starts_.push_back(utf8);  // 末尾哨兵起点：使「全文长度」端点可映射（选区终点 = 文末）
+        utf16_of_.push_back(utf16);  // 与哨兵起点配对的 UTF-16 偏移
     }
 
+    /// @brief UTF-8 文本总字节数。
+    /// @return 构建时文本的字节长度。
     [[nodiscard]] auto utf8_length() const -> std::size_t { return text_.size(); }
+    /// @brief UTF-16 单元总数（非 BMP 码点按代理对计 2）。
+    /// @return 末尾哨兵的 UTF-16 偏移；空表时为 0。
     [[nodiscard]] auto utf16_length() const -> std::size_t { return utf16_of_.empty() ? 0 : utf16_of_.back(); }
 
     /// @brief UTF-16 偏移 → UTF-8 偏移（向下夹紧到码点起点，G9）。
+    /// @param utf16_index UTF-16 单元下标；落在代理对第二单元时回夹到高代理起点。
+    /// @return 对应码点起点的 UTF-8 字节偏移；不小于总长时返回文本字节长度。
     [[nodiscard]] auto to_utf8(std::size_t utf16_index) const -> std::size_t {
         if (utf16_of_.empty()) {
             return 0;
@@ -119,6 +132,8 @@ class UtfOffsetMap {
     }
 
     /// @brief UTF-8 偏移 → UTF-16 偏移（非法/中部偏移向下夹紧到码点起点）。
+    /// @param utf8_index UTF-8 字节下标；落在码点中部时回夹到该码点起点。
+    /// @return 对应码点起点的 UTF-16 单元偏移；不小于文本长度时返回 UTF-16 总单元数。
     [[nodiscard]] auto to_utf16(std::size_t utf8_index) const -> std::size_t {
         if (starts_.empty()) {
             return 0;
@@ -132,6 +147,9 @@ class UtfOffsetMap {
     }
 
     /// @brief 从 `utf8_index` 起按码点前进/后退 `count` 个（夹紧到 [0, size]）。
+    /// @param utf8_index 起始 UTF-8 字节下标（先夹紧到码点起点）。
+    /// @param count 正数前进、负数后退的码点个数。
+    /// @return 目标码点的 UTF-8 字节偏移；越过串尾返回文本字节长度，越过串头返回 0。
     [[nodiscard]] auto advance_utf8(std::size_t utf8_index, int count) const -> std::size_t {
         if (count == 0 || starts_.empty()) {
             return utf8_index;
@@ -154,6 +172,9 @@ class UtfOffsetMap {
     }
 
     /// @brief 按 UTF-16 单元前进/后退（UIA `MoveEndpointByUnit(Character)` 语义）。
+    /// @param utf16_index 起始 UTF-16 单元下标。
+    /// @param count 正数前进、负数后退的单元个数（负向越界夹紧到 0）。
+    /// @return 目标 UTF-16 偏移经 `to_utf8` 换算的 UTF-8 字节偏移（夹紧到码点起点）。
     [[nodiscard]] auto advance_utf16(std::size_t utf16_index, int count) const -> std::size_t {
         // utf16_index 无符号、count 有符号：用 std::cmp_less 做术语比较（本分支内 -count > 0，无溢出语义差）。
         const std::size_t target =
@@ -168,6 +189,8 @@ class UtfOffsetMap {
 };
 
 /// @brief UTF-8 → UTF-16（`char16_t` 序列；代理对按原生单元，非 BMP 占 2）。
+/// @param text 待转换的 UTF-8 文本。
+/// @return 转换后的 UTF-16 序列；非法序列按单字节码点退化编码。
 [[nodiscard]] inline auto utf8_to_utf16(std::string_view text) -> std::u16string {
     std::u16string out;
     out.reserve(text.size());
@@ -187,6 +210,8 @@ class UtfOffsetMap {
 }
 
 /// @brief UTF-16 → UTF-8（孤立代理按 U+FFFD 替换，不崩溃）。
+/// @param text 待转换的 UTF-16 序列。
+/// @return 编码后的 UTF-8 串；高代理后随低代理合成非 BMP 码点，孤立代理替换为 U+FFFD。
 [[nodiscard]] inline auto utf16_to_utf8(std::u16string_view text) -> std::string {
     std::string out;
     out.reserve(text.size());
@@ -228,6 +253,8 @@ class UtfOffsetMap {
 }
 
 /// @brief UTF-8 文本的 UTF-16 单元数（不建映射的便捷口径）。
+/// @param text UTF-8 文本。
+/// @return UTF-16 code unit 总数（非 BMP 码点计 2）。
 [[nodiscard]] inline auto utf16_length_of(std::string_view text) -> std::size_t {
     std::size_t n = 0;
     std::size_t i = 0;
@@ -242,6 +269,8 @@ class UtfOffsetMap {
 // ---- 文本单位（Word / Line / Document 启发式；零依赖，三桥共用）----
 
 /// @brief 该码点是否为「词内」字符（非空白、非 ASCII 标点）。
+/// @param cp Unicode 码点值。
+/// @return NUL、空白与 ASCII 标点为 false；其余码点（含 CJK）为 true。
 [[nodiscard]] inline auto is_word_char(std::uint32_t cp) -> bool {
     if (cp == 0) {
         return false;
@@ -260,6 +289,10 @@ class UtfOffsetMap {
 }
 
 /// @brief 把 `index` 所在位置按 `unit` 展开为 `[start, end)`（UTF-8 字节偏移）。
+/// @param text UTF-8 文本。
+/// @param index 字节下标（越界夹紧到串尾）。
+/// @param unit 展开单位：字符 / 词 / 行 / 全文。
+/// @return 该单位的半开区间 [start, end)；Document 返回全文，Word 按词内字符向两侧扫描。
 [[nodiscard]] inline auto expand_to_unit(std::string_view text, std::size_t index, TextUnit unit)
     -> std::pair<std::size_t, std::size_t> {
     index = std::min(index, text.size());  // 越界索引夹紧到串尾

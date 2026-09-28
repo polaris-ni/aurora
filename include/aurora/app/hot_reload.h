@@ -13,7 +13,6 @@ namespace aurora {
 
 /// @brief JSON UI 热重载（specification/08-tooling.md §2.7）：监视 JSON 变化 → `from_json` 重建整棵树，
 /// 并**按树路径**保留上一棵树里 JSON 未显式声明的属性值。
-///
 /// 用法（伪代码）：
 ///   HotReload hr("ui.json");
 ///   while (!surface.should_close()) {
@@ -39,27 +38,35 @@ namespace aurora {
 /// @note Rebuildable: yes, via from_json
 class HotReload {
   public:
+    /// @brief 外部 JSON 读取器签名：无参返回解析好的 Json（测试可注入，替代按 `path_` 的文件读取）。
     using JsonLoadFn = std::function<Json()>;  // 外部读取 JSON 的工具
 
+    /// @brief 按文件路径构造：每次 try_sync 用 ifstream 读取该路径的 JSON。
+    /// @param path JSON UI 文件路径（可稍后经 set_loader 注入读取器覆盖）。
     explicit HotReload(std::string path) : path_(std::move(path)) {}
 
+    /// @brief 路径 + 自定义读取器构造：loader 非空时优先于文件读取。
+    /// @param path JSON UI 文件路径（保留为状态来源标识）。
+    /// @param loader JSON 读取器（测试或自定义 IO 注入）。
     HotReload(std::string path, JsonLoadFn loader) : path_(std::move(path)), loader_(std::move(loader)) {}
 
     /// @brief 注入 JSON 读取器（用于测试时不解耦 IO）。
+    /// @param loader 替代按 path_ 文件读取的 JSON 读取器；非空时 try_sync 每次经它取 JSON。
     void set_loader(JsonLoadFn loader) { loader_ = std::move(loader); }
 
     /// @brief 保留项 —— 现已按树路径匹配，故本设置不再参与匹配。
-    /// @deprecated 仅为兼容保留；`id` 不经 JSON 往返，按 id 保留状态在热重载下无法成立。
-    /// @note 形参取 const 引用：本接口是空实现（仅兼容占位），不消费 key，按值传 std::string 徒增一次拷贝。
+    /// @deprecated 改用 try_sync 的按树路径状态保留（无需任何键设置）；自 1.0.0 起仅为兼容保留。
+    /// @note `id` 不经 JSON 往返，按 id 保留状态在热重载下无法成立。
+    /// @param key 原「按 id 保留状态」的键名；本接口为空实现，不消费该参数。
+    /// @note 形参取 const 引用：空实现（仅兼容占位），按值传 std::string 徒增一次拷贝。
     void set_state_key([[maybe_unused]] const std::string &key) {}
 
     /// @brief 检查文件时间戳；如有更新则从 JSON 重建树。
     /// @return 新根节点（共享指针所有权），无变化或重建失败返回 nullptr。
-    ///
     /// @note 结构变化（增删子节点）后按路径保留会对错位：此时宁可少恢复几项也不猜，
     ///       故只对**新旧都存在**的路径回填。
     [[nodiscard]] auto try_sync() -> std::shared_ptr<Widget> {
-        Json json;
+        Json json;  // 本轮读入并与 last_json_ 比对的 JSON 暂存
         try {
             json = load_json();
         } catch (...) {
@@ -72,17 +79,15 @@ class HotReload {
             return nullptr;
         }
 
-        // 保存旧树的状态快照
-        preserve_state();
+        preserve_state();  // 保存旧树的状态快照，供重建后按路径回填
 
-        // 重建
-        auto root = aurora::serialization::from_json(json);
+        auto root = aurora::serialization::from_json(json);  // 由新 JSON 重建的根节点结果
         if (!root.ok()) {
             return nullptr;
         }
 
-        // 恢复状态（需在 last_json_ 接管 json 之前 —— 恢复要用它判断哪些属性是显式声明的）
-        restore_state(Node{root.value()}, json);
+        restore_state(Node{root.value()},
+                      json);  // 恢复状态（须在 last_json_ 接管 json 之前——恢复要用它判断哪些属性是显式声明的）
 
         last_json_ = std::move(json);
         last_root_ = root.value();
@@ -90,6 +95,7 @@ class HotReload {
     }
 
     /// @brief 当前持有的根节点（首次 try_sync 前为 nullptr）。
+    /// @return 最近一次成功重建的根节点共享指针；尚未重建过时为 `nullptr`。
     [[nodiscard]] auto root() const -> std::shared_ptr<Widget> { return last_root_; }
 
   private:
@@ -97,14 +103,15 @@ class HotReload {
         if (loader_) {
             return loader_();
         }
-        std::ifstream f(path_);
+        std::ifstream f(path_);  // 未注入 loader 时按 path_ 打开的只读文件流
         if (!f.is_open()) {
             return {};
         }
         return Json::parse(f, nullptr, false);
     }
 
-    // ── 状态快照：路径 → 该节点序列化出的属性对象 ──
+    /// @brief 状态快照：清空并重扫上一棵树，把各路径节点序列化出的属性对象存入 saved_state_。
+    /// 无历史根（首次同步）时直接返回，不产生任何快照。
     void preserve_state() {
         saved_state_.clear();
         if (!last_root_) {
@@ -113,6 +120,10 @@ class HotReload {
         collect_state(Node{last_root_}, std::string{});
     }
 
+    /// @brief 深度遍历收集状态：把 node 自身属性按 path 记入 saved_state_，再递归子节点。
+    /// 子节点路径为 `path + "/" + 序号`（根为 ""，首层即 "0"、"1"，与 find_node_by_path 同格式）。
+    /// @param node 当前遍历到的控件节点。
+    /// @param path 该节点的树路径（根为空串）。
     void collect_state(Node node, const std::string &path) {
         Widget &w = node.widget();
         Json props = Json::object();
@@ -127,7 +138,10 @@ class HotReload {
         }
     }
 
-    // ── 状态回填：只补 JSON 未显式声明的标量属性 ──
+    /// @brief 状态回填：只补 JSON 未显式声明的标量属性，按树路径逐层对齐新旧树。
+    /// 仅当快照存在且该路径在新 JSON 中也有对应节点时回填；非 JSON 对象节点按空 props/children 处理。
+    /// @param node 新树中的当前控件节点。
+    /// @param json_node 该节点在新 JSON 中的对象（含可选的 props / children 键）。
     void restore_state(Node node, const Json &json_node) {
         const std::string path = current_path_;
         const auto it = saved_state_.find(path);
@@ -161,10 +175,10 @@ class HotReload {
         }
     }
 
-    std::string path_;
-    Json last_json_;
-    std::shared_ptr<Widget> last_root_;
-    JsonLoadFn loader_;
+    std::string path_;  ///< JSON UI 文件路径（未注入 loader 时的读取来源）
+    Json last_json_;  ///< 上次成功解析的 JSON（与新读内容比对判是否变化；恢复状态时据此识别显式声明）
+    std::shared_ptr<Widget> last_root_;  ///< 上次重建的根节点（preserve_state 的快照来源；初始为空）
+    JsonLoadFn loader_;  ///< 注入的 JSON 读取器（可空；非空时优先于按 path_ 的文件读取）
     Json saved_state_;  ///< 路径 → 属性对象
     std::string current_path_;  ///< restore_state 递归过程中的当前路径
 };

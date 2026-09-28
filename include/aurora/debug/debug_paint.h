@@ -37,16 +37,22 @@ struct DebugPaintFlags {
 };
 
 /// @brief 设置全局叠层开关（DEBUG 下生效；Release 为 no-op）。
+/// @param f 目标开关组（写入全局状态，覆盖既有设置）。
 auto set_flags(const DebugPaintFlags &f) -> void;
 
 /// @brief 读取全局叠层开关（Release 恒为全 false）。
+/// @return 当前生效的开关组副本。
 [[nodiscard]] auto flags() -> DebugPaintFlags;
 
 /// @brief 是否有任一叠层开启（Release 恒 false，供 `present_root` 短路）。
+/// @return 五个叠层开关中任一为 true 时返回 true。
 [[nodiscard]] auto any_flag_enabled() -> bool;
 
-// ---- 调试帧计数（仅 repaint_highlight 需要；DEBUG 下递增）----
+/// @brief 读取当前全局调试帧号（repaint_highlight 据其判定「本帧重绘」标记）。
+/// @return 当前帧号；Release 下调用点不前移计数，恒为 0。
 [[nodiscard]] auto current_debug_frame() -> std::uint64_t;
+
+/// @brief 前移全局调试帧计数（调用点在 `AURORA_ENABLE_DEBUG` 的帧绘制路径，且仅叠层开启时前移）。
 auto bump_debug_frame() -> void;
 
 /// @brief 全树绘制后统一绘制 5 个叠层（含 overdraw 热力图）。由 `present_root` 在
@@ -66,7 +72,11 @@ struct DebugOverlayStats {
     std::uint64_t overdraw_regions_drawn = 0;  ///< 参与 overdraw 热力图叠加的控件（非根）数。
 };
 
+/// @brief 读取最近一次 `paint_debug_overlays` 的叠层绘制统计（供测试断言）。
+/// @return 统计快照（各叠层实际绘制到的控件/区域计数）。
 [[nodiscard]] auto overlay_stats() -> DebugOverlayStats;
+
+/// @brief 清零叠层绘制统计（`paint_debug_overlays` 每次绘制前也会自动清零）。
 auto reset_overlay_stats() -> void;
 
 /// @brief 控件拾取结果中的单层节点。
@@ -88,6 +98,7 @@ struct DebugPickResult {
 /// @param root_bounds 根全局盒（用于把 `screen` 作为根局部坐标传入 hit_test_chain）。
 /// @param ctx BuildContext（命中测试多忽略其环境，可默认构造）。
 /// @param screen 窗口逻辑 dp 坐标（相对根原点；与 `root_bounds.origin` 同坐标系）。
+/// @return 根→最深命中链与各层类型名/全局盒；未命中或 Release 下为 `{ {}, false }`。
 /// @note Release 下返回 `{ {}, false }`（空操作）。
 [[nodiscard]] auto widget_picker(Widget &root, const Rect &root_bounds, const BuildContext &ctx, Point screen)
     -> DebugPickResult;

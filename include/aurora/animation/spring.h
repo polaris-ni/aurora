@@ -4,36 +4,45 @@
 
 namespace aurora {
 
-/**
- * @brief 弹簧物理描述（参考 Flutter `SpringDescription`）。
- *
- * 阻尼谐振子：m·x'' + c·x' + k·x = 0（相对目标位移）。
- */
+/// @brief 弹簧物理描述（参考 Flutter `SpringDescription`）。
+///
+/// 阻尼谐振子：m·x'' + c·x' + k·x = 0（相对目标位移）。
 struct SpringDescription {
     double stiffness = 170.0;  ///< 刚度 k（越大回弹越快）
     double damping = 26.0;  ///< 阻尼 c（越大越稳）
     double mass = 1.0;  ///< 质量 m
 
+    /// @brief 无阻尼固有角频率 ω0。
+    /// @return sqrt(stiffness / mass)（rad/s）。
     [[nodiscard]] auto natural_frequency() const -> double { return std::sqrt(stiffness / mass); }
+
+    /// @brief 阻尼比 ζ。
+    /// @brief 阻尼比 ζ。
+    /// @return damping / (2·sqrt(stiffness·mass))；小于 1 欠阻尼、等于 1 临界、大于 1 过阻尼。
     [[nodiscard]] auto damping_ratio() const -> double { return damping / (2.0 * std::sqrt(stiffness * mass)); }
 };
 
-/**
- * @brief 阻尼弹簧模拟：从 start 收敛到 end，给定初速度（单位/秒）。
- *
- * 提供任意时刻位置（闭合解，统一覆盖欠阻尼/临界阻尼/过阻尼三种情形），
- * 供 spring 动画在每帧 `tick` 时求值（specification/05-event-navigation.md §6.1，对应 Flutter `SpringSimulation`）。
- *
- * @note Thread: thread-safe (pure value type)
- * @note Side-effects: none
- * @note Rebuildable: no
- */
+/// @brief 阻尼弹簧模拟：从 start 收敛到 end，给定初速度（单位/秒）。
+///
+/// 提供任意时刻位置（闭合解，统一覆盖欠阻尼/临界阻尼/过阻尼三种情形），
+/// 供 spring 动画在每帧 `tick` 时求值（specification/05-event-navigation.md §6.1，对应 Flutter `SpringSimulation`）。
+///
+/// @note Thread: thread-safe (pure value type)
+/// @note Side-effects: none
+/// @note Rebuildable: no
 class SpringSimulation {
   public:
+    /// @brief 以弹簧参数、起止位置与初速度构造。
+    /// @param spring 弹簧物理描述（刚度/阻尼/质量）。
+    /// @param start 起始位置（与目标值同单位域）。
+    /// @param end 收敛目标位置。
+    /// @param velocity 初速度（单位/秒，默认 0）。
     SpringSimulation(const SpringDescription &spring, double start, double end, double velocity = 0.0)
         : spring_(spring), start_(start), end_(end), velocity_(velocity) {}
 
     /// @brief 时刻 t（秒）的位置。
+    /// @param t 时刻（秒）。
+    /// @return 闭合解位置（欠/临界/过阻尼统一覆盖，可能短暂越过 end）。
     [[nodiscard]] auto value(double t) const -> double {
         const double y0 = start_ - end_;
         const double w0 = spring_.natural_frequency();
@@ -42,16 +51,23 @@ class SpringSimulation {
     }
 
     /// @brief 时刻 t（秒）的速度（数值微分，供 settled 判定）。
+    /// @param t 时刻（秒）。
+    /// @return 中心差商近似速度（步长 1e-4）。
     [[nodiscard]] auto velocity(double t) const -> double {
         constexpr double h = 1e-4;
         return (value(t + h) - value(t - h)) / (2.0 * h);
     }
 
     /// @brief 是否已在容差内静止（位置与速度均接近目标）。
+    /// @param t 时刻（秒）。
+    /// @param tolerance 位置与速度的容差（默认 0.01，与值同单位域）。
+    /// @return |value(t)-end| 与 |velocity(t)| 都小于容差时为 true。
     [[nodiscard]] auto is_settled(double t, double tolerance = 0.01) const -> bool {
         return std::abs(value(t) - end_) < tolerance && std::abs(velocity(t)) < tolerance;
     }
 
+    /// @brief 收敛目标位置。
+    /// @return 构造时传入的 end。
     [[nodiscard]] auto target() const -> double { return end_; }
 
   private:

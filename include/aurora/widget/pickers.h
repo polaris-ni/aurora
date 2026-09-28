@@ -13,14 +13,19 @@
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
+/// @brief Aurora UI 库顶层命名空间（本头承载日期 / 时间 / 颜色选择器控件）。
 namespace aurora {
 
 /// @brief 简单日期值（无时区语义；合法性由 Date::is_valid 检查）。
 struct Date {
-    int year = 2026;
+    int year = 2026;  ///< 日历年（无上下界校验；默认 2026）
     int month = 1;  ///< 1..12
     int day = 1;  ///< 1..31
 
+    /// @brief 该年该月的天数（2 月按闰年规则取 29/28）。
+    /// @param y 年份（公历）。
+    /// @param m 月份（1..12）。
+    /// @return 天数；m 越界（<1 或 >12）时为 0。
     [[nodiscard]] static auto days_in_month(int y, int m) -> int {
         static constexpr int aurora_days[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};  // NOLINT
         if (m < 1 || m > 12) {
@@ -33,14 +38,21 @@ struct Date {
         return aurora_days[m - 1];  // NOLINT
     }
 
+    /// @brief 日期是否合法：月份落在 1..12，且日落在 1..当月天数。
+    /// @return 合法为 true；越界（含闰年判定失败）为 false。
     [[nodiscard]] auto is_valid() const -> bool {
         return month >= 1 && month <= 12 && day >= 1 && day <= days_in_month(year, month);
     }
 
+    /// @brief 格式化为 ISO 风格日期文本。
+    /// @return "YYYY-MM-DD" 形式的字符串（零填充）。
     [[nodiscard]] auto to_string() const -> std::string {
         return internal::string_format("%04d-%02d-%02d", year, month, day);
     }
 
+    /// @brief 逐年/逐月/逐日比较两个日期是否相等。
+    /// @param o 对照日期。
+    /// @return 三字段全等时为 true。
     auto operator==(const Date &o) const -> bool = default;
 };
 
@@ -49,29 +61,37 @@ struct TimeOfDay {
     int hour = 0;  ///< 0..23
     int minute = 0;  ///< 0..59
 
+    /// @brief 时刻是否合法：hour 落在 0..23 且 minute 落在 0..59。
+    /// @return 合法为 true。
     [[nodiscard]] auto is_valid() const -> bool { return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59; }
 
+    /// @brief 格式化为 "HH:MM" 文本（零填充）。
+    /// @return 时:分字符串。
     [[nodiscard]] auto to_string() const -> std::string { return internal::string_format("%02d:%02d", hour, minute); }
 
+    /// @brief 逐年/逐月/逐日比较两个时刻是否相等。
+    /// @param o 对照时刻。
+    /// @return 两字段全等时为 true。
     auto operator==(const TimeOfDay &o) const -> bool = default;
 };
 
-/**
- * @brief 日期选择器：月历网格选择。
- *
- * 顶部年月导航（< 年月 >），下方 7 列日历网格；点击日期选中。
- * 对标 Qt `QDateEdit`+日历、Flutter `showDatePicker`、SwiftUI `DatePicker`。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
-// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_change_，而其拷贝与 operator()
-// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
-// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
-// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
-// NOLINTNEXTLINE(bugprone-exception-escape)
+/// @brief 日期选择器：月历网格选择。
+///
+/// 顶部年月导航（< 年月 >），下方 7 列日历网格；点击日期选中。
+/// 对标 Qt `QDateEdit`+日历、Flutter `showDatePicker`、SwiftUI `DatePicker`。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
+/// @note 类声明行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_change_，而其拷贝与 operator()
+/// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
+/// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
+/// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+/// NOLINTNEXTLINE(bugprone-exception-escape)
 class DatePicker : public Widget {
   public:
+    /// @brief 默认构造：选中日为 Date 默认值（2026-01-01），视图年月即其初值。
     DatePicker() = default;
+    /// @brief 以初始日期构造：仅当 initial 合法时作为选中值，否则保留默认日期。
+    /// @param initial 初始选中日期。
     explicit DatePicker(Date initial) {
         if (initial.is_valid()) {
             selected_.set(initial);
@@ -80,8 +100,12 @@ class DatePicker : public Widget {
         view_month_ = selected_.get().month;
     }
 
+    /// @brief 控件类型名（Inspector / 序列化路由用）。
+    /// @return 静态字符串字面量 "DatePicker"，生命周期同程序。
     [[nodiscard]] auto type_name() const -> const char * override { return "DatePicker"; }
 
+    /// @brief 静态自描述表：Inspector 元数据（属性/事件/不变量/示例）。
+    /// @return WidgetDescriptor 静态描述表。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "DatePicker",
@@ -118,24 +142,37 @@ class DatePicker : public Widget {
             .examples = {"au::DatePicker(au::Date{2026, 7, 25})"},
         };
     }
+    /// @brief 实例级自描述：转发静态描述表。
+    /// @return 与 describe_static() 相同的 WidgetDescriptor（属性/事件/不变量/示例）。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 收集本控件的响应式信号到构建面。
+    /// @param out 输出收集向量（追加 selected_ 的基类指针）。
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_); }
 
+    /// @brief 选中日期信号（可订阅）。
+    /// @return selected_ 的引用。
     [[nodiscard]] auto selected() -> State<Date> & { return selected_; }
+    /// @brief 当前选中日期快照。
+    /// @return selected_.get()（默认 2026-01-01）。
     [[nodiscard]] auto selected_date() const -> Date { return selected_.get(); }
+    /// @brief 月历视图所在年份。
+    /// @return view_year_（随翻月导航变化）。
     [[nodiscard]] auto view_year() const -> int { return view_year_; }
+    /// @brief 月历视图所在月份。
+    /// @return view_month_（1..12，随翻月导航变化）。
     [[nodiscard]] auto view_month() const -> int { return view_month_; }
 
     /// @brief 选中日期（非法忽略；触发 on_change 并同步视图年月）。
+    /// @param d 目标日期。
     auto select(Date d) -> void {
         if (!d.is_valid() || d == selected_.get()) {
             return;
         }
-        selected_.set(d);
+        selected_.set(d);  // 写入选中信号，驱动订阅方刷新
         view_year_ = d.year;
         view_month_ = d.month;
-        mark_needs_paint();
+        mark_needs_paint();  // 标记月历网格待重绘
         if (on_change_) {
             on_change_(d);
         }
@@ -149,6 +186,7 @@ class DatePicker : public Widget {
         }
         mark_needs_paint();
     }
+    /// @brief 视图翻到上一月（跨年回卷到 12 月并递减年份；不改变选中）。
     auto prev_month() -> void {
         if (--view_month_ < 1) {
             view_month_ = 12;
@@ -157,12 +195,16 @@ class DatePicker : public Widget {
         mark_needs_paint();
     }
 
+    /// @brief 注册选中变化回调（链式）。
+    /// @param cb 选中日期变化时触发的回调；可为空。
+    /// @return DatePicker 引用（链式调用）。
     auto set_on_change(std::function<void(Date)> cb) -> DatePicker & {
         on_change_ = std::move(cb);
         return *this;
     }
 
     /// @brief 点击交互：头部左右箭头翻月；网格点击选日。
+    /// @param e 指针事件；Press 时按坐标分区处理并置 is_handled。
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (e.action != MouseAction::Press) {
             Widget::on_pointer_event(e);
@@ -190,23 +232,32 @@ class DatePicker : public Widget {
         e.is_handled = true;
     }
 
+    /// @brief 声明接收点击事件（日历网格靠点击选中）。
+    /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
     /// @brief 网格 (row, col) 对应的日号（<=0 = 空格）。周日为第 0 列。
+    /// @param row 网格行（0..5）。
+    /// @param col 网格列（0..6）。
+    /// @return 该槽位的日号；空槽或越出当月天数时为 0。
     [[nodiscard]] auto grid_day(int row, int col) const -> int {
-        const int first_wd = weekday_of_first(view_year_, view_month_);
-        const int day = (row * 7) + col - first_wd + 1;
+        const int first_wd = weekday_of_first(view_year_, view_month_);  // 视图年月的 1 号星期（定位首行空格）
+        const int day = (row * 7) + col - first_wd + 1;  // 网格槽位换算出的日号（可能为负/越界，下方裁剪）
         return (day >= 1 && day <= Date::days_in_month(view_year_, view_month_)) ? day : 0;
     }
 
+    /// @brief 序列化选中年/月/日到属性 JSON（先经基类写公共属性）。
+    /// @param props 输出目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
-        Widget::serialize_props(props);
-        const Date d = selected_.get();
+        Widget::serialize_props(props);  // 先由基类写入公共属性
+        const Date d = selected_.get();  // 当前选中日期快照（三字段写入 props）
         props["year"] = d.year;
         props["month"] = d.month;
         props["day"] = d.day;
     }
 
+    /// @brief 从属性 JSON 回填年/月/日（键均可选；合成日期合法才生效并同步视图年月）。
+    /// @param props 输入 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         Date d = selected_.get();
@@ -303,28 +354,34 @@ class DatePicker : public Widget {
     std::function<void(Date)> on_change_;
 };
 
-/**
- * @brief 时间选择器：时/分两列上下调节。
- * 对标 Qt `QTimeEdit`、Flutter `showTimePicker`。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
-// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_change_，而其拷贝与 operator()
-// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
-// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
-// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
-// NOLINTNEXTLINE(bugprone-exception-escape)
+/// @brief 时间选择器：时/分两列上下调节。
+///
+/// 对标 Qt `QTimeEdit`、Flutter `showTimePicker`。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
+/// @note 类声明行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_change_，而其拷贝与 operator()
+/// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
+/// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
+/// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+/// NOLINTNEXTLINE(bugprone-exception-escape)
 class TimePicker : public Widget {
   public:
+    /// @brief 默认构造：选中时刻为 TimeOfDay 默认值（00:00）。
     TimePicker() = default;
+    /// @brief 以初始时刻构造：仅当 initial 合法时作为选中值，否则保留默认 00:00。
+    /// @param initial 初始选中时刻。
     explicit TimePicker(TimeOfDay initial) {
         if (initial.is_valid()) {
             selected_.set(initial);
         }
     }
 
+    /// @brief 控件类型名（Inspector / 序列化路由用）。
+    /// @return 静态字符串字面量 "TimePicker"，生命周期同程序。
     [[nodiscard]] auto type_name() const -> const char * override { return "TimePicker"; }
 
+    /// @brief 静态自描述表：Inspector 元数据（属性/事件/不变量/示例）。
+    /// @return WidgetDescriptor 静态描述表。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "TimePicker",
@@ -355,30 +412,43 @@ class TimePicker : public Widget {
             .examples = {"au::TimePicker(au::TimeOfDay{14, 30})"},
         };
     }
+    /// @brief 实例级自描述：转发静态描述表。
+    /// @return 与 describe_static() 相同的 WidgetDescriptor（属性/事件/不变量/示例）。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 收集本控件的响应式信号到构建面。
+    /// @param out 输出收集向量（追加 selected_ 的基类指针）。
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_); }
 
+    /// @brief 选中时刻信号（可订阅）。
+    /// @return selected_ 的引用。
     [[nodiscard]] auto selected() -> State<TimeOfDay> & { return selected_; }
+    /// @brief 当前选中时刻快照。
+    /// @return selected_.get()（默认 00:00）。
     [[nodiscard]] auto selected_time() const -> TimeOfDay { return selected_.get(); }
 
+    /// @brief 选中时刻（非法忽略；触发 on_change）。
+    /// @param t 目标时刻。
     auto select(TimeOfDay t) -> void {
         if (!t.is_valid() || t == selected_.get()) {
             return;
         }
-        selected_.set(t);
-        mark_needs_paint();
+        selected_.set(t);  // 写入选中信号，驱动订阅方刷新
+        mark_needs_paint();  // 标记时刻文本待重绘
         if (on_change_) {
             on_change_(t);
         }
     }
 
     /// @brief 时/分调节（自动回卷）。
+    /// @param dh 增减的小时数（可为负；结果按 24 回卷）。
     auto add_hours(int dh) -> void {
-        TimeOfDay t = selected_.get();
+        TimeOfDay t = selected_.get();  // 当前时刻副本，改小时后经 select 提交
         t.hour = (((t.hour + dh) % 24) + 24) % 24;
         select(t);
     }
+    /// @brief 加减分钟，时刻按 1440 分钟（一天）回卷。
+    /// @param dm 增减的分钟数（可为负）。
     auto add_minutes(int dm) -> void {
         TimeOfDay t = selected_.get();
         const int total = ((((t.hour * 60) + t.minute + dm) % 1440) + 1440) % 1440;
@@ -387,12 +457,16 @@ class TimePicker : public Widget {
         select(t);
     }
 
+    /// @brief 注册选中变化回调（链式）。
+    /// @param cb 选中时刻变化时触发的回调；可为空。
+    /// @return TimePicker 引用（链式调用）。
     auto set_on_change(std::function<void(TimeOfDay)> cb) -> TimePicker & {
         on_change_ = std::move(cb);
         return *this;
     }
 
     /// @brief 点击交互：左半列=时、右半列=分；上半=+1、下半=-1。
+    /// @param e 指针事件；Press 时按象限调节时/分并置 is_handled。
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (e.action == MouseAction::Press) {
             const bool is_hour = e.local_position.x < size_.width * 0.5F;
@@ -408,14 +482,20 @@ class TimePicker : public Widget {
         Widget::on_pointer_event(e);
     }
 
+    /// @brief 声明接收点击事件（时/分两列靠点击调节）。
+    /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
+    /// @brief 序列化选中时/分到属性 JSON（先经基类写公共属性）。
+    /// @param props 输出目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
-        Widget::serialize_props(props);
+        Widget::serialize_props(props);  // 先由基类写入公共属性
         props["hour"] = selected_.get().hour;
         props["minute"] = selected_.get().minute;
     }
 
+    /// @brief 从属性 JSON 回填时/分（键均可选；合成时刻合法才生效）。
+    /// @param props 输入 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         TimeOfDay t = selected_.get();
@@ -454,24 +534,30 @@ class TimePicker : public Widget {
     std::function<void(TimeOfDay)> on_change_;
 };
 
-/**
- * @brief 颜色选择器：预设色板网格选择。
- * 对标 Qt `QColorDialog`（简化色板模式）、SwiftUI `ColorPicker`。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
-// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_change_，而其拷贝与 operator()
-// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
-// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
-// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
-// NOLINTNEXTLINE(bugprone-exception-escape)
+/// @brief 颜色选择器：预设色板网格选择。
+///
+/// 对标 Qt `QColorDialog`（简化色板模式）、SwiftUI `ColorPicker`。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
+/// @note 类声明行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_change_，而其拷贝与 operator()
+/// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
+/// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
+/// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+/// NOLINTNEXTLINE(bugprone-exception-escape)
 class ColorPicker : public Widget {
   public:
+    /// @brief 默认构造：选中色取默认色板首色（黑）。
     ColorPicker() { selected_.set(default_palette()[0]); }
+    /// @brief 以初始颜色构造：直接作为选中值。
+    /// @param initial 初始选中颜色。
     explicit ColorPicker(Color initial) { selected_.set(initial); }
 
+    /// @brief 控件类型名（Inspector / 序列化路由用）。
+    /// @return 静态字符串字面量 "ColorPicker"，生命周期同程序。
     [[nodiscard]] auto type_name() const -> const char * override { return "ColorPicker"; }
 
+    /// @brief 静态自描述表：Inspector 元数据（属性/事件/不变量/示例）。
+    /// @return WidgetDescriptor 静态描述表。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "ColorPicker",
@@ -489,26 +575,37 @@ class ColorPicker : public Widget {
             .examples = {"au::ColorPicker(au::Color(255, 0, 0, 255))"},
         };
     }
+    /// @brief 实例级自描述：转发静态描述表。
+    /// @return 与 describe_static() 相同的 WidgetDescriptor（属性/事件/不变量/示例）。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 收集本控件的响应式信号到构建面。
+    /// @param out 输出收集向量（追加 selected_ 的基类指针）。
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_); }
 
+    /// @brief 选中颜色信号（可订阅）。
+    /// @return selected_ 的引用。
     [[nodiscard]] auto selected() -> State<Color> & { return selected_; }
+    /// @brief 当前选中颜色快照。
+    /// @return selected_.get()（默认为传入 initial；缺省构造时为默认色板首色）。
     [[nodiscard]] auto selected_color() const -> Color { return selected_.get(); }
 
+    /// @brief 选中颜色（与当前相同则忽略；触发 on_change）。
+    /// @param c 目标颜色。
     auto select(Color c) -> void {
         const Color cur = selected_.get();
         if (c.r == cur.r && c.g == cur.g && c.b == cur.b && c.a == cur.a) {
             return;
         }
-        selected_.set(c);
-        mark_needs_paint();
+        selected_.set(c);  // 写入选中信号，驱动订阅方刷新
+        mark_needs_paint();  // 标记色板网格待重绘
         if (on_change_) {
             on_change_(c);
         }
     }
 
     /// @brief 默认 16 色板。
+    /// @return 指向函数内惰性构造的静态 Color 数组（生命周期同程序）。
     [[nodiscard]] static auto default_palette() -> const std::vector<Color> & {
         // 惰性构造的函数内 static 色板：16 个 `Color` 运行时构造，常量初始化不可能（Color 非
         // literal 聚合），而首建时刻与跨 TU 静态初始化顺序无关（本检查的担心面）。仅浏览器口径
@@ -523,7 +620,9 @@ class ColorPicker : public Widget {
         return AURORA_PALETTE;
     }
 
-    /// @brief 自定义色板（链式）。
+    /// @brief 自定义色板（链式）；空列表忽略，保持原色板。
+    /// @param palette 候选颜色列表（非空才生效）。
+    /// @return ColorPicker 引用（链式调用）。
     auto set_palette(std::vector<Color> palette) -> ColorPicker & {
         if (!palette.empty()) {
             palette_ = std::move(palette);
@@ -531,16 +630,22 @@ class ColorPicker : public Widget {
         mark_needs_layout();
         return *this;
     }
+    /// @brief 当前生效色板。
+    /// @return palette_ 非空时为自定义色板，否则回落默认 16 色板。
     [[nodiscard]] auto palette() const -> const std::vector<Color> & {
         return palette_.empty() ? default_palette() : palette_;
     }
 
+    /// @brief 注册选中变化回调（链式）。
+    /// @param cb 选中颜色变化时触发的回调；可为空。
+    /// @return ColorPicker 引用（链式调用）。
     auto set_on_change(std::function<void(Color)> cb) -> ColorPicker & {
         on_change_ = std::move(cb);
         return *this;
     }
 
     /// @brief 点击色板格选色（8 列网格）。
+    /// @param e 指针事件；Press 时按行列定位色板索引命中选色并置 is_handled。
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (e.action == MouseAction::Press) {
             const auto &pal = palette();
@@ -558,13 +663,19 @@ class ColorPicker : public Widget {
         Widget::on_pointer_event(e);
     }
 
+    /// @brief 声明接收点击事件（色板格靠点击选色）。
+    /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
+    /// @brief 序列化选中颜色到属性 JSON（先经基类写公共属性）。
+    /// @param props 输出目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
-        Widget::serialize_props(props);
+        Widget::serialize_props(props);  // 先由基类写入公共属性
         props["color"] = color_to_json(selected_.get());
     }
 
+    /// @brief 从属性 JSON 的 color 键回填选中色（键缺失则不动）。
+    /// @param props 输入 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("color")) {

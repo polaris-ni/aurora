@@ -14,31 +14,40 @@
 
 namespace aurora {
 
-/**
- * @brief 折叠面板：标题头 + 可折叠内容区。
- *
- * 点击标题头切换展开/收起；`expanded()` 为响应式状态可订阅。
- * 收起时内容不参与布局（高度仅头部）；展开时头部下方显示内容。
- *
- * 对标 Flutter `ExpansionTile`、WPF `Expander`、SwiftUI `DisclosureGroup`。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
-// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_toggle_，而其拷贝与 operator()
-// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
-// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
-// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
-// NOLINTNEXTLINE(bugprone-exception-escape)
+/// @brief 折叠面板：标题头 + 可折叠内容区。
+///
+/// 点击标题头切换展开/收起；`expanded()` 为响应式状态可订阅。
+/// 收起时内容不参与布局（高度仅头部）；展开时头部下方显示内容。
+///
+/// 对标 Flutter `ExpansionTile`、WPF `Expander`、SwiftUI `DisclosureGroup`。
+///
+/// 本行隐式生成的拷贝/移动构造逐成员复制 std::function 回调 on_toggle_，而其拷贝与 operator()
+/// 皆无 noexcept 规格 —— 即 .clang-tidy 记录在案的系统性假告警面。该隐式特成员按 [except.spec]
+/// 本就是 potentially-throwing，抛出（bad_alloc 或宿主回调自身异常）沿栈交给复制方，本库回调路径
+/// 刻意不做异常捕获（CODING_STANDARDS.md §2 生命周期回调条目）。
+///
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
+/// NOLINTNEXTLINE(bugprone-exception-escape)
 class ExpansionPanel : public SingleChild {
   public:
     ExpansionPanel() = default;
+
+    /// @brief 构造：设定标题文本与内容子树，可选初始展开态。
+    /// @param header 标题头显示的文本。
+    /// @param content 折叠区内承载的内容节点，移动接管。
+    /// @param initially_expanded 构造完成时的展开状态，默认收起。
     ExpansionPanel(std::string header, Node content, bool initially_expanded = false)
         : SingleChild(std::move(content)), header_(std::move(header)) {
-        expanded_.set(initially_expanded);
+        expanded_.set(initially_expanded);  // 初始展开态写入响应式状态，订阅方随后即可读到。
     }
 
+    /// @brief 类型名，供序列化与运行时自描述使用。
+    /// @return C 字符串 "ExpansionPanel"。
     [[nodiscard]] auto type_name() const -> const char * override { return "ExpansionPanel"; }
 
+    /// @brief 类级自描述：声明 header/expanded/header_height 属性与 on_toggle 事件。
+    /// @return 本控件的静态描述符。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "ExpansionPanel",
@@ -70,15 +79,26 @@ class ExpansionPanel : public SingleChild {
             .examples = {R"(au::ExpansionPanel("Details", au::Text("content"), false))"},
         };
     }
+    /// @brief 运行时自描述：转发静态描述符。
+    /// @return 本控件的静态描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 收集本控件的响应式信号供宿主订阅。
+    /// @param out 输出参数，追加 expanded 状态信号视图。
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&expanded_); }
 
+    /// @brief 取得展开状态的响应式引用，可订阅其变化。
+    /// @return 内部 State<bool> 的非 const 引用。
     [[nodiscard]] auto expanded() -> State<bool> & { return expanded_; }
+    /// @brief 当前是否展开（同步读快照）。
+    /// @return expanded 状态的当前值。
     [[nodiscard]] auto is_expanded() const -> bool { return expanded_.get(); }
+    /// @brief 标题头文本。
+    /// @return header_ 的 const 引用。
     [[nodiscard]] auto header() const -> const std::string & { return header_; }
 
     /// @brief 展开/收起（触发 on_toggle）。
+    /// @param v 目标展开状态；与当前值相同时不做任何事。
     auto set_expanded(bool v) -> void {
         if (v != expanded_.get()) {
             expanded_.set(v);
@@ -94,12 +114,15 @@ class ExpansionPanel : public SingleChild {
     auto toggle() -> void { set_expanded(!expanded_.get()); }
 
     /// @brief 设置切换回调（链式）。
+    /// @param cb 展开态变化时调用，入参为变化后的展开值。
+    /// @return 自身引用，便于链式调用。
     auto set_on_toggle(std::function<void(bool)> cb) -> ExpansionPanel & {
         on_toggle_ = std::move(cb);
         return *this;
     }
 
     /// @brief 点击标题头切换展开。
+    /// @param e 鼠标事件；命中标题头区域的 Press 被吞掉并触发 toggle。
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (e.action == MouseAction::Press && e.local_position.y < header_height_) {
             toggle();
@@ -109,8 +132,12 @@ class ExpansionPanel : public SingleChild {
         Widget::on_pointer_event(e);
     }
 
+    /// @brief 本控件需要点击事件（标题头切换）。
+    /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
+    /// @brief 将标题文本、展开状态与头部高度写入 JSON 对象。
+    /// @param props 输出参数，序列化后的属性集合。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         props["header"] = header_;
@@ -118,6 +145,8 @@ class ExpansionPanel : public SingleChild {
         props["header_height"] = header_height_;
     }
 
+    /// @brief 从 JSON 恢复标题、展开状态与头部高度（缺键项保留当前值）。
+    /// @param props 反序列化来源的属性对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("header")) {
@@ -201,10 +230,10 @@ class ExpansionPanel : public SingleChild {
     }
 
   private:
-    std::string header_;
-    State<bool> expanded_{false};
-    float header_height_ = 36.0F;
-    std::function<void(bool)> on_toggle_;
+    std::string header_;  ///< 标题头文本，序列化与绘制共用。
+    State<bool> expanded_{false};  ///< 展开状态响应式信号，订阅方经 expanded() 取得。
+    float header_height_ = 36.0F;  ///< 标题头高度（dp），同时作为点击命中判定边界。
+    std::function<void(bool)> on_toggle_;  ///< 展开态变化回调，入参为变化后的展开值。
 };
 
 }  // namespace aurora

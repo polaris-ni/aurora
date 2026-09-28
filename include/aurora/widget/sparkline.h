@@ -26,68 +26,105 @@ struct SparklineProps {
     EdgeInsets padding{.left = 2.0F, .top = 2.0F, .right = 2.0F, .bottom = 2.0F};  ///< 图内留白
 };
 
-/**
- * @brief 迷你折线（叶控件，切片 4；契约见 specification/04-widget.md §3.8）。
- *
- * **无轴、无网格、无图例、无交互**——最薄的图表控件，用于表格 / 卡片内的趋势缩览。
- * 值域直接取数据 min/max（退化时回退 `[0,1]`），绘制 = `stroke_polyline` + 末端圆点。
- *
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 迷你折线（叶控件，切片 4；契约见 specification/04-widget.md §3.8）。
+///
+/// **无轴、无网格、无图例、无交互**——最薄的图表控件，用于表格 / 卡片内的趋势缩览。
+/// 值域直接取数据 min/max（退化时回退 `[0,1]`），绘制 = `stroke_polyline` + 末端圆点。
+///
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
 class Sparkline : public LeafWidget, public SparklineProps {
   public:
+    /// @brief 默认构造：所有属性取 `SparklineProps` 的默认值。
     Sparkline() = default;
+    /// @brief 以属性聚合构造（整体拷入属性基类切片）。
+    /// @param props Sparkline 属性（数据、线宽、末端圆点与留白等）。
     explicit Sparkline(SparklineProps props) : SparklineProps(std::move(props)) {}
 
+    /// @brief 默认属性集（各字段取结构体默认值）。
+    /// @return 新构造的空 `SparklineProps`。
     [[nodiscard]] static auto defaults() -> SparklineProps { return SparklineProps{}; }
 
+    /// @brief 设置数据序列（标绘制脏并重播 grow-in 动画）。
+    /// @param v 单系列数据（等距，x = 索引）。
+    /// @return 自身引用，便于链式调用。
     auto set_values(std::vector<double> v) -> Sparkline & {
         values = std::move(v);
-        mark_needs_paint();
-        grow_.replay();
+        mark_needs_paint();  // 数据变化只影响绘制，不影响尺寸
+        grow_.replay();  // 重播 grow-in 入场动画
         return *this;
     }
+    /// @brief 设置线条色（标绘制脏）。
+    /// @param c 线条颜色；设置后不再按索引取内置色板。
+    /// @return 自身引用，便于链式调用。
     auto set_color(Color c) -> Sparkline & {
         color = c;
-        mark_needs_paint();
+        mark_needs_paint();  // 颜色变化只影响绘制
         return *this;
     }
+    /// @brief 设置线宽（标绘制脏）。
+    /// @param w 线宽（dp）。
+    /// @return 自身引用，便于链式调用。
     auto set_line_width(float w) -> Sparkline & {
         line_width = w;
-        mark_needs_paint();
+        mark_needs_paint();  // 线宽变化只影响绘制
         return *this;
     }
+    /// @brief 开关末端数据点圆点（标绘制脏）。
+    /// @param v true = 绘制末端圆点。
+    /// @return 自身引用，便于链式调用。
     auto set_show_end_dot(bool v) -> Sparkline & {
         show_end_dot = v;
-        mark_needs_paint();
+        mark_needs_paint();  // 圆点开关只影响绘制
         return *this;
     }
+    /// @brief 设置图内留白（标布局脏）。
+    /// @param p 四边留白（dp）。
+    /// @return 自身引用，便于链式调用。
     auto set_padding(const EdgeInsets &p) -> Sparkline & {
         padding = p;
-        mark_needs_layout();
+        mark_needs_layout();  // 留白参与绘图矩形内缩，须重布局
         return *this;
     }
 
+    /// @brief 类型名字符串 "Sparkline"。
+    /// @return 静态字符串常量，指向类型名。
     [[nodiscard]] auto type_name() const -> const char * override { return "Sparkline"; }
 
+    /// @brief 静态属性描述符（供注册表 / Schema 生成使用）。
+    /// @return 含全部属性元数据与不变量的 `WidgetDescriptor`，子策略为 none。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
+    /// @brief 运行时自描述：转发到静态描述符。
+    /// @return 与 `describe_static()` 相同的描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 收集 grow-in 动画的进行中信号，驱动逐帧重绘。
+    /// @param out 信号输出向量；追加动画进行信号的裸指针。
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&grow_.signal()); }
 
     /// @brief 动画期间不缓存 Display List（内容每帧变化）。
+    /// @return grow-in 入场动画未进行中时为 true（本帧绘制结果可缓存复用），动画播放期间为 false。
     [[nodiscard]] auto can_cache_display_list() const -> bool override { return !grow_.animating(); }
 
+    /// @brief 序列化本控件属性到 JSON：先由基类写通用属性，再写 values/color/line_width/show_end_dot/
+    ///        dot_radius/padding；color 未设置（走内置色板）时不写该键。
+    /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override;
+    /// @brief 从 JSON 恢复本控件属性：先经基类回填通用属性，线宽与末端圆点半径夹到非负，末尾标绘制脏。
+    /// @param props 源 JSON 对象；仅读取存在的键，缺失或类型不符的键保持当前值。
     auto deserialize_props(const Json &props) -> void override;
 
     /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `Sparkline`，
     ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
     /// @note Side-effects: pure
+    /// @return 固定为 `AccessibilityRole::Image`。
     [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override { return AccessibilityRole::Image; }
 
+    /// @brief 无障碍标签：类型名 + 数据点数量。
+    /// @return 形如 "Sparkline, N points" 的字符串。
     [[nodiscard]] auto accessibility_label() const -> std::string override;
+    /// @brief 无障碍值：末端数据点读数。
+    /// @return 最后一个值的字符串形式；数据为空时为空串。
     [[nodiscard]] auto accessibility_value() const -> std::string override;
 
   protected:
@@ -171,10 +208,12 @@ class Sparkline : public LeafWidget, public SparklineProps {
     ChartGrowIn grow_;
 };
 
+// N 取 values.size()，非有限值也计入。
 inline auto Sparkline::accessibility_label() const -> std::string {
     return "Sparkline, " + std::to_string(values.size()) + " points";
 }
 
+// 直接取 values.back()，非有限值照原样转字符串。
 inline auto Sparkline::accessibility_value() const -> std::string {
     if (values.empty()) {
         return std::string{};
@@ -182,6 +221,7 @@ inline auto Sparkline::accessibility_value() const -> std::string {
     return std::to_string(values.back());
 }
 
+// 属性表与 SparklineProps 字段一一对应，另附基类的 width/height/show。
 inline auto Sparkline::describe_static() -> WidgetDescriptor {
     return WidgetDescriptor{
         .name = "Sparkline",
@@ -251,6 +291,7 @@ inline auto Sparkline::describe_static() -> WidgetDescriptor {
     };
 }
 
+// 键集与 describe_static 的属性表一致。
 inline auto Sparkline::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
     props["values"] = double_vector_to_json(values);
@@ -263,6 +304,7 @@ inline auto Sparkline::serialize_props(Json &props) const -> void {
     props["padding"] = edge_insets_to_json(padding);
 }
 
+// values/padding 交由转换函数直接覆盖，其余键先校验类型再写入。
 inline auto Sparkline::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("values")) {

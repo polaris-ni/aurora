@@ -7,47 +7,55 @@
 
 namespace aurora {
 
-/**
- * @brief 剪贴板抽象（specification/06-app-platform.md §8.2）。
- *
- * - 文本：`set_text`/`get_text`，各平台实现：
- *   - Windows：`SetClipboardData(CF_UNICODETEXT)` / `GetClipboardData(CF_UNICODETEXT)`
- *   - Linux：`xclip -selection clipboard` / `xsel --clipboard`（需安装 xclip 或 xsel）
- *   - macOS：`pbcopy` / `pbpaste`
- * - 图像：`set_image`/`get_image`，仅 Windows 经 `SetClipboardData(CF_DIB)` 实现，
- *   其它平台报 `GeneralNotSupported`。
- *
- * **失败口径**（一律机器可见，不再以空串 / 静默 no-op 冒充成功）：
- *
- * | 情形 | 结果 |
- * |:---|:---|
- * | 剪贴板打不开、被别的线程/进程占用、外壳工具（xclip/xsel/pbcopy）缺失、跨进程载荷非法 | `ClipboardAccessFailed` |
- * | 已打开但载荷提交失败（`GlobalAlloc` / `GlobalLock` / `SetClipboardData`）、文本不是合法 UTF-8 |
- * `ClipboardWriteFailed` | | 本平台无剪贴板实现 | `GeneralNotSupported` | |
- * 图像尺寸超限或像素缓冲与维度不一致（调用方参数错） | `GeneralInvalidArgument` | | 可访问但当前没有文本 / 图像 |
- * `Ok("")` / `Ok(空 Image)`——**空内容不是失败** |
- *
- * 空文本与空图像是契约内的 no-op：不触碰剪贴板、保留既有内容，返回 `Ok`。
- * `ClipboardAccessFailed` 标 `retryable = true`（占用是暂时态），调用方据此可退避重试。
- * Windows 的文本写入先转码后开剪贴板：非法 UTF-8 在 `EmptyClipboard` 之前就被拒，
- * 失败的那一次不会把用户原本复制的内容清空。
- *
- * @note Thread: main-thread only
- * @note Side-effects: none (accesses system clipboard)
- * @note Rebuildable: no
- */
+/// @brief 剪贴板抽象（specification/06-app-platform.md §8.2）。
+///
+/// - 文本：`set_text`/`get_text`，各平台实现：
+/// - Windows：`SetClipboardData(CF_UNICODETEXT)` / `GetClipboardData(CF_UNICODETEXT)`
+/// - Linux：`xclip -selection clipboard` / `xsel --clipboard`（需安装 xclip 或 xsel）
+/// - macOS：`pbcopy` / `pbpaste`
+/// - 图像：`set_image`/`get_image`，仅 Windows 经 `SetClipboardData(CF_DIB)` 实现，
+/// 其它平台报 `GeneralNotSupported`。
+///
+/// **失败口径**（一律机器可见，不再以空串 / 静默 no-op 冒充成功）：
+///
+/// | 情形 | 结果 |
+/// |:---|:---|
+/// | 剪贴板打不开、被别的线程/进程占用、外壳工具（xclip/xsel/pbcopy）缺失、跨进程载荷非法 | `ClipboardAccessFailed` |
+/// | 已打开但载荷提交失败（`GlobalAlloc` / `GlobalLock` / `SetClipboardData`）、文本不是合法 UTF-8 |
+/// `ClipboardWriteFailed` | | 本平台无剪贴板实现 | `GeneralNotSupported` | |
+/// 图像尺寸超限或像素缓冲与维度不一致（调用方参数错） | `GeneralInvalidArgument` | | 可访问但当前没有文本 / 图像 |
+/// `Ok("")` / `Ok(空 Image)`——**空内容不是失败** |
+///
+/// 空文本与空图像是契约内的 no-op：不触碰剪贴板、保留既有内容，返回 `Ok`。
+/// `ClipboardAccessFailed` 标 `retryable = true`（占用是暂时态），调用方据此可退避重试。
+/// Windows 的文本写入先转码后开剪贴板：非法 UTF-8 在 `EmptyClipboard` 之前就被拒，
+/// 失败的那一次不会把用户原本复制的内容清空。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: none (accesses system clipboard)
+/// @note Rebuildable: no
 class Clipboard {
   public:
     /// @brief 把文本写入系统剪贴板（UTF-8 入参，平台按需转码）。空串为 no-op，保留既有内容。
+    /// @param text 待写入的 UTF-8 文本；空串时不触碰剪贴板、直接返回成功。
+    /// @return 成功为 `Ok(true)`（空串 no-op 同样 `Ok(true)`）；失败为结构化 `Error`，按原因取
+    /// `ClipboardAccessFailed` / `ClipboardWriteFailed` / `GeneralNotSupported` / `GeneralInvalidArgument`。
     static auto set_text(const std::string &text) -> Result<bool>;
 
     /// @brief 从系统剪贴板读取文本（UTF-8 返回）；可读但无文本时为空串。
+    /// @return `Ok(文本)`——剪贴板可访问但当前没有文本时为 `Ok("")`（空内容不是失败）；
+    /// 访问/解析失败为结构化 `Error`。
     [[nodiscard]] static auto get_text() -> Result<std::string>;
 
     /// @brief 把 RGBA8 图像写入系统剪贴板（经 CF_DIB）。空图像直接返回（不清除已有内容）。
+    /// @param img RGBA8 图像；`width == 0`（空图像）时为 no-op，保留既有内容。
+    /// @return 成功为 `Ok(true)`；失败为结构化 `Error`（非 Windows 平台为 `GeneralNotSupported`，
+    /// 尺寸超限或缓冲与维度不符为 `GeneralInvalidArgument`）。
     static auto set_image(const Image &img) -> Result<bool>;
 
     /// @brief 从系统剪贴板读取 RGBA8 图像；无图像（格式不存在）返回空 `Image`（width==0）。
+    /// @return `Ok(图像)`——剪贴板可访问但当前没有图像载荷时为 `Ok(空 Image)`（空内容不是失败）；
+    /// 访问/载荷非法为结构化 `Error`。
     [[nodiscard]] static auto get_image() -> Result<Image>;
 
     // ---- 测试注入点（test-only，见 specification/06-app-platform.md §8.2）----

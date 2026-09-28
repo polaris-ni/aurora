@@ -34,30 +34,40 @@ namespace rhi {
 class SoftwareRhi final : public RhiBackend {
   public:
     SoftwareRhi() = default;
+    /// @brief 绑定绘制器构造：命令提交即转发给 `painter`。
+    /// @param painter 目标绘制器引用；生命周期须覆盖本实例使用期。
     explicit SoftwareRhi(Painter &painter) : painter_(&painter) {}
     /// @brief 离屏回放构造：与父实例**共享层存储**（嵌套层经内层 DrawLayer 命中外层刚定稿的内容）。
+    /// @param painter 目标绘制器引用。
+    /// @param shared_store 外部层位图存储指针（键 → 直色 RGBA 位图）；nullptr 视为使用进程级全局默认。
     SoftwareRhi(Painter &painter, std::unordered_map<std::uint64_t, Image> *shared_store)
         : painter_(&painter), layer_store_(shared_store) {}
 
     /// @brief 绑定目标绘制器。可重复调用（`Surface::rhi()` 每次取用都重绑，保证与当前
     ///        `painter()` 一致）；`Painter` 生命周期与所属 `Surface` 一致。
+    /// @param painter 新的目标绘制器引用；覆盖先前绑定。
     auto bind(Painter &painter) -> void { painter_ = &painter; }
 
     /// @brief 当前绑定的绘制器（未绑定时为 `nullptr`）。
+    /// @return 目标 `Painter` 裸指针；nullptr = 未绑定，`submit` 将走 no-op 分支。
     [[nodiscard]] auto painter() const -> Painter * { return painter_; }
 
+    /// @brief 后端标识：诊断与自检用。
+    /// @return 静态字符串视图 `"software"`。
     [[nodiscard]] auto name() const -> std::string_view override { return "software"; }
 
     /// @brief 执行一条命令（未绑定绘制器时为 no-op）。
+    /// @param cmd 待执行的绘制命令（几何/颜色/标量已内联）。
+    /// @param data 命令引用的变长数据（文本/字体/渐变/图像/矩阵/点集；不引用者字段为 nullptr）。
     auto submit(const DrawCmd &cmd, const CmdData &data) -> void override;
 
   private:
     /// @brief 层捕获帧：BeginLayer 起缓冲命令，EndLayer 时离屏重放定稿层位图。
     struct LayerCapture {
-        std::uint64_t key = 0;
+        std::uint64_t key = 0;  ///< 层缓存键（BeginLayer 时分配，EndLayer 定稿写入层存储）
         int width = 0;  ///< 层逻辑宽（dp）
         int height = 0;  ///< 层逻辑高（dp）
-        std::vector<std::pair<DrawCmd, CmdData>> cmds;
+        std::vector<std::pair<DrawCmd, CmdData>> cmds;  ///< 捕获期间的命令 + 变长数据序列，EndLayer 时逐条重放
     };
 
     Painter *painter_ = nullptr;

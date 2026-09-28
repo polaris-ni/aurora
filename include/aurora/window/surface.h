@@ -31,11 +31,6 @@ class Provider;  // 前向声明：平台无障碍桥抽象（完整定义见 co
 
 class Widget;  // 前向声明：语义树根（无障碍根注入参数；完整定义见 widget/widget.h）
 
-/// @brief 窗口高级样式选项：跨后端声明，由各 Surface 按能力映射。
-/// Headless 忽略（无 OS 窗口）；Win32 映射到 WS_EX_TOPMOST / WS_POPUP / 去 WS_THICKFRAME /
-/// WM_GETMINMAXINFO；GLFW 映射到对应 window hint（后续接入）。
-/// 对标 Qt WindowStaysOnTopHint/FramelessWindowHint、WPF Topmost/ResizeMode。
-
 /// @brief 窗口装饰策略（跨后端声明；各 Surface 按合成器能力映射）。
 /// 决定「标题栏/边框由谁绘制、无原生装饰（如 GNOME 不支持 xdg-decoration）时如何兜底」，
 /// 使窗口在缺标题栏或显式无边框时仍可移动/缩放/关闭——即「无标题栏也能正常运行」。
@@ -72,6 +67,10 @@ enum class WindowVisibility : std::uint8_t {
     Hidden = 2,  ///< 不显示：窗口不进入用户视野，但渲染与像素读回照常工作
 };
 
+/// @brief 窗口高级样式选项：跨后端声明，由各 Surface 按能力映射。
+/// Headless 忽略（无 OS 窗口）；Win32 映射到 WS_EX_TOPMOST / WS_POPUP / 去 WS_THICKFRAME /
+/// WM_GETMINMAXINFO；GLFW 映射到对应 window hint（后续接入）。
+/// 对标 Qt WindowStaysOnTopHint/FramelessWindowHint、WPF Topmost/ResizeMode。
 struct WindowStyleOptions {
     bool always_on_top = false;  ///< 置顶（始终浮在普通窗口之上）
     bool frameless = false;  ///< 无边框（无标题栏/边框；自行实现拖拽/关闭）。等价于 DecorationPolicy::Frameless。
@@ -83,37 +82,51 @@ struct WindowStyleOptions {
     TitleBarStyle title_bar{};  ///< CSD 自绘标题栏样式（Wayland/X11 等客户端装饰后端使用）
 };
 
-/**
- * @brief 表面抽象：平台窗口/画布的绘制目标（ARCHITECTURE.md §4.3 `Surface`，<<platform impl>>）。
- *
- * 一帧生命周期：`beginFrame` → 取 `painter()` 绘制 → `present` 呈现。
- * 已实现后端：`HeadlessSurface`（内存帧缓冲 + 可选 PNG 落盘）、`Win32Surface`（Win32/GDI，仅
- * `AURORA_PLATFORM_WINDOWS`）、 `GlfwSurface`（GLFW/OpenGL，跨平台），均由 `auto_detect_surface()` 按平台选择（见
- * `native_surfaces.h`）； `D3D11Surface` 经 `create_window(D3D11Options)` 显式开启。widget 层与渲染后端解耦。
- * @note Thread: main-thread only
- * @note Side-effects: none
- */
+/// @brief 表面抽象：平台窗口/画布的绘制目标（ARCHITECTURE.md §4.3 `Surface`，<<platform impl>>）。
+///
+/// 一帧生命周期：`beginFrame` → 取 `painter()` 绘制 → `present` 呈现。
+/// 已实现后端：`HeadlessSurface`（内存帧缓冲 + 可选 PNG 落盘）、`Win32Surface`（Win32/GDI，仅
+/// `AURORA_PLATFORM_WINDOWS`）、 `GlfwSurface`（GLFW/OpenGL，跨平台），均由 `auto_detect_surface()` 按平台选择（见
+/// `native_surfaces.h`）； `D3D11Surface` 经 `create_window(D3D11Options)` 显式开启。widget 层与渲染后端解耦。
+/// @note Thread: main-thread only
+/// @note Side-effects: none
 class Surface {
   public:
+    /// @brief 默认构造：基类不持有平台资源，状态由派生后端承载。
     Surface() = default;
+    /// @brief 虚析构：允许经 `Surface*` 基类指针安全释放任意派生后端。
     virtual ~Surface() = default;
 
+    /// @brief 禁止拷贝：Surface 与 OS 窗口一一对应，所有权唯一。
     Surface(const Surface &) = delete;
+    /// @brief 禁止拷贝赋值：窗口所有权唯一，任何使用均为编译期错误。
+    /// @return 删除声明无运行期返回值。
     auto operator=(const Surface &) -> Surface & = delete;
+    /// @brief 禁止移动：后端回调 user-data 绑定本对象，移动会悬垂。
     Surface(Surface &&) = delete;
+    /// @brief 禁止移动赋值：回调绑定 this，任何使用均为编译期错误。
+    /// @return 删除声明无运行期返回值。
     auto operator=(Surface &&) -> Surface & = delete;
 
     /// @brief 分配/重置一帧画布（设备像素宽高）。
+    /// @param width 画布宽（设备像素）。
+    /// @param height 画布高（设备像素）。
+    /// @return 分配成功 true；后端失败 false 及错误信息。
     [[nodiscard]] virtual auto begin_frame(int width, int height) -> Result<bool> = 0;
     /// @brief 取当前帧绘制器（绘制目标）。
+    /// @return Painter 引用，本帧内有效（生命周期同 Surface）。
     [[nodiscard]] virtual auto painter() -> Painter & = 0;
     /// @brief 呈现当前帧（刷新到窗口/落盘）。
+    /// @return 呈现成功 true；失败 false 及错误信息。
     [[nodiscard]] virtual auto present() -> Result<bool> = 0;
     /// @brief 当前表面尺寸（设备像素）。
+    /// @return 表面 Size。
     [[nodiscard]] virtual auto size() const -> Size = 0;
     /// @brief 设备像素密度（dpi / 160）。
+    /// @return 缩放因子；默认 1.0（真实后端覆写上报实际 DPI）。
     [[nodiscard]] virtual auto scale_factor() const -> float { return 1.0F; }
     /// @brief 平台是否已请求关闭（帧循环据此退出）。
+    /// @return 收到关闭请求时 true；默认 false（无 OS 关闭事件）。
     [[nodiscard]] virtual auto should_close() const -> bool { return false; }
     /// @brief 轮询平台原生事件（无头实现为空操作）。
     virtual auto poll_platform_events() -> void {}
@@ -124,6 +137,7 @@ class Surface {
     /// 默认实现为限频 sleep（不支持阻塞等待的自定义后端至少不再忙轮询）；
     /// `Headless` 覆盖为 no-op（测试用 max_frames 有限循环驱动，不得引入等待）；
     /// Win32 经 `MsgWaitForMultipleObjectsEx`、GLFW 经 `glfwWaitEventsTimeout` 实现真阻塞。
+    /// @param timeout_ms 等待上限毫秒；<0 无限（分段 1000ms 兜底），==0 立即返回。
     virtual auto wait_events(double timeout_ms) -> void {
         if (timeout_ms == 0.0) {
             return;
@@ -144,6 +158,7 @@ class Surface {
     /// 抽出**全部**窗口的消息并路由到各自宿主；X11/Wayland/Wasm 则是每 Surface 独立队列。
     /// 多窗口帧循环据此决定 pump 策略：共享队列只需 pump 一次（后续为空转），
     /// 独立队列则必须逐个 pump，否则事件滞留。默认 `false`（per-surface 语义）。
+    /// @return 共享队列后端（Windows/GLFW）true；per-surface 队列默认 false。
     [[nodiscard]] virtual auto pumps_thread_queue() const -> bool { return false; }
 
     /// @brief 本后端的 `wait_events()` 是否会因「任意窗口的事件到达」而返回。
@@ -152,6 +167,7 @@ class Surface {
     /// `glfwWaitEventsTimeout`），任一窗口有消息即唤醒；X11/Wayland/Wasm 的等待只覆盖
     /// **本 Surface 自己的连接 fd**，多窗口下若只等一个 surface 会让其余窗口的事件迟迟不被
     /// 处理。多窗口帧循环据此施加等待上限兜底。默认 `false`（per-surface 语义）。
+    /// @return 等待通道覆盖任意窗口的后端（Windows/GLFW）true；默认 false。
     [[nodiscard]] virtual auto waits_thread_queue() const -> bool { return false; }
 
     // ---- 父子窗口与模态（多窗口：specification/06-app-platform.md §2.4）----
@@ -168,7 +184,8 @@ class Surface {
     /// 模态语义的另一半由焦点保证：Aurora 的 `FocusManager` 是**逐窗口**的（焦点不跨窗），
     /// 故无需在同窗口内做焦点陷阱，只需禁用 owner 的 OS 输入。
     /// 默认空实现（后端不支持时为 no-op）。
-    virtual auto set_enabled(bool /*on*/) -> void {}
+    /// @param on true 启用输入，false 禁用（模态屏蔽 owner 时置 false）。
+    virtual auto set_enabled([[maybe_unused]] bool on) -> void {}
 
     // ---- z 序、显示与 DPI（多窗口）----
 
@@ -182,10 +199,12 @@ class Surface {
     ///
     /// 与 `app::display_containing()` / `app::move_window_to_display()` 使用同一套 id 空间，
     /// 供窗口几何持久化与「迁移到指定显示器」使用。默认 -1（后端不提供）。
+    /// @return 显示器稳定 id；未知默认 -1。
     [[nodiscard]] virtual auto display_id() const -> int { return -1; }
 
     /// @brief 本窗口在屏幕上的位置（**物理像素**，与 `app::Display` 同一坐标系）。
     /// 默认 (0,0)（后端不提供，或纯内存后端）。
+    /// @return 窗口左上角屏幕坐标（物理像素）。
     [[nodiscard]] virtual auto position() const -> Point { return Point{.x = 0.0F, .y = 0.0F}; }
     /// @brief 程序化移动窗口到屏幕坐标（物理像素）。默认空实现。
     /// 与 `display_id()` / `position()` 配合实现窗口几何的保存与恢复。
@@ -198,29 +217,39 @@ class Surface {
     /// 参数为本窗口新的 `scale_factor`（dpi/96）。`Window` 据此强制全量重排重绘并重建
     /// HUD 缓冲（否则 logical↔physical 换算失配会导致内容错位/发虚）。默认空实现。
     using ScaleChangeHandler = std::function<void(float)>;
+    /// @brief 注册 DPI 缩放变化回调（默认存入 `scale_change_handler_`，由后端在缩放变化时经
+    /// `notify_scale_change` 触发）。
+    /// @param h 处理器，参数为新的 `scale_factor`。
     virtual auto set_scale_change_handler(ScaleChangeHandler h) -> void { scale_change_handler_ = std::move(h); }
 
     /// @brief 后端是否自带帧节拍（如 D3D11 vsync `Present(1,0)` 阻塞到 vblank）。
     /// 帧调度决策据此在活跃帧跳过 CPU 端 sleep 节流，避免双重限速；默认 false。
+    /// @return 自带 vsync 帧节拍的后端 true；默认 false。
     [[nodiscard]] virtual auto paces_frames() const -> bool { return false; }
 
     /// @brief 事件上抛：后端把原生事件翻译为 aurora::Event 后回调（默认空实现）。
     /// 所有真实后端 override 本方法；由 Application 经 EventDispatcher + FocusManager 统一派发。
     using EventHandler = std::function<void(Event &)>;
-    virtual auto set_event_handler(const EventHandler & /*h*/) -> void {}
+    /// @brief 注册事件处理器（默认空实现；所有真实后端覆写以承接翻译后的原生事件）。
+    /// @param h 事件接收器；后端事件循环在翻译出 aurora::Event 后同步回调。
+    virtual auto set_event_handler([[maybe_unused]] const EventHandler &h) -> void {}
 
     /// @brief 窗口可见性状态上报句柄（最小化/被遮挡/前台激活，见 `WindowState`）。
     /// 与 widget `Event` 管道正交：窗口级可见性不进入 `Application::dispatch` 命中冒泡，
     /// 由 `Application` 直接聚合为响应式 `State`。
     using WindowStateHandler = std::function<void(WindowState)>;
     /// @brief 窗口几何态上报句柄（Normal/Maximized/Minimized/FullScreen，见 `WindowMode`）。
+    /// @param WindowMode 句柄形参：新的窗口几何态。
+    /// @return 句柄调用无返回值。
     using WindowModeHandler = std::function<void(WindowMode)>;
 
     /// @brief 注册窗口可见性状态上报句柄（默认存入 `window_state_handler_`；
     /// 真实后端可覆盖以叠加本地状态记录）。
+    /// @param h 可见性状态回调；按值接收并移动入成员。
     virtual auto set_window_state_handler(WindowStateHandler h) -> void { window_state_handler_ = std::move(h); }
     /// @brief 注册窗口几何态上报句柄（默认存入 `window_mode_handler_`；
     /// 真实后端可覆盖以叠加本地状态记录）。
+    /// @param h 几何态回调；按值接收并移动入成员。
     virtual auto set_window_mode_handler(WindowModeHandler h) -> void { window_mode_handler_ = std::move(h); }
 
     /// @brief 立即重绘请求回调。
@@ -228,6 +257,8 @@ class Surface {
     /// 由 `Window` 接为「对当前缓存根再渲染一帧」，使帧缓冲在 DWM 合成前已为新尺寸内容，
     /// 从根源消除最大化白闪。`Headless`/`GLFW` 不调用该回调（默认空实现），行为不变。
     using PresentRequest = std::function<void()>;
+    /// @brief 注册立即重绘请求回调（默认存入 `present_request_`，后端在 WM_SIZE/WM_PAINT 时调用）。
+    /// @param h 请求回调；按值接收并移动入成员。
     virtual auto set_present_request(PresentRequest h) -> void { present_request_ = std::move(h); }
 
     /// @brief 增量上屏脏区（设备坐标）：`Window` 在 present 前、脏追踪 clear 前调用，
@@ -240,6 +271,7 @@ class Surface {
     /// 否则脏区内无不透明背景的控件（如裸 `Text`、无背景的 `LazyList` 子项）会露出零基底（黑）。
     /// 默认透明（0,0,0,0），对应 `begin_frame` 仅 `painter().begin()` 不铺底色的后端
     /// （Headless/D3D11）；铺浅色底的窗口后端（Win32/GLFW/X11/Wayland）覆盖返回其底色。
+    /// @return begin_frame 所铺底色；默认全透明 (0,0,0,0)。
     [[nodiscard]] virtual auto clear_color() const -> Color { return Color{0, 0, 0, 0}; }
 
     /// @brief 运行时更新窗口标题（默认空实现；Win32 后端经 SetWindowText 生效，Headless/GLFW 忽略）。
@@ -255,7 +287,8 @@ class Surface {
     /// `CursorShape::Arrow` 由宿主在悬停回到无声明区域时下发，视为「恢复默认光标」。
     /// 无系统光标的后端（`HeadlessSurface`）覆写为「记录调用序列」，使悬停链路可在
     /// 无头环境端到端断言（见 `HeadlessSurface::cursor_log()`）；`D3D11`/`Wasm` 保持默认空实现。
-    virtual auto set_cursor(CursorShape /*shape*/) -> void {}
+    /// @param shape 目标光标形状；由悬停链解析得出，Arrow 视为恢复默认。
+    virtual auto set_cursor([[maybe_unused]] CursorShape shape) -> void {}
 
     /// @brief 运行期更新 CSD 自绘标题栏样式（默认空实现；Wayland 等客户端装饰后端覆写生效）。
     virtual auto set_title_bar_style(const TitleBarStyle & /*style*/) -> void {}
@@ -268,6 +301,7 @@ class Surface {
     /// @brief 客户端装饰预留给应用内容的安全区内边距（逻辑 dp）：CSD 标题栏/边框占用的区域。
     /// 默认 0（无装饰）；Wayland CSD 下返回标题栏高度（顶）与边框厚度（四周）。
     /// `MediaQuery::from_surface` 会将其并入 `padding`，子树据此自动避开装饰（对齐 Flutter SafeArea 范式）。
+    /// @return 装饰占用的内边距（逻辑 dp）；默认全零（无装饰）。
     [[nodiscard]] virtual auto content_inset() const -> EdgeInsets { return EdgeInsets{}; }
 
     /// @brief 程序化窗口控制：请求关闭（默认空实现；Wayland 经 xdg_toplevel 生效）。
@@ -287,11 +321,13 @@ class Surface {
     virtual auto begin_window_resize(WindowResizeEdge /*edge*/) -> void {}
 
     /// @brief 当前帧像素（仅供测试/抓帧；无缓冲返回 nullptr）。
+    /// @return RGBA8 帧缓冲首像素只读指针；默认 nullptr。
     [[nodiscard]] virtual auto data() const -> const std::uint8_t * { return nullptr; }
 
     /// @brief 帧缓冲物理像素尺寸（用于 `save_snapshot` 写出 PNG 的真实宽高）。
     /// 默认等于逻辑 `size()`；当 painter 缓冲按 DPI 物理分辨率分配（Win32/D3D11）时，
     /// 后端须覆写返回物理像素，否则 PNG 宽高与像素数据错位（缩放比≠1 时图像被压扁/错位）。
+    /// @return 帧缓冲物理像素尺寸；默认等于逻辑 size()。
     [[nodiscard]] virtual auto framebuffer_size() const -> Size { return size(); }
 
     /// @brief 导出当前帧软件帧缓冲为 PNG（RGBA）。
@@ -299,6 +335,8 @@ class Surface {
     /// 各真实后端在 `AURORA_ENABLE_DEBUG` 下覆写 `data()` 返回 Painter 缓冲后，本默认实现即通用可用，
     /// 无需逐后端重写。本方法**始终声明**（vtable 槽稳定，属 Surface 契约）；Release 下默认实现仍编译，
     /// 但仅判空返回，不引入后端专属截图代码，零开销。判空走运行时而非宏，避免宏不一致引发 ODR。
+    /// @param path 输出 PNG 文件路径（覆盖同名文件）。
+    /// @return 写盘成功 true；`data()` 为空或写盘失败时 false 及错误信息。
     [[nodiscard]] virtual auto save_snapshot(const std::string &path) -> Result<bool> {
         const std::uint8_t *px = data();
         if (px == nullptr) {
@@ -318,6 +356,8 @@ class Surface {
     /// 默认实现：返回 unsupported 错误。Win32 家族（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，
     /// 共用 `Win32Host` 宿主）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写；
     /// Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。本方法**始终声明**。
+    /// @param path 输出 PNG 文件路径。
+    /// @return 截图写盘成功 true；后端未覆写时 false 及 unsupported 错误。
     [[nodiscard]] virtual auto capture_window(const std::string &path) -> Result<bool> {
         (void)path;
         return Result<bool>{make_error(
@@ -327,6 +367,7 @@ class Surface {
 
     /// @brief 已呈现帧数（诊断/测试用）：真实后端在各自 `present()` 上屏后自增，
     /// 逐帧出帧即逐帧计数，与系统几何变化触发的同步重渲染无关；未覆写的后端恒 0。
+    /// @return 成功呈现的帧数。
     [[nodiscard]] virtual auto frame_count() const -> int { return 0; }
 
     /// @brief 原生窗口句柄（平台相关；Headless/未知后端返回 nullptr）。
@@ -341,6 +382,7 @@ class Surface {
     /// 后续按 §8 契约接入。桥**惰性激活**：无读屏在线时返回 nullptr 或已注册但未激活的实例，
     /// 宿主据此零开销。公共头不引入任何平台头（仅前向声明）。
     /// @note Thread: main-thread only
+    /// @return 平台无障碍桥实例裸指针（所有权归后端）；默认 nullptr（无桥/未激活）。
     [[nodiscard]] virtual auto accessibility_provider() const -> a11y::Provider * { return nullptr; }
 
     /// @brief 把语义树根注入本窗口（每帧调用；默认 no-op）。
@@ -357,6 +399,7 @@ class Surface {
     /// 桥在 a11y 查询路径无 `BuildContext`，无法自动判定方向，故由**应用侧推送** RTL 状态。
     /// 默认实现转发到 `accessibility_provider()->set_rtl()`（桥存在且支持 RTL 时生效）。
     /// @note Thread: main-thread only
+    /// @param rtl true 右到左排版，false 左到右。
     virtual auto set_accessibility_rtl(bool rtl) -> void {
         if (auto *p = accessibility_provider()) {
             p->set_rtl(rtl);
@@ -371,58 +414,63 @@ class Surface {
     /// 零宽竖盒）。后端自行 `× scale_factor` + `ClientToScreen` 折算物理屏幕像素。
     /// 返回零盒 = 无有效定位，后端退化为系统默认位置（候选窗贴在鼠标/窗口角落，仍可用）。
     /// @note Thread: main-thread only
-    // 豁免 performance-unnecessary-value-param：本函数是虚接口且为既定扩展点契约（codespec/ARCHITECTURE.md
-    // 「Surface 扩展点」条目，Win32/D3D11/X11/Wayland/wgpu 各后端均有同签名 override），基类单边改
-    // const 引用会切断多态；各 override 以按值形参 + std::move 入成员存储，按值即设计意图。
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    virtual auto set_composition_caret_provider(std::function<Rect()> /*provider*/) -> void {}
+    /// 豁免 performance-unnecessary-value-param：本函数是虚接口且为既定扩展点契约（codespec/ARCHITECTURE.md
+    /// 「Surface 扩展点」条目，Win32/D3D11/X11/Wayland/wgpu 各后端均有同签名 override），基类单边改
+    /// const 引用会切断多态；各 override 以按值形参 + std::move 入成员存储，按值即设计意图。
+    /// @param provider 候选窗定位查询（按值持有；返回窗口逻辑 dp 零宽竖盒）。
+    /// NOLINTNEXTLINE(performance-unnecessary-value-param)
+    virtual auto set_composition_caret_provider([[maybe_unused]] std::function<Rect()> provider) -> void {}
 
     /// @brief GPU 帧调度挂点：后端提供 GPU 栅格（`rhi::RhiFrameSink`）时返回其指针，默认 nullptr。
     /// `Window::present_root` 据此选择「帧级 DisplayList 录制 → GPU 回放」或软件栅格路径；
     /// 两路径不做逐命令混合（同帧软硬混渲引入合成次序歧义）。返回非空后若首帧
     /// `begin_frame` 失败，Window 即永久回退软件路径（该 Surface 生命周期内不再尝试 GPU）。
+    /// @return GPU 帧 sink 裸指针（所有权归后端）；默认 nullptr（走软件栅格路径）。
     [[nodiscard]] virtual auto gpu_backend() -> rhi::RhiFrameSink * { return nullptr; }
 
   protected:
     /// @brief 上报当前窗口可见性状态（由真实后端在状态变化时调用）。
+    /// @param s 新的可见性状态。
     auto notify_window_state(WindowState s) const -> void {
         if (window_state_handler_) {
             window_state_handler_(s);
         }
     }
     /// @brief 上报当前窗口几何态（由真实后端在几何态变化时调用）。
+    /// @param m 新的窗口几何态。
     auto notify_window_mode(WindowMode m) const -> void {
         if (window_mode_handler_) {
             window_mode_handler_(m);
         }
     }
     /// @brief 上报本窗口 DPI 缩放变化（由真实后端在 `WM_DPICHANGED` 等时机调用）。
+    /// @param scale 新的缩放因子。
     auto notify_scale_change(float scale) const -> void {
         if (scale_change_handler_) {
             scale_change_handler_(scale);
         }
     }
 
+    /// @brief 窗口可见性状态上报句柄（子类经 set_* 注册）。
     WindowStateHandler window_state_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
-                                               ///< 窗口可见性状态上报句柄（子类经 set_* 注册）。
+    /// @brief 窗口几何态上报句柄（子类经 set_* 注册）。
     WindowModeHandler window_mode_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
-                                             ///< 窗口几何态上报句柄（子类经 set_* 注册）。
+    /// @brief 立即重绘请求（子类在几何变化/WM_PAINT 时调用；默认空）。
     PresentRequest present_request_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
-                                      ///< 立即重绘请求（子类在几何变化/WM_PAINT 时调用；默认空）。
+    /// @brief DPI 缩放变化上报句柄（子类经 set_scale_change_handler 注册）。
     ScaleChangeHandler scale_change_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
-                                               ///< DPI 缩放变化上报句柄（子类经 set_scale_change_handler 注册）。
 };
 
 #ifdef AURORA_BACKEND_HEADLESS
-/**
- * @brief 无头表面：在内存 `Painter` 帧缓冲上绘制，`present()` 时可写 PNG（specification/03-layout-render.md §8.4）。
- *
- * 用于无窗口系统的单元测试与无头校验；不依赖 GLFW/SDL/OpenGL。
- * 窗口可见性策略（WindowVisibility）不在此落地：无 OS 窗口。
- * 仅当 `AURORA_BACKEND_HEADLESS` 定义（默认 ON，可由 CMake `AURORA_BACKEND_HEADLESS=OFF` 剪裁）时提供。
- */
+/// @brief 无头表面：在内存 `Painter` 帧缓冲上绘制，`present()` 时可写 PNG（specification/03-layout-render.md §8.4）。
+///
+/// 用于无窗口系统的单元测试与无头校验；不依赖 GLFW/SDL/OpenGL。
+/// 窗口可见性策略（WindowVisibility）不在此落地：无 OS 窗口。
+/// 仅当 `AURORA_BACKEND_HEADLESS` 定义（默认 ON，可由 CMake `AURORA_BACKEND_HEADLESS=OFF` 剪裁）时提供。
+///
 class HeadlessSurface : public Surface {
   public:
+    /// @brief 构造无头表面：可选 PNG 落盘路径与初始逻辑尺寸。
     /// @param png_path 非空时每次 `present()` 写出 PNG（覆盖同名文件）。
     /// @param size 初始逻辑尺寸；传入后可让 `size()` 在 `begin_frame` 之前即返回正确值，
     /// 避免 `Window::present_root` 首次读取到 0 尺寸把整棵树布局到 0×0 而白屏（HEADLESS 后端特有）。
@@ -430,20 +478,30 @@ class HeadlessSurface : public Surface {
         : png_path_(std::move(png_path)), size_(size) {}
 
     /// @brief 设置/更换 PNG 输出路径（空串表示仅留在内存）。
+    /// @param png_path 新输出路径（移动入成员）。
     auto set_png_path(std::string png_path) -> void { png_path_ = std::move(png_path); }
     /// @brief 已呈现帧数（测试与诊断用）。
+    /// @return present() 调用次数。
     [[nodiscard]] auto frame_count() const -> int override { return frame_; }
 
     /// @brief 无头后端不等待（no-op）：测试以 `max_frames` 有限循环驱动，
     /// 引入等待会拖慢 ctest 且破坏确定性；行为与历史完全一致。
     auto wait_events(double /*timeout_ms*/) -> void override {}
 
+    /// @brief 开始新帧：分配/重置内存帧缓冲并同步逻辑尺寸。
+    /// @param width 缓冲宽（像素）。
+    /// @param height 缓冲高（像素）。
+    /// @return 恒为成功（内存缓冲无平台失败路径）。
     [[nodiscard]] auto begin_frame(int width, int height) -> Result<bool> override {
         painter_.begin(width, height);
         size_ = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)};
         return Result<bool>{true};
     }
+    /// @brief 取当前帧绘制器（内存 Painter）。
+    /// @return Painter 引用，帧内有效。
     [[nodiscard]] auto painter() -> Painter & override { return painter_; }
+    /// @brief 呈现当前帧：帧计数自增；png_path_ 非空时把当前缓冲写出 PNG。
+    /// @return 成功 true；写盘失败透传 `write_png` 错误。
     [[nodiscard]] auto present() -> Result<bool> override {
         ++frame_;
         if (!png_path_.empty()) {
@@ -454,25 +512,34 @@ class HeadlessSurface : public Surface {
         }
         return Result<bool>{true};
     }
+    /// @brief 当前逻辑尺寸（构造入参或最近一次 begin_frame）。
+    /// @return 表面 Size。
     [[nodiscard]] auto size() const -> Size override { return size_; }
+    /// @brief 帧像素只读指针（RGBA8）。
+    /// @return Painter 缓冲首地址；尚未 begin_frame 时 nullptr。
     [[nodiscard]] auto data() const -> const std::uint8_t * override { return painter_.data(); }
 
     /// @brief 平台是否已请求关闭：无头后端无 OS 关闭事件，默认恒 false。
+    /// @return 经 set_should_close 置位后 true。
     [[nodiscard]] auto should_close() const -> bool override { return should_close_; }
     /// @brief 测试 seam：程序化置位关闭请求（多窗口测试需驱动「某一窗口被关闭」）。
     ///
     /// 无 OS 窗口就没有 × 按钮事件，`Window::run` / `Application::run` 的退出必须可被
     /// 确定性驱动，否则多窗口帧循环无法在无头环境断言。
+    /// @param v 置位值：true 模拟用户请求关闭。
     auto set_should_close(bool v) -> void { should_close_ = v; }
 
     /// @brief 覆写悬停光标下发：Headless 无系统光标，改为按序记录下发形状，
     /// 使「派发器解析 → Application 接线 → Surface 生效」整条链路在无头环境可确定性断言
     /// （光标形状完成判据：悬停不同控件触发对应 `set_cursor`，Headless 可断言）。
     /// 仅记录、不产生任何 OS 副作用；真实后端各自覆写为平台光标 API。
+    /// @param shape 下发的光标形状，按调用序记入 cursor_log_。
     auto set_cursor(CursorShape shape) -> void override { cursor_log_.push_back(shape); }
     /// @brief 已下发的光标形状序列（按调用先后）。
+    /// @return cursor_log_ 只读引用。
     [[nodiscard]] auto cursor_log() const -> const std::vector<CursorShape> & { return cursor_log_; }
     /// @brief 最近一次下发的形状；从未下发时为 `std::nullopt`。
+    /// @return 末位形状的可选值。
     [[nodiscard]] auto last_cursor() const -> std::optional<CursorShape> {
         if (cursor_log_.empty()) {
             return std::nullopt;
@@ -483,8 +550,10 @@ class HeadlessSurface : public Surface {
     auto clear_cursor_log() -> void { cursor_log_.clear(); }
 
     /// @brief 测试 seams：在无 OS 窗口下确定性驱动窗口级状态（供 `test_window_state` 使用）。
+    /// @param s 模拟的可见性状态（经 notify_window_state 上报）。
     auto simulate_window_state(WindowState s) const -> void { notify_window_state(s); }
     /// @brief 测试 seams：在无 OS 窗口下确定性驱动窗口几何态。
+    /// @param m 模拟的几何态（经 notify_window_mode 上报）。
     auto simulate_window_mode(WindowMode m) const -> void { notify_window_mode(m); }
     /// @brief 测试 seams：模拟系统重绘请求（如 Win32 最小化还原后的 WM_PAINT），
     /// 触发 `Window` 接线的同步重渲染回调；未接线时 no-op。
@@ -494,31 +563,65 @@ class HeadlessSurface : public Surface {
         }
     }
 
-    // ---- 多窗口测试 seams（无 OS 窗口：记录调用而非产生副作用）----
-
-    auto set_owner(const Surface *owner) -> void override { owner_ = owner; }  ///< 记录 owner 供断言。
+    /// @brief 多窗口测试 seams（无 OS 窗口：记录调用而非产生副作用）：记录 owner 供断言。
+    /// @param owner 待记录的 owner Surface（非持有；nullptr 解除从属）。
+    auto set_owner(const Surface *owner) -> void override { owner_ = owner; }
+    /// @brief 读回已记录的 owner。
+    /// @return 最近一次 set_owner 传入的 Surface（非持有；未设置时为 nullptr）。
     [[nodiscard]] auto owner_surface() const -> const Surface * { return owner_; }
-    auto set_enabled(bool on) -> void override { enabled_ = on; }  ///< 记录输入启用态（模态屏蔽 owner）。
+
+    /// @brief 记录输入启用态（模态屏蔽 owner 的测试观测点）。
+    /// @param on 是否启用输入。
+    auto set_enabled(bool on) -> void override { enabled_ = on; }
+
+    /// @brief 读回输入启用态。
+    /// @return 最近一次 set_enabled 的值。
     [[nodiscard]] auto enabled() const -> bool { return enabled_; }
+
+    /// @brief 计数 raise 调用（无 OS z 序副作用）。
     auto raise() -> void override { ++raise_count_; }
+
+    /// @brief 计数 focus 调用（无 OS 焦点副作用）。
     auto focus_window() -> void override { ++focus_count_; }
+
+    /// @brief 已记录的 raise 次数。
+    /// @return raise() 被调用的累计次数。
     [[nodiscard]] auto raise_count() const -> int { return raise_count_; }
+
+    /// @brief 已记录的 focus 次数。
+    /// @return focus_window() 被调用的累计次数。
     [[nodiscard]] auto focus_count() const -> int { return focus_count_; }
+
+    /// @brief 模拟的所在显示器 id。
+    /// @return 最近一次 set_display_id 的值。
     [[nodiscard]] auto display_id() const -> int override { return display_id_; }
+
+    /// @brief 设定模拟显示器 id。
+    /// @param id 显示器序号。
     auto set_display_id(int id) -> void { display_id_ = id; }
+
+    /// @brief 模拟的屏幕位置。
+    /// @return 最近一次 set_position 记录的左上角坐标。
     [[nodiscard]] auto position() const -> Point override { return origin_; }
+
+    /// @brief 记录目标位置（几何持久化测试的观测点）。
+    /// @param p 窗口左上角屏幕坐标。
     auto set_position(Point p) -> void override { origin_ = p; }
+
+    /// @brief 记录目标尺寸（set_size seam）。
+    /// @param s 窗口尺寸。
     auto set_size(Size s) -> void override { size_ = s; }
 
     /// @brief 测试 seams：模拟 DPI 缩放变化（窗口被拖到不同缩放比的显示器）。
+    /// @param scale 模拟的新缩放因子（经 notify_scale_change 触发回调）。
     auto emit_scale_change(float scale) const -> void { notify_scale_change(scale); }
 
   private:
     Painter painter_;
-    // 声明顺序须与构造函数初始化列表一致（png_path_ 先于 size_），否则触发 -Wreorder。
+    /// @brief PNG 输出路径（非空时 present 落盘）。声明顺序先于 size_ 以匹配构造初始化列表，防 -Wreorder。
     std::string png_path_;
-    Size size_{.width = 0.0F, .height = 0.0F};
-    int frame_ = 0;
+    Size size_{.width = 0.0F, .height = 0.0F};  ///< 当前逻辑尺寸（构造/begin_frame/set_size 驱动）
+    int frame_ = 0;  ///< 已 present 帧计数
     bool should_close_ = false;  ///< 关闭请求（经 `set_should_close` 置位；见 `should_close()`）。
     const Surface *owner_ = nullptr;  ///< 记录的 owner（多窗口测试观测点）。
     bool enabled_ = true;  ///< 输入启用态（模态屏蔽 owner 的观测点）。

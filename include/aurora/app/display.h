@@ -24,17 +24,23 @@ struct Display {
 namespace app {
 
 /// @brief 枚举当前所有显示器（含主屏）。无显示器时返回单默认屏。
+/// @return 显示器列表；至少含一项（枚举失败/无显示器时为合成的单默认屏）。
 [[nodiscard]] auto list_displays() -> std::vector<Display>;
 
 /// @brief 返回主显示器；无显示器时返回单默认屏（1920x1080, scale 1, primary）。
+/// @return 主屏 `Display`（`is_primary == true`）。
 [[nodiscard]] auto primary_display() -> Display;
 
 /// @brief 将窗口迁移到指定 id 的显示器。
 /// Win32 下以 SetWindowPos 将窗口居中到该显示器工作区；无头/非 Win32 为 no-op。
 /// 找不到 id 时回退到主显示器。
+/// @param win 待迁移的窗口。
+/// @param display_id 目标显示器 id（与 `Display::id` 同源）。
 auto move_window_to_display(Window &win, int display_id) -> void;
 
 /// @brief 返回包含给定点的显示器；落点不在任何显示器内时回退主显示器。
+/// @param p 屏幕坐标点（物理像素，与 `Display::bounds` 同一坐标系）。
+/// @return 覆盖该点的显示器；无命中时为主屏。
 [[nodiscard]] auto display_containing(Point p) -> Display;
 
 }  // namespace app

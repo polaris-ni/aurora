@@ -45,6 +45,8 @@ inline constexpr std::size_t AURORA_CURSOR_SHAPE_COUNT = 11;
 /// | `Crosshair` | `crosshair` | 十字准星 |
 /// | `NotAllowed` | `not-allowed` | 禁止 |
 /// | `Wait` | `wait` | 等待/忙碌 |
+/// @param shape 待翻译的光标语义形状。
+/// @return 该形状对应的规范名字符串（静态存储期，与上表一致；未知取值回退 `"default"`）。
 [[nodiscard]] constexpr auto cursor_rfc_name(CursorShape shape) -> const char * {
     switch (shape) {
         case CursorShape::Arrow:

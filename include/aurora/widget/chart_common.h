@@ -20,49 +20,46 @@
 #include "aurora/theming/theme.h"
 #include "aurora/widget/props_io.h"
 
+/// @brief 图表公共纯值数据层（契约见 specification/04-widget.md §3.8）。
+///
+/// 本头只放**纯值类型、纯函数与比例尺**：无状态、不持有资源、可在无头环境（无 Application、
+/// 无 Surface、无字体）完整单测。绘制 / 刻度生成 / 命中反查三处**同源**消费这些类型，
+/// 故域计算与反查必须走同一份 `LinearScale` / `BandScale`，不得各算一遍。
+///
+/// 所有聚合字段均有合理默认值（CODING_STANDARDS.md §6.2）。
+/// @note Thread: thread-safe (pure value types)
+/// @note Side-effects: none
+/// @note Rebuildable: yes, via from_json
 namespace aurora {
-
-/**
- * @brief 图表公共纯值数据层（切片 2；契约见 specification/04-widget.md §3.8）。
- *
- * 本头只放**纯值类型、纯函数与比例尺**：无状态、不持有资源、可在无头环境（无 Application、
- * 无 Surface、无字体）完整单测。绘制 / 刻度生成 / 命中反查三处**同源**消费这些类型（D6），
- * 故域计算与反查必须走同一份 `LinearScale` / `BandScale`，不得各算一遍。
- *
- * 所有聚合字段均有合理默认值（CODING_STANDARDS.md §6.2）。
- * @note Thread: thread-safe (pure value types)
- * @note Side-effects: none
- * @note Rebuildable: yes, via from_json
- */
 
 // ---------- 数据 ----------
 
 /// @brief 显式坐标数据点（Scatter 用；Line/Bar/Sparkline 为等距，x = 索引）。
 struct ChartPoint {
-    double x = 0.0;
-    double y = 0.0;
+    double x = 0.0;  ///< 横坐标（数据域单位，非像素）。
+    double y = 0.0;  ///< 纵坐标（数据域单位，非像素）。
 };
 
 /// @brief 数据系列（Line / Bar 共用）：`values` 等距，`name` 进图例与值框。
 struct ChartSeries {
-    std::string name;
-    std::vector<double> values;
+    std::string name;  ///< 系列名（图例与 hover 值框的标签；可为空串）。
+    std::vector<double> values;  ///< 等距采样的数值序列（第 i 项对应 x = i）。
     std::optional<Color> color;  ///< 空 = 按索引取色板（D8 / D14）
 };
 
 /// @brief 散点系列（Scatter 专用）：显式 `ChartPoint` 坐标。
 struct ScatterSeries {
-    std::string name;
-    std::vector<ChartPoint> points;
-    std::optional<Color> color;
-    float dot_radius = 4.0F;
+    std::string name;  ///< 系列名（图例标签；可为空串）。
+    std::vector<ChartPoint> points;  ///< 显式坐标点序列（x/y 均为数据域单位）。
+    std::optional<Color> color;  ///< 空 = 按索引取色板（D8 / D14）。
+    float dot_radius = 4.0F;  ///< 散点半径（dp），默认 4.0。
 };
 
 /// @brief 扇区（Pie 专用）：归一化占比 = value / Σvalue。
 struct PieSection {
-    std::string name;
-    double value = 0.0;
-    std::optional<Color> color;
+    std::string name;  ///< 扇区名（图例标签；可为空串）。
+    double value = 0.0;  ///< 原始数值；仅有限且 > 0 的项参与占比计算（见 pie_section_ratios）。
+    std::optional<Color> color;  ///< 空 = 按索引取色板（D8 / D14）。
 };
 
 // ---------- 轴与图例 ---------
@@ -78,20 +75,20 @@ struct ChartAxisSpec {
     bool include_zero = true;  ///< 域是否必须含 0（Bar 的零基线依赖它）
 };
 
-/// @brief 图例位置。
 // 公共 API 枚举（specification/04-widget.md 记录为数据层类型，且随 JSON 按名序列化）：
 // 底层类型属 API 形态的一部分，本库按语义选型而非体积取向，改窄只让 ChartLegendSpec 少 6 字节。
-// NOLINTNEXTLINE(performance-enum-size)
+/// @brief 图例位置。
+/// NOLINTNEXTLINE(performance-enum-size)
 enum class LegendPosition {
-    Top,
-    Bottom,
-    Right,
+    Top,  ///< 顶部：图例横排于绘图区上方，行高先从留白扣除。
+    Bottom,  ///< 底部：图例横排于绘图区下方。
+    Right,  ///< 右侧：图例纵排于右方，按最长条目名加色块宽扣除宽度。
 };
 
 /// @brief 图例规格。
 struct ChartLegendSpec {
-    bool visible = true;
-    LegendPosition position = LegendPosition::Top;
+    bool visible = true;  ///< 是否绘制图例。
+    LegendPosition position = LegendPosition::Top;  ///< 图例摆放位置（默认顶部）。
 };
 
 // ---------- 比例尺（D3 式纯值化）----------
@@ -99,14 +96,23 @@ struct ChartLegendSpec {
 /// @brief 线性比例尺：domain → px，含 nice 域、nice 刻度与反查（invert）。
 class LinearScale {
   public:
+    /// @brief 默认构造：域 [0, 1]、刻度步长 1。
     LinearScale() = default;
+    /// @brief 以显式域与步长直接构造（不经 nice 化，通常传入 `from_domain` / `from_explicit` 的结果）。
+    /// @param d0 域下界。
+    /// @param d1 域上界。
+    /// @param step 刻度步长（须 > 0，否则 `ticks` 返回空序列）。
     LinearScale(double d0, double d1, double step) : d0_(d0), d1_(d1), step_(step) {}
 
     /// @brief 由数据域构造并 nice 化（D3/Qt 通用做法：step ∈ {1,2,5}×10^k，上下界向 step 对齐）。
     /// 域退化（range ≤ 0）时回退 `[lo, lo + 1]`，杜绝除零 / NaN（D15）。
+    /// @param d0 数据域一端（可与 d1 倒序，内部取 min/max）。
+    /// @param d1 数据域另一端。
+    /// @param tick_count 期望刻度数（内部 clamp ≥ 1，用于推导原始步长）。
+    /// @return nice 化后的比例尺（域端点向 step 对齐，步长为 nice 数）。
     [[nodiscard]] static auto from_domain(double d0, double d1, int tick_count) -> LinearScale {
-        double lo = std::min(d0, d1);
-        double hi = std::max(d0, d1);
+        double lo = std::min(d0, d1);  // 域两端排序后的下界。
+        double hi = std::max(d0, d1);  // 域两端排序后的上界。
         if (!std::isfinite(lo) || !std::isfinite(hi)) {
             return LinearScale{0.0, 1.0, 1.0};
         }
@@ -116,7 +122,7 @@ class LinearScale {
         const int n = std::max(tick_count, 1);
         const double step = nice_number((hi - lo) / static_cast<double>(n));
         const double nice_lo = std::floor(lo / step) * step;
-        double nice_hi = std::ceil(hi / step) * step;
+        double nice_hi = std::ceil(hi / step) * step;  // 上界向 step 上对齐后的 nice 域上界。
         if (!(nice_hi > nice_lo)) {
             nice_hi = nice_lo + step;
         }
@@ -124,6 +130,10 @@ class LinearScale {
     }
 
     /// @brief 显式域（含 `min`/`max` 覆盖）：同样 nice 化刻度，但保留调用方指定的域边界。
+    /// @param d0 域下界（须有限且 < d1，否则整体回退 `from_domain` 的 nice 化行为）。
+    /// @param d1 域上界。
+    /// @param tick_count 期望刻度数（内部 clamp ≥ 1，仅用于推导步长）。
+    /// @return 域保持 [d0, d1]、步长为 nice 化结果的比例尺。
     [[nodiscard]] static auto from_explicit(double d0, double d1, int tick_count) -> LinearScale {
         if (!std::isfinite(d0) || !std::isfinite(d1) || !(d1 > d0)) {
             return from_domain(d0, d1, tick_count);
@@ -132,10 +142,18 @@ class LinearScale {
         return LinearScale{d0, d1, nice_number((d1 - d0) / static_cast<double>(n))};
     }
 
+    /// @brief 当前域访问器（nice 化后的端点对）。
+    /// @return (域下界, 域上界)。
     [[nodiscard]] auto domain() const -> std::pair<double, double> { return {d0_, d1_}; }
+    /// @brief 刻度步长访问器。
+    /// @return nice 化步长（`ticks` / `tick_digits` 共用）。
     [[nodiscard]] auto step() const -> double { return step_; }
 
     /// @brief domain 值 → 像素（px1 < px0 用于 y 轴自上而下）。
+    /// @param v domain 坐标值。
+    /// @param px0 像素轴起点（`v = d0` 对应位置）。
+    /// @param px1 像素轴终点（`v = d1` 对应位置）。
+    /// @return 线性插值后的像素坐标；域跨度退化（≤ 1e-12）时按 t = 0 处理，返回 px0。
     [[nodiscard]] auto to_px(double v, float px0, float px1) const -> float {
         const double span = d1_ - d0_;
         const double t = std::abs(span) < 1e-12 ? 0.0 : (v - d0_) / span;
@@ -143,6 +161,10 @@ class LinearScale {
     }
 
     /// @brief 像素 → domain 值（hover 命中反查；与 `to_px` 同源）。
+    /// @param px 待反查的像素坐标。
+    /// @param px0 像素轴起点（与 `to_px` 传入值一致）。
+    /// @param px1 像素轴终点（与 `to_px` 传入值一致）。
+    /// @return 对应 domain 值；像素跨度退化（≤ 1e-12）时按 t = 0 处理，返回 d0。
     [[nodiscard]] auto invert(float px, float px0, float px1) const -> double {
         const double span = static_cast<double>(px1) - static_cast<double>(px0);
         const double t = std::abs(span) < 1e-12 ? 0.0 : (static_cast<double>(px) - px0) / span;
@@ -150,6 +172,7 @@ class LinearScale {
     }
 
     /// @brief nice 刻度值序列（含域两端点；数量受 step 约束，最多 1001 个防病态输入）。
+    /// @return 自域下界起、按 step 递增的刻度值序列；step 非正或非有限时为空序列。
     [[nodiscard]] auto ticks() const -> std::vector<double> {
         std::vector<double> out;
         if (!(step_ > 0.0) || !std::isfinite(step_)) {
@@ -190,11 +213,18 @@ class LinearScale {
 /// @brief 带状比例尺（Bar 类目轴）：n 个类目等分带宽，取带中心；命中反查越界夹取。
 class BandScale {
   public:
+    /// @brief 以类目数构造（仅记录个数，像素参数在查询时传入）。
+    /// @param n 类目数量（0 = 空轴，各查询接口按 D15 降级返回）。
     explicit BandScale(std::size_t n) : n_(n) {}
 
+    /// @brief 类目数量。
+    /// @return 构造时传入的 n（无类目时为 0）。
     [[nodiscard]] auto count() const -> std::size_t { return n_; }
 
     /// @brief 单带宽度（dp）。n == 0 时为 0（调用方须先判空，D15）。
+    /// @param px0 轴像素起点。
+    /// @param px1 轴像素终点。
+    /// @return (px1 - px0) / n；n == 0 时恒为 0。
     [[nodiscard]] auto band_width(float px0, float px1) const -> float {
         if (n_ == 0U) {
             return 0.0F;
@@ -203,6 +233,10 @@ class BandScale {
     }
 
     /// @brief 第 i 个带的中心像素（i 越界时夹取到 [0, n-1]）。
+    /// @param i 类目下标（越界安全：内部夹取）。
+    /// @param px0 轴像素起点。
+    /// @param px1 轴像素终点。
+    /// @return 该带中心位置；n == 0 时返回 px0。
     [[nodiscard]] auto band_center_px(std::size_t i, float px0, float px1) const -> float {
         if (n_ == 0U) {
             return px0;
@@ -213,6 +247,10 @@ class BandScale {
     }
 
     /// @brief 像素 → 类目索引（越界夹取，保证永远可安全下标）。
+    /// @param px 待反查的像素坐标。
+    /// @param px0 轴像素起点。
+    /// @param px1 轴像素终点。
+    /// @return 夹取到 [0, n-1] 的类目下标；n == 0 或带宽退化（≤ 1e-6）时返回 0。
     [[nodiscard]] auto index_at(float px, float px0, float px1) const -> std::size_t {
         if (n_ == 0U) {
             return 0U;
@@ -236,6 +274,8 @@ class BandScale {
 // ---------- 色板 ----------
 
 /// @brief 内置系列色板（Material 风格 8 色；索引超界取模）。
+/// @param index 系列索引（任意非负值，内部对 8 取模）。
+/// @return 模 8 后对应位置的 RGBA 颜色。
 [[nodiscard]] inline auto chart_palette(std::size_t index) -> Color {
     constexpr std::array<Color, 8> palette = {
         Color{66, 133, 244, 255},  // blue
@@ -252,6 +292,10 @@ class BandScale {
 }
 
 /// @brief 系列取色优先级（D14）：显式 color > `Theme` 命名令牌 `chart.palette.<i%8>` > 内置色板。
+/// @param index 系列索引（令牌名与内置色板均按 index % 8 选取）。
+/// @param explicit_color 系列显式色；有值时直接返回，不参与令牌查询。
+/// @param theme 查询 `chart.palette.*` 命名令牌的主题。
+/// @return 最终系列颜色（令牌缺失时回退内置色板）。
 [[nodiscard]] inline auto resolve_series_color(std::size_t index, const std::optional<Color> &explicit_color,
                                                const Theme &theme) -> Color {
     if (explicit_color.has_value()) {
@@ -263,6 +307,8 @@ class BandScale {
 // ---------- JSON 编解码（数据进序列化面，D5）----------
 
 /// @brief `vector<double>` → JSON 数组（非数值元素跳过）。
+/// @param v 数值序列。
+/// @return JSON 数组；非有限值按 0.0 写出（保证 JSON 可序列化）。
 [[nodiscard]] inline auto double_vector_to_json(const std::vector<double> &v) -> Json {
     Json a = Json::array();
     for (const double x : v) {
@@ -272,6 +318,8 @@ class BandScale {
 }
 
 /// @brief JSON 数组 → `vector<double>`（非数组 / 非数值元素跳过，绝不抛异常）。
+/// @param j 待解析的 JSON 值。
+/// @return 数值序列（非数组时为空）；非有限数值按 0.0 收。
 [[nodiscard]] inline auto json_to_double_vector(const Json &j) -> std::vector<double> {
     std::vector<double> out;
     if (!j.is_array()) {
@@ -288,6 +336,8 @@ class BandScale {
 }
 
 /// @brief 字符串数组 ↔ JSON（类目标签）。
+/// @param v 类目标签序列。
+/// @return 与 v 等长的 JSON 字符串数组。
 [[nodiscard]] inline auto string_vector_to_json(const std::vector<std::string> &v) -> Json {
     Json a = Json::array();
     for (const std::string &s : v) {
@@ -296,6 +346,9 @@ class BandScale {
     return a;
 }
 
+/// @brief JSON 数组 → 字符串数组（非数组 / 非字符串元素跳过，绝不抛异常）。
+/// @param j 待解析的 JSON 值。
+/// @return 字符串序列（非数组时为空）。
 [[nodiscard]] inline auto json_to_string_vector(const Json &j) -> std::vector<std::string> {
     std::vector<std::string> out;
     if (!j.is_array()) {
@@ -311,6 +364,8 @@ class BandScale {
 }
 
 /// @brief 单个系列 → JSON 对象（`color` 未设置时不输出，保留「按索引取色板」语义）。
+/// @param s 待序列化的系列。
+/// @return 含 `name` / `values`（可选 `color`）的 JSON 对象。
 [[nodiscard]] inline auto chart_series_to_json(const ChartSeries &s) -> Json {
     Json o = Json::object();
     o["name"] = s.name;
@@ -322,6 +377,8 @@ class BandScale {
 }
 
 /// @brief JSON 对象 → 系列（字段缺失 / 类型不符逐项回退默认，绝不抛异常）。
+/// @param j 含 `name` / `values` / `color` 的 JSON 对象。
+/// @return 解析出的系列（非对象时返回默认构造：空名、空值、无色）。
 [[nodiscard]] inline auto json_to_chart_series(const Json &j) -> ChartSeries {
     ChartSeries s;
     if (!j.is_object()) {
@@ -340,6 +397,8 @@ class BandScale {
 }
 
 /// @brief 对象数组（`ChartSeries`）↔ JSON。
+/// @param v 系列序列。
+/// @return 与 v 等长的 JSON 数组，逐元素走 `chart_series_to_json`。
 [[nodiscard]] inline auto chart_series_vector_to_json(const std::vector<ChartSeries> &v) -> Json {
     Json a = Json::array();
     for (const ChartSeries &s : v) {
@@ -348,6 +407,9 @@ class BandScale {
     return a;
 }
 
+/// @brief JSON 值 → `ChartSeries` 数组（非数组返回空；仅解析其中的对象元素）。
+/// @param j 系列对象数组的 JSON 值。
+/// @return 系列序列，逐元素走 `json_to_chart_series`。
 [[nodiscard]] inline auto json_to_chart_series_vector(const Json &j) -> std::vector<ChartSeries> {
     std::vector<ChartSeries> out;
     if (!j.is_array()) {
@@ -362,7 +424,9 @@ class BandScale {
     return out;
 }
 
-/// @brief 散点系列 ↔ JSON。
+/// @brief 散点系列 → JSON 对象（点列为 `[x, y]` 数组对；非有限坐标按 0.0 写出）。
+/// @param s 待序列化的散点系列。
+/// @return 含 `name` / `points` / `dot_radius`（可选 `color`）的 JSON 对象。
 [[nodiscard]] inline auto scatter_series_to_json(const ScatterSeries &s) -> Json {
     Json o = Json::object();
     o["name"] = s.name;
@@ -378,6 +442,10 @@ class BandScale {
     return o;
 }
 
+/// @brief JSON 对象 → 散点系列（字段缺失 / 类型不符逐项回退默认，绝不抛异常）。
+/// @param j 含 `name` / `points` / `dot_radius` / `color` 的 JSON 对象；`points` 仅收录
+///        长度 ≥ 2 且前两元素为数值的数组项。
+/// @return 解析出的散点系列（非对象时返回默认构造）。
 [[nodiscard]] inline auto json_to_scatter_series(const Json &j) -> ScatterSeries {
     ScatterSeries s;
     if (!j.is_object()) {
@@ -402,6 +470,9 @@ class BandScale {
     return s;
 }
 
+/// @brief 散点系列序列 → JSON 数组（逐元素走 `scatter_series_to_json`）。
+/// @param v 散点系列序列。
+/// @return 与 v 等长的 JSON 数组。
 [[nodiscard]] inline auto scatter_series_vector_to_json(const std::vector<ScatterSeries> &v) -> Json {
     Json a = Json::array();
     for (const ScatterSeries &s : v) {
@@ -410,6 +481,9 @@ class BandScale {
     return a;
 }
 
+/// @brief JSON 值 → `ScatterSeries` 数组（非数组返回空；仅解析其中的对象元素）。
+/// @param j 散点系列对象数组的 JSON 值。
+/// @return 散点系列序列，逐元素走 `json_to_scatter_series`。
 [[nodiscard]] inline auto json_to_scatter_series_vector(const Json &j) -> std::vector<ScatterSeries> {
     std::vector<ScatterSeries> out;
     if (!j.is_array()) {
@@ -424,7 +498,9 @@ class BandScale {
     return out;
 }
 
-/// @brief 扇区 ↔ JSON。
+/// @brief 扇区 → JSON 对象（非有限 `value` 按 0.0 写出；`color` 未设置时不输出）。
+/// @param s 待序列化的扇区。
+/// @return 含 `name` / `value`（可选 `color`）的 JSON 对象。
 [[nodiscard]] inline auto pie_section_to_json(const PieSection &s) -> Json {
     Json o = Json::object();
     o["name"] = s.name;
@@ -435,6 +511,9 @@ class BandScale {
     return o;
 }
 
+/// @brief JSON 对象 → 扇区（字段缺失 / 类型不符逐项回退默认；非有限 `value` 按 0.0 收）。
+/// @param j 含 `name` / `value` / `color` 的 JSON 对象。
+/// @return 解析出的扇区（非对象时返回默认构造：空名、0 值、无色）。
 [[nodiscard]] inline auto json_to_pie_section(const Json &j) -> PieSection {
     PieSection s;
     if (!j.is_object()) {
@@ -453,6 +532,9 @@ class BandScale {
     return s;
 }
 
+/// @brief 扇区序列 → JSON 数组（逐元素走 `pie_section_to_json`）。
+/// @param v 扇区序列。
+/// @return 与 v 等长的 JSON 数组。
 [[nodiscard]] inline auto pie_section_vector_to_json(const std::vector<PieSection> &v) -> Json {
     Json a = Json::array();
     for (const PieSection &s : v) {
@@ -461,6 +543,9 @@ class BandScale {
     return a;
 }
 
+/// @brief JSON 值 → `PieSection` 数组（非数组返回空；仅解析其中的对象元素）。
+/// @param j 扇区对象数组的 JSON 值。
+/// @return 扇区序列，逐元素走 `json_to_pie_section`。
 [[nodiscard]] inline auto json_to_pie_section_vector(const Json &j) -> std::vector<PieSection> {
     std::vector<PieSection> out;
     if (!j.is_array()) {
@@ -478,6 +563,8 @@ class BandScale {
 // ---------- 枚举编解码 ----------
 
 /// @brief LegendPosition → JSON 字符串。
+/// @param v 图例位置枚举值。
+/// @return "Top" / "Bottom" / "Right" 之一（超出枚举范围的值兜底为 "Top"）。
 [[nodiscard]] inline auto legend_position_to_json(LegendPosition v) -> Json {
     switch (v) {
         case LegendPosition::Top:
@@ -491,6 +578,8 @@ class BandScale {
 }
 
 /// @brief JSON → LegendPosition（未知值回退 Top）。
+/// @param j 待解析的 JSON 值（仅字符串参与匹配）。
+/// @return 匹配 "Bottom" / "Right" 的对应枚举值；其余（含非字符串）一律为 Top。
 [[nodiscard]] inline auto json_to_legend_position(const Json &j) -> LegendPosition {
     if (j.is_string()) {
         const std::string s = j.get<std::string>();
@@ -504,7 +593,9 @@ class BandScale {
     return LegendPosition::Top;
 }
 
-/// @brief 轴规格 ↔ JSON（嵌套对象；缺失字段回退默认）。
+/// @brief 轴规格 → JSON（嵌套对象；空 `label` 与未设置的 `min`/`max` 不输出）。
+/// @param a 待序列化的轴规格。
+/// @return 含 visible / tick_count / show_grid_lines / include_zero 等字段的 JSON 对象。
 [[nodiscard]] inline auto chart_axis_spec_to_json(const ChartAxisSpec &a) -> Json {
     Json o = Json::object();
     o["visible"] = a.visible;
@@ -523,6 +614,9 @@ class BandScale {
     return o;
 }
 
+/// @brief JSON 对象 → 轴规格（字段缺失 / 类型不符逐项回退默认；`tick_count` 最小夹到 2）。
+/// @param j 轴规格的 JSON 对象。
+/// @return 解析出的轴规格（非对象时返回默认构造）。
 [[nodiscard]] inline auto json_to_chart_axis_spec(const Json &j) -> ChartAxisSpec {
     ChartAxisSpec a;
     if (!j.is_object()) {
@@ -552,7 +646,9 @@ class BandScale {
     return a;
 }
 
-/// @brief 图例规格 ↔ JSON。
+/// @brief 图例规格 → JSON。
+/// @param l 待序列化的图例规格。
+/// @return 含 `visible` 与 `position`（按名序列化）的 JSON 对象。
 [[nodiscard]] inline auto chart_legend_spec_to_json(const ChartLegendSpec &l) -> Json {
     Json o = Json::object();
     o["visible"] = l.visible;
@@ -560,6 +656,9 @@ class BandScale {
     return o;
 }
 
+/// @brief JSON 对象 → 图例规格（字段缺失 / 类型不符逐项回退默认；position 未知值回退 Top）。
+/// @param j 图例规格的 JSON 对象。
+/// @return 解析出的图例规格（非对象时返回默认构造：可见、顶部）。
 [[nodiscard]] inline auto json_to_chart_legend_spec(const Json &j) -> ChartLegendSpec {
     ChartLegendSpec l;
     if (!j.is_object()) {
@@ -586,7 +685,9 @@ class BandScale {
 /// 用法：控件持有一个成员，`on_mount` 调 `mount()`，数据变更调 `replay()`，绘制读 `progress()`。
 class ChartGrowIn {
   public:
+    /// @brief 默认构造：进度处于终态 1.0，尚未接入 `Animator`。
     ChartGrowIn() = default;
+    /// @brief 析构：若控制器仍登记在 `Animator` 上则先摘除，避免帧循环持有悬空控制器。
     ~ChartGrowIn() {
         if (bound_) {
             if (Animator *a = Animator::current()) {
@@ -595,19 +696,25 @@ class ChartGrowIn {
             bound_ = false;
         }
     }
+    /// @brief 禁止拷贝：`Animator` 按控制器地址登记，拷贝会产生两份同源登记。
     ChartGrowIn(const ChartGrowIn &) = delete;
+    /// @brief 禁止拷贝赋值（理由同拷贝构造）。
+    /// @return 名义上返回左操作数引用；重载已删除，任何调用都是编译错误。
     auto operator=(const ChartGrowIn &) -> ChartGrowIn & = delete;
+    /// @brief 禁止移动赋值：控件挂载后地址被 `Animator` 持有，赋值会撕裂登记。
+    /// @return 名义上返回左操作数引用；重载已删除，任何调用都是编译错误。
     auto operator=(ChartGrowIn &&) -> ChartGrowIn & = delete;
 
-    /// @brief 移动构造：控件经 `Node{widget}` 入树必须可移动。
-    ///
-    /// 绑定建立在 `on_mount`（入树之后，此后不再移动），故此处若已登记则先摘除再转移进度值——
-    /// 绝不让 `Animator` 持有已失效的控制器 / 目标地址（`Animator::drive` 存裸指针，UAF 风险）。
     // 豁免 bugprone-exception-escape：本构造读写 State<double>（进订阅者通知链，回调经
     // std::function 转发），触发 .clang-tidy 已记录的系统性假告警面——「任何转入 std::function
     // 的可调用对象一律判『不应抛出』」（operator() 无 noexcept 规格）。抛出仅可能为 bad_alloc，
     // 由顶层兜底；noexcept 是既定契约（控件经 Node{widget} 入树，容器搬移依赖移动不抛），不改签名。
-    // NOLINTNEXTLINE(bugprone-exception-escape)
+    /// @brief 移动构造：控件经 `Node{widget}` 入树必须可移动。
+    ///
+    /// 绑定建立在 `on_mount`（入树之后，此后不再移动），故此处若已登记则先摘除再转移进度值——
+    /// 绝不让 `Animator` 持有已失效的控制器 / 目标地址（`Animator::drive` 存裸指针，UAF 风险）。
+    /// @param other 源对象；其 `Animator` 登记被摘除，构造后进度回落终态 1.0。
+    /// NOLINTNEXTLINE(bugprone-exception-escape)
     ChartGrowIn(ChartGrowIn &&other) noexcept : progress_{other.progress_.get()} {
         if (other.bound_) {
             if (Animator *a = Animator::current()) {
@@ -619,23 +726,26 @@ class ChartGrowIn {
     }
 
     /// @brief 当前进度（0..1）；未接动画时恒为 1（终态）。
+    /// @return 归一化进度值。
     [[nodiscard]] auto progress() const -> double { return progress_.get(); }
     /// @brief 进度信号（供 `collect_signals` 登记）。
+    /// @return `progress_` 的可变引用。
     [[nodiscard]] auto signal() -> State<double> & { return progress_; }
     /// @brief 是否正在播放（用于 `can_cache_display_list()`）。
+    /// @return true = 已绑定帧循环且动画进行中。
     [[nodiscard]] auto animating() const -> bool { return bound_ && ctrl_.is_animating(); }
 
     /// @brief 在 `on_mount` 中调用：接上帧循环并从头播放；无 Animator 时落到终态。
     auto mount() -> void {
-        Animator *a = Animator::current();
+        Animator *a = Animator::current();  // 当前帧循环注册器；空 = 无头渲染上下文（降级路径）。
         if (a == nullptr) {
-            progress_.set(1.0);  // 降级：无运行循环（无头渲染）直接呈现终态
+            progress_.set(1.0);  // 降级：无运行循环（无头渲染）直接呈现终态。
             return;
         }
-        progress_.set(0.0);
+        progress_.set(0.0);  // 从头播放：绑定帧循环前将进度复位到 0。
         a->bind(ctrl_, Tween<double>{0.0, 1.0, Curves::ease_out()}, progress_);
         bound_ = true;
-        ctrl_.forward();
+        ctrl_.forward();  // 起播：0 → 1 缓出过渡（450ms）。
     }
 
     /// @brief 数据变更时重放（未接动画时为 no-op，进度已恒为终态）。
@@ -657,6 +767,8 @@ class ChartGrowIn {
 // ---------- 轴绘制共享实现（Bar / Line / Scatter 共用，避免四份漂移）----------
 
 /// @brief 刻度小数位：由 nice step 推导（step ≥ 1 → 0 位）。
+/// @param step 比例尺的 nice 步长（非正 / 非有限按 0 位处理）。
+/// @return 保留小数位数，夹取在 [0, 6]。
 [[nodiscard]] inline auto tick_digits(double step) -> int {
     if (!(step > 0.0) || !std::isfinite(step) || step >= 1.0) {
         return 0;
@@ -668,6 +780,14 @@ class ChartGrowIn {
 ///
 /// `origin` 为控件在画布中的全局原点（几何一律用局部坐标，绘制时才平移），
 /// 保证「渲染与命中同源」。`plot` 为局部坐标下的绘图区。
+/// @param p 目标绘制器。
+/// @param origin 控件全局原点（绘制时平移量）。
+/// @param plot 局部坐标绘图区（高度 ≤ 0 时直接返回，不绘制）。
+/// @param scale 数值域比例尺（提供 ticks 与 to_px 换算）。
+/// @param spec 轴规格（`show_grid_lines` 控制网格线，`label` 非空时绘制轴标题）。
+/// @param font 刻度与标题字体。
+/// @param grid_color 网格线颜色。
+/// @param text_color 刻度与轴标题文字颜色。
 inline auto draw_numeric_axis(Painter &p, Point origin, const Rect &plot, const LinearScale &scale,
                               const ChartAxisSpec &spec, const Font &font, Color grid_color, Color text_color) -> void {
     if (plot.size.height <= 0.0F) {
@@ -700,6 +820,14 @@ inline auto draw_numeric_axis(Painter &p, Point origin, const Rect &plot, const 
 }
 
 /// @brief 类目轴（x）绘制：带中心标签 + 轴标题。`cats` 为空时直接返回。
+/// @param p 目标绘制器。
+/// @param origin 控件全局原点（绘制时平移量）。
+/// @param plot 局部坐标绘图区（宽度 ≤ 0 时直接返回，不绘制）。
+/// @param band 类目比例尺（提供各带中心像素）。
+/// @param cats 类目标签序列（逐项画在对应带中心下方）。
+/// @param spec 轴规格（`label` 非空时在绘图区下方居中绘制轴标题）。
+/// @param font 标签与标题字体。
+/// @param text_color 标签与轴标题文字颜色。
 inline auto draw_category_axis(Painter &p, Point origin, const Rect &plot, const BandScale &band,
                                const std::vector<std::string> &cats, const ChartAxisSpec &spec, const Font &font,
                                Color text_color) -> void {
@@ -725,6 +853,8 @@ inline auto draw_category_axis(Painter &p, Point origin, const Rect &plot, const
 }
 
 /// @brief 扇区归一化占比（Σ ≤ 0 时返回全 0，由调用方按 D15 降级处理）。
+/// @param sections 扇区序列（仅有限且 > 0 的 `value` 计入总和）。
+/// @return 与 sections 等长的占比序列（每项 = value / Σvalue；无效/非正项为 0）。
 [[nodiscard]] inline auto pie_section_ratios(const std::vector<PieSection> &sections) -> std::vector<double> {
     std::vector<double> out(sections.size(), 0.0);
     double total = 0.0;

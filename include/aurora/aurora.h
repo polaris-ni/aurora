@@ -1,21 +1,19 @@
 #pragma once
 
-/**
- * @file aurora.h
- * @brief 单一包含入口（需求 #2/#24：one import / one namespace）。
- *
- * 包含全部抽象层公共模块；任何翻译单元只需 `#include "aurora/aurora.h"` 即可使用
- * Surface/Window/Painter/FontEngine/事件 等整套抽象 API。
- * **真实平台窗口 Surface**（GLFW/Win32）需另行 `#include "aurora/window/native_surfaces.h"`，
- * 并经 `create_window`（window/window.h）统一构造。无头渲染工具见 render/offscreen.h。
- *
- * 推荐别名（需求 #2）：
- * @code
- *   #include "aurora/aurora.h"
- *   using namespace aurora;   // 或只用 au:: 前缀
- *   // au::Text("Hi").font_size(14);
- * @endcode
- */
+/// @brief 单一包含入口（需求 #2/#24：one import / one namespace）。
+/// @file aurora.h
+///
+/// 包含全部抽象层公共模块；任何翻译单元只需 `#include "aurora/aurora.h"` 即可使用
+/// Surface/Window/Painter/FontEngine/事件 等整套抽象 API。
+/// **真实平台窗口 Surface**（GLFW/Win32）需另行 `#include "aurora/window/native_surfaces.h"`，
+/// 并经 `create_window`（window/window.h）统一构造。无头渲染工具见 render/offscreen.h。
+///
+/// 推荐别名（需求 #2）：
+/// @code
+/// #include "aurora/aurora.h"
+/// using namespace aurora;   // 或只用 au:: 前缀
+/// // au::Text("Hi").font_size(14);
+/// @endcode
 #include "aurora/animation/animator.h"
 #include "aurora/animation/easing.h"
 #include "aurora/animation/spring.h"

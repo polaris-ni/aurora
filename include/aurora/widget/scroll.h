@@ -28,7 +28,7 @@ namespace aurora {
 
 /// @brief Scroll 属性（聚合）：单子滚动容器。
 struct ScrollProps {
-    Node child;
+    Node child;  ///< 唯一内容子节点；空则容器无可滚内容（on_paint 直接返回）
     float step = 16.0F;  ///< 每单位滚轮增量的滚动像素
     float overscan = 1.0F;  ///< 缓冲上下各留 overscan 屏：离屏缓冲 = 视口高 ×(1+2×overscan)（滑动窗口）
     /// @brief 滚动位置保存键（空 = 不参与）：控件重建后据 `app::ScrollStorage` 恢复滚动偏移。
@@ -39,31 +39,34 @@ struct ScrollProps {
     ScrollSnap snap;
 };
 
-/**
- * @brief 单子滚动容器：在固定视口内裁切内容，按滚轮增量垂直滚动。
- *
- * 内容在宽松约束下测量自然尺寸；容器自身取父约束给出的视口尺寸。
- *
- * 性能模型（滚动流畅、跟手、不卡顿的关键，滑动窗口缓冲）：
- * - 内容在宽松约束下测量自然尺寸；容器自身取父约束给出的视口尺寸。
- * - 离屏缓冲 `content_` 是**滑动窗口**而非整页：尺寸 = 视口宽 × 视口高 ×(1 + 2×overscan)，
- *   与内容总量解耦（缓冲内存随内容 ×10 不增长）。缓冲以「稳定的内容坐标」录制
- *   （偏移不烘焙进子控件 bounds，子控件的 Display List 缓存不被偏移击穿）。
- * - 滚动只改变下方 `composite` 的平移量，纯滚动帧整页仅一次 blit（平移合成），**不重新栅格化**。
- * - 视口滚出缓冲安全区（上下各 overscan 屏）时才**重锚点并整块重录有界缓冲**；重录频率正比于
- *   滚动距离（每滚约 1 屏触发一次），而非内容总量 —— 这才是正确的复杂度。
- * - 非滚动帧（如自动轮播 banner 标脏）重录同一块有界缓冲（已从上百 MB 降到约 3 屏量级）。
- * 这避免了旧实现把偏移烤进 bounds + 绘制时压裁剪，导致每帧重栅整页内容而卡顿的问题。
- *
- * 采用**继承式双模 API**（specification/04-widget.md §2.5）：`ScrollProps` 字段即本控件公有字段，
- * `step` 可直接赋值（`scroll.step = 16`）或以配置块构造
- * `Scroll{ ScrollProps{.child = ..., .step = 16} }`。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 单子滚动容器：在固定视口内裁切内容，按滚轮增量垂直滚动。
+///
+/// 内容在宽松约束下测量自然尺寸；容器自身取父约束给出的视口尺寸。
+///
+/// 性能模型（滚动流畅、跟手、不卡顿的关键，滑动窗口缓冲）：
+/// - 内容在宽松约束下测量自然尺寸；容器自身取父约束给出的视口尺寸。
+/// - 离屏缓冲 `content_` 是**滑动窗口**而非整页：尺寸 = 视口宽 × 视口高 ×(1 + 2×overscan)，
+/// 与内容总量解耦（缓冲内存随内容 ×10 不增长）。缓冲以「稳定的内容坐标」录制
+/// （偏移不烘焙进子控件 bounds，子控件的 Display List 缓存不被偏移击穿）。
+/// - 滚动只改变下方 `composite` 的平移量，纯滚动帧整页仅一次 blit（平移合成），**不重新栅格化**。
+/// - 视口滚出缓冲安全区（上下各 overscan 屏）时才**重锚点并整块重录有界缓冲**；重录频率正比于
+/// 滚动距离（每滚约 1 屏触发一次），而非内容总量 —— 这才是正确的复杂度。
+/// - 非滚动帧（如自动轮播 banner 标脏）重录同一块有界缓冲（已从上百 MB 降到约 3 屏量级）。
+/// 这避免了旧实现把偏移烤进 bounds + 绘制时压裁剪，导致每帧重栅整页内容而卡顿的问题。
+///
+/// 采用**继承式双模 API**（specification/04-widget.md §2.5）：`ScrollProps` 字段即本控件公有字段，
+/// `step` 可直接赋值（`scroll.step = 16`）或以配置块构造
+/// `Scroll{ ScrollProps{.child = ..., .step = 16} }`。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
+///
 class Scroll : public Container, public ScrollProps {
   public:
+    /// @brief 默认构造：无内容子节点，属性取 `ScrollProps` 默认值（step=16、overscan=1、无保存键、不吸附）。
     Scroll() = default;
+    /// @brief 以属性聚合构造（继承式双模 API 的配置块形态）。
+    /// @param props `ScrollProps` 属性块：`child` 非空时作为唯一内容子节点入 `children_`，
+    ///              `step`/`overscan`/`restore_key`/`snap` 逐字段覆盖本控件的同名公有字段。
     explicit Scroll(ScrollProps props) {
         if (props.child) {
             children_.push_back(std::move(props.child));
@@ -74,16 +77,23 @@ class Scroll : public Container, public ScrollProps {
         snap = props.snap;
     }
     /// @brief 便捷构造：扁平罗列子项，取首项为唯一子节点（Scroll{ Column{...} }）。
+    /// @param kids 子项列表；只消费首项，其余静默忽略（本容器 children_policy = single）。
     Scroll(std::initializer_list<Node> kids) {
         if (kids.size() > 0) {
             children_.push_back(*kids.begin());
         }
     }
 
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    /// @brief 无响应式信号可收集：滚动偏移等运行状态为普通字段，不经 Effect 订阅刷新。
+    /// @param out 输出向量（未使用）；本控件不向依赖图登记任何 `SignalViewBase`。
+    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    /// @brief 类型名（序列化 / 诊断 / 语义树寻址用）。
+    /// @return 固定 `"Scroll"`。
     [[nodiscard]] auto type_name() const -> const char * override { return "Scroll"; }
 
     /// @brief 运行时自描述（规格附录 B）。
+    /// @return Scroll 的 WidgetDescriptor：`step`/`restore_key`/`snap_*` 属性表 + 通用
+    ///         `width`/`height`/`show`，无事件，children_policy = single，含一条构造示例。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "Scroll",
@@ -132,8 +142,14 @@ class Scroll : public Container, public ScrollProps {
             .examples = {"au::Scroll{ au::Column{ au::Text(\"long content\") } }"},
         };
     }
+    /// @brief 实例自描述：本控件无实例级差异，直接复用静态描述。
+    /// @return `describe_static()` 的 WidgetDescriptor（属性表 / children_policy = single）。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 导出当前属性，含运行期滚动位置（AI-first 可观测）。
+    /// @param props 输出 JSON 对象（引用，就地写入）：先由基类补通用属性，再写 `step`、
+    ///              `offset`（= 当前 `offset_y_`，与 LazyList/GridView 同口径）、`restore_key`
+    ///              与 `snap_extent`/`snap_paging`/`snap_alignment` 三件套。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         props["step"] = step;
@@ -143,6 +159,11 @@ class Scroll : public Container, public ScrollProps {
         props["snap_paging"] = snap.paging;
         props["snap_alignment"] = snap_alignment_to_json(snap.alignment);
     }
+    /// @brief 从属性 JSON 回填：认得的键逐个赋值，未认得的键由基类/本函数忽略。
+    /// @param props 输入 JSON 对象：`step`、`restore_key`、`snap_extent`/`snap_paging`/
+    ///              `snap_alignment` 直接覆盖对应字段；`offset` 不立即生效——记入 `pending_offset_`
+    ///              并复位 `scroll_restored_`，待首次可滚动布局时由 `maybe_restore_scroll` 应用
+    ///              （显式偏移优先于 `restore_key` 的存储值）。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("step")) {
@@ -169,6 +190,7 @@ class Scroll : public Container, public ScrollProps {
 
     /// @brief Scroll 自行管理离屏内容缓冲，禁用框架对 Scroll 自身的 DL 缓存，
     /// 避免缓存录制依赖会变化的 `content_` 缓冲。
+    /// @return 恒为 false。
     [[nodiscard]] auto can_cache_display_list() const -> bool override { return false; }
 
     /// @brief Scroll 的布局结果可缓存，**仅当其直接内容子控件也可缓存时**。
@@ -179,6 +201,7 @@ class Scroll : public Container, public ScrollProps {
     ///
     ///        此检查仅针对直接子控件，不向上递归——更远的祖先不受影响（避免 grid_rows 等测试
     ///        因 AppShell 额外 on_layout 调用导致动画状态提前推进）。
+    /// @return 无子节点时 true；否则原样取 `children_[0].widget().can_cache_layout()`。
     [[nodiscard]] auto can_cache_layout() const -> bool override {
         if (children_.empty()) {
             return true;
@@ -199,6 +222,9 @@ class Scroll : public Container, public ScrollProps {
     /// Scroll **视口的屏幕坐标**，不会覆盖视口区域 → `present_root` 的增量裁剪把视口排除在外 →
     /// 视口永不重绘（白屏 / 内容冻结）。故此处显式 `mark_needs_paint()`：它经布局父链上溯到 sink 时
     /// 标记的是 **Scroll 自身的视口（窗口坐标）**，保证离屏缓冲重录后合成到屏幕的视口被真正重绘。
+    ///
+    /// @param origin 触发标脏的后代控件（不含 Scroll 自身）；绘制脏时以它的 `paint_bounds()` 并入脏带。
+    /// @param layout true = 后代布局脏（尺寸/结构可能变，整块重录）；false = 仅绘制脏（局部重录）。
     ///
     /// @note 只响应**后代**：Scroll 自身 `on_scroll` 的 `request_frame(false)` 不经此路径，
     ///       故纯滚动帧仍只平移合成、不重栅 3 屏缓冲（滚动跟手的关键路径不受影响）。
@@ -230,6 +256,12 @@ class Scroll : public Container, public ScrollProps {
         mark_needs_paint();
     }
 
+    /// @brief 滚轮事件入口：经共享 ScrollViewport 内核夹取新偏移，并回传端点余量。
+    /// @param e 滚动事件（引用，就地改写）：读 `delta_y`；置 `is_handled = true`；
+    ///          `remaining_y` 回传被夹掉的余量供嵌套滚动上冒给更浅祖先。
+    ///        偏移实际变化时才置 `scrolling_`、写回 `ScrollStorage`、发布偏移信号并只请求
+    ///        重绘本视口（不重录内容缓冲）；启用的 snap/paging 在收位后发起短滑动。
+    /// @note Side-effects: mutates scroll state, requests a frame
     auto on_scroll(ScrollEvent &e) -> void override {
         // clamp/符号约定走共享 ScrollViewport 内核（与 Widget 基类 Overflow::Scroll 一致）。
         const float before = offset_y_;
@@ -254,10 +286,13 @@ class Scroll : public Container, public ScrollProps {
     }
 
     /// @brief 真实滚动控件：滚轮派发时本控件是可滚动目标（最深优先）。
+    /// @return 恒为 true。
     [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
 
-    /// 程序化滚动（供测试 / 无障碍 / 外部控制器驱动），delta_y 正方向为向上滚动。
-    /// 覆写 `Widget::scroll_by`（基类为虚，避免同名隐藏非虚函数）；返回 offset 是否实际变化。
+    /// @brief 程序化滚动（供测试 / 无障碍 / 外部控制器驱动），delta_y 正方向为向上滚动。
+    ///        覆写 `Widget::scroll_by`（基类为虚，避免同名隐藏非虚函数）。
+    /// @param delta_y 滚动增量，按 `step` 换算后由 `on_scroll` 统一夹取（端点外余量上冒）。
+    /// @return 偏移是否实际变化（未布局 / 已在端点时为 false）。
     auto scroll_by(float delta_y) -> bool override {
         ScrollEvent e;
         e.delta_y = delta_y;
@@ -265,6 +300,8 @@ class Scroll : public Container, public ScrollProps {
         on_scroll(e);
         return offset_y_ != before;
     }
+    /// @brief 当前滚动偏移（内容坐标下视口顶的位置）。
+    /// @return `offset_y_`，未经额外夹取（布局后由滚动路径保证在 `[0, 内容高−视口高]` 内）。
     [[nodiscard]] auto offset_y() const -> float { return offset_y_; }
 
     /// @brief 无障碍滚动量（G32）：{0, 内容量−视口量, 当前偏移}。
@@ -272,6 +309,7 @@ class Scroll : public Container, public ScrollProps {
     /// 供读屏驱动滚动（UIA `IScrollProvider` / AT-SPI2 `Component.ScrollTo` /
     /// macOS `accessibilityPerformScrollToVisible`）；不可滚时 max = 0，桥据此不暴露滚动 pattern。
     /// @note Side-effects: reads state
+    /// @return `{min = 0, max = max(0, content_h_ − viewport_h_), position = offset_y_}`。
     [[nodiscard]] auto accessibility_scroll() const -> std::optional<AccessibilityScrollRange> override {
         const float max_offset = std::max(0.0F, content_h_ - viewport_h_);
         return AccessibilityScrollRange{
@@ -279,6 +317,7 @@ class Scroll : public Container, public ScrollProps {
     }
 
     /// @brief 无障碍滚动定位（G32）：走 `set_offset` 既有夹取路径（不标布局脏）。
+    /// @param offset 目标偏移（内容坐标，double 来自读屏协议）；越界值按可滚范围夹取。
     /// @note Side-effects: mutates scroll state
     auto accessibility_scroll_to(double offset) -> void override {
         (void)set_offset(static_cast<float>(offset));
@@ -286,6 +325,9 @@ class Scroll : public Container, public ScrollProps {
     }
 
     /// @brief 读屏滚动动作：按自身 step 换算「一屏」增量（比基类的通用估算精确）。
+    /// @param req 动作请求：只处理 `ScrollDown`/`ScrollUp`（按 `viewport_h_ / step` 换算屏数，
+    ///            方向为 down 负 / up 正），其余动作原样转交 `Container`。
+    /// @return 偏移实际变化为 true（转交基类的动作则取基类结果）。
     /// @note Side-effects: mutates scroll state
     auto perform_accessibility_action(const AccessibilityActionRequest &req) -> bool override {
         const bool down = req.action == AccessibilityAction::ScrollDown;
@@ -307,6 +349,9 @@ class Scroll : public Container, public ScrollProps {
     ///   `!in_buffer → reanchor` 分支整块/条带重录兜底，无需在此强制整块重录；
     /// - 内容/视口尚未确定（未布局过）时夹到 0 并返回 `false`——调用方（如 `restore_key` 恢复）
     ///   须等到「首次可滚动布局」再调用。
+    ///
+    /// @param offset 期望偏移（可越界，内部按 `[0, 内容高 − 视口高]` 夹取）。
+    /// @return 夹取后的目标与当前偏移不同（即发生移动）时为 true；未布局或已在目标处为 false。
     auto set_offset(float offset) -> bool {
         const float target = ScrollViewport::clamp_offset(offset, 0.0F, step, content_h_, viewport_h_);
         if (target == offset_y_) {
@@ -323,6 +368,7 @@ class Scroll : public Container, public ScrollProps {
     }
 
     /// @brief 程序化滚动到指定偏移（snap 关闭时即普通夹取目标）。
+    /// @param offset 目标偏移；先夹到 `[0, 内容高 − 视口高]`，越界值按端点就位。
     /// @param animate true = 经收位滑动过渡（reduce-motion 下自动直落端点）；false = 立即就位。
     /// @return 目标与当前偏移不同（即发生了移动或启动滑动）时为 true。
     /// @note Side-effects: mutates scroll state
@@ -344,6 +390,7 @@ class Scroll : public Container, public ScrollProps {
     /// @brief 滚动偏移只读信号（滚动驱动动画原语）：宿主以纯函数派生视差/进度/淡入淡出。
     ///        懒创建；偏移每次变化（滚轮/拖拽/滑动帧/程序化）写入。
     /// @note Side-effects: reads state (registers reactive dependency in Effect scope)
+    /// @return 该偏移信号的只读视图引用（首次调用时按当前 `offset_y_` 懒建 `State<float>`）。
     [[nodiscard]] auto offset_signal() -> SignalView<float> & {
         if (!offset_state_) {
             offset_state_ = std::make_shared<State<float>>(offset_y_);
@@ -353,6 +400,7 @@ class Scroll : public Container, public ScrollProps {
     }
 
     /// @brief 是否正处于收位/程序化滑动中（测试与帧调度观测点）。
+    /// @return `glide_.active`；滑动抵达终点的那一帧之后即为 false。
     [[nodiscard]] auto is_gliding() const -> bool { return glide_.active; }
 
   protected:
@@ -569,6 +617,7 @@ class Scroll : public Container, public ScrollProps {
 
     /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Dismissible/ReorderableList 模式）。
     ///        滑动帧与滚轮帧同策略：仅平移 blit，不重录内容缓冲。
+    /// @param now 本帧时刻（单调时钟），与上一滑动时刻求差推进收位滑动插值。
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Container::tick_gestures(now);  // 子树手势照常计时
         if (!glide_.active) {
@@ -630,12 +679,15 @@ class Scroll : public Container, public ScrollProps {
     /// @brief 内容子树中 `StickyHeader` 节点的发现缓存（on_layout 重建树时刷新；空 = 覆盖层零开销）。
     ///        natural_y 在收集时沿遍历路径累加（Node 不指回父，bounds 只存于父的 children 视图）。
     struct StickyEntry {
-        const Node *node;
+        const Node *node;  ///< 指向 children_ 视图里的吸顶节点（随 on_layout 重建缓存而失效）
         float natural_y;  ///< 内容坐标下的顶部（Scroll 内容空间）
     };
-    std::vector<StickyEntry> sticky_nodes_;
+    std::vector<StickyEntry> sticky_nodes_;  ///< 吸顶节点缓存：on_layout 每帧重收；空则覆盖层零开销
 
     /// @brief 递归发现内容子树中的吸顶节点（就地短路，不再深入其子树）。
+    /// @param kids 本层候选子节点（布局时的 children_ 视图）。
+    /// @param base 本层顶部在内容坐标系的累计偏移（父级原点；逐层加子节点 bounds.origin.y）。
+    /// @param out 输出：命中的 StickyHeader 以 `{node, natural_y}` 追加于此（已滚过头顶者由绘制端筛）。
     auto collect_stickies(const std::vector<Node> &kids, float base, std::vector<StickyEntry> &out) -> void {
         for (const Node &n : kids) {
             if (n.widget().is_sticky_header()) {
@@ -649,13 +701,16 @@ class Scroll : public Container, public ScrollProps {
     /// @brief 吸顶覆盖层：把「已滚过头顶」的 StickyHeader 按 pin 位重绘于视口顶部，
     ///        后来的头部把先前的向上顶出（内容序即堆叠序）。纯绘制路径——内容缓冲照常
     ///        blit/重录，sticky 不进缓冲（否则每滚动帧都要整块重录，缓冲模型即告破产）。
+    /// @param p 视口画笔（覆盖层直接绘到屏幕，非离屏 `content_` 缓冲）。
+    /// @param bounds 本帧 Scroll 的视口矩形：其 origin 作为钉驻坐标的基准（pin_y 为视口内偏移）。
+    /// @param ctx 构建上下文，原样透传给被重绘的头部控件。
     auto paint_sticky_overlay(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
         if (sticky_nodes_.empty()) {
             return;
         }
         std::sort(sticky_nodes_.begin(), sticky_nodes_.end(),
                   [](const StickyEntry &a, const StickyEntry &b) { return a.natural_y < b.natural_y; });
-        float stack_bottom = 0.0F;  ///< 已钉驻头部占用的顶部区带高度
+        float stack_bottom = 0.0F;  // 已钉驻头部占用的顶部区带高度
         for (std::size_t i = 0; i < sticky_nodes_.size(); ++i) {
             const StickyEntry &s = sticky_nodes_[i];
             const float h = s.node->bounds().size.height;
@@ -685,6 +740,7 @@ class Scroll : public Container, public ScrollProps {
     }
 
     /// @brief 恢复路径专用：夹取 → 赋值 → 强制整块重录（不写回、不改归属标记）。
+    /// @param raw 待恢复的原始偏移（显式反序列化的 `offset` 或 `ScrollStorage` 中的存储值）。
     auto apply_restored_offset(float raw) -> void {
         const float target = ScrollViewport::clamp_offset(raw, 0.0F, step, content_h_, viewport_h_);
         if (target == offset_y_) {
@@ -729,6 +785,10 @@ class Scroll : public Container, public ScrollProps {
         ScrollStorage::instance().write(restore_key, offset_y_);
     }
 
+    /// @brief 按需创建/复位滑动窗口离屏缓冲：逻辑尺寸 = 内容宽 × (视口高 ×(1 + 2×overscan))。
+    /// @param ctx 构建上下文：取 `scale_factor`（<=0 视为 1）换算物理像素尺寸；逻辑宽高变化时
+    ///            重新 `begin()` 并置 `content_valid_ = false`（下帧整块重录）。
+    ///        内容宽或视口高尚未确定（未布局过）时直接返回，不建缓冲。
     auto ensure_content_buffer(const BuildContext &ctx) -> void {
         if (content_w_ <= 0.0F || viewport_h_ <= 0.0F) {
             return;
@@ -750,13 +810,13 @@ class Scroll : public Container, public ScrollProps {
         }
     }
 
-    float offset_y_ = 0.0F;
+    float offset_y_ = 0.0F;  ///< 当前滚动偏移（内容坐标下的视口顶位置；经 `offset` 属性对外可见）
     std::optional<float> pending_offset_;  ///< 显式反序列化的偏移（优先于 restore_key 恢复，布局后应用）
     bool scroll_restored_ = false;  ///< 是否已就位（恢复过一次 / 用户或外部程序化设置过）
-    float content_h_ = 0.0F;
-    float content_w_ = 0.0F;
-    float viewport_h_ = 0.0F;
-    float viewport_w_ = 0.0F;
+    float content_h_ = 0.0F;  ///< 内容自然高（宽松约束测得；决定可滚范围上界）
+    float content_w_ = 0.0F;  ///< 内容宽 = 视口宽（垂直滚动容器受视口约束，避免 inf 宽缓冲）
+    float viewport_h_ = 0.0F;  ///< 视口高（父约束给出；inf 时退化为内容高）
+    float viewport_w_ = 0.0F;  ///< 视口宽（同时用作内容宽与缓冲宽，供 inf 约束兜底）
     float buffer_origin_y_ = 0.0F;  ///< 滑动窗口锚点：缓冲顶对应的内容坐标 Y（重锚点时更新）
     std::unique_ptr<Painter> content_;  ///< 滑动窗口离屏缓冲（尺寸 = 视口宽 × 视口高×(1+2×overscan)，与滚动偏移无关）
     bool content_valid_ = false;  ///< 离屏缓冲是否需要整体重建（首建 / 内容尺寸变化 / 重锚点）

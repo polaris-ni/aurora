@@ -21,25 +21,32 @@ namespace debug {
 
 /// @brief Widget 树完整 JSON 快照（type + props + children）。
 ///        薄封装 `Inspector::tree_json_full`（引擎留 `inspector/`，不搬迁）。
+/// @param root 待快照的控件树根节点（按引用读取，不持有）。
+/// @return 整棵树的嵌套 JSON：每节点含 type / props / children。
 /// @note Release（未开 DEBUG）返回 `{"available":false, "reason": ...}`。
 [[nodiscard]] auto widget_tree(const Node &root) -> Json;
 
 /// @brief 性能快照 JSON：聚合 `FrameStats` 读数 + `PerfLog::snapshot_json()`。
+/// @return 含 fps / 帧时均值与极值 / p50 / p99 分位 / 掉帧与卡顿计数 / stale 陈旧标志，以及 `perf_log` 子对象。
 /// @note Release 返回 `{"available":false, ...}`。
 [[nodiscard]] auto perf_snapshot() -> Json;
 
 /// @brief 帧相位时间线 JSON：layout / paint / present 各相位平均耗时、帧时间统计与 ASCII
 ///        flamegraph（复用 `FrameStats` 已维护的相位环形缓冲，零新埋点）。
 /// @param limit 帧时间窗口最多取最近多少帧（毫秒）进 `recent_frame_ms`。
+/// @return 各相位均值、fps / 帧时统计、`recent_frame_ms` 数组与 `flamegraph` 文本。
 /// @note Release 返回 `{"available":false, ...}`。
 [[nodiscard]] auto frame_phase_timeline(std::size_t limit = 64) -> Json;
 
 /// @brief why-relayout / why-repaint 追踪 JSON：最近 `limit` 次 `mark_needs_layout` /
 ///        `mark_needs_paint` 触发记录（kind / type / frame / propagated），区分根因与父链传播。
+/// @param limit 最多输出最近多少条记录（超出即截断，最新在前）。
+/// @return 含 count / total_recorded 与记录数组的 JSON。
 /// @note Release 返回 `{"available":false, ...}`（热路径未记录）。
 [[nodiscard]] auto why_trace(std::size_t limit = 64) -> Json;
 
 /// @brief 运行时诊断只读快照 JSON：薄封装 `Diagnostics::get_last_diagnostics()`。
+/// @return 含 count 与逐条 severity / category / message 的快照 JSON。
 /// @note Release 返回 `{"available":false, ...}`。
 [[nodiscard]] auto diagnostics() -> Json;
 
