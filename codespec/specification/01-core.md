@@ -11,7 +11,7 @@
 |:---|:---|
 | 几何与尺寸意图 | `types.h`、`dimension.h`、`transform.h`、`math.h` |
 | 颜色 | `color.h`、`color_space.h` |
-| 错误与结果 | `result.h`、`error_codes.h`、`error_codes.gen.h`、`expected.h` |
+| 错误与结果 | `result.h`、`error_codes.h`、`error_codes.gen.h` |
 | 诊断与降级 | `diagnostics.h`、`strict_mode.h`、`aurora_assert.h` |
 | 日志 | `log.h`、`debug.h` |
 | 异步底座 | `thread_pool.h`、`thread.h` |
@@ -117,7 +117,7 @@ struct Constraints {
 
 `Result<void>` 为特化（`result.h`），提供 `ok()` / `error()` / `operator bool`，**不提供** `value()` 与 `unwrap()`。
 
-`core/expected.h` 另有库自带的极简 `expected<T, E>` / `unexpected<E>`（C++23 `std::expected` 落地前的替身实现）：二态（持值或持错误），错误态经 `expected<T, E>{unexpected{err}}` 构造，提供 `explicit operator bool` / `has_value()` / `value()` / `error()` / `value_or(def)`（`value_or` 仅接受右值 `T&&`；`operator bool` 为 `explicit`）。公共 API 一律返回 `Result<T>`，`expected` 仅作其底层接口底座，新代码不应直接暴露它。
+`Result<T>` 是成功/失败二态的唯一载体，公共 API 一律返回它；不再提供第二套等价的二态包装类型——同义并存只会让读者在两条出口间做无谓选择。
 
 **常见误写**：`Result` **没有** `is_ok()` 成员。判成功一律用 `ok()` 或 `if (r)`。
 

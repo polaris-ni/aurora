@@ -134,7 +134,7 @@
 
 | 头 | 理由 | 已有覆盖 |
 |:---|:---|:---|
-| `math.h` `utf8.h` `string_util.h` `time.h` `duration.h` `expected.h` `enums.h` `literals.h` `types.h` | 纯函数与纯类型，输入输出可用断言穷举，人工执行无增益 | `tests/unit/` 下同名 `utest_*` 用例 |
+| `math.h` `utf8.h` `string_util.h` `time.h` `duration.h` `enums.h` `literals.h` `types.h` | 纯函数与纯类型，输入输出可用断言穷举，人工执行无增益 | `tests/unit/` 下同名 `utest_*` 用例 |
 | `color.h` `color_space.h` `transform.h` | 类型与数值换算，程序判定更精确；其视觉表现在 render 模块 | `utest_color` `utest_color_space` `utest_transform` |
 | `dimension.h` | 单位换算有唯一解，人工抄录输出反而增加误差 | `utest_dimension` `utest_literals` |
 | `thread.h` `thread_pool.h` | 并发时序不确定，人工观察不可复现；需 sanitizer 支撑 | `utest_thread` `utest_thread_pool` |
