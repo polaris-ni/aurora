@@ -268,22 +268,12 @@ auto FilesystemBackend::put_record(const std::string &id, const StorageRecord &r
     const auto enc = b64url_encode(id);
     const auto json_path = root_ / (enc + ".json");
 
-    Json env = Json::object();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    env["id"] = rec.id.empty() ? id : rec.id;
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    env["type"] = rec.type;
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    env["version"] = rec.version;
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    env["encoding"] = (rec.encoding == StorageEncoding::Binary) ? "binary" : "json";
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    env["mtime"] = mtime_to_ms(rec.mtime);
+    json::Value env = json::Value::object();
+    env.set("id", rec.id.empty() ? id : rec.id);
+    env.set("type", rec.type);
+    env.set("version", static_cast<std::int64_t>(rec.version));
+    env.set("encoding", (rec.encoding == StorageEncoding::Binary) ? "binary" : "json");
+    env.set("mtime", mtime_to_ms(rec.mtime));
 
     if (rec.encoding == StorageEncoding::Binary) {
         const auto bin_path = root_ / (enc + ".bin");
@@ -293,21 +283,21 @@ auto FilesystemBackend::put_record(const std::string &id, const StorageRecord &r
             return Result<void>{
                 make_error(ErrorCode::StorageIoError, "Failed to write binary sidecar: " + ec.message())};
         }
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        env["blob_ref"] = enc + ".bin";
+        env.set("blob_ref", enc + ".bin");
     } else {
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        env["payload"] = std::get<Json>(rec.payload);
+        env.set("payload", std::get<json::Value>(rec.payload));
         // 记录由 Binary 改写为 Json 时清理旧 sidecar：残留的 <id>.bin 既是磁盘泄漏，
         // 也让已删除的二进制载荷继续躺在盘上（泄露面）。删除失败不阻断主流程。
         std::error_code rm_ec;
         std::filesystem::remove(root_ / (enc + ".bin"), rm_ec);
     }
 
+    auto text = json::dump(env, {.indent = 2});
+    if (!text) {
+        return Result<void>{text.error()};
+    }
     std::error_code ec;
-    if (!atomic_write_text(json_path, env.dump(2), ec)) {
+    if (!atomic_write_text(json_path, text.value(), ec)) {
         return Result<void>{make_error(ErrorCode::StorageIoError, "Failed to write record file: " + ec.message())};
     }
     return Result<void>{};
@@ -333,23 +323,22 @@ auto FilesystemBackend::get_record(const std::string &id) -> Result<StorageRecor
     std::stringstream ss;
     ss << f.rdbuf();
 
-    Json env;
-    try {
-        env = Json::parse(ss.str());
-    } catch (...) {
+    auto parsed = json::parse(ss.str());
+    if (!parsed) {
         return Result<StorageRecord>{make_error(ErrorCode::StorageRecordCorrupt, "Record JSON parse failed: " + id)};
     }
+    const json::Value &env = parsed.value();
     if (!env.is_object()) {
         return Result<StorageRecord>{make_error(ErrorCode::StorageRecordCorrupt, "Record structure invalid: " + id)};
     }
 
     StorageRecord rec;
-    rec.id = env.value("id", id);
-    rec.type = env.value("type", "");
-    rec.version = env.value("version", 1U);
-    const std::string enc_str = env.value("encoding", "json");
+    rec.id = env.as_or<std::string>("id", id);
+    rec.type = env.as_or<std::string>("type", "");
+    rec.version = static_cast<std::uint32_t>(env.as_or<std::int64_t>("version", 1));
+    const std::string enc_str = env.as_or<std::string>("encoding", "json");
     rec.encoding = enc_str == "binary" ? StorageEncoding::Binary : StorageEncoding::Json;
-    rec.mtime = ms_to_mtime(env.value("mtime", std::int64_t{0}));
+    rec.mtime = ms_to_mtime(env.as_or<std::int64_t>("mtime", 0));
 
     if (rec.encoding == StorageEncoding::Binary) {
         const auto bin_path = root_ / (enc + ".bin");
@@ -384,13 +373,12 @@ auto FilesystemBackend::get_record(const std::string &id) -> Result<StorageRecor
         rec.payload = std::move(bytes);
         rec.blob_ref = enc + ".bin";
     } else {
-        if (!env.contains("payload")) {
+        const json::Value *payload = env.at("payload");
+        if (payload == nullptr) {
             return Result<StorageRecord>{
                 make_error(ErrorCode::StorageRecordCorrupt, "JSON record missing payload: " + id)};
         }
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        rec.payload = env["payload"];
+        rec.payload = *payload;
     }
     return Result<StorageRecord>{std::move(rec)};
 }

@@ -13,25 +13,23 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
-#include <nlohmann/json.hpp>
 #include <string>
 #include <variant>
 #include <vector>
+
+#include "aurora/core/json.h"
 
 namespace aurora::storage {
 
 /// @brief 二进制载荷类型（对标 Room BLOB / Realm data / Hive 二进制）。
 using StorageBytes = std::vector<std::byte>;
 
-/// @brief 库内 JSON 别名（不依赖 widget 头，保持存储层低耦合）。
-using Json = nlohmann::json;
-
 /// @brief 载荷线格式：决定后端如何落盘与反序列化路由。
 enum class StorageEncoding : std::uint8_t { Json = 0, Binary = 1 };
 
 /// @brief 值模型放宽（对标 Room/Core Data/Realm/Hive 的一等公民二进制）：
-///         要么 Json（默认、人类可读、可迁移），要么原生二进制（零 base64 膨胀）。
-using StorageValue = std::variant<Json, StorageBytes>;
+///         要么 JSON 值（默认、人类可读、可迁移），要么原生二进制（零 base64 膨胀）。
+using StorageValue = std::variant<json::Value, StorageBytes>;
 
 /// @brief 持久化记录信封。后端只认信封，不认裸 value。
 /// 字段按对齐重排并去 optional（mtime 缺失=epoch、blob_ref 空=无）：本机 sizeof 160B → 144B。

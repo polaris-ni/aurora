@@ -27,7 +27,7 @@
 
 namespace aurora::cli {
 
-/// @brief 库内 JSON 别名（同 `aurora::storage::Json` 做法，不依赖 widget 头以保持低耦合）。
+/// @brief 库内 JSON 别名（不依赖 widget 头以保持低耦合）。
 using Json = nlohmann::json;
 
 /**

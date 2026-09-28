@@ -76,12 +76,12 @@ auto main(int argc, char **argv) -> int {
 
     aurora::serialization::register_core_widgets();
 
-    aurora::storage::Json api = aurora::tools::build_api_skeleton();
+    nlohmann::json api = aurora::tools::build_api_skeleton();
 
     // ---- layout_rules: simplified layout-protocol summary (for AI to generate JSON within constraints) ----
-    aurora::storage::Json layout_rules = aurora::storage::Json::object();
+    nlohmann::json layout_rules = nlohmann::json::object();
     {
-        aurora::storage::Json flex = aurora::storage::Json::object();
+        nlohmann::json flex = nlohmann::json::object();
         flex["description"] =
             "Flex layout (Column/Row): children are laid out along the main axis, aligned on the cross axis";
         flex["main_axis_alignment"] = known_enums()["MainAxisAlignment"];
@@ -90,64 +90,63 @@ auto main(int argc, char **argv) -> int {
         flex["gap_constraint"] = "gap >= 0";
         layout_rules["flex"] = flex;
 
-        aurora::storage::Json stack = aurora::storage::Json::object();
+        nlohmann::json stack = nlohmann::json::object();
         stack["description"] = "Stack layout: children are layered, later-drawn ones on top";
         stack["fit"] = known_enums()["StackFit"];
         layout_rules["stack"] = stack;
 
-        aurora::storage::Json grid = aurora::storage::Json::object();
+        nlohmann::json grid = nlohmann::json::object();
         grid["description"] = "Grid layout: a two-dimensional grid with a fixed column count";
-        grid["required_props"] = aurora::storage::Json::array({"columns"});
+        grid["required_props"] = nlohmann::json::array({"columns"});
         grid["column_constraint"] = "columns >= 1";
         layout_rules["grid"] = grid;
 
-        aurora::storage::Json length = aurora::storage::Json::object();
+        nlohmann::json length = nlohmann::json::object();
         length["description"] = "Length type: auto | fill | [px, v] | [percent, v]";
         length["auto"] = "WrapContent, sized by its content";
         length["fill"] = "Expand, absorb the remaining space";
-        length["px_example"] = aurora::storage::Json::array({"px", 100});
-        length["percent_example"] = aurora::storage::Json::array({"percent", 50});
+        length["px_example"] = nlohmann::json::array({"px", 100});
+        length["percent_example"] = nlohmann::json::array({"percent", 50});
         layout_rules["length"] = length;
 
-        aurora::storage::Json edge_insets = aurora::storage::Json::object();
+        nlohmann::json edge_insets = nlohmann::json::object();
         edge_insets["description"] = "EdgeInsets object: {left, top, right, bottom}, unit dp";
         layout_rules["edge_insets"] = edge_insets;
 
-        aurora::storage::Json color = aurora::storage::Json::object();
+        nlohmann::json color = nlohmann::json::object();
         color["description"] = "Color type: [r, g, b, a], each component 0-255";
-        color["example"] = aurora::storage::Json::array({255, 128, 0, 255});
+        color["example"] = nlohmann::json::array({255, 128, 0, 255});
         layout_rules["color"] = color;
     }
     api["layout_rules"] = layout_rules;
 
     // ---- state_patterns: usage scenarios and JSON examples for the three state patterns ----
-    aurora::storage::Json state_patterns = aurora::storage::Json::array();
+    nlohmann::json state_patterns = nlohmann::json::array();
     {
-        aurora::storage::Json p1 = aurora::storage::Json::object();
+        nlohmann::json p1 = nlohmann::json::object();
         p1["name"] = "simple_value";
         p1["description"] =
             "Simple value state: the widget holds a single mutable value and notifies via the on_changed callback";
-        p1["applicable_widgets"] = aurora::storage::Json::array(
+        p1["applicable_widgets"] = nlohmann::json::array(
             {"TextInput", "Slider", "Checkbox", "Switch", "Dropdown", "RadioGroup", "SegmentedControl", "TabBar"});
         p1["json_example"] =
             R"({"type": "TextInput", "props": {"value": "hello"}, "events": {"on_changed": "handler_name"}})";
         state_patterns.push_back(p1);
 
-        aurora::storage::Json p2 = aurora::storage::Json::object();
+        nlohmann::json p2 = nlohmann::json::object();
         p2["name"] = "selection_index";
         p2["description"] =
             "Selection index state: one item is selected from an options list, managed via selected_index and "
             "on_change";
-        p2["applicable_widgets"] =
-            aurora::storage::Json::array({"Dropdown", "RadioGroup", "SegmentedControl", "TabBar"});
+        p2["applicable_widgets"] = nlohmann::json::array({"Dropdown", "RadioGroup", "SegmentedControl", "TabBar"});
         p2["json_example"] =
             R"({"type": "Dropdown", "props": {"options": ["A","B","C"], "selected_index": 1}, "events": {"on_change": "handler"}})";
         state_patterns.push_back(p2);
 
-        aurora::storage::Json p3 = aurora::storage::Json::object();
+        nlohmann::json p3 = nlohmann::json::object();
         p3["name"] = "toggle_state";
         p3["description"] = "Toggle state: a boolean toggle, managed via checked/value and on_changed/on_toggled";
-        p3["applicable_widgets"] = aurora::storage::Json::array({"Checkbox", "Switch", "ExpansionPanel"});
+        p3["applicable_widgets"] = nlohmann::json::array({"Checkbox", "Switch", "ExpansionPanel"});
         p3["json_example"] =
             R"({"type": "Checkbox", "props": {"checked": false}, "events": {"on_changed": "handler"}})";
         state_patterns.push_back(p3);

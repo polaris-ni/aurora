@@ -14,6 +14,7 @@
 
 #include "aurora/storage/storage_types.h"
 #include "framework/aurora_test.h"
+#include "framework/json_value_printer.h"
 
 namespace aurora::test_cases::utest_storage_types {
 
@@ -44,7 +45,7 @@ AURORA_TEST_CASE(storage_change_operation_values_distinct) {
 }
 
 AURORA_TEST_CASE(storage_record_default_construction_invariants) {
-    // 默认信封不变量：version=1、Json 线格式、mtime=epoch、blob_ref/type/id 为空、payload 为 null Json。
+    // 默认信封不变量：version=1、JSON 线格式、mtime=epoch、blob_ref/type/id 为空、payload 为 null 值。
     const aus::StorageRecord rec;
     AURORA_TEST_CHECK(rec.id.empty());
     AURORA_TEST_CHECK(rec.type.empty());
@@ -52,8 +53,8 @@ AURORA_TEST_CASE(storage_record_default_construction_invariants) {
     AURORA_TEST_CHECK(rec.encoding == aus::StorageEncoding::Json);
     AURORA_TEST_CHECK(rec.mtime == std::chrono::system_clock::time_point{});  // 缺失/未知 = epoch
     AURORA_TEST_CHECK(rec.blob_ref.empty());
-    AURORA_TEST_CHECK(std::holds_alternative<aus::Json>(rec.payload));
-    AURORA_TEST_CHECK(std::get<aus::Json>(rec.payload).is_null());
+    AURORA_TEST_CHECK(std::holds_alternative<aurora::json::Value>(rec.payload));
+    AURORA_TEST_CHECK(std::get<aurora::json::Value>(rec.payload).is_null());
 }
 
 AURORA_TEST_CASE(storage_record_aggregate_fields_preserved) {
@@ -79,10 +80,14 @@ AURORA_TEST_CASE(storage_record_aggregate_fields_preserved) {
 }
 
 AURORA_TEST_CASE(storage_value_variant_dispatch) {
-    // StorageValue = variant<Json, StorageBytes>：两种形态可写入、可判别、可取出。
-    aus::StorageValue value = aus::Json{{"a", 1}};
-    AURORA_TEST_CHECK(std::holds_alternative<aus::Json>(value));
-    AURORA_TEST_CHECK_EQ(std::get<aus::Json>(value), aus::Json{{"a", 1}});
+    // StorageValue = variant<JSON 值, StorageBytes>：两种形态可写入、可判别、可取出。
+    auto obj = aurora::json::Value::object();
+    obj.set("a", 1);
+    aus::StorageValue value = std::move(obj);
+    AURORA_TEST_CHECK(std::holds_alternative<aurora::json::Value>(value));
+    auto expected = aurora::json::Value::object();
+    expected.set("a", 1);
+    AURORA_TEST_CHECK_EQ(std::get<aurora::json::Value>(value), expected);
 
     value = aus::StorageBytes{std::byte{0x01}, std::byte{0x02}};
     AURORA_TEST_CHECK(std::holds_alternative<aus::StorageBytes>(value));

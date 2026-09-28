@@ -13,6 +13,8 @@
 #include "aurora/core/result.h"  // serializable.h 使用 Result 但未自带该 include，测试侧显式引入
 #include "aurora/storage/serializable.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
+#include "framework/json_value_printer.h"
 
 namespace aurora::test_cases::utest_serializable {
 
@@ -30,16 +32,16 @@ struct Note {
     int priority = 0;
 };
 
-inline auto to_storage_json(const Note &n) -> aus::Json {
-    return aus::Json{{"title", n.title}, {"priority", n.priority}};
+inline auto to_storage_json(const Note &n) -> aurora::json::Value {
+    return testing::json_obj({{"title", n.title}, {"priority", n.priority}});
 }
 
-inline auto from_storage_json(Note &n, const aus::Json &j) -> Result<void> {
+inline auto from_storage_json(Note &n, const aurora::json::Value &j) -> Result<void> {
     if (!j.contains("title")) {
         return Result<void>{make_error(ErrorCode::StorageRecordCorrupt, "note missing title")};
     }
-    n.title = j.at("title").get<std::string>();
-    n.priority = j.value("priority", 0);
+    n.title = j.as_or<std::string>("title", "");
+    n.priority = j.as_or<int>("priority", 0);
     return Result<void>{};
 }
 
@@ -101,10 +103,12 @@ struct NoDefaultCtor {
     std::string title;
 };
 
-inline auto to_storage_json(const NoDefaultCtor &n) -> aus::Json { return aus::Json{{"title", n.title}}; }
+inline auto to_storage_json(const NoDefaultCtor &n) -> aurora::json::Value {
+    return testing::json_obj({{"title", n.title}});
+}
 
-inline auto from_storage_json(NoDefaultCtor &n, const aus::Json &j) -> Result<void> {
-    n.title = j.value("title", "");
+inline auto from_storage_json(NoDefaultCtor &n, const aurora::json::Value &j) -> Result<void> {
+    n.title = j.as_or<std::string>("title", "");
     return Result<void>{};
 }
 
@@ -174,7 +178,7 @@ AURORA_TEST_CASE(storage_type_name_stable_and_distinct) {
 
 AURORA_TEST_CASE(migrate_storage_default_is_identity) {
     // 默认迁移钩子对 JSON 与二进制两条线格式均恒等返回（不丢数据、不报错）。
-    const aus::Json payload = aus::Json{{"k", 1}, {"s", "v"}};
+    const aurora::json::Value payload = testing::json_obj({{"k", 1}, {"s", "v"}});
     const auto migrated_json = aus::migrate_storage(1, static_cast<const Note *>(nullptr), payload);
     AURORA_TEST_REQUIRE(migrated_json.ok());
     AURORA_TEST_CHECK_EQ(migrated_json.value(), payload);
@@ -188,8 +192,8 @@ AURORA_TEST_CASE(migrate_storage_default_is_identity) {
 AURORA_TEST_CASE(json_line_roundtrip_and_parse_failure) {
     // JSON 线格式：to → from 往返还原；形状不符时返回结构化错误。
     const Note in{.title = "todo", .priority = 3};
-    const aus::Json encoded = json_line::to_storage_json(in);
-    AURORA_TEST_CHECK_EQ(encoded, aus::Json{{"title", "todo"}, {"priority", 3}});
+    const aurora::json::Value encoded = json_line::to_storage_json(in);
+    AURORA_TEST_CHECK_EQ(encoded, testing::json_obj({{"title", "todo"}, {"priority", 3}}));
 
     Note out;
     const auto ok = json_line::from_storage_json(out, encoded);
@@ -198,7 +202,7 @@ AURORA_TEST_CASE(json_line_roundtrip_and_parse_failure) {
     AURORA_TEST_CHECK_EQ(out.priority, 3);
 
     Note bad;
-    const auto failed = json_line::from_storage_json(bad, aus::Json{{"other", 1}});
+    const auto failed = json_line::from_storage_json(bad, testing::json_obj({{"other", 1}}));
     AURORA_TEST_CHECK(!failed.ok());
     AURORA_TEST_CHECK_EQ(failed.error().code_enum, ErrorCode::StorageRecordCorrupt);
 }

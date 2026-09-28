@@ -58,7 +58,7 @@ auto Storage::create(SqliteOptions opts) -> Result<Storage> {
 
 // ---------- 原始 JSON 记录 API ----------
 
-auto Storage::put(const std::string &id, const Json &value) const -> Result<void> {
+auto Storage::put(const std::string &id, const json::Value &value) const -> Result<void> {
     StorageRecord rec;
     rec.id = id;
     rec.type = AURORA_RAW_TYPE;
@@ -70,16 +70,16 @@ auto Storage::put(const std::string &id, const Json &value) const -> Result<void
     return r;
 }
 
-auto Storage::get(const std::string &id) const -> Result<Json> {
+auto Storage::get(const std::string &id) const -> Result<json::Value> {
     auto rec = backend_->get_record(id);
     if (!rec) {
-        return Result<Json>{rec.error()};
+        return Result<json::Value>{rec.error()};
     }
     if (rec.value().encoding != StorageEncoding::Json) {
-        return Result<Json>{make_error(ErrorCode::StorageEncodingMismatch,
-                                       "Record stored in binary, cannot read via JSON channel: " + id)};
+        return Result<json::Value>{make_error(ErrorCode::StorageEncodingMismatch,
+                                              "Record stored in binary, cannot read via JSON channel: " + id)};
     }
-    return Result{std::get<Json>(rec.value().payload)};
+    return Result{std::get<json::Value>(rec.value().payload)};
 }
 
 auto Storage::remove(const std::string &id) const -> Result<void> {
@@ -151,7 +151,7 @@ auto Storage::get_record(const std::string &id) const -> Result<StorageRecord> {
 
 // ---------- 异步 API ----------
 
-auto Storage::async_put(const std::string &id, const Json &value) const -> Task<void> {
+auto Storage::async_put(const std::string &id, const json::Value &value) const -> Task<void> {
     StorageRecord rec;
     rec.id = id;
     rec.type = AURORA_RAW_TYPE;
@@ -176,22 +176,22 @@ auto Storage::async_put(const std::string &id, const Json &value) const -> Task<
     return task;
 }
 
-auto Storage::async_get(const std::string &id) const -> Task<Json> {
+auto Storage::async_get(const std::string &id) const -> Task<json::Value> {
     auto *be = backend_.get();
     const std::string &idc = id;
     // 误报：转入 std::function 的 lambda
     // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
     // NOLINTNEXTLINE(bugprone-exception-escape)
-    return async([be, idc]() -> Result<Json> {
+    return async([be, idc]() -> Result<json::Value> {
         auto rec = be->get_record(idc);
         if (!rec) {
-            return Result<Json>{rec.error()};
+            return Result<json::Value>{rec.error()};
         }
         if (rec.value().encoding != StorageEncoding::Json) {
-            return Result<Json>{make_error(ErrorCode::StorageEncodingMismatch,
-                                           "Record stored in binary, cannot read via JSON channel: " + idc)};
+            return Result<json::Value>{make_error(ErrorCode::StorageEncodingMismatch,
+                                                  "Record stored in binary, cannot read via JSON channel: " + idc)};
         }
-        return Result{std::get<Json>(rec.value().payload)};
+        return Result{std::get<json::Value>(rec.value().payload)};
     });
 }
 

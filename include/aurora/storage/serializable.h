@@ -47,7 +47,7 @@ auto storage_type_name(const T * /*tag*/) -> const std::string & {
 
 /// @brief 默认迁移钩子：不迁移（原样返回）。旧版本记录反序列化前会经此钩子升级。
 template <typename T>
-auto migrate_storage(std::uint32_t /*old_version*/, const T * /*tag*/, Json j) -> Result<Json> {
+auto migrate_storage(std::uint32_t /*old_version*/, const T * /*tag*/, json::Value j) -> Result<json::Value> {
     return Result{std::move(j)};
 }
 template <typename T>
@@ -57,8 +57,8 @@ auto migrate_storage(std::uint32_t /*old_version*/, const T * /*tag*/, StorageBy
 
 /// @brief 类型 T 可经 JSON 持久化的充要条件（默认线格式）。
 template <typename T>
-concept StorageSerializable = requires(const T &t, T &out, const Json &j) {
-    { to_storage_json(t) } -> std::convertible_to<Json>;
+concept StorageSerializable = requires(const T &t, T &out, const json::Value &j) {
+    { to_storage_json(t) } -> std::convertible_to<json::Value>;
     { from_storage_json(out, j) } -> std::convertible_to<Result<void>>;
 };
 

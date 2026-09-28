@@ -36,9 +36,9 @@ class Storage {
     /// @brief 注入任意后端（自定义 / SQLite / 测试 Memory）—— 对标 Application(Scene, unique_ptr<Surface>)。
     [[nodiscard]] static auto create(std::unique_ptr<StorageBackend> backend) -> Storage;
 
-    // ---------- 原始 JSON 记录 API（用户视角 id → Json value；内部自动信封化） ----------
-    [[nodiscard]] auto put(const std::string &id, const Json &value) const -> Result<void>;
-    [[nodiscard]] auto get(const std::string &id) const -> Result<Json>;  ///< 返回 JSON payload（裸 value）
+    // ---------- 原始 JSON 记录 API（用户视角 id → JSON 值；内部自动信封化） ----------
+    [[nodiscard]] auto put(const std::string &id, const json::Value &value) const -> Result<void>;
+    [[nodiscard]] auto get(const std::string &id) const -> Result<json::Value>;  ///< 返回 JSON payload（裸 value）
     [[nodiscard]] auto remove(const std::string &id) const -> Result<void>;
     [[nodiscard]] auto list() const -> Result<std::vector<std::string>>;
     [[nodiscard]] auto contains(const std::string &id) const -> Result<bool>;
@@ -49,7 +49,7 @@ class Storage {
     [[nodiscard]] auto put(const std::string &id, const StorageBytes &value) const -> Result<void>;
     [[nodiscard]] auto get_bytes(const std::string &id) const -> Result<StorageBytes>;  ///< 仅取二进制载荷
     [[nodiscard]] auto get_value(const std::string &id) const
-        -> Result<StorageValue>;  ///< 返回原始 variant（Json 或 bytes）
+        -> Result<StorageValue>;  ///< 返回原始 variant（JSON 值 或 bytes）
 
     // ---------- 信封级 API（含元数据/迁移时使用） ----------
     [[nodiscard]] auto put_record(const std::string &id, const StorageRecord &rec) const -> Result<void>;
@@ -57,8 +57,8 @@ class Storage {
 
     // ---------- 异步 API（门面 async_* 重载，内部经 au::async 卸载到 worker） ----------
     // 注意：au::async 会把 Result<T> 解包为 Task<T>，故回调收到 Result<T>（非 Task<Result<T>>）。
-    [[nodiscard]] auto async_put(const std::string &id, const Json &value) const -> aurora::Task<void>;
-    [[nodiscard]] auto async_get(const std::string &id) const -> aurora::Task<Json>;
+    [[nodiscard]] auto async_put(const std::string &id, const json::Value &value) const -> aurora::Task<void>;
+    [[nodiscard]] auto async_get(const std::string &id) const -> aurora::Task<json::Value>;
     [[nodiscard]] auto async_put(const std::string &id, const StorageBytes &value) const -> aurora::Task<void>;
     [[nodiscard]] auto async_get_value(const std::string &id) const -> aurora::Task<StorageValue>;
     [[nodiscard]] auto async_remove(const std::string &id) const -> aurora::Task<void>;
@@ -116,7 +116,7 @@ class Storage {
             }
         } else {
             if constexpr (StorageSerializable<T>) {
-                auto j = std::get<Json>(rec.value().payload);
+                auto j = std::get<json::Value>(rec.value().payload);
                 if (rec.value().version < storage_version(static_cast<const T *>(nullptr))) {
                     auto migrated = migrate_storage(rec.value().version, static_cast<const T *>(nullptr), std::move(j));
                     if (!migrated) {
