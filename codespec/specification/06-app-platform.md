@@ -478,7 +478,34 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 ### 8.2 剪贴板
 
-`Clipboard`（`app/clipboard.h`）在 Win32 经 `SetClipboardData` 实现，默认 no-op。文本复制经 `Clipboard::set_text`。
+`Clipboard`（`app/clipboard.h`）提供四个静态自由函数，**一律返回 `Result<...>`**，失败必机器可见（不再以空串 / 静默 no-op 冒充成功）：
+
+| 接口 | 签名 | 说明 |
+|:---|:---|:---|
+| 写文本 | `set_text(const std::string &) -> Result<bool>` | Windows 经 `OpenClipboard` + `SetClipboardData(CF_UNICODETEXT)`；UTF-8 入参，平台按需转码 |
+| 读文本 | `get_text() -> Result<std::string>` | 可读但无文本 → `Ok("")` |
+| 写图像 | `set_image(const Image &) -> Result<bool>` | 仅 Windows 经 `CF_DIB`；其它平台 `GeneralNotSupported` |
+| 读图像 | `get_image() -> Result<Image>` | 格式不存在 → `Ok(空 Image)`（`width == 0`） |
+
+**失败口径**：
+
+| 情形 | 错误码 | retryable |
+|:---|:---|:---|
+| 剪贴板打不开 / 被别的线程或进程占用 / 外壳工具（xclip、xsel、pbcopy）缺失 / 跨进程载荷非法 | `ClipboardAccessFailed` | ✅（占用是暂时态，可退避重试） |
+| 已打开但载荷提交失败（`GlobalAlloc` / `GlobalLock` / `SetClipboardData`）/ 入参文本不是合法 UTF-8 | `ClipboardWriteFailed` | ❌ |
+| 本平台无剪贴板实现 | `GeneralNotSupported` | ❌ |
+| 图像尺寸超限或像素缓冲与维度不一致（调用方参数错） | `GeneralInvalidArgument` | ❌ |
+
+- **空内容不是失败**：「可访问但当前没有文本/图像」是正常态，返回 `Ok`，不得与「读不到」混为一谈。
+- **空写入是契约内 no-op**：空文本 / 空图像不触碰剪贴板、**保留既有内容**，返回 `Ok`。
+- **Windows 写文本先转码后开剪贴板**：`MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, ...)` 在 `EmptyClipboard` **之前**校验，非法 UTF-8 那一笔被拒时不会把用户原本复制的内容清掉；同理 `SetClipboardData` 失败意味着所有权未转移，须 `GlobalFree` 归还，不泄漏句柄。
+- 声明与迁移：四函数由「`void` / `std::string` 静默返回」改为 `Result`，属预览期破坏性收敛（semver 记录随版本收口批量落 `CHANGELOG.json`）；消费端把原 `std::string` 返回值改 `.value()` 即可保持旧行为，但**建议检查 `error()`**，否则又回到静默吞失败。
+
+**控件层（`TextInput` / `Text` / `RichTextEdit` 的 Ctrl+C/X/V）**：这些快捷键路径无 `Result` 出口（`on_key_event` 返回 `void`），故失败经 `Diagnostics::warn(msg, where, code)` 上报——桥接 Logger 且进 `Diagnostics::report()` 收集，机器可读，与 `widget.cpp` / `timer.h` 既有口径一致。同时快捷键语义随失败收紧：
+
+- **Ctrl+X 只在复制成功后才删选区**：剪贴板写入失败时保留选区与内容（剪切 = 复制 + 删除，复制没成就不该半程提交造成内容丢失）。
+- **Ctrl+V 读失败视为空剪贴板**：不插入任何内容，同时上报 `Diagnostics::warn`。
+- 只读态的降级路径（Ctrl+C/Ctrl+X 仅复制、Ctrl+V 忽略）不变。
 
 **测试注入点（test-only）**：`install_test_backend` / `reset_test_backend` / `remove_test_backend` 三个静态函数构成仓库私有测试设施（`tests/`）用于并行隔离的最小注入面——安装后 `set_text` / `get_text` / `set_image` / `get_image` 全部改走进程内 memory 后端，不触碰系统剪贴板。
 
