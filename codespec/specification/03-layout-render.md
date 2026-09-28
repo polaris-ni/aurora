@@ -769,6 +769,17 @@ class RhiBackend {
 
 `image/image_codec.h` 提供图像编解码，能力由编译期开关 `AURORA_ENABLE_IMAGE_JPEG` / `AURORA_ENABLE_IMAGE_WEBP` / `AURORA_ENABLE_IMAGE_PNG` 控制（见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md)）。
 
+**内置 SVG 子集**（注册名 `svg`，实现在 `src/aurora/core/image_svg.cpp`，零三方依赖；入口为经内容嗅探的 `Image::load` 与可指定目标尺寸的 `Image::load_svg(path, w, h)`）：
+
+| 维度 | 契约 |
+|:---|:---|
+| 固有尺寸 | `viewBox` 优先（不足 4 个非负可解析数则回退），否则取根标签 `width`/`height`，皆缺为 64×64；文档单位 1:1 映射输出像素，故共享 `viewBox` 时只改 `width`/`height` 不改变光栅尺寸 |
+| 形状 | `rect`（含 `rx` 圆角，半径夹到 `min(w,h)/2`）、`circle`、`ellipse`、`line`、`polygon`、`polyline`；其余标签（`path`、渐变、`transform`、`text`、外部引用）跳过而不报错，文档序即绘制序 |
+| 填充与描边 | 六种形状的 `fill` 与 `stroke` 均生效，**描边压在填充之上**；`stroke-width` 缺省 1，描边以轮廓为中心、法向半宽 `max(0.5, stroke-width/2)`；`fill` 缺省黑（`line` 除外，它只由描边承载，缺省黑）；颜色取 `#rgb` / `#rrggbb` / 命名色 / `none` |
+| 闭合语义 | `polygon` 的填充与描边都按闭合链；`polyline` 的填充按 SVG 规范视作闭合区域、描边只走**开链**（不绘首末点间的收口边） |
+| 防御上限 | 单边输出尺寸 ≤ 8192、形状数 ≤ 4096，越界返回结构化错误而非降级（SVG 属不可信输入） |
+| 边缘质量 | 光栅化为逐像素点内测试，本身不做抗锯齿；细描边的平滑来自显示链路（`Painter::draw_image` 双线性采样） |
+
 `Painter::draw_image(const Image&, const Rect&)` 采用双线性采样，在 **premultiplied-alpha 空间插值**，避免半透明边缘暗边与光晕。
 
 `Image::content_hash()`（`core/image.h`）提供像素内容的 FNV-1a 64 位惰性摘要：首次调用计算并缓存（const 访问经 mutable 落回本对象），拷贝携带缓存；GPU 纹理缓存等内容寻址消费方经此寻址，免除每帧全量哈希。**契约**：直接改写 `pixels` 后必须调用 `invalidate_content_hash()`，否则摘要过期、内容寻址消费方可能命中旧内容。
