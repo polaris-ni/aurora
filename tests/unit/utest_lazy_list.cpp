@@ -3,7 +3,8 @@
 /// 测试说明: 覆盖 LazyList——默认不变量、count/行高参数钳制与降级、按需构建仅可见窗口条目（实例复用）、
 /// cache_extent 窗口、滚动偏移钳制与 scroll_to_item、滚轮步进、滚出窗口回收重建、序列化与自描述、
 /// 反序列化回填标量属性（含非法值降级、显式偏移优先于 restore_key 恢复）、
-/// snap/paging 收位短滑动（逐帧推进至终点对齐）、reduce-motion 直落、offset_signal 发布、滚轮余量上冒
+/// snap/paging 收位短滑动（逐帧推进至终点对齐）、reduce-motion 直落、offset_signal 发布、滚轮余量上冒、
+/// 绘制盒与命中盒同源（对齐/非对齐滚动位下点中的条目==可见的条目）
 
 #include <chrono>
 #include <map>
@@ -53,6 +54,17 @@ struct BuildRecorder {
         return [this](int index) -> Node {
             built_order.push_back(index);
             auto box = std::make_shared<FixedBox>(300.0F, 48.0F);
+            items.emplace(index, std::move(box));
+            return Node{items.at(index)};
+        };
+    }
+
+    /// 可点击条目：仅让条目进入命中链，用于「绘制盒 == 命中盒」对账。
+    auto clickable_builder() -> LazyList::ItemBuilder {
+        return [this](int index) -> Node {
+            built_order.push_back(index);
+            auto box = std::make_shared<FixedBox>(300.0F, 48.0F);
+            box->modifier.set(Modifier{}.clickable([]() -> void {}));
             items.emplace(index, std::move(box));
             return Node{items.at(index)};
         };
@@ -219,6 +231,57 @@ AURORA_TEST_CASE(scrolling_recycles_and_rebuilds_window) {
     AURORA_TEST_CHECK_NEAR(rec.items.at(20)->paint_bounds().origin.y, 0.0F, 1e-4F);  // 20*48 - 960
     AURORA_TEST_CHECK_NEAR(rec.items.at(24)->paint_bounds().origin.y, 192.0F, 1e-4F);  // 24*48 - 960
     AURORA_TEST_CHECK_NEAR(rec.items.at(24)->paint_bounds().size.height, 48.0F, 1e-4F);
+}
+
+/// 绘制盒与命中盒必须同源：虚拟化条目的可见位置与点击落点解析出的条目一致。
+/// 对齐偏移（行高整数倍）与非对齐偏移（滚轮 40dp 步进的自然落点）都要成，
+/// 否则「看得见的那一行」与「点中的那一行」会错开若干行（TC-WIDGET-008 的断言）。
+AURORA_TEST_CASE(hit_test_shares_paint_origin_across_offsets) {
+    BuildRecorder rec;
+    LazyList list{100, rec.clickable_builder(), 48.0F};
+    list.set_cache_extent(0.0F);
+    const Rect viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 300.0F, .height = 400.0F}};
+
+    int probed = 0;
+    int guarded = 0;
+    for (const float offset : {240.0F, 260.0F}) {
+        list.set_scroll_offset(offset);
+        LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+        Painter p;
+        p.begin(300, 400);
+        list.paint(p, viewport, BuildContext{});
+
+        const int first = static_cast<int>(offset / 48.0F);
+        for (int idx = first; (static_cast<float>(idx) * 48.0F) - offset < viewport.size.height; ++idx) {
+            const float top = (static_cast<float>(idx) * 48.0F) - offset;
+            const float probe = top + 24.0F;  // 盒中心
+            if (probe < 0.0F || probe >= viewport.size.height) {
+                continue;
+            }
+            ++probed;
+            const Rect pb = rec.items.at(idx)->paint_bounds();
+            AURORA_TEST_CHECK_NEAR(pb.origin.y, top, 1e-4F);
+            const auto chain = list.hit_test_chain(Point{.x = 150.0F, .y = probe}, viewport, BuildContext{});
+            AURORA_TEST_CHECK_FALSE(chain.empty());
+            if (chain.empty()) {
+                continue;
+            }
+            AURORA_TEST_CHECK_TRUE(chain.back().ptr == static_cast<Widget *>(rec.items.at(idx).get()));
+            // 命中链记录的全局 origin 即该条目的绘制盒 origin（同一原点，无行高/内缩错位）
+            AURORA_TEST_CHECK_NEAR(chain.back().origin.y, pb.origin.y, 1e-4F);
+            AURORA_TEST_CHECK_NEAR(chain.back().origin.x, pb.origin.x, 1e-4F);
+            if (idx > first) {
+                // 上沿外 1dp 属前一行，不得解析到本条目
+                ++guarded;
+                const auto above = list.hit_test_chain(Point{.x = 150.0F, .y = top - 1.0F}, viewport, BuildContext{});
+                auto *item = static_cast<Widget *>(rec.items.at(idx).get());
+                AURORA_TEST_CHECK_TRUE(above.empty() || above.back().ptr != item);
+            }
+        }
+    }
+    // 防空转：两处偏移都必须真正探到若干整行，且都做过「上一行边界」反证
+    AURORA_TEST_CHECK(probed >= 16);
+    AURORA_TEST_CHECK(guarded >= 14);
 }
 
 AURORA_TEST_CASE(serialize_props_and_describe_metadata) {
