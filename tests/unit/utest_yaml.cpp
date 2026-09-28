@@ -155,6 +155,60 @@ AURORA_TEST_CASE(yaml_nested_structure_and_indent) {
     AURORA_TEST_CHECK_MSG(padded.find("  name: Aurora") == 0, "indent shifts top-level lines");
 }
 
+/// 发射器的层级契约：非空容器一律另起块、空容器只在值位置内联。
+/// 逐行整体比对（而非 `find` 子串）——子串断言对「缩进少一级」这类结构劣化是盲的，
+/// 而那正是内联 flow 形态（`props: {content: a}`）抹掉层级的故障形态。
+AURORA_TEST_CASE(yaml_block_form_exact_lines) {
+    Json leaf = Json::object();
+    leaf["type"] = "Text";
+    Json leaf_props = Json::object();
+    leaf_props["content"] = "a";
+    leaf["props"] = leaf_props;
+
+    Json row = Json::object();
+    row["type"] = "Row";
+    row["props"] = Json::object();
+    row["children"] = Json::array();
+
+    Json doc = Json::object();
+    doc["type"] = "Column";
+    Json props = Json::object();
+    props["width"] = 100.0;
+    props["show"] = true;
+    doc["props"] = props;
+    doc["children"] = Json::array({leaf, row});
+
+    // nlohmann 对象键按字典序迭代，期望输出确定可逐行锁定。
+    const std::string expected = R"YAML(children:
+  - props:
+      content: a
+    type: Text
+  - children: []
+    props: {}
+    type: Row
+props:
+  show: true
+  width: 100.0
+type: Column)YAML";
+    AURORA_TEST_CHECK_EQ(serialization::to_yaml(doc), expected);
+
+    // indent=1 只整体平移：顶层行下沉一级，嵌套层级相对差不变。
+    const std::string padded = serialization::to_yaml(doc, 1);
+    AURORA_TEST_CHECK_MSG(padded.rfind("  children:\n", 0) == 0, "indent=1 shifts top-level key line");
+    AURORA_TEST_CHECK_MSG(padded.find("    - props:\n") != std::string::npos, "indent=1 shifts dash item line");
+    AURORA_TEST_CHECK_MSG(padded.find("        content: a\n") != std::string::npos, "indent=1 shifts nested key");
+    AURORA_TEST_CHECK_MSG(padded.find("\n  type: Column") != std::string::npos, "indent=1 shifts last top-level key");
+
+    // 标量数组同样下沉一级，且不与键同行。
+    Json counts = Json::object();
+    counts["items"] = Json::array({1, 2});
+    AURORA_TEST_CHECK_EQ(serialization::to_yaml(counts), "items:\n  - 1\n  - 2");
+
+    // 数组套数组：内层 dash 与外层 dash 同列起（`- ` 恰占一级缩进）。
+    Json matrix = Json::array({Json::array({1, 2})});
+    AURORA_TEST_CHECK_EQ(serialization::to_yaml(matrix), "- - 1\n  - 2");
+}
+
 AURORA_TEST_CASE(yaml_widget_tree_smoke) {
     // 真实 widget 树 → to_json → to_yaml 全链路冒烟。
     Node root{Text{"Hello"}};

@@ -103,6 +103,9 @@ namespace detail {
 
 // 前向声明：容器辅助函数需要递归回调主分发器。
 [[nodiscard]] inline auto yaml_emit(const Json &j, int indent) -> std::string;
+// 前向声明：数组项可为对象、对象值可为数组，二者互递归。
+[[nodiscard]] inline auto emit_object(const Json &j, int indent, const std::string &pad) -> std::string;
+[[nodiscard]] inline auto emit_array(const Json &j, int indent, const std::string &pad) -> std::string;
 
 /// @brief 将 JSON 字符串值转为 YAML 字符串（按需加引号）。
 [[nodiscard]] inline auto emit_string(const Json &j) -> std::string {
@@ -151,56 +154,64 @@ namespace detail {
     return "null";  // fallback
 }
 
-/// @brief 将 JSON 数组转为 YAML 数组字符串。
+/// @brief 把子块首行的自身缩进让给调用方的 `- ` 前缀。
+/// `- ` 恰占两列，与「下一级缩进 = 2 空格」同宽，故只需削掉首行的前导空格，
+/// 子块的其余行就已对齐在同一列上——这正是 YAML 列表项内映射的合法排版。
+[[nodiscard]] inline auto drop_first_indent(const std::string &block, std::size_t cols) -> std::string {
+    return block.size() >= cols ? block.substr(cols) : block;
+}
+
+/// @brief 将 JSON 数组转为 YAML 块：每项以 `- ` 起一行，行首缩进为 indent 级（空数组由调用方内联为
+/// `[]`，不进此处）。
 [[nodiscard]] inline auto emit_array(const Json &j, int indent, const std::string &pad) -> std::string {
-    if (j.empty()) {
-        return "[]";
-    }
     std::ostringstream os;
+    const std::string child_pad(static_cast<std::size_t>(indent + 1) * 2, ' ');
     for (std::size_t i = 0; i < j.size(); ++i) {
         if (i > 0) {
             os << '\n';
         }
-        os << pad << "- " << yaml_emit(j[i], indent + 1);
+        const Json &item = j[i];
+        os << pad << "- ";
+        if (item.is_object()) {
+            os << (item.empty() ? "{}" : drop_first_indent(emit_object(item, indent + 1, child_pad), child_pad.size()));
+        } else if (item.is_array()) {
+            os << (item.empty() ? "[]" : drop_first_indent(emit_array(item, indent + 1, child_pad), child_pad.size()));
+        } else {
+            os << emit_scalar(item);
+        }
     }
     return os.str();
 }
 
 /// @brief 将 JSON 对象的一个键值对转为 YAML 行块。
+/// 容器值**另起一块**并整体下沉一级缩进——把嵌套映射内联在 `key:` 同一行会抹掉层级，产出的不是合法
+/// YAML（多行块的首行被 `- ` 或调用方前缀接管，故此处只负责键行与其后块）。
 [[nodiscard]] inline auto emit_object_value(const Json &val, const std::string &key, int indent, const std::string &pad)
     -> std::string {
     std::ostringstream os;
     const std::string yaml_key = yaml_needs_quoting(key) ? yaml_quote_string(key) : key;
-    if (val.is_object() || val.is_array()) {
-        const std::string child = yaml_emit(val, indent + 1);
-        if (val.is_array() && !val.empty() && !val[0].is_object()) {
-            // 简单标量数组：- item 直接跟在 key 后面
-            os << pad << yaml_key << ":\n" << child;
-        } else if (val.is_array() && !val.empty()) {
-            // 对象数组：第一个 - 与 key 同行
-            os << pad << yaml_key << ":\n";
-            const std::string inner_pad(static_cast<std::size_t>(indent + 1) * 2, ' ');
-            for (std::size_t i = 0; i < val.size(); ++i) {
-                if (i > 0) {
-                    os << '\n';
-                }
-                os << inner_pad << "- " << yaml_emit(val[i], indent + 2);
-            }
+    const std::string child_pad(static_cast<std::size_t>(indent + 1) * 2, ' ');
+    os << pad << yaml_key << ":";
+    if (val.is_object()) {
+        if (val.empty()) {
+            os << " {}";
         } else {
-            // 空数组或空对象
-            os << pad << yaml_key << ": " << child;
+            os << '\n' << emit_object(val, indent + 1, child_pad);
+        }
+    } else if (val.is_array()) {
+        if (val.empty()) {
+            os << " []";
+        } else {
+            os << '\n' << emit_array(val, indent + 1, child_pad);
         }
     } else {
-        os << pad << yaml_key << ": " << yaml_emit(val, 0);
+        os << ' ' << emit_scalar(val);
     }
     return os.str();
 }
 
-/// @brief 将 JSON 对象转为 YAML 对象字符串。
+/// @brief 将 JSON 对象转为 YAML 对象字符串（每行前缀 pad；空对象由调用方内联为 `{}`）。
 [[nodiscard]] inline auto emit_object(const Json &j, int indent, const std::string &pad) -> std::string {
-    if (j.empty()) {
-        return "{}";
-    }
     std::ostringstream os;
     bool first = true;
     for (auto it = j.begin(); it != j.end(); ++it) {
@@ -214,14 +225,15 @@ namespace detail {
 }
 
 /// @brief 递归下降 YAML 发射器，将 nlohmann::json 转为 YAML 字符串。
+/// 顶层空容器内联为 `{}` / `[]`；非空容器一律走块形态，空容器只在「值位置」由调用方内联。
 [[nodiscard]] inline auto yaml_emit(const Json &j, int indent) -> std::string {
     const std::string pad(static_cast<std::size_t>(indent) * 2, ' ');
 
     if (j.is_object()) {
-        return emit_object(j, indent, pad);
+        return j.empty() ? std::string{"{}"} : emit_object(j, indent, pad);
     }
     if (j.is_array()) {
-        return emit_array(j, indent, pad);
+        return j.empty() ? std::string{"[]"} : emit_array(j, indent, pad);
     }
     return emit_scalar(j);
 }
