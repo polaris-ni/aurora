@@ -109,6 +109,8 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     CliMissingRequired = 70,
     CliTooManyPositionals = 71,
     CliConflictViolated = 72,
+    ClipboardAccessFailed = 73,
+    ClipboardWriteFailed = 74,
 };
 
 struct ErrorMeta {
@@ -124,7 +126,7 @@ struct ErrorMeta {
     std::string_view hint;
 };
 
-inline constexpr std::array<ErrorMeta, 73> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 75> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1014,6 +1016,32 @@ inline constexpr std::array<ErrorMeta, 73> AURORA_ERROR_TABLE = {
             .retryable = false,
             .message_tpl = "Options '{option}' and '{conflict}' cannot be used together",
             .hint = "Drop one of the mutually exclusive options; the conflict group is declared on the option schema",
+        },
+        {
+            .code = ErrorCode::ClipboardAccessFailed,
+            .ident = "ClipboardAccessFailed",
+            .slug = "clipboard-access-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = true,
+            .message_tpl = "System clipboard is inaccessible: '{detail}'",
+            .hint = "Another thread/process may own the clipboard (retry once it is released), the OS helper may be "
+                    "missing (install xclip or xsel on Linux), or the stored payload failed validation",
+        },
+        {
+            .code = ErrorCode::ClipboardWriteFailed,
+            .ident = "ClipboardWriteFailed",
+            .slug = "clipboard-write-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "Clipboard payload could not be committed: '{detail}'",
+            .hint = "The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free "
+                    "memory or retry the copy",
         },
     },
 };

@@ -1381,6 +1381,30 @@
       "retryable": false,
       "severity": "error",
       "slug": "cli-conflict-violated"
+    },
+    {
+      "auto_fixable": false,
+      "category": "platform",
+      "enum": "ClipboardAccessFailed",
+      "fix_category": "resource_error",
+      "hint": "Another thread/process may own the clipboard (retry once it is released), the OS helper may be missing (install xclip or xsel on Linux), or the stored payload failed validation",
+      "index": 73,
+      "message": "System clipboard is inaccessible: '{detail}'",
+      "retryable": true,
+      "severity": "error",
+      "slug": "clipboard-access-failed"
+    },
+    {
+      "auto_fixable": false,
+      "category": "platform",
+      "enum": "ClipboardWriteFailed",
+      "fix_category": "resource_error",
+      "hint": "The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free memory or retry the copy",
+      "index": 74,
+      "message": "Clipboard payload could not be committed: '{detail}'",
+      "retryable": false,
+      "severity": "error",
+      "slug": "clipboard-write-failed"
     }
   ],
   "include": "aurora/aurora.h",

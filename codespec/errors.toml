@@ -836,3 +836,25 @@ fix_category = "layout_conflict"
 retryable = false
 message = "Options '{option}' and '{conflict}' cannot be used together"
 hint = "Drop one of the mutually exclusive options; the conflict group is declared on the option schema"
+
+[[error]]
+enum = "ClipboardAccessFailed"
+slug = "clipboard-access-failed"
+category = "platform"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = true
+message = "System clipboard is inaccessible: '{detail}'"
+hint = "Another thread/process may own the clipboard (retry once it is released), the OS helper may be missing (install xclip or xsel on Linux), or the stored payload failed validation"
+
+[[error]]
+enum = "ClipboardWriteFailed"
+slug = "clipboard-write-failed"
+category = "platform"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = false
+message = "Clipboard payload could not be committed: '{detail}'"
+hint = "The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free memory or retry the copy"

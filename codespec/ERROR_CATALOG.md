@@ -78,5 +78,7 @@
 | 70 | `CliMissingRequired` | `cli-missing-required` | validation | error | false | missing_prop | false | Required option '{option}' is missing for command '{command}' | Pass the option, or declare a default_value so it becomes optional |
 | 71 | `CliTooManyPositionals` | `cli-too-many-positionals` | validation | error | false | invalid_value | false | Too many positional arguments for command '{command}': unexpected extra '{value}' | Declare the extra slot in the positional schema, or pass it after '--' to treat it as trailing input |
 | 72 | `CliConflictViolated` | `cli-conflict-violated` | validation | error | false | layout_conflict | false | Options '{option}' and '{conflict}' cannot be used together | Drop one of the mutually exclusive options; the conflict group is declared on the option schema |
+| 73 | `ClipboardAccessFailed` | `clipboard-access-failed` | platform | error | false | resource_error | true | System clipboard is inaccessible: '{detail}' | Another thread/process may own the clipboard (retry once it is released), the OS helper may be missing (install xclip or xsel on Linux), or the stored payload failed validation |
+| 74 | `ClipboardWriteFailed` | `clipboard-write-failed` | platform | error | false | resource_error | false | Clipboard payload could not be committed: '{detail}' | The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free memory or retry the copy |
 
-<!-- count: total 73 error codes -->
+<!-- count: total 75 error codes -->
