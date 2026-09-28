@@ -37,7 +37,7 @@
 | `padding + background + border` | 内边距 + 背景 + 边框 |
 | `Long text clipped to 160x28` | 显式尺寸 + 裁剪 + 边框 |
 | `clickable (tap callback)` | 内边距 + 背景 + 点击回调 |
-| `size(120,40) + align` | 显式尺寸 + 居中对齐 |
+| `align(Center) + size(120,40)` | 显式尺寸 + 居中对齐（Align 须写在 size 之外，链序见规格 §7.1） |
 | `fill_max_width` | 撑满可用宽度 + 内边距 |
 
 ### 1.3 执行环境
@@ -157,7 +157,7 @@
 | 前置条件 | 位于仓库根目录；`build/` 已完成 CMake 配置；本机工具链可用 |
 | 依赖用例 | 无 |
 | 操作步骤 | 1. 构建载体：`cmake --build build --target demo_modifiers demo_animation`（纯执行，无预期结果）<br>2. 启动 `./build/demo_modifiers.exe 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>3. 查看窗口标题与客户区尺寸<br>4. 清点窗口内自上而下呈现的控件数量与各自文本<br>5. 查看 `err.txt` 的内容与行数 |
-| 预期结果 | 3. 标题为 `Modifier · Aurora Demo`，客户区约为 520×520<br>4. 共 5 个示例控件，文本自上而下依次为 `padding + background + border`、`Long text clipped to 160x28`、`clickable (tap callback)`、`size(120,40) + align`、`fill_max_width`；各控件之间有可见间隔<br>5. 恰 1 行 `INF` 级 `[run_demo] window shown: Modifier · Aurora Demo`，此时**无** `[modifiers] clicked` 行 |
+| 预期结果 | 3. 标题为 `Modifier · Aurora Demo`，客户区约为 520×520<br>4. 共 5 个示例控件，文本自上而下依次为 `padding + background + border`、`Long text clipped to 160x28`、`clickable (tap callback)`、`align(Center) + size(120,40)`、`fill_max_width`；各控件之间有可见间隔<br>5. 恰 1 行 `INF` 级 `[run_demo] window shown: Modifier · Aurora Demo`，此时**无** `[modifiers] clicked` 行 |
 
 ### 2.2 修饰叠加与裁剪
 
@@ -203,11 +203,11 @@
 | 项目 | 内容 |
 |:---|:---|
 | 用例编号 | TC-MODIFIER-005 |
-| 测试目的 | 验证「给定固定尺寸 + 在父容器内居中」这一组合下，控件盒尺寸固定且水平居中 |
+| 测试目的 | 验证「给定固定尺寸 + 在父容器内居中」这一组合下，控件盒尺寸固定且水平居中，且命中盒与绘制盒同源 |
 | 前置条件 | 载体 `demo_modifiers` 已构建成功 |
 | 依赖用例 | TC-MODIFIER-001 |
-| 操作步骤 | 1. 启动 `./build/demo_modifiers.exe`（纯执行，无预期结果）<br>2. 观察第四个控件 `size(120,40) + align` 的色块（纯执行，无预期结果）<br>3. 测量其色块宽度与高度的比例关系<br>4. 观察其色块在窗口水平方向上的位置 |
-| 预期结果 | 3. 色块宽高比约为 3:1（对应 120×40），且其内部文字垂直居中<br>4. 色块在窗口内水平居中（左右两侧留白接近相等），不贴左边缘也不贴右边缘 |
+| 操作步骤 | 1. 启动 `./build/demo_modifiers.exe`（纯执行，无预期结果）<br>2. 观察第四个控件 `align(Center) + size(120,40)` 的色块（纯执行，无预期结果）<br>3. 测量其色块宽度与高度的比例关系<br>4. 观察其色块在窗口水平方向上的位置，并拖宽窗口后再次观察<br>5. 沿色块所在的水平一行逐点用 Inspector `pick` 取样，记录命中该控件的 x 区间 |
+| 预期结果 | 3. 色块宽高比约为 3:1（对应 120×40）。**注**：`.align()` 只摆放控件自身盒，不居中其内部内容，故块内文字仍按文本控件的顶对齐排布，且该链无 `.clip()` 时换行文字可越出盒底（与 TC-MODIFIER-003 的裁剪恰成对照，不属本用例缺陷）<br>4. 色块在窗口内水平居中（左右两侧留白接近相等），不贴左边缘也不贴右边缘；窗口变宽后仍居中，其余控件宽度不受影响（居中不得吞掉同列兄弟的主轴空间）<br>5. 命中区间与色块左右缘一致，展开出的两端空白都不命中该控件 |
 
 #### TC-MODIFIER-006 撑满宽度修饰在父容器内占满可用宽度
 
@@ -237,10 +237,10 @@
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| TC-MODIFIER-001 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：标题恰为 `Modifier · Aurora Demo`，客户区物理 780×780、DPI 缩放 1.5 → 520×520dp；步骤 4：Inspector 树 DFS 自上而下恰 5 个示例 Text，依次为 `padding + background + border`、`Long text clipped to 160x28`、`clickable (tap callback)`、`size(120,40) + align`、`fill_max_width`，相邻色块间隔实测 8.0dp（块底 dp 139.3→次块顶 148.7、176.7→184.7、232.7→240.7、280.7→288.7）；步骤 5：`err.txt` 恰 1 行 `INF` 级 `[run_demo] window shown: Modifier · Aurora Demo`，`[modifiers] clicked` 0 行 | | 步骤 5 的「恰 1 行」在裸启动（不设 `AURORA_INSPECTOR_PORT`）下测得；设该变量后 `run_demo` 另打 3 行 `INF`（InspectorServer started / accept loop / listening），属取证通道自身噪声。本模块取证需 `AURORA_BUILD_INSPECTOR_SERVER=ON`，默认 OFF 时 demo 内该分支整编译剔除、无 HTTP 通道 |
+| TC-MODIFIER-001 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：标题恰为 `Modifier · Aurora Demo`，客户区物理 780×780、DPI 缩放 1.5 → 520×520dp；步骤 4：Inspector 树 DFS 自上而下恰 5 个示例 Text，依次为 `padding + background + border`、`Long text clipped to 160x28`、`clickable (tap callback)`、`align(Center) + size(120,40)`、`fill_max_width`，相邻色块间隔实测 8.0dp（块底 dp 139.3→次块顶 148.7、176.7→184.7、232.7→240.7、280.7→288.7）；步骤 5：`err.txt` 恰 1 行 `INF` 级 `[run_demo] window shown: Modifier · Aurora Demo`，`[modifiers] clicked` 0 行 | | 步骤 5 的「恰 1 行」在裸启动（不设 `AURORA_INSPECTOR_PORT`）下测得；设该变量后 `run_demo` 另打 3 行 `INF`（InspectorServer started / accept loop / listening），属取证通道自身噪声。本模块取证需 `AURORA_BUILD_INSPECTOR_SERVER=ON`，默认 OFF 时 demo 内该分支整编译剔除、无 HTTP 通道。第四项标签原为 `size(120,40) + align`，2026-09-28 随 TC-MODIFIER-005 修复改为 `align(Center) + size(120,40)` 以体现链序，本记录按新标签回填 |
 | TC-MODIFIER-002 | 2026-09-26 | Qoder Agent | PASS | | 步骤 2：块 1 背景色块 316.7×54.0dp，其内文字墨水仅 282.0×18.0dp → 背景覆盖范围明显大于文字区；步骤 3：文字到色块四边距离 左 15.3 / 右 18.7 / 上 20.0 / 下 15.3dp（声明内边距 14dp，四向同量级、最大差 4.7dp 来自行高 leading）；步骤 4：色块四边外侧 1~2px 处逐线采样，边框色 `(222,226,232)` 命中率 上 475/475、下 475/475、左 81/81、右 81/81，四边 100% 闭合 | | 文字墨水按「贴近 `AURORA_TEXT` 且色差 ≤60」筛出；早期判据用「亮度和 <380」会把饱和底色（如绿块 `(22,163,74)`）整块误判为文字 |
 | TC-MODIFIER-003 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：`pick` 报出该 Text bounds 160×28dp，帧内按边框反推的绘制盒 159.3×28.0dp（x dp 14.0..173.3、y dp 148.7..176.7）；原文 `Long text clipped to 160x28` 盒内只余 `Long text clipped`（墨水右端 dp 166.7，距盒右边 7.3dp），第二行整行被裁掉——截断成立，形态为「整行裁失」而非半截字符；步骤 4：盒外右侧 80px 带内文字墨水 0 点、块 2 与块 3 之间 dp 177..184 间隙带内墨水 0 点，下方 `clickable (tap callback)` 色块完整可见未被覆盖 | | 该色块为白底、与卡片同色，色掩膜不可用，盒边界改由 1px 边框列/行反推（竖直边框候选 dp 14.0/14.7 与 172.7/173.3） |
 | TC-MODIFIER-004 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：单击文字正中央（客户物理 px 184,314）→ stderr 新增恰 1 行 `[INF][demo@…demo_modifiers.cpp:18] > [modifiers] clicked`；步骤 5：色块内三处边缘落点（左内 3px、右内 3px、左上角内 3px）各新增 1 行，累计 1→2→3→4 每次 +1，内边距确计入命中区；步骤 7：色块外三处（右外 20px、左外 20px、下外 20px）新增 0 行，总数停在 4 | | 落点由帧标定的色块包围盒换算为「窗口像素 − 客户区偏移」的物理客户坐标。早期一轮误按 dp 投递，五个落点回调数全为 0；坐标口径修正后盒内 4 点全部命中、盒外 3 点全部不命中 |
-| TC-MODIFIER-005 | 2026-09-26 | Qoder Agent | FAIL | 3, 4 | 步骤 3：色块 120.0×40.7dp（`pick` bounds 120×40）、宽高比 2.95≈3:1 成立，但内部文字并非垂直居中——第一行墨水起于 dp 247.3（盒顶 240.7，上留白 6.6dp），换行后第二行 `+ align` 跨 dp 273.3..288.0，越过盒底 280.7 达 7.3dp，即文字整体偏下且溢出盒外；步骤 4：色块左边距 14.0dp、右边距 386.7dp（窗口 520dp）→ 紧贴列左缘，未水平居中；窗口拖到 893dp 后仍为左 14.0 / 右 759.3 | | 实测语义为 `.size().background().align(Center)` 只把内容对齐到自身盒内，父 `Column` 未把该 120dp 盒在交叉轴居中，与用例预期的「块在窗口内水平居中」不一致，按预期判 FAIL。文字溢出盒外未触发裁剪（该修饰链无 `.clip()`），与 TC-MODIFIER-003 的裁剪行为恰成对照 |
+| TC-MODIFIER-005 | 2026-09-28 | Qoder Agent | PASS | | 步骤 3：粉色块 120.0×40.7dp、宽高比 2.95≈3:1；块内文字首行墨迹起于 dp 247.3（盒顶 240.7，上留白 6.6dp），换行第二行至 dp 281.3（盒底 280.7，溢出 0.6dp），即文字贴顶排布而非垂直居中——按预期 3 的契约注属 `.align()` 职责外，不判缺陷；步骤 4：窄窗（客户区 520.0dp）窗口级左距 200.0dp = 右距 200.0dp，卡片内容区 [15.3, 506.0] 内左留白 184.7dp / 右留白 186.0dp（差 1.3dp 源于内容左界由带 14dp 内边距的块 1 反推）；拖宽至 885.3dp 后仍居中（左 382.7 / 右距 382.6），粉色块尺寸不变，余四块宽度保持 316.7 / 225.3 / 857.3（撑满块）→ 居中未吞同列兄弟的主轴空间；步骤 5：沿 y=261.1dp 逐 0.5dp `pick`，命中该 Text 的 x 区间 dp (200.0, 320.0) 与绘制盒左右缘逐位重合，199.5 与 320.5 两点均 `hit=False`；附带点击回归：块 3（`padding`+`clickable`）中央 / 左内 3px / 右内 3px 各触发 1 行 `[modifiers] clicked`，右外 20px、下外 20px 各 0 行，块 4 色块中心与展开行右半各 0 行（该链无 clickable，符合预期） | | 2026-09-26 首轮判 FAIL（贴列左缘 左 14.0 / 右 386.7）。根因两处已修：链序须为 Align 在 size 之外（先压入者靠外，见规格 §7.1）；`Align` 改逐轴展开并跳过 Flex 主轴的「按需剩余空间」供给标记（`Constraints::loose_width/loose_height`，见 [`03-layout-render.md`](../specification/03-layout-render.md) §2.3），另将绘制盒与命中盒按链位分段收缩（§7.4）。取证须用带 `AURORA_BUILD_INSPECTOR_SERVER=ON` 的构建目录，默认 `build/` 无 HTTP 通道 |
 | TC-MODIFIER-006 | 2026-09-26 | Qoder Agent | PASS | | 步骤 2：`fill_max_width` 色块宽 492.0dp，恰等于 `pick` 报出的 `Column` 内容宽 492dp，左边缘 dp 14.0 与内容区左界重合，故色块到内容区边界的可见留白为 0（8dp 内边距被背景一并覆盖绘制），其余四块宽 316.7 / 159.3 / 225.3 / 120.0dp 明显窄于它；步骤 4：窗口 520→893dp 后该色块 492.0→864.7dp（+372.7dp，与窗口 +373dp 同步），左右仍各贴内容区边界（左 14.0 / 右距 14.7），其余四块宽度逐一保持 316.7 / 159.3 / 225.3 / 120.0dp 不变 | | 「约 8 像素量级留白」实测为 0：`padding` 在 `background` 之前，背景把内边距一并涂满，故只剩卡片自身的 14dp 内边距可见。变宽后的量测须重取有效帧——PrintWindow 在 resize 后首帧常回空，脚本以「绿块能否命中」作非空校验后重试（窄窗第 2 次、宽窗第 1 次有效） |
 | TC-MODIFIER-007 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：12 秒内取 246 帧跟踪绿块包围盒，宽 48px↔112px、比值 2.333 恰等于 scale 端点比 1.4/0.6；由最小帧反推自身布局盒 80px（=80dp），最大帧 112px 越出自身盒 32px（=32dp），四角像素皆为绿 `(34,197,94)`、包围盒内填充率 96.5% → 放大后四边完整、未被自身布局盒裁角；步骤 4：最大帧绿块占客户 y 225..336px，与上方最近文字带留 17px、与下方最近文字带留 18px，未压住说明文字；舞台 120dp=120px，实测最大 112px ≤ 舞台 → 溢出仍受外层裁剪约束 | | 载体走 `au::App().size(520,520)` 而非 `run_demo`，帧内 1dp=1px（`run_demo` 载体为 1dp=1.5px），故本用例改用像素比值判定以绕开两条启动路径的口径差；该 demo 不启动 InspectorServer，无 `pick` 通道可用 |

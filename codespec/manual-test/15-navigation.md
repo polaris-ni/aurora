@@ -160,11 +160,11 @@
 | 项目 | 内容 |
 |:---|:---|
 | 用例编号 | TC-NAVIGATION-002 |
-| 测试目的 | 验证压栈后栈深度与当前路由的取值相互自洽，且与界面上呈现的页面一致 |
+| 测试目的 | 验证压栈后栈深度与当前路由的取值相互自洽，且与界面上呈现的读数行一致 |
 | 前置条件 | 载体 `demo_navigation` 已构建成功 |
 | 依赖用例 | TC-NAVIGATION-001 |
-| 操作步骤 | 1. 启动 `./build/demo_navigation.exe`（纯执行，无预期结果）<br>2. 读取窗口内 `Navigator depth =` 行的数值与 `current route =` 行的名称<br>3. 核对两值是否自洽（当前路由应是栈顶）<br>4. 对照窗口标题区显示的页面标题与步骤 2 的当前路由名 |
-| 预期结果 | 2. `Navigator depth = 2`、`current route = about`<br>3. 两者自洽：深度为 2 表示栈内有 `home` 与 `about` 两页，栈顶即 `about`（源码中先以 `home` 构造导航器、随后 `push(about)`）<br>4. 标题区显示 `About`，与当前路由名 `about` 对应，不存在「标题仍是 Home 而路由已是 about」的不一致 |
+| 操作步骤 | 1. 启动 `./build/demo_navigation.exe`（纯执行，无预期结果）<br>2. 读取窗口内 `Navigator depth =` 行的数值与 `current route =` 行的名称<br>3. 核对两值是否自洽（当前路由应是栈顶）<br>4. 对照窗口内实际显示的两行读数文本与步骤 2 取自控件树的数值 |
+| 预期结果 | 2. `Navigator depth = 2`、`current route = about`<br>3. 两者自洽：深度为 2 表示栈内有 `home` 与 `about` 两页，栈顶即 `about`（源码中先以 `home` 构造导航器、随后 `push(about)`）<br>4. 窗口内呈现的 `Navigator depth =` 与 `current route =` 两行文本，与从控件树读到的数值逐字相同（本载体只装配读数文本、不装配 `NavigatorHost`，故路由页面本身不上屏，此为载体口径而非库缺陷；「栈顶即当前上屏页面」的一致性由 TC-NAVIGATION-004 与 TC-NAVIGATION-005 在 `demo_navigator` / `demo_hero` 上覆盖） |
 
 #### TC-NAVIGATION-003 路由注册表查询返回登记结果
 
@@ -219,7 +219,7 @@
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
 | TC-NAVIGATION-001 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：窗口标题 `Navigation · Aurora Demo`，stderr 中 `[run_demo] window shown` 恰 1 行 INF；步骤 5：`demo_navigator` stderr 为 0 行、stdout 为 0 行 | | 本次构建开启 `AURORA_BUILD_INSPECTOR_SERVER=ON`，`demo_navigation` 因此另有 3 行 InspectorServer INF；默认（OFF）构建即恰 1 行，不判为偏差 |
-| TC-NAVIGATION-002 | 2026-09-26 | Qoder Agent | FAIL | 4 | 步骤 2：经 Inspector 读树得 `Navigator depth = 2`、`current route = about`；步骤 3：与源码「以 home 构造、随后 push(about)」自洽；步骤 4：标题区显示的是演示用渐变标题 `Navigation`，界面上不存在任何页面标题，`About` 未出现 | | 载体按 §1.2 定位为静态读数：控件树共 8 节点，`Navigator` / `NavigatorHost` 均为 0，about 页从未装配上屏；预期 4 与载体口径不符，属用例前提问题而非库缺陷，建议改预期或让载体经 `NavigatorHost` 呈现当前页 |
+| TC-NAVIGATION-002 | 2026-09-28 | Qoder Agent | PASS | | 步骤 2：Inspector 树读到 `Navigator depth = 2`、`current route = about`；步骤 3：与源码「以 home 构造、随后 push(about)」自洽（深度 2 即 `home`+`about`，栈顶为 `about`）；步骤 4：窗口内两行读数文本与树内取值逐字相同，帧上可见文本序列含 `Navigator depth = 2` 与 `current route = about` | | 2026-09-26 首轮判 FAIL（步骤 4 原要求「标题区显示 `About`」）：复核后确认该前提与本载体口径不符 —— `demo_navigation` 仅装配读数文本，控件树共 8 节点且 `Navigator`/`NavigatorHost` 均为 0，路由页面从不上屏，标题区显示的是演示用渐变标题 `Navigation`，故界面必然无页面标题，非库缺陷。已按「文档以代码运行时为准」把预期 4 改为核对读数文本，页面呈现一致性移交 TC-NAVIGATION-004/005 |
 | TC-NAVIGATION-003 | 2026-09-26 | Qoder Agent | PASS | | 步骤 2：Inspector 读数 `Router has 'home' = true`；步骤 4：与源码 `register_route("home", ...)` 登记状态一致 | | 取值来自 `/api/tree` 的 `Text.text` 字段，非截图判读；未登记名称不在本载体展示范围内 |
 | TC-NAVIGATION-004 | 2026-09-26 | Qoder Agent | PASS | | 步骤 4：点击后 16 帧连拍（跨度 1.96s，间隔约 120ms）中蓝按钮带数由 2 在 +112ms 与 +248ms 之间一次变为 0，其余 14 帧稳定，未出现 `Detail`/`Home` 中间页；步骤 5：终帧页面文本为 `Settings`，与 URI 末段对应 | | 步骤 2 的初始页实为控制页（两个深链按钮）而非 `Home`——载体启动即 `push` 控制页；首轮点击界面无任何反应，根因是 `NavigatorHost` 非动画换页不发失效请求（新页要等窗口 resize 才上屏），实测中修复并提交 aa01726 后复跑通过 |
 | TC-NAVIGATION-005 | 2026-09-26 | Qoder Agent | PASS | | 步骤 4：点击 `Go to detail` 后色块尺寸按 63x47 → 65x49 → 67x51 → 69x53 → 87x65 → 105x63 → 127x95 → 137x103 → 145x109 → 151x113 → 159x119 px 单调插值，块心像素由品红 (122,33,77) 经灰调 (116,85,96) 过渡到绿调 (8,85,37)，无跳位；步骤 5：终态 159x119 px（≈160x120dp）、均色 (21,162,73) 即详情页绿色，全程任一帧只检出一个彩块 | | 载体首页按钮原 `push` 未带 `RouteTransition`，点击为硬切、无飞行过程，实测中为其补 0.6s 淡变后复跑；两页 Hero 均在 Column 原点，位移分量为 0，故「移动」只体现为尺寸插值；包围盒按 2px 步长采样，读数比真值小 1px |
