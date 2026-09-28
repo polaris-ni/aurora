@@ -5,7 +5,7 @@
 >
 > **片段约定**：本文所有片段统一使用 `au::` 前缀。复制任意单段时，请确保该别名（或 `using namespace aurora;`）已在所处编译单元声明，否则 `au::Xxx` 编译失败。
 >
-> API 契约见 `specification/` 九份子系统文档；架构见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；状态选择见 [`CONCEPTS.md`](CONCEPTS.md) §2；常见坑见本文 §26；运行时调试见本文 §27。
+> API 契约见 `specification/` 九份子系统文档；架构见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；状态选择见 [`CONCEPTS.md`](CONCEPTS.md) §2；常见坑见本文 §26；运行时调试见本文 §27；JSON 读写见本文 §42。
 
 ---
 
@@ -1866,3 +1866,81 @@ args.rest();                      // `--` 之后的原始 token，未经任何�
 [`specification/09-cli.md`](specification/09-cli.md)。
 
 ---
+
+## 42 JSON 值容器（`au::json`）
+
+> 头文件**不随伞头导出**，用前须显式 `#include "aurora/core/json.h"`。`widget/` 层收敛到本类型后，
+> 伞头用户将经 `widget/props_io.h` 传递获得；在此之前这行不能省。
+
+```cpp
+#include "aurora/core/json.h"
+namespace au = aurora;
+
+// ---- 解析：唯一出口是 Result，无抛出式重载、无 discarded 双模式 ----
+auto doc = au::json::parse(R"({"name":"aurora","count":3,"tags":["a","b"]})");
+if (!doc.ok()) {
+    // doc.error() 持 code / message / hint；语法失败已含 line / column / offset
+    return;
+}
+const au::json::Value &root = doc.value();
+
+// ---- 宽容读：缺键 / 类型不符 / 容器不符一律回退默认值（空安全，无解引用风险）----
+const auto name  = root.as_or<std::string_view>("name", "");
+const auto count = root.as_or<std::int64_t>("count", 0);
+const auto first = root.as_or_at<std::string_view>(0, "");   // 索引族用 as_or_at
+
+// ---- 指针读：需要区分「缺失」与「类型不符」时才用；at 不抛，缺失返回 nullptr ----
+if (const auto *tags = root.at("tags"); tags != nullptr && tags->is_array()) {
+    for (const auto &tag : *tags) {          // Array 迭代直接用 begin() / end()
+        (void)tag.as_or<std::string_view>("");
+    }
+}
+
+// ---- 严格读：必须成功、且需要结构化错误 ----
+if (auto n = root.get<std::int64_t>("count"); n.ok()) {
+    (void)n.value();
+}
+
+// ---- 构造与写入 ----
+au::json::Value res = au::json::Value::object();
+res.set("total", 3);                          // 算术值隐式入向构造（按类型精确落域）
+res.set("label", "ready");                    // 字符串隐式入向
+
+au::json::Value list = au::json::Value::array();
+list.reserve(2);                              // 批量构造先预留，避免反复扩容
+list.push_back("first");
+list.push_back("second");
+res.set("items", std::move(list));            // 移动入容器
+
+// ---- 对象迭代：entries() 产出 {key, value} 只读视图 ----
+for (auto entry : res.entries()) {
+    (void)entry.key;
+    (void)entry.value;
+}
+
+// ---- 序列化：返回 Result；dump_into 复用缓冲，适合响应帧热路径 ----
+const auto compact = au::json::dump(res);                            // 紧凑单行
+const auto pretty  = au::json::dump(res, {.indent = 2});             // 缩进
+
+std::string out;
+au::json::dump_into(res, out, {.indent = 2});                        // 追加式，避免每帧分配
+```
+
+要点：
+
+- **读写分离，读不变更 DOM**：读只有 `as_or` / `as_or_at` / `at` / `find` / `as<T>` / `get`，写只有
+  `set` / `push_back` / `erase` / `clear`。**没有 `operator[]`**——读缺失键绝不会静默插入 `null`。
+- **`at` 不抛异常**：键缺失、索引越界、容器类型不符一律返回 `nullptr`（`noexcept`），刻意区别于
+  STL `at` 的 `std::out_of_range`；`find(key)` / `contains(key)` 是 `at(key)` 的等价入口。
+- **优先用宽容族**：语义是「取不到就用默认」时一律 `as_or` / `as_or_at`，不要先判空再解引用。
+- **写操作使引用与指针失效**：`set` / `push_back` / `erase` / `clear` 之后，先前取得的 `Value&`
+  与指针都不可再用（容器由 `std::vector` 承载）；嵌套写入须重新取指针。
+- **视图别名内部存储**：`as<string_view>()` / `as_string()` / `as_raw_number()` 与 `Entry::key` 都
+  别名容器内部数据，仅在该 `Value` 存活且未被修改期间有效；对临时 `Value` 取视图立即悬垂。
+- **严格相等**：同 `Type` 才相等（`Int(1) != Double(1.0)`）；`RawNumber` 按文本比较。
+- **`RawNumber` 不参与数值转换**：超 int64/uint64 域、或与 double 最短往返不一致的字面量原样保真
+  存储，唯一读出口是 `as_raw_number()`。
+- **非有限值不可序列化**：`dump` 遇 `NaN` / `Inf` 返回失败（`json-value-not-serializable`），
+  不宽容转 `null`。
+
+契约见 [`specification/01-core.md`](specification/01-core.md) §9。

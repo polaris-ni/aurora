@@ -1,6 +1,6 @@
 # 序列化、检查器与工具链（serialization / inspector / tooling / log）
 
-> 覆盖 `widget/serialization.h`、`widget/codegen.h`、`widget/yaml.h`、`widget/inspect.h`、`inspector/`、`core/log.h`、`debug/`、仓库私有 `tests/support/test_helpers.h` 与 `tools/`。
+> 覆盖 `widget/serialization.h`、`widget/codegen.h`、`widget/yaml.h`、`widget/inspect.h`、`inspector/`、`core/log.h`、`core/json.h`（JSON 值容器，契约见 [`01-core.md`](01-core.md) §9）、`debug/`、仓库私有 `tests/support/test_helpers.h` 与 `tools/`。
 > 本文件是 UI 树线格式、差分补丁、代码生成、运行时检查、MCP / CLI / LSP 工具链与日志通道的**唯一权威**。
 > `WidgetDescriptor` / `PropDescriptor` 结构见 [`04-widget.md`](04-widget.md) §2.1；`Result` 与 `Error` 见 [`01-core.md`](01-core.md) §3。
 
@@ -10,6 +10,7 @@
 
 | 关注点 | 头文件 / 目标 |
 |:---|:---|
+| JSON 值容器 | `core/json.h`（自有 JSON 值与编解码器，契约见 [`01-core.md`](01-core.md) §9） |
 | 序列化与补丁 | `widget/serialization.h` |
 | 代码生成 | `widget/codegen.h` |
 | YAML 输出 | `widget/yaml.h` |
@@ -33,7 +34,38 @@
 
 `children` 为空时不输出。**属性一律位于 `props` 子对象下**，因此补丁 path 形如 `/children/0/props/show`。
 
-`Json` 类型是 `nlohmann::json` 的别名，定义于 `widget/props_io.h`。
+**值类型**：UI 树的 JSON 值当前由第三方单头库承载——`Json` 是 `nlohmann::json` 的别名，定义于
+`widget/props_io.h`；另有 `storage/storage_types.h`、`cli/command.h`、`widget/yaml.h` 三处安装头
+同样定义该别名。
+
+Aurora 自有 JSON 值容器 `au::json::Value`（`core/json.h`）已落地，是该别名的**收敛目标**。收敛顺序为
+「库内改写 → 工具与测试改写 → 删除四处别名与第三方单头」，属尚未执行的动作；在此之前两者并存，
+本节及 §2.2 的函数签名一律以现状（`Json`）为准。容器自身的类型系统、读写契约与错误码见
+[`01-core.md`](01-core.md) §9。
+
+收敛时逐条应用的机械对照：
+
+| 第三方单头用法 | 收敛后写法 |
+|:---|:---|
+| `Json::parse(s)` | `json::parse(s)` → `Result<Value>` |
+| `Json::parse(s, nullptr, false)` + `is_discarded()` | `if (auto r = json::parse(s)) { … }` |
+| `try { parse } catch (parse_error&)` | Result 解包（`r.ok()` / `r.error()`） |
+| `j["k"] = v;`（写） | `j.set("k", v);` |
+| `j["k"].get<T>()`（读，可缺失） | `j.as_or<T>("k", fallback)`（空安全，不隐式插入） |
+| `j.at("k").get<T>()`（读，保证存在） | 判空后 `j.at("k")->as<T>()`，或 `j.get<T>("k")` |
+| `j.contains("k")` | 同名保留 |
+| `j.erase("k")` | `j.erase("k")`；JSON Pointer 写路径用 `json::erase_pointer` |
+| `for (auto& [k, v] : j.items())` | `for (auto e : j.entries())`，取 `e.key` / `e.value` |
+| `j.push_back(v)` / `j.emplace_back(...)` | `push_back(v)`（不提供 `emplace_back`） |
+| `j.dump()` / `j.dump(2)` | `json::dump(j)` / `json::dump(j, {.indent = 2})`，返回 `Result` |
+| `a == b` | 同名；**语义收严为同类型比较**——跨数值类型不再相等（`1 != 1.0`） |
+| `is_boolean` / `is_number_integer` / `is_number_float` | `is_bool` / `is_integer` / `is_double` |
+| `json::json_pointer(p)` | `json::find_pointer(root, p)` / `resolve_for_write` / `erase_pointer` |
+
+⚠️ **ADL 命名冲突约束**：仓内已存在域级函数 `aurora::serialization::from_json` 与成员 / 域级
+`to_json`，故自有 JSON 模块**不得**定义可被 ADL 命中的同名自由函数模板。其转换入口一律为成员 /
+静态函数（`parse` / `dump` / `as<T>` / `as_or`），且 `aurora::json` 与 `aurora::serialization`
+之间不得 `using namespace` 互相引入。
 
 部分控件的序列化 `type` 名与 C++ 类名不同（`Image` → `ImageView` / `ImageViewProps`）。
 

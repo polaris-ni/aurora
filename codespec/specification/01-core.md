@@ -1,7 +1,7 @@
 # 核心基础层（core）
 
-> 覆盖 `include/aurora/core/`（35 个头文件）与根级 `todo.h`、`commands.h`。
-> 本文件是错误、诊断、日志、异步底座与基础几何类型的**唯一权威**；错误码全量清单见 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)（生成物），编码层面的错误写法规则见 [`CODING_STANDARDS.md`](../CODING_STANDARDS.md) §1。
+> 覆盖 `include/aurora/core/`（36 个头文件）与根级 `todo.h`、`commands.h`。
+> 本文件是错误、诊断、日志、异步底座、基础几何类型与 JSON 值容器的**唯一权威**；错误码全量清单见 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)（生成物），编码层面的错误写法规则见 [`CODING_STANDARDS.md`](../CODING_STANDARDS.md) §1。
 
 ---
 
@@ -19,6 +19,7 @@
 | 文本与编码 | `utf8.h`、`string_util.h`、`directionality.h` |
 | 平台与能力查询 | `platform.h`、`enums.h`、`native_surface.h` |
 | 无障碍（a11y） | `accessibility.h`（角色 / 动作 / 节点 / 事件 / 设置等纯数据类型与指针级钩子）、`a11y_types.h`（状态 / 取值域 / 选区值类型）、`a11y_provider.h`（桥抽象与注册表）、`a11y_text.h`（UTF-8 ↔ UTF-16 偏移映射） |
+| JSON 值容器 | `json.h`（公共轻头；实现位于 `src/aurora/core/json/`，契约见 §9） |
 | 其他 | `image.h`、`font.h`、`literals.h`、`version.h` |
 
 根级头文件：`aurora.h`（唯一入口）、`aurora_fwd.h`（仅前向声明，供只需指针/引用的编译单元降低包含成本）、`aurora_pch.h`、`commands.h`、`todo.h`、`imperative.h`（命令式逃生舱：就地执行一段命令式代码块）。（原根级 `test_helpers.h` 已迁至 `tests/support/test_helpers.h`，定位为仓库私有测试设施，退出公共 API 与 `aurora_api.json`。）
@@ -411,3 +412,176 @@ auto node = au::find_node_by_path(root, path);  // widget/inspect.h，位于 aur
 - 运行时：缺少必要属性的组件渲染为占位框而非崩溃（降级视觉语言见 #21）。
 
 **验收标准：** 只填了 label 的控件、带 `au::TODO` 回调的界面，均可编译、可渲染、可运行，并留下可读警告指明未完成处。
+
+---
+
+## 9 JSON 值容器（`core/json.h`）
+
+> 覆盖 `include/aurora/core/json.h`（公共轻头）与 `src/aurora/core/json/`（`value.cpp` / `parse.cpp` /
+> `dump.cpp`）。
+> 本模块是 Aurora 自有 JSON **值容器与编解码器**的唯一权威；UI 树线格式、差分补丁与工具链侧的
+> 序列化契约见 [`08-tooling.md`](08-tooling.md) §2，复制即用配方见 [`GUIDELINE.md`](../GUIDELINE.md)。
+
+### 9.1 定位与边界
+
+`aurora::json`（别名 `au::json`）提供纯 DOM 的 JSON 值容器与解析 / 序列化，取代此前对第三方单头
+JSON 库的全量依赖。四条边界约束：
+
+| 约束 | 内容 |
+|:---|:---|
+| **公共模块** | 头位于 `include/aurora/core/json.h`，随 semver 承诺稳定性；值类型判别 `aurora::json::Type` 经 `tools/include/known_enums.h` 以 `JsonType` 进 `aurora_api.json` 的 `enums` 段（AI 可枚举） |
+| **轻头承诺** | 目标 < 500 行；头内不落模板实现与大段逻辑，实现全部在 `src/aurora/core/json/`。这是编译收益的前提——伞头 `aurora.h` 经 `widget/props_io.h` 传递包含本头，其体量直接进入每个消费者 TU |
+| **层边界** | 只允许 `#include "aurora/core/..."` 与标准库，由 `tools/check/check_core_layer_boundary.py` 守护 |
+| **零外部依赖** | 纯计算模块：不触网络、不触 GPU、不触平台 API |
+
+值类型与读写语义刻意区别于常见的第三方 JSON 库：**读缺失键绝不隐式插入**、**无隐式出向类型转换**、
+**对象键序为插入序**、**数值三判别 + 超域保真**、**const 与非 const 访问行为一致**。
+
+### 9.2 类型系统（9 值）
+
+| `Type` | 序数 | 承载类型 | 语义 |
+|:---|--:|:---|:---|
+| `Null` | 0 | — | `null` |
+| `Bool` | 1 | `bool` | `true` / `false` |
+| `Int` | 2 | `std::int64_t` | 有符号整数（int64 域内） |
+| `UInt` | 3 | `std::uint64_t` | 无符号整数（> `INT64_MAX` 的正整数） |
+| `Double` | 4 | `double` | 双精度浮点 |
+| `RawNumber` | 5 | `RawNumber` | 保真数字（超 int64/uint64 域，或与 double 最短往返不一致的原字面量） |
+| `String` | 6 | `std::string` | UTF-8 字符串 |
+| `Array` | 7 | `std::vector<Value>` | 数组（插入序） |
+| `Object` | 8 | `std::vector<std::pair<std::string, Value>>` | 对象（插入序） |
+
+**序数与内部 `std::variant` 的 alternative index 强制同构**（模块内部契约）：`type()` 实现为
+`static_cast<Type>(data_.index())`，零分支。两表任一侧重排即由 `tests/unit/utest_json.cpp` 的逐
+枚举量断言捕获，不存在静默漂移窗口。
+
+类型谓词：`is_null()` / `is_bool()` / `is_int()` / `is_uint()` / `is_double()` / `is_raw_number()` /
+`is_string()` / `is_array()` / `is_object()`，外加合成谓词 `is_number()`（Int ∪ UInt ∪ Double ∪
+RawNumber）与 `is_integer()`（Int ∪ UInt）。
+
+### 9.3 读出口三族
+
+| 族 | 入口 | 缺失 / 类型不符时的行为 |
+|:---|:---|:---|
+| **宽容** | `as_or(fallback)`、`as_or(key, fallback)`、`as_or_at(index, fallback)` | 回退 `fallback`；空安全、零 UB、不返回指针 |
+| **指针** | `at(key)`、`at(index)`、`find(key)` | 返回 `nullptr`；**不抛异常** |
+| **严格** | `as<T>()`、`get<T>(key)` | 返回 `Result<T>`，失败码 `json-type-mismatch` |
+
+宽容族是「取不到就用默认」场景的官方入口，指针族用于需要区分「缺失」与「类型不符」的场合，
+严格族用于必须成功且需要结构化错误的位置。另有**无模板族**（免实例化，供热路径与
+`widget/props_io.h` 的宽容解析复用）：`as_bool()` / `as_int()` / `as_double()` / `as_string()` /
+`as_raw_number()`，统一返回 `std::optional`。
+
+**`at` 不抛是对 STL 的刻意偏离**：STL 与常见 JSON 库的 `at` 一律「缺失或越界即抛
+`std::out_of_range`」，本模块的 `at` 返回指针、缺失返回 `nullptr`，使调用方在 `noexcept` 路径上
+也能安全探测。`find(key)` / `contains(key)` 是 `at(key)` 的等价入口，保留供键语义自述。
+
+**`as<T>` 支持封闭类型集**（无用户特化点；域外类型编译期拒绝）：`bool` / `int` / `std::int64_t` /
+`std::uint64_t` / `std::size_t` / `float` / `double` / `std::string` / `std::string_view`。数值族按
+「值域内可提升、收窄可丢精度」规则转换。**`RawNumber` 全程不参与数值转换**——`is_string()` 对其为
+false，`as_string()` 亦不返回其文本，唯一读出口是 `as_raw_number()`；保真语义与「可被数值消费」
+互斥，混入会掩盖精度损失。
+
+### 9.4 写接口与引用失效
+
+| 接口 | 适用 | 语义 |
+|:---|:---|:---|
+| `set(key, v)` | Object | 插入或覆盖；**重复键后值覆盖前值，位置保持首次插入处** |
+| `push_back(v)` | Array | 追加（不提供 `emplace_back`） |
+| `reserve(n)` | Array / Object | 容量预留（批量构造热路径） |
+| `erase(key)` / `erase_at(index)` | Object / Array | 删除，返回是否命中 |
+| `clear()` | 容器 | 清空为对应空容器 |
+
+**写操作使既有引用与指针失效**：Array / Object 由 `std::vector` 承载，故 `set` / `push_back` /
+`erase` / `clear` 之后，先前取得的 `Value&` 与指针均不可再用。这是写接口返回 `void` 而非引用的
+原因——嵌套写入统一走指针重载，失效点显式可见，不提供「返回引用且可链式持有」的接口。
+
+**禁隐式出向转换**：算术与字符串构造为**隐式入向**（按 `T` 的精确类别落域，绝不跨类别），但
+**不提供** `operator T()` / `operator bool()`。判空与取值一律走显式谓词与读族，避免
+「`if (value)` 编译通过」这类静默错误。
+
+### 9.5 相等语义
+
+**同 `Type` 严格比较**：跨数值类型不相等（`Int(1) != Double(1.0)`）。这比「按值跨类型相等」的
+第三方惯例更严格，代价是差分把 `1` → `1.0` 视为一次真实变更，收益是类型变更不再被吞掉；
+`RawNumber` 按文本比较。
+
+### 9.6 解析
+
+```cpp
+struct ParseOptions {
+    std::size_t max_depth = 512;   // 嵌套深度上限，超限 → json-depth-exceeded
+    bool validate_utf8 = true;     // 字符串与文档级 UTF-8 校验
+};
+
+// 解析完整 RFC 8259 文档；失败持结构化 Error（含 line / column / offset）
+[[nodiscard]] auto parse(std::string_view input, ParseOptions opts = {}) -> Result<Value>;
+```
+
+实现为手写递归下降（全部在 `src/aurora/core/json/parse.cpp`），唯一出口是 `Result`——**无抛出式
+重载、无 discarded 双模式**，`Error` 携带 line / column / offset 与 ≤ 24 字节的上下文片段。
+
+| 边界情形 | 规则 |
+|:---|:---|
+| 前导 UTF-8 BOM | **拒绝**（RFC 8259 §8.1 明禁），无宽容开关 |
+| `\u0000` | **合法**：解出内嵌 NUL 原样存入 `std::string`，视图长度不被截断 |
+| 孤立代理项（未配对 / 配对顺序错） | **拒绝** |
+| 顶层标量（`42` / `"s"` / `true`） | **合法**（`JSON-text = ws value ws`） |
+| 顶层尾随内容（`{} {}`） | 拒绝 |
+| 重复键 | 后值覆盖前值，位置保持首次插入处 |
+| 空输入 / 仅空白 | 拒绝 |
+| 嵌套深度超限 | `json-depth-exceeded` |
+
+**数字分派（三判别 + 保真）**：整数字面量先试 `int64`、再试 `uint64`，两者皆溢出则存为
+`RawNumber`；小数字面量经 `std::from_chars` 解析为 `double`，若域外（如 `1e999`）或
+`std::to_chars` 最短往返与原文不一致（忽略符号、小数点、指数与前后零后比对）则同样存为
+`RawNumber`。单一规则，无特例分支。`-0` 归 `Int(0)`（JSON 无负零整数语义），`-0.0` 归
+`Double(-0.0)`。
+
+### 9.7 序列化
+
+```cpp
+struct DumpOptions {
+    int indent = -1;             // < 0 紧凑单行；≥ 0 为每层缩进空格数
+    bool ensure_ascii = false;   // true 时非 ASCII 转 \uXXXX（含代理对编码）
+};
+
+[[nodiscard]] auto dump(const Value &v, DumpOptions opts = {}) -> Result<std::string>;
+auto dump_into(const Value &v, std::string &out, DumpOptions opts = {}) -> Result<void>;
+```
+
+- 键序 = 插入序；
+- `Double` 文本化走 `std::to_chars` 最短往返，整值补 `.0` 后缀（`3.0` 不退化为 `3`，类型可辨识）；
+- `RawNumber` 原样输出存储的字面量（保真闭环）；
+- **非有限值硬失败**：`NaN` / `Inf` 无 RFC 8259 文本形态，返回 `json-value-not-serializable`，
+  不宽容转 `null`；
+- 转义：`"` 与 `\` 必转，`< 0x20` 控制字符转 `\u00XX`，`/` 不转；`ensure_ascii` 时非 ASCII 转
+  `\uXXXX`（BMP 之外经代理对）；
+- `dump_into` 复用调用方缓冲，供响应帧热路径避免每帧分配。
+
+### 9.8 错误码
+
+复用既有 `JsonParseError` / `json-parse-error` 作为解析失败与 DOM 访问失败的统一码位；新增三条
+（`category` 一律 `io`，元数据见 [`errors.toml`](../errors.toml)，全量清单见
+[`ERROR_CATALOG.md`](../ERROR_CATALOG.md)）：
+
+| enum | slug | 触发 |
+|:---|:---|:---|
+| `JsonDepthExceeded` | `json-depth-exceeded` | 解析嵌套超 `ParseOptions::max_depth` |
+| `JsonTypeMismatch` | `json-type-mismatch` | `as<T>()` / `get(key)` 类型不符或域外 |
+| `JsonValueNotSerializable` | `json-value-not-serializable` | `dump` 遇 `NaN` / `Inf` |
+
+错误消息模板含多个占位符（`{max}` / `{line}` / `{column}` / `{expected}` / `{actual}`），而
+`format_message` 对**缺失占位符原样保留**，故这些模板每次调用都必须传齐全部键——实现以「构造错误
+消息的唯一私有工厂」集中保证，不在调用点散落手拼。
+
+### 9.9 与序列化层的值类型关系
+
+`widget/` 层的序列化接口（`to_json` / `from_json` / `diff` / `apply_patch` 等）当前仍以第三方单头
+JSON 库的别名 `Json` 作为值类型；本模块提供其收敛目标类型 `aurora::json::Value`。收敛顺序为
+「库内改写 → 工具与测试改写 → 删除别名与第三方单头」，属尚未执行的动作；收敛完成前两者并存，
+`widget/` 层的签名以现状为准（别名定义点与迁移约束见 [`08-tooling.md`](08-tooling.md) §2.1）。
+
+本模块的覆盖用例见 `tests/unit/utest_json.cpp`（套件名恒等于文件 stem）：语法合规矩阵、边界语义、
+全类型往返、键序与重复键、错误位置与占位符填充、类型判别与内部存储的同构、封闭读类型集、保真数字
+不参与数值转换、严格相等语义、容器读写与迭代视图、序列化转义与非有限值拒绝。

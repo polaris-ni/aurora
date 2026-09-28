@@ -75,7 +75,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 
 ---
 
-## 5 特性清单（#1–#29）
+## 5 特性清单（#1–#30）
 
 需求编号 `#N` 是稳定的需求标识。下表给出每条需求的**规格落点**（文档 + 章节）。
 
@@ -110,6 +110,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | 27 | 滚动位置保存/恢复（`app::ScrollStorage`） | 重建 / 重启后滚动位置可还原，且多窗口与同键争用不串味 | [`06-app-platform.md`](specification/06-app-platform.md) §9.3、[`04-widget.md`](specification/04-widget.md) §3.3 |
 | 28 | 列表拖拽重排（`ReorderableList`） | 用户可拖动条目换位：跟手 / 让位 / 近边缘自动滚动 / 落位动画，数据由控件改写 | [`04-widget.md`](specification/04-widget.md) §3.4、[`GUIDELINE.md`](GUIDELINE.md) §36 |
 | 29 | 滚动交互增强（`ScrollSnap` / `PullToRefresh` / `StickyHeader` / `offset_signal`） | 轮播整页对齐、分组头部钉顶、到顶下拉即刷新、嵌套滚动余量移交，且全程尊重 reduce-motion | [`04-widget.md`](specification/04-widget.md) §3.3、[`05-event-navigation.md`](specification/05-event-navigation.md) §3.3、[`GUIDELINE.md`](GUIDELINE.md) §38 |
+| 30 | 自研 JSON 值容器与编解码器（`au::json`） | AI 可在无第三方 JSON 依赖下解析 / 构造 / 序列化，且读缺失键不隐式变更文档 | [`01-core.md`](specification/01-core.md) §9、[`GUIDELINE.md`](GUIDELINE.md) §42 |
 
 ---
 
@@ -178,7 +179,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 
 | 文档 | 覆盖 |
 |:---|:---|
-| [`01-core.md`](specification/01-core.md) | 基础层 `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池、`au::TODO`；需求 #18 / #19 / #21 / #23 |
+| [`01-core.md`](specification/01-core.md) | 基础层 `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池、JSON 值容器、`au::TODO`；需求 #18 / #19 / #21 / #23 / #30 |
 | [`02-state.md`](specification/02-state.md) | 响应式 `state/`：信号原语、订阅生命周期、`Store`、异步与协程、依赖图与撤销；需求 #6 / #19 |
 | [`03-layout-render.md`](specification/03-layout-render.md) | `layout/` + `render/` + `image/` + `media/`：布局协议、Flex / Grid 算法、Painter、字体引擎、Surface 与后端、音频图（Web Audio 语义节点图 + WASAPI / ALSA / Web Audio 三端设备层）；需求 #11 / #20 |
 | [`04-widget.md`](specification/04-widget.md) | `widget/` + `ui/`：控件基类契约、自描述、控件清单、可定制性契约；需求 #7 / #22 |

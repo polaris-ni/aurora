@@ -29,7 +29,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 ├───────────────────────────────────────────┤
 │  Platform Abstraction (include/aurora/window/) │  平台抽象：Surface 家族
 ├───────────────────────────────────────────┤
-│  Foundation (include/aurora/core/)        │  基础层：types / Result / Error / Log
+│  Foundation (include/aurora/core/)        │  基础层：types / Result / Error / Log / JSON 值容器
 └───────────────────────────────────────────┘
 ```
 
@@ -85,7 +85,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 | 模块 | 路径 | 主要头文件 |
 |:---|:---|:---|
-| 基础层 | `core/` | `types.h` `result.h`（`Result<T>` / `Error`） `log.h` `diagnostics.h` `color.h` `dimension.h` `image.h` `font.h` `expected.h` `strict_mode.h` `event_stream.h` `accessibility.h` `a11y_types.h` `a11y_provider.h` `a11y_text.h` |
+| 基础层 | `core/` | `types.h` `result.h`（`Result<T>` / `Error`） `log.h` `diagnostics.h` `color.h` `dimension.h` `image.h` `font.h` `expected.h` `strict_mode.h` `event_stream.h` `accessibility.h` `a11y_types.h` `a11y_provider.h` `a11y_text.h` `json.h`（JSON 值容器，见 `specification/01-core.md` §9） |
 | 响应式核心 | `state/` | `state.h` `computed.h` `effect.h` `binding.h` `immutable.h`（`Immutable<T>` / `Mutable<T>` 作用域权限包装） `store.h` `reactive.h` `signal_view.h` `async.h` `coroutine.h` `state_graph.h` `state_registry.h` |
 
 ### 4.2 布局与渲染
@@ -332,6 +332,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 ## 9 序列化与元信息
 
+- **JSON 值容器**：`au::json::Value`（`core/json.h`）是序列化层的底层值载体，自带解析 / 构造 / 序列化与三族读出口（宽容 / 指针 / 严格），不依赖任何第三方 JSON 库；契约见 [`specification/01-core.md`](specification/01-core.md) §9。
 - **树 ⇄ JSON**：`serialization::to_json` / `from_json` / `diff` / `diff_into` / `apply_patch`，结合 `WidgetRegistry`（工厂注册）。`from_json` 流程：`make` → `deserialize_props` → `adopt_children`。
 - **树 → YAML**：`serialization::to_yaml(const Widget&)` / `to_yaml(const Json&)`，内部经 `yaml.h` 的递归下降发射器把 JSON 转为 YAML（仅输出方向，无 `from_yaml`）。
 - **树 ⇄ 源码**：`serialization::to_code` 反向生成等效构造代码。
