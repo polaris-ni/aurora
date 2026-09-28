@@ -216,6 +216,13 @@ if (AURORA_BUILD_TESTS)
                     -sALLOW_MEMORY_GROWTH=1
                     "--post-js=${CMAKE_SOURCE_DIR}/tests/support/wasm_noderawfs_cwd.js")
         endif ()
+
+        # TODO(json-migration): 过渡点，波 4 删除。
+        # 新旧 JSON 库共存期，仅测试 runner 打开该宏，供 tests/unit/utest_json_compare.cpp
+        # 与既有 nlohmann 做语义对拍（正确性锚）。nlohmann 是纯头库且其头目录已由 aurora
+        # 目标 PUBLIC 暴露（见顶层 CMakeLists.txt 的 third_party 段），故此处只需开关。
+        # 波 4 移除 nlohmann 时，本段与该对拍用例文件一并删除。
+        target_compile_definitions(${tgt} PRIVATE AURORA_HAVE_NLOHMANN)
     endfunction()
 
     set(_runner_targets "")

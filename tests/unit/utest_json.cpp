@@ -782,4 +782,134 @@ AURORA_TEST_CASE(refuses_to_serialize_non_finite_doubles) {
     AURORA_TEST_CHECK_EQ(list_dump.error().code_enum, ErrorCode::JsonValueNotSerializable);
 }
 
+// ============================================================================
+// JSON Pointer（RFC 6901 最小集）
+// ============================================================================
+
+AURORA_TEST_CASE(addresses_members_through_pointers) {
+    const auto root = aj::parse(R"({"a":{"b":[10,20]},"~x":1,"k/1":2})");
+    AURORA_TEST_REQUIRE(root.ok());
+    const aj::Value &doc = root.value();
+
+    // 空 pointer 指向文档自身。
+    AURORA_TEST_CHECK(aj::find_pointer(doc, "") == &doc);
+
+    // 对象键与数组下标混合路径。
+    const aj::Value *nested = aj::find_pointer(doc, "/a/b/1");
+    AURORA_TEST_REQUIRE(nested != nullptr);
+    AURORA_TEST_CHECK_EQ(nested->as_or<std::int64_t>(0), 20);
+
+    // 段转义：~0 还原为 '~'、~1 还原为 '/'（RFC 6901 §3）。
+    const aj::Value *tilde = aj::find_pointer(doc, "/~0x");
+    AURORA_TEST_REQUIRE(tilde != nullptr);
+    AURORA_TEST_CHECK_EQ(tilde->as_or<std::int64_t>(0), 1);
+
+    const aj::Value *with_slash = aj::find_pointer(doc, "/k~11");
+    AURORA_TEST_REQUIRE(with_slash != nullptr);
+    AURORA_TEST_CHECK_EQ(with_slash->as_or<std::int64_t>(0), 2);
+}
+
+AURORA_TEST_CASE(pointer_misses_report_null) {
+    const auto root = aj::parse(R"({"a":[1],"s":"txt"})");
+    AURORA_TEST_REQUIRE(root.ok());
+    const aj::Value &doc = root.value();
+
+    AURORA_TEST_CHECK(aj::find_pointer(doc, "a") == nullptr);  // 缺前导 '/'
+    AURORA_TEST_CHECK(aj::find_pointer(doc, "/missing") == nullptr);  // 键不存在
+    AURORA_TEST_CHECK(aj::find_pointer(doc, "/a/9") == nullptr);  // 数组越界
+    AURORA_TEST_CHECK(aj::find_pointer(doc, "/a/x") == nullptr);  // 数组段非数字
+    AURORA_TEST_CHECK(aj::find_pointer(doc, "/s/x") == nullptr);  // 标量下取子项
+}
+
+AURORA_TEST_CASE(resolves_write_paths_and_creates_missing_layers) {
+    aj::Value doc = aj::Value::object();
+
+    // 空 pointer 落在根自身。
+    const auto at_root = aj::resolve_for_write(doc, "");
+    AURORA_TEST_REQUIRE(at_root.ok());
+    AURORA_TEST_CHECK(at_root.value() == &doc);
+
+    // 缺失中间层按下一段形态建容器：数字段 → Array。
+    auto list_slot = aj::resolve_for_write(doc, "/list/0");
+    AURORA_TEST_REQUIRE(list_slot.ok());
+    *list_slot.value() = aj::Value(7);
+    const aj::Value *list = aj::find_pointer(doc, "/list");
+    AURORA_TEST_REQUIRE(list != nullptr);
+    AURORA_TEST_CHECK_TRUE(list->is_array());
+
+    // 非数字段 → Object。
+    auto name_slot = aj::resolve_for_write(doc, "/meta/name");
+    AURORA_TEST_REQUIRE(name_slot.ok());
+    *name_slot.value() = aj::Value("aurora");
+    const aj::Value *meta = aj::find_pointer(doc, "/meta");
+    AURORA_TEST_REQUIRE(meta != nullptr);
+    AURORA_TEST_CHECK_TRUE(meta->is_object());
+
+    // 数组上 `-` 与「索引 == 长度」都按追加处理。
+    auto dash_slot = aj::resolve_for_write(doc, "/list/-");
+    AURORA_TEST_REQUIRE(dash_slot.ok());
+    *dash_slot.value() = aj::Value(8);
+    auto append_slot = aj::resolve_for_write(doc, "/list/2");
+    AURORA_TEST_REQUIRE(append_slot.ok());
+    *append_slot.value() = aj::Value(9);
+    AURORA_TEST_CHECK_EQ(aj::find_pointer(doc, "/list")->size(), 3U);
+
+    // 非 const 重载返回可写槽位。
+    aj::Value *writable = aj::find_pointer(doc, "/list/0");
+    AURORA_TEST_REQUIRE(writable != nullptr);
+    *writable = aj::Value(70);
+    AURORA_TEST_CHECK_EQ(aj::find_pointer(doc, "/list/0")->as_or<std::int64_t>(0), 70);
+}
+
+AURORA_TEST_CASE(rejects_invalid_write_paths) {
+    aj::Value doc = aj::Value::object();
+
+    // 语法非法：非空且不以 '/' 开头。
+    const auto bad_syntax = aj::resolve_for_write(doc, "a/b");
+    AURORA_TEST_REQUIRE_FALSE(bad_syntax.ok());
+    AURORA_TEST_CHECK_EQ(bad_syntax.error().code_enum, ErrorCode::JsonParseError);
+
+    // 在标量下继续下探。
+    doc.set("s", aj::Value("text"));
+    const auto into_scalar = aj::resolve_for_write(doc, "/s/x");
+    AURORA_TEST_REQUIRE_FALSE(into_scalar.ok());
+    AURORA_TEST_CHECK_EQ(into_scalar.error().code_enum, ErrorCode::JsonTypeMismatch);
+
+    // 数组索引越界（超出可追加位）。
+    doc.set("arr", aj::Value::array());
+    const auto out_of_range = aj::resolve_for_write(doc, "/arr/3");
+    AURORA_TEST_REQUIRE_FALSE(out_of_range.ok());
+    AURORA_TEST_CHECK_EQ(out_of_range.error().code_enum, ErrorCode::JsonTypeMismatch);
+
+    // `-` 与「索引 == 长度」都是追加位，只能作末段：出现在中间段一律拒绝。
+    const auto dash_not_last = aj::resolve_for_write(doc, "/arr/-/x");
+    AURORA_TEST_REQUIRE_FALSE(dash_not_last.ok());
+    AURORA_TEST_CHECK_EQ(dash_not_last.error().code_enum, ErrorCode::JsonTypeMismatch);
+
+    const auto append_not_last = aj::resolve_for_write(doc, "/arr/0/x");  // arr 为空，0 == size
+    AURORA_TEST_REQUIRE_FALSE(append_not_last.ok());
+    AURORA_TEST_CHECK_EQ(append_not_last.error().code_enum, ErrorCode::JsonTypeMismatch);
+}
+
+AURORA_TEST_CASE(erases_members_through_pointers) {
+    auto root = aj::parse(R"({"a":1,"b":[10,20,30]})");
+    AURORA_TEST_REQUIRE(root.ok());
+    aj::Value &doc = root.value();
+
+    AURORA_TEST_CHECK_TRUE(aj::erase_pointer(doc, "/a").value());
+    AURORA_TEST_CHECK(aj::find_pointer(doc, "/a") == nullptr);
+
+    AURORA_TEST_CHECK_TRUE(aj::erase_pointer(doc, "/b/1").value());
+    AURORA_TEST_CHECK_EQ(aj::find_pointer(doc, "/b")->size(), 2U);
+
+    // 未命中不算错误。
+    AURORA_TEST_CHECK_FALSE(aj::erase_pointer(doc, "/nope").value());
+    AURORA_TEST_CHECK_FALSE(aj::erase_pointer(doc, "/b/9").value());
+
+    // 根不可删除：空 pointer 是错误。
+    const auto on_root = aj::erase_pointer(doc, "");
+    AURORA_TEST_REQUIRE_FALSE(on_root.ok());
+    AURORA_TEST_CHECK_EQ(on_root.error().code_enum, ErrorCode::JsonParseError);
+}
+
 }  // namespace aurora::test_cases::utest_json
