@@ -4,10 +4,10 @@
 #include <string>
 #include <vector>
 
+#include "aurora/core/json.h"
 #include "aurora/state/effect.h"
 #include "aurora/state/state.h"
 #include "aurora/state/state_registry.h"
-#include "aurora/widget/props_io.h"
 
 namespace aurora {
 
@@ -16,7 +16,7 @@ namespace aurora {
  *
  * 从运行期活着的 State / Effect 网络读出节点（state / effect）与边
  * （state → effect 表示「观察」；effect → state 表示「依赖」），
- * 输出为 `Json` 或人类可读文本，供调试 / 文档 / 测试使用。
+ * 输出为 JSON 值（`au::json::Value`）或人类可读文本，供调试 / 文档 / 测试使用。
  *
  * @note Thread: main-thread only
  * @note Side-effects: none
@@ -96,25 +96,25 @@ class StateGraph {
         return out;
     }
 
-    [[nodiscard]] static auto to_json() -> Json {
-        Json j = Json::object();
-        Json n = Json::array();
+    [[nodiscard]] static auto to_json() -> json::Value {
+        auto j = json::Value::object();
+        auto n = json::Value::array();
         for (const auto &[id, kind] : nodes()) {
-            Json o = Json::object();
-            o["id"] = id;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
-            o["kind"] = kind;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+            auto o = json::Value::object();
+            o.set("id", id);
+            o.set("kind", kind);
             n.push_back(o);
         }
-        Json e = Json::array();
+        auto e = json::Value::array();
         for (const auto &[from, to, kind] : edges()) {
-            Json o = Json::object();
-            o["from"] = from;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
-            o["to"] = to;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
-            o["kind"] = kind;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+            auto o = json::Value::object();
+            o.set("from", from);
+            o.set("to", to);
+            o.set("kind", kind);
             e.push_back(o);
         }
-        j["nodes"] = n;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
-        j["edges"] = e;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        j.set("nodes", n);
+        j.set("edges", e);
         return j;
     }
 
@@ -142,7 +142,7 @@ class StateGraph {
 };
 
 /// @brief 便捷自由函数（等价 `StateGraph::to_json` / `StateGraph::to_text`）。
-[[nodiscard]] inline auto state_graph() -> Json { return StateGraph::to_json(); }
+[[nodiscard]] inline auto state_graph() -> json::Value { return StateGraph::to_json(); }
 [[nodiscard]] inline auto state_graph_text() -> std::string { return StateGraph::to_text(); }
 
 }  // namespace aurora

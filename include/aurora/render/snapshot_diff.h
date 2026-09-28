@@ -11,8 +11,8 @@
 #include <vector>
 
 #include "aurora/core/image.h"
+#include "aurora/core/json.h"
 #include "aurora/core/types.h"
-#include "aurora/widget/props_io.h"
 
 namespace aurora {
 
@@ -463,7 +463,7 @@ struct SnapshotDiffReport {
     [[nodiscard]] auto passed() const -> bool { return raw.passed(); }
 
     /// @brief 结构化信封，供 MCP / Inspector 返回给调用方。
-    [[nodiscard]] auto to_json() const -> Json;
+    [[nodiscard]] auto to_json() const -> json::Value;
 
     /// @brief 多行文本摘要。`max_regions` 限制逐条列出的条数（其余折叠为一行计数）。
     [[nodiscard]] auto to_text(std::size_t max_regions = 8) const -> std::string;
@@ -472,51 +472,51 @@ struct SnapshotDiffReport {
 namespace detail {
 
 /// @brief 矩形 → JSON 对象 {x,y,w,h}。矩形统一用这一种编码，避免各消费方自行约定。
-[[nodiscard]] inline auto rect_to_json(const Rect &r) -> Json {
-    Json j = Json::object();
-    j["x"] = r.origin.x;
-    j["y"] = r.origin.y;
-    j["w"] = r.size.width;
-    j["h"] = r.size.height;
+[[nodiscard]] inline auto rect_to_json(const Rect &r) -> json::Value {
+    auto j = json::Value::object();
+    j.set("x", r.origin.x);
+    j.set("y", r.origin.y);
+    j.set("w", r.size.width);
+    j.set("h", r.size.height);
     return j;
 }
 
 }  // namespace detail
 
-inline auto SnapshotDiffReport::to_json() const -> Json {
-    Json j = Json::object();
-    j["size_mismatch"] = raw.size_mismatch;
-    j["passed"] = passed();
-    j["pixel_diff_count"] = raw.pixel_diff_count;
-    j["max_color_delta"] = raw.max_color_delta;
-    j["diff_ratio"] = raw.diff_ratio;
-    j["attributed_ratio"] = attributed_ratio;
+inline auto SnapshotDiffReport::to_json() const -> json::Value {
+    auto j = json::Value::object();
+    j.set("size_mismatch", json::Value{raw.size_mismatch});
+    j.set("passed", json::Value{passed()});
+    j.set("pixel_diff_count", raw.pixel_diff_count);
+    j.set("max_color_delta", raw.max_color_delta);
+    j.set("diff_ratio", raw.diff_ratio);
+    j.set("attributed_ratio", attributed_ratio);
 
-    Json region_arr = Json::array();
+    auto region_arr = json::Value::array();
     for (const DiffRegion &r : regions) {
-        Json o = detail::rect_to_json(r.bounds);
-        o["diff_pixels"] = r.diff_pixels;
-        o["coverage"] = r.coverage;
-        o["max_color_delta"] = r.max_color_delta;
+        auto o = detail::rect_to_json(r.bounds);
+        o.set("diff_pixels", r.diff_pixels);
+        o.set("coverage", r.coverage);
+        o.set("max_color_delta", r.max_color_delta);
         region_arr.push_back(o);
     }
-    j["regions"] = region_arr;
+    j.set("regions", region_arr);
 
-    Json attr_arr = Json::array();
+    auto attr_arr = json::Value::array();
     for (const RegionAttribution &a : attributed) {
-        Json o = Json::object();
-        o["region"] = detail::rect_to_json(a.region.bounds);
-        o["diff_pixels"] = a.region.diff_pixels;
+        auto o = json::Value::object();
+        o.set("region", detail::rect_to_json(a.region.bounds));
+        o.set("diff_pixels", a.region.diff_pixels);
         // 未归因时用 null 而非空串；但注意**根控件的合法路径就是空串**，故这里不能反过来把
         // 空路径当作「未归因」——判据统一交给 `attributed()`（看类型名）。
-        o["widget_path"] = a.attributed() ? Json(a.widget_path) : Json(nullptr);
-        o["widget_type"] = a.attributed() ? Json(a.widget_type) : Json(nullptr);
-        o["widget_box"] = detail::rect_to_json(a.widget_bounds);
-        o["widget_area_ratio"] = a.widget_area_ratio;
-        o["partial_overlap"] = a.partial_overlap;
+        o.set("widget_path", a.attributed() ? json::Value{a.widget_path} : json::Value{});
+        o.set("widget_type", a.attributed() ? json::Value{a.widget_type} : json::Value{});
+        o.set("widget_box", detail::rect_to_json(a.widget_bounds));
+        o.set("widget_area_ratio", a.widget_area_ratio);
+        o.set("partial_overlap", json::Value{a.partial_overlap});
         attr_arr.push_back(o);
     }
-    j["attributed"] = attr_arr;
+    j.set("attributed", attr_arr);
     return j;
 }
 

@@ -10,10 +10,13 @@
 
 #include "aurora/state/state_graph.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_state_graph {
 
 namespace m = aurora::testing::matchers;  // 匹配器工厂别名（禁止 using-directive）
+using aurora::testing::require_child;
+using aurora::testing::require_field;
 
 /// @brief 复现 StateGraph::ptr_id 的指针标识（同为 os << const void*，平台格式一致），
 ///        用于把本用例创建的 State/Effect 与图节点/边按 id 关联。
@@ -122,28 +125,31 @@ AURORA_TEST_CASE(to_json_reports_nodes_and_edges_shape) {
 
     const auto j = aurora::state_graph();
     AURORA_TEST_REQUIRE_TRUE(j.contains("nodes"));
-    AURORA_TEST_REQUIRE_TRUE(j["nodes"].is_array());
+    AURORA_TEST_REQUIRE_TRUE(require_child(j, "nodes")->is_array());
     AURORA_TEST_REQUIRE_TRUE(j.contains("edges"));
-    AURORA_TEST_REQUIRE_TRUE(j["edges"].is_array());
+    AURORA_TEST_REQUIRE_TRUE(require_child(j, "edges")->is_array());
 
     bool saw_state_node = false;
-    for (const auto &item : j["nodes"]) {
-        AURORA_TEST_REQUIRE(item.contains("id"));
-        AURORA_TEST_REQUIRE(item.contains("kind"));
-        if (item["id"].get<std::string>() == state_id) {
+    const auto *const nodes = require_child(j, "nodes");
+    for (const auto *item = nodes->begin(); item != nodes->end(); ++item) {
+        AURORA_TEST_REQUIRE(item->contains("id"));
+        AURORA_TEST_REQUIRE(item->contains("kind"));
+        if (require_field<std::string>(*item, "id") == state_id) {
             saw_state_node = true;
-            AURORA_TEST_CHECK_EQ(item["kind"].get<std::string>(), std::string("state"));
+            AURORA_TEST_CHECK_EQ(require_field<std::string>(*item, "kind"), std::string("state"));
         }
     }
     AURORA_TEST_CHECK_TRUE(saw_state_node);
 
     bool saw_observes = false;
-    for (const auto &item : j["edges"]) {
-        AURORA_TEST_REQUIRE(item.contains("from"));
-        AURORA_TEST_REQUIRE(item.contains("to"));
-        AURORA_TEST_REQUIRE(item.contains("kind"));
-        if (item["kind"].get<std::string>() == "observes" && item["from"].get<std::string>() == state_id &&
-            item["to"].get<std::string>() == effect_id) {
+    const auto *const edges = require_child(j, "edges");
+    for (const auto *item = edges->begin(); item != edges->end(); ++item) {
+        AURORA_TEST_REQUIRE(item->contains("from"));
+        AURORA_TEST_REQUIRE(item->contains("to"));
+        AURORA_TEST_REQUIRE(item->contains("kind"));
+        if (require_field<std::string>(*item, "kind") == "observes" &&
+            require_field<std::string>(*item, "from") == state_id &&
+            require_field<std::string>(*item, "to") == effect_id) {
             saw_observes = true;
         }
     }
@@ -167,8 +173,8 @@ AURORA_TEST_CASE(to_text_lists_nodes_edges_and_matches_free_function) {
 
     AURORA_TEST_CHECK_EQ(aurora::state_graph_text(), text);
     const auto j = aurora::state_graph();
-    AURORA_TEST_CHECK_EQ(j["nodes"].size(), StateGraph::nodes().size());
-    AURORA_TEST_CHECK_EQ(j["edges"].size(), StateGraph::edges().size());
+    AURORA_TEST_CHECK_EQ(require_child(j, "nodes")->size(), StateGraph::nodes().size());
+    AURORA_TEST_CHECK_EQ(require_child(j, "edges")->size(), StateGraph::edges().size());
 }
 
 }  // namespace aurora::test_cases::utest_state_graph

@@ -716,10 +716,13 @@ struct InspectorSession {
         const aurora::SnapshotDiffReport report =
             aurora::build_snapshot_diff_report(baseline.value(), current, boxes, tolerance);
 
-        au::Json payload = report.to_json();
-        payload["summary"] = report.to_text();
-        payload["baseline"] = baseline_path;
-        return au::Json{{"content", json_content(payload)}};
+        // 信封的三个字段直接在新容器上拼好后序列化：`json_content` 的终点是文本，
+        // 无需再回到 MCP 层所用的 JSON 库做一次解析往返。
+        auto payload = report.to_json();
+        payload.set("summary", report.to_text());
+        payload.set("baseline", baseline_path);
+        const auto text = aurora::json::dump(payload, {.indent = 2});
+        return au::Json{{"content", text_content(text.ok() ? text.value() : std::string{})}};
     }
 
     // ───────────────────── Track B：NL→UI ─────────────────────
