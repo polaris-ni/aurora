@@ -478,9 +478,9 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
     // 留白不该被环罩住），二者都无收缩节点时与视觉盒逐位相同。
     // 自绘聚焦态外观的控件（TextInput 等）经 `wants_focus_ring()` 关闭，避免双环。
     if (is_focused_ && wants_focus_ring()) {
-        constexpr float ring_gap = 2.0F;  ///< 与自身边框/内容的最小间距（不得压在边缘像素上）
-        constexpr float ring_thickness = 2.0F;  ///< 环宽
-        constexpr float ring_radius = 4.0F;  ///< 环圆角：小于常见控件圆角，故不与边框弧线相交
+        constexpr float ring_gap = 2.0F;  // 与自身边框/内容的最小间距（不得压在边缘像素上）
+        constexpr float ring_thickness = 2.0F;  // 环宽
+        constexpr float ring_radius = 4.0F;  // 环圆角：小于常见控件圆角，故不与边框弧线相交
         Rect ring_box = visual_box;  // 链上无盒收缩节点 → 与历史行为逐位一致
         if (!paint_boxes.empty()) {
             ring_box = content_box;  // 有收缩但无 Paint 节点 → 罩住实际内容盒

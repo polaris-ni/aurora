@@ -27,12 +27,12 @@ namespace aurora::cli::detail {
 /// @brief 按名查直接子命令；未找到返回 nullptr。
 [[nodiscard]] auto find_subcommand(const CommandSpec &spec, std::string_view sub_name) -> const CommandSpec *;
 
-/**
- * @brief 一层命令的内建 help / version 实际注入形态。
- *
- * 规则（惰性注入，用户声明优先）：长名已被声明 → 该内建整体不注入；短名已被本层任一选项占用、
- * 或 `builtins.take_shorts == false` → 内建降级为仅长名。`version` 另需该层 `version` 非空。
- */
+///
+/// @brief 一层命令的内建 help / version 实际注入形态。
+///
+/// 规则（惰性注入，用户声明优先）：长名已被声明 → 该内建整体不注入；短名已被本层任一选项占用、
+/// 或 `builtins.take_shorts == false` → 内建降级为仅长名。`version` 另需该层 `version` 非空。
+///
 struct BuiltinPlan {
     bool help = false;  ///< 是否提供 `--help`
     bool help_short = false;  ///< `--help` 是否同时可用 `-h`

@@ -18,16 +18,16 @@ namespace aurora {
 
 namespace {
 
-/**
- * @brief 垂直滚动控件探针：读取被测树中主滚动容器的真实偏移量。
- *
- * 存在的意义是**自证**：没有它，harness 可能在事件根本没命中滚动容器的情况下，
- * 照样输出一组「非常流畅」的读数（因为每帧都是 idle 跳帧）。有了偏移量对比，
- * 「没滚动」这件事会直接体现在 `moved_frames = 0` 上。
- *
- * 三类控件的偏移访问器命名历史不一致（`Scroll::offset_y` vs
- * `LazyList/GridView::scroll_offset`），此处统一收口，不改动既有公共 API。
- */
+///
+/// @brief 垂直滚动控件探针：读取被测树中主滚动容器的真实偏移量。
+///
+/// 存在的意义是**自证**：没有它，harness 可能在事件根本没命中滚动容器的情况下，
+/// 照样输出一组「非常流畅」的读数（因为每帧都是 idle 跳帧）。有了偏移量对比，
+/// 「没滚动」这件事会直接体现在 `moved_frames = 0` 上。
+///
+/// 三类控件的偏移访问器命名历史不一致（`Scroll::offset_y` vs
+/// `LazyList/GridView::scroll_offset`），此处统一收口，不改动既有公共 API。
+///
 class ScrollProbe {
   public:
     /// @brief 前序深度优先查找**最外层**垂直滚动容器（页面级滚动器优先于内部嵌套列表）。
@@ -267,7 +267,7 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
     res.scroll_viewport_h = probe.viewport_h();
 
     const Point center{.x = viewport.width * 0.5F, .y = viewport.height * 0.5F};
-    int dir = 1;  ///< +1 = 向下滚（内容上移）；触边由 auto_reverse 翻转
+    int dir = 1;  // +1 = 向下滚（内容上移）；触边由 auto_reverse 翻转
     float velocity = cfg.delta_per_frame * (cfg.fling ? cfg.fling_boost : 1.0F);
 
     // 滚轮约定（全库一致）：delta_y 正方向为「向上滚动」，故向下滚需取负号。

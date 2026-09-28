@@ -58,9 +58,9 @@ namespace aurora::detail {
 // 为何是这个量级：读屏客户端（NVDA 等）自身对 provider 调用有秒级超时，超了会整条
 // 无障碍链路报错并拖死前台。预算必须显著小于客户端超时，又要大于一次正常帧排空的
 // 延迟。读路径远多于动作，取更小的预算；动作是用户意图，多等一档。
-/// @brief 属性 / 几何 / 导航等读路径的回投预算。
+// @brief 属性 / 几何 / 导航等读路径的回投预算。
 inline constexpr unsigned long AURORA_UI_READ_TIMEOUT_MS = 250;
-/// @brief Invoke / Toggle / SetValue / Scroll 等动作路径的回投预算。
+// @brief Invoke / Toggle / SetValue / Scroll 等动作路径的回投预算。
 inline constexpr unsigned long AURORA_UI_ACTION_TIMEOUT_MS = 500;
 
 /// @brief `Navigate` 的方向意图（主人线程解析出的目标节点 id，0 = 无）。

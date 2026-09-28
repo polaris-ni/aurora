@@ -292,7 +292,8 @@ struct WaylandSurface::Impl {
             self->present_request_();
         }
     }
-    auto draw_decoration(Painter &p) const -> void;  ///< 自绘装饰：标题栏（csd_title）+ 边框（csd_border）
+    /// @brief 自绘装饰：标题栏（csd_title）+ 边框（csd_border）。
+    auto draw_decoration(Painter &p) const -> void;
     /// @brief 装配本帧装饰绘制状态（软件光栅与 GPU 录制两条路径共用的唯一装配点）。
     [[nodiscard]] auto decoration_state() const -> csd::TitleBarPaintState;
     /// @brief 装饰录制专用 Painter：不复用 `painter`——app 帧录制期间其录制栈非空，嵌套会污染帧 DL。

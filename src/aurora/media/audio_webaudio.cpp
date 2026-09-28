@@ -136,8 +136,8 @@ EM_JS(int, wa_open, (intptr_t out_rate), {
 });
 // clang-format on
 
-/// 建 ScriptProcessor 消费链：JS 回调按 head/tail 两个 int32 地址从 wasm 环取帧；
-/// 环空则补零并累加欠载计数。**不导出 wasm 函数**——这是本后端零链接标志的关键。
+// 建 ScriptProcessor 消费链：JS 回调按 head/tail 两个 int32 地址从 wasm 环取帧；
+// 环空则补零并累加欠载计数。**不导出 wasm 函数**——这是本后端零链接标志的关键。
 // EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
 // clang-format off
 EM_JS(int, wa_attach_processor,

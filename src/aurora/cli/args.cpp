@@ -422,13 +422,13 @@ template <typename T>
 // `Parser` 定义在 `aurora::cli` 而非匿名空间：它是 `Arguments` 的 friend，而匿名空间会
 // 给它一个内部链接的独立类型，friend 声明（指向 `aurora::cli::Parser`）便不再匹配。
 
-/**
- * @brief 一次 `parse` 的驱动：沿命令链下钻，逐 token 归类，收尾物化默认值。
- *
- * 命令树语义（git 式）：选项属于「命中命令链的最深命令」，父级选项须写在子命令名之前，
- * 同名选项合并时由最深层的显式取值胜出（叶级默认值不覆盖父级显式取值）。
- * 见 specification/09-cli.md §4.5。
- */
+///
+/// @brief 一次 `parse` 的驱动：沿命令链下钻，逐 token 归类，收尾物化默认值。
+///
+/// 命令树语义（git 式）：选项属于「命中命令链的最深命令」，父级选项须写在子命令名之前，
+/// 同名选项合并时由最深层的显式取值胜出（叶级默认值不覆盖父级显式取值）。
+/// 见 specification/09-cli.md §4.5。
+///
 class Parser {
   public:
     Parser(const CommandSpec &root, std::span<const std::string_view> tokens, std::string_view program_name)

@@ -8,10 +8,10 @@
 namespace aurora {
 
 namespace {
-/// @brief 把一条命令引用的池下标解析为只读指针，供 RHI 后端使用。
-///
-/// 下标合法性由录制方（`Painter::record*`）保证；负数表示该命令不引用对应池，解析为
-/// `nullptr` 由后端回退到空值（与 D 轨抽取前的 `replay` 语义逐条对应）。
+// @brief 把一条命令引用的池下标解析为只读指针，供 RHI 后端使用。
+//
+// 下标合法性由录制方（`Painter::record*`）保证；负数表示该命令不引用对应池，解析为
+// `nullptr` 由后端回退到空值（与 D 轨抽取前的 `replay` 语义逐条对应）。
 // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) 见函数内说明
 auto resolve_cmd_data(const DrawCmd &cmd, const DisplayList &dl) -> rhi::CmdData {
     rhi::CmdData data;

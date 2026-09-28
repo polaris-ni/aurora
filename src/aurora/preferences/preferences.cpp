@@ -49,15 +49,15 @@ auto from_json_map(const json::Value &j) -> std::unordered_map<std::string, doub
     return out;
 }
 
-/**
- * @brief 跨进程 advisory 文件锁（RAII）。
- *
- * 锁定 `<data_file>.lock`，保证多个进程对同一个配置文件的 `flush`/`reload` 互斥、
- * 且读时能读到完整内容。读写均通过锁序列化，避免半写损坏与互相覆盖。
- *
- * - Windows：`CreateFile` 打开锁文件 + `LockFileEx`（独占/共享），析构时 `UnlockFileEx`。
- * - POSIX：`open` 打开锁文件 + `flock(LOCK_EX | LOCK_SH)`。
- */
+///
+/// @brief 跨进程 advisory 文件锁（RAII）。
+///
+/// 锁定 `<data_file>.lock`，保证多个进程对同一个配置文件的 `flush`/`reload` 互斥、
+/// 且读时能读到完整内容。读写均通过锁序列化，避免半写损坏与互相覆盖。
+///
+/// - Windows：`CreateFile` 打开锁文件 + `LockFileEx`（独占/共享），析构时 `UnlockFileEx`。
+/// - POSIX：`open` 打开锁文件 + `flock(LOCK_EX | LOCK_SH)`。
+///
 class FileLock {
   public:
     explicit FileLock(const std::filesystem::path &data_file)
@@ -122,10 +122,8 @@ class FileLock {
     std::filesystem::path lock_path_;
 };
 
-/**
- * @brief 从整份磁盘 JSON 中拆出「用户数据」与「meta（versions/tombstones/cleared_at）」。
- * 旧格式（无 meta 键）也能兼容：data 为整个对象，meta 为空。
- */
+/// @brief 从整份磁盘 JSON 中拆出「用户数据」与「meta（versions/tombstones/cleared_at）」。
+/// 旧格式（无 meta 键）也能兼容：data 为整个对象，meta 为空。
 auto split_meta(const json::Value &whole, json::Value &data, std::unordered_map<std::string, double> &versions,
                 std::unordered_map<std::string, double> &tombstones, double &cleared_at) -> void {
     data = json::Value::object();

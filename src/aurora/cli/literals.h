@@ -26,23 +26,23 @@ class LiteralFactory {
     LiteralFactory() = delete;
 };
 
-/**
- * @brief 按声明类型把 token 转为 `Value`。
- * @param option_display 错误回显用的选项名（`--width` 或位置参数名）。
- * @return 失败返回 `cli-invalid-value`（携带 kind 与原文）。
- */
+///
+/// @brief 按声明类型把 token 转为 `Value`。
+/// @param option_display 错误回显用的选项名（`--width` 或位置参数名）。
+/// @return 失败返回 `cli-invalid-value`（携带 kind 与原文）。
+///
 [[nodiscard]] auto convert_literal(ValueKind kind, std::string_view token, std::string_view option_display)
     -> Result<Value>;
 
 /// @brief 构造 `cli-invalid-value`（供本模块各失败点复用，保证参数口径一致）。
 [[nodiscard]] auto invalid_literal(std::string_view option_display, ValueKind kind, std::string_view token) -> Error;
 
-/**
- * @brief 数值边界的可读文本：整值不带小数位（`1` 而非 `1.000000`），非整值去掉尾零。
- *
- * `command.cpp` 帮助里的 `[range: ...]` 与 `args.cpp` 的 `cli-range-violated` 错误文案共用它，
- * 避免出现「帮助写 `[1, 8192]`、报错写 `[1.000000, 8192.000000]`」的双口径漂移。
- */
+///
+/// @brief 数值边界的可读文本：整值不带小数位（`1` 而非 `1.000000`），非整值去掉尾零。
+///
+/// `command.cpp` 帮助里的 `[range: ...]` 与 `args.cpp` 的 `cli-range-violated` 错误文案共用它，
+/// 避免出现「帮助写 `[1, 8192]`、报错写 `[1.000000, 8192.000000]`」的双口径漂移。
+///
 [[nodiscard]] inline auto bound_text(double value) -> std::string {
     if (const auto whole = static_cast<long long>(value); static_cast<double>(whole) == value) {
         return std::to_string(whole);

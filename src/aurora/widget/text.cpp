@@ -554,8 +554,8 @@ auto Text::wrap_lines(const std::string &text, const Font &f, float max_w, bool 
 
     std::vector<std::string> lines;
     std::vector<size_t> starts;
-    std::string line;  ///< 当前行已累积的可见内容
-    size_t line_start_off = words[0].start;  ///< 当前行首字符在 text 中的字节偏移
+    std::string line;  // 当前行已累积的可见内容
+    size_t line_start_off = words[0].start;  // 当前行首字符在 text 中的字节偏移
 
     const auto measure = [&](const std::string &s) -> float { return render::FontEngine::measure_width(s, f, opts); };
     // 把当前行压入结果，并依据其首字节偏移记录全局码点下标。

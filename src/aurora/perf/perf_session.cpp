@@ -21,11 +21,11 @@ namespace {
     return std::strcmp(a, b) == 0;
 }
 
-/**
- * @brief 线性插值分位数。
- * @param sorted 升序样本（非空）
- * @param p 分位 [0,1]
- */
+///
+/// @brief 线性插值分位数。
+/// @param sorted 升序样本（非空）
+/// @param p 分位 [0,1]
+///
 [[nodiscard]] auto percentile(const std::vector<double> &sorted, double p) -> double {
     if (sorted.empty()) {
         return 0.0;
