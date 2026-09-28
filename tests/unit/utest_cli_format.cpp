@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -17,6 +18,7 @@
 #include "aurora/core/error_codes.h"
 #include "framework/aurora_test.h"
 #include "framework/golden.h"
+#include "framework/json_access.h"
 #include "support/cli_fixture.h"
 
 namespace aurora::test_cases::utest_cli_format {
@@ -25,6 +27,10 @@ namespace au = aurora;
 namespace cli = aurora::cli;
 namespace m = aurora::testing::matchers;
 namespace golden = aurora::testing::golden;
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
+using aurora::testing::require_value;
 using aurora::testing::cli_fixture::displacement_spec;
 using aurora::testing::cli_fixture::spec;
 using aurora::testing::cli_fixture::strict_spec;
@@ -72,14 +78,25 @@ auto expect_valid(const CommandSpec &candidate) -> void {
     return nullptr;
 }
 
-/// @brief 取 schema 里某个长名的选项节点；未找到返回 null。
-[[nodiscard]] auto option_node(const nlohmann::json &command, std::string_view long_name) -> nlohmann::json {
-    for (const auto &entry : command["options"]) {
-        if (entry["long"].get<std::string>() == long_name) {
-            return entry;
+/// @brief 取 schema 里某个长名的选项节点；未找到返回 nullptr。
+[[nodiscard]] auto option_node(const json::Value &command, std::string_view long_name) -> const json::Value * {
+    const auto *options = command.at("options");
+    if (options == nullptr) {
+        return nullptr;
+    }
+    for (const auto *option = options->begin(); option != options->end(); ++option) {
+        if (option->as_or<std::string_view>("long", std::string_view{}) == long_name) {
+            return option;
         }
     }
-    return nlohmann::json{};
+    return nullptr;
+}
+
+/// @brief 取 schema 里某个长名的选项节点并断言其存在；未找到即本用例致命失败。
+[[nodiscard]] auto option_of(const json::Value &command, std::string_view long_name) -> const json::Value & {
+    const auto *node = option_node(command, long_name);
+    AURORA_TEST_REQUIRE(node != nullptr);
+    return *node;
 }
 
 }  // namespace
@@ -436,13 +453,15 @@ AURORA_TEST_CASE(displaced_builtins_degrade_to_long_names_only) {
 
     // schema 与帮助同源：让位形态在两处一致，且 early_view 只标在真有短路语义的项上
     const auto schema = cli::schema_json(root);
-    const auto version = option_node(schema, "version");
-    AURORA_TEST_REQUIRE_TRUE(version.is_object());
-    AURORA_TEST_CHECK_FALSE(version.contains("short"));
-    AURORA_TEST_CHECK_EQ(version["early_view"].get<std::string>(), "version");
-    AURORA_TEST_CHECK_EQ(option_node(schema, "help")["early_view"].get<std::string>(), "help");
-    AURORA_TEST_CHECK_EQ(option_node(schema, "dump-schema")["early_view"].get<std::string>(), "schema");
-    AURORA_TEST_CHECK_FALSE(option_node(schema, "height").contains("early_view"));
+    const auto *const version = option_node(schema, "version");
+    AURORA_TEST_REQUIRE(version != nullptr);
+    AURORA_TEST_CHECK_FALSE(version->contains("short"));
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*version, "early_view"), "version");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(option_of(schema, "help"), "early_view"), "help");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(option_of(schema, "dump-schema"), "early_view"), "schema");
+    const auto *const height = option_node(schema, "height");
+    AURORA_TEST_REQUIRE(height != nullptr);
+    AURORA_TEST_CHECK_FALSE(height->contains("early_view"));
 
     // 关掉全部内建且无自有选项的层：连 [OPTIONS] 都不该出现在 usage 里
     const auto *const bare = sub_of(root, "bare");
@@ -465,63 +484,68 @@ AURORA_TEST_CASE(version_text_is_program_scoped_and_empty_when_undeclared) {
 
 AURORA_TEST_CASE(schema_json_lists_declarations_builtins_and_subcommands) {
     const auto schema = cli::schema_json(spec());
-    AURORA_TEST_CHECK_EQ(schema["name"].get<std::string>(), "aurora-render");
-    AURORA_TEST_CHECK_EQ(schema["about"].get<std::string>(), "Render Aurora scenes into image files");
-    AURORA_TEST_CHECK_EQ(schema["version"].get<std::string>(), "1.2.3");
-    AURORA_TEST_CHECK_EQ(schema["usage"].get<std::string>(),
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(schema, "name"), "aurora-render");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(schema, "about"), "Render Aurora scenes into image files");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(schema, "version"), "1.2.3");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(schema, "usage"),
                          "usage: aurora-render [OPTIONS] <SCENE>... [COMMAND] [-- ARGS...]");
-    AURORA_TEST_CHECK_EQ(schema["options"][0]["long"].get<std::string>(), "output");
-    AURORA_TEST_CHECK_EQ(schema["subcommands"].size(), 2U);
-    AURORA_TEST_CHECK_EQ(schema["subcommands"][0]["name"].get<std::string>(), "render");
+    const auto *const first_option = require_child_at(*require_child(schema, "options"), 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*first_option, "long"), "output");
+    AURORA_TEST_CHECK_EQ(require_child(schema, "subcommands")->size(), 2U);
+    const auto *const first_subcommand = require_child_at(*require_child(schema, "subcommands"), 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*first_subcommand, "name"), "render");
 
     // 内建 help/version 一并列出，供 AI 枚举全量选项；它们与用户自标 early_view 的旗标同一条通道
-    const auto &options = schema["options"];
-    AURORA_TEST_CHECK_EQ(options[options.size() - 2]["long"].get<std::string>(), "help");
-    AURORA_TEST_CHECK_EQ(options.back()["long"].get<std::string>(), "version");
-    AURORA_TEST_CHECK_EQ(option_node(schema, "help")["early_view"].get<std::string>(), "help");
-    AURORA_TEST_CHECK_EQ(option_node(schema, "version")["early_view"].get<std::string>(), "version");
-    AURORA_TEST_CHECK_EQ(option_node(schema, "help").value("short", std::string{}), "h");
+    const auto *const options = require_child(schema, "options");
+    const auto *const help = require_child_at(*options, options->size() - 2);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*help, "long"), "help");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(*options, options->size() - 1), "long"),
+                         "version");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(option_of(schema, "help"), "early_view"), "help");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(option_of(schema, "version"), "early_view"), "version");
+    AURORA_TEST_CHECK_EQ(option_of(schema, "help").as_or<std::string>("short", std::string{}), "h");
 
     // hidden 项与 schema 的约定：不出现
-    AURORA_TEST_CHECK_TRUE(option_node(schema, "trace-file").is_null());
+    AURORA_TEST_CHECK_TRUE(option_node(schema, "trace-file") == nullptr);
 }
 
 AURORA_TEST_CASE(schema_json_encodes_arity_choices_and_bounds) {
     const auto schema = cli::schema_json(spec());
-    const auto width = option_node(schema, "width");
+    const auto &width = option_of(schema, "width");
     AURORA_TEST_REQUIRE_TRUE(width.is_object());
-    AURORA_TEST_CHECK_EQ(width["min"].get<int>(), 1);
-    AURORA_TEST_CHECK_EQ(width["max"].get<int>(), 1);
-    AURORA_TEST_CHECK_EQ(width["type"].get<std::string>(), "int");
-    AURORA_TEST_CHECK_EQ(width["short"].get<std::string>(), "w");
-    AURORA_TEST_CHECK_EQ(width["maximum"].get<double>(), 8192.0);
+    AURORA_TEST_CHECK_EQ(require_field<int>(width, "min"), 1);
+    AURORA_TEST_CHECK_EQ(require_field<int>(width, "max"), 1);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(width, "type"), "int");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(width, "short"), "w");
+    AURORA_TEST_CHECK_EQ(require_field<double>(width, "maximum"), 8192.0);
 
-    const auto tag = option_node(schema, "tag");
-    AURORA_TEST_CHECK_EQ(tag["max"].get<int>(), Arity::AURORA_UNBOUNDED);
-    AURORA_TEST_CHECK_EQ(tag["type"].get<std::string>(), "string");
+    const auto &tag = option_of(schema, "tag");
+    AURORA_TEST_CHECK_EQ(require_field<int>(tag, "max"), Arity::AURORA_UNBOUNDED);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(tag, "type"), "string");
 
-    const auto mode = option_node(schema, "mode");
-    AURORA_TEST_REQUIRE_EQ(mode["choices"].size(), 3U);
-    AURORA_TEST_CHECK_EQ(mode["default"].get<std::string>(), "balanced");
+    const auto &mode = option_of(schema, "mode");
+    AURORA_TEST_REQUIRE_EQ(require_child(mode, "choices")->size(), 3U);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(mode, "default"), "balanced");
 
-    const auto verbose = option_node(schema, "verbose");
-    AURORA_TEST_CHECK_EQ(verbose["type"].get<std::string>(), "bool");
-    AURORA_TEST_CHECK_EQ(verbose["max"].get<int>(), 0);
+    const auto &verbose = option_of(schema, "verbose");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(verbose, "type"), "bool");
+    AURORA_TEST_CHECK_EQ(require_field<int>(verbose, "max"), 0);
 
-    const auto &positional = schema["positionals"][0];
-    AURORA_TEST_CHECK_EQ(positional["name"].get<std::string>(), "SCENE");
-    AURORA_TEST_CHECK_EQ(positional["type"].get<std::string>(), "string");
+    const auto *const positional = require_child_at(*require_child(schema, "positionals"), 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*positional, "name"), "SCENE");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*positional, "type"), "string");
 }
 
 AURORA_TEST_CASE(schema_json_reflects_positionals_and_required_subcommands) {
     const auto schema = cli::schema_json(strict_spec());
-    AURORA_TEST_CHECK_EQ(schema["subcommand_required"].get<bool>(), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(schema, "subcommand_required"), true);
     AURORA_TEST_CHECK_FALSE(schema.contains("version"));
-    const auto &deploy = schema["subcommands"][0];
-    AURORA_TEST_REQUIRE_EQ(deploy["positionals"].size(), 1U);
-    AURORA_TEST_CHECK_EQ(deploy["positionals"][0]["choices"].size(), 2U);
-    AURORA_TEST_CHECK_EQ(deploy["usage"].get<std::string>(), "usage: deploy [OPTIONS] <ENV> [-- ARGS...]");
-    AURORA_TEST_CHECK_EQ(option_node(schema, "token")["required"].get<bool>(), true);
+    const auto *const deploy = require_child_at(*require_child(schema, "subcommands"), 0);
+    const auto *const slots = require_child(*deploy, "positionals");
+    AURORA_TEST_REQUIRE_EQ(slots->size(), 1U);
+    AURORA_TEST_CHECK_EQ(require_child(*require_child_at(*slots, 0), "choices")->size(), 2U);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*deploy, "usage"), "usage: deploy [OPTIONS] <ENV> [-- ARGS...]");
+    AURORA_TEST_CHECK_EQ(require_field<bool>(option_of(schema, "token"), "required"), true);
 }
 
 // ------------------------------------------------------------ 文本 golden
@@ -530,12 +554,15 @@ AURORA_TEST_CASE(cli_texts_match_golden_baseline) {
     const std::filesystem::path path = golden::dir() / "cli_snapshots.json";
     const bool regen = golden::env_flag("AURORA_UPDATE_GOLDEN");
 
-    nlohmann::json baseline = nlohmann::json::object();
+    auto baseline = json::Value::object();
     if (!regen) {
         std::ifstream in(path);
         AURORA_TEST_REQUIRE_MSG(
             in.good(), "golden baseline cli_snapshots.json must exist (run with AURORA_UPDATE_GOLDEN=1 to create)");
-        in >> baseline;
+        const auto parsed =
+            json::parse(std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}});
+        AURORA_TEST_REQUIRE_MSG(parsed, parsed ? std::string{} : parsed.error().message);
+        baseline = parsed.value();
         AURORA_TEST_REQUIRE_TRUE(baseline.contains("texts"));
     }
 
@@ -543,40 +570,43 @@ AURORA_TEST_CASE(cli_texts_match_golden_baseline) {
     const auto *render = sub_of(root, "render");
     AURORA_TEST_REQUIRE(render != nullptr);
 
-    const nlohmann::json current = {
-        {"texts",
-         {
-             {"root/usage", cli::usage_line(root)},
-             {"root/help", cli::help_text(root, {"aurora-render"})},
-             {"root/version", cli::version_text(root)},
-             {"render/usage", cli::usage_line(*render, {"aurora-render", "render"})},
-             {"render/help", cli::help_text(*render, {"aurora-render", "render"})},
-             {"strict/usage", cli::usage_line(strict_spec())},
-             {"strict/help", cli::help_text(strict_spec(), {"strict"})},
-         }},
-        {"schema", cli::schema_json(root)},
-    };
+    auto texts = json::Value::object();
+    texts.set("root/usage", cli::usage_line(root));
+    texts.set("root/help", cli::help_text(root, {"aurora-render"}));
+    texts.set("root/version", cli::version_text(root));
+    texts.set("render/usage", cli::usage_line(*render, {"aurora-render", "render"}));
+    texts.set("render/help", cli::help_text(*render, {"aurora-render", "render"}));
+    texts.set("strict/usage", cli::usage_line(strict_spec()));
+    texts.set("strict/help", cli::help_text(strict_spec(), {"strict"}));
+
+    auto current = json::Value::object();
+    current.set("texts", std::move(texts));
+    current.set("schema", cli::schema_json(root));
 
     if (regen) {
-        nlohmann::json doc;
-        doc["_about"] =
-            "Aurora aurora::cli text golden baseline (specification/09-cli.md). Do not hand-edit; regenerate with "
-            "AURORA_UPDATE_GOLDEN=1 via aurora_test_runner --run=utest_cli_format.";
-        doc["texts"] = current["texts"];
-        doc["schema"] = current["schema"];
+        auto doc = json::Value::object();
+        doc.set("_about",
+                "Aurora aurora::cli text golden baseline (specification/09-cli.md). Do not hand-edit; regenerate with "
+                "AURORA_UPDATE_GOLDEN=1 via aurora_test_runner --run=utest_cli_format.");
+        doc.set("texts", *require_child(current, "texts"));
+        doc.set("schema", *require_child(current, "schema"));
+        const auto text = json::dump(doc, {.indent = 2});
+        AURORA_TEST_REQUIRE_MSG(text, text ? std::string{} : text.error().message);
         std::error_code ec;
         std::filesystem::create_directories(path.parent_path(), ec);
         std::ofstream out(path);
-        out << doc.dump(2) << "\n";
+        out << text.value() << "\n";
         AURORA_TEST_CHECK_TRUE(out.good());
         return;
     }
 
-    for (const auto &[key, value] : current["texts"].items()) {
-        AURORA_TEST_REQUIRE_TRUE(baseline["texts"].contains(key));
-        AURORA_TEST_CHECK_EQ(value.get<std::string>(), baseline["texts"][key].get<std::string>());
+    const auto *const expected_texts = require_child(baseline, "texts");
+    for (const auto &entry : require_child(current, "texts")->entries()) {
+        AURORA_TEST_CHECK_EQ(require_value(entry.value.as_string()),
+                             require_field<std::string>(*expected_texts, entry.key));
     }
-    AURORA_TEST_CHECK(current["schema"] == baseline["schema"]);
+    // 新容器按插入序保持对象键，故此处是全序相等：键顺序漂移也会被判为回归
+    AURORA_TEST_CHECK(*require_child(current, "schema") == *require_child(baseline, "schema"));
 }
 
 }  // namespace aurora::test_cases::utest_cli_format

@@ -16,19 +16,16 @@
 // ============================================================================
 
 #include <cstdint>
-#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "aurora/cli/args.h"
+#include "aurora/core/json.h"
 #include "aurora/core/result.h"
 
 namespace aurora::cli {
-
-/// @brief 库内 JSON 别名（不依赖 widget 头以保持低耦合）。
-using Json = nlohmann::json;
 
 /**
  * @brief 单个选项的自描述声明（长名 / 短名 / 类型 / arity / 取值域 / 默认值）。
@@ -144,6 +141,6 @@ struct CommandSpec {
  * required,choices,default,minimum,maximum,group,hidden,conflicts_with,help}],
  * "positionals":[...],"subcommands":[...]}`。内建 help/version 一并列出，便于 AI 枚举全量。
  */
-[[nodiscard]] auto schema_json(const CommandSpec &spec) -> Json;
+[[nodiscard]] auto schema_json(const CommandSpec &spec) -> json::Value;
 
 }  // namespace aurora::cli

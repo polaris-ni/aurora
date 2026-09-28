@@ -1,92 +1,110 @@
 {
   "_about": "Aurora aurora::cli text golden baseline (specification/09-cli.md). Do not hand-edit; regenerate with AURORA_UPDATE_GOLDEN=1 via aurora_test_runner --run=utest_cli_format.",
+  "texts": {
+    "root/usage": "usage: aurora-render [OPTIONS] <SCENE>... [COMMAND] [-- ARGS...]",
+    "root/help": "Render Aurora scenes into image files\nusage: aurora-render [OPTIONS] <SCENE>... [COMMAND] [-- ARGS...]\n\nLong description line for the root command.\n\nOptions:\n  -o, --output <FILE>       Output image path [default: out.png]\n  -w, --width <WIDTH>       Canvas width in px [range: 1, 8192] [default: 800]\n  -s, --scale <SCALE>       Scale factor [default: 1]\n  -v, --verbose             Repeat for more detail\n  -f, --force               Overwrite output\n      --dry-run             Print only\n      --margin <MARGIN>     Outer margin [default: 0]\n      --tint <TINT>         Overlay tint [default: #fff]\n      --timeout <TIMEOUT>   Give up after [default: 30s]\n      --tag <TAG> <TAG>...  Attach a tag (repeatable)\n      --format <FORMAT>     Root output format [possible values: text, json] [default: text]\n\nDiagnostics:\n      --level <LEVEL>  Log verbosity [default: info]\n      --mode <MODE>    Quality/speed trade-off [possible values: fast, balanced, quality] [default: balanced]\n\nHelp:\n  -h, --help     Show this help and exit\n  -V, --version  Show the version and exit\n\nArguments:\n  <SCENE>...  Scenes to render\n\nCommands:\n  render  Render one scene interactively\n  serve   Serve the gallery over HTTP\n\nRun 'aurora-render <COMMAND> --help' for more information on a command.\n\nReport issues at the project tracker.\n",
+    "root/version": "aurora-render 1.2.3\n",
+    "render/usage": "usage: aurora-render render [OPTIONS] <SRC> [<DST>] [-- ARGS...]",
+    "render/help": "Render one scene interactively\nusage: aurora-render render [OPTIONS] <SRC> [<DST>] [-- ARGS...]\n\nOptions:\n  -w, --watch            Re-render on change\n      --fps <FPS>        Target frame rate [range: 1, 240] [default: 60]\n      --format <FORMAT>  Leaf output format [possible values: png, webp] [default: png]\n\nHelp:\n  -h, --help  Show this help and exit\n\nArguments:\n  <SRC>  Source scene\n  <DST>  Target image\n\n",
+    "strict/usage": "usage: strict [OPTIONS] <COMMAND> [-- ARGS...]",
+    "strict/help": "A command that refuses to run bare\nusage: strict [OPTIONS] <COMMAND> [-- ARGS...]\n\nOptions:\n      --token <TOKEN>  Auth token [required]\n\nHelp:\n  -h, --help  Show this help and exit\n\nCommands:\n  deploy  Deploy the build\n\nRun 'strict <COMMAND> --help' for more information on a command.\n\n"
+  },
   "schema": {
-    "about": "Render Aurora scenes into image files",
     "name": "aurora-render",
+    "about": "Render Aurora scenes into image files",
+    "usage": "usage: aurora-render [OPTIONS] <SCENE>... [COMMAND] [-- ARGS...]",
+    "version": "1.2.3",
+    "subcommand_required": false,
     "options": [
       {
-        "default": "out.png",
-        "help": "Output image path",
-        "hidden": false,
         "long": "output",
-        "max": 1,
-        "min": 1,
-        "required": false,
         "short": "o",
         "type": "string",
-        "value_hint": "FILE"
+        "min": 1,
+        "max": 1,
+        "required": false,
+        "hidden": false,
+        "value_hint": "FILE",
+        "default": "out.png",
+        "help": "Output image path"
       },
       {
-        "default": "800",
-        "help": "Canvas width in px",
-        "hidden": false,
         "long": "width",
-        "max": 1,
-        "maximum": 8192.0,
-        "min": 1,
-        "minimum": 1.0,
-        "required": false,
         "short": "w",
-        "type": "int"
-      },
-      {
-        "default": "1",
-        "help": "Scale factor",
-        "hidden": false,
-        "long": "scale",
-        "max": 1,
+        "type": "int",
         "min": 1,
+        "max": 1,
         "required": false,
-        "short": "s",
-        "type": "double"
-      },
-      {
-        "help": "Repeat for more detail",
         "hidden": false,
-        "long": "verbose",
-        "max": 0,
-        "min": 0,
-        "required": false,
-        "short": "v",
-        "type": "bool"
+        "default": "800",
+        "minimum": 1.0,
+        "maximum": 8192.0,
+        "help": "Canvas width in px"
       },
       {
+        "long": "scale",
+        "short": "s",
+        "type": "double",
+        "min": 1,
+        "max": 1,
+        "required": false,
+        "hidden": false,
+        "default": "1",
+        "help": "Scale factor"
+      },
+      {
+        "long": "verbose",
+        "short": "v",
+        "type": "bool",
+        "min": 0,
+        "max": 0,
+        "required": false,
+        "hidden": false,
+        "help": "Repeat for more detail"
+      },
+      {
+        "long": "force",
+        "short": "f",
+        "type": "bool",
+        "min": 0,
+        "max": 0,
+        "required": false,
+        "hidden": false,
         "conflicts_with": [
           "dry-run"
         ],
-        "help": "Overwrite output",
-        "hidden": false,
-        "long": "force",
-        "max": 0,
-        "min": 0,
-        "required": false,
-        "short": "f",
-        "type": "bool"
+        "help": "Overwrite output"
       },
       {
+        "long": "dry-run",
+        "type": "bool",
+        "min": 0,
+        "max": 0,
+        "required": false,
+        "hidden": false,
         "conflicts_with": [
           "force"
         ],
-        "help": "Print only",
-        "hidden": false,
-        "long": "dry-run",
-        "max": 0,
-        "min": 0,
-        "required": false,
-        "type": "bool"
+        "help": "Print only"
       },
       {
+        "long": "level",
+        "type": "log-level",
+        "min": 1,
+        "max": 1,
+        "required": false,
+        "hidden": false,
         "default": "info",
         "group": "Diagnostics",
-        "help": "Log verbosity",
-        "hidden": false,
-        "long": "level",
-        "max": 1,
-        "min": 1,
-        "required": false,
-        "type": "log-level"
+        "help": "Log verbosity"
       },
       {
+        "long": "mode",
+        "type": "enum",
+        "min": 1,
+        "max": 1,
+        "required": false,
+        "hidden": false,
         "choices": [
           "fast",
           "balanced",
@@ -94,219 +112,201 @@
         ],
         "default": "balanced",
         "group": "Diagnostics",
-        "help": "Quality/speed trade-off",
-        "hidden": false,
-        "long": "mode",
-        "max": 1,
-        "min": 1,
-        "required": false,
-        "type": "enum"
+        "help": "Quality/speed trade-off"
       },
       {
-        "default": "0",
-        "help": "Outer margin",
-        "hidden": false,
         "long": "margin",
-        "max": 1,
+        "type": "length",
         "min": 1,
+        "max": 1,
         "required": false,
-        "type": "length"
+        "hidden": false,
+        "default": "0",
+        "help": "Outer margin"
       },
       {
-        "default": "#fff",
-        "help": "Overlay tint",
-        "hidden": false,
         "long": "tint",
-        "max": 1,
+        "type": "color",
         "min": 1,
+        "max": 1,
         "required": false,
-        "type": "color"
+        "hidden": false,
+        "default": "#fff",
+        "help": "Overlay tint"
       },
       {
-        "default": "30s",
-        "help": "Give up after",
-        "hidden": false,
         "long": "timeout",
+        "type": "duration",
+        "min": 1,
         "max": 1,
-        "min": 1,
         "required": false,
-        "type": "duration"
-      },
-      {
-        "help": "Attach a tag (repeatable)",
         "hidden": false,
-        "long": "tag",
-        "max": -1,
-        "min": 1,
-        "required": false,
-        "type": "string"
+        "default": "30s",
+        "help": "Give up after"
       },
       {
+        "long": "tag",
+        "type": "string",
+        "min": 1,
+        "max": -1,
+        "required": false,
+        "hidden": false,
+        "help": "Attach a tag (repeatable)"
+      },
+      {
+        "long": "format",
+        "type": "enum",
+        "min": 1,
+        "max": 1,
+        "required": false,
+        "hidden": false,
         "choices": [
           "text",
           "json"
         ],
         "default": "text",
-        "help": "Root output format",
-        "hidden": false,
-        "long": "format",
-        "max": 1,
-        "min": 1,
-        "required": false,
-        "type": "enum"
+        "help": "Root output format"
       },
       {
-        "early_view": "help",
-        "help": "Show this help and exit",
-        "hidden": false,
         "long": "help",
-        "max": 0,
-        "min": 0,
-        "required": false,
         "short": "h",
-        "type": "bool"
+        "type": "bool",
+        "min": 0,
+        "max": 0,
+        "required": false,
+        "hidden": false,
+        "early_view": "help",
+        "help": "Show this help and exit"
       },
       {
-        "early_view": "version",
-        "group": "Help",
-        "help": "Show the version and exit",
-        "hidden": false,
         "long": "version",
-        "max": 0,
-        "min": 0,
-        "required": false,
         "short": "V",
-        "type": "bool"
+        "type": "bool",
+        "min": 0,
+        "max": 0,
+        "required": false,
+        "hidden": false,
+        "group": "Help",
+        "early_view": "version",
+        "help": "Show the version and exit"
       }
     ],
     "positionals": [
       {
-        "help": "Scenes to render",
-        "max": -1,
-        "min": 0,
         "name": "SCENE",
-        "type": "string"
+        "type": "string",
+        "min": 0,
+        "max": -1,
+        "help": "Scenes to render"
       }
     ],
-    "subcommand_required": false,
     "subcommands": [
       {
-        "about": "Render one scene interactively",
         "name": "render",
+        "about": "Render one scene interactively",
+        "usage": "usage: render [OPTIONS] <SRC> [<DST>] [-- ARGS...]",
+        "subcommand_required": false,
         "options": [
           {
-            "help": "Re-render on change",
-            "hidden": false,
             "long": "watch",
-            "max": 0,
-            "min": 0,
-            "required": false,
             "short": "w",
-            "type": "bool"
-          },
-          {
-            "default": "60",
-            "help": "Target frame rate",
-            "hidden": false,
-            "long": "fps",
-            "max": 1,
-            "maximum": 240.0,
-            "min": 1,
-            "minimum": 1.0,
+            "type": "bool",
+            "min": 0,
+            "max": 0,
             "required": false,
-            "type": "int"
+            "hidden": false,
+            "help": "Re-render on change"
           },
           {
+            "long": "fps",
+            "type": "int",
+            "min": 1,
+            "max": 1,
+            "required": false,
+            "hidden": false,
+            "default": "60",
+            "minimum": 1.0,
+            "maximum": 240.0,
+            "help": "Target frame rate"
+          },
+          {
+            "long": "format",
+            "type": "enum",
+            "min": 1,
+            "max": 1,
+            "required": false,
+            "hidden": false,
             "choices": [
               "png",
               "webp"
             ],
             "default": "png",
-            "help": "Leaf output format",
-            "hidden": false,
-            "long": "format",
-            "max": 1,
-            "min": 1,
-            "required": false,
-            "type": "enum"
+            "help": "Leaf output format"
           },
           {
-            "early_view": "help",
-            "help": "Show this help and exit",
-            "hidden": false,
             "long": "help",
-            "max": 0,
-            "min": 0,
-            "required": false,
             "short": "h",
-            "type": "bool"
+            "type": "bool",
+            "min": 0,
+            "max": 0,
+            "required": false,
+            "hidden": false,
+            "early_view": "help",
+            "help": "Show this help and exit"
           }
         ],
         "positionals": [
           {
-            "help": "Source scene",
-            "max": 1,
-            "min": 1,
             "name": "SRC",
-            "type": "string"
+            "type": "string",
+            "min": 1,
+            "max": 1,
+            "help": "Source scene"
           },
           {
-            "help": "Target image",
-            "max": 1,
-            "min": 0,
             "name": "DST",
-            "type": "string"
+            "type": "string",
+            "min": 0,
+            "max": 1,
+            "help": "Target image"
           }
         ],
-        "subcommand_required": false,
-        "subcommands": [],
-        "usage": "usage: render [OPTIONS] <SRC> [<DST>] [-- ARGS...]"
+        "subcommands": []
       },
       {
-        "about": "Serve the gallery over HTTP",
         "name": "serve",
+        "about": "Serve the gallery over HTTP",
+        "usage": "usage: serve [OPTIONS] [-- ARGS...]",
+        "subcommand_required": false,
         "options": [
           {
-            "default": "8080",
-            "help": "Listen port",
-            "hidden": false,
             "long": "port",
-            "max": 1,
-            "maximum": 65535.0,
-            "min": 1,
-            "minimum": 1.0,
-            "required": false,
             "short": "p",
-            "type": "int"
+            "type": "int",
+            "min": 1,
+            "max": 1,
+            "required": false,
+            "hidden": false,
+            "default": "8080",
+            "minimum": 1.0,
+            "maximum": 65535.0,
+            "help": "Listen port"
           },
           {
-            "early_view": "help",
-            "help": "Show this help and exit",
-            "hidden": false,
             "long": "help",
-            "max": 0,
-            "min": 0,
-            "required": false,
             "short": "h",
-            "type": "bool"
+            "type": "bool",
+            "min": 0,
+            "max": 0,
+            "required": false,
+            "hidden": false,
+            "early_view": "help",
+            "help": "Show this help and exit"
           }
         ],
         "positionals": [],
-        "subcommand_required": false,
-        "subcommands": [],
-        "usage": "usage: serve [OPTIONS] [-- ARGS...]"
+        "subcommands": []
       }
-    ],
-    "usage": "usage: aurora-render [OPTIONS] <SCENE>... [COMMAND] [-- ARGS...]",
-    "version": "1.2.3"
-  },
-  "texts": {
-    "render/help": "Render one scene interactively\nusage: aurora-render render [OPTIONS] <SRC> [<DST>] [-- ARGS...]\n\nOptions:\n  -w, --watch            Re-render on change\n      --fps <FPS>        Target frame rate [range: 1, 240] [default: 60]\n      --format <FORMAT>  Leaf output format [possible values: png, webp] [default: png]\n\nHelp:\n  -h, --help  Show this help and exit\n\nArguments:\n  <SRC>  Source scene\n  <DST>  Target image\n\n",
-    "render/usage": "usage: aurora-render render [OPTIONS] <SRC> [<DST>] [-- ARGS...]",
-    "root/help": "Render Aurora scenes into image files\nusage: aurora-render [OPTIONS] <SCENE>... [COMMAND] [-- ARGS...]\n\nLong description line for the root command.\n\nOptions:\n  -o, --output <FILE>       Output image path [default: out.png]\n  -w, --width <WIDTH>       Canvas width in px [range: 1, 8192] [default: 800]\n  -s, --scale <SCALE>       Scale factor [default: 1]\n  -v, --verbose             Repeat for more detail\n  -f, --force               Overwrite output\n      --dry-run             Print only\n      --margin <MARGIN>     Outer margin [default: 0]\n      --tint <TINT>         Overlay tint [default: #fff]\n      --timeout <TIMEOUT>   Give up after [default: 30s]\n      --tag <TAG> <TAG>...  Attach a tag (repeatable)\n      --format <FORMAT>     Root output format [possible values: text, json] [default: text]\n\nDiagnostics:\n      --level <LEVEL>  Log verbosity [default: info]\n      --mode <MODE>    Quality/speed trade-off [possible values: fast, balanced, quality] [default: balanced]\n\nHelp:\n  -h, --help     Show this help and exit\n  -V, --version  Show the version and exit\n\nArguments:\n  <SCENE>...  Scenes to render\n\nCommands:\n  render  Render one scene interactively\n  serve   Serve the gallery over HTTP\n\nRun 'aurora-render <COMMAND> --help' for more information on a command.\n\nReport issues at the project tracker.\n",
-    "root/usage": "usage: aurora-render [OPTIONS] <SCENE>... [COMMAND] [-- ARGS...]",
-    "root/version": "aurora-render 1.2.3\n",
-    "strict/help": "A command that refuses to run bare\nusage: strict [OPTIONS] <COMMAND> [-- ARGS...]\n\nOptions:\n      --token <TOKEN>  Auth token [required]\n\nHelp:\n  -h, --help  Show this help and exit\n\nCommands:\n  deploy  Deploy the build\n\nRun 'strict <COMMAND> --help' for more information on a command.\n\n",
-    "strict/usage": "usage: strict [OPTIONS] <COMMAND> [-- ARGS...]"
+    ]
   }
 }

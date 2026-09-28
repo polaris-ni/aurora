@@ -315,73 +315,83 @@ auto count_commands(const CommandSpec &spec) -> int {
 
 // ------------------------------------------------------------ schema
 
-[[nodiscard]] auto option_to_json(const OptionSchema &option) -> Json {
-    Json entry = Json::object();
-    entry["long"] = option.long_name;
-    if (option.short_name != '\0') {
-        entry["short"] = std::string(1, option.short_name);
+/// @brief 字符串数组 → JSON 数组（取值域 / 互斥表这类词表字段）。
+[[nodiscard]] auto string_list_to_json(const std::vector<std::string> &items) -> json::Value {
+    auto out = json::Value::array();
+    out.reserve(items.size());
+    for (const auto &item : items) {
+        out.push_back(item);
     }
-    entry["type"] = std::string{to_string(option.kind)};
-    entry["min"] = option.arity.min;
-    entry["max"] = option.arity.max;
-    entry["required"] = option.required;
-    entry["hidden"] = option.hidden;
+    return out;
+}
+
+[[nodiscard]] auto option_to_json(const OptionSchema &option) -> json::Value {
+    auto entry = json::Value::object();
+    entry.set("long", option.long_name);
+    if (option.short_name != '\0') {
+        entry.set("short", std::string(1, option.short_name));
+    }
+    entry.set("type", std::string{to_string(option.kind)});
+    entry.set("min", option.arity.min);
+    entry.set("max", option.arity.max);
+    entry.set("required", json::Value{option.required});
+    entry.set("hidden", json::Value{option.hidden});
     if (!option.value_hint.empty()) {
-        entry["value_hint"] = option.value_hint;
+        entry.set("value_hint", option.value_hint);
     }
     if (!option.choices.empty()) {
-        entry["choices"] = option.choices;
+        entry.set("choices", string_list_to_json(option.choices));
     }
     if (!option.default_text.empty()) {
-        entry["default"] = option.default_text;
+        entry.set("default", option.default_text);
     }
     if (option.minimum) {
-        entry["minimum"] = *option.minimum;
+        entry.set("minimum", *option.minimum);
     }
     if (option.maximum) {
-        entry["maximum"] = *option.maximum;
+        entry.set("maximum", *option.maximum);
     }
     if (!option.conflicts_with.empty()) {
-        entry["conflicts_with"] = option.conflicts_with;
+        entry.set("conflicts_with", string_list_to_json(option.conflicts_with));
     }
     if (!option.group.empty()) {
-        entry["group"] = option.group;
+        entry.set("group", option.group);
     }
     if (option.early_view != EarlyView::None) {
-        entry["early_view"] = std::string{early_view_to_string(option.early_view)};
+        entry.set("early_view", std::string{early_view_to_string(option.early_view)});
     }
-    entry["help"] = option.help;
+    entry.set("help", option.help);
     return entry;
 }
 
-[[nodiscard]] auto positional_to_json(const PositionalSchema &slot) -> Json {
-    Json entry = Json::object();
-    entry["name"] = slot.name;
-    entry["type"] = std::string{to_string(slot.kind)};
-    entry["min"] = slot.arity.min;
-    entry["max"] = slot.arity.max;
+[[nodiscard]] auto positional_to_json(const PositionalSchema &slot) -> json::Value {
+    auto entry = json::Value::object();
+    entry.set("name", slot.name);
+    entry.set("type", std::string{to_string(slot.kind)});
+    entry.set("min", slot.arity.min);
+    entry.set("max", slot.arity.max);
     if (!slot.choices.empty()) {
-        entry["choices"] = slot.choices;
+        entry.set("choices", string_list_to_json(slot.choices));
     }
     if (!slot.default_text.empty()) {
-        entry["default"] = slot.default_text;
+        entry.set("default", slot.default_text);
     }
-    entry["help"] = slot.help;
+    entry.set("help", slot.help);
     return entry;
 }
 
-[[nodiscard]] auto command_to_json(const CommandSpec &spec) -> Json {
-    Json out = Json::object();
-    out["name"] = spec.name;
-    out["about"] = spec.about;
-    out["usage"] =
-        usage_line(spec, spec.name.empty() ? std::vector<std::string>{} : std::vector<std::string>{spec.name});
+[[nodiscard]] auto command_to_json(const CommandSpec &spec) -> json::Value {
+    auto out = json::Value::object();
+    out.set("name", spec.name);
+    out.set("about", spec.about);
+    out.set("usage",
+            usage_line(spec, spec.name.empty() ? std::vector<std::string>{} : std::vector<std::string>{spec.name}));
     if (!spec.version.empty()) {
-        out["version"] = spec.version;
+        out.set("version", spec.version);
     }
-    out["subcommand_required"] = spec.subcommand_required;
+    out.set("subcommand_required", json::Value{spec.subcommand_required});
     const auto plan = detail::builtin_plan(spec);
-    Json options = Json::array();
+    auto options = json::Value::array();
     for (const auto &option : spec.options) {
         if (!option.hidden) {  // hidden 的约定：既不进 --help，也不进 schema，仍可正常解析
             options.push_back(option_to_json(option));
@@ -394,17 +404,17 @@ auto count_commands(const CommandSpec &spec) -> int {
     if (plan.version) {
         options.push_back(option_to_json(detail::builtin_version_option(plan)));
     }
-    out["options"] = std::move(options);
-    Json positionals = Json::array();
+    out.set("options", std::move(options));
+    auto positionals = json::Value::array();
     for (const auto &slot : spec.positionals) {
         positionals.push_back(positional_to_json(slot));
     }
-    out["positionals"] = std::move(positionals);
-    Json subcommands = Json::array();
+    out.set("positionals", std::move(positionals));
+    auto subcommands = json::Value::array();
     for (const auto &sub : spec.subcommands) {
         subcommands.push_back(command_to_json(sub));
     }
-    out["subcommands"] = std::move(subcommands);
+    out.set("subcommands", std::move(subcommands));
     return out;
 }
 
@@ -611,6 +621,6 @@ auto version_text(const CommandSpec &spec, std::string_view program_name) -> std
     return out;
 }
 
-auto schema_json(const CommandSpec &spec) -> Json { return command_to_json(spec); }
+auto schema_json(const CommandSpec &spec) -> json::Value { return command_to_json(spec); }
 
 }  // namespace aurora::cli

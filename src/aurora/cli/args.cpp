@@ -547,7 +547,10 @@ class Parser {
             return version_text(*matched(), program_);
         }
         if (view == EarlyView::Schema) {
-            return schema_json(*root_).dump(2) + '\n';
+            // 序列化仅在边界值非有限时失败（RFC 8259 没有 NaN / Inf 的文本形态）；
+            // 此时无 text 可交付，回落空串由调用方按「无输出」处理。
+            const auto text = json::dump(schema_json(*root_), {.indent = 2});
+            return text ? std::move(text).value() + '\n' : std::string{};
         }
         return {};
     }
