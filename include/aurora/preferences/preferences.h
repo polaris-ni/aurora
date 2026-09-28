@@ -7,13 +7,14 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
+#include "aurora/core/json.h"
 #include "aurora/core/result.h"
 #include "aurora/state/binding.h"
 #include "aurora/state/state.h"
-#include "aurora/widget/props_io.h"
 
 namespace aurora::preferences {
 
@@ -46,7 +47,8 @@ namespace aurora::preferences {
  * - **单例**：`instance(name)` 提供按名注册表的全局单例访问（每个 name 唯一、懒构造、
  *   线程安全创建）；原构造器依然可用（内存模式 / 测试 / 非单例场景）。
  *
- * 支持的值类型：`bool` / 整数 / 浮点 / `std::string` / `std::vector` / JSON 对象。
+ * 支持的值类型：`bool` / 整数 / 浮点 / `std::string`，以及整值 `json::Value`（含嵌套对象与数组，
+ * 直存直取不做转换）。
  *
  * 分组：通过 `group(name)` 获取作用域子视图（`Group`），其内 `get/set/watch/binding/
  * contains/keys/remove/clear` 自动限定在该命名分组下，并以嵌套 JSON 对象持久化
@@ -60,10 +62,10 @@ namespace aurora::preferences {
 // ----- 嵌套 JSON 路径助手（复合点号键） -----
 // 供头文件模板方法（`*_impl`）与 `preferences.cpp` 的 `reconcile` 共用：
 // 分组键以点号路径（如 `"ui.theme"`）在嵌套 `root_` 中寻址；顶层键（无点号）语义不变。
-auto resolve_get(const Json &root, const std::string &composite) -> Json;
-auto resolve_set(Json &root, const std::string &composite, Json value) -> void;
-auto resolve_erase(Json &root, const std::string &composite) -> void;
-auto flatten(const Json &root) -> std::unordered_map<std::string, Json>;
+auto resolve_get(const json::Value &root, const std::string &composite) -> json::Value;
+auto resolve_set(json::Value &root, const std::string &composite, json::Value value) -> void;
+auto resolve_erase(json::Value &root, const std::string &composite) -> void;
+auto flatten(const json::Value &root) -> std::unordered_map<std::string, json::Value>;
 
 class Preferences {
   public:
@@ -261,7 +263,7 @@ class Preferences {
         auto operator=(const IStateHolder &) -> IStateHolder & = delete;
         IStateHolder(IStateHolder &&) = delete;
         auto operator=(IStateHolder &&) -> IStateHolder & = delete;
-        virtual void push(const Json &j) = 0;
+        virtual void push(const json::Value &j) = 0;
     };
 
     template <typename T>
@@ -269,15 +271,17 @@ class Preferences {
         std::shared_ptr<State<T>> state;
         T fallback;
         StateHolder(std::shared_ptr<State<T>> s, T fb) : state(std::move(s)), fallback(std::move(fb)) {}
-        void push(const Json &j) override {
+        void push(const json::Value &j) override {
             if (j.is_null()) {
                 state->set(fallback);
                 return;
             }
-            try {
-                state->set(j.get<T>());
-            } catch (...) {
-                state->set(fallback);
+            // T 为整值时原样投递；否则走宽容读：类型不符/域外一律回落 fallback（新容器不抛异常，
+            // 原「try + catch(...) 回落」的语义由 as_or 内建）。
+            if constexpr (std::is_same_v<T, json::Value>) {
+                state->set(j);
+            } else {
+                state->set(j.as_or<T>(fallback));
             }
         }
     };
@@ -288,9 +292,9 @@ class Preferences {
     template <typename T>
     [[nodiscard]] auto get_impl(const std::string &scope, const std::string &key, T fallback) const -> T;
     template <typename T>
-    // 豁免 performance-unnecessary-value-param：告警仅对 std::vector<int> 这类「转 Json 时本就要逐元素
-    // 复制」的实例化成立；同一模板体对 T=std::string/Json 等实例靠按值形参 + Json(std::move(value))
-    // 完成移动转换，改 const 引用反而把这些高频实例化退化成深拷贝。单一签名的私有模板按最受益形态取形参。
+    // 豁免 performance-unnecessary-value-param：同一模板体对 T=std::string/json::Value 这类实例
+    // 靠按值形参 + json::Value(std::move(value)) 完成移动转换，改 const 引用反而把这些高频实例化
+    // 退化成深拷贝。单一签名的私有模板按最受益形态取形参。
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     auto set_impl(const std::string &scope, const std::string &key, T value) -> void;
     template <typename T>
@@ -308,7 +312,7 @@ class Preferences {
 
     std::filesystem::path file_;  // 空 = 内存模式
     Options opts_;  // 默认构造即 auto_create_dir=true（Options 为聚合类型，见 Options）
-    Json root_ = Json::object();  // 内存 JSON 存储
+    json::Value root_ = json::Value::object();  // 内存 JSON 存储
     std::unordered_map<std::string, std::shared_ptr<IStateHolder>> states_;  // key -> State
     std::optional<Error> load_error_;
     // 用 std::mutex 而非 std::shared_mutex：MinGW-w64 winpthreads 的 rwlock 在多线程
@@ -332,7 +336,7 @@ class Preferences {
 
     /// @brief 依据当前 versions_/tombstones_/cleared_at_ 与磁盘数据重算 root_
     ///         （合并远端新增键、应用墓碑与清空纪元、按版本 LWW 取舍），保证多进程一致。
-    auto reconcile(const Json &on_disk, const std::unordered_map<std::string, double> &disk_versions) -> void;
+    auto reconcile(const json::Value &on_disk, const std::unordered_map<std::string, double> &disk_versions) -> void;
 };
 
 // ----- Preferences 作用域化实现（模板，供头文件内联公共方法 / Group 委托） -----
@@ -341,25 +345,32 @@ template <typename T>
 auto Preferences::get_impl(const std::string &scope, const std::string &key, T fallback) const -> T {
     std::unique_lock lock(mutex_);
     const std::string composite = scope.empty() ? key : scope + "." + key;
-    const Json j = resolve_get(root_, composite);
+    const json::Value j = resolve_get(root_, composite);
     if (j.is_null()) {
         return fallback;
     }
-    try {
-        return j.get<T>();
-    } catch (...) {
-        return fallback;
+    // 恒等分支：T 为整值时直接交出该 Value（嵌套对象/数组原样透出）；其余 T 走宽容读，
+    // 类型不符或数值域外一律回落 fallback（语义等同原「try + catch(...) 回落」）。
+    if constexpr (std::is_same_v<T, json::Value>) {
+        return j;
+    } else {
+        return j.as_or<T>(fallback);
     }
 }
 
 template <typename T>
 auto Preferences::set_impl(const std::string &scope, const std::string &key, T value) -> void {
     const std::string composite = scope.empty() ? key : scope + "." + key;
-    Json snapshot;
+    json::Value snapshot;
     std::shared_ptr<IStateHolder> holder;
     {
         std::unique_lock lock(mutex_);
-        resolve_set(root_, composite, Json(std::move(value)));
+        // 恒等分支：T 为整值时原样存入（不做任何类型推断）；其余 T 由入向构造落成标量 / 字符串。
+        if constexpr (std::is_same_v<T, json::Value>) {
+            resolve_set(root_, composite, std::move(value));
+        } else {
+            resolve_set(root_, composite, json::Value(std::move(value)));
+        }
         snapshot = resolve_get(root_, composite);
         versions_[composite] = now_ts();  // 记录写入版本（LWW 依据）
         tombstones_.erase(composite);  // 重新创建会取消墓碑
@@ -385,12 +396,13 @@ auto Preferences::watch_impl(const std::string &scope, const std::string &key, T
         // 类型不一致（同键不同 T）：重建。
     }
     T initial = fallback;
-    const Json j = resolve_get(root_, composite);
+    const json::Value j = resolve_get(root_, composite);
     if (!j.is_null()) {
-        try {
-            initial = j.get<T>();
-        } catch (const nlohmann::json::exception &) {
-            initial = fallback;  // JSON 类型转换失败，回退到默认值
+        // 恒等分支：T 为整值时取存储原值；否则宽容读，类型不符回退到默认值。
+        if constexpr (std::is_same_v<T, json::Value>) {
+            initial = j;
+        } else {
+            initial = j.as_or<T>(fallback);
         }
     }
     auto state = std::make_shared<State<T>>(initial);

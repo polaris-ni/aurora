@@ -5,9 +5,9 @@
 #include <vector>
 
 #include "aurora/app/display.h"
+#include "aurora/core/json.h"
 #include "aurora/core/types.h"
 #include "aurora/preferences/preferences.h"
-#include "aurora/widget/props_io.h"
 #include "aurora/window/window_state.h"
 
 namespace aurora {
@@ -34,10 +34,10 @@ struct WindowGeometry {
 };
 
 /// @brief 序列化为 JSON 对象（键稳定，供人工排查与跨版本兼容读取）。
-[[nodiscard]] auto window_geometry_to_json(const WindowGeometry &g) -> Json;
+[[nodiscard]] auto window_geometry_to_json(const WindowGeometry &g) -> json::Value;
 
 /// @brief 从 JSON 反序列化：键缺失或类型不符返回 `std::nullopt`（异常不跨 API 边界）。
-[[nodiscard]] auto window_geometry_from_json(const Json &j) -> std::optional<WindowGeometry>;
+[[nodiscard]] auto window_geometry_from_json(const json::Value &j) -> std::optional<WindowGeometry>;
 
 /// @brief 几何是否可用：尺寸为正，且与给定显示器列表中的**任一工作区**有交集（允许部分越界）。
 ///

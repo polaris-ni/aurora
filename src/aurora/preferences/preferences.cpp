@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iterator>
 #include <mutex>
+#include <ranges>
 #include <set>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "aurora/core/platform.h"
@@ -25,24 +28,22 @@ namespace {
 constexpr auto AURORA_PREFERENCE_META_KEY = "__aurora_preference_meta__";
 
 /// @brief 把 `unordered_map<string,double>` 序列化为 JSON 对象（跳过值为 0 的项）。
-auto to_json_map(const std::unordered_map<std::string, double> &m) -> Json {
-    Json out = Json::object();
+auto to_json_map(const std::unordered_map<std::string, double> &m) -> json::Value {
+    auto out = json::Value::object();
     for (const auto &kv : m) {
         if (kv.second != 0.0) {
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            out[kv.first] = kv.second;
+            out.set(kv.first, kv.second);
         }
     }
     return out;
 }
 
 /// @brief 从 JSON 对象解析版本/墓碑表。
-auto from_json_map(const Json &j) -> std::unordered_map<std::string, double> {
+auto from_json_map(const json::Value &j) -> std::unordered_map<std::string, double> {
     std::unordered_map<std::string, double> out;
     if (j.is_object()) {
-        for (const auto &it : j.items()) {
-            out[it.key()] = it.value().is_number() ? it.value().get<double>() : 0.0;
+        for (const auto &entry : j.entries()) {
+            out[std::string(entry.key)] = entry.value.is_number() ? entry.value.as_or<double>(0.0) : 0.0;
         }
     }
     return out;
@@ -125,9 +126,9 @@ class FileLock {
  * @brief 从整份磁盘 JSON 中拆出「用户数据」与「meta（versions/tombstones/cleared_at）」。
  * 旧格式（无 meta 键）也能兼容：data 为整个对象，meta 为空。
  */
-auto split_meta(const Json &whole, Json &data, std::unordered_map<std::string, double> &versions,
+auto split_meta(const json::Value &whole, json::Value &data, std::unordered_map<std::string, double> &versions,
                 std::unordered_map<std::string, double> &tombstones, double &cleared_at) -> void {
-    data = Json::object();
+    data = json::Value::object();
     versions.clear();
     tombstones.clear();
     cleared_at = 0.0;
@@ -136,25 +137,17 @@ auto split_meta(const Json &whole, Json &data, std::unordered_map<std::string, d
     }
     data = whole;
     data.erase(AURORA_PREFERENCE_META_KEY);
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    const Json meta = (whole.contains(AURORA_PREFERENCE_META_KEY) && whole[AURORA_PREFERENCE_META_KEY].is_object())
-                          // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-                          // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                          ? whole[AURORA_PREFERENCE_META_KEY]
-                          : Json::object();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    cleared_at = meta.contains("cleared_at") && meta["cleared_at"].is_number() ? meta["cleared_at"].get<double>() : 0.0;
-    if (meta.contains("versions")) {
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        versions = from_json_map(meta["versions"]);
+    // 指针路径：meta 缺失或不是对象即视为旧格式（无元数据），三类字段一律取空/0。
+    const json::Value *meta = whole.at(AURORA_PREFERENCE_META_KEY);
+    if ((meta == nullptr) || !meta->is_object()) {
+        return;
     }
-    if (meta.contains("tombstones")) {
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        tombstones = from_json_map(meta["tombstones"]);
+    cleared_at = meta->as_or<double>("cleared_at", 0.0);
+    if (const json::Value *versions_node = meta->at("versions"); versions_node != nullptr) {
+        versions = from_json_map(*versions_node);
+    }
+    if (const json::Value *tombstones_node = meta->at("tombstones"); tombstones_node != nullptr) {
+        tombstones = from_json_map(*tombstones_node);
     }
 }
 
@@ -162,17 +155,19 @@ auto split_meta(const Json &whole, Json &data, std::unordered_map<std::string, d
 
 // ----- 嵌套 JSON 路径助手（复合点号键） -----
 
-/// @brief 按复合点号键取嵌套值；缺失或路径中断返回 Json{}。
-auto resolve_get(const Json &root, const std::string &composite) -> Json {
-    const Json *cur = &root;
+/// @brief 按复合点号键取嵌套值；缺失或路径中断返回空值。
+auto resolve_get(const json::Value &root, const std::string &composite) -> json::Value {
+    const json::Value *cur = &root;
     std::string_view rem(composite);
     while (true) {
         const auto dot = rem.find('.');
         const std::string seg(rem.substr(0, dot));
-        if (!cur->is_object() || !cur->contains(seg)) {
-            return Json{};
+        // at() 在非对象上同样返回 nullptr，故「路径中断」与「键缺失」合并为一次判空。
+        const json::Value *next = cur->at(seg);
+        if (next == nullptr) {
+            return json::Value{};
         }
-        cur = &cur->at(seg);
+        cur = next;
         if (dot == std::string_view::npos) {
             break;
         }
@@ -182,57 +177,55 @@ auto resolve_get(const Json &root, const std::string &composite) -> Json {
 }
 
 /// @brief 按复合点号键写入嵌套值（中间段自动建对象容器）。
-auto resolve_set(Json &root, const std::string &composite, Json value) -> void {
-    Json *cur = &root;
+auto resolve_set(json::Value &root, const std::string &composite, json::Value value) -> void {
+    json::Value *cur = &root;
     std::string_view rem(composite);
     while (true) {
         const auto dot = rem.find('.');
         const std::string seg(rem.substr(0, dot));
         if (!cur->is_object()) {
-            *cur = Json::object();
+            *cur = json::Value::object();
         }
         if (dot == std::string_view::npos) {
-            // 此处依赖 json operator[]
-            // 的插入语义（建键），不可改为 .at()
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            (*cur)[seg] = std::move(value);
+            cur->set(seg, std::move(value));
             return;
         }
-        if (!cur->contains(seg) || !cur->at(seg).is_object()) {
-            // 此处依赖 json operator[]
-            // 的插入语义（建键），不可改为 .at()
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            (*cur)[seg] = Json::object();
+        // 写接口会使既有引用失效，故每次插入后重新取址，不复用插入前的指针。
+        json::Value *next = cur->at(seg);
+        if ((next == nullptr) || !next->is_object()) {
+            cur->set(seg, json::Value::object());
+            next = cur->at(seg);
         }
-        cur = &cur->at(seg);
+        cur = next;
         rem = rem.substr(dot + 1);
     }
 }
 
 /// @brief 按复合点号键删除嵌套值（路径中断则无操作）。
-auto resolve_erase(Json &root, const std::string &composite) -> void {
-    Json *cur = &root;
+auto resolve_erase(json::Value &root, const std::string &composite) -> void {
+    json::Value *cur = &root;
     std::string_view rem(composite);
     while (true) {
         const auto dot = rem.find('.');
         const std::string seg(rem.substr(0, dot));
-        if (!cur->is_object() || !cur->contains(seg)) {
+        json::Value *next = cur->at(seg);
+        if (next == nullptr) {
             return;
         }
         if (dot == std::string_view::npos) {
             cur->erase(seg);
             return;
         }
-        cur = &cur->at(seg);
+        cur = next;
         rem = rem.substr(dot + 1);
     }
 }
 
 /// @brief 把嵌套 JSON 拍平为复合点号键 → 叶子值的平面表（递归展开所有对象）。
-auto flatten(const Json &root) -> std::unordered_map<std::string, Json> {
-    std::unordered_map<std::string, Json> out;
+auto flatten(const json::Value &root) -> std::unordered_map<std::string, json::Value> {
+    std::unordered_map<std::string, json::Value> out;
     struct Frame {
-        const Json *node;
+        const json::Value *node;
         std::string prefix;
     };
     std::vector<Frame> stack{{.node = &root, .prefix = ""}};
@@ -242,12 +235,13 @@ auto flatten(const Json &root) -> std::unordered_map<std::string, Json> {
         if (!f.node->is_object()) {
             continue;
         }
-        for (const auto &it : f.node->items()) {
-            const std::string k = f.prefix.empty() ? it.key() : (f.prefix + "." + it.key());
-            if (it.value().is_object()) {
-                stack.push_back({.node = &it.value(), .prefix = k});
+        for (const auto &entry : f.node->entries()) {
+            const std::string key(entry.key);
+            const std::string k = f.prefix.empty() ? key : (f.prefix + "." + key);
+            if (entry.value.is_object()) {
+                stack.push_back({.node = &entry.value, .prefix = k});
             } else {
-                out[k] = it.value();
+                out[k] = entry.value;
             }
         }
     }
@@ -319,38 +313,41 @@ auto Preferences::load_from_file() -> void {
     }
     std::error_code ec;
     if (!std::filesystem::exists(file_, ec)) {
-        root_ = Json::object();  // 文件不存在 → 空配置（构造后由 flush 创建）
+        root_ = json::Value::object();  // 文件不存在 → 空配置（构造后由 flush 创建）
         return;
     }
     std::ifstream in(file_, std::ios::binary);
     if (!in) {
         load_error_ = make_error(ErrorCode::PrefsOpenFailed, "Failed to open config file: " + file_.string(),
                                  "Check file path and read permission", "", file_.string());
-        root_ = Json::object();
+        root_ = json::Value::object();
         return;
     }
-    try {
-        Json whole;
-        in >> whole;
-        Json data;
-        std::unordered_map<std::string, double> versions;
-        std::unordered_map<std::string, double> tombstones;
-        double cleared_at = 0.0;
-        split_meta(whole, data, versions, tombstones, cleared_at);
-        root_ = std::move(data);
-        versions_ = std::move(versions);
-        tombstones_ = std::move(tombstones);
-        cleared_at_ = cleared_at;
-        // 应用持久化的墓碑/清空纪元，得到初始内存视图（不复活已删除键）。
-        reconcile(root_, versions_);
-    } catch (const std::exception &e) {
-        load_error_ = make_error(ErrorCode::PrefsParseFailed, std::string("Config file JSON parse failed: ") + e.what(),
+    const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    auto whole = json::parse(text);
+    if (!whole.ok()) {
+        // 解析失败语义不变：记入 last_load_error 并以空存储启动（异常改为显式判 Result）。
+        load_error_ = make_error(ErrorCode::PrefsParseFailed,
+                                 std::string("Config file JSON parse failed: ") + whole.error().message,
                                  "Check whether file is valid JSON", "", file_.string());
-        root_ = Json::object();
+        root_ = json::Value::object();
+        return;
     }
+    json::Value data;
+    std::unordered_map<std::string, double> versions;
+    std::unordered_map<std::string, double> tombstones;
+    double cleared_at = 0.0;
+    split_meta(whole.value(), data, versions, tombstones, cleared_at);
+    root_ = std::move(data);
+    versions_ = std::move(versions);
+    tombstones_ = std::move(tombstones);
+    cleared_at_ = cleared_at;
+    // 应用持久化的墓碑/清空纪元，得到初始内存视图（不复活已删除键）。
+    reconcile(root_, versions_);
 }
 
-auto Preferences::reconcile(const Json &on_disk, const std::unordered_map<std::string, double> &disk_versions) -> void {
+auto Preferences::reconcile(const json::Value &on_disk, const std::unordered_map<std::string, double> &disk_versions)
+    -> void {
     // 把嵌套 root_ / on_disk 拍平为复合点号键平面视图，统一在复合键空间做 LWW/墓碑/清空纪元。
     const auto mem = flatten(root_);
     const auto disk = flatten(on_disk);
@@ -370,7 +367,7 @@ auto Preferences::reconcile(const Json &on_disk, const std::unordered_map<std::s
         all.insert(key);
     }
 
-    std::unordered_map<std::string, Json> merged;
+    std::unordered_map<std::string, json::Value> merged;
     std::unordered_map<std::string, double> merged_ver;
     for (const auto &k : all) {
         const double tomb = tombstones_.contains(k) ? tombstones_[k] : 0.0;
@@ -385,11 +382,11 @@ auto Preferences::reconcile(const Json &on_disk, const std::unordered_map<std::s
         }
         // 3) 存活：按版本决定取值（仅本进程显式 set 的版本参与 LWW；仅加载的键让位于磁盘新值）。
         const double d_ver = disk_versions.contains(k) ? disk_versions.at(k) : 0.0;
-        Json val{};
+        json::Value val{};
         bool have_val = false;
         if (mem.contains(k)) {
             if (ver < d_ver) {
-                val = disk.contains(k) ? disk.at(k) : Json{};
+                val = disk.contains(k) ? disk.at(k) : json::Value{};
                 merged_ver[k] = d_ver;
             } else {
                 val = mem.at(k);
@@ -412,7 +409,7 @@ auto Preferences::reconcile(const Json &on_disk, const std::unordered_map<std::s
     }
 
     // 由合并后的复合键平面表重建嵌套 root_。
-    root_ = Json::object();
+    root_ = json::Value::object();
     for (const auto &kv : merged) {
         resolve_set(root_, kv.first, kv.second);
     }
@@ -429,19 +426,19 @@ auto Preferences::keys_impl(const std::string &scope) const -> std::vector<std::
     std::unique_lock lock(mutex_);
     std::vector<std::string> out;
     if (scope.empty()) {
-        for (const auto &item : root_.items()) {
-            if (!item.value().is_null()) {
-                out.push_back(item.key());
+        for (const auto &entry : root_.entries()) {
+            if (!entry.value.is_null()) {
+                out.push_back(std::string(entry.key));
             }
         }
         return out;
     }
-    const Json sub = resolve_get(root_, scope);
+    const json::Value sub = resolve_get(root_, scope);
     if (!sub.is_object()) {
         return out;
     }
-    for (const auto &item : sub.items()) {
-        out.push_back(item.key());
+    for (const auto &entry : sub.entries()) {
+        out.push_back(std::string(entry.key));
     }
     return out;
 }
@@ -460,14 +457,14 @@ auto Preferences::clear_impl(const std::string &scope) -> void {
     if (scope.empty()) {
         // 全局清空（现有行为）：全局清空纪元 + 已知键墓碑。
         std::vector<std::string> held;
-        for (const auto &item : root_.items()) {
-            held.push_back(item.key());
+        for (const auto &entry : root_.entries()) {
+            held.push_back(std::string(entry.key));
         }
         cleared_at_ = std::max(cleared_at_, now_ts());  // 全局清空纪元
         for (const auto &k : held) {
             tombstones_[k] = now_ts();  // 已知键打墓碑，确保本地持有的键被清掉
         }
-        root_ = Json::object();
+        root_ = json::Value::object();
         states_.clear();
         versions_.clear();
         return;
@@ -508,7 +505,7 @@ auto Preferences::flush() -> Result<void> {
                           "Another process may be writing, retry later", "", file_.string());
     }
     // 读取磁盘现状（其他进程可能已写入或删除键）。
-    Json on_disk = Json::object();
+    json::Value on_disk = json::Value::object();
     std::unordered_map<std::string, double> disk_versions;
     std::unordered_map<std::string, double> disk_tombstones;
     double disk_cleared_at = 0.0;
@@ -517,13 +514,13 @@ auto Preferences::flush() -> Result<void> {
         if (std::filesystem::exists(file_, ec_disk)) {
             std::ifstream in(file_, std::ios::binary);
             if (in) {
-                try {
-                    Json whole;
-                    in >> whole;
-                    split_meta(whole, on_disk, disk_versions, disk_tombstones, disk_cleared_at);
-                } catch (const nlohmann::json::exception &) {
+                const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+                auto whole = json::parse(text);
+                if (whole.ok()) {
+                    split_meta(whole.value(), on_disk, disk_versions, disk_tombstones, disk_cleared_at);
+                } else {
                     // 损坏的临时/残留内容：忽略，以本进程内存为准覆盖。
-                    on_disk = Json::object();
+                    on_disk = json::Value::object();
                 }
             }
         }
@@ -538,23 +535,20 @@ auto Preferences::flush() -> Result<void> {
     reconcile(on_disk, disk_versions);
 
     // 序列化：用户数据 + meta（versions / tombstones / cleared_at）。
-    Json out = root_;
-    Json meta = Json::object();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    meta["versions"] = to_json_map(versions_);
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    meta["tombstones"] = to_json_map(tombstones_);
+    json::Value out = root_;
+    auto meta = json::Value::object();
+    meta.set("versions", to_json_map(versions_));
+    meta.set("tombstones", to_json_map(tombstones_));
     if (cleared_at_ > 0.0) {
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        meta["cleared_at"] = cleared_at_;
+        meta.set("cleared_at", cleared_at_);
     }
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    out[AURORA_PREFERENCE_META_KEY] = meta;
-    const std::string content = out.dump(2);  // 人类可读、UTF-8（无 BOM）
+    out.set(AURORA_PREFERENCE_META_KEY, std::move(meta));
+    auto dumped = json::dump(out, {.indent = 2});  // 人类可读、UTF-8（无 BOM）
+    if (!dumped.ok()) {
+        return make_error(ErrorCode::PrefsWriteFailed, "Failed to serialize preferences: " + dumped.error().message,
+                          "Check whether stored values contain non-finite numbers", "", file_.string());
+    }
+    const std::string content = std::move(dumped.value());
 
     // 临时文件名须进程唯一（含 PID），避免多进程共用同一临时文件互相覆盖。
 #ifdef AURORA_PLATFORM_WINDOWS
@@ -599,35 +593,37 @@ auto Preferences::reload() -> Result<void> {
     }
     std::error_code ec;
     if (!std::filesystem::exists(file_, ec)) {
-        root_ = Json::object();
+        root_ = json::Value::object();
         versions_.clear();
         tombstones_.clear();
         cleared_at_ = 0.0;
-        std::vector<std::pair<std::shared_ptr<IStateHolder>, Json>> to_push;
+        std::vector<std::pair<std::shared_ptr<IStateHolder>, json::Value>> to_push;
         for (auto &[k, h] : states_) {
             (void)k;
-            to_push.emplace_back(h, Json{});
+            to_push.emplace_back(h, json::Value{});
         }
         for (auto &[h, j] : to_push) {
             h->push(j);
         }
         return {};
     }
-    Json whole;
+    json::Value whole;
     {
         std::ifstream in(file_, std::ios::binary);
         if (!in) {
             return make_error(ErrorCode::PrefsOpenFailed, "Failed to open config file: " + file_.string(), "", "",
                               file_.string());
         }
-        try {
-            in >> whole;
-        } catch (const std::exception &e) {
-            return make_error(ErrorCode::PrefsParseFailed, std::string("Config file JSON parse failed: ") + e.what(),
-                              "", "", file_.string());
+        const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+        auto parsed = json::parse(text);
+        if (!parsed.ok()) {
+            return make_error(ErrorCode::PrefsParseFailed,
+                              std::string("Config file JSON parse failed: ") + parsed.error().message, "", "",
+                              file_.string());
         }
+        whole = std::move(parsed.value());
     }
-    Json on_disk;
+    json::Value on_disk;
     std::unordered_map<std::string, double> disk_versions;
     std::unordered_map<std::string, double> disk_tombstones;
     double disk_cleared_at = 0.0;
@@ -640,10 +636,10 @@ auto Preferences::reload() -> Result<void> {
     root_ = std::move(on_disk);
     reconcile(root_, versions_);  // 应用持久化的墓碑/清空纪元
 
-    std::vector<std::pair<std::shared_ptr<IStateHolder>, Json>> to_push;
+    std::vector<std::pair<std::shared_ptr<IStateHolder>, json::Value>> to_push;
     for (auto &[k, h] : states_) {
-        const Json j = resolve_get(root_, k);  // k 为复合键，须按嵌套路径寻址
-        to_push.emplace_back(h, j.is_null() ? Json{} : j);
+        const json::Value j = resolve_get(root_, k);  // k 为复合键，须按嵌套路径寻址
+        to_push.emplace_back(h, j.is_null() ? json::Value{} : j);
     }
     for (auto &[h, j] : to_push) {
         h->push(j);
