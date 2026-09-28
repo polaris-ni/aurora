@@ -1872,6 +1872,8 @@ args.rest();                      // `--` 之后的原始 token，未经任何�
 > 头文件**不随伞头导出**，用前须显式 `#include "aurora/core/json.h"`。`widget/` 层收敛到本类型后，
 > 伞头用户将经 `widget/props_io.h` 传递获得；在此之前这行不能省。
 
+### 42.1 值容器读写（DOM）
+
 ```cpp
 #include "aurora/core/json.h"
 namespace au = aurora;
@@ -1942,5 +1944,109 @@ au::json::dump_into(res, out, {.indent = 2});                        // 追加�
   存储，唯一读出口是 `as_raw_number()`。
 - **非有限值不可序列化**：`dump` 遇 `NaN` / `Inf` 返回失败（`json-value-not-serializable`），
   不宽容转 `null`。
+
+### 42.2 JSON Pointer（路径寻址）
+
+键路径需要跨层寻址、或要按一条路径同时读写 / 删除时用 Pointer 族，不要手写逐层 `at` 链。
+
+```cpp
+#include "aurora/core/json.h"
+namespace au = aurora;
+
+auto parsed = au::json::parse(R"({"a":{"b":[10,20,30]},"c":{"d":1}})");
+au::json::Value root = std::move(parsed.value());  // 写路径需要非 const root
+
+// ---- 只读：命中返回指针，未命中 / 语法非法一律 nullptr（不抛异常）----
+if (const auto *v = au::json::find_pointer(root, "/a/b/1"); v != nullptr) {
+    (void)v->as_or<std::int64_t>(0);               // 20
+}
+(void)au::json::find_pointer(root, "");            // 空串 = 文档自身
+(void)au::json::find_pointer(root, "/a/missing");  // nullptr
+(void)au::json::find_pointer(root, "a/b");         // nullptr（非空且不以 '/' 开头 = 语法非法）
+
+// ---- 写路径：自动补齐缺失的中间容器；取指针后立即写，别跨写持有 ----
+auto slot = au::json::resolve_for_write(root, "/c/e/0");
+if (slot.ok()) {
+    *slot.value() = "created";                     // 若无 c.e 则已按段形态建为 Array
+}
+
+// ---- 路径删除：成功时 bool = 是否命中（未命中不是错误）----
+auto removed = au::json::erase_pointer(root, "/c/d");
+if (removed.ok() && removed.value()) { /* 命中并已删除 */ }
+```
+
+要点：
+
+- **段语法**：`~1` 还原为 `/`、`~0` 还原为 `~`；**空串指根**；**非空且不以 `/` 开头即语法非法**
+  （无相对路径宽容形式）。
+- **错误归属二分**：语法非法 → `json-parse-error`；段类型不符 / 对非容器取子项 / 索引越界 →
+  `json-type-mismatch`。只读族把两者统一压成 `nullptr`，需要区分时才用写路径族。
+- **写路径补齐**：中间遇 `null` 占位时按本段形态建容器（本段像下标或为 `-` → Array，否则 Object）；
+  已存在的成员不覆盖。末段落数组时 `-` 或「等于长度的索引」按追加处理；**两者都只能出现在末段**。
+- **根不可删**：`erase_pointer(root, "")` 恒失败。
+- **补齐也触发引用失效**：`resolve_for_write` 会调 `set` / `push_back`，返回的指针在后续任何写操作
+  后失效——「取指针 → 立即写」成对使用。
+
+### 42.3 SAX 流式解析（`parse_sax`）
+
+只关心文档中的少数片段、或文档大到不值得建整棵 DOM 时，用 SAX 出口：自己实现 `SaxHandler`，
+逐事件消费，命中目标后返回 `false` 提前收工。
+
+```cpp
+#include "aurora/core/json.h"
+namespace au = aurora;
+
+/// @brief 只取顶层 "id" 字段，其余事件一律忽略。
+class IdOnly : public au::json::SaxHandler {
+  public:
+    auto on_null() -> bool override { return true; }
+    auto on_bool(bool) -> bool override { return true; }
+    auto on_int(std::int64_t) -> bool override { return true; }
+    auto on_uint(std::uint64_t) -> bool override { return true; }
+    auto on_double(double) -> bool override { return true; }
+    auto on_raw_number(std::string_view) -> bool override { return true; }
+    auto on_string(std::string_view decoded) -> bool override {
+        if (pending_) {
+            id_.assign(decoded);      // 视图仅在本次回调期间有效，必须拷贝留存
+            return false;             // 提前终止：parse_sax 随即停止并返回「成功」
+        }
+        return true;
+    }
+    auto on_array_start() -> bool override { return true; }
+    auto on_array_end(std::size_t) -> bool override { return true; }
+    auto on_object_start() -> bool override { return true; }
+    auto on_object_key(std::string_view key) -> bool override {
+        pending_ = key == "id";
+        return true;
+    }
+    auto on_object_end(std::size_t) -> bool override { return true; }
+
+    [[nodiscard]] auto id() const -> const std::string & { return id_; }
+
+  private:
+    std::string id_;
+    bool pending_ = false;
+};
+
+IdOnly sink;
+const auto r = au::json::parse_sax(text, sink);   // 与 parse 同一引擎，失败口径逐字一致
+if (r.ok()) {
+    (void)sink.id();                              // 已拷贝，可安全使用
+}
+```
+
+要点：
+
+- **提前终止即成功**：回调返回 `false` 表示消费者主动停止，`parse_sax` 立即停止解析并返回**成功**
+  ——不是错误，不要按失败分支处理。
+- **视图只在回调期间有效**：`on_string` / `on_object_key` / `on_raw_number` 收到的 `string_view`
+  别名引擎内部复用缓冲，下一次回调即被覆写；**需要留存必须当场拷贝**。
+- **字符串事件已解码**：转义与 `\uXXXX`（含代理对）在派发前已还原成 UTF-8，不需要二次解码。
+- **数字按域分派**：`on_int` / `on_uint` / `on_double` 按三判别落域回调，超域或往返失真落
+  `on_raw_number`（载荷为原字面量文本）。
+- **闭合事件带计数**：`on_array_end(count)` / `on_object_end(count)` 的载荷是该层元素 / 成员个数。
+- **失败口径与 DOM 完全一致**：非法文档的 `Error`（code / message）与 `parse` 逐字相同；DOM 出口
+  本身就是「同一引擎 + 内置装配器」。
+- **`ParseOptions` 同样生效**：`max_depth` / `validate_utf8` 与 `parse` 共用。
 
 契约见 [`specification/01-core.md`](specification/01-core.md) §9。

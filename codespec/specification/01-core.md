@@ -418,7 +418,7 @@ auto node = au::find_node_by_path(root, path);  // widget/inspect.h，位于 aur
 ## 9 JSON 值容器（`core/json.h`）
 
 > 覆盖 `include/aurora/core/json.h`（公共轻头）与 `src/aurora/core/json/`（`value.cpp` / `parse.cpp` /
-> `dump.cpp`）。
+> `sax.cpp` / `pointer.cpp` / `dump.cpp`）。
 > 本模块是 Aurora 自有 JSON **值容器与编解码器**的唯一权威；UI 树线格式、差分补丁与工具链侧的
 > 序列化契约见 [`08-tooling.md`](08-tooling.md) §2，复制即用配方见 [`GUIDELINE.md`](../GUIDELINE.md)。
 
@@ -518,8 +518,9 @@ struct ParseOptions {
 [[nodiscard]] auto parse(std::string_view input, ParseOptions opts = {}) -> Result<Value>;
 ```
 
-实现为手写递归下降（全部在 `src/aurora/core/json/parse.cpp`），唯一出口是 `Result`——**无抛出式
-重载、无 discarded 双模式**，`Error` 携带 line / column / offset 与 ≤ 24 字节的上下文片段。
+实现为手写递归下降字符级引擎（位于 `src/aurora/core/json/sax.cpp`，见 §9.10），`parse.cpp` 只是
+「引擎 + 内置 DOM 装配器」的薄壳。`parse` 的唯一出口是 `Result`——**无抛出式重载、无 discarded
+双模式**，`Error` 携带 line / column / offset 与 ≤ 24 字节的上下文片段。
 
 | 边界情形 | 规则 |
 |:---|:---|
@@ -584,4 +585,101 @@ JSON 库的别名 `Json` 作为值类型；本模块提供其收敛目标类型 
 
 本模块的覆盖用例见 `tests/unit/utest_json.cpp`（套件名恒等于文件 stem）：语法合规矩阵、边界语义、
 全类型往返、键序与重复键、错误位置与占位符填充、类型判别与内部存储的同构、封闭读类型集、保真数字
-不参与数值转换、严格相等语义、容器读写与迭代视图、序列化转义与非有限值拒绝。
+不参与数值转换、严格相等语义、容器读写与迭代视图、序列化转义与非有限值拒绝、Pointer 寻址与写路径
+补齐。
+
+### 9.10 SAX 出口（`parse_sax`）
+
+```cpp
+class SaxHandler {
+  public:
+    SaxHandler() = default;
+    virtual ~SaxHandler() = default;
+    SaxHandler(const SaxHandler &) = delete;            // 不可拷贝
+    SaxHandler &operator=(const SaxHandler &) = delete;
+    SaxHandler(SaxHandler &&) = delete;                 // 不可移动
+    SaxHandler &operator=(SaxHandler &&) = delete;
+
+    virtual auto on_null() -> bool = 0;
+    virtual auto on_bool(bool value) -> bool = 0;
+    virtual auto on_int(std::int64_t value) -> bool = 0;
+    virtual auto on_uint(std::uint64_t value) -> bool = 0;
+    virtual auto on_double(double value) -> bool = 0;
+    virtual auto on_raw_number(std::string_view digits) -> bool = 0;
+    virtual auto on_string(std::string_view decoded) -> bool = 0;
+    virtual auto on_array_start() -> bool = 0;
+    virtual auto on_array_end(std::size_t count) -> bool = 0;
+    virtual auto on_object_start() -> bool = 0;
+    virtual auto on_object_key(std::string_view key) -> bool = 0;
+    virtual auto on_object_end(std::size_t count) -> bool = 0;
+};
+
+[[nodiscard]] auto parse_sax(std::string_view input, SaxHandler &handler, ParseOptions opts = {}) -> Result<void>;
+```
+
+**单引擎不分叉**：`parse_sax` 与 `parse` 共用同一字符级引擎。DOM 出口的实质是「本引擎 + 内置装配器
+（`DomBuilder`，一个 `SaxHandler` 实现）」，故词法、数字分派、转义还原、边界语义与错误消息全仓只有
+一份实现，不存在 DOM 与 SAX 行为漂移的可能。
+
+| 事件 | 触发时机与载荷 |
+|:---|:---|
+| `on_null` | 遇到 `null` |
+| `on_bool` | 遇到 `true` / `false`，载荷为已判别的 `bool` |
+| `on_int` / `on_uint` / `on_double` | 数字按 §9.6 的三判别落域后，以**对应域**回调 |
+| `on_raw_number` | 数字落 `RawNumber`（超域或往返失真），载荷为**原字面量文本** |
+| `on_string` | 字符串：**转义与 `\uXXXX`（含代理对）已还原为 UTF-8** 后才回调 |
+| `on_array_start` / `on_array_end(count)` | 数组开闭；闭合事件载荷为元素个数 |
+| `on_object_start` / `on_object_key(key)` / `on_object_end(count)` | 对象开 / 键 / 闭合；闭合载荷为成员个数 |
+
+三条语义约束：
+
+- **提前终止即成功**：回调返回 `false` 表示消费者主动停止（如只关心前几个字段），`parse_sax` 立即
+  停止解析并返回**成功**——这是消费者的决定而非错误。DOM 路径的装配器恒返回 `true`，故 DOM 出口
+  永不触发该分支。
+- **视图仅在回调期间有效**：`on_string` / `on_object_key` / `on_raw_number` 收到的 `string_view`
+  别名引擎内部的可复用缓冲，下一次回调即被覆写；需要留存必须自行拷贝。
+- **失败口径与 DOM 出口逐字一致**：非法文档的 `Error`（code / message）与 `parse` 完全相同，由
+  `tests/unit/utest_json_sax.cpp` 对同一批非法输入逐字比对 message 守住。
+
+覆盖用例见 `tests/unit/utest_json_sax.cpp`：事件序列（标量 / 容器 / 混合嵌套）、转义与代理对在发
+事件前已还原、闭合事件的成员与元素计数、提前终止（含首个事件前终止）按成功返回且后续事件不再
+派发、失败口径与 DOM 出口一致、深度上限同样生效、顶层标量。
+
+### 9.11 JSON Pointer（RFC 6901 最小集）
+
+```cpp
+[[nodiscard]] auto find_pointer(const Value &root, std::string_view pointer) -> const Value *;
+[[nodiscard]] auto find_pointer(Value &root, std::string_view pointer) -> Value *;
+[[nodiscard]] auto resolve_for_write(Value &root, std::string_view pointer) -> Result<Value *>;
+[[nodiscard]] auto erase_pointer(Value &root, std::string_view pointer) -> Result<bool>;
+```
+
+| 入口 | 语义 |
+|:---|:---|
+| `find_pointer`（const / 非 const 重载） | 只读寻址。命中返回子值指针；未命中返回 `nullptr` |
+| `resolve_for_write` | 写路径寻址：**自动补齐缺失的中间容器**，返回可写槽位 |
+| `erase_pointer` | 删除末段所指成员；成功时 `bool` 表示**是否命中**（未命中不是错误） |
+
+**路径语法**：段以 `/` 分隔（`"/a/0/b"`）；**空串指向 `root` 自身**；段内 `~1` 还原为 `/`、`~0`
+还原为 `~`。**非空且不以 `/` 开头即语法非法**——不存在「相对路径」或省略前导斜杠的宽容形式。
+
+**错误归属二分**（错误码见 §9.8）：
+
+| 情形 | 结果 |
+|:---|:---|
+| `pointer` 语法非法（非空且不以 `/` 开头） | `find_pointer` 返 `nullptr`；写路径返 `json-parse-error` |
+| 段不存在 / 数组索引越界 / 段与值类型不符 / 对非容器取子项 | `find_pointer` 返 `nullptr`；写路径返 `json-type-mismatch` |
+| 空 `pointer` 传入 `erase_pointer`（指向根自身） | 恒失败——根不可删除 |
+| 写路径 `pointer` 为空 | 成功，返回 `&root` |
+
+**写路径补齐规则**：中间段遇 `null` 占位时，按**本段**的形态决定建 `Object` 还是 `Array`（本段形如
+十进制数字或 `-` 则建 Array，否则建 Object；已存在的对象成员不覆盖，仅在缺失时补 `null` 占位）。
+末段落在数组上时，段为 `-`（RFC 6901 追加记号）或数字等于当前长度均按**追加**处理；数字大于当前
+长度不补齐空位，报 `json-type-mismatch`。**`-` 与「等于长度的索引」都只能出现在末段**，出现在中间
+段一律报 `json-type-mismatch`（不存在「追加后再往下走」的目标）。
+
+**与 §9.4 的引用失效规则叠加**：`resolve_for_write` 补齐容器会触发 `push_back` / `set`，故返回的
+指针在**后续任何写操作**后即失效——路径化写入必须「取指针 → 立即写」成对使用，不得跨写持有。
+
+覆盖用例见 `tests/unit/utest_json.cpp` 的 Pointer 段落：成员寻址、未命中返空、写路径补齐缺失层级、
+非法写路径拒绝、路径化删除。
