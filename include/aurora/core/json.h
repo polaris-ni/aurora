@@ -261,6 +261,45 @@ struct ParseOptions {
 [[nodiscard]] auto parse(std::string_view input, ParseOptions opts = {}) -> Result<Value>;
 
 // ============================================================================
+// SAX 解析
+// ============================================================================
+
+/// @brief SAX 事件消费者（虚接口）。
+/// @note 回调返回 `false` 表示消费者要求**提前终止**：`parse_sax` 随即停止解析并返回**成功**
+///       ——这是消费者的主动决定而非错误。DOM 解析路径永不返回 `false`。
+/// @warning 回调收到的 `string_view`（字符串解码结果 / 对象键 / 保真数字文本）**仅在本次回调
+///          期间有效**，底层是可复用的临时缓冲；需要留存请自行拷贝。
+/// @note Thread: 回调在调用 `parse_sax` 的线程上同步执行
+class SaxHandler {
+  public:
+    SaxHandler() = default;
+    virtual ~SaxHandler() = default;
+
+    SaxHandler(const SaxHandler &) = delete;
+    SaxHandler &operator=(const SaxHandler &) = delete;
+    SaxHandler(SaxHandler &&) = delete;
+    SaxHandler &operator=(SaxHandler &&) = delete;
+
+    virtual auto on_null() -> bool = 0;
+    virtual auto on_bool(bool value) -> bool = 0;
+    virtual auto on_int(std::int64_t value) -> bool = 0;
+    virtual auto on_uint(std::uint64_t value) -> bool = 0;
+    virtual auto on_double(double value) -> bool = 0;
+    virtual auto on_raw_number(std::string_view digits) -> bool = 0;
+    virtual auto on_string(std::string_view decoded) -> bool = 0;
+    virtual auto on_array_start() -> bool = 0;
+    virtual auto on_array_end(std::size_t count) -> bool = 0;
+    virtual auto on_object_start() -> bool = 0;
+    virtual auto on_object_key(std::string_view key) -> bool = 0;
+    virtual auto on_object_end(std::size_t count) -> bool = 0;
+};
+
+/// @brief SAX 模式解析（不构建 DOM）。
+/// @note 与 `parse` 共用同一字符级引擎（DOM 出口即「本引擎 + 内置 builder」），行为不分叉。
+/// @return 失败持结构化 Error（与 `parse` 同口径）；成功涵盖「文档解析完毕」与「消费者提前终止」。
+[[nodiscard]] auto parse_sax(std::string_view input, SaxHandler &handler, ParseOptions opts = {}) -> Result<void>;
+
+// ============================================================================
 // 序列化
 // ============================================================================
 
@@ -276,5 +315,28 @@ struct DumpOptions {
 
 /// @brief 追加式序列化（响应帧热路径复用缓冲，避免每帧分配）。
 auto dump_into(const Value &v, std::string &out, DumpOptions opts = {}) -> Result<void>;
+
+// ============================================================================
+// JSON Pointer（RFC 6901 最小集）
+// ============================================================================
+
+/// @brief 按 RFC 6901 Pointer 寻址（只读）。
+/// @param pointer 形如 `"/a/0/b"`；**空串指向 `root` 自身**。段内 `~1` 还原为 `/`、`~0` 还原为 `~`。
+/// @return 命中返回子值指针；未命中（段不存在 / 数组索引越界 / 段与值的类型不符）或 `pointer`
+///         语法非法（非空且不以 `/` 开头）一律返回 `nullptr`。与 `Value::at` 同风格：**不抛异常**，
+///         调用方必须自判空。
+[[nodiscard]] auto find_pointer(const Value &root, std::string_view pointer) -> const Value *;
+[[nodiscard]] auto find_pointer(Value &root, std::string_view pointer) -> Value *;
+
+/// @brief 写路径寻址：自动补齐缺失的中间容器（按**下一段**形态决定建 Object 还是 Array）。
+/// @note 末段落在数组上时，段为 `-`（RFC 6901 追加记号）或数字等于当前长度均按**追加**处理。
+/// @return 成功返回可写槽位指针；失败持结构化 Error——`pointer` 语法非法落 `json-parse-error`，
+///         段与值的类型不符（对非容器取子项 / 对数组用非数字段）或数组索引越界落 `json-type-mismatch`。
+[[nodiscard]] auto resolve_for_write(Value &root, std::string_view pointer) -> Result<Value *>;
+
+/// @brief 按 Pointer 删除末段所指成员（对应 `Value::erase` / `Value::erase_at` 的路径化形式）。
+/// @return 成功时 bool 表示**是否命中**（未命中不是错误，返回 `false`）；失败条件与
+///         `resolve_for_write` 相同。空 `pointer`（指向根自身）恒失败——根不可删除。
+[[nodiscard]] auto erase_pointer(Value &root, std::string_view pointer) -> Result<bool>;
 
 }  // namespace aurora::json
