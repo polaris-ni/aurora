@@ -68,6 +68,17 @@ auto count_blue(const Painter &p, const Rect &r) -> int {
     return n;
 }
 
+/// 统一焦点环画在控件盒外 2–4 dp（`Widget::paint_content` 末端：间距 2 + 环宽 2）。行盒在
+/// Column 里紧贴排布，故被点击获焦那一行的环带正落在邻行顶边的几行像素上。本文件判据是
+/// 「选区高亮是否渗入邻行」，与焦点环无关，故扫描区四边各内缩环的外包尺寸。
+constexpr float AURORA_RING_ENVELOPE = 4.0F;
+
+auto outside_focus_ring(const Rect &r) -> Rect {
+    return Rect{.origin = Point{.x = r.origin.x + AURORA_RING_ENVELOPE, .y = r.origin.y + AURORA_RING_ENVELOPE},
+                .size = Size{.width = r.size.width - (2.0F * AURORA_RING_ENVELOPE),
+                             .height = r.size.height - (2.0F * AURORA_RING_ENVELOPE)}};
+}
+
 /// 近黑墨迹像素数（字形本体，阈值 40）。
 auto count_ink(const Painter &p) -> int {
     int n = 0;
@@ -252,7 +263,7 @@ AURORA_TEST_CASE(highlight_does_not_bleed_into_neighbor_row) {
     p2.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 400, .height = 200}}, Color::white());
     col.paint(p2, Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 400, .height = 200}}, lctx);
 
-    AURORA_TEST_CHECK_EQ(count_blue(p2, r_b), 0);  // lineA 的高亮不得渗入 lineB
+    AURORA_TEST_CHECK_EQ(count_blue(p2, outside_focus_ring(r_b)), 0);  // lineA 的高亮不得渗入 lineB
     AURORA_TEST_CHECK_FALSE(line_b->has_selection());
 }
 
@@ -285,7 +296,8 @@ AURORA_TEST_CASE(neighbor_rows_unselected_and_uncolored_under_cleartype) {
     // 邻行蓝像素 baseline（未选中 line1 时）。
     Painter base_p;
     paint_all(base_p);
-    const int blue2_base = count_blue(base_p, r2);
+    const Rect r2_scan = outside_focus_ring(r2);  // 避开获焦行（line1）的焦点环带，见其定义处注释
+    const int blue2_base = count_blue(base_p, r2_scan);
     const int blue3_base = count_blue(base_p, r3);
 
     FocusManager fm;
@@ -311,7 +323,7 @@ AURORA_TEST_CASE(neighbor_rows_unselected_and_uncolored_under_cleartype) {
 
     Painter post_p;
     paint_all(post_p);
-    const int blue2_post = count_blue(post_p, r2);
+    const int blue2_post = count_blue(post_p, r2_scan);
     const int blue3_post = count_blue(post_p, r3);
     AURORA_TEST_CHECK_EQ(blue2_post, blue2_base);  // 高亮不得渗入邻行
     AURORA_TEST_CHECK_EQ(blue3_post, blue3_base);

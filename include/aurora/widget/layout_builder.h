@@ -25,6 +25,9 @@ namespace aurora {
  */
 class LayoutBuilder : public Widget {
   public:
+    /// @brief 纯展示件默认不是 Tab 停点：只有挂上点击 / 手势 / 菜单 / 滚动 / 键盘认领时
+    ///        才可聚焦（覆写基类 public virtual；分级默认见 specification/05 §4.2）。
+    [[nodiscard]] auto wants_focus() const -> bool override { return has_input_semantics(); }
     /// @brief 构建回调：给定 (BuildContext, 当前 Constraints) 返回一棵子树。
     using BuilderFn = std::function<Node(const BuildContext &, const Constraints &)>;
 

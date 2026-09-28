@@ -22,6 +22,9 @@ namespace aurora {
  */
 class Canvas : public Widget {
   public:
+    /// @brief 纯展示件默认不是 Tab 停点：只有挂上点击 / 手势 / 菜单 / 滚动 / 键盘认领时
+    ///        才可聚焦（覆写基类 public virtual；分级默认见 specification/05 §4.2）。
+    [[nodiscard]] auto wants_focus() const -> bool override { return has_input_semantics(); }
     using PaintFn = std::function<void(Painter &, const Rect &)>;
 
     Canvas() = default;

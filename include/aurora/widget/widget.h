@@ -505,16 +505,39 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 无论是否覆写，进入本实现即代表一次真实焦点转移，故在此统一上抛无障碍事件。
     virtual auto on_focus_change(bool focused) -> void {
         is_focused_ = focused;
+        mark_needs_paint();  // 焦点态外观（基类统一焦点环，见 wants_focus_ring）随焦点变化
         notify_accessibility_focus_changed(this);
     }
 
     // ---- 焦点能力（specification/05-event-navigation.md §4）----
-    /// @brief 是否可参与焦点序（默认 true）。交互控件保持 true；纯展示控件可设 false。
+    /// @brief 是否可参与焦点序（默认 true）。
+    /// 这是**宿主侧的显式开关**：`false` 一票否决，`true` 只是「未否决」——能否成为 Tab 停点
+    /// 还取决于 `wants_focus()`（该控件是否真有输入语义）。二者分工见 §4.2。
     [[nodiscard]] auto focusable() const -> bool { return focusable_; }
     auto set_focusable(bool v) -> Widget & {
         focusable_ = v;
         return *this;
     }
+
+    /// @brief 本控件是否应被键盘焦点序纳入（Tab 停点 / 方向键导航候选的谓词）。
+    ///
+    /// **分级默认**（specification/05-event-navigation.md §4.2）：基类返回 `true`，即「控件默认可
+    /// Tab 到」。自定义控件、第三方控件因此无需任何声明即参与焦点序，也不会因未声明交互谓词而
+    /// 静默失去键盘可达性。只有**纯布局容器**（`Container` / `SingleChild` 及其派生的 `Row` /
+    /// `Column` / `Stack` / `Show` / `Provider` …）与**纯展示件**（`Text` / `Divider` / `Image` /
+    /// `Spacer` …）把本谓词覆写为 `has_input_semantics()`：它们自身不接收输入，只有宿主挂上点击 /
+    /// 手势 / 上下文菜单 / 滚动 / 键盘认领时才重新成为停点——谓词是动态的，不按类型一刀切。
+    /// 不受本谓词约束的两条路径：`FocusManager::set_focus` / `request_focus` 的**显式聚焦**，
+    /// 以及指针 Press 的焦点归属（见 §4.3）——二者仍只看 `focusable()`。
+    [[nodiscard]] virtual auto wants_focus() const -> bool { return true; }
+
+    /// @brief 持焦时是否由基类统一绘制焦点环（默认 true）。
+    ///
+    /// 基类在 `Widget::paint_content` 末尾为**任何持有焦点**的控件画出主题色环，使 Tab 停点
+    /// 在任意控件上都可观测（specification/05-event-navigation.md §4.4）。已自带聚焦态外观的
+    /// 控件（`TextInput` 画 Fluent 式主题色加粗边框）覆写为 `false` 以免双环。
+    /// 仅影响绘制，不影响焦点序归属与 `focusable()` / `wants_focus()` 判定。
+    [[nodiscard]] virtual auto wants_focus_ring() const -> bool { return true; }
 
     /// @brief Tab 序权重（默认 0，越小越靠前）；move_focus 按此排序。
     [[nodiscard]] auto tab_index() const -> int { return tab_index_; }
@@ -960,7 +983,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     std::vector<std::unique_ptr<Effect>> effects_;
-    bool focusable_ = true;  ///< 是否可参与焦点序（specification/05-event-navigation.md §4）
+    bool focusable_ = true;  ///< 宿主侧焦点否决位（默认未否决）；实际入 Tab 序还需 wants_focus()
     int tab_index_ = 0;  ///< Tab 序权重（越小越靠前）
     bool is_focused_ = false;  ///< 当前是否持有焦点
     /// 宿主显式声明的读屏名（对标 ARIA `aria-label`）：Name 回退链最高优先级，空串 = 未声明。
@@ -985,6 +1008,15 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @brief 声明本控件为 relayout boundary（尺寸由约束决定、不依赖子节点）。
     ///        虚拟化列表/滚动容器等应在构造时调用，以截断布局脏向上冒泡、避免整树重排。
     auto set_relayout_boundary(bool v) -> void { is_relayout_boundary_ = v; }
+
+    /// @brief 「有输入语义」判据：纯布局容器与纯展示件用它实现 `wants_focus()`。
+    /// 命中任一即认为该控件需要键盘可达：点击目标（含 `.clickable()` 修饰）、指针手势、
+    /// 上下文菜单、滚动视口、或认领方向键 / 激活键。
+    [[nodiscard]] auto has_input_semantics() const -> bool {
+        const Modifier &mod = modifier.get();
+        return wants_click() || mod.has_gesture() || mod.has_context_menu() || wants_scroll() ||
+               wants_navigation_keys() || wants_activation_keys();
+    }
 
   private:
     /// @brief 绘制内容主体（背景 + on_paint + 边框），供直接绘制与离屏合成复用。
@@ -1151,6 +1183,10 @@ class Container : public Widget {
     }
 
   public:
+    /// @brief 纯布局容器默认不是 Tab 停点：只有挂上点击/手势/菜单/滚动/键盘认领时才可聚焦
+    /// （覆写基类 public virtual，保持对外可见；分级默认见 §4.2）。
+    [[nodiscard]] auto wants_focus() const -> bool override { return has_input_semantics(); }
+
     /// @brief 公开 tick 入口（覆写基类 public virtual）：递归子树计时，保持对外可见。
     auto tick(std::chrono::steady_clock::time_point now) -> void override {
         if (needs_gesture_tick_) {
@@ -1307,6 +1343,11 @@ class SingleChild : public Widget {
     }
 
   public:
+    /// @brief 单子节点包装件（`Show`/`Provider`/`Lifecycle`/`Badge` …）默认不是 Tab 停点：
+    /// 它们是透传壳，只有自身挂上输入语义（如 `ExpansionPanel` 的点击展开）才可聚焦
+    /// （覆写基类 public virtual，保持对外可见；分级默认见 §4.2）。
+    [[nodiscard]] auto wants_focus() const -> bool override { return has_input_semantics(); }
+
     /// @brief 公开 tick 入口（覆写基类 public virtual）：递归子控件计时，保持对外可见。
     auto tick(std::chrono::steady_clock::time_point now) -> void override {
         if (needs_gesture_tick_) {

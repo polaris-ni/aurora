@@ -25,9 +25,10 @@
 //              AURORA_KI_PORT / AURORA_KI_DBG_PORT（本地 http / CDP 端口）。
 //
 // 断言依据：
-//   - 焦点序 = pre-order + tab_index 稳定排序，且 `Widget::focusable_` 默认 true——根 Column
-//     容器（Generic）与纯展示 Text 也在序内：Tab1=根容器、Tab2=标题 Text（activate 均无
-//     操作），Tab3 才到「确定」按钮（插桩实测坐实后写入，见判据 3 注释）；
+//   - 焦点序 = pre-order + tab_index 稳定排序，且停点谓词为 `focusable() && wants_focus()`
+//     （Tab 停点按控件类型分级默认，见 specification/05-event-navigation.md §4.2）：根 Column
+//     容器与纯展示 Text 不入序，故 Tab1 即首个交互控件「确定」；后续停点 播报 → TextInput →
+//     Checkbox → Slider（插桩实测坐实后写入，判据 3 注释同源）；
 //   - TextInput 聚焦自 Tab 序（无点击定位 ⇒ caret_ 停在 0——判据 3 的 set_value("clk1")
 //     亦把 caret 重置回 0）→ 字符头插：打 "a1" ⇒ "a1clk1"（确定性断言）；
 //   - Shift+Tab 反向回绕 2 步（TextInput→播报→确定）后 Enter ⇒ 二次激活（clicks=2）。
@@ -241,11 +242,9 @@ try {
     ok('2 canvas 像素采样可用', Number.isInteger(hash0) && hash0 !== -1, `hash=${hash0}`);
 
     // —— 判据 3：Tab 聚焦「确定」+ Enter 激活（键盘导航与激活快捷键真机闭环）
-    // 焦点序注意：`Widget::focusable_` 默认 true——根 Column 容器（Generic）与纯展示 Text
-    // 也在 Tab 序内（pre-order + tab_index 稳定排序）：Tab1=根容器、Tab2=标题 Text（activate
-    // 均无操作）、Tab3 才到首个交互控件「确定」（插桩实测坐实后写入，见判据 3 注释）。
-    await pressKey(tabKey());
-    await pressKey(tabKey());
+    // 焦点序注意：停点谓词是 `focusable() && wants_focus()`——根 Column 容器与纯展示 Text 不入序
+    // （pre-order + tab_index 稳定排序），故 Tab1 即首个交互控件「确定」（分级默认见
+    // specification/05-event-navigation.md §4.2；插桩实测坐实后写入）。
     await pressKey(tabKey());
     await pressKey(enterKey());
     const d3 = await waitDom(d => d.buttons.includes('确定·1') && d.entry === 'clk1');

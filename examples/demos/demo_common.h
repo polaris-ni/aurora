@@ -125,7 +125,10 @@ class BrandBadge : public au::LeafWidget {
 // ---------------------------------------------------------------------------
 class GradientTitle : public au::LeafWidget {
   public:
-    explicit GradientTitle(std::string t, float size = 34.0F) : text_(std::move(t)), size_(size) {}
+    explicit GradientTitle(std::string t, float size = 34.0F) : text_(std::move(t)), size_(size) {
+        // 纯展示标题：自定义叶控件默认参与 Tab 序（Widget::wants_focus() 基类返回 true），故宿主侧显式让位。
+        set_focusable(false);
+    }
 
     void collect_signals(std::vector<au::SignalViewBase *> & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "GradientTitle"; }

@@ -162,7 +162,12 @@ AURORA_TEST_CASE(blur_clears_selection_highlight_pixels) {
     AURORA_TEST_REQUIRE_MSG(!st.txt->has_selection(), "precondition: text blurred by button press");
 
     st.repaint_on_white();
-    AURORA_TEST_CHECK_EQ(count_blue_in(st.p, st.text_bounds()), 0);
+    // 按钮此刻持有焦点：基类统一焦点环画在它盒外 2–4 dp，正压进文本行盒的底边几行。
+    // 本用例判的是「失焦后选区高亮消失」，与环无关，故底边内缩环的外包尺寸再扫描。
+    const Rect scan = st.text_bounds();
+    const Rect ring_free{.origin = scan.origin,
+                         .size = Size{.width = scan.size.width, .height = scan.size.height - 4.0F}};
+    AURORA_TEST_CHECK_EQ(count_blue_in(st.p, ring_free), 0);
 }
 
 AURORA_TEST_CASE(click_non_focusable_area_blurs_text) {

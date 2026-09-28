@@ -773,6 +773,10 @@ class TextInput : public LeafWidget {
         }
     }
 
+    /// @brief 关闭基类统一焦点环：本控件已自带 Fluent 式聚焦边框（`paint_frame` 的主题色加粗
+    ///        边框），再叠一环会出现双环。见 specification/05-event-navigation.md §4.4。
+    [[nodiscard]] auto wants_focus_ring() const -> bool override { return false; }
+
     auto on_text_input(TextInputEvent &e) -> void override {
         if (!enabled_ || !is_focused()) {
             return;

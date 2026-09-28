@@ -16,6 +16,7 @@
 #include "aurora/render/detail/paint_timing.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme_scope.h"
 
 namespace aurora {
 
@@ -452,6 +453,22 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
     // 弹出溢出策略裁剪（与上方 push_clip 配对）。
     if (overflow_clip) {
         p.pop_clip();
+    }
+
+    // 统一焦点环：持有焦点的控件由基类画出可见停点，使 Tab 落点不依赖各控件自带外观。
+    // 画在溢出裁剪之后——环外扩于视觉盒，若被本控件自身裁剪切掉就只剩三段残缺边。
+    // 自绘聚焦态外观的控件（TextInput 等）经 `wants_focus_ring()` 关闭，避免双环。
+    if (is_focused_ && wants_focus_ring()) {
+        constexpr float ring_gap = 2.0F;  ///< 与自身边框/内容的最小间距（不得压在边缘像素上）
+        constexpr float ring_thickness = 2.0F;  ///< 环宽
+        constexpr float ring_radius = 4.0F;  ///< 环圆角：小于常见控件圆角，故不与边框弧线相交
+        const float out = ring_gap + ring_thickness;
+        const Rect ring{.origin = Point{.x = visual_box.origin.x - out, .y = visual_box.origin.y - out},
+                        .size = Size{.width = visual_box.size.width + (2.0F * out),
+                                     .height = visual_box.size.height + (2.0F * out)}};
+        if (ring.size.width > 0.0F && ring.size.height > 0.0F) {
+            p.draw_rounded_border(ring, ring_radius, ring_thickness, inherit_theme(ctx).primary);
+        }
     }
 }
 

@@ -35,6 +35,9 @@ namespace aurora {
  */
 class ProgressIndicator : public LeafWidget {
   public:
+    /// @brief 纯展示件默认不是 Tab 停点：只有挂上点击 / 手势 / 菜单 / 滚动 / 键盘认领时
+    ///        才可聚焦（覆写基类 public virtual；分级默认见 specification/05 §4.2）。
+    [[nodiscard]] auto wants_focus() const -> bool override { return has_input_semantics(); }
     ProgressIndicator() = default;
     explicit ProgressIndicator(Reactive<double> value) : value_(std::move(value)) {}
     explicit ProgressIndicator(Binding<double> binding) : binding_(std::move(binding)), value_(binding_.get()) {}

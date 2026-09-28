@@ -153,7 +153,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 ### 4.2 组件焦点接口
 
-`Widget` 提供：`focusable()`、`set_focusable(bool)`、`tab_index()`、`set_tab_index(int)`、`is_focused()`、`request_focus()`、`on_focus_change(bool)`（虚钩子，基类维护 `is_focused_`）。
+`Widget` 提供：`focusable()`、`set_focusable(bool)`、`wants_focus()`（虚钩子，Tab 停点意愿，见下）、`tab_index()`、`set_tab_index(int)`、`is_focused()`、`request_focus()`、`on_focus_change(bool)`（虚钩子，基类维护 `is_focused_` 并标脏重绘）、`wants_focus_ring()`（虚钩子，基类统一焦点环开关，见 §4.4）。
 
 **焦点管理器「随派发可得」**：`EventDispatcher::dispatch(Widget&, MouseEvent&, FocusManager*)` 在派发期经线程局部暴露「当前焦点管理器」（`current_focus_manager()`），`request_focus()` 读之，无需在每控件上递归注入。无焦点管理器（`nullptr`）时 `request_focus` 静默 no-op。
 
@@ -165,6 +165,15 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **端点键（Home / End）语义**：`Home` / `End` 不属派发器的 Tab / 方向键 / 激活键任一类别，因此**无需认领**——未匹配全局快捷键时天然经焦点路由直达焦点控件，控件消费即止。两个文本录入控件都把它实现为「文本 / 文档两端」（单行框本无行首行尾之别；`RichTextEdit` 的行内定位属未实现项，当前按整篇文档首尾处理），且与 ←/→ 共用各自的选区模型：非 Shift 时跳光标并清选区，Shift 时从光标扩到对应端点。`TextInput` 额外约束：光标本已在端点且原无选区时，Shift+`Home`/`End` 的扩选结果为空，不得伪造一个单字符选区（否则一次退格会删掉无辜字符）。
 
+**Tab 停点的分级默认**：一个控件进入 Tab 序的条件是 `focusable() && wants_focus()`，两个谓词分工不同，不可混用：
+
+- `focusable()` 是**宿主侧的显式开关**（默认 `true`）：`false` 一票否决，`true` 只代表「宿主没否决」，不代表该停点存在。
+- `wants_focus()` 是**控件类型侧的意愿**（`Widget` 基类默认 `true`）：由类型自己声明「我是不是一个交互停点」，宿主无需逐个关闭。
+
+覆写为「有输入语义才入序」的只有两类：**纯布局容器**（`Container` / `SingleChild` 基类——`Column`/`Row`/`Stack`/`Grid`/`Wrap` 与 `Show`/`Provider`/`Lifecycle`/`Badge` 等，它们本身不接受输入）与**纯展示件**（`Text`/`Divider`/`Spacer`/`Placeholder`/`RichText`/`Progress`/`Skeleton`/`ImageView`/`Canvas`/`BreakpointBuilder`/`LayoutBuilder`）。判定统一走 `Widget::has_input_semantics()`（protected）：`wants_click() || modifier.has_gesture() || modifier.has_context_menu() || wants_scroll() || wants_navigation_keys() || wants_activation_keys()`——任一成立即认为该控件确实需要键盘到达，于是同一个 `Text` 挂上 `.clickable(...)` 后自动回到 Tab 序，宿主不必再改焦点属性。因此该覆写是**减法而非一刀切**：自带滚动语义的容器（`Scroll`/`LazyList`/`LazyRow`/`GridView`/`ReorderableList`/`PullToRefresh`）与自带点击的 `ExpansionPanel` 仍是停点。**交互控件无需任何声明**（基类默认 `true` 已覆盖）。
+
+分级只作用于 `move_focus` 的候选集，**不影响**指针 Press 的焦点归属（§4.3）与 `set_focus` / `request_focus` 的显式聚焦——二者仍只看 `focusable()`，因此点击一个纯展示容器依然不会误清焦点，而业务代码强制聚焦任何未被否决的控件都仍然成功。
+
 ### 4.3 Press 焦点归属与点击失焦契约
 
 鼠标 / 触控 `Press` 时，焦点归属为**命中链上自最深命中向根找到的第一个可获焦控件**（点到不可获焦的装饰子控件时归属其可获焦祖先，如按钮内的图标）。
@@ -174,6 +183,16 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 鼠标与触控路径行为一致。`Release` **不**切换焦点，避免拖选结束落在别处时选区被清。
 
 `TextInput` 点击时 `request_focus`，`is_focused()` 控制光标显示。
+
+### 4.4 焦点可视化：基类统一焦点环
+
+焦点态必须在像素上可判定，否则人工侧只能靠猜（`Button` 这类控件自身不画任何聚焦外观）。为此 `Widget::paint_content` 末尾由**基类统一绘制焦点环**：控件持有焦点（`is_focused()`）且 `wants_focus_ring()` 为 `true` 时，在其视觉盒外画一圈主题色（`inherit_theme(ctx).primary`）圆角边框。
+
+- 几何：环带严格落在盒外 **2–4 dp** 的带宽内（间距 2 dp + 环宽 2 dp，圆角 4 dp 小于常见控件圆角故不与边框弧线相交）。**不得压在控件自身边缘像素上**——否则会把 `RichTextEdit` 之类贴着边缘绘制的-caret / 边框像素覆盖掉。
+- 开关：`wants_focus_ring()`（`Widget` 基类默认 `true`，虚钩子）已自带聚焦态外观的控件覆写为 `false`，以免双环。当前唯一覆写者是 `TextInput` 与 `RichTextEdit`（它们画 Fluent 式主题色加粗聚焦边框，`paint_frame`）。
+- 重绘：`on_focus_change(bool)` 基实现在维护 `is_focused_` 后调用 `mark_needs_paint()`，故焦点变化必然进下一帧，环不会「逻辑上聚焦、像素上无环」。
+- 可观测性：环是无条件的像素证据，配合树快照里持有焦点节点的 `focused: true`（见 [`08-tooling.md`](08-tooling.md)），Inspector 与人工验收都能在不依赖控件自觉的前提下确认焦点落点。
+- 取舍：未采用 `:focus-visible`（仅键盘触发环）方案——它需要给 `FocusDirection` 增「非导航来源」并让派发器透传来源信息，且会使「指针点击后的焦点」在像素上重新不可判定，与本条要解决的问题相反。
 
 ---
 
