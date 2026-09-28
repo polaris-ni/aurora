@@ -18,12 +18,12 @@
 namespace aurora::internal {
 
 // 与 Windows SDK 同值的常量副本（取值来源：winuser.h 的 WM_* 与 shellapi.h 的 NIN_* = WM_USER+n）。
-inline constexpr std::uint32_t k_tray_wm_contextmenu = 0x007B;        ///< WM_CONTEXTMENU
-inline constexpr std::uint32_t k_tray_wm_lbuttonup = 0x0202;          ///< WM_LBUTTONUP
-inline constexpr std::uint32_t k_tray_wm_lbuttondblclk = 0x0203;      ///< WM_LBUTTONDBLCLK
-inline constexpr std::uint32_t k_tray_wm_rbuttonup = 0x0205;          ///< WM_RBUTTONUP
-inline constexpr std::uint32_t k_tray_nin_select = 0x0400;            ///< NIN_SELECT (WM_USER+0)
-inline constexpr std::uint32_t k_tray_nin_keyselect = 0x0401;         ///< NIN_KEYSELECT (WM_USER+1)
+inline constexpr std::uint32_t k_tray_wm_contextmenu = 0x007B;  ///< WM_CONTEXTMENU
+inline constexpr std::uint32_t k_tray_wm_lbuttonup = 0x0202;  ///< WM_LBUTTONUP
+inline constexpr std::uint32_t k_tray_wm_lbuttondblclk = 0x0203;  ///< WM_LBUTTONDBLCLK
+inline constexpr std::uint32_t k_tray_wm_rbuttonup = 0x0205;  ///< WM_RBUTTONUP
+inline constexpr std::uint32_t k_tray_nin_select = 0x0400;  ///< NIN_SELECT (WM_USER+0)
+inline constexpr std::uint32_t k_tray_nin_keyselect = 0x0401;  ///< NIN_KEYSELECT (WM_USER+1)
 inline constexpr std::uint32_t k_tray_nin_balloonuserclick = 0x0405;  ///< NIN_BALLOONUSERCLICK (WM_USER+5)
 
 /// @brief 本库注册托盘图标时使用的 `uID`（版本 4 的回调把它放在 lParam 高字，用于筛掉别的图标）。
@@ -31,7 +31,7 @@ inline constexpr std::uint32_t k_tray_icon_id = 1;
 
 /// @brief 一次托盘回调的归类结果。
 struct TrayCallbackEvent {
-    bool activate = false;      ///< 左键 / 键盘选中 / 点气泡 → 触发 `on_activate`
+    bool activate = false;  ///< 左键 / 键盘选中 / 点气泡 → 触发 `on_activate`
     bool context_menu = false;  ///< 右键 → 弹出托盘上下文菜单
 };
 
@@ -47,8 +47,8 @@ struct TrayCallbackEvent {
         if (icon_id != k_tray_icon_id) {
             return ev;  // 同一消息窗挂了别的图标：不归本库管
         }
-        ev.activate = ((event == k_tray_nin_select) || (event == k_tray_nin_keyselect) ||
-                       (event == k_tray_nin_balloonuserclick));
+        ev.activate =
+            ((event == k_tray_nin_select) || (event == k_tray_nin_keyselect) || (event == k_tray_nin_balloonuserclick));
         ev.context_menu = (event == k_tray_wm_contextmenu);
         return ev;
     }
