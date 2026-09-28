@@ -233,7 +233,7 @@ auto main(int argc, char **argv) -> int {
         return 2;
     }
     const au::cli::Invocation &invocation = parsed.value();
-    if (invocation.outcome != au::cli::ParseOutcome::Ok) {
+    if (invocation.shows_display()) {
         AURORA_LOG_RAW("core-demo", invocation.display_text);  // --help 已由声明表渲染
         return 0;
     }

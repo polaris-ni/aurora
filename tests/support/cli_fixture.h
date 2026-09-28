@@ -23,7 +23,9 @@
 namespace aurora::testing::cli_fixture {
 
 using aurora::cli::Arity;
+using aurora::cli::Builtins;
 using aurora::cli::CommandSpec;
+using aurora::cli::EarlyView;
 using aurora::cli::OptionSchema;
 using aurora::cli::PositionalSchema;
 using aurora::cli::ValueKind;
@@ -246,14 +248,73 @@ struct Tokens : std::vector<std::string> {
     return STRICT_SPEC;
 }
 
+/**
+ * @brief 内建让位 / 关闭与调用方自标 `early_view` 的样例树。
+ *
+ * 三条契约只在这棵树上成立，故与主样例树分开（主树的 golden 快照因此不受影响）：
+ *   * `-h` 被 `height` 占用、`-V` 被 `verify` 占用 → 内建 help/version 降级为仅长名；
+ *   * 调用方自己声明 `--help`（标 `EarlyView::Help`）即顶掉内建，走的是同一条短路通道；
+ *   * `--dump-schema` 标 `EarlyView::Schema` → 展示通道不再只归 help/version 独占；
+ *   * 子命令 `bare` 关掉全部内建且无自有选项 → usage 里连 `[OPTIONS]` 都不该出现。
+ */
+[[nodiscard]] inline auto displacement_spec() -> const CommandSpec & {
+    // 单例地址即契约：Invocation 借用声明表，不可改为按值返回。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
+    static const CommandSpec SPEC = [] {
+        CommandSpec root;
+        root.name = "displace";
+        root.about = "Exercise built-in displacement and user-declared early views";
+        root.version = "0.9.1";
+        root.options = {
+            OptionSchema{
+                .long_name = "height",
+                .short_name = 'h',
+                .kind = ValueKind::Int,
+                .help = "Canvas height in px",
+                .default_text = "600",
+            },
+            OptionSchema{
+                .long_name = "verify",
+                .short_name = 'V',
+                .kind = ValueKind::Bool,
+                .arity = Arity::flag(),
+                .help = "Verify after writing",
+            },
+            OptionSchema{
+                .long_name = "help",
+                .kind = ValueKind::Bool,
+                .arity = Arity::flag(),
+                .help = "Hand-rolled help flag (displaces the built-in)",
+                .group = "Help",
+                .early_view = EarlyView::Help,
+            },
+            OptionSchema{
+                .long_name = "dump-schema",
+                .kind = ValueKind::Bool,
+                .arity = Arity::flag(),
+                .help = "Print schema_json() and exit",
+                .group = "Help",
+                .early_view = EarlyView::Schema,
+            },
+        };
+
+        CommandSpec bare;
+        bare.name = "bare";
+        bare.about = "No options at all, built-ins switched off";
+        bare.builtins = Builtins{.help = false, .version = false, .take_shorts = false};
+        root.subcommands = {bare};
+        return root;
+    }();
+    return SPEC;
+}
+
 /// @brief 按长名取解析结果里的单值文本（失败即空串），便于紧凑断言。
 [[nodiscard]] inline auto text_of(const aurora::cli::Arguments &args, std::string_view long_name) -> std::string {
-    auto value = args.value(long_name);
-    if (!value) {
-        return {};
+    if (const auto text = args.get<std::string>(long_name); text) {
+        return text.value();
     }
-    const auto text = value.value().as_string();
-    return text ? text.value() : value.value().raw_text();
+    const auto values = args.values(long_name);
+    return values.empty() ? std::string{} : values.front().raw_text();
 }
 
 }  // namespace aurora::testing::cli_fixture

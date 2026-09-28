@@ -8,8 +8,9 @@
 // 零异常。
 //
 //   * 零异常：一切失败经 `Result<T>` + `codespec/errors.toml` 的 `cli-*` 码上报。
-//   * 帮助/版本是一等结果而非错误：`Invocation::outcome` 区分 Ok/Help/Version，并直接
-//     给出渲染好的 `display_text`，调用方 `AURORA_LOG_RAW` 落 stdout 即可。
+//   * 展示请求是一等结果而非错误：任何旗标（内建 `--help`/`--version`，或调用方自己声明并标了
+//     `OptionSchema::early_view` 的旗标，如 `--dump-schema`）都只把 `Invocation::view` 置为对应的
+//     `EarlyView` 并在 `display_text` 给出渲染好的文本，调用方 `AURORA_LOG_RAW` 落 stdout 即可。
 //   * 语法取 GNU/POSIX 全集：`--k=v` `--k v` `-k v` `-kv` `-k=v` `-abc` 聚组、`--` 终止、
 //     负数消歧、重复选项按 arity 累积。不做前缀缩写匹配（歧义不可枚举）。
 //
@@ -17,13 +18,12 @@
 // 的 `Invocation` / `Arguments` 活得更久（同 clap 借用 App 的约定）。
 //
 // 退出码约定（交由调用方实施，库本身不 exit、不打印）：
-//   0 = outcome::Ok/Help/Version 且业务成功；2 = Err(Error)（用法错误）；1 = 业务失败。
+//   0 = view 为 None/Help/Version/Schema 且业务成功；2 = Err(Error)（用法错误）；1 = 业务失败。
 // ============================================================================
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -93,8 +93,6 @@ struct Arity {
     [[nodiscard]] static constexpr auto flag() noexcept -> Arity { return {.min = 0, .max = 0}; }
     [[nodiscard]] static constexpr auto at_least_one() noexcept -> Arity { return {.min = 1, .max = AURORA_UNBOUNDED}; }
     [[nodiscard]] static constexpr auto zero_or_more() noexcept -> Arity { return {.min = 0, .max = AURORA_UNBOUNDED}; }
-    [[nodiscard]] static constexpr auto exactly(int n) noexcept -> Arity { return {.min = n, .max = n}; }
-    [[nodiscard]] static constexpr auto at_most(int n) noexcept -> Arity { return {.min = 0, .max = n}; }
 
     /// @brief 是否允许「不消耗 token」（即作为无值 flag 出现）。
     [[nodiscard]] constexpr auto allows_no_value() const noexcept -> bool { return min == 0; }
@@ -116,9 +114,10 @@ struct Arity {
 /**
  * @brief 已按声明类型转换完成的单个参数值。
  *
- * 内部是 `std::variant` + 记录来源 `ValueKind`。数值访问器允许「无损」跨读：
- * `Int → double` 加宽、`double → int` 仅当值整且可表示，否则 `cli-invalid-value`；
- * 类型不符一律 `cli-invalid-value`，窄化越界一律 `cli-range-violated`。
+ * 内部是 `std::variant` + 记录来源 `ValueKind`。公共出口只有一个泛型 `as<T>()`（加 `kind()` 与
+ * `raw_text()`）：数值访问器允许「无损」跨读，`Int`/`Duration` → `double` 加宽、`double` → 整型
+ * 仅当值恰为整且可表示，否则 `cli-invalid-value`；类型不符一律 `cli-invalid-value`，窄化越界一律
+ * `cli-range-violated`。`ValueKind::Duration` 没有对应 C++ 类型，用 `as<std::int64_t>()` 取毫秒。
  *
  * @note Thread: thread-safe（纯值类型）
  * @note Side-effects: none
@@ -131,48 +130,33 @@ class Value {
     Value() = default;
 
     [[nodiscard]] constexpr auto kind() const noexcept -> ValueKind { return kind_; }
-    [[nodiscard]] bool has_value() const noexcept { return !std::holds_alternative<std::monostate>(raw_); }
-
-    /// @brief 变体只读访问（跨类型无损加宽由库内 `read_numeric` 使用）。
-    [[nodiscard]] const Raw &raw() const noexcept { return raw_; }
 
     /// @brief 用户输入的 token 原文（未经转换）。始终可得，供错误回显与脚本消费。
     [[nodiscard]] auto raw_text() const -> const std::string & { return raw_text_; }
 
-    [[nodiscard]] auto as_bool() const -> Result<bool>;
-    [[nodiscard]] auto as_int64() const -> Result<std::int64_t>;
-    [[nodiscard]] auto as_int() const -> Result<int>;
-    [[nodiscard]] auto as_double() const -> Result<double>;
-    [[nodiscard]] auto as_string() const -> Result<std::string>;
-    [[nodiscard]] auto as_length() const -> Result<Length>;
-    [[nodiscard]] auto as_color() const -> Result<Color>;
-    [[nodiscard]] auto as_log_level() const -> Result<LogLevel>;
-    /// @brief 时长值，单位毫秒（仅 `ValueKind::Duration`）。
-    [[nodiscard]] auto as_duration_ms() const -> Result<std::int64_t>;
-
     /**
-     * @brief 按 C++ 类型取值（`get<T>` 风格的强类型出口）。
+     * @brief 按 C++ 类型取值（`get<T>` 风格的唯一强类型出口）。
      * @tparam T 支持集合可枚举：bool / int / std::int64_t / double / std::string /
      *           Length / Color / LogLevel。其余类型编译期即拒绝。
      */
     template <typename T>
     [[nodiscard]] auto as() const -> Result<T> {
         if constexpr (std::is_same_v<T, bool>) {
-            return as_bool();
+            return read_bool();
         } else if constexpr (std::is_same_v<T, int>) {
-            return as_int();
+            return read_int();
         } else if constexpr (std::is_same_v<T, std::int64_t>) {
-            return as_int64();
+            return read_int64();
         } else if constexpr (std::is_same_v<T, double>) {
-            return as_double();
+            return read_double();
         } else if constexpr (std::is_same_v<T, std::string>) {
-            return as_string();
+            return read_string();
         } else if constexpr (std::is_same_v<T, Length>) {
-            return as_length();
+            return read_length();
         } else if constexpr (std::is_same_v<T, Color>) {
-            return as_color();
+            return read_color();
         } else if constexpr (std::is_same_v<T, LogLevel>) {
-            return as_log_level();
+            return read_log_level();
         } else {
             static_assert(sizeof(T) == 0,
                           "aurora::cli::Value::as<T>: unsupported T; the supported set is "
@@ -182,10 +166,24 @@ class Value {
 
   private:
     friend class Parser;
+    friend class Arguments;
     friend class detail::LiteralFactory;
 
     Value(ValueKind kind, Raw raw, std::string literal)
         : kind_(kind), raw_(std::move(raw)), raw_text_(std::move(literal)) {}
+
+    /// @brief 变体只读访问（跨类型无损加宽由 `read_int64` / `read_double` 使用）。
+    [[nodiscard]] const Raw &raw() const noexcept { return raw_; }
+
+    // as<T>() 的具型别实现；留在 args.cpp，公共头只保留一个泛型出口。
+    [[nodiscard]] auto read_bool() const -> Result<bool>;
+    [[nodiscard]] auto read_int() const -> Result<int>;
+    [[nodiscard]] auto read_int64() const -> Result<std::int64_t>;
+    [[nodiscard]] auto read_double() const -> Result<double>;
+    [[nodiscard]] auto read_string() const -> Result<std::string>;
+    [[nodiscard]] auto read_length() const -> Result<Length>;
+    [[nodiscard]] auto read_color() const -> Result<Color>;
+    [[nodiscard]] auto read_log_level() const -> Result<LogLevel>;
 
     ValueKind kind_ = ValueKind::String;
     Raw raw_;
@@ -195,7 +193,7 @@ class Value {
 /**
  * @brief 一次成功解析的产物：按长名/下标取值，不持有用户变量。
  *
- * 默认值已在解析结束时物化进槽位，故即使用户没给，`value("width")` 也成功；要区分
+ * 默认值已在解析结束时物化进槽位，故即使用户没给，`get<int>("width")` 也成功；要区分
  * 「用户显式给出」与「回落默认」用 `explicitly_given()`。
  */
 class Arguments {
@@ -206,13 +204,10 @@ class Arguments {
     /// @brief 长名对应的所有出现值（未出现且无默认 → 空表，不算错误）。
     [[nodiscard]] auto values(std::string_view long_name) const -> std::vector<Value>;
 
-    /// @brief 取单值：缺失返回 `cli-missing-required`，多值返回 `cli-arity-violated`。
-    [[nodiscard]] auto value(std::string_view long_name) const -> Result<Value>;
-
-    /// @brief 强类型取单值便捷入口（等价 `value(k).as<T>()`）。
+    /// @brief 强类型取单值：缺失返回 `cli-missing-required`，多值返回 `cli-arity-violated`。
     template <typename T>
     [[nodiscard]] auto get(std::string_view long_name) const -> Result<T> {
-        auto single = value(long_name);
+        auto single = one(long_name);
         if (!single) {
             return single.error();
         }
@@ -246,11 +241,11 @@ class Arguments {
     /// @brief 最终生效的命令声明（子命令叶节点）；未设置时返回 nullptr。
     [[nodiscard]] auto matched_command() const -> const CommandSpec * { return matched_; }
 
-    /// @brief 程序名（argv[0] 的 basename，或根声明的 name）。
-    [[nodiscard]] auto program_name() const -> std::string_view { return program_name_; }
-
   private:
     friend class Parser;
+
+    /// @brief 单值读出（`get<T>()` 的实现）：缺失 `cli-missing-required`，多值 `cli-arity-violated`。
+    [[nodiscard]] auto one(std::string_view long_name) const -> Result<Value>;
 
     /// @brief 一个选项槽：声明 + 累积值 + 是否显式给出。
     struct Slot {
@@ -260,9 +255,9 @@ class Arguments {
     };
 
     [[nodiscard]] Arguments(std::vector<Slot> slots, std::vector<Value> positionals, std::vector<std::string> rest,
-                            std::vector<std::string> chain, const CommandSpec *matched, std::string program_name)
+                            std::vector<std::string> chain, const CommandSpec *matched)
         : slots_(std::move(slots)), positionals_(std::move(positionals)), rest_(std::move(rest)),
-          chain_(std::move(chain)), matched_(matched), program_name_(std::move(program_name)) {}
+          chain_(std::move(chain)), matched_(matched) {}
 
     [[nodiscard]] auto find_slot(std::string_view long_name) const -> const Slot *;
 
@@ -271,25 +266,31 @@ class Arguments {
     std::vector<std::string> rest_;
     std::vector<std::string> chain_;
     const CommandSpec *matched_ = nullptr;
-    std::string program_name_;
 };
 
-/// @brief 一次调用的结局：Ok 走业务，Help/Version 只需打印 `display_text`。
-enum class ParseOutcome : std::uint8_t {
-    Ok = 0,
-    Help,  ///< 命中 `--help` / `-h`（任意层级）
-    Version,  ///< 命中声明了 `version` 的那一层命令的 `--version` / `-V`
+/// @brief 提前展示的视图：封闭词表，新增一项即多一种可声明的「短路出口」（需求 #9）。
+///
+/// `Help`/`Version` 由库内建旗标使用（见 `CommandSpec::builtins`），`Schema` 既可作内建亦可由
+/// 调用方标在自有旗标上（如 `--dump-schema`）；`None` 表示没有展示请求，正常走业务。
+enum class EarlyView : std::uint8_t {
+    None = 0,
+    Help,  ///< `--help` / `-h`（任意层级）
+    Version,  ///< 声明了 `version` 的那一层命令的 `--version` / `-V`
+    Schema,  ///< 整棵声明树的 `schema_json`（缩进 2，尾随换行）
 };
 
-/// @brief 解析产物：结局 + 取值 + 已渲染的展示文本（Help/Version 时非空）。
+/// @brief 解析产物：展示视图 + 取值 + 已渲染的展示文本（`view != None` 时非空）。
 struct Invocation {
-    ParseOutcome outcome = ParseOutcome::Ok;
+    EarlyView view = EarlyView::None;
     Arguments arguments;
     std::string display_text;
+
+    /// @brief 是否命中了某个提前展示旗标：为真时调用方只需打印 `display_text`，不必进业务。
+    [[nodiscard]] constexpr auto shows_display() const noexcept -> bool { return view != EarlyView::None; }
 };
 
-/// @brief 结局的线名（小写），供 schema / 日志消费。
-[[nodiscard]] auto outcome_to_string(ParseOutcome outcome) noexcept -> std::string_view;
+/// @brief 展示视图的线名（小写，`None` 为 "ok"），供 schema / 日志消费。
+[[nodiscard]] auto early_view_to_string(EarlyView view) noexcept -> std::string_view;
 
 // ---------------------------------------------------------------- 解析入口
 
@@ -298,13 +299,9 @@ struct Invocation {
  * @param root          命令声明；必须比返回的 Invocation 活得久。
  * @param tokens        不含 argv[0] 的参数序列（调用方自行去掉程序名）。
  * @param program_name  usage/help 里显示的程序名；空则回落 `root.name`，再空则 "program"。
- * @return 用法错误返回 `cli-*` 结构化 Error；`--help`/`--version` 返回成功的 `Invocation`
- *         （outcome 非 Ok，display_text 已渲染）。
+ * @return 用法错误返回 `cli-*` 结构化 Error；展示请求返回成功的 `Invocation`
+ *         （`view` 非 `None`，`display_text` 已渲染）。
  */
-[[nodiscard]] auto parse(const CommandSpec &root, std::span<const std::string_view> tokens,
-                         std::string_view program_name = {}) -> Result<Invocation>;
-
-/// @brief `std::vector<std::string>` 便利重载（生命周期同 `parse` 契约）。
 [[nodiscard]] auto parse(const CommandSpec &root, const std::vector<std::string> &tokens,
                          std::string_view program_name = {}) -> Result<Invocation>;
 

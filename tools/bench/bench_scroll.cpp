@@ -279,7 +279,7 @@ auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-comple
         return 2;
     }
     const aurora::cli::Invocation &invocation = parsed.value();
-    if (invocation.outcome != aurora::cli::ParseOutcome::Ok) {
+    if (invocation.shows_display()) {
         AURORA_LOG_RAW("bench", invocation.display_text);  // --help / --version come from the schema
         return 0;
     }

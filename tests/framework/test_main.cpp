@@ -392,7 +392,7 @@ auto main(int argc, char **argv) -> int {
         print_help(spec);
         return static_cast<int>(ExitCode::UsageOrNoMatch);
     }
-    if (parsed.value().outcome == aurora::cli::ParseOutcome::Help) {
+    if (parsed.value().shows_display()) {
         std::printf("%s", parsed.value().display_text.c_str());
         return static_cast<int>(ExitCode::AllPassed);
     }

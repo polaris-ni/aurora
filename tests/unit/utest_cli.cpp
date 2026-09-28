@@ -110,8 +110,8 @@ AURORA_TEST_CASE(repeatable_option_accumulates_in_order) {
     AURORA_TEST_REQUIRE(parsed);
     const auto values = parsed.value().arguments.values("tag");
     AURORA_TEST_REQUIRE_EQ(values.size(), 2U);
-    AURORA_TEST_CHECK_EQ(values[0].as_string().unwrap(), "a");
-    AURORA_TEST_CHECK_EQ(values[1].as_string().unwrap(), "b");
+    AURORA_TEST_CHECK_EQ(values[0].as<std::string>().unwrap(), "a");
+    AURORA_TEST_CHECK_EQ(values[1].as<std::string>().unwrap(), "b");
     AURORA_TEST_CHECK_EQ(parsed.value().arguments.count("tag"), 2);
 }
 
@@ -135,7 +135,7 @@ AURORA_TEST_CASE(double_dash_terminates_option_parsing) {
     // 根命令的 SCENE 是变长位置参数，故 `--` 之后仍按位置参数吸收，且不做类型转换以外解释
     const auto &args = parsed.value().arguments;
     AURORA_TEST_REQUIRE_EQ(args.positionals().size(), 2U);
-    AURORA_TEST_CHECK_EQ(args.positionals()[0].as_string().unwrap(), "--width");
+    AURORA_TEST_CHECK_EQ(args.positionals()[0].as<std::string>().unwrap(), "--width");
     AURORA_TEST_CHECK_EQ(args.get<int>("width").unwrap(), 800);  // 未被覆盖，仍是默认值
 }
 
@@ -144,7 +144,7 @@ AURORA_TEST_CASE(overflow_after_double_dash_goes_to_rest) {
     AURORA_TEST_REQUIRE(parsed);
     const auto &args = parsed.value().arguments;
     AURORA_TEST_REQUIRE_EQ(args.positionals().size(), 2U);
-    AURORA_TEST_CHECK_EQ(args.positional(0).unwrap().as_string().unwrap(), "src.scene");
+    AURORA_TEST_CHECK_EQ(args.positional(0).unwrap().as<std::string>().unwrap(), "src.scene");
     // `--` 之后的 token 原样落在 rest()，不做类型转换也不报错
     AURORA_TEST_REQUIRE_EQ(args.rest().size(), 2U);
     AURORA_TEST_CHECK_EQ(args.rest()[0], "--flag");
@@ -227,14 +227,14 @@ AURORA_TEST_CASE(required_option_and_mandatory_subcommand_are_enforced) {
     const auto ok = cli::parse(strict_spec(), Tokens{"--token", "secret", "deploy", "prod"});
     AURORA_TEST_REQUIRE(ok);
     AURORA_TEST_CHECK_EQ(text_of(ok.value().arguments, "token"), "secret");
-    AURORA_TEST_CHECK_EQ(ok.value().arguments.positional(0).unwrap().as_string().unwrap(), "prod");
+    AURORA_TEST_CHECK_EQ(ok.value().arguments.positional(0).unwrap().as<std::string>().unwrap(), "prod");
 }
 
 AURORA_TEST_CASE(help_beats_pending_required_errors) {
     // 严格树缺 --token 会报必填，但 --help 的优先级更高：用户要的是说明书
     const auto parsed = cli::parse(strict_spec(), Tokens{"--help"});
     AURORA_TEST_REQUIRE(parsed);
-    AURORA_TEST_CHECK(parsed.value().outcome == cli::ParseOutcome::Help);
+    AURORA_TEST_CHECK(parsed.value().view == cli::EarlyView::Help);
     AURORA_TEST_CHECK_THAT(parsed.value().display_text, au::testing::matchers::has_substr("usage: strict"));
 }
 
@@ -242,8 +242,8 @@ AURORA_TEST_CASE(positionals_are_bound_in_declaration_order) {
     const auto parsed = run(Tokens{"render", "in.scene", "out.webp"});
     AURORA_TEST_REQUIRE(parsed);
     const auto &args = parsed.value().arguments;
-    AURORA_TEST_CHECK_EQ(args.positional(0).unwrap().as_string().unwrap(), "in.scene");
-    AURORA_TEST_CHECK_EQ(args.positional(1).unwrap().as_string().unwrap(), "out.webp");
+    AURORA_TEST_CHECK_EQ(args.positional(0).unwrap().as<std::string>().unwrap(), "in.scene");
+    AURORA_TEST_CHECK_EQ(args.positional(1).unwrap().as<std::string>().unwrap(), "out.webp");
     AURORA_TEST_CHECK_FALSE(static_cast<bool>(args.positional(2)));
 }
 
@@ -301,7 +301,7 @@ AURORA_TEST_CASE(variadic_positional_absorbs_tokens_that_are_not_subcommand_name
     // 精确命中子命令名才下钻；近似拼写被根命令的变长位置参数吸收（git / cobra 同规则）
     const auto parsed = run(Tokens{"rnder"});
     AURORA_TEST_REQUIRE(parsed);
-    AURORA_TEST_CHECK_EQ(parsed.value().arguments.positionals()[0].as_string().unwrap(), "rnder");
+    AURORA_TEST_CHECK_EQ(parsed.value().arguments.positionals()[0].as<std::string>().unwrap(), "rnder");
     AURORA_TEST_CHECK_EQ(parsed.value().arguments.command_chain().size(), 1U);
 }
 
@@ -323,9 +323,9 @@ AURORA_TEST_CASE(strong_type_literals_convert_to_project_types) {
     AURORA_TEST_REQUIRE(level);
     AURORA_TEST_CHECK(level.value() == au::LogLevel::Debug);
 
-    const auto timeout = args.value("timeout");
+    const auto timeout = args.get<std::int64_t>("timeout");
     AURORA_TEST_REQUIRE(timeout);
-    AURORA_TEST_CHECK_EQ(timeout.value().as_duration_ms().unwrap(), 2000);
+    AURORA_TEST_CHECK_EQ(timeout.value(), 2000);
 }
 
 AURORA_TEST_CASE(length_and_color_accept_alternate_spellings) {
@@ -385,7 +385,7 @@ AURORA_TEST_CASE(duration_units_scale_to_milliseconds) {
           Case{.token = "2m", .ms = 120000}, Case{.token = "1h", .ms = 3600000}, Case{.token = "1d", .ms = 86400000}}) {
         const auto parsed = run(Tokens{"--timeout", c.token});
         AURORA_TEST_REQUIRE(parsed);
-        AURORA_TEST_CHECK_EQ(parsed.value().arguments.value("timeout").unwrap().as_duration_ms().unwrap(), c.ms);
+        AURORA_TEST_CHECK_EQ(parsed.value().arguments.get<std::int64_t>("timeout").unwrap(), c.ms);
     }
 }
 
@@ -393,16 +393,16 @@ AURORA_TEST_CASE(numeric_kinds_widen_losslessly_and_reject_lossy_reads) {
     // Int → double 加宽
     const auto integer = run(Tokens{"--width", "800"});
     AURORA_TEST_REQUIRE(integer);
-    AURORA_TEST_CHECK_NEAR(integer.value().arguments.value("width").unwrap().as_double().unwrap(), 800.0, 0.0001);
+    AURORA_TEST_CHECK_NEAR(integer.value().arguments.get<double>("width").unwrap(), 800.0, 0.0001);
 
     // double 整值 → int 放行；非整值 → cli-invalid-value
     const auto whole = run(Tokens{"--scale", "3"});
     AURORA_TEST_REQUIRE(whole);
-    AURORA_TEST_CHECK_EQ(whole.value().arguments.value("scale").unwrap().as_int().unwrap(), 3);
+    AURORA_TEST_CHECK_EQ(whole.value().arguments.get<int>("scale").unwrap(), 3);
 
     const auto fractional = run(Tokens{"--scale", "1.5"});
     AURORA_TEST_REQUIRE(fractional);
-    const auto narrowed = fractional.value().arguments.value("scale").unwrap().as_int();
+    const auto narrowed = fractional.value().arguments.get<int>("scale");
     AURORA_TEST_REQUIRE_FALSE(narrowed);
     AURORA_TEST_CHECK(code_of(narrowed.error()) == au::ErrorCode::CliInvalidValue);
 }
@@ -415,16 +415,17 @@ AURORA_TEST_CASE(type_mismatch_read_is_invalid_value_error) {
     AURORA_TEST_CHECK(code_of(as_text.error()) == au::ErrorCode::CliInvalidValue);
 
     // 未声明的长名：value 失败、flag 保守返回 false
-    AURORA_TEST_CHECK(code_of(parsed.value().arguments.value("nope").error()) == au::ErrorCode::CliMissingRequired);
+    AURORA_TEST_CHECK(code_of(parsed.value().arguments.get<std::string>("nope").error()) ==
+                      au::ErrorCode::CliMissingRequired);
     AURORA_TEST_CHECK_FALSE(parsed.value().arguments.flag("nope"));
 }
 
 AURORA_TEST_CASE(raw_text_is_always_available_regardless_of_kind) {
     const auto parsed = run(Tokens{"--margin", "25%", "--timeout", "2s"});
     AURORA_TEST_REQUIRE(parsed);
-    AURORA_TEST_CHECK_EQ(parsed.value().arguments.value("margin").unwrap().raw_text(), "25%");
-    AURORA_TEST_CHECK_EQ(parsed.value().arguments.value("timeout").unwrap().raw_text(), "2s");
-    AURORA_TEST_CHECK(parsed.value().arguments.value("margin").unwrap().kind() == cli::ValueKind::Length);
+    AURORA_TEST_CHECK_EQ(parsed.value().arguments.values("margin").front().raw_text(), "25%");
+    AURORA_TEST_CHECK_EQ(parsed.value().arguments.values("timeout").front().raw_text(), "2s");
+    AURORA_TEST_CHECK(parsed.value().arguments.values("margin").front().kind() == cli::ValueKind::Length);
 }
 
 AURORA_TEST_CASE(help_option_is_builtin_at_every_level) {
@@ -432,7 +433,7 @@ AURORA_TEST_CASE(help_option_is_builtin_at_every_level) {
          {Tokens{"--help"}, Tokens{"-h"}, Tokens{"render", "--help"}, Tokens{"serve", "-h"}}) {
         const auto parsed = run(tokens);
         AURORA_TEST_REQUIRE(parsed);
-        AURORA_TEST_CHECK(parsed.value().outcome == cli::ParseOutcome::Help);
+        AURORA_TEST_CHECK(parsed.value().view == cli::EarlyView::Help);
         AURORA_TEST_CHECK_FALSE(parsed.value().display_text.empty());
     }
     const auto nested = run(Tokens{"render", "--help"});
@@ -444,7 +445,7 @@ AURORA_TEST_CASE(version_option_only_exists_where_declared) {
     for (const std::vector<std::string> &tokens : {Tokens{"--version"}, Tokens{"-V"}}) {
         const auto parsed = run(tokens);
         AURORA_TEST_REQUIRE(parsed);
-        AURORA_TEST_CHECK(parsed.value().outcome == cli::ParseOutcome::Version);
+        AURORA_TEST_CHECK(parsed.value().view == cli::EarlyView::Version);
         AURORA_TEST_CHECK_EQ(parsed.value().display_text, "aurora-render 1.2.3\n");
     }
 
@@ -457,34 +458,40 @@ AURORA_TEST_CASE(version_option_only_exists_where_declared) {
     AURORA_TEST_CHECK(code_of(sub_short.error()) == au::ErrorCode::CliUnknownOption);
 }
 
-AURORA_TEST_CASE(outcome_to_string_is_enumerable_wire_vocabulary) {
-    AURORA_TEST_CHECK_EQ(cli::outcome_to_string(cli::ParseOutcome::Ok), "ok");
-    AURORA_TEST_CHECK_EQ(cli::outcome_to_string(cli::ParseOutcome::Help), "help");
-    AURORA_TEST_CHECK_EQ(cli::outcome_to_string(cli::ParseOutcome::Version), "version");
+AURORA_TEST_CASE(early_view_to_string_is_enumerable_wire_vocabulary) {
+    AURORA_TEST_CHECK_EQ(cli::early_view_to_string(cli::EarlyView::None), "ok");
+    AURORA_TEST_CHECK_EQ(cli::early_view_to_string(cli::EarlyView::Help), "help");
+    AURORA_TEST_CHECK_EQ(cli::early_view_to_string(cli::EarlyView::Version), "version");
+    AURORA_TEST_CHECK_EQ(cli::early_view_to_string(cli::EarlyView::Schema), "schema");
+    // shows_display() 是调用方唯一的分支判据：只有 None 不进业务
+    AURORA_TEST_CHECK_FALSE(cli::Invocation{}.shows_display());
+    for (const auto view : {cli::EarlyView::Help, cli::EarlyView::Version, cli::EarlyView::Schema}) {
+        AURORA_TEST_CHECK((cli::Invocation{.view = view}).shows_display());
+    }
 }
 
 AURORA_TEST_CASE(argc_argv_entry_strips_program_name_and_uses_basename) {
+    // 程序名不再有独立出口（它只在 usage/help/错误回显里起作用），故以 command_display() 为观测面。
     const char *windows_argv[] = {"C:\\tools\\aurora-render.exe", "--width", "320"};
     const auto windows = cli::parse(spec(), 3, windows_argv);
     AURORA_TEST_REQUIRE(windows);
-    AURORA_TEST_CHECK_EQ(std::string{windows.value().arguments.program_name()}, "aurora-render.exe");
+    AURORA_TEST_CHECK_EQ(windows.value().arguments.command_display(), "aurora-render.exe");
     AURORA_TEST_CHECK_EQ(windows.value().arguments.get<int>("width").unwrap(), 320);
 
     const char *posix_argv[] = {"/usr/local/bin/aurora-render", "--width", "320"};
     const auto posix = cli::parse(spec(), 3, posix_argv);
     AURORA_TEST_REQUIRE(posix);
-    AURORA_TEST_CHECK_EQ(std::string{posix.value().arguments.program_name()}, "aurora-render");
+    AURORA_TEST_CHECK_EQ(posix.value().arguments.command_display(), "aurora-render");
 
     // 无 argv 可用时回落根命令名，且 argc<=0 不算错误
     const auto none = cli::parse(spec(), 0, nullptr);
     AURORA_TEST_REQUIRE(none);
-    AURORA_TEST_CHECK_EQ(std::string{none.value().arguments.program_name()}, "aurora-render");
+    AURORA_TEST_CHECK_EQ(none.value().arguments.command_display(), "aurora-render");
 }
 
 AURORA_TEST_CASE(program_name_override_wins_over_root_name) {
     const auto parsed = cli::parse(spec(), Tokens{"--width", "1"}, "custom-name");
     AURORA_TEST_REQUIRE(parsed);
-    AURORA_TEST_CHECK_EQ(std::string{parsed.value().arguments.program_name()}, "custom-name");
     AURORA_TEST_CHECK_EQ(parsed.value().arguments.command_display(), "custom-name");
 }
 
@@ -506,36 +513,94 @@ AURORA_TEST_CASE(named_value_accessors_cover_the_public_entry_directly) {
     AURORA_TEST_REQUIRE(parsed);
     const auto &args = parsed.value().arguments;
 
-    const auto width = args.value("width").unwrap();
-    AURORA_TEST_CHECK_EQ(width.as_int64().unwrap(), 12);
-    AURORA_TEST_CHECK_EQ(width.as_int().unwrap(), 12);
-    AURORA_TEST_CHECK_NEAR(width.as_double().unwrap(), 12.0, 0.0001);  // Int → double 属无损加宽
+    const auto width = args.values("width").front();
+    AURORA_TEST_CHECK_EQ(width.as<std::int64_t>().unwrap(), 12);
+    AURORA_TEST_CHECK_EQ(width.as<int>().unwrap(), 12);
+    AURORA_TEST_CHECK_NEAR(width.as<double>().unwrap(), 12.0, 0.0001);  // Int → double 属无损加宽
 
-    const auto scale = args.value("scale").unwrap();
-    AURORA_TEST_CHECK_NEAR(scale.as_double().unwrap(), 1.5, 0.0001);
-    AURORA_TEST_CHECK(code_of(scale.as_int().error()) == au::ErrorCode::CliInvalidValue);  // 非整 double 不收
+    const auto scale = args.values("scale").front();
+    AURORA_TEST_CHECK_NEAR(scale.as<double>().unwrap(), 1.5, 0.0001);
+    AURORA_TEST_CHECK(code_of(scale.as<int>().error()) == au::ErrorCode::CliInvalidValue);  // 非整 double 不收
 
-    AURORA_TEST_CHECK(args.value("verbose").unwrap().as_bool().unwrap());
-    AURORA_TEST_CHECK_EQ(args.value("output").unwrap().as_string().unwrap(), "shot.png");
-    const auto margin = args.value("margin").unwrap().as_length().unwrap();
+    AURORA_TEST_CHECK(args.get<bool>("verbose").unwrap());
+    AURORA_TEST_CHECK_EQ(args.get<std::string>("output").unwrap(), "shot.png");
+    const auto margin = args.get<au::Length>("margin").unwrap();
     AURORA_TEST_CHECK(margin.kind == au::LengthKind::Fraction);
     AURORA_TEST_CHECK_NEAR(margin.value, 0.25F, 0.0001);
-    AURORA_TEST_CHECK(args.value("tint").unwrap().as_color().unwrap() == au::Color{255, 0, 0});
-    AURORA_TEST_CHECK(args.value("level").unwrap().as_log_level().unwrap() == au::LogLevel::Debug);
-    AURORA_TEST_CHECK_EQ(args.value("timeout").unwrap().as_duration_ms().unwrap(), 2000);
+    AURORA_TEST_CHECK(args.get<au::Color>("tint").unwrap() == au::Color{255, 0, 0});
+    AURORA_TEST_CHECK(args.get<au::LogLevel>("level").unwrap() == au::LogLevel::Debug);
+    AURORA_TEST_CHECK_EQ(args.get<std::int64_t>("timeout").unwrap(), 2000);
 
     // 类型不符一律 cli-invalid-value（字符串读成整数、double 超出 int64 可表示范围）；
     // 只有 int64 → int32 的窄化越界才是 cli-range-violated。
-    AURORA_TEST_CHECK(code_of(args.value("output").unwrap().as_int64().error()) == au::ErrorCode::CliInvalidValue);
+    AURORA_TEST_CHECK(code_of(args.get<std::int64_t>("output").error()) == au::ErrorCode::CliInvalidValue);
     const auto huge = run(Tokens{"--scale", "1e300"});
     AURORA_TEST_REQUIRE(huge);
-    AURORA_TEST_CHECK(code_of(huge.value().arguments.value("scale").unwrap().as_int64().error()) ==
+    AURORA_TEST_CHECK(code_of(huge.value().arguments.get<std::int64_t>("scale").error()) ==
                       au::ErrorCode::CliInvalidValue);
     const auto wide_ms = run(Tokens{"--timeout", "4000000000s"});  // 4e12 ms：int64 放得下，int32 放不下
     AURORA_TEST_REQUIRE(wide_ms);
-    const auto timeout = wide_ms.value().arguments.value("timeout").unwrap();
-    AURORA_TEST_CHECK_EQ(timeout.as_int64().unwrap(), 4000000000000);
-    AURORA_TEST_CHECK(code_of(timeout.as_int().error()) == au::ErrorCode::CliRangeViolated);
+    const auto timeout = wide_ms.value().arguments.values("timeout").front();
+    AURORA_TEST_CHECK_EQ(timeout.as<std::int64_t>().unwrap(), 4000000000000);
+    AURORA_TEST_CHECK(code_of(timeout.as<int>().error()) == au::ErrorCode::CliRangeViolated);
+}
+
+AURORA_TEST_CASE(declared_short_names_displace_the_builtins) {
+    using aurora::testing::cli_fixture::displacement_spec;
+    // `-h` / `-V` 已被 height / verify 声明占用：短名归用户，内建降级为仅长名（不再判 spec-invalid）
+    const auto height = cli::parse(displacement_spec(), Tokens{"-h", "480"});
+    AURORA_TEST_REQUIRE(height);
+    AURORA_TEST_CHECK_EQ(height.value().arguments.get<int>("height").unwrap(), 480);
+    AURORA_TEST_CHECK_FALSE(height.value().shows_display());  // -h 不该顺手打印说明书
+
+    const auto verify = cli::parse(displacement_spec(), Tokens{"-V"});
+    AURORA_TEST_REQUIRE(verify);
+    AURORA_TEST_CHECK(verify.value().arguments.flag("verify"));
+    AURORA_TEST_CHECK_FALSE(verify.value().shows_display());
+
+    // 长名那条仍然有效：--help 是用户自己声明的（顶掉内建），--version 仍是内建
+    const auto help = cli::parse(displacement_spec(), Tokens{"--help"});
+    AURORA_TEST_REQUIRE(help);
+    AURORA_TEST_CHECK(help.value().view == cli::EarlyView::Help);
+    AURORA_TEST_CHECK_THAT(help.value().display_text, au::testing::matchers::has_substr("usage: displace"));
+
+    const auto version = cli::parse(displacement_spec(), Tokens{"--version"});
+    AURORA_TEST_REQUIRE(version);
+    AURORA_TEST_CHECK(version.value().view == cli::EarlyView::Version);
+    AURORA_TEST_CHECK_EQ(version.value().display_text, "displace 0.9.1\n");
+}
+
+AURORA_TEST_CASE(user_declared_early_view_flag_shares_the_display_channel) {
+    using aurora::testing::cli_fixture::displacement_spec;
+    // 短路语义：命中即结束扫描，后面的非法字面量不再被消费（与 --help 优先于报错同规则）
+    const auto parsed = cli::parse(displacement_spec(), Tokens{"--dump-schema", "--height", "wide"});
+    AURORA_TEST_REQUIRE(parsed);
+    AURORA_TEST_CHECK(parsed.value().view == cli::EarlyView::Schema);
+    AURORA_TEST_CHECK_THAT(parsed.value().display_text, au::testing::matchers::has_substr("\"dump-schema\""));
+    AURORA_TEST_CHECK_THAT(parsed.value().display_text,
+                           au::testing::matchers::has_substr("\"early_view\": \"schema\""));
+    // 视图文本自带尾随换行，调用方原样落 stdout 即可
+    AURORA_TEST_CHECK(parsed.value().display_text.back() == '\n');
+}
+
+AURORA_TEST_CASE(builtins_switch_is_per_level) {
+    using aurora::testing::cli_fixture::displacement_spec;
+    // `bare` 层关掉了全部内建且没有自有选项：--help 在那里是未知选项，而不是「库总会给一个」
+    const auto bare = cli::parse(displacement_spec(), Tokens{"bare", "--help"});
+    AURORA_TEST_REQUIRE_FALSE(bare);
+    AURORA_TEST_CHECK(code_of(bare.error()) == au::ErrorCode::CliUnknownOption);
+
+    // 同一棵树换一层仍然有效：开关是按层的，不是全局的
+    const auto parent = cli::parse(displacement_spec(), Tokens{"--height", "1", "bare"});
+    AURORA_TEST_REQUIRE(parent);
+    AURORA_TEST_CHECK_EQ(parent.value().arguments.command_chain().size(), 2U);
+}
+
+AURORA_TEST_CASE(help_view_beats_a_failing_literal_that_follows_it) {
+    // 内建与用户声明共用同一条短路：--help 之后即便跟着越界值也照样给说明书
+    const auto parsed = run(Tokens{"--help", "--width", "99999"});
+    AURORA_TEST_REQUIRE(parsed);
+    AURORA_TEST_CHECK(parsed.value().view == cli::EarlyView::Help);
 }
 
 }  // namespace aurora::test_cases::utest_cli

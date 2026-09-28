@@ -14,6 +14,7 @@
 #include <limits>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -21,6 +22,7 @@
 
 #include "aurora/cli/command.h"
 #include "aurora/cli/literals.h"
+#include "aurora/cli/spec_lookup.h"
 
 namespace aurora::cli {
 namespace {
@@ -443,16 +445,16 @@ class Parser {
             return *error;
         }
         auto slots = finish();
-        // --help / --version 优先于必填/互斥结论：用户要的是说明书，不是报错。
+        // 展示请求优先于必填/互斥结论：用户要的是说明书，不是报错。
         if (!early_ && pending_) {
             return *pending_;
         }
         auto positionals = flatten_positionals();
         Invocation invocation;
-        invocation.outcome = early_.value_or(ParseOutcome::Ok);
+        invocation.view = early_.value_or(EarlyView::None);
         invocation.display_text = std::move(early_text_);
         invocation.arguments =
-            Arguments{std::move(slots), std::move(positionals), std::move(rest_), chain(), matched(), program_};
+            Arguments{std::move(slots), std::move(positionals), std::move(rest_), chain(), matched()};
         return invocation;
     }
 
@@ -514,12 +516,13 @@ class Parser {
                 levels_.back().after_double_dash = true;
                 continue;
             }
-            if (token == "--help") {
-                request_help();
+            const auto plan = detail::builtin_plan(*matched());
+            if (token == "--help" && plan.help) {
+                request_view(EarlyView::Help);
                 continue;
             }
-            if (token == "--version" && !matched()->version.empty()) {
-                request_version();
+            if (token == "--version" && plan.version) {
+                request_view(EarlyView::Version);
                 continue;
             }
             if (looks_like_option(token)) {
@@ -535,15 +538,24 @@ class Parser {
         return std::nullopt;
     }
 
-    auto request_help() -> void {
-        early_ = ParseOutcome::Help;
-        early_text_ = help_text(*matched(), chain());
+    /// @brief 渲染某视图的文本：Help/Version 取当前命中层，Schema 取整棵声明树。
+    [[nodiscard]] auto render_view(EarlyView view) const -> std::string {
+        if (view == EarlyView::Help) {
+            return help_text(*matched(), chain());
+        }
+        if (view == EarlyView::Version) {
+            return version_text(*matched(), program_);
+        }
+        if (view == EarlyView::Schema) {
+            return schema_json(*root_).dump(2) + '\n';
+        }
+        return {};
     }
 
-    /// @brief 内建版本结局：仅在该层声明了 `version` 时存在（`--version` / `-V`）。
-    auto request_version() -> void {
-        early_ = ParseOutcome::Version;
-        early_text_ = version_text(*matched(), program_);
+    /// @brief 命中提前展示旗标：记下视图并渲染文本，扫描随即短路（内建与用户声明走同一条路）。
+    auto request_view(EarlyView view) -> void {
+        early_ = view;
+        early_text_ = render_view(view);
     }
 
     /// @brief 以 `-` 开头的 token：长选项或短选项簇。
@@ -559,7 +571,7 @@ class Parser {
         const auto equals = body.find('=');
         const bool inline_value = (equals != std::string_view::npos);
         const std::string_view name = inline_value ? body.substr(0, equals) : body;
-        const OptionSchema *spec = matched()->find_option(name);
+        const OptionSchema *spec = detail::find_option(*matched(), name);
         if (spec == nullptr) {
             std::vector<std::string> candidates;
             for (const auto &option : matched()->options) {
@@ -585,17 +597,18 @@ class Parser {
     /// @brief 短选项簇：`-v`、`-vw 80`、`-w80`、`-w=80`。
     [[nodiscard]] auto consume_short(std::string_view token) -> std::optional<Error> {
         const std::string_view body = token.substr(1);
+        const auto plan = detail::builtin_plan(*matched());
         for (std::size_t i = 0; i < body.size(); ++i) {
             const char letter = body[i];
-            if (letter == 'h' && matched()->find_short('h') == nullptr) {
-                request_help();
+            if (letter == 'h' && plan.help_short) {
+                request_view(EarlyView::Help);
                 return std::nullopt;
             }
-            if (letter == 'V' && matched()->find_short('V') == nullptr && !matched()->version.empty()) {
-                request_version();
+            if (letter == 'V' && plan.version_short) {
+                request_view(EarlyView::Version);
                 return std::nullopt;
             }
-            const OptionSchema *spec = matched()->find_short(letter);
+            const OptionSchema *spec = detail::find_short(*matched(), letter);
             if (spec == nullptr) {
                 std::vector<std::string> candidates;
                 for (const auto &option : matched()->options) {
@@ -717,6 +730,9 @@ class Parser {
         if (spec.kind != ValueKind::Bool && spec.arity.max != Arity::AURORA_UNBOUNDED && occurrences > spec.arity.max) {
             return arity_error(spec, occurrences);
         }
+        if (spec.early_view != EarlyView::None) {
+            request_view(spec.early_view);
+        }
         return std::nullopt;
     }
 
@@ -733,7 +749,7 @@ class Parser {
         if (!spec.minimum && !spec.maximum) {
             return std::nullopt;
         }
-        const auto number = value.as_double();
+        const auto number = value.as<double>();
         if (!number) {
             return std::nullopt;  // 非数值类型不参与区间判定（validate 已拦，此处宽容）
         }
@@ -755,7 +771,7 @@ class Parser {
         const CommandSpec *spec = level.spec;
         // 「精确命中子命令名」优先于位置参数槽（git / cobra / npm 同规则）：否则根命令的变长
         // 位置参数会把 `render` 吞成一条普通取值，整棵子命令树永远进不去。
-        const CommandSpec *sub = spec->find_subcommand(token);
+        const CommandSpec *sub = detail::find_subcommand(*spec, token);
         if (sub != nullptr) {
             levels_.push_back(Level{.spec = sub});
             return std::nullopt;
@@ -964,21 +980,21 @@ class Parser {
     std::vector<std::string> rest_;
     std::string program_;
     std::size_t cursor_ = 0;
-    std::optional<ParseOutcome> early_;
+    std::optional<EarlyView> early_;
     std::string early_text_;
     std::optional<Error> pending_;
 };
 
 // ------------------------------------------------------------ Value
 
-auto Value::as_bool() const -> Result<bool> {
+auto Value::read_bool() const -> Result<bool> {
     if (const auto *flag = std::get_if<bool>(&raw_)) {
         return *flag;
     }
     return detail::invalid_literal(raw_text_, ValueKind::Bool, raw_text_);
 }
 
-auto Value::as_int64() const -> Result<std::int64_t> {
+auto Value::read_int64() const -> Result<std::int64_t> {
     if (const auto *number = std::get_if<std::int64_t>(&raw_)) {
         return *number;
     }
@@ -988,8 +1004,8 @@ auto Value::as_int64() const -> Result<std::int64_t> {
     return detail::invalid_literal(raw_text_, ValueKind::Int, raw_text_);
 }
 
-auto Value::as_int() const -> Result<int> {
-    auto wide = as_int64();
+auto Value::read_int() const -> Result<int> {
+    auto wide = read_int64();
     if (!wide) {
         return wide.error();
     }
@@ -1004,7 +1020,7 @@ auto Value::as_int() const -> Result<int> {
     return static_cast<int>(value);
 }
 
-auto Value::as_double() const -> Result<double> {
+auto Value::read_double() const -> Result<double> {
     if (const auto *number = std::get_if<double>(&raw_)) {
         return *number;
     }
@@ -1014,39 +1030,32 @@ auto Value::as_double() const -> Result<double> {
     return detail::invalid_literal(raw_text_, ValueKind::Double, raw_text_);
 }
 
-auto Value::as_string() const -> Result<std::string> {
+auto Value::read_string() const -> Result<std::string> {
     if (const auto *text = std::get_if<std::string>(&raw_)) {
         return *text;
     }
     return detail::invalid_literal(raw_text_, ValueKind::String, raw_text_);
 }
 
-auto Value::as_length() const -> Result<Length> {
+auto Value::read_length() const -> Result<Length> {
     if (const auto *length = std::get_if<Length>(&raw_)) {
         return *length;
     }
     return detail::invalid_literal(raw_text_, ValueKind::Length, raw_text_);
 }
 
-auto Value::as_color() const -> Result<Color> {
+auto Value::read_color() const -> Result<Color> {
     if (const auto *color = std::get_if<Color>(&raw_)) {
         return *color;
     }
     return detail::invalid_literal(raw_text_, ValueKind::Color, raw_text_);
 }
 
-auto Value::as_log_level() const -> Result<LogLevel> {
+auto Value::read_log_level() const -> Result<LogLevel> {
     if (const auto *level = std::get_if<LogLevel>(&raw_)) {
         return *level;
     }
     return detail::invalid_literal(raw_text_, ValueKind::LogLevel, raw_text_);
-}
-
-auto Value::as_duration_ms() const -> Result<std::int64_t> {
-    if (kind_ != ValueKind::Duration) {
-        return detail::invalid_literal(raw_text_, ValueKind::Duration, raw_text_);
-    }
-    return as_int64();
 }
 
 // ------------------------------------------------------------ Arguments
@@ -1065,7 +1074,7 @@ auto Arguments::values(std::string_view long_name) const -> std::vector<Value> {
     return (slot == nullptr) ? std::vector<Value>{} : slot->values;
 }
 
-auto Arguments::value(std::string_view long_name) const -> Result<Value> {
+auto Arguments::one(std::string_view long_name) const -> Result<Value> {
     const auto *slot = find_slot(long_name);
     if (slot == nullptr || slot->values.empty()) {
         return make_error(ErrorCode::CliMissingRequired,
@@ -1172,24 +1181,30 @@ auto Arity::max_text() const -> std::string {
     return (max == Arity::AURORA_UNBOUNDED) ? std::string{"∞"} : std::to_string(max);
 }
 
-auto outcome_to_string(ParseOutcome outcome) noexcept -> std::string_view {
-    switch (outcome) {
-        case ParseOutcome::Ok:
+auto early_view_to_string(EarlyView view) noexcept -> std::string_view {
+    switch (view) {
+        case EarlyView::None:
             return "ok";
-        case ParseOutcome::Help:
+        case EarlyView::Help:
             return "help";
-        case ParseOutcome::Version:
+        case EarlyView::Version:
             return "version";
+        case EarlyView::Schema:
+            return "schema";
     }
     return "ok";
 }
 
 // ------------------------------------------------------------ parse 入口
 
-auto parse(const CommandSpec &root, std::span<const std::string_view> tokens, std::string_view program_name)
-    -> Result<Invocation> {
+namespace {
+/// @brief 两个公共 `parse` 重载的公共实现：token 序列（不含程序名）+ 程序名 → `Parser`。
+///        `span` 形态只在此内部使用，不再作为公共入口（外部无一调用点）。
+[[nodiscard]] auto run_parser(const CommandSpec &root, std::span<const std::string_view> tokens,
+                              std::string_view program_name) -> Result<Invocation> {
     return Parser{root, tokens, program_name}.run();
 }
+}  // namespace
 
 auto parse(const CommandSpec &root, const std::vector<std::string> &tokens, std::string_view program_name)
     -> Result<Invocation> {
@@ -1198,7 +1213,7 @@ auto parse(const CommandSpec &root, const std::vector<std::string> &tokens, std:
     for (const auto &token : tokens) {
         views.emplace_back(token);
     }
-    return parse(root, std::span<const std::string_view>{views}, program_name);
+    return run_parser(root, std::span<const std::string_view>{views}, program_name);
 }
 
 auto parse(const CommandSpec &root, int argc, const char *const *argv) -> Result<Invocation> {
@@ -1220,7 +1235,7 @@ auto parse(const CommandSpec &root, int argc, const char *const *argv) -> Result
         const auto slash = raw.find_last_of("/\\");
         program_name = (slash == std::string_view::npos) ? std::string{raw} : std::string{raw.substr(slash + 1)};
     }
-    return parse(root, std::span<const std::string_view>{views}, program_name);
+    return run_parser(root, std::span<const std::string_view>{views}, program_name);
 }
 
 }  // namespace aurora::cli

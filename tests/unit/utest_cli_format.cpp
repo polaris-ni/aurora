@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/cli/command.h
-/// 测试说明: 覆盖 ValueKind 词表与 Arity 工厂的可枚举性、validate 对声明表的 20 余条静态门禁、
+/// 测试说明: 覆盖 ValueKind 词表与 Arity 工厂的可枚举性、validate 对声明表的 20 余条静态门禁
+/// （含 `early_view` 必须是零值 arity 的 Bool）、内建 help/version 的惰性注入与让位、
 /// usage/help/version 派生文本形态、schema_json 自描述结构，并以 cli_snapshots.json
 /// 做文本 golden 基线（AURORA_UPDATE_GOLDEN=1 再生成）
 
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "aurora/cli/args.h"
@@ -23,8 +25,10 @@ namespace au = aurora;
 namespace cli = aurora::cli;
 namespace m = aurora::testing::matchers;
 namespace golden = aurora::testing::golden;
+using aurora::testing::cli_fixture::displacement_spec;
 using aurora::testing::cli_fixture::spec;
 using aurora::testing::cli_fixture::strict_spec;
+using aurora::testing::cli_fixture::Tokens;
 using cli::Arity;
 using cli::CommandSpec;
 using cli::OptionSchema;
@@ -55,6 +59,17 @@ auto expect_invalid(const CommandSpec &candidate) -> void {
 auto expect_valid(const CommandSpec &candidate) -> void {
     const auto result = cli::validate(candidate);
     AURORA_TEST_REQUIRE_MSG(result, result ? std::string{} : result.error().message);
+}
+
+/// @brief 按名找直接子命令。`CommandSpec` 不再暴露 `find_*`（对外发现能力由 `schema_json` 承担），
+///        测试侧用同语义的本地查找代替，避免为了测试把库内原语重新开放成公共 API。
+[[nodiscard]] auto sub_of(const CommandSpec &root, std::string_view name) -> const CommandSpec * {
+    for (const auto &sub : root.subcommands) {
+        if (sub.name == name) {
+            return &sub;
+        }
+    }
+    return nullptr;
 }
 
 /// @brief 取 schema 里某个长名的选项节点；未找到返回 null。
@@ -89,21 +104,102 @@ AURORA_TEST_CASE(value_kind_vocabulary_is_closed_and_round_trips) {
     AURORA_TEST_CHECK_FALSE(cli::value_kind_from_name("").has_value());
 }
 
+/// @brief 两张封闭表的桥：`ValueKind`（9 项，schema 的 `type` 词表）↔ `Value::as<T>()` 的 C++ 支持集。
+struct KindRead {
+    ValueKind kind;
+    std::string_view literal;  ///< 该 kind 的一个合法字面量
+    std::string_view cpp_type;  ///< 规范读出类型（`as<T>` 的 T 名）
+};
+
+/// @brief 按登记的类型名直调 `as<T>()`，返回是否读成功（表驱动穷尽性检查用）。
+[[nodiscard]] auto read_back(const cli::Value &value, std::string_view cpp_type) -> bool {
+    if (cpp_type == "bool") {
+        return static_cast<bool>(value.as<bool>());
+    }
+    if (cpp_type == "int64_t") {
+        return static_cast<bool>(value.as<std::int64_t>());
+    }
+    if (cpp_type == "double") {
+        return static_cast<bool>(value.as<double>());
+    }
+    if (cpp_type == "std::string") {
+        return static_cast<bool>(value.as<std::string>());
+    }
+    if (cpp_type == "Length") {
+        return static_cast<bool>(value.as<au::Length>());
+    }
+    if (cpp_type == "Color") {
+        return static_cast<bool>(value.as<au::Color>());
+    }
+    if (cpp_type == "LogLevel") {
+        return static_cast<bool>(value.as<au::LogLevel>());
+    }
+    return false;
+}
+
+AURORA_TEST_CASE(every_value_kind_has_a_documented_read_type) {
+    // 词表封闭是需求 #9 的承诺：9 个 ValueKind 各自必须至少有一个 `as<T>` 类型能无损读出，
+    // 且登记的 C++ 类型集不得超出 args.h static_assert 文案那份（8 个：Enum 复用 string、
+    // Duration 复用 int64_t）。任何一侧新增/删除项而未同步另一侧，这里先红。
+    const std::vector<KindRead> reads = {
+        KindRead{.kind = ValueKind::Bool, .literal = "true", .cpp_type = "bool"},
+        KindRead{.kind = ValueKind::Int, .literal = "12", .cpp_type = "int64_t"},
+        KindRead{.kind = ValueKind::Double, .literal = "1.5", .cpp_type = "double"},
+        KindRead{.kind = ValueKind::String, .literal = "s", .cpp_type = "std::string"},
+        KindRead{.kind = ValueKind::Enum, .literal = "a", .cpp_type = "std::string"},
+        KindRead{.kind = ValueKind::Length, .literal = "25%", .cpp_type = "Length"},
+        KindRead{.kind = ValueKind::Color, .literal = "#fff", .cpp_type = "Color"},
+        KindRead{.kind = ValueKind::LogLevel, .literal = "debug", .cpp_type = "LogLevel"},
+        KindRead{.kind = ValueKind::Duration, .literal = "2s", .cpp_type = "int64_t"},
+    };
+    AURORA_TEST_REQUIRE_EQ(reads.size(), cli::all_value_kinds().size());
+    for (const KindRead &read : reads) {
+        OptionSchema option;
+        option.long_name = "v";
+        option.kind = read.kind;
+        option.arity = (read.kind == ValueKind::Bool) ? Arity::flag() : Arity::exactly_one();
+        if (read.kind == ValueKind::Enum) {
+            option.choices = {std::string{read.literal}};  // Enum 的取值域唯一合法来源
+        }
+        // 声明表按指针借用，故 root 必须比 parsed 活得久：两者都留在本层作用域
+        const auto root = minimal({option});
+        const auto parsed = cli::parse(root, Tokens{"--v=" + std::string{read.literal}});
+        AURORA_TEST_REQUIRE_MSG(
+            parsed,
+            parsed ? std::string{} : "kind " + std::string{cli::to_string(read.kind)} + ": " + parsed.error().message);
+        const auto value = parsed.unwrap().arguments.values("v").front();
+        AURORA_TEST_CHECK(value.kind() == read.kind);
+        AURORA_TEST_CHECK_EQ(value.raw_text(), std::string{read.literal});
+        AURORA_TEST_CHECK_MSG(read_back(value, read.cpp_type), "kind " + std::string{cli::to_string(read.kind)} +
+                                                                   " unreadable as " + std::string{read.cpp_type});
+    }
+    // 登记到的 C++ 类型去重后 7 个；`as<T>` 另收 `int`（int64_t 的窄化别名），合计 args.h
+    // static_assert 文案里那 8 个。表里若多出未登记的类型名，read_back 会返回 false 而在上面红灯。
+    std::vector<std::string_view> distinct;
+    for (const KindRead &read : reads) {
+        if (std::find(distinct.begin(), distinct.end(), read.cpp_type) == distinct.end()) {
+            distinct.push_back(read.cpp_type);
+        }
+    }
+    AURORA_TEST_CHECK_EQ(distinct.size(), 7U);
+}
+
 AURORA_TEST_CASE(arity_factories_describe_consumed_value_tokens) {
     AURORA_TEST_CHECK(Arity::flag().allows_no_value());
     AURORA_TEST_CHECK_FALSE(Arity::exactly_one().allows_no_value());
     AURORA_TEST_CHECK_EQ(Arity::exactly_one().min, 1);
-    AURORA_TEST_CHECK_EQ(Arity::exactly(3).max, 3);
-    AURORA_TEST_CHECK_EQ(Arity::at_most(2).min, 0);
+    // 非标准区间（如定长 3、至多 2）不再有命名工厂：`Arity` 是公开聚合，直接写区间即可。
+    AURORA_TEST_CHECK_EQ((Arity{.min = 3, .max = 3}).max, 3);
+    AURORA_TEST_CHECK_EQ((Arity{.min = 0, .max = 2}).min, 0);
 
     // 定长 span 决定「一条选项吃几个后续 token」
     AURORA_TEST_CHECK_EQ(Arity::exactly_one().fixed_span().value_or(-7), 1);
-    AURORA_TEST_CHECK_EQ(Arity::exactly(2).fixed_span().value_or(-7), 2);
+    AURORA_TEST_CHECK_EQ((Arity{.min = 2, .max = 2}).fixed_span().value_or(-7), 2);
     AURORA_TEST_CHECK_FALSE(Arity::at_least_one().fixed_span().has_value());
     AURORA_TEST_CHECK_FALSE(Arity::zero_or_more().fixed_span().has_value());
 
     AURORA_TEST_CHECK_EQ(Arity::zero_or_more().max_text(), "∞");
-    AURORA_TEST_CHECK_EQ(Arity::exactly(4).max_text(), "4");
+    AURORA_TEST_CHECK_EQ((Arity{.min = 4, .max = 4}).max_text(), "4");
 }
 
 AURORA_TEST_CASE(arity_help_placeholders_follow_optionality) {
@@ -112,7 +208,7 @@ AURORA_TEST_CASE(arity_help_placeholders_follow_optionality) {
     AURORA_TEST_CHECK_EQ(Arity::optional_one().help_placeholder("X"), "<X>");
     AURORA_TEST_CHECK_EQ(Arity::at_least_one().help_placeholder("TAG"), "<TAG> <TAG>...");
     AURORA_TEST_CHECK_EQ(Arity::zero_or_more().help_placeholder("TAG"), "<TAG>...");
-    AURORA_TEST_CHECK_EQ(Arity::exactly(2).help_placeholder("XY"), "<XY>");
+    AURORA_TEST_CHECK_EQ((Arity{.min = 2, .max = 2}).help_placeholder("XY"), "<XY>");
 }
 
 // ------------------------------------------------------------ validate 门禁
@@ -122,27 +218,47 @@ AURORA_TEST_CASE(validate_accepts_the_shared_fixtures) {
     AURORA_TEST_REQUIRE(ok);
     AURORA_TEST_CHECK_EQ(ok.value(), 3);  // 根 + render + serve
     AURORA_TEST_CHECK_EQ(cli::validate(strict_spec()).unwrap(), 2);
+    // 让位树（占用 -h/-V、自标 early_view、子命令关内建）同样是合法声明
+    AURORA_TEST_CHECK_EQ(cli::validate(displacement_spec()).unwrap(), 2);
 }
 
 AURORA_TEST_CASE(validate_rejects_malformed_long_names) {
     expect_invalid(minimal({OptionSchema{.kind = ValueKind::String}}));  // 无长名
     expect_invalid(minimal({OptionSchema{.long_name = "-x", .kind = ValueKind::String}}));
     expect_invalid(minimal({OptionSchema{.long_name = "a b", .kind = ValueKind::String}}));
-    expect_invalid(minimal({OptionSchema{.long_name = "help", .kind = ValueKind::String}}));
-    expect_invalid(minimal({OptionSchema{.long_name = "version", .kind = ValueKind::String}}));
     expect_invalid(minimal({OptionSchema{.long_name = "out", .kind = ValueKind::String},
                             OptionSchema{.long_name = "out", .short_name = 'z', .kind = ValueKind::String}}));
     expect_valid(minimal({OptionSchema{.long_name = "out", .kind = ValueKind::String}}));
+    // help / version 不再是保留名：声明它们 = 内建让位（口径见 09-cli.md §4.6）
+    expect_valid(minimal({OptionSchema{
+        .long_name = "help", .kind = ValueKind::Bool, .arity = Arity::flag(), .early_view = cli::EarlyView::Help}}));
+    expect_valid(minimal({OptionSchema{.long_name = "version",
+                                       .kind = ValueKind::Bool,
+                                       .arity = Arity::flag(),
+                                       .early_view = cli::EarlyView::Version}}));
 }
 
-AURORA_TEST_CASE(validate_reserves_short_h_and_duplicate_shorts) {
-    expect_invalid(minimal({OptionSchema{.long_name = "helpless", .short_name = 'h', .kind = ValueKind::String}}));
-    expect_invalid(minimal({OptionSchema{.long_name = "verbose", .short_name = 'V', .kind = ValueKind::String}}));
+AURORA_TEST_CASE(validate_allows_h_and_V_but_not_duplicate_shorts) {
+    // 旧门禁「-h / -V 一律拒绝」已废除：占用即让位，内建降级为仅长名，不再有「必须改名」的强制。
+    expect_valid(minimal({OptionSchema{.long_name = "helpless", .short_name = 'h', .kind = ValueKind::String}}));
+    expect_valid(minimal({OptionSchema{.long_name = "verbose", .short_name = 'V', .kind = ValueKind::String}}));
     expect_invalid(minimal({OptionSchema{.long_name = "one", .short_name = 'o', .kind = ValueKind::String},
                             OptionSchema{.long_name = "two", .short_name = 'o', .kind = ValueKind::String}}));
     expect_valid(minimal({OptionSchema{.long_name = "one", .short_name = 'o', .kind = ValueKind::String},
                           OptionSchema{.long_name = "two", .short_name = 't', .kind = ValueKind::String}}));
     expect_valid(minimal({OptionSchema{.long_name = "verbose", .short_name = 'v', .kind = ValueKind::String}}));
+}
+
+AURORA_TEST_CASE(validate_requires_early_view_to_be_a_value_less_bool) {
+    // 提前展示是「出现即短路」，消耗值的旗标会让 `--dump-schema=…` 这类写法语义不明
+    expect_invalid(
+        minimal({OptionSchema{.long_name = "dump", .kind = ValueKind::String, .early_view = cli::EarlyView::Schema}}));
+    expect_invalid(minimal({OptionSchema{.long_name = "dump",
+                                         .kind = ValueKind::Bool,
+                                         .arity = Arity::optional_one(),
+                                         .early_view = cli::EarlyView::Schema}}));
+    expect_valid(minimal({OptionSchema{
+        .long_name = "dump", .kind = ValueKind::Bool, .arity = Arity::flag(), .early_view = cli::EarlyView::Schema}}));
 }
 
 AURORA_TEST_CASE(validate_requires_consistent_arity_per_kind) {
@@ -216,19 +332,30 @@ AURORA_TEST_CASE(validate_checks_subcommand_declarations_recursively) {
     deep.name = "deep";
     deep.subcommands = {CommandSpec{
         .name = "mid",
-        .options = {OptionSchema{.long_name = "help", .kind = ValueKind::String}},
+        .options = {OptionSchema{.long_name = "wide", .kind = ValueKind::Int, .default_text = "x"}},
     }};
     const auto result = cli::validate(deep);
     AURORA_TEST_REQUIRE_FALSE(result);
     AURORA_TEST_CHECK(result.error().code == "cli-spec-invalid");
-    AURORA_TEST_CHECK_THAT(result.error().message, m::has_substr("help"));
+    // 错误带完整命令路径：既证明递归扫到了孙层，也让十来个子命令的树一眼定位到该改哪。
+    AURORA_TEST_CHECK_THAT(result.error().message, m::has_substr("mid --wide"));
+
+    // 内建让位是合法的，递归层也一样：子命令自己声明 help 即顶掉该层内建
+    CommandSpec displaced;
+    displaced.name = "displaced";
+    displaced.subcommands = {CommandSpec{
+        .name = "child",
+        .options = {OptionSchema{
+            .long_name = "help", .kind = ValueKind::Bool, .arity = Arity::flag(), .early_view = cli::EarlyView::Help}},
+    }};
+    expect_valid(displaced);
 }
 
 AURORA_TEST_CASE(spec_invalid_error_carries_the_reason) {
-    const auto result = cli::validate(minimal({OptionSchema{.long_name = "help", .kind = ValueKind::String}}));
+    const auto result = cli::validate(minimal({OptionSchema{.long_name = "a b", .kind = ValueKind::String}}));
     AURORA_TEST_REQUIRE_FALSE(result);
     AURORA_TEST_CHECK(result.error().code_enum == au::ErrorCode::CliSpecInvalid);
-    AURORA_TEST_CHECK_THAT(result.error().message, m::has_substr("built in"));
+    AURORA_TEST_CHECK_THAT(result.error().message, m::has_substr("long name"));
     AURORA_TEST_CHECK(result.error().category == au::ErrorCategory::Validation);
 }
 
@@ -236,7 +363,7 @@ AURORA_TEST_CASE(spec_invalid_error_carries_the_reason) {
 
 AURORA_TEST_CASE(usage_line_renders_chain_options_positionals_and_commands) {
     AURORA_TEST_CHECK_EQ(cli::usage_line(spec()), "usage: aurora-render [OPTIONS] <SCENE>... [COMMAND] [-- ARGS...]");
-    const auto *const render = spec().find_subcommand("render");
+    const auto *const render = sub_of(spec(), "render");
     AURORA_TEST_REQUIRE(render != nullptr);
     AURORA_TEST_CHECK_EQ(cli::usage_line(*render, {"aurora-render", "render"}),
                          "usage: aurora-render render [OPTIONS] <SRC> [<DST>] [-- ARGS...]");
@@ -295,10 +422,38 @@ AURORA_TEST_CASE(help_text_renders_bounds_without_decimal_noise) {
     AURORA_TEST_CHECK_THAT(text, m::has_substr("[range: 0.25, 4]"));
 }
 
+AURORA_TEST_CASE(displaced_builtins_degrade_to_long_names_only) {
+    const auto &root = displacement_spec();
+
+    const auto text = cli::help_text(root, {"displace"});
+    // `-h` 归 height、`-V` 归 verify → 内建 --version 只以长名出现（帮助不再谎报短名）
+    AURORA_TEST_CHECK_THAT(text, m::has_substr("      --version"));
+    AURORA_TEST_CHECK_FALSE(text.find("-V, --version") != std::string::npos);
+    AURORA_TEST_CHECK_THAT(text, m::has_substr("-h, --height <HEIGHT>"));
+    // help 已由调用方自己声明：内建那条不该再出现，否则「文档有、代码无」
+    AURORA_TEST_CHECK_FALSE(text.find("Show this help and exit") != std::string::npos);
+    AURORA_TEST_CHECK_THAT(text, m::has_substr("Hand-rolled help flag"));
+
+    // schema 与帮助同源：让位形态在两处一致，且 early_view 只标在真有短路语义的项上
+    const auto schema = cli::schema_json(root);
+    const auto version = option_node(schema, "version");
+    AURORA_TEST_REQUIRE_TRUE(version.is_object());
+    AURORA_TEST_CHECK_FALSE(version.contains("short"));
+    AURORA_TEST_CHECK_EQ(version["early_view"].get<std::string>(), "version");
+    AURORA_TEST_CHECK_EQ(option_node(schema, "help")["early_view"].get<std::string>(), "help");
+    AURORA_TEST_CHECK_EQ(option_node(schema, "dump-schema")["early_view"].get<std::string>(), "schema");
+    AURORA_TEST_CHECK_FALSE(option_node(schema, "height").contains("early_view"));
+
+    // 关掉全部内建且无自有选项的层：连 [OPTIONS] 都不该出现在 usage 里
+    const auto *const bare = sub_of(root, "bare");
+    AURORA_TEST_REQUIRE(bare != nullptr);
+    AURORA_TEST_CHECK_EQ(cli::usage_line(*bare, {"displace", "bare"}), "usage: displace bare [-- ARGS...]");
+}
+
 AURORA_TEST_CASE(version_text_is_program_scoped_and_empty_when_undeclared) {
     AURORA_TEST_CHECK_EQ(cli::version_text(spec()), "aurora-render 1.2.3\n");
     AURORA_TEST_CHECK_EQ(cli::version_text(spec(), "renamed"), "renamed 1.2.3\n");
-    const auto *const render = spec().find_subcommand("render");
+    const auto *const render = sub_of(spec(), "render");
     AURORA_TEST_REQUIRE(render != nullptr);
     AURORA_TEST_CHECK_EQ(cli::version_text(*render), "");
     CommandSpec nameless;  // 无名根命令回落 "program"
@@ -319,10 +474,13 @@ AURORA_TEST_CASE(schema_json_lists_declarations_builtins_and_subcommands) {
     AURORA_TEST_CHECK_EQ(schema["subcommands"].size(), 2U);
     AURORA_TEST_CHECK_EQ(schema["subcommands"][0]["name"].get<std::string>(), "render");
 
-    // 内建 help/version 一并列出，供 AI 枚举全量选项
+    // 内建 help/version 一并列出，供 AI 枚举全量选项；它们与用户自标 early_view 的旗标同一条通道
     const auto &options = schema["options"];
     AURORA_TEST_CHECK_EQ(options[options.size() - 2]["long"].get<std::string>(), "help");
     AURORA_TEST_CHECK_EQ(options.back()["long"].get<std::string>(), "version");
+    AURORA_TEST_CHECK_EQ(option_node(schema, "help")["early_view"].get<std::string>(), "help");
+    AURORA_TEST_CHECK_EQ(option_node(schema, "version")["early_view"].get<std::string>(), "version");
+    AURORA_TEST_CHECK_EQ(option_node(schema, "help").value("short", std::string{}), "h");
 
     // hidden 项与 schema 的约定：不出现
     AURORA_TEST_CHECK_TRUE(option_node(schema, "trace-file").is_null());
@@ -382,7 +540,7 @@ AURORA_TEST_CASE(cli_texts_match_golden_baseline) {
     }
 
     const auto &root = spec();
-    const auto *render = root.find_subcommand("render");
+    const auto *render = sub_of(root, "render");
     AURORA_TEST_REQUIRE(render != nullptr);
 
     const nlohmann::json current = {

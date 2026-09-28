@@ -66,11 +66,11 @@ namespace cli = aurora::cli;
     };
 }
 
-/// @brief 高度用 `-H`：`-h` 是 `aurora::cli` 内建 help 短名，声明即 `cli-spec-invalid`。
+/// @brief 高度占用 `-h`：内建 help 短名会被声明顶掉并降级为仅 `--help`（不再有保留短名限制）。
 [[nodiscard]] auto height_option() -> cli::OptionSchema {
     return cli::OptionSchema{
         .long_name = "height",
-        .short_name = 'H',
+        .short_name = 'h',
         .kind = cli::ValueKind::Int,
         .help = "Viewport height in logical pixels",
         .value_hint = "PX",
@@ -393,8 +393,8 @@ auto main(int argc, char *argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     }
 
     const cli::Invocation &invocation = parsed.value();
-    if (invocation.outcome != cli::ParseOutcome::Ok) {
-        AURORA_LOG_RAW("cli", invocation.display_text);  // --help / --version 是一等结局
+    if (invocation.shows_display()) {
+        AURORA_LOG_RAW("cli", invocation.display_text);  // 展示视图（--help / --version）是一等结果
         return 0;
     }
 

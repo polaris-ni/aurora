@@ -1,11 +1,10 @@
-// command.h 的实现：命令声明表的查找、静态校验与派生视图（usage / help / schema）。
-// 规格：codespec/specification/09-cli.md §3（声明表）、§7（派生视图）。
+// command.h 的实现：静态校验、内建注入判定与派生视图（usage / help / version / schema）。
+// 规格：codespec/specification/09-cli.md §3（声明表与 validate）、§4.6（提前展示通道）、§7（派生视图）。
 // 纪律：全部纯函数，不写任何流；文本由调用方经 AURORA_LOG_RAW 输出。
 
 #include "aurora/cli/command.h"
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -15,6 +14,7 @@
 #include <vector>
 
 #include "aurora/cli/literals.h"
+#include "aurora/cli/spec_lookup.h"
 
 namespace aurora::cli {
 namespace {
@@ -28,9 +28,6 @@ namespace {
     return std::none_of(name.begin(), name.end(),
                         [](char c) { return c == ' ' || c == '=' || c == '\t' || c == '\n'; });
 }
-
-/// @brief 内建长名：声明表里出现即视为冲突（`--help` / `--version` 由库注入）。
-constexpr std::array<std::string_view, 2> AURORA_RESERVED_LONG_NAMES{{"help", "version"}};
 
 [[nodiscard]] auto default_value_hint(const OptionSchema &option) -> std::string {
     if (!option.value_hint.empty()) {
@@ -178,7 +175,7 @@ struct HelpEntry {
     if (!choices.empty() && std::find(choices.begin(), choices.end(), literal) == choices.end()) {
         return spec_invalid(owner + ": default value '" + literal + "' is not in the choices list");
     }
-    if (const auto number = converted.value().as_double(); number && (minimum || maximum)) {
+    if (const auto number = converted.value().as<double>(); number && (minimum || maximum)) {
         if (minimum && number.value() < *minimum) {
             return spec_invalid(owner + ": default value is below minimum");
         }
@@ -189,20 +186,19 @@ struct HelpEntry {
     return std::nullopt;
 }
 
-[[nodiscard]] auto validate_command(const CommandSpec &spec) -> std::optional<Error> {
+[[nodiscard]] auto validate_command(const CommandSpec &spec, const std::string &command) -> std::optional<Error> {
     if (spec.name.empty() && spec.subcommands.empty() && spec.options.empty() && spec.positionals.empty()) {
-        return spec_invalid("command declares nothing (no name, options, positionals or subcommands)");
+        return spec_invalid(command + ": command declares nothing (no name, options, positionals or subcommands)");
     }
     std::vector<std::string> long_names;
     std::vector<std::string> short_names;
     for (const auto &option : spec.options) {
-        const std::string owner = "--" + (option.long_name.empty() ? std::string{"<unnamed>"} : option.long_name);
+        // 归属带命令路径（`aurora_cli render --height`），与其余 `cli-*` 错误的 `command` 参数同口径；
+        // 十来个子命令的树里，只说 `--height` 无从下手。
+        const std::string owner =
+            command + " --" + (option.long_name.empty() ? std::string{"<unnamed>"} : option.long_name);
         if (!is_valid_long_name(option.long_name)) {
             return spec_invalid(owner + ": long name must be non-empty, must not start with '-' or contain blanks/'='");
-        }
-        if (std::find(AURORA_RESERVED_LONG_NAMES.begin(), AURORA_RESERVED_LONG_NAMES.end(), option.long_name) !=
-            AURORA_RESERVED_LONG_NAMES.end()) {
-            return spec_invalid(owner + ": this long name is built in and must not be declared");
         }
         if (std::find(long_names.begin(), long_names.end(), option.long_name) != long_names.end()) {
             return spec_invalid(owner + ": duplicate long name");
@@ -210,12 +206,6 @@ struct HelpEntry {
         long_names.push_back(option.long_name);
         if (option.short_name != '\0') {
             const std::string short_name(1, option.short_name);
-            if (short_name == "h") {
-                return spec_invalid(owner + ": -h is reserved for the built-in help flag");
-            }
-            if (short_name == "V") {
-                return spec_invalid(owner + ": -V is reserved for the built-in version flag");
-            }
             if (std::find(short_names.begin(), short_names.end(), short_name) != short_names.end()) {
                 std::string message{owner};
                 message += ": duplicate short name -";
@@ -235,6 +225,10 @@ struct HelpEntry {
         } else if (option.arity.min < 1) {
             return spec_invalid(owner + ": a value-taking option must require at least one value");
         }
+        // 提前展示是「出现即短路」，它必须不消耗值，否则 --dump-schema=x 这类写法语义不明。
+        if (option.early_view != EarlyView::None && (option.kind != ValueKind::Bool || option.arity.max != 0)) {
+            return spec_invalid(owner + ": an early_view option must be a value-less Bool flag (Arity::flag())");
+        }
         if (option.kind == ValueKind::Enum && option.choices.empty()) {
             return spec_invalid(owner + ": an Enum option must list its choices");
         }
@@ -244,7 +238,7 @@ struct HelpEntry {
             return error;
         }
         for (const auto &conflict : option.conflicts_with) {
-            if (conflict == option.long_name || spec.find_option(conflict) == nullptr) {
+            if (conflict == option.long_name || detail::find_option(spec, conflict) == nullptr) {
                 std::string message{owner};
                 message += ": conflicts_with names an unknown option '--";
                 message += conflict;
@@ -257,7 +251,7 @@ struct HelpEntry {
     for (std::size_t i = 0; i < spec.positionals.size(); ++i) {
         const auto &slot = spec.positionals[i];
         const std::string owner =
-            slot.name.empty() ? ("positional[" + std::to_string(i) + "]") : ("<" + slot.name + ">");
+            command + " " + (slot.name.empty() ? ("positional[" + std::to_string(i) + "]") : ("<" + slot.name + ">"));
         if (slot.name.empty() || slot.name.front() == '-') {
             return spec_invalid(owner + ": positional name must be non-empty and must not start with '-'");
         }
@@ -285,15 +279,15 @@ struct HelpEntry {
     std::vector<std::string> sub_names;
     for (const auto &sub : spec.subcommands) {
         if (sub.name.empty() || !is_valid_long_name(sub.name)) {
-            return spec_invalid("subcommand name must be non-empty and free of blanks");
+            return spec_invalid(command + ": subcommand name must be non-empty and free of blanks");
         }
         if (std::find(sub_names.begin(), sub_names.end(), sub.name) != sub_names.end()) {
-            return spec_invalid("duplicate subcommand '" + sub.name + "'");
+            return spec_invalid(command + ": duplicate subcommand '" + sub.name + "'");
         }
         sub_names.push_back(sub.name);
     }
     if (spec.subcommand_required && spec.subcommands.empty()) {
-        return spec_invalid("'" + spec.name + "': subcommand_required without any subcommand");
+        return spec_invalid(command + ": subcommand_required without any subcommand");
     }
     return std::nullopt;
 }
@@ -306,13 +300,13 @@ auto count_commands(const CommandSpec &spec) -> int {
     return total;
 }
 
-/// @brief 递归校验；返回首个违规错误。
-[[nodiscard]] auto validate_tree(const CommandSpec &spec) -> std::optional<Error> {
-    if (auto error = validate_command(spec)) {
+/// @brief 递归校验；返回首个违规错误。`command` 是已走过的命令路径，用于给错误定位。
+[[nodiscard]] auto validate_tree(const CommandSpec &spec, const std::string &command) -> std::optional<Error> {
+    if (auto error = validate_command(spec, command)) {
         return error;
     }
     for (const auto &sub : spec.subcommands) {
-        if (auto error = validate_tree(sub)) {
+        if (auto error = validate_tree(sub, command + " " + sub.name)) {
             return error;
         }
     }
@@ -353,29 +347,11 @@ auto count_commands(const CommandSpec &spec) -> int {
     if (!option.group.empty()) {
         entry["group"] = option.group;
     }
+    if (option.early_view != EarlyView::None) {
+        entry["early_view"] = std::string{early_view_to_string(option.early_view)};
+    }
     entry["help"] = option.help;
     return entry;
-}
-
-[[nodiscard]] auto builtin_help_option() -> OptionSchema {
-    return OptionSchema{
-        .long_name = "help",
-        .short_name = 'h',
-        .kind = ValueKind::Bool,
-        .arity = Arity::flag(),
-        .help = "Show this help and exit",
-    };
-}
-
-[[nodiscard]] auto builtin_version_option() -> OptionSchema {
-    return OptionSchema{
-        .long_name = "version",
-        .short_name = 'V',
-        .kind = ValueKind::Bool,
-        .arity = Arity::flag(),
-        .help = "Show the version and exit",
-        .group = "Help",
-    };
 }
 
 [[nodiscard]] auto positional_to_json(const PositionalSchema &slot) -> Json {
@@ -404,15 +380,19 @@ auto count_commands(const CommandSpec &spec) -> int {
         out["version"] = spec.version;
     }
     out["subcommand_required"] = spec.subcommand_required;
+    const auto plan = detail::builtin_plan(spec);
     Json options = Json::array();
     for (const auto &option : spec.options) {
         if (!option.hidden) {  // hidden 的约定：既不进 --help，也不进 schema，仍可正常解析
             options.push_back(option_to_json(option));
         }
     }
-    options.push_back(option_to_json(builtin_help_option()));
-    if (!spec.version.empty()) {
-        options.push_back(option_to_json(builtin_version_option()));
+    // 内建行按 builtin_plan 的实际注入形态列出：被用户声明顶掉的不列，短名让位时只列长名。
+    if (plan.help) {
+        options.push_back(option_to_json(detail::builtin_help_option(plan)));
+    }
+    if (plan.version) {
+        options.push_back(option_to_json(detail::builtin_version_option(plan)));
     }
     out["options"] = std::move(options);
     Json positionals = Json::array();
@@ -430,10 +410,12 @@ auto count_commands(const CommandSpec &spec) -> int {
 
 }  // namespace
 
-// ------------------------------------------------------------ CommandSpec
+// ------------------------------------------------------------ 库内查表与内建注入
 
-auto CommandSpec::find_option(std::string_view long_name) const -> const OptionSchema * {
-    for (const auto &option : options) {
+namespace detail {
+
+auto find_option(const CommandSpec &spec, std::string_view long_name) -> const OptionSchema * {
+    for (const auto &option : spec.options) {
         if (option.long_name == long_name) {
             return &option;
         }
@@ -441,8 +423,8 @@ auto CommandSpec::find_option(std::string_view long_name) const -> const OptionS
     return nullptr;
 }
 
-auto CommandSpec::find_short(char short_name) const -> const OptionSchema * {
-    for (const auto &option : options) {
+auto find_short(const CommandSpec &spec, char short_name) -> const OptionSchema * {
+    for (const auto &option : spec.options) {
         if (option.short_name != '\0' && option.short_name == short_name) {
             return &option;
         }
@@ -450,14 +432,53 @@ auto CommandSpec::find_short(char short_name) const -> const OptionSchema * {
     return nullptr;
 }
 
-auto CommandSpec::find_subcommand(std::string_view sub_name) const -> const CommandSpec * {
-    for (const auto &sub : subcommands) {
+auto find_subcommand(const CommandSpec &spec, std::string_view sub_name) -> const CommandSpec * {
+    for (const auto &sub : spec.subcommands) {
         if (sub.name == sub_name) {
             return &sub;
         }
     }
     return nullptr;
 }
+
+auto builtin_plan(const CommandSpec &spec) -> BuiltinPlan {
+    BuiltinPlan plan;
+    const bool shorts_free = spec.builtins.take_shorts;
+    if (spec.builtins.help && find_option(spec, "help") == nullptr) {
+        plan.help = true;
+        plan.help_short = shorts_free && find_short(spec, 'h') == nullptr;
+    }
+    if (spec.builtins.version && !spec.version.empty() && find_option(spec, "version") == nullptr) {
+        plan.version = true;
+        plan.version_short = shorts_free && find_short(spec, 'V') == nullptr;
+    }
+    return plan;
+}
+
+auto builtin_help_option(const BuiltinPlan &plan) -> OptionSchema {
+    return OptionSchema{
+        .long_name = "help",
+        .short_name = plan.help_short ? 'h' : '\0',
+        .kind = ValueKind::Bool,
+        .arity = Arity::flag(),
+        .help = "Show this help and exit",
+        .early_view = EarlyView::Help,
+    };
+}
+
+auto builtin_version_option(const BuiltinPlan &plan) -> OptionSchema {
+    return OptionSchema{
+        .long_name = "version",
+        .short_name = plan.version_short ? 'V' : '\0',
+        .kind = ValueKind::Bool,
+        .arity = Arity::flag(),
+        .help = "Show the version and exit",
+        .group = "Help",
+        .early_view = EarlyView::Version,
+    };
+}
+
+}  // namespace detail
 
 auto Arity::help_placeholder(std::string_view value_hint) const -> std::string {
     if (max == 0) {
@@ -474,7 +495,7 @@ auto Arity::help_placeholder(std::string_view value_hint) const -> std::string {
 // ------------------------------------------------------------ validate
 
 auto validate(const CommandSpec &root) -> Result<int> {
-    if (auto error = validate_tree(root)) {
+    if (auto error = validate_tree(root, chain_display(root, {}))) {
         return *error;
     }
     return count_commands(root);
@@ -484,8 +505,11 @@ auto validate(const CommandSpec &root) -> Result<int> {
 
 auto usage_line(const CommandSpec &spec, const std::vector<std::string> &path) -> std::string {
     std::string out = "usage: " + chain_display(spec, path);
-    // [OPTIONS] 恒在：`--help` 是内建项，任何命令都至少有一个选项。
-    out += " [OPTIONS]";
+    // [OPTIONS] 只在本层真有需要时出现：内建 help/version 可被 builtins 关掉，关掉后可能一个选项都没有。
+    const auto plan = detail::builtin_plan(spec);
+    if (!spec.options.empty() || plan.help || plan.version) {
+        out += " [OPTIONS]";
+    }
     for (const auto &slot : spec.positionals) {
         const std::string one = "<" + slot.name + ">";
         if (slot.arity.max == Arity::AURORA_UNBOUNDED) {
@@ -522,11 +546,14 @@ auto help_text(const CommandSpec &spec, const std::vector<std::string> &path) ->
         entries.push_back(
             HelpEntry{.group = group_of(option), .names = names_column(option), .detail = detail_column(option)});
     }
-    const auto help_builtin = builtin_help_option();
-    entries.push_back(
-        HelpEntry{.group = "Help", .names = names_column(help_builtin), .detail = detail_column(help_builtin)});
-    if (!spec.version.empty()) {
-        const auto version_builtin = builtin_version_option();
+    const auto plan = detail::builtin_plan(spec);
+    if (plan.help) {
+        const auto help_builtin = detail::builtin_help_option(plan);
+        entries.push_back(
+            HelpEntry{.group = "Help", .names = names_column(help_builtin), .detail = detail_column(help_builtin)});
+    }
+    if (plan.version) {
+        const auto version_builtin = detail::builtin_version_option(plan);
         entries.push_back(HelpEntry{
             .group = "Help", .names = names_column(version_builtin), .detail = detail_column(version_builtin)});
     }

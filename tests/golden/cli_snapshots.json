@@ -156,6 +156,7 @@
         "type": "enum"
       },
       {
+        "early_view": "help",
         "help": "Show this help and exit",
         "hidden": false,
         "long": "help",
@@ -166,6 +167,7 @@
         "type": "bool"
       },
       {
+        "early_view": "version",
         "group": "Help",
         "help": "Show the version and exit",
         "hidden": false,
@@ -229,6 +231,7 @@
             "type": "enum"
           },
           {
+            "early_view": "help",
             "help": "Show this help and exit",
             "hidden": false,
             "long": "help",
@@ -277,6 +280,7 @@
             "type": "int"
           },
           {
+            "early_view": "help",
             "help": "Show this help and exit",
             "hidden": false,
             "long": "help",

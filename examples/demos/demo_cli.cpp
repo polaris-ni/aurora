@@ -12,7 +12,7 @@
 //   强类型打通    Length(25%|12px|fill) / Color(#rgb|#rrggbbaa|rgb()) / LogLevel / Duration
 //   声明校验      validate() 拒绝自相矛盾的声明表（cli-spec-invalid）
 //   派生文本      usage_line / help_text / version_text 全由声明表推导
-//   一等结局      --help / --version 是成功的 Invocation（outcome 非 Ok），不是错误
+//   一等结局      --help / --version / --dump-schema 命中即只给 view + display_text，不是错误
 //   子命令树      render 叶命令遮蔽父级同名选项；未知子命令给候选建议
 //   自描述        schema_json() 输出整棵声明表，供 Inspector / MCP 消费
 //
@@ -141,7 +141,8 @@ auto emit(Args &&...args) -> void {
                 .long_name = "dump-schema",
                 .kind = cli::ValueKind::Bool,
                 .arity = cli::Arity::flag(),
-                .help = "Print schema_json() before the summary",
+                .help = "Print schema_json() and exit",
+                .early_view = cli::EarlyView::Schema,
             },
         };
         root.positionals = {
@@ -237,7 +238,7 @@ auto report_strong_types(const cli::Arguments &args) -> void {
 /// @brief 打印一次成功调用的全部可观测结果。
 auto report_ok(const cli::Invocation &invocation, const cli::CommandSpec &root) -> void {
     const auto &args = invocation.arguments;
-    emit("outcome : ", cli::outcome_to_string(invocation.outcome));
+    emit("view    : ", cli::early_view_to_string(invocation.view));
     emit("command : ", args.command_display());
     emit("chain   : ", std::to_string(args.command_chain().size()), " level(s)");
     if (args.matched_command() != nullptr && args.matched_command() != &root) {
@@ -294,15 +295,13 @@ auto main(int argc, char **argv) -> int {
     }
     const cli::Invocation &invocation = parsed.value();
 
-    // --help / --version 是「成功结局 + 已渲染文本」，不是错误：调用方原样打印即可。
-    if (invocation.outcome != cli::ParseOutcome::Ok) {
+    // 展示请求（--help / --version / --dump-schema）是「成功调用 + 已渲染文本」，不是错误：
+    // 调用方原样打印即可，不必进业务。
+    if (invocation.shows_display()) {
         AURORA_LOG_RAW("cli-demo", invocation.display_text);  // 文本自带行尾换行
         return 0;
     }
 
-    if (invocation.arguments.flag("dump-schema")) {
-        emit(cli::schema_json(root).dump(2));
-    }
     report_ok(invocation, root);
     return 0;
 }

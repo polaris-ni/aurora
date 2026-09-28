@@ -9,6 +9,10 @@
 // 字段名反射（二者都让 schema 不可枚举）。
 //
 // 变量绑定与回调一律没有：解析结果按长名从 `aurora::cli::Arguments` 取值（见 args.h）。
+//
+// `--help` / `--version` 是**惰性注入**的糖：解析、渲染、schema 三方共用 `detail::builtin_plan`
+// 判定的实际注入形态，用户声明同名长/短名即令对应内建让位（见 `CommandSpec::builtins`），
+// 「内建」与「用户声明一个会打印 schema 的旗标」走的是同一条 `early_view` 通道。
 // ============================================================================
 
 #include <cstdint>
@@ -41,7 +45,7 @@ using Json = nlohmann::json;
  */
 struct OptionSchema {
     std::string long_name;  ///< 长名，不含 `--`，kebab-case（如 "output-dir"）；必填且命令内唯一
-    char short_name = '\0';  ///< 短名（不含 `-`）；'\0' 表示无短名；`h`/`V` 为内建保留
+    char short_name = '\0';  ///< 短名（不含 `-`）；'\0' 表示无短名；占用 `h`/`V` 即令内建让位
     ValueKind kind = ValueKind::String;  ///< 值类型（决定字面量转换）
     Arity arity{};  ///< 值个数区间；缺省 `{1,1}`（单值选项），Bool 类应为 `flag()`
     std::string help;  ///< 一行说明，出现在 --help
@@ -54,6 +58,19 @@ struct OptionSchema {
     std::vector<std::string> conflicts_with;  ///< 互斥选项长名列表
     std::string group;  ///< 帮助文本分组名；空 = "Options"（末组固定为 "Options"/"Help"）
     bool hidden = false;  ///< 隐藏：仍可解析，但不出现在 --help 与 schema_json
+    EarlyView early_view = EarlyView::None;  ///< 非 `None`：出现即短路，渲染该视图进 `display_text`
+};
+
+/**
+ * @brief 内建 `--help` / `--version` 的注入开关（`CommandSpec::builtins`）。
+ *
+ * 内建项在解析与渲染时**惰性**注册：用户已经声明了同名长名或短名，对应内建就不存在，
+ * 短名被占用时内建自动降级为仅长名（不再要求改名让位）。`--version` 另需该层 `version` 非空。
+ */
+struct Builtins {
+    bool help = true;  ///< 注入 `--help`（设 false = 完全自理，如自建 `help` 子命令）
+    bool version = true;  ///< 注入 `--version`（仅当该层 `version` 非空时生效）
+    bool take_shorts = true;  ///< 允许内建占用 `-h` / `-V`（设 false = 只认长名，Click 口径）
 };
 
 /// @brief 位置参数声明（按数组顺序消费 token；变长项必须置于末位）。
@@ -69,8 +86,9 @@ struct PositionalSchema {
 /**
  * @brief 一条命令（可含子命令，构成一棵树）的完整声明。
  *
- * `--help` / `-h` 与 `--version` / `-V` 为库内建，无需也不得声明（短名 `h`/`V` 一经占用，
- * `validate` 即报 `cli-spec-invalid`）；`version` 非空则该层自动支持 `--version` / `-V`。
+ * `--help` / `--version` 为内建项，无需声明即存在（`version` 非空则该层自动支持 `--version`）；
+ * 但**同名声明合法**：用户自己写了 `help` / `version` 长名或 `h` / `V` 短名，对应内建就让位，
+ * 不再判 `cli-spec-invalid`。用 `builtins` 可整体关闭或收回短名。
  */
 struct CommandSpec {
     std::string name;  ///< 命令名；根命令留空则取 argv[0] 的 basename
@@ -82,13 +100,7 @@ struct CommandSpec {
     std::string version;  ///< 非空 → 内建 `--version` 输出该文本
     std::string epilog;  ///< help 末尾附注（可多行）
     bool subcommand_required = false;  ///< 是否禁止裸跑父命令（要求存在子命令）
-
-    /// @brief 按长名查本命令声明的选项（内建 help/version 不在其列）；未找到返回 nullptr。
-    [[nodiscard]] auto find_option(std::string_view long_name) const -> const OptionSchema *;
-    /// @brief 按短名查本命令声明的选项；未找到返回 nullptr。
-    [[nodiscard]] auto find_short(char short_name) const -> const OptionSchema *;
-    /// @brief 按名查直接子命令；未找到返回 nullptr。
-    [[nodiscard]] auto find_subcommand(std::string_view sub_name) const -> const CommandSpec *;
+    Builtins builtins;  ///< 内建 help / version 的注入开关（默认开，短名被占即自动让位）
 };
 
 // ---------------------------------------------------------------- 校验
@@ -96,11 +108,11 @@ struct CommandSpec {
 /**
  * @brief 静态校验一棵命令树（不解析 argv），启动期一次性挡住声明表里的拼写/形态错误。
  *
- * 检查项：长/短名与位置参数名非空、合法且命令内唯一、不得占用内建长名 `help`/`version` 或内建
- * 短名 `-h`/`-V`；
- * `Enum` 必须有词表且默认值落在词表内；`Bool` 必须是零值 arity；非 `Bool` 的 `min >= 1`；
+ * 检查项：长/短名与位置参数名非空、合法且命令内唯一；`Enum` 必须有词表且默认值落在词表内；
+ * `Bool` 必须是零值 arity；非 `Bool` 的 `min >= 1`；标了 `early_view` 的必须是零值 arity 的 `Bool`；
  * 默认值字面量可按 `kind` 解析且落在取值域内；`conflicts_with` 指向已存在的长名；
  * 变长位置参数不得非末位；`subcommand_required` 要求存在子命令。递归覆盖全部子命令。
+ * 内建 `help`/`version` 的长名与短名**可以**被声明（声明即让位），故不再是检查项。
  *
  * @return 成功返回被检查的命令总数（含根）；失败返回首个违规的 `cli-spec-invalid`。
  */

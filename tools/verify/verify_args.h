@@ -49,8 +49,8 @@ struct CommandLine {
         return {.arguments = std::nullopt, .exit_code = CommandLine::AURORA_EXIT_USAGE};
     }
     const auto &invocation = parsed.value();
-    if (invocation.outcome != aurora::cli::ParseOutcome::Ok) {
-        AURORA_LOG_RAW("verify", invocation.display_text);  // --help / --version 是一等结局
+    if (invocation.shows_display()) {
+        AURORA_LOG_RAW("verify", invocation.display_text);  // --help / --version 是一等展示视图
         return {.arguments = std::nullopt, .exit_code = 0};
     }
     return {.arguments = invocation.arguments, .exit_code = 0};

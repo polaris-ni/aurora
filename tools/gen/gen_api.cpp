@@ -65,12 +65,12 @@ auto main(int argc, char **argv) -> int {
         return 2;
     }
     const aurora::cli::Invocation &invocation = parsed.value();
-    if (invocation.outcome != aurora::cli::ParseOutcome::Ok) {
+    if (invocation.shows_display()) {
         AURORA_LOG_RAW("genapi", invocation.display_text);
         return 0;
     }
     // 声明表给了 default_text，故该槽必然存在且必然可按 String 读出（不变量，无需再判错）。
-    const std::string output_path = invocation.arguments.positional(0).value().as_string().value();
+    const std::string output_path = invocation.arguments.positional(0).value().as<std::string>().value();
     const bool to_stdout = (output_path == "-");
 
     aurora::serialization::register_core_widgets();
