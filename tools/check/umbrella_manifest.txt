@@ -12,6 +12,7 @@ aurora/animation/easing.h
 aurora/animation/spring.h
 aurora/animation/timeline.h
 aurora/app/application.h
+aurora/app/display.h
 aurora/app/file_dialog.h
 aurora/app/generate_ui.h
 aurora/app/hot_reload.h
@@ -26,13 +27,16 @@ aurora/app/test_controller.h
 aurora/app/ui_prompt.h
 aurora/app/validate.h
 aurora/app/validate_ui.h
+aurora/app/window_geometry.h
 aurora/cli/args.h
 aurora/cli/command.h
 aurora/commands.h
 aurora/core/a11y_provider.h
+aurora/core/a11y_text.h
 aurora/core/accessibility.h
 aurora/core/aurora_assert.h
 aurora/core/color.h
+aurora/core/color_space.h
 aurora/core/debug.h
 aurora/core/diagnostics.h
 aurora/core/duration.h
@@ -59,6 +63,7 @@ aurora/environment/build_context.h
 aurora/environment/environment.h
 aurora/environment/media_query.h
 aurora/event/dispatcher.h
+aurora/event/drag_drop.h
 aurora/event/event.h
 aurora/event/focus.h
 aurora/event/gesture.h
@@ -80,8 +85,10 @@ aurora/media/video_source.h
 aurora/modifier/modifier.h
 aurora/navigation/hero.h
 aurora/navigation/navigator.h
+aurora/navigation/navigator_host.h
 aurora/navigation/route.h
 aurora/navigation/router.h
+aurora/navigation/transition_layer.h
 aurora/perf/counters.h
 aurora/perf/perf_log.h
 aurora/perf/perf_session.h
@@ -117,16 +124,20 @@ aurora/theming/theme_query.h
 aurora/theming/theme_scope.h
 aurora/todo.h
 aurora/ui/factories.h
+aurora/widget/a11y_diff.h
 aurora/widget/a11y_tree.h
 aurora/widget/bar_chart.h
+aurora/widget/breakpoint_builder.h
 aurora/widget/button.h
 aurora/widget/canvas.h
 aurora/widget/chart_common.h
 aurora/widget/checkbox.h
 aurora/widget/chip.h
+aurora/widget/codegen.h
 aurora/widget/command_palette.h
 aurora/widget/containers.h
 aurora/widget/data_widgets.h
+aurora/widget/dialog.h
 aurora/widget/dismissible.h
 aurora/widget/divider.h
 aurora/widget/drawer.h
@@ -204,19 +215,8 @@ aurora/render/noto_font_data.h -> 内置字体字节数据，字体引擎内部�
 aurora/storage/*_backend.h -> 持久化后端实现，经 storage.h 抽象引入
 aurora/inspector/inspector_server.h -> localhost HTTP 服务，工具侧远程调试能力
 aurora/media/audio_sink_bridge.h -> AudioSink 桥接内部实现
+aurora/core/json.h -> 公共轻头，但有意不经伞头导出：消费者须显式包含，配方见 codespec/GUIDELINE.md §42，契约见 codespec/specification/01-core.md §9
+aurora/core/math.h -> 渲染热路径内部收敛助手（saturate / saturate_u8），头内自注「不进入 aurora.h 公共导出」
+aurora/core/expected.h -> 按 codespec/specification/01-core.md §3.2 定位为 Result 的底层接口底座、新代码不应直接暴露
 
 [exempt-review]
-aurora/core/json.h -> 自研 JSON 值容器公共头，是否进伞头待裁决
-aurora/core/math.h -> 数学工具，从伞头不可达，疑为公共 API 缺口
-aurora/core/expected.h -> 携带错误值的包装（std::unexpected 对标），疑为公共 API 缺口
-aurora/core/color_space.h -> 色彩空间标注，从伞头不可达，疑为公共 API 缺口
-aurora/core/a11y_text.h -> UIA / AT-SPI2 文本边界共享语义，疑为公共 API 缺口
-aurora/app/display.h -> 物理显示器描述（逻辑像素 / DPI），疑为公共 API 缺口
-aurora/app/window_geometry.h -> 窗口几何快照（多窗口几何持久化数据单元），疑为公共 API 缺口
-aurora/event/drag_drop.h -> 拖放数据载荷，从伞头完全不可达，疑为公共 API 缺口
-aurora/navigation/navigator_host.h -> 导航宿主，疑为公共 API 缺口
-aurora/navigation/transition_layer.h -> 转场合成层，疑为公共 API 缺口
-aurora/widget/a11y_diff.h -> 语义树快照节点，疑为公共 API 缺口
-aurora/widget/breakpoint_builder.h -> 响应式断点原语，疑为公共 API 缺口
-aurora/widget/codegen.h -> 代码生成风格，疑为公共 API 缺口
-aurora/widget/dialog.h -> 对话框控件，从伞头完全不可达，疑为公共 API 缺口
