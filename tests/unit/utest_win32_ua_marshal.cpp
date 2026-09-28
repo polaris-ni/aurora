@@ -189,10 +189,10 @@ AURORA_TEST_CASE(timeout_returns_zero_value_and_drops_the_late_task) {
         });
         caller.join();
     }
-    AURORA_TEST_CHECK_EQ(returned, 0);      // R{} ⇒ provider 侧映射为 UIA_E_ELEMENTNOTAVAILABLE
+    AURORA_TEST_CHECK_EQ(returned, 0);  // R{} ⇒ provider 侧映射为 UIA_E_ELEMENTNOTAVAILABLE
     AURORA_TEST_CHECK_FALSE(ran.load());
     AURORA_TEST_REQUIRE_TRUE(poster.drain_one(1000));  // 此刻才排空
-    AURORA_TEST_CHECK_FALSE(ran.load());               // 放弃闸必须拦住补做
+    AURORA_TEST_CHECK_FALSE(ran.load());  // 放弃闸必须拦住补做
 }
 
 /// 目标：桥先于在途队列项析构时，存活闸拦住闭包（这是 #53 唯一的 use-after-free 通道）。
@@ -210,8 +210,8 @@ AURORA_TEST_CASE(bridge_destruction_drops_a_still_queued_task) {
             2000U);
     });
     AURORA_TEST_REQUIRE_TRUE(poster.wait_for_task(3000));  // 已入队、尚未执行
-    bridge.reset();                                        // 析构：存活闸落下
-    AURORA_TEST_REQUIRE_TRUE(poster.drain_one(3000));      // 队列项被拒绝 → 立即唤醒等待方
+    bridge.reset();  // 析构：存活闸落下
+    AURORA_TEST_REQUIRE_TRUE(poster.drain_one(3000));  // 队列项被拒绝 → 立即唤醒等待方
     caller.join();
 
     AURORA_TEST_CHECK_FALSE(ran.load());
@@ -239,7 +239,7 @@ AURORA_TEST_CASE(provider_reads_project_through_the_marshal) {
         bool dangling_stripped = false;
         std::uint64_t node_id = 0;
         bool parent_known = false;
-        std::uint64_t parent_id = 1;      // 缺省 1（非 0）⇒「必须有值且为 0」两半都能失败
+        std::uint64_t parent_id = 1;  // 缺省 1（非 0）⇒「必须有值且为 0」两半都能失败
         bool unknown_known = false;
     };
     Remote remote;
@@ -253,8 +253,7 @@ AURORA_TEST_CASE(provider_reads_project_through_the_marshal) {
         const auto parent = bridge.navigate_target(id, detail::NavigationKind::Parent);
         remote.parent_known = parent.has_value();
         remote.parent_id = parent.value_or(1ULL);
-        remote.unknown_known =
-            bridge.navigate_target(id + 987'654'321ULL, detail::NavigationKind::Parent).has_value();
+        remote.unknown_known = bridge.navigate_target(id + 987'654'321ULL, detail::NavigationKind::Parent).has_value();
     });
     // 调用方在一条线程上连发三次回投，主人线程逐个排空。
     AURORA_TEST_REQUIRE_TRUE(poster.drain_one(3000));
