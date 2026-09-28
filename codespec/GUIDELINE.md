@@ -2050,3 +2050,26 @@ if (r.ok()) {
 - **`ParseOptions` 同样生效**：`max_depth` / `validate_utf8` 与 `parse` 共用。
 
 契约见 [`specification/01-core.md`](specification/01-core.md) §9。
+
+### 42.4 合规验收（改动 `core/json` 必跑）
+
+解析与序列化的正确性由**外部权威语料**背书，快照位于 `tests/fixtures/json_test_suite/`（MIT，
+来源与 commit 锚点见该目录 `README.md`）。任何触及 `core/json` 的改动都应当跑：
+
+```powershell
+ctest --test-dir build -R "^utest_json" --output-on-failure
+```
+
+该正则一次覆盖三个套件：`utest_json`（模块自产用例）、`utest_json_sax`（SAX 出口）、
+`utest_json_conformance`（外部语料合规验收）。
+
+合规套件分三层口径，理解它才知道失败时该改哪一边：
+
+| 语料 | 失败含义 | 处置 |
+|:---|:---|:---|
+| `y_` / `n_` | 实现偏离 RFC 8259 | 改实现——这是缺陷，不是期望值问题 |
+| `i_` | 实现策略变了（规范对此不作要求） | 先确认变更是否**有意**：有意则改测试内的处置表，否则改实现 |
+| `test_transform` | 往返丢信息或 `dump` 不幂等 | 改实现 |
+
+处置表与语料清单双向比对：同步语料时漏改表一定失败；反过来表也不会自动跟随实现漂移——这正是它
+要拦住的事。契约见 [`specification/01-core.md`](specification/01-core.md) §9.12。

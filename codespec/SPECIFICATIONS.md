@@ -110,7 +110,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | 27 | 滚动位置保存/恢复（`app::ScrollStorage`） | 重建 / 重启后滚动位置可还原，且多窗口与同键争用不串味 | [`06-app-platform.md`](specification/06-app-platform.md) §9.3、[`04-widget.md`](specification/04-widget.md) §3.3 |
 | 28 | 列表拖拽重排（`ReorderableList`） | 用户可拖动条目换位：跟手 / 让位 / 近边缘自动滚动 / 落位动画，数据由控件改写 | [`04-widget.md`](specification/04-widget.md) §3.4、[`GUIDELINE.md`](GUIDELINE.md) §36 |
 | 29 | 滚动交互增强（`ScrollSnap` / `PullToRefresh` / `StickyHeader` / `offset_signal`） | 轮播整页对齐、分组头部钉顶、到顶下拉即刷新、嵌套滚动余量移交，且全程尊重 reduce-motion | [`04-widget.md`](specification/04-widget.md) §3.3、[`05-event-navigation.md`](specification/05-event-navigation.md) §3.3、[`GUIDELINE.md`](GUIDELINE.md) §38 |
-| 30 | 自研 JSON 值容器与编解码器（`au::json`） | AI 可在无第三方 JSON 依赖下解析（DOM / SAX 双出口）/ 构造 / 序列化，按 RFC 6901 路径寻址读写删，且读缺失键不隐式变更文档 | [`01-core.md`](specification/01-core.md) §9、[`GUIDELINE.md`](GUIDELINE.md) §42 |
+| 30 | 自研 JSON 值容器与编解码器（`au::json`） | AI 可在无第三方 JSON 依赖下解析（DOM / SAX 双出口）/ 构造 / 序列化，按 RFC 6901 路径寻址读写删，读缺失键不隐式变更文档，并通过外部语料的 RFC 8259 合规验收 | [`01-core.md`](specification/01-core.md) §9、[`GUIDELINE.md`](GUIDELINE.md) §42 |
 
 ---
 
