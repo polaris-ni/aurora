@@ -3,8 +3,6 @@
 // 本文件持有**唯一的字符级递归下降引擎**：DOM 出口（parse.cpp 的 DomBuilder）与 SAX 出口都经由它，
 // 两套出口因此共享同一份词法、转义解码、数字分派与错误定位逻辑，行为不可能分叉。
 
-#include "aurora/core/json.h"
-
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +11,7 @@
 #include <system_error>
 #include <utility>
 
+#include "aurora/core/json.h"
 #include "aurora/core/utf8.h"
 
 namespace aurora::json {
@@ -20,7 +19,8 @@ namespace aurora::json {
 namespace {
 
 /// @brief 偏移量 → (行, 列)，均从 1 起（`\n` 计数换行）。
-[[nodiscard]] auto line_col_of(std::string_view input, std::size_t offset) noexcept -> std::pair<std::size_t, std::size_t> {
+[[nodiscard]] auto line_col_of(std::string_view input, std::size_t offset) noexcept
+    -> std::pair<std::size_t, std::size_t> {
     std::size_t line = 1;
     std::size_t col = 1;
     const std::size_t n = offset < input.size() ? offset : input.size();

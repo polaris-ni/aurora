@@ -3,8 +3,6 @@
 // 最小集范围：`~1` / `~0` 反转义、对象键与数组下标段、`-` 追加记号与「自动补齐中间容器」
 // （后两者服务 RFC 6902 补丁的写路径）。不含 URI fragment 形态与相对 pointer。
 
-#include "aurora/core/json.h"
-
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
@@ -12,6 +10,8 @@
 #include <string_view>
 #include <system_error>
 #include <vector>
+
+#include "aurora/core/json.h"
 
 namespace aurora::json {
 
@@ -105,8 +105,8 @@ namespace {
 
 /// @brief pointer 语法非法（非空且不以 `/` 开头）。
 [[nodiscard]] auto syntax_error(std::string_view pointer) -> Error {
-    return make_error(ErrorCode::JsonParseError, "invalid JSON Pointer '" + std::string(pointer) + "'",
-                      ErrorParams{}, std::string("A non-empty JSON Pointer must start with '/' (RFC 6901)."));
+    return make_error(ErrorCode::JsonParseError, "invalid JSON Pointer '" + std::string(pointer) + "'", ErrorParams{},
+                      std::string("A non-empty JSON Pointer must start with '/' (RFC 6901)."));
 }
 
 /// @brief 段无法应用于当前值（对非容器取子项 / 对数组用非数字段 / 索引越界）。
@@ -226,8 +226,8 @@ auto resolve_for_write(Value &root, std::string_view pointer) -> Result<Value *>
 
 auto erase_pointer(Value &root, std::string_view pointer) -> Result<bool> {
     if (pointer.empty()) {
-        return make_error(ErrorCode::JsonParseError, std::string("cannot erase the JSON document root"),
-                          ErrorParams{}, std::string("A pointer that selects the root has no member to remove."));
+        return make_error(ErrorCode::JsonParseError, std::string("cannot erase the JSON document root"), ErrorParams{},
+                          std::string("A pointer that selects the root has no member to remove."));
     }
     if (pointer[0] != '/') {
         return syntax_error(pointer);

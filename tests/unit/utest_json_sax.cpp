@@ -127,9 +127,9 @@ AURORA_TEST_CASE(records_the_event_sequence_of_a_mixed_document) {
     const auto r = aj::parse_sax(R"({"a":1,"b":[true,null],"c":"x"})", rec);
     AURORA_TEST_REQUIRE(r.ok());
 
-    const std::vector<std::string> expected{"object_start", "key:a", "int:1",   "key:b", "array_start",
-                                            "bool:true",    "null",  "array_end:2", "key:c", "string:x",
-                                            "object_end:3"};
+    const std::vector<std::string> expected{"object_start", "key:a",     "int:1",       "key:b",
+                                            "array_start",  "bool:true", "null",        "array_end:2",
+                                            "key:c",        "string:x",  "object_end:3"};
     AURORA_TEST_CHECK_EQ(rec.trace.size(), expected.size());
     for (std::size_t i = 0; i < rec.trace.size() && i < expected.size(); ++i) {
         AURORA_TEST_CHECK_EQ(rec.trace[i], expected[i]);
