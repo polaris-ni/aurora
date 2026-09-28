@@ -46,6 +46,14 @@ struct Event {
 
 枚举：`MouseButton{Left, Right, Middle}`、`MouseAction`（`event.h`）、`KeyAction{Down, Up}`、`ModifierKey`（`event.h）、`KeyCode`（`keycode.h`）。
 
+**修饰键语义（`KeyEvent::modifiers`）= 队列相对，而非派发时刻的物理读数**：宿主按键盘消息流推进一份修饰位状态（Win32 侧为 `src/aurora/window/detail/win32_modifiers.h` 的 `ModifierKeyTracker`），`KeyEvent` 携带的是「该键在队列里被处理的那一刻」的修饰态。取此口径的理由：在派发时刻异步采样（`GetAsyncKeyState`）会让热键命中与否取决于「消息被泵到之前修饰键是否仍按着」，于是 UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时按键**静默**丢失（同载体同形态实测 0/10，见 `manual-test/21-debug.md` TC-DEBUG-004 备注）。三条配套边界：
+
+- **左右归并**：`VK_LSHIFT` / `VK_RSHIFT` / `VK_SHIFT` 折到同一位，使不配对的变体（注入或布局按下给 L 变体、抬起给通用码）不残留幻影；代价是同位上任一变体抬起即清位。
+- **失焦清空、激活播种**：`WM_ACTIVATE` 转非激活与 `WM_KILLFOCUS` 整体清零（未送达的抬起消息不可追），重新取得激活时用一次异步读数播种基线（覆盖「Alt+Tab 切进来时 Alt 已按下」）。因此修饰键**只在持有键盘焦点的那个窗口内计数**——非前台窗口上的物理 Ctrl 不再被别的窗口借读，这恰是 Windows 自身的键盘语义。
+- **`WM_SYSKEY*` 只跟态、不派发**：按住 Alt 期间的按键仍交 `DefWindowProc`（`Alt+F4`、菜单助记键归系统），但 Alt 自身的按下/抬起计入跟踪器，否则 Alt 松开后的普通按键会错报带 Alt。副作用是 Alt 组合在库侧仍不派发（既有边界）。
+
+指针类事件（`MouseEvent` / `ScrollEvent`）不携带修饰位。
+
 **滚动方向约定**：`ScrollEvent::delta_y` 正方向为「向上滚动」（应露出上方内容、offset 减小）。所有滚动控件统一用 `offset_ - e.delta_y * step`；误用 `+` 会导致方向相反。
 
 **滚动增量单位**：`delta_y` 是**设备无关增量**（滚轮格数口径），不是 dp；控件按自己的 `step`（dp/增量单位）换算位移。回传余量 `remaining_y` **与 `delta_y` 同单位同号**（未吃尽的增量数），派发器把它原样作为下一跳的 `delta_y`，故跨控件嵌套时各层按自己的 `step` 折算——内层 `step=16`、外层 `step=1` 也不会串味。
