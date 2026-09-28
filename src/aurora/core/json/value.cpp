@@ -1,6 +1,3 @@
-#include "aurora/core/json.h"
-#include "aurora/core/platform.h"
-
 #include <cassert>
 #include <cmath>
 #include <cstddef>
@@ -11,6 +8,9 @@
 #include <string_view>
 #include <utility>
 #include <variant>
+
+#include "aurora/core/json.h"
+#include "aurora/core/platform.h"
 
 namespace aurora::json {
 
@@ -474,8 +474,8 @@ auto Value::end() const noexcept -> const Value * {
 // wasm32、x86）才需要为 size_t 独立实例化，故按 AURORA_BIT_32 条件守卫。
 // ============================================================================
 
-#define AURORA_JSON_INSTANTIATE_STRICT(T)                    \
-    template Result<T> Value::as<T>() const;                 \
+#define AURORA_JSON_INSTANTIATE_STRICT(T)    \
+    template Result<T> Value::as<T>() const; \
     template Result<T> Value::get<T>(std::string_view key) const;
 
 #define AURORA_JSON_INSTANTIATE_READ(T)                                          \

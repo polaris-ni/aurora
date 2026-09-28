@@ -33,15 +33,15 @@ namespace aurora::json {
 ///       tools/include/known_enums.h 登记为 "JsonType"，从而进入 aurora_api.json，
 ///       使 AI 侧可枚举 JSON 类型判别值。
 enum class Type : std::uint8_t {
-    Null = 0,       ///< null
-    Bool = 1,       ///< true / false
-    Int = 2,        ///< 有符号整数（int64_t 域内）
-    UInt = 3,       ///< 无符号整数（> INT64_MAX 的正数）
-    Double = 4,     ///< 双精度浮点（shortest round-trip 文本化）
+    Null = 0,  ///< null
+    Bool = 1,  ///< true / false
+    Int = 2,  ///< 有符号整数（int64_t 域内）
+    UInt = 3,  ///< 无符号整数（> INT64_MAX 的正数）
+    Double = 4,  ///< 双精度浮点（shortest round-trip 文本化）
     RawNumber = 5,  ///< 保真数字（超 int64/uint64 域或 double 往返失真的原字面量）
-    String = 6,     ///< UTF-8 字符串
-    Array = 7,      ///< 数组
-    Object = 8,     ///< 对象（插入序）
+    String = 6,  ///< UTF-8 字符串
+    Array = 7,  ///< 数组
+    Object = 8,  ///< 对象（插入序）
 };
 
 class Value;
@@ -67,11 +67,10 @@ concept json_arith = std::is_arithmetic_v<T> && !std::is_same_v<std::remove_cv_t
 /// @brief 读出口封闭类型集：`as<T>` / `as_or<T>` / `get<T>` 仅对这些 T 可见，
 ///        无用户特化点；域外类型被 `static_assert` 拒绝。
 template <typename T>
-concept json_readable = std::is_same_v<T, bool> || std::is_same_v<T, std::int64_t> ||
-                        std::is_same_v<T, int> || std::is_same_v<T, std::uint64_t> ||
-                        std::is_same_v<T, std::size_t> || std::is_same_v<T, float> ||
-                        std::is_same_v<T, double> || std::is_same_v<T, std::string> ||
-                        std::is_same_v<T, std::string_view>;
+concept json_readable =
+    std::is_same_v<T, bool> || std::is_same_v<T, std::int64_t> || std::is_same_v<T, int> ||
+    std::is_same_v<T, std::uint64_t> || std::is_same_v<T, std::size_t> || std::is_same_v<T, float> ||
+    std::is_same_v<T, double> || std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view>;
 
 /// @brief Object 条目只读视图（零拷贝遍历）。
 /// @warning `key` 与 `value` 均**别名** Value 内部存储；该 Value 被移动 / 修改后即失效。
@@ -103,7 +102,8 @@ class Value {
             data_.emplace<double>(static_cast<double>(v));
         } else if constexpr (std::is_signed_v<T>) {
             data_.emplace<std::int64_t>(static_cast<std::int64_t>(v));
-        } else if (static_cast<std::uint64_t>(v) <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+        } else if (static_cast<std::uint64_t>(v) <=
+                   static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
             data_.emplace<std::int64_t>(static_cast<std::int64_t>(v));
         } else {
             data_.emplace<std::uint64_t>(static_cast<std::uint64_t>(v));
@@ -111,14 +111,14 @@ class Value {
     }
 
     // ---- 构造：字符串（隐式入向）----
-    Value(const char *s);          // NOLINT(google-explicit-constructor)：String（nullptr → Null）
-    Value(std::string_view s);     // NOLINT(google-explicit-constructor)：String（拷贝）
+    Value(const char *s);  // NOLINT(google-explicit-constructor)：String（nullptr → Null）
+    Value(std::string_view s);  // NOLINT(google-explicit-constructor)：String（拷贝）
     Value(std::string s) noexcept;  // String（移动）
 
     // ---- 工厂 ----
     [[nodiscard]] static auto raw_number(std::string_view digits) -> Value;  ///< RawNumber 保真入口
-    [[nodiscard]] static auto array() -> Value;                              ///< 空 Array
-    [[nodiscard]] static auto object() -> Value;                             ///< 空 Object
+    [[nodiscard]] static auto array() -> Value;  ///< 空 Array
+    [[nodiscard]] static auto object() -> Value;  ///< 空 Object
 
     // ---- 类型查询 ----
     [[nodiscard]] auto type() const noexcept -> Type;  ///< = static_cast<Type>(data_.index())
@@ -131,7 +131,7 @@ class Value {
     [[nodiscard]] auto is_string() const noexcept -> bool;
     [[nodiscard]] auto is_array() const noexcept -> bool;
     [[nodiscard]] auto is_object() const noexcept -> bool;
-    [[nodiscard]] auto is_number() const noexcept -> bool;   ///< Int|UInt|Double|RawNumber
+    [[nodiscard]] auto is_number() const noexcept -> bool;  ///< Int|UInt|Double|RawNumber
     [[nodiscard]] auto is_integer() const noexcept -> bool;  ///< Int|UInt
 
     // ---- 读：宽容路径（空安全、零 UB；「非法值回退默认」的官方入口）----
@@ -173,11 +173,11 @@ class Value {
 
     // ---- 写（仅 Object/Array 有效；其他类型上调用是未定义行为，debug 断言拦截）----
     auto set(std::string_view key, Value v) -> void;  ///< Object：插入或覆盖（保持首次插入位置）
-    auto push_back(Value v) -> void;                  ///< Array：追加（不提供 emplace_back）
-    auto reserve(std::size_t n) -> void;              ///< Array/Object：容量预留（批量构造热路径）
-    auto clear() noexcept -> void;                    ///< 清空为对应空容器
-    auto erase(std::string_view key) -> bool;         ///< Object：删键，返回是否命中
-    auto erase_at(std::size_t index) -> bool;         ///< Array：删元素，返回是否命中
+    auto push_back(Value v) -> void;  ///< Array：追加（不提供 emplace_back）
+    auto reserve(std::size_t n) -> void;  ///< Array/Object：容量预留（批量构造热路径）
+    auto clear() noexcept -> void;  ///< 清空为对应空容器
+    auto erase(std::string_view key) -> bool;  ///< Object：删键，返回是否命中
+    auto erase_at(std::size_t index) -> bool;  ///< Array：删元素，返回是否命中
 
     // ---- 迭代 ----
     [[nodiscard]] auto entries() const noexcept -> EntryRange;  ///< Object → Entry 只读视图（非 Object → 空 range）
@@ -253,7 +253,7 @@ inline auto EntryRange::end() const noexcept -> Iterator {
 /// @brief 解析选项。
 struct ParseOptions {
     std::size_t max_depth = 512;  ///< 嵌套深度上限，超限 → json-depth-exceeded
-    bool validate_utf8 = true;    ///< 字符串 / 文档级 UTF-8 校验（无效序列 → 解析失败）
+    bool validate_utf8 = true;  ///< 字符串 / 文档级 UTF-8 校验（无效序列 → 解析失败）
 };
 
 /// @brief 解析完整 JSON 文档（RFC 8259）。
@@ -266,7 +266,7 @@ struct ParseOptions {
 
 /// @brief 序列化选项。
 struct DumpOptions {
-    int indent = -1;            ///< <0 紧凑单行；≥0 每层缩进空格数（dump(2) 对应 indent=2）
+    int indent = -1;  ///< <0 紧凑单行；≥0 每层缩进空格数（dump(2) 对应 indent=2）
     bool ensure_ascii = false;  ///< true 时非 ASCII 转 \uXXXX（含代理对编码）
 };
 

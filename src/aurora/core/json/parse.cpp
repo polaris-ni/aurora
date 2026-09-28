@@ -1,5 +1,3 @@
-#include "aurora/core/json.h"
-
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
@@ -8,6 +6,7 @@
 #include <system_error>
 #include <utility>
 
+#include "aurora/core/json.h"
 #include "aurora/core/utf8.h"
 
 namespace aurora::json {
@@ -15,7 +14,8 @@ namespace aurora::json {
 namespace {
 
 /// @brief 偏移量 → (行, 列)，均从 1 起（`\n` 计数换行）。
-[[nodiscard]] auto line_col_of(std::string_view input, std::size_t offset) noexcept -> std::pair<std::size_t, std::size_t> {
+[[nodiscard]] auto line_col_of(std::string_view input, std::size_t offset) noexcept
+    -> std::pair<std::size_t, std::size_t> {
     std::size_t line = 1;
     std::size_t col = 1;
     const std::size_t n = offset < input.size() ? offset : input.size();

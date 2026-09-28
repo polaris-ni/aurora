@@ -1,5 +1,3 @@
-#include "aurora/core/json.h"
-
 #include <charconv>
 #include <cmath>
 #include <cstddef>
@@ -8,6 +6,8 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+
+#include "aurora/core/json.h"
 
 namespace aurora::json {
 
@@ -139,7 +139,8 @@ auto write_string(std::string_view s, std::string &out, bool ensure_ascii) -> vo
     return {};
 }
 
-[[nodiscard]] auto dump_value(const Value &v, std::string &out, const DumpOptions &opts, std::size_t depth) -> Result<void> {
+[[nodiscard]] auto dump_value(const Value &v, std::string &out, const DumpOptions &opts, std::size_t depth)
+    -> Result<void> {
     switch (v.type()) {
         case Type::Null:
             out += "null";
@@ -222,7 +223,9 @@ auto write_string(std::string_view s, std::string &out, bool ensure_ascii) -> vo
 
 }  // namespace
 
-auto dump_into(const Value &v, std::string &out, DumpOptions opts) -> Result<void> { return dump_value(v, out, opts, 0); }
+auto dump_into(const Value &v, std::string &out, DumpOptions opts) -> Result<void> {
+    return dump_value(v, out, opts, 0);
+}
 
 auto dump(const Value &v, DumpOptions opts) -> Result<std::string> {
     std::string out;

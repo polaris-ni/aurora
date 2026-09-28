@@ -109,33 +109,33 @@ AURORA_TEST_CASE(rejects_malformed_literals) {
 }
 
 AURORA_TEST_CASE(rejects_malformed_numbers) {
-    check_parse_fails("01");    // 前导零
-    check_parse_fails("-01");   // 负号后前导零
-    check_parse_fails("-");     // 只有符号
-    check_parse_fails("1.");    // 小数点后无数字
-    check_parse_fails("1e");    // 指数无数字
-    check_parse_fails("1e+");   // 指数符号后无数字
-    check_parse_fails(".5");    // 缺整数部分
-    check_parse_fails("+1");    // 不允许显式正号
-    check_parse_fails("1.2.3"); // 多个小数点 → 尾随内容
+    check_parse_fails("01");  // 前导零
+    check_parse_fails("-01");  // 负号后前导零
+    check_parse_fails("-");  // 只有符号
+    check_parse_fails("1.");  // 小数点后无数字
+    check_parse_fails("1e");  // 指数无数字
+    check_parse_fails("1e+");  // 指数符号后无数字
+    check_parse_fails(".5");  // 缺整数部分
+    check_parse_fails("+1");  // 不允许显式正号
+    check_parse_fails("1.2.3");  // 多个小数点 → 尾随内容
     check_parse_fails("0x1F");  // 十六进制非 JSON 语法
 }
 
 AURORA_TEST_CASE(rejects_structural_errors) {
     check_parse_fails("");
     check_parse_fails("   ");
-    check_parse_fails("{} {}");       // 顶层多值
-    check_parse_fails("42 43");       // 标量尾随内容
-    check_parse_fails("{");           // 未闭合对象
-    check_parse_fails("[1,");         // 未闭合数组
-    check_parse_fails("[1,]");        // 尾随逗号（数组）
+    check_parse_fails("{} {}");  // 顶层多值
+    check_parse_fails("42 43");  // 标量尾随内容
+    check_parse_fails("{");  // 未闭合对象
+    check_parse_fails("[1,");  // 未闭合数组
+    check_parse_fails("[1,]");  // 尾随逗号（数组）
     check_parse_fails(R"({"a":1,})");  // 尾随逗号（对象）
-    check_parse_fails(R"({"a"})");     // 缺冒号
-    check_parse_fails(R"({"a":})");    // 缺值
-    check_parse_fails("{a:1}");        // 键未加引号
-    check_parse_fails("[1 2]");        // 缺逗号
+    check_parse_fails(R"({"a"})");  // 缺冒号
+    check_parse_fails(R"({"a":})");  // 缺值
+    check_parse_fails("{a:1}");  // 键未加引号
+    check_parse_fails("[1 2]");  // 缺逗号
     check_parse_fails("\"unterminated");
-    check_parse_fails(R"({"a":1)");   // 括号类型不匹配
+    check_parse_fails(R"({"a":1)");  // 括号类型不匹配
 }
 
 AURORA_TEST_CASE(rejects_leading_bom_and_bad_escapes) {
@@ -144,11 +144,11 @@ AURORA_TEST_CASE(rejects_leading_bom_and_bad_escapes) {
     AURORA_TEST_CHECK_EQ(bom.error().code_enum, ErrorCode::JsonParseError);
     AURORA_TEST_CHECK(bom.error().message.find("BOM") != std::string::npos);
 
-    check_parse_fails(R"("\q")");      // 未知转义
-    check_parse_fails(R"("\u12")");    // \u 位数不足
+    check_parse_fails(R"("\q")");  // 未知转义
+    check_parse_fails(R"("\u12")");  // \u 位数不足
     check_parse_fails(R"("\uZZZZ")");  // 非法十六进制位
-    check_parse_fails("\"\x01\"");     // 裸控制字符
-    check_parse_fails("\"\n\"");       // 裸换行
+    check_parse_fails("\"\x01\"");  // 裸控制字符
+    check_parse_fails("\"\n\"");  // 裸换行
 }
 
 // ============================================================================
@@ -176,9 +176,9 @@ AURORA_TEST_CASE(keeps_embedded_nul_and_decodes_surrogate_pairs) {
 }
 
 AURORA_TEST_CASE(rejects_lone_surrogates) {
-    check_parse_fails(R"("\uD800")");     // 孤立高代理项
-    check_parse_fails(R"("\uDC00")");     // 孤立低代理项
-    check_parse_fails(R"("\uD800x")");    // 高代理项后无低代理项
+    check_parse_fails(R"("\uD800")");  // 孤立高代理项
+    check_parse_fails(R"("\uDC00")");  // 孤立低代理项
+    check_parse_fails(R"("\uD800x")");  // 高代理项后无低代理项
     check_parse_fails(R"("\uD800\u0041")");  // 次项不是低代理项
 }
 
@@ -269,8 +269,8 @@ AURORA_TEST_CASE(round_trips_every_type_through_dump_and_parse) {
     check_round_trip("9223372036854775808");
     check_round_trip("18446744073709551615");
     check_round_trip("18446744073709551616");  // 保真数字闭环
-    check_round_trip("1e999");                 // 上溢保真
-    check_round_trip("1e-999");                // 下溢保真
+    check_round_trip("1e999");  // 上溢保真
+    check_round_trip("1e-999");  // 下溢保真
     check_round_trip("0.1");
     check_round_trip("3.141592653589793");
     check_round_trip("-1.5e-3");
@@ -393,8 +393,8 @@ AURORA_TEST_CASE(classifies_types_through_predicates) {
     AURORA_TEST_CHECK_FALSE(aj::Value::raw_number("1").is_integer());
 
     // 判别互斥：每个值恰有一个 is_* 为真。
-    const aj::Value sample[] = {aj::Value(),        aj::Value(true),   aj::Value(1),     aj::Value(1.0),
-                                aj::Value("s"),     aj::Value::array(), aj::Value::object(), aj::Value::raw_number("1")};
+    const aj::Value sample[] = {aj::Value(),    aj::Value(true),    aj::Value(1),        aj::Value(1.0),
+                                aj::Value("s"), aj::Value::array(), aj::Value::object(), aj::Value::raw_number("1")};
     for (const auto &v : sample) {
         const int hits = static_cast<int>(v.is_null()) + static_cast<int>(v.is_bool()) + static_cast<int>(v.is_int()) +
                          static_cast<int>(v.is_uint()) + static_cast<int>(v.is_double()) +
@@ -642,7 +642,7 @@ AURORA_TEST_CASE(iterates_entries_and_elements) {
 AURORA_TEST_CASE(reports_container_queries_consistently) {
     AURORA_TEST_CHECK_EQ(aj::Value("abc").size(), 3U);  // 字符串按字节数
     AURORA_TEST_CHECK_EQ(aj::Value("").size(), 0U);
-    AURORA_TEST_CHECK_EQ(aj::Value(1).size(), 0U);      // 标量恒 0
+    AURORA_TEST_CHECK_EQ(aj::Value(1).size(), 0U);  // 标量恒 0
     AURORA_TEST_CHECK_EQ(aj::Value().size(), 0U);
     AURORA_TEST_CHECK_EQ(aj::parse(R"({"a":1,"b":2})").value().size(), 2U);
     AURORA_TEST_CHECK_EQ(aj::parse("[1,2,3,4]").value().size(), 4U);
