@@ -125,6 +125,13 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_nolint_layout
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_nolint_layout.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 伞头（include/aurora/aurora.h）完整性门禁。两层检查：① 文件健康——include 被行尾
+        # 注释吞并 / 一行多指令 / 重复 / 路径缺失 / 编码损坏（私用区字符）/ 行结束符混用；
+        # ② 覆盖契约——直连集合不得相对基线缩减，且每个 public 头必须「直连 ∨ 从直连集合可达
+        # ∨ 显式豁免」，否则强制作者做分类决策。基线见 tools/check/umbrella_manifest.txt。
+        add_test(NAME check_umbrella_header
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_umbrella_header.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     endif ()
 
     # ---- 空源集 guard ----
