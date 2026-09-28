@@ -132,6 +132,14 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_umbrella_header
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_umbrella_header.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # Doxygen 注释规范门禁（CODING_STANDARDS.md §13，DOC-R1—DOC-R8）：标记形态（/// 与 ///< 唯一、@ 前缀）、
+        # // 与 /// 的归属界限（含「文档块须挂在 template 头之上」）、include/ 公共与已注释 protected 符号的
+        # @brief/@param/@return/@tparam 齐全度、@brief 首行与命令行后不得续写散文、 ///< 只挂真实成员且一声明一条、
+        # @param/@tparam 名必须与签名具名形参逐字对应。字符串与原始串在扫描前被掩掉，故着色器源码里的
+        # @group/@binding 不误判。豁免写法 `DOC-EXEMPT: <规则> <原因>`（见 §13.7，当前基线为 0 条豁免）。
+        add_test(NAME check_doc_comments
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_doc_comments.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     endif ()
 
     # ---- 空源集 guard ----

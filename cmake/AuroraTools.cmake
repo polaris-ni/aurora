@@ -288,3 +288,31 @@ if (AURORA_BUILD_INSPECTOR_SERVER)
     set_target_properties(aurora_inspector_server PROPERTIES CXX_STANDARD 20)
     aurora_log("Inspector HTTP server enabled (aurora_inspector_server static lib)")
 endif ()
+
+# ---- 文档站（Doxygen）：可选 `docs` 目标 ----------------------------------
+# 注释规范口径见 codespec/CODING_STANDARDS.md §13.7：Doxyfile 是配置单一来源，
+# WARN_AS_ERROR=YES 让「注释写了但 Doxygen 读不出」在 CI 上红灯；标记形态与齐全度下限
+# 由 tools/check/check_doc_comments.py 独立守护（两者互补，不重叠）。
+# doxygen 属外部工具：不在 PATH 时由使用者显式传入 -DAURORA_DOXYGEN_EXECUTABLE=<路径>，
+# 仓库内不写死任何本机路径（CODING_STANDARDS.md §10.5 第 10 条）。
+option(AURORA_BUILD_DOCS "Provide the 'docs' target that renders the API reference with Doxygen" ON)
+if (AURORA_BUILD_DOCS)
+    set(AURORA_DOXYGEN_EXECUTABLE "" CACHE FILEPATH
+            "Path to the doxygen executable (empty = search PATH)")
+    if (AURORA_DOXYGEN_EXECUTABLE)
+        set(_aurora_doxygen "${AURORA_DOXYGEN_EXECUTABLE}")
+    else ()
+        find_program(_aurora_doxygen NAMES doxygen doxygen.exe)
+    endif ()
+    if (_aurora_doxygen AND EXISTS "${CMAKE_SOURCE_DIR}/Doxyfile")
+        add_custom_target(docs
+                COMMAND "${_aurora_doxygen}" -s "${CMAKE_SOURCE_DIR}/Doxyfile"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                COMMENT "生成 API 文档站（Doxygen；告警即失败，产物在 build/docs/）"
+                EXCLUDE_FROM_ALL
+                VERBATIM)
+        aurora_log("Doxygen docs: 'docs' target available (${_aurora_doxygen})")
+    else ()
+        aurora_log("Doxygen docs: 'docs' target skipped (未找到 doxygen；用 -DAURORA_DOXYGEN_EXECUTABLE=<路径> 指定)")
+    endif ()
+endif ()
