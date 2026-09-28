@@ -71,9 +71,8 @@ auto with_prefix(const std::vector<std::string> &names, std::string_view prefix)
 /// @brief 语料根下的子目录；资产随仓库分发，缺失即环境错误（不静默跳过）。
 auto corpus_dir(std::string_view name) -> fs::path {
     const fs::path dir = suite_root() / fs::path{name};
-    AURORA_TEST_REQUIRE_MSG(fs::is_directory(dir),
-                            "corpus directory is missing: " + dir.string() +
-                                " (override with AURORA_JSON_TEST_SUITE_DIR)");
+    AURORA_TEST_REQUIRE_MSG(fs::is_directory(dir), "corpus directory is missing: " + dir.string() +
+                                                       " (override with AURORA_JSON_TEST_SUITE_DIR)");
     return dir;
 }
 
