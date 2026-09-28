@@ -108,8 +108,8 @@ namespace detail {
 }
 // NOLINTEND(cppcoreguidelines-pro-type-union-access)
 
-/// @brief 元素几何是否投影：`UIA_BoundingRectanglePropertyId` 返回非空矩形
-///        （VT_ARRAY|VT_R8 的 left/top/width/height 四元组；与探针逐字同形）。
+// @brief 元素几何是否投影：`UIA_BoundingRectanglePropertyId` 返回非空矩形
+//        （VT_ARRAY|VT_R8 的 left/top/width/height 四元组；与探针逐字同形）。
 // NOLINTBEGIN(cppcoreguidelines-pro-type-union-access): 矩形属性只能读联合体 parray 成员
 [[nodiscard]] inline auto uia_rect_ok(IUIAutomationElement &element) -> bool {
     VARIANT value{};

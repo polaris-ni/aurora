@@ -52,8 +52,8 @@ struct Probe {
     std::shared_ptr<au::AudioBufferSourceNode> src;
 };
 
-/// 每拍把观测状态写进 `window.__auState`（驱动侧唯一读取面）。
-/// EM_JS 形参为具名 C/C++ 参数（无 `$` 占位符），不触发 -Wdollar-in-identifier-extension。
+// 每拍把观测状态写进 `window.__auState`（驱动侧唯一读取面）。
+// EM_JS 形参为具名 C/C++ 参数（无 `$` 占位符），不触发 -Wdollar-in-identifier-extension。
 // EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
 // clang-format off
 EM_JS(void, publish_state_js, (const char *base), { window.__auState = UTF8ToString(base); });

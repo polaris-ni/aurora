@@ -94,7 +94,7 @@ struct Obs {
 // 无需诊断守卫（与 `wasm_aria.cpp` 同法）；JS 里的空串写 `""` 而非 `''`——片段仍经 C++ 词法
 // 分析，`''` 会被判为「空字符常量」而报 -Winvalid-pp-token。
 
-/// @brief 命令队列当前长度（`window.__mwCmd`，未定义即空）。
+// 命令队列当前长度（`window.__mwCmd`，未定义即空）。
 // EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
 // clang-format off
 EM_JS(int, cmd_count_js, (), {
@@ -103,7 +103,7 @@ EM_JS(int, cmd_count_js, (), {
 });
 // clang-format on
 
-/// @brief 把第 idx 条命令以 UTF-8 落进 wasm 内存（NUL 结尾；超出容量即截断）。
+// 把第 idx 条命令以 UTF-8 落进 wasm 内存（NUL 结尾；超出容量即截断）。
 // EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
 // clang-format off
 EM_JS(void, cmd_at_js, (char *dst, int cap, int idx), {
@@ -117,7 +117,7 @@ EM_JS(void, cmd_at_js, (char *dst, int cap, int idx), {
 });
 // clang-format on
 
-/// @brief 排空命令队列（命令只执行一次）。
+// 排空命令队列（命令只执行一次）。
 // EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
 // clang-format off
 EM_JS(void, cmd_clear_js, (), { window.__mwCmd = []; });
@@ -133,9 +133,9 @@ auto cmd_at(int i) -> std::string {
 
 auto cmd_clear() -> void { cmd_clear_js(); }
 
-/// @brief 把状态串发布到 `window.__mwState`，并由 JS 侧就地补齐三条 DOM 观测。
-/// @note DOM 三段（`order=` 层叠序 / `zTop=` 交叠命中者 / `dt=` 页面标题）必须在 JS 里读，
-///       C++ 侧没有 DOM；`dt=` 只是给排障看的镜像，判据仍以自动化直读 `document.title` 为准。
+// 把状态串发布到 `window.__mwState`，并由 JS 侧就地补齐三条 DOM 观测。
+// 注：DOM 三段（`order=` 层叠序 / `zTop=` 交叠命中者 / `dt=` 页面标题）必须在 JS 里读，
+// C++ 侧没有 DOM；`dt=` 只是给排障看的镜像，判据仍以自动化直读 `document.title` 为准。
 // EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
 // clang-format off
 EM_JS(void, publish_state_js, (const char *base), {

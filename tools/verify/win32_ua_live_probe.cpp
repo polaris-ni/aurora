@@ -113,10 +113,10 @@ struct Expectation {
     /// 名的任意控件（回退链第一级）。`Checkbox` / `Slider` 无内建 label，其标签通常是**兄弟**
     /// 节点而非子节点，故走下方 `sibling_expect` 的兄弟关联，或直接显式声明。
     bool require_name{};
-    /// @brief 期望经「兄弟标签关联」解析出的 Name（#1-C 验收）；`nullptr` 表示不作此断言。
-    ///
-    /// 仅对 `Checkbox` / `Slider` 这类「标签常为兄弟」的控件有意义：探针将它们放进
-    /// `Row { Text(sibling), 控件 }`，由 `sibling_label_name` 取最近相邻文本兄弟为 Name。
+    // @brief 期望经「兄弟标签关联」解析出的 Name（#1-C 验收）；`nullptr` 表示不作此断言。
+    //
+    // 仅对 `Checkbox` / `Slider` 这类「标签常为兄弟」的控件有意义：探针将它们放进
+    // `Row { Text(sibling), 控件 }`，由 `sibling_label_name` 取最近相邻文本兄弟为 Name。
     const char *sibling_expect = nullptr;
 };
 
@@ -351,10 +351,10 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     return oss.str();
 }
 
-/// @brief 元素几何是否投影（#3 验收）：`UIA_BoundingRectanglePropertyId` 返回非空矩形。
-///
-/// 与读屏同款入口（COM 客户端取属性）；非空即桥的 `get_BoundingRectangle` 生效，离屏/出窗元素
-/// 应返回空矩形（本探针的控件均可见，故应恒为非空）。
+// @brief 元素几何是否投影（#3 验收）：`UIA_BoundingRectanglePropertyId` 返回非空矩形。
+//
+// 与读屏同款入口（COM 客户端取属性）；非空即桥的 `get_BoundingRectangle` 生效，离屏/出窗元素
+// 应返回空矩形（本探针的控件均可见，故应恒为非空）。
 // NOLINTBEGIN(cppcoreguidelines-pro-type-union-access): Win32 UIA/COM 边界——VARIANT 矩形属性只能读联合体 parray 成员
 [[nodiscard]] auto element_rect_ok(IUIAutomationElement *e) -> bool {
     if (e == nullptr) {
