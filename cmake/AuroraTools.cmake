@@ -108,8 +108,9 @@ endif ()
 # 按 ColumnLimit 折成相邻字面量，生成器自己写出的是单行超长形态——于是「重新生成」这一步本身
 # 就把仓库弄红（实测：内容一字未改，仅重新生成即让 format-check 报 99 行 diff，而 HEAD 里的
 # 版本本就是「生成 + 格式化」的产物）。故生成命令后紧跟 -style=file -i，让生成与门禁同口径。
-# ⚠️ 这一步**必须**用 aurora_find_clang_format 而不是裸 find_program：发行版 clang-format 读不懂
-# 本仓 `.clang-format`（`BinPackParameters: BinPack` 是 v20+ 的枚举取值），会
+# ⚠️ 这一步**必须**用 aurora_find_clang_format 而不是裸 find_program：把该选项当布尔的构建读不懂
+# 本仓 `.clang-format` 的枚举取值（`BinPackParameters: BinPack`；门槛是迁移后的较新 patch 构建，
+# 不是主版本号 ≥ 20，实测见 cmake/AuroraUtils.cmake 的探针注释），会
 # `error: invalid boolean` + 退出码 1，把**依赖该生成物的每一个作业**（native / wasm / 各 toggles /
 # install / coverage / asan）一起拖红——2026-09-23 CI run 35839746160 实测即是此形：Windows / macOS /
 # 装了 clang-format-22 的 format 作业全绿，其余 ubuntu 与 Emscripten 作业全红，且都红在这一条上。
@@ -124,7 +125,9 @@ if (_gen_error_codes_cf)
 else ()
     aurora_warn("no clang-format on PATH can parse the repo .clang-format (candidates: "
                 "${AURORA_CLANG_FORMAT_CANDIDATES}): generate_error_codes will emit an unfolded "
-                "error_codes.gen.h. Install clang-format >= 20, or the format-check gate will flag it.")
+                "error_codes.gen.h. Install a clang-format build that parses this repo .clang-format "
+                "(apt.llvm.org llvm-22 snapshot; CI uses ./.github/actions/setup-clang-format) or the "
+                "format-check gate will flag it. Note >= 20 alone is not enough.")
 endif ()
 add_custom_command(
         OUTPUT ${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h

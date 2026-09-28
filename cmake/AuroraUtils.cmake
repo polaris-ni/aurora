@@ -71,18 +71,23 @@ endfunction()
 #   clang-format，绝对路径写入 <out_var>；一个都不行则写空串（不 FATAL_ERROR）。
 #
 # 为什么要「试跑一遍」而不是 find_program 了事：本仓配置用了新于发行版的选项取值——
-# `.clang-format` 的 `BinPackParameters: BinPack`（枚举，v20+ 才认）在旧版里是布尔，
-# 于是 Ubuntu runner 上的发行版 clang-format 直接
+# `.clang-format` 的 `BinPackParameters: BinPack`（枚举形态）在把它当布尔的构建里直接
 # `.clang-format:46:20: error: invalid boolean` / `Error reading ...: Invalid argument`
 # 并以退出码 1 结束（2026-09-23 CI run 35839746160 实测：凡是跑 `generate_error_codes`
 # 的作业全红，Windows / macOS / 装了 clang-format-22 的 format 作业全绿）。
-# `find_program` 只看「存在」，看不出「能不能用」，故此处以 `--dump-config --style=file`
-# 真跑一遍：读得懂配置才收——配置坏了/版本过旧都会以非零退出码暴露，判据是行为而非版本号，
-# 不必随 clang 主版本升级改代码。
+# ⚠️ 门槛是**patch 构建**而非主版本号，别拿「装个 clang-format ≥ 20」当解法：2026-09-28 对
+# run 36348853231 逐作业取日志实测，GitHub ubuntu-latest 镜像预装的 `clang-format`（发行版 18）
+# 与候选表里的 clang-format-20 / -21 / -22（旧 patch 构建）**四个全拒**，同 run 里 apt.llvm.org
+# 的 `1:22.1.8~++20260714` 快照却接受；本机 git 构建 22.1.2 与 WSL 里的 Ubuntu 21.1.8 也都接受。
+# 即「迁移后的较新 patch 构建才认」，同一主版本内部两侧都可能。正因判据落在版本上就稳不住，
+# 这里才按**行为**筛：`--dump-config --style=file` 真跑一遍，读得懂配置才收。
+# `find_program` 只看「存在」，看不出「能不能用」，故探针不可省。
 #
-# 判别力本机已实测（v22.1.2）：同一份 `--dump-config --style=file` 在仓库根返回 0（说明 v22 认
+# 判别力本机已实测（v22.1.2）：同一份 `--dump-config --style=file` 在仓库根返回 0（说明该构建认
 # `BinPackParameters: BinPack`），换到一份放了非法取值的 `.clang-format`（`IndentWidth: abc`）的
 # 临时目录即返回 1 并打印 `error: invalid number`——配置读不懂就会非零退出，故该探针筛得住版本。
+# 另测得 `true` 与 `BinPack` 在本机门禁**同判**（临时改 46 行复跑全仓：875/875 合规、差异 0 行），
+# 保留枚举形态只为与格式化器自身 `--dump-config` 的打印一致；`Break` 则在两侧都不是合法取值。
 #
 # 生成链（AuroraTools 的 generate_error_codes）与排版门禁（AuroraFormat 的 format/format-check）
 # 共用本函数，两处因此必然落在同一个可执行文件上——避免「生成时按 A 版本折行、门禁按 B 版本

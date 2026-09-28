@@ -285,7 +285,7 @@ cmake --build build
 | `AURORA_ENABLE_WASM_PTHREADS` | `OFF` | WASM 真并行（`-pthread`）：`__EMSCRIPTEN_PTHREADS__` 与 `AURORA_CAP_THREADS` 同翻 1，`ThreadPool` 从「任务只入队、帧尾 `pump()` 排空」回到普通 worker 池。**代价在宿主页面**：产物要求 SharedArrayBuffer，须跨源隔离（`COOP: same-origin` + `COEP: require-corp`）方可实例化（裸 Node 无此约束），非 Emscripten 开启 FATAL。故默认关闭——无隔离头的站点宁用单线程 deferred 排空也不换回打不开的产物 | 全局追加 `-pthread` 到 `CMAKE_C_FLAGS` / `CMAKE_CXX_FLAGS` / `CMAKE_EXE_LINKER_FLAGS`（**编译 + 链接同参，且须先于 `add_subdirectory(third_party/*)` 的标志快照**——`-pthread` 是整个链接闭包的约束，漏掉 freetype/harfbuzz 的 `.o` 时链接报 `wasm-ld: --shared-memory is disallowed by harfbuzz.cc.o`，实测；故本体位于根 `CMakeLists.txt` 而非 `AuroraBackends.cmake`）。**不注入 feature 宏**，不出现在 `debug::feature_flags` 镜像，运行期查询用 `ThreadPool::default_pool().is_deferred()` |
 | `AURORA_ENABLE_CLANG_TIDY` | `ON` | Clang-Tidy 门禁（`lint` / `lint-fix` 聚合目标） | 需 `clang-tidy` 与 python 在 PATH；未开启时自动打开 `CMAKE_EXPORT_COMPILE_COMMANDS`。经 `tools/check/run_clang_tidy.py` 并行 lint **非 third_party** 翻译单元并按 `(file, line, check)` 去重；详见 §4.5 |
 | `AURORA_LINT_SHARD` | 空（= 一遍跑全量） | Clang-Tidy 门禁的 TU 分片（非开关、形如 `<i>/<n>` 的字符串缓存变量，与 `AURORA_TEST_SHARDS` 同族）：`lint` / `lint-fix` 只跑已排序 TU 清单的第 i 片（`tus[i::n]`），供 CI 把一遍摊成多个作业并跑 | 校验在 configure 期：格式非法或 `i >= n` 直接 `FATAL_ERROR`；片内选中 0 个 TU 由 runner 以退出码 2 拒跑。只改排布不改覆盖面，也不改「任一片红即整门红」的判据；详见 §4.5「墙钟与分片」 |
-| `AURORA_ENABLE_CLANG_FORMAT` | `ON` | clang-format 门禁（`format` / `format-check` 聚合目标） | 需读得懂本仓 `.clang-format` 的 clang-format（≥ v20，由 `AURORA_CLANG_FORMAT_CANDIDATES` 试跑探测）与 python 在 PATH。经 `tools/check/run_clang_format.py` 并行处理 **非 third_party** 源文件（配置源为仓库根 `.clang-format`）；`--fix` 即 `format`，默认只读校验即 `format-check`；详见 §4.7 |
+| `AURORA_ENABLE_CLANG_FORMAT` | `ON` | clang-format 门禁（`format` / `format-check` 聚合目标） | 需读得懂本仓 `.clang-format` 的 clang-format（门槛是**较新 patch 构建**而非主版本 ≥ 20，见 §4.7；由 `AURORA_CLANG_FORMAT_CANDIDATES` 试跑探测）与 python 在 PATH。经 `tools/check/run_clang_format.py` 并行处理 **非 third_party** 源文件（配置源为仓库根 `.clang-format`）；`--fix` 即 `format`，默认只读校验即 `format-check`；详见 §4.7 |
 | `AURORA_ENABLE_IMAGE_JPEG` | `OFF` | JPEG 图像解码能力（libjpeg-turbo 源码构建） | 注入 `AURORA_ENABLE_IMAGE_JPEG`（仅库内部，不 PUBLIC 传播）；详见 §4.6 |
 | `AURORA_ENABLE_IMAGE_WEBP` | `OFF` | WebP 图像解码能力（libwebp 源码构建） | 注入 `AURORA_ENABLE_IMAGE_WEBP`（同上） |
 | `AURORA_ENABLE_IMAGE_PNG` | `OFF` | PNG/GIF 图像解码能力（wuffs 源码构建） | 注入 `AURORA_ENABLE_IMAGE_PNG`（同上） |
@@ -481,7 +481,7 @@ python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏
 为何要有这道门禁：门禁的作用是让排版漂移在**引入的那一刻**暴露，而不是攒到需要一次性大改。
 
 **版本口径：调 clang-format 之前必须先证明它读得懂本仓配置。** `.clang-format` 里有新于发行版包的
-枚举取值——`BinPackParameters: BinPack`（v20+ 才认，旧版该字段是布尔）。旧版读到它即
+枚举取值——`BinPackParameters: BinPack`（把它当布尔的构建不认）。这些构建读到它即
 `.clang-format:46:20: error: invalid boolean` / `Error reading …: Invalid argument` 并以退出码 1 结束，
 **且这不是「排版判红」而是「命令失败」**：任何把 clang-format 排进构建链的地方都会因此炸掉。
 实测代价（2026-09-23 CI run `35839746160`）：`generate_error_codes` 的生成后折行一步用了
@@ -489,13 +489,27 @@ python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏
 （core linux / 各 toggles / install / coverage / asan / wasm）**全红**，Windows、macOS 与装了
 clang-format-22 的 `clang-format` 作业全绿——同一份配置、两种命运，差别只在 PATH 上那个二进制的版本。
 
+**门槛是 patch 构建，不是主版本号**（2026-09-28 对 run `36348853231` 逐作业取日志实测）：GitHub
+ubuntu-latest 镜像预装的 `clang-format`（发行版 18）与候选表里的 `clang-format-20 / -21 / -22`
+**四个全拒**，而同一条 run 里 apt.llvm.org 的 `1:22.1.8~++20260714` 快照接受；本机 git 构建 `22.1.2`
+与 WSL 的 Ubuntu `21.1.8` 也都接受。所以 `>= 20` 这类按 major 的劝告会把人直接引到坑里，两侧同一
+主版本都可能一侧能跑一侧不能——判据只能是**试跑**，这也正是探针存在的原因。另测得 `true` 与
+`BinPack` 在本机门禁**同判**（把 `.clang-format:46` 临时改成 `true` 复跑全仓：875/875 合规、差异 0 行），
+仓库保留枚举形态只为与该构建自身 `--dump-config` 的打印一致；`Break` 两侧都不是合法取值。
+
 处置是把「存在」与「可用」分开判：`aurora_find_clang_format` 以 `--dump-config --style=file` 真跑一遍
 （cwd 钉在仓库根，`--style=file` 才从那里上溯找配置），探针判别力本机实测（v22.1.2）——仓库根返回
 `0`，换一份含非法取值的配置（`IndentWidth: abc`）即返回 `1` 并打印 `error: invalid number`。
 生成链（`cmake/AuroraTools.cmake` 的 `generate_error_codes`）与排版门禁共用该函数，两处必然落在同一个
 二进制上；生成链在判不到可用版本时**告警跳过而不中断构建**（仓库内已提交的 `error_codes.gen.h` 本就是
 格式化后的形态，缺工具只意味着「本次生成未折行」，真漂移仍由 format 门禁判，不该由它决定编译成败）。
-CI 因此无需在每个作业里装 clang-format-22；只有 `clang-format` 作业需要（它跑的才是门禁本身）。
+「告警跳过」的代价在 2026-09-28 被证实是真的：tidy / toggles / wasm 等作业的 configure 日志里
+`no clang-format on PATH can parse the repo .clang-format` 一路静默通过，`format` / `format-check`
+聚合目标在这些作业里压根没生成。故 CI 改为**每个跑 configure 的 Linux 作业**都装一个读得懂配置的
+clang-format——命令收在 `.github/actions/setup-clang-format`（apt.llvm.org 的 llvm-22 快照 +
+`/usr/local/bin/clang-format` 软链 + 装完立刻用与探针同形态的 `--dump-config --style=file` 自证），
+`clang-format` 门禁作业与两道 `clang-tidy` 作业共用同一口径（后者在同一次 apt 里多带一个包，不重复
+`apt-get update`）。Windows / macOS 作业未纳入：那里没有 apt，且这两侧此前从未因该探测红过。
 
 为何要有独立 runner（而非直接 `clang-format --dry-run --Werror`）：
 

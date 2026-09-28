@@ -18,8 +18,10 @@
 # ⚠️ 依赖 tools/check/run_clang_format.py。脚本内的 third_party 排除 + 绝对路径调用形态
 #    是正确性的一部分，勿在外层自行传文件列表绕过。
 # ⚠️ 可执行文件由 aurora_find_clang_format 选出并显式传给脚本（--clang-format），不靠脚本自己
-#    在 PATH 上撞运气：本仓 `.clang-format` 用了 v20+ 才认的枚举取值（`BinPackParameters: BinPack`），
-#    发行版旧版会 `error: invalid boolean` 后整条命令失败；与生成链（AuroraTools 的
+#    在 PATH 上撞运气：本仓 `.clang-format` 用了枚举形态取值（`BinPackParameters: BinPack`），
+#    把它当布尔的构建（含 GitHub runner 预装的 clang-format-20/21/22 旧 patch 构建）会
+#    `error: invalid boolean` 后整条命令失败——门槛是迁移后的较新 patch 构建，不是主版本号 ≥ 20，
+#    实测口径见 cmake/AuroraUtils.cmake 的探针注释；与生成链（AuroraTools 的
 #    generate_error_codes）取同一个判据，两处不会落在不同版本上。
 # ============================================================
 
@@ -35,7 +37,10 @@ find_program(PYTHON3_EXE NAMES python3 python)
 if (NOT AURORA_CLANG_FORMAT_BIN)
     aurora_warn("AURORA_ENABLE_CLANG_FORMAT=ON but no clang-format on PATH parses the repo .clang-format "
                 "(probed: ${AURORA_CLANG_FORMAT_CANDIDATES}); 'format' targets skipped. "
-                "Install clang-format >= 20, or point AURORA_CLANG_FORMAT_CANDIDATES at one.")
+                "Install a clang-format build that parses this repo .clang-format (apt.llvm.org "
+                "llvm-22 snapshot works; CI does it via ./.github/actions/setup-clang-format) or "
+                "point AURORA_CLANG_FORMAT_CANDIDATES at one. A >= 20 major version is NOT enough: "
+                "the runner-provided 20/21/22 patch builds are rejected.")
     return ()
 endif ()
 if (NOT PYTHON3_EXE)
