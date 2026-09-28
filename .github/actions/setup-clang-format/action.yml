@@ -1,0 +1,27 @@
+name: Setup clang-format (repo-parseable)
+description: >-
+  装一个读得懂本仓 .clang-format 的 clang-format，并置为 PATH 上的 clang-format。
+  为什么每个跑 configure 的 Linux 作业都要这一步：仓库根的 .clang-format 用了枚举形态取值
+  （BinPackParameters: BinPack），发行版/旧 patch 构建会把整份配置判为 invalid boolean 并以退出码 1
+  失败，于是 aurora_find_clang_format（cmake/AuroraUtils.cmake）逐个 candidate 试跑全部落空——
+  format / format-check 聚合目标不生成，且以该探测为同源判据的 generate_error_codes 生成链也一起
+  降级，configure 只留一行 warning，红灯常态化地溜过去。版本口径与实测证据见
+  codespec/BUILD_OPTIONS.md §4.7；改这里前先看那段。
+inputs: {}
+runs:
+  using: composite
+  steps:
+    - name: Install clang-format-22 from apt.llvm.org
+      shell: bash
+      run: |
+        sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+        # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
+        echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+        sudo apt-get update -y
+        sudo apt-get install -y clang-format-22
+        sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
+        # 装完立刻自证「这份二进制读得懂仓库配置」：试跑与 CMake 探测（aurora_find_clang_format）
+        # 同一条命令形态，cwd 即仓库根、--style=file 逐级上溯找 .clang-format。
+        # 不写这一行，源里换到不兼容的 patch 构建时只会静默回到老问题。
+        clang-format --dump-config --style=file >/dev/null
+        clang-format --version
