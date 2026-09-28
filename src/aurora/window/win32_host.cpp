@@ -1,6 +1,7 @@
 #include "aurora/window/win32_host.h"
 
 #include "aurora/window/detail/win32_ime.h"
+#include "aurora/window/detail/win32_modifiers.h"
 #include "aurora/window/detail/win32_ua.h"
 
 #ifdef AURORA_BACKEND_WIN32
@@ -32,13 +33,17 @@
 namespace aurora {
 
 // ---- 自由函数：修饰键 / 键码映射 / UTF-8 转换（不依赖实例，纯函数）----
+// 派发期的修饰态一律读 `Impl::mods`（随消息流推进的跟踪器），**不再**逐事件异步采样——
+// 那会让命中与否取决于「消息被泵到之前修饰键是否仍按着」，见 `detail/win32_modifiers.h`。
+// 这里只剩一处合法的异步读数：窗口**获得激活**时取一次物理态基线，用于播种跟踪器
+// （覆盖「用户 Alt+Tab 切进来、Alt 在激活之前就已按下」这种跟踪器无从得知的前置态）。
 [[nodiscard]] static auto is_async_key_down(int vk) -> bool {
     // GetAsyncKeyState 返回有符号 SHORT；对最高位做位与时应先转无符号，
     // 避免 signed-bitwise 静态检查告警。
     return (static_cast<std::uint16_t>(GetAsyncKeyState(vk)) & 0x8000U) != 0U;
 }
 
-[[nodiscard]] static auto current_modifiers() -> ModifierKey {
+[[nodiscard]] static auto async_modifiers() -> ModifierKey {
     auto m = ModifierKey::None;
     if (is_async_key_down(VK_SHIFT)) {
         m = m | ModifierKey::Shift;
@@ -192,6 +197,8 @@ struct Win32Host::Impl {
 
     /// @brief IMM32 组合输入桥（与窗口同生命周期；无输入法激活时零消息、零成本）。
     std::unique_ptr<detail::Win32ImeBridge> ime;
+    /// @brief 修饰键跟踪器：随 `WM_KEY*` / `WM_SYSKEY*` 推进，失焦清空、重新激活播种。
+    detail::ModifierKeyTracker mods;
     /// @brief 焦点控件的候选窗定位盒查询（由 `WindowHost` 注入；空 = 无定位，走系统默认）。
     std::function<Rect()> composition_caret_provider;
 
@@ -220,7 +227,8 @@ struct Win32Host::Impl {
     static auto handle_create() -> LRESULT;
     auto handle_mouse(HWND hwnd_in, UINT msg, LPARAM lp) -> LRESULT;
     auto handle_wheel(HWND hwnd_in, WPARAM wp, LPARAM lp) const -> LRESULT;
-    [[nodiscard]] auto handle_key(UINT msg, WPARAM wp) const -> LRESULT;
+    [[nodiscard]] auto handle_key(UINT msg, WPARAM wp) -> LRESULT;
+    [[nodiscard]] auto handle_syskey(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT;
     [[nodiscard]] auto handle_char(WPARAM wp) const -> LRESULT;
     auto handle_size(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESULT;
     auto handle_paint(HWND hwnd_in) -> LRESULT;
@@ -392,7 +400,7 @@ auto Win32Host::Impl::on_key(KeyAction action, int vk) const -> void {
     KeyEvent e;
     e.action = action;
     e.key = static_cast<int>(from_win32_vk(vk));
-    e.modifiers = current_modifiers();
+    e.modifiers = mods.get();
     handler(e);
 }
 
@@ -468,9 +476,23 @@ auto Win32Host::Impl::handle_wheel(HWND hwnd_in, WPARAM wp, LPARAM lp) const -> 
     return 0;
 }
 
-auto Win32Host::Impl::handle_key(UINT msg, WPARAM wp) const -> LRESULT {
-    on_key((msg == WM_KEYUP) ? KeyAction::Up : KeyAction::Down, static_cast<int>(wp));
+auto Win32Host::Impl::handle_key(UINT msg, WPARAM wp) -> LRESULT {
+    const auto action = (msg == WM_KEYUP) ? KeyAction::Up : KeyAction::Down;
+    // 先推进修饰态再派发：本条消息若正是修饰键自身，它应当计入本事件的 `modifiers`
+    // （Windows 的常规语义是「Ctrl 按下的那条 KeyEvent 就带 Control」，热键匹配依赖它）。
+    mods.apply(static_cast<int>(wp), action == KeyAction::Down);
+    on_key(action, static_cast<int>(wp));
     return 0;
+}
+
+// `WM_SYSKEY*` = 按住 Alt 期间的按键（Alt 自身也算）。这里只借它推进修饰态，按键本身仍交
+// `DefWindowProcA`：`Alt+F4` 关闭、`Alt+Tab` 切换与菜单助记键都由系统实现，在此吞掉即掐死系统
+// 热键。代价是 Alt 组合在 Aurora 侧依旧不派发（既有边界，见
+// `specification/05-event-navigation.md` §2.2），但 Alt 的按下/抬起不再
+// 变成跟踪器里的幻影位——不推进它，`Alt` 之后的普通按键会一直错报带 Alt。
+auto Win32Host::Impl::handle_syskey(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
+    mods.apply(static_cast<int>(wp), msg != WM_SYSKEYUP);
+    return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
 auto Win32Host::Impl::handle_char(WPARAM wp) const -> LRESULT {
@@ -534,6 +556,14 @@ auto Win32Host::Impl::handle_activate(WPARAM wp) -> LRESULT {
     const bool new_active = (LOWORD(wp) != WA_INACTIVE);
     if (new_active != active) {
         active = new_active;
+        // 修饰态与前台状态同步：拿到前台时用物理读数播种一次（「Alt+Tab 切进来」的那条 Alt
+        // 按下属于别的窗口，跟踪器无从得知）；交出前台时整体清空（未送达的抬起消息不可追，
+        // 留着就是幻影位）。二者都只在状态真翻转时做一次，不是逐事件采样。
+        if (new_active) {
+            mods.seed(async_modifiers());
+        } else {
+            mods.clear();
+        }
         update_window_state();
     }
     return 0;
@@ -755,13 +785,19 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case WM_KEYDOWN:
         case WM_KEYUP:
             return self->handle_key(msg, wp);
+        case WM_SYSKEYDOWN:
+        case WM_SYSKEYUP:
+            return self->handle_syskey(msg, wp, lp);
         case WM_CHAR:
             return self->handle_char(wp);
         case WM_IME_STARTCOMPOSITION:
         case WM_IME_COMPOSITION:
         case WM_IME_ENDCOMPOSITION:
         case WM_IME_CHAR:
+            return self->handle_ime(msg, wp, lp);
         case WM_KILLFOCUS:
+            // 焦点交出即清空修饰态：抬起消息可能落到新获得焦点的窗口，本窗口的跟踪器再也收不到
+            self->mods.clear();
             return self->handle_ime(msg, wp, lp);
         case WM_SIZE:
             return self->handle_size(hwnd, wp, lp);
