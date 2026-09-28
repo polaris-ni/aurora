@@ -81,6 +81,14 @@ struct FlexLayoutContext {
     [[nodiscard]] auto p_min_cross() const -> float { return main_axis == 1 ? parent.min.width : parent.min.height; }
 
   public:
+    /// @brief 按主轴/交叉轴写入两轴的供给性质（loose = 按需剩余空间，非既定槽位）。
+    /// @param main_loose 主轴性质；交叉轴沿用父容器同轴性质（父级本就宽松时，本容器的该轴也不是槽位）。
+    auto apply_supply(Constraints &cc, bool main_loose, bool horizontal) const -> void {
+        const bool cross_loose = horizontal ? parent.loose_height : parent.loose_width;
+        cc.loose_width = horizontal ? main_loose : cross_loose;
+        cc.loose_height = horizontal ? cross_loose : main_loose;
+    }
+
     // 阶段一(A)+ (B) + 固定间距计入：先测量非 flex 子项，再按权重瓜分剩余主轴，最后把
     // 相邻子项间的固定间距计入容器主轴占用。
     auto measure_pass() -> void {
@@ -102,6 +110,10 @@ struct FlexLayoutContext {
             const float remaining = main_finite ? std::max(0.0F, parent_max_main - used_main) : inf;
             set_main(cc.max, remaining);
             set_cross(cc.max, parent_max_cross);
+            // 供给性质：主轴上限是「剩余空间」的按需供给（非既定槽位），一律标 loose；交叉轴沿用父级同轴性质。
+            // 展开类修饰（`Align`）据此只在交叉轴展开，不会吞掉同列/同行后续兄弟的空间。
+            // 对标 Flutter `RenderFlex` 给非 flex 子项施加的 `asFlexChild`（主轴 max=无限）。
+            apply_supply(cc, true, horizontal);
             // 基准测量热路径：.at()
             // 的边界检查开销会影响计时
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
@@ -135,6 +147,8 @@ struct FlexLayoutContext {
                 set_cross(cc.min, parent_min_cross);
                 set_main(cc.max, std::max(0.0F, alloc));
                 set_cross(cc.max, parent_max_cross);
+                // flex 子项的主轴上限是按权重分配到的**既定槽位**，故主轴不标 loose（`.align()` 可在该轴展开）。
+                apply_supply(cc, false, horizontal);
                 // 基准测量热路径：.at()
                 // 的边界检查开销会影响计时
                 // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)

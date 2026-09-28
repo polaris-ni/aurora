@@ -92,6 +92,8 @@ au::Node row = au::Node{ au::Row(au::RowProps{ .children = {
 
 > 对齐语义：主轴对齐（`Center` / `SpaceBetween` 等）只有在父约束强制容器更大时才可见。若想让 `SpaceBetween` 生效，给父容器一个固定尺寸或 `Expand`（见 §9）。
 
+> 「固定尺寸 + 居中」要写 `Modifier{}.align(Alignment::Center).size(120.0F, 40.0F)`：链上**先压入者靠外**，Align 在 `size` 之外才把色块本身摆到父容器交叉轴中央；反过来写只定位色块内部的内容。Align 逐轴展开，Flex 主轴那轴（只是「剩余空间」）不展开，故居中不会挤走同列兄弟——详见 [`specification/07-environment-modifier.md`](specification/07-environment-modifier.md) §7.1 与 §7.4。
+
 ---
 
 ## 4 层叠（浮层 / 徽章）

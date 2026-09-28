@@ -4,6 +4,31 @@
 
 namespace aurora {
 
+namespace {
+
+/// @brief 盒收缩节点给内侧节点留下的盒子（仅 Transform 切片的 Align / Offset 会改变盒子；
+///        其余节点原样返回）。
+/// @note Padding/PaddingEdges **不**参与：Paint 修饰覆盖内边距是既定语义（规格 §7.4
+///       「把 Paint 修饰限制在 content_box 导致 padding 区域露白」被列为历史错误形态）。
+[[nodiscard]] auto shrink_for_inner(const ModifierNode &n, const Rect &cur) -> Rect {
+    if (const auto *a = dynamic_cast<const AlignNode *>(&n)) {
+        const Size child = a->child_size();
+        return Rect{.origin = cur.origin + align_origin(a->align(), child, cur.size), .size = child};
+    }
+    if (const auto *o = dynamic_cast<const OffsetNode *>(&n)) {
+        return Rect{.origin = Point{.x = cur.origin.x + o->dx(), .y = cur.origin.y + o->dy()}, .size = cur.size};
+    }
+    return cur;
+}
+
+/// @brief 该节点是否改变内侧节点的盒子。
+[[nodiscard]] auto shrinks_box(const ModifierNode &n) -> bool {
+    return n.kind() == ModifierNode::Kind::Transform &&
+           (dynamic_cast<const AlignNode *>(&n) != nullptr || dynamic_cast<const OffsetNode *>(&n) != nullptr);
+}
+
+}  // namespace
+
 auto Modifier::invoke_click() const -> void {
     for (const auto &n : nodes_) {
         if (n) {
@@ -15,11 +40,15 @@ auto Modifier::invoke_click() const -> void {
 auto Modifier::transform(const Size &self_size) const -> TransformInfo {
     TransformInfo info;
     info.content_size = self_size;
+    info.hit_size = self_size;
     for (const auto &n : nodes_) {
         if (const auto *a = dynamic_cast<const AlignNode *>(n.get())) {
             const Size child = a->child_size();
             info.translation = info.translation + align_origin(a->align(), child, self_size);
             info.content_size = child;
+            // 命中盒与被对齐收缩后的自身盒一致：外侧 Align 展开出的那段空间不属于本控件，
+            // 若仍按布局盒尺寸判定，展开行会在平移方向上多吞一块什么都没画的点击。
+            info.hit_size = child;
         } else if (const auto *o = dynamic_cast<const OffsetNode *>(n.get())) {
             info.translation = info.translation + Point{.x = o->dx(), .y = o->dy()};
         } else if (const auto *p = dynamic_cast<const Padding *>(n.get())) {
@@ -41,6 +70,31 @@ auto Modifier::transform(const Size &self_size) const -> TransformInfo {
         }
     }
     return info;
+}
+
+auto Modifier::paint_boxes(const Rect &widget_box) const -> std::vector<Rect> {
+    bool any_shrink = false;
+    for (const auto &n : nodes_) {
+        if (n && shrinks_box(*n)) {
+            any_shrink = true;
+            break;
+        }
+    }
+    if (!any_shrink) {
+        return {};  // 无盒改变节点：各 Paint 节点都作用于控件自身盒（历史行为）
+    }
+    std::vector<Rect> boxes;
+    boxes.reserve(nodes_.size());
+    Rect cur = widget_box;
+    // 正序走链 = 由外向外内（`Widget::layout` 逆序包裹，故先压入者靠外）：
+    // 节点 j 的盒子是它外侧盒改变节点作用完剩下的那个。
+    for (const auto &n : nodes_) {
+        boxes.push_back(cur);
+        if (n) {
+            cur = shrink_for_inner(*n, cur);
+        }
+    }
+    return boxes;
 }
 
 auto Modifier::invoke_drag_start(std::optional<int> pid) const -> void {

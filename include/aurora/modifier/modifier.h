@@ -343,8 +343,10 @@ class Modifier {
     /**
      * @brief 计算修饰链对绘制内容的几何与透明度影响。
      *
-     * - `translation`：Align/Offset/Padding 带来的内容平移量（绘制期生效，命中测试同步）。
+     * - `translation`：Align/Offset/Padding 带来的内容平移量（绘制期生效，命中盒随之同步平移）。
      * - `content_size`：实际内容盒尺寸（Align 时小于布局盒）。
+     * - `hit_size`：命中盒尺寸，**只**被 Align 收缩（Padding 不收缩，与 `paint_boxes` 的
+     *   内边距豁免同源，见 `specification/07-environment-modifier.md` §7.4）。
      * - `matrix`：Transform 切片（TransformNode）累积的绕内容盒中心的仿射矩阵
      *   （旋转/缩放/任意矩阵），用于离屏合成（见 `Widget::paint`）。
      * - `opacity`：OpacityNode 透明度累乘（0~1）。
@@ -354,11 +356,31 @@ class Modifier {
     struct TransformInfo {
         Point translation{.x = 0.0F, .y = 0.0F};  ///< 绘制内容相对布局盒的平移量
         Size content_size;  ///< 实际内容盒尺寸（Align 时小于布局盒）
+        Size hit_size;  ///< 命中盒尺寸（仅 Align 收缩；链上无 Align 时等于布局盒尺寸）
         Matrix2D matrix;  ///< 绕内容盒中心的仿射变换（恒等=无变换）
         float opacity = 1.0F;  ///< 整体不透明度（1=不透明）
     };
 
     [[nodiscard]] auto transform(const Size &self_size) const -> TransformInfo;
+
+    /**
+     * @brief 逐个节点的绘制盒（与 `nodes()` 同序），供 Paint 类修饰按链上位置取盒。
+     *
+     * 链序约定：`Widget::layout` 逆序包裹节点，故 **先压入者靠外**
+     * （`Modifier{}.a().b()` 里 a 是 b 的外层）。盒规则：
+     * - 外侧的 `AlignNode` 展开出的那部分空间不属于本控件自身，其**内侧**的 Paint 节点
+     *   只取对齐后的子盒：`.align(Center).size(120,40).background(c)` → 背景画在居中的
+     *   120×40，而不是展开后的整行。
+     * - 外侧的 `OffsetNode` 平移其内侧的 Paint 节点，与内容/命中保持一致。
+     * - `Padding` / `PaddingEdges` **不**分段：背景、边框、裁剪一律连内边距一起覆盖
+     *   （规格 §7.4 把「把 Paint 修饰限制在 content_box 导致 padding 区域露白」列为历史错误形态）。
+     *
+     * 入参 `widget_box` 是本控件的布局盒（最外层节点所占的盒）。
+     *
+     * @return 与 `nodes()` 同序的盒子数组；链上无盒改变节点（Align/Offset）时返回**空数组**
+     *         （调用方沿用 `widget_box`，与历史行为逐位一致，且免掉每帧走链开销）。
+     */
+    [[nodiscard]] auto paint_boxes(const Rect &widget_box) const -> std::vector<Rect>;
 
     /// @brief 触发所有 `Draggable` 的拖拽开始回调（指针按下时调用）。
     /// 每个 `Draggable` 按下时绑定 pointer id，仅匹配指针才会 fire（并发触控互不干扰）。

@@ -3,7 +3,8 @@
 /// 测试说明: 基础控件组装与交互集成——Divider/Checkbox/Switch/Slider/ProgressIndicator
 /// 渲染走通、Checkbox 完整点击切换、Slider 拖拽赋值、Stack 对齐/偏移/圆角裁剪渲染、
 /// draggable/long_press 手势回调、逻辑快照与像素栅格确定性、Column/Row 对齐属性
-/// 及序列化往返（低阶 FlexLayouter 语义由 utest_flex_layouter 覆盖）
+/// 及序列化往返、Align 在 Column 内的交叉轴展开与兄弟主轴空间守恒
+/// （低阶 FlexLayouter 语义由 utest_flex_layouter 覆盖）
 
 #include <chrono>
 #include <cmath>
@@ -112,6 +113,46 @@ AURORA_TEST_CASE(stack_align_offset_rounded_clip_render) {
     render_tree(stacked, 200.0F, 200.0F);
     // Align/Offset/圆角裁剪渲染走通（Stack 尺寸策略不在此断言，渲染无崩溃即通过）。
     AURORA_TEST_CHECK_MSG(true, "Align/Offset/rounded-clip render without crash");
+}
+
+AURORA_TEST_CASE(align_in_column_centers_cross_axis_without_stealing_main_space) {
+    // TC-MODIFIER-005 的引擎侧不变量：`.align(Center)` 写在 `.size()` 之外时，
+    // Column 的交叉轴（宽）是既定槽位 → 展开成整行并把 120×40 内容盒居中；
+    // 主轴（高）只是「剩余空间」→ 不展开，否则同列后续兄弟会被挤出可视区。
+    Text centered{"Centered"};
+    centered.modifier.set(Modifier{}.align(Alignment::Center).size(120.0F, 40.0F).background(Color(9, 9, 9, 255)));
+    Text below{"Below"};
+    below.modifier.set(Modifier{}.size(100.0F, 20.0F));
+    Column col{Node{std::move(centered)}, Node{std::move(below)}};
+    render_tree(col, 400.0F, 300.0F);
+
+    AURORA_TEST_CHECK_NEAR(col.size().width, 400.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(col.size().height, 60.0F, 1e-3F);  // 40 + 20，剩余 240 未被吞
+
+    // 绘制盒与命中盒同源：居中的 120×40 子盒（x 140..260）内命中该 Text，
+    // 展开行两端（左 0..140、右 260..400）的空白命不中任何控件。
+    const BuildContext ctx;
+    const Rect root_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 300.0F}};
+    Widget *on_block = col.hit_test(Point{.x = 200.0F, .y = 20.0F}, root_box, ctx);
+    Widget *on_left_gutter = col.hit_test(Point{.x = 20.0F, .y = 20.0F}, root_box, ctx);
+    Widget *on_right_gutter = col.hit_test(Point{.x = 380.0F, .y = 20.0F}, root_box, ctx);
+    AURORA_TEST_CHECK_TRUE(dynamic_cast<Text *>(on_block) != nullptr);
+    AURORA_TEST_CHECK_EQ(on_left_gutter, nullptr);
+    AURORA_TEST_CHECK_EQ(on_right_gutter, nullptr);
+}
+
+AURORA_TEST_CASE(align_hit_box_shrinks_for_clickable_widget) {
+    // 同一收缩规则对「自身可点击」分支同样成立：可点击块挂在展开行里时，
+    // 展开出的空白段不得抢走点击（否则回调会在什么都没画的地方触发）。
+    Text tappable{"Tap"};
+    tappable.modifier.set(Modifier{}.align(Alignment::Center).size(120.0F, 40.0F).clickable([]() -> void {}));
+    Column col{Node{std::move(tappable)}};
+    render_tree(col, 400.0F, 60.0F);
+
+    const BuildContext ctx;
+    const Rect root_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 60.0F}};
+    AURORA_TEST_CHECK_TRUE(col.hit_test(Point{.x = 200.0F, .y = 20.0F}, root_box, ctx) != nullptr);
+    AURORA_TEST_CHECK_EQ(col.hit_test(Point{.x = 380.0F, .y = 20.0F}, root_box, ctx), nullptr);
 }
 
 AURORA_TEST_CASE(drag_gesture_reports_delta) {

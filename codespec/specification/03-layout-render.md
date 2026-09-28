@@ -53,7 +53,11 @@ cc.min.main  = 0                          // 主轴 min 归零（内容自适应
 cc.min.cross = parent.min.cross
 cc.max.main  = parent.max.main - used     // 父剩余主轴空间
 cc.max.cross = parent.max.cross
+cc.loose.main = true                      // 非加权子项：主轴上限是「按需剩余空间」
+cc.loose.cross = parent.loose.cross       // 交叉轴继承父级供给性质
 ```
+
+`Constraints::loose_width` / `loose_height` 标注各轴上限的**供给性质**（对标 Flutter `RenderFlex` 的 `asFlexChild`）：`true` = 只是剩余可用空间的上限，父级并不承诺这块空间，故「占满该轴」的填充类修饰（`Align` 展开）必须跳过它——否则一个居中请求就会吞掉同轴兄弟的空间；`false` = 父级既定槽位，可安全展开。`flex` 权重子项的主轴上限是按权重分配到的既定槽位，两轴均不标 loose。纯几何填充（`fill_max_*`）仍按 `max` 取值，不受该标记影响。嵌套容器沿**同一绝对轴**向下传递该标记。
 
 **阶段二 Place**：根据测量结果和对齐参数计算每个子节点的 `Rect{origin, size}` 并写入 `bounds`。容器自身尺寸 = `constrain(内容总尺寸)`，子节点位置 = 前导间距 + 累计偏移。
 
@@ -261,7 +265,7 @@ for col in 0..cols:
 
 ### 5.1 缓存一致性不变量
 
-- **缓存键**：`Constraints` 逐字段相等（`min.w, min.h, max.w, max.h`）。
+- **缓存键**：`Constraints` 逐字段相等（`min.w, min.h, max.w, max.h`，含供给标记 `loose_width, loose_height`）。
 - **不变量**：若约束未变（`Constraints::operator==` 为真），布局结果不重算。
 - **意义**：避免无效 re-layout，保证帧循环复杂度与脏节点数成正比。
 

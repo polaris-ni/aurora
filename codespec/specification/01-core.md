@@ -80,11 +80,15 @@ struct Length {
 struct Constraints {
     Size min;
     Size max = Size::infinity();
+    bool loose_width = false;   // 该轴上限只是「按需剩余空间」，非父级既定槽位
+    bool loose_height = false;
     auto constrain(const Size& s) const noexcept -> Size;  // 逐轴 clamp 到 [min, max]
 };
 ```
 
-`operator==` 逐字段比较，用作布局缓存键。`min ≤ max` 逐轴成立是布局求解的前提不变量。
+`operator==` 逐字段比较（含 `loose_*`），用作布局缓存键。`min ≤ max` 逐轴成立是布局求解的前提不变量。
+
+`loose_width` / `loose_height` 是上限的**供给性质**标注，由 `FlexLayouter` 在给孩子施加约束时写入（语义与 Flutter 对照见 [`03-layout-render.md`](03-layout-render.md) §2.3）：`true` 轴的 `max` 只表示「还能给你这么多」，因此「展开自身占满父级」的修饰（`Modifier::align`）必须跳过该轴，否则会吞掉同轴兄弟的空间；纯几何 clamp（`constrain`）与 `fill_max_*` 不看该标记。
 
 ---
 

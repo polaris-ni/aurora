@@ -4,6 +4,8 @@
 /// @brief 几何变换修饰节点（Transform 切片）：AlignNode / OffsetNode / TransformNode。
 /// 本文件为 modifier.h 的子切片；消费者通常直接 #include "aurora/modifier/modifier.h"。
 
+#include <limits>
+
 #include "aurora/core/transform.h"
 #include "aurora/modifier/modifier_base.h"
 #include "aurora/widget/alignment.h"
@@ -11,7 +13,9 @@
 namespace aurora {
 
 /// @brief 对齐修饰（Transform 切片）：在父级所给的额外空间内把子项按 `align` 定位。
-/// 布局时占满父约束（fill），绘制时把内容平移到对齐子矩形；不影响命中（命中区随之平移）。
+/// 布局时**逐轴**占满父约束的「既定槽位」轴（`Constraints::loose_*` 为 false 且有界即展开；
+/// 无限轴或 Flex 主轴的按需剩余空间则退化为内容尺寸，不吞兄弟控件的空间），
+/// 绘制时把内容平移到对齐子矩形；不影响命中（命中区随之平移）。
 class AlignNode : public ModifierNode {
   public:
     explicit AlignNode(Alignment align) : align_(align) {}
@@ -22,15 +26,22 @@ class AlignNode : public ModifierNode {
         -> Size override {
         const Size child = measure_child(c);
         child_size_ = child;
-        Size self = c.max;  // 占满父级（Align 默认填满可用空间）
-        if (!c.max.is_finite()) {
-            self = child;  // 父级无限时退化为内容尺寸
+        // 逐轴判定（对标 Flutter RenderPositionedBox 的 shrinkWrapWidth/Height）：
+        // 整块 is_finite() 判据会让「该轴其实有既定槽位」被另一轴的无限上限连带取消，交叉轴居中静默失效。
+        // loose_* 标记的轴是 Flex 主轴的「按需剩余空间」而非既定槽位，在此轴展开会吞掉兄弟控件的空间。
+        Size self = child;
+        if (bounded(c.max.width) && !c.loose_width) {
+            self.width = c.max.width;  // 该轴占满父级既定槽位（Align 默认填满可用空间）
+        }
+        if (bounded(c.max.height) && !c.loose_height) {
+            self.height = c.max.height;
         }
         return c.constrain(self);
     }
 
     [[nodiscard]] auto align() const -> Alignment { return align_; }
     [[nodiscard]] auto child_size() const -> Size { return child_size_; }
+    [[nodiscard]] static auto bounded(float v) -> bool { return v != std::numeric_limits<float>::infinity(); }
 
   private:
     Alignment align_;

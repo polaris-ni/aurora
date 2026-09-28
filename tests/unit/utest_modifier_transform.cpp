@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/modifier/modifier_transform.h
-/// 测试说明: 覆盖 Transform 切片三节点——AlignNode 占满/无限约束退化与 child_size 记录、
-/// OffsetNode 视觉偏移不改布局、TransformNode 旋转/缩放/原始矩阵绕内容中心构造与布局透传
+/// 测试说明: 覆盖 Transform 切片三节点——AlignNode 逐轴展开/无限约束退化/Flex 主轴 loose 供给不展开
+/// 与 child_size 记录、OffsetNode 视觉偏移不改布局、TransformNode 旋转/缩放/原始矩阵绕内容中心构造与布局透传
 
 #include "aurora/modifier/modifier_transform.h"
 #include "framework/aurora_test.h"
@@ -14,8 +14,11 @@ auto make_measure(float w, float h) -> std::function<Size(const Constraints &)> 
     return [w, h](const Constraints &) -> Size { return Size{.width = w, .height = h}; };
 }
 
-auto constraints(float max_w, float max_h) -> Constraints {
-    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = max_w, .height = max_h}};
+auto constraints(float max_w, float max_h, bool loose_w = false, bool loose_h = false) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F},
+                       .max = Size{.width = max_w, .height = max_h},
+                       .loose_width = loose_w,
+                       .loose_height = loose_h};
 }
 
 }  // namespace
@@ -39,6 +42,35 @@ AURORA_TEST_CASE(align_degrades_to_child_size_under_infinite_constraint) {
     const Size s = a.layout(Constraints{}, make_measure(30.0F, 40.0F));
     AURORA_TEST_CHECK_NEAR(s.width, 30.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(s.height, 40.0F, 0.0F);
+}
+
+AURORA_TEST_CASE(align_expands_only_the_bounded_axis) {
+    // Column 给子项 max.height=∞、max.width 有界：只有宽度轴展开，高度取内容尺寸。
+    // 整块 is_finite() 判据会让这条无界高度轴连带取消水平展开，交叉轴居中静默失效。
+    const AlignNode a(Alignment::Center);
+    const Size s = a.layout(constraints(400.0F, std::numeric_limits<float>::infinity()), make_measure(120.0F, 40.0F));
+    AURORA_TEST_CHECK_NEAR(s.width, 400.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 40.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(a.child_size().width, 120.0F, 0.0F);
+    // 反向：Row 主轴（宽）无界时高度轴展开、宽度取内容尺寸。
+    const AlignNode b(Alignment::Center);
+    const Size s2 = b.layout(constraints(std::numeric_limits<float>::infinity(), 90.0F), make_measure(120.0F, 40.0F));
+    AURORA_TEST_CHECK_NEAR(s2.width, 120.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s2.height, 90.0F, 0.0F);
+}
+
+AURORA_TEST_CASE(align_skips_the_loose_axis_of_a_flex_container) {
+    // Flex 容器给非加权子项的主轴上限只是「剩余空间」（loose_height=true），不是既定槽位：
+    // 在此轴展开会吞掉同列后续兄弟的空间，故 Align 只在交叉轴（宽）展开。
+    const AlignNode a(Alignment::Center);
+    const Size s = a.layout(constraints(400.0F, 260.0F, false, true), make_measure(120.0F, 40.0F));
+    AURORA_TEST_CHECK_NEAR(s.width, 400.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s.height, 40.0F, 0.0F);
+    // 反向：Row 的主轴是宽（loose_width），高度轴仍按既定槽位展开。
+    const AlignNode b(Alignment::Center);
+    const Size s2 = b.layout(constraints(300.0F, 90.0F, true, false), make_measure(120.0F, 40.0F));
+    AURORA_TEST_CHECK_NEAR(s2.width, 120.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(s2.height, 90.0F, 0.0F);
 }
 
 AURORA_TEST_CASE(align_respects_min_constraint_clamp) {

@@ -131,6 +131,14 @@ struct Constraints {
     Size min;
     Size max = Size::infinity();
 
+    /// @brief 该轴上限的**供给性质**：true = 只是「剩余可用空间」的按需上限（Flex 主轴给非加权子项即此），
+    ///        false = 父级既定槽位（可撑满/展开）。
+    /// 「展开自身占满父级」的修饰（`Align`）只在取值为 false 的轴扩张，否则会吞掉 Flex 同列/同行的剩余空间、
+    /// 把后续兄弟控件挤出可视区；对标 Flutter `RenderFlex` 给非 flex 子项施加的 `asFlexChild`（主轴 max=无限）。
+    /// 纯几何填充（`fill_max_*`）仍按 `max` 取值，不受该标记影响。
+    bool loose_width = false;
+    bool loose_height = false;
+
     /// @brief 将给定尺寸夹入 [min, max] 区间。
     [[nodiscard]] auto constrain(const Size &s) const noexcept -> Size {
         Size r;
@@ -139,10 +147,10 @@ struct Constraints {
         return r;
     }
 
-    /// @brief 约束相等比较（布局缓存键，逐字段比较）。
+    /// @brief 约束相等比较（布局缓存键，逐字段比较；供给性质改变展开类修饰的取值，故同属缓存键）。
     [[nodiscard]] auto operator==(const Constraints &o) const noexcept -> bool {
         return min.width == o.min.width && min.height == o.min.height && max.width == o.max.width &&
-               max.height == o.max.height;
+               max.height == o.max.height && loose_width == o.loose_width && loose_height == o.loose_height;
     }
 
     // NOLINTNEXTLINE(*-redundant-parentheses)

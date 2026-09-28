@@ -18,8 +18,12 @@ auto main() -> int {
         AURORA_LOG_INFO("demo", "[modifiers] clicked");
     }));
 
-    au::Text sized{au::LocalizedString{"size(120,40) + align"}};
-    sized.modifier.set(au::Modifier{}.size(120.0F, 40.0F).background(pal::AURORA_ACCENT).align(au::Alignment::Center));
+    // 链序「先压入者靠外」：Align 必须在 size 之外，才能把 120×40 的色块摆到父容器交叉轴中央；
+    // 若 Align 写在最后（靠内），它只定位色块内部的内容，色块本身仍贴列左缘。
+    // Align 逐轴展开：Column 的交叉轴（宽）是既定槽位 → 水平展开成整行并把子盒居中；
+    // 主轴（高）只是 Flex 给的「按需剩余空间」→ 不展开，退化为内容高度，兄弟控件不被挤出。
+    au::Text sized{au::LocalizedString{"align(Center) + size(120,40)"}};
+    sized.modifier.set(au::Modifier{}.align(au::Alignment::Center).size(120.0F, 40.0F).background(pal::AURORA_ACCENT));
 
     au::Text fill{au::LocalizedString{"fill_max_width"}};
     fill.modifier.set(au::Modifier{}.fill_max_width().padding(8.0F).background(pal::AURORA_WARN));
