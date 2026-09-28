@@ -302,6 +302,7 @@ ctest -R itest_ai_compat
 | 豁免指令排版 | `ctest -R check_nolint_layout`（clang-tidy 豁免只在物理行生效：理由夹在指令与代码之间、被豁免语句折行、注释散文抄裸令牌，三类均静默失效，见 `CODING_STANDARDS.md` §5.2） | `check_nolint_layout` |
 | codespec 交叉引用 | `ctest -R check_codespec_xref` | `check_codespec_xref` |
 | 代码-文档同步 | `ctest -R check_code_doc_sync` | `check_code_doc_sync` |
+| Doxygen 注释规范 | `ctest -R check_doc_comments`（`CODING_STANDARDS.md` §13 的 DOC-R1–DOC-R8：标记唯一 / `@` 前缀 / `///` 须挂声明 / `include/` 公共声明须 `///` / 覆盖与命令必选矩阵 / 排版次序 / 矩阵禁写侧（`@param` 名须真实、`void` 与构造析构不写 `@return`）/ `///<` 只挂真实成员） | `check_doc_comments` |
 | 人工用例格式契约 | `ctest -R check_manual_test_format`（`codespec/manual-test/*.md` 的六字段名/顺序/取值域、编号升序、依赖拓扑可解、步骤-预期同号映射、执行记录表列格式） | `check_manual_test_format` |
 | 黄金文件 | `ctest -R golden`（确定性渲染基准） | golden 基准图 |
 

@@ -110,7 +110,7 @@
 | **项目定位 / 设计原则 / 需求清单 / 文档导航 / 版本门禁** | `codespec/SPECIFICATIONS.md`   | 总纲与索引：30 条特性清单（`#1–#30`）逐条指向其规格落点；分层蓝图、命名速查、API 兼容策略；版本与稳定性门禁（§12） |
 | **架构 / 运行时 / 分层 / 模块映射 / 设计不变量**      | `codespec/ARCHITECTURE.md`     | 🥇 架构与设计以它为准：分层、运行时、模块映射、核心数据流、组件树、事件、渲染、性能、11 条设计不变量、错误处理架构、AI-first 原则、测试与 CI |
 | **核心概念 / 跨框架映射 / 概念可枚举性**              | `codespec/CONCEPTS.md`         | 可枚举 UI 原语审计、状态作用域决策树、React / Flutter / Qt 概念映射、迁移要点                              |
-| **编码规范 / 命名 / 错误 / AI 友好性 / 版本管理**     | `codespec/CODING_STANDARDS.md` | 🥇 编码规则以它为准：错误处理、命名、文档与示例、日志纪律、契约标注、AI 友好性、SemVer、函数签名、内部工具层、提交信息规范 |
+| **编码规范 / 命名 / 错误 / 注释 / AI 友好性 / 版本管理**     | `codespec/CODING_STANDARDS.md` | 🥇 编码规则以它为准：错误处理、命名、文档与示例、日志纪律、契约标注、Doxygen 注释规范（§13）、AI 友好性、SemVer、函数签名、内部工具层、提交信息规范 |
 | **使用指南 / 复制即用配方**                           | `codespec/GUIDELINE.md`        | 42 组最小可编译片段：界面 / 布局 / 状态 / 异步 / 持久化 / 媒体 / 字体 / Inspector / 工厂 / 测试 / 样式 / 输入法 / JSON / 坑 / 调试 |
 | **编译选项 / 宏 / 环境变量（统一参考）**              | `codespec/BUILD_OPTIONS.md`    | 🥇 所有 CMake 开关、缓存变量、feature 宏、运行时环境变量与 find_package 集成以它为准                       |
 
@@ -218,3 +218,8 @@
     - 提及尚未落地的规划时，须显式标注为「计划 / 待建」，不得写成既存事实。
     - 增量由 `tools/check/check_codespec_xref.py`（文档交叉引用）与 `tools/check/check_code_doc_sync.py`
       （代码注释引用）守护；本条目是这两道门禁的语义前提。
+12. **公共 API 的文档注释按 `CODING_STANDARDS.md` §13 写，且必须写全**：标记一律 `///`（成员尾注 `///<`，禁 `/** */`、`/*! */`、`//!`、`/**< */`），命令一律 `@` 前缀（禁 `\cmd`），`@brief` 居块首；
+    `include/` 下公共类型的每个函数 / 方法 / 数据成员都要有文档注释，并按「命令必选矩阵」补齐 `@param`（含 `[in]`/`[out]` 方向）、`@return`（非 void）、`@tparam`（每个具名模板形参）、枚举项说明、常量宏说明——**不得只留标记而缺某一规定说明项**（矩阵见 §13.5.2）。
+    纯实现叙述 / TODO / 内部说明用 `//` 且不得紧贴可文档化声明；`include/` 里紧贴公共声明的 `//` 须升级为 `///`。
+    描述内容以代码实际行为为准，禁止编造语义或零信息套话。增量由 CTest `check_doc_comments`（`tools/check/check_doc_comments.py`，DOC-R1–DOC-R8）守护，
+    「写了注释但 Doxygen 读不出」由 `docs` 目标（`Doxyfile`，`WARN_AS_ERROR=YES`）另查；两者互补、不重叠。豁免须逐条写 `DOC-EXEMPT: <规则> <原因>` 并注明理由。

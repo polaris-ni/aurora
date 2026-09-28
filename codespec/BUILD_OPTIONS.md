@@ -30,7 +30,7 @@
 | `cmake/AuroraImageCodecs.cmake` | `AURORA_ENABLE_IMAGE_JPEG` / `AURORA_ENABLE_IMAGE_WEBP` / `AURORA_ENABLE_IMAGE_PNG`（编译期能力开关） |
 | `cmake/AuroraSimd.cmake` | `AURORA_ENABLE_SIMD`（光栅内核 SIMD 双实现，内部宏，不 PUBLIC 传播） |
 | `cmake/AuroraCcache.cmake` | `AURORA_ENABLE_CCACHE`（ccache 编译缓存启动器） |
-| `cmake/AuroraTools.cmake` | 工具 / 基准可执行（`aurora_add_tool()` 统一样板）+ `AURORA_BUILD_INSPECTOR_SERVER` |
+| `cmake/AuroraTools.cmake` | 工具 / 基准可执行（`aurora_add_tool()` 统一样板）+ `AURORA_BUILD_INSPECTOR_SERVER` + `AURORA_BUILD_DOCS`（Doxygen `docs` 聚合目标，见 §2） |
 | `cmake/AuroraVerify.cmake` | `AURORA_BUILD_VERIFY_TOOLS`：真机验收探针（`tools/verify/` 下按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**） |
 | `cmake/AuroraDemos.cmake` | 示例 demo 定义块（须在 `AuroraTools` 与 `AuroraTests` 之后 include，因其依赖 `aurora_inspector_server` 目标） |
 | `cmake/AuroraTests.cmake` | `AURORA_BUILD_TESTS` 注册式 runner（GLOB `tests/*.cpp`、`tests/unit/*.cpp`、`tests/integration/*.cpp` 与 `tests/e2e/*.cpp`（受 `AURORA_BUILD_E2E` 门控，Emscripten 下排除）→ 单一 `aurora_test_runner`，`AURORA_TEST()` 自注册） |
@@ -55,6 +55,8 @@
 | `AURORA_E2E_TIMEOUT_MS` | `60000` | E2E 用例的看门狗超时（非开关、为正整数字符串缓存变量）：按 stem 前缀 `etest_` 以 `--timeout=<ms>` 注入。runner 默认不设限，而真实窗口事件循环一旦挂起没有兜底，故须显式设限——到点先写报告再以退出码 3 结束 | 无（仅改变 `etest_` 用例的 CTest 命令行） |
 | `AURORA_BUILD_INSPECTOR_SERVER` | `OFF` | 编译 Inspector 远程 HTTP 服务器（跨平台：Windows 链 `ws2_32` / POSIX 链 `pthread`） | `aurora_inspector_server` 静态库 |
 | `AURORA_BUILD_VERIFY_TOOLS` | `OFF` | **定义**（非默认构建）`tools/verify/` 下的真机验收探针：按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**（会创建真实窗口、读取屏幕光标，非确定且干扰用户桌面） | 各 `aurora_verify_<平台>_cursor` 可执行文件 + 聚合目标 `aurora_verify` |
+| `AURORA_BUILD_DOCS` | `ON` | 是否**提供** Doxygen API 文档站目标：配置期 `find_program(doxygen)` 探测，未找到则跳过定义（不 FATAL——doxygen 属可选外部工具），也可显式传入可执行路径。目标本身 `EXCLUDE_FROM_ALL`，`cmake --build build` 不触发；配置单一来源是仓库根 `Doxyfile`（`WARN_AS_ERROR=YES`，告警即失败），口径见 `CODING_STANDARDS.md` §13.7 | `docs` 聚合目标（产物 `build/docs/`，告警日志 `build/docs/doxygen_warnings.log`） |
+| `AURORA_DOXYGEN_EXECUTABLE` | 空（= 在 PATH 上找） | doxygen 可执行路径（非开关、FILEPATH 缓存变量）：PATH 上没有 doxygen 的机器用它显式接入，仓库内不写死任何本机路径 | 仅改变 `docs` 目标调用的可执行 |
 ### 2.1 demo 构建方式
 
 demo 不进默认构建（`EXCLUDE_FROM_ALL`）：日常 `cmake --build build` 只建库 / 工具 / 测试；单个 demo 按名构建（`cmake --build build --target demo_lazy_list`），全部 demo 用聚合目标（`cmake --build build --target demos`）。关闭 `AURORA_BUILD_DEMOS` 则连目标都不定义。
@@ -726,6 +728,8 @@ cmake --build build
 -D AURORA_E2E_TIMEOUT_MS=<ms>                 # etest_ 用例看门狗超时（默认 60000）
 -D AURORA_BUILD_INSPECTOR_SERVER=ON|OFF       # Inspector HTTP 服务器（默认 OFF）
 -D AURORA_BUILD_VERIFY_TOOLS=ON|OFF           # 真机验收探针 tools/verify/（默认 OFF，EXCLUDE_FROM_ALL）
+-D AURORA_BUILD_DOCS=ON|OFF                   # Doxygen docs 目标（默认 ON 提供，EXCLUDE_FROM_ALL；缺 doxygen 自动跳过）
+-D AURORA_DOXYGEN_EXECUTABLE=<路径>           # PATH 上没有 doxygen 时显式指定
 
 # 后端开关（= feature 宏，PUBLIC 传播）
 -D AURORA_BACKEND_HEADLESS=ON|OFF   # 无头 PNG（默认 ON）
