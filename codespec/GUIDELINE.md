@@ -1809,8 +1809,8 @@ auto main(int argc, char **argv) -> int {
         return 2;  // 用法错误
     }
     const au::cli::Invocation &invocation = parsed.value();
-    if (invocation.outcome != au::cli::ParseOutcome::Ok) {
-        AURORA_LOG_RAW("gallery", invocation.display_text);  // --help / --version 已预渲染
+    if (invocation.shows_display()) {
+        AURORA_LOG_RAW("gallery", invocation.display_text);  // --help / --version / 自标通道已预渲染
         return 0;
     }
     const au::cli::Arguments &args = invocation.arguments;
@@ -1819,8 +1819,9 @@ auto main(int argc, char **argv) -> int {
         AURORA_LOG_ERROR("gallery", width.error().message);
         return 1;
     }
+    const std::string tint_text = args.values("tint").front().raw_text();  // 原文回显，默认值同样带原文
     AURORA_LOG_RAW("gallery", "scenes=", std::to_string(args.positionals().size()),
-                   " width=", std::to_string(width.value()), " tint=", args.value("tint").unwrap().raw_text(),
+                   " width=", std::to_string(width.value()), " tint=", tint_text,
                    " dry=", args.flag("dry-run") ? "1" : "0", "\n");
     return 0;
 }
@@ -1841,14 +1842,19 @@ if (tint) paint(tint.value());                           // 失败只可能是�
 ```cpp
 args.count("verbose");            // -vv -> 2；默认值不计
 args.explicitly_given("width");   // 区分「用户真写过」与「回落 default_text」
-args.values("tag");               // 可重复选项的全部值——此处勿用 value()，多值即 cli-arity-violated
+args.values("tag");               // 可重复选项的全部值——此处勿用 get<T>()，多值即 cli-arity-violated
 args.rest();                      // `--` 之后的原始 token，未经任何转换
 ```
 
 要点：
 - **生命周期**：`Invocation` / `Arguments` 以指针借用声明表，不拷贝 `CommandSpec`，故声明表必须活得更久（全局 /
   `static` / 同作用域栈对象）。
-- **`--help` 优先于报错**：必填项缺失时用户仍拿到说明书（`outcome == Help`），不会被 `cli-missing-required` 顶回去。
+- **展示请求是一等结果**：`Invocation::view` 取 `EarlyView::Help` / `Version` / `Schema`，文本已在 `display_text`
+  预渲染，`shows_display()` 为真即打印后返回、不进业务。自己加一类出口只需给 `OptionSchema` 标 `early_view`
+  （须是 `Arity::flag()` 的 `Bool`），不必改库。
+- **`--help` 优先于报错**：必填项缺失时用户仍拿到说明书，不会被 `cli-missing-required` 顶回去。
+- **短名可让位**：内建 `-h` / `-V` 是惰性注入，本层把短名用作它途时内建自动降级为仅长名（无需改名避让），
+  `CommandSpec::builtins` 还能逐层关掉它们。
 - **语法边界可枚举**：`--name=v` / `-w80` / `-w 80` / `-vf` 集群 / `--` 终止符成立；**前缀缩写不支持**，未知形态一律
   `cli-unknown-option`（`suggestion` 给 `Did you mean --width?`）。
 - **变长选项是贪心 span**（`--tag a b c` 吞到下一个 `-` 为止），所以位置参数要写在它前面，或放到 `--` 之后。
