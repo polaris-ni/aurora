@@ -3,7 +3,7 @@
 /// 测试说明: 共存期正确性锚——同一批语料分别经本库 parse→dump 与既有库 parse，把本库产出的文本
 /// 交回既有库解析后应逐值等价；数值域归属与「既有库产出文本」的反向兼容同样如此。值语义
 /// （类型判别 / 数值域 / 字符串解码 / 结构）任一处偏差都会在此暴露。
-/// ⚠️ 本文件是迁移过渡脚手架（README 无引用，仅供本轮对拍）：波 4 删除 nlohmann 时，连同
+/// ⚠️ 本文件是迁移过渡脚手架（README 无引用，仅供本轮对拍）：移除 nlohmann 时，连同
 ///    CMake 侧的 AURORA_HAVE_NLOHMANN 开关一并移除。
 
 #include <string>
@@ -55,15 +55,15 @@ AURORA_TEST_CASE(matches_the_incumbent_library_on_a_shared_corpus) {
         AURORA_TEST_CHECK(reparsed == incumbent);
     }
 #else
-    AURORA_TEST_SKIP("nlohmann 语义对拍需要 AURORA_HAVE_NLOHMANN 宏（波 4 后移除）");
+    AURORA_TEST_SKIP("semantic parity with nlohmann requires AURORA_HAVE_NLOHMANN");
 #endif
 }
 
 AURORA_TEST_CASE(matches_the_incumbent_library_across_number_domains) {
 #ifdef AURORA_HAVE_NLOHMANN
     // 三判别（int64 / uint64 / double）的域归属须与既有库一致，否则往返后文本会漂移。
-    constexpr std::string_view kNumbers[] = {"0",  "-0",    "1",     "-1",  "9223372036854775807",
-                                             "18446744073709551615", "1.5", "-1.5", "1e10"};
+    constexpr std::string_view kNumbers[] = {"0",   "-0",   "1",   "-1", "9223372036854775807", "18446744073709551615",
+                                             "1.5", "-1.5", "1e10"};
 
     for (const std::string_view text : kNumbers) {
         const auto ours = aj::parse(text);
@@ -76,7 +76,7 @@ AURORA_TEST_CASE(matches_the_incumbent_library_across_number_domains) {
         AURORA_TEST_CHECK(reparsed == nlohmann::json::parse(text, nullptr, false));
     }
 #else
-    AURORA_TEST_SKIP("nlohmann 数值对拍需要 AURORA_HAVE_NLOHMANN 宏（波 4 后移除）");
+    AURORA_TEST_SKIP("numeric parity with nlohmann requires AURORA_HAVE_NLOHMANN");
 #endif
 }
 
@@ -98,7 +98,7 @@ AURORA_TEST_CASE(accepts_text_produced_by_the_incumbent_library) {
         AURORA_TEST_CHECK(reparsed == incumbent);
     }
 #else
-    AURORA_TEST_SKIP("nlohmann 反向对拍需要 AURORA_HAVE_NLOHMANN 宏（波 4 后移除）");
+    AURORA_TEST_SKIP("reverse parity with nlohmann requires AURORA_HAVE_NLOHMANN");
 #endif
 }
 
