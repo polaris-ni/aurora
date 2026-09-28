@@ -1,7 +1,8 @@
 /// 测试类型: integration
 /// 目标单元: include/aurora/core/image.h
 /// 测试说明: 内置 SVG 子集光栅化与 Image::load / load_svg 集成——viewBox/固有尺寸、rect/circle/
-///           ellipse/line/polygon 光栅化、颜色解析、目标尺寸缩放、内容嗅探、不支持标签降级、
+///           ellipse/line/polygon 光栅化、fill 与 stroke 分层（描边居中、压在填充之上，polyline
+///           开链而 polygon 闭链）、颜色解析、目标尺寸缩放、内容嗅探、不支持标签降级、
 ///           viewBox 回退、尺寸/形状数量防御
 
 #include <array>
@@ -241,6 +242,111 @@ AURORA_TEST_CASE(svg_too_many_shapes_rejected) {
     const std::string path = write_file("svg_too_many_shapes.svg", doc);
     const auto r = aurora::Image::load(path);
     AURORA_TEST_CHECK_FALSE(r.ok());
+}
+
+AURORA_TEST_CASE(svg_stroke_only_polyline_paints_open_path) {
+    // TC-IMAGE-004 的回归焦点：fill="none" + stroke 的折线必须绘出，且**不得**按闭合区域填充。
+    const std::string path = write_file(
+        "svg_polyline_stroke.svg",
+        R"(<svg viewBox="0 0 100 100"><polyline points="10,80 30,20 50,80 70,20 90,80" fill="none" stroke="black" stroke-width="4"/></svg>)");
+
+    const auto r = aurora::Image::load(path);
+    AURORA_TEST_REQUIRE_TRUE(r.ok());
+    const Image &img = r.value();
+    // 段 (10,80)-(30,20) 的中点 (20,50) 落在描边带上 → 黑色不透明。
+    const auto on_path = px(img, 20, 50);
+    AURORA_TEST_CHECK_EQ(on_path[3], 255);
+    AURORA_TEST_CHECK(on_path[0] == 0 && on_path[1] == 0 && on_path[2] == 0);
+    // 折线围成的「假想闭合区」内部（离任何段都 > 半宽）必须保持透明：旧实现正是在这里误按填充绘制。
+    AURORA_TEST_CHECK_EQ(px(img, 30, 70)[3], 0);
+}
+
+AURORA_TEST_CASE(svg_polyline_stroke_does_not_close_polygon_stroke_does) {
+    // polyline 的描边是**开**链，polygon 是闭链：同一组顶点下，收口边只属于后者。
+    const std::string open = write_file(
+        "svg_open.svg",
+        R"(<svg viewBox="0 0 100 100"><polyline points="50,90 10,10 90,10" fill="none" stroke="black" stroke-width="4"/></svg>)");
+    const std::string closed = write_file(
+        "svg_closed.svg",
+        R"(<svg viewBox="0 0 100 100"><polygon points="50,90 10,10 90,10" fill="none" stroke="black" stroke-width="4"/></svg>)");
+
+    const auto ro = aurora::Image::load(open);
+    const auto rc = aurora::Image::load(closed);
+    AURORA_TEST_REQUIRE_TRUE(ro.ok());
+    AURORA_TEST_REQUIRE_TRUE(rc.ok());
+    // 收口边 (90,10)-(50,90) 的中点 (70,50)：polygon 有墨、polyline 无墨。
+    AURORA_TEST_CHECK_EQ(px(rc.value(), 70, 50)[3], 255);
+    AURORA_TEST_CHECK_EQ(px(ro.value(), 70, 50)[3], 0);
+    // 两者共有边 (10,10)-(90,10) 上都有墨。
+    AURORA_TEST_CHECK_EQ(px(rc.value(), 50, 10)[3], 255);
+    AURORA_TEST_CHECK_EQ(px(ro.value(), 50, 10)[3], 255);
+}
+
+AURORA_TEST_CASE(svg_polygon_stroke_band_straddles_outline) {
+    // 描边以轮廓为中心：填充内部靠边处与轮廓外侧同样宽的一圈都被描边覆盖（描边压在填充之上）。
+    const std::string path = write_file(
+        "svg_poly_band.svg",
+        R"(<svg viewBox="0 0 100 100"><polygon points="10,10 90,10 50,90" fill="#ff0000" stroke="black" stroke-width="6"/></svg>)");
+
+    const auto r = aurora::Image::load(path);
+    AURORA_TEST_REQUIRE_TRUE(r.ok());
+    const Image &img = r.value();
+    // 顶边 y=10 上下各 3：内侧与外侧均为黑色描边。
+    for (const int y : {11, 8}) {
+        const auto c = px(img, 49, y);
+        AURORA_TEST_CHECK(c[3] == 255 && c[0] == 0);  // 描边带在轮廓两侧对称
+    }
+    // 深处仍是红色填充。
+    const auto center = px(img, 50, 40);
+    AURORA_TEST_CHECK(center[0] == 255 && center[2] == 0);
+    // 远离轮廓与填充区：透明。
+    AURORA_TEST_CHECK_EQ(px(img, 5, 95)[3], 0);
+}
+
+AURORA_TEST_CASE(svg_rect_and_circle_stroke_only) {
+    const std::string path = write_file(
+        "svg_stroke_shapes.svg",
+        R"(<svg viewBox="0 0 100 60"><rect x="10" y="10" width="30" height="30" fill="none" stroke="black" stroke-width="4"/>)"
+        R"(<circle cx="70" cy="25" r="15" fill="none" stroke="blue" stroke-width="4"/></svg>)");
+
+    const auto r = aurora::Image::load(path);
+    AURORA_TEST_REQUIRE_TRUE(r.ok());
+    const Image &img = r.value();
+    // rect：边上有墨、中心留空（fill=none 不再被当成填充）。
+    AURORA_TEST_CHECK_EQ(px(img, 25, 10)[3], 255);
+    AURORA_TEST_CHECK_EQ(px(img, 25, 25)[3], 0);
+    // circle：边界带不透明（蓝），圆心透明。
+    AURORA_TEST_CHECK_EQ(px(img, 85, 25)[3], 255);
+    AURORA_TEST_CHECK_EQ(px(img, 70, 25)[3], 0);
+}
+
+AURORA_TEST_CASE(svg_ellipse_stroke_band_follows_boundary) {
+    const std::string path = write_file(
+        "svg_ellipse_stroke.svg",
+        R"(<svg viewBox="0 0 100 100"><ellipse cx="50" cy="50" rx="40" ry="20" fill="none" stroke="black" stroke-width="4"/></svg>)");
+
+    const auto r = aurora::Image::load(path);
+    AURORA_TEST_REQUIRE_TRUE(r.ok());
+    const Image &img = r.value();
+    // 长轴端 (10,50) 与短轴端 (50,30) 都在边界上 → 有墨。
+    AURORA_TEST_CHECK_EQ(px(img, 10, 50)[3], 255);
+    AURORA_TEST_CHECK_EQ(px(img, 50, 30)[3], 255);
+    // 圆心与长轴中点（离边界 15）→ 透明。
+    AURORA_TEST_CHECK_EQ(px(img, 50, 50)[3], 0);
+    AURORA_TEST_CHECK_EQ(px(img, 25, 50)[3], 0);
+}
+
+AURORA_TEST_CASE(svg_line_stroke_unchanged_and_default_black) {
+    // line 只由描边承载（无填充语义）：既有行为不得因分层绘制而回归。
+    const std::string path = write_file(
+        "svg_line_only.svg",
+        R"(<svg viewBox="0 0 20 20"><line x1="0" y1="10" x2="20" y2="10" stroke="black" stroke-width="4"/></svg>)");
+
+    const auto r = aurora::Image::load(path);
+    AURORA_TEST_REQUIRE_TRUE(r.ok());
+    const Image &img = r.value();
+    AURORA_TEST_CHECK_EQ(px(img, 10, 10)[3], 255);
+    AURORA_TEST_CHECK_EQ(px(img, 10, 2)[3], 0);
 }
 
 }  // namespace aurora::test_cases::itest_svg_image
