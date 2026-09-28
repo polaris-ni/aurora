@@ -125,49 +125,50 @@ AURORA_TEST_CASE(tray_move_preserves_state) {
 }
 
 AURORA_TEST_CASE(tray_callback_classifies_version4_events_by_loword_only) {
+    using aurora::internal::AURORA_TRAY_ICON_ID;
+    using aurora::internal::AURORA_TRAY_NIN_BALLOONUSERCLICK;
+    using aurora::internal::AURORA_TRAY_NIN_KEYSELECT;
+    using aurora::internal::AURORA_TRAY_NIN_SELECT;
+    using aurora::internal::AURORA_TRAY_WM_CONTEXTMENU;
+    using aurora::internal::AURORA_TRAY_WM_LBUTTONUP;
+    using aurora::internal::AURORA_TRAY_WM_RBUTTONUP;
     using aurora::internal::classify_tray_callback;
-    using aurora::internal::k_tray_icon_id;
-    using aurora::internal::k_tray_nin_balloonuserclick;
-    using aurora::internal::k_tray_nin_keyselect;
-    using aurora::internal::k_tray_nin_select;
-    using aurora::internal::k_tray_wm_contextmenu;
-    using aurora::internal::k_tray_wm_lbuttonup;
-    using aurora::internal::k_tray_wm_rbuttonup;
 
     // 版本 4：高字是 uID、低字是事件（实测一次左键连发 POPUPOPEN/DOWN/UP/NIN_SELECT 四条）。
-    auto ev = classify_tray_callback(k_tray_nin_select, k_tray_icon_id, true);
+    auto ev = classify_tray_callback(AURORA_TRAY_NIN_SELECT, AURORA_TRAY_ICON_ID, true);
     AURORA_TEST_CHECK_TRUE(ev.activate);
     AURORA_TEST_CHECK_FALSE(ev.context_menu);
-    AURORA_TEST_CHECK_TRUE(classify_tray_callback(k_tray_nin_keyselect, k_tray_icon_id, true).activate);
-    AURORA_TEST_CHECK_TRUE(classify_tray_callback(k_tray_nin_balloonuserclick, k_tray_icon_id, true).activate);
+    AURORA_TEST_CHECK_TRUE(classify_tray_callback(AURORA_TRAY_NIN_KEYSELECT, AURORA_TRAY_ICON_ID, true).activate);
+    AURORA_TEST_CHECK_TRUE(
+        classify_tray_callback(AURORA_TRAY_NIN_BALLOONUSERCLICK, AURORA_TRAY_ICON_ID, true).activate);
 
     // 同一次点击附带的裸鼠标消息必须忽略，否则 on_activate 每次点击触发两遍。
-    ev = classify_tray_callback(k_tray_wm_lbuttonup, k_tray_icon_id, true);
+    ev = classify_tray_callback(AURORA_TRAY_WM_LBUTTONUP, AURORA_TRAY_ICON_ID, true);
     AURORA_TEST_CHECK_FALSE(ev.activate);
     AURORA_TEST_CHECK_FALSE(ev.context_menu);
 
     // 菜单只认 WM_CONTEXTMENU：右键的 WM_RBUTTONUP 是它前一条重复投递。
-    ev = classify_tray_callback(k_tray_wm_contextmenu, k_tray_icon_id, true);
+    ev = classify_tray_callback(AURORA_TRAY_WM_CONTEXTMENU, AURORA_TRAY_ICON_ID, true);
     AURORA_TEST_CHECK_TRUE(ev.context_menu);
     AURORA_TEST_CHECK_FALSE(ev.activate);
-    AURORA_TEST_CHECK_FALSE(classify_tray_callback(k_tray_wm_rbuttonup, k_tray_icon_id, true).context_menu);
+    AURORA_TEST_CHECK_FALSE(classify_tray_callback(AURORA_TRAY_WM_RBUTTONUP, AURORA_TRAY_ICON_ID, true).context_menu);
 
     // 别的图标（uID 不符）不归本库管。
-    AURORA_TEST_CHECK_FALSE(classify_tray_callback(k_tray_nin_select, k_tray_icon_id + 1, true).activate);
+    AURORA_TEST_CHECK_FALSE(classify_tray_callback(AURORA_TRAY_NIN_SELECT, AURORA_TRAY_ICON_ID + 1, true).activate);
 }
 
 AURORA_TEST_CASE(tray_callback_classifies_legacy_whole_lparam_and_ignores_noise) {
+    using aurora::internal::AURORA_TRAY_WM_CONTEXTMENU;
+    using aurora::internal::AURORA_TRAY_WM_LBUTTONDBLCLK;
+    using aurora::internal::AURORA_TRAY_WM_LBUTTONUP;
+    using aurora::internal::AURORA_TRAY_WM_RBUTTONUP;
     using aurora::internal::classify_tray_callback;
-    using aurora::internal::k_tray_wm_contextmenu;
-    using aurora::internal::k_tray_wm_lbuttondblclk;
-    using aurora::internal::k_tray_wm_lbuttonup;
-    using aurora::internal::k_tray_wm_rbuttonup;
 
     // NIM_SETVERSION 失败即回落旧编码：整个 lParam 就是鼠标消息，高字恒 0。
-    AURORA_TEST_CHECK_TRUE(classify_tray_callback(k_tray_wm_lbuttonup, 0, false).activate);
-    AURORA_TEST_CHECK_TRUE(classify_tray_callback(k_tray_wm_lbuttondblclk, 0, false).activate);
-    AURORA_TEST_CHECK_TRUE(classify_tray_callback(k_tray_wm_rbuttonup, 0, false).context_menu);
-    AURORA_TEST_CHECK_TRUE(classify_tray_callback(k_tray_wm_contextmenu, 0, false).context_menu);
+    AURORA_TEST_CHECK_TRUE(classify_tray_callback(AURORA_TRAY_WM_LBUTTONUP, 0, false).activate);
+    AURORA_TEST_CHECK_TRUE(classify_tray_callback(AURORA_TRAY_WM_LBUTTONDBLCLK, 0, false).activate);
+    AURORA_TEST_CHECK_TRUE(classify_tray_callback(AURORA_TRAY_WM_RBUTTONUP, 0, false).context_menu);
+    AURORA_TEST_CHECK_TRUE(classify_tray_callback(AURORA_TRAY_WM_CONTEXTMENU, 0, false).context_menu);
 
     // 无关消息既不激活也不弹菜单（NIN_POPUPOPEN / NIN_BALLOONHIDE / WM_MOUSEMOVE）。
     auto ev = classify_tray_callback(0x0406, 0, false);

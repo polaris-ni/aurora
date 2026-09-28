@@ -37,13 +37,13 @@ namespace aurora {
 
 #ifdef AURORA_PLATFORM_WINDOWS
 // 内部头里的常量副本必须与 SDK 取值一致，漂移即编译失败（`tray_events.h` 不引 windows.h，无法自证）。
-static_assert(internal::k_tray_wm_contextmenu == static_cast<std::uint32_t>(WM_CONTEXTMENU));
-static_assert(internal::k_tray_wm_lbuttonup == static_cast<std::uint32_t>(WM_LBUTTONUP));
-static_assert(internal::k_tray_wm_lbuttondblclk == static_cast<std::uint32_t>(WM_LBUTTONDBLCLK));
-static_assert(internal::k_tray_wm_rbuttonup == static_cast<std::uint32_t>(WM_RBUTTONUP));
-static_assert(internal::k_tray_nin_select == static_cast<std::uint32_t>(NIN_SELECT));
-static_assert(internal::k_tray_nin_keyselect == static_cast<std::uint32_t>(NIN_KEYSELECT));
-static_assert(internal::k_tray_nin_balloonuserclick == static_cast<std::uint32_t>(NIN_BALLOONUSERCLICK));
+static_assert(internal::AURORA_TRAY_WM_CONTEXTMENU == static_cast<std::uint32_t>(WM_CONTEXTMENU));
+static_assert(internal::AURORA_TRAY_WM_LBUTTONUP == static_cast<std::uint32_t>(WM_LBUTTONUP));
+static_assert(internal::AURORA_TRAY_WM_LBUTTONDBLCLK == static_cast<std::uint32_t>(WM_LBUTTONDBLCLK));
+static_assert(internal::AURORA_TRAY_WM_RBUTTONUP == static_cast<std::uint32_t>(WM_RBUTTONUP));
+static_assert(internal::AURORA_TRAY_NIN_SELECT == static_cast<std::uint32_t>(NIN_SELECT));
+static_assert(internal::AURORA_TRAY_NIN_KEYSELECT == static_cast<std::uint32_t>(NIN_KEYSELECT));
+static_assert(internal::AURORA_TRAY_NIN_BALLOONUSERCLICK == static_cast<std::uint32_t>(NIN_BALLOONUSERCLICK));
 #endif
 
 struct SystemTray::Impl {
@@ -223,7 +223,7 @@ auto SystemTray::Impl::add_icon() -> bool {
     }
     nid.cbSize = sizeof(NOTIFYICONDATAW);
     nid.hWnd = hwnd;
-    nid.uID = internal::k_tray_icon_id;
+    nid.uID = internal::AURORA_TRAY_ICON_ID;
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     nid.uCallbackMessage = AURORA_CALLBACK_MAG;
     nid.hIcon = (hicon != nullptr) ? hicon : LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
