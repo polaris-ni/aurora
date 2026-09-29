@@ -455,38 +455,38 @@ inline auto PieChart::describe_static() -> WidgetDescriptor {
 // 键集与 describe_static 的属性表一致。
 inline auto PieChart::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-    props["sections"] = pie_section_vector_to_json(sections);
-    props["center_space_ratio"] = center_space_ratio;
-    props["start_angle"] = start_angle;
-    props["show_percentage_labels"] = show_percentage_labels;
-    props["section_gap"] = section_gap;
-    props["legend"] = chart_legend_spec_to_json(legend);
-    props["padding"] = edge_insets_to_json(padding);
+    props.set("sections", pie_section_vector_to_json(sections));
+    props.set("center_space_ratio", center_space_ratio);
+    props.set("start_angle", start_angle);
+    props.set("show_percentage_labels", Json{show_percentage_labels});
+    props.set("section_gap", section_gap);
+    props.set("legend", chart_legend_spec_to_json(legend));
+    props.set("padding", edge_insets_to_json(padding));
 }
 
 // 键名与 serialize_props 对称；sections/legend/padding 交由转换函数直接覆盖。
 inline auto PieChart::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("sections")) {
-        sections = json_to_pie_section_vector(props["sections"]);
+        sections = json_to_pie_section_vector(*props.at("sections"));
     }
-    if (props.contains("center_space_ratio") && props["center_space_ratio"].is_number()) {
-        center_space_ratio = std::clamp(props["center_space_ratio"].get<float>(), 0.0F, 0.95F);
+    if (props.contains("center_space_ratio") && props.at("center_space_ratio")->is_number()) {
+        center_space_ratio = std::clamp(props.at("center_space_ratio")->as_or<float>(0.0F), 0.0F, 0.95F);
     }
-    if (props.contains("start_angle") && props["start_angle"].is_number()) {
-        start_angle = props["start_angle"].get<float>();
+    if (props.contains("start_angle") && props.at("start_angle")->is_number()) {
+        start_angle = props.at("start_angle")->as_or<float>(0.0F);
     }
-    if (props.contains("show_percentage_labels") && props["show_percentage_labels"].is_boolean()) {
-        show_percentage_labels = props["show_percentage_labels"].get<bool>();
+    if (props.contains("show_percentage_labels") && props.at("show_percentage_labels")->is_bool()) {
+        show_percentage_labels = props.at("show_percentage_labels")->as_or<bool>(false);
     }
-    if (props.contains("section_gap") && props["section_gap"].is_number()) {
-        section_gap = std::max(0.0F, props["section_gap"].get<float>());
+    if (props.contains("section_gap") && props.at("section_gap")->is_number()) {
+        section_gap = std::max(0.0F, props.at("section_gap")->as_or<float>(0.0F));
     }
     if (props.contains("legend")) {
-        legend = json_to_chart_legend_spec(props["legend"]);
+        legend = json_to_chart_legend_spec(*props.at("legend"));
     }
     if (props.contains("padding")) {
-        padding = json_to_edge_insets(props["padding"]);
+        padding = json_to_edge_insets(*props.at("padding"));
     }
     mark_needs_layout();
     mark_needs_paint();

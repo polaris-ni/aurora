@@ -251,9 +251,9 @@ class DatePicker : public Widget {
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入公共属性
         const Date d = selected_.get();  // 当前选中日期快照（三字段写入 props）
-        props["year"] = d.year;
-        props["month"] = d.month;
-        props["day"] = d.day;
+        props.set("year", d.year);
+        props.set("month", d.month);
+        props.set("day", d.day);
     }
 
     /// @brief 从属性 JSON 回填年/月/日（键均可选；合成日期合法才生效并同步视图年月）。
@@ -262,13 +262,13 @@ class DatePicker : public Widget {
         Widget::deserialize_props(props);
         Date d = selected_.get();
         if (props.contains("year")) {
-            d.year = props["year"].get<int>();
+            d.year = props.at("year")->as_or<std::int32_t>(0);
         }
         if (props.contains("month")) {
-            d.month = props["month"].get<int>();
+            d.month = props.at("month")->as_or<std::int32_t>(0);
         }
         if (props.contains("day")) {
-            d.day = props["day"].get<int>();
+            d.day = props.at("day")->as_or<std::int32_t>(0);
         }
         if (d.is_valid()) {
             selected_.set(d);
@@ -490,8 +490,8 @@ class TimePicker : public Widget {
     /// @param props 输出目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入公共属性
-        props["hour"] = selected_.get().hour;
-        props["minute"] = selected_.get().minute;
+        props.set("hour", selected_.get().hour);
+        props.set("minute", selected_.get().minute);
     }
 
     /// @brief 从属性 JSON 回填时/分（键均可选；合成时刻合法才生效）。
@@ -500,10 +500,10 @@ class TimePicker : public Widget {
         Widget::deserialize_props(props);
         TimeOfDay t = selected_.get();
         if (props.contains("hour")) {
-            t.hour = props["hour"].get<int>();
+            t.hour = props.at("hour")->as_or<std::int32_t>(0);
         }
         if (props.contains("minute")) {
-            t.minute = props["minute"].get<int>();
+            t.minute = props.at("minute")->as_or<std::int32_t>(0);
         }
         if (t.is_valid()) {
             selected_.set(t);
@@ -671,7 +671,7 @@ class ColorPicker : public Widget {
     /// @param props 输出目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入公共属性
-        props["color"] = color_to_json(selected_.get());
+        props.set("color", color_to_json(selected_.get()));
     }
 
     /// @brief 从属性 JSON 的 color 键回填选中色（键缺失则不动）。
@@ -679,7 +679,7 @@ class ColorPicker : public Widget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("color")) {
-            selected_.set(json_to_color(props["color"]));
+            selected_.set(json_to_color(*props.at("color")));
         }
     }
 

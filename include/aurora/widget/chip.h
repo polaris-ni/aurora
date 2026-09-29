@@ -219,15 +219,15 @@ class Chip : public LeafWidget {
     /// @param props 输出目标 JSON 对象
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入通用属性
-        props["label"] = label_;
+        props.set("label", label_);
         if (!avatar_.empty()) {
-            props["avatar"] = avatar_;
+            props.set("avatar", avatar_);
         }
-        props["background"] = color_to_json(bg_);
-        props["text_color"] = color_to_json(text_color_);
-        props["delete_color"] = color_to_json(delete_color_);
-        props["font_size"] = font_size_;
-        props["corner_radius"] = corner_radius_;
+        props.set("background", color_to_json(bg_));
+        props.set("text_color", color_to_json(text_color_));
+        props.set("delete_color", color_to_json(delete_color_));
+        props.set("font_size", font_size_);
+        props.set("corner_radius", corner_radius_);
     }
 
     /// @brief 从 JSON 重建 Chip 自有属性（与 `serialize_props` 对偶；键缺失保留现值）。
@@ -235,25 +235,25 @@ class Chip : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("label")) {
-            label_ = props["label"].get<std::string>();
+            label_ = props.at("label")->as_or<std::string>("");
         }
         if (props.contains("avatar")) {
-            avatar_ = props["avatar"].get<std::string>();
+            avatar_ = props.at("avatar")->as_or<std::string>("");
         }
         if (props.contains("background")) {
-            bg_ = json_to_color(props["background"]);
+            bg_ = json_to_color(*props.at("background"));
         }
         if (props.contains("text_color")) {
-            text_color_ = json_to_color(props["text_color"]);
+            text_color_ = json_to_color(*props.at("text_color"));
         }
         if (props.contains("delete_color")) {
-            delete_color_ = json_to_color(props["delete_color"]);
+            delete_color_ = json_to_color(*props.at("delete_color"));
         }
         if (props.contains("font_size")) {
-            font_size_ = props["font_size"].get<float>();
+            font_size_ = props.at("font_size")->as_or<float>(0.0F);
         }
         if (props.contains("corner_radius")) {
-            corner_radius_ = props["corner_radius"].get<float>();
+            corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
         }
     }
 
@@ -437,9 +437,9 @@ class Badge : public SingleChild {
     /// @param props 输出目标 JSON 对象
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入通用属性
-        props["count"] = count_;
-        props["badge_color"] = color_to_json(badge_color_);
-        props["text_color"] = color_to_json(text_color_);
+        props.set("count", count_);
+        props.set("badge_color", color_to_json(badge_color_));
+        props.set("text_color", color_to_json(text_color_));
     }
 
     /// @brief 从 JSON 重建 Badge 自有属性（与 `serialize_props` 对偶；键缺失保留现值）。
@@ -447,13 +447,13 @@ class Badge : public SingleChild {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("count")) {
-            count_ = props["count"].get<int>();
+            count_ = props.at("count")->as_or<std::int32_t>(0);
         }
         if (props.contains("badge_color")) {
-            badge_color_ = json_to_color(props["badge_color"]);
+            badge_color_ = json_to_color(*props.at("badge_color"));
         }
         if (props.contains("text_color")) {
-            text_color_ = json_to_color(props["text_color"]);
+            text_color_ = json_to_color(*props.at("text_color"));
         }
     }
 

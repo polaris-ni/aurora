@@ -140,11 +140,11 @@ class Divider : public LeafWidget, public DividerProps {
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["orientation"] = orientation == Orientation::Vertical ? "vertical" : "horizontal";
-        props["thickness"] = thickness;
-        props["color"] = color_to_json(color);
-        props["indent"] = indent;
-        props["end_indent"] = end_indent;
+        props.set("orientation", orientation == Orientation::Vertical ? "vertical" : "horizontal");
+        props.set("thickness", thickness);
+        props.set("color", color_to_json(color));
+        props.set("indent", indent);
+        props.set("end_indent", end_indent);
     }
 
     /// @brief 反序列化分隔线属性：按存在的键逐一还原方向/线粗/颜色/缩进，缺键保持当前值。
@@ -152,20 +152,20 @@ class Divider : public LeafWidget, public DividerProps {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("orientation")) {
-            const std::string o = props["orientation"].get<std::string>();
+            const std::string o = props.at("orientation")->as_or<std::string>("");
             orientation = o == "vertical" ? Orientation::Vertical : Orientation::Horizontal;
         }
         if (props.contains("thickness")) {
-            thickness = props["thickness"].get<float>();
+            thickness = props.at("thickness")->as_or<float>(0.0F);
         }
         if (props.contains("color")) {
-            color = json_to_color(props["color"]);
+            color = json_to_color(*props.at("color"));
         }
         if (props.contains("indent")) {
-            indent = props["indent"].get<float>();
+            indent = props.at("indent")->as_or<float>(0.0F);
         }
         if (props.contains("end_indent")) {
-            end_indent = props["end_indent"].get<float>();
+            end_indent = props.at("end_indent")->as_or<float>(0.0F);
         }
     }
 

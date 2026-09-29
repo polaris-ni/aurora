@@ -109,8 +109,8 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
     auto serialize_props(Json &props) const -> void override {
         // 先链入基类通用属性。
         Widget::serialize_props(props);
-        props["selected_index"] = selected_index;  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
-        props["bar_height"] = bar_height;
+        props.set("selected_index", selected_index);  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        props.set("bar_height", bar_height);
     }
 
     /// @brief 反序列化专有属性：selected_index/bar_height 存在才覆盖。
@@ -118,10 +118,10 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("selected_index")) {
-            selected_index = props["selected_index"].get<int>();
+            selected_index = props.at("selected_index")->as_or<std::int32_t>(0);
         }
         if (props.contains("bar_height")) {
-            bar_height = props["bar_height"].get<float>();
+            bar_height = props.at("bar_height")->as_or<float>(0.0F);
         }
     }
 

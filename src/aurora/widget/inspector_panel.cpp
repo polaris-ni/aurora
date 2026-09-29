@@ -18,20 +18,20 @@ namespace aurora {
 namespace {
 auto aurora_infer_value_string(const Json &v) -> std::string {
     if (v.is_string()) {
-        return v.get<std::string>();
+        return v.as_or<std::string>("");
     }
-    if (v.is_number_integer()) {
-        return std::to_string(v.get<int>());
+    if (v.is_int()) {
+        return std::to_string(v.as_or<std::int32_t>(0));
     }
-    if (v.is_number_float()) {
+    if (v.is_double()) {
         std::ostringstream oss;
-        oss << v.get<float>();
+        oss << v.as_or<float>(0.0F);
         return oss.str();
     }
-    if (v.is_boolean()) {
-        return v.get<bool>() ? "true" : "false";
+    if (v.is_bool()) {
+        return v.as_or<bool>(false) ? "true" : "false";
     }
-    return v.dump();
+    return json::dump(v).unwrap();
 }
 
 auto aurora_append_extra_props(std::vector<std::pair<std::string, std::string>> &rows, const Json &values,
@@ -39,8 +39,8 @@ auto aurora_append_extra_props(std::vector<std::pair<std::string, std::string>> 
     if (!values.is_object()) {
         return;
     }
-    for (auto it = values.begin(); it != values.end(); ++it) {
-        const std::string &key = it.key();
+    for (const auto &e : values.entries()) {
+        const std::string key = std::string(e.key);
         bool found = false;
         for (const auto &pd : desc.properties) {
             if (pd.name == key) {
@@ -49,7 +49,7 @@ auto aurora_append_extra_props(std::vector<std::pair<std::string, std::string>> 
             }
         }
         if (!found) {
-            const std::string val_str = it->is_string() ? it->get<std::string>() : it->dump();
+            const std::string val_str = e.value.is_string() ? e.value.as_or<std::string>("") : json::dump(e.value).unwrap();
             rows.emplace_back(key, val_str);
         }
     }
@@ -112,7 +112,7 @@ auto InspectorPanel::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["ratio"] = ratio_;
+    props.set("ratio", ratio_);
 }
 
 auto InspectorPanel::export_code() const -> std::string {
@@ -421,7 +421,7 @@ auto InspectorPanel::update_props_panel() -> void {
         const std::string val_str =
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            values.contains(pd.name) ? aurora_infer_value_string(values[pd.name]) : pd.default_value;
+            values.contains(pd.name) ? aurora_infer_value_string(*values.at(pd.name)) : pd.default_value;
         prop_rows_.emplace_back(pd.name, val_str);
     }
 

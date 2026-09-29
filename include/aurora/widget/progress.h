@@ -197,13 +197,13 @@ class ProgressIndicator : public LeafWidget {
     /// @param props [out] 写入的属性 JSON 对象（先叠加基类属性）。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["value"] = value();
+        props.set("value", value());
         if (color_.has_value()) {
-            props["color"] = color_to_json(*color_);  // 未设置不输出：保留「跟随主题」语义
+            props.set("color", color_to_json(*color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props["track_color"] = color_to_json(track_color_);
-        props["thickness"] = thickness_;
-        props["corner_radius"] = corner_radius_;
+        props.set("track_color", color_to_json(track_color_));
+        props.set("thickness", thickness_);
+        props.set("corner_radius", corner_radius_);
     }
 
     /// @brief 从 JSON 恢复属性：色值 / 厚度 / 圆角直接覆写，`value` 经 `set_value` 夹取并触发重绘。
@@ -211,19 +211,19 @@ class ProgressIndicator : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("color")) {
-            color_ = json_to_color(props["color"]);
+            color_ = json_to_color(*props.at("color"));
         }
         if (props.contains("track_color")) {
-            track_color_ = json_to_color(props["track_color"]);
+            track_color_ = json_to_color(*props.at("track_color"));
         }
         if (props.contains("thickness")) {
-            thickness_ = props["thickness"].get<float>();
+            thickness_ = props.at("thickness")->as_or<float>(0.0F);
         }
         if (props.contains("corner_radius")) {
-            corner_radius_ = props["corner_radius"].get<float>();
+            corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
         }
         if (props.contains("value")) {
-            set_value(props["value"].get<double>());
+            set_value(props.at("value")->as_or<double>(0.0));
         }
     }
 

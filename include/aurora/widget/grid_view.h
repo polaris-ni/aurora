@@ -302,15 +302,15 @@ class GridView : public Widget {
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入通用属性（width/height/show 等）
-        props["count"] = count_;
-        props["columns"] = columns_;
-        props["cell_extent"] = cell_extent_;
-        props["scroll_offset"] = offset_;
-        props["cache_extent"] = cache_extent_;
-        props["restore_key"] = restore_key_;
-        props["snap_extent"] = snap_.extent;
-        props["snap_paging"] = snap_.paging;
-        props["snap_alignment"] = snap_alignment_to_json(snap_.alignment);
+        props.set("count", count_);
+        props.set("columns", columns_);
+        props.set("cell_extent", cell_extent_);
+        props.set("scroll_offset", offset_);
+        props.set("cache_extent", cache_extent_);
+        props.set("restore_key", restore_key_);
+        props.set("snap_extent", snap_.extent);
+        props.set("snap_paging", Json{snap_.paging});
+        props.set("snap_alignment", snap_alignment_to_json(snap_.alignment));
     }
 
     /// @brief 从静态 JSON 回填标量属性。单元格内容仍持运行时 `ItemBuilder`（不可序列化），
@@ -320,38 +320,38 @@ class GridView : public Widget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);  // 先由基类恢复通用属性
         if (props.contains("count")) {
-            const int declared = props["count"].get<int>();
+            const int declared = props.at("count")->as_or<std::int32_t>(0);
             count_ = declared < 0 ? 0 : declared;
         }
         if (props.contains("columns")) {
-            const int declared = props["columns"].get<int>();
+            const int declared = props.at("columns")->as_or<std::int32_t>(0);
             columns_ =
                 declared > 0 ? declared : (Diagnostics::degraded("layout", "GridView columns 非正已降级为 1"), 1);
         }
         if (props.contains("cell_extent")) {
-            const float declared = props["cell_extent"].get<float>();
+            const float declared = props.at("cell_extent")->as_or<float>(0.0F);
             cell_extent_ = declared > 0.0F
                                ? declared
                                : (Diagnostics::degraded("layout", "GridView cell_extent 非正已降级为 96"), 96.0F);
         }
         if (props.contains("cache_extent")) {
-            set_cache_extent(props["cache_extent"].get<float>());
+            set_cache_extent(props.at("cache_extent")->as_or<float>(0.0F));
         }
         if (props.contains("restore_key")) {
-            set_restore_key(props["restore_key"].get<std::string>());
+            set_restore_key(props.at("restore_key")->as_or<std::string>(""));
         }
         if (props.contains("snap_extent")) {
-            snap_.extent = props["snap_extent"].get<float>();
+            snap_.extent = props.at("snap_extent")->as_or<float>(0.0F);
         }
         if (props.contains("snap_paging")) {
-            snap_.paging = props["snap_paging"].get<bool>();
+            snap_.paging = props.at("snap_paging")->as_or<bool>(false);
         }
         if (props.contains("snap_alignment")) {
-            snap_.alignment = json_to_snap_alignment(props["snap_alignment"]);
+            snap_.alignment = json_to_snap_alignment(*props.at("snap_alignment"));
         }
         if (props.contains("scroll_offset")) {
             // 显式偏移优先于 restore_key 恢复（见 maybe_restore_scroll）：记入 pending 待布局后应用。
-            pending_offset_ = props["scroll_offset"].get<float>();
+            pending_offset_ = props.at("scroll_offset")->as_or<float>(0.0F);
             scroll_restored_ = false;
         }
     }

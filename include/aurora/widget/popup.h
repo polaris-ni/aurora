@@ -168,10 +168,10 @@ class Popup : public SingleChild {
     /// @param props 输出 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["open"] = open_;
-        props["anchor_x"] = anchor_.x;
-        props["anchor_y"] = anchor_.y;
-        props["dismiss_on_outside_click"] = dismiss_outside_;
+        props.set("open", Json{open_});
+        props.set("anchor_x", anchor_.x);
+        props.set("anchor_y", anchor_.y);
+        props.set("dismiss_on_outside_click", Json{dismiss_outside_});
     }
 
     /// @brief 从 JSON 恢复弹出属性，缺失键保持当前值；先链入基类。
@@ -179,16 +179,16 @@ class Popup : public SingleChild {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("open")) {
-            open_ = props["open"].get<bool>();
+            open_ = props.at("open")->as_or<bool>(false);
         }
         if (props.contains("anchor_x")) {
-            anchor_.x = props["anchor_x"].get<float>();
+            anchor_.x = props.at("anchor_x")->as_or<float>(0.0F);
         }
         if (props.contains("anchor_y")) {
-            anchor_.y = props["anchor_y"].get<float>();
+            anchor_.y = props.at("anchor_y")->as_or<float>(0.0F);
         }
         if (props.contains("dismiss_on_outside_click")) {
-            dismiss_outside_ = props["dismiss_on_outside_click"].get<bool>();
+            dismiss_outside_ = props.at("dismiss_on_outside_click")->as_or<bool>(false);
         }
     }
 

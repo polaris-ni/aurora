@@ -381,23 +381,27 @@ struct PropDescriptor {
     }
     std::unordered_map<std::string, PropDescriptor> table{};  // 未命中缓存时新建的描述表（未知类型为空表）
     const Json schema = describe_component(type);  // 未知类型为空对象
-    if (schema.contains("prop_descriptors") && schema["prop_descriptors"].is_array()) {
+    const auto *pd_val = schema.at("prop_descriptors");
+    if (pd_val != nullptr && pd_val->is_array()) {
         std::size_t idx = 0;
-        for (const Json &d : schema["prop_descriptors"]) {
-            if (d.contains("name") && d["name"].is_string()) {
+        for (const auto *d = pd_val->begin(); d != pd_val->end(); ++d) {
+            const auto *name_val = d->at("name");
+            if (name_val != nullptr && d->contains("name") && name_val->is_string()) {
                 PropDescriptor pd{};
                 pd.order = idx;
-                if (d.contains("type") && d["type"].is_string()) {
-                    pd.cpp_type = d["type"].get<std::string>();
+                const auto *type_val = d->at("type");
+                if (type_val != nullptr && d->contains("type") && type_val->is_string()) {
+                    pd.cpp_type = type_val->as_or<std::string>("");
                 }
-                if (d.contains("enum") && d["enum"].is_array()) {
-                    for (const Json &e : d["enum"]) {
-                        if (e.is_string()) {
-                            pd.enum_values.push_back(e.get<std::string>());
+                const auto *enum_val = d->at("enum");
+                if (enum_val != nullptr && d->contains("enum") && enum_val->is_array()) {
+                    for (const auto *e = enum_val->begin(); e != enum_val->end(); ++e) {
+                        if (e->is_string()) {
+                            pd.enum_values.push_back(e->as_or<std::string>(""));
                         }
                     }
                 }
-                table.emplace(d["name"].get<std::string>(), std::move(pd));
+                table.emplace(name_val->as_or<std::string>(""), std::move(pd));
             }
             ++idx;
         }
@@ -540,11 +544,11 @@ struct PropDescriptor {
 [[nodiscard]] inline auto emit_font_weight(const Json &value) -> std::string {
     int w = 400;
     if (value.is_string()) {
-        const auto &s = value.get_ref<const std::string &>();
+        const std::string s = value.as_or<std::string>("");
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic) std::from_chars 需要首尾指针
         std::from_chars(s.data(), s.data() + s.size(), w);
     } else if (value.is_number()) {
-        w = value.get<int>();
+        w = value.as_or<std::int32_t>(0);
     }
     return std::to_string(w);
 }
@@ -582,11 +586,11 @@ struct PropDescriptor {
     };
     if (value.is_array()) {
         std::string result{};
-        for (const auto &item : value) {
-            if (!item.is_string()) {
+        for (const auto *item = value.begin(); item != value.end(); ++item) {
+            if (!item->is_string()) {
                 continue;
             }
-            const std::string s = item.get<std::string>();
+            const std::string s = item->as_or<std::string>("");
             if (s == "None") {
                 return "au::TextDecoration::None";
             }
@@ -598,7 +602,7 @@ struct PropDescriptor {
         return result.empty() ? "au::TextDecoration::None" : result;
     }
     if (value.is_string()) {
-        return one(value.get<std::string>());
+        return one(value.as_or<std::string>(""));
     }
     return "au::TextDecoration::None";
 }
@@ -645,31 +649,31 @@ struct PropDescriptor {
     // --- 枚举属性（string → au::EnumType::Value）---
     if (value.is_string()) {
         // 自描述优先：描述符带枚举取值集时，类型名与取值名都是控件自己声明的，无需按键名猜。
-        std::string declared = descriptor_enum_expression(type, key, value.get<std::string>());
+        std::string declared = descriptor_enum_expression(type, key, value.as_or<std::string>(""));
         if (!declared.empty()) {
             return declared;
         }
         const std::string enum_type = enum_type_for_key(key, type);
         if (!enum_type.empty()) {
-            return emit_enum_value(enum_type, value.get<std::string>());
+            return emit_enum_value(enum_type, value.as_or<std::string>(""));
         }
         // FontWeight: 数值字符串 → 数值字面量（落点 `Font::weight` 是 int）
         if (key == "font_weight") {
             return emit_font_weight(value);
         }
         // Length 特殊字符串
-        if (value.get<std::string>() == "auto") {
+        if (value.as_or<std::string>("") == "auto") {
             return "au::auto_length()";
         }
-        if (value.get<std::string>() == "fill") {
+        if (value.as_or<std::string>("") == "fill") {
             return "au::fill()";
         }
         // 普通字符串
-        return "\"" + escape_cpp_string(value.get<std::string>()) + "\"";
+        return "\"" + escape_cpp_string(value.as_or<std::string>("")) + "\"";
     }
     // --- bool ---
-    if (value.is_boolean()) {
-        return value.get<bool>() ? "true" : "false";
+    if (value.is_bool()) {
+        return value.as_or<bool>(false) ? "true" : "false";
     }
     // --- number ---
     if (value.is_number()) {
@@ -677,7 +681,7 @@ struct PropDescriptor {
         // 不可隐式转换的 `Length` 构造，按 px 语义包装才成立。
         const std::string cpp_type = declared_type(type, key);
         if (cpp_type == "Length") {
-            return std::string{"au::px("} + emit_float_literal(value.get<float>()) + std::string{")"};
+            return std::string{"au::px("} + emit_float_literal(value.as_or<float>(0.0F)) + std::string{")"};
         }
         // 枚举属性遇数字取值（`fit: 2`）：自描述没给取值名，按序号猜枚举项等于臆造 API，
         // 只能告警省略——数字既不是该类型的字面量，也没有名可发。
@@ -686,26 +690,26 @@ struct PropDescriptor {
                             "）却给了数字取值，无法还原为枚举表达式，已省略");
             return "/* unknown */";
         }
-        if (value.is_number_float()) {
-            return emit_float_literal(value.get<float>());
+        if (value.is_double()) {
+            return emit_float_literal(value.as_or<float>(0.0F));
         }
-        return std::to_string(value.get<int>());
+        return std::to_string(value.as_or<std::int32_t>(0));
     }
     // --- array: Length ["px"/"percent", N] | Color [r,g,b,a] | TextDecoration [...] ---
     if (value.is_array()) {
-        if (value.size() == 2 && value[0].is_string()) {
-            const std::string unit = value[0].get<std::string>();
+        if (value.size() == 2 && value.at(0)->is_string()) {
+            const std::string unit = value.at(0)->as_or<std::string>("");
             if (unit == "px") {
-                return std::string{"au::px("} + emit_float_literal(value[1].get<float>()) + std::string{")"};
+                return std::string{"au::px("} + emit_float_literal(value.at(1)->as_or<float>(0.0F)) + std::string{")"};
             }
             if (unit == "percent") {
-                return std::string{"au::percent("} + emit_float_literal(value[1].get<float>()) + std::string{")"};
+                return std::string{"au::percent("} + emit_float_literal(value.at(1)->as_or<float>(0.0F)) + std::string{")"};
             }
         }
-        if (value.size() >= 4 && value[0].is_number()) {
-            return std::string{"au::Color{"} + std::to_string(value[0].get<int>()) + std::string{","} +
-                   std::to_string(value[1].get<int>()) + std::string{","} + std::to_string(value[2].get<int>()) +
-                   std::string{","} + std::to_string(value[3].get<int>()) + std::string{"}"};
+        if (value.size() >= 4 && value.at(0)->is_number()) {
+            return std::string{"au::Color{"} + std::to_string(value.at(0)->as_or<std::int32_t>(0)) + std::string{","} +
+                   std::to_string(value.at(1)->as_or<std::int32_t>(0)) + std::string{","} + std::to_string(value.at(2)->as_or<std::int32_t>(0)) +
+                   std::string{","} + std::to_string(value.at(3)->as_or<std::int32_t>(0)) + std::string{"}"};
         }
         if (key == "text_decoration" || key == "decoration") {
             return emit_text_decoration(value);
@@ -714,14 +718,14 @@ struct PropDescriptor {
     // --- object: EdgeInsets {top,right,bottom,left} | legacy Length {value,unit} ---
     if (value.is_object()) {
         if (value.contains("top") && value.contains("left") && value.contains("right") && value.contains("bottom")) {
-            return std::string{"au::EdgeInsets{"} + emit_float_literal(value["top"].get<float>()) + std::string{","} +
-                   emit_float_literal(value["right"].get<float>()) + std::string{","} +
-                   emit_float_literal(value["bottom"].get<float>()) + std::string{","} +
-                   emit_float_literal(value["left"].get<float>()) + std::string{"}"};
+            return std::string{"au::EdgeInsets{"} + emit_float_literal(value.at("top")->as_or<float>(0.0F)) + std::string{","} +
+                   emit_float_literal(value.at("right")->as_or<float>(0.0F)) + std::string{","} +
+                   emit_float_literal(value.at("bottom")->as_or<float>(0.0F)) + std::string{","} +
+                   emit_float_literal(value.at("left")->as_or<float>(0.0F)) + std::string{"}"};
         }
         if (value.contains("value") && value.contains("unit")) {
-            const auto unit = value["unit"].get<std::string>();
-            const auto v = value["value"].get<float>();
+            const auto unit = value.at("unit")->as_or<std::string>("");
+            const auto v = value.at("value")->as_or<float>(0.0F);
             if (unit == "pct") {
                 return std::string{"au::percent("} + emit_float_literal(v) + std::string{")"};
             }
@@ -730,7 +734,7 @@ struct PropDescriptor {
     }
     // --- fallback ---
     // 静默丢属性是「生成的树看着完整、实际少一项」的故障，必须在 stderr 留话（调用方据此跳过发射）。
-    AURORA_LOG_WARN("codegen", type, ".", key, " 的取值形态无法还原为 C++ 表达式，已省略: ", value.dump());
+    AURORA_LOG_WARN("codegen", type, ".", key, " 的取值形态无法还原为 C++ 表达式，已省略: ", json::dump(value).unwrap());
     return "/* unknown */";
 }
 
@@ -753,9 +757,9 @@ struct PropEmit {
 [[nodiscard]] inline auto emit_prop_targets(const std::string &type, const Json &props, bool use_statement)
     -> std::vector<PropEmit> {
     std::vector<PropEmit> out{};  // 发射序列累加容器（过滤后按成员声明序稳定排序）
-    for (auto it = props.begin(); it != props.end(); ++it) {
-        const std::string &key = it.key();
-        std::string expr = emit_prop_value(key, it.value(), type);
+    for (const auto &e : props.entries()) {
+        const std::string key = std::string(e.key);
+        std::string expr = emit_prop_value(key, e.value, type);
         if (expr == "/* unknown */") {
             continue;
         }
@@ -912,13 +916,14 @@ struct PropEmit {
 /// @param indent 缩进层级（一级 4 空格）。
 /// @return 该子树的构造表达式串。
 [[nodiscard]] inline auto to_code_expr(const Json &node, CodeStyle style, int indent) -> std::string {
-    const std::string type = node.contains("type") ? node["type"].get<std::string>() : "Column";
-    const Json &props = node.contains("props") ? node["props"] : Json::object();
+    const std::string type = node.contains("type") ? node.at("type")->as_or<std::string>("") : "Column";
+    const Json &props = node.contains("props") ? *node.at("props") : Json::object();
     std::vector<std::string> kids{};
-    if (node.contains("children") && node["children"].is_array()) {
-        for (const Json &kid : node["children"]) {
-            if (kid.is_object()) {
-                kids.push_back(to_code_expr(kid, style, indent + 2));
+    const auto *children_val = node.at("children");
+    if (children_val != nullptr && children_val->is_array()) {
+        for (const auto *kid = children_val->begin(); kid != children_val->end(); ++kid) {
+            if (kid->is_object()) {
+                kids.push_back(to_code_expr(*kid, style, indent + 2));
             }
         }
     }
@@ -952,16 +957,17 @@ struct PropEmit {
 [[nodiscard]] inline auto to_code_sb(const Json &node, int indent, std::ostringstream &os, int &counter)
     -> std::string {
     const std::string pad(static_cast<std::size_t>(indent) * 4, ' ');  // 本层行首缩进串（层级 × 4 空格）
-    const std::string type = node.contains("type") ? node["type"].get<std::string>() : "Column";
-    const Json &props = node.contains("props") ? node["props"] : Json::object();
+    const std::string type = node.contains("type") ? node.at("type")->as_or<std::string>("") : "Column";
+    const Json &props = node.contains("props") ? *node.at("props") : Json::object();
     const std::string var = std::string{"__w"} + std::to_string(counter++);
     const std::string cls = detail::cpp_class(type);
 
     std::vector<std::string> all_kids{};  // 已递归生成的子节点移动表达式（交构造实参用）
-    if (node.contains("children") && node["children"].is_array()) {
-        for (const Json &kid : node["children"]) {
-            if (kid.is_object()) {
-                all_kids.push_back("au::Node{std::move(" + to_code_sb(kid, indent, os, counter) + ")}");
+    const auto *children_val = node.at("children");
+    if (children_val != nullptr && children_val->is_array()) {
+        for (const auto *kid = children_val->begin(); kid != children_val->end(); ++kid) {
+            if (kid->is_object()) {
+                all_kids.push_back("au::Node{std::move(" + to_code_sb(*kid, indent, os, counter) + ")}");
             }
         }
     }

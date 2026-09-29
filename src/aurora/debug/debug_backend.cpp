@@ -76,35 +76,28 @@ auto capture(Surface &s, const std::string &path, CaptureSource src) -> Result<b
 
 auto surface_state(const Surface &s) -> Json {
 #ifdef AURORA_ENABLE_DEBUG
-    Json j;
+    Json j = Json::object();
     const auto sz = s.size();
-    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    j["width"] = static_cast<int>(sz.width);
-    j["height"] = static_cast<int>(sz.height);
-    j["scale_factor"] = s.scale_factor();
-    j["frame_count"] = s.frame_count();
+    j.set("width", static_cast<int>(sz.width));
+    j.set("height", static_cast<int>(sz.height));
+    j.set("scale_factor", s.scale_factor());
+    j.set("frame_count", s.frame_count());
     const Color c = s.clear_color();
     Json cc = Json::array();
     cc.push_back(c.r);
     cc.push_back(c.g);
     cc.push_back(c.b);
     cc.push_back(c.a);
-    j["clear_color"] = cc;
-    j["should_close"] = s.should_close();
-    j["has_native_window"] = s.native_handle() != nullptr;
-    j["available"] = true;
-    // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    j.set("clear_color", std::move(cc));
+    j.set("should_close", Json{s.should_close()});
+    j.set("has_native_window", Json{s.native_handle() != nullptr});
+    j.set("available", Json{true});
     return j;
 #else
     (void)s;
-    Json j;
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["available"] = false;
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["reason"] = "AURORA_ENABLE_DEBUG not enabled";
+    Json j = Json::object();
+    j.set("available", Json{false});
+    j.set("reason", "AURORA_ENABLE_DEBUG not enabled");
     return j;
 #endif
 }

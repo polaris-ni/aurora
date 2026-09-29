@@ -105,7 +105,7 @@ class Canvas : public Widget {
     /// @param props 目标 JSON 对象，写入 width/height/show 及 note 提示。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["note"] = "Canvas paint callback is not serializable";
+        props.set("note", "Canvas paint callback is not serializable");
     }
 
   protected:

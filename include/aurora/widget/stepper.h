@@ -185,8 +185,8 @@ class Stepper : public LeafWidget {
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入通用属性（width/height/show 等）
-        props["current"] = current_;
-        props["step_count"] = static_cast<int>(steps_.size());
+        props.set("current", current_);
+        props.set("step_count", static_cast<int>(steps_.size()));
     }
 
     /// @brief 反序列化：恢复通用属性与 current（缺失键保持当前值）。
@@ -194,7 +194,7 @@ class Stepper : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);  // 先由基类恢复通用属性
         if (props.contains("current")) {
-            current_ = props["current"].get<int>();
+            current_ = props.at("current")->as_or<std::int32_t>(0);
         }
     }
 

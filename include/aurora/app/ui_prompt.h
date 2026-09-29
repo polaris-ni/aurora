@@ -60,40 +60,52 @@ struct UiPromptOptions {
 
         out += "## " + type + "\n";
         std::string tags;
-        if (schema.value("is_container", false)) {
+        if (schema.as_or<bool>("is_container", false)) {
             tags += " container";
         }
-        if (schema.value("is_clickable", false)) {
+        if (schema.as_or<bool>("is_clickable", false)) {
             tags += " clickable";
         }
         if (!tags.empty()) {
             out += "(" + tags.substr(1) + ")\n";
         }
         if (opt.include_children_policy) {
-            out += "- children: " + schema.value("children_policy", std::string("none")) + "\n";
+            out += "- children: " + schema.as_or<std::string>("children_policy", "none") + "\n";
         }
 
         // 属性：类型取自 prop_descriptors，缺省值取自 default_props（后者是实测序列化结果，最可信）。
-        const Json defaults = schema.value("default_props", Json::object());
+        const auto *defaults_ptr = schema.at("default_props");
+        const Json defaults = defaults_ptr != nullptr ? *defaults_ptr : Json::object();
         if (defaults.is_object() && !defaults.empty()) {
             out += "- props: ";
             bool first = true;
-            for (auto it = defaults.begin(); it != defaults.end(); ++it) {
+            for (const auto &e : defaults.entries()) {
                 if (!first) {
                     out += ", ";
                 }
                 first = false;
-                out += it.key();
+                out += e.key;
                 if (opt.include_defaults) {
-                    const Json &v = it.value();
-                    out += "=" + (v.is_string() ? v.get<std::string>() : v.dump());
+                    const Json &v = e.value;
+                    if (v.is_string()) {
+                        out += "=" + v.as_or<std::string>("");
+                    } else {
+                        const auto d = json::dump(v);
+                        out += "=" + (d.ok() ? std::move(d.value()) : std::string{});
+                    }
                 }
             }
             out += "\n";
         }
         if (opt.include_examples && schema.contains("examples")) {
-            for (const Json &ex : schema["examples"]) {
-                out += "- example: " + (ex.is_string() ? ex.get<std::string>() : ex.dump()) + "\n";
+            const Json &examples = *schema.at("examples");
+            for (const auto *ex = examples.begin(); ex != examples.end(); ++ex) {
+                if (ex->is_string()) {
+                    out += "- example: " + ex->as_or<std::string>("") + "\n";
+                } else {
+                    const auto d = json::dump(*ex);
+                    out += "- example: " + (d.ok() ? std::move(d.value()) : std::string{}) + "\n";
+                }
             }
         }
         out += "\n";
@@ -118,10 +130,13 @@ struct UiPromptOptions {
 
     // 描述里探测到的类型（generate_ui 已做关键词匹配）。
     if (const auto r = generate_ui(description); r.ok()) {
-        const Json &children = r.value().value("node", Json::object()).value("children", Json::array());
-        for (const Json &child : children) {
-            if (child.contains("type")) {
-                remember(child["type"].get<std::string>());
+        const auto *node_ptr = r.value().at("node");
+        const Json node = node_ptr != nullptr ? *node_ptr : Json::object();
+        const auto *children_ptr = node.at("children");
+        const Json children = children_ptr != nullptr ? *children_ptr : Json::array();
+        for (const auto *child = children.begin(); child != children.end(); ++child) {
+            if (child->contains("type")) {
+                remember(child->at("type")->as_or<std::string>(""));
             }
         }
     }
@@ -156,14 +171,14 @@ struct UiRepairStep {
     /// @return JSON 对象；errors 逐项经 `ValidationError::to_json` 转换。
     [[nodiscard]] auto to_json() const -> Json {
         Json j = Json::object();
-        j["attempt"] = attempt;
-        j["generated"] = generated;
-        j["machine_fixed"] = machine_fixed;
+        j.set("attempt", attempt);
+        j.set("generated", generated);
+        j.set("machine_fixed", Json{machine_fixed});
         Json errs = Json::array();
         for (const ValidationError &e : errors) {
             errs.push_back(e.to_json());
         }
-        j["errors"] = errs;
+        j.set("errors", errs);
         return j;
     }
 };
@@ -179,14 +194,14 @@ struct UiRepairResult {
     /// @return JSON 对象；history 逐轮经 `UiRepairStep::to_json` 转换。
     [[nodiscard]] auto to_json() const -> Json {
         Json j = Json::object();
-        j["ok"] = ok;
-        j["tree"] = tree;
-        j["attempts_used"] = attempts_used;
+        j.set("ok", Json{ok});
+        j.set("tree", tree);
+        j.set("attempts_used", attempts_used);
         Json steps = Json::array();
         for (const UiRepairStep &s : history) {
             steps.push_back(s.to_json());
         }
-        j["history"] = steps;
+        j.set("history", steps);
         return j;
     }
 };
@@ -254,8 +269,8 @@ namespace detail {
     Json out = node;
 
     // 1) 未知类型 → 尝试确定性修正
-    if (out.contains("type") && out["type"].is_string()) {
-        const std::string type = out["type"].get<std::string>();
+    if (out.contains("type") && out.at("type")->is_string()) {
+        const std::string type = out.at("type")->as_or<std::string>("");
         bool known = false;
         for (const std::string &t : ui_registered_types()) {
             if (t == type) {
@@ -266,13 +281,13 @@ namespace detail {
         if (!known) {
             const std::string fixed = ui_resolve_type(type);
             if (!fixed.empty()) {
-                out["type"] = fixed;
+                out.set("type", fixed);
             }
         }
     }
 
-    if (out.contains("type") && out["type"].is_string()) {
-        const Json schema = aurora::describe_component(out["type"].get<std::string>());
+    if (out.contains("type") && out.at("type")->is_string()) {
+        const Json schema = aurora::describe_component(out.at("type")->as_or<std::string>(""));
 
         // 2) 补齐**必填**属性。值取自 default_props（实测序列化结果），类型保真度最高。
         //
@@ -280,39 +295,42 @@ namespace detail {
         // 有 `color` 这类以数组承载 Color 的项，与 validator 对 "Color" 的宽松判定（string/object）
         // 不兼容 —— 无脑回填会把一棵本来合法的树改成一堆类型错误（实测踩到）。
         // 校验只关心必填项，故只补必填项。
-        const Json defaults = schema.value("default_props", Json::object());
-        const Json descriptors = schema.value("prop_descriptors", Json::array());
-        for (const Json &pd : descriptors) {
-            if (!pd.value("required", false)) {
+        const auto *defaults_ptr = schema.at("default_props");
+        const Json defaults = defaults_ptr != nullptr ? *defaults_ptr : Json::object();
+        const auto *descriptors_ptr = schema.at("prop_descriptors");
+        const Json descriptors = descriptors_ptr != nullptr ? *descriptors_ptr : Json::array();
+        for (const auto *pd = descriptors.begin(); pd != descriptors.end(); ++pd) {
+            if (!pd->as_or<bool>("required", false)) {
                 continue;
             }
-            const std::string name = pd.value("name", std::string{});
+            const std::string name = pd->as_or<std::string>("name", "");
             if (name.empty()) {
                 continue;
             }
-            if (!out.contains("props") || !out["props"].is_object()) {
-                out["props"] = Json::object();
+            if (!out.contains("props") || !out.at("props")->is_object()) {
+                out.set("props", Json::object());
             }
-            if (!out["props"].contains(name) && defaults.contains(name)) {
-                out["props"][name] = defaults[name];
+            if (!out.at("props")->contains(name) && defaults.contains(name)) {
+                out.at("props")->set(name, *defaults.at(name));
             }
         }
 
         // 3) children 策略：声明 none 却带了子节点 → 丢弃（树本身非法，留着只会继续报错）。
-        if (schema.value("children_policy", std::string("none")) == "none") {
-            if (out.contains("children") && out["children"].is_array() && !out["children"].empty()) {
-                out.erase("children");
+        if (schema.as_or<std::string>("children_policy", "none") == "none") {
+            if (out.contains("children") && out.at("children")->is_array() && !out.at("children")->empty()) {
+                (void)out.erase("children");
             }
         }
     }
 
     // 4) 递归子节点
-    if (out.contains("children") && out["children"].is_array()) {
+    if (out.contains("children") && out.at("children")->is_array()) {
+        const Json &src_children = *out.at("children");
         Json kids = Json::array();
-        for (const Json &child : out["children"]) {
-            kids.push_back(ui_repair_node(child));
+        for (const auto *child = src_children.begin(); child != src_children.end(); ++child) {
+            kids.push_back(ui_repair_node(*child));
         }
-        out["children"] = kids;
+        out.set("children", std::move(kids));
     }
     return out;
 }
@@ -365,7 +383,8 @@ namespace detail {
             step.generated = llm(prompt, previous);
         } else {
             const auto r = generate_ui(description);
-            step.generated = r.ok() ? r.value().value("node", Json::object()) : Json::object();
+            const auto *node_ptr = r.ok() ? r.value().at("node") : nullptr;
+            step.generated = node_ptr != nullptr ? *node_ptr : Json::object();
         }
         if (step.generated.is_null() || step.generated.empty()) {
             step.errors = {};

@@ -274,56 +274,59 @@ class RadioGroup : public Widget {
         for (const auto &o : options_) {
             opts.push_back(o);
         }
-        props["options"] = opts;
-        props["selected_index"] = selected_.get();
-        props["horizontal"] = horizontal_;
+        props.set("options", opts);
+        props.set("selected_index", selected_.get());
+        props.set("horizontal", Json{horizontal_});
         if (active_color_.has_value()) {
-            props["active_color"] = color_to_json(*active_color_);  // 未设置不输出：保留「跟随主题」语义
+            props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props["border_color"] = color_to_json(border_color_);
-        props["text_color"] = color_to_json(text_color_);
-        props["dot_size"] = dot_size_;
-        props["row_height"] = row_height_;
-        props["font_size"] = font_size_;
-        props["enabled"] = enabled_;
+        props.set("border_color", color_to_json(border_color_));
+        props.set("text_color", color_to_json(text_color_));
+        props.set("dot_size", dot_size_);
+        props.set("row_height", row_height_);
+        props.set("font_size", font_size_);
+        props.set("enabled", Json{enabled_});
     }
 
     /// @brief 从 JSON 重建整组属性（缺失键保持现值）。
     /// @param props 源属性对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
-        if (props.contains("options") && props["options"].is_array()) {
-            options_.clear();
-            for (const auto &o : props["options"]) {
-                options_.push_back(o.get<std::string>());
+        if (props.contains("options")) {
+            const auto *arr = props.at("options");
+            if (arr != nullptr && arr->is_array()) {
+                options_.clear();
+                for (const auto *o = arr->begin(); o != arr->end(); ++o) {
+                    options_.push_back(o->as_or<std::string>(""));
+                }
             }
         }
         if (props.contains("selected_index")) {
-            selected_.set(props["selected_index"].get<int>());
+            selected_.set(props.at("selected_index")->as_or<std::int32_t>(0));
         }
         if (props.contains("horizontal")) {
-            horizontal_ = props["horizontal"].get<bool>();
+            horizontal_ = props.at("horizontal")->as_or<bool>(false);
         }
         if (props.contains("active_color")) {
-            active_color_ = json_to_color(props["active_color"]);
+            active_color_ = json_to_color(*props.at("active_color"));
         }
         if (props.contains("border_color")) {
-            border_color_ = json_to_color(props["border_color"]);
+            border_color_ = json_to_color(*props.at("border_color"));
         }
         if (props.contains("text_color")) {
-            text_color_ = json_to_color(props["text_color"]);
+            text_color_ = json_to_color(*props.at("text_color"));
         }
         if (props.contains("dot_size")) {
-            dot_size_ = props["dot_size"].get<float>();
+            dot_size_ = props.at("dot_size")->as_or<float>(0.0F);
         }
         if (props.contains("row_height")) {
-            row_height_ = props["row_height"].get<float>();
+            row_height_ = props.at("row_height")->as_or<float>(0.0F);
         }
         if (props.contains("font_size")) {
-            font_size_ = props["font_size"].get<float>();
+            font_size_ = props.at("font_size")->as_or<float>(0.0F);
         }
         if (props.contains("enabled")) {
-            enabled_ = props["enabled"].get<bool>();
+            enabled_ = props.at("enabled")->as_or<bool>(false);
         }
     }
 
@@ -795,20 +798,20 @@ class SpinBox : public Widget {
     /// @param props 输出属性对象，写入本控件键值。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["value"] = value_.get();
-        props["min"] = min_;
-        props["max"] = max_;
-        props["step"] = step_;
-        props["prefix"] = prefix_;
-        props["suffix"] = suffix_;
-        props["decimals"] = decimals_;
-        props["background"] = color_to_json(background_);
-        props["border_color"] = color_to_json(border_color_);
-        props["text_color"] = color_to_json(text_color_);
-        props["arrow_color"] = color_to_json(arrow_color_);
-        props["corner_radius"] = corner_radius_;
-        props["font_size"] = font_size_;
-        props["enabled"] = enabled_;
+        props.set("value", value_.get());
+        props.set("min", min_);
+        props.set("max", max_);
+        props.set("step", step_);
+        props.set("prefix", prefix_);
+        props.set("suffix", suffix_);
+        props.set("decimals", decimals_);
+        props.set("background", color_to_json(background_));
+        props.set("border_color", color_to_json(border_color_));
+        props.set("text_color", color_to_json(text_color_));
+        props.set("arrow_color", color_to_json(arrow_color_));
+        props.set("corner_radius", corner_radius_);
+        props.set("font_size", font_size_);
+        props.set("enabled", Json{enabled_});
     }
 
     /// @brief 从 JSON 重建属性（缺失键保持现值；value 最后写入并钳制到新值域）。
@@ -816,46 +819,46 @@ class SpinBox : public Widget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("min")) {
-            min_ = props["min"].get<double>();
+            min_ = props.at("min")->as_or<double>(0.0);
         }
         if (props.contains("max")) {
-            max_ = props["max"].get<double>();
+            max_ = props.at("max")->as_or<double>(0.0);
         }
         if (props.contains("step")) {
-            step_ = props["step"].get<double>();
+            step_ = props.at("step")->as_or<double>(0.0);
         }
         if (props.contains("prefix")) {
-            prefix_ = props["prefix"].get<std::string>();
+            prefix_ = props.at("prefix")->as_or<std::string>("");
         }
         if (props.contains("suffix")) {
-            suffix_ = props["suffix"].get<std::string>();
+            suffix_ = props.at("suffix")->as_or<std::string>("");
         }
         if (props.contains("decimals")) {
-            decimals_ = props["decimals"].get<int>();
+            decimals_ = props.at("decimals")->as_or<std::int32_t>(0);
         }
         if (props.contains("background")) {
-            background_ = json_to_color(props["background"]);
+            background_ = json_to_color(*props.at("background"));
         }
         if (props.contains("border_color")) {
-            border_color_ = json_to_color(props["border_color"]);
+            border_color_ = json_to_color(*props.at("border_color"));
         }
         if (props.contains("text_color")) {
-            text_color_ = json_to_color(props["text_color"]);
+            text_color_ = json_to_color(*props.at("text_color"));
         }
         if (props.contains("arrow_color")) {
-            arrow_color_ = json_to_color(props["arrow_color"]);
+            arrow_color_ = json_to_color(*props.at("arrow_color"));
         }
         if (props.contains("corner_radius")) {
-            corner_radius_ = props["corner_radius"].get<float>();
+            corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
         }
         if (props.contains("font_size")) {
-            font_size_ = props["font_size"].get<float>();
+            font_size_ = props.at("font_size")->as_or<float>(0.0F);
         }
         if (props.contains("enabled")) {
-            enabled_ = props["enabled"].get<bool>();
+            enabled_ = props.at("enabled")->as_or<bool>(false);
         }
         if (props.contains("value")) {
-            value_.set(std::clamp(props["value"].get<double>(), min_, max_));
+            value_.set(std::clamp(props.at("value")->as_or<double>(0.0), min_, max_));
         }
     }
 

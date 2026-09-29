@@ -135,10 +135,10 @@ class Placeholder : public Widget {
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["message"] = message_;
-        props["background_color"] = color_to_json(background_);
-        props["border_color"] = color_to_json(border_);
-        props["text_color"] = color_to_json(text_);
+        props.set("message", message_);
+        props.set("background_color", color_to_json(background_));
+        props.set("border_color", color_to_json(border_));
+        props.set("text_color", color_to_json(text_));
     }
 
     /// @brief 反序列化占位属性：按存在的键逐一还原文字与三色，缺键保持当前值。
@@ -146,16 +146,16 @@ class Placeholder : public Widget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("message")) {
-            message_ = props["message"].get<std::string>();
+            message_ = props.at("message")->as_or<std::string>("");
         }
         if (props.contains("background_color")) {
-            background_ = json_to_color(props["background_color"]);
+            background_ = json_to_color(*props.at("background_color"));
         }
         if (props.contains("border_color")) {
-            border_ = json_to_color(props["border_color"]);
+            border_ = json_to_color(*props.at("border_color"));
         }
         if (props.contains("text_color")) {
-            text_ = json_to_color(props["text_color"]);
+            text_ = json_to_color(*props.at("text_color"));
         }
     }
 

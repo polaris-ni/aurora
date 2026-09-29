@@ -187,11 +187,11 @@ class TitleBar : public Widget {
     /// @param props 目标 JSON 对象；先写基类公共字段，Snap 自定义动作仅写计数（回调不可序列化）
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["height"] = style_.height;
-        props["title"] = title_;
-        props["subtitle"] = subtitle_;
-        props["window_controls"] = window_controls_;
-        props["snap_action_count"] = snap_actions_.size();  // 仅计数：回调不可序列化
+        props.set("height", style_.height);
+        props.set("title", title_);
+        props.set("subtitle", subtitle_);
+        props.set("window_controls", Json{window_controls_});
+        props.set("snap_action_count", snap_actions_.size());  // 仅计数：回调不可序列化
     }
 
     /// @brief 反序列化标题栏属性（height/title/subtitle/window_controls 逐字段还原，缺字段保持现值）。
@@ -199,16 +199,16 @@ class TitleBar : public Widget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("height")) {
-            style_.height = props["height"].get<float>();
+            style_.height = props.at("height")->as_or<float>(0.0F);
         }
         if (props.contains("title")) {
-            title_ = props["title"].get<std::string>();
+            title_ = props.at("title")->as_or<std::string>("");
         }
         if (props.contains("subtitle")) {
-            subtitle_ = props["subtitle"].get<std::string>();
+            subtitle_ = props.at("subtitle")->as_or<std::string>("");
         }
         if (props.contains("window_controls")) {
-            window_controls_ = props["window_controls"].get<bool>();
+            window_controls_ = props.at("window_controls")->as_or<bool>(false);
         }
         mark_needs_layout();
     }

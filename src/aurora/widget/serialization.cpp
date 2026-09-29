@@ -96,16 +96,16 @@ auto WidgetRegistry::list_types() const -> std::vector<std::string> {
 auto to_json(const Widget &w) -> Json {
     Json j = Json::object();
 
-    j["type"] = w.type_name();
+    j.set("type", w.type_name());
 
     Json props = Json::object();
     w.serialize_props(props);
-    j["props"] = props;
+    j.set("props", props);
 
     Json children = Json::array();
     w.for_each_child([&](const Widget &c) -> void { children.push_back(to_json(c)); });
     if (!children.empty()) {
-        j["children"] = children;
+        j.set("children", children);
     }
     return j;
 }
@@ -297,12 +297,14 @@ auto from_json_impl(const Json &j, std::size_t depth) -> Result<std::shared_ptr<
         return make_error(ErrorCode::WidgetDepthExceeded, "serialization: widget tree nesting depth exceeds limit (" +
                                                               std::to_string(AURORA_DEFAULT_MAX_WIDGET_DEPTH) + "）");
     }
-    if (!j.is_object() || !j.contains("type") || !j["type"].is_string()) {
+    const auto *t = j.at("type");
+    if (!j.is_object() || t == nullptr || !t->is_string()) {
         return make_error(ErrorCode::IOParseFailed,
                           "serialization: node JSON must be an object with a string 'type' field");
     }
-    const std::string type = j["type"].get<std::string>();
-    const Json props = j.value("props", Json::object());
+    const std::string type = t->as_or<std::string>("");
+    const Json *pp = j.at("props");
+    const Json props = pp != nullptr ? *pp : Json::object();
 
     auto wres = WidgetRegistry::instance().make(type, props);
     if (!wres) {
@@ -310,10 +312,10 @@ auto from_json_impl(const Json &j, std::size_t depth) -> Result<std::shared_ptr<
     }
     std::shared_ptr<Widget> w = std::move(wres.value());
 
-    if (j.contains("children") && j["children"].is_array()) {
+    if (const auto *c = j.at("children"); c != nullptr && c->is_array()) {
         std::vector<Node> kids;
-        for (const auto &cj : j["children"]) {
-            auto cres = from_json_impl(cj, depth + 1);
+        for (const auto *cj = c->begin(); cj != c->end(); ++cj) {
+            auto cres = from_json_impl(*cj, depth + 1);
             if (!cres) {
                 return cres;
             }
@@ -335,19 +337,19 @@ namespace {
 
 // 对象差异：新增键 add、消失键 remove、共同键递归。
 auto diff_objects(const Json &a, const Json &b, const std::string &path, std::vector<JsonPatchOp> &out) -> void {
-    for (auto it = b.begin(); it != b.end(); ++it) {
-        if (!a.contains(it.key())) {
-            out.push_back(JsonPatchOp{.op = "add", .path = path + "/" + it.key(), .value = it.value()});
+    for (const auto &e : b.entries()) {
+        if (!a.contains(e.key)) {
+            out.push_back(JsonPatchOp{.op = "add", .path = path + "/" + std::string(e.key), .value = e.value});
         }
     }
-    for (auto it = a.begin(); it != a.end(); ++it) {
-        if (!b.contains(it.key())) {
-            out.push_back(JsonPatchOp{.op = "remove", .path = path + "/" + it.key(), .value = Json()});
+    for (const auto &e : a.entries()) {
+        if (!b.contains(e.key)) {
+            out.push_back(JsonPatchOp{.op = "remove", .path = path + "/" + std::string(e.key), .value = Json{}});
         }
     }
-    for (auto it = b.begin(); it != b.end(); ++it) {
-        if (a.contains(it.key())) {
-            diff_into(a.at(it.key()), it.value(), path + "/" + it.key(), out);
+    for (const auto &e : b.entries()) {
+        if (a.contains(e.key)) {
+            diff_into(*a.at(e.key), e.value, path + "/" + std::string(e.key), out);
         }
     }
 }
@@ -358,11 +360,11 @@ auto diff_arrays(const Json &a, const Json &b, const std::string &path, std::vec
     for (std::size_t i = 0; i < n; ++i) {
         const std::string ip = path + "/" + std::to_string(i);
         if (i >= a.size()) {
-            out.push_back(JsonPatchOp{.op = "add", .path = ip, .value = b.at(i)});
+            out.push_back(JsonPatchOp{.op = "add", .path = ip, .value = *b.at(i)});
         } else if (i >= b.size()) {
-            out.push_back(JsonPatchOp{.op = "remove", .path = ip, .value = Json()});
+            out.push_back(JsonPatchOp{.op = "remove", .path = ip, .value = Json{}});
         } else {
-            diff_into(a.at(i), b.at(i), ip, out);
+            diff_into(*a.at(i), *b.at(i), ip, out);
         }
     }
 }
@@ -390,33 +392,15 @@ auto diff(const Json &a, const Json &b) -> std::vector<JsonPatchOp> {
 
 auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void {
     for (const auto &op : patch) {
-        const nlohmann::json::json_pointer ptr(op.path);
-        // nlohmann 3.11 起 json_pointer 的 string 转换已弃用（contains/erase/operator[] 内部使用），
-        // 局部抑制该告警；行为保持幂等（路径不存在时 contains 返回 false，不会抛异常）。
-#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
-#pragma warning(push)
-#pragma warning(disable : 4996)
-#elif defined(AURORA_COMPILER_CLANG)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#elif defined(AURORA_COMPILER_GCC)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
         if (op.op == "remove") {
-            if (target.contains(ptr)) {
-                target.erase(ptr);
-            }
+            // 路径不存在不是错误（幂等），直接忽略结果。
+            (void)erase_pointer(target, op.path);
         } else {
-            target[ptr] = op.value;  // replace / add
+            auto slot = resolve_for_write(target, op.path);
+            if (slot) {
+                *slot.value() = op.value;  // replace / add
+            }
         }
-#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
-#pragma warning(pop)
-#elif defined(AURORA_COMPILER_CLANG)
-#pragma clang diagnostic pop
-#elif defined(AURORA_COMPILER_GCC)
-#pragma GCC diagnostic pop
-#endif
     }
 }
 
@@ -429,18 +413,18 @@ auto is_container_type(const std::string &t) -> bool {
 
 auto component_schema(const std::string &name) -> Json {
     Json w = Json::object();
-    w["type"] = name;
-    w["container"] = is_container_type(name);
-    w["is_container"] = is_container_type(name);
-    w["is_layout"] = is_container_type(name);  // 多子布局容器即 layout 型
-    w["is_clickable"] = name == "Button";
-    w["dynamic_children"] = (name == "Repeater" || name == "Canvas");
-    w["thread"] = "main";
+    w.set("type", name);
+    w.set("container", Json{is_container_type(name)});
+    w.set("is_container", Json{is_container_type(name)});
+    w.set("is_layout", Json{is_container_type(name)});  // 多子布局容器即 layout 型
+    w.set("is_clickable", Json{name == "Button"});
+    w.set("dynamic_children", Json{name == "Repeater" || name == "Canvas"});
+    w.set("thread", "main");
     Json props = Json::object();
     auto inst = WidgetRegistry::instance().make(name, Json::object());
     if (inst) {
         inst.value()->serialize_props(props);
-        w["default_props"] = props;  // serialize_props 已写入含默认值的属性对象
+        w.set("default_props", props);  // serialize_props 已写入含默认值的属性对象
 
         // 附录 B 自描述元数据
         const WidgetDescriptor desc = inst.value()->describe();
@@ -448,18 +432,18 @@ auto component_schema(const std::string &name) -> Json {
         for (const auto &pd : desc.properties) {
             prop_desc.push_back(descriptor_to_json(pd));
         }
-        w["prop_descriptors"] = prop_desc;
+        w.set("prop_descriptors", prop_desc);
         Json events = Json::array();
         for (const auto &e : desc.events) {
             events.push_back(e);
         }
-        w["events"] = events;
-        w["children_policy"] = desc.children_policy;
+        w.set("events", events);
+        w.set("children_policy", desc.children_policy);
         Json examples = Json::array();
         for (const auto &ex : desc.examples) {
             examples.push_back(ex);
         }
-        w["examples"] = examples;
+        w.set("examples", examples);
 
         // ---- Schema 扩展：props_schema / children_types / constraints ----
         Json props_schema = Json::object();
@@ -467,38 +451,38 @@ auto component_schema(const std::string &name) -> Json {
         for (const auto &pd : desc.properties) {
             Json ps = Json::object();
             if (!pd.json_type.empty()) {
-                ps["type"] = pd.json_type;
+                ps.set("type", pd.json_type);
             }
             if (!pd.enum_values.empty()) {
                 Json ev = Json::array();
                 for (const auto &v : pd.enum_values) {
                     ev.push_back(v);
                 }
-                ps["enum"] = ev;
+                ps.set("enum", ev);
             }
             if (!pd.min_value.empty()) {
-                ps["minimum"] = pd.min_value;
+                ps.set("minimum", pd.min_value);
             }
             if (!pd.max_value.empty()) {
-                ps["maximum"] = pd.max_value;
+                ps.set("maximum", pd.max_value);
             }
             if (!pd.default_value.empty()) {
-                ps["default"] = pd.default_value;
+                ps.set("default", pd.default_value);
             }
             if (!pd.note.empty()) {
-                ps["description"] = pd.note;
+                ps.set("description", pd.note);
             }
             if (!pd.constraint.empty()) {
-                ps["constraint"] = pd.constraint;
+                ps.set("constraint", pd.constraint);
                 constraints.push_back(pd.constraint);
             }
             if (!ps.empty()) {
-                props_schema[pd.name] = ps;
+                props_schema.set(pd.name, ps);
             }
         }
-        w["props_schema"] = props_schema;
+        w.set("props_schema", props_schema);
         if (!constraints.empty()) {
-            w["constraints"] = constraints;
+            w.set("constraints", constraints);
         }
 
         Json children_types = Json::array();
@@ -506,7 +490,7 @@ auto component_schema(const std::string &name) -> Json {
             children_types.push_back(ct);
         }
         if (!children_types.empty()) {
-            w["children_types"] = children_types;
+            w.set("children_types", children_types);
         }
 
         Json invariants = Json::array();
@@ -514,20 +498,20 @@ auto component_schema(const std::string &name) -> Json {
             invariants.push_back(inv);
         }
         if (!invariants.empty()) {
-            w["invariants"] = invariants;
+            w.set("invariants", invariants);
         }
     } else {
-        w["default_props"] = Json::object();
-        w["prop_descriptors"] = Json::array();
-        w["events"] = Json::array();
-        w["children_policy"] = "none";
-        w["examples"] = Json::array();
+        w.set("default_props", Json::object());
+        w.set("prop_descriptors", Json::array());
+        w.set("events", Json::array());
+        w.set("children_policy", "none");
+        w.set("examples", Json::array());
     }
     Json prop_keys = Json::array();
-    for (auto it = props.begin(); it != props.end(); ++it) {
-        prop_keys.push_back(it.key());
+    for (const auto &e : props.entries()) {
+        prop_keys.push_back(e.key);
     }
-    w["props"] = prop_keys;
+    w.set("props", prop_keys);
     return w;
 }
 

@@ -79,7 +79,7 @@ class Spacer : public Widget {
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["expand"] = expand_;
+        props.set("expand", Json{expand_});
     }
 
     /// @brief 反序列化扩展属性：含 expand 键时还原并同步 flex 权重修饰。
@@ -87,7 +87,7 @@ class Spacer : public Widget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("expand")) {
-            expand_ = props["expand"].get<bool>();
+            expand_ = props.at("expand")->as_or<bool>(false);
             apply_expand();
         }
     }

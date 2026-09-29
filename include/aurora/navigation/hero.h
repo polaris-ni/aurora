@@ -55,14 +55,14 @@ class Hero : public SingleChild {
     /// @param props 待填充的属性 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["tag"] = tag_;
+        props.set("tag", tag_);
     }
     /// @brief 反序列化：读取基类公共属性；props 含 tag 字段时更新标签。
     /// @param props 来源属性 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("tag")) {
-            tag_ = props["tag"].get<std::string>();
+            tag_ = props.at("tag")->as_or<std::string>("");
         }
     }
     /// @brief 单子控件：序列化重建时取首个子节点作为 child。

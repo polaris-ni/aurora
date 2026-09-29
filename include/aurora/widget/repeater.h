@@ -80,7 +80,7 @@ class Repeater : public Container {
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["note"] = "Repeater items are runtime-state driven, not serialized";
+        props.set("note", "Repeater items are runtime-state driven, not serialized");
     }
 
   protected:

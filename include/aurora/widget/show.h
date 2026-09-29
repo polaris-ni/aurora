@@ -85,7 +85,7 @@ class Show : public SingleChild {
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["visible"] = is_visible();
+        props.set("visible", Json{is_visible()});
     }
 
   protected:

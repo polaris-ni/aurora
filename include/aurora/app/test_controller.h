@@ -190,8 +190,8 @@ class TestController {
     /// @param key 属性名（取自控件自描述）。
     /// @param expected 期望值（JSON）。
     /// @return 相等为空 Result；不等返回 `WidgetInvalidProp` 错误（附实际值描述）。
-    /// @note Json 字面量陷阱：`Json{"hello"}` 在 nlohmann 语义下是**数组** `["hello"]`，
-    ///       字符串期望值须写成 `Json(std::string{"hello"})`（布尔用 `Json(true)`）。
+    /// @note Json 字面量：`Json{"hello"}` 即**字符串**（json::Value 无 init-list 构造歧义）；
+    ///       布尔须显式写 `Json{true}`（bool 构造是 explicit）。
     [[nodiscard]] static auto expect_prop(const Widget &w, std::string_view key, const Json &expected) -> Result<void>;
     /// @brief 断言属性值等于期望（节点重载）。
     /// @param n 目标节点。

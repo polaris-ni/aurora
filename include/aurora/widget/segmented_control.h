@@ -248,21 +248,21 @@ class SegmentedControl : public LeafWidget {
     /// @param props 输出 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["selected"] = selected_;
+        props.set("selected", selected_);
         Json segs = Json::array();
         for (const auto &s : segments_) {
             segs.push_back(s);
         }
-        props["segments"] = segs;
+        props.set("segments", segs);
         if (active_color_.has_value()) {
-            props["active_color"] = color_to_json(*active_color_);  // 未设置不输出：保留「跟随主题」语义
+            props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props["text_color"] = color_to_json(text_color_);
-        props["selected_text_color"] = color_to_json(selected_text_color_);
-        props["border_color"] = color_to_json(border_color_);
-        props["font_size"] = font_size_;
-        props["corner_radius"] = corner_radius_;
-        props["enabled"] = enabled_;
+        props.set("text_color", color_to_json(text_color_));
+        props.set("selected_text_color", color_to_json(selected_text_color_));
+        props.set("border_color", color_to_json(border_color_));
+        props.set("font_size", font_size_);
+        props.set("corner_radius", corner_radius_);
+        props.set("enabled", Json{enabled_});
     }
 
     /// @brief 从 JSON 恢复选中序号、分段列表与各样式属性；缺失键保持当前值，先链入基类。
@@ -270,34 +270,37 @@ class SegmentedControl : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("selected")) {
-            selected_ = props["selected"].get<int>();
+            selected_ = props.at("selected")->as_or<std::int32_t>(0);
         }
-        if (props.contains("segments") && props["segments"].is_array()) {
-            segments_.clear();
-            for (const auto &s : props["segments"]) {
-                segments_.push_back(s.get<std::string>());
+        if (props.contains("segments")) {
+            const auto *arr = props.at("segments");
+            if (arr != nullptr && arr->is_array()) {
+                segments_.clear();
+                for (const auto *s = arr->begin(); s != arr->end(); ++s) {
+                    segments_.push_back(s->as_or<std::string>(""));
+                }
             }
         }
         if (props.contains("active_color")) {
-            active_color_ = json_to_color(props["active_color"]);
+            active_color_ = json_to_color(*props.at("active_color"));
         }
         if (props.contains("text_color")) {
-            text_color_ = json_to_color(props["text_color"]);
+            text_color_ = json_to_color(*props.at("text_color"));
         }
         if (props.contains("selected_text_color")) {
-            selected_text_color_ = json_to_color(props["selected_text_color"]);
+            selected_text_color_ = json_to_color(*props.at("selected_text_color"));
         }
         if (props.contains("border_color")) {
-            border_color_ = json_to_color(props["border_color"]);
+            border_color_ = json_to_color(*props.at("border_color"));
         }
         if (props.contains("font_size")) {
-            font_size_ = props["font_size"].get<float>();
+            font_size_ = props.at("font_size")->as_or<float>(0.0F);
         }
         if (props.contains("corner_radius")) {
-            corner_radius_ = props["corner_radius"].get<float>();
+            corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
         }
         if (props.contains("enabled")) {
-            enabled_ = props["enabled"].get<bool>();
+            enabled_ = props.at("enabled")->as_or<bool>(false);
         }
     }
 

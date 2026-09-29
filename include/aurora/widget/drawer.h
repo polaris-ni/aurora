@@ -152,10 +152,10 @@ class Drawer : public Widget {
     /// @note Rebuildable: yes, via from_json
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["open"] = open_.get();
-        props["side"] = side_ == DrawerSide::Left ? "left" : "right";
-        props["panel_width"] = panel_width_;
-        props["permanent"] = permanent_;
+        props.set("open", Json{open_.get()});
+        props.set("side", side_ == DrawerSide::Left ? "left" : "right");
+        props.set("panel_width", panel_width_);
+        props.set("permanent", Json{permanent_});
     }
 
     /// @brief 从 props JSON 还原自有属性（缺失键保持当前值）。
@@ -163,16 +163,16 @@ class Drawer : public Widget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("open")) {
-            open_.set(props["open"].get<bool>());
+            open_.set(props.at("open")->as_or<bool>(false));
         }
         if (props.contains("side")) {
-            side_ = props["side"].get<std::string>() == "right" ? DrawerSide::Right : DrawerSide::Left;
+            side_ = props.at("side")->as_or<std::string>("") == "right" ? DrawerSide::Right : DrawerSide::Left;
         }
         if (props.contains("panel_width")) {
-            panel_width_ = props["panel_width"].get<float>();
+            panel_width_ = props.at("panel_width")->as_or<float>(0.0F);
         }
         if (props.contains("permanent")) {
-            permanent_ = props["permanent"].get<bool>();
+            permanent_ = props.at("permanent")->as_or<bool>(false);
         }
     }
 
@@ -347,10 +347,10 @@ class ProgressDialog : public Widget {
     /// @note Rebuildable: yes, via from_json
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["message"] = message_;
-        props["progress"] = progress_.get();
-        props["open"] = open_;
-        props["cancellable"] = cancellable_;
+        props.set("message", message_);
+        props.set("progress", progress_.get());
+        props.set("open", Json{open_});
+        props.set("cancellable", Json{cancellable_});
     }
 
   protected:
@@ -493,8 +493,8 @@ class PageView : public Container {
     /// @note Rebuildable: yes, via from_json
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["current"] = current_.get();
-        props["show_indicator"] = show_indicator_;
+        props.set("current", current_.get());
+        props.set("show_indicator", Json{show_indicator_});
     }
 
     /// @brief 从 props JSON 还原自有属性（缺失键保持当前值）。
@@ -502,10 +502,10 @@ class PageView : public Container {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("current")) {
-            current_.set(props["current"].get<int>());
+            current_.set(props.at("current")->as_or<std::int32_t>(0));
         }
         if (props.contains("show_indicator")) {
-            show_indicator_ = props["show_indicator"].get<bool>();
+            show_indicator_ = props.at("show_indicator")->as_or<bool>(false);
         }
     }
 

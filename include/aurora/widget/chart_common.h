@@ -326,9 +326,9 @@ class BandScale {
         return out;
     }
     out.reserve(j.size());
-    for (const Json &item : j) {
-        if (item.is_number()) {
-            const double v = item.get<double>();
+    for (const auto *item = j.begin(); item != j.end(); ++item) {
+        if (item->is_number()) {
+            const double v = item->as_or<double>(0.0);
             out.push_back(std::isfinite(v) ? v : 0.0);
         }
     }
@@ -355,9 +355,9 @@ class BandScale {
         return out;
     }
     out.reserve(j.size());
-    for (const Json &item : j) {
-        if (item.is_string()) {
-            out.push_back(item.get<std::string>());
+    for (const auto *item = j.begin(); item != j.end(); ++item) {
+        if (item->is_string()) {
+            out.push_back(item->as_or<std::string>(""));
         }
     }
     return out;
@@ -368,10 +368,10 @@ class BandScale {
 /// @return 含 `name` / `values`（可选 `color`）的 JSON 对象。
 [[nodiscard]] inline auto chart_series_to_json(const ChartSeries &s) -> Json {
     Json o = Json::object();
-    o["name"] = s.name;
-    o["values"] = double_vector_to_json(s.values);
+    o.set("name", s.name);
+    o.set("values", double_vector_to_json(s.values));
     if (s.color.has_value()) {
-        o["color"] = color_to_json(*s.color);
+        o.set("color", color_to_json(*s.color));
     }
     return o;
 }
@@ -384,14 +384,14 @@ class BandScale {
     if (!j.is_object()) {
         return s;
     }
-    if (j.contains("name") && j["name"].is_string()) {
-        s.name = j["name"].get<std::string>();
+    if (j.contains("name") && j.at("name")->is_string()) {
+        s.name = j.at("name")->as_or<std::string>("");
     }
     if (j.contains("values")) {
-        s.values = json_to_double_vector(j["values"]);
+        s.values = json_to_double_vector(*j.at("values"));
     }
-    if (j.contains("color") && j["color"].is_array()) {
-        s.color = json_to_color(j["color"]);
+    if (j.contains("color") && j.at("color")->is_array()) {
+        s.color = json_to_color(*j.at("color"));
     }
     return s;
 }
@@ -416,9 +416,9 @@ class BandScale {
         return out;
     }
     out.reserve(j.size());
-    for (const Json &item : j) {
-        if (item.is_object()) {
-            out.push_back(json_to_chart_series(item));
+    for (const auto *item = j.begin(); item != j.end(); ++item) {
+        if (item->is_object()) {
+            out.push_back(json_to_chart_series(*item));
         }
     }
     return out;
@@ -429,15 +429,18 @@ class BandScale {
 /// @return 含 `name` / `points` / `dot_radius`（可选 `color`）的 JSON 对象。
 [[nodiscard]] inline auto scatter_series_to_json(const ScatterSeries &s) -> Json {
     Json o = Json::object();
-    o["name"] = s.name;
+    o.set("name", s.name);
     Json pts = Json::array();
     for (const ChartPoint &pt : s.points) {
-        pts.push_back(Json::array({std::isfinite(pt.x) ? pt.x : 0.0, std::isfinite(pt.y) ? pt.y : 0.0}));
+        Json p = Json::array();
+        p.push_back(std::isfinite(pt.x) ? pt.x : 0.0);
+        p.push_back(std::isfinite(pt.y) ? pt.y : 0.0);
+        pts.push_back(std::move(p));
     }
-    o["points"] = std::move(pts);
-    o["dot_radius"] = s.dot_radius;
+    o.set("points", std::move(pts));
+    o.set("dot_radius", s.dot_radius);
     if (s.color.has_value()) {
-        o["color"] = color_to_json(*s.color);
+        o.set("color", color_to_json(*s.color));
     }
     return o;
 }
@@ -451,19 +454,20 @@ class BandScale {
     if (!j.is_object()) {
         return s;
     }
-    if (j.contains("name") && j["name"].is_string()) {
-        s.name = j["name"].get<std::string>();
+    if (j.contains("name") && j.at("name")->is_string()) {
+        s.name = j.at("name")->as_or<std::string>("");
     }
-    if (j.contains("dot_radius") && j["dot_radius"].is_number()) {
-        s.dot_radius = j["dot_radius"].get<float>();
+    if (j.contains("dot_radius") && j.at("dot_radius")->is_number()) {
+        s.dot_radius = j.at("dot_radius")->as_or<float>(0.0F);
     }
-    if (j.contains("color") && j["color"].is_array()) {
-        s.color = json_to_color(j["color"]);
+    if (j.contains("color") && j.at("color")->is_array()) {
+        s.color = json_to_color(*j.at("color"));
     }
-    if (j.contains("points") && j["points"].is_array()) {
-        for (const Json &item : j["points"]) {
-            if (item.is_array() && item.size() >= 2 && item[0].is_number() && item[1].is_number()) {
-                s.points.push_back(ChartPoint{.x = item[0].get<double>(), .y = item[1].get<double>()});
+    if (j.contains("points") && j.at("points")->is_array()) {
+        const auto *points = j.at("points");
+        for (const auto *item = points->begin(); item != points->end(); ++item) {
+            if (item->is_array() && item->size() >= 2 && item->at(0)->is_number() && item->at(1)->is_number()) {
+                s.points.push_back(ChartPoint{.x = item->at(0)->as_or<double>(0.0), .y = item->at(1)->as_or<double>(0.0)});
             }
         }
     }
@@ -490,9 +494,9 @@ class BandScale {
         return out;
     }
     out.reserve(j.size());
-    for (const Json &item : j) {
-        if (item.is_object()) {
-            out.push_back(json_to_scatter_series(item));
+    for (const auto *item = j.begin(); item != j.end(); ++item) {
+        if (item->is_object()) {
+            out.push_back(json_to_scatter_series(*item));
         }
     }
     return out;
@@ -503,10 +507,10 @@ class BandScale {
 /// @return 含 `name` / `value`（可选 `color`）的 JSON 对象。
 [[nodiscard]] inline auto pie_section_to_json(const PieSection &s) -> Json {
     Json o = Json::object();
-    o["name"] = s.name;
-    o["value"] = std::isfinite(s.value) ? s.value : 0.0;
+    o.set("name", s.name);
+    o.set("value", std::isfinite(s.value) ? s.value : 0.0);
     if (s.color.has_value()) {
-        o["color"] = color_to_json(*s.color);
+        o.set("color", color_to_json(*s.color));
     }
     return o;
 }
@@ -519,15 +523,15 @@ class BandScale {
     if (!j.is_object()) {
         return s;
     }
-    if (j.contains("name") && j["name"].is_string()) {
-        s.name = j["name"].get<std::string>();
+    if (j.contains("name") && j.at("name")->is_string()) {
+        s.name = j.at("name")->as_or<std::string>("");
     }
-    if (j.contains("value") && j["value"].is_number()) {
-        const double v = j["value"].get<double>();
+    if (j.contains("value") && j.at("value")->is_number()) {
+        const double v = j.at("value")->as_or<double>(0.0);
         s.value = std::isfinite(v) ? v : 0.0;
     }
-    if (j.contains("color") && j["color"].is_array()) {
-        s.color = json_to_color(j["color"]);
+    if (j.contains("color") && j.at("color")->is_array()) {
+        s.color = json_to_color(*j.at("color"));
     }
     return s;
 }
@@ -552,9 +556,9 @@ class BandScale {
         return out;
     }
     out.reserve(j.size());
-    for (const Json &item : j) {
-        if (item.is_object()) {
-            out.push_back(json_to_pie_section(item));
+    for (const auto *item = j.begin(); item != j.end(); ++item) {
+        if (item->is_object()) {
+            out.push_back(json_to_pie_section(*item));
         }
     }
     return out;
@@ -582,7 +586,7 @@ class BandScale {
 /// @return 匹配 "Bottom" / "Right" 的对应枚举值；其余（含非字符串）一律为 Top。
 [[nodiscard]] inline auto json_to_legend_position(const Json &j) -> LegendPosition {
     if (j.is_string()) {
-        const std::string s = j.get<std::string>();
+        const std::string s = j.as_or<std::string>("");
         if (s == "Bottom") {
             return LegendPosition::Bottom;
         }
@@ -598,19 +602,19 @@ class BandScale {
 /// @return 含 visible / tick_count / show_grid_lines / include_zero 等字段的 JSON 对象。
 [[nodiscard]] inline auto chart_axis_spec_to_json(const ChartAxisSpec &a) -> Json {
     Json o = Json::object();
-    o["visible"] = a.visible;
+    o.set("visible", Json{a.visible});
     if (!a.label.empty()) {
-        o["label"] = a.label;
+        o.set("label", a.label);
     }
-    o["tick_count"] = a.tick_count;
+    o.set("tick_count", a.tick_count);
     if (a.min.has_value()) {
-        o["min"] = *a.min;
+        o.set("min", *a.min);
     }
     if (a.max.has_value()) {
-        o["max"] = *a.max;
+        o.set("max", *a.max);
     }
-    o["show_grid_lines"] = a.show_grid_lines;
-    o["include_zero"] = a.include_zero;
+    o.set("show_grid_lines", Json{a.show_grid_lines});
+    o.set("include_zero", Json{a.include_zero});
     return o;
 }
 
@@ -622,26 +626,26 @@ class BandScale {
     if (!j.is_object()) {
         return a;
     }
-    if (j.contains("visible") && j["visible"].is_boolean()) {
-        a.visible = j["visible"].get<bool>();
+    if (j.contains("visible") && j.at("visible")->is_bool()) {
+        a.visible = j.at("visible")->as_or<bool>(false);
     }
-    if (j.contains("label") && j["label"].is_string()) {
-        a.label = j["label"].get<std::string>();
+    if (j.contains("label") && j.at("label")->is_string()) {
+        a.label = j.at("label")->as_or<std::string>("");
     }
-    if (j.contains("tick_count") && j["tick_count"].is_number()) {
-        a.tick_count = std::max(2, j["tick_count"].get<int>());
+    if (j.contains("tick_count") && j.at("tick_count")->is_number()) {
+        a.tick_count = std::max(2, j.at("tick_count")->as_or<std::int32_t>(0));
     }
-    if (j.contains("min") && j["min"].is_number()) {
-        a.min = j["min"].get<double>();
+    if (j.contains("min") && j.at("min")->is_number()) {
+        a.min = j.at("min")->as_or<double>(0.0);
     }
-    if (j.contains("max") && j["max"].is_number()) {
-        a.max = j["max"].get<double>();
+    if (j.contains("max") && j.at("max")->is_number()) {
+        a.max = j.at("max")->as_or<double>(0.0);
     }
-    if (j.contains("show_grid_lines") && j["show_grid_lines"].is_boolean()) {
-        a.show_grid_lines = j["show_grid_lines"].get<bool>();
+    if (j.contains("show_grid_lines") && j.at("show_grid_lines")->is_bool()) {
+        a.show_grid_lines = j.at("show_grid_lines")->as_or<bool>(false);
     }
-    if (j.contains("include_zero") && j["include_zero"].is_boolean()) {
-        a.include_zero = j["include_zero"].get<bool>();
+    if (j.contains("include_zero") && j.at("include_zero")->is_bool()) {
+        a.include_zero = j.at("include_zero")->as_or<bool>(false);
     }
     return a;
 }
@@ -651,8 +655,8 @@ class BandScale {
 /// @return 含 `visible` 与 `position`（按名序列化）的 JSON 对象。
 [[nodiscard]] inline auto chart_legend_spec_to_json(const ChartLegendSpec &l) -> Json {
     Json o = Json::object();
-    o["visible"] = l.visible;
-    o["position"] = legend_position_to_json(l.position);
+    o.set("visible", Json{l.visible});
+    o.set("position", legend_position_to_json(l.position));
     return o;
 }
 
@@ -664,11 +668,11 @@ class BandScale {
     if (!j.is_object()) {
         return l;
     }
-    if (j.contains("visible") && j["visible"].is_boolean()) {
-        l.visible = j["visible"].get<bool>();
+    if (j.contains("visible") && j.at("visible")->is_bool()) {
+        l.visible = j.at("visible")->as_or<bool>(false);
     }
     if (j.contains("position")) {
-        l.position = json_to_legend_position(j["position"]);
+        l.position = json_to_legend_position(*j.at("position"));
     }
     return l;
 }

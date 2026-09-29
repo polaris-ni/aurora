@@ -606,50 +606,50 @@ inline auto LineChart::describe_static() -> WidgetDescriptor {
 
 inline auto LineChart::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-    props["series"] = chart_series_vector_to_json(series);
-    props["categories"] = string_vector_to_json(categories);
-    props["show_dots"] = show_dots;
-    props["line_width"] = line_width;
-    props["dot_radius"] = dot_radius;
-    props["show_crosshair"] = show_crosshair;
-    props["axis_x"] = chart_axis_spec_to_json(axis_x);
-    props["axis_y"] = chart_axis_spec_to_json(axis_y);
-    props["legend"] = chart_legend_spec_to_json(legend);
-    props["padding"] = edge_insets_to_json(padding);
+    props.set("series", chart_series_vector_to_json(series));
+    props.set("categories", string_vector_to_json(categories));
+    props.set("show_dots", Json{show_dots});
+    props.set("line_width", line_width);
+    props.set("dot_radius", dot_radius);
+    props.set("show_crosshair", Json{show_crosshair});
+    props.set("axis_x", chart_axis_spec_to_json(axis_x));
+    props.set("axis_y", chart_axis_spec_to_json(axis_y));
+    props.set("legend", chart_legend_spec_to_json(legend));
+    props.set("padding", edge_insets_to_json(padding));
 }
 
 // 键名与 serialize_props 一一对称；类型不符的键跳过不写。
 inline auto LineChart::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("series")) {
-        series = json_to_chart_series_vector(props["series"]);
+        series = json_to_chart_series_vector(*props.at("series"));
     }
     if (props.contains("categories")) {
-        categories = json_to_string_vector(props["categories"]);
+        categories = json_to_string_vector(*props.at("categories"));
     }
-    if (props.contains("show_dots") && props["show_dots"].is_boolean()) {
-        show_dots = props["show_dots"].get<bool>();
+    if (props.contains("show_dots") && props.at("show_dots")->is_bool()) {
+        show_dots = props.at("show_dots")->as_or<bool>(false);
     }
-    if (props.contains("line_width") && props["line_width"].is_number()) {
-        line_width = std::max(0.0F, props["line_width"].get<float>());
+    if (props.contains("line_width") && props.at("line_width")->is_number()) {
+        line_width = std::max(0.0F, props.at("line_width")->as_or<float>(0.0F));
     }
-    if (props.contains("dot_radius") && props["dot_radius"].is_number()) {
-        dot_radius = std::max(0.0F, props["dot_radius"].get<float>());
+    if (props.contains("dot_radius") && props.at("dot_radius")->is_number()) {
+        dot_radius = std::max(0.0F, props.at("dot_radius")->as_or<float>(0.0F));
     }
-    if (props.contains("show_crosshair") && props["show_crosshair"].is_boolean()) {
-        show_crosshair = props["show_crosshair"].get<bool>();
+    if (props.contains("show_crosshair") && props.at("show_crosshair")->is_bool()) {
+        show_crosshair = props.at("show_crosshair")->as_or<bool>(false);
     }
     if (props.contains("axis_x")) {
-        axis_x = json_to_chart_axis_spec(props["axis_x"]);
+        axis_x = json_to_chart_axis_spec(*props.at("axis_x"));
     }
     if (props.contains("axis_y")) {
-        axis_y = json_to_chart_axis_spec(props["axis_y"]);
+        axis_y = json_to_chart_axis_spec(*props.at("axis_y"));
     }
     if (props.contains("legend")) {
-        legend = json_to_chart_legend_spec(props["legend"]);
+        legend = json_to_chart_legend_spec(*props.at("legend"));
     }
     if (props.contains("padding")) {
-        padding = json_to_edge_insets(props["padding"]);
+        padding = json_to_edge_insets(*props.at("padding"));
     }
     mark_needs_layout();
     mark_needs_paint();

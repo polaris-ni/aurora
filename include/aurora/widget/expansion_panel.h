@@ -140,9 +140,9 @@ class ExpansionPanel : public SingleChild {
     /// @param props 输出参数，序列化后的属性集合。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["header"] = header_;
-        props["expanded"] = expanded_.get();
-        props["header_height"] = header_height_;
+        props.set("header", header_);
+        props.set("expanded", Json{expanded_.get()});
+        props.set("header_height", header_height_);
     }
 
     /// @brief 从 JSON 恢复标题、展开状态与头部高度（缺键项保留当前值）。
@@ -150,13 +150,13 @@ class ExpansionPanel : public SingleChild {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("header")) {
-            header_ = props["header"].get<std::string>();
+            header_ = props.at("header")->as_or<std::string>("");
         }
         if (props.contains("expanded")) {
-            expanded_.set(props["expanded"].get<bool>());
+            expanded_.set(props.at("expanded")->as_or<bool>(false));
         }
         if (props.contains("header_height")) {
-            header_height_ = props["header_height"].get<float>();
+            header_height_ = props.at("header_height")->as_or<float>(0.0F);
         }
     }
 

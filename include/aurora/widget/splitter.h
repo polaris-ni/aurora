@@ -184,11 +184,11 @@ class Splitter : public Widget {
     /// @param props 输出 JSON 对象，先写入基类属性再补充本控件字段。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["orientation"] = orient_ == SplitterOrientation::Horizontal ? "horizontal" : "vertical";
-        props["ratio"] = ratio_.get();
-        props["min_first"] = min_first_;
-        props["min_second"] = min_second_;
-        props["handle_size"] = handle_size_;
+        props.set("orientation", orient_ == SplitterOrientation::Horizontal ? "horizontal" : "vertical");
+        props.set("ratio", ratio_.get());
+        props.set("min_first", min_first_);
+        props.set("min_second", min_second_);
+        props.set("handle_size", handle_size_);
     }
 
     /// @brief 从 JSON 恢复可序列化字段；缺省键保留现值。
@@ -196,20 +196,20 @@ class Splitter : public Widget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("orientation")) {
-            orient_ = props["orientation"].get<std::string>() == "vertical" ? SplitterOrientation::Vertical
-                                                                            : SplitterOrientation::Horizontal;
+            orient_ = props.at("orientation")->as_or<std::string>("") == "vertical" ? SplitterOrientation::Vertical
+                                                                                    : SplitterOrientation::Horizontal;
         }
         if (props.contains("ratio")) {
-            ratio_.set(props["ratio"].get<float>());
+            ratio_.set(props.at("ratio")->as_or<float>(0.0F));
         }
         if (props.contains("min_first")) {
-            min_first_ = props["min_first"].get<float>();
+            min_first_ = props.at("min_first")->as_or<float>(0.0F);
         }
         if (props.contains("min_second")) {
-            min_second_ = props["min_second"].get<float>();
+            min_second_ = props.at("min_second")->as_or<float>(0.0F);
         }
         if (props.contains("handle_size")) {
-            handle_size_ = props["handle_size"].get<float>();
+            handle_size_ = props.at("handle_size")->as_or<float>(0.0F);
         }
     }
 

@@ -191,12 +191,12 @@ class MenuBar : public Widget {
     /// @param props [out] 写入的属性 JSON 对象（先叠加基类属性）。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["bar_height"] = bar_height_;
+        props.set("bar_height", bar_height_);
         Json titles = Json::array();
         for (const auto &m : menus_) {
             titles.push_back(m.title);
         }
-        props["menu_titles"] = titles;
+        props.set("menu_titles", titles);
     }
 
   protected:

@@ -325,22 +325,22 @@ class Slider : public LeafWidget {
     /// @param props 出参：键值写入该 JSON 对象（先由基类写入通用属性）。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["value"] = value();
-        props["min"] = min_;
-        props["max"] = max_;
+        props.set("value", value());
+        props.set("min", min_);
+        props.set("max", max_);
         if (step_ > 0.0) {
-            props["step"] = step_;
+            props.set("step", step_);
         }
         if (active_color_.has_value()) {
-            props["active_color"] = color_to_json(*active_color_);  // 未设置不输出：保留「跟随主题」语义
+            props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props["inactive_color"] = color_to_json(inactive_color_);
+        props.set("inactive_color", color_to_json(inactive_color_));
         if (thumb_color_.has_value()) {
-            props["thumb_color"] = color_to_json(*thumb_color_);
+            props.set("thumb_color", color_to_json(*thumb_color_));
         }
-        props["track_height"] = track_height_;
-        props["thumb_size"] = thumb_size_;
-        props["enabled"] = enabled_;
+        props.set("track_height", track_height_);
+        props.set("thumb_size", thumb_size_);
+        props.set("enabled", Json{enabled_});
     }
 
     /// @brief 从 JSON 恢复属性：仅读取存在的键，缺失键保持当前值；value 经 set_value 写入（走 clamp/吸附）。
@@ -348,34 +348,34 @@ class Slider : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("min")) {
-            min_ = props["min"].get<double>();
+            min_ = props.at("min")->as_or<double>(0.0);
         }
         if (props.contains("max")) {
-            max_ = props["max"].get<double>();
+            max_ = props.at("max")->as_or<double>(0.0);
         }
         if (props.contains("step")) {
-            step_ = props["step"].get<double>();
+            step_ = props.at("step")->as_or<double>(0.0);
         }
         if (props.contains("active_color")) {
-            active_color_ = json_to_color(props["active_color"]);
+            active_color_ = json_to_color(*props.at("active_color"));
         }
         if (props.contains("inactive_color")) {
-            inactive_color_ = json_to_color(props["inactive_color"]);
+            inactive_color_ = json_to_color(*props.at("inactive_color"));
         }
         if (props.contains("thumb_color")) {
-            thumb_color_ = json_to_color(props["thumb_color"]);
+            thumb_color_ = json_to_color(*props.at("thumb_color"));
         }
         if (props.contains("track_height")) {
-            track_height_ = props["track_height"].get<float>();
+            track_height_ = props.at("track_height")->as_or<float>(0.0F);
         }
         if (props.contains("thumb_size")) {
-            thumb_size_ = props["thumb_size"].get<float>();
+            thumb_size_ = props.at("thumb_size")->as_or<float>(0.0F);
         }
         if (props.contains("enabled")) {
-            enabled_ = props["enabled"].get<bool>();
+            enabled_ = props.at("enabled")->as_or<bool>(false);
         }
         if (props.contains("value")) {
-            set_value(props["value"].get<double>());
+            set_value(props.at("value")->as_or<double>(0.0));
         }
     }
 

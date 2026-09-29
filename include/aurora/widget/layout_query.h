@@ -24,11 +24,11 @@ namespace aurora {
 [[nodiscard]] inline auto describe_layout(const Node &node) -> Json {
     Json j = Json::object();
     const Rect b = node.bounds();
-    j["type"] = node.widget().type_name();
-    j["x"] = b.origin.x;
-    j["y"] = b.origin.y;
-    j["width"] = b.size.width;
-    j["height"] = b.size.height;
+    j.set("type", node.widget().type_name());
+    j.set("x", b.origin.x);
+    j.set("y", b.origin.y);
+    j.set("width", b.size.width);
+    j.set("height", b.size.height);
     return j;
 }
 

@@ -126,19 +126,19 @@ class Grid : public Container, public GridProps {
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["columns"] = columns;
-        props["gap"] = gap;
+        props.set("columns", columns);
+        props.set("gap", gap);
     }
     /// @brief 反序列化网格属性：读回 columns（<1 钳为 1）与 gap。
     /// @param props 源 JSON 对象，缺键的字段保持当前值。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("columns")) {
-            const int c = props["columns"].get<int>();
+            const int c = props.at("columns")->as_or<std::int32_t>(0);
             columns = c > 0 ? c : 1;
         }
         if (props.contains("gap")) {
-            gap = props["gap"].get<float>();
+            gap = props.at("gap")->as_or<float>(0.0F);
         }
     }
 

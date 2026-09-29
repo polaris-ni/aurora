@@ -504,34 +504,34 @@ inline auto ScatterChart::describe_static() -> WidgetDescriptor {
 // 键集与 describe_static 的属性表一致。
 inline auto ScatterChart::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-    props["series"] = scatter_series_vector_to_json(series);
-    props["show_crosshair"] = show_crosshair;
-    props["axis_x"] = chart_axis_spec_to_json(axis_x);
-    props["axis_y"] = chart_axis_spec_to_json(axis_y);
-    props["legend"] = chart_legend_spec_to_json(legend);
-    props["padding"] = edge_insets_to_json(padding);
+    props.set("series", scatter_series_vector_to_json(series));
+    props.set("show_crosshair", Json{show_crosshair});
+    props.set("axis_x", chart_axis_spec_to_json(axis_x));
+    props.set("axis_y", chart_axis_spec_to_json(axis_y));
+    props.set("legend", chart_legend_spec_to_json(legend));
+    props.set("padding", edge_insets_to_json(padding));
 }
 
 // 键名与 serialize_props 对称；series/轴/图例/留白交由转换函数直接覆盖。
 inline auto ScatterChart::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("series")) {
-        series = json_to_scatter_series_vector(props["series"]);
+        series = json_to_scatter_series_vector(*props.at("series"));
     }
-    if (props.contains("show_crosshair") && props["show_crosshair"].is_boolean()) {
-        show_crosshair = props["show_crosshair"].get<bool>();
+    if (props.contains("show_crosshair") && props.at("show_crosshair")->is_bool()) {
+        show_crosshair = props.at("show_crosshair")->as_or<bool>(false);
     }
     if (props.contains("axis_x")) {
-        axis_x = json_to_chart_axis_spec(props["axis_x"]);
+        axis_x = json_to_chart_axis_spec(*props.at("axis_x"));
     }
     if (props.contains("axis_y")) {
-        axis_y = json_to_chart_axis_spec(props["axis_y"]);
+        axis_y = json_to_chart_axis_spec(*props.at("axis_y"));
     }
     if (props.contains("legend")) {
-        legend = json_to_chart_legend_spec(props["legend"]);
+        legend = json_to_chart_legend_spec(*props.at("legend"));
     }
     if (props.contains("padding")) {
-        padding = json_to_edge_insets(props["padding"]);
+        padding = json_to_edge_insets(*props.at("padding"));
     }
     mark_needs_layout();
     mark_needs_paint();

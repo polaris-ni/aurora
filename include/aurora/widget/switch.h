@@ -326,22 +326,22 @@ class Switch : public LeafWidget {
     /// @param props 输出的 JSON 对象，属性键值追加到其上
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["checked"] = value();
+        props.set("checked", Json{value()});
         if (active_color_.has_value()) {
-            props["active_color"] = color_to_json(*active_color_);  // 未设置不输出：保留「跟随主题」语义
+            props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props["inactive_color"] = color_to_json(inactive_color_);
-        props["thumb_color"] = color_to_json(thumb_color_);
-        props["track_width"] = track_width_;
-        props["track_height"] = track_height_;
-        props["thumb_inset"] = thumb_inset_;
+        props.set("inactive_color", color_to_json(inactive_color_));
+        props.set("thumb_color", color_to_json(thumb_color_));
+        props.set("track_width", track_width_);
+        props.set("track_height", track_height_);
+        props.set("thumb_inset", thumb_inset_);
         if (border_color_.has_value()) {
-            props["border_color"] = color_to_json(*border_color_);
+            props.set("border_color", color_to_json(*border_color_));
         }
         if (border_width_ > 0.0F) {
-            props["border_width"] = border_width_;
+            props.set("border_width", border_width_);
         }
-        props["enabled"] = enabled_;
+        props.set("enabled", Json{enabled_});
     }
 
     /// @brief 反序列化开关属性：按键存在读取 checked/各颜色/轨道尺寸/边距/描边/enabled。
@@ -349,34 +349,34 @@ class Switch : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("checked")) {
-            set_value(props["checked"].get<bool>());
+            set_value(props.at("checked")->as_or<bool>(false));
         }
         if (props.contains("active_color")) {
-            active_color_ = json_to_color(props["active_color"]);
+            active_color_ = json_to_color(*props.at("active_color"));
         }
         if (props.contains("inactive_color")) {
-            inactive_color_ = json_to_color(props["inactive_color"]);
+            inactive_color_ = json_to_color(*props.at("inactive_color"));
         }
         if (props.contains("thumb_color")) {
-            thumb_color_ = json_to_color(props["thumb_color"]);
+            thumb_color_ = json_to_color(*props.at("thumb_color"));
         }
         if (props.contains("track_width")) {
-            track_width_ = props["track_width"].get<float>();
+            track_width_ = props.at("track_width")->as_or<float>(0.0F);
         }
         if (props.contains("track_height")) {
-            track_height_ = props["track_height"].get<float>();
+            track_height_ = props.at("track_height")->as_or<float>(0.0F);
         }
         if (props.contains("thumb_inset")) {
-            thumb_inset_ = props["thumb_inset"].get<float>();
+            thumb_inset_ = props.at("thumb_inset")->as_or<float>(0.0F);
         }
         if (props.contains("border_color")) {
-            border_color_ = json_to_color(props["border_color"]);
+            border_color_ = json_to_color(*props.at("border_color"));
         }
         if (props.contains("border_width")) {
-            border_width_ = props["border_width"].get<float>();
+            border_width_ = props.at("border_width")->as_or<float>(0.0F);
         }
         if (props.contains("enabled")) {
-            enabled_ = props["enabled"].get<bool>();
+            enabled_ = props.at("enabled")->as_or<bool>(false);
         }
     }
 

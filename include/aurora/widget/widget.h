@@ -889,20 +889,20 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///        以及非空的 `accessibility_label` / `stable_key` / `labelled_by`（未设不写键）。
     /// @note Rebuildable: yes, via from_json
     virtual auto serialize_props(Json &props) const -> void {
-        props["width"] = length_to_json(width_);
-        props["height"] = length_to_json(height_);
-        props["show"] = show.get();
-        props["overflow"] = overflow_strategy_to_json(overflow_);
+        props.set("width", length_to_json(width_));
+        props.set("height", length_to_json(height_));
+        props.set("show", Json{show.get()});
+        props.set("overflow", overflow_strategy_to_json(overflow_));
         // 未声明不输出：空串即「回落 Name 回退链」，写出空值会让结构快照误读为「名字已清空」。
         if (!explicit_label_.empty()) {
-            props["accessibility_label"] = explicit_label_;
+            props.set("accessibility_label", explicit_label_);
         }
         // 同一条「未设不写键」纪律：两键的空串语义都是「未声明」，写出空值会被误读为撤除指令。
         if (!stable_key_.empty()) {
-            props["stable_key"] = stable_key_;
+            props.set("stable_key", stable_key_);
         }
         if (!labelled_by_.empty()) {
-            props["labelled_by"] = labelled_by_;
+            props.set("labelled_by", labelled_by_);
         }
     }
 
@@ -911,26 +911,26 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @param props 来源 JSON：仅读取存在的键，缺失键保持当前值不变（与 `serialize_props` 的
     ///        「未设不写键」对称，故缺键读作「未声明」而非「撤除指令」）。
     virtual auto deserialize_props(const Json &props) -> void {
-        if (props.contains("width")) {
-            width_ = json_to_length(props["width"]);
+        if (const auto *v = props.at("width"); v != nullptr) {
+            width_ = json_to_length(*v);
         }
-        if (props.contains("height")) {
-            height_ = json_to_length(props["height"]);
+        if (const auto *v = props.at("height"); v != nullptr) {
+            height_ = json_to_length(*v);
         }
-        if (props.contains("show")) {
-            show.set(props["show"].get<bool>());
+        if (const auto *v = props.at("show"); v != nullptr) {
+            show.set(v->as_or<bool>(false));
         }
-        if (props.contains("overflow")) {
-            overflow_strategy(json_to_overflow_strategy(props["overflow"]));
+        if (const auto *v = props.at("overflow"); v != nullptr) {
+            overflow_strategy(json_to_overflow_strategy(*v));
         }
-        if (props.contains("accessibility_label")) {
-            set_accessibility_label(props["accessibility_label"].get<std::string>());
+        if (const auto *v = props.at("accessibility_label"); v != nullptr) {
+            set_accessibility_label(v->as_or<std::string>(""));
         }
-        if (props.contains("stable_key")) {
-            set_stable_key(props["stable_key"].get<std::string>());
+        if (const auto *v = props.at("stable_key"); v != nullptr) {
+            set_stable_key(v->as_or<std::string>(""));
         }
-        if (props.contains("labelled_by")) {
-            set_labelled_by(props["labelled_by"].get<std::string>());
+        if (const auto *v = props.at("labelled_by"); v != nullptr) {
+            set_labelled_by(v->as_or<std::string>(""));
         }
     }
 

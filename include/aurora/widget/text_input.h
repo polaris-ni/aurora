@@ -555,35 +555,35 @@ class TextInput : public LeafWidget {
     /// @param props 目标 JSON 对象（基类先写通用布局字段）。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入通用布局字段（width/height/show 等）。
-        props["value"] = value_.get();
-        props["placeholder"] = placeholder_;
-        props["font_size"] = font_size_;
-        props["corner_radius"] = corner_radius_;
-        props["padding"] = edge_insets_to_json(padding_);
-        props["cursor_color"] = color_to_json(cursor_color_);
-        props["enabled"] = enabled_;
-        props["text_color"] = color_to_json(text_color_);
-        props["placeholder_color"] = color_to_json(placeholder_color_);
-        props["background"] = color_to_json(background_);
-        props["focused_background"] = color_to_json(focused_background_);
-        props["border_color"] = color_to_json(border_color_);
+        props.set("value", value_.get());
+        props.set("placeholder", placeholder_);
+        props.set("font_size", font_size_);
+        props.set("corner_radius", corner_radius_);
+        props.set("padding", edge_insets_to_json(padding_));
+        props.set("cursor_color", color_to_json(cursor_color_));
+        props.set("enabled", Json{enabled_});
+        props.set("text_color", color_to_json(text_color_));
+        props.set("placeholder_color", color_to_json(placeholder_color_));
+        props.set("background", color_to_json(background_));
+        props.set("focused_background", color_to_json(focused_background_));
+        props.set("border_color", color_to_json(border_color_));
         if (focused_border_color_.has_value()) {
-            props["focused_border_color"] =
-                color_to_json(*focused_border_color_);  // 未设置不输出：保留「跟随主题」语义
+            props.set("focused_border_color",
+                      color_to_json(*focused_border_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props["border_width"] = border_width_;
-        props["selection_color"] = color_to_json(selection_color_);
+        props.set("border_width", border_width_);
+        props.set("selection_color", color_to_json(selection_color_));
         if (direction_.has_value()) {  // 未设置不输出：保留「继承环境」语义
-            props["direction"] = *direction_ == TextDirection::RTL ? "RTL" : "LTR";
+            props.set("direction", *direction_ == TextDirection::RTL ? "RTL" : "LTR");
         }
         if (max_length_ > 0) {
-            props["max_length"] = max_length_;
+            props.set("max_length", max_length_);
         }
         if (read_only_) {
-            props["read_only"] = read_only_;
+            props.set("read_only", Json{read_only_});
         }
         if (obscure_) {
-            props["obscure_text"] = obscure_;
+            props.set("obscure_text", Json{obscure_});
         }
     }
 
@@ -593,61 +593,62 @@ class TextInput : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("value")) {
-            value_ = props["value"].get<std::string>();
+            value_ = props.at("value")->as_or<std::string>("");
         }
         if (props.contains("placeholder")) {
-            placeholder_ = props["placeholder"].get<std::string>();
+            placeholder_ = props.at("placeholder")->as_or<std::string>("");
         }
         if (props.contains("font_size")) {
-            font_size_ = props["font_size"].get<float>();
+            font_size_ = props.at("font_size")->as_or<float>(0.0F);
         }
         if (props.contains("corner_radius")) {
-            corner_radius_ = props["corner_radius"].get<float>();
+            corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
         }
         if (props.contains("padding")) {
-            padding_ = json_to_edge_insets(props["padding"]);
+            padding_ = json_to_edge_insets(*props.at("padding"));
         }
         if (props.contains("cursor_color")) {
-            cursor_color_ = json_to_color(props["cursor_color"]);
+            cursor_color_ = json_to_color(*props.at("cursor_color"));
         }
         if (props.contains("enabled")) {
-            enabled_ = props["enabled"].get<bool>();
+            enabled_ = props.at("enabled")->as_or<bool>(false);
         }
         if (props.contains("text_color")) {
-            text_color_ = json_to_color(props["text_color"]);
+            text_color_ = json_to_color(*props.at("text_color"));
         }
         if (props.contains("placeholder_color")) {
-            placeholder_color_ = json_to_color(props["placeholder_color"]);
+            placeholder_color_ = json_to_color(*props.at("placeholder_color"));
         }
         if (props.contains("background")) {
-            background_ = json_to_color(props["background"]);
+            background_ = json_to_color(*props.at("background"));
         }
         if (props.contains("focused_background")) {
-            focused_background_ = json_to_color(props["focused_background"]);
+            focused_background_ = json_to_color(*props.at("focused_background"));
         }
         if (props.contains("border_color")) {
-            border_color_ = json_to_color(props["border_color"]);
+            border_color_ = json_to_color(*props.at("border_color"));
         }
         if (props.contains("focused_border_color")) {
-            focused_border_color_ = json_to_color(props["focused_border_color"]);
+            focused_border_color_ = json_to_color(*props.at("focused_border_color"));
         }
         if (props.contains("border_width")) {
-            border_width_ = props["border_width"].get<float>();
+            border_width_ = props.at("border_width")->as_or<float>(0.0F);
         }
         if (props.contains("selection_color")) {
-            selection_color_ = json_to_color(props["selection_color"]);
+            selection_color_ = json_to_color(*props.at("selection_color"));
         }
         if (props.contains("max_length")) {
-            max_length_ = props["max_length"].get<std::size_t>();
+            max_length_ = props.at("max_length")->as_or<std::size_t>(0);
         }
         if (props.contains("read_only")) {
-            read_only_ = props["read_only"].get<bool>();
+            read_only_ = props.at("read_only")->as_or<bool>(false);
         }
         if (props.contains("obscure_text")) {
-            obscure_ = props["obscure_text"].get<bool>();
+            obscure_ = props.at("obscure_text")->as_or<bool>(false);
         }
-        if (props.contains("direction") && props["direction"].is_string()) {
-            direction_ = props["direction"].get<std::string>() == "RTL" ? TextDirection::RTL : TextDirection::LTR;
+        if (props.contains("direction") && props.at("direction")->is_string()) {
+            direction_ = props.at("direction")->as_or<std::string>("") == "RTL" ? TextDirection::RTL
+                                                                                : TextDirection::LTR;
         }
     }
 

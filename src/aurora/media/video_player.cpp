@@ -389,25 +389,17 @@ auto VideoPlayer::paint_frame(Painter &p, const Rect &bounds) const -> void { dr
 
 auto VideoPlayer::serialize_props(Json &props) const -> void {
     Container::serialize_props(props);
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["fit"] = box_fit_to_json(fit_);
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["show_controls"] = show_controls_;
+    props.set("fit", box_fit_to_json(fit_));
+    props.set("show_controls", Json{show_controls_});
 }
 
 auto VideoPlayer::deserialize_props(const Json &props) -> void {
     Container::deserialize_props(props);
     if (props.contains("fit")) {
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        fit_ = json_to_box_fit(props["fit"]);
+        fit_ = json_to_box_fit(*props.at("fit"));
     }
     if (props.contains("show_controls")) {
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        show_controls_ = props["show_controls"].get<bool>();
+        show_controls_ = props.at("show_controls")->as_or<bool>(false);
         if (!children_.empty()) {
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)

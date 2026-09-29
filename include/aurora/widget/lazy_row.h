@@ -112,33 +112,33 @@ class LazyRow : public Widget, public LazyRowProps {
     /// @param props 写入目标 JSON 对象（基类属性先行）。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入通用属性（width/height/show 等）
-        props["item_count"] = item_count;
-        props["item_extent"] = item_extent_;
-        props["cache_extent"] = cache_extent;
-        props["offset"] = offset_;  // 运行时滚动位置（AI-first 可观测）
-        props["restore_key"] = restore_key;
+        props.set("item_count", item_count);
+        props.set("item_extent", item_extent_);
+        props.set("cache_extent", cache_extent);
+        props.set("offset", offset_);  // 运行时滚动位置（AI-first 可观测）
+        props.set("restore_key", restore_key);
     }
     /// @brief 从静态 JSON 回填标量属性；缺失键保持当前值。
     /// @param props 属性 JSON 对象（item_count/item_extent/cache_extent/restore_key/offset）。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("item_count")) {
-            item_count = props["item_count"].get<int>();
+            item_count = props.at("item_count")->as_or<std::int32_t>(0);
             item_count_ = item_count;
         }
         if (props.contains("item_extent")) {
-            item_extent_ = props["item_extent"].get<float>();
+            item_extent_ = props.at("item_extent")->as_or<float>(0.0F);
             item_extent = item_extent_;
         }
         if (props.contains("cache_extent")) {
-            cache_extent = props["cache_extent"].get<float>();
+            cache_extent = props.at("cache_extent")->as_or<float>(0.0F);
         }
         if (props.contains("restore_key")) {
-            restore_key = props["restore_key"].get<std::string>();
+            restore_key = props.at("restore_key")->as_or<std::string>("");
         }
         if (props.contains("offset")) {
             // 显式偏移优先于 restore_key 恢复：记入 pending，首次可滚动布局时应用。
-            pending_offset_ = props["offset"].get<float>();
+            pending_offset_ = props.at("offset")->as_or<float>(0.0F);
             scroll_restored_ = false;
         }
     }

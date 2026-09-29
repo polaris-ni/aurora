@@ -326,22 +326,22 @@ class TabBar : public Widget {
     /// @param props 输出目标 JSON 对象
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["selected_index"] = selected_.get();
-        props["tab_height"] = tab_height_;
+        props.set("selected_index", selected_.get());
+        props.set("tab_height", tab_height_);
         Json labels = Json::array();
         for (const auto &t : tabs_) {
             labels.push_back(t.label);
         }
-        props["tab_labels"] = labels;
+        props.set("tab_labels", labels);
         if (active_color_.has_value()) {
-            props["active_color"] = color_to_json(*active_color_);  // 未设置不输出：保留「跟随主题」语义
+            props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props["bar_background"] = color_to_json(bar_background_);
-        props["tab_background"] = color_to_json(tab_background_);
-        props["text_color"] = color_to_json(text_color_);
-        props["indicator_thickness"] = indicator_thickness_;
-        props["font_size"] = font_size_;
-        props["tab_padding"] = tab_padding_;
+        props.set("bar_background", color_to_json(bar_background_));
+        props.set("tab_background", color_to_json(tab_background_));
+        props.set("text_color", color_to_json(text_color_));
+        props.set("indicator_thickness", indicator_thickness_);
+        props.set("font_size", font_size_);
+        props.set("tab_padding", tab_padding_);
     }
 
     /// @brief 从 JSON 重建 TabBar 样式与选中态（tab_labels 仅记录文本，内容子树不经序列化恢复）。
@@ -349,31 +349,31 @@ class TabBar : public Widget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("selected_index")) {
-            selected_.set(props["selected_index"].get<int>());
+            selected_.set(props.at("selected_index")->as_or<std::int32_t>(0));
         }
         if (props.contains("tab_height")) {
-            tab_height_ = props["tab_height"].get<float>();
+            tab_height_ = props.at("tab_height")->as_or<float>(0.0F);
         }
         if (props.contains("active_color")) {
-            active_color_ = json_to_color(props["active_color"]);
+            active_color_ = json_to_color(*props.at("active_color"));
         }
         if (props.contains("bar_background")) {
-            bar_background_ = json_to_color(props["bar_background"]);
+            bar_background_ = json_to_color(*props.at("bar_background"));
         }
         if (props.contains("tab_background")) {
-            tab_background_ = json_to_color(props["tab_background"]);
+            tab_background_ = json_to_color(*props.at("tab_background"));
         }
         if (props.contains("text_color")) {
-            text_color_ = json_to_color(props["text_color"]);
+            text_color_ = json_to_color(*props.at("text_color"));
         }
         if (props.contains("indicator_thickness")) {
-            indicator_thickness_ = props["indicator_thickness"].get<float>();
+            indicator_thickness_ = props.at("indicator_thickness")->as_or<float>(0.0F);
         }
         if (props.contains("font_size")) {
-            font_size_ = props["font_size"].get<float>();
+            font_size_ = props.at("font_size")->as_or<float>(0.0F);
         }
         if (props.contains("tab_padding")) {
-            tab_padding_ = props["tab_padding"].get<float>();
+            tab_padding_ = props.at("tab_padding")->as_or<float>(0.0F);
         }
     }
 

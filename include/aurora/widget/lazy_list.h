@@ -306,14 +306,14 @@ class LazyList : public Widget {
     auto serialize_props(Json &props) const -> void override {
         // 先链入基类通用属性。
         Widget::serialize_props(props);
-        props["count"] = count_;
-        props["item_extent"] = item_extent_;
-        props["scroll_offset"] = offset_;
-        props["cache_extent"] = cache_extent_;
-        props["restore_key"] = restore_key_;
-        props["snap_extent"] = snap_.extent;
-        props["snap_paging"] = snap_.paging;
-        props["snap_alignment"] = snap_alignment_to_json(snap_.alignment);
+        props.set("count", count_);
+        props.set("item_extent", item_extent_);
+        props.set("scroll_offset", offset_);
+        props.set("cache_extent", cache_extent_);
+        props.set("restore_key", restore_key_);
+        props.set("snap_extent", snap_.extent);
+        props.set("snap_paging", Json{snap_.paging});
+        props.set("snap_alignment", snap_alignment_to_json(snap_.alignment));
     }
 
     /// @brief 从静态 JSON 回填标量属性。虚拟化条目仍持运行时 `ItemBuilder`（不可序列化），
@@ -324,33 +324,33 @@ class LazyList : public Widget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("count")) {
-            const int declared = props["count"].get<int>();
+            const int declared = props.at("count")->as_or<std::int32_t>(0);
             count_ = declared < 0 ? 0 : declared;
         }
         if (props.contains("item_extent")) {
-            const float declared = props["item_extent"].get<float>();
+            const float declared = props.at("item_extent")->as_or<float>(0.0F);
             item_extent_ = declared > 0.0F
                                ? declared
                                : (Diagnostics::degraded("layout", "LazyList item_extent 非正值已降级为 48"), 48.0F);
         }
         if (props.contains("cache_extent")) {
-            set_cache_extent(props["cache_extent"].get<float>());
+            set_cache_extent(props.at("cache_extent")->as_or<float>(0.0F));
         }
         if (props.contains("restore_key")) {
-            set_restore_key(props["restore_key"].get<std::string>());
+            set_restore_key(props.at("restore_key")->as_or<std::string>(""));
         }
         if (props.contains("snap_extent")) {
-            snap_.extent = props["snap_extent"].get<float>();
+            snap_.extent = props.at("snap_extent")->as_or<float>(0.0F);
         }
         if (props.contains("snap_paging")) {
-            snap_.paging = props["snap_paging"].get<bool>();
+            snap_.paging = props.at("snap_paging")->as_or<bool>(false);
         }
         if (props.contains("snap_alignment")) {
-            snap_.alignment = json_to_snap_alignment(props["snap_alignment"]);
+            snap_.alignment = json_to_snap_alignment(*props.at("snap_alignment"));
         }
         if (props.contains("scroll_offset")) {
             // 显式偏移优先于 restore_key 恢复（见 maybe_restore_scroll）：记入 pending 待布局后应用。
-            pending_offset_ = props["scroll_offset"].get<float>();
+            pending_offset_ = props.at("scroll_offset")->as_or<float>(0.0F);
             scroll_restored_ = false;
         }
     }

@@ -270,70 +270,71 @@ class Dropdown : public Widget {
         for (const auto &o : options_) {
             opts.push_back(o);
         }
-        props["options"] = opts;
-        props["selected_index"] = selected_.get();
+        props.set("options", opts);
+        props.set("selected_index", selected_.get());
         if (!placeholder_.empty()) {
-            props["placeholder"] = placeholder_;
+            props.set("placeholder", placeholder_);
         }
         if (accent_color_.has_value()) {
-            props["accent_color"] = color_to_json(*accent_color_);  // 未设置不输出：保留「跟随主题」语义
+            props.set("accent_color", color_to_json(*accent_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props["box_color"] = color_to_json(box_color_);
-        props["border_color"] = color_to_json(border_color_);
-        props["text_color"] = color_to_json(text_color_);
-        props["arrow_color"] = color_to_json(arrow_color_);
-        props["box_height"] = box_height_;
-        props["item_height"] = item_height_;
-        props["font_size"] = font_size_;
-        props["corner_radius"] = corner_radius_;
-        props["enabled"] = enabled_;
+        props.set("box_color", color_to_json(box_color_));
+        props.set("border_color", color_to_json(border_color_));
+        props.set("text_color", color_to_json(text_color_));
+        props.set("arrow_color", color_to_json(arrow_color_));
+        props.set("box_height", box_height_);
+        props.set("item_height", item_height_);
+        props.set("font_size", font_size_);
+        props.set("corner_radius", corner_radius_);
+        props.set("enabled", Json{enabled_});
     }
 
     /// @brief 从 props 回填属性，与 serialize_props 对称；缺失的键保持现值不变。
     /// @param props 序列化产物 JSON 对象（options/selected_index/样式各键）。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
-        if (props.contains("options") && props["options"].is_array()) {
+        const auto *options_val = props.at("options");
+        if (options_val != nullptr && options_val->is_array()) {
             options_.clear();
-            for (const auto &o : props["options"]) {
-                options_.push_back(o.get<std::string>());
+            for (const auto *o = options_val->begin(); o != options_val->end(); ++o) {
+                options_.push_back(o->as_or<std::string>(""));
             }
         }
         if (props.contains("selected_index")) {
-            selected_.set(props["selected_index"].get<int>());
+            selected_.set(props.at("selected_index")->as_or<std::int32_t>(0));
         }
         if (props.contains("placeholder")) {
-            placeholder_ = props["placeholder"].get<std::string>();
+            placeholder_ = props.at("placeholder")->as_or<std::string>("");
         }
         if (props.contains("accent_color")) {
-            accent_color_ = json_to_color(props["accent_color"]);
+            accent_color_ = json_to_color(*props.at("accent_color"));
         }
         if (props.contains("box_color")) {
-            box_color_ = json_to_color(props["box_color"]);
+            box_color_ = json_to_color(*props.at("box_color"));
         }
         if (props.contains("border_color")) {
-            border_color_ = json_to_color(props["border_color"]);
+            border_color_ = json_to_color(*props.at("border_color"));
         }
         if (props.contains("text_color")) {
-            text_color_ = json_to_color(props["text_color"]);
+            text_color_ = json_to_color(*props.at("text_color"));
         }
         if (props.contains("arrow_color")) {
-            arrow_color_ = json_to_color(props["arrow_color"]);
+            arrow_color_ = json_to_color(*props.at("arrow_color"));
         }
         if (props.contains("box_height")) {
-            box_height_ = props["box_height"].get<float>();
+            box_height_ = props.at("box_height")->as_or<float>(0.0F);
         }
         if (props.contains("item_height")) {
-            item_height_ = props["item_height"].get<float>();
+            item_height_ = props.at("item_height")->as_or<float>(0.0F);
         }
         if (props.contains("font_size")) {
-            font_size_ = props["font_size"].get<float>();
+            font_size_ = props.at("font_size")->as_or<float>(0.0F);
         }
         if (props.contains("corner_radius")) {
-            corner_radius_ = props["corner_radius"].get<float>();
+            corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
         }
         if (props.contains("enabled")) {
-            enabled_ = props["enabled"].get<bool>();
+            enabled_ = props.at("enabled")->as_or<bool>(false);
         }
     }
 

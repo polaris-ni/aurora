@@ -122,11 +122,11 @@ class Skeleton : public LeafWidget {
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["width"] = size_.width;
-        props["height"] = size_.height;
-        props["color"] = color_to_json(base_);
-        props["highlight"] = color_to_json(highlight_);
-        props["duration"] = duration_;
+        props.set("width", size_.width);
+        props.set("height", size_.height);
+        props.set("color", color_to_json(base_));
+        props.set("highlight", color_to_json(highlight_));
+        props.set("duration", duration_);
     }
 
     /// @brief 反序列化骨架属性：按存在的键逐一还原宽高/双色/周期，缺键保持当前值。
@@ -134,19 +134,19 @@ class Skeleton : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("width")) {
-            size_.width = props["width"].get<float>();
+            size_.width = props.at("width")->as_or<float>(0.0F);
         }
         if (props.contains("height")) {
-            size_.height = props["height"].get<float>();
+            size_.height = props.at("height")->as_or<float>(0.0F);
         }
         if (props.contains("color")) {
-            base_ = json_to_color(props["color"]);
+            base_ = json_to_color(*props.at("color"));
         }
         if (props.contains("highlight")) {
-            highlight_ = json_to_color(props["highlight"]);
+            highlight_ = json_to_color(*props.at("highlight"));
         }
         if (props.contains("duration")) {
-            duration_ = props["duration"].get<double>();
+            duration_ = props.at("duration")->as_or<double>(0.0);
         }
     }
 

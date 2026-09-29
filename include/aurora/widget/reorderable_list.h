@@ -165,13 +165,13 @@ class ReorderableList : public Container {
     /// @param props 待写入的 JSON 属性对象（在基类结果上追加几何与开关字段）。
     auto serialize_props(Json &props) const -> void override {
         Container::serialize_props(props);
-        props["gap"] = gap_;
-        props["scroll_offset"] = offset_;
-        props["restore_key"] = restore_key_;
-        props["drag_handle"] = drag_handle_;
-        props["auto_scroll_threshold"] = auto_scroll_threshold_;
-        props["keyboard_reorder"] = keyboard_reorder_;
-        props["note"] = "ReorderableList items are runtime-state driven, not serialized";
+        props.set("gap", gap_);
+        props.set("scroll_offset", offset_);
+        props.set("restore_key", restore_key_);
+        props.set("drag_handle", Json{drag_handle_});
+        props.set("auto_scroll_threshold", auto_scroll_threshold_);
+        props.set("keyboard_reorder", Json{keyboard_reorder_});
+        props.set("note", "ReorderableList items are runtime-state driven, not serialized");
     }
 
     // ---- 数据 ----

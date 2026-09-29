@@ -79,30 +79,30 @@ auto DataTable::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
     Json cols = Json::array();
     for (const auto &c : columns_) {
-        Json jc;
+        Json jc = Json::object();
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        jc["label"] = c.label;
+        jc.set("label", c.label);
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        jc["width"] = c.width;
+        jc.set("width", c.width);
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        jc["sortable"] = c.sortable;
+        jc.set("sortable", Json{c.sortable});
         cols.push_back(jc);
     }
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["columns"] = cols;
+    props.set("columns", cols);
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["row_count"] = static_cast<int>(rows_.size());
+    props.set("row_count", static_cast<int>(rows_.size()));
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["selected_row"] = selected_row_.get();
+    props.set("selected_row", selected_row_.get());
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["sort_column"] = sort_column_;
+    props.set("sort_column", sort_column_);
 }
 
 auto DataTable::on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size {
@@ -199,10 +199,10 @@ auto TreeView::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["selected_row"] = selected_.get();
+    props.set("selected_row", selected_.get());
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["visible_count"] = static_cast<int>(visible_count());
+    props.set("visible_count", static_cast<int>(visible_count()));
 }
 
 auto TreeView::on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size {
@@ -288,10 +288,10 @@ auto ListView::serialize_props(Json &props) const -> void {
     }
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["items"] = items;
+    props.set("items", items);
     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["multi_select"] = multi_;
+    props.set("multi_select", Json{multi_});
 }
 
 auto ListView::deserialize_props(const Json &props) -> void {
@@ -299,13 +299,14 @@ auto ListView::deserialize_props(const Json &props) -> void {
     if (props.contains("items")) {
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        if (props["items"].is_array()) {
+        const auto *items_val = props.at("items");
+        if (items_val != nullptr && items_val->is_array()) {
             items_.clear();
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            for (const auto &s : props["items"]) {
-                if (s.is_string()) {
-                    items_.push_back(s.get<std::string>());
+            for (const auto *s = items_val->begin(); s != items_val->end(); ++s) {
+                if (s->is_string()) {
+                    items_.push_back(s->as_or<std::string>(""));
                 } else {
                     Diagnostics::degraded("items array elements must be strings", type_name(), "invalid-prop-value");
                 }
@@ -317,10 +318,11 @@ auto ListView::deserialize_props(const Json &props) -> void {
     if (props.contains("multi_select")) {
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        if (props["multi_select"].is_boolean()) {
+        const auto *ms = props.at("multi_select");
+        if (ms != nullptr && ms->is_bool()) {
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            multi_ = props["multi_select"].get<bool>();
+            multi_ = ms->as_or<bool>(false);
         } else {
             Diagnostics::degraded("multi_select expects boolean", type_name(), "invalid-prop-value");
         }

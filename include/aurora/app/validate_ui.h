@@ -22,11 +22,11 @@ struct ValidationError {
     /// @brief 序列化为单条错误对象：suggestion 为空时省略该键。
     /// @return 含 path / message（及可选 suggestion）的 JSON 对象。
     [[nodiscard]] auto to_json() const -> Json {
-        Json j;
-        j["path"] = path;
-        j["message"] = message;
+        Json j = Json::object();
+        j.set("path", path);
+        j.set("message", message);
         if (!suggestion.empty()) {
-            j["suggestion"] = suggestion;
+            j.set("suggestion", suggestion);
         }
         return j;
     }

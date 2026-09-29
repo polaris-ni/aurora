@@ -294,36 +294,36 @@ inline auto Sparkline::describe_static() -> WidgetDescriptor {
 // 键集与 describe_static 的属性表一致。
 inline auto Sparkline::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-    props["values"] = double_vector_to_json(values);
+    props.set("values", double_vector_to_json(values));
     if (color.has_value()) {
-        props["color"] = color_to_json(*color);
+        props.set("color", color_to_json(*color));
     }
-    props["line_width"] = line_width;
-    props["show_end_dot"] = show_end_dot;
-    props["dot_radius"] = dot_radius;
-    props["padding"] = edge_insets_to_json(padding);
+    props.set("line_width", line_width);
+    props.set("show_end_dot", Json{show_end_dot});
+    props.set("dot_radius", dot_radius);
+    props.set("padding", edge_insets_to_json(padding));
 }
 
 // values/padding 交由转换函数直接覆盖，其余键先校验类型再写入。
 inline auto Sparkline::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("values")) {
-        values = json_to_double_vector(props["values"]);
+        values = json_to_double_vector(*props.at("values"));
     }
-    if (props.contains("color") && props["color"].is_array()) {
-        color = json_to_color(props["color"]);
+    if (props.contains("color") && props.at("color")->is_array()) {
+        color = json_to_color(*props.at("color"));
     }
-    if (props.contains("line_width") && props["line_width"].is_number()) {
-        line_width = std::max(0.0F, props["line_width"].get<float>());
+    if (props.contains("line_width") && props.at("line_width")->is_number()) {
+        line_width = std::max(0.0F, props.at("line_width")->as_or<float>(0.0F));
     }
-    if (props.contains("show_end_dot") && props["show_end_dot"].is_boolean()) {
-        show_end_dot = props["show_end_dot"].get<bool>();
+    if (props.contains("show_end_dot") && props.at("show_end_dot")->is_bool()) {
+        show_end_dot = props.at("show_end_dot")->as_or<bool>(false);
     }
-    if (props.contains("dot_radius") && props["dot_radius"].is_number()) {
-        dot_radius = std::max(0.0F, props["dot_radius"].get<float>());
+    if (props.contains("dot_radius") && props.at("dot_radius")->is_number()) {
+        dot_radius = std::max(0.0F, props.at("dot_radius")->as_or<float>(0.0F));
     }
     if (props.contains("padding")) {
-        padding = json_to_edge_insets(props["padding"]);
+        padding = json_to_edge_insets(*props.at("padding"));
     }
     mark_needs_paint();
 }

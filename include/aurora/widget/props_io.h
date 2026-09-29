@@ -7,13 +7,13 @@
 #include "aurora/core/enums.h"
 #include "aurora/core/types.h"
 #include "aurora/widget/scroll_viewport.h"
-#include "nlohmann/json.hpp"
+#include "aurora/core/json.h"
 
 /// @brief Aurora 命名空间：本头承载属性值 <-> JSON 的双向序列化自由函数。
 namespace aurora {
 
-/// @brief 序列化所用的 JSON 类型别名（nlohmann/json，vendor 于 third_party）。
-using Json = nlohmann::json;
+/// @brief 序列化所用的 JSON 值类型别名（aurora 自研 core/json::Value）。
+using Json = json::Value;
 
 /// @brief 强类型尺寸意图 → JSON：["px",v] / ["percent",v] / "fill" / "auto"。
 /// @param len 尺寸意图；WrapContent/Expand 编为字符串，Fixed/Fraction 编为二元数组（kind + 数值）。
@@ -45,7 +45,7 @@ using Json = nlohmann::json;
 /// @return 对应 Length；无法识别的字符串、数组形态一律回退 wrap（按内容自适应）。
 [[nodiscard]] inline auto json_to_length(const Json &j) -> Length {
     if (j.is_string()) {
-        const std::string s = j.get<std::string>();
+        const std::string s = j.as_or<std::string>("");
         if (s == "auto") {
             return Length::wrap();
         }
@@ -55,8 +55,8 @@ using Json = nlohmann::json;
         return Length::wrap();
     }
     if (j.is_array() && j.size() == 2) {
-        const std::string kind = j[0].get<std::string>();
-        const float v = j[1].get<float>();
+        const std::string kind = j.as_or_at<std::string>(0, "");
+        const float v = j.as_or_at<float>(1, 0.0F);
         if (kind == "px") {
             return Length::fixed(v);
         }
@@ -84,8 +84,10 @@ using Json = nlohmann::json;
 /// @return 解码颜色；非数组或元素不足 4 个时返回黑色。
 [[nodiscard]] inline auto json_to_color(const Json &j) -> Color {
     if (j.is_array() && j.size() >= 4) {
-        return Color{static_cast<std::uint8_t>(j[0].get<int>()), static_cast<std::uint8_t>(j[1].get<int>()),
-                     static_cast<std::uint8_t>(j[2].get<int>()), static_cast<std::uint8_t>(j[3].get<int>())};
+        return Color{static_cast<std::uint8_t>(j.as_or_at<std::int32_t>(0, 0)),
+                     static_cast<std::uint8_t>(j.as_or_at<std::int32_t>(1, 0)),
+                     static_cast<std::uint8_t>(j.as_or_at<std::int32_t>(2, 0)),
+                     static_cast<std::uint8_t>(j.as_or_at<std::int32_t>(3, 0))};
     }
     return Color::black();
 }
@@ -94,11 +96,11 @@ using Json = nlohmann::json;
 /// @param e 四边内边距。
 /// @return 含 left/top/right/bottom 四键的 JSON 对象。
 [[nodiscard]] inline auto edge_insets_to_json(const EdgeInsets &e) -> Json {
-    Json o;
-    o["left"] = e.left;
-    o["top"] = e.top;
-    o["right"] = e.right;
-    o["bottom"] = e.bottom;
+    Json o = Json::object();
+    o.set("left", e.left);
+    o.set("top", e.top);
+    o.set("right", e.right);
+    o.set("bottom", e.bottom);
     return o;
 }
 
@@ -108,18 +110,10 @@ using Json = nlohmann::json;
 [[nodiscard]] inline auto json_to_edge_insets(const Json &j) -> EdgeInsets {
     EdgeInsets e{};
     if (j.is_object()) {
-        if (j.contains("left")) {
-            e.left = j["left"].get<float>();
-        }
-        if (j.contains("top")) {
-            e.top = j["top"].get<float>();
-        }
-        if (j.contains("right")) {
-            e.right = j["right"].get<float>();
-        }
-        if (j.contains("bottom")) {
-            e.bottom = j["bottom"].get<float>();
-        }
+        e.left = j.as_or<float>("left", 0.0F);
+        e.top = j.as_or<float>("top", 0.0F);
+        e.right = j.as_or<float>("right", 0.0F);
+        e.bottom = j.as_or<float>("bottom", 0.0F);
     }
     return e;
 }
@@ -152,7 +146,7 @@ using Json = nlohmann::json;
 /// @return 匹配的 TextAlign，未知名返回 Left。
 [[nodiscard]] inline auto json_to_text_align(const Json &j) -> TextAlign {
     if (j.is_string()) {
-        const std::string s = j.get<std::string>();
+        const std::string s = j.as_or<std::string>("");
         if (s == "Left") {
             return TextAlign::Left;
         }
@@ -193,7 +187,7 @@ using Json = nlohmann::json;
 /// @return 匹配的方向；未知名返回 LTR。
 [[nodiscard]] inline auto json_to_text_direction(const Json &j) -> TextDirection {
     if (j.is_string()) {
-        const std::string s = j.get<std::string>();
+        const std::string s = j.as_or<std::string>("");
         if (s == "RTL") {
             return TextDirection::RTL;
         }
@@ -221,7 +215,7 @@ using Json = nlohmann::json;
 /// @return 匹配的策略；未知名返回 Clip。
 [[nodiscard]] inline auto json_to_text_overflow(const Json &j) -> TextOverflow {
     if (j.is_string()) {
-        const std::string s = j.get<std::string>();
+        const std::string s = j.as_or<std::string>("");
         if (s == "Clip") {
             return TextOverflow::Clip;
         }
@@ -248,13 +242,16 @@ using Json = nlohmann::json;
 [[nodiscard]] inline auto json_to_font_weight(const Json &j) -> FontWeight {
     int w = 400;  // 字重数值，解析失败时保持默认 Normal(400)。
     if (j.is_string()) {
-        try {
-            w = std::stoi(j.get<std::string>());
-        } catch (...) {
-            w = 400;
+        const std::string s = j.as_or<std::string>("");
+        if (!s.empty()) {
+            try {
+                w = std::stoi(s);
+            } catch (...) {
+                w = 400;
+            }
         }
     } else if (j.is_number()) {
-        w = j.get<int>();
+        w = static_cast<int>(j.as_or<double>(0.0));
     }
     switch (w) {
         case 100:
@@ -284,14 +281,14 @@ using Json = nlohmann::json;
 /// @param v 字体风格枚举值。
 /// @return "Italic" 或 "Normal"。
 [[nodiscard]] inline auto font_style_to_json(FontStyle v) -> Json {
-    return v == FontStyle::Italic ? Json("Italic") : Json("Normal");
+    return v == FontStyle::Italic ? "Italic" : "Normal";
 }
 
 /// @brief JSON -> FontStyle（未知值回退 Normal）。
 /// @param j "Italic" 字符串以外的任何输入都按 Normal 处理。
 /// @return 匹配的风格；未知名返回 Normal。
 [[nodiscard]] inline auto json_to_font_style(const Json &j) -> FontStyle {
-    if (j.is_string() && j.get<std::string>() == "Italic") {
+    if (j.is_string() && j.as_or<std::string>("") == "Italic") {
         return FontStyle::Italic;
     }
     return FontStyle::Normal;
@@ -335,13 +332,13 @@ using Json = nlohmann::json;
         }
     };
     if (j.is_array()) {
-        for (const auto &item : j) {
-            if (item.is_string()) {
-                add(item.get<std::string>());
+        for (const auto *item = j.begin(); item != j.end(); ++item) {
+            if (item->is_string()) {
+                add(item->as_or<std::string>(""));
             }
         }
     } else if (j.is_string()) {
-        add(j.get<std::string>());
+        add(j.as_or<std::string>(""));
     }
     return result;
 }
@@ -350,7 +347,7 @@ using Json = nlohmann::json;
 /// @param v 主轴尺寸意图枚举值。
 /// @return "Max" 或 "Min"。
 [[nodiscard]] inline auto main_axis_size_to_json(MainAxisSize v) -> Json {
-    return v == MainAxisSize::Max ? Json("Max") : Json("Min");
+    return v == MainAxisSize::Max ? "Max" : "Min";
 }
 
 /// @brief ScrollSnapAlignment -> JSON 字符串（snap/paging 吸附方位，三控件共享）。
@@ -373,7 +370,7 @@ using Json = nlohmann::json;
 /// @return 匹配的方位；未知名返回 Start。
 [[nodiscard]] inline auto json_to_snap_alignment(const Json &j) -> ScrollSnapAlignment {
     if (j.is_string()) {
-        const std::string s = j.get<std::string>();
+        const std::string s = j.as_or<std::string>("");
         if (s == "Center") {
             return ScrollSnapAlignment::Center;
         }
@@ -388,7 +385,7 @@ using Json = nlohmann::json;
 /// @param j "Max" 字符串以外的任何输入都按 Min 处理。
 /// @return 匹配的尺寸意图；未知名返回 Min。
 [[nodiscard]] inline auto json_to_main_axis_size(const Json &j) -> MainAxisSize {
-    if (j.is_string() && j.get<std::string>() == "Max") {
+    if (j.is_string() && j.as_or<std::string>("") == "Max") {
         return MainAxisSize::Max;
     }
     return MainAxisSize::Min;
@@ -420,7 +417,7 @@ using Json = nlohmann::json;
 /// @return 匹配的对齐方式；未知名返回 Start。
 [[nodiscard]] inline auto json_to_main_axis_alignment(const Json &j) -> MainAxisAlignment {
     if (j.is_string()) {
-        const std::string s = j.get<std::string>();
+        const std::string s = j.as_or<std::string>("");
         if (s == "Center") {
             return MainAxisAlignment::Center;
         }
@@ -464,7 +461,7 @@ using Json = nlohmann::json;
 /// @return 匹配的对齐方式；未知名返回 Start。
 [[nodiscard]] inline auto json_to_cross_axis_alignment(const Json &j) -> CrossAxisAlignment {
     if (j.is_string()) {
-        const std::string s = j.get<std::string>();
+        const std::string s = j.as_or<std::string>("");
         if (s == "Center") {
             return CrossAxisAlignment::Center;
         }
@@ -501,7 +498,7 @@ using Json = nlohmann::json;
 /// @return 匹配的 StackFit；未知名返回 Loose。
 [[nodiscard]] inline auto json_to_stack_fit(const Json &j) -> StackFit {
     if (j.is_string()) {
-        const std::string s = j.get<std::string>();
+        const std::string s = j.as_or<std::string>("");
         if (s == "Loose") {
             return StackFit::Loose;
         }
@@ -543,7 +540,7 @@ using Json = nlohmann::json;
 /// @return 匹配的 BoxFit；未知名返回 Fill。
 [[nodiscard]] inline auto json_to_box_fit(const Json &j) -> BoxFit {
     if (j.is_string()) {
-        const std::string s = j.get<std::string>();
+        const std::string s = j.as_or<std::string>("");
         if (s == "Fill") {
             return BoxFit::Fill;
         }
@@ -591,7 +588,7 @@ using Json = nlohmann::json;
 /// @return 匹配的策略；未知名返回 Visible。
 [[nodiscard]] inline auto json_to_overflow_strategy(const Json &j) -> OverflowStrategy {
     if (j.is_string()) {
-        const std::string s = j.get<std::string>();
+        const std::string s = j.as_or<std::string>("");
         if (s == "Visible") {
             return OverflowStrategy::Visible;
         }

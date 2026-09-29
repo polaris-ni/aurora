@@ -126,10 +126,10 @@ class Column : public Container, public ColumnProps {
     /// @param props 写入目标 JSON 对象（就地填充键值）。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["main_axis_alignment"] = main_axis_alignment_to_json(flex.main_axis);
-        props["cross_axis_alignment"] = cross_axis_alignment_to_json(flex.cross_axis);
-        props["main_axis_size"] = main_axis_size_to_json(flex.main_axis_size);
-        props["gap"] = gap;
+        props.set("main_axis_alignment", main_axis_alignment_to_json(flex.main_axis));
+        props.set("cross_axis_alignment", cross_axis_alignment_to_json(flex.cross_axis));
+        props.set("main_axis_size", main_axis_size_to_json(flex.main_axis_size));
+        props.set("gap", gap);
     }
 
     /// @brief 从属性 JSON 恢复对齐/尺寸策略/gap（各键可选；gap 经 PropDescriptor 校验，非法回退 0）。
@@ -137,17 +137,17 @@ class Column : public Container, public ColumnProps {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("main_axis_alignment")) {
-            flex.main_axis = json_to_main_axis_alignment(props["main_axis_alignment"]);
+            flex.main_axis = json_to_main_axis_alignment(*props.at("main_axis_alignment"));
         }
         if (props.contains("cross_axis_alignment")) {
-            flex.cross_axis = json_to_cross_axis_alignment(props["cross_axis_alignment"]);
+            flex.cross_axis = json_to_cross_axis_alignment(*props.at("cross_axis_alignment"));
         }
         if (props.contains("main_axis_size")) {
-            flex.main_axis_size = json_to_main_axis_size(props["main_axis_size"]);
+            flex.main_axis_size = json_to_main_axis_size(*props.at("main_axis_size"));
         }
         if (props.contains("gap")) {
             static const PropDescriptor D_GAP{.name = "gap", .json_type = "number", .min_value = "0"};
-            gap = validate_or_default<float>(props["gap"], D_GAP, 0.0F);
+            gap = validate_or_default<float>(*props.at("gap"), D_GAP, 0.0F);
         }
     }
 
@@ -333,10 +333,10 @@ class Row : public Container, public RowProps {
     /// @param props 写入目标 JSON 对象（就地填充键值）。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["main_axis_alignment"] = main_axis_alignment_to_json(flex.main_axis);
-        props["cross_axis_alignment"] = cross_axis_alignment_to_json(flex.cross_axis);
-        props["main_axis_size"] = main_axis_size_to_json(flex.main_axis_size);
-        props["gap"] = gap;
+        props.set("main_axis_alignment", main_axis_alignment_to_json(flex.main_axis));
+        props.set("cross_axis_alignment", cross_axis_alignment_to_json(flex.cross_axis));
+        props.set("main_axis_size", main_axis_size_to_json(flex.main_axis_size));
+        props.set("gap", gap);
     }
 
     /// @brief 从属性 JSON 恢复对齐/尺寸策略/gap（各键可选；gap 经 PropDescriptor 校验，非法回退 0）。
@@ -344,17 +344,17 @@ class Row : public Container, public RowProps {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("main_axis_alignment")) {
-            flex.main_axis = json_to_main_axis_alignment(props["main_axis_alignment"]);
+            flex.main_axis = json_to_main_axis_alignment(*props.at("main_axis_alignment"));
         }
         if (props.contains("cross_axis_alignment")) {
-            flex.cross_axis = json_to_cross_axis_alignment(props["cross_axis_alignment"]);
+            flex.cross_axis = json_to_cross_axis_alignment(*props.at("cross_axis_alignment"));
         }
         if (props.contains("main_axis_size")) {
-            flex.main_axis_size = json_to_main_axis_size(props["main_axis_size"]);
+            flex.main_axis_size = json_to_main_axis_size(*props.at("main_axis_size"));
         }
         if (props.contains("gap")) {
             static const PropDescriptor D_GAP{.name = "gap", .json_type = "number", .min_value = "0"};
-            gap = validate_or_default<float>(props["gap"], D_GAP, 0.0F);
+            gap = validate_or_default<float>(*props.at("gap"), D_GAP, 0.0F);
         }
     }
 

@@ -100,9 +100,9 @@ class ToolBar : public Container {
     /// @param props 输出 JSON 对象，先写入基类属性再补充本控件字段。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["bar_height"] = bar_height_;
-        props["gap"] = gap_;
-        props["padding"] = padding_;
+        props.set("bar_height", bar_height_);
+        props.set("gap", gap_);
+        props.set("padding", padding_);
     }
 
     /// @brief 从 JSON 恢复可序列化字段；缺省键保留现值。
@@ -110,13 +110,13 @@ class ToolBar : public Container {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("bar_height")) {
-            bar_height_ = props["bar_height"].get<float>();
+            bar_height_ = props.at("bar_height")->as_or<float>(0.0F);
         }
         if (props.contains("gap")) {
-            gap_ = props["gap"].get<float>();
+            gap_ = props.at("gap")->as_or<float>(0.0F);
         }
         if (props.contains("padding")) {
-            padding_ = props["padding"].get<float>();
+            padding_ = props.at("padding")->as_or<float>(0.0F);
         }
     }
 
@@ -223,8 +223,8 @@ class StatusBar : public Container {
     /// @param props 输出 JSON 对象，先写入基类属性再补充本控件字段。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["bar_height"] = bar_height_;
-        props["gap"] = gap_;
+        props.set("bar_height", bar_height_);
+        props.set("gap", gap_);
     }
 
     /// @brief 从 JSON 恢复可序列化字段；缺省键保留现值。
@@ -232,10 +232,10 @@ class StatusBar : public Container {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("bar_height")) {
-            bar_height_ = props["bar_height"].get<float>();
+            bar_height_ = props.at("bar_height")->as_or<float>(0.0F);
         }
         if (props.contains("gap")) {
-            gap_ = props["gap"].get<float>();
+            gap_ = props.at("gap")->as_or<float>(0.0F);
         }
     }
 

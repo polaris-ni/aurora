@@ -112,15 +112,18 @@ inline constexpr std::array<std::string_view, 3> AURORA_UI_TEXT_PROP_CANDIDATES 
     Json children = Json::array();
     for (const std::string &type : hits) {
         Json node = Json::object();
-        node["type"] = type;
+        node.set("type", type);
 
         // 该类型若有文案类属性，填入类型名作为占位文案（与旧行为一致：Button→"Button"）。
         const Json schema = aurora::describe_component(type);
         if (schema.contains("default_props")) {
-            const Json &defaults = schema["default_props"];
+            const Json &defaults = *schema.at("default_props");
             for (const std::string_view key : AURORA_UI_TEXT_PROP_CANDIDATES) {
                 if (defaults.contains(std::string(key))) {
-                    node["props"][std::string(key)] = type;
+                    if (node.at("props") == nullptr) {
+                        node.set("props", Json::object());
+                    }
+                    node.at("props")->set(std::string(key), type);
                     break;
                 }
             }
@@ -131,16 +134,19 @@ inline constexpr std::array<std::string_view, 3> AURORA_UI_TEXT_PROP_CANDIDATES 
     // ── 回退：一个都没命中时产出带原描述片段的 Text（截断 20 字符）──
     if (children.empty()) {
         Json node = Json::object();
-        node["type"] = "Text";
-        node["props"]["content"] = "?" + description.substr(0, std::min<std::size_t>(description.size(), 20));
+        node.set("type", "Text");
+        Json props = Json::object();
+        props.set("content", "?" + description.substr(0, std::min<std::size_t>(description.size(), 20)));
+        node.set("props", std::move(props));
         children.push_back(node);
     }
 
+    Json node = Json::object();
+    node.set("type", "Stack");
+    node.set("props", Json::object());
+    node.set("children", children);
     Json tree = Json::object();
-    tree["node"] = Json::object();
-    tree["node"]["type"] = "Stack";
-    tree["node"]["props"] = Json::object();
-    tree["node"]["children"] = children;
+    tree.set("node", std::move(node));
     return tree;
 }
 
@@ -153,7 +159,8 @@ inline constexpr std::array<std::string_view, 3> AURORA_UI_TEXT_PROP_CANDIDATES 
         return false;
     }
     // generate_ui 返回带 "node" 包装的树，from_json 需要顶层 "type" 的节点对象。
-    const Json &node = r.value().value("node", Json::object());
+    const auto *node_ptr = r.value().at("node");
+    const Json node = node_ptr != nullptr ? *node_ptr : Json::object();
     return aurora::serialization::from_json(node).ok();
 }
 

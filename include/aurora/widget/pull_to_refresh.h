@@ -141,18 +141,18 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入通用属性（width/height/show 等）
-        props["threshold"] = threshold;
-        props["max_pull"] = max_pull;
+        props.set("threshold", threshold);
+        props.set("max_pull", max_pull);
     }
     /// @brief 反序列化：恢复通用属性与 threshold/max_pull（缺失键保持当前值）。
     /// @param props 源 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);  // 先由基类恢复通用属性
         if (props.contains("threshold")) {
-            threshold = props["threshold"].get<float>();
+            threshold = props.at("threshold")->as_or<float>(0.0F);
         }
         if (props.contains("max_pull")) {
-            max_pull = props["max_pull"].get<float>();
+            max_pull = props.at("max_pull")->as_or<float>(0.0F);
         }
     }
 

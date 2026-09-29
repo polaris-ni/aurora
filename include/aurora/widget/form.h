@@ -227,7 +227,7 @@ class FormField : public SingleChild {
     /// @param props 输出目标 JSON 对象：先由基类写入通用属性，再补本类的 `error_text` 键
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入通用属性
-        props["error_text"] = error_.get();
+        props.set("error_text", error_.get());
     }
 
   protected:

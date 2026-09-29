@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -107,7 +108,9 @@ class HotReload {
         if (!f.is_open()) {
             return {};
         }
-        return Json::parse(f, nullptr, false);
+        std::string content{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+        const auto parsed = json::parse(content);
+        return parsed.ok() ? std::move(parsed.value()) : Json{};
     }
 
     /// @brief 状态快照：清空并重扫上一棵树，把各路径节点序列化出的属性对象存入 saved_state_。
@@ -129,7 +132,7 @@ class HotReload {
         Json props = Json::object();
         w.serialize_props(props);
         if (!props.empty()) {
-            saved_state_[path] = std::move(props);
+            saved_state_.set(path, std::move(props));
         }
         const std::vector<Node> &children = w.child_nodes();
         for (std::size_t i = 0; i < children.size(); ++i) {
@@ -144,33 +147,35 @@ class HotReload {
     /// @param json_node 该节点在新 JSON 中的对象（含可选的 props / children 键）。
     void restore_state(Node node, const Json &json_node) {
         const std::string path = current_path_;
-        const auto it = saved_state_.find(path);
-        const Json declared = json_node.is_object() ? json_node.value("props", Json::object()) : Json::object();
+        const Json *snapshot_ptr = saved_state_.find(path);
+        const auto *props_ptr = json_node.is_object() ? json_node.at("props") : nullptr;
+        const Json declared = props_ptr != nullptr ? *props_ptr : Json::object();
 
-        if (it != saved_state_.end() && declared.is_object()) {
+        if (snapshot_ptr != nullptr && declared.is_object()) {
             Widget &w = node.widget();
-            // nlohmann 的对象迭代器解引用得到的是**值**而非 pair，故用 `it.value()` 取回该路径的快照。
-            const Json &snapshot = it.value();
-            for (auto kv = snapshot.begin(); kv != snapshot.end(); ++kv) {
-                if (declared.contains(kv.key())) {
+            // Value::find 按键寻址，未命中返回 nullptr；此处已判空，直接解引用取该路径的快照。
+            const Json &snapshot = *snapshot_ptr;
+            for (const auto &kv : snapshot.entries()) {
+                if (declared.contains(kv.key)) {
                     continue;  // 源文件显式声明的值优先
                 }
                 // 只回填标量：回调 / 订阅者 / 复杂对象无法经 JSON 表达，硬喂只会报错。
-                const Json &v = kv.value();
-                if (!(v.is_string() || v.is_number() || v.is_boolean())) {
+                const Json &v = kv.value;
+                if (!(v.is_string() || v.is_number() || v.is_bool())) {
                     continue;
                 }
-                static_cast<void>(Inspector::set_prop(w, kv.key(), v));
+                static_cast<void>(Inspector::set_prop(w, kv.key, v));
             }
         }
 
         const std::vector<Node> &children = node.widget().child_nodes();
-        const Json &json_children = json_node.is_object() ? json_node.value("children", Json::array()) : Json::array();
+        const auto *children_ptr = json_node.is_object() ? json_node.at("children") : nullptr;
+        const Json json_children = children_ptr != nullptr ? *children_ptr : Json::array();
         const std::size_t count = children.size() < json_children.size() ? children.size() : json_children.size();
         for (std::size_t i = 0; i < count; ++i) {
             const std::string saved = current_path_;
             current_path_ = path.empty() ? std::to_string(i) : path + "/" + std::to_string(i);
-            restore_state(children[i], json_children[i]);
+            restore_state(children[i], *json_children.at(i));
             current_path_ = saved;
         }
     }
@@ -179,7 +184,7 @@ class HotReload {
     Json last_json_;  ///< 上次成功解析的 JSON（与新读内容比对判是否变化；恢复状态时据此识别显式声明）
     std::shared_ptr<Widget> last_root_;  ///< 上次重建的根节点（preserve_state 的快照来源；初始为空）
     JsonLoadFn loader_;  ///< 注入的 JSON 读取器（可空；非空时优先于按 path_ 的文件读取）
-    Json saved_state_;  ///< 路径 → 属性对象
+    Json saved_state_ = Json::object();  ///< 路径 → 属性对象
     std::string current_path_;  ///< restore_state 递归过程中的当前路径
 };
 

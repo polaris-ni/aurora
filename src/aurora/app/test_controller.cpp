@@ -55,13 +55,19 @@ auto collect_preorder(const Node &n, std::vector<Node> &out) -> void {
     w.serialize_props(props);
     const std::string k{key};
     if (props.contains(k)) {
-        return props[k];  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        return *props.at(k);
     }
     return Json{};
 }
 
 /// @brief JSON → 可读串（断言信息用；`dump()` 无缩进以保持确定性）。
-[[nodiscard]] auto json_dump(const Json &j) -> std::string { return j.is_null() ? std::string{"<missing>"} : j.dump(); }
+[[nodiscard]] auto json_dump(const Json &j) -> std::string {
+    if (j.is_null()) {
+        return "<missing>";
+    }
+    const auto d = json::dump(j);
+    return d.ok() ? std::move(d.value()) : std::string{};
+}
 
 /// @brief 节点描述（断言信息里定位是哪个节点）。
 [[nodiscard]] auto describe(const Node &n) -> std::string {
@@ -249,7 +255,7 @@ auto TestController::find_by_text(std::string_view text) const -> std::vector<No
     for (const Node &n : all) {
         for (const std::string_view key : AURORA_TEXT_PROP_KEYS) {
             Json v = prop_of(n.widget(), key);
-            if (v.is_string() && std::string_view{v.get<std::string>()} == text) {
+            if (v.is_string() && std::string_view{v.as_or<std::string>("")} == text) {
                 hits.push_back(n);
                 break;  // 同一节点命中一个键即止（避免重复计入）
             }
@@ -324,7 +330,7 @@ auto TestController::expect_visible(const Node &n) -> Result<void> {
                                        "expect_visible: target node is empty（先经 find_by_* 取到非空节点再断言）")};
     }
     const Json show = prop_of(n.widget(), "show");
-    if (show.is_boolean() && !show.get<bool>()) {
+    if (show.is_bool() && !show.as_or<bool>(false)) {
         return Result<void>{make_error(
             ErrorCode::ValidationFailed,
             "expect_visible: " + describe(n) + " has show=false（隐藏节点不入绘制；断言前确认控件未被置为隐藏）")};

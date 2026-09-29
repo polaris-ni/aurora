@@ -101,17 +101,20 @@ namespace aurora {
     root.set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = root->size()});
 
     std::function<Json(const Node &)> snap = [&](const Node &n) -> Json {
-        Json j;
-        j["type"] = n.widget().type_name();  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        Json j = Json::object();
+        j.set("type", n.widget().type_name());
         const auto [origin, size] = n.bounds();
-        // NOLINTNEXTLINE(*-pro-bounds-avoid-unchecked-container-access)
-        j["box"] = Json{{"x", origin.x}, {"y", origin.y}, {"w", size.width}, {"h", size.height}};
+        Json box = Json::object();
+        box.set("x", origin.x);
+        box.set("y", origin.y);
+        box.set("w", size.width);
+        box.set("h", size.height);
+        j.set("box", std::move(box));
         Json children = Json::array();
         for (const Node &child : n.widget().child_nodes()) {
             children.push_back(snap(child));
         }
-        // NOLINTNEXTLINE(*-pro-bounds-avoid-unchecked-container-access)
-        j["children"] = children;
+        j.set("children", std::move(children));
         return j;
     };
     return snap(root);

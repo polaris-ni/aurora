@@ -84,8 +84,8 @@ class Stack : public Container {
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["alignment"] = align_;
-        props["fit"] = fit_;
+        props.set("alignment", static_cast<int>(align_));
+        props.set("fit", static_cast<int>(fit_));
     }
 
     /// @brief 反序列化层叠属性：含对应键时按 int 还原 alignment/fit，缺键保持当前值。
@@ -93,10 +93,10 @@ class Stack : public Container {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("alignment")) {
-            align_ = static_cast<Alignment>(props["alignment"].get<int>());
+            align_ = static_cast<Alignment>(props.at("alignment")->as_or<std::int32_t>(0));
         }
         if (props.contains("fit")) {
-            fit_ = static_cast<StackFit>(props["fit"].get<int>());
+            fit_ = static_cast<StackFit>(props.at("fit")->as_or<std::int32_t>(0));
         }
     }
 

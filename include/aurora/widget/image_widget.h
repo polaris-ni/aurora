@@ -200,18 +200,18 @@ class ImageView : public Widget, public ImageViewProps {
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         if (source.has_value()) {
-            props["source"] = *source;
+            props.set("source", *source);
         }
-        props["image_width"] = bitmap.width;
-        props["image_height"] = bitmap.height;
+        props.set("image_width", bitmap.width);
+        props.set("image_height", bitmap.height);
     }
 
     /// @brief 从 JSON 重建自有属性（键缺失或非字符串则保留现值）。
     /// @param props 序列化属性对象，本类只读 `source` 键。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
-        if (props.contains("source") && props["source"].is_string()) {
-            source = props["source"].get<std::string>();
+        if (props.contains("source") && props.at("source")->is_string()) {
+            source = props.at("source")->as_or<std::string>("");
         }
     }
 

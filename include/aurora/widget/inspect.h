@@ -94,9 +94,9 @@ struct WidgetPatchOp {
     /// @return 新建的 JSON 对象；不修改本结构。
     [[nodiscard]] auto to_json() const -> Json {
         Json j = Json::object();
-        j["op"] = op;
-        j["path"] = path;
-        j["value"] = value;
+        j.set("op", op);
+        j.set("path", path);
+        j.set("value", value);
         return j;
     }
 };
@@ -142,20 +142,22 @@ struct WidgetPatchOp {
 
         // 并集遍历：新增与删除的属性都要体现（删了的属性在 new_props 里缺失，视为 null）。
         std::vector<std::string> keys;
-        for (auto kv = old_props.begin(); kv != old_props.end(); ++kv) {
-            keys.push_back(kv.key());
+        for (const auto &e : old_props.entries()) {
+            keys.push_back(std::string(e.key));
         }
-        for (auto kv = new_props.begin(); kv != new_props.end(); ++kv) {
-            if (old_props.contains(kv.key())) {
+        for (const auto &e : new_props.entries()) {
+            if (old_props.contains(e.key)) {
                 continue;
             }
-            keys.push_back(kv.key());
+            keys.push_back(std::string(e.key));
         }
         std::sort(keys.begin(), keys.end());  // 确定性：与 JSON 的对象序无关
 
         for (const std::string &key : keys) {
-            const Json before = old_props.value(key, Json(nullptr));
-            const Json after = new_props.value(key, Json(nullptr));
+            const auto *before_val = old_props.at(key);
+            const Json before = before_val != nullptr ? *before_val : Json(nullptr);
+            const auto *after_val = new_props.at(key);
+            const Json after = after_val != nullptr ? *after_val : Json(nullptr);
             if (before == after) {
                 continue;
             }
@@ -257,7 +259,7 @@ struct WidgetPatchOp {
         if (!style.empty()) {
             style += ", ";
         }
-        style += std::string(out_k) + ": " + j[ink].dump();
+        style += std::string(out_k) + ": " + json::dump(*j.at(ink)).unwrap();
     };
     pick("bg", "background_color");
     pick("bg", "color");
@@ -336,12 +338,12 @@ struct WidgetPatchOp {
 /// @return `{type, children}` 对象；叶子节点 `children` 为空数组。
 [[nodiscard]] inline auto dump_tree_json(const Node &root) -> Json {
     Json j = Json::object();
-    j["type"] = root.widget().type_name();
+    j.set("type", root.widget().type_name());
     Json children = Json::array();
     for (const Node &child : root.widget().child_nodes()) {
         children.push_back(dump_tree_json(child));
     }
-    j["children"] = children;
+    j.set("children", children);
     return j;
 }
 
@@ -380,12 +382,12 @@ struct WidgetPatchOp {
         if (!cur->is_array() || idx >= cur->size()) {
             return false;
         }
-        cur = &(*cur)[idx];
+        cur = (*cur).at(idx);
     } else {
         if (!cur->is_object() || !cur->contains(std::string(key))) {
             return false;
         }
-        cur = &(*cur)[std::string(key)];
+        cur = (*cur).at(std::string(key));
     }
     return true;
 }
@@ -501,17 +503,17 @@ inline auto for_each_child_unified(const Widget &w, const std::function<void(con
 /// @return `{type, props, children}` 对象，`w` 持焦时另含 `focused: true`。
 [[nodiscard]] inline auto dump_tree_json_full(const Widget &w) -> Json {
     Json j = Json::object();
-    j["type"] = w.type_name();
+    j.set("type", w.type_name());
     Json props = Json::object();
     w.serialize_props(props);
-    j["props"] = props;
+    j.set("props", props);
     if (w.is_focused()) {
-        j["focused"] = true;
+        j.set("focused", Json{true});
     }
     Json children = Json::array();
     for_each_child_unified(
         w, [&children](const Widget &child) -> void { children.push_back(dump_tree_json_full(child)); });
-    j["children"] = children;
+    j.set("children", children);
     return j;
 }
 
@@ -618,17 +620,17 @@ inline auto for_each_child_unified(const Widget &w, const std::function<void(con
     // 描述元数据
     const WidgetDescriptor desc = w.describe();
     Json descriptor = Json::object();
-    descriptor["name"] = desc.name;
+    descriptor.set("name", desc.name);
     Json prop_names = Json::array();
     for (const auto &pd : desc.properties) {
         prop_names.push_back(pd.name);
     }
-    descriptor["property_names"] = prop_names;
-    result["descriptor"] = descriptor;
+    descriptor.set("property_names", prop_names);
+    result.set("descriptor", descriptor);
     // 当前属性值
     Json values = Json::object();
     w.serialize_props(values);
-    result["values"] = values;
+    result.set("values", values);
     return result;
 }
 
@@ -639,7 +641,7 @@ inline auto for_each_child_unified(const Widget &w, const std::function<void(con
 ///              由该控件的 `get<T>` 行为决定后果。
 inline void set_widget_prop(Widget &w, std::string_view key, const Json &value) {
     Json props = Json::object();
-    props[std::string(key)] = value;
+    props.set(std::string(key), value);
     w.deserialize_props(props);
 }
 

@@ -349,37 +349,37 @@ class Button : public LeafWidget, public ButtonProps {
     /// @param props 输出目标 JSON 对象，写入 label/color/on_color/font_size 等本类键
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入 width/height/show 等通用属性
-        props["label"] = label.get().text;
-        props["color"] = color_to_json(color.get());
-        props["on_color"] = color_to_json(on_color);
-        props["font_size"] = font.size_pt;
-        props["corner_radius"] = corner_radius;
-        props["padding"] = edge_insets_to_json(padding);
-        props["enabled"] = enabled;
+        props.set("label", label.get().text);
+        props.set("color", color_to_json(color.get()));
+        props.set("on_color", color_to_json(on_color));
+        props.set("font_size", font.size_pt);
+        props.set("corner_radius", corner_radius);
+        props.set("padding", edge_insets_to_json(padding));
+        props.set("enabled", Json{enabled});
         // optional 颜色未显式设置不输出：保留「自动派生」语义
         if (hover_color.has_value()) {
-            props["hover_color"] = color_to_json(*hover_color);
+            props.set("hover_color", color_to_json(*hover_color));
         }
         if (pressed_color.has_value()) {
-            props["pressed_color"] = color_to_json(*pressed_color);
+            props.set("pressed_color", color_to_json(*pressed_color));
         }
         if (border_color.has_value()) {
-            props["border_color"] = color_to_json(*border_color);
+            props.set("border_color", color_to_json(*border_color));
         }
         if (border_width > 0.0F) {
-            props["border_width"] = border_width;
+            props.set("border_width", border_width);
         }
         if (disabled_color.has_value()) {
-            props["disabled_color"] = color_to_json(*disabled_color);
+            props.set("disabled_color", color_to_json(*disabled_color));
         }
         if (disabled_text_color.has_value()) {
-            props["disabled_text_color"] = color_to_json(*disabled_text_color);
+            props.set("disabled_text_color", color_to_json(*disabled_text_color));
         }
         if (min_width > 0.0F) {
-            props["min_width"] = min_width;
+            props.set("min_width", min_width);
         }
         if (min_height > 0.0F) {
-            props["min_height"] = min_height;
+            props.set("min_height", min_height);
         }
     }
 
@@ -388,49 +388,49 @@ class Button : public LeafWidget, public ButtonProps {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("label")) {
-            label.set(LocalizedString{props["label"].get<std::string>()});
+            label.set(LocalizedString{props.at("label")->as_or<std::string>("")});
         }
         if (props.contains("color")) {
-            color.set(json_to_color(props["color"]));
+            color.set(json_to_color(*props.at("color")));
         }
         if (props.contains("on_color")) {
-            on_color = json_to_color(props["on_color"]);
+            on_color = json_to_color(*props.at("on_color"));
         }
         if (props.contains("font_size")) {
-            font.size_pt = props["font_size"].get<float>();
+            font.size_pt = props.at("font_size")->as_or<float>(0.0F);
         }
         if (props.contains("corner_radius")) {
-            corner_radius = props["corner_radius"].get<float>();
+            corner_radius = props.at("corner_radius")->as_or<float>(0.0F);
         }
         if (props.contains("padding")) {
-            padding = json_to_edge_insets(props["padding"]);
+            padding = json_to_edge_insets(*props.at("padding"));
         }
         if (props.contains("enabled")) {
-            enabled = props["enabled"].get<bool>();
+            enabled = props.at("enabled")->as_or<bool>(false);
         }
         if (props.contains("hover_color")) {
-            hover_color = json_to_color(props["hover_color"]);
+            hover_color = json_to_color(*props.at("hover_color"));
         }
         if (props.contains("pressed_color")) {
-            pressed_color = json_to_color(props["pressed_color"]);
+            pressed_color = json_to_color(*props.at("pressed_color"));
         }
         if (props.contains("border_color")) {
-            border_color = json_to_color(props["border_color"]);
+            border_color = json_to_color(*props.at("border_color"));
         }
         if (props.contains("border_width")) {
-            border_width = props["border_width"].get<float>();
+            border_width = props.at("border_width")->as_or<float>(0.0F);
         }
         if (props.contains("disabled_color")) {
-            disabled_color = json_to_color(props["disabled_color"]);
+            disabled_color = json_to_color(*props.at("disabled_color"));
         }
         if (props.contains("disabled_text_color")) {
-            disabled_text_color = json_to_color(props["disabled_text_color"]);
+            disabled_text_color = json_to_color(*props.at("disabled_text_color"));
         }
         if (props.contains("min_width")) {
-            min_width = props["min_width"].get<float>();
+            min_width = props.at("min_width")->as_or<float>(0.0F);
         }
         if (props.contains("min_height")) {
-            min_height = props["min_height"].get<float>();
+            min_height = props.at("min_height")->as_or<float>(0.0F);
         }
     }
 

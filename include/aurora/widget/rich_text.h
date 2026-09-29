@@ -225,7 +225,7 @@ class RichText : public LeafWidget {
         for (const auto &s : spans_.get()) {
             all += s.text.text;
         }
-        props["text"] = all;
+        props.set("text", all);
     }
 
     /// @brief 反序列化：`text` 键存在时重建为单一片段序列（富文本样式无法由 JSON 恢复）。
@@ -233,7 +233,7 @@ class RichText : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("text")) {
-            spans_ = Reactive{std::vector{TextSpan{.text = LocalizedString{props["text"].get<std::string>()}}}};
+            spans_ = Reactive{std::vector{TextSpan{.text = LocalizedString{props.at("text")->as_or<std::string>("")}}}};
         }
     }
 

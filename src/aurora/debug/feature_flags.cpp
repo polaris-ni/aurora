@@ -91,28 +91,28 @@ auto feature_flags() -> FeatureFlags {
 
 auto FeatureFlags::to_json() const -> Json {
     Json j = Json::object();
-    j["AURORA_BACKEND_HEADLESS"] = backend_headless;
-    j["AURORA_BACKEND_WIN32"] = backend_win32;
-    j["AURORA_BACKEND_D3D11"] = backend_d3d11;
-    j["AURORA_BACKEND_GLFW"] = backend_glfw;
-    j["AURORA_BACKEND_X11"] = backend_x11;
-    j["AURORA_BACKEND_WAYLAND"] = backend_wayland;
-    j["AURORA_BACKEND_MACOS"] = backend_macos;
-    j["AURORA_BACKEND_WASM"] = backend_wasm;
-    j["AURORA_ENABLE_LAYOUT_CACHE"] = layout_cache;
-    j["AURORA_ENABLE_OCCLUSION_CULLING"] = occlusion_culling;
-    j["AURORA_ENABLE_DISPLAY_LIST"] = display_list;
-    j["AURORA_ENABLE_SIMD"] = simd;
-    j["AURORA_ENABLE_PROFILING"] = profiling;
-    j["AURORA_ENABLE_TRACING"] = tracing;
-    j["AURORA_ENABLE_DEBUG"] = debug;
-    j["AURORA_ENABLE_AUDIO"] = audio;
-    j["AURORA_ENABLE_AUDIO_WASAPI"] = enable_audio_wasapi;
-    j["AURORA_ENABLE_AUDIO_ALSA"] = enable_audio_alsa;
-    j["AURORA_ENABLE_AUDIO_WEBAUDIO"] = enable_audio_webaudio;
-    j["AURORA_ENABLE_IMAGE_JPEG"] = image_jpeg;
-    j["AURORA_ENABLE_IMAGE_WEBP"] = image_webp;
-    j["AURORA_ENABLE_IMAGE_PNG"] = image_png;
+    j.set("AURORA_BACKEND_HEADLESS", Json{backend_headless});
+    j.set("AURORA_BACKEND_WIN32", Json{backend_win32});
+    j.set("AURORA_BACKEND_D3D11", Json{backend_d3d11});
+    j.set("AURORA_BACKEND_GLFW", Json{backend_glfw});
+    j.set("AURORA_BACKEND_X11", Json{backend_x11});
+    j.set("AURORA_BACKEND_WAYLAND", Json{backend_wayland});
+    j.set("AURORA_BACKEND_MACOS", Json{backend_macos});
+    j.set("AURORA_BACKEND_WASM", Json{backend_wasm});
+    j.set("AURORA_ENABLE_LAYOUT_CACHE", Json{layout_cache});
+    j.set("AURORA_ENABLE_OCCLUSION_CULLING", Json{occlusion_culling});
+    j.set("AURORA_ENABLE_DISPLAY_LIST", Json{display_list});
+    j.set("AURORA_ENABLE_SIMD", Json{simd});
+    j.set("AURORA_ENABLE_PROFILING", Json{profiling});
+    j.set("AURORA_ENABLE_TRACING", Json{tracing});
+    j.set("AURORA_ENABLE_DEBUG", Json{debug});
+    j.set("AURORA_ENABLE_AUDIO", Json{audio});
+    j.set("AURORA_ENABLE_AUDIO_WASAPI", Json{enable_audio_wasapi});
+    j.set("AURORA_ENABLE_AUDIO_ALSA", Json{enable_audio_alsa});
+    j.set("AURORA_ENABLE_AUDIO_WEBAUDIO", Json{enable_audio_webaudio});
+    j.set("AURORA_ENABLE_IMAGE_JPEG", Json{image_jpeg});
+    j.set("AURORA_ENABLE_IMAGE_WEBP", Json{image_webp});
+    j.set("AURORA_ENABLE_IMAGE_PNG", Json{image_png});
     return j;
 }
 

@@ -6,12 +6,12 @@
 #include <sstream>
 #include <string>
 
-#include "nlohmann/json.hpp"
+#include "aurora/core/json.h"
 
 namespace aurora {
 
-/// @brief JSON 内存 DOM 类型别名（nlohmann::json），序列化与反序列化 API 的统一载体。
-using Json = nlohmann::json;
+/// @brief JSON 内存 DOM 类型别名（aurora::json::Value），序列化与反序列化 API 的统一载体。
+using Json = json::Value;
 
 namespace serialization {
 
@@ -132,7 +132,7 @@ namespace detail {
 /// @param j 字符串类型的 JSON 值。
 /// @return 无需引号时原样输出；否则为双引号转义形态。
 [[nodiscard]] inline auto emit_string(const Json &j) -> std::string {
-    auto s = j.get<std::string>();
+    auto s = j.as_or<std::string>("");
     return yaml_needs_quoting(s) ? yaml_quote_string(s) : std::move(s);
 }
 
@@ -163,17 +163,17 @@ namespace detail {
     if (j.is_null()) {
         return "null";
     }
-    if (j.is_boolean()) {
-        return j.get<bool>() ? "true" : "false";
+    if (j.is_bool()) {
+        return j.as_or<bool>(false) ? "true" : "false";
     }
-    if (j.is_number_integer()) {
-        return std::to_string(j.get<std::int64_t>());
+    if (j.is_int()) {
+        return std::to_string(j.as_or<std::int64_t>(0));
     }
-    if (j.is_number_unsigned()) {
-        return std::to_string(j.get<std::uint64_t>());
+    if (j.is_uint()) {
+        return std::to_string(j.as_or<std::uint64_t>(0));
     }
-    if (j.is_number_float()) {
-        return emit_float(j.get<double>());
+    if (j.is_double()) {
+        return emit_float(j.as_or<double>(0.0));
     }
     if (j.is_string()) {
         return emit_string(j);
@@ -198,14 +198,14 @@ namespace detail {
         if (i > 0) {
             os << '\n';
         }
-        const Json &item = j[i];
+        const Json *item = j.at(i);
         os << pad << "- ";
-        if (item.is_object()) {
-            os << (item.empty() ? "{}" : drop_first_indent(emit_object(item, indent + 1, child_pad), child_pad.size()));
-        } else if (item.is_array()) {
-            os << (item.empty() ? "[]" : drop_first_indent(emit_array(item, indent + 1, child_pad), child_pad.size()));
+        if (item->is_object()) {
+            os << (item->empty() ? "{}" : drop_first_indent(emit_object(*item, indent + 1, child_pad), child_pad.size()));
+        } else if (item->is_array()) {
+            os << (item->empty() ? "[]" : drop_first_indent(emit_array(*item, indent + 1, child_pad), child_pad.size()));
         } else {
-            os << emit_scalar(item);
+            os << emit_scalar(*item);
         }
     }
     return os.str();
@@ -246,12 +246,12 @@ namespace detail {
 [[nodiscard]] inline auto emit_object(const Json &j, int indent, const std::string &pad) -> std::string {
     std::ostringstream os;
     bool first = true;
-    for (auto it = j.begin(); it != j.end(); ++it) {
+    for (const auto &e : j.entries()) {
         if (!first) {
             os << '\n';
         }
         first = false;
-        os << emit_object_value(it.value(), it.key(), indent, pad);
+        os << emit_object_value(e.value, std::string(e.key), indent, pad);
     }
     return os.str();
 }

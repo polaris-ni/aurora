@@ -119,7 +119,7 @@ class ToastHost : public SingleChild {
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入通用属性（width/height/show 等）
-        props["position"] = position_ == ToastPosition::Bottom ? "bottom" : "top";
+        props.set("position", position_ == ToastPosition::Bottom ? "bottom" : "top");
     }
 
   protected:

@@ -152,12 +152,12 @@ class Scroll : public Container, public ScrollProps {
     ///              与 `snap_extent`/`snap_paging`/`snap_alignment` 三件套。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["step"] = step;
-        props["offset"] = offset_y_;  // 运行时滚动位置（AI-first 可观测；与 LazyList/GridView 同口径）
-        props["restore_key"] = restore_key;
-        props["snap_extent"] = snap.extent;
-        props["snap_paging"] = snap.paging;
-        props["snap_alignment"] = snap_alignment_to_json(snap.alignment);
+        props.set("step", step);
+        props.set("offset", offset_y_);  // 运行时滚动位置（AI-first 可观测；与 LazyList/GridView 同口径）
+        props.set("restore_key", restore_key);
+        props.set("snap_extent", snap.extent);
+        props.set("snap_paging", Json{snap.paging});
+        props.set("snap_alignment", snap_alignment_to_json(snap.alignment));
     }
     /// @brief 从属性 JSON 回填：认得的键逐个赋值，未认得的键由基类/本函数忽略。
     /// @param props 输入 JSON 对象：`step`、`restore_key`、`snap_extent`/`snap_paging`/
@@ -167,23 +167,23 @@ class Scroll : public Container, public ScrollProps {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("step")) {
-            step = props["step"].get<float>();
+            step = props.at("step")->as_or<float>(0.0F);
         }
         if (props.contains("restore_key")) {
-            restore_key = props["restore_key"].get<std::string>();
+            restore_key = props.at("restore_key")->as_or<std::string>("");
         }
         if (props.contains("snap_extent")) {
-            snap.extent = props["snap_extent"].get<float>();
+            snap.extent = props.at("snap_extent")->as_or<float>(0.0F);
         }
         if (props.contains("snap_paging")) {
-            snap.paging = props["snap_paging"].get<bool>();
+            snap.paging = props.at("snap_paging")->as_or<bool>(false);
         }
         if (props.contains("snap_alignment")) {
-            snap.alignment = json_to_snap_alignment(props["snap_alignment"]);
+            snap.alignment = json_to_snap_alignment(*props.at("snap_alignment"));
         }
         if (props.contains("offset")) {
             // 显式偏移优先于 restore_key 恢复（见 maybe_restore_scroll）：记入 pending 待布局后应用。
-            pending_offset_ = props["offset"].get<float>();
+            pending_offset_ = props.at("offset")->as_or<float>(0.0F);
             scroll_restored_ = false;
         }
     }

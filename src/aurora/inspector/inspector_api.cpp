@@ -49,7 +49,7 @@ auto Inspector::get_prop_value(const Widget &w, std::string_view key) -> Json {
     Json props = Json::object();
     w.serialize_props(props);
     if (props.contains(std::string(key))) {
-        return props[std::string(key)];  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        return *props.at(std::string(key));
     }
     return Json{};
 }
@@ -67,10 +67,8 @@ auto Inspector::apply_patch(Node &root, const Json &patch) -> Result<void> {
         if (!op.is_object() || !op.contains("path") || !op.contains("value")) {
             continue;
         }
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        const std::string path_str = op["path"].get<std::string>();
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        const Json &value = op["value"];
+        const std::string path_str = op.at("path")->as_or<std::string>("");
+        const Json &value = *op.at("value");
         // path 格式: "/widget_path/prop_name" — 最后一段为属性名
         const auto last_slash = path_str.rfind('/');
         if (last_slash == std::string::npos) {

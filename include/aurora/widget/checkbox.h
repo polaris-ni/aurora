@@ -299,16 +299,16 @@ class Checkbox : public LeafWidget {
     /// @note Rebuildable: yes, via from_json
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["checked"] = value();
+        props.set("checked", Json{value()});
         if (active_color_.has_value()) {
-            props["active_color"] = color_to_json(*active_color_);  // 未设置不输出：保留「跟随主题」语义
+            props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props["border_color"] = color_to_json(border_color_);
-        props["check_color"] = color_to_json(check_color_);
-        props["size"] = size_;
-        props["corner_radius"] = corner_radius_;
-        props["border_width"] = border_width_;
-        props["enabled"] = enabled_;
+        props.set("border_color", color_to_json(border_color_));
+        props.set("check_color", color_to_json(check_color_));
+        props.set("size", size_);
+        props.set("corner_radius", corner_radius_);
+        props.set("border_width", border_width_);
+        props.set("enabled", Json{enabled_});
     }
 
     /// @brief 从 props JSON 还原自有属性（与 `serialize_props` 往返闭环）。
@@ -317,28 +317,28 @@ class Checkbox : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("checked")) {
-            set_value(props["checked"].get<bool>());
+            set_value(props.at("checked")->as_or<bool>(false));
         }
         if (props.contains("active_color")) {
-            active_color_ = json_to_color(props["active_color"]);
+            active_color_ = json_to_color(*props.at("active_color"));
         }
         if (props.contains("border_color")) {
-            border_color_ = json_to_color(props["border_color"]);
+            border_color_ = json_to_color(*props.at("border_color"));
         }
         if (props.contains("check_color")) {
-            check_color_ = json_to_color(props["check_color"]);
+            check_color_ = json_to_color(*props.at("check_color"));
         }
         if (props.contains("size")) {
-            size_ = props["size"].get<float>();
+            size_ = props.at("size")->as_or<float>(0.0F);
         }
         if (props.contains("corner_radius")) {
-            corner_radius_ = props["corner_radius"].get<float>();
+            corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
         }
         if (props.contains("border_width")) {
-            border_width_ = props["border_width"].get<float>();
+            border_width_ = props.at("border_width")->as_or<float>(0.0F);
         }
         if (props.contains("enabled")) {
-            enabled_ = props["enabled"].get<bool>();
+            enabled_ = props.at("enabled")->as_or<bool>(false);
         }
     }
 
