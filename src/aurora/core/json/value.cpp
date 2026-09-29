@@ -255,7 +255,7 @@ auto Value::read_impl() const noexcept -> std::optional<T> {  // NOLINT(bugprone
 }
 
 template <json_readable T>
-auto Value::as_or(T fallback) const noexcept -> T {
+auto Value::as_or(T fallback) const noexcept -> T {  // NOLINT(bugprone-exception-escape)
     if (const auto v = read_impl<T>(); v.has_value()) {
         return *v;
     }
@@ -263,13 +263,13 @@ auto Value::as_or(T fallback) const noexcept -> T {
 }
 
 template <json_readable T>
-auto Value::as_or(std::string_view key, const T &fallback) const noexcept -> T {
+auto Value::as_or(std::string_view key, const T &fallback) const noexcept -> T {  // NOLINT(bugprone-exception-escape)
     const Value *sub = find(key);
     return sub != nullptr ? sub->as_or<T>(fallback) : fallback;
 }
 
 template <json_readable T>
-auto Value::as_or_at(std::size_t index, const T &fallback) const noexcept -> T {
+auto Value::as_or_at(std::size_t index, const T &fallback) const noexcept -> T {  // NOLINT(bugprone-exception-escape)
     const Value *sub = at(index);
     return sub != nullptr ? sub->as_or<T>(fallback) : fallback;
 }

@@ -146,13 +146,13 @@ class SaxCore {
         }
     }
 
-    [[nodiscard]] auto match(std::string_view literal) noexcept -> bool {
+    [[nodiscard]] auto match(std::string_view literal) noexcept -> bool {  // NOLINT(bugprone-exception-escape)
         if (in_.size() - pos_ < literal.size()) {
             return false;
         }
         // 首个分支已保证 pos_ + literal.size() <= size_，compare 的抛出条件
         // （pos > size）不可达；检查器无法建模该区间推理。
-        if (in_.compare(pos_, literal.size(), literal) != 0) {  // NOLINT(bugprone-exception-escape)
+        if (in_.compare(pos_, literal.size(), literal) != 0) {
             return false;
         }
         pos_ += literal.size();
