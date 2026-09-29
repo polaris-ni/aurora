@@ -16,7 +16,7 @@ namespace aurora {
 /// 仅表达平移 / 旋转 / 缩放（不含投影），求逆稳定、零堆分配，适合每帧热路径。
 ///
 /// 退化（行列式≈0，如缩放为 0）时 `inverse()` 返回单位矩阵并上报
-/// `Diagnostics::degraded`，避免崩溃（需求 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21 错误恢复与降级渲染）。
+/// `Diagnostics::degraded`，避免崩溃（需求 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001 错误恢复与降级渲染）。
 struct Matrix2D {
     float m11 = 1;  ///< 线性部分第 1 行第 1 列（x' = m11·x + m12·y + tx 的 x 系数），默认单位阵。
     float m12 = 0;  ///< 线性部分第 1 行第 2 列（y 对 x' 的贡献系数），默认单位阵。

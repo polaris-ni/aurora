@@ -429,7 +429,7 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 
 ## 6 需求规格
 
-### 6.1 SPEC.FEAT.WIDGET.FLAT-COMPONENTS.7 扁平组合模型 + 共享所有权组件
+### 6.1 SPEC.FEAT.WIDGET.FLAT-COMPONENTS.001 扁平组合模型 + 共享所有权组件
 
 **核心目标：** AI 易追踪逻辑。
 
@@ -461,7 +461,7 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 
 **验收标准：** 控件继承深度 ≤ 2；`Widget` 上不存在任何几何字段；命中链的解引用路径全部经 `lock()` 持有强引用。
 
-### 6.2 SPEC.FEAT.TOOLING.UI-TO-CODE.22 可逆性：UI → 代码的参考还原（控件侧）
+### 6.2 SPEC.FEAT.TOOLING.UI-TO-CODE.001 可逆性：UI → 代码的参考还原（控件侧）
 
 **核心目标：** AI 可分析现有界面并重构。定位是「结构化往返」而非「完全可逆」。
 

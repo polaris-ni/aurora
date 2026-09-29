@@ -1,6 +1,6 @@
 // tools/servers/aurora_cli.cpp
 //
-// aurora — Aurora CLI toolchain (spec SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17).
+// aurora — Aurora CLI toolchain (spec SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001).
 //
 // Provides subcommands for component discovery, UI-tree validation, offscreen rendering, code generation, etc.
 // All output defaults to JSON (machine-readable).

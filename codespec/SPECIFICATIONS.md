@@ -44,7 +44,7 @@ AI（LLM）使用 UI 库的方式与人类有本质不同：
 
 Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题**的库。AI 最擅长处理结构化的、模式一致的、可验证的任务——Aurora 的设计让 UI 开发恰好落入这个区间。
 
-**AI 生成代码的两大失败来源**：① 内存与所有权错误（悬空指针、use-after-free、泄漏）；② 并发与线程安全错误（死锁、竞态、在错误线程更新 UI）。Aurora 的设计从根本上去除这两类错误的可能性（分别见 SPEC.QUALITY.CORE.MEMORY-SAFETY.18 与单线程 UI 不变量）。
+**AI 生成代码的两大失败来源**：① 内存与所有权错误（悬空指针、use-after-free、泄漏）；② 并发与线程安全错误（死锁、竞态、在错误线程更新 UI）。Aurora 的设计从根本上去除这两类错误的可能性（分别见 SPEC.QUALITY.CORE.MEMORY-SAFETY.001 与单线程 UI 不变量）。
 
 ---
 
@@ -61,9 +61,9 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 - 不做「又一套 CSS」：布局用代码表达，不引入样式表语言。
 - 不做服务端渲染。
 - 不做可视化拖拽编辑器（除非社区驱动）。
-- 不提供 Playground / REPL；MCP / CLI 与 LSP 已提供（见 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17）。
+- 不提供 Playground / REPL；MCP / CLI 与 LSP 已提供（见 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001）。
 
-### 4.3 技术约束（SPEC.PERF.API.TOKEN-EFFICIENCY.24 Token 效率 + 编译速度约束）
+### 4.3 技术约束（SPEC.PERF.API.TOKEN-EFFICIENCY.001 Token 效率 + 编译速度约束）
 
 - C++20 最小标准。
 - 静态库交付（非 header-only）。
@@ -80,41 +80,43 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 需求 ID 形如 `SPEC.<类目>.<域>.[<子域>…]<语义短名>.<数字尾>`：全大写、点分割、层级不限，短名多词用连字符。
 类目封闭 6 类（`API` 语言与接口设计原则 / `FEAT` 面向使用者的功能能力 / `QUALITY` 质量不变量与保证 /
 `PERF` 效率目标 / `PLATFORM` 平台适配目标 / `TEST` 可验证性机制），域段对齐 `specification/` 的模块切分。
-**数字尾是不可变的稳定后缀**，插入新需求只增不改，既有引用永不偏移；`§N` 只表示章节号，需求引用一律写需求 ID。
+**数字尾是三位序号（`001` 起）**：只有前面的前缀（`SPEC.<类目>.<域>.[<子域>…]<语义短名>`）完全相同时才依次递增
+为 `002`、`003`；前缀不同则一律从 `001` 起，因此插入新需求既不改写既有 ID、也不会让任何引用偏移。
+`§N` 只表示章节号，需求引用一律写需求 ID。
 下表给出每条需求的**规格落点**（文档 + 章节）。
 
 | 需求 ID | 特性 | 核心目标 | 规格落点 |
 |:---|:---|:---|:---|
-| SPEC.API.DECLARATIVE-DUAL-API.1 | 声明式双模 API（链式 / 分步 / 配置块等价） | AI 易生成 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.1 |
-| SPEC.API.NAMING-CONSISTENCY.2 | 极致命名一致性 + 扁平命名空间 | AI 易补全 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.2 |
-| SPEC.API.MINIMAL-COMPOSITION.3 | 正交可组合的最小核心 API | AI 少幻觉 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.3 |
-| SPEC.API.STRONG-TYPES.4 | 强类型 + 单位标注 + 编译期校验 | 编译即验证 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.4 |
-| SPEC.API.SENSIBLE-DEFAULTS.5 | 合理默认值（声明处可见） | AI 少写少错 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.5 |
-| SPEC.FEAT.STATE.SIGNAL-STATE.6 | 单向数据流 + 细粒度信号状态模型 | AI 易理解状态 | [`02-state.md`](specification/02-state.md) §7.1 |
-| SPEC.FEAT.WIDGET.FLAT-COMPONENTS.7 | 扁平组合模型 + 共享所有权组件 | AI 易追踪逻辑 | [`04-widget.md`](specification/04-widget.md) §6.1 |
-| SPEC.API.EXPLICIT-FIRST.8 | 显式优于隐式（含样式继承） | AI 无理解盲区 | [`05-event-navigation.md`](specification/05-event-navigation.md) §8.1 |
-| SPEC.QUALITY.CORE.STRUCTURED-ERROR.9 | 结构化错误信息（JSON 可解析） | AI 易调试 | [`08-tooling.md`](specification/08-tooling.md) §10.1 |
-| SPEC.FEAT.TOOLING.UI-INSPECTOR.10 | 内置 UI Inspector（HTTP / MCP 接口） | AI 可观测运行时 | [`08-tooling.md`](specification/08-tooling.md) §10.2 |
-| SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.11 | 确定性渲染 + 逻辑快照测试 | AI 可验证正确性 | [`03-layout-render.md`](specification/03-layout-render.md) §10.1 |
-| SPEC.FEAT.TOOLING.API-SCHEMA.12 | 机器可读 API Schema | AI 工具链直接消费 | [`08-tooling.md`](specification/08-tooling.md) §10.3（工具链侧）、[`07-environment-modifier.md`](specification/07-environment-modifier.md) §8.1（控件自描述侧） |
-| SPEC.FEAT.TOOLING.UI-SERIALIZATION.13 | UI 树序列化 + 差分 Patch 协议 | AI 可增量修改 UI | [`08-tooling.md`](specification/08-tooling.md) §10.4 |
-| SPEC.PLATFORM.ZERO-IFDEF.14 | 零 `#ifdef` 跨平台 + 插件式平台扩展 | AI 无需处理平台分支 | [`06-app-platform.md`](specification/06-app-platform.md) §12.1 |
-| SPEC.PLATFORM.CONSISTENT-BEHAVIOR.15 | 跨平台一致行为 + 黄金文件验证 | AI 无需考虑平台差异 | [`06-app-platform.md`](specification/06-app-platform.md) §12.2 |
-| SPEC.FEAT.TOOLING.RECIPE-DOCS.16 | 示例驱动文档（Recipe 形式） | AI 从示例高效学习 | [`08-tooling.md`](specification/08-tooling.md) §10.5 |
-| SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17 | LSP / MCP Server / CLI 工具链 | AI Agent 直接集成 | [`08-tooling.md`](specification/08-tooling.md) §10.6、[`09-cli.md`](specification/09-cli.md) §10.1（argv 解析底座） |
-| SPEC.QUALITY.CORE.MEMORY-SAFETY.18 | 安全的内存与所有权模型 | AI 生成无内存错误的代码 | [`01-core.md`](specification/01-core.md) §8.1 |
-| SPEC.FEAT.CORE.ASYNC-CONCURRENCY.19 | 结构化异步与并发模型 | AI 轻松处理耗时操作 | [`01-core.md`](specification/01-core.md) §8.2、[`02-state.md`](specification/02-state.md) §7.2 |
-| SPEC.QUALITY.LAYOUT.ALGEBRA.20 | 布局系统的代数一致性 | AI 可推理尺寸和位置 | [`03-layout-render.md`](specification/03-layout-render.md) §10.2 |
-| SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21 | 错误恢复与降级渲染 | AI 生成的错误 UI 不会崩溃 | [`01-core.md`](specification/01-core.md) §8.3 |
-| SPEC.FEAT.TOOLING.UI-TO-CODE.22 | 可逆性：UI → 代码的参考还原 | AI 可分析现有界面并重构 | [`08-tooling.md`](specification/08-tooling.md) §10.7（工具链侧）、[`04-widget.md`](specification/04-widget.md) §6.2（控件侧） |
-| SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.23 | 部分代码容错（半成品可编译可运行） | AI 可增量开发 | [`01-core.md`](specification/01-core.md) §8.4 |
-| SPEC.PERF.API.TOKEN-EFFICIENCY.24 | Token 效率 + 编译速度约束 | AI 迭代循环效率 | 本文 §4.3 |
-| SPEC.FEAT.APP.MULTI-WINDOW.25 | 多窗口（一个进程多个顶层窗口） | AI 生成的复合应用可多窗协同，且不退化单窗调用模型 | [`06-app-platform.md`](specification/06-app-platform.md) §2.4 |
-| SPEC.FEAT.WIDGET.LAYOUT.BASELINE-ALIGN.26 | 交叉轴基线对齐（`CrossAxisAlignment::Baseline`） | 同一行内文本与控件的首行基线共线（含 Modifier 内边距与退化路径） | [`03-layout-render.md`](specification/03-layout-render.md) §3.8、[`04-widget.md`](specification/04-widget.md) §3.3 |
-| SPEC.FEAT.WIDGET.LAYOUT.SCROLL-RESTORE.27 | 滚动位置保存/恢复（`app::ScrollStorage`） | 重建 / 重启后滚动位置可还原，且多窗口与同键争用不串味 | [`06-app-platform.md`](specification/06-app-platform.md) §9.3、[`04-widget.md`](specification/04-widget.md) §3.3 |
-| SPEC.FEAT.WIDGET.DATA.LIST-REORDER.28 | 列表拖拽重排（`ReorderableList`） | 用户可拖动条目换位：跟手 / 让位 / 近边缘自动滚动 / 落位动画，数据由控件改写 | [`04-widget.md`](specification/04-widget.md) §3.4、[`GUIDELINE.md`](GUIDELINE.md) §36 |
-| SPEC.FEAT.WIDGET.SCROLL-INTERACTION.29 | 滚动交互增强（`ScrollSnap` / `PullToRefresh` / `StickyHeader` / `offset_signal`） | 轮播整页对齐、分组头部钉顶、到顶下拉即刷新、嵌套滚动余量移交，且全程尊重 reduce-motion | [`04-widget.md`](specification/04-widget.md) §3.3、[`05-event-navigation.md`](specification/05-event-navigation.md) §3.3、[`GUIDELINE.md`](GUIDELINE.md) §38 |
-| SPEC.FEAT.CORE.JSON.30 | 自研 JSON 值容器与编解码器（`au::json`） | AI 可在无第三方 JSON 依赖下解析（DOM / SAX 双出口）/ 构造 / 序列化，按 RFC 6901 路径寻址读写删，读缺失键不隐式变更文档，并通过外部语料的 RFC 8259 合规验收 | [`01-core.md`](specification/01-core.md) §9、[`GUIDELINE.md`](GUIDELINE.md) §42 |
+| SPEC.API.DECLARATIVE-DUAL-API.001 | 声明式双模 API（链式 / 分步 / 配置块等价） | AI 易生成 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.1 |
+| SPEC.API.NAMING-CONSISTENCY.001 | 极致命名一致性 + 扁平命名空间 | AI 易补全 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.2 |
+| SPEC.API.MINIMAL-COMPOSITION.001 | 正交可组合的最小核心 API | AI 少幻觉 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.3 |
+| SPEC.API.STRONG-TYPES.001 | 强类型 + 单位标注 + 编译期校验 | 编译即验证 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.4 |
+| SPEC.API.SENSIBLE-DEFAULTS.001 | 合理默认值（声明处可见） | AI 少写少错 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.5 |
+| SPEC.FEAT.STATE.SIGNAL-STATE.001 | 单向数据流 + 细粒度信号状态模型 | AI 易理解状态 | [`02-state.md`](specification/02-state.md) §7.1 |
+| SPEC.FEAT.WIDGET.FLAT-COMPONENTS.001 | 扁平组合模型 + 共享所有权组件 | AI 易追踪逻辑 | [`04-widget.md`](specification/04-widget.md) §6.1 |
+| SPEC.API.EXPLICIT-FIRST.001 | 显式优于隐式（含样式继承） | AI 无理解盲区 | [`05-event-navigation.md`](specification/05-event-navigation.md) §8.1 |
+| SPEC.QUALITY.CORE.STRUCTURED-ERROR.001 | 结构化错误信息（JSON 可解析） | AI 易调试 | [`08-tooling.md`](specification/08-tooling.md) §10.1 |
+| SPEC.FEAT.TOOLING.UI-INSPECTOR.001 | 内置 UI Inspector（HTTP / MCP 接口） | AI 可观测运行时 | [`08-tooling.md`](specification/08-tooling.md) §10.2 |
+| SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.001 | 确定性渲染 + 逻辑快照测试 | AI 可验证正确性 | [`03-layout-render.md`](specification/03-layout-render.md) §10.1 |
+| SPEC.FEAT.TOOLING.API-SCHEMA.001 | 机器可读 API Schema | AI 工具链直接消费 | [`08-tooling.md`](specification/08-tooling.md) §10.3（工具链侧）、[`07-environment-modifier.md`](specification/07-environment-modifier.md) §8.1（控件自描述侧） |
+| SPEC.FEAT.TOOLING.UI-SERIALIZATION.001 | UI 树序列化 + 差分 Patch 协议 | AI 可增量修改 UI | [`08-tooling.md`](specification/08-tooling.md) §10.4 |
+| SPEC.PLATFORM.ZERO-IFDEF.001 | 零 `#ifdef` 跨平台 + 插件式平台扩展 | AI 无需处理平台分支 | [`06-app-platform.md`](specification/06-app-platform.md) §12.1 |
+| SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001 | 跨平台一致行为 + 黄金文件验证 | AI 无需考虑平台差异 | [`06-app-platform.md`](specification/06-app-platform.md) §12.2 |
+| SPEC.FEAT.TOOLING.RECIPE-DOCS.001 | 示例驱动文档（Recipe 形式） | AI 从示例高效学习 | [`08-tooling.md`](specification/08-tooling.md) §10.5 |
+| SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 | LSP / MCP Server / CLI 工具链 | AI Agent 直接集成 | [`08-tooling.md`](specification/08-tooling.md) §10.6、[`09-cli.md`](specification/09-cli.md) §10.1（argv 解析底座） |
+| SPEC.QUALITY.CORE.MEMORY-SAFETY.001 | 安全的内存与所有权模型 | AI 生成无内存错误的代码 | [`01-core.md`](specification/01-core.md) §8.1 |
+| SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 | 结构化异步与并发模型 | AI 轻松处理耗时操作 | [`01-core.md`](specification/01-core.md) §8.2、[`02-state.md`](specification/02-state.md) §7.2 |
+| SPEC.QUALITY.LAYOUT.ALGEBRA.001 | 布局系统的代数一致性 | AI 可推理尺寸和位置 | [`03-layout-render.md`](specification/03-layout-render.md) §10.2 |
+| SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001 | 错误恢复与降级渲染 | AI 生成的错误 UI 不会崩溃 | [`01-core.md`](specification/01-core.md) §8.3 |
+| SPEC.FEAT.TOOLING.UI-TO-CODE.001 | 可逆性：UI → 代码的参考还原 | AI 可分析现有界面并重构 | [`08-tooling.md`](specification/08-tooling.md) §10.7（工具链侧）、[`04-widget.md`](specification/04-widget.md) §6.2（控件侧） |
+| SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.001 | 部分代码容错（半成品可编译可运行） | AI 可增量开发 | [`01-core.md`](specification/01-core.md) §8.4 |
+| SPEC.PERF.API.TOKEN-EFFICIENCY.001 | Token 效率 + 编译速度约束 | AI 迭代循环效率 | 本文 §4.3 |
+| SPEC.FEAT.APP.MULTI-WINDOW.001 | 多窗口（一个进程多个顶层窗口） | AI 生成的复合应用可多窗协同，且不退化单窗调用模型 | [`06-app-platform.md`](specification/06-app-platform.md) §2.4 |
+| SPEC.FEAT.WIDGET.LAYOUT.BASELINE-ALIGN.001 | 交叉轴基线对齐（`CrossAxisAlignment::Baseline`） | 同一行内文本与控件的首行基线共线（含 Modifier 内边距与退化路径） | [`03-layout-render.md`](specification/03-layout-render.md) §3.8、[`04-widget.md`](specification/04-widget.md) §3.3 |
+| SPEC.FEAT.WIDGET.LAYOUT.SCROLL-RESTORE.001 | 滚动位置保存/恢复（`app::ScrollStorage`） | 重建 / 重启后滚动位置可还原，且多窗口与同键争用不串味 | [`06-app-platform.md`](specification/06-app-platform.md) §9.3、[`04-widget.md`](specification/04-widget.md) §3.3 |
+| SPEC.FEAT.WIDGET.DATA.LIST-REORDER.001 | 列表拖拽重排（`ReorderableList`） | 用户可拖动条目换位：跟手 / 让位 / 近边缘自动滚动 / 落位动画，数据由控件改写 | [`04-widget.md`](specification/04-widget.md) §3.4、[`GUIDELINE.md`](GUIDELINE.md) §36 |
+| SPEC.FEAT.WIDGET.SCROLL-INTERACTION.001 | 滚动交互增强（`ScrollSnap` / `PullToRefresh` / `StickyHeader` / `offset_signal`） | 轮播整页对齐、分组头部钉顶、到顶下拉即刷新、嵌套滚动余量移交，且全程尊重 reduce-motion | [`04-widget.md`](specification/04-widget.md) §3.3、[`05-event-navigation.md`](specification/05-event-navigation.md) §3.3、[`GUIDELINE.md`](GUIDELINE.md) §38 |
+| SPEC.FEAT.CORE.JSON.001 | 自研 JSON 值容器与编解码器（`au::json`） | AI 可在无第三方 JSON 依赖下解析（DOM / SAX 双出口）/ 构造 / 序列化，按 RFC 6901 路径寻址读写删，读缺失键不隐式变更文档，并通过外部语料的 RFC 8259 合规验收 | [`01-core.md`](specification/01-core.md) §9、[`GUIDELINE.md`](GUIDELINE.md) §42 |
 
 ---
 
@@ -122,14 +124,14 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 
 | 张力对 | 冲突点 | 解决方案 |
 |:---|:---|:---|
-| SPEC.API.SENSIBLE-DEFAULTS.5 默认值 vs SPEC.API.EXPLICIT-FIRST.8 显式 | 默认值是「隐式」的 | **默认值在声明处可见**（LSP hover 显示），运行时可查询 `Xxx::defaults()`，但代码中可省略 |
-| SPEC.API.DECLARATIVE-DUAL-API.1 链式 vs SPEC.API.MINIMAL-COMPOSITION.3 最小 API | 链式需要每个方法返回 `this`，增加 API 面 | 链式方法 = 属性 setter 的语法糖，不增加新概念 |
-| SPEC.FEAT.STATE.SIGNAL-STATE.6 细粒度信号 vs SPEC.FEAT.WIDGET.FLAT-COMPONENTS.7 共享所有权 | 信号变化需定点刷新，但组件树需可被复制 / 移动 | `Node` 持有 `shared_ptr<Widget>`（拷贝即共享），信号变化仅重绘依赖组件（见 SPEC.FEAT.WIDGET.FLAT-COMPONENTS.7 / SPEC.QUALITY.CORE.MEMORY-SAFETY.18） |
-| SPEC.API.STRONG-TYPES.4 强类型 vs 编译速度 | 大量模板 / 概念检查拖慢编译 | 核心路径用简单类型，高级校验放在**独立验证工具**中（CLI），不阻塞编译 |
-| SPEC.FEAT.TOOLING.API-SCHEMA.12 机器 Schema vs SPEC.API.NAMING-CONSISTENCY.2 命名一致 | Schema 需要额外维护 | Schema 从代码**自动生成**（`gen_api_tools`），保证与实现同步 |
-| SPEC.FEAT.STATE.SIGNAL-STATE.6 信号刷新 vs 高频交互 | 每帧走全链路延迟不可接受 | 默认细粒度信号定点刷新；高频绘制用 `Canvas` opt-in |
-| SPEC.QUALITY.CORE.MEMORY-SAFETY.18 单线程 UI vs SPEC.FEAT.CORE.ASYNC-CONCURRENCY.19 异步 | 异步结果需回 UI 线程 | `au::async` 经主线程投递器回到 UI 线程 |
-| SPEC.API.NAMING-CONSISTENCY.2 命名一致 vs 历史 API | AI 可能混用新旧命名 | 文档统一 snake_case 属性 + CamelCase 类型，废弃名仅在兼容层标注 |
+| SPEC.API.SENSIBLE-DEFAULTS.001 默认值 vs SPEC.API.EXPLICIT-FIRST.001 显式 | 默认值是「隐式」的 | **默认值在声明处可见**（LSP hover 显示），运行时可查询 `Xxx::defaults()`，但代码中可省略 |
+| SPEC.API.DECLARATIVE-DUAL-API.001 链式 vs SPEC.API.MINIMAL-COMPOSITION.001 最小 API | 链式需要每个方法返回 `this`，增加 API 面 | 链式方法 = 属性 setter 的语法糖，不增加新概念 |
+| SPEC.FEAT.STATE.SIGNAL-STATE.001 细粒度信号 vs SPEC.FEAT.WIDGET.FLAT-COMPONENTS.001 共享所有权 | 信号变化需定点刷新，但组件树需可被复制 / 移动 | `Node` 持有 `shared_ptr<Widget>`（拷贝即共享），信号变化仅重绘依赖组件（见 SPEC.FEAT.WIDGET.FLAT-COMPONENTS.001 / SPEC.QUALITY.CORE.MEMORY-SAFETY.001） |
+| SPEC.API.STRONG-TYPES.001 强类型 vs 编译速度 | 大量模板 / 概念检查拖慢编译 | 核心路径用简单类型，高级校验放在**独立验证工具**中（CLI），不阻塞编译 |
+| SPEC.FEAT.TOOLING.API-SCHEMA.001 机器 Schema vs SPEC.API.NAMING-CONSISTENCY.001 命名一致 | Schema 需要额外维护 | Schema 从代码**自动生成**（`gen_api_tools`），保证与实现同步 |
+| SPEC.FEAT.STATE.SIGNAL-STATE.001 信号刷新 vs 高频交互 | 每帧走全链路延迟不可接受 | 默认细粒度信号定点刷新；高频绘制用 `Canvas` opt-in |
+| SPEC.QUALITY.CORE.MEMORY-SAFETY.001 单线程 UI vs SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 异步 | 异步结果需回 UI 线程 | `au::async` 经主线程投递器回到 UI 线程 |
+| SPEC.API.NAMING-CONSISTENCY.001 命名一致 vs 历史 API | AI 可能混用新旧命名 | 文档统一 snake_case 属性 + CamelCase 类型，废弃名仅在兼容层标注 |
 
 ---
 
@@ -183,15 +185,15 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 
 | 文档 | 覆盖 |
 |:---|:---|
-| [`01-core.md`](specification/01-core.md) | 基础层 `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池、JSON 值容器、`au::TODO`；需求 SPEC.QUALITY.CORE.MEMORY-SAFETY.18 / SPEC.FEAT.CORE.ASYNC-CONCURRENCY.19 / SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21 / SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.23 / SPEC.FEAT.CORE.JSON.30 |
-| [`02-state.md`](specification/02-state.md) | 响应式 `state/`：信号原语、订阅生命周期、`Store`、异步与协程、依赖图与撤销；需求 SPEC.FEAT.STATE.SIGNAL-STATE.6 / SPEC.FEAT.CORE.ASYNC-CONCURRENCY.19 |
-| [`03-layout-render.md`](specification/03-layout-render.md) | `layout/` + `render/` + `image/` + `media/`：布局协议、Flex / Grid 算法、Painter、字体引擎、Surface 与后端、音频图（Web Audio 语义节点图 + WASAPI / ALSA / Web Audio 三端设备层）；需求 SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.11 / SPEC.QUALITY.LAYOUT.ALGEBRA.20 |
-| [`04-widget.md`](specification/04-widget.md) | `widget/` + `ui/`：控件基类契约、自描述、控件清单、可定制性契约；需求 SPEC.FEAT.WIDGET.FLAT-COMPONENTS.7 / SPEC.FEAT.TOOLING.UI-TO-CODE.22 |
-| [`05-event-navigation.md`](specification/05-event-navigation.md) | `event/` + `animation/` + `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈；需求 SPEC.API.EXPLICIT-FIRST.8 |
-| [`06-app-platform.md`](specification/06-app-platform.md) | `app/` + `window/`（平台 API 在 `window/platform.h`）+ `preferences/` + `storage/` + `perf/` + `debug/`：应用驱动、多窗口容器（`WindowHost`）、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面；需求 SPEC.PLATFORM.ZERO-IFDEF.14 / SPEC.PLATFORM.CONSISTENT-BEHAVIOR.15 / SPEC.FEAT.APP.MULTI-WINDOW.25
-| [`07-environment-modifier.md`](specification/07-environment-modifier.md) | `environment/` + `theming/` + `i18n/` + `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier；需求 SPEC.FEAT.TOOLING.API-SCHEMA.12 |
-| [`08-tooling.md`](specification/08-tooling.md) | 序列化 / 代码生成 / YAML、控件树检查、Inspector 面板与远程服务、自描述发现、MCP / CLI / LSP、测试原语、日志通道；需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.9 / SPEC.FEAT.TOOLING.UI-INSPECTOR.10 / SPEC.FEAT.TOOLING.API-SCHEMA.12 / SPEC.FEAT.TOOLING.UI-SERIALIZATION.13 / SPEC.FEAT.TOOLING.RECIPE-DOCS.16 / SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17 / SPEC.FEAT.TOOLING.UI-TO-CODE.22 |
-| [`09-cli.md`](specification/09-cli.md) | `cli/`：argv → 强类型值的声明表驱动解析（GNU/POSIX 语法全集、`cli-*` 错误码、usage / help / schema 派生视图），工具链与 demo 的共用底座；需求 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17 |
+| [`01-core.md`](specification/01-core.md) | 基础层 `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池、JSON 值容器、`au::TODO`；需求 SPEC.QUALITY.CORE.MEMORY-SAFETY.001 / SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 / SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001 / SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.001 / SPEC.FEAT.CORE.JSON.001 |
+| [`02-state.md`](specification/02-state.md) | 响应式 `state/`：信号原语、订阅生命周期、`Store`、异步与协程、依赖图与撤销；需求 SPEC.FEAT.STATE.SIGNAL-STATE.001 / SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 |
+| [`03-layout-render.md`](specification/03-layout-render.md) | `layout/` + `render/` + `image/` + `media/`：布局协议、Flex / Grid 算法、Painter、字体引擎、Surface 与后端、音频图（Web Audio 语义节点图 + WASAPI / ALSA / Web Audio 三端设备层）；需求 SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.001 / SPEC.QUALITY.LAYOUT.ALGEBRA.001 |
+| [`04-widget.md`](specification/04-widget.md) | `widget/` + `ui/`：控件基类契约、自描述、控件清单、可定制性契约；需求 SPEC.FEAT.WIDGET.FLAT-COMPONENTS.001 / SPEC.FEAT.TOOLING.UI-TO-CODE.001 |
+| [`05-event-navigation.md`](specification/05-event-navigation.md) | `event/` + `animation/` + `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈；需求 SPEC.API.EXPLICIT-FIRST.001 |
+| [`06-app-platform.md`](specification/06-app-platform.md) | `app/` + `window/`（平台 API 在 `window/platform.h`）+ `preferences/` + `storage/` + `perf/` + `debug/`：应用驱动、多窗口容器（`WindowHost`）、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面；需求 SPEC.PLATFORM.ZERO-IFDEF.001 / SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001 / SPEC.FEAT.APP.MULTI-WINDOW.001
+| [`07-environment-modifier.md`](specification/07-environment-modifier.md) | `environment/` + `theming/` + `i18n/` + `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier；需求 SPEC.FEAT.TOOLING.API-SCHEMA.001 |
+| [`08-tooling.md`](specification/08-tooling.md) | 序列化 / 代码生成 / YAML、控件树检查、Inspector 面板与远程服务、自描述发现、MCP / CLI / LSP、测试原语、日志通道；需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001 / SPEC.FEAT.TOOLING.UI-INSPECTOR.001 / SPEC.FEAT.TOOLING.API-SCHEMA.001 / SPEC.FEAT.TOOLING.UI-SERIALIZATION.001 / SPEC.FEAT.TOOLING.RECIPE-DOCS.001 / SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 / SPEC.FEAT.TOOLING.UI-TO-CODE.001 |
+| [`09-cli.md`](specification/09-cli.md) | `cli/`：argv → 强类型值的声明表驱动解析（GNU/POSIX 语法全集、`cli-*` 错误码、usage / help / schema 派生视图），工具链与 demo 的共用底座；需求 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 |
 
 ### 8.2 顶层文档（`codespec/`）
 
@@ -200,7 +202,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | [`SPECIFICATIONS.md`](SPECIFICATIONS.md) | 本文件：总纲、设计原则、特性清单与文档导航 |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 分层、运行时、模块映射、核心数据流、组件树、事件、渲染、性能、设计不变量、错误处理架构、AI-first 原则、测试与 CI |
 | [`CONCEPTS.md`](CONCEPTS.md) | 核心概念审计（可枚举 UI 原语）、状态作用域决策树、React / Flutter / Qt 概念映射、迁移要点 |
-| [`CODING_STANDARDS.md`](CODING_STANDARDS.md) | 错误处理、命名、文档与示例、元数据与可观测、契约表达、AI 友好性、版本管理、函数签名、内部工具层、提交规范；需求 SPEC.API.DECLARATIVE-DUAL-API.1–SPEC.API.SENSIBLE-DEFAULTS.5 |
+| [`CODING_STANDARDS.md`](CODING_STANDARDS.md) | 错误处理、命名、文档与示例、元数据与可观测、契约表达、AI 友好性、版本管理、函数签名、内部工具层、提交规范；需求 SPEC.API.DECLARATIVE-DUAL-API.001–SPEC.API.SENSIBLE-DEFAULTS.001 |
 | [`GUIDELINE.md`](GUIDELINE.md) | 复制即用配方集 |
 | [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) | 全部 CMake 开关、feature 宏、缓存变量、环境变量、安装与 find_package |
 
@@ -279,7 +281,7 @@ ctest -R itest_ai_compat
 
 ### 12.2 API 冻结单一真相源（SSOT）
 
-- 冻结基准 = `aurora_api.json`（由 `gen_api_tools` 生成器从代码自动生成，见 SPEC.FEAT.TOOLING.API-SCHEMA.12）。
+- 冻结基准 = `aurora_api.json`（由 `gen_api_tools` 生成器从代码自动生成，见 SPEC.FEAT.TOOLING.API-SCHEMA.001）。
 - 任何公共 widget / 类型 / 属性键的新增或删除，必须先更新代码并重新生成该 JSON，再由 CTest `check_api_schema_sync` 校验「代码 ↔ JSON」零漂移。
 - 冻结后，新增属性键不得改变既有键的语义；删除 / 重命名键视为 breaking（见 §12.3）。
 
@@ -299,9 +301,9 @@ ctest -R itest_ai_compat
 | 全量构建 | `cmake --build build` 0 error | — |
 | 完整测试 | `ctest` 全绿（含 `aurora_test_runner` 单元 / 集成） | — |
 | API 漂移 | `ctest -R check_api_schema_sync` | `check_api_schema_sync` |
-| 命名一致性 | `ctest -R check_naming_conventions`（SPEC.API.NAMING-CONSISTENCY.2：类型 PascalCase、属性/事件/函数 snake_case、事件 `on_` 前缀） | `check_naming_conventions` |
-| 零原生平台宏 | `ctest -R check_platform_macros`（SPEC.PLATFORM.ZERO-IFDEF.14：预处理分支禁原生平台/架构宏，规范化宏密度仅报告） | `check_platform_macros` |
-| API token 预算 | `ctest -R check_api_budget`（SPEC.PERF.API.TOKEN-EFFICIENCY.24：`aurora_api.json` 估算 token 数 ≤ 预算） | `check_api_budget` |
+| 命名一致性 | `ctest -R check_naming_conventions`（SPEC.API.NAMING-CONSISTENCY.001：类型 PascalCase、属性/事件/函数 snake_case、事件 `on_` 前缀） | `check_naming_conventions` |
+| 零原生平台宏 | `ctest -R check_platform_macros`（SPEC.PLATFORM.ZERO-IFDEF.001：预处理分支禁原生平台/架构宏，规范化宏密度仅报告） | `check_platform_macros` |
+| API token 预算 | `ctest -R check_api_budget`（SPEC.PERF.API.TOKEN-EFFICIENCY.001：`aurora_api.json` 估算 token 数 ≤ 预算） | `check_api_budget` |
 | 无写死本机路径 | `ctest -R check_no_hardcoded_paths`（禁止盘符 / 用户主目录等本机专属绝对路径入库，外部路径须显式传入） | `check_no_hardcoded_paths` |
 | 豁免指令排版 | `ctest -R check_nolint_layout`（clang-tidy 豁免只在物理行生效：理由夹在指令与代码之间、被豁免语句折行、注释散文抄裸令牌，三类均静默失效，见 `CODING_STANDARDS.md` §5.2） | `check_nolint_layout` |
 | codespec 交叉引用 | `ctest -R check_codespec_xref` | `check_codespec_xref` |

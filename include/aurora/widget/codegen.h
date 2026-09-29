@@ -16,11 +16,11 @@
 #include "aurora/core/log.h"
 #include "aurora/widget/serialization.h"
 
-/// @brief 序列化与代码生成命名空间（需求 SPEC.FEAT.TOOLING.UI-TO-CODE.22 / specification/08-tooling.md §2.5）：把控件树
-/// JSON 快照反向生成为可编译的 Aurora C++ 构造表达式。
+/// @brief 序列化与代码生成命名空间（需求 SPEC.FEAT.TOOLING.UI-TO-CODE.001 / specification/08-tooling.md
+/// §2.5）：把控件树 JSON 快照反向生成为可编译的 Aurora C++ 构造表达式。
 namespace aurora::serialization {
 
-/// @brief 代码生成风格（需求 SPEC.FEAT.TOOLING.UI-TO-CODE.22 / specification/08-tooling.md §2.5）。
+/// @brief 代码生成风格（需求 SPEC.FEAT.TOOLING.UI-TO-CODE.001 / specification/08-tooling.md §2.5）。
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: none
@@ -1007,7 +1007,7 @@ struct PropEmit {
     return var;
 }
 
-/// @brief 把序列化的 widget 树 JSON 反向生成为 Aurora C++ 源码（需求 SPEC.FEAT.TOOLING.UI-TO-CODE.22 /
+/// @brief 把序列化的 widget 树 JSON 反向生成为 Aurora C++ 源码（需求 SPEC.FEAT.TOOLING.UI-TO-CODE.001 /
 /// specification/08-tooling.md §2.5）。
 ///
 /// 输入为 `to_json(widget)` 产生的结构快照。默认 Fluent 风格（扁平容器直接罗列子项 +
@@ -1026,7 +1026,7 @@ struct PropEmit {
     return to_code_expr(node, CodeStyle::Fluent, indent);
 }
 
-/// @brief 按指定风格生成代码（需求 SPEC.FEAT.TOOLING.UI-TO-CODE.22）。默认 Fluent，与 to_code(node, int) 行为一致。
+/// @brief 按指定风格生成代码（需求 SPEC.FEAT.TOOLING.UI-TO-CODE.001）。默认 Fluent，与 to_code(node, int) 行为一致。
 /// @param node to_json(widget) 的结构快照。
 /// @param style 目标代码风格。
 /// @param indent 缩进层级（一级 4 空格）。

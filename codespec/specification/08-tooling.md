@@ -917,7 +917,7 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
 
 ## 10 需求规格
 
-### 10.1 SPEC.QUALITY.CORE.STRUCTURED-ERROR.9 结构化错误信息（JSON 可解析）
+### 10.1 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001 结构化错误信息（JSON 可解析）
 
 **核心目标：** AI 易调试——错误必须可被 AI 直接解析，而不只是被人读懂。
 
@@ -929,13 +929,13 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
 - 渲染前的整树静态检查走 `au::validate(const Node& root, int max_depth = 64) -> Result<bool>`；UI 树 JSON 校验走 `au::validate_ui_tree_json()`（MCP `validate_ui` 工具）。
 - **两条输出流分工**：诊断日志走 `AURORA_LOG_*`；CLI 的 JSON 诊断结果 / usage、LSP 线协议帧等「程序产品」输出走 `AURORA_LOG_RAW`，两者互不污染，保证下游管道可直接解析。
 - 编译期诊断用自定义 `static_assert` 消息（C++20/23），必须在第一个错误点给出、不级联。
-- 运行期降级（SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21）必须同时产生结构化警告，让 AI 从渲染快照与日志两侧都能识别「此处被降级」。
+- 运行期降级（SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001）必须同时产生结构化警告，让 AI 从渲染快照与日志两侧都能识别「此处被降级」。
 
 **设计决策：** 不采用 SARIF。SARIF 面向静态分析工具，而 Aurora 的错误涵盖运行时场景（空子元素、非法属性值），故采用自定义 JSON 错误格式，同时覆盖编译期与运行时。
 
 **错误码权威：** 所有错误码的真实产生点与语义见 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)（由代码 `make_error(...)` 调用逐项核对），本文不复述清单。
 
-### 10.2 SPEC.FEAT.TOOLING.UI-INSPECTOR.10 内置 UI Inspector
+### 10.2 SPEC.FEAT.TOOLING.UI-INSPECTOR.001 内置 UI Inspector
 
 **核心目标：** AI 可观测运行时。
 
@@ -959,7 +959,7 @@ std::string dump = au::dump_tree_json(root).dump();
 
 **验收标准：** 任一运行时 UI 树可经 `dump_tree_json*` 导出且能被 `from_json` 重建；`InspectorPanel` 可浏览与回写属性。
 
-### 10.3 SPEC.FEAT.TOOLING.API-SCHEMA.12 机器可读 API Schema
+### 10.3 SPEC.FEAT.TOOLING.API-SCHEMA.001 机器可读 API Schema
 
 **核心目标：** AI 工具链直接消费。
 
@@ -994,7 +994,7 @@ std::string dump = au::dump_tree_json(root).dump();
 
 **验收标准：** `aurora_api.json` 覆盖全部已注册控件；新增 / 删除 widget 或类型后重跑生成器即可同步，无手工维护项。
 
-### 10.4 SPEC.FEAT.TOOLING.UI-SERIALIZATION.13 UI 树序列化 + 差分 Patch 协议
+### 10.4 SPEC.FEAT.TOOLING.UI-SERIALIZATION.001 UI 树序列化 + 差分 Patch 协议
 
 **核心目标：** AI 可增量修改 UI——整树可往返，局部改动不必重传全树。
 
@@ -1011,9 +1011,9 @@ std::string yaml2 = au::serialization::to_yaml(json_value);     // Json → YAML
 
 - 任何 UI 树都可以双向转换（`to_json` ↔ `from_json`，形态与失败语义见 §2.2），并支持从结构化描述直接构建 UI 树。
 - 差分协议基于 JSON Pointer 定位 + `replace` / `add` / `remove` 三类操作，允许 AI 只发送部分 UI 树 patch 而不是整树（这是「AI 编辑现有界面」的成本下限：改动越小，token 越少）。
-- 反序列化失败必须是**值语义的失败**（`Result` + 结构化 `Error`），不得抛异常或产出一棵「半合法」树（与 SPEC.QUALITY.CORE.STRUCTURED-ERROR.9 / SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21 的错误与降级策略一致）。
+- 反序列化失败必须是**值语义的失败**（`Result` + 结构化 `Error`），不得抛异常或产出一棵「半合法」树（与 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001 / SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001 的错误与降级策略一致）。
 
-### 10.5 SPEC.FEAT.TOOLING.RECIPE-DOCS.16 示例驱动文档（Recipe 形式）
+### 10.5 SPEC.FEAT.TOOLING.RECIPE-DOCS.001 示例驱动文档（Recipe 形式）
 
 **核心目标：** AI 从示例高效学习。
 
@@ -1043,7 +1043,7 @@ int main() {
 - 示例本身就是集成测试。
 - 示例被组织成配方形式（见 [`GUIDELINE.md`](../GUIDELINE.md)），AI 可以通过检索示例直接拼接出目标代码。
 
-### 10.6 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17 LSP / MCP Server / CLI 工具链
+### 10.6 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 LSP / MCP Server / CLI 工具链
 
 **核心目标：** AI Agent 直接集成。
 
@@ -1055,7 +1055,7 @@ int main() {
 
 **验收标准：** AI Agent 可仅凭工具链完成「发现控件 → 校验树 → 渲染快照 → 生成代码」全链路，无需读取源码。
 
-### 10.7 SPEC.FEAT.TOOLING.UI-TO-CODE.22 可逆性：UI → 代码的参考还原
+### 10.7 SPEC.FEAT.TOOLING.UI-TO-CODE.001 可逆性：UI → 代码的参考还原
 
 **核心目标：** AI 可分析现有界面并重构。定位是「结构化往返」而非「完全可逆」。
 
@@ -1070,6 +1070,6 @@ int main() {
 **关键约束：**
 
 - 这是**工具层**功能（CLI / MCP / InspectorPanel），不是库核心 API。
-- 与 SPEC.FEAT.TOOLING.UI-INSPECTOR.10 Inspector 集成：`to_code(dump_tree_json_full(root))` 可直接获取当前 UI 的代码表示。
-- 与 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17 CLI 集成：`aurora_cli to-code tree.json --style fluent`。
+- 与 SPEC.FEAT.TOOLING.UI-INSPECTOR.001 Inspector 集成：`to_code(dump_tree_json_full(root))` 可直接获取当前 UI 的代码表示。
+- 与 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 CLI 集成：`aurora_cli to-code tree.json --style fluent`。
 - `InspectorPanel` 已支持导出代码：`export_code()` + 「Export Code」按钮 + `on_export_code` 回调，实现 Inspector → 代码闭环。

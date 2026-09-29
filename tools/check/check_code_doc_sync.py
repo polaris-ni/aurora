@@ -73,13 +73,15 @@ TEST_FACILITY_DIRS = ("framework", "support", "fixtures", "golden")
 CATCH_ALL_BASELINE = 20
 
 ARCH_REF_RE = re.compile(r"架构\s*§\s*([\d.]+)")  # CJK-LITERAL: regex-semantic
-# 需求 ID：SPEC.<类目>.<域>[.<子域>…]<短名>.<数字尾>（至少 4 个点分段，数字尾 1–2 位）。
-# (?!\d) 防止把 `SPEC...142` 之类的更长数字尾巴截断成 `.14` 而误判通过。
-SPEC_ID_RE = re.compile(r"\bSPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{1,2}(?!\d)")
+# 需求 ID：SPEC.<类目>.<域>[.<子域>…]<短名>.<数字尾>（至少 4 个点分段，数字尾恒为三位、001 起）。
+# SPEC_ID_RE 是候选发现器，尾巴放宽到 1–3 位，使「尾巴位数不对」的写法也能被 DOC2 抓出；
+# SPEC_ID_SHAPE_RE 才是合法形态（恒为三位）。(?!\d) 防止把 `.0012` 截断成 `.001` 而误判通过。
+SPEC_ID_RE = re.compile(r"\bSPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{1,3}(?!\d)")
+SPEC_ID_SHAPE_RE = re.compile(r"^SPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{3}$")
 # 回流形态：关键词 + `#数字`（旧的纯数字需求编号）。数字尾巴同样做 (?!\d) 截断保护，
 # 故 `Ref #142`（PR 号）这类更长的数字串不会被 `#14` 前缀误伤。
 BACKFLOW_KEYWORD_RE = re.compile(
-    r"(?:需求|规格|requirement|spec)\s*#\s*\d{1,2}(?!\d)",  # CJK-LITERAL: regex-semantic
+    r"(?:需求|规格|requirement|spec)\s*#\s*\d{1,3}(?!\d)",  # CJK-LITERAL: regex-semantic
     re.IGNORECASE)
 # 只校验「目标单元 / 目标源单元」（路径声明）；「目标组合」是语义描述，不是路径。
 TARGET_RE = re.compile(r"目标(?:单元|源单元)[:：]\s*([^\s`]+)")  # CJK-LITERAL: regex-semantic
@@ -151,7 +153,7 @@ def feature_ids(spec_path):
     with open(spec_path, encoding="utf-8") as handle:
         for line in handle:
             match = re.match(
-                r"^\s*\|\s*`?(SPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{1,2})(?!\d)`?\s*\|", line)
+                r"^\s*\|\s*`?(SPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{1,3})(?!\d)`?\s*\|", line)
             if match:
                 # 上界刻意不写死：SPECIFICATIONS.md 中唯一「需求 ID 首列」的表就是特性清单表，
                 # 硬编码数字上界会让新增需求静默逃过 DOC2 校验。
@@ -172,7 +174,10 @@ def check_doc_refs(repo, problems):
                     if arch_numbers is not None and number not in arch_numbers:
                         problems.append(("DOC1", rel, lineno, f"ARCHITECTURE.md section {number} not found"))
                 for req_id in SPEC_ID_RE.findall(line):
-                    if known_ids is not None and req_id not in known_ids:
+                    if not SPEC_ID_SHAPE_RE.match(req_id):
+                        problems.append(("DOC2", rel, lineno,
+                                         f"requirement ID {req_id} must end with a 3-digit tail (001, 002, ...)"))
+                    elif known_ids is not None and req_id not in known_ids:
                         problems.append(("DOC2", rel, lineno,
                                          f"requirement ID {req_id} is not in the SPECIFICATIONS.md feature table"))
 

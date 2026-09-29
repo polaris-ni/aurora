@@ -9,7 +9,7 @@
 
 namespace aurora {
 
-/// @brief 结构化错误（需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.9：机器可解析错误）。
+/// @brief 结构化错误（需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001：机器可解析错误）。
 ///
 /// 字段分两类受众：
 /// - 进程外（JSON/日志/IDE 工具）：只认 `code`（冻结 slug，如 "nav-depth-exceeded"
@@ -103,7 +103,7 @@ struct Error {
     return e;
 }
 
-/// @brief 结果类型：成功持 T，失败持结构化 Error（需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.9：统一失败路径）。
+/// @brief 结果类型：成功持 T，失败持结构化 Error（需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001：统一失败路径）。
 /// @tparam T 成功时的值类型。
 /// @note Thread: thread-safe
 /// @note Side-effects: none
@@ -149,7 +149,7 @@ class Result {
 };
 
 /// @brief `Result<void>` 特化：仅表示成功/失败，无成功值（用于 `flush`/`reload` 等
-/// 只关心“是否出错”的接口，统一失败路径，对齐需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.9）。
+/// 只关心“是否出错”的接口，统一失败路径，对齐需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001）。
 /// @note `std::variant<void, ...>` 非法（void 非对象类型），故用 `bool` 标记成功态。
 /// @note Thread: thread-safe
 /// @note Side-effects: none

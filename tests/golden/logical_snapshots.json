@@ -1,5 +1,5 @@
 {
-  "_about": "Aurora logical-snapshot golden baseline (requirement SPEC.PLATFORM.CONSISTENT-BEHAVIOR.15). Do not hand-edit; regenerate with AURORA_UPDATE_GOLDEN=1 via aurora_test_runner --run=utest_offscreen.",
+  "_about": "Aurora logical-snapshot golden baseline (requirement SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001). Do not hand-edit; regenerate with AURORA_UPDATE_GOLDEN=1 via aurora_test_runner --run=utest_offscreen.",
   "colorspace": "sRGB",
   "viewport": {
     "w": 320,

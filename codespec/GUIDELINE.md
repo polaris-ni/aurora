@@ -951,7 +951,7 @@ python tools/check/check_gen_api_merge.py build         # 回归：损坏现有�
 
 ### 27.7 运行时 feature 宏查询
 
-编译期 feature 宏（后端 / 优化 / SIMD / 插桩 / 编解码）的取值已单点收口为运行时查询，**应用代码零 `#ifdef`**（需求 SPEC.PLATFORM.ZERO-IFDEF.14）：
+编译期 feature 宏（后端 / 优化 / SIMD / 插桩 / 编解码）的取值已单点收口为运行时查询，**应用代码零 `#ifdef`**（需求 SPEC.PLATFORM.ZERO-IFDEF.001）：
 
 ```cpp
 au::debug::FeatureFlags flags = au::debug::feature_flags();

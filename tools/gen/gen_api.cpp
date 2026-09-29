@@ -1,5 +1,5 @@
-// Requirement SPEC.FEAT.TOOLING.API-SCHEMA.12: generate aurora_api.json (Aurora public API description, for toolchain /
-// LSP / docs).
+// Requirement SPEC.FEAT.TOOLING.API-SCHEMA.001: generate aurora_api.json (Aurora public API description, for toolchain
+// / LSP / docs).
 //
 // Extracts registered widget types and their property keys via runtime reflection
 // (WidgetRegistry + serializeProps of each widget's default instance), supplements core enums

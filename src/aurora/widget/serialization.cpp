@@ -192,7 +192,7 @@ auto register_core_widgets() -> void {
     reg_fresh("Show", []() -> std::shared_ptr<Show> {
         return std::make_shared<Show>(false, Node{std::make_shared<Spacer>(false)});
     });
-    // 降级视觉占位控件（需求 SPEC.QUALITY.CORE.MEMORY-SAFETY.18）：可安全从静态 JSON
+    // 降级视觉占位控件（需求 SPEC.QUALITY.CORE.MEMORY-SAFETY.001）：可安全从静态 JSON
     // 重建，便于在错误/缺失处渲染占位盒。
     reg_default<Placeholder>("Placeholder");
     reg_default<RichText>("RichText");

@@ -207,7 +207,7 @@ au::launch(load());
 
 ## 7 需求规格
 
-### 7.1 SPEC.FEAT.STATE.SIGNAL-STATE.6 单向数据流与细粒度信号状态模型
+### 7.1 SPEC.FEAT.STATE.SIGNAL-STATE.001 单向数据流与细粒度信号状态模型
 
 **核心目标：** AI 易理解状态。
 
@@ -247,7 +247,7 @@ au::Column(au::ColumnProps{
 
 **验收标准：** 一次 `set()` 只重绘读取过该信号的控件；未读取该信号的控件不产生任何重绘或重算；`StateGraph::to_json()` 能导出完整依赖图。
 
-### 7.2 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.19 结构化异步与并发模型（异步侧契约）
+### 7.2 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 结构化异步与并发模型（异步侧契约）
 
 **核心目标：** AI 轻松处理耗时操作。
 
@@ -257,4 +257,4 @@ au::Column(au::ColumnProps{
 
 **验收标准：** 全部后台工作都可在无 GUI 环境（headless）下完成并回到主线程；`ThreadPool` 存活期间不出现新建的游离 `std::thread`；超时与取消路径只改变结果的投递去向，绝不中断用户函数。
 
-> 内存与所有权侧的所有权模型见 [`01-core.md`](01-core.md) §8.1（SPEC.QUALITY.CORE.MEMORY-SAFETY.18）；跨线程回投与帧循环唤醒见 [`06-app-platform.md`](06-app-platform.md)。
+> 内存与所有权侧的所有权模型见 [`01-core.md`](01-core.md) §8.1（SPEC.QUALITY.CORE.MEMORY-SAFETY.001）；跨线程回投与帧循环唤醒见 [`06-app-platform.md`](06-app-platform.md)。

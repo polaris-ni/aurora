@@ -36,8 +36,8 @@ except (AttributeError, ValueError, OSError):
     pass
 
 # ---- 需求 ID 结构：SPEC.<类目>.<域>[.<子域>…]<短名>.<数字尾> ----------------
-# 数字尾即原「#N」编号，不可变；至少 4 个点分段（SPEC + 两个中间段 + 数字尾）。
-SPEC_ID_FULL_RE = re.compile(r"^SPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{1,2}$")
+# 数字尾恒为三位序号（001 起，前缀完全相同时才递增）；至少 4 个点分段（SPEC + 两个中间段 + 数字尾）。
+SPEC_ID_FULL_RE = re.compile(r"^SPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{3}$")
 
 # ---- 白名单：存量豁免，逐项注明原因；新规则只拦增量 -------------------------
 WHITELIST = {
@@ -254,7 +254,12 @@ def check_spec_table(rel, lines, repo, problems):
         if len(cells) < 4:
             continue
         feature = cells[0].strip("`")
+        if not feature.startswith("SPEC."):
+            continue
         if not SPEC_ID_FULL_RE.fullmatch(feature):
+            problems.append(("R5", rel, lineno,
+                             f"malformed requirement ID in feature table: {feature} "
+                             f"(tail must be 3 digits, e.g. 001)"))
             continue
         # 上界刻意不写死：SPECIFICATIONS.md 中唯一「需求 ID 首列」的表就是特性清单表（R5 已按 basename
         # 限定本文件），硬编码数字上界会让新增需求的落点链接静默逃过校验。

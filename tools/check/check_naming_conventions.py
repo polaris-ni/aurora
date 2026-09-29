@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # ============================================================================
-# check_naming_conventions.py - public-API naming-consistency gate (SPEC.API.NAMING-CONSISTENCY.2)
+# check_naming_conventions.py - public-API naming-consistency gate (SPEC.API.NAMING-CONSISTENCY.001)
 # ----------------------------------------------------------------------------
-# Spec: codespec/CODING_STANDARDS.md §11.2 (requirement SPEC.API.NAMING-CONSISTENCY.2 "极致命名一致性")
+# Spec: codespec/CODING_STANDARDS.md §11.2 (requirement SPEC.API.NAMING-CONSISTENCY.001 "极致命名一致性")
 #   - 公共控件 / 枚举类型：PascalCase（Button、TextInput、Alignment…）
 #   - 属性键：snake_case（on_click、font_size…），杜绝同义异名
 #   - 事件名：snake_case 且 on_ 前缀（on_click、on_change…）

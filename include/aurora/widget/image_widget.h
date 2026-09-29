@@ -26,7 +26,7 @@ enum class ImageLoadState : std::uint8_t {
     Failed,  ///< 加载/解码失败（降级占位框）
 };
 
-/// @brief 图片获取器（需求 SPEC.API.DECLARATIVE-DUAL-API.1 fetcher 方案）：URL → 字节流的异步任务工厂。
+/// @brief 图片获取器（需求 SPEC.API.DECLARATIVE-DUAL-API.001 fetcher 方案）：URL → 字节流的异步任务工厂。
 ///
 /// 库核心**不内置 HTTP**：App 提供实现（如 WinHTTP/curl/浏览器 fetch 包装），返回
 /// `Task<std::vector<std::uint8_t>>`（内部经 `async` 跑线程池，`then` 回主线程投递器）。

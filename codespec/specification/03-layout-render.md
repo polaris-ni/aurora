@@ -880,7 +880,7 @@ class RhiBackend {
 
 ## 10 需求规格
 
-### 10.1 SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.11 确定性渲染 + 逻辑快照测试
+### 10.1 SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.001 确定性渲染 + 逻辑快照测试
 
 **核心目标：** AI 可验证正确性。
 
@@ -914,7 +914,7 @@ AURORA_TEST_CHECK(std::abs(snap["box"]["w"].get<float>() - 100.0F) < 0.001f);
 
 **系统化 golden 套件：** `utest_offscreen` 以 `render_to_logical_snapshot` 为基础建立跨布局的 Level 1+2 黄金文件比对：11 个固定尺寸场景（Column/Row/Stack/Grid/Scroll/嵌套容器、gap、padding、横/纵向 fill 分配）逐场景与 `tests/golden/logical_snapshots.json` 基准深度比对，盒模型逐字段漂移即红灯。场景全部使用 `px()` / `fill()` 等显式尺寸意图、不依赖字体度量，保证跨平台逐值一致。基准有意更新时设 `AURORA_UPDATE_GOLDEN=1` 重跑用例重写基准（见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) golden 环境变量）。
 
-### 10.2 SPEC.QUALITY.LAYOUT.ALGEBRA.20 布局系统的代数一致性
+### 10.2 SPEC.QUALITY.LAYOUT.ALGEBRA.001 布局系统的代数一致性
 
 **核心目标：** AI 可推理尺寸和位置。
 

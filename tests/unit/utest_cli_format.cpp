@@ -155,7 +155,7 @@ struct KindRead {
 }
 
 AURORA_TEST_CASE(every_value_kind_has_a_documented_read_type) {
-    // 词表封闭是需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.9 的承诺：9 个 ValueKind 各自必须至少有一个 `as<T>`
+    // 词表封闭是需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001 的承诺：9 个 ValueKind 各自必须至少有一个 `as<T>`
     // 类型能无损读出， 且登记的 C++ 类型集不得超出 args.h static_assert 文案那份（8 个：Enum 复用 string、 Duration
     // 复用 int64_t）。任何一侧新增/删除项而未同步另一侧，这里先红。
     const std::vector<KindRead> reads = {

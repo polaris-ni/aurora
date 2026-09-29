@@ -27,7 +27,7 @@ struct CoroShared<void> {
 };
 }  // namespace detail
 
-/// @brief 协程式异步任务返回类型（需求 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.19 / specification/02-state.md §5.2
+/// @brief 协程式异步任务返回类型（需求 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 / specification/02-state.md §5.2
 /// 协程路径）。
 ///
 /// 与回调式 `au::async().then()` 并存：`co_await au::co_async(fn)` 在后台线程池执行 `fn`，

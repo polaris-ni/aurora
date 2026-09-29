@@ -6,7 +6,7 @@
 /// 设计要点：
 /// - **归一化镜像**：全部 AURORA_* feature 宏的取值只在 feature_flags.cpp 单点收口
 ///   （与 BUILD_OPTIONS.md 的开关清单一一对应），消费者禁止散写 `#ifdef` 探测能力
-///   （需求 SPEC.PLATFORM.ZERO-IFDEF.14：运行时查询替代宏分支）。
+///   （需求 SPEC.PLATFORM.ZERO-IFDEF.001：运行时查询替代宏分支）。
 /// - **始终可用**（gated = none）：其意义正在于报告「当前编译开了什么」，若被
 ///   AURORA_ENABLE_DEBUG 门控则 Release 下将无从获知，自相矛盾。
 /// - 结果为**编译期常量快照**：反映链接进来的 aurora 静态库的宏取值，与运行环境无关。

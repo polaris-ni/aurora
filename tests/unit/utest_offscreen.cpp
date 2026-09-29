@@ -261,7 +261,7 @@ AURORA_TEST_CASE(logical_snapshots_match_golden_baseline) {
     if (regen) {
         Json doc = Json::object();
         doc.set("_about",
-                "Aurora logical-snapshot golden baseline (requirement SPEC.PLATFORM.CONSISTENT-BEHAVIOR.15). Do not "
+                "Aurora logical-snapshot golden baseline (requirement SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001). Do not "
                 "hand-edit; regenerate with "
                 "AURORA_UPDATE_GOLDEN=1 via aurora_test_runner --run=utest_offscreen.");
         doc.set("colorspace", "sRGB");  // 注记：golden 基准唯一色彩空间（软件参考路径 SSOT）

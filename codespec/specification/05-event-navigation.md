@@ -429,7 +429,7 @@ au::Hero("logo", au::Text("Aurora"));   // Hero(tag, Node)；Text 直接作为�
 
 ## 8 需求规格
 
-### 8.1 SPEC.API.EXPLICIT-FIRST.8 显式优于隐式（含样式继承）
+### 8.1 SPEC.API.EXPLICIT-FIRST.001 显式优于隐式（含样式继承）
 
 **核心目标：** AI 无理解盲区。
 

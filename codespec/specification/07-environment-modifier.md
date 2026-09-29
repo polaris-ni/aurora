@@ -300,7 +300,7 @@ save_btn.modifier = au::Modifier{}
 
 ## 8 需求规格
 
-### 8.1 SPEC.FEAT.TOOLING.API-SCHEMA.12 机器可读 API Schema
+### 8.1 SPEC.FEAT.TOOLING.API-SCHEMA.001 机器可读 API Schema
 
 **控件自描述侧的契约**：各控件提供**静态** `describe_static()`；虚 `describe()` 在基类 `Widget` 已有默认实现（返回 `{ .name = type_name() }`，`widget.h`），无需富描述的控件可省略 override，仅在需要补充 properties / events / `children_policy` 等元数据时覆写（与 [`04-widget.md`](04-widget.md) §2.1 的表述一致）。`component_schema()` / `list_all_schemas()` 消费 `describe()` 输出；`aurora_api.json` 自动包含增强字段。
 

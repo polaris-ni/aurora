@@ -101,7 +101,7 @@
 ## 4. 文档导航表（codespec/）
 
 `codespec/` 共 **15 份手写文档 + 1 份生成物**（`ERROR_CATALOG.md`），外加 2 份生成源数据（`errors.toml` / `debug_api.toml`）。
-各文档的章节号统一为纯数字点分层级（`1` / `1.1` / `1.1.1`）；需求 ID（`SPEC.<类目>.<域>.[<子域>…]<语义短名>.<数字尾>`，共 30 条）是独立的需求标识体系，与章节号并存。
+各文档的章节号统一为纯数字点分层级（`1` / `1.1` / `1.1.1`）；需求 ID（`SPEC.<类目>.<域>.[<子域>…]<语义短名>.<数字尾>`，共 30 条）是独立的需求标识体系，与章节号并存——数字尾是三位序号，只有前面的前缀完全相同时才递增（`001` → `002`），前缀不同一律从 `001` 起。
 
 **顶层文档（6 份，均为自包含正文，非外链索引）**
 
@@ -123,15 +123,15 @@
 
 | 文件 | 覆盖 | 需求 |
 |:---|:---|:---|
-| `specification/01-core.md` | `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池 | SPEC.QUALITY.CORE.MEMORY-SAFETY.18 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.19 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21 SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.23 |
-| `specification/02-state.md` | `state/`：信号原语、订阅生命周期、`Store`、异步与协程 | SPEC.FEAT.STATE.SIGNAL-STATE.6 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.19 |
-| `specification/03-layout-render.md` | `layout/` `render/` `image/` `media/`：布局协议、Flex/Grid 算法、Painter、字体引擎、Surface 与后端 | SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.11 SPEC.QUALITY.LAYOUT.ALGEBRA.20 |
-| `specification/04-widget.md` | `widget/` `ui/`：控件基类契约、自描述、控件清单、可定制性契约 | SPEC.FEAT.WIDGET.FLAT-COMPONENTS.7 SPEC.FEAT.TOOLING.UI-TO-CODE.22 |
-| `specification/05-event-navigation.md` | `event/` `animation/` `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈 | SPEC.API.EXPLICIT-FIRST.8 |
-| `specification/06-app-platform.md` | `app/` `window/` `preferences/` `storage/` `perf/` `debug/`：应用驱动、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面 | SPEC.PLATFORM.ZERO-IFDEF.14 SPEC.PLATFORM.CONSISTENT-BEHAVIOR.15 |
-| `specification/07-environment-modifier.md` | `environment/` `theming/` `i18n/` `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier | SPEC.FEAT.TOOLING.API-SCHEMA.12 |
-| `specification/08-tooling.md` | 序列化 / 代码生成 / YAML、控件树检查、Inspector、自描述发现、MCP / CLI / LSP、测试原语、日志通道 | SPEC.QUALITY.CORE.STRUCTURED-ERROR.9 SPEC.FEAT.TOOLING.UI-INSPECTOR.10 SPEC.FEAT.TOOLING.API-SCHEMA.12 SPEC.FEAT.TOOLING.UI-SERIALIZATION.13 SPEC.FEAT.TOOLING.RECIPE-DOCS.16 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17 SPEC.FEAT.TOOLING.UI-TO-CODE.22 |
-| `specification/09-cli.md` | `cli/`：argv 语法、声明表与静态校验、字面量强类型、`cli-*` 错误码、usage / help / schema 派生视图 | SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17 |
+| `specification/01-core.md` | `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池 | SPEC.QUALITY.CORE.MEMORY-SAFETY.001 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001 SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.001 |
+| `specification/02-state.md` | `state/`：信号原语、订阅生命周期、`Store`、异步与协程 | SPEC.FEAT.STATE.SIGNAL-STATE.001 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 |
+| `specification/03-layout-render.md` | `layout/` `render/` `image/` `media/`：布局协议、Flex/Grid 算法、Painter、字体引擎、Surface 与后端 | SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.001 SPEC.QUALITY.LAYOUT.ALGEBRA.001 |
+| `specification/04-widget.md` | `widget/` `ui/`：控件基类契约、自描述、控件清单、可定制性契约 | SPEC.FEAT.WIDGET.FLAT-COMPONENTS.001 SPEC.FEAT.TOOLING.UI-TO-CODE.001 |
+| `specification/05-event-navigation.md` | `event/` `animation/` `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈 | SPEC.API.EXPLICIT-FIRST.001 |
+| `specification/06-app-platform.md` | `app/` `window/` `preferences/` `storage/` `perf/` `debug/`：应用驱动、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面 | SPEC.PLATFORM.ZERO-IFDEF.001 SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001 |
+| `specification/07-environment-modifier.md` | `environment/` `theming/` `i18n/` `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier | SPEC.FEAT.TOOLING.API-SCHEMA.001 |
+| `specification/08-tooling.md` | 序列化 / 代码生成 / YAML、控件树检查、Inspector、自描述发现、MCP / CLI / LSP、测试原语、日志通道 | SPEC.QUALITY.CORE.STRUCTURED-ERROR.001 SPEC.FEAT.TOOLING.UI-INSPECTOR.001 SPEC.FEAT.TOOLING.API-SCHEMA.001 SPEC.FEAT.TOOLING.UI-SERIALIZATION.001 SPEC.FEAT.TOOLING.RECIPE-DOCS.001 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 SPEC.FEAT.TOOLING.UI-TO-CODE.001 |
+| `specification/09-cli.md` | `cli/`：argv 语法、声明表与静态校验、字面量强类型、`cli-*` 错误码、usage / help / schema 派生视图 | SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 |
 
 > **模块存在性提醒**：`a11y`（无障碍）与 `audio`（音频）是真实存在的模块，`a11y` 横跨 `core/`（类型 / 事件 / 桥抽象）与 `widget/`（语义树构建与快照，因需 `Widget` 完整定义；见 `ARCHITECTURE.md` §8.5），`audio` 归属 `media/`（音频图 API 恒编译，设备后端经 `AURORA_ENABLE_AUDIO` 编入，见 `BUILD_OPTIONS.md` §4）。本表按 `include/aurora/` 顶层模块域切分 spec 文档，二者未单列独立文件，但不可误认为不存在。
 

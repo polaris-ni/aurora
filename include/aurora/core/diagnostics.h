@@ -10,7 +10,7 @@
 
 namespace aurora {
 
-/// @brief 结构化修复建议（需求 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21）。
+/// @brief 结构化修复建议（需求 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001）。
 ///
 /// 携带机器可读 `code`、人类可读 `description` 与可选的 `auto_fix` 回调。
 /// 工具 / UI 可经 `Diagnostics::collect_fixes()` 取出，调用 `apply_fix(code)` 一键修复。
@@ -26,7 +26,7 @@ struct FixSuggestion {
     [[nodiscard]] auto has_auto_fix() const -> bool { return static_cast<bool>(auto_fix); }
 };
 
-/// @brief 诊断记录（需求 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21：错误恢复与降级渲染）。
+/// @brief 诊断记录（需求 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001：错误恢复与降级渲染）。
 ///
 /// 库在“输入非法 / 部分代码缺失”时**不崩溃、不中止**，而是降级到安全默认值，
 /// 并产出一条结构化诊断，供运行时日志与工具消费（JSON 行）。

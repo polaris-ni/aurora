@@ -10,7 +10,7 @@
 
 namespace aurora {
 
-/// @brief 渲染前校验整棵 UI 树（规格 SPEC.QUALITY.CORE.STRUCTURED-ERROR.9）。
+/// @brief 渲染前校验整棵 UI 树（规格 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001）。
 ///
 /// 检查三类问题：
 /// - 空子节点（nullptr）：结构不完整，渲染会崩溃；
